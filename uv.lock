@@ -44,6 +44,7 @@ fast-neighbours = [
 ]
 gp = [
     { name = "ase" },
+    { name = "blackjax" },
     { name = "numpyro" },
     { name = "optax" },
 ]
@@ -60,6 +61,7 @@ dev = [
 requires-dist = [
     { name = "ase", marker = "extra == 'ase'", specifier = ">=3.22" },
     { name = "ase", marker = "extra == 'gp'", specifier = ">=3.22" },
+    { name = "blackjax", marker = "extra == 'gp'", specifier = ">=1.6" },
     { name = "equinox", specifier = ">=0.11" },
     { name = "jax", specifier = ">=0.10.1" },
     { name = "jax", extras = ["cuda12"], marker = "extra == 'cuda'", specifier = ">=0.10.1" },
@@ -95,6 +97,27 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/aa/36/cfe17324ea701d2caa479f25b134c54aeb36998443fd88c13e4f1af06f52/ase-3.29.0.tar.gz", hash = "sha256:ef4e2caa38169e3fbbc4164764a060d1877a6692519a4bed82521328eeb0d9aa", size = 2466051, upload-time = "2026-06-21T16:03:06.499Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/66/a6/a3d29378618d3d9ba0962473f8bbf09a5ad15eb8b210c5153fb88d0b8aad/ase-3.29.0-py3-none-any.whl", hash = "sha256:7b9dd103f007810339c24acfee2f6b677c0c48443b21d3c98e52959246cf4ebf", size = 3014724, upload-time = "2026-06-21T16:03:03.794Z" },
+]
+
+[[package]]
+name = "blackjax"
+version = "1.6.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "jax", version = "0.10.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "jax", version = "0.11.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "jaxlib", version = "0.10.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "jaxlib", version = "0.11.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "optax" },
+    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/12/bc/423d304810d0defb54906d220468730895207c9c908cc0ea67d925b463b5/blackjax-1.6.2.tar.gz", hash = "sha256:ad3c97ff6c77cfa17310a68de665d1a48f9d47ff1ac39725082ab235517406ee", size = 5302867, upload-time = "2026-07-16T13:10:25.422Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/39/13/fc2be5e0c9a68c18eb0ea8ece9a0f3b078a513fd8a695f00d506de08db97/blackjax-1.6.2-py3-none-any.whl", hash = "sha256:2989786202cdfc9b0a84f8215c24f2c7985b40ae432136282c3776d979d1236e", size = 4915114, upload-time = "2026-07-16T13:10:23.466Z" },
 ]
 
 [[package]]

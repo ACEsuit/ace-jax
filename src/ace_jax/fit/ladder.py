@@ -116,3 +116,20 @@ def run_laplace_fd(lml, prior, theta_map, *, n_draws=100, eps=1e-3, seed=0, floo
     info = {"eigenvalues": w.tolist(), "n_floored": n_floored, "std": np.sqrt(np.diag(cov)).tolist(),
             "fields": list(FIELDS)}
     return draws, info
+
+
+def run_pathfinder(lml, prior, theta_map, *, n_draws=100, seed=0):
+    """Pathfinder VI (blackjax): a Gaussian approximation built along the L-BFGS
+    optimisation path from theta_map, then sampled.  No MCMC loop (cheap like
+    Laplace) but often a better Gaussian than the at-mode Hessian when the
+    posterior is skewed -- the recommended VI rung.  Returns (draws (n_draws,
+    10) in log space, info)."""
+    import blackjax
+    from .hypers import log_prior
+    logpost = jax.jit(lambda a: lml(a) + log_prior(from_array(a), prior))
+    x0 = jnp.asarray(to_array(theta_map))
+    k1, k2 = jax.random.split(jax.random.PRNGKey(seed))
+    state, _ = blackjax.vi.pathfinder.approximate(k1, logpost, x0)
+    draws, _ = blackjax.vi.pathfinder.sample(k2, state, n_draws)
+    draws = np.asarray(draws)
+    return draws, {"std": draws.std(0).tolist(), "fields": list(FIELDS)}

@@ -18,7 +18,7 @@ from .fit.data import build_dataset, load_configs
 from .fit.hypers import Hypers, default_prior, to_array
 from .fit.inducing import GPConfig, descriptor_scale, select_inducing, site_features
 from .fit.kernels import KernelSpec
-from .fit.ladder import run_laplace, run_map, run_nuts, run_vi
+from .fit.ladder import run_laplace, run_laplace_fd, run_map, run_nuts, run_pathfinder, run_vi
 from .fit.metrics import summarise
 from .fit.objective import Problem, make_log_density
 from .fit.predict import predict_mixture
@@ -47,8 +47,7 @@ def _pad_to_multiple(ds, n):
     return jax.tree.map(lambda a, b: jnp.concatenate([a, b], axis=0), ds, pad)
 
 
-def parser():
-    p = argparse.ArgumentParser()
+def _add_fit_args(p):
     p.add_argument("--model", required=True); p.add_argument("--train", required=True)
     p.add_argument("--test"); p.add_argument("--energy-key", default="energy")
     p.add_argument("--force-key", default="forces"); p.add_argument("--virial-key", default="virial")
@@ -138,6 +137,8 @@ def run(a):
         if "laplace" in rungs:
             draws["laplace"], _ = run_laplace(lik, prob.prior, n_draws=a.n_draws, steps=a.map_steps,
                                               seed=a.seed, init=theta_map)
+        if "pathfinder" in rungs:
+            draws["pathfinder"], _ = run_pathfinder(lik, prob.prior, theta_map, n_draws=a.n_draws, seed=a.seed)
         if "vi" in rungs:
             draws["vi"], _ = run_vi(lik, prob.prior, n_draws=a.n_draws, steps=a.vi_steps,
                                     seed=a.seed, init=theta_map)
@@ -166,8 +167,59 @@ def run(a):
     return results
 
 
+def cmd_eval(a):
+    """Evaluate a fitted/exported model on a dataset: predicted energy (and,
+    with --forces, forces/virial) per configuration, and RMSE vs the labels
+    when present.  Native E/F/V (no ASE), one forward pass per config."""
+    import jax.numpy as jnp
+    from .eval import highest_precision, load, sparse_graph, species_indices
+    model, meta, z = load(a.model)
+    rcut = float(meta["rcut"])
+    keys = dict(energy_key=a.energy_key, force_key=a.force_key, virial_key=a.virial_key)
+    configs = load_configs(a.data, **keys)
+    esq = ecnt = fsq = fcnt = 0.0
+    rows = []
+    with highest_precision():
+        for i, c in enumerate(configs):
+            g = sparse_graph(c.positions, c.cell, c.pbc, rcut)
+            nz = jnp.asarray(species_indices(meta, c.numbers))
+            send, recv = jnp.asarray(g.senders), jnp.asarray(g.receivers)
+            E, F, V = model.energy_forces_virial(jnp.asarray(g.rij), nz[send], nz[recv],
+                                                 send, recv, g.n_nodes, nz)
+            E = float(E); F = np.asarray(F); nat = len(c.numbers)
+            rows.append({"config": i, "natoms": nat, "energy": E,
+                         "energy_per_atom": E / nat, "fmax": float(np.abs(F).max())})
+            if c.energy is not None:
+                esq += ((E - c.energy) / nat) ** 2; ecnt += 1
+            if c.forces is not None:
+                fsq += float(((F - c.forces) ** 2).sum()); fcnt += c.forces.size
+    if a.out:
+        with open(a.out, "w", newline="") as fh:
+            w = csv.DictWriter(fh, fieldnames=list(rows[0])); w.writeheader(); w.writerows(rows)
+        print(f"wrote {len(rows)} predictions to {a.out}")
+    else:
+        for r in rows[:10]:
+            print(r)
+        if len(rows) > 10:
+            print(f"... ({len(rows)} configs)")
+    if ecnt:
+        print(f"E RMSE {1e3 * np.sqrt(esq / ecnt):.3f} meV/atom  ({ecnt} configs)")
+    if fcnt:
+        print(f"F RMSE {np.sqrt(fsq / fcnt):.4f} eV/A  ({fcnt} components)")
+    return rows
+
+
 def main(argv=None):
-    return run(parser().parse_args(argv))
+    top = argparse.ArgumentParser(prog="ace-jax", description="Fit and evaluate ACE models in JAX")
+    sub = top.add_subparsers(dest="cmd", required=True)
+    _add_fit_args(sub.add_parser("fit", help="fit the hybrid linear-ACE + residual GP (--m-per-species 0 = linear-only fit)"))
+    ev = sub.add_parser("eval", help="evaluate a model on a dataset (energy/forces, RMSE vs labels)")
+    ev.add_argument("--model", required=True); ev.add_argument("--data", required=True)
+    ev.add_argument("--energy-key", default="energy"); ev.add_argument("--force-key", default="forces")
+    ev.add_argument("--virial-key", default="virial"); ev.add_argument("--forces", action="store_true")
+    ev.add_argument("--out", default=None, help="CSV of per-config predictions (default: print head)")
+    a = top.parse_args(argv)
+    return cmd_eval(a) if a.cmd == "eval" else run(a)
 
 
 if __name__ == "__main__":
