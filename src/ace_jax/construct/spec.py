@@ -1,4 +1,5 @@
 """Integer basis specs (mb_spec / Rnl_spec / Ylm_spec) for the coupling shim,
+import numpy as np
 and the ported real-RPE admissibility filter.
 
 The admissibility predicate is a direct port of ACEpotentials
@@ -77,3 +78,57 @@ def spec_from_reference(npz):
     A2B_ref = np.zeros(tuple(int(v) for v in z["A2B_shape"]))
     A2B_ref[z["A2B_rows"], z["A2B_cols"]] = z["A2B_vals"]
     return mb, Rnl, Ylm, A2B_ref
+
+
+def _level(n, l, NZ, wL):
+    """ACEpotentials TotalDegree(NZ, 1/wL) level of a channel: n/NZ + l*wL."""
+    return n / NZ + l * wL
+
+
+def _couples_to_zero(ll):
+    """Whether angular momenta ll can couple to total L=0: sum even AND the
+    largest <= sum of the rest.  This is the L=0 admissibility ET enforces
+    (the rpe m-filter alone is necessary but not sufficient: l=0 (x) l=2 passes
+    the m-filter yet cannot reach L=0)."""
+    if len(ll) == 0:
+        return True
+    s = sum(ll)
+    return s % 2 == 0 and max(ll) <= s - max(ll)
+
+
+def build_spec(NZ, order, totaldegree, wL=1.5, tol=1e-9):
+    """From-scratch reproduction of ACEpotentials' ace1_model basis selection
+    (Models.oneparticle_spec + sparse_AA_spec, src/models/{smoothness_priors,utils}.jl):
+    the many-body mb_spec (list of (n,l) bodies), the one-particle Rnl_spec (n,l),
+    and Ylm_spec (l,m), for TotalDegree(NZ, 1/wL) with max level = totaldegree.
+
+    Returns (mb_spec, Rnl_spec, Ylm_spec).  Ordering need not match ACEpotentials'
+    (the parity aligns basis functions by their invariant signatures); the SET is
+    what must agree.  order = correlation order (body order - 1)."""
+    from itertools import combinations_with_replacement
+    md = totaldegree
+    maxn1 = int(np.ceil(md * NZ)) if False else int(-(-int(md * NZ * 1) // 1))  # placeholder
+    import math
+    maxn1 = math.ceil(md * NZ)
+    maxl1 = math.ceil(md / wL)                                    # wl = 1/wL, maxl1 = ceil(md*wl)
+    # one-particle (n,l), level <= md, sorted by (l, n)  [oneparticle_spec]
+    Rnl = sorted([(n, l) for n in range(1, maxn1 + 1) for l in range(0, maxl1 + 1)
+                  if _level(n, l, NZ, wL) <= md + tol], key=lambda b: (b[1], b[0]))
+    # A-spec (n,l,m), stable-sorted by level (m does not change the level)
+    A = [(n, l, m) for (n, l) in Rnl for m in range(-l, l + 1)]
+    A.sort(key=lambda b: _level(b[0], b[1], NZ, wL))             # Python sort is stable
+    # AA/mb: non-decreasing A-index combinations up to `order`, level + rpe admissible
+    seen, mb = set(), []
+    for k in range(1, order + 1):
+        for combo in combinations_with_replacement(range(len(A)), k):
+            bb = [A[i] for i in combo]
+            if sum(_level(b[0], b[1], NZ, wL) for b in bb) > md + tol:
+                continue
+            if not rpe_admissible(bb):
+                continue
+            if not _couples_to_zero([b[1] for b in bb]):     # must reach L=0 (ET drops otherwise)
+                continue
+            nl = tuple((b[0], b[1]) for b in bb)
+            if nl not in seen:
+                seen.add(nl); mb.append([(b[0], b[1]) for b in bb])
+    return mb, Rnl, ylm_spec(maxl1)
