@@ -35,13 +35,15 @@ _BRIDGE = r"""
 import json, numpy as np, juliacall
 from ace_jax.construct.spec import ylm_spec
 from ace_jax.construct.coupling import couple
-A2B, aa, aspec = couple([[(1,0)], [(1,1),(1,1)]], [(1,0),(1,1),(2,0)], ylm_spec(1))
+A2B, aa_sig, aspec = couple([[(1,0)], [(1,1),(1,1)]], [(1,0),(1,1),(2,0)], ylm_spec(1))
 print("RESULT", json.dumps({
     "A2B_shape": list(A2B.shape),
     "A2B_nnz": int((A2B != 0).sum()),
-    "n_AA": int(sum(s.shape[0] for s in aa)),
-    "aa_min": int(min(int(s.min()) for s in aa if s.size)),
-    "aa_max": int(max(int(s.max()) for s in aa if s.size)),
+    "n_AA": len(aa_sig),
+    "sigs_ok": all(isinstance(s, tuple) and all(len(t) == 3 for t in s) for s in aa_sig),
+    "sigs_sorted": all(list(s) == sorted(s) for s in aa_sig),
+    "l_in_range": all(0 <= l <= 1 for s in aa_sig for (n, l, m) in s),
+    "sigs_unique": len(set(aa_sig)) == len(aa_sig),   # each AA column is a distinct function
     "n_aspec": len(aspec),
     "aspec_ok": all(0 <= r < 3 and 0 <= y < 4 for r, y in aspec),
 }))
@@ -55,7 +57,7 @@ def test_bridge_wellformed_subprocess():
     assert p.returncode == 0, f"bridge subprocess failed:\n{p.stderr[-2000:]}"
     line = [l for l in p.stdout.splitlines() if l.startswith("RESULT")][-1]
     r = json.loads(line[len("RESULT "):])
-    assert r["A2B_shape"][1] == r["n_AA"]                  # (n_B, n_AA)
+    assert r["A2B_shape"][1] == r["n_AA"]                  # (n_B, n_AA): one aa_sig per column
     assert r["A2B_shape"][0] >= 1 and r["A2B_nnz"] >= 1
-    assert r["aa_min"] >= 0 and r["aa_max"] < r["n_aspec"]  # 0-based A-indices in range
+    assert r["sigs_ok"] and r["sigs_sorted"] and r["l_in_range"] and r["sigs_unique"]
     assert r["aspec_ok"]

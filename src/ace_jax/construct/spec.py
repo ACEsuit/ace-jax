@@ -105,30 +105,37 @@ def build_spec(NZ, order, totaldegree, wL=1.5, tol=1e-9):
     Returns (mb_spec, Rnl_spec, Ylm_spec).  Ordering need not match ACEpotentials'
     (the parity aligns basis functions by their invariant signatures); the SET is
     what must agree.  order = correlation order (body order - 1)."""
-    from itertools import combinations_with_replacement
-    md = totaldegree
-    maxn1 = int(np.ceil(md * NZ)) if False else int(-(-int(md * NZ * 1) // 1))  # placeholder
     import math
-    maxn1 = math.ceil(md * NZ)
+    md = totaldegree
+    maxn1 = math.ceil(md * NZ)                                    # oneparticle_spec bounds
     maxl1 = math.ceil(md / wL)                                    # wl = 1/wL, maxl1 = ceil(md*wl)
     # one-particle (n,l), level <= md, sorted by (l, n)  [oneparticle_spec]
     Rnl = sorted([(n, l) for n in range(1, maxn1 + 1) for l in range(0, maxl1 + 1)
                   if _level(n, l, NZ, wL) <= md + tol], key=lambda b: (b[1], b[0]))
     # A-spec (n,l,m), stable-sorted by level (m does not change the level)
     A = [(n, l, m) for (n, l) in Rnl for m in range(-l, l + 1)]
-    A.sort(key=lambda b: _level(b[0], b[1], NZ, wL))             # Python sort is stable
-    # AA/mb: non-decreasing A-index combinations up to `order`, level + rpe admissible
+    A.sort(key=lambda b: _level(b[0], b[1], NZ, wL))             # ascending level (stable)
+    Alev = [_level(b[0], b[1], NZ, wL) for b in A]
+    # AA/mb: non-decreasing A-index bodies up to `order`, pruned by level (DFS,
+    # matching Polynomials4ML.gensparse), then rpe + couples-to-L=0 admissible.
     seen, mb = set(), []
-    for k in range(1, order + 1):
-        for combo in combinations_with_replacement(range(len(A)), k):
-            bb = [A[i] for i in combo]
-            if sum(_level(b[0], b[1], NZ, wL) for b in bb) > md + tol:
-                continue
-            if not rpe_admissible(bb):
-                continue
-            if not _couples_to_zero([b[1] for b in bb]):     # must reach L=0 (ET drops otherwise)
-                continue
-            nl = tuple((b[0], b[1]) for b in bb)
-            if nl not in seen:
-                seen.add(nl); mb.append([(b[0], b[1]) for b in bb])
+
+    def emit(bb):
+        if len(bb) == 0 or not rpe_admissible(bb) or not _couples_to_zero([b[1] for b in bb]):
+            return
+        nl = tuple((b[0], b[1]) for b in bb)
+        if nl not in seen:
+            seen.add(nl); mb.append([(b[0], b[1]) for b in bb])
+
+    def dfs(start, bb, lvl):
+        if bb:
+            emit(bb)
+        if len(bb) == order:
+            return
+        for i in range(start, len(A)):
+            if lvl + Alev[i] > md + tol:                         # A sorted ascending -> prune tail
+                break
+            bb.append(A[i]); dfs(i, bb, lvl + Alev[i]); bb.pop()
+
+    dfs(0, [], 0.0)
     return mb, Rnl, ylm_spec(maxl1)

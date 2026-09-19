@@ -22,29 +22,32 @@ maxl   = maximum(l for (n, l) in r_spec)
 y_spec = [(l, m) for l in 0:maxl for m in -l:l]                  # real Ylm (l,m) order
 abasis = [(tt[1], tt[2]) for tt in t.abasis.spec]               # (Rnl_idx, Ylm_idx) per A (1-based)
 
-# per-AA (n,l) bodies (drop m) and per-AA full (n,l,m) signature
+# per-AA (n,l) bodies (drop m), used ONLY to extract the mb_spec (the ET input).
 aa_specs = t.aabasis.specs
 bodies = Vector{Vector{Tuple{Int,Int}}}()                        # per AA function, (n,l)
-aa_sig = Vector{Vector{Tuple{Int,Int,Int}}}()                    # per AA function, (n,l,m) sorted
 for s in aa_specs, aa in s
-    nl = [r_spec[abasis[a][1]] for a in aa]
-    nlm = sort([(r_spec[abasis[a][1]]..., y_spec[abasis[a][2]][2]) for a in aa])
-    push!(bodies, nl); push!(aa_sig, nlm)
+    push!(bodies, [r_spec[abasis[a][1]] for a in aa])
 end
 mb_spec = unique(bodies)                                          # the ET input, in this extracted order
 
-# Recompute the coupling from the EXACT extracted mb_spec so the dumped A2B is
-# self-consistent with the dumped order.  (The model's cached A2B is a valid but
-# order-dependent basis choice for degenerate nnll blocks; the Python bridge, fed
-# this same mb_spec, must reproduce THIS A2B bit-for-bit.)
+# Recompute the coupling from the EXACT extracted mb_spec so the dumped A2B, its
+# column identities (aa_sig) and row identities (nnll) are all self-consistent
+# with each other and with the dumped mb_spec order.  The Python bridge fed this
+# same mb_spec reproduces THIS A2B bit-for-bit on multiplicity-1 nnll blocks; on
+# degenerate blocks (order >= 4) it reproduces the row SUBSPACE (the block basis
+# is unique only up to a within-block orthogonal rotation) -- see the parity test.
 mb_nt  = [[(n=nl[1], l=nl[2]) for nl in bb] for bb in mb_spec]
 rnl_nt = [(n=nl[1], l=nl[2]) for nl in r_spec]
 ylm_nt = [(l=lm[1], m=lm[2]) for lm in y_spec]
 t2 = EquivariantTensors.sparse_equivariant_tensor(L=0, mb_spec=mb_nt, Rnl_spec=rnl_nt,
                                                    Ylm_spec=ylm_nt, basis=real)
 A2B = Matrix(t2.A2Bmaps[1]); rows, cols, vals = findnz(sparse(A2B))
-aa_specs = t2.aabasis.specs                                      # re-bind to the recomputed tensor
-nnll = M.get_nnll_spec(t2)                                        # per-B (n,l)
+nnll = M.get_nnll_spec(t2)                                        # per-B (n,l), in A2B ROW order
+# per-AA (n,l,m) signature in A2B COLUMN order.  Taken from meta 𝔸spec (the spec
+# returned WITH the symmetrisation matrix), NOT aabasis.specs: SparseSymmProd
+# re-sorts its input, so the aabasis evaluation order is a different permutation
+# from the A2B column order (this mislabels columns within/across nnll blocks).
+aa_sig = [sort([(Int(b.n), Int(b.l), Int(b.m)) for b in row]) for row in t2.meta["𝔸spec"]]
 
 # flatten ragged specs to (data, lengths, offsets) for npz
 flat(v) = (reduce(vcat, [collect(Iterators.flatten(x)) for x in v]), Int32[length(x) for x in v])

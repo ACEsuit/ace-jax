@@ -32,11 +32,15 @@ jobs:
       # bridge (juliapkg.json) to the SAME ET version so the two sides agree.
       - name: Regenerate coupling references + pin bridge ET
         run: |
-          for shape in "Si,Ge 2 6 fixtures/coupling_ref_SiGe_o2d6.npz" \
-                       "Cr,Mn,Fe 2 5 fixtures/coupling_ref_CrMnFe_o2d5.npz"; do
+          # ELEMENTS ORDER TOTALDEGREE WL OUTPATH.  Orders 2, 3 (production: the
+          # Cantor model is order 3) and 4 (SiGe wL=0.5 has DEGENERATE nnll blocks).
+          for shape in "Si,Ge 2 6 1.5 fixtures/coupling_ref_SiGe_o2d6.npz" \
+                       "Cr,Mn,Fe 2 5 1.5 fixtures/coupling_ref_CrMnFe_o2d5.npz" \
+                       "Cr,Mn,Fe 3 6 1.5 fixtures/coupling_ref_CrMnFe_o3d6.npz" \
+                       "Si,Ge 4 5 0.5 fixtures/coupling_ref_SiGe_o4d5w05.npz"; do
             set -- $shape
-            ACE_ELEMENTS=$1 ACE_ORDER=$2 ACE_TOTALDEGREE=$3 \
-              julia --project=julia_oracle julia/coupling_reference.jl $4
+            ACE_ELEMENTS=$1 ACE_ORDER=$2 ACE_TOTALDEGREE=$3 ACE_WL=$4 \
+              julia --project=julia_oracle julia/coupling_reference.jl $5
           done
           ETV=$(julia --project=julia_oracle -e \
             'using ACEpotentials; println(pkgversion(ACEpotentials.Models.EquivariantTensors))')
