@@ -31,6 +31,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+authoring = ["juliacall>=0.9.20", "juliapkg>=0.1.13"]  # ET coupling shim (heavy; ET pulls Lux/GPU). Not needed to refit.
 # ASE: calculators + xyz IO (not needed for the core evaluator/descriptors).
 ase = ["ase>=3.22"]
 # Hybrid ACE+GP fitting with the marginalised-hyperparameter UQ ladder.
