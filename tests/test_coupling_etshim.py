@@ -59,12 +59,3 @@ def test_bridge_wellformed_subprocess():
     assert r["A2B_shape"][0] >= 1 and r["A2B_nnz"] >= 1
     assert r["aa_min"] >= 0 and r["aa_max"] < r["n_aspec"]  # 0-based A-indices in range
     assert r["aspec_ok"]
-
-
-@pytest.mark.xfail(reason="fixtures store A-spec indices (aspec_r/y), not the (n,l)/(l,m) value "
-                          "tables, so mb_spec cannot be reconstructed without the completed "
-                          "TotalDegree/wL spec builder (row-2, out of scope). Documented gap.",
-                   strict=False, raises=NotImplementedError)
-def test_fixture_parity():
-    aspec_ref, aa_ref = spec_from_export(FIXTURE_DIR / "si_ace_model.npz")
-    raise NotImplementedError("needs Rnl/Ylm value tables or the spec builder to rebuild mb_spec")

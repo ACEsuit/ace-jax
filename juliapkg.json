@@ -1,9 +1,11 @@
 {
+  "//": "EquivariantTensors must match the ET version the coupling reference fixtures were generated with (real-harmonics coupling convention changed 0.4.3 -> 0.5.2). Locally this points at the same dev checkout ACEpotentials uses (ET 0.5.2). In CI, julia-parity.yml regenerates the fixtures with its ACEpotentials' ET and rewrites this pin to match, so the two sides stay self-consistent. Registered-only users can pin a \"version\" here and regenerate fixtures against a matching ACEpotentials.",
   "julia": "~1.10, ~1.11",
   "packages": {
     "EquivariantTensors": {
       "uuid": "5e107534-7145-4f8f-b06f-47a52840c895",
-      "version": "0.4"
+      "dev": true,
+      "path": "/Users/u1470235/.julia/dev/EquivariantTensors"
     }
   }
 }

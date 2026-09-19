@@ -1,38 +1,54 @@
 name: julia-parity
-# Guards that the JAX design matrix + linear solve still equal ACEpotentials.jl.
-# CI-only: regenerates the committed fixtures with Julia and re-runs the parity
-# tests (design rows to 1e-8, ACEfit solve(QR) to 1e-9). Not required for pip users.
+# Julia/ACEpotentials parity checks (CI-only; the runtime package is Julia-free).
+# Path-gated: runs only when the fit/eval code, the Julia oracle, or the coupling
+# shim change -- the pip-only test.yml covers everything else with no Julia.
 on:
-  push:
+  pull_request:
     paths:
-      - "src/ace_jax/eval/model.py"
-      - "src/ace_jax/fit/rows.py"
-      - "src/ace_jax/fit/solve.py"
+      - "src/ace_jax/construct/**"
       - "julia/**"
+      - "tests/test_coupling_parity.py"
       - ".github/workflows/julia-parity.yml"
-  schedule:
-    - cron: "0 6 * * 1"   # weekly
   workflow_dispatch:
+
 jobs:
-  parity:
+  coupling-parity:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
       - uses: julia-actions/setup-julia@v2
-        with:
-          version: "1.11"
-      - name: Julia env (ACEpotentials + ACEfit + NPZ)
+        with: { version: "1.11" }
+      - uses: astral-sh/setup-uv@v5
+
+      # ACEpotentials is the ORACLE (CI-only). Add the ACE registry + deps.
+      - name: Provision ACEpotentials (oracle)
         run: |
-          julia --project=julia -e '
-            using Pkg
-            Pkg.Registry.add(RegistrySpec(url="https://github.com/ACEsuit/ACEregistry"))
-            Pkg.add(["ACEpotentials", "ACEfit", "NPZ"])   # or pin a version for reproducibility
-            Pkg.instantiate()'
-      - name: Regenerate fixtures (design matrix + ACEfit QR reference)
+          julia -e 'using Pkg; Pkg.Registry.add("General");
+                    Pkg.Registry.add(RegistrySpec(url="https://github.com/ACEsuit/ACEregistry"));
+                    Pkg.activate("julia_oracle"; shared=false);
+                    Pkg.add(["ACEpotentials","NPZ"])'
+
+      # Regenerate the reference fixtures with THIS environment's ET, and pin the
+      # bridge (juliapkg.json) to the SAME ET version so the two sides agree.
+      - name: Regenerate coupling references + pin bridge ET
         run: |
-          ACE_GP_FIXTURES=1 julia --project=julia julia/export_model.jl fixtures/si_fitted.npz ace1
-          julia --project=julia julia/acefit_qr_reference.jl
-      - name: Re-run parity tests against regenerated fixtures
-        env: { JAX_PLATFORM_NAME: cpu, JAX_ENABLE_X64: "1" }
-        run: uv run --extra gp --extra ase pytest -q tests/test_gp_rows.py tests/test_gp_solve.py tests/test_gp_objective.py
+          for shape in "Si,Ge 2 6 fixtures/coupling_ref_SiGe_o2d6.npz" \
+                       "Cr,Mn,Fe 2 5 fixtures/coupling_ref_CrMnFe_o2d5.npz"; do
+            set -- $shape
+            ACE_ELEMENTS=$1 ACE_ORDER=$2 ACE_TOTALDEGREE=$3 \
+              julia --project=julia_oracle julia/coupling_reference.jl $4
+          done
+          ETV=$(julia --project=julia_oracle -e \
+            'using ACEpotentials; println(pkgversion(ACEpotentials.Models.EquivariantTensors))')
+          python - "$ETV" <<'PY'
+          import json, sys
+          j = {"julia": "~1.10, ~1.11", "packages": {"EquivariantTensors": {
+                 "uuid": "5e107534-7145-4f8f-b06f-47a52840c895", "version": "=" + sys.argv[1]}}}
+          json.dump(j, open("juliapkg.json", "w"), indent=2)
+          print("pinned bridge ET to", sys.argv[1])
+          PY
+
+      - name: Run the numerical coupling parity (bridge vs oracle)
+        run: |
+          uv sync --extra authoring
+          uv run pytest tests/test_coupling_parity.py -v

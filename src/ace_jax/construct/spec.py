@@ -54,3 +54,26 @@ def spec_from_export(npz):
         aa.append(np.asarray(z[f"aa_spec_{order}"]))
         order += 1
     return aspec, aa
+
+
+def _unflat(flat, lens, k):
+    out, off = [], 0
+    for n in lens:
+        n = int(n)
+        out.append([tuple(int(x) for x in flat[off + i * k:off + (i + 1) * k]) for i in range(n)])
+        off += k * n
+    return out
+
+
+def spec_from_reference(npz):
+    """Reconstruct the ET inputs (mb_spec bodies, Rnl_spec, Ylm_spec) and the dense
+    reference A2B from a coupling_reference.jl oracle npz -- the ground truth for
+    the numerical parity test."""
+    import numpy as np
+    z = np.load(npz)
+    mb = _unflat(z["mb_flat"], z["mb_len"], 2)                      # list of list of (n, l)
+    Rnl = [tuple(int(x) for x in r) for r in z["r_spec"]]          # (n, l)
+    Ylm = [tuple(int(x) for x in y) for y in z["y_spec"]]          # (l, m)
+    A2B_ref = np.zeros(tuple(int(v) for v in z["A2B_shape"]))
+    A2B_ref[z["A2B_rows"], z["A2B_cols"]] = z["A2B_vals"]
+    return mb, Rnl, Ylm, A2B_ref
