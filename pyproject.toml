@@ -35,7 +35,7 @@ authoring = ["juliacall>=0.9.20", "juliapkg>=0.1.13"]  # ET coupling shim (heavy
 # ASE: calculators + xyz IO (not needed for the core evaluator/descriptors).
 ase = ["ase>=3.22"]
 # Hybrid ACE+GP fitting with the marginalised-hyperparameter UQ ladder.
-gp = ["numpyro>=0.16", "optax>=0.2", "ase>=3.22"]
+gp = ["numpyro>=0.16", "optax>=0.2", "blackjax>=1.6", "ase>=3.22"]
 cuda = ["jax[cuda12]>=0.10.1"]
 # matscipy gives C/GPU neighbour lists; ace-jax uses it when present and falls
 # back to a pure-numpy list otherwise, so it is intentionally NOT a core dep.
