@@ -1,0 +1,38 @@
+name: julia-parity
+# Guards that the JAX design matrix + linear solve still equal ACEpotentials.jl.
+# CI-only: regenerates the committed fixtures with Julia and re-runs the parity
+# tests (design rows to 1e-8, ACEfit solve(QR) to 1e-9). Not required for pip users.
+on:
+  push:
+    paths:
+      - "src/ace_jax/eval/model.py"
+      - "src/ace_jax/fit/rows.py"
+      - "src/ace_jax/fit/solve.py"
+      - "julia/**"
+      - ".github/workflows/julia-parity.yml"
+  schedule:
+    - cron: "0 6 * * 1"   # weekly
+  workflow_dispatch:
+jobs:
+  parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: "1.11"
+      - name: Julia env (ACEpotentials + ACEfit + NPZ)
+        run: |
+          julia --project=julia -e '
+            using Pkg
+            Pkg.Registry.add(RegistrySpec(url="https://github.com/ACEsuit/ACEregistry"))
+            Pkg.add(["ACEpotentials", "ACEfit", "NPZ"])   # or pin a version for reproducibility
+            Pkg.instantiate()'
+      - name: Regenerate fixtures (design matrix + ACEfit QR reference)
+        run: |
+          ACE_GP_FIXTURES=1 julia --project=julia julia/export_model.jl fixtures/si_fitted.npz ace1
+          julia --project=julia julia/acefit_qr_reference.jl
+      - name: Re-run parity tests against regenerated fixtures
+        env: { JAX_PLATFORM_NAME: cpu, JAX_ENABLE_X64: "1" }
+        run: uv run --extra gp --extra ase pytest -q tests/test_gp_rows.py tests/test_gp_solve.py tests/test_gp_objective.py

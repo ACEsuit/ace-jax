@@ -1,0 +1,61 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ace-jax"
+version = "0.1.0"
+description = "Fit and evaluate ACE interatomic potentials in Python/JAX"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.11,<3.14"
+authors = [{ name = "ACEsuit contributors" }]
+keywords = ["ace", "interatomic-potential", "jax", "molecular-dynamics", "chemistry", "gaussian-process"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Scientific/Engineering :: Chemistry",
+  "Topic :: Scientific/Engineering :: Physics",
+]
+dependencies = [
+  "jax>=0.10.1",
+  "equinox>=0.11",
+  "numpy>=1.24",
+  "scipy>=1.10",
+  "lineax>=0.1.1",
+]
+
+[project.optional-dependencies]
+# ASE: calculators + xyz IO (not needed for the core evaluator/descriptors).
+ase = ["ase>=3.22"]
+# Hybrid ACE+GP fitting with the marginalised-hyperparameter UQ ladder.
+gp = ["numpyro>=0.16", "optax>=0.2", "ase>=3.22"]
+cuda = ["jax[cuda12]>=0.10.1"]
+# matscipy gives C/GPU neighbour lists; ace-jax uses it when present and falls
+# back to a pure-numpy list otherwise, so it is intentionally NOT a core dep.
+fast-neighbours = ["matscipy>=1.0"]
+
+[project.scripts]
+ace-jax = "ace_jax.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/ACEsuit/ace-jax"
+Issues = "https://github.com/ACEsuit/ace-jax/issues"
+
+[dependency-groups]
+dev = ["pytest>=8", "ase>=3.22", "numpyro>=0.16", "optax>=0.2"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ace_jax"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/ace_jax", "README.md", "LICENSE"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src", "tests"]
+testpaths = ["tests"]
