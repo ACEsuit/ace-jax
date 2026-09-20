@@ -24,7 +24,6 @@ jobs:
       - name: Provision ACEpotentials (oracle)
         run: |
           julia -e 'using Pkg; Pkg.Registry.add("General");
-                    Pkg.Registry.add(RegistrySpec(url="https://github.com/ACEsuit/ACEregistry"));
                     Pkg.activate("julia_oracle"; shared=false);
                     Pkg.add(["ACEpotentials","NPZ"])'
 

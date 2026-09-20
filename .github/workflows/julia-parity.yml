@@ -28,7 +28,6 @@ jobs:
           julia --project=julia -e '
             using Pkg
             Pkg.Registry.add("General")
-            Pkg.Registry.add(RegistrySpec(url="https://github.com/ACEsuit/ACEregistry"))
             Pkg.add(["ACEpotentials", "ACEfit", "NPZ"])   # or pin a version for reproducibility
             Pkg.instantiate()'
       - name: Regenerate fixtures (design matrix + ACEfit QR reference)
