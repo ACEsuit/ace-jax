@@ -95,7 +95,7 @@ def farthest_point(X, m, start=0):
     return np.asarray(idx)
 
 
-def select_inducing(X, S, Z, node_mask, m_per_species, scale, Pmap=None, warp="none", embed=None):
+def select_inducing(X, S, Z, node_mask, m_per_species, scale, Pmap=None, warp="none", embed=None, nz=None):
     X = np.asarray(X).reshape(-1, X.shape[-1]); S = np.asarray(S).reshape(-1)
     Z = np.asarray(Z).reshape(-1); live = np.asarray(node_mask).reshape(-1)
     scale = np.asarray(scale)
@@ -114,7 +114,16 @@ def select_inducing(X, S, Z, node_mask, m_per_species, scale, Pmap=None, warp="n
     Xpick = np.concatenate(xs) if xs else np.zeros((0, X.shape[-1]))
     UM = np.asarray(_apply(jnp.asarray(Xpick), jnp.asarray(Pmap), warp))
     if embed is None:
-        NZ = int(np.asarray(Z).reshape(-1)[np.asarray(node_mask).reshape(-1)].max()) + 1
+        # Default one-hot species embedding. Size it to the full model species count `nz`
+        # (e.g. len(meta["elements"])) when given: the kernel gathers embed[z] by centre
+        # species at PREDICTION too, and a test-only species with index >= width would be
+        # silently clamped by JAX's gather to the last row (spurious cross-covariance). Any
+        # width >= the species actually present reproduces (z==zm) bit-for-bit. Falls back to
+        # the present-species count when nz is None (correct only if prediction sees no unseen
+        # species); guards an all-masked batch.
+        zlive = np.asarray(Z).reshape(-1)[np.asarray(node_mask).reshape(-1)]
+        present = int(zlive.max()) + 1 if zlive.size else 1
+        NZ = present if nz is None else max(int(nz), present)
         embed = species_onehot(NZ)
     else:
         embed = jnp.asarray(embed, jnp.float64)

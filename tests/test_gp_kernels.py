@@ -140,3 +140,18 @@ def test_default_inducing_embed_is_onehot():
     ZM = np.asarray(ind.ZM)                                          # the gate: embed[z].embed[zm]==(z==zm)
     G = E[ZM] @ E[ZM].T
     assert np.allclose(G, (ZM[:, None] == ZM[None, :]).astype(float))
+
+
+def test_inducing_embed_nz_gives_full_width_onehot():
+    # I1 regression: with nz set, the default one-hot spans ALL model species even when the
+    # data presents only some, so a predict-time gather of a test-only species cannot clamp.
+    import numpy as np, jax.numpy as jnp
+    from ace_jax.fit.inducing import descriptor_scale, select_inducing
+    rng = np.random.default_rng(0)
+    X = jnp.asarray(rng.normal(size=(8, 4))); S = jnp.asarray(2.5 + rng.random(8))
+    Z = jnp.asarray([0] * 8, jnp.int32); mask = jnp.ones(8, bool)     # only species 0 present
+    ind = select_inducing(X, S, Z, mask, 3, descriptor_scale(X, mask), nz=3)
+    E = np.asarray(ind.embed)
+    assert E.shape == (3, 3) and np.allclose(E, np.eye(3))            # full width despite 1 species
+    ind0 = select_inducing(X, S, Z, mask, 3, descriptor_scale(X, mask))
+    assert np.asarray(ind0.embed).shape == (1, 1)                     # default: present-species width
