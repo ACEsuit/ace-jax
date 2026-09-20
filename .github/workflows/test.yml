@@ -11,24 +11,29 @@ concurrency:
 
 jobs:
   pytest:
-    # Full pip-only suite on ONE Python, parallelised with xdist so it finishes
-    # in a few minutes (JAX per-test compilation is the cost; workers amortise it).
-    # NO Julia; the heavy 'slow' ladder test is a separate job below.
+    # Full pip-only suite on ONE Python, split into single-process shards across
+    # separate runners (pytest-split). Single-process is what survives long runs
+    # here (like the ladder job); xdist workers get the runner killed mid-run.
+    # Each shard has its own VM + JAX compile cache. NO Julia.
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [1, 2, 3]
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
       - uses: actions/cache@v4
         with:
           path: .jax_cache
-          key: jaxcache-${{ runner.os }}-${{ github.sha }}
-          restore-keys: jaxcache-${{ runner.os }}-
-      - name: Full suite (CPU JAX, parallel)
+          key: jaxcache-${{ runner.os }}-g${{ matrix.group }}-${{ github.sha }}
+          restore-keys: jaxcache-${{ runner.os }}-g${{ matrix.group }}-
+      - name: Suite shard ${{ matrix.group }}/3 (CPU JAX)
         env:
           JAX_PLATFORM_NAME: cpu
           JAX_ENABLE_X64: "1"
-        run: uv run --python 3.12 --extra gp pytest -m "not slow" -n 2 --dist worksteal
+        run: uv run --python 3.12 --extra gp pytest -m "not slow" --splits 3 --group ${{ matrix.group }}
   smoke:
     # Import + a small descriptor/EFV/kernel smoke on the other supported Pythons
     # -- a cheap compatibility check without re-running the whole (slow) matrix.
@@ -51,7 +56,7 @@ jobs:
           JAX_ENABLE_X64: "1"
         run: |
           uv run --python ${{ matrix.python }} --extra gp python -c "import ace_jax, ace_jax.fit, ace_jax.eval; print('import OK')"
-          uv run --python ${{ matrix.python }} --extra gp pytest -m "not slow" -n auto \
+          uv run --python ${{ matrix.python }} --extra gp pytest -m "not slow" \
             tests/test_descriptors.py tests/test_efv.py tests/test_gp_kernels.py -q
   ladder:
     # Heavy integration run ONCE (not per-Python): the real-model MCMC ladder
