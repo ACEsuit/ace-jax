@@ -13,8 +13,8 @@ pure **Python/JAX** — no Julia needed to fit or run.
 ## Install
 
 ```bash
-pip install ace-jax           # core: evaluate + linear fit
-pip install ace-jax[gp,ase]   # + GP/UQ ladder + ASE calculator
+pip install ace-jax           # core: evaluate + linear fit + ASE calculator
+pip install ace-jax[gp]       # + GP/UQ hyperparameter ladder
 pip install ace-jax[cuda]     # + CUDA 12 JAX
 ```
 

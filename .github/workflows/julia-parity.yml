@@ -35,4 +35,4 @@ jobs:
           julia --project=julia julia/acefit_qr_reference.jl
       - name: Re-run parity tests against regenerated fixtures
         env: { JAX_PLATFORM_NAME: cpu, JAX_ENABLE_X64: "1" }
-        run: uv run --extra gp --extra ase pytest -q tests/test_gp_rows.py tests/test_gp_solve.py tests/test_gp_objective.py
+        run: uv run --extra gp pytest -q tests/test_gp_rows.py tests/test_gp_solve.py tests/test_gp_objective.py

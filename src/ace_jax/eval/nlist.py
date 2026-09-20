@@ -4,10 +4,10 @@ Three backends, tried in order:
 
 1. `matscipy_neighbours` -- preferred when present: GPU, DLPack, and a native
    `neighbour_matrix` for the dense layout.  Not on PyPI, so it is optional.
-2. `matscipy` -- the hard dependency.  C-accelerated, on PyPI, and advertised
-   as the same `"ijdDS"` API, so the two are interchangeable for the sparse path.
-3. a pure-numpy fallback -- a genuine last resort, kept so the package still
-   works if neither import succeeds.
+2. `matscipy` -- optional fast path.  C-accelerated, on PyPI, same `"ijdDS"` API,
+   so it is interchangeable with (1) for the sparse path.
+3. `ase.neighborlist` -- the baseline.  ASE is a *core* dependency, so this path
+   is always available; (1) and (2) are pure speed-ups over it.
 
 All three are checked against each other in `tests/test_efv.py`, which asserts
 the edge sets are *identical* rather than merely similar.
@@ -74,14 +74,14 @@ def backend():
     """Which neighbour-list backend is in use: for tests and for reporting."""
     if have_matscipy_neighbours():
         return "matscipy-neighbours"
-    return "matscipy" if have_matscipy() else "numpy"
+    return "matscipy" if have_matscipy() else "ase"
 
 
 def _fallback_neighbour_list(positions, cell, pbc, cutoff):
     """Fallback periodic neighbour list, via ASE's linear-scaling cell list.
 
-    `matscipy-neighbours` is not on PyPI so it cannot be a hard dependency, and
-    `matscipy` is optional too -- this keeps `pip install acejax` self-sufficient.
+    Uses `ase.neighborlist`, a core dependency, so `pip install ace-jax` can
+    evaluate with no optional extras; matscipy(-neighbours) only speed this up.
     ASE is already a dependency, its `neighbor_list` is O(N) rather than the
     O(N^2)-per-image-shell loop this replaces, and it needs no compiler.  The
     tests check all available backends agree.
