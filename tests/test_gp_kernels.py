@@ -119,3 +119,24 @@ def test_offdiagonal_embed_couples_species():
     cross = [(i, j) for i in range(len(Z)) for j in range(len(ZM))
              if {int(Z[i]), int(ZM[j])} == {0, 1}]
     assert any(abs(K[i, j]) > 0 for i, j in cross)   # 0-1 pairs now couple
+
+
+def test_default_inducing_embed_is_onehot():
+    import numpy as np
+    from conftest import FIXTURE_DIR
+    from ace_jax.eval import load
+    from ace_jax.fit.data import build_dataset, load_configs
+    from ace_jax.fit.inducing import GPConfig, descriptor_scale, select_inducing, site_features
+    model, meta, z = load(FIXTURE_DIR / "sige_nofit.npz")
+    cfgs = load_configs(FIXTURE_DIR / "si_tiny_train.xyz", "dft_energy", "dft_force", "dft_virial")[:3]
+    ds = build_dataset(cfgs, meta, np.asarray(z["E0"]), 3)
+    cfg = GPConfig(r0=2.35, rcut=float(meta["rcut"]), n_B=meta["n_B"], n_pair=meta["n_pair"],
+                   NZ=len(meta["elements"]), C=3)
+    X, S = site_features(model, cfg, ds)
+    ind = select_inducing(X, S, ds.node_z, ds.node_mask, 4, descriptor_scale(X, ds.node_mask))
+    E = np.asarray(ind.embed)
+    assert E.ndim == 2 and E.shape[0] == E.shape[1]                 # square identity of its own width
+    assert np.allclose(E, np.eye(E.shape[0]))
+    ZM = np.asarray(ind.ZM)                                          # the gate: embed[z].embed[zm]==(z==zm)
+    G = E[ZM] @ E[ZM].T
+    assert np.allclose(G, (ZM[:, None] == ZM[None, :]).astype(float))

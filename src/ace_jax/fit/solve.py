@@ -70,7 +70,7 @@ def _prior_block(prob, theta):
     sc = jnp.exp(theta.log_sigma_c)
     R0 = jnp.zeros((L + M, L + M)).at[jnp.arange(L), jnp.arange(L)].set(prob.gamma / sc)
     if M > 0:
-        LMM = jnp.linalg.cholesky(K_MM(theta, prob.spec, prob.ind.XM, prob.ind.SM, prob.ind.ZM))
+        LMM = jnp.linalg.cholesky(K_MM(theta, prob.spec, prob.ind.XM, prob.ind.SM, prob.ind.ZM, prob.ind.embed))
         R0 = R0.at[L:, L:].set(LMM.T)                    # chol(K_MM)^T, upper triangular
     return R0, jnp.zeros(L + M)
 

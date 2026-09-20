@@ -94,13 +94,13 @@ def residual_rows(theta, spec, ind, cfg, batch, X, J):
     dw = dwarp(U0, ind.warp)                                          # (Ncap, d)
     Jr = J.reshape(Ncap, K, Dfull, 3)
     JU = dw[:, None, :, None] * jnp.einsum("nkDa,Dq->nkqa", Jr, ind.Pmap)     # (Ncap, K, d, 3)
-    Kx = k_rows(theta, spec, U, s, batch.node_z, ind.XM, ind.SM, ind.ZM)   # (Ncap, M)
+    Kx = k_rows(theta, spec, U, s, batch.node_z, ind.XM, ind.SM, ind.ZM, ind.embed)   # (Ncap, M)
     E = jax.ops.segment_sum(Kx, batch.node_cfg, num_segments=C + 1)[:C]
 
     def step(carry, ch):
         F, V = carry
         Uc, sc, zc, JUc, Jsc, rc, nc, mc, nodes, cfgc = ch
-        dKx, dKs = grad_k_rows(theta, spec, Uc, sc, zc, ind.XM, ind.SM, ind.ZM)  # (c,M,d), (c,M)
+        dKx, dKs = grad_k_rows(theta, spec, Uc, sc, zc, ind.XM, ind.SM, ind.ZM, ind.embed)  # (c,M,d), (c,M)
         T = (jnp.einsum("ckqa,cmq->ckam", JUc, dKx)
              + jnp.einsum("cka,cm->ckam", Jsc, dKs))                          # (c, K, 3, M)
         T = jnp.where(mc[:, :, None, None], T, 0.0)
