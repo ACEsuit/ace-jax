@@ -48,7 +48,7 @@ Homepage = "https://github.com/ACEsuit/ace-jax"
 Issues = "https://github.com/ACEsuit/ace-jax/issues"
 
 [dependency-groups]
-dev = ["pytest>=8", "numpyro>=0.16", "optax>=0.2"]
+dev = ["pytest>=8", "pytest-xdist>=3", "numpyro>=0.16", "optax>=0.2"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ace_jax"]

@@ -8,27 +8,54 @@ on:
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
 jobs:
   pytest:
-    # Fast pip-only suite: NO Julia, NO heavy MCMC (the 'slow' marker is excluded).
-    # Runs against the committed npz fixtures across the supported Pythons.
+    # Full pip-only suite on ONE Python, parallelised with xdist so it finishes
+    # in a few minutes (JAX per-test compilation is the cost; workers amortise it).
+    # NO Julia; the heavy 'slow' ladder test is a separate job below.
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false            # let every Python report; don't cancel siblings
-      matrix:
-        python: ["3.11", "3.12", "3.13"]
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - name: Run the fast suite (CPU JAX, no Julia)
+      - uses: actions/cache@v4
+        with:
+          path: .jax_cache
+          key: jaxcache-${{ runner.os }}-${{ github.sha }}
+          restore-keys: jaxcache-${{ runner.os }}-
+      - name: Full suite (CPU JAX, parallel)
         env:
           JAX_PLATFORM_NAME: cpu
           JAX_ENABLE_X64: "1"
-        run: uv run --python ${{ matrix.python }} --extra gp pytest -v -m "not slow"
+        run: uv run --python 3.12 --extra gp pytest -m "not slow" -n auto --dist worksteal
+  smoke:
+    # Import + a small descriptor/EFV/kernel smoke on the other supported Pythons
+    # -- a cheap compatibility check without re-running the whole (slow) matrix.
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/cache@v4
+        with:
+          path: .jax_cache
+          key: jaxcache-${{ runner.os }}-${{ github.sha }}
+          restore-keys: jaxcache-${{ runner.os }}-
+      - name: Import + smoke
+        env:
+          JAX_PLATFORM_NAME: cpu
+          JAX_ENABLE_X64: "1"
+        run: |
+          uv run --python ${{ matrix.python }} --extra gp python -c "import ace_jax, ace_jax.fit, ace_jax.eval; print('import OK')"
+          uv run --python ${{ matrix.python }} --extra gp pytest -m "not slow" -n auto \
+            tests/test_descriptors.py tests/test_efv.py tests/test_gp_kernels.py -q
   ladder:
     # Heavy integration run ONCE (not per-Python): the real-model MCMC ladder
-    # (MAP/Laplace/Pathfinder/NUTS, fast mode). Isolated so it can't slow or cancel
-    # the matrix; -v + --durations surface exactly which rung costs what.
+    # (MAP/Laplace/Pathfinder/NUTS, fast mode). Isolated so it can't slow the suite.
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:

@@ -6,3 +6,4 @@ dist/
 build/
 *.egg-info/
 .uv/
+.jax_cache/
