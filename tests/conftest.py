@@ -9,6 +9,7 @@ Note the pair basis is splined in both: `ace_model` splinifies it
 (ace_heuristics.jl:213), so the radial branches are per-basis, not per-model.
 """
 import os
+import pathlib
 
 # Two host CPU devices so tests/test_gp_sharding.py runs in the full suite.
 # Must be set before ANY jax import (the CPU backend fixes its device count at
@@ -17,7 +18,13 @@ _flag = "--xla_force_host_platform_device_count=2"
 if _flag not in os.environ.get("XLA_FLAGS", ""):
     os.environ["XLA_FLAGS"] = (os.environ.get("XLA_FLAGS", "") + " " + _flag).strip()
 
-import pathlib
+# Reuse compiled XLA executables across tests, xdist workers, and CI runs. JAX's
+# persistent cache is keyed by the computation hash, so it hits even when each
+# test builds a fresh jit closure for the same model eval -- the dominant cost in
+# this f64-CPU suite. Set before any jax import. CI persists the dir via actions/cache.
+os.environ.setdefault("JAX_COMPILATION_CACHE_DIR", str(pathlib.Path(__file__).parent.parent / ".jax_cache"))
+os.environ.setdefault("JAX_PERSISTENT_CACHE_MIN_COMPILE_TIME_SECS", "0")
+os.environ.setdefault("JAX_PERSISTENT_CACHE_MIN_ENTRY_SIZE_BYTES", "0")
 
 import pytest
 
@@ -77,3 +84,17 @@ def species_index(z):
     lookup = {int(zz): i for i, zz in enumerate(i2z)}
     return jnp.asarray([lookup[int(a)] for a in np.asarray(z["test_Z"]).ravel()],
                        dtype=jnp.int32)
+
+
+# Bound peak memory across the suite: JAX retains compiled executables and traced
+# artifacts in-process, which under xdist workers accumulates and can OOM a CI
+# runner mid-run. Release them after each test; the persistent on-disk cache
+# above keeps the next compile cheap, so this costs little.
+@pytest.fixture(autouse=True)
+def _release_jax_memory():
+    yield
+    try:
+        import jax
+        jax.clear_caches()
+    except Exception:
+        pass

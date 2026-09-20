@@ -1,8 +1,7 @@
 """Variable projection (VarPro) driver:  learn nonlinear feature
 parameters eta by minimising the PROJECTED residual, with the linear
 coefficients solved exactly (projected out) at each outer step by a stable
-inner least-squares solve.  This is the FS-density pre-training of
-spike_fs/varpro_core.jl ported to the JAX inner solve -- the outer
+inner least-squares solve.  This is the FS-density pre-training on the JAX inner solve -- the outer
 optimiser is an alternative ladder driver over the same inner solvers as
 objective.posterior / solve.py: "learn the nonlinear part once, cheaply, by
 VarPro; freeze; convex fit at scale".
