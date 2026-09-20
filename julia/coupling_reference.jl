@@ -15,6 +15,20 @@ tdeg  = parse(Int, get(ENV, "ACE_TOTALDEGREE", "6"))
 wL    = parse(Float64, get(ENV, "ACE_WL", "1.5"))
 out   = length(ARGS) >= 1 ? ARGS[1] : "coupling_ref.npz"
 
+# ACEpotentials v0.10.1 DefaultHypers.bond_len crashes (UndefVarError: `rnn`)
+# for elements absent from its VASP length-scale table (e.g. Mn, z=25). The
+# coupling table is bond-length-independent, so inject a placeholder bond length
+# for any missing requested element, letting ace1_model construct.
+let DH = ACEpotentials.DefaultHypers
+    for sym in els
+        z = Int(DH.atomic_number(DH.ChemicalSpecies(sym)))
+        haskey(DH._lengthscales, z) && continue
+        DH._lengthscales[z] = Dict{Any,Any}("bond_len" => Any[2.5, "placeholder (ace-jax)"],
+                                            "min_bond_len" => Any[1.8, "placeholder (ace-jax)"])
+        @info "coupling_reference: injected placeholder bond_len for $sym (z=$z)"
+    end
+end
+
 model = ACEpotentials.ace1_model(elements = els, order = order, totaldegree = tdeg, wL = wL)
 t = model.model.tensor
 r_spec = [(b.n, b.l) for b in model.model.rbasis.spec]           # (n,l) per Rnl idx (1-based)
