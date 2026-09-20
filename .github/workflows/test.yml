@@ -2,16 +2,32 @@ name: test
 on: [push, pull_request]
 jobs:
   pytest:
-    # Pip-only: NO Julia. Runs against the committed npz fixtures.
+    # Fast pip-only suite: NO Julia, NO heavy MCMC (the 'slow' marker is excluded).
+    # Runs against the committed npz fixtures across the supported Pythons.
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false            # let every Python report; don't cancel siblings
       matrix:
         python: ["3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - name: Run the suite (CPU JAX, no Julia)
+      - name: Run the fast suite (CPU JAX, no Julia)
         env:
           JAX_PLATFORM_NAME: cpu
           JAX_ENABLE_X64: "1"
-        run: uv run --python ${{ matrix.python }} --extra gp --extra ase pytest -q
+        run: uv run --python ${{ matrix.python }} --extra gp --extra ase pytest -v -m "not slow"
+  ladder:
+    # Heavy integration run ONCE (not per-Python): the real-model MCMC ladder
+    # (MAP/Laplace/Pathfinder/NUTS, fast mode). Isolated so it can't slow or cancel
+    # the matrix; -v + --durations surface exactly which rung costs what.
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Real-model ladder (fast mode)
+        env:
+          JAX_PLATFORM_NAME: cpu
+          JAX_ENABLE_X64: "1"
+        run: uv run --extra gp --extra ase pytest -v -m slow

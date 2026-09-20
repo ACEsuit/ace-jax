@@ -59,3 +59,7 @@ include = ["src/ace_jax", "README.md", "LICENSE"]
 [tool.pytest.ini_options]
 pythonpath = ["src", "tests"]
 testpaths = ["tests"]
+addopts = "--durations=25"
+markers = [
+    "slow: heavy integration (real-model MCMC ladder); excluded from the fast matrix, run in its own CI job",
+]
