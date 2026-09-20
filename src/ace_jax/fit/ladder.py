@@ -68,15 +68,24 @@ def run_vi(lml, prior, *, n_draws=100, steps=2000, lr=0.01, seed=0, init=None):
     return _stack(draws), params
 
 
-def run_nuts(lml, prior, *, num_warmup=500, num_samples=500, num_chains=4, seed=0, init=None):
+def run_nuts(lml, prior, *, num_warmup=500, num_samples=500, num_chains=4, seed=0, init=None,
+             max_tree_depth=None, target_accept_prob=None):
     model = numpyro_model(lml, prior)
-    kernel = NUTS(model, init_strategy=init_to_value(values=_init(prior, init)))
+    kw = {}
+    if max_tree_depth is not None:
+        kw["max_tree_depth"] = max_tree_depth
+    if target_accept_prob is not None:
+        kw["target_accept_prob"] = target_accept_prob
+    kernel = NUTS(model, init_strategy=init_to_value(values=_init(prior, init)), **kw)
     mcmc = MCMC(kernel, num_warmup=num_warmup, num_samples=num_samples, num_chains=num_chains,
                 chain_method="sequential", progress_bar=False)
     mcmc.run(jax.random.PRNGKey(seed), extra_fields=("diverging",))
     samples = mcmc.get_samples(group_by_chain=True)
     from numpyro.diagnostics import effective_sample_size, gelman_rubin
-    summary = {"r_hat": {f: float(gelman_rubin(np.asarray(samples[f]))) for f in FIELDS},
+    # R-hat (Gelman-Rubin) is undefined for a single chain; report NaN then.
+    r_hat = {f: (float(gelman_rubin(np.asarray(samples[f]))) if num_chains >= 2 else float("nan"))
+             for f in FIELDS}
+    summary = {"r_hat": r_hat,
                "ess": {f: float(effective_sample_size(np.asarray(samples[f]))) for f in FIELDS},
                "divergences": int(np.sum(np.asarray(mcmc.get_extra_fields()["diverging"])))}
     return _stack(mcmc.get_samples()), summary
