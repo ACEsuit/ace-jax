@@ -33,7 +33,7 @@ jobs:
         env:
           JAX_PLATFORM_NAME: cpu
           JAX_ENABLE_X64: "1"
-        run: uv run --python 3.12 --extra gp pytest -m "not slow and not heavy" --splits 3 --group ${{ matrix.group }}
+        run: uv run --python 3.12 --extra gp pytest -m "not slow" --splits 3 --group ${{ matrix.group }}
   smoke:
     # Import + a small descriptor/EFV/kernel smoke on the other supported Pythons
     # -- a cheap compatibility check without re-running the whole (slow) matrix.
@@ -71,16 +71,3 @@ jobs:
           JAX_PLATFORM_NAME: cpu
           JAX_ENABLE_X64: "1"
         run: uv run --extra gp pytest -v -m slow
-  heavy:
-    # High-peak-memory tests (full jacrev) run ONCE on a dedicated runner so they
-    # get a whole VM's RAM instead of OOM-ing a shared shard.
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
-      - name: Heavy-memory tests
-        env:
-          JAX_PLATFORM_NAME: cpu
-          JAX_ENABLE_X64: "1"
-        run: uv run --python 3.12 --extra gp pytest -v -m heavy

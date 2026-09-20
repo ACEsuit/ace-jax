@@ -2,8 +2,6 @@
 a naive jacrev of the compact site basis, and force rows built from it against
 -d/dr of the summed basis.  f64 only."""
 import jax
-import pytest
-pytestmark = pytest.mark.heavy
 import numpy as np
 
 from conftest import species_index
@@ -27,15 +25,22 @@ def _case(npz):
 def test_edge_jacobian_matches_naive(npz):
     model, z, n, send, recv, nz, rij = _case(npz)
     zi, zj = nz[send], nz[recv]
+    E = len(send)
+    # The full (n, D, E, 3) jacrev OOMs a 16 GB CI runner, so check a subset of
+    # edges via jvp instead: for edge e, d compact_basis / d rij[e, a] is an
+    # (n, D) tangent; node send[e]'s block is J[e, :, a]. Memory ~ (n, D)/jvp.
+    idx = np.unique(np.linspace(0, E - 1, min(E, 24)).astype(int))
     with highest_precision():
         X, J = model.edge_jacobian(rij, zi, zj, send, n)
         X0 = model.compact_basis(rij, zi, zj, send, n)
-        Jfull = jax.jacrev(lambda r: model.compact_basis(r, zi, zj, send, n))(rij)
-    Jn = Jfull[send, :, jnp.arange(len(send)), :]          # (E, D, 3)
-    assert X.shape == X0.shape and J.shape == (len(send), X.shape[1], 3)
+        cb = lambda r: model.compact_basis(r, zi, zj, send, n)
+        Jn = jnp.stack([jnp.stack(
+            [jax.jvp(cb, (rij,), (jnp.zeros_like(rij).at[int(e), a].set(1.0),))[1][int(send[e])]
+             for a in range(3)], -1) for e in idx])          # (len(idx), D, 3)
+    assert X.shape == X0.shape and J.shape == (E, X.shape[1], 3)
     assert float(jnp.abs(X - X0).max()) < 1e-11
     scale = float(jnp.abs(Jn).max())
-    assert float(jnp.abs(J - Jn).max()) < 1e-11 * max(scale, 1.0)
+    assert float(jnp.abs(J[idx] - Jn).max()) < 1e-11 * max(scale, 1.0)
 
 
 def test_force_rows_from_edge_jacobian(npz):
