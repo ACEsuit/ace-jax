@@ -1,6 +1,24 @@
-"""The four inference rungs off one numpyro model.  Sampling the log values
-with Normal priors is the log-normal hyperprior; `lml` is the streamed marginal
-likelihood (objective.make_lml), differentiable through scan + checkpoint."""
+"""Inference rungs over one shared log-density.  Sampling the log values with
+Normal priors is the log-normal hyperprior; `lml` is the streamed marginal
+likelihood (objective.make_lml), differentiable through scan + checkpoint.
+
+Framework split (deliberate -- see the "keep the documented mix" decision).
+Every rung consumes the SAME log-density; numpyro and blackjax are just two
+inference backends over it:
+
+  * run_map / run_laplace / run_vi / run_nuts -- numpyro.  Its batteries-included
+    autoguides (AutoDelta, AutoLaplaceApproximation, AutoMultivariateNormal) and
+    adaptive NUTS give validated posteriors with no hand-rolled adaptation, and
+    the calibration results rest on them.
+  * run_pathfinder -- blackjax.  numpyro has no Pathfinder, so this one rung uses
+    blackjax.vi.pathfinder; it takes theta_map (a numpyro run_map result) as its
+    L-BFGS start, so the two backends compose cleanly at the log-density.
+  * run_laplace_fd -- backend-free: a finite-difference Hessian at the MAP,
+    independent of both.
+
+So the numpyro/blackjax mix is intra-ladder by necessity (Pathfinder), not an
+accident; do NOT "unify" by dropping Pathfinder or rewriting the numpyro rungs
+without re-validating calibration."""
 import jax
 import jax.numpy as jnp
 import numpy as np
