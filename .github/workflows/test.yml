@@ -28,7 +28,7 @@ jobs:
         env:
           JAX_PLATFORM_NAME: cpu
           JAX_ENABLE_X64: "1"
-        run: uv run --python 3.12 --extra gp pytest -m "not slow" -n auto --dist worksteal
+        run: uv run --python 3.12 --extra gp pytest -m "not slow" -n 2 --dist worksteal
   smoke:
     # Import + a small descriptor/EFV/kernel smoke on the other supported Pythons
     # -- a cheap compatibility check without re-running the whole (slow) matrix.
