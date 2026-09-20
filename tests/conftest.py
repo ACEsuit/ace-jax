@@ -84,3 +84,17 @@ def species_index(z):
     lookup = {int(zz): i for i, zz in enumerate(i2z)}
     return jnp.asarray([lookup[int(a)] for a in np.asarray(z["test_Z"]).ravel()],
                        dtype=jnp.int32)
+
+
+# Bound peak memory across the suite: JAX retains compiled executables and traced
+# artifacts in-process, which under xdist workers accumulates and can OOM a CI
+# runner mid-run. Release them after each test; the persistent on-disk cache
+# above keeps the next compile cheap, so this costs little.
+@pytest.fixture(autouse=True)
+def _release_jax_memory():
+    yield
+    try:
+        import jax
+        jax.clear_caches()
+    except Exception:
+        pass
