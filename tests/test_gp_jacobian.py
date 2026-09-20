@@ -1,4 +1,4 @@
-"""edge_jacobian (hybrid analytic push, ported from spike/jax_phase0) against
+"""edge_jacobian (hybrid analytic push) against
 a naive jacrev of the compact site basis, and force rows built from it against
 -d/dr of the summed basis.  f64 only."""
 import jax

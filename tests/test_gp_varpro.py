@@ -1,7 +1,7 @@
 """VarPro driver (ace_jax.fit.varpro): the outer optimiser learns the nonlinear
 FS-density weights on the projected residual, driving the stable inner solve;
 it beats the linear-only fit and the learned density transfers frozen to a
-disjoint split -- the spike's gate, in ace_jax/JAX."""
+disjoint split."""
 import numpy as np
 import jax
 jax.config.update("jax_enable_x64", True)

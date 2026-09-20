@@ -1,6 +1,6 @@
 # ACEfit QR reference for the linear (M = 0) equivalence test.
 #
-#   julia --project=acejax/julia acejax/julia/acefit_qr_reference.jl
+#   julia --project=julia julia/acefit_qr_reference.jl
 #
 # Reads the exported ACEfit design matrix (fixtures/si_tiny_design.npz: the raw
 # rows A, targets Y, per-row weights W, smoothness prior gamma) and solves the
