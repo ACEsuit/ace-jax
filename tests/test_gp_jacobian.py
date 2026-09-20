@@ -2,6 +2,8 @@
 a naive jacrev of the compact site basis, and force rows built from it against
 -d/dr of the summed basis.  f64 only."""
 import jax
+import pytest
+pytestmark = pytest.mark.heavy
 import numpy as np
 
 from conftest import species_index

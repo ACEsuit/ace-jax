@@ -202,14 +202,17 @@ def _e0_offset(prob, ds):
     return jax.vmap(lambda e, c: jax.ops.segment_sum(e, c, num_segments=C + 1)[:C])(per_node, ds.node_cfg)
 
 
-def predict_fixed(theta, prob, ds_train, ds_test, dtc=True, deriv_dtc=True):
-    """dtc=False drops the DTC prior residual from E_var (SoR only; for tests).
-    deriv_dtc=False keeps the energy DTC residual but drops its force/virial
-    derivative (F_var, V_var stay SoR-only)."""
+def _predict_fn(prob, dtc, deriv_dtc):
+    """The jitted per-batch predictor with theta/mu/L as ARGUMENTS (not closures)
+    so it compiles ONCE and is reused across posterior draws -- predict_mixture
+    otherwise recompiled the (expensive) derivative-DTC once per draw."""
+    return jax.jit(lambda th, mu, L, b: _predict_batch(th, prob, mu, L, b, dtc, deriv_dtc))
+
+
+def _run_predict(f, theta, prob, ds_train, ds_test):
     st = sufficient_statistics(theta, prob.spec, prob.model, prob.ind, prob.cfg, ds_train)
     mu, L = posterior(theta, st, prob)
-    f = jax.jit(lambda b: _predict_batch(theta, prob, mu, L, b, dtc, deriv_dtc))
-    outs = [f(jax.tree.map(lambda a: a[i], ds_test)) for i in range(ds_test.n_batches)]
+    outs = [f(theta, mu, L, jax.tree.map(lambda a: a[i], ds_test)) for i in range(ds_test.n_batches)]
     Em = jnp.stack([o[0] for o in outs]) + _e0_offset(prob, ds_test)     # (nb, C)
     cm, nm = np.asarray(ds_test.cfg_mask).reshape(-1), np.asarray(ds_test.node_mask).reshape(-1)
     cat = lambda k: np.concatenate([np.asarray(o[k]) for o in outs])
@@ -217,8 +220,16 @@ def predict_fixed(theta, prob, ds_train, ds_test, dtc=True, deriv_dtc=True):
                       cat(4)[cm], cat(5)[cm])
 
 
+def predict_fixed(theta, prob, ds_train, ds_test, dtc=True, deriv_dtc=True):
+    """dtc=False drops the DTC prior residual from E_var (SoR only; for tests).
+    deriv_dtc=False keeps the energy DTC residual but drops its force/virial
+    derivative (F_var, V_var stay SoR-only)."""
+    return _run_predict(_predict_fn(prob, dtc, deriv_dtc), theta, prob, ds_train, ds_test)
+
+
 def predict_mixture(draws, prob, ds_train, ds_test, deriv_dtc=True):
-    preds = [predict_fixed(from_array(jnp.asarray(d)), prob, ds_train, ds_test, deriv_dtc=deriv_dtc)
+    f = _predict_fn(prob, True, deriv_dtc)   # compile ONCE, reuse across all draws
+    preds = [_run_predict(f, from_array(jnp.asarray(d)), prob, ds_train, ds_test)
              for d in np.asarray(draws)]
     out = []
     for k in range(0, 6, 2):

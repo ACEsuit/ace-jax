@@ -62,4 +62,5 @@ testpaths = ["tests"]
 addopts = "--durations=25"
 markers = [
     "slow: heavy integration (real-model MCMC ladder); excluded from the fast matrix, run in its own CI job",
+    "heavy: high peak memory (e.g. full jacrev); run in its own CI job so it gets a whole runner",
 ]
