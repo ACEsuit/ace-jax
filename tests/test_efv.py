@@ -143,7 +143,7 @@ def test_all_neighbour_backends_agree(case):
     model, meta, z, atoms = case
     args = (atoms.get_positions(), atoms.get_cell().array, atoms.get_pbc(),
             float(meta["rcut"]))
-    avail = ["numpy"]
+    avail = ["ase"]
     if have_matscipy():
         avail.append("matscipy")
     if have_matscipy_neighbours():

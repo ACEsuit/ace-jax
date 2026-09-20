@@ -21,6 +21,7 @@ name = "ace-jax"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "ase" },
     { name = "equinox" },
     { name = "jax", version = "0.10.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "jax", version = "0.11.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
@@ -32,9 +33,6 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
-ase = [
-    { name = "ase" },
-]
 authoring = [
     { name = "juliacall" },
     { name = "juliapkg" },
@@ -47,7 +45,6 @@ fast-neighbours = [
     { name = "matscipy" },
 ]
 gp = [
-    { name = "ase" },
     { name = "blackjax" },
     { name = "numpyro" },
     { name = "optax" },
@@ -55,7 +52,6 @@ gp = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "ase" },
     { name = "numpyro" },
     { name = "optax" },
     { name = "pytest" },
@@ -63,8 +59,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "ase", marker = "extra == 'ase'", specifier = ">=3.22" },
-    { name = "ase", marker = "extra == 'gp'", specifier = ">=3.22" },
+    { name = "ase", specifier = ">=3.22" },
     { name = "blackjax", marker = "extra == 'gp'", specifier = ">=1.6" },
     { name = "equinox", specifier = ">=0.11" },
     { name = "jax", specifier = ">=0.10.1" },
@@ -78,11 +73,10 @@ requires-dist = [
     { name = "optax", marker = "extra == 'gp'", specifier = ">=0.2" },
     { name = "scipy", specifier = ">=1.10" },
 ]
-provides-extras = ["authoring", "ase", "gp", "cuda", "fast-neighbours"]
+provides-extras = ["authoring", "gp", "cuda", "fast-neighbours"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "ase", specifier = ">=3.22" },
     { name = "numpyro", specifier = ">=0.16" },
     { name = "optax", specifier = ">=0.2" },
     { name = "pytest", specifier = ">=8" },

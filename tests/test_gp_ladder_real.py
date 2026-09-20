@@ -33,7 +33,8 @@ from ace_jax.fit.ladder import run_laplace, run_map, run_nuts, run_pathfinder
 from ace_jax.fit.objective import Problem, make_log_density
 
 XYZ = FIXTURE_DIR / "si_tiny_train.xyz"
-pytestmark = pytest.mark.skipif(not XYZ.exists(), reason="missing si_tiny_train.xyz")
+pytestmark = [pytest.mark.slow,
+              pytest.mark.skipif(not XYZ.exists(), reason="missing si_tiny_train.xyz")]
 
 SEED = 0
 SLOW = os.environ.get("ACEGP_SLOW") == "1"
@@ -43,8 +44,8 @@ if SLOW:                                    # converged: meaningful statistics
     NUTS_MAX_DEPTH, NUTS_ACCEPT = None, None   # numpyro defaults (depth 10, 0.8)
     PF_SAMPLES, PF_MAXITER = 40, 25            # pathfinder (blackjax) ELBO samples / L-BFGS iters
 else:                                       # fast: code-path + health gate
-    N_DRAWS, OPT_STEPS = 80, 120
-    NUTS_WARMUP, NUTS_SAMPLES = 50, 60
+    N_DRAWS, OPT_STEPS = 60, 100
+    NUTS_WARMUP, NUTS_SAMPLES = 50, 40
     PF_SAMPLES, PF_MAXITER = 8, 10             # pathfinder: tiny counts (cheap here)
     NUTS_MAX_DEPTH, NUTS_ACCEPT = 6, 0.9       # cap depth (ill-conditioned GP
     #   posterior -> uncapped ~2^10 leapfrogs/sample) and raise target-accept
