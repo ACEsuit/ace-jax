@@ -8,8 +8,9 @@ on:
       - "src/ace_jax/eval/model.py"
       - "src/ace_jax/fit/rows.py"
       - "src/ace_jax/fit/solve.py"
-      - "julia/**"
-      - ".github/workflows/julia-parity.yml"
+      - "julia/export_model.jl"
+      - "julia/acefit_qr_reference.jl"
+      - "julia/Project.toml"
   schedule:
     - cron: "0 6 * * 1"   # weekly
   workflow_dispatch:
@@ -26,6 +27,7 @@ jobs:
         run: |
           julia --project=julia -e '
             using Pkg
+            Pkg.Registry.add("General")
             Pkg.Registry.add(RegistrySpec(url="https://github.com/ACEsuit/ACEregistry"))
             Pkg.add(["ACEpotentials", "ACEfit", "NPZ"])   # or pin a version for reproducibility
             Pkg.instantiate()'
