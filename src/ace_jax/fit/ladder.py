@@ -1,6 +1,24 @@
-"""The four inference rungs off one numpyro model.  Sampling the log values
-with Normal priors is the log-normal hyperprior; `lml` is the streamed marginal
-likelihood (objective.make_lml), differentiable through scan + checkpoint."""
+"""Inference rungs over one shared log-density.  Sampling the log values with
+Normal priors is the log-normal hyperprior; `lml` is the streamed marginal
+likelihood (objective.make_lml), differentiable through scan + checkpoint.
+
+Framework split (deliberate -- see the "keep the documented mix" decision).
+Every rung consumes the SAME log-density; numpyro and blackjax are just two
+inference backends over it:
+
+  * run_map / run_laplace / run_vi / run_nuts -- numpyro.  Its batteries-included
+    autoguides (AutoDelta, AutoLaplaceApproximation, AutoMultivariateNormal) and
+    adaptive NUTS give validated posteriors with no hand-rolled adaptation, and
+    the calibration results rest on them.
+  * run_pathfinder -- blackjax.  numpyro has no Pathfinder, so this one rung uses
+    blackjax.vi.pathfinder; it takes theta_map (a numpyro run_map result) as its
+    L-BFGS start, so the two backends compose cleanly at the log-density.
+  * run_laplace_fd -- backend-free: a finite-difference Hessian at the MAP,
+    independent of both.
+
+So the numpyro/blackjax mix is intra-ladder by necessity (Pathfinder), not an
+accident; do NOT "unify" by dropping Pathfinder or rewriting the numpyro rungs
+without re-validating calibration."""
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -68,15 +86,24 @@ def run_vi(lml, prior, *, n_draws=100, steps=2000, lr=0.01, seed=0, init=None):
     return _stack(draws), params
 
 
-def run_nuts(lml, prior, *, num_warmup=500, num_samples=500, num_chains=4, seed=0, init=None):
+def run_nuts(lml, prior, *, num_warmup=500, num_samples=500, num_chains=4, seed=0, init=None,
+             max_tree_depth=None, target_accept_prob=None):
     model = numpyro_model(lml, prior)
-    kernel = NUTS(model, init_strategy=init_to_value(values=_init(prior, init)))
+    kw = {}
+    if max_tree_depth is not None:
+        kw["max_tree_depth"] = max_tree_depth
+    if target_accept_prob is not None:
+        kw["target_accept_prob"] = target_accept_prob
+    kernel = NUTS(model, init_strategy=init_to_value(values=_init(prior, init)), **kw)
     mcmc = MCMC(kernel, num_warmup=num_warmup, num_samples=num_samples, num_chains=num_chains,
                 chain_method="sequential", progress_bar=False)
     mcmc.run(jax.random.PRNGKey(seed), extra_fields=("diverging",))
     samples = mcmc.get_samples(group_by_chain=True)
     from numpyro.diagnostics import effective_sample_size, gelman_rubin
-    summary = {"r_hat": {f: float(gelman_rubin(np.asarray(samples[f]))) for f in FIELDS},
+    # R-hat (Gelman-Rubin) is undefined for a single chain; report NaN then.
+    r_hat = {f: (float(gelman_rubin(np.asarray(samples[f]))) if num_chains >= 2 else float("nan"))
+             for f in FIELDS}
+    summary = {"r_hat": r_hat,
                "ess": {f: float(effective_sample_size(np.asarray(samples[f]))) for f in FIELDS},
                "divergences": int(np.sum(np.asarray(mcmc.get_extra_fields()["diverging"])))}
     return _stack(mcmc.get_samples()), summary
@@ -118,18 +145,35 @@ def run_laplace_fd(lml, prior, theta_map, *, n_draws=100, eps=1e-3, seed=0, floo
     return draws, info
 
 
-def run_pathfinder(lml, prior, theta_map, *, n_draws=100, seed=0):
+def run_pathfinder(lml, prior, theta_map, *, n_draws=100, seed=0,
+                   num_samples=16, maxiter=15):
     """Pathfinder VI (blackjax): a Gaussian approximation built along the L-BFGS
-    optimisation path from theta_map, then sampled.  No MCMC loop (cheap like
+    optimisation path from theta_map, then sampled.  No MCMC loop (cheap, like
     Laplace) but often a better Gaussian than the at-mode Hessian when the
     posterior is skewed -- the recommended VI rung.  Returns (draws (n_draws,
-    10) in log space, info)."""
+    10) in log space, info).
+
+    Memory: blackjax `approximate` vmaps the (Dt-dim) log-density objective over
+    `num_samples` (ELBO estimate per L-BFGS iterate, to pick the best point on
+    the path) nested inside a vmap over the path (`maxiter+1` iterates).  Peak is
+    ~ c . num_samples . (maxiter+1) . Dt^2 -- linear in both vmap counts and
+    quadratic in the parameter dimension Dt = len_basis + M (the objective's
+    Cholesky).  So the blackjax defaults (num_samples=200, maxiter=30) blow up at
+    scale -- 1.12 TiB at Cantor M=500 (Dt=2450).  The defaults here (16, 15) suit
+    moderate problems (Dt<=350 -> ~17 GB) but STILL OOM a 20 GB GPU at Cantor
+    M=500 (~68 GB): the Dt^2 term dominates, so LARGE problems must pass small
+    values -- ns=4, maxiter=10 -> 11.6 GB, ns=2, maxiter=8 -> 5.2 GB at Dt=2450
+    (measured).  num_samples only sets ELBO-estimation noise for path selection
+    (NOT the posterior draw count -- that is n_draws, resampled below), so small
+    values cost little; maxiter just caps the L-BFGS steps from a MAP start."""
     import blackjax
     from .hypers import log_prior
     logpost = jax.jit(lambda a: lml(a) + log_prior(from_array(a), prior))
     x0 = jnp.asarray(to_array(theta_map))
     k1, k2 = jax.random.split(jax.random.PRNGKey(seed))
-    state, _ = blackjax.vi.pathfinder.approximate(k1, logpost, x0)
+    state, _ = blackjax.vi.pathfinder.approximate(
+        k1, logpost, x0, num_samples=num_samples, maxiter=maxiter)
     draws, _ = blackjax.vi.pathfinder.sample(k2, state, n_draws)
     draws = np.asarray(draws)
-    return draws, {"std": draws.std(0).tolist(), "fields": list(FIELDS)}
+    return draws, {"std": draws.std(0).tolist(), "fields": list(FIELDS),
+                   "num_samples": num_samples, "maxiter": maxiter}

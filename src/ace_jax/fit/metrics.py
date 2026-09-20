@@ -28,6 +28,9 @@ def spearman(a, b):
 
 def sigma_ratio(sigma, lo=5, hi=95):
     s = np.asarray(sigma)
+    s = s[np.isfinite(s)]
+    if s.size == 0:
+        return float("nan")
     return float(np.percentile(s, hi) / np.percentile(s, lo))
 
 
@@ -41,7 +44,12 @@ def summarise(y, mu, sigma):
     feature rows are all zero) carries no UQ information and would give
     z = 0/0.  `n_dropped` reports how many were excluded."""
     y, mu, sigma = (np.asarray(a, float) for a in (y, mu, sigma))
-    keep = sigma > 0
+    keep = np.isfinite(sigma) & (sigma > 0)
+    n_total = keep.size
+    if not keep.any():
+        nan = float("nan")
+        return {"rmse": nan, "mae": nan, "crps": nan, "coverage": nan, "rho": nan,
+                "sigma_ratio": nan, "rms_z": nan, "median_sigma": nan, "n_dropped": int(n_total)}
     y, mu, sigma = y[keep], mu[keep], sigma[keep]
     err = np.abs(y - mu)
     return {"rmse": rmse(y, mu), "mae": mae(y, mu), "crps": float(np.mean(crps_gaussian(y, mu, sigma))),
