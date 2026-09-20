@@ -118,18 +118,35 @@ def run_laplace_fd(lml, prior, theta_map, *, n_draws=100, eps=1e-3, seed=0, floo
     return draws, info
 
 
-def run_pathfinder(lml, prior, theta_map, *, n_draws=100, seed=0):
+def run_pathfinder(lml, prior, theta_map, *, n_draws=100, seed=0,
+                   num_samples=16, maxiter=15):
     """Pathfinder VI (blackjax): a Gaussian approximation built along the L-BFGS
-    optimisation path from theta_map, then sampled.  No MCMC loop (cheap like
+    optimisation path from theta_map, then sampled.  No MCMC loop (cheap, like
     Laplace) but often a better Gaussian than the at-mode Hessian when the
     posterior is skewed -- the recommended VI rung.  Returns (draws (n_draws,
-    10) in log space, info)."""
+    10) in log space, info).
+
+    Memory: blackjax `approximate` vmaps the (Dt-dim) log-density objective over
+    `num_samples` (ELBO estimate per L-BFGS iterate, to pick the best point on
+    the path) nested inside a vmap over the path (`maxiter+1` iterates).  Peak is
+    ~ c . num_samples . (maxiter+1) . Dt^2 -- linear in both vmap counts and
+    quadratic in the parameter dimension Dt = len_basis + M (the objective's
+    Cholesky).  So the blackjax defaults (num_samples=200, maxiter=30) blow up at
+    scale -- 1.12 TiB at Cantor M=500 (Dt=2450).  The defaults here (16, 15) suit
+    moderate problems (Dt<=350 -> ~17 GB) but STILL OOM a 20 GB GPU at Cantor
+    M=500 (~68 GB): the Dt^2 term dominates, so LARGE problems must pass small
+    values -- ns=4, maxiter=10 -> 11.6 GB, ns=2, maxiter=8 -> 5.2 GB at Dt=2450
+    (measured).  num_samples only sets ELBO-estimation noise for path selection
+    (NOT the posterior draw count -- that is n_draws, resampled below), so small
+    values cost little; maxiter just caps the L-BFGS steps from a MAP start."""
     import blackjax
     from .hypers import log_prior
     logpost = jax.jit(lambda a: lml(a) + log_prior(from_array(a), prior))
     x0 = jnp.asarray(to_array(theta_map))
     k1, k2 = jax.random.split(jax.random.PRNGKey(seed))
-    state, _ = blackjax.vi.pathfinder.approximate(k1, logpost, x0)
+    state, _ = blackjax.vi.pathfinder.approximate(
+        k1, logpost, x0, num_samples=num_samples, maxiter=maxiter)
     draws, _ = blackjax.vi.pathfinder.sample(k2, state, n_draws)
     draws = np.asarray(draws)
-    return draws, {"std": draws.std(0).tolist(), "fields": list(FIELDS)}
+    return draws, {"std": draws.std(0).tolist(), "fields": list(FIELDS),
+                   "num_samples": num_samples, "maxiter": maxiter}
