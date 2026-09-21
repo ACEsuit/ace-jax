@@ -38,3 +38,41 @@ def embed_objective_and_grad(prob, ds, lam):
     def grad(E, a):
         return np.asarray(grad_lml(E, a)) - np.asarray(grad_anchor(E, lam))
     return objective, grad, lml_E
+
+
+def learn_embedding(prob, ds, E0, *, lam=1.0, steps=30, lr=0.05, inner_steps=300,
+                    val_score=None, seed=0):
+    """Outer VarOpt over the embedding, profiled in theta.  Returns
+    (E_star_normalized, info).  steps=0 -> return normalize_rows(E0) unchanged."""
+    from .varopt import learn, select_by_holdout
+    E0 = jnp.asarray(E0, jnp.float64)
+    NZ = E0.shape[0]
+    if steps <= 0:
+        return normalize_rows(E0), {"steps": 0, "selected": "init", "trace": []}
+
+    objective, grad, _ = embed_objective_and_grad(prob, ds, lam)
+
+    # Profiled outer step: re-MAP theta at the current E, then one envelope step.
+    def outer_objective(psi):
+        E = psi.reshape(E0.shape)
+        a = theta_map_at(prob, ds, E, steps=inner_steps, seed=seed)
+        return objective(E, a)
+
+    def outer_grad(psi):
+        E = psi.reshape(E0.shape)
+        a = theta_map_at(prob, ds, E, steps=inner_steps, seed=seed)
+        return grad(E, a).reshape(-1)
+
+    psi0 = E0.reshape(-1)
+    psi_star, oinfo = learn(psi0, outer_objective, outer_grad, steps=steps, lr=lr)
+    E_learned = normalize_rows(psi_star.reshape(E0.shape))
+
+    info = {"steps": int(steps), "trace": oinfo["trace"], "selected": "learned"}
+    if val_score is None:
+        return E_learned, info
+    # Held-out gate: keep the best of {learned, mace=E0, eye}; ties -> eye.
+    eye = normalize_rows(jnp.eye(NZ))
+    cands = {"eye": eye, "mace": normalize_rows(E0), "learned": E_learned}   # eye first -> tie winner
+    label, E_sel = select_by_holdout(cands, val_score)
+    info["selected"] = label
+    return E_sel, info

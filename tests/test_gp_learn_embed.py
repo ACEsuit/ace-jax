@@ -37,3 +37,36 @@ def test_embed_grad_is_correct():
         jvp = float(jax.jvp(pen, (E,), (v,))[1])
         gv = float(np.sum(g * np.asarray(v)))
         assert abs(jvp - gv) / (abs(jvp) + 1e-12) < 1e-8      # fwd == reverse (exact)
+
+
+def test_learn_embedding_steps0_returns_init():
+    import numpy as np, jax.numpy as jnp
+    from ace_jax.eval import highest_precision
+    from ace_jax.fit.embedding import species_onehot, normalize_rows
+    from ace_jax.fit.varopt_embed import learn_embedding
+    from test_gp_varopt import _tiny_problem
+    with highest_precision():
+        prob, ds, els = _tiny_problem()
+        E0 = jnp.asarray(species_onehot(len(els)))
+        E_star, info = learn_embedding(prob, ds, E0, steps=0)
+        assert np.allclose(np.asarray(E_star), np.asarray(normalize_rows(E0)))   # unchanged
+        assert info["steps"] == 0
+
+@pytest.mark.slow
+def test_learn_embedding_holdout_prefers_block_diagonal_when_val_says_so():
+    # val_score rigged so block-diagonal (eye) wins -> gate returns eye, even though
+    # the MACE init and the learned E both couple the species.
+    import numpy as np, jax.numpy as jnp
+    from ace_jax.eval import highest_precision
+    from ace_jax.fit.embedding import normalize_rows, gram
+    from ace_jax.fit.varopt_embed import learn_embedding
+    from test_gp_varopt import _tiny_problem
+    with highest_precision():
+        prob, ds, els = _tiny_problem()
+        NZ = len(els)
+        E0 = jnp.asarray([[1.0, 0.0], [0.6, 0.8]])[:NZ, :NZ]     # coupled MACE-like init (B[0,1]=0.6)
+        # val prefers whichever E has the smallest off-diagonal coupling (eye wins)
+        vs = lambda E: float(np.abs(np.asarray(gram(E)) - np.eye(NZ)).sum())
+        E_star, info = learn_embedding(prob, ds, E0, steps=2, inner_steps=50, val_score=vs, seed=0)
+        assert info["selected"] == "eye"
+        assert np.allclose(np.asarray(E_star), np.asarray(normalize_rows(jnp.eye(NZ))))
