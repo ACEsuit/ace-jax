@@ -157,17 +157,21 @@ with highest_precision():
         from ace_jax.fit.predict import predict_fixed
         from ace_jax.fit.metrics import rmse
         from ace_jax.fit.hypers import from_array
-        # simple held-out val: last embed_holdout of train configs (same ds pipeline)
+        # GENUINELY held-out gate: split train into DISJOINT fit/val; learn E on train_fit,
+        # score on train_val (NOT in train_fit). Conditioning val_score on ds_fit (not ds_train)
+        # is what makes the gate protective.
         nval = max(1, int(a.embed_holdout * len(train)))
-        ds_val = build_dataset(train[-nval:], meta, E0, a.batch)
+        train_fit, train_val = train[:-nval], train[-nval:]
+        ds_fit = build_dataset(train_fit, meta, E0, a.batch)
+        ds_val = build_dataset(train_val, meta, E0, a.batch)
+        Fval = np.concatenate([c.forces for c in train_val]).reshape(-1)
         def val_score(E):
             ind_E = ind._replace(embed=E)
-            a_star = theta_map_at(prob._replace(ind=ind_E), ds_train, E, steps=a.map_steps)
-            pr = predict_fixed(from_array(a_star), prob._replace(ind=ind_E), ds_train, ds_val,
+            a_star = theta_map_at(prob._replace(ind=ind_E), ds_fit, E, steps=a.map_steps)
+            pr = predict_fixed(from_array(a_star), prob._replace(ind=ind_E), ds_fit, ds_val,
                                dtc=False, deriv_dtc=False)
-            Fv = np.concatenate([c.forces for c in train[-nval:]]).reshape(-1)
-            return rmse(Fv, np.asarray(pr.F_mean).reshape(-1))
-        E_star, einfo = learn_embedding(prob, ds_train, embed, lam=a.embed_anchor,
+            return rmse(Fval, np.asarray(pr.F_mean).reshape(-1))
+        E_star, einfo = learn_embedding(prob, ds_fit, embed, lam=a.embed_anchor,
                                         steps=a.embed_steps, inner_steps=a.map_steps,
                                         val_score=val_score, seed=a.seed)
         print(f"learn-embedding: selected {einfo['selected']}, trace {np.round(einfo['trace'][-3:], 2)}", flush=True)
