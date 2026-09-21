@@ -155,3 +155,14 @@ def test_inducing_embed_nz_gives_full_width_onehot():
     assert E.shape == (3, 3) and np.allclose(E, np.eye(3))            # full width despite 1 species
     ind0 = select_inducing(X, S, Z, mask, 3, descriptor_scale(X, mask))
     assert np.asarray(ind0.embed).shape == (1, 1)                     # default: present-species width
+
+
+def test_select_inducing_accepts_lowrank_embed():
+    import numpy as np, jax.numpy as jnp
+    from ace_jax.fit.inducing import descriptor_scale, select_inducing
+    rng = np.random.default_rng(0)
+    X = jnp.asarray(rng.normal(size=(10, 4))); S = jnp.asarray(2.5 + rng.random(10))
+    Z = jnp.asarray([0] * 5 + [1] * 5, jnp.int32); mask = jnp.ones(10, bool)
+    E = jnp.asarray(rng.normal(size=(2, 3)))                 # NZ=2, de=3 low-rank
+    ind = select_inducing(X, S, Z, mask, 3, descriptor_scale(X, mask), embed=E, de=3)
+    assert np.asarray(ind.embed).shape == (2, 3)            # passed through unchanged

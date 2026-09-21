@@ -95,7 +95,7 @@ def farthest_point(X, m, start=0):
     return np.asarray(idx)
 
 
-def select_inducing(X, S, Z, node_mask, m_per_species, scale, Pmap=None, warp="none", embed=None, nz=None):
+def select_inducing(X, S, Z, node_mask, m_per_species, scale, Pmap=None, warp="none", embed=None, nz=None, de=None):
     X = np.asarray(X).reshape(-1, X.shape[-1]); S = np.asarray(S).reshape(-1)
     Z = np.asarray(Z).reshape(-1); live = np.asarray(node_mask).reshape(-1)
     scale = np.asarray(scale)
@@ -127,6 +127,8 @@ def select_inducing(X, S, Z, node_mask, m_per_species, scale, Pmap=None, warp="n
         embed = species_onehot(NZ)
     else:
         embed = jnp.asarray(embed, jnp.float64)
+        if de is not None and embed.shape[1] != int(de):
+            raise ValueError(f"embed width {embed.shape[1]} != de {de}")
     return Inducing(jnp.asarray(UM), jnp.asarray(np.concatenate(ss) if ss else np.zeros(0)),
                     jnp.asarray(np.concatenate(zs) if zs else np.zeros(0), jnp.int32),
                     jnp.asarray(scale), jnp.asarray(Pmap), warp, embed=embed)
