@@ -134,14 +134,19 @@ with highest_precision():
     Pmap = build_pmap(cfg, scale, density=None if a.density == "none" else a.density)
     from ace_jax.fit.embedding import load_mace_embedding
     raw = None if a.embedding is None else np.asarray(load_mace_embedding(a.embedding, els))
-    if raw is not None and a.embed_de:
+    # Low-rank SVD init ONLY when learning; frozen --embedding stays full-width (exact prior
+    # behaviour). load_mace_embedding returns (NZ, D) with NZ usually < D, so svd gives U (NZ, NZ)
+    # and effective rank <= NZ; pass de = the ACTUAL embed width, never a.embed_de (which can
+    # exceed the available columns -> select_inducing ValueError).
+    if raw is not None and a.learn_embedding and a.embed_de:
         U, sv, _ = np.linalg.svd(raw, full_matrices=False)
-        embed = jnp.asarray(U[:, :a.embed_de] * sv[:a.embed_de])          # low-rank SVD init
+        k = min(int(a.embed_de), U.shape[1])
+        embed = jnp.asarray(U[:, :k] * sv[:k])                            # low-rank SVD init for learning
     else:
-        embed = None if raw is None else jnp.asarray(raw)
+        embed = None if raw is None else jnp.asarray(raw)                 # frozen: full-width (exact prior behaviour)
     ind = select_inducing(X, S, ds_train.node_z, ds_train.node_mask, m, scale,
                           Pmap=Pmap, warp=a.warp, embed=embed, nz=len(els),
-                          de=(a.embed_de if embed is not None else None))
+                          de=(int(embed.shape[1]) if embed is not None else None))
     print(f"feature map: density={a.density} warp={a.warp} -> d={ind.XM.shape[1] if ind.XM.shape[0] else cfg.D}", flush=True)
     timings["inducing"] = time.time() - t
     print(f"M = {ind.XM.shape[0]}  len_basis = {cfg.len_basis}", flush=True)
