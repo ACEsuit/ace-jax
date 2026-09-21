@@ -1,6 +1,25 @@
 import json, numpy as np, jax.numpy as jnp, pytest
 from ace_jax.fit.embedding import species_onehot, normalize_rows, load_mace_embedding
 
+def test_gram_is_correlation_matrix():
+    import numpy as np, jax.numpy as jnp
+    from ace_jax.fit.embedding import gram
+    E = jnp.asarray([[3.0, 0.0], [0.6, 0.8]])       # row 1 already unit
+    B = np.asarray(gram(E))
+    assert B.shape == (2, 2)
+    assert np.allclose(np.diag(B), 1.0)             # unit rows -> diag 1
+    assert np.allclose(B, B.T) and abs(B[0, 1] - 0.6) < 1e-9
+
+def test_anchor_penalty_zero_at_orthonormal_and_grad_finite():
+    import numpy as np, jax, jax.numpy as jnp
+    from ace_jax.fit.embedding import anchor_penalty
+    eye = jnp.eye(3)
+    assert float(anchor_penalty(eye, 2.0)) < 1e-18   # B = I -> penalty 0
+    E = jnp.asarray([[1.0, 0.0], [0.7, 0.7]])
+    assert float(anchor_penalty(E, 1.0)) > 0         # coupled -> positive
+    g = jax.grad(lambda X: anchor_penalty(X, 1.0))(E)
+    assert np.all(np.isfinite(np.asarray(g)))
+
 def test_onehot_is_identity():
     E = np.asarray(species_onehot(4))
     assert E.shape == (4, 4) and np.allclose(E, np.eye(4))
