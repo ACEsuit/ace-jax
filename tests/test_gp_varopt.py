@@ -47,3 +47,20 @@ def test_make_lml_embed_matches_make_lml_at_eye():
         # abs+rel combined tolerance keeps the check tight (rtol below is ~40x the
         # actual ~5e-11 relative gap) while being scale-appropriate.
         assert abs(L_emb - L_ref) < 1e-6 + 2e-9 * abs(L_ref)   # same LML when E = the eye default
+
+def test_varopt_learn_maximizes_quadratic():
+    import numpy as np, jax.numpy as jnp
+    from ace_jax.fit.varopt import learn
+    target = jnp.asarray([1.0, -2.0, 0.5])
+    obj = lambda p: -float(jnp.sum((p - target) ** 2))     # maximized at target
+    grad = lambda p: np.asarray(-2.0 * (p - target))
+    psi, info = learn(jnp.zeros(3), obj, grad, steps=200, lr=0.1)
+    assert np.allclose(np.asarray(psi), np.asarray(target), atol=1e-2)
+    assert info["trace"][-1] > info["trace"][0]            # objective rose
+
+def test_select_by_holdout_picks_lowest_score():
+    import jax.numpy as jnp
+    from ace_jax.fit.varopt import select_by_holdout
+    cands = {"a": jnp.zeros(2), "b": jnp.ones(2), "c": jnp.full(2, 2.0)}
+    label, psi = select_by_holdout(cands, score=lambda p: float(p[0]))   # a=0 wins
+    assert label == "a"
