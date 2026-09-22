@@ -26,6 +26,7 @@ class Config(NamedTuple):
     w_E: float
     w_F: float
     w_V: float
+    type_idx: int = 0          # config-type index (default type -> 0), for per-type sigma
 
 
 def _get(d, key):
@@ -46,10 +47,16 @@ def load_configs(path, energy_key="energy", force_key="forces", virial_key="viri
     weights = weights or {"default": {"E": 1.0, "F": 1.0, "V": 1.0}}
     if "default" not in weights:
         raise ValueError("weights dict needs a 'default' entry")
+    # Type index: the default type is 0; each NAMED weights entry (in insertion
+    # order) is 1, 2, ...  A config whose config_type matches a named key takes
+    # that index, else the default 0.  A single default type -> every config 0.
+    type_index = {name: i + 1 for i, name in enumerate(k for k in weights if k != "default")}
     out = []
     for at in read(str(path), index=":"):
         n = len(at)
-        w = _get(weights, str(at.info.get(weight_key, ""))) or weights["default"]
+        ct = str(at.info.get(weight_key, ""))
+        w = _get(weights, ct) or weights["default"]
+        ti = next((idx for name, idx in type_index.items() if name.lower() == ct.lower()), 0)
         E = _get(at.info, energy_key)
         F = _get(at.arrays, force_key)
         V = _get(at.info, virial_key)
@@ -60,7 +67,8 @@ def load_configs(path, energy_key="energy", force_key="forces", virial_key="viri
             energy=None if E is None else float(E),
             forces=None if F is None else np.asarray(F, float),
             virial=V,
-            w_E=w["E"] / np.sqrt(n), w_F=float(w["F"]), w_V=w["V"] / np.sqrt(n)))
+            w_E=w["E"] / np.sqrt(n), w_F=float(w["F"]), w_V=w["V"] / np.sqrt(n),
+            type_idx=ti))
     return out
 
 
@@ -71,6 +79,7 @@ class Dataset(NamedTuple):
     y_F: jnp.ndarray;       w_F: jnp.ndarray
     y_V: jnp.ndarray;       w_V: jnp.ndarray
     n_atoms: jnp.ndarray;   cfg_mask: jnp.ndarray
+    cfg_type: jnp.ndarray;  node_type: jnp.ndarray   # per-config / per-node config-type index
 
     @property
     def n_batches(self):
@@ -87,8 +96,9 @@ def flat_edges(rij, nbr, nbr_mask):
 
 def _batch(configs, meta, E0, rcut, C, n_cap, k_cap):
     """One padded batch from up to C configs."""
-    rij, nbr, nmask, node_z, node_cfg = [], [], [], [], []
+    rij, nbr, nmask, node_z, node_cfg, node_ty = [], [], [], [], [], []
     yE, wE, yV, wV, nat, cm = np.zeros(C), np.zeros(C), np.zeros((C, 6)), np.zeros(C), np.zeros(C), np.zeros(C, bool)
+    ctype = np.zeros(C, np.int32)
     yF, wF = [], []
     off = 0
     for c, cfg in enumerate(configs):
@@ -97,8 +107,8 @@ def _batch(configs, meta, E0, rcut, C, n_cap, k_cap):
         m = g.mask
         rij.append(g.rij); nbr.append(np.where(m, g.idx + off, 0)); nmask.append(m)
         zi = species_indices(meta, cfg.numbers)
-        node_z.append(zi); node_cfg.append(np.full(n, c))
-        nat[c] = n; cm[c] = True
+        node_z.append(zi); node_cfg.append(np.full(n, c)); node_ty.append(np.full(n, cfg.type_idx))
+        nat[c] = n; cm[c] = True; ctype[c] = cfg.type_idx
         if cfg.energy is not None:
             yE[c] = cfg.energy - E0[zi].sum(); wE[c] = cfg.w_E
         if cfg.forces is not None:
@@ -112,6 +122,7 @@ def _batch(configs, meta, E0, rcut, C, n_cap, k_cap):
     rij = cat(rij).reshape(-1, k_cap, 3) if rij else np.zeros((0, k_cap, 3))
     nbr, nmask = cat(nbr, np.int32).reshape(-1, k_cap), cat(nmask, bool).reshape(-1, k_cap)
     node_z, node_cfg = cat(node_z, np.int32), cat(node_cfg, np.int32)
+    node_ty = cat(node_ty, np.int32)
     yF, wF = cat(yF).reshape(-1, 3), cat(wF)
     n_nodes = off
     assert n_nodes <= n_cap, (n_nodes, n_cap)
@@ -125,7 +136,8 @@ def _batch(configs, meta, E0, rcut, C, n_cap, k_cap):
         node_z=pad(node_z, pn, 0), node_cfg=pad(node_cfg, pn, C),
         node_mask=np.concatenate([np.ones(n_nodes, bool), np.zeros(pn, bool)]),
         y_E=yE, w_E=wE, y_F=pad(yF, pn, 0.0), w_F=pad(wF, pn, 0.0),
-        y_V=yV, w_V=wV, n_atoms=nat, cfg_mask=cm)
+        y_V=yV, w_V=wV, n_atoms=nat, cfg_mask=cm,
+        cfg_type=ctype, node_type=pad(node_ty, pn, 0))
 
 
 def build_dataset(configs, meta, E0, configs_per_batch, rcut=None, n_cap=None, k_cap=None,

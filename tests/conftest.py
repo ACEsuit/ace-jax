@@ -105,6 +105,55 @@ def tiny_linear_problem():
     return prob, ds
 
 
+@pytest.fixture(scope="module")
+def two_type_synthetic():
+    """M=0 (BLR-limit) Problem + Dataset with TWO config-types built from the 6
+    si_tiny configs.  Each config appears once as type 0 and once as type 1; the
+    type-1 ENERGY label carries 3x the Gaussian noise of its type-0 twin (added
+    element-wise, so the per-config weighted-residual ratio is exactly 3
+    regardless of the structural weights).  Forces/virials -- which vastly
+    outnumber the energy rows -- pin the shared linear model near the truth, so
+    each type's energy residual tracks its injected noise and the evidence should
+    recover an energy sigma ratio ~3.  Returns (prob, ds, n_types=2)."""
+    import numpy as np
+    import jax
+    jax.config.update("jax_enable_x64", True)
+    import jax.numpy as jnp
+    from ace_jax.eval import load
+    from ace_jax.fit.data import build_dataset, load_configs
+    from ace_jax.fit.hypers import default_prior
+    from ace_jax.fit.inducing import (GPConfig, descriptor_scale, select_inducing,
+                                       site_features)
+    from ace_jax.fit.kernels import KernelSpec
+    from ace_jax.fit.objective import Problem
+
+    xyz = FIXTURE_DIR / "si_tiny_train.xyz"
+    fitted = FIXTURE_DIR / "si_fitted.npz"
+    if not (xyz.exists() and fitted.exists()):
+        pytest.skip("missing GP fixtures")
+    model, meta, z = load(fitted)
+    base = load_configs(xyz, "dft_energy", "dft_force", "dft_virial")[:6]
+    rng = np.random.default_rng(0)
+    s = 0.1
+    noise = s * rng.normal(size=len(base))
+    configs = []
+    for c, cfg in enumerate(base):                       # type 0: 1x noise
+        e = None if cfg.energy is None else float(cfg.energy + noise[c])
+        configs.append(cfg._replace(energy=e, type_idx=0))
+    for c, cfg in enumerate(base):                       # type 1: 3x noise (element-wise)
+        e = None if cfg.energy is None else float(cfg.energy + 3.0 * noise[c])
+        configs.append(cfg._replace(energy=e, type_idx=1))
+    ds = build_dataset(configs, meta, np.asarray(z["E0"]), configs_per_batch=6)
+    cfg = GPConfig(r0=2.35, rcut=float(meta["rcut"]), n_B=meta["n_B"], n_pair=meta["n_pair"],
+                   NZ=len(meta["elements"]), C=6)
+    X, S = site_features(model, cfg, ds)
+    ind = select_inducing(X, S, ds.node_z, ds.node_mask, 0,
+                          descriptor_scale(X, ds.node_mask))  # M = 0
+    prob = Problem(KernelSpec("cosine", True, cfg.D), model, ind, cfg,
+                   jnp.asarray(z["gamma"]), default_prior(2.35))
+    return prob, ds, 2
+
+
 def species_index(z):
     """Map the exported per-atom atomic numbers onto model species indices.
 
