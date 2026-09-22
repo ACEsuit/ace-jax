@@ -16,7 +16,7 @@ from typing import NamedTuple
 import jax.numpy as jnp
 import numpy as np
 
-from ..eval.model import ACEModel, fold_readout
+from ..eval.model import ACEModel, fold_readout, with_edge_a_kind
 from . import radial_init as ri
 from .coupling import couple
 from .prior import smoothness_prior
@@ -108,6 +108,8 @@ def build_model(elements, order, totaldegree, *, wL=1.5, rcut=5.5, r0=None,
 
     Returns an `Authoring`.  Requires the `authoring` extra (Julia coupling
     shim) on a cache miss; evaluate in float64 with x64 enabled."""
+    if edge_a_kind not in ("gather", "matmul"):
+        raise ValueError(f'edge_a_kind must be "gather" or "matmul", got {edge_a_kind!r}')
     zs = ri.resolve_elements(elements)
     NZ = len(zs)
     mb, Rnl, Ylm = build_spec(NZ, order, totaldegree, wL)
@@ -179,9 +181,10 @@ def build_model(elements, order, totaldegree, *, wL=1.5, rcut=5.5, r0=None,
         pair_envelope_kind="poly1sr",
         rnl_grid=(0.0, 1.0, 2), pair_grid=(0.0, 1.0, 2),
         elements=tuple(int(e) for e in zs),
-        edge_a_kind=edge_a_kind,
     )
-    model = fold_readout(model)
+    # "matmul" needs the one-hot selectors (a_sel_r/a_sel_y) the loader builds;
+    # with_edge_a_kind is the single place that derives them from aspec
+    model = fold_readout(with_edge_a_kind(model, edge_a_kind))
 
     tensor_nnll = list(nnll)
     pair_nnll = [[(n, 0)] for n in range(1, n_pair + 1)]

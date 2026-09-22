@@ -200,6 +200,112 @@ def test_eval_pair_in_memory_handoff():
     assert abs(E2 - float(z["test_E"][0])) < 1e-10
 
 
+def _atoms_from(z):
+    from ase import Atoms
+    return Atoms(numbers=np.asarray(z["test_Z"]),
+                 positions=np.asarray(z["test_pos"]).T,
+                 cell=np.asarray(z["test_cell"]).T,
+                 pbc=np.asarray(z["test_pbc"]).astype(bool))
+
+
+def _blank_authoring(model, meta):
+    from ace_jax.construct.model import Authoring
+    return Authoring(model=model, meta=meta, nnll_spec=(), Rnl_spec=(),
+                     Ylm_spec=(), aa_sig=(), aspec=(), aa_specs=(), nnll=(),
+                     gamma=None)
+
+
+def _fixture_coupling():
+    """A `Coupling` reconstructed from fixtures/si_ace_model.npz.  The
+    fixture's A2B columns are in aa_spec (evaluation) order, so each column's
+    (n, l, m) signature comes from the fixture's own aspec gathers."""
+    from ace_jax.construct.coupling import Coupling
+    from ace_jax.construct.spec import build_spec
+    z = _fixture("si_ace_model.npz")
+    meta = json.loads(bytes(z["meta_json"]).decode())
+    _, Rnl, Ylm = build_spec(1, 3, 10, 1.5)
+    ar, ay = z["aspec_r"], z["aspec_y"]
+    aa = [np.asarray(z[f"aa_spec_{k+1}"]) for k in range(len(meta["aa_lens"]))]
+    sig = tuple(tuple((Rnl[ar[i]][0], Rnl[ar[i]][1], Ylm[ay[i]][1]) for i in row)
+                for g in aa for row in g)
+    return Coupling(A2B=np.asarray(z["A2B"], float), aa_sig=sig,
+                    aspec=tuple((int(r), int(y)) for r, y in zip(ar, ay)),
+                    aa_specs=tuple(aa),
+                    nnll_spec=tuple(tuple(tuple(b) for b in bb) for bb in meta["nnll"]))
+
+
+def _primed_cache(tmp_path):
+    """A coupling cache dir holding the fixture coupling under the key
+    build_model([14], 3, 10) asks for, so authoring never touches Julia."""
+    from ace_jax.construct import coupling as C
+    from ace_jax.construct.spec import build_spec
+    mb, Rnl, Ylm = build_spec(1, 3, 10, 1.5)
+    key = C.coupling_key(mb, Rnl, Ylm)
+    C._write_entry(C._entry_path(tmp_path, key), _fixture_coupling(), key, mb, Rnl, Ylm)
+    return str(tmp_path)
+
+
+def test_build_model_edge_a_kind_matmul(tmp_path, monkeypatch):
+    """edge_a_kind="matmul" needs the one-hot selectors the loader builds;
+    an authored matmul model must carry them and evaluate identically to the
+    gather form (WB is zero at authoring, so compare descriptors)."""
+    import jax
+    jax.config.update("jax_enable_x64", True)
+    from ace_jax.construct.model import build_model
+    from ace_jax.eval import ACECalculator
+    monkeypatch.setenv("ACEJAX_NO_JULIA", "1")
+    cache = _primed_cache(tmp_path)
+    g = build_model([14], 3, 10, coupling_cache_dir=cache)
+    m = build_model([14], 3, 10, coupling_cache_dir=cache, edge_a_kind="matmul")
+    assert g.model.a_sel_r is None and m.model.edge_a_kind == "matmul"
+    assert m.model.a_sel_r.shape == (g.meta["n_rnl"], g.meta["n_A"])
+    assert m.model.a_sel_y.shape == (g.meta["n_ylm"], g.meta["n_A"])
+    atoms = _atoms_from(_fixture("si_ace_model.npz"))
+    dg = ACECalculator(*g.eval_pair()).get_site_descriptors(atoms)
+    dm = ACECalculator(*m.eval_pair()).get_site_descriptors(atoms)
+    assert np.isfinite(dg).all() and np.abs(dg).max() > 0
+    assert np.abs(np.asarray(dg) - np.asarray(dm)).max() < 1e-12
+    with pytest.raises(ValueError):
+        build_model([14], 3, 10, coupling_cache_dir=cache, edge_a_kind="scatter")
+
+
+def test_save_npz_spline_factorised_roundtrip(tmp_path):
+    """A tree on the factorised-spline branch must save as the exporter's
+    factorised layout and reload to the same energies (a trivial d=1
+    factorisation of a spline fixture makes the reference exact)."""
+    import dataclasses
+    import jax
+    jax.config.update("jax_enable_x64", True)
+    import jax.numpy as jnp
+    from ace_jax.construct.export import save_npz
+    from ace_jax.eval import ACECalculator, load
+
+    path = os.path.join(FIX, "si_1429.npz")
+    model, meta, _ = load(path)
+    coefs = np.asarray(model.rnl_coefs)                       # (1, 1, ncoef, n_rnl)
+    n_rnl = coefs.shape[-1]
+    fac = dataclasses.replace(
+        model, radial_kind="spline_factorised",
+        rnl_coefs=jnp.zeros((1, 1, 1, 1), jnp.float64),
+        rnl_coefs_single=jnp.asarray(coefs[0, 0]),
+        rnl_embedding=jnp.ones((1, 1), jnp.float64),
+        rnl_emb_nidx=jnp.arange(n_rnl, dtype=jnp.int32),
+        rnl_emb_kidx=jnp.zeros(n_rnl, jnp.int32))
+    out = str(tmp_path / "fac.npz")
+    save_npz(out, _blank_authoring(fac, meta))
+    m2, meta2, z2 = load(out)
+    assert m2.radial_kind == "spline_factorised" and meta2["radial_kind"] == "spline_factorised"
+    assert np.array_equal(np.asarray(m2.rnl_coefs_single), coefs[0, 0])
+    assert np.array_equal(np.asarray(m2.rnl_emb_nidx), np.arange(n_rnl))
+    assert meta2["rnl_spline"] == meta["rnl_spline"]
+    atoms = _atoms_from(_fixture("si_1429.npz"))
+    atoms.calc = ACECalculator(path)
+    E, F = atoms.get_potential_energy(), atoms.get_forces()
+    atoms.calc = ACECalculator(out)
+    assert abs(atoms.get_potential_energy() - E) < 1e-10
+    assert np.abs(atoms.get_forces() - F).max() < 1e-10
+
+
 # ---------------------------------------------------------------------------
 #  bridge tests (authoring extra)
 # ---------------------------------------------------------------------------

@@ -7,7 +7,11 @@ reads (the same one `julia/export_model.jl` writes):
     aspec_r, aspec_y             0-based A-basis indices
     aa_spec_{1..K}               per-order A-index tuples, (n_v, order) int32
     elements, rcuts, pair_rcuts  informational structure
-    rnl_transform (NZ,NZ,7), rnl_envelope (NZ,NZ,5), rnl_Wnlq, polys_A/B/C
+    rnl_transform (NZ,NZ,7), rnl_envelope (NZ,NZ,5), and per radial_kind:
+        analytic            rnl_Wnlq, polys_A/B/C
+        spline              rnl_spline_coefs (NZ,NZ,ncoef,n_rnl)
+        spline_factorised   rnl_spline_coefs_single (ncoef,n1), rnl_embedding
+                            (NZ,d), rnl_emb_nidx/kidx (n_rnl,)
     pair_transform (NZ,NZ,7), pair_envelope (NZ,NZ,2), pair_Wnlq, pair_polys_*
     WB (n_B, NZ), Wpair (n_pair, NZ), E0 (NZ,)
     meta_json                    schema_version = 1
@@ -60,11 +64,23 @@ def save_npz(path, auth):
         out["polys_A"] = np.asarray(model.polys_A, np.float64)
         out["polys_B"] = np.asarray(model.polys_B, np.float64)
         out["polys_C"] = np.asarray(model.polys_C, np.float64)
-    else:
+    elif meta["radial_kind"] == "spline_factorised":
+        # the exporter's separable layout; the loader keys the branch on the
+        # presence of rnl_spline_coefs_single
+        out["rnl_spline_coefs_single"] = np.asarray(model.rnl_coefs_single, np.float64)
+        out["rnl_embedding"] = np.asarray(model.rnl_embedding, np.float64)
+        out["rnl_emb_nidx"] = np.asarray(model.rnl_emb_nidx, np.int32)
+        out["rnl_emb_kidx"] = np.asarray(model.rnl_emb_kidx, np.int32)
+        meta["rnl_spline"] = {"x0": model.rnl_grid[0], "h": model.rnl_grid[1],
+                              "n": model.rnl_grid[2],
+                              "ncoef": int(model.rnl_coefs_single.shape[0])}
+    elif meta["radial_kind"] == "spline":
         out["rnl_spline_coefs"] = np.asarray(model.rnl_coefs, np.float64)
         meta["rnl_spline"] = {"x0": model.rnl_grid[0], "h": model.rnl_grid[1],
                               "n": model.rnl_grid[2],
                               "ncoef": model.rnl_coefs.shape[2]}
+    else:
+        raise NotImplementedError(f"save_npz: radial_kind {meta['radial_kind']!r}")
     if meta["pair_radial_kind"] == "analytic":
         out["pair_Wnlq"] = np.asarray(model.pair_Wnlq, np.float64)
         out["pair_polys_A"] = np.asarray(model.pair_polys_A, np.float64)
