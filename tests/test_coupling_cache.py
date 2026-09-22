@@ -145,3 +145,51 @@ def test_juliapkg_hash_finds_repo_pin(monkeypatch):
         assert C.juliapkg_hash() == expected
     h = C.juliapkg_hash()
     assert h is None or len(h) == 64
+
+
+def test_corrupt_entry_recomputes(tmp_path, shim):
+    """A torn entry (half-written zip) must read as a miss, not crash every
+    later authoring of that shape."""
+    C.couple_cached(_MB, _RNL, _YLM, cache_dir=str(tmp_path))
+    p = C._entry_path(tmp_path, C.coupling_key(_MB, _RNL, _YLM))
+    data = p.read_bytes()
+    p.write_bytes(data[: len(data) // 2])
+    cpl = C.couple_cached(_MB, _RNL, _YLM, cache_dir=str(tmp_path))
+    assert len(shim) == 2 and cpl.A2B.shape[0] == len(_MB)
+
+
+def test_schema_drift_entry_recomputes(tmp_path, shim):
+    """An entry whose meta lacks a field this reader needs is a miss."""
+    C.couple_cached(_MB, _RNL, _YLM, cache_dir=str(tmp_path))
+    p = C._entry_path(tmp_path, C.coupling_key(_MB, _RNL, _YLM))
+    z = dict(np.load(p))
+    meta = json.loads(bytes(z["meta_json"]).decode())
+    del meta["aa_sig"]
+    z["meta_json"] = np.frombuffer(json.dumps(meta).encode(), np.uint8)
+    np.savez(p, **z)
+    cpl = C.couple_cached(_MB, _RNL, _YLM, cache_dir=str(tmp_path))
+    assert len(shim) == 2 and cpl.A2B.shape[0] == len(_MB)
+
+
+def test_concurrent_writes_same_key(tmp_path, shim, monkeypatch):
+    """Two writers racing on one key must both publish a valid entry.  The
+    race is made deterministic: while the first writer is inside np.savez, a
+    second full write of the same entry runs to completion."""
+    key = C.coupling_key(_MB, _RNL, _YLM)
+    p = C._entry_path(tmp_path, key)
+    cpl = _fake_coupling(_MB, _RNL, _YLM)
+    real_savez = np.savez
+    depth = []
+
+    def racing_savez(fh, **kw):
+        if not depth:
+            depth.append(1)
+            C._write_entry(p, cpl, key, _MB, _RNL, _YLM)     # the other writer
+        real_savez(fh, **kw)
+
+    monkeypatch.setattr(np, "savez", racing_savez)
+    C._write_entry(p, cpl, key, _MB, _RNL, _YLM)              # must not raise
+    monkeypatch.setattr(np, "savez", real_savez)
+    got, ok = C._read_entry(p, key)
+    assert ok and np.array_equal(got.A2B, cpl.A2B)
+    assert not list(tmp_path.glob("*.tmp*"))                  # no leftovers

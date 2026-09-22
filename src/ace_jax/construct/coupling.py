@@ -20,6 +20,8 @@ import hashlib
 import json
 import os
 import pathlib
+import sys
+import tempfile
 
 from typing import NamedTuple
 
@@ -74,8 +76,7 @@ def subspace_residual(A, B):
 
 
 def _jl():
-    import os as _os
-    if _os.environ.get("ACEJAX_NO_JULIA"):
+    if os.environ.get("ACEJAX_NO_JULIA"):
         raise RuntimeError("ACEJAX_NO_JULIA is set but Julia was invoked -- "
                            "the coupling cache missed where it should have hit")
     try:
@@ -135,7 +136,7 @@ def couple(mb_spec, Rnl_spec, Ylm_spec):
         tuple((int(n), int(l), int(m)) for n, l, m in col_sig(jl.getindex(aaspec, k)))
         for k in range(1, int(jl.length(aaspec)) + 1))
     aspec_arr = np.asarray(tomat(tensor.abasis.spec), np.int64) - 1        # (n_A, 2): (Rnl_idx, Ylm_idx)
-    aspec = [(int(r), int(y)) for r, y in aspec_arr]
+    aspec = tuple((int(r), int(y)) for r, y in aspec_arr)
     # AA basis in EVALUATION order, split by correlation order (aa_lens), and
     # the per-row body dump.  Both are exporter-artifact sources.
     aa_specs = tuple(
@@ -188,7 +189,7 @@ def juliapkg_hash():
     juliapkg uses, but readable WITHOUT importing juliacall (that is the
     point: a cache hit must not launch Julia).  Stored in entries so a pin
     change invalidates them.  None if no file is found."""
-    for p in os.sys.path:
+    for p in sys.path:
         if not p:
             continue
         cand = pathlib.Path(p) / "juliapkg.json"
@@ -221,11 +222,13 @@ def _write_entry(path, cpl, key, mb_spec, Rnl_spec, Ylm_spec):
         }).encode(), np.uint8),
     }
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".npz.tmp")
+    # unique tmp per writer: two processes missing the cache on the same key
+    # at once must not truncate each other's half-written file
+    fd, tmp = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=path.parent)
     try:
-        # open the handle explicitly: np.savez(path) appends '.npz' to names
-        # that do not already end in it, which would leave tmp unreplaced
-        with open(tmp, "wb") as fh:
+        # write through the fd: np.savez(path) appends '.npz' to names that do
+        # not already end in it, which would leave tmp unreplaced
+        with os.fdopen(fd, "wb") as fh:
             np.savez(fh, **entry)
         os.replace(tmp, path)
     finally:
@@ -242,22 +245,26 @@ def _read_entry(path, key):
     try:
         z = np.load(path)
         meta = json.loads(bytes(z["meta_json"]).decode())
-    except (OSError, ValueError, KeyError):
+        ok = (meta.get("schema") == _CACHE_SCHEMA and meta.get("key") == key
+              and meta.get("juliapkg_hash") == juliapkg_hash())
+        if not ok:
+            return None, False
+        n_orders = sum(1 for f in z.files if f.startswith("aa_spec_"))
+        cpl = Coupling(
+            A2B=np.asarray(z["A2B"], np.float64),
+            aa_sig=tuple(tuple(tuple(int(v) for v in t) for t in sig)
+                         for sig in meta["aa_sig"]),
+            aspec=tuple((int(r), int(y)) for r, y in meta["aspec"]),
+            aa_specs=tuple(np.asarray(z[f"aa_spec_{k+1}"], np.int64)
+                           for k in range(n_orders)),
+            nnll_spec=tuple(tuple((int(b[0]), int(b[1])) for b in bb)
+                            for bb in meta["nnll_spec"]),
+        )
+    except Exception:
+        # torn zip (BadZipFile), schema drift (KeyError/TypeError/ValueError),
+        # unreadable file (OSError): all are misses, never errors
         return None, False
-    n_orders = sum(1 for f in z.files if f.startswith("aa_spec_"))
-    ok = (meta.get("schema") == _CACHE_SCHEMA and meta.get("key") == key
-          and meta.get("juliapkg_hash") == juliapkg_hash())
-    cpl = Coupling(
-        A2B=np.asarray(z["A2B"], np.float64),
-        aa_sig=tuple(tuple(tuple(int(v) for v in t) for t in sig)
-                     for sig in meta["aa_sig"]),
-        aspec=tuple((int(r), int(y)) for r, y in meta["aspec"]),
-        aa_specs=tuple(np.asarray(z[f"aa_spec_{k+1}"], np.int64)
-                       for k in range(n_orders)),
-        nnll_spec=tuple(tuple((int(b[0]), int(b[1])) for b in bb)
-                        for bb in meta["nnll_spec"]),
-    )
-    return cpl, ok
+    return cpl, True
 
 
 def couple_cached(mb_spec, Rnl_spec, Ylm_spec, cache_dir=None):
