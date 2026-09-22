@@ -80,6 +80,49 @@ def test_envelope_formulas():
     assert ep[1] > 0.0 and np.argmax(ep) < len(r) // 2
 
 
+def test_eval_pair_in_memory_handoff():
+    """A (model, meta) pair evaluates directly -- no npz round-trip.
+
+    eval_pair's derived meta must equal the loader's for a fixture tree, and
+    the pair path must agree with the path-based calculator (which test_efv
+    separately pins against Julia).  Authoring is exercised via a directly
+    instantiated NamedTuple, so this needs no Julia."""
+    import jax
+    jax.config.update("jax_enable_x64", True)
+    from ase import Atoms
+    from ace_jax.eval import ACECalculator, load
+    from ace_jax.construct.model import Authoring
+
+    path = os.path.join(FIX, "si_ace_model.npz")
+    z = _fixture("si_ace_model.npz")
+    model, meta, _ = load(path)
+    auth = Authoring(model=model, meta=meta, nnll_spec=(), Rnl_spec=(),
+                     Ylm_spec=(), aa_sig=(), aspec=(), aa_specs=(), nnll=(),
+                     gamma=None)
+    _, meta2 = auth.eval_pair()
+    for k in ("radial_kind", "pair_radial_kind", "pair_envelope_kind",
+              "ybasis_kind", "elements", "n_B", "n_AA", "lmax", "rcut"):
+        assert meta2[k] == meta[k], k
+    # meta was deep-copied: mutating the copy must not leak into auth.meta
+    meta2["rcut"] = -1.0
+    assert auth.meta["rcut"] == meta["rcut"]
+
+    atoms = Atoms(numbers=np.asarray(z["test_Z"]),
+                  positions=np.asarray(z["test_pos"]).T,
+                  cell=np.asarray(z["test_cell"]).T,
+                  pbc=np.asarray(z["test_pbc"]).astype(bool))
+    atoms.calc = ACECalculator(*auth.eval_pair())
+    E2, F2, S2 = (atoms.get_potential_energy(), atoms.get_forces(),
+                  atoms.get_stress(voigt=False))
+    d2 = atoms.calc.get_site_descriptors(atoms)
+    atoms.calc = ACECalculator(path)
+    assert abs(E2 - atoms.get_potential_energy()) < 1e-12
+    assert np.abs(F2 - atoms.get_forces()).max() < 1e-12
+    assert np.abs(S2 - atoms.get_stress(voigt=False)).max() < 1e-12
+    assert np.abs(d2 - atoms.calc.get_site_descriptors(atoms)).max() < 1e-12
+    assert abs(E2 - float(z["test_E"][0])) < 1e-10
+
+
 # ---------------------------------------------------------------------------
 #  bridge tests (authoring extra)
 # ---------------------------------------------------------------------------
@@ -140,11 +183,16 @@ m2 = dataclasses.replace(m,
     a2b_sparse=True, radial_kind="analytic", pair_radial_kind="spline",
     pair_envelope_kind="poly1sr",
     WB=jnp.asarray(zf["WB"]), Wpair=jnp.asarray(zf["Wpair"]),
-    E0=jnp.asarray(zf["E0"]))
+    E0=jnp.asarray(zf["E0"]), folded=False)
+# WB was replaced on a folded model: ctilde must be rebuilt (the stale-ctilde
+# trap fold_readout's docstring warns about -- the round-trip below hid it,
+# because load() rebuilds with folded=False, but the in-memory hand-off
+# evaluates the tree as-is)
 m2 = fold_readout(m2)
 meta2 = dict(meta)
 meta2["nnll"] = [[list(b) for b in bb] for bb in cpl.nnll_spec]
-save_npz("/tmp/opencode_auth_roundtrip.npz", auth._replace(model=m2, meta=meta2))
+auth2 = auth._replace(model=m2, meta=meta2)
+save_npz("/tmp/opencode_auth_roundtrip.npz", auth2)
 model, rmeta, rz = eio.load("/tmp/opencode_auth_roundtrip.npz")
 
 res["arrays"] = {}
@@ -169,12 +217,22 @@ E = float(atoms.get_potential_energy())
 F = atoms.get_forces()
 S = atoms.get_stress(voigt=False)
 vol = atoms.get_volume()
+d = np.asarray(atoms.calc.get_site_descriptors(atoms))
+Vj = np.asarray(zf["test_V"], float)
 res["efv"] = {
     "E": abs(E - float(zf["test_E"][0])),
     "F": float(np.abs(np.asarray(F) - zf["test_F"].T).max()),
     # ASE stress is -virial/volume; the fixture stores the Julia virial
-    "S": float(np.abs(np.asarray(S)
-                      + np.asarray(zf["test_V"], float) / vol).max()),
+    "S": float(np.abs(np.asarray(S) + Vj / vol).max()),
+    "desc": float(np.abs(d - zf["test_desc"].T).max()),
+}
+
+# same tree, in memory (no file): eval_pair hand-off must match the round-trip
+atoms.calc = ACECalculator(*auth2.eval_pair())
+res["inmem"] = {
+    "E": abs(float(atoms.get_potential_energy()) - float(zf["test_E"][0])),
+    "F": float(np.abs(np.asarray(atoms.get_forces()) - zf["test_F"].T).max()),
+    "S": float(np.abs(np.asarray(atoms.get_stress(voigt=False)) + Vj / vol).max()),
     "desc": float(np.abs(np.asarray(atoms.calc.get_site_descriptors(atoms))
                          - zf["test_desc"].T).max()),
 }
@@ -208,5 +266,6 @@ def test_bridge_wellformed_subprocess():
     assert r["meta"]["n_B"] == 110 and r["meta"]["n_AA"] == 230
     for name, err in r["arrays"].items():
         assert err < 1e-10, f"{name} round-trip error {err}"
-    for name, err in r["efv"].items():
-        assert err < 1e-8, f"{name} parity error {err}"
+    for stage in ("efv", "inmem"):
+        for name, err in r[stage].items():
+            assert err < 1e-8, f"{stage}/{name} parity error {err}"

@@ -12,9 +12,10 @@ reads (the same one `julia/export_model.jl` writes):
     WB (n_B, NZ), Wpair (n_pair, NZ), E0 (NZ,)
     meta_json                    schema_version = 1
 
-This file is deliberately throwaway: once Python-authored models are the
-source of truth, the export/import round-trip disappears and with it this
-module.  The round-trip test (`tests/test_python_authoring.py::test_bridge_*`)
+This file is the compatibility path only: Python callers evaluate the
+in-memory tree directly (`Authoring.eval_pair`, no npz round-trip); the file
+serves ACEfit-fitted interchange and shell hand-off (`ace-jax construct
+--out`).  The round-trip test (`tests/test_python_authoring.py::test_bridge_*`)
 pins the writer against the committed Julia fixture, so any schema drift on
 either side is caught.
 """
@@ -30,16 +31,12 @@ def save_npz(path, auth):
     The meta written here is derived from the model being saved, not from the
     authoring defaults: any tree patched onto a different branch (e.g. the
     fixture-injection round trip) must save as what it now is, or the loader
-    silently routes branch arrays to placeholders.
+    silently routes branch arrays to placeholders.  The derivation and the
+    structural checks live in `Authoring.eval_pair` -- the file path and the
+    in-memory hand-off share one source of truth.
     """
-    model, meta = auth.model, auth.meta
-    meta = json.loads(json.dumps(meta))            # deep copy; don't mutate auth.meta
+    model, meta = auth.eval_pair()
     NZ = len(meta["elements"])
-    meta["radial_kind"] = model.radial_kind
-    meta["pair_radial_kind"] = model.pair_radial_kind
-    meta["pair_envelope_kind"] = model.pair_envelope_kind
-    meta["ybasis_kind"] = ("real_solidharmonics" if model.ysolid
-                           else "real_sphericalharmonics")
     out = {
         "A2B_rows": np.asarray(model.a2b_rows, np.int32),
         "A2B_cols": np.asarray(model.a2b_cols, np.int32),

@@ -37,6 +37,41 @@ class Authoring(NamedTuple):
     nnll: tuple                     # derived body lists (== ET dump)
     gamma: np.ndarray               # (len_basis,) algebraic smoothness prior
 
+    def eval_pair(self):
+        """(model, meta) ready for direct evaluation -- the in-memory hand-off.
+
+        The four branch-selector meta keys are derived from the tree being
+        handed over, exactly as `export.save_npz` does for the file path: the
+        loader-side consumers (`eval.io.load`, and anything that reads meta to
+        route branches) must never see authoring defaults that a patched tree
+        has outgrown -- JAX clamps out-of-range branch indices silently, so a
+        mismatch fails numerically, not loudly.  The meta is deep-copied; the
+        caller may mutate it freely.  Structural checks guard the derivable
+        keys (`_resolve` consumers read `rcut`/`elements`/`n_*` from meta).
+
+        `ACECalculator(*auth.eval_pair())` and `site_descriptors(auth.model,
+        ..., meta=meta)` evaluate the in-memory tree directly -- no npz
+        round-trip; `save_npz` remains for ACEfit-fitted interchange and
+        shell hand-off only."""
+        import json
+        model, meta = self.model, json.loads(json.dumps(self.meta))
+        meta["radial_kind"] = model.radial_kind
+        meta["pair_radial_kind"] = model.pair_radial_kind
+        meta["pair_envelope_kind"] = model.pair_envelope_kind
+        meta["ybasis_kind"] = ("real_solidharmonics" if model.ysolid
+                               else "real_sphericalharmonics")
+        checks = (
+            ("elements vs WB", len(meta["elements"]), model.WB.shape[1]),
+            ("n_B vs A2B", meta["n_B"], model.A2B.shape[0]),
+            ("n_AA vs A2B", meta["n_AA"], model.A2B.shape[1]),
+            ("aa_lens vs aa_specs", meta["aa_lens"], [int(g.shape[0]) for g in model.aa_specs]),
+            ("lmax", meta["lmax"], int(model.lmax)),
+        )
+        for what, m, t in checks:
+            if m != t:
+                raise ValueError(f"eval_pair: meta/tree mismatch in {what}: {m!r} vs {t!r}")
+        return model, meta
+
 
 def nnll_from_coupling(A2B, aa_sig, tol=1e-12):
     """Per-B-row body lists from the block-diagonal coupling: each row's first

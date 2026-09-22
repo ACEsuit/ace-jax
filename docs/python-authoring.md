@@ -95,6 +95,21 @@ Two conventions to know when reading fixtures:
   (`calc/point.py`) stores ASE-convention stress; compare with
   `S + V/vol ≈ 0`.
 
+## In-memory hand-off (Tier 2, point 1)
+
+`auth.eval_pair()` returns `(model, meta)` with the branch-selector keys
+derived from the tree (the same derivation `save_npz` performs — one source
+of truth) plus structural meta/tree checks. The pair evaluates directly:
+`ACECalculator(*auth.eval_pair())`, `site_descriptors(auth.model, ...,
+meta=meta)`, `model.energy_forces_virial(...)` — no npz round-trip.
+`save_npz` is the compatibility path (ACEfit-fitted interchange, shell
+hand-off), not a required step.
+
+Trap this pins: replacing `WB` on a **folded** model leaves a stale `ctilde`
+(the bridge test hit exactly this — the round-trip masked it because
+`load()` rebuilds with `folded=False`, but the in-memory tree is evaluated
+as-is). Re-fold after any `dataclasses.replace` that touches `WB`.
+
 ## Known traps
 
 - **juliapkg scans `sys.path` for `juliapkg.json`.** When running a script
@@ -114,8 +129,12 @@ Two conventions to know when reading fixtures:
 
 ## Roadmap after Tier 1
 
-Tier 1 keeps `save_npz` as a *disposable bridge* (format-compatible with the
-Julia export, so ACEfit-fitted files stay loadable). Tier 2 would let Python
-callers hold the in-memory `ACEModel` directly — no npz round-trip — and the
-`authoring` extra's Julia dependency would shrink to coupling-cache hits only
-(the table is cached per shape, so refits are already Julia-free).
+- ~~Tier 2 point 1 — in-memory hand-off~~: done (`Authoring.eval_pair`).
+- ~~Tier 2 point 2 — coupling cache~~: done (`couple_cached`, see
+  [tier2-plan.md](tier2-plan.md)) — authoring an existing shape runs
+  Julia-free from a populated cache dir.
+- **Endgame — pure-JAX coupling**: reimplement ET's `SparseSymmProd`
+  symmetrisation in JAX, dropping the `authoring` extra's juliacall
+  dependency entirely. The hard part: degenerate nnll blocks are only unique
+  up to a row-space rotation, so coefficient interchange needs the
+  subspace-matching discipline the parity tests already use.
