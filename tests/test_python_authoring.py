@@ -48,6 +48,83 @@ def test_legendre_recurrence():
         assert np.allclose(Q[:, k], c * L.legval(x, [0] * k + [1]), atol=1e-12)
 
 
+def test_legendre_3term_matches_fixture():
+    """The authored recurrence must be the exporter's, coefficient for
+    coefficient: Julia's legendre_basis folds the P0 normalisation into A[2]
+    (P1 = A[2] x + B[2], no P0 factor), so A[1] here is sqrt(3/2), not
+    sqrt(3)."""
+    from ace_jax.construct.radial_init import legendre_3term
+    z = _fixture("si_ace_model.npz")
+    A, B, C = legendre_3term(len(z["polys_A"]))
+    assert np.allclose(A, z["polys_A"], atol=1e-12)
+    assert np.allclose(B, z["polys_B"], atol=1e-12)
+    assert np.allclose(C, z["polys_C"], atol=1e-12)
+
+
+def test_poly_eval_matches_eval_path():
+    """poly_eval (numpy, authoring side) and poly_recursion (JAX, eval side)
+    read the same (A, B, C) with the same convention, so the unit test above
+    pins what the eval path actually computes."""
+    import jax
+    jax.config.update("jax_enable_x64", True)
+    import jax.numpy as jnp
+    from ace_jax.construct.radial_init import legendre_3term, poly_eval
+    from ace_jax.eval.radial import poly_recursion
+    x = np.linspace(-1, 1, 41)
+    for n in (2, 3, 15):
+        A, B, C = legendre_3term(n)
+        Q = poly_eval(x, A, B, C)
+        Qj = np.asarray(poly_recursion(jnp.asarray(x), jnp.asarray(A),
+                                       jnp.asarray(B), jnp.asarray(C)))
+        assert Q.shape == (41, n)
+        assert np.allclose(Q, Qj, atol=1e-13)
+
+
+def test_resolve_elements_rejects_duplicates():
+    from ace_jax.construct.radial_init import resolve_elements
+    assert resolve_elements(["C", "Si", 32]) == [6, 14, 32]     # order kept
+    with pytest.raises(ValueError, match="duplicate"):
+        resolve_elements(["Si", 14])
+
+
+def test_per_pair_r0_default():
+    """ACEpotentials _default_rin0cuts: r0(zi, zj) = (bond_len(zi) +
+    bond_len(zj)) / 2 per species pair, not one global mean."""
+    from ace_jax.construct.radial_init import (agnesi_transform_params,
+                                               pair_radial_init,
+                                               tensor_radial_init)
+    Rnl = [(1, 0), (2, 0), (1, 1)]
+    t = tensor_radial_init([14, 6], Rnl, rcut=5.5)
+    r0 = t["rnl_transform"][..., 4]
+    assert np.allclose(r0, [[2.4, 1.9], [1.9, 1.4]])
+    # every slot is the full per-pair 7-tuple (ycut moves with r0)
+    for i, j in ((0, 0), (0, 1), (1, 1)):
+        ref = agnesi_transform_params(0.0, r0[i, j], 5.5, 2, 2)
+        assert np.allclose(t["rnl_transform"][i, j], ref, atol=1e-12)
+    pr = pair_radial_init([14, 6], 4, rcut=5.5)
+    assert np.allclose(pr["pair_transform"][..., 4], [[2.4, 1.9], [1.9, 1.4]])
+
+
+def test_r0_override_scalar_or_table():
+    from ace_jax.construct.radial_init import tensor_radial_init
+    Rnl = [(1, 0), (2, 0)]
+    t = tensor_radial_init([14, 6], Rnl, rcut=5.5, r0=2.0)
+    assert np.allclose(t["rnl_transform"][..., 4], 2.0)
+    tab = np.array([[2.5, 2.0], [2.0, 1.5]])
+    t = tensor_radial_init([14, 6], Rnl, rcut=5.5, r0=tab)
+    assert np.allclose(t["rnl_transform"][..., 4], tab)
+    with pytest.raises(ValueError):
+        tensor_radial_init([14, 6], Rnl, rcut=5.5, r0=np.ones((3, 3)))
+
+
+def test_untabulated_bond_length_raises():
+    """Julia errors per element (`bond_len(z)`); a silent average over the
+    known species would give a wrong transform for the unknown one."""
+    from ace_jax.construct.radial_init import tensor_radial_init
+    with pytest.raises(ValueError, match="bond length"):
+        tensor_radial_init([14, 2], [(1, 0)], rcut=5.5)
+
+
 def test_agnesi_params_match_fixture():
     from ace_jax.construct.radial_init import (agnesi_a, agnesi_transform_params,
                                                agnesi_normalized)

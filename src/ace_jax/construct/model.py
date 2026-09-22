@@ -95,9 +95,11 @@ def build_model(elements, order, totaldegree, *, wL=1.5, rcut=5.5, r0=None,
                 coupling_cache=True, coupling_cache_dir=None):
     """Author a frozen `ace_model`-family model in memory.
 
-    elements: atomic numbers or symbols; order: correlation order (body
-    order - 1); totaldegree: TotalDegree(NZ, 1/wL) level bound.  Radial
-    coefficients are frozen at the seeded initial values (no fitting here).
+    elements: atomic numbers or symbols (order kept, no duplicates); order:
+    correlation order (body order - 1); totaldegree: TotalDegree(NZ, 1/wL)
+    level bound; r0: None for the per-pair bond-length default, a scalar or
+    an (NZ, NZ) table.  Radial coefficients are frozen at the seeded initial
+    values (no fitting here).
 
     `coupling_cache` routes the ET shim through `couple_cached` (default on):
     a known shape is served from the per-shape disk cache without launching
@@ -207,7 +209,7 @@ def build_model(elements, order, totaldegree, *, wL=1.5, rcut=5.5, r0=None,
         "nnll": [[list(b) for b in bb] for bb in cpl.nnll_spec],
         "authoring": {
             "wL": float(wL), "rcut": float(rcut),
-            "r0": float(tinit["rnl_transform"][0, 0, 4]),
+            "r0": tinit["rnl_transform"][:, :, 4].tolist(),      # (NZ, NZ) per pair
             "rin": float(rin), "radial_mode": radial_mode,
             "pair_mode": pair_mode, "seed": int(seed),
             "pair_maxn": int(pair_maxn), "with_gamma": bool(with_gamma),

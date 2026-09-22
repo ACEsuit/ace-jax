@@ -51,7 +51,10 @@ _SYMBOLS = (
 
 
 def resolve_elements(elements):
-    """Atomic numbers from ints or chemical symbols ("Si" / "si" / 14)."""
+    """Atomic numbers from ints or chemical symbols ("Si" / "si" / 14).
+
+    Order is preserved (it is the species index order, as ACEpotentials'
+    `_convert_zlist` keeps it); duplicates are an error."""
     zs = []
     for e in elements:
         if isinstance(e, (int, np.integer)):
@@ -65,20 +68,36 @@ def resolve_elements(elements):
             raise TypeError(f"element must be int or str, got {type(e)}")
         if not 1 <= z <= len(_SYMBOLS):
             raise ValueError(f"atomic number {z} out of range")
+        if z in zs:
+            raise ValueError(f"duplicate element {e!r} (Z={z}) in {list(elements)!r}")
         zs.append(z)
     if not zs:
         raise ValueError("elements must be non-empty")
     return zs
 
 
-def default_r0(zs):
-    """ACEpotentials `_default_r0`: mean tabulated bond length; errors when no
-    species has a tabulated length (pass `r0` explicitly then)."""
-    known = [BOND_LEN[z] for z in zs if z in BOND_LEN]
-    if not known:
-        raise ValueError(f"no element in Z={zs} has a tabulated bond length; "
-                         "pass `r0` explicitly")
-    return sum(known) / len(known)
+def bond_len(z):
+    """ACEpotentials `DefaultHypers.bond_len(z)`: the tabulated length, or an
+    error (Julia falls back to JuLIP's rnn table, which is not ported)."""
+    if z not in BOND_LEN:
+        raise ValueError(f"no tabulated bond length for Z={z}; pass `r0` explicitly")
+    return BOND_LEN[z]
+
+
+def r0_table(zs, r0=None):
+    """(NZ, NZ) per-pair r0.  Default is ACEpotentials `_default_rin0cuts`:
+    r0(zi, zj) = (bond_len(zi) + bond_len(zj)) / 2.  `r0` may be a scalar
+    (every pair) or an (NZ, NZ) table."""
+    NZ = len(zs)
+    if r0 is None:
+        bl = [bond_len(z) for z in zs]
+        return np.array([[(bl[i] + bl[j]) / 2 for j in range(NZ)] for i in range(NZ)])
+    r0 = np.asarray(r0, float)
+    if r0.ndim == 0:
+        return np.full((NZ, NZ), float(r0))
+    if r0.shape != (NZ, NZ):
+        raise ValueError(f"r0 must be a scalar or an ({NZ}, {NZ}) table, got shape {r0.shape}")
+    return r0.copy()
 
 
 # ---------------------------------------------------------------------------
@@ -121,28 +140,36 @@ def agnesi_normalized(r, tr):
 # ---------------------------------------------------------------------------
 
 def legendre_3term(n_polys):
-    """3-term recurrence arrays (A, B, C) for Q_k = sqrt((2k+1)/2) P_k:
-    Q_0 = A[0];  Q_k = (A[k] x + B[k]) Q_{k-1} + C[k] Q_{k-2}."""
+    """3-term recurrence arrays (A, B, C) for Q_k = sqrt((2k+1)/2) P_k in the
+    OrthPolyBasis1D3T convention (Polynomials4ML `orthpolybasis`, and
+    `eval/radial.py:poly_recursion`):
+
+        Q_0 = A[0];  Q_1 = A[1] x + B[1];  Q_k = (A[k] x + B[k]) Q_{k-1} + C[k] Q_{k-2}
+
+    Q_1 carries no Q_0 factor, so A[1] = sqrt(3/2) (the P0 normalisation is
+    folded in), matching the exporter's polys_A."""
     k = np.arange(n_polys, dtype=float)
-    A = np.empty(n_polys)
+    A = np.zeros(n_polys)
     B = np.zeros(n_polys)
-    C = np.empty(n_polys)
+    C = np.zeros(n_polys)
     A[0] = 1.0 / math.sqrt(2.0)
     if n_polys > 1:
         A[1:] = ((2 * k[1:] - 1) / k[1:]) * np.sqrt((2 * k[1:] + 1) / (2 * k[1:] - 1))
-        C[0] = 0.0
+        A[1] *= A[0]
         C[2:] = -((k[2:] - 1) / k[2:]) * np.sqrt((2 * k[2:] + 1) / (2 * k[2:] - 3))
-        C[1] = 0.0
     return A, B, C
 
 
 def poly_eval(x, A, B, C):
-    """Evaluate the recurrence at x (any shape) -> (..., n_polys)."""
+    """Evaluate the recurrence at x (any shape) -> (..., n_polys); same
+    convention as `poly_recursion` on the eval side."""
     x = np.asarray(x, float)
     n = len(A)
-    Q = np.empty(x.shape + (n,))
+    Q = np.zeros(x.shape + (n,))
     Q[..., 0] = A[0]
-    for k in range(1, n):
+    if n > 1:
+        Q[..., 1] = A[1] * x + B[1]
+    for k in range(2, n):
         Q[..., k] = (A[k] * x + B[k]) * Q[..., k - 1] + C[k] * Q[..., k - 2]
     return Q
 
@@ -217,24 +244,31 @@ def _init_Wnlq(spec_n, n_q, NZ, mode, seed):
 #  the two basis initialisers
 # ---------------------------------------------------------------------------
 
+def transform_table(elements, rcut, r0, rin, p, q):
+    """(NZ, NZ, 7) agnesi 7-tuples, one per species pair (per-pair r0; rin,
+    rcut, p, q shared)."""
+    r0t = r0_table(elements, r0)
+    NZ = len(elements)
+    return np.array([[agnesi_transform_params(rin, r0t[i, j], rcut, p, q)
+                      for j in range(NZ)] for i in range(NZ)])
+
+
 def tensor_radial_init(elements, Rnl_spec, *, rcut,
                        r0=None, rin=0.0, p=2, q=2, mode="glorot_normal", seed=0):
     """Coefficients for the many-body (tensor) radial basis.
 
     elements: atomic numbers; Rnl_spec: (n, l) list from `build_spec` (defines
-    n_rnl and the onehot convention).  Returns dict with rnl_transform
-    (NZ,NZ,7), rnl_envelope (NZ,NZ,5), rnl_Wnlq (NZ,NZ,n_rnl,n_q) and
-    polys_A/B/C (n_q,)."""
+    n_rnl and the onehot convention); r0: None (per-pair bond-length default),
+    a scalar or an (NZ, NZ) table.  Returns dict with rnl_transform (NZ,NZ,7),
+    rnl_envelope (NZ,NZ,5), rnl_Wnlq (NZ,NZ,n_rnl,n_q) and polys_A/B/C (n_q,)."""
     NZ = len(elements)
     n_rnl = len(Rnl_spec)
     actual_maxn = max(n for n, _ in Rnl_spec)
     n_q = math.ceil(actual_maxn * 1.5)
-    r0 = default_r0(elements) if r0 is None else float(r0)
-    tr = agnesi_transform_params(rin, r0, rcut, p, q)
     env = envelope2sx_params(-1.0, 1.0, 2, 2)
     A, B, C = legendre_3term(n_q)
     return {
-        "rnl_transform": np.tile(np.array(tr), (NZ, NZ, 1)),
+        "rnl_transform": transform_table(elements, rcut, r0, rin, p, q),
         "rnl_envelope": np.tile(np.array(env), (NZ, NZ, 1)),
         "rnl_Wnlq": _init_Wnlq([n for n, _ in Rnl_spec], n_q, NZ, mode, seed),
         "polys_A": A, "polys_B": B, "polys_C": C,
@@ -246,12 +280,10 @@ def pair_radial_init(elements, pair_maxn, *, rcut, r0=None, rin=0.0,
     """Coefficients for the pair radial basis (analytic contract; Julia
     splinifies this before export).  n_pair = pair_maxn channels (n, 0)."""
     NZ = len(elements)
-    r0 = default_r0(elements) if r0 is None else float(r0)
-    tr = agnesi_transform_params(rin, r0, rcut, p, q)
     n_q = math.ceil(pair_maxn * 1.5)
     A, B, C = legendre_3term(n_q)
     return {
-        "pair_transform": np.tile(np.array(tr), (NZ, NZ, 1)),
+        "pair_transform": transform_table(elements, rcut, r0, rin, p, q),
         "pair_envelope": np.tile(np.array(envelope1sr_params(rcut, 1)), (NZ, NZ, 1)),
         "pair_Wnlq": _init_Wnlq(list(range(1, pair_maxn + 1)), n_q, NZ, mode, seed),
         "pair_polys_A": A, "pair_polys_B": B, "pair_polys_C": C,
