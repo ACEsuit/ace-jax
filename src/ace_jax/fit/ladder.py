@@ -69,6 +69,25 @@ def run_map(lml, prior, *, steps=500, lr=0.02, seed=0, init=None):
     return Hypers(*[float(med[f]) for f in FIELDS])
 
 
+def run_map_ps(ps, prob, ds, *, steps=500, lr=0.02, seed=0):
+    """Inner MAP over a ParamSet's LML blocks, returning the updated ParamSet.
+
+    The all-LML case holds the embedding FIXED (materialise it once), so this is
+    the existing flat path: build `make_lml` ONCE on the materialised problem
+    (its theta-independent linear Gram is cached inside), then let `run_map`
+    optimise `lml(theta_array)` over the flat LML vector -- which is exactly
+    `ps.lml_vector()` (Task-2 `from_hypers` stores the 'hypers' block as
+    `to_array(hypers)`).  A materialised embed is threaded through the kernel via
+    `ind.embed`, mirroring `make_lml_embed` in objective.py."""
+    from .objective import make_lml
+    h, embed = ps.materialise()
+    prob_m = prob if embed is None else prob._replace(ind=prob.ind._replace(embed=embed))
+    lml = make_lml(prob_m, ds)
+    x_star = run_map(lml, ps.block("hypers").prior, steps=steps, lr=lr, seed=seed,
+                     init=ps.lml_vector())
+    return ps.set_lml_vector(to_array(x_star))
+
+
 def run_laplace(lml, prior, *, n_draws=100, steps=500, lr=0.02, seed=0, init=None):
     model = numpyro_model(lml, prior)
     guide = AutoLaplaceApproximation(model, init_loc_fn=init_to_value(values=_init(prior, init)))

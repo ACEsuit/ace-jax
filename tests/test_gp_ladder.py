@@ -46,6 +46,18 @@ def test_nuts_recovers_target():
     assert max(summary["r_hat"].values()) < 1.05
 
 
+def test_run_map_ps_matches_flat_run_map(tiny_linear_problem):
+    from ace_jax.fit.paramset import from_hypers
+    from ace_jax.fit.ladder import run_map, run_map_ps
+    from ace_jax.fit.objective import make_lml
+    prob, ds = tiny_linear_problem
+    lml = make_lml(prob, ds)
+    flat = run_map(lml, prob.prior, steps=20, seed=0)          # existing path
+    ps = from_hypers(prob.prior.mu, prob.prior)                # all-LML default
+    ps_out = run_map_ps(ps, prob, ds, steps=20, seed=0)
+    assert jnp.allclose(ps_out.lml_vector(), to_array(flat), atol=1e-6)  # same optimum
+
+
 def test_laplace_fd_matches_exact_width():
     from ace_jax.fit.ladder import run_laplace_fd
     h = run_map(lml, PRIOR, steps=2000, lr=0.05)
