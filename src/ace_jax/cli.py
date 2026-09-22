@@ -216,6 +216,25 @@ def cmd_eval(a):
     return rows
 
 
+def cmd_construct(a):
+    """Author a frozen ACE model in memory (seeded radial init, zero readout,
+    algebraic smoothness prior) and package it as an npz bridge file.  Requires
+    the `authoring` extra; the saved file evaluates with the plain eval path."""
+    from .construct.model import build_model
+    from .construct.export import save_npz
+    els = [int(e) if e.strip().isdigit() else e.strip()
+           for e in a.elements.split(",")]
+    auth = build_model(els, a.order, a.max_degree, wL=a.wL, rcut=a.rcut,
+                       rin=a.rin, radial_mode=a.radial_mode, pair_mode=a.pair_mode,
+                       seed=a.seed, with_gamma=not a.no_gamma)
+    save_npz(a.out, auth)
+    m, meta = auth.model, auth.meta
+    print(f"authored {m.A2B.shape[0]} B functions ({meta['n_AA']} AA), "
+          f"{meta['n_pair']} pair, {meta['len_basis']} basis entries, "
+          f"lmax {meta['lmax']}, rcut {meta['rcut']} -> {a.out}")
+    return auth
+
+
 def main(argv=None):
     top = argparse.ArgumentParser(prog="ace-jax", description="Fit and evaluate ACE models in JAX")
     sub = top.add_subparsers(dest="cmd", required=True)
@@ -225,8 +244,24 @@ def main(argv=None):
     ev.add_argument("--energy-key", default="energy"); ev.add_argument("--force-key", default="forces")
     ev.add_argument("--virial-key", default="virial"); ev.add_argument("--forces", action="store_true")
     ev.add_argument("--out", default=None, help="CSV of per-config predictions (default: print head)")
+    con = sub.add_parser("construct", help="author a frozen ACE model (seeded radial init) and save it")
+    con.add_argument("--elements", required=True, help="comma-separated Z numbers or symbols")
+    con.add_argument("--order", type=int, required=True, help="correlation order")
+    con.add_argument("--max-degree", type=int, required=True, help="TotalDegree level bound")
+    con.add_argument("--wL", type=float, default=1.5)
+    con.add_argument("--rcut", type=float, default=5.5)
+    con.add_argument("--rin", type=float, default=0.0)
+    con.add_argument("--radial-mode", default="glorot_normal")
+    con.add_argument("--pair-mode", default="onehot")
+    con.add_argument("--seed", type=int, default=0)
+    con.add_argument("--no-gamma", action="store_true", help="skip the smoothness prior")
+    con.add_argument("--out", required=True)
     a = top.parse_args(argv)
-    return cmd_eval(a) if a.cmd == "eval" else run(a)
+    if a.cmd == "eval":
+        return cmd_eval(a)
+    if a.cmd == "construct":
+        return cmd_construct(a)
+    return run(a)
 
 
 if __name__ == "__main__":

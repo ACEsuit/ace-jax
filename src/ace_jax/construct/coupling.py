@@ -2,12 +2,41 @@
 
 `couple(mb_spec, Rnl_spec, Ylm_spec)` calls
 `EquivariantTensors.sparse_equivariant_tensor(L=0, ...)` and returns the coupling
-in ace-jax's export layout: dense A2B (n_B, n_AA), per-column (n,l,m) signatures
-(aa_sig, in A2B column order), and the A-basis spec (0-based).  Requires the
-optional `authoring` extra
-(juliacall + juliapkg, which auto-provisions Julia + EquivariantTensors); the
-import is lazy so the core package never depends on it.
+in ace-jax's export layout (see `Coupling`).  Requires the optional `authoring`
+extra (juliacall + juliapkg, which auto-provisions Julia + EquivariantTensors);
+the import is lazy so the core package never depends on it.
+
+juliacall note: dependency discovery scans `sys.path` for `juliapkg.json`, so a
+standalone script must put the repo root on `PYTHONPATH` (pytest and
+`python -m acegp.cli` do this implicitly).
 """
+
+from typing import NamedTuple
+
+
+class Coupling(NamedTuple):
+    """Everything the ET call returns, in ace-jax's export layout.
+
+    A2B: dense (n_B, n_AA) float64 coupling, one nonzero per column.
+    aa_sig: per-column (n, l, m) tuples in A2B column order -- the column
+        *identity*, from meta `𝔸spec` in raw row order (NOT aabasis.specs:
+        SparseSymmProd re-sorts its input, so the evaluation order is a
+        different permutation; see the build_spec/couple docstrings in earlier
+        findings).
+    aspec: 0-based (Rnl_idx, Ylm_idx) per A function, in abasis.spec order --
+        the index space A2B columns and aa_specs entries share.
+    aa_specs: per-order (n_v, order) 0-based A-column index arrays, aabasis
+        evaluation order (consumed as `A[:, g]` in eval).
+    nnll_spec: per-B-row body lists from ET's `get_nnll_spec` -- exactly the
+        exporter's meta["nnll"] source (per-row, not the input echo: the
+        tensor meta also carries "mb_spec", which is the ET *input* echo).
+    """
+
+    A2B: object
+    aa_sig: tuple
+    aspec: tuple
+    aa_specs: tuple
+    nnll_spec: tuple
 
 
 def subspace_residual(A, B):
@@ -53,8 +82,7 @@ def _jl():
 
 def couple(mb_spec, Rnl_spec, Ylm_spec):
     """mb_spec: list of list of (n, l); Rnl_spec: list of (n, l); Ylm_spec: list
-    of (l, m).  Returns (A2B dense (n_B, n_AA) float64, aa_sig tuple of per-column
-    sorted (n, l, m) signatures, aspec list of 0-based (Rnl_idx, Ylm_idx)).
+    of (l, m).  Returns a `Coupling`.
 
     `aa_sig[j]` is the identity of A2B COLUMN j.  It is taken from the tensor's
     meta `𝔸spec` (the readable spec returned *alongside* the symmetrisation
@@ -83,13 +111,27 @@ def couple(mb_spec, Rnl_spec, Ylm_spec):
                                           Ylm_spec=ylm, basis=jl.real)
     A2B = np.asarray(jl.Matrix(jl.getindex(tensor.A2Bmaps, 1)), float)    # (n_B, n_AA)
     tomat = jl.seval("s -> permutedims(reduce(hcat, collect.(s)))")       # Vector{NTuple} -> (n, k), 1-based
-    # Per-column (n,l,m) signatures in A2B COLUMN order, straight from meta 𝔸spec.
+    # Per-column (n,l,m) signatures in A2B COLUMN order, straight from meta 𝔸spec
+    # (raw row order -- sorting here would lose the original body channel order
+    # that get_nnll_spec dumps; consumers sort when comparing).
     aaspec = tensor.meta["𝔸spec"]
     col_sig = jl.seval(
         "row -> [(Int(b.n), Int(b.l), Int(b.m)) for b in row]")
     aa_sig = tuple(
-        tuple(sorted((int(n), int(l), int(m)) for n, l, m in col_sig(jl.getindex(aaspec, k))))
+        tuple((int(n), int(l), int(m)) for n, l, m in col_sig(jl.getindex(aaspec, k)))
         for k in range(1, int(jl.length(aaspec)) + 1))
     aspec_arr = np.asarray(tomat(tensor.abasis.spec), np.int64) - 1        # (n_A, 2): (Rnl_idx, Ylm_idx)
     aspec = [(int(r), int(y)) for r, y in aspec_arr]
-    return A2B, aa_sig, aspec
+    # AA basis in EVALUATION order, split by correlation order (aa_lens), and
+    # the per-row body dump.  Both are exporter-artifact sources.
+    aa_specs = tuple(
+        np.asarray(tomat(jl.getindex(tensor.aabasis.specs, k)), np.int64) - 1
+        for k in range(1, int(jl.length(tensor.aabasis.specs)) + 1))
+    nnll = jl.seval("t -> EquivariantTensors.get_nnll_spec(t, 1)")(tensor)
+    row_sig = jl.seval(
+        "row -> [(Int(b.n), Int(b.l)) for b in row]")
+    nnll_spec = tuple(
+        tuple((int(n), int(l)) for n, l in row_sig(jl.getindex(nnll, k)))
+        for k in range(1, int(jl.length(nnll)) + 1))
+    return Coupling(A2B=A2B, aa_sig=aa_sig, aspec=aspec,
+                    aa_specs=aa_specs, nnll_spec=nnll_spec)

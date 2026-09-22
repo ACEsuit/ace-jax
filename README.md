@@ -69,6 +69,19 @@ including the degenerate `nnll` blocks that need a subspace (row-space) match.
 See `docs/coupling-etshim-spec.md` for the design and `tests/test_coupling_parity.py`
 for usage.
 
+## Authoring a whole model in Python (Tier 1)
+
+`ace-jax construct --elements Si --order 3 --max-degree 10 --out si.npz`
+(`construct.model.build_model`) authors a complete frozen model in memory:
+coupling via the shim, seeded radial/pair init, zero readout, and the algebraic
+smoothness prior — then packages it in the export format, so the saved file
+evaluates with the plain eval path. `save_npz` derives the branch-selector meta
+keys from the tree being saved, which is what lets fitted coefficients be
+injected via `dataclasses.replace` and round-trip through the loader. The
+bridge test verifies the whole chain against the committed Si fixture: `A2B`
+bit-for-bit, then energies, forces, stress and descriptors to float noise.
+See `docs/python-authoring.md`.
+
 ## Julia parity (maintainers / CI only)
 
 The everyday test suite is pip-only (no Julia), run against committed npz
