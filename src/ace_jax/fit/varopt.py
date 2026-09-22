@@ -32,3 +32,23 @@ def select_by_holdout(candidates, score):
         if best is None or s < best[2]:
             best = (label, psi, s)
     return best[0], best[1]
+
+
+def varopt_ps(ps, objective_and_grad, *, steps=30, lr=0.05, val_score=None):
+    """Outer VarOpt over `ps.varopt_vector()` only -- LML/fixed blocks are untouched.
+    `objective_and_grad(x) -> (value, grad)` closes over the inner MAP (re-materialising
+    ps at each step is the caller's job, inside its own closure). No-op (returns ps
+    unchanged) when there are no VarOpt blocks or steps==0. With val_score, applies the
+    held-out gate between {"learned": x_star, "init": x0} (ties -> insertion order, so
+    "learned" wins a tie). Returns the updated ParamSet."""
+    x0 = ps.varopt_vector()
+    if x0.size == 0 or steps == 0:
+        return ps
+    obj = lambda x: objective_and_grad(x)[0]
+    grad = lambda x: objective_and_grad(x)[1]
+    x_star, _info = learn(x0, obj, grad, steps=steps, lr=lr)
+    if val_score is None:
+        return ps.set_varopt_vector(x_star)
+    cands = {"learned": x_star, "init": x0}
+    _label, x_sel = select_by_holdout(cands, val_score)
+    return ps.set_varopt_vector(x_sel)
