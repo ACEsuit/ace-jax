@@ -6,6 +6,7 @@ pin-hash change).  The end-to-end "a hit never launches Julia" guarantee is
 pinned by the ACEJAX_NO_JULIA subprocess test in test_python_authoring.py.
 """
 
+import hashlib
 import json
 import os
 import pathlib
@@ -133,11 +134,14 @@ def test_disabled_cache_calls_shim_directly(shim):
     assert len(shim) == 2                       # nothing persisted anywhere
 
 
-def test_juliapkg_hash_finds_repo_pin():
-    """The repo's own juliapkg.json is discoverable without juliacall (tests
-    run from the repo root, which is on sys.path)."""
+def test_juliapkg_hash_finds_repo_pin(monkeypatch):
+    """The repo's own juliapkg.json is discoverable and hashed without
+    juliacall.  (CI's pytest may not have the repo root on sys.path, so the
+    test prepends cwd itself; the end-to-end pin re-check on a real entry is
+    covered by the ACEJAX_NO_JULIA subprocess test.)"""
+    if os.path.exists("juliapkg.json"):
+        expected = hashlib.sha256(open("juliapkg.json", "rb").read()).hexdigest()
+        monkeypatch.syspath_prepend(os.getcwd())
+        assert C.juliapkg_hash() == expected
     h = C.juliapkg_hash()
     assert h is None or len(h) == 64
-    if getattr(sys, "base_prefix", None) and os.path.exists("juliapkg.json"):
-        import hashlib
-        assert h == hashlib.sha256(open("juliapkg.json", "rb").read()).hexdigest()
