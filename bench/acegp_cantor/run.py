@@ -19,6 +19,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from ace_jax.eval import highest_precision, load
+from ace_jax.construct.prior import gamma_from_model
 from ace_jax.fit.data import build_dataset, load_configs
 from ace_jax.fit.hypers import Hypers, default_prior, to_array
 from ace_jax.fit.inducing import GPConfig, descriptor_scale, select_inducing, site_features
@@ -150,8 +151,14 @@ with highest_precision():
     print(f"feature map: density={a.density} warp={a.warp} -> d={ind.XM.shape[1] if ind.XM.shape[0] else cfg.D}", flush=True)
     timings["inducing"] = time.time() - t
     print(f"M = {ind.XM.shape[0]}  len_basis = {cfg.len_basis}", flush=True)
+    if "gamma" in z.files:
+        gamma = jnp.asarray(z["gamma"])
+    else:
+        print(f"gamma missing from {a.model} -- rebuilt via construct.prior "
+              "(algebraic smoothness prior)", flush=True)
+        gamma = jnp.asarray(gamma_from_model(meta))
     prob = Problem(KernelSpec(a.kernel, not a.no_bump, cfg.D), model, ind, cfg,
-                   jnp.asarray(z["gamma"]), default_prior(a.r0))
+                   gamma, default_prior(a.r0))
     if a.learn_embedding and embed is not None:
         from ace_jax.fit.varopt_embed import learn_embedding, theta_map_at
         from ace_jax.fit.predict import predict_fixed

@@ -59,3 +59,31 @@ def smoothness_prior(nnll, *, p=P, wl=WL, wn=WN):
             s += (l / wl) ** p + (n / wn) ** p
         gamma[i] = s
     return gamma
+
+
+def model_nnll(meta):
+    """Per-column (n, l) bodies of an exported model, over the design
+    layout ``[tensor x NZ | pair x NZ]`` -- the species-blocked order of
+    ``fit/rows.py:_place`` (i.e. ``ACEModel.site_descriptors``).
+
+    The tensor part is the exporter's own spec dump ``meta["nnll"]``
+    (``get_nnll_spec(m.tensor)``, export_model.jl:331): n_B entries, shared
+    across species.  Pair columns are the singletons (n, 0), n = 1..n_pair --
+    confirmed against the oracle fixtures.  (Rebuilding the tensor spec from
+    aspec_r/aa_specs would additionally need the Rnl table's per-l block
+    layout, which the npz does not carry.)
+
+    meta: the parsed ``meta_json`` of an export.  numpy only -- no jax import,
+    usable by authoring scripts.
+    """
+    n_B, n_pair, NZ = int(meta["n_B"]), int(meta["n_pair"]), len(meta["elements"])
+    tensor = [[tuple(b) for b in bb] for bb in meta["nnll"]]
+    if len(tensor) != n_B:
+        raise ValueError(f"meta nnll has {len(tensor)} columns, n_B = {n_B}")
+    pair = [[(n, 0)] for n in range(1, n_pair + 1)]
+    return tensor * NZ + pair * NZ
+
+
+def gamma_from_model(meta):
+    """The model's prior diagonal, rebuilt from its exported structure."""
+    return smoothness_prior(model_nnll(meta))

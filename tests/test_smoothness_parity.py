@@ -13,13 +13,15 @@ partial sums stay below 2^53, so Julia and Python must agree exactly (see
 prior.py's docstring).  A tolerance here would hide a convention drift.
 """
 import collections
+import json
 
 import numpy as np
 import pytest
 
 from conftest import FIXTURE_DIR, REQUIRE
 
-from ace_jax.construct.prior import P, WL, WN, smoothness_prior, unflatten_nnll
+from ace_jax.construct.prior import (
+    P, WL, WN, gamma_from_model, model_nnll, smoothness_prior, unflatten_nnll)
 
 # Same shapes as fixtures/coupling_ref_*.npz (order 2/3 multiplicity-1 blocks,
 # order 4 SiGe wL=0.5 with degenerate nnll blocks).
@@ -111,3 +113,65 @@ def test_port_agrees_with_reference_per_column(name):
     ref = np.asarray(z["gamma"], np.float64)
     worst = int(np.argmax(np.abs(gamma - ref)))
     assert gamma[worst] == ref[worst]
+
+
+# ---------------------------------------------------------------------------
+# Production wire-in (Phase 4): rebuild gamma from an exported model npz when
+# the exporter did not store it.  The tensor bodies come from the exporter's
+# own spec dump meta["nnll"] (get_nnll_spec(m.tensor), n_B entries shared
+# across species) tiled per species, pair bodies are the (n, 0) singletons.
+# The ship fixtures (real exports) are the targets; si_fitted stores the
+# Julia-computed gamma, closing the loop end-to-end bit-for-bit.
+MODELS = [
+    "si_fitted.npz",     # NZ=1, spline radial, HAS exported gamma -> bit-for-bit ref
+    "si_ace_model.npz",  # NZ=1, analytic radial, dense A2B, no gamma
+    "si_1429.npz",       # NZ=1, big basis (n_B=1429, order 3), no gamma
+    "sige_nofit.npz",    # NZ=2, no gamma -- the actual refit fallback target
+]
+
+
+def _load_model(name):
+    p = FIXTURE_DIR / name
+    if not p.exists():
+        if REQUIRE:
+            raise FileNotFoundError(f"ACEJAX_REQUIRE_FIXTURES is set but {p} is missing")
+        pytest.skip(f"missing fixture {p.name}")
+    z = np.load(p)
+    return z, json.loads(bytes(z["meta_json"]).decode())
+
+
+@pytest.mark.parametrize("name", MODELS)
+def test_model_nnll_layout(name):
+    """Full-basis bodies = exporter's tensor dump tiled NZ times, then the
+    (n, 0) pair singletons tiled NZ times."""
+    z, meta = _load_model(name)
+    n_B, n_pair, NZ = int(meta["n_B"]), int(meta["n_pair"]), len(meta["elements"])
+    nnll = model_nnll(meta)
+    assert len(nnll) == NZ * (n_B + n_pair)
+    meta_tensor = [[tuple(b) for b in bb] for bb in meta["nnll"]]
+    assert nnll[:NZ * n_B] == meta_tensor * NZ
+    assert nnll[NZ * n_B:] == [[(n, 0)] for n in range(1, n_pair + 1)] * NZ
+
+
+@pytest.mark.parametrize("name", MODELS)
+def test_gamma_from_model_structure(name):
+    """Full-basis length, positivity, and the species-block replication
+    contract (NZ consecutive identical blocks per kind) on rebuilt gamma."""
+    z, meta = _load_model(name)
+    n_B, n_pair, NZ = int(meta["n_B"]), int(meta["n_pair"]), len(meta["elements"])
+    gamma = gamma_from_model(meta)
+    assert gamma.dtype == np.float64 and np.all(gamma > 0)
+    tensor = gamma[:NZ * n_B].reshape(NZ, n_B)
+    pair = gamma[NZ * n_B:].reshape(NZ, n_pair)
+    assert np.array_equal(tensor, np.repeat(tensor[:1], NZ, axis=0))
+    assert np.array_equal(pair, np.repeat(pair[:1], NZ, axis=0))
+    # pair columns are the (n, 0) singletons: (1/wn)^4 = 1, 16, 81, ...
+    assert np.array_equal(pair[0], np.arange(1, n_pair + 1, dtype=np.float64) ** 4)
+
+
+def test_gamma_from_model_matches_exported():
+    """On the one ship fixture that stores gamma, the rebuild must agree
+    bit-for-bit -- the fallback never silently overrides an exported value,
+    but it must reproduce it when the export lacks one."""
+    z, meta = _load_model("si_fitted.npz")
+    assert np.array_equal(gamma_from_model(meta), np.asarray(z["gamma"], np.float64))
