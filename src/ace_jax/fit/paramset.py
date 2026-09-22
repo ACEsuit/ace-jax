@@ -39,3 +39,21 @@ class ParamSet(NamedTuple):
     def set_lml_vector(self, x): return self._set("lml", x)
     def varopt_vector(self):     return self._vec("varopt")
     def set_varopt_vector(self, x): return self._set("varopt", x)
+
+def from_hypers(hypers, prior, embed=None, hypers_route="lml", embed_route="fixed"):
+    from .hypers import to_array
+    blocks = [ParamBlock("hypers", to_array(hypers), hypers_route, prior=prior)]
+    if embed is not None:
+        blocks.append(ParamBlock("embed", jnp.asarray(embed), embed_route))
+    return ParamSet(tuple(blocks))
+
+def materialise(self):
+    from .hypers import from_array
+    h = from_array(self.block("hypers").value)
+    embed = None
+    try:
+        embed = self.block("embed").value
+    except StopIteration:
+        pass
+    return h, embed
+ParamSet.materialise = materialise
