@@ -1,0 +1,43 @@
+name: prior-parity
+# Guards the algebraic smoothness prior port (construct/prior.py): regenerates
+# the committed oracle fixtures with ACEpotentials.jl and re-runs the parity
+# tests (bit-for-bit gamma). CI-only; not required for pip users.
+on:
+  push:
+    paths:
+      - "src/ace_jax/construct/prior.py"
+      - "tests/test_smoothness_parity.py"
+      - "julia/smoothness_reference.jl"
+      - "julia/Project.toml"
+  schedule:
+    - cron: "0 7 * * 1"   # weekly
+  workflow_dispatch:
+jobs:
+  parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: "1.11"
+      - name: Julia env (ACEpotentials + NPZ)
+        run: |
+          julia --project=julia -e '
+            using Pkg
+            Pkg.Registry.add("General")
+            Pkg.add(["ACEpotentials", "NPZ"])
+            Pkg.instantiate()'
+      - name: Regenerate oracle fixtures (nnll basis + prior diagonal)
+        run: |
+          ACE_ELEMENTS=Si,Ge    ACE_ORDER=2 ACE_TOTALDEGREE=6 \
+            julia --project=julia julia/smoothness_reference.jl fixtures/smoothness_ref_SiGe_o2d6.npz
+          ACE_ELEMENTS=Cr,Mn,Fe ACE_ORDER=2 ACE_TOTALDEGREE=5 \
+            julia --project=julia julia/smoothness_reference.jl fixtures/smoothness_ref_CrMnFe_o2d5.npz
+          ACE_ELEMENTS=Cr,Mn,Fe ACE_ORDER=3 ACE_TOTALDEGREE=6 \
+            julia --project=julia julia/smoothness_reference.jl fixtures/smoothness_ref_CrMnFe_o3d6.npz
+          ACE_ELEMENTS=Si,Ge    ACE_ORDER=4 ACE_TOTALDEGREE=5 ACE_WL=0.5 \
+            julia --project=julia julia/smoothness_reference.jl fixtures/smoothness_ref_SiGe_o4d5w05.npz
+      - name: Re-run prior parity tests against regenerated fixtures
+        env: { JAX_PLATFORM_NAME: cpu, JAX_ENABLE_X64: "1" }
+        run: uv run --extra gp pytest -q tests/test_smoothness_parity.py
