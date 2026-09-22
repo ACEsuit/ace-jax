@@ -27,6 +27,7 @@ from ace_jax.fit.ladder import run_laplace_fd, run_map, run_nuts, run_pathfinder
 from ace_jax.fit.metrics import summarise
 from ace_jax.fit.objective import Problem, make_log_density
 from ace_jax.fit.predict import predict_mixture
+from ace_jax.fit.weights import ConfigType, PerConfig, Quantity, Structural
 
 VOIGT = [(0, 0), (1, 1), (2, 2), (1, 2), (0, 2), (0, 1)]   # Voigt 6-vector index pairs
 
@@ -60,6 +61,14 @@ p.add_argument("--r0", type=float, default=2.5)
 p.add_argument("--init", default=None, help="theta_map.json to start from (e.g. the linear arm's)")
 p.add_argument("--energy-key", default="mace_energy"); p.add_argument("--force-key", default="mace_force")
 p.add_argument("--virial-key", default="mace_virial")
+p.add_argument("--weights", default=None,
+               help='JSON list of weight factors (ace_jax.fit.weights), composed in order and '
+                    'multiplied into w_E/w_F/w_V, e.g. \'[{"Structural":{}},'
+                    '{"ConfigType":{"table":{"defect":{"E":10,"F":10,"V":1}},"default":{"E":1,"F":1,"V":1}}},'
+                    '{"PerConfig":{"key":"w"}}]\'. Each entry is {"<FactorClass>": {<constructor kwargs>}}, '
+                    "kwargs matching the class's __init__ (table/key/default for ConfigType, key for "
+                    "PerConfig, w for Quantity, exp for Structural). Omitted = the classic default "
+                    "(structural 1/sqrt(n) on E,V, 1 on F; no per-config-type dict).")
 p.add_argument("--baseline", default=None, help="dimer_mean.npz: subtract the MH-1 pair mean mu_0 from labels, add back at prediction")
 p.add_argument("--base-npz", default=None, help="precomputed per-config (E,F,V) mu_0 offsets in data-file order (make_density_base.py); train+test only")
 p.add_argument("--ood", default=None, help="extra out-of-distribution test xyz (same keys); predicted from the fitted model")
@@ -77,6 +86,15 @@ T0 = time.time(); timings = {}
 
 model, meta, z = load(a.model)
 keys = dict(energy_key=a.energy_key, force_key=a.force_key, virial_key=a.virial_key)
+# --weights: JSON list of {"<FactorClass>": {kwargs}} -> ace_jax.fit.weights instances,
+# composed in order by load_configs (see --weights help). None = classic default weighting.
+_FACTOR_CLASSES = {"Structural": Structural, "Quantity": Quantity,
+                   "ConfigType": ConfigType, "PerConfig": PerConfig}
+if a.weights:
+    spec = json.loads(a.weights)
+    factors = [_FACTOR_CLASSES[name](**kwargs) for entry in spec for name, kwargs in entry.items()]
+    keys["factors"] = factors
+    print("weight factors:", [type(f).__name__ for f in factors], flush=True)
 configs = load_configs(a.data, **keys)
 rng = np.random.default_rng(a.seed); perm = rng.permutation(len(configs))
 ts = a.ntrain if a.test_start is None else a.test_start

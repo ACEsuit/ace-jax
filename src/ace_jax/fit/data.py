@@ -11,6 +11,7 @@ import numpy as np
 import jax.numpy as jnp
 
 from ..eval import dense_graph, species_indices, sparse_graph
+from .weights import ConfigType, Structural, compose
 
 VOIGT = ((0, 0), (1, 1), (2, 2), (2, 1), (2, 0), (1, 0))
 
@@ -42,7 +43,17 @@ def _get(d, key):
 
 
 def load_configs(path, energy_key="energy", force_key="forces", virial_key="virial",
-                 weights=None, weight_key="config_type"):
+                 weights=None, weight_key="config_type", factors=None):
+    """`factors`: an optional list of `weights.WeightFactor`s (see
+    `ace_jax.fit.weights`), composed via `compose()` into a single
+    fn(meta, quantity) -> float that produces w_E/w_F/w_V.  `factors=None`
+    (the default) reconstructs the CLASSIC weighting -- structural 1/sqrt(n)
+    on E,V (1 on F), times the resolved per-config-type {E,F,V} dict from
+    `weights`/`weight_key` -- as `[Structural(), ConfigType(...)]`, so every
+    existing caller (none of which pass `factors`) gets bit-identical
+    w_E/w_F/w_V to before this was added.  `weights`/`weight_key` ALSO still
+    drive `type_idx` (Task 6's per-type sigma routing) independently of
+    `factors` -- that wiring is untouched."""
     from ase.io import read
     weights = weights or {"default": {"E": 1.0, "F": 1.0, "V": 1.0}}
     if "default" not in weights:
@@ -51,23 +62,27 @@ def load_configs(path, energy_key="energy", force_key="forces", virial_key="viri
     # order) is 1, 2, ...  A config whose config_type matches a named key takes
     # that index, else the default 0.  A single default type -> every config 0.
     type_index = {name: i + 1 for i, name in enumerate(k for k in weights if k != "default")}
+    if factors is None:
+        named = {k: v for k, v in weights.items() if k != "default"}
+        factors = [Structural(), ConfigType(named, key=weight_key, default=weights["default"])]
+    weigh = compose(factors)
     out = []
     for at in read(str(path), index=":"):
         n = len(at)
         ct = str(at.info.get(weight_key, ""))
-        w = _get(weights, ct) or weights["default"]
         ti = next((idx for name, idx in type_index.items() if name.lower() == ct.lower()), 0)
         E = _get(at.info, energy_key)
         F = _get(at.arrays, force_key)
         V = _get(at.info, virial_key)
         V = None if V is None else np.asarray(V, float).reshape(3, 3)
+        meta = {"n_atoms": n, "config_type": at.info.get(weight_key), **at.info}
         out.append(Config(
             positions=np.asarray(at.positions, float), numbers=np.asarray(at.numbers),
             cell=np.asarray(at.cell.array, float), pbc=np.asarray(at.pbc, bool),
             energy=None if E is None else float(E),
             forces=None if F is None else np.asarray(F, float),
             virial=V,
-            w_E=w["E"] / np.sqrt(n), w_F=float(w["F"]), w_V=w["V"] / np.sqrt(n),
+            w_E=weigh(meta, "E"), w_F=weigh(meta, "F"), w_V=weigh(meta, "V"),
             type_idx=ti))
     return out
 
