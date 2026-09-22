@@ -82,8 +82,10 @@ p.add_argument("--sigma-type", action="store_true",
                help="fit a per-config-type noise block (Task 6): assign each config a type from its "
                     "config_type label, build a ParamSet carrying the sigma_type LML block and fit the "
                     "inner MAP via run_map_ps so the block is optimised. The learned per-type log-ratios "
-                    "(rows=type, cols E,F,V) are written to sigma_type_ratios.json. Off (default) = the "
-                    "classic single-noise L-BFGS/run_map fit, numerically unchanged.")
+                    "(rows=type, cols E,F,V) are DIAGNOSTIC ONLY (written to sigma_type_ratios.json); "
+                    "predictions/draws/Laplace still use the single theta_map noise -- per-type PREDICTIVE "
+                    "noise is not yet wired. Off (default) = the classic single-noise L-BFGS/run_map fit, "
+                    "numerically unchanged.")
 p.add_argument("--route", default=None,
                help='per-block route override for the ParamSet fit, as a JSON object, e.g. '
                     '\'{"sigma_type":"lml","embed":"fixed"}\'; each route is fixed/lml/varopt. '
@@ -275,6 +277,8 @@ with highest_precision():
             json.dump(np.asarray(ratios).tolist(), open(out / "sigma_type_ratios.json", "w"), indent=1)
             print("sigma-type log-ratios (rows=type, cols E,F,V):",
                   np.round(np.asarray(ratios), 4).tolist(), flush=True)
+            print("[sigma-type] per-type ratios are diagnostic only; predictions still use "
+                  "single-noise theta_map.", flush=True)
     elif a.opt == "lbfgs":
         # 10-d smooth objective with an exact gradient: L-BFGS converges in a
         # few tens of evaluations where Adam needs hundreds of (expensive) steps
