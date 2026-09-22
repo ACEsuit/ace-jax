@@ -106,12 +106,22 @@ def embedding_d_max(meta):
 
     export_model.jl writes ``meta["embedding"]`` as the JSON of the Julia
     model's ``meta["embedding"]`` dict for KIND=embedding and as ``""``
-    otherwise; older exports omit the key entirely."""
+    otherwise; older exports omit the key entirely.  Anything present that
+    does not carry a usable ``d_max`` is an error naming the key and the
+    expected shape of the value."""
     emb = meta.get("embedding")
     if not emb:
         return None
     if isinstance(emb, str):
-        emb = json.loads(emb)
+        try:
+            emb = json.loads(emb)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"meta['embedding'] = {emb!r} is not valid JSON "
+                             f"({e}) -- expected an object with a 'd_max' key") from e
+    if not isinstance(emb, dict) or "d_max" not in emb:
+        raise ValueError(f"meta['embedding'] = {emb!r} does not carry a "
+                         "'d_max' key -- expected the KIND=embedding export's "
+                         "embedding dict")
     return int(emb["d_max"])
 
 

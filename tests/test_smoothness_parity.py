@@ -240,3 +240,18 @@ def test_gamma_from_model_folds_embedded_radial_index():
                                     NZ, axis=0))
     # ...and the fold actually changed something (some tensor n > d_max).
     assert not np.array_equal(gamma, gamma_from_model(dict(meta, embedding="")))
+
+
+def test_embedding_d_max_bad_value_is_a_named_error():
+    """A present-but-unusable meta['embedding'] fails with a ValueError that
+    names the key and the expected shape, not a bare KeyError/JSONDecodeError
+    from inside the helper."""
+    z, meta = _load_model("sige_nofit.npz")
+    with pytest.raises(ValueError, match="d_max"):
+        gamma_from_model(dict(meta, embedding=json.dumps({"widths": [3, 3]})))
+    with pytest.raises(ValueError, match="d_max"):
+        gamma_from_model(dict(meta, embedding={"widths": [3, 3]}))          # already a dict
+    with pytest.raises(ValueError, match="d_max"):
+        gamma_from_model(dict(meta, embedding="[3, 3]"))                    # JSON, not an object
+    with pytest.raises(ValueError, match="not valid JSON"):
+        gamma_from_model(dict(meta, embedding="{not json"))
