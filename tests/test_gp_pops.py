@@ -196,11 +196,21 @@ def sige_fit():
         lik = make_lml(prob, ds_train, cache_linear=True)
         jax.block_until_ready(lik(to_array(prob.prior.mu)))
         theta_map = run_map(lik, prob.prior, steps=_MAP_STEPS, lr=0.02, seed=_SEED)
-        # native POPS (run.py defaults: samples posterior, leverage 0, NO aleatoric)
-        pred_pops = predict_fixed(theta_map, prob, ds_train, ds_test, uq="pops")
-        # diagnostic: POPS + label noise (aleatoric)
-        pred_pops_al = predict_fixed(theta_map, prob, ds_train, ds_test,
-                                     uq="pops", aleatoric=True)
+        # All predictives reuse the SAME warm fit (theta_map); only the POSTERIOR
+        # form / aleatoric flag differ.  Two POPS posterior forms:
+        #   samples   -- CENTERED committee variance, drops (phi.mean(delta))^2
+        #   hypercube -- UNCENTERED 2nd moment about the origin, KEEPS that term
+        # (the coordinator's crux: systematic misspecification lives in the mean
+        # of the delta corrections, which only the uncentered form retains).
+        def _pops(form, alea):
+            return predict_fixed(theta_map, prob, ds_train, ds_test, uq="pops",
+                                 pops_form=form, aleatoric=alea)
+        pred = {
+            ("samples", False): _pops("samples", False),      # run.py default "native POPS"
+            ("samples", True): _pops("samples", True),
+            ("hypercube", False): _pops("hypercube", False),
+            ("hypercube", True): _pops("hypercube", True),
+        }
         pred_blr = predict_fixed(theta_map, prob, ds_train, ds_test, uq="blr")
 
     nat = np.array([len(c.numbers) for c in test])
@@ -209,7 +219,7 @@ def sige_fit():
     sig = {q: float(np.exp(getattr(theta_map, f"log_sigma_{q}"))) for q in "EFV"}
     return dict(theta_map=theta_map, sig=sig, nat=nat, E=E, F=F,
                 E0={k: float(v) for k, v in zip(els, E0)},
-                pops=pred_pops, pops_al=pred_pops_al, blr=pred_blr, ntest=len(test))
+                pred=pred, blr=pred_blr, ntest=len(test))
 
 
 def _sige_qty(fit, pred, quantity):
@@ -226,90 +236,120 @@ def _sige_qty(fit, pred, quantity):
     return y, mu, sigma
 
 
+# The four POPS predictives (posterior form x aleatoric), plus a short label.
+# The misspecification-only rows (aleatoric False) are the candidate "native
+# POPS" forms; "samples,False" is the run.py --uq pops default.
+_POPS_ROWS = [
+    (("samples", False), "POPS s"),
+    (("samples", True), "POPS s+alea"),
+    (("hypercube", False), "POPS hc"),
+    (("hypercube", True), "POPS hc+alea"),
+]
+# candidate native forms (no post-hoc scalar, misspecification-only)
+_NATIVE_FORMS = [(("samples", False), "POPS s"), (("hypercube", False), "POPS hc")]
+
+
 @pytest.mark.slow
 @_sige
 def test_sige_pops_per_quantity_calibration_gate(sige_fit):
     from ace_jax.fit.metrics import rmse
     fit = sige_fit
+    default_pops = fit["pred"][("samples", False)]
 
     # ---- HARD ASSERTS (must hold regardless of the scientific outcome) --------
-    # POPS sigma is finite and the right shape (E: one per config; F: one per
-    # force component); POPS never changes the mean, so its RMSE == BLR RMSE.
-    assert fit["pops"].E_var.shape == (fit["ntest"],)
-    assert fit["pops"].F_var.reshape(-1).shape == fit["F"].shape
-    for q in ("E", "F"):
-        _, _, s_pops = _sige_qty(fit, fit["pops"], q)
-        assert np.all(np.isfinite(s_pops)), f"POPS {q} sigma has non-finite entries"
-        assert np.all(s_pops >= 0.0), f"POPS {q} sigma has negative entries"
-        yp, mp, _ = _sige_qty(fit, fit["pops"], q)
-        yb, mb, _ = _sige_qty(fit, fit["blr"], q)
-        r_pops, r_blr = rmse(yp, mp), rmse(yb, mb)
-        assert abs(r_pops - r_blr) <= 0.02 * r_blr, (
-            f"{q}: POPS RMSE {r_pops:.5g} != BLR RMSE {r_blr:.5g} (>2%); "
-            f"POPS must not change the mean")
+    # Every POPS sigma is finite and the right shape (E: one per config; F: one
+    # per force component); POPS never changes the mean, so its RMSE == BLR RMSE.
+    assert default_pops.E_var.shape == (fit["ntest"],)
+    assert default_pops.F_var.reshape(-1).shape == fit["F"].shape
+    for key, _ in _POPS_ROWS:
+        for q in ("E", "F"):
+            yp, mp, s_pops = _sige_qty(fit, fit["pred"][key], q)
+            assert np.all(np.isfinite(s_pops)), f"POPS{key} {q} sigma non-finite"
+            assert np.all(s_pops >= 0.0), f"POPS{key} {q} sigma negative"
+            yb, mb, _ = _sige_qty(fit, fit["blr"], q)
+            r_pops, r_blr = rmse(yp, mp), rmse(yb, mb)
+            assert abs(r_pops - r_blr) <= 0.02 * r_blr, (
+                f"{key} {q}: POPS RMSE {r_pops:.5g} != BLR RMSE {r_blr:.5g} (>2%); "
+                f"POPS must not change the mean")
 
-    # ---- MEASURE the calibration table (POPS / BLR / BLR+scalar) --------------
+    # ---- MEASURE the full 6-way table (samples/hypercube x alea off/on) -------
     print(f"\n=== SiGe POPS per-quantity calibration gate "
           f"(ntrain={_NTRAIN} ntest={fit['ntest']} seed={_SEED}) ===")
     print("E0 (eV):", {k: round(v, 4) for k, v in fit["E0"].items()},
           "  MAP sigma:", {k: round(v, 5) for k, v in fit["sig"].items()})
-    print(f"{'q':>2} {'method':<12} {'rms_z':>9} {'cov@90':>8} "
+    print(f"{'q':>2} {'method':<13} {'rms_z':>9} {'cov@90':>8} "
           f"{'CRPS':>11} {'RMSE':>11}   n")
 
     table = {}                                     # (quantity, method) -> metrics
+    b_half = {}                                    # quantity -> eval half slice
     for q in ("E", "F"):
-        for method, key in (("POPS", "pops"), ("POPS+alea", "pops_al"), ("BLR", "blr")):
-            y, mu, s = _sige_qty(fit, fit[key], q)
+        for key, label in _POPS_ROWS:
+            y, mu, s = _sige_qty(fit, fit["pred"][key], q)
             m = _sige_metrics(y, mu, s)
-            table[(q, method)] = m
-            print(f"{q:>2} {method:<12} {m['rms_z']:9.3f} {m['cov90']:8.3f} "
+            table[(q, label)] = m
+            print(f"{q:>2} {label:<13} {m['rms_z']:9.3f} {m['cov90']:8.3f} "
                   f"{m['crps']:11.4g} {m['rmse']:11.4g}   {m['n']}")
-        yb, mub, sb = _sige_qty(fit, fit["blr"], q)
-        m_scalar, b_idx, s = _blr_scalar_heldout(yb, mub, sb)
+        y, mu, s = _sige_qty(fit, fit["blr"], q)
+        m = _sige_metrics(y, mu, s)
+        table[(q, "BLR")] = m
+        print(f"{q:>2} {'BLR':<13} {m['rms_z']:9.3f} {m['cov90']:8.3f} "
+              f"{m['crps']:11.4g} {m['rmse']:11.4g}   {m['n']}")
+        m_scalar, b_idx, s_scale = _blr_scalar_heldout(y, mu, s)
         table[(q, "BLR+scalar")] = m_scalar
-        print(f"{q:>2} {'BLR+scalar':<12} {m_scalar['rms_z']:9.3f} "
+        b_half[q] = b_idx
+        print(f"{q:>2} {'BLR+scalar':<13} {m_scalar['rms_z']:9.3f} "
               f"{m_scalar['cov90']:8.3f} {m_scalar['crps']:11.4g} "
-              f"{m_scalar['rmse']:11.4g}   {m_scalar['n']}  (s={s:.3f}, held-out half)")
-        # matched CRPS on the SAME evaluation half: POPS vs BLR+scalar
-        yp, mup, sp = _sige_qty(fit, fit["pops"], q)
-        table[(q, "POPS@half")] = _sige_metrics(yp[b_idx], mup[b_idx], sp[b_idx])
+              f"{m_scalar['rmse']:11.4g}   {m_scalar['n']}  (s={s_scale:.3f}, held-out half)")
 
     # ---- THE STRICT CALIBRATION BAR: measure, then assert-or-xfail ------------
-    def _bar(q):
-        m = table[(q, "POPS")]
-        cp = table[(q, "POPS@half")]["crps"]
-        cs = table[(q, "BLR+scalar")]["crps"]
-        checks = {
-            "rms_z_in_[0.7,1.5]": 0.7 <= m["rms_z"] <= 1.5,
-            "cov90_in_[0.85,0.95]": 0.85 <= m["cov90"] <= 0.95,
-            "crps<=blr+scalar": cp <= cs,
-        }
-        return checks, m, cp, cs
-
-    bar_ok, reasons = True, []
-    for q in ("F", "E"):
-        checks, m, cp, cs = _bar(q)
-        print(f"[bar {q}] rms_z={m['rms_z']:.3f} cov@90={m['cov90']:.3f} "
-              f"CRPS_POPS(half)={cp:.4g} CRPS_BLR+scalar={cs:.4g} -> {checks}")
-        if not all(checks.values()):
-            bar_ok = False
-            reasons.append(f"{q}: " + ", ".join(k for k, v in checks.items() if not v))
-
-    mF, mE = table[("F", "POPS")], table[("E", "POPS")]
-    if bar_ok:
-        # green gate: native POPS calibrates both quantities without any scalar
+    # A candidate native form (misspecification-only, no scalar) passes iff, on
+    # BOTH E and F: rms-z in [0.7,1.5], cov@90 in [0.85,0.95], and CRPS (on the
+    # BLR+scalar evaluation half) <= CRPS_BLR+scalar.  The gate is green iff ANY
+    # native form passes; otherwise xfail with the measured numbers.
+    def _bar(key, label):
+        ok, detail = True, {}
         for q in ("F", "E"):
-            m = table[(q, "POPS")]
+            m = table[(q, label)]
+            yp, mup, sp = _sige_qty(fit, fit["pred"][key], q)
+            b = b_half[q]
+            cp = _sige_metrics(yp[b], mup[b], sp[b])["crps"]
+            cs = table[(q, "BLR+scalar")]["crps"]
+            checks = {"rms_z": 0.7 <= m["rms_z"] <= 1.5,
+                      "cov90": 0.85 <= m["cov90"] <= 0.95,
+                      "crps<=blr+scalar": cp <= cs}
+            detail[q] = (m["rms_z"], m["cov90"], cp, cs, checks)
+            ok = ok and all(checks.values())
+        return ok, detail
+
+    any_native_ok, summaries = False, []
+    for key, label in _NATIVE_FORMS:
+        ok, detail = _bar(key, label)
+        any_native_ok = any_native_ok or ok
+        for q in ("F", "E"):
+            rz, c90, cp, cs, checks = detail[q]
+            print(f"[bar {label} {q}] rms_z={rz:.3f} cov@90={c90:.3f} "
+                  f"CRPS(half)={cp:.4g} CRPS_BLR+scalar={cs:.4g} -> {checks}")
+        mF, mE = table[("F", label)], table[("E", label)]
+        summaries.append(
+            f"{label}: F rms-z={mF['rms_z']:.3f} cov@90={mF['cov90']:.3f}, "
+            f"E rms-z={mE['rms_z']:.3f} cov@90={mE['cov90']:.3f}"
+            f"{'  [PASS]' if ok else ''}")
+
+    if any_native_ok:
+        # green gate: SOME native POPS form calibrates both quantities, no scalar
+        passing = [(k, l) for k, l in _NATIVE_FORMS if _bar(k, l)[0]]
+        key, label = passing[0]
+        for q in ("F", "E"):
+            m = table[(q, label)]
             assert 0.7 <= m["rms_z"] <= 1.5
             assert 0.85 <= m["cov90"] <= 0.95
-        assert table[("F", "POPS@half")]["crps"] <= table[("F", "BLR+scalar")]["crps"]
-        assert table[("E", "POPS@half")]["crps"] <= table[("E", "BLR+scalar")]["crps"]
+            yp, mup, sp = _sige_qty(fit, fit["pred"][key], q)
+            b = b_half[q]
+            assert (_sige_metrics(yp[b], mup[b], sp[b])["crps"]
+                    <= table[(q, "BLR+scalar")]["crps"])
     else:
         # Do NOT force a pass and do NOT weaken the bar into a tautology: record
         # the measured numbers and mark the strict bar xfail so the file stays
         # runnable.
-        pytest.xfail(
-            f"native POPS does not meet the SiGe calibration bar -- "
-            f"F rms-z={mF['rms_z']:.3f} cov@90={mF['cov90']:.3f}; "
-            f"E rms-z={mE['rms_z']:.3f} cov@90={mE['cov90']:.3f}; "
-            f"failing checks: {'; '.join(reasons)}")
+        pytest.xfail("no native POPS form meets the SiGe calibration bar -- "
+                     + "; ".join(summaries))
