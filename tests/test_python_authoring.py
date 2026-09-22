@@ -269,3 +269,36 @@ def test_bridge_wellformed_subprocess():
     for stage in ("efv", "inmem"):
         for name, err in r[stage].items():
             assert err < 1e-8, f"{stage}/{name} parity error {err}"
+
+
+_NOJULIA = r"""
+import sys
+import numpy as np
+import juliacall  # noqa: F401  (fail loudly here if the extra is missing)
+import jax
+jax.config.update("jax_enable_x64", True)
+from ace_jax.construct.model import build_model
+
+auth = build_model([14], 2, 5, coupling_cache=True, coupling_cache_dir=sys.argv[1])
+print("RESULT", float(np.asarray(auth.model.A2B).sum()), len(auth.meta["nnll"]))
+"""
+
+
+def test_coupling_cache_no_julia_on_hit(tmp_path):
+    """Tier 2 point 2: run 1 populates the per-shape cache (Julia allowed);
+    run 2 repeats with ACEJAX_NO_JULIA=1, which makes the shim raise if Julia
+    is ever touched -- the build must be served entirely from cache and
+    produce the same A2B."""
+    try:
+        import juliacall  # noqa: F401
+    except ImportError:
+        pytest.skip("authoring extra (juliacall) not installed")
+    p1 = subprocess.run([sys.executable, "-c", _NOJULIA, str(tmp_path)],
+                        capture_output=True, text=True, timeout=1200)
+    assert p1.returncode == 0, f"cache-populating run failed:\n{p1.stderr[-2000:]}"
+    p2 = subprocess.run([sys.executable, "-c", _NOJULIA, str(tmp_path)],
+                        capture_output=True, text=True, timeout=1200,
+                        env=dict(os.environ, ACEJAX_NO_JULIA="1"))
+    assert p2.returncode == 0, (f"cache-hit run failed (missed the cache, or "
+                                f"touched Julia):\n{p2.stderr[-2000:]}")
+    assert p1.stdout.split("RESULT ")[-1] == p2.stdout.split("RESULT ")[-1]

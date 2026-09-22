@@ -6,10 +6,11 @@ launches Julia. Tier 2 (points 1–2 of the roadmap; the pure-JAX coupling
 endgame stays out of scope, and the EquivariantTensors bridge is kept):
 
 1. **In-memory hand-off** — Python callers hold the `ACEModel` directly; the
-   npz writer becomes strictly compatibility-only.
+   npz writer becomes strictly compatibility-only. *(Implemented:
+   `Authoring.eval_pair`)*
 2. **Coupling cache** — authoring an *existing* shape never launches Julia:
    the shim runs once per new shape, results are persisted per shape, and a
-   pip install + cache dir is Julia-free.
+   pip install + cache dir is Julia-free. *(Implemented: `couple_cached`)*
 
 ## 1. In-memory hand-off
 

@@ -226,8 +226,13 @@ def cmd_construct(a):
            for e in a.elements.split(",")]
     auth = build_model(els, a.order, a.max_degree, wL=a.wL, rcut=a.rcut,
                        rin=a.rin, radial_mode=a.radial_mode, pair_mode=a.pair_mode,
-                       seed=a.seed, with_gamma=not a.no_gamma)
-    save_npz(a.out, auth)
+                       seed=a.seed, with_gamma=not a.no_gamma,
+                       coupling_cache=not a.no_coupling_cache,
+                       coupling_cache_dir=a.coupling_cache_dir)
+    out = pathlib.Path(a.out).expanduser()
+    if out.parent and str(out.parent) != ".":
+        out.parent.mkdir(parents=True, exist_ok=True)
+    save_npz(out, auth)
     m, meta = auth.model, auth.meta
     print(f"authored {m.A2B.shape[0]} B functions ({meta['n_AA']} AA), "
           f"{meta['n_pair']} pair, {meta['len_basis']} basis entries, "
@@ -255,6 +260,11 @@ def main(argv=None):
     con.add_argument("--pair-mode", default="onehot")
     con.add_argument("--seed", type=int, default=0)
     con.add_argument("--no-gamma", action="store_true", help="skip the smoothness prior")
+    con.add_argument("--no-coupling-cache", action="store_true",
+                     help="always run the Julia coupling shim instead of the per-shape cache")
+    con.add_argument("--coupling-cache-dir", default=None,
+                     help="override the coupling cache directory (default: $ACEJAX_COUPLING_CACHE "
+                          "or ~/.cache/ace-jax/coupling)")
     con.add_argument("--out", required=True)
     a = top.parse_args(argv)
     if a.cmd == "eval":

@@ -110,6 +110,20 @@ Trap this pins: replacing `WB` on a **folded** model leaves a stale `ctilde`
 `load()` rebuilds with `folded=False`, but the in-memory tree is evaluated
 as-is). Re-fold after any `dataclasses.replace` that touches `WB`.
 
+## Coupling cache (Tier 2, point 2)
+
+The coupling depends only on the three integer specs, so
+`couple_cached` (default inside `build_model`) persists one entry per shape —
+keyed by a sha256 of the order-preserving spec JSON — under
+`$ACEJAX_COUPLING_CACHE` (or `~/.cache/ace-jax/coupling`). A **hit
+reconstructs the `Coupling` without importing juliacall**: pip install +
+populated cache dir = Julia-free authoring of a known shape. Entries store
+their input specs (hit-time re-check) and the `juliapkg.json` pin hash (a
+pin change invalidates); writes are atomic and best-effort. `couple()` stays
+the uncached parity oracle; `--no-coupling-cache` / `cache_dir="none"` opt
+out. Entries are self-describing npz files — ship one by copying it into a
+team's cache dir.
+
 ## Known traps
 
 - **juliapkg scans `sys.path` for `juliapkg.json`.** When running a script

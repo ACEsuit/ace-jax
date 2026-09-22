@@ -91,19 +91,29 @@ def nnll_from_coupling(A2B, aa_sig, tol=1e-12):
 
 def build_model(elements, order, totaldegree, *, wL=1.5, rcut=5.5, r0=None,
                 rin=0.0, radial_mode="glorot_normal", pair_mode="onehot",
-                seed=0, with_gamma=True, edge_a_kind="gather"):
+                seed=0, with_gamma=True, edge_a_kind="gather",
+                coupling_cache=True, coupling_cache_dir=None):
     """Author a frozen `ace_model`-family model in memory.
 
     elements: atomic numbers or symbols; order: correlation order (body
     order - 1); totaldegree: TotalDegree(NZ, 1/wL) level bound.  Radial
     coefficients are frozen at the seeded initial values (no fitting here).
 
+    `coupling_cache` routes the ET shim through `couple_cached` (default on):
+    a known shape is served from the per-shape disk cache without launching
+    Julia; a new shape runs the shim once and populates the cache.  Pass
+    `coupling_cache=False` to always call the shim.
+
     Returns an `Authoring`.  Requires the `authoring` extra (Julia coupling
-    shim); evaluate in float64 with x64 enabled."""
+    shim) on a cache miss; evaluate in float64 with x64 enabled."""
     zs = ri.resolve_elements(elements)
     NZ = len(zs)
     mb, Rnl, Ylm = build_spec(NZ, order, totaldegree, wL)
-    cpl = couple(mb, Rnl, Ylm)
+    if coupling_cache:
+        from .coupling import couple_cached
+        cpl = couple_cached(mb, Rnl, Ylm, cache_dir=coupling_cache_dir)
+    else:
+        cpl = couple(mb, Rnl, Ylm)
 
     nnll = nnll_from_coupling(cpl.A2B, cpl.aa_sig)
     # within a row, channel order differs (signature-sorted vs original body
