@@ -13,3 +13,119 @@ def whiten(phi, resid, w, sigma):
     """
     s = w / sigma
     return phi * s[:, None], resid * s
+
+
+def pops_corrections(Sigma0, phi_t, r_t, leverage_pct):
+    """Per-training-point "pointwise optimal parameter" corrections.
+
+    Ported from ``popsregression.POPSRegression.fit``. On the WHITENED design
+    (``phi_t``, ``r_t`` already whitened by Task 7's :func:`whiten`, so the
+    homoscedastic noise scale is 1 and ``Sigma0 = A^{-1}`` needs no ``alpha_``
+    rescaling), the correction for training point ``i`` is the minimum-norm
+    Newton step (under the ``A`` metric) that makes the model fit point ``i``
+    exactly, ``phi_i . (c + delta_i) = y_i``::
+
+        delta_i = Sigma0 @ phi_i * (r_i / h_i),   h_i = phi_i . Sigma0 . phi_i
+
+    where ``h_i`` is the (whitened) leverage. Dividing by ``h_i`` is what makes
+    ``phi_i . delta_i == r_i`` hold exactly (the package does this via
+    ``pointwise_correction *= errors / safe_leverage``); it is retained here
+    even though the brief's inline formula wrote only ``Sigma0 @ phi_i * r_i``.
+
+    Only points whose leverage ``h_i`` is at or above the ``leverage_pct``
+    percentile are kept (the package's ``leverage_percentile``, for
+    tractability at scale). If that mask is empty, all points are kept.
+
+    Parameters
+    ----------
+    Sigma0 : (L, L) array   epistemic weight covariance ``A^{-1}``.
+    phi_t  : (n, L) array   whitened design rows.
+    r_t    : (n,)   array   whitened residuals ``y - phi c``.
+    leverage_pct : float    percentile in [0, 100]; 0 keeps every point.
+
+    Returns
+    -------
+    deltas : (K, L) array    corrections for the K retained points.
+    """
+    pc = phi_t @ Sigma0                       # (n, L): rows phi_i . Sigma0
+    h = jnp.sum(pc * phi_t, axis=1)           # leverage h_i
+    safe_h = jnp.where(h > 0, h, jnp.inf)     # guard zero-leverage points
+    deltas = pc * (r_t / safe_h)[:, None]     # delta_i = Sigma0 phi_i r_i / h_i
+
+    thresh = jnp.percentile(h, leverage_pct)
+    mask = h >= thresh
+    if not bool(jnp.any(mask)):               # fallback: keep everything
+        mask = jnp.ones_like(h, dtype=bool)
+    return deltas[mask]
+
+
+def _fit_hypercube_cov(deltas, mode_threshold=1.0e-8, percentile_clipping=0.0):
+    """Fit the POPS "hypercube" (PCA axis-aligned box) to ``deltas`` and return
+    its misspecification covariance ``(L, L)``.
+
+    Ported from ``popsregression`` ``_fit_hypercube`` + ``_sample_hypercube``.
+    The package fits a box in the PCA basis of ``deltas.T @ deltas`` (keeping
+    modes above ``mode_threshold * max_eigval``), with per-axis bounds from the
+    ``percentile_clipping`` / ``100 - percentile_clipping`` percentiles of the
+    projected corrections, then draws a QMC uniform sample from the box and
+    reports ``S @ S.T / n`` (the second moment about the origin).
+
+    Here we use the exact large-sample expectation of that estimator instead of
+    a finite random draw: a coordinate uniform on ``[low_j, high_j]`` has second
+    moment ``(high-low)^2 / 12 + m_j^2`` (with midpoint ``m_j``) on its own axis
+    and ``m_j m_k`` off-axis, so::
+
+        cov = support @ (diag((high-low)^2 / 12) + m m^T) @ support.T
+
+    This is deterministic, fp64, and JAX-friendly, and equals the package's
+    sampled ``misspecification_sigma_`` as ``n_resample -> inf``.
+    """
+    gram = deltas.T @ deltas                  # (L, L)
+    evals, evecs = jnp.linalg.eigh(gram)
+    keep = evals > mode_threshold * jnp.max(evals)
+    support = evecs[:, keep]                  # (L, d) principal directions
+
+    projected = deltas @ support              # (K, d)
+    low = jnp.percentile(projected, percentile_clipping, axis=0)
+    high = jnp.percentile(projected, 100.0 - percentile_clipping, axis=0)
+
+    m = 0.5 * (low + high)                     # per-axis box midpoint
+    var_axis = (high - low) ** 2 / 12.0        # per-axis uniform variance
+    second_moment = jnp.diag(var_axis) + jnp.outer(m, m)   # E[u u^T]
+    return support @ second_moment @ support.T
+
+
+def pops_posterior(deltas, c_star, form="samples"):
+    """Build the POPS misspecification posterior from pointwise ``deltas``.
+
+    Two forms (both ported from ``popsregression._build_posterior``):
+
+    * ``form="samples"`` (DEFAULT): the committee of weight samples
+      ``c_star + deltas`` (the package's ``posterior_samples_``, here stored as
+      full weight vectors rather than bare perturbations). Returns
+      ``{"samples": (K, L)}``.
+    * ``form="hypercube"``: the PCA/axis-aligned box over ``deltas`` reduced to
+      a covariance (the package's ``misspecification_sigma_``). Returns
+      ``{"cov": (L, L)}``.
+    """
+    if form == "samples":
+        return {"samples": c_star[None, :] + deltas}
+    elif form == "hypercube":
+        return {"cov": _fit_hypercube_cov(deltas)}
+    raise ValueError(f"unknown POPS posterior form: {form!r}")
+
+
+def pops_var(phi_star, posterior):
+    """Predictive misspecification variance at test rows ``phi_star`` (n, L).
+
+    * samples form: the variance across the committee of ``phi* . c_k``.
+    * cov form: the quadratic form ``sum((phi* @ cov) * phi*, axis=1)``.
+    """
+    if "samples" in posterior:
+        samples = posterior["samples"]         # (K, L)
+        preds = phi_star @ samples.T           # (n, K)
+        return jnp.var(preds, axis=1)
+    elif "cov" in posterior:
+        cov = posterior["cov"]
+        return jnp.sum((phi_star @ cov) * phi_star, axis=1)
+    raise ValueError("posterior must contain 'samples' or 'cov'")
