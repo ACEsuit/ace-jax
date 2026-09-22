@@ -78,9 +78,25 @@ p.add_argument("--embed-de", type=int, default=8, help="rank of the learned embe
 p.add_argument("--embed-anchor", type=float, default=1.0, help="lambda for the shrink-to-block-diagonal anchor")
 p.add_argument("--embed-steps", type=int, default=30, help="outer VarOpt steps (0 = frozen)")
 p.add_argument("--embed-holdout", type=float, default=0.2, help="fraction of train held out for the acceptance gate")
+p.add_argument("--sigma-type", action="store_true",
+               help="fit a per-config-type noise block (Task 6): assign each config a type from its "
+                    "config_type label, build a ParamSet carrying the sigma_type LML block and fit the "
+                    "inner MAP via run_map_ps so the block is optimised. The learned per-type log-ratios "
+                    "(rows=type, cols E,F,V) are written to sigma_type_ratios.json. Off (default) = the "
+                    "classic single-noise L-BFGS/run_map fit, numerically unchanged.")
+p.add_argument("--route", default=None,
+               help='per-block route override for the ParamSet fit, as a JSON object, e.g. '
+                    '\'{"sigma_type":"lml","embed":"fixed"}\'; each route is fixed/lml/varopt. '
+                    '"embed":"fixed" also skips the embedding VarOpt (as --learn-embedding off).')
 a = p.parse_args()
 if a.uq == "pops" and a.arm != "linear":
     p.error("--uq pops is the linear-arm misspecification predictive; pass --arm linear (or --uq blr).")
+# --route: parse+validate once (fails loudly on a bad route); "embed":"fixed" is
+# also read here as "skip the embedding VarOpt", mirroring --learn-embedding off.
+from ace_jax.fit.paramset import parse_route
+route = parse_route(a.route)
+if route.get("embed") == "fixed":
+    a.learn_embedding = False
 out = pathlib.Path(a.out); out.mkdir(parents=True, exist_ok=True)
 T0 = time.time(); timings = {}
 
@@ -95,6 +111,20 @@ if a.weights:
     factors = [_FACTOR_CLASSES[name](**kwargs) for entry in spec for name, kwargs in entry.items()]
     keys["factors"] = factors
     print("weight factors:", [type(f).__name__ for f in factors], flush=True)
+if a.sigma_type:
+    # Per-config-type noise needs each config's type_idx set.  Scan the data for the
+    # distinct config_type labels and pass a WEIGHT-NEUTRAL named-weights dict (every
+    # type weight 1.0 -> ConfigType is identity), which drives load_configs' type_idx
+    # (Task 6) without touching w_E/w_F/w_V.  Weighting stays classic/--weights-driven.
+    from ase.io import read as _aseread
+    _cts = []
+    for _at in _aseread(a.data, index=":"):
+        _ct = str(_at.info.get("config_type", ""))
+        if _ct and _ct not in _cts:
+            _cts.append(_ct)
+    keys["weights"] = {"default": {"E": 1.0, "F": 1.0, "V": 1.0},
+                       **{ct: {"E": 1.0, "F": 1.0, "V": 1.0} for ct in _cts}}
+    print(f"sigma-type: {len(_cts)} named config-type(s): {_cts}", flush=True)
 configs = load_configs(a.data, **keys)
 rng = np.random.default_rng(a.seed); perm = rng.permutation(len(configs))
 ts = a.ntrain if a.test_start is None else a.test_start
@@ -223,7 +253,29 @@ with highest_precision():
 
     rungs = [r.strip() for r in a.rungs.split(",")]
     t = time.time()
-    if a.opt == "lbfgs":
+    if a.sigma_type:
+        # Per-config-type noise fit: build a ParamSet carrying the sigma_type LML
+        # block (Task 6) and let run_map_ps optimise [hypers | free log-ratios]
+        # jointly (inner MAP).  --route overrides block routes.  The embedding is
+        # already baked into prob.ind, so no embed block here.  Downstream draws
+        # /prediction still use the 10-hyper theta_map (the learned per-type ratios
+        # are written out as a diagnostic; feeding them into predict is deferred).
+        from ace_jax.fit.ladder import run_map_ps
+        from ace_jax.fit.paramset import build_fit_paramset
+        from ace_jax.fit.hypers import from_array
+        n_types = int(np.asarray(ds_train.cfg_type).max()) + 1
+        ps0 = build_fit_paramset(init or prob.prior.mu, prob.prior,
+                                 n_types=n_types, sigma_type=True, route=route)
+        ps = run_map_ps(ps0, prob, ds_train, steps=a.map_steps, lr=a.map_lr, seed=a.seed)
+        theta_map = from_array(ps.block("hypers").value)
+        ratios = ps.sigma_type_ratios()
+        if ratios is None:
+            print(f"sigma-type: only {n_types} config-type -> no ratios (reduced to run_map)", flush=True)
+        else:
+            json.dump(np.asarray(ratios).tolist(), open(out / "sigma_type_ratios.json", "w"), indent=1)
+            print("sigma-type log-ratios (rows=type, cols E,F,V):",
+                  np.round(np.asarray(ratios), 4).tolist(), flush=True)
+    elif a.opt == "lbfgs":
         # 10-d smooth objective with an exact gradient: L-BFGS converges in a
         # few tens of evaluations where Adam needs hundreds of (expensive) steps
         from scipy.optimize import minimize

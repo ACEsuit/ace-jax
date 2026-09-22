@@ -64,6 +64,47 @@ def from_hypers(hypers, prior, embed=None, hypers_route="lml", embed_route="fixe
         blocks.append(sigma_type_block(n_types, sigma_type_init, sigma_type_prior_sigma))
     return ParamSet(tuple(blocks))
 
+def parse_route(spec):
+    """Parse a `--route` argument into a validated {block_name: route} map.
+
+    `spec` may be None/"" (-> {}), a JSON object string, or an already-decoded
+    dict.  Every route must be one of ROUTES ('fixed'/'lml'/'varopt'); anything
+    else, or a non-object JSON payload, raises ValueError so a bad CLI flag fails
+    loudly rather than silently mis-routing a block."""
+    import json
+    if spec is None or spec == "":
+        return {}
+    d = spec if isinstance(spec, dict) else json.loads(spec)
+    if not isinstance(d, dict):
+        raise ValueError(f"--route must be a JSON object {{block: route}}, got {type(d).__name__}")
+    bad = sorted({str(r) for r in d.values() if r not in ROUTES})
+    if bad:
+        raise ValueError(f"--route: unknown route(s) {bad}; routes are {list(ROUTES)}")
+    return {str(k): str(v) for k, v in d.items()}
+
+
+def apply_routes(ps, routes):
+    """Return a ParamSet with each named block's route replaced by routes[name].
+    A route naming a block that is absent from the set is ignored (a no-op)."""
+    if not routes:
+        return ps
+    return ParamSet(tuple(b._replace(route=routes.get(b.name, b.route)) for b in ps.blocks))
+
+
+def build_fit_paramset(hypers, prior, *, embed=None, embed_route="fixed",
+                       n_types=1, sigma_type=False, route=None):
+    """Assemble the ParamSet a run.py fit optimises: an LML `hypers` block, an
+    optional `embed` block, and -- only when `sigma_type` and n_types > 1 -- the
+    per-config-type `sigma_type` LML block (Task 6), with any `--route` overrides
+    applied last.  With `sigma_type=False`, no embed and no route (the default),
+    this is exactly `from_hypers(hypers, prior)`: a single all-LML hypers block,
+    whose `run_map_ps` reduces to the flat `run_map` (Task 3 equivalence), so a
+    default-flags run stays numerically unchanged."""
+    nt = int(n_types) if sigma_type else 1
+    ps = from_hypers(hypers, prior, embed=embed, embed_route=embed_route, n_types=nt)
+    return apply_routes(ps, parse_route(route))
+
+
 def materialise(self):
     from .hypers import from_array
     h = from_array(self.block("hypers").value)
