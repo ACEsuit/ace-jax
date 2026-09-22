@@ -15,6 +15,48 @@ def whiten(phi, resid, w, sigma):
     return phi * s[:, None], resid * s
 
 
+def pointwise_corrections(Sigma0, phi_t, r_t):
+    """Per-point corrections ``delta_i`` and leverages ``h_i`` on a WHITENED
+    design, WITHOUT any leverage subselection.
+
+    This is the jit-safe core of :func:`pops_corrections`: it contains no
+    boolean masking, so it can run inside a ``jax.lax.scan`` body (Task 9's
+    streamed :func:`ace_jax.fit.stats.pops_statistics`).  The correction for
+    training point ``i`` is the minimum-norm Newton step (under the ``A``
+    metric) that makes the model fit point ``i`` exactly,
+    ``phi_i . (c + delta_i) = y_i``::
+
+        delta_i = Sigma0 @ phi_i * (r_i / h_i),   h_i = phi_i . Sigma0 . phi_i
+
+    Dividing by the (whitened) leverage ``h_i`` is what makes
+    ``phi_i . delta_i == r_i`` hold exactly.  Zero-leverage rows (padded /
+    structurally-absent observations, ``w = 0``) get ``delta_i = 0`` via the
+    ``h_i = inf`` guard.
+
+    Returns ``(deltas (n, L), h (n,))``.
+    """
+    pc = phi_t @ Sigma0                       # (n, L): rows phi_i . Sigma0
+    h = jnp.sum(pc * phi_t, axis=1)           # leverage h_i
+    safe_h = jnp.where(h > 0, h, jnp.inf)     # guard zero-leverage points
+    deltas = pc * (r_t / safe_h)[:, None]     # delta_i = Sigma0 phi_i r_i / h_i
+    return deltas, h
+
+
+def leverage_select(deltas, h, leverage_pct):
+    """Keep only the rows of ``deltas`` whose leverage ``h`` is at or above the
+    ``leverage_pct`` percentile (the package's ``leverage_percentile``, for
+    tractability at scale).  If that mask is empty, all rows are kept.
+
+    Uses an EAGER ``bool(jnp.any(...))`` fallback, so it is NOT jit-safe and is
+    applied ONCE, outside any scan (Task 9's resolution 1).
+    """
+    thresh = jnp.percentile(h, leverage_pct)
+    mask = h >= thresh
+    if not bool(jnp.any(mask)):               # fallback: keep everything
+        mask = jnp.ones_like(h, dtype=bool)
+    return deltas[mask]
+
+
 def pops_corrections(Sigma0, phi_t, r_t, leverage_pct):
     """Per-training-point "pointwise optimal parameter" corrections.
 
@@ -47,16 +89,8 @@ def pops_corrections(Sigma0, phi_t, r_t, leverage_pct):
     -------
     deltas : (K, L) array    corrections for the K retained points.
     """
-    pc = phi_t @ Sigma0                       # (n, L): rows phi_i . Sigma0
-    h = jnp.sum(pc * phi_t, axis=1)           # leverage h_i
-    safe_h = jnp.where(h > 0, h, jnp.inf)     # guard zero-leverage points
-    deltas = pc * (r_t / safe_h)[:, None]     # delta_i = Sigma0 phi_i r_i / h_i
-
-    thresh = jnp.percentile(h, leverage_pct)
-    mask = h >= thresh
-    if not bool(jnp.any(mask)):               # fallback: keep everything
-        mask = jnp.ones_like(h, dtype=bool)
-    return deltas[mask]
+    deltas, h = pointwise_corrections(Sigma0, phi_t, r_t)
+    return leverage_select(deltas, h, leverage_pct)
 
 
 def _fit_hypercube_cov(deltas, mode_threshold=1.0e-8, percentile_clipping=0.0):

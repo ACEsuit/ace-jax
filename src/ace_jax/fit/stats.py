@@ -212,3 +212,74 @@ def residual_statistics_typed(theta, spec, model, ind, cfg, ds, n_types):
 def assemble_statistics_typed(lin, res):
     """Per-type full Stats: vmap assemble_statistics over the leading type axis."""
     return jax.vmap(assemble_statistics)(lin, res)
+
+
+# ---------------------------------------------------------------------------
+# Streamed POPS statistics (Task 9).  One extra pass over the dataset that
+# produces the SAME per-point misspecification corrections `deltas` as Task-8's
+# pops_corrections on the whole (whitened) design assembled at once, but never
+# materialises more than one batch's rows.
+#
+# Per batch we build the linear rows (rows.linear_rows, the M=0 arm), whiten
+# each quantity's rows/residual by w/sigma_q (Task 7's pops.whiten), and compute
+# the per-point correction delta_i and leverage h_i with pops.pointwise_corrections
+# (Task 8's formula, NO boolean masking -- jit-safe under scan).  The scan stacks
+# every batch's (delta, h); the leverage_pct subselection is applied ONCE,
+# eagerly, after the scan (pops.leverage_select), which is where the only
+# non-jit-safe boolean lives.  With leverage_pct=0 every point (including padded
+# w=0 rows, which carry delta=0, h=0) is kept, so streaming == monolithic
+# elementwise (tests/test_gp_stats.py).
+
+def _batch_pops_pointwise(model, cfg, batch, c_star, Sigma0, sigma):
+    """One batch's per-point corrections and leverages, quantities concatenated
+    in E, F, V order.  `sigma` maps 'E'/'F'/'V' -> per-quantity noise scale."""
+    from .pops import pointwise_corrections, whiten
+    from .rows import linear_rows
+    r, _, _ = linear_rows(model, cfg, batch)
+    L = r.E.shape[-1]
+    ds_d, ds_h = [], []
+    for phi, y, w, sq in (
+            (r.E, batch.y_E, batch.w_E, sigma["E"]),
+            (r.F.reshape(-1, L), batch.y_F.reshape(-1), jnp.repeat(batch.w_F, 3), sigma["F"]),
+            (r.V.reshape(-1, L), batch.y_V.reshape(-1), jnp.repeat(batch.w_V, 6), sigma["V"])):
+        phi_t, r_t = whiten(phi, y - phi @ c_star, w, sq)
+        d, h = pointwise_corrections(Sigma0, phi_t, r_t)
+        ds_d.append(d); ds_h.append(h)
+    return jnp.concatenate(ds_d, 0), jnp.concatenate(ds_h, 0)
+
+
+def _stream_pops_pointwise(model, cfg, ds, c_star, Sigma0, sigma):
+    """Stream _batch_pops_pointwise over ds, returning all per-point (deltas, h)
+    flattened batch-major.  jit-safe (no boolean masking)."""
+    body = lambda carry, batch: (
+        carry, _batch_pops_pointwise(model, cfg, batch, c_star, Sigma0, sigma))
+    _, (dd, hh) = jax.lax.scan(body, 0.0, ds)        # dd (B, P, L), hh (B, P)
+    L = dd.shape[-1]
+    return dd.reshape(-1, L), hh.reshape(-1)
+
+
+def pops_statistics(c_star, Sigma0, prob, ds, sigma, *, leverage_pct=0.0):
+    """Streamed POPS pointwise corrections over the dataset ``ds``.
+
+    Returns the SAME ``deltas`` (K, L) as Task-8's ``pops.pops_corrections`` on
+    the whole whitened design assembled in one batch, but streams ``ds`` one
+    batch at a time (peak memory is one batch's rows plus the accumulated
+    per-point (delta, h)).
+
+    Parameters
+    ----------
+    c_star : (L,) array     fitted linear weights (``objective.posterior`` mean).
+    Sigma0 : (L, L) array   epistemic weight covariance ``A^{-1}``
+                            (``objective.posterior``'s precision inverse).
+    prob   : Problem        supplies ``model``/``cfg`` for the linear rows.
+    ds     : Dataset        streamed, leading batch axis (the same ``ds`` fed to
+                            the statistics/LML; splitting it into more batches
+                            leaves ``deltas`` unchanged).
+    sigma  : mapping        per-quantity noise scales, keys ``'E'``/``'F'``/``'V'``
+                            (single config-type; per-type sigma is a documented
+                            extension, not implemented here).
+    leverage_pct : float    keyword-only; percentile in [0, 100], 0 keeps all.
+    """
+    from .pops import leverage_select
+    deltas, h = _stream_pops_pointwise(prob.model, prob.cfg, ds, c_star, Sigma0, sigma)
+    return leverage_select(deltas, h, leverage_pct)
