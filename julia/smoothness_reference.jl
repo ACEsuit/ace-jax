@@ -36,11 +36,12 @@ end
 model = ACEpotentials.ace1_model(elements = els, order = order, totaldegree = tdeg, wL = wL)
 m = model.model                                  # the inner model, as export_model.jl:102
 
-# The port assumes the plain algebraic prior: Diagonal, no coupling scalings
-# (those are commented out in smoothness_priors.jl:122) and NO embedded-model
+# The fixtures pin the plain algebraic prior: Diagonal, no coupling scalings
+# (those are commented out in smoothness_priors.jl:122) and no embedded-model
 # n-folding (meta["embedding"] is only set by ace_embedding_model, never by
-# ace1_model -- assert both here so the fixture cannot silently drift).
-@assert !haskey(m.meta, "embedding") "embedded model: the Python port does not cover the n-folding branch"
+# ace1_model -- assert here so the fixture cannot silently drift; the port's
+# fold is unit-tested from a synthetic meta["embedding"] instead).
+@assert !haskey(m.meta, "embedding") "embedded model: the oracle fixtures are for the unfolded ace1_model prior"
 P = M.algebraic_smoothness_prior(m)
 @assert P isa Diagonal "algebraic_smoothness_prior is not Diagonal"
 gamma = collect(diag(P))

@@ -21,7 +21,8 @@ import pytest
 from conftest import FIXTURE_DIR, REQUIRE
 
 from ace_jax.construct.prior import (
-    P, WL, WN, gamma_from_model, model_nnll, smoothness_prior, unflatten_nnll)
+    P, WL, WN, gamma_from_model, model_nnll, prior_diagonal, smoothness_prior,
+    unflatten_nnll)
 
 # Same shapes as fixtures/coupling_ref_*.npz (order 2/3 multiplicity-1 blocks,
 # order 4 SiGe wL=0.5 with degenerate nnll blocks).
@@ -87,6 +88,17 @@ def test_layout_species_replication(name):
 
 
 @pytest.mark.parametrize("name", FIXTURES)
+def test_oracle_block_order_is_tensor_then_pair(name):
+    """Pin the GLOBAL block order the port hard-codes in model_nnll:
+    ``[tensor x NZ | pair x NZ]``.  test_layout_species_replication reshapes by
+    kind and so would also pass for an interleaved [t, p, t, p] layout; this is
+    the contract that aligns the rebuilt gamma with fit/rows.py:_place."""
+    z = _load(name)
+    nz, kind = int(z["n_species"]), list(np.asarray(z["nnll_kind"]))
+    assert kind == [0] * (int(z["n_tensor"]) * nz) + [1] * (int(z["n_pair"]) * nz)
+
+
+@pytest.mark.parametrize("name", FIXTURES)
 def test_reference_constant_across_identical_nnll(name):
     """The prior is a per-column functional of nnll: columns with IDENTICAL
     bodies must carry IDENTICAL gamma -- this is what makes per-column
@@ -141,16 +153,24 @@ def _load_model(name):
 
 
 @pytest.mark.parametrize("name", MODELS)
-def test_model_nnll_layout(name):
-    """Full-basis bodies = exporter's tensor dump tiled NZ times, then the
-    (n, 0) pair singletons tiled NZ times."""
+def test_model_nnll_length_matches_exporter(name):
+    """The rebuilt full basis has exactly the exporter's own ``len_basis``
+    (Julia's length_basis(m)) columns -- an independent source, unlike
+    NZ * (n_B + n_pair) which model_nnll itself computes -- and a corrupted
+    len_basis is refused rather than silently misaligning gamma."""
     z, meta = _load_model(name)
-    n_B, n_pair, NZ = int(meta["n_B"]), int(meta["n_pair"]), len(meta["elements"])
-    nnll = model_nnll(meta)
-    assert len(nnll) == NZ * (n_B + n_pair)
-    meta_tensor = [[tuple(b) for b in bb] for bb in meta["nnll"]]
-    assert nnll[:NZ * n_B] == meta_tensor * NZ
-    assert nnll[NZ * n_B:] == [[(n, 0)] for n in range(1, n_pair + 1)] * NZ
+    assert len(model_nnll(meta)) == int(meta["len_basis"])
+    with pytest.raises(ValueError, match="len_basis"):
+        model_nnll(dict(meta, len_basis=int(meta["len_basis"]) + 1))
+
+
+def test_model_nnll_refuses_export_without_nnll():
+    """An export older than the nnll meta dump cannot rebuild gamma: fail with
+    a message naming the missing key and the fix, not a bare KeyError."""
+    z, meta = _load_model("si_ace_model.npz")
+    meta.pop("nnll")
+    with pytest.raises(ValueError, match="nnll.*re-export"):
+        model_nnll(meta)
 
 
 @pytest.mark.parametrize("name", MODELS)
@@ -175,3 +195,48 @@ def test_gamma_from_model_matches_exported():
     but it must reproduce it when the export lacks one."""
     z, meta = _load_model("si_fitted.npz")
     assert np.array_equal(gamma_from_model(meta), np.asarray(z["gamma"], np.float64))
+
+
+def test_prior_diagonal_prefers_exported_gamma(capsys):
+    """The single wire-in helper cli.py / bench run.py use: an exported gamma
+    is authoritative and used verbatim, silently."""
+    z, meta = _load_model("si_fitted.npz")
+    gamma = prior_diagonal(z, meta, "si_fitted.npz")
+    assert np.array_equal(gamma, np.asarray(z["gamma"], np.float64))
+    assert capsys.readouterr().out == ""
+
+
+def test_prior_diagonal_rebuilds_when_missing(capsys):
+    """Without an exported gamma the helper rebuilds it from meta and says so,
+    naming the file, so a refit log shows which prior was used."""
+    z, meta = _load_model("sige_nofit.npz")
+    assert "gamma" not in z.files
+    gamma = prior_diagonal(z, meta, "sige_nofit.npz")
+    assert np.array_equal(gamma, gamma_from_model(meta))
+    out = capsys.readouterr().out
+    assert "sige_nofit.npz" in out and "gamma" in out
+
+
+def test_gamma_from_model_folds_embedded_radial_index():
+    """Embedded models (export_model.jl KIND=embedding) carry a channel k folded
+    into the tensor radial index, n = (n'-1)*d_max + k.  Julia's
+    smoothness_prior (smoothness_priors.jl:110-117) unfolds the TENSOR block to
+    n' = (n-1) div d_max + 1 before applying the functional; the pair block is
+    categorical and is left alone.  The port must do the same."""
+    z, meta = _load_model("sige_nofit.npz")
+    n_B, n_pair, NZ = int(meta["n_B"]), int(meta["n_pair"]), len(meta["elements"])
+    d = 3
+    meta = dict(meta, embedding=json.dumps({"d_max": d, "widths": [d, d], "block_rule": "x"}))
+    gamma = gamma_from_model(meta)
+    assert gamma.shape == (NZ * (n_B + n_pair),)
+    # Independent evaluation of the Julia formula on the unfolded bodies.
+    expect_tensor = np.array([
+        sum((l / WL) ** P + (((n - 1) // d + 1) / WN) ** P for n, l in bb)
+        for bb in meta["nnll"]], np.float64)
+    assert np.array_equal(gamma[:NZ * n_B].reshape(NZ, n_B),
+                          np.repeat(expect_tensor[None], NZ, axis=0))
+    assert np.array_equal(gamma[NZ * n_B:].reshape(NZ, n_pair),
+                          np.repeat(np.arange(1, n_pair + 1, dtype=np.float64)[None] ** 4,
+                                    NZ, axis=0))
+    # ...and the fold actually changed something (some tensor n > d_max).
+    assert not np.array_equal(gamma, gamma_from_model(dict(meta, embedding="")))
