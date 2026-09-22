@@ -22,6 +22,7 @@ import os
 import pathlib
 import sys
 import tempfile
+import warnings
 
 from typing import NamedTuple
 
@@ -230,6 +231,11 @@ def _write_entry(path, cpl, key, mb_spec, Rnl_spec, Ylm_spec):
         # not already end in it, which would leave tmp unreplaced
         with os.fdopen(fd, "wb") as fh:
             np.savez(fh, **entry)
+        # mkstemp creates the file 0600; publish with the default (umask-
+        # adjusted) mode so a shared team cache dir stays readable by the team
+        umask = os.umask(0o022)
+        os.umask(umask)
+        os.chmod(tmp, 0o666 & ~umask)
         os.replace(tmp, path)
     finally:
         pathlib.Path(tmp).unlink(missing_ok=True)
@@ -260,9 +266,14 @@ def _read_entry(path, key):
             nnll_spec=tuple(tuple((int(b[0]), int(b[1])) for b in bb)
                             for bb in meta["nnll_spec"]),
         )
-    except Exception:
+    except Exception as e:
         # torn zip (BadZipFile), schema drift (KeyError/TypeError/ValueError),
-        # unreadable file (OSError): all are misses, never errors
+        # unreadable file (OSError): all are misses, never errors.  The broad
+        # net is the documented contract ("any unreadable entry is a miss"),
+        # but the miss is announced so a permanently-broken entry is visible
+        # in the log instead of silently recomputed on every authoring run.
+        warnings.warn(f"coupling cache: unreadable entry {path.name} "
+                      f"({type(e).__name__}: {e}); recomputing")
         return None, False
     return cpl, True
 

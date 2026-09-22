@@ -154,7 +154,8 @@ def test_corrupt_entry_recomputes(tmp_path, shim):
     p = C._entry_path(tmp_path, C.coupling_key(_MB, _RNL, _YLM))
     data = p.read_bytes()
     p.write_bytes(data[: len(data) // 2])
-    cpl = C.couple_cached(_MB, _RNL, _YLM, cache_dir=str(tmp_path))
+    with pytest.warns(UserWarning, match="unreadable entry"):
+        cpl = C.couple_cached(_MB, _RNL, _YLM, cache_dir=str(tmp_path))
     assert len(shim) == 2 and cpl.A2B.shape[0] == len(_MB)
 
 
@@ -167,7 +168,8 @@ def test_schema_drift_entry_recomputes(tmp_path, shim):
     del meta["aa_sig"]
     z["meta_json"] = np.frombuffer(json.dumps(meta).encode(), np.uint8)
     np.savez(p, **z)
-    cpl = C.couple_cached(_MB, _RNL, _YLM, cache_dir=str(tmp_path))
+    with pytest.warns(UserWarning, match="unreadable entry"):
+        cpl = C.couple_cached(_MB, _RNL, _YLM, cache_dir=str(tmp_path))
     assert len(shim) == 2 and cpl.A2B.shape[0] == len(_MB)
 
 
@@ -193,3 +195,14 @@ def test_concurrent_writes_same_key(tmp_path, shim, monkeypatch):
     got, ok = C._read_entry(p, key)
     assert ok and np.array_equal(got.A2B, cpl.A2B)
     assert not list(tmp_path.glob("*.tmp*"))                  # no leftovers
+
+
+def test_entry_published_with_default_mode(tmp_path, shim):
+    """mkstemp creates files 0600; a published entry must carry the default
+    (umask-adjusted) mode instead, so a shared team cache dir stays readable
+    by the team."""
+    C.couple_cached(_MB, _RNL, _YLM, cache_dir=str(tmp_path))
+    p = C._entry_path(tmp_path, C.coupling_key(_MB, _RNL, _YLM))
+    umask = os.umask(0o022)
+    os.umask(umask)
+    assert (p.stat().st_mode & 0o777) == (0o666 & ~umask)
