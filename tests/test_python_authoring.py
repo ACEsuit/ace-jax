@@ -339,6 +339,7 @@ res["nnll_multiset"] = (sorted(sorted(b) for b in auth.nnll_spec)
 mb, Rnl, Ylm = build_spec(1, 3, 10, wL=1.5)
 cpl = couple(mb_ref, Rnl, Ylm)
 res["a2b_exact"] = bool(np.array_equal(cpl.A2B, np.asarray(zf["A2B"], float)))
+res["aspec_tuple"] = isinstance(cpl.aspec, tuple)     # same type as a cache hit
 res["shapes"] = {
     "A2B": list(m.A2B.shape), "WB": list(m.WB.shape), "Wpair": list(m.Wpair.shape),
     "rnl_Wnlq": list(m.rnl_Wnlq.shape), "pair_Wnlq": list(m.pair_Wnlq.shape),
@@ -375,8 +376,9 @@ m2 = fold_readout(m2)
 meta2 = dict(meta)
 meta2["nnll"] = [[list(b) for b in bb] for bb in cpl.nnll_spec]
 auth2 = auth._replace(model=m2, meta=meta2)
-save_npz("/tmp/opencode_auth_roundtrip.npz", auth2)
-model, rmeta, rz = eio.load("/tmp/opencode_auth_roundtrip.npz")
+out = sys.argv[2]
+save_npz(out, auth2)
+model, rmeta, rz = eio.load(out)
 
 res["arrays"] = {}
 for name, got, ref in (
@@ -395,7 +397,7 @@ from ace_jax.eval import ACECalculator
 
 atoms = Atoms(numbers=zf["test_Z"], positions=zf["test_pos"].T,
               cell=zf["test_cell"].T, pbc=zf["test_pbc"].astype(bool))
-atoms.calc = ACECalculator("/tmp/opencode_auth_roundtrip.npz")
+atoms.calc = ACECalculator(out)
 E = float(atoms.get_potential_energy())
 F = atoms.get_forces()
 S = atoms.get_stress(voigt=False)
@@ -425,7 +427,7 @@ print("RESULT", json.dumps(res))
 
 @pytest.mark.skipif(not os.path.exists(os.path.join(FIX, "si_ace_model.npz")),
                     reason="fixture missing")
-def test_bridge_wellformed_subprocess():
+def test_bridge_wellformed_subprocess(tmp_path):
     """Authored model is structurally identical to the committed Julia fixture,
     and with the fixture's coefficients injected it reproduces Julia's
     energies, forces, stress and descriptors through the eval path."""
@@ -434,12 +436,13 @@ def test_bridge_wellformed_subprocess():
     except ImportError:
         pytest.skip("authoring extra (juliacall) not installed")
     p = subprocess.run([sys.executable, "-c", _BRIDGE,
-                        os.path.join(FIX, "si_ace_model.npz")],
+                        os.path.join(FIX, "si_ace_model.npz"),
+                        str(tmp_path / "roundtrip.npz")],
                        capture_output=True, text=True, timeout=1200)
     assert p.returncode == 0, f"bridge subprocess failed:\n{p.stderr[-2000:]}"
     line = [l for l in p.stdout.splitlines() if l.startswith("RESULT")][-1]
     r = json.loads(line[len("RESULT "):])
-    assert r["nnll_multiset"] and r["a2b_exact"]
+    assert r["nnll_multiset"] and r["a2b_exact"] and r["aspec_tuple"]
     assert r["shapes"]["A2B"] == [110, 230]
     assert r["shapes"]["WB"] == [110, 1] and r["shapes"]["Wpair"] == [10, 1]
     assert r["shapes"]["rnl_Wnlq"] == [1, 1, 37, 15]

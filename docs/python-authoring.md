@@ -12,8 +12,9 @@ init, pair basis, readout, packaging and evaluation are pure Python/NumPy/JAX.
 pair_mode, seed, with_gamma, edge_a_kind)` (`construct/model.py`) walks the same
 steps the Julia exporter walks, returning an `Authoring` NamedTuple:
 
-1. **`resolve_elements`** — atomic numbers or symbols (`"14"`, `14`, `"Si"`) →
-   sorted `zs`.
+1. **`resolve_elements`** — atomic numbers or symbols (`14`, `"Si"`) → `zs`
+   in the order given (it is the species index order, as ACEpotentials'
+   `_convert_zlist` keeps it); duplicates are rejected.
 2. **`build_spec(NZ, order, totaldegree, wL)`** (`construct/spec.py`) — the three
    integer specs ET consumes: `mb_spec` (per-B `(n,l)` tuples under
    `TotalDegree` + `rpe_admissible`), `Rnl_spec`, `Ylm_spec`.
@@ -27,9 +28,16 @@ steps the Julia exporter walks, returning an `Authoring` NamedTuple:
    Catches any ET-version drift in one place.
 5. **`tensor_radial_init` / `pair_radial_init`** (`construct/radial_init.py`) —
    seeded radial coefficients, frozen. `mode="glorot_normal"` (tensor),
-   `"onehot"` (pair, `spl_n = δ(n, 2Z)`-style identity rows) or `"zeros"`;
-   the 7-tuple Agnesi transform `(n_deg, l_shift, a, y0=0, r0, rcut, ycut)` is
-   derived from `(n_deg, l_shift, r0, rcut)` and never stored independently.
+   `"onehot"` (pair, `spl_n = δ(n, 2Z)`-style identity rows) or `"zero"`;
+   the 7-tuple Agnesi transform `(p, q, a, rin, r0, yin, ycut)` is derived
+   from `(p, q, rin, r0, rcut)` per species pair and never stored
+   independently. `r0` defaults to ACEpotentials' `_default_rin0cuts`,
+   `(bond_len(zi) + bond_len(zj)) / 2` per pair (`r0=` overrides it with a
+   scalar or an `(NZ, NZ)` table). The Legendre recurrence uses
+   Polynomials4ML's `OrthPolyBasis1D3T` convention (`P1 = A[1] x + B[1]`,
+   no `P0` factor, so `A[1] = sqrt(3/2)`) — the one `eval/radial.py`'s
+   `poly_recursion` reads, pinned coefficient-for-coefficient against the
+   fixture.
 6. **Zero readout** — `WB`, `Wpair`, `E0` zeros (the `acefit!`-fresh init), then
    `fold_readout` bakes the species pooling into the coefficient tables.
 7. **`smoothness_prior`** (`construct/prior.py`, ported in PR #3) — the
@@ -37,7 +45,8 @@ steps the Julia exporter walks, returning an `Authoring` NamedTuple:
    `[(n,0)]`; `--no-gamma` / `with_gamma=False` skips it.
 
 `save_npz(path, authoring)` (`construct/export.py`) writes the disposable
-npz bridge file.
+npz bridge file, for any of the three radial layouts the loader reads
+(`analytic`, `spline`, `spline_factorised`).
 
 ## Writer routes on the model, not on defaults
 
@@ -119,7 +128,10 @@ keyed by a sha256 of the order-preserving spec JSON — under
 reconstructs the `Coupling` without importing juliacall**: pip install +
 populated cache dir = Julia-free authoring of a known shape. Entries store
 their input specs (hit-time re-check) and the `juliapkg.json` pin hash (a
-pin change invalidates); writes are atomic and best-effort. `couple()` stays
+pin change invalidates); writes are atomic (a unique tmp file per writer,
+then `os.replace`) and best-effort, and any entry that fails to read for
+whatever reason — torn zip, schema drift — is a miss, never an error.
+`couple()` stays
 the uncached parity oracle; `--no-coupling-cache` / `cache_dir="none"` opt
 out. Entries are self-describing npz files — ship one by copying it into a
 team's cache dir.
