@@ -43,34 +43,56 @@ def embed_objective_and_grad(prob, ds, lam):
 def learn_embedding(prob, ds, E0, *, lam=1.0, steps=30, lr=0.05, inner_steps=300,
                     val_score=None, seed=0):
     """Outer VarOpt over the embedding, profiled in theta.  Returns
-    (E_star_normalized, info).  steps=0 -> return normalize_rows(E0) unchanged."""
-    from .varopt import learn, select_by_holdout
+    (E_star_normalized, info).  steps=0 -> return normalize_rows(E0) unchanged.
+
+    Re-homed onto the ParamSet framework (Task 5): the embedding is a VarOpt-routed
+    block of `ps = from_hypers(prob.prior.mu, prob.prior, embed=E0, embed_route="varopt")`.
+    Each outer step re-MAPs theta at the current (row-normalised) embedding via
+    `run_map_ps` -- the inner theta-profile, matching the old `theta_map_at` -- and
+    takes the envelope value/grad d/dE[LML - anchor] from `embed_objective_and_grad`.
+    `varopt_ps` drives the outer Adam ascent over the flat embed vector.  This is a
+    refactor: the theta MAP, the envelope step and the held-out gate are numerically
+    identical to the previous hand-rolled loop."""
+    from .paramset import from_hypers
+    from .ladder import run_map_ps
+    from .varopt import varopt_ps, select_by_holdout
     E0 = jnp.asarray(E0, jnp.float64)
     NZ = E0.shape[0]
     if steps <= 0:
         return normalize_rows(E0), {"steps": 0, "selected": "init", "trace": []}
 
     objective, grad, _ = embed_objective_and_grad(prob, ds, lam)
+    ps = from_hypers(prob.prior.mu, prob.prior, embed=E0, embed_route="varopt")
 
-    # Profiled outer step: re-MAP theta at the current E, then one envelope step.
-    def outer_objective(psi):
-        E = psi.reshape(E0.shape)
-        a = theta_map_at(prob, ds, E, steps=inner_steps, seed=seed)
-        return objective(E, a)
+    # Profiled outer objective/grad closing over the inner MAP: at the current
+    # embed x (flat, RAW), re-MAP theta with run_map_ps (which normalises the rows,
+    # so it reproduces theta_map_at), then take the envelope value/grad at theta*.
+    # varopt.learn evaluates the objective then the gradient at the SAME x on
+    # consecutive calls, so a one-slot cache serves both from a single inner MAP
+    # and records exactly one trace entry per distinct outer point.
+    cache = {"x": None, "val": None, "grad": None}
+    trace = []
 
-    def outer_grad(psi):
-        E = psi.reshape(E0.shape)
-        a = theta_map_at(prob, ds, E, steps=inner_steps, seed=seed)
-        return grad(E, a).reshape(-1)
+    def objective_and_grad(x):
+        if cache["x"] is None or x.shape != cache["x"].shape or not bool(jnp.all(x == cache["x"])):
+            ps_x = ps.set_varopt_vector(x)
+            a = run_map_ps(ps_x, prob, ds, steps=inner_steps, seed=seed).block("hypers").value
+            E = x.reshape(E0.shape)
+            val = objective(E, a)
+            g = jnp.asarray(grad(E, a)).reshape(-1)
+            cache.update(x=x, val=val, grad=g)
+            trace.append(val)
+        return cache["val"], cache["grad"]
 
-    psi0 = E0.reshape(-1)
-    psi_star, oinfo = learn(psi0, outer_objective, outer_grad, steps=steps, lr=lr)
-    E_learned = normalize_rows(psi_star.reshape(E0.shape))
+    ps_star = varopt_ps(ps, objective_and_grad, steps=steps, lr=lr)   # gate handled below
+    E_learned = normalize_rows(ps_star.block("embed").value)
 
-    info = {"steps": int(steps), "trace": oinfo["trace"], "selected": "learned"}
+    info = {"steps": int(steps), "trace": trace, "selected": "learned"}
     if val_score is None:
         return E_learned, info
-    # Held-out gate: keep the best of {learned, mace=E0, eye}; ties -> eye.
+    # Held-out gate: keep the best of {learned, mace=E0, eye}; ties -> eye.  Kept
+    # here (not delegated to varopt_ps, whose gate is only learned-vs-init) so the
+    # three-candidate contract is preserved exactly.
     eye = normalize_rows(jnp.eye(NZ))
     cands = {"eye": eye, "mace": normalize_rows(E0), "learned": E_learned}   # eye first -> tie winner
     label, E_sel = select_by_holdout(cands, val_score)

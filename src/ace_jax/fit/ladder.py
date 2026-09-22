@@ -78,9 +78,15 @@ def run_map_ps(ps, prob, ds, *, steps=500, lr=0.02, seed=0):
     optimise `lml(theta_array)` over the flat LML vector -- which is exactly
     `ps.lml_vector()` (Task-2 `from_hypers` stores the 'hypers' block as
     `to_array(hypers)`).  A materialised embed is threaded through the kernel via
-    `ind.embed`, mirroring `make_lml_embed` in objective.py."""
+    `ind.embed`, mirroring `make_lml_embed` in objective.py -- which normalises
+    the rows (`normalize_rows(E)`) before they reach the kernel, so we apply the
+    same normalisation here (the embed block carries the RAW E), keeping the
+    inner MAP identical to `theta_map_at` / `make_lml_embed`."""
     from .objective import make_lml
+    from .embedding import normalize_rows
     h, embed = ps.materialise()
+    if embed is not None:
+        embed = normalize_rows(embed)
     prob_m = prob if embed is None else prob._replace(ind=prob.ind._replace(embed=embed))
     lml = make_lml(prob_m, ds)
     x_star = run_map(lml, ps.block("hypers").prior, steps=steps, lr=lr, seed=seed,

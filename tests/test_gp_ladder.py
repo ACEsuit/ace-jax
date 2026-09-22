@@ -65,3 +65,35 @@ def test_laplace_fd_matches_exact_width():
     assert draws.shape == (4000, 10) and info["n_floored"] == 0
     assert np.abs(draws.mean(0) - np.asarray(STAR)).max() < 0.02
     assert np.abs(np.array(info["std"]) - WIDTH).max() < 1e-3      # quadratic target: FD Hessian is exact
+
+
+import pytest
+
+
+@pytest.mark.slow
+def test_run_map_ps_normalizes_embed_for_inner_map():
+    # Task-3 gap fixed centrally: an embed-carrying ParamSet stores the RAW E, but
+    # make_lml_embed/theta_map_at feed the kernel normalize_rows(E).  run_map_ps must
+    # apply the same row-normalisation so its inner theta-MAP matches that reference.
+    from ace_jax.eval import highest_precision
+    from ace_jax.fit.paramset import from_hypers
+    from ace_jax.fit.ladder import run_map_ps
+    from ace_jax.fit.varopt_embed import theta_map_at
+    from ace_jax.fit.embedding import normalize_rows
+    from test_gp_varopt import _tiny_problem
+    with highest_precision():
+        prob, ds, els = _tiny_problem()
+        NZ = len(els)
+        rng = np.random.default_rng(0)
+        E = jnp.asarray(np.eye(NZ) + 0.1 * rng.normal(size=(NZ, NZ)))     # rows NOT unit-norm
+        assert not np.allclose(np.asarray(E), np.asarray(normalize_rows(E)))   # E is genuinely raw
+        ps = from_hypers(prob.prior.mu, prob.prior, embed=E, embed_route="varopt")
+        a_ps = run_map_ps(ps, prob, ds, steps=50, seed=0).block("hypers").value
+        # (1) matches make_lml_embed's reference MAP (theta_map_at normalises internally)
+        a_ref = theta_map_at(prob, ds, E, steps=50, seed=0)
+        assert np.allclose(np.asarray(a_ps), np.asarray(a_ref), atol=1e-8)
+        # (2) regression guard: raw-E and pre-normalised-E inputs give the SAME MAP, i.e.
+        #     run_map_ps threads the normalised embed, not the raw one.
+        ps_n = from_hypers(prob.prior.mu, prob.prior, embed=normalize_rows(E), embed_route="varopt")
+        a_norm = run_map_ps(ps_n, prob, ds, steps=50, seed=0).block("hypers").value
+        assert np.allclose(np.asarray(a_ps), np.asarray(a_norm), atol=1e-10)

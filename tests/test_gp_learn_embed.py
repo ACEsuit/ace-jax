@@ -52,6 +52,42 @@ def test_learn_embedding_steps0_returns_init():
         assert np.allclose(np.asarray(E_star), np.asarray(normalize_rows(E0)))   # unchanged
         assert info["steps"] == 0
 
+def test_learn_embedding_uses_paramset_path():
+    # Re-homed onto the ParamSet framework (Task 5).  The steps=0 guard runs
+    # before any framework machinery and must return normalize_rows(E0) bit-for-bit.
+    import numpy as np, jax.numpy as jnp
+    from ace_jax.eval import highest_precision
+    from ace_jax.fit.embedding import species_onehot, normalize_rows
+    from ace_jax.fit.varopt_embed import learn_embedding
+    from test_gp_varopt import _tiny_problem
+    with highest_precision():
+        prob, ds, els = _tiny_problem()
+        E0 = jnp.asarray(species_onehot(len(els)))
+        embed, info = learn_embedding(prob, ds, E0, steps=0)   # steps=0 -> normalize_rows(E0)
+        assert jnp.allclose(embed, normalize_rows(E0))
+
+
+@pytest.mark.slow
+def test_learn_embedding_paramset_path_runs_and_traces():
+    # steps>0 exercises the framework path (from_hypers embed_route="varopt" ->
+    # run_map_ps inner theta-MAP -> embed_objective_and_grad envelope -> varopt_ps).
+    # The returned embed is row-normalised and info carries steps+1 trace entries
+    # (one per distinct outer point, matching the old varopt.learn trace length).
+    import numpy as np, jax.numpy as jnp
+    from ace_jax.eval import highest_precision
+    from ace_jax.fit.embedding import normalize_rows
+    from ace_jax.fit.varopt_embed import learn_embedding
+    from test_gp_varopt import _tiny_problem
+    with highest_precision():
+        prob, ds, els = _tiny_problem()
+        NZ = len(els)
+        E0 = jnp.asarray([[1.0, 0.0], [0.6, 0.8]])[:NZ, :NZ]
+        E_star, info = learn_embedding(prob, ds, E0, steps=2, inner_steps=50, seed=0)
+        assert info["steps"] == 2 and info["selected"] == "learned"
+        assert len(info["trace"]) == 3                                   # steps + 1
+        assert np.allclose(np.sum(np.asarray(E_star) ** 2, axis=1), 1.0, atol=1e-8)   # rows unit-norm
+
+
 @pytest.mark.slow
 def test_learn_embedding_holdout_prefers_block_diagonal_when_val_says_so():
     # val_score rigged so block-diagonal (eye) wins -> gate returns eye, even though
