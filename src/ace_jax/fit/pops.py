@@ -141,6 +141,14 @@ def pops_posterior(deltas, c_star, form="samples"):
     * ``form="hypercube"``: the PCA/axis-aligned box over ``deltas`` reduced to
       a covariance (the package's ``misspecification_sigma_``). Returns
       ``{"cov": (L, L)}``.
+
+    NOTE: ``"samples"`` is a CENTERED committee variance (``pops_var`` takes
+    ``jnp.var`` of ``phi* . (c_star + deltas)`` across the committee), whereas
+    ``"hypercube"`` is an UNCENTERED second moment about the origin (see
+    ``_fit_hypercube_cov``'s ``E[u u^T] = diag(var_axis) + outer(m, m)``, not
+    ``E[(u - E[u])(u - E[u])^T]``). The two forms therefore differ by
+    ``(phi* . mean(deltas))**2`` whenever the pointwise corrections ``deltas``
+    have nonzero mean.
     """
     if form == "samples":
         return {"samples": c_star[None, :] + deltas}

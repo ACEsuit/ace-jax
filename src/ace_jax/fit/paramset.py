@@ -88,7 +88,29 @@ def apply_routes(ps, routes):
     A route naming a block that is absent from the set is ignored (a no-op)."""
     if not routes:
         return ps
-    return ParamSet(tuple(b._replace(route=routes.get(b.name, b.route)) for b in ps.blocks))
+    out = ParamSet(tuple(b._replace(route=routes.get(b.name, b.route)) for b in ps.blocks))
+    _check_sigma_type_lml_layout(out)
+    return out
+
+
+def _check_sigma_type_lml_layout(ps):
+    """`_sigma_type_decode` (objective.py) assumes the LML vector is exactly
+    `[hypers | sigma_type free rows]`. If some OTHER block (e.g. `embed`) is
+    also routed to "lml" while a `sigma_type` block is present, that block's
+    values get interleaved into the LML vector ahead of the sigma_type rows
+    and are silently mis-decoded as log-ratios -- a wrong fit with no error.
+    Raise loudly instead."""
+    names = [b.name for b in ps.blocks]
+    if "sigma_type" not in names:
+        return
+    bad = sorted(b.name for b in ps.blocks
+                 if b.route == "lml" and b.name not in ("hypers", "sigma_type"))
+    if bad:
+        raise ValueError(
+            f"invalid route: block(s) {bad} routed to 'lml' alongside a 'sigma_type' "
+            "block. The LML vector layout is [hypers | sigma_type free rows]; routing "
+            "any other block to 'lml' would silently corrupt that decode. Route "
+            f"{bad} to 'fixed' or 'varopt' instead.")
 
 
 def build_fit_paramset(hypers, prior, *, embed=None, embed_route="fixed",
@@ -99,7 +121,11 @@ def build_fit_paramset(hypers, prior, *, embed=None, embed_route="fixed",
     applied last.  With `sigma_type=False`, no embed and no route (the default),
     this is exactly `from_hypers(hypers, prior)`: a single all-LML hypers block,
     whose `run_map_ps` reduces to the flat `run_map` (Task 3 equivalence), so a
-    default-flags run stays numerically unchanged."""
+    default-flags run stays numerically unchanged.
+
+    Raises `ValueError` if `route` would route a block other than `hypers`/
+    `sigma_type` to "lml" while a `sigma_type` block is present -- see
+    `_check_sigma_type_lml_layout`."""
     nt = int(n_types) if sigma_type else 1
     ps = from_hypers(hypers, prior, embed=embed, embed_route=embed_route, n_types=nt)
     return apply_routes(ps, parse_route(route))

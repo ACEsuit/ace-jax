@@ -114,6 +114,18 @@ def test_route_overrides_block_routes():
     assert [b.name for b in ps2.blocks] == ["hypers"]
 
 
+def test_route_embed_to_lml_with_sigma_type_raises():
+    # embed routed to "lml" while a sigma_type block is present would corrupt
+    # _sigma_type_decode's [hypers | sigma_type free rows] layout -- must raise.
+    from ace_jax.fit.hypers import default_prior
+    from ace_jax.fit.paramset import build_fit_paramset
+    pr = default_prior(2.5)
+    embed = jnp.ones((3, 4))
+    with pytest.raises(ValueError):
+        build_fit_paramset(pr.mu, pr, embed=embed, n_types=2, sigma_type=True,
+                           route='{"embed": "lml"}')
+
+
 def test_parse_route_parses_and_validates():
     from ace_jax.fit.paramset import parse_route
     assert parse_route(None) == {}

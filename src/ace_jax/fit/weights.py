@@ -70,20 +70,23 @@ class Quantity:
 
 class ConfigType:
     """Per-config-type per-quantity multiplier, looked up via
-    `meta[key]` (default key "config_type"). Unknown/absent config_type
-    falls back to `default`; an unknown quantity within the resolved entry
-    is neutral 1.0."""
+    `meta[key]` (default key "config_type"). The lookup is CASE-INSENSITIVE,
+    matching `data.py`'s `_get`/`type_idx` resolution, so a config_type that
+    differs only in case from a table key still resolves to that entry rather
+    than silently falling back to `default`. Unknown/absent config_type falls
+    back to `default`; an unknown quantity within the resolved entry is
+    neutral 1.0."""
 
     learnable = False
 
     def __init__(self, table: dict, key: str = "config_type", default: Optional[dict] = None):
-        self.table = dict(table)
+        self.table = {str(k).lower(): v for k, v in table.items()}
         self.key = key
         self.default = {} if default is None else dict(default)
 
     def weight(self, meta: dict, quantity: str) -> float:
         ctype = meta.get(self.key)
-        entry = self.table.get(ctype, self.default) if ctype is not None else self.default
+        entry = self.table.get(str(ctype).lower(), self.default) if ctype is not None else self.default
         return float(entry.get(quantity, 1.0))
 
     def params(self):
