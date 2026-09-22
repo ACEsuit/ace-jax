@@ -43,6 +43,10 @@ p.add_argument("--density", choices=["none", "pair"], default="none",
 p.add_argument("--warp", choices=["none", "sqrt"], default="none",
                help="feature warp: sqrt gives the Finnis-Sinclair sqrt-density embedding")
 p.add_argument("--no-deriv-dtc", action="store_true", help="force/virial variance SoR only (drop the derivative-DTC)")
+p.add_argument("--uq", choices=["blr", "pops"], default="blr", help="linear-arm predictive UQ: blr (posterior variance, today's default) or pops (weight-space misspecification). pops requires --arm linear.")
+p.add_argument("--pops-posterior", choices=["samples", "hypercube"], default="samples", help="POPS posterior form (uq=pops): committee of weight samples, or the PCA/box misspecification covariance")
+p.add_argument("--pops-leverage-pct", type=float, default=0.0, help="POPS leverage percentile (uq=pops); 0 keeps every training point")
+p.add_argument("--aleatoric", action="store_true", help="add the label noise (sigma_q/w)^2 to the POPS predictive variance (label-predictive rather than misspecification-only)")
 p.add_argument("--no-predict-train", action="store_true", help="skip train-set UQ prediction (a diagnostic; ~46%% of runtime at Cantor scale)")
 p.add_argument("--rungs", default="map,laplace"); p.add_argument("--n-draws", type=int, default=64)
 p.add_argument("--map-steps", type=int, default=150); p.add_argument("--map-lr", type=float, default=0.02)
@@ -66,6 +70,8 @@ p.add_argument("--embed-anchor", type=float, default=1.0, help="lambda for the s
 p.add_argument("--embed-steps", type=int, default=30, help="outer VarOpt steps (0 = frozen)")
 p.add_argument("--embed-holdout", type=float, default=0.2, help="fraction of train held out for the acceptance gate")
 a = p.parse_args()
+if a.uq == "pops" and a.arm != "linear":
+    p.error("--uq pops is the linear-arm misspecification predictive; pass --arm linear (or --uq blr).")
 out = pathlib.Path(a.out); out.mkdir(parents=True, exist_ok=True)
 T0 = time.time(); timings = {}
 
@@ -266,7 +272,17 @@ with highest_precision():
             splits.append(("ood", ood_o, ds_ood, base_ood))
         for split, cfgs, ds, base in splits:
             t = time.time()
-            pred = predict_mixture(sub, prob, ds_train, ds, deriv_dtc=not a.no_deriv_dtc)
+            if a.uq == "pops":
+                from ace_jax.fit.predict import predict_fixed
+                # POPS is a fixed-theta (MAP) misspecification predictive, not a
+                # hyperposterior mixture: the mean is the BLR mean, the variance is
+                # the weight-space misspecification covariance (+ label noise if
+                # --aleatoric).  Same for every rung (theta_map only).
+                pred = predict_fixed(theta_map, prob, ds_train, ds, deriv_dtc=not a.no_deriv_dtc,
+                                     uq="pops", pops_form=a.pops_posterior,
+                                     leverage_pct=a.pops_leverage_pct, aleatoric=a.aleatoric)
+            else:
+                pred = predict_mixture(sub, prob, ds_train, ds, deriv_dtc=not a.no_deriv_dtc)
             timings[f"predict_{split}_{rung}"] = time.time() - t
             nat = np.array([len(c.numbers) for c in cfgs])
             # references are the ORIGINAL labels; add mu_0 back to the predictions

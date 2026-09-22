@@ -162,6 +162,49 @@ def test_force_virial_dtc_is_derivative_of_energy(fitted):
             assert abs(fd - float(Fv[n, a])) < 1e-4 + 1e-3 * abs(float(Fv[n, a]))
 
 
+def test_pops_predict_finite_and_aleatoric_inflates(tiny_linear_problem):
+    """Task 10: uq='pops' on the linear arm returns FINITE per-config E sigma and
+    per-component F sigma with the right shapes; --aleatoric strictly inflates it."""
+    prob, ds = tiny_linear_problem
+    theta = Hypers(log_ell=0.0, log_A=0.0, log_alpha=0.0, log_r0=np.log(2.35), log_eps=0.0,
+                   log_rho=0.0, log_sigma_c=np.log(0.3), log_sigma_E=np.log(0.01),
+                   log_sigma_F=np.log(0.01), log_sigma_V=np.log(0.01))
+    with highest_precision():
+        p = predict_fixed(theta, prob, ds, ds, uq="pops")
+        pa = predict_fixed(theta, prob, ds, ds, uq="pops", aleatoric=True)
+        pblr = predict_fixed(theta, prob, ds, ds)                       # uq='blr' default
+    assert np.all(np.isfinite(p.E_var)) and np.all(p.E_var >= 0.0)
+    assert np.all(np.isfinite(p.F_var)) and np.all(p.F_var >= 0.0)
+    assert p.E_var.shape == p.E_mean.shape                             # per config
+    assert p.F_var.shape == p.F_mean.shape == (p.F_mean.shape[0], 3)   # per component
+    # mean is the BLR linear posterior mean -- untouched by the POPS variance path
+    assert np.allclose(np.asarray(p.E_mean), np.asarray(pblr.E_mean))
+    assert np.allclose(np.asarray(p.F_mean), np.asarray(pblr.F_mean))
+    # aleatoric ADDS (sigma_q / w)^2 > 0 to every observed row -> strictly larger
+    assert np.all(pa.E_var > p.E_var) and np.all(pa.F_var > p.F_var)
+
+
+def test_pops_hypercube_form_and_leverage(tiny_linear_problem):
+    """The hypercube posterior form and a >0 leverage percentile both stay finite."""
+    prob, ds = tiny_linear_problem
+    theta = Hypers(log_ell=0.0, log_A=0.0, log_alpha=0.0, log_r0=np.log(2.35), log_eps=0.0,
+                   log_rho=0.0, log_sigma_c=np.log(0.3), log_sigma_E=np.log(0.01),
+                   log_sigma_F=np.log(0.01), log_sigma_V=np.log(0.01))
+    with highest_precision():
+        p = predict_fixed(theta, prob, ds, ds, uq="pops", pops_form="hypercube",
+                          leverage_pct=50.0)
+    assert np.all(np.isfinite(p.E_var)) and np.all(p.E_var >= 0.0)
+    assert np.all(np.isfinite(p.F_var)) and np.all(p.F_var >= 0.0)
+
+
+def test_pops_requires_linear_arm(fitted):
+    """uq='pops' is linear-arm only: the GP arm (M>0) must error clearly."""
+    prob, train, test, theta, configs, E0 = fitted
+    assert prob.ind.XM.shape[0] > 0
+    with pytest.raises(ValueError, match="linear"):
+        predict_fixed(theta, prob, train, test, uq="pops")
+
+
 def test_deriv_dtc_requires_cosine(fitted):
     """matern32 is not twice differentiable at coincidence (Ruling R30); the
     derivative-DTC must refuse it rather than emit untrustworthy force UQ."""

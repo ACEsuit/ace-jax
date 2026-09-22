@@ -10,7 +10,7 @@ from typing import NamedTuple
 import jax
 import jax.numpy as jnp
 import numpy as np
-from jax.scipy.linalg import solve_triangular
+from jax.scipy.linalg import cho_solve, solve_triangular
 
 from .hypers import from_array
 from .kernels import K_MM, k_rows
@@ -18,8 +18,9 @@ from .summary import site_summary
 from .feature import apply as _feat, dwarp
 from .objective import posterior
 from .data import VOIGT, flat_edges
+from .pops import pops_posterior, pops_var
 from .rows import Rows, linear_rows, residual_inputs, residual_rows
-from .stats import sufficient_statistics
+from .stats import pops_statistics, sufficient_statistics
 
 
 class Prediction(NamedTuple):
@@ -209,10 +210,10 @@ def _predict_fn(prob, dtc, deriv_dtc):
     return jax.jit(lambda th, mu, L, b: _predict_batch(th, prob, mu, L, b, dtc, deriv_dtc))
 
 
-def _run_predict(f, theta, prob, ds_train, ds_test):
-    st = sufficient_statistics(theta, prob.spec, prob.model, prob.ind, prob.cfg, ds_train)
-    mu, L = posterior(theta, st, prob)
-    outs = [f(theta, mu, L, jax.tree.map(lambda a: a[i], ds_test)) for i in range(ds_test.n_batches)]
+def _pack(outs, prob, ds_test):
+    """Stack the per-batch (E, F, V) mean/var tuples, add the E0 offset to the
+    energy mean, and drop the padded configs/nodes (shared by the BLR and POPS
+    predictive paths)."""
     Em = jnp.stack([o[0] for o in outs]) + _e0_offset(prob, ds_test)     # (nb, C)
     cm, nm = np.asarray(ds_test.cfg_mask).reshape(-1), np.asarray(ds_test.node_mask).reshape(-1)
     cat = lambda k: np.concatenate([np.asarray(o[k]) for o in outs])
@@ -220,11 +221,75 @@ def _run_predict(f, theta, prob, ds_train, ds_test):
                       cat(4)[cm], cat(5)[cm])
 
 
-def predict_fixed(theta, prob, ds_train, ds_test, dtc=True, deriv_dtc=True):
+def _run_predict(f, theta, prob, ds_train, ds_test):
+    st = sufficient_statistics(theta, prob.spec, prob.model, prob.ind, prob.cfg, ds_train)
+    mu, L = posterior(theta, st, prob)
+    outs = [f(theta, mu, L, jax.tree.map(lambda a: a[i], ds_test)) for i in range(ds_test.n_batches)]
+    return _pack(outs, prob, ds_test)
+
+
+def _pops_predict_batch(prob, mu, post, sigma, aleatoric, batch):
+    """Linear-arm POPS predictive for one batch.  The MEAN is the BLR linear
+    posterior mean c*.phi* (mu == c_star; unchanged from uq='blr').  The VARIANCE
+    is the POPS weight-space misspecification covariance evaluated on the RAW (NOT
+    whitened) test linear rows phi* -- Sigma_POPS is already a weight covariance,
+    so predictive var = pops_var(phi*, post) directly.  E rows are one L-vector per
+    config, F rows one L-vector per force component, V rows per Voigt component.
+    aleatoric=True ADDs the per-quantity label noise (sigma_q / w*)^2 (padded rows,
+    w=0, contribute 0)."""
+    lin, _, _ = linear_rows(prob.model, prob.cfg, batch)
+    L = lin.E.shape[-1]
+    phiE, phiF, phiV = lin.E, lin.F.reshape(-1, L), lin.V.reshape(-1, L)
+    Em, Ev = phiE @ mu, pops_var(phiE, post)
+    Fm, Fv = phiF @ mu, pops_var(phiF, post)
+    Vm, Vv = phiV @ mu, pops_var(phiV, post)
+    if aleatoric:
+        alea = lambda w, sq: jnp.where(w > 0, (sq / jnp.where(w > 0, w, 1.0)) ** 2, 0.0)
+        Ev = Ev + alea(batch.w_E, sigma["E"])
+        Fv = Fv + alea(jnp.repeat(batch.w_F, 3), sigma["F"])
+        Vv = Vv + alea(jnp.repeat(batch.w_V, 6), sigma["V"])
+    return Em, Ev, Fm.reshape(-1, 3), Fv.reshape(-1, 3), Vm.reshape(-1, 6), Vv.reshape(-1, 6)
+
+
+def _run_predict_pops(theta, prob, ds_train, ds_test, form, leverage_pct, aleatoric):
+    """POPS misspecification predictive for the LINEAR arm (M == 0).  Sigma0 = A^-1
+    and c_star = A^-1 b come from objective.posterior; the pointwise corrections
+    deltas = pops_statistics(...) (Task 9) build the POPS posterior (Task 8), which
+    replaces the BLR variance over the raw test linear rows."""
+    M = prob.ind.XM.shape[0]
+    if M > 0:
+        raise ValueError(
+            f"uq='pops' is the linear-arm (M=0) misspecification predictive only; "
+            f"this problem has M={M} inducing points (the GP arm, --arm gp, which "
+            f"uses the DTC path).  Pass --arm linear, or --uq blr.")
+    st = sufficient_statistics(theta, prob.spec, prob.model, prob.ind, prob.cfg, ds_train)
+    c_star, cholA = posterior(theta, st, prob)                     # mean A^-1 b, chol(A)
+    Sigma0 = cho_solve((cholA, True), jnp.eye(c_star.shape[0]))    # A^-1
+    sigma = {q: float(jnp.exp(getattr(theta, f"log_sigma_{q}"))) for q in "EFV"}   # per-quantity sigma_q
+    deltas = pops_statistics(c_star, Sigma0, prob, ds_train, sigma, leverage_pct=leverage_pct)
+    post = pops_posterior(deltas, c_star, form=form)
+    f = jax.jit(lambda mu, b: _pops_predict_batch(prob, mu, post, sigma, aleatoric, b))
+    outs = [f(c_star, jax.tree.map(lambda a: a[i], ds_test)) for i in range(ds_test.n_batches)]
+    return _pack(outs, prob, ds_test)
+
+
+def predict_fixed(theta, prob, ds_train, ds_test, dtc=True, deriv_dtc=True,
+                  uq="blr", pops_form="samples", leverage_pct=0.0, aleatoric=False):
     """dtc=False drops the DTC prior residual from E_var (SoR only; for tests).
     deriv_dtc=False keeps the energy DTC residual but drops its force/virial
-    derivative (F_var, V_var stay SoR-only)."""
-    return _run_predict(_predict_fn(prob, dtc, deriv_dtc), theta, prob, ds_train, ds_test)
+    derivative (F_var, V_var stay SoR-only).
+
+    uq='blr' (default) is today's linear/GP posterior predictive variance,
+    unchanged.  uq='pops' selects the linear-arm POPS misspecification predictive:
+    the mean is untouched, the variance comes from the POPS weight-space posterior
+    (pops_form in {'samples','hypercube'}, leverage_pct the leverage percentile),
+    and aleatoric=True adds the label noise (sigma_q/w)^2.  POPS is linear-arm only
+    (raises on M>0)."""
+    if uq == "blr":
+        return _run_predict(_predict_fn(prob, dtc, deriv_dtc), theta, prob, ds_train, ds_test)
+    if uq == "pops":
+        return _run_predict_pops(theta, prob, ds_train, ds_test, pops_form, leverage_pct, aleatoric)
+    raise ValueError(f"uq must be 'blr' or 'pops', got {uq!r}")
 
 
 def predict_mixture(draws, prob, ds_train, ds_test, deriv_dtc=True):
