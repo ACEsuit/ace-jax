@@ -228,21 +228,28 @@ def _run_predict(f, theta, prob, ds_train, ds_test):
     return _pack(outs, prob, ds_test)
 
 
-def _pops_predict_batch(prob, mu, post, sigma, aleatoric, batch):
+def _pops_predict_batch(prob, mu, post, sigma, aleatoric, Sigma0, epistemic, batch):
     """Linear-arm POPS predictive for one batch.  The MEAN is the BLR linear
     posterior mean c*.phi* (mu == c_star; unchanged from uq='blr').  The VARIANCE
     is the POPS weight-space misspecification covariance evaluated on the RAW (NOT
     whitened) test linear rows phi* -- Sigma_POPS is already a weight covariance,
     so predictive var = pops_var(phi*, post) directly.  E rows are one L-vector per
     config, F rows one L-vector per force component, V rows per Voigt component.
-    aleatoric=True ADDs the per-quantity label noise (sigma_q / w*)^2 (padded rows,
-    w=0, contribute 0)."""
+    epistemic=True ADDS the ordinary linear posterior variance phi*.Sigma0.phi*
+    (Sigma0 = A^-1) -- the upstream popsregression predictive is misspecification +
+    this Bayesian term, and it is the term that dominates (and self-calibrates) when
+    the design is under-determined; omitting it is why the box-only variance
+    under-covers on small data.  aleatoric=True ADDs the per-quantity label noise
+    (sigma_q / w*)^2 (padded rows, w=0, contribute 0)."""
     lin, _, _ = linear_rows(prob.model, prob.cfg, batch)
     L = lin.E.shape[-1]
     phiE, phiF, phiV = lin.E, lin.F.reshape(-1, L), lin.V.reshape(-1, L)
     Em, Ev = phiE @ mu, pops_var(phiE, post)
     Fm, Fv = phiF @ mu, pops_var(phiF, post)
     Vm, Vv = phiV @ mu, pops_var(phiV, post)
+    if epistemic:
+        quad = lambda phi: jnp.sum((phi @ Sigma0) * phi, axis=1)   # phi.Sigma0.phi (linear posterior var)
+        Ev = Ev + quad(phiE); Fv = Fv + quad(phiF); Vv = Vv + quad(phiV)
     if aleatoric:
         alea = lambda w, sq: jnp.where(w > 0, (sq / jnp.where(w > 0, w, 1.0)) ** 2, 0.0)
         Ev = Ev + alea(batch.w_E, sigma["E"])
@@ -251,7 +258,7 @@ def _pops_predict_batch(prob, mu, post, sigma, aleatoric, batch):
     return Em, Ev, Fm.reshape(-1, 3), Fv.reshape(-1, 3), Vm.reshape(-1, 6), Vv.reshape(-1, 6)
 
 
-def _run_predict_pops(theta, prob, ds_train, ds_test, form, leverage_pct, aleatoric):
+def _run_predict_pops(theta, prob, ds_train, ds_test, form, leverage_pct, aleatoric, epistemic):
     """POPS misspecification predictive for the LINEAR arm (M == 0).  Sigma0 = A^-1
     and c_star = A^-1 b come from objective.posterior; the pointwise corrections
     deltas = pops_statistics(...) (Task 9) build the POPS posterior (Task 8), which
@@ -268,13 +275,14 @@ def _run_predict_pops(theta, prob, ds_train, ds_test, form, leverage_pct, aleato
     sigma = {q: float(jnp.exp(getattr(theta, f"log_sigma_{q}"))) for q in "EFV"}   # per-quantity sigma_q
     deltas = pops_statistics(c_star, Sigma0, prob, ds_train, sigma, leverage_pct=leverage_pct)
     post = pops_posterior(deltas, c_star, form=form)
-    f = jax.jit(lambda mu, b: _pops_predict_batch(prob, mu, post, sigma, aleatoric, b))
+    f = jax.jit(lambda mu, b: _pops_predict_batch(prob, mu, post, sigma, aleatoric, Sigma0, epistemic, b))
     outs = [f(c_star, jax.tree.map(lambda a: a[i], ds_test)) for i in range(ds_test.n_batches)]
     return _pack(outs, prob, ds_test)
 
 
 def predict_fixed(theta, prob, ds_train, ds_test, dtc=True, deriv_dtc=True,
-                  uq="blr", pops_form="hypercube", leverage_pct=0.0, aleatoric=True):
+                  uq="blr", pops_form="hypercube", leverage_pct=0.0, aleatoric=True,
+                  pops_epistemic=True):
     """dtc=False drops the DTC prior residual from E_var (SoR only; for tests).
     deriv_dtc=False keeps the energy DTC residual but drops its force/virial
     derivative (F_var, V_var stay SoR-only).
@@ -290,7 +298,7 @@ def predict_fixed(theta, prob, ds_train, ds_test, dtc=True, deriv_dtc=True,
     if uq == "blr":
         return _run_predict(_predict_fn(prob, dtc, deriv_dtc), theta, prob, ds_train, ds_test)
     if uq == "pops":
-        return _run_predict_pops(theta, prob, ds_train, ds_test, pops_form, leverage_pct, aleatoric)
+        return _run_predict_pops(theta, prob, ds_train, ds_test, pops_form, leverage_pct, aleatoric, pops_epistemic)
     raise ValueError(f"uq must be 'blr' or 'pops', got {uq!r}")
 
 

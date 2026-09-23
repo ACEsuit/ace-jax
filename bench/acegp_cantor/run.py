@@ -48,6 +48,7 @@ p.add_argument("--uq", choices=["blr", "pops"], default="blr", help="linear-arm 
 p.add_argument("--pops-posterior", choices=["hypercube", "ensemble"], default="hypercube", help="POPS posterior form (uq=pops): hypercube (PCA/box misspecification covariance; DEFAULT, matches upstream popsregression) or ensemble (committee of weight samples; centred). ('samples' is reserved for a future draw-from-Sigma route.)")
 p.add_argument("--pops-leverage-pct", type=float, default=0.0, help="POPS leverage percentile (uq=pops); 0 keeps every training point")
 p.add_argument("--aleatoric", action=argparse.BooleanOptionalAction, default=True, help="add the label noise (sigma_q/w)^2 to the POPS predictive variance (label-predictive; DEFAULT on). --no-aleatoric gives the misspecification-only variance.")
+p.add_argument("--pops-epistemic", action=argparse.BooleanOptionalAction, default=True, help="add the linear posterior variance phi.Sigma0.phi to the POPS predictive (uq=pops), matching upstream popsregression (misspec + Bayes); DEFAULT on. Dominant when the design is under-determined.")
 p.add_argument("--no-predict-train", action="store_true", help="skip train-set UQ prediction (a diagnostic; ~46%% of runtime at Cantor scale)")
 p.add_argument("--rungs", default="map,laplace"); p.add_argument("--n-draws", type=int, default=64)
 p.add_argument("--map-steps", type=int, default=150); p.add_argument("--map-lr", type=float, default=0.02)
@@ -354,7 +355,8 @@ with highest_precision():
                 # --aleatoric).  Same for every rung (theta_map only).
                 pred = predict_fixed(theta_map, prob, ds_train, ds, deriv_dtc=not a.no_deriv_dtc,
                                      uq="pops", pops_form=a.pops_posterior,
-                                     leverage_pct=a.pops_leverage_pct, aleatoric=a.aleatoric)
+                                     leverage_pct=a.pops_leverage_pct, aleatoric=a.aleatoric,
+                                     pops_epistemic=a.pops_epistemic)
             else:
                 pred = predict_mixture(sub, prob, ds_train, ds, deriv_dtc=not a.no_deriv_dtc)
             timings[f"predict_{split}_{rung}"] = time.time() - t

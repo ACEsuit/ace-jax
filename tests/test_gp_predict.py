@@ -203,6 +203,22 @@ def test_pops_default_is_hypercube_aleatoric(tiny_linear_problem):
     assert not np.allclose(np.asarray(d.E_var), np.asarray(so.E_var))
 
 
+def test_pops_epistemic_inflates_and_default_on(tiny_linear_problem):
+    """pops_epistemic adds the linear posterior variance phi.Sigma0.phi (upstream
+    popsregression predictive = misspecification + this Bayes term); default on."""
+    prob, ds = tiny_linear_problem
+    theta = Hypers(log_ell=0.0, log_A=0.0, log_alpha=0.0, log_r0=np.log(2.35), log_eps=0.0,
+                   log_rho=0.0, log_sigma_c=np.log(0.3), log_sigma_E=np.log(0.01),
+                   log_sigma_F=np.log(0.01), log_sigma_V=np.log(0.01))
+    with highest_precision():
+        no_e = predict_fixed(theta, prob, ds, ds, uq="pops", aleatoric=False, pops_epistemic=False)
+        yes_e = predict_fixed(theta, prob, ds, ds, uq="pops", aleatoric=False, pops_epistemic=True)
+        default = predict_fixed(theta, prob, ds, ds, uq="pops", aleatoric=False)   # epistemic default on
+    assert np.all(np.asarray(yes_e.E_var) >= np.asarray(no_e.E_var) - 1e-12)
+    assert np.any(np.asarray(yes_e.E_var) > np.asarray(no_e.E_var))
+    assert np.allclose(np.asarray(default.E_var), np.asarray(yes_e.E_var))
+
+
 def test_pops_hypercube_form_and_leverage(tiny_linear_problem):
     """The hypercube posterior form and a >0 leverage percentile both stay finite."""
     prob, ds = tiny_linear_problem
