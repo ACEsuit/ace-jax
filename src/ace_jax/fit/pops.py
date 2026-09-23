@@ -201,10 +201,19 @@ def pops_posterior(deltas, c_star, form="hypercube"):
     under strong misspecification, and the misspecification term (both forms) is
     what fixes it.  So most of the SiGe/Cantor "ensemble 19 vs hypercube+alea 1"
     gap was the aleatoric flag (ensemble-run misspec-thin, hcube-run carried it),
-    not centred-vs-uncentred.  The ~5x ensemble-vs-hypercube gap our port showed
-    (aleatoric-off) is NOT reproduced on the benign 1D case, so it is either
-    ACE-regime-specific (whitened multi-quantity design inflating mean(delta)) or
-    a port quirk -- an open item to pin down directly.
+    not centred-vs-uncentred.
+
+    RESOLVED (2026-09-23, spike/pops_ace_check.py, on the real SiGe M=0 design).
+    The separate ~5x ensemble-vs-hypercube gap (aleatoric-off: ensemble rms-z E
+    12.4 / F 21.8 vs hypercube 2.2 / 3.6) is REAL, by-design, and regime-specific
+    -- NOT the mean term and NOT a port bug.  On ACE the pointwise corrections are
+    strongly HEAVY-TAILED (projected-correction kurtosis ~10, vs 3 for Gaussian),
+    so the hypercube's uniform box over the full min..max range has variance
+    (range)^2/12 ~= 58x the committee's centred variance, while the mean-term
+    fraction is ~0.  ('ensemble' reports the committee bulk and under-covers;
+    'hypercube' spans the tails and is the more robust estimator -- another reason
+    it is the default.)  The benign 1D case has near-Gaussian corrections, so box
+    ~= committee there and the two forms nearly agree.
     """
     if form == "ensemble":
         return {"ensemble": c_star[None, :] + deltas}
