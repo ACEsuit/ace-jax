@@ -274,7 +274,7 @@ def _run_predict_pops(theta, prob, ds_train, ds_test, form, leverage_pct, aleato
 
 
 def predict_fixed(theta, prob, ds_train, ds_test, dtc=True, deriv_dtc=True,
-                  uq="blr", pops_form="samples", leverage_pct=0.0, aleatoric=False):
+                  uq="blr", pops_form="hypercube", leverage_pct=0.0, aleatoric=True):
     """dtc=False drops the DTC prior residual from E_var (SoR only; for tests).
     deriv_dtc=False keeps the energy DTC residual but drops its force/virial
     derivative (F_var, V_var stay SoR-only).
@@ -284,7 +284,10 @@ def predict_fixed(theta, prob, ds_train, ds_test, dtc=True, deriv_dtc=True,
     the mean is untouched, the variance comes from the POPS weight-space posterior
     (pops_form in {'samples','hypercube'}, leverage_pct the leverage percentile),
     and aleatoric=True adds the label noise (sigma_q/w)^2.  POPS is linear-arm only
-    (raises on M>0)."""
+    (raises on M>0).  The POPS defaults ('hypercube' + aleatoric) match the upstream
+    popsregression package default and are the calibrated choice: 'samples' is the
+    centred committee variance, which drops the systematic-misspecification mean term
+    and is badly overconfident (see pops.pops_posterior)."""
     if uq == "blr":
         return _run_predict(_predict_fn(prob, dtc, deriv_dtc), theta, prob, ds_train, ds_test)
     if uq == "pops":

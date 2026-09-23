@@ -206,7 +206,7 @@ def sige_fit():
             return predict_fixed(theta_map, prob, ds_train, ds_test, uq="pops",
                                  pops_form=form, aleatoric=alea)
         pred = {
-            ("samples", False): _pops("samples", False),      # run.py default "native POPS"
+            ("samples", False): _pops("samples", False),      # centred, misspec-only (overconfident)
             ("samples", True): _pops("samples", True),
             ("hypercube", False): _pops("hypercube", False),
             ("hypercube", True): _pops("hypercube", True),
@@ -238,7 +238,7 @@ def _sige_qty(fit, pred, quantity):
 
 # The four POPS predictives (posterior form x aleatoric), plus a short label.
 # The misspecification-only rows (aleatoric False) are the candidate "native
-# POPS" forms; "samples,False" is the run.py --uq pops default.
+# POPS" forms; ("hypercube", True) is the run.py --uq pops default.
 _POPS_ROWS = [
     (("samples", False), "POPS s"),
     (("samples", True), "POPS s+alea"),
@@ -254,7 +254,7 @@ _NATIVE_FORMS = [(("samples", False), "POPS s"), (("hypercube", False), "POPS hc
 def test_sige_pops_per_quantity_calibration_gate(sige_fit):
     from ace_jax.fit.metrics import rmse
     fit = sige_fit
-    default_pops = fit["pred"][("samples", False)]
+    default_pops = fit["pred"][("hypercube", True)]   # run.py default (hypercube + aleatoric)
 
     # ---- HARD ASSERTS (must hold regardless of the scientific outcome) --------
     # Every POPS sigma is finite and the right shape (E: one per config; F: one

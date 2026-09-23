@@ -170,7 +170,7 @@ def test_pops_predict_finite_and_aleatoric_inflates(tiny_linear_problem):
                    log_rho=0.0, log_sigma_c=np.log(0.3), log_sigma_E=np.log(0.01),
                    log_sigma_F=np.log(0.01), log_sigma_V=np.log(0.01))
     with highest_precision():
-        p = predict_fixed(theta, prob, ds, ds, uq="pops")
+        p = predict_fixed(theta, prob, ds, ds, uq="pops", aleatoric=False)  # misspec-only baseline
         pa = predict_fixed(theta, prob, ds, ds, uq="pops", aleatoric=True)
         pblr = predict_fixed(theta, prob, ds, ds)                       # uq='blr' default
     assert np.all(np.isfinite(p.E_var)) and np.all(p.E_var >= 0.0)
@@ -182,6 +182,25 @@ def test_pops_predict_finite_and_aleatoric_inflates(tiny_linear_problem):
     assert np.allclose(np.asarray(p.F_mean), np.asarray(pblr.F_mean))
     # aleatoric ADDS (sigma_q / w)^2 > 0 to every observed row -> strictly larger
     assert np.all(pa.E_var > p.E_var) and np.all(pa.F_var > p.F_var)
+
+
+def test_pops_default_is_hypercube_aleatoric(tiny_linear_problem):
+    """Revised decision: the POPS default is hypercube + aleatoric (matches the
+    upstream popsregression default; the calibrated form).  'samples' centred with
+    no aleatoric is the overconfident form and must NOT be the default."""
+    prob, ds = tiny_linear_problem
+    theta = Hypers(log_ell=0.0, log_A=0.0, log_alpha=0.0, log_r0=np.log(2.35), log_eps=0.0,
+                   log_rho=0.0, log_sigma_c=np.log(0.3), log_sigma_E=np.log(0.01),
+                   log_sigma_F=np.log(0.01), log_sigma_V=np.log(0.01))
+    with highest_precision():
+        d  = predict_fixed(theta, prob, ds, ds, uq="pops")                                    # defaults
+        hc = predict_fixed(theta, prob, ds, ds, uq="pops", pops_form="hypercube", aleatoric=True)
+        so = predict_fixed(theta, prob, ds, ds, uq="pops", pops_form="samples", aleatoric=False)
+    # the default binds to hypercube + aleatoric ...
+    assert np.allclose(np.asarray(d.E_var), np.asarray(hc.E_var))
+    assert np.allclose(np.asarray(d.F_var), np.asarray(hc.F_var))
+    # ... and is NOT the old (samples, misspec-only) form
+    assert not np.allclose(np.asarray(d.E_var), np.asarray(so.E_var))
 
 
 def test_pops_hypercube_form_and_leverage(tiny_linear_problem):
