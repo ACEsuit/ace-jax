@@ -145,8 +145,7 @@ np.save(out / "split_perm.npy", perm)
 # mu_0: subtract the MH-1 pair mean from the labels (fit the many-body residual),
 # add it back at prediction.  base_* are the per-config (E, F, V) of mu_0.
 if a.baseline:
-    import sys; sys.path.insert(0, str(pathlib.Path(__file__).parent))
-    from baseline import load_mean, subtract_baseline
+    from ace_jax.fit.baseline import load_mean, subtract_baseline
     mean = load_mean(a.baseline)
     train, base_train = subtract_baseline(train_o, mean)
     test, base_test = subtract_baseline(test_o, mean)
