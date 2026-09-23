@@ -214,6 +214,14 @@ def pops_posterior(deltas, c_star, form="hypercube"):
     'hypercube' spans the tails and is the more robust estimator -- another reason
     it is the default.)  The benign 1D case has near-Gaussian corrections, so box
     ~= committee there and the two forms nearly agree.
+
+    ALEATORIC IS ESSENTIAL (same SiGe fit).  hypercube ALONE (aleatoric off) is
+    still overconfident: rms-z E 2.20 / F 3.62.  Adding the per-quantity noise
+    floor (sigma_q/w)^2 gives E 1.37 / F 0.99, and that floor is 61% of the energy
+    predictive variance and 93% of the force variance -- for forces the POPS
+    misspecification term is almost negligible next to the label-noise floor, which
+    is why native POPS ~matches BLR+scalar on F.  So hypercube WITHOUT aleatoric is
+    NOT enough; aleatoric on is the default for a reason.
     """
     if form == "ensemble":
         return {"ensemble": c_star[None, :] + deltas}

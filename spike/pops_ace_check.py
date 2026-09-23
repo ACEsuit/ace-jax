@@ -75,6 +75,7 @@ with highest_precision():
         return float(np.sqrt(np.mean(((y - mu) / s) ** 2)))
     p_ens = predict_fixed(theta, prob, ds_train, ds_test, uq="pops", pops_form="ensemble", aleatoric=False)
     p_hc = predict_fixed(theta, prob, ds_train, ds_test, uq="pops", pops_form="hypercube", aleatoric=False)
+    p_hc_a = predict_fixed(theta, prob, ds_train, ds_test, uq="pops", pops_form="hypercube", aleatoric=True)
 
     # ---- (B) diagnose from the pointwise corrections deltas ----
     st = sufficient_statistics(theta, prob.spec, prob.model, prob.ind, prob.cfg, ds_train)
@@ -85,10 +86,17 @@ with highest_precision():
     deltas = np.asarray(pops_statistics(c_star, Sigma0, prob, ds_train, sigma, leverage_pct=0.0))
 
 print(f"\nSiGe linear (M=0), {len(train)} train / {len(test)} test, {deltas.shape[0]} corrections x {deltas.shape[1]} params")
-print("\n(A) predictive rms-z, aleatoric OFF (misspecification-only):")
-print(f"    ensemble  : E {rmsz_E(p_ens):6.2f}   F {rmsz_F(p_ens):6.2f}")
-print(f"    hypercube : E {rmsz_E(p_hc):6.2f}   F {rmsz_F(p_hc):6.2f}")
+print("\n(A) predictive rms-z (ideal 1):")
+print(f"    ensemble,  aleatoric OFF : E {rmsz_E(p_ens):6.2f}   F {rmsz_F(p_ens):6.2f}")
+print(f"    hypercube, aleatoric OFF : E {rmsz_E(p_hc):6.2f}   F {rmsz_F(p_hc):6.2f}   <- misspecification-only")
+print(f"    hypercube, aleatoric ON  : E {rmsz_E(p_hc_a):6.2f}   F {rmsz_F(p_hc_a):6.2f}   <- the default")
 print(f"    hypercube/ensemble sigma-E ratio = {float(np.sqrt(np.asarray(p_hc.E_var)/np.asarray(p_ens.E_var)).mean()):.1f}x")
+# how much of the default predictive variance is the aleatoric floor?
+for q in ("E", "F"):
+    v_off = np.asarray(getattr(p_hc, f"{q}_var")).reshape(-1)
+    v_on = np.asarray(getattr(p_hc_a, f"{q}_var")).reshape(-1)
+    frac = float(np.mean((v_on - v_off) / v_on))
+    print(f"    {q}: aleatoric is {frac:.0%} of the hypercube+aleatoric predictive variance (mean)")
 
 # PCA of the corrections; per-axis centered var, box var, mean term
 G = deltas.T @ deltas
