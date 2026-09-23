@@ -187,6 +187,20 @@ def pops_posterior(deltas, c_star, form="samples"):
     This is faithful to the POPS package's definition (``misspecification_sigma_``
     is the uncentred ``E[u u^T]`` by design), so it is a design choice inherited
     from upstream, not a port bug.
+
+    EMPIRICAL NOTE (2026-09-23, spike/pops_1d.py, reference popsregression package).
+    A 1D misspecified fit tempers the story above: the mean term (phi.mbar)^2 is
+    typically SMALL (a few % of the misspecification variance), so 'samples' vs
+    'hypercube' differ only modestly (hypercube a bit better).  The DOMINANT
+    calibration factor is having the misspecification/aleatoric variance at all --
+    the ordinary posterior variance alone is overconfident by up to ~100x rms-z
+    under strong misspecification, and the misspecification term (both forms) is
+    what fixes it.  So most of the SiGe/Cantor "samples 19 vs hypercube+alea 1"
+    gap was the aleatoric flag (samples-run misspec-thin, hcube-run carried it),
+    not centred-vs-uncentred.  The ~5x samples-vs-hypercube gap our port showed
+    (aleatoric-off) is NOT reproduced on the benign 1D case, so it is either
+    ACE-regime-specific (whitened multi-quantity design inflating mean(delta)) or
+    a port quirk -- an open item to pin down directly.
     """
     if form == "samples":
         return {"samples": c_star[None, :] + deltas}
