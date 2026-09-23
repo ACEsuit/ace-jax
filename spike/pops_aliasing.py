@@ -1,3 +1,10 @@
+# /// script
+# requires-python = ">=3.11,<3.14"
+# dependencies = ["ace-jax", "POPSRegression>=0.4"]
+#
+# [tool.uv.sources]
+# ace-jax = { path = "..", editable = true }
+# ///
 """Is the 'aleatoric' floor genuine irreducible scatter (descriptor aliasing) or
 an artifact of undersized POPS? POPS is designed to need NO noise floor, so if the
 floor is real it must be error the ACE FEATURES cannot resolve: two configs with
@@ -11,7 +18,7 @@ stays ~ the model RMSE (0.97 meV/atom) as ||Delta x|| -> 0, the features alias
 aliasing and the floor points to an undersized POPS term instead.
 
 No MAP fit needed (design rows + labels only). ~30 s.
-Run:  uv run python spike/pops_aliasing.py
+Run:  uv run spike/pops_aliasing.py
 """
 import os, pathlib
 import numpy as np

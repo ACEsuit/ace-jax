@@ -1,3 +1,10 @@
+# /// script
+# requires-python = ">=3.11,<3.14"
+# dependencies = ["ace-jax", "POPSRegression>=0.4"]
+#
+# [tool.uv.sources]
+# ace-jax = { path = "..", editable = true }
+# ///
 """Does POPS need a noise floor in the WELL-DETERMINED regime (production has lots
 of data), or only in the underdetermined SiGe toy?
 
@@ -14,7 +21,7 @@ underdetermined to well-determined, and DECOMPOSE the reference POPS predictive:
 and report rms-z of each vs the noiseless labels. The question: as N_train grows
 (epi -> small), does the misspecification box (mis) stay ~1 on its own?
 
-No ACE MAP fit needed. ~30 s.  Run:  uv run python spike/pops_regime.py
+No ACE MAP fit needed. ~30 s.  Run:  uv run spike/pops_regime.py
 """
 import os, pathlib
 import numpy as np

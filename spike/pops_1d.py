@@ -1,3 +1,7 @@
+# /// script
+# requires-python = ">=3.11,<3.14"
+# dependencies = ["numpy", "POPSRegression>=0.4"]
+# ///
 """Spike: reproduce the POPS behaviour on a 1D misspecified fit with the REFERENCE
 `popsregression` package, to understand why 'samples'(=ensemble) vs 'hypercube'
 looked SO far apart on SiGe/Cantor (rms-z ~19 vs ~1).
@@ -16,7 +20,7 @@ Setup: y=sin(w x), low-degree polynomial (Vandermonde) = misspecification knob.
 Calibration is against the NOISELESS truth (pure model error), which is exactly what
 the POPS misspecification term must cover.
 
-Run:  uv run python spike/pops_1d.py
+Run:  uv run spike/pops_1d.py
 """
 import numpy as np
 from popsregression import POPSRegression
