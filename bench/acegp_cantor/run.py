@@ -345,7 +345,6 @@ with highest_precision():
     pops_ridge, pops_env = 1e-3, {}
     if a.uq == "pops":
         from ace_jax.fit.predict import PopsRidgePath, select_pops_ridge
-        from ace_jax.fit.pops import pops_envelope
         from ace_jax.fit.rows import linear_rows
         t = time.time()
         if a.pops_ridge == "auto":
@@ -383,7 +382,7 @@ with highest_precision():
         phF, rF = phF[np.sort(sel)], rF[np.sort(sel)]
         env_arrays = {}
         for q, ph, r, sc in (("E", phE, rE, natE), ("F", phF, rF, np.ones(len(rF)))):
-            lo, hi = pops_envelope(jnp.asarray(ph), path.members(rd[q], a.pops_leverage_pct))
+            lo, hi = path.envelope(jnp.asarray(ph), rd[q], a.pops_leverage_pct)   # streamed
             lo, hi = np.asarray(lo), np.asarray(hi)
             unit = 1e3 if q == "E" else 1.0                          # E per atom in meV
             pops_env[q] = {"env_cover": float(np.mean((lo <= r) & (r <= hi))),

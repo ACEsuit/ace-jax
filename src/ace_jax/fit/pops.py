@@ -116,15 +116,23 @@ def _fit_hypercube_cov(deltas, mode_threshold=1.0e-8, percentile_clipping=0.0):
     This is deterministic, fp64, and JAX-friendly, and equals the package's
     sampled ``misspecification_sigma_`` as ``n_resample -> inf``.
     """
-    gram = deltas.T @ deltas                  # (L, L)
-    evals, evecs = jnp.linalg.eigh(gram)
-    keep = evals > mode_threshold * jnp.max(evals)
-    support = evecs[:, keep]                  # (L, d) principal directions
-
+    support = hypercube_support(deltas.T @ deltas, mode_threshold)   # (L, d)
     projected = deltas @ support              # (K, d)
     low = jnp.percentile(projected, percentile_clipping, axis=0)
     high = jnp.percentile(projected, 100.0 - percentile_clipping, axis=0)
+    return hypercube_cov(support, low, high)
 
+
+def hypercube_support(gram, mode_threshold=1.0e-8):
+    """Principal directions of the corrections' Gram ``sum delta delta^T`` whose
+    eigenvalue exceeds ``mode_threshold * max`` -- the box axes, (L, d)."""
+    evals, evecs = jnp.linalg.eigh(gram)
+    return evecs[:, evals > mode_threshold * jnp.max(evals)]
+
+
+def hypercube_cov(support, low, high):
+    """Covariance of the uniform box [low, high] on the ``support`` axes, as the
+    second moment about the origin: support (diag((hi-lo)^2/12) + m m^T) support^T."""
     m = 0.5 * (low + high)                     # per-axis box midpoint
     var_axis = (high - low) ** 2 / 12.0        # per-axis uniform variance
     second_moment = jnp.diag(var_axis) + jnp.outer(m, m)   # E[u u^T]
@@ -171,8 +179,13 @@ def pops_var(phi_star, posterior):
     """Predictive misspecification variance at test rows ``phi_star`` (n, L).
 
     * ensemble form: the variance across the committee of ``phi* . c_k``.
+    * moments form (streamed ensemble): phi* S phi* - (phi* . mu)^2 with
+      S = E[delta delta^T], mu = E[delta] -- the same population variance.
     * cov form: the quadratic form ``sum((phi* @ cov) * phi*, axis=1)``.
     """
+    if "moments" in posterior:                 # streamed ensemble: (E[delta delta^T], E[delta])
+        S, mu = posterior["moments"]
+        return jnp.sum((phi_star @ S) * phi_star, axis=1) - (phi_star @ mu) ** 2
     if "ensemble" in posterior:
         ensemble = posterior["ensemble"]       # (K, L)
         preds = phi_star @ ensemble.T          # (n, K)
@@ -180,7 +193,7 @@ def pops_var(phi_star, posterior):
     elif "cov" in posterior:
         cov = posterior["cov"]
         return jnp.sum((phi_star @ cov) * phi_star, axis=1)
-    raise ValueError("posterior must contain 'ensemble' or 'cov'")
+    raise ValueError("posterior must contain 'ensemble', 'moments' or 'cov'")
 
 
 def pops_envelope(phi_star, deltas, chunk=1024):

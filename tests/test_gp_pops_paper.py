@@ -96,3 +96,61 @@ def test_select_pops_ridge_picks_argmin_of_its_own_score(tiny_linear_problem):
     for q in "EF":
         assert ridge[q] in grid
         assert ridge[q] == grid[int(np.argmin(scores[q]))]
+
+
+# ---------------------------------------------------------------------------
+# Streaming POPS: same predictive, O(L^2) memory -- the K x L corrections are
+# never materialised.  The in-memory members() path is the oracle.
+# ---------------------------------------------------------------------------
+from ace_jax.fit.pops import pops_envelope, pops_posterior, pops_var
+
+
+def _test_rows(prob, ds):
+    st = sufficient_statistics(THETA, prob.spec, prob.model, prob.ind, prob.cfg, ds)
+    c = np.asarray(posterior(THETA, st, prob)[0])
+    return jnp.asarray(_dense_structural(prob, ds, c)[2])
+
+
+@pytest.mark.parametrize("lev", [0.0, 50.0])
+def test_streamed_hypercube_matches_in_memory(tiny_linear_problem, lev):
+    prob, ds = tiny_linear_problem
+    with highest_precision():
+        path = PopsRidgePath(THETA, prob, ds)
+        PE = _test_rows(prob, ds)
+        ref = pops_var(PE, pops_posterior(path.members(1e-3, lev), path.c_star, form="hypercube"))
+        got = pops_var(PE, path.posterior(1e-3, form="hypercube", leverage_pct=lev))
+    assert np.allclose(np.asarray(got), np.asarray(ref), rtol=1e-6, atol=1e-14)
+
+
+@pytest.mark.parametrize("lev", [0.0, 50.0])
+def test_streamed_ensemble_matches_in_memory(tiny_linear_problem, lev):
+    prob, ds = tiny_linear_problem
+    with highest_precision():
+        path = PopsRidgePath(THETA, prob, ds)
+        PE = _test_rows(prob, ds)
+        ref = pops_var(PE, pops_posterior(path.members(1e-3, lev), path.c_star, form="ensemble"))
+        got = pops_var(PE, path.posterior(1e-3, form="ensemble", leverage_pct=lev))
+    assert np.allclose(np.asarray(got), np.asarray(ref), rtol=1e-6, atol=1e-14)
+
+
+def test_streamed_envelope_matches_in_memory(tiny_linear_problem):
+    prob, ds = tiny_linear_problem
+    with highest_precision():
+        path = PopsRidgePath(THETA, prob, ds)
+        PE = _test_rows(prob, ds)
+        lo_ref, hi_ref = pops_envelope(PE, path.members(1e-3))
+        lo, hi = path.envelope(PE, 1e-3)
+    assert np.allclose(np.asarray(lo), np.asarray(lo_ref), rtol=1e-8, atol=1e-12)
+    assert np.allclose(np.asarray(hi), np.asarray(hi_ref), rtol=1e-8, atol=1e-12)
+
+
+def test_predict_and_ridge_selection_never_materialise_members(tiny_linear_problem, monkeypatch):
+    """The production paths must stream: calling the (K x L) members() oracle is a bug."""
+    prob, ds = tiny_linear_problem
+    def boom(*a, **k):
+        raise AssertionError("members() materialises every correction -- must not be used here")
+    monkeypatch.setattr(PopsRidgePath, "members", boom)
+    with highest_precision():
+        predict_fixed(THETA, prob, ds, ds, uq="pops", pops_ridge=1e-3)
+        predict_fixed(THETA, prob, ds, ds, uq="pops", pops_ridge=1e-3, pops_form="ensemble")
+        select_pops_ridge(THETA, prob, ds, ds, (1e-2, 1e-4))

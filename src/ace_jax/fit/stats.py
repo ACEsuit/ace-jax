@@ -283,3 +283,88 @@ def pops_statistics(c_star, Sigma0, prob, ds, sigma, *, leverage_pct=0.0):
     from .pops import leverage_select
     deltas, h = _stream_pops_pointwise(prob.model, prob.cfg, ds, c_star, Sigma0, sigma)
     return leverage_select(deltas, h, leverage_pct)
+
+
+# ---------------------------------------------------------------------------
+# Streaming POPS (Swinburne & Perez, structural weights).  Every member is
+# delta_i = A phi_i c_i  with  c_i = r_i / h_i,  h_i = phi_i . A . phi_i  (A
+# symmetric), so the statistics the predictive needs are Gram-shaped:
+#     sum delta delta^T = A (sum c_i^2 phi_i phi_i^T) A,   sum delta = A (sum c_i phi_i)
+# and the (K, L) matrix of corrections is never formed.  Memory is O(L^2) plus two
+# scalars per observation; each pass holds one batch of rows.
+# ---------------------------------------------------------------------------
+
+def _pops_batch_rows(model, cfg, batch):
+    """Structurally-weighted rows w*phi, residual target y and weight w for one
+    batch, quantities concatenated E, F, V (padded rows carry w = 0)."""
+    from .rows import linear_rows
+    r, _, _ = linear_rows(model, cfg, batch)
+    L = r.E.shape[-1]
+    phi = jnp.concatenate([r.E, r.F.reshape(-1, L), r.V.reshape(-1, L)])
+    y = jnp.concatenate([batch.y_E, batch.y_F.reshape(-1), batch.y_V.reshape(-1)])
+    w = jnp.concatenate([batch.w_E, jnp.repeat(batch.w_F, 3), jnp.repeat(batch.w_V, 6)])
+    return phi * w[:, None], w * y, phi
+
+
+def pops_leverage_residual(model, cfg, ds, c_star, A):
+    """Pass 1: whitened leverage h_i = pw_i . A . pw_i and residual r_i = w_i (y_i -
+    phi_i . c*) of every row, each (n_batches, rows_per_batch).  Padded rows have
+    h = 0 (w = 0)."""
+    def body(carry, batch):
+        pw, wy, phi = _pops_batch_rows(model, cfg, batch)
+        h = jnp.sum((pw @ A) * pw, axis=1)
+        r = wy - (pw @ c_star)
+        return carry, (h, r)
+    _, (h, r) = jax.lax.scan(body, 0.0, ds)
+    return h, r
+
+
+def pops_moment_sums(model, cfg, ds, coef):
+    """Pass 2: W = sum_i coef_i^2 pw_i pw_i^T and s = sum_i coef_i pw_i, with
+    coef (n_batches, rows) = r/h on member rows and 0 elsewhere."""
+    def body(carry, xs):
+        batch, c = xs
+        pw, _, _ = _pops_batch_rows(model, cfg, batch)
+        pc = pw * c[:, None]
+        W, s = carry
+        return (W + pc.T @ pc, s + pw.T @ c), None
+    return jax.lax.scan(body, _moment_init(model, cfg, ds), (ds, coef))[0]
+
+
+def _moment_init(model, cfg, ds):
+    first = jax.tree.map(lambda a: a[0], ds)
+    L = jax.eval_shape(lambda b: _pops_batch_rows(model, cfg, b)[0], first).shape[-1]
+    return jnp.zeros((L, L)), jnp.zeros(L)
+
+
+def pops_projection_bounds(model, cfg, ds, coef, keep, B):
+    """Pass 3: per-axis min / max over member rows of the projected corrections
+    (pw_i @ B) * coef_i, with B = A @ support (L, d).  Exact for zero percentile
+    clipping (the hypercube default)."""
+    d = B.shape[1]
+    def body(carry, xs):
+        batch, c, k = xs
+        pw, _, _ = _pops_batch_rows(model, cfg, batch)
+        proj = (pw @ B) * c[:, None]
+        lo, hi = carry
+        lo = jnp.minimum(lo, jnp.min(jnp.where(k[:, None], proj, jnp.inf), axis=0))
+        hi = jnp.maximum(hi, jnp.max(jnp.where(k[:, None], proj, -jnp.inf), axis=0))
+        return (lo, hi), None
+    init = (jnp.full(d, jnp.inf), jnp.full(d, -jnp.inf))
+    return jax.lax.scan(body, init, (ds, coef, keep))[0]
+
+
+def pops_envelope_streamed(model, cfg, ds, coef, keep, Q):
+    """Member min / max of the prediction shift phi* . delta_i = (Q @ pw_i) * coef_i
+    at test rows, with Q = phi* @ A (n, L).  Returns (lo, hi), each (n,)."""
+    n = Q.shape[0]
+    def body(carry, xs):
+        batch, c, k = xs
+        pw, _, _ = _pops_batch_rows(model, cfg, batch)
+        shift = (Q @ pw.T) * c[None, :]                       # (n, rows)
+        lo, hi = carry
+        lo = jnp.minimum(lo, jnp.min(jnp.where(k[None, :], shift, jnp.inf), axis=1))
+        hi = jnp.maximum(hi, jnp.max(jnp.where(k[None, :], shift, -jnp.inf), axis=1))
+        return (lo, hi), None
+    init = (jnp.full(n, jnp.inf), jnp.full(n, -jnp.inf))
+    return jax.lax.scan(body, init, (ds, coef, keep))[0]

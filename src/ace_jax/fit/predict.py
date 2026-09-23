@@ -19,9 +19,10 @@ from .feature import apply as _feat, dwarp
 from .objective import posterior
 from .data import VOIGT, flat_edges
 from .metrics import crps_gaussian
-from .pops import leverage_select, pops_posterior, pops_var
+from .pops import leverage_select, pops_var
 from .rows import Rows, linear_rows, residual_inputs, residual_rows
-from .stats import _stream_pops_pointwise, sufficient_statistics
+from .stats import (_stream_pops_pointwise, pops_envelope_streamed, pops_leverage_residual,
+                    pops_moment_sums, pops_projection_bounds, sufficient_statistics)
 
 
 class Prediction(NamedTuple):
@@ -279,8 +280,52 @@ class PopsRidgePath:
     def A(self, ridge):
         return (self.W / (self.Lam + self.ridge_abs(ridge))) @ self.W.T
 
+    def _coef(self, ridge, leverage_pct):
+        """Pass 1 of the streamed POPS: A, the per-row coefficient c_i = r_i / h_i
+        (0 off the member set) and the member mask, each (n_batches, rows).  Members
+        are the non-padded rows (h > 0) at or above the leverage percentile -- the
+        same set as ``members`` / ``leverage_select``."""
+        A = self.A(ridge)
+        h, r = pops_leverage_residual(self.prob.model, self.prob.cfg, self.ds, self.c_star, A)
+        live = h > 0
+        thr = jnp.percentile(h[live], leverage_pct)
+        keep = live & (h >= thr)
+        if not bool(jnp.any(keep)):                          # leverage_select's fallback
+            keep = live
+        coef = jnp.where(keep, r / jnp.where(live, h, 1.0), 0.0)
+        return A, coef, keep
+
+    def posterior(self, ridge, form="hypercube", leverage_pct=0.0, mode_threshold=1.0e-8):
+        """POPS posterior WITHOUT materialising the corrections: O(L^2) memory.
+
+        hypercube: box axes from sum delta delta^T = A W A, bounds from a streamed
+        min/max of the projected corrections (3 passes).  ensemble: the moments
+        E[delta delta^T] = A W A / K and E[delta] = A s / K (2 passes).  Equals
+        ``pops_posterior(self.members(...))`` for zero percentile clipping."""
+        from .pops import hypercube_cov, hypercube_support
+        model, cfg = self.prob.model, self.prob.cfg
+        A, coef, keep = self._coef(ridge, leverage_pct)
+        W, s = pops_moment_sums(model, cfg, self.ds, coef)
+        if form == "ensemble":
+            K = jnp.sum(keep)
+            return {"moments": (A @ W @ A / K, A @ s / K)}
+        if form != "hypercube":
+            raise ValueError(f"unknown POPS posterior form: {form!r}")
+        support = hypercube_support(A @ W @ A, mode_threshold)
+        lo, hi = pops_projection_bounds(model, cfg, self.ds, coef, keep, A @ support)
+        return {"cov": hypercube_cov(support, lo, hi)}
+
+    def envelope(self, phi_star, ridge, leverage_pct=0.0):
+        """Member min/max of the prediction shift phi* . delta_i at rows phi_star,
+        streamed (equals ``pops.pops_envelope(phi_star, self.members(...))``)."""
+        A, coef, keep = self._coef(ridge, leverage_pct)
+        return pops_envelope_streamed(self.prob.model, self.prob.cfg, self.ds, coef, keep,
+                                      phi_star @ A)
+
     def members(self, ridge, leverage_pct=0.0):
-        """Pointwise-optimal corrections of every non-padded training observation."""
+        """Pointwise-optimal corrections of every member, MATERIALISED (K, L).
+        A small-problem oracle for tests: production paths use ``posterior`` /
+        ``envelope``, which never form this matrix."""
         one = {q: 1.0 for q in "EFV"}                       # structural weights only
         deltas, h = _stream_pops_pointwise(self.prob.model, self.prob.cfg, self.ds,
                                            self.c_star, self.A(ridge), one)
@@ -304,7 +349,7 @@ def _pops_paper_posts(path, ridge, form, leverage_pct):
     r, cache, posts = _ridge_dict(ridge), {}, {}
     for q in "EFV":
         if r[q] not in cache:
-            cache[r[q]] = pops_posterior(path.members(r[q], leverage_pct), path.c_star, form=form)
+            cache[r[q]] = path.posterior(r[q], form=form, leverage_pct=leverage_pct)
         posts[q] = cache[r[q]]
     return posts
 
@@ -328,7 +373,7 @@ def select_pops_ridge(theta, prob, ds_fit, ds_val, grid, form="hypercube", lever
     path = PopsRidgePath(theta, prob, ds_fit)
     scores = {q: [] for q in "EFV"}
     for r in grid:
-        post = pops_posterior(path.members(r, leverage_pct), path.c_star, form=form)
+        post = path.posterior(r, form=form, leverage_pct=leverage_pct)
         posts = {q: post for q in "EFV"}
         f = jax.jit(lambda mu, b: _pops_paper_batch(prob, mu, posts, b))
         cols = {q: ([], [], []) for q in "EFV"}               # y, mean, sd (scaled, live rows)
