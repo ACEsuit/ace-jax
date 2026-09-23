@@ -129,20 +129,24 @@ def _fit_hypercube_cov(deltas, mode_threshold=1.0e-8, percentile_clipping=0.0):
     return support @ second_moment @ support.T
 
 
-def pops_posterior(deltas, c_star, form="samples"):
+def pops_posterior(deltas, c_star, form="hypercube"):
     """Build the POPS misspecification posterior from pointwise ``deltas``.
 
-    Two forms (both ported from ``popsregression._build_posterior``):
+    Two forms (both ported from ``popsregression._build_posterior``; the package
+    calls the committee form 'ensemble', which we match):
 
-    * ``form="samples"`` (DEFAULT): the committee of weight samples
-      ``c_star + deltas`` (the package's ``posterior_samples_``, here stored as
-      full weight vectors rather than bare perturbations). Returns
-      ``{"samples": (K, L)}``.
-    * ``form="hypercube"``: the PCA/axis-aligned box over ``deltas`` reduced to
-      a covariance (the package's ``misspecification_sigma_``). Returns
+    * ``form="hypercube"`` (DEFAULT): the PCA/axis-aligned box over ``deltas``
+      reduced to a covariance (the package's ``misspecification_sigma_``). Returns
       ``{"cov": (L, L)}``.
+    * ``form="ensemble"``: the committee of weight samples ``c_star + deltas``
+      (the package's ``posterior_samples_``, here stored as full weight vectors
+      rather than bare perturbations). Returns ``{"ensemble": (K, L)}``.
 
-    NOTE: ``"samples"`` is a CENTERED committee variance (``pops_var`` takes
+    (The name ``"samples"`` is intentionally NOT used here; it is reserved for a
+    possible future third route that draws Gaussian samples from the hypercube
+    ``misspecification_sigma_`` itself, rather than the box or the committee.)
+
+    NOTE: ``"ensemble"`` is a CENTERED committee variance (``pops_var`` takes
     ``jnp.var`` of ``phi* . (c_star + deltas)`` across the committee), whereas
     ``"hypercube"`` is an UNCENTERED second moment about the origin (see
     ``_fit_hypercube_cov``'s ``E[u u^T] = diag(var_axis) + outer(m, m)``, not
@@ -157,7 +161,7 @@ def pops_posterior(deltas, c_star, form="samples"):
     parameter sets systematically pull ``c_star`` in one direction, the signature
     of a *biased* fit (missing physics), not of scatter — the two forms are:
 
-      * ``samples``:  mean ``phi* . c_star``,  var ``Var_i[phi* . delta_i]``
+      * ``ensemble``:  mean ``phi* . c_star``,  var ``Var_i[phi* . delta_i]``
         (centred on the committee mean).  Drops the systematic term entirely, so
         it under-reports and is overconfident (measured rms-z ~12 on SiGe E).
       * ``hypercube``: mean ``phi* . c_star``,  var ``E_i[(phi* . delta_i)**2]``
@@ -190,20 +194,20 @@ def pops_posterior(deltas, c_star, form="samples"):
 
     EMPIRICAL NOTE (2026-09-23, spike/pops_1d.py, reference popsregression package).
     A 1D misspecified fit tempers the story above: the mean term (phi.mbar)^2 is
-    typically SMALL (a few % of the misspecification variance), so 'samples' vs
+    typically SMALL (a few % of the misspecification variance), so 'ensemble' vs
     'hypercube' differ only modestly (hypercube a bit better).  The DOMINANT
     calibration factor is having the misspecification/aleatoric variance at all --
     the ordinary posterior variance alone is overconfident by up to ~100x rms-z
     under strong misspecification, and the misspecification term (both forms) is
-    what fixes it.  So most of the SiGe/Cantor "samples 19 vs hypercube+alea 1"
-    gap was the aleatoric flag (samples-run misspec-thin, hcube-run carried it),
-    not centred-vs-uncentred.  The ~5x samples-vs-hypercube gap our port showed
+    what fixes it.  So most of the SiGe/Cantor "ensemble 19 vs hypercube+alea 1"
+    gap was the aleatoric flag (ensemble-run misspec-thin, hcube-run carried it),
+    not centred-vs-uncentred.  The ~5x ensemble-vs-hypercube gap our port showed
     (aleatoric-off) is NOT reproduced on the benign 1D case, so it is either
     ACE-regime-specific (whitened multi-quantity design inflating mean(delta)) or
     a port quirk -- an open item to pin down directly.
     """
-    if form == "samples":
-        return {"samples": c_star[None, :] + deltas}
+    if form == "ensemble":
+        return {"ensemble": c_star[None, :] + deltas}
     elif form == "hypercube":
         return {"cov": _fit_hypercube_cov(deltas)}
     raise ValueError(f"unknown POPS posterior form: {form!r}")
@@ -212,14 +216,14 @@ def pops_posterior(deltas, c_star, form="samples"):
 def pops_var(phi_star, posterior):
     """Predictive misspecification variance at test rows ``phi_star`` (n, L).
 
-    * samples form: the variance across the committee of ``phi* . c_k``.
+    * ensemble form: the variance across the committee of ``phi* . c_k``.
     * cov form: the quadratic form ``sum((phi* @ cov) * phi*, axis=1)``.
     """
-    if "samples" in posterior:
-        samples = posterior["samples"]         # (K, L)
-        preds = phi_star @ samples.T           # (n, K)
+    if "ensemble" in posterior:
+        ensemble = posterior["ensemble"]       # (K, L)
+        preds = phi_star @ ensemble.T          # (n, K)
         return jnp.var(preds, axis=1)
     elif "cov" in posterior:
         cov = posterior["cov"]
         return jnp.sum((phi_star @ cov) * phi_star, axis=1)
-    raise ValueError("posterior must contain 'samples' or 'cov'")
+    raise ValueError("posterior must contain 'ensemble' or 'cov'")

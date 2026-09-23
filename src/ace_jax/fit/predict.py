@@ -282,12 +282,11 @@ def predict_fixed(theta, prob, ds_train, ds_test, dtc=True, deriv_dtc=True,
     uq='blr' (default) is today's linear/GP posterior predictive variance,
     unchanged.  uq='pops' selects the linear-arm POPS misspecification predictive:
     the mean is untouched, the variance comes from the POPS weight-space posterior
-    (pops_form in {'samples','hypercube'}, leverage_pct the leverage percentile),
+    (pops_form in {'hypercube','ensemble'}, leverage_pct the leverage percentile),
     and aleatoric=True adds the label noise (sigma_q/w)^2.  POPS is linear-arm only
     (raises on M>0).  The POPS defaults ('hypercube' + aleatoric) match the upstream
-    popsregression package default and are the calibrated choice: 'samples' is the
-    centred committee variance, which drops the systematic-misspecification mean term
-    and is badly overconfident (see pops.pops_posterior)."""
+    popsregression package default; 'ensemble' is the centred committee variance
+    (the package's 'ensemble' posterior; see pops.pops_posterior)."""
     if uq == "blr":
         return _run_predict(_predict_fn(prob, dtc, deriv_dtc), theta, prob, ds_train, ds_test)
     if uq == "pops":

@@ -186,7 +186,7 @@ def test_pops_predict_finite_and_aleatoric_inflates(tiny_linear_problem):
 
 def test_pops_default_is_hypercube_aleatoric(tiny_linear_problem):
     """Revised decision: the POPS default is hypercube + aleatoric (matches the
-    upstream popsregression default; the calibrated form).  'samples' centred with
+    upstream popsregression default; the calibrated form).  'ensemble' centred with
     no aleatoric is the overconfident form and must NOT be the default."""
     prob, ds = tiny_linear_problem
     theta = Hypers(log_ell=0.0, log_A=0.0, log_alpha=0.0, log_r0=np.log(2.35), log_eps=0.0,
@@ -195,11 +195,11 @@ def test_pops_default_is_hypercube_aleatoric(tiny_linear_problem):
     with highest_precision():
         d  = predict_fixed(theta, prob, ds, ds, uq="pops")                                    # defaults
         hc = predict_fixed(theta, prob, ds, ds, uq="pops", pops_form="hypercube", aleatoric=True)
-        so = predict_fixed(theta, prob, ds, ds, uq="pops", pops_form="samples", aleatoric=False)
+        so = predict_fixed(theta, prob, ds, ds, uq="pops", pops_form="ensemble", aleatoric=False)
     # the default binds to hypercube + aleatoric ...
     assert np.allclose(np.asarray(d.E_var), np.asarray(hc.E_var))
     assert np.allclose(np.asarray(d.F_var), np.asarray(hc.F_var))
-    # ... and is NOT the old (samples, misspec-only) form
+    # ... and is NOT the old (ensemble, misspec-only) form
     assert not np.allclose(np.asarray(d.E_var), np.asarray(so.E_var))
 
 

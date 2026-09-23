@@ -48,7 +48,7 @@ def pops_synth():
 def test_pops_var_exceeds_epistemic_under_misspecification(pops_synth):
     Sigma0, phi_t, r_t, c, phi_star, epi_var = pops_synth
     d = pops_corrections(Sigma0, phi_t, r_t, leverage_pct=0.0)
-    post = pops_posterior(d, c, form="samples")
+    post = pops_posterior(d, c, form="ensemble")
     v = pops_var(phi_star, post)
     assert jnp.all(v >= 0.5 * epi_var)            # misspecification inflates
     assert v.mean() > epi_var.mean()
@@ -198,7 +198,7 @@ def sige_fit():
         theta_map = run_map(lik, prob.prior, steps=_MAP_STEPS, lr=0.02, seed=_SEED)
         # All predictives reuse the SAME warm fit (theta_map); only the POSTERIOR
         # form / aleatoric flag differ.  Two POPS posterior forms:
-        #   samples   -- CENTERED committee variance, drops (phi.mean(delta))^2
+        #   ensemble  -- CENTERED committee variance, drops (phi.mean(delta))^2
         #   hypercube -- UNCENTERED 2nd moment about the origin, KEEPS that term
         # (the coordinator's crux: systematic misspecification lives in the mean
         # of the delta corrections, which only the uncentered form retains).
@@ -206,8 +206,8 @@ def sige_fit():
             return predict_fixed(theta_map, prob, ds_train, ds_test, uq="pops",
                                  pops_form=form, aleatoric=alea)
         pred = {
-            ("samples", False): _pops("samples", False),      # centred, misspec-only (overconfident)
-            ("samples", True): _pops("samples", True),
+            ("ensemble", False): _pops("ensemble", False),      # centred, misspec-only (overconfident)
+            ("ensemble", True): _pops("ensemble", True),
             ("hypercube", False): _pops("hypercube", False),
             ("hypercube", True): _pops("hypercube", True),
         }
@@ -240,13 +240,13 @@ def _sige_qty(fit, pred, quantity):
 # The misspecification-only rows (aleatoric False) are the candidate "native
 # POPS" forms; ("hypercube", True) is the run.py --uq pops default.
 _POPS_ROWS = [
-    (("samples", False), "POPS s"),
-    (("samples", True), "POPS s+alea"),
+    (("ensemble", False), "POPS s"),
+    (("ensemble", True), "POPS s+alea"),
     (("hypercube", False), "POPS hc"),
     (("hypercube", True), "POPS hc+alea"),
 ]
 # candidate native forms (no post-hoc scalar, misspecification-only)
-_NATIVE_FORMS = [(("samples", False), "POPS s"), (("hypercube", False), "POPS hc")]
+_NATIVE_FORMS = [(("ensemble", False), "POPS s"), (("hypercube", False), "POPS hc")]
 
 
 @pytest.mark.slow
@@ -272,7 +272,7 @@ def test_sige_pops_per_quantity_calibration_gate(sige_fit):
                 f"{key} {q}: POPS RMSE {r_pops:.5g} != BLR RMSE {r_blr:.5g} (>2%); "
                 f"POPS must not change the mean")
 
-    # ---- MEASURE the full 6-way table (samples/hypercube x alea off/on) -------
+    # ---- MEASURE the full 6-way table (ensemble/hypercube x alea off/on) -------
     print(f"\n=== SiGe POPS per-quantity calibration gate "
           f"(ntrain={_NTRAIN} ntest={fit['ntest']} seed={_SEED}) ===")
     print("E0 (eV):", {k: round(v, 4) for k, v in fit["E0"].items()},
