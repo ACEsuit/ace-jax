@@ -1,5 +1,7 @@
-"""Native POPS misspecification UQ for the linear (M=0) arm, on the design
-whitened per quantity by w/sigma_q so E and F share one homoscedastic scale."""
+"""Native POPS misspecification UQ for the linear (M=0) arm, following Swinburne
+& Perez (arXiv:2402.01810): pointwise-optimal parameter sets built on the design
+weighted by the STRUCTURAL weights only (the intrinsic noise is fixed, never fitted
+to the residual).  The predict-side driver is ``predict.PopsRidgePath``."""
 import jax.numpy as jnp
 
 
@@ -136,93 +138,28 @@ def pops_posterior(deltas, c_star, form="hypercube"):
     calls the committee form 'ensemble', which we match):
 
     * ``form="hypercube"`` (DEFAULT): the PCA/axis-aligned box over ``deltas``
-      reduced to a covariance (the package's ``misspecification_sigma_``). Returns
-      ``{"cov": (L, L)}``.
+      reduced to a covariance (the package's ``misspecification_sigma_``).
+      Returns ``{"cov": (L, L)}``.
     * ``form="ensemble"``: the committee of weight samples ``c_star + deltas``
-      (the package's ``posterior_samples_``, here stored as full weight vectors
-      rather than bare perturbations). Returns ``{"ensemble": (K, L)}``.
+      (the package's ``posterior_samples_``, stored as full weight vectors).
+      Returns ``{"ensemble": (K, L)}``.
 
-    (The name ``"samples"`` is intentionally NOT used here; it is reserved for a
-    possible future third route that draws Gaussian samples from the hypercube
-    ``misspecification_sigma_`` itself, rather than the box or the committee.)
+    ("samples" is reserved for a possible future route that draws Gaussian
+    samples from the hypercube covariance itself.)
 
-    NOTE: ``"ensemble"`` is a CENTERED committee variance (``pops_var`` takes
-    ``jnp.var`` of ``phi* . (c_star + deltas)`` across the committee), whereas
-    ``"hypercube"`` is an UNCENTERED second moment about the origin (see
-    ``_fit_hypercube_cov``'s ``E[u u^T] = diag(var_axis) + outer(m, m)``, not
-    ``E[(u - E[u])(u - E[u])^T]``). The two forms therefore differ by
-    ``(phi* . mean(deltas))**2`` whenever the pointwise corrections ``deltas``
-    have nonzero mean.
+    The ensemble variance is centred across the committee; the hypercube is an
+    uncentred second moment of a uniform box spanning the full min..max of the
+    PCA-projected corrections.  On ACE designs the corrections are heavy-tailed
+    (projected kurtosis ~10), so the box is much wider than the committee spread;
+    the mean term (phi*.mean(delta))^2 is negligible by comparison.
 
-    KNOWN LIMITATION — bias/variance conflation (not yet implemented: a clean
-    third form).  In BOTH forms the *mean* prediction stays at ``phi* . c_star``
-    (see ``predict._pops_predict_batch``): only the variance changes.  When the
-    retained ``deltas`` have a nonzero mean ``mbar`` — i.e. the pointwise-optimal
-    parameter sets systematically pull ``c_star`` in one direction, the signature
-    of a *biased* fit (missing physics), not of scatter — the two forms are:
-
-      * ``ensemble``:  mean ``phi* . c_star``,  var ``Var_i[phi* . delta_i]``
-        (centred on the committee mean).  Drops the systematic term entirely, so
-        it under-reports and is overconfident (measured rms-z ~12 on SiGe E).
-      * ``hypercube``: mean ``phi* . c_star``,  var ``E_i[(phi* . delta_i)**2]``
-        = ``Var_i + (phi* . mbar)**2``.  This is a mean-squared-error ABOUT THE
-        RAW FIT, not a variance: it folds ``bias**2`` into ``sigma**2`` while
-        leaving the mean at the (knowingly biased) ``phi* . c_star``.  It
-        restores *symmetric* coverage (rms-z, Gaussian CRPS) only because the
-        interval is widened by exactly enough to straddle the bias; it would
-        mislead any sign-sensitive / asymmetric downstream use.
-
-    The statistically clean object is a THIRD form we do not implement:
-    bias-correct the mean to ``phi* . (c_star + mbar)`` AND report the centred
-    ``Var_i[phi* . delta_i]``.  That separates a mean shift (which belongs in the
-    prediction) from spread (which belongs in the variance).  It is a strictly
-    better experiment than either form above and is cheap to try:
-
-      * measure BOTH rms-z AND energy RMSE.  If ``mbar`` is a genuine model bias,
-        moving the mean should *reduce* RMSE — POPS then improves the fit, not
-        just the UQ.
-      * CAVEAT: ``mbar`` is taken over the LEVERAGE-SELECTED (high-influence)
-        subset — exactly the points most prone to overfitting — so the shift may
-        be an overfit direction, not a true bias.  RMSE is the discriminator:
-        RMSE down => real bias worth correcting; RMSE up => the "bias" was
-        leverage-selection noise, and centred variance + aleatoric is the honest
-        report (which is why native POPS did not beat BLR + post-hoc scalar on E).
-
-    This is faithful to the POPS package's definition (``misspecification_sigma_``
-    is the uncentred ``E[u u^T]`` by design), so it is a design choice inherited
-    from upstream, not a port bug.
-
-    EMPIRICAL NOTE (2026-09-23, spike/pops_1d.py, reference popsregression package).
-    A 1D misspecified fit tempers the story above: the mean term (phi.mbar)^2 is
-    typically SMALL (a few % of the misspecification variance), so 'ensemble' vs
-    'hypercube' differ only modestly (hypercube a bit better).  The DOMINANT
-    calibration factor is having the misspecification/aleatoric variance at all --
-    the ordinary posterior variance alone is overconfident by up to ~100x rms-z
-    under strong misspecification, and the misspecification term (both forms) is
-    what fixes it.  So most of the SiGe/Cantor "ensemble 19 vs hypercube+alea 1"
-    gap was the aleatoric flag (ensemble-run misspec-thin, hcube-run carried it),
-    not centred-vs-uncentred.
-
-    RESOLVED (2026-09-23, spike/pops_ace_check.py, on the real SiGe M=0 design).
-    The separate ~5x ensemble-vs-hypercube gap (aleatoric-off: ensemble rms-z E
-    12.4 / F 21.8 vs hypercube 2.2 / 3.6) is REAL, by-design, and regime-specific
-    -- NOT the mean term and NOT a port bug.  On ACE the pointwise corrections are
-    strongly HEAVY-TAILED (projected-correction kurtosis ~10, vs 3 for Gaussian),
-    so the hypercube's uniform box over the full min..max range has variance
-    (range)^2/12 ~= 58x the committee's centred variance, while the mean-term
-    fraction is ~0.  ('ensemble' reports the committee bulk and under-covers;
-    'hypercube' spans the tails and is the more robust estimator -- another reason
-    it is the default.)  The benign 1D case has near-Gaussian corrections, so box
-    ~= committee there and the two forms nearly agree.
-
-    ALEATORIC IS ESSENTIAL (same SiGe fit).  hypercube ALONE (aleatoric off) is
-    still overconfident: rms-z E 2.20 / F 3.62.  Adding the per-quantity noise
-    floor (sigma_q/w)^2 gives E 1.37 / F 0.99, and that floor is 61% of the energy
-    predictive variance and 93% of the force variance -- for forces the POPS
-    misspecification term is almost negligible next to the label-noise floor, which
-    is why native POPS ~matches BLR+scalar on F.  So hypercube WITHOUT aleatoric is
-    NOT enough; aleatoric on is the default for a reason.
-    """
+    Both are Gaussian summaries.  The object of the paper's coverage theorem is the
+    member ENVELOPE (:func:`pops_envelope`): the min/max over members brackets
+    every training observation as N/P -> inf.  No separate noise term belongs in
+    the predictive -- fitting the noise to the residual "recovers standard
+    maximum-likelihood inference, which ignores misspecification" (the paper), so
+    the members are built with structural weights and a fixed ridge
+    (``predict.PopsRidgePath``)."""
     if form == "ensemble":
         return {"ensemble": c_star[None, :] + deltas}
     elif form == "hypercube":
@@ -244,3 +181,19 @@ def pops_var(phi_star, posterior):
         cov = posterior["cov"]
         return jnp.sum((phi_star @ cov) * phi_star, axis=1)
     raise ValueError("posterior must contain 'ensemble' or 'cov'")
+
+
+def pops_envelope(phi_star, deltas, chunk=1024):
+    """Pointwise-optimal ENVELOPE at rows ``phi_star`` (n, L): the min and max of
+    the prediction shift ``phi* . delta_i`` over every member ``delta_i`` (K, L).
+
+    This is the object of the Swinburne-Perez coverage theorem (the ensemble
+    min/max must bracket every training observation as N/P -> inf), as opposed
+    to the Gaussian second-moment summaries of :func:`pops_var`.  Evaluated in
+    chunks of ``chunk`` rows so the (n, K) shift matrix is never materialised.
+    Returns ``(lo, hi)``, each (n,), as shifts relative to the base prediction."""
+    lo, hi = [], []
+    for s in range(0, phi_star.shape[0], chunk):
+        shift = phi_star[s:s + chunk] @ deltas.T            # (chunk, K)
+        lo.append(jnp.min(shift, axis=1)); hi.append(jnp.max(shift, axis=1))
+    return jnp.concatenate(lo), jnp.concatenate(hi)

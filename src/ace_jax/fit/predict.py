@@ -10,7 +10,7 @@ from typing import NamedTuple
 import jax
 import jax.numpy as jnp
 import numpy as np
-from jax.scipy.linalg import cho_solve, solve_triangular
+from jax.scipy.linalg import solve_triangular
 
 from .hypers import from_array
 from .kernels import K_MM, k_rows
@@ -18,9 +18,10 @@ from .summary import site_summary
 from .feature import apply as _feat, dwarp
 from .objective import posterior
 from .data import VOIGT, flat_edges
-from .pops import pops_posterior, pops_var
+from .metrics import crps_gaussian
+from .pops import leverage_select, pops_posterior, pops_var
 from .rows import Rows, linear_rows, residual_inputs, residual_rows
-from .stats import pops_statistics, sufficient_statistics
+from .stats import _stream_pops_pointwise, sufficient_statistics
 
 
 class Prediction(NamedTuple):
@@ -228,77 +229,157 @@ def _run_predict(f, theta, prob, ds_train, ds_test):
     return _pack(outs, prob, ds_test)
 
 
-def _pops_predict_batch(prob, mu, post, sigma, aleatoric, Sigma0, epistemic, batch):
-    """Linear-arm POPS predictive for one batch.  The MEAN is the BLR linear
-    posterior mean c*.phi* (mu == c_star; unchanged from uq='blr').  The VARIANCE
-    is the POPS weight-space misspecification covariance evaluated on the RAW (NOT
-    whitened) test linear rows phi* -- Sigma_POPS is already a weight covariance,
-    so predictive var = pops_var(phi*, post) directly.  E rows are one L-vector per
-    config, F rows one L-vector per force component, V rows per Voigt component.
-    epistemic=True ADDS the ordinary linear posterior variance phi*.Sigma0.phi*
-    (Sigma0 = A^-1) -- the upstream popsregression predictive is misspecification +
-    this Bayesian term, and it is the term that dominates (and self-calibrates) when
-    the design is under-determined; omitting it is why the box-only variance
-    under-covers on small data.  aleatoric=True ADDs the per-quantity label noise
-    (sigma_q / w*)^2 (padded rows, w=0, contribute 0)."""
+# ---------------------------------------------------------------------------
+# Paper-faithful POPS (Swinburne & Perez, arXiv:2402.01810)
+# ---------------------------------------------------------------------------
+
+def _ridge_dict(ridge):
+    """A scalar ridge applies to every quantity; a mapping sets each of E/F/V."""
+    if isinstance(ridge, dict):
+        return {q: float(ridge[q]) for q in "EFV"}
+    return {q: float(ridge) for q in "EFV"}
+
+
+class PopsRidgePath:
+    """Paper-faithful POPS members along a ridge path, from ONE factorisation.
+
+    The paper's parameter covariance is ``A = [Sigma_Y Sigma_0^-1 + <F F^T>]^-1``
+    with ``Sigma_Y`` an INTRINSIC, fixed noise -- explicitly NOT fitted to the
+    residual (fitting it "recovers standard maximum-likelihood inference, which
+    ignores misspecification").  So here the member rows carry only the
+    structural weights ``w`` (the evidence-fit sigma_q never enter), the data Gram
+    is ``M = G_E + G_F + G_V`` from the sufficient statistics (``(w Phi)^T (w Phi)``),
+    and the regulariser is ``lam * Gamma^2`` (``Sigma_0`` = the smoothness prior).
+    With ``D = diag(Gamma)``, ``D^-1 M D^-1 = U diag(Lambda) U^T`` is factorised
+    once and every ridge reuses it::
+
+        A(lam) = D^-1 U diag(1 / (Lambda + lam)) U^T D^-1 ,   lam = ridge * max(Lambda)
+
+    ``ridge`` is relative (dimensionless).  The mean ``c_star`` is the fitted
+    linear posterior mean at ``theta`` (the same mean as uq='blr'), so POPS only
+    supplies the uncertainty.  Linear arm (M == 0) only."""
+
+    def __init__(self, theta, prob, ds_train):
+        M_ind = prob.ind.XM.shape[0]
+        if M_ind > 0:
+            raise ValueError(f"paper-faithful POPS is the linear-arm (M=0) predictive only; "
+                             f"this problem has M={M_ind} inducing points.  Pass --arm linear.")
+        st = sufficient_statistics(theta, prob.spec, prob.model, prob.ind, prob.cfg, ds_train)
+        self.c_star = posterior(theta, st, prob)[0]
+        M = st.G_E + st.G_F + st.G_V
+        self.Dinv = 1.0 / jnp.asarray(prob.gamma)
+        Lam, U = jnp.linalg.eigh(M * self.Dinv[:, None] * self.Dinv[None, :])
+        self.Lam = jnp.maximum(Lam, 0.0)                    # clip round-off negatives
+        self.W = U * self.Dinv[:, None]                     # D^-1 U
+        self.prob, self.ds = prob, ds_train
+
+    def ridge_abs(self, ridge):
+        return float(ridge) * float(jnp.max(self.Lam))
+
+    def A(self, ridge):
+        return (self.W / (self.Lam + self.ridge_abs(ridge))) @ self.W.T
+
+    def members(self, ridge, leverage_pct=0.0):
+        """Pointwise-optimal corrections of every non-padded training observation."""
+        one = {q: 1.0 for q in "EFV"}                       # structural weights only
+        deltas, h = _stream_pops_pointwise(self.prob.model, self.prob.cfg, self.ds,
+                                           self.c_star, self.A(ridge), one)
+        keep = np.asarray(h) > 0                            # drop padded (w = 0) rows
+        return leverage_select(deltas[keep], h[keep], leverage_pct)
+
+
+def _pops_paper_batch(prob, mu, posts, batch):
+    """Paper-faithful POPS predictive for one batch: mean c*.phi*, variance the
+    misspecification posterior of each quantity (no noise / epistemic terms)."""
     lin, _, _ = linear_rows(prob.model, prob.cfg, batch)
     L = lin.E.shape[-1]
     phiE, phiF, phiV = lin.E, lin.F.reshape(-1, L), lin.V.reshape(-1, L)
-    Em, Ev = phiE @ mu, pops_var(phiE, post)
-    Fm, Fv = phiF @ mu, pops_var(phiF, post)
-    Vm, Vv = phiV @ mu, pops_var(phiV, post)
-    if epistemic:
-        quad = lambda phi: jnp.sum((phi @ Sigma0) * phi, axis=1)   # phi.Sigma0.phi (linear posterior var)
-        Ev = Ev + quad(phiE); Fv = Fv + quad(phiF); Vv = Vv + quad(phiV)
-    if aleatoric:
-        alea = lambda w, sq: jnp.where(w > 0, (sq / jnp.where(w > 0, w, 1.0)) ** 2, 0.0)
-        Ev = Ev + alea(batch.w_E, sigma["E"])
-        Fv = Fv + alea(jnp.repeat(batch.w_F, 3), sigma["F"])
-        Vv = Vv + alea(jnp.repeat(batch.w_V, 6), sigma["V"])
-    return Em, Ev, Fm.reshape(-1, 3), Fv.reshape(-1, 3), Vm.reshape(-1, 6), Vv.reshape(-1, 6)
+    Ev, Fv, Vv = (pops_var(phiE, posts["E"]), pops_var(phiF, posts["F"]),
+                  pops_var(phiV, posts["V"]))
+    return (phiE @ mu, Ev, (phiF @ mu).reshape(-1, 3), Fv.reshape(-1, 3),
+            (phiV @ mu).reshape(-1, 6), Vv.reshape(-1, 6))
 
 
-def _run_predict_pops(theta, prob, ds_train, ds_test, form, leverage_pct, aleatoric, epistemic):
-    """POPS misspecification predictive for the LINEAR arm (M == 0).  Sigma0 = A^-1
-    and c_star = A^-1 b come from objective.posterior; the pointwise corrections
-    deltas = pops_statistics(...) (Task 9) build the POPS posterior (Task 8), which
-    replaces the BLR variance over the raw test linear rows."""
-    M = prob.ind.XM.shape[0]
-    if M > 0:
-        raise ValueError(
-            f"uq='pops' is the linear-arm (M=0) misspecification predictive only; "
-            f"this problem has M={M} inducing points (the GP arm, --arm gp, which "
-            f"uses the DTC path).  Pass --arm linear, or --uq blr.")
-    st = sufficient_statistics(theta, prob.spec, prob.model, prob.ind, prob.cfg, ds_train)
-    c_star, cholA = posterior(theta, st, prob)                     # mean A^-1 b, chol(A)
-    Sigma0 = cho_solve((cholA, True), jnp.eye(c_star.shape[0]))    # A^-1
-    sigma = {q: float(jnp.exp(getattr(theta, f"log_sigma_{q}"))) for q in "EFV"}   # per-quantity sigma_q
-    deltas = pops_statistics(c_star, Sigma0, prob, ds_train, sigma, leverage_pct=leverage_pct)
-    post = pops_posterior(deltas, c_star, form=form)
-    f = jax.jit(lambda mu, b: _pops_predict_batch(prob, mu, post, sigma, aleatoric, Sigma0, epistemic, b))
-    outs = [f(c_star, jax.tree.map(lambda a: a[i], ds_test)) for i in range(ds_test.n_batches)]
+def _pops_paper_posts(path, ridge, form, leverage_pct):
+    r, cache, posts = _ridge_dict(ridge), {}, {}
+    for q in "EFV":
+        if r[q] not in cache:
+            cache[r[q]] = pops_posterior(path.members(r[q], leverage_pct), path.c_star, form=form)
+        posts[q] = cache[r[q]]
+    return posts
+
+
+def _run_predict_pops_paper(theta, prob, ds_train, ds_test, form, ridge, leverage_pct):
+    path = PopsRidgePath(theta, prob, ds_train)
+    posts = _pops_paper_posts(path, ridge, form, leverage_pct)
+    f = jax.jit(lambda mu, b: _pops_paper_batch(prob, mu, posts, b))
+    outs = [f(path.c_star, jax.tree.map(lambda a: a[i], ds_test)) for i in range(ds_test.n_batches)]
     return _pack(outs, prob, ds_test)
 
 
+def select_pops_ridge(theta, prob, ds_fit, ds_val, grid, form="hypercube", leverage_pct=0.0):
+    """Choose the paper-faithful POPS ridge per quantity on held-out data.
+
+    One :class:`PopsRidgePath` factorisation of the ``ds_fit`` Gram serves the
+    whole ``grid``; for each ridge the members are rebuilt and the predictive is
+    scored on ``ds_val`` by CRPS / RMSE (scale-free; energies and virials per
+    atom, forces per component).  Returns ``(ridge, scores)``: ``ridge[q]`` is the
+    grid value minimising ``scores[q]`` (an array aligned with ``grid``)."""
+    path = PopsRidgePath(theta, prob, ds_fit)
+    scores = {q: [] for q in "EFV"}
+    for r in grid:
+        post = pops_posterior(path.members(r, leverage_pct), path.c_star, form=form)
+        posts = {q: post for q in "EFV"}
+        f = jax.jit(lambda mu, b: _pops_paper_batch(prob, mu, posts, b))
+        cols = {q: ([], [], []) for q in "EFV"}               # y, mean, sd (scaled, live rows)
+        for i in range(ds_val.n_batches):
+            b = jax.tree.map(lambda a: a[i], ds_val)
+            Em, Ev, Fm, Fv, Vm, Vv = f(path.c_star, b)
+            C = b.y_E.shape[0]
+            nat = np.zeros(C + 1)                             # bucket C collects padded nodes
+            np.add.at(nat, np.asarray(b.node_cfg), np.asarray(b.node_mask, float))
+            nat = np.maximum(nat[:C], 1.0)
+            for q, y, m, v, w, sc in (
+                    ("E", b.y_E, Em, Ev, b.w_E, nat),
+                    ("F", b.y_F.reshape(-1), Fm.reshape(-1), Fv.reshape(-1), np.repeat(np.asarray(b.w_F), 3), 1.0),
+                    ("V", b.y_V.reshape(-1), Vm.reshape(-1), Vv.reshape(-1), np.repeat(np.asarray(b.w_V), 6),
+                     np.repeat(nat, 6))):
+                k = np.asarray(w) > 0
+                sc = np.broadcast_to(np.asarray(sc, float), np.asarray(w).shape)[k]
+                cols[q][0].append(np.asarray(y)[k] / sc); cols[q][1].append(np.asarray(m)[k] / sc)
+                cols[q][2].append(np.sqrt(np.maximum(np.asarray(v)[k], 1e-300)) / sc)
+        for q in "EFV":
+            y, m, s = (np.concatenate(c) for c in cols[q])
+            if y.size == 0:
+                scores[q].append(np.nan); continue
+            rmse = np.sqrt(np.mean((y - m) ** 2))
+            scores[q].append(float(np.mean(crps_gaussian(y, m, s))) / max(rmse, 1e-300))
+    scores = {q: np.asarray(v) for q, v in scores.items()}
+    ridge = {q: (float(grid[int(np.nanargmin(scores[q]))]) if np.isfinite(scores[q]).any()
+                 else float(grid[0])) for q in "EFV"}
+    return ridge, scores
+
+
 def predict_fixed(theta, prob, ds_train, ds_test, dtc=True, deriv_dtc=True,
-                  uq="blr", pops_form="hypercube", leverage_pct=0.0, aleatoric=True,
-                  pops_epistemic=True):
+                  uq="blr", pops_form="hypercube", leverage_pct=0.0, pops_ridge=1e-3):
     """dtc=False drops the DTC prior residual from E_var (SoR only; for tests).
     deriv_dtc=False keeps the energy DTC residual but drops its force/virial
     derivative (F_var, V_var stay SoR-only).
 
-    uq='blr' (default) is today's linear/GP posterior predictive variance,
-    unchanged.  uq='pops' selects the linear-arm POPS misspecification predictive:
-    the mean is untouched, the variance comes from the POPS weight-space posterior
-    (pops_form in {'hypercube','ensemble'}, leverage_pct the leverage percentile),
-    and aleatoric=True adds the label noise (sigma_q/w)^2.  POPS is linear-arm only
-    (raises on M>0).  The POPS defaults ('hypercube' + aleatoric) match the upstream
-    popsregression package default; 'ensemble' is the centred committee variance
-    (the package's 'ensemble' posterior; see pops.pops_posterior)."""
+    uq='blr' (default) is the linear/GP posterior predictive variance.  uq='pops'
+    is the linear-arm (M=0) misspecification predictive of Swinburne & Perez
+    (arXiv:2402.01810) as published: the mean is the fitted linear posterior mean,
+    the variance is the pointwise-optimal-parameter-set posterior built from
+    STRUCTURAL weights only (the evidence-fit sigma_q never enter -- fitting the
+    noise to the residual reverts to plain ML) with the regulariser
+    pops_ridge * Gamma^2 (relative ridge; a float, or a dict per E/F/V).  There is
+    no separate noise/epistemic term.  pops_form in {'hypercube','ensemble'},
+    leverage_pct the leverage percentile.  See PopsRidgePath / select_pops_ridge."""
     if uq == "blr":
         return _run_predict(_predict_fn(prob, dtc, deriv_dtc), theta, prob, ds_train, ds_test)
     if uq == "pops":
-        return _run_predict_pops(theta, prob, ds_train, ds_test, pops_form, leverage_pct, aleatoric, pops_epistemic)
+        return _run_predict_pops_paper(theta, prob, ds_train, ds_test, pops_form,
+                                       pops_ridge, leverage_pct)
     raise ValueError(f"uq must be 'blr' or 'pops', got {uq!r}")
 
 

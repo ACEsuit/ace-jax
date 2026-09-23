@@ -47,8 +47,14 @@ p.add_argument("--no-deriv-dtc", action="store_true", help="force/virial varianc
 p.add_argument("--uq", choices=["blr", "pops"], default="blr", help="linear-arm predictive UQ: blr (posterior variance, today's default) or pops (weight-space misspecification). pops requires --arm linear.")
 p.add_argument("--pops-posterior", choices=["hypercube", "ensemble"], default="hypercube", help="POPS posterior form (uq=pops): hypercube (PCA/box misspecification covariance; DEFAULT, matches upstream popsregression) or ensemble (committee of weight samples; centred). ('samples' is reserved for a future draw-from-Sigma route.)")
 p.add_argument("--pops-leverage-pct", type=float, default=0.0, help="POPS leverage percentile (uq=pops); 0 keeps every training point")
-p.add_argument("--aleatoric", action=argparse.BooleanOptionalAction, default=True, help="add the label noise (sigma_q/w)^2 to the POPS predictive variance (label-predictive; DEFAULT on). --no-aleatoric gives the misspecification-only variance.")
-p.add_argument("--pops-epistemic", action=argparse.BooleanOptionalAction, default=True, help="add the linear posterior variance phi.Sigma0.phi to the POPS predictive (uq=pops), matching upstream popsregression (misspec + Bayes); DEFAULT on. Dominant when the design is under-determined.")
+p.add_argument("--pops-ridge", default="auto",
+               help="uq=pops: relative ridge (lam / max eig of the Gamma-scaled Gram), or 'auto' "
+                    "to pick it per quantity by CRPS on the last --pops-val-frac of train (one factorisation)")
+p.add_argument("--pops-ridge-grid", default="1e-2,1e-3,1e-4,1e-5,1e-6,1e-7,1e-8,1e-9,1e-10,1e-11,1e-12,1e-13,1e-14",
+               help="comma-separated relative ridges searched by --pops-ridge auto")
+p.add_argument("--pops-val-frac", type=float, default=0.2, help="held-out fraction of train for --pops-ridge auto")
+p.add_argument("--pops-env-nf", type=int, default=2000,
+               help="force components (random subsample of test) for the paper-mode envelope coverage")
 p.add_argument("--no-predict-train", action="store_true", help="skip train-set UQ prediction (a diagnostic; ~46%% of runtime at Cantor scale)")
 p.add_argument("--rungs", default="map,laplace"); p.add_argument("--n-draws", type=int, default=64)
 p.add_argument("--map-steps", type=int, default=150); p.add_argument("--map-lr", type=float, default=0.02)
@@ -336,6 +342,61 @@ with highest_precision():
         timings["nuts"] = time.time() - t
         json.dump(summ, open(out / "nuts_summary.json", "w"), indent=1)
 
+    # --- paper-faithful POPS: ridge (selected once on a train holdout) + test envelope ---
+    pops_ridge, pops_env = 1e-3, {}
+    if a.uq == "pops":
+        from ace_jax.fit.predict import PopsRidgePath, select_pops_ridge
+        from ace_jax.fit.pops import pops_envelope
+        from ace_jax.fit.rows import linear_rows
+        t = time.time()
+        if a.pops_ridge == "auto":
+            grid = [float(x) for x in a.pops_ridge_grid.split(",")]
+            nval = max(1, int(a.pops_val_frac * len(train)))
+            ds_pfit = build_dataset(train[:-nval], meta, E0, a.batch)
+            ds_pval = build_dataset(train[-nval:], meta, E0, a.batch)
+            pops_ridge, scores = select_pops_ridge(theta_map, prob, ds_pfit, ds_pval, grid,
+                                                   form=a.pops_posterior, leverage_pct=a.pops_leverage_pct)
+            json.dump({"grid": grid, "ridge": pops_ridge, "n_val": nval,
+                       "scores_crps_over_rmse": {q: [float(x) for x in v] for q, v in scores.items()}},
+                      open(out / "pops_ridge.json", "w"), indent=1)
+        else:
+            pops_ridge = float(a.pops_ridge)
+        print("POPS (paper) ridge:", pops_ridge, flush=True)
+        rd = pops_ridge if isinstance(pops_ridge, dict) else {q: pops_ridge for q in "EFV"}
+        path = PopsRidgePath(theta_map, prob, ds_train)
+        cst = np.asarray(path.c_star)
+        rowsE, rowsF = ([], [], []), ([], [])
+        for i in range(ds_test.n_batches):
+            b = jax.tree.map(lambda x_: x_[i], ds_test)
+            lin, _, _ = linear_rows(prob.model, prob.cfg, b)
+            Lb = lin.E.shape[-1]
+            C = b.y_E.shape[0]
+            nat_b = np.zeros(C + 1); np.add.at(nat_b, np.asarray(b.node_cfg), np.asarray(b.node_mask, float))
+            kE = np.asarray(b.w_E) > 0
+            phE = np.asarray(lin.E)[kE]
+            rowsE[0].append(phE); rowsE[1].append(np.asarray(b.y_E)[kE] - phE @ cst); rowsE[2].append(nat_b[:C][kE])
+            kF = np.repeat(np.asarray(b.w_F) > 0, 3)
+            phF = np.asarray(lin.F).reshape(-1, Lb)[kF]
+            rowsF[0].append(phF); rowsF[1].append(np.asarray(b.y_F).reshape(-1)[kF] - phF @ cst)
+        phE, rE, natE = (np.concatenate(x_) for x_ in rowsE)
+        phF, rF = (np.concatenate(x_) for x_ in rowsF)
+        sel = np.random.default_rng(a.seed).choice(len(rF), size=min(a.pops_env_nf, len(rF)), replace=False)
+        phF, rF = phF[np.sort(sel)], rF[np.sort(sel)]
+        env_arrays = {}
+        for q, ph, r, sc in (("E", phE, rE, natE), ("F", phF, rF, np.ones(len(rF)))):
+            lo, hi = pops_envelope(jnp.asarray(ph), path.members(rd[q], a.pops_leverage_pct))
+            lo, hi = np.asarray(lo), np.asarray(hi)
+            unit = 1e3 if q == "E" else 1.0                          # E per atom in meV
+            pops_env[q] = {"env_cover": float(np.mean((lo <= r) & (r <= hi))),
+                           "env_width_median": float(np.median(unit * (hi - lo) / sc)),
+                           "env_n": int(len(r))}
+            env_arrays.update({f"{q}_lo": lo / sc * unit, f"{q}_hi": hi / sc * unit, f"{q}_resid": r / sc * unit})
+        env_arrays["F_index"] = np.sort(sel)
+        np.savez(out / "pops_envelope_test.npz", **env_arrays)
+        timings["pops_paper_setup"] = time.time() - t
+        print("POPS (paper) envelope:", {q: {k: round(v, 4) for k, v in d_.items()} for q, d_ in pops_env.items()},
+              flush=True)
+
     metrics = {}
     for rung, d in draws.items():
         np.save(out / f"draws_{rung}.npy", d)
@@ -351,12 +412,12 @@ with highest_precision():
                 from ace_jax.fit.predict import predict_fixed
                 # POPS is a fixed-theta (MAP) misspecification predictive, not a
                 # hyperposterior mixture: the mean is the BLR mean, the variance is
-                # the weight-space misspecification covariance (+ label noise if
-                # --aleatoric).  Same for every rung (theta_map only).
+                # the Swinburne-Perez pointwise-optimal misspecification posterior
+                # (structural weights, ridge*Gamma^2; no noise term).  Same for every
+                # rung (theta_map only).
                 pred = predict_fixed(theta_map, prob, ds_train, ds, deriv_dtc=not a.no_deriv_dtc,
                                      uq="pops", pops_form=a.pops_posterior,
-                                     leverage_pct=a.pops_leverage_pct, aleatoric=a.aleatoric,
-                                     pops_epistemic=a.pops_epistemic)
+                                     leverage_pct=a.pops_leverage_pct, pops_ridge=pops_ridge)
             else:
                 pred = predict_mixture(sub, prob, ds_train, ds, deriv_dtc=not a.no_deriv_dtc)
             timings[f"predict_{split}_{rung}"] = time.time() - t
@@ -380,6 +441,9 @@ with highest_precision():
                 "E": summarise(1e3 * E / nat, 1e3 * pred.E_mean / nat, 1e3 * np.sqrt(pred.E_var) / nat),
                 "F": summarise(F.reshape(-1), pred.F_mean.reshape(-1), np.sqrt(pred.F_var).reshape(-1)),
                 "V": summarise(V.reshape(-1), pred.V_mean.reshape(-1), np.sqrt(pred.V_var).reshape(-1))}
+            if split == "test":
+                for q_, d_ in pops_env.items():
+                    metrics[f"{split}/{rung}"][q_].update(d_)
             print(split, rung, {q: {k: round(v, 4) for k, v in m_.items() if k in ("rmse", "crps", "coverage", "rho", "rms_z")}
                                 for q, m_ in metrics[f"{split}/{rung}"].items()}, flush=True)
 
