@@ -149,6 +149,44 @@ def pops_posterior(deltas, c_star, form="samples"):
     ``E[(u - E[u])(u - E[u])^T]``). The two forms therefore differ by
     ``(phi* . mean(deltas))**2`` whenever the pointwise corrections ``deltas``
     have nonzero mean.
+
+    KNOWN LIMITATION — bias/variance conflation (not yet implemented: a clean
+    third form).  In BOTH forms the *mean* prediction stays at ``phi* . c_star``
+    (see ``predict._pops_predict_batch``): only the variance changes.  When the
+    retained ``deltas`` have a nonzero mean ``mbar`` — i.e. the pointwise-optimal
+    parameter sets systematically pull ``c_star`` in one direction, the signature
+    of a *biased* fit (missing physics), not of scatter — the two forms are:
+
+      * ``samples``:  mean ``phi* . c_star``,  var ``Var_i[phi* . delta_i]``
+        (centred on the committee mean).  Drops the systematic term entirely, so
+        it under-reports and is overconfident (measured rms-z ~12 on SiGe E).
+      * ``hypercube``: mean ``phi* . c_star``,  var ``E_i[(phi* . delta_i)**2]``
+        = ``Var_i + (phi* . mbar)**2``.  This is a mean-squared-error ABOUT THE
+        RAW FIT, not a variance: it folds ``bias**2`` into ``sigma**2`` while
+        leaving the mean at the (knowingly biased) ``phi* . c_star``.  It
+        restores *symmetric* coverage (rms-z, Gaussian CRPS) only because the
+        interval is widened by exactly enough to straddle the bias; it would
+        mislead any sign-sensitive / asymmetric downstream use.
+
+    The statistically clean object is a THIRD form we do not implement:
+    bias-correct the mean to ``phi* . (c_star + mbar)`` AND report the centred
+    ``Var_i[phi* . delta_i]``.  That separates a mean shift (which belongs in the
+    prediction) from spread (which belongs in the variance).  It is a strictly
+    better experiment than either form above and is cheap to try:
+
+      * measure BOTH rms-z AND energy RMSE.  If ``mbar`` is a genuine model bias,
+        moving the mean should *reduce* RMSE — POPS then improves the fit, not
+        just the UQ.
+      * CAVEAT: ``mbar`` is taken over the LEVERAGE-SELECTED (high-influence)
+        subset — exactly the points most prone to overfitting — so the shift may
+        be an overfit direction, not a true bias.  RMSE is the discriminator:
+        RMSE down => real bias worth correcting; RMSE up => the "bias" was
+        leverage-selection noise, and centred variance + aleatoric is the honest
+        report (which is why native POPS did not beat BLR + post-hoc scalar on E).
+
+    This is faithful to the POPS package's definition (``misspecification_sigma_``
+    is the uncentred ``E[u u^T]`` by design), so it is a design choice inherited
+    from upstream, not a port bug.
     """
     if form == "samples":
         return {"samples": c_star[None, :] + deltas}
