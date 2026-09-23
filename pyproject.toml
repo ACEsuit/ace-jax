@@ -48,7 +48,8 @@ Homepage = "https://github.com/ACEsuit/ace-jax"
 Issues = "https://github.com/ACEsuit/ace-jax/issues"
 
 [dependency-groups]
-dev = ["pytest>=8", "pytest-split>=0.8", "numpyro>=0.16", "optax>=0.2"]
+# mirrors the `gp` extra so a plain `uv run pytest` can run the GP ladder tests
+dev = ["pytest>=8", "pytest-split>=0.8", "numpyro>=0.16", "optax>=0.2", "blackjax>=1.6"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ace_jax"]
