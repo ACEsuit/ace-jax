@@ -120,3 +120,26 @@ print(f"    top-5 of {deltas.shape[0]} corrections carry {frac_top:.1%} of total
 print("\nVERDICT: if box/centered >> 1 with small mean-term fraction and high kurtosis,")
 print("the ACE gap is HEAVY-TAILED corrections (a few high-leverage points) widening the")
 print("uniform box -- regime-specific and by-design, NOT the centred-vs-uncentred mean term.")
+
+# ---- (C) where does the "aleatoric" term come from, if the data is noise-free? --
+# The labels (MACE-MH1) and the ACE surrogate are both deterministic: there is NO
+# physical noise. The per-quantity sigma_q is fit by evidence/MAP under a Gaussian
+# likelihood, so it inflates to explain whatever residual the model CANNOT fit --
+# i.e. it absorbs the MODEL ERROR (misspecification + descriptor aliasing), not
+# measurement noise. If so, the fitted sigma_q should ~equal the model's own RMSE.
+natE = np.array([len(c.numbers) for c in test])
+yE = np.array([c.energy for c in test])
+rmseE = float(np.sqrt(np.mean(((yE - np.asarray(p_hc.E_mean)) / natE) ** 2)))           # eV/atom
+yF = np.concatenate([c.forces for c in test]).reshape(-1)
+rmseF = float(np.sqrt(np.mean((yF - np.asarray(p_hc.F_mean).reshape(-1)) ** 2)))        # eV/A
+# the ACTUAL aleatoric floor the model adds = sqrt(var_on - var_off), in matching
+# units (energy per atom; force per component). This sidesteps the per-config
+# w_E = 1/sqrt(nat) weighting that makes the raw log_sigma_E per-config, not per-atom.
+alea_E = float(np.mean(np.sqrt(np.maximum(np.asarray(p_hc_a.E_var) - np.asarray(p_hc.E_var), 0)) / natE))
+alea_F = float(np.mean(np.sqrt(np.maximum(np.asarray(p_hc_a.F_var) - np.asarray(p_hc.F_var), 0)).reshape(-1)))
+print("\n(C) the data is noise-free -- so what is 'aleatoric'? the added noise floor vs model RMSE:")
+print(f"    E: aleatoric floor = {alea_E*1e3:6.2f} meV/atom   vs test RMSE = {rmseE*1e3:6.2f} meV/atom")
+print(f"    F: aleatoric floor = {alea_F:8.4f} eV/A     vs test RMSE = {rmseF:8.4f} eV/A")
+print("    => sigma_q ~ the model's own (deterministic) error; the 'aleatoric' floor is")
+print("       model error re-labelled as noise (misspecification + descriptor aliasing),")
+print("       NOT physical measurement noise.")
