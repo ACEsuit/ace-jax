@@ -79,21 +79,44 @@ def residual_inputs(ind, cfg, batch, X):
 
 
 def residual_rows(theta, spec, ind, cfg, batch, X, J):
-    from .feature import apply, dwarp
+    """Residual rows from the full compact descriptors X (Ncap, D) and their
+    edge Jacobian J (E, D, 3): projects onto the feature map and defers to
+    residual_rows_from_inputs."""
+    Ncap, K = batch.nbr.shape
+    if ind.XM.shape[0] == 0:        # BLR limit: no residual block (static shape, legal under jit)
+        C = batch.y_E.shape[0]
+        return Rows(jnp.zeros((C, 0)), jnp.zeros((Ncap, 3, 0)), jnp.zeros((C, 6, 0)))
+    U0 = X @ ind.Pmap
+    JU0 = jnp.einsum("nkDa,Dq->nkqa", J.reshape(Ncap, K, cfg.D, 3), ind.Pmap)   # (Ncap, K, d, 3)
+    return residual_rows_from_inputs(theta, spec, ind, cfg, batch, U0, JU0)
+
+
+def pair_feature_inputs(model, ind, cfg, batch):
+    """(U0, JU0) for a pair-density feature map (Pmap zero outside the n_pair pair
+    rows) from the pair radials alone -- no many-body basis.  Equals
+    (X @ Pmap, Pmap^T J) of the full path (tests/test_gp_hostcache.py)."""
+    Ncap, K = batch.nbr.shape
+    zi = jnp.broadcast_to(batch.node_z[:, None], (Ncap, K))
+    Xp, dRp = model.pair_features_dense(batch.rij, zi, batch.node_z[batch.nbr], batch.nbr_mask)
+    P = ind.Pmap[cfg.n_B:]                                            # (n_pair, d)
+    return Xp @ P, jnp.einsum("nkpa,pq->nkqa", dRp.reshape(Ncap, K, -1, 3), P)
+
+
+def residual_rows_from_inputs(theta, spec, ind, cfg, batch, U0, JU0):
+    """Residual rows from the projected feature coordinates U0 = X @ Pmap
+    (Ncap, d) and their edge Jacobian JU0 = Pmap^T J (Ncap, K, d, 3), pre-warp."""
+    from .feature import dwarp, warp_u
     Ncap, K = batch.nbr.shape
     C, c = batch.y_E.shape[0], cfg.node_chunk
     M, d = ind.XM.shape                 # d = feature dim (D for isotropic, n_pair for density)
-    Dfull = cfg.D
-    if M == 0:                      # BLR limit: no residual block (static shape, legal under jit)
+    if M == 0:
         return Rows(jnp.zeros((C, 0)), jnp.zeros((Ncap, 3, 0)), jnp.zeros((C, 6, 0)))
     rij, send, _, mask = flat_edges(batch.rij, batch.nbr, batch.nbr_mask)
-    U, s, Js = residual_inputs(ind, cfg, batch, X)                    # (Ncap, d)
-    # feature edge Jacobian JU (Ncap, K, d, 3) = dwarp(X@Pmap) * (Pmap^T J);
+    s, Js = summary_edge_jacobian(rij, send, Ncap, cfg.r0, cfg.rcut, cfg.p, mask)
+    U = warp_u(U0, ind.warp)                                          # (Ncap, d)
+    # feature edge Jacobian JU (Ncap, K, d, 3) = dwarp(U0) * (Pmap^T J);
     # folds ind.scale, the projection and the warp into one object.
-    U0 = X @ ind.Pmap
-    dw = dwarp(U0, ind.warp)                                          # (Ncap, d)
-    Jr = J.reshape(Ncap, K, Dfull, 3)
-    JU = dw[:, None, :, None] * jnp.einsum("nkDa,Dq->nkqa", Jr, ind.Pmap)     # (Ncap, K, d, 3)
+    JU = dwarp(U0, ind.warp)[:, None, :, None] * JU0
     Kx = k_rows(theta, spec, U, s, batch.node_z, ind.XM, ind.SM, ind.ZM, ind.embed)   # (Ncap, M)
     E = jax.ops.segment_sum(Kx, batch.node_cfg, num_segments=C + 1)[:C]
 

@@ -55,6 +55,11 @@ p.add_argument("--pops-ridge-grid", default="1e-2,1e-3,1e-4,1e-5,1e-6,1e-7,1e-8,
 p.add_argument("--pops-val-frac", type=float, default=0.2, help="held-out fraction of train for --pops-ridge auto")
 p.add_argument("--pops-env-nf", type=int, default=2000,
                help="force components (random subsample of test) for the paper-mode envelope coverage")
+p.add_argument("--lml", choices=["device", "host-cache"], default="device",
+               help="joint-LML engine. host-cache (needs --arm gp --density pair, --rungs map, --opt lbfgs): "
+                    "cache the linear design rows in host RAM once and never re-evaluate the ACE basis "
+                    "per evaluation (ace_jax.fit.hostcache; ~rows x L x 8 B of host RAM)")
+p.add_argument("--lml-chunk", type=int, default=64, help="host-cache: batches per host->device transfer")
 p.add_argument("--no-predict-train", action="store_true", help="skip train-set UQ prediction (a diagnostic; ~46%% of runtime at Cantor scale)")
 p.add_argument("--rungs", default="map,laplace"); p.add_argument("--n-draws", type=int, default=64)
 p.add_argument("--map-steps", type=int, default=150); p.add_argument("--map-lr", type=float, default=0.02)
@@ -98,6 +103,9 @@ p.add_argument("--route", default=None,
                     '\'{"sigma_type":"lml","embed":"fixed"}\'; each route is fixed/lml/varopt. '
                     '"embed":"fixed" also skips the embedding VarOpt (as --learn-embedding off).')
 a = p.parse_args()
+if a.lml == "host-cache" and (a.arm != "gp" or a.density != "pair" or a.rungs != "map" or a.opt != "lbfgs"):
+    p.error("--lml host-cache needs --arm gp --density pair --rungs map --opt lbfgs (the cached LML "
+            "exposes value_and_grad for L-BFGS; the pair feature map is what makes caching pay)")
 if a.uq == "pops" and a.arm != "linear":
     p.error("--uq pops is the linear-arm misspecification predictive; pass --arm linear (or --uq blr).")
 # --route: parse+validate once (fails loudly on a bad route); "embed":"fixed" is
@@ -243,14 +251,26 @@ with highest_precision():
     # streamed once; only the M residual columns move per evaluation (both arms).
     from ace_jax.fit.objective import make_lml
     from ace_jax.fit.stats import assemble_statistics, linear_statistics, residual_statistics
-    t = time.time(); lik = make_lml(prob, ds_train, cache_linear=True)
-    jax.block_until_ready(lik(to_array(prob.prior.mu))); timings["stats_once"] = time.time() - t
-    # cache the theta-independent linear stats for PREDICTION too (predict_fixed
-    # always conditions on ds_train), so each draw recomputes only the M columns
     import ace_jax.fit.predict as _P
-    _lin = jax.jit(lambda: linear_statistics(prob.model, prob.cfg, ds_train))()
-    _P.sufficient_statistics = (lambda th, spec, model, ind, cfg, ds:
-        assemble_statistics(_lin, residual_statistics(th, spec, model, ind, cfg, ds)))
+    t = time.time()
+    if a.lml == "host-cache":
+        # one ACE pass: linear stats on device + weighted linear rows in host RAM;
+        # prediction (always conditioned on ds_train) reuses both
+        from ace_jax.fit.hostcache import HostCachedLML
+        lik = HostCachedLML(prob, ds_train, chunk=a.lml_chunk)
+        timings["stats_once"] = time.time() - t
+        print(f"host-cache: {sum(r.nbytes for r in lik.rows) / 1e9:.1f} GB of linear rows in host RAM",
+              flush=True)
+        _P.sufficient_statistics = (lambda th, spec, model, ind, cfg, ds:
+            assemble_statistics(lik.lin, lik._residual_stats(to_array(th))))
+    else:
+        lik = make_lml(prob, ds_train, cache_linear=True)
+        jax.block_until_ready(lik(to_array(prob.prior.mu))); timings["stats_once"] = time.time() - t
+        # cache the theta-independent linear stats for PREDICTION too (predict_fixed
+        # always conditions on ds_train), so each draw recomputes only the M columns
+        _lin = jax.jit(lambda: linear_statistics(prob.model, prob.cfg, ds_train))()
+        _P.sufficient_statistics = (lambda th, spec, model, ind, cfg, ds:
+            assemble_statistics(_lin, residual_statistics(th, spec, model, ind, cfg, ds)))
 
     init = None
     if a.init:
@@ -290,8 +310,14 @@ with highest_precision():
         # few tens of evaluations where Adam needs hundreds of (expensive) steps
         from scipy.optimize import minimize
         from ace_jax.fit.hypers import from_array, log_prior
-        logpost = jax.jit(lambda arr: lik(arr) + log_prior(from_array(arr), prob.prior))
-        vg = jax.jit(jax.value_and_grad(logpost))
+        if a.lml == "host-cache":           # streamed: value_and_grad cannot sit inside a jit
+            prior_vg = jax.jit(jax.value_and_grad(lambda arr: log_prior(from_array(arr), prob.prior)))
+            def vg(x):
+                v, g = lik.value_and_grad(x); pv, pg = prior_vg(x)
+                return v + pv, g + pg
+        else:
+            logpost = jax.jit(lambda arr: lik(arr) + log_prior(from_array(arr), prob.prior))
+            vg = jax.jit(jax.value_and_grad(logpost))
         hist = []
         def fg(x):
             t1 = time.time(); v, g = vg(jnp.asarray(x)); g.block_until_ready(); v = float(v); hist.append(v)
