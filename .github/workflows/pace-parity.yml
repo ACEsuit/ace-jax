@@ -33,5 +33,5 @@ jobs:
       - name: Parity
         env: { JAX_PLATFORM_NAME: cpu, ACEJAX_REQUIRE_FIXTURES: "1" }
         run: |
-          uv run pytest -q tests/test_pace_io.py tests/test_pace_radial.py tests/test_pace_build.py tests/test_pace_model.py tests/test_pace_export.py tests/test_pace_hlo.py
+          uv run pytest -q tests/test_pace_io.py tests/test_pace_radial.py tests/test_pace_build.py tests/test_pace_model.py tests/test_pace_export.py tests/test_pace_hlo.py -k "not pyace"   # pyace runs in its own venv below
           pace_ref/.venv/bin/python -m pytest -q tests/test_pace_export.py -k pyace
