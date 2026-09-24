@@ -4,6 +4,7 @@ Runs on Modal (one cheap GPU), so no local LAMMPS build or SSH is needed:
 
     modal run bench/pace_modal/run.py               # parity + timings + AA counts
     modal run bench/pace_modal/run.py --only parity
+    modal run bench/pace_modal/run.py --only profile   # force-pass breakdown
 
 The image builds LAMMPS (stable) with ML-PACE + KOKKOS/CUDA + the Python module
 once and caches it.  ace-jax is mounted from this checkout (not installed), so
@@ -47,6 +48,7 @@ image = (
     )
     .env({"LD_LIBRARY_PATH": "/opt/lammps/build", "JAX_ENABLE_X64": "1"})
     .add_local_dir(ROOT / "src", "/ace-jax/src")
+    .add_local_file(ROOT / "bench" / "pace_profile.py", "/ace-jax/bench/pace_profile.py")
     .add_local_dir(ROOT / "fixtures" / "pace", "/data/fixtures")
     .add_local_file(LAMMPS_EX / "PACKAGES/dispersion/potential_files/c_ace.yace", "/data/c_ace.yace")
     .add_local_file(LAMMPS_EX / "PACKAGES/apip/Cu-1.yace", "/data/Cu-1.yace")
@@ -224,12 +226,25 @@ def aa_counts():
     return out
 
 
+# ----------------------------------------------------------------- profile
+@app.function(gpu=GPU, timeout=3600)
+def profile(reps: int = 10, n_rep: int = 8):
+    """Force-pass breakdown; the logic lives in bench/pace_profile.py."""
+    import sys
+    sys.path.insert(0, "/ace-jax/src"); sys.path.insert(0, "/ace-jax/bench")
+    from pace_profile import run_profile
+    return run_profile("/data/c_ace.yace", reps, n_rep)
+
+
 @app.local_entrypoint()
 def main(only: str = ""):
     out = ROOT / "bench" / "pace_modal" / "last_results.json"
     res = json.loads(out.read_text()) if out.exists() else {}   # --only reruns merge in
-    for key, fn in (("aa_counts", aa_counts), ("parity", parity), ("timings", timings)):
-        if only not in ("", key.split("_")[0]):
+    stages = (("aa_counts", aa_counts), ("parity", parity), ("timings", timings),
+              ("profile", profile))
+    for key, fn in stages:
+        # profile is opt-in (--only profile); the default run is the Task 9 set
+        if only != key.split("_")[0] and not (only == "" and key != "profile"):
             continue
         try:
             res[key] = fn.remote()
