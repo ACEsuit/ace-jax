@@ -56,8 +56,9 @@ def test_parity_shipped_grid(name):
     assert worst < SHIP_TOL
 
 
-SHIP_TOL = 1e-6   # 10x the largest measured gap (9.5e-8, si_cheblinear; 2026-09-24,
-                  # python-ace 0.2.7+192.g66c35ea, deltaSplineBins 0.001)
+SHIP_TOL = 1e-5   # 10x the largest measured gap (9.8e-7, si_chebpow_fs: the sqrt
+                  # embedding amplifies spline error; 2026-09-24, python-ace
+                  # 0.2.7+192.g66c35ea, deltaSplineBins 0.001)
 
 
 def _fd_forces(calc, at, h=1e-5):

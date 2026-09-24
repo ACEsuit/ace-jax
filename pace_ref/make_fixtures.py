@@ -4,7 +4,7 @@ Run in the python-ace venv (pace_ref/.venv).  Coefficients are random: parity
 between two evaluators does not need a physical potential, and random values
 exercise every term.  Writes fixtures/pace/{name}.yace and {name}_ref.npz.
 """
-import copy, pathlib, tempfile
+import copy, pathlib, tempfile, zlib
 import numpy as np, yaml
 from ase import Atoms
 from ase.build import bulk
@@ -84,7 +84,7 @@ def main():
         cfg = {"deltaSplineBins": 0.001, "elements": els, "embeddings": {"ALL": embd},
                "bonds": bonds, "functions": funcs}
         bb = ACEBBasisSet(create_multispecies_basis_config(cfg))
-        rng = np.random.default_rng(abs(hash(name)) % 2**32)
+        rng = np.random.default_rng(zlib.crc32(name.encode()))   # hash() is salted per process
         c = np.asarray(bb.all_coeffs)                          # API line 1
         bb.all_coeffs = rng.normal(scale=0.3, size=c.shape)     # API line 2 (a settable property)
         cb = bb.to_ACECTildeBasisSet()                          # API line 3
