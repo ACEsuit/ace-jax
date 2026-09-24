@@ -47,10 +47,10 @@ p.add_argument("--no-deriv-dtc", action="store_true", help="force/virial varianc
 p.add_argument("--uq", choices=["blr", "pops"], default="blr", help="linear-arm predictive UQ: blr (posterior variance, today's default) or pops (weight-space misspecification). pops requires --arm linear.")
 p.add_argument("--pops-posterior", choices=["hypercube", "ensemble"], default="hypercube", help="POPS posterior form (uq=pops): hypercube (PCA/box misspecification covariance; DEFAULT, matches upstream popsregression) or ensemble (committee of weight samples; centred). ('samples' is reserved for a future draw-from-Sigma route.)")
 p.add_argument("--pops-leverage-pct", type=float, default=0.0, help="POPS leverage percentile (uq=pops); 0 keeps every training point")
-p.add_argument("--pops-ridge", default="blr",
-               help="uq=pops: 'blr' (DEFAULT: the BLR prior 1/sigma_c^2 -- POPS on the BLR's own loss, so "
-                    "the mean is the BLR mean), a relative ridge (lam / max eig of the loss Gram), per "
-                    "quantity as 'E=blr,F=1e-5,V=1e-5' (the mean is the F ridge's), or 'auto' "
+p.add_argument("--pops-ridge", default="auto",
+               help="uq=pops uncertainty ridge (the mean is always the BLR mean): 'auto' (DEFAULT: per "
+                    "quantity by validation CRPS), 'blr' (1/sigma_c^2), a relative ridge (lam / max eig of "
+                    "the loss Gram), or per quantity as 'E=1e-11,F=1e-7,V=1e-6' "
                     "to pick it per quantity by CRPS on the last --pops-val-frac of train (one factorisation)")
 p.add_argument("--pops-ridge-grid", default="1e-2,1e-3,1e-4,1e-5,1e-6,1e-7,1e-8,1e-9,1e-10,1e-11,1e-12,1e-13,1e-14",
                help="comma-separated relative ridges searched by --pops-ridge auto")
@@ -429,9 +429,9 @@ with highest_precision():
             pops_ridge = a.pops_ridge if a.pops_ridge == "blr" else float(a.pops_ridge)
         print("POPS (paper) ridge:", pops_ridge, flush=True)
         rd = pops_ridge if isinstance(pops_ridge, dict) else {q: pops_ridge for q in "EFV"}
-        from ace_jax.fit.predict import pops_mean_ridge
+        from ace_jax.fit.predict import POPS_MEAN
         path = PopsRidgePath(theta_map, prob, ds_train)
-        path.use_mean(pops_mean_ridge(pops_ridge))      # one potential: the force ridge's c*
+        path.use_mean(POPS_MEAN)                        # the BLR mean
         cst = np.asarray(path.c_star)
         rowsE, rowsF = ([], [], []), ([], [])
         for i in range(ds_test.n_batches):
@@ -447,14 +447,6 @@ with highest_precision():
             phF = np.asarray(lin.F).reshape(-1, Lb)[kF]
             rowsF[0].append(phF); rowsF[1].append(np.asarray(b.y_F).reshape(-1)[kF] - phF @ cst)
         phE, rE, natE = (np.concatenate(x_) for x_ in rowsE)
-        # consistency check for per-quantity ridges: the E uncertainty is built
-        # around the F-ridge mean; how far would the E-ridge mean move E?
-        dE = phE @ (np.asarray(path.c_star_at(rd["E"])) - cst)
-        mean_shift = {"E_rmse_shift_meV_per_atom": float(1e3 * np.sqrt(np.mean((dE / natE) ** 2))),
-                      "E_rmse_test_meV_per_atom": float(1e3 * np.sqrt(np.mean((rE / natE) ** 2)))}
-        print("POPS mean sensitivity (c*(ridge_E) vs c*(ridge_F)):", mean_shift, flush=True)
-        json.dump({"mean_ridge": pops_mean_ridge(pops_ridge), "ridge": rd, **mean_shift},
-                  open(out / "pops_mean.json", "w"), indent=1)
         phF, rF = (np.concatenate(x_) for x_ in rowsF)
         sel = np.random.default_rng(a.seed).choice(len(rF), size=min(a.pops_env_nf, len(rF)), replace=False)
         phF, rF = phF[np.sort(sel)], rF[np.sort(sel)]

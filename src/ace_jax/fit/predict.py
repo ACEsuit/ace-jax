@@ -407,16 +407,18 @@ def _rkey(ridge):
     return "blr" if ridge == "blr" else float(ridge)
 
 
-def pops_mean_ridge(ridge):
-    """The one ridge whose c* is the POPS mean: a scalar ridge is itself (the
-    paper's single lambda); a per-quantity dict uses the force ridge (forces
-    dominate the design)."""
-    return _rkey(ridge["F"]) if isinstance(ridge, dict) else _rkey(ridge)
+POPS_MEAN = "blr"
+"""The POPS mean is pinned to the BLR mean, c*('blr'), whatever the uncertainty
+ridge(s): one potential, the one that is fitted and reported.  On SiGe/Cantor a
+single consistent (c*, A) either gave a poor mean (theta-free ridge mean, E 10x
+worse) or unbalanced E/F uncertainty (the 'blr' ridge for A: E sigma ~150x too
+large, F too small), so each quantity's A(ridge_q) is chosen for its own
+calibration around the fixed BLR mean."""
 
 
 def _run_predict_pops_paper(theta, prob, ds_train, ds_test, form, ridge, leverage_pct, path=None):
     path = PopsRidgePath(theta, prob, ds_train) if path is None else path
-    path.use_mean(pops_mean_ridge(ridge))
+    path.use_mean(POPS_MEAN)
     posts = _pops_paper_posts(path, ridge, form, leverage_pct)
     f = jax.jit(lambda mu, b: _pops_paper_batch(prob, mu, posts, b))
     outs = [f(path.c_star, jax.tree.map(lambda a: a[i], ds_test)) for i in range(ds_test.n_batches)]
@@ -432,13 +434,12 @@ def select_pops_ridge(theta, prob, ds_fit, ds_val, grid, form="hypercube", lever
     atom, forces per component).  Returns ``(ridge, scores)``: ``ridge[q]`` is the
     grid value minimising ``scores[q]`` (an array aligned with ``grid``).
 
-    The score is the mean CRPS in physical units (per atom for E and V), NOT
-    CRPS/RMSE: every candidate ridge also moves the mean (c* is its own ridge
-    solution), so accuracy has to count, not only calibration."""
+    The mean is pinned (POPS_MEAN), so the ridge only moves the uncertainty and
+    the mean CRPS (per atom for E and V) ranks calibration+sharpness."""
     path = PopsRidgePath(theta, prob, ds_fit)
+    path.use_mean(POPS_MEAN)                                 # the ridge only moves A, never the mean
     scores = {q: [] for q in "EFV"}
     for r in grid:
-        path.use_mean(r)                                     # each candidate is one consistent (c*, A)
         post = path.posterior(r, form=form, leverage_pct=leverage_pct)
         posts = {q: post for q in "EFV"}
         f = jax.jit(lambda mu, b: _pops_paper_batch(prob, mu, posts, b))

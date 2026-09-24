@@ -62,7 +62,7 @@ def _dense_ridge_mean(prob, ds, ridge, theta=THETA):
 
 
 def _reference_var(prob, ds, ridge):
-    c = _dense_ridge_mean(prob, ds, ridge)                # the paper's c*: same loss as A
+    c = _dense_ridge_mean(prob, ds, "blr")                # the mean is ALWAYS the BLR mean
     Pw, rw, PE = _dense_structural(prob, ds, c)
     g2 = np.asarray(prob.gamma) ** 2
     M = Pw.T @ Pw
@@ -76,7 +76,8 @@ def _reference_var(prob, ds, ridge):
 
 @pytest.mark.parametrize("ridge", ["blr", 1e-3])
 def test_pops_matches_dense_blr_loss_reference(tiny_linear_problem, ridge):
-    """Rows weighted w/sigma_q, regulariser ridge*Gamma^2, c* its own optimum."""
+    """Rows weighted w/sigma_q, regulariser ridge*Gamma^2 for A; the mean is the
+    BLR mean whatever the uncertainty ridge."""
     prob, ds = tiny_linear_problem
     with highest_precision():
         p = predict_fixed(THETA, prob, ds, ds, uq="pops", pops_ridge=ridge)
@@ -104,16 +105,20 @@ def test_blr_ridge_is_the_blr_posterior(tiny_linear_problem):
 
 
 def test_pops_paper_per_quantity_ridge(tiny_linear_problem):
-    """A per-quantity ridge dict: ONE mean (a single potential), the force ridge's
-    c*, and each quantity's own A(ridge_q) for its uncertainty."""
+    """A per-quantity ridge dict: ONE mean -- the BLR mean, pinned whatever the
+    ridges -- and each quantity's own A(ridge_q) for its uncertainty."""
     prob, ds = tiny_linear_problem
     with highest_precision():
         pd = predict_fixed(THETA, prob, ds, ds, uq="pops", pops_ridge={"E": 1e-2, "F": 1e-4, "V": 1e-4})
         pF = predict_fixed(THETA, prob, ds, ds, uq="pops", pops_ridge=1e-4)
+        pb = predict_fixed(THETA, prob, ds, ds)                             # BLR
         path = PopsRidgePath(THETA, prob, ds)
-        path.use_mean(1e-4)
+        path.use_mean("blr")
         vE = pops_var(_test_rows(prob, ds), path.posterior(1e-2))
-    for f in ("E_mean", "F_mean", "V_mean", "F_var", "V_var"):
+    for f in ("E_mean", "F_mean", "V_mean"):
+        assert np.allclose(np.asarray(getattr(pd, f)), np.asarray(getattr(pb, f)), rtol=1e-8, atol=1e-12), f
+        assert np.allclose(np.asarray(getattr(pF, f)), np.asarray(getattr(pb, f)), rtol=1e-8, atol=1e-12), f
+    for f in ("F_var", "V_var"):
         assert np.allclose(np.asarray(getattr(pd, f)), np.asarray(getattr(pF, f)), rtol=1e-10, atol=1e-14), f
     assert np.allclose(np.asarray(pd.E_var), np.asarray(vE), rtol=1e-8, atol=1e-14)
     assert not np.allclose(np.asarray(pd.E_var), np.asarray(pF.E_var))
