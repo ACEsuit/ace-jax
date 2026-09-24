@@ -16,6 +16,7 @@ XYZ = FIXTURE_DIR / "si_tiny_train.xyz"
 pytestmark = pytest.mark.skipif(not XYZ.exists(), reason="missing si_tiny_train.xyz")
 
 
+@pytest.mark.slow           # ~275 s: over half the fast suite; runs in CI's slow job
 def test_cli_map_laplace(tmp_path):
     main(["fit", "--model", str(FIXTURE_DIR / "si_fitted.npz"), "--train", str(XYZ), "--test", str(XYZ),
           "--energy-key", "dft_energy", "--force-key", "dft_force", "--virial-key", "dft_virial",
