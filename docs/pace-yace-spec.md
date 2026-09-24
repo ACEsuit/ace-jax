@@ -1,6 +1,7 @@
 # PACE `.yace` import/export — design spec
 
-Status: design agreed 2026-09-24; implementation not started.
+Status: design agreed 2026-09-24; checked against ML-PACE source
+(`ICAMS/lammps-user-pace` @ `99aa6e6`) the same day; implementation not started.
 
 ## Goal
 
@@ -23,12 +24,17 @@ Success means:
 
 - GRACE (including GRACE-1L-FS): different schema; separate spec once a real
   file has been inspected. It may map onto the factorised radial.
-- Exporting ACEpotentials-native models to `.yace` (ACE.jl spline radial).
+- Exporting ACEpotentials-native models to `.yace`. ML-PACE does read
+  `ACE.jl.*` tabulated radials (`ace_c_basis.cpp`), so this is a feasible
+  follow-up; it is not part of this spec, and importing such files is
+  rejected too.
   Export covers only models whose radial is a PACE family.
 - B-basis methods on imported models (`site_basis`, `site_descriptors`,
   `edge_jacobian`), and fitting. They raise a clear error on a `PACEModel`.
 - Per-bond differing `radbasename`: `NotImplementedError` until a real model
-  needs it.
+  needs it. (The C++ does allow it.)
+- Per-bond differing `inner_cutoff_type`: rejected. The C++ keeps one global
+  value (last bond wins), so such files are ill-defined.
 - The pacemaker B-basis `potential.yaml` format.
 
 ## Architecture
@@ -63,7 +69,7 @@ New and changed files:
 | `eval/pace_io.py` | `load_yace`, `write_yace`; PyYAML with the C loader |
 | `eval/pace_build.py` | complex→real map T, A/AA index construction, padding |
 | `eval/pace_model.py` | `PACEModel` |
-| `eval/radial.py` | `cheb_exp_cos`, `cheb_pow`, `simplified_bessel`, `fexp` |
+| `eval/pace_radial.py` | `cheb_exp_cos`, `cheb_pow`, `cheb_linear`, `simplified_bessel`, `cutoff_func_poly`, `radcore`, `pace_zbl`, `fexp`, `fexp_shifted_scaled` |
 | `eval/io.py` / `__init__.py` | extension dispatch in `load` |
 | `pyproject.toml` | add `pyyaml` |
 | `pace_ref/` | reference env recipe + `make_fixtures.py` |
@@ -75,7 +81,7 @@ New and changed files:
 class PACEModel(eqx.Module):
     # trainable leaves (what write_yace serialises)
     crad            # (NZ, NZ, nradmax, lmax+1, nradbase), zero-padded per bond
-    radparams       # (NZ, NZ, k): lambda, rcut, dcut, rcut_in, dcut_in, ...
+    radparams       # (NZ, NZ, 5): lambda, rcut, dcut, rcut_in, dcut_in
     core            # (NZ, NZ, 2): prehc, lambdahc
     ctilde_complex  # (n_terms, ndensity): yace ms_comb coefficients, flat
     fs_params       # (NZ, 2*ndensity)
@@ -112,8 +118,8 @@ one element's set, not NZ times as large.
 PACE forms products of complex A_lm; ace-jax uses real (SpheriCart) Y_lm.
 At build time:
 
-1. write each complex A_lm as at most 2 real A_lm′ (fixed per-l unitary map
-   between PACE's Y_lm convention and SpheriCart's);
+1. write each complex A_lm as at most 2 real A_lm′, using the convention
+   map given under "R_nl and the A basis" below (verified against the C++);
 2. expand each `ms_comb` product, keep the real part;
 3. merge terms by sorted real-index tuple.
 
@@ -122,47 +128,106 @@ This yields `aa_specs` and a sparse real T. The forward pass computes
 negligible per call, keeps gradients on the complex leaf, and means export
 never needs an inverse map.
 
-**To verify from source:** PACE's Y_lm normalisation and phase, and whether
-the `.yace` lists negative m explicitly or relies on conjugate symmetry.
-
-Rank-1 functions use the radial base g_k directly (not R_nl); they are
-order-1 AA entries pointing at the g_k columns.
+Rank-1 functions use the radial base g_k directly (not R_nl), times
+Y00 = 1; they are order-1 AA entries pointing at the g_k columns.
 
 Bonds with differing `nradmax`/`lmax`/`nradbase` are zero-padded.
 
 ## Radials, embedding, core terms
 
-All formulas below are **ported line by line from ML-PACE's C++**
-(`ace_radial.cpp`, `ace_evaluator.cpp`), not re-derived; the source is the
-authority for every constant.
+Every formula here was checked against `ICAMS/lammps-user-pace` @ `99aa6e6`
+(`ML-PACE/ace-evaluator/`: `ace_radial.cpp`, `ace_abstract_basis.cpp`,
+`ace_evaluator.cpp`, `ace_spherical_cart.cpp`, `ace_c_basis.cpp`) and is
+ported from it line by line. The line references below are to that commit.
 
-- **Radial base g_k(r)**: `cheb_exp_cos`, `cheb_pow`, `simplified_bessel`,
-  each with PACE's cosine cutoff over [rcut − dcut, rcut]. SBessel roots are
-  computed once at load (static table).
-- **R_nl(r)** = Σ_k crad[zi, zj, n, l, k] g_k(r): an einsum against
-  `crad[zi, zj]` gathered per edge. The per-edge gather is O(S²) in memory
-  traffic; a per-bond-type contraction is the lever if benchmarks show it
-  matters at many elements.
-- **Neighbour-list cutoff** is the max bond `rcut`; smaller bonds are zeroed by
-  their own cutoff function.
-- **Embedding F**: `FinnisSinclair` / `FinnisSinclairShiftedScaled`, per
-  element, summed over densities via `fs_params`. The power law is **PACE's
-  `Fexp` ported exactly**, including its small-|ρ| linear blend. That keeps
-  value parity everywhere and gives a finite gradient at ρ = 0, which padded
-  and neighbourless nodes in lammps-jax buffers hit. The `fit/` smoothed
-  signed sqrt (ρ(ρ²+1e-6)^(−1/4)) is **not** reused: its values differ at
-  small ρ.
-- **Inner regimes**: the loader reads which one the `.yace` declares:
-  1. legacy density-based: hard-core repulsion from `prehc`/`lambdahc`,
-     feeding ρ_core; the embedding energy is switched off as ρ_core crosses
-     `rho_core_cutoff` ± `drho_core_cutoff`;
-  2. distance-based: a switch on [rcut_in − dcut_in, rcut_in] multiplied into
-     the radials, with ZBL below. Reuse `fit/zbl.py` (lifted into `eval/`) only
-     if its form matches PACE's exactly; otherwise port PACE's.
-- **Site energy**: E_i = E0[zi] + F_zi(ρ)·switch(ρ_core) + core repulsion.
-  Forces and virial by autodiff through the existing edge-vector wrapper.
-- **Precision**: nothing touches `jax.config`; `highest_precision` applies as
-  for `ACEModel`.
+### Bond parameters (YAML → leaves)
+
+Per bond `[μi, μj]`: `radbasename`, `radparameters` (λ = element 0),
+`radcoefficients` (→ `crad[n][l][k]`), `nradmax`, `lmax`, `nradbasemax`,
+`rcut`, `dcut`, `rcut_in`, `dcut_in`, `prehc`, `lambdahc`,
+`inner_cutoff_type`. The C++ allocates `crad` as
+(NZ, NZ, max nradmax, max lmax + 1, max nradbasemax) and zero-fills. Our
+padding matches that exactly.
+
+`radbasename` values starting `ACE.jl` select a different, tabulated radial
+path in ML-PACE. That's out of scope here (see Non-goals), and a model that
+mixes ACE.jl and PACE radials is rejected by the C++ itself.
+
+### Radial base g_k(r), `ace_radial.cpp:241–445`
+
+g ≡ 0 for r ≤ cut_in − dcut_in or r ≥ rcut. Otherwise, by family:
+
+| family | x | g | own cutoff |
+|---|---|---|---|
+| `ChebExpCos` | 1 − 2(e^{−λr/rc} − e^{−λ})/(1 − e^{−λ}) | g₀ = 1; g_{n−1} = ½ − ½T_{n−1}(x), n = 2..K | × ½(1 + cos πr/rc), then × ½(1 + cos π(r − rc + dcut)/dcut) on r > rc − dcut |
+| `ChebPow` | 2(1 − (1 − r/rc)^λ) − 1 | g_{n−1} = ½ − ½T_n(x), n = 1..K | none (vanishes at rc by construction; `dcut` unused) |
+| `ChebLinear` | 1 − r/rc | g_{n−1} = ½ − ½T_n(x) | none |
+| `SBessel` | — | closed-form sinc sum f_n (`simplified_bessel_aux`) plus a 3-term orthogonalising recursion; **no roots needed** | none (zero for r ≥ rc) |
+
+For `distance` and `zbl`, g is then multiplied by 1 − P(r; cut_in, dcut_in),
+where P is `cutoff_func_poly` (a quintic from 1 at r_in − δ to 0 at r_in).
+**Port the quirk at `ace_radial.cpp:246`:** for `zbl`, `cut_in = (dcut_in == 0)`,
+so with dcut_in ≠ 0 the inner cutoff becomes P(r; 0, dcut_in) = 0 for r > 0
+and g is left unmodified. The ACE-to-ZBL switch then happens only in the
+energy assembly (below). A `zbl` fixture pins this.
+
+### R_nl and the A basis, `ace_evaluator.cpp:315–380`
+
+- R_nl(r) = Σ_k crad[zi, zj, n, l, k]·g_k(r). This is an einsum against
+  `crad[zi, zj]` gathered per edge. That gather is O(S²) in memory traffic;
+  a per-bond-type contraction is the lever if benchmarks show it matters at
+  many elements.
+- Rank 1: A¹[μj, k] = Σ_j g_k(r_j)·Y00, with **Y00 = 1**.
+- Rank > 1: A[μj, n, l, m] = Σ_j R_nl(r_j)·Y_lm(r̂_j) for m ≥ 0, then
+  A[l, −m] = (−1)^m·conj A[l, m].
+- **Harmonics convention** (`ace_spherical_cart.cpp`, `ace_spherical_cart.h:51`):
+  complex, Condon–Shortley phase, Y00 = 1, Y10 = √3·ẑ, Y11 = −√(3/2)(x̂ + iŷ).
+  That is √(4π) times the standard complex Y_lm. So for m > 0,
+  Y^PACE_{l,±m} = √(4π)·(−1)^m (Y^R_{l,m} ± i·Y^R_{l,−m})/√2 in terms of
+  SpheriCart's real L2-normalised Y^R (no Condon–Shortley phase), and
+  Y^PACE_{l,0} = √(4π)·Y^R_{l,0}. The T-map unit test confirms these
+  numerically against a numpy port of the C++ recursion.
+- Each function contributes ρ_p += Re(Π_t A[μ_t, n_t, l_t, m_t] · c̃_p)
+  **over its `ms_combs` exactly as listed**. Whether a file stores full or
+  half m-sets needs no special handling.
+- Neighbours with r ≥ rcut(μi, μj) are skipped per bond. The neighbour-list
+  cutoff is the max bond `rcut`.
+
+### Embedding, `ace_abstract_basis.cpp:37–122`
+
+`FS_parameters` holds [w₀, m₀, w₁, m₁, …] per element; E_F = Σ_p w_p·F(ρ_p; m_p).
+
+- `FinnisSinclair` → `Fexp`, with w = 10⁶, λ = w^{1−m}:
+  F = sign(x)·((1 − g)|x|^m + λ·g·|x|), g = exp(−(w|x|)³), with g := 0 when
+  (w|x|)³ > 30; and F = λx for |x| ≤ 10⁻¹⁰. Ported with safe `where`s so the
+  unused branch never produces a NaN gradient (padded and neighbourless
+  nodes sit at x = 0). The `fit/` smoothed signed sqrt is **not** reused.
+- `FinnisSinclairShiftedScaled` → `FexpShiftedScaled`: F = x if |m − 1| < 10⁻¹⁰;
+  otherwise with a = |x|, e = e^{−a}, ν = 1/m: F = sign(x)·((ν^{ν/(1−ν)}·e + a)^m − ν^{1/(1−ν)}·e).
+
+### Inner regimes and site energy, `ace_radial.cpp:615–700`, `ace_evaluator.cpp:497–536`
+
+`inner_cutoff_type` is one global value in the C++ (the last bond read wins).
+The loader **rejects** files whose bonds disagree, rather than copying that
+behaviour. Missing ⇒ `density` (the backward-compatible default).
+
+ρ_core = Σ_j c_r(r_j), where c_r depends on the regime:
+
+| regime | c_r(r) | site energy |
+|---|---|---|
+| `density` | \|pre\|·e^{−\|λhc\|r²}/r · ½(1 + cos πr/rc) (0 if λhc·r² ≥ 50) | E0 + E_F·f + ρ_core, f = P(ρ_core; `rho_core_cutoff`, `drho_core_cutoff`) (`inner_cutoff`) |
+| `distance` | the `density` c_r × P(r; r_in, δ_in) | same as `density` |
+| `zbl` | pre·(K/2)·Zi·Zj·(φ(r/a)/r + S(r)) × P(r; rc, dcut); a = 0.4685/(Zi^0.23 + Zj^0.23), K = 14.399645351950543, φ is the 4-exponential ZBL screening, S is the C²-matching shift over [rc − dcut, rc] | E0 + E_F·f + ρ_core·(1 − f), with f = P(dcut_in − d_min; dcut_in, dcut_in), d_min = min_j (r_j − (cut_in − dcut_in)) and f = 1 with no neighbours |
+
+The `zbl` switch depends on the **nearest neighbour's distance** per atom,
+not on a sum. In JAX that is a per-node `segment_min` over edges (padded
+edges masked to +∞). It's continuous and differentiable except where two
+neighbours tie. `fit/zbl.py` is not reused: PACE's ZBL has its own shift
+S(r) and cutoff, and needs Zi, Zj from the element names.
+
+Forces and virial come from autodiff through the existing edge-vector
+wrapper. Nothing touches `jax.config`; `highest_precision` applies as for
+`ACEModel`.
 
 ## Writer
 
@@ -209,17 +274,26 @@ Random-coefficient models from pyace's basis-config tools, converted with
 |---|---|
 | 1 element, ChebExpCos, ndensity 1, linear F | simplest path |
 | 1 element, ChebPow, ndensity 2, FS √ | Fexp, several densities |
+| 1 element, ChebLinear | the fourth radial family |
 | 3 elements, SBessel, FSShiftedScaled, mixed `nradmax` | species channels, padding, SBessel |
-| 2 elements, legacy hard-core + ρ_core switch | inner regime 1 |
-| 2 elements, distance inner cutoff + ZBL | inner regime 2 |
+| 2 elements, `density` (hard-core + ρ_core switch) | regime 1 |
+| 2 elements, `distance` | regime 2 |
+| 2 elements, `zbl`, dcut_in ≠ 0, a close-contact structure | regime 3, nearest-neighbour switch, the `cut_in` quirk |
 | one real published `.yace` | realistic size; perf; AA-union measurement |
 
 ### Test layers
 
-1. **Unit**: g_k per family against the C++ (pyace radial functions if
-   exposed, else a direct numpy port); T map (complex and real products equal
-   on random A); `fexp` values and gradients incl. ρ = 0; ρ_core switch.
-2. **Model**: E/F/virial against pyace fixtures at the pinned tolerance.
+1. **Unit**: g_k per family, c_r per regime and `cutoff_func_poly` against
+   the C++ (pyace radial functions if exposed, else a numpy port); the
+   harmonics convention map and T map (complex and real products equal on
+   random A); `fexp`/`fexp_shifted_scaled` values and gradients, including
+   x = 0; the ρ_core and nearest-neighbour switches.
+2. **Model**: E/F/virial against pyace fixtures. The C++ evaluates splined
+   g, R_nl and c_r on a grid of spacing `deltaSplineBins` (default 0.001 Å,
+   stored in the `.yace`), while ace-jax is analytic. So each fixture is
+   generated twice: once with `deltaSplineBins` reduced (e.g. 1e-5) for a
+   tight parity check of the formulas, and once at the shipped value to
+   measure and pin the real-world gap.
 3. **Consistency** (reusing `test_efv` patterns): finite-difference forces
    and virial; sparse vs dense layout; padded neighbourless node and isolated
    atom give finite results.
