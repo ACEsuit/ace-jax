@@ -1,6 +1,6 @@
 """Low-rank principal-frame projection of the site descriptors for the residual
 GP (--density pca): the same uncentred principal-frame reduction as the species
-embedding (ACEpotentials _pca_reduce; run.py's --learn-embedding SVD init)."""
+embedding (ACEpotentials _pca_reduce)."""
 import jax
 import numpy as np
 import pytest

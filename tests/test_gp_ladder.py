@@ -70,30 +70,50 @@ def test_laplace_fd_matches_exact_width():
 import pytest
 
 
+def _tiny_embed_problem(mps=4, ncfg=3):
+    """SiGe (unfitted) problem with the species kernel factor live."""
+    import equinox as eqx
+    from conftest import FIXTURE_DIR
+    from ace_jax.eval import load
+    from ace_jax.fit.data import build_dataset, load_configs
+    from ace_jax.fit.hypers import default_prior
+    from ace_jax.fit.inducing import GPConfig, build_pmap, descriptor_scale, select_inducing, site_features
+    from ace_jax.fit.kernels import KernelSpec
+    from ace_jax.fit.objective import Problem
+    model, meta, z = load(FIXTURE_DIR / "sige_nofit.npz")
+    els = [int(e) for e in meta["elements"]]
+    cfgs = load_configs(FIXTURE_DIR / "si_tiny_train.xyz", "dft_energy", "dft_force", "dft_virial")[:ncfg]
+    counts = np.array([[np.sum(c.numbers == e) for e in els] for c in cfgs], float)
+    E0, *_ = np.linalg.lstsq(counts, np.array([c.energy for c in cfgs]), rcond=None)
+    model = eqx.tree_at(lambda m: m.E0, model, jnp.asarray(E0))
+    ds = build_dataset(cfgs, meta, E0, ncfg)
+    cfg = GPConfig(r0=2.35, rcut=float(meta["rcut"]), n_B=meta["n_B"], n_pair=meta["n_pair"],
+                   NZ=len(els), C=ncfg)
+    X, S = site_features(model, cfg, ds); scale = descriptor_scale(X, ds.node_mask)
+    ind = select_inducing(X, S, ds.node_z, ds.node_mask, mps, scale,
+                          Pmap=build_pmap(cfg, scale, None), nz=len(els))
+    prob = Problem(KernelSpec("cosine", True, cfg.D), model, ind, cfg,
+                   jnp.ones(cfg.len_basis), default_prior(2.35))   # unfitted model: no exported gamma
+    return prob, ds, els
+
+
 @pytest.mark.slow
 def test_run_map_ps_normalizes_embed_for_inner_map():
-    # Task-3 gap fixed centrally: an embed-carrying ParamSet stores the RAW E, but
-    # make_lml_embed/theta_map_at feed the kernel normalize_rows(E).  run_map_ps must
-    # apply the same row-normalisation so its inner theta-MAP matches that reference.
+    # An embed-carrying ParamSet stores the RAW E; the kernel's coregionalization
+    # needs normalize_rows(E).  run_map_ps must normalise centrally, so a raw and
+    # a pre-normalised (frozen) E give the same inner theta-MAP.
     from ace_jax.eval import highest_precision
     from ace_jax.fit.paramset import from_hypers
     from ace_jax.fit.ladder import run_map_ps
-    from ace_jax.fit.varopt_embed import theta_map_at
     from ace_jax.fit.embedding import normalize_rows
-    from test_gp_varopt import _tiny_problem
     with highest_precision():
-        prob, ds, els = _tiny_problem()
+        prob, ds, els = _tiny_embed_problem()
         NZ = len(els)
         rng = np.random.default_rng(0)
         E = jnp.asarray(np.eye(NZ) + 0.1 * rng.normal(size=(NZ, NZ)))     # rows NOT unit-norm
         assert not np.allclose(np.asarray(E), np.asarray(normalize_rows(E)))   # E is genuinely raw
-        ps = from_hypers(prob.prior.mu, prob.prior, embed=E, embed_route="varopt")
+        ps = from_hypers(prob.prior.mu, prob.prior, embed=E, embed_route="fixed")
         a_ps = run_map_ps(ps, prob, ds, steps=50, seed=0).block("hypers").value
-        # (1) matches make_lml_embed's reference MAP (theta_map_at normalises internally)
-        a_ref = theta_map_at(prob, ds, E, steps=50, seed=0)
-        assert np.allclose(np.asarray(a_ps), np.asarray(a_ref), atol=1e-8)
-        # (2) regression guard: raw-E and pre-normalised-E inputs give the SAME MAP, i.e.
-        #     run_map_ps threads the normalised embed, not the raw one.
-        ps_n = from_hypers(prob.prior.mu, prob.prior, embed=normalize_rows(E), embed_route="varopt")
+        ps_n = from_hypers(prob.prior.mu, prob.prior, embed=normalize_rows(E), embed_route="fixed")
         a_norm = run_map_ps(ps_n, prob, ds, steps=50, seed=0).block("hypers").value
         assert np.allclose(np.asarray(a_ps), np.asarray(a_norm), atol=1e-10)

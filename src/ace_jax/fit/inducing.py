@@ -48,7 +48,7 @@ def principal_frame(R, d):
     channels: returns (coordinates U S (n, d), frame V (D, d)), so coordinates =
     R @ V and, for d >= rank, their Gram equals R R^T exactly.  The same reduction
     as the species embedding (ACEpotentials ``_pca_reduce``; run.py's
-    --learn-embedding init U[:, :k] * sv[:k]).  Uncentred on purpose: dot products
+    Python embedded-model authoring).  Uncentred on purpose: dot products
     (the cosine kernel's inputs) are what the frame preserves.  d is capped at the
     numerical rank (tolerance as ``_pca_reduce``)."""
     import numpy as _np

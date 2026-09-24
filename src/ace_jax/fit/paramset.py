@@ -5,7 +5,7 @@ the whole set back into the concrete objects stats/kernels/predict consume."""
 from typing import NamedTuple, Optional
 import jax.numpy as jnp
 
-ROUTES = ("fixed", "lml", "varopt")
+ROUTES = ("fixed", "lml")
 
 class ParamBlock(NamedTuple):
     name: str
@@ -37,8 +37,6 @@ class ParamSet(NamedTuple):
 
     def lml_vector(self):        return self._vec("lml")
     def set_lml_vector(self, x): return self._set("lml", x)
-    def varopt_vector(self):     return self._vec("varopt")
-    def set_varopt_vector(self, x): return self._set("varopt", x)
 
 def sigma_type_block(n_types, init=None, prior_sigma=1.5):
     """An LML ParamBlock carrying the FREE per-config-type log-noise ratios:
@@ -68,7 +66,7 @@ def parse_route(spec):
     """Parse a `--route` argument into a validated {block_name: route} map.
 
     `spec` may be None/"" (-> {}), a JSON object string, or an already-decoded
-    dict.  Every route must be one of ROUTES ('fixed'/'lml'/'varopt'); anything
+    dict.  Every route must be one of ROUTES ('fixed'/'lml'); anything
     else, or a non-object JSON payload, raises ValueError so a bad CLI flag fails
     loudly rather than silently mis-routing a block."""
     import json
@@ -110,7 +108,7 @@ def _check_sigma_type_lml_layout(ps):
             f"invalid route: block(s) {bad} routed to 'lml' alongside a 'sigma_type' "
             "block. The LML vector layout is [hypers | sigma_type free rows]; routing "
             "any other block to 'lml' would silently corrupt that decode. Route "
-            f"{bad} to 'fixed' or 'varopt' instead.")
+            f"{bad} to 'fixed' instead.")
 
 
 def build_fit_paramset(hypers, prior, *, embed=None, embed_route="fixed",

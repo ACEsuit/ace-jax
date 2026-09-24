@@ -1,5 +1,11 @@
 # Hyperparameter routing + native POPS UQ + composable weights — design
 
+> **Update 2026-09-24.** The learned species embedding (outer VarOpt, `varopt_embed.py`)
+> was removed before merge -- the ablations did not justify it -- and with it the
+> `varopt` route: routes are now `fixed` / `lml`, and the `embed` block is frozen
+> coregionalization only.  Sections below that describe the VarOpt route and the
+> embedding re-home are kept as the design record, not the current code.
+
 **Date:** 2026-09-22. **Code:** `~/gits/ace-jax` (`ace_jax.fit`). **Status:** design, awaiting review.
 
 ## Motivation

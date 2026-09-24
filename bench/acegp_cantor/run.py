@@ -97,11 +97,6 @@ p.add_argument("--baseline", default=None, help="dimer_mean.npz: subtract the MH
 p.add_argument("--base-npz", default=None, help="precomputed per-config (E,F,V) mu_0 offsets in data-file order (make_density_base.py); train+test only")
 p.add_argument("--ood", default=None, help="extra out-of-distribution test xyz (same keys); predicted from the fitted model")
 p.add_argument("--embedding", default=None, help="MACE element-embedding table (JSON); coregionalize the GP species factor. Absent = categorical block-diagonal.")
-p.add_argument("--learn-embedding", action="store_true", help="learn the GP species embedding by outer VarOpt (SVD-init from --embedding, freeze for the ladder). Off = frozen.")
-p.add_argument("--embed-de", type=int, default=8, help="rank of the learned embedding (SVD of the MACE table)")
-p.add_argument("--embed-anchor", type=float, default=1.0, help="lambda for the shrink-to-block-diagonal anchor")
-p.add_argument("--embed-steps", type=int, default=30, help="outer VarOpt steps (0 = frozen)")
-p.add_argument("--embed-holdout", type=float, default=0.2, help="fraction of train held out for the acceptance gate")
 p.add_argument("--sigma-type", action="store_true",
                help="fit a per-config-type noise block (Task 6): assign each config a type from its "
                     "config_type label, build a ParamSet carrying the sigma_type LML block and fit the "
@@ -112,20 +107,16 @@ p.add_argument("--sigma-type", action="store_true",
                     "numerically unchanged.")
 p.add_argument("--route", default=None,
                help='per-block route override for the ParamSet fit, as a JSON object, e.g. '
-                    '\'{"sigma_type":"lml","embed":"fixed"}\'; each route is fixed/lml/varopt. '
-                    '"embed":"fixed" also skips the embedding VarOpt (as --learn-embedding off).')
+                    '\'{"sigma_type":"lml"}\'; each route is fixed or lml.')
 a = p.parse_args()
 if a.lml == "host-cache" and (a.arm != "gp" or a.density not in ("pair", "pca") or a.rungs != "map" or a.opt != "lbfgs"):
     p.error("--lml host-cache needs --arm gp --density pair|pca --rungs map --opt lbfgs (the cached LML "
             "exposes value_and_grad for L-BFGS; a narrow feature map is what makes caching pay)")
 if a.uq == "pops" and a.arm != "linear":
     p.error("--uq pops is the linear-arm misspecification predictive; pass --arm linear (or --uq blr).")
-# --route: parse+validate once (fails loudly on a bad route); "embed":"fixed" is
-# also read here as "skip the embedding VarOpt", mirroring --learn-embedding off.
+# --route: parse+validate once (fails loudly on a bad route)
 from ace_jax.fit.paramset import parse_route
 route = parse_route(a.route)
-if route.get("embed") == "fixed":
-    a.learn_embedding = False
 out = pathlib.Path(a.out); out.mkdir(parents=True, exist_ok=True)
 T0 = time.time(); timings = {}
 
@@ -217,15 +208,7 @@ with highest_precision():
                       d=a.pca_d, X=np.asarray(X), mask=np.asarray(ds_train.node_mask))
     from ace_jax.fit.embedding import load_mace_embedding
     raw = None if a.embedding is None else np.asarray(load_mace_embedding(a.embedding, els))
-    # Low-rank SVD init ONLY when learning; frozen --embedding stays full-width (exact prior
-    # behaviour). load_mace_embedding returns (NZ, D) with NZ usually < D, so svd gives U (NZ, NZ)
-    # and effective rank <= NZ; pass de = the ACTUAL embed width, never a.embed_de (which can
-    # exceed the available columns -> select_inducing ValueError).
-    if raw is not None and a.learn_embedding and a.embed_de:
-        from ace_jax.fit.inducing import principal_frame
-        embed = jnp.asarray(principal_frame(raw, a.embed_de)[0])          # low-rank SVD init for learning
-    else:
-        embed = None if raw is None else jnp.asarray(raw)                 # frozen: full-width (exact prior behaviour)
+    embed = None if raw is None else jnp.asarray(raw)                     # frozen coregionalization
     ind = select_inducing(X, S, ds_train.node_z, ds_train.node_mask, m, scale,
                           Pmap=Pmap, warp=a.warp, embed=embed, nz=len(els),
                           de=(int(embed.shape[1]) if embed is not None else None))
@@ -240,31 +223,6 @@ with highest_precision():
               f"[{s_live.min():.3f}, {s_live.max():.3f}])", flush=True)
     prob = Problem(KernelSpec(a.kernel, not a.no_bump, cfg.D, s_floor=s_floor), model, ind, cfg,
                    jnp.asarray(z["gamma"]), default_prior(a.r0))
-    if a.learn_embedding and embed is not None:
-        from ace_jax.fit.varopt_embed import learn_embedding, theta_map_at
-        from ace_jax.fit.predict import predict_fixed
-        from ace_jax.fit.metrics import rmse
-        from ace_jax.fit.hypers import from_array
-        # GENUINELY held-out gate: split train into DISJOINT fit/val; learn E on train_fit,
-        # score on train_val (NOT in train_fit). Conditioning val_score on ds_fit (not ds_train)
-        # is what makes the gate protective.
-        nval = max(1, int(a.embed_holdout * len(train)))
-        train_fit, train_val = train[:-nval], train[-nval:]
-        ds_fit = build_dataset(train_fit, meta, E0, a.batch)
-        ds_val = build_dataset(train_val, meta, E0, a.batch)
-        Fval = np.concatenate([c.forces for c in train_val]).reshape(-1)
-        def val_score(E):
-            ind_E = ind._replace(embed=E)
-            a_star = theta_map_at(prob._replace(ind=ind_E), ds_fit, E, steps=a.map_steps)
-            pr = predict_fixed(from_array(a_star), prob._replace(ind=ind_E), ds_fit, ds_val,
-                               dtc=False, deriv_dtc=False)
-            return rmse(Fval, np.asarray(pr.F_mean).reshape(-1))
-        E_star, einfo = learn_embedding(prob, ds_fit, embed, lam=a.embed_anchor,
-                                        steps=a.embed_steps, inner_steps=a.map_steps,
-                                        val_score=val_score, seed=a.seed)
-        print(f"learn-embedding: selected {einfo['selected']}, trace {np.round(einfo['trace'][-3:], 2)}", flush=True)
-        ind = ind._replace(embed=E_star)
-        prob = prob._replace(ind=ind)
     # theta-split cached likelihood: the theta-independent linear Gram G_BB is
     # streamed once; only the M residual columns move per evaluation (both arms).
     from ace_jax.fit.objective import make_lml
