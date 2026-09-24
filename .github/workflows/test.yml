@@ -33,7 +33,7 @@ jobs:
         env:
           JAX_PLATFORM_NAME: cpu
           JAX_ENABLE_X64: "1"
-        run: uv run --python 3.12 --extra gp pytest -m "not slow" --splits 3 --group ${{ matrix.group }}
+        run: uv run --python 3.12 --extra gp pytest -m "not slow" --splits 3 --group ${{ matrix.group }} --splitting-algorithm least_duration
   smoke:
     # Import + a small descriptor/EFV/kernel smoke on the other supported Pythons
     # -- a cheap compatibility check without re-running the whole (slow) matrix.
