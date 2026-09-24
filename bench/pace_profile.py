@@ -69,8 +69,8 @@ def run_profile(yace, reps=10, n_rep=8):
             return real_spherical_harmonics(x, m.lmax)
         cols = jnp.concatenate([gk, jax.jit(st_R_gather)(gk).reshape(gk.shape[0], -1)], -1)
         Y = jax.jit(st_Y)(rij)
-        def st_eA(cols):                              # A-basis column gather product
-            return cols[:, m.a_rad] * Y[:, m.a_y]
+        def st_eA(cols):                              # A-basis product (model's current form)
+            return m.edge_a(cols, Y)
         eA = jax.jit(st_eA)(cols)
         def st_pool(eA):
             return jax.ops.segment_sum(eA, s * m.nz + zj, num_segments=n * m.nz)
