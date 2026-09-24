@@ -41,6 +41,17 @@ FIXTURE_DIR = pathlib.Path(os.environ.get("ACEJAX_FIXTURE_DIR", ROOT / "fixtures
 # into a failure.
 REQUIRE = bool(os.environ.get("ACEJAX_REQUIRE_FIXTURES"))
 
+def pace_fixture(path):
+    """Return `path` if the committed PACE fixture exists; otherwise skip -- or,
+    under ACEJAX_REQUIRE_FIXTURES (CI), fail, so a regeneration that wrote
+    nothing cannot pass as all-skipped.  Reads the env at call time."""
+    if pathlib.Path(path).exists():
+        return path
+    if os.environ.get("ACEJAX_REQUIRE_FIXTURES"):
+        pytest.fail(f"missing PACE fixture {path}")
+    pytest.skip(f"PACE fixture {path} not generated (see pace_ref/README.md)")
+
+
 MODELS = {
     "ace1_spline_spherical": "si_fitted.npz",
     "ace_analytic_solid": "si_ace_model.npz",

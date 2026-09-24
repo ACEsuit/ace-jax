@@ -2,6 +2,7 @@ import pathlib
 import jax
 import numpy as np
 import pytest
+from conftest import pace_fixture
 
 jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
@@ -13,8 +14,7 @@ REF = pathlib.Path(__file__).parent.parent / "fixtures" / "pace" / "unit_ref.npz
 
 @pytest.fixture(scope="module")
 def ref():
-    if not REF.exists():
-        pytest.skip("unit_ref.npz not generated (Task 1)")
+    pace_fixture(REF)
     return np.load(REF)
 
 
@@ -67,3 +67,11 @@ def test_radbase_grad_finite_at_and_beyond_cutoff(name):
     for r in (5.0, 5.5):
         J = jax.jacfwd(lambda rr: pr.radbase(rr, name, "density", 2.0, 5.0, 0.3, 0.0, 1e-5, 6))(r)
         assert np.all(np.isfinite(J)) and np.all(J == 0)
+
+
+def test_chebexpcos_dcut_zero_has_finite_gradient():
+    """dcut = 0: the C++ never enters the outer-cutoff branch for r < rcut, so
+    the untaken branch here must not produce a NaN derivative."""
+    # reverse mode: that is where 0 * NaN appears (forces use it); jacfwd hides it
+    J = jax.jacrev(lambda r: pr.radbase(r, "ChebExpCos", "density", 2.0, 5.0, 0.0, 0.0, 0.0, 6))(2.3)
+    assert np.all(np.isfinite(J))

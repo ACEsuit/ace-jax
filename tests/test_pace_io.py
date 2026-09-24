@@ -1,6 +1,7 @@
 import pathlib
 import numpy as np
 import pytest
+from conftest import pace_fixture
 from ace_jax.eval.pace_io import load_tree, parse_yace
 
 FIX = pathlib.Path(__file__).parent.parent / "fixtures" / "pace"
@@ -80,8 +81,7 @@ def test_mixed_bond_types_rejected(tmp_path, mini):
 @pytest.mark.parametrize("name", ["si_chebexpcos", "gesi_sbessel", "sige_zbl"])
 def test_parse_fixtures(name):
     p = FIX / f"{name}.yace"
-    if not p.exists():
-        pytest.skip("fixture not generated")
+    pace_fixture(p)
     spec, a = parse_yace(p)
     NZ = len(spec.element_names)
     assert a["crad"].shape[:2] == (NZ, NZ)
@@ -96,4 +96,28 @@ def test_function_indices_beyond_bond_basis_rejected(tmp_path):
     p = tmp_path / "bad.yace"
     p.write_text(MINI.replace("ls: [1, 1]", "ls: [2, 2]"))
     with pytest.raises(ValueError, match="exceeds"):
+        parse_yace(p)
+
+
+@pytest.mark.parametrize("edit, match", [
+    (("inner_cutoff_type: density", "inner_cutoff_type: zbl2"), "inner_cutoff_type"),
+    (("radbasename: ChebExpCos", "radbasename: ChebExpCos2"), "radbasename"),
+])
+def test_unknown_types_rejected_at_load(tmp_path, edit, match):
+    """ML-PACE throws on these; they must fail at load, not evaluate as density."""
+    p = tmp_path / "x.yace"
+    p.write_text(MINI.replace(*edit))
+    with pytest.raises(NotImplementedError, match=match):
+        parse_yace(p)
+
+
+def test_bond_defaults_match_mlpace_from_yaml(tmp_path):
+    """ACEBondSpecification::from_YAML: absent rcut_in/dcut_in -> 0 (not the
+    ACERadialFunctions::init 1e-5), and prehc/lambdahc are required."""
+    p = tmp_path / "x.yace"
+    p.write_text(MINI.replace(" rcut_in: 0, dcut_in: 0,", ""))
+    _, a = parse_yace(p)
+    np.testing.assert_array_equal(a["radparams"][0, 0, 3:], [0.0, 0.0])
+    p.write_text(MINI.replace(" prehc: 0,", ""))
+    with pytest.raises(ValueError, match="prehc"):
         parse_yace(p)

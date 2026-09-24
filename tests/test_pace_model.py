@@ -2,6 +2,7 @@ import pathlib
 import jax
 import numpy as np
 import pytest
+from conftest import pace_fixture
 
 jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
@@ -17,8 +18,7 @@ NAMES = ["si_chebexpcos", "si_chebpow_fs", "si_cheblinear", "gesi_sbessel",
 
 def _fixture(name):
     y, r = FIX / f"{name}.yace", FIX / f"{name}_ref.npz"
-    if not (y.exists() and r.exists()):
-        pytest.skip("fixtures not generated (Task 2)")
+    pace_fixture(y), pace_fixture(r)
     return y, np.load(r)
 
 

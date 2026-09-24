@@ -37,7 +37,8 @@ def _cheb_exp_cos(r, lam, rc, dcut, K):
     T = _cheb(x, K)
     g = jnp.concatenate([T[..., :1], 0.5 - 0.5 * T[..., 1:K]], axis=-1)
     env = 0.5 * (1.0 + jnp.cos(PI * r / rc))
-    fc = jnp.where(r > rc - dcut, 0.5 * (1.0 + jnp.cos(PI * (r - rc + dcut) / dcut)), 1.0)
+    d = jnp.where(dcut == 0, 1.0, dcut)      # dcut = 0: branch never taken, keep its grad finite
+    fc = jnp.where(r > rc - dcut, 0.5 * (1.0 + jnp.cos(PI * (r - rc + dcut) / d)), 1.0)
     return g * (env * fc)[..., None]
 
 

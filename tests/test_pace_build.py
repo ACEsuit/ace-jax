@@ -2,6 +2,7 @@ import itertools, pathlib
 import jax
 import numpy as np
 import pytest
+from conftest import pace_fixture
 
 jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
@@ -14,8 +15,7 @@ FIX = pathlib.Path(__file__).parent.parent / "fixtures" / "pace"
 
 def test_ylm_map_matches_pace_cpp():
     ref_p = FIX / "unit_ref.npz"
-    if not ref_p.exists():
-        pytest.skip("unit_ref.npz not generated")
+    pace_fixture(ref_p)
     ref = np.load(ref_p)
     U = ylm_map(6)
     YR = np.asarray(real_spherical_harmonics(jnp.asarray(ref["ydir"]), 6))

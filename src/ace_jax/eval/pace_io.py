@@ -5,6 +5,7 @@ Keys and defaults follow ML-PACE `ace_c_basis.cpp::load_yaml` and
 sequences (`[0, 1]:`), which PyYAML cannot hash, so they load as tuples.
 """
 import copy
+import warnings
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -61,8 +62,11 @@ class PACESpec:
     functions: list = field(default_factory=list)   # (el, idx, term_start, num_ms, ndens)
 
 
-_BOND_DEFAULTS = {"rcut_in": 0.0, "dcut_in": 1e-5, "prehc": 0.0, "lambdahc": 1.0,
-                  "inner_cutoff_type": "density"}
+# ACEBondSpecification::from_YAML (ace_abstract_basis.h): these are the values
+# used when a key is absent; prehc / lambdahc are required there, and here.
+_BOND_DEFAULTS = {"rcut_in": 0.0, "dcut_in": 0.0, "inner_cutoff_type": "density"}
+_RADBASES = ("ChebExpCos", "ChebPow", "ChebLinear", "SBessel")
+_INNER = ("density", "distance", "zbl")
 
 
 def parse_yace(path):
@@ -75,15 +79,25 @@ def parse_yace(path):
         raise ValueError(f"unknown element {e.args[0]!r} in {path}") from None
 
     bonds = {k: {**_BOND_DEFAULTS, **v} for k, v in tree["bonds"].items()}
+    for k, b in bonds.items():
+        for key in ("prehc", "lambdahc"):
+            if key not in b:
+                raise ValueError(f"{path}: bond {list(k)} lacks required key {key!r}")
     kinds = {b["radbasename"] for b in bonds.values()}
     if any(k.startswith("ACE.jl") for k in kinds):
         raise NotImplementedError(f"{path}: ACE.jl tabulated radials are not supported")
     if len(kinds) != 1:
         raise NotImplementedError(f"{path}: per-bond differing radbasename {sorted(kinds)}")
+    if not kinds <= set(_RADBASES):
+        raise NotImplementedError(f"{path}: radbasename {sorted(kinds)} not supported "
+                                  f"(supported: {', '.join(_RADBASES)})")
     inner = {b["inner_cutoff_type"] for b in bonds.values()}
     if len(inner) != 1:
         raise ValueError(f"{path}: bonds disagree on inner_cutoff_type {sorted(inner)}; "
                          "ML-PACE keeps one global value (last bond wins), so the file is ill-defined")
+    if not inner <= set(_INNER):
+        raise NotImplementedError(f"{path}: inner_cutoff_type {sorted(inner)} not supported "
+                                  f"(supported: {', '.join(_INNER)})")
     for k in [(i, j) for i in range(NZ) for j in range(NZ)]:
         if k not in bonds:
             raise ValueError(f"{path}: missing bond {list(k)}")
@@ -151,6 +165,11 @@ def write_yace(model, spec, path):
     from .pace_model import PACEModel
     if not isinstance(model, PACEModel):
         raise TypeError("write_yace only writes PACEModel (PACE radials); see docs/pace-yace-spec.md")
+    if any(getattr(x, "dtype", np.float64) != np.float64 for x in
+           (model.crad, model.ctilde_complex, model.fs_params, model.E0)):
+        warnings.warn("write_yace: model leaves are float32, so coefficients are written at "
+                      "float32 precision; load with dtype=float64 to export exactly",
+                      UserWarning, stacklevel=2)
     f64 = lambda x: np.asarray(x, np.float64)
     t = copy.deepcopy(spec.tree)
     t["E0"] = f64(model.E0).tolist()
@@ -162,11 +181,20 @@ def write_yace(model, spec, path):
     crad, rp, core = f64(model.crad), f64(model.radparams), f64(model.core)
     for (i, j), b in t["bonds"].items():
         n, l, k = int(b["nradmax"]), int(b["lmax"]), int(b["nradbasemax"])
+        # padded entries (beyond this bond's own sizes, up to the global ones) are
+        # live -- g_k runs to the global nradbase on every bond -- so if they were
+        # edited, widen the bond rather than drop them.  ML-PACE sizes to the max.
+        nzi = np.nonzero(crad[i, j])
+        if nzi[0].size:
+            n, l, k = (max(n, int(nzi[0].max()) + 1), max(l, int(nzi[1].max())),
+                       max(k, int(nzi[2].max()) + 1))
+            if (n, l, k) != (b["nradmax"], b["lmax"], b["nradbasemax"]):
+                b["nradmax"], b["lmax"], b["nradbasemax"] = n, l, k
         b["radcoefficients"] = crad[i, j, :n, :l + 1, :k].tolist()
         b["radparameters"] = [float(rp[i, j, 0])] + list(b["radparameters"][1:])
         b["rcut"], b["dcut"] = float(rp[i, j, 1]), float(rp[i, j, 2])
-        for key, v in (("rcut_in", rp[i, j, 3]), ("dcut_in", rp[i, j, 4]),
-                       ("prehc", core[i, j, 0]), ("lambdahc", core[i, j, 1])):
+        b["prehc"], b["lambdahc"] = float(core[i, j, 0]), float(core[i, j, 1])
+        for key, v in (("rcut_in", rp[i, j, 3]), ("dcut_in", rp[i, j, 4])):
             if key in b or float(v) != _BOND_DEFAULTS[key]:
                 b[key] = float(v)
     ct = f64(model.ctilde_complex)
