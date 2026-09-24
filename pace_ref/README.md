@@ -34,3 +34,12 @@ pace_ref/.venv/bin/python pace_ref/make_fixtures.py
 `make_fixtures.py` writes `fixtures/pace/{name}.yace` and `{name}_ref.npz`
 (E/F/stress at the shipped `deltaSplineBins` and at 1e-4); see the plan,
 `docs/pace-yace-plan.md`, Task 2.
+
+### Notes on the pyace fixture config (python-ace 0.2.7+192.g66c35ea, `~/gits/python-ace` @ 66c35ea)
+
+- pyace defaults `inner_cutoff_type` to `distance`; `bond()` sets `density` explicitly.
+- `prehc` is also the ZBL prefactor; the `zbl` fixture sets `core-repulsion: [1, 1]` so ZBL is active.
+- Per-centre function overrides use pacemaker's unary key (`"Ge"`), not a tuple.
+- `all_coeffs` is a settable property (there is no `set_all_coeffs`).
+- On a flaky network, clone python-ace locally and `uv pip install ~/gits/python-ace`
+  with `UV_HTTP_TIMEOUT=300`.
