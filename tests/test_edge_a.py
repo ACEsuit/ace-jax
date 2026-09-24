@@ -17,7 +17,6 @@ import pytest
 from conftest import FIXTURE_DIR, MODELS, pace_fixture, species_index
 
 from ace_jax.eval import calibrate_edge_a, load, sparse_graph, with_edge_a_kind
-from ace_jax.eval.edge_model import EDGE_A_KINDS
 
 # Both model families share the A-basis forms (eval/edge_model.py), so every
 # test here runs on the ACE npz models and on PACE .yace fixtures alike.
@@ -55,9 +54,8 @@ def _case(model_path, dtype, kind):
     return model, (rij, nz[send], nz[recv], send, n, jnp.zeros(n, jnp.int32))
 
 
-@pytest.mark.parametrize("alt", ["matmul", "segment"])
 @pytest.mark.parametrize("dtype", [jnp.float64, jnp.float32], ids=["f64", "f32"])
-def test_forms_agree_bitwise(model_path, dtype, alt):
+def test_forms_agree_bitwise(model_path, dtype):
     """Values and gradients agree; how tightly depends on the dtype.
 
     Values are bit-identical in both dtypes.  GRADIENTS are bit-identical in f64
@@ -67,8 +65,8 @@ def test_forms_agree_bitwise(model_path, dtype, alt):
     architecture and fails on the other, which is how this was found.
     """
     mg, args = _case(model_path, dtype, "gather")
-    mm, _ = _case(model_path, dtype, alt)
-    assert (mg.edge_a_kind, mm.edge_a_kind) == ("gather", alt)   # else this compares a form with itself
+    mm, _ = _case(model_path, dtype, "matmul")
+    assert (mg.edge_a_kind, mm.edge_a_kind) == ("gather", "matmul")   # else this compares a form with itself
     rij, zi, zj, send, n, nzero = args
     ev = lambda m: m.site_energies(rij, zi, zj, send, n, nzero)
     dv = np.max(np.abs(np.asarray(ev(mg) - ev(mm))))
@@ -76,13 +74,8 @@ def test_forms_agree_bitwise(model_path, dtype, alt):
     dg = np.max(np.abs(np.asarray(gr(mg) - gr(mm))))
     print(f"\n  {dtype.__name__}: values {dv:.1e}  grads {dg:.1e}")
     assert dv == 0.0, f"values differ by {dv}"
-    if dtype is jnp.float64 and alt == "matmul":
+    if dtype is jnp.float64:
         assert dg == 0.0, f"f64 gradients differ by {dg}"
-    elif dtype is jnp.float64:
-        # "segment" sums each column's cotangents in sorted order, a scatter in
-        # whatever order XLA picks: equal to roundoff, not bitwise
-        scale = float(np.max(np.abs(np.asarray(gr(mg)))))
-        assert dg <= 1e-12 * scale, f"f64 gradients differ by {dg} (scale {scale})"
     else:
         scale = float(np.max(np.abs(np.asarray(gr(mg)))))
         assert dg <= 1e-5 * scale, f"f32 gradients differ by {dg} (scale {scale})"
@@ -92,7 +85,7 @@ def test_switching_preserves_results(model_path):
     """`with_edge_a_kind` round-trips without touching the numbers."""
     mg, (rij, zi, zj, send, n, nzero) = _case(model_path, jnp.float64, "gather")
     ref = np.asarray(mg.site_energies(rij, zi, zj, send, n, nzero))
-    for kind in ("matmul", "segment", "gather"):
+    for kind in ("matmul", "gather"):
         m = with_edge_a_kind(mg, kind)
         assert m.edge_a_kind == kind
         got = np.asarray(m.site_energies(rij, zi, zj, send, n, nzero))
@@ -105,7 +98,7 @@ def test_calibration_picks_one_and_is_correct(model_path):
     mg, (rij, zi, zj, send, n, nzero) = _case(model_path, jnp.float64, "gather")
     best, timings = calibrate_edge_a(mg, rij, zi, zj, send, n, nzero, reps=2)
     print(f"\n  timings/ms {timings}  -> {best.edge_a_kind}")
-    assert set(timings) == set(EDGE_A_KINDS) == {"gather", "matmul", "segment"}
+    assert set(timings) == {"gather", "matmul"}
     assert best.edge_a_kind == min(timings, key=timings.get)
     ref = np.asarray(mg.site_energies(rij, zi, zj, send, n, nzero))
     assert np.array_equal(np.asarray(best.site_energies(rij, zi, zj, send, n, nzero)), ref)

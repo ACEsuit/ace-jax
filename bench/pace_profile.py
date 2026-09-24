@@ -87,8 +87,7 @@ def run_profile(yace, reps=10, n_rep=8):
             f, fb = fwd_and_vjp(fn, x)
             res[name] = {"fwd_s": f, "fwd_plus_vjp_s": fb}
         from ace_jax.eval import with_edge_a_kind
-        from ace_jax.eval.edge_model import EDGE_A_KINDS
-        for kind in EDGE_A_KINDS:                  # the same call, every A-basis form
+        for kind in ("gather", "matmul"):          # the same call, both A-basis forms
             mk = with_edge_a_kind(m, kind)
             fk = jax.jit(lambda x, mk=mk: mk.energy_forces_virial(x, zi, zj, s, r, n, nz))
             res[f"efv_{kind}_s"] = bench(fk, rij)
@@ -96,7 +95,7 @@ def run_profile(yace, reps=10, n_rep=8):
         res["total_energy_s"] = bench(en, rij)
 
         # kernel-level: perfetto trace of energy_forces_virial, top GPU ops, per form
-        for kind in EDGE_A_KINDS:
+        for kind in ("gather", "matmul"):
             mk = with_edge_a_kind(m, kind)
             efv = jax.jit(lambda x, mk=mk: mk.energy_forces_virial(x, zi, zj, s, r, n, nz))
             tdir = f"/tmp/trace_{dtype}_{kind}"

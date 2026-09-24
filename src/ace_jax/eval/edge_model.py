@@ -11,18 +11,16 @@ in `EdgeSiteModel`, so the two model families cannot drift apart:
 
 A subclass provides `site_energies`, `pad_cutoff()` (where padded edges are
 parked) and `edge_a_widths()` (row counts of the one-hot selectors), plus the
-fields `aspec_r`, `aspec_y`, `edge_a_kind`, `a_sel_r`, `a_sel_y`, `a_perm_r`,
-`a_perm_y` and `E0`.
+fields `aspec_r`, `aspec_y`, `edge_a_kind`, `a_sel_r`, `a_sel_y` and `E0`.
 """
 import dataclasses
 import time
-from functools import partial
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 
-EDGE_A_KINDS = ("gather", "matmul", "segment")
+EDGE_A_KINDS = ("gather", "matmul")
 
 
 def one_hot_selector(idx, width, dtype):
@@ -32,35 +30,7 @@ def one_hot_selector(idx, width, dtype):
 
 def check_edge_a_kind(kind):
     if kind not in EDGE_A_KINDS:
-        raise ValueError(f"edge_a_kind must be one of {EDGE_A_KINDS}, got {kind!r}")
-
-
-@partial(jax.custom_vjp, nondiff_argnums=(3,))
-def gather_cols_segment(X, idx, perm, width):
-    """X[:, idx], whose adjoint is a *sorted* segment-sum over columns.
-
-    The plain gather's adjoint is an axis-1 scatter-add (atomics, and on GPUs the
-    dominant cost of a force call); the one-hot matmul's is a dense GEMM, cheap in
-    f32 but 1/32-1/64 rate in f64 on consumer cards.  Here the cotangent's columns
-    are permuted (`perm` = argsort(idx), fixed per model) so equal targets are
-    contiguous, then reduced with indices_are_sorted=True: no atomics, no GEMM.
-    `width` = X.shape[1], static.
-    """
-    return X[:, idx]
-
-
-def _gcs_fwd(X, idx, perm, width):
-    return X[:, idx], (idx, perm)
-
-
-def _gcs_bwd(width, res, ct):
-    idx, perm = res
-    dX = jax.ops.segment_sum(ct[:, perm].T, idx[perm], num_segments=width,
-                             indices_are_sorted=True).T
-    return dX, None, None
-
-
-gather_cols_segment.defvjp(_gcs_fwd, _gcs_bwd)
+        raise ValueError(f'edge_a_kind must be "gather" or "matmul", got {kind!r}')
 
 
 class EdgeSiteModel(eqx.Module):
@@ -73,10 +43,8 @@ class EdgeSiteModel(eqx.Module):
         Two algebraically identical forms, selected by `edge_a_kind`; they agree
         to bit-identity on values and (in f64) on gradients.
 
-          "gather"   A = R[:, aspec_r] * Y[:, aspec_y]
-          "matmul"   A = (R @ Sr) * (Y @ Sy),  Sr/Sy one-hot
-          "segment"  the gather, with a sorted segment-sum adjoint
-                     (`gather_cols_segment`)
+          "gather"  A = R[:, aspec_r] * Y[:, aspec_y]
+          "matmul"  A = (R @ Sr) * (Y @ Sy),  Sr/Sy one-hot
 
         They differ only in the reverse pass: the gather's adjoint is an axis-1
         scatter whose cost per slot grows with buffer length, while the matmul's
@@ -89,9 +57,6 @@ class EdgeSiteModel(eqx.Module):
         """
         if self.edge_a_kind == "matmul":
             return (R @ self.a_sel_r) * (Y @ self.a_sel_y)
-        if self.edge_a_kind == "segment":
-            return (gather_cols_segment(R, self.aspec_r, self.a_perm_r, R.shape[1])
-                    * gather_cols_segment(Y, self.aspec_y, self.a_perm_y, Y.shape[1]))
         return R[:, self.aspec_r] * Y[:, self.aspec_y]
 
     # -------------------------------------------------- energy / forces / virial
@@ -145,17 +110,13 @@ def with_edge_a_kind(model, kind):
     check_edge_a_kind(kind)
     if kind == model.edge_a_kind:
         return model
-    # each form carries only its own tables
-    tables = dict(a_sel_r=None, a_sel_y=None, a_perm_r=None, a_perm_y=None)
-    if kind == "matmul":
-        n_r, n_y = model.edge_a_widths()
-        dt = model.E0.dtype
-        tables.update(a_sel_r=one_hot_selector(model.aspec_r, n_r, dt),
-                      a_sel_y=one_hot_selector(model.aspec_y, n_y, dt))
-    elif kind == "segment":
-        tables.update(a_perm_r=jnp.argsort(model.aspec_r, stable=True).astype(jnp.int32),
-                      a_perm_y=jnp.argsort(model.aspec_y, stable=True).astype(jnp.int32))
-    return dataclasses.replace(model, edge_a_kind=kind, **tables)
+    if kind == "gather":
+        return dataclasses.replace(model, edge_a_kind="gather", a_sel_r=None, a_sel_y=None)
+    n_r, n_y = model.edge_a_widths()
+    dt = model.E0.dtype
+    return dataclasses.replace(model, edge_a_kind="matmul",
+                               a_sel_r=one_hot_selector(model.aspec_r, n_r, dt),
+                               a_sel_y=one_hot_selector(model.aspec_y, n_y, dt))
 
 
 def calibrate_edge_a(model, rij, zi, zj, segment_ids, n_nodes, node_z, mask=None, reps=5):

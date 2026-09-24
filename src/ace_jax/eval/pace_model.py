@@ -48,8 +48,6 @@ class PACEModel(EdgeSiteModel):
     edge_a_kind: str = eqx.field(static=True, default="gather")
     a_sel_r: jax.Array = None
     a_sel_y: jax.Array = None
-    a_perm_r: jax.Array = None   # argsort(aspec_*) for "segment"
-    a_perm_y: jax.Array = None
 
     @property
     def nz(self):

@@ -117,9 +117,6 @@ class ACEModel(EdgeSiteModel):
     # that never use it do not carry the arrays
     a_sel_r: jax.Array = None                     # (n_rnl, n_A)
     a_sel_y: jax.Array = None                     # (n_ylm, n_A)
-    # argsort(aspec_*) for the "segment" form; None otherwise
-    a_perm_r: jax.Array = None
-    a_perm_y: jax.Array = None
     # C-tilde readout (PACE's ctilde): ctilde = A2B^T @ WB, (n_AA, NZ).  When
     # `folded`, site energies contract AA directly against it and the A2B
     # contraction never runs.  `site_basis` keeps using A2B, since descriptors
