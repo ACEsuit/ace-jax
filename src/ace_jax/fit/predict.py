@@ -256,9 +256,17 @@ class PopsRidgePath:
 
         A(lam) = D^-1 U diag(1 / (Lambda + lam)) U^T D^-1 ,   lam = ridge * max(Lambda)
 
-    ``ridge`` is relative (dimensionless).  The mean ``c_star`` is the fitted
-    linear posterior mean at ``theta`` (the same mean as uq='blr'), so POPS only
-    supplies the uncertainty.  Linear arm (M == 0) only."""
+    ``ridge`` is relative (dimensionless).  The mean is the paper's ``c*``: the
+    minimiser of the SAME regularised loss that defines ``A`` (the pointwise
+    corrections assume it), read off the same factorisation::
+
+        c*(lam) = D^-1 U diag(1 / (Lambda + lam)) U^T D^-1 b ,   b = (w Phi)^T (w y)
+
+    so nothing here depends on ``theta``: POPS as published has no fitted
+    hyperparameters (``theta`` is only the sufficient-statistics signature; for
+    M = 0 the linear statistics are theta-free).  By default each call's mean is
+    its own ridge's ``c*``; ``use_mean(r)`` pins one mean for every ridge (one
+    potential with per-quantity uncertainty ridges).  Linear arm (M == 0) only."""
 
     def __init__(self, theta, prob, ds_train):
         M_ind = prob.ind.XM.shape[0]
@@ -266,17 +274,40 @@ class PopsRidgePath:
             raise ValueError(f"paper-faithful POPS is the linear-arm (M=0) predictive only; "
                              f"this problem has M={M_ind} inducing points.  Pass --arm linear.")
         st = sufficient_statistics(theta, prob.spec, prob.model, prob.ind, prob.cfg, ds_train)
-        self.c_star = posterior(theta, st, prob)[0]
         M = st.G_E + st.G_F + st.G_V
+        b = st.b_E + st.b_F + st.b_V
         self.Dinv = 1.0 / jnp.asarray(prob.gamma)
         Lam, U = jnp.linalg.eigh(M * self.Dinv[:, None] * self.Dinv[None, :])
         self.Lam = jnp.maximum(Lam, 0.0)                    # clip round-off negatives
         self.W = U * self.Dinv[:, None]                     # D^-1 U
-        self._posts = {}                                    # (ridge, form, lev, thr) -> posterior
+        self._Wb = self.W.T @ b                             # U^T D^-1 b
+        self.mean_ridge = None                              # None: each call uses its own ridge
+        self._means = {}                                    # ridge -> c*(ridge)
+        self._posts = {}                                    # (mean, ridge, form, lev, thr) -> posterior
         self.prob, self.ds = prob, ds_train
 
     def ridge_abs(self, ridge):
         return float(ridge) * float(jnp.max(self.Lam))
+
+    def c_star_at(self, ridge):
+        """The ridge solution c*(ridge) = (M + lam Gamma^2)^-1 b (memoised)."""
+        r = float(ridge)
+        if r not in self._means:
+            self._means[r] = self.W @ (self._Wb / (self.Lam + self.ridge_abs(r)))
+        return self._means[r]
+
+    def use_mean(self, ridge):
+        """Pin the mean to c*(ridge) for every subsequent ridge (None: unpin)."""
+        self.mean_ridge = None if ridge is None else float(ridge)
+
+    def _mean_for(self, ridge):
+        return float(ridge) if self.mean_ridge is None else self.mean_ridge
+
+    @property
+    def c_star(self):
+        if self.mean_ridge is None:
+            raise ValueError("no mean pinned: call use_mean(ridge) or use c_star_at(ridge)")
+        return self.c_star_at(self.mean_ridge)
 
     def A(self, ridge):
         return (self.W / (self.Lam + self.ridge_abs(ridge))) @ self.W.T
@@ -287,7 +318,8 @@ class PopsRidgePath:
         are the non-padded rows (h > 0) at or above the leverage percentile -- the
         same set as ``members`` / ``leverage_select``."""
         A = self.A(ridge)
-        h, r = pops_leverage_residual(self.prob.model, self.prob.cfg, self.ds, self.c_star, A)
+        c = self.c_star_at(self._mean_for(ridge))
+        h, r = pops_leverage_residual(self.prob.model, self.prob.cfg, self.ds, c, A)
         live = h > 0
         thr = jnp.percentile(h[live], leverage_pct)
         keep = live & (h >= thr)
@@ -305,7 +337,7 @@ class PopsRidgePath:
         min/max of the projected corrections (3 passes).  ensemble: the moments
         E[delta delta^T] = A W A / K and E[delta] = A s / K (2 passes).  Equals
         ``pops_posterior(self.members(...))`` for zero percentile clipping."""
-        key = (float(ridge), form, float(leverage_pct), float(mode_threshold))
+        key = (self._mean_for(ridge), float(ridge), form, float(leverage_pct), float(mode_threshold))
         if key not in self._posts:
             self._posts[key] = self._posterior(ridge, form, leverage_pct, mode_threshold)
         return self._posts[key]
@@ -337,7 +369,7 @@ class PopsRidgePath:
         ``envelope``, which never form this matrix."""
         one = {q: 1.0 for q in "EFV"}                       # structural weights only
         deltas, h = _stream_pops_pointwise(self.prob.model, self.prob.cfg, self.ds,
-                                           self.c_star, self.A(ridge), one)
+                                           self.c_star_at(self._mean_for(ridge)), self.A(ridge), one)
         keep = np.asarray(h) > 0                            # drop padded (w = 0) rows
         return leverage_select(deltas[keep], h[keep], leverage_pct)
 
@@ -363,8 +395,16 @@ def _pops_paper_posts(path, ridge, form, leverage_pct):
     return posts
 
 
+def pops_mean_ridge(ridge):
+    """The one ridge whose c* is the POPS mean: a scalar ridge is itself (the
+    paper's single lambda); a per-quantity dict uses the force ridge (forces
+    dominate the design)."""
+    return float(ridge["F"]) if isinstance(ridge, dict) else float(ridge)
+
+
 def _run_predict_pops_paper(theta, prob, ds_train, ds_test, form, ridge, leverage_pct, path=None):
     path = PopsRidgePath(theta, prob, ds_train) if path is None else path
+    path.use_mean(pops_mean_ridge(ridge))
     posts = _pops_paper_posts(path, ridge, form, leverage_pct)
     f = jax.jit(lambda mu, b: _pops_paper_batch(prob, mu, posts, b))
     outs = [f(path.c_star, jax.tree.map(lambda a: a[i], ds_test)) for i in range(ds_test.n_batches)]
@@ -382,6 +422,7 @@ def select_pops_ridge(theta, prob, ds_fit, ds_val, grid, form="hypercube", lever
     path = PopsRidgePath(theta, prob, ds_fit)
     scores = {q: [] for q in "EFV"}
     for r in grid:
+        path.use_mean(r)                                     # each candidate is one consistent (c*, A)
         post = path.posterior(r, form=form, leverage_pct=leverage_pct)
         posts = {q: post for q in "EFV"}
         f = jax.jit(lambda mu, b: _pops_paper_batch(prob, mu, posts, b))

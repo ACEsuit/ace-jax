@@ -254,7 +254,19 @@ with highest_precision():
     from ace_jax.fit.stats import assemble_statistics, linear_statistics, residual_statistics
     import ace_jax.fit.predict as _P
     t = time.time()
-    if a.lml == "host-cache":
+    if a.uq == "pops":
+        # POPS as published has no fitted hyperparameters: structural weights, a
+        # fixed ridge, and the mean c*(ridge) from the same factorisation.  So no
+        # likelihood and no MAP -- just the (theta-free, M = 0) linear statistics.
+        if prob.ind.XM.shape[0] > 0:
+            raise SystemExit("--uq pops is the linear-arm predictive: pass --arm linear")
+        if [r.strip() for r in a.rungs.split(",")] != ["map"]:
+            raise SystemExit("--uq pops has no hyperposterior: use --rungs map")
+        _lin = jax.jit(lambda: linear_statistics(prob.model, prob.cfg, ds_train))()
+        jax.block_until_ready(_lin); timings["stats_once"] = time.time() - t
+        _P.sufficient_statistics = (lambda th, spec, model, ind, cfg, ds:
+            assemble_statistics(_lin, residual_statistics(th, spec, model, ind, cfg, ds)))
+    elif a.lml == "host-cache":
         # one ACE pass: linear stats on device + weighted linear rows in host RAM;
         # prediction (always conditioned on ds_train) reuses both
         from ace_jax.fit.hostcache import HostCachedLML
@@ -282,7 +294,10 @@ with highest_precision():
 
     rungs = [r.strip() for r in a.rungs.split(",")]
     t = time.time()
-    if a.sigma_type:
+    if a.uq == "pops":
+        theta_map = Hypers(*[float(v) for v in np.asarray(to_array(init or prob.prior.mu))])  # unused by POPS
+        print("POPS: no MAP (theta-free); theta_map is a placeholder", flush=True)
+    elif a.sigma_type:
         # Per-config-type noise fit: build a ParamSet carrying the sigma_type LML
         # block (Task 6) and let run_map_ps optimise [hypers | free log-ratios]
         # jointly (inner MAP).  --route overrides block routes.  The embedding is
@@ -391,7 +406,9 @@ with highest_precision():
             pops_ridge = float(a.pops_ridge)
         print("POPS (paper) ridge:", pops_ridge, flush=True)
         rd = pops_ridge if isinstance(pops_ridge, dict) else {q: pops_ridge for q in "EFV"}
+        from ace_jax.fit.predict import pops_mean_ridge
         path = PopsRidgePath(theta_map, prob, ds_train)
+        path.use_mean(pops_mean_ridge(pops_ridge))      # one potential: the force ridge's c*
         cst = np.asarray(path.c_star)
         rowsE, rowsF = ([], [], []), ([], [])
         for i in range(ds_test.n_batches):
@@ -407,6 +424,14 @@ with highest_precision():
             phF = np.asarray(lin.F).reshape(-1, Lb)[kF]
             rowsF[0].append(phF); rowsF[1].append(np.asarray(b.y_F).reshape(-1)[kF] - phF @ cst)
         phE, rE, natE = (np.concatenate(x_) for x_ in rowsE)
+        # consistency check for per-quantity ridges: the E uncertainty is built
+        # around the F-ridge mean; how far would the E-ridge mean move E?
+        dE = phE @ (np.asarray(path.c_star_at(rd["E"])) - cst)
+        mean_shift = {"E_rmse_shift_meV_per_atom": float(1e3 * np.sqrt(np.mean((dE / natE) ** 2))),
+                      "E_rmse_test_meV_per_atom": float(1e3 * np.sqrt(np.mean((rE / natE) ** 2)))}
+        print("POPS mean sensitivity (c*(ridge_E) vs c*(ridge_F)):", mean_shift, flush=True)
+        json.dump({"mean_ridge": pops_mean_ridge(pops_ridge), "ridge": rd, **mean_shift},
+                  open(out / "pops_mean.json", "w"), indent=1)
         phF, rF = (np.concatenate(x_) for x_ in rowsF)
         sel = np.random.default_rng(a.seed).choice(len(rF), size=min(a.pops_env_nf, len(rF)), replace=False)
         phF, rF = phF[np.sort(sel)], rF[np.sort(sel)]

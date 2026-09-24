@@ -41,9 +41,18 @@ def _dense_structural(prob, ds, c):
     return np.concatenate(Pw), np.concatenate(rw), np.concatenate(PE)
 
 
+def _dense_ridge_mean(prob, ds, ridge):
+    """c*(ridge) = (M + lam Gamma^2)^-1 b from the dense structural rows."""
+    Pw, _, _ = _dense_structural(prob, ds, np.zeros(prob.cfg.len_basis))
+    yw = _dense_structural(prob, ds, np.zeros(prob.cfg.len_basis))[1]     # w * y at c = 0
+    g2 = np.asarray(prob.gamma) ** 2; D = np.sqrt(g2)
+    M = Pw.T @ Pw
+    lam = ridge * np.linalg.eigvalsh(M / D[:, None] / D[None, :]).max()
+    return np.linalg.solve(M + lam * np.diag(g2), Pw.T @ yw)
+
+
 def _reference_var(prob, ds, ridge):
-    st = sufficient_statistics(THETA, prob.spec, prob.model, prob.ind, prob.cfg, ds)
-    c = np.asarray(posterior(THETA, st, prob)[0])
+    c = _dense_ridge_mean(prob, ds, ridge)                # the paper's c*: same loss as A
     Pw, rw, PE = _dense_structural(prob, ds, c)
     g2 = np.asarray(prob.gamma) ** 2; D = np.sqrt(g2)
     M = Pw.T @ Pw
@@ -66,15 +75,33 @@ def test_pops_paper_matches_dense_structural_reference(tiny_linear_problem):
 
 
 def test_pops_paper_per_quantity_ridge(tiny_linear_problem):
-    """A per-quantity ridge dict uses each quantity's own ridge."""
+    """A per-quantity ridge dict: ONE mean (a single potential), the force ridge's
+    c*, and each quantity's own A(ridge_q) for its uncertainty."""
     prob, ds = tiny_linear_problem
     with highest_precision():
         pd = predict_fixed(THETA, prob, ds, ds, uq="pops", pops_ridge={"E": 1e-2, "F": 1e-4, "V": 1e-4})
-        pE = predict_fixed(THETA, prob, ds, ds, uq="pops", pops_ridge=1e-2)
         pF = predict_fixed(THETA, prob, ds, ds, uq="pops", pops_ridge=1e-4)
-    assert np.allclose(np.asarray(pd.E_var), np.asarray(pE.E_var))
-    assert np.allclose(np.asarray(pd.F_var), np.asarray(pF.F_var))
-    assert not np.allclose(np.asarray(pE.E_var), np.asarray(pF.E_var))
+        path = PopsRidgePath(THETA, prob, ds)
+        path.use_mean(1e-4)
+        vE = pops_var(_test_rows(prob, ds), path.posterior(1e-2))
+    for f in ("E_mean", "F_mean", "V_mean", "F_var", "V_var"):
+        assert np.allclose(np.asarray(getattr(pd, f)), np.asarray(getattr(pF, f)), rtol=1e-10, atol=1e-14), f
+    assert np.allclose(np.asarray(pd.E_var), np.asarray(vE), rtol=1e-8, atol=1e-14)
+    assert not np.allclose(np.asarray(pd.E_var), np.asarray(pF.E_var))
+
+
+def test_pops_mean_is_the_ridge_solution_from_the_shared_factorisation(tiny_linear_problem):
+    """c*(ridge) = (M + lam Gamma^2)^-1 b, read off the one eigendecomposition, and
+    theta-free (the evidence-fit sigmas and sigma_c never enter POPS)."""
+    prob, ds = tiny_linear_problem
+    other = THETA._replace(log_sigma_c=np.log(5.0), log_sigma_F=np.log(0.5))
+    with highest_precision():
+        path = PopsRidgePath(THETA, prob, ds)
+        path2 = PopsRidgePath(other, prob, ds)
+        for r in (1e-2, 1e-6):
+            ref = _dense_ridge_mean(prob, ds, r)
+            assert np.allclose(np.asarray(path.c_star_at(r)), ref, rtol=1e-6, atol=1e-10)
+            assert np.allclose(np.asarray(path2.c_star_at(r)), ref, rtol=1e-6, atol=1e-10)
 
 
 def test_ridge_path_reuses_one_factorisation(tiny_linear_problem):
@@ -106,9 +133,7 @@ from ace_jax.fit.pops import pops_envelope, pops_posterior, pops_var
 
 
 def _test_rows(prob, ds):
-    st = sufficient_statistics(THETA, prob.spec, prob.model, prob.ind, prob.cfg, ds)
-    c = np.asarray(posterior(THETA, st, prob)[0])
-    return jnp.asarray(_dense_structural(prob, ds, c)[2])
+    return jnp.asarray(_dense_structural(prob, ds, np.zeros(prob.cfg.len_basis))[2])   # raw E rows
 
 
 @pytest.mark.parametrize("lev", [0.0, 50.0])
@@ -117,7 +142,7 @@ def test_streamed_hypercube_matches_in_memory(tiny_linear_problem, lev):
     with highest_precision():
         path = PopsRidgePath(THETA, prob, ds)
         PE = _test_rows(prob, ds)
-        ref = pops_var(PE, pops_posterior(path.members(1e-3, lev), path.c_star, form="hypercube"))
+        ref = pops_var(PE, pops_posterior(path.members(1e-3, lev), path.c_star_at(1e-3), form="hypercube"))
         got = pops_var(PE, path.posterior(1e-3, form="hypercube", leverage_pct=lev))
     assert np.allclose(np.asarray(got), np.asarray(ref), rtol=1e-6, atol=1e-14)
 
@@ -128,7 +153,7 @@ def test_streamed_ensemble_matches_in_memory(tiny_linear_problem, lev):
     with highest_precision():
         path = PopsRidgePath(THETA, prob, ds)
         PE = _test_rows(prob, ds)
-        ref = pops_var(PE, pops_posterior(path.members(1e-3, lev), path.c_star, form="ensemble"))
+        ref = pops_var(PE, pops_posterior(path.members(1e-3, lev), path.c_star_at(1e-3), form="ensemble"))
         got = pops_var(PE, path.posterior(1e-3, form="ensemble", leverage_pct=lev))
     assert np.allclose(np.asarray(got), np.asarray(ref), rtol=1e-6, atol=1e-14)
 

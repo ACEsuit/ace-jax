@@ -162,23 +162,24 @@ def test_force_virial_dtc_is_derivative_of_energy(fitted):
             assert abs(fd - float(Fv[n, a])) < 1e-4 + 1e-3 * abs(float(Fv[n, a]))
 
 
-def test_pops_predict_finite_and_keeps_blr_mean(tiny_linear_problem):
+def test_pops_predict_finite_and_theta_free(tiny_linear_problem):
     """uq='pops' on the linear arm returns FINITE per-config E sigma and
-    per-component F sigma with the right shapes, and leaves the mean untouched."""
+    per-component F sigma with the right shapes.  As published it has no fitted
+    hyperparameters: the mean is the ridge solution of the same regularised loss
+    that defines A (not the BLR mean), so the whole predictive is theta-free."""
     prob, ds = tiny_linear_problem
-    theta = Hypers(log_ell=0.0, log_A=0.0, log_alpha=0.0, log_r0=np.log(2.35), log_eps=0.0,
-                   log_rho=0.0, log_sigma_c=np.log(0.3), log_sigma_E=np.log(0.01),
-                   log_sigma_F=np.log(0.01), log_sigma_V=np.log(0.01))
+    th = lambda s: Hypers(log_ell=0.0, log_A=0.0, log_alpha=0.0, log_r0=np.log(2.35), log_eps=0.0,
+                          log_rho=0.0, log_sigma_c=np.log(s), log_sigma_E=np.log(0.01 * s),
+                          log_sigma_F=np.log(0.01), log_sigma_V=np.log(0.03 * s))
     with highest_precision():
-        p = predict_fixed(theta, prob, ds, ds, uq="pops")
-        pblr = predict_fixed(theta, prob, ds, ds)                       # uq='blr' default
+        p = predict_fixed(th(0.3), prob, ds, ds, uq="pops")
+        q = predict_fixed(th(3.0), prob, ds, ds, uq="pops")
     assert np.all(np.isfinite(p.E_var)) and np.all(p.E_var >= 0.0)
     assert np.all(np.isfinite(p.F_var)) and np.all(p.F_var >= 0.0)
     assert p.E_var.shape == p.E_mean.shape                             # per config
     assert p.F_var.shape == p.F_mean.shape == (p.F_mean.shape[0], 3)   # per component
-    # mean is the BLR linear posterior mean -- untouched by the POPS variance path
-    assert np.allclose(np.asarray(p.E_mean), np.asarray(pblr.E_mean))
-    assert np.allclose(np.asarray(p.F_mean), np.asarray(pblr.F_mean))
+    for f in p._fields:
+        assert np.allclose(np.asarray(getattr(p, f)), np.asarray(getattr(q, f)), rtol=1e-10, atol=1e-14), f
 
 
 def test_pops_default_form_is_hypercube(tiny_linear_problem):
