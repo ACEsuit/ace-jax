@@ -92,8 +92,16 @@ class PACEModel(eqx.Module):
     aa_specs                # per order, into flattened (NZ * n_A_local) A
     T_rows, T_cols, T_vals  # ctilde_real[(a, z0)] += v * ctilde_complex[t]
     # static
-    radbasename, embedding_kind, ndensity, lmax, nradmax, nradbase, elements,
-    yace_meta               # non-numeric YAML fields, verbatim, for export
+    radbasename, inner_cutoff_type, npoti (per element), ndensity, lmax,
+    nradmax, nradbase, n_a_local, elements
+
+# returned alongside the model, not stored on it: a dict is not hashable, so
+# it cannot be an Equinox static field without breaking jit
+@dataclass
+class PACESpec:
+    tree: dict              # the parsed YAML, verbatim (structural fields for export)
+    element_names: list
+    functions: list         # per function: (element, index, term_start, num_ms_combs, ndensity)
 ```
 
 ### Neighbour-species channel via pooling
@@ -182,10 +190,11 @@ energy assembly (below). A `zbl` fixture pins this.
   A[l, −m] = (−1)^m·conj A[l, m].
 - **Harmonics convention** (`ace_spherical_cart.cpp`, `ace_spherical_cart.h:51`):
   complex, Condon–Shortley phase, Y00 = 1, Y10 = √3·ẑ, Y11 = −√(3/2)(x̂ + iŷ).
-  That is √(4π) times the standard complex Y_lm. So for m > 0,
-  Y^PACE_{l,±m} = √(4π)·(−1)^m (Y^R_{l,m} ± i·Y^R_{l,−m})/√2 in terms of
-  SpheriCart's real L2-normalised Y^R (no Condon–Shortley phase), and
-  Y^PACE_{l,0} = √(4π)·Y^R_{l,0}. The T-map unit test confirms these
+  That is √(4π) times the standard complex Y_lm. In terms of SpheriCart's
+  real L2-normalised Y^R (no Condon–Shortley phase), for m > 0:
+  Y^PACE_{l,m} = √(4π)·(−1)^m (Y^R_{l,m} + i·Y^R_{l,−m})/√2,
+  Y^PACE_{l,−m} = (−1)^m·conj(Y^PACE_{l,m}) = √(4π)·(Y^R_{l,m} − i·Y^R_{l,−m})/√2,
+  and Y^PACE_{l,0} = √(4π)·Y^R_{l,0}. The T-map unit test confirms these
   numerically against a numpy port of the C++ recursion.
 - Each function contributes ρ_p += Re(Π_t A[μ_t, n_t, l_t, m_t] · c̃_p)
   **over its `ms_combs` exactly as listed**. Whether a file stores full or
@@ -231,14 +240,16 @@ wrapper. Nothing touches `jax.config`; `highest_precision` applies as for
 
 ## Writer
 
-`write_yace(model, path)` accepts only a `PACEModel`.
+`write_yace(model, spec, path)` accepts only a `PACEModel`.
 
 - Numeric fields come from the live leaves: `crad` (un-padded per bond),
   `radparams`, `core`, `ctilde_complex` (split back per function), `fs_params`,
   `rho_core_cut`, `E0`.
 - Everything structural (element order, `ns`/`ls`/`mus`/`ms_combs`,
   `radbasename`, embedding and cutoff types, unknown keys) comes verbatim from
-  `yace_meta`. The function layout is never regenerated.
+  `PACESpec.tree`. The function layout is never regenerated. The signature is
+  therefore `write_yace(model, spec, path)`, and `load_yace` returns
+  `(model, meta, spec)`, the same triple shape as `eval.io.load`.
 - Floats are written round-trip exact. `load_yace` keeps f64 leaves even when
   evaluating in f32; dtype is an evaluation property.
 - Pruning zero-ctilde functions is the only structural edit contemplated, and
