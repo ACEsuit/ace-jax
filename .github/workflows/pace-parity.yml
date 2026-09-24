@@ -5,8 +5,23 @@ on:
   push:
     paths:
       - "src/ace_jax/eval/pace_*.py"
+      - "src/ace_jax/eval/io.py"
+      - "src/ace_jax/eval/harmonics.py"
       - "pace_ref/**"
+      - "fixtures/pace/**"
       - "tests/test_pace_*.py"
+      - "tests/conftest.py"
+      - ".github/workflows/pace-parity.yml"
+  pull_request:
+    paths:
+      - "src/ace_jax/eval/pace_*.py"
+      - "src/ace_jax/eval/io.py"
+      - "src/ace_jax/eval/harmonics.py"
+      - "pace_ref/**"
+      - "fixtures/pace/**"
+      - "tests/test_pace_*.py"
+      - "tests/conftest.py"
+      - ".github/workflows/pace-parity.yml"
   schedule:
     - cron: "0 6 * * 1"
   workflow_dispatch:
