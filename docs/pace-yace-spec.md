@@ -319,3 +319,87 @@ No merge prerequisite; branch from `main`. PRs #2–#4 touch `fit/*`,
 `construct/*` and `cli.py`; #5 touches `fit/*`, `uv.lock` and appends two
 methods to `ACEModel`. None touch the `eval/` files changed here. Expect a
 trivial `uv.lock` conflict with #5 (PyYAML); keep changes out of `cli.py`.
+
+## Sub-project 2 (deferred): exporting ace-jax / ACEpotentials models to ML-PACE
+
+Not part of this spec; recorded here so the findings aren't lost. Start only
+after PACE import/export lands **and** the upstream C++ change below has been
+agreed with ICAMS (coordinated by James Kermode).
+
+### History and current state (checked 2026-09-24)
+
+- ACEpotentials v0.6 (ACE1) `export2lammps` (now `src/outdated/export.jl`)
+  wrote `radbasename: "ACE.jl"` bonds holding per-bond cubic-Hermite tables
+  (`splinenodalvals`, `splinenodalderivs`, `nbins`, `rcut`; R_nl independent
+  of l), a linear embedding (`FinnisSinclairShiftedScaled` with m = 1,
+  `rho_core_cutoff` 1e5), ctildes c/(4π)^{ν/2}, and the pair potential as a
+  separate LAMMPS `pair_style table` file.
+- That format is read only by wcwitt's fork (`wcwitt/lammps-user-pace`,
+  `f92fcdb` "change ships_radial to acejl_radial with splines", 2023-04; now 14
+  commits behind upstream). Upstream sends every `ACE.jl*` radbasename to the
+  older SHIPs reader (polynomial recursion coefficients), so spline-format
+  files fail on stock ML-PACE. That is the break.
+- ACEpotentials ≥ 0.8 has no export (`fit_model.jl:173`: "automatic lammps
+  export currently not supported").
+- `pace/kk` (GPU) only accepts `ACERadialFunctions`
+  (`KOKKOS/pair_pace_kokkos.cpp:252`); SHIPs and the fork's radial are both
+  CPU-only.
+- LAMMPS pins the PACE library via `PACELIB_URL`/`PACELIB_MD5`
+  (`cmake/Modules/Packages/ML-PACE.cmake`; currently `v.2023.11.25.fix2`), so a
+  patched library can be built without waiting for a LAMMPS release.
+
+### Findings
+
+1. **Projecting into native PACE radials is lossy.** A spike fitting the
+   `si_fitted` fixture's R_nl into ChebExpCos/ChebPow reached only ~6e-4
+   worst-case relative error at K = 80 (median ~2e-5), concentrated at the
+   outer cutoff, with slow algebraic convergence. Exact export needs a
+   tabulated radial.
+2. **Species expansion for the PACE format.** `ACEModel` pools all neighbours
+   into one A (species only via the radial); PACE needs per-neighbour-species
+   A. An order-ν product expands into up to NZ^ν PACE products (C(NZ+ν−1, ν)
+   multisets): fine at 1–3 elements, heavy at 5 elements / order 4.
+3. **Real → complex with real ctildes** (needed for the PACE format) is
+   lossless only if the imaginary parts cancel, which O(3)-invariant bases
+   (Σl even) guarantee. It must be tested, not assumed.
+4. **Embedded-species models fit ML-PACE's GRACE-FS format natively**
+   (`ML-PACE/ace/grace_fs_evaluator.cpp`, in the library since
+   `v.2024.9.11`). GRACE-FS has A(n,l,m) = Σ_j Z[μj, n]·R_nl(r)·Y^R_lm(r̂)
+   with **one species-independent radial**, a chemical embedding Z
+   (nelements × nradmax), **real** harmonics, and per-centre-element functions
+   with `gen_cgs` × per-density `coeff`, plus the FS embedding. ace-jax's
+   factorised radial (frozen embedding, uniform cutoffs:
+   R_i = P_{n′(i)}(r)·emb[zj, k(i)]) maps onto it channel by channel
+   (Z[:, i] = emb[:, k(i)], R_i ← P_{n′(i)}), with **no species expansion and
+   no complex conversion**, only a per-(l,m) normalisation/sign map between
+   SpheriCart and PACE's real Y. Its blockers:
+   - GRACE-FS's radial base is SBessel-only; the same tabulated-radial patch
+     is needed there (`GRACEFSRadialFunction` already holds
+     `splines_gk`/`splines_rnl`).
+   - GRACE-FS has no pair term. ace-jax's pair basis (full (zi, zj)
+     dependence) can be folded into rank-1 functions using extra channels per
+     (μi, μj, q) with one-hot Z columns, used only by the matching centre
+     element; alternatively a LAMMPS `pair_style table` file.
+   - Which LAMMPS release ships `pair_style grace/fs`, and whether a Kokkos
+     variant exists, must be checked. The local `~/gits/lammps` (Nov 2025,
+     library `v.2023.11.25.fix2`) has neither.
+
+   Non-factorised `ACEModel`s (per-pair radial tables) cannot use GRACE-FS,
+   because its radial does not depend on (μi, μj). They need the PACE format
+   with species expansion.
+
+### Proposed route (to be designed in its own spec)
+
+- **Upstream C++ (coordinate with ICAMS):** a tabulated radial type, under a
+  new `radbasename` distinct from `ACE.jl*`, implemented *inside*
+  `ACERadialFunctions` (and `GRACEFSRadialFunction`) by loading nodal values
+  and derivatives straight into the existing `splines_gk`/`splines_rnl`. Being
+  the same class and the same spline structures, it keeps `pace/kk` working
+  without Kokkos changes.
+- **ace-jax exporters:**
+  - factorised/embedded models → GRACE-FS YAML (preferred: compact, real
+    harmonics);
+  - other `ACEModel`s → PACE `.yace` with species expansion and real→complex;
+  - both tabulate radials from JAX with exact autodiff derivatives.
+- **Optional:** a writer for wcwitt's fork format (same tables), only if the
+  fork still has users.
