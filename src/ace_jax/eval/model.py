@@ -29,6 +29,8 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 
+from .edge_model import (EdgeSiteModel, calibrate_edge_a, one_hot_selector,  # noqa: F401
+                         with_edge_a_kind)
 from .harmonics import real_solid_harmonics, real_spherical_harmonics
 from .radial import (agnesi_normalized, env_ace1_poly1sr, env_poly1sr,
                      env_poly2sx, poly_recursion, spline_eval)
@@ -55,7 +57,7 @@ def pool_dense(edge_feats, mask):
     return jnp.sum(jnp.where(mask[..., None], edge_feats, 0.0), axis=1)
 
 
-class ACEModel(eqx.Module):
+class ACEModel(EdgeSiteModel):
     # ---- array leaves (parameters) ----
     # radial: exactly one branch is populated per basis, chosen by radial_kind.
     # Both are live array leaves (never static): for the splined branch Julia's
@@ -181,29 +183,22 @@ class ACEModel(eqx.Module):
     # -------------------------------------------------- many-body
     def edge_features(self, rij, zi, zj):
         """Per-edge (A-basis rows, pair rows).  Layout-agnostic: the caller
-        pools these however its neighbour-list layout dictates.
-
-        Two algebraically identical forms of the A-basis product, selected by
-        `edge_a_kind`; they agree to bit-identity on values and gradients.
-
-          "gather"  A = Rnl[:, aspec_r] * Ylm[:, aspec_y]
-          "matmul"  A = (Rnl @ Sr) * (Ylm @ Sy),  Sr/Sy one-hot
-
-        They differ only in the reverse pass: the gather's adjoint is an axis-1
-        scatter whose cost per slot grows with buffer length, while the matmul's
-        adjoint is a matmul and is flat.  Neither wins everywhere -- on an M3 Pro
-        the matmul wins throughout and by up to 11x, on a Xeon the gather wins
-        below ~200k edge slots -- so this is a choice to calibrate, not a
-        constant to hardcode.  See docs/findings/FINDINGS_apple_scaling.md and
-        `calibrate_edge_a`.
-        """
+        pools these however its neighbour-list layout dictates.  The A-basis
+        product and its two forms live in `EdgeSiteModel.edge_a`."""
         Rnl, Rpair = self.radial(rij, zi, zj)
-        Ylm = self.angular(rij)
-        if self.edge_a_kind == "matmul":
-            edge_A = (Rnl @ self.a_sel_r) * (Ylm @ self.a_sel_y)
-        else:
-            edge_A = Rnl[:, self.aspec_r] * Ylm[:, self.aspec_y]
-        return edge_A, Rpair
+        return self.edge_a(Rnl, self.angular(rij)), Rpair
+
+    # -------------------------------------------------- EdgeSiteModel hooks
+    def pad_cutoff(self):
+        """Padded edges sit at the pair cutoff, where every envelope vanishes."""
+        return float(jnp.max(self.pair_envelope[..., 0]))
+
+    def edge_a_widths(self):
+        """(radial columns, harmonic columns) the A-basis selectors index."""
+        n_rnl = (self.rnl_emb_nidx.shape[0] if self.radial_kind == "spline_factorised"
+                 else self.rnl_coefs.shape[-1] if self.radial_kind == "spline"
+                 else self.rnl_Wnlq.shape[-2])
+        return n_rnl, (self.lmax + 1) ** 2
 
     def _aa(self, A):
         return jnp.concatenate([jnp.prod(A[:, g], axis=-1) for g in self.aa_specs], axis=-1)
@@ -366,49 +361,6 @@ class ACEModel(eqx.Module):
                                         pool_dense(un(Rpair), mask), node_z)
         return self._readout(*self.site_basis_dense(rij, zi, zj, mask), node_z)
 
-    # -------------------------------------------------- energy / forces / virial
-    def energy_forces_virial(self, rij, zi, zj, senders, receivers, n_nodes,
-                             node_z, mask=None):
-        """E, F, V from edge vectors alone -- no cell needed.
-
-        Virial by the symmetric-displacement trick, after mace-jax
-        `modules/utils.py::compute_forces_and_stress` (MIT).  There the strain is
-        applied to positions *and* cell, hence to the edge shifts; because
-        rij = r[j] - r[i] + S@cell, both halves transform the same way and the
-        whole thing collapses to rij -> rij + rij @ eps.  That keeps the virial a
-        function of the edge vectors, consistent with the core.
-
-        Sign follows Julia (AtomsCalculatorsUtilities sitepotentials/assembly.jl:6,
-        `site_virial = -sum(dv_i * r_i')`), i.e. V = -dE/d(eps); verified against
-        the exported reference rather than argued from the algebra.
-        """
-        def total(r, eps):
-            sym = 0.5 * (eps + eps.T)
-            return jnp.sum(self.site_energies(r + r @ sym, zi, zj, senders,
-                                              n_nodes, node_z, mask))
-
-        eps0 = jnp.zeros((3, 3), rij.dtype)
-        E, (g_r, g_eps) = jax.value_and_grad(total, argnums=(0, 1))(rij, eps0)
-        F = (jnp.zeros((n_nodes, 3), rij.dtype)
-             .at[senders].add(g_r).at[receivers].add(-g_r))
-        return E, F, -g_eps
-
-    # -------------------------------------------------- positions wrapper
-    def energy_from_positions(self, positions, node_z, senders, receivers,
-                              edge_mask=None, shifts=None):
-        """lammps-jax-shaped entry point.  Padded edges are placed at the cutoff,
-        where the envelope vanishes and the gradient stays defined."""
-        n_nodes = positions.shape[0]
-        rij = positions[receivers] - positions[senders]
-        if shifts is not None:
-            rij = rij + shifts
-        if edge_mask is not None:
-            rcut = float(jnp.max(self.pair_envelope[..., 0]))
-            pad = jnp.asarray([1.0, 0.0, 0.0], positions.dtype) * rcut
-            rij = jnp.where(edge_mask[:, None], rij, pad)
-        zi, zj = node_z[senders], node_z[receivers]
-        return self.site_energies(rij, zi, zj, senders, n_nodes, node_z, edge_mask)
-
 
 # ------------------------------------------------------------------ readout fold
 def fold_readout(model):
@@ -435,53 +387,3 @@ def fold_readout(model):
     with highest_precision():                 # TF32 would corrupt ctilde on Ampere+
         ctilde = model.A2B.T @ model.WB       # (n_AA, NZ)
     return dataclasses.replace(model, ctilde=ctilde, folded=True)
-
-
-# ------------------------------------------------------------------ edge_A kind
-def with_edge_a_kind(model, kind):
-    """Return `model` using the other A-basis form.  Values and gradients are
-    unchanged (bit-identically, measured); only the reverse-pass cost differs."""
-    import dataclasses
-    if kind not in ("gather", "matmul"):
-        raise ValueError(f'kind must be "gather" or "matmul", got {kind!r}')
-    if kind == model.edge_a_kind:
-        return model
-    if kind == "gather":
-        return dataclasses.replace(model, edge_a_kind="gather", a_sel_r=None, a_sel_y=None)
-    n_rnl = (model.rnl_emb_nidx.shape[0] if model.radial_kind == "spline_factorised"
-             else model.rnl_coefs.shape[-1] if model.radial_kind == "spline"
-             else model.rnl_Wnlq.shape[-2])
-    n_ylm = (model.lmax + 1) ** 2
-    dt = model.WB.dtype
-    sel = lambda idx, w: jnp.zeros((w, idx.shape[0]), dt).at[
-        idx, jnp.arange(idx.shape[0])].set(1)
-    return dataclasses.replace(model, edge_a_kind="matmul",
-                               a_sel_r=sel(model.aspec_r, n_rnl),
-                               a_sel_y=sel(model.aspec_y, n_ylm))
-
-
-def calibrate_edge_a(model, rij, zi, zj, segment_ids, n_nodes, node_z, mask=None, reps=5):
-    """Time both A-basis forms at THESE shapes and return (best_model, timings).
-
-    Calibrate; do not guess.  The crossover is a property of the XLA backend, the
-    dtype and the edge-buffer length, not of the platform name -- on an M3 Pro the
-    matmul form wins throughout, on a Xeon the gather wins below ~200k edge slots.
-    Timing the forward *and* reverse pass matters: the forward gather is cheap and
-    flat, and the entire difference is in the adjoint.
-    """
-    import time
-    out = {}
-    for kind in ("gather", "matmul"):
-        m = with_edge_a_kind(model, kind)
-        fn = jax.jit(lambda mm, r: jnp.sum(jax.grad(
-            lambda rr: jnp.sum(mm.site_energies(rr, zi, zj, segment_ids, n_nodes,
-                                                node_z, mask))
-        )(r)))
-        jax.block_until_ready(fn(m, rij))                      # warm up / compile
-        best = float("inf")
-        for _ in range(reps):
-            t0 = time.perf_counter()
-            jax.block_until_ready(fn(m, rij))
-            best = min(best, time.perf_counter() - t0)
-        out[kind] = best * 1e3                                 # ms
-    return with_edge_a_kind(model, min(out, key=out.get)), out

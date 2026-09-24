@@ -14,23 +14,48 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from conftest import species_index
+from conftest import FIXTURE_DIR, MODELS, pace_fixture, species_index
 
-from ace_jax.eval import calibrate_edge_a, load, with_edge_a_kind
+from ace_jax.eval import calibrate_edge_a, load, sparse_graph, with_edge_a_kind
+
+# Both model families share the A-basis forms (eval/edge_model.py), so every
+# test here runs on the ACE npz models and on PACE .yace fixtures alike.
+PACE = ("gesi_sbessel", "sige_zbl")
 
 
-def _case(npz, dtype, kind):
-    model, meta, z = load(npz, dtype=dtype, edge_a_kind=kind)
+@pytest.fixture(params=[f"ace:{k}" for k in MODELS] + [f"pace:{k}" for k in PACE])
+def model_path(request):
+    fam, name = request.param.split(":")
+    if fam == "ace":
+        p = FIXTURE_DIR / MODELS[name]
+        if not p.exists():
+            pytest.skip(f"{p.name} not generated")
+        return p
+    return pace_fixture(FIXTURE_DIR / "pace" / f"{name}.yace")
+
+
+def _case(model_path, dtype, kind):
+    """(model, (rij, zi, zj, senders, n_nodes, node_z)) for either family."""
+    model, meta, z = load(str(model_path), dtype=dtype, edge_a_kind=kind)
+    if str(model_path).endswith(".yace"):
+        from ase import Atoms
+        ref = np.load(str(model_path).replace(".yace", "_ref.npz"))
+        at = Atoms(numbers=ref["Z_bulk"], positions=ref["pos_bulk"], cell=ref["cell_bulk"], pbc=True)
+        g = sparse_graph(at.positions, at.cell.array, at.pbc, meta["rcut"])
+        z2i = {zz: i for i, zz in enumerate(meta["elements"])}
+        nz = jnp.asarray([z2i[int(x)] for x in at.numbers], jnp.int32)
+        send, recv = jnp.asarray(g.senders, jnp.int32), jnp.asarray(g.receivers, jnp.int32)
+        return model, (jnp.asarray(g.rij, dtype), nz[send], nz[recv], send, len(at), nz)
     n = int(z["test_pos"].shape[1])
     send = jnp.asarray(z["test_edge_i"], jnp.int32)
     recv = jnp.asarray(z["test_edge_j"], jnp.int32)
     rij = jnp.asarray(np.asarray(z["test_edge_rij"]).T, dtype)
     nz = species_index(z)
-    return model, (rij, nz[send], nz[recv], send, n), z
+    return model, (rij, nz[send], nz[recv], send, n, jnp.zeros(n, jnp.int32))
 
 
 @pytest.mark.parametrize("dtype", [jnp.float64, jnp.float32], ids=["f64", "f32"])
-def test_forms_agree_bitwise(npz, dtype):
+def test_forms_agree_bitwise(model_path, dtype):
     """Values and gradients agree; how tightly depends on the dtype.
 
     Values are bit-identical in both dtypes.  GRADIENTS are bit-identical in f64
@@ -39,10 +64,10 @@ def test_forms_agree_bitwise(npz, dtype):
     Apple Silicon and ~4e-6 on x86 -- so an exact assertion here passes on one
     architecture and fails on the other, which is how this was found.
     """
-    mg, args, _ = _case(npz, dtype, "gather")
-    mm, _, _ = _case(npz, dtype, "matmul")
-    rij, zi, zj, send, n = args
-    nzero = jnp.zeros(n, jnp.int32)
+    mg, args = _case(model_path, dtype, "gather")
+    mm, _ = _case(model_path, dtype, "matmul")
+    assert (mg.edge_a_kind, mm.edge_a_kind) == ("gather", "matmul")   # else this compares a form with itself
+    rij, zi, zj, send, n, nzero = args
     ev = lambda m: m.site_energies(rij, zi, zj, send, n, nzero)
     dv = np.max(np.abs(np.asarray(ev(mg) - ev(mm))))
     gr = lambda m: jax.grad(lambda r: jnp.sum(m.site_energies(r, zi, zj, send, n, nzero)))(rij)
@@ -56,10 +81,9 @@ def test_forms_agree_bitwise(npz, dtype):
         assert dg <= 1e-5 * scale, f"f32 gradients differ by {dg} (scale {scale})"
 
 
-def test_switching_preserves_results(npz):
+def test_switching_preserves_results(model_path):
     """`with_edge_a_kind` round-trips without touching the numbers."""
-    mg, (rij, zi, zj, send, n), _ = _case(npz, jnp.float64, "gather")
-    nzero = jnp.zeros(n, jnp.int32)
+    mg, (rij, zi, zj, send, n, nzero) = _case(model_path, jnp.float64, "gather")
     ref = np.asarray(mg.site_energies(rij, zi, zj, send, n, nzero))
     for kind in ("matmul", "gather"):
         m = with_edge_a_kind(mg, kind)
@@ -69,10 +93,9 @@ def test_switching_preserves_results(npz):
     assert with_edge_a_kind(mg, "gather") is mg          # no-op returns the same object
 
 
-def test_calibration_picks_one_and_is_correct(npz):
+def test_calibration_picks_one_and_is_correct(model_path):
     """Calibration must return a working model, whichever form it chooses."""
-    mg, (rij, zi, zj, send, n), _ = _case(npz, jnp.float64, "gather")
-    nzero = jnp.zeros(n, jnp.int32)
+    mg, (rij, zi, zj, send, n, nzero) = _case(model_path, jnp.float64, "gather")
     best, timings = calibrate_edge_a(mg, rij, zi, zj, send, n, nzero, reps=2)
     print(f"\n  timings/ms {timings}  -> {best.edge_a_kind}")
     assert set(timings) == {"gather", "matmul"}
@@ -81,6 +104,6 @@ def test_calibration_picks_one_and_is_correct(npz):
     assert np.array_equal(np.asarray(best.site_energies(rij, zi, zj, send, n, nzero)), ref)
 
 
-def test_bad_kind_rejected(npz):
+def test_bad_kind_rejected(model_path):
     with pytest.raises(ValueError, match="edge_a_kind"):
-        load(npz, edge_a_kind="scatter")
+        load(str(model_path), edge_a_kind="scatter")
