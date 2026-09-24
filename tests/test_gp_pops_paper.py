@@ -1,7 +1,8 @@
-"""Paper-faithful POPS (Swinburne & Perez, arXiv:2402.01810): the intrinsic noise
-Sigma_Y is FIXED (structural weights only, never the evidence-fit sigma_q), the
-regulariser is the paper's Sigma_Y Sigma_0^-1 term = ridge * Gamma^2 (smoothness
-prior shape), and there is no separate aleatoric/epistemic term."""
+"""POPS (Swinburne & Perez, arXiv:2402.01810) on the BLR's own loss: rows weighted
+by w/sigma_q (the fit's relative E/F/V loss weights), regulariser ridge * Gamma^2
+with the default ridge 'blr' = 1/sigma_c^2, so c* IS the BLR mean and A the BLR
+posterior covariance -- the corrections sit around the optimum of the loss that
+defines A.  sigma_q never enters the PREDICTIVE (no aleatoric/noise term)."""
 import jax
 import numpy as np
 import pytest
@@ -17,47 +18,55 @@ from ace_jax.fit.predict import PopsRidgePath, predict_fixed, select_pops_ridge
 from ace_jax.fit.rows import linear_rows
 from ace_jax.fit.stats import sufficient_statistics
 
-# sigma_q deliberately far from 1: a sigma-whitened implementation would differ
+# sigma_q deliberately far from 1 and unequal: the loss weights must be 1/sigma_q
 THETA = Hypers(log_ell=0.0, log_A=0.0, log_alpha=0.0, log_r0=np.log(2.35), log_eps=0.0,
                log_rho=0.0, log_sigma_c=np.log(0.3), log_sigma_E=np.log(0.01),
                log_sigma_F=np.log(0.05), log_sigma_V=np.log(0.3))
 
 
-def _dense_structural(prob, ds, c):
-    """Structurally-weighted member rows (w*phi) and residuals (w*r) of every
-    non-padded observation, plus the raw energy rows -- a dense reference."""
+def _dense_structural(prob, ds, c, theta=THETA):
+    """Loss-weighted member rows (w/sigma_q * phi) and residuals (w/sigma_q * r) of
+    every non-padded observation, plus the raw energy rows -- a dense reference."""
+    sg = {q: float(np.exp(getattr(theta, f"log_sigma_{q}"))) for q in "EFV"}
     Pw, rw, PE = [], [], []
     for i in range(ds.n_batches):
         b = jax.tree.map(lambda a: a[i], ds)
         r, _, _ = linear_rows(prob.model, prob.cfg, b)
         L = r.E.shape[-1]
-        for phi, y, w in ((r.E, b.y_E, b.w_E),
-                          (r.F.reshape(-1, L), b.y_F.reshape(-1), jnp.repeat(b.w_F, 3)),
-                          (r.V.reshape(-1, L), b.y_V.reshape(-1), jnp.repeat(b.w_V, 6))):
+        for q, phi, y, w in (("E", r.E, b.y_E, b.w_E),
+                             ("F", r.F.reshape(-1, L), b.y_F.reshape(-1), jnp.repeat(b.w_F, 3)),
+                             ("V", r.V.reshape(-1, L), b.y_V.reshape(-1), jnp.repeat(b.w_V, 6))):
             phi, y, w = map(np.asarray, (phi, y, w))
             k = w > 0
+            w = w / sg[q]
             Pw.append(w[k, None] * phi[k]); rw.append(w[k] * (y[k] - phi[k] @ c))
         PE.append(np.asarray(r.E)[np.asarray(b.w_E) > 0])
     return np.concatenate(Pw), np.concatenate(rw), np.concatenate(PE)
 
 
-def _dense_ridge_mean(prob, ds, ridge):
-    """c*(ridge) = (M + lam Gamma^2)^-1 b from the dense structural rows."""
-    Pw, _, _ = _dense_structural(prob, ds, np.zeros(prob.cfg.len_basis))
-    yw = _dense_structural(prob, ds, np.zeros(prob.cfg.len_basis))[1]     # w * y at c = 0
-    g2 = np.asarray(prob.gamma) ** 2; D = np.sqrt(g2)
+def _lam(ridge, M, g2, theta=THETA):
+    """Absolute ridge: 'blr' = 1/sigma_c^2 (the BLR prior); a number is relative to
+    the largest eigenvalue of the Gamma-scaled loss Gram."""
+    if ridge == "blr":
+        return float(np.exp(-2.0 * theta.log_sigma_c))
+    D = np.sqrt(g2)
+    return ridge * np.linalg.eigvalsh(M / D[:, None] / D[None, :]).max()
+
+
+def _dense_ridge_mean(prob, ds, ridge, theta=THETA):
+    """c*(ridge) = (M + lam Gamma^2)^-1 b from the dense loss-weighted rows."""
+    Pw, yw, _ = _dense_structural(prob, ds, np.zeros(prob.cfg.len_basis), theta)   # yw = w/s * y at c = 0
+    g2 = np.asarray(prob.gamma) ** 2
     M = Pw.T @ Pw
-    lam = ridge * np.linalg.eigvalsh(M / D[:, None] / D[None, :]).max()
-    return np.linalg.solve(M + lam * np.diag(g2), Pw.T @ yw)
+    return np.linalg.solve(M + _lam(ridge, M, g2, theta) * np.diag(g2), Pw.T @ yw)
 
 
 def _reference_var(prob, ds, ridge):
     c = _dense_ridge_mean(prob, ds, ridge)                # the paper's c*: same loss as A
     Pw, rw, PE = _dense_structural(prob, ds, c)
-    g2 = np.asarray(prob.gamma) ** 2; D = np.sqrt(g2)
+    g2 = np.asarray(prob.gamma) ** 2
     M = Pw.T @ Pw
-    lam = ridge * np.linalg.eigvalsh(M / D[:, None] / D[None, :]).max()
-    A = np.linalg.inv(M + lam * np.diag(g2))
+    A = np.linalg.inv(M + _lam(ridge, M, g2) * np.diag(g2))
     h = np.einsum("ij,jk,ik->i", Pw, A, Pw)
     k = h > 0                                       # zero-leverage rows (phi = 0) are not members
     deltas = (Pw[k] @ A) * (rw[k] / h[k])[:, None]
@@ -65,13 +74,33 @@ def _reference_var(prob, ds, ridge):
     return np.sum((PE @ cov) * PE, axis=1), M, g2
 
 
-def test_pops_paper_matches_dense_structural_reference(tiny_linear_problem):
-    """Paper mode = structural weights (sigma_q never enters) + ridge*Gamma^2."""
+@pytest.mark.parametrize("ridge", ["blr", 1e-3])
+def test_pops_matches_dense_blr_loss_reference(tiny_linear_problem, ridge):
+    """Rows weighted w/sigma_q, regulariser ridge*Gamma^2, c* its own optimum."""
     prob, ds = tiny_linear_problem
     with highest_precision():
-        p = predict_fixed(THETA, prob, ds, ds, uq="pops", pops_ridge=1e-3)
-        ref, _, _ = _reference_var(prob, ds, 1e-3)
+        p = predict_fixed(THETA, prob, ds, ds, uq="pops", pops_ridge=ridge)
+        ref, _, _ = _reference_var(prob, ds, ridge)
     assert np.allclose(np.asarray(p.E_var), ref, rtol=1e-6, atol=1e-14)
+
+
+def test_blr_ridge_is_the_blr_posterior(tiny_linear_problem):
+    """Default ridge 'blr': c* = the BLR posterior mean, A = the BLR posterior
+    covariance (objective.posterior) -- POPS around the fit that is reported."""
+    prob, ds = tiny_linear_problem
+    with highest_precision():
+        st = sufficient_statistics(THETA, prob.spec, prob.model, prob.ind, prob.cfg, ds)
+        mu, L = posterior(THETA, st, prob)
+        path = PopsRidgePath(THETA, prob, ds)
+        cov = np.linalg.inv(np.asarray(L) @ np.asarray(L).T)
+        assert np.allclose(np.asarray(path.c_star_at("blr")), np.asarray(mu), rtol=1e-6, atol=1e-10)
+        # eigh- vs Cholesky-based inverse of a precision with cond ~1e7: they agree
+        # to ~1e-9 of the largest entry (cond * eps), so atol is relative to max|cov|
+        assert np.allclose(np.asarray(path.A("blr")), cov, rtol=1e-6, atol=1e-8 * np.abs(cov).max())
+        p = predict_fixed(THETA, prob, ds, ds, uq="pops")                  # default ridge
+        pb = predict_fixed(THETA, prob, ds, ds)
+    for f in ("E_mean", "F_mean", "V_mean"):
+        assert np.allclose(np.asarray(getattr(p, f)), np.asarray(getattr(pb, f)), rtol=1e-8, atol=1e-12), f
 
 
 def test_pops_paper_per_quantity_ridge(tiny_linear_problem):
@@ -91,17 +120,14 @@ def test_pops_paper_per_quantity_ridge(tiny_linear_problem):
 
 
 def test_pops_mean_is_the_ridge_solution_from_the_shared_factorisation(tiny_linear_problem):
-    """c*(ridge) = (M + lam Gamma^2)^-1 b, read off the one eigendecomposition, and
-    theta-free (the evidence-fit sigmas and sigma_c never enter POPS)."""
+    """c*(ridge) = (M + lam Gamma^2)^-1 b on the loss-weighted rows, read off the
+    one eigendecomposition, for 'blr' and numeric ridges."""
     prob, ds = tiny_linear_problem
-    other = THETA._replace(log_sigma_c=np.log(5.0), log_sigma_F=np.log(0.5))
     with highest_precision():
         path = PopsRidgePath(THETA, prob, ds)
-        path2 = PopsRidgePath(other, prob, ds)
-        for r in (1e-2, 1e-6):
+        for r in ("blr", 1e-2, 1e-6):
             ref = _dense_ridge_mean(prob, ds, r)
-            assert np.allclose(np.asarray(path.c_star_at(r)), ref, rtol=1e-6, atol=1e-10)
-            assert np.allclose(np.asarray(path2.c_star_at(r)), ref, rtol=1e-6, atol=1e-10)
+            assert np.allclose(np.asarray(path.c_star_at(r)), ref, rtol=1e-6, atol=1e-10), r
 
 
 def test_ridge_path_reuses_one_factorisation(tiny_linear_problem):

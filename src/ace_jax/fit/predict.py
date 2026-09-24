@@ -237,8 +237,8 @@ def _run_predict(f, theta, prob, ds_train, ds_test):
 def _ridge_dict(ridge):
     """A scalar ridge applies to every quantity; a mapping sets each of E/F/V."""
     if isinstance(ridge, dict):
-        return {q: float(ridge[q]) for q in "EFV"}
-    return {q: float(ridge) for q in "EFV"}
+        return {q: _rkey(ridge[q]) for q in "EFV"}
+    return {q: _rkey(ridge) for q in "EFV"}
 
 
 class PopsRidgePath:
@@ -256,17 +256,19 @@ class PopsRidgePath:
 
         A(lam) = D^-1 U diag(1 / (Lambda + lam)) U^T D^-1 ,   lam = ridge * max(Lambda)
 
-    ``ridge`` is relative (dimensionless).  The mean is the paper's ``c*``: the
-    minimiser of the SAME regularised loss that defines ``A`` (the pointwise
-    corrections assume it), read off the same factorisation::
+    The loss is the BLR's own: rows weighted ``w / sigma_q`` (the fit's relative
+    E/F/V weights; their absolute scale cancels against a relative ridge) and the
+    regulariser ``lam * Gamma^2``.  ``ridge='blr'`` is ``lam = 1/sigma_c^2``, the
+    BLR prior, so ``c*`` IS the BLR mean and ``A`` the BLR posterior covariance; a
+    number is relative (``lam = ridge * max Lambda``).  The mean is always the
+    minimiser of the SAME loss that defines ``A`` (the pointwise corrections
+    assume it), read off the same factorisation::
 
         c*(lam) = D^-1 U diag(1 / (Lambda + lam)) U^T D^-1 b ,   b = (w Phi)^T (w y)
 
-    so nothing here depends on ``theta``: POPS as published has no fitted
-    hyperparameters (``theta`` is only the sufficient-statistics signature; for
-    M = 0 the linear statistics are theta-free).  By default each call's mean is
-    its own ridge's ``c*``; ``use_mean(r)`` pins one mean for every ridge (one
-    potential with per-quantity uncertainty ridges).  Linear arm (M == 0) only."""
+    sigma_q only weights the FIT -- it never enters the predictive (no noise
+    term).  By default each call's mean is its own ridge's ``c*``;
+    ``use_mean(r)`` pins one mean for every ridge.  Linear arm (M == 0) only."""
 
     def __init__(self, theta, prob, ds_train):
         M_ind = prob.ind.XM.shape[0]
@@ -274,8 +276,12 @@ class PopsRidgePath:
             raise ValueError(f"paper-faithful POPS is the linear-arm (M=0) predictive only; "
                              f"this problem has M={M_ind} inducing points.  Pass --arm linear.")
         st = sufficient_statistics(theta, prob.spec, prob.model, prob.ind, prob.cfg, ds_train)
-        M = st.G_E + st.G_F + st.G_V
-        b = st.b_E + st.b_F + st.b_V
+        s2 = {q: jnp.exp(2.0 * getattr(theta, f"log_sigma_{q}")) for q in "EFV"}
+        self.sigma = {q: float(jnp.sqrt(s2[q])) for q in "EFV"}
+        self.qs = tuple(1.0 / self.sigma[q] for q in "EFV")        # loss weights 1/sigma_q
+        self.lam_blr = float(jnp.exp(-2.0 * theta.log_sigma_c))    # the BLR prior Gamma^2 / sigma_c^2
+        M = sum(getattr(st, f"G_{q}") / s2[q] for q in "EFV")
+        b = sum(getattr(st, f"b_{q}") / s2[q] for q in "EFV")
         self.Dinv = 1.0 / jnp.asarray(prob.gamma)
         Lam, U = jnp.linalg.eigh(M * self.Dinv[:, None] * self.Dinv[None, :])
         self.Lam = jnp.maximum(Lam, 0.0)                    # clip round-off negatives
@@ -287,21 +293,23 @@ class PopsRidgePath:
         self.prob, self.ds = prob, ds_train
 
     def ridge_abs(self, ridge):
+        if ridge == "blr":
+            return self.lam_blr
         return float(ridge) * float(jnp.max(self.Lam))
 
     def c_star_at(self, ridge):
         """The ridge solution c*(ridge) = (M + lam Gamma^2)^-1 b (memoised)."""
-        r = float(ridge)
+        r = _rkey(ridge)
         if r not in self._means:
             self._means[r] = self.W @ (self._Wb / (self.Lam + self.ridge_abs(r)))
         return self._means[r]
 
     def use_mean(self, ridge):
         """Pin the mean to c*(ridge) for every subsequent ridge (None: unpin)."""
-        self.mean_ridge = None if ridge is None else float(ridge)
+        self.mean_ridge = None if ridge is None else _rkey(ridge)
 
     def _mean_for(self, ridge):
-        return float(ridge) if self.mean_ridge is None else self.mean_ridge
+        return _rkey(ridge) if self.mean_ridge is None else self.mean_ridge
 
     @property
     def c_star(self):
@@ -319,7 +327,7 @@ class PopsRidgePath:
         same set as ``members`` / ``leverage_select``."""
         A = self.A(ridge)
         c = self.c_star_at(self._mean_for(ridge))
-        h, r = pops_leverage_residual(self.prob.model, self.prob.cfg, self.ds, c, A)
+        h, r = pops_leverage_residual(self.prob.model, self.prob.cfg, self.ds, c, A, self.qs)
         live = h > 0
         thr = jnp.percentile(h[live], leverage_pct)
         keep = live & (h >= thr)
@@ -337,7 +345,7 @@ class PopsRidgePath:
         min/max of the projected corrections (3 passes).  ensemble: the moments
         E[delta delta^T] = A W A / K and E[delta] = A s / K (2 passes).  Equals
         ``pops_posterior(self.members(...))`` for zero percentile clipping."""
-        key = (self._mean_for(ridge), float(ridge), form, float(leverage_pct), float(mode_threshold))
+        key = (self._mean_for(ridge), _rkey(ridge), form, float(leverage_pct), float(mode_threshold))
         if key not in self._posts:
             self._posts[key] = self._posterior(ridge, form, leverage_pct, mode_threshold)
         return self._posts[key]
@@ -346,14 +354,14 @@ class PopsRidgePath:
         from .pops import hypercube_cov, hypercube_support
         model, cfg = self.prob.model, self.prob.cfg
         A, coef, keep = self._coef(ridge, leverage_pct)
-        W, s = pops_moment_sums(model, cfg, self.ds, coef)
+        W, s = pops_moment_sums(model, cfg, self.ds, coef, self.qs)
         if form == "ensemble":
             K = jnp.sum(keep)
             return {"moments": (A @ W @ A / K, A @ s / K)}
         if form != "hypercube":
             raise ValueError(f"unknown POPS posterior form: {form!r}")
         support = hypercube_support(A @ W @ A, mode_threshold)
-        lo, hi = pops_projection_bounds(model, cfg, self.ds, coef, keep, A @ support)
+        lo, hi = pops_projection_bounds(model, cfg, self.ds, coef, keep, A @ support, self.qs)
         return {"cov": hypercube_cov(support, lo, hi)}
 
     def envelope(self, phi_star, ridge, leverage_pct=0.0):
@@ -361,15 +369,14 @@ class PopsRidgePath:
         streamed (equals ``pops.pops_envelope(phi_star, self.members(...))``)."""
         A, coef, keep = self._coef(ridge, leverage_pct)
         return pops_envelope_streamed(self.prob.model, self.prob.cfg, self.ds, coef, keep,
-                                      phi_star @ A)
+                                      phi_star @ A, self.qs)
 
     def members(self, ridge, leverage_pct=0.0):
         """Pointwise-optimal corrections of every member, MATERIALISED (K, L).
         A small-problem oracle for tests: production paths use ``posterior`` /
         ``envelope``, which never form this matrix."""
-        one = {q: 1.0 for q in "EFV"}                       # structural weights only
-        deltas, h = _stream_pops_pointwise(self.prob.model, self.prob.cfg, self.ds,
-                                           self.c_star_at(self._mean_for(ridge)), self.A(ridge), one)
+        deltas, h = _stream_pops_pointwise(self.prob.model, self.prob.cfg, self.ds,     # rows w/sigma_q
+                                           self.c_star_at(self._mean_for(ridge)), self.A(ridge), self.sigma)
         keep = np.asarray(h) > 0                            # drop padded (w = 0) rows
         return leverage_select(deltas[keep], h[keep], leverage_pct)
 
@@ -395,11 +402,16 @@ def _pops_paper_posts(path, ridge, form, leverage_pct):
     return posts
 
 
+def _rkey(ridge):
+    """A ridge as a hashable key: 'blr' or a float."""
+    return "blr" if ridge == "blr" else float(ridge)
+
+
 def pops_mean_ridge(ridge):
     """The one ridge whose c* is the POPS mean: a scalar ridge is itself (the
     paper's single lambda); a per-quantity dict uses the force ridge (forces
     dominate the design)."""
-    return float(ridge["F"]) if isinstance(ridge, dict) else float(ridge)
+    return _rkey(ridge["F"]) if isinstance(ridge, dict) else _rkey(ridge)
 
 
 def _run_predict_pops_paper(theta, prob, ds_train, ds_test, form, ridge, leverage_pct, path=None):
@@ -416,9 +428,13 @@ def select_pops_ridge(theta, prob, ds_fit, ds_val, grid, form="hypercube", lever
 
     One :class:`PopsRidgePath` factorisation of the ``ds_fit`` Gram serves the
     whole ``grid``; for each ridge the members are rebuilt and the predictive is
-    scored on ``ds_val`` by CRPS / RMSE (scale-free; energies and virials per
+    scored on ``ds_val`` by mean CRPS (energies and virials per
     atom, forces per component).  Returns ``(ridge, scores)``: ``ridge[q]`` is the
-    grid value minimising ``scores[q]`` (an array aligned with ``grid``)."""
+    grid value minimising ``scores[q]`` (an array aligned with ``grid``).
+
+    The score is the mean CRPS in physical units (per atom for E and V), NOT
+    CRPS/RMSE: every candidate ridge also moves the mean (c* is its own ridge
+    solution), so accuracy has to count, not only calibration."""
     path = PopsRidgePath(theta, prob, ds_fit)
     scores = {q: [] for q in "EFV"}
     for r in grid:
@@ -447,8 +463,7 @@ def select_pops_ridge(theta, prob, ds_fit, ds_val, grid, form="hypercube", lever
             y, m, s = (np.concatenate(c) for c in cols[q])
             if y.size == 0:
                 scores[q].append(np.nan); continue
-            rmse = np.sqrt(np.mean((y - m) ** 2))
-            scores[q].append(float(np.mean(crps_gaussian(y, m, s))) / max(rmse, 1e-300))
+            scores[q].append(float(np.mean(crps_gaussian(y, m, s))))
     scores = {q: np.asarray(v) for q, v in scores.items()}
     ridge = {q: (float(grid[int(np.nanargmin(scores[q]))]) if np.isfinite(scores[q]).any()
                  else float(grid[0])) for q in "EFV"}
@@ -456,7 +471,7 @@ def select_pops_ridge(theta, prob, ds_fit, ds_val, grid, form="hypercube", lever
 
 
 def predict_fixed(theta, prob, ds_train, ds_test, dtc=True, deriv_dtc=True,
-                  uq="blr", pops_form="hypercube", leverage_pct=0.0, pops_ridge=1e-3, pops_path=None):
+                  uq="blr", pops_form="hypercube", leverage_pct=0.0, pops_ridge="blr", pops_path=None):
     """dtc=False drops the DTC prior residual from E_var (SoR only; for tests).
     deriv_dtc=False keeps the energy DTC residual but drops its force/virial
     derivative (F_var, V_var stay SoR-only).

@@ -294,24 +294,26 @@ def pops_statistics(c_star, Sigma0, prob, ds, sigma, *, leverage_pct=0.0):
 # scalars per observation; each pass holds one batch of rows.
 # ---------------------------------------------------------------------------
 
-def _pops_batch_rows(model, cfg, batch):
-    """Structurally-weighted rows w*phi, residual target y and weight w for one
-    batch, quantities concatenated E, F, V (padded rows carry w = 0)."""
+def _pops_batch_rows(model, cfg, batch, qs=(1.0, 1.0, 1.0)):
+    """Loss-weighted rows w*phi, weighted target w*y and raw rows phi for one
+    batch, quantities concatenated E, F, V (padded rows carry w = 0).  The weight
+    is the structural weight times the per-quantity loss scale qs = (1/sigma_E,
+    1/sigma_F, 1/sigma_V)."""
     from .rows import linear_rows
     r, _, _ = linear_rows(model, cfg, batch)
     L = r.E.shape[-1]
     phi = jnp.concatenate([r.E, r.F.reshape(-1, L), r.V.reshape(-1, L)])
     y = jnp.concatenate([batch.y_E, batch.y_F.reshape(-1), batch.y_V.reshape(-1)])
-    w = jnp.concatenate([batch.w_E, jnp.repeat(batch.w_F, 3), jnp.repeat(batch.w_V, 6)])
+    w = jnp.concatenate([batch.w_E * qs[0], jnp.repeat(batch.w_F, 3) * qs[1], jnp.repeat(batch.w_V, 6) * qs[2]])
     return phi * w[:, None], w * y, phi
 
 
-def pops_leverage_residual(model, cfg, ds, c_star, A):
+def pops_leverage_residual(model, cfg, ds, c_star, A, qs=(1.0, 1.0, 1.0)):
     """Pass 1: whitened leverage h_i = pw_i . A . pw_i and residual r_i = w_i (y_i -
     phi_i . c*) of every row, each (n_batches, rows_per_batch).  Padded rows have
     h = 0 (w = 0)."""
     def body(carry, batch):
-        pw, wy, phi = _pops_batch_rows(model, cfg, batch)
+        pw, wy, phi = _pops_batch_rows(model, cfg, batch, qs)
         h = jnp.sum((pw @ A) * pw, axis=1)
         r = wy - (pw @ c_star)
         return carry, (h, r)
@@ -319,12 +321,12 @@ def pops_leverage_residual(model, cfg, ds, c_star, A):
     return h, r
 
 
-def pops_moment_sums(model, cfg, ds, coef):
+def pops_moment_sums(model, cfg, ds, coef, qs=(1.0, 1.0, 1.0)):
     """Pass 2: W = sum_i coef_i^2 pw_i pw_i^T and s = sum_i coef_i pw_i, with
     coef (n_batches, rows) = r/h on member rows and 0 elsewhere."""
     def body(carry, xs):
         batch, c = xs
-        pw, _, _ = _pops_batch_rows(model, cfg, batch)
+        pw, _, _ = _pops_batch_rows(model, cfg, batch, qs)
         pc = pw * c[:, None]
         W, s = carry
         return (W + pc.T @ pc, s + pw.T @ c), None
@@ -337,14 +339,14 @@ def _moment_init(model, cfg, ds):
     return jnp.zeros((L, L)), jnp.zeros(L)
 
 
-def pops_projection_bounds(model, cfg, ds, coef, keep, B):
+def pops_projection_bounds(model, cfg, ds, coef, keep, B, qs=(1.0, 1.0, 1.0)):
     """Pass 3: per-axis min / max over member rows of the projected corrections
     (pw_i @ B) * coef_i, with B = A @ support (L, d).  Exact for zero percentile
     clipping (the hypercube default)."""
     d = B.shape[1]
     def body(carry, xs):
         batch, c, k = xs
-        pw, _, _ = _pops_batch_rows(model, cfg, batch)
+        pw, _, _ = _pops_batch_rows(model, cfg, batch, qs)
         proj = (pw @ B) * c[:, None]
         lo, hi = carry
         lo = jnp.minimum(lo, jnp.min(jnp.where(k[:, None], proj, jnp.inf), axis=0))
@@ -354,13 +356,13 @@ def pops_projection_bounds(model, cfg, ds, coef, keep, B):
     return jax.lax.scan(body, init, (ds, coef, keep))[0]
 
 
-def pops_envelope_streamed(model, cfg, ds, coef, keep, Q):
+def pops_envelope_streamed(model, cfg, ds, coef, keep, Q, qs=(1.0, 1.0, 1.0)):
     """Member min / max of the prediction shift phi* . delta_i = (Q @ pw_i) * coef_i
     at test rows, with Q = phi* @ A (n, L).  Returns (lo, hi), each (n,)."""
     n = Q.shape[0]
     def body(carry, xs):
         batch, c, k = xs
-        pw, _, _ = _pops_batch_rows(model, cfg, batch)
+        pw, _, _ = _pops_batch_rows(model, cfg, batch, qs)
         shift = (Q @ pw.T) * c[None, :]                       # (n, rows)
         lo, hi = carry
         lo = jnp.minimum(lo, jnp.min(jnp.where(k[None, :], shift, jnp.inf), axis=1))
