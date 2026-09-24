@@ -56,7 +56,11 @@ class EdgeSiteModel(eqx.Module):
         `calibrate_edge_a`.
         """
         if self.edge_a_kind == "matmul":
-            return (R @ self.a_sel_r) * (Y @ self.a_sel_y)
+            # the one-hot products only select, so they must not round: at default
+            # precision an f32 matmul on Ampere+ is TF32 (10-bit mantissa)
+            hi = jax.lax.Precision.HIGHEST
+            return (jnp.matmul(R, self.a_sel_r, precision=hi)
+                    * jnp.matmul(Y, self.a_sel_y, precision=hi))
         return R[:, self.aspec_r] * Y[:, self.aspec_y]
 
     # -------------------------------------------------- energy / forces / virial

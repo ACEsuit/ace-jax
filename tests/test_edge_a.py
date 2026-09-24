@@ -107,3 +107,32 @@ def test_calibration_picks_one_and_is_correct(model_path):
 def test_bad_kind_rejected(model_path):
     with pytest.raises(ValueError, match="edge_a_kind"):
         load(str(model_path), edge_a_kind="scatter")
+
+
+
+def _dot_generals(jaxpr):
+    """All dot_general equations, recursing into sub-jaxprs (pjit, custom_vjp...)."""
+    for eqn in jaxpr.eqns:
+        if eqn.primitive.name == "dot_general":
+            yield eqn
+        for v in eqn.params.values():
+            for sub in (v if isinstance(v, (list, tuple)) else [v]):
+                inner = getattr(sub, "jaxpr", sub)
+                if hasattr(inner, "eqns"):
+                    yield from _dot_generals(inner)
+
+
+def test_matmul_form_selects_at_full_precision(model_path):
+    """The one-hot matmuls only *select* values, so they must not round them:
+    at default precision an f32 matmul on Ampere+ GPUs is TF32 (10-bit mantissa),
+    which silently truncates every A entry (measured 3e-3 on an A4500).  CPUs
+    have no TF32, so this checks the traced graph, not the numbers."""
+    mm, (rij, zi, zj, send, n, nz) = _case(model_path, jnp.float32, "matmul")
+    closed = jax.make_jaxpr(lambda r: mm.site_energies(r, zi, zj, send, n, nz))(rij)
+    n_a = mm.a_sel_r.shape[1]
+    sel = [e for e in _dot_generals(closed.jaxpr)
+           if e.outvars[0].aval.shape == (rij.shape[0], n_a)]
+    assert len(sel) == 2, f"expected the two selection matmuls, found {len(sel)}"
+    for e in sel:
+        prec = e.params["precision"]
+        assert prec is not None and all(p == jax.lax.Precision.HIGHEST for p in prec), prec
