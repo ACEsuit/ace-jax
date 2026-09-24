@@ -17,7 +17,7 @@ import numpy as np
 import pytest
 
 FIX = pathlib.Path(__file__).resolve().parents[1] / "fixtures"
-CACHE = str(FIX / "coupling_cache_embedding")
+CACHE = None                                  # set by the _cache fixture (a restamped copy)
 CASES = {"SiGe_o2d6": "emb_ref_SiGe_o2d6", "CrMnFe_o3d5_dmax4": "emb_ref_CrMnFe_o3d5_dmax4"}
 
 
@@ -31,6 +31,33 @@ def _need(p):
 def _x64():
     import jax
     jax.config.update("jax_enable_x64", True)
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _cache(tmp_path_factory):
+    """The committed coupling entries, re-written into a temp cache by this
+    process (as test_python_authoring's _primed_cache does), so their pin stamp
+    is this environment's juliapkg hash -- which depends on where juliapkg.json
+    sits on sys.path, not on the coupling.  A stale coupling would still fail
+    the descriptor parity against Julia."""
+    import json as _json
+    from ace_jax.construct import coupling as C
+    global CACHE
+    out = tmp_path_factory.mktemp("cpl")
+    for f in sorted((FIX / "coupling_cache_embedding").glob("cpl-*.npz")):
+        z = np.load(f)
+        m = _json.loads(bytes(z["meta_json"]).decode())
+        n_orders = sum(1 for k in z.files if k.startswith("aa_spec_"))
+        cpl = C.Coupling(
+            A2B=np.asarray(z["A2B"]),
+            aa_sig=tuple(tuple(tuple(int(v) for v in t) for t in sig) for sig in m["aa_sig"]),
+            aspec=tuple((int(r), int(y)) for r, y in m["aspec"]),
+            aa_specs=tuple(np.asarray(z[f"aa_spec_{k + 1}"]) for k in range(n_orders)),
+            nnll_spec=tuple(tuple((int(b[0]), int(b[1])) for b in bb) for bb in m["nnll_spec"]))
+        mb = [[tuple(b) for b in bb] for bb in m["mb"]]
+        rnl, ylm = [tuple(r) for r in m["rnl"]], [tuple(y) for y in m["ylm"]]
+        C._write_entry(C._entry_path(out, m["key"]), cpl, m["key"], mb, rnl, ylm)
+    CACHE = str(out)
 
 
 def _build(case, rows=True, **kw):

@@ -52,14 +52,24 @@ def _generic_frame(r, d):
     return Q[:, :r].T
 
 
+def _fix_signs(U, rtol=1e-8):
+    """Flip each column so that its FIRST entry within rtol of the column's
+    largest |.| is positive.  Plain argmax|.| is not enough: for two elements the
+    normalised U is +-(1, 1)/sqrt2, +-(1, -1)/sqrt2 -- an exact tie that round-off
+    breaks differently on different LAPACKs."""
+    A = np.abs(U)
+    idx = np.argmax(A >= A.max(axis=0) * (1.0 - rtol), axis=0)             # first near-max entry
+    return U * np.sign(U[idx, np.arange(U.shape[1])])
+
+
 def _pca_reduce(R, d):
     """Principal-frame reduction of an (S, D) block to (S, d): rows normalised
     (full-row similarity is the target), R = U S V^T, P = U S truncated at the
     numerical rank r; d <= r keeps the leading d columns, d > r mixes the r
     principal coordinates into d generic channels, P @ _generic_frame(r, d).
 
-    Sign convention: each singular vector is flipped so that its largest-|.|
-    entry is positive.  Julia's `_pca_reduce` leaves the sign to LAPACK, so for
+    Sign convention (`_fix_signs`): each singular vector is flipped so that its
+    first near-largest-|.| entry is positive.  Julia's `_pca_reduce` leaves the sign to LAPACK, so for
     d > rank its rows (and hence the channel-diagonal many-body basis, which is
     NOT invariant to flipping a principal coordinate) depend on the BLAS build;
     fixing it makes the model deterministic.  The element Gram is unaffected, and
@@ -70,7 +80,7 @@ def _pca_reduce(R, d):
     tol = max(R.shape) * np.finfo(np.float64).eps * sv[0]
     r = int(np.sum(sv > tol))
     U = U[:, :r]
-    U = U * np.sign(U[np.argmax(np.abs(U), axis=0), np.arange(r)])     # deterministic signs
+    U = _fix_signs(U)                                                     # deterministic signs
     P = U * sv[:r]
     if d <= r:
         return P[:, :d]

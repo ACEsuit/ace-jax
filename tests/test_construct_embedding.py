@@ -7,8 +7,8 @@ import pathlib
 import numpy as np
 import pytest
 
-from ace_jax.construct.embedding import (_generic_frame, embedding_rows, embedding_widths,
-                                         read_embedding)
+from ace_jax.construct.embedding import (_fix_signs, _generic_frame, embedding_rows,
+                                         embedding_widths, read_embedding)
 
 FIX = pathlib.Path(__file__).resolve().parents[1] / "fixtures"
 CASES = ["identity5", "mh1_CrMnFeCoNi", "mh1_SiGe"]
@@ -53,13 +53,12 @@ def test_pca_rows_match_julia(case, normalise):
         assert np.allclose(got @ got.T, ref @ ref.T, atol=1e-12), d
         # the rows themselves: Julia's principal coordinates with the port's
         # deterministic sign convention (Julia leaves the sign to LAPACK)
-        P = z["pca_P"]
-        P = P * np.sign(P[np.argmax(np.abs(P), axis=0), np.arange(P.shape[1])])
+        P = _fix_signs(z["pca_P"])                                  # P = U S, s > 0: same flips as U
         want = P[:, :d] if d <= P.shape[1] else P @ _generic_frame(P.shape[1], d)
         if normalise:
             want = want / np.linalg.norm(want, axis=1, keepdims=True)
         assert np.allclose(got, want, atol=1e-12), d
-        if np.all(np.sign(z["pca_P"][np.argmax(np.abs(z["pca_P"]), axis=0), np.arange(P.shape[1])]) > 0):
+        if np.allclose(P, z["pca_P"]):
             assert np.allclose(got, ref, atol=1e-12), d            # Julia's LAPACK happened to agree
 
 
@@ -88,6 +87,17 @@ def test_zero_row_after_reduction_raises_like_julia():
     table = np.array([[1.0, 0.0], [0.0, 1.0], [0.0, 0.0]])            # element 3 has a zero row
     with pytest.raises(ValueError, match="zero embedding row"):
         embedding_rows(table, [1, 2, 3], [1, 2, 3], d=2, reduction="truncate")
+
+
+def test_sign_convention_is_stable_under_exact_ties():
+    """Two elements: the normalised U columns tie exactly in |.|; tiny
+    perturbations (as different LAPACKs produce) must not flip the result."""
+    h = 1 / np.sqrt(2)
+    for eps in (0.0, 1e-15, -1e-15):
+        U = np.array([[h + eps, h], [h, -h - eps]])
+        for flips in ((1, 1), (-1, 1), (1, -1), (-1, -1)):
+            V = _fix_signs(U * np.array(flips))
+            assert np.allclose(V, [[h, h], [h, -h]], atol=1e-12)
 
 
 def test_read_embedding_json(tmp_path):
