@@ -395,6 +395,16 @@ with highest_precision():
         timings["nuts"] = time.time() - t
         json.dump(summ, open(out / "nuts_summary.json", "w"), indent=1)
 
+    if a.uq == "pops":
+        # POPS needs only the linear statistics from here on.  The likelihood and the
+        # jitted MAP objective hold ~25 Gram-sized buffers (captured constants included)
+        # -- ~150 GB on the lossless Cantor base -- which starved POPS's kernels (CUBIN
+        # OOM at 181 GB).  Drop them and the compile caches before POPS.
+        import gc
+        for _n in ("lik", "vg", "logpost", "prior_vg", "fg"):
+            globals().pop(_n, None)
+        jax.clear_caches(); gc.collect()
+
     # --- paper-faithful POPS: ridge (selected once on a train holdout) + test envelope ---
     pops_ridge, pops_env, path = 1e-3, {}, None
     if a.uq == "pops":
