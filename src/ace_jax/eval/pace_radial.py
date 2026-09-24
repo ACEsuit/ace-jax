@@ -76,7 +76,8 @@ def _sbessel(r, rc, K):
 def radbase(r, name, inner, lam, rc, dcut, cut_in, dcut_in, K):
     """g_k(r), k < K, zero outside (cut_in - dcut_in, rc)."""
     if inner == "zbl":                       # ace_radial.cpp:246, ported as-is
-        cut_in = jnp.where(dcut_in == 0, 1.0, 0.0)
+        one = jnp.ones_like(dcut_in)              # typed operands: no f64 buffer
+        cut_in = jnp.where(dcut_in == 0, one, 0 * one)
     inside = (r > cut_in - dcut_in) & (r < rc)
     rs = jnp.where(inside, r, 0.5 * rc)      # safe argument for the untaken branch
     if name == "ChebExpCos":
@@ -151,7 +152,8 @@ def fexp(x, m):
     as_ = jnp.where(big, a, 1.0)
     w3 = (w * as_) ** 3
     g = jnp.where(w3 > 30.0, 0.0, jnp.exp(-jnp.minimum(w3, 30.0)))
-    s = jnp.where(x < 0, -1.0, 1.0)
+    one = jnp.ones_like(x)                   # typed operands: literal-only where is f64
+    s = jnp.where(x < 0, -one, one)
     return jnp.where(big, s * ((1.0 - g) * as_ ** m + lam * g * as_), lam * x)
 
 
@@ -164,5 +166,6 @@ def fexp_shifted_scaled(x, m):
     nu = 1.0 / ms
     xoff = nu ** (nu / (1.0 - nu)) * e
     yoff = nu ** (1.0 / (1.0 - nu)) * e
-    s = jnp.where(x < 0, -1.0, 1.0)
+    one = jnp.ones_like(x)                   # typed operands: literal-only where is f64
+    s = jnp.where(x < 0, -one, one)
     return jnp.where(lin, x, s * ((xoff + a) ** ms - yoff))

@@ -169,3 +169,20 @@ def test_b_basis_methods_raise():
     model, _, _ = load(str(y))
     with pytest.raises(NotImplementedError, match="B-basis"):
         model.site_descriptors(None, None, None, None, 0, None)
+
+
+@pytest.mark.parametrize("name", ["si_chebpow_fs", "sige_zbl", "gesi_sbessel"])
+def test_float32_graph_has_no_float64_arrays(name):
+    """A float32 model must not promote any array to float64 (scalar literals are
+    weakly typed and fine): f64 is 1/32-1/64 rate on consumer GPUs."""
+    import re
+    y, ref = _fixture(name)
+    model, meta, _ = load(str(y), dtype=jnp.float32)
+    at = _atoms(ref, "bulk")
+    g = sparse_graph(at.positions, at.cell.array, at.pbc, meta["rcut"])
+    z2i = {z: i for i, z in enumerate(meta["elements"])}
+    nz = jnp.asarray([z2i[int(z)] for z in at.numbers])
+    s, r = jnp.asarray(g.senders), jnp.asarray(g.receivers)
+    jaxpr = str(jax.make_jaxpr(lambda x: model.energy_forces_virial(
+        x, nz[s], nz[r], s, r, len(at), nz))(jnp.asarray(g.rij, jnp.float32)))
+    assert re.findall(r"f64\[[0-9,]+\]", jaxpr) == []
