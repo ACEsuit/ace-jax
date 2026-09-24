@@ -39,8 +39,11 @@ p.add_argument("--test-start", type=int, default=None, help="absolute perm index
 p.add_argument("--seed", type=int, default=0); p.add_argument("--batch", type=int, default=4)
 p.add_argument("--m-per-species", type=int, default=100)
 p.add_argument("--kernel", default="cosine"); p.add_argument("--no-bump", action="store_true")
-p.add_argument("--density", choices=["none", "pair"], default="none",
-               help="residual feature map: none = isotropic B*scale (D dims); pair = the ACE pair-density channels (n_pair dims)")
+p.add_argument("--density", choices=["none", "pair", "pca"], default="none",
+               help="residual feature map: none = isotropic B*scale (D dims); pair = the ACE pair-density "
+                    "channels (n_pair dims); pca = the top --pca-d uncentred principal frame of the scaled "
+                    "full descriptor (many-body included), host-cacheable")
+p.add_argument("--pca-d", type=int, default=128, help="width of the --density pca feature map")
 p.add_argument("--warp", choices=["none", "sqrt"], default="none",
                help="feature warp: sqrt gives the Finnis-Sinclair sqrt-density embedding")
 p.add_argument("--no-deriv-dtc", action="store_true", help="force/virial variance SoR only (drop the derivative-DTC)")
@@ -112,9 +115,9 @@ p.add_argument("--route", default=None,
                     '\'{"sigma_type":"lml","embed":"fixed"}\'; each route is fixed/lml/varopt. '
                     '"embed":"fixed" also skips the embedding VarOpt (as --learn-embedding off).')
 a = p.parse_args()
-if a.lml == "host-cache" and (a.arm != "gp" or a.density != "pair" or a.rungs != "map" or a.opt != "lbfgs"):
-    p.error("--lml host-cache needs --arm gp --density pair --rungs map --opt lbfgs (the cached LML "
-            "exposes value_and_grad for L-BFGS; the pair feature map is what makes caching pay)")
+if a.lml == "host-cache" and (a.arm != "gp" or a.density not in ("pair", "pca") or a.rungs != "map" or a.opt != "lbfgs"):
+    p.error("--lml host-cache needs --arm gp --density pair|pca --rungs map --opt lbfgs (the cached LML "
+            "exposes value_and_grad for L-BFGS; a narrow feature map is what makes caching pay)")
 if a.uq == "pops" and a.arm != "linear":
     p.error("--uq pops is the linear-arm misspecification predictive; pass --arm linear (or --uq blr).")
 # --route: parse+validate once (fails loudly on a bad route); "embed":"fixed" is
@@ -210,7 +213,8 @@ with highest_precision():
     scale = descriptor_scale(X, ds_train.node_mask)
     m = a.m_per_species if a.arm == "gp" else 0
     from ace_jax.fit.inducing import build_pmap
-    Pmap = build_pmap(cfg, scale, density=None if a.density == "none" else a.density)
+    Pmap = build_pmap(cfg, scale, density=None if a.density == "none" else a.density,
+                      d=a.pca_d, X=np.asarray(X), mask=np.asarray(ds_train.node_mask))
     from ace_jax.fit.embedding import load_mace_embedding
     raw = None if a.embedding is None else np.asarray(load_mace_embedding(a.embedding, els))
     # Low-rank SVD init ONLY when learning; frozen --embedding stays full-width (exact prior
@@ -218,9 +222,8 @@ with highest_precision():
     # and effective rank <= NZ; pass de = the ACTUAL embed width, never a.embed_de (which can
     # exceed the available columns -> select_inducing ValueError).
     if raw is not None and a.learn_embedding and a.embed_de:
-        U, sv, _ = np.linalg.svd(raw, full_matrices=False)
-        k = min(int(a.embed_de), U.shape[1])
-        embed = jnp.asarray(U[:, :k] * sv[:k])                            # low-rank SVD init for learning
+        from ace_jax.fit.inducing import principal_frame
+        embed = jnp.asarray(principal_frame(raw, a.embed_de)[0])          # low-rank SVD init for learning
     else:
         embed = None if raw is None else jnp.asarray(raw)                 # frozen: full-width (exact prior behaviour)
     ind = select_inducing(X, S, ds_train.node_z, ds_train.node_mask, m, scale,
@@ -347,7 +350,8 @@ with highest_precision():
         x0 = np.asarray(to_array(init or prob.prior.mu), float)
         # log-space boxes: generous, but keep the Cholesky away from sigma -> 0
         lo = np.log([0.05, 1e-3, 0.1, 1.5, 1e-3, 0.1, 1e-2, 1e-4, 1e-4, 1e-4])
-        hi = np.log([50.0, 10.0, 50.0, 4.0, 50.0, 100.0, 1e4, 10.0, 10.0, 10.0])
+        # A up to 1e3: the full/PCA-descriptor GP pinned A at the old bound of 10 (Cantor-1k ablation)
+        hi = np.log([50.0, 1e3, 50.0, 4.0, 50.0, 100.0, 1e4, 10.0, 10.0, 10.0])
         if a.fix_rho is not None:
             if a.fix_rho == "auto":
                 XM = np.asarray(prob.ind.XM)

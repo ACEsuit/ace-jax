@@ -43,10 +43,46 @@ class Inducing(NamedTuple):
     embed: jnp.ndarray  # (NZ, de) unit-normalized species embedding (eye = block-diagonal)
 
 
-def build_pmap(cfg, scale, density=None):
+def principal_frame(R, d):
+    """Uncentred principal-frame reduction of the rows of R (n, D) to d <= rank
+    channels: returns (coordinates U S (n, d), frame V (D, d)), so coordinates =
+    R @ V and, for d >= rank, their Gram equals R R^T exactly.  The same reduction
+    as the species embedding (ACEpotentials ``_pca_reduce``; run.py's
+    --learn-embedding init U[:, :k] * sv[:k]).  Uncentred on purpose: dot products
+    (the cosine kernel's inputs) are what the frame preserves.  d is capped at the
+    numerical rank (tolerance as ``_pca_reduce``)."""
+    import numpy as _np
+    R = _np.asarray(R, float)
+    U, sv, Vt = _np.linalg.svd(R, full_matrices=False)
+    tol = max(R.shape) * _np.finfo(float).eps * (sv[0] if sv.size else 0.0)
+    k = min(int(d), int(_np.sum(sv > tol)))
+    return U[:, :k] * sv[:k], Vt[:k].T
+
+
+def _frame_from_rows(X, mask, scale, d, chunk=4096):
+    """principal_frame's V for the scaled live rows of X without forming them:
+    eigh of the streamed uncentred second moment (D, D)."""
+    import numpy as _np
+    Xl = _np.asarray(X)[_np.asarray(mask)] * _np.asarray(scale)
+    C = _np.zeros((Xl.shape[1], Xl.shape[1]))
+    for i in range(0, len(Xl), chunk):
+        C += Xl[i:i + chunk].T @ Xl[i:i + chunk]
+    w, V = _np.linalg.eigh(C)
+    w, V = w[::-1], V[:, ::-1]
+    sv = _np.sqrt(_np.maximum(w, 0.0))
+    tol = max(Xl.shape) * _np.finfo(float).eps * sv[0]
+    k = min(int(d), int(_np.sum(sv > tol)))
+    return V[:, :k]
+
+
+def build_pmap(cfg, scale, density=None, d=None, X=None, mask=None):
     """Residual feature projection Pmap (D, d).  density=None -> isotropic
     (diag(scale), d = D).  density="pair" -> select the n_pair ACE pair-density
-    channels (the last n_pair compact components), scaled, d = n_pair."""
+    channels (the last n_pair compact components), scaled, d = n_pair.
+    density="pca" -> diag(scale) V_d, V_d the top-d uncentred principal frame of
+    the scaled live training-site descriptors X (nb, Ncap, D) under mask: a
+    low-rank view of the FULL descriptor (many-body included), so the kernel is
+    not limited to pair densities yet stays d-wide for the host cache."""
     import numpy as _np
     D = cfg.D
     if density is None:
@@ -56,6 +92,10 @@ def build_pmap(cfg, scale, density=None):
         P = _np.zeros((D, len(cols)))
         P[cols, _np.arange(len(cols))] = _np.asarray(scale)[cols]
         return P
+    if density == "pca":
+        if X is None or mask is None or d is None:
+            raise ValueError("density='pca' needs the training descriptors X, their node mask and d")
+        return _np.asarray(scale)[:, None] * _frame_from_rows(X, mask, scale, d)
     raise ValueError(f"unknown density {density!r}")
 
 

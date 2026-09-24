@@ -29,7 +29,7 @@ THETA = Hypers(log_ell=np.log(0.8), log_A=np.log(0.05), log_alpha=np.log(1.0), l
                log_sigma_E=np.log(1e-3), log_sigma_F=np.log(0.02), log_sigma_V=np.log(0.02))
 
 
-def _problem(density):
+def _problem(density, **kw):
     model, meta, z = load(FIXTURE_DIR / "si_fitted.npz")
     configs = load_configs(XYZ, "dft_energy", "dft_force", "dft_virial")[:9]
     ds = build_dataset(configs, meta, np.asarray(z["E0"]), 3)          # 3 batches
@@ -37,7 +37,7 @@ def _problem(density):
                    NZ=len(meta["elements"]), C=3)
     X, S = site_features(model, cfg, ds)
     scale = descriptor_scale(X, ds.node_mask)
-    Pmap = build_pmap(cfg, scale, density=density)
+    Pmap = build_pmap(cfg, scale, density=density, X=np.asarray(X), mask=np.asarray(ds.node_mask), **kw)
     ind = select_inducing(X, S, ds.node_z, ds.node_mask, 4, scale, Pmap=Pmap)
     prob = Problem(KernelSpec("cosine", True, cfg.D), model, ind, cfg, jnp.asarray(z["gamma"]),
                    default_prior(2.35))
@@ -47,6 +47,13 @@ def _problem(density):
 @pytest.fixture(scope="module")
 def pair_problem():
     return _problem("pair")
+
+
+@pytest.fixture(scope="module", params=["pair", "pca"])
+def cached_problem(request):
+    """Both host-cache modes: pair features recomputed from the pair radials, and a
+    low-rank PCA map whose inputs (U0, JU0) are cached from the one ACE pass."""
+    return _problem("pair") if request.param == "pair" else _problem("pca", d=6)
 
 
 def test_pair_features_match_full_jacobian(pair_problem):
@@ -79,13 +86,13 @@ def test_pair_residual_inputs_match_projection(pair_problem):
 
 
 @pytest.mark.parametrize("chunk", [1, 2])
-def test_hostcache_statistics_match_device(pair_problem, chunk):
+def test_hostcache_statistics_match_device(cached_problem, chunk):
     """The correctness check proper: cached linear statistics and streamed residual
     statistics equal the device path's to f64 roundoff, for any chunking."""
     from ace_jax.fit.hostcache import HostCachedLML
     from ace_jax.fit.hypers import from_array
     from ace_jax.fit.stats import linear_statistics, residual_statistics
-    prob, ds = pair_problem
+    prob, ds = cached_problem
     a = jnp.asarray(to_array(THETA))
     with highest_precision():
         lik = HostCachedLML(prob, ds, chunk=chunk)
@@ -100,12 +107,12 @@ def test_hostcache_statistics_match_device(pair_problem, chunk):
 
 
 @pytest.mark.parametrize("chunk", [1, 2])
-def test_hostcached_lml_matches_device_lml(pair_problem, chunk):
+def test_hostcached_lml_matches_device_lml(cached_problem, chunk):
     """Value and gradient of the host-cached LML equal make_lml's.  The statistics
     agree to ~1e-15 (above), but the posterior precision here has cond ~1e19, so
     summation-order roundoff reaches the LML at ~1e-9 relative: tolerances say so."""
     from ace_jax.fit.hostcache import HostCachedLML
-    prob, ds = pair_problem
+    prob, ds = cached_problem
     a = jnp.asarray(to_array(THETA))
     with highest_precision():
         ref_v, ref_g = jax.value_and_grad(make_lml(prob, ds, cache_linear=True))(a)
@@ -118,8 +125,9 @@ def test_hostcached_lml_matches_device_lml(pair_problem, chunk):
 
 
 def test_hostcache_requires_pair_features():
-    """With the isotropic (full-descriptor) feature map the residual needs the ACE
-    Jacobian every evaluation, so the host cache would save nothing: refuse."""
+    """The isotropic full-descriptor map (d = D) would cache a D-wide input
+    Jacobian per batch -- as large as the ACE Jacobian itself: refuse, and point
+    at the low-rank --density pca map."""
     from ace_jax.fit.hostcache import HostCachedLML
     prob, ds = _problem(None)
     with pytest.raises(ValueError, match="density"):
