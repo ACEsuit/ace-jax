@@ -123,6 +123,12 @@ def parse_yace(path):
             ms = np.asarray(f["ms_combs"], np.int64).reshape(nms, rank)
             c = np.zeros((nms, P))
             c[:, :nd] = np.asarray(f["ctildes"], float).reshape(nms, nd)
+            for n, l in zip(f["ns"], f["ls"]):
+                if rank == 1 and not 1 <= n <= K:
+                    raise ValueError(f"{path}: rank-1 function n={n} exceeds nradbasemax {K}")
+                if rank > 1 and not (1 <= n <= nradmax and 0 <= l <= lmax):
+                    raise ValueError(f"{path}: function (n={n}, l={l}) exceeds bond basis "
+                                     f"(nradmax {nradmax}, lmax {lmax})")
             funcs.append({"el": e, "rank": rank, "mus": list(f["mus"]), "ns": list(f["ns"]),
                           "ls": list(f["ls"]), "ms": ms})
             spec_funcs.append((e, idx, term, nms, nd))
@@ -137,3 +143,33 @@ def parse_yace(path):
         "nradbase": K, "funcs": funcs,
     }
     return PACESpec(tree=tree, element_names=names, functions=spec_funcs), arrays
+
+
+def write_yace(model, spec, path):
+    """Serialise a PACEModel: numeric fields from its leaves, everything else
+    verbatim from `spec.tree` (function layout is never regenerated)."""
+    from .pace_model import PACEModel
+    if not isinstance(model, PACEModel):
+        raise TypeError("write_yace only writes PACEModel (PACE radials); see docs/pace-yace-spec.md")
+    f64 = lambda x: np.asarray(x, np.float64)
+    t = copy.deepcopy(spec.tree)
+    t["E0"] = f64(model.E0).tolist()
+    fs, rcc = f64(model.fs_params), f64(model.rho_core_cut)
+    for e in range(len(spec.element_names)):
+        em = t["embeddings"][e]
+        em["FS_parameters"] = fs[e, :2 * int(em["ndensity"])].tolist()
+        em["rho_core_cutoff"], em["drho_core_cutoff"] = rcc[e].tolist()
+    crad, rp, core = f64(model.crad), f64(model.radparams), f64(model.core)
+    for (i, j), b in t["bonds"].items():
+        n, l, k = int(b["nradmax"]), int(b["lmax"]), int(b["nradbasemax"])
+        b["radcoefficients"] = crad[i, j, :n, :l + 1, :k].tolist()
+        b["radparameters"] = [float(rp[i, j, 0])] + list(b["radparameters"][1:])
+        b["rcut"], b["dcut"] = float(rp[i, j, 1]), float(rp[i, j, 2])
+        for key, v in (("rcut_in", rp[i, j, 3]), ("dcut_in", rp[i, j, 4]),
+                       ("prehc", core[i, j, 0]), ("lambdahc", core[i, j, 1])):
+            if key in b or float(v) != _BOND_DEFAULTS[key]:
+                b[key] = float(v)
+    ct = f64(model.ctilde_complex)
+    for el, idx, start, nms, nd in spec.functions:
+        t["functions"][el][idx]["ctildes"] = ct[start:start + nms, :nd].reshape(-1).tolist()
+    dump_tree(t, path)

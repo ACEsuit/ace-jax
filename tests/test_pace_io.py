@@ -12,7 +12,7 @@ deltaSplineBins: 0.001
 embeddings:
   0: {ndensity: 1, FS_parameters: [1, 1], npoti: FinnisSinclairShiftedScaled, rho_core_cutoff: 100000, drho_core_cutoff: 250}
 bonds:
-  [0, 0]: {radbasename: ChebExpCos, radparameters: [5.25], radcoefficients: [[[1, 0.5]]], prehc: 0, lambdahc: 1, rcut: 5, dcut: 0.01, rcut_in: 0, dcut_in: 0, inner_cutoff_type: density, nradmax: 1, lmax: 0, nradbasemax: 2}
+  [0, 0]: {radbasename: ChebExpCos, radparameters: [5.25], radcoefficients: [[[1, 0.5], [0.3, 0.2]]], prehc: 0, lambdahc: 1, rcut: 5, dcut: 0.01, rcut_in: 0, dcut_in: 0, inner_cutoff_type: density, nradmax: 1, lmax: 1, nradbasemax: 2}
 functions:
   0:
     - {mu0: 0, rank: 1, ndensity: 1, num_ms_combs: 1, mus: [0], ns: [1], ls: [0], ms_combs: [0], ctildes: [0.7]}
@@ -35,8 +35,8 @@ def test_tuple_bond_keys(mini):
 def test_parse_mini(mini):
     spec, a = parse_yace(mini)
     assert spec.element_names == ["Si"] and a["Z"].tolist() == [14]
-    assert a["crad"].shape == (1, 1, 1, 1, 2)
-    np.testing.assert_array_equal(a["crad"][0, 0, 0, 0], [1, 0.5])
+    assert a["crad"].shape == (1, 1, 1, 2, 2)
+    np.testing.assert_array_equal(a["crad"][0, 0, 0], [[1, 0.5], [0.3, 0.2]])
     np.testing.assert_array_equal(a["radparams"][0, 0], [5.25, 5, 0.01, 0, 0])
     assert a["ctilde_complex"].shape == (4, 1)          # 1 + 3 terms
     assert [f[2:] for f in spec.functions] == [(0, 1, 1), (1, 3, 1)]
@@ -88,3 +88,12 @@ def test_parse_fixtures(name):
     assert a["ctilde_complex"].shape[0] == spec.functions[-1][2] + spec.functions[-1][3]
     if name == "gesi_sbessel":
         assert a["Z"].tolist() == [32, 14]
+
+
+def test_function_indices_beyond_bond_basis_rejected(tmp_path):
+    """A function using l > lmax (or n > nradmax / nradbase) must fail at load,
+    naming the problem, not deep inside the basis builder."""
+    p = tmp_path / "bad.yace"
+    p.write_text(MINI.replace("ls: [1, 1]", "ls: [2, 2]"))
+    with pytest.raises(ValueError, match="exceeds"):
+        parse_yace(p)
