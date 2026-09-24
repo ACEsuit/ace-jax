@@ -26,13 +26,6 @@ def gram(E):
     return Eh @ Eh.T
 
 
-def anchor_penalty(E, lam):
-    """Shrink-to-block-diagonal penalty lam * ||B(E) - I||_F^2 (B = gram(E));
-    rotation-invariant (acts on the Gram, so the E->EO gauge freedom is harmless)."""
-    B = gram(E)
-    return lam * jnp.sum((B - jnp.eye(B.shape[0])) ** 2)
-
-
 def load_mace_embedding(path, elements):
     """path: MACE embedding artifact (JSON with parallel arrays "emb" (list of raw
     float rows) and "Z" (list of atomic numbers), row i belonging to Z[i]).
