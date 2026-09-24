@@ -33,12 +33,16 @@ def run_profile(yace, reps=10, n_rep=8):
         return float(np.median(ts))
 
     def fwd_and_vjp(fn, x):
-        """(forward s, forward+VJP s) for fn: x -> array, cotangent = ones."""
+        """(forward s, forward+VJP s) for fn: x -> array.  The cotangent is a
+        random array passed in as an argument: a constant ones cotangent lets
+        XLA constant-fold whole backward passes (seen on the first profile)."""
         f = jax.jit(fn)
-        def fb(x):
-            y, pull = jax.vjp(fn, x)
-            return pull(jnp.ones_like(y))[0]
-        return bench(f, x), bench(jax.jit(fb), x)
+        y = f(x)
+        ct = jax.random.normal(jax.random.PRNGKey(0), y.shape, y.dtype)
+        def fb(x, ct):
+            _, pull = jax.vjp(fn, x)
+            return pull(ct)[0]
+        return bench(f, x), bench(jax.jit(fb), x, ct)
 
     out = {"n_atoms": n}
     for dtype in ("float32", "float64"):
@@ -82,31 +86,37 @@ def run_profile(yace, reps=10, n_rep=8):
                             ("node_AA_rho_F", st_node, A)):
             f, fb = fwd_and_vjp(fn, x)
             res[name] = {"fwd_s": f, "fwd_plus_vjp_s": fb}
-        efv = jax.jit(lambda x: m.energy_forces_virial(x, zi, zj, s, r, n, nz))
+        from ace_jax.eval import with_edge_a_kind
+        for kind in ("gather", "matmul"):          # the same call, both A-basis forms
+            mk = with_edge_a_kind(m, kind)
+            fk = jax.jit(lambda x, mk=mk: mk.energy_forces_virial(x, zi, zj, s, r, n, nz))
+            res[f"efv_{kind}_s"] = bench(fk, rij)
         en = jax.jit(lambda x: m.site_energies(x, zi, zj, s, n, nz))
         res["total_energy_s"] = bench(en, rij)
-        res["total_efv_s"] = bench(efv, rij)
 
-        # kernel-level: perfetto trace of energy_forces_virial, top GPU ops by time
-        tdir = f"/tmp/trace_{dtype}"
-        jax.block_until_ready(efv(rij))
-        with jax.profiler.trace(tdir, create_perfetto_trace=True):
-            for _ in range(3):
-                jax.block_until_ready(efv(rij))
-        files = glob.glob(f"{tdir}/**/*perfetto_trace.json.gz", recursive=True)
-        top = []
-        if files:
-            ev = json.load(gzip.open(files[0]))
-            ev = ev["traceEvents"] if isinstance(ev, dict) else ev
-            gpu_pids = {e["pid"] for e in ev if e.get("ph") == "M" and e.get("name") == "process_name"
-                        and "GPU" in str(e.get("args", {}).get("name", ""))}
-            tot = defaultdict(float)
-            for e in ev:
-                if e.get("ph") == "X" and e.get("pid") in gpu_pids:
-                    tot[e.get("name", "?")[:90]] += e.get("dur", 0) / 1e6 / 3
-            top = sorted(tot.items(), key=lambda kv: -kv[1])[:15]
-            res["gpu_kernel_total_s"] = sum(tot.values())
-        res["top_gpu_kernels_s"] = top
+        # kernel-level: perfetto trace of energy_forces_virial, top GPU ops, per form
+        for kind in ("gather", "matmul"):
+            mk = with_edge_a_kind(m, kind)
+            efv = jax.jit(lambda x, mk=mk: mk.energy_forces_virial(x, zi, zj, s, r, n, nz))
+            tdir = f"/tmp/trace_{dtype}_{kind}"
+            jax.block_until_ready(efv(rij))
+            with jax.profiler.trace(tdir, create_perfetto_trace=True):
+                for _ in range(3):
+                    jax.block_until_ready(efv(rij))
+            files = glob.glob(f"{tdir}/**/*perfetto_trace.json.gz", recursive=True)
+            top, total = [], None
+            if files:
+                ev = json.load(gzip.open(files[0]))
+                ev = ev["traceEvents"] if isinstance(ev, dict) else ev
+                gpu_pids = {e["pid"] for e in ev if e.get("ph") == "M" and e.get("name") == "process_name"
+                            and "GPU" in str(e.get("args", {}).get("name", ""))}
+                tot = defaultdict(float)
+                for e in ev:
+                    if e.get("ph") == "X" and e.get("pid") in gpu_pids:
+                        tot[e.get("name", "?")[:90]] += e.get("dur", 0) / 1e6 / 3
+                top = sorted(tot.items(), key=lambda kv: -kv[1])[:12]
+                total = sum(tot.values())
+            res[f"gpu_kernels_{kind}"] = {"total_s": total, "top_s": top}
         out[dtype] = res
     return out
 
