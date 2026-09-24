@@ -272,6 +272,7 @@ class PopsRidgePath:
         Lam, U = jnp.linalg.eigh(M * self.Dinv[:, None] * self.Dinv[None, :])
         self.Lam = jnp.maximum(Lam, 0.0)                    # clip round-off negatives
         self.W = U * self.Dinv[:, None]                     # D^-1 U
+        self._posts = {}                                    # (ridge, form, lev, thr) -> posterior
         self.prob, self.ds = prob, ds_train
 
     def ridge_abs(self, ridge):
@@ -297,11 +298,19 @@ class PopsRidgePath:
 
     def posterior(self, ridge, form="hypercube", leverage_pct=0.0, mode_threshold=1.0e-8):
         """POPS posterior WITHOUT materialising the corrections: O(L^2) memory.
+        Memoised per (ridge, form, leverage_pct, mode_threshold): each one is
+        several streamed passes over the training set.
 
         hypercube: box axes from sum delta delta^T = A W A, bounds from a streamed
         min/max of the projected corrections (3 passes).  ensemble: the moments
         E[delta delta^T] = A W A / K and E[delta] = A s / K (2 passes).  Equals
         ``pops_posterior(self.members(...))`` for zero percentile clipping."""
+        key = (float(ridge), form, float(leverage_pct), float(mode_threshold))
+        if key not in self._posts:
+            self._posts[key] = self._posterior(ridge, form, leverage_pct, mode_threshold)
+        return self._posts[key]
+
+    def _posterior(self, ridge, form, leverage_pct, mode_threshold):
         from .pops import hypercube_cov, hypercube_support
         model, cfg = self.prob.model, self.prob.cfg
         A, coef, keep = self._coef(ridge, leverage_pct)
@@ -354,8 +363,8 @@ def _pops_paper_posts(path, ridge, form, leverage_pct):
     return posts
 
 
-def _run_predict_pops_paper(theta, prob, ds_train, ds_test, form, ridge, leverage_pct):
-    path = PopsRidgePath(theta, prob, ds_train)
+def _run_predict_pops_paper(theta, prob, ds_train, ds_test, form, ridge, leverage_pct, path=None):
+    path = PopsRidgePath(theta, prob, ds_train) if path is None else path
     posts = _pops_paper_posts(path, ridge, form, leverage_pct)
     f = jax.jit(lambda mu, b: _pops_paper_batch(prob, mu, posts, b))
     outs = [f(path.c_star, jax.tree.map(lambda a: a[i], ds_test)) for i in range(ds_test.n_batches)]
@@ -406,7 +415,7 @@ def select_pops_ridge(theta, prob, ds_fit, ds_val, grid, form="hypercube", lever
 
 
 def predict_fixed(theta, prob, ds_train, ds_test, dtc=True, deriv_dtc=True,
-                  uq="blr", pops_form="hypercube", leverage_pct=0.0, pops_ridge=1e-3):
+                  uq="blr", pops_form="hypercube", leverage_pct=0.0, pops_ridge=1e-3, pops_path=None):
     """dtc=False drops the DTC prior residual from E_var (SoR only; for tests).
     deriv_dtc=False keeps the energy DTC residual but drops its force/virial
     derivative (F_var, V_var stay SoR-only).
@@ -419,12 +428,14 @@ def predict_fixed(theta, prob, ds_train, ds_test, dtc=True, deriv_dtc=True,
     noise to the residual reverts to plain ML) with the regulariser
     pops_ridge * Gamma^2 (relative ridge; a float, or a dict per E/F/V).  There is
     no separate noise/epistemic term.  pops_form in {'hypercube','ensemble'},
-    leverage_pct the leverage percentile.  See PopsRidgePath / select_pops_ridge."""
+    leverage_pct the leverage percentile.  pops_path: a PopsRidgePath already built
+    on (theta, ds_train) to reuse -- one factorisation and its memoised posteriors
+    serve every test split.  See PopsRidgePath / select_pops_ridge."""
     if uq == "blr":
         return _run_predict(_predict_fn(prob, dtc, deriv_dtc), theta, prob, ds_train, ds_test)
     if uq == "pops":
         return _run_predict_pops_paper(theta, prob, ds_train, ds_test, pops_form,
-                                       pops_ridge, leverage_pct)
+                                       pops_ridge, leverage_pct, path=pops_path)
     raise ValueError(f"uq must be 'blr' or 'pops', got {uq!r}")
 
 

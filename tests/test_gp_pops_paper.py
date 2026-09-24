@@ -154,3 +154,25 @@ def test_predict_and_ridge_selection_never_materialise_members(tiny_linear_probl
         predict_fixed(THETA, prob, ds, ds, uq="pops", pops_ridge=1e-3)
         predict_fixed(THETA, prob, ds, ds, uq="pops", pops_ridge=1e-3, pops_form="ensemble")
         select_pops_ridge(THETA, prob, ds, ds, (1e-2, 1e-4))
+
+
+def test_predict_reuses_a_prebuilt_path_and_its_posteriors(tiny_linear_problem, monkeypatch):
+    """At production size (L ~ 2.8e4) a second factorisation does not fit next to the
+    first, and every posterior is several streamed passes: predict_fixed must reuse a
+    caller's path, and the path must not rebuild a posterior it already has."""
+    prob, ds = tiny_linear_problem
+    with highest_precision():
+        ref = predict_fixed(THETA, prob, ds, ds, uq="pops", pops_ridge={"E": 1e-2, "F": 1e-4, "V": 1e-4})
+        path = PopsRidgePath(THETA, prob, ds)
+        import ace_jax.fit.predict as P
+        calls = []                                            # one streamed moment pass per posterior built
+        real = P.pops_moment_sums
+        monkeypatch.setattr(P, "pops_moment_sums", lambda *a, **k: calls.append(1) or real(*a, **k))
+        monkeypatch.setattr(PopsRidgePath, "__init__",
+                            lambda *a, **k: (_ for _ in ()).throw(AssertionError("second factorisation")))
+        for _ in range(2):                                    # e.g. the test and ood splits
+            got = predict_fixed(THETA, prob, ds, ds, uq="pops", pops_ridge={"E": 1e-2, "F": 1e-4, "V": 1e-4},
+                                pops_path=path)
+    for f in ref._fields:
+        assert np.allclose(np.asarray(getattr(got, f)), np.asarray(getattr(ref, f)), rtol=1e-10, atol=1e-14), f
+    assert len(calls) == 2, calls                             # one per distinct ridge, across both calls

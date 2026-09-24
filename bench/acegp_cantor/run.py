@@ -48,7 +48,8 @@ p.add_argument("--uq", choices=["blr", "pops"], default="blr", help="linear-arm 
 p.add_argument("--pops-posterior", choices=["hypercube", "ensemble"], default="hypercube", help="POPS posterior form (uq=pops): hypercube (PCA/box misspecification covariance; DEFAULT, matches upstream popsregression) or ensemble (committee of weight samples; centred). ('samples' is reserved for a future draw-from-Sigma route.)")
 p.add_argument("--pops-leverage-pct", type=float, default=0.0, help="POPS leverage percentile (uq=pops); 0 keeps every training point")
 p.add_argument("--pops-ridge", default="auto",
-               help="uq=pops: relative ridge (lam / max eig of the Gamma-scaled Gram), or 'auto' "
+               help="uq=pops: relative ridge (lam / max eig of the Gamma-scaled Gram), per quantity as "
+                    "'E=1e-7,F=1e-5,V=1e-5', or 'auto' "
                     "to pick it per quantity by CRPS on the last --pops-val-frac of train (one factorisation)")
 p.add_argument("--pops-ridge-grid", default="1e-2,1e-3,1e-4,1e-5,1e-6,1e-7,1e-8,1e-9,1e-10,1e-11,1e-12,1e-13,1e-14",
                help="comma-separated relative ridges searched by --pops-ridge auto")
@@ -368,7 +369,7 @@ with highest_precision():
         json.dump(summ, open(out / "nuts_summary.json", "w"), indent=1)
 
     # --- paper-faithful POPS: ridge (selected once on a train holdout) + test envelope ---
-    pops_ridge, pops_env = 1e-3, {}
+    pops_ridge, pops_env, path = 1e-3, {}, None
     if a.uq == "pops":
         from ace_jax.fit.predict import PopsRidgePath, select_pops_ridge
         from ace_jax.fit.rows import linear_rows
@@ -383,6 +384,9 @@ with highest_precision():
             json.dump({"grid": grid, "ridge": pops_ridge, "n_val": nval,
                        "scores_crps_over_rmse": {q: [float(x) for x in v] for q, v in scores.items()}},
                       open(out / "pops_ridge.json", "w"), indent=1)
+        elif "=" in a.pops_ridge:                      # per quantity, e.g. E=1e-7,F=1e-5,V=1e-5
+            pops_ridge = {k.strip(): float(v) for k, v in (kv.split("=") for kv in a.pops_ridge.split(","))}
+            assert set(pops_ridge) == set("EFV"), "--pops-ridge per-quantity form needs E=,F=,V="
         else:
             pops_ridge = float(a.pops_ridge)
         print("POPS (paper) ridge:", pops_ridge, flush=True)
@@ -441,7 +445,8 @@ with highest_precision():
                 # rung (theta_map only).
                 pred = predict_fixed(theta_map, prob, ds_train, ds, deriv_dtc=not a.no_deriv_dtc,
                                      uq="pops", pops_form=a.pops_posterior,
-                                     leverage_pct=a.pops_leverage_pct, pops_ridge=pops_ridge)
+                                     leverage_pct=a.pops_leverage_pct, pops_ridge=pops_ridge,
+                                     pops_path=path)   # one factorisation + posteriors for every split
             else:
                 pred = predict_mixture(sub, prob, ds_train, ds, deriv_dtc=not a.no_deriv_dtc)
             timings[f"predict_{split}_{rung}"] = time.time() - t
