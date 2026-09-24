@@ -57,6 +57,13 @@ p.add_argument("--pops-ridge-grid", default="1e-2,1e-3,1e-4,1e-5,1e-6,1e-7,1e-8,
 p.add_argument("--pops-val-frac", type=float, default=0.2, help="held-out fraction of train for --pops-ridge auto")
 p.add_argument("--pops-env-nf", type=int, default=2000,
                help="force components (random subsample of test) for the paper-mode envelope coverage")
+p.add_argument("--delta-s-floor-q", type=float, default=None,
+               help="floor the amplitude coordinate s at this quantile of the training sites' s: "
+                    "delta(max(s, s_q)) cannot extrapolate to zero in compressed environments")
+p.add_argument("--fix-rho", default=None,
+               help="pin the bump lengthscale rho (L-BFGS only): a number, or 'auto' = the median "
+                    "nearest-neighbour RMS distance within the inducing set; keeps the evidence from "
+                    "flattening the GP's novelty term")
 p.add_argument("--lml", choices=["device", "host-cache"], default="device",
                help="joint-LML engine. host-cache (needs --arm gp --density pair, --rungs map, --opt lbfgs): "
                     "cache the linear design rows in host RAM once and never re-evaluate the ACE basis "
@@ -222,7 +229,13 @@ with highest_precision():
     print(f"feature map: density={a.density} warp={a.warp} -> d={ind.XM.shape[1] if ind.XM.shape[0] else cfg.D}", flush=True)
     timings["inducing"] = time.time() - t
     print(f"M = {ind.XM.shape[0]}  len_basis = {cfg.len_basis}", flush=True)
-    prob = Problem(KernelSpec(a.kernel, not a.no_bump, cfg.D), model, ind, cfg,
+    s_floor = None
+    if a.delta_s_floor_q is not None:
+        s_live = np.asarray(S)[np.asarray(ds_train.node_mask)]
+        s_floor = float(np.quantile(s_live, a.delta_s_floor_q))
+        print(f"delta s-floor: s_q({a.delta_s_floor_q}) = {s_floor:.4f} (training s in "
+              f"[{s_live.min():.3f}, {s_live.max():.3f}])", flush=True)
+    prob = Problem(KernelSpec(a.kernel, not a.no_bump, cfg.D, s_floor=s_floor), model, ind, cfg,
                    jnp.asarray(z["gamma"]), default_prior(a.r0))
     if a.learn_embedding and embed is not None:
         from ace_jax.fit.varopt_embed import learn_embedding, theta_map_at
@@ -307,7 +320,9 @@ with highest_precision():
                   np.round(np.asarray(ratios), 4).tolist(), flush=True)
             print("[sigma-type] per-type ratios are diagnostic only; predictions still use "
                   "single-noise theta_map.", flush=True)
-    elif a.opt == "lbfgs":
+    elif a.opt == "lbfgs" or a.fix_rho is not None:
+        if a.opt != "lbfgs":
+            raise SystemExit("--fix-rho is implemented for --opt lbfgs only")
         # 10-d smooth objective with an exact gradient: L-BFGS converges in a
         # few tens of evaluations where Adam needs hundreds of (expensive) steps
         from scipy.optimize import minimize
@@ -333,6 +348,17 @@ with highest_precision():
         # log-space boxes: generous, but keep the Cholesky away from sigma -> 0
         lo = np.log([0.05, 1e-3, 0.1, 1.5, 1e-3, 0.1, 1e-2, 1e-4, 1e-4, 1e-4])
         hi = np.log([50.0, 10.0, 50.0, 4.0, 50.0, 100.0, 1e4, 10.0, 10.0, 10.0])
+        if a.fix_rho is not None:
+            if a.fix_rho == "auto":
+                XM = np.asarray(prob.ind.XM)
+                d2 = ((XM[:, None, :] - XM[None, :, :]) ** 2).mean(-1)
+                np.fill_diagonal(d2, np.inf)
+                rho_fix = float(np.median(np.sqrt(d2.min(1))))
+            else:
+                rho_fix = float(a.fix_rho)
+            lo, hi, x0 = lo.copy(), hi.copy(), x0.copy()
+            lo[5] = hi[5] = x0[5] = np.log(rho_fix)
+            print(f"fix-rho: rho pinned at {rho_fix:.4f}", flush=True)
         x0 = np.clip(x0, lo, hi)
         res = minimize(fg, x0, jac=True, method="L-BFGS-B", bounds=list(zip(lo, hi)),
                        options={"maxiter": a.map_steps, "maxfun": 4 * a.map_steps})

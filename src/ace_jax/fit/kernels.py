@@ -18,6 +18,11 @@ class KernelSpec:
     kind: str = "cosine"     # "cosine" | "matern32"
     bump: bool = True        # multiply by the SE magnitude factor psi_se
     D: int = 1               # descriptor width, informational (the kernels read x.shape[-1])
+    # lower floor on the delta(s) coordinate: delta is evaluated at max(s, s_floor), so
+    # the learned amplitude cannot extrapolate to zero below the training range of s
+    # (compressed environments), where the GP's prior variance is its OOD uncertainty.
+    # A lower floor only: isolated/padding sites (s ~ 1e3 r0) keep delta = 0.
+    s_floor: float | None = None
 
 
 def _sqdist(x, xm):
@@ -75,6 +80,8 @@ def kernel(theta, spec, x, s, z, xm, sm, zm, embed):
         kap = kappa_matern32(x, xm, ell)
     else:
         raise ValueError(f"unknown kernel kind {spec.kind!r}")
+    if spec.s_floor is not None:
+        s, sm = jnp.maximum(s, spec.s_floor), jnp.maximum(sm, spec.s_floor)
     k = delta(s, theta) * delta(sm, theta) * kap
     if spec.bump:
         k = k * psi_se(x, xm, jnp.exp(theta.log_rho))
