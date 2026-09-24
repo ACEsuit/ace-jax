@@ -222,3 +222,131 @@ def build_model(elements, order, totaldegree, *, wL=1.5, rcut=5.5, r0=None,
                      Ylm_spec=tuple(Ylm), aa_sig=cpl.aa_sig, aspec=tuple(cpl.aspec),
                      aa_specs=tuple(np.asarray(g) for g in cpl.aa_specs),
                      nnll=nnll, gamma=gamma)
+
+
+def build_embedding_model(elements, order, totaldegree, embedding=None, *, rows=None,
+                          d_max=None, wL=1.5, maxl=None, rcut=None, pair_maxn=None,
+                          reduction="pca", normalise=True, block_rule="ace1",
+                          with_gamma=True, edge_a_kind="gather",
+                          coupling_cache=True, coupling_cache_dir=None):
+    """Author the frozen-element-embedding model of ACEpotentials
+    `ace_embedding_model` (ace1_compat, the default there) in memory.
+
+    The neighbour species enters the radial basis through a frozen embedding row,
+    R_(n'k)l(r, Z1, Z2) = Q_n'(x) emb[Z2, k], instead of a one-hot index: the
+    model stays linear in its coefficients, and with lossless widths (d_max=None)
+    it is a reparameterisation of the categorical basis; d_max < lossless
+    compresses the species tensor.  Everything is ace1-compatible: Jacobi(4,4)
+    radials splined on 100 nodes (stored factorised, one table + the embedding),
+    Agnesi (2,4) / (1,3) transforms on UNIFORM cutoffs (mean bond length,
+    rcut = 2.5 r0 unless given), spherical harmonics, the one-hot Legendre ace1
+    pair basis, the :ace1 folded block rule and channel-diagonal many-body spec.
+
+    embedding: a JSON artefact path (keys Z, emb), a (Z, table) pair, or
+    "identity"; reduced with `embedding_rows(reduction, normalise)`.  rows: an
+    explicit (NZ, d) block instead (e.g. to reproduce a Julia model exactly --
+    Julia leaves the PCA sign to LAPACK).  Returns an `Authoring` (readout zero);
+    the coupling needs the ET shim on a cache miss, as `build_model`."""
+    import io
+    import json
+    from math import ceil
+
+    from ..eval.io import load
+    from . import radial_ace1 as ra
+    from .coupling import couple_cached
+    from .embedding import embedding_rows, embedding_widths, read_embedding
+    from .spec import build_embedding_spec
+
+    if edge_a_kind not in ("gather", "matmul"):
+        raise ValueError(f'edge_a_kind must be "gather" or "matmul", got {edge_a_kind!r}')
+    zs = ri.resolve_elements(elements)
+    S = len(zs)
+    widths = embedding_widths(S, order, d_max=d_max)
+    d = max(widths)
+    if rows is not None:
+        emb = np.asarray(rows, dtype=np.float64)
+        if emb.shape != (S, d):
+            raise ValueError(f"rows must be ({S}, {d}) for these elements and widths, got {emb.shape}")
+        provenance = {"checkpoint": "explicit rows"}
+    else:
+        if embedding is None:
+            raise ValueError("pass an embedding (path, (Z, table) or 'identity') or explicit rows")
+        if isinstance(embedding, str) and embedding == "identity":
+            Z, table, provenance = zs, np.eye(S), {"checkpoint": "identity"}
+        elif isinstance(embedding, (str, bytes)) or hasattr(embedding, "__fspath__"):
+            Z, table, provenance = read_embedding(embedding)
+        else:
+            Z, table = embedding
+            provenance = {"checkpoint": "table"}
+        emb = embedding_rows(table, Z, zs, d=d, reduction=reduction, normalise=normalise)
+
+    sp = build_embedding_spec(S, order, totaldegree, widths, wL=wL, maxl=maxl, block_rule=block_rule)
+    if coupling_cache:
+        cpl = couple_cached(sp.mb, sp.rspec, sp.Ylm, cache_dir=coupling_cache_dir)
+    else:
+        cpl = couple(sp.mb, sp.rspec, sp.Ylm)
+    nnll = nnll_from_coupling(cpl.A2B, cpl.aa_sig)
+    norm = lambda rws: sorted(sorted(bb) for bb in rws)
+    if norm(nnll) != norm(cpl.nnll_spec):
+        raise AssertionError("nnll derivation disagrees with the ET dump")
+
+    cut = ra.uniform_cutoffs(zs, rcut)
+    n1max = max(n for n, _ in sp.r1)
+    rnl_single = ra.jacobi_spline_table(n1max, 4.0, 4.0)[:, [n - 1 for n, _ in sp.r1]]
+    maxq = int(ceil(totaldegree if pair_maxn is None else pair_maxn))
+    n_pair = maxq * S
+    n_B, n_AA = cpl.A2B.shape
+    lmax = max(l for l, _ in sp.Ylm)
+    rr, cc = np.nonzero(cpl.A2B)
+    o = np.argsort(cc)
+    spl = {"x0": -1.0, "h": 2.0 / (ra.SPLINE_NODES - 1), "n": ra.SPLINE_NODES, "ncoef": ra.SPLINE_NODES + 2}
+
+    tensor_nnll = [[((n - 1) // d + 1, l) for n, l in bb] for bb in nnll]    # k is not a degree
+    pair_nnll = [[(n, 0)] for n in range(1, n_pair + 1)]
+    gamma = (smoothness_prior(tensor_nnll * S + pair_nnll * S) if with_gamma
+             else np.zeros((n_B + n_pair) * S))
+
+    meta = {
+        "schema_version": 1,
+        "source": "ace-jax python authoring (build_embedding_model)",
+        "embedding": json.dumps({"d_max": d, "widths": widths, "block_rule": block_rule,
+                                 "reduction": reduction, "provenance": provenance}),
+        "elements": zs, "order": int(order), "totaldegree": int(totaldegree),
+        "radial_kind": "spline", "pair_radial_kind": "spline",
+        "transform_kind": "agnesi_normalized", "envelope_kind": "poly2sx",
+        "pair_envelope_kind": "ace1_poly1sr", "ybasis_kind": "real_sphericalharmonics",
+        "lmax": int(lmax), "n_rnl": len(sp.rspec), "n_pair": n_pair, "n_ylm": (lmax + 1) ** 2,
+        "n_A": len(cpl.aspec), "n_AA": int(n_AA), "n_B": int(n_B),
+        "len_basis": int((n_B + n_pair) * S),
+        "aa_orders": [int(g.shape[1]) for g in cpl.aa_specs],
+        "aa_lens": [int(g.shape[0]) for g in cpl.aa_specs],
+        "rnl_spline": spl, "pair_spline": dict(spl), "rcut": float(cut[2]),
+        "nnll": [[list(b) for b in bb] for bb in cpl.nnll_spec],
+        "authoring": {"wL": float(wL), "rcut": float(cut[2]), "r0": float(cut[1]),
+                      "maxl": maxl, "pair_maxn": maxq, "d_max": d_max,
+                      "with_gamma": bool(with_gamma)},
+    }
+    D = {
+        "A2B_rows": rr[o].astype(np.int32), "A2B_cols": cc[o].astype(np.int32),
+        "A2B_vals": cpl.A2B[rr[o], cc[o]], "A2B_shape": np.array(cpl.A2B.shape, np.int32),
+        "aspec_r": np.array([a[0] for a in cpl.aspec], np.int32),
+        "aspec_y": np.array([a[1] for a in cpl.aspec], np.int32),
+        "elements": np.array(zs, np.int32),
+        "rcuts": np.full((S, S), cut[2]), "pair_rcuts": np.full((S, S), cut[2]),
+        "rnl_transform": ra.transform_table(S, cut, 2, 4), "rnl_envelope": ra.tensor_envelope_table(S),
+        "rnl_spline_coefs_single": rnl_single, "rnl_embedding": emb,
+        "rnl_emb_nidx": sp.nidx, "rnl_emb_kidx": sp.kidx,
+        "pair_spline_coefs": ra.pair_spline_coefs(S, maxq),
+        "pair_transform": ra.transform_table(S, cut, 1, 3), "pair_envelope": ra.pair_envelope_table(S, cut),
+        "WB": np.zeros((n_B, S)), "Wpair": np.zeros((n_pair, S)), "E0": np.zeros(S),
+        "meta_json": np.frombuffer(json.dumps(meta).encode(), np.uint8),
+    }
+    for k, g in enumerate(cpl.aa_specs):
+        D[f"aa_spec_{k + 1}"] = np.asarray(g, np.int32)
+    buf = io.BytesIO()
+    np.savez(buf, **D)
+    buf.seek(0)
+    model, _, _ = load(buf, edge_a_kind=edge_a_kind)
+    return Authoring(model=model, meta=meta, nnll_spec=cpl.nnll_spec, Rnl_spec=tuple(sp.rspec),
+                     Ylm_spec=tuple(sp.Ylm), aa_sig=cpl.aa_sig, aspec=tuple(cpl.aspec),
+                     aa_specs=tuple(np.asarray(g) for g in cpl.aa_specs), nnll=nnll, gamma=gamma)
