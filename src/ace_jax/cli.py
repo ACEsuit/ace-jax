@@ -141,18 +141,21 @@ def cmd_eval(a):
 
 
 def cmd_construct(a):
-    """Author a frozen ACE model in memory (seeded radial init, zero readout,
-    algebraic smoothness prior) and package it as an npz bridge file.  Requires
-    the `authoring` extra; the saved file evaluates with the plain eval path."""
-    from .construct.model import build_model
     from .construct.export import save_npz
-    els = [int(e) if e.strip().isdigit() else e.strip()
-           for e in a.elements.split(",")]
-    auth = build_model(els, a.order, a.max_degree, wL=a.wL, rcut=a.rcut,
-                       rin=a.rin, radial_mode=a.radial_mode, pair_mode=a.pair_mode,
-                       seed=a.seed, with_gamma=not a.no_gamma,
-                       coupling_cache=not a.no_coupling_cache,
-                       coupling_cache_dir=a.coupling_cache_dir)
+    els = [int(e) if e.strip().isdigit() else e.strip() for e in a.elements.split(",")]
+    if a.embedding:
+        from .construct.model import build_embedding_model
+        auth = build_embedding_model(els, a.order, a.max_degree, embedding=a.embedding, d_max=a.d_max,
+                                     wL=a.wL, maxl=a.maxl, rcut=a.rcut, reduction=a.reduction,
+                                     with_gamma=not a.no_gamma, coupling_cache=not a.no_coupling_cache,
+                                     coupling_cache_dir=a.coupling_cache_dir)
+    else:
+        from .construct.model import build_model
+        auth = build_model(els, a.order, a.max_degree, wL=a.wL, rcut=5.5 if a.rcut is None else a.rcut,
+                           rin=a.rin, radial_mode=a.radial_mode, pair_mode=a.pair_mode,
+                           seed=a.seed, with_gamma=not a.no_gamma,
+                           coupling_cache=not a.no_coupling_cache,
+                           coupling_cache_dir=a.coupling_cache_dir)
     out = pathlib.Path(a.out).expanduser()
     if out.parent and str(out.parent) != ".":
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -178,7 +181,8 @@ def main(argv=None):
     con.add_argument("--order", type=int, required=True, help="correlation order")
     con.add_argument("--max-degree", type=int, required=True, help="TotalDegree level bound")
     con.add_argument("--wL", type=float, default=1.5)
-    con.add_argument("--rcut", type=float, default=5.5)
+    con.add_argument("--rcut", type=float, default=None,
+                     help="cutoff (default 5.5; with --embedding, 2.5 x mean bond length)")
     con.add_argument("--rin", type=float, default=0.0)
     con.add_argument("--radial-mode", default="glorot_normal")
     con.add_argument("--pair-mode", default="onehot")
@@ -189,6 +193,12 @@ def main(argv=None):
     con.add_argument("--coupling-cache-dir", default=None,
                      help="override the coupling cache directory (default: $ACEJAX_COUPLING_CACHE "
                           "or ~/.cache/ace-jax/coupling)")
+    con.add_argument("--embedding", default=None,
+                     help="frozen element embedding: a JSON table {Z, emb} or 'identity' "
+                          "(builds ace_embedding_model: ace1-compatible, factorised radial)")
+    con.add_argument("--d-max", type=int, default=None, help="cap on per-order channel widths (default lossless)")
+    con.add_argument("--maxl", type=int, default=None)
+    con.add_argument("--reduction", choices=["pca", "truncate"], default="pca")
     con.add_argument("--out", required=True)
     a = top.parse_args(argv)
     if a.cmd == "eval":
