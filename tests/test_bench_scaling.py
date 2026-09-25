@@ -201,3 +201,14 @@ def test_parity_dump_and_thermo_print_full_precision():
                        dump="/w/f.dump", warmup=0)
     assert "dump_modify d sort id format float %.17g" in txt
     assert "thermo_modify format float %.17g" in txt
+
+
+def test_acejax_lammps_is_gpu_only():
+    """lammps-jax's pair style is jax/kk on KOKKOS+CUDA only: no CPU LAMMPS rows."""
+    from scaling.sweep import cases, lammps_supported
+    assert not lammps_supported("acejax-pace", "cpu") and lammps_supported("acejax-ace", "gpu")
+    assert lammps_supported("mlpace", "cpu") and lammps_supported("mace", "cpu")
+    cpu = cases("local-cpu")
+    assert not [c for c in cpu if c.code.startswith("acejax") and c.mode == "lammps"]
+    assert [c for c in cpu if c.code.startswith("acejax") and c.mode == "standalone"]
+    assert [c for c in cases("moriarty-gpu") if c.code == "acejax-pace" and c.mode == "lammps"]

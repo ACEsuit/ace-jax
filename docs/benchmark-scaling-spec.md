@@ -139,8 +139,11 @@ A case that fails its gate is not timed, and the failure is recorded.
    - The build recipes are documented in `bench/scaling/README.md`.
 
 CPU runs use the whole node. LAMMPS styles run with MPI ranks equal to the
-core count (32 on moriarty). ace-jax standalone and ace-jax in LAMMPS on CPU
-run as one process using XLA's thread pool, and MACE uses 32 torch threads.
+core count (32 on moriarty). ace-jax standalone on CPU runs as one process
+using XLA's thread pool, and MACE uses 32 torch threads. ace-jax in LAMMPS is
+GPU-only: lammps-jax ships just `pair_style jax/kk`, which needs KOKKOS built
+with CUDA, so there are no CPU LAMMPS rows for ace-jax (the parity gate
+records them as `unsupported`).
 The threading actually used is recorded in each row.
 
 ## Plots (`docs/benchmarks.md`)

@@ -74,7 +74,7 @@ def _mace_ef(path, at, device, head=None):
 
 
 def gate(host, env, workroot="/tmp"):
-    from scaling.sweep import HOSTS
+    from scaling.sweep import HOSTS, lammps_supported
     device = HOSTS[host]["device"]
     lmp, pjrt = env["lmp"], env.get("pjrt")
     rows = []
@@ -95,6 +95,9 @@ def gate(host, env, workroot="/tmp"):
                     E1, F1 = _lammps_ef("mlpace", m["path"], m["elements"], at, device, lmp,
                                         work / "mlpace")
                 elif gate_name == "acejax":
+                    if not lammps_supported(m["code"], device):     # lammps-jax: GPU only
+                        rows.append({**row, "status": "unsupported"})
+                        continue
                     E0, F0 = _acejax_ef(m["path"], at)
                     bundle, layout, _ = export_bundle(m, at, "float64", work / m["code"])
                     row["layout"] = layout

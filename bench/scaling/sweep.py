@@ -21,6 +21,12 @@ MODES = {"acejax-pace": ("standalone", "lammps"), "acejax-ace": ("standalone", "
          "mlpace": ("lammps",), "mace": ("standalone", "lammps")}
 DTYPES = {"acejax-pace": ("float64", "float32"), "acejax-ace": ("float64", "float32"),
           "mlpace": ("float64",), "mace": ("float64", "float32")}
+# lammps-jax ships only pair_style jax/kk, which needs KOKKOS built with CUDA
+GPU_ONLY_LAMMPS = ("acejax-pace", "acejax-ace")
+
+
+def lammps_supported(code, device):
+    return device == "gpu" or code not in GPU_ONLY_LAMMPS
 
 
 @dataclasses.dataclass(frozen=True)
@@ -42,6 +48,8 @@ def cases(host):
     out = []
     for m in planned_models():
         for mode in MODES[m["code"]]:
+            if mode == "lammps" and not lammps_supported(m["code"], h["device"]):
+                continue
             for dtype in DTYPES[m["code"]]:
                 for n in n_ladder(m["system"], h["n_max"]):
                     out.append(Case(m["code"], m["name"], mode, n, dtype, h["device"], h["ranks"]))
