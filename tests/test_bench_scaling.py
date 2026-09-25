@@ -285,3 +285,18 @@ def test_error_summary_keeps_head_and_tail():
     from scaling.parity import error_summary
     s = error_summary(RuntimeError("#define X\n" * 200 + "nvrtc: error: invalid value"))
     assert s.startswith("RuntimeError(") and "nvrtc: error: invalid value" in s and len(s) < 800
+
+
+def test_kokkos_allocation_failure_is_oom():
+    """Kokkos (Symmetrix, pace/kk) never says 'out of memory'."""
+    from scaling.run_lammps import failure_status
+    msg = ("Kokkos ERROR: Cuda memory space failed to allocate 3.2 GiB (label=\"x\"). "
+           "The Cuda allocation returned the error code \"cudaErrorMemoryAllocation\".")
+    assert failure_status(msg) == "oom"
+
+
+def test_lammps_error_summary_keeps_error_lines():
+    """An MPI_ABORT banner filled the whole stored tail; keep the ERROR lines."""
+    from scaling.run_lammps import error_text
+    txt = "ERROR: Kokkos failed to allocate\n" + "MPI_ABORT banner line\n" * 50
+    assert "ERROR: Kokkos failed to allocate" in error_text(txt)

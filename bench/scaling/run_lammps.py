@@ -35,7 +35,18 @@ def _pair(style, model_path, elements, device):
 
 def failure_status(text):
     """'oom' if the output anywhere reports running out of memory, else 'error'."""
-    return "oom" if "out of memory" in text.lower() or "RESOURCE_EXHAUSTED" in text else "error"
+    low = text.lower()
+    oom = ("out of memory" in low or "RESOURCE_EXHAUSTED" in text
+           or "cudaErrorMemoryAllocation" in text or "failed to allocate" in low)  # Kokkos
+    return "oom" if oom else "error"
+
+
+def error_text(text, tail=300):
+    """The ERROR/exception lines (an MPI_ABORT banner buries them), then the tail."""
+    keys = ("error", "exception", "failed", "abort")
+    lines = [l for l in text.splitlines() if any(k in l.lower() for k in keys)
+             and "MPI_ABORT" not in l][:8]
+    return "\n".join(lines)[:1200] + "\n...\n" + text[-tail:]
 
 
 def finished(returncode, log):
@@ -141,7 +152,7 @@ def run_case(row, n_atoms, dtype, device, lmp, ranks, workdir, pjrt=None):
     p = subprocess.run(cmd, cwd=work, capture_output=True, text=True, timeout=3600)
     log = (work / "log.lammps").read_text() if (work / "log.lammps").exists() else p.stdout
     if not finished(p.returncode, log) or "Loop time" not in log:
-        tail = (p.stderr or p.stdout)[-300:]
+        tail = error_text((p.stderr or "") + (p.stdout or "") + log)
         out["status"] = failure_status((p.stderr or "") + (p.stdout or "") + log)
         out["error"] = tail
         return out
