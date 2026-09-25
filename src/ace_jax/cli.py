@@ -74,8 +74,11 @@ def _parse_weights(s):
     raise ValueError("--weights must be a JSON object (ACEfit weights) or a JSON list (weight factors)")
 
 
-def run(a):
-    from .fit.pipeline import FitConfig, fit, load_fit_data, write_outputs
+def _fit_config(a):
+    """FitConfig for `ace-jax fit` arguments, keeping the CLI's historical defaults
+    (model E0, per-draw statistics recompute, run_pathfinder's own 16 samples /
+    15 iterations)."""
+    from .fit.pipeline import FitConfig
     weights, factors = _parse_weights(a.weights)
     rungs = tuple(r.strip() for r in a.rungs.split(","))
     ridge = a.pops_ridge if a.pops_ridge in ("auto", "blr") else float(a.pops_ridge)
@@ -89,8 +92,13 @@ def run(a):
         init=json.load(open(a.init)) if a.init else None, rungs=rungs, laplace=a.laplace,
         n_draws=a.n_draws, vi_steps=a.vi_steps, nuts_warmup=a.nuts_warmup, nuts_samples=a.nuts_samples,
         nuts_chains=a.nuts_chains, uq=a.uq, predict_train=False, pops_ridge=ridge,
-        predict_stats="recompute")
-    cfg.validate()
+        predict_stats="recompute", pf_samples=16, pf_maxiter=15)
+    return cfg.validate()
+
+
+def run(a):
+    from .fit.pipeline import fit, load_fit_data, write_outputs
+    cfg = _fit_config(a)
     data = (load_fit_data(cfg, data=a.data, ood=a.ood) if a.data
             else load_fit_data(cfg, train=a.train, test=a.test, ood=a.ood))
     res = fit(cfg, data)
@@ -167,7 +175,7 @@ def cmd_construct(a):
     return auth
 
 
-def main(argv=None):
+def _parser():
     top = argparse.ArgumentParser(prog="ace-jax", description="Fit and evaluate ACE models in JAX")
     sub = top.add_subparsers(dest="cmd", required=True)
     _add_fit_args(sub.add_parser("fit", help="fit the hybrid linear-ACE + residual GP (--m-per-species 0 = linear-only fit)"))
@@ -200,7 +208,11 @@ def main(argv=None):
     con.add_argument("--maxl", type=int, default=None)
     con.add_argument("--reduction", choices=["pca", "truncate"], default="pca")
     con.add_argument("--out", required=True)
-    a = top.parse_args(argv)
+    return top
+
+
+def main(argv=None):
+    a = _parser().parse_args(argv)
     if a.cmd == "eval":
         return cmd_eval(a)
     if a.cmd == "construct":

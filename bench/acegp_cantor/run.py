@@ -98,6 +98,7 @@ p.add_argument("--route", default=None,
                     '\'{"sigma_type":"lml"}\'; each route is fixed or lml.')
 a = p.parse_args()
 from ace_jax.fit.pipeline import FitConfig, fit, load_fit_data, write_outputs
+from ace_jax.fit.pipeline.outputs import checkpoint_writer
 from ace_jax.fit.paramset import parse_route
 from ace_jax.fit.weights import ConfigType, PerConfig, Quantity, Structural
 
@@ -137,6 +138,8 @@ try:
 except ValueError as e:
     p.error(str(e))
 data = load_fit_data(cfg, data=a.data, ood=a.ood)
-res = fit(cfg, data, log=lambda *s: print(*s, flush=True))
+# stage checkpoints: split, MAP (theta_map.json for --init) and rung draws are on
+# disk before POPS / prediction run, so a late failure does not lose them
+res = fit(cfg, data, log=lambda *s: print(*s, flush=True), on_stage=checkpoint_writer(a.out))
 write_outputs(res, a.out, layout=("run",), argv=vars(a))
 print("done", {k: round(v, 1) for k, v in res.timings.items()}, flush=True)

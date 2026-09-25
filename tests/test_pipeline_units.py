@@ -183,3 +183,91 @@ def test_cli_rejects_train_and_data_together(tmp_path):
     with pytest.raises(SystemExit):
         main(["fit", "--model", "m.npz", "--train", "a.xyz", "--data", "b.xyz", "--r0", "2.35",
               "--out", str(tmp_path)])
+
+
+# ---------------------------------------------------------------------------
+# Final-review fixes (Important 1-6)
+# ---------------------------------------------------------------------------
+def _fx_cfg(**kw):
+    from conftest import FIXTURE_DIR
+    from ace_jax.fit.pipeline import FitConfig
+    base = dict(model=str(FIXTURE_DIR / "si_fitted.npz"), energy_key="dft_energy", force_key="dft_force",
+                virial_key="dft_virial", ntrain=12, ntest=4, batch=4, r0=2.35, arm="linear",
+                rungs=("map",), map_steps=3, predict_train=False)
+    base.update(kw)
+    return FitConfig(**base)
+
+
+def test_cli_keeps_the_ladder_pathfinder_defaults():
+    from ace_jax.cli import _fit_config, _parser
+    a = _parser().parse_args(["fit", "--model", "m.npz", "--train", "t.xyz", "--r0", "2.35", "--out", "o"])
+    cfg = _fit_config(a)
+    assert (cfg.pf_samples, cfg.pf_maxiter) == (16, 15)          # run_pathfinder's own defaults
+
+
+def test_cli_writes_ood_metrics(tmp_path):
+    import csv
+    from conftest import FIXTURE_DIR
+    from ase.io import read, write
+    from ace_jax.cli import main
+    cfgs = read(FIXTURE_DIR / "si_tiny_train.xyz", ":")
+    tr, te, od = tmp_path / "tr.xyz", tmp_path / "te.xyz", tmp_path / "od.xyz"
+    write(tr, cfgs[:12]); write(te, cfgs[12:16]); write(od, cfgs[20:24])
+    main(["fit", "--model", str(FIXTURE_DIR / "si_fitted.npz"), "--train", str(tr), "--test", str(te),
+          "--ood", str(od), "--energy-key", "dft_energy", "--force-key", "dft_force", "--virial-key",
+          "dft_virial", "--configs-per-batch", "4", "--m-per-species", "0", "--rungs", "map",
+          "--map-steps", "3", "--r0", "2.35", "--out", str(tmp_path / "out")])
+    rows = list(csv.DictReader(open(tmp_path / "out" / "metrics_ood.csv")))
+    assert {r["quantity"] for r in rows} == {"E", "F", "V"} and {r["rung"] for r in rows} == {"map"}
+
+
+def test_map_and_rung_outputs_survive_a_failure_in_prediction(tmp_path, monkeypatch):
+    from conftest import FIXTURE_DIR
+    import ace_jax.fit.pipeline.run as R
+    from ace_jax.fit.pipeline import load_fit_data
+    from ace_jax.fit.pipeline.outputs import checkpoint_writer
+    cfg = _fx_cfg()
+    def boom(*a, **k):
+        raise RuntimeError("OOM in prediction")
+    monkeypatch.setattr(R, "predict_splits", boom)
+    with pytest.raises(RuntimeError, match="OOM"):
+        R.fit(cfg, load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz")), log=lambda *a: None,
+              on_stage=checkpoint_writer(tmp_path))
+    for n in ("split_perm.npy", "theta_map.json", "map_restarts.json", "draws_map.npy"):
+        assert (tmp_path / n).exists(), n
+
+
+def test_pops_reuses_the_objectives_linear_statistics(monkeypatch):
+    from conftest import FIXTURE_DIR
+    import ace_jax.fit.pipeline.objective as O
+    import ace_jax.fit.stats as ST
+    from ace_jax.fit.pipeline import fit, load_fit_data
+    calls = []
+    real = ST.linear_statistics
+    def spy(*a, **k):
+        calls.append(1); return real(*a, **k)
+    monkeypatch.setattr(ST, "linear_statistics", spy)
+    monkeypatch.setattr(O, "linear_statistics", spy)
+    counts = {}
+    for uq in ("blr", "pops"):
+        calls.clear()
+        cfg = _fx_cfg(uq=uq, pops_ridge="blr", pops_env_nf=10)
+        fit(cfg, load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz")), log=lambda *a: None)
+        counts[uq] = len(calls)
+    assert counts["pops"] == counts["blr"]                        # no extra ACE pass before POPS
+
+
+def test_split_configs_rejects_a_file_too_small_for_the_split():
+    from ace_jax.fit.pipeline import split_configs
+    with pytest.raises(ValueError, match="ntrain"):
+        split_configs(list(range(10)), 800, 200)
+    with pytest.raises(ValueError, match="test"):
+        split_configs(list(range(10)), 8, 5)
+
+
+def test_map_restarts_needs_lbfgs():
+    from ace_jax.fit.pipeline import FitConfig
+    with pytest.raises(ValueError, match="map_restarts"):
+        FitConfig(model="m.npz", opt="adam", map_restarts=3).validate()
+    with pytest.raises(ValueError, match="map_restarts"):
+        FitConfig(model="m.npz", sigma_type=True, map_restarts=3).validate()

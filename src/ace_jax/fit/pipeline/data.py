@@ -25,8 +25,14 @@ def _zero_base(c):
 def split_configs(configs, ntrain, ntest, test_start=None, seed=0):
     """run.py's split: a seeded permutation; train = perm[:ntrain], test =
     perm[test_start : test_start + ntest] (test_start defaults to ntrain)."""
-    perm = np.random.default_rng(seed).permutation(len(configs))
+    n = len(configs)
     ts = ntrain if test_start is None else test_start
+    if ntrain > n:
+        raise ValueError(f"ntrain = {ntrain} but the data file has only {n} configs")
+    if ts + ntest > n:
+        raise ValueError(f"the test slice [{ts}, {ts + ntest}) runs past the {n} configs in the data file "
+                         f"(set ntest / test_start)")
+    perm = np.random.default_rng(seed).permutation(n)
     return [configs[i] for i in perm[:ntrain]], [configs[i] for i in perm[ts:ts + ntest]], perm
 
 

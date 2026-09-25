@@ -70,6 +70,9 @@ class FitConfig:
                 raise ValueError("lml='host-cache' is single-device: set devices=1")
         if self.map_restarts < 1:
             raise ValueError(f"map_restarts must be >= 1, got {self.map_restarts}")
+        if self.map_restarts > 1 and (self.opt != "lbfgs" or self.sigma_type):
+            raise ValueError("map_restarts > 1 is the L-BFGS multi-start: set opt lbfgs "
+                             "(and not sigma_type)")
         if self.predict_stats not in ("cached", "recompute"):
             raise ValueError(f"predict_stats must be 'cached' or 'recompute', got {self.predict_stats!r}")
         if self.fix_rho is not None and self.opt != "lbfgs":
