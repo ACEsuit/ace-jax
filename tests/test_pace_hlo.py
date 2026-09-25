@@ -14,13 +14,16 @@ from ace_jax.eval import load
 FIX = pathlib.Path(__file__).parent.parent / "fixtures" / "pace"
 
 
+@pytest.mark.parametrize("kind", ["gather", "matmul", "jvp"])
 @pytest.mark.parametrize("name", ["si_chebpow_fs", "sige_zbl", "gesi_sbessel"])
-def test_exports_without_custom_calls(name):
+def test_exports_without_custom_calls(name, kind):
     p = FIX / f"{name}.yace"
     pace_fixture(p)
-    model, _, _ = load(str(p))
+    model, _, _ = load(str(p), edge_a_kind=kind)
     n, E = 8, 40
-    f = jax.jit(lambda pos, z, s, r, m: jnp.sum(model.energy_from_positions(pos, z, s, r, m)))
+    # value and gradient: the force path is what the A-forms change
+    f = jax.jit(jax.value_and_grad(
+        lambda pos, z, s, r, m: jnp.sum(model.energy_from_positions(pos, z, s, r, m))))
     args = (jnp.zeros((n, 3)), jnp.zeros(n, jnp.int32), jnp.zeros(E, jnp.int32),
             jnp.zeros(E, jnp.int32), jnp.zeros(E, bool))
     text = jax.export.export(f)(*args).mlir_module()
