@@ -88,6 +88,10 @@ image = (
     .env({"PYTHONPATH": "/ace-jax/src:/ace-jax/bench",
           "LD_LIBRARY_PATH": "/usr/local/lib/python3.12/site-packages/nvidia/cu13/lib"
                              ":/usr/local/nvidia/lib:/usr/local/nvidia/lib64"})
+    # its own layer, after the LAMMPS builds, so adding it kept their cache:
+    # matscipy-neighbours with CUDA (sm_80) -- the calculator's dense graph on the GPU
+    .run_commands("pip install -C cmake.define.ENABLE_CUDA=ON -C cmake.define.CMAKE_CUDA_ARCHITECTURES=80"
+                  " 'matscipy-neighbours @ git+https://github.com/libAtoms/matscipy-neighbours@258d65cca766022c1c22e8725fcbe4cf08e84d48'")
     .add_local_dir(ROOT / "src", "/ace-jax/src")
     .add_local_dir(ROOT / "bench", "/ace-jax/bench",
                    ignore=["**/__pycache__", "pace_modal/*.json*", "scaling/results/*"])

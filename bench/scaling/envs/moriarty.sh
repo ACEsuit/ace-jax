@@ -13,7 +13,7 @@
 #               plugin needs Pair::eflag_only, newer than 10 Sep 2025, while
 #               Symmetrix does not compile against current develop)
 #
-# Steps: sources venv lammps lmp_python symmetrix_py lammps_dev plugin env_json
+# Steps: sources venv neighbours lammps lmp_python symmetrix_py lammps_dev plugin env_json
 set -euo pipefail
 ROOT=${BENCH_ROOT:-$HOME/bench-scaling}
 ACEJAX=${ACEJAX_SRC:-$ROOT/ace-jax}          # synced checkout of this branch
@@ -87,6 +87,14 @@ lammps_dev() {          # develop + ML-PACE + PLUGIN, host for the lammps-jax pl
   echo "$stamp" > "$BUILD_DEV/.cuda"
 }
 
+neighbours() {        # matscipy-neighbours with CUDA: the calculator's dense graph on the GPU (DLPack)
+  "$VENV/bin/python" -c "import matscipy_neighbours" 2>/dev/null && return 0
+  module swap CUDA/12.4.0 "$CUDA_DEV" 2>/dev/null || true
+  CC=gcc CXX=g++ uv pip install --python "$VENV/bin/python" \
+    -C cmake.define.ENABLE_CUDA=ON -C cmake.define.CMAKE_CUDA_ARCHITECTURES=86 \
+    "matscipy-neighbours @ git+https://github.com/libAtoms/matscipy-neighbours@258d65cca766022c1c22e8725fcbe4cf08e84d48"
+}
+
 symmetrix_py() {        # for symmetrix_extract_mace (model export only)
   # not `import symmetrix`: from $ROOT the source dir imports as a namespace package
   [ -x "$VENV/bin/symmetrix_extract_mace" ] || \
@@ -139,7 +147,7 @@ EOF
 }
 
 steps=("$@")
-[ ${#steps[@]} -eq 0 ] && steps=(sources venv lammps lmp_python symmetrix_py lammps_dev plugin env_json)
+[ ${#steps[@]} -eq 0 ] && steps=(sources venv neighbours lammps lmp_python symmetrix_py lammps_dev plugin env_json)
 for s in "${steps[@]}"; do
   echo "=== $s"
   "$s"
