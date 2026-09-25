@@ -3,7 +3,7 @@
 fixtures, so the pipeline refactor can be checked for exact equivalence.
     uv run --extra gp python tests/pipeline_golden/make_golden.py
 Re-run only if a behaviour change is intended (and say so in the commit)."""
-import os, pathlib, shutil, subprocess, sys
+import os, pathlib, platform, shutil, subprocess, sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 FIX = ROOT / "fixtures"
@@ -54,8 +54,16 @@ def cli_argv(out):
             "--map-steps", "150", "--r0", "2.35", "--out", str(out)]
 
 
+def platform_tag():
+    """Where goldens were recorded: bit-level parity only holds on the same
+    platform (BLAS/LAPACK round-off feeds the optimiser trajectories)."""
+    return f"{platform.system()}-{platform.machine()}"
+
+
 def main():
     env = dict(os.environ, JAX_ENABLE_X64="1", PYTHONPATH=str(ROOT))
+    OUT.mkdir(parents=True, exist_ok=True)
+    (OUT / "PLATFORM").write_text(platform_tag() + "\n")
     for name, (driver, argv) in SCENARIOS.items():
         out = OUT / name
         shutil.rmtree(out, ignore_errors=True); out.mkdir(parents=True)
