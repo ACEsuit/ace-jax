@@ -28,7 +28,7 @@ def prior_precision(theta, prob):
     M = prob.ind.XM.shape[0]
     sc2 = jnp.exp(2.0 * theta.log_sigma_c)
     lin = prob.gamma ** 2 / sc2
-    Kmm = K_MM(theta, prob.spec, prob.ind.XM, prob.ind.SM, prob.ind.ZM)
+    Kmm = K_MM(theta, prob.spec, prob.ind.XM, prob.ind.SM, prob.ind.ZM, prob.ind.embed)
     Lam = jnp.zeros((L + M, L + M)).at[jnp.arange(L), jnp.arange(L)].set(lin).at[L:, L:].set(Kmm)
     logdet = jnp.sum(jnp.log(lin)) + (2.0 * jnp.sum(jnp.log(jnp.diag(jnp.linalg.cholesky(Kmm))))
                                       if M > 0 else 0.0)

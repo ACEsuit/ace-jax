@@ -50,10 +50,10 @@ def _dtc_energy_residual(theta, prob, batch, X):
         return jnp.zeros(C)
     x, s, _ = residual_inputs(ind, prob.cfg, batch, X)
     z = batch.node_z
-    R = k_rows(theta, spec, x, s, z, x, s, z)                   # (Ncap, Ncap)
+    R = k_rows(theta, spec, x, s, z, x, s, z, ind.embed)                   # (Ncap, Ncap)
     if ind.XM.shape[0] > 0:                                     # static: no Cholesky of a (0, 0)
-        KxM = k_rows(theta, spec, x, s, z, ind.XM, ind.SM, ind.ZM)          # (Ncap, M)
-        L_MM = jnp.linalg.cholesky(K_MM(theta, spec, ind.XM, ind.SM, ind.ZM))
+        KxM = k_rows(theta, spec, x, s, z, ind.XM, ind.SM, ind.ZM, ind.embed)          # (Ncap, M)
+        L_MM = jnp.linalg.cholesky(K_MM(theta, spec, ind.XM, ind.SM, ind.ZM, ind.embed))
         A = solve_triangular(L_MM, KxM.T, lower=True)                       # (M, Ncap)
         R = R - A.T @ A
     m = batch.node_mask
@@ -89,10 +89,10 @@ def _dtc_D(theta, prob, batch, deL, deR):
 
     UL, sL = field(deL)
     UR, sR = field(deR)
-    Kfull = k_rows(theta, spec, UL, sL, z, UR, sR, z)                        # (Ncap, Ncap)
-    KLM = k_rows(theta, spec, UL, sL, z, ind.XM, ind.SM, ind.ZM)            # (Ncap, M)
-    KRM = k_rows(theta, spec, UR, sR, z, ind.XM, ind.SM, ind.ZM)
-    L_MM = jnp.linalg.cholesky(K_MM(theta, spec, ind.XM, ind.SM, ind.ZM))
+    Kfull = k_rows(theta, spec, UL, sL, z, UR, sR, z, ind.embed)                        # (Ncap, Ncap)
+    KLM = k_rows(theta, spec, UL, sL, z, ind.XM, ind.SM, ind.ZM, ind.embed)            # (Ncap, M)
+    KRM = k_rows(theta, spec, UR, sR, z, ind.XM, ind.SM, ind.ZM, ind.embed)
+    L_MM = jnp.linalg.cholesky(K_MM(theta, spec, ind.XM, ind.SM, ind.ZM, ind.embed))
     AL = solve_triangular(L_MM, KLM.T, lower=True)                           # (M, Ncap)
     AR = solve_triangular(L_MM, KRM.T, lower=True)
     R = Kfull - AL.T @ AR
@@ -161,7 +161,7 @@ def _dtc_deriv_residual(theta, prob, batch, X=None, J=None, res=None):
     # matched velocity v (in both the U and the summary s slots), via a double jvp.
     live = batch.node_mask[:, None] & batch.node_mask[None, :]
     def Ksum(Ux, sx, Uy, sy):
-        return jnp.sum(jnp.where(live, k_rows(theta, spec, Ux, sx, z, Uy, sy, z), 0.0))
+        return jnp.sum(jnp.where(live, k_rows(theta, spec, Ux, sx, z, Uy, sy, z, ind.embed), 0.0))
     def ffk(vU, vS):
         gy = lambda Uy, sy: jax.jvp(lambda Ux, sx: Ksum(Ux, sx, Uy, sy), (U, s), (vU, vS))[1]
         return jax.jvp(gy, (U, s), (vU, vS))[1]
@@ -169,7 +169,7 @@ def _dtc_deriv_residual(theta, prob, batch, X=None, J=None, res=None):
     VVk = jax.vmap(ffk)(bU, bS).reshape(C, 6)
 
     # Q-term K_oM K_MM^-1 K_Mo from the residual force/virial rows
-    L_MM = jnp.linalg.cholesky(K_MM(theta, spec, ind.XM, ind.SM, ind.ZM))
+    L_MM = jnp.linalg.cholesky(K_MM(theta, spec, ind.XM, ind.SM, ind.ZM, ind.embed))
     vF = solve_triangular(L_MM, res.F.reshape(Ncap * 3, M).T, lower=True)
     vV = solve_triangular(L_MM, res.V.reshape(C * 6, M).T, lower=True)
     Fv = jnp.where(batch.node_mask[:, None], jnp.maximum(FFk - jnp.sum(vF * vF, 0).reshape(Ncap, 3), 0.0), 0.0)
