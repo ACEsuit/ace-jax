@@ -49,6 +49,7 @@ image = (
     .env({"LD_LIBRARY_PATH": "/opt/lammps/build", "JAX_ENABLE_X64": "1"})
     .add_local_dir(ROOT / "src", "/ace-jax/src")
     .add_local_file(ROOT / "bench" / "pace_profile.py", "/ace-jax/bench/pace_profile.py")
+    .add_local_file(ROOT / "bench" / "pace_dense_proto.py", "/ace-jax/bench/pace_dense_proto.py")
     .add_local_dir(ROOT / "fixtures" / "pace", "/data/fixtures")
     .add_local_file(LAMMPS_EX / "PACKAGES/dispersion/potential_files/c_ace.yace", "/data/c_ace.yace")
     .add_local_file(LAMMPS_EX / "PACKAGES/apip/Cu-1.yace", "/data/Cu-1.yace")
@@ -236,15 +237,32 @@ def profile(reps: int = 10, n_rep: int = 8):
     return run_profile("/data/c_ace.yace", reps, n_rep)
 
 
+# ----------------------------------------------------------------- dense prototype
+@app.function(gpu="A100-80GB", timeout=3600)
+def dense_proto():
+    """bench/pace_dense_proto.py (check + all cases) on the given GPU; one JSON per line."""
+    import os, subprocess, sys
+    env = {**os.environ, "PYTHONPATH": "/ace-jax/src"}
+    out = []
+    for mode in ("check", "run"):
+        p = subprocess.run([sys.executable, "/ace-jax/bench/pace_dense_proto.py", mode,
+                            "/data/c_ace.yace"], capture_output=True, text=True, env=env)
+        out += [ln for ln in p.stdout.splitlines() if ln.startswith("{")] or [p.stderr[-500:]]
+    return {"gpu": os.environ.get("MODAL_GPU", ""), "lines": out}
+
+
 @app.local_entrypoint()
 def main(only: str = ""):
     out = ROOT / "bench" / "pace_modal" / "last_results.json"
     res = json.loads(out.read_text()) if out.exists() else {}   # --only reruns merge in
     stages = (("aa_counts", aa_counts), ("parity", parity), ("timings", timings),
-              ("profile", profile))
+              ("profile", profile), ("dense_A100", dense_proto),
+              ("dense_H100", dense_proto.with_options(gpu="H100")))
     for key, fn in stages:
-        # profile is opt-in (--only profile); the default run is the Task 9 set
-        if only != key.split("_")[0] and not (only == "" and key != "profile"):
+        # profile / dense_* are opt-in (--only profile | dense); the default run
+        # is the Task 9 set
+        opt_in = key == "profile" or key.startswith("dense")
+        if only != key.split("_")[0] and not (only == "" and not opt_in):
             continue
         try:
             res[key] = fn.remote()

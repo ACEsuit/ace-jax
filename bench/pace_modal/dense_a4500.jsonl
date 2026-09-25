@@ -1,0 +1,8 @@
+{"variant": "sparse", "dtype": "float32", "n_atoms": 4096, "n_edges": 499712, "K": 122, "energy_s": 0.013498807093128562, "energy_forces_s": 0.17347649589646608, "peak_gpu_bytes": 1200594944}
+{"variant": "dense", "dtype": "float32", "n_atoms": 4096, "n_edges": 499712, "K": 122, "energy_s": 0.004447531537152827, "energy_forces_s": 0.012859577545896173, "peak_gpu_bytes": 620984320}
+{"variant": "sparse", "dtype": "float64", "n_atoms": 4096, "n_edges": 499712, "K": 122, "energy_s": 0.04162934352643788, "energy_forces_s": 0.22870727442204952, "peak_gpu_bytes": 2587674112}
+{"variant": "dense", "dtype": "float64", "n_atoms": 4096, "n_edges": 499712, "K": 122, "energy_s": 0.03461789095308632, "energy_forces_s": 0.0820571124786511, "peak_gpu_bytes": 1197729024}
+{"variant": "sparse", "dtype": "float32", "n_atoms": 13824, "n_edges": 1686528, "K": 122, "energy_s": 0.044273261446505785, "energy_forces_s": 0.6557626960566267, "peak_gpu_bytes": 4118366208}
+{"variant": "dense", "dtype": "float32", "n_atoms": 13824, "n_edges": 1686528, "K": 122, "energy_s": 0.02755158196669072, "energy_forces_s": 0.1537920730188489, "peak_gpu_bytes": 1775209728}
+{"variant": "sparse", "dtype": "float64", "n_atoms": 13824, "n_edges": 1686528, "K": 122, "energy_s": 0.14622161851730198, "error": "JaxRuntimeError(\"RESOURCE_EXHAUSTED: Out of memory while trying to allocate 8.09GiB with allocator GPU_0_bfc on device 0. [executable_name='jit__lambda'] [tf-allocator-allocation-error='']\")", "peak_gpu_bytes": 5818458112}
+{"variant": "dense", "dtype": "float64", "n_atoms": 13824, "n_edges": 1686528, "K": 122, "energy_s": 0.12830661504995078, "energy_forces_s": 0.3905471439938992, "peak_gpu_bytes": 4139573504}
