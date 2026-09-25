@@ -53,6 +53,7 @@ gp = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "blackjax" },
     { name = "numpyro" },
     { name = "optax" },
     { name = "pytest" },
@@ -80,6 +81,7 @@ provides-extras = ["authoring", "gp", "cuda", "fast-neighbours"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "blackjax", specifier = ">=1.6" },
     { name = "numpyro", specifier = ">=0.16" },
     { name = "optax", specifier = ">=0.2" },
     { name = "pytest", specifier = ">=8" },

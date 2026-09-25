@@ -166,3 +166,38 @@ def test_select_inducing_accepts_lowrank_embed():
     E = jnp.asarray(rng.normal(size=(2, 3)))                 # NZ=2, de=3 low-rank
     ind = select_inducing(X, S, Z, mask, 3, descriptor_scale(X, mask), embed=E, de=3)
     assert np.asarray(ind.embed).shape == (2, 3)            # passed through unchanged
+
+
+# ---------------------------------------------------------------------------
+# s_floor: the learned amplitude delta(s) must not extrapolate to zero below the
+# training range of s (compressed environments), where the residual GP's prior
+# variance IS its out-of-distribution uncertainty.
+# ---------------------------------------------------------------------------
+def test_s_floor_evaluates_delta_at_the_floor_below_it():
+    spec = KernelSpec("cosine", True, D, s_floor=2.0)
+    X, S, Z = _data(6, 3)
+    embed = jnp.eye(2)
+    S_low = S.at[:3].set(jnp.asarray([1.2, 1.6, 1.95]))
+    got = k_rows(THETA, spec, X, S_low, Z, X, S, Z, embed)
+    ref = k_rows(THETA, KernelSpec("cosine", True, D), X, jnp.maximum(S_low, 2.0), Z, X,
+                 jnp.maximum(S, 2.0), Z, embed)
+    assert np.allclose(np.asarray(got), np.asarray(ref), rtol=1e-12)
+    assert np.all(np.diag(np.asarray(got))[:3] > 0.0)            # self-covariance: no collapse at s = 1.2
+
+
+def test_s_floor_leaves_the_training_range_unchanged():
+    X, S, Z = _data(8, 4)                                         # S in [1.8, 3.5]
+    embed = jnp.eye(2)
+    a = k_rows(THETA, KernelSpec("cosine", True, D, s_floor=1.5), X, S, Z, X, S, Z, embed)
+    b = k_rows(THETA, KernelSpec("cosine", True, D), X, S, Z, X, S, Z, embed)
+    assert np.allclose(np.asarray(a), np.asarray(b), rtol=1e-14)
+
+
+def test_s_floor_keeps_isolated_atoms_at_zero_and_gradients_finite():
+    spec = KernelSpec("cosine", True, D, s_floor=2.0)
+    x = jnp.ones(D); z = jnp.asarray(0, jnp.int32); embed = jnp.eye(2)
+    k = lambda s: kernel(THETA, spec, x, s, z, x, jnp.asarray(2.3), z, embed)
+    assert float(k(jnp.asarray(1e30))) == 0.0                      # a lower floor only
+    g = jax.grad(k)
+    assert float(g(jnp.asarray(1.5))) == 0.0                       # flat below the floor
+    assert np.isfinite(float(g(jnp.asarray(1e30))))

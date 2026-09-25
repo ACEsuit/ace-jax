@@ -342,6 +342,30 @@ class ACEModel(eqx.Module):
         X = jnp.concatenate([jax.vmap(node_B)(A), pool_dense(Rpair.reshape(n, K, -1), mask)], axis=1)
         return X, J
 
+    def pair_radial(self, rij, zi, zj):
+        """The pair radial alone, (E, n_pair): the second output of `radial`
+        without the many-body Rnl."""
+        r = jnp.linalg.norm(rij, axis=-1)
+        pe = self.pair_envelope[zi, zj]
+        envp = (env_ace1_poly1sr(r, pe) if self.pair_envelope_kind == "ace1_poly1sr"
+                else env_poly1sr(r, pe))
+        return self._radial_one(r, zi, zj, self.pair_radial_kind, self.pair_transform,
+                                self.pair_coefs, self.pair_grid, self.pair_Wnlq,
+                                (self.pair_polys_A, self.pair_polys_B, self.pair_polys_C),
+                                envp)
+
+    def pair_features_dense(self, rij, zi, zj, mask):
+        """The pair-density channels only: per-site Xpair (n, n_pair) and the
+        per-edge Jacobian (n*K, n_pair, 3), node-major -- exactly the pair slices
+        of `edge_jacobian_dense`'s X and J, with no many-body basis evaluated."""
+        n, K = mask.shape
+        flat = lambda a: a.reshape(n * K, *a.shape[2:])
+        f = lambda r1, z1, z2: self.pair_radial(r1[None, :], z1[None], z2[None])[0]
+        Rp = jax.vmap(f)(flat(rij), flat(zi), flat(zj))                     # (nK, n_pair)
+        dRp = jax.vmap(jax.jacfwd(f))(flat(rij), flat(zi), flat(zj))       # (nK, n_pair, 3)
+        dRp = jnp.where(flat(mask)[:, None, None], dRp, 0.0)
+        return pool_dense(Rp.reshape(n, K, -1), mask), dRp
+
     def _readout(self, B, Apair, node_z):
         e = jnp.einsum("ib,bi->i", B, self.WB[:, node_z])
         e = e + jnp.einsum("ip,pi->i", Apair, self.Wpair[:, node_z])

@@ -28,6 +28,7 @@ from ace_jax.fit.ladder import run_laplace_fd, run_map, run_nuts, run_pathfinder
 from ace_jax.fit.metrics import summarise
 from ace_jax.fit.objective import Problem, make_log_density
 from ace_jax.fit.predict import predict_mixture
+from ace_jax.fit.weights import ConfigType, PerConfig, Quantity, Structural
 
 VOIGT = [(0, 0), (1, 1), (2, 2), (1, 2), (0, 2), (0, 1)]   # Voigt 6-vector index pairs
 
@@ -39,11 +40,39 @@ p.add_argument("--test-start", type=int, default=None, help="absolute perm index
 p.add_argument("--seed", type=int, default=0); p.add_argument("--batch", type=int, default=4)
 p.add_argument("--m-per-species", type=int, default=100)
 p.add_argument("--kernel", default="cosine"); p.add_argument("--no-bump", action="store_true")
-p.add_argument("--density", choices=["none", "pair"], default="none",
-               help="residual feature map: none = isotropic B*scale (D dims); pair = the ACE pair-density channels (n_pair dims)")
+p.add_argument("--density", choices=["none", "pair", "pca"], default="none",
+               help="residual feature map: none = isotropic B*scale (D dims); pair = the ACE pair-density "
+                    "channels (n_pair dims); pca = the top --pca-d uncentred principal frame of the scaled "
+                    "full descriptor (many-body included), host-cacheable")
+p.add_argument("--pca-d", type=int, default=128, help="width of the --density pca feature map")
 p.add_argument("--warp", choices=["none", "sqrt"], default="none",
                help="feature warp: sqrt gives the Finnis-Sinclair sqrt-density embedding")
 p.add_argument("--no-deriv-dtc", action="store_true", help="force/virial variance SoR only (drop the derivative-DTC)")
+p.add_argument("--uq", choices=["blr", "pops"], default="blr", help="linear-arm predictive UQ: blr (posterior variance, today's default) or pops (weight-space misspecification). pops requires --arm linear.")
+p.add_argument("--pops-posterior", choices=["hypercube", "ensemble"], default="hypercube", help="POPS posterior form (uq=pops): hypercube (PCA/box misspecification covariance; DEFAULT, matches upstream popsregression) or ensemble (committee of weight samples; centred). ('samples' is reserved for a future draw-from-Sigma route.)")
+p.add_argument("--pops-leverage-pct", type=float, default=0.0, help="POPS leverage percentile (uq=pops); 0 keeps every training point")
+p.add_argument("--pops-ridge", default="auto",
+               help="uq=pops uncertainty ridge (the mean is always the BLR mean): 'auto' (DEFAULT: per "
+                    "quantity by validation CRPS), 'blr' (1/sigma_c^2), a relative ridge (lam / max eig of "
+                    "the loss Gram), or per quantity as 'E=1e-11,F=1e-7,V=1e-6' "
+                    "to pick it per quantity by CRPS on the last --pops-val-frac of train (one factorisation)")
+p.add_argument("--pops-ridge-grid", default="1e-2,1e-3,1e-4,1e-5,1e-6,1e-7,1e-8,1e-9,1e-10,1e-11,1e-12,1e-13,1e-14",
+               help="comma-separated relative ridges searched by --pops-ridge auto")
+p.add_argument("--pops-val-frac", type=float, default=0.2, help="held-out fraction of train for --pops-ridge auto")
+p.add_argument("--pops-env-nf", type=int, default=2000,
+               help="force components (random subsample of test) for the paper-mode envelope coverage")
+p.add_argument("--delta-s-floor-q", type=float, default=None,
+               help="floor the amplitude coordinate s at this quantile of the training sites' s: "
+                    "delta(max(s, s_q)) cannot extrapolate to zero in compressed environments")
+p.add_argument("--fix-rho", default=None,
+               help="pin the bump lengthscale rho (L-BFGS only): a number, or 'auto' = the median "
+                    "nearest-neighbour RMS distance within the inducing set; keeps the evidence from "
+                    "flattening the GP's novelty term")
+p.add_argument("--lml", choices=["device", "host-cache"], default="device",
+               help="joint-LML engine. host-cache (needs --arm gp --density pair, --rungs map, --opt lbfgs): "
+                    "cache the linear design rows in host RAM once and never re-evaluate the ACE basis "
+                    "per evaluation (ace_jax.fit.hostcache; ~rows x L x 8 B of host RAM)")
+p.add_argument("--lml-chunk", type=int, default=64, help="host-cache: batches per host->device transfer")
 p.add_argument("--no-predict-train", action="store_true", help="skip train-set UQ prediction (a diagnostic; ~46%% of runtime at Cantor scale)")
 p.add_argument("--rungs", default="map,laplace"); p.add_argument("--n-draws", type=int, default=64)
 p.add_argument("--map-steps", type=int, default=150); p.add_argument("--map-lr", type=float, default=0.02)
@@ -57,16 +86,66 @@ p.add_argument("--r0", type=float, default=2.5)
 p.add_argument("--init", default=None, help="theta_map.json to start from (e.g. the linear arm's)")
 p.add_argument("--energy-key", default="mace_energy"); p.add_argument("--force-key", default="mace_force")
 p.add_argument("--virial-key", default="mace_virial")
+p.add_argument("--weights", default=None,
+               help='JSON list of weight factors (ace_jax.fit.weights), composed in order and '
+                    'multiplied into w_E/w_F/w_V, e.g. \'[{"Structural":{}},'
+                    '{"ConfigType":{"table":{"defect":{"E":10,"F":10,"V":1}},"default":{"E":1,"F":1,"V":1}}},'
+                    '{"PerConfig":{"key":"w"}}]\'. Each entry is {"<FactorClass>": {<constructor kwargs>}}, '
+                    "kwargs matching the class's __init__ (table/key/default for ConfigType, key for "
+                    "PerConfig, w for Quantity, exp for Structural). Omitted = the classic default "
+                    "(structural 1/sqrt(n) on E,V, 1 on F; no per-config-type dict).")
 p.add_argument("--baseline", default=None, help="dimer_mean.npz: subtract the MH-1 pair mean mu_0 from labels, add back at prediction")
 p.add_argument("--base-npz", default=None, help="precomputed per-config (E,F,V) mu_0 offsets in data-file order (make_density_base.py); train+test only")
 p.add_argument("--ood", default=None, help="extra out-of-distribution test xyz (same keys); predicted from the fitted model")
 p.add_argument("--embedding", default=None, help="MACE element-embedding table (JSON); coregionalize the GP species factor. Absent = categorical block-diagonal.")
+p.add_argument("--sigma-type", action="store_true",
+               help="fit a per-config-type noise block (Task 6): assign each config a type from its "
+                    "config_type label, build a ParamSet carrying the sigma_type LML block and fit the "
+                    "inner MAP via run_map_ps so the block is optimised. The learned per-type log-ratios "
+                    "(rows=type, cols E,F,V) are DIAGNOSTIC ONLY (written to sigma_type_ratios.json); "
+                    "predictions/draws/Laplace still use the single theta_map noise -- per-type PREDICTIVE "
+                    "noise is not yet wired. Off (default) = the classic single-noise L-BFGS/run_map fit, "
+                    "numerically unchanged.")
+p.add_argument("--route", default=None,
+               help='per-block route override for the ParamSet fit, as a JSON object, e.g. '
+                    '\'{"sigma_type":"lml"}\'; each route is fixed or lml.')
 a = p.parse_args()
+if a.lml == "host-cache" and (a.arm != "gp" or a.density not in ("pair", "pca") or a.rungs != "map" or a.opt != "lbfgs"):
+    p.error("--lml host-cache needs --arm gp --density pair|pca --rungs map --opt lbfgs (the cached LML "
+            "exposes value_and_grad for L-BFGS; a narrow feature map is what makes caching pay)")
+if a.uq == "pops" and a.arm != "linear":
+    p.error("--uq pops is the linear-arm misspecification predictive; pass --arm linear (or --uq blr).")
+# --route: parse+validate once (fails loudly on a bad route)
+from ace_jax.fit.paramset import parse_route
+route = parse_route(a.route)
 out = pathlib.Path(a.out); out.mkdir(parents=True, exist_ok=True)
 T0 = time.time(); timings = {}
 
 model, meta, z = load(a.model)
 keys = dict(energy_key=a.energy_key, force_key=a.force_key, virial_key=a.virial_key)
+# --weights: JSON list of {"<FactorClass>": {kwargs}} -> ace_jax.fit.weights instances,
+# composed in order by load_configs (see --weights help). None = classic default weighting.
+_FACTOR_CLASSES = {"Structural": Structural, "Quantity": Quantity,
+                   "ConfigType": ConfigType, "PerConfig": PerConfig}
+if a.weights:
+    spec = json.loads(a.weights)
+    factors = [_FACTOR_CLASSES[name](**kwargs) for entry in spec for name, kwargs in entry.items()]
+    keys["factors"] = factors
+    print("weight factors:", [type(f).__name__ for f in factors], flush=True)
+if a.sigma_type:
+    # Per-config-type noise needs each config's type_idx set.  Scan the data for the
+    # distinct config_type labels and pass a WEIGHT-NEUTRAL named-weights dict (every
+    # type weight 1.0 -> ConfigType is identity), which drives load_configs' type_idx
+    # (Task 6) without touching w_E/w_F/w_V.  Weighting stays classic/--weights-driven.
+    from ase.io import read as _aseread
+    _cts = []
+    for _at in _aseread(a.data, index=":"):
+        _ct = str(_at.info.get("config_type", ""))
+        if _ct and _ct not in _cts:
+            _cts.append(_ct)
+    keys["weights"] = {"default": {"E": 1.0, "F": 1.0, "V": 1.0},
+                       **{ct: {"E": 1.0, "F": 1.0, "V": 1.0} for ct in _cts}}
+    print(f"sigma-type: {len(_cts)} named config-type(s): {_cts}", flush=True)
 configs = load_configs(a.data, **keys)
 rng = np.random.default_rng(a.seed); perm = rng.permutation(len(configs))
 ts = a.ntrain if a.test_start is None else a.test_start
@@ -78,8 +157,7 @@ np.save(out / "split_perm.npy", perm)
 # mu_0: subtract the MH-1 pair mean from the labels (fit the many-body residual),
 # add it back at prediction.  base_* are the per-config (E, F, V) of mu_0.
 if a.baseline:
-    import sys; sys.path.insert(0, str(pathlib.Path(__file__).parent))
-    from baseline import load_mean, subtract_baseline
+    from ace_jax.fit.baseline import load_mean, subtract_baseline
     mean = load_mean(a.baseline)
     train, base_train = subtract_baseline(train_o, mean)
     test, base_test = subtract_baseline(test_o, mean)
@@ -127,7 +205,8 @@ with highest_precision():
     scale = descriptor_scale(X, ds_train.node_mask)
     m = a.m_per_species if a.arm == "gp" else 0
     from ace_jax.fit.inducing import build_pmap
-    Pmap = build_pmap(cfg, scale, density=None if a.density == "none" else a.density)
+    Pmap = build_pmap(cfg, scale, density=None if a.density == "none" else a.density,
+                      d=a.pca_d, X=np.asarray(X), mask=np.asarray(ds_train.node_mask))
     from ace_jax.fit.embedding import load_mace_embedding
     raw = None if a.embedding is None else np.asarray(load_mace_embedding(a.embedding, els))
     embed = None if raw is None else jnp.asarray(raw)                     # frozen coregionalization
@@ -137,20 +216,38 @@ with highest_precision():
     print(f"feature map: density={a.density} warp={a.warp} -> d={ind.XM.shape[1] if ind.XM.shape[0] else cfg.D}", flush=True)
     timings["inducing"] = time.time() - t
     print(f"M = {ind.XM.shape[0]}  len_basis = {cfg.len_basis}", flush=True)
-    prob = Problem(KernelSpec(a.kernel, not a.no_bump, cfg.D), model, ind, cfg,
+    s_floor = None
+    if a.delta_s_floor_q is not None:
+        s_live = np.asarray(S)[np.asarray(ds_train.node_mask)]
+        s_floor = float(np.quantile(s_live, a.delta_s_floor_q))
+        print(f"delta s-floor: s_q({a.delta_s_floor_q}) = {s_floor:.4f} (training s in "
+              f"[{s_live.min():.3f}, {s_live.max():.3f}])", flush=True)
+    prob = Problem(KernelSpec(a.kernel, not a.no_bump, cfg.D, s_floor=s_floor), model, ind, cfg,
                    jnp.asarray(prior_diagonal(z, meta, a.model)), default_prior(a.r0))
     # theta-split cached likelihood: the theta-independent linear Gram G_BB is
     # streamed once; only the M residual columns move per evaluation (both arms).
     from ace_jax.fit.objective import make_lml
     from ace_jax.fit.stats import assemble_statistics, linear_statistics, residual_statistics
-    t = time.time(); lik = make_lml(prob, ds_train, cache_linear=True)
-    jax.block_until_ready(lik(to_array(prob.prior.mu))); timings["stats_once"] = time.time() - t
-    # cache the theta-independent linear stats for PREDICTION too (predict_fixed
-    # always conditions on ds_train), so each draw recomputes only the M columns
     import ace_jax.fit.predict as _P
-    _lin = jax.jit(lambda: linear_statistics(prob.model, prob.cfg, ds_train))()
-    _P.sufficient_statistics = (lambda th, spec, model, ind, cfg, ds:
-        assemble_statistics(_lin, residual_statistics(th, spec, model, ind, cfg, ds)))
+    t = time.time()
+    if a.lml == "host-cache":
+        # one ACE pass: linear stats on device + weighted linear rows in host RAM;
+        # prediction (always conditioned on ds_train) reuses both
+        from ace_jax.fit.hostcache import HostCachedLML
+        lik = HostCachedLML(prob, ds_train, chunk=a.lml_chunk)
+        timings["stats_once"] = time.time() - t
+        print(f"host-cache: {sum(r.nbytes for r in lik.rows) / 1e9:.1f} GB of linear rows in host RAM",
+              flush=True)
+        _P.sufficient_statistics = (lambda th, spec, model, ind, cfg, ds:
+            assemble_statistics(lik.lin, lik._residual_stats(to_array(th))))
+    else:
+        lik = make_lml(prob, ds_train, cache_linear=True)
+        jax.block_until_ready(lik(to_array(prob.prior.mu))); timings["stats_once"] = time.time() - t
+        # cache the theta-independent linear stats for PREDICTION too (predict_fixed
+        # always conditions on ds_train), so each draw recomputes only the M columns
+        _lin = jax.jit(lambda: linear_statistics(prob.model, prob.cfg, ds_train))()
+        _P.sufficient_statistics = (lambda th, spec, model, ind, cfg, ds:
+            assemble_statistics(_lin, residual_statistics(th, spec, model, ind, cfg, ds)))
 
     init = None
     if a.init:
@@ -161,13 +258,45 @@ with highest_precision():
 
     rungs = [r.strip() for r in a.rungs.split(",")]
     t = time.time()
-    if a.opt == "lbfgs":
+    if a.sigma_type:
+        # Per-config-type noise fit: build a ParamSet carrying the sigma_type LML
+        # block (Task 6) and let run_map_ps optimise [hypers | free log-ratios]
+        # jointly (inner MAP).  --route overrides block routes.  The embedding is
+        # already baked into prob.ind, so no embed block here.  Downstream draws
+        # /prediction still use the 10-hyper theta_map (the learned per-type ratios
+        # are written out as a diagnostic; feeding them into predict is deferred).
+        from ace_jax.fit.ladder import run_map_ps
+        from ace_jax.fit.paramset import build_fit_paramset
+        from ace_jax.fit.hypers import from_array
+        n_types = int(np.asarray(ds_train.cfg_type).max()) + 1
+        ps0 = build_fit_paramset(init or prob.prior.mu, prob.prior,
+                                 n_types=n_types, sigma_type=True, route=route)
+        ps = run_map_ps(ps0, prob, ds_train, steps=a.map_steps, lr=a.map_lr, seed=a.seed)
+        theta_map = from_array(ps.block("hypers").value)
+        ratios = ps.sigma_type_ratios()
+        if ratios is None:
+            print(f"sigma-type: only {n_types} config-type -> no ratios (reduced to run_map)", flush=True)
+        else:
+            json.dump(np.asarray(ratios).tolist(), open(out / "sigma_type_ratios.json", "w"), indent=1)
+            print("sigma-type log-ratios (rows=type, cols E,F,V):",
+                  np.round(np.asarray(ratios), 4).tolist(), flush=True)
+            print("[sigma-type] per-type ratios are diagnostic only; predictions still use "
+                  "single-noise theta_map.", flush=True)
+    elif a.opt == "lbfgs" or a.fix_rho is not None:
+        if a.opt != "lbfgs":
+            raise SystemExit("--fix-rho is implemented for --opt lbfgs only")
         # 10-d smooth objective with an exact gradient: L-BFGS converges in a
         # few tens of evaluations where Adam needs hundreds of (expensive) steps
         from scipy.optimize import minimize
         from ace_jax.fit.hypers import from_array, log_prior
-        logpost = jax.jit(lambda arr: lik(arr) + log_prior(from_array(arr), prob.prior))
-        vg = jax.jit(jax.value_and_grad(logpost))
+        if a.lml == "host-cache":           # streamed: value_and_grad cannot sit inside a jit
+            prior_vg = jax.jit(jax.value_and_grad(lambda arr: log_prior(from_array(arr), prob.prior)))
+            def vg(x):
+                v, g = lik.value_and_grad(x); pv, pg = prior_vg(x)
+                return v + pv, g + pg
+        else:
+            logpost = jax.jit(lambda arr: lik(arr) + log_prior(from_array(arr), prob.prior))
+            vg = jax.jit(jax.value_and_grad(logpost))
         hist = []
         def fg(x):
             t1 = time.time(); v, g = vg(jnp.asarray(x)); g.block_until_ready(); v = float(v); hist.append(v)
@@ -180,7 +309,19 @@ with highest_precision():
         x0 = np.asarray(to_array(init or prob.prior.mu), float)
         # log-space boxes: generous, but keep the Cholesky away from sigma -> 0
         lo = np.log([0.05, 1e-3, 0.1, 1.5, 1e-3, 0.1, 1e-2, 1e-4, 1e-4, 1e-4])
-        hi = np.log([50.0, 10.0, 50.0, 4.0, 50.0, 100.0, 1e4, 10.0, 10.0, 10.0])
+        # A up to 1e3: the full/PCA-descriptor GP pinned A at the old bound of 10 (Cantor-1k ablation)
+        hi = np.log([50.0, 1e3, 50.0, 4.0, 50.0, 100.0, 1e4, 10.0, 10.0, 10.0])
+        if a.fix_rho is not None:
+            if a.fix_rho == "auto":
+                XM = np.asarray(prob.ind.XM)
+                d2 = ((XM[:, None, :] - XM[None, :, :]) ** 2).mean(-1)
+                np.fill_diagonal(d2, np.inf)
+                rho_fix = float(np.median(np.sqrt(d2.min(1))))
+            else:
+                rho_fix = float(a.fix_rho)
+            lo, hi, x0 = lo.copy(), hi.copy(), x0.copy()
+            lo[5] = hi[5] = x0[5] = np.log(rho_fix)
+            print(f"fix-rho: rho pinned at {rho_fix:.4f}", flush=True)
         x0 = np.clip(x0, lo, hi)
         res = minimize(fg, x0, jac=True, method="L-BFGS-B", bounds=list(zip(lo, hi)),
                        options={"maxiter": a.map_steps, "maxfun": 4 * a.map_steps})
@@ -217,6 +358,76 @@ with highest_precision():
         timings["nuts"] = time.time() - t
         json.dump(summ, open(out / "nuts_summary.json", "w"), indent=1)
 
+    if a.uq == "pops":
+        # POPS needs only the linear statistics from here on.  The likelihood and the
+        # jitted MAP objective hold ~25 Gram-sized buffers (captured constants included)
+        # -- ~150 GB on the lossless Cantor base -- which starved POPS's kernels (CUBIN
+        # OOM at 181 GB).  Drop them and the compile caches before POPS.
+        import gc
+        for _n in ("lik", "vg", "logpost", "prior_vg", "fg"):
+            globals().pop(_n, None)
+        jax.clear_caches(); gc.collect()
+
+    # --- paper-faithful POPS: ridge (selected once on a train holdout) + test envelope ---
+    pops_ridge, pops_env, path = 1e-3, {}, None
+    if a.uq == "pops":
+        from ace_jax.fit.predict import PopsRidgePath, select_pops_ridge
+        from ace_jax.fit.rows import linear_rows
+        t = time.time()
+        if a.pops_ridge == "auto":
+            grid = [float(x) for x in a.pops_ridge_grid.split(",")]
+            nval = max(1, int(a.pops_val_frac * len(train)))
+            ds_pfit = build_dataset(train[:-nval], meta, E0, a.batch)
+            ds_pval = build_dataset(train[-nval:], meta, E0, a.batch)
+            pops_ridge, scores = select_pops_ridge(theta_map, prob, ds_pfit, ds_pval, grid,
+                                                   form=a.pops_posterior, leverage_pct=a.pops_leverage_pct)
+            json.dump({"grid": grid, "ridge": pops_ridge, "n_val": nval,
+                       "scores_crps": {q: [float(x) for x in v] for q, v in scores.items()}},
+                      open(out / "pops_ridge.json", "w"), indent=1)
+        elif "=" in a.pops_ridge:                      # per quantity, e.g. E=1e-7,F=1e-5,V=1e-5
+            pops_ridge = {k.strip(): (v.strip() if v.strip() == "blr" else float(v))
+                          for k, v in (kv.split("=") for kv in a.pops_ridge.split(","))}
+            assert set(pops_ridge) == set("EFV"), "--pops-ridge per-quantity form needs E=,F=,V="
+        else:
+            pops_ridge = a.pops_ridge if a.pops_ridge == "blr" else float(a.pops_ridge)
+        print("POPS (paper) ridge:", pops_ridge, flush=True)
+        rd = pops_ridge if isinstance(pops_ridge, dict) else {q: pops_ridge for q in "EFV"}
+        from ace_jax.fit.predict import POPS_MEAN
+        path = PopsRidgePath(theta_map, prob, ds_train)
+        path.use_mean(POPS_MEAN)                        # the BLR mean
+        cst = np.asarray(path.c_star)
+        rowsE, rowsF = ([], [], []), ([], [])
+        for i in range(ds_test.n_batches):
+            b = jax.tree.map(lambda x_: x_[i], ds_test)
+            lin, _, _ = linear_rows(prob.model, prob.cfg, b)
+            Lb = lin.E.shape[-1]
+            C = b.y_E.shape[0]
+            nat_b = np.zeros(C + 1); np.add.at(nat_b, np.asarray(b.node_cfg), np.asarray(b.node_mask, float))
+            kE = np.asarray(b.w_E) > 0
+            phE = np.asarray(lin.E)[kE]
+            rowsE[0].append(phE); rowsE[1].append(np.asarray(b.y_E)[kE] - phE @ cst); rowsE[2].append(nat_b[:C][kE])
+            kF = np.repeat(np.asarray(b.w_F) > 0, 3)
+            phF = np.asarray(lin.F).reshape(-1, Lb)[kF]
+            rowsF[0].append(phF); rowsF[1].append(np.asarray(b.y_F).reshape(-1)[kF] - phF @ cst)
+        phE, rE, natE = (np.concatenate(x_) for x_ in rowsE)
+        phF, rF = (np.concatenate(x_) for x_ in rowsF)
+        sel = np.random.default_rng(a.seed).choice(len(rF), size=min(a.pops_env_nf, len(rF)), replace=False)
+        phF, rF = phF[np.sort(sel)], rF[np.sort(sel)]
+        env_arrays = {}
+        for q, ph, r, sc in (("E", phE, rE, natE), ("F", phF, rF, np.ones(len(rF)))):
+            lo, hi = path.envelope(jnp.asarray(ph), rd[q], a.pops_leverage_pct)   # streamed
+            lo, hi = np.asarray(lo), np.asarray(hi)
+            unit = 1e3 if q == "E" else 1.0                          # E per atom in meV
+            pops_env[q] = {"env_cover": float(np.mean((lo <= r) & (r <= hi))),
+                           "env_width_median": float(np.median(unit * (hi - lo) / sc)),
+                           "env_n": int(len(r))}
+            env_arrays.update({f"{q}_lo": lo / sc * unit, f"{q}_hi": hi / sc * unit, f"{q}_resid": r / sc * unit})
+        env_arrays["F_index"] = np.sort(sel)
+        np.savez(out / "pops_envelope_test.npz", **env_arrays)
+        timings["pops_paper_setup"] = time.time() - t
+        print("POPS (paper) envelope:", {q: {k: round(v, 4) for k, v in d_.items()} for q, d_ in pops_env.items()},
+              flush=True)
+
     metrics = {}
     for rung, d in draws.items():
         np.save(out / f"draws_{rung}.npy", d)
@@ -228,7 +439,19 @@ with highest_precision():
             splits.append(("ood", ood_o, ds_ood, base_ood))
         for split, cfgs, ds, base in splits:
             t = time.time()
-            pred = predict_mixture(sub, prob, ds_train, ds, deriv_dtc=not a.no_deriv_dtc)
+            if a.uq == "pops":
+                from ace_jax.fit.predict import predict_fixed
+                # POPS is a fixed-theta (MAP) misspecification predictive, not a
+                # hyperposterior mixture: the mean is the BLR mean, the variance is
+                # the Swinburne-Perez pointwise-optimal misspecification posterior
+                # (structural weights, ridge*Gamma^2; no noise term).  Same for every
+                # rung (theta_map only).
+                pred = predict_fixed(theta_map, prob, ds_train, ds, deriv_dtc=not a.no_deriv_dtc,
+                                     uq="pops", pops_form=a.pops_posterior,
+                                     leverage_pct=a.pops_leverage_pct, pops_ridge=pops_ridge,
+                                     pops_path=path)   # one factorisation + posteriors for every split
+            else:
+                pred = predict_mixture(sub, prob, ds_train, ds, deriv_dtc=not a.no_deriv_dtc)
             timings[f"predict_{split}_{rung}"] = time.time() - t
             nat = np.array([len(c.numbers) for c in cfgs])
             # references are the ORIGINAL labels; add mu_0 back to the predictions
@@ -250,6 +473,9 @@ with highest_precision():
                 "E": summarise(1e3 * E / nat, 1e3 * pred.E_mean / nat, 1e3 * np.sqrt(pred.E_var) / nat),
                 "F": summarise(F.reshape(-1), pred.F_mean.reshape(-1), np.sqrt(pred.F_var).reshape(-1)),
                 "V": summarise(V.reshape(-1), pred.V_mean.reshape(-1), np.sqrt(pred.V_var).reshape(-1))}
+            if split == "test":
+                for q_, d_ in pops_env.items():
+                    metrics[f"{split}/{rung}"][q_].update(d_)
             print(split, rung, {q: {k: round(v, 4) for k, v in m_.items() if k in ("rmse", "crps", "coverage", "rho", "rms_z")}
                                 for q, m_ in metrics[f"{split}/{rung}"].items()}, flush=True)
 

@@ -25,7 +25,11 @@ EPS = 1e-6
 
 def apply(X, Pmap, warp):
     """B-compact descriptors X (..., D) -> kernel coordinates U (..., d)."""
-    U0 = X @ Pmap
+    return warp_u(X @ Pmap, warp)
+
+
+def warp_u(U0, warp):
+    """Projected coordinates U0 = X @ Pmap -> kernel coordinates U (the warp)."""
     return U0 * (U0 * U0 + EPS) ** -0.25 if warp == "sqrt" else U0
 
 

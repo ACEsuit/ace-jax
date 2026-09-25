@@ -26,3 +26,11 @@ def test_log_prior_is_sum_of_normals():
 def test_default_prior_centres_r0():
     prior = default_prior(r0=2.35)
     assert abs(float(jnp.exp(prior.mu.log_r0)) - 2.35) < 1e-12
+
+
+def test_sigma_type_recovers_injected_ratio(two_type_synthetic):
+    # fixture: 2 config-types, type-1 energies noisier by 3x (built in conftest).
+    from ace_jax.fit.fit_api import fit_linear_with_sigma_type
+    ratios = fit_linear_with_sigma_type(two_type_synthetic)   # exp(log_ratios)[:, 0]
+    assert 2.0 < float(ratios[1] / ratios[0]) < 4.5           # ~3x recovered by evidence
+
