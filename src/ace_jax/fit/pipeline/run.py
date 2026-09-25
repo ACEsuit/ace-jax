@@ -22,7 +22,9 @@ def fit(cfg, data, log=print):
         obj = make_objective(cfg, data, b)
         mf = fit_map(cfg, data, b, obj, log=log)
         rg = run_rungs(cfg, b, obj, mf.theta, log=log)
-        stats = obj.stats
+        # cached linear statistics (run.py) or a full recompute per draw (the CLI's
+        # historical path): equal in exact arithmetic, not in summation order
+        stats = obj.stats if cfg.predict_stats == "cached" else None
         if cfg.uq == "pops":
             # POPS needs only the linear statistics: free the LML's Gram-sized buffers first
             from ..stats import assemble_statistics, linear_statistics, residual_statistics

@@ -48,6 +48,7 @@ class FitConfig:
     # prediction / UQ
     uq: str = "blr"                      # "blr" | "pops"
     deriv_dtc: bool = True
+    predict_stats: str = "cached"        # "cached" (linear stats once; run.py) | "recompute" (per draw; CLI)
     predict_train: bool = True
     pops_posterior: str = "hypercube"; pops_leverage_pct: float = 0.0
     pops_ridge: object = "auto"          # "auto" | "blr" | float | {"E":..,"F":..,"V":..}
@@ -69,6 +70,8 @@ class FitConfig:
                 raise ValueError("lml='host-cache' is single-device: set devices=1")
         if self.map_restarts < 1:
             raise ValueError(f"map_restarts must be >= 1, got {self.map_restarts}")
+        if self.predict_stats not in ("cached", "recompute"):
+            raise ValueError(f"predict_stats must be 'cached' or 'recompute', got {self.predict_stats!r}")
         if self.fix_rho is not None and self.opt != "lbfgs":
             raise ValueError("fix_rho is implemented for opt lbfgs only")
         return self

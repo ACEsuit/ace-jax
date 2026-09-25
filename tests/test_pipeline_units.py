@@ -166,3 +166,20 @@ def test_fit_end_to_end_writes_run_layout(tmp_path):
     for n in ("theta_map.json", "metrics.json", "metrics.csv", "pred_test_map.npz", "draws_map.npy",
               "map_restarts.json", "timings.json", "config.json", "split_perm.npy"):
         assert (tmp_path / n).exists(), n
+
+
+def test_cli_weights_accepts_dict_or_factor_list():
+    from ace_jax.cli import _parse_weights
+    w, f = _parse_weights('{"default": {"E": 30, "F": 1, "V": 1}}')
+    assert w == {"default": {"E": 30, "F": 1, "V": 1}} and f is None
+    w, f = _parse_weights('[{"Structural": {}}]')
+    assert w is None and [type(x).__name__ for x in f] == ["Structural"]
+    with pytest.raises(ValueError, match="weights"):
+        _parse_weights('"nonsense"')
+
+
+def test_cli_rejects_train_and_data_together(tmp_path):
+    from ace_jax.cli import main
+    with pytest.raises(SystemExit):
+        main(["fit", "--model", "m.npz", "--train", "a.xyz", "--data", "b.xyz", "--r0", "2.35",
+              "--out", str(tmp_path)])
