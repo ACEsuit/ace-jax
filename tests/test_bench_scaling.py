@@ -48,3 +48,35 @@ def test_standalone_row_for_acejax(tmp_path):
     assert out["status"] == "ok" and out["n_atoms"] == 256 and out["layout"] in ("dense", "sparse")
     for k in ("call_s", "force_s", "nlist_s", "compile_s"):
         assert out[k] > 0
+
+
+from scaling.run_lammps import lammps_input, parse_log
+
+LOG = """Step PotEng
+       0   -100.0
+Loop time of 1.5 on 4 procs for 50 steps with 512 atoms
+Step PotEng
+      50   -99.9
+Loop time of 6.0 on 4 procs for 200 steps with 512 atoms
+"""
+
+
+def test_parse_log_uses_the_timed_segment():
+    p = parse_log(LOG)
+    assert p["step_s"] == pytest.approx(0.03) and p["n_atoms_end"] == 512 and p["procs"] == 4
+    assert p["nan"] is False
+
+
+def test_parse_log_flags_nan():
+    assert parse_log(LOG.replace("-99.9", "nan"))["nan"] is True
+
+
+@pytest.mark.parametrize("style,device,expect", [
+    ("mlpace", "cpu", "pair_style pace\n"), ("mlpace", "gpu", "pair_style pace product"),
+    ("acejax", "gpu", "pair_style jax/kk ${pjrt}"), ("mace", "gpu", "pair_style symmetrix/mace")])
+def test_lammps_input_pair_lines(style, device, expect):
+    txt = lammps_input(style, "/m/model.yace", ["Ge", "Si"], "/d/x.data", device, 200)
+    assert expect in txt
+    if style in ("mlpace", "mace"):
+        assert "pair_coeff * * " in txt and txt.strip().split("pair_coeff * * ")[1].split("\n")[0].endswith("Ge Si")
+    assert "run 50" in txt and "run 200" in txt
