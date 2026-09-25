@@ -23,6 +23,9 @@ import sys
 import time
 
 CASES = [(v, dt, n) for n in (8, 12) for dt in ("float32", "float64") for v in ("sparse", "dense")]
+# integrated: the real model methods (sparse in both A-forms, and dense)
+MODEL_CASES = [(v, dt, n) for n in (8, 12) for dt in ("float32", "float64")
+               for v in ("sparse-gather", "sparse-matmul", "dense")]
 
 
 def setup(yace, n_rep, dtype):
@@ -159,15 +162,59 @@ def one(yace, variant, dtype, n_rep, reps=10):
     print(json.dumps(res))
 
 
+def one_model(yace, variant, dtype, n_rep, reps=10):
+    """energy_forces_virial[_dense] of the model itself, with the layout's
+    estimate_a_bytes next to the measured peak."""
+    import jax
+    jax.config.update("jax_enable_x64", True)
+    import jax.numpy as jnp
+    import numpy as np
+    from ace_jax.eval import with_edge_a_kind
+    from ace_jax.eval.edge_model import estimate_a_bytes
+    from ace_jax.eval.nlist import dense_from_sparse
+    m, at, g, _, dt = setup(yace, n_rep, dtype)
+    n = len(at)
+    nz = jnp.zeros(n, jnp.int32)
+    s, r = jnp.asarray(g.senders), jnp.asarray(g.receivers)
+    K = int(np.bincount(g.senders, minlength=n).max())
+    if variant == "dense":
+        d = dense_from_sparse(g, float(np.max(np.asarray(m.radparams[..., 1]))))
+        idx, mask = jnp.asarray(d.idx), jnp.asarray(d.mask)
+        x = jnp.asarray(d.rij, dt)
+        f = jax.jit(lambda x: m.energy_forces_virial_dense(x, jnp.broadcast_to(nz[:, None], idx.shape),
+                                                           nz[idx], idx, mask, nz))
+        est = estimate_a_bytes(m, "dense", n, len(g.senders), K, np.dtype(dtype).itemsize)
+    else:
+        mk = with_edge_a_kind(m, variant.split("-")[1])
+        x = jnp.asarray(g.rij, dt)
+        f = jax.jit(lambda x: mk.energy_forces_virial(x, nz[s], nz[r], s, r, n, nz))
+        est = estimate_a_bytes(m, "sparse", n, len(g.senders), K, np.dtype(dtype).itemsize)
+    res = {"variant": variant, "dtype": dtype, "n_atoms": n, "n_edges": int(len(g.senders)),
+           "estimate_bytes": est}
+    try:
+        jax.block_until_ready(f(x))
+        ts = []
+        for _ in range(reps):
+            t0 = time.perf_counter(); jax.block_until_ready(f(x)); ts.append(time.perf_counter() - t0)
+        res["efv_s"] = float(np.median(ts))
+    except Exception as ex:
+        res["error"] = repr(ex)[:200]
+    res["peak_gpu_bytes"] = jax.devices()[0].memory_stats().get("peak_bytes_in_use")
+    print(json.dumps(res))
+
+
 if __name__ == "__main__":
     mode, yace = sys.argv[1], sys.argv[2]
     if mode == "check":
         check(yace)
     elif mode == "one":
         one(yace, sys.argv[3], sys.argv[4], int(sys.argv[5]))
+    elif mode == "one_model":
+        one_model(yace, sys.argv[3], sys.argv[4], int(sys.argv[5]))
     else:
-        for v, dt, nr in CASES:
-            p = subprocess.run([sys.executable, __file__, "one", yace, v, dt, str(nr)],
+        cases, sub = (MODEL_CASES, "one_model") if mode == "model" else (CASES, "one")
+        for v, dt, nr in cases:
+            p = subprocess.run([sys.executable, __file__, sub, yace, v, dt, str(nr)],
                                capture_output=True, text=True,
                                env={**__import__("os").environ, "XLA_PYTHON_CLIENT_PREALLOCATE": "false"})
             line = [ln for ln in p.stdout.splitlines() if ln.startswith("{")]

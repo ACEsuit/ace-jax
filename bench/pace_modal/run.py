@@ -239,12 +239,14 @@ def profile(reps: int = 10, n_rep: int = 8):
 
 # ----------------------------------------------------------------- dense prototype
 @app.function(gpu="A100-80GB", timeout=3600)
-def dense_proto():
-    """bench/pace_dense_proto.py (check + all cases) on the given GPU; one JSON per line."""
+def dense_proto(modes: str = "check,model"):
+    """bench/pace_dense_proto.py on the given GPU; one JSON per line.  Modes:
+    check (dense == sparse), run (prototype A construction), model (the real
+    energy_forces_virial[_dense] with estimate_a_bytes vs measured peak)."""
     import os, subprocess, sys
     env = {**os.environ, "PYTHONPATH": "/ace-jax/src"}
     out = []
-    for mode in ("check", "run"):
+    for mode in modes.split(","):
         p = subprocess.run([sys.executable, "/ace-jax/bench/pace_dense_proto.py", mode,
                             "/data/c_ace.yace"], capture_output=True, text=True, env=env)
         out += [ln for ln in p.stdout.splitlines() if ln.startswith("{")] or [p.stderr[-500:]]
