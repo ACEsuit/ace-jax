@@ -192,6 +192,19 @@ def dense_graph(positions, cell, pbc, cutoff, max_neighbours, pad_vector=None):
     return DenseGraph(dist, idx, count, len(positions))
 
 
+def dense_from_sparse(g: "SparseGraph", cutoff, max_neighbours=None):
+    """Regroup a sparse edge list into the dense (n, K) layout, K = the largest
+    neighbour count (at least 1).  Padded slots are parked at the cutoff, as in
+    `dense_graph`, so no model branch sees r = 0."""
+    counts = np.bincount(np.asarray(g.senders), minlength=g.n_nodes)
+    K = int(max_neighbours if max_neighbours is not None else max(counts.max(initial=0), 1))
+    idx, dist, count = _dense_from_sparse(np.asarray(g.senders), np.asarray(g.receivers),
+                                          np.asarray(g.rij), g.n_nodes, K)
+    live = np.arange(K)[None, :] < count[:, None]
+    dist = np.where(live[..., None], dist, np.array([float(cutoff), 0.0, 0.0]))
+    return DenseGraph(dist, idx, count, g.n_nodes)
+
+
 def dense_to_sparse(g: DenseGraph):
     """Flatten a DenseGraph, for cross-checking the two pooling paths."""
     m = g.mask

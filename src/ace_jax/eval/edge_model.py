@@ -9,8 +9,11 @@ in `EdgeSiteModel`, so the two model families cannot drift apart:
 * energy, forces and virial from one `value_and_grad` over the edge vectors;
 * the lammps-jax positions entry point.
 
-A subclass provides `site_energies`, `pad_cutoff()` (where padded edges are
-parked) and `edge_a_widths()` (row counts of the one-hot selectors), plus the
+A subclass provides `site_energies`, `site_energies_dense`, `pad_cutoff()`
+(where padded edges are parked), `edge_a_widths()` (row counts of the one-hot
+selectors), `edge_a_factors(rij, zi, zj, mask)` (the two per-edge factors of the
+A basis, zero on invalid edges) and `a_channels` (1, or the number of
+neighbour-species channels A carries), plus the
 fields `aspec_r`, `aspec_y`, `edge_a_kind`, `a_sel_r`, `a_sel_y` and `E0`.
 """
 import dataclasses
@@ -63,6 +66,34 @@ class EdgeSiteModel(eqx.Module):
                     * jnp.matmul(Y, self.a_sel_y, precision=hi))
         return R[:, self.aspec_r] * Y[:, self.aspec_y]
 
+    # -------------------------------------------------- A basis, two layouts
+    def pool_a_sparse(self, cols, Y, seg, channel, n_nodes):
+        """A (n_nodes, C * n_A) from edge-list factors: per-edge rows in the chosen
+        form (`edge_a`), summed per (node, channel).  Memory ~ E * n_A."""
+        C = self.a_channels
+        rows = self.edge_a(cols, Y)
+        A = jax.ops.segment_sum(rows, seg * C + channel, num_segments=n_nodes * C)
+        return A.reshape(n_nodes, C * rows.shape[1])
+
+    def pool_a_dense(self, cols, Y, channel):
+        """A (n, C * n_A) from padded (n, K, .) factors, per node as a batched
+        outer product sum_k cols_k (x) Y_k, then the used entries selected.  No
+        per-edge column gather, so no scatter in the reverse pass (3-13x faster
+        forces measured on A4500/A100/H100).  Memory ~ n * K * (C * n_cols + n_Y)
+        + n * C * n_cols * n_Y, so it grows with channels and neighbour padding --
+        which is why the sparse layout stays."""
+        n, K, nc = cols.shape
+        ny = Y.shape[-1]
+        C = self.a_channels
+        if C > 1:                                    # neighbour-species channel
+            oh = jax.nn.one_hot(channel, C, dtype=cols.dtype)
+            cols = (oh[..., :, None] * cols[..., None, :]).reshape(n, K, C * nc)
+        A_full = jnp.einsum("nkr,nky->nry", cols, Y,
+                            precision=jax.lax.Precision.HIGHEST).reshape(n, -1)
+        mu = jnp.arange(C, dtype=self.aspec_r.dtype)[:, None]
+        sel = ((mu * nc + self.aspec_r[None, :]) * ny + self.aspec_y[None, :]).reshape(-1)
+        return A_full[:, sel]
+
     # -------------------------------------------------- energy / forces / virial
     def energy_forces_virial(self, rij, zi, zj, senders, receivers, n_nodes,
                              node_z, mask=None):
@@ -88,6 +119,22 @@ class EdgeSiteModel(eqx.Module):
         E, (g_r, g_eps) = jax.value_and_grad(total, argnums=(0, 1))(rij, eps0)
         F = (jnp.zeros((n_nodes, 3), rij.dtype)
              .at[senders].add(g_r).at[receivers].add(-g_r))
+        return E, F, -g_eps
+
+    def energy_forces_virial_dense(self, rij, zi, zj, idx, mask, node_z):
+        """`energy_forces_virial` for the dense layout: rij (n, K, 3), zi / zj /
+        idx (neighbour index) / mask (n, K).  Same strain trick for the virial."""
+        n = mask.shape[0]
+
+        def total(r, eps):
+            sym = 0.5 * (eps + eps.T)
+            return jnp.sum(self.site_energies_dense(r + r @ sym, zi, zj, mask, node_z))
+
+        eps0 = jnp.zeros((3, 3), rij.dtype)
+        E, (g_r, g_eps) = jax.value_and_grad(total, argnums=(0, 1))(rij, eps0)
+        g_r = jnp.where(mask[..., None], g_r, 0.0)
+        F = (jnp.zeros((n, 3), rij.dtype).at[jnp.arange(n)].add(g_r.sum(axis=1))
+             .at[idx.reshape(-1)].add(-g_r.reshape(-1, 3)))
         return E, F, -g_eps
 
     # -------------------------------------------------- positions wrapper

@@ -189,6 +189,20 @@ class ACEModel(EdgeSiteModel):
         return self.edge_a(Rnl, self.angular(rij)), Rpair
 
     # -------------------------------------------------- EdgeSiteModel hooks
+    a_channels = 1          # species enter through the radial, not a channel
+
+    def _edge_factors_and_pair(self, rij, zi, zj, mask=None):
+        """(Rnl, Ylm, Rpair) per edge, Rnl zeroed on masked edges; one radial pass."""
+        Rnl, Rpair = self.radial(rij, zi, zj)
+        if mask is not None:
+            Rnl = jnp.where(mask[:, None], Rnl, 0.0)
+        return Rnl, self.angular(rij), Rpair
+
+    def edge_a_factors(self, rij, zi, zj, mask=None):
+        """The two per-edge factors of the A basis: (Rnl, Ylm)."""
+        Rnl, Y, _ = self._edge_factors_and_pair(rij, zi, zj, mask)
+        return Rnl, Y
+
     def pad_cutoff(self):
         """Padded edges sit at the pair cutoff, where every envelope vanishes."""
         return float(jnp.max(self.pair_envelope[..., 0]))
@@ -345,20 +359,23 @@ class ACEModel(EdgeSiteModel):
     def site_energies(self, rij, zi, zj, segment_ids, n_nodes, node_z, mask=None):
         """Per-site energies (n_nodes,).  `node_z` is the centre species index per node."""
         if self.folded:
-            edge_A, Rpair = self.edge_features(rij, zi, zj)
-            return self._readout_folded(pool_sparse(edge_A, segment_ids, n_nodes, mask),
-                                        pool_sparse(Rpair, segment_ids, n_nodes, mask),
+            Rnl, Y, Rpair = self._edge_factors_and_pair(rij, zi, zj, mask)
+            A = self.pool_a_sparse(Rnl, Y, segment_ids, 0, n_nodes)
+            return self._readout_folded(A, pool_sparse(Rpair, segment_ids, n_nodes, mask),
                                         node_z)
         return self._readout(*self.site_basis(rij, zi, zj, segment_ids, n_nodes, mask), node_z)
 
     def site_energies_dense(self, rij, zi, zj, mask, node_z):
         if self.folded:
+            # A by the batched outer product over each node's K slots (no
+            # per-edge column gather); the pair channel is a plain masked sum
             n, K = mask.shape
             flat = lambda a: a.reshape(n * K, *a.shape[2:])
-            edge_A, Rpair = self.edge_features(flat(rij), flat(zi), flat(zj))
+            Rnl, Y, Rpair = self._edge_factors_and_pair(flat(rij), flat(zi), flat(zj),
+                                                        flat(mask))
             un = lambda a: a.reshape(n, K, -1)
-            return self._readout_folded(pool_dense(un(edge_A), mask),
-                                        pool_dense(un(Rpair), mask), node_z)
+            A = self.pool_a_dense(un(Rnl), un(Y), None)
+            return self._readout_folded(A, pool_dense(un(Rpair), mask), node_z)
         return self._readout(*self.site_basis_dense(rij, zi, zj, mask), node_z)
 
 
