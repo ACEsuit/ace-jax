@@ -250,3 +250,23 @@ def test_child_env_passes_the_pjrt_plugin():
     from scaling.sweep import child_env
     assert child_env({"pythonpath": "/p", "pjrt": "/x/xla_cuda_plugin.so"})["PJRT_PLUGIN"] \
         == "/x/xla_cuda_plugin.so"
+
+
+def test_log_y_axis_uses_compact_labels_and_no_minor_labels():
+    """Minor log ticks printed '6x10^3' in mathtext next to the styled majors."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.ticker import NullFormatter
+    from scaling.plot import _count_fmt, _ylog
+    assert [_count_fmt(v, None) for v in (0.5, 10, 1000, 6000, 2e6)] == ["0.5", "10", "1k", "6k", "2M"]
+    fig, ax = plt.subplots()
+    ax.plot([1, 2], [100, 1e5])
+    _ylog(ax)
+    assert ax.get_yscale() == "log" and isinstance(ax.yaxis.get_minor_formatter(), NullFormatter)
+    ax.set_ylim(800, 6000)                   # under a decade: still several labelled ticks
+    fig.canvas.draw()
+    labels = [t.get_text() for t in ax.get_yticklabels() if t.get_text()
+              and 800 <= t.get_position()[1] <= 6000]
+    assert labels == ["1k", "2k", "5k"]
+    plt.close(fig)

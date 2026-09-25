@@ -55,6 +55,22 @@ def _atoms_fmt(x, _pos):
     return f"{int(x)}" if x < 1024 else f"{int(x) // 1024}k"
 
 
+def _count_fmt(v, _pos):
+    for div, suf in ((1e6, "M"), (1e3, "k")):
+        if v >= div:
+            return f"{v / div:g}{suf}"
+    return f"{v:g}"
+
+
+def _ylog(ax):
+    """Log y with compact major labels; no minor labels (they default to mathtext)."""
+    from matplotlib.ticker import FuncFormatter, LogLocator, NullFormatter
+    ax.set_yscale("log")
+    ax.yaxis.set_major_locator(LogLocator(base=10, subs=(1.0, 2.0, 5.0)))  # labelled within a decade
+    ax.yaxis.set_major_formatter(FuncFormatter(_count_fmt))
+    ax.yaxis.set_minor_formatter(NullFormatter())
+
+
 def _xatoms(ax):
     from matplotlib.ticker import FuncFormatter, LogLocator
     ax.set_xscale("log", base=2)
@@ -90,7 +106,9 @@ def _legend(fig, codes, modes=True, layout=True):
     if layout:
         handles += [Line2D([], [], color=MUTED, lw=0, marker="o", ms=6, mfc="none",
                            label="hollow = ace-jax sparse layout")]
-    fig.legend(handles=handles, loc="upper center", ncol=min(len(handles), 4), frameon=False,
+    ncol = max(2, min(len(handles), int(fig.get_figwidth() // 2)))   # wrap to the figure width
+    # above the figure (bbox_inches="tight" keeps it), so it can never cover a title
+    fig.legend(handles=handles, loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=ncol, frameon=False,
                fontsize=8, labelcolor=INK2)
 
 
@@ -145,7 +163,7 @@ def fig_throughput(rows, out, dtype="float64", size="medium"):
                 if mode == "standalone" or code == "mlpace":
                     _end_label(ax, xs[-1], ys[-1], SHORT[code])
             _xatoms(ax)
-            ax.set_yscale("log")
+            _ylog(ax)
             ax.set_title(f"{system} · {host}", fontsize=9, color=INK)
             if i == len(systems) - 1:
                 ax.set_xlabel("atoms", fontsize=8, color=INK2)
@@ -155,7 +173,7 @@ def fig_throughput(rows, out, dtype="float64", size="medium"):
     fig.tight_layout(rect=(0, 0, 0.94, 0.9), w_pad=3.0)
     _place_labels(fig)
     p = out / f"scaling_throughput_{dtype}_{size}.png"
-    fig.savefig(p, dpi=160)
+    fig.savefig(p, dpi=160, bbox_inches="tight")     # keeps the figure legend
     plt.close(fig)
     return p
 
@@ -191,7 +209,7 @@ def fig_model_size(rows, out, dtype="float64"):
                            for s in SIZES if (code, mode, s, system) in best]
                     if pts:
                         ax.plot(*zip(*pts), color=CODES[code][1], ls=ls, lw=1.6, marker="o", ms=5)
-            ax.set_yscale("log")
+            _ylog(ax)
             ax.set_xticks(range(len(SIZES)), SIZES)
             ax.set_title(f"{system} · {host} · N≈{n_target}", fontsize=9, color=INK)
             if j == 0:
@@ -199,7 +217,7 @@ def fig_model_size(rows, out, dtype="float64"):
     _legend(fig, [c for c in CODES if any(r["code"] == c for r in ok)], layout=False)
     fig.tight_layout(rect=(0, 0, 1, 0.93))
     p = out / f"scaling_model_size_{dtype}.png"
-    fig.savefig(p, dpi=160)
+    fig.savefig(p, dpi=160, bbox_inches="tight")     # keeps the figure legend
     plt.close(fig)
     return p
 
@@ -232,7 +250,7 @@ def fig_memory(rows, out, dtype="float64", size="medium"):
                 if st == "oom":                        # the size that did not fit
                     ax.axvline(x, color=CODES[code][1], ls=":", lw=1)
         _xatoms(ax)
-        ax.set_yscale("log")
+        _ylog(ax)
         ax.set_title(f"peak memory · {host} (dotted: out of memory)", fontsize=9, color=INK)
         ax.set_xlabel("atoms", fontsize=8, color=INK2)
         if j == 0:
@@ -241,7 +259,7 @@ def fig_memory(rows, out, dtype="float64", size="medium"):
     fig.tight_layout(rect=(0, 0, 0.94, 0.86), w_pad=3.0)
     _place_labels(fig)
     p = out / f"scaling_memory_{dtype}_{size}.png"
-    fig.savefig(p, dpi=160)
+    fig.savefig(p, dpi=160, bbox_inches="tight")     # keeps the figure legend
     plt.close(fig)
     return p
 
@@ -274,7 +292,7 @@ def fig_precision(rows, out, size="medium"):
     _legend(fig, sorted({c for _, c in ratio}, key=list(CODES).index), modes=False, layout=False)
     fig.tight_layout(rect=(0, 0, 1, 0.9))
     p = out / f"scaling_precision_{size}.png"
-    fig.savefig(p, dpi=160)
+    fig.savefig(p, dpi=160, bbox_inches="tight")     # keeps the figure legend
     plt.close(fig)
     return p
 
