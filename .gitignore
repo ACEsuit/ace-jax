@@ -7,3 +7,5 @@ build/
 *.egg-info/
 .uv/
 .jax_cache/
+pace_ref/build/
+pace_ref/.venv/

@@ -2,11 +2,14 @@ from .model import (ACEModel, calibrate_edge_a, fold_readout, highest_precision,
                     pool_dense, pool_sparse, with_edge_a_kind)
 from .api import site_descriptors, species_indices
 from .io import load
+from .pace_io import write_yace
+from .pace_model import PACEModel, load_yace
 from .nlist import DenseGraph, SparseGraph, dense_graph, dense_to_sparse, sparse_graph
 
 __all__ = ["calibrate_edge_a", "with_edge_a_kind", "fold_readout", "ACEModel", "load",
            "highest_precision", "pool_sparse", "pool_dense", "SparseGraph", "DenseGraph",
-           "sparse_graph", "dense_graph", "dense_to_sparse", "site_descriptors", "species_indices"]
+           "sparse_graph", "dense_graph", "dense_to_sparse", "site_descriptors", "species_indices",
+           "PACEModel", "load_yace", "write_yace"]
 
 __all__.append("ACECalculator")
 
