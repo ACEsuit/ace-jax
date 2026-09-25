@@ -270,3 +270,11 @@ def test_log_y_axis_uses_compact_labels_and_no_minor_labels():
               and 800 <= t.get_position()[1] <= 6000]
     assert labels == ["1k", "2k", "5k"]
     plt.close(fig)
+
+
+def test_oom_detected_anywhere_in_output():
+    """XLA's allocator summary can push RESOURCE_EXHAUSTED out of the tail."""
+    from scaling.run_lammps import failure_status
+    long = "RESOURCE_EXHAUSTED: Out of memory\n" + "Current allocation summary\n" * 100
+    assert failure_status(long) == "oom"
+    assert failure_status("ERROR: Unrecognized pair style") == "error"

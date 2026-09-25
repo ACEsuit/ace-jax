@@ -33,6 +33,11 @@ def _pair(style, model_path, elements, device):
     raise ValueError(style)
 
 
+def failure_status(text):
+    """'oom' if the output anywhere reports running out of memory, else 'error'."""
+    return "oom" if "out of memory" in text.lower() or "RESOURCE_EXHAUSTED" in text else "error"
+
+
 def finished(returncode, log):
     """A run completed if LAMMPS exited cleanly or got as far as its final
     `Total wall time` line: the Symmetrix tree aborts afterwards, in a static
@@ -137,7 +142,7 @@ def run_case(row, n_atoms, dtype, device, lmp, ranks, workdir, pjrt=None):
     log = (work / "log.lammps").read_text() if (work / "log.lammps").exists() else p.stdout
     if not finished(p.returncode, log) or "Loop time" not in log:
         tail = (p.stderr or p.stdout)[-300:]
-        out["status"] = "oom" if "out of memory" in tail.lower() or "RESOURCE_EXHAUSTED" in tail else "error"
+        out["status"] = failure_status((p.stderr or "") + (p.stdout or "") + log)
         out["error"] = tail
         return out
     parsed = parse_log(log)
