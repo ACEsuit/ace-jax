@@ -165,7 +165,7 @@
     "tests/test_gate.py::test_total_energy[ace_analytic_solid]": 0.17865387396886945,
     "tests/test_gp_calculator.py::test_calculator_agrees_with_predict_mixture": 3.492673959059175,
     "tests/test_gp_cli.py::test_cli_eval": 9.750507040997036,
-    "tests/test_gp_cli.py::test_cli_map_laplace": 275.46764266799437,
+    "tests/test_gp_cli.py::test_cli_map_laplace": 19.6,
     "tests/test_gp_data.py::test_dataset_shapes_and_padding": 0.09346104203723371,
     "tests/test_gp_data.py::test_energy_target_subtracts_e0_and_virial_is_voigt": 0.03152316698106006,
     "tests/test_gp_data.py::test_load_configs_reads_keys_and_structural_weights": 0.0125145009951666,
