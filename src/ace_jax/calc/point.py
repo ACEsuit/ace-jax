@@ -76,6 +76,15 @@ class ACECalculator(Calculator):
         self.cutoff = float(cutoff if cutoff is not None else meta["rcut"])
         self._z2i = {int(z): i for i, z in enumerate(meta["elements"])}
         self.dtype = dtype
+        # compiled entry points: run eagerly, a call dispatches thousands of ops
+        # one by one (a flat ~0.6 s per call on an A100).  The model is an
+        # argument, so each edge_a form is its own cache entry; n_nodes is static.
+        import equinox as eqx
+        self._efv_dense = eqx.filter_jit(
+            lambda m, rij, zi, zj, idx, mask, nz: m.energy_forces_virial_dense(
+                rij, zi, zj, idx, mask, nz))
+        self._efv_sparse = eqx.filter_jit(
+            lambda m, rij, zi, zj, s, r, n, nz: m.energy_forces_virial(rij, zi, zj, s, r, n, nz))
 
     def _species_index(self, numbers):
         try:
@@ -100,15 +109,15 @@ class ACECalculator(Calculator):
             d = dense_from_sparse(g, self.cutoff)
             idx = jnp.asarray(d.idx)
             with highest_precision():
-                E, F, V = self.model.energy_forces_virial_dense(
-                    jnp.asarray(d.rij, dtype=rij.dtype),
+                E, F, V = self._efv_dense(
+                    self.model, jnp.asarray(d.rij, dtype=rij.dtype),
                     jnp.broadcast_to(node_z[:, None], idx.shape), node_z[idx], idx,
                     jnp.asarray(d.mask), node_z)
         else:
             model = self._model_for(rij, node_z[send], node_z[recv], send, g.n_nodes, node_z)
             with highest_precision():
-                E, F, V = model.energy_forces_virial(
-                    rij, node_z[send], node_z[recv], send, recv, g.n_nodes, node_z)
+                E, F, V = self._efv_sparse(
+                    model, rij, node_z[send], node_z[recv], send, recv, int(g.n_nodes), node_z)
         E = float(E)
         self.results["energy"] = E
         self.results["free_energy"] = E
