@@ -33,7 +33,7 @@ jobs:
         env:
           JAX_PLATFORM_NAME: cpu
           JAX_ENABLE_X64: "1"
-        run: uv run --python 3.12 --extra gp pytest -m "not slow" --splits 3 --group ${{ matrix.group }}
+        run: uv run --python 3.12 --extra gp pytest -m "not slow" --splits 3 --group ${{ matrix.group }} --splitting-algorithm least_duration
   smoke:
     # Import + a small descriptor/EFV/kernel smoke on the other supported Pythons
     # -- a cheap compatibility check without re-running the whole (slow) matrix.
@@ -60,13 +60,14 @@ jobs:
             tests/test_descriptors.py tests/test_efv.py tests/test_gp_kernels.py -q
   ladder:
     # Heavy integration run ONCE (not per-Python): the real-model MCMC ladder
-    # (MAP/Laplace/Pathfinder/NUTS, fast mode). Isolated so it can't slow the suite.
+    # (MAP/Laplace/Pathfinder/NUTS, fast mode) and any other `slow` test.
+    # Isolated so it can't slow the suite.
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - name: Real-model ladder (fast mode)
+      - name: Slow tests (real-model ladder)
         env:
           JAX_PLATFORM_NAME: cpu
           JAX_ENABLE_X64: "1"

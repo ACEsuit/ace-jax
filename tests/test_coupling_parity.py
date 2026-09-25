@@ -92,7 +92,8 @@ else:
     build_mb = {norm(b) for b in mb}
     mset_ok = bool(build_mb == oracle_mb)
 
-A2B_py, aa_sig_py, _aspec = couple(mb, Rnl, Ylm)
+cpl = couple(mb, Rnl, Ylm)
+A2B_py, aa_sig_py = cpl.A2B, cpl.aa_sig
 aa_sig_py = [tuple(sorted(s)) for s in aa_sig_py]
 
 nl_of = lambda s: tuple(sorted((n, l) for (n, l, m) in s))
