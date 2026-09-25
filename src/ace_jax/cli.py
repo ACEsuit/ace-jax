@@ -51,12 +51,18 @@ def _add_fit_args(p):
     p.add_argument("--laplace", choices=["svi", "fd"], default="svi")
     p.add_argument("--map-steps", type=int, default=500); p.add_argument("--vi-steps", type=int, default=2000)
     p.add_argument("--nuts-warmup", type=int, default=500); p.add_argument("--nuts-samples", type=int, default=500)
-    p.add_argument("--nuts-chains", type=int, default=4); p.add_argument("--r0", type=float, required=True)
+    p.add_argument("--nuts-chains", type=int, default=4); p.add_argument("--r0", type=float, required=True,
+                   help="typical nearest-neighbour distance (A); centres the GP hyperprior")
     p.add_argument("--uq", choices=["blr", "pops"], default="blr", help="pops: linear arm (--m-per-species 0)")
     p.add_argument("--pops-ridge", default="auto")
     p.add_argument("--seed", type=int, default=0); p.add_argument("--out", required=True)
+    p.add_argument("--model-draws", type=int, default=1,
+                   help="GP arm: hyperparameter draws stored in gp_model.npz (1 = the MAP; more = "
+                        "evenly spaced draws of the last rung, each adding a (Dt, Dt) factor)")
+    p.add_argument("--no-save-model", action="store_true",
+                   help="skip writing the fitted model (model.npz linear / gp_model.npz GP)")
     p.add_argument("--devices", type=int, default=1,
-                   help="shard sufficient statistics over this many devices (Task 15, stretch)")
+                   help="shard sufficient statistics over this many devices (experimental)")
     return p
 
 
@@ -102,7 +108,8 @@ def run(a):
     data = (load_fit_data(cfg, data=a.data, ood=a.ood) if a.data
             else load_fit_data(cfg, train=a.train, test=a.test, ood=a.ood))
     res = fit(cfg, data)
-    write_outputs(res, a.out, layout=("cli",), argv=vars(a))
+    write_outputs(res, a.out, layout=("cli",), argv=vars(a), save_model=not a.no_save_model,
+                  model_draws=a.model_draws)
     return {key.split("/")[1]: m for key, m in res.preds.metrics.items() if key.startswith("test/")}
 
 
@@ -112,22 +119,35 @@ def cmd_eval(a):
     when present.  Native E/F/V (no ASE), one forward pass per config."""
     import jax.numpy as jnp
     from .eval import highest_precision, load, sparse_graph, species_indices
-    model, meta, z = load(a.model)
-    rcut = float(meta["rcut"])
     keys = dict(energy_key=a.energy_key, force_key=a.force_key, virial_key=a.virial_key)
     configs = load_configs(a.data, **keys)
+    gp = str(a.model).endswith(".npz") and "gp_json" in np.load(a.model).files   # gp_model.npz from `fit`
+    if gp:
+        from ase import Atoms
+        from .calc.gp import GPCalculator
+        calc = GPCalculator.from_file(a.model)
+    else:
+        model, meta, z = load(a.model)
+        rcut = float(meta["rcut"])
     esq = ecnt = fsq = fcnt = 0.0
     rows = []
     with highest_precision():
         for i, c in enumerate(configs):
-            g = sparse_graph(c.positions, c.cell, c.pbc, rcut)
-            nz = jnp.asarray(species_indices(meta, c.numbers))
-            send, recv = jnp.asarray(g.senders), jnp.asarray(g.receivers)
-            E, F, V = model.energy_forces_virial(jnp.asarray(g.rij), nz[send], nz[recv],
-                                                 send, recv, g.n_nodes, nz)
+            if gp:
+                at = Atoms(numbers=c.numbers, positions=c.positions, cell=c.cell, pbc=c.pbc)
+                at.calc = calc
+                E, F = at.get_potential_energy(), at.get_forces()
+            else:
+                g = sparse_graph(c.positions, c.cell, c.pbc, rcut)
+                nz = jnp.asarray(species_indices(meta, c.numbers))
+                send, recv = jnp.asarray(g.senders), jnp.asarray(g.receivers)
+                E, F, V = model.energy_forces_virial(jnp.asarray(g.rij), nz[send], nz[recv],
+                                                     send, recv, g.n_nodes, nz)
             E = float(E); F = np.asarray(F); nat = len(c.numbers)
             rows.append({"config": i, "natoms": nat, "energy": E,
                          "energy_per_atom": E / nat, "fmax": float(np.abs(F).max())})
+            if gp:
+                rows[-1]["energy_std"] = float(calc.results["energy_std"])
             if c.energy is not None:
                 esq += ((E - c.energy) / nat) ** 2; ecnt += 1
             if c.forces is not None:
@@ -176,7 +196,8 @@ def cmd_construct(a):
 
 
 def _parser():
-    top = argparse.ArgumentParser(prog="ace-jax", description="Fit and evaluate ACE models in JAX")
+    top = argparse.ArgumentParser(prog="ace-jax",
+                                  description="Fit and evaluate ACE models in JAX (short alias: aj)")
     sub = top.add_subparsers(dest="cmd", required=True)
     _add_fit_args(sub.add_parser("fit", help="fit the hybrid linear-ACE + residual GP (--m-per-species 0 = linear-only fit)"))
     ev = sub.add_parser("eval", help="evaluate a model on a dataset (energy/forces, RMSE vs labels)")
@@ -212,12 +233,11 @@ def _parser():
 
 
 def main(argv=None):
+    """Console entry point; returns 0 because the script wrapper passes the
+    result to sys.exit (a returned dict would print and exit 1)."""
     a = _parser().parse_args(argv)
-    if a.cmd == "eval":
-        return cmd_eval(a)
-    if a.cmd == "construct":
-        return cmd_construct(a)
-    return run(a)
+    {"eval": cmd_eval, "construct": cmd_construct}.get(a.cmd, run)(a)
+    return 0
 
 
 if __name__ == "__main__":

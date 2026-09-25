@@ -46,7 +46,9 @@ def _metrics_csv(path, metrics, split):
             w = csv.DictWriter(fh, fieldnames=list(rows[0])); w.writeheader(); w.writerows(rows)
 
 
-def write_outputs(res, out, layout=("run",), argv=None):
+def write_outputs(res, out, layout=("run",), argv=None, save_model=True, model_draws=1, log=print):
+    """Write the run artefacts; with save_model, also the fitted model file
+    (model.npz for the linear arm, gp_model.npz for the GP arm; see export.py)."""
     out = pathlib.Path(out); out.mkdir(parents=True, exist_ok=True)
     cfg, d, b = res.config, res.data, res.built
     _dump(out / "theta_map.json", res.theta._asdict())
@@ -83,3 +85,8 @@ def write_outputs(res, out, layout=("run",), argv=None):
             _dump(out / "config.json", {**(argv or {}), "M": int(b.prob.ind.XM.shape[0]),
                                         "len_basis": b.gpcfg.len_basis, "n_train": len(d.train),
                                         "n_test": len(d.test)})
+    if save_model:
+        from .export import save_model as _save
+        path = _save(res, out, n_draws=model_draws, log=log)
+        if path is not None:
+            log(f"fitted model: {path}")

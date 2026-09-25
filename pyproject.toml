@@ -43,6 +43,7 @@ fast-neighbours = ["matscipy>=1.0"]
 
 [project.scripts]
 ace-jax = "ace_jax.cli:main"
+aj = "ace_jax.cli:main"          # short alias
 
 [project.urls]
 Homepage = "https://github.com/ACEsuit/ace-jax"
