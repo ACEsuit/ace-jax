@@ -36,7 +36,12 @@ image = (
         # second tree for the lammps-jax plugin (needs develop; Symmetrix needs 10Sep2025)
         "git clone --depth 1 -b develop https://github.com/lammps/lammps.git /opt/lammps-dev",
         "cd /opt/symmetrix/pair_symmetrix && ./install.sh /opt/lammps",
-        "pip install -e /opt/lammps-jax /opt/symmetrix/symmetrix",
+        "pip install -e /opt/lammps-jax",
+        # the python package is only for symmetrix_extract_mace: build it CPU-only
+        # (the builder has nvcc but no GPU, so Kokkos arch auto-detection fails)
+        # and without ARCH_NATIVE (builder and runtime CPUs differ)
+        "SKBUILD_CMAKE_ARGS='-DKokkos_ENABLE_CUDA=OFF;-DSYMMETRIX_SPHERICART_CUDA=OFF;-DKokkos_ARCH_NATIVE=OFF'"
+        " pip install /opt/symmetrix/symmetrix",
         "cmake -S /opt/lammps/cmake -B /opt/lammps/build-kk -D CMAKE_BUILD_TYPE=Release"
         " -D CMAKE_CXX_STANDARD=20 -D CMAKE_CXX_STANDARD_REQUIRED=ON"
         " -D CMAKE_CXX_COMPILER=/opt/lammps/lib/kokkos/bin/nvcc_wrapper"
