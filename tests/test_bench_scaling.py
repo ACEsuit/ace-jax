@@ -80,3 +80,62 @@ def test_lammps_input_pair_lines(style, device, expect):
     if style in ("mlpace", "mace"):
         assert "pair_coeff * * " in txt and txt.strip().split("pair_coeff * * ")[1].split("\n")[0].endswith("Ge Si")
     assert "run 50" in txt and "run 200" in txt
+
+
+from scaling.sweep import HOSTS, cases, run_sweep
+
+
+def test_cases_cover_host_matrix():
+    cs = cases("moriarty-gpu")
+    assert {c.dtype for c in cs} == {"float32", "float64"}
+    assert all(not (c.code == "mlpace" and c.dtype == "float32") for c in cs)   # ML-PACE is f64 only
+    assert {c.mode for c in cs} == {"standalone", "lammps"}
+
+
+def test_sweep_resumes_and_stops_after_oom(tmp_path):
+    calls = []
+
+    def fake(case):
+        calls.append(case)
+        return {"status": "oom" if case.n_atoms >= 1024 else "ok"}
+    res = tmp_path / "r.jsonl"
+    sel = lambda c: c.model == "acejax-pace/SiGe/small" and c.mode == "standalone" and c.dtype == "float64"
+    run_sweep("moriarty-gpu", fake, res, select=sel)
+    ns = [c.n_atoms for c in calls]
+    assert ns == [256, 512, 1024]                      # stops after the first OOM
+    run_sweep("moriarty-gpu", fake, res, select=sel)   # resume: nothing new to run
+    assert [c.n_atoms for c in calls] == ns
+    rows = [json.loads(l) for l in res.read_text().splitlines()]
+    assert [r["status"] for r in rows] == ["ok", "ok", "oom"]
+
+
+def test_capacity_covers_ghosts_and_neighbours():
+    from scaling.run_lammps import capacity
+    at = supercell("SiGe", 256)
+    cap = capacity(at, 5.0)
+    assert cap["max_atoms"] > 256                      # owned + ghost shell
+    assert cap["k_dense"] >= cap["k_max"] + 8
+    assert cap["max_edges"] >= 256 * cap["k_max"]
+
+
+def test_read_pe_and_dump(tmp_path):
+    from scaling.run_lammps import read_dump_forces, read_pe
+    log = "Step PotEng Atoms\n       0   -12.5    3\nLoop time of 0.1 on 1 procs for 0 steps with 3 atoms\n"
+    assert read_pe(log) == -12.5
+    d = tmp_path / "f.dump"
+    d.write_text("ITEM: TIMESTEP\n0\nITEM: NUMBER OF ATOMS\n3\nITEM: BOX BOUNDS pp pp pp\n0 1\n0 1\n0 1\n"
+                 "ITEM: ATOMS id fx fy fz\n1 0.1 0.2 0.3\n2 0 0 0\n3 -1 -2 -3\n")
+    F = read_dump_forces(d)
+    assert F.shape == (3, 3) and F[2, 1] == -2.0
+
+
+def test_parity_compare_and_blocking():
+    from scaling.parity import blocked, compare
+    F = np.zeros((4, 3))
+    ok = compare(-10.0, F, -10.0 + 4e-7, F + 5e-6, 4, (1e-6, 1e-5))
+    bad = compare(-10.0, F, -10.0 + 4e-5, F, 4, (1e-6, 1e-5))
+    assert ok["status"] == "parity_ok" and bad["status"] == "parity_fail"
+    assert bad["dE_per_atom"] == pytest.approx(1e-5)
+    rows = [{"code": "mlpace", "status": "parity_fail"}, {"code": "acejax-pace", "status": "parity_ok"},
+            {"code": "mace", "status": "unsupported", "model": "mace/SiGe/mh1"}]
+    assert blocked(rows) == {("mlpace", "lammps")}
