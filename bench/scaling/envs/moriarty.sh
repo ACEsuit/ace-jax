@@ -35,7 +35,8 @@ sources() {
 
 venv() {
   [ -x "$VENV/bin/python" ] || uv venv --python 3.12 "$VENV"
-  uv pip install --python "$VENV/bin/python" -q "jax[cuda12]" matscipy ase matplotlib pyyaml \
+  # pip too: LAMMPS's install-python target calls `python -m pip`
+  uv pip install --python "$VENV/bin/python" -q pip "jax[cuda12]" matscipy ase matplotlib pyyaml \
     mace-torch cuequivariance-torch cuequivariance-ops-torch-cu12 \
     -e "$ACEJAX" -e "$ROOT/lammps-jax"
 }
