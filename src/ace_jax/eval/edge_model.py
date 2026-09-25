@@ -131,6 +131,11 @@ def calibrate_edge_a(model, rij, zi, zj, segment_ids, n_nodes, node_z, mask=None
     matmul form wins throughout, on a Xeon the gather wins below ~200k edge slots.
     Timing the forward *and* reverse pass matters: the forward gather is cheap and
     flat, and the entire difference is in the adjoint.
+
+    `ACECalculator(edge_a_kind="auto")` does this automatically.  For a lammps-jax
+    export -- traced once at fixed buffer sizes -- call it on a representative
+    structure at the export's dtype and edge capacity, and export the returned
+    model.
     """
     out = {}
     for kind in EDGE_A_KINDS:
