@@ -116,3 +116,14 @@ def test_fit_map_restarts_one_equals_single_lbfgs():
         thetas.append(r)
     assert len(thetas[0].restarts) == 1 and len(thetas[1].restarts) == 2
     assert thetas[1].restarts[0]["x"] == thetas[0].restarts[0]["x"]      # start 0 identical
+
+
+def test_rungs_map_is_theta_and_unknown_rung_raises():
+    from ace_jax.fit.hypers import default_prior, to_array
+    from ace_jax.fit.pipeline import FitConfig
+    from ace_jax.fit.pipeline.rungs import run_rungs
+    th = default_prior(2.35).mu
+    r = run_rungs(FitConfig(model="m", rungs=("map",)), None, None, th, log=lambda *a: None)
+    assert np.array_equal(r.draws["map"], np.asarray(to_array(th))[None])
+    with pytest.raises(ValueError, match="unknown rung"):
+        run_rungs(FitConfig(model="m", rungs=("map", "hmc")), None, None, th, log=lambda *a: None)
