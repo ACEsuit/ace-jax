@@ -45,7 +45,7 @@ image = (
         "INC=$(python -c \"import jaxlib, os; print(os.path.join(os.path.dirname(jaxlib.__file__), 'include'))\");"
         " cmake -S /opt/lammps-jax/cpp -B /opt/lammps-jax/build-plugin-gpu-pjrt"
         " -D CMAKE_CXX_COMPILER=/opt/lammps/lib/kokkos/bin/nvcc_wrapper -D CMAKE_BUILD_TYPE=Release"
-        " -D CMAKE_CXX_FLAGS=-fno-lto -D CMAKE_SHARED_LINKER_FLAGS='-fno-lto " + STUB + "'"
+        " -D CMAKE_CXX_FLAGS='-fno-lto -fopenmp' -D CMAKE_SHARED_LINKER_FLAGS='-fno-lto -fopenmp " + STUB + "'"
         " -D CMAKE_INTERPROCEDURAL_OPTIMIZATION=OFF -D LAMMPS_HEADER_DIR=/opt/lammps/src"
         " -D JAXLIB_INCLUDE_DIR=$INC -D KOKKOS_CONFIG_INCLUDE_DIR=/opt/lammps/build-kk/lib/kokkos",
         "cmake --build /opt/lammps-jax/build-plugin-gpu-pjrt -j 32",

@@ -68,7 +68,7 @@ plugin() {
   inc=$("$VENV/bin/python" -c "import jaxlib, os; print(os.path.join(os.path.dirname(jaxlib.__file__), 'include'))")
   cmake -S "$ROOT/lammps-jax/cpp" -B "$ROOT/lammps-jax/build-plugin-gpu-pjrt" \
     -D CMAKE_CXX_COMPILER="$LAMMPS/lib/kokkos/bin/nvcc_wrapper" -D CMAKE_BUILD_TYPE=Release \
-    -D CMAKE_CXX_FLAGS="-fno-lto" -D CMAKE_SHARED_LINKER_FLAGS="-fno-lto" \
+    -D CMAKE_CXX_FLAGS="-fno-lto -fopenmp" -D CMAKE_SHARED_LINKER_FLAGS="-fno-lto -fopenmp" \
     -D CMAKE_INTERPROCEDURAL_OPTIMIZATION=OFF \
     -D LAMMPS_HEADER_DIR="$LAMMPS/src" -D JAXLIB_INCLUDE_DIR="$inc" \
     -D KOKKOS_CONFIG_INCLUDE_DIR="$BUILD/lib/kokkos"
