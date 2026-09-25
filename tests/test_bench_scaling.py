@@ -212,3 +212,34 @@ def test_acejax_lammps_is_gpu_only():
     assert not [c for c in cpu if c.code.startswith("acejax") and c.mode == "lammps"]
     assert [c for c in cpu if c.code.startswith("acejax") and c.mode == "standalone"]
     assert [c for c in cases("moriarty-gpu") if c.code == "acejax-pace" and c.mode == "lammps"]
+
+
+def test_child_env_keeps_the_login_environment(monkeypatch):
+    """The lmp wrappers `module load`: a child without PATH/HOME/MODULEPATH
+    fails with 'libcudart.so.12: cannot open shared object file'."""
+    from scaling.sweep import child_env
+    monkeypatch.setenv("MODULEPATH", "/m")
+    e = child_env({"pythonpath": "/p", "os_env": {"X": "1"}})
+    assert e["PYTHONPATH"] == "/p" and e["X"] == "1"
+    assert e["MODULEPATH"] == "/m" and "PATH" in e
+
+
+def test_main_reuses_recorded_parity_and_never_gates_in_process(tmp_path, monkeypatch):
+    """The parent must not import JAX/torch (it would hold GPU memory for the
+    whole sweep), and a resumed sweep must not re-gate or duplicate rows."""
+    import json as _json
+    from scaling import sweep
+    res = tmp_path / "r.jsonl"
+    res.write_text(_json.dumps({"mode": "parity", "code": "acejax-pace", "gate": "acejax",
+                                "system": "SiGe", "model": "m", "status": "parity_fail",
+                                "_key": ["parity"], "_line": ["parity"]}) + "\n")
+    monkeypatch.setattr(sweep, "gate_in_subprocess", lambda *a: (_ for _ in ()).throw(AssertionError))
+    got = {}
+    monkeypatch.setattr(sweep, "run_sweep", lambda host, runner, path, select: got.update(
+        blocked=[c.code for c in sweep.cases(host) if not select(c)]))
+    envs = tmp_path / "envs"
+    monkeypatch.setattr(sweep, "_env_path", lambda host: tmp_path / "env.json")
+    (tmp_path / "env.json").write_text(_json.dumps({"lmp": "lmp"}))
+    sweep.main(["moriarty-gpu", "--results", str(res)])
+    assert len(res.read_text().splitlines()) == 1                  # nothing re-appended
+    assert set(got["blocked"]) == {"acejax-pace"}                  # the recorded fail blocks

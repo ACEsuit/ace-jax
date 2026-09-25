@@ -4,6 +4,7 @@
 """
 import dataclasses
 import json
+import os
 import pathlib
 import subprocess
 import sys
@@ -81,6 +82,28 @@ def run_sweep(host, runner, results_path, select=lambda c: True):
             dead.add(_line(c))
 
 
+def child_env(env):
+    """The login environment (the lmp wrappers `module load`), plus overrides."""
+    here = pathlib.Path(__file__).parent
+    return {**os.environ, **env.get("os_env", {}),
+            "PYTHONPATH": env.get("pythonpath", str(here.parent))}
+
+
+def gate_in_subprocess(host, env):
+    """Parity rows from a child process: the gate imports JAX and torch, and a
+    parent holding GPU memory would starve every case after it."""
+    p = subprocess.run([sys.executable, str(pathlib.Path(__file__).resolve()), host, "--gate-rows"],
+                       capture_output=True, text=True, timeout=7200, env=child_env(env))
+    rows = [json.loads(l) for l in p.stdout.splitlines() if l.startswith("{")]
+    if not rows:
+        raise RuntimeError(f"parity gate produced no rows:\n{p.stderr[-2000:]}")
+    return rows
+
+
+def _env_path(host):
+    return pathlib.Path(__file__).parent / "envs" / f"{host}.json"
+
+
 def subprocess_runner(host, env):
     """Real runner: one case per fresh process (so peak memory is per case)."""
     here = pathlib.Path(__file__).parent
@@ -93,8 +116,7 @@ def subprocess_runner(host, env):
             lmp = env.get("lmp_jax", env["lmp"]) if c.code.startswith("acejax") else env["lmp"]
             cmd = [sys.executable, str(here / "run_lammps.py"), c.model, str(c.n_atoms), c.dtype,
                    c.device, lmp, str(c.ranks), f"/tmp/bench_{host}_{c.n_atoms}"]
-        p = subprocess.run(cmd, capture_output=True, text=True, timeout=7200,
-                           env={**env.get("os_env", {}), "PYTHONPATH": env["pythonpath"]})
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=7200, env=child_env(env))
         lines = [l for l in p.stdout.splitlines() if l.startswith("{")]
         return json.loads(lines[-1]) if lines else {"status": "error", "error": p.stderr[-300:]}
     return run
@@ -108,6 +130,7 @@ def main(argv=None):
     ap.add_argument("--only", help="run only this code (e.g. acejax-pace)")
     ap.add_argument("--parity-only", action="store_true")
     ap.add_argument("--dry-run", action="store_true", help="count cases, run nothing")
+    ap.add_argument("--gate-rows", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--results", help="default: bench/scaling/results/<host>.jsonl")
     a = ap.parse_args(argv)
     here = pathlib.Path(__file__).parent
@@ -117,22 +140,30 @@ def main(argv=None):
         for k, v in sorted(n.items()):
             print(f"{k[0]:12s} {k[1]:10s} {v}")
         return
-    env = json.loads((here / "envs" / f"{a.host}.json").read_text())
+    env = json.loads(_env_path(a.host).read_text())
     env.setdefault("pythonpath", str(here.parent))
+    if a.gate_rows:                                    # child side of gate_in_subprocess
+        from scaling import parity
+        for r in parity.gate(a.host, env):
+            print(json.dumps(r))
+        return
     res = pathlib.Path(a.results or here / "results" / f"{a.host}.jsonl")
     res.parent.mkdir(parents=True, exist_ok=True)
-    from scaling import parity
-    rows = parity.gate(a.host, env)
-    with res.open("a") as f:
-        for r in rows:
-            r["_key"], r["_line"] = ["parity", r["gate"], r["system"], r["code"]], ["parity"]
-            f.write(json.dumps(r) + "\n")
+    prior = [json.loads(l) for l in res.read_text().splitlines()] if res.exists() else []
+    rows = [r for r in prior if r.get("mode") == "parity"]
+    if a.parity_only or not rows:                      # a resumed sweep keeps its gate
+        rows = gate_in_subprocess(a.host, env)
+        with res.open("a") as f:
+            for r in rows:
+                r["_key"], r["_line"] = ["parity", r["gate"], r["system"], r["code"]], ["parity"]
+                f.write(json.dumps(r) + "\n")
     for r in rows:
         print(f"parity {r['gate']:7s} {r['system']:7s} {r['model']:28s} {r['status']}"
               + (f"  dE/atom {r['dE_per_atom']:.1e} dF {r['max_dF']:.1e}" if "dE_per_atom" in r else ""))
     if a.parity_only:
         return
-    block = parity.blocked(rows)
+    from scaling.parity import blocked                 # plain python: no JAX/torch import
+    block = blocked(rows)
     run_sweep(a.host, subprocess_runner(a.host, env), res,
               select=lambda c: select(c) and (c.code, c.mode) not in block)
 
