@@ -12,7 +12,8 @@ from ase.calculators.calculator import Calculator, all_changes
 from ..eval.edge_model import (LAYOUTS, calibrate_edge_a, check_edge_a_kind,
                                estimate_a_bytes, with_edge_a_kind)
 from ..eval.model import highest_precision
-from ..eval.nlist import dense_from_sparse, sparse_graph
+from ..eval.nlist import backend as nlist_backend
+from ..eval.nlist import dense_from_sparse, dense_graph, have_matscipy_neighbours, sparse_graph
 
 # Below this many edges "auto" keeps the gather form: compile time dominates and
 # the forms differ little.  Above it, the adjoint of the gather (an atomic
@@ -27,6 +28,12 @@ AUTO_MIN_EDGES = 20_000
 MIN_DENSE_FILL = 0.5
 DENSE_BUDGET_FRACTION = 0.5
 CPU_DENSE_BUDGET_BYTES = 4 * 2**30
+
+
+def _round_k(k, step=4):
+    """Dense row capacity: the largest neighbour count rounded up, so a small
+    change in the count keeps the compiled shape (and the neighbour_matrix K)."""
+    return max(step, -(-int(k) // step) * step)
 
 
 def dense_budget_bytes():
@@ -76,6 +83,9 @@ class ACECalculator(Calculator):
         self.cutoff = float(cutoff if cutoff is not None else meta["rcut"])
         self._z2i = {int(z): i for i, z in enumerate(meta["elements"])}
         self.dtype = dtype
+        self.last_timing = None
+        self._k_hint = None                   # dense row capacity, learnt from the first call
+        self._nl_gpu = True                   # build the dense graph on the GPU when possible
         # compiled entry points: run eagerly, a call dispatches thousands of ops
         # one by one (a flat ~0.6 s per call on an A100).  The model is an
         # argument, so each edge_a form is its own cache entry; n_nodes is static.
@@ -95,29 +105,51 @@ class ACECalculator(Calculator):
 
     def calculate(self, atoms=None, properties=("energy",), system_changes=all_changes):
         super().calculate(atoms, properties, system_changes)
+        import time
+
+        import jax
         import jax.numpy as jnp
 
-        g = sparse_graph(self.atoms.get_positions(), self.atoms.get_cell().array,
-                         self.atoms.get_pbc(), self.cutoff)
+        t0 = time.perf_counter()
+        pos, cell, pbc = (self.atoms.get_positions(), self.atoms.get_cell().array,
+                          self.atoms.get_pbc())
+        n = len(pos)
         node_z = jnp.asarray(self._species_index(self.atoms.get_atomic_numbers()))
-        rij = jnp.asarray(g.rij, dtype=self.dtype)
-        send = jnp.asarray(g.senders)
-        recv = jnp.asarray(g.receivers)
-        layout = self._layout_for(g, rij.dtype)
+        dtype = np.dtype(self.dtype or jnp.zeros(()).dtype)
+        dg, g, backend = self._native_dense(pos, cell, pbc, n, dtype), None, "neighbour_matrix"
+        if dg is None:                                  # sparse list (also learns K)
+            g = sparse_graph(pos, cell, pbc, self.cutoff)
+            backend = nlist_backend()
+            layout = self._layout_for(g, dtype)
+            if layout == "dense":
+                counts = np.bincount(np.asarray(g.senders), minlength=n)
+                self._k_hint = _round_k(int(counts.max(initial=0)))
+                dg = dense_from_sparse(g, self.cutoff, max_neighbours=self._k_hint)
+        layout = "dense" if dg is not None else "sparse"
         self.last_layout = layout
         if layout == "dense":
-            d = dense_from_sparse(g, self.cutoff)
-            idx = jnp.asarray(d.idx)
+            # one dtype whichever builder ran (regroup vs neighbour_matrix): no retrace
+            idx = jnp.asarray(dg.idx, dtype=jnp.int32)
+            count = jnp.asarray(dg.count, dtype=jnp.int32)
+            args = (jnp.asarray(dg.rij, dtype=dtype), jnp.broadcast_to(node_z[:, None], idx.shape),
+                    node_z[idx], idx, jnp.arange(idx.shape[1])[None, :] < count[:, None], node_z)
+            jax.block_until_ready(args)
+            t1 = time.perf_counter()
             with highest_precision():
-                E, F, V = self._efv_dense(
-                    self.model, jnp.asarray(d.rij, dtype=rij.dtype),
-                    jnp.broadcast_to(node_z[:, None], idx.shape), node_z[idx], idx,
-                    jnp.asarray(d.mask), node_z)
+                E, F, V = jax.block_until_ready(self._efv_dense(self.model, *args))
         else:
+            rij = jnp.asarray(g.rij, dtype=dtype)
+            send, recv = jnp.asarray(g.senders), jnp.asarray(g.receivers)
             model = self._model_for(rij, node_z[send], node_z[recv], send, g.n_nodes, node_z)
+            args = (rij, node_z[send], node_z[recv], send, recv)
+            jax.block_until_ready(args)
+            t1 = time.perf_counter()
             with highest_precision():
-                E, F, V = self._efv_sparse(
-                    model, rij, node_z[send], node_z[recv], send, recv, int(g.n_nodes), node_z)
+                E, F, V = jax.block_until_ready(
+                    self._efv_sparse(model, *args, int(g.n_nodes), node_z))
+        t2 = time.perf_counter()
+        # nlist_s: neighbour list + layout + host->device; model_s: the compiled call
+        self.last_timing = {"nlist_s": t1 - t0, "model_s": t2 - t1, "nlist_backend": backend}
         E = float(E)
         self.results["energy"] = E
         self.results["free_energy"] = E
@@ -129,12 +161,43 @@ class ACECalculator(Calculator):
             self.results["stress"] = np.array(
                 [s[0, 0], s[1, 1], s[2, 2], s[1, 2], s[0, 2], s[0, 1]])
 
+    def _native_dense(self, pos, cell, pbc, n, dtype):
+        """The dense graph straight from matscipy_neighbours' neighbour_matrix,
+        on the GPU when JAX runs there (zero-copy via DLPack), with the K learnt
+        by an earlier call.  None when that path does not apply: no
+        matscipy_neighbours, sparse layout, K not learnt yet, an atom outgrew K
+        (the sparse list then re-learns it), or auto-layout now prefers sparse."""
+        if self.layout == "sparse" or not self._k_hint or not have_matscipy_neighbours():
+            return None
+        import jax
+        device = "cuda" if (jax.default_backend() == "gpu" and self._nl_gpu) else None
+        try:
+            dg = dense_graph(pos, cell, pbc, self.cutoff, self._k_hint, device=device)
+        except ValueError:                              # capacity exceeded
+            return None
+        except Exception:                               # no CUDA backend in this build
+            if device is None:
+                raise
+            self._nl_gpu = False
+            return self._native_dense(pos, cell, pbc, n, dtype)
+        if self.layout == "auto":
+            count = np.asarray(dg.count)
+            K = max(int(count.max(initial=0)), 1)
+            if self._layout_from(n, int(count.sum()), K, dtype) == "sparse":
+                return None
+        return dg
+
     def _layout_for(self, g, dtype):
         """"dense" or "sparse" for this neighbour list (see `layout`)."""
         if self.layout != "auto":
             return self.layout
         n, n_edges = g.n_nodes, len(g.senders)
         K = max(int(np.bincount(np.asarray(g.senders), minlength=n).max(initial=0)), 1)
+        return self._layout_from(n, n_edges, K, dtype)
+
+    def _layout_from(self, n, n_edges, K, dtype):
+        if self.layout != "auto":
+            return self.layout
         if n_edges / (n * K) < MIN_DENSE_FILL:
             return "sparse"
         need = estimate_a_bytes(self.model, "dense", n, n_edges, K, np.dtype(dtype).itemsize)

@@ -48,3 +48,45 @@ def test_model_body_runs_once_per_shape(monkeypatch, layout, method):
     assert calc.last_layout == layout
     assert len(calls) == 1                       # traced once, then the compiled call
     assert E[0] == E[1] == E[2]
+
+
+def test_last_timing_splits_neighbour_list_and_model():
+    """The benchmark reports model time on its own; `call - nlist` also counted
+    host regrouping and transfers as 'model'."""
+    calc = ACECalculator(str(pace_fixture(FIX / "gesi_sbessel.yace")))
+    at = _bulk()
+    for _ in range(2):
+        calc.calculate(at, ["energy", "forces", "stress"], all_changes)
+    t = calc.last_timing
+    assert t["nlist_s"] > 0 and t["model_s"] > 0 and t["nlist_backend"]
+
+
+def test_dense_path_uses_native_neighbour_matrix(monkeypatch):
+    """With matscipy_neighbours, the dense (n, K) graph comes straight from
+    neighbour_matrix (no sparse build + regroup), K cached across calls and
+    re-learnt when an atom outgrows it; results match the sparse layout."""
+    import ace_jax.eval.nlist as nl
+    if not nl.have_matscipy_neighbours():
+        pytest.skip("matscipy_neighbours not installed")
+    import matscipy_neighbours
+    calls = []
+    orig = matscipy_neighbours.neighbour_matrix
+
+    def counted(*a, **k):
+        calls.append(k.get("max_neighbours"))
+        return orig(*a, **k)
+
+    monkeypatch.setattr(matscipy_neighbours, "neighbour_matrix", counted)
+    y = str(pace_fixture(FIX / "gesi_sbessel.yace"))
+    at = _bulk()
+    dense = ACECalculator(y, layout="dense")
+    for _ in range(3):
+        dense.calculate(at, ["energy", "forces", "stress"], all_changes)
+    assert len(calls) >= 2 and dense.last_timing["nlist_backend"] == "neighbour_matrix"
+    dense._k_hint = 2                                  # too small: must recover
+    dense.calculate(at, ["energy", "forces", "stress"], all_changes)
+    E, F = dense.results["energy"], dense.results["forces"].copy()
+    sparse = ACECalculator(y, layout="sparse")
+    sparse.calculate(at, ["energy", "forces", "stress"], all_changes)
+    assert E == pytest.approx(sparse.results["energy"], abs=1e-10)
+    np.testing.assert_allclose(F, sparse.results["forces"], atol=1e-9)
