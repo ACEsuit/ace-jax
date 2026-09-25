@@ -96,6 +96,10 @@ def run_sweep(host, runner, results_path, select=lambda c: True):
         if c.key() in done or _line(c) in dead:
             continue
         row = runner(c)
+        if row.get("status") == "error":        # transient (e.g. GPU state): retry once
+            first = row.get("error")
+            row = runner(c)
+            row["retried"], row["first_error"] = True, first
         row["_key"], row["_line"], row["host"] = list(c.key()), list(_line(c)), host
         with results_path.open("a") as f:
             f.write(json.dumps(row) + "\n")

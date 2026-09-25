@@ -130,6 +130,29 @@ def sweep(seed: str = "", only: str = "", parity_only: bool = False):
     return res.read_text()
 
 
+@app.function(gpu="A100-80GB", timeout=3600)
+def debug_case(model: str, n: int, dtype: str = "float64"):
+    """One LAMMPS case, returning the full stderr/stdout/log (the sweep keeps a summary)."""
+    import os
+    import subprocess
+    import sys
+    bench = pathlib.Path("/ace-jax/bench/scaling")
+    if not any((bench / "models").glob("mace_*.model")):
+        subprocess.run([sys.executable, str(bench / "models.py"), "mace"], check=True,
+                       capture_output=True)
+    lmp = "/opt/lmp-jax.sh" if model.startswith("acejax") else "/opt/lmp.sh"
+    work = "/tmp/debug_case"
+    p = subprocess.run([sys.executable, str(bench / "run_lammps.py"), model, str(n), dtype, "gpu",
+                        lmp, "1", work], capture_output=True, text=True,
+                       env={**os.environ, "PYTHONPATH": "/ace-jax/bench:/ace-jax/src"})
+    log = pathlib.Path(work, "log.lammps")
+    lmp_out = subprocess.run(["bash", "-c", f"cd {work} && {lmp} -in in.bench -nocite -log none "
+                              "-k on g 1 -sf kk -pk kokkos newton on neigh half 2>&1 | tail -60"],
+                             capture_output=True, text=True).stdout
+    return {"stdout": p.stdout[-3000:], "stderr": p.stderr[-6000:],
+            "log": log.read_text()[-3000:] if log.exists() else "", "rerun": lmp_out}
+
+
 @app.local_entrypoint()
 def main(only: str = "", parity_only: bool = False):
     import sys
@@ -138,7 +161,9 @@ def main(only: str = "", parity_only: bool = False):
     RESULTS.parent.mkdir(parents=True, exist_ok=True)
     prior = RESULTS.read_text() if RESULTS.exists() else ""
     seed = seed_for(prior, SNAPSHOTS, only) if only else prior
-    merged, added = merge_rows(prior, sweep.remote(seed, only, parity_only))
+    rows = sweep.remote(seed, only, parity_only)
+    # re-read now: parallel runs (one per --only) each finish at their own time
+    merged, added = merge_rows(RESULTS.read_text() if RESULTS.exists() else "", rows)
     RESULTS.write_text(merged)
     print(f"{added} new rows ->", RESULTS)
     for r in (json.loads(l) for l in merged.splitlines() if l.strip()):

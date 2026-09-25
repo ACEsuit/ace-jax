@@ -321,3 +321,22 @@ def test_seed_for_code_combines_results_and_snapshot(tmp_path):
     seed = seed_for(p + "\n", tmp_path, "acejax-pace")
     assert seed.splitlines() == [p, r]
     assert seed_for(p + "\n", tmp_path, "mace").splitlines() == [p]      # no snapshot
+
+
+def test_run_sweep_retries_an_error_once(tmp_path):
+    """A transient failure (GPU state left by the previous case) must not end a
+    whole line; a second error does, and oom is never retried."""
+    from scaling.sweep import run_sweep
+    calls = []
+
+    def runner(c):
+        calls.append((c.model, c.n_atoms))
+        first = calls.count((c.model, c.n_atoms)) == 1
+        return {"status": "error" if (first and c.n_atoms == 256) else "ok"}
+
+    only = lambda c: c.model == "mlpace/SiGe/small"
+    run_sweep("local-cpu", runner, tmp_path / "r.jsonl", select=only)
+    rows = [json.loads(l) for l in (tmp_path / "r.jsonl").read_text().splitlines()]
+    assert rows[0]["status"] == "ok" and rows[0].get("retried") is True
+    assert calls[:2] == [("mlpace/SiGe/small", 256)] * 2
+    assert all(r["status"] == "ok" for r in rows) and len(rows) > 1
