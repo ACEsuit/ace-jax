@@ -19,6 +19,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from ace_jax.eval import highest_precision, load
+from ace_jax.construct.prior import prior_diagonal
 from ace_jax.fit.data import build_dataset, load_configs
 from ace_jax.fit.hypers import Hypers, default_prior, to_array
 from ace_jax.fit.inducing import GPConfig, descriptor_scale, select_inducing, site_features
@@ -137,7 +138,7 @@ with highest_precision():
     timings["inducing"] = time.time() - t
     print(f"M = {ind.XM.shape[0]}  len_basis = {cfg.len_basis}", flush=True)
     prob = Problem(KernelSpec(a.kernel, not a.no_bump, cfg.D), model, ind, cfg,
-                   jnp.asarray(z["gamma"]), default_prior(a.r0))
+                   jnp.asarray(prior_diagonal(z, meta, a.model)), default_prior(a.r0))
     # theta-split cached likelihood: the theta-independent linear Gram G_BB is
     # streamed once; only the M residual columns move per evaluation (both arms).
     from ace_jax.fit.objective import make_lml

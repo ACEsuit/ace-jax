@@ -14,6 +14,7 @@ import jax.numpy as jnp
 from jax.sharding import Mesh
 
 from .eval import highest_precision, load
+from .construct.prior import prior_diagonal
 from .fit.data import build_dataset, load_configs
 from .fit.hypers import Hypers, default_prior, to_array
 from .fit.inducing import GPConfig, descriptor_scale, select_inducing, site_features
@@ -121,7 +122,7 @@ def run(a):
         ind = select_inducing(X, S, ds_train.node_z, ds_train.node_mask, a.m_per_species,
                               descriptor_scale(X, ds_train.node_mask))
         prob = Problem(KernelSpec(a.kernel, not a.no_bump, cfg.D), model, ind, cfg,
-                       jnp.asarray(z["gamma"]), default_prior(a.r0))
+                       jnp.asarray(prior_diagonal(z, meta, a.model)), default_prior(a.r0))
         # ds_fit is what the (possibly sharded) objective sees; ds_train stays
         # unpadded for predict_mixture below (single-device, brief says so).
         ds_fit = _pad_to_multiple(ds_train, a.devices) if mesh is not None else ds_train

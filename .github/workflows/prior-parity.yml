@@ -1,0 +1,73 @@
+name: prior-parity
+# Guards the algebraic smoothness prior port (construct/prior.py): regenerates
+# the committed oracle fixtures with ACEpotentials.jl and re-runs the parity
+# tests (bit-for-bit gamma). CI-only; not required for pip users.
+on:
+  push:
+    paths:
+      - "src/ace_jax/construct/prior.py"
+      - "tests/test_smoothness_parity.py"
+      - "julia/smoothness_reference.jl"
+      - "julia/Project.toml"
+      - "fixtures/smoothness_ref_*.npz"
+      - ".github/workflows/prior-parity.yml"
+  schedule:
+    - cron: "0 7 * * 1"   # weekly
+  workflow_dispatch:
+jobs:
+  parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: "1.11"
+      - name: Julia env (ACEpotentials + NPZ)
+        run: |
+          julia --project=julia -e '
+            using Pkg
+            Pkg.Registry.add("General")
+            Pkg.add(["ACEpotentials", "NPZ"])
+            Pkg.instantiate()'
+      - name: Set aside the committed oracle fixtures
+        run: mkdir -p "$RUNNER_TEMP/committed" && cp fixtures/smoothness_ref_*.npz "$RUNNER_TEMP/committed/"
+      - name: Regenerate oracle fixtures (nnll basis + prior diagonal)
+        run: |
+          ACE_ELEMENTS=Si,Ge    ACE_ORDER=2 ACE_TOTALDEGREE=6 \
+            julia --project=julia julia/smoothness_reference.jl fixtures/smoothness_ref_SiGe_o2d6.npz
+          ACE_ELEMENTS=Cr,Mn,Fe ACE_ORDER=2 ACE_TOTALDEGREE=5 \
+            julia --project=julia julia/smoothness_reference.jl fixtures/smoothness_ref_CrMnFe_o2d5.npz
+          ACE_ELEMENTS=Cr,Mn,Fe ACE_ORDER=3 ACE_TOTALDEGREE=6 \
+            julia --project=julia julia/smoothness_reference.jl fixtures/smoothness_ref_CrMnFe_o3d6.npz
+          ACE_ELEMENTS=Si,Ge    ACE_ORDER=4 ACE_TOTALDEGREE=5 ACE_WL=0.5 \
+            julia --project=julia julia/smoothness_reference.jl fixtures/smoothness_ref_SiGe_o4d5w05.npz
+      - name: Committed fixtures must match the regenerated ones
+        # The committed files are what pip-only test.yml and every developer
+        # test against; a green port-vs-fresh-oracle run says nothing about them.
+        # Compared array-by-array, not by bytes: NPZ.jl stamps zip entries with
+        # the write time, so a regenerated file is never byte-identical.
+        run: |
+          uv run --extra gp python - "$RUNNER_TEMP/committed" <<'EOF'
+          import glob, os, sys
+          import numpy as np
+          committed_dir, stale = sys.argv[1], []
+          for fresh in sorted(glob.glob("fixtures/smoothness_ref_*.npz")):
+              a = np.load(os.path.join(committed_dir, os.path.basename(fresh)))
+              b = np.load(fresh)
+              ignore = {"acepotentials_version", "julia_version"}   # provenance, not content
+              keys = (set(a.files) | set(b.files)) - ignore
+              bad = [k for k in sorted(keys)
+                     if k not in a.files or k not in b.files
+                     or a[k].dtype != b[k].dtype or not np.array_equal(a[k], b[k])]
+              if bad:
+                  stale.append(f"{fresh}: {bad}")
+          if stale:
+              print("::error::committed smoothness_ref fixtures are stale -- regenerate with "
+                    "julia/smoothness_reference.jl and commit:\n  " + "\n  ".join(stale))
+              sys.exit(1)
+          print("committed fixtures match the regenerated oracle")
+          EOF
+      - name: Re-run prior parity tests against regenerated fixtures
+        env: { JAX_PLATFORM_NAME: cpu, JAX_ENABLE_X64: "1" }
+        run: uv run --extra gp pytest -q tests/test_smoothness_parity.py
