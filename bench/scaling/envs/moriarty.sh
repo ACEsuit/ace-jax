@@ -86,6 +86,9 @@ symmetrix_py() {        # for symmetrix_extract_mace (model export only)
 plugin() {
   local inc pjrt
   inc=$("$VENV/bin/python" -c "import jaxlib, os; print(os.path.join(os.path.dirname(jaxlib.__file__), 'include'))")
+  # always configure fresh: changing CMAKE_CXX_COMPILER on an existing cache makes
+  # CMake wipe it and silently drop the -D values given here
+  rm -rf "$ROOT/lammps-jax/build-plugin-gpu-pjrt"
   cmake -S "$ROOT/lammps-jax/cpp" -B "$ROOT/lammps-jax/build-plugin-gpu-pjrt" \
     -D CMAKE_CXX_COMPILER="$LAMMPS_DEV/lib/kokkos/bin/nvcc_wrapper" -D CMAKE_BUILD_TYPE=Release \
     -D CMAKE_CXX_FLAGS="-fno-lto -fopenmp" -D CMAKE_SHARED_LINKER_FLAGS="-fno-lto -fopenmp" \
