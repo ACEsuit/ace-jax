@@ -107,12 +107,20 @@ def run_sweep(host, runner, results_path, select=lambda c: True):
             dead.add(_line(c))
 
 
-def child_env(env):
-    """The login environment (the lmp wrappers `module load`), plus overrides."""
+def child_env(env, mode=None, cpus=None):
+    """The login environment (the lmp wrappers `module load`), plus overrides.
+    Threads: a standalone case is one process and gets every core (torch reads
+    OMP_NUM_THREADS; moriarty's login env pins it to 1); MPI LAMMPS runs one
+    thread per rank."""
     here = pathlib.Path(__file__).parent
-    return {**os.environ, **env.get("os_env", {}),
-            "PYTHONPATH": env.get("pythonpath", str(here.parent)),
-            **({"PJRT_PLUGIN": env["pjrt"]} if env.get("pjrt") else {})}   # run_lammps reads it
+    out = {**os.environ, **env.get("os_env", {}),
+           "PYTHONPATH": env.get("pythonpath", str(here.parent)),
+           **({"PJRT_PLUGIN": env["pjrt"]} if env.get("pjrt") else {})}   # run_lammps reads it
+    if mode == "standalone" and cpus:
+        out["OMP_NUM_THREADS"] = str(cpus)
+    elif mode == "lammps":
+        out["OMP_NUM_THREADS"] = "1"
+    return out
 
 
 def gate_in_subprocess(host, env):
@@ -142,7 +150,9 @@ def subprocess_runner(host, env):
             lmp = env.get("lmp_jax", env["lmp"]) if c.code.startswith("acejax") else env["lmp"]
             cmd = [sys.executable, str(here / "run_lammps.py"), c.model, str(c.n_atoms), c.dtype,
                    c.device, lmp, str(c.ranks), f"/tmp/bench_{host}_{c.n_atoms}"]
-        p = subprocess.run(cmd, capture_output=True, text=True, timeout=7200, env=child_env(env))
+        cpus = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else os.cpu_count()
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=7200,
+                           env=child_env(env, mode=c.mode, cpus=cpus))
         lines = [l for l in p.stdout.splitlines() if l.startswith("{")]
         return json.loads(lines[-1]) if lines else {"status": "error", "error": p.stderr[-300:]}
     return run

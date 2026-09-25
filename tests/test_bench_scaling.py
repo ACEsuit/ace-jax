@@ -343,3 +343,14 @@ def test_run_sweep_retries_an_error_once(tmp_path):
     assert rows[0]["status"] == "ok" and rows[0].get("retried") is True
     assert calls[:2] == [("mlpace/SiGe/small", 256)] * 2
     assert all(r["status"] == "ok" for r in rows) and len(rows) > 1
+
+
+def test_child_env_threads_per_mode(monkeypatch):
+    """moriarty's login env sets OMP_NUM_THREADS=1: standalone (torch, one
+    process) must get every core; MPI LAMMPS keeps one thread per rank."""
+    from scaling.sweep import child_env
+    monkeypatch.setenv("OMP_NUM_THREADS", "1")
+    env = {"pythonpath": "/p"}
+    assert child_env(env, mode="standalone", cpus=32)["OMP_NUM_THREADS"] == "32"
+    assert child_env(env, mode="lammps", cpus=32)["OMP_NUM_THREADS"] == "1"
+    assert child_env(env)["OMP_NUM_THREADS"] == "1"                    # unchanged by default
