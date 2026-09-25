@@ -77,6 +77,10 @@ p.add_argument("--no-predict-train", action="store_true", help="skip train-set U
 p.add_argument("--rungs", default="map,laplace"); p.add_argument("--n-draws", type=int, default=64)
 p.add_argument("--map-steps", type=int, default=150); p.add_argument("--map-lr", type=float, default=0.02)
 p.add_argument("--opt", choices=["lbfgs", "adam"], default="lbfgs")
+p.add_argument("--map-restarts", type=int, default=1,
+               help="L-BFGS MAP from this many starts (the --init/prior-mean point plus seeded "
+                    "hyperprior draws, clipped to the box); the best log-posterior wins.  The joint "
+                    "LML is multimodal: single starts ended 620 nats apart on Cantor-1k")
 p.add_argument("--vi-steps", type=int, default=1000)
 p.add_argument("--nuts-warmup", type=int, default=100); p.add_argument("--nuts-samples", type=int, default=100)
 p.add_argument("--nuts-chains", type=int, default=1)
@@ -287,7 +291,6 @@ with highest_precision():
             raise SystemExit("--fix-rho is implemented for --opt lbfgs only")
         # 10-d smooth objective with an exact gradient: L-BFGS converges in a
         # few tens of evaluations where Adam needs hundreds of (expensive) steps
-        from scipy.optimize import minimize
         from ace_jax.fit.hypers import from_array, log_prior
         if a.lml == "host-cache":           # streamed: value_and_grad cannot sit inside a jit
             prior_vg = jax.jit(jax.value_and_grad(lambda arr: log_prior(from_array(arr), prob.prior)))
@@ -297,15 +300,14 @@ with highest_precision():
         else:
             logpost = jax.jit(lambda arr: lik(arr) + log_prior(from_array(arr), prob.prior))
             vg = jax.jit(jax.value_and_grad(logpost))
-        hist = []
-        def fg(x):
-            t1 = time.time(); v, g = vg(jnp.asarray(x)); g.block_until_ready(); v = float(v); hist.append(v)
-            print(f"  lbfgs eval {len(hist)}  logpost = {v:.6g}  ({time.time() - t1:.0f} s)", flush=True)
-            if not np.isfinite(v) or not np.all(np.isfinite(np.asarray(g))):
-                # an ill-conditioned trial point (e.g. sigma_E -> 0): a large
-                # finite penalty makes the line search back off instead of aborting
-                return 1e12, np.zeros_like(x)
-            return -v, -np.asarray(g, float)
+        from ace_jax.fit.multistart import multistart_map, prior_starts
+        tick = [time.time()]
+        def vg_host(x):
+            v, g = vg(jnp.asarray(x)); g.block_until_ready()
+            return float(v), np.asarray(g, float)
+        def log_eval(k, i, v):
+            print(f"  lbfgs start {k} eval {i}  logpost = {v:.6g}  ({time.time() - tick[0]:.0f} s)", flush=True)
+            tick[0] = time.time()
         x0 = np.asarray(to_array(init or prob.prior.mu), float)
         # log-space boxes: generous, but keep the Cholesky away from sigma -> 0
         lo = np.log([0.05, 1e-3, 0.1, 1.5, 1e-3, 0.1, 1e-2, 1e-4, 1e-4, 1e-4])
@@ -322,11 +324,17 @@ with highest_precision():
             lo, hi, x0 = lo.copy(), hi.copy(), x0.copy()
             lo[5] = hi[5] = x0[5] = np.log(rho_fix)
             print(f"fix-rho: rho pinned at {rho_fix:.4f}", flush=True)
-        x0 = np.clip(x0, lo, hi)
-        res = minimize(fg, x0, jac=True, method="L-BFGS-B", bounds=list(zip(lo, hi)),
-                       options={"maxiter": a.map_steps, "maxfun": 4 * a.map_steps})
-        theta_map = Hypers(*[float(v) for v in res.x])
-        print("L-BFGS:", res.message, "nfev", res.nfev, flush=True)
+        starts = prior_starts(prob.prior, a.map_restarts, lo, hi, x0, seed=a.seed)
+        best, runs = multistart_map(vg_host, starts, lo, hi, a.map_steps, log=log_eval)
+        for r in runs:
+            print(f"L-BFGS start {r['start']}: logpost {r['value']:.6g}  nfev {r['nfev']}  {r['message']}",
+                  flush=True)
+        json.dump([{"start": r["start"], "logpost": r["value"], "nfev": r["nfev"], "message": r["message"],
+                    "x0": r["x0"].tolist(), "x": r["x"].tolist()} for r in runs],
+                  open(out / "map_restarts.json", "w"), indent=1)
+        theta_map = Hypers(*[float(v) for v in best["x"]])
+        print(f"L-BFGS: best of {len(runs)} start(s) = start {best['start']}, logpost {best['value']:.6g}",
+              flush=True)
     else:
         theta_map = run_map(lik, prob.prior, steps=a.map_steps, lr=a.map_lr, seed=a.seed, init=init)
     timings["map"] = time.time() - t
