@@ -78,7 +78,12 @@ image = (
         "export LD_LIBRARY_PATH=/opt/lammps-dev/build-kk:${LD_LIBRARY_PATH:-}\\n"
         "exec /opt/lammps-dev/build-kk/lmp \"$@\"\\n' > /opt/lmp-jax.sh && chmod +x /opt/lmp-jax.sh",
     )
-    .env({"PYTHONPATH": "/ace-jax/src:/ace-jax/bench"})
+    # torch's cu130 wheel JIT-compiles kernels with NVRTC, which dlopens
+    # libnvrtc-builtins.so.13.0 by name: put the pip CUDA 13 libs on the loader
+    # path (sonames .so.13, so the CUDA 12 stack of JAX and LAMMPS is unaffected)
+    .env({"PYTHONPATH": "/ace-jax/src:/ace-jax/bench",
+          "LD_LIBRARY_PATH": "/usr/local/lib/python3.12/site-packages/nvidia/cu13/lib"
+                             ":/usr/local/nvidia/lib:/usr/local/nvidia/lib64"})
     .add_local_dir(ROOT / "src", "/ace-jax/src")
     .add_local_dir(ROOT / "bench", "/ace-jax/bench",
                    ignore=["**/__pycache__", "pace_modal/*.json*", "scaling/results/*"])
