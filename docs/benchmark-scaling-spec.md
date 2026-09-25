@@ -55,12 +55,13 @@ reported as a failure, never as a timing.
 ## Metrics (one JSON row per case)
 
 - **Timing:**
-  - `force_s`: median of 10 timed energy + forces (+ virial) calls after
-    warm-up. Standalone excludes neighbour-list construction, which is
-    reported separately as `nlist_s`.
+  - `call_s`: median ASE-calculator call (energy + forces + stress), including
+    the neighbour list, for every code. MACE builds its graph inside the call,
+    so this is the like-for-like standalone number. ace-jax also reports
+    `force_s` (the jitted model call alone) and `nlist_s`.
   - `step_s`: LAMMPS loop time per MD step, from a 200-step timed run after a
     50-step warm-up.
-  - `atom_steps_per_s = n_atoms / (force_s or step_s)`.
+  - `atom_steps_per_s = n_atoms / (step_s or call_s)`.
   - `compile_s`: JIT / `jax.export` / `torch.compile` time.
 - **Memory:** `peak_bytes` (device peak; peak RSS on CPU), and whether the
   case ran out of memory.
