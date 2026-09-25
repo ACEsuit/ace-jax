@@ -169,3 +169,9 @@ def test_symmetrix_cmd_uses_current_cli():
     assert cmd[1:] == ["--model", "x/mace_mh1.model", "--atomic-numbers", "14", "32",
                        "--output", "x/out.json", "--head", "omat_pbe"]
     assert "--head" not in symmetrix_cmd("m", [14], None, "o")
+
+
+def test_mace_mp_sizes_are_symmetrix_exportable_revision():
+    """The original MP-0 checkpoints have a residual first block Symmetrix rejects."""
+    from scaling.models import MACE
+    assert [MACE[s] for s in ("small", "medium", "large")] == ["small-0b2", "medium-0b2", "large-0b2"]

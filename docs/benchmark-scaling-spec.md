@@ -38,12 +38,16 @@ slower, by how much, and up to what system size each code fits.
   existing `si_s69` / `si_m710` / `si_l2849` ladder. Fitted models are used
   where they exist (the Cantor d6 model from `bench/acegp_cantor`); otherwise
   random coefficients.
-- **MACE:** MACE-MP-0 small / medium / large, plus MACE-MH-1, via
+- **MACE:** MACE-MP-0b2 small / medium / large, plus MACE-MH-1, via
   `mace-torch`. All four cover the seven elements, and no training is needed.
-  MH-1 extends the MACE model-size axis beyond MP-0. It is multi-head: use its
-  default head and record which head that was. If `symmetrix_extract_mace`
-  can't export MH-1, its LAMMPS rows are recorded as `unsupported` and only
-  its standalone rows are timed.
+  The b2 revision is used rather than the original MP-0 checkpoints because
+  Symmetrix only exports models whose first interaction is the plain or
+  density block, and the original MP-0 (like MH-1) uses the residual one.
+  MP-0b2 keeps the same size ladder and r_max = 5 A.
+  MH-1 extends the MACE model-size axis beyond MP-0. It is multi-head: both
+  sides evaluate the `omat_pbe` head, pinned explicitly. Symmetrix can't
+  export MH-1 (residual first block), so its LAMMPS rows are recorded as
+  `unsupported` and only its standalone rows are timed.
 - **Phase B:** the ace-jax production model (linear + species embedding +
   density embedding) at the same three sizes. See "Phase B".
 
@@ -158,7 +162,7 @@ are edited by hand.
 
 **Phase A (now, independent of the other PRs):**
 - the exporter;
-- structures, models (PACE `.yace`, ACE linear, MACE-MP-0), environments and
+- structures, models (PACE `.yace`, ACE linear, MACE-MP-0b2 / MH-1), environments and
   parity;
 - full sweeps on moriarty CPU, moriarty A4500 and Modal A100;
 - the plots and a draft of `docs/benchmarks.md`.

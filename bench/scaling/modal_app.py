@@ -94,7 +94,7 @@ def sweep(results_so_far: str = "", only: str = "", parity_only: bool = False):
         {"lmp": "/opt/lmp.sh", "lmp_jax": "/opt/lmp-jax.sh", "pjrt": pjrt, "pythonpath": "/ace-jax/bench:/ace-jax/src",
          "python": sys.executable}))
     models = bench / "models"
-    if not any(models.glob("mace_*.model")):                 # MACE-MP-0 / MH-1 + Symmetrix
+    if not any(models.glob("mace_*.model")):                 # MACE-MP-0b2 / MH-1 + Symmetrix
         subprocess.run([sys.executable, str(bench / "models.py"), "mace"], check=True)
     res = pathlib.Path("/tmp/modal-a100.jsonl")
     res.write_text(results_so_far)                          # resume: skip finished cases

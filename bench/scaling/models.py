@@ -2,7 +2,7 @@
 
     python bench/scaling/models.py pace   # pyace venv: random-coefficient .yace x3 x2
     python bench/scaling/models.py ace    # Julia: linear ACE .npz x3 x2
-    python bench/scaling/models.py mace   # MACE-MP-0 s/m/l + Symmetrix .json per system
+    python bench/scaling/models.py mace   # MACE-MP-0b2 s/m/l + MH-1 + Symmetrix .json per system
 Model files live in bench/scaling/models/ (git-ignored); manifest.json records
 provenance (builder, parameters, n_params, sha256).
 """
@@ -29,7 +29,9 @@ ACE_DEG_BY_SYSTEM = {"SiGe": ACE_DEG,
 # explicit bond length where ACEpotentials has no default (fcc nearest neighbour
 # a / sqrt(2) at a = 3.59 A); SiGe uses the library defaults
 ACE_R0 = {"Cantor": 2.54}
-MACE = {"small": "small", "medium": "medium", "large": "large",   # MACE-MP-0
+# MACE-MP-0b2, not the original MP-0: Symmetrix only exports a plain/density
+# first interaction block, and MP-0 (like MH-1) has a residual one
+MACE = {"small": "small-0b2", "medium": "medium-0b2", "large": "large-0b2",
         "mh1": "mh-1"}                                              # MACE-MH-1 (multi-head)
 MACE_SIZES = tuple(MACE)
 # multi-head models: the head both the standalone calculator and the Symmetrix
@@ -134,7 +136,7 @@ def symmetrix_cmd(model, zs, head, out):
 
 
 def build_mace():
-    """Run inside the MACE venv (mace-torch + symmetrix): download MACE-MP-0 and
+    """Run inside the MACE venv (mace-torch + symmetrix): download MACE-MP-0b2 / MH-1 and
     extract one Symmetrix .json per (size, system) -- each is element-specific."""
     from ase.data import atomic_numbers
     from mace.calculators.foundations_models import download_mace_mp_checkpoint
@@ -144,7 +146,7 @@ def build_mace():
         src = download_mace_mp_checkpoint(tag)
         p = DIR / f"mace_{size}.model"
         p.write_bytes(pathlib.Path(src).read_bytes())
-        out[str(p)] = {"builder": "mace-mp-0" if size != "mh1" else "mace-mh-1", "tag": tag,
+        out[str(p)] = {"builder": f"mace-mp:{tag}", "tag": tag,
                        "sha256": _sha(p)}
         for system, els in ELEMENTS.items():
             zs = sorted(atomic_numbers[e] for e in els)
