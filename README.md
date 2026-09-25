@@ -17,7 +17,7 @@ pure **Python/JAX** — no Julia needed to fit or run.
 
 ```bash
 pip install ace-jax             # core: evaluate + linear fit + ASE calculator
-pip install ace-jax[gp]         # + GP/UQ hyperparameter ladder
+pip install ace-jax[gp]         # + `ace-jax fit` pipeline: GP/UQ hyperparameter ladder
 pip install ace-jax[authoring]  # + Python basis coupling (EquivariantTensors via juliacall)
 pip install ace-jax[cuda]       # + CUDA 12 JAX
 ```
@@ -27,13 +27,13 @@ No Julia is required to **use, fit, or evaluate** a model. A model **definition*
 model-authoring seam has three paths:
 
 - **use / fit / evaluate an existing model** → only the `.npz` (no Julia);
-- **build the SO(3) coupling table in Python** → the `authoring` extra
-  constructs the `(n,l)` specification and the symmetry-adapted A→B coefficients
-  directly via EquivariantTensors. `juliacall`/`juliapkg` auto-provision a
-  pinned private Julia the first time (no manual install, and no full
-  ACEpotentials stack). This is the coupling stage; radials / pair basis /
-  embedding are still taken from a Julia export today (a follow-up closes that
-  gap);
+- **author a new model in Python** → the `authoring` extra builds the whole
+  model (`ace-jax construct`, including species-embedded models): the `(n,l)`
+  specification and the symmetry-adapted A→B coefficients come from
+  EquivariantTensors, whose pinned private Julia `juliacall`/`juliapkg`
+  provision on first use (no manual install, no ACEpotentials stack); radials,
+  pair basis and embedding are built in Python. A per-shape coupling cache means
+  Julia runs only for a basis shape not seen before;
 - **export a whole new basis from Julia** → the original path
   (`julia/export_model.jl`), still fully supported.
 
@@ -51,7 +51,9 @@ atoms.calc = ACECalculator("si_fitted.npz")
 atoms.get_potential_energy(); atoms.get_forces()
 ```
 
-CLI: `ace-jax --help` (fit / gp-fit / eval / predict).
+CLI: `ace-jax` (short alias `aj`) with subcommands `construct`, `fit` and `eval`;
+see [Command line](#command-line-ace-jax--aj) below. An agent-oriented guide lives in
+[`skills/ace-jax/SKILL.md`](skills/ace-jax/SKILL.md).
 
 ### PACE (pacemaker) potentials
 
@@ -105,23 +107,77 @@ builds the frozen-element-embedding model (`construct.model.build_embedding_mode
 the ace1-compatible `ace_embedding_model`) without Julia, parity-tested against
 ACEpotentials' exports.
 
-## Fitting (`ace-jax fit`)
+## Command line (`ace-jax` / `aj`)
 
-`ace-jax fit` and the research driver `bench/acegp_cantor/run.py` share one pipeline
-(`ace_jax.fit.pipeline`: `FitConfig`, `load_fit_data`, `fit`, `write_outputs`).
-Common options:
+`aj` is the same entry point as `ace-jax`. Three subcommands cover the workflow:
+**construct** a model definition, **fit** it to labelled data, and **eval** the
+fitted model. `si.npz` is any model definition, e.g. from
+`aj construct --elements Si --order 3 --max-degree 10 --out si.npz`. The examples
+below were checked on the Si test fixture (`si_fitted.npz`, with `si_tiny_train.xyz`
+split into train/test/ood files). The `--*-key` flags name the extxyz fields that
+hold the labels.
+
+```bash
+K="--energy-key dft_energy --force-key dft_force --virial-key dft_virial"
+
+# linear ACE (M = 0): Bayesian linear regression, fitted model -> out_linear/model.npz
+aj fit --model si.npz --train train.xyz --test test.xyz $K \
+    --m-per-species 0 --rungs map --r0 2.35 --out out_linear
+aj eval --model out_linear/model.npz --data test.xyz $K --forces
+
+# hybrid ACE + GP: 6 inducing sites per species, best of 3 L-BFGS MAP starts
+# -> out_gp/gp_model.npz  (add laplace to --rungs for hyperparameter draws)
+aj fit --model si.npz --train train.xyz --test test.xyz $K \
+    --m-per-species 6 --opt lbfgs --map-restarts 3 --map-steps 40 \
+    --rungs map --r0 2.35 --out out_gp
+aj eval --model out_gp/gp_model.npz --data test.xyz $K --forces --out pred.csv   # + energy_std
+
+# large data: PCA density features, design rows cached in host RAM, an OOD set
+aj fit --model si.npz --train train.xyz --test test.xyz --ood ood.xyz $K \
+    --m-per-species 6 --density pca --pca-d 8 --lml host-cache --opt lbfgs \
+    --map-steps 40 --rungs map --r0 2.35 --out out_hc
+
+# POPS misspecification uncertainty on the linear model
+aj fit --model si.npz --train train.xyz --test test.xyz $K \
+    --m-per-species 0 --uq pops --opt lbfgs --rungs map --r0 2.35 --out out_pops
+
+# one file split by a seeded permutation, E0 by least squares
+aj fit --model si.npz --data all.xyz --ntrain 40 --ntest 10 --e0 lsq $K \
+    --m-per-species 0 --rungs map --r0 2.35 --out out_split
+```
+
+`aj fit` and the research driver `bench/acegp_cantor/run.py` share one pipeline
+(`ace_jax.fit.pipeline`: `FitConfig`, `load_fit_data`, `fit`, `write_outputs`,
+`save_model`). Common options:
 
 - data: `--train/--test` files, or `--data` split with `--ntrain/--ntest/--test-start`;
   `--ood` for an extra test set; `--weights` takes an ACEfit weights dict or a list of
-  weight factors
+  weight factors; `--r0` (required) is the typical nearest-neighbour distance
+- model: `--m-per-species 0` is the linear model, `> 0` the hybrid GP (default 500)
 - GP features: `--density none|pair|pca` (`--pca-d`), `--embedding` (frozen species
   coregionalization)
 - likelihood: `--lml host-cache` caches the linear design rows in host RAM (GP arm,
   pair/pca features, L-BFGS, MAP only)
-- MAP: `--opt adam|lbfgs`, `--map-restarts N` (best of N L-BFGS starts; the joint LML
-  is multimodal)
-- UQ: `--rungs map,laplace,...` (`--laplace svi|fd`), or `--uq pops` on the linear arm
-  (`--m-per-species 0`)
+- MAP: `--opt adam|lbfgs` (default adam, 500 steps; L-BFGS is much faster on small
+  data), `--map-restarts N` (best of N L-BFGS starts; the joint LML is multimodal)
+- UQ: `--rungs map,laplace,pathfinder,vi,nuts` (`--laplace svi|fd`), or `--uq pops` on
+  the linear model. The CLI default is `map,laplace`; the Laplace rung takes a Hessian
+  through the whole LML, which is slow to compile (it did not finish within 30 min on a laptop CPU
+  for 40 Si configs), so use `--rungs map` for quick fits
+
+Outputs in `--out`: `metrics.csv` (test RMSE, MAE, CRPS, coverage, rms z per rung and
+quantity), `metrics_ood.csv`, `theta_map.json`, `draws_<rung>.npy`, `config.json`,
+and the **fitted model**:
+
+- linear: `model.npz`, an ordinary ACE model file (`aj.load`, `ACECalculator`,
+  `aj eval`);
+- GP: `gp_model.npz`, self-contained, loaded by
+  `GPCalculator.from_file("gp_model.npz")` (energy, forces, stress, `energy_std`,
+  `forces_std`) or `aj eval`. It stores one (Dt, Dt) posterior factor per
+  hyperparameter draw (Dt = basis size + M): `--model-draws N` keeps N draws of the
+  last rung (default 1, the MAP), and `--no-save-model` skips the file.
+
+A fit with `--baseline` saves no model, because its pair baseline is added outside the model.
 
 ## Julia parity (maintainers / CI only)
 
