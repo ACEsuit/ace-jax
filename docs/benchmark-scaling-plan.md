@@ -13,7 +13,7 @@
 **Tech stack:**
 - Python 3.12, JAX, ASE, matplotlib, pytest.
 - lammps-jax (`~/gits/lammps-jax`, editable), pyace (`pace_ref/.venv`) and mace-torch.
-- LAMMPS (develop, ≥ 10 Sep 2025) with KOKKOS / ML-PACE / ML-IAP / PYTHON.
+- LAMMPS (develop, ≥ 10 Sep 2025) with KOKKOS / ML-PACE / PYTHON, patched with Symmetrix (`pair_style symmetrix/mace`).
 - Julia `julia/export_model.jl` for ACE models.
 - Modal.
 
@@ -33,7 +33,7 @@
 
 1. **Periodic systems in LAMMPS use ghost atoms.** Senders are owned atoms, receivers may be ghosts, and ghost rows carry no edges. The exporter's energy must match `ACECalculator` on periodic cells, not only on clusters. Task 8's parity gate checks this on bulk cells.
 2. **Dense regrouping has to cope with edge order.** The packed LAMMPS edge buffer isn't guaranteed to be in sender order, and an atom may have more neighbours than `k_dense`. Regrouping must work on any order and fail loudly (NaN energy) on overflow. Task 1 tests shuffled order and overflow.
-3. **LAMMPS type order must follow the model's element order** (lammps-jax maps type t to species t−1; ML-PACE and ML-IAP map by the element names in `pair_coeff`). The data files are written with `specorder` equal to the model's elements, and Task 5 tests this for a reversed-order model (`gesi_sbessel`: Ge, Si).
+3. **LAMMPS type order must follow the model's element order** (lammps-jax maps type t to species t−1; ML-PACE and Symmetrix map by the element names in `pair_coeff`). The data files are written with `specorder` equal to the model's elements, and Task 5 tests this for a reversed-order model (`gesi_sbessel`: Ge, Si).
 4. **A run that ends with fewer atoms, or any NaN, is a failure, not a timing** (random-coefficient models). Task 5 parses the final atom count; Task 6 marks the row.
 5. **Out-of-memory is data.** The sweep records it and stops increasing N for that line, rather than crashing or retrying. Task 6 tests this with a fake runner.
 
@@ -413,7 +413,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Produces:
   - `MODELS`: an ordered list of dicts `{name, code, system, size, path, elements, n_params}`. Code is `acejax-pace`, `mlpace`, `acejax-ace` or `mace`; size is `small`, `medium` or `large`. The `mlpace` rows share the `.yace` files of `acejax-pace`.
   - `load_manifest() -> list[dict]` reads `bench/scaling/models/manifest.json`.
-  - Builders run in their own environments: `python bench/scaling/models.py pace --venv pace_ref/.venv` builds the `.yace` files with pyace; `models.py ace` runs `julia --project=julia julia/export_model.jl` per (system, size); `models.py mace` fetches MACE-MP-0 small / medium / large and converts each to ML-IAP (`mace_create_lammps_model --format=mliap`).
+  - Builders run in their own environments: `python bench/scaling/models.py pace --venv pace_ref/.venv` builds the `.yace` files with pyace; `models.py ace` runs `julia --project=julia julia/export_model.jl` per (system, size); `models.py mace` fetches MACE-MP-0 small / medium / large and extracts a Symmetrix `.json` per (size, system) with `symmetrix_extract_mace <model> --atomic-numbers <Z...>`. The file is specific to that element set.
 
 - [ ] **Step 1: Write the failing test** (manifest schema and size coverage)
 
@@ -441,7 +441,7 @@ def test_planned_models_cover_the_matrix():
 
     python bench/scaling/models.py pace   # pyace venv: random-coefficient .yace x3 x2
     python bench/scaling/models.py ace    # Julia: linear ACE .npz x3 x2
-    python bench/scaling/models.py mace   # MACE-MP-0 s/m/l + ML-IAP conversions
+    python bench/scaling/models.py mace   # MACE-MP-0 s/m/l + Symmetrix .json per system
 Model files live in bench/scaling/models/ (git-ignored); manifest.json records
 provenance (builder, parameters, n_params, sha256).
 """
@@ -475,7 +475,8 @@ def planned_models():
                      dict(name=f"acejax-ace/{system}/{size}", code="acejax-ace", system=system,
                           size=size, path=str(DIR / f"ace_{system}_{size}.npz"), elements=els),
                      dict(name=f"mace/{system}/{size}", code="mace", system=system, size=size,
-                          path=str(DIR / f"mace_mp0_{size}.model"), elements=els)]
+                          path=str(DIR / f"mace_mp0_{size}.model"), elements=els,
+                          symmetrix=str(DIR / f"mace_mp0_{size}_{system}.json"))]
     return rows
 
 
@@ -541,7 +542,10 @@ def build_ace():
 
 
 def build_mace():
-    """Run inside the MACE venv: download MACE-MP-0 and write ML-IAP models."""
+    """Run inside the MACE venv (mace-torch + symmetrix): download MACE-MP-0 and
+    extract one Symmetrix .json per (size, system) -- each is element-specific."""
+    import shutil
+    from ase.data import atomic_numbers
     from mace.calculators.foundations_models import download_mace_mp_checkpoint
     out = {}
     DIR.mkdir(parents=True, exist_ok=True)
@@ -549,9 +553,16 @@ def build_mace():
         src = download_mace_mp_checkpoint(tag)
         p = DIR / f"mace_mp0_{size}.model"
         p.write_bytes(pathlib.Path(src).read_bytes())
-        subprocess.run([sys.executable, "-m", "mace.cli.create_lammps_model", str(p),
-                        "--format=mliap"], check=True)
         out[str(p)] = {"builder": "mace-mp-0", "tag": tag, "sha256": _sha(p)}
+        for system, els in ELEMENTS.items():
+            zs = sorted(atomic_numbers[e] for e in els)
+            subprocess.run([shutil.which("symmetrix_extract_mace"), str(p), "--atomic-numbers",
+                            *map(str, zs)], cwd=DIR, check=True)
+            made = DIR / f"mace_mp0_{size}-{'-'.join(map(str, zs))}.json"
+            dst = DIR / f"mace_mp0_{size}_{system}.json"
+            made.replace(dst)
+            out[str(dst)] = {"builder": "symmetrix_extract_mace", "from": str(p),
+                             "atomic_numbers": zs, "sha256": _sha(dst)}
     _update_manifest(out)
 
 
@@ -559,7 +570,11 @@ if __name__ == "__main__":
     {"pace": build_pace, "ace": build_ace, "mace": build_mace}[sys.argv[1]]()
 ```
 
-Before relying on it, check two names against the installed packages: `download_mace_mp_checkpoint`, and `mace.cli.create_lammps_model` with `--format=mliap` (`python -m mace.cli.create_lammps_model -h`). If either differs, adapt only `build_mace` and record a ruling.
+Before relying on it, check against the installed packages:
+- `download_mace_mp_checkpoint`;
+- `symmetrix_extract_mace -h`, including the output file name. Its README gives `my-mace.model --atomic-numbers 1 8` → `my-mace-1-8.json`.
+
+If either differs, adapt only `build_mace` and record a ruling.
 
 - [ ] **Step 3: Run the test; build the models; commit**
 
@@ -732,7 +747,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Styles:
   - `acejax`: `pair_style jax/kk ${pjrt}` / `pair_coeff * * <bundle.json>`, with Kokkos `newton off neigh full`.
   - `mlpace`: `pair_style pace` on CPU; `pair_style pace product` with Kokkos `newton on neigh half` on GPU.
-  - `mace`: `pair_style mliap unified <model>-mliap_lammps.pt 0` / `pair_coeff * * <elements>`, with Kokkos `newton on neigh half` on GPU.
+  - `mace`: `pair_style symmetrix/mace` / `pair_coeff * * <mace_mp0_<size>_<system>.json> <elements>`, with `-k on g 1 -sf kk` on GPU. The Kokkos neighbour settings are taken from Symmetrix's own examples and confirmed by the T8 parity gate.
 
 - [ ] **Step 1: Write the failing tests** (input text and log parsing; no LAMMPS needed)
 
@@ -761,7 +776,7 @@ def test_parse_log_flags_nan():
 
 @pytest.mark.parametrize("style,device,expect", [
     ("mlpace", "cpu", "pair_style pace\n"), ("mlpace", "gpu", "pair_style pace product"),
-    ("acejax", "gpu", "pair_style jax/kk ${pjrt}"), ("mace", "gpu", "pair_style mliap unified")])
+    ("acejax", "gpu", "pair_style jax/kk ${pjrt}"), ("mace", "gpu", "pair_style symmetrix/mace")])
 def test_lammps_input_pair_lines(style, device, expect):
     txt = lammps_input(style, "/m/model.yace", ["Ge", "Si"], "/d/x.data", device, 200)
     assert expect in txt
@@ -777,7 +792,7 @@ def test_lammps_input_pair_lines(style, device, expect):
 """One LAMMPS benchmark case -> one JSON row.
 
 Writes the data file with species in the model's element order (lammps-jax
-maps type t -> species t-1; ML-PACE / ML-IAP map by pair_coeff names), runs a
+maps type t -> species t-1; ML-PACE / Symmetrix map by pair_coeff names), runs a
 50-step warm-up and a timed segment, and parses the timed "Loop time".  Runs
 that lose atoms or produce NaN are failures, never timings.
 """
@@ -803,9 +818,8 @@ def _pair(style, model_path, elements, device):
     if style == "mlpace":
         return (f"pair_style pace product\n" if device == "gpu" else "pair_style pace\n") + \
                f"pair_coeff * * {model_path} {els}\n"
-    if style == "mace":
-        pt = model_path + "-mliap_lammps.pt"
-        return f"pair_style mliap unified {pt} 0\npair_coeff * * {els}\n"
+    if style == "mace":                     # Symmetrix: element-specific .json
+        return f"pair_style symmetrix/mace\npair_coeff * * {model_path} {els}\n"
     raise ValueError(style)
 
 
@@ -835,7 +849,7 @@ def run_case(row, n_atoms, dtype, device, lmp, ranks, workdir, pjrt=None):
     data = work / "x.data"
     write(data, at, format="lammps-data", specorder=row["elements"], masses=True)
     style = {"acejax-pace": "acejax", "acejax-ace": "acejax", "mlpace": "mlpace", "mace": "mace"}[row["code"]]
-    model = row["bundle"] if style == "acejax" else row["path"]
+    model = {"acejax": row.get("bundle"), "mace": row.get("symmetrix")}.get(style) or row["path"]
     (work / "in.bench").write_text(lammps_input(style, model, row["elements"], data, device, 200))
     cmd = [lmp, "-in", "in.bench", "-log", "log.lammps", "-nocite"]
     if device == "gpu":
@@ -878,7 +892,7 @@ For `acejax`, the sweep (Task 6) exports the bundle per (model, capacity) before
 Run: `uv run pytest tests/test_bench_scaling.py -q -k "lammps or parse"` → pass.
 ```bash
 git add bench/scaling/run_lammps.py tests/test_bench_scaling.py
-git commit -m "bench(scaling): LAMMPS one-case runner (jax/kk, pace[/kk], mliap unified)
+git commit -m "bench(scaling): LAMMPS one-case runner (jax/kk, pace[/kk], symmetrix/mace)
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -1107,11 +1121,17 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Create: `bench/scaling/envs/moriarty.sh`, `bench/scaling/envs/moriarty-cpu.json`, `bench/scaling/envs/moriarty-gpu.json`, `bench/scaling/README.md`
 
 - [ ] **Step 1: Write `envs/moriarty.sh`.** It is idempotent and installs into `/home/eng/essswb/bench-scaling/` (shared home):
-  1. Clone LAMMPS `develop` (≥ 10 Sep 2025) and configure with `PKG_KOKKOS` (CUDA + `Kokkos_ARCH_AMPERE86` + OpenMP), `PKG_ML-PACE`, `PKG_ML-IAP`, `PKG_PYTHON`, `BUILD_SHARED_LIBS=ON`, MPI on, using `module load CUDA/12.2.0`. Build, then `install-python`.
+  1. Clone LAMMPS `develop` (≥ 10 Sep 2025) and `wcwitt/symmetrix` (`--recursive`), then patch the tree with `symmetrix/pair_symmetrix/install.sh <lammps>`. Configure with:
+     - `PKG_KOKKOS` (CUDA + `Kokkos_ARCH_AMPERE86` + OpenMP, `CMAKE_CXX_COMPILER=lib/kokkos/bin/nvcc_wrapper`)
+     - `PKG_ML-PACE`, `PKG_PYTHON`
+     - `SYMMETRIX_KOKKOS=ON`, `SYMMETRIX_SPHERICART_CUDA=ON`
+     - `CMAKE_CXX_STANDARD=20`, `BUILD_SHARED_LIBS=ON`, MPI on
+
+     First check that the prerequisites are available: `module avail` for CMake ≥ 3.27, GCC ≥ 11 and `CUDA/12.2.0`. If they aren't, build Symmetrix on Modal only (spec risk) and record that in the README. Build, then `install-python`.
   2. Build the lammps-jax plugin against that tree for GPU PJRT (README recipe), and for CPU PJRT if lammps-jax supports it.
-  3. Create a venv (Python 3.12) with jax[cuda12], the `ace-jax` checkout (editable), lammps-jax (editable), mace-torch, cuequivariance-torch and matplotlib.
+  3. Create a venv (Python 3.12) with jax[cuda12], the `ace-jax` checkout (editable), lammps-jax (editable), mace-torch, cuequivariance-torch, symmetrix (`pip install ./symmetrix/symmetrix`, for `symmetrix_extract_mace`) and matplotlib.
 - [ ] **Step 2: Run it** under `setsid nohup`, waiting with one remote `while pgrep` loop. Verify:
-  - `lmp -h | grep -E "pace|mliap|jax"` lists `pace`, `pace/kk`, `mliap` and `jax/kk`;
+  - `lmp -h | grep -E "pace|symmetrix|jax"` lists `pace`, `pace/kk`, `symmetrix/mace` (and its `/kk` variant) and `jax/kk`;
   - `python -c "import lammps, jax, mace; print(jax.devices())"` shows the GPU.
 
   If lammps-jax won't build, stop that part and record it in `README.md`; the ace-jax LAMMPS-mode rows are then deferred, per the spec.
@@ -1166,8 +1186,8 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
   - Phase B is deliberately absent.
 - **Spec amendment:** T1 Step 1 redefines standalone timing as the end-to-end calculator call (`call_s`), because MACE builds its graph inside the call. ace-jax's `force_s` is kept as a secondary number.
 - **External names to verify in their tasks:**
-  - `mace_mp(model=path)`, `download_mace_mp_checkpoint` and the ML-IAP converter (T3/T4);
+  - `mace_mp(model=path)`, `download_mace_mp_checkpoint` and `symmetrix_extract_mace` (T3/T4);
   - the lammps-jax CPU PJRT (T8);
-  - the `pair_style mliap unified` syntax (T5, confirmed by the T8 parity gate).
+  - Symmetrix's Kokkos neighbour settings (T5, confirmed by the T8 parity gate).
 
   Each step says what to do if a name differs.

@@ -105,8 +105,8 @@ A case that fails its gate is not timed, and the failure is recorded.
      with cuequivariance and `torch.compile` where available.
    - `run_lammps.py`: writes the input for each case and runs LAMMPS. Pair
      styles are `jax/kk` (ace-jax via lammps-jax), `pace` / `pace/kk` (ML-PACE)
-     and `mliap unified` (MACE through ML-IAP / Kokkos). Neighbour skin 1.0 Å,
-     rebuilt as needed.
+     and `symmetrix/mace` (MACE through wcwitt's Symmetrix, Kokkos build).
+     Neighbour skin 1.0 Å, rebuilt as needed.
    - `parity.py`: runs the gates above.
    - `sweep.py`: expands the matrix for a host, skips cases already in the
      results file, and appends JSONL to `bench/scaling/results/<host>.jsonl`.
@@ -115,9 +115,13 @@ A case that fails its gate is not timed, and the failure is recorded.
      `docs/benchmarks.md`.
 3. **Environments:**
    - **moriarty:** LAMMPS ≥ 10 Sep 2025 (required by lammps-jax) with KOKKOS
-     (CUDA, `Kokkos_ARCH_AMPERE86`, plus OpenMP for CPU), ML-PACE, ML-IAP and
-     Python; the lammps-jax plugin with CPU and GPU PJRT; and a venv with
-     jax[cuda12], torch, cuequivariance, mace-torch and pyace. This lives in
+     (CUDA, `Kokkos_ARCH_AMPERE86`, plus OpenMP for CPU), ML-PACE, Python, and
+     Symmetrix. Symmetrix patches the tree with `pair_symmetrix/install.sh`
+     and needs C++20, CMake ≥ 3.27, GCC ≥ 11, `SYMMETRIX_KOKKOS=ON`, and
+     `SYMMETRIX_SPHERICART_CUDA=ON` for GPU. The same tree also gets the
+     lammps-jax plugin with CPU and GPU PJRT, plus a venv with jax[cuda12],
+     torch, cuequivariance, mace-torch, symmetrix (for model extraction) and
+     pyace. This lives in
      the shared home, so every node sees it.
    - **Modal A100-80GB:** the same build in a new image (`Kokkos_ARCH_AMPERE80`),
      in its own app, `bench/scaling/modal_app.py`. It stays separate from
@@ -185,7 +189,7 @@ are edited by hand.
 ## Cost and effort
 
 - **Engineering:** the exporter (with tests) and the LAMMPS / lammps-jax /
-  ML-IAP builds on two platforms. The rest is harness code.
+  Symmetrix builds on two platforms. The rest is harness code.
 - **GPU time:** the moriarty A4500 is free. The Modal A100 sweep is about
   2–4 GPU-hours, so tens of dollars.
 - **Phase B** is about a day of work once the merges land.
@@ -195,8 +199,9 @@ are edited by hand.
 - **The lammps-jax plugin build on moriarty** needs LAMMPS with the Kokkos
   precision layer (≥ 10 Sep 2025) and a matching PJRT plugin. If the build
   fails, the LAMMPS-mode ace-jax rows are deferred rather than faked.
-- **MACE through ML-IAP / Kokkos** needs cuequivariance and a compatible torch
-  build. If unavailable, MACE-in-LAMMPS falls back to the non-Kokkos ML-IAP
-  path, and the plots say so.
+- **MACE in LAMMPS through Symmetrix** needs a C++20 / CMake ≥ 3.27 / GCC ≥ 11
+  toolchain alongside CUDA (nvcc_wrapper). If moriarty's modules can't provide
+  it, the Symmetrix rows are built on Modal only, and the plots say so.
+  Standalone MACE stays PyTorch (`mace-torch`).
 - **Random-coefficient MD stability.** This is mitigated as above, and fitted
   models are used where available.
