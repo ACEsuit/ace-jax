@@ -153,3 +153,19 @@ def test_plots_from_synthetic_results(tmp_path):
     (tmp_path / "r.jsonl").write_text("\n".join(json.dumps(r) for r in rows))
     figs = make_figures(str(tmp_path / "*.jsonl"), tmp_path / "figs")
     assert figs and all(pathlib.Path(f).exists() for f in figs)
+
+
+def test_mace_rows_pin_the_head():
+    """MH-1 is multi-head: standalone and Symmetrix must evaluate the same head,
+    so it is pinned explicitly rather than left to each tool's default."""
+    heads = {r["size"]: r["head"] for r in planned_models() if r["code"] == "mace"}
+    assert heads["mh1"] == "omat_pbe"
+    assert heads["small"] is None
+
+
+def test_symmetrix_cmd_uses_current_cli():
+    from scaling.models import symmetrix_cmd
+    cmd = symmetrix_cmd("x/mace_mh1.model", [14, 32], "omat_pbe", "x/out.json")
+    assert cmd[1:] == ["--model", "x/mace_mh1.model", "--atomic-numbers", "14", "32",
+                       "--output", "x/out.json", "--head", "omat_pbe"]
+    assert "--head" not in symmetrix_cmd("m", [14], None, "o")

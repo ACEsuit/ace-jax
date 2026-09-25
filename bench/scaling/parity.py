@@ -61,11 +61,12 @@ def _acejax_ef(path, at):
     return a.get_potential_energy(), a.get_forces()
 
 
-def _mace_ef(path, at, device):
+def _mace_ef(path, at, device, head=None):
     from mace.calculators import mace_mp
     a = at.copy()
     a.calc = mace_mp(model=path, default_dtype="float64",
-                     device="cuda" if device == "gpu" else "cpu")
+                     device="cuda" if device == "gpu" else "cpu",
+                     **({"head": head} if head else {}))
     return a.get_potential_energy(), a.get_forces()
 
 
@@ -100,7 +101,7 @@ def gate(host, env, workroot="/tmp"):
                     if not pathlib.Path(m["symmetrix"]).exists():
                         rows.append({**row, "status": "unsupported"})
                         continue
-                    E0, F0 = _mace_ef(m["path"], at, device)
+                    E0, F0 = _mace_ef(m["path"], at, device, m.get("head"))
                     E1, F1 = _lammps_ef("mace", m["symmetrix"], m["elements"], at, device, lmp,
                                         work / "mace")
                 row.update(compare(E0, F0, E1, F1, N_ATOMS, TOL[gate_name]))

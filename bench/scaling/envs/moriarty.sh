@@ -85,8 +85,10 @@ lammps_dev() {          # develop + ML-PACE, host for the lammps-jax plugin
 }
 
 symmetrix_py() {        # for symmetrix_extract_mace (model export only)
-  "$VENV/bin/python" -c "import symmetrix" 2>/dev/null || \
-    uv pip install --python "$VENV/bin/python" "$ROOT/symmetrix/symmetrix"
+  # not `import symmetrix`: from $ROOT the source dir imports as a namespace package
+  [ -x "$VENV/bin/symmetrix_extract_mace" ] || \
+    CC=gcc CXX=g++ SKBUILD_CMAKE_ARGS="-DKokkos_ENABLE_CUDA=OFF;-DSYMMETRIX_SPHERICART_CUDA=OFF;-DKokkos_ARCH_NATIVE=OFF" \
+    uv pip install --python "$VENV/bin/python" "$ROOT/symmetrix/symmetrix"   # CPU-only: runs on any node
 }
 
 plugin() {

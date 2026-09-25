@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
 
@@ -31,6 +32,9 @@ ACE_R0 = {"Cantor": 2.54}
 MACE = {"small": "small", "medium": "medium", "large": "large",   # MACE-MP-0
         "mh1": "mh-1"}                                              # MACE-MH-1 (multi-head)
 MACE_SIZES = tuple(MACE)
+# multi-head models: the head both the standalone calculator and the Symmetrix
+# export evaluate (materials PBE -- the one that fits SiGe and Cantor)
+MACE_HEAD = {"mh1": "omat_pbe"}
 
 
 def planned_models():
@@ -48,6 +52,7 @@ def planned_models():
         for size in MACE_SIZES:
             rows.append(dict(name=f"mace/{system}/{size}", code="mace", system=system, size=size,
                              path=str(DIR / f"mace_{size}.model"), elements=els,
+                             head=MACE_HEAD.get(size),
                              symmetrix=str(DIR / f"mace_{size}_{system}.json")))
     return rows
 
@@ -122,10 +127,15 @@ def build_ace():
                                         "sha256": _sha(p)}})   # per model: a later failure keeps it
 
 
+def symmetrix_cmd(model, zs, head, out):
+    cmd = [shutil.which("symmetrix_extract_mace") or "symmetrix_extract_mace", "--model", str(model),
+           "--atomic-numbers", *map(str, zs), "--output", str(out)]
+    return cmd + (["--head", head] if head else [])
+
+
 def build_mace():
     """Run inside the MACE venv (mace-torch + symmetrix): download MACE-MP-0 and
     extract one Symmetrix .json per (size, system) -- each is element-specific."""
-    import shutil
     from ase.data import atomic_numbers
     from mace.calculators.foundations_models import download_mace_mp_checkpoint
     out = {}
@@ -139,18 +149,19 @@ def build_mace():
         for system, els in ELEMENTS.items():
             zs = sorted(atomic_numbers[e] for e in els)
             dst = DIR / f"mace_{size}_{system}.json"
-            r = subprocess.run([shutil.which("symmetrix_extract_mace"), str(p), "--atomic-numbers",
-                                *map(str, zs)], cwd=DIR, capture_output=True, text=True)
-            made = DIR / f"mace_{size}-{'-'.join(map(str, zs))}.json"
-            if r.returncode != 0 or not made.exists():
-                # e.g. MH-1 (multi-head) may not export yet: its LAMMPS rows become
+            dst.unlink(missing_ok=True)
+            r = subprocess.run(symmetrix_cmd(p, zs, MACE_HEAD.get(size), dst), cwd=DIR,
+                               capture_output=True, text=True)
+            if r.returncode == 2:                        # argparse usage error: our bug
+                raise RuntimeError(r.stderr[-500:])
+            if r.returncode != 0 or not dst.exists():
+                # a model Symmetrix cannot export: its LAMMPS rows become
                 # "unsupported"; standalone PyTorch rows still run
                 out[str(dst)] = {"builder": "symmetrix_extract_mace", "from": str(p),
                                  "unsupported": (r.stderr or r.stdout)[-300:]}
                 continue
-            made.replace(dst)
             out[str(dst)] = {"builder": "symmetrix_extract_mace", "from": str(p),
-                             "atomic_numbers": zs, "sha256": _sha(dst)}
+                             "atomic_numbers": zs, "head": MACE_HEAD.get(size), "sha256": _sha(dst)}
     _update_manifest(out)
 
 

@@ -71,7 +71,8 @@ def run_case(row, n_atoms, dtype, device, reps=10):
             from mace.calculators import mace_mp
             calc = mace_mp(model=row["path"], default_dtype=dtype,
                            device="cuda" if device == "gpu" else "cpu",
-                           enable_cueq=(device == "gpu"))
+                           enable_cueq=(device == "gpu"),
+                           **({"head": row["head"]} if row.get("head") else {}))
             call = lambda: calc.calculate(at, ["energy", "forces", "stress"], all_changes)
             t0 = time.perf_counter(); call(); out["compile_s"] = time.perf_counter() - t0
             out["call_s"] = _median_time(call, reps)
