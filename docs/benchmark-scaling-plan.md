@@ -419,7 +419,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 Append to `tests/test_bench_scaling.py`:
 ```python
-from scaling.models import SIZES, planned_models
+from scaling.models import MACE_SIZES, SIZES, planned_models
 
 
 def test_planned_models_cover_the_matrix():
@@ -427,7 +427,8 @@ def test_planned_models_cover_the_matrix():
     for code in ("acejax-pace", "mlpace", "acejax-ace", "mace"):
         for system in ("SiGe", "Cantor"):
             got = sorted(r["size"] for r in rows if r["code"] == code and r["system"] == system)
-            assert got == sorted(SIZES), (code, system)
+            want = sorted(MACE_SIZES) if code == "mace" else sorted(SIZES)
+            assert got == want, (code, system)
     pace = {(r["system"], r["size"]): r["path"] for r in rows if r["code"] == "acejax-pace"}
     ml = {(r["system"], r["size"]): r["path"] for r in rows if r["code"] == "mlpace"}
     assert pace == ml                                     # the same .yace files
@@ -460,7 +461,9 @@ PACE_FUNCS = {"small": 100, "medium": 500, "large": 2000}          # per element
 # (ACE_ORDER, ACE_TOTALDEGREE) targeting ~100 / 700 / 2800 basis functions per
 # element; `models.py ace` records the actual count and warns if off by > 2x
 ACE_DEG = {"small": (3, 8), "medium": (3, 12), "large": (4, 12)}
-MACE = {"small": "small", "medium": "medium", "large": "large"}    # MACE-MP-0
+MACE = {"small": "small", "medium": "medium", "large": "large",   # MACE-MP-0
+        "mh1": "mh-1"}                                              # MACE-MH-1 (multi-head)
+MACE_SIZES = tuple(MACE)
 
 
 def planned_models():
@@ -474,9 +477,11 @@ def planned_models():
                           size=size, path=str(yace), elements=els),
                      dict(name=f"acejax-ace/{system}/{size}", code="acejax-ace", system=system,
                           size=size, path=str(DIR / f"ace_{system}_{size}.npz"), elements=els),
-                     dict(name=f"mace/{system}/{size}", code="mace", system=system, size=size,
-                          path=str(DIR / f"mace_mp0_{size}.model"), elements=els,
-                          symmetrix=str(DIR / f"mace_mp0_{size}_{system}.json"))]
+                     ]
+        for size in MACE_SIZES:
+            rows.append(dict(name=f"mace/{system}/{size}", code="mace", system=system, size=size,
+                             path=str(DIR / f"mace_{size}.model"), elements=els,
+                             symmetrix=str(DIR / f"mace_{size}_{system}.json")))
     return rows
 
 
@@ -551,15 +556,22 @@ def build_mace():
     DIR.mkdir(parents=True, exist_ok=True)
     for size, tag in MACE.items():
         src = download_mace_mp_checkpoint(tag)
-        p = DIR / f"mace_mp0_{size}.model"
+        p = DIR / f"mace_{size}.model"
         p.write_bytes(pathlib.Path(src).read_bytes())
-        out[str(p)] = {"builder": "mace-mp-0", "tag": tag, "sha256": _sha(p)}
+        out[str(p)] = {"builder": "mace-mp-0" if size != "mh1" else "mace-mh-1", "tag": tag,
+                       "sha256": _sha(p)}
         for system, els in ELEMENTS.items():
             zs = sorted(atomic_numbers[e] for e in els)
-            subprocess.run([shutil.which("symmetrix_extract_mace"), str(p), "--atomic-numbers",
-                            *map(str, zs)], cwd=DIR, check=True)
-            made = DIR / f"mace_mp0_{size}-{'-'.join(map(str, zs))}.json"
-            dst = DIR / f"mace_mp0_{size}_{system}.json"
+            dst = DIR / f"mace_{size}_{system}.json"
+            r = subprocess.run([shutil.which("symmetrix_extract_mace"), str(p), "--atomic-numbers",
+                                *map(str, zs)], cwd=DIR, capture_output=True, text=True)
+            made = DIR / f"mace_{size}-{'-'.join(map(str, zs))}.json"
+            if r.returncode != 0 or not made.exists():
+                # e.g. MH-1 (multi-head) may not export yet: its LAMMPS rows become
+                # "unsupported"; standalone PyTorch rows still run
+                out[str(dst)] = {"builder": "symmetrix_extract_mace", "from": str(p),
+                                 "unsupported": (r.stderr or r.stdout)[-300:]}
+                continue
             made.replace(dst)
             out[str(dst)] = {"builder": "symmetrix_extract_mace", "from": str(p),
                              "atomic_numbers": zs, "sha256": _sha(dst)}
@@ -850,6 +862,10 @@ def run_case(row, n_atoms, dtype, device, lmp, ranks, workdir, pjrt=None):
     write(data, at, format="lammps-data", specorder=row["elements"], masses=True)
     style = {"acejax-pace": "acejax", "acejax-ace": "acejax", "mlpace": "mlpace", "mace": "mace"}[row["code"]]
     model = {"acejax": row.get("bundle"), "mace": row.get("symmetrix")}.get(style) or row["path"]
+    if style == "mace" and not pathlib.Path(model).exists():     # e.g. MH-1 not exportable
+        return {"code": row["code"], "mode": "lammps", "model": row["name"], "size": row["size"],
+                "system": row["system"], "n_atoms": n_atoms, "device": device, "dtype": dtype,
+                "status": "unsupported", "error": f"no Symmetrix model {model}"}
     (work / "in.bench").write_text(lammps_input(style, model, row["elements"], data, device, 200))
     cmd = [lmp, "-in", "in.bench", "-log", "log.lammps", "-nocite"]
     if device == "gpu":
@@ -1008,7 +1024,7 @@ def run_sweep(host, runner, results_path, select=lambda c: True):
         for l in results_path.read_text().splitlines():
             r = json.loads(l)
             done.add(tuple(r["_key"]))
-            if r["status"] in ("oom", "error", "unstable", "parity_fail"):
+            if r["status"] in ("oom", "error", "unstable", "parity_fail", "unsupported"):
                 dead.add(tuple(r["_line"]))
     todo = sorted((c for c in cases(host) if select(c)), key=lambda c: (_line(c), c.n_atoms))
     for c in todo:
