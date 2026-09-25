@@ -95,6 +95,34 @@ bridge test verifies the whole chain against the committed Si fixture: `A2B`
 bit-for-bit, then energies, forces, stress and descriptors to float noise.
 See `docs/python-authoring.md`.
 
+### Embedded (species-compressed) models: `ace-jax construct --embedding`
+
+    ace-jax construct --elements Cr,Mn,Fe,Co,Ni --order 3 --max-degree 10 \
+        --embedding mace_embedding.json --out cantor_embed.npz          # lossless widths
+    ace-jax construct ... --d-max 16                                    # capped widths
+
+builds the frozen-element-embedding model (`construct.model.build_embedding_model`,
+the ace1-compatible `ace_embedding_model`) without Julia, parity-tested against
+ACEpotentials' exports.
+
+## Fitting (`ace-jax fit`)
+
+`ace-jax fit` and the research driver `bench/acegp_cantor/run.py` share one pipeline
+(`ace_jax.fit.pipeline`: `FitConfig`, `load_fit_data`, `fit`, `write_outputs`).
+Common options:
+
+- data: `--train/--test` files, or `--data` split with `--ntrain/--ntest/--test-start`;
+  `--ood` for an extra test set; `--weights` takes an ACEfit weights dict or a list of
+  weight factors
+- GP features: `--density none|pair|pca` (`--pca-d`), `--embedding` (frozen species
+  coregionalization)
+- likelihood: `--lml host-cache` caches the linear design rows in host RAM (GP arm,
+  pair/pca features, L-BFGS, MAP only)
+- MAP: `--opt adam|lbfgs`, `--map-restarts N` (best of N L-BFGS starts; the joint LML
+  is multimodal)
+- UQ: `--rungs map,laplace,...` (`--laplace svi|fd`), or `--uq pops` on the linear arm
+  (`--m-per-species 0`)
+
 ## Julia parity (maintainers / CI only)
 
 The everyday test suite is pip-only (no Julia), run against committed npz
