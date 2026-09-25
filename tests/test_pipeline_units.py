@@ -64,3 +64,15 @@ def test_load_fit_data_file_split_and_lsq_e0():
     counts = np.array([[np.sum(c.numbers == 14)] for c in d.train], float)
     E0ref, *_ = np.linalg.lstsq(counts, np.array([c.energy for c in d.train]), rcond=None)
     assert np.allclose(d.E0, E0ref)
+
+
+def test_build_problem_linear_has_no_inducing_and_gp_has_m():
+    from conftest import FIXTURE_DIR
+    from ace_jax.fit.pipeline import FitConfig, load_fit_data
+    from ace_jax.fit.pipeline.problem import build_problem
+    base = dict(model=str(FIXTURE_DIR / "si_fitted.npz"), energy_key="dft_energy",
+                force_key="dft_force", virial_key="dft_virial", ntrain=12, ntest=4, batch=4, r0=2.35)
+    for arm, m in (("linear", 0), ("gp", 6)):
+        cfg = FitConfig(**base, arm=arm, m_per_species=6, density="pair")
+        b = build_problem(cfg, load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz")))
+        assert b.prob.ind.XM.shape[0] == m
