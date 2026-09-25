@@ -49,6 +49,7 @@ def test_standalone_row_for_acejax(tmp_path):
     # a "cpu" row must really run on the CPU (jax[cuda12] defaults to the GPU),
     # and record the threading it used (spec: "the threading actually used")
     assert out["platform"] == "cpu" and out["threads"]["cpus"] >= 1
+    assert out["nlist_backend"] and out["force_s"] + out["nlist_s"] <= out["call_s"] * 1.5
     for k in ("call_s", "force_s", "nlist_s", "compile_s"):
         assert out[k] > 0
 

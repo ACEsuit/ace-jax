@@ -2,7 +2,9 @@
 
     python bench/scaling/run_standalone.py <model-name> <n_atoms> <dtype> <device>
 call_s: median ASE calculator call (energy+forces+stress) incl. neighbour list,
-for every code.  ace-jax also: force_s (jitted model call alone), nlist_s.
+for every code.  ace-jax also, from ACECalculator.last_timing: force_s (the
+compiled model call alone), nlist_s (list + layout + host->device) and the
+neighbour-list backend.
 """
 import json
 import platform
@@ -16,7 +18,8 @@ from scaling.structures import supercell
 def _versions():
     import importlib.metadata as md
     out = {"python": platform.python_version()}
-    for pkg in ("ace-jax", "jax", "jaxlib", "mace-torch", "torch", "ase"):
+    for pkg in ("ace-jax", "jax", "jaxlib", "mace-torch", "torch", "ase", "matscipy",
+                "matscipy-neighbours"):
         try:
             out[pkg] = md.version(pkg)
         except md.PackageNotFoundError:
@@ -71,10 +74,19 @@ def run_case(row, n_atoms, dtype, device, reps=10):
             calc = ACECalculator(row["path"], dtype=getattr(jnp, dtype))
             call = lambda: calc.calculate(at, ["energy", "forces", "stress"], all_changes)
             t0 = time.perf_counter(); call(); out["compile_s"] = time.perf_counter() - t0
-            out["call_s"] = _median_time(call, reps)
-            out["nlist_s"] = _median_time(
-                lambda: sparse_graph(at.positions, at.cell.array, at.pbc, calc.cutoff), reps)
-            out["force_s"] = max(out["call_s"] - out["nlist_s"], 1e-9)
+            call()                                # K learnt: the steady-state path from here
+            splits = []
+
+            def timed():
+                call()
+                splits.append(calc.last_timing)
+
+            out["call_s"] = _median_time(timed, reps)
+            # the calculator's own split: nlist_s = list + layout + host->device,
+            # force_s = the compiled model call alone
+            out["nlist_s"] = statistics.median(t["nlist_s"] for t in splits)
+            out["force_s"] = statistics.median(t["model_s"] for t in splits)
+            out["nlist_backend"] = splits[-1]["nlist_backend"]
             out["layout"], out["edge_a_kind"] = calc.last_layout, calc.last_edge_a_kind
             out["n_edges"] = int(len(sparse_graph(at.positions, at.cell.array, at.pbc,
                                                   calc.cutoff).senders))
