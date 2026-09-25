@@ -45,9 +45,10 @@ def lammps_input(style, model_path, elements, data_path, device, run_steps, dump
     txt = ("units metal\natom_style atomic\nboundary p p p\natom_modify map yes\n"
            f"read_data {data_path}\n" + _pair(style, model_path, elements, device) +
            "neighbor 1.0 bin\nneigh_modify every 1 delay 0 check yes\n"
-           "timestep 0.0001\nfix 1 all nve\nthermo_style custom step pe atoms\nthermo 50\n")
+           "timestep 0.0001\nfix 1 all nve\nthermo_style custom step pe atoms\nthermo 50\n"
+           "thermo_modify format float %.17g\n")       # full precision: parity reads pe
     if dump:
-        txt += f"dump d all custom 1 {dump} id fx fy fz\ndump_modify d sort id\nrun 0\nundump d\n"
+        txt += f"dump d all custom 1 {dump} id fx fy fz\ndump_modify d sort id format float %.17g\nrun 0\nundump d\n"
     return txt + (f"run {warmup}\n" if warmup else "") + f"run {run_steps}\n"
 
 
@@ -93,6 +94,7 @@ def export_bundle(row, at, dtype, workdir):
     import time
     import jax
     jax.config.update("jax_enable_x64", dtype == "float64")
+    from ase.data import atomic_numbers
     from ace_jax.eval import load
     from ace_jax.export.lammps import export_lammps
     model, meta, _ = load(row["path"])
@@ -100,7 +102,8 @@ def export_bundle(row, at, dtype, workdir):
     pathlib.Path(workdir).mkdir(parents=True, exist_ok=True)
     t0 = time.perf_counter()
     b = export_lammps(model, meta, pathlib.Path(workdir) / "bundle.json", max_atoms=cap["max_atoms"],
-                      max_edges=cap["max_edges"], k_dense=cap["k_dense"], dtype=dtype)
+                      max_edges=cap["max_edges"], k_dense=cap["k_dense"], dtype=dtype,
+                      type_elements=[atomic_numbers[e] for e in row["elements"]])  # data-file order
     return str(pathlib.Path(workdir) / "bundle.json"), b["ace_jax"]["layout"], time.perf_counter() - t0
 
 

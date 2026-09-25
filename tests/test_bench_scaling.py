@@ -192,3 +192,12 @@ def test_acejax_kokkos_newton_on():
     ghosts included: they need reverse comm, i.e. newton on (as lammps-jax examples/in.mlip_al)."""
     from scaling.run_lammps import KOKKOS
     assert KOKKOS["acejax"] == "newton on neigh half"      # KOKKOS: full list needs newton off
+
+
+def test_parity_dump_and_thermo_print_full_precision():
+    """Default formats print ~6 significant digits: a 1e-9 force gate would
+    measure print rounding (it did: every dF came out 5.0e-06 / 5.0e-07)."""
+    txt = lammps_input("acejax", "/m/b.json", ["Si", "Ge"], "/d/x.data", "gpu", 0,
+                       dump="/w/f.dump", warmup=0)
+    assert "dump_modify d sort id format float %.17g" in txt
+    assert "thermo_modify format float %.17g" in txt

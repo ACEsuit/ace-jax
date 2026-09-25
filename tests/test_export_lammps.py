@@ -90,5 +90,37 @@ def test_bundle_written(tmp_path):
                       k_dense=64, dtype="float64", layout="dense")
     on_disk = json.loads((tmp_path / "m.json").read_text())
     assert on_disk["contract"]["n_species"] == 2
-    assert on_disk["ace_jax"] == {"layout": "dense", "elements": [32, 14], "k_dense": 64}
+    assert on_disk["ace_jax"] == {"layout": "dense", "elements": [32, 14],
+                                  "type_elements": [32, 14], "k_dense": 64}
     assert b["ace_jax"]["layout"] == "dense"
+
+
+@pytest.mark.parametrize("layout", ["sparse", "dense"])
+def test_lammps_type_order_differs_from_model_order(layout):
+    """LAMMPS hands species = type - 1 in the *input's* element order; a .yace
+    lists its elements in its own order ([Ge, Si] here).  type_map bridges them."""
+    y = str(pace_fixture(FIX / "gesi_sbessel.yace"))
+    model, meta, _ = load(y)
+    assert list(meta["elements"]) == [32, 14]
+    at = _cluster()
+    graph, g = _lammps_graph(at, meta["rcut"])
+    types = [14, 32]                                      # LAMMPS: type 1 = Si, 2 = Ge
+    species = jnp.asarray([types.index(int(z)) for z in at.numbers], jnp.int32)
+    K = int(np.bincount(g.senders, minlength=len(at)).max())
+    f = make_energy_fn(model, 2, layout, k_dense=K + 3,
+                       type_map=[list(meta["elements"]).index(z) for z in types])
+    E = float(jnp.sum(f(jnp.asarray(at.positions), species, graph)))
+    at.calc = ACECalculator(y, layout="sparse")
+    assert E == pytest.approx(at.get_potential_energy(), abs=1e-10)
+
+
+def test_bundle_records_type_order(tmp_path):
+    pytest.importorskip("lammps_jax")
+    from ace_jax.export.lammps import export_lammps
+    model, meta, _ = load(str(pace_fixture(FIX / "gesi_sbessel.yace")))
+    b = export_lammps(model, meta, tmp_path / "m.json", max_atoms=64, max_edges=64 * 64,
+                      k_dense=64, layout="sparse", type_elements=[14, 32])
+    assert b["ace_jax"]["type_elements"] == [14, 32]
+    with pytest.raises(ValueError, match="not in the model"):
+        export_lammps(model, meta, tmp_path / "x.json", max_atoms=64, max_edges=64,
+                      layout="sparse", type_elements=[14, 6])
