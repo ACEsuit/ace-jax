@@ -76,3 +76,23 @@ def test_build_problem_linear_has_no_inducing_and_gp_has_m():
         cfg = FitConfig(**base, arm=arm, m_per_species=6, density="pair")
         b = build_problem(cfg, load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz")))
         assert b.prob.ind.XM.shape[0] == m
+
+
+def test_objective_device_and_hostcache_agree_on_the_fixture():
+    from conftest import FIXTURE_DIR
+    from ace_jax.fit.hypers import to_array
+    from ace_jax.fit.pipeline import FitConfig, load_fit_data
+    from ace_jax.fit.pipeline.objective import make_objective
+    from ace_jax.fit.pipeline.problem import build_problem
+    base = dict(model=str(FIXTURE_DIR / "si_fitted.npz"), energy_key="dft_energy", force_key="dft_force",
+                virial_key="dft_virial", ntrain=12, ntest=4, batch=4, r0=2.35, arm="gp",
+                m_per_species=6, density="pair", rungs=("map",))
+    vals = []
+    for lml in ("device", "host-cache"):
+        cfg = FitConfig(**base, lml=lml).validate()
+        d = load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz"))
+        o = make_objective(cfg, d, build_problem(cfg, d))
+        v, g = o.vg(to_array(o.prior_mu))
+        vals.append((float(v), np.asarray(g)))
+    assert np.isclose(vals[0][0], vals[1][0], rtol=1e-7)
+    assert np.allclose(vals[0][1], vals[1][1], rtol=1e-5, atol=1e-6 * np.abs(vals[0][1]).max())
