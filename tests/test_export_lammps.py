@@ -46,18 +46,26 @@ def _lammps_graph(at, rcut, n_pad=37, seed=0):
     return Graph(jnp.asarray(s, jnp.int32), jnp.asarray(r, jnp.int32), jnp.asarray(m)), g
 
 
+MODELS = {"pace": lambda: str(pace_fixture(FIX / "gesi_sbessel.yace")),
+          "ace": lambda: str(FIX.parent / "sige_nofit.npz")}      # ACEModel: pad_cutoff is a float()
+
+
+@pytest.mark.parametrize("kind", sorted(MODELS))
 @pytest.mark.parametrize("layout", ["sparse", "dense"])
-def test_energy_fn_matches_calculator(layout):
-    y = str(pace_fixture(FIX / "gesi_sbessel.yace"))
+def test_energy_fn_matches_calculator(layout, kind):
+    y = MODELS[kind]()
     model, meta, _ = load(y)
     at = _cluster()
+    if kind == "ace":                                   # the cluster's species, as Si/Ge
+        at.numbers = np.where(at.numbers == 32, 32, 14)
     graph, g = _lammps_graph(at, meta["rcut"])
     z2i = {z: i for i, z in enumerate(meta["elements"])}
     species = jnp.asarray([z2i[int(z)] for z in at.numbers], jnp.int32)
     K = int(np.bincount(g.senders, minlength=len(at)).max())
     f = make_energy_fn(model, len(meta["elements"]), layout, k_dense=K + 3)
     pos = jnp.asarray(at.positions)
-    E, G = jax.value_and_grad(lambda p: jnp.sum(f(p, species, graph)))(pos)
+    # jit: the bundle export traces energy_fn, so nothing in it may concretize
+    E, G = jax.jit(jax.value_and_grad(lambda p: jnp.sum(f(p, species, graph))))(pos)
     at.calc = ACECalculator(y, layout="sparse")
     assert float(E) == pytest.approx(at.get_potential_energy(), abs=1e-10)
     np.testing.assert_allclose(-np.asarray(G), at.get_forces(), atol=1e-9)

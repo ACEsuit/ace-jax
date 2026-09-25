@@ -205,7 +205,7 @@ class ACEModel(EdgeSiteModel):
 
     def pad_cutoff(self):
         """Padded edges sit at the pair cutoff, where every envelope vanishes."""
-        return float(jnp.max(self.pair_envelope[..., 0]))
+        return jnp.max(self.pair_envelope[..., 0])        # traceable: no float()
 
     def edge_a_widths(self):
         """(radial columns, harmonic columns) the A-basis selectors index."""

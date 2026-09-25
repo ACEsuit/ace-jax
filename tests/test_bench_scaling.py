@@ -175,3 +175,13 @@ def test_mace_mp_sizes_are_symmetrix_exportable_revision():
     """The original MP-0 checkpoints have a residual first block Symmetrix rejects."""
     from scaling.models import MACE
     assert [MACE[s] for s in ("small", "medium", "large")] == ["small-0b2", "medium-0b2", "large-0b2"]
+
+
+def test_finished_tolerates_teardown_abort_only():
+    """The Symmetrix tree aborts in a static destructor after `Total wall time`
+    (double free between liblammps and libkokkoskernels); the run itself is done."""
+    from scaling.run_lammps import finished
+    assert finished(0, "Loop time ...")
+    assert finished(-6, "Loop time ...\nTotal wall time: 0:00:01\n")
+    assert not finished(-6, "Loop time ...\n")                   # died mid-run
+    assert not finished(1, "ERROR: Unrecognized pair style")

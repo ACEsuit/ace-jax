@@ -33,6 +33,13 @@ def _pair(style, model_path, elements, device):
     raise ValueError(style)
 
 
+def finished(returncode, log):
+    """A run completed if LAMMPS exited cleanly or got as far as its final
+    `Total wall time` line: the Symmetrix tree aborts afterwards, in a static
+    destructor (a std::map freed twice across liblammps / libkokkoskernels)."""
+    return returncode == 0 or "Total wall time" in log
+
+
 def lammps_input(style, model_path, elements, data_path, device, run_steps, dump=None,
                  warmup=50):
     txt = ("units metal\natom_style atomic\nboundary p p p\natom_modify map yes\n"
@@ -90,6 +97,7 @@ def export_bundle(row, at, dtype, workdir):
     from ace_jax.export.lammps import export_lammps
     model, meta, _ = load(row["path"])
     cap = capacity(at, float(meta["rcut"]))
+    pathlib.Path(workdir).mkdir(parents=True, exist_ok=True)
     t0 = time.perf_counter()
     b = export_lammps(model, meta, pathlib.Path(workdir) / "bundle.json", max_atoms=cap["max_atoms"],
                       max_edges=cap["max_edges"], k_dense=cap["k_dense"], dtype=dtype)
@@ -124,7 +132,7 @@ def run_case(row, n_atoms, dtype, device, lmp, ranks, workdir, pjrt=None):
            "ranks": ranks, "status": "ok", **export}
     p = subprocess.run(cmd, cwd=work, capture_output=True, text=True, timeout=3600)
     log = (work / "log.lammps").read_text() if (work / "log.lammps").exists() else p.stdout
-    if p.returncode != 0 or "Loop time" not in log:
+    if not finished(p.returncode, log) or "Loop time" not in log:
         tail = (p.stderr or p.stdout)[-300:]
         out["status"] = "oom" if "out of memory" in tail.lower() or "RESOURCE_EXHAUSTED" in tail else "error"
         out["error"] = tail

@@ -17,7 +17,7 @@ import numpy as np
 from ase.io import write
 
 from scaling.models import planned_models
-from scaling.run_lammps import KOKKOS, export_bundle, lammps_input, read_dump_forces, read_pe
+from scaling.run_lammps import KOKKOS, export_bundle, finished, lammps_input, read_dump_forces, read_pe
 from scaling.structures import supercell
 
 TOL = {"mlpace": (1e-6, 1e-5), "acejax": (1e-10, 1e-9), "mace": (1e-6, None)}
@@ -48,7 +48,10 @@ def _lammps_ef(style, model_path, els, at, device, lmp, work, pjrt=None):
         cmd += ["-k", "on", "g", "1", "-sf", "kk", "-pk", "kokkos", *KOKKOS[style].split()]
     if pjrt:
         cmd += ["-var", "pjrt", pjrt]
-    subprocess.run(cmd, cwd=work, check=True, capture_output=True, text=True, timeout=1800)
+    p = subprocess.run(cmd, cwd=work, capture_output=True, text=True, timeout=1800)
+    log = (work / "log.lammps").read_text() if (work / "log.lammps").exists() else ""
+    if not finished(p.returncode, log):
+        raise RuntimeError(f"lammps exit {p.returncode}: {(p.stderr or p.stdout)[-300:]}")
     return read_pe((work / "log.lammps").read_text()), read_dump_forces(work / "f.dump")
 
 

@@ -65,7 +65,9 @@ image = (
         " -D CMAKE_CXX_COMPILER=/opt/lammps-dev/lib/kokkos/bin/nvcc_wrapper -D CMAKE_BUILD_TYPE=Release"
         " -D CMAKE_CXX_FLAGS='-fno-lto -fopenmp' -D CMAKE_SHARED_LINKER_FLAGS='-fno-lto -fopenmp " + STUB + "'"
         " -D CMAKE_INTERPROCEDURAL_OPTIMIZATION=OFF -D LAMMPS_HEADER_DIR=/opt/lammps-dev/src"
-        " -D JAXLIB_INCLUDE_DIR=$INC -D KOKKOS_CONFIG_INCLUDE_DIR=/opt/lammps-dev/build-kk/lib/kokkos",
+        " -D JAXLIB_INCLUDE_DIR=$INC -D KOKKOS_CONFIG_INCLUDE_DIR=/opt/lammps-dev/build-kk/lib/kokkos"
+        # no driver in the builder: link the stub (the real libcuda is there at run time)
+        " -D CUDA_DRIVER_LIBRARY=/usr/local/cuda/lib64/stubs/libcuda.so",
         "cmake --build /opt/lammps-jax/build-plugin-gpu-pjrt -j 32",
         "printf '#!/usr/bin/env bash\\nexport LD_LIBRARY_PATH=/opt/lammps/build-kk:${LD_LIBRARY_PATH:-}\\n"
         "exec /opt/lammps/build-kk/lmp \"$@\"\\n' > /opt/lmp.sh && chmod +x /opt/lmp.sh",
