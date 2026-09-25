@@ -1,0 +1,52 @@
+name: pace-parity
+# Regenerates the PACE references from the ML-PACE C++ and python-ace, then re-runs
+# the PACE tests against them.  CI-only; pip users run against committed fixtures.
+on:
+  push:
+    paths:
+      - "src/ace_jax/eval/pace_*.py"
+      - "src/ace_jax/eval/io.py"
+      - "src/ace_jax/eval/harmonics.py"
+      - "pace_ref/**"
+      - "fixtures/pace/**"
+      - "tests/test_pace_*.py"
+      - "tests/conftest.py"
+      - ".github/workflows/pace-parity.yml"
+  pull_request:
+    paths:
+      - "src/ace_jax/eval/pace_*.py"
+      - "src/ace_jax/eval/io.py"
+      - "src/ace_jax/eval/harmonics.py"
+      - "pace_ref/**"
+      - "fixtures/pace/**"
+      - "tests/test_pace_*.py"
+      - "tests/conftest.py"
+      - ".github/workflows/pace-parity.yml"
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+jobs:
+  parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: ML-PACE sources (pinned)
+        run: |
+          git clone https://github.com/ICAMS/lammps-user-pace.git $HOME/gits/lammps-user-pace
+          git -C $HOME/gits/lammps-user-pace checkout 99aa6e6
+      - name: Unit reference
+        run: |
+          cmake -S pace_ref -B pace_ref/build -DCMAKE_BUILD_TYPE=Release
+          cmake --build pace_ref/build --target unit_ref -j
+          pace_ref/build/unit_ref | uv run python pace_ref/json_to_npz.py
+      - name: python-ace fixtures
+        run: |
+          uv venv pace_ref/.venv --python 3.11
+          uv pip install --python pace_ref/.venv/bin/python numpy ase pyyaml pytest "git+https://github.com/ICAMS/python-ace" -e .
+          pace_ref/.venv/bin/python pace_ref/make_fixtures.py
+      - name: Parity
+        env: { JAX_PLATFORM_NAME: cpu, ACEJAX_REQUIRE_FIXTURES: "1" }
+        run: |
+          uv run pytest -q tests/test_pace_io.py tests/test_pace_radial.py tests/test_pace_build.py tests/test_pace_model.py tests/test_pace_export.py tests/test_pace_hlo.py -k "not pyace"   # pyace runs in its own venv below
+          pace_ref/.venv/bin/python -m pytest -q tests/test_pace_export.py -k pyace
