@@ -25,6 +25,9 @@ image = (
     .pip_install("cmake>=3.27", "jax[cuda12]", "matscipy", "ase", "matplotlib", "pyyaml",
                  "equinox", "lineax", "scipy", "mace-torch", "cuequivariance-torch",
                  "cuequivariance-ops-torch-cu12")
+    # the python base image exports CC for a compiler that is not in the container;
+    # CMake (symmetrix wheel, LAMMPS) would fail on it
+    .env({"CC": "gcc", "CXX": "g++"})
     .run_commands(
         "git clone --depth 1 -b patch_10Sep2025 https://github.com/lammps/lammps.git /opt/lammps",  # pinned (Symmetrix)
         "git clone --recursive https://github.com/wcwitt/symmetrix.git /opt/symmetrix",

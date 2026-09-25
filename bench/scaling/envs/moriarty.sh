@@ -27,6 +27,9 @@ mkdir -p "$ROOT"
 source /etc/profile.d/modules.sh 2>/dev/null || true
 module purge
 module load gompi/2023a CUDA/12.4.0          # GCC 12.3 + OpenMPI; C++20 for Symmetrix
+# the lammps-jax plugin needs a newer nvcc (parenthesised aggregate init in
+# emplace_back fails on 12.4's front end); the dev tree + plugin use this one
+CUDA_DEV=CUDA/12.9.0
 export PATH=$HOME/.local/bin:$PATH
 
 sources() {
@@ -69,13 +72,16 @@ lmp_python() {
 }
 
 lammps_dev() {          # develop + ML-PACE, host for the lammps-jax plugin
-  [ -x "$BUILD_DEV/lmp" ] && return 0
+  module swap CUDA/12.4.0 "$CUDA_DEV"
+  [ -x "$BUILD_DEV/lmp" ] && [ -f "$BUILD_DEV/.cuda" ] && [ "$(cat "$BUILD_DEV/.cuda")" = "$CUDA_DEV" ] && return 0
+  rm -rf "$BUILD_DEV"
   cmake -S "$LAMMPS_DEV/cmake" -B "$BUILD_DEV" \
     -D CMAKE_BUILD_TYPE=Release -D CMAKE_CXX_COMPILER="$LAMMPS_DEV/lib/kokkos/bin/nvcc_wrapper" \
     -D BUILD_SHARED_LIBS=ON -D BUILD_MPI=ON -D BUILD_OMP=ON \
     -D PKG_KOKKOS=ON -D Kokkos_ENABLE_CUDA=ON -D Kokkos_ENABLE_OPENMP=ON \
     -D Kokkos_ENABLE_SERIAL=ON -D Kokkos_ARCH_AMPERE86=ON -D PKG_ML-PACE=ON
   cmake --build "$BUILD_DEV" -j "$JOBS"
+  echo "$CUDA_DEV" > "$BUILD_DEV/.cuda"
 }
 
 symmetrix_py() {        # for symmetrix_extract_mace (model export only)
@@ -85,6 +91,7 @@ symmetrix_py() {        # for symmetrix_extract_mace (model export only)
 
 plugin() {
   local inc pjrt
+  module swap CUDA/12.4.0 "$CUDA_DEV" 2>/dev/null || module load "$CUDA_DEV"
   inc=$("$VENV/bin/python" -c "import jaxlib, os; print(os.path.join(os.path.dirname(jaxlib.__file__), 'include'))")
   # always configure fresh: changing CMAKE_CXX_COMPILER on an existing cache makes
   # CMake wipe it and silently drop the -D values given here
@@ -118,7 +125,7 @@ EOF
   cat > "$ROOT/lmp-jax.sh" <<EOF
 #!/usr/bin/env bash
 source /etc/profile.d/modules.sh 2>/dev/null || true
-module purge; module load gompi/2023a CUDA/12.4.0
+module purge; module load gompi/2023a $CUDA_DEV
 export LAMMPS_PLUGIN_PATH=$ROOT/lammps-jax/build-plugin-gpu-pjrt
 export LD_LIBRARY_PATH=$BUILD_DEV:\${LD_LIBRARY_PATH:-}
 exec $BUILD_DEV/lmp "\$@"
