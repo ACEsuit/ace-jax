@@ -139,3 +139,17 @@ def test_parity_compare_and_blocking():
     rows = [{"code": "mlpace", "status": "parity_fail"}, {"code": "acejax-pace", "status": "parity_ok"},
             {"code": "mace", "status": "unsupported", "model": "mace/SiGe/mh1"}]
     assert blocked(rows) == {("mlpace", "lammps")}
+
+
+def test_plots_from_synthetic_results(tmp_path):
+    from scaling.plot import make_figures
+    rows = []
+    for code in ("acejax-pace", "mlpace", "mace"):
+        for n in (256, 512, 1024):
+            rows.append({"code": code, "mode": "lammps", "model": f"{code}/SiGe/small", "size": "small",
+                         "system": "SiGe", "n_atoms": n, "device": "gpu", "dtype": "float64",
+                         "host": "moriarty-gpu", "status": "ok", "step_s": n * 1e-6,
+                         "atom_steps_per_s": 1e6, "peak_bytes": n * 1e5})
+    (tmp_path / "r.jsonl").write_text("\n".join(json.dumps(r) for r in rows))
+    figs = make_figures(str(tmp_path / "*.jsonl"), tmp_path / "figs")
+    assert figs and all(pathlib.Path(f).exists() for f in figs)
