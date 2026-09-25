@@ -21,6 +21,13 @@ PACE_FUNCS = {"small": 100, "medium": 500, "large": 2000}          # per element
 # (ACE_ORDER, ACE_TOTALDEGREE) targeting ~100 / 700 / 2800 basis functions per
 # element; `models.py ace` records the actual count and warns if off by > 2x
 ACE_DEG = {"small": (3, 8), "medium": (3, 12), "large": (4, 12)}
+# five species multiply the basis: Cantor gets its own (order, degree) ladder so
+# its per-element size tracks the same targets (measured: (3,8) -> 765/element)
+ACE_DEG_BY_SYSTEM = {"SiGe": ACE_DEG,
+                     "Cantor": {"small": (3, 6), "medium": (3, 8), "large": (3, 11)}}
+# explicit bond length where ACEpotentials has no default (fcc nearest neighbour
+# a / sqrt(2) at a = 3.59 A); SiGe uses the library defaults
+ACE_R0 = {"Cantor": 2.54}
 MACE = {"small": "small", "medium": "medium", "large": "large",   # MACE-MP-0
         "mh1": "mh-1"}                                              # MACE-MH-1 (multi-head)
 MACE_SIZES = tuple(MACE)
@@ -93,10 +100,16 @@ def build_pace():
 def build_ace():
     out = {}
     for system, els in ELEMENTS.items():
-        for size, (order, deg) in ACE_DEG.items():
+        for size, (order, deg) in ACE_DEG_BY_SYSTEM[system].items():
             p = DIR / f"ace_{system}_{size}.npz"
+            if p.exists() and not os.environ.get("FORCE"):
+                continue
+            # ACE_NOFIT=1: random weights, timing only -- the script's built-in fit is
+            # on a silicon-only set, meaningless for SiGe/Cantor and singular (Cholesky
+            # fails) once the basis outgrows it
             env = {**os.environ, "ACE_ELEMENTS": ",".join(els), "ACE_ORDER": str(order),
-                   "ACE_TOTALDEGREE": str(deg), "ACE_RCUT": "5.0"}
+                   "ACE_TOTALDEGREE": str(deg), "ACE_RCUT": "5.0", "ACE_NOFIT": "1",
+                   **({"ACE_R0": str(ACE_R0[system])} if system in ACE_R0 else {})}
             # ACE_JULIA selects the Julia (e.g. "julia +1.11": the export env does
             # not resolve on 1.13, and CI's julia-parity job pins 1.11)
             julia = os.environ.get("ACE_JULIA", "julia").split()
@@ -104,9 +117,9 @@ def build_ace():
                            cwd=ROOT, env=env, check=True)
             import numpy as np
             n_b = int(json.loads(bytes(np.load(p)["meta_json"]).decode())["n_B"])
-            out[str(p)] = {"builder": "julia/export_model.jl", "order": order,
-                           "totaldegree": deg, "n_params": n_b, "sha256": _sha(p)}
-    _update_manifest(out)
+            _update_manifest({str(p): {"builder": "julia/export_model.jl", "order": order,
+                                        "totaldegree": deg, "n_params": n_b, "weights": "random",
+                                        "sha256": _sha(p)}})   # per model: a later failure keeps it
 
 
 def build_mace():

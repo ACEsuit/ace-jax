@@ -49,6 +49,9 @@ if KIND == "ace1"
     @info "building ace1_model(elements=$elements, order=$order, totaldegree=$totaldegree)"
     ace1_kwargs = Dict{Symbol, Any}(:elements => elements, :order => order, :totaldegree => totaldegree)
     rcut_kw === nothing || (ace1_kwargs[:rcut] = rcut_kw)
+    # ACE_R0: explicit bond length.  ACEpotentials' default (:bondlen) falls back to
+    # an undefined `rnn` for elements outside its length-scale table (e.g. Cr-Ni)
+    haskey(ENV, "ACE_R0") && (ace1_kwargs[:r0] = parse(Float64, ENV["ACE_R0"]))
     eref_kw === nothing || (ace1_kwargs[:Eref] = eref_kw)
     model = ace1_model(; ace1_kwargs...)
 elseif KIND == "ace"
