@@ -53,6 +53,19 @@ atoms.get_potential_energy(); atoms.get_forces()
 
 CLI: `ace-jax --help` (fit / gp-fit / eval / predict).
 
+### PACE (pacemaker) potentials
+
+`.yace` files load directly and evaluate in JAX (ASE calculator, lammps-jax):
+
+```python
+atoms.calc = ACECalculator("model.yace")
+```
+
+Supported: ChebExpCos / ChebPow / ChebLinear / SBessel radials, FinnisSinclair
+and FinnisSinclairShiftedScaled embeddings, `density` / `distance` / `zbl` inner
+cutoffs. `write_yace(model, spec, path)` writes a (possibly modified) model back.
+Checked against the ML-PACE C++ and python-ace; see `docs/pace-yace-spec.md`.
+
 ## Authoring the coupling table in Python (EquivariantTensors)
 
 With the `authoring` extra, `ace_jax.construct` builds an ACE basis's

@@ -69,6 +69,9 @@ def load(path, dtype=jnp.float64, a2b_sparse=False, edge_a_kind="gather", fold=T
     `fold_readout`); pass False to keep the B-materialising path, e.g. to
     measure the fold by difference.  Descriptors are unaffected either way.
     """
+    if str(path).endswith(".yace"):          # PACE C-tilde potential: separate model class
+        from .pace_model import load_yace
+        return load_yace(path, dtype=dtype)
     if edge_a_kind not in ("gather", "matmul"):
         raise ValueError(f'edge_a_kind must be "gather" or "matmul", got {edge_a_kind!r}')
     z = np.load(path)

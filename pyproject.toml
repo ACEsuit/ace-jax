@@ -29,6 +29,7 @@ dependencies = [
   "scipy>=1.10",
   "lineax>=0.1.1",
   "ase>=3.22",          # core: neighbour-list fallback (eval) + calculators + xyz IO
+  "pyyaml>=6",          # .yace (PACE) model files
 ]
 
 [project.optional-dependencies]

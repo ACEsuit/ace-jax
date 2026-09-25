@@ -9,7 +9,6 @@ import jax
 import jax.numpy as jnp
 from jax.scipy.linalg import cho_solve, solve_triangular
 
-from .embedding import normalize_rows
 from .hypers import from_array, log_prior
 from .kernels import K_MM
 from .stats import sufficient_statistics
@@ -123,21 +122,3 @@ def make_log_density(prob, ds, objective="lml", mesh=None, cache_linear=True):
         return lik(a) + log_prior(from_array(a), prob.prior)
     f.likelihood = lik
     return f
-
-
-def make_lml_embed(prob, ds):
-    """LML as a differentiable function (E, a) -> scalar for the outer VarOpt over
-    the species embedding E. E enters the GP kernel via ind.embed = normalize_rows(E)
-    (K_MM + the M residual columns); the E-independent linear Gram is cached once.
-    Bypasses make_lml's jitted, E-frozen closure so jax.grad(., E) is available."""
-    from .stats import assemble_statistics, linear_statistics, residual_statistics
-    lin = jax.jit(lambda: linear_statistics(prob.model, prob.cfg, ds))()
-    jax.block_until_ready(lin)
-
-    def lml_E(E, a):
-        theta = from_array(a)
-        ind_E = prob.ind._replace(embed=normalize_rows(E))
-        res = residual_statistics(theta, prob.spec, prob.model, ind_E, prob.cfg, ds)
-        st = assemble_statistics(lin, res)
-        return log_marginal_likelihood(theta, st, prob._replace(ind=ind_E))
-    return lml_E

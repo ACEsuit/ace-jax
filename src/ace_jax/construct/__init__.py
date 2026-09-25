@@ -7,8 +7,9 @@ julia/smoothness_reference.jl).  Radials / pair basis / embedding stay exported
 (separate follow-up).
 
 prior.py is deliberately numpy-only so the eval/fit path can import it as a
-fallback for exports that lack gamma (cli.py rebuilds it from the export's
-meta["nnll"] via gamma_from_model); the coupling shim is the only piece that
+fallback for exports that lack gamma (cli.py and the bench driver go through
+prior.prior_diagonal, which rebuilds it from the export's meta["nnll"]); the
+coupling shim is the only piece that
 needs the optional `authoring` extra (juliacall + juliapkg).  Refitting on an
 existing model never touches it.
 """
