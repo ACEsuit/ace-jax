@@ -37,3 +37,14 @@ def test_planned_models_cover_the_matrix():
     pace = {(r["system"], r["size"]): r["path"] for r in rows if r["code"] == "acejax-pace"}
     ml = {(r["system"], r["size"]): r["path"] for r in rows if r["code"] == "mlpace"}
     assert pace == ml                                     # the same .yace files
+
+
+def test_standalone_row_for_acejax(tmp_path):
+    from scaling.run_standalone import run_case
+    row = {"code": "acejax-pace", "system": "SiGe", "size": "small",
+           "path": str(pathlib.Path(__file__).parent.parent / "fixtures" / "pace" / "gesi_sbessel.yace"),
+           "elements": ["Si", "Ge"], "name": "acejax-pace/SiGe/small"}
+    out = run_case(row, 256, "float64", "cpu", reps=2)
+    assert out["status"] == "ok" and out["n_atoms"] == 256 and out["layout"] in ("dense", "sparse")
+    for k in ("call_s", "force_s", "nlist_s", "compile_s"):
+        assert out[k] > 0

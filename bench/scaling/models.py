@@ -97,7 +97,10 @@ def build_ace():
             p = DIR / f"ace_{system}_{size}.npz"
             env = {**os.environ, "ACE_ELEMENTS": ",".join(els), "ACE_ORDER": str(order),
                    "ACE_TOTALDEGREE": str(deg), "ACE_RCUT": "5.0"}
-            subprocess.run(["julia", "--project=julia", "julia/export_model.jl", str(p), "ace1"],
+            # ACE_JULIA selects the Julia (e.g. "julia +1.11": the export env does
+            # not resolve on 1.13, and CI's julia-parity job pins 1.11)
+            julia = os.environ.get("ACE_JULIA", "julia").split()
+            subprocess.run([*julia, "--project=julia", "julia/export_model.jl", str(p), "ace1"],
                            cwd=ROOT, env=env, check=True)
             import numpy as np
             n_b = int(json.loads(bytes(np.load(p)["meta_json"]).decode())["n_B"])
