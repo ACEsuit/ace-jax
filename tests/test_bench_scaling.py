@@ -185,3 +185,10 @@ def test_finished_tolerates_teardown_abort_only():
     assert finished(-6, "Loop time ...\nTotal wall time: 0:00:01\n")
     assert not finished(-6, "Loop time ...\n")                   # died mid-run
     assert not finished(1, "ERROR: Unrecognized pair style")
+
+
+def test_acejax_kokkos_newton_on():
+    """The bundle's forces are the energy gradient w.r.t. every position,
+    ghosts included: they need reverse comm, i.e. newton on (full list)."""
+    from scaling.run_lammps import KOKKOS
+    assert KOKKOS["acejax"] == "newton on neigh full"
