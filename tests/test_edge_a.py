@@ -16,10 +16,7 @@ import pytest
 
 from conftest import FIXTURE_DIR, MODELS, pace_fixture, species_index
 
-import equinox as eqx
-
 from ace_jax.eval import calibrate_edge_a, load, sparse_graph, with_edge_a_kind
-from ace_jax.eval.edge_model import EDGE_A_KINDS
 
 # Both model families share the A-basis forms (eval/edge_model.py), so every
 # test here runs on the ACE npz models and on PACE .yace fixtures alike.
@@ -57,9 +54,8 @@ def _case(model_path, dtype, kind):
     return model, (rij, nz[send], nz[recv], send, n, jnp.zeros(n, jnp.int32))
 
 
-@pytest.mark.parametrize("alt", ["matmul", "jvp"])
 @pytest.mark.parametrize("dtype", [jnp.float64, jnp.float32], ids=["f64", "f32"])
-def test_forms_agree_bitwise(model_path, dtype, alt):
+def test_forms_agree_bitwise(model_path, dtype):
     """Values and gradients agree; how tightly depends on the dtype.
 
     Values are bit-identical in both dtypes.  GRADIENTS are bit-identical in f64
@@ -69,8 +65,8 @@ def test_forms_agree_bitwise(model_path, dtype, alt):
     architecture and fails on the other, which is how this was found.
     """
     mg, args = _case(model_path, dtype, "gather")
-    mm, _ = _case(model_path, dtype, alt)
-    assert (mg.edge_a_kind, mm.edge_a_kind) == ("gather", alt)   # else this compares a form with itself
+    mm, _ = _case(model_path, dtype, "matmul")
+    assert (mg.edge_a_kind, mm.edge_a_kind) == ("gather", "matmul")   # else this compares a form with itself
     rij, zi, zj, send, n, nzero = args
     ev = lambda m: m.site_energies(rij, zi, zj, send, n, nzero)
     dv = np.max(np.abs(np.asarray(ev(mg) - ev(mm))))
@@ -78,27 +74,18 @@ def test_forms_agree_bitwise(model_path, dtype, alt):
     dg = np.max(np.abs(np.asarray(gr(mg) - gr(mm))))
     print(f"\n  {dtype.__name__}: values {dv:.1e}  grads {dg:.1e}")
     assert dv == 0.0, f"values differ by {dv}"
-    if dtype is jnp.float64 and alt == "matmul":
+    if dtype is jnp.float64:
         assert dg == 0.0, f"f64 gradients differ by {dg}"
-    elif dtype is jnp.float64:
-        # "jvp" forms each edge's force by forward mode and a row gather instead
-        # of a scatter: equal to roundoff, not bitwise
-        scale = float(np.max(np.abs(np.asarray(gr(mg)))))
-        assert dg <= 1e-12 * scale, f"f64 gradients differ by {dg} (scale {scale})"
     else:
         scale = float(np.max(np.abs(np.asarray(gr(mg)))))
-        # "jvp" reaches each force by a different chain (forward mode, then the
-        # contraction), so f32 roundoff differs more than matmul's reordering;
-        # the f64 case above pins the mathematics at 1e-12
-        tol = 5e-5 if alt == "jvp" else 1e-5
-        assert dg <= tol * scale, f"f32 gradients differ by {dg} (scale {scale})"
+        assert dg <= 1e-5 * scale, f"f32 gradients differ by {dg} (scale {scale})"
 
 
 def test_switching_preserves_results(model_path):
     """`with_edge_a_kind` round-trips without touching the numbers."""
     mg, (rij, zi, zj, send, n, nzero) = _case(model_path, jnp.float64, "gather")
     ref = np.asarray(mg.site_energies(rij, zi, zj, send, n, nzero))
-    for kind in ("matmul", "jvp", "gather"):
+    for kind in ("matmul", "gather"):
         m = with_edge_a_kind(mg, kind)
         assert m.edge_a_kind == kind
         got = np.asarray(m.site_energies(rij, zi, zj, send, n, nzero))
@@ -111,7 +98,7 @@ def test_calibration_picks_one_and_is_correct(model_path):
     mg, (rij, zi, zj, send, n, nzero) = _case(model_path, jnp.float64, "gather")
     best, timings = calibrate_edge_a(mg, rij, zi, zj, send, n, nzero, reps=2)
     print(f"\n  timings/ms {timings}  -> {best.edge_a_kind}")
-    assert set(timings) == set(EDGE_A_KINDS) == {"gather", "matmul", "jvp"}
+    assert set(timings) == {"gather", "matmul"}
     assert best.edge_a_kind == min(timings, key=timings.get)
     ref = np.asarray(mg.site_energies(rij, zi, zj, send, n, nzero))
     assert np.array_equal(np.asarray(best.site_energies(rij, zi, zj, send, n, nzero)), ref)
@@ -149,20 +136,3 @@ def test_matmul_form_selects_at_full_precision(model_path):
     for e in sel:
         prec = e.params["precision"]
         assert prec is not None and all(p == jax.lax.Precision.HIGHEST for p in prec), prec
-
-
-def test_jvp_form_keeps_parameter_gradients(model_path):
-    """The "jvp" form replaces only the edge-vector adjoint; gradients with
-    respect to the model's own parameters (fitting, trainable radials) must be
-    those of the plain gather."""
-    mg, (rij, zi, zj, send, n, nz) = _case(model_path, jnp.float64, "gather")
-    mj = with_edge_a_kind(mg, "jvp")
-    loss = lambda m: jnp.sum(m.site_energies(rij, zi, zj, send, n, nz) ** 2)
-    gg = eqx.filter_grad(loss)(mg)
-    gj = eqx.filter_grad(loss)(mj)
-    leaves_g = jax.tree_util.tree_leaves(eqx.filter(gg, eqx.is_inexact_array))
-    leaves_j = jax.tree_util.tree_leaves(eqx.filter(gj, eqx.is_inexact_array))
-    assert len(leaves_g) == len(leaves_j) > 0
-    for a, b in zip(leaves_g, leaves_j):
-        scale = float(jnp.max(jnp.abs(a))) or 1.0
-        assert float(jnp.max(jnp.abs(a - b))) <= 1e-11 * scale

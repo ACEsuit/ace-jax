@@ -60,34 +60,22 @@ class PACEModel(EdgeSiteModel):
         return flat.reshape(self.n_aa, self.nz, self.ndensity)
 
     # ------------------------------------------------------------ per edge
-    def _geometry(self, rij, zi, zj, mask):
-        """Per-edge bond parameters, validity (r < bond rcut, and mask), and a
-        safe r / rij for invalid edges so no branch sees r = 0 or r >= rcut."""
+    def _edges(self, rij, zi, zj, mask):
         r2 = jnp.sum(rij * rij, axis=-1)
         bp = self.radparams[zi, zj]
-        valid = r2 < bp[:, 1] * bp[:, 1]
+        lam, rc, dcut, cin, dcin = (bp[:, k] for k in range(5))
+        valid = r2 < rc * rc
         if mask is not None:
             valid = valid & mask
-        r = jnp.sqrt(jnp.where(valid, r2, 1.0)) * jnp.where(valid, 1.0, 0.5 * bp[:, 1])
+        r = jnp.sqrt(jnp.where(valid, r2, 1.0)) * jnp.where(valid, 1.0, 0.5 * rc)
         rij_s = jnp.where(valid[:, None], rij, jnp.stack([r, 0 * r, 0 * r], -1))
-        return bp, valid, r, rij_s
-
-    def edge_a_rows(self, rij, zi, zj, mask=None):
-        """Per-edge A rows [g_k | R_nl] x Y_lm, zero for invalid edges."""
-        bp, valid, r, rij_s = self._geometry(rij, zi, zj, mask)
-        lam, rc, dcut, cin, dcin = (bp[:, k] for k in range(5))
         g = radbase(r, self.radbasename, self.inner_cutoff_type, lam, rc, dcut,
                     cin, dcin, self.nradbase)                             # (E, K)
         R = jnp.einsum("ek,enlk->enl", g, self.crad[zi, zj])
         R = R.reshape(g.shape[0], R.shape[1] * R.shape[2])      # explicit: E may be 0
         cols = jnp.concatenate([g, R], axis=-1)
         Y = real_spherical_harmonics(rij_s, self.lmax)
-        return jnp.where(valid[:, None], self.edge_a(cols, Y), 0.0)
-
-    def _edge_core(self, rij, zi, zj, mask):
-        """Core repulsion / ZBL per edge, and the zbl switch coordinate d."""
-        bp, valid, r, _ = self._geometry(rij, zi, zj, mask)
-        lam, rc, dcut, cin, dcin = (bp[:, k] for k in range(5))
+        eA = jnp.where(valid[:, None], self.edge_a(cols, Y), 0.0)
         if self.inner_cutoff_type == "zbl":
             cr = pace_zbl(r, self.Zf[zi], self.Zf[zj], rc, dcut, self.core[zi, zj, 0])
         else:
@@ -95,7 +83,7 @@ class PACEModel(EdgeSiteModel):
                          self.inner_cutoff_type)
         cr = jnp.where(valid, cr, 0.0)
         d = jnp.where(valid, r - (cin - dcin), jnp.inf)                   # zbl switch coordinate
-        return cr, d, dcin
+        return eA, cr, d, dcin
 
     # ------------------------------------------------------------ per node
     def _embedding(self, rho, node_z):
@@ -105,8 +93,8 @@ class PACEModel(EdgeSiteModel):
         return jnp.sum(w * F, axis=-1)
 
     def site_energies(self, rij, zi, zj, segment_ids, n_nodes, node_z, mask=None):
-        cr, d, dcin = self._edge_core(rij, zi, zj, mask)
-        A = self.pool_edge_a(rij, zi, zj, segment_ids * self.nz + zj, n_nodes * self.nz, mask)
+        eA, cr, d, dcin = self._edges(rij, zi, zj, mask)
+        A = jax.ops.segment_sum(eA, segment_ids * self.nz + zj, num_segments=n_nodes * self.nz)
         A = A.reshape(n_nodes, self.nz * self.n_a_local)
         AA = jnp.concatenate([jnp.prod(A[:, s], axis=-1) for s in self.aa_specs], axis=-1)
         rho_all = (AA @ self.ctilde_real().reshape(self.n_aa, -1)).reshape(

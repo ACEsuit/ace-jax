@@ -10,20 +10,17 @@ in `EdgeSiteModel`, so the two model families cannot drift apart:
 * the lammps-jax positions entry point.
 
 A subclass provides `site_energies`, `pad_cutoff()` (where padded edges are
-parked), `edge_a_widths()` (row counts of the one-hot selectors) and
-`edge_a_rows(rij, zi, zj, mask)` (the masked per-edge A rows that
-`pool_edge_a` sums), plus the
+parked) and `edge_a_widths()` (row counts of the one-hot selectors), plus the
 fields `aspec_r`, `aspec_y`, `edge_a_kind`, `a_sel_r`, `a_sel_y` and `E0`.
 """
 import dataclasses
 import time
-from functools import partial
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 
-EDGE_A_KINDS = ("gather", "matmul", "jvp")
+EDGE_A_KINDS = ("gather", "matmul")
 
 
 def one_hot_selector(idx, width, dtype):
@@ -33,40 +30,7 @@ def one_hot_selector(idx, width, dtype):
 
 def check_edge_a_kind(kind):
     if kind not in EDGE_A_KINDS:
-        raise ValueError(f"edge_a_kind must be one of {EDGE_A_KINDS}, got {kind!r}")
-
-
-@partial(jax.custom_vjp, nondiff_argnums=(6,))
-def _pool_edge_a_jvp(model, rij, zi, zj, seg, mask, n_seg):
-    """segment_sum of the per-edge A rows, with a forward-mode edge adjoint.
-
-    Each edge's row depends only on its own rij, so its force is
-    g_e = sum_a ct[seg_e, a] * dA_{e,a}/drij_e: a row gather of the node
-    cotangent and three jvps (one per Cartesian direction, all edges at once).
-    That replaces the reverse pass's axis-1 scatter-adds -- the dominant cost of
-    a force call on GPUs -- with gathers and fused elementwise work.  Parameter
-    cotangents come from an ordinary VJP, which XLA removes as dead code when
-    only forces are requested.
-    """
-    return jax.ops.segment_sum(model.edge_a_rows(rij, zi, zj, mask), seg, num_segments=n_seg)
-
-
-def _pool_jvp_fwd(model, rij, zi, zj, seg, mask, n_seg):
-    return _pool_edge_a_jvp(model, rij, zi, zj, seg, mask, n_seg), (model, rij, zi, zj, seg, mask)
-
-
-def _pool_jvp_bwd(n_seg, res, ct):
-    model, rij, zi, zj, seg, mask = res
-    w = ct[seg]                                                    # (E, n_A) row gather
-    _, lin = jax.linearize(lambda r: model.edge_a_rows(r, zi, zj, mask), rij)
-    unit = jnp.eye(3, dtype=rij.dtype)
-    g_r = jnp.stack([jnp.sum(w * lin(jnp.broadcast_to(unit[k], rij.shape)), axis=1)
-                     for k in range(3)], axis=1)                   # (E, 3)
-    g_m = jax.vjp(lambda m: m.edge_a_rows(rij, zi, zj, mask), model)[1](w)[0]
-    return g_m, g_r, None, None, None, None
-
-
-_pool_edge_a_jvp.defvjp(_pool_jvp_fwd, _pool_jvp_bwd)
+        raise ValueError(f'edge_a_kind must be "gather" or "matmul", got {kind!r}')
 
 
 class EdgeSiteModel(eqx.Module):
@@ -81,8 +45,6 @@ class EdgeSiteModel(eqx.Module):
 
           "gather"  A = R[:, aspec_r] * Y[:, aspec_y]
           "matmul"  A = (R @ Sr) * (Y @ Sy),  Sr/Sy one-hot
-          "jvp"     the gather here; `pool_edge_a` then replaces the whole
-                    edge-axis adjoint by forward mode (`_pool_edge_a_jvp`)
 
         They differ only in the reverse pass: the gather's adjoint is an axis-1
         scatter whose cost per slot grows with buffer length, while the matmul's
@@ -100,14 +62,6 @@ class EdgeSiteModel(eqx.Module):
             return (jnp.matmul(R, self.a_sel_r, precision=hi)
                     * jnp.matmul(Y, self.a_sel_y, precision=hi))
         return R[:, self.aspec_r] * Y[:, self.aspec_y]
-
-    def pool_edge_a(self, rij, zi, zj, seg, n_seg, mask=None):
-        """Per-edge A rows summed into `n_seg` segments.  Under "jvp" the edge
-        adjoint is forward mode; otherwise ordinary autodiff of the chosen form."""
-        if self.edge_a_kind == "jvp":
-            return _pool_edge_a_jvp(self, rij, zi, zj, seg, mask, n_seg)
-        return jax.ops.segment_sum(self.edge_a_rows(rij, zi, zj, mask), seg,
-                                   num_segments=n_seg)
 
     # -------------------------------------------------- energy / forces / virial
     def energy_forces_virial(self, rij, zi, zj, senders, receivers, n_nodes,
@@ -160,8 +114,8 @@ def with_edge_a_kind(model, kind):
     check_edge_a_kind(kind)
     if kind == model.edge_a_kind:
         return model
-    if kind in ("gather", "jvp"):                  # no selector tables needed
-        return dataclasses.replace(model, edge_a_kind=kind, a_sel_r=None, a_sel_y=None)
+    if kind == "gather":
+        return dataclasses.replace(model, edge_a_kind="gather", a_sel_r=None, a_sel_y=None)
     n_r, n_y = model.edge_a_widths()
     dt = model.E0.dtype
     return dataclasses.replace(model, edge_a_kind="matmul",
@@ -170,7 +124,7 @@ def with_edge_a_kind(model, kind):
 
 
 def calibrate_edge_a(model, rij, zi, zj, segment_ids, n_nodes, node_z, mask=None, reps=5):
-    """Time every A-basis form at THESE shapes and return (best_model, timings).
+    """Time both A-basis forms at THESE shapes and return (best_model, timings).
 
     Calibrate; do not guess.  The crossover is a property of the XLA backend, the
     dtype and the edge-buffer length, not of the platform name -- on an M3 Pro the

@@ -189,12 +189,6 @@ class ACEModel(EdgeSiteModel):
         return self.edge_a(Rnl, self.angular(rij)), Rpair
 
     # -------------------------------------------------- EdgeSiteModel hooks
-    def edge_a_rows(self, rij, zi, zj, mask=None):
-        """Per-edge A rows, zero on masked edges (what `pool_sparse` sums)."""
-        Rnl, _ = self.radial(rij, zi, zj)
-        rows = self.edge_a(Rnl, self.angular(rij))
-        return rows if mask is None else jnp.where(mask[:, None], rows, 0.0)
-
     def pad_cutoff(self):
         """Padded edges sit at the pair cutoff, where every envelope vanishes."""
         return float(jnp.max(self.pair_envelope[..., 0]))
@@ -350,13 +344,6 @@ class ACEModel(EdgeSiteModel):
 
     def site_energies(self, rij, zi, zj, segment_ids, n_nodes, node_z, mask=None):
         """Per-site energies (n_nodes,).  `node_z` is the centre species index per node."""
-        if self.folded and self.edge_a_kind == "jvp":
-            # A through the shared forward-mode edge adjoint; the pair channel
-            # has no gather, so it keeps ordinary autodiff
-            A = self.pool_edge_a(rij, zi, zj, segment_ids, n_nodes, mask)
-            Rpair = self.radial(rij, zi, zj)[1]
-            return self._readout_folded(A, pool_sparse(Rpair, segment_ids, n_nodes, mask),
-                                        node_z)
         if self.folded:
             edge_A, Rpair = self.edge_features(rij, zi, zj)
             return self._readout_folded(pool_sparse(edge_A, segment_ids, n_nodes, mask),
