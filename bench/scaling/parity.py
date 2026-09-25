@@ -24,6 +24,12 @@ TOL = {"mlpace": (1e-6, 1e-5), "acejax": (1e-10, 1e-9), "mace": (1e-6, None)}
 N_ATOMS = 256
 
 
+def error_summary(ex, head=200, tail=500):
+    """Head and tail of repr(ex): some errors (NVRTC) put the message last."""
+    r = repr(ex)
+    return r if len(r) <= head + tail else r[:head] + " ... " + r[-tail:]
+
+
 def compare(E_ref, F_ref, E, F, n_atoms, tol):
     dE = abs(float(E) - float(E_ref)) / n_atoms
     dF = float(np.abs(np.asarray(F) - np.asarray(F_ref)).max())
@@ -112,6 +118,6 @@ def gate(host, env, workroot="/tmp"):
                                         work / "mace")
                 row.update(compare(E0, F0, E1, F1, N_ATOMS, TOL[gate_name]))
             except Exception as ex:                       # a missing style is a failed gate
-                row.update({"status": "error", "error": repr(ex)[:300]})
+                row.update({"status": "error", "error": error_summary(ex)})
             rows.append(row)
     return rows

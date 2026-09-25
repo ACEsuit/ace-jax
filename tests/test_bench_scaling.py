@@ -278,3 +278,10 @@ def test_oom_detected_anywhere_in_output():
     long = "RESOURCE_EXHAUSTED: Out of memory\n" + "Current allocation summary\n" * 100
     assert failure_status(long) == "oom"
     assert failure_status("ERROR: Unrecognized pair style") == "error"
+
+
+def test_error_summary_keeps_head_and_tail():
+    """NVRTC errors lead with kernel source; the message is at the end."""
+    from scaling.parity import error_summary
+    s = error_summary(RuntimeError("#define X\n" * 200 + "nvrtc: error: invalid value"))
+    assert s.startswith("RuntimeError(") and "nvrtc: error: invalid value" in s and len(s) < 800
