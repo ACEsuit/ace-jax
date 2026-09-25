@@ -39,7 +39,7 @@ class FitConfig:
     map_restarts: int = 1
     init: dict | None = None             # Hypers field -> value
     # rungs
-    rungs: tuple = ("map", "laplace")
+    rungs: tuple = ("map",)
     laplace: str = "fd"                  # "fd" (run_laplace_fd) | "svi" (run_laplace)
     n_draws: int = 64
     vi_steps: int = 1000

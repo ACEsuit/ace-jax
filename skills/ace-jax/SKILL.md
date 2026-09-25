@@ -32,10 +32,10 @@ aj construct --elements Cr,Mn,Fe,Co,Ni --order 3 --max-degree 10 \
 # 2. fit. Label keys default to energy/forces/virial; pass yours explicitly.
 K="--energy-key dft_energy --force-key dft_force --virial-key dft_virial"
 aj fit --model si.npz --train train.xyz --test test.xyz $K \
-    --m-per-species 0 --rungs map --r0 2.35 --out out_linear          # linear ACE
+    --m-per-species 0 --r0 2.35 --out out_linear                      # linear ACE
 aj fit --model si.npz --train train.xyz --test test.xyz $K \
     --m-per-species 6 --opt lbfgs --map-restarts 3 --map-steps 40 \
-    --rungs map --r0 2.35 --out out_gp                                # ACE + GP
+    --r0 2.35 --out out_gp                                            # ACE + GP
 
 # 3. evaluate the fitted model on any extxyz
 aj eval --model out_linear/model.npz --data new.xyz $K --forces --out pred.csv
@@ -123,11 +123,12 @@ Other entry points:
 
 - **Run time.** The default Adam MAP is 500 steps. On small data use
   `--opt lbfgs --map-steps 40–150`.
-- **The CLI default `--rungs` is `map,laplace`.** The Laplace rung
-  differentiates the LML twice (a Hessian). Compiling it can take far longer
-  than the MAP: on a laptop CPU, 40 Si configs with M=6 had not finished after
-  30 min.
-  - Pass `--rungs map` unless you need hyperparameter draws.
+- **`--rungs` defaults to `map`.** Adding `laplace` (or `pathfinder`, `vi`,
+  `nuts`) gives hyperparameter draws but costs far more than the MAP. The Laplace
+  rung differentiates the LML twice (a Hessian): on a laptop CPU, 40 Si configs
+  with M=6 had not finished compiling after 30 min.
+  - Add those rungs only when you need hyperparameter uncertainty, and try them
+    on a small subset first.
   - A silent process after the last `lbfgs ... logpost` line means it is
     compiling the Laplace rung, not hung.
 - **Memory.** It scales with Dt² (Dt = basis size + M), and prediction adds

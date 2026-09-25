@@ -126,7 +126,7 @@ aj fit --model si.npz --train train.xyz --test test.xyz $K \
 aj eval --model out_linear/model.npz --data test.xyz $K --forces
 
 # hybrid ACE + GP: 6 inducing sites per species, best of 3 L-BFGS MAP starts
-# -> out_gp/gp_model.npz  (add laplace to --rungs for hyperparameter draws)
+# -> out_gp/gp_model.npz  (--rungs map,laplace adds hyperparameter draws)
 aj fit --model si.npz --train train.xyz --test test.xyz $K \
     --m-per-species 6 --opt lbfgs --map-restarts 3 --map-steps 40 \
     --rungs map --r0 2.35 --out out_gp
@@ -161,9 +161,10 @@ aj fit --model si.npz --data all.xyz --ntrain 40 --ntest 10 --e0 lsq $K \
 - MAP: `--opt adam|lbfgs` (default adam, 500 steps; L-BFGS is much faster on small
   data), `--map-restarts N` (best of N L-BFGS starts; the joint LML is multimodal)
 - UQ: `--rungs map,laplace,pathfinder,vi,nuts` (`--laplace svi|fd`), or `--uq pops` on
-  the linear model. The CLI default is `map,laplace`; the Laplace rung takes a Hessian
-  through the whole LML, which is slow to compile (it did not finish within 30 min on a laptop CPU
-  for 40 Si configs), so use `--rungs map` for quick fits
+  the linear model. The default is `--rungs map`. The other rungs add
+  hyperparameter draws and cost far more than the MAP: the Laplace rung takes a
+  Hessian through the whole LML, which had not finished compiling after 30 min on a
+  laptop CPU for 40 Si configs
 
 Outputs in `--out`: `metrics.csv` (test RMSE, MAE, CRPS, coverage, rms z per rung and
 quantity), `metrics_ood.csv`, `theta_map.json`, `draws_<rung>.npy`, `config.json`,

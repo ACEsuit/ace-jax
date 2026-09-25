@@ -271,3 +271,13 @@ def test_map_restarts_needs_lbfgs():
         FitConfig(model="m.npz", opt="adam", map_restarts=3).validate()
     with pytest.raises(ValueError, match="map_restarts"):
         FitConfig(model="m.npz", sigma_type=True, map_restarts=3).validate()
+
+
+def test_default_ladder_is_map_only():
+    """Laplace compiles a Hessian through the whole LML (>30 min on 40 Si configs on
+    a laptop CPU), so hyperparameter draws are opt-in: --rungs map,laplace."""
+    from ace_jax.cli import _fit_config, _parser
+    from ace_jax.fit.pipeline import FitConfig
+    a = _parser().parse_args(["fit", "--model", "m.npz", "--train", "a.xyz", "--r0", "2.35", "--out", "o"])
+    assert tuple(_fit_config(a).rungs) == ("map",)
+    assert tuple(FitConfig(model="m.npz").rungs) == ("map",)

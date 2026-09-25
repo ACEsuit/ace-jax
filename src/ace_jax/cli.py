@@ -47,7 +47,10 @@ def _add_fit_args(p):
     p.add_argument("--opt", choices=["adam", "lbfgs"], default="adam")
     p.add_argument("--map-restarts", type=int, default=1, help="L-BFGS multi-start (best log-posterior)")
     p.add_argument("--init", default=None, help="theta_map.json to start the MAP from")
-    p.add_argument("--rungs", default="map,laplace"); p.add_argument("--n-draws", type=int, default=100)
+    p.add_argument("--rungs", default="map",
+                   help="comma-separated from map,laplace,pathfinder,vi,nuts (default map; the others add "
+                        "hyperparameter draws and cost far more than the MAP)")
+    p.add_argument("--n-draws", type=int, default=100)
     p.add_argument("--laplace", choices=["svi", "fd"], default="svi")
     p.add_argument("--map-steps", type=int, default=500); p.add_argument("--vi-steps", type=int, default=2000)
     p.add_argument("--nuts-warmup", type=int, default=500); p.add_argument("--nuts-samples", type=int, default=500)
