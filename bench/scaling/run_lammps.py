@@ -17,7 +17,7 @@ from ase.io import write
 
 from scaling.structures import supercell
 
-KOKKOS = {"acejax": "newton on neigh full", "mlpace": "newton on neigh half",
+KOKKOS = {"acejax": "newton on neigh half", "mlpace": "newton on neigh half",
           "mace": "newton on neigh half"}
 
 

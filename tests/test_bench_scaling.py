@@ -189,6 +189,6 @@ def test_finished_tolerates_teardown_abort_only():
 
 def test_acejax_kokkos_newton_on():
     """The bundle's forces are the energy gradient w.r.t. every position,
-    ghosts included: they need reverse comm, i.e. newton on (full list)."""
+    ghosts included: they need reverse comm, i.e. newton on (as lammps-jax examples/in.mlip_al)."""
     from scaling.run_lammps import KOKKOS
-    assert KOKKOS["acejax"] == "newton on neigh full"
+    assert KOKKOS["acejax"] == "newton on neigh half"      # KOKKOS: full list needs newton off
