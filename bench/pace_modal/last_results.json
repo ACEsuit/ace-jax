@@ -1,0 +1,133 @@
+{
+  "aa_counts": {
+    "c_ace": {
+      "n_functions": 475,
+      "n_ms_combs": 3156,
+      "n_aa_real": 7406,
+      "n_a_local": 314,
+      "n_T": 7895
+    },
+    "Cu-1": {
+      "n_functions": 24,
+      "n_ms_combs": 33,
+      "n_aa_real": 42,
+      "n_a_local": 33,
+      "n_T": 42
+    },
+    "sige_zbl": {
+      "n_functions": 120,
+      "n_ms_combs": 152,
+      "n_aa_real": 125,
+      "n_a_local": 34,
+      "n_T": 184
+    }
+  },
+  "parity": {
+    "pacelib": "PACELIB_URL:STRING=https://github.com/ICAMS/lammps-user-pace/archive/refs/tags/v.2023.11.25.fix2.tar.gz\n//ADVANCED property for variable: PACELIB_URL\nPACELIB_URL-ADVANCED:INTERNAL=1",
+    "c_ace": {
+      "n_atoms": 216,
+      "E_acejax": -1913.5295805064338,
+      "pace_recursive": {
+        "dE_per_atom": 2.076890100229152e-12,
+        "max_dF": 9.729115069134764e-09,
+        "max_dS": 2.053934095719301e-09
+      },
+      "pace_product": {
+        "dE_per_atom": 2.0832060356581306e-12,
+        "max_dF": 9.72912794772185e-09,
+        "max_dS": 2.053931847517676e-09
+      },
+      "pace_kk": {
+        "dE_per_atom": 2.077942756133982e-12,
+        "max_dF": 9.729166805527711e-09,
+        "max_dS": 2.0539330236601927e-09
+      }
+    },
+    "Cu-1": {
+      "n_atoms": 108,
+      "E_acejax": -441.6457714412163,
+      "pace_recursive": {
+        "dE_per_atom": 3.442184808793374e-13,
+        "max_dF": 1.574333831702579e-09,
+        "max_dS": 1.296158243235812e-09
+      },
+      "pace_product": {
+        "dE_per_atom": 3.442184808793374e-13,
+        "max_dF": 1.5743340450735666e-09,
+        "max_dS": 1.2961582675219407e-09
+      },
+      "pace_kk": {
+        "dE_per_atom": 3.4316582497450765e-13,
+        "max_dF": 1.5743340971152708e-09,
+        "max_dS": 1.2961583369108798e-09
+      }
+    },
+    "sige_zbl/bulk": {
+      "n_atoms": 64,
+      "E_acejax": 114.52070152118235,
+      "pace_recursive": {
+        "dE_per_atom": 1.1102230246251565e-15,
+        "max_dF": 3.9559333586680623e-10,
+        "max_dS": 1.923512571444519e-08
+      },
+      "pace_product": {
+        "dE_per_atom": 1.5543122344752192e-15,
+        "max_dF": 3.9559333586680623e-10,
+        "max_dS": 1.923512571444519e-08
+      },
+      "pace_kk": {
+        "dE_per_atom": 2.220446049250313e-16,
+        "max_dF": 3.955928917775964e-10,
+        "max_dS": 1.923512571444519e-08
+      }
+    },
+    "sige_zbl/close": {
+      "n_atoms": 64,
+      "E_acejax": 179.97733708259813,
+      "pace_recursive": {
+        "dE_per_atom": 3.9968028886505635e-15,
+        "max_dF": 9.132889999818872e-10,
+        "max_dS": 2.5706037798389758e-08
+      },
+      "pace_product": {
+        "dE_per_atom": 3.9968028886505635e-15,
+        "max_dF": 9.132889999818872e-10,
+        "max_dS": 2.5706037798389758e-08
+      },
+      "pace_kk": {
+        "dE_per_atom": 4.440892098500626e-15,
+        "max_dF": 9.132321565630264e-10,
+        "max_dS": 2.570603790941206e-08
+      }
+    },
+    "lammps_reads_write_yace": {
+      "dE_total": 0.0
+    }
+  },
+  "timings": {
+    "n_atoms": 4096,
+    "gpu": "L4",
+    "pace_kk_gpu": {
+      "s_per_step": 0.03962422355999999,
+      "atom_steps_per_s": 103371.11069943702
+    },
+    "pace_cpu_1core": {
+      "s_per_step": 1.8186762736,
+      "atom_steps_per_s": 2252.1875165238316
+    },
+    "acejax_float32": {
+      "s_per_call": 0.36399740799999947,
+      "atom_steps_per_s": 11252.82738277083,
+      "s_energy_only": 0.16504550449997168,
+      "n_edges": 499712,
+      "peak_gpu_bytes": 1538114560
+    },
+    "acejax_float64": {
+      "s_per_call": 0.2745197829999597,
+      "atom_steps_per_s": 14920.600458148407,
+      "s_energy_only": 0.03936697300002834,
+      "n_edges": 499712,
+      "peak_gpu_bytes": 3098787072
+    }
+  }
+}
