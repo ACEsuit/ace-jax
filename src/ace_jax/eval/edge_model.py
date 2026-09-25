@@ -154,6 +154,28 @@ class EdgeSiteModel(eqx.Module):
         return self.site_energies(rij, zi, zj, senders, n_nodes, node_z, edge_mask)
 
 
+# ------------------------------------------------------------------ layouts
+LAYOUTS = ("sparse", "dense")
+
+
+def estimate_a_bytes(model, layout, n_nodes, n_edges, max_neighbours, itemsize):
+    """Peak bytes of the A-basis stage (energy + forces), for choosing a layout.
+
+    Fitted to measured peaks on A4500/A100/H100 (c_ace, 4k and 14k atoms):
+    dense  ~ 2 n K (C n_cols + n_Y) + 3 n C n_cols n_Y   (factors + A_full)
+    sparse ~ 2 E (n_cols + n_Y + n_A)                    (factors + per-edge rows)
+    with C neighbour-species channels.  Dense grows with C and with the (n, K)
+    padding; sparse only with the edge count.
+    """
+    nc, ny = model.edge_a_widths()
+    C, n_a = model.a_channels, int(model.aspec_r.shape[0])
+    if layout == "dense":
+        return itemsize * (2 * n_nodes * max_neighbours * (C * nc + ny) + 3 * n_nodes * C * nc * ny)
+    if layout == "sparse":
+        return itemsize * 2 * n_edges * (nc + ny + n_a)
+    raise ValueError(f"layout must be one of {LAYOUTS}, got {layout!r}")
+
+
 # ------------------------------------------------------------------ edge_A kind
 def with_edge_a_kind(model, kind):
     """Return `model` using the other A-basis form.  Values and gradients are
