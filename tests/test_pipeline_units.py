@@ -96,3 +96,23 @@ def test_objective_device_and_hostcache_agree_on_the_fixture():
         vals.append((float(v), np.asarray(g)))
     assert np.isclose(vals[0][0], vals[1][0], rtol=1e-7)
     assert np.allclose(vals[0][1], vals[1][1], rtol=1e-5, atol=1e-6 * np.abs(vals[0][1]).max())
+
+
+def test_fit_map_restarts_one_equals_single_lbfgs():
+    from conftest import FIXTURE_DIR
+    from ace_jax.fit.pipeline import FitConfig, load_fit_data
+    from ace_jax.fit.pipeline.mapfit import fit_map
+    from ace_jax.fit.pipeline.objective import make_objective
+    from ace_jax.fit.pipeline.problem import build_problem
+    base = dict(model=str(FIXTURE_DIR / "si_fitted.npz"), energy_key="dft_energy", force_key="dft_force",
+                virial_key="dft_virial", ntrain=12, ntest=4, batch=4, r0=2.35, arm="linear",
+                rungs=("map",), map_steps=8)
+    thetas = []
+    for n in (1, 2):
+        cfg = FitConfig(**base, map_restarts=n)
+        d = load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz"))
+        b = build_problem(cfg, d)
+        r = fit_map(cfg, d, b, make_objective(cfg, d, b), log=lambda *a, **k: None)
+        thetas.append(r)
+    assert len(thetas[0].restarts) == 1 and len(thetas[1].restarts) == 2
+    assert thetas[1].restarts[0]["x"] == thetas[0].restarts[0]["x"]      # start 0 identical
