@@ -6,9 +6,13 @@
 The image mirrors bench/scaling/envs/moriarty.sh: LAMMPS develop with KOKKOS
 (CUDA sm_80 + OpenMP), ML-PACE and Symmetrix; the lammps-jax plugin; a venv with
 JAX CUDA, lammps-jax, mace-torch, cuequivariance and symmetrix.  ace-jax source,
-the benchmark models and any existing results are mounted from this checkout,
-so the sweep resumes where the last run stopped.  Rows come back to
-bench/scaling/results/modal-a100.jsonl.
+the benchmark models are mounted from this checkout.
+
+Rows are written to the `ace-jax-bench-scaling-results` Volume as they land
+(committed every minute), so a preempted container resumes instead of starting
+over.  A run is seeded with bench/scaling/results/modal-a100.jsonl plus
+modal-snapshots/<code>.jsonl, and its rows are merged back into
+modal-a100.jsonl (by case key) when it returns.
 """
 import json
 import pathlib
@@ -90,13 +94,18 @@ image = (
     .add_local_dir(ROOT / "julia", "/ace-jax/julia")
 )
 app = modal.App("ace-jax-bench-scaling", image=image)
+# rows land here as they are written: a preempted container is restarted with
+# the same input, and resumes from the volume instead of from scratch
+vol = modal.Volume.from_name("ace-jax-bench-scaling-results", create_if_missing=True)
+SNAPSHOTS = ROOT / "bench" / "scaling" / "results" / "modal-snapshots"
 
 
-@app.function(gpu="A100-80GB", timeout=24 * 3600)
-def sweep(results_so_far: str = "", only: str = "", parity_only: bool = False):
+@app.function(gpu="A100-80GB", timeout=24 * 3600, volumes={"/results": vol})
+def sweep(seed: str = "", only: str = "", parity_only: bool = False):
     import os
     import subprocess
     import sys
+    import time
     import jax_plugins.xla_cuda12 as p
     bench = pathlib.Path("/ace-jax/bench/scaling")
     pjrt = os.path.join(os.path.dirname(p.__file__), "xla_cuda_plugin.so")
@@ -106,23 +115,32 @@ def sweep(results_so_far: str = "", only: str = "", parity_only: bool = False):
     models = bench / "models"
     if not any(models.glob("mace_*.model")):                 # MACE-MP-0b2 / MH-1 + Symmetrix
         subprocess.run([sys.executable, str(bench / "models.py"), "mace"], check=True)
-    res = pathlib.Path("/tmp/modal-a100.jsonl")
-    res.write_text(results_so_far)                          # resume: skip finished cases
+    vol.reload()
+    res = pathlib.Path(f"/results/modal-a100-{only or 'all'}{'-parity' if parity_only else ''}.jsonl")
+    if not res.exists():                                    # first start; a restart keeps the volume copy
+        res.write_text(seed)
+        vol.commit()
     cmd = [sys.executable, str(bench / "sweep.py"), "modal-a100", "--results", str(res)]
     cmd += (["--only", only] if only else []) + (["--parity-only"] if parity_only else [])
-    subprocess.run(cmd, check=False)
-    return res.read_text()[len(results_so_far):]            # only the new rows
+    proc = subprocess.Popen(cmd)
+    while proc.poll() is None:                              # at most a minute lost to preemption
+        time.sleep(60)
+        vol.commit()
+    vol.commit()
+    return res.read_text()
 
 
 @app.local_entrypoint()
 def main(only: str = "", parity_only: bool = False):
+    import sys
+    sys.path.insert(0, str(ROOT / "bench"))
+    from scaling.sweep import merge_rows, seed_for
     RESULTS.parent.mkdir(parents=True, exist_ok=True)
     prior = RESULTS.read_text() if RESULTS.exists() else ""
-    new = sweep.remote(prior, only, parity_only)
-    with RESULTS.open("a") as f:
-        f.write(new)
-    rows = [json.loads(l) for l in new.splitlines() if l.strip()]
-    print(f"{len(rows)} new rows ->", RESULTS)
-    for r in rows:
+    seed = seed_for(prior, SNAPSHOTS, only) if only else prior
+    merged, added = merge_rows(prior, sweep.remote(seed, only, parity_only))
+    RESULTS.write_text(merged)
+    print(f"{added} new rows ->", RESULTS)
+    for r in (json.loads(l) for l in merged.splitlines() if l.strip()):
         if r.get("mode") == "parity":
             print(f"  parity {r['gate']:7s} {r['system']:7s} {r['model']:28s} {r['status']}")

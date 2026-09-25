@@ -300,3 +300,24 @@ def test_lammps_error_summary_keeps_error_lines():
     from scaling.run_lammps import error_text
     txt = "ERROR: Kokkos failed to allocate\n" + "MPI_ABORT banner line\n" * 50
     assert "ERROR: Kokkos failed to allocate" in error_text(txt)
+
+
+def test_merge_rows_appends_only_unseen_keys():
+    """A preempted Modal run returns its whole resumed file: merging must not
+    duplicate rows the local results already hold."""
+    from scaling.sweep import merge_rows
+    a = json.dumps({"_key": ["m", "lammps", 256], "status": "ok"})
+    b = json.dumps({"_key": ["m", "lammps", 512], "status": "ok"})
+    merged, added = merge_rows(a + "\n", a + "\n" + b + "\n")
+    assert merged.splitlines() == [a, b] and added == 1
+    assert merge_rows("", "")[1] == 0
+
+
+def test_seed_for_code_combines_results_and_snapshot(tmp_path):
+    from scaling.sweep import seed_for
+    p = json.dumps({"_key": ["parity", "acejax", "SiGe", "acejax-pace"], "mode": "parity"})
+    r = json.dumps({"_key": ["acejax-pace/SiGe/small", "lammps", 256], "code": "acejax-pace"})
+    (tmp_path / "acejax-pace.jsonl").write_text(p + "\n" + r + "\n")
+    seed = seed_for(p + "\n", tmp_path, "acejax-pace")
+    assert seed.splitlines() == [p, r]
+    assert seed_for(p + "\n", tmp_path, "mace").splitlines() == [p]      # no snapshot

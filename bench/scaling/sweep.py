@@ -57,6 +57,27 @@ def cases(host):
     return out
 
 
+def merge_rows(existing, incoming):
+    """(existing + incoming rows whose _key is new, number added); keeps order."""
+    seen = {json.dumps(json.loads(l).get("_key")) for l in existing.splitlines() if l.strip()}
+    out, added = existing, 0
+    for l in incoming.splitlines():
+        if not l.strip():
+            continue
+        k = json.dumps(json.loads(l).get("_key"))
+        if k not in seen:
+            seen.add(k)
+            out += ("" if not out or out.endswith("\n") else "\n") + l + "\n"
+            added += 1
+    return out, added
+
+
+def seed_for(results_text, snapshot_dir, code):
+    """Resume point for one code: the local results plus a saved snapshot of it."""
+    snap = pathlib.Path(snapshot_dir) / f"{code}.jsonl"
+    return merge_rows(results_text, snap.read_text() if snap.exists() else "")[0]
+
+
 def _line(c):
     return (c.model, c.mode, c.dtype, c.device)
 
