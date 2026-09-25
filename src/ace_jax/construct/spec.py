@@ -9,6 +9,9 @@ absolute value, sum(l) + L is even, and the L=0 single-channel special case
 (one channel => l == 0) holds.
 """
 from itertools import product
+from typing import NamedTuple
+
+import numpy as np
 
 
 def _mm_filter(mm, L=0):
@@ -139,3 +142,50 @@ def build_spec(NZ, order, totaldegree, wL=1.5, tol=1e-9):
 
     dfs(0, [], 0.0)
     return mb, Rnl, ylm_spec(maxl1)
+
+
+class EmbeddingSpec(NamedTuple):
+    """Embedded-model spec (ACEpotentials `ace_embedding_model`)."""
+    mb: list                  # many-body (n, l) bodies, widened n, grouped by order
+    rspec: list               # radial (n, l), n = (n'-1) d + k, in r1 order x k
+    Ylm: list                 # (l, m) up to the largest radial l
+    r1: list                  # unfolded single-channel (n', l) blocks, (l, n') order
+    d: int                    # channel width = max(widths)
+    widths: list              # per-order widths d_nu
+    nidx: np.ndarray          # radial i -> r1 block (factorised table column)
+    kidx: np.ndarray          # radial i -> channel k
+
+
+def build_embedding_spec(S, order, totaldegree, widths, wL=1.5, maxl=None, block_rule="ace1"):
+    """The basis spec of `ace_embedding_model` for S elements.
+
+    block_rule="ace1" (default) admits the (n', l) blocks the categorical
+    `ace1_model` admits: degree counted on the species-FOLDED radial index with
+    TotalDegree(S, 1/wL), keeping the z' = 1 channel and unfolding (40-45% more
+    blocks than the plain single-channel rule at S = 5, order 3); "symmetric"
+    counts on the radial index alone (the folding with S = 1).  The channel k is
+    folded into the radial index, n = (n'-1) d + k, and the many-body spec is
+    channel-diagonal: every factor of a body shares one k, order nu drawing on
+    its own d_nu = widths[nu-1] channels.  Bodies are grouped by order (ET
+    mis-couples an ungrouped spec)."""
+    if block_rule not in ("ace1", "symmetric"):
+        raise ValueError(f"block_rule = {block_rule!r}; expected 'ace1' or 'symmetric'")
+    if len(widths) != order:
+        raise ValueError(f"need one width per correlation order: {len(widths)} != {order}")
+    NZf = S if block_rule == "ace1" else 1
+    mb_f, Rnl_f, _ = build_spec(NZf, order, totaldegree, wL)
+    ok = lambda n, l: (n - 1) % NZf == 0 and (maxl is None or l <= maxl)
+    unfold = lambda n: (n - 1) // NZf + 1
+    r1 = [(unfold(n), l) for n, l in Rnl_f if ok(n, l)]                 # (l, n') order
+    mb1 = [[(unfold(n), l) for n, l in b] for b in mb_f if all(ok(n, l) for n, l in b)]
+    d = max(widths)
+    rspec = [((n1 - 1) * d + k, l) for n1, l in r1 for k in range(1, d + 1)]
+    mb = [[((n1 - 1) * d + k, l) for n1, l in b] for b in mb1 for k in range(1, widths[len(b) - 1] + 1)]
+    mb.sort(key=len)                                                      # stable: grouped by order
+    # every radial l, as build_model does (a safe superset for the coupling shim;
+    # Julia's own Ylm stops at the largest l of its rpe-only AA spec -- the extra
+    # channels change no basis function)
+    lmax = max(l for _, l in r1)
+    i = np.arange(len(rspec))
+    return EmbeddingSpec(mb=mb, rspec=rspec, Ylm=ylm_spec(lmax), r1=r1, d=d, widths=list(widths),
+                         nidx=(i // d).astype(np.int32), kidx=(i % d).astype(np.int32))

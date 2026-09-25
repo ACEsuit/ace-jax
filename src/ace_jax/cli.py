@@ -14,6 +14,7 @@ import jax.numpy as jnp
 from jax.sharding import Mesh
 
 from .eval import highest_precision, load
+from .construct.prior import prior_diagonal
 from .fit.data import build_dataset, load_configs
 from .fit.hypers import Hypers, default_prior, to_array
 from .fit.inducing import GPConfig, descriptor_scale, select_inducing, site_features
@@ -121,7 +122,7 @@ def run(a):
         ind = select_inducing(X, S, ds_train.node_z, ds_train.node_mask, a.m_per_species,
                               descriptor_scale(X, ds_train.node_mask))
         prob = Problem(KernelSpec(a.kernel, not a.no_bump, cfg.D), model, ind, cfg,
-                       jnp.asarray(z["gamma"]), default_prior(a.r0))
+                       jnp.asarray(prior_diagonal(z, meta, a.model)), default_prior(a.r0))
         # ds_fit is what the (possibly sharded) objective sees; ds_train stays
         # unpadded for predict_mixture below (single-device, brief says so).
         ds_fit = _pad_to_multiple(ds_train, a.devices) if mesh is not None else ds_train
@@ -209,6 +210,30 @@ def cmd_eval(a):
     return rows
 
 
+def cmd_construct(a):
+    """Author a frozen ACE model in memory (seeded radial init, zero readout,
+    algebraic smoothness prior) and package it as an npz bridge file.  Requires
+    the `authoring` extra; the saved file evaluates with the plain eval path."""
+    from .construct.model import build_model
+    from .construct.export import save_npz
+    els = [int(e) if e.strip().isdigit() else e.strip()
+           for e in a.elements.split(",")]
+    auth = build_model(els, a.order, a.max_degree, wL=a.wL, rcut=a.rcut,
+                       rin=a.rin, radial_mode=a.radial_mode, pair_mode=a.pair_mode,
+                       seed=a.seed, with_gamma=not a.no_gamma,
+                       coupling_cache=not a.no_coupling_cache,
+                       coupling_cache_dir=a.coupling_cache_dir)
+    out = pathlib.Path(a.out).expanduser()
+    if out.parent and str(out.parent) != ".":
+        out.parent.mkdir(parents=True, exist_ok=True)
+    save_npz(out, auth)
+    m, meta = auth.model, auth.meta
+    print(f"authored {m.A2B.shape[0]} B functions ({meta['n_AA']} AA), "
+          f"{meta['n_pair']} pair, {meta['len_basis']} basis entries, "
+          f"lmax {meta['lmax']}, rcut {meta['rcut']} -> {a.out}")
+    return auth
+
+
 def main(argv=None):
     top = argparse.ArgumentParser(prog="ace-jax", description="Fit and evaluate ACE models in JAX")
     sub = top.add_subparsers(dest="cmd", required=True)
@@ -218,8 +243,29 @@ def main(argv=None):
     ev.add_argument("--energy-key", default="energy"); ev.add_argument("--force-key", default="forces")
     ev.add_argument("--virial-key", default="virial"); ev.add_argument("--forces", action="store_true")
     ev.add_argument("--out", default=None, help="CSV of per-config predictions (default: print head)")
+    con = sub.add_parser("construct", help="author a frozen ACE model (seeded radial init) and save it")
+    con.add_argument("--elements", required=True, help="comma-separated Z numbers or symbols")
+    con.add_argument("--order", type=int, required=True, help="correlation order")
+    con.add_argument("--max-degree", type=int, required=True, help="TotalDegree level bound")
+    con.add_argument("--wL", type=float, default=1.5)
+    con.add_argument("--rcut", type=float, default=5.5)
+    con.add_argument("--rin", type=float, default=0.0)
+    con.add_argument("--radial-mode", default="glorot_normal")
+    con.add_argument("--pair-mode", default="onehot")
+    con.add_argument("--seed", type=int, default=0)
+    con.add_argument("--no-gamma", action="store_true", help="skip the smoothness prior")
+    con.add_argument("--no-coupling-cache", action="store_true",
+                     help="always run the Julia coupling shim instead of the per-shape cache")
+    con.add_argument("--coupling-cache-dir", default=None,
+                     help="override the coupling cache directory (default: $ACEJAX_COUPLING_CACHE "
+                          "or ~/.cache/ace-jax/coupling)")
+    con.add_argument("--out", required=True)
     a = top.parse_args(argv)
-    return cmd_eval(a) if a.cmd == "eval" else run(a)
+    if a.cmd == "eval":
+        return cmd_eval(a)
+    if a.cmd == "construct":
+        return cmd_construct(a)
+    return run(a)
 
 
 if __name__ == "__main__":

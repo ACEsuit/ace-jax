@@ -19,6 +19,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from ace_jax.eval import highest_precision, load
+from ace_jax.construct.prior import prior_diagonal
 from ace_jax.fit.data import build_dataset, load_configs
 from ace_jax.fit.hypers import Hypers, default_prior, to_array
 from ace_jax.fit.inducing import GPConfig, descriptor_scale, select_inducing, site_features
@@ -222,7 +223,7 @@ with highest_precision():
         print(f"delta s-floor: s_q({a.delta_s_floor_q}) = {s_floor:.4f} (training s in "
               f"[{s_live.min():.3f}, {s_live.max():.3f}])", flush=True)
     prob = Problem(KernelSpec(a.kernel, not a.no_bump, cfg.D, s_floor=s_floor), model, ind, cfg,
-                   jnp.asarray(z["gamma"]), default_prior(a.r0))
+                   jnp.asarray(prior_diagonal(z, meta, a.model)), default_prior(a.r0))
     # theta-split cached likelihood: the theta-independent linear Gram G_BB is
     # streamed once; only the M residual columns move per evaluation (both arms).
     from ace_jax.fit.objective import make_lml
