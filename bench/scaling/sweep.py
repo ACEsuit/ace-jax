@@ -82,8 +82,9 @@ def subprocess_runner(host, env):
             cmd = [sys.executable, str(here / "run_standalone.py"), c.model, str(c.n_atoms),
                    c.dtype, c.device]
         else:
+            lmp = env.get("lmp_jax", env["lmp"]) if c.code.startswith("acejax") else env["lmp"]
             cmd = [sys.executable, str(here / "run_lammps.py"), c.model, str(c.n_atoms), c.dtype,
-                   c.device, env["lmp"], str(c.ranks), f"/tmp/bench_{host}_{c.n_atoms}"]
+                   c.device, lmp, str(c.ranks), f"/tmp/bench_{host}_{c.n_atoms}"]
         p = subprocess.run(cmd, capture_output=True, text=True, timeout=7200,
                            env={**env.get("os_env", {}), "PYTHONPATH": env["pythonpath"]})
         lines = [l for l in p.stdout.splitlines() if l.startswith("{")]

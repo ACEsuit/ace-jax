@@ -7,12 +7,20 @@
 #
 #   bash bench/scaling/envs/moriarty.sh [step ...]    # default: all steps
 #
-# Steps: sources lammps venv lmp_python symmetrix_py plugin env_json
+# Two LAMMPS trees, because no single version builds both add-ons today:
+#   lammps      patch_10Sep2025 + Symmetrix + ML-PACE   (MACE, ML-PACE rows)
+#   lammps-dev  develop + ML-PACE + the lammps-jax plugin (ace-jax rows; the
+#               plugin needs Pair::eflag_only, newer than 10 Sep 2025, while
+#               Symmetrix does not compile against current develop)
+#
+# Steps: sources venv lammps lmp_python symmetrix_py lammps_dev plugin env_json
 set -euo pipefail
 ROOT=${BENCH_ROOT:-$HOME/bench-scaling}
 ACEJAX=${ACEJAX_SRC:-$ROOT/ace-jax}          # synced checkout of this branch
 LAMMPS=$ROOT/lammps
 BUILD=$LAMMPS/build-kk
+LAMMPS_DEV=$ROOT/lammps-dev
+BUILD_DEV=$LAMMPS_DEV/build-kk
 VENV=$ROOT/venv
 JOBS=${JOBS:-24}
 mkdir -p "$ROOT"
@@ -26,11 +34,13 @@ sources() {
   [ -d lammps ] || git clone --depth 1 -b patch_10Sep2025 https://github.com/lammps/lammps.git   # pinned: Symmetrix fails on current develop
   [ -d symmetrix ] || git clone --recursive https://github.com/wcwitt/symmetrix.git
   [ -d lammps-jax ] || git clone https://github.com/abhijeetgangan/lammps-jax.git
+  [ -d lammps-dev ] || git clone --depth 1 -b develop https://github.com/lammps/lammps.git lammps-dev
   # patch LAMMPS with pair_symmetrix (copies sources into src/)
   (cd symmetrix/pair_symmetrix && ./install.sh "$LAMMPS")
   git -C "$LAMMPS" log -1 --format='lammps %h %cd' > "$ROOT/VERSIONS"
   git -C symmetrix log -1 --format='symmetrix %h %cd' >> "$ROOT/VERSIONS"
   git -C lammps-jax log -1 --format='lammps-jax %h %cd' >> "$ROOT/VERSIONS"
+  git -C lammps-dev log -1 --format='lammps-dev %h %cd' >> "$ROOT/VERSIONS"
 }
 
 venv() {
@@ -58,6 +68,16 @@ lmp_python() {
   cmake --build "$BUILD" --target install-python
 }
 
+lammps_dev() {          # develop + ML-PACE, host for the lammps-jax plugin
+  [ -x "$BUILD_DEV/lmp" ] && return 0
+  cmake -S "$LAMMPS_DEV/cmake" -B "$BUILD_DEV" \
+    -D CMAKE_BUILD_TYPE=Release -D CMAKE_CXX_COMPILER="$LAMMPS_DEV/lib/kokkos/bin/nvcc_wrapper" \
+    -D BUILD_SHARED_LIBS=ON -D BUILD_MPI=ON -D BUILD_OMP=ON \
+    -D PKG_KOKKOS=ON -D Kokkos_ENABLE_CUDA=ON -D Kokkos_ENABLE_OPENMP=ON \
+    -D Kokkos_ENABLE_SERIAL=ON -D Kokkos_ARCH_AMPERE86=ON -D PKG_ML-PACE=ON
+  cmake --build "$BUILD_DEV" -j "$JOBS"
+}
+
 symmetrix_py() {        # for symmetrix_extract_mace (model export only)
   "$VENV/bin/python" -c "import symmetrix" 2>/dev/null || \
     uv pip install --python "$VENV/bin/python" "$ROOT/symmetrix/symmetrix"
@@ -67,11 +87,11 @@ plugin() {
   local inc pjrt
   inc=$("$VENV/bin/python" -c "import jaxlib, os; print(os.path.join(os.path.dirname(jaxlib.__file__), 'include'))")
   cmake -S "$ROOT/lammps-jax/cpp" -B "$ROOT/lammps-jax/build-plugin-gpu-pjrt" \
-    -D CMAKE_CXX_COMPILER="$LAMMPS/lib/kokkos/bin/nvcc_wrapper" -D CMAKE_BUILD_TYPE=Release \
+    -D CMAKE_CXX_COMPILER="$LAMMPS_DEV/lib/kokkos/bin/nvcc_wrapper" -D CMAKE_BUILD_TYPE=Release \
     -D CMAKE_CXX_FLAGS="-fno-lto -fopenmp" -D CMAKE_SHARED_LINKER_FLAGS="-fno-lto -fopenmp" \
     -D CMAKE_INTERPROCEDURAL_OPTIMIZATION=OFF \
-    -D LAMMPS_HEADER_DIR="$LAMMPS/src" -D JAXLIB_INCLUDE_DIR="$inc" \
-    -D KOKKOS_CONFIG_INCLUDE_DIR="$BUILD/lib/kokkos"
+    -D LAMMPS_HEADER_DIR="$LAMMPS_DEV/src" -D JAXLIB_INCLUDE_DIR="$inc" \
+    -D KOKKOS_CONFIG_INCLUDE_DIR="$BUILD_DEV/lib/kokkos"
   cmake --build "$ROOT/lammps-jax/build-plugin-gpu-pjrt" -j "$JOBS"
 }
 
@@ -80,24 +100,31 @@ env_json() {
   pjrt=$("$VENV/bin/python" -c "import jax_plugins.xla_cuda12 as p, os; print(os.path.join(os.path.dirname(p.__file__), 'xla_cuda_plugin.so'))")
   for host in moriarty-gpu moriarty-cpu; do
     cat > "$ACEJAX/bench/scaling/envs/$host.json" <<EOF
-{"lmp": "$ROOT/lmp.sh", "pjrt": "$pjrt", "pythonpath": "$ACEJAX/bench",
+{"lmp": "$ROOT/lmp.sh", "lmp_jax": "$ROOT/lmp-jax.sh", "pjrt": "$pjrt", "pythonpath": "$ACEJAX/bench",
  "python": "$VENV/bin/python", "root": "$ROOT"}
 EOF
   done
-  # lmp wrapper: modules + plugin path, so every LAMMPS call sees the same env
+  # lmp wrappers: modules (+ plugin path), so every LAMMPS call sees the same env
   cat > "$ROOT/lmp.sh" <<EOF
 #!/usr/bin/env bash
 source /etc/profile.d/modules.sh 2>/dev/null || true
 module purge; module load gompi/2023a CUDA/12.4.0
-export LAMMPS_PLUGIN_PATH=$ROOT/lammps-jax/build-plugin-gpu-pjrt
 export LD_LIBRARY_PATH=$BUILD:\${LD_LIBRARY_PATH:-}
 exec $BUILD/lmp "\$@"
 EOF
-  chmod +x "$ROOT/lmp.sh"
+  cat > "$ROOT/lmp-jax.sh" <<EOF
+#!/usr/bin/env bash
+source /etc/profile.d/modules.sh 2>/dev/null || true
+module purge; module load gompi/2023a CUDA/12.4.0
+export LAMMPS_PLUGIN_PATH=$ROOT/lammps-jax/build-plugin-gpu-pjrt
+export LD_LIBRARY_PATH=$BUILD_DEV:\${LD_LIBRARY_PATH:-}
+exec $BUILD_DEV/lmp "\$@"
+EOF
+  chmod +x "$ROOT/lmp.sh" "$ROOT/lmp-jax.sh"
 }
 
 steps=("$@")
-[ ${#steps[@]} -eq 0 ] && steps=(sources venv lammps lmp_python symmetrix_py plugin env_json)
+[ ${#steps[@]} -eq 0 ] && steps=(sources venv lammps lmp_python symmetrix_py lammps_dev plugin env_json)
 for s in "${steps[@]}"; do
   echo "=== $s"
   "$s"

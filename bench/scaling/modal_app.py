@@ -29,6 +29,8 @@ image = (
         "git clone --depth 1 -b patch_10Sep2025 https://github.com/lammps/lammps.git /opt/lammps",  # pinned (Symmetrix)
         "git clone --recursive https://github.com/wcwitt/symmetrix.git /opt/symmetrix",
         "git clone https://github.com/abhijeetgangan/lammps-jax.git /opt/lammps-jax",
+        # second tree for the lammps-jax plugin (needs develop; Symmetrix needs 10Sep2025)
+        "git clone --depth 1 -b develop https://github.com/lammps/lammps.git /opt/lammps-dev",
         "cd /opt/symmetrix/pair_symmetrix && ./install.sh /opt/lammps",
         "pip install -e /opt/lammps-jax /opt/symmetrix/symmetrix",
         "cmake -S /opt/lammps/cmake -B /opt/lammps/build-kk -D CMAKE_BUILD_TYPE=Release"
@@ -42,16 +44,25 @@ image = (
         f' -D CMAKE_SHARED_LINKER_FLAGS="{STUB}" -D CMAKE_EXE_LINKER_FLAGS="{STUB}"',
         "cmake --build /opt/lammps/build-kk -j 32",
         "cmake --build /opt/lammps/build-kk --target install-python",
+        "cmake -S /opt/lammps-dev/cmake -B /opt/lammps-dev/build-kk -D CMAKE_BUILD_TYPE=Release"
+        " -D CMAKE_CXX_COMPILER=/opt/lammps-dev/lib/kokkos/bin/nvcc_wrapper"
+        " -D BUILD_SHARED_LIBS=ON -D BUILD_MPI=ON -D BUILD_OMP=ON"
+        " -D PKG_KOKKOS=ON -D Kokkos_ENABLE_CUDA=ON -D Kokkos_ENABLE_OPENMP=ON"
+        " -D Kokkos_ENABLE_SERIAL=ON -D Kokkos_ARCH_AMPERE80=ON -D PKG_ML-PACE=ON"
+        f' -D CMAKE_SHARED_LINKER_FLAGS="{STUB}" -D CMAKE_EXE_LINKER_FLAGS="{STUB}"',
+        "cmake --build /opt/lammps-dev/build-kk -j 32",
         "INC=$(python -c \"import jaxlib, os; print(os.path.join(os.path.dirname(jaxlib.__file__), 'include'))\");"
         " cmake -S /opt/lammps-jax/cpp -B /opt/lammps-jax/build-plugin-gpu-pjrt"
-        " -D CMAKE_CXX_COMPILER=/opt/lammps/lib/kokkos/bin/nvcc_wrapper -D CMAKE_BUILD_TYPE=Release"
+        " -D CMAKE_CXX_COMPILER=/opt/lammps-dev/lib/kokkos/bin/nvcc_wrapper -D CMAKE_BUILD_TYPE=Release"
         " -D CMAKE_CXX_FLAGS='-fno-lto -fopenmp' -D CMAKE_SHARED_LINKER_FLAGS='-fno-lto -fopenmp " + STUB + "'"
-        " -D CMAKE_INTERPROCEDURAL_OPTIMIZATION=OFF -D LAMMPS_HEADER_DIR=/opt/lammps/src"
-        " -D JAXLIB_INCLUDE_DIR=$INC -D KOKKOS_CONFIG_INCLUDE_DIR=/opt/lammps/build-kk/lib/kokkos",
+        " -D CMAKE_INTERPROCEDURAL_OPTIMIZATION=OFF -D LAMMPS_HEADER_DIR=/opt/lammps-dev/src"
+        " -D JAXLIB_INCLUDE_DIR=$INC -D KOKKOS_CONFIG_INCLUDE_DIR=/opt/lammps-dev/build-kk/lib/kokkos",
         "cmake --build /opt/lammps-jax/build-plugin-gpu-pjrt -j 32",
-        "printf '#!/usr/bin/env bash\\nexport LAMMPS_PLUGIN_PATH=/opt/lammps-jax/build-plugin-gpu-pjrt\\n"
-        "export LD_LIBRARY_PATH=/opt/lammps/build-kk:${LD_LIBRARY_PATH:-}\\n"
+        "printf '#!/usr/bin/env bash\\nexport LD_LIBRARY_PATH=/opt/lammps/build-kk:${LD_LIBRARY_PATH:-}\\n"
         "exec /opt/lammps/build-kk/lmp \"$@\"\\n' > /opt/lmp.sh && chmod +x /opt/lmp.sh",
+        "printf '#!/usr/bin/env bash\\nexport LAMMPS_PLUGIN_PATH=/opt/lammps-jax/build-plugin-gpu-pjrt\\n"
+        "export LD_LIBRARY_PATH=/opt/lammps-dev/build-kk:${LD_LIBRARY_PATH:-}\\n"
+        "exec /opt/lammps-dev/build-kk/lmp \"$@\"\\n' > /opt/lmp-jax.sh && chmod +x /opt/lmp-jax.sh",
     )
     .env({"PYTHONPATH": "/ace-jax/src:/ace-jax/bench"})
     .add_local_dir(ROOT / "src", "/ace-jax/src")
@@ -71,7 +82,7 @@ def sweep(results_so_far: str = "", only: str = "", parity_only: bool = False):
     bench = pathlib.Path("/ace-jax/bench/scaling")
     pjrt = os.path.join(os.path.dirname(p.__file__), "xla_cuda_plugin.so")
     (bench / "envs" / "modal-a100.json").write_text(json.dumps(
-        {"lmp": "/opt/lmp.sh", "pjrt": pjrt, "pythonpath": "/ace-jax/bench:/ace-jax/src",
+        {"lmp": "/opt/lmp.sh", "lmp_jax": "/opt/lmp-jax.sh", "pjrt": pjrt, "pythonpath": "/ace-jax/bench:/ace-jax/src",
          "python": sys.executable}))
     models = bench / "models"
     if not any(models.glob("mace_*.model")):                 # MACE-MP-0 / MH-1 + Symmetrix

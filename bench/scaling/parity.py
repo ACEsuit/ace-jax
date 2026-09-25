@@ -94,8 +94,8 @@ def gate(host, env, workroot="/tmp"):
                     E0, F0 = _acejax_ef(m["path"], at)
                     bundle, layout, _ = export_bundle(m, at, "float64", work / m["code"])
                     row["layout"] = layout
-                    E1, F1 = _lammps_ef("acejax", bundle, m["elements"], at, device, lmp,
-                                        work / m["code"], pjrt)
+                    E1, F1 = _lammps_ef("acejax", bundle, m["elements"], at, device,
+                                        env.get("lmp_jax", lmp), work / m["code"], pjrt)
                 else:
                     if not pathlib.Path(m["symmetrix"]).exists():
                         rows.append({**row, "status": "unsupported"})
