@@ -59,15 +59,26 @@ jobs:
           uv run --python ${{ matrix.python }} --extra gp pytest -m "not slow" \
             tests/test_descriptors.py tests/test_efv.py tests/test_gp_kernels.py -q
   ladder:
-    # Heavy integration run ONCE (not per-Python): the real-model MCMC ladder
-    # (MAP/Laplace/Pathfinder/NUTS, fast mode). Isolated so it can't slow the suite.
+    # Heavy integration runs ONCE (not per-Python), isolated so they can't slow the
+    # suite, and split in two parallel jobs so neither sets the critical path:
+    # the real-model MCMC ladder (MAP/Laplace/Pathfinder/NUTS, fast mode), and every
+    # other `slow` test (e.g. the ~10 min CLI MAP+Laplace run).
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [real-ladder, other-slow]
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - name: Real-model ladder (fast mode)
+      - name: Slow tests (${{ matrix.part }})
         env:
           JAX_PLATFORM_NAME: cpu
           JAX_ENABLE_X64: "1"
-        run: uv run --extra gp pytest -v -m slow
+        run: |
+          if [ "${{ matrix.part }}" = "real-ladder" ]; then
+            uv run --extra gp pytest -v -m slow tests/test_gp_ladder_real.py
+          else
+            uv run --extra gp pytest -v -m slow --ignore=tests/test_gp_ladder_real.py
+          fi
