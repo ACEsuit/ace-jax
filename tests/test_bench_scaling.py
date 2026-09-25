@@ -243,3 +243,10 @@ def test_main_reuses_recorded_parity_and_never_gates_in_process(tmp_path, monkey
     sweep.main(["moriarty-gpu", "--results", str(res)])
     assert len(res.read_text().splitlines()) == 1                  # nothing re-appended
     assert set(got["blocked"]) == {"acejax-pace"}                  # the recorded fail blocks
+
+
+def test_child_env_passes_the_pjrt_plugin():
+    """run_lammps reads PJRT_PLUGIN; without it `pair_style jax/kk ${pjrt}` fails."""
+    from scaling.sweep import child_env
+    assert child_env({"pythonpath": "/p", "pjrt": "/x/xla_cuda_plugin.so"})["PJRT_PLUGIN"] \
+        == "/x/xla_cuda_plugin.so"

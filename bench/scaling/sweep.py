@@ -86,7 +86,8 @@ def child_env(env):
     """The login environment (the lmp wrappers `module load`), plus overrides."""
     here = pathlib.Path(__file__).parent
     return {**os.environ, **env.get("os_env", {}),
-            "PYTHONPATH": env.get("pythonpath", str(here.parent))}
+            "PYTHONPATH": env.get("pythonpath", str(here.parent)),
+            **({"PJRT_PLUGIN": env["pjrt"]} if env.get("pjrt") else {})}   # run_lammps reads it
 
 
 def gate_in_subprocess(host, env):
