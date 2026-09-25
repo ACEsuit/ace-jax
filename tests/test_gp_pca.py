@@ -9,7 +9,8 @@ from conftest import FIXTURE_DIR
 
 jax.config.update("jax_enable_x64", True)
 
-from ace_jax.fit.inducing import build_pmap, principal_frame
+from ace_jax.construct.embedding import _fix_signs, principal_frame
+from ace_jax.fit.inducing import _frame_from_rows, build_pmap
 
 
 def test_principal_frame_is_the_truncated_uncentred_svd():
@@ -21,6 +22,7 @@ def test_principal_frame_is_the_truncated_uncentred_svd():
     assert np.allclose(V.T @ V, np.eye(4), atol=1e-12)                # orthonormal frame
     assert np.allclose(C, R @ V, atol=1e-10)                           # coordinates = projection
     assert np.allclose(np.abs(C), np.abs(U[:, :4] * s[:4]), atol=1e-10)  # the embedding-init form
+    assert np.allclose(_fix_signs(C), C)                               # deterministic sign convention
     C6, _ = principal_frame(R, 6)                                      # d >= rank: exact Gram
     assert np.allclose(C6 @ C6.T, R @ R.T, atol=1e-9)
 
@@ -67,3 +69,14 @@ def test_pca_pmap_needs_the_descriptors():
     cfg, X, mask, scale = _si()
     with pytest.raises(ValueError, match="pca"):
         build_pmap(cfg, scale, density="pca", d=5)
+
+
+def test_streamed_frame_has_a_deterministic_sign_convention():
+    """The eigh path (production scale) fixes each frame column's sign the same
+    way, so the PCA map does not depend on the LAPACK build."""
+    rng = np.random.default_rng(3)
+    X = rng.normal(size=(2, 30, 7)); mask = np.ones((2, 30), bool); scale = np.ones(7)
+    V = _frame_from_rows(X, mask, scale, 4)
+    assert np.allclose(_fix_signs(V), V)
+    _, Vsvd = principal_frame(X[mask], 4)
+    assert np.allclose(np.abs(V.T @ Vsvd), np.eye(4), atol=1e-8)       # same frame as the SVD

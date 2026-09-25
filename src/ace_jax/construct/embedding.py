@@ -62,6 +62,26 @@ def _fix_signs(U, rtol=1e-8):
     return U * np.sign(U[idx, np.arange(U.shape[1])])
 
 
+def _rank_tol(shape, s0):
+    """Numerical-rank tolerance on singular values (as ACEpotentials _pca_reduce)."""
+    return max(shape) * np.finfo(np.float64).eps * s0
+
+
+def principal_frame(R, d):
+    """Uncentred principal frame of the rows of R (n, D), truncated at
+    min(d, numerical rank): returns (coordinates U S (n, k), frame V (D, k)) with
+    coordinates = R @ V and, for d >= rank, their Gram exactly R R^T.  Signs are
+    fixed on U (`_fix_signs`; V flipped to match), so the result does not depend on
+    the LAPACK build.  Shared by the embedding reduction (`_pca_reduce`) and the GP
+    feature map (inducing.build_pmap, density='pca')."""
+    R = np.asarray(R, dtype=np.float64)
+    U, sv, Vt = np.linalg.svd(R, full_matrices=False)
+    k = min(int(d), int(np.sum(sv > _rank_tol(R.shape, sv[0] if sv.size else 0.0))))
+    Uf = _fix_signs(U[:, :k])
+    sgn = np.sign(np.sum(Uf * U[:, :k], axis=0))                          # +1 kept, -1 flipped
+    return Uf * sv[:k], Vt[:k].T * sgn
+
+
 def _pca_reduce(R, d):
     """Principal-frame reduction of an (S, D) block to (S, d): rows normalised
     (full-row similarity is the target), R = U S V^T, P = U S truncated at the
@@ -76,12 +96,8 @@ def _pca_reduce(R, d):
     lossless widths span the same space either way."""
     R = np.array(R, dtype=np.float64)
     R /= np.linalg.norm(R, axis=1, keepdims=True)
-    U, sv, _ = np.linalg.svd(R, full_matrices=False)
-    tol = max(R.shape) * np.finfo(np.float64).eps * sv[0]
-    r = int(np.sum(sv > tol))
-    U = U[:, :r]
-    U = _fix_signs(U)                                                     # deterministic signs
-    P = U * sv[:r]
+    P, _ = principal_frame(R, min(R.shape))                               # U S, all r, fixed signs
+    r = P.shape[1]
     if d <= r:
         return P[:, :d]
     return P @ _generic_frame(r, d)

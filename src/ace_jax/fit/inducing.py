@@ -43,25 +43,14 @@ class Inducing(NamedTuple):
     embed: jnp.ndarray  # (NZ, de) unit-normalized species embedding (eye = block-diagonal)
 
 
-def principal_frame(R, d):
-    """Uncentred principal-frame reduction of the rows of R (n, D) to d <= rank
-    channels: returns (coordinates U S (n, d), frame V (D, d)), so coordinates =
-    R @ V and, for d >= rank, their Gram equals R R^T exactly.  The same reduction
-    as the species embedding (ACEpotentials ``_pca_reduce``; run.py's
-    Python embedded-model authoring).  Uncentred on purpose: dot products
-    (the cosine kernel's inputs) are what the frame preserves.  d is capped at the
-    numerical rank (tolerance as ``_pca_reduce``)."""
-    import numpy as _np
-    R = _np.asarray(R, float)
-    U, sv, Vt = _np.linalg.svd(R, full_matrices=False)
-    tol = max(R.shape) * _np.finfo(float).eps * (sv[0] if sv.size else 0.0)
-    k = min(int(d), int(_np.sum(sv > tol)))
-    return U[:, :k] * sv[:k], Vt[:k].T
+from ..construct.embedding import _fix_signs, _rank_tol, principal_frame  # noqa: E402,F401  (shared)
 
 
 def _frame_from_rows(X, mask, scale, d, chunk=4096):
-    """principal_frame's V for the scaled live rows of X without forming them:
-    eigh of the streamed uncentred second moment (D, D)."""
+    """`principal_frame`'s V for the scaled live rows of X without forming them:
+    eigh of the streamed uncentred second moment (D, D) -- the production-scale
+    path.  Same rank tolerance; signs fixed on V's columns (`_fix_signs`, the only
+    factor available here), so the map does not depend on the LAPACK build."""
     import numpy as _np
     Xl = _np.asarray(X)[_np.asarray(mask)] * _np.asarray(scale)
     C = _np.zeros((Xl.shape[1], Xl.shape[1]))
@@ -70,9 +59,8 @@ def _frame_from_rows(X, mask, scale, d, chunk=4096):
     w, V = _np.linalg.eigh(C)
     w, V = w[::-1], V[:, ::-1]
     sv = _np.sqrt(_np.maximum(w, 0.0))
-    tol = max(Xl.shape) * _np.finfo(float).eps * sv[0]
-    k = min(int(d), int(_np.sum(sv > tol)))
-    return V[:, :k]
+    k = min(int(d), int(_np.sum(sv > _rank_tol(Xl.shape, sv[0]))))
+    return _fix_signs(V[:, :k])
 
 
 def build_pmap(cfg, scale, density=None, d=None, X=None, mask=None):
