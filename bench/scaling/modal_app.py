@@ -58,6 +58,7 @@ image = (
         " -D BUILD_SHARED_LIBS=ON -D BUILD_MPI=ON -D BUILD_OMP=ON"
         " -D PKG_KOKKOS=ON -D Kokkos_ENABLE_CUDA=ON -D Kokkos_ENABLE_OPENMP=ON"
         " -D Kokkos_ENABLE_SERIAL=ON -D Kokkos_ARCH_AMPERE80=ON -D PKG_ML-PACE=ON"
+        " -D PKG_PLUGIN=ON"                          # LAMMPS_PLUGIN_PATH auto-loading
         f' -D CMAKE_SHARED_LINKER_FLAGS="{STUB}" -D CMAKE_EXE_LINKER_FLAGS="{STUB}"',
         "cmake --build /opt/lammps-dev/build-kk -j 32",
         "INC=$(python -c \"import jaxlib, os; print(os.path.join(os.path.dirname(jaxlib.__file__), 'include'))\");"

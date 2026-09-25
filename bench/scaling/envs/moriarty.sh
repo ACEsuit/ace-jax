@@ -71,17 +71,20 @@ lmp_python() {
   cmake --build "$BUILD" --target install-python
 }
 
-lammps_dev() {          # develop + ML-PACE, host for the lammps-jax plugin
+lammps_dev() {          # develop + ML-PACE + PLUGIN, host for the lammps-jax plugin
   module swap CUDA/12.4.0 "$CUDA_DEV"
-  [ -x "$BUILD_DEV/lmp" ] && [ -f "$BUILD_DEV/.cuda" ] && [ "$(cat "$BUILD_DEV/.cuda")" = "$CUDA_DEV" ] && return 0
-  rm -rf "$BUILD_DEV"
+  # PLUGIN: LAMMPS_PLUGIN_PATH auto-loading of lammps_jaxplugin.so needs it
+  local stamp="$CUDA_DEV PLUGIN"
+  [ -x "$BUILD_DEV/lmp" ] && [ "$(cat "$BUILD_DEV/.cuda" 2>/dev/null)" = "$stamp" ] && return 0
+  # a different nvcc: start clean (CMake drops the -D values on a compiler change)
+  [ "$(cut -d' ' -f1 "$BUILD_DEV/.cuda" 2>/dev/null)" = "$CUDA_DEV" ] || rm -rf "$BUILD_DEV"
   cmake -S "$LAMMPS_DEV/cmake" -B "$BUILD_DEV" \
     -D CMAKE_BUILD_TYPE=Release -D CMAKE_CXX_COMPILER="$LAMMPS_DEV/lib/kokkos/bin/nvcc_wrapper" \
     -D BUILD_SHARED_LIBS=ON -D BUILD_MPI=ON -D BUILD_OMP=ON \
     -D PKG_KOKKOS=ON -D Kokkos_ENABLE_CUDA=ON -D Kokkos_ENABLE_OPENMP=ON \
-    -D Kokkos_ENABLE_SERIAL=ON -D Kokkos_ARCH_AMPERE86=ON -D PKG_ML-PACE=ON
+    -D Kokkos_ENABLE_SERIAL=ON -D Kokkos_ARCH_AMPERE86=ON -D PKG_ML-PACE=ON -D PKG_PLUGIN=ON
   cmake --build "$BUILD_DEV" -j "$JOBS"
-  echo "$CUDA_DEV" > "$BUILD_DEV/.cuda"
+  echo "$stamp" > "$BUILD_DEV/.cuda"
 }
 
 symmetrix_py() {        # for symmetrix_extract_mace (model export only)
