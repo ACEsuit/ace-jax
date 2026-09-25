@@ -46,6 +46,9 @@ def test_standalone_row_for_acejax(tmp_path):
            "elements": ["Si", "Ge"], "name": "acejax-pace/SiGe/small"}
     out = run_case(row, 256, "float64", "cpu", reps=2)
     assert out["status"] == "ok" and out["n_atoms"] == 256 and out["layout"] in ("dense", "sparse")
+    # a "cpu" row must really run on the CPU (jax[cuda12] defaults to the GPU),
+    # and record the threading it used (spec: "the threading actually used")
+    assert out["platform"] == "cpu" and out["threads"]["cpus"] >= 1
     for k in ("call_s", "force_s", "nlist_s", "compile_s"):
         assert out[k] > 0
 

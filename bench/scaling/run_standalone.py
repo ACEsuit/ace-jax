@@ -43,16 +43,28 @@ def _peak(device):
     return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * (1 if sys.platform == "darwin" else 1024)
 
 
+def _threads():
+    import os
+    out = {"cpus": len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else os.cpu_count()}
+    for v in ("OMP_NUM_THREADS", "XLA_FLAGS"):
+        if os.environ.get(v):
+            out[v] = os.environ[v]
+    return out
+
+
 def run_case(row, n_atoms, dtype, device, reps=10):
     from ase.calculators.calculator import all_changes
     at = supercell(row["system"], n_atoms)
     out = {"code": row["code"], "mode": "standalone", "model": row["name"], "size": row["size"],
            "system": row["system"], "n_atoms": n_atoms, "device": device, "dtype": dtype,
-           "versions": _versions(), "status": "ok"}
+           "versions": _versions(), "status": "ok", "threads": _threads()}
     try:
         if row["code"].startswith("acejax"):
             import jax
+            if device == "cpu":                   # jax[cuda12] would pick the GPU
+                jax.config.update("jax_platforms", "cpu")
             jax.config.update("jax_enable_x64", dtype == "float64")
+            out["platform"] = jax.default_backend()
             import jax.numpy as jnp
             from ace_jax.calc.point import ACECalculator
             from ace_jax.eval import sparse_graph
@@ -73,6 +85,8 @@ def run_case(row, n_atoms, dtype, device, reps=10):
                            device="cuda" if device == "gpu" else "cpu",
                            enable_cueq=(device == "gpu"),
                            **({"head": row["head"]} if row.get("head") else {}))
+            out["platform"] = "cuda" if device == "gpu" else "cpu"
+            out["threads"]["torch"] = torch.get_num_threads()
             call = lambda: calc.calculate(at, ["energy", "forces", "stress"], all_changes)
             t0 = time.perf_counter(); call(); out["compile_s"] = time.perf_counter() - t0
             out["call_s"] = _median_time(call, reps)
