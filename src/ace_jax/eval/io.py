@@ -21,6 +21,7 @@ import json
 import jax.numpy as jnp
 import numpy as np
 
+from .edge_model import check_edge_a_kind, with_edge_a_kind
 from .model import ACEModel
 
 
@@ -71,9 +72,8 @@ def load(path, dtype=jnp.float64, a2b_sparse=False, edge_a_kind="gather", fold=T
     """
     if str(path).endswith(".yace"):          # PACE C-tilde potential: separate model class
         from .pace_model import load_yace
-        return load_yace(path, dtype=dtype)
-    if edge_a_kind not in ("gather", "matmul"):
-        raise ValueError(f'edge_a_kind must be "gather" or "matmul", got {edge_a_kind!r}')
+        return load_yace(path, dtype=dtype, edge_a_kind=edge_a_kind)
+    check_edge_a_kind(edge_a_kind)
     z = np.load(path)
     meta = json.loads(bytes(z["meta_json"]).decode())
     if meta["schema_version"] != 1:
@@ -116,9 +116,6 @@ def load(path, dtype=jnp.float64, a2b_sparse=False, edge_a_kind="gather", fold=T
         raise ValueError(f"aspec out of range: max r {int(_ar.max())} vs n_rnl {n_rnl}, "
                          f"max y {int(_ay.max())} vs n_ylm {n_ylm}")
 
-    def _sel(idx, width, dt):
-        """One-hot (width, n_A) selector such that X @ _sel(idx, ...) == X[:, idx]."""
-        return jnp.zeros((width, idx.shape[0]), dt).at[idx, jnp.arange(idx.shape[0])].set(1)
     model = ACEModel(
         rnl_coefs=A("rnl_spline_coefs", z0),
         pair_coefs=A("pair_spline_coefs", z0),
@@ -138,13 +135,10 @@ def load(path, dtype=jnp.float64, a2b_sparse=False, edge_a_kind="gather", fold=T
         WB=A("WB"), Wpair=A("Wpair"), E0=A("E0"),
         aspec_r=_ar,
         aspec_y=_ay,
-        edge_a_kind=edge_a_kind,
         rnl_coefs_single=(A("rnl_spline_coefs_single") if factorised else None),
         rnl_embedding=(A("rnl_embedding") if factorised else None),
         rnl_emb_nidx=(jnp.asarray(z["rnl_emb_nidx"], jnp.int32) if factorised else None),
         rnl_emb_kidx=(jnp.asarray(z["rnl_emb_kidx"], jnp.int32) if factorised else None),
-        a_sel_r=_sel(_ar, n_rnl, dtype) if edge_a_kind == "matmul" else None,
-        a_sel_y=_sel(_ay, n_ylm, dtype) if edge_a_kind == "matmul" else None,
         aa_specs=tuple(jnp.asarray(z[f"aa_spec_{k+1}"], jnp.int32) for k in range(n_orders)),
         lmax=int(meta["lmax"]),
         ysolid=(meta["ybasis_kind"] == "real_solidharmonics"),
@@ -155,6 +149,7 @@ def load(path, dtype=jnp.float64, a2b_sparse=False, edge_a_kind="gather", fold=T
         pair_grid=(float(ps_["x0"]), float(ps_["h"]), int(ps_["n"])),
         elements=tuple(int(e) for e in meta["elements"]),
     )
+    model = with_edge_a_kind(model, edge_a_kind)   # one-hot selectors if "matmul"
     if fold:
         from .model import fold_readout
         model = fold_readout(model)

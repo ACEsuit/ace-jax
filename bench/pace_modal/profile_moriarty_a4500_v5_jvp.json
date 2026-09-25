@@ -1,0 +1,395 @@
+{
+ "n_atoms": 4096,
+ "float32": {
+  "n_edges": 499712,
+  "n_a_local": 314,
+  "n_aa": 7406,
+  "radial_g": {
+   "fwd_s": 0.00040090002585202456,
+   "fwd_plus_vjp_s": 0.00040602858643978834
+  },
+  "R_crad_gather": {
+   "fwd_s": 0.0006896229460835457,
+   "fwd_plus_vjp_s": 0.0032051519956439734
+  },
+  "R_matmul_candidate": {
+   "fwd_s": 0.00028268888127058744,
+   "fwd_plus_vjp_s": 0.00028482440393418074
+  },
+  "Ylm": {
+   "fwd_s": 0.0026828900445252657,
+   "fwd_plus_vjp_s": 0.0009238050552085042
+  },
+  "eA_gather": {
+   "fwd_s": 0.0018465110333636403,
+   "fwd_plus_vjp_s": 0.060900537529960275
+  },
+  "pool_segment_sum": {
+   "fwd_s": 0.0037672145990654826,
+   "fwd_plus_vjp_s": 0.0014152619987726212
+  },
+  "node_AA_rho_F": {
+   "fwd_s": 0.0023095839424058795,
+   "fwd_plus_vjp_s": 0.008084441418759525
+  },
+  "efv_gather_s": 0.13508712849579751,
+  "efv_matmul_s": 0.04274743190035224,
+  "efv_jvp_s": 0.09063111210707575,
+  "total_energy_s": 0.013140779337845743,
+  "gpu_kernels_gather": {
+   "total_s": 0.13477160566666668,
+   "top_s": [
+    [
+     "wrapped_scatter",
+     0.05772427733333334
+    ],
+    [
+     "wrapped_scatter_1",
+     0.055802807
+    ],
+    [
+     "input_scatter_fusion_4",
+     0.0038244966666666665
+    ],
+    [
+     "input_scatter_fusion_8",
+     0.0034714183333333336
+    ],
+    [
+     "input_reduce_fusion",
+     0.0027644813333333336
+    ],
+    [
+     "input_transpose_fusion",
+     0.0026714679999999998
+    ],
+    [
+     "loop_concatenate_fusion",
+     0.001992905
+    ],
+    [
+     "loop_pad_fusion",
+     0.001176069
+    ],
+    [
+     "input_scatter_fusion_5",
+     0.0007567926666666666
+    ],
+    [
+     "input_scatter_fusion_1",
+     0.0005760663333333333
+    ],
+    [
+     "loop_reduce_fusion",
+     0.000356588
+    ],
+    [
+     "input_concatenate_fusion",
+     0.00035368666666666667
+    ]
+   ]
+  },
+  "gpu_kernels_matmul": {
+   "total_s": 0.04040044933333333,
+   "top_s": [
+    [
+     "loop_add_fusion",
+     0.011432151
+    ],
+    [
+     "loop_multiply_fusion",
+     0.005543312000000001
+    ],
+    [
+     "input_scatter_fusion_4",
+     0.0042297586666666664
+    ],
+    [
+     "input_scatter_fusion_8",
+     0.004229321666666667
+    ],
+    [
+     "input_reduce_fusion",
+     0.0030487933333333333
+    ],
+    [
+     "gemm_fusion_dot_general_18",
+     0.0013436333333333333
+    ],
+    [
+     "loop_pad_fusion",
+     0.001311494
+    ],
+    [
+     "gemm_fusion_dot_general_17",
+     0.001293254
+    ],
+    [
+     "gemm_fusion_dot_1",
+     0.001273958
+    ],
+    [
+     "gemm_fusion_dot",
+     0.0011878456666666668
+    ],
+    [
+     "input_scatter_fusion_5",
+     0.0008429266666666667
+    ],
+    [
+     "input_scatter_fusion_1",
+     0.0006455603333333333
+    ]
+   ]
+  },
+  "gpu_kernels_jvp": {
+   "total_s": 0.089944798,
+   "top_s": [
+    [
+     "input_concatenate_fusion_4",
+     0.03623224566666667
+    ],
+    [
+     "input_reduce_fusion",
+     0.01710450833333333
+    ],
+    [
+     "loop_concatenate_fusion",
+     0.015615104666666667
+    ],
+    [
+     "input_transpose_fusion",
+     0.004320540333333333
+    ],
+    [
+     "input_scatter_fusion_4",
+     0.004210108333333333
+    ],
+    [
+     "wrapped_scatter",
+     0.003793231
+    ],
+    [
+     "input_concatenate_fusion_3",
+     0.0018838056666666664
+    ],
+    [
+     "loop_select_fusion",
+     0.0017624183333333336
+    ],
+    [
+     "loop_pad_fusion",
+     0.001305414
+    ],
+    [
+     "input_scatter_fusion_5",
+     0.000839886
+    ],
+    [
+     "input_scatter_fusion_1",
+     0.000656419
+    ],
+    [
+     "input_scatter_fusion_3",
+     0.0003937723333333333
+    ]
+   ]
+  }
+ },
+ "float64": {
+  "n_edges": 499712,
+  "n_a_local": 314,
+  "n_aa": 7406,
+  "radial_g": {
+   "fwd_s": 0.002279345062561333,
+   "fwd_plus_vjp_s": 0.0037302030250430107
+  },
+  "R_crad_gather": {
+   "fwd_s": 0.005777840502560139,
+   "fwd_plus_vjp_s": 0.01692665694281459
+  },
+  "R_matmul_candidate": {
+   "fwd_s": 0.00462989485822618,
+   "fwd_plus_vjp_s": 0.0035410765558481216
+  },
+  "Ylm": {
+   "fwd_s": 0.016541000921279192,
+   "fwd_plus_vjp_s": 0.004049328388646245
+  },
+  "eA_gather": {
+   "fwd_s": 0.003359064576216042,
+   "fwd_plus_vjp_s": 0.0662504161009565
+  },
+  "pool_segment_sum": {
+   "fwd_s": 0.0057679833844304085,
+   "fwd_plus_vjp_s": 0.002555946004576981
+  },
+  "node_AA_rho_F": {
+   "fwd_s": 0.003978094318881631,
+   "fwd_plus_vjp_s": 0.01223005005158484
+  },
+  "efv_gather_s": 0.18475230550393462,
+  "efv_matmul_s": 0.3159475250868127,
+  "efv_jvp_s": 0.21983906801324338,
+  "total_energy_s": 0.041430062148720026,
+  "gpu_kernels_gather": {
+   "total_s": 0.18514138833333332,
+   "top_s": [
+    [
+     "wrapped_scatter",
+     0.06059084433333333
+    ],
+    [
+     "wrapped_scatter_1",
+     0.06052478566666667
+    ],
+    [
+     "input_reduce_fusion",
+     0.014744031333333334
+    ],
+    [
+     "loop_concatenate_fusion",
+     0.011521557333333333
+    ],
+    [
+     "input_scatter_fusion_8",
+     0.005569134666666667
+    ],
+    [
+     "input_transpose_fusion",
+     0.005331501000000001
+    ],
+    [
+     "input_concatenate_fusion",
+     0.005006314666666667
+    ],
+    [
+     "input_scatter_fusion_4",
+     0.004702473
+    ],
+    [
+     "loop_reduce_slice_fusion",
+     0.0019326096666666668
+    ],
+    [
+     "loop_add_multiply_select_fusion",
+     0.0019229243333333333
+    ],
+    [
+     "loop_add_select_fusion",
+     0.0018009076666666666
+    ],
+    [
+     "loop_pad_fusion",
+     0.0015015776666666666
+    ]
+   ]
+  },
+  "gpu_kernels_matmul": {
+   "total_s": 0.3120182793333333,
+   "top_s": [
+    [
+     "loop_add_fusion_1",
+     0.076969715
+    ],
+    [
+     "gemm_fusion_dot_general_18",
+     0.052975785
+    ],
+    [
+     "gemm_fusion_dot_general_17",
+     0.047494575666666664
+    ],
+    [
+     "ampere_dgemm_128x64_nn",
+     0.04564328866666667
+    ],
+    [
+     "ampere_dgemm_64x64_nn",
+     0.019603873666666667
+    ],
+    [
+     "input_reduce_fusion",
+     0.014738754
+    ],
+    [
+     "loop_multiply_fusion",
+     0.011969509
+    ],
+    [
+     "loop_add_fusion",
+     0.008973904666666668
+    ],
+    [
+     "input_scatter_fusion_8",
+     0.0075814153333333325
+    ],
+    [
+     "loop_reduce_fusion",
+     0.0047976956666666674
+    ],
+    [
+     "input_scatter_fusion_4",
+     0.004576968999999999
+    ],
+    [
+     "loop_reduce_slice_fusion",
+     0.0019456343333333333
+    ]
+   ]
+  },
+  "gpu_kernels_jvp": {
+   "total_s": 0.22163411033333333,
+   "top_s": [
+    [
+     "loop_concatenate_fusion",
+     0.059024227666666665
+    ],
+    [
+     "input_concatenate_fusion_4",
+     0.039016846333333334
+    ],
+    [
+     "loop_concatenate_fusion_2",
+     0.037545295666666666
+    ],
+    [
+     "input_reduce_fusion",
+     0.028315594333333333
+    ],
+    [
+     "input_concatenate_fusion_3",
+     0.019983957333333333
+    ],
+    [
+     "input_transpose_fusion",
+     0.010198668
+    ],
+    [
+     "wrapped_scatter",
+     0.0054387866666666665
+    ],
+    [
+     "input_scatter_fusion_4",
+     0.004710761333333334
+    ],
+    [
+     "loop_select_fusion",
+     0.0038523656666666663
+    ],
+    [
+     "loop_add_and_compare_exponential_multiply_negate_select_slice_subtract_fusion",
+     0.0017998616666666666
+    ],
+    [
+     "loop_pad_fusion",
+     0.0014630916666666669
+    ],
+    [
+     "ampere_dgemm_128x64_tn",
+     0.0014088306666666668
+    ]
+   ]
+  }
+ }
+}

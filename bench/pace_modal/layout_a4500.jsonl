@@ -1,0 +1,12 @@
+{"variant": "sparse-gather", "dtype": "float32", "n_atoms": 4096, "n_edges": 499712, "estimate_bytes": 1699020800, "efv_s": 0.17426285555120558, "peak_gpu_bytes": 1207395328}
+{"variant": "sparse-matmul", "dtype": "float32", "n_atoms": 4096, "n_edges": 499712, "estimate_bytes": 1699020800, "efv_s": 0.040680051082745194, "peak_gpu_bytes": 1997733376}
+{"variant": "dense", "dtype": "float32", "n_atoms": 4096, "n_edges": 499712, "estimate_bytes": 593068032, "efv_s": 0.013478736393153667, "peak_gpu_bytes": 652474112}
+{"variant": "sparse-gather", "dtype": "float64", "n_atoms": 4096, "n_edges": 499712, "estimate_bytes": 3398041600, "efv_s": 0.23081912752240896, "peak_gpu_bytes": 2618550528}
+{"variant": "sparse-matmul", "dtype": "float64", "n_atoms": 4096, "n_edges": 499712, "estimate_bytes": 3398041600, "efv_s": 0.29503192857373506, "peak_gpu_bytes": 3186151424}
+{"variant": "dense", "dtype": "float64", "n_atoms": 4096, "n_edges": 499712, "estimate_bytes": 1186136064, "efv_s": 0.08439123048447073, "peak_gpu_bytes": 1212213504}
+{"variant": "sparse-gather", "dtype": "float32", "n_atoms": 13824, "n_edges": 1686528, "estimate_bytes": 5734195200, "efv_s": 0.6564851325238124, "peak_gpu_bytes": 4129325824}
+{"variant": "sparse-matmul", "dtype": "float32", "n_atoms": 13824, "n_edges": 1686528, "estimate_bytes": 5734195200, "efv_s": 0.21599900489673018, "peak_gpu_bytes": 6956087808}
+{"variant": "dense", "dtype": "float32", "n_atoms": 13824, "n_edges": 1686528, "estimate_bytes": 2001604608, "efv_s": 0.15719984308816493, "peak_gpu_bytes": 1810636032}
+{"variant": "sparse-gather", "dtype": "float64", "n_atoms": 13824, "n_edges": 1686528, "estimate_bytes": 11468390400, "efv_s": 0.8771225254749879, "peak_gpu_bytes": 8915867136}
+{"variant": "sparse-matmul", "dtype": "float64", "n_atoms": 13824, "n_edges": 1686528, "estimate_bytes": 11468390400, "error": "JaxRuntimeError(\"RESOURCE_EXHAUSTED: Out of memory while trying to allocate 8.93GiB with allocator GPU_0_bfc on device 0. [tf-allocator-allocation-error=''] [executable_name='jit__lambda']\")", "peak_gpu_bytes": 9563988992}
+{"variant": "dense", "dtype": "float64", "n_atoms": 13824, "n_edges": 1686528, "estimate_bytes": 4003209216, "efv_s": 0.39938064001034945, "peak_gpu_bytes": 4179801344}
