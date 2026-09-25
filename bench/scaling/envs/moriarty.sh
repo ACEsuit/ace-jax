@@ -23,7 +23,7 @@ export PATH=$HOME/.local/bin:$PATH
 
 sources() {
   cd "$ROOT"
-  [ -d lammps ] || git clone --depth 1 -b develop https://github.com/lammps/lammps.git
+  [ -d lammps ] || git clone --depth 1 -b patch_10Sep2025 https://github.com/lammps/lammps.git   # pinned: Symmetrix fails on current develop
   [ -d symmetrix ] || git clone --recursive https://github.com/wcwitt/symmetrix.git
   [ -d lammps-jax ] || git clone https://github.com/abhijeetgangan/lammps-jax.git
   # patch LAMMPS with pair_symmetrix (copies sources into src/)

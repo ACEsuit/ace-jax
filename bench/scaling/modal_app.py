@@ -26,7 +26,7 @@ image = (
                  "equinox", "lineax", "scipy", "mace-torch", "cuequivariance-torch",
                  "cuequivariance-ops-torch-cu12")
     .run_commands(
-        "git clone --depth 1 -b develop https://github.com/lammps/lammps.git /opt/lammps",
+        "git clone --depth 1 -b patch_10Sep2025 https://github.com/lammps/lammps.git /opt/lammps",  # pinned (Symmetrix)
         "git clone --recursive https://github.com/wcwitt/symmetrix.git /opt/symmetrix",
         "git clone https://github.com/abhijeetgangan/lammps-jax.git /opt/lammps-jax",
         "cd /opt/symmetrix/pair_symmetrix && ./install.sh /opt/lammps",
