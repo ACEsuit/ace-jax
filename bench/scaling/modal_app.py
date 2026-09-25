@@ -21,7 +21,8 @@ STUB = '-L/usr/local/cuda/lib64/stubs -lcuda'     # the image builder has no GPU
 
 image = (
     modal.Image.from_registry("nvidia/cuda:12.4.1-devel-ubuntu22.04", add_python="3.12")
-    .apt_install("git", "build-essential", "wget", "libopenmpi-dev", "openmpi-bin", "gfortran")
+    .apt_install("git", "build-essential", "wget", "libopenmpi-dev", "openmpi-bin", "gfortran",
+                 "libopenblas-dev", "liblapack-dev")          # Symmetrix needs BLAS/LAPACK
     .pip_install("cmake>=3.27", "jax[cuda12]", "matscipy", "ase", "matplotlib", "pyyaml",
                  "equinox", "lineax", "scipy", "mace-torch", "cuequivariance-torch",
                  "cuequivariance-ops-torch-cu12")
