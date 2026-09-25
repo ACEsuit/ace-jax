@@ -152,3 +152,17 @@ def test_pops_ridge_selection_uses_the_fit_subset_statistics(tiny_linear_problem
     fit_ds = jax.tree.map(lambda a: a[:1], ds)
     P.select_pops_ridge(prob.prior.mu, prob, fit_ds, ds, [1e-3])
     assert seen and set(seen) == {1}            # the fit subset (1 batch), never the full set
+
+
+def test_fit_end_to_end_writes_run_layout(tmp_path):
+    from conftest import FIXTURE_DIR
+    from ace_jax.fit.pipeline import FitConfig, fit, load_fit_data, write_outputs
+    cfg = FitConfig(model=str(FIXTURE_DIR / "si_fitted.npz"), energy_key="dft_energy", force_key="dft_force",
+                    virial_key="dft_virial", ntrain=12, ntest=4, batch=4, r0=2.35, arm="linear",
+                    rungs=("map",), map_steps=5, predict_train=False)
+    res = fit(cfg.validate(), load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz")),
+              log=lambda *a: None)
+    write_outputs(res, tmp_path, layout=("run", "cli"), argv={"arm": "linear"})
+    for n in ("theta_map.json", "metrics.json", "metrics.csv", "pred_test_map.npz", "draws_map.npy",
+              "map_restarts.json", "timings.json", "config.json", "split_perm.npy"):
+        assert (tmp_path / n).exists(), n
