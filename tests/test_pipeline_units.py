@@ -127,3 +127,28 @@ def test_rungs_map_is_theta_and_unknown_rung_raises():
     assert np.array_equal(r.draws["map"], np.asarray(to_array(th))[None])
     with pytest.raises(ValueError, match="unknown rung"):
         run_rungs(FitConfig(model="m", rungs=("map", "hmc")), None, None, th, log=lambda *a: None)
+
+
+def test_metrics_drop_configs_without_labels():
+    from ace_jax.fit.pipeline.predict import label_metrics
+    nat = np.array([1, 2, 2])
+    E = np.array([np.nan, -1.0, -2.0]); Em = np.array([5.0, -1.1, -2.1]); Ev = np.full(3, 0.01)
+    F = np.zeros((5, 3)); Fm = np.zeros((5, 3)) + 0.1; Fv = np.full((5, 3), 0.01)
+    V = np.full((3, 6), np.nan); V[1:] = 0.0
+    Vm = np.zeros((3, 6)); Vv = np.full((3, 6), 0.01)
+    m = label_metrics(E, Em, Ev, F, Fm, Fv, V, Vm, Vv, nat)
+    assert np.isfinite(m["E"]["rmse"]) and np.isfinite(m["V"]["rmse"])
+    assert np.isclose(m["E"]["rmse"], 1e3 * np.sqrt(np.mean(((E[1:] - Em[1:]) / nat[1:]) ** 2)))
+
+
+def test_pops_ridge_selection_uses_the_fit_subset_statistics(tiny_linear_problem, monkeypatch):
+    import ace_jax.fit.predict as P
+    prob, ds = tiny_linear_problem
+    seen = []
+    real = P.sufficient_statistics
+    def spy(theta, spec, model, ind, cfg, dsx):
+        seen.append(int(dsx.n_batches)); return real(theta, spec, model, ind, cfg, dsx)
+    monkeypatch.setattr(P, "sufficient_statistics", spy)
+    fit_ds = jax.tree.map(lambda a: a[:1], ds)
+    P.select_pops_ridge(prob.prior.mu, prob, fit_ds, ds, [1e-3])
+    assert seen and set(seen) == {1}            # the fit subset (1 batch), never the full set
