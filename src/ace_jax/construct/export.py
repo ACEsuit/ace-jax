@@ -95,3 +95,28 @@ def save_npz(path, auth):
         out[f"aa_spec_{k+1}"] = np.asarray(spec, np.int32)
     out["meta_json"] = np.frombuffer(json.dumps(meta).encode(), np.uint8)
     np.savez(path, **out)
+
+
+def patch_radial_npz(src, dst, model):
+    """Copy the npz at `src` to `dst` with the tensor radial replaced by
+    `model`'s analytic one (rnl_Wnlq + polys_A/B/C; any rnl spline arrays are
+    dropped and meta radial_kind/rnl_spline updated).  Everything else --
+    coupling, pair basis, readout, E0 -- is copied verbatim.  This is how a
+    learned radial is written back from a model that was loaded rather than
+    authored (save_npz needs an Authoring)."""
+    if model.radial_kind != "analytic":
+        raise ValueError(f"patch_radial_npz: model radial_kind {model.radial_kind!r} is not analytic")
+    with np.load(src, allow_pickle=False) as z:
+        out = {k: z[k] for k in z.files}
+    meta = json.loads(bytes(out["meta_json"]).decode())
+    for k in ("rnl_spline_coefs", "rnl_spline_coefs_single", "rnl_embedding",
+              "rnl_emb_nidx", "rnl_emb_kidx"):
+        out.pop(k, None)
+    out["rnl_Wnlq"] = np.asarray(model.rnl_Wnlq, np.float64)
+    out["polys_A"] = np.asarray(model.polys_A, np.float64)
+    out["polys_B"] = np.asarray(model.polys_B, np.float64)
+    out["polys_C"] = np.asarray(model.polys_C, np.float64)
+    meta["radial_kind"] = "analytic"
+    meta["rnl_spline"] = None
+    out["meta_json"] = np.frombuffer(json.dumps(meta).encode(), dtype=np.uint8)
+    np.savez(dst, **out)
