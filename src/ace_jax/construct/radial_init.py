@@ -254,17 +254,20 @@ def transform_table(elements, rcut, r0, rin, p, q):
 
 
 def tensor_radial_init(elements, Rnl_spec, *, rcut,
-                       r0=None, rin=0.0, p=2, q=2, mode="glorot_normal", seed=0):
+                       r0=None, rin=0.0, p=2, q=2, mode="glorot_normal", seed=0,
+                       n_q_factor=1.5):
     """Coefficients for the many-body (tensor) radial basis.
 
     elements: atomic numbers; Rnl_spec: (n, l) list from `build_spec` (defines
     n_rnl and the onehot convention); r0: None (per-pair bond-length default),
-    a scalar or an (NZ, NZ) table.  Returns dict with rnl_transform (NZ,NZ,7),
+    a scalar or an (NZ, NZ) table; n_q_factor: polynomial span
+    n_q = ceil(n_q_factor * max n) (1.5 is ACEpotentials' default; learned
+    radials want 2-3).  Returns dict with rnl_transform (NZ,NZ,7),
     rnl_envelope (NZ,NZ,5), rnl_Wnlq (NZ,NZ,n_rnl,n_q) and polys_A/B/C (n_q,)."""
     NZ = len(elements)
     n_rnl = len(Rnl_spec)
     actual_maxn = max(n for n, _ in Rnl_spec)
-    n_q = math.ceil(actual_maxn * 1.5)
+    n_q = math.ceil(actual_maxn * n_q_factor)
     env = envelope2sx_params(-1.0, 1.0, 2, 2)
     A, B, C = legendre_3term(n_q)
     return {
