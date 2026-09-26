@@ -210,3 +210,47 @@ def test_learn_radial_profiles_theta(small):
     prob, ds, _ = small
     W, info = learn_radial(prob, ds, prob.model.rnl_Wnlq, steps=4, reprofile_every=2, map_steps=50)
     assert len(info["theta"]) >= 2 and all(np.all(np.isfinite(t)) for t in info["theta"])
+
+
+def test_gate_ties_go_to_first():
+    from ace_jax.fit.radial_learn import gate
+    label, scores = gate({"init": 1, "learned": 2}, lambda w: 0.5)
+    assert label == "init" and scores == {"init": 0.5, "learned": 0.5}
+    label, _ = gate({"init": 1, "learned": 2}, lambda w: 1.0 if w == 1 else 0.1)
+    assert label == "learned"
+
+
+def test_holdout_score_energy_only_split(small):
+    from ace_jax.fit.hypers import to_array
+    from ace_jax.fit.radial_learn import holdout_score
+    prob, ds_fit, _ = small
+    _, ds_val, _ = make_problem(ncfg=6, start=6, force_key="__no_such_key__")
+    a = to_array(THETA)
+    s = holdout_score(prob.model.rnl_Wnlq, a, a, prob, ds_fit, ds_val)
+    assert np.isfinite(s) and s >= 0.0
+
+
+def test_fit_radial_gate_prefers_learned_on_recoverable_problem():
+    from ace_jax.fit.radial_learn import fit_radial
+    prob, ds_fit, _ = make_problem(ncfg=12, per_batch=3, start=0)
+    _, ds_val, _ = make_problem(ncfg=12, per_batch=3, start=12)
+    Wt, W0, c = _perturbed_truth(prob)
+    ds_fit, ds_val = relabel(prob, ds_fit, Wt, c), relabel(prob, ds_val, Wt, c)
+    W, info = fit_radial(prob, ds_fit, ds_val, W0, lam_grid=(0.0,), theta0=THETA,
+                         profile=False, steps=30, map_steps=50)
+    print(info["scores"])
+    assert info["selected"].startswith("learned")
+    assert info["scores"][info["selected"]] < info["scores"]["init"]
+
+
+def test_save_result_roundtrip(tmp_path, small):
+    from ace_jax.fit.radial_learn import save_result
+    prob, _, _ = small
+    W = 1.5 * prob.model.rnl_Wnlq
+    save_result(tmp_path, W, {"selected": "learned", "trace": [1.0, 0.5], "theta": [np.zeros(3)]},
+                src_npz=MODEL, model=prob.model)
+    assert np.array_equal(np.load(tmp_path / "rnl_Wnlq.npy"), np.asarray(W))
+    back, meta, _ = load(tmp_path / "model.npz")
+    np.testing.assert_array_equal(np.asarray(back.rnl_Wnlq), np.asarray(W))
+    import json
+    assert json.loads((tmp_path / "radial_info.json").read_text())["selected"] == "learned"

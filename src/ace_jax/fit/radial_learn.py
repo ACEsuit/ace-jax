@@ -14,6 +14,8 @@ through the checkpointed `linear_statistics` scan.  M = 0 throughout: the
 residual GP is fitted afterwards on the frozen learned model.
 See docs/specs/2026-09-26-learned-radial-varpro-design.md.
 """
+import json
+import pathlib
 from functools import partial
 
 import jax
@@ -24,7 +26,7 @@ from jax.scipy.linalg import solve_triangular
 
 from .hypers import from_array, to_array
 from .ladder import run_map
-from .objective import combine, log_marginal_likelihood
+from .objective import combine, log_marginal_likelihood, posterior
 from .radial_model import (normalise, radial_gram, require_analytic, roughness,
                            roughness_matrix, row_active, with_radial)
 from .stats import linear_statistics
@@ -211,3 +213,86 @@ def learn_radial(prob, ds, W0, *, theta0=None, profile=True, lam_rough=0.0, roug
     info["steps"] = done
     info["theta_final"] = np.asarray(a)
     return V, info
+
+
+def holdout_score(W, a_fit, a_norm, prob, ds_fit, ds_val):
+    """Validation error of the M = 0 linear fit with radials W: the readout is
+    the posterior mean on ds_fit at theta a_fit; the score is
+    sum_{t in E, F} SSE_t / (n_t sigma_t^2) on ds_val with sigma from a_norm
+    (fixed across candidates so scores are comparable), SSE_t = yy - 2 c.b +
+    c.G.c from ds_val's weighted linear statistics -- no design matrix.  A
+    type with no rows in ds_val is skipped."""
+    model = with_radial(prob.model, W)
+    c, _ = posterior(from_array(a_fit), linear_statistics(model, prob.cfg, ds_fit), prob)
+    val = linear_statistics(model, prob.cfg, ds_val)
+    th = from_array(a_norm)
+    score = 0.0
+    for t in "EF":
+        n = float(getattr(val, f"n_{t}"))
+        if n == 0:
+            continue
+        G, b, yy = getattr(val, f"G_{t}"), getattr(val, f"b_{t}"), getattr(val, f"yy_{t}")
+        sse = float(yy - 2.0 * c @ b + c @ G @ c)
+        score += sse / (n * float(jnp.exp(2.0 * getattr(th, f"log_sigma_{t}"))))
+    return score
+
+
+def gate(candidates, score):
+    """Score every candidate (lower is better); ties resolve to insertion order,
+    so put the conservative choice ("init") first.  Returns (label, scores)."""
+    scores = {k: float(score(w)) for k, w in candidates.items()}
+    order = list(scores)
+    return min(order, key=lambda k: (scores[k], order.index(k))), scores
+
+
+def fit_radial(prob, ds_fit, ds_val, W0, *, lam_grid=(0.0, 1e-3, 1e-2, 1e-1), theta0=None,
+               map_steps=300, **learn_kw):
+    """learn_radial on ds_fit once per relative roughness weight in lam_grid,
+    then keep the best of {init, learned per lam} on the disjoint ds_val
+    (ties -> init).  Each candidate's readout is refitted at its own theta-MAP
+    (warm-started from the init's); scores are normalised by the init's sigmas.
+    Returns (W_sel, info)."""
+    require_x64()
+    require_analytic(prob.model)
+    W0 = jnp.asarray(W0, jnp.float64)
+    Q = radial_gram(prob.model, ds_fit, n_prior=learn_kw.get("n_prior", 10.0))
+    W_init = normalise(W0, Q, row_active(W0))
+    a0 = to_array(theta0) if theta0 is not None else theta_map_linear(prob, ds_fit, W_init, steps=map_steps)
+    cands, runs = {"init": W_init}, {}
+    for lam in lam_grid:
+        W, info = learn_radial(prob, ds_fit, W0, theta0=from_array(a0), lam_rough=lam,
+                               map_steps=map_steps, **learn_kw)
+        cands[f"learned_lam={lam:g}"] = W
+        runs[f"{lam:g}"] = info
+
+    def score(W):
+        a_fit = a0 if W is W_init else theta_map_linear(prob, ds_fit, W, steps=map_steps, init=a0)
+        return holdout_score(W, a_fit, a0, prob, ds_fit, ds_val)
+
+    label, scores = gate(cands, score)
+    return cands[label], {"selected": label, "scores": scores, "runs": runs, "theta_init": np.asarray(a0)}
+
+
+def _jsonable(x):
+    if isinstance(x, dict):
+        return {str(k): _jsonable(v) for k, v in x.items()}
+    if isinstance(x, (list, tuple)):
+        return [_jsonable(v) for v in x]
+    if hasattr(x, "tolist"):
+        return x.tolist()
+    return x
+
+
+def save_result(out_dir, W, info, *, src_npz=None, model=None):
+    """Write rnl_Wnlq.npy and radial_info.json to out_dir; with src_npz and
+    model (the analytic model W belongs to, e.g. after widen_radial /
+    to_analytic) also write model.npz = src_npz with the learned radial."""
+    out = pathlib.Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    np.save(out / "rnl_Wnlq.npy", np.asarray(W))
+    (out / "radial_info.json").write_text(json.dumps(_jsonable(info), indent=1))
+    if src_npz is not None:
+        if model is None:
+            raise ValueError("save_result: src_npz needs the analytic `model` W belongs to")
+        from ..construct.export import patch_radial_npz
+        patch_radial_npz(src_npz, out / "model.npz", with_radial(model, W))
