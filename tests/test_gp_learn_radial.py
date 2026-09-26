@@ -138,6 +138,29 @@ def test_lbfgs_loop_nonfinite_keeps_best():
     assert fx <= float(f(x0)) and float(f(x)) == fx
 
 
+def _toy_quadratic(x, s, t):
+    """Module-level (hence stable-identity, hashable) toy `f` for lbfgs_loop's
+    args= interface: f(x, *args, *statics) = f(x, s, t)."""
+    return jnp.sum(s * (x - t) ** 2)
+
+
+def test_lbfgs_loop_no_recompile_across_rounds():
+    """Two lbfgs_loop calls with the same f/statics and matching x0/args
+    shapes -- exactly how learn_radial drives one round per call -- must
+    compile _lbfgs_step at most once between them, not once per call."""
+    from ace_jax.fit.radial_learn import _lbfgs_step, lbfgs_loop
+    t = jnp.arange(5.0)
+    s1 = jnp.array([1.0, 10.0, 100.0, 0.1, 3.0])
+    s2 = jnp.array([2.0, 5.0, 50.0, 0.2, 1.0])          # different VALUES, same shape/dtype
+    n0 = _lbfgs_step._cache_size()
+    lbfgs_loop(_toy_quadratic, jnp.zeros(5), steps=5, args=(s1, t))
+    n1 = _lbfgs_step._cache_size()
+    lbfgs_loop(_toy_quadratic, jnp.zeros(5), steps=5, args=(s2, t))
+    n2 = _lbfgs_step._cache_size()
+    print(f"_lbfgs_step cache size: before={n0} after call 1={n1} after call 2={n2}")
+    assert n2 - n0 <= 1
+
+
 def test_learn_radial_requires_x64(small, monkeypatch):
     import types
     from ace_jax.fit import radial_learn

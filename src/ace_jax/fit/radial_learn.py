@@ -52,8 +52,33 @@ def require_x64():
         raise RuntimeError("learned radials need float64: jax.config.update('jax_enable_x64', True)")
 
 
-def lbfgs_loop(f, x0, *, steps, tol=1e-6, patience=3, memory_size=10):
-    """Minimise f (x -> scalar, jittable) by optax L-BFGS with zoom line search.
+@partial(jax.jit, static_argnames=("f", "statics", "memory_size"))
+def _lbfgs_step(x, state, args, *, f, statics, memory_size):
+    """One optax L-BFGS + zoom-line-search step of f(y, *args, *statics).
+
+    `f` and `statics` are static (baked into the compiled program; `f` must be
+    a stable, hashable callable such as a module-level function, and `statics`
+    a tuple of hashable objects), `x`, `state` and `args` are traced.  Reusing
+    this single jitted step across rounds -- rather than re-jitting a fresh
+    closure over the (theta, model, ...) each round -- means only a change in
+    shape/dtype (never in value) of `x`/`state`/`args`, or in `f`/`statics`/
+    `memory_size` themselves, triggers a recompile."""
+    fa = lambda y: f(y, *args, *statics)
+    opt = optax.lbfgs(memory_size=memory_size)
+    value, grad = optax.value_and_grad_from_state(fa)(x, state=state)
+    updates, state = opt.update(grad, state, x, value=value, grad=grad, value_fn=fa)
+    return optax.apply_updates(x, updates), state, value, grad
+
+
+def lbfgs_loop(f, x0, *, steps, args=(), statics=(), tol=1e-6, patience=3, memory_size=10):
+    """Minimise f(x, *args, *statics) -> scalar by optax L-BFGS with zoom line
+    search, via the single compiled `_lbfgs_step` (no per-call closure is
+    jitted here, so calling this repeatedly with the same `f`/`statics` and
+    matching `x0`/`args` shapes -- e.g. once per VarPro round -- compiles
+    once and reuses the executable thereafter).  `args` may change VALUE
+    between calls (e.g. re-profiled theta) without forcing a recompile, since
+    only their shape/dtype is baked into the trace; `f`, `statics` and
+    `memory_size` must stay fixed (they are static, part of the cache key).
 
     Stops after `steps` iterations ("steps"); when the relative decrease stays
     below `tol` for `patience` consecutive iterations ("converged"); when an
@@ -61,26 +86,34 @@ def lbfgs_loop(f, x0, *, steps, tol=1e-6, patience=3, memory_size=10):
     the iterate go non-finite ("nonfinite").  Always returns the best finite
     iterate seen: (x_best, f_best, trace, reason), trace = f after each
     accepted step (strictly decreasing)."""
-    x_best, f_best = x0, float(f(x0))
     if int(steps) <= 0:
-        return x_best, f_best, [], "steps"
-    if not np.isfinite(f_best):
-        return x_best, f_best, [], "nonfinite"
+        return x0, float(f(x0, *args, *statics)), [], "steps"
     opt = optax.lbfgs(memory_size=memory_size)
-    vg = optax.value_and_grad_from_state(f)
-    x, state = x0, opt.init(x0)
-    trace, prev, small = [], f_best, 0
-    for _ in range(int(steps)):
-        value, grad = vg(x, state=state)
-        if not (np.isfinite(float(value)) and bool(jnp.all(jnp.isfinite(grad)))):
+    # optax.lbfgs's init leaves a few ZoomLinesearchInfo fields weak-typed
+    # (Python-literal defaults), while every _lbfgs_step call returns them
+    # strongly typed; left alone, that mismatch is a second, permanent
+    # abstract signature -- one extra (harmless but avoidable) compile the
+    # first time this shape/dtype combination is ever seen.  Stripping it
+    # up front means the very first iteration of the very first round
+    # already matches every later call's signature: one compile, not two.
+    state = jax.tree.map(lambda a: jax.lax.convert_element_type(a, a.dtype)
+                         if hasattr(a, "dtype") else a, opt.init(x0))
+    x = x0
+    x_best, f_best, trace, prev, small = x0, None, [], None, 0
+    for i in range(int(steps)):
+        x_new, state, value, grad = _lbfgs_step(x, state, args, f=f, statics=statics,
+                                                 memory_size=memory_size)
+        value = float(value)               # f(x) at the pre-step x (f(x0) when i == 0)
+        if i == 0:
+            f_best = prev = value
+        if not (np.isfinite(value) and bool(jnp.all(jnp.isfinite(grad)))):
             return x_best, f_best, trace, "nonfinite"
-        updates, state = opt.update(grad, state, x, value=value, grad=grad, value_fn=f)
-        x = optax.apply_updates(x, updates)
         fx = float(optax.tree_utils.tree_get(state, "value"))
-        if not (np.isfinite(fx) and bool(jnp.all(jnp.isfinite(x)))):
+        if not (np.isfinite(fx) and bool(jnp.all(jnp.isfinite(x_new)))):
             return x_best, f_best, trace, "nonfinite"
         if fx >= prev:                       # rejected step: not recorded, best kept
             return x_best, f_best, trace, "linesearch"
+        x = x_new
         trace.append(fx)
         x_best, f_best = x, fx
         small = small + 1 if (prev - fx) <= tol * max(abs(prev), 1e-300) else 0
@@ -101,8 +134,14 @@ def theta_map_linear(prob, ds, W, *, steps=300, seed=0, init=None):
     return to_array(h)
 
 
-@partial(jax.jit, static_argnames=("cfg",))
 def _objective(V, a, model, ds, gamma, Q, active, D2, wn, lam, cfg):
+    """The VarPro-plus-roughness objective, module-level so it is a stable,
+    hashable `f` for `lbfgs_loop`/`_lbfgs_step` (a fresh per-round closure
+    over the same computation would be a distinct object each round and
+    force a recompile of the L-BFGS step every round -- see `learn_radial`).
+    `cfg` is meant to be passed through `lbfgs_loop`'s `statics`, not `args`;
+    this function does not need to be jitted itself, since `_lbfgs_step` is
+    the sole jit boundary and traces straight through it."""
     theta = from_array(a)
     W = normalise(V, Q, active)
     lin = linear_statistics(with_radial(model, W), cfg, ds)
@@ -141,15 +180,22 @@ def learn_radial(prob, ds, W0, *, theta0=None, profile=True, lam_rough=0.0, roug
     rough0 = float(roughness(V, D2, wn))
     lam = float(lam_rough) * r0 / max(rough0, 1e-300) if lam_rough else 0.0
     info = {"trace": [], "reasons": [], "theta": [np.asarray(a)], "lam_abs": lam,
-            "lam_rough": float(lam_rough), "steps": 0}
+            "lam_rough": float(lam_rough), "steps": 0, "round_lengths": []}
+    lam = jnp.asarray(lam, jnp.float64)
     done = 0
     while done < int(steps):
         n = min(int(reprofile_every), int(steps) - done)
-        f = lambda X, a=a: _objective(X, a, prob.model, ds, prob.gamma, Q, active, D2, wn,
-                                      lam, prob.cfg)
-        V, _, trace, reason = lbfgs_loop(f, V, steps=n, tol=tol, patience=patience)
+        # `_objective` (module-level) + fixed `statics=(prob.cfg,)` is the same
+        # `f`/static pair every round, so `_lbfgs_step` compiles once across
+        # the whole learn_radial call and every round below just reuses it;
+        # `args` change VALUE each round (a is re-profiled) but not shape/dtype.
+        V, _, trace, reason = lbfgs_loop(
+            _objective, V, steps=n, tol=tol, patience=patience,
+            args=(a, prob.model, ds, prob.gamma, Q, active, D2, wn, lam),
+            statics=(prob.cfg,))
         info["trace"].extend(trace)
         info["reasons"].append(reason)
+        info["round_lengths"].append(len(trace))
         done += n
         # Canonicalise once per round (lbfgs_loop moves V, not W = normalise(V));
         # persisting it back avoids a second normalise() at the return below,
