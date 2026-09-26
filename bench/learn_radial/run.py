@@ -20,7 +20,7 @@ jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 import numpy as np
 
-from ace_jax.construct.prior import smoothness_prior
+from ace_jax.construct.prior import prior_diagonal
 from ace_jax.eval import load
 from ace_jax.fit.data import build_dataset, load_configs
 from ace_jax.fit.hypers import default_prior
@@ -63,12 +63,7 @@ ds_val = build_dataset(val_c, meta, E0, configs_per_batch=a.batch)
 cfg = GPConfig(r0=a.r0, rcut=float(meta["rcut"]), n_B=meta["n_B"], n_pair=meta["n_pair"], NZ=NZ, C=a.batch)
 X, S = site_features(model, cfg, ds_fit)
 ind = select_inducing(X, S, ds_fit.node_z, ds_fit.node_mask, 0, descriptor_scale(X, ds_fit.node_mask))
-if "gamma" in z:
-    gamma = np.asarray(z["gamma"])
-else:   # same construction as construct.model.build_model
-    tensor_nnll = [[tuple(b) for b in bb] for bb in meta["nnll"]]
-    pair_nnll = [[(n, 0)] for n in range(1, meta["n_pair"] + 1)]
-    gamma = smoothness_prior(tensor_nnll * NZ + pair_nnll * NZ)
+gamma = prior_diagonal(z, meta, source=a.model)
 prob = Problem(KernelSpec("cosine", True, cfg.D), model, ind, cfg, jnp.asarray(gamma), default_prior(a.r0))
 
 wn = 1.0 / (1.0 + rnl_degrees(meta)) ** 2
