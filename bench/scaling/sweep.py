@@ -14,8 +14,9 @@ from scaling.structures import n_ladder
 
 HOSTS = {
     # Xeon Silver 4216: 16 cores x 2 hyperthreads -- one MPI rank per physical core
-    "moriarty-cpu": {"device": "cpu", "n_max": 32768, "ranks": 16},
-    "moriarty-gpu": {"device": "gpu", "n_max": 1 << 20, "ranks": 1},
+    # rss_cap_gb: a case's whole process tree is killed past this (62 GB node)
+    "moriarty-cpu": {"device": "cpu", "n_max": 32768, "ranks": 16, "rss_cap_gb": 48},
+    "moriarty-gpu": {"device": "gpu", "n_max": 1 << 20, "ranks": 1, "rss_cap_gb": 48},
     "modal-a100": {"device": "gpu", "n_max": 1 << 21, "ranks": 1},
     "local-cpu": {"device": "cpu", "n_max": 8192, "ranks": 8},
 }
@@ -169,21 +170,81 @@ def subprocess_runner(host, env):
         e = child_env(env, mode=c.mode, cpus=cpus)
         if prev and prev.get("step_s"):                  # sizes the LAMMPS step count
             e["BENCH_PREV"] = json.dumps({"step_s": prev["step_s"], "n_atoms": prev["n_atoms"]})
-        p = subprocess.run(cmd, capture_output=True, text=True, timeout=7200, env=e)
-        return row_from_process(c, p.returncode, p.stdout, p.stderr)
+        cap = HOSTS[host].get("rss_cap_gb")
+        rc, out, err, peak, capped = run_capped(cmd, e, timeout=7200,
+                                                cap_bytes=cap and cap * 2**30)
+        return row_from_process(c, rc, out, err, capped=capped, peak_rss=peak)
     return run
 
 
-def row_from_process(c, returncode, stdout, stderr):
+def row_from_process(c, returncode, stdout, stderr, capped=False, peak_rss=None):
     """The case's JSON row, or -- when it died without printing one -- a row
-    saying why: SIGKILL is the kernel OOM killer on these hosts (dmesg: "Out of
-    memory: Killed process"), anything else an error."""
+    saying why: over the host memory cap (run_capped killed it), or SIGKILL
+    (the kernel OOM killer: dmesg "Out of memory: Killed process") is an oom,
+    anything else an error."""
     lines = [l for l in stdout.splitlines() if l.startswith("{")]
-    if lines:
+    if lines and not capped:
         return json.loads(lines[-1])
-    return {"code": c.code, "mode": c.mode, "model": c.model, "n_atoms": c.n_atoms,
-            "dtype": c.dtype, "device": c.device, "returncode": returncode,
-            "status": "oom" if returncode == -9 else "error", "error": stderr[-300:]}
+    row = {"code": c.code, "mode": c.mode, "model": c.model, "n_atoms": c.n_atoms,
+           "dtype": c.dtype, "device": c.device, "returncode": returncode,
+           "status": "oom" if (capped or returncode == -9) else "error", "error": stderr[-300:]}
+    if capped:
+        row["capped_rss"] = peak_rss
+    return row
+
+
+def run_capped(cmd, env, timeout, cap_bytes=None, poll=0.5):
+    """Run cmd in its own session; kill the whole process tree (MPI ranks too)
+    if its summed resident memory passes cap_bytes, so the case -- not the
+    kernel OOM killer, which on moriarty took systemd and dbus first -- pays.
+    Returns (returncode, stdout, stderr, peak_rss, capped); returncode None
+    means it was killed for running past `timeout`."""
+    import signal
+    import tempfile
+    import time
+    with tempfile.TemporaryFile("w+") as fo, tempfile.TemporaryFile("w+") as fe:
+        p = subprocess.Popen(cmd, stdout=fo, stderr=fe, text=True, env=env, start_new_session=True)
+        t0, peak, capped = time.monotonic(), 0, False
+        while p.poll() is None:
+            if cap_bytes:
+                rss = _tree_rss(p.pid)
+                peak = max(peak, rss)
+                if rss > cap_bytes:
+                    capped = True
+                    _kill_tree(p.pid, signal.SIGKILL)
+                    break
+            if time.monotonic() - t0 > timeout:
+                _kill_tree(p.pid, signal.SIGKILL)
+                p.wait()
+                fo.seek(0); fe.seek(0)
+                return None, fo.read(), fe.read() + f"\ntimeout after {timeout} s", peak, False
+            time.sleep(poll)
+        rc = p.wait()
+        fo.seek(0); fe.seek(0)
+        return rc, fo.read(), fe.read(), peak, capped
+
+
+def _tree_rss(pid):
+    import psutil
+    try:
+        root = psutil.Process(pid)
+        procs = [root] + root.children(recursive=True)
+    except psutil.NoSuchProcess:
+        return 0
+    total = 0
+    for q in procs:
+        try:
+            total += q.memory_info().rss
+        except psutil.NoSuchProcess:
+            pass
+    return total
+
+
+def _kill_tree(pid, sig):
+    try:
+        os.killpg(pid, sig)                    # the case's own session / process group
+    except ProcessLookupError:
+        pass
 
 
 def main(argv=None):

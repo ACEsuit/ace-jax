@@ -408,3 +408,37 @@ def test_mace_lammps_runs_float64_only():
     assert got == {"float64"}
     assert {c.dtype for c in cases("moriarty-cpu") if c.code == "mace" and c.mode == "standalone"} \
         == {"float64", "float32"}
+
+
+def test_run_capped_kills_a_case_over_its_memory_cap():
+    """Past the node's RAM the kernel OOM killer took systemd/dbus before the
+    case; the runner kills the case's whole process tree at a cap instead."""
+    import sys
+    pytest.importorskip("psutil")
+    from scaling.sweep import run_capped
+    grow = [sys.executable, "-c",
+            "import time\nx=[]\nfor _ in range(60):\n    x.append(bytearray(20*2**20)); time.sleep(0.05)\n"
+            "print('{\"status\": \"ok\"}')"]
+    rc, out, err, peak, capped = run_capped(grow, env=None, timeout=60, cap_bytes=200 * 2**20, poll=0.05)
+    assert capped and rc != 0 and "ok" not in out and peak > 200 * 2**20
+    rc, out, err, peak, capped = run_capped([sys.executable, "-c", "print('{\"status\": \"ok\"}')"],
+                                            env=None, timeout=60, cap_bytes=200 * 2**20)
+    assert not capped and rc == 0 and '"ok"' in out
+
+
+def test_capped_case_is_an_oom_row():
+    from scaling.sweep import Case, row_from_process
+    c = Case("mace", "mace/Cantor/large", "lammps", 16384, "float64", "cpu", 16)
+    r = row_from_process(c, -9, "", "", capped=True, peak_rss=5e10)
+    assert r["status"] == "oom" and r["capped_rss"] == 5e10
+
+
+def test_timeout_is_an_error_not_an_oom():
+    import sys
+    pytest.importorskip("psutil")
+    from scaling.sweep import Case, row_from_process, run_capped
+    rc, out, err, peak, capped = run_capped([sys.executable, "-c", "import time; time.sleep(30)"],
+                                            env=None, timeout=0.5, cap_bytes=None, poll=0.05)
+    c = Case("mlpace", "mlpace/SiGe/small", "lammps", 256, "float64", "cpu", 16)
+    r = row_from_process(c, rc, out, err, capped=capped)
+    assert rc is None and r["status"] == "error" and "timeout" in r["error"]
