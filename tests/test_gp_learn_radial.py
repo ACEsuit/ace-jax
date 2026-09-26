@@ -110,3 +110,80 @@ def test_gradient_memory_does_not_scale_with_batches():
     val6 = _temp_bytes(lambda X, d: projected_residual(X, THETA, prob, d), W, ds6)
     print(f"temp bytes: grad(2 batches)={t2}  grad(6 batches)={t6}  value(6)={val6}")
     assert t6 <= 1.25 * t2 + 1_000_000
+
+
+def test_lbfgs_loop_quadratic():
+    from ace_jax.fit.radial_learn import lbfgs_loop
+    t = jnp.arange(5.0)
+    s = jnp.array([1.0, 10.0, 100.0, 0.1, 3.0])
+    f = jax.jit(lambda x: jnp.sum(s * (x - t) ** 2))
+    x, fx, trace, reason = lbfgs_loop(f, jnp.zeros(5), steps=100)
+    np.testing.assert_allclose(np.asarray(x), np.asarray(t), atol=1e-6)
+    assert reason in ("converged", "linesearch", "steps") and fx <= trace[0]
+
+
+def test_lbfgs_loop_zero_steps_returns_start():
+    from ace_jax.fit.radial_learn import lbfgs_loop
+    x0 = jnp.ones(3)
+    x, fx, trace, reason = lbfgs_loop(lambda x: jnp.sum(x ** 2), x0, steps=0)
+    assert bool(jnp.all(x == x0)) and trace == [] and reason == "steps" and fx == 3.0
+
+
+def test_lbfgs_loop_nonfinite_keeps_best():
+    from ace_jax.fit.radial_learn import lbfgs_loop
+    f = jax.jit(lambda x: jnp.where(x[0] > 0.5, jnp.sum(x ** 2), jnp.nan))
+    x0 = jnp.array([2.0, 1.0])
+    x, fx, _, _ = lbfgs_loop(f, x0, steps=50)
+    assert bool(jnp.all(jnp.isfinite(x))) and np.isfinite(fx)
+    assert fx <= float(f(x0)) and float(f(x)) == fx
+
+
+def test_learn_radial_requires_x64(small, monkeypatch):
+    import types
+    from ace_jax.fit import radial_learn
+    prob, ds, _ = small
+    # require_x64 is learn_radial's first statement, so only its read of
+    # jax.config sees the stub; the global flag is never touched
+    monkeypatch.setattr(radial_learn, "jax", types.SimpleNamespace(
+        config=types.SimpleNamespace(jax_enable_x64=False)))
+    with pytest.raises(RuntimeError, match="float64"):
+        radial_learn.learn_radial(prob, ds, prob.model.rnl_Wnlq, theta0=THETA, steps=1)
+
+
+def test_learn_radial_zero_steps_is_normalised_init(small):
+    from ace_jax.fit.radial_learn import learn_radial
+    from ace_jax.fit.radial_model import normalise, radial_gram, row_active
+    prob, ds, _ = small
+    W0 = prob.model.rnl_Wnlq
+    W, info = learn_radial(prob, ds, W0, theta0=THETA, profile=False, steps=0)
+    ref = normalise(W0, radial_gram(prob.model, ds), row_active(W0))
+    np.testing.assert_array_equal(np.asarray(W), np.asarray(ref))
+    assert info["steps"] == 0
+
+
+def _perturbed_truth(prob, seed=0, eps=0.2):
+    rng = np.random.default_rng(seed)
+    Wt = prob.model.rnl_Wnlq
+    W0 = Wt + eps * jnp.abs(Wt).mean() * jnp.asarray(rng.standard_normal(Wt.shape))
+    c = jnp.asarray(0.1 * rng.standard_normal(prob.cfg.len_basis))
+    return Wt, W0, c
+
+
+def test_learn_radial_recovers_perturbed_radials():
+    from ace_jax.fit.radial_learn import learn_radial, projected_residual
+    prob, ds, _ = make_problem(ncfg=12, per_batch=3)
+    Wt, W0, c = _perturbed_truth(prob)
+    ds = relabel(prob, ds, Wt, c)
+    W, info = learn_radial(prob, ds, W0, theta0=THETA, profile=False, steps=30)
+    f0 = float(projected_residual(W0, THETA, prob, ds))
+    f1 = float(projected_residual(W, THETA, prob, ds))
+    print(f"recovery: f0={f0:.4e} f1={f1:.4e} reasons={info['reasons']}")
+    assert f1 < 0.3 * f0
+    assert all(b <= a * (1 + 1e-12) for a, b in zip(info["trace"], info["trace"][1:]))
+
+
+def test_learn_radial_profiles_theta(small):
+    from ace_jax.fit.radial_learn import learn_radial
+    prob, ds, _ = small
+    W, info = learn_radial(prob, ds, prob.model.rnl_Wnlq, steps=4, reprofile_every=2, map_steps=50)
+    assert len(info["theta"]) >= 2 and all(np.all(np.isfinite(t)) for t in info["theta"])
