@@ -241,6 +241,43 @@ def _init_Wnlq(spec_n, n_q, NZ, mode, seed):
 
 
 # ---------------------------------------------------------------------------
+#  sampled radials -> analytic Wnlq (spline conversion, MACE init)
+# ---------------------------------------------------------------------------
+
+def from_table(x, R, envelope, polys, weights=None):
+    """Project sampled tensor radials onto the analytic basis env(x) P_q(x).
+
+    x: (n_x,) grid in the transformed coordinate [-1, 1]; R: (NZ, NZ, n_x,
+    n_rnl) radial values, envelope INCLUDED; envelope: (NZ, NZ, 5)
+    PolyEnvelope2sX params; polys: (A, B, C) recursion arrays (n_q = len(A));
+    weights: optional (NZ, NZ, n_x) nonnegative quadrature/density weights
+    (default uniform).  Per species pair solves the weighted least squares
+    min_W sum_x w (env P W^T - R)^2 -- the envelope is part of the basis, so
+    nothing is divided by it.  Returns (Wnlq (NZ, NZ, n_rnl, n_q), relres
+    (NZ, NZ, n_rnl)): relres is ||weighted residual|| / ||weighted R|| per
+    radial, 0 for an all-zero radial."""
+    x = np.asarray(x, float)
+    R = np.asarray(R, float)
+    envelope = np.asarray(envelope, float)
+    NZ, _, n_x, n_rnl = R.shape
+    P = poly_eval(x, *polys)                                   # (n_x, n_q)
+    n_q = P.shape[1]
+    W = np.zeros((NZ, NZ, n_rnl, n_q))
+    rel = np.zeros((NZ, NZ, n_rnl))
+    for i in range(NZ):
+        for j in range(NZ):
+            basis = envelope2sx_eval(None, x, envelope[i, j])[:, None] * P
+            w = np.ones(n_x) if weights is None else np.asarray(weights[i, j], float)
+            sw = np.sqrt(w)[:, None]
+            Wij = np.linalg.lstsq(sw * basis, sw * R[i, j], rcond=None)[0]     # (n_q, n_rnl)
+            W[i, j] = Wij.T
+            res = np.linalg.norm(sw * (basis @ Wij - R[i, j]), axis=0)
+            nrm = np.linalg.norm(sw * R[i, j], axis=0)
+            rel[i, j] = np.where(nrm > 0, res / np.where(nrm > 0, nrm, 1.0), 0.0)
+    return W, rel
+
+
+# ---------------------------------------------------------------------------
 #  the two basis initialisers
 # ---------------------------------------------------------------------------
 

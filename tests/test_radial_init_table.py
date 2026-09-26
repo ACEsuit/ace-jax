@@ -39,3 +39,51 @@ def test_build_model_n_q_factor(tmp_path):
     assert auth.model.rnl_Wnlq.shape[-1] == math.ceil(3.0 * maxn)
     assert auth.model.polys_A.shape == (math.ceil(3.0 * maxn),)
     assert auth.meta["authoring"]["n_q_factor"] == 3.0
+
+
+from conftest import FIXTURE_DIR
+
+
+def _analytic_fixture():
+    import jax
+    jax.config.update("jax_enable_x64", True)
+    from ace_jax.eval import load
+    p = FIXTURE_DIR / "si_ace_model.npz"
+    if not p.exists():
+        pytest.skip("missing si_ace_model.npz")
+    m, meta, _ = load(p)
+    return m
+
+
+def _sample(m, x):
+    """env(x) P(x) W^T per pair, numpy, (NZ, NZ, n_x, n_rnl)."""
+    from ace_jax.construct.radial_init import envelope2sx_eval, poly_eval
+    W = np.asarray(m.rnl_Wnlq)
+    P = poly_eval(x, np.asarray(m.polys_A), np.asarray(m.polys_B), np.asarray(m.polys_C))
+    NZ = W.shape[0]
+    env = np.asarray(m.rnl_envelope)
+    return np.stack([np.stack([envelope2sx_eval(None, x, env[i, j])[:, None] * P @ W[i, j].T
+                               for j in range(NZ)]) for i in range(NZ)])
+
+
+def test_from_table_roundtrip_recovers_Wnlq():
+    from ace_jax.construct.radial_init import from_table
+    m = _analytic_fixture()
+    x = np.linspace(-1, 1, 801)
+    R = _sample(m, x)
+    polys = tuple(np.asarray(a) for a in (m.polys_A, m.polys_B, m.polys_C))
+    W, rel = from_table(x, R, np.asarray(m.rnl_envelope), polys)
+    Wt = np.asarray(m.rnl_Wnlq)
+    assert np.abs(W - Wt).max() < 1e-10 * np.abs(Wt).max()
+    assert rel.max() < 1e-10
+
+
+def test_from_table_zero_radial_has_zero_residual():
+    from ace_jax.construct.radial_init import from_table
+    m = _analytic_fixture()
+    x = np.linspace(-1, 1, 201)
+    R = _sample(m, x)
+    R[..., 0] = 0.0
+    polys = tuple(np.asarray(a) for a in (m.polys_A, m.polys_B, m.polys_C))
+    W, rel = from_table(x, R, np.asarray(m.rnl_envelope), polys)
+    assert np.all(W[..., 0, :] == 0.0) and np.all(rel[..., 0] == 0.0)
