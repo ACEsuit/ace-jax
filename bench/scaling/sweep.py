@@ -45,6 +45,10 @@ class Case:
         return (self.model, self.mode, self.n_atoms, self.dtype, self.device)
 
 
+# Symmetrix evaluates in double whatever the input precision: one LAMMPS dtype
+LAMMPS_DTYPES = {"mace": ("float64",)}
+
+
 def cases(host):
     h = HOSTS[host]
     out = []
@@ -52,7 +56,9 @@ def cases(host):
         for mode in MODES[m["code"]]:
             if mode == "lammps" and not lammps_supported(m["code"], h["device"]):
                 continue
-            for dtype in DTYPES[m["code"]]:
+            dtypes = LAMMPS_DTYPES.get(m["code"], DTYPES[m["code"]]) if mode == "lammps" \
+                else DTYPES[m["code"]]
+            for dtype in dtypes:
                 for n in n_ladder(m["system"], h["n_max"]):
                     out.append(Case(m["code"], m["name"], mode, n, dtype, h["device"], h["ranks"]))
     return out
@@ -84,28 +90,36 @@ def _line(c):
 
 
 def run_sweep(host, runner, results_path, select=lambda c: True):
+    """Run the cases in order (line by line, ascending n), resumably.  Each case
+    gets the previous ok row of its line, which sizes its step count."""
     results_path = pathlib.Path(results_path)
-    done, dead = set(), set()
+    done, dead, prev = set(), set(), {}
     if results_path.exists():
         for l in results_path.read_text().splitlines():
             r = json.loads(l)
             done.add(tuple(r["_key"]))
             if r["status"] in ("oom", "error", "unstable", "parity_fail", "unsupported"):
                 dead.add(tuple(r["_line"]))
+            elif r["status"] == "ok" and r.get("mode") != "parity":
+                ln = tuple(r["_line"])
+                if ln not in prev or r["_key"][2] > prev[ln]["_key"][2]:
+                    prev[ln] = r
     todo = sorted((c for c in cases(host) if select(c)), key=lambda c: (_line(c), c.n_atoms))
     for c in todo:
         if c.key() in done or _line(c) in dead:
             continue
-        row = runner(c)
+        row = runner(c, prev.get(_line(c)))
         if row.get("status") == "error":        # transient (e.g. GPU state): retry once
             first = row.get("error")
-            row = runner(c)
+            row = runner(c, prev.get(_line(c)))
             row["retried"], row["first_error"] = True, first
         row["_key"], row["_line"], row["host"] = list(c.key()), list(_line(c)), host
         with results_path.open("a") as f:
             f.write(json.dumps(row) + "\n")
         if row["status"] != "ok":
             dead.add(_line(c))
+        else:
+            prev[_line(c)] = row
 
 
 def child_env(env, mode=None, cpus=None):
@@ -143,7 +157,7 @@ def subprocess_runner(host, env):
     """Real runner: one case per fresh process (so peak memory is per case)."""
     here = pathlib.Path(__file__).parent
 
-    def run(c):
+    def run(c, prev=None):
         if c.mode == "standalone":
             cmd = [sys.executable, str(here / "run_standalone.py"), c.model, str(c.n_atoms),
                    c.dtype, c.device]
@@ -152,8 +166,10 @@ def subprocess_runner(host, env):
             cmd = [sys.executable, str(here / "run_lammps.py"), c.model, str(c.n_atoms), c.dtype,
                    c.device, lmp, str(c.ranks), f"/tmp/bench_{host}_{c.n_atoms}"]
         cpus = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else os.cpu_count()
-        p = subprocess.run(cmd, capture_output=True, text=True, timeout=7200,
-                           env=child_env(env, mode=c.mode, cpus=cpus))
+        e = child_env(env, mode=c.mode, cpus=cpus)
+        if prev and prev.get("step_s"):                  # sizes the LAMMPS step count
+            e["BENCH_PREV"] = json.dumps({"step_s": prev["step_s"], "n_atoms": prev["n_atoms"]})
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=7200, env=e)
         return row_from_process(c, p.returncode, p.stdout, p.stderr)
     return run
 

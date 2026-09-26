@@ -123,7 +123,22 @@ def export_bundle(row, at, dtype, workdir):
     return str(pathlib.Path(workdir) / "bundle.json"), b["ace_jax"]["layout"], time.perf_counter() - t0
 
 
-def run_case(row, n_atoms, dtype, device, lmp, ranks, workdir, pjrt=None):
+STEP_BUDGET_S = 60.0          # target wall time of the timed segment
+
+
+def choose_steps(prev_step_s, prev_n, n, target_s=STEP_BUDGET_S, max_steps=200, min_steps=10):
+    """(timed steps, warmup steps) for an n-atom case, from the step time of the
+    previous (smaller) case of the same line scaled linearly in n: about
+    target_s of timed MD, 10..200 steps, warmup a quarter of that (3..50).  No
+    hint (the first size of a line): 200 / 50."""
+    if not prev_step_s or not prev_n:
+        return max_steps, 50
+    est = prev_step_s * n / prev_n
+    steps = int(min(max_steps, max(min_steps, round(target_s / est))))
+    return steps, min(50, max(3, steps // 4))
+
+
+def run_case(row, n_atoms, dtype, device, lmp, ranks, workdir, pjrt=None, prev=None):
     work = pathlib.Path(workdir); work.mkdir(parents=True, exist_ok=True)
     at = supercell(row["system"], n_atoms)
     data = work / "x.data"
@@ -138,7 +153,9 @@ def run_case(row, n_atoms, dtype, device, lmp, ranks, workdir, pjrt=None):
         return {"code": row["code"], "mode": "lammps", "model": row["name"], "size": row["size"],
                 "system": row["system"], "n_atoms": n_atoms, "device": device, "dtype": dtype,
                 "status": "unsupported", "error": f"no Symmetrix model {model}"}
-    (work / "in.bench").write_text(lammps_input(style, model, row["elements"], data, device, 200))
+    steps, warmup = choose_steps((prev or {}).get("step_s"), (prev or {}).get("n_atoms"), n_atoms)
+    (work / "in.bench").write_text(lammps_input(style, model, row["elements"], data, device, steps,
+                                                warmup=warmup))
     cmd = [lmp, "-in", "in.bench", "-log", "log.lammps", "-nocite"]
     if device == "gpu":
         cmd += ["-k", "on", "g", "1", "-sf", "kk", "-pk", "kokkos", *KOKKOS[style].split()]
@@ -169,5 +186,6 @@ if __name__ == "__main__":
     name, n, dtype, device, lmp, ranks, workdir = sys.argv[1:8]
     row = next(r for r in planned_models() if r["name"] == name)
     row["bundle"] = os.environ.get("ACEJAX_BUNDLE", "")
+    prev = json.loads(os.environ["BENCH_PREV"]) if os.environ.get("BENCH_PREV") else None
     print(json.dumps(run_case(row, int(n), dtype, device, lmp, int(ranks), workdir,
-                              os.environ.get("PJRT_PLUGIN"))))
+                              os.environ.get("PJRT_PLUGIN"), prev)))

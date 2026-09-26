@@ -99,7 +99,7 @@ def test_cases_cover_host_matrix():
 def test_sweep_resumes_and_stops_after_oom(tmp_path):
     calls = []
 
-    def fake(case):
+    def fake(case, prev=None):
         calls.append(case)
         return {"status": "oom" if case.n_atoms >= 1024 else "ok"}
     res = tmp_path / "r.jsonl"
@@ -333,7 +333,7 @@ def test_run_sweep_retries_an_error_once(tmp_path):
     from scaling.sweep import run_sweep
     calls = []
 
-    def runner(c):
+    def runner(c, prev=None):
         calls.append((c.model, c.n_atoms))
         first = calls.count((c.model, c.n_atoms)) == 1
         return {"status": "error" if (first and c.n_atoms == 256) else "ok"}
@@ -375,3 +375,36 @@ def test_moriarty_cpu_ranks_are_physical_cores():
     ('not enough slots'); one rank per physical core."""
     from scaling.sweep import HOSTS
     assert HOSTS["moriarty-cpu"]["ranks"] == 16
+
+
+def test_choose_steps_budgets_the_timed_segment():
+    """Fixed 200 steps took ~3.5 h per 32k-atom MACE CPU case; scale the step
+    count from the previous (smaller) case of the same line to ~60 s of MD."""
+    from scaling.run_lammps import choose_steps
+    assert choose_steps(None, None, 256) == (200, 50)              # no hint: the default
+    assert choose_steps(0.001, 256, 512) == (200, 50)              # fast codes unchanged
+    steps, warm = choose_steps(0.8, 512, 1024)                     # ~1.6 s/step expected
+    assert steps == 38 and warm == 9
+    assert choose_steps(50.0, 16384, 32768) == (10, 3)             # floor
+
+
+def test_run_sweep_hands_each_case_the_previous_ok_row_of_its_line(tmp_path):
+    from scaling.sweep import run_sweep
+    seen = []
+
+    def runner(c, prev=None):
+        seen.append((c.n_atoms, prev and prev["n_atoms"]))
+        return {"status": "ok", "n_atoms": c.n_atoms, "step_s": 1e-3}
+
+    run_sweep("local-cpu", runner, tmp_path / "r.jsonl",
+              select=lambda c: c.model == "mlpace/SiGe/small")
+    assert seen[0] == (256, None) and seen[1] == (512, 256) and seen[2] == (1024, 512)
+
+
+def test_mace_lammps_runs_float64_only():
+    """Symmetrix evaluates in double whatever the input: f32 rows duplicated f64."""
+    from scaling.sweep import cases
+    got = {c.dtype for c in cases("moriarty-cpu") if c.code == "mace" and c.mode == "lammps"}
+    assert got == {"float64"}
+    assert {c.dtype for c in cases("moriarty-cpu") if c.code == "mace" and c.mode == "standalone"} \
+        == {"float64", "float32"}
