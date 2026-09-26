@@ -91,3 +91,22 @@ def test_projected_residual_gradient(small):
     g_mem = jax.grad(lambda X: _in_memory_residual(X, prob, ds, THETA))(W)
     np.testing.assert_allclose(np.asarray(g), np.asarray(g_mem), rtol=1e-6,
                                atol=1e-8 * float(jnp.abs(g_mem).max()))
+
+
+def _temp_bytes(fn, *args):
+    ma = jax.jit(fn).lower(*args).compile().memory_analysis()
+    if ma is None:
+        pytest.skip("backend exposes no memory_analysis")
+    return ma.temp_size_in_bytes
+
+
+def test_gradient_memory_does_not_scale_with_batches():
+    from ace_jax.fit.radial_learn import projected_residual
+    prob, ds6, _ = make_problem(ncfg=12, per_batch=2)          # 6 equal-shape batches
+    ds2 = jax.tree.map(lambda a: a[:2], ds6)
+    W = prob.model.rnl_Wnlq
+    grad = lambda X, d: jax.grad(lambda Y: projected_residual(Y, THETA, prob, d))(X)
+    t2, t6 = _temp_bytes(grad, W, ds2), _temp_bytes(grad, W, ds6)
+    val6 = _temp_bytes(lambda X, d: projected_residual(X, THETA, prob, d), W, ds6)
+    print(f"temp bytes: grad(2 batches)={t2}  grad(6 batches)={t6}  value(6)={val6}")
+    assert t6 <= 1.25 * t2 + 1_000_000
