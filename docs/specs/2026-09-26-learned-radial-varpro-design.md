@@ -64,9 +64,12 @@ precedent: the ablation table is part of the deliverable, not an afterthought.
 **`construct/radial_init.py`** (extend)
 - `n_q_factor` kwarg (default `1.5`, preserving current behaviour) threaded
   through `tensor_radial_init` and `build_model`.
-- `from_table(r_grid, R_table, transform, envelope, polys, weights)` →
-  `Wnlq`: density-weighted least squares of `R_table / envelope` onto `P_q(x(r))`
-  per `(zi, zj, n)`. Returns `Wnlq` and the per-radial relative residual.
+- `from_table(x, R, envelope, polys, weights=None)` → `(Wnlq, relres)`: the
+  projector works in the transformed coordinate `x` (a grid on `[-1, 1]`, not
+  `r`), with the envelope folded into the basis (`env(x)·P_q(x)`) rather than
+  divided out of `R` — density-weighted least squares `min_W Σ_x w (env·P·Wᵀ −
+  R)²` per `(zi, zj)`. Returns `Wnlq (NZ, NZ, n_rnl, n_q)` and the per-radial
+  relative residual `relres (NZ, NZ, n_rnl)`.
 - Used for (a) converting a Julia-exported **splined** model to the analytic
   branch (sample its splines, project) so an existing fitted ACE can be the
   starting point, and (b) the MACE init (phase 2).
@@ -76,16 +79,21 @@ precedent: the ablation table is part of the deliverable, not an afterthought.
   unless `radial_kind == "analytic"`.
 - `pair_density_weights(model, ds, x_grid)` — per-`(zi, zj)` quadrature
   weights on an `x` grid from the dataset's edge-distance histogram (once).
-- `normalise(V, wq)` — `W = V / ‖R_n‖_{wq}` per `(zi, zj, n)`: unit norm of
-  each radial under the empirical pair density. Fixes the scale gauge that
-  would otherwise trade against Γ and the readout. The optimiser works on `V`.
+- `normalise(V, Q, active)` — `W = V / ‖R_n‖_Q` per `(zi, zj, n)`: unit norm of
+  each radial under the empirical pair density (the Gram `Q`, `radial_gram`).
+  Fixes the scale gauge that would otherwise trade against Γ and the readout.
+  Rows that are zero in `W0` (`row_active`; the onehot init's structural zeros
+  for `NZ > 1`) are frozen at zero rather than normalised (0/0 avoided by
+  `where`). The optimiser works on `V`.
 - `roughness(W, D2, wn)` — `Σ_{zi,zj,n} wn[n] · W[zi,zj,n]ᵀ D2 W[zi,zj,n]`,
   `D2[q,q'] = ∫ P_q'' P_q'' dx` (precomputed, `x`-space), `wn[n] = 1/(1+n)²`.
 - `projected_residual(W, theta, prob, ds, log_ratios=None)` —
   `yy − bᵀ(G+Λ)⁻¹b` from `combine(theta, linear_statistics(with_radial(...)))`
   and `prior_precision` with M = 0. This equals
   `min_c ‖Φc − y‖²_w + cᵀΛc` exactly, so no Φ is ever materialised.
-  Float64; Cholesky of `G+Λ` with the jitter-retry of `solve.py`.
+  Float64; plain Cholesky of `G+Λ` — **no jitter-retry exists in `solve.py`**;
+  a failed Cholesky yields NaN, and `lbfgs_loop` treats that as a stop signal,
+  returning the best finite iterate seen so far rather than retrying.
 - `learn_radial(prob, ds, W0, *, lam_rough, reprofile_every=10, steps=200,
   tol=1e-6, val=None, seed=0)` → `(W_sel, info)`.
 
@@ -119,17 +127,25 @@ Fallback if it fails: a manual two-pass streamed adjoint — pass 1 streams
 
 ### λ_r selection
 
-Small grid (default 4 values, log-spaced) chosen on the held-out split, not
-optimised inside the loop.
+`lam_rough` is RELATIVE, not an absolute penalty weight: `λ = lam_rough ·
+r(W0) / roughness(W0)`, where `r(W0)` is the projected residual and
+`roughness(W0)` the roughness of the (normalised) init, so a given
+`lam_rough` means roughly the same trade-off regardless of the model's
+absolute scale. Default grid `(0, 1e-3, 1e-2, 1e-1)`, chosen on the held-out
+split, not optimised inside the loop.
 
 ### Held-out gate
 
 A private helper in `radial_learn.py` (the removed `select_by_holdout` is not
 revived as a shared API). Candidates `{init, learned}` (phase 2 adds `mace`,
-`learned_from_mace`). Each is scored by refitting the linear model (M = 0,
-θ re-MAP'd) on the fit split and computing weighted E+F RMSE on a **disjoint**
+`learned_from_mace`). Each candidate is refitted (readout only, M = 0) at its
+OWN θ-MAP on the fit split — warm-started from the init's θ-MAP, not
+recomputed from scratch — and scored by weighted E+F SSE on a **disjoint**
 validation split, using the same split construction as the learned-embedding
-gate (commit 516e0ba). Ties go to `init`.
+gate (commit 516e0ba). Scores are normalised by the INIT's σ (`a_norm = a0`
+for every candidate, fixed across the grid), not each candidate's own
+θ-MAP σ, so scores stay comparable across candidates whose θ-MAP can drift.
+Ties go to `init`.
 
 ### Outputs
 
@@ -137,12 +153,53 @@ gate (commit 516e0ba). Ties go to `init`.
 selected label, projection residuals (when `from_table` was used). The learned
 model is saved as an npz (analytic branch) plus a JSON summary of `info`.
 
+### Implementation notes (added during execution)
+
+- `fit/radial_model.py:to_analytic(model, n_q, n_x=2001) -> (model, relres)`
+  converts a splined model to the analytic branch (`from_table` sampled on a
+  uniform `x`-grid) or, if already analytic, just widens it (`widen_radial`).
+  It is EXACT only for `ace_model`-family splines (Legendre-recursion
+  polynomials in the agnesi `x` of `ace_model`): an ACE1 spline is not
+  polynomial in that `x`, so its projection has residual, not roundoff, error
+  — measured max relative radial error 9.2e-5 at `n_q=30` on the committed
+  ACE1 fixture, converging as `n_q` grows. `bench/learn_radial/run.py` records
+  the run's `to_analytic_relres_max` in `radial_info.json` so this is visible
+  per benchmark, not just asserted here.
+- The test suite's in-memory VarPro reference (`_in_memory_residual` in
+  `tests/test_gp_learn_radial.py`) uses reduced QR (`jnp.linalg.qr`), not
+  `jnp.linalg.lstsq`: `lstsq` has no custom VJP, so its gradient is plain
+  autodiff through SVD, whose singular-VECTOR gradient is NaN on the
+  degenerate ACE design (repeated singular values). Reduced QR is
+  differentiable for a full-column-rank design, and the prior-augmented rows
+  make that design full rank.
+- The L-BFGS step (`radial_learn._lbfgs_step`) is one module-level
+  `jax.jit`-ed function with the objective `f` and `cfg` (e.g. `prob.cfg`)
+  STATIC and `x`/`state`/`args` (θ, model, data, ...) traced; see
+  `lbfgs_loop`'s docstring. One compile serves every θ-reprofiling round
+  within a `learn_radial` call, since only the VALUE of `args` changes
+  between rounds, not its shape/dtype. `info["round_lengths"]` records the
+  trace length of each round, so the flat `info["trace"]` can be split back
+  into per-round segments.
+- The Task 6 gradient-memory gate (`test_gradient_memory_does_not_scale_with_batches`)
+  passed on CPU: temp bytes `grad(2 batches) = grad(6 batches) = 59724808`,
+  `value(6) = 13905096` — gradient memory does not grow with the number of
+  streamed batches, and is in fact identical at 2 and 6 batches on this
+  fixture, well inside the manual two-pass-adjoint fallback's motivating
+  concern. No two-pass adjoint was needed. This was measured on CPU at fixture
+  scale; the production-size (moriarty, realistic `L`) measurement is
+  reported in `docs/learn-radial-results.md`.
+
 ### Entry points
 
-- Library: `learn_radial` as above.
-- CLI: a `learn-radial` step in the fit pipeline. **Depends on PR #8**
-  (`fit/pipeline/`, CLI restructure); if #8 has not merged when the CLI task
-  is reached, the CLI task waits and the library ships first.
+- Library: `learn_radial`/`fit_radial`/`save_result` as above.
+- Bench driver: `bench/learn_radial/run.py` — a standalone CLI (`--model`,
+  `--data`, `--out`, plus the usual hyperparameters) that loads a model and
+  dataset, converts/widens to the analytic branch, runs `fit_radial`, and
+  writes `model.npz`/`rnl_Wnlq.npy`/`radial_info.json`/`summary.json`. This is
+  the library's only CLI entry point for now.
+- CLI: a `learn-radial` step in the fit pipeline still **depends on PR #8**
+  (`fit/pipeline/`, CLI restructure) and has not landed; `bench/learn_radial/run.py`
+  is the interim entry point until #8 merges.
 
 ## Phase 2 — MACE initialisation
 
@@ -224,4 +281,6 @@ CrMnFe; results table in `docs/` alongside the PR.
 Agnesi transform learning (a later phase, same objective); joint learning
 with the residual GP; Kaufman Gauss–Newton/LM; caching the raw-polynomial
 atomic basis `Â` (A is linear in W) — only if profiling shows the restream
-dominates; learning `pair_Wnlq`.
+dominates; learning `pair_Wnlq`; per-config-type noise ratios (`log_ratios`)
+in the radial objective (`projected_residual`/`combine` accept them, but the
+radial learner never passes any).

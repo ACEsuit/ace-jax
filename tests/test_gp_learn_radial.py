@@ -254,3 +254,17 @@ def test_save_result_roundtrip(tmp_path, small):
     np.testing.assert_array_equal(np.asarray(back.rnl_Wnlq), np.asarray(W))
     import json
     assert json.loads((tmp_path / "radial_info.json").read_text())["selected"] == "learned"
+
+
+def test_bench_driver_smoke(tmp_path):
+    import json, subprocess, sys
+    from conftest import ROOT
+    r = subprocess.run(
+        [sys.executable, str(ROOT / "bench/learn_radial/run.py"), "--model", str(MODEL),
+         "--data", str(XYZ), "--energy-key", "dft_energy", "--force-key", "dft_force",
+         "--virial-key", "dft_virial", "--ntrain", "8", "--nval", "8", "--batch", "4",
+         "--n-q", "20", "--steps", "3", "--lam-grid", "0", "--map-steps", "20",
+         "--out", str(tmp_path)], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr[-3000:]
+    s = json.loads((tmp_path / "summary.json").read_text())
+    assert s["selected"] in s["scores"] and (tmp_path / "model.npz").exists()
