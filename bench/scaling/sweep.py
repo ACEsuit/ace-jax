@@ -13,7 +13,8 @@ from scaling.models import SIZES, planned_models
 from scaling.structures import n_ladder
 
 HOSTS = {
-    "moriarty-cpu": {"device": "cpu", "n_max": 32768, "ranks": 32},
+    # Xeon Silver 4216: 16 cores x 2 hyperthreads -- one MPI rank per physical core
+    "moriarty-cpu": {"device": "cpu", "n_max": 32768, "ranks": 16},
     "moriarty-gpu": {"device": "gpu", "n_max": 1 << 20, "ranks": 1},
     "modal-a100": {"device": "gpu", "n_max": 1 << 21, "ranks": 1},
     "local-cpu": {"device": "cpu", "n_max": 8192, "ranks": 8},
@@ -153,9 +154,20 @@ def subprocess_runner(host, env):
         cpus = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else os.cpu_count()
         p = subprocess.run(cmd, capture_output=True, text=True, timeout=7200,
                            env=child_env(env, mode=c.mode, cpus=cpus))
-        lines = [l for l in p.stdout.splitlines() if l.startswith("{")]
-        return json.loads(lines[-1]) if lines else {"status": "error", "error": p.stderr[-300:]}
+        return row_from_process(c, p.returncode, p.stdout, p.stderr)
     return run
+
+
+def row_from_process(c, returncode, stdout, stderr):
+    """The case's JSON row, or -- when it died without printing one -- a row
+    saying why: SIGKILL is the kernel OOM killer on these hosts (dmesg: "Out of
+    memory: Killed process"), anything else an error."""
+    lines = [l for l in stdout.splitlines() if l.startswith("{")]
+    if lines:
+        return json.loads(lines[-1])
+    return {"code": c.code, "mode": c.mode, "model": c.model, "n_atoms": c.n_atoms,
+            "dtype": c.dtype, "device": c.device, "returncode": returncode,
+            "status": "oom" if returncode == -9 else "error", "error": stderr[-300:]}
 
 
 def main(argv=None):

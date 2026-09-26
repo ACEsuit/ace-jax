@@ -355,3 +355,23 @@ def test_child_env_threads_per_mode(monkeypatch):
     assert child_env(env, mode="standalone", cpus=32)["OMP_NUM_THREADS"] == "32"
     assert child_env(env, mode="lammps", cpus=32)["OMP_NUM_THREADS"] == "1"
     assert child_env(env)["OMP_NUM_THREADS"] == "1"                    # unchanged by default
+
+
+def test_row_from_process_reads_the_json_or_classifies_the_death():
+    """A case killed by the kernel OOM killer (SIGKILL) prints no JSON; it is an
+    oom, not an error, and the row still carries the case identity."""
+    from scaling.sweep import Case, row_from_process
+    c = Case("mace", "mace/Cantor/large", "standalone", 16384, "float32", "cpu", 16)
+    ok = row_from_process(c, 0, 'noise\n{"status": "ok", "call_s": 1.0}\n', "")
+    assert ok == {"status": "ok", "call_s": 1.0}
+    killed = row_from_process(c, -9, "", "DeprecationWarning ...")
+    assert killed["status"] == "oom" and killed["returncode"] == -9
+    assert killed["code"] == "mace" and killed["mode"] == "standalone" and killed["n_atoms"] == 16384
+    assert row_from_process(c, 1, "", "Traceback ...")["status"] == "error"
+
+
+def test_moriarty_cpu_ranks_are_physical_cores():
+    """Xeon Silver 4216: 16 cores x 2 hyperthreads.  Open MPI refuses 32 ranks
+    ('not enough slots'); one rank per physical core."""
+    from scaling.sweep import HOSTS
+    assert HOSTS["moriarty-cpu"]["ranks"] == 16
