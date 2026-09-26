@@ -11,161 +11,109 @@ import numpy as np
 
 jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
-from jax.sharding import Mesh
 
 from .eval import highest_precision, load
-from .construct.prior import prior_diagonal
-from .fit.data import build_dataset, load_configs
-from .fit.hypers import Hypers, default_prior, to_array
-from .fit.inducing import GPConfig, descriptor_scale, select_inducing, site_features
-from .fit.kernels import KernelSpec
-from .fit.ladder import run_laplace, run_laplace_fd, run_map, run_nuts, run_pathfinder, run_vi
-from .fit.metrics import summarise
-from .fit.objective import Problem, make_log_density
-from .fit.predict import predict_mixture
-
-
-def _pad_to_multiple(ds, n):
-    """Append copies of the last batch, weights, cfg_mask, node_mask and
-    nbr_mask all zeroed/False, so ds.n_batches is a multiple of n (Task 15:
-    sufficient_statistics_sharded requires n_batches % n_devices == 0).
-    Zeroing node_mask/nbr_mask too (matching build_dataset's own padding
-    convention) makes the padded batch inert to every consumer -- not just
-    the weighted statistics, but also anything reading node_mask, such as
-    site_features/select_inducing/descriptor_scale, should this helper ever
-    be applied before those run (fix round 1: cli.py now calls it only after,
-    on a copy handed solely to make_log_density, but the invariant should
-    hold regardless of call site)."""
-    k = (-ds.n_batches) % n
-    if k == 0:
-        return ds
-    last = jax.tree.map(lambda a: a[-1:], ds)
-    last = last._replace(w_E=jnp.zeros_like(last.w_E), w_F=jnp.zeros_like(last.w_F),
-                         w_V=jnp.zeros_like(last.w_V), cfg_mask=jnp.zeros_like(last.cfg_mask),
-                         node_mask=jnp.zeros_like(last.node_mask),
-                         nbr_mask=jnp.zeros_like(last.nbr_mask))
-    pad = jax.tree.map(lambda a: jnp.concatenate([a] * k, axis=0), last)
-    return jax.tree.map(lambda a, b: jnp.concatenate([a, b], axis=0), ds, pad)
+from .fit.data import load_configs
+from .fit.pipeline.objective import _pad_to_multiple  # noqa: F401  (moved to the pipeline; kept importable)
 
 
 def _add_fit_args(p):
-    p.add_argument("--model", required=True); p.add_argument("--train", required=True)
-    p.add_argument("--test"); p.add_argument("--energy-key", default="energy")
+    p.add_argument("--model", required=True)
+    src = p.add_mutually_exclusive_group(required=True)
+    src.add_argument("--train", help="training extxyz (with --test, or tested on itself)")
+    src.add_argument("--data", help="one extxyz split by a seeded permutation (--ntrain/--ntest/--test-start)")
+    p.add_argument("--test"); p.add_argument("--ood", help="extra out-of-distribution test extxyz")
+    p.add_argument("--ntrain", type=int, default=800); p.add_argument("--ntest", type=int, default=200)
+    p.add_argument("--test-start", type=int, default=None)
+    p.add_argument("--energy-key", default="energy")
     p.add_argument("--force-key", default="forces"); p.add_argument("--virial-key", default="virial")
-    p.add_argument("--weights", default=None, help="JSON, ACEfit weights dict")
+    p.add_argument("--weights", default=None,
+                   help='JSON: an ACEfit weights dict {"default": {"E":..,"F":..,"V":..}, <config_type>: ..} '
+                        'or a list of weight factors [{"Structural": {}}, {"ConfigType": {...}}]')
+    p.add_argument("--e0", choices=["model", "lsq"], default="model",
+                   help="per-species E0: the model's (default) or least squares on the training energies")
+    p.add_argument("--baseline", default=None, help="dimer_mean.npz: fit the residual to this pair mean")
     p.add_argument("--configs-per-batch", type=int, default=8)
     p.add_argument("--m-per-species", type=int, default=500)
     p.add_argument("--kernel", default="cosine", choices=["cosine", "matern32"])
-    p.add_argument("--no-bump", action="store_true"); p.add_argument("--objective", default="lml", choices=["lml", "loo"])
-    p.add_argument("--rungs", default="map,laplace"); p.add_argument("--n-draws", type=int, default=100)
+    p.add_argument("--no-bump", action="store_true")
+    p.add_argument("--density", choices=["none", "pair", "pca"], default="none",
+                   help="GP feature map: full descriptor, pair densities, or a PCA view (--pca-d)")
+    p.add_argument("--pca-d", type=int, default=128)
+    p.add_argument("--embedding", default=None, help="MACE element table (JSON): frozen species coregionalization")
+    p.add_argument("--objective", default="lml", choices=["lml", "loo"])
+    p.add_argument("--lml", choices=["device", "host-cache"], default="device",
+                   help="host-cache: cache the linear design rows in host RAM (GP, pair|pca, L-BFGS, map only)")
+    p.add_argument("--opt", choices=["adam", "lbfgs"], default="adam")
+    p.add_argument("--map-restarts", type=int, default=1, help="L-BFGS multi-start (best log-posterior)")
+    p.add_argument("--init", default=None, help="theta_map.json to start the MAP from")
+    p.add_argument("--rungs", default="map",
+                   help="comma-separated from map,laplace,pathfinder,vi,nuts (default map; the others add "
+                        "hyperparameter draws and cost far more than the MAP)")
+    p.add_argument("--n-draws", type=int, default=100)
+    p.add_argument("--laplace", choices=["svi", "fd"], default="svi")
     p.add_argument("--map-steps", type=int, default=500); p.add_argument("--vi-steps", type=int, default=2000)
     p.add_argument("--nuts-warmup", type=int, default=500); p.add_argument("--nuts-samples", type=int, default=500)
-    p.add_argument("--nuts-chains", type=int, default=4); p.add_argument("--r0", type=float, required=True)
+    p.add_argument("--nuts-chains", type=int, default=4); p.add_argument("--r0", type=float, required=True,
+                   help="typical nearest-neighbour distance (A); centres the GP hyperprior")
+    p.add_argument("--uq", choices=["blr", "pops"], default="blr", help="pops: linear arm (--m-per-species 0)")
+    p.add_argument("--pops-ridge", default="auto")
     p.add_argument("--seed", type=int, default=0); p.add_argument("--out", required=True)
+    p.add_argument("--model-draws", type=int, default=1,
+                   help="GP arm: hyperparameter draws stored in gp_model.npz (1 = the MAP; more = "
+                        "evenly spaced draws of the last rung, each adding a (Dt, Dt) factor)")
+    p.add_argument("--no-save-model", action="store_true",
+                   help="skip writing the fitted model (model.npz linear / gp_model.npz GP)")
     p.add_argument("--devices", type=int, default=1,
-                   help="shard sufficient statistics over this many devices (Task 15, stretch)")
+                   help="shard sufficient statistics over this many devices (experimental)")
     return p
 
 
-def _metrics(pred, test_configs, ds_test):
-    nat = np.array([len(c.numbers) for c in test_configs])
-    # E rows are one per config, F rows one per atom in config order: keep only
-    # the configs that carry the observation (mirrors the virial has_v below).
-    has_e = np.array([c.energy is not None for c in test_configs])
-    has_f = np.array([c.forces is not None for c in test_configs])
-    yE = np.array([c.energy for c, h in zip(test_configs, has_e) if h])
-    E_mean, E_var, nat_e = pred.E_mean[has_e], pred.E_var[has_e], nat[has_e]
-    yF = np.concatenate([c.forces for c, h in zip(test_configs, has_f) if h]).reshape(-1, 3)
-    f_rows = np.repeat(has_f, nat)
-    F_mean, F_var = np.asarray(pred.F_mean)[f_rows], np.asarray(pred.F_var)[f_rows]
-    # yV/pred.V_* are one row per real (cfg_mask-true) config, in dataset order,
-    # which is test_configs order.  configs[0] (the isolated atom) has no
-    # virial, so its y_V row is a placeholder zero -- build yV only from
-    # configs that actually carry a virial, and drop the matching rows from
-    # pred.V_mean/V_var so the two stay aligned (brief, Task 14 context).
-    has_v = np.array([c.virial is not None for c in test_configs])
-    yV = np.asarray(ds_test.y_V).reshape(-1, 6)[np.asarray(ds_test.cfg_mask).reshape(-1)][has_v]
-    V_mean = np.asarray(pred.V_mean)[has_v]
-    V_var = np.asarray(pred.V_var)[has_v]
-    out = {"E": summarise(1e3 * yE / nat_e, 1e3 * E_mean / nat_e, 1e3 * np.sqrt(E_var) / nat_e),
-           "F": summarise(yF.reshape(-1), F_mean.reshape(-1), np.sqrt(F_var).reshape(-1)),
-           "V": summarise(yV.reshape(-1), V_mean.reshape(-1), np.sqrt(V_var).reshape(-1))}
-    return out
+def _parse_weights(s):
+    """(ACEfit weights dict, factor list): exactly one is set, from one JSON string."""
+    from .fit.weights import ConfigType, PerConfig, Quantity, Structural
+    if not s:
+        return None, None
+    v = json.loads(s)
+    if isinstance(v, dict):
+        return v, None
+    if isinstance(v, list):
+        cls = {"Structural": Structural, "Quantity": Quantity, "ConfigType": ConfigType, "PerConfig": PerConfig}
+        return None, [cls[name](**kw) for entry in v for name, kw in entry.items()]
+    raise ValueError("--weights must be a JSON object (ACEfit weights) or a JSON list (weight factors)")
+
+
+def _fit_config(a):
+    """FitConfig for `ace-jax fit` arguments, keeping the CLI's historical defaults
+    (model E0, per-draw statistics recompute, run_pathfinder's own 16 samples /
+    15 iterations)."""
+    from .fit.pipeline import FitConfig
+    weights, factors = _parse_weights(a.weights)
+    rungs = tuple(r.strip() for r in a.rungs.split(","))
+    ridge = a.pops_ridge if a.pops_ridge in ("auto", "blr") else float(a.pops_ridge)
+    cfg = FitConfig(
+        model=a.model, arm="gp" if a.m_per_species > 0 else "linear", energy_key=a.energy_key,
+        force_key=a.force_key, virial_key=a.virial_key, ntrain=a.ntrain, ntest=a.ntest,
+        test_start=a.test_start, seed=a.seed, batch=a.configs_per_batch, weights=weights, factors=factors,
+        baseline=a.baseline, e0=a.e0, m_per_species=a.m_per_species, kernel=a.kernel, bump=not a.no_bump,
+        density=a.density, pca_d=a.pca_d, embedding=a.embedding, r0=a.r0, objective=a.objective,
+        lml=a.lml, devices=a.devices, opt=a.opt, map_steps=a.map_steps, map_restarts=a.map_restarts,
+        init=json.load(open(a.init)) if a.init else None, rungs=rungs, laplace=a.laplace,
+        n_draws=a.n_draws, vi_steps=a.vi_steps, nuts_warmup=a.nuts_warmup, nuts_samples=a.nuts_samples,
+        nuts_chains=a.nuts_chains, uq=a.uq, predict_train=False, pops_ridge=ridge,
+        predict_stats="recompute", pf_samples=16, pf_maxiter=15)
+    return cfg.validate()
 
 
 def run(a):
-    out = pathlib.Path(a.out); out.mkdir(parents=True, exist_ok=True)
-    model, meta, z = load(a.model)
-    weights = json.loads(a.weights) if a.weights else None
-    keys = dict(energy_key=a.energy_key, force_key=a.force_key, virial_key=a.virial_key, weights=weights)
-    train_cfgs = load_configs(a.train, **keys)
-    test_cfgs = load_configs(a.test, **keys) if a.test else train_cfgs
-    E0 = np.asarray(z["E0"])
-    C = a.configs_per_batch
-    ds_train = build_dataset(train_cfgs, meta, E0, C)
-    ds_test = build_dataset(test_cfgs, meta, E0, C)
-    cfg = GPConfig(r0=a.r0, rcut=float(meta["rcut"]), n_B=meta["n_B"], n_pair=meta["n_pair"],
-                   NZ=len(meta["elements"]), C=C)
-    mesh = None
-    if a.devices > 1:
-        devices = jax.devices()[:a.devices]
-        if len(devices) != a.devices:
-            raise ValueError(f"--devices {a.devices} requested, only {len(devices)} available")
-        mesh = Mesh(np.array(devices), ("data",))
-    # site_features/select_inducing/descriptor_scale always run on the
-    # UNPADDED ds_train: a padded batch's node_mask==True atoms are literal
-    # duplicates of the last real batch's atoms, and letting them into
-    # descriptor_scale's std or farthest_point's candidate set would make the
-    # fitted model silently depend on --devices (review finding, fix round 1).
-    with highest_precision():
-        X, S = site_features(model, cfg, ds_train)
-        ind = select_inducing(X, S, ds_train.node_z, ds_train.node_mask, a.m_per_species,
-                              descriptor_scale(X, ds_train.node_mask))
-        prob = Problem(KernelSpec(a.kernel, not a.no_bump, cfg.D), model, ind, cfg,
-                       jnp.asarray(prior_diagonal(z, meta, a.model)), default_prior(a.r0))
-        # ds_fit is what the (possibly sharded) objective sees; ds_train stays
-        # unpadded for predict_mixture below (single-device, brief says so).
-        ds_fit = _pad_to_multiple(ds_train, a.devices) if mesh is not None else ds_train
-        logdens = make_log_density(prob, ds_fit, a.objective, mesh=mesh)
-        lik = logdens.likelihood
-        rungs = [r.strip() for r in a.rungs.split(",")]
-        theta_map = run_map(lik, prob.prior, steps=a.map_steps, seed=a.seed)
-        with open(out / "theta_map.json", "w") as fh:
-            json.dump(theta_map._asdict(), fh, indent=1)
-        draws = {}
-        if "map" in rungs:
-            draws["map"] = np.asarray(to_array(theta_map))[None]
-        if "laplace" in rungs:
-            draws["laplace"], _ = run_laplace(lik, prob.prior, n_draws=a.n_draws, steps=a.map_steps,
-                                              seed=a.seed, init=theta_map)
-        if "pathfinder" in rungs:
-            draws["pathfinder"], _ = run_pathfinder(lik, prob.prior, theta_map, n_draws=a.n_draws, seed=a.seed)
-        if "vi" in rungs:
-            draws["vi"], _ = run_vi(lik, prob.prior, n_draws=a.n_draws, steps=a.vi_steps,
-                                    seed=a.seed, init=theta_map)
-        if "nuts" in rungs:
-            draws["nuts"], summ = run_nuts(lik, prob.prior, num_warmup=a.nuts_warmup,
-                                           num_samples=a.nuts_samples, num_chains=a.nuts_chains,
-                                           seed=a.seed, init=theta_map)
-            with open(out / "nuts_summary.json", "w") as fh:
-                json.dump(summ, fh, indent=1)
-        results = {}
-        with open(out / "metrics.csv", "w", newline="") as fh:
-            w = None
-            for rung, d in draws.items():
-                np.save(out / f"draws_{rung}.npy", d)
-                sub = d if len(d) <= a.n_draws else d[np.linspace(0, len(d) - 1, a.n_draws).astype(int)]
-                pred = predict_mixture(sub, prob, ds_train, ds_test)
-                results[rung] = _metrics(pred, test_cfgs, ds_test)
-                for q, m in results[rung].items():
-                    row = {"rung": rung, "quantity": q, **m}
-                    if w is None:
-                        w = csv.DictWriter(fh, fieldnames=list(row)); w.writeheader()
-                    w.writerow(row)
-    with open(out / "config.json", "w") as fh:
-        json.dump({**vars(a), "M": int(ind.XM.shape[0]), "len_basis": cfg.len_basis,
-                   "n_train": len(train_cfgs), "n_test": len(test_cfgs)}, fh, indent=1)
-    return results
+    from .fit.pipeline import fit, load_fit_data, write_outputs
+    cfg = _fit_config(a)
+    data = (load_fit_data(cfg, data=a.data, ood=a.ood) if a.data
+            else load_fit_data(cfg, train=a.train, test=a.test, ood=a.ood))
+    res = fit(cfg, data)
+    write_outputs(res, a.out, layout=("cli",), argv=vars(a), save_model=not a.no_save_model,
+                  model_draws=a.model_draws)
+    return {key.split("/")[1]: m for key, m in res.preds.metrics.items() if key.startswith("test/")}
 
 
 def cmd_eval(a):
@@ -174,22 +122,35 @@ def cmd_eval(a):
     when present.  Native E/F/V (no ASE), one forward pass per config."""
     import jax.numpy as jnp
     from .eval import highest_precision, load, sparse_graph, species_indices
-    model, meta, z = load(a.model)
-    rcut = float(meta["rcut"])
     keys = dict(energy_key=a.energy_key, force_key=a.force_key, virial_key=a.virial_key)
     configs = load_configs(a.data, **keys)
+    gp = str(a.model).endswith(".npz") and "gp_json" in np.load(a.model).files   # gp_model.npz from `fit`
+    if gp:
+        from ase import Atoms
+        from .calc.gp import GPCalculator
+        calc = GPCalculator.from_file(a.model)
+    else:
+        model, meta, z = load(a.model)
+        rcut = float(meta["rcut"])
     esq = ecnt = fsq = fcnt = 0.0
     rows = []
     with highest_precision():
         for i, c in enumerate(configs):
-            g = sparse_graph(c.positions, c.cell, c.pbc, rcut)
-            nz = jnp.asarray(species_indices(meta, c.numbers))
-            send, recv = jnp.asarray(g.senders), jnp.asarray(g.receivers)
-            E, F, V = model.energy_forces_virial(jnp.asarray(g.rij), nz[send], nz[recv],
-                                                 send, recv, g.n_nodes, nz)
+            if gp:
+                at = Atoms(numbers=c.numbers, positions=c.positions, cell=c.cell, pbc=c.pbc)
+                at.calc = calc
+                E, F = at.get_potential_energy(), at.get_forces()
+            else:
+                g = sparse_graph(c.positions, c.cell, c.pbc, rcut)
+                nz = jnp.asarray(species_indices(meta, c.numbers))
+                send, recv = jnp.asarray(g.senders), jnp.asarray(g.receivers)
+                E, F, V = model.energy_forces_virial(jnp.asarray(g.rij), nz[send], nz[recv],
+                                                     send, recv, g.n_nodes, nz)
             E = float(E); F = np.asarray(F); nat = len(c.numbers)
             rows.append({"config": i, "natoms": nat, "energy": E,
                          "energy_per_atom": E / nat, "fmax": float(np.abs(F).max())})
+            if gp:
+                rows[-1]["energy_std"] = float(calc.results["energy_std"])
             if c.energy is not None:
                 esq += ((E - c.energy) / nat) ** 2; ecnt += 1
             if c.forces is not None:
@@ -211,18 +172,21 @@ def cmd_eval(a):
 
 
 def cmd_construct(a):
-    """Author a frozen ACE model in memory (seeded radial init, zero readout,
-    algebraic smoothness prior) and package it as an npz bridge file.  Requires
-    the `authoring` extra; the saved file evaluates with the plain eval path."""
-    from .construct.model import build_model
     from .construct.export import save_npz
-    els = [int(e) if e.strip().isdigit() else e.strip()
-           for e in a.elements.split(",")]
-    auth = build_model(els, a.order, a.max_degree, wL=a.wL, rcut=a.rcut,
-                       rin=a.rin, radial_mode=a.radial_mode, pair_mode=a.pair_mode,
-                       seed=a.seed, with_gamma=not a.no_gamma,
-                       coupling_cache=not a.no_coupling_cache,
-                       coupling_cache_dir=a.coupling_cache_dir)
+    els = [int(e) if e.strip().isdigit() else e.strip() for e in a.elements.split(",")]
+    if a.embedding:
+        from .construct.model import build_embedding_model
+        auth = build_embedding_model(els, a.order, a.max_degree, embedding=a.embedding, d_max=a.d_max,
+                                     wL=a.wL, maxl=a.maxl, rcut=a.rcut, reduction=a.reduction,
+                                     with_gamma=not a.no_gamma, coupling_cache=not a.no_coupling_cache,
+                                     coupling_cache_dir=a.coupling_cache_dir)
+    else:
+        from .construct.model import build_model
+        auth = build_model(els, a.order, a.max_degree, wL=a.wL, rcut=5.5 if a.rcut is None else a.rcut,
+                           rin=a.rin, radial_mode=a.radial_mode, pair_mode=a.pair_mode,
+                           seed=a.seed, with_gamma=not a.no_gamma,
+                           coupling_cache=not a.no_coupling_cache,
+                           coupling_cache_dir=a.coupling_cache_dir)
     out = pathlib.Path(a.out).expanduser()
     if out.parent and str(out.parent) != ".":
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -234,8 +198,9 @@ def cmd_construct(a):
     return auth
 
 
-def main(argv=None):
-    top = argparse.ArgumentParser(prog="ace-jax", description="Fit and evaluate ACE models in JAX")
+def _parser():
+    top = argparse.ArgumentParser(prog="ace-jax",
+                                  description="Fit and evaluate ACE models in JAX (short alias: aj)")
     sub = top.add_subparsers(dest="cmd", required=True)
     _add_fit_args(sub.add_parser("fit", help="fit the hybrid linear-ACE + residual GP (--m-per-species 0 = linear-only fit)"))
     ev = sub.add_parser("eval", help="evaluate a model on a dataset (energy/forces, RMSE vs labels)")
@@ -248,7 +213,8 @@ def main(argv=None):
     con.add_argument("--order", type=int, required=True, help="correlation order")
     con.add_argument("--max-degree", type=int, required=True, help="TotalDegree level bound")
     con.add_argument("--wL", type=float, default=1.5)
-    con.add_argument("--rcut", type=float, default=5.5)
+    con.add_argument("--rcut", type=float, default=None,
+                     help="cutoff (default 5.5; with --embedding, 2.5 x mean bond length)")
     con.add_argument("--rin", type=float, default=0.0)
     con.add_argument("--radial-mode", default="glorot_normal")
     con.add_argument("--pair-mode", default="onehot")
@@ -259,13 +225,22 @@ def main(argv=None):
     con.add_argument("--coupling-cache-dir", default=None,
                      help="override the coupling cache directory (default: $ACEJAX_COUPLING_CACHE "
                           "or ~/.cache/ace-jax/coupling)")
+    con.add_argument("--embedding", default=None,
+                     help="frozen element embedding: a JSON table {Z, emb} or 'identity' "
+                          "(builds ace_embedding_model: ace1-compatible, factorised radial)")
+    con.add_argument("--d-max", type=int, default=None, help="cap on per-order channel widths (default lossless)")
+    con.add_argument("--maxl", type=int, default=None)
+    con.add_argument("--reduction", choices=["pca", "truncate"], default="pca")
     con.add_argument("--out", required=True)
-    a = top.parse_args(argv)
-    if a.cmd == "eval":
-        return cmd_eval(a)
-    if a.cmd == "construct":
-        return cmd_construct(a)
-    return run(a)
+    return top
+
+
+def main(argv=None):
+    """Console entry point; returns 0 because the script wrapper passes the
+    result to sys.exit (a returned dict would print and exit 1)."""
+    a = _parser().parse_args(argv)
+    {"eval": cmd_eval, "construct": cmd_construct}.get(a.cmd, run)(a)
+    return 0
 
 
 if __name__ == "__main__":

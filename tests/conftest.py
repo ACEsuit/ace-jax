@@ -30,6 +30,24 @@ import pytest
 
 ROOT = pathlib.Path(__file__).parent.parent
 
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_cmdline_main(config):
+    """A bare `pytest` (the whole suite) runs on parallel workers when pytest-xdist
+    is installed: 6 by default (ACEJAX_TEST_WORKERS overrides), the measured
+    optimum on a 12-core laptop -- each JAX worker is itself multi-threaded, so
+    more workers contend (8: 72 s, 12: 75 s vs 6: 68 s).  Targeted runs
+    (`pytest tests/test_x.py`), an explicit -n, --pdb, or no xdist stay serial.
+    Runs before xdist's own tryfirst hook (conftest hooks register later).
+
+    Never in a worker: workers re-run this hook with numprocesses reset to None, and
+    setting it there makes every worker spawn its own workers, recursively."""
+    if (os.environ.get("PYTEST_XDIST_WORKER") or hasattr(config, "workerinput")
+            or not config.pluginmanager.hasplugin("xdist") or config.option.numprocesses is not None
+            or config.getoption("usepdb", False) or config.args != config.getini("testpaths")):
+        return
+    config.option.numprocesses = int(os.environ.get("ACEJAX_TEST_WORKERS", min(6, os.cpu_count() or 1)))
+
 # ACEJAX_FIXTURE_DIR points the whole suite at a different set of exports -- used
 # by the divergence job in CI, which regenerates them from the Julia in the
 # working tree so the reference values are fresh rather than committed.

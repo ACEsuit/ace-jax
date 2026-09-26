@@ -32,6 +32,12 @@ def fit_posteriors(prob, ds_train, draws):
 class GPCalculator(Calculator):
     implemented_properties = ["energy", "forces", "stress", "energy_std", "forces_std"]
 
+    @classmethod
+    def from_file(cls, path, **kw):
+        """A calculator from the gp_model.npz that `ace-jax fit` writes."""
+        from ..fit.pipeline.export import load_gp_model
+        return cls(*load_gp_model(path), **kw)
+
     def __init__(self, fitted, meta, **kw):
         super().__init__(**kw)
         self.fitted, self.meta = fitted, meta

@@ -43,6 +43,7 @@ fast-neighbours = ["matscipy>=1.0"]
 
 [project.scripts]
 ace-jax = "ace_jax.cli:main"
+aj = "ace_jax.cli:main"          # short alias
 
 [project.urls]
 Homepage = "https://github.com/ACEsuit/ace-jax"
@@ -50,7 +51,7 @@ Issues = "https://github.com/ACEsuit/ace-jax/issues"
 
 [dependency-groups]
 # mirrors the `gp` extra so a plain `uv run pytest` can run the GP ladder tests
-dev = ["pytest>=8", "pytest-split>=0.8", "numpyro>=0.16", "optax>=0.2", "blackjax>=1.6"]
+dev = ["pytest>=8", "pytest-split>=0.8", "pytest-xdist>=3.5", "numpyro>=0.16", "optax>=0.2", "blackjax>=1.6"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ace_jax"]
@@ -61,7 +62,8 @@ include = ["src/ace_jax", "README.md", "LICENSE"]
 [tool.pytest.ini_options]
 pythonpath = ["src", "tests"]
 testpaths = ["tests"]
-addopts = "--durations=25"
+# `slow` (real-model ladder, bit-exact goldens) is opt-in: `pytest -m slow`
+addopts = "--durations=15 -m 'not slow'"
 markers = [
-    "slow: heavy integration (real-model MCMC ladder); excluded from the fast matrix, run in its own CI job",
+    "slow: heavy integration (real-model MCMC ladder, bit-exact driver goldens); excluded by default -- run with `pytest -m slow`",
 ]

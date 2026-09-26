@@ -14,6 +14,7 @@ jobs:
     # Full pip-only suite on ONE Python, split into single-process shards across
     # separate runners (pytest-split). Single-process is what survives long runs
     # here (like the ladder job); xdist workers get the runner killed mid-run.
+    # `-n 0` overrides tests/conftest.py, which parallelises a bare local `pytest`.
     # Each shard has its own VM + JAX compile cache. NO Julia.
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -33,7 +34,7 @@ jobs:
         env:
           JAX_PLATFORM_NAME: cpu
           JAX_ENABLE_X64: "1"
-        run: uv run --python 3.12 --extra gp pytest -m "not slow" --splits 3 --group ${{ matrix.group }} --splitting-algorithm least_duration
+        run: uv run --python 3.12 --extra gp pytest -n 0 -m "not slow" --splits 3 --group ${{ matrix.group }} --splitting-algorithm least_duration
   smoke:
     # Import + a small descriptor/EFV/kernel smoke on the other supported Pythons
     # -- a cheap compatibility check without re-running the whole (slow) matrix.
@@ -71,4 +72,4 @@ jobs:
         env:
           JAX_PLATFORM_NAME: cpu
           JAX_ENABLE_X64: "1"
-        run: uv run --extra gp pytest -v -m slow
+        run: uv run --extra gp pytest -n 0 -v -m slow
