@@ -91,3 +91,91 @@ def to_analytic(model, n_q, n_x=2001):
     out = dataclasses.replace(model, radial_kind="analytic", rnl_Wnlq=jnp.asarray(W),
                               polys_A=A, polys_B=B, polys_C=C)
     return out, rel
+
+
+def _uniform_moment(model, n_uniform):
+    """(NZ, NZ, n_q, n_q): mean over a uniform x-grid of p p^T, p = env(x) P(x)."""
+    x = jnp.linspace(-1.0, 1.0, n_uniform)
+    P = poly_recursion(x, model.polys_A, model.polys_B, model.polys_C)          # (n_x, n_q)
+    env = env_poly2sx(x[None, None, :], model.rnl_envelope[:, :, None, :])     # (NZ, NZ, n_x)
+    p = env[..., None] * P                                                      # (NZ, NZ, n_x, n_q)
+    return jnp.einsum("abxq,abxp->abqp", p, p) / n_uniform
+
+
+def radial_gram(model, ds, n_prior=10.0, n_uniform=401):
+    """Q (NZ, NZ, n_q, n_q): per (centre, neighbour) species pair, the second
+    moment E_e[p(r_e) p(r_e)^T] of the enveloped polynomials p = env * P over
+    the dataset's live edges, so ||R_n||^2 under the empirical pair-distance
+    density is W_n^T Q W_n.  Each pair is shrunk towards the uniform-in-x
+    moment with `n_prior` pseudo-edges, so a pair absent from the data (or
+    with very few edges) still has a positive-definite Q.  Depends on the
+    transform/envelope/polys only, never on Wnlq."""
+    require_analytic(model)
+    NZ, n_q = model.rnl_Wnlq.shape[0], model.rnl_Wnlq.shape[-1]
+    S = jnp.zeros((NZ * NZ, n_q, n_q))
+    cnt = jnp.zeros(NZ * NZ)
+    for i in range(ds.n_batches):
+        b = jax.tree.map(lambda a: a[i], ds)
+        rij, send, recv, mask = flat_edges(b.rij, b.nbr, b.nbr_mask)
+        zi, zj = b.node_z[send], b.node_z[recv]
+        r = jnp.where(mask, jnp.linalg.norm(rij, axis=-1), 1.0)      # padded slots: any finite r
+        p = poly_env(model, r, zi, zj) * mask[:, None]
+        pair = zi * NZ + zj
+        S = S + jax.ops.segment_sum(p[:, :, None] * p[:, None, :], pair, num_segments=NZ * NZ)
+        cnt = cnt + jax.ops.segment_sum(mask.astype(S.dtype), pair, num_segments=NZ * NZ)
+    S = S.reshape(NZ, NZ, n_q, n_q)
+    cnt = cnt.reshape(NZ, NZ)[..., None, None]
+    return (S + n_prior * _uniform_moment(model, n_uniform)) / (cnt + n_prior)
+
+
+def row_active(W):
+    """(NZ, NZ, n_rnl) bool: radials that are not identically zero.  The onehot
+    (identity) init has structurally-zero rows for NZ > 1; they stay frozen."""
+    return jnp.any(jnp.asarray(W) != 0.0, axis=-1)
+
+
+def normalise(V, Q, active):
+    """W = V with each active radial (zi, zj, n) scaled to unit norm under Q
+    (||R||^2 = V Q V^T); inactive rows are returned as exact zeros.  Invariant
+    to a positive rescaling of any row -- the gauge the readout and the prior
+    would otherwise trade against.  The `where` keeps 0/0 out of the gradient."""
+    nrm2 = jnp.einsum("abnq,abqp,abnp->abn", V, Q, V)
+    safe = jnp.where(active, nrm2, 1.0)
+    return jnp.where(active[..., None], V * jax.lax.rsqrt(safe)[..., None], 0.0)
+
+
+def roughness_matrix(model):
+    """D2 (n_q, n_q) = int_{-1}^{1} P_q''(x) P_p''(x) dx by Gauss-Legendre with
+    n_q + 2 nodes or more (exact for these polynomial degrees)."""
+    n_q = model.polys_A.shape[0]
+    xg, wg = np.polynomial.legendre.leggauss(max(64, n_q + 2))
+    p = lambda x: poly_recursion(x, model.polys_A, model.polys_B, model.polys_C)
+    d2 = jax.vmap(jax.jacfwd(jax.jacfwd(p)))(jnp.asarray(xg))     # (n_nodes, n_q)
+    D2 = (d2 * jnp.asarray(wg)[:, None]).T @ d2
+    # D2 = A^T diag(wg) A is symmetric by construction, but the two triangles
+    # accumulate in different summation orders inside the matmul; measured
+    # asymmetry on the Si fixture (entries up to ~1.1e7) was 4.66e-10 absolute
+    # (~4e-17 relative to the matrix's own scale, i.e. float64 rounding, not a
+    # real signal), which trips a naive atol=1e-10 symmetry check on the
+    # near-zero entries. Symmetrize explicitly rather than loosen that check.
+    return (D2 + D2.T) / 2
+
+
+def roughness(W, D2, wn):
+    """sum_{zi, zj, n} wn[n] * W[zi, zj, n] D2 W[zi, zj, n]^T -- the curvature
+    of the polynomial part of each radial, weighted per radial by wn."""
+    return jnp.einsum("n,abnq,qp,abnp->", wn, W, D2, W)
+
+
+def rnl_degrees(meta, wL=1.5):
+    """(n_rnl,) polynomial degree of each tensor radial under the identity
+    (onehot) convention, n' = (n - 1) // NZ, from the model's (n, l) spec.
+    Rebuilds the spec with build_spec; raises if its length disagrees with
+    meta["n_rnl"] (e.g. a Julia export with a different wL)."""
+    from ..construct.spec import build_spec
+    NZ = len(meta["elements"])
+    wL = meta.get("authoring", {}).get("wL", wL)
+    _, Rnl, _ = build_spec(NZ, meta["order"], meta["totaldegree"], wL)
+    if len(Rnl) != meta["n_rnl"]:
+        raise ValueError(f"rnl_degrees: rebuilt spec has {len(Rnl)} radials, meta n_rnl={meta['n_rnl']}")
+    return np.array([(n - 1) // NZ for n, _ in Rnl], dtype=int)

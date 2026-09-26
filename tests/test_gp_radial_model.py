@@ -136,3 +136,87 @@ def test_patch_radial_npz_roundtrip(tmp_path, si):
     rij, zi, zj = _live_edges(ds)
     np.testing.assert_allclose(np.asarray(back.radial(rij, zi, zj)[0]),
                                np.asarray(ana.radial(rij, zi, zj)[0]), rtol=0, atol=1e-14)
+
+
+def test_radial_gram_gives_unit_empirical_norm(si):
+    from ace_jax.fit.radial_model import normalise, poly_env, radial_gram, row_active
+    model, _, ds, _ = si
+    Q = radial_gram(model, ds, n_prior=0.0)
+    W = normalise(model.rnl_Wnlq, Q, row_active(model.rnl_Wnlq))
+    rij, zi, zj = _live_edges(ds)
+    R = jnp.einsum("eq,enq->en", poly_env(model, jnp.linalg.norm(rij, axis=-1), zi, zj), W[zi, zj])
+    np.testing.assert_allclose(np.asarray(jnp.mean(R ** 2, axis=0)), 1.0, rtol=1e-10)
+
+
+def test_normalise_is_scale_invariant(si):
+    from ace_jax.fit.radial_model import normalise, radial_gram, row_active
+    model, _, ds, _ = si
+    Q = radial_gram(model, ds)
+    V = model.rnl_Wnlq
+    act = row_active(V)
+    np.testing.assert_allclose(np.asarray(normalise(3.7 * V, Q, act)),
+                               np.asarray(normalise(V, Q, act)), rtol=1e-12, atol=1e-14)
+
+
+def test_normalise_zero_rows_stay_zero_and_finite(si):
+    from ace_jax.fit.radial_model import normalise, radial_gram, row_active
+    model, _, ds, _ = si
+    Q = radial_gram(model, ds)
+    V0 = model.rnl_Wnlq.at[0, 0, 3].set(0.0)            # a structurally-zero radial
+    act = row_active(V0)
+    assert not bool(act[0, 0, 3]) and bool(act[0, 0, 2])
+    W = normalise(V0, Q, act)
+    assert bool(jnp.all(W[0, 0, 3] == 0.0)) and bool(jnp.all(jnp.isfinite(W)))
+    g = jax.grad(lambda V: jnp.sum(normalise(V, Q, act) ** 2))(V0)
+    assert bool(jnp.all(jnp.isfinite(g))) and bool(jnp.all(g[0, 0, 3] == 0.0))
+
+
+def test_radial_gram_absent_pair_is_positive_definite():
+    from ace_jax.fit.radial_model import radial_gram, to_analytic
+    spline, _, ds, _ = _setup(SIGE_SPLINE)              # elements Si, Ge; data is all-Si
+    model, _ = to_analytic(spline, 12)
+    Q = radial_gram(model, ds)
+    ev = np.linalg.eigvalsh(np.asarray(Q))              # (NZ, NZ, n_q)
+    assert ev.min() > 0.0
+
+
+def test_roughness_matrix_properties(si):
+    from ace_jax.fit.radial_model import roughness_matrix
+    model, *_ = si
+    D2 = np.asarray(roughness_matrix(model))
+    np.testing.assert_allclose(D2, D2.T, atol=1e-10)
+    assert np.abs(D2[:2]).max() < 1e-9                  # degrees 0, 1 have zero curvature
+    assert np.linalg.eigvalsh(D2).min() > -1e-8 * np.abs(D2).max()
+    from ace_jax.construct.radial_init import poly_eval
+    # finite-difference check of one entry: int P_5'' P_7'' dx.  The double
+    # np.gradient + trapezoid reference converges only at O(h) here (measured:
+    # reldiff 1.29e-2 at n=2001, 1.28e-3 at n=20001, 1.28e-4 at n=200001,
+    # 1.28e-5 at n=2e6 -- a clean 10x-per-10x rate, extrapolating to the exact
+    # value the Gauss-Legendre+autodiff D2 already matches), so the brief's
+    # n=20001 sits right at the 1e-3 tolerance boundary (measured reldiff
+    # 1.28e-3, i.e. the assertion as originally written fails by ~2.8e-4).
+    # Raised to n=200001 (reldiff 1.28e-4, 8x inside tolerance; ~0.03s) rather
+    # than loosen the tolerance.
+    x = np.linspace(-1, 1, 200_001)
+    P = poly_eval(x, *(np.asarray(a) for a in (model.polys_A, model.polys_B, model.polys_C)))
+    d2 = np.gradient(np.gradient(P, x, axis=0), x, axis=0)
+    ref = np.trapezoid(d2[:, 5] * d2[:, 7], x)
+    assert abs(D2[5, 7] - ref) < 1e-3 * abs(ref)
+
+
+def test_roughness_is_weighted_quadratic_form(si):
+    from ace_jax.fit.radial_model import roughness, roughness_matrix
+    model, *_ = si
+    W, D2 = model.rnl_Wnlq, roughness_matrix(model)
+    wn = jnp.linspace(1.0, 0.1, W.shape[2])
+    ref = sum(float(wn[n]) * float(W[0, 0, n] @ D2 @ W[0, 0, n]) for n in range(W.shape[2]))
+    assert abs(float(roughness(W, D2, wn)) - ref) < 1e-10 * abs(ref)
+
+
+def test_rnl_degrees(si):
+    from ace_jax.fit.radial_model import rnl_degrees
+    _, meta, _, _ = si
+    d = rnl_degrees(meta)
+    assert d.shape == (meta["n_rnl"],) and d.min() == 0
+    with pytest.raises(ValueError, match="n_rnl"):
+        rnl_degrees({**meta, "n_rnl": meta["n_rnl"] + 1})
