@@ -58,6 +58,7 @@ def _compare(got, gold):
 RECORDED = (GOLD / "PLATFORM").read_text().strip() if (GOLD / "PLATFORM").exists() else None
 
 
+@pytest.mark.slow                  # 45 s of subprocess runs; refactor-parity, not behaviour
 @pytest.mark.skipif(RECORDED != platform_tag(),
                     reason=f"goldens recorded on {RECORDED}; bit-level parity is platform-specific")
 @pytest.mark.parametrize("name", list(SCENARIOS))

@@ -219,6 +219,9 @@ def test_cli_writes_ood_metrics(tmp_path):
           "--map-steps", "3", "--r0", "2.35", "--out", str(tmp_path / "out")])
     rows = list(csv.DictReader(open(tmp_path / "out" / "metrics_ood.csv")))
     assert {r["quantity"] for r in rows} == {"E", "F", "V"} and {r["rung"] for r in rows} == {"map"}
+    # the fitted linear model is saved as an ordinary ACE npz that eval reads
+    assert main(["eval", "--model", str(tmp_path / "out" / "model.npz"), "--data", str(te),
+                 "--energy-key", "dft_energy", "--force-key", "dft_force"]) == 0
 
 
 def test_map_and_rung_outputs_survive_a_failure_in_prediction(tmp_path, monkeypatch):

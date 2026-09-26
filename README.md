@@ -180,6 +180,18 @@ and the **fitted model**:
 
 A fit with `--baseline` saves no model, because its pair baseline is added outside the model.
 
+## Running the tests
+
+```bash
+uv run pytest                        # whole fast suite, 6 parallel workers (~1.5 min)
+uv run pytest tests/test_efv.py      # a targeted run stays single-process
+uv run pytest -m slow                # opt-in: real-model MCMC ladder, bit-exact driver goldens
+```
+
+A bare `pytest` uses pytest-xdist when it is installed (`ACEJAX_TEST_WORKERS`
+sets the worker count; `-n 0` forces a single process, as CI does). The `slow`
+marker is excluded by default.
+
 ## Julia parity (maintainers / CI only)
 
 The everyday test suite is pip-only (no Julia), run against committed npz

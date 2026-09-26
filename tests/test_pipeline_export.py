@@ -92,42 +92,18 @@ def test_write_outputs_saves_the_model_by_default(linear_res, tmp_path):
     assert not (tmp_path / "no" / "model.npz").exists()
 
 
-def _cli_fit(tmp_path, *extra):
-    from ase.io import read, write
-    from ace_jax.cli import main
-    cfgs = read(XYZ, ":")
-    tr, te = tmp_path / "tr.xyz", tmp_path / "te.xyz"
-    write(tr, cfgs[:12]); write(te, cfgs[12:16])
-    out = tmp_path / "out"
-    main(["fit", "--model", BASE["model"], "--train", str(tr), "--test", str(te), "--energy-key", "dft_energy",
-          "--force-key", "dft_force", "--virial-key", "dft_virial", "--configs-per-batch", "4",
-          "--rungs", "map", "--map-steps", "5", "--r0", "2.35", "--out", str(out), *extra])
-    return te, out
 
-
-def _cli_eval(model, te, csv_path):
+def test_cli_eval_reads_a_gp_model(gp_res, tmp_path):
+    """`ace-jax eval` on a gp_model.npz goes through GPCalculator and adds the
+    predictive energy_std column."""
     import csv
+    from ase.io import write
     from ace_jax.cli import main
-    main(["eval", "--model", str(model), "--data", str(te), "--energy-key", "dft_energy",
-          "--force-key", "dft_force", "--forces", "--out", str(csv_path)])
-    return list(csv.DictReader(open(csv_path)))
-
-
-def test_cli_fit_then_eval_linear_model(tmp_path):
-    te, out = _cli_fit(tmp_path, "--m-per-species", "0")
-    pred = np.load(out / "model.npz")                       # an ordinary ACE npz
-    assert "WB" in pred.files and "meta_json" in pred.files
-    rows = _cli_eval(out / "model.npz", te, tmp_path / "p.csv")
-    assert len(rows) == 4 and "energy_std" not in rows[0]
-
-
-def test_cli_fit_then_eval_gp_model(tmp_path):
-    te, out = _cli_fit(tmp_path, "--m-per-species", "6", "--opt", "lbfgs", "--model-draws", "1")
-    assert (out / "gp_model.npz").exists() and not (out / "model.npz").exists()
-    rows = _cli_eval(out / "gp_model.npz", te, tmp_path / "p.csv")
-    assert len(rows) == 4 and float(rows[0]["energy_std"]) > 0
-
-
-def test_cli_no_save_model(tmp_path):
-    _, out = _cli_fit(tmp_path, "--m-per-species", "0", "--no-save-model")
-    assert (out / "metrics.csv").exists() and not (out / "model.npz").exists()
+    from ace_jax.fit.pipeline import save_model
+    path = save_model(gp_res, tmp_path)
+    data = tmp_path / "te.xyz"
+    write(data, [_atoms(c) for c in gp_res.data.test])
+    assert main(["eval", "--model", str(path), "--data", str(data), "--forces",
+                 "--out", str(tmp_path / "p.csv")]) == 0
+    rows = list(csv.DictReader(open(tmp_path / "p.csv")))
+    assert len(rows) == len(gp_res.data.test) and float(rows[0]["energy_std"]) > 0
