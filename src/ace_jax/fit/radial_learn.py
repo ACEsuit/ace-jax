@@ -165,9 +165,27 @@ def _objective(V, a, model, ds, gamma, Q, active, D2, wn, lam, cfg):
     return projected_residual_from_stats(theta, lin, gamma) + lam * roughness(W, D2, wn)
 
 
+def require_linear(prob):
+    if prob.ind.XM.shape[0] != 0:
+        raise ValueError(f"learned radials support the linear model only (M = 0 inducing points), "
+                         f"got M = {prob.ind.XM.shape[0]}; fit the residual GP afterwards")
+
+
+def relative_lambda(lam_rough, r0, rough0):
+    """Absolute roughness weight lam_rough * r0 / rough0 (0 for lam_rough = 0).
+    Raises if the init is (numerically) perfectly smooth, where the relative
+    weight would be effectively infinite."""
+    if not lam_rough:
+        return 0.0
+    if rough0 < 1e-12 * max(abs(r0), 1.0):
+        raise ValueError(f"relative lam_rough={lam_rough:g} is undefined: roughness of the init "
+                         f"rough0={rough0:.3e} is ~0 relative to r0={r0:.3e}; use lam_rough=0")
+    return float(lam_rough) * r0 / rough0
+
+
 def learn_radial(prob, ds, W0, *, theta0=None, profile=True, lam_rough=0.0, rough_weights=None,
                  steps=200, reprofile_every=10, tol=1e-6, patience=3, map_steps=300,
-                 n_prior=10.0, seed=0, log=None):
+                 n_prior=None, seed=0, log=None, Q=None, D2=None, r0=None):
     """VarPro-learn the tensor radials of prob.model (analytic branch, M = 0).
 
     Minimises  r(W; theta) + lam * roughness(W)  over V with W = normalise(V)
@@ -181,25 +199,39 @@ def learn_radial(prob, ds, W0, *, theta0=None, profile=True, lam_rough=0.0, roug
 
     `log`: optional one-arg callable given one-line progress strings (start
     hyperparameters, then a line per round); None (default) is silent and
-    leaves all other behaviour unchanged."""
+    leaves all other behaviour unchanged.
+
+    Precomputed pieces (fit_radial passes them so a lambda grid shares them;
+    each is computed here when None): Q = radial_gram(prob.model, ds,
+    n_prior) (n_prior None -> radial_gram's default), D2 =
+    roughness_matrix(prob.model), and r0 = r(normalise(W0); theta0), the
+    projected residual at the start -- only valid together with that theta0.
+    M > 0 (inducing points) is unsupported and raises."""
     require_x64()
     require_analytic(prob.model)
+    require_linear(prob)
     W0 = jnp.asarray(W0, jnp.float64)
     active = row_active(W0)
-    Q = radial_gram(prob.model, ds, n_prior=n_prior)
-    D2 = roughness_matrix(prob.model)
+    if Q is None:
+        Q = radial_gram(prob.model, ds) if n_prior is None else radial_gram(prob.model, ds, n_prior=n_prior)
+    if D2 is None:
+        D2 = roughness_matrix(prob.model)
     wn = jnp.ones(W0.shape[2]) if rough_weights is None else jnp.asarray(rough_weights, jnp.float64)
     V = normalise(W0, Q, active)
+    lin0 = None
     if theta0 is not None:
         a = to_array(theta0)
     elif profile:
-        a = theta_map_linear(prob, ds, V, steps=map_steps, seed=seed)
+        a, lin0, _ = theta_map_linear(prob, ds, V, steps=map_steps, seed=seed, return_stats=True)
     else:
         raise ValueError("learn_radial: profile=False needs theta0")
-    r0 = float(projected_residual_from_stats(
-        from_array(a), linear_statistics(with_radial(prob.model, V), prob.cfg, ds), prob.gamma))
+    if r0 is None:
+        if lin0 is None:
+            lin0 = linear_statistics(with_radial(prob.model, V), prob.cfg, ds)
+        r0 = projected_residual_from_stats(from_array(a), lin0, prob.gamma)
+    r0 = float(r0)
     rough0 = float(roughness(V, D2, wn))
-    lam = float(lam_rough) * r0 / max(rough0, 1e-300) if lam_rough else 0.0
+    lam = relative_lambda(lam_rough, r0, rough0)
     info = {"trace": [], "reasons": [], "theta": [np.asarray(a)], "lam_abs": lam,
             "lam_rough": float(lam_rough), "r0": r0, "rough0": rough0, "steps": 0,
             "round_lengths": []}
@@ -304,7 +336,7 @@ def gate(candidates, score):
 
 
 def fit_radial(prob, ds_fit, ds_val, W0, *, lam_grid=(0.0, 1e-3, 1e-2, 1e-1), theta0=None,
-               map_steps=300, log=None, **learn_kw):
+               map_steps=300, log=None, checkpoint=None, **learn_kw):
     """learn_radial on ds_fit once per relative roughness weight in lam_grid,
     then keep the best of {init, learned per lam} on the disjoint ds_val
     (ties -> init).
@@ -323,24 +355,47 @@ def fit_radial(prob, ds_fit, ds_val, W0, *, lam_grid=(0.0, 1e-3, 1e-2, 1e-1), th
 
     `log`: optional one-arg callable given one-line progress strings (forwarded
     to `learn_radial`, plus fit_radial's own per-lambda and gate-score lines);
-    None (default) is silent and leaves all other behaviour unchanged."""
+    None (default) is silent and leaves all other behaviour unchanged.
+
+    `checkpoint`: optional callable checkpoint(lam_label, W, run_info), called
+    as soon as each lambda's learn_radial finishes (lam_label = f"{lam:g}"),
+    so an interrupted grid keeps its finished runs (e.g. save_result without
+    src_npz).  Q, D2 and the relative-lambda reference are computed once here
+    and shared by every lambda; M > 0 raises."""
     require_x64()
     require_analytic(prob.model)
+    require_linear(prob)
     labels = [f"learned_lam={float(lam):g}" for lam in lam_grid]
     if len(set(labels)) != len(labels):
         raise ValueError(f"fit_radial: duplicate values in lam_grid {tuple(lam_grid)}")
     W0 = jnp.asarray(W0, jnp.float64)
-    Q = radial_gram(prob.model, ds_fit, n_prior=learn_kw.get("n_prior", 10.0))
+    # shared by every lambda: the gauge Gram, the roughness matrix, and the
+    # relative-lambda reference r0 = r(W_init; a0) (all runs start there)
+    n_prior = learn_kw.pop("n_prior", None)
+    Q = radial_gram(prob.model, ds_fit) if n_prior is None else radial_gram(prob.model, ds_fit, n_prior=n_prior)
+    D2 = roughness_matrix(prob.model)
     W_init = normalise(W0, Q, row_active(W0))
-    a0 = to_array(theta0) if theta0 is not None else theta_map_linear(prob, ds_fit, W_init, steps=map_steps)
+    if theta0 is not None:
+        a0 = to_array(theta0)
+        lin0 = linear_statistics(with_radial(prob.model, W_init), prob.cfg, ds_fit)
+    else:
+        a0, lin0, _ = theta_map_linear(prob, ds_fit, W_init, steps=map_steps, return_stats=True)
+    r0 = float(projected_residual_from_stats(from_array(a0), lin0, prob.gamma))
+    rw = learn_kw.get("rough_weights")
+    rough0 = float(roughness(W_init, D2, jnp.ones(W0.shape[2]) if rw is None
+                             else jnp.asarray(rw, jnp.float64)))
+    for lam in lam_grid:
+        relative_lambda(lam, r0, rough0)          # fail before any learning, not mid-grid
     cands, runs = {"init": W_init}, {}
     for lam, label in zip(lam_grid, labels):
         if log is not None:
             log(f"fit_radial: lam={lam:g} starting")
         W, info = learn_radial(prob, ds_fit, W0, theta0=from_array(a0), lam_rough=lam,
-                               map_steps=map_steps, log=log, **learn_kw)
+                               map_steps=map_steps, log=log, Q=Q, D2=D2, r0=r0, **learn_kw)
         cands[label] = W
         runs[f"{float(lam):g}"] = info
+        if checkpoint is not None:
+            checkpoint(f"{float(lam):g}", W, info)
 
     at_a0, theta_fit, map_diag, readouts = {}, {}, {}, {}
 

@@ -5,8 +5,10 @@
 
 A splined (Julia-exported) model is converted to the analytic branch first
 (to_analytic); an analytic one is widened to --n-q.  Writes DIR/model.npz (the
-selected radials patched into a copy of --model), rnl_Wnlq.npy,
-radial_info.json and summary.json (gate scores, selected label).  The residual
+selected radials and the readout fitted for them patched into a copy of
+--model), rnl_Wnlq.npy, readout.npy, radial_info.json and summary.json (gate
+scores, selected label).  Each lambda's radials are checkpointed to
+DIR/lam_<lam>/ (rnl_Wnlq.npy, radial_info.json) as soon as its run finishes.  The residual
 GP / UQ fit then runs on DIR/model.npz as usual.
 """
 import argparse
@@ -70,9 +72,19 @@ print(f"problem built: {time.time() - t0:.1f}s", flush=True)
 
 wn = 1.0 / (1.0 + rnl_degrees(meta)) ** 2
 lam_grid = tuple(float(x) for x in a.lam_grid.split(","))
+
+
+def checkpoint(label, W_lam, run_info):
+    """Persist each lambda's learned radials as soon as its run finishes, so an
+    interrupted grid keeps them (no model.npz: the readout comes from the gate)."""
+    save_result(out / f"lam_{label}", W_lam, run_info)
+    print(f"checkpoint: {out / f'lam_{label}'}", flush=True)
+
+
 W, info = fit_radial(prob, ds_fit, ds_val, model.rnl_Wnlq, lam_grid=lam_grid,
                      rough_weights=wn, steps=a.steps, reprofile_every=a.reprofile_every,
-                     map_steps=a.map_steps, log=lambda s: print(s, flush=True))
+                     map_steps=a.map_steps, log=lambda s: print(s, flush=True),
+                     checkpoint=checkpoint)
 info["to_analytic_relres_max"] = float(np.max(relres))
 save_result(out, W, info, src_npz=a.model, model=model)
 summary = {"selected": info["selected"], "scores": info["scores"], "n_q": a.n_q,

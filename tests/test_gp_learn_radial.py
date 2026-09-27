@@ -322,6 +322,67 @@ def test_learn_radial_two_species_roughness():
     assert out[1e-1] <= out[0.0]
 
 
+def test_fit_radial_checkpoints_each_lambda(tmp_path, small):
+    from ace_jax.fit.radial_learn import fit_radial, save_result
+    prob, ds_fit, _ = small
+    _, ds_val, _ = make_problem(ncfg=6, start=6)
+    calls = []
+
+    def ckpt(label, W, info):
+        calls.append(label)
+        save_result(tmp_path / f"lam_{label}", W, info)
+
+    W, info = fit_radial(prob, ds_fit, ds_val, prob.model.rnl_Wnlq, lam_grid=(0.0, 1e-2),
+                         theta0=THETA, profile=False, steps=1, map_steps=10, checkpoint=ckpt)
+    assert calls == ["0", "0.01"]
+    import json
+    saved = {}
+    for lab in calls:
+        saved[lab] = np.load(tmp_path / f"lam_{lab}" / "rnl_Wnlq.npy")
+        js = json.loads((tmp_path / f"lam_{lab}" / "radial_info.json").read_text())
+        assert js["lam_rough"] == float(lab) and js["steps"] == 1
+    sel = info["selected"]
+    if sel != "init":
+        np.testing.assert_array_equal(saved[sel.split("=")[1]], np.asarray(W))
+
+
+def test_learn_radial_precomputed_pieces_match(small):
+    """Q/D2/r0 passed in (as fit_radial does) give the same run as computed."""
+    from ace_jax.fit.radial_learn import learn_radial, projected_residual
+    from ace_jax.fit.radial_model import normalise, radial_gram, roughness_matrix, row_active
+    prob, ds, _ = small
+    W0 = prob.model.rnl_Wnlq
+    Q, D2 = radial_gram(prob.model, ds), roughness_matrix(prob.model)
+    r0 = float(projected_residual(normalise(W0, Q, row_active(W0)), THETA, prob, ds))
+    kw = dict(theta0=THETA, profile=False, lam_rough=1e-2, steps=2)
+    Wa, ia = learn_radial(prob, ds, W0, **kw)
+    Wb, ib = learn_radial(prob, ds, W0, Q=Q, D2=D2, r0=r0, **kw)
+    np.testing.assert_allclose(ib["lam_abs"], ia["lam_abs"], rtol=1e-12)
+    np.testing.assert_allclose(np.asarray(Wb), np.asarray(Wa), rtol=1e-10, atol=1e-12)
+
+
+def test_learn_radial_rejects_smooth_init_with_lambda(small):
+    from ace_jax.fit.radial_learn import learn_radial, relative_lambda
+    prob, ds, _ = small
+    assert relative_lambda(0.0, 1.0, 0.0) == 0.0
+    with pytest.raises(ValueError, match="rough0"):
+        relative_lambda(1e-2, 5.0, 1e-13)
+    W0 = jnp.zeros_like(prob.model.rnl_Wnlq).at[..., 1].set(1.0)   # degree-1 radials: zero curvature
+    with pytest.raises(ValueError, match="rough0"):
+        learn_radial(prob, ds, W0, theta0=THETA, profile=False, lam_rough=1e-2, steps=1)
+
+
+def test_learned_radials_reject_inducing_points(small):
+    from ace_jax.fit.radial_learn import fit_radial, learn_radial
+    prob, ds, _ = small
+    ind = prob.ind._replace(XM=jnp.zeros((3, prob.ind.XM.shape[1])))
+    bad = prob._replace(ind=ind)
+    with pytest.raises(ValueError, match="M = 0"):
+        learn_radial(bad, ds, prob.model.rnl_Wnlq, theta0=THETA, steps=0)
+    with pytest.raises(ValueError, match="M = 0"):
+        fit_radial(bad, ds, ds, prob.model.rnl_Wnlq, steps=0)
+
+
 def test_fit_radial_rejects_duplicate_lambdas(small):
     from ace_jax.fit.radial_learn import fit_radial
     prob, ds, _ = small
@@ -414,3 +475,4 @@ def test_bench_driver_smoke(tmp_path):
     assert r.returncode == 0, r.stderr[-3000:]
     s = json.loads((tmp_path / "summary.json").read_text())
     assert s["selected"] in s["scores"] and (tmp_path / "model.npz").exists()
+    assert (tmp_path / "lam_0" / "rnl_Wnlq.npy").exists()
