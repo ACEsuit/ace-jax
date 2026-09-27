@@ -180,6 +180,51 @@ def spectral_penalty(W, W_ref, sw):
     return jnp.einsum("q,abnq,abnq->", sw, dW, dW)
 
 
+def uniform_gram(model, r_lo, r_hi, n=400):
+    """U (NZ, NZ, n_q, n_q): per species pair, the mean over a uniform r grid
+    on [r_lo, r_hi] of p p^T with p = env(x(r)) P(x(r)) (poly_env) --
+    ||R_n||^2 under a uniform-in-r measure is W_n^T U[zi, zj] W_n.  Unlike
+    radial_gram (empirical pair-distance density, dataset-dependent), this
+    measure is flat in r, so it costs the change equally everywhere on
+    [r_lo, r_hi] including gaps between coordination shells where the data
+    density (hence radial_gram) is near zero."""
+    require_analytic(model)
+    NZ, n_q = model.rnl_Wnlq.shape[0], model.rnl_Wnlq.shape[-1]
+    r = jnp.linspace(r_lo, r_hi, n)
+    zi, zj = jnp.meshgrid(jnp.arange(NZ), jnp.arange(NZ), indexing="ij")   # (NZ, NZ)
+    zi = jnp.broadcast_to(zi[:, :, None], (NZ, NZ, n)).reshape(-1)
+    zj = jnp.broadcast_to(zj[:, :, None], (NZ, NZ, n)).reshape(-1)
+    r_rep = jnp.tile(r, NZ * NZ)
+    p = poly_env(model, r_rep, zi, zj).reshape(NZ, NZ, n, n_q)
+    return jnp.einsum("abxq,abxp->abqp", p, p) / n
+
+
+def gap_penalty(W, W_ref, U):
+    """sum_{zi,zj,n} (W - W_ref)[zi,zj,n] U[zi,zj] (W - W_ref)[zi,zj,n]^T --
+    the change of every radial from W_ref, measured under the uniform-in-r
+    measure U (uniform_gram) rather than the empirical pair-distance density
+    (radial_gram): a change that sits in a low-density gap between
+    coordination shells costs the same here as an equal change where the
+    data is dense."""
+    dW = W - W_ref
+    return jnp.einsum("abnq,abqp,abnp->", dW, U, dW)
+
+
+def data_r_range(ds):
+    """(r_min, r_max) over all live edges of ds."""
+    r_min, r_max = float("inf"), float("-inf")
+    for i in range(ds.n_batches):
+        b = jax.tree.map(lambda a: a[i], ds)
+        rij, _, _, mask = flat_edges(b.rij, b.nbr, b.nbr_mask)
+        m = np.asarray(mask)
+        if not m.any():
+            continue
+        r = np.asarray(jnp.linalg.norm(rij, axis=-1))[m]
+        r_min = min(r_min, float(r.min()))
+        r_max = max(r_max, float(r.max()))
+    return r_min, r_max
+
+
 def rnl_degrees(meta, wL=1.5):
     """(n_rnl,) polynomial degree of each tensor radial under the identity
     (onehot) convention, n' = (n - 1) // NZ, from the model's (n, l) spec.

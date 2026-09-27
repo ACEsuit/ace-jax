@@ -240,6 +240,53 @@ def test_spectral_penalty_matches_explicit_loop(si):
     assert abs(got - ref) < 1e-10 * max(abs(ref), 1.0)
 
 
+def test_gap_penalty_zero_at_reference(si):
+    from ace_jax.fit.radial_model import gap_penalty, uniform_gram
+    model, *_ = si
+    U = uniform_gram(model, 2.0, 5.0, n=50)
+    W = model.rnl_Wnlq
+    assert float(gap_penalty(W, W, U)) == 0.0
+
+
+def test_gap_penalty_matches_uniform_grid_mean(si):
+    from ace_jax.fit.radial_model import gap_penalty, poly_env, uniform_gram
+    model, *_ = si
+    r_lo, r_hi, n = 2.0, 5.0, 400
+    U = uniform_gram(model, r_lo, r_hi, n=n)
+    W = model.rnl_Wnlq
+    W_ref = W + 0.05 * jnp.abs(W).mean()
+    got = float(gap_penalty(W, W_ref, U))
+    # Independent reference on the SAME grid: for each species pair and each
+    # radial n, R_n(r) = poly_env(r) @ W[zi,zj,n], so the mean squared change
+    # over the grid is exactly dW^T (mean p p^T) dW = dW^T U dW for any grid
+    # (not just a fine one) -- this checks uniform_gram/gap_penalty agree with
+    # a direct pointwise computation, not merely converge as n grows.
+    NZ, _, n_rnl, _ = W.shape
+    r = jnp.linspace(r_lo, r_hi, n)
+    ref = 0.0
+    for zi in range(NZ):
+        for zj in range(NZ):
+            zi_arr = jnp.full(r.shape, zi, dtype=jnp.int32)
+            zj_arr = jnp.full(r.shape, zj, dtype=jnp.int32)
+            p = poly_env(model, r, zi_arr, zj_arr)                  # (n, n_q)
+            dR = jnp.einsum("xq,mq->mx", p, (W - W_ref)[zi, zj])    # (n_rnl, n)
+            ref += float(jnp.mean(dR ** 2, axis=-1).sum())
+    assert abs(got - ref) < 1e-8 * max(abs(ref), 1.0)
+
+
+def test_uniform_gram_symmetric_psd(si):
+    from ace_jax.fit.radial_model import uniform_gram
+    model, *_ = si
+    U = np.asarray(uniform_gram(model, 2.0, 5.0, n=200))
+    NZ = U.shape[0]
+    for zi in range(NZ):
+        for zj in range(NZ):
+            m = U[zi, zj]
+            np.testing.assert_allclose(m, m.T, atol=1e-10)
+            ev = np.linalg.eigvalsh(m)
+            assert ev.min() > -1e-8 * np.abs(m).max()
+
+
 def test_rnl_degrees(si):
     from ace_jax.fit.radial_model import rnl_degrees
     _, meta, _, _ = si

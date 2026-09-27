@@ -414,6 +414,46 @@ def test_learn_radial_spectral_prior_suppresses_high_q_change():
     assert out[1e2] < out[0.0]
 
 
+def test_learn_radial_gap_prior_shrinks_change_in_gaps():
+    """A large data-gap prior on the radial change should shrink the change
+    measured under the uniform-in-r measure, relative to no prior, while
+    staying finite."""
+    from ace_jax.fit.radial_learn import learn_radial
+    from ace_jax.fit.radial_model import (data_r_range, gap_penalty, normalise, radial_gram,
+                                          row_active, uniform_gram)
+    prob, ds, _ = make_problem(ncfg=12, per_batch=3)
+    Wt, W0, c = _perturbed_truth(prob)
+    ds = relabel(prob, ds, Wt, c)
+    Q = radial_gram(prob.model, ds)
+    active = row_active(W0)
+    W_ref = np.asarray(normalise(W0, Q, active))
+    r_min, _ = data_r_range(ds)
+    U = uniform_gram(prob.model, 0.8 * r_min, prob.cfg.rcut)
+    out = {}
+    for lam_gap in (0.0, 1e2):
+        W, info = learn_radial(prob, ds, W0, theta0=THETA, profile=False, steps=10,
+                               lam_gap=lam_gap, U=U)
+        W = np.asarray(W)
+        assert np.all(np.isfinite(W)) and all(np.isfinite(info["trace"]))
+        out[lam_gap] = float(gap_penalty(jnp.asarray(W), jnp.asarray(W_ref), U))
+    print(f"gap_penalty(W, W_ref, U): lam_gap=0 {out[0.0]:.6e}  lam_gap=1e2 {out[1e2]:.6e}")
+    assert np.isfinite(out[0.0]) and np.isfinite(out[1e2])
+    assert out[1e2] < out[0.0]
+
+
+def test_fit_radial_gap_grid_labels(small):
+    from ace_jax.fit.radial_learn import fit_radial
+    prob, ds_fit, _ = small
+    _, ds_val, _ = make_problem(ncfg=6, start=6)
+    lam_grid = (0.0, 1e-2)
+    gap_grid = (0.0, 1.0)
+    W, info = fit_radial(prob, ds_fit, ds_val, prob.model.rnl_Wnlq, lam_grid=lam_grid,
+                         gap_grid=gap_grid, theta0=THETA, steps=0, map_steps=10)
+    expected = {"init"} | {f"learned_lam={l:g}_gap={g:g}" for l in lam_grid for g in gap_grid}
+    assert set(info["scores"]) == expected
+    assert len(info["scores"]) == 1 + len(lam_grid) * len(gap_grid)
+
+
 def test_fit_radial_spec_grid_labels(small):
     from ace_jax.fit.radial_learn import fit_radial
     prob, ds_fit, _ = small

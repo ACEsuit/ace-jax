@@ -45,6 +45,7 @@ p.add_argument("--steps", type=int, default=40); p.add_argument("--reprofile-eve
 p.add_argument("--lam-grid", default="0,1e-2", help="relative roughness weights")
 p.add_argument("--spec-grid", default="0", help="relative spectral-prior weights on the radial change; useful range ~1e-6..1e-4 at --spec-p 4 (see relative_lambda_spec)")
 p.add_argument("--spec-p", type=float, default=4.0, help="spectral prior degree power (1+q)^p")
+p.add_argument("--gap-grid", default="0", help="relative data-gap-prior weights on the radial change, measured under a uniform-in-r Gram rather than the empirical pair-distance density; useful range ~0.1..3 (see relative_lambda_gap)")
 p.add_argument("--map-steps", type=int, default=300)
 a = p.parse_args()
 
@@ -77,6 +78,7 @@ print(f"problem built: {time.time() - t0:.1f}s", flush=True)
 wn = 1.0 / (1.0 + rnl_degrees(meta)) ** 2
 lam_grid = tuple(float(x) for x in a.lam_grid.split(","))
 spec_grid = tuple(float(x) for x in a.spec_grid.split(","))
+gap_grid = tuple(float(x) for x in a.gap_grid.split(","))
 
 
 def checkpoint(label, W_lam, run_info):
@@ -87,14 +89,14 @@ def checkpoint(label, W_lam, run_info):
 
 
 W, info = fit_radial(prob, ds_fit, ds_val, model.rnl_Wnlq, lam_grid=lam_grid, spec_grid=spec_grid,
-                     rough_weights=wn, spec_p=a.spec_p, steps=a.steps, reprofile_every=a.reprofile_every,
-                     map_steps=a.map_steps, log=lambda s: print(s, flush=True),
-                     checkpoint=checkpoint)
+                     gap_grid=gap_grid, rough_weights=wn, spec_p=a.spec_p, steps=a.steps,
+                     reprofile_every=a.reprofile_every, map_steps=a.map_steps,
+                     log=lambda s: print(s, flush=True), checkpoint=checkpoint)
 info["to_analytic_relres_max"] = relres_max
 save_result(out, W, info, src_npz=a.model, model=model)
 summary = {"selected": info["selected"], "scores": info["scores"], "n_q": a.n_q,
            "ntrain": a.ntrain, "nval": a.nval, "lam_grid": list(lam_grid),
-           "spec_grid": list(spec_grid), "spec_p": a.spec_p,
+           "spec_grid": list(spec_grid), "spec_p": a.spec_p, "gap_grid": list(gap_grid),
            "steps": a.steps, "reprofile_every": a.reprofile_every,
            "to_analytic_relres_max": relres_max,
            "seconds": time.time() - t0}

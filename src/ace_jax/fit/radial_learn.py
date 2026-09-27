@@ -29,9 +29,9 @@ from jax.scipy.linalg import solve_triangular
 from .hypers import from_array, log_prior, to_array
 from .ladder import run_map
 from .objective import combine, log_marginal_likelihood, posterior
-from .radial_model import (normalise, radial_gram, require_analytic, roughness,
-                           roughness_matrix, row_active, spectral_penalty,
-                           spectral_weights, with_radial)
+from .radial_model import (data_r_range, gap_penalty, normalise, radial_gram, require_analytic,
+                           roughness, roughness_matrix, row_active, spectral_penalty,
+                           spectral_weights, uniform_gram, with_radial)
 from .stats import linear_statistics
 
 
@@ -153,7 +153,7 @@ def theta_map_linear(prob, ds, W, *, steps=300, seed=0, init=None, return_stats=
     return a, lin, diag
 
 
-def _objective(V, a, model, ds, gamma, Q, active, D2, wn, lam, W_ref, sw, lam_spec, cfg):
+def _objective(V, a, model, ds, gamma, Q, active, D2, wn, lam, W_ref, sw, lam_spec, U, lam_gap, cfg):
     """The VarPro-plus-priors objective, module-level so it is a stable,
     hashable `f` for `lbfgs_loop`/`_lbfgs_step` (a fresh per-round closure
     over the same computation would be a distinct object each round and
@@ -162,12 +162,16 @@ def _objective(V, a, model, ds, gamma, Q, active, D2, wn, lam, W_ref, sw, lam_sp
     this function does not need to be jitted itself, since `_lbfgs_step` is
     the sole jit boundary and traces straight through it.  `W_ref`, `sw` and
     `lam_spec` (traced `args`, not `statics`) add the spectral prior on the
-    change from the reference radials W_ref, more strongly at high degree."""
+    change from the reference radials W_ref, more strongly at high degree.
+    `U` and `lam_gap` (also traced `args`) add the data-gap prior: the same
+    change W_ref, but measured under the uniform-in-r Gram U rather than
+    per-degree weights, so it costs change in low-data gaps between
+    coordination shells rather than change at high polynomial degree."""
     theta = from_array(a)
     W = normalise(V, Q, active)
     lin = linear_statistics(with_radial(model, W), cfg, ds)
     return (projected_residual_from_stats(theta, lin, gamma) + lam * roughness(W, D2, wn)
-            + lam_spec * spectral_penalty(W, W_ref, sw))
+            + lam_spec * spectral_penalty(W, W_ref, sw) + lam_gap * gap_penalty(W, W_ref, U))
 
 
 def require_linear(prob):
@@ -207,12 +211,39 @@ def relative_lambda_spec(lam_spec, r0, n_active):
     return float(lam_spec) * r0 / n_active
 
 
+def relative_lambda_gap(lam_gap, r0, n_active):
+    """Absolute data-gap weight lam_gap * r0 / n_active (0 for lam_gap = 0),
+    the analogue of `relative_lambda_spec` for the data-gap prior on the
+    radial change: n_active is the number of active radials (row_active
+    count), not a roughness or spectral scale.
+
+    Scale: measured on si_tiny (the si_ace_model fixture, n_q=15, ncfg=12)
+    with an iid-random synthetic change of ~25% of each active radial
+    (measured as ||W - W_ref|| / ||W_ref|| over active rows), gap_penalty(W,
+    W_ref, U) / n_active is about 0.12, i.e. the penalty/r0 ratio (the
+    fraction of r0 the gap term contributes) is about lam_gap * 0.12:
+    lam_gap=0.1 is a mild penalty (~1.2% of r0), lam_gap=1 is comparable to
+    the fit term itself (~12% of r0), and lam_gap=10 already dominates the
+    fit (~120% of r0). Sweep roughly 0.1..3, well above the lam_rough grid
+    and not directly comparable to the lam_spec window -- the two priors act
+    on different quantities (lam_rough the raw curvature of W, lam_spec the
+    change under a per-degree measure that decays fast with degree, lam_gap
+    the change under a flat, uniform-in-r measure over [0.8 r_min, rcut])."""
+    if not lam_gap:
+        return 0.0
+    if n_active <= 0:
+        raise ValueError("gap prior: no active radials in W0 (all rows zero)")
+    return float(lam_gap) * r0 / n_active
+
+
 def learn_radial(prob, ds, W0, *, theta0=None, profile=True, lam_rough=0.0, rough_weights=None,
-                 lam_spec=0.0, spec_p=4.0, steps=200, reprofile_every=10, tol=1e-6, patience=3,
-                 map_steps=300, n_prior=None, seed=0, log=None, Q=None, D2=None, r0=None):
+                 lam_spec=0.0, spec_p=4.0, lam_gap=0.0, steps=200, reprofile_every=10, tol=1e-6,
+                 patience=3, map_steps=300, n_prior=None, seed=0, log=None, Q=None, D2=None,
+                 r0=None, U=None):
     """VarPro-learn the tensor radials of prob.model (analytic branch, M = 0).
 
     Minimises  r(W; theta) + lam * roughness(W) + lam_spec_abs * spectral_penalty(W, W_ref)
+              + lam_gap_abs * gap_penalty(W, W_ref, U)
     over V with W = normalise(V) (unit empirical norm per radial; rows that
     are zero in W0 stay zero), by L-BFGS in rounds of `reprofile_every`
     steps.  With profile=True theta is re-MAP'd on the M = 0 LML after every
@@ -224,9 +255,15 @@ def learn_radial(prob, ds, W0, *, theta0=None, profile=True, lam_rough=0.0, roug
     from W_ref = normalise(W0) (the starting V), weighted per Legendre degree
     q by spectral_weights(n_q, spec_p) = (1 + q)^spec_p, so it grows with
     degree -- the analogue of the Gamma smoothness prior's degree weighting,
-    but on the CHANGE rather than the absolute radial.  Stops at `steps`
-    total or at the first round that ends early (converged, line search,
-    non-finite).  Returns (W, info); steps=0 returns normalise(W0).
+    but on the CHANGE rather than the absolute radial.  lam_gap is also
+    RELATIVE (relative_lambda_gap): lam_gap_abs = lam_gap * r0 / n_active; the
+    data-gap prior penalises the same departure from W_ref, but measured under
+    U = uniform_gram(prob.model, 0.8 * r_min, rcut) (r_min from
+    data_r_range(ds), rcut = prob.cfg.rcut) -- a uniform-in-r measure, so it
+    costs change equally everywhere on that range, including gaps between
+    coordination shells where the data-weighted gauge Q costs nothing.  Stops
+    at `steps` total or at the first round that ends early (converged, line
+    search, non-finite).  Returns (W, info); steps=0 returns normalise(W0).
 
     `log`: optional one-arg callable given one-line progress strings (start
     hyperparameters, then a line per round); None (default) is silent and
@@ -235,9 +272,13 @@ def learn_radial(prob, ds, W0, *, theta0=None, profile=True, lam_rough=0.0, roug
     Precomputed pieces (fit_radial passes them so a lambda grid shares them;
     each is computed here when None): Q = radial_gram(prob.model, ds,
     n_prior) (n_prior None -> radial_gram's default), D2 =
-    roughness_matrix(prob.model), and r0 = r(normalise(W0); theta0), the
-    projected residual at the start -- only valid together with that theta0.
-    M > 0 (inducing points) is unsupported and raises."""
+    roughness_matrix(prob.model), r0 = r(normalise(W0); theta0), the
+    projected residual at the start -- only valid together with that theta0 --
+    and U = uniform_gram(...) as above (only computed, an extra streaming pass
+    over ds via data_r_range, when lam_gap > 0; a zeros array of the right
+    shape otherwise, so the default path adds no streaming passes and the
+    traced arg structure of `_objective` stays fixed).  M > 0 (inducing
+    points) is unsupported and raises."""
     require_x64()
     require_analytic(prob.model)
     require_linear(prob)
@@ -247,9 +288,16 @@ def learn_radial(prob, ds, W0, *, theta0=None, profile=True, lam_rough=0.0, roug
         Q = radial_gram(prob.model, ds) if n_prior is None else radial_gram(prob.model, ds, n_prior=n_prior)
     if D2 is None:
         D2 = roughness_matrix(prob.model)
+    if U is None:
+        if lam_gap:
+            r_min, _ = data_r_range(ds)
+            U = uniform_gram(prob.model, 0.8 * r_min, prob.cfg.rcut)
+        else:
+            NZ, n_q = W0.shape[0], W0.shape[-1]
+            U = jnp.zeros((NZ, NZ, n_q, n_q), jnp.float64)
     wn = jnp.ones(W0.shape[2]) if rough_weights is None else jnp.asarray(rough_weights, jnp.float64)
     V = normalise(W0, Q, active)
-    W_ref = V                              # reference for the spectral prior: the starting V
+    W_ref = V                              # reference for the spectral/gap priors: the starting V
     sw = spectral_weights(W0.shape[-1], spec_p)
     lin0 = None
     if theta0 is not None:
@@ -267,16 +315,19 @@ def learn_radial(prob, ds, W0, *, theta0=None, profile=True, lam_rough=0.0, roug
     lam = relative_lambda(lam_rough, r0, rough0)
     n_active = int(jnp.sum(active))
     lam_spec_abs = relative_lambda_spec(lam_spec, r0, n_active)
+    lam_gap_abs = relative_lambda_gap(lam_gap, r0, n_active)
     info = {"trace": [], "reasons": [], "theta": [np.asarray(a)], "lam_abs": lam,
             "lam_rough": float(lam_rough), "r0": r0, "rough0": rough0, "steps": 0,
             "round_lengths": [], "lam_spec": float(lam_spec), "lam_spec_abs": lam_spec_abs,
-            "spec_p": float(spec_p)}
+            "spec_p": float(spec_p), "lam_gap": float(lam_gap), "lam_gap_abs": lam_gap_abs}
     if log is not None:
         log(f"learn_radial: lam_rough={float(lam_rough):g} lam_abs={lam:.6e} "
             f"lam_spec={float(lam_spec):g} lam_spec_abs={lam_spec_abs:.6e} spec_p={float(spec_p):g} "
+            f"lam_gap={float(lam_gap):g} lam_gap_abs={lam_gap_abs:.6e} "
             f"r0={r0:.6e} profile={bool(profile)}")
     lam = jnp.asarray(lam, jnp.float64)
     lam_spec_abs = jnp.asarray(lam_spec_abs, jnp.float64)
+    lam_gap_abs = jnp.asarray(lam_gap_abs, jnp.float64)
     done = 0
     round_idx = 0
     while done < int(steps):
@@ -289,7 +340,8 @@ def learn_radial(prob, ds, W0, *, theta0=None, profile=True, lam_rough=0.0, roug
         # `args` change VALUE each round (a is re-profiled) but not shape/dtype.
         V, f_best, trace, reason = lbfgs_loop(
             _objective, V, steps=n, tol=tol, patience=patience,
-            args=(a, prob.model, ds, prob.gamma, Q, active, D2, wn, lam, W_ref, sw, lam_spec_abs),
+            args=(a, prob.model, ds, prob.gamma, Q, active, D2, wn, lam, W_ref, sw, lam_spec_abs,
+                  U, lam_gap_abs),
             statics=(prob.cfg,))
         info["trace"].extend(trace)
         info["reasons"].append(reason)
@@ -379,16 +431,18 @@ def gate(candidates, score):
 
 
 def fit_radial(prob, ds_fit, ds_val, W0, *, lam_grid=(0.0, 1e-3, 1e-2, 1e-1), spec_grid=(0.0,),
-               theta0=None, map_steps=300, log=None, checkpoint=None, **learn_kw):
-    """learn_radial on ds_fit once per (roughness weight, spectral weight) pair
-    in lam_grid x spec_grid, then keep the best of {init, learned per pair} on
-    the disjoint ds_val (ties -> init).
+               gap_grid=(0.0,), theta0=None, map_steps=300, log=None, checkpoint=None, **learn_kw):
+    """learn_radial on ds_fit once per (roughness, spectral, data-gap weight)
+    triple in lam_grid x spec_grid x gap_grid, then keep the best of {init,
+    learned per triple} on the disjoint ds_val (ties -> init).
 
-    Candidate labels are "learned_lam=<l>_spec=<s>" when spec_grid has more
-    than one value, and the old "learned_lam=<l>" otherwise (backward
-    compatible with a single, implicit spec=0); checkpoints use the same
-    scheme without the "learned_" prefix (lam_label = f"{l:g}" or
-    f"{l:g}_spec={s:g}").
+    Candidate labels are "learned_lam=<l>" with a "_spec=<s>" suffix appended
+    when spec_grid has more than one value, and a "_gap=<g>" suffix appended
+    when gap_grid has more than one value (each independently; backward
+    compatible with plain "learned_lam=<l>" when both grids are single-valued,
+    an implicit spec=0/gap=0); checkpoints use the same scheme without the
+    "learned_" prefix (lam_label = f"{l:g}", plus "_spec=..."/"_gap=..." under
+    the same conditions).
 
     Every candidate, init included, is scored by ONE procedure: a_fit =
     theta_map_linear(ds_fit, W, map_steps, init=a0), readout = posterior mean
@@ -407,35 +461,49 @@ def fit_radial(prob, ds_fit, ds_val, W0, *, lam_grid=(0.0, 1e-3, 1e-2, 1e-1), sp
     lines); None (default) is silent and leaves all other behaviour unchanged.
 
     `checkpoint`: optional callable checkpoint(lam_label, W, run_info), called
-    as soon as each (lam, spec) pair's learn_radial finishes, so an
+    as soon as each (lam, spec, gap) triple's learn_radial finishes, so an
     interrupted grid keeps its finished runs (e.g. save_result without
-    src_npz).  Q, D2 and the relative-lambda/spec reference are computed once
-    here and shared by every candidate; M > 0 raises."""
+    src_npz).  Q, D2, U and the relative-lambda/spec/gap reference are
+    computed once here and shared by every candidate (U only when some
+    gap_grid value is > 0, via one extra streaming pass for data_r_range); M >
+    0 raises."""
     require_x64()
     require_analytic(prob.model)
     require_linear(prob)
     multi_spec = len(spec_grid) > 1
-    combos = list(itertools.product(lam_grid, spec_grid))
+    multi_gap = len(gap_grid) > 1
+    combos = list(itertools.product(lam_grid, spec_grid, gap_grid))
 
-    def cand_label(lam, spec):
+    def cand_label(lam, spec, gap):
+        label = f"learned_lam={float(lam):g}"
         if multi_spec:
-            return f"learned_lam={float(lam):g}_spec={float(spec):g}"
-        return f"learned_lam={float(lam):g}"
+            label += f"_spec={float(spec):g}"
+        if multi_gap:
+            label += f"_gap={float(gap):g}"
+        return label
 
-    def run_key(lam, spec):
+    def run_key(lam, spec, gap):
+        key = f"{float(lam):g}"
         if multi_spec:
-            return f"{float(lam):g}_spec={float(spec):g}"
-        return f"{float(lam):g}"
+            key += f"_spec={float(spec):g}"
+        if multi_gap:
+            key += f"_gap={float(gap):g}"
+        return key
 
-    labels = [cand_label(lam, spec) for lam, spec in combos]
+    labels = [cand_label(*c) for c in combos]
     if len(set(labels)) != len(labels):
-        raise ValueError(f"fit_radial: duplicate combinations in lam_grid x spec_grid {combos}")
+        raise ValueError(f"fit_radial: duplicate combinations in lam_grid x spec_grid x gap_grid {combos}")
     W0 = jnp.asarray(W0, jnp.float64)
-    # shared by every lambda: the gauge Gram, the roughness matrix, and the
-    # relative-lambda reference r0 = r(W_init; a0) (all runs start there)
+    # shared by every candidate: the gauge Gram, the roughness matrix, the
+    # uniform-in-r Gram (if needed), and the relative-lambda reference
+    # r0 = r(W_init; a0) (all runs start there)
     n_prior = learn_kw.pop("n_prior", None)
     Q = radial_gram(prob.model, ds_fit) if n_prior is None else radial_gram(prob.model, ds_fit, n_prior=n_prior)
     D2 = roughness_matrix(prob.model)
+    U = None
+    if any(gap_grid):
+        r_min, _ = data_r_range(ds_fit)
+        U = uniform_gram(prob.model, 0.8 * r_min, prob.cfg.rcut)
     W_init = normalise(W0, Q, row_active(W0))
     if theta0 is not None:
         a0 = to_array(theta0)
@@ -449,13 +517,13 @@ def fit_radial(prob, ds_fit, ds_val, W0, *, lam_grid=(0.0, 1e-3, 1e-2, 1e-1), sp
     for lam in lam_grid:
         relative_lambda(lam, r0, rough0)          # fail before any learning, not mid-grid
     cands, runs = {"init": W_init}, {}
-    for lam, spec in combos:
-        label, key = cand_label(lam, spec), run_key(lam, spec)
+    for lam, spec, gap in combos:
+        label, key = cand_label(lam, spec, gap), run_key(lam, spec, gap)
         if log is not None:
-            log(f"fit_radial: lam={lam:g} spec={spec:g} starting")
+            log(f"fit_radial: lam={lam:g} spec={spec:g} gap={gap:g} starting")
         W, info = learn_radial(prob, ds_fit, W0, theta0=from_array(a0), lam_rough=lam,
-                               lam_spec=spec, map_steps=map_steps, log=log, Q=Q, D2=D2, r0=r0,
-                               **learn_kw)
+                               lam_spec=spec, lam_gap=gap, map_steps=map_steps, log=log, Q=Q,
+                               D2=D2, r0=r0, U=U, **learn_kw)
         cands[label] = W
         runs[key] = info
         if checkpoint is not None:
