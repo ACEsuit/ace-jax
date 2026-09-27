@@ -25,6 +25,8 @@ import jax.numpy as jnp
 
 EDGE_A_KINDS = ("gather", "matmul")
 
+CHUNK_NODES = 16384   # dense rows per block: peak memory ~ block, not N (spec, component 2)
+
 
 def one_hot_selector(idx, width, dtype):
     """One-hot (width, n) matrix S with X @ S == X[:, idx]."""
@@ -121,14 +123,38 @@ class EdgeSiteModel(eqx.Module):
              .at[senders].add(g_r).at[receivers].add(-g_r))
         return E, F, -g_eps
 
-    def energy_forces_virial_dense(self, rij, zi, zj, idx, mask, node_z):
+    def energy_forces_virial_dense(self, rij, zi, zj, idx, mask, node_z, chunk=CHUNK_NODES):
         """`energy_forces_virial` for the dense layout: rij (n, K, 3), zi / zj /
-        idx (neighbour index) / mask (n, K).  Same strain trick for the virial."""
-        n = mask.shape[0]
+        idx (neighbour index) / mask (n, K).  Same strain trick for the virial.
+
+        Rows are evaluated in blocks of `chunk` (lax.map; jax.checkpoint so the
+        backward pass recomputes a block rather than storing all of them): peak
+        memory scales with the block.  A site energy depends only on its own row,
+        so blocks are independent; padding rows are fully masked."""
+        n, K = mask.shape
+        nb = max(1, -(-n // chunk))
+        B = -(-n // nb)
+        pad_n = nb * B - n
+
+        def blocks(a, fill):
+            if pad_n:
+                a = jnp.concatenate([a, jnp.full((pad_n,) + a.shape[1:], fill, a.dtype)])
+            return a.reshape((nb, B) + a.shape[1:])
+
+        park = jnp.asarray([1.0, 0.0, 0.0], rij.dtype) * self.pad_cutoff()
 
         def total(r, eps):
             sym = 0.5 * (eps + eps.T)
-            return jnp.sum(self.site_energies_dense(r + r @ sym, zi, zj, mask, node_z))
+            rs = r + r @ sym
+            if nb == 1:
+                return jnp.sum(self.site_energies_dense(rs, zi, zj, mask, node_z))
+            rb = jnp.concatenate([rs, jnp.broadcast_to(park, (pad_n, K, 3))]) if pad_n else rs
+            rb = rb.reshape(nb, B, K, 3)
+            live = blocks(jnp.ones((n,), rij.dtype), 0.0)       # padding rows add nothing (E0)
+            xs = (rb, blocks(zi, 0), blocks(zj, 0), blocks(mask, False), blocks(node_z, 0), live)
+            block = jax.checkpoint(
+                lambda a: jnp.sum(self.site_energies_dense(*a[:5]) * a[5]))
+            return jnp.sum(jax.lax.map(block, xs))
 
         eps0 = jnp.zeros((3, 3), rij.dtype)
         E, (g_r, g_eps) = jax.value_and_grad(total, argnums=(0, 1))(rij, eps0)
