@@ -45,6 +45,8 @@ p.add_argument("--map-steps", type=int, default=300)
 p.add_argument("--cand", action="append", required=True,
                help='"init" or a path to a learned rnl_Wnlq.npy (repeatable); label = its parent dir')
 p.add_argument("--out", required=True)
+p.add_argument("--save-models", default=None,
+               help="directory: also write <label>.npz per candidate (its radials + the readout fitted for them)")
 a = p.parse_args()
 
 model, meta, z = load(a.model)
@@ -99,6 +101,10 @@ for cand in a.cand:
     a_fit = theta_map_linear(prob, ds_fit, W, steps=a.map_steps, init=a0)
     m = with_radial(model, W)
     c, _ = posterior(from_array(a_fit), linear_statistics(m, cfg, ds_fit), prob)
+    if a.save_models:
+        from ace_jax.construct.export import patch_radial_npz
+        pathlib.Path(a.save_models).mkdir(parents=True, exist_ok=True)
+        patch_radial_npz(a.model, pathlib.Path(a.save_models) / f"{label}.npz", m, readout=np.asarray(c))
     out = {}
     for split, ds in (("val", ds_val), ("train", ds_fit)):
         eE, eF = errors(m, c, ds)
