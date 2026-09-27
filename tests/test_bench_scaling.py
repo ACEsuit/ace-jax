@@ -553,3 +553,40 @@ def test_float32_figure_omits_symmetrix_lammps(tmp_path, monkeypatch):
     dashed = [ln for ax in figs[-1].axes for ln in ax.lines
               if ln.get_linestyle() == "--" and len(ln.get_xdata()) > 1]
     assert dashed == []
+
+
+def test_doc_has_narrative_captions_and_capacity_table(tmp_path):
+    """The page is regenerated on every render: prose lives in
+    bench/scaling/benchmarks_intro.md and is included, each figure gets a
+    caption, and a table gives the largest system that fits per line."""
+    from scaling.plot import largest_fits, write_doc
+    rows = []
+    for n, st in ((256, "ok"), (512, "ok"), (1024, "oom")):
+        rows.append({"code": "acejax-pace", "mode": "standalone", "model": "acejax-pace/SiGe/medium",
+                     "size": "medium", "system": "SiGe", "n_atoms": n, "device": "gpu",
+                     "dtype": "float64", "host": "moriarty-gpu", "status": st, "call_s": 1e-3})
+    assert "| moriarty-gpu | SiGe | ace-jax (PACE model) | standalone | 512 | 1024 |" in largest_fits(rows)
+    res = tmp_path / "r.jsonl"
+    res.write_text("\n".join(json.dumps(r) for r in rows))
+    fig = tmp_path / "scaling_memory_float64_medium.png"
+    fig.write_bytes(b"")
+    doc = write_doc(str(res), [str(fig)], doc=str(tmp_path / "b.md"))
+    text = pathlib.Path(doc).read_text()
+    intro = (pathlib.Path(__file__).parent.parent / "bench" / "scaling" / "benchmarks_intro.md").read_text()
+    assert intro.strip().splitlines()[0] in text
+    assert "*Peak device memory" in text                      # a caption under the figure
+    assert "## Largest system that fits" in text
+
+
+def test_load_fills_system_and_size_from_the_model_name(tmp_path):
+    """Rows written for killed cases (row_from_process) carry the model name but
+    not system/size; the capacity table must still see their oom."""
+    from scaling.plot import largest_fits, load
+    ok = {"code": "mace", "mode": "standalone", "model": "mace/Cantor/medium", "size": "medium",
+          "system": "Cantor", "n_atoms": 4096, "dtype": "float64", "host": "h", "status": "ok",
+          "call_s": 1.0}
+    killed = {"code": "mace", "mode": "standalone", "model": "mace/Cantor/medium", "n_atoms": 8192,
+              "dtype": "float64", "device": "cpu", "status": "oom", "host": "h"}
+    (tmp_path / "r.jsonl").write_text(json.dumps(ok) + "\n" + json.dumps(killed) + "\n")
+    rows = load(str(tmp_path / "*.jsonl"))
+    assert "| h | Cantor | MACE | standalone | 4096 | 8192 |" in largest_fits(rows)
