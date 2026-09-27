@@ -400,6 +400,13 @@ def _pops_paper_batch(prob, mu, posts, batch):
             (phiV @ mu).reshape(-1, 6), Vv.reshape(-1, 6))
 
 
+def _pops_predict_fn(prob):
+    """The jitted POPS batch predictor with the mean and posteriors as ARGUMENTS:
+    closing over them would re-trace per ridge and embed every L x L posterior in
+    the compiled program as a constant (6 GB each at the production Cantor basis)."""
+    return jax.jit(lambda mu, posts, b: _pops_paper_batch(prob, mu, posts, b))
+
+
 def _pops_paper_posts(path, ridge, form, leverage_pct):
     r, cache, posts = _ridge_dict(ridge), {}, {}
     for q in "EFV":
@@ -428,8 +435,8 @@ def _run_predict_pops_paper(theta, prob, ds_train, ds_test, form, ridge, leverag
     path = PopsRidgePath(theta, prob, ds_train, stats=stats) if path is None else path
     path.use_mean(POPS_MEAN)
     posts = _pops_paper_posts(path, ridge, form, leverage_pct)
-    f = jax.jit(lambda mu, b: _pops_paper_batch(prob, mu, posts, b))
-    outs = [f(path.c_star, jax.tree.map(lambda a: a[i], ds_test)) for i in range(ds_test.n_batches)]
+    f = _pops_predict_fn(prob)
+    outs = [f(path.c_star, posts, jax.tree.map(lambda a: a[i], ds_test)) for i in range(ds_test.n_batches)]
     return _pack(outs, prob, ds_test)
 
 
@@ -447,14 +454,14 @@ def select_pops_ridge(theta, prob, ds_fit, ds_val, grid, form="hypercube", lever
     path = PopsRidgePath(theta, prob, ds_fit, stats=stats)
     path.use_mean(POPS_MEAN)                                 # the ridge only moves A, never the mean
     scores = {q: [] for q in "EFV"}
+    f = _pops_predict_fn(prob)                                # compiled once for the whole grid
     for r in grid:
         post = path.posterior(r, form=form, leverage_pct=leverage_pct)
         posts = {q: post for q in "EFV"}
-        f = jax.jit(lambda mu, b: _pops_paper_batch(prob, mu, posts, b))
         cols = {q: ([], [], []) for q in "EFV"}               # y, mean, sd (scaled, live rows)
         for i in range(ds_val.n_batches):
             b = jax.tree.map(lambda a: a[i], ds_val)
-            Em, Ev, Fm, Fv, Vm, Vv = f(path.c_star, b)
+            Em, Ev, Fm, Fv, Vm, Vv = f(path.c_star, posts, b)
             C = b.y_E.shape[0]
             nat = np.zeros(C + 1)                             # bucket C collects padded nodes
             np.add.at(nat, np.asarray(b.node_cfg), np.asarray(b.node_mask, float))

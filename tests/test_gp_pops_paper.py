@@ -232,3 +232,17 @@ def test_predict_reuses_a_prebuilt_path_and_its_posteriors(tiny_linear_problem, 
     for f in ref._fields:
         assert np.allclose(np.asarray(getattr(got, f)), np.asarray(getattr(ref, f)), rtol=1e-10, atol=1e-14), f
     assert len(calls) == 2, calls                             # one per distinct ridge, across both calls
+
+
+def test_ridge_selection_compiles_the_predictor_once(tiny_linear_problem, monkeypatch):
+    """The batch predictor takes the posteriors as ARGUMENTS: jitting a closure over
+    them re-traced (and re-compiled, with the L x L posteriors embedded as constants
+    -- 6 GB each at the production Cantor basis) once per grid ridge."""
+    import ace_jax.fit.predict as P
+    prob, ds = tiny_linear_problem
+    traces = []
+    real = P._pops_paper_batch
+    monkeypatch.setattr(P, "_pops_paper_batch", lambda *a: traces.append(1) or real(*a))
+    with highest_precision():
+        select_pops_ridge(THETA, prob, ds, ds, (1e-2, 1e-4, 1e-6))
+    assert len(traces) == 1
