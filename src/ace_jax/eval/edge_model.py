@@ -123,14 +123,19 @@ class EdgeSiteModel(eqx.Module):
              .at[senders].add(g_r).at[receivers].add(-g_r))
         return E, F, -g_eps
 
-    def energy_forces_virial_dense(self, rij, zi, zj, idx, mask, node_z, chunk=CHUNK_NODES):
+    def energy_forces_virial_dense(self, rij, zi, zj, idx, mask, node_z, chunk=CHUNK_NODES,
+                                   rev=None):
         """`energy_forces_virial` for the dense layout: rij (n, K, 3), zi / zj /
         idx (neighbour index) / mask (n, K).  Same strain trick for the virial.
 
         Rows are evaluated in blocks of `chunk` (lax.map; jax.checkpoint so the
         backward pass recomputes a block rather than storing all of them): peak
         memory scales with the block.  A site energy depends only on its own row,
-        so blocks are independent; padding rows are fully masked."""
+        so blocks are independent; padding rows are fully masked.
+
+        `rev` (n, K), from `nlist.reverse_slots`, is optional and independent of
+        chunking: it only changes how the per-edge gradient `g_r` is turned into
+        forces, after the (possibly chunked) energy above has produced it."""
         n, K = mask.shape
         nb = max(1, -(-n // chunk))
         B = -(-n // nb)
@@ -159,8 +164,20 @@ class EdgeSiteModel(eqx.Module):
         eps0 = jnp.zeros((3, 3), rij.dtype)
         E, (g_r, g_eps) = jax.value_and_grad(total, argnums=(0, 1))(rij, eps0)
         g_r = jnp.where(mask[..., None], g_r, 0.0)
-        F = (jnp.zeros((n, 3), rij.dtype).at[jnp.arange(n)].add(g_r.sum(axis=1))
-             .at[idx.reshape(-1)].add(-g_r.reshape(-1, 3)))
+        if rev is None:
+            F = (jnp.zeros((n, 3), rij.dtype).at[jnp.arange(n)].add(g_r.sum(axis=1))
+                 .at[idx.reshape(-1)].add(-g_r.reshape(-1, 3)))
+        else:
+            # F_i = sum_k g[i,k] - sum_k g[j, rev[i,k]], j = idx[i,k]: the edge
+            # j -> i sits at slot rev[i,k] of row j (a full list is symmetric),
+            # so the force assembly is a gather, not a scatter-add.  Padded slots
+            # have idx = rev = 0; g_r there is already zeroed by the mask above,
+            # and `back` at those slots is masked out again below, so g_r[0, 0]
+            # (a live value, generally nonzero) never leaks into F -- and for a
+            # live edge, g_r[idx, rev] reads a live slot of row j, because the
+            # match found by reverse_slots guarantees the reverse edge is live.
+            back = g_r[idx, rev]
+            F = g_r.sum(axis=1) - jnp.where(mask[..., None], back, 0.0).sum(axis=1)
         return E, F, -g_eps
 
     # -------------------------------------------------- positions wrapper
