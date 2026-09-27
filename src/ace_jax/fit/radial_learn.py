@@ -375,16 +375,30 @@ def _jsonable(x):
     return x
 
 
-def save_result(out_dir, W, info, *, src_npz=None, model=None):
-    """Write rnl_Wnlq.npy and radial_info.json to out_dir; with src_npz and
+def save_result(out_dir, W, info, *, src_npz=None, model=None, readout=None):
+    """Write rnl_Wnlq.npy and radial_info.json to out_dir.  With src_npz and
     model (the analytic model W belongs to, e.g. after widen_radial /
-    to_analytic) also write model.npz = src_npz with the learned radial."""
-    out = pathlib.Path(out_dir)
-    out.mkdir(parents=True, exist_ok=True)
-    np.save(out / "rnl_Wnlq.npy", np.asarray(W))
-    (out / "radial_info.json").write_text(json.dumps(_jsonable(info), indent=1))
+    to_analytic) also write model.npz = src_npz with the learned radial AND
+    the readout fitted for it (`readout`, default info["readout"] as returned
+    by fit_radial; also saved as readout.npy).  The source npz's WB/Wpair
+    belong to the old radials, so writing model.npz without a readout is
+    refused rather than silently stale.  info["readout"] is kept out of the
+    JSON (it is len_basis long)."""
+    if readout is None:
+        readout = info.get("readout")
     if src_npz is not None:
         if model is None:
             raise ValueError("save_result: src_npz needs the analytic `model` W belongs to")
+        if readout is None:
+            raise ValueError("save_result: writing model.npz needs the readout fitted for W "
+                             "(fit_radial's info['readout']); the source WB/Wpair are stale")
+    out = pathlib.Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    np.save(out / "rnl_Wnlq.npy", np.asarray(W))
+    (out / "radial_info.json").write_text(
+        json.dumps(_jsonable({k: v for k, v in info.items() if k != "readout"}), indent=1))
+    if readout is not None:
+        np.save(out / "readout.npy", np.asarray(readout))
+    if src_npz is not None:
         from ..construct.export import patch_radial_npz
-        patch_radial_npz(src_npz, out / "model.npz", with_radial(model, W))
+        patch_radial_npz(src_npz, out / "model.npz", with_radial(model, W), readout=readout)

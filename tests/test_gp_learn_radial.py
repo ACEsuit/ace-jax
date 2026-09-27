@@ -290,13 +290,73 @@ def test_save_result_roundtrip(tmp_path, small):
     from ace_jax.fit.radial_learn import save_result
     prob, _, _ = small
     W = 1.5 * prob.model.rnl_Wnlq
-    save_result(tmp_path, W, {"selected": "learned", "trace": [1.0, 0.5], "theta": [np.zeros(3)]},
-                src_npz=MODEL, model=prob.model)
+    c = np.arange(prob.cfg.len_basis, dtype=float)
+    save_result(tmp_path, W, {"selected": "learned", "trace": [1.0, 0.5], "theta": [np.zeros(3)],
+                              "readout": c}, src_npz=MODEL, model=prob.model)
     assert np.array_equal(np.load(tmp_path / "rnl_Wnlq.npy"), np.asarray(W))
+    assert np.array_equal(np.load(tmp_path / "readout.npy"), c)
     back, meta, _ = load(tmp_path / "model.npz")
     np.testing.assert_array_equal(np.asarray(back.rnl_Wnlq), np.asarray(W))
+    nB, nP, NZ = prob.cfg.n_B, prob.cfg.n_pair, prob.cfg.NZ
+    np.testing.assert_array_equal(np.asarray(back.WB)[:, 0], c[:nB])
+    np.testing.assert_array_equal(np.asarray(back.Wpair)[:, 0], c[NZ * nB:NZ * nB + nP])
     import json
-    assert json.loads((tmp_path / "radial_info.json").read_text())["selected"] == "learned"
+    js = json.loads((tmp_path / "radial_info.json").read_text())
+    assert js["selected"] == "learned" and "readout" not in js
+
+
+def test_save_result_refuses_stale_readout(tmp_path, small):
+    from ace_jax.fit.radial_learn import save_result
+    prob, _, _ = small
+    with pytest.raises(ValueError, match="readout"):
+        save_result(tmp_path, prob.model.rnl_Wnlq, {"selected": "init"}, src_npz=MODEL, model=prob.model)
+    assert not (tmp_path / "model.npz").exists()
+    save_result(tmp_path, prob.model.rnl_Wnlq, {"selected": "init"})      # no model.npz: fine
+    assert (tmp_path / "rnl_Wnlq.npy").exists()
+
+
+def test_readout_to_npz_layout():
+    from ace_jax.construct.export import readout_to_npz
+    nB, nP, NZ = 3, 2, 2
+    c = np.arange((nB + nP) * NZ, dtype=float)
+    WB, Wpair = readout_to_npz(c, nB, nP, NZ)
+    np.testing.assert_array_equal(WB, [[0, 3], [1, 4], [2, 5]])
+    np.testing.assert_array_equal(Wpair, [[6, 8], [7, 9]])
+    with pytest.raises(ValueError, match="readout shape"):
+        readout_to_npz(c[:-1], nB, nP, NZ)
+
+
+def test_saved_model_energies_match_fitted_readout(tmp_path, small):
+    """model.npz written by save_result evaluates to linear_rows @ readout
+    (+ E0): the readout is the one fitted for the selected radials."""
+    from ace_jax.fit.radial_learn import fit_radial, save_result
+    from ace_jax.fit.radial_model import with_radial
+    from ace_jax.fit.rows import linear_rows
+    prob, ds_fit, _ = small
+    _, ds_val, _ = make_problem(ncfg=6, start=6)
+    W, info = fit_radial(prob, ds_fit, ds_val, prob.model.rnl_Wnlq, lam_grid=(0.0,), theta0=THETA,
+                         profile=False, steps=2, map_steps=20)
+    save_result(tmp_path, W, info, src_npz=MODEL, model=prob.model)
+    back, _, z = load(tmp_path / "model.npz")
+    E0 = np.asarray(z["E0"])
+    m = with_radial(prob.model, W)
+    worst = 0.0
+    for i in range(ds_val.n_batches):
+        b = jax.tree.map(lambda a: a[i], ds_val)
+        rows, _, _ = linear_rows(m, prob.cfg, b)
+        C = b.y_E.shape[0]
+        Ncap, K = b.nbr.shape
+        zi = jnp.broadcast_to(b.node_z[:, None], (Ncap, K))
+        e = back.site_energies_dense(b.rij, zi, b.node_z[b.nbr], b.nbr_mask, b.node_z)
+        E_model = np.asarray(jax.ops.segment_sum(e, b.node_cfg, num_segments=C + 1)[:C])
+        live = np.asarray(b.node_mask)
+        E0sum = np.asarray(jax.ops.segment_sum(jnp.where(b.node_mask, jnp.asarray(E0)[b.node_z], 0.0),
+                                               b.node_cfg, num_segments=C + 1)[:C])
+        E_lin = np.asarray(rows.E @ jnp.asarray(info["readout"])) + E0sum
+        assert live.any()
+        worst = max(worst, float(np.max(np.abs(E_model - E_lin) / np.abs(E_lin))))
+    print(f"max relative |E_npz - (rows @ c + E0)| / |E| = {worst:.3e}")
+    assert worst < 1e-8
 
 
 def test_bench_driver_smoke(tmp_path):
