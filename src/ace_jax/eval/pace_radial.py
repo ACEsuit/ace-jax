@@ -59,12 +59,25 @@ def _sinc(x):
 
 
 def _sbessel(r, rc, K):
+    """PACE's SBessel basis.  sin(k x), k = 1..K+1, from one sin and one cos by
+    sin((k+1)x) = 2 cos(x) sin(kx) - sin((k-1)x), and one reciprocal instead
+    of a division per k: the per-edge transcendental cost no longer grows with K
+    (-20% of a PACE force call, docs/pace-performance-gap.md #3)."""
+    x = r * PI / rc
+    xs = jnp.where(x == 0, 1.0, x)
+    s1, c2 = jnp.sin(xs), 2.0 * jnp.cos(xs)
+    inv = 1.0 / xs
+    s = [jnp.zeros_like(xs), s1]
+    for _ in range(2, K + 2):
+        s.append(c2 * s[-1] - s[-2])
+    sinc = [None] + [jnp.where(x == 0, 1.0, s[k] * inv * (1.0 / k)) for k in range(1, K + 2)]
+    rc15 = rc ** 1.5
+
     def f(n):
         pre = ((-1) ** n * math.sqrt(2) * PI * (n + 1) * (n + 2)
                / math.sqrt((n + 1) ** 2 + (n + 2) ** 2))
-        return pre / rc ** 1.5 * (_sinc(r * (n + 1) * PI / rc) + _sinc(r * (n + 2) * PI / rc))
-    g = [f(0)]
-    d_prev = 1.0
+        return pre / rc15 * (sinc[n + 1] + sinc[n + 2])
+    g, d_prev = [f(0)], 1.0
     for n in range(1, K):
         en = n ** 2 * (n + 2) ** 2 / (4 * (n + 1) ** 4 + 1)
         dn = 1 - en / d_prev
