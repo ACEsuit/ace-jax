@@ -23,7 +23,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[2] if modal.is_local() else path
 RESULTS = ROOT / "bench" / "scaling" / "results" / "modal-a100.jsonl"
 STUB = '-L/usr/local/cuda/lib64/stubs -lcuda'     # the image builder has no GPU driver
 
-image = (
+base_image = (
     # CUDA 12.9: nvcc 12.4 rejects the lammps-jax plugin (parenthesised aggregate
     # init in emplace_back); 12.9 compiles it unmodified, as on moriarty
     modal.Image.from_registry("nvidia/cuda:12.9.1-devel-ubuntu22.04", add_python="3.12")
@@ -92,11 +92,20 @@ image = (
     # matscipy-neighbours with CUDA (sm_80) -- the calculator's dense graph on the GPU
     .run_commands("pip install -C cmake.define.ENABLE_CUDA=ON -C cmake.define.CMAKE_CUDA_ARCHITECTURES=80"
                   " matscipy-neighbours==1.0.0")
+)
+
+
+def with_sources(img):
+    """`img` with this checkout's ace-jax source, bench and julia dirs mounted
+    (the last layers, so editing them never rebuilds the toolchain)."""
+    return (img
     .add_local_dir(ROOT / "src", "/ace-jax/src")
     .add_local_dir(ROOT / "bench", "/ace-jax/bench",
                    ignore=["**/__pycache__", "pace_modal/*.json*", "scaling/results/*"])
-    .add_local_dir(ROOT / "julia", "/ace-jax/julia")
-)
+    .add_local_dir(ROOT / "julia", "/ace-jax/julia"))
+
+
+image = with_sources(base_image)
 app = modal.App("ace-jax-bench-scaling", image=image)
 # rows land here as they are written: a preempted container is restarted with
 # the same input, and resumes from the volume instead of from scratch
