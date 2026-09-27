@@ -212,6 +212,16 @@ def test_learn_radial_profiles_theta(small):
     assert len(info["theta"]) >= 2 and all(np.all(np.isfinite(t)) for t in info["theta"])
 
 
+def test_learn_radial_logs_per_round(small):
+    from ace_jax.fit.radial_learn import learn_radial
+    prob, ds, _ = small
+    lines = []
+    learn_radial(prob, ds, prob.model.rnl_Wnlq, theta0=THETA, profile=False, steps=4,
+                 reprofile_every=2, log=lines.append)
+    round_lines = [l for l in lines if "round" in l]
+    assert len(round_lines) >= 2
+
+
 def test_gate_ties_go_to_first():
     from ace_jax.fit.radial_learn import gate
     label, scores = gate({"init": 1, "learned": 2}, lambda w: 0.5)

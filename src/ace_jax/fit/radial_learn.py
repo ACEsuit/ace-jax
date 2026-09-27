@@ -16,6 +16,7 @@ See docs/specs/2026-09-26-learned-radial-varpro-design.md.
 """
 import json
 import pathlib
+import time
 from functools import partial
 
 import jax
@@ -152,7 +153,7 @@ def _objective(V, a, model, ds, gamma, Q, active, D2, wn, lam, cfg):
 
 def learn_radial(prob, ds, W0, *, theta0=None, profile=True, lam_rough=0.0, rough_weights=None,
                  steps=200, reprofile_every=10, tol=1e-6, patience=3, map_steps=300,
-                 n_prior=10.0, seed=0):
+                 n_prior=10.0, seed=0, log=None):
     """VarPro-learn the tensor radials of prob.model (analytic branch, M = 0).
 
     Minimises  r(W; theta) + lam * roughness(W)  over V with W = normalise(V)
@@ -162,7 +163,11 @@ def learn_radial(prob, ds, W0, *, theta0=None, profile=True, lam_rough=0.0, roug
     theta0 is given), and L-BFGS restarts because the objective changed.
     lam_rough is RELATIVE: lam = lam_rough * r(W0) / roughness(W0).  Stops at
     `steps` total or at the first round that ends early (converged, line
-    search, non-finite).  Returns (W, info); steps=0 returns normalise(W0)."""
+    search, non-finite).  Returns (W, info); steps=0 returns normalise(W0).
+
+    `log`: optional one-arg callable given one-line progress strings (start
+    hyperparameters, then a line per round); None (default) is silent and
+    leaves all other behaviour unchanged."""
     require_x64()
     require_analytic(prob.model)
     W0 = jnp.asarray(W0, jnp.float64)
@@ -183,15 +188,21 @@ def learn_radial(prob, ds, W0, *, theta0=None, profile=True, lam_rough=0.0, roug
     lam = float(lam_rough) * r0 / max(rough0, 1e-300) if lam_rough else 0.0
     info = {"trace": [], "reasons": [], "theta": [np.asarray(a)], "lam_abs": lam,
             "lam_rough": float(lam_rough), "steps": 0, "round_lengths": []}
+    if log is not None:
+        log(f"learn_radial: lam_rough={float(lam_rough):g} lam_abs={lam:.6e} "
+            f"r0={r0:.6e} profile={bool(profile)}")
     lam = jnp.asarray(lam, jnp.float64)
     done = 0
+    round_idx = 0
     while done < int(steps):
+        round_idx += 1
         n = min(int(reprofile_every), int(steps) - done)
+        t_round = time.perf_counter()
         # `_objective` (module-level) + fixed `statics=(prob.cfg,)` is the same
         # `f`/static pair every round, so `_lbfgs_step` compiles once across
         # the whole learn_radial call and every round below just reuses it;
         # `args` change VALUE each round (a is re-profiled) but not shape/dtype.
-        V, _, trace, reason = lbfgs_loop(
+        V, f_best, trace, reason = lbfgs_loop(
             _objective, V, steps=n, tol=tol, patience=patience,
             args=(a, prob.model, ds, prob.gamma, Q, active, D2, wn, lam),
             statics=(prob.cfg,))
@@ -199,15 +210,25 @@ def learn_radial(prob, ds, W0, *, theta0=None, profile=True, lam_rough=0.0, roug
         info["reasons"].append(reason)
         info["round_lengths"].append(len(trace))
         done += n
+        round_dt = time.perf_counter() - t_round
         # Canonicalise once per round (lbfgs_loop moves V, not W = normalise(V));
         # persisting it back avoids a second normalise() at the return below,
         # which for steps=0 would perturb the already-normalised V0 by ~1 ULP
         # (rsqrt(1 + eps) != 1 bit-for-bit) and break exact-equality recovery
         # of normalise(W0) against an independently-computed reference.
         V = normalise(V, Q, active)
+        theta_msg = ""
         if profile:
             a = theta_map_linear(prob, ds, V, steps=map_steps, seed=seed, init=a)
             info["theta"].append(np.asarray(a))
+            th = from_array(a)
+            theta_msg = (f" log_sigma_c={float(th.log_sigma_c):.4f} "
+                         f"log_sigma_E={float(th.log_sigma_E):.4f} "
+                         f"log_sigma_F={float(th.log_sigma_F):.4f}")
+        if log is not None:
+            log(f"learn_radial: round {round_idx} steps={done}/{int(steps)} "
+                f"accepted={len(trace)} obj={f_best:.6e} reason={reason} "
+                f"time={round_dt:.1f}s" + theta_msg)
         if reason != "steps":
             break
     info["steps"] = done
@@ -246,12 +267,16 @@ def gate(candidates, score):
 
 
 def fit_radial(prob, ds_fit, ds_val, W0, *, lam_grid=(0.0, 1e-3, 1e-2, 1e-1), theta0=None,
-               map_steps=300, **learn_kw):
+               map_steps=300, log=None, **learn_kw):
     """learn_radial on ds_fit once per relative roughness weight in lam_grid,
     then keep the best of {init, learned per lam} on the disjoint ds_val
     (ties -> init).  Each candidate's readout is refitted at its own theta-MAP
     (warm-started from the init's); scores are normalised by the init's sigmas.
-    Returns (W_sel, info)."""
+    Returns (W_sel, info).
+
+    `log`: optional one-arg callable given one-line progress strings (forwarded
+    to `learn_radial`, plus fit_radial's own per-lambda and gate-score lines);
+    None (default) is silent and leaves all other behaviour unchanged."""
     require_x64()
     require_analytic(prob.model)
     W0 = jnp.asarray(W0, jnp.float64)
@@ -260,16 +285,25 @@ def fit_radial(prob, ds_fit, ds_val, W0, *, lam_grid=(0.0, 1e-3, 1e-2, 1e-1), th
     a0 = to_array(theta0) if theta0 is not None else theta_map_linear(prob, ds_fit, W_init, steps=map_steps)
     cands, runs = {"init": W_init}, {}
     for lam in lam_grid:
+        if log is not None:
+            log(f"fit_radial: lam={lam:g} starting")
         W, info = learn_radial(prob, ds_fit, W0, theta0=from_array(a0), lam_rough=lam,
-                               map_steps=map_steps, **learn_kw)
+                               map_steps=map_steps, log=log, **learn_kw)
         cands[f"learned_lam={lam:g}"] = W
         runs[f"{lam:g}"] = info
 
+    label_of = {id(w): k for k, w in cands.items()}
+
     def score(W):
         a_fit = a0 if W is W_init else theta_map_linear(prob, ds_fit, W, steps=map_steps, init=a0)
-        return holdout_score(W, a_fit, a0, prob, ds_fit, ds_val)
+        s = holdout_score(W, a_fit, a0, prob, ds_fit, ds_val)
+        if log is not None:
+            log(f"fit_radial: gate {label_of[id(W)]} score={s:.6e}")
+        return s
 
     label, scores = gate(cands, score)
+    if log is not None:
+        log(f"fit_radial: selected {label}")
     return cands[label], {"selected": label, "scores": scores, "runs": runs, "theta_init": np.asarray(a0)}
 
 

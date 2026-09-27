@@ -59,18 +59,20 @@ val_c = [configs[i] for i in perm[a.ntrain:a.ntrain + a.nval]]
 E0 = np.asarray(z["E0"]) if "E0" in z else np.zeros(NZ)
 ds_fit = build_dataset(fit_c, meta, E0, configs_per_batch=a.batch)
 ds_val = build_dataset(val_c, meta, E0, configs_per_batch=a.batch)
+print(f"data loaded: {time.time() - t0:.1f}s", flush=True)
 
 cfg = GPConfig(r0=a.r0, rcut=float(meta["rcut"]), n_B=meta["n_B"], n_pair=meta["n_pair"], NZ=NZ, C=a.batch)
 X, S = site_features(model, cfg, ds_fit)
 ind = select_inducing(X, S, ds_fit.node_z, ds_fit.node_mask, 0, descriptor_scale(X, ds_fit.node_mask))
 gamma = prior_diagonal(z, meta, source=a.model)
 prob = Problem(KernelSpec("cosine", True, cfg.D), model, ind, cfg, jnp.asarray(gamma), default_prior(a.r0))
+print(f"problem built: {time.time() - t0:.1f}s", flush=True)
 
 wn = 1.0 / (1.0 + rnl_degrees(meta)) ** 2
 lam_grid = tuple(float(x) for x in a.lam_grid.split(","))
 W, info = fit_radial(prob, ds_fit, ds_val, model.rnl_Wnlq, lam_grid=lam_grid,
                      rough_weights=wn, steps=a.steps, reprofile_every=a.reprofile_every,
-                     map_steps=a.map_steps)
+                     map_steps=a.map_steps, log=lambda s: print(s, flush=True))
 info["to_analytic_relres_max"] = float(np.max(relres))
 save_result(out, W, info, src_npz=a.model, model=model)
 summary = {"selected": info["selected"], "scores": info["scores"], "n_q": a.n_q,
