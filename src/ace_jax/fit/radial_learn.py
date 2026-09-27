@@ -25,7 +25,7 @@ import numpy as np
 import optax
 from jax.scipy.linalg import solve_triangular
 
-from .hypers import from_array, to_array
+from .hypers import from_array, log_prior, to_array
 from .ladder import run_map
 from .objective import combine, log_marginal_likelihood, posterior
 from .radial_model import (normalise, radial_gram, require_analytic, roughness,
@@ -126,15 +126,29 @@ def lbfgs_loop(f, x0, *, steps, args=(), statics=(), tol=1e-6, patience=3, memor
     return x_best, f_best, trace, "steps"
 
 
-def theta_map_linear(prob, ds, W, *, steps=300, seed=0, init=None):
+def theta_map_linear(prob, ds, W, *, steps=300, seed=0, init=None, return_stats=False):
     """theta-MAP of the M = 0 LML for the model with radials W (one streaming
     pass for the statistics, then run_map on the cached Gram).  init: optional
-    theta array to warm-start from.  Returns the theta array."""
+    theta array to warm-start from.  Returns the theta array; with
+    return_stats=True returns (a, lin, diag): `lin` the linear statistics of
+    ds it streamed (so a caller can reuse them without another pass) and
+    `diag` a MAP convergence diagnostic computed on the cached `lin` (no extra
+    pass): the final LML, the change in the SVI loss (-log posterior) over the
+    last min(10, steps) steps, and the norm of the log-posterior gradient at
+    the returned theta."""
     lin = linear_statistics(with_radial(prob.model, W), prob.cfg, ds)
     lml = jax.jit(lambda a: log_marginal_likelihood(from_array(a), lin, prob))
-    h = run_map(lml, prob.prior, steps=steps, seed=seed,
-                init=None if init is None else from_array(jnp.asarray(init)))
-    return to_array(h)
+    h, losses = run_map(lml, prob.prior, steps=steps, seed=seed, return_losses=True,
+                        init=None if init is None else from_array(jnp.asarray(init)))
+    a = to_array(h)
+    if not return_stats:
+        return a
+    logpost = lambda x: lml(x) + log_prior(from_array(x), prob.prior)
+    k = min(10, len(losses) - 1)
+    diag = {"lml": float(lml(a)), "map_steps": int(steps),
+            "dloss_last": float(losses[-1] - losses[-1 - k]) if k > 0 else float("nan"),
+            "grad_norm": float(jnp.linalg.norm(jax.grad(logpost)(a)))}
+    return a, lin, diag
 
 
 def _objective(V, a, model, ds, gamma, Q, active, D2, wn, lam, cfg):
@@ -243,16 +257,10 @@ def learn_radial(prob, ds, W0, *, theta0=None, profile=True, lam_rough=0.0, roug
     return V, info
 
 
-def holdout_score(W, a_fit, a_norm, prob, ds_fit, ds_val):
-    """Validation error of the M = 0 linear fit with radials W: the readout is
-    the posterior mean on ds_fit at theta a_fit; the score is
-    sum_{t in E, F} SSE_t / (n_t sigma_t^2) on ds_val with sigma from a_norm
-    (fixed across candidates so scores are comparable), SSE_t = yy - 2 c.b +
-    c.G.c from ds_val's weighted linear statistics -- no design matrix.  A
-    type with no rows in ds_val is skipped."""
-    model = with_radial(prob.model, W)
-    c, _ = posterior(from_array(a_fit), linear_statistics(model, prob.cfg, ds_fit), prob)
-    val = linear_statistics(model, prob.cfg, ds_val)
+def _val_score(c, val, a_norm):
+    """sum_{t in E, F} SSE_t / (n_t sigma_t^2) of readout c on the validation
+    statistics `val`, sigma from a_norm; SSE_t = yy - 2 c.b + c.G.c.  A type
+    with no rows is skipped."""
     th = from_array(a_norm)
     score = 0.0
     for t in "EF":
@@ -265,10 +273,31 @@ def holdout_score(W, a_fit, a_norm, prob, ds_fit, ds_val):
     return score
 
 
+def holdout_score(W, a_fit, a_norm, prob, ds_fit, ds_val, *, lin_fit=None, lin_val=None,
+                  return_readout=False):
+    """Validation error of the M = 0 linear fit with radials W: the readout c is
+    the posterior mean on ds_fit at theta a_fit; the score is
+    sum_{t in E, F} SSE_t / (n_t sigma_t^2) on ds_val with sigma from a_norm
+    (fixed across candidates so scores are comparable), from ds_val's weighted
+    linear statistics -- no design matrix.  A type with no rows in ds_val is
+    skipped.  lin_fit / lin_val: the statistics of ds_fit / ds_val at W if the
+    caller already has them (each saves one streaming pass).  With
+    return_readout=True returns (score, c)."""
+    model = with_radial(prob.model, W)
+    if lin_fit is None:
+        lin_fit = linear_statistics(model, prob.cfg, ds_fit)
+    if lin_val is None:
+        lin_val = linear_statistics(model, prob.cfg, ds_val)
+    c, _ = posterior(from_array(a_fit), lin_fit, prob)
+    score = _val_score(c, lin_val, a_norm)
+    return (score, c) if return_readout else score
+
+
 def gate(candidates, score):
-    """Score every candidate (lower is better); ties resolve to insertion order,
-    so put the conservative choice ("init") first.  Returns (label, scores)."""
-    scores = {k: float(score(w)) for k, w in candidates.items()}
+    """Score every candidate (lower is better) as score(label, W); ties resolve
+    to insertion order, so put the conservative choice ("init") first.
+    Returns (label, scores)."""
+    scores = {k: float(score(k, w)) for k, w in candidates.items()}
     order = list(scores)
     return min(order, key=lambda k: (scores[k], order.index(k))), scores
 
@@ -277,44 +306,63 @@ def fit_radial(prob, ds_fit, ds_val, W0, *, lam_grid=(0.0, 1e-3, 1e-2, 1e-1), th
                map_steps=300, log=None, **learn_kw):
     """learn_radial on ds_fit once per relative roughness weight in lam_grid,
     then keep the best of {init, learned per lam} on the disjoint ds_val
-    (ties -> init).  Each candidate's readout is refitted at its own theta-MAP
-    (warm-started from the init's); scores are normalised by the init's sigmas.
-    Returns (W_sel, info).
+    (ties -> init).
+
+    Every candidate, init included, is scored by ONE procedure: a_fit =
+    theta_map_linear(ds_fit, W, map_steps, init=a0), readout = posterior mean
+    on ds_fit at a_fit, score on ds_val with sigma from a0 (a0 = theta0, or the
+    theta-MAP at the normalised init).  So with steps=0 (learned == init) the
+    scores are identical and the tie goes to init.  Also recorded:
+    info["scores_at_a0"] (every candidate's readout at the common a0, no theta
+    optimisation involved), info["map_diag"] (per-candidate MAP convergence
+    diagnostic, see theta_map_linear), info["theta_fit"] and info["readout"]
+    (the SELECTED candidate's M = 0 readout on ds_fit at its a_fit, length
+    len_basis, species-blocked as fit.rows._place).  Each candidate costs one
+    ds_fit pass plus one ds_val pass.  Returns (W_sel, info).
 
     `log`: optional one-arg callable given one-line progress strings (forwarded
     to `learn_radial`, plus fit_radial's own per-lambda and gate-score lines);
     None (default) is silent and leaves all other behaviour unchanged."""
     require_x64()
     require_analytic(prob.model)
+    labels = [f"learned_lam={float(lam):g}" for lam in lam_grid]
+    if len(set(labels)) != len(labels):
+        raise ValueError(f"fit_radial: duplicate values in lam_grid {tuple(lam_grid)}")
     W0 = jnp.asarray(W0, jnp.float64)
     Q = radial_gram(prob.model, ds_fit, n_prior=learn_kw.get("n_prior", 10.0))
     W_init = normalise(W0, Q, row_active(W0))
     a0 = to_array(theta0) if theta0 is not None else theta_map_linear(prob, ds_fit, W_init, steps=map_steps)
     cands, runs = {"init": W_init}, {}
-    for lam in lam_grid:
+    for lam, label in zip(lam_grid, labels):
         if log is not None:
             log(f"fit_radial: lam={lam:g} starting")
         W, info = learn_radial(prob, ds_fit, W0, theta0=from_array(a0), lam_rough=lam,
                                map_steps=map_steps, log=log, **learn_kw)
-        cands[f"learned_lam={lam:g}"] = W
-        runs[f"{lam:g}"] = info
+        cands[label] = W
+        runs[f"{float(lam):g}"] = info
 
-    # id(W) -> label, only needed to name the candidate in the gate-score log
-    # line; relies on cands' values staying distinct and alive, and on
-    # `gate` passing them to `score` unchanged (no copying).
-    label_of = {id(w): k for k, w in cands.items()} if log is not None else None
+    at_a0, theta_fit, map_diag, readouts = {}, {}, {}, {}
 
-    def score(W):
-        a_fit = a0 if W is W_init else theta_map_linear(prob, ds_fit, W, steps=map_steps, init=a0)
-        s = holdout_score(W, a_fit, a0, prob, ds_fit, ds_val)
+    def score(label, W):
+        a_fit, lin_fit, diag = theta_map_linear(prob, ds_fit, W, steps=map_steps, init=a0,
+                                                return_stats=True)
+        lin_val = linear_statistics(with_radial(prob.model, W), prob.cfg, ds_val)
+        s, c = holdout_score(W, a_fit, a0, prob, ds_fit, ds_val, lin_fit=lin_fit,
+                             lin_val=lin_val, return_readout=True)
+        at_a0[label] = holdout_score(W, a0, a0, prob, ds_fit, ds_val, lin_fit=lin_fit,
+                                     lin_val=lin_val)
+        theta_fit[label], map_diag[label], readouts[label] = np.asarray(a_fit), diag, np.asarray(c)
         if log is not None:
-            log(f"fit_radial: gate {label_of[id(W)]} score={s:.6e}")
+            log(f"fit_radial: gate {label} score={s:.6e} score_at_a0={at_a0[label]:.6e} "
+                f"map_dloss_last={diag['dloss_last']:.3e} map_grad_norm={diag['grad_norm']:.3e}")
         return s
 
     label, scores = gate(cands, score)
     if log is not None:
         log(f"fit_radial: selected {label}")
-    return cands[label], {"selected": label, "scores": scores, "runs": runs, "theta_init": np.asarray(a0)}
+    return cands[label], {"selected": label, "scores": scores, "scores_at_a0": at_a0,
+                          "map_diag": map_diag, "theta_fit": theta_fit, "runs": runs,
+                          "theta_init": np.asarray(a0), "readout": readouts[label]}
 
 
 def _jsonable(x):

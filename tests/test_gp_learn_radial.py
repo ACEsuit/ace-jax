@@ -224,10 +224,13 @@ def test_learn_radial_logs_per_round(small):
 
 def test_gate_ties_go_to_first():
     from ace_jax.fit.radial_learn import gate
-    label, scores = gate({"init": 1, "learned": 2}, lambda w: 0.5)
+    label, scores = gate({"init": 1, "learned": 2}, lambda k, w: 0.5)
     assert label == "init" and scores == {"init": 0.5, "learned": 0.5}
-    label, _ = gate({"init": 1, "learned": 2}, lambda w: 1.0 if w == 1 else 0.1)
+    label, _ = gate({"init": 1, "learned": 2}, lambda k, w: 1.0 if w == 1 else 0.1)
     assert label == "learned"
+    seen = []
+    gate({"init": 1, "learned": 1}, lambda k, w: seen.append(k) or 0.0)   # equal values, distinct labels
+    assert seen == ["init", "learned"]
 
 
 def test_holdout_score_energy_only_split(small):
@@ -246,11 +249,41 @@ def test_fit_radial_gate_prefers_learned_on_recoverable_problem():
     _, ds_val, _ = make_problem(ncfg=12, per_batch=3, start=12)
     Wt, W0, c = _perturbed_truth(prob)
     ds_fit, ds_val = relabel(prob, ds_fit, Wt, c), relabel(prob, ds_val, Wt, c)
-    W, info = fit_radial(prob, ds_fit, ds_val, W0, lam_grid=(0.0,), theta0=THETA,
+    # theta0=None: a0 is the (unconverged) MAP at the init, so this exercises
+    # the gate's common re-MAP for every candidate, init included
+    W, info = fit_radial(prob, ds_fit, ds_val, W0, lam_grid=(0.0,), theta0=None,
                          profile=False, steps=30, map_steps=50)
-    print(info["scores"])
+    print(info["scores"], info["scores_at_a0"])
     assert info["selected"].startswith("learned")
     assert info["scores"][info["selected"]] < info["scores"]["init"]
+    assert info["scores_at_a0"][info["selected"]] < info["scores_at_a0"]["init"]
+
+
+def test_fit_radial_zero_steps_gate_is_fair(small):
+    """steps=0: learned == init, so both are scored by the identical procedure
+    and must tie exactly (-> init), whatever the MAP's convergence."""
+    from ace_jax.fit.radial_learn import fit_radial
+    prob, ds_fit, _ = small
+    _, ds_val, _ = make_problem(ncfg=6, start=6)
+    W, info = fit_radial(prob, ds_fit, ds_val, prob.model.rnl_Wnlq, lam_grid=(0.0,), theta0=None,
+                         steps=0, map_steps=50)
+    s = info["scores"]
+    print(s, info["scores_at_a0"], info["map_diag"])
+    np.testing.assert_allclose(s["learned_lam=0"], s["init"], rtol=1e-6)
+    np.testing.assert_allclose(info["scores_at_a0"]["learned_lam=0"], info["scores_at_a0"]["init"],
+                               rtol=1e-6)
+    assert info["selected"] == "init"
+    assert set(info["map_diag"]) == {"init", "learned_lam=0"}
+    assert all(np.isfinite(d["grad_norm"]) and np.isfinite(d["dloss_last"])
+               for d in info["map_diag"].values())
+    assert info["readout"].shape == (prob.cfg.len_basis,)
+
+
+def test_fit_radial_rejects_duplicate_lambdas(small):
+    from ace_jax.fit.radial_learn import fit_radial
+    prob, ds, _ = small
+    with pytest.raises(ValueError, match="duplicate"):
+        fit_radial(prob, ds, ds, prob.model.rnl_Wnlq, lam_grid=(0.0, 1e-2, 0.01), steps=0)
 
 
 def test_save_result_roundtrip(tmp_path, small):
