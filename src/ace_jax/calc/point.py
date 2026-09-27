@@ -58,7 +58,9 @@ class ACECalculator(Calculator):
         `edge_a_kind` picks the A-basis form (see `EdgeSiteModel.edge_a`):
         "gather", "matmul", or "auto" (default), which calibrates both on the
         actual neighbour list once per power-of-two edge-count bucket and keeps
-        the faster, using the gather below `AUTO_MIN_EDGES` edges.
+        the faster, using the gather below `AUTO_MIN_EDGES` edges.  It does not
+        apply to a pool-first model (PACE, `uses_edge_a` False), which is used
+        as given and reports `last_edge_a_kind` None.
 
         `layout` picks the neighbour layout: "sparse" (edge list), "dense" (padded
         (n, K) per-node blocks; A by a batched outer product), or "auto" (default):
@@ -210,6 +212,9 @@ class ACECalculator(Calculator):
 
     def _model_for(self, rij, zi, zj, send, n_nodes, node_z):
         """The model in the A-basis form to use for this neighbour list."""
+        if not self.model.uses_edge_a:        # pool-first (PACE): the form is inert
+            self.last_edge_a_kind = None
+            return self.model
         n_edges = int(rij.shape[0])
         if self.edge_a_kind != "auto":
             kind = self.edge_a_kind

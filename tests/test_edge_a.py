@@ -6,6 +6,10 @@ differ -- the gather's is an axis-1 scatter whose cost per slot grows with buffe
 length, the matmul's is a matmul and is flat -- and neither wins on every
 backend.  Whatever the cost, the numbers must not move, so these tests demand
 bit-identity rather than a tolerance.
+
+ACEModel only: PACE builds A pool-first (EdgeSiteModel.pool_first_*, see
+tests/test_pool_first.py) and never forms per-edge A rows, so the form does not
+apply to it (Task 5 ruling: these tests moved from PACE fixtures to ACEModel).
 """
 import jax
 
@@ -14,38 +18,21 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from conftest import FIXTURE_DIR, MODELS, pace_fixture, species_index
+from conftest import FIXTURE_DIR, MODELS, species_index
 
-from ace_jax.eval import calibrate_edge_a, load, sparse_graph, with_edge_a_kind
+from ace_jax.eval import calibrate_edge_a, load, with_edge_a_kind
 
-# Both model families share the A-basis forms (eval/edge_model.py), so every
-# test here runs on the ACE npz models and on PACE .yace fixtures alike.
-PACE = ("gesi_sbessel", "sige_zbl")
-
-
-@pytest.fixture(params=[f"ace:{k}" for k in MODELS] + [f"pace:{k}" for k in PACE])
+@pytest.fixture(params=list(MODELS))
 def model_path(request):
-    fam, name = request.param.split(":")
-    if fam == "ace":
-        p = FIXTURE_DIR / MODELS[name]
-        if not p.exists():
-            pytest.skip(f"{p.name} not generated")
-        return p
-    return pace_fixture(FIXTURE_DIR / "pace" / f"{name}.yace")
+    p = FIXTURE_DIR / MODELS[request.param]
+    if not p.exists():
+        pytest.skip(f"{p.name} not generated")
+    return p
 
 
 def _case(model_path, dtype, kind):
-    """(model, (rij, zi, zj, senders, n_nodes, node_z)) for either family."""
+    """(model, (rij, zi, zj, senders, n_nodes, node_z)) for an ACE npz model."""
     model, meta, z = load(str(model_path), dtype=dtype, edge_a_kind=kind)
-    if str(model_path).endswith(".yace"):
-        from ase import Atoms
-        ref = np.load(str(model_path).replace(".yace", "_ref.npz"))
-        at = Atoms(numbers=ref["Z_bulk"], positions=ref["pos_bulk"], cell=ref["cell_bulk"], pbc=True)
-        g = sparse_graph(at.positions, at.cell.array, at.pbc, meta["rcut"])
-        z2i = {zz: i for i, zz in enumerate(meta["elements"])}
-        nz = jnp.asarray([z2i[int(x)] for x in at.numbers], jnp.int32)
-        send, recv = jnp.asarray(g.senders, jnp.int32), jnp.asarray(g.receivers, jnp.int32)
-        return model, (jnp.asarray(g.rij, dtype), nz[send], nz[recv], send, len(at), nz)
     n = int(z["test_pos"].shape[1])
     send = jnp.asarray(z["test_edge_i"], jnp.int32)
     recv = jnp.asarray(z["test_edge_j"], jnp.int32)

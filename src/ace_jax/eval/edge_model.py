@@ -15,6 +15,11 @@ selectors), `edge_a_factors(rij, zi, zj, mask)` (the two per-edge factors of the
 A basis, zero on invalid edges) and `a_channels` (1, or the number of
 neighbour-species channels A carries), plus the
 fields `aspec_r`, `aspec_y`, `edge_a_kind`, `a_sel_r`, `a_sel_y` and `E0`.
+
+A model whose A basis is built pool-first (`pool_first_dense` /
+`pool_first_sparse`; PACE) provides instead `pool_first_weights()` and
+`pool_first_sel_y`, and sets `uses_edge_a = False`: the `edge_a` form is then
+inert and `ACECalculator` does not calibrate it.
 """
 import dataclasses
 import time
@@ -40,6 +45,10 @@ def check_edge_a_kind(kind):
 
 class EdgeSiteModel(eqx.Module):
     """Base class: no fields of its own, only the shared behaviour."""
+
+    # False for a model whose energy path is pool-first (A never formed per edge),
+    # so the `edge_a` form, and its calibration, do not apply.
+    uses_edge_a = True
 
     # -------------------------------------------------- A-basis product
     def edge_a(self, R, Y):
@@ -95,6 +104,45 @@ class EdgeSiteModel(eqx.Module):
         mu = jnp.arange(C, dtype=self.aspec_r.dtype)[:, None]
         sel = ((mu * nc + self.aspec_r[None, :]) * ny + self.aspec_y[None, :]).reshape(-1)
         return A_full[:, sel]
+
+    # -------------------------------------------------- pool-first A (feature-major)
+    def pool_first_dense(self, b, Y, zj, node_z):
+        """A_t (C*n_a, n) = sum_k W[z_i, z_j] b_k (x) Y_y, pooled BEFORE W.
+
+        Every model here has a radial that is linear in per-pair coefficients
+        over a fixed per-edge basis b (PACE: g_k with crad; ACE: polynomials,
+        spline or factorised table with its weights), so the per-edge R_nl is
+        never formed: pool b (x) Y per (node, neighbour-species channel), then
+        apply W per node.  Feature-major output so the product-basis gathers read
+        whole rows.  b (n, K, n_b), Y (n, K, n_Y), zj (n, K) neighbour channel.
+        docs/pace-performance-gap.md #4, #5."""
+        n, K, nb = b.shape
+        C = self.a_channels
+        hi = jax.lax.Precision.HIGHEST
+        if C > 1:
+            oh = jax.nn.one_hot(zj, C, dtype=b.dtype)
+            b = (oh[..., :, None] * b[..., None, :]).reshape(n, K, C * nb)
+        Ag = jnp.einsum("nkg,nky->ngy", b, Y, precision=hi)                  # (n, C*nb, nY)
+        Agy = jnp.matmul(Ag, self.pool_first_sel_y, precision=hi)            # (n, C*nb, n_a)
+        Agy = Agy.reshape(n, C, nb, -1)
+        W = self.pool_first_weights()                                        # (NZ, C, n_a, nb)
+        At = jnp.einsum("nmka,nmak->man", Agy, W[node_z], precision=hi)     # (C, n_a, n)
+        return At.reshape(C * At.shape[1], n)
+
+    def pool_first_sparse(self, b, Y, seg, zj, node_z, n_nodes):
+        """`pool_first_dense` for an edge list: pool b (x) Y per (node, channel)
+        by segment_sum, then W per node.  Same output layout, (C*n_a, n_nodes)."""
+        C = self.a_channels
+        hi = jax.lax.Precision.HIGHEST
+        nb = b.shape[1]
+        outer = (b[:, :, None] * Y[:, None, :]).reshape(b.shape[0], nb * Y.shape[1])  # explicit: E may be 0
+        Ag = jax.ops.segment_sum(outer, seg * C + (zj if C > 1 else 0),
+                                 num_segments=n_nodes * C)
+        Ag = Ag.reshape(n_nodes, C, nb, -1)
+        Agy = jnp.matmul(Ag, self.pool_first_sel_y, precision=hi)             # (n, C, nb, n_a)
+        W = self.pool_first_weights()
+        At = jnp.einsum("nmka,nmak->man", Agy, W[node_z], precision=hi)     # (C, n_a, n)
+        return At.reshape(C * At.shape[1], n_nodes)
 
     # -------------------------------------------------- energy / forces / virial
     def energy_forces_virial(self, rij, zi, zj, senders, receivers, n_nodes,
