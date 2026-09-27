@@ -137,9 +137,17 @@ def _place_labels(fig, min_gap_pt=9.0):
                         fontsize=7, color=INK2, va="center")
 
 
+def _measures_dtype(r):
+    """False for rows whose dtype label does not change what ran: Symmetrix
+    (MACE in LAMMPS) evaluates in double whatever the input precision."""
+    return not (r.get("code") == "mace" and r.get("mode") == "lammps"
+                and r.get("dtype") == "float32")
+
+
 def fig_throughput(rows, out, dtype="float64", size="medium"):
     ok = [r for r in rows if r.get("status") == "ok" and r.get("mode") in MODES
-          and r.get("dtype") == dtype and r.get("size") == size and throughput(r)]
+          and r.get("dtype") == dtype and r.get("size") == size and throughput(r)
+          and _measures_dtype(r)]
     if not ok:
         return None
     systems = sorted({r["system"] for r in ok})

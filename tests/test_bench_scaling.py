@@ -532,3 +532,24 @@ def test_export_bundle_child_writes_a_bundle(tmp_path):
     row = {"name": "x", "system": "SiGe", "path": y, "elements": ["Si", "Ge"]}
     bundle, layout, t = export_bundle(row, supercell("SiGe", 256), "float64", tmp_path)
     assert pathlib.Path(bundle).exists() and layout in ("dense", "sparse") and t > 0
+
+
+def test_float32_figure_omits_symmetrix_lammps(tmp_path, monkeypatch):
+    """Symmetrix evaluates in double whatever the input: MACE-LAMMPS float32
+    rows repeat float64, so the float32 figure must not draw them."""
+    import matplotlib
+    matplotlib.use("Agg")
+    from scaling import plot
+    rows = []
+    for code, mode in (("mace", "lammps"), ("mace", "standalone"), ("acejax-pace", "standalone")):
+        for n in (256, 512):
+            rows.append({"code": code, "mode": mode, "model": f"{code}/SiGe/medium", "size": "medium",
+                         "system": "SiGe", "n_atoms": n, "device": "gpu", "dtype": "float32",
+                         "host": "moriarty-gpu", "status": "ok", "call_s": 1e-3, "step_s": 1e-3,
+                         "atom_steps_per_s": n / 1e-3})
+    figs = []
+    monkeypatch.setattr(plot.plt, "close", lambda f=None: figs.append(f))
+    plot.fig_throughput(rows, tmp_path, dtype="float32")
+    dashed = [ln for ax in figs[-1].axes for ln in ax.lines
+              if ln.get_linestyle() == "--" and len(ln.get_xdata()) > 1]
+    assert dashed == []
