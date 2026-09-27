@@ -171,7 +171,13 @@ coefficients inside the trace.
     pair term;
   - on open clusters and periodic cells.
 
-  The optimised code must match them to 1e-12 relative (1e-5 in float32).
+  The optimised code must match them to 1e-12 relative in float64. In float32
+  the gate is accuracy, not bit-level agreement with the old float32 rounding:
+  each float32 result is compared with the float64 reference and must be no
+  worse than the old float32 result was, i.e. at most max(1e-5,
+  1.25 × old-float32 error) relative. (Two independently rounded float32
+  results differ by about their own error, around 1e-4 here, so a 1e-5 gate
+  on new-vs-old float32 would reject even a more accurate rewrite.)
 - **Existing parity tests stay green:** ML-PACE, python-ace, Julia
   (julia-parity CI), and `tests/test_export_lammps.py` (bundle vs calculator
   at 1e-10).

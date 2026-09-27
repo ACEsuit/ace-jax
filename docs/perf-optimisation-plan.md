@@ -37,7 +37,9 @@ profiling and micro-benchmarks, and the `bench/scaling/` suite.
   - in float64: dE per atom ≤ 1e-12 × |E| per atom, and dF and dV within
     1e-12 relative. That is, `assert_allclose(rtol=1e-12, atol=1e-12)` on
     E, F and V;
-  - in float32: 1e-5 relative;
+  - in float32: measured against the float64 reference, no worse than the
+    old float32 result, i.e. at most max(1e-5, 1.25 × old-float32 error)
+    relative (Task 2 ruling);
   - existing tests: ML-PACE, python-ace and Julia parity, and
     `tests/test_export_lammps.py` (1e-10 / 1e-9), stay green.
 - **Test commands:**
