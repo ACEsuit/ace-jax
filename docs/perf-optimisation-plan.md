@@ -39,7 +39,9 @@ profiling and micro-benchmarks, and the `bench/scaling/` suite.
     E, F and V;
   - in float32: measured against the float64 reference, no worse than the
     old float32 result, i.e. at most max(1e-5, 1.25 × old-float32 error)
-    relative (Task 2 ruling);
+    relative (Task 2 ruling); forces use 2.0 instead of 1.25 when the float64
+    reference forces are below 1e-3 eV/Å (max|F64| < 1e-3: pure rounding
+    noise), energy and stress keep 1.25 (Task 5 ruling);
   - existing tests: ML-PACE, python-ace and Julia parity, and
     `tests/test_export_lammps.py` (1e-10 / 1e-9), stay green.
 - **Test commands:**

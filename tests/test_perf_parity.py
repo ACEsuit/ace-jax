@@ -35,15 +35,26 @@ def _err(x, x64):
     return np.max(np.abs(x - x64)) / max(1.0, np.max(np.abs(x64)))
 
 
-def _float32_gate(old32, x64):
+NOISE_FORCES = 1e-3   # eV/A: below this the float64 reference forces are ~0
+
+
+def _float32_gate(old32, x64, factor=1.25):
     """Task 2 ruling: a float32 result must be no worse than the old float32
     result was, i.e. at most max(1e-5, 1.25 x old-float32 error) relative to
     the float64 reference. Plain bit-similarity to the old float32 rounding
     (a flat 1e-5 new-vs-old gate) is not used, because two independently
     rounded float32 evaluations of the same quantity differ from each other by
     about their own error against the true (float64) answer, which would
-    reject a rewrite that is more accurate than the old one."""
-    return max(1e-5, 1.25 * _err(old32, x64))
+    reject a rewrite that is more accurate than the old one.
+
+    Task 5 ruling: forces on a configuration whose float64 reference forces
+    are below NOISE_FORCES (max|F64| < 1e-3 eV/A, e.g. a perfect crystal) are
+    pure float32 rounding noise, so the caller passes factor=2.0 for them;
+    energy and stress keep 1.25. Measured on si_chebpow_fs (2-atom diamond
+    cell, dense): the unrattled cell drew 1.68e-4 (pool-first) vs 1.14e-4
+    (old) = 1.47x, while over 19 rattled seeds new/old had median 1.02 and
+    max 1.81 -- a noise draw, not a regression."""
+    return max(1e-5, factor * _err(old32, x64))
 
 
 @pytest.mark.parametrize("skin", [0.0, 1.0])
@@ -71,6 +82,7 @@ def test_matches_frozen_reference(ref, skin):
     E_old32, F_old32, S_old32 = float(r["E"]), r["F"], r["S"]
 
     assert _err(E, E64) <= _float32_gate(E_old32, E64)
-    assert _err(F, F64) <= _float32_gate(F_old32, F64)
+    f_factor = 2.0 if np.max(np.abs(F64)) < NOISE_FORCES else 1.25
+    assert _err(F, F64) <= _float32_gate(F_old32, F64, f_factor)
     if S is not None:
         assert _err(S, S64) <= _float32_gate(S_old32, S64)

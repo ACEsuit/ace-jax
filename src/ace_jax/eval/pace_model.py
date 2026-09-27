@@ -185,8 +185,14 @@ class PACEModel(EdgeSiteModel):
         """Padded edges sit at the largest bond cutoff; they are masked too."""
         return jnp.max(self.radparams[..., 1])
 
+    def pool_first_widths(self):
+        """(n_b, n_Y): the per-edge fixed radial basis and harmonic widths
+        (`estimate_a_bytes` for the pool-first form)."""
+        return self.nradbase, (self.lmax + 1) ** 2
+
     def edge_a_widths(self):
-        """(radial columns [g_k | R_nl], harmonic columns)."""
+        """(radial columns [g_k | R_nl], harmonic columns) of the per-edge form;
+        inert for PACE's energy path (pool-first)."""
         nrad, nl = self.crad.shape[2], self.crad.shape[3]
         return self.nradbase + nrad * nl, nl * nl
 

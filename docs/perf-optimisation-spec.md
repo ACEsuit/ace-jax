@@ -177,7 +177,10 @@ coefficients inside the trace.
   worse than the old float32 result was, i.e. at most max(1e-5,
   1.25 × old-float32 error) relative. (Two independently rounded float32
   results differ by about their own error, around 1e-4 here, so a 1e-5 gate
-  on new-vs-old float32 would reject even a more accurate rewrite.)
+  on new-vs-old float32 would reject even a more accurate rewrite.) Forces on
+  a configuration whose float64 reference forces are below 1e-3 eV/Å
+  (max|F64| < 1e-3) are pure float32 rounding noise, so their factor is 2.0
+  instead of 1.25; energy and stress keep 1.25 (Task 5 ruling).
 - **Existing parity tests stay green:** ML-PACE, python-ace, Julia
   (julia-parity CI), and `tests/test_export_lammps.py` (bundle vs calculator
   at 1e-10).

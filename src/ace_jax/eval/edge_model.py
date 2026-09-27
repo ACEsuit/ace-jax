@@ -257,9 +257,24 @@ def estimate_a_bytes(model, layout, n_nodes, n_edges, max_neighbours, itemsize):
     sparse ~ 2 E (n_cols + n_Y + n_A)                    (factors + per-edge rows)
     with C neighbour-species channels.  Dense grows with C and with the (n, K)
     padding; sparse only with the edge count.
+
+    A pool-first model (`uses_edge_a` False; PACE) never forms per-edge columns
+    or A rows: per edge it holds the fixed basis b (n_b wide) and Y, per node
+    the pooled b (x) Y and A, so with n_b, n_Y = `pool_first_widths()`
+    dense  ~ 2 n K (C n_b + n_Y) + 3 n C (n_b n_Y + n_A)
+    sparse ~ 2 E (n_b + n_Y + n_b n_Y) + 3 n C (n_b n_Y + n_A)
+    (same coefficients as above; not refitted on a GPU).
     """
-    nc, ny = model.edge_a_widths()
     C, n_a = model.a_channels, int(model.aspec_r.shape[0])
+    if not model.uses_edge_a:
+        nb, ny = model.pool_first_widths()
+        per_node = 3 * n_nodes * C * (nb * ny + n_a)
+        if layout == "dense":
+            return itemsize * (2 * n_nodes * max_neighbours * (C * nb + ny) + per_node)
+        if layout == "sparse":
+            return itemsize * (2 * n_edges * (nb + ny + nb * ny) + per_node)
+        raise ValueError(f"layout must be one of {LAYOUTS}, got {layout!r}")
+    nc, ny = model.edge_a_widths()
     if layout == "dense":
         return itemsize * (2 * n_nodes * max_neighbours * (C * nc + ny) + 3 * n_nodes * C * nc * ny)
     if layout == "sparse":
