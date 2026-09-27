@@ -168,6 +168,62 @@ The curvature penalty as implemented barely restrains this:
 The decisive test is whether most of the held-out gain survives when the
 change is forced to be smooth.
 
+## Prior experiments: capping the span beats a spectral prior
+
+Two follow-up runs on lestrade used the same data, split, 40 steps and gate as
+above:
+
+- **Capped span:** `--n-q 12`, with λ ∈ {0, 1e-1}.
+- **Spectral prior:** a penalty `λ_spec · Σ(1+q)^4 ΔW_q²` on the change from
+  the initial radials, with n_q = 30 and λ_spec ∈ {1e-5, 1e-4}.
+
+Held-out score, as the change relative to the initial radials:
+
+| System | n_q=30, no prior | n_q=30 + spectral 1e-4 | n_q=12, λ=0 | n_q=12, λ=0.1 |
+|---|---|---|---|---|
+| SiGe (init 14.03) | 11.09 (−21%) | 10.51 (−25%) | 1.43 (−90%) | **1.13 (−92%)** |
+| Cantor (init 207.8) | 108.4 (−48%) | 105.2 (−49%) | **94.5 (−55%)** | 96.9 (−53%) |
+
+The ranking is the same when every candidate is scored at the common θ.
+
+![scores](figures/learn-radial/compare_A_scores.png)
+
+**Capping the span fixes the optimisation; the spectral prior does not.**
+
+- **The n_q = 30 failure was conditioning, not missing regularisation.**
+  - With n_q = 30, 40 L-BFGS steps mostly move ill-conditioned high-degree
+    directions. The result is a tiny change (≤1–5%) with a flat spectrum.
+    Penalising those degrees with a spectral prior leaves this almost
+    unchanged.
+  - With n_q = 12 the same budget produces much larger changes: up to 26%
+    of a radial on SiGe and 11% on Cantor. These are smooth, with lobes about
+    1 Å wide, and the spectrum of the change decays with degree, as the
+    initial radials' spectrum does.
+- **Held-out error drops much further:** −92% on SiGe and −55% on Cantor.
+- **The largest lobes partly sit in gaps between coordination shells.** One
+  example is the SiGe Ge–Ge lobe of −0.65 at 3.5 Å, between the 2.4 Å and
+  4 Å peaks, where there is little training data. The validation split
+  shares those gaps, so this gate cannot say whether that behaviour
+  transfers, for example to MD that samples those distances. The fitting
+  prior should control change where the data density is low: a norm on ΔR
+  under a uniform-in-r measure, in addition to the data-weighted gauge.
+
+![SiGe radial change](figures/learn-radial/compare_B_radial_change_SiGe.png)
+
+![Cantor radial change](figures/learn-radial/compare_B_radial_change_Cantor.png)
+
+![change spectra](figures/learn-radial/compare_C_change_spectrum.png)
+
+**Recommended next steps:**
+
+- Make a modest span the default: `n_q` near the initial span plus a few,
+  e.g. `--n-q 12`.
+- Add a data-gap prior on ΔR.
+- Check transfer outside the training distribution (MD, OOD configs) before
+  adopting learned radials.
+
+Reproduce with `bench/learn_radial/compare_plots.py`.
+
 ## Caveats
 
 - **L-BFGS had not converged at 40 steps.** Every round in both systems ended
