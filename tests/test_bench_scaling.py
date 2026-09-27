@@ -421,7 +421,9 @@ def test_run_capped_kills_a_case_over_its_memory_cap():
     pytest.importorskip("psutil")
     from scaling.sweep import run_capped
     grow = [sys.executable, "-c",
-            "import time\nx=[]\nfor _ in range(60):\n    x.append(bytearray(20*2**20)); time.sleep(0.05)\n"
+            # b"x" * n writes every page: a zero-filled bytearray can stay
+            # non-resident (lazy zero pages), so RSS -- and the cap -- never saw it
+            "import time\nx=[]\nfor _ in range(60):\n    x.append(b'x' * (20*2**20)); time.sleep(0.05)\n"
             "print('{\"status\": \"ok\"}')"]
     rc, out, err, peak, capped = run_capped(grow, env=None, timeout=60, cap_bytes=200 * 2**20, poll=0.05)
     assert capped and rc != 0 and "ok" not in out and peak > 200 * 2**20
