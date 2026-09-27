@@ -45,7 +45,7 @@ p.add_argument("--steps", type=int, default=40); p.add_argument("--reprofile-eve
 p.add_argument("--lam-grid", default="0,1e-2", help="relative roughness weights")
 p.add_argument("--spec-grid", default="0", help="relative spectral-prior weights on the radial change; useful range ~1e-6..1e-4 at --spec-p 4 (see relative_lambda_spec)")
 p.add_argument("--spec-p", type=float, default=4.0, help="spectral prior degree power (1+q)^p")
-p.add_argument("--gap-grid", default="0", help="relative data-gap-prior weights on the radial change, measured under a uniform-in-r Gram rather than the empirical pair-distance density; useful range ~0.1..3 (see relative_lambda_gap)")
+p.add_argument("--gap-grid", default="0", help="relative data-gap-prior weights on the radial change, measured under a uniform-in-r Gram rather than the empirical pair-distance density; useful range ~1..30 (see relative_lambda_gap)")
 p.add_argument("--map-steps", type=int, default=300)
 a = p.parse_args()
 

@@ -204,6 +204,8 @@ def relative_lambda_spec(lam_spec, r0, n_active):
     1e-6 is negligible, 1e-5..3e-5 is comparable to lam_rough=1e-2, and 1e-4
     already dominates the fit. Sweep roughly 1e-6..1e-4, not the lam_rough
     grid. The window moves by about n_q^dp per unit change of p."""
+    if lam_spec < 0:
+        raise ValueError(f"lam_spec must be >= 0, got {lam_spec}")
     if not lam_spec:
         return 0.0
     if n_active <= 0:
@@ -217,18 +219,16 @@ def relative_lambda_gap(lam_gap, r0, n_active):
     radial change: n_active is the number of active radials (row_active
     count), not a roughness or spectral scale.
 
-    Scale: measured on si_tiny (the si_ace_model fixture, n_q=15, ncfg=12)
-    with an iid-random synthetic change of ~25% of each active radial
-    (measured as ||W - W_ref|| / ||W_ref|| over active rows), gap_penalty(W,
-    W_ref, U) / n_active is about 0.12, i.e. the penalty/r0 ratio (the
-    fraction of r0 the gap term contributes) is about lam_gap * 0.12:
-    lam_gap=0.1 is a mild penalty (~1.2% of r0), lam_gap=1 is comparable to
-    the fit term itself (~12% of r0), and lam_gap=10 already dominates the
-    fit (~120% of r0). Sweep roughly 0.1..3, well above the lam_rough grid
-    and not directly comparable to the lam_spec window -- the two priors act
-    on different quantities (lam_rough the raw curvature of W, lam_spec the
-    change under a per-degree measure that decays fast with degree, lam_gap
-    the change under a flat, uniform-in-r measure over [0.8 r_min, rcut])."""
+    Scale, measured on the real learned change (n_q=12, lam_gap=0, 40 steps):
+    gap_penalty(W_learned, W_ref, U) / n_active = 0.009 (SiGe) and 0.017
+    (Cantor), so the penalty/r0 ratio is about lam_gap * 0.01-0.02. Learning
+    gains ~0.5 r0 in the fit term, so lam_gap ~1 is weak, ~10 is comparable,
+    and ~30 or more is strong. Sweep roughly 1..30. A synthetic iid-random 25%
+    change on si_tiny gave 0.12; that overstates the scale about 10x
+    because it spreads change over every degree. The weight is not comparable
+    to lam_rough or lam_spec, which act on other quantities."""
+    if lam_gap < 0:
+        raise ValueError(f"lam_gap must be >= 0, got {lam_gap}")
     if not lam_gap:
         return 0.0
     if n_active <= 0:
