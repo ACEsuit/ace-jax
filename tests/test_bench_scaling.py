@@ -118,8 +118,18 @@ def test_capacity_covers_ghosts_and_neighbours():
     at = supercell("SiGe", 256)
     cap = capacity(at, 5.0)
     assert cap["max_atoms"] > 256                      # owned + ghost shell
-    assert cap["k_dense"] >= cap["k_max"] + 8
+    assert cap["k_dense"] == cap["k_max"] + 4
     assert cap["max_edges"] >= 256 * cap["k_max"]
+    assert cap["max_owned"] == int(np.ceil(1.1 * 256))
+
+
+def test_capacity_sizes_slots_for_rcut_not_skin():
+    from scaling.run_lammps import capacity
+    at = supercell("Cantor", 8192)
+    c = capacity(at, 5.0)
+    assert c["max_owned"] == int(np.ceil(1.1 * len(at)))
+    c_skin = capacity(at, 6.0)                      # what rcut + skin used to give
+    assert c["k_dense"] < c_skin["k_dense"]
 
 
 def test_read_pe_and_dump(tmp_path):

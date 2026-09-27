@@ -91,7 +91,7 @@ def test_bundle_written(tmp_path):
     on_disk = json.loads((tmp_path / "m.json").read_text())
     assert on_disk["contract"]["n_species"] == 2
     assert on_disk["ace_jax"] == {"layout": "dense", "elements": [32, 14],
-                                  "type_elements": [32, 14], "k_dense": 64}
+                                  "type_elements": [32, 14], "k_dense": 64, "max_owned": None}
     assert b["ace_jax"]["layout"] == "dense"
 
 
@@ -112,6 +112,18 @@ def test_lammps_type_order_differs_from_model_order(layout):
     E = float(jnp.sum(f(jnp.asarray(at.positions), species, graph)))
     at.calc = ACECalculator(y, layout="sparse")
     assert E == pytest.approx(at.get_potential_energy(), abs=1e-10)
+
+
+def test_bundle_records_max_owned_even_for_sparse(tmp_path):
+    """The sparse layout has no row concept, but max_owned is still recorded
+    (the value the caller sized the bundle's neighbour slots for)."""
+    pytest.importorskip("lammps_jax")
+    from ace_jax.export.lammps import export_lammps
+    y = str(pace_fixture(FIX / "gesi_sbessel.yace"))
+    model, meta, _ = load(y)
+    b = export_lammps(model, meta, tmp_path / "m.json", max_atoms=256, max_edges=256 * 64,
+                      layout="sparse", max_owned=200)
+    assert b["ace_jax"]["max_owned"] == 200 and b["ace_jax"]["layout"] == "sparse"
 
 
 def test_bundle_records_type_order(tmp_path):
@@ -137,3 +149,35 @@ def test_dense_overflow_makes_forces_nan_too():
     f = make_energy_fn(model, len(meta["elements"]), "dense", k_dense=2)
     g = jax.grad(lambda p: jnp.sum(f(p, species, graph)))(jnp.asarray(at.positions))
     assert np.isnan(np.asarray(g)).any()
+
+
+@pytest.mark.parametrize("layout", ["dense"])
+def test_owned_rows_bundle_matches_calculator(layout):
+    y = str(pace_fixture(FIX / "gesi_sbessel.yace"))
+    model, meta, _ = load(y)
+    at = _cluster()
+    graph, g = _lammps_graph(at, meta["rcut"])
+    z2i = {z: i for i, z in enumerate(meta["elements"])}
+    species = jnp.asarray([z2i[int(z)] for z in at.numbers], jnp.int32)
+    K = int(np.bincount(g.senders, minlength=len(at)).max())
+    f = make_energy_fn(model, len(meta["elements"]), layout, k_dense=K + 3,
+                       n_rows=int(np.ceil(1.1 * len(at))))
+    E, G = jax.value_and_grad(lambda p: jnp.sum(f(p, species, graph)))(jnp.asarray(at.positions))
+    at.calc = ACECalculator(y, layout="sparse", skin=0.0)
+    assert float(E) == pytest.approx(at.get_potential_energy(), abs=1e-10)
+    np.testing.assert_allclose(-np.asarray(G), at.get_forces(), atol=1e-9)
+
+
+def test_owned_rows_overflow_is_nan():
+    """A sender >= n_rows must make the energy NaN, and (multiplicative
+    overflow, not jnp.where(overflow, nan, e)) the forces too."""
+    y = str(pace_fixture(FIX / "gesi_sbessel.yace"))
+    model, meta, _ = load(y)
+    at = _cluster()
+    graph, _ = _lammps_graph(at, meta["rcut"])
+    n_rows = len(at) // 2
+    species = jnp.zeros(len(at), jnp.int32)
+    f = make_energy_fn(model, len(meta["elements"]), "dense", k_dense=64, n_rows=n_rows)
+    E, G = jax.value_and_grad(lambda p: jnp.sum(f(p, species, graph)))(jnp.asarray(at.positions))
+    assert np.isnan(float(E))
+    assert np.isnan(np.asarray(G)).any()

@@ -95,14 +95,19 @@ def read_dump_forces(path):
 
 def capacity(at, rcut, skin=1.0):
     """lammps-jax buffer sizes for this structure: owned + ghost atoms (the
-    periodic shell within rcut + skin of each face), neighbours per atom."""
+    periodic shell within rcut + skin of each face) size the LAMMPS position
+    buffer (max_atoms); neighbour slots (k_dense, max_edges) are sized for
+    rcut alone -- lammps-jax packs only real edges within the cutoff, and the
+    dense energy function evaluates owned rows only (max_owned)."""
     from ace_jax.eval import sparse_graph
     L = np.linalg.norm(at.cell.array, axis=1)
     ghost = float(np.prod((L + 2 * (rcut + skin)) / L))
-    g = sparse_graph(at.positions, at.cell.array, at.pbc, rcut + skin)
+    g = sparse_graph(at.positions, at.cell.array, at.pbc, rcut)
     k_max = int(np.bincount(g.senders, minlength=len(at)).max())
+    max_owned = int(np.ceil(1.1 * len(at)))
+    k_dense = k_max + 4
     return {"max_atoms": int(np.ceil(len(at) * ghost * 1.1)), "k_max": k_max,
-            "k_dense": k_max + 8, "max_edges": int(len(at) * (k_max + 8))}
+            "k_dense": k_dense, "max_edges": max_owned * k_dense, "max_owned": max_owned}
 
 
 def _export_inprocess(row, at, dtype, workdir, layout="auto"):
@@ -120,7 +125,8 @@ def _export_inprocess(row, at, dtype, workdir, layout="auto"):
     t0 = time.perf_counter()
     b = export_lammps(model, meta, pathlib.Path(workdir) / "bundle.json", max_atoms=cap["max_atoms"],
                       max_edges=cap["max_edges"], k_dense=cap["k_dense"], dtype=dtype, layout=layout,
-                      type_elements=[atomic_numbers[e] for e in row["elements"]])  # data-file order
+                      type_elements=[atomic_numbers[e] for e in row["elements"]],  # data-file order
+                      max_owned=cap["max_owned"])
     return str(pathlib.Path(workdir) / "bundle.json"), b["ace_jax"]["layout"], time.perf_counter() - t0
 
 

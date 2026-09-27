@@ -21,8 +21,15 @@ import numpy as np
 from ..eval.edge_model import LAYOUTS, estimate_a_bytes
 
 
-def make_energy_fn(model, n_species, layout, k_dense=None, type_map=None):
-    """type_map[t] is the model species of LAMMPS type t+1 (default: identity)."""
+def make_energy_fn(model, n_species, layout, k_dense=None, type_map=None, n_rows=None):
+    """type_map[t] is the model species of LAMMPS type t+1 (default: identity).
+
+    n_rows (dense only): evaluate rows < n_rows only -- owned atoms, which
+    LAMMPS numbers first -- padding the rest with zero energy, and return NaN
+    (energy and, via the multiplicative overflow below, forces too) if a
+    sender is >= n_rows or a slot overflows k_dense.  Capped at the actual
+    row count, so n_rows >= the buffer's row count is a no-op.
+    """
     if layout not in LAYOUTS:
         raise ValueError(f"layout must be one of {LAYOUTS}, got {layout!r}")
     if layout == "dense" and not k_dense:
@@ -30,6 +37,7 @@ def make_energy_fn(model, n_species, layout, k_dense=None, type_map=None):
 
     def energy_fn(positions, species, graph):
         n = positions.shape[0]
+        nr = n if n_rows is None else min(n_rows, n)
         m = graph.edge_mask
         s = jnp.where(m, graph.senders, 0)
         r = jnp.where(m, graph.receivers, 0)
@@ -40,23 +48,28 @@ def make_energy_fn(model, n_species, layout, k_dense=None, type_map=None):
         rij = jnp.where(m[:, None], positions[r] - positions[s], pad)
         if layout == "sparse":
             return model.site_energies(rij, node_z[s], node_z[r], s, n, node_z, m)
-        # dense: rank each edge within its centre's group, whatever the order
-        key = jnp.where(m, s, n)                              # padding sorts last
+        # dense: rank each edge within its centre's group, whatever the order,
+        # restricted to rows < nr (owned atoms, when n_rows narrows the buffer)
+        in_range = m & (s < nr)
+        key = jnp.where(in_range, s, nr)                      # out of range sorts last
         order = jnp.argsort(key, stable=True)
         ks = key[order]
-        counts = jax.ops.segment_sum(jnp.ones_like(ks), ks, num_segments=n + 1)
+        counts = jax.ops.segment_sum(jnp.ones_like(ks), ks, num_segments=nr + 1)
         starts = jnp.cumsum(counts) - counts
         slot_sorted = jnp.arange(ks.shape[0]) - starts[ks]
         slot = jnp.zeros_like(slot_sorted).at[order].set(slot_sorted)
-        ok = m & (slot < k_dense)
-        row = jnp.where(ok, s, n)                             # out of range: dropped
+        ok = in_range & (slot < k_dense)
+        row = jnp.where(ok, s, nr)                            # out of range: dropped
         col = jnp.where(ok, slot, 0)
-        rd = jnp.broadcast_to(pad, (n, k_dense, 3)).at[row, col].set(rij, mode="drop")
-        idx = jnp.zeros((n, k_dense), jnp.int32).at[row, col].set(r, mode="drop")
-        md = jnp.zeros((n, k_dense), bool).at[row, col].set(True, mode="drop")
-        e = model.site_energies_dense(rd, jnp.broadcast_to(node_z[:, None], idx.shape),
-                                      node_z[idx], md, node_z)
-        overflow = jnp.any(m & (slot >= k_dense))
+        rd = jnp.broadcast_to(pad, (nr, k_dense, 3)).at[row, col].set(rij, mode="drop")
+        idx = jnp.zeros((nr, k_dense), jnp.int32).at[row, col].set(r, mode="drop")
+        md = jnp.zeros((nr, k_dense), bool).at[row, col].set(True, mode="drop")
+        zr = node_z[:nr]
+        e = model.site_energies_dense(rd, jnp.broadcast_to(zr[:, None], idx.shape),
+                                      node_z[idx], md, zr)
+        overflow = jnp.any(m & ((s >= nr) | (slot >= k_dense)))
+        if nr < n:
+            e = jnp.concatenate([e, jnp.zeros((n - nr,), e.dtype)])
         # multiply, not where: jnp.where sends no cotangent to e when overflow
         # is set, so the energy would be NaN but the forces silently zero
         return e * jnp.where(overflow, jnp.nan, 1.0)
@@ -65,15 +78,21 @@ def make_energy_fn(model, n_species, layout, k_dense=None, type_map=None):
 
 
 def export_lammps(model, meta, path, *, max_atoms, max_edges, k_dense=None,
-                  dtype="float64", layout="auto", type_elements=None):
+                  dtype="float64", layout="auto", type_elements=None, max_owned=None):
     """Write a lammps-jax JSON bundle for `model`; returns the bundle dict.
 
     type_elements: atomic numbers in LAMMPS type order (type 1 first).  LAMMPS
     hands the model species = type - 1, and a model's own element order (a
     .yace lists its elements as fitted) need not match; default: the model's.
 
+    max_owned: dense-layout row capacity (owned atoms only, LAMMPS numbers them
+    first).  When given, the dense energy function evaluates only rows < it
+    (see make_energy_fn's n_rows); always recorded in the bundle, including for
+    the sparse layout, which has no row concept and ignores it otherwise.
+
     layout="auto" picks dense when k_dense is given and estimate_a_bytes for the
-    bundle's capacity fits ace_jax.calc.point.dense_budget_bytes(), else sparse.
+    dense row capacity (max_owned if given, else max_atoms) fits
+    ace_jax.calc.point.dense_budget_bytes(), else sparse.
     """
     from lammps_jax.export import export_model
     from ..calc.point import dense_budget_bytes
@@ -86,15 +105,18 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges, k_dense=None,
     n_species = len(type_elements)
     if layout == "auto":
         itemsize = np.dtype(dtype).itemsize
-        fits = k_dense and estimate_a_bytes(model, "dense", max_atoms, max_edges, k_dense,
+        n_rows = max_owned if max_owned is not None else max_atoms
+        fits = k_dense and estimate_a_bytes(model, "dense", n_rows, max_edges, k_dense,
                                             itemsize) <= dense_budget_bytes()
         layout = "dense" if fits else "sparse"
     energy_fn = make_energy_fn(model, n_species, layout, k_dense,
-                               None if type_map == list(range(len(model_z))) else type_map)
+                               None if type_map == list(range(len(model_z))) else type_map,
+                               n_rows=max_owned if layout == "dense" else None)
     bundle = export_model(energy_fn=energy_fn, path=path, max_atoms=max_atoms,
                           max_edges=max_edges, cutoff=float(meta["rcut"]), unit_style="metal",
                           precision=dtype, n_species=n_species)
     bundle["ace_jax"] = {"layout": layout, "elements": model_z, "type_elements": type_elements,
-                         "k_dense": int(k_dense) if layout == "dense" else None}
+                         "k_dense": int(k_dense) if layout == "dense" else None,
+                         "max_owned": int(max_owned) if max_owned is not None else None}
     Path(path).write_text(json.dumps(bundle, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return bundle
