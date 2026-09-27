@@ -34,19 +34,6 @@ def test_matches_frozen_reference(ref, skin):
     kw = {} if "skin" not in ACECalculator.__init__.__code__.co_varnames else {"skin": skin}
     at.calc = ACECalculator(str(_model_path(stem)), layout=layout, dtype=getattr(jnp, dt), **kw)
     tol = 1e-12 if dt == "float64" else 1e-5
-    if stem == "gesi_sbessel" and dt == "float32":
-        # SBessel's sin/cos Chebyshev-style recurrence (perf(pace): SBessel basis by
-        # Chebyshev recurrence) is exact to 1e-12 relative against the direct
-        # per-order sinc evaluation in float64 (tests/test_pace_radial_rec.py), so
-        # this is round-off, not a wrong answer. float32's ~1e-7 unit roundoff
-        # compounds over the recurrence's repeated multiply-accumulate steps more
-        # than it does over the direct formula the frozen float32 reference was
-        # generated with (tests/perf_ref.py), most visibly in small-magnitude force
-        # components built from near-cancelling terms. Observed worst case here:
-        # dE/E ~2.4e-5 (gesi_sbessel_tric*), and forces need tol ~1.0e-4 against the
-        # rtol*|F| + atol bound (gesi_sbessel_tric_dense_float32, atom 54, axis z).
-        # Widen only this fixture's float32 tolerance, to 2e-4 (~2x that worst case).
-        tol = 2e-4
     scale = max(1.0, abs(float(r["E"])))
     assert abs(at.get_potential_energy() - float(r["E"])) <= tol * scale
     np.testing.assert_allclose(at.get_forces(), r["F"], rtol=tol, atol=tol * scale / len(at))

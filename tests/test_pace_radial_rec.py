@@ -27,7 +27,7 @@ def _direct(r, rc, K):
 
 def test_sbessel_recurrence_is_exact_and_cheap():
     r = jnp.linspace(1e-6, 4.9, 997)
-    for K in (4, 8, 12):
+    for K in (0, 1, 4, 8, 12):
         np.testing.assert_allclose(pr._sbessel(r, 5.0, K), _direct(r, 5.0, K), rtol=1e-12, atol=1e-13)
     hlo = jax.jit(lambda x: pr._sbessel(x, 5.0, 12)).lower(r).as_text()
     # StableHLO op names, not bare "sine"/"cosine": "cosine" contains "sine" as a
