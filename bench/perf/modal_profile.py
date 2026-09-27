@@ -5,6 +5,7 @@
     uv run --with modal modal run bench/perf/modal_profile.py::mlpace --model Cantor_medium --n 8192
     uv run --with modal modal run bench/perf/modal_profile.py::sweep_acejax
     uv run --with modal modal run bench/perf/modal_profile.py::sweep_mlpace
+    uv run --with modal modal run bench/perf/modal_profile.py::ace      # ACEModel (npz), 6 models
 
 Results are returned (and written under bench/perf/results/ locally by the
 entrypoints); nothing is written to bench/scaling/results.
@@ -331,6 +332,69 @@ def mlpace_chunk(model: str = "Cantor_medium", ns: str = "8192,65536",
         r["style"] = c["style"]
         print(r["n"], c["style"], r.get("atom_steps_per_s"), r.get("error", "")[:200])
     _save(f"mlpace_chunk_{model}{tag}.json", res)
+
+
+def _ace(model, n=8192, dtype="float64", reps=20):
+    """ACEModel (bench/perf/profile_ace.py): timings + stages, then a traced run
+    with the HLO dump, whose kernels are attributed to stages.  The raw trace
+    and optimised HLO are kept on the volume for re-parsing."""
+    import os
+    import shutil
+    import tempfile
+    npz = f"/ace-jax/bench/scaling/models/ace_{model}.npz"
+    base = ["python", "/ace-jax/bench/perf/profile_ace.py", npz, _system(model), str(n),
+            "--dtype", dtype]
+    p = _sh(base + ["--reps", str(reps)])
+    try:
+        out = json.loads(p.stdout.strip().splitlines()[-1])
+    except Exception:                                              # noqa: BLE001
+        return {"model": model, "error": (p.stdout[-2000:] + p.stderr[-4000:])}
+    td, dd = tempfile.mkdtemp(), tempfile.mkdtemp()
+    p2 = _sh(base + ["--reps", "3", "--no-stages", "--trace", td, "--dump", dd])
+    try:
+        out["kernels"] = json.loads(p2.stdout.strip().splitlines()[-1])["kernels"]
+    except Exception:                                              # noqa: BLE001
+        out["kernels"] = {"error": (p2.stdout[-1500:] + p2.stderr[-3000:])}
+    keep = f"/vol/ace_{model}_{n}_{dtype}"
+    shutil.rmtree(keep, ignore_errors=True)
+    shutil.copytree(td, keep + "/trace")
+    os.makedirs(keep + "/hlo", exist_ok=True)
+    for f in os.listdir(dd):
+        if f.endswith("after_optimizations.txt") and os.path.getsize(os.path.join(dd, f)) > 20000:
+            shutil.copy(os.path.join(dd, f), keep + "/hlo/")
+    out["saved"] = keep
+    shutil.rmtree(td, ignore_errors=True)
+    shutil.rmtree(dd, ignore_errors=True)
+    return out
+
+
+@app.function(gpu="A100-80GB", timeout=3600, volumes={"/vol": vol})
+def ace_remote(models: list, n: int, dtype: str):
+    """Every model on ONE container (one GPU); each result is written to the
+    volume as it lands, so a failure part-way keeps the finished ones."""
+    import subprocess
+    gpu = subprocess.run("nvidia-smi --query-gpu=name --format=csv,noheader", shell=True,
+                         capture_output=True, text=True).stdout.strip()
+    out = []
+    for m in models:
+        r = _ace(m, n, dtype)
+        r["gpu"] = gpu
+        pathlib.Path(f"/vol/ace_{m}_{n}_{dtype}.json").write_text(json.dumps(r))
+        vol.commit()
+        out.append(r)
+    return out
+
+
+@app.local_entrypoint()
+def ace(models: str = "SiGe_small,SiGe_medium,SiGe_large,Cantor_small,Cantor_medium,Cantor_large",
+        n: int = 8192, dtype: str = "float64", tag: str = ""):
+    """ACEModel energy_forces_virial_dense per-stage GPU profile (Task 8)."""
+    res = ace_remote.remote(models.split(","), n, dtype)
+    for m, r in zip(models.split(","), res):
+        _save(f"ace_{m}_{n}_{dtype}{tag}.json", r)
+        k = r.get("kernels", {})
+        print(m, r.get("model", r.get("error", "")[:300]), k.get("total_gpu_us_per_call"),
+              {s: v["frac"] for s, v in k.get("stages", {}).items()})
 
 
 @app.local_entrypoint()
