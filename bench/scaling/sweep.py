@@ -284,7 +284,10 @@ def main(argv=None):
         rows = gate_in_subprocess(a.host, env)
         with res.open("a") as f:
             for r in rows:
-                r["_key"], r["_line"] = ["parity", r["gate"], r["system"], r["code"]], ["parity"]
+                # the bundle layout keeps the dense and sparse ace-jax gates distinct
+                r["_key"] = ["parity", r["gate"], r["system"], r["code"]] + (
+                    [r["bundle_layout"]] if r.get("bundle_layout") else [])
+                r["_line"] = ["parity"]
                 f.write(json.dumps(r) + "\n")
     for r in rows:
         print(f"parity {r['gate']:7s} {r['system']:7s} {r['model']:28s} {r['status']}"

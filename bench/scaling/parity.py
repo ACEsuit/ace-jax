@@ -79,6 +79,16 @@ def _mace_ef(path, at, device, head=None):
     return a.get_potential_energy(), a.get_forces()
 
 
+def gate_checks(small, system):
+    """(gate, model row, bundle layout) per check.  Both ace-jax bundle layouts are
+    gated: run_lammps falls back to a sparse bundle when dense runs out of memory,
+    so the sparse path (ghost atoms included) must be verified, not only dense."""
+    checks = [("mlpace", small[("mlpace", system)], None)]
+    for code in ("acejax-pace", "acejax-ace"):
+        checks += [("acejax", small[(code, system)], lay) for lay in ("dense", "sparse")]
+    return checks + [("mace", small[("mace", system)], None)]
+
+
 def gate(host, env, workroot="/tmp"):
     from scaling.sweep import HOSTS, lammps_supported
     device = HOSTS[host]["device"]
@@ -88,13 +98,11 @@ def gate(host, env, workroot="/tmp"):
     for system in ("SiGe", "Cantor"):
         at = supercell(system, N_ATOMS)
         work = pathlib.Path(workroot) / f"parity_{host}_{system}"
-        checks = [("mlpace", small[("mlpace", system)]),
-                  ("acejax", small[("acejax-pace", system)]),
-                  ("acejax", small[("acejax-ace", system)]),
-                  ("mace", small[("mace", system)])]
-        for gate_name, m in checks:
+        for gate_name, m, layout in gate_checks(small, system):
             row = {"code": m["code"], "mode": "parity", "gate": gate_name, "system": system,
                    "model": m["name"], "n_atoms": N_ATOMS, "device": device, "host": host}
+            if layout:
+                row["bundle_layout"] = layout
             try:
                 if gate_name == "mlpace":
                     E0, F0 = _acejax_ef(m["path"], at)
@@ -105,10 +113,11 @@ def gate(host, env, workroot="/tmp"):
                         rows.append({**row, "status": "unsupported"})
                         continue
                     E0, F0 = _acejax_ef(m["path"], at)
-                    bundle, layout, _ = export_bundle(m, at, "float64", work / m["code"])
-                    row["layout"] = layout
+                    bundle, used, _ = export_bundle(m, at, "float64", work / f"{m['code']}_{layout}",
+                                                    layout=layout)
+                    row["layout"] = used
                     E1, F1 = _lammps_ef("acejax", bundle, m["elements"], at, device,
-                                        env.get("lmp_jax", lmp), work / m["code"], pjrt)
+                                        env.get("lmp_jax", lmp), work / f"{m['code']}_{layout}", pjrt)
                 else:
                     if not pathlib.Path(m["symmetrix"]).exists():
                         rows.append({**row, "status": "unsupported"})

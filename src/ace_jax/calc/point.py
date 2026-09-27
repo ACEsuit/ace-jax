@@ -30,6 +30,12 @@ DENSE_BUDGET_FRACTION = 0.5
 CPU_DENSE_BUDGET_BYTES = 4 * 2**30
 
 
+def _edge_bucket(n_edges, floor=64):
+    """Sparse edge-list length: the next power of two (at least `floor`), so the
+    compiled shape changes only when the edge count crosses a doubling."""
+    return max(floor, 1 << max(0, int(n_edges) - 1).bit_length())
+
+
 def _round_k(k, step=4):
     """Dense row capacity: the largest neighbour count rounded up, so a small
     change in the count keeps the compiled shape (and the neighbour_matrix K)."""
@@ -96,7 +102,8 @@ class ACECalculator(Calculator):
             lambda m, rij, zi, zj, idx, mask, nz: m.energy_forces_virial_dense(
                 rij, zi, zj, idx, mask, nz))
         self._efv_sparse = eqx.filter_jit(
-            lambda m, rij, zi, zj, s, r, n, nz: m.energy_forces_virial(rij, zi, zj, s, r, n, nz))
+            lambda m, rij, zi, zj, s, r, n, nz, emask: m.energy_forces_virial(
+                rij, zi, zj, s, r, n, nz, emask))
 
     def _species_index(self, numbers):
         try:
@@ -130,6 +137,7 @@ class ACECalculator(Calculator):
         layout = "dense" if dg is not None else "sparse"
         self.last_layout = layout
         if layout == "dense":
+            self.last_n_edges = int(np.asarray(dg.count).sum())
             # one dtype whichever builder ran (regroup vs neighbour_matrix): no retrace
             idx = jnp.asarray(dg.idx, dtype=jnp.int32)
             count = jnp.asarray(dg.count, dtype=jnp.int32)
@@ -140,15 +148,26 @@ class ACECalculator(Calculator):
             with highest_precision():
                 E, F, V = jax.block_until_ready(self._efv_dense(self.model, *args))
         else:
-            rij = jnp.asarray(g.rij, dtype=dtype)
-            send, recv = jnp.asarray(g.senders), jnp.asarray(g.receivers)
+            # pad the edge list to a power-of-two bucket: MD changes the edge
+            # count every few steps, and each new length was a new compiled shape
+            n_e = len(g.senders)
+            bucket = _edge_bucket(n_e)
+            park = np.array([float(self.model.pad_cutoff()), 0.0, 0.0])
+            rij = jnp.asarray(np.concatenate([np.asarray(g.rij), np.tile(park, (bucket - n_e, 1))]),
+                              dtype=dtype)
+            send = jnp.asarray(np.concatenate([np.asarray(g.senders), np.zeros(bucket - n_e, int)]),
+                               dtype=jnp.int32)
+            recv = jnp.asarray(np.concatenate([np.asarray(g.receivers), np.zeros(bucket - n_e, int)]),
+                               dtype=jnp.int32)
+            emask = jnp.arange(bucket) < n_e
+            self.last_n_edges = n_e
             model = self._model_for(rij, node_z[send], node_z[recv], send, g.n_nodes, node_z)
             args = (rij, node_z[send], node_z[recv], send, recv)
             jax.block_until_ready(args)
             t1 = time.perf_counter()
             with highest_precision():
                 E, F, V = jax.block_until_ready(
-                    self._efv_sparse(model, *args, int(g.n_nodes), node_z))
+                    self._efv_sparse(model, *args, int(g.n_nodes), node_z, emask))
         t2 = time.perf_counter()
         # nlist_s: neighbour list + layout + host->device; model_s: the compiled call
         self.last_timing = {"nlist_s": t1 - t0, "model_s": t2 - t1, "nlist_backend": backend}

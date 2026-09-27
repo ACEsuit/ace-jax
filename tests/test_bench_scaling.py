@@ -421,7 +421,9 @@ def test_run_capped_kills_a_case_over_its_memory_cap():
     pytest.importorskip("psutil")
     from scaling.sweep import run_capped
     grow = [sys.executable, "-c",
-            "import time\nx=[]\nfor _ in range(60):\n    x.append(bytearray(20*2**20)); time.sleep(0.05)\n"
+            # b"x" * n writes every page: a zero-filled bytearray can stay
+            # non-resident (lazy zero pages), so RSS -- and the cap -- never saw it
+            "import time\nx=[]\nfor _ in range(60):\n    x.append(b'x' * (20*2**20)); time.sleep(0.05)\n"
             "print('{\"status\": \"ok\"}')"]
     rc, out, err, peak, capped = run_capped(grow, env=None, timeout=60, cap_bytes=200 * 2**20, poll=0.05)
     assert capped and rc != 0 and "ok" not in out and peak > 200 * 2**20
@@ -532,3 +534,93 @@ def test_export_bundle_child_writes_a_bundle(tmp_path):
     row = {"name": "x", "system": "SiGe", "path": y, "elements": ["Si", "Ge"]}
     bundle, layout, t = export_bundle(row, supercell("SiGe", 256), "float64", tmp_path)
     assert pathlib.Path(bundle).exists() and layout in ("dense", "sparse") and t > 0
+
+
+def test_float32_figure_omits_symmetrix_lammps(tmp_path, monkeypatch):
+    """Symmetrix evaluates in double whatever the input: MACE-LAMMPS float32
+    rows repeat float64, so the float32 figure must not draw them."""
+    import matplotlib
+    matplotlib.use("Agg")
+    from scaling import plot
+    rows = []
+    for code, mode in (("mace", "lammps"), ("mace", "standalone"), ("acejax-pace", "standalone")):
+        for n in (256, 512):
+            rows.append({"code": code, "mode": mode, "model": f"{code}/SiGe/medium", "size": "medium",
+                         "system": "SiGe", "n_atoms": n, "device": "gpu", "dtype": "float32",
+                         "host": "moriarty-gpu", "status": "ok", "call_s": 1e-3, "step_s": 1e-3,
+                         "atom_steps_per_s": n / 1e-3})
+    figs = []
+    monkeypatch.setattr(plot.plt, "close", lambda f=None: figs.append(f))
+    plot.fig_throughput(rows, tmp_path, dtype="float32")
+    dashed = [ln for ax in figs[-1].axes for ln in ax.lines
+              if ln.get_linestyle() == "--" and len(ln.get_xdata()) > 1]
+    assert dashed == []
+
+
+def test_doc_has_narrative_captions_and_capacity_table(tmp_path):
+    """The page is regenerated on every render: prose lives in
+    bench/scaling/benchmarks_intro.md and is included, each figure gets a
+    caption, and a table gives the largest system that fits per line."""
+    from scaling.plot import largest_fits, write_doc
+    rows = []
+    for n, st in ((256, "ok"), (512, "ok"), (1024, "oom")):
+        rows.append({"code": "acejax-pace", "mode": "standalone", "model": "acejax-pace/SiGe/medium",
+                     "size": "medium", "system": "SiGe", "n_atoms": n, "device": "gpu",
+                     "dtype": "float64", "host": "moriarty-gpu", "status": st, "call_s": 1e-3})
+    assert "| moriarty-gpu | SiGe | ace-jax (PACE model) | standalone | 512 | 1024 |" in largest_fits(rows)
+    res = tmp_path / "r.jsonl"
+    res.write_text("\n".join(json.dumps(r) for r in rows))
+    fig = tmp_path / "scaling_memory_float64_medium.png"
+    fig.write_bytes(b"")
+    doc = write_doc(str(res), [str(fig)], doc=str(tmp_path / "b.md"))
+    text = pathlib.Path(doc).read_text()
+    intro = (pathlib.Path(__file__).parent.parent / "bench" / "scaling" / "benchmarks_intro.md").read_text()
+    assert intro.strip().splitlines()[0] in text
+    assert "*Peak device memory" in text                      # a caption under the figure
+    assert "## Largest system that fits" in text
+
+
+def test_load_fills_system_and_size_from_the_model_name(tmp_path):
+    """Rows written for killed cases (row_from_process) carry the model name but
+    not system/size; the capacity table must still see their oom."""
+    from scaling.plot import largest_fits, load
+    ok = {"code": "mace", "mode": "standalone", "model": "mace/Cantor/medium", "size": "medium",
+          "system": "Cantor", "n_atoms": 4096, "dtype": "float64", "host": "h", "status": "ok",
+          "call_s": 1.0}
+    killed = {"code": "mace", "mode": "standalone", "model": "mace/Cantor/medium", "n_atoms": 8192,
+              "dtype": "float64", "device": "cpu", "status": "oom", "host": "h"}
+    (tmp_path / "r.jsonl").write_text(json.dumps(ok) + "\n" + json.dumps(killed) + "\n")
+    rows = load(str(tmp_path / "*.jsonl"))
+    assert "| h | Cantor | MACE | standalone | 4096 | 8192 |" in largest_fits(rows)
+
+
+def test_parity_gate_covers_both_bundle_layouts():
+    """run_lammps falls back to a sparse bundle on dense OOM, so the sparse
+    layout must be gated on a periodic cell too (ghost atoms), not only dense."""
+    from scaling.models import planned_models
+    from scaling.parity import gate_checks
+    small = {(m["code"], m["system"]): m for m in planned_models() if m["size"] == "small"}
+    got = {(g, m["code"], lay) for g, m, lay in gate_checks(small, "SiGe")}
+    for code in ("acejax-pace", "acejax-ace"):
+        assert ("acejax", code, "dense") in got and ("acejax", code, "sparse") in got
+    assert ("mlpace", "mlpace", None) in got and ("mace", "mace", None) in got
+
+
+def test_model_size_figure_plots_only_the_target_size(tmp_path, monkeypatch):
+    """A line that ran out of memory below N must not be drawn from a smaller N
+    under a title that says N: GPU throughput is lower at small N."""
+    import matplotlib
+    matplotlib.use("Agg")
+    from scaling import plot
+    rows = []
+    for size, ns in (("small", (4096, 8192)), ("medium", (4096,)), ("large", (2048, 4096, 8192))):
+        for n in ns:
+            rows.append({"code": "mace", "mode": "standalone", "model": f"mace/SiGe/{size}",
+                         "size": size, "system": "SiGe", "n_atoms": n, "device": "gpu",
+                         "dtype": "float64", "host": "moriarty-gpu", "status": "ok",
+                         "call_s": 1.0})
+    figs = []
+    monkeypatch.setattr(plot.plt, "close", lambda f=None: figs.append(f))
+    plot.fig_model_size(rows, tmp_path)
+    xs = sorted(x for ax in figs[-1].axes for ln in ax.lines for x in ln.get_xdata())
+    assert xs == [0, 2]                            # medium (only 4096) is absent

@@ -90,3 +90,31 @@ def test_dense_path_uses_native_neighbour_matrix(monkeypatch):
     sparse.calculate(at, ["energy", "forces", "stress"], all_changes)
     assert E == pytest.approx(sparse.results["energy"], abs=1e-10)
     np.testing.assert_allclose(F, sparse.results["forces"], atol=1e-9)
+
+
+def test_sparse_layout_does_not_recompile_as_the_edge_count_changes(monkeypatch):
+    """MD moves atoms, so the edge count changes from step to step; unpadded,
+    every new count was a new shape and a full XLA compile.  The edge list is
+    padded to a power-of-two bucket, so traces stay bounded."""
+    calls = []
+    orig = EdgeSiteModel.energy_forces_virial
+
+    def counted(self, *a, **k):
+        calls.append(1)
+        return orig(self, *a, **k)
+
+    monkeypatch.setattr(EdgeSiteModel, "energy_forces_virial", counted)
+    calc = ACECalculator(str(pace_fixture(FIX / "gesi_sbessel.yace")), layout="sparse")
+    at = _bulk()
+    rng = np.random.default_rng(0)
+    counts = set()
+    ref = ACECalculator(str(pace_fixture(FIX / "gesi_sbessel.yace")), layout="dense")
+    for _ in range(6):
+        a = at.copy()
+        a.positions += rng.normal(0, 0.15, a.positions.shape)
+        calc.calculate(a, ["energy", "forces"], all_changes)
+        ref.calculate(a, ["energy", "forces"], all_changes)
+        np.testing.assert_allclose(calc.results["forces"], ref.results["forces"], atol=1e-10)
+        counts.add(calc.last_n_edges)
+    assert len(counts) > 1                         # the edge count really changed
+    assert len(calls) <= 2                         # ... but not the compiled shape
