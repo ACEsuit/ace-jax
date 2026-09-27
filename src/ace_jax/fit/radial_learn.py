@@ -210,25 +210,32 @@ def learn_radial(prob, ds, W0, *, theta0=None, profile=True, lam_rough=0.0, roug
         info["reasons"].append(reason)
         info["round_lengths"].append(len(trace))
         done += n
-        round_dt = time.perf_counter() - t_round
         # Canonicalise once per round (lbfgs_loop moves V, not W = normalise(V));
         # persisting it back avoids a second normalise() at the return below,
         # which for steps=0 would perturb the already-normalised V0 by ~1 ULP
         # (rsqrt(1 + eps) != 1 bit-for-bit) and break exact-equality recovery
         # of normalise(W0) against an independently-computed reference.
         V = normalise(V, Q, active)
-        theta_msg = ""
+        profile_dt = 0.0
         if profile:
+            t_profile = time.perf_counter()
             a = theta_map_linear(prob, ds, V, steps=map_steps, seed=seed, init=a)
+            profile_dt = time.perf_counter() - t_profile
             info["theta"].append(np.asarray(a))
-            th = from_array(a)
-            theta_msg = (f" log_sigma_c={float(th.log_sigma_c):.4f} "
-                         f"log_sigma_E={float(th.log_sigma_E):.4f} "
-                         f"log_sigma_F={float(th.log_sigma_F):.4f}")
+        # round_dt is measured after the (optional) re-profile above, so it
+        # covers the whole round -- theta_map_linear does its own full
+        # streaming pass and must not be left out of the wall time.
+        round_dt = time.perf_counter() - t_round
         if log is not None:
+            theta_msg = ""
+            if profile:
+                th = from_array(a)
+                theta_msg = (f" log_sigma_c={float(th.log_sigma_c):.4f} "
+                             f"log_sigma_E={float(th.log_sigma_E):.4f} "
+                             f"log_sigma_F={float(th.log_sigma_F):.4f}")
             log(f"learn_radial: round {round_idx} steps={done}/{int(steps)} "
                 f"accepted={len(trace)} obj={f_best:.6e} reason={reason} "
-                f"time={round_dt:.1f}s" + theta_msg)
+                f"time={round_dt:.1f}s profile_time={profile_dt:.1f}s" + theta_msg)
         if reason != "steps":
             break
     info["steps"] = done
@@ -292,7 +299,10 @@ def fit_radial(prob, ds_fit, ds_val, W0, *, lam_grid=(0.0, 1e-3, 1e-2, 1e-1), th
         cands[f"learned_lam={lam:g}"] = W
         runs[f"{lam:g}"] = info
 
-    label_of = {id(w): k for k, w in cands.items()}
+    # id(W) -> label, only needed to name the candidate in the gate-score log
+    # line; relies on cands' values staying distinct and alive, and on
+    # `gate` passing them to `score` unchanged (no copying).
+    label_of = {id(w): k for k, w in cands.items()} if log is not None else None
 
     def score(W):
         a_fit = a0 if W is W_init else theta_map_linear(prob, ds_fit, W, steps=map_steps, init=a0)
