@@ -188,6 +188,31 @@ The ranking is the same when every candidate is scored at the common θ.
 
 ![scores](figures/learn-radial/compare_A_scores.png)
 
+**In physical units** (`bench/learn_radial/rmse.py`). The gate score is a
+σ-weighted sum of squared errors, so it cannot be read in physical units. This
+table repeats the gate's procedure and predicts the validation split directly:
+the θ-MAP is warm-started from the init MAP, and the M = 0 readout is fitted on
+the fit split. Raw numbers, including MAEs and training-split errors, are in
+`figures/learn-radial/rmse.json`.
+
+| System | Configuration | E RMSE (meV/atom) | F RMSE (meV/Å) | train E / F |
+|---|---|---|---|---|
+| SiGe | initial | 2.08 | 53.7 | 1.83 / 50.1 |
+| | n_q=30, no prior | 1.85 (−11%) | 49.9 (−7%) | 1.65 / 46.1 |
+| | n_q=30 + spectral 1e-4 | 1.80 (−14%) | 49.9 (−7%) | 1.59 / 46.1 |
+| | n_q=12, λ=0 | 0.62 (−70%) | 40.5 (−25%) | 0.47 / 37.4 |
+| | **n_q=12, λ=0.1** | **0.54 (−74%)** | **40.2 (−25%)** | 0.44 / 36.8 |
+| Cantor | initial | 10.29 | 152.0 | 7.26 / 139.9 |
+| | n_q=30, no prior | 7.43 (−28%) | 141.6 (−7%) | 4.65 / 125.3 |
+| | n_q=30 + spectral 1e-4 | 7.29 (−29%) | 138.2 (−9%) | 4.47 / 123.2 |
+| | **n_q=12, λ=0** | **6.94 (−33%)** | **129.6 (−15%)** | 4.86 / 116.3 |
+| | n_q=12, λ=0.1 | 7.07 (−31%) | 133.3 (−12%) | 5.20 / 122.4 |
+
+- **Energies gain far more than forces.** The gate weights favour energy,
+  which is why its −92% / −55% overstates the force gain.
+- **No sign of over-fitting.** Training errors fall in proportion to the
+  validation errors.
+
 **Capping the span fixes the optimisation; the spectral prior does not.**
 
 - **The n_q = 30 failure was conditioning, not missing regularisation.**
