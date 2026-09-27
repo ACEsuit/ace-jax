@@ -249,6 +249,56 @@ the fit split. Raw numbers, including MAEs and training-split errors, are in
 
 Reproduce with `bench/learn_radial/compare_plots.py`.
 
+## Data-gap prior and MD transfer check
+
+**Data-gap prior.** `--gap-grid` adds the term `λ_gap · r0/n_active · Σ ΔW U ΔWᵀ`. `U` is the Gram matrix of the radials under a uniform-in-r measure on [0.8·r_min, rcut]. The term penalises change where training pairs are sparse.
+
+- **Scale.** On the real learned change, penalty/r0 ≈ λ_gap × 0.01–0.02.
+- **Runs.** n_q = 12 and λ_gap ∈ {1, 10, 30}. The gate picked λ_gap = 1 on both systems.
+- **Validation cost.** Small at λ_gap ≤ 10. At λ_gap = 30 it is noticeable on SiGe.
+
+Raw numbers are in `figures/learn-radial/gap_rmse_*.json`.
+
+| Validation RMSE (E meV/atom / F meV/Å) | SiGe | Cantor |
+|---|---|---|
+| initial | 2.08 / 53.7 | 10.29 / 152.0 |
+| n_q=12, no gap prior | 0.62 / 40.5 | 6.94 / 129.6 |
+| λ_gap = 1 | 0.54 / 39.8 | 7.00 / 129.2 |
+| λ_gap = 10 | 0.65 / 40.7 | 7.48 / 128.3 |
+| λ_gap = 30 | 0.89 / 41.3 | 7.33 / 131.0 |
+
+**MD transfer check** (`bench/learn_radial/md/`):
+
+- **Runs.** Each model ran Langevin MD for 2 ps at 1000 K and 2000 K, from 4 validation structures (1 fs step, a frame every 20 fs).
+- **Speed.** The padded, jitted calculator matches `ACECalculator` to 1e-12 and runs about 30× faster.
+- **Reference labels.** Frames were labelled with MACE-MH-1, head `matpes_r2scan`. That head reproduces the stored training labels: 0.00 meV/atom on SiGe and 0.04 meV/atom on Cantor.
+- **Scoring.** Every model is scored on every trajectory.
+- **Coverage.** MD frames put about 5× (SiGe) and 5–9× (Cantor) more pairs into the training data's gap bins than the training set does.
+
+Raw numbers are in `figures/learn-radial/md_eval_*.json`.
+
+RMSE against MACE, averaged over all models' trajectories at that temperature, with stopped frames excluded:
+
+| | SiGe 1000 K | Cantor 1000 K | Cantor 2000 K |
+|---|---|---|---|
+| initial | 3.80 / 114.0 | 11.48 / 248.4 | 51.7 / 741 |
+| n_q=12, no gap prior | **1.86 / 78.9** | **9.33 / 208.2** | 47.8 / 728 |
+| λ_gap = 1 | 1.88 / 77.5 | 10.20 / 206.9 | 49.0 / 723 |
+| λ_gap = 10 | 1.74 / 80.5 | 11.50 / 202.0 | 49.9 / 692 |
+| λ_gap = 30 | 1.92 / 83.9 | 11.46 / 206.5 | 51.7 / 700 |
+
+- **1000 K, both systems.** Every model is stable. The learned radials transfer: force errors are about 30% lower on SiGe and 16% lower on Cantor than with the initial radials, on MD frames outside the training distribution. The gap prior changes this by only a few percent, in either direction.
+- **2000 K is outside every model's domain.**
+  - Cantor is stable throughout, with errors of about 50 meV/atom for all models.
+  - SiGe melts at this temperature, and even the initial model's own trajectory is wrong by 2.5 eV/atom, although it never trips the stop criterion (max|F| > 50 eV/Å or r < 1 Å).
+  - The learned models with λ_gap ≤ 10 each collapse once, on the same start (#89). λ_gap = 30 avoids that collapse, but at +60% validation energy error.
+
+**Decision.** The gap prior is not a robust fix. At strengths that keep the accuracy gain, it does not prevent the one liquid-SiGe collapse, and in the regime where the models are valid it adds nothing. Following the agreed fallback:
+
+- `bench/learn_radial/run.py` now defaults to `--n-q 12`;
+- `--gap-grid` stays available and defaults to off (0);
+- the spectral prior likewise stays opt-in.
+
 ## Caveats
 
 - **L-BFGS had not converged at 40 steps.** Every round in both systems ended

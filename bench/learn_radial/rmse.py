@@ -40,7 +40,7 @@ p.add_argument("--virial-key", default="virial")
 p.add_argument("--ntrain", type=int, default=200); p.add_argument("--nval", type=int, default=200)
 p.add_argument("--seed", type=int, default=0); p.add_argument("--batch", type=int, default=4)
 p.add_argument("--r0", type=float, default=2.35)
-p.add_argument("--n-q", type=int, default=30)
+p.add_argument("--n-q", type=int, default=12, help="must match the run that produced the candidates")
 p.add_argument("--map-steps", type=int, default=300)
 p.add_argument("--cand", action="append", required=True,
                help='"init" or a path to a learned rnl_Wnlq.npy (repeatable); label = its parent dir')

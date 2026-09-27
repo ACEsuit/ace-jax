@@ -1,7 +1,7 @@
 """Learn the tensor radials of an ACE model by VarPro, gate on a held-out split.
 
     uv run python bench/learn_radial/run.py --model M.npz --data D.xyz --out DIR \
-        [--n-q 30] [--ntrain 200] [--steps 40] [--lam-grid 0,1e-2]
+        [--n-q 12] [--ntrain 200] [--steps 40] [--lam-grid 0,1e-2]
 
 A splined (Julia-exported) model is converted to the analytic branch first
 (to_analytic); an analytic one is widened to --n-q.  Writes DIR/model.npz (the
@@ -40,7 +40,7 @@ p.add_argument("--virial-key", default="virial")
 p.add_argument("--ntrain", type=int, default=200); p.add_argument("--nval", type=int, default=200)
 p.add_argument("--seed", type=int, default=0); p.add_argument("--batch", type=int, default=4)
 p.add_argument("--r0", type=float, default=2.35, help="hyperprior length scale (default_prior)")
-p.add_argument("--n-q", type=int, default=30, help="tensor-radial polynomial span after widening")
+p.add_argument("--n-q", type=int, default=12, help="tensor-radial polynomial span after widening. 12 (a modest widening) optimises well and transfers to MD; 30 is ill-conditioned and learns only tiny high-frequency changes (docs/learn-radial-results.md)")
 p.add_argument("--steps", type=int, default=40); p.add_argument("--reprofile-every", type=int, default=20)
 p.add_argument("--lam-grid", default="0,1e-2", help="relative roughness weights")
 p.add_argument("--spec-grid", default="0", help="relative spectral-prior weights on the radial change; useful range ~1e-6..1e-4 at --spec-p 4 (see relative_lambda_spec)")
