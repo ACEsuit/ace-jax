@@ -70,9 +70,11 @@ Also:
 
 ### 2. Chunked evaluation (`eval/edge_model.py`, shared)
 
-`energy_forces_virial_dense` and `energy_forces_virial` run the per-node work
-with `lax.map` over node blocks, and `jax.checkpoint` recomputes each block in
-the backward pass.
+`energy_forces_virial_dense` runs the per-node work with `lax.map` over node
+blocks, and `jax.checkpoint` recomputes each block in the backward pass. The
+dense layout only: the sparse layout's memory is already O(edges), and blocking
+an edge list would need dynamic per-block edge ranges. With chunking, dense
+fits at any N, which is what makes `layout="auto"` a pure fill decision.
 - **Block size:** 16,384 nodes by default. Below one block the code path is the
   same as today's.
 - **Memory:** peak memory scales with the block size, not N.
@@ -82,7 +84,8 @@ the backward pass.
 ### 3. Reverse-edge force gather (`eval/edge_model.py`, `eval/nlist.py`, shared)
 
 `rev[i, k]` is the slot in row `idx[i, k]` that points back to `i`. It is built
-on the device once per rebuild. Forces become
+on the host once per rebuild (`nlist.reverse_slots`, matched per periodic
+image), which runs every 20–50 MD steps at most. Forces become
 
     F_i = Σ_k g[i,k] − Σ_k g[idx[i,k], rev[i,k]]
 
@@ -98,7 +101,13 @@ which is a gather in place of today's `.at[idx].add` scatter.
 with one reciprocal instead of a division per k. The report measured −20% on
 the model call.
 
-### 5. Pool-first A and a feature-major product basis (`eval/pace_model.py`, PACE)
+### 5. Pool-first A and a feature-major product basis (`eval/edge_model.py` helper, `eval/pace_model.py` hooks)
+
+Pool-first is a shared `EdgeSiteModel` helper. Every radial here is linear in
+per-pair coefficients over a fixed per-edge basis (PACE `g_k` with `crad`, ACE
+polynomials with `Wnlq`, the factorised table with its embedding), so the
+models supply that basis and the weights `W`, built from the trainable
+coefficients inside the trace.
 
 - **Pool first:** pool `g_k ⊗ Y_lm` per (node, neighbour-species channel)
   first, then apply `crad[zi, μ]` per node. There is no per-edge R_nl, and the
