@@ -455,3 +455,48 @@ def test_acejax_lammps_layout_follows_the_line():
     assert bundle_layout(None) == "auto"
     assert bundle_layout({"layout": "dense"}) == "auto"
     assert bundle_layout({"layout": "sparse"}) == "sparse"
+
+
+def test_peak_memory_asks_the_framework_the_code_used(monkeypatch):
+    """MACE rows reported peak_bytes=0: jax was importable in the process but
+    never allocated, so torch's counter was never read."""
+    import sys
+    import types
+    from scaling.run_standalone import _peak
+    fake = types.SimpleNamespace(cuda=types.SimpleNamespace(max_memory_allocated=lambda: 123))
+    monkeypatch.setitem(sys.modules, "torch", fake)
+    assert _peak("gpu", "mace") == 123
+
+
+def _two_system_rows():
+    rows = []
+    for system, base in (("SiGe", 1.0), ("Cantor", 3.0)):
+        for code in ("acejax-pace", "mace"):
+            for n in (256, 512, 1024):
+                for dt, f in (("float64", 1.0), ("float32", 1.5)):
+                    rows.append({"code": code, "mode": "standalone", "model": f"{code}/{system}/medium",
+                                 "size": "medium", "system": system, "n_atoms": n, "device": "gpu",
+                                 "dtype": dt, "host": "moriarty-gpu", "status": "ok",
+                                 "call_s": n * 1e-6 * base / f, "peak_bytes": n * 1e6 * base,
+                                 "layout": "dense"})
+    return rows
+
+
+@pytest.mark.parametrize("fig", ["fig_memory", "fig_precision"])
+def test_per_system_panels_never_zigzag(tmp_path, monkeypatch, fig):
+    """Memory and precision joined both systems into one line per host panel."""
+    import matplotlib
+    matplotlib.use("Agg")
+    from scaling import plot
+    figs = []
+    monkeypatch.setattr(plot.plt, "close", lambda f=None: figs.append(f))
+    getattr(plot, fig)(_two_system_rows(), tmp_path)
+    f = figs[-1]
+    assert len([ax for ax in f.axes if ax.lines]) == 2            # one panel per system
+    for ax in f.axes:
+        for ln in ax.lines:
+            x = list(ln.get_xdata())
+            if len(x) > 1:
+                assert x == sorted(x), (fig, ax.get_title(), x)
+    labels = {t.get_text() for lg in f.legends for t in lg.get_texts()}
+    assert "MACE" in labels

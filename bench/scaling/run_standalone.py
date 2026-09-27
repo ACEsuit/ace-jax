@@ -34,14 +34,15 @@ def _median_time(f, reps):
     return statistics.median(ts)
 
 
-def _peak(device):
+def _peak(device, code="acejax"):
+    """Peak device memory from the framework the code ran on (torch for MACE,
+    JAX for ace-jax), or peak RSS on the CPU."""
     if device == "gpu":
-        try:
-            import jax
-            return jax.devices()[0].memory_stats().get("peak_bytes_in_use")
-        except Exception:
+        if code == "mace":
             import torch
             return torch.cuda.max_memory_allocated()
+        import jax
+        return jax.devices()[0].memory_stats().get("peak_bytes_in_use")
     import resource
     return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * (1 if sys.platform == "darwin" else 1024)
 
@@ -112,7 +113,7 @@ def run_case(row, n_atoms, dtype, device, reps=10):
         msg = repr(ex)
         out["status"] = "oom" if ("RESOURCE_EXHAUSTED" in msg or "out of memory" in msg.lower()) else "error"
         out["error"] = msg[:300]
-    out["peak_bytes"] = _peak(device)
+    out["peak_bytes"] = _peak(device, row["code"])
     return out
 
 

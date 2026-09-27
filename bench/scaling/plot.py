@@ -170,7 +170,7 @@ def fig_throughput(rows, out, dtype="float64", size="medium"):
             if j == 0:
                 ax.set_ylabel("atom-steps / s", fontsize=8, color=INK2)
     _legend(fig, [c for c in CODES if any(r["code"] == c for r in ok)])
-    fig.tight_layout(rect=(0, 0, 0.94, 0.9), w_pad=3.0)
+    fig.tight_layout(rect=(0, 0, 0.94, 1), w_pad=3.0)
     _place_labels(fig)
     p = out / f"scaling_throughput_{dtype}_{size}.png"
     fig.savefig(p, dpi=160, bbox_inches="tight")     # keeps the figure legend
@@ -215,7 +215,7 @@ def fig_model_size(rows, out, dtype="float64"):
             if j == 0:
                 ax.set_ylabel("atom-steps / s", fontsize=8, color=INK2)
     _legend(fig, [c for c in CODES if any(r["code"] == c for r in ok)], layout=False)
-    fig.tight_layout(rect=(0, 0, 1, 0.93))
+    fig.tight_layout(rect=(0, 0, 1, 1))
     p = out / f"scaling_model_size_{dtype}.png"
     fig.savefig(p, dpi=160, bbox_inches="tight")     # keeps the figure legend
     plt.close(fig)
@@ -223,40 +223,47 @@ def fig_model_size(rows, out, dtype="float64"):
 
 
 def fig_memory(rows, out, dtype="float64", size="medium"):
-    sel = [r for r in rows if r.get("mode") in MODES and r.get("dtype") == dtype
-           and r.get("size") == size and r.get("peak_bytes")]
+    """Peak device memory vs N (standalone), one panel per system x GPU host;
+    dotted verticals mark the first size that did not fit, hollow markers the
+    sizes where ace-jax chose the sparse layout."""
+    sel = [r for r in rows if r.get("mode") == "standalone" and r.get("dtype") == dtype
+           and r.get("size") == size and r.get("peak_bytes") is not None]
     if not sel:
         return None
-    hosts = sorted({r["host"] for r in sel if "gpu" in r.get("device", "") or "gpu" in r["host"]
-                    or "a100" in r["host"]}) or sorted({r["host"] for r in sel})
-    fig, axes = _panels(1, len(hosts))
-    for j, host in enumerate(hosts):
-        ax = axes[0][j]
-        lines = defaultdict(list)
-        for r in sel:
-            if r["host"] == host and r["mode"] == "standalone":
-                lines[r["code"]].append((r["n_atoms"], r["peak_bytes"] / 1e9, r.get("status"),
-                                         r.get("layout")))
-        for code, pts in sorted(lines.items()):
-            pts.sort()
-            good = [p for p in pts if p[2] == "ok"]
-            if good:
-                ax.plot([p[0] for p in good], [p[1] for p in good], color=CODES[code][1], lw=1.6)
-                for x, y, _, lay in good:
-                    ax.plot(x, y, marker="o", ms=5, color=CODES[code][1],
-                            mfc="none" if lay == "sparse" else CODES[code][1])
-                _end_label(ax, good[-1][0], good[-1][1], SHORT[code])
-            for x, _, st, _ in pts:
-                if st == "oom":                        # the size that did not fit
-                    ax.axvline(x, color=CODES[code][1], ls=":", lw=1)
-        _xatoms(ax)
-        _ylog(ax)
-        ax.set_title(f"peak memory · {host} (dotted: out of memory)", fontsize=9, color=INK)
-        ax.set_xlabel("atoms", fontsize=8, color=INK2)
-        if j == 0:
-            ax.set_ylabel("GB", fontsize=8, color=INK2)
-    _legend(fig, [c for c in CODES if any(r["code"] == c for r in sel)], modes=False)
-    fig.tight_layout(rect=(0, 0, 0.94, 0.86), w_pad=3.0)
+    hosts = sorted({r["host"] for r in sel if r.get("device") == "gpu"}) or sorted({r["host"] for r in sel})
+    systems = sorted({r["system"] for r in sel})
+    fig, axes = _panels(len(systems), len(hosts))
+    drawn = set()
+    for i, system in enumerate(systems):
+        for j, host in enumerate(hosts):
+            ax = axes[i][j]
+            lines = defaultdict(list)
+            for r in sel:
+                if r["host"] == host and r["system"] == system:
+                    lines[r["code"]].append((r["n_atoms"], r["peak_bytes"] / 1e9, r.get("status"),
+                                             r.get("layout")))
+            for code, pts in sorted(lines.items()):
+                pts.sort()
+                good = [p for p in pts if p[2] == "ok" and p[1] > 0]
+                if good:
+                    drawn.add(code)
+                    ax.plot([p[0] for p in good], [p[1] for p in good], color=CODES[code][1], lw=1.6)
+                    for x, y, _, lay in good:
+                        ax.plot(x, y, marker="o", ms=5, color=CODES[code][1],
+                                mfc="none" if lay == "sparse" else CODES[code][1])
+                    _end_label(ax, good[-1][0], good[-1][1], SHORT[code])
+                for x, _, st, _ in pts:
+                    if st == "oom":                        # the size that did not fit
+                        ax.axvline(x, color=CODES[code][1], ls=":", lw=1)
+            _xatoms(ax)
+            _ylog(ax)
+            ax.set_title(f"{system} · {host}", fontsize=9, color=INK)
+            if i == len(systems) - 1:
+                ax.set_xlabel("atoms", fontsize=8, color=INK2)
+            if j == 0:
+                ax.set_ylabel("peak memory (GB)", fontsize=8, color=INK2)
+    _legend(fig, [c for c in CODES if c in drawn], modes=False)
+    fig.tight_layout(rect=(0, 0, 0.94, 1), w_pad=3.0)
     _place_labels(fig)
     p = out / f"scaling_memory_{dtype}_{size}.png"
     fig.savefig(p, dpi=160, bbox_inches="tight")     # keeps the figure legend
@@ -265,6 +272,7 @@ def fig_memory(rows, out, dtype="float64", size="medium"):
 
 
 def fig_precision(rows, out, size="medium"):
+    """f32 / f64 throughput ratio vs N (standalone), one panel per system x host."""
     ok = [r for r in rows if r.get("status") == "ok" and r.get("mode") == "standalone"
           and r.get("size") == size and throughput(r)]
     by = defaultdict(dict)
@@ -273,24 +281,29 @@ def fig_precision(rows, out, size="medium"):
     ratio = defaultdict(list)
     for (host, code, system, n), d in by.items():
         if "float32" in d and "float64" in d:
-            ratio[(host, code)].append((n, d["float32"] / d["float64"]))
+            ratio[(host, system, code)].append((n, d["float32"] / d["float64"]))
     if not ratio:
         return None
-    hosts = sorted({h for h, _ in ratio})
-    fig, axes = _panels(1, len(hosts))
-    for j, host in enumerate(hosts):
-        ax = axes[0][j]
-        for (h, code), pts in sorted(ratio.items()):
-            if h != host:
-                continue
-            pts.sort()
-            ax.plot(*zip(*pts), color=CODES[code][1], lw=1.6, marker="o", ms=5)
-        ax.axhline(1.0, color=AXIS, lw=1)
-        _xatoms(ax)
-        ax.set_title(f"f32 / f64 throughput · {host}", fontsize=9, color=INK)
-        ax.set_xlabel("atoms", fontsize=8, color=INK2)
-    _legend(fig, sorted({c for _, c in ratio}, key=list(CODES).index), modes=False, layout=False)
-    fig.tight_layout(rect=(0, 0, 1, 0.9))
+    hosts = sorted({h for h, _, _ in ratio})
+    systems = sorted({s for _, s, _ in ratio})
+    fig, axes = _panels(len(systems), len(hosts))
+    for i, system in enumerate(systems):
+        for j, host in enumerate(hosts):
+            ax = axes[i][j]
+            for (h, s_, code), pts in sorted(ratio.items()):
+                if h != host or s_ != system:
+                    continue
+                pts.sort()
+                ax.plot(*zip(*pts), color=CODES[code][1], lw=1.6, marker="o", ms=5)
+            ax.axhline(1.0, color=AXIS, lw=1)
+            _xatoms(ax)
+            ax.set_title(f"{system} · {host}", fontsize=9, color=INK)
+            if i == len(systems) - 1:
+                ax.set_xlabel("atoms", fontsize=8, color=INK2)
+            if j == 0:
+                ax.set_ylabel("f32 / f64 throughput", fontsize=8, color=INK2)
+    _legend(fig, sorted({c for _, _, c in ratio}, key=list(CODES).index), modes=False, layout=False)
+    fig.tight_layout(rect=(0, 0, 1, 1))
     p = out / f"scaling_precision_{size}.png"
     fig.savefig(p, dpi=160, bbox_inches="tight")     # keeps the figure legend
     plt.close(fig)
