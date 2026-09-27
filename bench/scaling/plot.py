@@ -215,7 +215,10 @@ def fig_model_size(rows, out, dtype="float64"):
     fig, axes = _panels(len(systems), len(hosts))
     for j, host in enumerate(hosts):
         n_target = 2048 if "cpu" in host else 8192
-        best = _at_fixed_n(ok, host, n_target)
+        # exactly N: a line that did not reach N (out of memory) is left out
+        # rather than drawn from a smaller N, where GPU throughput is lower
+        best = {k: r for k, r in _at_fixed_n(ok, host, n_target).items()
+                if r["n_atoms"] == n_target}
         for i, system in enumerate(systems):
             ax = axes[i][j]
             for code in CODES:
@@ -370,8 +373,8 @@ CAPTIONS = {
                                   "solid = standalone, dashed = LAMMPS.",
     "scaling_throughput_float32": "The same in float32. ML-PACE and Symmetrix (MACE in "
                                   "LAMMPS) evaluate in double, so they are absent.",
-    "scaling_model_size": "Throughput vs model size at a fixed size (8,192 atoms on GPU, "
-                          "2,048 on CPU).",
+    "scaling_model_size": "Throughput vs model size at exactly 8,192 atoms on GPU and "
+                          "2,048 on CPU; a line is absent at a size that did not fit.",
     "scaling_memory": "Peak device memory vs system size (standalone); dotted verticals "
                       "mark the first size that did not fit.",
     "scaling_precision": "float32 / float64 throughput ratio (standalone).",

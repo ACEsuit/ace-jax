@@ -602,3 +602,23 @@ def test_parity_gate_covers_both_bundle_layouts():
     for code in ("acejax-pace", "acejax-ace"):
         assert ("acejax", code, "dense") in got and ("acejax", code, "sparse") in got
     assert ("mlpace", "mlpace", None) in got and ("mace", "mace", None) in got
+
+
+def test_model_size_figure_plots_only_the_target_size(tmp_path, monkeypatch):
+    """A line that ran out of memory below N must not be drawn from a smaller N
+    under a title that says N: GPU throughput is lower at small N."""
+    import matplotlib
+    matplotlib.use("Agg")
+    from scaling import plot
+    rows = []
+    for size, ns in (("small", (4096, 8192)), ("medium", (4096,)), ("large", (2048, 4096, 8192))):
+        for n in ns:
+            rows.append({"code": "mace", "mode": "standalone", "model": f"mace/SiGe/{size}",
+                         "size": size, "system": "SiGe", "n_atoms": n, "device": "gpu",
+                         "dtype": "float64", "host": "moriarty-gpu", "status": "ok",
+                         "call_s": 1.0})
+    figs = []
+    monkeypatch.setattr(plot.plt, "close", lambda f=None: figs.append(f))
+    plot.fig_model_size(rows, tmp_path)
+    xs = sorted(x for ax in figs[-1].axes for ln in ax.lines for x in ln.get_xdata())
+    assert xs == [0, 2]                            # medium (only 4096) is absent

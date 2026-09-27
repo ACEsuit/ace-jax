@@ -29,27 +29,40 @@ design is in `docs/benchmark-scaling-spec.md`, and how to reproduce it is in
   20 GB); Modal A100-80GB.
 - **Parity gate:** each host's parity checks passed before any timing ran.
   - ace-jax vs ML-PACE: |dE|/atom ≤ 5e-14, |dF| ≤ 4e-10.
-  - ace-jax standalone vs ace-jax in LAMMPS: ≤ 3e-15.
+  - ace-jax standalone vs ace-jax in LAMMPS, both bundle layouts: |dE|/atom
+    ≤ 3e-15, |dF| ≤ 3e-14.
   - MACE vs Symmetrix: ≤ 7e-7.
 
-## Findings (medium models, float64; 8,192 atoms on GPU, 2,048 on CPU)
+## Findings
 
-- **ML-PACE in LAMMPS is the fastest code on every host,** at about 1.7–2.2M
-  atom-steps/s on the A100, 0.7–1.0M on the A4500, and 0.2–0.3M on 16 CPU
-  cores. On the same `.yace` models, ace-jax reaches about 0.3–0.45M on the
-  A100 (4–6× slower), 0.1–0.17M standalone on the A4500, and about 7–10k on
-  the CPU.
-  - A profiling study (`docs/pace-performance-gap.md`, on the follow-up
-    speed-up branch) traces most of the GPU gap to calculator overhead and
-    specific model kernels, and prototypes changes that bring the model call
-    level with ML-PACE.
-- **ace-jax is 5–15× faster than MACE** at the model sizes compared here,
-  standalone and in LAMMPS. It fits 10–30× more atoms in the same memory: on
-  the A100, ace-jax PACE fits about 1M atoms, where MACE runs out at about
-  32–64k.
+Medium models, float64, at exactly 8,192 atoms on the GPUs and 2,048 on the
+CPU. The ratios come from the rows in the table below.
+
+- **ML-PACE in LAMMPS is the fastest code on every host.** It reaches
+  1.7–2.2M atom-steps/s on the A100, 0.7–1.0M on the A4500, and 0.2–0.3M on
+  16 CPU cores. On the same `.yace` models, ace-jax PACE is slower:
+
+  | host | vs ace-jax standalone | vs ace-jax in LAMMPS | note |
+  |---|---|---|---|
+  | A100 | 4.6–6.4× | about 5× | |
+  | A4500 | 4–6× | 10–18× | slow consumer-card float64 |
+  | CPU | about 30× | — | 16 MPI ranks against one process |
+
+  A profiling study (`docs/pace-performance-gap.md`, on the follow-up
+  speed-up branch) traces most of the GPU gap to calculator overhead and
+  specific model kernels. It prototypes changes that bring the model call
+  level with ML-PACE.
+- **ace-jax is faster than MACE at every size compared here:**
+  - standalone: 12–16× on the A100, 23–41× on the A4500, and 14–48× on the
+    CPU;
+  - in LAMMPS on the A100: 5–8×;
+  - on the A4500, where MACE in LAMMPS runs out of memory at 8,192 atoms,
+    about 2–10× at 4,096.
+- **ace-jax fits far more atoms than MACE in the same memory.** On the A100,
+  ace-jax PACE runs 524k–1M atoms standalone and linear ACE 262k–524k, where
+  MACE stops at 32k. That's 8–32× more, and similar on the A4500.
 - **float32** speeds ace-jax up 1–1.5× on the A100 and 1.5–3× on the
-  consumer A4500, where float64 is slow. The gain for MACE is up to 6× on the
-  A4500.
+  consumer A4500, where float64 is slow. MACE gains up to 6× on the A4500.
 
 ## Caveats
 
@@ -63,6 +76,14 @@ design is in `docs/benchmark-scaling-spec.md`, and how to reproduce it is in
   - Symmetrix evaluates in double whatever precision it's given, so MACE
     LAMMPS rows are float64 only.
 - **ace-jax in LAMMPS is GPU-only.** lammps-jax provides only `jax/kk`.
+- **Neighbour list.** Standalone ace-jax numbers use `matscipy-neighbours`
+  (the `fast-neighbours` extra, built with CUDA on the GPU hosts, so the
+  dense neighbour graph is built on the device). A default install falls
+  back to ASE's neighbour list and is slower end to end.
+- **LAMMPS step counts.** Each case times about 60 s of MD (10–200 steps,
+  sized from the previous size's step time) after 3–50 warm-up steps. This
+  is a deviation from the spec's fixed 200/50, made so the slow MACE CPU
+  cases finish.
 - **Out-of-memory markers.** On the CPU host, cases are killed at 48 GB of
   resident memory (the node has 62 GB); on GPUs they stop at the device
   limit. A dotted vertical line marks the first size that did not fit.
@@ -84,7 +105,7 @@ Hollow markers: ace-jax chose the sparse layout.
 
 ![scaling_model_size_float64](figs/scaling_model_size_float64.png)
 
-*Throughput vs model size at a fixed size (8,192 atoms on GPU, 2,048 on CPU).*
+*Throughput vs model size at exactly 8,192 atoms on GPU and 2,048 on CPU; a line is absent at a size that did not fit.*
 
 ![scaling_memory_float64_medium](figs/scaling_memory_float64_medium.png)
 
