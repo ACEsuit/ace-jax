@@ -220,6 +220,7 @@ def test_learn_radial_logs_per_round(small):
                  reprofile_every=2, log=lines.append)
     round_lines = [l for l in lines if "round" in l]
     assert len(round_lines) >= 2
+    assert "eta=" in round_lines[0] and "eta=" not in round_lines[-1]
 
 
 def test_gate_ties_go_to_first():
@@ -476,3 +477,5 @@ def test_bench_driver_smoke(tmp_path):
     s = json.loads((tmp_path / "summary.json").read_text())
     assert s["selected"] in s["scores"] and (tmp_path / "model.npz").exists()
     assert (tmp_path / "lam_0" / "rnl_Wnlq.npy").exists()
+    assert s["to_analytic_relres_max"] == 0.0            # analytic fixture: widened only
+    assert "relres_max=" in r.stdout

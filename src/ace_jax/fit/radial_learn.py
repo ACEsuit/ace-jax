@@ -280,9 +280,14 @@ def learn_radial(prob, ds, W0, *, theta0=None, profile=True, lam_rough=0.0, roug
                 theta_msg = (f" log_sigma_c={float(th.log_sigma_c):.4f} "
                              f"log_sigma_E={float(th.log_sigma_E):.4f} "
                              f"log_sigma_F={float(th.log_sigma_F):.4f}")
+            eta_msg = ""
+            if round_idx == 1 and done < int(steps):
+                # projected from round 1 (includes compile, so conservative)
+                eta = round_dt * (int(steps) - done) / n
+                eta_msg = f" eta={eta:.0f}s (this lam, from round 1)"
             log(f"learn_radial: round {round_idx} steps={done}/{int(steps)} "
                 f"accepted={len(trace)} obj={f_best:.6e} reason={reason} "
-                f"time={round_dt:.1f}s profile_time={profile_dt:.1f}s" + theta_msg)
+                f"time={round_dt:.1f}s profile_time={profile_dt:.1f}s" + theta_msg + eta_msg)
         if reason != "steps":
             break
     info["steps"] = done

@@ -1,15 +1,15 @@
 """Learn the tensor radials of an ACE model by VarPro, gate on a held-out split.
 
     uv run python bench/learn_radial/run.py --model M.npz --data D.xyz --out DIR \
-        [--n-q 30] [--steps 200] [--lam-grid 0,1e-3,1e-2,1e-1]
+        [--n-q 30] [--ntrain 200] [--steps 40] [--lam-grid 0,1e-2]
 
 A splined (Julia-exported) model is converted to the analytic branch first
 (to_analytic); an analytic one is widened to --n-q.  Writes DIR/model.npz (the
 selected radials and the readout fitted for them patched into a copy of
 --model), rnl_Wnlq.npy, readout.npy, radial_info.json and summary.json (gate
-scores, selected label).  Each lambda's radials are checkpointed to
-DIR/lam_<lam>/ (rnl_Wnlq.npy, radial_info.json) as soon as its run finishes.  The residual
-GP / UQ fit then runs on DIR/model.npz as usual.
+scores, selected label, to_analytic_relres_max).  Each lambda's radials are
+checkpointed to DIR/lam_<lam>/ (rnl_Wnlq.npy, radial_info.json) as soon as its
+run finishes.  The residual GP / UQ fit then runs on DIR/model.npz as usual.
 """
 import argparse
 import json
@@ -37,12 +37,12 @@ p.add_argument("--model", required=True); p.add_argument("--data", required=True
 p.add_argument("--out", required=True)
 p.add_argument("--energy-key", default="energy"); p.add_argument("--force-key", default="forces")
 p.add_argument("--virial-key", default="virial")
-p.add_argument("--ntrain", type=int, default=800); p.add_argument("--nval", type=int, default=200)
+p.add_argument("--ntrain", type=int, default=200); p.add_argument("--nval", type=int, default=200)
 p.add_argument("--seed", type=int, default=0); p.add_argument("--batch", type=int, default=4)
 p.add_argument("--r0", type=float, default=2.35, help="hyperprior length scale (default_prior)")
 p.add_argument("--n-q", type=int, default=30, help="tensor-radial polynomial span after widening")
-p.add_argument("--steps", type=int, default=200); p.add_argument("--reprofile-every", type=int, default=10)
-p.add_argument("--lam-grid", default="0,1e-3,1e-2,1e-1", help="relative roughness weights")
+p.add_argument("--steps", type=int, default=40); p.add_argument("--reprofile-every", type=int, default=20)
+p.add_argument("--lam-grid", default="0,1e-2", help="relative roughness weights")
 p.add_argument("--map-steps", type=int, default=300)
 a = p.parse_args()
 
@@ -50,6 +50,8 @@ t0 = time.time()
 out = pathlib.Path(a.out); out.mkdir(parents=True, exist_ok=True)
 model, meta, z = load(a.model)
 model, relres = to_analytic(model, a.n_q)
+relres_max = float(np.max(relres))
+print(f"to_analytic: n_q={a.n_q} relres_max={relres_max:.3e}", flush=True)
 NZ = len(meta["elements"])
 
 configs = load_configs(a.data, a.energy_key, a.force_key, a.virial_key)
@@ -85,10 +87,12 @@ W, info = fit_radial(prob, ds_fit, ds_val, model.rnl_Wnlq, lam_grid=lam_grid,
                      rough_weights=wn, steps=a.steps, reprofile_every=a.reprofile_every,
                      map_steps=a.map_steps, log=lambda s: print(s, flush=True),
                      checkpoint=checkpoint)
-info["to_analytic_relres_max"] = float(np.max(relres))
+info["to_analytic_relres_max"] = relres_max
 save_result(out, W, info, src_npz=a.model, model=model)
 summary = {"selected": info["selected"], "scores": info["scores"], "n_q": a.n_q,
            "ntrain": a.ntrain, "nval": a.nval, "lam_grid": list(lam_grid),
+           "steps": a.steps, "reprofile_every": a.reprofile_every,
+           "to_analytic_relres_max": relres_max,
            "seconds": time.time() - t0}
 (out / "summary.json").write_text(json.dumps(summary, indent=1))
 print(json.dumps(summary, indent=1))
