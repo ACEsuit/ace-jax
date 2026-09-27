@@ -116,6 +116,58 @@ value, the feature is worth keeping; a Si production run remains open before
 the ≥2-of-3 criterion can be called fully satisfied on the intended system
 set rather than on a 2-system subset.
 
+## Figures
+
+![Held-out gate scores](figures/learn-radial/1_gate_scores.png)
+
+![VarPro objective per L-BFGS step](figures/learn-radial/2_objective.png)
+
+## Shape of the learned radials: small, but high-frequency
+
+The radials barely move. Measured in the data-weighted norm, where each
+initial radial has norm 1, the median change is below 0.1%. The largest is
+about 1% on SiGe and 5% on Cantor at λ = 0. At plot scale the learned curves
+lie on top of the initial ones.
+
+The *change*, however, is not smooth:
+
+- **It is spectrally flat up to q = 30.** The initial radials are
+  band-limited: Legendre degree ≤ 9 on SiGe and ≤ 3 on Cantor, which reflects
+  the spline radials they were projected from. The change ΔW has roughly
+  equal power at every degree up to the widened span `--n-q 30`. The share of
+  that power at q ≥ 15 is 34% on SiGe and about 50% on Cantor.
+- **It sits on the pair-distance peaks.** ΔR(r) consists of wiggles about
+  0.3 Å wide, placed on the training pair-distance peaks near 2.5, 4.0 and
+  4.5 Å, and it is near zero in the gaps between them.
+
+The optimiser is using the widened polynomial span to add fine structure
+tuned to the training distance distribution. The validation split shares
+those peaks, so the held-out gate cannot tell physical improvement from this
+kind of fit. More steps would let the wiggles grow.
+
+The curvature penalty as implemented barely restrains this:
+
+- **SiGe:** λ = 1e-2 makes no visible difference. The relative scaling
+  `λ·r0/rough0` gives λ_abs ≈ 1e-5, because the degree-9 initial radials
+  already have a large curvature.
+- **Cantor:** λ = 1e-2 halves the wiggles but leaves the spectrum flat.
+
+![SiGe radials](figures/learn-radial/3_radials_SiGe.png)
+
+![Cantor radials](figures/learn-radial/3_radials_Cantor.png)
+
+![How much each radial moved, and the spectrum of the change](figures/learn-radial/4_change_spectrum.png)
+
+**Next: a stronger prior.** Three options, cheapest first:
+
+- **(a)** Cap the span at roughly the initial degree plus a few (`--n-q 12`).
+- **(b)** Add a spectral prior on the change ΔW, penalising ∝ q^p, as the
+  departure-from-init analogue of Γ's degree weighting.
+- **(c)** Use a much larger λ grid.
+
+The decisive test is whether most of the held-out gain survives when the
+change is forced to be smooth.
+
 ## Caveats
 
 - **L-BFGS had not converged at 40 steps.** Every round in both systems ended
