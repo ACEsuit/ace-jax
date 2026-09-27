@@ -218,5 +218,10 @@ def test_rnl_degrees(si):
     _, meta, _, _ = si
     d = rnl_degrees(meta)
     assert d.shape == (meta["n_rnl"],) and d.min() == 0
+    # Si fixture (NZ = 1, order 3, totaldegree 10): the spec starts
+    # (1,0) .. (10,0), (1,1), (2,1), so (n - 1) // NZ = n - 1 there
+    spec_n = list(range(1, 11)) + [1, 2]
+    np.testing.assert_array_equal(d[:12], [(n - 1) // 1 for n in spec_n])
+    np.testing.assert_array_equal(d[:12], [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1])
     with pytest.raises(ValueError, match="n_rnl"):
         rnl_degrees({**meta, "n_rnl": meta["n_rnl"] + 1})

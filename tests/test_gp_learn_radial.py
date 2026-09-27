@@ -238,9 +238,17 @@ def test_holdout_score_energy_only_split(small):
     from ace_jax.fit.radial_learn import holdout_score
     prob, ds_fit, _ = small
     _, ds_val, _ = make_problem(ncfg=6, start=6, force_key="__no_such_key__")
+    from ace_jax.fit.objective import posterior
+    from ace_jax.fit.stats import linear_statistics
     a = to_array(THETA)
-    s = holdout_score(prob.model.rnl_Wnlq, a, a, prob, ds_fit, ds_val)
-    assert np.isfinite(s) and s >= 0.0
+    W = prob.model.rnl_Wnlq
+    s = holdout_score(W, a, a, prob, ds_fit, ds_val)
+    val = linear_statistics(prob.model, prob.cfg, ds_val)
+    assert float(val.n_F) == 0 and float(val.n_E) > 0
+    c, _ = posterior(THETA, linear_statistics(prob.model, prob.cfg, ds_fit), prob)
+    e_term = float(val.yy_E - 2.0 * c @ val.b_E + c @ val.G_E @ c) / (float(val.n_E) * 0.01 ** 2)
+    assert np.isfinite(s) and s > 0.0
+    np.testing.assert_allclose(s, e_term, rtol=1e-10)
 
 
 def test_fit_radial_gate_prefers_learned_on_recoverable_problem():
@@ -277,6 +285,41 @@ def test_fit_radial_zero_steps_gate_is_fair(small):
     assert all(np.isfinite(d["grad_norm"]) and np.isfinite(d["dloss_last"])
                for d in info["map_diag"].values())
     assert info["readout"].shape == (prob.cfg.len_basis,)
+
+
+def test_learn_radial_two_species_roughness():
+    """NZ = 2 (SiGe, structurally-zero onehot rows) and lam > 0: zero rows stay
+    exactly zero, everything is finite, the roughness penalty lowers the
+    learned roughness, and lam_abs is the relative weight times r0/rough0."""
+    from ace_jax.fit.radial_learn import learn_radial
+    from ace_jax.fit.radial_model import (radial_gram, rnl_degrees, roughness, roughness_matrix,
+                                          row_active, to_analytic)
+    spline, meta, z = load(FIXTURE_DIR / "sige_nofit.npz")
+    model, _ = to_analytic(spline, 12)
+    configs = load_configs(XYZ, "dft_energy", "dft_force", "dft_virial")[:6]
+    ds = build_dataset(configs, meta, np.asarray(z["E0"]), configs_per_batch=3)
+    cfg = GPConfig(r0=2.35, rcut=float(meta["rcut"]), n_B=meta["n_B"], n_pair=meta["n_pair"],
+                   NZ=len(meta["elements"]), C=3)
+    X, S = site_features(model, cfg, ds)
+    ind = select_inducing(X, S, ds.node_z, ds.node_mask, 0, descriptor_scale(X, ds.node_mask))
+    prob = Problem(KernelSpec("cosine", True, cfg.D), model, ind, cfg,
+                   jnp.ones(cfg.len_basis), default_prior(2.35))
+    W0 = model.rnl_Wnlq
+    zero = ~np.asarray(row_active(W0))
+    assert cfg.NZ == 2 and zero.any() and (~zero).any()
+    wn = 1.0 / (1.0 + rnl_degrees(meta)) ** 2
+    D2 = roughness_matrix(model)
+    out = {}
+    for lam in (0.0, 1e-1):
+        W, info = learn_radial(prob, ds, W0, theta0=THETA, lam_rough=lam, rough_weights=wn,
+                               steps=5, reprofile_every=5, map_steps=20)
+        W = np.asarray(W)
+        assert np.all(np.isfinite(W)) and all(np.isfinite(info["trace"]))
+        assert np.all(W[zero] == 0.0)
+        np.testing.assert_allclose(info["lam_abs"], lam * info["r0"] / info["rough0"], rtol=1e-12)
+        out[lam] = float(roughness(jnp.asarray(W), D2, jnp.asarray(wn)))
+    print(f"roughness: lam=0 {out[0.0]:.6e}  lam=0.1 {out[1e-1]:.6e}")
+    assert out[1e-1] <= out[0.0]
 
 
 def test_fit_radial_rejects_duplicate_lambdas(small):

@@ -201,7 +201,8 @@ def learn_radial(prob, ds, W0, *, theta0=None, profile=True, lam_rough=0.0, roug
     rough0 = float(roughness(V, D2, wn))
     lam = float(lam_rough) * r0 / max(rough0, 1e-300) if lam_rough else 0.0
     info = {"trace": [], "reasons": [], "theta": [np.asarray(a)], "lam_abs": lam,
-            "lam_rough": float(lam_rough), "steps": 0, "round_lengths": []}
+            "lam_rough": float(lam_rough), "r0": r0, "rough0": rough0, "steps": 0,
+            "round_lengths": []}
     if log is not None:
         log(f"learn_radial: lam_rough={float(lam_rough):g} lam_abs={lam:.6e} "
             f"r0={r0:.6e} profile={bool(profile)}")

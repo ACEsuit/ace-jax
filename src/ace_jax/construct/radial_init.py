@@ -301,6 +301,8 @@ def tensor_radial_init(elements, Rnl_spec, *, rcut,
     n_q = ceil(n_q_factor * max n) (1.5 is ACEpotentials' default; learned
     radials want 2-3).  Returns dict with rnl_transform (NZ,NZ,7),
     rnl_envelope (NZ,NZ,5), rnl_Wnlq (NZ,NZ,n_rnl,n_q) and polys_A/B/C (n_q,)."""
+    if not n_q_factor >= 1:
+        raise ValueError(f"n_q_factor must be >= 1 (n_q >= max n), got {n_q_factor!r}")
     NZ = len(elements)
     n_rnl = len(Rnl_spec)
     actual_maxn = max(n for n, _ in Rnl_spec)

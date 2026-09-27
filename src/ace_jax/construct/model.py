@@ -112,6 +112,8 @@ def build_model(elements, order, totaldegree, *, wL=1.5, rcut=5.5, r0=None,
     shim) on a cache miss; evaluate in float64 with x64 enabled."""
     if edge_a_kind not in ("gather", "matmul"):
         raise ValueError(f'edge_a_kind must be "gather" or "matmul", got {edge_a_kind!r}')
+    if not n_q_factor >= 1:          # checked before the (possibly Julia) coupling step
+        raise ValueError(f"n_q_factor must be >= 1 (n_q >= max n), got {n_q_factor!r}")
     zs = ri.resolve_elements(elements)
     NZ = len(zs)
     mb, Rnl, Ylm = build_spec(NZ, order, totaldegree, wL)

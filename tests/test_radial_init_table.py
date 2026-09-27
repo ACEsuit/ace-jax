@@ -41,6 +41,16 @@ def test_build_model_n_q_factor(tmp_path):
     assert auth.meta["authoring"]["n_q_factor"] == 3.0
 
 
+@pytest.mark.parametrize("bad", [0.5, 0.0, -1.0, float("nan")])
+def test_n_q_factor_below_one_raises(bad):
+    from ace_jax.construct.model import build_model
+    Rnl, _ = _rnl()
+    with pytest.raises(ValueError, match="n_q_factor"):
+        tensor_radial_init([14], Rnl, rcut=5.5, n_q_factor=bad)
+    with pytest.raises(ValueError, match="n_q_factor"):   # before any coupling work
+        build_model([14], 3, 10, coupling_cache=False, n_q_factor=bad)
+
+
 from conftest import FIXTURE_DIR
 
 
