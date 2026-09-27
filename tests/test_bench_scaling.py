@@ -590,3 +590,15 @@ def test_load_fills_system_and_size_from_the_model_name(tmp_path):
     (tmp_path / "r.jsonl").write_text(json.dumps(ok) + "\n" + json.dumps(killed) + "\n")
     rows = load(str(tmp_path / "*.jsonl"))
     assert "| h | Cantor | MACE | standalone | 4096 | 8192 |" in largest_fits(rows)
+
+
+def test_parity_gate_covers_both_bundle_layouts():
+    """run_lammps falls back to a sparse bundle on dense OOM, so the sparse
+    layout must be gated on a periodic cell too (ghost atoms), not only dense."""
+    from scaling.models import planned_models
+    from scaling.parity import gate_checks
+    small = {(m["code"], m["system"]): m for m in planned_models() if m["size"] == "small"}
+    got = {(g, m["code"], lay) for g, m, lay in gate_checks(small, "SiGe")}
+    for code in ("acejax-pace", "acejax-ace"):
+        assert ("acejax", code, "dense") in got and ("acejax", code, "sparse") in got
+    assert ("mlpace", "mlpace", None) in got and ("mace", "mace", None) in got

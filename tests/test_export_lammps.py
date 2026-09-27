@@ -124,3 +124,16 @@ def test_bundle_records_type_order(tmp_path):
     with pytest.raises(ValueError, match="not in the model"):
         export_lammps(model, meta, tmp_path / "x.json", max_atoms=64, max_edges=64,
                       layout="sparse", type_elements=[14, 6])
+
+
+def test_dense_overflow_makes_forces_nan_too():
+    """jnp.where(overflow, nan, e) sends no cotangent to e: energy NaN but
+    forces exactly zero, so MD between thermo steps would run silently wrong."""
+    y = str(pace_fixture(FIX / "gesi_sbessel.yace"))
+    model, meta, _ = load(y)
+    at = _cluster()
+    graph, _ = _lammps_graph(at, meta["rcut"])
+    species = jnp.zeros(len(at), jnp.int32)
+    f = make_energy_fn(model, len(meta["elements"]), "dense", k_dense=2)
+    g = jax.grad(lambda p: jnp.sum(f(p, species, graph)))(jnp.asarray(at.positions))
+    assert np.isnan(np.asarray(g)).any()

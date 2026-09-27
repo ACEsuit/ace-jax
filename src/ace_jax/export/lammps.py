@@ -57,7 +57,9 @@ def make_energy_fn(model, n_species, layout, k_dense=None, type_map=None):
         e = model.site_energies_dense(rd, jnp.broadcast_to(node_z[:, None], idx.shape),
                                       node_z[idx], md, node_z)
         overflow = jnp.any(m & (slot >= k_dense))
-        return jnp.where(overflow, jnp.nan, e)
+        # multiply, not where: jnp.where sends no cotangent to e when overflow
+        # is set, so the energy would be NaN but the forces silently zero
+        return e * jnp.where(overflow, jnp.nan, 1.0)
 
     return energy_fn
 
