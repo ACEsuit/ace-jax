@@ -105,7 +105,7 @@ def capacity(at, rcut, skin=1.0):
             "k_dense": k_max + 8, "max_edges": int(len(at) * (k_max + 8))}
 
 
-def export_bundle(row, at, dtype, workdir):
+def export_bundle(row, at, dtype, workdir, layout="auto"):
     """Export the ace-jax model as a lammps-jax bundle sized for `at`."""
     import time
     import jax
@@ -118,7 +118,7 @@ def export_bundle(row, at, dtype, workdir):
     pathlib.Path(workdir).mkdir(parents=True, exist_ok=True)
     t0 = time.perf_counter()
     b = export_lammps(model, meta, pathlib.Path(workdir) / "bundle.json", max_atoms=cap["max_atoms"],
-                      max_edges=cap["max_edges"], k_dense=cap["k_dense"], dtype=dtype,
+                      max_edges=cap["max_edges"], k_dense=cap["k_dense"], dtype=dtype, layout=layout,
                       type_elements=[atomic_numbers[e] for e in row["elements"]])  # data-file order
     return str(pathlib.Path(workdir) / "bundle.json"), b["ace_jax"]["layout"], time.perf_counter() - t0
 
@@ -138,22 +138,45 @@ def choose_steps(prev_step_s, prev_n, n, target_s=STEP_BUDGET_S, max_steps=200, 
     return steps, min(50, max(3, steps // 4))
 
 
+def bundle_layout(prev):
+    """The ace-jax bundle layout for this case: once a line has fallen back to
+    sparse (dense out of memory), its larger sizes export sparse directly."""
+    return "sparse" if (prev or {}).get("layout") == "sparse" else "auto"
+
+
 def run_case(row, n_atoms, dtype, device, lmp, ranks, workdir, pjrt=None, prev=None):
     work = pathlib.Path(workdir); work.mkdir(parents=True, exist_ok=True)
     at = supercell(row["system"], n_atoms)
     data = work / "x.data"
     write(data, at, format="lammps-data", specorder=row["elements"], masses=True)
     style = {"acejax-pace": "acejax", "acejax-ace": "acejax", "mlpace": "mlpace", "mace": "mace"}[row["code"]]
-    export = {}
-    if style == "acejax" and not row.get("bundle"):              # sized for this structure
-        row = dict(row)
-        row["bundle"], export["layout"], export["compile_s"] = export_bundle(row, at, dtype, work)
-    model = {"acejax": row.get("bundle"), "mace": row.get("symmetrix")}.get(style) or row["path"]
-    if style == "mace" and not pathlib.Path(model).exists():     # e.g. MH-1 not exportable
+    if style == "mace" and not pathlib.Path(row.get("symmetrix") or "").exists():  # e.g. MH-1
         return {"code": row["code"], "mode": "lammps", "model": row["name"], "size": row["size"],
                 "system": row["system"], "n_atoms": n_atoms, "device": device, "dtype": dtype,
-                "status": "unsupported", "error": f"no Symmetrix model {model}"}
+                "status": "unsupported", "error": f"no Symmetrix model {row.get('symmetrix')}"}
     steps, warmup = choose_steps((prev or {}).get("step_s"), (prev or {}).get("n_atoms"), n_atoms)
+    if style != "acejax":
+        model = row.get("symmetrix") if style == "mace" else row["path"]
+        return _run_lammps(row, style, model, data, work, n_atoms, dtype, device, lmp, ranks,
+                           pjrt, steps, warmup, {})
+    # ace-jax: the export's auto layout judges dense against the exporting
+    # process's budget, not LAMMPS's (PJRT pool + Kokkos + ghosts): a dense
+    # bundle that runs out of memory is retried sparse
+    layout = bundle_layout(prev)
+    while True:
+        bundle, used, compile_s = export_bundle(row, at, dtype, work, layout=layout)
+        out = _run_lammps(row, style, bundle, data, work, n_atoms, dtype, device, lmp, ranks, pjrt,
+                          steps, warmup, {"layout": used, "compile_s": compile_s})
+        if out["status"] == "oom" and used == "dense":
+            layout = "sparse"
+            continue
+        if layout == "sparse" and bundle_layout(prev) == "auto":
+            out["dense_oom"] = True                     # this size is where the line went sparse
+        return out
+
+
+def _run_lammps(row, style, model, data, work, n_atoms, dtype, device, lmp, ranks, pjrt, steps,
+                warmup, extra):
     (work / "in.bench").write_text(lammps_input(style, model, row["elements"], data, device, steps,
                                                 warmup=warmup))
     cmd = [lmp, "-in", "in.bench", "-log", "log.lammps", "-nocite"]
@@ -165,7 +188,8 @@ def run_case(row, n_atoms, dtype, device, lmp, ranks, workdir, pjrt=None, prev=N
         cmd += ["-var", "pjrt", pjrt]
     out = {"code": row["code"], "mode": "lammps", "model": row["name"], "size": row["size"],
            "system": row["system"], "n_atoms": n_atoms, "device": device, "dtype": dtype,
-           "ranks": ranks, "status": "ok", **export}
+           "ranks": ranks, "status": "ok", **extra}
+    (work / "log.lammps").unlink(missing_ok=True)
     p = subprocess.run(cmd, cwd=work, capture_output=True, text=True, timeout=3600)
     log = (work / "log.lammps").read_text() if (work / "log.lammps").exists() else p.stdout
     if not finished(p.returncode, log) or "Loop time" not in log:

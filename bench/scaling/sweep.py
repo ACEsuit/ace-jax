@@ -132,10 +132,13 @@ def child_env(env, mode=None, cpus=None):
     out = {**os.environ, **env.get("os_env", {}),
            "PYTHONPATH": env.get("pythonpath", str(here.parent)),
            **({"PJRT_PLUGIN": env["pjrt"]} if env.get("pjrt") else {})}   # run_lammps reads it
+    # torch reads MKL_NUM_THREADS as well (moriarty's login env pins both to 1)
     if mode == "standalone" and cpus:
-        out["OMP_NUM_THREADS"] = str(cpus)
+        for v in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS"):
+            out[v] = str(cpus)
     elif mode == "lammps":
-        out["OMP_NUM_THREADS"] = "1"
+        for v in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS"):
+            out[v] = "1"
     return out
 
 
@@ -169,7 +172,8 @@ def subprocess_runner(host, env):
         cpus = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else os.cpu_count()
         e = child_env(env, mode=c.mode, cpus=cpus)
         if prev and prev.get("step_s"):                  # sizes the LAMMPS step count
-            e["BENCH_PREV"] = json.dumps({"step_s": prev["step_s"], "n_atoms": prev["n_atoms"]})
+            e["BENCH_PREV"] = json.dumps({"step_s": prev["step_s"], "n_atoms": prev["n_atoms"],
+                                          "layout": prev.get("layout")})
         cap = HOSTS[host].get("rss_cap_gb")
         rc, out, err, peak, capped = run_capped(cmd, e, timeout=7200,
                                                 cap_bytes=cap and cap * 2**30)

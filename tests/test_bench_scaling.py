@@ -354,6 +354,10 @@ def test_child_env_threads_per_mode(monkeypatch):
     env = {"pythonpath": "/p"}
     assert child_env(env, mode="standalone", cpus=32)["OMP_NUM_THREADS"] == "32"
     assert child_env(env, mode="lammps", cpus=32)["OMP_NUM_THREADS"] == "1"
+    # torch sizes its intra-op pool from MKL_NUM_THREADS too (login env: 1)
+    monkeypatch.setenv("MKL_NUM_THREADS", "1")
+    assert child_env(env, mode="standalone", cpus=32)["MKL_NUM_THREADS"] == "32"
+    assert child_env(env, mode="lammps", cpus=32)["MKL_NUM_THREADS"] == "1"
     assert child_env(env)["OMP_NUM_THREADS"] == "1"                    # unchanged by default
 
 
@@ -442,3 +446,12 @@ def test_timeout_is_an_error_not_an_oom():
     c = Case("mlpace", "mlpace/SiGe/small", "lammps", 256, "float64", "cpu", 16)
     r = row_from_process(c, rc, out, err, capped=capped)
     assert rc is None and r["status"] == "error" and "timeout" in r["error"]
+
+
+def test_acejax_lammps_layout_follows_the_line():
+    """A dense bundle that OOMs is retried sparse; once a line has gone sparse,
+    its larger sizes export sparse directly."""
+    from scaling.run_lammps import bundle_layout
+    assert bundle_layout(None) == "auto"
+    assert bundle_layout({"layout": "dense"}) == "auto"
+    assert bundle_layout({"layout": "sparse"}) == "sparse"

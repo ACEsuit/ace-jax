@@ -98,6 +98,8 @@ def run_case(row, n_atoms, dtype, device, reps=10):
                            enable_cueq=(device == "gpu"),
                            **({"head": row["head"]} if row.get("head") else {}))
             out["platform"] = "cuda" if device == "gpu" else "cpu"
+            if device == "cpu":                   # MKL_NUM_THREADS=1 would pin torch to 1
+                torch.set_num_threads(out["threads"]["cpus"])
             out["threads"]["torch"] = torch.get_num_threads()
             call = lambda: calc.calculate(at, ["energy", "forces", "stress"], all_changes)
             t0 = time.perf_counter(); call(); out["compile_s"] = time.perf_counter() - t0
