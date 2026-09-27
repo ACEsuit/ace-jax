@@ -89,8 +89,13 @@ def test_projected_residual_gradient(small):
     fd = (float(f(W + h * D)) - float(f(W - h * D))) / (2 * h)
     assert abs(float(jnp.vdot(g, D)) - fd) < 1e-5 * abs(fd)
     g_mem = jax.grad(lambda X: _in_memory_residual(X, prob, ds, THETA))(W)
-    np.testing.assert_allclose(np.asarray(g), np.asarray(g_mem), rtol=1e-6,
-                               atol=1e-8 * float(jnp.abs(g_mem).max()))
+    # The streamed path solves the normal equations (error ~ eps * kappa(Phi)^2, with
+    # kappa(Phi) ~ 5.7e4 here), the reference a QR of Phi; float64 agreement is
+    # therefore ~1e-6 of the gradient scale, and platform-dependent below that
+    # (CI Linux vs macOS differ at the 1e-8 level). The FD check above pins the
+    # gradient independently.
+    np.testing.assert_allclose(np.asarray(g), np.asarray(g_mem), rtol=1e-5,
+                               atol=1e-6 * float(jnp.abs(g_mem).max()))
 
 
 def _temp_bytes(fn, *args):
