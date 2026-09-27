@@ -55,6 +55,7 @@ class FitConfig:
     pops_ridge_grid: tuple = (1e-2, 1e-3, 1e-4, 1e-5, 1e-6, 1e-7, 1e-8, 1e-9, 1e-10, 1e-11,
                               1e-12, 1e-13, 1e-14)
     pops_val_frac: float = 0.2; pops_env_nf: int = 2000
+    pops_rows: str = "auto"              # "auto" | "host" (rows cached in host RAM) | "device" (re-evaluated)
 
     def validate(self):
         if self.arm not in ("linear", "gp"):
@@ -73,6 +74,8 @@ class FitConfig:
         if self.map_restarts > 1 and (self.opt != "lbfgs" or self.sigma_type):
             raise ValueError("map_restarts > 1 is the L-BFGS multi-start: set opt lbfgs "
                              "(and not sigma_type)")
+        if self.pops_rows not in ("auto", "host", "device"):
+            raise ValueError(f"pops_rows must be 'auto', 'host' or 'device', got {self.pops_rows!r}")
         if self.predict_stats not in ("cached", "recompute"):
             raise ValueError(f"predict_stats must be 'cached' or 'recompute', got {self.predict_stats!r}")
         if self.fix_rho is not None and self.opt != "lbfgs":

@@ -42,6 +42,8 @@ p.add_argument("--pops-ridge", default="auto",
 p.add_argument("--pops-ridge-grid", default="1e-2,1e-3,1e-4,1e-5,1e-6,1e-7,1e-8,1e-9,1e-10,1e-11,1e-12,1e-13,1e-14",
                help="comma-separated relative ridges searched by --pops-ridge auto")
 p.add_argument("--pops-val-frac", type=float, default=0.2, help="held-out fraction of train for --pops-ridge auto")
+p.add_argument("--pops-rows", choices=["auto", "host", "device"], default="auto",
+               help="POPS design rows: cached once in host RAM (host) or re-evaluated every pass (device)")
 p.add_argument("--pops-env-nf", type=int, default=2000,
                help="force components (random subsample of test) for the paper-mode envelope coverage")
 p.add_argument("--delta-s-floor-q", type=float, default=None,
@@ -132,7 +134,7 @@ cfg = FitConfig(
     pf_maxiter=a.pf_maxiter, uq=a.uq, deriv_dtc=not a.no_deriv_dtc, predict_train=not a.no_predict_train,
     pops_posterior=a.pops_posterior, pops_leverage_pct=a.pops_leverage_pct, pops_ridge=ridge,
     pops_ridge_grid=tuple(float(x) for x in a.pops_ridge_grid.split(",")),
-    pops_val_frac=a.pops_val_frac, pops_env_nf=a.pops_env_nf)
+    pops_val_frac=a.pops_val_frac, pops_env_nf=a.pops_env_nf, pops_rows=a.pops_rows)
 try:
     cfg.validate()
 except ValueError as e:

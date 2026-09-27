@@ -1,7 +1,7 @@
 {
- "model": "/Users/u1470235/gits/ace-jax/.worktrees/pipeline/fixtures/si_fitted.npz",
- "data": "/Users/u1470235/gits/ace-jax/.worktrees/pipeline/fixtures/si_tiny_train.xyz",
- "out": "/Users/u1470235/gits/ace-jax/.worktrees/pipeline/fixtures/pipeline_golden/run_linear_pops_auto",
+ "model": "/Users/u1470235/gits/ace-jax/.worktrees/pops-perf/fixtures/si_fitted.npz",
+ "data": "/Users/u1470235/gits/ace-jax/.worktrees/pops-perf/fixtures/si_tiny_train.xyz",
+ "out": "/Users/u1470235/gits/ace-jax/.worktrees/pops-perf/fixtures/pipeline_golden/run_linear_pops_auto",
  "arm": "linear",
  "ntrain": 16,
  "ntest": 6,
@@ -21,6 +21,7 @@
  "pops_ridge": "auto",
  "pops_ridge_grid": "1e-3,1e-6",
  "pops_val_frac": 0.2,
+ "pops_rows": "auto",
  "pops_env_nf": 20,
  "delta_s_floor_q": null,
  "fix_rho": null,

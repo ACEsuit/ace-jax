@@ -222,8 +222,9 @@ def test_predict_reuses_a_prebuilt_path_and_its_posteriors(tiny_linear_problem, 
         path = PopsRidgePath(THETA, prob, ds)
         import ace_jax.fit.predict as P
         calls = []                                            # one streamed moment pass per posterior built
-        real = P.pops_moment_sums
-        monkeypatch.setattr(P, "pops_moment_sums", lambda *a, **k: calls.append(1) or real(*a, **k))
+        import ace_jax.fit.stats as S                         # DeviceRows calls it there
+        real = S.pops_moment_sums
+        monkeypatch.setattr(S, "pops_moment_sums", lambda *a, **k: calls.append(1) or real(*a, **k))
         monkeypatch.setattr(PopsRidgePath, "__init__",
                             lambda *a, **k: (_ for _ in ()).throw(AssertionError("second factorisation")))
         for _ in range(2):                                    # e.g. the test and ood splits
@@ -246,3 +247,79 @@ def test_ridge_selection_compiles_the_predictor_once(tiny_linear_problem, monkey
     with highest_precision():
         select_pops_ridge(THETA, prob, ds, ds, (1e-2, 1e-4, 1e-6))
     assert len(traces) == 1
+
+
+# --- host-cached rows: one ACE pass, every POPS pass streams the cache -------------
+
+def _host(prob, ds, block=7):
+    from ace_jax.fit.stats import HostRows
+    qs = PopsRidgePath(THETA, prob, ds).qs
+    return HostRows(prob.model, prob.cfg, ds, qs, block=block)     # 7: many blocks + a padded tail
+
+
+def test_host_rows_path_equals_device_path(tiny_linear_problem):
+    prob, ds = tiny_linear_problem
+    with highest_precision():
+        dev = PopsRidgePath(THETA, prob, ds)
+        host = PopsRidgePath(THETA, prob, ds, rows=_host(prob, ds))
+        for p in (dev, host):
+            p.use_mean("blr")
+        # the Gram is summed row-wise vs per quantity: equal to the solve's conditioning
+        assert np.allclose(host.c_star, dev.c_star, rtol=1e-7, atol=1e-12)
+        # compared on what is predicted -- the variance / envelope at real rows
+        from ace_jax.fit.pops import pops_var
+        from ace_jax.fit.rows import linear_rows
+        lin = linear_rows(prob.model, prob.cfg, jax.tree.map(lambda a: a[0], ds))[0]
+        for phi in (lin.E, lin.F.reshape(-1, lin.F.shape[-1])):
+            for form in ("hypercube", "ensemble"):
+                a = pops_var(phi, dev.posterior(1e-4, form=form))
+                b = pops_var(phi, host.posterior(1e-4, form=form))
+                assert np.allclose(np.asarray(a), np.asarray(b), rtol=1e-6, atol=1e-14), form
+            for x, y in zip(dev.envelope(phi, 1e-4), host.envelope(phi, 1e-4)):
+                assert np.allclose(np.asarray(x), np.asarray(y), rtol=1e-6, atol=1e-12)
+
+
+def test_host_rows_ridge_selection_equals_device(tiny_linear_problem):
+    prob, ds = tiny_linear_problem
+    grid = (1e-2, 1e-4, 1e-6)
+    with highest_precision():
+        r_dev, s_dev = select_pops_ridge(THETA, prob, ds, ds, grid)
+        r_host, s_host = select_pops_ridge(THETA, prob, ds, ds, grid, rows="host")
+    assert r_dev == r_host
+    for q in "EFV":
+        assert np.allclose(s_dev[q], s_host[q], rtol=1e-6)
+
+
+def test_host_rows_hold_only_live_rows(tiny_linear_problem):
+    """Padded rows (w = 0) are dropped: the cache is the live rows plus one block's tail."""
+    prob, ds = tiny_linear_problem
+    h = _host(prob, ds)
+    live = int(sum(np.sum(np.asarray(w) > 0) * k for w, k in
+                   ((ds.w_E, 1), (ds.w_F, 3), (ds.w_V, 6))))
+    assert h.n_rows == live and h.blocks[0].shape[0] == 7
+    assert sum(b.shape[0] for b in h.blocks) - h.n_rows < 7
+
+
+def test_blr_mean_is_accurate_not_the_eigh_formula():
+    """c*('blr') must be the BLR posterior mean to solver accuracy.  Reading it off
+    the eigendecomposition of the Gram (kappa^2, with round-off negatives clipped)
+    was 1e-3 off a QR reference on the Si fixture at its MAP hyperparameters, and
+    4e-4 eV/A in forces at the production Cantor basis; the Cholesky BLR posterior
+    agrees with QR to 1e-7 there."""
+    from conftest import FIXTURE_DIR
+    from ace_jax.fit.pipeline import FitConfig, load_fit_data
+    from ace_jax.fit.pipeline.mapfit import fit_map
+    from ace_jax.fit.pipeline.objective import make_objective
+    from ace_jax.fit.pipeline.problem import build_problem
+    from ace_jax.fit.solve import solve_qr
+    cfg = FitConfig(model=str(FIXTURE_DIR / "si_fitted.npz"), energy_key="dft_energy", force_key="dft_force",
+                    virial_key="dft_virial", ntrain=16, ntest=6, batch=4, r0=2.35, arm="linear",
+                    opt="lbfgs", rungs=("map",), map_steps=5).validate()
+    d = load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz"))
+    b = build_problem(cfg, d)
+    with highest_precision():
+        theta = fit_map(cfg, d, b, make_objective(cfg, d, b), log=lambda *a: None).theta
+        ref = np.asarray(solve_qr(b.prob, d.ds_train, theta))
+        for rows in ("device", "host"):
+            c = np.asarray(PopsRidgePath(theta, b.prob, d.ds_train, rows=rows).c_star_at("blr"))
+            assert np.linalg.norm(c - ref) <= 1e-5 * np.linalg.norm(ref), (rows, np.linalg.norm(c - ref) / np.linalg.norm(ref))

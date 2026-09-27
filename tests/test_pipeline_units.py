@@ -284,3 +284,27 @@ def test_default_ladder_is_map_only():
     a = _parser().parse_args(["fit", "--model", "m.npz", "--train", "a.xyz", "--r0", "2.35", "--out", "o"])
     assert tuple(_fit_config(a).rungs) == ("map",)
     assert tuple(FitConfig(model="m.npz").rungs) == ("map",)
+
+
+def test_pops_fit_with_host_rows_matches_device_rows():
+    """FitConfig.pops_rows="host" (rows evaluated once, cached in host RAM) gives the
+    same POPS fit as "device" (rows re-evaluated per pass), to the Gram's summation
+    order."""
+    from conftest import FIXTURE_DIR
+    from ace_jax.fit.pipeline import FitConfig, fit, load_fit_data
+    base = dict(model=str(FIXTURE_DIR / "si_fitted.npz"), energy_key="dft_energy", force_key="dft_force",
+                virial_key="dft_virial", ntrain=16, ntest=6, batch=4, r0=2.35, arm="linear", uq="pops",
+                opt="lbfgs", rungs=("map",), map_steps=5, predict_train=False,
+                pops_ridge_grid=(1e-3, 1e-5, 1e-7))
+    out = {}
+    for rows in ("device", "host"):
+        cfg = FitConfig(**base, pops_rows=rows).validate()
+        out[rows] = fit(cfg, load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz")),
+                        log=lambda *a: None).preds
+    assert out["host"].pops["ridge"] == out["device"].pops["ridge"]
+    a, b = out["device"].arrays["test/map"], out["host"].arrays["test/map"]
+    # agree to the problem's solver accuracy (the BLR mean is 1e-5 from QR here)
+    for k in ("E_mean", "F_mean", "E_var", "F_var", "V_var"):
+        assert np.allclose(a[k], b[k], rtol=1e-5, atol=1e-7), k
+    with pytest.raises(ValueError, match="pops_rows"):
+        FitConfig(**base, pops_rows="gpu").validate()
