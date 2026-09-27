@@ -1,0 +1,1858 @@
+[
+ {
+  "code": "mlpace",
+  "model": "SiGe_small",
+  "n": 1024,
+  "dtype": "float64",
+  "step_s": 0.00068066,
+  "atom_steps_per_s": 1504422.1784738342,
+  "error": null,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "acejax",
+  "model": "SiGe_small",
+  "n": 1024,
+  "dtype": "float64",
+  "variant": "baseline",
+  "yace": "/ace-jax/bench/scaling/models/pace_SiGe_small.yace",
+  "device": "NVIDIA A100 80GB PCIe",
+  "ase_calc": {
+   "call_s": 0.010798247500000357,
+   "atoms_per_s": 94830.20277132619,
+   "first_s": 3.1744172149999983,
+   "nlist_s": 0.007750801500000293,
+   "model_s": 0.001193756000001045
+  },
+  "parity_skin_vs_ase": {
+   "dE_per_atom": 2.7755575615628914e-17,
+   "max_dF": 8.451572774959004e-15
+  },
+  "skin_calc": {
+   "call_s": 0.003945175499998399,
+   "atoms_per_s": 259557.52792250068,
+   "first_s": 0.005093064000000425,
+   "prep_s": 0.00035047799999965434,
+   "model_and_d2h_s": 0.0030829859999990106,
+   "n_rebuilds": 1,
+   "first_rebuild_s": 1.607667995,
+   "rebuild_s": 0.011200515999998828,
+   "K": 28,
+   "K_skin": 36
+  },
+  "peak_bytes": 114992896,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "acejax",
+  "model": "SiGe_small",
+  "n": 1024,
+  "dtype": "float64",
+  "variant": "rec+pool+fm",
+  "yace": "/ace-jax/bench/scaling/models/pace_SiGe_small.yace",
+  "device": "NVIDIA A100 80GB PCIe",
+  "skin_calc": {
+   "call_s": 0.004156514499996433,
+   "atoms_per_s": 246360.26170506052,
+   "first_s": 0.005239299999999503,
+   "prep_s": 0.0003789459999978817,
+   "model_and_d2h_s": 0.003216282000000348,
+   "n_rebuilds": 1,
+   "first_rebuild_s": 1.9071975929999958,
+   "rebuild_s": 0.013202601999999786,
+   "K": 28,
+   "K_skin": 36
+  },
+  "peak_bytes": 90508288,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "mlpace",
+  "model": "SiGe_small",
+  "n": 4096,
+  "dtype": "float64",
+  "step_s": 0.0012013500000000001,
+  "atom_steps_per_s": 3409497.6484787944,
+  "error": null,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "acejax",
+  "model": "SiGe_small",
+  "n": 4096,
+  "dtype": "float64",
+  "variant": "baseline",
+  "yace": "/ace-jax/bench/scaling/models/pace_SiGe_small.yace",
+  "device": "NVIDIA A100 80GB PCIe",
+  "ase_calc": {
+   "call_s": 0.014056659499999569,
+   "atoms_per_s": 291392.1333870345,
+   "first_s": 3.0310924959999994,
+   "nlist_s": 0.009623176000001621,
+   "model_s": 0.002010568000002877
+  },
+  "parity_skin_vs_ase": {
+   "dE_per_atom": 1.1102230246251565e-16,
+   "max_dF": 1.1660811205516097e-14
+  },
+  "skin_calc": {
+   "call_s": 0.004809777999998488,
+   "atoms_per_s": 851598.5561082627,
+   "first_s": 0.006673015000004057,
+   "prep_s": 0.0004747354999992126,
+   "model_and_d2h_s": 0.0038356334999960495,
+   "n_rebuilds": 1,
+   "first_rebuild_s": 1.669068860000003,
+   "rebuild_s": 0.012024601000000246,
+   "K": 28,
+   "K_skin": 36
+  },
+  "peak_bytes": 245995264,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "acejax",
+  "model": "SiGe_small",
+  "n": 4096,
+  "dtype": "float64",
+  "variant": "rec+pool+fm",
+  "yace": "/ace-jax/bench/scaling/models/pace_SiGe_small.yace",
+  "device": "NVIDIA A100 80GB PCIe",
+  "skin_calc": {
+   "call_s": 0.004801781000004723,
+   "atoms_per_s": 853016.8285467352,
+   "first_s": 0.006128467999999998,
+   "prep_s": 0.0005238320000060526,
+   "model_and_d2h_s": 0.0037503864999948178,
+   "n_rebuilds": 1,
+   "first_rebuild_s": 1.890567450000006,
+   "rebuild_s": 0.010767873000006034,
+   "K": 28,
+   "K_skin": 36
+  },
+  "peak_bytes": 147966976,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "mlpace",
+  "model": "SiGe_small",
+  "n": 16384,
+  "dtype": "float64",
+  "step_s": 0.00433025,
+  "atom_steps_per_s": 3783615.2647075807,
+  "error": null,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "acejax",
+  "model": "SiGe_small",
+  "n": 16384,
+  "dtype": "float64",
+  "variant": "baseline",
+  "yace": "/ace-jax/bench/scaling/models/pace_SiGe_small.yace",
+  "device": "NVIDIA A100 80GB PCIe",
+  "ase_calc": {
+   "call_s": 0.02461081300000245,
+   "atoms_per_s": 665723.6394424827,
+   "first_s": 4.4244676819999995,
+   "nlist_s": 0.013214742999991813,
+   "model_s": 0.007043445000007864
+  },
+  "parity_skin_vs_ase": {
+   "dE_per_atom": 1.3877787807814457e-16,
+   "max_dF": 3.6692870963861424e-14
+  },
+  "skin_calc": {
+   "call_s": 0.011689361999998482,
+   "atoms_per_s": 1401616.2729841138,
+   "first_s": 0.013321857999997633,
+   "prep_s": 0.0008044389999994905,
+   "model_and_d2h_s": 0.00971917750000273,
+   "n_rebuilds": 1,
+   "first_rebuild_s": 1.8252108880000009,
+   "rebuild_s": 0.012794395000000236,
+   "K": 28,
+   "K_skin": 36
+  },
+  "peak_bytes": 770004736,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "acejax",
+  "model": "SiGe_small",
+  "n": 16384,
+  "dtype": "float64",
+  "variant": "rec+pool+fm",
+  "yace": "/ace-jax/bench/scaling/models/pace_SiGe_small.yace",
+  "device": "NVIDIA A100 80GB PCIe",
+  "skin_calc": {
+   "call_s": 0.009096764999995344,
+   "atoms_per_s": 1801079.8344255772,
+   "first_s": 0.012653464999999642,
+   "prep_s": 0.0009067149999992807,
+   "model_and_d2h_s": 0.00713301150000234,
+   "n_rebuilds": 1,
+   "first_rebuild_s": 2.1432538239999985,
+   "rebuild_s": 0.012116277000004061,
+   "K": 28,
+   "K_skin": 36
+  },
+  "peak_bytes": 463072256,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "mlpace",
+  "model": "SiGe_small",
+  "n": 65536,
+  "dtype": "float64",
+  "step_s": 0.018100500000000002,
+  "atom_steps_per_s": 3620673.4620590587,
+  "error": null,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "acejax",
+  "model": "SiGe_small",
+  "n": 65536,
+  "dtype": "float64",
+  "variant": "baseline",
+  "yace": "/ace-jax/bench/scaling/models/pace_SiGe_small.yace",
+  "device": "NVIDIA A100 80GB PCIe",
+  "ase_calc": {
+   "call_s": 0.06376656199999786,
+   "atoms_per_s": 1027748.6811975561,
+   "first_s": 5.083841669999998,
+   "nlist_s": 0.028666892999993365,
+   "model_s": 0.026928198999996766
+  },
+  "parity_skin_vs_ase": {
+   "dE_per_atom": 1.3877787807814457e-16,
+   "max_dF": 7.216449660063518e-14
+  },
+  "skin_calc": {
+   "call_s": 0.03972826600001156,
+   "atoms_per_s": 1649606.3533198487,
+   "first_s": 0.038141313999972226,
+   "prep_s": 0.0026278585000056864,
+   "model_and_d2h_s": 0.03268178050001325,
+   "n_rebuilds": 1,
+   "first_rebuild_s": 2.322560545999977,
+   "rebuild_s": 0.0186895219999883,
+   "K": 28,
+   "K_skin": 36
+  },
+  "peak_bytes": 3081794560,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "acejax",
+  "model": "SiGe_small",
+  "n": 65536,
+  "dtype": "float64",
+  "variant": "rec+pool+fm",
+  "yace": "/ace-jax/bench/scaling/models/pace_SiGe_small.yace",
+  "device": "NVIDIA A100 80GB PCIe",
+  "skin_calc": {
+   "call_s": 0.024293990000003873,
+   "atoms_per_s": 2697621.922129282,
+   "first_s": 0.028601439999988543,
+   "prep_s": 0.0030533670000068014,
+   "model_and_d2h_s": 0.01785045399999774,
+   "n_rebuilds": 1,
+   "first_rebuild_s": 2.988595532000005,
+   "rebuild_s": 0.018959437999996,
+   "K": 28,
+   "K_skin": 36
+  },
+  "peak_bytes": 1864953088,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "mlpace",
+  "model": "SiGe_medium",
+  "n": 1024,
+  "dtype": "float64",
+  "step_s": 0.00106554,
+  "atom_steps_per_s": 961015.0721699796,
+  "error": null,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "acejax",
+  "model": "SiGe_medium",
+  "n": 1024,
+  "dtype": "float64",
+  "variant": "baseline",
+  "yace": "/ace-jax/bench/scaling/models/pace_SiGe_medium.yace",
+  "device": "NVIDIA A100 80GB PCIe",
+  "ase_calc": {
+   "call_s": 0.011177452500007234,
+   "atoms_per_s": 91613.0039469492,
+   "first_s": 4.086845014999994,
+   "nlist_s": 0.007608312499996828,
+   "model_s": 0.00166670149999959
+  },
+  "parity_skin_vs_ase": {
+   "dE_per_atom": 1.1102230246251565e-16,
+   "max_dF": 2.758904216193514e-14
+  },
+  "skin_calc": {
+   "call_s": 0.005067236499996852,
+   "atoms_per_s": 202082.53552022608,
+   "first_s": 0.007573535999995329,
+   "prep_s": 0.0005484760000058486,
+   "model_and_d2h_s": 0.0038778990000167823,
+   "n_rebuilds": 1,
+   "first_rebuild_s": 1.7572249010000007,
+   "rebuild_s": 0.010587936999996828,
+   "K": 28,
+   "K_skin": 36
+  },
+  "peak_bytes": 135318528,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "acejax",
+  "model": "SiGe_medium",
+  "n": 1024,
+  "dtype": "float64",
+  "variant": "rec+pool+fm",
+  "yace": "/ace-jax/bench/scaling/models/pace_SiGe_medium.yace",
+  "device": "NVIDIA A100 80GB PCIe",
+  "skin_calc": {
+   "call_s": 0.0044684749999959195,
+   "atoms_per_s": 229160.95535969993,
+   "first_s": 0.0066158829999949376,
+   "prep_s": 0.0003698754999987841,
+   "model_and_d2h_s": 0.003586279500012779,
+   "n_rebuilds": 1,
+   "first_rebuild_s": 2.2080662529999984,
+   "rebuild_s": 0.00970449100000792,
+   "K": 28,
+   "K_skin": 36
+  },
+  "peak_bytes": 133291520,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "mlpace",
+  "model": "SiGe_medium",
+  "n": 4096,
+  "dtype": "float64",
+  "step_s": 0.00252806,
+  "atom_steps_per_s": 1620214.7100939061,
+  "error": null,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "acejax",
+  "model": "SiGe_medium",
+  "n": 4096,
+  "dtype": "float64",
+  "variant": "baseline",
+  "yace": "/ace-jax/bench/scaling/models/pace_SiGe_medium.yace",
+  "device": "NVIDIA A100 80GB PCIe",
+  "ase_calc": {
+   "call_s": 0.01663168849998442,
+   "atoms_per_s": 246276.8587809853,
+   "first_s": 3.7685978590000104,
+   "nlist_s": 0.010188904500012086,
+   "model_s": 0.003731555000001663
+  },
+  "parity_skin_vs_ase": {
+   "dE_per_atom": 3.3306690738754696e-16,
+   "max_dF": 3.702593787124897e-14
+  },
+  "skin_calc": {
+   "call_s": 0.007014820999984295,
+   "atoms_per_s": 583906.5601259349,
+   "first_s": 0.009035823000004939,
+   "prep_s": 0.0004745164999917506,
+   "model_and_d2h_s": 0.00593729250002184,
+   "n_rebuilds": 1,
+   "first_rebuild_s": 1.8490577970000004,
+   "rebuild_s": 0.011788162999977203,
+   "K": 28,
+   "K_skin": 36
+  },
+  "peak_bytes": 347756800,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "acejax",
+  "model": "SiGe_medium",
+  "n": 4096,
+  "dtype": "float64",
+  "variant": "rec+pool+fm",
+  "yace": "/ace-jax/bench/scaling/models/pace_SiGe_medium.yace",
+  "device": "NVIDIA A100 80GB PCIe",
+  "skin_calc": {
+   "call_s": 0.0071098724999956175,
+   "atoms_per_s": 576100.344978412,
+   "first_s": 0.00937198700000863,
+   "prep_s": 0.000474937000007003,
+   "model_and_d2h_s": 0.006089786499984484,
+   "n_rebuilds": 1,
+   "first_rebuild_s": 1.8950435359999744,
+   "rebuild_s": 0.011651964999998654,
+   "K": 28,
+   "K_skin": 36
+  },
+  "peak_bytes": 318496256,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "mlpace",
+  "model": "SiGe_medium",
+  "n": 16384,
+  "dtype": "float64",
+  "step_s": 0.00962404,
+  "atom_steps_per_s": 1702403.564407463,
+  "error": null,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "acejax",
+  "model": "SiGe_medium",
+  "n": 16384,
+  "dtype": "float64",
+  "variant": "baseline",
+  "yace": "/ace-jax/bench/scaling/models/pace_SiGe_medium.yace",
+  "device": "NVIDIA A100 80GB PCIe",
+  "ase_calc": {
+   "call_s": 0.031017080500021166,
+   "atoms_per_s": 528225.0855295301,
+   "first_s": 4.517419245000042,
+   "nlist_s": 0.013605233499987435,
+   "model_s": 0.013328725000008035
+  },
+  "parity_skin_vs_ase": {
+   "dE_per_atom": 4.440892098500626e-16,
+   "max_dF": 1.0058620603103918e-13
+  },
+  "skin_calc": {
+   "call_s": 0.01841064850000862,
+   "atoms_per_s": 889919.7657264669,
+   "first_s": 0.019247592999988683,
+   "prep_s": 0.000962288000010858,
+   "model_and_d2h_s": 0.016235191500015844,
+   "n_rebuilds": 1,
+   "first_rebuild_s": 1.8647497509999766,
+   "rebuild_s": 0.01349336300000914,
+   "K": 28,
+   "K_skin": 36
+  },
+  "peak_bytes": 1394694912,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "acejax",
+  "model": "SiGe_medium",
+  "n": 16384,
+  "dtype": "float64",
+  "variant": "rec+pool+fm",
+  "yace": "/ace-jax/bench/scaling/models/pace_SiGe_medium.yace",
+  "device": "NVIDIA A100 80GB PCIe",
+  "skin_calc": {
+   "call_s": 0.019499156000023277,
+   "atoms_per_s": 840241.4955796262,
+   "first_s": 0.020406629999968118,
+   "prep_s": 0.0009776159999717038,
+   "model_and_d2h_s": 0.01721021200000905,
+   "n_rebuilds": 1,
+   "first_rebuild_s": 1.8642836120000084,
+   "rebuild_s": 0.013336241999979848,
+   "K": 28,
+   "K_skin": 36
+  },
+  "peak_bytes": 1059315200,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "mlpace",
+  "model": "SiGe_medium",
+  "n": 65536,
+  "dtype": "float64",
+  "step_s": 0.037723,
+  "atom_steps_per_s": 1737295.5491344803,
+  "error": null,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "acejax",
+  "model": "SiGe_medium",
+  "n": 65536,
+  "dtype": "float64",
+  "variant": "baseline",
+  "yace": "/ace-jax/bench/scaling/models/pace_SiGe_medium.yace",
+  "device": "NVIDIA A100 80GB PCIe",
+  "ase_calc": {
+   "call_s": 0.12531980399995746,
+   "atoms_per_s": 522950.06781228486,
+   "first_s": 6.4897066930000165,
+   "nlist_s": 0.023474089999979242,
+   "model_s": 0.0899331984999776
+  },
+  "parity_skin_vs_ase": {
+   "dE_per_atom": 4.996003610813204e-16,
+   "max_dF": 2.0339285811132868e-13
+  },
+  "skin_calc": {
+   "call_s": 0.10126678500000708,
+   "atoms_per_s": 647161.8507489442,
+   "first_s": 0.10040700400003288,
+   "prep_s": 0.002675224999990178,
+   "model_and_d2h_s": 0.0950818190000291,
+   "n_rebuilds": 1,
+   "first_rebuild_s": 2.153447445999973,
+   "rebuild_s": 0.016017391999980646,
+   "K": 28,
+   "K_skin": 36
+  },
+  "peak_bytes": 5943745536,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "acejax",
+  "model": "SiGe_medium",
+  "n": 65536,
+  "dtype": "float64",
+  "variant": "rec+pool+fm",
+  "yace": "/ace-jax/bench/scaling/models/pace_SiGe_medium.yace",
+  "device": "NVIDIA A100 80GB PCIe",
+  "skin_calc": {
+   "call_s": 0.06468017450001184,
+   "atoms_per_s": 1013231.6510677936,
+   "first_s": 0.06828334199997244,
+   "prep_s": 0.0027405254999735007,
+   "model_and_d2h_s": 0.057332376999994494,
+   "n_rebuilds": 1,
+   "first_rebuild_s": 2.3866690179999637,
+   "rebuild_s": 0.017398506000006364,
+   "K": 28,
+   "K_skin": 36
+  },
+  "peak_bytes": 4022590976,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "mlpace",
+  "model": "SiGe_large",
+  "n": 1024,
+  "dtype": "float64",
+  "step_s": 0.00261312,
+  "atom_steps_per_s": 391868.72397746757,
+  "error": null,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "acejax",
+  "model": "SiGe_large",
+  "n": 1024,
+  "dtype": "float64",
+  "variant": "baseline",
+  "yace": "/ace-jax/bench/scaling/models/pace_SiGe_large.yace",
+  "device": "NVIDIA A100 80GB PCIe",
+  "ase_calc": {
+   "call_s": 0.014354163999996672,
+   "atoms_per_s": 71338.18451567346,
+   "first_s": 4.066434596000022,
+   "nlist_s": 0.008189262000001918,
+   "model_s": 0.0037978629999884106
+  },
+  "parity_skin_vs_ase": {
+   "dE_per_atom": 1.8041124150158794e-16,
+   "max_dF": 4.007905118896815e-14
+  },
+  "skin_calc": {
+   "call_s": 0.006797191500027111,
+   "atoms_per_s": 150650.45614735375,
+   "first_s": 0.008131998000010299,
+   "prep_s": 0.00046876050001287695,
+   "model_and_d2h_s": 0.005941792999976769,
+   "n_rebuilds": 1,
+   "first_rebuild_s": 1.707427426000038,
+   "rebuild_s": 0.010894613999994363,
+   "K": 28,
+   "K_skin": 36
+  },
+  "peak_bytes": 399560448,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "acejax",
+  "model": "SiGe_large",
+  "n": 1024,
+  "dtype": "float64",
+  "variant": "rec+pool+fm",
+  "yace": "/ace-jax/bench/scaling/models/pace_SiGe_large.yace",
+  "device": "NVIDIA A100 80GB PCIe",
+  "skin_calc": {
+   "call_s": 0.006676105999986248,
+   "atoms_per_s": 153382.82525803355,
+   "first_s": 0.007906341000023076,
+   "prep_s": 0.00044499499998096326,
+   "model_and_d2h_s": 0.005810569499999474,
+   "n_rebuilds": 1,
+   "first_rebuild_s": 1.9694679810000366,
+   "rebuild_s": 0.009659732999978132,
+   "K": 28,
+   "K_skin": 36
+  },
+  "peak_bytes": 400063488,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "mlpace",
+  "model": "SiGe_large",
+  "n": 4096,
+  "dtype": "float64",
+  "step_s": 0.008534429999999999,
+  "atom_steps_per_s": 479938.32042678894,
+  "error": null,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "acejax",
+  "model": "SiGe_large",
+  "n": 4096,
+  "dtype": "float64",
+  "variant": "baseline",
+  "yace": "/ace-jax/bench/scaling/models/pace_SiGe_large.yace",
+  "device": "NVIDIA A100 80GB PCIe",
+  "ase_calc": {
+   "call_s": 0.024013096499970743,
+   "atoms_per_s": 170573.58679273166,
+   "first_s": 3.8266876519999755,
+   "nlist_s": 0.01126753650001433,
+   "model_s": 0.010179831999977296
+  },
+  "parity_skin_vs_ase": {
+   "dE_per_atom": 3.469446951953614e-16,
+   "max_dF": 4.69416172599324e-14
+  },
+  "skin_calc": {
+   "call_s": 0.01457308100000887,
+   "atoms_per_s": 281066.16576120775,
+   "first_s": 0.015837091000037162,
+   "prep_s": 0.0005995499999755793,
+   "model_and_d2h_s": 0.013272227500010558,
+   "n_rebuilds": 1,
+   "first_rebuild_s": 1.770786844999975,
+   "rebuild_s": 0.012614218000010169,
+   "K": 28,
+   "K_skin": 36
+  },
+  "peak_bytes": 1379663616,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "acejax",
+  "model": "SiGe_large",
+  "n": 4096,
+  "dtype": "float64",
+  "variant": "rec+pool+fm",
+  "yace": "/ace-jax/bench/scaling/models/pace_SiGe_large.yace",
+  "device": "NVIDIA A100 80GB PCIe",
+  "skin_calc": {
+   "call_s": 0.015051360999990493,
+   "atoms_per_s": 272134.8587680933,
+   "first_s": 0.016680475999976352,
+   "prep_s": 0.0004827455000224745,
+   "model_and_d2h_s": 0.013930314499987162,
+   "n_rebuilds": 1,
+   "first_rebuild_s": 2.0376680260000057,
+   "rebuild_s": 0.011711124999976619,
+   "K": 28,
+   "K_skin": 36
+  },
+  "peak_bytes": 1381334016,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "mlpace",
+  "model": "SiGe_large",
+  "n": 16384,
+  "dtype": "float64",
+  "step_s": 0.0338931,
+  "atom_steps_per_s": 483402.2264118655,
+  "error": null,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "acejax",
+  "model": "SiGe_large",
+  "n": 16384,
+  "dtype": "float64",
+  "variant": "baseline",
+  "yace": "/ace-jax/bench/scaling/models/pace_SiGe_large.yace",
+  "device": "NVIDIA A100 80GB PCIe",
+  "ase_calc": {
+   "call_s": 0.08588211700001125,
+   "atoms_per_s": 190773.12684313377,
+   "first_s": 4.718727226999988,
+   "nlist_s": 0.014921013000019911,
+   "model_s": 0.06499124850000726
+  },
+  "parity_skin_vs_ase": {
+   "dE_per_atom": 4.3021142204224816e-16,
+   "max_dF": 1.4521717162097048e-13
+  },
+  "skin_calc": {
+   "call_s": 0.07068981799997687,
+   "atoms_per_s": 231773.12466705404,
+   "first_s": 0.07109997300000259,
+   "prep_s": 0.0008326640000291263,
+   "model_and_d2h_s": 0.0685583915000052,
+   "n_rebuilds": 1,
+   "first_rebuild_s": 1.8667754530000025,
+   "rebuild_s": 0.014798838000046999,
+   "K": 28,
+   "K_skin": 36
+  },
+  "peak_bytes": 5839970560,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "acejax",
+  "model": "SiGe_large",
+  "n": 16384,
+  "dtype": "float64",
+  "variant": "rec+pool+fm",
+  "yace": "/ace-jax/bench/scaling/models/pace_SiGe_large.yace",
+  "device": "NVIDIA A100 80GB PCIe",
+  "skin_calc": {
+   "call_s": 0.05161133050000899,
+   "atoms_per_s": 317449.67318750184,
+   "first_s": 0.05272884700002578,
+   "prep_s": 0.0010668589999909273,
+   "model_and_d2h_s": 0.049338341999970226,
+   "n_rebuilds": 1,
+   "first_rebuild_s": 1.9967595470000106,
+   "rebuild_s": 0.014952591999985998,
+   "K": 28,
+   "K_skin": 36
+  },
+  "peak_bytes": 5306416128,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "mlpace",
+  "model": "SiGe_large",
+  "n": 65536,
+  "dtype": "float64",
+  "step_s": 0.135195,
+  "atom_steps_per_s": 484751.6550168275,
+  "error": null,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "acejax",
+  "model": "SiGe_large",
+  "n": 65536,
+  "dtype": "float64",
+  "variant": "baseline",
+  "yace": "/ace-jax/bench/scaling/models/pace_SiGe_large.yace",
+  "device": "NVIDIA A100 80GB PCIe",
+  "ase_calc": {
+   "call_s": 0.45568666750000375,
+   "atoms_per_s": 143818.120375443,
+   "first_s": 7.897744833000047,
+   "nlist_s": 0.02531116900007646,
+   "model_s": 0.41892378450000933
+  },
+  "parity_skin_vs_ase": {
+   "dE_per_atom": 4.996003610813204e-16,
+   "max_dF": 3.4641733925866447e-13
+  },
+  "skin_calc": {
+   "call_s": 0.4304017155000679,
+   "atoms_per_s": 152267.05108239668,
+   "first_s": 0.43007752200003324,
+   "prep_s": 0.002752355999973588,
+   "model_and_d2h_s": 0.4242472099999759,
+   "n_rebuilds": 1,
+   "first_rebuild_s": 2.336994979999986,
+   "rebuild_s": 0.0192559549999487,
+   "K": 28,
+   "K_skin": 36
+  },
+  "peak_bytes": 23501987840,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "acejax",
+  "model": "SiGe_large",
+  "n": 65536,
+  "dtype": "float64",
+  "variant": "rec+pool+fm",
+  "yace": "/ace-jax/bench/scaling/models/pace_SiGe_large.yace",
+  "device": "NVIDIA A100 80GB PCIe",
+  "skin_calc": {
+   "call_s": 0.20231736300002012,
+   "atoms_per_s": 323926.72101006715,
+   "first_s": 0.20214552300001287,
+   "prep_s": 0.0027676739999833444,
+   "model_and_d2h_s": 0.1941256349999776,
+   "n_rebuilds": 1,
+   "first_rebuild_s": 2.349893229000031,
+   "rebuild_s": 0.015772756000046684,
+   "K": 28,
+   "K_skin": 36
+  },
+  "peak_bytes": 21216733440,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "mlpace",
+  "model": "Cantor_small",
+  "n": 1024,
+  "dtype": "float64",
+  "step_s": 0.000538898,
+  "atom_steps_per_s": 1900174.0589128183,
+  "error": null,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "acejax",
+  "model": "Cantor_small",
+  "n": 1024,
+  "dtype": "float64",
+  "variant": "baseline",
+  "yace": "/ace-jax/bench/scaling/models/pace_Cantor_small.yace",
+  "device": "NVIDIA A100 80GB PCIe",
+  "ase_calc": {
+   "call_s": 0.011966835000009723,
+   "atoms_per_s": 85569.82694247627,
+   "first_s": 2.214245277000032,
+   "nlist_s": 0.008726390499987247,
+   "model_s": 0.0012240945000598913
+  },
+  "parity_skin_vs_ase": {
+   "dE_per_atom": 0.0,
+   "max_dF": 1.27675647831893e-15
+  },
+  "skin_calc": {
+   "call_s": 0.004095694499994806,
+   "atoms_per_s": 250018.64763138426,
+   "first_s": 0.005354015000079926,
+   "prep_s": 0.00044772949996740863,
+   "model_and_d2h_s": 0.003210716000012326,
+   "n_rebuilds": 1,
+   "first_rebuild_s": 1.8177966140000308,
+   "rebuild_s": 0.011520282999981646,
+   "K": 44,
+   "K_skin": 80
+  },
+  "peak_bytes": 112133888,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "acejax",
+  "model": "Cantor_small",
+  "n": 1024,
+  "dtype": "float64",
+  "variant": "rec+pool+fm",
+  "yace": "/ace-jax/bench/scaling/models/pace_Cantor_small.yace",
+  "device": "NVIDIA A100 80GB PCIe",
+  "skin_calc": {
+   "call_s": 0.0035370539999917128,
+   "atoms_per_s": 289506.46498538024,
+   "first_s": 0.004591613000002326,
+   "prep_s": 0.0003839244999994662,
+   "model_and_d2h_s": 0.002815350999981092,
+   "n_rebuilds": 1,
+   "first_rebuild_s": 2.0067658410000604,
+   "rebuild_s": 0.01092818399990847,
+   "K": 44,
+   "K_skin": 80
+  },
+  "peak_bytes": 91074816,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "mlpace",
+  "model": "Cantor_small",
+  "n": 4096,
+  "dtype": "float64",
+  "step_s": 0.0008057400000000001,
+  "atom_steps_per_s": 5083525.703080397,
+  "error": null,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "acejax",
+  "model": "Cantor_small",
+  "n": 4096,
+  "dtype": "float64",
+  "variant": "baseline",
+  "yace": "/ace-jax/bench/scaling/models/pace_Cantor_small.yace",
+  "device": "NVIDIA A100 80GB PCIe",
+  "ase_calc": {
+   "call_s": 0.015704871000025378,
+   "atoms_per_s": 260810.80194758563,
+   "first_s": 2.2016671550001092,
+   "nlist_s": 0.010730169500050124,
+   "model_s": 0.0019145184999729281
+  },
+  "parity_skin_vs_ase": {
+   "dE_per_atom": 6.938893903907228e-18,
+   "max_dF": 8.302386556024999e-15
+  },
+  "skin_calc": {
+   "call_s": 0.005297243000029539,
+   "atoms_per_s": 773232.4154238647,
+   "first_s": 0.006645726000101604,
+   "prep_s": 0.0005513639999890074,
+   "model_and_d2h_s": 0.00412850250000929,
+   "n_rebuilds": 1,
+   "first_rebuild_s": 1.783713126000066,
+   "rebuild_s": 0.012698618000058559,
+   "K": 44,
+   "K_skin": 80
+  },
+  "peak_bytes": 234534656,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "acejax",
+  "model": "Cantor_small",
+  "n": 4096,
+  "dtype": "float64",
+  "variant": "rec+pool+fm",
+  "yace": "/ace-jax/bench/scaling/models/pace_Cantor_small.yace",
+  "device": "NVIDIA A100 80GB PCIe",
+  "skin_calc": {
+   "call_s": 0.004491923499983841,
+   "atoms_per_s": 911858.8061472407,
+   "first_s": 0.0073524050000060015,
+   "prep_s": 0.0005059185000391153,
+   "model_and_d2h_s": 0.003448888500031444,
+   "n_rebuilds": 1,
+   "first_rebuild_s": 2.173784963000003,
+   "rebuild_s": 0.012497311000061018,
+   "K": 44,
+   "K_skin": 80
+  },
+  "peak_bytes": 150266112,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "mlpace",
+  "model": "Cantor_small",
+  "n": 16384,
+  "dtype": "float64",
+  "step_s": 0.00284628,
+  "atom_steps_per_s": 5756285.397079697,
+  "error": null,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "acejax",
+  "model": "Cantor_small",
+  "n": 16384,
+  "dtype": "float64",
+  "variant": "baseline",
+  "yace": "/ace-jax/bench/scaling/models/pace_Cantor_small.yace",
+  "device": "NVIDIA A100 80GB PCIe",
+  "ase_calc": {
+   "call_s": 0.02351614500003052,
+   "atoms_per_s": 696712.832820972,
+   "first_s": 2.766348793999896,
+   "nlist_s": 0.013543777499990028,
+   "model_s": 0.005444850000003498
+  },
+  "parity_skin_vs_ase": {
+   "dE_per_atom": 2.7755575615628914e-17,
+   "max_dF": 1.2156942119645464e-14
+  },
+  "skin_calc": {
+   "call_s": 0.009291432499992425,
+   "atoms_per_s": 1763344.887886056,
+   "first_s": 0.010751981999987947,
+   "prep_s": 0.0007765764999589919,
+   "model_and_d2h_s": 0.0075158814999554124,
+   "n_rebuilds": 1,
+   "first_rebuild_s": 2.079175608000014,
+   "rebuild_s": 0.01324104000002535,
+   "K": 44,
+   "K_skin": 80
+  },
+  "peak_bytes": 724137728,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "acejax",
+  "model": "Cantor_small",
+  "n": 16384,
+  "dtype": "float64",
+  "variant": "rec+pool+fm",
+  "yace": "/ace-jax/bench/scaling/models/pace_Cantor_small.yace",
+  "device": "NVIDIA A100 80GB PCIe",
+  "skin_calc": {
+   "call_s": 0.00804960450005865,
+   "atoms_per_s": 2035379.5021706503,
+   "first_s": 0.009883457000000817,
+   "prep_s": 0.0008738834999917344,
+   "model_and_d2h_s": 0.005985029999976632,
+   "n_rebuilds": 1,
+   "first_rebuild_s": 2.8718819310000754,
+   "rebuild_s": 0.013486499000009644,
+   "K": 44,
+   "K_skin": 80
+  },
+  "peak_bytes": 447330560,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "mlpace",
+  "model": "Cantor_small",
+  "n": 65536,
+  "dtype": "float64",
+  "step_s": 0.0110759,
+  "atom_steps_per_s": 5916990.944302495,
+  "error": null,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "acejax",
+  "model": "Cantor_small",
+  "n": 65536,
+  "dtype": "float64",
+  "variant": "baseline",
+  "yace": "/ace-jax/bench/scaling/models/pace_Cantor_small.yace",
+  "device": "NVIDIA A100 80GB PCIe",
+  "ase_calc": {
+   "call_s": 0.04707776999998714,
+   "atoms_per_s": 1392079.5313800527,
+   "first_s": 2.865664279999919,
+   "nlist_s": 0.022565992500005905,
+   "model_s": 0.017706087999954434
+  },
+  "parity_skin_vs_ase": {
+   "dE_per_atom": 2.7755575615628914e-17,
+   "max_dF": 1.5393068764080198e-14
+  },
+  "skin_calc": {
+   "call_s": 0.028444023000020024,
+   "atoms_per_s": 2304034.137504173,
+   "first_s": 0.02849541299997327,
+   "prep_s": 0.002533865499970034,
+   "model_and_d2h_s": 0.021755537500041555,
+   "n_rebuilds": 1,
+   "first_rebuild_s": 2.451833396999973,
+   "rebuild_s": 0.01688123100007033,
+   "K": 44,
+   "K_skin": 80
+  },
+  "peak_bytes": 2705626112,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "acejax",
+  "model": "Cantor_small",
+  "n": 65536,
+  "dtype": "float64",
+  "variant": "rec+pool+fm",
+  "yace": "/ace-jax/bench/scaling/models/pace_Cantor_small.yace",
+  "device": "NVIDIA A100 80GB PCIe",
+  "skin_calc": {
+   "call_s": 0.022813058499991712,
+   "atoms_per_s": 2872740.6279181642,
+   "first_s": 0.0247809719999168,
+   "prep_s": 0.002583608000009008,
+   "model_and_d2h_s": 0.015506483000024218,
+   "n_rebuilds": 1,
+   "first_rebuild_s": 2.881489098999964,
+   "rebuild_s": 0.018919684000024972,
+   "K": 44,
+   "K_skin": 80
+  },
+  "peak_bytes": 1815656704,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "mlpace",
+  "model": "Cantor_medium",
+  "n": 1024,
+  "dtype": "float64",
+  "step_s": 0.000878237,
+  "atom_steps_per_s": 1165972.2831080903,
+  "error": null,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "acejax",
+  "model": "Cantor_medium",
+  "n": 1024,
+  "dtype": "float64",
+  "variant": "baseline",
+  "yace": "/ace-jax/bench/scaling/models/pace_Cantor_medium.yace",
+  "device": "NVIDIA A100 80GB PCIe",
+  "ase_calc": {
+   "call_s": 0.012799555000015062,
+   "atoms_per_s": 80002.78134660111,
+   "first_s": 2.968211942000039,
+   "nlist_s": 0.009113474000059796,
+   "model_s": 0.0016556144999526623
+  },
+  "parity_skin_vs_ase": {
+   "dE_per_atom": 2.7755575615628914e-17,
+   "max_dF": 4.3298697960381105e-15
+  },
+  "skin_calc": {
+   "call_s": 0.004529653000020062,
+   "atoms_per_s": 226065.88186677097,
+   "first_s": 0.005677585999933399,
+   "prep_s": 0.00042043799999191833,
+   "model_and_d2h_s": 0.0036520900000596157,
+   "n_rebuilds": 1,
+   "first_rebuild_s": 1.7797696410000299,
+   "rebuild_s": 0.011626420999959919,
+   "K": 44,
+   "K_skin": 80
+  },
+  "peak_bytes": 179686144,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "acejax",
+  "model": "Cantor_medium",
+  "n": 1024,
+  "dtype": "float64",
+  "variant": "rec+pool+fm",
+  "yace": "/ace-jax/bench/scaling/models/pace_Cantor_medium.yace",
+  "device": "NVIDIA A100 80GB PCIe",
+  "skin_calc": {
+   "call_s": 0.004136243499999637,
+   "atoms_per_s": 247567.62990382215,
+   "first_s": 0.006193570000050386,
+   "prep_s": 0.0004250620000334493,
+   "model_and_d2h_s": 0.003281709000077626,
+   "n_rebuilds": 1,
+   "first_rebuild_s": 2.1217655120000245,
+   "rebuild_s": 0.011445659000060004,
+   "K": 44,
+   "K_skin": 80
+  },
+  "peak_bytes": 109772544,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "mlpace",
+  "model": "Cantor_medium",
+  "n": 4096,
+  "dtype": "float64",
+  "step_s": 0.00188083,
+  "atom_steps_per_s": 2177761.9455240504,
+  "error": null,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "acejax",
+  "model": "Cantor_medium",
+  "n": 4096,
+  "dtype": "float64",
+  "variant": "baseline",
+  "yace": "/ace-jax/bench/scaling/models/pace_Cantor_medium.yace",
+  "device": "NVIDIA A100 80GB PCIe",
+  "ase_calc": {
+   "call_s": 0.018076042500013045,
+   "atoms_per_s": 226598.27227099315,
+   "first_s": 2.9532517349999807,
+   "nlist_s": 0.011632480999992367,
+   "model_s": 0.0034691175000602925
+  },
+  "parity_skin_vs_ase": {
+   "dE_per_atom": 0.0,
+   "max_dF": 2.1510571102112408e-14
+  },
+  "skin_calc": {
+   "call_s": 0.007156027000007725,
+   "atoms_per_s": 572384.6486319264,
+   "first_s": 0.008679317999963132,
+   "prep_s": 0.0006471384999713337,
+   "model_and_d2h_s": 0.005833503000019391,
+   "n_rebuilds": 1,
+   "first_rebuild_s": 1.8452909009999985,
+   "rebuild_s": 0.012426289000018187,
+   "K": 44,
+   "K_skin": 80
+  },
+  "peak_bytes": 504347392,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "acejax",
+  "model": "Cantor_medium",
+  "n": 4096,
+  "dtype": "float64",
+  "variant": "rec+pool+fm",
+  "yace": "/ace-jax/bench/scaling/models/pace_Cantor_medium.yace",
+  "device": "NVIDIA A100 80GB PCIe",
+  "skin_calc": {
+   "call_s": 0.005474993500001801,
+   "atoms_per_s": 748128.7420704066,
+   "first_s": 0.007619664000003468,
+   "prep_s": 0.00045147149995727887,
+   "model_and_d2h_s": 0.004470269500018276,
+   "n_rebuilds": 1,
+   "first_rebuild_s": 1.9015153870000177,
+   "rebuild_s": 0.011632956999960697,
+   "K": 44,
+   "K_skin": 80
+  },
+  "peak_bytes": 224505600,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "mlpace",
+  "model": "Cantor_medium",
+  "n": 16384,
+  "dtype": "float64",
+  "step_s": 0.00718185,
+  "atom_steps_per_s": 2281306.348642759,
+  "error": null,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "acejax",
+  "model": "Cantor_medium",
+  "n": 16384,
+  "dtype": "float64",
+  "variant": "baseline",
+  "yace": "/ace-jax/bench/scaling/models/pace_Cantor_medium.yace",
+  "device": "NVIDIA A100 80GB PCIe",
+  "ase_calc": {
+   "call_s": 0.032760479000046416,
+   "atoms_per_s": 500114.78769821365,
+   "first_s": 3.9857093260000056,
+   "nlist_s": 0.01560532449997254,
+   "model_s": 0.012800166999966223
+  },
+  "parity_skin_vs_ase": {
+   "dE_per_atom": 5.551115123125783e-17,
+   "max_dF": 3.91631171936524e-14
+  },
+  "skin_calc": {
+   "call_s": 0.017435832000046503,
+   "atoms_per_s": 939674.1147744658,
+   "first_s": 0.019450941999934912,
+   "prep_s": 0.0009418709999522434,
+   "model_and_d2h_s": 0.015075925000019197,
+   "n_rebuilds": 1,
+   "first_rebuild_s": 1.8242742930000304,
+   "rebuild_s": 0.013119162000066353,
+   "K": 44,
+   "K_skin": 80
+  },
+  "peak_bytes": 1802992384,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "acejax",
+  "model": "Cantor_medium",
+  "n": 16384,
+  "dtype": "float64",
+  "variant": "rec+pool+fm",
+  "yace": "/ace-jax/bench/scaling/models/pace_Cantor_medium.yace",
+  "device": "NVIDIA A100 80GB PCIe",
+  "skin_calc": {
+   "call_s": 0.011557479000032345,
+   "atoms_per_s": 1417610.1898999035,
+   "first_s": 0.013228407000042353,
+   "prep_s": 0.000929362499960007,
+   "model_and_d2h_s": 0.009441345000027468,
+   "n_rebuilds": 1,
+   "first_rebuild_s": 1.9896402679999028,
+   "rebuild_s": 0.012035148999984813,
+   "K": 44,
+   "K_skin": 80
+  },
+  "peak_bytes": 863609600,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "mlpace",
+  "model": "Cantor_medium",
+  "n": 65536,
+  "dtype": "float64",
+  "step_s": 0.028264766666666667,
+  "atom_steps_per_s": 2318646.418450297,
+  "error": null,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "acejax",
+  "model": "Cantor_medium",
+  "n": 65536,
+  "dtype": "float64",
+  "variant": "baseline",
+  "yace": "/ace-jax/bench/scaling/models/pace_Cantor_medium.yace",
+  "device": "NVIDIA A100 80GB PCIe",
+  "ase_calc": {
+   "call_s": 0.102254809499982,
+   "atoms_per_s": 640908.729090259,
+   "first_s": 4.133698908000042,
+   "nlist_s": 0.02230011149998745,
+   "model_s": 0.07170155200003592
+  },
+  "parity_skin_vs_ase": {
+   "dE_per_atom": 2.7755575615628914e-17,
+   "max_dF": 9.992007221626409e-14
+  },
+  "skin_calc": {
+   "call_s": 0.0812303415000315,
+   "atoms_per_s": 806792.12705236,
+   "first_s": 0.0810044500000231,
+   "prep_s": 0.0023584225000377046,
+   "model_and_d2h_s": 0.07515306000004784,
+   "n_rebuilds": 1,
+   "first_rebuild_s": 2.2554249170000276,
+   "rebuild_s": 0.015589556000008997,
+   "K": 44,
+   "K_skin": 80
+  },
+  "peak_bytes": 7046195968,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "acejax",
+  "model": "Cantor_medium",
+  "n": 65536,
+  "dtype": "float64",
+  "variant": "rec+pool+fm",
+  "yace": "/ace-jax/bench/scaling/models/pace_Cantor_medium.yace",
+  "device": "NVIDIA A100 80GB PCIe",
+  "skin_calc": {
+   "call_s": 0.03849312050004983,
+   "atoms_per_s": 1702537.989870558,
+   "first_s": 0.04086100399990755,
+   "prep_s": 0.002634137499967437,
+   "model_and_d2h_s": 0.031788808000044355,
+   "n_rebuilds": 1,
+   "first_rebuild_s": 2.674813806999964,
+   "rebuild_s": 0.019463228000063282,
+   "K": 44,
+   "K_skin": 80
+  },
+  "peak_bytes": 3496977408,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "mlpace",
+  "model": "Cantor_large",
+  "n": 1024,
+  "dtype": "float64",
+  "step_s": 0.00196663,
+  "atom_steps_per_s": 520687.6738379868,
+  "error": null,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "acejax",
+  "model": "Cantor_large",
+  "n": 1024,
+  "dtype": "float64",
+  "variant": "baseline",
+  "yace": "/ace-jax/bench/scaling/models/pace_Cantor_large.yace",
+  "device": "NVIDIA A100 80GB PCIe",
+  "ase_calc": {
+   "call_s": 0.01270005199995694,
+   "atoms_per_s": 80629.59112320736,
+   "first_s": 3.7355128860000377,
+   "nlist_s": 0.008084505499937222,
+   "model_s": 0.0027739784999880612
+  },
+  "parity_skin_vs_ase": {
+   "dE_per_atom": 0.0,
+   "max_dF": 1.5432100042289676e-14
+  },
+  "skin_calc": {
+   "call_s": 0.005183349500043732,
+   "atoms_per_s": 197555.65392442868,
+   "first_s": 0.006566166999959933,
+   "prep_s": 0.00032172350006476336,
+   "model_and_d2h_s": 0.004545257500012667,
+   "n_rebuilds": 1,
+   "first_rebuild_s": 1.7648121960000935,
+   "rebuild_s": 0.0108255539998936,
+   "K": 44,
+   "K_skin": 80
+  },
+  "peak_bytes": 272477440,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "acejax",
+  "model": "Cantor_large",
+  "n": 1024,
+  "dtype": "float64",
+  "variant": "rec+pool+fm",
+  "yace": "/ace-jax/bench/scaling/models/pace_Cantor_large.yace",
+  "device": "NVIDIA A100 80GB PCIe",
+  "skin_calc": {
+   "call_s": 0.005825834500001292,
+   "atoms_per_s": 175768.8104596471,
+   "first_s": 0.006657884999981434,
+   "prep_s": 0.0005282309999756762,
+   "model_and_d2h_s": 0.004792310500022268,
+   "n_rebuilds": 1,
+   "first_rebuild_s": 1.9393025679999027,
+   "rebuild_s": 0.012458928999990349,
+   "K": 44,
+   "K_skin": 80
+  },
+  "peak_bytes": 202114304,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "mlpace",
+  "model": "Cantor_large",
+  "n": 4096,
+  "dtype": "float64",
+  "step_s": 0.005832349999999999,
+  "atom_steps_per_s": 702289.8145687417,
+  "error": null,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "acejax",
+  "model": "Cantor_large",
+  "n": 4096,
+  "dtype": "float64",
+  "variant": "baseline",
+  "yace": "/ace-jax/bench/scaling/models/pace_Cantor_large.yace",
+  "device": "NVIDIA A100 80GB PCIe",
+  "ase_calc": {
+   "call_s": 0.02009893350003722,
+   "atoms_per_s": 203791.9076647731,
+   "first_s": 3.681796345999942,
+   "nlist_s": 0.00962388300007433,
+   "model_s": 0.007764562999966529
+  },
+  "parity_skin_vs_ase": {
+   "dE_per_atom": 1.3877787807814457e-17,
+   "max_dF": 7.127631818093505e-14
+  },
+  "skin_calc": {
+   "call_s": 0.01042290100002674,
+   "atoms_per_s": 392980.8025605819,
+   "first_s": 0.012003107000055024,
+   "prep_s": 0.000392465999993874,
+   "model_and_d2h_s": 0.009584978999953364,
+   "n_rebuilds": 1,
+   "first_rebuild_s": 1.8205177840000033,
+   "rebuild_s": 0.011565730000029362,
+   "K": 44,
+   "K_skin": 80
+  },
+  "peak_bytes": 917937152,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "acejax",
+  "model": "Cantor_large",
+  "n": 4096,
+  "dtype": "float64",
+  "variant": "rec+pool+fm",
+  "yace": "/ace-jax/bench/scaling/models/pace_Cantor_large.yace",
+  "device": "NVIDIA A100 80GB PCIe",
+  "skin_calc": {
+   "call_s": 0.009475224499965407,
+   "atoms_per_s": 432285.27197587286,
+   "first_s": 0.0113771750000069,
+   "prep_s": 0.0004621365000048172,
+   "model_and_d2h_s": 0.00844082899999421,
+   "n_rebuilds": 1,
+   "first_rebuild_s": 1.8745801500000425,
+   "rebuild_s": 0.011558054000033735,
+   "K": 44,
+   "K_skin": 80
+  },
+  "peak_bytes": 589886720,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "mlpace",
+  "model": "Cantor_large",
+  "n": 16384,
+  "dtype": "float64",
+  "step_s": 0.022899600000000003,
+  "atom_steps_per_s": 715471.0125941064,
+  "error": null,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "acejax",
+  "model": "Cantor_large",
+  "n": 16384,
+  "dtype": "float64",
+  "variant": "baseline",
+  "yace": "/ace-jax/bench/scaling/models/pace_Cantor_large.yace",
+  "device": "NVIDIA A100 80GB PCIe",
+  "ase_calc": {
+   "call_s": 0.06979376349994482,
+   "atoms_per_s": 234748.7680616758,
+   "first_s": 5.596814976000019,
+   "nlist_s": 0.015797049499951754,
+   "model_s": 0.04801641799997469
+  },
+  "parity_skin_vs_ase": {
+   "dE_per_atom": 1.0408340855860843e-16,
+   "max_dF": 8.693046282814976e-14
+  },
+  "skin_calc": {
+   "call_s": 0.05396554300000389,
+   "atoms_per_s": 303601.133041482,
+   "first_s": 0.053808354000011605,
+   "prep_s": 0.000993584000013925,
+   "model_and_d2h_s": 0.05161258399999724,
+   "n_rebuilds": 1,
+   "first_rebuild_s": 1.9579120399999965,
+   "rebuild_s": 0.020179816999984723,
+   "K": 44,
+   "K_skin": 80
+  },
+  "peak_bytes": 3734904576,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "acejax",
+  "model": "Cantor_large",
+  "n": 16384,
+  "dtype": "float64",
+  "variant": "rec+pool+fm",
+  "yace": "/ace-jax/bench/scaling/models/pace_Cantor_large.yace",
+  "device": "NVIDIA A100 80GB PCIe",
+  "skin_calc": {
+   "call_s": 0.028810486999987006,
+   "atoms_per_s": 568681.8136745619,
+   "first_s": 0.0327096910000364,
+   "prep_s": 0.0008773614999881829,
+   "model_and_d2h_s": 0.02659488649993591,
+   "n_rebuilds": 1,
+   "first_rebuild_s": 2.1753660630000695,
+   "rebuild_s": 0.015069944000060786,
+   "K": 44,
+   "K_skin": 80
+  },
+  "peak_bytes": 2156352000,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "mlpace",
+  "model": "Cantor_large",
+  "n": 65536,
+  "dtype": "float64",
+  "step_s": 0.08998433333333335,
+  "atom_steps_per_s": 728304.5567191325,
+  "error": null,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "acejax",
+  "model": "Cantor_large",
+  "n": 65536,
+  "dtype": "float64",
+  "variant": "baseline",
+  "yace": "/ace-jax/bench/scaling/models/pace_Cantor_large.yace",
+  "device": "NVIDIA A100 80GB PCIe",
+  "ase_calc": {
+   "call_s": 0.289208133499983,
+   "atoms_per_s": 226604.9685632505,
+   "first_s": 5.34272112099984,
+   "nlist_s": 0.02499190699995779,
+   "model_s": 0.25561819550000564
+  },
+  "parity_skin_vs_ase": {
+   "dE_per_atom": 9.020562075079397e-17,
+   "max_dF": 1.376676550535194e-13
+  },
+  "skin_calc": {
+   "call_s": 0.26522765749996324,
+   "atoms_per_s": 247093.38617903783,
+   "first_s": 0.2648952179999924,
+   "prep_s": 0.002492173000064213,
+   "model_and_d2h_s": 0.2592065645000048,
+   "n_rebuilds": 1,
+   "first_rebuild_s": 2.491712254000049,
+   "rebuild_s": 0.014714466999976139,
+   "K": 44,
+   "K_skin": 80
+  },
+  "peak_bytes": 17263002112,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "acejax",
+  "model": "Cantor_large",
+  "n": 65536,
+  "dtype": "float64",
+  "variant": "rec+pool+fm",
+  "yace": "/ace-jax/bench/scaling/models/pace_Cantor_large.yace",
+  "device": "NVIDIA A100 80GB PCIe",
+  "skin_calc": {
+   "call_s": 0.12202916149988141,
+   "atoms_per_s": 537051.9570444126,
+   "first_s": 0.12489604799998233,
+   "prep_s": 0.0024462960000164458,
+   "model_and_d2h_s": 0.11619150699993952,
+   "n_rebuilds": 1,
+   "first_rebuild_s": 2.8067656569999144,
+   "rebuild_s": 0.015180362000137393,
+   "K": 44,
+   "K_skin": 80
+  },
+  "peak_bytes": 10861759744,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "mlpace",
+  "model": "Cantor_medium",
+  "n": 8192,
+  "dtype": "float64",
+  "step_s": 0.0036846699999999997,
+  "atom_steps_per_s": 2223265.5841635754,
+  "error": null,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "acejax",
+  "model": "Cantor_medium",
+  "n": 8192,
+  "dtype": "float64",
+  "variant": "baseline",
+  "yace": "/ace-jax/bench/scaling/models/pace_Cantor_medium.yace",
+  "device": "NVIDIA A100 80GB PCIe",
+  "ase_calc": {
+   "call_s": 0.021896340500006772,
+   "atoms_per_s": 374126.4436400898,
+   "first_s": 4.018043099000124,
+   "nlist_s": 0.012101766999990105,
+   "model_s": 0.006816303500045251
+  },
+  "parity_skin_vs_ase": {
+   "dE_per_atom": 2.7755575615628914e-17,
+   "max_dF": 3.902433931557425e-14
+  },
+  "skin_calc": {
+   "call_s": 0.010931358000107139,
+   "atoms_per_s": 749403.6879882362,
+   "first_s": 0.012046716999975615,
+   "prep_s": 0.0007951560000947211,
+   "model_and_d2h_s": 0.009374860999969314,
+   "n_rebuilds": 1,
+   "first_rebuild_s": 1.8749421090001306,
+   "rebuild_s": 0.013371182999890152,
+   "K": 44,
+   "K_skin": 80
+  },
+  "peak_bytes": 937229056,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "acejax",
+  "model": "Cantor_medium",
+  "n": 8192,
+  "dtype": "float64",
+  "variant": "rec+pool+fm",
+  "yace": "/ace-jax/bench/scaling/models/pace_Cantor_medium.yace",
+  "device": "NVIDIA A100 80GB PCIe",
+  "skin_calc": {
+   "call_s": 0.007403543500004162,
+   "atoms_per_s": 1106497.1793568032,
+   "first_s": 0.010829889999968145,
+   "prep_s": 0.0005674635000332273,
+   "model_and_d2h_s": 0.006117570500009606,
+   "n_rebuilds": 1,
+   "first_rebuild_s": 2.122584513999982,
+   "rebuild_s": 0.014232840999966356,
+   "K": 44,
+   "K_skin": 80
+  },
+  "peak_bytes": 434807552,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "mlpace",
+  "model": "SiGe_medium",
+  "n": 8192,
+  "dtype": "float64",
+  "step_s": 0.004872909999999999,
+  "atom_steps_per_s": 1681130.9874387176,
+  "error": null,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "acejax",
+  "model": "SiGe_medium",
+  "n": 8192,
+  "dtype": "float64",
+  "variant": "baseline",
+  "yace": "/ace-jax/bench/scaling/models/pace_SiGe_medium.yace",
+  "device": "NVIDIA A100 80GB PCIe",
+  "ase_calc": {
+   "call_s": 0.0239000289999467,
+   "atoms_per_s": 342761.09037433675,
+   "first_s": 7.360464807999961,
+   "nlist_s": 0.012577722999935759,
+   "model_s": 0.00766110550000576
+  },
+  "parity_skin_vs_ase": {
+   "dE_per_atom": 4.440892098500626e-16,
+   "max_dF": 1.0380585280245214e-13
+  },
+  "skin_calc": {
+   "call_s": 0.011177198500035956,
+   "atoms_per_s": 732920.6866974445,
+   "first_s": 0.011982248000094842,
+   "prep_s": 0.000556398499838906,
+   "model_and_d2h_s": 0.009862294500067037,
+   "n_rebuilds": 1,
+   "first_rebuild_s": 2.2617464489999293,
+   "rebuild_s": 0.015278735000038068,
+   "K": 28,
+   "K_skin": 36
+  },
+  "peak_bytes": 697194496,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "acejax",
+  "model": "SiGe_medium",
+  "n": 8192,
+  "dtype": "float64",
+  "variant": "rec+pool+fm",
+  "yace": "/ace-jax/bench/scaling/models/pace_SiGe_medium.yace",
+  "device": "NVIDIA A100 80GB PCIe",
+  "skin_calc": {
+   "call_s": 0.01040230600005998,
+   "atoms_per_s": 787517.6907844053,
+   "first_s": 0.013290628000049765,
+   "prep_s": 0.0005555619999313421,
+   "model_and_d2h_s": 0.009139835500036497,
+   "n_rebuilds": 1,
+   "first_rebuild_s": 1.953625349000049,
+   "rebuild_s": 0.01156053299996529,
+   "K": 28,
+   "K_skin": 36
+  },
+  "peak_bytes": 565435904,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "acejax",
+  "model": "Cantor_medium",
+  "n": 8192,
+  "dtype": "float32",
+  "variant": "baseline",
+  "yace": "/ace-jax/bench/scaling/models/pace_Cantor_medium.yace",
+  "device": "NVIDIA A100 80GB PCIe",
+  "ase_calc": {
+   "call_s": 0.020162188500080447,
+   "atoms_per_s": 406305.0992687284,
+   "first_s": 4.927120471999842,
+   "nlist_s": 0.012202161000118394,
+   "model_s": 0.003740380000181176
+  },
+  "parity_skin_vs_ase": {
+   "dE_per_atom": 0.0,
+   "max_dF": 8.58306884765625e-06
+  },
+  "skin_calc": {
+   "call_s": 0.007912439999927301,
+   "atoms_per_s": 1035331.7055263949,
+   "first_s": 0.009141065999983766,
+   "prep_s": 0.0009552279999525126,
+   "model_and_d2h_s": 0.005988219000073514,
+   "n_rebuilds": 1,
+   "first_rebuild_s": 1.9109413730000142,
+   "rebuild_s": 0.013062520999937988,
+   "K": 44,
+   "K_skin": 80
+  },
+  "peak_bytes": 506671872,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "acejax",
+  "model": "Cantor_medium",
+  "n": 8192,
+  "dtype": "float32",
+  "variant": "rec+pool+fm",
+  "yace": "/ace-jax/bench/scaling/models/pace_Cantor_medium.yace",
+  "device": "NVIDIA A100 80GB PCIe",
+  "skin_calc": {
+   "call_s": 0.0071982419999585545,
+   "atoms_per_s": 1138055.6530396126,
+   "first_s": 0.00855634899994584,
+   "prep_s": 0.0010668420000001788,
+   "model_and_d2h_s": 0.005064968500050782,
+   "n_rebuilds": 1,
+   "first_rebuild_s": 2.1911948240001493,
+   "rebuild_s": 0.01353929199990489,
+   "K": 44,
+   "K_skin": 80
+  },
+  "peak_bytes": 222833152,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "acejax",
+  "model": "Cantor_medium",
+  "n": 65536,
+  "dtype": "float32",
+  "variant": "baseline",
+  "yace": "/ace-jax/bench/scaling/models/pace_Cantor_medium.yace",
+  "device": "NVIDIA A100 80GB PCIe",
+  "ase_calc": {
+   "call_s": 0.08114945950001129,
+   "atoms_per_s": 807596.260083419,
+   "first_s": 4.313457176000156,
+   "nlist_s": 0.025035653000031743,
+   "model_s": 0.04439571699992939
+  },
+  "parity_skin_vs_ase": {
+   "dE_per_atom": 0.0,
+   "max_dF": 1.52587890625e-05
+  },
+  "skin_calc": {
+   "call_s": 0.0567065159999629,
+   "atoms_per_s": 1155704.9281610402,
+   "first_s": 0.0560626650001268,
+   "prep_s": 0.0031677059999992707,
+   "model_and_d2h_s": 0.04816480599993156,
+   "n_rebuilds": 1,
+   "first_rebuild_s": 2.518673938999882,
+   "rebuild_s": 0.018209853000143994,
+   "K": 44,
+   "K_skin": 80
+  },
+  "peak_bytes": 3553473280,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ },
+ {
+  "code": "acejax",
+  "model": "Cantor_medium",
+  "n": 65536,
+  "dtype": "float32",
+  "variant": "rec+pool+fm",
+  "yace": "/ace-jax/bench/scaling/models/pace_Cantor_medium.yace",
+  "device": "NVIDIA A100 80GB PCIe",
+  "skin_calc": {
+   "call_s": 0.030621740000015052,
+   "atoms_per_s": 2140178.8402608014,
+   "first_s": 0.032883065000078204,
+   "prep_s": 0.0032935204999375856,
+   "model_and_d2h_s": 0.021779051999942567,
+   "n_rebuilds": 1,
+   "first_rebuild_s": 2.8984056670001337,
+   "rebuild_s": 0.022625307999987854,
+   "K": 44,
+   "K_skin": 80
+  },
+  "peak_bytes": 1662936320,
+  "gpu": "NVIDIA A100 80GB PCIe"
+ }
+]

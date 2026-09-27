@@ -22,7 +22,6 @@ import numpy as np
 from ase.calculators.calculator import all_changes
 
 from ace_jax.calc.point import ACECalculator, _round_k
-from ace_jax.eval.model import highest_precision
 from ace_jax.eval.nlist import dense_graph, have_matscipy_neighbours, sparse_graph
 
 
@@ -56,7 +55,20 @@ class SkinDenseCalculator(ACECalculator):
         self.skin = float(skin)
         self.n_rebuilds = 0
         self._nl = None
-        self._jstep = eqx.filter_jit(_step)
+        # one jax.jit (C++ dispatch) over the model's arrays; the static part and
+        # the cutoff are closed over, precision is fixed at trace time, and the
+        # outputs come back packed in one array: one H2D and one D2H per call
+        params, static = eqx.partition(self.model, eqx.is_array)
+        rc = self.cutoff
+
+        def packed(params, x, idx_s, shift_s, live_s, node_z, K):
+            with jax.default_matmul_precision("highest"):
+                E, F, V, ovf, kmax = _step(eqx.combine(params, static), x, idx_s, shift_s,
+                                           live_s, node_z, rc, K)
+            return jnp.concatenate([E[None], F.ravel(), V.ravel(),
+                                    ovf[None].astype(E.dtype), kmax[None].astype(E.dtype)])
+        self._params = params
+        self._jstep = jax.jit(packed, static_argnames=("K",))
         lut = np.full(119, -1, np.int32)
         for z, i in self._z2i.items():
             lut[z] = i
@@ -109,21 +121,23 @@ class SkinDenseCalculator(ACECalculator):
         if rebuilt:
             self._rebuild(pos, cell, pbc, numbers, dtype)
         nl = self._nl
-        x = jnp.asarray(pos, dtype)
+        x = jax.device_put(np.ascontiguousarray(pos, dtype))
         t1 = time.perf_counter()
-        with highest_precision():
-            E, F, V, ovf, kmax = self._jstep(self.model, x, nl["idx"], nl["shift"], nl["live"],
-                                             nl["node_z"], self.cutoff, nl["K"])
-            if bool(ovf):                  # an atom gained neighbours inside the cutoff
-                self._rebuild(pos, cell, pbc, numbers, dtype, K_cut=_round_k(int(kmax) + 4))
-                nl = self._nl
-                E, F, V, ovf, kmax = self._jstep(self.model, x, nl["idx"], nl["shift"],
-                                                 nl["live"], nl["node_z"], self.cutoff, nl["K"])
-        E = float(E)
-        F = np.asarray(F)
-        V = np.asarray(V)
+        out = self._jstep(self._params, x, nl["idx"], nl["shift"], nl["live"], nl["node_z"],
+                          K=nl["K"])
         t2 = time.perf_counter()
-        self.last_timing = {"prep_s": t1 - t0, "model_and_d2h_s": t2 - t1, "rebuilt": rebuilt}
+        out = np.asarray(out)
+        if out[-2]:                       # an atom gained neighbours inside the cutoff
+            self._rebuild(pos, cell, pbc, numbers, dtype, K_cut=_round_k(int(out[-1]) + 4))
+            nl = self._nl
+            out = np.asarray(self._jstep(self._params, x, nl["idx"], nl["shift"], nl["live"],
+                                         nl["node_z"], K=nl["K"]))
+        n = len(pos)
+        E, F = float(out[0]), out[1:1 + 3 * n].reshape(n, 3)
+        V = out[1 + 3 * n:10 + 3 * n].reshape(3, 3)
+        t3 = time.perf_counter()
+        self.last_timing = {"prep_s": t1 - t0, "dispatch_s": t2 - t1, "device_and_d2h_s": t3 - t2,
+                            "model_and_d2h_s": t3 - t1, "rebuilt": rebuilt}
         self.results["energy"] = self.results["free_energy"] = E
         self.results["forces"] = F
         vol = self.atoms.get_volume()

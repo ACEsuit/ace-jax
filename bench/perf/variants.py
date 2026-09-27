@@ -12,8 +12,10 @@ Variants (combine with '+', e.g. "rec+pool+rev"):
         crad[z_i, z_j] after pooling, per node.  No per-edge R_nl = crad . g
         (no (E, n_rad*(lmax+1), K_rad) crad gather) and the one-hot channel
         expansion is over K_rad = 8 columns instead of K_rad + n_rad*(lmax+1) = 26.
-  fm    feature-major product basis: A transposed to (n_A, n) before the AA
-        products, so the gathers (and their scatter adjoints) move whole rows.
+  fm    feature-major product basis: A as (n_A, n) for the AA products, so the
+        gathers (and their scatter adjoints) move whole rows.  Effective only
+        with `pool`, which produces A in that layout; a transposed node-major A
+        is laid out node-major again by XLA's layout assignment (measured).
   rev   forces by a gather over reverse edges instead of a scatter-add:
         F_i = sum_k g[i,k] - sum_k g[idx[i,k], rev[i,k]], with rev[i,k] the slot
         of edge (j -> i) in row j (a full neighbour list is symmetric).  rev is

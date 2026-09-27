@@ -301,6 +301,39 @@ def bigsweep(models: str = "SiGe_small,SiGe_medium,SiGe_large,Cantor_small,Canto
 
 
 @app.local_entrypoint()
+def lammps_variants(model: str = "Cantor_medium", ns: str = "8192,32768",
+                    modes: str = "stock,owned,owned:rec+pool+fm", dtype: str = "float64",
+                    tag: str = ""):
+    argvs = []
+    for n in ns.split(","):
+        for mv in modes.split(","):
+            mode, _, var = mv.partition(":")
+            argvs.append(["bench/perf/lammps_variant.py", model, n, "--dtype", dtype, "--mode", mode,
+                          "--variant", var or "baseline", "--work", f"/tmp/lv_{n}_{mode}_{var}"])
+    res = script_remote.remote(argvs)
+    _save(f"lammps_variants_{model}_{dtype}{tag}.json", res)
+    for r in res:
+        print(json.dumps({k: r.get(k) for k in ("n_atoms", "mode", "variant", "layout", "rows",
+                                                 "k_dense", "status", "step_s", "atom_steps_per_s",
+                                                 "pe", "error")}))
+
+
+@app.local_entrypoint()
+def mlpace_chunk(model: str = "Cantor_medium", ns: str = "8192,65536",
+                 chunks: str = "4096,16384,65536", tag: str = ""):
+    """ML-PACE's own headroom: pace/kk processes `chunksize` atoms per kernel
+    sequence (default 4096); the kernel timer adds fences, so it is off here."""
+    cases = [dict(model=model, system=_system(model), n=int(n), steps=60, warmup=10,
+                  ktimer=False, style=f"product chunksize {c}")
+             for n in ns.split(",") for c in chunks.split(",")]
+    res = mlpace_remote.remote(cases)
+    for c, r in zip(cases, res):
+        r["style"] = c["style"]
+        print(r["n"], c["style"], r.get("atom_steps_per_s"), r.get("error", "")[:200])
+    _save(f"mlpace_chunk_{model}{tag}.json", res)
+
+
+@app.local_entrypoint()
 def probe_main():
     for k, v in probe.remote().items():
         print("==", k)

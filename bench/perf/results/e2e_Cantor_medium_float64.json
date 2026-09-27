@@ -1,0 +1,96 @@
+[
+ {
+  "yace": "/ace-jax/bench/scaling/models/pace_Cantor_medium.yace",
+  "n": 8192,
+  "dtype": "float64",
+  "variant": "baseline",
+  "device": "NVIDIA A100-SXM4-80GB",
+  "parity_skin_vs_ase": {
+   "dE_per_atom": 2.7755575615628914e-17,
+   "max_dF": 3.9190872769268026e-14
+  },
+  "ase_calc": {
+   "call_s": 0.02304956649999923,
+   "atoms_per_s": 355407.98565562064,
+   "first_s": 4.412641201,
+   "nlist_s": 0.012298649999999967,
+   "model_s": 0.007198724499998477
+  },
+  "skin_calc": {
+   "call_s": 0.010876399500000744,
+   "atoms_per_s": 753190.428505264,
+   "first_s": 0.012825506999998737,
+   "prep_s": 0.0007993890000008719,
+   "model_and_d2h_s": 0.009071915999999902,
+   "n_rebuilds": 1,
+   "rebuild_s": 1.849402704000001,
+   "K": 44,
+   "K_skin": 80
+  }
+ },
+ {
+  "yace": "/ace-jax/bench/scaling/models/pace_Cantor_medium.yace",
+  "n": 8192,
+  "dtype": "float64",
+  "variant": "rec+pool+fm",
+  "device": "NVIDIA A100-SXM4-80GB",
+  "skin_calc": {
+   "call_s": 0.007302427000002609,
+   "atoms_per_s": 1121818.8144841534,
+   "first_s": 0.009526692000001447,
+   "prep_s": 0.0005997475000043551,
+   "model_and_d2h_s": 0.005956310000001963,
+   "n_rebuilds": 1,
+   "rebuild_s": 1.8091346900000005,
+   "K": 44,
+   "K_skin": 80
+  }
+ },
+ {
+  "yace": "/ace-jax/bench/scaling/models/pace_Cantor_medium.yace",
+  "n": 65536,
+  "dtype": "float64",
+  "variant": "baseline",
+  "device": "NVIDIA A100-SXM4-80GB",
+  "parity_skin_vs_ase": {
+   "dE_per_atom": 2.7755575615628914e-17,
+   "max_dF": 1.0014211682118912e-13
+  },
+  "ase_calc": {
+   "call_s": 0.10254913100000351,
+   "atoms_per_s": 639069.2867011984,
+   "first_s": 4.384245277000005,
+   "nlist_s": 0.024851658500004703,
+   "model_s": 0.06996011050000561
+  },
+  "skin_calc": {
+   "call_s": 0.08102524000000244,
+   "atoms_per_s": 808834.3829650863,
+   "first_s": 0.08265059000000008,
+   "prep_s": 0.002943007999995473,
+   "model_and_d2h_s": 0.07352851649999792,
+   "n_rebuilds": 1,
+   "rebuild_s": 2.868935523999994,
+   "K": 44,
+   "K_skin": 80
+  }
+ },
+ {
+  "yace": "/ace-jax/bench/scaling/models/pace_Cantor_medium.yace",
+  "n": 65536,
+  "dtype": "float64",
+  "variant": "rec+pool+fm",
+  "device": "NVIDIA A100-SXM4-80GB",
+  "skin_calc": {
+   "call_s": 0.03785645150000505,
+   "atoms_per_s": 1731171.2377477128,
+   "first_s": 0.03968298000000914,
+   "prep_s": 0.002876260999997271,
+   "model_and_d2h_s": 0.03039445249999062,
+   "n_rebuilds": 1,
+   "rebuild_s": 2.784865477000011,
+   "K": 44,
+   "K_skin": 80
+  }
+ }
+]
