@@ -105,7 +105,12 @@ def capacity(at, rcut, skin=1.0):
     g = sparse_graph(at.positions, at.cell.array, at.pbc, rcut)
     k_max = int(np.bincount(g.senders, minlength=len(at)).max())
     max_owned = int(np.ceil(1.1 * len(at)))
-    k_dense = k_max + 4
+    # lammps-jax drops pairs beyond rcut before packing, so slots are sized at
+    # rcut; the margin (>= 4, 10% of k_max for larger coordination) covers
+    # coordination drift within the cutoff over a run -- overflow is loud
+    # (NaN energy and forces, make_energy_fn's n_rows/k_dense guard), never
+    # a silent truncation.
+    k_dense = k_max + max(4, int(np.ceil(0.1 * k_max)))
     return {"max_atoms": int(np.ceil(len(at) * ghost * 1.1)), "k_max": k_max,
             "k_dense": k_dense, "max_edges": max_owned * k_dense, "max_owned": max_owned}
 

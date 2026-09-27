@@ -118,7 +118,7 @@ def test_capacity_covers_ghosts_and_neighbours():
     at = supercell("SiGe", 256)
     cap = capacity(at, 5.0)
     assert cap["max_atoms"] > 256                      # owned + ghost shell
-    assert cap["k_dense"] == cap["k_max"] + 4
+    assert cap["k_dense"] == cap["k_max"] + max(4, int(np.ceil(0.1 * cap["k_max"])))
     assert cap["max_edges"] >= 256 * cap["k_max"]
     assert cap["max_owned"] == int(np.ceil(1.1 * 256))
 

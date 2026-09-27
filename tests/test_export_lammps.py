@@ -15,6 +15,7 @@ import pytest
 jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 from ase import Atoms
+from ase.build import bulk
 
 from ace_jax.calc.point import ACECalculator
 from ace_jax.eval import load, sparse_graph
@@ -166,6 +167,46 @@ def test_owned_rows_bundle_matches_calculator(layout):
     at.calc = ACECalculator(y, layout="sparse", skin=0.0)
     assert float(E) == pytest.approx(at.get_potential_energy(), abs=1e-10)
     np.testing.assert_allclose(-np.asarray(G), at.get_forces(), atol=1e-9)
+
+
+def test_owned_rows_no_overflow_matches_unrestricted():
+    """n_rows < n with no overflow: this is owned-rows evaluation itself, not
+    just its overflow guard.  Build a periodic supercell graph and keep only
+    edges whose sender is < nr (receivers may be any atom -- the ghost-like
+    case LAMMPS actually presents), so restricting to nr rows drops no real
+    edge.  Rows < nr must then match the unrestricted computation exactly,
+    and rows >= nr must be exactly zero (not the isolated-atom energy the
+    unrestricted computation would give them)."""
+    y = str(pace_fixture(FIX / "gesi_sbessel.yace"))
+    model, meta, _ = load(y)
+    a = bulk("Si", "diamond", a=5.43, cubic=True).repeat((2, 2, 2))
+    a.numbers[::2] = 32                                       # Ge/Si mix
+    graph, _ = _lammps_graph(a, meta["rcut"])
+    n = len(a)
+    nr = n // 2
+    senders, receivers, mask = (np.asarray(x) for x in
+                                (graph.senders, graph.receivers, graph.edge_mask))
+    keep = mask & (senders < nr)                              # owned senders only
+    s = np.where(keep, senders, 0)
+    r = np.where(keep, receivers, 0)
+    filtered = Graph(jnp.asarray(s, jnp.int32), jnp.asarray(r, jnp.int32), jnp.asarray(keep))
+    z2i = {z: i for i, z in enumerate(meta["elements"])}
+    species = jnp.asarray([z2i[int(z)] for z in a.numbers], jnp.int32)
+    K = int(np.bincount(senders[keep], minlength=n).max())
+    pos = jnp.asarray(a.positions)
+
+    f_all = make_energy_fn(model, len(meta["elements"]), "dense", k_dense=K + 3)
+    f_owned = make_energy_fn(model, len(meta["elements"]), "dense", k_dense=K + 3, n_rows=nr)
+
+    _, g_all = jax.value_and_grad(lambda p: jnp.sum(f_all(p, species, filtered)))(pos)
+    _, g_owned = jax.value_and_grad(lambda p: jnp.sum(f_owned(p, species, filtered)))(pos)
+    e_all_arr = f_all(pos, species, filtered)
+    e_owned_arr = f_owned(pos, species, filtered)
+
+    np.testing.assert_allclose(np.asarray(e_owned_arr[:nr]), np.asarray(e_all_arr[:nr]),
+                               rtol=1e-12, atol=1e-12)
+    assert np.all(np.asarray(e_owned_arr[nr:]) == 0.0)
+    np.testing.assert_allclose(np.asarray(g_owned), np.asarray(g_all), rtol=1e-12, atol=1e-12)
 
 
 def test_owned_rows_overflow_is_nan():
