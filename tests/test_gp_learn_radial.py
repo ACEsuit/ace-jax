@@ -389,6 +389,44 @@ def test_learned_radials_reject_inducing_points(small):
         fit_radial(bad, ds, ds, prob.model.rnl_Wnlq, steps=0)
 
 
+def test_learn_radial_spectral_prior_suppresses_high_q_change():
+    """A strong spectral prior on the radial change should shrink the high-q
+    (q >= n_q/2) part of W - W_ref relative to no prior, while staying finite."""
+    from ace_jax.fit.radial_learn import learn_radial
+    from ace_jax.fit.radial_model import normalise, radial_gram, row_active
+    prob, ds, _ = make_problem(ncfg=12, per_batch=3)
+    Wt, W0, c = _perturbed_truth(prob)
+    ds = relabel(prob, ds, Wt, c)
+    Q = radial_gram(prob.model, ds)
+    active = row_active(W0)
+    W_ref = np.asarray(normalise(W0, Q, active))
+    n_q = W0.shape[-1]
+    hi = slice(n_q // 2, n_q)
+    out = {}
+    for lam_spec in (0.0, 1e2):
+        W, info = learn_radial(prob, ds, W0, theta0=THETA, profile=False, steps=10,
+                               lam_spec=lam_spec, spec_p=4.0)
+        W = np.asarray(W)
+        assert np.all(np.isfinite(W)) and all(np.isfinite(info["trace"]))
+        dW = W - W_ref
+        out[lam_spec] = float(np.sqrt(np.sum(dW[..., hi] ** 2)))
+    print(f"high-q ||dW||: lam_spec=0 {out[0.0]:.6e}  lam_spec=1e2 {out[1e2]:.6e}")
+    assert out[1e2] < out[0.0]
+
+
+def test_fit_radial_spec_grid_labels(small):
+    from ace_jax.fit.radial_learn import fit_radial
+    prob, ds_fit, _ = small
+    _, ds_val, _ = make_problem(ncfg=6, start=6)
+    lam_grid = (0.0, 1e-2)
+    spec_grid = (0.0, 1.0)
+    W, info = fit_radial(prob, ds_fit, ds_val, prob.model.rnl_Wnlq, lam_grid=lam_grid,
+                         spec_grid=spec_grid, theta0=THETA, steps=0, map_steps=10)
+    expected = {"init"} | {f"learned_lam={l:g}_spec={s:g}" for l in lam_grid for s in spec_grid}
+    assert set(info["scores"]) == expected
+    assert len(info["scores"]) == 1 + len(lam_grid) * len(spec_grid)
+
+
 def test_fit_radial_rejects_duplicate_lambdas(small):
     from ace_jax.fit.radial_learn import fit_radial
     prob, ds, _ = small

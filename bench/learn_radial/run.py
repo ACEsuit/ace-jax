@@ -43,6 +43,8 @@ p.add_argument("--r0", type=float, default=2.35, help="hyperprior length scale (
 p.add_argument("--n-q", type=int, default=30, help="tensor-radial polynomial span after widening")
 p.add_argument("--steps", type=int, default=40); p.add_argument("--reprofile-every", type=int, default=20)
 p.add_argument("--lam-grid", default="0,1e-2", help="relative roughness weights")
+p.add_argument("--spec-grid", default="0", help="relative spectral-prior weights on the radial change")
+p.add_argument("--spec-p", type=float, default=4.0, help="spectral prior degree power (1+q)^p")
 p.add_argument("--map-steps", type=int, default=300)
 a = p.parse_args()
 
@@ -74,6 +76,7 @@ print(f"problem built: {time.time() - t0:.1f}s", flush=True)
 
 wn = 1.0 / (1.0 + rnl_degrees(meta)) ** 2
 lam_grid = tuple(float(x) for x in a.lam_grid.split(","))
+spec_grid = tuple(float(x) for x in a.spec_grid.split(","))
 
 
 def checkpoint(label, W_lam, run_info):
@@ -83,14 +86,15 @@ def checkpoint(label, W_lam, run_info):
     print(f"checkpoint: {out / f'lam_{label}'}", flush=True)
 
 
-W, info = fit_radial(prob, ds_fit, ds_val, model.rnl_Wnlq, lam_grid=lam_grid,
-                     rough_weights=wn, steps=a.steps, reprofile_every=a.reprofile_every,
+W, info = fit_radial(prob, ds_fit, ds_val, model.rnl_Wnlq, lam_grid=lam_grid, spec_grid=spec_grid,
+                     rough_weights=wn, spec_p=a.spec_p, steps=a.steps, reprofile_every=a.reprofile_every,
                      map_steps=a.map_steps, log=lambda s: print(s, flush=True),
                      checkpoint=checkpoint)
 info["to_analytic_relres_max"] = relres_max
 save_result(out, W, info, src_npz=a.model, model=model)
 summary = {"selected": info["selected"], "scores": info["scores"], "n_q": a.n_q,
            "ntrain": a.ntrain, "nval": a.nval, "lam_grid": list(lam_grid),
+           "spec_grid": list(spec_grid), "spec_p": a.spec_p,
            "steps": a.steps, "reprofile_every": a.reprofile_every,
            "to_analytic_relres_max": relres_max,
            "seconds": time.time() - t0}

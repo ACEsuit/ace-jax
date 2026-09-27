@@ -14,6 +14,7 @@ through the checkpointed `linear_statistics` scan.  M = 0 throughout: the
 residual GP is fitted afterwards on the frozen learned model.
 See docs/specs/2026-09-26-learned-radial-varpro-design.md.
 """
+import itertools
 import json
 import pathlib
 import time
@@ -29,7 +30,8 @@ from .hypers import from_array, log_prior, to_array
 from .ladder import run_map
 from .objective import combine, log_marginal_likelihood, posterior
 from .radial_model import (normalise, radial_gram, require_analytic, roughness,
-                           roughness_matrix, row_active, with_radial)
+                           roughness_matrix, row_active, spectral_penalty,
+                           spectral_weights, with_radial)
 from .stats import linear_statistics
 
 
@@ -151,18 +153,21 @@ def theta_map_linear(prob, ds, W, *, steps=300, seed=0, init=None, return_stats=
     return a, lin, diag
 
 
-def _objective(V, a, model, ds, gamma, Q, active, D2, wn, lam, cfg):
-    """The VarPro-plus-roughness objective, module-level so it is a stable,
+def _objective(V, a, model, ds, gamma, Q, active, D2, wn, lam, W_ref, sw, lam_spec, cfg):
+    """The VarPro-plus-priors objective, module-level so it is a stable,
     hashable `f` for `lbfgs_loop`/`_lbfgs_step` (a fresh per-round closure
     over the same computation would be a distinct object each round and
     force a recompile of the L-BFGS step every round -- see `learn_radial`).
     `cfg` is meant to be passed through `lbfgs_loop`'s `statics`, not `args`;
     this function does not need to be jitted itself, since `_lbfgs_step` is
-    the sole jit boundary and traces straight through it."""
+    the sole jit boundary and traces straight through it.  `W_ref`, `sw` and
+    `lam_spec` (traced `args`, not `statics`) add the spectral prior on the
+    change from the reference radials W_ref, more strongly at high degree."""
     theta = from_array(a)
     W = normalise(V, Q, active)
     lin = linear_statistics(with_radial(model, W), cfg, ds)
-    return projected_residual_from_stats(theta, lin, gamma) + lam * roughness(W, D2, wn)
+    return (projected_residual_from_stats(theta, lin, gamma) + lam * roughness(W, D2, wn)
+            + lam_spec * spectral_penalty(W, W_ref, sw))
 
 
 def require_linear(prob):
@@ -183,19 +188,36 @@ def relative_lambda(lam_rough, r0, rough0):
     return float(lam_rough) * r0 / rough0
 
 
+def relative_lambda_spec(lam_spec, r0, n_active):
+    """Absolute spectral weight lam_spec * r0 / n_active (0 for lam_spec = 0),
+    the analogue of `relative_lambda` for the spectral prior on the radial
+    change: n_active is the number of active radials (row_active count), not
+    a roughness scale, so there is no "smooth init" degeneracy to guard."""
+    if not lam_spec:
+        return 0.0
+    return float(lam_spec) * r0 / n_active
+
+
 def learn_radial(prob, ds, W0, *, theta0=None, profile=True, lam_rough=0.0, rough_weights=None,
-                 steps=200, reprofile_every=10, tol=1e-6, patience=3, map_steps=300,
-                 n_prior=None, seed=0, log=None, Q=None, D2=None, r0=None):
+                 lam_spec=0.0, spec_p=4.0, steps=200, reprofile_every=10, tol=1e-6, patience=3,
+                 map_steps=300, n_prior=None, seed=0, log=None, Q=None, D2=None, r0=None):
     """VarPro-learn the tensor radials of prob.model (analytic branch, M = 0).
 
-    Minimises  r(W; theta) + lam * roughness(W)  over V with W = normalise(V)
-    (unit empirical norm per radial; rows that are zero in W0 stay zero), by
-    L-BFGS in rounds of `reprofile_every` steps.  With profile=True theta is
-    re-MAP'd on the M = 0 LML after every round (and at the start unless
-    theta0 is given), and L-BFGS restarts because the objective changed.
-    lam_rough is RELATIVE: lam = lam_rough * r(W0) / roughness(W0).  Stops at
-    `steps` total or at the first round that ends early (converged, line
-    search, non-finite).  Returns (W, info); steps=0 returns normalise(W0).
+    Minimises  r(W; theta) + lam * roughness(W) + lam_spec_abs * spectral_penalty(W, W_ref)
+    over V with W = normalise(V) (unit empirical norm per radial; rows that
+    are zero in W0 stay zero), by L-BFGS in rounds of `reprofile_every`
+    steps.  With profile=True theta is re-MAP'd on the M = 0 LML after every
+    round (and at the start unless theta0 is given), and L-BFGS restarts
+    because the objective changed.  lam_rough is RELATIVE: lam = lam_rough *
+    r(W0) / roughness(W0).  lam_spec is also RELATIVE: lam_spec_abs =
+    lam_spec * r0 / n_active, n_active = the number of active (row_active)
+    radials; the spectral prior penalises the departure of the normalised W
+    from W_ref = normalise(W0) (the starting V), weighted per Legendre degree
+    q by spectral_weights(n_q, spec_p) = (1 + q)^spec_p, so it grows with
+    degree -- the analogue of the Gamma smoothness prior's degree weighting,
+    but on the CHANGE rather than the absolute radial.  Stops at `steps`
+    total or at the first round that ends early (converged, line search,
+    non-finite).  Returns (W, info); steps=0 returns normalise(W0).
 
     `log`: optional one-arg callable given one-line progress strings (start
     hyperparameters, then a line per round); None (default) is silent and
@@ -218,6 +240,8 @@ def learn_radial(prob, ds, W0, *, theta0=None, profile=True, lam_rough=0.0, roug
         D2 = roughness_matrix(prob.model)
     wn = jnp.ones(W0.shape[2]) if rough_weights is None else jnp.asarray(rough_weights, jnp.float64)
     V = normalise(W0, Q, active)
+    W_ref = V                              # reference for the spectral prior: the starting V
+    sw = spectral_weights(W0.shape[-1], spec_p)
     lin0 = None
     if theta0 is not None:
         a = to_array(theta0)
@@ -232,13 +256,18 @@ def learn_radial(prob, ds, W0, *, theta0=None, profile=True, lam_rough=0.0, roug
     r0 = float(r0)
     rough0 = float(roughness(V, D2, wn))
     lam = relative_lambda(lam_rough, r0, rough0)
+    n_active = int(jnp.sum(active))
+    lam_spec_abs = relative_lambda_spec(lam_spec, r0, n_active)
     info = {"trace": [], "reasons": [], "theta": [np.asarray(a)], "lam_abs": lam,
             "lam_rough": float(lam_rough), "r0": r0, "rough0": rough0, "steps": 0,
-            "round_lengths": []}
+            "round_lengths": [], "lam_spec": float(lam_spec), "lam_spec_abs": lam_spec_abs,
+            "spec_p": float(spec_p)}
     if log is not None:
         log(f"learn_radial: lam_rough={float(lam_rough):g} lam_abs={lam:.6e} "
+            f"lam_spec={float(lam_spec):g} lam_spec_abs={lam_spec_abs:.6e} spec_p={float(spec_p):g} "
             f"r0={r0:.6e} profile={bool(profile)}")
     lam = jnp.asarray(lam, jnp.float64)
+    lam_spec_abs = jnp.asarray(lam_spec_abs, jnp.float64)
     done = 0
     round_idx = 0
     while done < int(steps):
@@ -251,7 +280,7 @@ def learn_radial(prob, ds, W0, *, theta0=None, profile=True, lam_rough=0.0, roug
         # `args` change VALUE each round (a is re-profiled) but not shape/dtype.
         V, f_best, trace, reason = lbfgs_loop(
             _objective, V, steps=n, tol=tol, patience=patience,
-            args=(a, prob.model, ds, prob.gamma, Q, active, D2, wn, lam),
+            args=(a, prob.model, ds, prob.gamma, Q, active, D2, wn, lam, W_ref, sw, lam_spec_abs),
             statics=(prob.cfg,))
         info["trace"].extend(trace)
         info["reasons"].append(reason)
@@ -340,11 +369,17 @@ def gate(candidates, score):
     return min(order, key=lambda k: (scores[k], order.index(k))), scores
 
 
-def fit_radial(prob, ds_fit, ds_val, W0, *, lam_grid=(0.0, 1e-3, 1e-2, 1e-1), theta0=None,
-               map_steps=300, log=None, checkpoint=None, **learn_kw):
-    """learn_radial on ds_fit once per relative roughness weight in lam_grid,
-    then keep the best of {init, learned per lam} on the disjoint ds_val
-    (ties -> init).
+def fit_radial(prob, ds_fit, ds_val, W0, *, lam_grid=(0.0, 1e-3, 1e-2, 1e-1), spec_grid=(0.0,),
+               theta0=None, map_steps=300, log=None, checkpoint=None, **learn_kw):
+    """learn_radial on ds_fit once per (roughness weight, spectral weight) pair
+    in lam_grid x spec_grid, then keep the best of {init, learned per pair} on
+    the disjoint ds_val (ties -> init).
+
+    Candidate labels are "learned_lam=<l>_spec=<s>" when spec_grid has more
+    than one value, and the old "learned_lam=<l>" otherwise (backward
+    compatible with a single, implicit spec=0); checkpoints use the same
+    scheme without the "learned_" prefix (lam_label = f"{l:g}" or
+    f"{l:g}_spec={s:g}").
 
     Every candidate, init included, is scored by ONE procedure: a_fit =
     theta_map_linear(ds_fit, W, map_steps, init=a0), readout = posterior mean
@@ -359,20 +394,33 @@ def fit_radial(prob, ds_fit, ds_val, W0, *, lam_grid=(0.0, 1e-3, 1e-2, 1e-1), th
     ds_fit pass plus one ds_val pass.  Returns (W_sel, info).
 
     `log`: optional one-arg callable given one-line progress strings (forwarded
-    to `learn_radial`, plus fit_radial's own per-lambda and gate-score lines);
-    None (default) is silent and leaves all other behaviour unchanged.
+    to `learn_radial`, plus fit_radial's own per-candidate and gate-score
+    lines); None (default) is silent and leaves all other behaviour unchanged.
 
     `checkpoint`: optional callable checkpoint(lam_label, W, run_info), called
-    as soon as each lambda's learn_radial finishes (lam_label = f"{lam:g}"),
-    so an interrupted grid keeps its finished runs (e.g. save_result without
-    src_npz).  Q, D2 and the relative-lambda reference are computed once here
-    and shared by every lambda; M > 0 raises."""
+    as soon as each (lam, spec) pair's learn_radial finishes, so an
+    interrupted grid keeps its finished runs (e.g. save_result without
+    src_npz).  Q, D2 and the relative-lambda/spec reference are computed once
+    here and shared by every candidate; M > 0 raises."""
     require_x64()
     require_analytic(prob.model)
     require_linear(prob)
-    labels = [f"learned_lam={float(lam):g}" for lam in lam_grid]
+    multi_spec = len(spec_grid) > 1
+    combos = list(itertools.product(lam_grid, spec_grid))
+
+    def cand_label(lam, spec):
+        if multi_spec:
+            return f"learned_lam={float(lam):g}_spec={float(spec):g}"
+        return f"learned_lam={float(lam):g}"
+
+    def run_key(lam, spec):
+        if multi_spec:
+            return f"{float(lam):g}_spec={float(spec):g}"
+        return f"{float(lam):g}"
+
+    labels = [cand_label(lam, spec) for lam, spec in combos]
     if len(set(labels)) != len(labels):
-        raise ValueError(f"fit_radial: duplicate values in lam_grid {tuple(lam_grid)}")
+        raise ValueError(f"fit_radial: duplicate combinations in lam_grid x spec_grid {combos}")
     W0 = jnp.asarray(W0, jnp.float64)
     # shared by every lambda: the gauge Gram, the roughness matrix, and the
     # relative-lambda reference r0 = r(W_init; a0) (all runs start there)
@@ -392,15 +440,17 @@ def fit_radial(prob, ds_fit, ds_val, W0, *, lam_grid=(0.0, 1e-3, 1e-2, 1e-1), th
     for lam in lam_grid:
         relative_lambda(lam, r0, rough0)          # fail before any learning, not mid-grid
     cands, runs = {"init": W_init}, {}
-    for lam, label in zip(lam_grid, labels):
+    for lam, spec in combos:
+        label, key = cand_label(lam, spec), run_key(lam, spec)
         if log is not None:
-            log(f"fit_radial: lam={lam:g} starting")
+            log(f"fit_radial: lam={lam:g} spec={spec:g} starting")
         W, info = learn_radial(prob, ds_fit, W0, theta0=from_array(a0), lam_rough=lam,
-                               map_steps=map_steps, log=log, Q=Q, D2=D2, r0=r0, **learn_kw)
+                               lam_spec=spec, map_steps=map_steps, log=log, Q=Q, D2=D2, r0=r0,
+                               **learn_kw)
         cands[label] = W
-        runs[f"{float(lam):g}"] = info
+        runs[key] = info
         if checkpoint is not None:
-            checkpoint(f"{float(lam):g}", W, info)
+            checkpoint(key, W, info)
 
     at_a0, theta_fit, map_diag, readouts = {}, {}, {}, {}
 

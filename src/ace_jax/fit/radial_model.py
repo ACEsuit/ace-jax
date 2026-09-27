@@ -167,6 +167,19 @@ def roughness(W, D2, wn):
     return jnp.einsum("n,abnq,qp,abnp->", wn, W, D2, W)
 
 
+def spectral_weights(n_q, p):
+    """(n_q,) weights (1 + q)^p for the spectral prior on the radial change."""
+    q = jnp.arange(n_q, dtype=jnp.float64)
+    return (1.0 + q) ** jnp.asarray(p, jnp.float64)
+
+
+def spectral_penalty(W, W_ref, sw):
+    """sum_{zi,zj,n,q} sw[q] * (W - W_ref)[zi,zj,n,q]^2 -- penalises the change from the
+    reference radials, more strongly at high Legendre degree."""
+    dW = W - W_ref
+    return jnp.einsum("q,abnq,abnq->", sw, dW, dW)
+
+
 def rnl_degrees(meta, wL=1.5):
     """(n_rnl,) polynomial degree of each tensor radial under the identity
     (onehot) convention, n' = (n - 1) // NZ, from the model's (n, l) spec.

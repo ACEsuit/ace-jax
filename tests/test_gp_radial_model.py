@@ -213,6 +213,33 @@ def test_roughness_is_weighted_quadratic_form(si):
     assert abs(float(roughness(W, D2, wn)) - ref) < 1e-10 * abs(ref)
 
 
+def test_spectral_weights_p0_is_ones():
+    from ace_jax.fit.radial_model import spectral_weights
+    sw = spectral_weights(10, 0.0)
+    np.testing.assert_allclose(np.asarray(sw), np.ones(10))
+
+
+def test_spectral_penalty_zero_at_reference(si):
+    from ace_jax.fit.radial_model import spectral_penalty, spectral_weights
+    model, *_ = si
+    W = model.rnl_Wnlq
+    sw = spectral_weights(W.shape[-1], 4.0)
+    assert float(spectral_penalty(W, W, sw)) == 0.0
+
+
+def test_spectral_penalty_matches_explicit_loop(si):
+    from ace_jax.fit.radial_model import spectral_penalty, spectral_weights
+    model, *_ = si
+    W = model.rnl_Wnlq
+    W_ref = W + 0.1
+    sw = spectral_weights(W.shape[-1], 3.0)
+    NZ, _, n_rnl, n_q = W.shape
+    ref = sum(float(sw[q]) * float((W[zi, zj, n, q] - W_ref[zi, zj, n, q]) ** 2)
+             for zi in range(NZ) for zj in range(NZ) for n in range(n_rnl) for q in range(n_q))
+    got = float(spectral_penalty(W, W_ref, sw))
+    assert abs(got - ref) < 1e-10 * max(abs(ref), 1.0)
+
+
 def test_rnl_degrees(si):
     from ace_jax.fit.radial_model import rnl_degrees
     _, meta, _, _ = si
