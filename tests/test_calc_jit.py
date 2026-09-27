@@ -52,8 +52,9 @@ def test_model_body_runs_once_per_shape(monkeypatch, layout, method):
 
 def test_last_timing_splits_neighbour_list_and_model():
     """The benchmark reports model time on its own; `call - nlist` also counted
-    host regrouping and transfers as 'model'."""
-    calc = ACECalculator(str(pace_fixture(FIX / "gesi_sbessel.yace")))
+    host regrouping and transfers as 'model'.  skin=0: a list is built every
+    call (with the skin list, nlist_s is 0 on reuse; tests/test_skin.py)."""
+    calc = ACECalculator(str(pace_fixture(FIX / "gesi_sbessel.yace")), skin=0.0)
     at = _bulk()
     for _ in range(2):
         calc.calculate(at, ["energy", "forces", "stress"], all_changes)
@@ -79,7 +80,7 @@ def test_dense_path_uses_native_neighbour_matrix(monkeypatch):
     monkeypatch.setattr(matscipy_neighbours, "neighbour_matrix", counted)
     y = str(pace_fixture(FIX / "gesi_sbessel.yace"))
     at = _bulk()
-    dense = ACECalculator(y, layout="dense")
+    dense = ACECalculator(y, layout="dense", skin=0.0)      # the rebuild-every-call path
     for _ in range(3):
         dense.calculate(at, ["energy", "forces", "stress"], all_changes)
     assert len(calls) >= 2 and dense.last_timing["nlist_backend"] == "neighbour_matrix"

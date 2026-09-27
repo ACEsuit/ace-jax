@@ -172,7 +172,7 @@ class EdgeSiteModel(eqx.Module):
         return E, F, -g_eps
 
     def energy_forces_virial_dense(self, rij, zi, zj, idx, mask, node_z, chunk=CHUNK_NODES,
-                                   rev=None):
+                                   rev=None, return_edge_grad=False):
         """`energy_forces_virial` for the dense layout: rij (n, K, 3), zi / zj /
         idx (neighbour index) / mask (n, K).  Same strain trick for the virial.
 
@@ -183,7 +183,12 @@ class EdgeSiteModel(eqx.Module):
 
         `rev` (n, K), from `nlist.reverse_slots`, is optional and independent of
         chunking: it only changes how the per-edge gradient `g_r` is turned into
-        forces, after the (possibly chunked) energy above has produced it."""
+        forces, after the (possibly chunked) energy above has produced it.
+
+        `return_edge_grad=True` returns (E, g_r, V) instead: g_r (n, K, 3) is
+        dE/drij, zero on masked slots, for a caller that assembles the forces
+        itself (the skin list's step, `calc.skin.step`, which gathers in its own
+        slot space); `rev` is then ignored."""
         n, K = mask.shape
         nb = max(1, -(-n // chunk))
         B = -(-n // nb)
@@ -212,6 +217,8 @@ class EdgeSiteModel(eqx.Module):
         eps0 = jnp.zeros((3, 3), rij.dtype)
         E, (g_r, g_eps) = jax.value_and_grad(total, argnums=(0, 1))(rij, eps0)
         g_r = jnp.where(mask[..., None], g_r, 0.0)
+        if return_edge_grad:
+            return E, g_r, -g_eps
         if rev is None:
             F = (jnp.zeros((n, 3), rij.dtype).at[jnp.arange(n)].add(g_r.sum(axis=1))
                  .at[idx.reshape(-1)].add(-g_r.reshape(-1, 3)))

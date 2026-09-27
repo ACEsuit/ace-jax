@@ -72,7 +72,10 @@ def run_case(row, n_atoms, dtype, device, reps=10):
             import jax.numpy as jnp
             from ace_jax.calc.point import ACECalculator
             from ace_jax.eval import sparse_graph
-            calc = ACECalculator(row["path"], dtype=getattr(jnp, dtype))
+            # skin=0: every call builds its neighbour list, as the published
+            # figures measured (the same geometry each call would otherwise
+            # reuse the skin list and report nlist_s = 0)
+            calc = ACECalculator(row["path"], dtype=getattr(jnp, dtype), skin=0.0)
             call = lambda: calc.calculate(at, ["energy", "forces", "stress"], all_changes)
             t0 = time.perf_counter(); call(); out["compile_s"] = time.perf_counter() - t0
             call()                                # K learnt: the steady-state path from here

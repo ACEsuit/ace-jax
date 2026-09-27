@@ -1,14 +1,17 @@
-"""End-to-end calculator timing: ACECalculator (as benchmarked) vs the prototype
-SkinDenseCalculator, optionally with a FastPACE model variant.
+"""End-to-end calculator timing: ACECalculator rebuilding its list every call
+(skin=0, "ase_calc"), ACECalculator with its skin list (skin=1, "ace_skin"), and
+the prototype SkinDenseCalculator ("skin_calc"), optionally with a FastPACE
+model variant.
 
     PYTHONPATH=bench:src python bench/perf/e2e.py <yace> <system> <n> [--variant rec+pool+fm]
 
 Each timed call displaces every atom by a fresh random vector of 1e-3 A from
 the lattice positions (as consecutive MD steps would), so the skin calculator
-takes its reuse path; the ASE calculator rebuilds its list every call either way.
+takes its reuse path; skin=0 rebuilds its list every call either way.
 Prints one JSON object.
 """
 import argparse
+import gc
 import json
 import statistics
 import sys
@@ -75,7 +78,7 @@ def main():
     E_a = F_a = None
     if not args.skip_ase:
         try:
-            ase_calc = ACECalculator(model, meta, dtype=dt, layout="dense")
+            ase_calc = ACECalculator(model, meta, dtype=dt, layout="dense", skin=0.0)
             at.positions = geo
             ase_calc.calculate(at, ["energy", "forces", "stress"], all_changes)
             E_a, F_a = ase_calc.results["energy"], ase_calc.results["forces"].copy()
@@ -83,8 +86,21 @@ def main():
         except Exception as ex:                                    # noqa: BLE001
             fail("ase_calc", ex)
         ase_calc = None
-        import gc
         gc.collect()
+    try:
+        ace_skin = ACECalculator(model, meta, dtype=dt, layout="dense", skin=1.0)
+        at.positions = geo
+        ace_skin.calculate(at, ["energy", "forces", "stress"], all_changes)
+        if E_a is not None:
+            out["parity_ace_skin_vs_ase"] = {
+                "dE_per_atom": abs(ace_skin.results["energy"] - E_a) / args.n,
+                "max_dF": float(np.max(np.abs(ace_skin.results["forces"] - F_a)))}
+        run(ace_skin, "ace_skin")
+        out["ace_skin"]["rebuilds"] = ace_skin.last_timing["rebuilds"]
+        ace_skin = None
+        gc.collect()
+    except Exception as ex:                                        # noqa: BLE001
+        fail("ace_skin", ex)
     try:
         skin = SkinDenseCalculator(model, meta, dtype=dt)
         at.positions = geo

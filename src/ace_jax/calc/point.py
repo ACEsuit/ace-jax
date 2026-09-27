@@ -9,11 +9,12 @@ vectors, so the same code path serves LAMMPS, where there is no cell at all.
 import numpy as np
 from ase.calculators.calculator import Calculator, all_changes
 
-from ..eval.edge_model import (LAYOUTS, calibrate_edge_a, check_edge_a_kind,
-                               estimate_a_bytes, with_edge_a_kind)
+from ..eval.edge_model import LAYOUTS, calibrate_edge_a, check_edge_a_kind, with_edge_a_kind
 from ..eval.model import highest_precision
 from ..eval.nlist import backend as nlist_backend
 from ..eval.nlist import dense_from_sparse, dense_graph, have_matscipy_neighbours, sparse_graph
+from . import skin as skin_list
+from .skin import round_k as _round_k
 
 # Below this many edges "auto" keeps the gather form: compile time dominates and
 # the forms differ little.  Above it, the adjoint of the gather (an atomic
@@ -22,9 +23,11 @@ from ..eval.nlist import dense_from_sparse, dense_graph, have_matscipy_neighbour
 AUTO_MIN_EDGES = 20_000
 
 # layout="auto": the dense (n, K) layout -- A per node by a batched outer product,
-# 3-13x faster forces on A4500/A100/H100 -- when its estimated memory fits the
-# budget and the neighbour padding is efficient (edges / (n * K) >= MIN_DENSE_FILL);
-# otherwise the sparse edge list, whose memory grows only with the edge count.
+# 3-13x faster forces on A4500/A100/H100 -- when the neighbour padding is
+# efficient (edges / (n * K) >= MIN_DENSE_FILL); otherwise the sparse edge list.
+# Memory is not a criterion: the dense model runs in blocks of CHUNK_NODES rows,
+# so its peak is bounded per block.  (dense_budget_bytes is for export_lammps,
+# whose bundles are not chunked.)
 MIN_DENSE_FILL = 0.5
 DENSE_BUDGET_FRACTION = 0.5
 CPU_DENSE_BUDGET_BYTES = 4 * 2**30
@@ -34,12 +37,6 @@ def _edge_bucket(n_edges, floor=64):
     """Sparse edge-list length: the next power of two (at least `floor`), so the
     compiled shape changes only when the edge count crosses a doubling."""
     return max(floor, 1 << max(0, int(n_edges) - 1).bit_length())
-
-
-def _round_k(k, step=4):
-    """Dense row capacity: the largest neighbour count rounded up, so a small
-    change in the count keeps the compiled shape (and the neighbour_matrix K)."""
-    return max(step, -(-int(k) // step) * step)
 
 
 def dense_budget_bytes():
@@ -56,7 +53,7 @@ class ACECalculator(Calculator):
                               "site_descriptors"]
 
     def __init__(self, model, meta=None, cutoff=None, dtype=None, edge_a_kind="auto",
-                 layout="auto", **kw):
+                 layout="auto", skin=1.0, **kw):
         """`ACECalculator("si_fitted.npz")` is the intended form: cutoff,
         species and dtype all come from the file.  A pre-loaded (model, meta)
         pair is still accepted, which is what the validation tests use.
@@ -70,13 +67,21 @@ class ACECalculator(Calculator):
 
         `layout` picks the neighbour layout: "sparse" (edge list), "dense" (padded
         (n, K) per-node blocks; A by a batched outer product), or "auto" (default):
-        dense when `estimate_a_bytes` fits `dense_budget_bytes()` and the padding
-        is efficient (see MIN_DENSE_FILL), else sparse.  `edge_a_kind` applies to
-        the sparse layout."""
+        dense when the padding is efficient (see MIN_DENSE_FILL), else sparse.
+        `edge_a_kind` applies to the sparse layout.
+
+        `skin` (A, default 1.0) is the Verlet skin of the dense layout (see
+        `calc.skin`): the neighbour list is built for cutoff + skin and reused,
+        one compiled step per call, until an atom has moved skin / 2 or the
+        cell, pbc or species change.  skin=0 rebuilds the list every call.
+        `last_timing["rebuilds"]` counts the calls that built a neighbour list,
+        and `last_timing["nlist_s"]` is this call's build time (0 on reuse)."""
         if edge_a_kind != "auto":
             check_edge_a_kind(edge_a_kind)
         if layout != "auto" and layout not in LAYOUTS:
             raise ValueError(f"layout must be 'auto' or one of {LAYOUTS}, got {layout!r}")
+        if not skin >= 0:
+            raise ValueError(f"skin must be >= 0, got {skin!r}")
         super().__init__(**kw)
         from ..eval.api import _resolve
         model, meta = _resolve(model, meta, dtype)
@@ -94,6 +99,10 @@ class ACECalculator(Calculator):
         self.last_timing = None
         self._k_hint = None                   # dense row capacity, learnt from the first call
         self._nl_gpu = True                   # build the dense graph on the GPU when possible
+        self.skin = float(skin)
+        self._skin_state = None               # the skin list in use (calc.skin.SkinState)
+        self._rebuilds = 0                    # calls that built a neighbour list
+        self._lut = skin_list.species_lut(meta["elements"])
         # compiled entry points: run eagerly, a call dispatches thousands of ops
         # one by one (a flat ~0.6 s per call on an A100).  The model is an
         # argument, so each edge_a form is its own cache entry; n_nodes is static.
@@ -104,6 +113,7 @@ class ACECalculator(Calculator):
         self._efv_sparse = eqx.filter_jit(
             lambda m, rij, zi, zj, s, r, n, nz, emask: m.energy_forces_virial(
                 rij, zi, zj, s, r, n, nz, emask))
+        self._skin_step = skin_list.jitted_step(self.model, self.cutoff) if self.skin > 0 else None
 
     def _species_index(self, numbers):
         try:
@@ -114,17 +124,105 @@ class ACECalculator(Calculator):
 
     def calculate(self, atoms=None, properties=("energy",), system_changes=all_changes):
         super().calculate(atoms, properties, system_changes)
+        import jax.numpy as jnp
+
+        pos, cell, pbc = (self.atoms.get_positions(), self.atoms.get_cell().array,
+                          self.atoms.get_pbc())
+        dtype = np.dtype(self.dtype or jnp.zeros(()).dtype)
+        out = None
+        if self.skin > 0 and self.layout != "sparse":
+            out = self._skin_calculate(pos, cell, pbc, self.atoms.get_atomic_numbers(), dtype)
+        if out is None:
+            out = self._rebuild_calculate(pos, cell, pbc, dtype)
+        E, F, V, timing = out
+        self.last_timing = {**timing, "rebuilds": self._rebuilds}
+        E = float(E)
+        self.results["energy"] = E
+        self.results["free_energy"] = E
+        self.results["forces"] = np.asarray(F)
+        vol = self.atoms.get_volume()
+        if vol > 0:
+            # ASE stress is -virial/volume, Voigt-ordered
+            s = -np.asarray(V) / vol
+            self.results["stress"] = np.array(
+                [s[0, 0], s[1, 1], s[2, 2], s[1, 2], s[0, 2], s[0, 1]])
+
+    def _skin_calculate(self, pos, cell, pbc, numbers, dtype):
+        """E, F, V from the skin list (built or reused), or None when
+        layout="auto" prefers sparse for this structure."""
+        import time
+
+        import jax
+
+        t_nl = 0.0
+        st = self._skin_state
+        rebuilt = not skin_list.valid(st, pos, cell, pbc, numbers, self.skin)
+        if rebuilt:
+            st, dt = self._skin_build(pos, cell, pbc, numbers, dtype, st)
+            t_nl += dt
+        if self.layout == "auto" and self._layout_from(
+                len(pos), st.n_edges, max(st.k_max, 1), dtype) == "sparse":
+            return None                        # the rebuild path counts this call
+        n = len(pos)
+        t0 = time.perf_counter()
+        u = jax.device_put(st.displacements(pos, dtype))
+        E, F, V, drift, overflow, k_max, n_edges = skin_list.unpack(
+            self._skin_step(u, st.arrays, K=st.K), n)
+        if drift or overflow:
+            # an atom moved skin / 2 (valid() checked in float64; this is the
+            # model dtype), or gained neighbours inside the cutoff past K
+            t1 = time.perf_counter()
+            K_hint = _round_k(k_max + 4) if overflow else st.K
+            st, dt = self._skin_build(pos, cell, pbc, numbers, dtype, st, K_hint=K_hint)
+            t_nl += dt
+            rebuilt = True
+            t0 += time.perf_counter() - t1
+            u = jax.device_put(st.displacements(pos, dtype))       # zero: the list is new
+            E, F, V, drift, overflow, k_max, n_edges = skin_list.unpack(
+                self._skin_step(u, st.arrays, K=st.K), n)
+            if drift or overflow:
+                raise RuntimeError("skin list invalid straight after a rebuild")
+        t_model = time.perf_counter() - t0
+        self._rebuilds += rebuilt
+        self.last_layout = "dense"
+        self.last_n_edges = n_edges
+        # nlist_s: skin list builds this call (0 on reuse); model_s: the compiled
+        # step, with the displacements' H2D and the packed result's D2H
+        return E, F, V, {"nlist_s": t_nl, "model_s": t_model, "nlist_backend": st.backend}
+
+    def _skin_build(self, pos, cell, pbc, numbers, dtype, prev, K_hint=None):
+        """A new SkinState (kept on self), reusing the capacities learnt by
+        `prev` so the compiled shapes stay put; returns (state, seconds)."""
+        import time
+
+        import jax
+        t0 = time.perf_counter()
+        gpu = jax.default_backend() == "gpu" and self._nl_gpu and have_matscipy_neighbours()
+        kw = dict(dtype=dtype, K_hint=max(K_hint or 0, prev.K if prev else 0))
+        args = (pos, cell, pbc, numbers, self._lut, self.cutoff, self.skin,
+                prev.K_skin if prev else None)
+        try:
+            st = skin_list.build(*args, device="cuda" if gpu else None, **kw)
+        except Exception as e:                          # no CUDA backend in this build
+            if not gpu or isinstance(e, ValueError):
+                raise
+            self._nl_gpu = False
+            st = skin_list.build(*args, device=None, **kw)
+        jax.block_until_ready(st.arrays)
+        self._skin_state = st
+        return st, time.perf_counter() - t0
+
+    def _rebuild_calculate(self, pos, cell, pbc, dtype):
+        """E, F, V with a neighbour list built for this call (skin=0, sparse)."""
         import time
 
         import jax
         import jax.numpy as jnp
 
+        self._rebuilds += 1
         t0 = time.perf_counter()
-        pos, cell, pbc = (self.atoms.get_positions(), self.atoms.get_cell().array,
-                          self.atoms.get_pbc())
         n = len(pos)
         node_z = jnp.asarray(self._species_index(self.atoms.get_atomic_numbers()))
-        dtype = np.dtype(self.dtype or jnp.zeros(()).dtype)
         dg, g, backend = self._native_dense(pos, cell, pbc, n, dtype), None, "neighbour_matrix"
         if dg is None:                                  # sparse list (also learns K)
             g = sparse_graph(pos, cell, pbc, self.cutoff)
@@ -170,17 +268,7 @@ class ACECalculator(Calculator):
                     self._efv_sparse(model, *args, int(g.n_nodes), node_z, emask))
         t2 = time.perf_counter()
         # nlist_s: neighbour list + layout + host->device; model_s: the compiled call
-        self.last_timing = {"nlist_s": t1 - t0, "model_s": t2 - t1, "nlist_backend": backend}
-        E = float(E)
-        self.results["energy"] = E
-        self.results["free_energy"] = E
-        self.results["forces"] = np.asarray(F)
-        vol = self.atoms.get_volume()
-        if vol > 0:
-            # ASE stress is -virial/volume, Voigt-ordered
-            s = -np.asarray(V) / vol
-            self.results["stress"] = np.array(
-                [s[0, 0], s[1, 1], s[2, 2], s[1, 2], s[0, 2], s[0, 1]])
+        return E, F, V, {"nlist_s": t1 - t0, "model_s": t2 - t1, "nlist_backend": backend}
 
     def _native_dense(self, pos, cell, pbc, n, dtype):
         """The dense graph straight from matscipy_neighbours' neighbour_matrix,
@@ -219,10 +307,7 @@ class ACECalculator(Calculator):
     def _layout_from(self, n, n_edges, K, dtype):
         if self.layout != "auto":
             return self.layout
-        if n_edges / (n * K) < MIN_DENSE_FILL:
-            return "sparse"
-        need = estimate_a_bytes(self.model, "dense", n, n_edges, K, np.dtype(dtype).itemsize)
-        return "dense" if need <= dense_budget_bytes() else "sparse"
+        return "sparse" if n_edges / (n * K) < MIN_DENSE_FILL else "dense"
 
     def _in_form(self, kind):
         if kind not in self._by_kind:

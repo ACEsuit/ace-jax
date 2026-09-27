@@ -1,10 +1,12 @@
-"""ACECalculator chooses the neighbour layout (dense or sparse) by memory.
+"""ACECalculator chooses the neighbour layout (dense or sparse) by padding fill.
 
 Dense (batched outer product per node) was 3-13x faster for forces on
-A4500/A100/H100, and lighter for single-element models, but its memory grows
-with neighbour-species channels and with (n, K) padding; sparse grows only with
-the edge count.  "auto" uses dense when its estimate fits the budget and the
-padding is efficient, else sparse.
+A4500/A100/H100, and lighter for single-element models, but it pays for the
+(n, K) padding.  "auto" uses dense when the padding is efficient
+(MIN_DENSE_FILL), else sparse.  Memory is not a criterion: the dense model runs
+in blocks of CHUNK_NODES rows, so its peak is bounded per block (Task 6 ruling;
+export_lammps keeps a budget test, its bundles are not chunked).  The
+estimate_a_bytes tests stay: export_lammps uses it.
 """
 import pathlib
 
@@ -14,6 +16,7 @@ import pytest
 
 jax.config.update("jax_enable_x64", True)
 from ase import Atoms
+from ase.calculators.calculator import all_changes
 
 import ace_jax.calc.point as point
 from ace_jax.calc.point import ACECalculator
@@ -113,18 +116,25 @@ def test_auto_picks_dense_for_uniform_bulk(yace):
     assert calc.last_layout == "dense"
 
 
-def test_auto_falls_back_to_sparse_over_budget(yace, monkeypatch):
+@pytest.mark.parametrize("skin", [0.0, 1.0])
+def test_auto_ignores_the_memory_budget(yace, monkeypatch, skin):
+    """Replaces test_auto_falls_back_to_sparse_over_budget: chunking bounds the
+    dense model's memory, so a tiny budget no longer forces sparse."""
     monkeypatch.setattr(point, "dense_budget_bytes", lambda: 1)
-    calc = ACECalculator(yace)
+    calc = ACECalculator(yace, skin=skin)
     _efs(calc, _atoms("gesi_sbessel", "bulk"))
-    assert calc.last_layout == "sparse"
+    assert calc.last_layout == "dense"
 
 
-def test_auto_falls_back_to_sparse_when_padding_is_wasteful(yace, monkeypatch):
+@pytest.mark.parametrize("skin", [0.0, 1.0])
+def test_auto_falls_back_to_sparse_when_padding_is_wasteful(yace, monkeypatch, skin):
     monkeypatch.setattr(point, "MIN_DENSE_FILL", 1.01)       # no layout can meet it
-    calc = ACECalculator(yace)
-    _efs(calc, _atoms("gesi_sbessel", "bulk"))
-    assert calc.last_layout == "sparse"
+    calc = ACECalculator(yace, skin=skin)
+    at = _atoms("gesi_sbessel", "bulk")
+    for k in range(1, 3):
+        calc.calculate(at, ["energy", "forces"], all_changes)
+        assert calc.last_layout == "sparse"
+        assert calc.last_timing["rebuilds"] == k              # sparse builds every call
 
 
 @pytest.mark.parametrize("s", ["bulk", "close", "isolated", "dimer_2.3"])
