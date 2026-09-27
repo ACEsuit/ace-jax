@@ -500,3 +500,35 @@ def test_per_system_panels_never_zigzag(tmp_path, monkeypatch, fig):
                 assert x == sorted(x), (fig, ax.get_title(), x)
     labels = {t.get_text() for lg in f.legends for t in lg.get_texts()}
     assert "MACE" in labels
+
+
+def test_export_bundle_runs_in_a_child_process(tmp_path, monkeypatch):
+    """Exporting in the runner process initialised JAX on the GPU, whose default
+    pool (75% of the card) stayed allocated while LAMMPS ran: lammps-jax got a
+    quarter of the GPU.  The export runs in a child that exits first."""
+    import subprocess as sp
+    from scaling import run_lammps
+    seen = {}
+
+    def fake_run(cmd, **kw):
+        seen["cmd"] = cmd
+        return sp.CompletedProcess(cmd, 0, stdout='noise\n{"bundle": "/w/bundle.json", '
+                                   '"layout": "dense", "compile_s": 1.5}\n', stderr="")
+
+    monkeypatch.setattr(run_lammps.subprocess, "run", fake_run)
+    row = {"name": "acejax-pace/SiGe/small", "system": "SiGe", "path": "m.yace", "elements": ["Si", "Ge"]}
+    from scaling.structures import supercell
+    got = run_lammps.export_bundle(row, supercell("SiGe", 256), "float64", tmp_path, layout="sparse")
+    assert got == ("/w/bundle.json", "dense", 1.5)
+    assert seen["cmd"][0] == sys.executable and "--export" in seen["cmd"]
+    assert "sparse" in seen["cmd"] and "256" in seen["cmd"]
+
+
+def test_export_bundle_child_writes_a_bundle(tmp_path):
+    pytest.importorskip("lammps_jax")
+    from scaling.run_lammps import export_bundle
+    from scaling.structures import supercell
+    y = str(pathlib.Path(__file__).parent.parent / "fixtures" / "pace" / "gesi_sbessel.yace")
+    row = {"name": "x", "system": "SiGe", "path": y, "elements": ["Si", "Ge"]}
+    bundle, layout, t = export_bundle(row, supercell("SiGe", 256), "float64", tmp_path)
+    assert pathlib.Path(bundle).exists() and layout in ("dense", "sparse") and t > 0

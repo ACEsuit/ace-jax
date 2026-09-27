@@ -105,8 +105,9 @@ def capacity(at, rcut, skin=1.0):
             "k_dense": k_max + 8, "max_edges": int(len(at) * (k_max + 8))}
 
 
-def export_bundle(row, at, dtype, workdir, layout="auto"):
-    """Export the ace-jax model as a lammps-jax bundle sized for `at`."""
+def _export_inprocess(row, at, dtype, workdir, layout="auto"):
+    """Export the ace-jax model as a lammps-jax bundle sized for `at` (this
+    process: it initialises JAX, and on a GPU host keeps JAX's memory pool)."""
     import time
     import jax
     jax.config.update("jax_enable_x64", dtype == "float64")
@@ -121,6 +122,27 @@ def export_bundle(row, at, dtype, workdir, layout="auto"):
                       max_edges=cap["max_edges"], k_dense=cap["k_dense"], dtype=dtype, layout=layout,
                       type_elements=[atomic_numbers[e] for e in row["elements"]])  # data-file order
     return str(pathlib.Path(workdir) / "bundle.json"), b["ace_jax"]["layout"], time.perf_counter() - t0
+
+
+def export_bundle(row, at, dtype, workdir, layout="auto"):
+    """Export the ace-jax model as a lammps-jax bundle sized for `at`, in a
+    child process: exporting here would initialise JAX on the GPU, whose default
+    pool (75% of the card) stays allocated while LAMMPS runs, leaving lammps-jax
+    a quarter of it.  Returns (bundle path, layout used, export seconds)."""
+    keep = {k: row[k] for k in ("name", "system", "path", "elements") if k in row}
+    cmd = [sys.executable, str(pathlib.Path(__file__).resolve()), "--export", json.dumps(keep),
+           str(len(at)), dtype, str(workdir), layout]
+    bench = str(pathlib.Path(__file__).resolve().parents[1])     # so the child imports scaling
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join(
+        [bench] + [x for x in os.environ.get("PYTHONPATH", "").split(os.pathsep) if x])}
+    p = subprocess.run(cmd, capture_output=True, text=True, timeout=3600, env=env)
+    lines = [l for l in p.stdout.splitlines() if l.startswith("{")]
+    if p.returncode != 0 or not lines:
+        raise RuntimeError(f"bundle export failed ({p.returncode}): {(p.stderr or p.stdout)[-2000:]}")
+    out = json.loads(lines[-1])
+    return out["bundle"], out["layout"], out["compile_s"]
+
+
 
 
 STEP_BUDGET_S = 60.0          # target wall time of the timed segment
@@ -205,7 +227,11 @@ def _run_lammps(row, style, model, data, work, n_atoms, dtype, device, lmp, rank
     return out
 
 
-if __name__ == "__main__":
+if __name__ == "__main__" and sys.argv[1:2] == ["--export"]:
+    _row, _n, _dtype, _work, _layout = json.loads(sys.argv[2]), int(sys.argv[3]), *sys.argv[4:7]
+    _b, _l, _t = _export_inprocess(_row, supercell(_row["system"], _n), _dtype, _work, _layout)
+    print(json.dumps({"bundle": _b, "layout": _l, "compile_s": _t}))
+elif __name__ == "__main__":
     from scaling.models import planned_models
     name, n, dtype, device, lmp, ranks, workdir = sys.argv[1:8]
     row = next(r for r in planned_models() if r["name"] == name)
