@@ -107,3 +107,23 @@ def test_cli_eval_reads_a_gp_model(gp_res, tmp_path):
                  "--out", str(tmp_path / "p.csv")]) == 0
     rows = list(csv.DictReader(open(tmp_path / "p.csv")))
     assert len(rows) == len(gp_res.data.test) and float(rows[0]["energy_std"]) > 0
+
+
+def test_pops_fit_saves_the_pops_mean_exactly(tmp_path):
+    """A POPS run predicts with the ridge path's pinned mean c*; the saved model must
+    hold exactly that vector.  A second, independent solve agreed only to the
+    conditioning (4e-4 eV/A in forces at the production Cantor basis, L = 27.6k)."""
+    from ace_jax.fit.pipeline import save_model
+    res = _fit(arm="linear", map_steps=5, uq="pops", opt="lbfgs")
+    z = np.load(save_model(res, tmp_path))
+    cfg = res.built.prob.cfg
+    mu = np.concatenate([z["WB"].T.reshape(-1), z["Wpair"].T.reshape(-1)])
+    assert mu.shape == (cfg.len_basis,)
+    assert np.array_equal(mu, res.preds.pops["mean"])
+    # ... and that mean is the one the POPS predictions were made with
+    from ace_jax import ACECalculator
+    calc = ACECalculator(str(tmp_path / "model.npz"))
+    E = []
+    for c in res.data.test:
+        at = _atoms(c); at.calc = calc; E.append(at.get_potential_energy())
+    assert np.allclose(E, res.preds.arrays["test/map"]["E_mean"], rtol=1e-10, atol=1e-10)

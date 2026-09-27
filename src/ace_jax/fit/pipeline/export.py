@@ -52,7 +52,10 @@ def linear_model_arrays(res):
     (fit/rows.py `_place`), i.e. WB[b, z] = mu[z*n_B + b]."""
     cfg = res.built.prob.cfg
     nB, nP, NZ = cfg.n_B, cfg.n_pair, cfg.NZ
-    mu, _ = _posterior(res, res.theta)
+    if "mean" in res.preds.pops:
+        mu = res.preds.pops["mean"]      # POPS: exactly the mean the predictions used
+    else:
+        mu, _ = _posterior(res, res.theta)
     mu = np.asarray(mu)
     out = _ace_arrays(res)
     out["WB"] = mu[:NZ * nB].reshape(NZ, nB).T.copy()

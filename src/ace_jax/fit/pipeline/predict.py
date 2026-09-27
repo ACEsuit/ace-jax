@@ -126,5 +126,6 @@ def predict_splits(cfg, d, b, stats, theta, draws, log=print):
             log(f"{split} {rung} " + str({q: {k: round(x, 4) for k, x in v.items()
                                               if k in ("rmse", "crps", "coverage", "rho", "rms_z")}
                                           for q, v in m.items()}))
-    pops.pop("path", None)
+    if "path" in pops:           # the path holds L x L arrays; keep only the mean it predicted with
+        pops["mean"] = np.asarray(pops.pop("path").c_star)
     return Preds(arrays, metrics, pops, tm)
