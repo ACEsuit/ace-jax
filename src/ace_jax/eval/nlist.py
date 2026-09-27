@@ -3,7 +3,8 @@
 Three backends, tried in order:
 
 1. `matscipy_neighbours` -- preferred when present: GPU, DLPack, and a native
-   `neighbour_matrix` for the dense layout.  Not on PyPI, so it is optional.
+   `neighbour_matrix` for the dense layout.  On PyPI as `matscipy-neighbours`
+   (the `fast-neighbours` extra; a source build, CUDA opt-in at build time).
 2. `matscipy` -- optional fast path.  C-accelerated, on PyPI, same `"ijdDS"` API,
    so it is interchangeable with (1) for the sparse path.
 3. `ase.neighborlist` -- the baseline.  ASE is a *core* dependency, so this path

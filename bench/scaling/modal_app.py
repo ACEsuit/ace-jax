@@ -91,7 +91,7 @@ image = (
     # its own layer, after the LAMMPS builds, so adding it kept their cache:
     # matscipy-neighbours with CUDA (sm_80) -- the calculator's dense graph on the GPU
     .run_commands("pip install -C cmake.define.ENABLE_CUDA=ON -C cmake.define.CMAKE_CUDA_ARCHITECTURES=80"
-                  " 'matscipy-neighbours @ git+https://github.com/libAtoms/matscipy-neighbours@258d65cca766022c1c22e8725fcbe4cf08e84d48'")
+                  " matscipy-neighbours==1.0.0")
     .add_local_dir(ROOT / "src", "/ace-jax/src")
     .add_local_dir(ROOT / "bench", "/ace-jax/bench",
                    ignore=["**/__pycache__", "pace_modal/*.json*", "scaling/results/*"])

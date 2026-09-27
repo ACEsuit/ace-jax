@@ -88,11 +88,11 @@ lammps_dev() {          # develop + ML-PACE + PLUGIN, host for the lammps-jax pl
 }
 
 neighbours() {        # matscipy-neighbours with CUDA: the calculator's dense graph on the GPU (DLPack)
-  "$VENV/bin/python" -c "import matscipy_neighbours" 2>/dev/null && return 0
+  [ "$("$VENV/bin/python" -c "import importlib.metadata as m; print(m.version('matscipy-neighbours'))" 2>/dev/null)" = "1.0.0" ] && return 0
   module swap CUDA/12.4.0 "$CUDA_DEV" 2>/dev/null || true
   CC=gcc CXX=g++ uv pip install --python "$VENV/bin/python" \
     -C cmake.define.ENABLE_CUDA=ON -C cmake.define.CMAKE_CUDA_ARCHITECTURES=86 \
-    "matscipy-neighbours @ git+https://github.com/libAtoms/matscipy-neighbours@258d65cca766022c1c22e8725fcbe4cf08e84d48"
+    "matscipy-neighbours==1.0.0"
 }
 
 symmetrix_py() {        # for symmetrix_extract_mace (model export only)

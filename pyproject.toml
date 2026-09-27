@@ -37,9 +37,14 @@ authoring = ["juliacall>=0.9.20", "juliapkg>=0.1.13"]  # ET coupling shim (heavy
 # Hybrid ACE+GP fitting with the marginalised-hyperparameter UQ ladder.
 gp = ["numpyro>=0.16", "optax>=0.2", "blackjax>=1.6"]
 cuda = ["jax[cuda12]>=0.10.1"]
-# matscipy gives C/GPU neighbour lists; ace-jax uses it when present and falls
-# back to a pure-numpy list otherwise, so it is intentionally NOT a core dep.
-fast-neighbours = ["matscipy>=1.0"]
+# Fast neighbour lists; ace-jax uses them when present and falls back to ASE's
+# list otherwise, so they are intentionally NOT core deps.  matscipy-neighbours
+# (preferred: OpenMP CPU, native dense neighbour_matrix) ships as a source
+# distribution: installing it compiles C++ (CMake + a C++17 compiler).  For its
+# GPU backend (graph built on the device, handed to JAX via DLPack):
+#   pip install -C cmake.define.ENABLE_CUDA=ON \
+#       -C cmake.define.CMAKE_CUDA_ARCHITECTURES=<sm> matscipy-neighbours
+fast-neighbours = ["matscipy-neighbours>=1.0"]
 
 [project.scripts]
 ace-jax = "ace_jax.cli:main"
