@@ -192,9 +192,18 @@ def relative_lambda_spec(lam_spec, r0, n_active):
     """Absolute spectral weight lam_spec * r0 / n_active (0 for lam_spec = 0),
     the analogue of `relative_lambda` for the spectral prior on the radial
     change: n_active is the number of active radials (row_active count), not
-    a roughness scale, so there is no "smooth init" degeneracy to guard."""
+    a roughness scale.
+
+    Scale: the weights (1+q)^p are large (~9e5 at q=30, p=4), so the useful
+    window is narrow. Measured on si_tiny with n_q=30, p=4 and a 5%
+    flat-spectrum change, the penalty/r0 ratio is about lam_spec * 5.5e3:
+    1e-6 is negligible, 1e-5..3e-5 is comparable to lam_rough=1e-2, and 1e-4
+    already dominates the fit. Sweep roughly 1e-6..1e-4, not the lam_rough
+    grid. The window moves by about n_q^dp per unit change of p."""
     if not lam_spec:
         return 0.0
+    if n_active <= 0:
+        raise ValueError("spectral prior: no active radials in W0 (all rows zero)")
     return float(lam_spec) * r0 / n_active
 
 

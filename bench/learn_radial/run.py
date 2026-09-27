@@ -43,7 +43,7 @@ p.add_argument("--r0", type=float, default=2.35, help="hyperprior length scale (
 p.add_argument("--n-q", type=int, default=30, help="tensor-radial polynomial span after widening")
 p.add_argument("--steps", type=int, default=40); p.add_argument("--reprofile-every", type=int, default=20)
 p.add_argument("--lam-grid", default="0,1e-2", help="relative roughness weights")
-p.add_argument("--spec-grid", default="0", help="relative spectral-prior weights on the radial change")
+p.add_argument("--spec-grid", default="0", help="relative spectral-prior weights on the radial change; useful range ~1e-6..1e-4 at --spec-p 4 (see relative_lambda_spec)")
 p.add_argument("--spec-p", type=float, default=4.0, help="spectral prior degree power (1+q)^p")
 p.add_argument("--map-steps", type=int, default=300)
 a = p.parse_args()
