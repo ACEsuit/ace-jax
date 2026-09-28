@@ -27,9 +27,9 @@ import numpy as np
 from .data import flat_edges
 from .density import compact_gamma, density_gamma, linear_density_statistics
 from .hypers import from_array, to_array
-from .radial_learn import (gate, holdout_score, lbfgs_loop, learn_radial, projected_residual_from_stats,
-                           relative_lambda, relative_lambda_gap, relative_lambda_spec, require_linear,
-                           require_x64, theta_map_linear)
+from .radial_learn import (_gate_setup, gate, holdout_score, lbfgs_loop, learn_radial,
+                           projected_residual_from_stats, relative_lambda, relative_lambda_gap,
+                           relative_lambda_spec, require_linear, require_x64, theta_map_linear)
 from .radial_model import (data_r_range, gap_penalty, normalise, radial_gram, require_analytic, roughness,
                            roughness_matrix, row_active, spectral_penalty, spectral_weights, uniform_gram,
                            with_radial)
@@ -256,19 +256,8 @@ def fit_radial_density(prob, ds_fit, ds_val, W0, *, mask, P=1, mode="joint", lam
     mask = jnp.asarray(mask, jnp.float64)
     W0 = jnp.asarray(W0, jnp.float64)
     n_prior = learn_kw.pop("n_prior", None)
-    Q = radial_gram(prob.model, ds_fit) if n_prior is None else radial_gram(prob.model, ds_fit, n_prior=n_prior)
-    D2 = roughness_matrix(prob.model)
-    U = None
-    if lam_gap:
-        r_min, _ = data_r_range(ds_fit)
-        U = uniform_gram(prob.model, 0.8 * r_min, cfg.rcut)
-    W_init = normalise(W0, Q, row_active(W0))
-    if theta0 is not None:
-        a0 = to_array(theta0)
-        lin0 = linear_statistics(with_radial(prob.model, W_init), cfg, ds_fit)
-    else:
-        a0, lin0, _ = theta_map_linear(prob, ds_fit, W_init, steps=map_steps, return_stats=True)
-    r0 = float(projected_residual_from_stats(from_array(a0), lin0, prob.gamma))
+    Q, D2, U, W_init, a0, lin0, r0 = _gate_setup(prob, ds_fit, W0, theta0=theta0, map_steps=map_steps,
+                                                 need_U=bool(lam_gap), n_prior=n_prior)
     S = rho_gram(prob.model, W_init, mask, cfg, ds_fit)
     prob_w = prob._replace(gamma=density_gamma(prob.gamma, P, cfg.NZ))
     cands, runs = {"init": (W_init, None)}, {}

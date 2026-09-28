@@ -467,6 +467,12 @@ def test_saved_density_model_matches_widened_rows(tmp_path):
     assert worst < 1e-8
 
 
+def test_save_result_eta_without_mask_raises(tmp_path):
+    from ace_jax.fit.radial_learn import save_result
+    with pytest.raises(ValueError, match="mask"):
+        save_result(tmp_path, np.zeros(3), {}, eta=np.zeros((1, 2, 3)))
+
+
 def test_fit_radial_density_checkpoints(tmp_path, small):
     from ace_jax.fit.density import density_mask
     from ace_jax.fit.radial_density import fit_radial_density

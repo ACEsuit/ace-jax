@@ -458,6 +458,31 @@ def gate(candidates, score):
     return min(order, key=lambda k: (scores[k], order.index(k))), scores
 
 
+def _gate_setup(prob, ds_fit, W0, *, theta0, map_steps, need_U, n_prior=None):
+    """Candidate-independent setup shared by every fit_radial/fit_radial_density gate
+    call: the gauge Gram Q (n_prior forwarded to radial_gram), the roughness matrix
+    D2, the uniform-in-r Gram U (only when need_U, via one extra data_r_range pass;
+    None otherwise), the normalised init W_init, the common theta a0 (theta0 if
+    given, else the theta-MAP at W_init), its linear statistics lin0 (so a caller can
+    reuse them), and the projected residual r0 = r(W_init; a0) -- the reference every
+    candidate's relative priors and (for fit_radial_density) lam_eta are scaled from.
+    Returns (Q, D2, U, W_init, a0, lin0, r0)."""
+    Q = radial_gram(prob.model, ds_fit) if n_prior is None else radial_gram(prob.model, ds_fit, n_prior=n_prior)
+    D2 = roughness_matrix(prob.model)
+    U = None
+    if need_U:
+        r_min, _ = data_r_range(ds_fit)
+        U = uniform_gram(prob.model, 0.8 * r_min, prob.cfg.rcut)
+    W_init = normalise(W0, Q, row_active(W0))
+    if theta0 is not None:
+        a0 = to_array(theta0)
+        lin0 = linear_statistics(with_radial(prob.model, W_init), prob.cfg, ds_fit)
+    else:
+        a0, lin0, _ = theta_map_linear(prob, ds_fit, W_init, steps=map_steps, return_stats=True)
+    r0 = float(projected_residual_from_stats(from_array(a0), lin0, prob.gamma))
+    return Q, D2, U, W_init, a0, lin0, r0
+
+
 def fit_radial(prob, ds_fit, ds_val, W0, *, lam_grid=(0.0, 1e-3, 1e-2, 1e-1), spec_grid=(0.0,),
                gap_grid=(0.0,), theta0=None, map_steps=300, log=None, checkpoint=None, **learn_kw):
     """learn_radial on ds_fit once per (roughness, spectral, data-gap weight)
@@ -526,19 +551,8 @@ def fit_radial(prob, ds_fit, ds_val, W0, *, lam_grid=(0.0, 1e-3, 1e-2, 1e-1), sp
     # uniform-in-r Gram (if needed), and the relative-lambda reference
     # r0 = r(W_init; a0) (all runs start there)
     n_prior = learn_kw.pop("n_prior", None)
-    Q = radial_gram(prob.model, ds_fit) if n_prior is None else radial_gram(prob.model, ds_fit, n_prior=n_prior)
-    D2 = roughness_matrix(prob.model)
-    U = None
-    if any(gap_grid):
-        r_min, _ = data_r_range(ds_fit)
-        U = uniform_gram(prob.model, 0.8 * r_min, prob.cfg.rcut)
-    W_init = normalise(W0, Q, row_active(W0))
-    if theta0 is not None:
-        a0 = to_array(theta0)
-        lin0 = linear_statistics(with_radial(prob.model, W_init), prob.cfg, ds_fit)
-    else:
-        a0, lin0, _ = theta_map_linear(prob, ds_fit, W_init, steps=map_steps, return_stats=True)
-    r0 = float(projected_residual_from_stats(from_array(a0), lin0, prob.gamma))
+    Q, D2, U, W_init, a0, lin0, r0 = _gate_setup(prob, ds_fit, W0, theta0=theta0, map_steps=map_steps,
+                                                 need_U=any(gap_grid), n_prior=n_prior)
     rw = learn_kw.get("rough_weights")
     rough0 = float(roughness(W_init, D2, jnp.ones(W0.shape[2]) if rw is None
                              else jnp.asarray(rw, jnp.float64)))
@@ -606,6 +620,8 @@ def save_result(out_dir, W, info, *, src_npz=None, model=None, readout=None, eta
     eta.npy, and model.npz carries the fs keys (eval.fs_model)."""
     if readout is None:
         readout = info.get("readout")
+    if eta is not None and mask is None:
+        raise ValueError("save_result: eta needs the `mask` it was learned on")
     if src_npz is not None:
         if model is None:
             raise ValueError("save_result: src_npz needs the analytic `model` W belongs to")
