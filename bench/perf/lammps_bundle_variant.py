@@ -29,6 +29,7 @@ def main():
     ap.add_argument("--work", default="/tmp/lammps_bundle_variant")
     ap.add_argument("--steps", type=int, default=50)
     ap.add_argument("--warmup", type=int, default=10)
+    ap.add_argument("--thermo", type=int, default=50, help="thermo interval (the deck's is 50)")
     a = ap.parse_args()
 
     import jax
@@ -95,12 +96,33 @@ def main():
     pjrt = os.path.join(os.path.dirname(p.__file__), "xla_cuda_plugin.so")
     row = {"name": f"acejax-{kind}/{system}/{size}", "code": f"acejax-{kind}", "size": size,
            "system": system, "elements": elements}
-    out = _run_lammps(row, "acejax", str(bundle), work / "x.data", work, a.n, a.dtype, "gpu",
+    import re
+    import scaling.run_lammps as rl
+    deck = rl.lammps_input
+    # thermo every a.thermo steps, with the largest coordination within rcut
+    # (compute coord/atom), to see whether an atom outgrows its k_dense slots
+    rl.lammps_input = lambda *x, **kw: deck(*x, **kw).replace(
+        "thermo 50\n", f"thermo {a.thermo}\n").replace(
+        "thermo_style custom step pe atoms\n",
+        f"compute cn all coord/atom cutoff {rcut}\ncompute cnmax all reduce max c_cn\n"
+        "thermo_style custom step pe atoms c_cnmax\n")
+    contract = json.loads(bundle.read_text())["contract"]
+    extra.update(contract_cutoff=contract["cutoff"], contract_max_edges=contract["max_edges"],
+                 rcut=rcut, steps=a.steps, warmup=a.warmup)
+    out = rl._run_lammps(row, "acejax", str(bundle), work / "x.data", work, a.n, a.dtype, "gpu",
                       "/opt/lmp-jax.sh", 1, pjrt, a.steps, a.warmup, extra)
+    log = (work / "log.lammps").read_text() if (work / "log.lammps").exists() else ""
     try:
-        out["pe"] = read_pe((work / "log.lammps").read_text())
+        out["pe"] = read_pe(log)
     except Exception:                                              # noqa: BLE001
         pass
+    # thermo rows (step, pe) and neighbour-list stats, to place an abort in the run
+    # (step, pe, max coordination within rcut); pe may be nan
+    out["thermo"] = [[int(m.group(1)), float(m.group(2)), float(m.group(3))] for m in
+                     re.finditer(r"^\s*(\d+)\s+(\S+)\s+\d+\s+(\S+)\s*$", log, re.M)]
+    out["neigh"] = re.findall(r"(?:Total # of neighbors|Neighbor list builds|Dangerous builds)"
+                              r"\s*=\s*\d+", log)
+    out["log_errors"] = [l for l in log.splitlines() if "ERROR" in l or "capacity" in l][:5]
     print(json.dumps(out))
 
 

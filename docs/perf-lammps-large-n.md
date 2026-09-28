@@ -74,15 +74,45 @@ The unchunked bundle also needs memory that grows with N:
   even with the whole card free. The sweep then falls back to the sparse
   layout, which gives the 2.27 s step.
 
-**Slot sizing costs a constant factor, and it is avoidable.** The bundle
-sizes `k_dense` and `max_edges` for rcut + skin: `k_dense` is 86 slots, while
-Cantor's coordination within rcut is 42. lammps-jax 4a7f4fb packs only pairs
-within the cutoff (`PackNeighborFunctor` checks `cutsq`). I tested this: a
-bundle whose `k_dense` and `max_edges` are sized for k(rcut) + 8 = 50 ran in
-LAMMPS at 256, 4k, 16k, 131k, 262k and 524k atoms with no capacity abort. The
-first-step energy was identical to the stock bundle's to all printed digits.
-This contradicts the Task 11 note (an overflow of 19968 = 256 × 78 edges).
-Either that run used an older lammps-jax, or something else differs.
+**Slot sizing costs a constant factor, but rcut-sized slots are not safe
+on the benchmark deck.** The bundle sizes `k_dense` and `max_edges` for
+rcut + skin: 86 slots, where Cantor's coordination within rcut = 5.0 Å is 42
+on the lattice. The bundle's `contract.cutoff` is 5.0 for the ACE and PACE
+models alike, equal to the rcut `capacity` uses, so no pair basis reaches
+further. lammps-jax 4a7f4fb packs only pairs within the cutoff
+(`PackNeighborFunctor` rejects `d² > cutsq`). A bundle with k(rcut) + 8 = 50
+slots therefore runs, and it is 1.5× faster. It ran on short runs (60 steps)
+at every size up to 524k atoms.
+
+The Task 11 overflows were still real. On the benchmark deck (50 warm-up plus
+200 timed steps, `bench/perf/results/bundle_scaling_lammps_task11*.json`):
+
+- `acejax-ace/Cantor/small` and `acejax-pace/Cantor/medium` at 256 atoms
+  finished with 50 slots.
+- `acejax-ace/Cantor/large` at 256 atoms aborted at step 175–180 with
+  "global max 19968 edges, capacity 14100", the Task 11 message.
+
+The cause is the models, not skin pairs:
+
+- **The benchmark structures collapse.** The deck starts from a perfect
+  lattice with no velocities. Random species give nonzero forces, and these
+  models drive the atoms together. For ACE Cantor large, the potential energy
+  falls from −355 to −609 eV over 250 steps. The largest coordination within
+  rcut, from `compute coord/atom`, rises from 42 to 50. For ACE Cantor small
+  it rises from 42 to 48 by step 250, and is still rising. There were no
+  neighbour-list rebuilds.
+- **Once one atom passes k_dense, the step fails as designed.** The energy
+  function returns NaN energies and forces, so positions go NaN.
+- **NaN distances then pass lammps-jax's cutoff test.** `d² > cutsq` is false
+  for NaN, so the next pack keeps every listed pair: 19968 = 256 × 78, which
+  is exactly LAMMPS's "Total # of neighbors", the rcut + skin list.
+
+The N × 78 count in every Task 11 failure is therefore the list size seen
+through NaN positions. It is not evidence that skin pairs are packed. I
+inferred the NaN step from the code: thermo was every 5 steps, and the NaN
+itself never reached a thermo line. I did not re-run PACE Cantor large at 16k
+atoms. Its energy fell the same way (718 to 282 eV), so it is probably the
+same mechanism.
 
 **Ruled out as the decline's cause:**
 
@@ -101,7 +131,7 @@ The chunked bundle removes that gap too.
 End to end in LAMMPS, 60 steps, identical first-step energies
 (`bundle_scaling_lammps_*.json`). Numbers are atom-steps/s.
 
-| model, atoms | stock | chunked | chunked + rcut slots |
+| model, atoms | stock | chunked (safe) | chunked + rcut slots (not safe on this deck) |
 |---|---|---|---|
 | PACE 16k | 1.13M | 1.13M | **1.77M** (1.56×) |
 | PACE 131k | 0.88M | 1.12M (1.27×) | **1.81M** (2.06×) |
@@ -134,16 +164,27 @@ End to end in LAMMPS, 60 steps, identical first-step energies
      ACE runs out of memory.
    - Chunking also lets `layout="auto"` stop falling back to sparse on memory
      grounds, as the calculator already does.
-2. **Size slots for rcut** in `bench/scaling/run_lammps.py::capacity`: set
-   `k_dense` = k(rcut) + margin, and set `max_edges` from that. This undoes
-   the Task 11 change. Before relying on it, reconcile it with the Task 11
-   overflow.
+2. **Keep slots at k(rcut + skin) + 8 for the benchmark**, where the
+   structures collapse. On that deck, coordination within rcut grows by 8 or
+   more within 250 steps. The rcut + skin list count is the natural bound:
+   between rebuilds, no atom can have more neighbours within rcut than its
+   list holds. So the safe gain today is chunking alone:
+   - PACE: 1.27× at 131k atoms and 1.68× at 262k;
+   - ACE: 2.75× at 65k and 7.7× at 131k.
+3. **For a stable MD deck**, a thermalised crystal or liquid, k(rcut) plus
+   about 20% would give the further 1.5×. The risk is an overflow, which
+   aborts the run rather than truncating. That trade-off belongs to the user,
+   not the default.
+4. **Upstream, lammps-jax should test `!(d² <= cutsq)`**, so NaN pairs are
+   dropped. With the current test, a NaN step is reported as an edge-capacity
+   overflow at the full list size. That report is what misled Task 11.
 
 ## Gaps in the evidence
 
-- All runs are 60 steps on a perfect lattice with zero velocity. Thermal
-  motion changes the coordination within rcut. The +8 margin is untested in
-  real MD, where an overflow gives NaN rather than a silent error.
+- The speed-up runs are 60 steps, too short for the benchmark structures to
+  collapse. The chunked + rcut-slot column is therefore a best case. On the
+  full benchmark deck, rcut-sized slots overflow for ACE Cantor large; see
+  above.
 - Only Cantor medium was measured.
 - The synthetic inputs are slightly pessimistic for chunked bundles at large
   N: 134 against 117 ms in LAMMPS for PACE at 131k. Atom ordering is the

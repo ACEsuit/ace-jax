@@ -83,13 +83,14 @@ def main(tag: str = "scaling", only: str = "", order: str = "interleaved", cases
 
 
 @app.function(gpu="A100-80GB", timeout=3600)
-def lammps_case(model: str, n: int, variant: str, steps: int = 50, warmup: int = 10):
+def lammps_case(model: str, n: int, variant: str, steps: int = 50, warmup: int = 10,
+                thermo: int = 50):
     import os
     import subprocess
     # export on the CPU: the exporting process then holds no GPU pool while LAMMPS runs
     p = subprocess.run([sys.executable, "/ace-jax/bench/perf/lammps_bundle_variant.py", model,
                         str(n), "--variant", variant, "--steps", str(steps), "--warmup",
-                        str(warmup), "--work", f"/tmp/lbv_{variant}"],
+                        str(warmup), "--thermo", str(thermo), "--work", f"/tmp/lbv_{variant}"],
                        capture_output=True, text=True, timeout=3500,
                        env={**os.environ, **ENV, "JAX_PLATFORMS": "cpu"})
     rows = [json.loads(l) for l in p.stdout.splitlines() if l.startswith("{")]
@@ -99,12 +100,16 @@ def lammps_case(model: str, n: int, variant: str, steps: int = 50, warmup: int =
 
 @app.local_entrypoint()
 def lammps(model: str = "pace_Cantor_medium", ns: str = "16384,131072",
-           variants: str = "stock,chunked", tag: str = "lammps", steps: int = 50):
-    jobs = [(model, int(n), v, steps) for n in ns.split(",") for v in variants.split(",")]
+           variants: str = "stock,chunked", tag: str = "lammps", steps: int = 50,
+           warmup: int = 10, thermo: int = 50):
+    jobs = [(m, int(n), v, steps, warmup, thermo) for m in model.split(",")
+            for n in ns.split(",") for v in variants.split(",")]
     rows = list(lammps_case.starmap(jobs))
     for r in rows:
         print(r.get("model", model), r.get("n_atoms", r.get("n")), r.get("variant"),
               r.get("status"), r.get("step_s"), r.get("atom_steps_per_s"), r.get("pe"),
+              r.get("contract_cutoff"), r.get("contract_max_edges"), r.get("neigh"),
+              (r.get("thermo") or [[None]])[-1][0], r.get("log_errors"),
               r.get("error", "")[:300] if r.get("status") != "ok" else "")
     OUT.mkdir(exist_ok=True)
     path = OUT / f"bundle_scaling_{tag}.json"
