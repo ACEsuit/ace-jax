@@ -462,30 +462,40 @@ def microbench(which: str = "", dtype: str = "float64", tag: str = ""):
 
 
 @app.function(gpu="A100-80GB", timeout=3600)
-def microbench_ab_remote(argvs: list):
-    """Each case at the merge base (/ace-jax-base/src) then at HEAD (/ace-jax/src),
-    each in its own process, all on ONE GPU."""
+def microbench_ab_remote(argvs: list, rounds: int = 1):
+    """Each case at the merge base (/ace-jax-base/src) and at HEAD (/ace-jax/src),
+    each in its own process, all on ONE GPU.  With rounds > 1 the order
+    alternates per round (before, after, after, before, ...) to cancel drift;
+    every run lands in out[which] with its "round"."""
     import subprocess
     gpu = subprocess.run("nvidia-smi --query-gpu=name --format=csv,noheader", shell=True,
                          capture_output=True, text=True).stdout.strip()
     out = {"before": [], "after": [], "gpu": gpu}
+    order = (("before", "/ace-jax-base/src"), ("after", "/ace-jax/src"))
     for argv in argvs:
-        for which, src in (("before", "/ace-jax-base/src"), ("after", "/ace-jax/src")):
-            p = _sh(["python"] + argv, cwd="/ace-jax",
-                    env={"PYTHONPATH": f"/ace-jax/bench:{src}"})
-            try:
-                out[which].append(json.loads(p.stdout.strip().splitlines()[-1]))
-            except Exception:                                      # noqa: BLE001
-                out[which].append({"argv": argv, "error": p.stdout[-1500:] + p.stderr[-3000:]})
+        for rnd in range(rounds):
+            for which, src in (order if rnd % 2 == 0 else order[::-1]):
+                p = _sh(["python"] + argv, cwd="/ace-jax",
+                        env={"PYTHONPATH": f"/ace-jax/bench:{src}"})
+                try:
+                    r = json.loads(p.stdout.strip().splitlines()[-1])
+                except Exception:                                  # noqa: BLE001
+                    r = {"argv": argv, "error": p.stdout[-1500:] + p.stderr[-3000:]}
+                r["round"] = rnd
+                out[which].append(r)
     return out
 
 
 @app.local_entrypoint()
-def microbench_ab(dtype: str = "float64", tag: str = ""):
+def microbench_ab(dtype: str = "float64", tag: str = "", models: str = "", ns: str = "",
+                  reps: int = 30, rounds: int = 1):
     """`microbench` before and after on the same A100 (A100-80GB may be SXM4 or
     PCIe, which differ by ~15%):
         BENCH_BASE_SRC=<merge-base worktree> uv run --with modal modal run \\
-            bench/perf/modal_profile.py::microbench_ab"""
+            bench/perf/modal_profile.py::microbench_ab
+    `models` (e.g. pace_Cantor_small.yace,pace_SiGe_small.yace) x `ns` replaces
+    the default MICROBENCH cases; `rounds` > 1 repeats each case, alternating
+    the before/after order per round."""
     import os
     import subprocess
     base = os.environ.get("BENCH_BASE_SRC")
@@ -493,17 +503,19 @@ def microbench_ab(dtype: str = "float64", tag: str = ""):
         raise SystemExit("set BENCH_BASE_SRC to a worktree of the merge base")
     commit = lambda root: subprocess.run(["git", "-C", root, "rev-parse", "HEAD"],
                                          capture_output=True, text=True).stdout.strip()
+    cases = ([(m, int(n), reps) for m in models.split(",") for n in ns.split(",")]
+             if models else MICROBENCH)
     argvs = [["bench/perf/microbench.py", "time", f"/ace-jax/bench/scaling/models/{m}",
-              _system(m.split("_", 1)[1]), str(n), "--dtype", dtype, "--reps", str(reps)]
-             for m, n, reps in MICROBENCH]
-    res = microbench_ab_remote.remote(argvs)
+              _system(m.split("_", 1)[1]), str(n), "--dtype", dtype, "--reps", str(r)]
+             for m, n, r in cases]
+    res = microbench_ab_remote.remote(argvs, rounds)
     for which, root in (("before", base), ("after", str(HERE.parents[1]))):
         _save(f"microbench_{which}{tag}.json", {"which": which, "src_commit": commit(root),
                                                 "gpu": res["gpu"], "same_container": True,
-                                                "rows": res[which]})
+                                                "rounds": rounds, "rows": res[which]})
         for r in res[which]:
             print(which, json.dumps({k: r.get(k) for k in (
-                "model", "n", "skin", "status", "model_s", "step_s", "call_s",
+                "model", "n", "round", "skin", "status", "model_s", "step_s", "call_s",
                 "call_atom_steps_per_s", "rebuilds", "error")}))
 
 
