@@ -78,11 +78,23 @@ def init_density(cfg, mask, P, seed=0):
     return jnp.asarray(H)
 
 
-def relative_lambda_eta(lam_eta, r0, n):
-    """Absolute density-prior weight lam_eta * r0 / n, n = P * NZ densities."""
+def relative_lambda_eta(lam_eta, r0, pen0):
+    """Absolute density-prior weight lam_eta * r0 / pen0 (0 for lam_eta = 0),
+    pen0 = sum_{p,z} ||Gamma_m * eta0_{p,z}||^2 at the normalised init eta0 =
+    normalise_rho(H0, S) -- the analogue of `relative_lambda`'s r0/rough0
+    ratio, but normalised against the penalty's own scale rather than an
+    arbitrary count of densities (that count leaves the penalty
+    unnormalised: on a real prior_diagonal the penalty at init can be many
+    orders of magnitude above r0).  Raises if the init is (numerically)
+    penalty-free, where the relative weight would be effectively infinite."""
     if lam_eta < 0:
         raise ValueError(f"lam_eta must be >= 0, got {lam_eta}")
-    return float(lam_eta) * r0 / n if lam_eta else 0.0
+    if not lam_eta:
+        return 0.0
+    if pen0 < 1e-12 * max(abs(r0), 1.0):
+        raise ValueError(f"relative lam_eta={lam_eta:g} is undefined: the density penalty at "
+                         f"the init pen0={pen0:.3e} is ~0 relative to r0={r0:.3e}; use lam_eta=0")
+    return float(lam_eta) * r0 / pen0
 
 
 def _pack(V, H, r, block):
@@ -134,12 +146,16 @@ def learn_radial_density(prob, ds, W0, *, mask, P=1, H0=None, mode="joint", thet
                          seed=0, log=None, Q=None, D2=None, U=None, S=None, r0=None):
     """VarPro-learn radials W and P density weights eta jointly (M = 0).  Same
     round structure, relative priors and stopping rules as radial_learn.learn_radial;
-    lam_eta is relative too (relative_lambda_eta).  mode "joint" optimises
-    [V; H] together, "alternating" spends each round's steps half on V (H
-    fixed) then half on H.  Q, D2, U as learn_radial; S = rho_gram at the
-    normalised init (computed when None); r0 = the widened projected residual at
-    the start (computed when None; only valid with theta0).  Returns
-    (V, eta, info), both normalised; steps = 0 returns the normalised init."""
+    lam_eta is relative too: lam_eta_abs = lam_eta * r0 / pen0, pen0 = sum
+    ||Gamma_m * eta0||^2 at the normalised init eta0 = normalise_rho(H0, S)
+    (relative_lambda_eta).  mode "joint" optimises [V; H] together,
+    "alternating" spends each round's steps half on V (H fixed) then half on
+    H.  Q, D2, U as learn_radial; S = rho_gram at the normalised init
+    (computed when None); r0 = the widened projected residual at the start
+    (computed when None; only valid with theta0).  H0, when given, is masked
+    (H0 * mask) before normalisation, so a caller cannot smuggle weight
+    outside the span.  Returns (V, eta, info), both normalised; steps = 0
+    returns the normalised init."""
     require_x64()
     require_analytic(prob.model)
     require_linear(prob)
@@ -168,7 +184,8 @@ def learn_radial_density(prob, ds, W0, *, mask, P=1, H0=None, mode="joint", thet
     W_ref, sw = V, spectral_weights(n_q, spec_p)
     if S is None:
         S = rho_gram(prob.model, V, mask, cfg, ds)
-    H = normalise_rho(init_density(cfg, mask, P, seed) if H0 is None else jnp.asarray(H0, jnp.float64), S)
+    H = normalise_rho(init_density(cfg, mask, P, seed) if H0 is None
+                      else jnp.asarray(H0, jnp.float64) * mask, S)
     gc = compact_gamma(prob.gamma, cfg)
     stats = lambda V_, H_: linear_density_statistics(with_radial(prob.model, V_), normalise_rho(H_, S), mask, cfg, ds)
     lin0 = None
@@ -187,13 +204,15 @@ def learn_radial_density(prob, ds, W0, *, mask, P=1, H0=None, mode="joint", thet
     n_active = int(jnp.sum(active))
     lam_spec_abs = relative_lambda_spec(lam_spec, r0, n_active)
     lam_gap_abs = relative_lambda_gap(lam_gap, r0, n_active)
-    lam_eta_abs = relative_lambda_eta(lam_eta, r0, P * cfg.NZ)
+    pen0 = float(jnp.sum((gc[None] * H) ** 2))
+    lam_eta_abs = relative_lambda_eta(lam_eta, r0, pen0)
     info = {"trace": [], "reasons": [], "round_lengths": [], "theta": [np.asarray(a)], "precond": [],
             "r0": r0, "lam_abs": lam, "lam_spec_abs": lam_spec_abs, "lam_gap_abs": lam_gap_abs,
-            "lam_eta": float(lam_eta), "lam_eta_abs": lam_eta_abs, "P": int(P), "mode": mode, "steps": 0}
+            "lam_eta": float(lam_eta), "lam_eta_abs": lam_eta_abs, "pen0": pen0,
+            "P": int(P), "mode": mode, "steps": 0}
     if log is not None:
         log(f"learn_radial_density: P={P} mode={mode} lam_eta={float(lam_eta):g} "
-            f"lam_eta_abs={lam_eta_abs:.6e} r0={r0:.6e}")
+            f"lam_eta_abs={lam_eta_abs:.6e} pen0={pen0:.6e} r0={r0:.6e}")
     f64 = lambda v: jnp.asarray(v, jnp.float64)
     shapes = (tuple(V.shape), tuple(H.shape))
     one = f64([1.0, 1.0])
@@ -246,10 +265,21 @@ def fit_radial_density(prob, ds_fit, ds_val, W0, *, mask, P=1, mode="joint", lam
     with sigma from a0) on its own design width -- so density is kept only when
     it wins on held-out data; ties go to the earlier, simpler candidate.
     Returns (W, eta or None, info); info["readout"] is the selected readout,
-    [c | d] (len_basis + P * NZ) for a density candidate."""
+    [c | d] (len_basis + P * NZ) for a density candidate.  info["readouts"] and
+    info["etas"] give every candidate's readout / eta (label -> array or, for
+    etas, None on a non-density candidate) and info["cands_W"] every
+    candidate's radials, so a caller (bench/learn_radial/run.py) can write a
+    model.npz per candidate, not just the selected one."""
     require_x64()
     require_analytic(prob.model)
     require_linear(prob)
+    if mode not in MODES:
+        raise ValueError(f"mode must be one of {MODES}, got {mode!r}")
+    if P < 1:
+        raise ValueError(f"P must be >= 1 (P = 0 is radial_learn.learn_radial), got {P}")
+    for l in lam_eta_grid:
+        if l < 0:
+            raise ValueError(f"lam_eta must be >= 0, got {l}")
     if learn_kw.pop("learn_sigma_e_mult", 1.0) != 1.0:
         raise ValueError("fit_radial_density: learn_sigma_e_mult is not supported with a density")
     cfg = prob.cfg
@@ -297,7 +327,10 @@ def fit_radial_density(prob, ds_fit, ds_val, W0, *, mask, P=1, mode="joint", lam
     W_sel, eta_sel = cands[label]
     if log is not None:
         log(f"fit_radial_density: selected {label}")
+    cands_W = {k: np.asarray(w) for k, (w, _) in cands.items()}
+    etas = {k: (None if eta is None else np.asarray(eta)) for k, (_, eta) in cands.items()}
     return W_sel, eta_sel, {"selected": label, "scores": scores, "theta_fit": theta_fit, "map_diag": map_diag,
                             "runs": runs, "theta_init": np.asarray(a0), "readout": readouts[label],
+                            "readouts": readouts, "etas": etas, "cands_W": cands_W,
                             "P": 0 if eta_sel is None else int(P), "mask": np.asarray(mask).tolist(),
                             "mode": mode}

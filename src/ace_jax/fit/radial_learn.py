@@ -464,8 +464,14 @@ def _gate_setup(prob, ds_fit, W0, *, theta0, map_steps, need_U, n_prior=None):
     D2, the uniform-in-r Gram U (only when need_U, via one extra data_r_range pass;
     None otherwise), the normalised init W_init, the common theta a0 (theta0 if
     given, else the theta-MAP at W_init), its linear statistics lin0 (so a caller can
-    reuse them), and the projected residual r0 = r(W_init; a0) -- the reference every
-    candidate's relative priors and (for fit_radial_density) lam_eta are scaled from.
+    reuse them), and the projected residual r0 = r(W_init; a0).  fit_radial passes
+    this r0 to every learn_radial call, so it is the shared reference for every
+    candidate's relative lam_rough/spec/gap there.  fit_radial_density passes it
+    only to its "radials_only" candidate (plain learn_radial); its density
+    candidates do NOT receive it and instead recompute their own r0 inside
+    learn_radial_density -- the widened projected residual at (V, H) init, which
+    differs from this one (it includes the density columns) -- and scale their
+    priors, including lam_eta_abs = lam_eta * r0_widened / pen0, from that.
     Returns (Q, D2, U, W_init, a0, lin0, r0)."""
     Q = radial_gram(prob.model, ds_fit) if n_prior is None else radial_gram(prob.model, ds_fit, n_prior=n_prior)
     D2 = roughness_matrix(prob.model)
@@ -645,6 +651,9 @@ def save_result(out_dir, W, info, *, src_npz=None, model=None, readout=None, eta
             eta = np.asarray(eta)
             k = eta.shape[0] * eta.shape[1]
             readout = np.asarray(readout)
+            if readout.size <= k:
+                raise ValueError(f"save_result: readout has {readout.size} values, not enough for "
+                                 f"eta's P * NZ = {k} density columns plus a nonempty linear part")
             fs = (eta, readout[-k:].reshape(eta.shape[0], eta.shape[1]), np.asarray(mask), EPS)
             readout = readout[:-k]
         patch_radial_npz(src_npz, out / "model.npz", with_radial(model, W), readout=readout, fs=fs)

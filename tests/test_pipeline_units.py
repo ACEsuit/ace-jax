@@ -321,3 +321,25 @@ def test_fitting_a_yace_model_raises_a_clear_error():
     cfg = FitConfig(model=str(fix / "gesi_sbessel.yace"), arm="linear")
     with pytest.raises(ValueError, match=r"\.yace.*cannot be fitted"):
         load_fit_data(cfg, train=str(pathlib.Path(__file__).parent.parent / "fixtures" / "si_tiny_train.xyz"))
+
+
+def test_fitting_an_fsmodel_raises_a_clear_error(tmp_path):
+    """I3: a model with a frozen density term (fs_* keys, eval.fs_model.FSModel,
+    from bench/learn_radial/run.py --density) used to die with AttributeError
+    (edge_jacobian_dense) deep in the GP/UQ pipeline, since FSModel has none of
+    that machinery -- it belongs to the base model.  load_fit_data raises a clear
+    error instead, next to the PACEModel guard above."""
+    from conftest import FIXTURE_DIR
+    from ace_jax.construct.export import patch_radial_npz
+    from ace_jax.eval import load
+    from ace_jax.fit.pipeline import FitConfig
+    from ace_jax.fit.pipeline.data import load_fit_data
+    model_path = FIXTURE_DIR / "si_ace_model.npz"
+    base, meta, _ = load(model_path)
+    NZ, D = len(meta["elements"]), meta["n_B"] + meta["n_pair"]
+    fs_npz = tmp_path / "fs.npz"
+    patch_radial_npz(model_path, fs_npz, base,
+                     fs=(1e-2 * np.ones((1, NZ, D)), np.ones((1, NZ)), np.ones(D), 1e-6))
+    cfg = FitConfig(model=str(fs_npz), arm="linear")
+    with pytest.raises(ValueError, match="frozen density term"):
+        load_fit_data(cfg, train=str(FIXTURE_DIR / "si_tiny_train.xyz"))

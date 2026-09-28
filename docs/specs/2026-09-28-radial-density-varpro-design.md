@@ -124,7 +124,7 @@ The objective is the VarPro projected residual `projected_residual_from_stats` o
 - the existing radial priors (roughness, spectral, gap);
 - `λ_η Σ_{p,z} ‖Γ_m ⊙ η_{p,z}‖²`, where Γ_m is Γ restricted to the mask. It penalises density weight on rough, high-degree functions.
 
-Both are scaled relative to r0, as the radial priors are.
+Both are scaled relative to r0, as the radial priors are: relative: `lam_eta * r0 / pen0` at the init, `pen0 = Σ_{p,z} ‖Γ_m ⊙ η0_{p,z}‖²` at the normalised init η0 = normalise_ρ(H0, S) -- not a plain count of densities, since the raw penalty's scale depends on Γ and is generally nowhere near r0's.
 
 ### Preconditioner
 

@@ -54,10 +54,14 @@ def load_fit_data(cfg, *, data=None, train=None, test=None, ood=None):
     if (data is None) == (train is None):
         raise ValueError("pass exactly one of data= (split) or train= (+ test=)")
     model, meta, z = load(cfg.model)
+    from ...eval.fs_model import FSModel
     from ...eval.pace_model import PACEModel
     if isinstance(model, PACEModel):
         raise ValueError(f"{cfg.model}: a PACE .yace model is evaluate-only and cannot be fitted; "
                          "fit a linear ACE model (.npz, e.g. from `aj construct`) instead")
+    if isinstance(model, FSModel):
+        raise ValueError(f"{cfg.model}: a model with a frozen density term (fs_* keys) cannot be "
+                         "refitted by the GP/UQ pipeline yet; fit the base model")
     keys = dict(energy_key=cfg.energy_key, force_key=cfg.force_key, virial_key=cfg.virial_key)
     if cfg.factors:
         keys["factors"] = cfg.factors

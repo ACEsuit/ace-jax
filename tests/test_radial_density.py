@@ -381,6 +381,52 @@ def test_learn_radial_density_rejects_bad_options(small):
         learn_radial_density(prob, ds, prob.model.rnl_Wnlq, mask=mask, lam_eta=-1.0, theta0=THETA, steps=1)
 
 
+def test_lam_eta_relative_to_pen0(small):
+    """I1: lam_eta_abs = lam_eta * r0 / pen0, pen0 = sum ||Gamma_m * eta0||^2 at the
+    normalised init -- not r0 / (P * NZ), which leaves the penalty unnormalised."""
+    from ace_jax.fit.density import density_mask
+    from ace_jax.fit.radial_density import learn_radial_density
+    prob, ds, _ = small
+    mask = density_mask(prob.cfg, "full")
+    V, eta, info = learn_radial_density(prob, ds, prob.model.rnl_Wnlq, mask=mask, P=2, lam_eta=1e-2,
+                                        theta0=THETA, profile=False, steps=0)
+    assert info["pen0"] > 0
+    np.testing.assert_allclose(info["lam_eta_abs"], info["lam_eta"] * info["r0"] / info["pen0"], rtol=1e-12)
+
+
+def test_learn_radial_density_masks_user_h0(small):
+    """M5: a user-supplied H0 is masked (H0 * mask) before normalisation, so weight
+    a caller puts outside the density span cannot leak into eta."""
+    from ace_jax.fit.density import density_mask
+    from ace_jax.fit.radial_density import learn_radial_density
+    prob, ds, _ = small
+    mask = density_mask(prob.cfg, "pair")
+    H0 = jnp.ones((2, prob.cfg.NZ, prob.cfg.D))          # nonzero everywhere, including off the mask
+    V, eta, info = learn_radial_density(prob, ds, prob.model.rnl_Wnlq, mask=mask, P=2, H0=H0,
+                                        theta0=THETA, profile=False, steps=0)
+    off_mask = np.asarray(mask) == 0
+    assert off_mask.any()
+    assert np.all(np.asarray(eta)[:, :, off_mask] == 0.0)
+
+
+def test_fit_radial_density_validates_before_radials_only_run(monkeypatch):
+    """M2: P, mode and lam_eta_grid are validated at the top of fit_radial_density,
+    before the (potentially expensive) radials_only learn_radial run."""
+    import ace_jax.fit.radial_density as rd
+    from ace_jax.fit.density import density_mask
+    prob, ds_fit, _ = make_problem(ncfg=6, per_batch=3, start=0)
+    _, ds_val, _ = make_problem(ncfg=6, start=6)
+
+    def boom(*a, **k):
+        raise AssertionError("learn_radial must not run before P/mode/lam_eta validation")
+
+    monkeypatch.setattr(rd, "learn_radial", boom)
+    mask = density_mask(prob.cfg, "full")
+    with pytest.raises(ValueError, match="P"):
+        rd.fit_radial_density(prob, ds_fit, ds_val, prob.model.rnl_Wnlq, mask=mask, P=0,
+                              theta0=THETA, steps=1)
+
+
 def test_fit_radial_density_gate_prefers_density_on_density_data():
     from ace_jax.fit.radial_density import fit_radial_density
     prob, ds_fit, _ = make_problem(ncfg=12, per_batch=3, start=0)
@@ -473,25 +519,58 @@ def test_save_result_eta_without_mask_raises(tmp_path):
         save_result(tmp_path, np.zeros(3), {}, eta=np.zeros((1, 2, 3)))
 
 
-def _driver(tmp_path, *extra, model=MODEL):
+def test_save_result_eta_readout_too_short_raises(tmp_path):
+    """M4: a readout that is only long enough for the linear part (a caller that
+    forgot to append the P * NZ density columns) raises a clear ValueError before
+    the silent-wrong-split that readout[-k:]/[:-k] would otherwise do."""
+    from ace_jax.eval import load
+    from ace_jax.fit.radial_learn import save_result
+    model, meta, _ = load(MODEL)
+    NZ, D = len(meta["elements"]), meta["n_B"] + meta["n_pair"]
+    len_basis = D * NZ
+    P = len_basis                     # P * NZ >= len_basis: readout has no room left over
+    eta = np.zeros((P, NZ, D))
+    readout = np.zeros(len_basis)     # the plain linear-only length
+    with pytest.raises(ValueError, match="readout"):
+        save_result(tmp_path, model.rnl_Wnlq, {}, src_npz=MODEL, model=model, eta=eta,
+                   mask=np.ones(D), readout=readout)
+
+
+def _driver(tmp_path, *extra, model=MODEL, lam_grid="0"):
+    """lam_grid=None omits --lam-grid entirely, exercising run.py's own default
+    resolution (I2: "0,1e-2" without --density, "1e-2" with --density)."""
     import subprocess, sys
     from conftest import ROOT
-    return subprocess.run(
-        [sys.executable, str(ROOT / "bench/learn_radial/run.py"), "--model", str(model),
-         "--data", str(XYZ), "--energy-key", "dft_energy", "--force-key", "dft_force",
-         "--virial-key", "dft_virial", "--ntrain", "8", "--nval", "8", "--batch", "4",
-         "--n-q", "20", "--steps", "3", "--lam-grid", "0", "--map-steps", "20",
-         "--out", str(tmp_path), *extra], capture_output=True, text=True)
+    args = [sys.executable, str(ROOT / "bench/learn_radial/run.py"), "--model", str(model),
+            "--data", str(XYZ), "--energy-key", "dft_energy", "--force-key", "dft_force",
+            "--virial-key", "dft_virial", "--ntrain", "8", "--nval", "8", "--batch", "4",
+            "--n-q", "20", "--steps", "3", "--map-steps", "20"]
+    if lam_grid is not None:
+        args += ["--lam-grid", lam_grid]
+    args += ["--out", str(tmp_path), *extra]
+    return subprocess.run(args, capture_output=True, text=True)
 
 
 def test_bench_driver_density_smoke(tmp_path):
     import json, subprocess, sys
     from conftest import ROOT
+    from ace_jax.eval import load
+    from ace_jax.eval.fs_model import FSModel
     r = _driver(tmp_path, "--density", "full", "--P", "1")
     assert r.returncode == 0, r.stderr[-3000:]
     s = json.loads((tmp_path / "summary.json").read_text())
     assert s["density"] == "full" and s["selected"] in s["scores"] and "radials_only" in s["scores"]
     assert (tmp_path / "model.npz").exists()
+    # M3: every non-init candidate gets its own model.npz, not just the selected one.
+    ro_npz = tmp_path / "radials_only" / "model.npz"
+    assert ro_npz.exists()
+    m_ro, _, _ = load(ro_npz)
+    assert not isinstance(m_ro, FSModel)
+    dens_dirs = sorted(tmp_path.glob("density_lam_eta=*"))
+    assert dens_dirs
+    for d in dens_dirs:
+        m_d, _, _ = load(d / "model.npz")
+        assert isinstance(m_d, FSModel)
     r2 = subprocess.run([sys.executable, str(ROOT / "bench/learn_radial/rmse_npz.py"), "--model", str(MODEL),
                          "--data", str(XYZ), "--energy-key", "dft_energy", "--force-key", "dft_force",
                          "--virial-key", "dft_virial", "--ntrain", "8", "--nval", "8",
@@ -503,9 +582,18 @@ def test_bench_driver_density_smoke(tmp_path):
     assert np.isfinite(row["E_rmse_meV_atom"]) and np.isfinite(row["F_rmse_meV_A"])
 
 
+def test_bench_driver_density_default_lam_grid(tmp_path):
+    """I2: --density with no --lam-grid at all uses run.py's own single-valued
+    default ("1e-2") rather than the plain default ("0,1e-2"), which would trip
+    the single-valued-grid check and exit immediately."""
+    r = _driver(tmp_path, "--density", "full", "--P", "1", lam_grid=None)
+    assert r.returncode == 0, r.stderr[-3000:]
+
+
 def test_bench_driver_density_rejects_grids(tmp_path):
     r = _driver(tmp_path, "--density", "full", "--spec-grid", "0,1e-5")
     assert r.returncode != 0 and "single-valued" in (r.stderr + r.stdout)
+    assert "pass a single --lam-grid value" in (r.stderr + r.stdout)
 
 
 def test_bench_driver_unwraps_density_model(tmp_path):
@@ -530,3 +618,70 @@ def test_fit_radial_density_checkpoints(tmp_path, small):
                        P=1, lam_eta_grid=(0.0, 1e-2), theta0=THETA, profile=False, steps=2, map_steps=20,
                        checkpoint=lambda k, W, eta, info: seen.append((k, eta is None)))
     assert seen == [("radials_only", True), ("density_lam_eta=0", False), ("density_lam_eta=0.01", False)]
+
+
+def test_multi_species_density_roundtrip(tmp_path):
+    """M6: a genuinely mixed-species SiGe basis (each si_tiny dimer config with one
+    atom relabelled Ge, so both species interact within the same config, not just
+    across the dataset).  The FSModel's density term is exactly
+    density_rows_masked(...).E @ d (E0 cancels between FS and its base), and a
+    save_result -> load round trip reproduces [c | d] rows @ readout + E0."""
+    from ace_jax.eval import load
+    from ace_jax.eval.fs_model import FSModel
+    from ace_jax.fit.data import build_dataset, load_configs
+    from ace_jax.fit.density import density_mask, density_rows_masked
+    from ace_jax.fit.inducing import GPConfig
+    from ace_jax.fit.radial_learn import save_result
+    from ace_jax.fit.radial_model import to_analytic
+    from ace_jax.fit.rows import linear_rows
+    sige_npz = FIXTURE_DIR / "sige_nofit.npz"
+    spline, meta, z = load(sige_npz)
+    model, _ = to_analytic(spline, 12)
+    configs = load_configs(XYZ, "dft_energy", "dft_force", "dft_virial")[1:7]      # 6 Si2 dimers
+    rng = np.random.default_rng(7)
+    mixed = []
+    for c in configs:
+        numbers = np.array(c.numbers, copy=True)
+        idx = rng.choice(len(numbers), size=max(1, len(numbers) // 2), replace=False)
+        numbers[idx] = 32                                  # half the atoms of each config become Ge
+        assert set(numbers.tolist()) == {14, 32}            # genuinely mixed, not just absent-species
+        mixed.append(c._replace(numbers=numbers))
+    ds = build_dataset(mixed, meta, np.asarray(z["E0"]), configs_per_batch=3)
+    cfg = GPConfig(r0=2.35, rcut=float(meta["rcut"]), n_B=meta["n_B"], n_pair=meta["n_pair"],
+                   NZ=len(meta["elements"]), C=3)
+
+    P, mask = 2, density_mask(cfg, "full")
+    eta = jnp.asarray(rng.standard_normal((P, cfg.NZ, cfg.D))) * 1e-2 * mask
+    d = jnp.asarray(rng.standard_normal((P, cfg.NZ)))
+    c_lin = jnp.asarray(rng.standard_normal(cfg.len_basis)) * 1e-2
+    readout = jnp.concatenate([c_lin, d.reshape(-1)])
+
+    save_result(tmp_path, model.rnl_Wnlq, {"readout": readout}, src_npz=sige_npz, model=model,
+               eta=eta, mask=mask)
+    back, meta2, z2 = load(tmp_path / "model.npz")
+    assert isinstance(back, FSModel)
+    E0 = np.asarray(z2["E0"])
+
+    worst_fs, worst_rt = 0.0, 0.0
+    for i in range(ds.n_batches):
+        b = jax.tree.map(lambda a: a[i], ds)
+        C = b.y_E.shape[0]; Ncap, K = b.nbr.shape
+        zi = jnp.broadcast_to(b.node_z[:, None], (Ncap, K))
+        e_fs = back.site_energies_dense(b.rij, zi, b.node_z[b.nbr], b.nbr_mask, b.node_z)
+        e_base = back.base.site_energies_dense(b.rij, zi, b.node_z[b.nbr], b.nbr_mask, b.node_z)
+        E_fs = np.asarray(jax.ops.segment_sum(e_fs, b.node_cfg, num_segments=C + 1)[:C])
+        E_base = np.asarray(jax.ops.segment_sum(e_base, b.node_cfg, num_segments=C + 1)[:C])
+
+        _, X0, J0 = linear_rows(model, cfg, b)
+        dr = density_rows_masked(eta, mask, cfg, b, X0, J0)
+        dens_pred = np.asarray(dr.E @ d.reshape(-1))
+        assert np.abs(dens_pred).max() > 1e-8                     # the density term is live
+        worst_fs = max(worst_fs, float(np.max(np.abs((E_fs - E_base) - dens_pred))))
+
+        r = _widened_rows(model, cfg, b, eta, mask)
+        E0sum = np.asarray(jax.ops.segment_sum(jnp.where(b.node_mask, jnp.asarray(E0)[b.node_z], 0.0),
+                                               b.node_cfg, num_segments=C + 1)[:C])
+        E_lin = np.asarray(r.E @ readout) + E0sum
+        worst_rt = max(worst_rt, float(np.max(np.abs(E_fs - E_lin) / np.abs(E_lin))))
+    assert worst_fs < 1e-12
+    assert worst_rt < 1e-8
