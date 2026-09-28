@@ -113,3 +113,7 @@ def test_ard_checkpoint_survives_a_failure_in_prediction(tmp_path, monkeypatch):
     assert (tmp_path / "posterior.npz").exists() and (tmp_path / "ard.json").exists()
     assert ARDPosterior.load(tmp_path / "posterior.npz").kappa > 0
     assert json.load(open(tmp_path / "ard.json"))["mode"] == "joint"
+    # the ARD-mean model file too, so big-cell forces_std can run before prediction finishes
+    from ace_jax import ACECalculator
+    calc = ACECalculator(str(tmp_path / "model.npz"), posterior=str(tmp_path / "posterior.npz"))
+    assert calc.posterior is not None                    # the mean-vs-coefficients guard passed

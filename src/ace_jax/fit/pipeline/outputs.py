@@ -29,6 +29,8 @@ def _write_stage(out, name, payload):
             _dump(out / "nuts_summary.json", payload.info["nuts"])
     elif name == "ard":
         _write_ard(out, payload)
+    elif name == "model":
+        np.savez(out / "model.npz", **payload)
 
 
 def _write_ard(out, ard):
@@ -39,8 +41,8 @@ def _write_ard(out, ard):
 
 def checkpoint_writer(out):
     """An on_stage callback for fit(): writes split_perm.npy, theta_map.json,
-    map_restarts.json, draws_*.npy, laplace_info.json, and (uq "ard") posterior.npz and
-    ard.json as each stage finishes (the run.py layout), so they survive a failure in a
+    map_restarts.json, draws_*.npy, laplace_info.json, and (uq "ard") posterior.npz,
+    ard.json and the ARD-mean model.npz as each stage finishes (the run.py layout), so they survive a failure in a
     later stage."""
     out = pathlib.Path(out); out.mkdir(parents=True, exist_ok=True)
     return lambda name, payload: _write_stage(out, name, payload)

@@ -18,7 +18,7 @@ class FitResult(NamedTuple):
 def fit(cfg, data, log=print, on_stage=None):
     """Run the pipeline.  on_stage(name, payload), if given, is called as each
     expensive stage finishes ("data" -> FitData, "map" -> MapFit, "rungs" -> Rungs,
-    "ard" -> ARDResult when uq == "ard"),
+    "ard" -> ARDResult and "model" -> the ARD-mean model.npz arrays when uq == "ard"),
     so a driver can write those results before a later stage (e.g. POPS or
     prediction running out of memory) can lose them."""
     T0 = time.time()
@@ -44,6 +44,9 @@ def fit(cfg, data, log=print, on_stage=None):
             ard = run_ard_stage(cfg, data, b, mf.theta, log=log, full_stats=full)
             del full
             stage("ard", ard)
+            from .export import linear_arrays_from_mean, model_file_blocked
+            if model_file_blocked(cfg) is None:      # the ARD-mean model.npz, before prediction
+                stage("model", linear_arrays_from_mean(cfg, data.E0, b.prob.cfg, ard.posterior.mean))
         # cached linear statistics (run.py) or a full recompute per draw (the CLI's
         # historical path): equal in exact arithmetic, not in summation order
         stats = obj.stats if cfg.predict_stats == "cached" else None
