@@ -92,7 +92,7 @@ def nnll_from_coupling(A2B, aa_sig, tol=1e-12):
 def build_model(elements, order, totaldegree, *, wL=1.5, rcut=5.5, r0=None,
                 rin=0.0, radial_mode="glorot_normal", pair_mode="onehot",
                 seed=0, with_gamma=True, edge_a_kind="gather",
-                coupling_cache=True, coupling_cache_dir=None):
+                coupling_cache=True, coupling_cache_dir=None, n_q_factor=1.5):
     """Author a frozen `ace_model`-family model in memory.
 
     elements: atomic numbers or symbols (order kept, no duplicates); order:
@@ -106,10 +106,14 @@ def build_model(elements, order, totaldegree, *, wL=1.5, rcut=5.5, r0=None,
     Julia; a new shape runs the shim once and populates the cache.  Pass
     `coupling_cache=False` to always call the shim.
 
+    n_q_factor: tensor-radial polynomial span, n_q = ceil(n_q_factor * max n).
+
     Returns an `Authoring`.  Requires the `authoring` extra (Julia coupling
     shim) on a cache miss; evaluate in float64 with x64 enabled."""
     if edge_a_kind not in ("gather", "matmul"):
         raise ValueError(f'edge_a_kind must be "gather" or "matmul", got {edge_a_kind!r}')
+    if not n_q_factor >= 1:          # checked before the (possibly Julia) coupling step
+        raise ValueError(f"n_q_factor must be >= 1 (n_q >= max n), got {n_q_factor!r}")
     zs = ri.resolve_elements(elements)
     NZ = len(zs)
     mb, Rnl, Ylm = build_spec(NZ, order, totaldegree, wL)
@@ -127,7 +131,7 @@ def build_model(elements, order, totaldegree, *, wL=1.5, rcut=5.5, r0=None,
         raise AssertionError("nnll derivation disagrees with the ET dump")
 
     tinit = ri.tensor_radial_init(zs, Rnl, rcut=rcut, r0=r0, rin=rin,
-                                  mode=radial_mode, seed=seed)
+                                  mode=radial_mode, seed=seed, n_q_factor=n_q_factor)
     pair_maxn = totaldegree
     pinit = ri.pair_radial_init(zs, pair_maxn, rcut=rcut, r0=r0, rin=rin,
                                 mode=pair_mode, seed=seed)
@@ -215,6 +219,7 @@ def build_model(elements, order, totaldegree, *, wL=1.5, rcut=5.5, r0=None,
             "r0": tinit["rnl_transform"][:, :, 4].tolist(),      # (NZ, NZ) per pair
             "rin": float(rin), "radial_mode": radial_mode,
             "pair_mode": pair_mode, "seed": int(seed),
+            "n_q_factor": float(n_q_factor),
             "pair_maxn": int(pair_maxn), "with_gamma": bool(with_gamma),
         },
     }

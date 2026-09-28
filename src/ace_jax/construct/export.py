@@ -95,3 +95,48 @@ def save_npz(path, auth):
         out[f"aa_spec_{k+1}"] = np.asarray(spec, np.int32)
     out["meta_json"] = np.frombuffer(json.dumps(meta).encode(), np.uint8)
     np.savez(path, **out)
+
+
+def readout_to_npz(c, n_B, n_pair, NZ):
+    """Split a length-(n_B + n_pair) * NZ linear readout, species-blocked as
+    ACEModel.site_descriptors / fit.rows._place (all NZ B-blocks first, then
+    all NZ pair blocks), into the npz arrays WB (n_B, NZ), Wpair (n_pair, NZ):
+    e_i = B_i . WB[:, z_i] + Apair_i . Wpair[:, z_i] + E0[z_i]."""
+    c = np.asarray(c, np.float64)
+    if c.shape != ((n_B + n_pair) * NZ,):
+        raise ValueError(f"readout shape {c.shape} != ((n_B + n_pair) * NZ,) = ({(n_B + n_pair) * NZ},)")
+    WB = c[:NZ * n_B].reshape(NZ, n_B).T
+    Wpair = c[NZ * n_B:].reshape(NZ, n_pair).T
+    return np.ascontiguousarray(WB), np.ascontiguousarray(Wpair)
+
+
+def patch_radial_npz(src, dst, model, readout=None):
+    """Copy the npz at `src` to `dst` with the tensor radial replaced by
+    `model`'s analytic one (rnl_Wnlq + polys_A/B/C; any rnl spline arrays are
+    dropped and meta radial_kind/rnl_spline updated).  `readout`: the linear
+    readout fitted FOR these radials (length (n_B + n_pair) * NZ, species-
+    blocked; see readout_to_npz), written into WB/Wpair.  readout=None copies
+    WB/Wpair verbatim -- correct only when the radials are unchanged (e.g. an
+    exact branch conversion), stale otherwise.  Coupling, pair basis and E0
+    are always copied verbatim.  This is how a learned radial is written back
+    from a model that was loaded rather than authored (save_npz needs an
+    Authoring)."""
+    if model.radial_kind != "analytic":
+        raise ValueError(f"patch_radial_npz: model radial_kind {model.radial_kind!r} is not analytic")
+    with np.load(src, allow_pickle=False) as z:
+        out = {k: z[k] for k in z.files}
+    meta = json.loads(bytes(out["meta_json"]).decode())
+    for k in ("rnl_spline_coefs", "rnl_spline_coefs_single", "rnl_embedding",
+              "rnl_emb_nidx", "rnl_emb_kidx"):
+        out.pop(k, None)
+    out["rnl_Wnlq"] = np.asarray(model.rnl_Wnlq, np.float64)
+    out["polys_A"] = np.asarray(model.polys_A, np.float64)
+    out["polys_B"] = np.asarray(model.polys_B, np.float64)
+    out["polys_C"] = np.asarray(model.polys_C, np.float64)
+    if readout is not None:
+        (n_B, NZ), n_pair = out["WB"].shape, out["Wpair"].shape[0]
+        out["WB"], out["Wpair"] = readout_to_npz(readout, n_B, n_pair, NZ)
+    meta["radial_kind"] = "analytic"
+    meta["rnl_spline"] = None
+    out["meta_json"] = np.frombuffer(json.dumps(meta).encode(), dtype=np.uint8)
+    np.savez(dst, **out)
