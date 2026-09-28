@@ -4,6 +4,8 @@
         [--n-q 12] [--ntrain 200] [--steps 40] [--lam-grid 0,1e-2]
     uv run python bench/learn_radial/run.py --model M.npz --data D.xyz --out DIR \
         --density full --P 1 --lam-eta-grid 0,1e-2
+        # --lam-grid defaults to "0,1e-2" without --density, "1e-2" (single-valued,
+        # as --density requires) with --density; pass --lam-grid explicitly to override.
 
 A splined (Julia-exported) model is converted to the analytic branch first
 (to_analytic); an analytic one is widened to --n-q.  Writes DIR/model.npz (the
@@ -15,8 +17,11 @@ run finishes.  With --density (a frozen sqrt-density term learned jointly with
 the radials, gated against the plain radials-only fit; see
 docs/specs/2026-09-28-radial-density-varpro-design.md), checkpoints go instead
 to DIR/radials_only/ and DIR/density_lam_eta=<l>/, each with rnl_Wnlq.npy (and
-eta.npy for the density runs).  The residual GP / UQ fit then runs on
-DIR/model.npz as usual.
+eta.npy for the density runs).  Without a selected density (--density none, or
+gated away), the residual GP / UQ fit then runs on DIR/model.npz as usual; with
+one selected, DIR/model.npz carries a frozen FSModel density term that the
+GP/UQ pipeline cannot fit yet (fit/pipeline/data.py raises) -- fit the base
+model instead.
 """
 import argparse
 import json
@@ -49,7 +54,8 @@ p.add_argument("--seed", type=int, default=0); p.add_argument("--batch", type=in
 p.add_argument("--r0", type=float, default=2.35, help="hyperprior length scale (default_prior)")
 p.add_argument("--n-q", type=int, default=12, help="tensor-radial polynomial span after widening. 12 (a modest widening) optimises well and transfers to MD; 30 is ill-conditioned and learns only tiny high-frequency changes (docs/learn-radial-results.md)")
 p.add_argument("--steps", type=int, default=40); p.add_argument("--reprofile-every", type=int, default=20)
-p.add_argument("--lam-grid", default="0,1e-2", help="relative roughness weights")
+p.add_argument("--lam-grid", default=None, help="relative roughness weights; default '0,1e-2' without "
+               "--density, '1e-2' (single-valued, as --density requires) with --density")
 p.add_argument("--spec-grid", default="0", help="relative spectral-prior weights on the radial change; useful range ~1e-6..1e-4 at --spec-p 4 (see relative_lambda_spec)")
 p.add_argument("--spec-p", type=float, default=4.0, help="spectral prior degree power (1+q)^p")
 p.add_argument("--gap-grid", default="0", help="relative data-gap-prior weights on the radial change, measured under a uniform-in-r Gram rather than the empirical pair-distance density; useful range ~1..30 (see relative_lambda_gap)")
@@ -65,6 +71,8 @@ p.add_argument("--P", type=int, default=1, help="number of density features (wit
 p.add_argument("--density-mode", choices=["joint", "alternating"], default="joint")
 p.add_argument("--lam-eta-grid", default="0", help="relative density shape-prior weights (with --density)")
 a = p.parse_args()
+if a.lam_grid is None:
+    a.lam_grid = "1e-2" if a.density != "none" else "0,1e-2"
 
 t0 = time.time()
 out = pathlib.Path(a.out); out.mkdir(parents=True, exist_ok=True)
@@ -119,8 +127,8 @@ else:
     from ace_jax.fit.density import density_mask
     from ace_jax.fit.radial_density import fit_radial_density
     if max(len(lam_grid), len(spec_grid), len(gap_grid)) > 1:
-        raise SystemExit("--density needs single-valued --lam-grid, --spec-grid and --gap-grid "
-                         "(sweep --lam-eta-grid instead)")
+        raise SystemExit("--density needs single-valued --lam-grid, --spec-grid and --gap-grid: "
+                         "pass a single --lam-grid value (sweep --lam-eta-grid instead)")
     if a.learn_sigma_e_mult != 1.0:
         raise SystemExit("--density does not support --learn-sigma-e-mult")
     mask = density_mask(cfg, a.density)
@@ -136,6 +144,15 @@ else:
                                       rough_weights=wn, spec_p=a.spec_p, steps=a.steps,
                                       reprofile_every=a.reprofile_every, map_steps=a.map_steps,
                                       log=lambda s: print(s, flush=True), checkpoint=checkpoint_rd)
+    # every non-init candidate's own model.npz (readout fitted for it), not just the
+    # selected one -- so the benchmark can score radials_only and every density
+    # candidate the same way (rmse.py/rmse_npz.py), not only the gate's winner.
+    for label in info["runs"]:
+        eta_c = info["etas"][label]
+        save_result(out / label, info["cands_W"][label], {**(info["runs"][label] or {}),
+                    "readout": info["readouts"][label]}, src_npz=a.model, model=model,
+                    eta=eta_c, mask=mask if eta_c is not None else None)
+        print(f"candidate model: {out / label}", flush=True)
 info["to_analytic_relres_max"] = relres_max
 save_result(out, W, info, src_npz=a.model, model=model, eta=eta, mask=mask)
 summary = {"selected": info["selected"], "scores": info["scores"], "n_q": a.n_q,

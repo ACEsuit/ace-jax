@@ -62,14 +62,24 @@ def learn(system: str, steps: int, lam_grid: str, reprofile_every: int, n_q: int
                        capture_output=True, text=True)
     log = r.stdout + r.stderr
     if r.returncode == 0:
-        glob = out.glob("*/rnl_Wnlq.npy") if density != "none" else out.glob("lam_*/rnl_Wnlq.npy")
-        cands = ["--cand", "init"] + sum((["--cand", str(p)] for p in sorted(glob)), [])
+        # rmse.py refits a plain linear readout per candidate's radials: for a density
+        # run only "init" and "radials_only" are meaningful there (a density
+        # candidate's radials without its eta/d would be a misleading score), so
+        # restrict to those two; rmse_npz.py evaluates the model.npz itself (which
+        # for a density candidate carries the frozen FSModel term), so it runs on
+        # the top-level model.npz AND every candidate's */model.npz.
+        if density != "none":
+            cands = ["--cand", "init", "--cand", str(out / "radials_only" / "rnl_Wnlq.npy")]
+        else:
+            cands = ["--cand", "init"] + sum((["--cand", str(p)] for p in sorted(out.glob("lam_*/rnl_Wnlq.npy"))), [])
         r2 = subprocess.run(["python", "/ace-jax/bench/learn_radial/rmse.py", *args, *cands,
                              "--out", str(out / "rmse.json")], capture_output=True, text=True)
         log += "\n== rmse ==\n" + r2.stdout + r2.stderr
+        npz_paths = [out / "model.npz"] + sorted(out.glob("*/model.npz"))
         r3 = subprocess.run(["python", "/ace-jax/bench/learn_radial/rmse_npz.py",
                              *_drop(args, "--r0", "--n-q"),
-                             "--model-npz", str(out / "model.npz"), "--out", str(out / "rmse_npz.json")],
+                             *sum((["--model-npz", str(p)] for p in npz_paths), []),
+                             "--out", str(out / "rmse_npz.json")],
                             capture_output=True, text=True)
         log += "\n== rmse_npz ==\n" + r3.stdout + r3.stderr
     files = {str(p.relative_to(out)): p.read_bytes() for p in out.rglob("*")
