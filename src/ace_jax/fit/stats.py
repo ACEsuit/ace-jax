@@ -6,6 +6,7 @@ from typing import NamedTuple
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 
 from .rows import batch_rows
 
@@ -370,3 +371,161 @@ def pops_envelope_streamed(model, cfg, ds, coef, keep, Q, qs=(1.0, 1.0, 1.0)):
         return (lo, hi), None
     init = (jnp.full(n, jnp.inf), jnp.full(n, -jnp.inf))
     return jax.lax.scan(body, init, (ds, coef, keep))[0]
+
+
+# ---------------------------------------------------------------------------
+# Host-cached POPS rows.  Every pass above recomputes the ACE design rows
+# (linear_rows: the descriptor Jacobian) for the whole training set; a POPS fit is
+# ~5 passes per ridge, so ridge selection over a 13-value grid re-ran the basis ~40
+# times (2.8 h at the production Cantor basis, where one pass is ~4 min).  HostRows
+# evaluates the rows ONCE, keeps the loss-weighted live rows in host RAM in
+# fixed-size blocks, and every pass streams those blocks through small jitted
+# kernels.  Memory: n_live_rows * L * 8 B on the host (~85 GB for Cantor-2560 at
+# L = 27.6k), one block on the device.
+# ---------------------------------------------------------------------------
+
+def _pops_live_rows(model, cfg, batch, qs):
+    pw, wy, _ = _pops_batch_rows(model, cfg, batch, qs)
+    w = jnp.concatenate([batch.w_E, jnp.repeat(batch.w_F, 3), jnp.repeat(batch.w_V, 6)])
+    return pw, wy, w
+
+
+@jax.jit
+def _k_gram(acc, pw, wy):
+    M, b = acc
+    return M + pw.T @ pw, b + pw.T @ wy
+
+
+@jax.jit
+def _k_leverage(pw, wy, c, A):
+    return jnp.sum((pw @ A) * pw, axis=1), wy - pw @ c
+
+
+@jax.jit
+def _k_moments(acc, pw, c):
+    W, s = acc
+    pc = pw * c[:, None]
+    return W + pc.T @ pc, s + pw.T @ c
+
+
+@jax.jit
+def _k_bounds(acc, pw, c, k, B):
+    lo, hi = acc
+    proj = (pw @ B) * c[:, None]
+    return (jnp.minimum(lo, jnp.min(jnp.where(k[:, None], proj, jnp.inf), axis=0)),
+            jnp.maximum(hi, jnp.max(jnp.where(k[:, None], proj, -jnp.inf), axis=0)))
+
+
+@jax.jit
+def _k_envelope(acc, pw, c, k, Q):
+    lo, hi = acc
+    shift = (Q @ pw.T) * c[None, :]
+    return (jnp.minimum(lo, jnp.min(jnp.where(k[None, :], shift, jnp.inf), axis=1)),
+            jnp.maximum(hi, jnp.max(jnp.where(k[None, :], shift, -jnp.inf), axis=1)))
+
+
+class HostRows:
+    """The POPS row passes over loss-weighted live rows cached in host RAM.
+
+    ``blocks`` are (block, L) float64 host arrays of w*phi (the last one padded with
+    zero rows, which have h = 0 and so count as padding everywhere), ``targets`` the
+    matching w*y.  Per-row outputs (h, r, coef, keep) are (n_blocks, block) arrays."""
+
+    def __init__(self, model, cfg, ds, qs=(1.0, 1.0, 1.0), block=16384):
+        f = jax.jit(lambda b: _pops_live_rows(model, cfg, b, qs))
+        self.block, self.blocks, self.targets, self.n_rows = block, [], [], 0
+        buf = tbuf = None
+        fill = 0
+        for i in range(ds.n_batches):
+            pw, wy, w = f(jax.tree.map(lambda a: a[i], ds))
+            live = np.asarray(w) > 0
+            pw, wy = np.asarray(pw)[live], np.asarray(wy)[live]
+            self.n_rows += len(pw)
+            j = 0
+            while j < len(pw):
+                if buf is None:
+                    buf, tbuf, fill = np.zeros((block, pw.shape[1])), np.zeros(block), 0
+                n = min(block - fill, len(pw) - j)
+                buf[fill:fill + n], tbuf[fill:fill + n] = pw[j:j + n], wy[j:j + n]
+                fill += n; j += n
+                if fill == block:
+                    self.blocks.append(buf); self.targets.append(tbuf); buf = None
+        if buf is not None:
+            self.blocks.append(buf); self.targets.append(tbuf)
+        self.L = self.blocks[0].shape[1]
+
+    def _stream(self):
+        for pw, wy in zip(self.blocks, self.targets):
+            yield jax.device_put(pw), jax.device_put(wy)
+
+    def gram(self):
+        """M = sum pw^T pw and b = sum pw^T wy (the POPS data Gram and moment)."""
+        acc = (jnp.zeros((self.L, self.L)), jnp.zeros(self.L))
+        for pw, wy in self._stream():
+            acc = _k_gram(acc, pw, wy)
+        return acc
+
+    def leverage_residual(self, c_star, A):
+        out = [_k_leverage(pw, wy, c_star, A) for pw, wy in self._stream()]
+        return jnp.stack([h for h, _ in out]), jnp.stack([r for _, r in out])
+
+    def moment_sums(self, coef):
+        acc = (jnp.zeros((self.L, self.L)), jnp.zeros(self.L))
+        for (pw, _), c in zip(self._stream(), coef):
+            acc = _k_moments(acc, pw, c)
+        return acc
+
+    def projection_bounds(self, coef, keep, B):
+        d = B.shape[1]
+        acc = (jnp.full(d, jnp.inf), jnp.full(d, -jnp.inf))
+        for (pw, _), c, k in zip(self._stream(), coef, keep):
+            acc = _k_bounds(acc, pw, c, k, B)
+        return acc
+
+    def envelope(self, coef, keep, Q):
+        n = Q.shape[0]
+        acc = (jnp.full(n, jnp.inf), jnp.full(n, -jnp.inf))
+        for (pw, _), c, k in zip(self._stream(), coef, keep):
+            acc = _k_envelope(acc, pw, c, k, Q)
+        return acc
+
+
+class DeviceRows:
+    """The same passes as HostRows, recomputing the rows inside each scan (no host
+    memory; one ACE evaluation of the training set per pass)."""
+
+    def __init__(self, model, cfg, ds, qs=(1.0, 1.0, 1.0)):
+        self.model, self.cfg, self.ds, self.qs = model, cfg, ds, qs
+
+    def leverage_residual(self, c_star, A):
+        return pops_leverage_residual(self.model, self.cfg, self.ds, c_star, A, self.qs)
+
+    def moment_sums(self, coef):
+        return pops_moment_sums(self.model, self.cfg, self.ds, coef, self.qs)
+
+    def projection_bounds(self, coef, keep, B):
+        return pops_projection_bounds(self.model, self.cfg, self.ds, coef, keep, B, self.qs)
+
+    def envelope(self, coef, keep, Q):
+        return pops_envelope_streamed(self.model, self.cfg, self.ds, coef, keep, Q, self.qs)
+
+
+def host_rows_bytes(ds, L):
+    """Host RAM HostRows would take for ds at basis size L (live rows only)."""
+    live = int(np.sum(np.asarray(ds.w_E) > 0) + 3 * np.sum(np.asarray(ds.w_F) > 0)
+               + 6 * np.sum(np.asarray(ds.w_V) > 0))
+    return live * L * 8
+
+
+def available_host_bytes():
+    """The memory limit this process runs under: the cgroup limit (containers) or
+    physical RAM."""
+    import os
+    for p in ("/sys/fs/cgroup/memory.max", "/sys/fs/cgroup/memory/memory.limit_in_bytes"):
+        try:
+            v = open(p).read().strip()
+            if v.isdigit() and int(v) < 1 << 60:
+                return int(v)
+        except OSError:
+            pass
+    return os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")

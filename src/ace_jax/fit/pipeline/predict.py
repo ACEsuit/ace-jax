@@ -42,7 +42,7 @@ def _pops_setup(cfg, d, b, stats, theta, log):
         ds_fit = build_dataset(d.train[:-nval], d.meta, d.E0, cfg.batch)
         ds_val = build_dataset(d.train[-nval:], d.meta, d.E0, cfg.batch)
         ridge, scores = select_pops_ridge(theta, prob, ds_fit, ds_val, list(cfg.pops_ridge_grid),
-                                          form=cfg.pops_posterior, leverage_pct=cfg.pops_leverage_pct)
+                                          form=cfg.pops_posterior, leverage_pct=cfg.pops_leverage_pct, rows=cfg.pops_rows)
         out["ridge_scores"] = {"grid": list(cfg.pops_ridge_grid), "ridge": ridge, "n_val": nval,
                                "scores_crps": {q: [float(x) for x in v] for q, v in scores.items()}}
     else:
@@ -50,7 +50,7 @@ def _pops_setup(cfg, d, b, stats, theta, log):
     out["ridge"] = ridge
     log(f"POPS (paper) ridge: {ridge}")
     rd = ridge if isinstance(ridge, dict) else {q: ridge for q in "EFV"}
-    path = PopsRidgePath(theta, prob, d.ds_train, stats=stats)
+    path = PopsRidgePath(theta, prob, d.ds_train, stats=stats, rows=cfg.pops_rows)
     path.use_mean(POPS_MEAN)
     cst = np.asarray(path.c_star)
     rowsE, rowsF = ([], [], []), ([], [])
@@ -126,5 +126,6 @@ def predict_splits(cfg, d, b, stats, theta, draws, log=print):
             log(f"{split} {rung} " + str({q: {k: round(x, 4) for k, x in v.items()
                                               if k in ("rmse", "crps", "coverage", "rho", "rms_z")}
                                           for q, v in m.items()}))
-    pops.pop("path", None)
+    if "path" in pops:           # the path holds L x L arrays; keep only the mean it predicted with
+        pops["mean"] = np.asarray(pops.pop("path").c_star)
     return Preds(arrays, metrics, pops, tm)

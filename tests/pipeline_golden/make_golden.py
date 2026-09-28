@@ -1,7 +1,7 @@
 # tests/pipeline_golden/make_golden.py
 """Record the outputs of the UNCHANGED drivers (run.py and `ace-jax fit`) on the
 fixtures, so the pipeline refactor can be checked for exact equivalence.
-    uv run --extra gp python tests/pipeline_golden/make_golden.py
+    uv run --extra gp python tests/pipeline_golden/make_golden.py [scenario ...]
 Re-run only if a behaviour change is intended (and say so in the commit)."""
 import os, pathlib, platform, shutil, subprocess, sys
 
@@ -64,7 +64,10 @@ def main():
     env = dict(os.environ, JAX_ENABLE_X64="1", PYTHONPATH=str(ROOT))
     OUT.mkdir(parents=True, exist_ok=True)
     (OUT / "PLATFORM").write_text(platform_tag() + "\n")
+    only = set(sys.argv[1:])                      # optional: regenerate just these scenarios
     for name, (driver, argv) in SCENARIOS.items():
+        if only and name not in only:
+            continue
         out = OUT / name
         shutil.rmtree(out, ignore_errors=True); out.mkdir(parents=True)
         cmd = cli_argv(out) if driver == "cli" else run_argv(argv, out)
