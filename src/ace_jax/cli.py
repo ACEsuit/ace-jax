@@ -61,6 +61,9 @@ def _add_fit_args(p):
                         "(calibrated per-atom forces_std, writes posterior.npz)")
     p.add_argument("--ard-mode", choices=["joint", "sequential"], default="joint",
                    help="joint: noise + ARD scales by evidence; sequential: ARD only, one Gram (low memory)")
+    p.add_argument("--ard-variance", choices=["sandwich", "kappa"], default="sandwich",
+                   help="ARD force variance: sandwich = configuration-clustered misspecification-robust "
+                        "(scaled by lam on the train hold-out); kappa = kappa^2 x the posterior variance")
     p.add_argument("--ard-val-frac", type=float, default=0.2,
                    help="train fraction held out to fit the temperature kappa")
     p.add_argument("--pops-ridge", default="auto")
@@ -106,7 +109,7 @@ def _fit_config(a):
         lml=a.lml, devices=a.devices, opt=a.opt, map_steps=a.map_steps, map_restarts=a.map_restarts,
         init=json.load(open(a.init)) if a.init else None, rungs=rungs, laplace=a.laplace,
         n_draws=a.n_draws, vi_steps=a.vi_steps, nuts_warmup=a.nuts_warmup, nuts_samples=a.nuts_samples,
-        nuts_chains=a.nuts_chains, uq=a.uq, ard_mode=a.ard_mode, ard_val_frac=a.ard_val_frac,
+        nuts_chains=a.nuts_chains, uq=a.uq, ard_mode=a.ard_mode, ard_variance=a.ard_variance, ard_val_frac=a.ard_val_frac,
         predict_train=False, pops_ridge=ridge,
         predict_stats="recompute", pf_samples=16, pf_maxiter=15)
     return cfg.validate()

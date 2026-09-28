@@ -21,6 +21,31 @@ def fitted(tmp_path_factory):
     return out
 
 
+def test_cli_fit_ard_variance_default_sandwich_and_kappa_flag(fitted, tmp_path):
+    """--ard-variance: default sandwich (the fixture fit, Q in posterior.npz); `kappa` once."""
+    import json
+    from ace_jax.cli import main
+    from ace_jax.fit.ard import ARDPosterior
+    assert json.load(open(fitted / "ard.json"))["variance"] == "sandwich"
+    assert ARDPosterior.load(fitted / "posterior.npz").Q is not None
+    out = tmp_path / "kappa"
+    assert main(["fit", "--model", str(FIXTURE_DIR / "si_fitted.npz"), "--data", str(XYZ), "--ntrain", "30",
+                 "--ntest", "8", "--energy-key", "dft_energy", "--force-key", "dft_force", "--virial-key",
+                 "dft_virial", "--m-per-species", "0", "--uq", "ard", "--ard-variance", "kappa", "--opt",
+                 "lbfgs", "--map-steps", "5", "--configs-per-batch", "4", "--r0", "2.35",
+                 "--out", str(out)]) == 0
+    assert json.load(open(out / "ard.json"))["variance"] == "kappa"
+    assert ARDPosterior.load(out / "posterior.npz").Q is None
+
+
+def test_calculator_caches_Q_on_device(fitted):
+    """The sandwich factor is moved to the device once at construction, not on every forces_std."""
+    from ace_jax import ACECalculator
+    calc = ACECalculator(str(fitted / "model.npz"), posterior=str(fitted / "posterior.npz"))
+    assert calc.posterior.Q is not None and isinstance(calc.posterior.Q, jax.Array)
+    assert calc.posterior.Q.dtype == np.float64
+
+
 def test_calculator_forces_std_matches_pipeline(fitted):
     from ace_jax import ACECalculator
     from ace_jax.fit.ard import ARDPosterior, predict_ard

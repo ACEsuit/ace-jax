@@ -48,6 +48,7 @@ class FitConfig:
     # prediction / UQ
     uq: str = "blr"                      # "blr" | "pops" | "ard"
     ard_mode: str = "joint"              # "joint" (sigma_q + ARD scales) | "sequential" (low memory)
+    ard_variance: str = "sandwich"       # "sandwich" (configuration-clustered, spec addendum) | "kappa"
     ard_val_frac: float = 0.2            # train hold-out for the temperature kappa
     ard_cond_max: float = 1e14           # prior floor: cond(S) <= ard_cond_max
     ard_laplace: bool = False            # Laplace diagnostic of the hyperparameters (ard.json)
@@ -73,6 +74,8 @@ class FitConfig:
                 raise ValueError("uq='ard' is the linear-arm tempered posterior: use arm linear (m_per_species 0)")
             if self.ard_mode not in ("joint", "sequential"):
                 raise ValueError(f"ard_mode must be 'joint' or 'sequential', got {self.ard_mode!r}")
+            if self.ard_variance not in ("sandwich", "kappa"):
+                raise ValueError(f"ard_variance must be 'sandwich' or 'kappa', got {self.ard_variance!r}")
             if not 0.0 < self.ard_val_frac < 1.0:
                 raise ValueError(f"ard_val_frac must be in (0, 1), got {self.ard_val_frac}")
         if self.lml == "host-cache":

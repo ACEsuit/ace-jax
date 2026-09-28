@@ -232,7 +232,7 @@ def _pipe_cfg(**kw):
     from ace_jax.fit.pipeline import FitConfig
     base = dict(model=str(FIXTURE_DIR / "si_fitted.npz"), energy_key="dft_energy", force_key="dft_force",
                 virial_key="dft_virial", ntrain=30, ntest=8, batch=4, r0=2.35, arm="linear", uq="ard",
-                opt="lbfgs", rungs=("map",), map_steps=5, predict_train=False)
+                opt="lbfgs", rungs=("map",), map_steps=5, predict_train=False, ard_variance="kappa")
     return FitConfig(**{**base, **kw})
 
 
@@ -491,3 +491,70 @@ def test_posterior_schema2_roundtrip_and_schema1_loads(tiny_linear_problem, tmp_
             old.var_rows(Fr.reshape(-1, Fr.shape[-1])).reshape(-1, 3).sum(1)), rtol=1e-12)
         zero = np.zeros((2, 3, prob.cfg.len_basis))
         assert np.all(post.forces_std(zero) == 0.0)                                  # no neighbours: 0, not NaN
+
+
+def test_ard_stage_sandwich_variance_and_lam_rule(monkeypatch):
+    """Default variance: Q from the full refit's training residuals, lam by the kappa refit rule
+    (held-out subset errors against the served posterior's sandwich variance), F_var = lam^2 sandwich."""
+    from conftest import FIXTURE_DIR
+    from ace_jax.fit import ard
+    from ace_jax.fit.pipeline import load_fit_data
+    from ace_jax.fit.pipeline.mapfit import fit_map
+    from ace_jax.fit.pipeline.objective import make_objective
+    from ace_jax.fit.pipeline.problem import build_problem
+    calls = []
+    orig = ard.kappa_closed_form
+    monkeypatch.setattr(ard, "kappa_closed_form", lambda e2, s2: calls.append((np.array(e2), np.array(s2))) or orig(e2, s2))
+    cfg = _pipe_cfg(ard_variance="sandwich").validate()
+    d = load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz"))
+    b = build_problem(cfg, d)
+    with highest_precision():
+        theta = fit_map(cfg, d, b, make_objective(cfg, d, b), log=lambda *a: None).theta
+        res = ard.run_ard_stage(cfg, d, b, theta, log=lambda *a: None)
+        pred = ard.predict_ard(res.posterior, b.prob, d.ds_test)
+        pred1 = ard.predict_ard(res.posterior._replace(lam=1.0), b.prob, d.ds_test)
+    post, rep = res.posterior, res.report
+    assert post.Q is not None and post.Q.shape == (b.prob.cfg.len_basis, len(d.train))
+    assert rep["variance"] == "sandwich" and rep["n_clusters"] == len(d.train)
+    assert len(calls) == 3 and np.array_equal(calls[2][0], calls[0][0])       # kappa_sub, kappa, lam: same e2
+    assert post.lam == orig(*calls[2]) == rep["lam"] and abs(rep["val_rms_z_sandwich"] - 1.0) < 1e-6
+    np.testing.assert_allclose(pred.F_var, post.lam ** 2 * pred1.F_var, rtol=1e-12)
+
+
+def test_ard_stage_sandwich_in_sequential_mode():
+    from conftest import FIXTURE_DIR
+    from ace_jax.fit.ard import run_ard_stage
+    from ace_jax.fit.pipeline import load_fit_data
+    from ace_jax.fit.pipeline.mapfit import fit_map
+    from ace_jax.fit.pipeline.objective import make_objective
+    from ace_jax.fit.pipeline.problem import build_problem
+    cfg = _pipe_cfg(ard_variance="sandwich", ard_mode="sequential").validate()
+    d = load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz"))
+    b = build_problem(cfg, d)
+    with highest_precision():
+        theta = fit_map(cfg, d, b, make_objective(cfg, d, b), log=lambda *a: None).theta
+        res = run_ard_stage(cfg, d, b, theta, log=lambda *a: None)
+    assert res.posterior.Q is not None and np.isfinite(res.posterior.lam) and res.posterior.lam > 0
+
+
+def test_sandwich_scores_columns_follow_config_order(tiny_linear_problem):
+    """Column c of G~ is config c: the batched dataset (3 configs per batch) and one config per batch
+    give the same score matrix column by column, so no cid permutation / cross-batch misassignment."""
+    from ace_jax.eval import load
+    from ace_jax.fit.ard import sandwich_scores
+    from ace_jax.fit.data import build_dataset, load_configs
+    from conftest import FIXTURE_DIR
+    _, meta, z = load(FIXTURE_DIR / "si_fitted.npz")
+    configs = load_configs(FIXTURE_DIR / "si_tiny_train.xyz", "dft_energy", "dft_force", "dft_virial")[:6]
+    with highest_precision():
+        prob, ds, ev, h, post = _sandwich_setup(tiny_linear_problem)
+        sig = ev.sigmas(h)
+        G3 = sandwich_scores(post, prob, build_dataset(configs, meta, np.asarray(z["E0"]), configs_per_batch=3), sig)
+        G1 = sandwich_scores(post, prob, build_dataset(configs, meta, np.asarray(z["E0"]), configs_per_batch=1), sig)
+    assert G3.shape == G1.shape == (prob.cfg.len_basis, len(configs))
+    live = np.abs(G1).max(0) > 0                         # config 0 is an isolated atom: zero rows, zero score
+    assert live.sum() >= len(configs) - 1
+    Gl = G1[:, live]                                     # the live columns are distinct: a permutation shows
+    assert all(not np.allclose(Gl[:, i], Gl[:, j]) for i in range(Gl.shape[1]) for j in range(i))
+    for c in range(len(configs)):
+        np.testing.assert_allclose(G3[:, c], G1[:, c], rtol=1e-10, atol=1e-14 * np.abs(G1).max())

@@ -18,7 +18,9 @@ def _cfg(**kw):
 
 
 def test_config_validates_ard():
-    _cfg().validate()
+    assert _cfg().validate().ard_variance == "sandwich"
+    with pytest.raises(ValueError, match="ard_variance"):
+        _cfg(ard_variance="nope").validate()
     with pytest.raises(ValueError, match="linear"):
         _cfg(arm="gp", m_per_species=6).validate()
     with pytest.raises(ValueError, match="ard_mode"):

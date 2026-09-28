@@ -304,11 +304,12 @@ def _force_nll(e2, s2, kappa):
 
 
 def predict_ard(post, prob, ds, node_chunk=256):
-    """Posterior predictive on a Dataset: means from the ARD mean; F_var tempered by kappa^2 (the
-    calibrated quantity), E_var/V_var the untempered posterior variances."""
+    """Posterior predictive on a Dataset: means from the ARD mean; F_var the served calibrated force
+    variance (`force_var_rows`: lam^2 x cluster sandwich when post.Q is set, else kappa^2 x the posterior
+    variance), E_var/V_var the untempered posterior variances."""
     from .predict import _pack
     from .rows import chunked_rows_fn
-    L, k2 = prob.cfg.len_basis, post.kappa ** 2
+    L = prob.cfg.len_basis
     rows_fn = chunked_rows_fn(prob.model, prob.cfg, node_chunk)
     outs = []
     for i in range(ds.n_batches):
@@ -316,7 +317,7 @@ def predict_ard(post, prob, ds, node_chunk=256):
         r = rows_fn(b)
         E, F, V = np.asarray(r.E), np.asarray(r.F).reshape(-1, L), np.asarray(r.V).reshape(-1, L)
         outs.append((E @ post.mean, post.var_rows(E), (F @ post.mean).reshape(-1, 3),
-                     k2 * post.var_rows(F).reshape(-1, 3), (V @ post.mean).reshape(-1, 6),
+                     post.force_var_rows(F).reshape(-1, 3), (V @ post.mean).reshape(-1, 6),
                      post.var_rows(V).reshape(-1, 6)))
     return _pack(outs, prob, ds)
 
@@ -327,9 +328,10 @@ class ARDResult(NamedTuple):
 
 
 def _val_errors(post, prob, ds):
-    """Per-atom squared force error and untempered s2 on the live force rows of ds."""
+    """Per-atom squared force error, untempered s2 and (when post.Q is set, else None) the unscaled
+    cluster-sandwich variance m2 on the live force rows of ds, in one pass over the rows."""
     from .rows import chunked_rows_fn
-    L, e2, s2 = prob.cfg.len_basis, [], []
+    L, e2, s2, m2 = prob.cfg.len_basis, [], [], []
     rows_fn = chunked_rows_fn(prob.model, prob.cfg)
     for i in range(ds.n_batches):
         b = jax.tree.map(lambda a, i=i: a[i], ds)
@@ -340,9 +342,11 @@ def _val_errors(post, prob, ds):
         pred = (F.reshape(-1, L) @ post.mean).reshape(-1, 3)
         e2.append(np.sum((np.asarray(b.y_F)[live] - pred) ** 2, 1))
         s2.append(post.var_rows(F.reshape(-1, L)).reshape(-1, 3).sum(1))
+        if post.Q is not None:
+            m2.append(post.misspec_var_rows(F.reshape(-1, L)).reshape(-1, 3).sum(1))
     if not e2:
-        return np.zeros(0), np.zeros(0)
-    return np.concatenate(e2), np.concatenate(s2)
+        return np.zeros(0), np.zeros(0), (None if post.Q is None else np.zeros(0))
+    return np.concatenate(e2), np.concatenate(s2), (np.concatenate(m2) if post.Q is not None else None)
 
 
 def _ard_fit_warnings(stage, info, names):
@@ -386,7 +390,7 @@ def run_ard_stage(cfg, data, built, theta, log=print, full_stats=None):
     for w in _ard_fit_warnings("fit-subset", info_fit, names):
         log(w)
     post_fit = ard_posterior(ev, h_fit, 1.0, data.meta)
-    e2, s2 = _val_errors(post_fit, prob, ds_val)
+    e2, s2, _ = _val_errors(post_fit, prob, ds_val)
     del post_fit                           # free the subset fit's L x L Cholesky factor before the refit
     ok = s2 > 0                            # atoms with zero force rows (isolated, 1-atom configs): no information
     e2, s2 = e2[ok], s2[ok]
@@ -406,13 +410,28 @@ def run_ard_stage(cfg, data, built, theta, log=print, full_stats=None):
     for w in _ard_fit_warnings("full", info, names):
         log(w)
     post = ard_posterior(ev, h, 1.0, data.meta)
+    variance = getattr(cfg, "ard_variance", "kappa")
+    lam, n_clusters = 1.0, 0
+    if variance == "sandwich":
+        # configuration-clustered sandwich (spec addendum): scores of the full refit's own training
+        # residuals, one cluster per training config; Q = S^-1 G~ is set before the held-out pass
+        G = sandwich_scores(post, prob, data.ds_train, ev.sigmas(h))
+        post = post._replace(Q=sandwich_factor(post, G))
+        n_clusters = int(G.shape[1])
+        del G
     # kappa for the SERVED (full-refit) posterior: the held-out errors stay the subset model's (honest),
     # their s^2 is the full posterior's.  Misspecification-dominated error (kappa >> 1) does not shrink
     # on the refit while s^2 does, so the subset kappa alone is ~sqrt(n_train / n_fit) too small.
-    s2_full = _val_errors(post, prob, ds_val)[1][ok]
+    # One pass over the held-out rows gives both s^2 (kappa) and the sandwich m^2 (lam, same rule).
+    _, s2_full, m2_full = _val_errors(post, prob, ds_val)
+    s2_full = s2_full[ok]
     kappa_subset, kappa = kappa, kappa_closed_form(e2, s2_full)
-    post = post._replace(kappa=kappa)
     log(f"ARD: kappa {kappa:.3f} for the full posterior (subset {kappa_subset:.3f}, x{kappa / kappa_subset:.3f})")
+    if variance == "sandwich":
+        m2_full = m2_full[ok]
+        lam = kappa_closed_form(e2, m2_full)
+        log(f"ARD: sandwich over {n_clusters} training configs; lam {lam:.3f}")
+    post = post._replace(kappa=kappa, lam=lam)
     report = {"mode": mode, "groups": list(ev.groups), "h": h.tolist(), "h_names": names,
               "logev_full": v, "logev_full_start": v_start, "optimiser": info, "optimiser_fit": info_fit,
               "a_floor": ev.a_floor,
@@ -422,7 +441,10 @@ def run_ard_stage(cfg, data, built, theta, log=print, full_stats=None):
               "val_rms_z_untempered": float(np.sqrt(np.mean(e2 / (s2_full / 3)) / 3)),
               "val_rms_z_tempered": float(np.sqrt(np.mean(e2 / (kappa ** 2 * s2_full / 3)) / 3)),
               "val_nll_untempered": _force_nll(e2, s2_full, 1.0), "val_nll_tempered": _force_nll(e2, s2_full, kappa),
+              "variance": variance, "lam": lam, "n_clusters": n_clusters,
               "seconds": time.time() - t0}
+    if variance == "sandwich":
+        report["val_rms_z_sandwich"] = float(np.sqrt(np.mean(e2 / (lam ** 2 * m2_full / 3)) / 3))
     if cfg.ard_laplace:
         lap = laplace_hypers(ev, h)
         report["laplace_std_h"] = lap["std"].tolist()
