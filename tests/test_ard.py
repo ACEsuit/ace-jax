@@ -526,18 +526,31 @@ def test_ard_stage_sandwich_variance_and_lam_rule(monkeypatch):
 
 def test_ard_stage_sandwich_in_sequential_mode():
     from conftest import FIXTURE_DIR
-    from ace_jax.fit.ard import run_ard_stage
+    from ace_jax.fit import ard
     from ace_jax.fit.pipeline import load_fit_data
     from ace_jax.fit.pipeline.mapfit import fit_map
     from ace_jax.fit.pipeline.objective import make_objective
     from ace_jax.fit.pipeline.problem import build_problem
+    theta_ls = lambda t: [float(getattr(t, f"log_sigma_{q}")) for q in "EFV"]
     cfg = _pipe_cfg(ard_variance="sandwich", ard_mode="sequential").validate()
     d = load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz"))
     b = build_problem(cfg, d)
     with highest_precision():
         theta = fit_map(cfg, d, b, make_objective(cfg, d, b), log=lambda *a: None).theta
-        res = run_ard_stage(cfg, d, b, theta, log=lambda *a: None)
-    assert res.posterior.Q is not None and np.isfinite(res.posterior.lam) and res.posterior.lam > 0
+        res = ard.run_ard_stage(cfg, d, b, theta, log=lambda *a: None)
+        post = res.posterior
+        # rebuild the stage's full-refit evidence: its sequential sigmas are the fixed linear MAP ones
+        ev = ard.ARDEvidence(ard.ard_statistics(theta, b.prob, d.ds_train, "sequential"),
+                             np.asarray(b.prob.gamma), ard.body_order_columns(d.meta, b.prob.cfg))
+        h = np.asarray(res.report["h"])
+        Ms, _, lam_prior, _ = ev._parts(jnp.asarray(h, float))
+        G = np.asarray((Ms + jnp.diag(lam_prior)) @ post.Q)          # G~ = S Q: the stage's own scores
+        x = post.mean / post.dinv                                     # scaled mean D c
+    assert post.Q.shape == (b.prob.cfg.len_basis, len(d.train)) and np.isfinite(post.lam) and post.lam > 0
+    # stationarity sum_c g~_c = lam_prior * x: the scores are whitened with ev.sigmas(h) -- the
+    # sequential mode's fixed MAP sigmas, not the (absent) fitted ones
+    np.testing.assert_allclose(G.sum(1), np.asarray(lam_prior) * x, rtol=1e-6, atol=1e-8 * np.abs(G).max())
+    assert np.array_equal(ev.sigmas(h), np.exp(np.asarray(theta_ls(theta))))
 
 
 def test_sandwich_scores_columns_follow_config_order(tiny_linear_problem):
