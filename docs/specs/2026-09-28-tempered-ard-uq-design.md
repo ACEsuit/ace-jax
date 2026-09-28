@@ -1,6 +1,6 @@
 # Tempered ARD posterior: calibrated per-atom force uncertainty for linear ACE
 
-Status: design, for review · Base: PR #8 (`feat/multistart-map`) · Branch: `feat/ard-uq`
+Status: design, for review · Base: `main` (after #8 and #10) · Branch: `feat/ard-uq`
 Evidence: `bench/defect_uq/README.md` (PR #12); the numbers below are from there.
 
 ## Goal
