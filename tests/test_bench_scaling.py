@@ -130,18 +130,23 @@ def test_capacity_covers_ghosts_and_neighbours():
     at = supercell("SiGe", 256)
     cap = capacity(at, 5.0)
     assert cap["max_atoms"] > 256                      # owned + ghost shell
-    assert cap["k_dense"] == cap["k_max"] + max(4, int(np.ceil(0.1 * cap["k_max"])))
-    assert cap["max_edges"] >= 256 * cap["k_max"]
+    assert cap["k_dense"] == cap["k_max"] + 8
+    assert cap["max_edges"] == cap["max_owned"] * cap["k_dense"]
     assert cap["max_owned"] == int(np.ceil(1.1 * 256))
 
 
-def test_capacity_sizes_slots_for_rcut_not_skin():
+def test_capacity_slots_have_skin_headroom():
+    """lammps-jax's edge count is LAMMPS's neighbour list, skin included
+    (Cantor, 256 atoms: "global max 19968 edges" = 256 x 78, the rcut + 1 A
+    coordination), so slots sized for rcut alone overflowed its edge capacity."""
+    from ace_jax.eval import sparse_graph
     from scaling.run_lammps import capacity
-    at = supercell("Cantor", 8192)
-    c = capacity(at, 5.0)
-    assert c["max_owned"] == int(np.ceil(1.1 * len(at)))
-    c_skin = capacity(at, 6.0)                      # what rcut + skin used to give
-    assert c["k_dense"] < c_skin["k_dense"]
+    at = supercell("Cantor", 256)
+    c = capacity(at, 5.0, skin=1.0)
+    g = sparse_graph(at.positions, at.cell.array, at.pbc, 6.0)
+    assert c["k_dense"] >= int(np.bincount(g.senders, minlength=len(at)).max())
+    assert c["max_edges"] >= 1.5 * len(sparse_graph(at.positions, at.cell.array, at.pbc,
+                                                     5.0).senders)
 
 
 def test_read_pe_and_dump(tmp_path):

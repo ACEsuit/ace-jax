@@ -140,10 +140,12 @@ coefficients inside the trace.
   - Exceeding the row or slot capacity gives NaN, never a silent truncation.
   - The export records `max_owned` alongside `max_atoms`, as `ace_jax.owned_rows`
     (lammps-jax reads a `max_owned` key anywhere in the bundle as its own).
-- **Slots sized for the cutoff:** lammps-jax drops pairs beyond the cutoff
-  before packing, so the benchmark's `capacity` sizes `k_dense` and
-  `max_edges` for `rcut`, not `rcut + skin`. That also halves the sparse
-  fallback's edge buffer.
+- **Slots sized for `rcut + skin`** (amended in Task 11): the plan sized
+  `k_dense` and `max_edges` for `rcut` alone, on the belief that lammps-jax
+  drops pairs beyond the cutoff before packing. It doesn't: its edge count is
+  LAMMPS's neighbour list, skin included, and the A100 runs overflowed ("edge
+  capacity exceeded", Cantor 256 atoms: 19968 = 256 × 78 edges, the
+  rcut + 1 Å coordination). `max_edges` still counts owned rows only.
 - **Model changes:** the bundle calls the same optimised model code
   (components 2–6).
 - **Unchanged:** `pair_style jax/kk`, the bundle contract, `layout="auto"` and

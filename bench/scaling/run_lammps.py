@@ -97,20 +97,16 @@ def capacity(at, rcut, skin=1.0):
     """lammps-jax buffer sizes for this structure: owned + ghost atoms (the
     periodic shell within rcut + skin of each face) size the LAMMPS position
     buffer (max_atoms); neighbour slots (k_dense, max_edges) are sized for
-    rcut alone -- lammps-jax packs only real edges within the cutoff, and the
-    dense energy function evaluates owned rows only (max_owned)."""
+    rcut + skin, since lammps-jax's edge count is LAMMPS's neighbour list,
+    skin included; the dense energy function evaluates owned rows only
+    (max_owned), and senders are always owned, so max_edges counts owned rows."""
     from ace_jax.eval import sparse_graph
     L = np.linalg.norm(at.cell.array, axis=1)
     ghost = float(np.prod((L + 2 * (rcut + skin)) / L))
-    g = sparse_graph(at.positions, at.cell.array, at.pbc, rcut)
+    g = sparse_graph(at.positions, at.cell.array, at.pbc, rcut + skin)
     k_max = int(np.bincount(g.senders, minlength=len(at)).max())
     max_owned = int(np.ceil(1.1 * len(at)))
-    # lammps-jax drops pairs beyond rcut before packing, so slots are sized at
-    # rcut; the margin (>= 4, 10% of k_max for larger coordination) covers
-    # coordination drift within the cutoff over a run -- overflow is loud
-    # (NaN energy and forces, make_energy_fn's n_rows/k_dense guard), never
-    # a silent truncation.
-    k_dense = k_max + max(4, int(np.ceil(0.1 * k_max)))
+    k_dense = k_max + 8                     # overflow is loud (NaN), never a truncation
     return {"max_atoms": int(np.ceil(len(at) * ghost * 1.1)), "k_max": k_max,
             "k_dense": k_dense, "max_edges": max_owned * k_dense, "max_owned": max_owned}
 
