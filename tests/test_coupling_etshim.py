@@ -35,7 +35,8 @@ _BRIDGE = r"""
 import json, numpy as np, juliacall
 from ace_jax.construct.spec import ylm_spec
 from ace_jax.construct.coupling import couple
-A2B, aa_sig, aspec = couple([[(1,0)], [(1,1),(1,1)]], [(1,0),(1,1),(2,0)], ylm_spec(1))
+cpl = couple([[(1,0)], [(1,1),(1,1)]], [(1,0),(1,1),(2,0)], ylm_spec(1))
+A2B, aa_sig, aspec = cpl.A2B, cpl.aa_sig, cpl.aspec
 print("RESULT", json.dumps({
     "A2B_shape": list(A2B.shape),
     "A2B_nnz": int((A2B != 0).sum()),

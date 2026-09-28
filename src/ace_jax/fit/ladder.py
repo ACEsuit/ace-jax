@@ -53,20 +53,82 @@ def _stack(samples):
     return a.reshape(-1, len(FIELDS))
 
 
-def _svi(model, guide, steps, lr, seed):
+def _svi(model, guide, steps, lr, seed, return_losses=False):
     # Adam on a deterministic objective oscillates at the lr scale, so decay it
     # to 0.1% over the run; the MAP then converges rather than jitters.
     svi = SVI(model, guide, optax.adam(optax.linear_schedule(lr, 1e-3 * lr, steps)), Trace_ELBO())
     res = svi.run(jax.random.PRNGKey(seed), steps, progress_bar=False)
-    return res.params
+    return (res.params, np.asarray(res.losses)) if return_losses else res.params
 
 
-def run_map(lml, prior, *, steps=500, lr=0.02, seed=0, init=None):
+def run_map(lml, prior, *, steps=500, lr=0.02, seed=0, init=None, return_losses=False):
+    """theta-MAP by SVI/AutoDelta.  return_losses=True also returns the
+    per-step SVI loss trace (-log posterior up to a constant), for
+    convergence diagnostics; the MAP itself is unchanged."""
     model = numpyro_model(lml, prior)
     guide = AutoDelta(model, init_loc_fn=init_to_value(values=_init(prior, init)))
+    params, losses = _svi(model, guide, steps, lr, seed, return_losses=True)
+    med = guide.median(params)
+    h = Hypers(*[float(med[f]) for f in FIELDS])
+    return (h, losses) if return_losses else h
+
+
+def run_map_vec(lml, mu, sigma, init, *, steps=500, lr=0.02, seed=0):
+    """MAP over an arbitrary-length LML vector with independent Normal priors
+    N(mu[i], sigma[i]) per entry.  The n-hyper `run_map` above is left untouched
+    (its calibration rests on the named FIELDS sites); this generalisation drives
+    the extended [hypers | sigma_type] vector for the per-config-type fit."""
+    mu, sigma, init = np.asarray(mu, float), np.asarray(sigma, float), np.asarray(init, float)
+    n = mu.size
+
+    def model():
+        th = [numpyro.sample(f"p{i}", dist.Normal(float(mu[i]), float(sigma[i]))) for i in range(n)]
+        numpyro.factor("loglik", lml(jnp.stack(th)))
+    guide = AutoDelta(model, init_loc_fn=init_to_value(
+        values={f"p{i}": jnp.asarray(init[i], jnp.float64) for i in range(n)}))
     params = _svi(model, guide, steps, lr, seed)
     med = guide.median(params)
-    return Hypers(*[float(med[f]) for f in FIELDS])
+    return jnp.stack([jnp.asarray(med[f"p{i}"], jnp.float64) for i in range(n)])
+
+
+def run_map_ps(ps, prob, ds, *, steps=500, lr=0.02, seed=0):
+    """Inner MAP over a ParamSet's LML blocks, returning the updated ParamSet.
+
+    The all-LML case holds the embedding FIXED (materialise it once), so this is
+    the existing flat path: build `make_lml` ONCE on the materialised problem
+    (its theta-independent linear Gram is cached inside), then let `run_map`
+    optimise `lml(theta_array)` over the flat LML vector -- which is exactly
+    `ps.lml_vector()` (Task-2 `from_hypers` stores the 'hypers' block as
+    `to_array(hypers)`).  A materialised embed is threaded through the kernel via
+    `ind.embed` with its rows normalised (`normalize_rows(E)`), as the kernel's
+    coregionalization expects -- the embed block carries the RAW E -- so a raw
+    and a pre-normalised E give the same inner MAP."""
+    from .objective import make_lml
+    from .embedding import normalize_rows
+    h, embed = ps.materialise()
+    if embed is not None:
+        embed = normalize_rows(embed)
+    prob_m = prob if embed is None else prob._replace(ind=prob.ind._replace(embed=embed))
+    try:
+        st_block = ps.block("sigma_type")
+    except StopIteration:
+        st_block = None
+    if st_block is None:                     # existing all-hypers path (unchanged)
+        lml = make_lml(prob_m, ds)
+        x_star = run_map(lml, ps.block("hypers").prior, steps=steps, lr=lr, seed=seed,
+                         init=ps.lml_vector())
+        return ps.set_lml_vector(to_array(x_star))
+    # per-config-type path: optimise [hypers | free log-ratios] jointly.  The LML
+    # vector already concatenates the hypers block and the sigma_type block, so
+    # its layout matches make_lml's _sigma_type_decode (hypers first, ratios last).
+    n_types, n_free = st_block.value.shape[0] + 1, st_block.value.size
+    lml = make_lml(prob_m, ds, n_types=n_types, n_free_ratios=n_free)
+    hp = ps.block("hypers").prior
+    st_mu, st_sig = st_block.prior
+    mu = jnp.concatenate([to_array(hp.mu), jnp.asarray(st_mu)])
+    sigma = jnp.concatenate([to_array(hp.sigma), jnp.asarray(st_sig)])
+    x_star = run_map_vec(lml, mu, sigma, init=ps.lml_vector(), steps=steps, lr=lr, seed=seed)
+    return ps.set_lml_vector(x_star)
 
 
 def run_laplace(lml, prior, *, n_draws=100, steps=500, lr=0.02, seed=0, init=None):
