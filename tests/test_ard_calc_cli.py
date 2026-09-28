@@ -46,6 +46,16 @@ def test_calculator_caches_Q_on_device(fitted):
     assert calc.posterior.Q.dtype == np.float64
 
 
+def test_calculator_caches_chol_on_device(fitted):
+    """The L x L Cholesky factor (numpy from posterior.npz) is moved to the device once at
+    construction: the kappa path's var_rows would otherwise re-upload it on every call."""
+    from ace_jax import ACECalculator
+    from ace_jax.fit.ard import ARDPosterior
+    assert isinstance(ARDPosterior.load(fitted / "posterior.npz").chol, np.ndarray)   # load stays numpy
+    calc = ACECalculator(str(fitted / "model.npz"), posterior=str(fitted / "posterior.npz"))
+    assert isinstance(calc.posterior.chol, jax.Array) and calc.posterior.chol.dtype == np.float64
+
+
 def test_calculator_forces_std_matches_pipeline(fitted):
     from ace_jax import ACECalculator
     from ace_jax.fit.ard import ARDPosterior, predict_ard

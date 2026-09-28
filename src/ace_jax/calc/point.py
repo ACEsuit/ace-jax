@@ -160,8 +160,10 @@ class ACECalculator(Calculator):
                     coef, mean, rtol=1e-10, atol=1e-14 * max(float(np.abs(mean).max(initial=0.0)), 1e-300)):
                 raise ValueError(f"posterior {posterior} does not match the model: its mean is not the "
                                  f"model's coefficients (a posterior from a different fit?)")
-            if post.Q is not None:                       # sandwich factor: host->device once, not per call
-                import jax.numpy as jnp
+            # the L x L Cholesky factor and the sandwich factor: host->device once, not on every call
+            import jax.numpy as jnp
+            post = post._replace(chol=jnp.asarray(post.chol, jnp.float64))
+            if post.Q is not None:
                 post = post._replace(Q=jnp.asarray(post.Q, jnp.float64))
             self.posterior = post
             self._fit_model = _load_fit_model(model_path)[0]

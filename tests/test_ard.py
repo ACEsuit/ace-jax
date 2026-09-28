@@ -606,3 +606,14 @@ def test_ard_stage_lam_leaves_out_each_held_out_atoms_own_cluster(monkeypatch):
     np.testing.assert_allclose(rep["lam_incl_own"], orig(e2, m2_all), rtol=1e-8)
     assert rep["lam"] == post.lam and rep["lam"] > rep["lam_incl_own"]
     assert abs(rep["val_rms_z_sandwich"] - 1.0) < 1e-6                           # z of the served lam
+
+
+def test_posterior_chol_and_sandwich_factor_stay_on_device(tiny_linear_problem):
+    """chol (1.8 GB at L = 15k) and Q are float64 device arrays: var_rows / misspec_var_rows run once
+    per batch and jnp.asarray of a numpy factor re-uploads it on every call."""
+    from ace_jax.fit.ard import sandwich_factor, sandwich_scores
+    with highest_precision():
+        prob, ds, ev, h, post = _sandwich_setup(tiny_linear_problem)
+        Q = sandwich_factor(post, sandwich_scores(post, prob, ds, ev.sigmas(h)))
+    assert isinstance(post.chol, jax.Array) and post.chol.dtype == np.float64
+    assert isinstance(Q, jax.Array) and Q.dtype == np.float64

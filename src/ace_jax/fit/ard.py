@@ -187,14 +187,15 @@ def laplace_hypers(ev, h, eps=1e-3):
 
 class ARDPosterior(NamedTuple):
     mean: np.ndarray          # (L,) posterior mean coefficients (the readout)
-    chol: np.ndarray          # (L, L) lower Cholesky factor of S = D^-1 A D^-1
+    chol: jax.Array           # (L, L) lower Cholesky factor of S = D^-1 A D^-1 (float64 on the device;
+                              # numpy after `load` -- ACECalculator moves it to the device once)
     dinv: np.ndarray          # (L,) 1 / Gamma
     kappa: float              # temperature (sigma inflation)
     h: np.ndarray
     groups: tuple
     body_col: np.ndarray
     meta: dict                # n_B, n_pair, NZ, rcut, elements
-    Q: np.ndarray | None = None   # (L, n_cfg) S^-1 G~: configuration-clustered sandwich factor
+    Q: jax.Array | None = None    # (L, n_cfg) S^-1 G~: configuration-clustered sandwich factor (device)
     lam: float = 1.0              # sandwich scale (fitted like kappa)
 
     def var_rows(self, Phi, chunk=4096):
@@ -262,7 +263,9 @@ def ard_posterior(ev, h, kappa, meta):
     keep = {k: meta[k] for k in ("n_B", "n_pair", "NZ", "rcut", "elements") if k in meta}
     if "NZ" not in keep and "elements" in keep:          # model meta carries elements, not NZ
         keep["NZ"] = len(keep["elements"])
-    return ARDPosterior(np.asarray(ev.dinv * x), np.asarray(c), np.asarray(ev.dinv), float(kappa),
+    # chol stays a float64 device array: var_rows runs once per batch (predict_ard, _val_errors), and
+    # jnp.asarray of a numpy factor would re-upload the L x L matrix (1.8 GB at L = 15k) on every call
+    return ARDPosterior(np.asarray(ev.dinv * x), jnp.asarray(c, jnp.float64), np.asarray(ev.dinv), float(kappa),
                         np.asarray(h, float), ev.groups, ev.body_col, keep)
 
 
@@ -295,9 +298,10 @@ def sandwich_scores(post, prob, ds, sig):
 
 
 def sandwich_factor(post, G):
-    """Q = S^-1 G~ (L, n_cfg), so that phi A^-1 M A^-1 phi^T = ||Q^T (D^-1 phi)||^2."""
+    """Q = S^-1 G~ (L, n_cfg), so that phi A^-1 M A^-1 phi^T = ||Q^T (D^-1 phi)||^2.  A float64 device
+    array: its consumers (misspec_var_rows, per batch) use it there, no host round trip."""
     c = jnp.asarray(post.chol, jnp.float64)
-    return np.asarray(cho_solve((c, True), jnp.asarray(G)))
+    return cho_solve((c, True), jnp.asarray(G, jnp.float64))
 
 
 def kappa_closed_form(e2, s2):
@@ -436,16 +440,16 @@ def run_ard_stage(cfg, data, built, theta, log=print, full_stats=None):
     for w in _ard_fit_warnings("full", info, names):
         log(w)
     post = ard_posterior(ev, h, 1.0, data.meta)
-    variance = getattr(cfg, "ard_variance", "kappa")
+    variance = cfg.ard_variance
     lam, n_clusters = 1.0, 0
     if variance == "sandwich":
         # configuration-clustered sandwich (spec addendum): scores of the full refit's own training
         # residuals, one cluster per training config; Q = S^-1 G~ is set before the held-out pass
         G = sandwich_scores(post, prob, data.ds_train, ev.sigmas(h))
-        # kept on-device (float64): misspec_var_rows/predict_ard/_val_errors call jnp.asarray(self.Q, ...)
-        # once per batch, and jnp.asarray of an existing float64 device array is a no-op -- as numpy it
-        # would re-upload the full (L, n_cfg) factor (0.44 GB at production size) on every one of those calls.
-        post = post._replace(Q=jnp.asarray(sandwich_factor(post, G), jnp.float64))
+        # Q is a float64 device array (sandwich_factor): misspec_var_rows/predict_ard/_val_errors call
+        # jnp.asarray(self.Q, ...) once per batch, a no-op on it -- as numpy it would re-upload the full
+        # (L, n_cfg) factor (0.44 GB at production size) on every one of those calls.
+        post = post._replace(Q=sandwich_factor(post, G))
         n_clusters = int(G.shape[1])
         del G
     # kappa for the SERVED (full-refit) posterior: the held-out errors stay the subset model's (honest),
