@@ -90,7 +90,9 @@ def learn(system: str, steps: int, lam_grid: str, reprofile_every: int, n_q: int
 @app.local_entrypoint()
 def main(system: str = "sige", steps: str = "100,200,400", lam_grid: str = "0.1",
          reprofile_every: int = 50, n_q: int = 12, mults: str = "1", out: str = "runs/modal",
-         density: str = "none", P: int = 1, density_mode: str = "joint", lam_eta_grid: str = "0"):
+         density: str = "none", n_density: int = 1, density_mode: str = "joint", lam_eta_grid: str = "0"):
+    # n_density, not P: Modal lower-cases CLI flags, so a `P` parameter is unreachable as --P
+    P = n_density
     budgets = [int(s) for s in steps.split(",")]
     calls = [(system, s, lam_grid, reprofile_every, n_q, float(m), density, P, density_mode, lam_eta_grid)
             for s in budgets for m in mults.split(",")]
