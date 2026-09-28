@@ -40,10 +40,12 @@ class ARDStats(NamedTuple):
 
 def ard_statistics(theta, prob, ds, mode):
     """joint: per-quantity statistics (3 L^2 matrices).  sequential: the combined Gram at the
-    linear MAP noise scales, accumulated in one pass (1 L^2 matrix) -- the low-memory mode."""
-    from .stats import sufficient_statistics
+    linear MAP noise scales, accumulated in one pass (1 L^2 matrix) -- the low-memory mode.
+    Both are the linear (L-column) statistics only: a hybrid problem's inducing columns (M > 0)
+    never enter the ARD posterior, and the joint Gram is hyperparameter-independent."""
+    from .stats import linear_statistics
     if mode == "joint":
-        st = sufficient_statistics(theta, prob.spec, prob.model, prob.ind, prob.cfg, ds)
+        st = linear_statistics(prob.model, prob.cfg, ds)
         return ARDStats(tuple(getattr(st, f"G_{q}") for q in "EFV"), tuple(getattr(st, f"b_{q}") for q in "EFV"),
                         np.array([float(getattr(st, f"yy_{q}")) for q in "EFV"]),
                         np.array([float(getattr(st, f"n_{q}")) for q in "EFV"]), None)
@@ -148,7 +150,7 @@ def fit_ard(ev, h0, cond_max=1e14, maxiter=500):
     r = minimize(f, x0, jac=True, method="L-BFGS-B", bounds=list(zip(lo, hi)),
                  options={"maxiter": maxiter, "ftol": 1e-12, "gtol": 1e-6})
     v, _ = ev.value_and_grad(r.x)
-    return r.x, v, {"message": str(r.message), "nit": int(r.nit), "gain": v - v0,
+    return r.x, v, {"success": bool(r.success), "message": str(r.message), "nit": int(r.nit), "gain": v - v0,
                     "at_bound": ((np.isclose(r.x, lo)) | (np.isclose(r.x, hi))).tolist()}
 
 
@@ -218,3 +220,127 @@ def ard_posterior(ev, h, kappa, meta):
         keep["NZ"] = len(keep["elements"])
     return ARDPosterior(np.asarray(ev.dinv * x), np.asarray(c), np.asarray(ev.dinv), float(kappa),
                         np.asarray(h, float), ev.groups, ev.body_col, keep)
+
+
+def kappa_closed_form(e2, s2):
+    """NLL-optimal kappa for dF ~ N(0, kappa^2 s^2/3 I_3) per atom: kappa^2 = mean(e2 / (s2/3)) / 3."""
+    e2, s2 = np.asarray(e2, float), np.asarray(s2, float)
+    ok = s2 > 0
+    return float(np.sqrt(np.mean(e2[ok] / (s2[ok] / 3.0)) / 3.0))
+
+
+def _force_nll(e2, s2, kappa):
+    """Mean per-atom Gaussian NLL of dF ~ N(0, kappa^2 s2/3 I_3) (constant 3/2 log 2 pi included)."""
+    v = kappa ** 2 * s2 / 3.0
+    return float(np.mean(e2 / (2 * v) + 1.5 * np.log(2 * np.pi * v)))
+
+
+def predict_ard(post, prob, ds, node_chunk=256):
+    """Posterior predictive on a Dataset: means from the ARD mean; F_var tempered by kappa^2 (the
+    calibrated quantity), E_var/V_var the untempered posterior variances."""
+    from .predict import _pack
+    from .rows import linear_rows_chunked
+    L, k2 = prob.cfg.len_basis, post.kappa ** 2
+    outs = []
+    for i in range(ds.n_batches):
+        b = jax.tree.map(lambda a, i=i: a[i], ds)
+        r = linear_rows_chunked(prob.model, prob.cfg, b, node_chunk=node_chunk)
+        E, F, V = np.asarray(r.E), np.asarray(r.F).reshape(-1, L), np.asarray(r.V).reshape(-1, L)
+        outs.append((E @ post.mean, post.var_rows(E), (F @ post.mean).reshape(-1, 3),
+                     k2 * post.var_rows(F).reshape(-1, 3), (V @ post.mean).reshape(-1, 6),
+                     post.var_rows(V).reshape(-1, 6)))
+    return _pack(outs, prob, ds)
+
+
+class ARDResult(NamedTuple):
+    posterior: ARDPosterior
+    report: dict
+
+
+def _val_errors(post, prob, ds):
+    """Per-atom squared force error and untempered s2 on the live force rows of ds."""
+    from .rows import linear_rows_chunked
+    L, e2, s2 = prob.cfg.len_basis, [], []
+    for i in range(ds.n_batches):
+        b = jax.tree.map(lambda a, i=i: a[i], ds)
+        live = np.asarray(b.w_F) > 0
+        if not live.any():
+            continue
+        F = np.asarray(linear_rows_chunked(prob.model, prob.cfg, b).F)[live]          # (n, 3, L)
+        pred = (F.reshape(-1, L) @ post.mean).reshape(-1, 3)
+        e2.append(np.sum((np.asarray(b.y_F)[live] - pred) ** 2, 1))
+        s2.append(post.var_rows(F.reshape(-1, L)).reshape(-1, 3).sum(1))
+    if not e2:
+        return np.zeros(0), np.zeros(0)
+    return np.concatenate(e2), np.concatenate(s2)
+
+
+def _ard_fit_warnings(stage, info, names):
+    """Warning lines for an ARD evidence fit that did not converge or ended with a hyperparameter
+    on its bound (a scale at a_floor is the conditioning guard, not the evidence optimum)."""
+    out = []
+    if not info.get("success", True):
+        out.append(f"WARNING: ARD {stage} evidence fit did not converge: {info.get('message', '?')}")
+    hit = [n for n, b in zip(names, info.get("at_bound", [])) if b]
+    if hit:
+        out.append(f"WARNING: ARD {stage} evidence fit ended at a bound for {', '.join(hit)}")
+    return out
+
+
+def run_ard_stage(cfg, data, built, theta, log=print):
+    """Fit ARD on a train subset, choose kappa on the held-out rest (never the test set), then refit
+    on ALL training data (started from the subset optimum) and keep kappa."""
+    import time
+    from .data import build_dataset
+    mode = getattr(cfg, "ard_mode", "joint")
+    val_frac = getattr(cfg, "ard_val_frac", 0.2)
+    cond_max = getattr(cfg, "ard_cond_max", 1e14)
+    t0 = time.time()
+    prob = built.prob
+    body_col = body_order_columns(data.meta, prob.cfg)
+    rng = np.random.default_rng(cfg.seed)
+    idx = rng.permutation(len(data.train))
+    nval = max(1, int(round(val_frac * len(data.train))))
+    val = [data.train[i] for i in idx[:nval]]
+    fit_ = [data.train[i] for i in idx[nval:]]
+    if not any(c.forces is not None and c.w_F > 0 for c in val):
+        raise ValueError(f"the ARD validation split ({nval} configs, ard_val_frac={val_frac}) has "
+                         f"no force labels to fit the temperature kappa on")
+    ds_fit = build_dataset(fit_, data.meta, data.E0, cfg.batch)
+    ds_val = build_dataset(val, data.meta, data.E0, cfg.batch)
+    ev = ARDEvidence(ard_statistics(theta, prob, ds_fit, mode), np.asarray(prob.gamma), body_col)
+    names = (["log_sigma_E", "log_sigma_F", "log_sigma_V"] if ev.joint else []) + [f"a_{g}body" for g in ev.groups]
+    h_fit, v_fit, info_fit = fit_ard(ev, ev.h0(theta), cond_max)
+    for w in _ard_fit_warnings("fit-subset", info_fit, names):
+        log(w)
+    post_fit = ard_posterior(ev, h_fit, 1.0, data.meta)
+    e2, s2 = _val_errors(post_fit, prob, ds_val)
+    ok = s2 > 0                            # atoms with zero force rows (isolated, 1-atom configs): no information
+    e2, s2 = e2[ok], s2[ok]
+    if len(e2) == 0:
+        raise ValueError(f"the ARD validation split (ard_val_frac={val_frac}) has no atom with a "
+                         f"non-zero force row to fit the temperature kappa on")
+    kappa = kappa_closed_form(e2, s2)
+    log(f"ARD: fit-subset logev {v_fit:.2f} ({info_fit['message']}, nit {info_fit['nit']}); "
+        f"kappa {kappa:.3f} from {len(e2)} held-out atoms")
+    del ev
+    ev = ARDEvidence(ard_statistics(theta, prob, data.ds_train, mode), np.asarray(prob.gamma), body_col)
+    v_start = ev.value_and_grad(np.clip(h_fit, *ev.bounds(h_fit, cond_max)))[0]   # refit's start
+    h, v, info = fit_ard(ev, h_fit, cond_max)
+    for w in _ard_fit_warnings("full", info, names):
+        log(w)
+    post = ard_posterior(ev, h, kappa, data.meta)
+    report = {"mode": mode, "groups": list(ev.groups), "h": h.tolist(), "h_names": names,
+              "logev_full": v, "logev_full_start": v_start, "optimiser": info, "optimiser_fit": info_fit,
+              "a_floor": ev.a_floor,
+              "tempered_quantities": ["F"],        # E_var / V_var are the untempered posterior variances
+              "kappa": kappa, "n_val_atoms": int(len(e2)), "n_val_configs": len(val), "n_fit_configs": len(fit_),
+              "val_rms_z_untempered": float(np.sqrt(np.mean(e2 / (s2 / 3)) / 3)),
+              "val_rms_z_tempered": float(np.sqrt(np.mean(e2 / (kappa ** 2 * s2 / 3)) / 3)),
+              "val_nll_untempered": _force_nll(e2, s2, 1.0), "val_nll_tempered": _force_nll(e2, s2, kappa),
+              "seconds": time.time() - t0}
+    if getattr(cfg, "ard_laplace", False):
+        lap = laplace_hypers(ev, h)
+        report["laplace_std_h"] = lap["std"].tolist()
+        report["laplace_eigs"] = lap["eigs"].tolist()
+    return ARDResult(post, report)
