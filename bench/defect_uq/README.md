@@ -100,5 +100,26 @@ AUROC is OOD atoms against test atoms; ρ is Spearman ρ(score, |ΔF|).
    tempered or generalised posterior) should transfer. POPS's σ is calibrated in-distribution
    (rms-z 0.6–0.7) but drifts OOD (strained surfaces 1.09).
 
-Next: the calibrated tempered ARD posterior (coverage on held-out families), node-chunked design
-rows (force σ on the big cells), and per-atom posterior σ_F as a calculator output.
+### Calibration (`scoring/calibrate.py`)
+
+Each atom's force error is modelled as N(0, (s²/3) I₃). Scale parameters are fitted by NLL on half
+of the in-distribution test configs only; everything else is evaluation.
+
+| model | rms-z: test bulk / test defect / divac / vac_surf / vac_sf / strained surf | 90 % coverage: same order |
+|---|---|---|
+| POPS as fitted | 0.61 / 0.70 / 0.67 / 0.97 / 0.68 / 1.09 | 0.99 / 0.98 / 0.99 / 0.89 / 0.98 / 0.85 |
+| POPS rescaled (×0.63) | 0.97 / 1.11 / 1.06 / 1.53 / 1.07 / 1.72 | 0.90 / 0.84 / 0.86 / 0.66 / 0.85 / 0.54 |
+| **tempered ARD posterior, s = 6.85 σ_ARD** | **1.01 / 0.94 / 1.01 / 1.01 / 0.91 / 1.02** | **0.88 / 0.92 / 0.88 / 0.88 / 0.92 / 0.88** |
+| tempered fitted-Γ posterior, s = 6.69 σ_BLR | 1.01 / 0.94 / 1.01 / 1.03 / 0.91 / 1.05 | 0.88 / 0.92 / 0.88 / 0.87 / 0.92 / 0.87 |
+| POPS + tempered ARD | 0.99 / 1.03 / 1.05 / 1.25 / 1.01 / 1.31 | 0.89 / 0.88 / 0.87 / 0.77 / 0.88 / 0.72 |
+
+- **A single temperature fitted in-distribution calibrates the Bayesian posterior σ_F on every
+  held-out defect combination**, including strained surfaces: rms-z 0.91–1.02 and 90 % coverage
+  0.87–0.92.
+- This is a tempered, or generalised, posterior: the likelihood's weight is scaled by 1/κ², and κ
+  absorbs the model misspecification.
+- POPS cannot be rescaled into calibration, because its σ does not grow off-distribution.
+- Adding the POPS term to the tempered ARD posterior degrades OOD calibration.
+
+Next: node-chunked design rows (force σ on the big cells), then the tempered ARD posterior σ_F as a
+per-atom output of ace-jax fits and calculators.
