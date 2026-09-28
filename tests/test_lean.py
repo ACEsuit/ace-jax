@@ -228,3 +228,50 @@ def test_block_needs_a_folded_model():
     m, _, _ = load(str(MODELS["sige_nofit"]), fold=False)
     with pytest.raises(ValueError, match="folded"):
         block_dense(m)
+
+
+# ------------------------------------------------------------------ evaluation paths
+@pytest.mark.parametrize("layout", ["sparse", "dense"])
+@pytest.mark.parametrize("skin", [0.0, 1.0])
+def test_calculator_evaluates_the_lean_form(layout, skin):
+    from ace_jax.calc.point import ACECalculator
+    from ace_jax.eval import site_descriptors
+    path = str(MODELS["Cantor_small"])
+    m, meta, _ = load(path)
+    at = _structure(meta)
+    res = {}
+    for use in (True, False):
+        calc = ACECalculator(path, layout=layout, skin=skin, lean=use)
+        assert calc.model.energy_only is False                  # the model as loaded
+        assert calc.eval_model.energy_only is use
+        a = at.copy()
+        a.calc = calc
+        res[use] = (a.get_potential_energy(), a.get_forces(), a.get_stress())
+        # descriptors come from the full model, lean or not
+        np.testing.assert_array_equal(
+            calc.get_site_descriptors(a),
+            site_descriptors(m, a.positions, a.numbers, a.cell.array, a.pbc, meta=meta))
+    E0, F0, S0 = res[False]
+    E1, F1, S1 = res[True]
+    assert abs(E1 - E0) <= TOL * max(1.0, abs(E0))
+    np.testing.assert_allclose(F1, F0, rtol=0, atol=TOL)
+    np.testing.assert_allclose(S1, S0, rtol=0, atol=TOL)
+
+
+def test_calculator_relean_on_new_model():
+    from ace_jax.calc.point import ACECalculator
+    m, meta, _ = load(str(MODELS["sige_nofit"]))
+    calc = ACECalculator(m, meta)
+    first = calc.eval_model
+    m2 = dataclasses.replace(m, ctilde=2 * m.ctilde)
+    calc.model = m2
+    assert calc.eval_model is not first and calc.eval_model.energy_only
+    np.testing.assert_allclose(np.asarray(calc.eval_model.ctilde), np.asarray(m2.ctilde))
+
+
+def test_calculator_pace_is_as_given():
+    from ace_jax.calc.point import ACECalculator
+    from conftest import pace_fixture
+    y = str(pace_fixture(ROOT / "fixtures" / "pace" / "gesi_sbessel.yace"))
+    calc = ACECalculator(y)
+    assert calc.eval_model is calc.model

@@ -92,7 +92,8 @@ def test_bundle_written(tmp_path):
     on_disk = json.loads((tmp_path / "m.json").read_text())
     assert on_disk["contract"]["n_species"] == 2
     assert on_disk["ace_jax"] == {"layout": "dense", "elements": [32, 14],
-                                  "type_elements": [32, 14], "k_dense": 64, "owned_rows": None}
+                                  "type_elements": [32, 14], "k_dense": 64, "owned_rows": None,
+                                  "lean": False}           # PACE: no lean form
     assert b["ace_jax"]["layout"] == "dense"
 
 
@@ -113,6 +114,39 @@ def test_lammps_type_order_differs_from_model_order(layout):
     E = float(jnp.sum(f(jnp.asarray(at.positions), species, graph)))
     at.calc = ACECalculator(y, layout="sparse")
     assert E == pytest.approx(at.get_potential_energy(), abs=1e-10)
+
+
+@pytest.mark.parametrize("layout", ["sparse", "dense"])
+def test_ace_bundle_uses_the_lean_form(tmp_path, layout):
+    """export_lammps builds the energy function from `lean(model)` (the lean
+    evaluation form, exact), unless lean=False."""
+    require_optional("lammps_jax")
+    from ace_jax.export.lammps import export_lammps
+    model, meta, _ = load(MODELS["ace"]())
+    for use in (True, False):
+        b = export_lammps(model, meta, tmp_path / "m.json", max_atoms=256,
+                          max_edges=256 * 64, k_dense=64, layout=layout, lean=use)
+        assert b["ace_jax"]["lean"] is use
+
+
+@pytest.mark.parametrize("layout", ["sparse", "dense"])
+def test_lean_energy_fn_matches_full(layout):
+    """The bundle's energy function on the lean model equals the full model's."""
+    from ace_jax.eval.model import lean
+    model, meta, _ = load(MODELS["ace"]())
+    at = _cluster()
+    at.numbers = np.where(at.numbers == 32, 32, 14)
+    graph, g = _lammps_graph(at, meta["rcut"])
+    z2i = {z: i for i, z in enumerate(meta["elements"])}
+    species = jnp.asarray([z2i[int(z)] for z in at.numbers], jnp.int32)
+    K = int(np.bincount(g.senders, minlength=len(at)).max())
+    pos = jnp.asarray(at.positions)
+    out = []
+    for m in (model, lean(model)):
+        f = make_energy_fn(m, len(meta["elements"]), layout, k_dense=K + 3)
+        out.append(jax.jit(jax.value_and_grad(lambda p: jnp.sum(f(p, species, graph))))(pos))  # noqa: B023
+    assert float(out[1][0]) == pytest.approx(float(out[0][0]), rel=1e-12)
+    np.testing.assert_allclose(np.asarray(out[1][1]), np.asarray(out[0][1]), rtol=0, atol=1e-12)
 
 
 def test_bundle_records_owned_rows_even_for_sparse(tmp_path):
