@@ -123,6 +123,10 @@ class ACEModel(EdgeSiteModel):
     # and fitting need B itself.  See `fold_readout`.
     ctilde: jax.Array = None
     folded: bool = eqx.field(static=True, default=False)
+    # The pair readout Wpair[:, z] folded into the pair radial table (`fold_pair`,
+    # part of `lean`): the energy is unchanged, but the pair channel is no longer
+    # Apair, so the basis methods (descriptors, Jacobians, fitting rows) refuse.
+    energy_only: bool = eqx.field(static=True, default=False)
 
     # -------------------------------------------------- edge embeddings
     def _radial_one(self, r, zi, zj, kind, trans, coefs, grid, Wnlq, ABC, env):
@@ -214,6 +218,12 @@ class ACEModel(EdgeSiteModel):
                  else self.rnl_Wnlq.shape[-2])
         return n_rnl, (self.lmax + 1) ** 2
 
+    def _check_basis(self):
+        if self.energy_only:
+            raise ValueError("an energy-only (lean) ACEModel has its pair readout folded into "
+                             "the pair radial, so it has no basis: use the model `lean` was "
+                             "applied to for descriptors, Jacobians or fitting")
+
     def _aa(self, A):
         return jnp.concatenate([jnp.prod(A[:, g], axis=-1) for g in self.aa_specs], axis=-1)
 
@@ -237,6 +247,7 @@ class ACEModel(EdgeSiteModel):
 
     def site_basis(self, rij, zi, zj, segment_ids, n_nodes, mask=None):
         """Sparse (edge-list) pooling -- the layout lammps-jax exports."""
+        self._check_basis()
         edge_A, Rpair = self.edge_features(rij, zi, zj)
         return self._from_pooled(pool_sparse(edge_A, segment_ids, n_nodes, mask),
                                  pool_sparse(Rpair, segment_ids, n_nodes, mask))
@@ -245,6 +256,7 @@ class ACEModel(EdgeSiteModel):
         """Dense (n, K) pooling -- matscipy-neighbours' `neighbour_matrix` form,
         which maps onto ET's own (maxneigs, nnodes, nfeat) layout and needs no
         scatter.  rij (n,K,3), zi/zj (n,K), mask (n,K)."""
+        self._check_basis()
         n, K = mask.shape
         flat = lambda a: a.reshape(n * K, *a.shape[2:])
         edge_A, Rpair = self.edge_features(flat(rij), flat(zi), flat(zj))
@@ -295,6 +307,7 @@ class ACEModel(EdgeSiteModel):
         (docs/plans/jax_ace_port_plan.md, decision gate 3).  Padded edges
         (mask False) contribute zero rows.
         """
+        self._check_basis()
         def feats(r1, z1, z2):
             eA, Rp = self.edge_features(r1[None, :], z1[None], z2[None])
             return eA[0], Rp[0]
@@ -326,6 +339,7 @@ class ACEModel(EdgeSiteModel):
         (E, n_B, n_A) -- 14 GB at 1348 basis functions x 72 A-functions on
         an 18k-edge batch -- while this needs only (n, n_B, n_A) + the output.
         """
+        self._check_basis()
         n, K = mask.shape
         flat = lambda a: a.reshape(n * K, *a.shape[2:])
 
@@ -367,6 +381,7 @@ class ACEModel(EdgeSiteModel):
         """The pair-density channels only: per-site Xpair (n, n_pair) and the
         per-edge Jacobian (n*K, n_pair, 3), node-major -- exactly the pair slices
         of `edge_jacobian_dense`'s X and J, with no many-body basis evaluated."""
+        self._check_basis()
         n, K = mask.shape
         flat = lambda a: a.reshape(n * K, *a.shape[2:])
         f = lambda r1, z1, z2: self.pair_radial(r1[None, :], z1[None], z2[None])[0]
@@ -428,3 +443,118 @@ def fold_readout(model):
     with highest_precision():                 # TF32 would corrupt ctilde on Ampere+
         ctilde = model.A2B.T @ model.WB       # (n_AA, NZ)
     return dataclasses.replace(model, ctilde=ctilde, folded=True)
+
+
+# ------------------------------------------------------------------ lean evaluation form
+# Exact, static data transforms of a loaded (folded) model that drop per-edge work
+# the energy never reads (docs/ace-vs-pace-gap.md sections 1, 3.2 and 4.1).  They
+# are for evaluation only -- ACECalculator and export_lammps apply `lean` -- and
+# never for fitting, which needs the full basis: `load` returns the full model.
+import dataclasses as _dc  # noqa: E402
+
+import numpy as _np  # noqa: E402
+
+
+def _l_of_y(y):
+    return _np.floor(_np.sqrt(_np.asarray(y))).astype(int)
+
+
+def _reselect(model):
+    """Rebuild the one-hot A selectors after the radial / harmonic widths changed."""
+    if model.edge_a_kind != "matmul":
+        return model
+    m = _dc.replace(model, edge_a_kind="gather", a_sel_r=None, a_sel_y=None)
+    return with_edge_a_kind(m, "matmul")
+
+
+def _rnl_owner(model):
+    """(n_rnl,) the neighbour species each R_nl column is nonzero for, or None
+    when R_nl is not block-sparse in z_j.  ACE1's splined R_nl always is: every
+    column is nonzero for exactly one z_j, whatever z_i (checked here, not
+    assumed).  Spline tables only; the other radial kinds return None."""
+    if model.radial_kind != "spline":
+        return None
+    nzm = _np.abs(_np.asarray(model.rnl_coefs)).max(axis=2) > 0         # (zi, zj, r)
+    own = nzm.any(axis=0)                                               # (zj, r)
+    if (own.sum(axis=0) > 1).any() or not (nzm == nzm[:1]).all():
+        return None
+    return own.argmax(axis=0)
+
+
+def prune_columns(model):
+    """Drop the R_nl columns no A entry reads, and the Y_lm above the largest l
+    any A entry uses.  Exact: the A basis (hence B, Apair and the energy) is
+    unchanged, only never-read columns go.
+
+    ACEpotentials exports lmax from the total degree, but a product of order nu
+    needs nu factors whose l couple to 0 within the degree budget, so no A entry
+    reaches it (lmax 4 -> 2 on Cantor_medium); and about 40% of the R_nl columns
+    are only in other species blocks' budgets (99 -> 58).  Columns are re-sorted
+    by (l, neighbour species, original index), so each l is one contiguous block
+    (`block_dense`).  Returns `model` itself when nothing changes."""
+    ar, ay = _np.asarray(model.aspec_r), _np.asarray(model.aspec_y)
+    la = _l_of_y(ay)
+    lmax = int(la.max()) if la.size else 0
+    l_of = {}
+    for r, l in zip(ar.tolist(), la.tolist()):
+        l_of.setdefault(r, set()).add(l)
+    own = _rnl_owner(model)
+    order = sorted(l_of, key=lambda r: (min(l_of[r]), 0 if own is None else int(own[r]), r))
+    n_rnl = model.edge_a_widths()[0]
+    if order == list(range(n_rnl)) and lmax == model.lmax:
+        return model
+    cols = _np.asarray(order)
+    new = _np.zeros(n_rnl, _np.int64)
+    new[cols] = _np.arange(len(cols))
+    kw = {}
+    if model.radial_kind == "spline":
+        kw["rnl_coefs"] = model.rnl_coefs[..., cols]
+    elif model.radial_kind == "analytic":
+        kw["rnl_Wnlq"] = model.rnl_Wnlq[..., cols, :]
+    elif model.radial_kind == "spline_factorised":
+        kw.update(rnl_emb_nidx=model.rnl_emb_nidx[cols], rnl_emb_kidx=model.rnl_emb_kidx[cols])
+    else:
+        raise ValueError(f"unknown radial_kind {model.radial_kind!r}")
+    return _reselect(_dc.replace(model, **kw, lmax=lmax,
+                                 aspec_r=jnp.asarray(new[ar], model.aspec_r.dtype)))
+
+
+def fold_pair(model):
+    """Fold the pair readout into the pair radial: one pair column per edge
+    instead of n_pair, e_pair,i = sum_j sum_p Rpair_p(r_ij) Wpair[p, z_i] with
+    the sum over p done once here, on the (linear) spline or Wnlq coefficients.
+    The same fold as `fold_readout`, for the pair channel.  Exact to roundoff.
+
+    The result is `energy_only`: its pair channel is now the pair energy, not
+    Apair, so the basis methods refuse.  Needs a folded model (the unfolded
+    energy materialises the basis)."""
+    if not model.folded:
+        raise ValueError("fold_pair needs a folded model (fold_readout first)")
+    if model.energy_only:
+        return model
+    dt = model.Wpair.dtype
+    W = _np.asarray(model.Wpair, _np.float64)                             # (n_pair, NZ)
+    if model.pair_radial_kind == "spline":
+        pc = _np.asarray(model.pair_coefs, _np.float64)                   # (zi, zj, c, p)
+        kw = {"pair_coefs": jnp.asarray(_np.einsum("ijcp,pi->ijc", pc, W)[..., None],
+                                        model.pair_coefs.dtype)}
+    elif model.pair_radial_kind == "analytic":
+        pw = _np.asarray(model.pair_Wnlq, _np.float64)                    # (zi, zj, p, q)
+        kw = {"pair_Wnlq": jnp.asarray(_np.einsum("ijpq,pi->ijq", pw, W)[:, :, None, :],
+                                       model.pair_Wnlq.dtype)}
+    else:
+        raise ValueError(f"unknown pair_radial_kind {model.pair_radial_kind!r}")
+    return _dc.replace(model, **kw, Wpair=jnp.ones((1, W.shape[1]), dt), energy_only=True)
+
+
+def lean(model):
+    """The evaluation form of a folded ACEModel: `prune_columns`, `fold_pair`
+    and the l-blocked dense A (`block_dense`).  Exact to roundoff in E, F and the
+    virial; 1.3-3x faster forces on the benchmark models (docs/ace-vs-pace-gap.md).
+
+    Energy only (see `fold_pair`): keep the original for descriptors and
+    fitting.  Anything that is not a folded ACEModel (a PACEModel, an unfolded
+    model) is returned as given, as is a model that is already lean."""
+    if not isinstance(model, ACEModel) or not model.folded or model.energy_only:
+        return model
+    return fold_pair(prune_columns(model))
