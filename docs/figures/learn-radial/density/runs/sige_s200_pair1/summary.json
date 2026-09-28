@@ -1,0 +1,30 @@
+{
+ "selected": "density_lam_eta=0",
+ "scores": {
+  "init": 14.034557236299811,
+  "radials_only": 1.1014335360919894,
+  "density_lam_eta=0": 1.0955185218952768
+ },
+ "n_q": 12,
+ "ntrain": 200,
+ "nval": 100,
+ "lam_grid": [
+  0.1
+ ],
+ "spec_grid": [
+  0.0
+ ],
+ "spec_p": 4.0,
+ "gap_grid": [
+  0.0
+ ],
+ "steps": 200,
+ "reprofile_every": 50,
+ "learn_sigma_e_mult": 1.0,
+ "to_analytic_relres_max": 0.00021616685161215753,
+ "density": "pair",
+ "P_selected": 1,
+ "density_mode": "joint",
+ "lam_eta_grid": "0",
+ "seconds": 1129.5639708042145
+}
