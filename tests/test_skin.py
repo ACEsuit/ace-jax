@@ -264,3 +264,67 @@ def test_skin_toggled_after_construction():
     _close(_efs(c, at), _efs(ref, at))
     assert c.last_timing["rebuilds"] == n0 + 2 and c._skin_state is None
 
+
+def _pbc(a):
+    a.pbc = (True, True, False)
+    return a, 1
+
+
+def _drop_atom(a):
+    del a[5]
+    return a, 1
+
+
+def _lattice_wrap(a):
+    # the same structure, some atoms one or two lattice vectors over: displacement
+    # is a box length, so a rebuild, and nothing may depend on the image an atom is in
+    a.positions[:7] += a.cell[0] - a.cell[2]
+    a.positions[7:9] -= a.cell[1]
+    return a, 1
+
+
+def _cell_change(a):
+    a.set_cell(a.cell * 1.01, scale_atoms=True)
+    return a, 1
+
+
+def _species(a):
+    a.numbers[1] = 14 if a.numbers[1] == 32 else 32
+    return a, 1
+
+
+def _into_cutoff(a):
+    """Two atoms just under skin / 2 each toward each other: a pair in the skin
+    shell (rc < d) closes to inside rc with no rebuild."""
+    from ase.neighborlist import neighbor_list
+    rc = float(ACECalculator(M).cutoff)
+    i, j, d, D = neighbor_list("ijdD", a, rc + 1.0)
+    # a shell pair that 2 * 0.499 A (each atom just under skin / 2) brings inside rc
+    k = np.flatnonzero((d > rc + 0.05) & (d < rc + 0.9) & (i != j))[0]
+    step = 0.499 * D[k] / d[k]
+    a.positions[i[k]] += step
+    a.positions[j[k]] -= step
+    assert np.linalg.norm(D[k] - 2 * step) < rc - 0.05         # now inside the cutoff
+    return a, 0
+
+
+MUTATIONS = {"pbc": _pbc, "atom_count": _drop_atom, "lattice_wrap": _lattice_wrap,
+             "cell": _cell_change, "species": _species, "shell_into_cutoff": _into_cutoff}
+
+
+@pytest.mark.parametrize("name", list(MUTATIONS))
+def test_skin_equals_rebuild_after_each_change(name):
+    """Each change a skin list must notice (or, below the threshold, must not
+    need to): the result equals a fresh rebuild (skin=0) to 1e-12 on the call
+    itself and on the next small step, with the rebuild counter as expected."""
+    at = _cell("tric")
+    at.rattle(0.02, seed=7)
+    c, ref = ACECalculator(M, layout="dense", skin=1.0), ACECalculator(M, layout="dense", skin=0.0)
+    _close(_efs(c, at), _efs(ref, at))
+    n0 = c.last_timing["rebuilds"]
+    at, rebuilt = MUTATIONS[name](at.copy())
+    _close(_efs(c, at), _efs(ref, at))
+    assert c.last_timing["rebuilds"] == n0 + rebuilt
+    at.positions[0] += [0.02, -0.01, 0.01]               # just after (or without) the rebuild
+    _close(_efs(c, at), _efs(ref, at))
+    assert c.last_timing["rebuilds"] == n0 + rebuilt
