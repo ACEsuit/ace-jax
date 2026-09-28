@@ -33,4 +33,3 @@ def test_sigma_type_recovers_injected_ratio(two_type_synthetic):
     from ace_jax.fit.fit_api import fit_linear_with_sigma_type
     ratios = fit_linear_with_sigma_type(two_type_synthetic)   # exp(log_ratios)[:, 0]
     assert 2.0 < float(ratios[1] / ratios[0]) < 4.5           # ~3x recovered by evidence
-

@@ -201,6 +201,19 @@ A bare `pytest` uses pytest-xdist when it is installed (`ACEJAX_TEST_WORKERS`
 sets the worker count; `-n 0` forces a single process, as CI does). The `slow`
 marker is excluded by default.
 
+## Linting and pre-commit
+
+```bash
+uv run ruff check                    # lint (config in pyproject.toml [tool.ruff])
+uv run pre-commit install            # once per clone: ruff + whitespace/YAML/large-file hooks on commit
+uv run pre-commit run --all-files    # what the `lint` CI job runs
+```
+
+No formatter is enforced: the code keeps its dense one-line style, and the ruff
+rules that fight it (semicolon statements, short math names, import sorting,
+line length) are off. Bump the ruff pin in the dev group and the `rev` in
+`.pre-commit-config.yaml` together.
+
 ## Julia parity (maintainers / CI only)
 
 The everyday test suite is pip-only (no Julia), run against committed npz
