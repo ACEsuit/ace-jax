@@ -22,7 +22,7 @@ DATA = pathlib.Path(os.environ.get("LEARN_RADIAL_DATA", "/data")) if modal.is_lo
 image = (
     modal.Image.debian_slim(python_version="3.11")
     .pip_install("jax[cuda12]==0.10.2", "equinox>=0.11", "numpy<2.3", "scipy", "lineax>=0.1.1",
-                 "ase>=3.22", "pyyaml", "numpyro>=0.16", "optax>=0.2", "blackjax>=1.6")
+                 "ase>=3.22", "pyyaml", "extxyz>=0.4.5", "numpyro>=0.16", "optax>=0.2", "blackjax>=1.6")
     .env({"PYTHONPATH": "/ace-jax/src", "JAX_ENABLE_X64": "1", "XLA_PYTHON_CLIENT_PREALLOCATE": "false"})
     .add_local_dir(ROOT / "src", "/ace-jax/src")
     .add_local_dir(ROOT / "bench" / "learn_radial", "/ace-jax/bench/learn_radial")
