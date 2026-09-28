@@ -45,7 +45,7 @@ Models come as **unfitted definitions** (coefficients to be fit here) or
 
 ```python
 import ace_jax as aj
-model, meta = aj.load("si_fitted.npz")
+model, meta, z = aj.load("si_fitted.npz")      # model, meta dict, raw npz
 from ace_jax import ACECalculator
 atoms.calc = ACECalculator("si_fitted.npz")
 atoms.get_potential_energy(); atoms.get_forces()
