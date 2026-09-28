@@ -221,6 +221,8 @@ Other entry points:
   that is not the model's coefficients, i.e. a posterior from another fit), and
   `RuntimeError` unless `jax_enable_x64` is on. `forces_std` holds the whole
   cell's force design rows, ~N·3·L·8 bytes.
+- **The default sandwich variance (`--ard-variance sandwich`) needs the training data at fit
+  time and stores an (L, n_cfg) factor.** Use `--ard-variance kappa` for the smaller posterior.
 - **First `construct` of a new basis shape** runs Julia (via juliacall) to
   build the coupling table, then caches it in `~/.cache/ace-jax/coupling`.
   Later runs are pure Python.

@@ -199,13 +199,18 @@ aj fit --model si.npz --data all.xyz --ntrain 40 --ntest 10 --e0 lsq $K \
 ```
 
 `--uq ard` fits prior scales per body order and the noise scales by evidence (joint type-II ML).
-A single temperature κ, from a train hold-out, calibrates the force σ. The prototype of this
-method (`bench/defect_uq`, PR #12) held rms-z 0.91–1.02 on held-out Cantor defect combinations;
-the acceptance run of this implementation is pending. `--uq ard` changes the mean as well as
-the uncertainty: `model.npz` holds the ARD posterior mean, not the BLR/MAP mean. `posterior.npz` stores the
-float32 posterior factor, ~0.9 GB at L = 15k. `--ard-mode sequential` is the low-memory fallback.
-The calculator's `forces_std` holds the whole cell's force design rows, about N·3·L·8 bytes
-(N atoms, L columns; 7 GB for 100k atoms at L = 3k), so size cells to fit them.
+The default `--ard-variance sandwich` serves the configuration-clustered sandwich variance,
+σ² = λ²·φA⁻¹MA⁻¹φᵀ, the misspecification-robust covariance, with λ from the train hold-out (fitted
+the same way as κ). On the bench365 prototype it ranked local errors better than the tempered
+posterior (Spearman ρ 0.26–0.37 against 0.15–0.26) at the same calibration and OOD detection.
+`--ard-variance kappa` keeps the single-temperature posterior variance κ²φA⁻¹φᵀ instead. The
+prototype of this method (`bench/defect_uq`, PR #12) held rms-z 0.91–1.02 on held-out Cantor
+defect combinations; the acceptance run of this implementation is pending. `--uq ard` changes the
+mean as well as the uncertainty: `model.npz` holds the ARD posterior mean, not the BLR/MAP mean.
+`posterior.npz` stores the float32 posterior factor, ~0.9 GB at L = 15k, and (for the default
+sandwich variance) an additional (L, n_train_configs) float32 factor. `--ard-mode sequential` is
+the low-memory fallback. The calculator's `forces_std` holds the whole cell's force design rows,
+about N·3·L·8 bytes (N atoms, L columns; 7 GB for 100k atoms at L = 3k), so size cells to fit them.
 
 `aj fit` and the research driver `bench/acegp_cantor/run.py` share one pipeline
 (`ace_jax.fit.pipeline`: `FitConfig`, `load_fit_data`, `fit`, `write_outputs`,
