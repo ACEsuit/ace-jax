@@ -1,0 +1,1108 @@
+[
+ {
+  "yace": "/ace-jax/bench/scaling/models/pace_Cantor_medium.yace",
+  "system": "Cantor",
+  "n": 8192,
+  "dtype": "float64",
+  "layout": "dense",
+  "variant": "baseline",
+  "platform": "gpu",
+  "device": "NVIDIA A100-SXM4-80GB",
+  "first_call_s": 5.8215959889999995,
+  "calc": {
+   "call_s": 0.019615639000001295,
+   "nlist_s": 0.010692507499999948,
+   "model_s": 0.006902283499998774,
+   "layout": "dense",
+   "backend": "neighbour_matrix"
+  },
+  "E": 1639.909472802445,
+  "K": 44,
+  "n_slots": 360448,
+  "n_edges": 344064,
+  "pre_model_split": {
+   "neighbour_matrix_s": 0.008957394500001215,
+   "build_args_s": 0.0026785490000005296,
+   "species_index_s": 0.001576065499998336,
+   "d2h_results_s": 9.864999999109614e-06
+  },
+  "parity_vs_calc": {
+   "dE": 0.0,
+   "max_dF": 1.1102230246251565e-15
+  },
+  "model": {
+   "efv_s": 0.006721768000000239,
+   "energy_only_s": 0.0018255234999990932,
+   "efv_cost": {
+    "flops": 3778246144.0,
+    "bytes": 4927502848.0
+   },
+   "energy_cost": {
+    "flops": 1123606016.0,
+    "bytes": 1464364544.0
+   }
+  },
+  "peak_bytes": 937229056
+ },
+ {
+  "yace": "/ace-jax/bench/scaling/models/pace_Cantor_medium.yace",
+  "system": "Cantor",
+  "n": 8192,
+  "dtype": "float64",
+  "layout": "dense",
+  "variant": "fm",
+  "platform": "gpu",
+  "device": "NVIDIA A100-SXM4-80GB",
+  "first_call_s": 6.0810295169999975,
+  "calc": {
+   "call_s": 0.02010412549999785,
+   "nlist_s": 0.01059504899999908,
+   "model_s": 0.00697590499999734,
+   "layout": "dense",
+   "backend": "neighbour_matrix"
+  },
+  "E": 1639.909472802445,
+  "K": 44,
+  "n_slots": 360448,
+  "n_edges": 344064,
+  "pre_model_split": {
+   "neighbour_matrix_s": 0.005372965999995927,
+   "build_args_s": 0.002933808999994625,
+   "species_index_s": 0.0015452655000025572,
+   "d2h_results_s": 1.0043500001444272e-05
+  },
+  "parity_vs_calc": {
+   "dE": 2.2737367544323206e-13,
+   "max_dF": 8.881784197001252e-16
+  },
+  "parity_vs_baseline": {
+   "dE_per_atom": 0.0,
+   "max_dF": 8.881784197001252e-16,
+   "max_dV": 2.2737367544323206e-13
+  },
+  "model": {
+   "efv_s": 0.006737467500002481,
+   "energy_only_s": 0.0018546004999997479,
+   "efv_cost": {
+    "flops": 3778233856.0,
+    "bytes": 4537989632.0
+   },
+   "energy_cost": {
+    "flops": 1123606016.0,
+    "bytes": 1464397568.0
+   }
+  },
+  "peak_bytes": 937229056
+ },
+ {
+  "yace": "/ace-jax/bench/scaling/models/pace_Cantor_medium.yace",
+  "system": "Cantor",
+  "n": 8192,
+  "dtype": "float64",
+  "layout": "dense",
+  "variant": "pool+fm",
+  "platform": "gpu",
+  "device": "NVIDIA A100-SXM4-80GB",
+  "first_call_s": 5.855260469000001,
+  "calc": {
+   "call_s": 0.01993740300000013,
+   "nlist_s": 0.011213419999997143,
+   "model_s": 0.006571741500000172,
+   "layout": "dense",
+   "backend": "neighbour_matrix"
+  },
+  "E": 1639.909472802445,
+  "K": 44,
+  "n_slots": 360448,
+  "n_edges": 344064,
+  "pre_model_split": {
+   "neighbour_matrix_s": 0.006444484999999389,
+   "build_args_s": 0.002889997499998742,
+   "species_index_s": 0.0015001120000022183,
+   "d2h_results_s": 9.238500002339833e-06
+  },
+  "parity_vs_calc": {
+   "dE": 0.0,
+   "max_dF": 1.1102230246251565e-15
+  },
+  "parity_vs_baseline": {
+   "dE_per_atom": 0.0,
+   "max_dF": 1.1102230246251565e-15,
+   "max_dV": 1.7763568394002505e-14
+  },
+  "model": {
+   "efv_s": 0.006419536999999309,
+   "energy_only_s": 0.001782269000010217,
+   "efv_cost": {
+    "flops": 2083520256.0,
+    "bytes": 2552573440.0
+   },
+   "energy_cost": {
+    "flops": 638630400.0,
+    "bytes": 868312192.0
+   }
+  },
+  "peak_bytes": 936505600
+ },
+ {
+  "yace": "/ace-jax/bench/scaling/models/pace_Cantor_medium.yace",
+  "system": "Cantor",
+  "n": 8192,
+  "dtype": "float64",
+  "layout": "dense",
+  "variant": "rec+pool+fm",
+  "platform": "gpu",
+  "device": "NVIDIA A100-SXM4-80GB",
+  "first_call_s": 4.8441957760000065,
+  "calc": {
+   "call_s": 0.017864754499989033,
+   "nlist_s": 0.010540148499998736,
+   "model_s": 0.005029589000002943,
+   "layout": "dense",
+   "backend": "neighbour_matrix"
+  },
+  "E": 1639.9094728024452,
+  "K": 44,
+  "n_slots": 360448,
+  "n_edges": 344064,
+  "pre_model_split": {
+   "neighbour_matrix_s": 0.005780471499996054,
+   "build_args_s": 0.00273233650000293,
+   "species_index_s": 0.001503319500002931,
+   "d2h_results_s": 1.0220000000060736e-05
+  },
+  "parity_vs_calc": {
+   "dE": 0.0,
+   "max_dF": 8.881784197001252e-16
+  },
+  "parity_vs_baseline": {
+   "dE_per_atom": 2.7755575615628914e-17,
+   "max_dF": 2.831068712794149e-15,
+   "max_dV": 1.8189894035458565e-12
+  },
+  "model": {
+   "efv_s": 0.004876262499998063,
+   "energy_only_s": 0.001579311500002234,
+   "efv_cost": {
+    "flops": 2026209024.0,
+    "bytes": 2411277824.0
+   },
+   "energy_cost": {
+    "flops": 636107264.0,
+    "bytes": 839476352.0
+   }
+  },
+  "peak_bytes": 936505600
+ },
+ {
+  "yace": "/ace-jax/bench/scaling/models/pace_Cantor_medium.yace",
+  "system": "Cantor",
+  "n": 8192,
+  "dtype": "float64",
+  "layout": "dense",
+  "variant": "rec+pool+rev+fm",
+  "platform": "gpu",
+  "device": "NVIDIA A100-SXM4-80GB",
+  "first_call_s": 4.77052496200001,
+  "calc": {
+   "call_s": 0.02084991850000506,
+   "nlist_s": 0.011806034000002796,
+   "model_s": 0.00523980750000419,
+   "layout": "dense",
+   "backend": "neighbour_matrix"
+  },
+  "E": 1639.9094728024452,
+  "K": 44,
+  "n_slots": 360448,
+  "n_edges": 344064,
+  "pre_model_split": {
+   "neighbour_matrix_s": 0.005491210499997123,
+   "build_args_s": 0.003055972500000337,
+   "species_index_s": 0.0016243279999983429,
+   "d2h_results_s": 1.0535500003072684e-05
+  },
+  "parity_vs_calc": {
+   "dE": 0.0,
+   "max_dF": 1.1102230246251565e-15
+  },
+  "parity_vs_baseline": {
+   "dE_per_atom": 5.551115123125783e-17,
+   "max_dF": 2.7200464103316335e-15,
+   "max_dV": 1.8189894035458565e-12
+  },
+  "parity_rev_vs_baseline": {
+   "dE_per_atom": 5.551115123125783e-17,
+   "max_dF": 2.6645352591003757e-15,
+   "max_dV": 2.2737367544323206e-12
+  },
+  "model": {
+   "efv_s": 0.004879930500003127,
+   "energy_only_s": 0.0018694610000054013,
+   "efv_cost": {
+    "flops": 2026209024.0,
+    "bytes": 2411277824.0
+   },
+   "energy_cost": {
+    "flops": 636107264.0,
+    "bytes": 839476352.0
+   },
+   "reverse_slots_host_s": 0.22527257900000563,
+   "efv_rev_s": 0.0045612274999982105,
+   "efv_rev_cost": {
+    "flops": 2025094912.0,
+    "bytes": 2464624128.0
+   }
+  },
+  "peak_bytes": 936505600,
+  "kernels": {
+   "total_gpu_us_per_call": 4154.9784,
+   "n_kernels": 56,
+   "launches_per_call": 57.0,
+   "hlo_module": "/tmp/tmp3606cmm6/module_0420.jit__lambda.sm_8.0_gpu_after_optimizations.txt",
+   "rows": [
+    {
+     "kernel": "input_scatter_fusion_1",
+     "us_per_call": 675.41,
+     "frac": 0.1626,
+     "launches_per_call": 1.0,
+     "GBps": 196.6,
+     "hlo_op": "fusion",
+     "out_shape": "f64[8192,180]{1,0}",
+     "bytes_in": 120986716,
+     "bytes_out": 11796480,
+     "bwd": true,
+     "srcs": [],
+     "op_names": [
+      "jit(<lambda>)/jvp()/gather",
+      "jit(<lambda>)/jvp(jvp())/pad",
+      "jit(<lambda>)/jvp(jvp())/slice",
+      "jit(<lambda>)/jvp(jvp(vmap(vmap(vmap()))))/mul",
+      "jit(<lambda>)/transpose(jvp())/scatter-add",
+      "jit(<lambda>)/transpose(jvp())/split"
+     ]
+    },
+    {
+     "kernel": "input_scatter_fusion_2",
+     "us_per_call": 520.32,
+     "frac": 0.1252,
+     "launches_per_call": 1.0,
+     "GBps": 300.5,
+     "hlo_op": "fusion",
+     "out_shape": "f64[8192,180]{1,0}",
+     "bytes_in": 144576816,
+     "bytes_out": 11796480,
+     "bwd": true,
+     "srcs": [],
+     "op_names": [
+      "jit(<lambda>)/jvp()/gather",
+      "jit(<lambda>)/jvp(jvp())/slice",
+      "jit(<lambda>)/jvp(jvp(vmap(vmap(vmap()))))/mul",
+      "jit(<lambda>)/transpose(jvp())/scatter-add",
+      "jit(<lambda>)/transpose(jvp())/split",
+      "jit(<lambda>)/transpose(jvp(jvp()))/add_any"
+     ]
+    },
+    {
+     "kernel": "loop_concatenate_fusion",
+     "us_per_call": 489.58,
+     "frac": 0.1178,
+     "launches_per_call": 1.0,
+     "GBps": 223.0,
+     "hlo_op": "fusion",
+     "out_shape": "f64[1486,8192]{1,0}",
+     "bytes_in": 11813080,
+     "bytes_out": 97386496,
+     "bwd": false,
+     "srcs": [],
+     "op_names": [
+      "jit(<lambda>)/jvp()/add",
+      "jit(<lambda>)/jvp()/concatenate",
+      "jit(<lambda>)/jvp()/gather",
+      "jit(<lambda>)/jvp()/lt",
+      "jit(<lambda>)/jvp()/select_n",
+      "jit(<lambda>)/jvp(jvp())/pad"
+     ]
+    },
+    {
+     "kernel": "input_scatter_fusion",
+     "us_per_call": 298.51,
+     "frac": 0.0718,
+     "launches_per_call": 1.0,
+     "GBps": 523.8,
+     "hlo_op": "fusion",
+     "out_shape": "f64[8192,180]{1,0}",
+     "bytes_in": 144576776,
+     "bytes_out": 11796480,
+     "bwd": true,
+     "srcs": [],
+     "op_names": [
+      "jit(<lambda>)/jvp()/gather",
+      "jit(<lambda>)/jvp(jvp())/slice",
+      "jit(<lambda>)/transpose(jvp())/scatter-add",
+      "jit(<lambda>)/transpose(jvp())/split",
+      "jit(<lambda>)/transpose(jvp(jvp()))/add_any",
+      "jit(<lambda>)/transpose(jvp(jvp()))/pad"
+     ]
+    },
+    {
+     "kernel": "loop_add_select_fusion",
+     "us_per_call": 234.61,
+     "frac": 0.0565,
+     "launches_per_call": 1.0,
+     "GBps": 4236.6,
+     "hlo_op": "fusion",
+     "out_shape": "(f64[360448]{0}, f64[360448]{0}, f64[360448]{0}, f64[360448]{0})",
+     "bytes_in": 982418408,
+     "bytes_out": 11534336,
+     "bwd": true,
+     "srcs": [],
+     "op_names": [
+      "a[1]",
+      "a[2]",
+      "jit(<lambda>)/jvp()/abs",
+      "jit(<lambda>)/jvp()/add",
+      "jit(<lambda>)/jvp()/and",
+      "jit(<lambda>)/jvp()/broadcast_in_dim"
+     ]
+    },
+    {
+     "kernel": "loop_concatenate_fusion_2",
+     "us_per_call": 151.58,
+     "frac": 0.0365,
+     "launches_per_call": 1.0,
+     "GBps": 2446.9,
+     "hlo_op": "fusion",
+     "out_shape": "(f64[360448,8]{1,0}, f64[360448,8]{1,0})",
+     "bytes_in": 324763648,
+     "bytes_out": 46137344,
+     "bwd": false,
+     "srcs": [],
+     "op_names": [
+      "jit(<lambda>)/jvp()/add",
+      "jit(<lambda>)/jvp()/cos",
+      "jit(<lambda>)/jvp()/div",
+      "jit(<lambda>)/jvp()/eq",
+      "jit(<lambda>)/jvp()/mul",
+      "jit(<lambda>)/jvp()/stack"
+     ]
+    },
+    {
+     "kernel": "loop_reduce_fusion",
+     "us_per_call": 136.61,
+     "frac": 0.0329,
+     "launches_per_call": 1.0,
+     "GBps": 777.8,
+     "hlo_op": "fusion",
+     "out_shape": "f64[8192,5,36]{2,1,0}",
+     "bytes_in": 94462208,
+     "bytes_out": 11796480,
+     "bwd": false,
+     "srcs": [],
+     "op_names": [
+      "jit(<lambda>)/jvp()/add",
+      "jit(<lambda>)/jvp()/dot_general",
+      "jit(<lambda>)/jvp()/gather",
+      "jit(<lambda>)/jvp()/lt",
+      "jit(<lambda>)/jvp()/select_n",
+      "jit(<lambda>)/jvp(nmka,nmak->nma)/dot_general"
+     ]
+    },
+    {
+     "kernel": "gemm_fusion_dot_1",
+     "us_per_call": 115.11,
+     "frac": 0.0277,
+     "launches_per_call": 1.0,
+     "GBps": 1432.4,
+     "hlo_op": "fusion",
+     "out_shape": "f64[8192,44,9]{2,1,0}",
+     "bytes_in": 138936320,
+     "bytes_out": 25952256,
+     "bwd": true,
+     "srcs": [],
+     "op_names": [
+      "jit(<lambda>)/transpose(jvp(nkg,nky->ngy))/transpose"
+     ]
+    },
+    {
+     "kernel": "loop_multiply_fusion_1",
+     "us_per_call": 112.84,
+     "frac": 0.0272,
+     "launches_per_call": 1.0,
+     "GBps": 1447.0,
+     "hlo_op": "fusion",
+     "out_shape": "f64[8192,44,5,8]{3,2,1,0}",
+     "bytes_in": 47939584,
+     "bytes_out": 115343360,
+     "bwd": false,
+     "srcs": [],
+     "op_names": [
+      "jit(<lambda>)/jvp()/mul",
+      "jit(<lambda>)/jvp(jit(_one_hot))/convert_element_type",
+      "jit(<lambda>)/jvp(jit(_where))/select_n"
+     ]
+    },
+    {
+     "kernel": "loop_multiply_fusion",
+     "us_per_call": 112.29,
+     "frac": 0.027,
+     "launches_per_call": 1.0,
+     "GBps": 946.3,
+     "hlo_op": "fusion",
+     "out_shape": "f64[8192,5,8,36]{3,2,1,0}",
+     "bytes_in": 11886848,
+     "bytes_out": 94371840,
+     "bwd": true,
+     "srcs": [],
+     "op_names": [
+      "jit(<lambda>)/jvp()/add",
+      "jit(<lambda>)/jvp()/gather",
+      "jit(<lambda>)/jvp()/lt",
+      "jit(<lambda>)/jvp()/select_n",
+      "jit(<lambda>)/transpose(jvp())/transpose",
+      "jit(<lambda>)/transpose(jvp(nmka,nmak->nma))/dot_general"
+     ]
+    },
+    {
+     "kernel": "gemm_fusion_dot_general_13",
+     "us_per_call": 110.6,
+     "frac": 0.0266,
+     "launches_per_call": 1.0,
+     "GBps": 1490.8,
+     "hlo_op": "fusion",
+     "out_shape": "f64[8192,40,9]{2,1,0}",
+     "bytes_in": 141295616,
+     "bytes_out": 23592960,
+     "bwd": false,
+     "srcs": [],
+     "op_names": [
+      "jit(<lambda>)/jvp(nkg,nky->ngy)/dot_general"
+     ]
+    },
+    {
+     "kernel": "input_reduce_select_fusion",
+     "us_per_call": 103.31,
+     "frac": 0.0249,
+     "launches_per_call": 1.0,
+     "GBps": 2379.5,
+     "hlo_op": "fusion",
+     "out_shape": "(f64[360448]{0}, f64[8192,44,8]{2,1,0})",
+     "bytes_in": 219873280,
+     "bytes_out": 25952256,
+     "bwd": true,
+     "srcs": [],
+     "op_names": [
+      "jit(<lambda>)/jvp()/mul",
+      "jit(<lambda>)/jvp(jit(_one_hot))/convert_element_type",
+      "jit(<lambda>)/jvp(jit(_where))/broadcast_in_dim",
+      "jit(<lambda>)/transpose(jvp())/mul",
+      "jit(<lambda>)/transpose(jvp())/reduce_sum",
+      "jit(<lambda>)/transpose(jvp(jit(_where)))/broadcast_in_dim"
+     ]
+    },
+    {
+     "kernel": "gemm_fusion_dot_2",
+     "us_per_call": 102.87,
+     "frac": 0.0248,
+     "launches_per_call": 1.0,
+     "GBps": 1602.8,
+     "hlo_op": "fusion",
+     "out_shape": "f64[8192,44,40]{2,1,0}",
+     "bytes_in": 49545216,
+     "bytes_out": 115343360,
+     "bwd": true,
+     "srcs": [],
+     "op_names": [
+      "jit(<lambda>)/transpose(jvp(nkg,nky->ngy))/transpose"
+     ]
+    },
+    {
+     "kernel": "gemm_fusion_dot_7",
+     "us_per_call": 85.43,
+     "frac": 0.0206,
+     "launches_per_call": 1.0,
+     "GBps": 1380.8,
+     "hlo_op": "fusion",
+     "out_shape": "f64[327680,9]{1,0}",
+     "bytes_in": 94374432,
+     "bytes_out": 23592960,
+     "bwd": true,
+     "srcs": [],
+     "op_names": [
+      "jit(<lambda>)/transpose(jvp())/dot_general"
+     ]
+    },
+    {
+     "kernel": "void cutlass::Kernel2<cutlass_80_tensorop_d884gemm_64x32_16x4_nt_align1>(cutlass_80_tensor",
+     "us_per_call": 81.05,
+     "frac": 0.0195,
+     "launches_per_call": 1.0,
+     "GBps": null,
+     "hlo_op": null,
+     "out_shape": null,
+     "bytes_in": null,
+     "bytes_out": null,
+     "bwd": null,
+     "srcs": null,
+     "op_names": null
+    },
+    {
+     "kernel": "loop_abs_add_and_compare_divide_multiply_power_sine_slice_sqrt_subtract_fusion",
+     "us_per_call": 78.27,
+     "frac": 0.0188,
+     "launches_per_call": 1.0,
+     "GBps": 1483.0,
+     "hlo_op": "fusion",
+     "out_shape": "(f64[360448]{0}, f64[360448]{0}, pred[360448]{0}, pred[360448]{0}, f64[360448]{0}, /*index=5*/f64[360448]{0}, f64[360448]{0}, f64[360448]{0}, f64[360448]{0}, pred[360448]{0}, /*index=10*/f64[360448,1]{1,0}, f64[360448,1]{1,0}, f64[360448,1]{1,0}, f64[360448]{0}, f64[360448]{0}, /*index=15*/f64[360448]{0}, f64[360448]{0}, f64[360448,1,1,1]{3,2,1,0}, pred[360448]{0})",
+     "bytes_in": 71370104,
+     "bytes_out": 44695552,
+     "bwd": false,
+     "srcs": [],
+     "op_names": [
+      "a[1]",
+      "a[2]",
+      "a[5]",
+      "jit(<lambda>)/jvp()/abs",
+      "jit(<lambda>)/jvp()/add",
+      "jit(<lambda>)/jvp()/and"
+     ]
+    },
+    {
+     "kernel": "gemm_fusion_dot_5",
+     "us_per_call": 77.57,
+     "frac": 0.0187,
+     "launches_per_call": 1.0,
+     "GBps": 1520.7,
+     "hlo_op": "fusion",
+     "out_shape": "f64[327680,36]{1,0}",
+     "bytes_in": 23595552,
+     "bytes_out": 94371840,
+     "bwd": false,
+     "srcs": [],
+     "op_names": [
+      "jit(<lambda>)/jvp()/dot_general"
+     ]
+    },
+    {
+     "kernel": "input_scatter_fusion_3",
+     "us_per_call": 68.14,
+     "frac": 0.0164,
+     "launches_per_call": 1.0,
+     "GBps": 2294.8,
+     "hlo_op": "fusion",
+     "out_shape": "f64[8192,180]{1,0}",
+     "bytes_in": 144572836,
+     "bytes_out": 11796480,
+     "bwd": true,
+     "srcs": [],
+     "op_names": [
+      "jit(<lambda>)/jvp()/gather",
+      "jit(<lambda>)/jvp(jvp())/pad",
+      "jit(<lambda>)/jvp(jvp())/slice",
+      "jit(<lambda>)/jvp(jvp(vmap(vmap(vmap()))))/mul",
+      "jit(<lambda>)/transpose(jvp())/scatter-add",
+      "jit(<lambda>)/transpose(jvp())/split"
+     ]
+    },
+    {
+     "kernel": "gemm_fusion_dot",
+     "us_per_call": 59.87,
+     "frac": 0.0144,
+     "launches_per_call": 1.0,
+     "GBps": 1639.7,
+     "hlo_op": "fusion",
+     "out_shape": "f64[1486,8192]{1,0}",
+     "bytes_in": 774240,
+     "bytes_out": 97386496,
+     "bwd": true,
+     "srcs": [],
+     "op_names": [
+      "jit(<lambda>)/transpose(jvp())/transpose"
+     ]
+    },
+    {
+     "kernel": "loop_concatenate_fusion_1",
+     "us_per_call": 53.79,
+     "frac": 0.0129,
+     "launches_per_call": 1.0,
+     "GBps": 2465.9,
+     "hlo_op": "fusion",
+     "out_shape": "f64[360448,9]{1,0}",
+     "bytes_in": 106692608,
+     "bytes_out": 25952256,
+     "bwd": false,
+     "srcs": [],
+     "op_names": [
+      "jit(<lambda>)/jvp()/add",
+      "jit(<lambda>)/jvp()/mul",
+      "jit(<lambda>)/jvp()/mul;jit(<lambda>)/jvp()/mul",
+      "jit(<lambda>)/jvp()/slice",
+      "jit(<lambda>)/jvp()/stack",
+      "jit(<lambda>)/jvp()/sub"
+     ]
+    },
+    {
+     "kernel": "gemm_fusion_dot_13",
+     "us_per_call": 52.37,
+     "frac": 0.0126,
+     "launches_per_call": 1.0,
+     "GBps": 330.5,
+     "hlo_op": "fusion",
+     "out_shape": "f64[128,3,3]{2,1,0}",
+     "bytes_in": 17301504,
+     "bytes_out": 9216,
+     "bwd": true,
+     "srcs": [],
+     "op_names": [
+      "jit(<lambda>)/transpose(jvp())/transpose"
+     ]
+    },
+    {
+     "kernel": "wrapped_add",
+     "us_per_call": 47.19,
+     "frac": 0.0114,
+     "launches_per_call": 2.0,
+     "GBps": 750.0,
+     "hlo_op": "fusion",
+     "out_shape": "f64[8192,180]{1,0}",
+     "bytes_in": 23592960,
+     "bytes_out": 11796480,
+     "bwd": true,
+     "srcs": [],
+     "op_names": [
+      "jit(<lambda>)/transpose(jvp())/add_any"
+     ]
+    },
+    {
+     "kernel": "loop_select_fusion",
+     "us_per_call": 43.75,
+     "frac": 0.0105,
+     "launches_per_call": 1.0,
+     "GBps": 4383.0,
+     "hlo_op": "fusion",
+     "out_shape": "(f64[360448]{0}, f64[360448]{0})",
+     "bytes_in": 185991168,
+     "bytes_out": 5767168,
+     "bwd": true,
+     "srcs": [],
+     "op_names": [
+      "jit(<lambda>)/jvp()/add",
+      "jit(<lambda>)/jvp()/div",
+      "jit(<lambda>)/jvp()/gt",
+      "jit(<lambda>)/jvp()/mul",
+      "jit(<lambda>)/jvp()/mul;jit(<lambda>)/jvp()/mul",
+      "jit(<lambda>)/jvp()/slice"
+     ]
+    },
+    {
+     "kernel": "loop_broadcast_fusion_2",
+     "us_per_call": 40.89,
+     "frac": 0.0098,
+     "launches_per_call": 1.0,
+     "GBps": 865.5,
+     "hlo_op": "fusion",
+     "out_shape": "(f64[8192,180]{1,0}, f64[8192,180]{1,0}, f64[8192,180]{1,0})",
+     "bytes_in": 0,
+     "bytes_out": 35389440,
+     "bwd": false,
+     "srcs": [],
+     "op_names": []
+    },
+    {
+     "kernel": "input_scatter_fusion_6",
+     "us_per_call": 38.89,
+     "frac": 0.0094,
+     "launches_per_call": 1.0,
+     "GBps": 6742.7,
+     "hlo_op": "fusion",
+     "out_shape": "f64[8192]{0}",
+     "bytes_in": 262177768,
+     "bytes_out": 65536,
+     "bwd": false,
+     "srcs": [],
+     "op_names": [
+      "a[1]",
+      "a[2]",
+      "jit(<lambda>)/jvp()/abs",
+      "jit(<lambda>)/jvp()/add",
+      "jit(<lambda>)/jvp()/broadcast_in_dim",
+      "jit(<lambda>)/jvp()/concatenate"
+     ]
+    },
+    {
+     "kernel": "loop_add_fusion_1",
+     "us_per_call": 30.19,
+     "frac": 0.0073,
+     "launches_per_call": 1.0,
+     "GBps": 4644.6,
+     "hlo_op": "fusion",
+     "out_shape": "f64[360448,3]{1,0}",
+     "bytes_in": 131563520,
+     "bytes_out": 8650752,
+     "bwd": true,
+     "srcs": [],
+     "op_names": [
+      "jit(<lambda>)/jvp()/add",
+      "jit(<lambda>)/jvp()/slice",
+      "jit(<lambda>)/jvp(jit(_where))/broadcast_in_dim",
+      "jit(<lambda>)/transpose(jvp())/add_any",
+      "jit(<lambda>)/transpose(jvp())/broadcast_in_dim",
+      "jit(<lambda>)/transpose(jvp())/div"
+     ]
+    },
+    {
+     "kernel": "input_gather_reduce_fusion",
+     "us_per_call": 24.61,
+     "frac": 0.0059,
+     "launches_per_call": 1.0,
+     "GBps": 842.9,
+     "hlo_op": "fusion",
+     "out_shape": "(f64[8192,3]{1,0}, f64[360448,1,1,3]{3,2,1,0})",
+     "bytes_in": 11894784,
+     "bytes_out": 8847360,
+     "bwd": false,
+     "srcs": [],
+     "op_names": [
+      "jit(<lambda>)/add",
+      "jit(<lambda>)/concatenate",
+      "jit(<lambda>)/gather",
+      "jit(<lambda>)/jit(_where)/broadcast_in_dim",
+      "jit(<lambda>)/jit(_where)/select_n",
+      "jit(<lambda>)/lt"
+     ]
+    },
+    {
+     "kernel": "gemm_fusion_dot_4",
+     "us_per_call": 21.93,
+     "frac": 0.0053,
+     "launches_per_call": 1.0,
+     "GBps": 788.8,
+     "hlo_op": "fusion",
+     "out_shape": "f64[360448,3]{1,0}",
+     "bytes_in": 8650760,
+     "bytes_out": 8650752,
+     "bwd": false,
+     "srcs": [],
+     "op_names": [
+      "jit(<lambda>)/jvp()/dot_general"
+     ]
+    },
+    {
+     "kernel": "loop_and_gather_slice_sqrt_fusion",
+     "us_per_call": 19.64,
+     "frac": 0.0047,
+     "launches_per_call": 1.0,
+     "GBps": 1211.6,
+     "hlo_op": "fusion",
+     "out_shape": "(f64[360448]{0}, pred[360448]{0}, f64[360448,1]{1,0}, f64[360448,1,1,1]{3,2,1,0}, f64[360448,1]{1,0})",
+     "bytes_in": 11896184,
+     "bytes_out": 11894784,
+     "bwd": false,
+     "srcs": [],
+     "op_names": [
+      "a[1]",
+      "a[2]",
+      "a[5]",
+      "jit(<lambda>)/jvp()/add",
+      "jit(<lambda>)/jvp()/and",
+      "jit(<lambda>)/jvp()/broadcast_in_dim"
+     ]
+    },
+    {
+     "kernel": "gemm_fusion_dot_8",
+     "us_per_call": 19.56,
+     "frac": 0.0047,
+     "launches_per_call": 1.0,
+     "GBps": 884.6,
+     "hlo_op": "fusion",
+     "out_shape": "f64[360448,3]{1,0}",
+     "bytes_in": 8650760,
+     "bytes_out": 8650752,
+     "bwd": true,
+     "srcs": [],
+     "op_names": [
+      "jit(<lambda>)/transpose(jvp())/dot_general"
+     ]
+    },
+    {
+     "kernel": "loop_select_sqrt_fusion",
+     "us_per_call": 16.84,
+     "frac": 0.0041,
+     "launches_per_call": 1.0,
+     "GBps": 8476.9,
+     "hlo_op": "fusion",
+     "out_shape": "(f64[360448]{0}, f64[360448]{0}, f64[360448]{0})",
+     "bytes_in": 134086656,
+     "bytes_out": 8650752,
+     "bwd": false,
+     "srcs": [],
+     "op_names": [
+      "jit(<lambda>)/jvp()/add",
+      "jit(<lambda>)/jvp()/div",
+      "jit(<lambda>)/jvp()/gt",
+      "jit(<lambda>)/jvp()/mul",
+      "jit(<lambda>)/jvp()/slice",
+      "jit(<lambda>)/jvp()/sqrt"
+     ]
+    },
+    {
+     "kernel": "loop_transpose_fusion_1",
+     "us_per_call": 14.83,
+     "frac": 0.0036,
+     "launches_per_call": 1.0,
+     "GBps": 1166.8,
+     "hlo_op": "fusion",
+     "out_shape": "f64[8192,3,44]{2,1,0}",
+     "bytes_in": 8650752,
+     "bytes_out": 8650752,
+     "bwd": true,
+     "srcs": [],
+     "op_names": [
+      "jit(<lambda>)/transpose(jvp())/add_any"
+     ]
+    },
+    {
+     "kernel": "loop_add_fusion",
+     "us_per_call": 14.66,
+     "frac": 0.0035,
+     "launches_per_call": 1.0,
+     "GBps": 1770.8,
+     "hlo_op": "fusion",
+     "out_shape": "f64[8192,44,3]{2,1,0}",
+     "bytes_in": 17301504,
+     "bytes_out": 8650752,
+     "bwd": false,
+     "srcs": [],
+     "op_names": [
+      "jit(<lambda>)/jvp()/add",
+      "jit(<lambda>)/jvp()/dot_general"
+     ]
+    },
+    {
+     "kernel": "wrapped_add_2",
+     "us_per_call": 14.21,
+     "frac": 0.0034,
+     "launches_per_call": 1.0,
+     "GBps": 1826.6,
+     "hlo_op": "fusion",
+     "out_shape": "f64[360448,3]{1,0}",
+     "bytes_in": 17301504,
+     "bytes_out": 8650752,
+     "bwd": true,
+     "srcs": [],
+     "op_names": [
+      "jit(<lambda>)/transpose(jvp())/add_any"
+     ]
+    },
+    {
+     "kernel": "loop_transpose_fusion",
+     "us_per_call": 10.75,
+     "frac": 0.0026,
+     "launches_per_call": 1.0,
+     "GBps": 1628.4,
+     "hlo_op": "fusion",
+     "out_shape": "f64[8192,3,44]{2,1,0}",
+     "bytes_in": 8847360,
+     "bytes_out": 8650752,
+     "bwd": false,
+     "srcs": [],
+     "op_names": [
+      "jit(<lambda>)/gather"
+     ]
+    },
+    {
+     "kernel": "input_scatter_fusion_4",
+     "us_per_call": 10.73,
+     "frac": 0.0026,
+     "launches_per_call": 1.0,
+     "GBps": 11272.0,
+     "hlo_op": "fusion",
+     "out_shape": "f64[8192,180]{1,0}",
+     "bytes_in": 109183136,
+     "bytes_out": 11796480,
+     "bwd": true,
+     "srcs": [],
+     "op_names": [
+      "jit(<lambda>)/jvp()/add",
+      "jit(<lambda>)/jvp()/lt",
+      "jit(<lambda>)/jvp()/select_n",
+      "jit(<lambda>)/transpose(jvp())/split",
+      "jit(<lambda>)/transpose(jvp())/transpose",
+      "m_.aa_specs[0]"
+     ]
+    },
+    {
+     "kernel": "loop_gather_multiply_power_fusion",
+     "us_per_call": 8.15,
+     "frac": 0.002,
+     "launches_per_call": 1.0,
+     "GBps": 213.0,
+     "hlo_op": "fusion",
+     "out_shape": "(f64[8192,2]{1,0}, f64[8192,2]{1,0}, f64[8192,2]{1,0}, f64[8192,2]{1,0}, f64[8192,1,2,1]{3,2,1,0}, /*index=5*/f64[8192,2]{1,0}, f64[16384,1,1]{2,1,0})",
+     "bytes_in": 819360,
+     "bytes_out": 917504,
+     "bwd": false,
+     "srcs": [],
+     "op_names": [
+      "jit(<lambda>)/jvp()/abs",
+      "jit(<lambda>)/jvp()/add",
+      "jit(<lambda>)/jvp()/broadcast_in_dim",
+      "jit(<lambda>)/jvp()/concatenate",
+      "jit(<lambda>)/jvp()/convert_element_type",
+      "jit(<lambda>)/jvp()/div"
+     ]
+    },
+    {
+     "kernel": "input_reduce_fusion",
+     "us_per_call": 7.42,
+     "frac": 0.0018,
+     "launches_per_call": 1.0,
+     "GBps": 1240.3,
+     "hlo_op": "fusion",
+     "out_shape": "f64[8192,3]{1,0}",
+     "bytes_in": 9011200,
+     "bytes_out": 196608,
+     "bwd": false,
+     "srcs": [],
+     "op_names": [
+      "jit(<lambda>)/jit(_where)/broadcast_in_dim",
+      "jit(<lambda>)/jit(_where)/select_n",
+      "jit(<lambda>)/reduce_sum"
+     ]
+    },
+    {
+     "kernel": "loop_compare_fusion",
+     "us_per_call": 5.9,
+     "frac": 0.0014,
+     "launches_per_call": 1.0,
+     "GBps": 549.8,
+     "hlo_op": "fusion",
+     "out_shape": "pred[8192,44,5]{2,1,0}",
+     "bytes_in": 1441792,
+     "bytes_out": 1802240,
+     "bwd": false,
+     "srcs": [],
+     "op_names": [
+      "jit(<lambda>)/jvp(jit(_one_hot))/eq"
+     ]
+    },
+    {
+     "kernel": "input_scatter_fusion_5",
+     "us_per_call": 5.26,
+     "frac": 0.0013,
+     "launches_per_call": 1.0,
+     "GBps": 1401.5,
+     "hlo_op": "fusion",
+     "out_shape": "f64[5,2,8192]{2,1,0}",
+     "bytes_in": 6717520,
+     "bytes_out": 655360,
+     "bwd": true,
+     "srcs": [],
+     "op_names": [
+      "jit(<lambda>)/jvp()/abs",
+      "jit(<lambda>)/jvp()/add",
+      "jit(<lambda>)/jvp()/broadcast_in_dim",
+      "jit(<lambda>)/jvp()/concatenate",
+      "jit(<lambda>)/jvp()/convert_element_type",
+      "jit(<lambda>)/jvp()/div"
+     ]
+    },
+    {
+     "kernel": "input_scatter_fusion_7",
+     "us_per_call": 3.76,
+     "frac": 0.0009,
+     "launches_per_call": 1.0,
+     "GBps": 93.0,
+     "hlo_op": "fusion",
+     "out_shape": "f64[7430,2]{1,0}",
+     "bytes_in": 231120,
+     "bytes_out": 118880,
+     "bwd": false,
+     "srcs": [],
+     "op_names": [
+      "jit(<lambda>)/jvp()/add",
+      "jit(<lambda>)/jvp()/gather",
+      "jit(<lambda>)/jvp()/lt",
+      "jit(<lambda>)/jvp()/mul",
+      "jit(<lambda>)/jvp()/scatter-add",
+      "jit(<lambda>)/jvp()/select_n"
+     ]
+    },
+    {
+     "kernel": "loop_add_subtract_fusion",
+     "us_per_call": 3.67,
+     "frac": 0.0009,
+     "launches_per_call": 1.0,
+     "GBps": 134.1,
+     "hlo_op": "fusion",
+     "out_shape": "(f64[8192]{0}, f64[8192]{0}, f64[8192]{0})",
+     "bytes_in": 295032,
+     "bytes_out": 196608,
+     "bwd": true,
+     "srcs": [],
+     "op_names": [
+      "jit(<lambda>)/jvp()/add",
+      "jit(<lambda>)/jvp()/concatenate",
+      "jit(<lambda>)/jvp()/div",
+      "jit(<lambda>)/jvp()/eq",
+      "jit(<lambda>)/jvp()/gather",
+      "jit(<lambda>)/jvp()/ge"
+     ]
+    },
+    {
+     "kernel": "input_reduce_fusion_2",
+     "us_per_call": 3.46,
+     "frac": 0.0008,
+     "launches_per_call": 1.0,
+     "GBps": 56.9,
+     "hlo_op": "fusion",
+     "out_shape": "f64[]",
+     "bytes_in": 196608,
+     "bytes_out": 8,
+     "bwd": false,
+     "srcs": [],
+     "op_names": [
+      "jit(<lambda>)/jvp()/reduce_sum"
+     ]
+    },
+    {
+     "kernel": "loop_gather_fusion",
+     "us_per_call": 2.86,
+     "frac": 0.0007,
+     "launches_per_call": 1.0,
+     "GBps": 57.3,
+     "hlo_op": "fusion",
+     "out_shape": "f64[16384,1,1]{2,1,0}",
+     "bytes_in": 32928,
+     "bytes_out": 131072,
+     "bwd": false,
+     "srcs": [],
+     "op_names": [
+      "jit(<lambda>)/jvp()/add",
+      "jit(<lambda>)/jvp()/broadcast_in_dim",
+      "jit(<lambda>)/jvp()/concatenate",
+      "jit(<lambda>)/jvp()/gather",
+      "jit(<lambda>)/jvp()/iota",
+      "jit(<lambda>)/jvp()/lt"
+     ]
+    },
+    {
+     "kernel": "input_reduce_fusion_3",
+     "us_per_call": 2.57,
+     "frac": 0.0006,
+     "launches_per_call": 1.0,
+     "GBps": 3.6,
+     "hlo_op": "fusion",
+     "out_shape": "f64[3,3]{0,1}",
+     "bytes_in": 9216,
+     "bytes_out": 72,
+     "bwd": true,
+     "srcs": [],
+     "op_names": [
+      "jit(<lambda>)/transpose(jvp())/transpose"
+     ]
+    }
+   ]
+  },
+  "saved": "/vol/Cantor_medium_8192_float64_dense_rec+pool+rev+fm"
+ }
+]

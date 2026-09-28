@@ -3,8 +3,14 @@
     python bench/scaling/run_standalone.py <model-name> <n_atoms> <dtype> <device>
 call_s: median ASE calculator call (energy+forces+stress) incl. neighbour list,
 for every code.  ace-jax also, from ACECalculator.last_timing: force_s (the
-compiled model call alone), nlist_s (list + layout + host->device) and the
-neighbour-list backend.
+compiled model call alone), nlist_s (list + layout + host->device), the
+neighbour-list backend and `rebuilds` (calls that built a neighbour list).
+
+The timed calls are MD-like (`md_like: true`): each first displaces every atom
+by N(0, 1e-3 A), a random walk seeded at 0, as consecutive MD steps would, so
+ace-jax takes its skin-list reuse path (the default skin) and MACE sees moving
+atoms too.  The first (compile) call, and `energy`, use the undisplaced
+structure.
 """
 import json
 import platform
@@ -27,9 +33,12 @@ def _versions():
     return out
 
 
-def _median_time(f, reps):
+def _median_time(f, reps, setup=None):
+    """Median seconds of f(); `setup()` (untimed) runs before each call."""
     ts = []
     for _ in range(reps):
+        if setup:
+            setup()
         t0 = time.perf_counter(); f(); ts.append(time.perf_counter() - t0)
     return statistics.median(ts)
 
@@ -58,7 +67,13 @@ def _threads():
 
 def run_case(row, n_atoms, dtype, device, reps=10):
     from ase.calculators.calculator import all_changes
+    import numpy as np
     at = supercell(row["system"], n_atoms)
+    rng = np.random.default_rng(0)
+
+    def displace():                       # one MD-like step before each timed call (untimed)
+        at.positions += rng.normal(0, 1e-3, at.positions.shape)
+
     out = {"code": row["code"], "mode": "standalone", "model": row["name"], "size": row["size"],
            "system": row["system"], "n_atoms": n_atoms, "device": device, "dtype": dtype,
            "versions": _versions(), "status": "ok", "threads": _threads()}
@@ -72,9 +87,13 @@ def run_case(row, n_atoms, dtype, device, reps=10):
             import jax.numpy as jnp
             from ace_jax.calc.point import ACECalculator
             from ace_jax.eval import sparse_graph
-            calc = ACECalculator(row["path"], dtype=getattr(jnp, dtype))
+            calc = ACECalculator(row["path"], dtype=getattr(jnp, dtype))   # default skin
+            out["skin"] = calc.skin
             call = lambda: calc.calculate(at, ["energy", "forces", "stress"], all_changes)
             t0 = time.perf_counter(); call(); out["compile_s"] = time.perf_counter() - t0
+            out["energy"] = calc.results["energy"]                         # undisplaced
+            n_edges = int(len(sparse_graph(at.positions, at.cell.array, at.pbc,
+                                           calc.cutoff).senders))
             call()                                # K learnt: the steady-state path from here
             splits = []
 
@@ -82,15 +101,16 @@ def run_case(row, n_atoms, dtype, device, reps=10):
                 call()
                 splits.append(calc.last_timing)
 
-            out["call_s"] = _median_time(timed, reps)
+            out["call_s"] = _median_time(timed, reps, setup=displace)
             # the calculator's own split: nlist_s = list + layout + host->device,
             # force_s = the compiled model call alone
             out["nlist_s"] = statistics.median(t["nlist_s"] for t in splits)
             out["force_s"] = statistics.median(t["model_s"] for t in splits)
             out["nlist_backend"] = splits[-1]["nlist_backend"]
             out["layout"], out["edge_a_kind"] = calc.last_layout, calc.last_edge_a_kind
-            out["n_edges"] = int(len(sparse_graph(at.positions, at.cell.array, at.pbc,
-                                                  calc.cutoff).senders))
+            out["n_edges"] = n_edges
+            out["rebuilds"] = splits[-1]["rebuilds"]     # of all calls, the first included
+            out["md_like"] = True
         elif row["code"] == "mace":
             import torch
             from mace.calculators import mace_mp
@@ -104,7 +124,9 @@ def run_case(row, n_atoms, dtype, device, reps=10):
             out["threads"]["torch"] = torch.get_num_threads()
             call = lambda: calc.calculate(at, ["energy", "forces", "stress"], all_changes)
             t0 = time.perf_counter(); call(); out["compile_s"] = time.perf_counter() - t0
-            out["call_s"] = _median_time(call, reps)
+            out["energy"] = calc.results["energy"]                         # undisplaced
+            out["call_s"] = _median_time(call, reps, setup=displace)
+            out["rebuilds"], out["md_like"] = None, True
             if device == "gpu":
                 torch.cuda.synchronize()
         else:

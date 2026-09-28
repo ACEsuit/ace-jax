@@ -1,0 +1,262 @@
+[
+ {
+  "code": "acejax-pace",
+  "mode": "lammps",
+  "model": "acejax-pace/Cantor/medium",
+  "size": "medium",
+  "system": "Cantor",
+  "n_atoms": 16384,
+  "device": "gpu",
+  "dtype": "float64",
+  "ranks": 1,
+  "status": "ok",
+  "variant": "stock",
+  "k_dense": 86,
+  "max_edges": 1549978,
+  "chunk": null,
+  "ckpt": true,
+  "contract_cutoff": 5.0,
+  "contract_max_edges": 1549978,
+  "rcut": 5.0,
+  "steps": 50,
+  "warmup": 10,
+  "loop_s": 0.719761,
+  "step_s": 0.01439522,
+  "procs": 1,
+  "n_atoms_end": 16384,
+  "nan": false,
+  "atom_steps_per_s": 1138155.5822002026,
+  "pe": 3288.627586630441,
+  "thermo": [
+   [
+    0,
+    3288.627586630441,
+    42.0
+   ],
+   [
+    10,
+    3288.16352884974,
+    42.0
+   ],
+   [
+    10,
+    3288.16352884974,
+    42.0
+   ],
+   [
+    50,
+    3277.015429268689,
+    42.0
+   ],
+   [
+    60,
+    3271.8990316685877,
+    42.0
+   ]
+  ],
+  "neigh": [
+   "Total # of neighbors = 1277952",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Total # of neighbors = 1277952",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0"
+  ],
+  "log_errors": []
+ },
+ {
+  "code": "acejax-pace",
+  "mode": "lammps",
+  "model": "acejax-pace/Cantor/medium",
+  "size": "medium",
+  "system": "Cantor",
+  "n_atoms": 131072,
+  "device": "gpu",
+  "dtype": "float64",
+  "ranks": 1,
+  "status": "ok",
+  "variant": "stock",
+  "k_dense": 86,
+  "max_edges": 12399480,
+  "chunk": null,
+  "ckpt": true,
+  "contract_cutoff": 5.0,
+  "contract_max_edges": 12399480,
+  "rcut": 5.0,
+  "steps": 50,
+  "warmup": 10,
+  "loop_s": 5.72291,
+  "step_s": 0.1144582,
+  "procs": 1,
+  "n_atoms_end": 131072,
+  "nan": false,
+  "atom_steps_per_s": 1145151.6798272207,
+  "pe": 26388.46379465847,
+  "thermo": [
+   [
+    0,
+    26388.46379465847,
+    42.0
+   ],
+   [
+    10,
+    26384.81249196681,
+    42.0
+   ],
+   [
+    10,
+    26384.81249196681,
+    42.0
+   ],
+   [
+    50,
+    26297.09394012237,
+    42.0
+   ],
+   [
+    60,
+    26256.833756554395,
+    42.0
+   ]
+  ],
+  "neigh": [
+   "Total # of neighbors = 10223616",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Total # of neighbors = 10223616",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0"
+  ],
+  "log_errors": []
+ },
+ {
+  "code": "acejax-ace",
+  "mode": "lammps",
+  "model": "acejax-ace/Cantor/medium",
+  "size": "medium",
+  "system": "Cantor",
+  "n_atoms": 16384,
+  "device": "gpu",
+  "dtype": "float64",
+  "ranks": 1,
+  "status": "ok",
+  "variant": "stock",
+  "k_dense": 86,
+  "max_edges": 1549978,
+  "chunk": null,
+  "ckpt": true,
+  "contract_cutoff": 5.0,
+  "contract_max_edges": 1549978,
+  "rcut": 5.0,
+  "steps": 50,
+  "warmup": 10,
+  "loop_s": 1.7996,
+  "step_s": 0.035992,
+  "procs": 1,
+  "n_atoms_end": 16384,
+  "nan": false,
+  "atom_steps_per_s": 455212.2693931984,
+  "pe": 5242.317817504845,
+  "thermo": [
+   [
+    0,
+    5242.317817504845,
+    42.0
+   ],
+   [
+    10,
+    5221.622433374716,
+    42.0
+   ],
+   [
+    10,
+    5221.622433374716,
+    42.0
+   ],
+   [
+    50,
+    4726.6713776570305,
+    42.0
+   ],
+   [
+    60,
+    4501.177279080906,
+    42.0
+   ]
+  ],
+  "neigh": [
+   "Total # of neighbors = 1277952",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Total # of neighbors = 1277952",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0"
+  ],
+  "log_errors": []
+ },
+ {
+  "code": "acejax-ace",
+  "mode": "lammps",
+  "model": "acejax-ace/Cantor/medium",
+  "size": "medium",
+  "system": "Cantor",
+  "n_atoms": 131072,
+  "device": "gpu",
+  "dtype": "float64",
+  "ranks": 1,
+  "status": "ok",
+  "variant": "stock",
+  "k_dense": 86,
+  "max_edges": 12399480,
+  "chunk": null,
+  "ckpt": true,
+  "contract_cutoff": 5.0,
+  "contract_max_edges": 12399480,
+  "rcut": 5.0,
+  "steps": 50,
+  "warmup": 10,
+  "loop_s": 14.8922,
+  "step_s": 0.297844,
+  "procs": 1,
+  "n_atoms_end": 131072,
+  "nan": false,
+  "atom_steps_per_s": 440069.29802178324,
+  "pe": 42172.18443668525,
+  "thermo": [
+   [
+    0,
+    42172.18443668525,
+    42.0
+   ],
+   [
+    10,
+    42006.78853596248,
+    42.0
+   ],
+   [
+    10,
+    42006.78853596248,
+    42.0
+   ],
+   [
+    50,
+    38051.816890770984,
+    42.0
+   ],
+   [
+    60,
+    36250.41887271993,
+    42.0
+   ]
+  ],
+  "neigh": [
+   "Total # of neighbors = 10223616",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Total # of neighbors = 10223616",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0"
+  ],
+  "log_errors": []
+ }
+]

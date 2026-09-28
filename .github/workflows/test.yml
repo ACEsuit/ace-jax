@@ -35,6 +35,37 @@ jobs:
           JAX_PLATFORM_NAME: cpu
           JAX_ENABLE_X64: "1"
         run: uv run --python 3.12 --extra gp pytest -n 0 -m "not slow" --splits 3 --group ${{ matrix.group }} --splitting-algorithm least_duration
+  optional-deps:
+    # The tests that skip without the optional dependencies: lammps-jax's export
+    # (tests/test_export_lammps.py, the scaling suite's bundle export) and
+    # matscipy-neighbours' native dense neighbour_matrix (the calculator's and
+    # skin list's production neighbour path).  ACEJAX_REQUIRE_OPTIONAL turns
+    # those skips into failures (tests/conftest.py `require_optional`), so a
+    # broken install cannot pass as all-skipped.  lammps-jax's export is pure
+    # Python + JAX (no compiled LAMMPS); pinned to a commit of its main branch.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/cache@v4
+        with:
+          path: .jax_cache
+          key: jaxcache-${{ runner.os }}-optional-${{ github.sha }}
+          restore-keys: jaxcache-${{ runner.os }}-optional-
+      - name: Install matscipy-neighbours (C++ source build) and lammps-jax
+        run: |
+          uv sync --python 3.12 --extra gp --extra fast-neighbours
+          uv pip install "lammps-jax @ git+https://github.com/abhijeetgangan/lammps-jax@4a7f4fb27ecc689abd35c2a91833590e613edb51"
+      - name: Optional-dependency tests (CPU JAX)
+        env:
+          JAX_PLATFORM_NAME: cpu
+          JAX_ENABLE_X64: "1"
+          ACEJAX_REQUIRE_OPTIONAL: "1"
+        run: >-
+          uv run --no-sync pytest -n 0 -m "not slow"
+          tests/test_export_lammps.py tests/test_bench_scaling.py tests/test_calc_jit.py
+          tests/test_efv.py tests/test_skin.py tests/test_perf_parity.py
   smoke:
     # Import + a small descriptor/EFV/kernel smoke on the other supported Pythons
     # -- a cheap compatibility check without re-running the whole (slow) matrix.

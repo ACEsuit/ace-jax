@@ -90,18 +90,43 @@ model back. `.yace` models are for evaluation and export: `aj fit` needs an
 
 ### Speed options and LAMMPS
 
-`ACECalculator(path, layout="auto", edge_a_kind="auto")` picks the dense layout
-(A per node by a batched outer product, several times faster forces on GPU) when
-its memory estimate fits the device, else the sparse edge list, and pads edge
-lists to power-of-two buckets so MD reuses the compiled function. To run in
-LAMMPS (`pair_style jax/kk`, GPU):
+`ACECalculator(path, layout="auto", edge_a_kind="auto", skin=1.0)`:
+
+- **Layout.** `"auto"` picks the dense layout (A per node by a batched outer
+  product, several times faster forces on GPU) when the neighbour padding is
+  efficient, i.e. edges / (atoms × max neighbours) ≥ `MIN_DENSE_FILL` (0.5),
+  else the sparse edge list. Memory is not a criterion: the dense model runs in
+  blocks of 16,384 rows (`CHUNK_NODES`), so its peak is bounded per block.
+  Sparse edge lists are padded to power-of-two buckets so MD reuses the
+  compiled function.
+- **Skin (Verlet) neighbour list,** dense layout only. The list is built for
+  cutoff + `skin` (Å) and reused across MD-like calls, one compiled step each.
+  It is rebuilt automatically when an atom has moved more than skin / 2 since
+  the build, when the cell, pbc, species or atom count change, or when a row
+  outgrows its capacity. `calc.last_timing["rebuilds"]` counts the calls that
+  built a list, and `last_timing["nlist_s"]` is 0 on a reuse. For one-shot
+  evaluation of unrelated structures (a dataset, a screening loop) pass
+  `skin=0`, which builds a list for the cutoff alone on every call. Setting
+  `calc.model` or `calc.skin` drops the current list.
+
+To run in LAMMPS (`pair_style jax/kk`, GPU):
 
 ```python
 from ace_jax.export.lammps import export_lammps
 model, meta, _ = aj.load("model.npz")                    # or a .yace
 export_lammps(model, meta, "bundle", max_atoms=4096, max_edges=200_000,
+              k_dense=64, max_owned=2048,                # dense rows: owned atoms only
               type_elements=[14, 32])                    # Z of LAMMPS types 1, 2, ...
 ```
+
+`layout="auto"` exports the dense layout when `k_dense` (max neighbours per
+atom) is given and one block's `estimate_a_bytes` fits the device budget, else
+sparse. `max_owned` bounds the dense rows to the owned atoms (LAMMPS numbers
+them first), so ghost rows cost nothing. It is recorded as
+`ace_jax.owned_rows` in the bundle, and an atom past it, or past `k_dense`
+neighbours, gives NaN, never a silent truncation. Above 32,768 rows
+(`BUNDLE_BLOCK_ROWS`) the dense bundle evaluates in blocks, which bounds
+memory at large N.
 
 ## Performance
 

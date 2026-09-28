@@ -1,0 +1,110 @@
+[
+ {
+  "model": "Cantor_medium",
+  "n": 8192,
+  "P": 4150,
+  "n_A": 180,
+  "tree_levels": 9,
+  "scatter_nm": {
+   "ms": 1.2606560000003597,
+   "max_err": 8.526512829121202e-14
+  },
+  "scatter_fm": {
+   "ms": 0.9940374999999335,
+   "max_err": 6.394884621840902e-14
+  },
+  "segsum_sorted": {
+   "error": "JaxRuntimeError(\"RESOURCE_EXHAUSTED: Failed to launch CUDA kernel: input_scatter_fusion; block dims: 128x1x1; grid dims: 87x1x1; shared memory size: 0: CUDA_ERR"
+  },
+  "tree": {
+   "ms": 1.0739624999995812,
+   "max_err": 9.947598300641403e-14
+  },
+  "onehot_mm": {
+   "ms": 1.1737180000004344,
+   "max_err": 6.394884621840902e-14
+  },
+  "Q_MB": 271.9744
+ },
+ {
+  "model": "Cantor_medium",
+  "n": 32768,
+  "P": 4150,
+  "n_A": 180,
+  "tree_levels": 9,
+  "scatter_nm": {
+   "ms": 5.214297000000201,
+   "max_err": 6.394884621840902e-14
+  },
+  "scatter_fm": {
+   "ms": 3.217077000000401,
+   "max_err": 6.394884621840902e-14
+  },
+  "segsum_sorted": {
+   "error": "JaxRuntimeError(\"INTERNAL: CUDA error: Failed to launch CUDA kernel: input_scatter_fusion; block dims: 128x1x1; grid dims: 87x1x1; shared memory size: 0: CUDA_E"
+  },
+  "tree": {
+   "ms": 3.4963829999981044,
+   "max_err": 9.947598300641403e-14
+  },
+  "onehot_mm": {
+   "ms": 3.544466500002841,
+   "max_err": 1.2789769243681803e-13
+  },
+  "Q_MB": 1087.8976
+ },
+ {
+  "model": "SiGe_medium",
+  "n": 8192,
+  "P": 8674,
+  "n_A": 258,
+  "tree_levels": 9,
+  "scatter_nm": {
+   "ms": 2.6315214999996783,
+   "max_err": 8.526512829121202e-14
+  },
+  "scatter_fm": {
+   "ms": 1.7866119999965235,
+   "max_err": 1.0658141036401503e-13
+  },
+  "segsum_sorted": {
+   "error": "JaxRuntimeError(\"RESOURCE_EXHAUSTED: Failed to launch CUDA kernel: input_scatter_fusion; block dims: 128x1x1; grid dims: 91x1x1; shared memory size: 0: CUDA_ERR"
+  },
+  "tree": {
+   "ms": 2.0390234999965173,
+   "max_err": 1.1368683772161603e-13
+  },
+  "onehot_mm": {
+   "ms": 2.9748970000014197,
+   "max_err": 1.0658141036401503e-13
+  },
+  "Q_MB": 568.459264
+ },
+ {
+  "model": "SiGe_medium",
+  "n": 32768,
+  "P": 8674,
+  "n_A": 258,
+  "tree_levels": 9,
+  "scatter_nm": {
+   "ms": 9.210596500011548,
+   "max_err": 8.526512829121202e-14
+  },
+  "scatter_fm": {
+   "ms": 5.605844500010448,
+   "max_err": 9.237055564881302e-14
+  },
+  "segsum_sorted": {
+   "error": "JaxRuntimeError(\"INTERNAL: CUDA error: Failed to launch CUDA kernel: input_scatter_fusion; block dims: 128x1x1; grid dims: 91x1x1; shared memory size: 0: CUDA_E"
+  },
+  "tree": {
+   "ms": 6.547355999998672,
+   "max_err": 1.7053025658242404e-13
+  },
+  "onehot_mm": {
+   "ms": 10.901729499991575,
+   "max_err": 1.9895196601282805e-13
+  },
+  "Q_MB": 2273.837056
+ }
+]
