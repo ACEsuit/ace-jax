@@ -21,8 +21,9 @@ from .data import VOIGT, flat_edges
 from .metrics import crps_gaussian
 from .pops import leverage_select, pops_var
 from .rows import Rows, linear_rows, residual_inputs, residual_rows
-from .stats import (_stream_pops_pointwise, pops_envelope_streamed, pops_leverage_residual,
-                    pops_moment_sums, pops_projection_bounds, sufficient_statistics)
+from .stats import (DeviceRows, HostRows, _stream_pops_pointwise, available_host_bytes, host_rows_bytes,
+                    pops_envelope_streamed, pops_leverage_residual, pops_moment_sums,
+                    pops_projection_bounds, sufficient_statistics)
 
 
 class Prediction(NamedTuple):
@@ -223,8 +224,15 @@ def _pack(outs, prob, ds_test):
                       cat(4)[cm], cat(5)[cm])
 
 
-def _run_predict(f, theta, prob, ds_train, ds_test):
-    st = sufficient_statistics(theta, prob.spec, prob.model, prob.ind, prob.cfg, ds_train)
+def _train_stats(theta, prob, ds_train, stats):
+    """The training sufficient statistics: stats(theta) if the caller supplies them
+    (e.g. cached linear statistics), else computed on ds_train."""
+    return (stats(theta) if stats is not None
+            else sufficient_statistics(theta, prob.spec, prob.model, prob.ind, prob.cfg, ds_train))
+
+
+def _run_predict(f, theta, prob, ds_train, ds_test, stats=None):
+    st = _train_stats(theta, prob, ds_train, stats)
     mu, L = posterior(theta, st, prob)
     outs = [f(theta, mu, L, jax.tree.map(lambda a: a[i], ds_test)) for i in range(ds_test.n_batches)]
     return _pack(outs, prob, ds_test)
@@ -270,23 +278,39 @@ class PopsRidgePath:
     term).  By default each call's mean is its own ridge's ``c*``;
     ``use_mean(r)`` pins one mean for every ridge.  Linear arm (M == 0) only."""
 
-    def __init__(self, theta, prob, ds_train):
+    def __init__(self, theta, prob, ds_train, stats=None, rows="device"):
+        """rows: "device" (each pass re-evaluates the ACE rows), "host" (evaluate
+        them once into host RAM: stats.HostRows), "auto" (host when it fits in
+        half the memory limit), or a HostRows built with this path's qs."""
         M_ind = prob.ind.XM.shape[0]
         if M_ind > 0:
             raise ValueError(f"paper-faithful POPS is the linear-arm (M=0) predictive only; "
                              f"this problem has M={M_ind} inducing points.  Pass --arm linear.")
-        st = sufficient_statistics(theta, prob.spec, prob.model, prob.ind, prob.cfg, ds_train)
         s2 = {q: jnp.exp(2.0 * getattr(theta, f"log_sigma_{q}")) for q in "EFV"}
         self.sigma = {q: float(jnp.sqrt(s2[q])) for q in "EFV"}
         self.qs = tuple(1.0 / self.sigma[q] for q in "EFV")        # loss weights 1/sigma_q
         self.lam_blr = float(jnp.exp(-2.0 * theta.log_sigma_c))    # the BLR prior Gamma^2 / sigma_c^2
-        M = sum(getattr(st, f"G_{q}") / s2[q] for q in "EFV")
-        b = sum(getattr(st, f"b_{q}") / s2[q] for q in "EFV")
+        if rows == "auto":
+            rows = ("host" if host_rows_bytes(ds_train, prob.cfg.len_basis) < 0.5 * available_host_bytes()
+                    else "device")
+        if rows == "host":
+            rows = HostRows(prob.model, prob.cfg, ds_train, self.qs)
+        if isinstance(rows, HostRows):
+            M, b = rows.gram()                       # the same M, b from the cached rows: no stats pass
+        elif rows == "device":
+            st = _train_stats(theta, prob, ds_train, stats)
+            M = sum(getattr(st, f"G_{q}") / s2[q] for q in "EFV")
+            b = sum(getattr(st, f"b_{q}") / s2[q] for q in "EFV")
+            rows = DeviceRows(prob.model, prob.cfg, ds_train, self.qs)
+        else:
+            raise ValueError(f"rows must be 'device', 'host', 'auto' or a HostRows, got {rows!r}")
+        self.rows = rows
         self.Dinv = 1.0 / jnp.asarray(prob.gamma)
-        Lam, U = jnp.linalg.eigh(M * self.Dinv[:, None] * self.Dinv[None, :])
+        self._Ms = M * self.Dinv[:, None] * self.Dinv[None, :]      # D^-1 M D^-1, kept for the mean
+        self._Db = self.Dinv * b                                     # D^-1 b
+        Lam, U = jnp.linalg.eigh(self._Ms)
         self.Lam = jnp.maximum(Lam, 0.0)                    # clip round-off negatives
         self.W = U * self.Dinv[:, None]                     # D^-1 U
-        self._Wb = self.W.T @ b                             # U^T D^-1 b
         self.mean_ridge = None                              # None: each call uses its own ridge
         self._means = {}                                    # ridge -> c*(ridge)
         self._posts = {}                                    # (mean, ridge, form, lev, thr) -> posterior
@@ -298,10 +322,17 @@ class PopsRidgePath:
         return float(ridge) * float(jnp.max(self.Lam))
 
     def c_star_at(self, ridge):
-        """The ridge solution c*(ridge) = (M + lam Gamma^2)^-1 b (memoised)."""
+        """The ridge solution c*(ridge) = (M + lam Gamma^2)^-1 b (memoised), by a
+        Cholesky solve of the scaled system (D^-1 M D^-1 + lam) (D c) = D^-1 b.
+        Not read off the eigendecomposition: that route loses the directions whose
+        eigenvalues sit below eigh's absolute resolution (eps * max Lambda) --
+        1e-3 relative error on the Si fixture, 4e-4 eV/A in Cantor forces."""
+        from jax.scipy.linalg import cho_factor, cho_solve
         r = _rkey(ridge)
         if r not in self._means:
-            self._means[r] = self.W @ (self._Wb / (self.Lam + self.ridge_abs(r)))
+            lam = self.ridge_abs(r)
+            cf = cho_factor(self._Ms + lam * jnp.eye(self._Ms.shape[0]), lower=True)
+            self._means[r] = self.Dinv * cho_solve(cf, self._Db)
         return self._means[r]
 
     def use_mean(self, ridge):
@@ -327,7 +358,7 @@ class PopsRidgePath:
         same set as ``members`` / ``leverage_select``."""
         A = self.A(ridge)
         c = self.c_star_at(self._mean_for(ridge))
-        h, r = pops_leverage_residual(self.prob.model, self.prob.cfg, self.ds, c, A, self.qs)
+        h, r = self.rows.leverage_residual(c, A)
         live = h > 0
         thr = jnp.percentile(h[live], leverage_pct)
         keep = live & (h >= thr)
@@ -352,24 +383,22 @@ class PopsRidgePath:
 
     def _posterior(self, ridge, form, leverage_pct, mode_threshold):
         from .pops import hypercube_cov, hypercube_support
-        model, cfg = self.prob.model, self.prob.cfg
         A, coef, keep = self._coef(ridge, leverage_pct)
-        W, s = pops_moment_sums(model, cfg, self.ds, coef, self.qs)
+        W, s = self.rows.moment_sums(coef)
         if form == "ensemble":
             K = jnp.sum(keep)
             return {"moments": (A @ W @ A / K, A @ s / K)}
         if form != "hypercube":
             raise ValueError(f"unknown POPS posterior form: {form!r}")
         support = hypercube_support(A @ W @ A, mode_threshold)
-        lo, hi = pops_projection_bounds(model, cfg, self.ds, coef, keep, A @ support, self.qs)
+        lo, hi = self.rows.projection_bounds(coef, keep, A @ support)
         return {"cov": hypercube_cov(support, lo, hi)}
 
     def envelope(self, phi_star, ridge, leverage_pct=0.0):
         """Member min/max of the prediction shift phi* . delta_i at rows phi_star,
         streamed (equals ``pops.pops_envelope(phi_star, self.members(...))``)."""
         A, coef, keep = self._coef(ridge, leverage_pct)
-        return pops_envelope_streamed(self.prob.model, self.prob.cfg, self.ds, coef, keep,
-                                      phi_star @ A, self.qs)
+        return self.rows.envelope(coef, keep, phi_star @ A)
 
     def members(self, ridge, leverage_pct=0.0):
         """Pointwise-optimal corrections of every member, MATERIALISED (K, L).
@@ -381,16 +410,32 @@ class PopsRidgePath:
         return leverage_select(deltas[keep], h[keep], leverage_pct)
 
 
-def _pops_paper_batch(prob, mu, posts, batch):
-    """Paper-faithful POPS predictive for one batch: mean c*.phi*, variance the
-    misspecification posterior of each quantity (no noise / epistemic terms)."""
+def _pops_batch_phi(prob, batch):
+    """The linear rows (phiE (C, L), phiF (3 Ncap, L), phiV (6 C, L)) of one batch."""
     lin, _, _ = linear_rows(prob.model, prob.cfg, batch)
     L = lin.E.shape[-1]
-    phiE, phiF, phiV = lin.E, lin.F.reshape(-1, L), lin.V.reshape(-1, L)
+    return lin.E, lin.F.reshape(-1, L), lin.V.reshape(-1, L)
+
+
+def _pops_rows_predict(mu, posts, phiE, phiF, phiV):
+    """POPS mean and misspecification variance from precomputed rows."""
     Ev, Fv, Vv = (pops_var(phiE, posts["E"]), pops_var(phiF, posts["F"]),
                   pops_var(phiV, posts["V"]))
     return (phiE @ mu, Ev, (phiF @ mu).reshape(-1, 3), Fv.reshape(-1, 3),
             (phiV @ mu).reshape(-1, 6), Vv.reshape(-1, 6))
+
+
+def _pops_paper_batch(prob, mu, posts, batch):
+    """Paper-faithful POPS predictive for one batch: mean c*.phi*, variance the
+    misspecification posterior of each quantity (no noise / epistemic terms)."""
+    return _pops_rows_predict(mu, posts, *_pops_batch_phi(prob, batch))
+
+
+def _pops_predict_fn(prob):
+    """The jitted POPS batch predictor with the mean and posteriors as ARGUMENTS:
+    closing over them would re-trace per ridge and embed every L x L posterior in
+    the compiled program as a constant (6 GB each at the production Cantor basis)."""
+    return jax.jit(lambda mu, posts, b: _pops_paper_batch(prob, mu, posts, b))
 
 
 def _pops_paper_posts(path, ridge, form, leverage_pct):
@@ -416,16 +461,18 @@ large, F too small), so each quantity's A(ridge_q) is chosen for its own
 calibration around the fixed BLR mean."""
 
 
-def _run_predict_pops_paper(theta, prob, ds_train, ds_test, form, ridge, leverage_pct, path=None):
-    path = PopsRidgePath(theta, prob, ds_train) if path is None else path
+def _run_predict_pops_paper(theta, prob, ds_train, ds_test, form, ridge, leverage_pct, path=None,
+                            stats=None):
+    path = PopsRidgePath(theta, prob, ds_train, stats=stats) if path is None else path
     path.use_mean(POPS_MEAN)
     posts = _pops_paper_posts(path, ridge, form, leverage_pct)
-    f = jax.jit(lambda mu, b: _pops_paper_batch(prob, mu, posts, b))
-    outs = [f(path.c_star, jax.tree.map(lambda a: a[i], ds_test)) for i in range(ds_test.n_batches)]
+    f = _pops_predict_fn(prob)
+    outs = [f(path.c_star, posts, jax.tree.map(lambda a: a[i], ds_test)) for i in range(ds_test.n_batches)]
     return _pack(outs, prob, ds_test)
 
 
-def select_pops_ridge(theta, prob, ds_fit, ds_val, grid, form="hypercube", leverage_pct=0.0):
+def select_pops_ridge(theta, prob, ds_fit, ds_val, grid, form="hypercube", leverage_pct=0.0, stats=None,
+                      rows="device"):
     """Choose the paper-faithful POPS ridge per quantity on held-out data.
 
     One :class:`PopsRidgePath` factorisation of the ``ds_fit`` Gram serves the
@@ -435,18 +482,28 @@ def select_pops_ridge(theta, prob, ds_fit, ds_val, grid, form="hypercube", lever
     grid value minimising ``scores[q]`` (an array aligned with ``grid``).
 
     The mean is pinned (POPS_MEAN), so the ridge only moves the uncertainty and
-    the mean CRPS (per atom for E and V) ranks calibration+sharpness."""
-    path = PopsRidgePath(theta, prob, ds_fit)
+    the mean CRPS (per atom for E and V) ranks calibration+sharpness.
+
+    rows: see PopsRidgePath.  Other than "device", the validation rows are also
+    evaluated once and kept on the host, not re-evaluated for every ridge."""
+    path = PopsRidgePath(theta, prob, ds_fit, stats=stats, rows=rows)
     path.use_mean(POPS_MEAN)                                 # the ridge only moves A, never the mean
     scores = {q: [] for q in "EFV"}
+    batches = [jax.tree.map(lambda a: a[i], ds_val) for i in range(ds_val.n_batches)]
+    if isinstance(path.rows, HostRows):
+        phi_fn = jax.jit(lambda b: _pops_batch_phi(prob, b))
+        val_phi = [tuple(np.asarray(x) for x in phi_fn(b)) for b in batches]
+        g = jax.jit(_pops_rows_predict)
+        predict = lambda posts, i: g(path.c_star, posts, *val_phi[i])
+    else:
+        f = _pops_predict_fn(prob)                            # compiled once for the whole grid
+        predict = lambda posts, i: f(path.c_star, posts, batches[i])
     for r in grid:
         post = path.posterior(r, form=form, leverage_pct=leverage_pct)
         posts = {q: post for q in "EFV"}
-        f = jax.jit(lambda mu, b: _pops_paper_batch(prob, mu, posts, b))
         cols = {q: ([], [], []) for q in "EFV"}               # y, mean, sd (scaled, live rows)
-        for i in range(ds_val.n_batches):
-            b = jax.tree.map(lambda a: a[i], ds_val)
-            Em, Ev, Fm, Fv, Vm, Vv = f(path.c_star, b)
+        for i, b in enumerate(batches):
+            Em, Ev, Fm, Fv, Vm, Vv = predict(posts, i)
             C = b.y_E.shape[0]
             nat = np.zeros(C + 1)                             # bucket C collects padded nodes
             np.add.at(nat, np.asarray(b.node_cfg), np.asarray(b.node_mask, float))
@@ -472,7 +529,8 @@ def select_pops_ridge(theta, prob, ds_fit, ds_val, grid, form="hypercube", lever
 
 
 def predict_fixed(theta, prob, ds_train, ds_test, dtc=True, deriv_dtc=True,
-                  uq="blr", pops_form="hypercube", leverage_pct=0.0, pops_ridge="blr", pops_path=None):
+                  uq="blr", pops_form="hypercube", leverage_pct=0.0, pops_ridge="blr", pops_path=None,
+                  stats=None):
     """dtc=False drops the DTC prior residual from E_var (SoR only; for tests).
     deriv_dtc=False keeps the energy DTC residual but drops its force/virial
     derivative (F_var, V_var stay SoR-only).
@@ -487,18 +545,20 @@ def predict_fixed(theta, prob, ds_train, ds_test, dtc=True, deriv_dtc=True,
     no separate noise/epistemic term.  pops_form in {'hypercube','ensemble'},
     leverage_pct the leverage percentile.  pops_path: a PopsRidgePath already built
     on (theta, ds_train) to reuse -- one factorisation and its memoised posteriors
-    serve every test split.  See PopsRidgePath / select_pops_ridge."""
+    serve every test split.  stats: optional theta -> training Stats (e.g. from
+    cached linear statistics); default computes them on ds_train.  See
+    PopsRidgePath / select_pops_ridge."""
     if uq == "blr":
-        return _run_predict(_predict_fn(prob, dtc, deriv_dtc), theta, prob, ds_train, ds_test)
+        return _run_predict(_predict_fn(prob, dtc, deriv_dtc), theta, prob, ds_train, ds_test, stats=stats)
     if uq == "pops":
         return _run_predict_pops_paper(theta, prob, ds_train, ds_test, pops_form,
-                                       pops_ridge, leverage_pct, path=pops_path)
+                                       pops_ridge, leverage_pct, path=pops_path, stats=stats)
     raise ValueError(f"uq must be 'blr' or 'pops', got {uq!r}")
 
 
-def predict_mixture(draws, prob, ds_train, ds_test, deriv_dtc=True):
+def predict_mixture(draws, prob, ds_train, ds_test, deriv_dtc=True, stats=None):
     f = _predict_fn(prob, True, deriv_dtc)   # compile ONCE, reuse across all draws
-    preds = [_run_predict(f, from_array(jnp.asarray(d)), prob, ds_train, ds_test)
+    preds = [_run_predict(f, from_array(jnp.asarray(d)), prob, ds_train, ds_test, stats=stats)
              for d in np.asarray(draws)]
     out = []
     for k in range(0, 6, 2):
