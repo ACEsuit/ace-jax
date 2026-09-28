@@ -111,7 +111,7 @@ ignore = [
 # B023 (closure over a loop variable): every site in these files was reviewed and
 # is a false positive -- the closure is consumed in the same iteration
 # (`jax.tree.map(lambda a: a[i], ds)`, in-loop jit timing).  Listed per file so
-# the rule still guards new files.  See the devops report (repo hygiene, 2026-09).
+# the rule still guards new files.
 "bench/learn_radial/compare_plots.py" = ["B023"]
 "bench/learn_radial/plots.py" = ["B023"]
 "bench/learn_radial/rmse.py" = ["B023"]
@@ -127,8 +127,3 @@ ignore = [
 "tests/test_gp_pops_paper.py" = ["B023"]
 "tests/test_gp_rows.py" = ["B023"]
 "tests/test_gp_stats.py" = ["B023"]
-
-# plots.py:44 uses a PEP 701 f-string (`f"{d["k"]}"`), a SyntaxError on Python
-# 3.11 (requires-python >= 3.11).  Linted as 3.12 until fixed; see the devops report.
-[tool.ruff.per-file-target-version]
-"bench/learn_radial/plots.py" = "py312"
