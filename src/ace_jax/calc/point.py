@@ -78,13 +78,21 @@ class ACECalculator(Calculator):
         std kappa * sqrt(sum_c phi_c A^-1 phi_c^T), shape (N,).  By default it is computed only
         when requested (`calc.get_property("forces_std", atoms)`, which reuses the cached
         E/F/stress): a design-row rebuild plus an L^2 solve per step is not a silent MD cost.
-        `forces_std_every_call=True` adds it to every calculation.
+        `forces_std_every_call=True` adds it to every calculation.  posterior= requires
+        `jax.config.update("jax_enable_x64", True)` (RuntimeError otherwise).
 
         Memory: forces_std builds the force design rows of the WHOLE cell, about N*3*L*8 bytes
         (N atoms padded, L = (n_B + n_pair) * NZ columns) -- 7 GB for N = 100k at L = 3k -- on
         the JAX device, besides the posterior's L^2 factor.  The edge Jacobian is node-chunked
         (`linear_rows_chunked`), the rows themselves are not: size cells to fit them."""
         model_path = model
+        if posterior is not None:
+            import jax
+            if not jax.config.jax_enable_x64:
+                # A^-1 at cond(S) ~ 1e13 is meaningless in float32; enabling x64 here would silently
+                # change every other JAX computation in the process
+                raise RuntimeError("posterior= (forces_std) needs float64: call "
+                                   "jax.config.update('jax_enable_x64', True) before creating the calculator")
         if edge_a_kind != "auto":
             check_edge_a_kind(edge_a_kind)
         if layout != "auto" and layout not in LAYOUTS:

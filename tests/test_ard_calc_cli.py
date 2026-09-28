@@ -123,3 +123,24 @@ def test_cli_eval_refuses_posterior_with_gp_model(fitted, tmp_path):
     with pytest.raises(ValueError, match="posterior"):
         main(["eval", "--model", str(gp_stub), "--posterior", str(fitted / "posterior.npz"),
               "--data", str(data), "--energy-key", "dft_energy", "--force-key", "dft_force"])
+
+
+def test_posterior_without_x64_raises(fitted):
+    """M1: forces_std needs float64 (A^-1 at cond ~1e13); with x64 off the calculator must refuse,
+    not silently solve in float32.  x64 is global state: run in a fresh interpreter."""
+    import os
+    import subprocess
+    import sys
+    code = ("import jax\n"
+            "assert not jax.config.jax_enable_x64\n"
+            "from ace_jax import ACECalculator\n"
+            "try:\n"
+            f"    ACECalculator({str(fitted / 'model.npz')!r}, posterior={str(fitted / 'posterior.npz')!r})\n"
+            "except RuntimeError as e:\n"
+            "    print('RAISED', e)\n"
+            "else:\n"
+            "    print('NO ERROR', jax.config.jax_enable_x64)\n")
+    env = {**os.environ, "JAX_ENABLE_X64": "0", "JAX_PLATFORMS": "cpu"}
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=env, timeout=300)
+    assert out.returncode == 0, out.stderr
+    assert "RAISED" in out.stdout and "jax_enable_x64" in out.stdout, out.stdout
