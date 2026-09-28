@@ -135,3 +135,26 @@ def bayes_joint(n_draws: int = 6, diag: bool = False, opt_only: bool = False) ->
 @app.local_entrypoint()
 def launch_joint(n_draws: int = 6, diag: bool = False, opt_only: bool = False):
     print("rc", bayes_joint.remote(n_draws, diag, opt_only))
+
+
+@app.function(gpu="B200", image=image.add_local_file(str(pathlib.Path(__file__).parent / "sandwich_spike.py"),
+                                                     "/root/sandwich_spike.py"),
+              volumes={"/out": vol}, timeout=6 * 3600, memory=200 * 1024)
+def sandwich(run: str = "bench365_ard_v2") -> int:
+    """SPIKE: sandwich (misspecification-robust) force variances on an ARD run -> <run>/sandwich.npz."""
+    import subprocess
+    import time
+    out = f"/out/{run}"
+    env = dict(os.environ, JAX_ENABLE_X64="1", XLA_PYTHON_CLIENT_PREALLOCATE="false")
+    with open(f"{out}/sandwich.log", "w") as so:
+        p = subprocess.Popen(["python", "-u", "/root/sandwich_spike.py", "/data", out], stdout=so,
+                             stderr=subprocess.STDOUT, env=env)
+        while p.poll() is None:
+            time.sleep(60); vol.commit()
+    vol.commit()
+    return p.returncode
+
+
+@app.local_entrypoint()
+def launch_sandwich(run: str = "bench365_ard_v2"):
+    print("spawned sandwich", sandwich.spawn(run).object_id)
