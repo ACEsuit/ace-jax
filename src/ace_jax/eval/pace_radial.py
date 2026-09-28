@@ -10,7 +10,9 @@ finite at r >= rcut, x = 0 and m = 1.
 """
 import math
 
+import jax
 import jax.numpy as jnp
+import numpy as np
 
 PI = math.pi
 
@@ -98,8 +100,52 @@ def _sbessel(r, rc, K):
     return jnp.stack(g, axis=-1)
 
 
-def radbase(r, name, inner, lam, rc, dcut, cut_in, dcut_in, K):
-    """g_k(r), k < K, zero outside (cut_in - dcut_in, rc)."""
+def sbessel_matrix(K):
+    """M (K+1, K) with `_sbessel`'s g_n = sum_k S_k M[k, n] / rc^1.5, where
+    S_k = sinc((k+1) x): PACE's orthogonalisation is linear with constant
+    coefficients, so the whole recurrence folds into one constant matrix.
+    K = 0 gives one column, as `_sbessel` does."""
+    Kf = max(K, 1)
+    P = np.zeros((Kf + 1, Kf))                      # f_n = pre_n (S_n + S_{n+1})
+    for n in range(Kf):
+        pre = ((-1) ** n * math.sqrt(2) * PI * (n + 1) * (n + 2)
+               / math.sqrt((n + 1) ** 2 + (n + 2) ** 2))
+        P[n, n] += pre
+        P[n + 1, n] += pre
+    L = np.zeros((Kf, Kf))                           # g = f @ L
+    L[0, 0] = 1.0
+    d_prev = 1.0
+    for n in range(1, Kf):
+        en = n ** 2 * (n + 2) ** 2 / (4 * (n + 1) ** 4 + 1)
+        dn = 1 - en / d_prev
+        L[:, n] = (np.eye(Kf)[:, n] + math.sqrt(en / d_prev) * L[:, n - 1]) / math.sqrt(dn)
+        d_prev = dn
+    return (P @ L)[:, :max(K, 1)]
+
+
+def _sbessel_mm(r, rc, K):
+    """`_sbessel` as one elementwise sin per (edge, k) and a constant matmul,
+    g = (S @ M) / rc^1.5 (`sbessel_matrix`).  Exact to roundoff.  The stacked
+    recurrence fuses into one kernel that re-evaluates its chain per column, so
+    its cost grows ~K^2 per edge; this form is faster from nradbase ~12 and
+    slower below (the (E, K+1) sin array and the matmul cost more), which is
+    why `load_yace` chooses it per model (docs/ace-vs-pace-gap.md 4.3)."""
+    x = r * PI / rc
+    xs = jnp.where(x == 0, 1.0, x)
+    k = jnp.arange(1, max(K, 1) + 2, dtype=r.dtype)
+    kx = k * xs[..., None]
+    S = jnp.where((x == 0)[..., None], 1.0, jnp.sin(kx) / kx)
+    M = jnp.asarray(sbessel_matrix(K), r.dtype)
+    return (jnp.matmul(S, M, precision=jax.lax.Precision.HIGHEST)
+            / jnp.expand_dims(jnp.asarray(rc, r.dtype) ** 1.5, -1))
+
+
+SBESSEL_FORMS = ("rotation", "matmul")
+
+
+def radbase(r, name, inner, lam, rc, dcut, cut_in, dcut_in, K, sbessel_form="rotation"):
+    """g_k(r), k < K, zero outside (cut_in - dcut_in, rc).  `sbessel_form`
+    picks `_sbessel` ("rotation") or `_sbessel_mm` ("matmul") for SBessel."""
     if inner == "zbl":                       # ace_radial.cpp:246, ported as-is
         one = jnp.ones_like(dcut_in)              # typed operands: no f64 buffer
         cut_in = jnp.where(dcut_in == 0, one, 0 * one)
@@ -112,7 +158,9 @@ def radbase(r, name, inner, lam, rc, dcut, cut_in, dcut_in, K):
     elif name == "ChebLinear":
         g = _cheb_linear(rs, rc, K)
     elif name == "SBessel":
-        g = _sbessel(rs, rc, K)
+        if sbessel_form not in SBESSEL_FORMS:
+            raise ValueError(f"sbessel_form must be one of {SBESSEL_FORMS}, got {sbessel_form!r}")
+        g = (_sbessel_mm if sbessel_form == "matmul" else _sbessel)(rs, rc, K)
     else:
         raise NotImplementedError(f"radial basis {name!r}")
     if inner in ("distance", "zbl"):
