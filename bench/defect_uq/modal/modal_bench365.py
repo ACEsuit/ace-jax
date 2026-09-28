@@ -100,3 +100,25 @@ def bayes_bodyorder() -> int:
 @app.local_entrypoint()
 def launch_bayes():
     print("rc", bayes_bodyorder.remote())
+
+
+@app.function(gpu="B200", image=image.add_local_file(str(pathlib.Path(__file__).parents[1] / "scoring" / "bayes_joint.py"),
+                                                     "/root/bayes_joint.py"),
+              volumes={"/out": vol}, timeout=12 * 3600, memory=128 * 1024)
+def bayes_joint(n_draws: int = 6) -> int:
+    import subprocess
+    out = "/out/bench365_bayes_joint"
+    os.makedirs(out, exist_ok=True)
+    env = dict(os.environ, JAX_ENABLE_X64="1", XLA_PYTHON_CLIENT_PREALLOCATE="false")
+    with open(f"{out}/stdout.log", "w") as so, open(f"{out}/stderr.log", "w") as se:
+        p = subprocess.Popen(["python", "-u", "/root/bayes_joint.py", "/data", "/out/bench365_pops/theta_map.json",
+                              f"{out}/joint.npz", str(n_draws)], stdout=so, stderr=se, env=env)
+        while p.poll() is None:
+            import time; time.sleep(60); vol.commit()
+    open(f"{out}/rc.txt", "w").write(f"rc={p.returncode}\n"); vol.commit()
+    return p.returncode
+
+
+@app.local_entrypoint()
+def launch_joint(n_draws: int = 6):
+    print("rc", bayes_joint.remote(n_draws))
