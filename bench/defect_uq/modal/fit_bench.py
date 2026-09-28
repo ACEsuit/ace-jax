@@ -20,7 +20,10 @@ common = dict(model="/data/cantor_embed_d16_deg10.npz" if data.startswith("/data
 if arm == "pops":
     cfg = FitConfig(**common, arm="linear", uq="pops", pops_ridge="auto")
 elif arm.startswith("ard"):   # "ard", or "ard_<tag>" for a separate output dir      # tempered ARD posterior (feat/ard-uq): joint type-II ML, kappa from a 20 % train hold-out
-    cfg = FitConfig(**common, arm="linear", uq="ard", ard_mode="joint", ard_val_frac=0.2, ard_laplace=True)
+    # "ard_c<k>": ard_cond_max = 10**k (the conditioning floor on the prior precisions); default 1e14
+    cm = float(10 ** int(arm.split("_c")[1])) if "_c" in arm else 1e14
+    cfg = FitConfig(**common, arm="linear", uq="ard", ard_mode="joint", ard_val_frac=0.2, ard_laplace=True,
+                    ard_cond_max=cm)
 else:
     cfg = FitConfig(**common, arm="gp", m_per_species=100, density="pca", pca_d=128, lml="host-cache",
                     map_restarts=1 if smoke else 4)
