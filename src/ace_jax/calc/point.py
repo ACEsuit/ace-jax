@@ -53,10 +53,10 @@ def dense_budget_bytes():
 
 class ACECalculator(Calculator):
     implemented_properties = ["energy", "free_energy", "forces", "stress",
-                              "site_descriptors"]
+                              "site_descriptors", "forces_std"]
 
     def __init__(self, model, meta=None, cutoff=None, dtype=None, edge_a_kind="auto",
-                 layout="auto", **kw):
+                 layout="auto", posterior=None, **kw):
         """`ACECalculator("si_fitted.npz")` is the intended form: cutoff,
         species and dtype all come from the file.  A pre-loaded (model, meta)
         pair is still accepted, which is what the validation tests use.
@@ -70,7 +70,12 @@ class ACECalculator(Calculator):
         (n, K) per-node blocks; A by a batched outer product), or "auto" (default):
         dense when `estimate_a_bytes` fits `dense_budget_bytes()` and the padding
         is efficient (see MIN_DENSE_FILL), else sparse.  `edge_a_kind` applies to
-        the sparse layout."""
+        the sparse layout.
+
+        `posterior` (a `posterior.npz` from `fit --uq ard`, with `model` the matching
+        `model.npz` FILE) adds `results["forces_std"]`: the tempered ARD per-atom force
+        std kappa * sqrt(sum_c phi_c A^-1 phi_c^T), shape (N,)."""
+        model_path = model
         if edge_a_kind != "auto":
             check_edge_a_kind(edge_a_kind)
         if layout != "auto" and layout not in LAYOUTS:
@@ -102,6 +107,24 @@ class ACECalculator(Calculator):
         self._efv_sparse = eqx.filter_jit(
             lambda m, rij, zi, zj, s, r, n, nz, emask: m.energy_forces_virial(
                 rij, zi, zj, s, r, n, nz, emask))
+        self.posterior = None
+        if posterior is not None:
+            from ..eval import load as _load_fit_model
+            from ..fit.ard import ARDPosterior
+            from ..fit.inducing import GPConfig
+            if not isinstance(model_path, (str, bytes)) and not hasattr(model_path, "__fspath__"):
+                raise ValueError("posterior= needs the model FILE path (the design rows use the fit model)")
+            post = ARDPosterior.load(posterior)
+            NZ = len(meta["elements"])
+            L = (meta["n_B"] + meta["n_pair"]) * NZ
+            if (len(post.mean) != L or post.meta.get("n_B") != meta["n_B"]
+                    or post.meta.get("NZ") != NZ):
+                raise ValueError(f"posterior {posterior} does not match the model: "
+                                 f"basis {len(post.mean)} vs {L}")
+            self.posterior = post
+            self._fit_model = _load_fit_model(model_path)[0]
+            self._fit_cfg = GPConfig(r0=1.0, rcut=float(meta["rcut"]), n_B=meta["n_B"],
+                                     n_pair=meta["n_pair"], NZ=NZ, C=1)
 
     def _species_index(self, numbers):
         try:
@@ -179,6 +202,26 @@ class ACECalculator(Calculator):
             s = -np.asarray(V) / vol
             self.results["stress"] = np.array(
                 [s[0, 0], s[1, 1], s[2, 2], s[1, 2], s[0, 2], s[0, 1]])
+        if self.posterior is not None:
+            self.results["forces_std"] = self._forces_std()
+
+    def _forces_std(self):
+        """Tempered ARD per-atom force std (posterior.npz), from node-chunked design rows."""
+        import jax
+
+        from ..fit.data import Config, build_dataset
+        from ..fit.rows import linear_rows_chunked
+        at = self.atoms
+        c = Config(at.get_positions(), at.get_atomic_numbers(), at.get_cell().array, at.get_pbc(),
+                   None, None, None, 1.0, 1.0, 1.0)
+        ds = build_dataset([c], self.meta, np.zeros(len(self.meta["elements"])), 1)
+        b = jax.tree.map(lambda a: a[0], ds)
+        if b.nbr.shape[1] == 0 or not bool(np.asarray(b.nbr_mask).any()):
+            return np.zeros(len(at))                     # no neighbours: forces are identically zero
+        with highest_precision():
+            F = np.asarray(linear_rows_chunked(self._fit_model, self._fit_cfg, b).F)
+        F = F[np.asarray(b.node_mask)]
+        return self.posterior.forces_std(F)
 
     def _native_dense(self, pos, cell, pbc, n, dtype):
         """The dense graph straight from matscipy_neighbours' neighbour_matrix,
