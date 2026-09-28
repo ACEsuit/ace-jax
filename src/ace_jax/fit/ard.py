@@ -221,8 +221,9 @@ class ARDPosterior(NamedTuple):
             out.append(np.asarray(tot))
             if own is not None:
                 o = jnp.asarray(own[i:i + chunk])
-                vo = jnp.take_along_axis(v, jnp.maximum(o, 0)[:, None], axis=1)[:, 0]
-                loo.append(np.asarray(tot - jnp.where(o >= 0, vo * vo, 0.0)))
+                # drop the own column before squaring (no tot - v_own^2 cancellation; >= 0 by construction)
+                w = jnp.where(jnp.arange(v.shape[1])[None, :] == o[:, None], 0.0, v)
+                loo.append(np.asarray(jnp.sum(w * w, axis=1)))
         cat = lambda xs: np.concatenate(xs) if xs else np.zeros(0)
         return cat(out) if own is None else (cat(out), cat(loo))
 
