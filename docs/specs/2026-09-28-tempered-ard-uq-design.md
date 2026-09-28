@@ -101,8 +101,14 @@ The GP path keeps `linear_rows`.
 
 - `body_order_columns(meta, cfg) -> (L,) int` gives each column's body order in the `_place`
   layout.
-- `fit_ard(stats, gamma, groups, h0) -> (h, logev)` does the joint type-II ML over
+- `fit_ard(stats, gamma, groups, h0, mode="joint") -> (h, logev)` does the joint type-II ML over
   (σ_E, σ_F, σ_V, a₂, a₃, a₄).
+  - `mode="sequential"` fixes σ_q at the linear MAP and fits only the ARD scales. It needs just the
+    combined Gram, one L² matrix, where the joint mode keeps G_E, G_F and G_V separate (three).
+  - Sequential is the low-memory fallback for large bases: 29 GB against 86 GB in float64 at
+    L = 60k; 1.8 against 5.4 GB at L = 15k.
+  - On bench365 the two agree to 2.4 nats and 0.2 % in σ_F.
+  - `FitConfig.ard_mode` ∈ {"joint", "sequential"}, default "joint"; CLI flag `--ard-mode`.
 - `laplace_hypers(stats, gamma, groups, h) -> (cov_h, report)` is the diagnostic.
 - `ArdPosterior(mean, chol, kappa, a, groups)` has two methods:
   - `.forces_std(Phi_F)`, with Φ_F as (N, 3, L), returns (N,) values of κ‖L⁻¹Φᵀ‖;
@@ -135,7 +141,8 @@ The GP path keeps `linear_rows`.
 
 ## Decisions taken (review these)
 
-1. **Joint type-II ML over the noise scales and the ARD scales,** in a dedicated linear-evidence
+1. **Joint type-II ML over the noise scales and the ARD scales** (default; `ard_mode="sequential"`
+   is the low-memory fallback), in a dedicated linear-evidence
    optimiser initialised from the linear MAP. It supersedes an earlier draft that fitted ARD after
    the MAP with σ_q fixed: that was one step of coordinate ascent on the same objective. The
    hyperparameters are *maximised*, not marginalised. The Laplace diagnostic measures what
