@@ -49,7 +49,7 @@ class FitConfig:
     uq: str = "blr"                      # "blr" | "pops" | "ard"
     ard_mode: str = "joint"              # "joint" (sigma_q + ARD scales) | "sequential" (low memory)
     ard_variance: str = "sandwich"       # "sandwich" (configuration-clustered, spec addendum) | "kappa"
-    ard_val_frac: float = 0.2            # train hold-out for the temperature kappa
+    ard_val_frac: float = 0.2            # train hold-out for the force-variance scale (lam, kappa)
     ard_cond_max: float = 1e14           # prior floor: cond(S) <= ard_cond_max
     ard_laplace: bool = False            # Laplace diagnostic of the hyperparameters (ard.json)
     deriv_dtc: bool = True
@@ -71,7 +71,7 @@ class FitConfig:
             raise ValueError(f"uq must be 'blr', 'pops' or 'ard', got {self.uq!r}")
         if self.uq == "ard":
             if self.arm != "linear":
-                raise ValueError("uq='ard' is the linear-arm tempered posterior: use arm linear (m_per_species 0)")
+                raise ValueError("uq='ard' is the linear-arm ARD posterior: use arm linear (m_per_species 0)")
             if self.ard_mode not in ("joint", "sequential"):
                 raise ValueError(f"ard_mode must be 'joint' or 'sequential', got {self.ard_mode!r}")
             if self.ard_variance not in ("sandwich", "kappa"):

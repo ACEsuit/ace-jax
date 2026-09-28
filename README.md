@@ -187,7 +187,7 @@ aj fit --model si.npz --train train.xyz --test test.xyz --ood ood.xyz $K \
 aj fit --model si.npz --train train.xyz --test test.xyz $K \
     --m-per-species 0 --uq pops --opt lbfgs --rungs map --r0 2.35 --out out_pops
 
-# calibrated per-atom force uncertainty: tempered ARD posterior (linear model)
+# calibrated per-atom force uncertainty: ARD posterior (linear model)
 aj fit --model si.npz --train train.xyz --test test.xyz $K \
     --m-per-species 0 --uq ard --opt lbfgs --r0 2.35 --out out_ard
 aj eval --model out_ard/model.npz --posterior out_ard/posterior.npz --data big.xyz $K \
@@ -201,9 +201,12 @@ aj fit --model si.npz --data all.xyz --ntrain 40 --ntest 10 --e0 lsq $K \
 `--uq ard` fits prior scales per body order and the noise scales by evidence (joint type-II ML).
 The default `--ard-variance sandwich` serves the configuration-clustered sandwich variance,
 σ² = λ²·φA⁻¹MA⁻¹φᵀ, the misspecification-robust covariance, with λ from the train hold-out (fitted
-the same way as κ). On the bench365 prototype it ranked local errors better than the tempered
+the same way as κ, but with each held-out atom's own training-configuration cluster left out of M: a
+new configuration has no such term; `ard.json` also reports `lam_incl_own`, the λ with it). On the bench365 prototype it ranked local errors better than the tempered
 posterior (Spearman ρ 0.26–0.37 against 0.15–0.26) at the same calibration and OOD detection.
-`--ard-variance kappa` keeps the single-temperature posterior variance κ²φA⁻¹φᵀ instead. The
+`--ard-variance kappa` keeps the single-temperature posterior variance κ²φA⁻¹φᵀ instead. Only
+the force variance is calibrated (λ or κ; `ard.json` `tempered_quantities: ["F"]`); energy and virial
+variances are the uncalibrated posterior ones. The
 prototype of this method (`bench/defect_uq`, PR #12) held rms-z 0.91–1.02 on held-out Cantor
 defect combinations; the acceptance run of this implementation is pending. `--uq ard` changes the
 mean as well as the uncertainty: `model.npz` holds the ARD posterior mean, not the BLR/MAP mean.

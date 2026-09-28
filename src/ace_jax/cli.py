@@ -57,15 +57,16 @@ def _add_fit_args(p):
     p.add_argument("--nuts-chains", type=int, default=4); p.add_argument("--r0", type=float, required=True,
                    help="typical nearest-neighbour distance (A); centres the GP hyperprior")
     p.add_argument("--uq", choices=["blr", "pops", "ard"], default="blr",
-                   help="pops/ard: linear arm (--m-per-species 0); ard = tempered ARD posterior "
-                        "(calibrated per-atom forces_std, writes posterior.npz)")
+                   help="pops/ard: linear arm (--m-per-species 0); ard = ARD posterior with a "
+                        "calibrated per-atom forces_std (see --ard-variance), writes posterior.npz")
     p.add_argument("--ard-mode", choices=["joint", "sequential"], default="joint",
                    help="joint: noise + ARD scales by evidence; sequential: ARD only, one Gram (low memory)")
     p.add_argument("--ard-variance", choices=["sandwich", "kappa"], default="sandwich",
                    help="ARD force variance: sandwich = configuration-clustered misspecification-robust "
                         "(scaled by lam on the train hold-out); kappa = kappa^2 x the posterior variance")
     p.add_argument("--ard-val-frac", type=float, default=0.2,
-                   help="train fraction held out to fit the temperature kappa")
+                   help="train fraction held out to fit the force-variance scale: lam (sandwich) "
+                        "and kappa")
     p.add_argument("--pops-ridge", default="auto")
     p.add_argument("--seed", type=int, default=0); p.add_argument("--out", required=True)
     p.add_argument("--model-draws", type=int, default=1,

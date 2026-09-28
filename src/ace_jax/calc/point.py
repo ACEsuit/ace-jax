@@ -255,7 +255,8 @@ class ACECalculator(Calculator):
             self.results["forces_std"] = self._forces_std()
 
     def _forces_std(self):
-        """Tempered ARD per-atom force std (posterior.npz), from node-chunked design rows."""
+        """Calibrated ARD per-atom force std (posterior.npz: lam x the cluster sandwich, or kappa x
+        the posterior std for --ard-variance kappa / schema 1), from node-chunked design rows."""
         import jax
 
         from ..fit.data import Config, build_dataset

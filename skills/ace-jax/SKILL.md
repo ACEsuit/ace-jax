@@ -87,10 +87,12 @@ These constraints are validated up front. A bad combination raises a
   - `model.npz` (linear): an ordinary ACE file, loaded by `ace_jax.load`,
     `ACECalculator` and `aj eval`.
   - `--uq ard` (linear only) also writes `posterior.npz` (float32 Cholesky factor of
-    the tempered ARD posterior) and `ard.json` (evidence, prior scales, κ, held-out
-    NLL and rms-z). `ACECalculator(model, posterior="out_ard/posterior.npz")` and
+    the ARD posterior, plus the (L, n_cfg) sandwich factor Q by default) and `ard.json`
+    (evidence, prior scales, κ, λ, held-out NLL and rms-z; `lam_incl_own` is the λ the
+    held-out atoms' own training clusters would give, for comparison only).
+    `ACECalculator(model, posterior="out_ard/posterior.npz")` and
     `aj eval --posterior out_ard/posterior.npz` add a `forces_std` result: per-atom
-    tempered force uncertainty. `--uq ard` also changes the mean: `model.npz` is the
+    calibrated force uncertainty. `--uq ard` also changes the mean: `model.npz` is the
     ARD posterior mean, not the BLR/MAP mean.
   - `gp_model.npz` (GP): self-contained, loaded by `GPCalculator.from_file` and
     `aj eval`. Its size is about 8·Dt²·(model draws) bytes, where Dt = basis
@@ -215,7 +217,10 @@ Other entry points:
   `atoms.get_forces()` does not compute it; call
   `calc.get_property("forces_std", atoms)` (reuses the cached E/F/stress), or
   pass `forces_std_every_call=True` — costly for per-step MD on big cells. Only
-  the force σ is tempered by κ; energy and virial variances are untempered.
+  the force σ is calibrated: by default it is λ × the configuration-clustered
+  sandwich σ, with `--ard-variance kappa` κ × the posterior σ. Energy and virial
+  variances are the uncalibrated posterior ones (`ard.json` `tempered_quantities: ["F"]`
+  names the calibrated quantity, whichever scale was used).
   `ACECalculator(model, posterior=...)` raises `ValueError` if the posterior
   doesn't match the model (basis size, species count, element list, or a mean
   that is not the model's coefficients, i.e. a posterior from another fit), and

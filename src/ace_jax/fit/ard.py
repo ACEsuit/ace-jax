@@ -392,8 +392,9 @@ def _ard_fit_warnings(stage, info, names):
 
 
 def run_ard_stage(cfg, data, built, theta, log=print, full_stats=None):
-    """Fit ARD on a train subset, choose kappa on the held-out rest (never the test set), then refit
-    on ALL training data (started from the subset optimum) and keep kappa.
+    """Fit ARD on a train subset, keep its errors on the held-out rest (never the test set), refit on
+    ALL training data (started from the subset optimum), and fit kappa (and, for the sandwich, lam)
+    from those held-out errors against the refit posterior's variance.
 
     full_stats: the linear statistics of data.ds_train (`stats.linear_statistics`) the caller has
     already cached -- the pipeline objective's.  The joint full refit then uses them as they are
@@ -474,7 +475,8 @@ def run_ard_stage(cfg, data, built, theta, log=print, full_stats=None):
     report = {"mode": mode, "groups": list(ev.groups), "h": h.tolist(), "h_names": names,
               "logev_full": v, "logev_full_start": v_start, "optimiser": info, "optimiser_fit": info_fit,
               "a_floor": ev.a_floor,
-              "tempered_quantities": ["F"],        # E_var / V_var are the untempered posterior variances
+              "tempered_quantities": ["F"],        # F_var is calibrated (lam^2 sandwich, or kappa^2 posterior
+                                                   # for variance "kappa"); E_var / V_var are untempered
               "kappa": kappa, "kappa_subset": kappa_subset, "n_val_atoms": int(len(e2)), "n_val_configs": len(val), "n_fit_configs": len(fit_),
               # held-out errors (subset model) against the served posterior's s^2
               "val_rms_z_untempered": float(np.sqrt(np.mean(e2 / (s2_full / 3)) / 3)),
