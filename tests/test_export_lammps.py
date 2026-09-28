@@ -331,3 +331,22 @@ def test_dense_blocks_only_above_one_block(monkeypatch, block, blocked):
         assert prims & {"scan", "while"} and prims & {"checkpoint", "remat", "remat2"}, prims
     else:
         assert not prims, prims
+
+
+def test_auto_layout_judges_one_dense_block(tmp_path, monkeypatch):
+    """The dense bundle runs in BUNDLE_BLOCK_ROWS blocks, so only one block's
+    temporaries are live: auto must stay dense when a block fits the budget
+    even though all rows at once would not (the benchmark exports with auto)."""
+    pytest.importorskip("lammps_jax")
+    from ace_jax.calc import point
+    from ace_jax.eval.edge_model import estimate_a_bytes
+    from ace_jax.export import lammps as lx
+    y = str(pace_fixture(FIX / "gesi_sbessel.yace"))
+    model, meta, _ = load(y)
+    k, block, n = 64, lx.BUNDLE_BLOCK_ROWS, 4 * lx.BUNDLE_BLOCK_ROWS
+    one = estimate_a_bytes(model, "dense", block, block * k, k, 8)
+    monkeypatch.setattr(point, "dense_budget_bytes", lambda: 2 * one)   # a block fits, 4 do not
+    assert estimate_a_bytes(model, "dense", n, n * k, k, 8) > 2 * one
+    b = lx.export_lammps(model, meta, tmp_path / "m.json", max_atoms=n + 100, max_edges=n * k,
+                         k_dense=k, max_owned=n, layout="auto")
+    assert b["ace_jax"]["layout"] == "dense"

@@ -104,9 +104,10 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges, k_dense=None,
     (see make_energy_fn's n_rows); always recorded in the bundle, including for
     the sparse layout, which has no row concept and ignores it otherwise.
 
-    layout="auto" picks dense when k_dense is given and estimate_a_bytes for the
-    dense row capacity (max_owned if given, else max_atoms) fits
-    ace_jax.calc.point.dense_budget_bytes(), else sparse.
+    layout="auto" picks dense when k_dense is given and estimate_a_bytes for one
+    dense block (the row capacity -- max_owned if given, else max_atoms -- capped
+    at BUNDLE_BLOCK_ROWS) fits ace_jax.calc.point.dense_budget_bytes(), else
+    sparse.
     """
     from lammps_jax.export import export_model
     from ..calc.point import dense_budget_bytes
@@ -119,9 +120,10 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges, k_dense=None,
     n_species = len(type_elements)
     if layout == "auto":
         itemsize = np.dtype(dtype).itemsize
-        n_rows = max_owned if max_owned is not None else max_atoms
-        fits = k_dense and estimate_a_bytes(model, "dense", n_rows, max_edges, k_dense,
-                                            itemsize) <= dense_budget_bytes()
+        # rows run in BUNDLE_BLOCK_ROWS blocks, so one block's temporaries bound memory
+        n_rows = min(max_owned if max_owned is not None else max_atoms, BUNDLE_BLOCK_ROWS)
+        fits = k_dense and estimate_a_bytes(model, "dense", n_rows, min(max_edges, n_rows * k_dense),
+                                            k_dense, itemsize) <= dense_budget_bytes()
         layout = "dense" if fits else "sparse"
     energy_fn = make_energy_fn(model, n_species, layout, k_dense,
                                None if type_map == list(range(len(model_z))) else type_map,
