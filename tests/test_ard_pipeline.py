@@ -119,3 +119,20 @@ def test_ard_checkpoint_survives_a_failure_in_prediction(tmp_path, monkeypatch):
     from ace_jax import ACECalculator
     calc = ACECalculator(str(tmp_path / "model.npz"), posterior=str(tmp_path / "posterior.npz"))
     assert calc.posterior is not None                    # the mean-vs-coefficients guard passed
+
+
+def test_bench_run_driver_passes_the_ard_flags_through(tmp_path):
+    """bench/acegp_cantor/run.py exposes --ard-variance/--ard-mode/--ard-val-frac and hands them to
+    FitConfig (it used to omit them, so --uq ard silently took the defaults)."""
+    import json, subprocess, sys
+    from conftest import FIXTURE_DIR, ROOT
+    r = subprocess.run(
+        [sys.executable, str(ROOT / "bench/acegp_cantor/run.py"), "--model", str(FIXTURE_DIR / "si_fitted.npz"),
+         "--data", str(FIXTURE_DIR / "si_tiny_train.xyz"), "--energy-key", "dft_energy", "--force-key",
+         "dft_force", "--virial-key", "dft_virial", "--r0", "2.35", "--ntrain", "16", "--test-start", "16",
+         "--ntest", "6", "--batch", "4", "--no-predict-train", "--arm", "linear", "--rungs", "map",
+         "--map-steps", "5", "--uq", "ard", "--ard-variance", "kappa", "--ard-mode", "sequential",
+         "--ard-val-frac", "0.25", "--out", str(tmp_path)], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr[-3000:]
+    rep = json.loads(next(tmp_path.rglob("ard.json")).read_text())
+    assert rep["variance"] == "kappa" and rep["mode"] == "sequential" and rep["n_val_configs"] == 4

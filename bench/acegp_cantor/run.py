@@ -31,7 +31,14 @@ p.add_argument("--pca-d", type=int, default=128, help="width of the --density pc
 p.add_argument("--warp", choices=["none", "sqrt"], default="none",
                help="feature warp: sqrt gives the Finnis-Sinclair sqrt-density embedding")
 p.add_argument("--no-deriv-dtc", action="store_true", help="force/virial variance SoR only (drop the derivative-DTC)")
-p.add_argument("--uq", choices=["blr", "pops", "ard"], default="blr", help="linear-arm predictive UQ: blr (posterior variance, today's default), pops (weight-space misspecification) or ard (tempered ARD posterior, joint mode; writes posterior.npz and ard.json, and its mean replaces the MAP mean). pops and ard require --arm linear.")
+p.add_argument("--uq", choices=["blr", "pops", "ard"], default="blr", help="linear-arm predictive UQ: blr (posterior variance, today's default), pops (weight-space misspecification) or ard (ARD posterior, calibrated per-atom force sigma: lam x the configuration-clustered sandwich by default, kappa x the posterior variance with --ard-variance kappa; writes posterior.npz and ard.json, and its mean replaces the MAP mean). pops and ard require --arm linear.")
+p.add_argument("--ard-variance", choices=["sandwich", "kappa"], default="sandwich",
+               help="uq=ard force variance: sandwich (DEFAULT) = configuration-clustered misspecification-robust, "
+                    "scaled by lam fitted on the train hold-out; kappa = kappa^2 x the ARD posterior variance")
+p.add_argument("--ard-mode", choices=["joint", "sequential"], default="joint",
+               help="uq=ard: joint = noise + ARD scales by evidence; sequential = ARD only, one Gram (low memory)")
+p.add_argument("--ard-val-frac", type=float, default=0.2,
+               help="uq=ard: train fraction held out to fit the force-variance scale (lam or kappa)")
 p.add_argument("--pops-posterior", choices=["hypercube", "ensemble"], default="hypercube", help="POPS posterior form (uq=pops): hypercube (PCA/box misspecification covariance; DEFAULT, matches upstream popsregression) or ensemble (committee of weight samples; centred). ('samples' is reserved for a future draw-from-Sigma route.)")
 p.add_argument("--pops-leverage-pct", type=float, default=0.0, help="POPS leverage percentile (uq=pops); 0 keeps every training point")
 p.add_argument("--pops-ridge", default="auto",
@@ -131,7 +138,8 @@ cfg = FitConfig(
     rungs=tuple(dict.fromkeys(["map", *[r.strip() for r in a.rungs.split(",")]])),
     laplace="fd", n_draws=a.n_draws, vi_steps=a.vi_steps, nuts_warmup=a.nuts_warmup,
     nuts_samples=a.nuts_samples, nuts_chains=a.nuts_chains, pf_samples=a.pf_samples,
-    pf_maxiter=a.pf_maxiter, uq=a.uq, deriv_dtc=not a.no_deriv_dtc, predict_train=not a.no_predict_train,
+    pf_maxiter=a.pf_maxiter, uq=a.uq, ard_variance=a.ard_variance, ard_mode=a.ard_mode,
+    ard_val_frac=a.ard_val_frac, deriv_dtc=not a.no_deriv_dtc, predict_train=not a.no_predict_train,
     pops_posterior=a.pops_posterior, pops_leverage_pct=a.pops_leverage_pct, pops_ridge=ridge,
     pops_ridge_grid=tuple(float(x) for x in a.pops_ridge_grid.split(",")),
     pops_val_frac=a.pops_val_frac, pops_env_nf=a.pops_env_nf, pops_rows=a.pops_rows)
