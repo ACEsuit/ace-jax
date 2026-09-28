@@ -83,7 +83,7 @@ def learn(system: str, steps: int, lam_grid: str, reprofile_every: int, n_q: int
                             capture_output=True, text=True)
         log += "\n== rmse_npz ==\n" + r3.stdout + r3.stderr
     files = {str(p.relative_to(out)): p.read_bytes() for p in out.rglob("*")
-             if p.is_file() and p.suffix in (".json", ".npy")} if out.exists() else {}
+             if p.is_file() and p.suffix in (".json", ".npy", ".npz")} if out.exists() else {}
     return {"log": log, "files": files, "returncode": r.returncode}
 
 
