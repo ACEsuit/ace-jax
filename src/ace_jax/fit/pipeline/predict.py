@@ -82,7 +82,7 @@ def _pops_setup(cfg, d, b, stats, theta, log):
     return out
 
 
-def predict_splits(cfg, d, b, stats, theta, draws, log=print):
+def predict_splits(cfg, d, b, stats, theta, draws, log=print, ard=None):
     prob, arrays, metrics, tm = b.prob, {}, {}, {}
     pops = {}
     if cfg.uq == "pops":
@@ -98,7 +98,10 @@ def predict_splits(cfg, d, b, stats, theta, draws, log=print):
         sub = dr if len(dr) <= cfg.n_draws else dr[np.linspace(0, len(dr) - 1, cfg.n_draws).astype(int)]
         for split, cfgs, ds, base in splits:
             t = time.time()
-            if cfg.uq == "pops":
+            if cfg.uq == "ard":
+                from ..ard import predict_ard
+                pred = predict_ard(ard.posterior, prob, ds)
+            elif cfg.uq == "pops":
                 pred = predict_fixed(theta, prob, d.ds_train, ds, deriv_dtc=cfg.deriv_dtc, uq="pops",
                                      pops_form=cfg.pops_posterior, leverage_pct=cfg.pops_leverage_pct,
                                      pops_ridge=pops["ridge"], pops_path=pops["path"], stats=stats)

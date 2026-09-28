@@ -226,27 +226,14 @@ def test_kappa_closed_form_minimises_nll():
     assert abs(k - k_bf) < 1e-4 * k_bf and 2.9 < k < 3.5
 
 
-_ARD_FIELDS = ("uq", "ard_mode", "ard_val_frac", "ard_cond_max", "ard_laplace")
-
-
 def _pipe_cfg(**kw):
-    """FitConfig for the ARD stage.  FitConfig gains uq='ard' and the ard_* fields in Task 4; until
-    then they are set as plain attributes on a valid (uq='blr') config -- run_ard_stage reads them
-    with getattr defaults."""
+    """A uq='ard' linear-arm FitConfig for the ARD stage tests."""
     from conftest import FIXTURE_DIR
     from ace_jax.fit.pipeline import FitConfig
     base = dict(model=str(FIXTURE_DIR / "si_fitted.npz"), energy_key="dft_energy", force_key="dft_force",
                 virial_key="dft_virial", ntrain=30, ntest=8, batch=4, r0=2.35, arm="linear", uq="ard",
                 opt="lbfgs", rungs=("map",), map_steps=5, predict_train=False)
-    kw = {**base, **kw}
-    known = {k: v for k, v in kw.items() if k not in _ARD_FIELDS or k in FitConfig.__dataclass_fields__}
-    if known.get("uq") == "ard" and "ard_mode" not in FitConfig.__dataclass_fields__:
-        known["uq"] = "blr"
-    cfg = FitConfig(**known)
-    for k, v in kw.items():
-        if k in _ARD_FIELDS and k not in FitConfig.__dataclass_fields__:
-            setattr(cfg, k, v)
-    return cfg
+    return FitConfig(**{**base, **kw})
 
 
 def test_ard_stage_fits_kappa_and_refits_on_all_training_data():

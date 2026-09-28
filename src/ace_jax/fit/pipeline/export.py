@@ -52,7 +52,9 @@ def linear_model_arrays(res):
     (fit/rows.py `_place`), i.e. WB[b, z] = mu[z*n_B + b]."""
     cfg = res.built.prob.cfg
     nB, nP, NZ = cfg.n_B, cfg.n_pair, cfg.NZ
-    if "mean" in res.preds.pops:
+    if res.ard is not None:
+        mu = res.ard.posterior.mean           # ARD: the posterior mean the predictions use
+    elif "mean" in res.preds.pops:
         mu = res.preds.pops["mean"]      # POPS: exactly the mean the predictions used
     else:
         mu, _ = _posterior(res, res.theta)

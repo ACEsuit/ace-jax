@@ -46,7 +46,11 @@ class FitConfig:
     nuts_warmup: int = 100; nuts_samples: int = 100; nuts_chains: int = 1
     pf_samples: int = 4; pf_maxiter: int = 10
     # prediction / UQ
-    uq: str = "blr"                      # "blr" | "pops"
+    uq: str = "blr"                      # "blr" | "pops" | "ard"
+    ard_mode: str = "joint"              # "joint" (sigma_q + ARD scales) | "sequential" (low memory)
+    ard_val_frac: float = 0.2            # train hold-out for the temperature kappa
+    ard_cond_max: float = 1e14           # prior floor: cond(S) <= ard_cond_max
+    ard_laplace: bool = False            # Laplace diagnostic of the hyperparameters (ard.json)
     deriv_dtc: bool = True
     predict_stats: str = "cached"        # "cached" (linear stats once; run.py) | "recompute" (per draw; CLI)
     predict_train: bool = True
@@ -62,6 +66,15 @@ class FitConfig:
             raise ValueError(f"arm must be 'linear' or 'gp', got {self.arm!r}")
         if self.uq == "pops" and self.arm != "linear":
             raise ValueError("uq='pops' is the linear-arm misspecification predictive: use arm linear")
+        if self.uq not in ("blr", "pops", "ard"):
+            raise ValueError(f"uq must be 'blr', 'pops' or 'ard', got {self.uq!r}")
+        if self.uq == "ard":
+            if self.arm != "linear":
+                raise ValueError("uq='ard' is the linear-arm tempered posterior: use arm linear (m_per_species 0)")
+            if self.ard_mode not in ("joint", "sequential"):
+                raise ValueError(f"ard_mode must be 'joint' or 'sequential', got {self.ard_mode!r}")
+            if not 0.0 < self.ard_val_frac < 1.0:
+                raise ValueError(f"ard_val_frac must be in (0, 1), got {self.ard_val_frac}")
         if self.lml == "host-cache":
             if (self.arm != "gp" or self.density not in ("pair", "pca") or tuple(self.rungs) != ("map",)
                     or self.opt != "lbfgs"):

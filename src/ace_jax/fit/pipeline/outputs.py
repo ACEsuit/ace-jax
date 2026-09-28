@@ -85,6 +85,9 @@ def write_outputs(res, out, layout=("run",), argv=None, save_model=True, model_d
             _dump(out / "config.json", {**(argv or {}), "M": int(b.prob.ind.XM.shape[0]),
                                         "len_basis": b.gpcfg.len_basis, "n_train": len(d.train),
                                         "n_test": len(d.test)})
+    if res.ard is not None:
+        res.ard.posterior.save(out / "posterior.npz")
+        _dump(out / "ard.json", res.ard.report)
     if save_model:
         from .export import save_model as _save
         path = _save(res, out, n_draws=model_draws, log=log)

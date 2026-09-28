@@ -292,9 +292,7 @@ def run_ard_stage(cfg, data, built, theta, log=print):
     on ALL training data (started from the subset optimum) and keep kappa."""
     import time
     from .data import build_dataset
-    mode = getattr(cfg, "ard_mode", "joint")
-    val_frac = getattr(cfg, "ard_val_frac", 0.2)
-    cond_max = getattr(cfg, "ard_cond_max", 1e14)
+    mode, val_frac, cond_max = cfg.ard_mode, cfg.ard_val_frac, cfg.ard_cond_max
     t0 = time.time()
     prob = built.prob
     body_col = body_order_columns(data.meta, prob.cfg)
@@ -315,6 +313,7 @@ def run_ard_stage(cfg, data, built, theta, log=print):
         log(w)
     post_fit = ard_posterior(ev, h_fit, 1.0, data.meta)
     e2, s2 = _val_errors(post_fit, prob, ds_val)
+    del post_fit                           # free the subset fit's L x L Cholesky factor before the refit
     ok = s2 > 0                            # atoms with zero force rows (isolated, 1-atom configs): no information
     e2, s2 = e2[ok], s2[ok]
     if len(e2) == 0:
@@ -339,7 +338,7 @@ def run_ard_stage(cfg, data, built, theta, log=print):
               "val_rms_z_tempered": float(np.sqrt(np.mean(e2 / (kappa ** 2 * s2 / 3)) / 3)),
               "val_nll_untempered": _force_nll(e2, s2, 1.0), "val_nll_tempered": _force_nll(e2, s2, kappa),
               "seconds": time.time() - t0}
-    if getattr(cfg, "ard_laplace", False):
+    if cfg.ard_laplace:
         lap = laplace_hypers(ev, h)
         report["laplace_std_h"] = lap["std"].tolist()
         report["laplace_eigs"] = lap["eigs"].tolist()
