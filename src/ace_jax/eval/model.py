@@ -234,6 +234,17 @@ class ACEModel(EdgeSiteModel):
                              "the pair radial, so it has no basis: use the model `lean` was "
                              "applied to for descriptors, Jacobians or fitting")
 
+    def require_full(self, what="this"):
+        """Raise unless this is a full model: not `energy_only` (`fold_pair`) and
+        not l-blocked (`block_dense`).  A lean model holds the radial twice
+        (`rnl_coefs` for the sparse layout, `blk_rnl_coefs` for the dense one) and
+        its pair channel is the pair energy, so editing its radials or weights
+        would desynchronise the layouts.  Edit the full model, then re-apply
+        `lean`."""
+        if self.energy_only or self.blk:
+            raise ValueError(f"{what} needs the full ACEModel, not its lean evaluation form "
+                             "(ace_jax.eval.model.lean): edit the full model and re-apply lean")
+
     def _aa(self, A, specs=None):
         specs = self.aa_specs if specs is None else specs
         return jnp.concatenate([jnp.prod(A[:, g], axis=-1) for g in specs], axis=-1)
@@ -576,7 +587,11 @@ def fold_pair(model):
 
     The result is `energy_only`: its pair channel is now the pair energy, not
     Apair, so the basis methods refuse.  Needs a folded model (the unfolded
-    energy materialises the basis)."""
+    energy materialises the basis).
+    Edit the full model, never this one: a lean model holds the radial twice
+    and its pair channel is the readout, so replacing rnl_coefs, Wnlq, Wpair,
+    WB or ctilde on it changes one layout and not the other (`require_full`
+    guards the radial helpers).  Change the full model and re-apply `lean`."""
     if not model.folded:
         raise ValueError("fold_pair needs a folded model (fold_readout first)")
     if model.energy_only:
@@ -606,7 +621,11 @@ def block_dense(model):
     ACE1 folds into the radial index.  On Cantor_medium that is 12 live columns
     of 58 per edge.  Applies `prune_columns` first (the blocks need each l's
     columns contiguous).  Needs a folded model.  Returns the pruned model
-    unblocked when a radial column is used at more than one l."""
+    unblocked when a radial column is used at more than one l.
+    Edit the full model, never this one: a lean model holds the radial twice
+    and its pair channel is the readout, so replacing rnl_coefs, Wnlq, Wpair,
+    WB or ctilde on it changes one layout and not the other (`require_full`
+    guards the radial helpers).  Change the full model and re-apply `lean`."""
     if not model.folded:
         raise ValueError("block_dense needs a folded model (fold_readout first)")
     if model.blk:
@@ -661,7 +680,11 @@ def lean(model):
 
     Energy only (see `fold_pair`): keep the original for descriptors and
     fitting.  Anything that is not a folded ACEModel (a PACEModel, an unfolded
-    model) is returned as given, as is a model that is already lean."""
+    model) is returned as given, as is a model that is already lean.
+    Edit the full model, never this one: a lean model holds the radial twice
+    and its pair channel is the readout, so replacing rnl_coefs, Wnlq, Wpair,
+    WB or ctilde on it changes one layout and not the other (`require_full`
+    guards the radial helpers).  Change the full model and re-apply `lean`."""
     if not isinstance(model, ACEModel) or not model.folded or model.energy_only:
         return model
     return block_dense(fold_pair(prune_columns(model)))

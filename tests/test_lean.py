@@ -275,3 +275,122 @@ def test_calculator_pace_is_as_given():
     y = str(pace_fixture(ROOT / "fixtures" / "pace" / "gesi_sbessel.yace"))
     calc = ACECalculator(y)
     assert calc.eval_model is calc.model
+
+
+# ------------------------------------------------------------------ edits need the full model
+def test_radial_edits_refuse_a_lean_model():
+    """A lean model keeps the radial twice (rnl_coefs for the sparse layout,
+    blk_rnl_coefs for the dense one) and its pair channel is the readout, so
+    editing its radials would silently desynchronise the layouts."""
+    from ace_jax.fit.radial_model import to_analytic, widen_radial, with_radial
+    m, meta, _ = load(str(MODELS["sige_nofit"]))
+    a, _ = to_analytic(m, 6)
+    for mm in (lean(m), block_dense(m)):
+        with pytest.raises(ValueError, match="lean"):
+            to_analytic(mm, 6)
+        with pytest.raises(ValueError, match="lean"):
+            mm.require_full()
+    for mm in (lean(a), block_dense(a)):
+        with pytest.raises(ValueError, match="lean"):
+            with_radial(mm, mm.rnl_Wnlq)
+        with pytest.raises(ValueError, match="lean"):
+            widen_radial(mm, 8)
+    m.require_full()                                       # the full model passes
+    prune_columns(m).require_full()                        # pruning keeps the full basis
+
+
+# ------------------------------------------------------------------ synthetic variants
+def _legendre(n_q):
+    from ace_jax.construct.radial_init import legendre_3term
+    return tuple(jnp.asarray(x) for x in legendre_3term(n_q))
+
+
+def _analytic_pair(m, n_q=6, seed=0):
+    NZ, n_pair = m.Wpair.shape[1], m.Wpair.shape[0]
+    W = np.random.default_rng(seed).normal(size=(NZ, NZ, n_pair, n_q)) * 0.3
+    A, B, C = _legendre(n_q)
+    return dataclasses.replace(m, pair_radial_kind="analytic", pair_Wnlq=jnp.asarray(W),
+                               pair_polys_A=A, pair_polys_B=B, pair_polys_C=C)
+
+
+def _two_l_column(m):
+    """One A entry re-pointed at a radial column another entry uses at a
+    different l: a column used at two l, so block_dense must fall back."""
+    ar, ay = np.array(m.aspec_r), np.asarray(m.aspec_y)
+    la = np.floor(np.sqrt(ay)).astype(int)
+    a0 = int(np.flatnonzero(la == 0)[0])
+    b1 = int(np.flatnonzero(la == 1)[0])
+    ar[a0] = ar[b1]
+    return dataclasses.replace(m, aspec_r=jnp.asarray(ar, m.aspec_r.dtype))
+
+
+def _no_pair(m):
+    NZ, c = m.Wpair.shape[1], m.pair_coefs.shape[2]
+    return dataclasses.replace(m, pair_coefs=jnp.zeros((NZ, NZ, c, 0)),
+                               Wpair=jnp.zeros((0, NZ)))
+
+
+def _analytic_rnl(m):
+    from ace_jax.fit.radial_model import to_analytic
+    return to_analytic(m, 8)[0]
+
+
+VARIANTS = {"analytic_pair": _analytic_pair, "analytic_rnl": _analytic_rnl,
+            "two_l_column": _two_l_column, "no_pair": _no_pair}
+
+
+@pytest.mark.parametrize("layout", ["sparse", "dense"])
+@pytest.mark.parametrize("variant", list(VARIANTS))
+def test_lean_is_exact_on_synthetic_variants(variant, layout):
+    m, meta, _ = load(str(MODELS["sige_nofit"]))
+    m = VARIANTS[variant](m)
+    at = _structure(meta)
+    m1 = lean(m)
+    assert m1.energy_only
+    if variant == "two_l_column":
+        assert m1.blk == ()                                # the unblocked fallback
+    if variant == "analytic_rnl":
+        assert m1.blk and not m1.blk_compact
+    _assert_same(_efv(m, meta, at, layout), _efv(m1, meta, at, layout))
+
+
+@pytest.mark.parametrize("layout", ["sparse", "dense"])
+def test_lean_float32(layout):
+    """float32: the lean form agrees with the full float32 model at float32
+    precision (the transforms themselves are done in float64)."""
+    m, meta, _ = load(str(MODELS["Cantor_small"]), dtype=jnp.float32)
+    at = _structure(meta)
+    (E0, F0, V0), (E1, F1, V1) = _efv(m, meta, at, layout), _efv(lean(m), meta, at, layout)
+    assert abs(E1 - E0) <= 5e-6 * abs(E0) + 1e-6 * len(at)
+    assert np.abs(F1 - F0).max() <= 2e-5 * np.abs(F0).max() + 1e-4
+    assert np.abs(V1 - V0).max() <= 5e-5 * np.abs(V0).max() + 1e-4
+
+
+def test_authored_model_through_the_calculator(tmp_path, monkeypatch):
+    """A Python-authored model (analytic R_nl and pair radial) with a nonzero
+    readout: ACECalculator(lean=True) equals lean=False."""
+    from test_python_authoring import _primed_cache
+
+    from ace_jax.calc.point import ACECalculator
+    from ace_jax.construct.model import build_model
+    from ace_jax.eval.model import fold_readout
+    monkeypatch.setenv("ACEJAX_NO_JULIA", "1")
+    auth = build_model([14], 3, 10, coupling_cache_dir=_primed_cache(tmp_path))
+    m, meta = auth.eval_pair()
+    assert m.pair_radial_kind == "analytic" and m.radial_kind == "analytic"
+    rng = np.random.default_rng(3)
+    m = fold_readout(dataclasses.replace(
+        m, WB=jnp.asarray(rng.normal(size=m.WB.shape) * 0.1),
+        Wpair=jnp.asarray(rng.normal(size=m.Wpair.shape) * 0.1), folded=False, ctilde=None))
+    at = bulk("Si", "diamond", a=5.43, cubic=True).repeat((2, 1, 1))
+    at.rattle(0.08, seed=4)
+    res = []
+    for use in (False, True):
+        a = at.copy()
+        a.calc = ACECalculator(m, meta, lean=use, layout="dense")
+        assert a.calc.eval_model.energy_only is use
+        res.append((a.get_potential_energy(), a.get_forces(), a.get_stress()))
+    (E0, F0, S0), (E1, F1, S1) = res
+    assert abs(E1 - E0) <= TOL * max(1.0, abs(E0))
+    np.testing.assert_allclose(F1, F0, rtol=0, atol=TOL)
+    np.testing.assert_allclose(S1, S0, rtol=0, atol=TOL)
