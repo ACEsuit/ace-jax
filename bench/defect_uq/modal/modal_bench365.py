@@ -1,8 +1,8 @@
-"""Fits on the re-centred Cantor defect benchmark (bench365): POPS (linear) and GP (PCA-128,
-host-cache, 4 L-BFGS starts), on the LOCAL ace-jax feat/pops-perf worktree (src baked over the
-pushed branch).  Outputs: volume acegp-prod-out/bench365_<arm>/ (pred_*.npz, metrics, model).
+"""Fits on the re-centred Cantor defect benchmark (bench365): POPS (linear), GP (PCA-128,
+host-cache, 4 L-BFGS starts) and tempered ARD (linear, --uq ard), on a LOCAL ace-jax worktree's src
+(ACEJAX_SRC; the ard arm needs feat/ard-uq) baked over main.  Outputs: volume acegp-prod-out/bench365_<arm>/ (pred_*.npz, metrics, model).
 
-  modal deploy modal_bench365.py && modal run modal_bench365.py::launch [--arms pops,gp] [--smoke]
+  modal deploy modal_bench365.py && modal run modal_bench365.py::launch [--arms pops,gp,ard] [--smoke]
 """
 import os
 import pathlib
@@ -20,6 +20,8 @@ image = (
     .apt_install("git")
     .run_commands("git clone --depth 1 --branch main https://github.com/ACEsuit/ace-jax /root/ace-jax",
                   "pip install -e '/root/ace-jax[gp,cuda]'")
+    # the clone layer is cached: keep the core deps of the LOCAL src (ACEJAX_SRC) current
+    .pip_install("extxyz>=0.4.5", "jax[cuda12]>=0.10.1", "lineax>=0.1.1", "equinox>=0.11", "scipy>=1.10")
     .add_local_file(str(DATA / "cantor_embed_d16_deg10.npz"), "/data/cantor_embed_d16_deg10.npz")
     .add_local_dir(str(DATA / "bench365"), "/data", ignore=["*.npy", "smoke/out_*/**"])
     .add_local_file(str(pathlib.Path(__file__).parent / "fit_bench.py"), "/root/fit_bench.py")
@@ -57,24 +59,33 @@ def launch(arms: str = "pops,gp", smoke: bool = False):
 @app.function(gpu="A100-80GB", image=image, volumes={"/out": vol}, timeout=4 * 3600)
 def big_errors(run: str = "bench365_pops") -> str:
     """Per-atom |F_model - F_MACE| on the big crack / dislocation cells (data/big.xyz), from the
-    run's saved linear model (ACECalculator: autodiff forces, no design rows -- the design-row
-    path does not fit one >2.8k-atom cell in int32-indexed GEMMs)."""
+    run's saved linear model.  If the run wrote posterior.npz (--uq ard), also the per-atom tempered
+    ARD force sigma (ACECalculator(posterior=): node-chunked design rows, fine above 2.8k atoms)."""
     import os
     os.environ["JAX_ENABLE_X64"] = "1"
+    import time
     import jax
     jax.config.update("jax_enable_x64", True)
     import numpy as np
     from ase.io import read
     from ace_jax import ACECalculator
-    calc = ACECalculator(f"/out/{run}/model.npz")
-    err = []
+    post = f"/out/{run}/posterior.npz"
+    calc = ACECalculator(f"/out/{run}/model.npz", posterior=post) if os.path.exists(post) \
+        else ACECalculator(f"/out/{run}/model.npz")
+    err, sd, t0 = [], [], time.time()
     for a in read("/data/big.xyz", ":"):
         a.calc = calc
         err.append(np.linalg.norm(a.get_forces() - a.arrays["mace_force"], axis=1))
-    np.savez(f"/out/{run}/big_err.npz", err=np.concatenate(err))
+        if os.path.exists(post):
+            sd.append(np.asarray(calc.get_property("forces_std", a)))
+    out = dict(err=np.concatenate(err))
+    if sd:
+        out["sd"] = np.concatenate(sd)
+    np.savez(f"/out/{run}/big_err.npz", **out)
     vol.commit()
-    e = np.concatenate(err)
-    return f"{len(e)} atoms, median |dF| {np.median(e):.3f}, 99th {np.percentile(e, 99):.3f} eV/A"
+    e = out["err"]
+    return (f"{len(e)} atoms, median |dF| {np.median(e):.3f}, 99th {np.percentile(e, 99):.3f} eV/A"
+            + (f"; median sigma {np.median(out['sd']):.3f}" if sd else "") + f"; {time.time() - t0:.0f} s")
 
 
 @app.local_entrypoint()
