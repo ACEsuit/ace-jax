@@ -27,7 +27,7 @@ import numpy as np
 from ace_jax.construct.prior import prior_diagonal
 from ace_jax.eval import load
 from ace_jax.fit.data import build_dataset, load_configs
-from ace_jax.fit.hypers import default_prior, from_array, to_array
+from ace_jax.fit.hypers import default_prior, from_array
 from ace_jax.fit.ladder import run_map
 from ace_jax.fit.objective import log_marginal_likelihood
 from ace_jax.fit.inducing import GPConfig, descriptor_scale, select_inducing, site_features

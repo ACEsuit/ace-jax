@@ -30,7 +30,6 @@ import sys
 import time
 
 import numpy as np
-from ase import Atoms
 from ase.build import bulk
 from ase.eos import EquationOfState
 from ase.optimize import FIRE
