@@ -135,3 +135,238 @@ def assemble_statistics(lin, res):
                  cat([lin.b_E, res.bM_E]), cat([lin.b_F, res.bM_F]), cat([lin.b_V, res.bM_V]),
                  lin.yy_E, lin.yy_F, lin.yy_V, lin.n_E, lin.n_F, lin.n_V,
                  lin.logw_E, lin.logw_F, lin.logw_V)
+
+
+# ---------------------------------------------------------------------------
+# Per-(quantity, TYPE) statistics.  These mirror the single-type functions above
+# but split each quantity's rows by their config-type index and accumulate one
+# Stats block PER TYPE (a leading n_types axis on every field).  The split is a
+# weight MASK (w * (type == t)) -- the structural weights carry NO sigma, so each
+# per-(q,t) Gram stays theta-INDEPENDENT and cacheable exactly like the linear
+# statistics above.  The per-type noise sigma_{q,t} enters only in the objective
+# (objective.combine), NOT the Gram, which is what preserves the streamed
+# theta-independent Gram caching.  With a single type these reduce (up to the
+# leading size-1 axis) to the functions above, so the fit is bit-identical.
+
+def _linear_type_stats_typed(Phi_B, y, w, tidx, n_types):
+    comps = [_linear_type_stats(Phi_B, y, jnp.where(tidx == t, w, 0.0))
+             for t in range(n_types)]
+    return tuple(jnp.stack([c[k] for c in comps]) for k in range(5))
+
+
+def batch_linear_stats_typed(model, cfg, batch, n_types):
+    from .rows import linear_rows
+    r, _, _ = linear_rows(model, cfg, batch)
+    L = r.E.shape[-1]
+    E = _linear_type_stats_typed(r.E, batch.y_E, batch.w_E, batch.cfg_type, n_types)
+    F = _linear_type_stats_typed(r.F.reshape(-1, L), batch.y_F.reshape(-1),
+                                 jnp.repeat(batch.w_F, 3), jnp.repeat(batch.node_type, 3), n_types)
+    V = _linear_type_stats_typed(r.V.reshape(-1, L), batch.y_V.reshape(-1),
+                                 jnp.repeat(batch.w_V, 6), jnp.repeat(batch.cfg_type, 6), n_types)
+    return Stats(E[0], F[0], V[0], E[1], F[1], V[1], E[2], F[2], V[2],
+                 E[3], F[3], V[3], E[4], F[4], V[4])
+
+
+def linear_statistics_typed(model, cfg, ds, n_types):
+    """theta-independent linear statistics, one Stats block per type
+    (leading n_types axis on every field)."""
+    L = cfg.len_basis
+    z2, z1, z0 = jnp.zeros((n_types, L, L)), jnp.zeros((n_types, L)), jnp.zeros((n_types,))
+    zero = Stats(z2, z2, z2, z1, z1, z1, z0, z0, z0, z0, z0, z0, z0, z0, z0)
+    f = jax.checkpoint(lambda b: batch_linear_stats_typed(model, cfg, b, n_types))
+    return jax.lax.scan(lambda c, b: (jax.tree.map(jnp.add, c, f(b)), None), zero, ds)[0]
+
+
+def _residual_type_stats_typed(Phi_B, Phi_M, y, w, tidx, n_types):
+    comps = [_residual_type_stats(Phi_B, Phi_M, y, jnp.where(tidx == t, w, 0.0))
+             for t in range(n_types)]
+    return tuple(jnp.stack([c[k] for c in comps]) for k in range(3))
+
+
+def batch_residual_stats_typed(theta, spec, model, ind, cfg, batch, n_types):
+    r = batch_rows(theta, spec, model, ind, cfg, batch)
+    L, Dt = cfg.len_basis, r.E.shape[-1]
+    sl = lambda A: (A[..., :L], A[..., L:])
+    parts = []
+    for R, y, w, tidx, reps in (
+            (r.E, batch.y_E, batch.w_E, batch.cfg_type, 1),
+            (r.F, batch.y_F, batch.w_F, jnp.repeat(batch.node_type, 3), 3),
+            (r.V, batch.y_V, batch.w_V, jnp.repeat(batch.cfg_type, 6), 6)):
+        B, Mrows = sl(R.reshape(-1, Dt))
+        parts.append(_residual_type_stats_typed(B, Mrows, y.reshape(-1),
+                                                jnp.repeat(w, reps), tidx, n_types))
+    return ResidualStats(parts[0][0], parts[1][0], parts[2][0],
+                         parts[0][1], parts[1][1], parts[2][1],
+                         parts[0][2], parts[1][2], parts[2][2])
+
+
+def residual_statistics_typed(theta, spec, model, ind, cfg, ds, n_types):
+    L, M = cfg.len_basis, ind.XM.shape[0]
+    zBM, zMM, zM = (jnp.zeros((n_types, L, M)), jnp.zeros((n_types, M, M)),
+                    jnp.zeros((n_types, M)))
+    zero = ResidualStats(zBM, zBM, zBM, zMM, zMM, zMM, zM, zM, zM)
+    f = jax.checkpoint(lambda th, b: batch_residual_stats_typed(th, spec, model, ind, cfg, b, n_types))
+    return jax.lax.scan(lambda c, b: (jax.tree.map(jnp.add, c, f(theta, b)), None), zero, ds)[0]
+
+
+def assemble_statistics_typed(lin, res):
+    """Per-type full Stats: vmap assemble_statistics over the leading type axis."""
+    return jax.vmap(assemble_statistics)(lin, res)
+
+
+# ---------------------------------------------------------------------------
+# Streamed POPS statistics (Task 9).  One extra pass over the dataset that
+# produces the SAME per-point misspecification corrections `deltas` as Task-8's
+# pops_corrections on the whole (whitened) design assembled at once, but never
+# materialises more than one batch's rows.
+#
+# Per batch we build the linear rows (rows.linear_rows, the M=0 arm), whiten
+# each quantity's rows/residual by w/sigma_q (Task 7's pops.whiten), and compute
+# the per-point correction delta_i and leverage h_i with pops.pointwise_corrections
+# (Task 8's formula, NO boolean masking -- jit-safe under scan).  The scan stacks
+# every batch's (delta, h); the leverage_pct subselection is applied ONCE,
+# eagerly, after the scan (pops.leverage_select), which is where the only
+# non-jit-safe boolean lives.  With leverage_pct=0 every point (including padded
+# w=0 rows, which carry delta=0, h=0) is kept, so streaming == monolithic
+# elementwise (tests/test_gp_stats.py).
+
+def _batch_pops_pointwise(model, cfg, batch, c_star, Sigma0, sigma):
+    """One batch's per-point corrections and leverages, quantities concatenated
+    in E, F, V order.  `sigma` maps 'E'/'F'/'V' -> per-quantity noise scale."""
+    from .pops import pointwise_corrections, whiten
+    from .rows import linear_rows
+    r, _, _ = linear_rows(model, cfg, batch)
+    L = r.E.shape[-1]
+    ds_d, ds_h = [], []
+    for phi, y, w, sq in (
+            (r.E, batch.y_E, batch.w_E, sigma["E"]),
+            (r.F.reshape(-1, L), batch.y_F.reshape(-1), jnp.repeat(batch.w_F, 3), sigma["F"]),
+            (r.V.reshape(-1, L), batch.y_V.reshape(-1), jnp.repeat(batch.w_V, 6), sigma["V"])):
+        phi_t, r_t = whiten(phi, y - phi @ c_star, w, sq)
+        d, h = pointwise_corrections(Sigma0, phi_t, r_t)
+        ds_d.append(d); ds_h.append(h)
+    return jnp.concatenate(ds_d, 0), jnp.concatenate(ds_h, 0)
+
+
+def _stream_pops_pointwise(model, cfg, ds, c_star, Sigma0, sigma):
+    """Stream _batch_pops_pointwise over ds, returning all per-point (deltas, h)
+    flattened batch-major.  jit-safe (no boolean masking)."""
+    body = lambda carry, batch: (
+        carry, _batch_pops_pointwise(model, cfg, batch, c_star, Sigma0, sigma))
+    _, (dd, hh) = jax.lax.scan(body, 0.0, ds)        # dd (B, P, L), hh (B, P)
+    L = dd.shape[-1]
+    return dd.reshape(-1, L), hh.reshape(-1)
+
+
+def pops_statistics(c_star, Sigma0, prob, ds, sigma, *, leverage_pct=0.0):
+    """Streamed POPS pointwise corrections over the dataset ``ds``.
+
+    Returns the SAME ``deltas`` (K, L) as Task-8's ``pops.pops_corrections`` on
+    the whole whitened design assembled in one batch, but streams ``ds`` one
+    batch at a time (peak memory is one batch's rows plus the accumulated
+    per-point (delta, h)).
+
+    Parameters
+    ----------
+    c_star : (L,) array     fitted linear weights (``objective.posterior`` mean).
+    Sigma0 : (L, L) array   epistemic weight covariance ``A^{-1}``
+                            (``objective.posterior``'s precision inverse).
+    prob   : Problem        supplies ``model``/``cfg`` for the linear rows.
+    ds     : Dataset        streamed, leading batch axis (the same ``ds`` fed to
+                            the statistics/LML; splitting it into more batches
+                            leaves ``deltas`` unchanged).
+    sigma  : mapping        per-quantity noise scales, keys ``'E'``/``'F'``/``'V'``
+                            (single config-type; per-type sigma is a documented
+                            extension, not implemented here).
+    leverage_pct : float    keyword-only; percentile in [0, 100], 0 keeps all.
+    """
+    from .pops import leverage_select
+    deltas, h = _stream_pops_pointwise(prob.model, prob.cfg, ds, c_star, Sigma0, sigma)
+    return leverage_select(deltas, h, leverage_pct)
+
+
+# ---------------------------------------------------------------------------
+# Streaming POPS (Swinburne & Perez, structural weights).  Every member is
+# delta_i = A phi_i c_i  with  c_i = r_i / h_i,  h_i = phi_i . A . phi_i  (A
+# symmetric), so the statistics the predictive needs are Gram-shaped:
+#     sum delta delta^T = A (sum c_i^2 phi_i phi_i^T) A,   sum delta = A (sum c_i phi_i)
+# and the (K, L) matrix of corrections is never formed.  Memory is O(L^2) plus two
+# scalars per observation; each pass holds one batch of rows.
+# ---------------------------------------------------------------------------
+
+def _pops_batch_rows(model, cfg, batch, qs=(1.0, 1.0, 1.0)):
+    """Loss-weighted rows w*phi, weighted target w*y and raw rows phi for one
+    batch, quantities concatenated E, F, V (padded rows carry w = 0).  The weight
+    is the structural weight times the per-quantity loss scale qs = (1/sigma_E,
+    1/sigma_F, 1/sigma_V)."""
+    from .rows import linear_rows
+    r, _, _ = linear_rows(model, cfg, batch)
+    L = r.E.shape[-1]
+    phi = jnp.concatenate([r.E, r.F.reshape(-1, L), r.V.reshape(-1, L)])
+    y = jnp.concatenate([batch.y_E, batch.y_F.reshape(-1), batch.y_V.reshape(-1)])
+    w = jnp.concatenate([batch.w_E * qs[0], jnp.repeat(batch.w_F, 3) * qs[1], jnp.repeat(batch.w_V, 6) * qs[2]])
+    return phi * w[:, None], w * y, phi
+
+
+def pops_leverage_residual(model, cfg, ds, c_star, A, qs=(1.0, 1.0, 1.0)):
+    """Pass 1: whitened leverage h_i = pw_i . A . pw_i and residual r_i = w_i (y_i -
+    phi_i . c*) of every row, each (n_batches, rows_per_batch).  Padded rows have
+    h = 0 (w = 0)."""
+    def body(carry, batch):
+        pw, wy, phi = _pops_batch_rows(model, cfg, batch, qs)
+        h = jnp.sum((pw @ A) * pw, axis=1)
+        r = wy - (pw @ c_star)
+        return carry, (h, r)
+    _, (h, r) = jax.lax.scan(body, 0.0, ds)
+    return h, r
+
+
+def pops_moment_sums(model, cfg, ds, coef, qs=(1.0, 1.0, 1.0)):
+    """Pass 2: W = sum_i coef_i^2 pw_i pw_i^T and s = sum_i coef_i pw_i, with
+    coef (n_batches, rows) = r/h on member rows and 0 elsewhere."""
+    def body(carry, xs):
+        batch, c = xs
+        pw, _, _ = _pops_batch_rows(model, cfg, batch, qs)
+        pc = pw * c[:, None]
+        W, s = carry
+        return (W + pc.T @ pc, s + pw.T @ c), None
+    return jax.lax.scan(body, _moment_init(model, cfg, ds), (ds, coef))[0]
+
+
+def _moment_init(model, cfg, ds):
+    first = jax.tree.map(lambda a: a[0], ds)
+    L = jax.eval_shape(lambda b: _pops_batch_rows(model, cfg, b)[0], first).shape[-1]
+    return jnp.zeros((L, L)), jnp.zeros(L)
+
+
+def pops_projection_bounds(model, cfg, ds, coef, keep, B, qs=(1.0, 1.0, 1.0)):
+    """Pass 3: per-axis min / max over member rows of the projected corrections
+    (pw_i @ B) * coef_i, with B = A @ support (L, d).  Exact for zero percentile
+    clipping (the hypercube default)."""
+    d = B.shape[1]
+    def body(carry, xs):
+        batch, c, k = xs
+        pw, _, _ = _pops_batch_rows(model, cfg, batch, qs)
+        proj = (pw @ B) * c[:, None]
+        lo, hi = carry
+        lo = jnp.minimum(lo, jnp.min(jnp.where(k[:, None], proj, jnp.inf), axis=0))
+        hi = jnp.maximum(hi, jnp.max(jnp.where(k[:, None], proj, -jnp.inf), axis=0))
+        return (lo, hi), None
+    init = (jnp.full(d, jnp.inf), jnp.full(d, -jnp.inf))
+    return jax.lax.scan(body, init, (ds, coef, keep))[0]
+
+
+def pops_envelope_streamed(model, cfg, ds, coef, keep, Q, qs=(1.0, 1.0, 1.0)):
+    """Member min / max of the prediction shift phi* . delta_i = (Q @ pw_i) * coef_i
+    at test rows, with Q = phi* @ A (n, L).  Returns (lo, hi), each (n,)."""
+    n = Q.shape[0]
+    def body(carry, xs):
+        batch, c, k = xs
+        pw, _, _ = _pops_batch_rows(model, cfg, batch, qs)
+        shift = (Q @ pw.T) * c[None, :]                       # (n, rows)
+        lo, hi = carry
+        lo = jnp.minimum(lo, jnp.min(jnp.where(k[None, :], shift, jnp.inf), axis=1))
+        hi = jnp.maximum(hi, jnp.max(jnp.where(k[None, :], shift, -jnp.inf), axis=1))
+        return (lo, hi), None
+    init = (jnp.full(n, jnp.inf), jnp.full(n, -jnp.inf))
+    return jax.lax.scan(body, init, (ds, coef, keep))[0]
