@@ -284,3 +284,119 @@ The sizes are rough, for one developer who knows ace-jax.
 4. **Pseudo-tensor inclusion by default.** On, for parity with ACEhamiltonians' completeness; or opt-in, since it adds basis functions?
 5. **Stage-B loss priorities.** Which observables come first: eigenvalues in a window, band energy, density matrix, gaps?
 6. **Split timing.** Is "in-tree with a lint-enforced boundary, split later" acceptable?
+
+## Appendix A. Route comparison: JAX port (A) against a new Julia ACEhamiltonians on ET (B)
+
+Both routes have the same goal:
+- on-site and off-site H/S blocks;
+- data via Quoll;
+- block fitting with BLR and conformal UQ;
+- end-to-end training on spectra through the generalised eigenproblem and k-sums, degeneracies included;
+- learned orbitals later;
+- Python consumers (an ASE calculator exposing `results["hamiltonian"]` and its uncertainty), plus a private DFT-injection prototype (example consumer).
+
+**Route A** is §§2–10: JAX, with ET only at construction and Quoll at ingestion (the §2 hybrid). **Route B** is a from-scratch Julia package on EquivariantTensors (ET), Polynomials4ML, Lux and ACEfit, using Quoll natively.
+
+### A.1 What the Julia stack gives route B today
+
+The versions checked are the ones on disk plus GitHub, 2026-09.
+
+**Equivariant bases.**
+- ET gives L>0 bases (`sparse_equivariant_tensors`, `SVector{2L+1}` A2B), real CG matrices and `TYVec2YMat`. Pseudo-tensors come from `refl_sym`, in 0.5.x.
+- The bases evaluate natively as LuxCore layers (`src/embed/*`, `src/ace/sparse_ace_ka.jl`), with KernelAbstractions kernels for the sparse product and pooling.
+- GPU work on ET is recent and active: a fused-scatter pullback and SelectLinL fixes (2026-03), GPU splines, and a "fix gpu grads" merge in 2026-06.
+- Radials were split into `lib/ACEradials` (2026-06). **Neither ET nor ACEpotentials uses Reactant** (no references in either repo).
+
+**ACEpotentials 0.10.2.**
+- It has an ET/Lux backend ("ETACE", with LuxCUDA GPU benchmarks, 2026-01) and still requires ET 0.4.x.
+- Activity since 2026-01 is maintenance: a 13× force-regression fix in 2026-06.
+- There is no bond/matrix-valued model to build on; route B writes the bond basis, triplet graph and readout itself, exactly as route A does.
+
+**Fitting and UQ.**
+- ACEfit 0.3.1 has `bayesian_linear_regression` (evidence maximisation, ARD, an SVD variant) on dense in-memory design matrices on the CPU.
+- There is no streamed or GPU solver and no conformal calibration anywhere in ACEsuit (code search: 0 hits). Conformal calibration is small and would be new on either route.
+
+**AD through the eigenproblem** (the crux for stage B):
+- **ChainRules 1.73** has an `rrule` for `eigen(::Hermitian)`. It divides by (λⱼ−λᵢ) exactly as JAX does, so it is **not degeneracy-safe** for eigenvector paths.
+  - Its Hermitian *matrix-function* rules (`exp`, `tanh`, …) use Daleckii–Krein and are degeneracy-safe, so a Fermi–Dirac density matrix written as ½(1−tanh(β(H̃−μ)/2)) works on the CPU.
+  - There is no rule for the generalised `eigen(A, B)`. A Cholesky reduction is needed; its `rrule` exists.
+  - The rules are typed on `StridedMatrix`, so a `CuArray` gets **no rule**.
+- **Enzyme 0.13** has no eigensolver rules. "Add forward and reverse rules for eigen of a real symmetric matrix" is an open PR (#3683), so it falls back on ChainRules import.
+- **Mooncake 0.5** has no eigen rule and relies on `@from_rrule`.
+- **Reactant 0.2.289** has **no `eigen`/`syevd` lowering** at all (source search), so an eigensolver cannot sit inside a Reactant-compiled region.
+- **DFTK** differentiates through self-consistent response (DFPT, forward mode). It has no reusable reverse-mode eigensolver rule.
+- **GPU.** CUDA.jl 6.3 wraps `heevjBatched!`/`syevjBatched!` (batched Jacobi eigh, fine for k-batches of small matrices), with no AD rule. Route B would hand-write a degeneracy-safe `rrule` for the generalised Hermitian problem on CPU and GPU. This is the same mathematics as route A's `custom_vjp`, but on top of a less settled AD stack.
+- **JAX, for comparison.** `eigh` is differentiable (complex Hermitian included), `vmap`-batched over k, and lowered to cuSOLVER on GPU inside one XLA program. Verified in §5: eigenvalue-only gradients are finite at degeneracies, and eigenvector paths need the same custom rule.
+
+**Quoll.**
+- Native in B: canonical `SpeciesPairDictionaryArray` blocks and `SHConvention` are used directly, with no conversion layer.
+- Registered ET 0.5.1 still conflicts with Quoll (§2, WignerD); ET `main` resolves. B depends on both at **run time**.
+
+**Python consumers in B.**
+- They need a juliacall-backed ASE calculator. That is about 1–2 weeks: environment provisioning, array hand-off, GIL and threading, and MPI coexistence.
+- Every Python process pays Julia start-up plus package load; ET and Quoll take about 12 s after precompilation, and first-call compilation comes on top.
+- For the DFT-injection example consumer this is cheap, because it already runs Quoll under juliacall. For general Python/ASE/MLIP users it is a new dependency.
+
+**Performance.**
+- JAX pays XLA compile latency per shape. ace-jax already mitigates it with power-of-two bucketing and the persistent compile cache. It then runs fused forward and backward passes, and k-batched `eigh`, in one device program.
+- Julia avoids XLA compile, but pays load and first-call compilation per process. Reverse passes run through Zygote plus hand-tuned KernelAbstractions kernels, with no whole-program fusion (Reactant cannot take the eigensolver).
+- No like-for-like benchmark exists for this workload. The block model is small per structure; spectral training is dominated by O(n_orb³) `eigh` × n_k, where both routes call cuSOLVER. The difference is in batching and fusion around it, which favours JAX.
+
+### A.2 Effort per phase (weeks, one developer)
+
+| Phase | Route A (JAX, §10) | Route B (Julia on ET) |
+|---|---|---|
+| 0. Foundations | 3–4: ET/Julia 1.12 bump, `couple_equivariant`, `core` boundary refactor, DeepH/Quoll ingestion, SH-convention test | 2–3: package skeleton, ET L>0/`refl_sym` used directly, native Quoll, convention test (shared) |
+| 1. Equivariant model and assembly | 4–5 | 4–5: bond triplet graph, envelope and readout as Lux layers. There is no bond model to reuse; learning the ET/Lux internals is on the critical path. |
+| 2a. Block fit and UQ, consumer-ready | 4–5 (generic rows, streamed BLR, block covariance, conformal, DeepH output) | 3–4 (ACEfit BLR per sub-model; conformal new) + 1–2 (juliacall ASE calculator for Python consumers) |
+| 2b. Observable training | 4–6 | 6–9: custom degeneracy-safe `rrule`s for the generalised Hermitian `eigen` on CPU **and** `CuArray`, a choice of AD system (Zygote now, Enzyme or Mooncake later), k-batching by hand, Zygote performance through the ACE layers |
+| 3. Performance and deployment | 3–4 | 4–6: KernelAbstractions bond kernels, GPU AD robustness, calculator latency |
+| 4. Learned orbitals | open | open |
+
+| Milestone | Route A | Route B |
+|---|---|---|
+| (1) Block-fitted model with UQ, usable from Python | **11–14 wk** | **10–14 wk** |
+| (2) End-to-end observable training | **15–20 wk** | **16–23 wk** |
+
+Assumptions:
+- Route B's estimates assume a developer already fluent in ET's Lux internals.
+- Route A's include the `core` refactor that the planned framework split needs anyway.
+- Without the split, A's phase 0 is about 1 week shorter.
+
+### A.3 Assessment
+
+**Faster to a usable result: a tie for milestone (1).**
+- B saves the shim, the conversion code and part of fitting: ET evaluates L>0 natively, Quoll is native, and ACEfit BLR exists.
+- It gives the time back on the Python calculator.
+
+**Faster to (2), and with less variance: A.**
+- Differentiable, batched and GPU-lowered `eigh` is mature in JAX.
+- In Julia, every AD system lacks a degeneracy-safe or GPU rule for this exact operation, and Reactant cannot compile it.
+
+**Better long term: A, on balance.** Criterion by criterion:
+- **AD and GPU maturity for this workload: A.** The observable loss is the part that is hard to get right, and JAX's single-program model (vmap over k, cuSOLVER, jit) fits it.
+- **Consumers and ecosystem: A.** The consumers are Python. The MLIP world, and ace-jax's users, are Python/JAX.
+- **Reuse: A.** It reuses ace-jax's streamed stats, QR/LSQR, BLR evidence, POPS, VarPro/L-BFGS and layouts, which are working and tested code. B reuses ET evaluation, ACEfit and Quoll.
+- **The owner's direction: A.** A is the planned framework/application split applied to Hamiltonians: `core` plays ET/Polynomials4ML and `ham` plays ACEhamiltonians.
+- **Community fit: B.** ACEsuit's developers and maintainers work in Julia. B lands in their ecosystem, and ET improvements (bases, GPU kernels) arrive for free. A tracks ET only through the construction-time shim.
+- **Pre-release exposure: A's is smaller.** B depends at run time on unregistered Quoll and currently on unreleased ET `main`. A touches them only at construction and ingestion.
+- **Maintainability: a split.**
+  - B keeps one language for model and data.
+  - A keeps one language for model, AD and consumers, and adds a two-language build only where it already has one: authoring, plus optional ingestion.
+
+**Hybrid options.**
+- **H1: Julia for construction and ingestion, JAX for everything differentiable.** Pure construction and ingestion work (ET couplings, Quoll conversion to a frozen cache) stays in Julia; evaluation, fitting, spectra, UQ and consumers are JAX. **This is route A as planned (§2).** Its extra cost is only the juliacall ingestion path and a Julia CI job.
+- **H2: basis and assembly in Julia, spectral losses in JAX (or the reverse).** Rejected.
+  - Every training step would cross the language boundary with gradients: a `jax.pure_callback` plus `custom_vjp` calling Julia pullbacks through juliacall/DLPack.
+  - That loses jit fusion, complicates GPU memory sharing, and makes two AD systems co-responsible for one gradient. It costs more than either pure route and is more fragile than both.
+
+**Recommendation: route A with H1.**
+
+What would change it:
+1. The long-term owners or maintainers are ACEsuit Julia developers, rather than ace-jax's users. Community fit then outweighs AD maturity.
+2. Reactant gains an `eigh` lowering and ACEsuit adopts Reactant end to end. That would give Julia a single-program, differentiable, GPU path comparable to XLA.
+3. Consumers move to Julia, making the Python calculator moot.
+4. Learned orbitals turn out to need Quoll's projections *inside* the differentiable loop in ways not reimplementable as a JAX contraction.
+5. The ACEsuit plan for Hamiltonians is itself a new Julia package. In that case contributing there and keeping ace-jax to potentials avoids duplicate effort.
+
+If (1) or (5) is true, B becomes the better long-term choice despite its slower and riskier path to observable training.
