@@ -1,5 +1,10 @@
 # Benchmark scaling, Phase A: implementation plan
 
+> **Update 2026-09-28.** Executed in #11 (landed on main with #7); see
+> [benchmark-scaling-spec.md](benchmark-scaling-spec.md). Task 1's `lammps =
+> ["lammps-jax"]` extra was not added (lammps-jax is not on PyPI; install it from a
+> clone). The checklist below is the implementation record.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Reproducible speed and memory scaling data and plots for ace-jax (`PACEModel`, linear `ACEModel`) vs ML-PACE vs MACE: standalone and in LAMMPS, on SiGe and Cantor at three model sizes, on moriarty CPU, moriarty A4500 and Modal A100.

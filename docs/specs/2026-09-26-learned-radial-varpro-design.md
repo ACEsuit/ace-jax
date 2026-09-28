@@ -1,5 +1,10 @@
 # Learned radial basis by VarPro (+ MACE-initialised radials) — design
 
+> **Update 2026-09-28.** Phase 1 (learned radials, held-out gate) merged in #9;
+> results in [learn-radial-results.md](../learn-radial-results.md). Phase 2
+> (MACE-initialised radials) is not implemented, and `tests/test_mace_radial.py`
+> does not exist. The body is the design record.
+
 **Date:** 2026-09-26. **Code:** `ace_jax.fit` / `ace_jax.construct`. **Branch:**
 `feat/learn-radial` (off `main` at f33ebbf). **Status:** design, awaiting review.
 

@@ -6,8 +6,6 @@ only under grad.  lammps-jax's nequip template pads at the cutoff instead,
 where the envelope vanishes and the derivative stays defined; that is the
 convention adopted here.
 """
-import pathlib
-
 import jax
 import numpy as np
 import pytest

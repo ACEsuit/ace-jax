@@ -1,6 +1,5 @@
 import json, pathlib
 import numpy as np
-import pytest
 
 FIX = pathlib.Path(__file__).resolve().parents[1] / "fixtures"
 

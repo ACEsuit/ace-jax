@@ -1,5 +1,10 @@
 # PACE `.yace` import/export — design spec
 
+> **Update 2026-09-28.** Implemented and merged (#6): `PACEModel`, `load_yace` /
+> `write_yace`; deployment results in [pace-yace-results.md](pace-yace-results.md).
+> #7 later moved the shared edge-model code (A-basis forms, E/F/V, dense layout)
+> into `eval/edge_model.py::EdgeSiteModel`. The body is the design record.
+
 Status: design agreed 2026-09-24; checked against ML-PACE source
 (`ICAMS/lammps-user-pace` @ `99aa6e6`) the same day; implementation not started.
 

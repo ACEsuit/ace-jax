@@ -17,7 +17,7 @@ from ace_jax.fit.inducing import GPConfig, descriptor_scale, select_inducing, si
 from ace_jax.fit.kernels import KernelSpec
 from ace_jax.fit.objective import Problem, posterior, combine, prior_precision
 from ace_jax.fit.stats import sufficient_statistics
-from ace_jax.fit.solve import solve_qr, solve_qr_streaming, solve_lsqr, lsqr, stacked_design, streamed_operators
+from ace_jax.fit.solve import solve_qr, solve_qr_streaming, lsqr, stacked_design, streamed_operators
 
 XYZ = FIXTURE_DIR / "si_tiny_train.xyz"
 DESIGN = FIXTURE_DIR / "si_tiny_design.npz"

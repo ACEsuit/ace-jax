@@ -1,5 +1,10 @@
 # Benchmark scaling plots: spec
 
+> **Update 2026-09-28.** Implemented in #11 (landed on main with #7): harness in `bench/scaling/`
+> (see its README), results in [benchmarks.md](benchmarks.md). The `lammps`
+> optional extra the plan proposed was not added: lammps-jax is installed from a
+> clone. The body is the design record.
+
 Status: agreed 2026-09-25. Phase A is ready to implement; Phase B waits for PRs
 #2–#5 to be merged and #6/#7 to be rebased onto `main`.
 

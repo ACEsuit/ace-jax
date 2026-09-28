@@ -7,7 +7,7 @@ import jax.numpy as jnp
 import numpy as np
 from jax.scipy.linalg import cho_solve, solve_triangular
 
-from .objective import _chol_S, combine
+from .objective import _chol_S
 from .rows import batch_rows
 
 

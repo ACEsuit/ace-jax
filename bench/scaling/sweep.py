@@ -9,7 +9,7 @@ import pathlib
 import subprocess
 import sys
 
-from scaling.models import SIZES, planned_models
+from scaling.models import planned_models
 from scaling.structures import n_ladder
 
 HOSTS = {

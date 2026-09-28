@@ -15,7 +15,7 @@ from ace_jax.fit.hypers import Hypers, from_array, to_array
 from ace_jax.fit.inducing import GPConfig, descriptor_scale, select_inducing, site_features
 from ace_jax.fit.kernels import KernelSpec
 from ace_jax.fit.rows import batch_rows
-from ace_jax.fit.stats import Stats, batch_stats, sufficient_statistics
+from ace_jax.fit.stats import sufficient_statistics
 
 XYZ = FIXTURE_DIR / "si_tiny_train.xyz"
 pytestmark = pytest.mark.skipif(not XYZ.exists(), reason="missing si_tiny_train.xyz")

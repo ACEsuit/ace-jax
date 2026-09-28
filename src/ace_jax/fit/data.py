@@ -42,6 +42,18 @@ def _get(d, key):
     return None
 
 
+def _label(value, key, shape, where):
+    """A label as float64 of `shape`, or a ValueError naming it -- never None for
+    a value that is present but unreadable (that would silently drop the label)."""
+    try:
+        a = np.asarray(value, float)
+    except (TypeError, ValueError):
+        raise ValueError(f"{where}: label {key!r} is not numeric: {value!r:.80}") from None
+    if a.size != int(np.prod(shape)):
+        raise ValueError(f"{where}: label {key!r} has {a.size} values, expected shape {shape}")
+    return a.reshape(shape)
+
+
 def load_configs(path, energy_key="energy", force_key="forces", virial_key="virial",
                  weights=None, weight_key="config_type", factors=None):
     """`factors`: an optional list of `weights.WeightFactor`s (see
@@ -53,8 +65,12 @@ def load_configs(path, energy_key="energy", force_key="forces", virial_key="viri
     existing caller (none of which pass `factors`) gets bit-identical
     w_E/w_F/w_V to before this was added.  `weights`/`weight_key` ALSO still
     drive `type_idx` (Task 6's per-type sigma routing) independently of
-    `factors` -- that wiring is untouched."""
-    from ase.io import read
+    `factors` -- that wiring is untouched.
+
+    Read with libAtoms extxyz (`fit.xyz.read_extxyz`): every label comes back
+    under the name it was written with, including `energy` / `forces`, which
+    ase.io hides in a calculator."""
+    from .xyz import read_extxyz
     weights = weights or {"default": {"E": 1.0, "F": 1.0, "V": 1.0}}
     if "default" not in weights:
         raise ValueError("weights dict needs a 'default' entry")
@@ -67,21 +83,19 @@ def load_configs(path, energy_key="energy", force_key="forces", virial_key="viri
         factors = [Structural(), ConfigType(named, key=weight_key, default=weights["default"])]
     weigh = compose(factors)
     out = []
-    for at in read(str(path), index=":"):
-        n = len(at)
+    for i, at in enumerate(read_extxyz(path)):
+        n, where = len(at.numbers), f"{path} config {i}"
         ct = str(at.info.get(weight_key, ""))
         ti = next((idx for name, idx in type_index.items() if name.lower() == ct.lower()), 0)
         E = _get(at.info, energy_key)
         F = _get(at.arrays, force_key)
         V = _get(at.info, virial_key)
-        V = None if V is None else np.asarray(V, float).reshape(3, 3)
         meta = {"n_atoms": n, "config_type": at.info.get(weight_key), **at.info}
         out.append(Config(
-            positions=np.asarray(at.positions, float), numbers=np.asarray(at.numbers),
-            cell=np.asarray(at.cell.array, float), pbc=np.asarray(at.pbc, bool),
-            energy=None if E is None else float(E),
-            forces=None if F is None else np.asarray(F, float),
-            virial=V,
+            positions=at.positions, numbers=at.numbers, cell=at.cell, pbc=at.pbc,
+            energy=None if E is None else float(_label(E, energy_key, (), where)),
+            forces=None if F is None else _label(F, force_key, (n, 3), where),
+            virial=None if V is None else _label(V, virial_key, (3, 3), where),
             w_E=weigh(meta, "E"), w_F=weigh(meta, "F"), w_V=weigh(meta, "V"),
             type_idx=ti))
     return out
@@ -168,6 +182,10 @@ def build_dataset(configs, meta, E0, configs_per_batch, rcut=None, n_cap=None, k
         k_cap = max(int(np.bincount(sparse_graph(c.positions, c.cell, c.pbc, rcut).senders,
                                     minlength=len(c.numbers)).max())
                     for c in configs)
+    # at least one (masked) neighbour slot: a batch of edgeless structures (an
+    # isolated atom) still needs an (n, K, 3) edge array, and the masked slot is
+    # parked at the cutoff, so it adds nothing -- E0 + the empty-environment term
+    k_cap = max(int(k_cap), 1)
     batches = [_batch(g, meta, E0, rcut, C, n_cap, k_cap) for g in groups]
     stack = lambda k: jnp.asarray(np.stack([b[k] for b in batches]))
     return Dataset(**{k: stack(k) for k in Dataset._fields})

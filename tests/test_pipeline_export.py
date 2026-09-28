@@ -127,3 +127,41 @@ def test_pops_fit_saves_the_pops_mean_exactly(tmp_path):
     for c in res.data.test:
         at = _atoms(c); at.calc = calc; E.append(at.get_potential_energy())
     assert np.allclose(E, res.preds.arrays["test/map"]["E_mean"], rtol=1e-10, atol=1e-10)
+
+
+def test_gpcalculator_evaluates_an_isolated_atom(gp_res, tmp_path, monkeypatch):
+    """No edges at all: E0 plus the model's empty-environment site term, zero
+    forces.  The empty neighbour list must not change the answer, so it is
+    checked against the same structure padded to 8 (all masked) neighbour slots."""
+    import ace_jax.calc.gp as G
+    from ace_jax import GPCalculator
+    from ace_jax.fit.pipeline import save_model
+    path = save_model(gp_res, tmp_path)
+
+    def energies(k_cap=None):
+        calc = GPCalculator.from_file(str(path))
+        at = Atoms("Si", positions=[[0.0, 0.0, 0.0]], cell=np.eye(3) * 20.0, pbc=True)
+        at.calc = calc
+        return at.get_potential_energy(), at.get_forces(), calc.results["energy_std"]
+
+    E, F, Es = energies()
+    real = G.build_dataset
+    monkeypatch.setattr(G, "build_dataset", lambda *a, **k: real(*a, **{**k, "k_cap": 8}))
+    E8, F8, Es8 = energies()
+    assert np.isfinite(E) and np.isfinite(Es) and np.array_equal(F, np.zeros((1, 3)))
+    assert np.isclose(E, E8, rtol=1e-12, atol=1e-12) and np.isclose(Es, Es8, rtol=1e-9)
+
+
+def test_cli_eval_gp_model_on_the_si_fixture(gp_res, tmp_path):
+    """`aj eval` of a GP model over si_tiny_train.xyz, whose first frame is an
+    isolated atom."""
+    import csv
+    from ace_jax.cli import main
+    from ace_jax.fit.pipeline import save_model
+    path = save_model(gp_res, tmp_path)
+    assert main(["eval", "--model", str(path), "--data", str(XYZ), "--energy-key", "dft_energy",
+                 "--force-key", "dft_force", "--virial-key", "dft_virial", "--forces",
+                 "--out", str(tmp_path / "p.csv")]) == 0
+    rows = list(csv.DictReader(open(tmp_path / "p.csv")))
+    assert len(rows) == 53 and rows[0]["natoms"] == "1"
+    assert all(np.isfinite(float(r["energy"])) and np.isfinite(float(r["energy_std"])) for r in rows)

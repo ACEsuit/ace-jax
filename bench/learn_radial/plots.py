@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 from ace_jax.eval import load
 from ace_jax.fit.data import build_dataset, load_configs, flat_edges
 from ace_jax.fit.radial_model import (to_analytic, radial_gram, normalise, row_active,
-                                      poly_env, roughness_matrix)
+                                      poly_env)
 from ace_jax.construct.spec import build_spec
 
 C = dict(init="#2a78d6", l0="#eb6834", l1="#1baf7a")          # reference categorical slots 1-3
@@ -41,7 +41,7 @@ for ax, (name, (_, _, _, run)) in zip(axs, SYS.items()):
     for yi, k in zip(y, labs):
         ax.barh(yi, info["scores"][k], height=0.5, color=COL[k])
         ax.plot(info["scores_at_a0"][k], yi, "o", ms=7, mfc=SURF, mec=INK, mew=1.5, zorder=3)
-        ax.text(info["scores"][k], yi, f"  {info["scores"][k]:.3g}", va="center", color=INK2)
+        ax.text(info["scores"][k], yi, f"  {info['scores'][k]:.3g}", va="center", color=INK2)
     ax.set_yticks(y, [LAB[k] for k in labs]); ax.set_title(f"{name}: held-out score (lower is better)", loc="left")
     ax.set_xlim(0, 1.25 * max(max(info["scores"].values()), max(info["scores_at_a0"].values())))
     ax.grid(axis="y", visible=False)

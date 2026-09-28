@@ -14,8 +14,6 @@ Polynomials4ML normalises the recurrence by quadgk (atol 1e-10); here the
 normalising integrals are exact (Gauss-Legendre on a polynomial integrand), so
 the tables agree to ~1e-10 rather than bit-for-bit.
 """
-import math
-
 import numpy as np
 
 from .radial_init import BOND_LEN, agnesi_transform_params, envelope2sx_params, poly_eval
