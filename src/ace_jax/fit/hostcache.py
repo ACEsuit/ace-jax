@@ -30,7 +30,7 @@ import numpy as np
 from .hypers import from_array
 from .objective import log_marginal_likelihood
 from .rows import linear_rows, pair_feature_inputs, residual_rows_from_inputs
-from .stats import ResidualStats, Stats, assemble_statistics, batch_linear_stats
+from .stats import ResidualStats, assemble_statistics, batch_linear_stats
 
 _Q = ("E", "F", "V")
 

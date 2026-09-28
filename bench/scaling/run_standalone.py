@@ -140,7 +140,7 @@ def run_case(row, n_atoms, dtype, device, reps=10):
 
 
 if __name__ == "__main__":
-    from scaling.models import load_manifest, planned_models
+    from scaling.models import planned_models
     name, n, dtype, device = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4]
     row = next(r for r in planned_models() if r["name"] == name)
     print(json.dumps(run_case(row, n, dtype, device)))

@@ -3,7 +3,6 @@ the Task 8 scan and the (Dt, Dt) statistics are all-reduced.  The only
 communication per evaluation is that psum, so speed-up is linear in devices.
 Multi-host: call jax.distributed.initialize() before building the mesh."""
 import jax
-import jax.numpy as jnp
 from jax import shard_map                      # public since JAX 0.7; keyword is check_vma
 from jax.sharding import NamedSharding, PartitionSpec as P
 

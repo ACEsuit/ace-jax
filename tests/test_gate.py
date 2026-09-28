@@ -8,8 +8,6 @@ scatter, since rij_e = pos[recv_e] - pos[send_e] + shift_e gives
     F_a = sum_e dE/drij_e (delta_{a,send_e} - delta_{a,recv_e}).
 This exercises the core exactly as the LAMMPS path will, with no cell involved.
 """
-import pathlib
-
 import jax
 import numpy as np
 import pytest

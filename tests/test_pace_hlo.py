@@ -2,7 +2,6 @@
 stock StableHLO so it needs none."""
 import pathlib
 import jax
-import numpy as np
 import pytest
 from conftest import pace_fixture
 

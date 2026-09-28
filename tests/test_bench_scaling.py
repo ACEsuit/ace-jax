@@ -269,7 +269,6 @@ def test_main_reuses_recorded_parity_and_never_gates_in_process(tmp_path, monkey
     got = {}
     monkeypatch.setattr(sweep, "run_sweep", lambda host, runner, path, select: got.update(
         blocked=[c.code for c in sweep.cases(host) if not select(c)]))
-    envs = tmp_path / "envs"
     monkeypatch.setattr(sweep, "_env_path", lambda host: tmp_path / "env.json")
     (tmp_path / "env.json").write_text(_json.dumps({"lmp": "lmp"}))
     sweep.main(["moriarty-gpu", "--results", str(res)])
@@ -405,7 +404,6 @@ def test_row_from_process_reads_the_json_or_classifies_the_death():
 def test_moriarty_cpu_ranks_are_physical_cores():
     """Xeon Silver 4216: 16 cores x 2 hyperthreads.  Open MPI refuses 32 ranks
     ('not enough slots'); one rank per physical core."""
-    from scaling.sweep import HOSTS
     assert HOSTS["moriarty-cpu"]["ranks"] == 16
 
 

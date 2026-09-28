@@ -1,0 +1,26 @@
+name: lint
+# ruff + the cheap hygiene hooks, exactly as .pre-commit-config.yaml defines them
+# (the ruff version is the rev pinned there).  Seconds, not minutes: uvx runs
+# pre-commit in its own tiny env, so no JAX / project install.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pre-commit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ runner.os }}-${{ hashFiles('.pre-commit-config.yaml') }}
+      - name: pre-commit (ruff check + whitespace / yaml / toml / large-file hooks)
+        run: uvx pre-commit@4.6.2 run --all-files --show-diff-on-failure --color=always

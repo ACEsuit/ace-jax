@@ -1,0 +1,25 @@
+# Install once per clone:  uv run pre-commit install
+# Run over everything:     uv run pre-commit run --all-files
+# Keep the ruff rev in step with the `ruff==` pin in pyproject.toml's dev group.
+#
+# Fixtures, recorded benchmark results and generated figure data are data
+# (bit-exact goldens, parity references), never rewritten by a hook.
+exclude: ^(fixtures/|docs/figures/|docs/figs/|bench/scaling/results/|bench/pace_modal/.*\.jsonl?$|\.test_durations$)
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      # largest tracked file is a ~3 MB npz fixture; this stops design-matrix
+      # caches and model dumps, which are release assets, not commits
+      - id: check-added-large-files
+        args: [--maxkb=4096]
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.9
+    hooks:
+      - id: ruff-check

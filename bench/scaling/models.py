@@ -120,7 +120,6 @@ def build_pace():
 
 
 def build_ace():
-    out = {}
     for system, els in ELEMENTS.items():
         for size, (order, deg) in ACE_DEG_BY_SYSTEM[system].items():
             p = DIR / f"ace_{system}_{size}.npz"

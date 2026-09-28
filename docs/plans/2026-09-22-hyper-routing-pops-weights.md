@@ -1,5 +1,11 @@
 # Hyper-routing + POPS UQ + composable weights — Implementation Plan
 
+> **Update 2026-09-28.** Merged (#5) without the learned species embedding:
+> `fit/varopt.py`, `fit/varopt_embed.py` and the `varopt` route were removed before
+> merge (routes are `fixed` / `lml`; the `embed` block is frozen
+> coregionalization). See the update at the top of the
+> [design spec](../specs/2026-09-22-hyper-routing-pops-weights-design.md).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Give every fit hyperparameter a fitting *route* ({fixed, LML, VarOpt}), add per-config-type σ hypers, a native POPS misspecification-UQ path on the linear arm, and a composable weight-factor pipeline.

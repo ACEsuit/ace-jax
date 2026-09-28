@@ -8,9 +8,6 @@ The core is validated elsewhere against a Julia-supplied edge list; this closes 
 loop: matscipy-neighbours builds the edges here, so a wrong cutoff, a missing
 periodic image or a shift-convention error would show up.
 """
-import json
-import pathlib
-
 import jax
 import numpy as np
 import pytest

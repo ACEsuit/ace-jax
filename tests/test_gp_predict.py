@@ -150,7 +150,6 @@ def test_force_virial_dtc_is_derivative_of_energy(fitted):
         Fv, Vv = _dtc_deriv_residual(theta, prob, batch)
     assert bool((Fv >= 0).all()) and bool((Vv >= 0).all())
     inc = lambda d: jnp.where(m[:, None], d[recv] - d[send], 0.0)
-    E = rij.shape[0]
     def Dm(n, a, s, tt):
         dL = jnp.zeros((batch.nbr.shape[0], 3)).at[n, a].set(s)
         dR = jnp.zeros((batch.nbr.shape[0], 3)).at[n, a].set(tt)

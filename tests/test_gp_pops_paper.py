@@ -220,7 +220,6 @@ def test_predict_reuses_a_prebuilt_path_and_its_posteriors(tiny_linear_problem, 
     with highest_precision():
         ref = predict_fixed(THETA, prob, ds, ds, uq="pops", pops_ridge={"E": 1e-2, "F": 1e-4, "V": 1e-4})
         path = PopsRidgePath(THETA, prob, ds)
-        import ace_jax.fit.predict as P
         calls = []                                            # one streamed moment pass per posterior built
         import ace_jax.fit.stats as S                         # DeviceRows calls it there
         real = S.pops_moment_sums

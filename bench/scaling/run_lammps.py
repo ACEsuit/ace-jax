@@ -26,7 +26,7 @@ def _pair(style, model_path, elements, device):
     if style == "acejax":
         return f"pair_style jax/kk ${{pjrt}}\npair_coeff * * {model_path}\n"
     if style == "mlpace":
-        return (f"pair_style pace product\n" if device == "gpu" else "pair_style pace\n") + \
+        return ("pair_style pace product\n" if device == "gpu" else "pair_style pace\n") + \
                f"pair_coeff * * {model_path} {els}\n"
     if style == "mace":                     # Symmetrix: element-specific .json
         return f"pair_style symmetrix/mace\npair_coeff * * {model_path} {els}\n"

@@ -298,7 +298,7 @@ def test_learn_radial_two_species_roughness():
     exactly zero, everything is finite, the roughness penalty lowers the
     learned roughness, and lam_abs is the relative weight times r0/rough0."""
     from ace_jax.fit.radial_learn import learn_radial
-    from ace_jax.fit.radial_model import (radial_gram, rnl_degrees, roughness, roughness_matrix,
+    from ace_jax.fit.radial_model import (rnl_degrees, roughness, roughness_matrix,
                                           row_active, to_analytic)
     spline, meta, z = load(FIXTURE_DIR / "sige_nofit.npz")
     model, _ = to_analytic(spline, 12)

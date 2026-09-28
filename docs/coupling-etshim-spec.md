@@ -1,5 +1,9 @@
 # Coupling generation via an EquivariantTensors-only JuliaCall shim
 
+> **Update 2026-09-28.** Radials, pair basis and embedding are no longer taken
+> from a Julia export: Tier 1 (#4) authors the whole model in Python
+> ([python-authoring.md](python-authoring.md)), with a per-shape coupling cache.
+
 **Goal.** Generate the SO(3) coupling artifacts (`A2B` map + `aa_spec`) — the one
 piece [EquivariantTensors.jl](https://github.com/ACEsuit/EquivariantTensors.jl)
 owns — from Python, in-process via `juliacall`, so a *new basis shape* can be

@@ -13,8 +13,8 @@ mirrors rows.residual_rows and is FD-checked against autodiff of the energy rows
 import jax
 import jax.numpy as jnp
 
-from .data import VOIGT, flat_edges
-from .rows import Rows, _voigt
+from .data import VOIGT
+from .rows import Rows
 
 EPS = 1e-6
 

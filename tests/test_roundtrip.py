@@ -3,9 +3,6 @@
 The probe block exists so a mismatch localises to a stage (transform, envelope,
 spline, Ylm) instead of only surfacing at the end in the site energy.
 """
-import json
-import pathlib
-
 import jax
 import numpy as np
 import pytest
@@ -14,8 +11,7 @@ jax.config.update("jax_enable_x64", True)   # test-local, not library-level
 import jax.numpy as jnp
 
 from ace_jax.eval import load
-from ace_jax.eval.radial import (agnesi_normalized, env_ace1_poly1sr, env_poly2sx,
-                           spline_eval)
+from ace_jax.eval.radial import (agnesi_normalized, env_poly2sx)
 
 @pytest.fixture
 def loaded(npz):

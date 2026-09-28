@@ -5,8 +5,6 @@ Parity target is `ACEpotentials.site_descriptors` (src/descriptor.jl).  Its
 layout is species-blocked: the centre species picks which (n_B, n_pair) blocks
 are populated and the rest are zero (src/models/ace.jl:544-566).
 """
-import pathlib
-
 import jax
 import numpy as np
 import pytest

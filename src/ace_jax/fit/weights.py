@@ -13,7 +13,8 @@ None): a future VarOpt consumer may want to learn some of these factors
 (e.g. per-config-type weights), so the protocol carries the hooks now, but
 no learning is wired up here -- see Task 13+.
 """
-from typing import Callable, Optional, Protocol, runtime_checkable
+from collections.abc import Callable
+from typing import Protocol, runtime_checkable
 
 
 @runtime_checkable
@@ -36,7 +37,7 @@ class Structural:
 
     learnable = False
 
-    def __init__(self, exp: Optional[dict] = None):
+    def __init__(self, exp: dict | None = None):
         self.exp = {"E": 0.5, "V": 0.5, "F": 0.0} if exp is None else dict(exp)
 
     def weight(self, meta: dict, quantity: str) -> float:
@@ -79,7 +80,7 @@ class ConfigType:
 
     learnable = False
 
-    def __init__(self, table: dict, key: str = "config_type", default: Optional[dict] = None):
+    def __init__(self, table: dict, key: str = "config_type", default: dict | None = None):
         self.table = {str(k).lower(): v for k, v in table.items()}
         self.key = key
         self.default = {} if default is None else dict(default)
