@@ -128,17 +128,20 @@ def lbfgs_loop(f, x0, *, steps, args=(), statics=(), tol=1e-6, patience=3, memor
     return x_best, f_best, trace, "steps"
 
 
-def theta_map_linear(prob, ds, W, *, steps=300, seed=0, init=None, return_stats=False):
+def theta_map_linear(prob, ds, W, *, steps=300, seed=0, init=None, return_stats=False, lin=None):
     """theta-MAP of the M = 0 LML for the model with radials W (one streaming
     pass for the statistics, then run_map on the cached Gram).  init: optional
-    theta array to warm-start from.  Returns the theta array; with
+    theta array to warm-start from.  `lin`: the statistics of ds if the caller
+    already has them (then W is unused and may be None; e.g. the widened
+    statistics of fit.density).  Returns the theta array; with
     return_stats=True returns (a, lin, diag): `lin` the linear statistics of
     ds it streamed (so a caller can reuse them without another pass) and
     `diag` a MAP convergence diagnostic computed on the cached `lin` (no extra
     pass): the final LML, the change in the SVI loss (-log posterior) over the
     last min(10, steps) steps, and the norm of the log-posterior gradient at
     the returned theta."""
-    lin = linear_statistics(with_radial(prob.model, W), prob.cfg, ds)
+    if lin is None:
+        lin = linear_statistics(with_radial(prob.model, W), prob.cfg, ds)
     lml = jax.jit(lambda a: log_marginal_likelihood(from_array(a), lin, prob))
     h, losses = run_map(lml, prob.prior, steps=steps, seed=seed, return_losses=True,
                         init=None if init is None else from_array(jnp.asarray(init)))
@@ -435,7 +438,8 @@ def holdout_score(W, a_fit, a_norm, prob, ds_fit, ds_val, *, lin_fit=None, lin_v
     skipped.  lin_fit / lin_val: the statistics of ds_fit / ds_val at W if the
     caller already has them (each saves one streaming pass).  With
     return_readout=True returns (score, c)."""
-    model = with_radial(prob.model, W)
+    if lin_fit is None or lin_val is None:
+        model = with_radial(prob.model, W)
     if lin_fit is None:
         lin_fit = linear_statistics(model, prob.cfg, ds_fit)
     if lin_val is None:
