@@ -172,6 +172,35 @@ class EdgeSiteModel(eqx.Module):
              .at[senders].add(g_r).at[receivers].add(-g_r))
         return E, F, -g_eps
 
+    def site_energies_dense_blocked(self, rij, zi, zj, mask, node_z, chunk):
+        """`site_energies_dense` evaluated in row blocks of at most `chunk`:
+        per-row energies (n,), identical to the unblocked call.
+
+        At or below one block this IS the unblocked call (no lax.map, no
+        checkpoint).  Above it, rows are split into nb equal blocks of B <= chunk
+        (padded with parked, fully masked rows, dropped from the result) and
+        evaluated with lax.map under jax.checkpoint, so the backward pass
+        recomputes one block at a time: peak memory scales with the block, not
+        with n.  Exact, because a site energy depends only on its own row."""
+        n = mask.shape[0]
+        nb = max(1, -(-n // chunk))
+        if nb == 1:
+            return self.site_energies_dense(rij, zi, zj, mask, node_z)
+        B = -(-n // nb)
+        pad_n = nb * B - n
+        park = jnp.asarray([1.0, 0.0, 0.0], rij.dtype) * self.pad_cutoff()
+
+        def blocks(a, fill):
+            if pad_n:
+                a = jnp.concatenate([a, jnp.broadcast_to(jnp.asarray(fill, a.dtype),
+                                                         (pad_n,) + a.shape[1:])])
+            return a.reshape((nb, B) + a.shape[1:])
+
+        xs = (blocks(rij, park), blocks(zi, 0), blocks(zj, 0), blocks(mask, False),
+              blocks(node_z, 0))
+        block = jax.checkpoint(lambda a: self.site_energies_dense(*a))
+        return jax.lax.map(block, xs).reshape(-1)[:n]
+
     def energy_forces_virial_dense(self, rij, zi, zj, idx, mask, node_z, chunk=CHUNK_NODES,
                                    rev=None, return_edge_grad=False):
         """`energy_forces_virial` for the dense layout: rij (n, K, 3), zi / zj /
@@ -190,30 +219,12 @@ class EdgeSiteModel(eqx.Module):
         dE/drij, zero on masked slots, for a caller that assembles the forces
         itself (the skin list's step, `calc.skin.step`, which gathers in its own
         slot space); `rev` is then ignored."""
-        n, K = mask.shape
-        nb = max(1, -(-n // chunk))
-        B = -(-n // nb)
-        pad_n = nb * B - n
-
-        def blocks(a, fill):
-            if pad_n:
-                a = jnp.concatenate([a, jnp.full((pad_n,) + a.shape[1:], fill, a.dtype)])
-            return a.reshape((nb, B) + a.shape[1:])
-
-        park = jnp.asarray([1.0, 0.0, 0.0], rij.dtype) * self.pad_cutoff()
+        n = mask.shape[0]
 
         def total(r, eps):
             sym = 0.5 * (eps + eps.T)
-            rs = r + r @ sym
-            if nb == 1:
-                return jnp.sum(self.site_energies_dense(rs, zi, zj, mask, node_z))
-            rb = jnp.concatenate([rs, jnp.broadcast_to(park, (pad_n, K, 3))]) if pad_n else rs
-            rb = rb.reshape(nb, B, K, 3)
-            live = blocks(jnp.ones((n,), rij.dtype), 0.0)       # padding rows add nothing (E0)
-            xs = (rb, blocks(zi, 0), blocks(zj, 0), blocks(mask, False), blocks(node_z, 0), live)
-            block = jax.checkpoint(
-                lambda a: jnp.sum(self.site_energies_dense(*a[:5]) * a[5]))
-            return jnp.sum(jax.lax.map(block, xs))
+            return jnp.sum(self.site_energies_dense_blocked(r + r @ sym, zi, zj, mask,
+                                                            node_z, chunk))
 
         eps0 = jnp.zeros((3, 3), rij.dtype)
         E, (g_r, g_eps) = jax.value_and_grad(total, argnums=(0, 1))(rij, eps0)

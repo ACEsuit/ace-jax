@@ -20,6 +20,17 @@ import numpy as np
 
 from ..eval.edge_model import LAYOUTS, estimate_a_bytes
 
+# Dense rows per block in the bundle (lax.map + jax.checkpoint above one block;
+# the unblocked program at or below it).  Unblocked, XLA temp memory grows with
+# the row count and the product-basis gather's adjoint scatter slows per row:
+# in LAMMPS on an A100, PACE Cantor at 131k atoms ran 0.88M atom-steps/s
+# unblocked against 1.12M blocked, and dense ACE at 131k ran out of memory
+# unblocked.  Not the calculator's CHUNK_NODES = 16384: with
+# max_owned ~ 1.1 N a 16k-atom system would split into two blocks and pay the
+# checkpoint recompute, 1.5x slower; 32k rows keeps it one block and is as fast
+# as or faster than 64k at scale.  docs/perf-lammps-large-n.md.
+BUNDLE_BLOCK_ROWS = 32768
+
 
 def make_energy_fn(model, n_species, layout, k_dense=None, type_map=None, n_rows=None):
     """type_map[t] is the model species of LAMMPS type t+1 (default: identity).
@@ -29,6 +40,9 @@ def make_energy_fn(model, n_species, layout, k_dense=None, type_map=None, n_rows
     (energy and, via the multiplicative overflow below, forces too) if a
     sender is >= n_rows or a slot overflows k_dense.  Capped at the actual
     row count, so n_rows >= the buffer's row count is a no-op.
+
+    Dense rows are evaluated in blocks of BUNDLE_BLOCK_ROWS (read at trace
+    time) when there are more than that; see `site_energies_dense_blocked`.
     """
     if layout not in LAYOUTS:
         raise ValueError(f"layout must be one of {LAYOUTS}, got {layout!r}")
@@ -65,8 +79,8 @@ def make_energy_fn(model, n_species, layout, k_dense=None, type_map=None, n_rows
         idx = jnp.zeros((nr, k_dense), jnp.int32).at[row, col].set(r, mode="drop")
         md = jnp.zeros((nr, k_dense), bool).at[row, col].set(True, mode="drop")
         zr = node_z[:nr]
-        e = model.site_energies_dense(rd, jnp.broadcast_to(zr[:, None], idx.shape),
-                                      node_z[idx], md, zr)
+        e = model.site_energies_dense_blocked(rd, jnp.broadcast_to(zr[:, None], idx.shape),
+                                              node_z[idx], md, zr, BUNDLE_BLOCK_ROWS)
         overflow = jnp.any(m & ((s >= nr) | (slot >= k_dense)))
         if nr < n:
             e = jnp.concatenate([e, jnp.zeros((n - nr,), e.dtype)])

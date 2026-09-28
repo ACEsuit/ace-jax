@@ -244,3 +244,90 @@ def test_owned_rows_overflow_is_nan():
     E, G = jax.value_and_grad(lambda p: jnp.sum(f(p, species, graph)))(jnp.asarray(at.positions))
     assert np.isnan(float(E))
     assert np.isnan(np.asarray(G)).any()
+
+
+# ------------------------------------------------------------------ row blocks
+# The dense bundle evaluates its rows in blocks of lammps.BUNDLE_BLOCK_ROWS
+# (lax.map + jax.checkpoint) once they exceed one block; at or below one block
+# the program is the unblocked one.  docs/perf-lammps-large-n.md.
+
+def _big_cluster(kind):
+    """213 atoms (3x3x3 diamond, 3 removed): with a 64-row block that is four
+    blocks of 54 plus 3 padding rows -- not a multiple of the block."""
+    at = bulk("Si", "diamond", a=5.43, cubic=True).repeat((3, 3, 3))
+    del at[[0, 50, 100]]
+    at.numbers[::3] = 32
+    at.pbc = False
+    at.center(vacuum=8.0)
+    return at
+
+
+def _blocked_inputs(kind, type_order, n_ghost=0):
+    model, meta, _ = load(MODELS[kind]())
+    at = _big_cluster(kind)
+    graph, g = _lammps_graph(at, meta["rcut"])
+    elements = [int(z) for z in meta["elements"]]
+    types = elements if type_order == "model" else elements[::-1]
+    type_map = None if type_order == "model" else [elements.index(z) for z in types]
+    species = jnp.asarray([types.index(int(z)) for z in at.numbers], jnp.int32)
+    pos = jnp.asarray(at.positions)
+    if n_ghost:                              # rows >= n_rows no edge points at
+        pos = jnp.concatenate([pos, pos[:n_ghost] + 100.0])
+        species = jnp.concatenate([species, species[:n_ghost]])
+    K = int(np.bincount(g.senders, minlength=len(at)).max())
+    return model, len(elements), K + 3, type_map, species, pos, graph, len(at)
+
+
+@pytest.mark.parametrize("n_ghost", [0, 11])
+@pytest.mark.parametrize("type_order", ["model", "reversed"])
+@pytest.mark.parametrize("kind", sorted(MODELS))
+def test_dense_blocks_match_single_block(monkeypatch, kind, type_order, n_ghost):
+    from ace_jax.export import lammps
+    model, nsp, k_dense, type_map, species, pos, graph, n_real = _blocked_inputs(
+        kind, type_order, n_ghost)
+    n_rows = n_real if n_ghost else None
+
+    def run(block):
+        monkeypatch.setattr(lammps, "BUNDLE_BLOCK_ROWS", block)
+        f = make_energy_fn(model, nsp, "dense", k_dense=k_dense, type_map=type_map,
+                           n_rows=n_rows)
+        e = jax.jit(lambda p: f(p, species, graph))(pos)
+        G = jax.jit(jax.grad(lambda p: jnp.sum(f(p, species, graph))))(pos)
+        return np.asarray(e), np.asarray(G)
+
+    e1, G1 = run(10 ** 9)
+    e64, G64 = run(64)
+    assert np.isfinite(e1).all() and np.isfinite(G1).all()
+    np.testing.assert_allclose(e64, e1, rtol=1e-12, atol=0)
+    np.testing.assert_allclose(G64, G1, rtol=1e-12, atol=1e-12 * np.abs(G1).max())
+
+
+def _loop_primitives(jaxpr):
+    """Names of loop / remat primitives anywhere in a (closed) jaxpr."""
+    found = set()
+
+    def walk(jx):
+        for eqn in jx.eqns:
+            if eqn.primitive.name in ("scan", "while", "checkpoint", "remat", "remat2"):
+                found.add(eqn.primitive.name)
+            for p in eqn.params.values():
+                for sub in (p if isinstance(p, (list, tuple)) else [p]):
+                    inner = getattr(sub, "jaxpr", sub)
+                    if hasattr(inner, "eqns"):
+                        walk(inner)
+    walk(jaxpr.jaxpr)
+    return found
+
+
+@pytest.mark.parametrize("block, blocked", [(64, True), (213, False), (10 ** 9, False)])
+def test_dense_blocks_only_above_one_block(monkeypatch, block, blocked):
+    from ace_jax.export import lammps
+    model, nsp, k_dense, type_map, species, pos, graph, _ = _blocked_inputs("pace", "model")
+    monkeypatch.setattr(lammps, "BUNDLE_BLOCK_ROWS", block)
+    f = make_energy_fn(model, nsp, "dense", k_dense=k_dense)
+    jx = jax.make_jaxpr(jax.value_and_grad(lambda p: jnp.sum(f(p, species, graph))))(pos)
+    prims = _loop_primitives(jx)
+    if blocked:
+        assert prims & {"scan", "while"} and prims & {"checkpoint", "remat", "remat2"}, prims
+    else:
+        assert not prims, prims
