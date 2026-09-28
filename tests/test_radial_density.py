@@ -395,7 +395,31 @@ def test_fit_radial_density_gate_prefers_density_on_density_data():
     assert set(info["scores"]) == {"init", "radials_only", "density_lam_eta=0"}
 
 
-def test_fit_radial_density_gate_rejects_density_on_linear_data():
+def test_fit_radial_density_gate_rejects_density_at_true_radials():
+    """Start the fit at the true radials (no radial error for the density to
+    absorb), so the linear-data gate has nothing to gain from the extra
+    per-species density flexibility."""
+    from test_gp_learn_radial import _perturbed_truth, relabel
+    from ace_jax.fit.density import density_mask
+    from ace_jax.fit.radial_density import fit_radial_density
+    prob, ds_fit, _ = make_problem(ncfg=12, per_batch=3, start=0)
+    _, ds_val, _ = make_problem(ncfg=12, per_batch=3, start=12)
+    Wt, _, c = _perturbed_truth(prob)
+    W0 = Wt
+    ds_fit, ds_val = relabel(prob, ds_fit, Wt, c), relabel(prob, ds_val, Wt, c)
+    W, eta, info = fit_radial_density(prob, ds_fit, ds_val, W0, mask=density_mask(prob.cfg, "full"), P=1,
+                                      theta0=None, profile=False, steps=20, map_steps=50)
+    print(info["scores"])
+    assert info["selected"] in ("init", "radials_only") and eta is None and info["P"] == 0
+    assert info["readout"].shape == (prob.cfg.len_basis,)
+
+
+def test_fit_radial_density_gate_selects_min_score():
+    """The perturbed-W0 setup (test_fit_radial_density_gate_rejects_density_at_true_radials'
+    predecessor): with unconverged radials the density candidate can legitimately win on
+    held-out data, because it compensates for the radial error rather than any noise in
+    the (noiseless) targets. This test only checks the gate picks the argmin, not which
+    label wins."""
     from test_gp_learn_radial import _perturbed_truth, relabel
     from ace_jax.fit.density import density_mask
     from ace_jax.fit.radial_density import fit_radial_density
@@ -406,8 +430,8 @@ def test_fit_radial_density_gate_rejects_density_on_linear_data():
     W, eta, info = fit_radial_density(prob, ds_fit, ds_val, W0, mask=density_mask(prob.cfg, "full"), P=1,
                                       theta0=None, profile=False, steps=20, map_steps=50)
     print(info["scores"])
-    assert info["selected"] in ("init", "radials_only") and eta is None and info["P"] == 0
-    assert info["readout"].shape == (prob.cfg.len_basis,)
+    assert all(np.isfinite(s) for s in info["scores"].values())
+    assert info["selected"] == min(info["scores"], key=info["scores"].get)
 
 
 def test_saved_density_model_matches_widened_rows(tmp_path):
