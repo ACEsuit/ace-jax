@@ -302,3 +302,56 @@ def test_ard_stage_logs_warning_on_failed_or_bounded_fit(monkeypatch):
         ard.run_ard_stage(cfg, d, b, default_prior(2.35).mu, log=lines.append)
     warns = [s for s in lines if "WARNING" in s]
     assert any("ABNORMAL" in s for s in warns) and any("log_sigma_E" in s for s in warns)
+
+
+def test_ard_stage_reuses_cached_full_statistics(monkeypatch):
+    """I1: the joint full refit reuses the objective's cached linear statistics (spec 3: "the cached
+    M, b where available") -- same h, kappa and posterior as the recompute, one fewer statistics pass."""
+    from conftest import FIXTURE_DIR
+    from ace_jax.fit import ard, stats
+    from ace_jax.fit.pipeline import load_fit_data
+    from ace_jax.fit.pipeline.mapfit import fit_map
+    from ace_jax.fit.pipeline.objective import make_objective
+    from ace_jax.fit.pipeline.problem import build_problem
+    cfg = _pipe_cfg().validate()
+    d = load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz"))
+    b = build_problem(cfg, d)
+    calls = []
+    real = stats.linear_statistics
+    monkeypatch.setattr(stats, "linear_statistics", lambda *a, **k: (calls.append(1), real(*a, **k))[1])
+    with highest_precision():
+        obj = make_objective(cfg, d, b)
+        theta = fit_map(cfg, d, b, obj, log=lambda *a: None).theta
+        # the cached statistics are the joint ARD statistics (unweighted per-quantity G/b/yy/n): the
+        # same function on the same data, jitted vs not -- equal up to summation order (~1e-15 of scale)
+        joint = ard.ard_statistics(theta, b.prob, d.ds_train, "joint")
+        for q, (G, bv, yy, n) in enumerate(zip(joint.G, joint.b, joint.yy, joint.n)):
+            G, bv = np.asarray(G), np.asarray(bv)
+            np.testing.assert_allclose(np.asarray(getattr(obj.lin, f"G_{'EFV'[q]}")), G, rtol=0,
+                                       atol=1e-14 * np.abs(G).max())
+            np.testing.assert_allclose(np.asarray(getattr(obj.lin, f"b_{'EFV'[q]}")), bv, rtol=0,
+                                       atol=1e-14 * np.abs(bv).max())
+            assert float(getattr(obj.lin, f"yy_{'EFV'[q]}")) == pytest.approx(yy, rel=1e-13)
+            assert float(getattr(obj.lin, f"n_{'EFV'[q]}")) == n
+        calls.clear()
+        ref = ard.run_ard_stage(cfg, d, b, theta, log=lambda *a: None)
+        n_recompute = len(calls)
+        calls.clear()
+        got = ard.run_ard_stage(cfg, d, b, theta, log=lambda *a: None, full_stats=obj.lin)
+        bc = ard.body_order_columns(d.meta, b.prob.cfg)
+        ev_ref = ard.ARDEvidence(joint, np.asarray(b.prob.gamma), bc)
+        ev_got = ard.ARDEvidence(ard.joint_ard_stats(obj.lin), np.asarray(b.prob.gamma), bc)
+        v_ref, g_ref = ev_ref.value_and_grad(ref.posterior.h)
+        v_got, g_got = ev_got.value_and_grad(ref.posterior.h)
+        p_ref = ard.predict_ard(ref.posterior, b.prob, d.ds_test)
+        p_got = ard.predict_ard(got.posterior, b.prob, d.ds_test)
+    assert n_recompute == 2 and len(calls) == 1          # the subset only: the full refit reused the cache
+    # the ~1e-15 summation-order difference, through cond(S) ~ 1e13, moves the evidence by ~1e-7 nats
+    # and L-BFGS's stopping point along flat directions by ~1e-4: equal to the optimiser's resolution
+    assert abs(v_got - v_ref) < 1e-6 and np.abs(g_got - g_ref).max() < 1e-5
+    assert got.posterior.kappa == pytest.approx(ref.posterior.kappa, rel=1e-12)   # subset stage unchanged
+    assert got.report["logev_full"] == pytest.approx(ref.report["logev_full"], abs=1e-5)
+    np.testing.assert_allclose(got.posterior.h, ref.posterior.h, atol=1e-3)
+    np.testing.assert_allclose(np.asarray(p_got.F_var), np.asarray(p_ref.F_var), rtol=1e-4)
+    Fm = np.asarray(p_ref.F_mean)
+    np.testing.assert_allclose(np.asarray(p_got.F_mean), Fm, rtol=0, atol=1e-4 * np.abs(Fm).max())

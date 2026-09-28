@@ -76,3 +76,20 @@ def test_joint_ard_noise_comes_from_the_ard_refit(ard_fit):
     np.testing.assert_allclose(p["noise_F"], np.exp(2 * h[1]), rtol=1e-12)
     np.testing.assert_allclose(p["noise_E"], np.exp(2 * h[0]) * p["nat"], rtol=1e-12)
     np.testing.assert_allclose(p["noise_V"], np.exp(2 * h[2]) * p["nat"], rtol=1e-12)
+
+
+def test_fit_hands_the_cached_statistics_to_the_ard_stage(monkeypatch):
+    """I1: fit() passes the objective's cached linear statistics to run_ard_stage (joint mode)."""
+    from ace_jax.fit import ard
+    from ace_jax.fit.pipeline import fit, load_fit_data
+    seen = []
+    real = ard.run_ard_stage
+
+    def spy(*a, **k):
+        seen.append(k.get("full_stats"))
+        return real(*a, **k)
+
+    monkeypatch.setattr(ard, "run_ard_stage", spy)
+    cfg = _cfg().validate()
+    fit(cfg, load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz")), log=lambda *a: None)
+    assert len(seen) == 1 and seen[0] is not None and hasattr(seen[0], "G_F")

@@ -45,10 +45,7 @@ def ard_statistics(theta, prob, ds, mode):
     never enter the ARD posterior, and the joint Gram is hyperparameter-independent."""
     from .stats import linear_statistics
     if mode == "joint":
-        st = linear_statistics(prob.model, prob.cfg, ds)
-        return ARDStats(tuple(getattr(st, f"G_{q}") for q in "EFV"), tuple(getattr(st, f"b_{q}") for q in "EFV"),
-                        np.array([float(getattr(st, f"yy_{q}")) for q in "EFV"]),
-                        np.array([float(getattr(st, f"n_{q}")) for q in "EFV"]), None)
+        return joint_ard_stats(linear_statistics(prob.model, prob.cfg, ds))
     if mode != "sequential":
         raise ValueError(f"ard mode must be 'joint' or 'sequential', got {mode!r}")
     from .rows import linear_rows
@@ -71,6 +68,14 @@ def ard_statistics(theta, prob, ds, mode):
     return ARDStats((M,), (bv,), np.zeros(3), np.zeros(3), ls)
 
 
+def joint_ard_stats(st):
+    """Joint ARDStats from `stats.linear_statistics` output (a `Stats`): the arrays are shared, not
+    copied, so a caller's cached statistics (pipeline objective) serve the full refit as they are."""
+    return ARDStats(tuple(getattr(st, f"G_{q}") for q in "EFV"), tuple(getattr(st, f"b_{q}") for q in "EFV"),
+                    np.array([float(getattr(st, f"yy_{q}")) for q in "EFV"]),
+                    np.array([float(getattr(st, f"n_{q}")) for q in "EFV"]), None)
+
+
 class ARDEvidence:
     """log p(D|h) and its gradient in the prior-scaled system.  h = (log sigma_q [joint only], a_k)."""
 
@@ -81,28 +86,31 @@ class ARDEvidence:
         gidx = jnp.asarray(np.searchsorted(np.asarray(self.groups), self.body_col))
         dinv = jnp.asarray(1.0 / np.asarray(gamma))
         self.dinv = dinv
-        Gs = tuple(dinv[:, None] * G * dinv[None, :] for G in stats.G)
-        bs = tuple(dinv * b for b in stats.b)
-        yy, nq = jnp.asarray(stats.yy), jnp.asarray(stats.n)
+        # the unscaled G/b are held as given (no scaled copies: the Gram is L^2 per quantity, and a
+        # pipeline caller shares them with its cache); D^-1 (sum_q w_q G_q) D^-1 is formed per call.
+        # They are jit ARGUMENTS, not closure constants, which XLA would copy into the executable.
+        self._data = (tuple(stats.G), tuple(stats.b), jnp.asarray(stats.yy), jnp.asarray(stats.n))
         nls = 3 if self.joint else 0
 
-        def parts(h):
+        def parts(h, data):
+            G, b, yy, nq = data
             if self.joint:
                 w = jnp.exp(-2 * h[:3])
-                Ms = w[0] * Gs[0] + w[1] * Gs[1] + w[2] * Gs[2]
-                bv = w[0] * bs[0] + w[1] * bs[1] + w[2] * bs[2]
+                M = w[0] * G[0] + w[1] * G[1] + w[2] * G[2]
+                bv = w[0] * b[0] + w[1] * b[1] + w[2] * b[2]
                 const = -0.5 * jnp.sum(yy * w) - jnp.sum(nq * h[:3])
             else:
-                Ms, bv, const = Gs[0], bs[0], 0.0
-            return Ms, bv, jnp.exp(h[nls:])[gidx], const
+                M, bv, const = G[0], b[0], 0.0
+            return dinv[:, None] * M * dinv[None, :], dinv * bv, jnp.exp(h[nls:])[gidx], const
 
-        def logev(h):
-            Ms, bv, lam, const = parts(h)
+        def logev(h, data):
+            Ms, bv, lam, const = parts(h, data)
             c, low = cho_factor(Ms + jnp.diag(lam), lower=True)
             x = cho_solve((c, low), bv)
             return const + 0.5 * bv @ x - jnp.sum(jnp.log(jnp.diag(c))) + 0.5 * jnp.sum(jnp.log(lam))
 
-        self._parts, self._vg = parts, jax.jit(jax.value_and_grad(logev))
+        self._parts = lambda h: parts(h, self._data)
+        self._vg = jax.jit(jax.value_and_grad(logev))
         self._nls = nls
 
     def h0(self, theta):
@@ -111,7 +119,7 @@ class ARDEvidence:
         return np.array(ls + [a_blr] * len(self.groups))
 
     def value_and_grad(self, h):
-        v, g = self._vg(jnp.asarray(h, float))
+        v, g = self._vg(jnp.asarray(h, float), self._data)
         return float(v), np.asarray(g)
 
     def bounds(self, h0, cond_max):
@@ -287,9 +295,13 @@ def _ard_fit_warnings(stage, info, names):
     return out
 
 
-def run_ard_stage(cfg, data, built, theta, log=print):
+def run_ard_stage(cfg, data, built, theta, log=print, full_stats=None):
     """Fit ARD on a train subset, choose kappa on the held-out rest (never the test set), then refit
-    on ALL training data (started from the subset optimum) and keep kappa."""
+    on ALL training data (started from the subset optimum) and keep kappa.
+
+    full_stats: the linear statistics of data.ds_train (`stats.linear_statistics`) the caller has
+    already cached -- the pipeline objective's.  The joint full refit then uses them as they are
+    instead of a second pass over the training set (spec 3); sequential mode ignores them."""
     import time
     from .data import build_dataset
     mode, val_frac, cond_max = cfg.ard_mode, cfg.ard_val_frac, cfg.ard_cond_max
@@ -323,7 +335,10 @@ def run_ard_stage(cfg, data, built, theta, log=print):
     log(f"ARD: fit-subset logev {v_fit:.2f} ({info_fit['message']}, nit {info_fit['nit']}); "
         f"kappa {kappa:.3f} from {len(e2)} held-out atoms")
     del ev
-    ev = ARDEvidence(ard_statistics(theta, prob, data.ds_train, mode), np.asarray(prob.gamma), body_col)
+    st = (joint_ard_stats(full_stats) if (full_stats is not None and mode == "joint")
+          else ard_statistics(theta, prob, data.ds_train, mode))
+    ev = ARDEvidence(st, np.asarray(prob.gamma), body_col)
+    del st
     v_start = ev.value_and_grad(np.clip(h_fit, *ev.bounds(h_fit, cond_max)))[0]   # refit's start
     h, v, info = fit_ard(ev, h_fit, cond_max)
     for w in _ard_fit_warnings("full", info, names):

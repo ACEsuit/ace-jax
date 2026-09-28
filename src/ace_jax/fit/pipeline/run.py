@@ -35,10 +35,14 @@ def fit(cfg, data, log=print, on_stage=None):
         ard = None
         if cfg.uq == "ard":
             from ..ard import run_ard_stage
-            # the ARD stage builds its own statistics: drop the LML and its jitted objective first
-            obj = obj._replace(lik=None, vg=None, host_cache=None)
+            # joint mode refits on the objective's cached linear statistics (not a second pass);
+            # drop everything else the objective holds -- the LML, its jitted objective and the
+            # stats closure (ARD predicts from its own posterior) -- then free their buffers
+            full = obj.lin if cfg.ard_mode == "joint" else None
+            obj = obj._replace(lik=None, vg=None, host_cache=None, stats=None, lin=None)
             release()
-            ard = run_ard_stage(cfg, data, b, mf.theta, log=log)
+            ard = run_ard_stage(cfg, data, b, mf.theta, log=log, full_stats=full)
+            del full
             stage("ard", ard)
         # cached linear statistics (run.py) or a full recompute per draw (the CLI's
         # historical path): equal in exact arithmetic, not in summation order
