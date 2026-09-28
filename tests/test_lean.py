@@ -23,7 +23,7 @@ import jax.numpy as jnp
 from ase.build import bulk
 
 from ace_jax.eval import load
-from ace_jax.eval.model import fold_pair, highest_precision, lean, prune_columns
+from ace_jax.eval.model import block_dense, fold_pair, highest_precision, lean, prune_columns
 from ace_jax.eval.nlist import dense_from_sparse, sparse_graph
 
 ROOT = pathlib.Path(__file__).parent.parent
@@ -91,6 +91,7 @@ TRANSFORMS = {
     "prune": prune_columns,
     "pairfold": fold_pair,
     "prune+pairfold": lambda m: fold_pair(prune_columns(m)),
+    "block": block_dense,
     "lean": lean,
 }
 
@@ -199,3 +200,31 @@ def test_lean_readout_stays_trainable(dense):
             grads.append(np.asarray(jax.grad(E)(mm.ctilde)))
     assert np.abs(grads[1]).max() > 0
     np.testing.assert_allclose(grads[1], grads[0], rtol=1e-10, atol=1e-10)
+
+
+# species-compact where R_nl is block-sparse in z_j (splined, more than one species)
+COMPACT = {"si_fitted": False, "si_ace_model": False, "sige_nofit": True, "emb_SiGe": False,
+           "Cantor_small": True}
+
+
+def test_block_layout(loaded):
+    """One block per l the A basis uses; the product basis is remapped onto the
+    blocks and the original aa_specs are kept for the sparse layout."""
+    name, m, meta, at = loaded
+    m1 = block_dense(m)
+    ls = sorted({int(v) for v in np.floor(np.sqrt(np.asarray(m.aspec_y)))})
+    assert [b[0] for b in m1.blk] == ls
+    assert m1.blk_compact == COMPACT[name]
+    assert (m1.blk_rnl_coefs is not None) == COMPACT[name]
+    assert len(m1.blk_aa_specs) == len(m1.aa_specs)
+    for g0, g1 in zip(m1.aa_specs, m1.blk_aa_specs):
+        assert g0.shape == g1.shape
+    assert not m1.energy_only                              # the basis is untouched
+    assert block_dense(m1) is m1
+    assert lean(m).blk == m1.blk
+
+
+def test_block_needs_a_folded_model():
+    m, _, _ = load(str(MODELS["sige_nofit"]), fold=False)
+    with pytest.raises(ValueError, match="folded"):
+        block_dense(m)

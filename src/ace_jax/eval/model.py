@@ -127,6 +127,16 @@ class ACEModel(EdgeSiteModel):
     # part of `lean`): the energy is unchanged, but the pair channel is no longer
     # Apair, so the basis methods (descriptors, Jacobians, fitting rows) refuse.
     energy_only: bool = eqx.field(static=True, default=False)
+    # l-blocked dense A (`block_dense`, part of `lean`): per used l, (l, radial
+    # column offset, width).  () keeps the n_rnl x n_Y outer product (`pool_a_dense`).
+    # With `blk_compact` each edge evaluates only its own z_j's columns, from the
+    # compacted table `blk_rnl_coefs`, expanded by a one-hot over z_j.
+    # `blk_aa_specs` index the concatenated blocks; `aa_specs` stay in A-basis
+    # order for the sparse layout and the basis methods.
+    blk: tuple = eqx.field(static=True, default=())
+    blk_compact: bool = eqx.field(static=True, default=False)
+    blk_aa_specs: tuple = None
+    blk_rnl_coefs: jax.Array = None                  # (NZ, NZ, ncoef, sum_l w_l)
 
     # -------------------------------------------------- edge embeddings
     def _radial_one(self, r, zi, zj, kind, trans, coefs, grid, Wnlq, ABC, env):
@@ -224,8 +234,9 @@ class ACEModel(EdgeSiteModel):
                              "the pair radial, so it has no basis: use the model `lean` was "
                              "applied to for descriptors, Jacobians or fitting")
 
-    def _aa(self, A):
-        return jnp.concatenate([jnp.prod(A[:, g], axis=-1) for g in self.aa_specs], axis=-1)
+    def _aa(self, A, specs=None):
+        specs = self.aa_specs if specs is None else specs
+        return jnp.concatenate([jnp.prod(A[:, g], axis=-1) for g in specs], axis=-1)
 
     def _from_pooled(self, A, Apair):
         AA = self._aa(A)
@@ -240,8 +251,8 @@ class ACEModel(EdgeSiteModel):
             B = AA @ self.A2B.T
         return B, Apair
 
-    def _readout_folded(self, A, Apair, node_z):
-        e = jnp.einsum("ia,ai->i", self._aa(A), self.ctilde[:, node_z])
+    def _readout_folded(self, A, Apair, node_z, specs=None):
+        e = jnp.einsum("ia,ai->i", self._aa(A, specs), self.ctilde[:, node_z])
         e = e + jnp.einsum("ip,pi->i", Apair, self.Wpair[:, node_z])
         return e + self.E0[node_z]
 
@@ -405,6 +416,8 @@ class ACEModel(EdgeSiteModel):
         return self._readout(*self.site_basis(rij, zi, zj, segment_ids, n_nodes, mask), node_z)
 
     def site_energies_dense(self, rij, zi, zj, mask, node_z):
+        if self.blk:
+            return self._site_energies_blocked(rij, zi, zj, mask, node_z)
         if self.folded:
             # A by the batched outer product over each node's K slots (no
             # per-edge column gather); the pair channel is a plain masked sum
@@ -416,6 +429,42 @@ class ACEModel(EdgeSiteModel):
             A = self.pool_a_dense(un(Rnl), un(Y), None)
             return self._readout_folded(A, pool_dense(un(Rpair), mask), node_z)
         return self._readout(*self.site_basis_dense(rij, zi, zj, mask), node_z)
+
+    def _site_energies_blocked(self, rij, zi, zj, mask, node_z):
+        """The dense energy with A pooled per l-block (`block_dense`):
+        A_l = sum_k R_{.,l} (x) Y_l, (w_l (2l+1)) per node, instead of the full
+        n_rnl x n_Y outer product of which only the l(R) = l(Y) diagonal blocks
+        are read; no column select follows.  Pooled feature-major and handed to
+        the product basis transposed: without that, XLA's layout for the
+        order-3/4 product adjoint regresses (docs/ace-vs-pace-gap.md 4.1)."""
+        n, K = mask.shape
+        E = n * K
+        r3, zi_, zj_, mk = rij.reshape(E, 3), zi.reshape(E), zj.reshape(E), mask.reshape(E)
+        if self.blk_compact:
+            r = jnp.linalg.norm(r3, axis=-1)
+            env = env_poly2sx(agnesi_normalized(r, self.rnl_transform[zi_, zj_]),
+                              self.rnl_envelope[zi_, zj_])
+            R = self._radial_one(r, zi_, zj_, "spline", self.rnl_transform, self.blk_rnl_coefs,
+                                 self.rnl_grid, None, None, env)
+            Rpair = self.pair_radial(r3, zi_, zj_)
+        else:
+            R, Rpair = self.radial(r3, zi_, zj_)
+        R = jnp.where(mk[:, None], R, 0.0)
+        Y = self.angular(r3)
+        nz = self.E0.shape[0]
+        oh = jax.nn.one_hot(zj_, nz, dtype=R.dtype) if self.blk_compact else None
+        hi = jax.lax.Precision.HIGHEST
+        At = []
+        for l, off, w in self.blk:
+            Rl = R[:, off:off + w]
+            if self.blk_compact:
+                Rl = (oh[:, :, None] * Rl[:, None, :]).reshape(E, nz * w)
+            Yl = Y[:, l * l:(l + 1) ** 2]
+            At.append(jnp.einsum("nkr,nky->ryn", Rl.reshape(n, K, -1), Yl.reshape(n, K, -1),
+                                 precision=hi).reshape(-1, n))
+        A = jnp.concatenate(At, axis=0).T
+        return self._readout_folded(A, pool_dense(Rpair.reshape(n, K, -1), mask), node_z,
+                                    self.blk_aa_specs)
 
 
 # ------------------------------------------------------------------ readout fold
@@ -547,6 +596,64 @@ def fold_pair(model):
     return _dc.replace(model, **kw, Wpair=jnp.ones((1, W.shape[1]), dt), energy_only=True)
 
 
+def block_dense(model):
+    """The l-blocked dense A (`ACEModel._site_energies_blocked`), species-compact
+    when R_nl is block-sparse in z_j and there is more than one species.
+
+    Per edge the compact form evaluates only the w_l columns of its own z_j (a
+    (NZ, NZ, ncoef, sum w_l) table, zero-padded to the widest species) and
+    expands them by a one-hot over z_j: PACE's neighbour-species channel, which
+    ACE1 folds into the radial index.  On Cantor_medium that is 12 live columns
+    of 58 per edge.  Applies `prune_columns` first (the blocks need each l's
+    columns contiguous).  Needs a folded model.  Returns the pruned model
+    unblocked when a radial column is used at more than one l."""
+    if not model.folded:
+        raise ValueError("block_dense needs a folded model (fold_readout first)")
+    if model.blk:
+        return model
+    m = prune_columns(model)
+    ar, ay = _np.asarray(m.aspec_r), _np.asarray(m.aspec_y)
+    la = _l_of_y(ay)
+    l_of = {}
+    for r, l in zip(ar.tolist(), la.tolist()):
+        if l_of.setdefault(r, l) != l:
+            return m
+    own = _rnl_owner(m)
+    nz = int(m.E0.shape[0])
+    compact = own is not None and nz > 1
+    coefs = _np.asarray(m.rnl_coefs) if compact else None
+    blocks, pos_of, tabs, base, off = [], {}, [], 0, 0
+    for l in sorted(set(l_of.values())):
+        cols = [r for r in sorted(l_of) if l_of[r] == l]
+        nm = 2 * l + 1
+        if compact:
+            per = [[r for r in cols if own[r] == z] for z in range(nz)]
+            w = max(len(v) for v in per)
+            tab = _np.zeros(coefs.shape[:3] + (w,), coefs.dtype)
+            for z, rs in enumerate(per):
+                for k, r in enumerate(rs):
+                    tab[:, z, :, k] = coefs[:, z, :, r]
+                    for mm in range(nm):
+                        pos_of[(r, mm)] = base + (z * w + k) * nm + mm
+            tabs.append(tab)
+            blocks.append((l, off, w))
+            off += w
+        else:
+            w = len(cols)
+            if cols != list(range(cols[0], cols[0] + w)):         # prune_columns sorts by l
+                return m
+            for k, r in enumerate(cols):
+                for mm in range(nm):
+                    pos_of[(r, mm)] = base + k * nm + mm
+            blocks.append((l, cols[0], w))
+        base += (nz if compact else 1) * w * nm
+    pos = _np.asarray([pos_of[(int(r), int(y) - l * l)] for r, y, l in zip(ar, ay, la)])
+    specs = tuple(jnp.asarray(pos[_np.asarray(g)], g.dtype) for g in m.aa_specs)
+    return _dc.replace(m, blk=tuple(blocks), blk_compact=compact, blk_aa_specs=specs,
+                       blk_rnl_coefs=(jnp.asarray(_np.concatenate(tabs, axis=-1), m.rnl_coefs.dtype)
+                                      if compact else None))
+
+
 def lean(model):
     """The evaluation form of a folded ACEModel: `prune_columns`, `fold_pair`
     and the l-blocked dense A (`block_dense`).  Exact to roundoff in E, F and the
@@ -557,4 +664,4 @@ def lean(model):
     model) is returned as given, as is a model that is already lean."""
     if not isinstance(model, ACEModel) or not model.folded or model.energy_only:
         return model
-    return fold_pair(prune_columns(model))
+    return block_dense(fold_pair(prune_columns(model)))
