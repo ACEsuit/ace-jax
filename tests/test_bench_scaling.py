@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent / "bench"))
+from conftest import require_optional
 from scaling.structures import SYSTEMS, n_ladder, supercell
 
 
@@ -553,7 +554,7 @@ def test_export_bundle_runs_in_a_child_process(tmp_path, monkeypatch):
 
 
 def test_export_bundle_child_writes_a_bundle(tmp_path):
-    pytest.importorskip("lammps_jax")
+    require_optional("lammps_jax")
     from scaling.run_lammps import export_bundle
     from scaling.structures import supercell
     y = str(pathlib.Path(__file__).parent.parent / "fixtures" / "pace" / "gesi_sbessel.yace")

@@ -20,7 +20,7 @@ from ase.build import bulk
 from ace_jax.calc.point import ACECalculator
 from ace_jax.eval import load, sparse_graph
 from ace_jax.export.lammps import make_energy_fn
-from conftest import pace_fixture
+from conftest import pace_fixture, require_optional
 
 FIX = pathlib.Path(__file__).parent.parent / "fixtures" / "pace"
 
@@ -83,7 +83,7 @@ def test_dense_overflow_is_loud():
 
 
 def test_bundle_written(tmp_path):
-    pytest.importorskip("lammps_jax")
+    require_optional("lammps_jax")
     from ace_jax.export.lammps import export_lammps
     y = str(pace_fixture(FIX / "gesi_sbessel.yace"))
     model, meta, _ = load(y)
@@ -118,7 +118,7 @@ def test_lammps_type_order_differs_from_model_order(layout):
 def test_bundle_records_owned_rows_even_for_sparse(tmp_path):
     """The sparse layout has no row concept, but max_owned is still recorded
     (the value the caller sized the bundle's neighbour slots for)."""
-    pytest.importorskip("lammps_jax")
+    require_optional("lammps_jax")
     from ace_jax.export.lammps import export_lammps
     y = str(pace_fixture(FIX / "gesi_sbessel.yace"))
     model, meta, _ = load(y)
@@ -140,7 +140,7 @@ LAMMPS_JAX_KEYS = {"comm_sites", "comm_widths", "custom_call_targets", "cutoff",
 
 @pytest.mark.parametrize("layout", ["sparse", "dense"])
 def test_bundle_metadata_keys_do_not_shadow_the_contract(tmp_path, layout):
-    pytest.importorskip("lammps_jax")
+    require_optional("lammps_jax")
     from ace_jax.export.lammps import export_lammps
     y = str(pace_fixture(FIX / "gesi_sbessel.yace"))
     model, meta, _ = load(y)
@@ -150,7 +150,7 @@ def test_bundle_metadata_keys_do_not_shadow_the_contract(tmp_path, layout):
 
 
 def test_bundle_records_type_order(tmp_path):
-    pytest.importorskip("lammps_jax")
+    require_optional("lammps_jax")
     from ace_jax.export.lammps import export_lammps
     model, meta, _ = load(str(pace_fixture(FIX / "gesi_sbessel.yace")))
     b = export_lammps(model, meta, tmp_path / "m.json", max_atoms=64, max_edges=64 * 64,
@@ -337,7 +337,7 @@ def test_auto_layout_judges_one_dense_block(tmp_path, monkeypatch):
     """The dense bundle runs in BUNDLE_BLOCK_ROWS blocks, so only one block's
     temporaries are live: auto must stay dense when a block fits the budget
     even though all rows at once would not (the benchmark exports with auto)."""
-    pytest.importorskip("lammps_jax")
+    require_optional("lammps_jax")
     from ace_jax.calc import point
     from ace_jax.eval.edge_model import estimate_a_bytes
     from ace_jax.export import lammps as lx

@@ -17,7 +17,7 @@ from ase.calculators.calculator import all_changes
 
 from ace_jax.calc.point import ACECalculator
 from ace_jax.eval.edge_model import EdgeSiteModel
-from conftest import pace_fixture
+from conftest import pace_fixture, require_optional
 
 FIX = pathlib.Path(__file__).parent.parent / "fixtures" / "pace"
 
@@ -66,10 +66,7 @@ def test_dense_path_uses_native_neighbour_matrix(monkeypatch):
     """With matscipy_neighbours, the dense (n, K) graph comes straight from
     neighbour_matrix (no sparse build + regroup), K cached across calls and
     re-learnt when an atom outgrows it; results match the sparse layout."""
-    import ace_jax.eval.nlist as nl
-    if not nl.have_matscipy_neighbours():
-        pytest.skip("matscipy_neighbours not installed")
-    import matscipy_neighbours
+    matscipy_neighbours = require_optional("matscipy_neighbours")
     calls = []
     orig = matscipy_neighbours.neighbour_matrix
 
