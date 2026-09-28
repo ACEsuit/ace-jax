@@ -3,6 +3,7 @@
     python bench/scaling/models.py pace   # pyace venv: random-coefficient .yace x3 x2
     python bench/scaling/models.py ace    # Julia: linear ACE .npz x3 x2
     python bench/scaling/models.py mace   # MACE-MP-0b2 s/m/l + MH-1 + Symmetrix .json per system
+    python bench/scaling/models.py sizes  # basis functions per central element -> model_sizes.json
 Model files live in bench/scaling/models/ (git-ignored); manifest.json records
 provenance (builder, parameters, n_params, sha256).
 """
@@ -16,6 +17,7 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 DIR = ROOT / "bench" / "scaling" / "models"
+SIZES_JSON = ROOT / "bench" / "scaling" / "model_sizes.json"      # committed; models are not
 SIZES = ("small", "medium", "large")
 ELEMENTS = {"SiGe": ["Si", "Ge"], "Cantor": ["Cr", "Mn", "Fe", "Co", "Ni"]}
 PACE_FUNCS = {"small": 100, "medium": 500, "large": 2000}          # per element
@@ -167,5 +169,49 @@ def build_mace():
     _update_manifest(out)
 
 
+def pace_functions_per_element(yace):
+    """Basis functions per central element of a .yace (the `functions:` block
+    lists them per element, one `    - {...}` line each; the counts are equal)."""
+    counts, on = {}, False
+    for line in pathlib.Path(yace).read_text().splitlines():
+        if line.startswith("functions:"):
+            on, el = True, None
+        elif on and line.startswith("  ") and not line.startswith("    ") and line.rstrip().endswith(":"):
+            el = line.strip()[:-1]
+        elif on and line.startswith("    - "):
+            counts[el] = counts.get(el, 0) + 1
+        elif on and line and not line.startswith(" "):
+            on = False
+    return max(counts.values())
+
+
+def ace_functions_per_element(npz):
+    """Basis functions per central element of a linear ACE model: every B
+    function carries its own weight per central element (WB is n_B x NZ), so
+    it is n_B -- not n_B / NZ."""
+    import numpy as np
+    return int(np.load(npz, allow_pickle=True)["WB"].shape[0])
+
+
+def basis_sizes():
+    """{"<system>/<size>": {code: functions per central element}} for the
+    ace-jax and ML-PACE models present in DIR (MACE has no comparable count)."""
+    out = {}
+    for r in planned_models():
+        p = pathlib.Path(r["path"])
+        if r["code"] == "mace" or not p.exists():
+            continue
+        n = (ace_functions_per_element(p) if r["code"] == "acejax-ace"
+             else pace_functions_per_element(p))
+        out.setdefault(f"{r['system']}/{r['size']}", {})[r["code"]] = n
+    return out
+
+
+def write_sizes():
+    SIZES_JSON.write_text(json.dumps(basis_sizes(), indent=1, sort_keys=True) + "\n")
+    print(SIZES_JSON)
+
+
 if __name__ == "__main__":
-    {"pace": build_pace, "ace": build_ace, "mace": build_mace}[sys.argv[1]]()
+    {"pace": build_pace, "ace": build_ace, "mace": build_mace,
+     "sizes": write_sizes}[sys.argv[1]]()

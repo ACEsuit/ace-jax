@@ -57,6 +57,13 @@ host whose ace-jax rows are still being re-run shows "pending".
 
 ## Caveats
 
+- **The linear ACE models are larger than the PACE models they sit beside.**
+  Plot labels and the "Model basis sizes" table give basis functions per
+  central element. Linear ACE is 2–3× the PACE size on SiGe and 7–14× on
+  Cantor, because the size ladder counted linear ACE functions as n_B / NZ,
+  but every B function carries its own weight for each central element. So
+  ACE-vs-PACE throughput differences mostly reflect basis size, not the code
+  path. Matching the ladder is a follow-up.
 - **Random weights.** The ace-jax and PACE models carry random coefficients
   where no fitted model exists. They are timing-only; their energies mean
   nothing physically.

@@ -90,6 +90,13 @@ Largest system that ran standalone (float64, atoms), and the float32 / float64 t
 
 ## Caveats
 
+- **The linear ACE models are larger than the PACE models they sit beside.**
+  Plot labels and the "Model basis sizes" table give basis functions per
+  central element. Linear ACE is 2–3× the PACE size on SiGe and 7–14× on
+  Cantor, because the size ladder counted linear ACE functions as n_B / NZ,
+  but every B function carries its own weight for each central element. So
+  ACE-vs-PACE throughput differences mostly reflect basis size, not the code
+  path. Matching the ladder is a follow-up.
 - **Random weights.** The ace-jax and PACE models carry random coefficients
   where no fitted model exists. They are timing-only; their energies mean
   nothing physically.
@@ -123,7 +130,7 @@ Before/after figures pending (ace-jax rows being re-run): moriarty-cpu, moriarty
 
 ![scaling_throughput_float64_medium](figs/scaling_throughput_float64_medium.png)
 
-*Throughput vs system size (float64, medium models): solid = standalone, dashed = LAMMPS.*
+*Throughput vs system size (float64, medium models): solid = standalone, dashed = LAMMPS. “fn”: basis functions per central element (linear ACE is 2–14× the PACE size).*
 
 ![scaling_throughput_float32_medium](figs/scaling_throughput_float32_medium.png)
 
@@ -131,7 +138,7 @@ Before/after figures pending (ace-jax rows being re-run): moriarty-cpu, moriarty
 
 ![scaling_model_size_float64](figs/scaling_model_size_float64.png)
 
-*Throughput vs model size at exactly 8,192 atoms on GPU and 2,048 on CPU; a line is absent at a size that did not fit.*
+*Throughput vs model size at exactly 8,192 atoms on GPU and 2,048 on CPU; a line is absent at a size that did not fit. Ticks give basis functions per central element.*
 
 ![scaling_memory_float64_medium](figs/scaling_memory_float64_medium.png)
 
@@ -143,7 +150,18 @@ Before/after figures pending (ace-jax rows being re-run): moriarty-cpu, moriarty
 
 ![scaling_before_after_float64_medium_modal-a100](figs/scaling_before_after_float64_medium_modal-a100.png)
 
-*ace-jax throughput before (dashed) and after (solid) the speed-ups, float64, medium models; ML-PACE in LAMMPS for reference. Before rows: `bench/scaling/results/before-perf/`.*
+*ace-jax throughput before (dashed) and after (solid) the speed-ups, float64, medium models; ML-PACE in LAMMPS for reference. Before rows: `bench/scaling/results/before-perf/`. “fn”: basis functions per central element.*
+
+## Model basis sizes
+
+| system | size | PACE | linear ACE | ACE / PACE |
+|---|---|--:|--:|--:|
+| Cantor | small | 96 | 1348 | 14.0× |
+| Cantor | medium | 496 | 3824 | 7.7× |
+| Cantor | large | 1998 | 13930 | 7.0× |
+| SiGe | small | 100 | 308 | 3.1× |
+| SiGe | medium | 499 | 1434 | 2.9× |
+| SiGe | large | 1684 | 3727 | 2.2× |
 
 ## Largest system that fits (medium, float64)
 

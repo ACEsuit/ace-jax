@@ -748,3 +748,27 @@ def test_perf_results_tables_mark_pending_hosts():
     assert "| end to end (scaling suite, standalone) | ≥ 1.10M atom-steps/s | 400k | 1.20M | **met** |" in crit
     assert "| LAMMPS throughput | ≥ 1.00M atom-steps/s | 400k | 1.20M | **met** |" in crit
     assert "| LAMMPS runs at 32,768 atoms | runs | did not run | did not run | **missed** |" in crit
+
+
+def test_basis_size_counts_functions_per_central_element():
+    """PACE: .yace functions per element; linear ACE: rows of WB, since every
+    B function carries its own weight per central element (WB is n_B x NZ).
+    Dividing n_B by NZ undercounted the Cantor ACE models 5x."""
+    from scaling.models import ace_functions_per_element, pace_functions_per_element
+    fix = pathlib.Path(__file__).parent.parent / "fixtures"
+    y = fix / "pace" / "gesi_sbessel.yace"
+    import re
+    block = y.read_text().split("\nfunctions:\n", 1)[1]
+    per_el = [part.count("\n    - ") + part.startswith("    - ")
+              for part in re.split(r"^  \d+:\n", block, flags=re.M)[1:]]
+    assert len(per_el) == 2 and pace_functions_per_element(y) == max(per_el)
+    z = fix / "sige_nofit.npz"
+    assert ace_functions_per_element(z) == np.load(z)["WB"].shape[0]
+
+
+def test_end_labels_carry_basis_size(monkeypatch):
+    from scaling import plot
+    monkeypatch.setattr(plot, "BASIS", {"Cantor/medium": {"acejax-ace": 3824, "acejax-pace": 496}})
+    assert plot._label("acejax-ace", "Cantor", "medium") == "ace-jax ACE · 3824 fn"
+    assert plot._label("acejax-pace", "Cantor", "medium") == "ace-jax PACE · 496 fn"
+    assert plot._label("mace", "Cantor", "medium") == "MACE"      # no size known: plain

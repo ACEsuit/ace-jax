@@ -33,6 +33,24 @@ CODES = {
 }
 SHORT = {"acejax-pace": "ace-jax PACE", "acejax-ace": "ace-jax ACE", "mlpace": "ML-PACE",
          "mace": "MACE"}          # direct end-of-line labels: distinct, short
+
+
+def _load_basis(path=pathlib.Path(__file__).with_name("model_sizes.json")):
+    """Basis functions per central element, by "<system>/<size>" and code
+    (`models.py sizes` writes it); empty when absent."""
+    try:
+        return json.loads(path.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+BASIS = _load_basis()
+
+
+def _label(code, system, size):
+    """End-of-line label, with the model's basis size where known."""
+    n = BASIS.get(f"{system}/{size}", {}).get(code)
+    return SHORT[code] + (f" · {n} fn" if n else "")
 INK, INK2, MUTED = "#0b0b0b", "#52514e", "#898781"
 GRID, AXIS, SURFACE = "#e1e0d9", "#c3c2b7", "#fcfcfb"
 SIZES = ("small", "medium", "large", "mh1")
@@ -179,7 +197,7 @@ def fig_throughput(rows, out, dtype="float64", size="medium"):
                     ax.plot(x, y, marker="o", ms=5, color=CODES[code][1], zorder=3,
                             mfc="none" if lay == "sparse" else CODES[code][1])
                 if mode == "standalone" or code == "mlpace":
-                    _end_label(ax, xs[-1], ys[-1], SHORT[code])
+                    _end_label(ax, xs[-1], ys[-1], _label(code, system, size))
             _xatoms(ax)
             _ylog(ax)
             ax.set_title(f"{system} · {host}", fontsize=9, color=INK)
@@ -188,7 +206,7 @@ def fig_throughput(rows, out, dtype="float64", size="medium"):
             if j == 0:
                 ax.set_ylabel("atom-steps / s", fontsize=8, color=INK2)
     _legend(fig, [c for c in CODES if any(r["code"] == c for r in ok)])
-    fig.tight_layout(rect=(0, 0, 0.94, 1), w_pad=3.0)
+    fig.tight_layout(rect=(0, 0, 0.94, 1), w_pad=7.0)
     _place_labels(fig)
     p = out / f"scaling_throughput_{dtype}_{size}.png"
     fig.savefig(p, dpi=160, bbox_inches="tight")     # keeps the figure legend
@@ -206,6 +224,14 @@ def _at_fixed_n(rows, host, n_target):
         if k not in best or abs(r["n_atoms"] - n_target) < abs(best[k]["n_atoms"] - n_target):
             best[k] = r
     return best
+
+
+def _size_tick(system, size):
+    """Model-size tick: the size name, then the basis functions per central
+    element of the PACE and linear ACE models where known."""
+    b = BASIS.get(f"{system}/{size}", {})
+    fn = [f"{k} {b[c]}" for c, k in (("acejax-pace", "PACE"), ("acejax-ace", "ACE")) if c in b]
+    return "\n".join([size, *fn])
 
 
 def fig_model_size(rows, out, dtype="float64"):
@@ -231,7 +257,8 @@ def fig_model_size(rows, out, dtype="float64"):
                     if pts:
                         ax.plot(*zip(*pts), color=CODES[code][1], ls=ls, lw=1.6, marker="o", ms=5)
             _ylog(ax)
-            ax.set_xticks(range(len(SIZES)), SIZES)
+            ax.set_xticks(range(len(SIZES)), [_size_tick(system, s) for s in SIZES],
+                          fontsize=7)
             ax.set_title(f"{system} · {host} · N≈{n_target}", fontsize=9, color=INK)
             if j == 0:
                 ax.set_ylabel("atom-steps / s", fontsize=8, color=INK2)
@@ -272,7 +299,7 @@ def fig_memory(rows, out, dtype="float64", size="medium"):
                     for x, y, _, lay in good:
                         ax.plot(x, y, marker="o", ms=5, color=CODES[code][1],
                                 mfc="none" if lay == "sparse" else CODES[code][1])
-                    _end_label(ax, good[-1][0], good[-1][1], SHORT[code])
+                    _end_label(ax, good[-1][0], good[-1][1], _label(code, system, size))
                 for x, _, st, _ in pts:
                     if st == "oom":                        # the size that did not fit
                         ax.axvline(x, color=CODES[code][1], ls=":", lw=1)
@@ -284,7 +311,7 @@ def fig_memory(rows, out, dtype="float64", size="medium"):
             if j == 0:
                 ax.set_ylabel("peak memory (GB)", fontsize=8, color=INK2)
     _legend(fig, [c for c in CODES if c in drawn], modes=False)
-    fig.tight_layout(rect=(0, 0, 0.94, 1), w_pad=3.0)
+    fig.tight_layout(rect=(0, 0, 0.94, 1), w_pad=7.0)
     _place_labels(fig)
     p = out / f"scaling_memory_{dtype}_{size}.png"
     fig.savefig(p, dpi=160, bbox_inches="tight")     # keeps the figure legend
@@ -397,7 +424,7 @@ def fig_before_after(after, before, out, host, dtype="float64", size="medium"):
                     ax.plot(x, y, marker="o", ms=4 if phase == "before" else 5, color=c, zorder=3,
                             mfc="none" if lay == "sparse" else c)
                 if phase != "before":
-                    _end_label(ax, xs[-1], ys[-1], SHORT[code])
+                    _end_label(ax, xs[-1], ys[-1], _label(code, system, size))
             _xatoms(ax)
             _ylog(ax)
             ax.set_title(f"{system} · ace-jax {mode} · {host}", fontsize=9, color=INK)
@@ -416,7 +443,7 @@ def fig_before_after(after, before, out, host, dtype="float64", size="medium"):
     fig.legend(handles=handles, loc="lower center", bbox_to_anchor=(0.5, 1.0),
                ncol=max(2, min(len(handles), int(fig.get_figwidth() // 2))), frameon=False,
                fontsize=8, labelcolor=INK2)
-    fig.tight_layout(rect=(0, 0, 0.94, 1), w_pad=3.0)
+    fig.tight_layout(rect=(0, 0, 0.94, 1), w_pad=7.0)
     _place_labels(fig)
     p = out / f"scaling_before_after_{dtype}_{size}_{host}.png"
     fig.savefig(p, dpi=160, bbox_inches="tight")     # keeps the figure legend
@@ -595,13 +622,16 @@ def parity_table(rows):
 CAPTIONS = {
     "scaling_before_after": "ace-jax throughput before (dashed) and after (solid) the "
                             "speed-ups, float64, medium models; ML-PACE in LAMMPS for "
-                            "reference. Before rows: `bench/scaling/results/before-perf/`.",
+                            "reference. Before rows: `bench/scaling/results/before-perf/`. "
+                            "“fn”: basis functions per central element.",
     "scaling_throughput_float64": "Throughput vs system size (float64, medium models): "
-                                  "solid = standalone, dashed = LAMMPS.",
+                                  "solid = standalone, dashed = LAMMPS. “fn”: basis functions per "
+                                  "central element (linear ACE is 2–14× the PACE size).",
     "scaling_throughput_float32": "The same in float32. ML-PACE and Symmetrix (MACE in "
                                   "LAMMPS) evaluate in double, so they are absent.",
     "scaling_model_size": "Throughput vs model size at exactly 8,192 atoms on GPU and "
-                          "2,048 on CPU; a line is absent at a size that did not fit.",
+                          "2,048 on CPU; a line is absent at a size that did not fit. Ticks give "
+                          "basis functions per central element.",
     "scaling_memory": "Peak device memory vs system size (standalone); dotted verticals "
                       "mark the first size that did not fit.",
     "scaling_precision": "float32 / float64 throughput ratio (standalone).",
@@ -623,6 +653,18 @@ def make_figures(pattern, outdir):
     return [str(f) for f in figs if f]
 
 
+def basis_table():
+    """Basis functions per central element, PACE (ace-jax and ML-PACE run the
+    same .yace) against linear ACE, with their ratio."""
+    lines = ["| system | size | PACE | linear ACE | ACE / PACE |", "|---|---|--:|--:|--:|"]
+    for key in sorted(BASIS, key=lambda k: (k.split("/")[0], SIZES.index(k.split("/")[1]))):
+        b = BASIS[key]
+        p, a = b.get("acejax-pace"), b.get("acejax-ace")
+        ratio = f"{a / p:.1f}×" if p and a else "-"
+        lines.append(f"| {key.split('/')[0]} | {key.split('/')[1]} | {p or '-'} | {a or '-'} | {ratio} |")
+    return "\n".join(lines) if BASIS else "(model_sizes.json absent)"
+
+
 def write_doc(pattern, figs, doc="docs/benchmarks.md"):
     rows = load(pattern)
     versions = {}
@@ -642,7 +684,8 @@ def write_doc(pattern, figs, doc="docs/benchmarks.md"):
         rel = (pathlib.Path(f).relative_to(pathlib.Path(doc).parent)
                if pathlib.Path(f).is_relative_to(pathlib.Path(doc).parent) else f)
         body += [f"![{stem}]({rel})", "", f"*{_caption(stem)}*", ""]
-    body += ["## Largest system that fits (medium, float64)", "", largest_fits(rows), "",
+    body += ["## Model basis sizes", "", basis_table(), "",
+             "## Largest system that fits (medium, float64)", "", largest_fits(rows), "",
              "## Tables", "", tables(rows), "", "## Versions", ""]
     body += [f"- **{h}**: " + ", ".join(f"{k} {v}" for k, v in sorted(v.items())) for h, v in sorted(versions.items())]
     pathlib.Path(doc).write_text("\n".join(body) + "\n")
