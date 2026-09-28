@@ -55,19 +55,17 @@ def parse_hlo(dump_dir, kernel_names):
     if best is None:
         return {}, None
     path, txt = best
-    comps, cur, entry = {}, None, None
+    comps, cur = {}, None
     for line in txt.splitlines():
         m = re.match(r"^(ENTRY\s+)?%?([\w.\-]+)\s.*\{\s*$", line)
         if m and not line.startswith(" "):
             cur = m.group(2)
             comps[cur] = []
-            if m.group(1):
-                entry = cur
             continue
         if cur is not None and line.strip() and line.strip() != "}":
             comps[cur].append(line)
     shapes = {}
-    for c, lines in comps.items():
+    for lines in comps.values():
         for ln in lines:
             m = _INSTR.match(ln)
             if m:
@@ -75,7 +73,7 @@ def parse_hlo(dump_dir, kernel_names):
                 shapes[m.group(1)] = rhs.split(" ", 1)[0] if not rhs.startswith("(") else \
                     rhs[:rhs.index(")") + 1]
     info = {}
-    for c, lines in comps.items():
+    for lines in comps.values():
         for ln in lines:
             m = _INSTR.match(ln)
             if not m:

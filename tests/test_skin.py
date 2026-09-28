@@ -51,7 +51,7 @@ def test_skin_matches_rebuild_along_a_trajectory(kind):
     at = _cell(kind)
     fresh, reuse = ACECalculator(M, layout="dense", skin=0.0), ACECalculator(M, layout="dense", skin=1.0)
     rng = np.random.default_rng(1)
-    for step in range(12):
+    for _ in range(12):
         at.positions += rng.normal(0, 0.03, at.positions.shape)     # ~0.4 A over the run
         E0, F0, S0 = _efs(fresh, at)
         E1, F1, S1 = _efs(reuse, at)
@@ -184,7 +184,7 @@ def test_float32_skin_matches_rebuild():
     for _ in range(3):
         at.positions += np.random.default_rng(6).normal(0, 0.02, at.positions.shape)
         got, want, E64 = _efs(c, at), _efs(ref, at), _efs(exact, at)
-        err = lambda r: np.max(np.abs(r[1] - E64[1]))                          # noqa: E731
+        err = lambda r: np.max(np.abs(r[1] - E64[1]))  # noqa: E731, B023 (used this iteration)
         assert abs(got[0] - E64[0]) < 1e-5 * abs(E64[0])
         assert err(got) <= max(2 * err(want), 1e-4)
     assert c.last_timing["rebuilds"] == 1

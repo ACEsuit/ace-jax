@@ -35,7 +35,10 @@ SHORT = {"acejax-pace": "ace-jax PACE", "acejax-ace": "ace-jax ACE", "mlpace": "
          "mace": "MACE"}          # direct end-of-line labels: distinct, short
 
 
-def _load_basis(path=pathlib.Path(__file__).with_name("model_sizes.json")):
+BASIS_JSON = pathlib.Path(__file__).with_name("model_sizes.json")
+
+
+def _load_basis(path=BASIS_JSON):
     """Basis functions per central element, by "<system>/<size>" and code
     (`models.py sizes` writes it); empty when absent."""
     try:

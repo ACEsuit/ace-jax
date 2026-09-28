@@ -110,7 +110,6 @@ def acejax_remote(cases: list):
 def _mlpace(model, system, n, steps=100, warmup=20, ktimer=True, style="product",
             extra_pk=""):
     import glob
-    import os
     import tempfile
     sys.path.insert(0, "/ace-jax/bench")
     from ase.io import write

@@ -27,7 +27,6 @@ from ace_jax.eval.nlist import dense_graph, have_matscipy_neighbours, sparse_gra
 
 def _step(model, x, idx_s, shift_s, live_s, node_z, rc, K):
     """Skin list -> compacted (n, K) dense graph -> E, F, V; plus overflow flag."""
-    n = x.shape[0]
     rij_s = x[idx_s] - x[:, None, :] + shift_s
     r2 = jnp.sum(rij_s * rij_s, axis=-1)
     valid = live_s & (r2 < rc * rc)

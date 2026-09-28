@@ -42,7 +42,7 @@ def main():
     from ace_jax.eval import load
     from ace_jax.export.lammps import export_lammps
     from scaling.models import ELEMENTS
-    from scaling.run_lammps import _run_lammps, capacity, read_pe
+    from scaling.run_lammps import capacity, read_pe
     from scaling.structures import supercell
 
     kind, system, size = a.model.split("_")

@@ -14,6 +14,7 @@ afterwards, so the per-edge R_nl is never formed; A comes out feature-major
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import numpy as np
 
 from .harmonics import real_spherical_harmonics
 from .edge_model import EdgeSiteModel, check_edge_a_kind, with_edge_a_kind

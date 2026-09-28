@@ -167,7 +167,7 @@ def kernel_stages(path):
         return st
 
     out = {}
-    for c, lines in comps.items():
+    for lines in comps.values():
         for ln in lines:
             m = re.match(r"^\s*(?:ROOT\s+)?%?([\w.\-]+)\s*=", ln)
             if not m:
@@ -358,7 +358,7 @@ def stages(model, rij, zi, zj, idx, mask, node_z, reps):
                          "AA": list(AA.shape), "Apair": list(Apair.shape)}
     tot = sum(v["fwd_vjp_s"] or v["fwd_s"] for k, v in out.items() if k != "shapes")
     out["sum_s"] = tot
-    for k, v in out.items():
+    for v in out.values():
         if isinstance(v, dict) and "fwd_s" in v:
             v["frac_of_sum"] = (v["fwd_vjp_s"] or v["fwd_s"]) / tot
     return out

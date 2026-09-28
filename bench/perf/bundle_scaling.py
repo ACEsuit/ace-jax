@@ -197,9 +197,9 @@ def parse_variant(v):
     """"base[@chunk][!]": chunk rows per lax.map block (none: unchunked), "!" no
     checkpoint.  Legacy names: chunked = stock@CHUNK, chunked_nockpt = stock@CHUNK!,
     filter_tight_chunked = filter_tight@CHUNK, model_fb_chunked = model_fb@CHUNK."""
-    legacy = {"chunked": "stock@%d" % CHUNK, "chunked_nockpt": "stock@%d!" % CHUNK,
-              "filter_tight_chunked": "filter_tight@%d" % CHUNK,
-              "model_fb_chunked": "model_fb@%d" % CHUNK}
+    legacy = {"chunked": f"stock@{CHUNK}", "chunked_nockpt": f"stock@{CHUNK}!",
+              "filter_tight_chunked": f"filter_tight@{CHUNK}",
+              "model_fb_chunked": f"model_fb@{CHUNK}"}
     v = legacy.get(v, v)
     ckpt = not v.endswith("!")
     v = v.rstrip("!")
@@ -361,7 +361,7 @@ def run(model_name, n, variants, order="interleaved", dtype="float64", skin=1.0,
             else:
                 pk = dict(pad_cutoff=model.pad_cutoff(), n_species=ns, k_dense=k_dense,
                           n_rows=n_rows, type_map=type_map)
-                packer = lambda p, sp, s, r, m: dense_pack(p, sp, Graph(s, r, m), **pk)[:5]
+                packer = lambda p, sp, s, r, m: dense_pack(p, sp, Graph(s, r, m), **pk)[:5]  # noqa: B023 (used this iteration)
                 pargs = (args[0], args[1], args[4], args[5], args[6])
                 if base_v == "pack":
                     fn, fargs = packer, pargs
@@ -372,7 +372,7 @@ def run(model_name, n, variants, order="interleaved", dtype="float64", skin=1.0,
 
                     def fn(rd, zi, zj, md, zr, chunk=chunk or 10 ** 9):
                         return jax.value_and_grad(lambda x: jnp.sum(chunked_rows(
-                            model, x, zi, zj, md, zr, chunk, ckpt)))(rd)
+                            model, x, zi, zj, md, zr, chunk, ckpt)))(rd)  # noqa: B023 (used this iteration)
                     fargs = packed
                 c, cs, mem = _compile(fn, fargs)
                 med, mn, reps, _ = _time(c, fargs, budget_s)

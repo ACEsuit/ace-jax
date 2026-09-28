@@ -49,7 +49,7 @@ def main(path):
             t[0].split("_")[1]), t[2], t[1])):
         d = by[key]
         ml = d.get("mlpace")
-        g = lambda x: f"{ml / x:.1f}x" if (ml and x) else "-"
+        g = lambda x: f"{ml / x:.1f}x" if (ml and x) else "-"  # noqa: B023 (used this iteration)
         print(f"| {key[0]} | {key[1]} | {key[2][-2:]} | {k(ml)} | {k(d.get('ase_e2e')) if d.get('ase_e2e') else d.get('ase_status') or '-'} "
               f"| {k(d.get('ase_model'))} | {g(d.get('ase_e2e'))} | {g(d.get('ase_model'))} "
               f"| {k(d.get('skin')) if d.get('skin') else d.get('skin_status') or '-'} "

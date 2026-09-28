@@ -11,7 +11,6 @@ A host whose ace-jax rows are still being re-run is listed as pending.
 import json
 import pathlib
 import sys
-from collections import defaultdict
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 from scaling.plot import (ACEJAX, CODES, MODES, before_after_hosts, before_pattern, load,  # noqa: E402
@@ -41,8 +40,8 @@ def summary_table(after, before, host):
     """before / after at the host's target N (float64), per system, size, code
     and mode, with ML-PACE in LAMMPS and each line's largest N."""
     n0 = target_n(host)
-    out = [f"| system | size | code | mode | before | after | speed-up | ML-PACE in LAMMPS "
-           f"| largest N before | largest N after |", "|---|---|---|---|---|---|---|---|---|---|"]
+    out = ["| system | size | code | mode | before | after | speed-up | ML-PACE in LAMMPS "
+           "| largest N before | largest N after |", "|---|---|---|---|---|---|---|---|---|---|"]
     for system in SYSTEMS:
         for size in SIZES:
             ml, _ = _ok(after, host, system, size, "mlpace", "lammps")
