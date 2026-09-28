@@ -74,8 +74,11 @@ class ACECalculator(Calculator):
         the sparse layout.
 
         `posterior` (a `posterior.npz` from `fit --uq ard`, with `model` the matching
-        `model.npz` FILE) adds `results["forces_std"]`: the tempered ARD per-atom force
-        std kappa * sqrt(sum_c phi_c A^-1 phi_c^T), shape (N,).  By default it is computed only
+        `model.npz` FILE) adds `results["forces_std"]`: the per-atom force std, shape (N,).
+        By default (posteriors fitted with `--ard-variance sandwich`) it is lambda times the
+        configuration-clustered sandwich std, lambda * sqrt(sum_c phi_c A^-1 M A^-1 phi_c^T);
+        for `--ard-variance kappa` or a schema-1 posterior.npz it is the tempered epistemic
+        std, kappa * sqrt(sum_c phi_c A^-1 phi_c^T).  By default it is computed only
         when requested (`calc.get_property("forces_std", atoms)`, which reuses the cached
         E/F/stress): a design-row rebuild plus an L^2 solve per step is not a silent MD cost.
         `forces_std_every_call=True` adds it to every calculation.  posterior= requires

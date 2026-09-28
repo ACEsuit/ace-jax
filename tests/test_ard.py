@@ -515,6 +515,7 @@ def test_ard_stage_sandwich_variance_and_lam_rule(monkeypatch):
         pred1 = ard.predict_ard(res.posterior._replace(lam=1.0), b.prob, d.ds_test)
     post, rep = res.posterior, res.report
     assert post.Q is not None and post.Q.shape == (b.prob.cfg.len_basis, len(d.train))
+    assert isinstance(post.Q, jax.Array)          # stage keeps Q on-device: no per-batch host->device copy
     assert rep["variance"] == "sandwich" and rep["n_clusters"] == len(d.train)
     assert len(calls) == 3 and np.array_equal(calls[2][0], calls[0][0])       # kappa_sub, kappa, lam: same e2
     assert post.lam == orig(*calls[2]) == rep["lam"] and abs(rep["val_rms_z_sandwich"] - 1.0) < 1e-6

@@ -416,7 +416,10 @@ def run_ard_stage(cfg, data, built, theta, log=print, full_stats=None):
         # configuration-clustered sandwich (spec addendum): scores of the full refit's own training
         # residuals, one cluster per training config; Q = S^-1 G~ is set before the held-out pass
         G = sandwich_scores(post, prob, data.ds_train, ev.sigmas(h))
-        post = post._replace(Q=sandwich_factor(post, G))
+        # kept on-device (float64): misspec_var_rows/predict_ard/_val_errors call jnp.asarray(self.Q, ...)
+        # once per batch, and jnp.asarray of an existing float64 device array is a no-op -- as numpy it
+        # would re-upload the full (L, n_cfg) factor (0.44 GB at production size) on every one of those calls.
+        post = post._replace(Q=jnp.asarray(sandwich_factor(post, G), jnp.float64))
         n_clusters = int(G.shape[1])
         del G
     # kappa for the SERVED (full-refit) posterior: the held-out errors stay the subset model's (honest),
