@@ -591,7 +591,7 @@ def _jsonable(x):
     return x
 
 
-def save_result(out_dir, W, info, *, src_npz=None, model=None, readout=None):
+def save_result(out_dir, W, info, *, src_npz=None, model=None, readout=None, eta=None, mask=None):
     """Write rnl_Wnlq.npy and radial_info.json to out_dir.  With src_npz and
     model (the analytic model W belongs to, e.g. after widen_radial /
     to_analytic) also write model.npz = src_npz with the learned radial AND
@@ -599,7 +599,11 @@ def save_result(out_dir, W, info, *, src_npz=None, model=None, readout=None):
     by fit_radial; also saved as readout.npy).  The source npz's WB/Wpair
     belong to the old radials, so writing model.npz without a readout is
     refused rather than silently stale.  info["readout"] is kept out of the
-    JSON (it is len_basis long)."""
+    JSON (it is len_basis long).
+
+    `eta`/`mask`: the frozen density of a fit_radial_density selection; then
+    the readout is [c | d] (len_basis + P * NZ), eta is also saved as
+    eta.npy, and model.npz carries the fs keys (eval.fs_model)."""
     if readout is None:
         readout = info.get("readout")
     if src_npz is not None:
@@ -615,6 +619,16 @@ def save_result(out_dir, W, info, *, src_npz=None, model=None, readout=None):
         json.dumps(_jsonable({k: v for k, v in info.items() if k != "readout"}), indent=1))
     if readout is not None:
         np.save(out / "readout.npy", np.asarray(readout))
+    if eta is not None:
+        np.save(out / "eta.npy", np.asarray(eta))
     if src_npz is not None:
         from ..construct.export import patch_radial_npz
-        patch_radial_npz(src_npz, out / "model.npz", with_radial(model, W), readout=readout)
+        fs = None
+        if eta is not None:
+            from .density import EPS
+            eta = np.asarray(eta)
+            k = eta.shape[0] * eta.shape[1]
+            readout = np.asarray(readout)
+            fs = (eta, readout[-k:].reshape(eta.shape[0], eta.shape[1]), np.asarray(mask), EPS)
+            readout = readout[:-k]
+        patch_radial_npz(src_npz, out / "model.npz", with_radial(model, W), readout=readout, fs=fs)

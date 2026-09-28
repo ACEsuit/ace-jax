@@ -27,11 +27,13 @@ import numpy as np
 from .data import flat_edges
 from .density import compact_gamma, density_gamma, linear_density_statistics
 from .hypers import from_array, to_array
-from .radial_learn import (lbfgs_loop, projected_residual_from_stats, relative_lambda, relative_lambda_gap,
-                           relative_lambda_spec, require_linear, require_x64, theta_map_linear)
+from .radial_learn import (gate, holdout_score, lbfgs_loop, learn_radial, projected_residual_from_stats,
+                           relative_lambda, relative_lambda_gap, relative_lambda_spec, require_linear,
+                           require_x64, theta_map_linear)
 from .radial_model import (data_r_range, gap_penalty, normalise, radial_gram, require_analytic, roughness,
                            roughness_matrix, row_active, spectral_penalty, spectral_weights, uniform_gram,
                            with_radial)
+from .stats import linear_statistics
 
 MODES = ("joint", "alternating")
 
@@ -231,3 +233,82 @@ def learn_radial_density(prob, ds, W0, *, mask, P=1, H0=None, mode="joint", thet
     info["steps"] = done
     info["theta_final"] = np.asarray(a)
     return V, H, info
+
+
+def fit_radial_density(prob, ds_fit, ds_val, W0, *, mask, P=1, mode="joint", lam_eta_grid=(0.0,),
+                       lam_rough=0.0, lam_spec=0.0, lam_gap=0.0, theta0=None, map_steps=300, log=None,
+                       checkpoint=None, **learn_kw):
+    """Held-out gate over {init, radials_only, density_lam_eta=<l> per l}: the
+    radials alone (radial_learn.learn_radial) and the joint radials + density
+    (learn_radial_density) from the same start and step budget, each candidate
+    scored by radial_learn.fit_radial's one procedure (theta re-MAP on ds_fit
+    warm-started at a0, posterior-mean readout, sigma-normalised SSE on ds_val
+    with sigma from a0) on its own design width -- so density is kept only when
+    it wins on held-out data; ties go to the earlier, simpler candidate.
+    Returns (W, eta or None, info); info["readout"] is the selected readout,
+    [c | d] (len_basis + P * NZ) for a density candidate."""
+    require_x64()
+    require_analytic(prob.model)
+    require_linear(prob)
+    if learn_kw.pop("learn_sigma_e_mult", 1.0) != 1.0:
+        raise ValueError("fit_radial_density: learn_sigma_e_mult is not supported with a density")
+    cfg = prob.cfg
+    mask = jnp.asarray(mask, jnp.float64)
+    W0 = jnp.asarray(W0, jnp.float64)
+    n_prior = learn_kw.pop("n_prior", None)
+    Q = radial_gram(prob.model, ds_fit) if n_prior is None else radial_gram(prob.model, ds_fit, n_prior=n_prior)
+    D2 = roughness_matrix(prob.model)
+    U = None
+    if lam_gap:
+        r_min, _ = data_r_range(ds_fit)
+        U = uniform_gram(prob.model, 0.8 * r_min, cfg.rcut)
+    W_init = normalise(W0, Q, row_active(W0))
+    if theta0 is not None:
+        a0 = to_array(theta0)
+        lin0 = linear_statistics(with_radial(prob.model, W_init), cfg, ds_fit)
+    else:
+        a0, lin0, _ = theta_map_linear(prob, ds_fit, W_init, steps=map_steps, return_stats=True)
+    r0 = float(projected_residual_from_stats(from_array(a0), lin0, prob.gamma))
+    S = rho_gram(prob.model, W_init, mask, cfg, ds_fit)
+    prob_w = prob._replace(gamma=density_gamma(prob.gamma, P, cfg.NZ))
+    cands, runs = {"init": (W_init, None)}, {}
+    kw = dict(lam_rough=lam_rough, lam_spec=lam_spec, lam_gap=lam_gap, map_steps=map_steps, log=log,
+              Q=Q, D2=D2, U=U, **learn_kw)
+    W_r, info_r = learn_radial(prob, ds_fit, W0, theta0=from_array(a0), r0=r0, **kw)
+    cands["radials_only"], runs["radials_only"] = (W_r, None), info_r
+    if checkpoint is not None:
+        checkpoint("radials_only", W_r, None, info_r)
+    for l in lam_eta_grid:
+        key = f"density_lam_eta={float(l):g}"
+        if log is not None:
+            log(f"fit_radial_density: {key} starting")
+        W, eta, info = learn_radial_density(prob, ds_fit, W0, mask=mask, P=P, mode=mode, theta0=from_array(a0),
+                                            lam_eta=l, S=S, **kw)
+        cands[key], runs[key] = (W, eta), info
+        if checkpoint is not None:
+            checkpoint(key, W, eta, info)
+    theta_fit, map_diag, readouts = {}, {}, {}
+
+    def score(label, cand):
+        W, eta = cand
+        pw = prob if eta is None else prob_w
+        st = ((lambda d: linear_statistics(with_radial(prob.model, W), cfg, d)) if eta is None else
+              (lambda d: linear_density_statistics(with_radial(prob.model, W), eta, mask, cfg, d)))
+        lin_fit = st(ds_fit)
+        a_fit, _, diag = theta_map_linear(pw, ds_fit, None, steps=map_steps, init=a0, return_stats=True,
+                                          lin=lin_fit)
+        s, c = holdout_score(None, a_fit, a0, pw, ds_fit, ds_val, lin_fit=lin_fit, lin_val=st(ds_val),
+                             return_readout=True)
+        theta_fit[label], map_diag[label], readouts[label] = np.asarray(a_fit), diag, np.asarray(c)
+        if log is not None:
+            log(f"fit_radial_density: gate {label} score={s:.6e}")
+        return s
+
+    label, scores = gate(cands, score)
+    W_sel, eta_sel = cands[label]
+    if log is not None:
+        log(f"fit_radial_density: selected {label}")
+    return W_sel, eta_sel, {"selected": label, "scores": scores, "theta_fit": theta_fit, "map_diag": map_diag,
+                            "runs": runs, "theta_init": np.asarray(a0), "readout": readouts[label],
+                            "P": 0 if eta_sel is None else int(P), "mask": np.asarray(mask).tolist(),
+                            "mode": mode}

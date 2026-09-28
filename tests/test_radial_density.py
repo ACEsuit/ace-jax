@@ -379,3 +379,77 @@ def test_learn_radial_density_rejects_bad_options(small):
         learn_radial_density(prob, ds, prob.model.rnl_Wnlq, mask=mask, P=0, theta0=THETA, steps=1)
     with pytest.raises(ValueError, match="lam_eta"):
         learn_radial_density(prob, ds, prob.model.rnl_Wnlq, mask=mask, lam_eta=-1.0, theta0=THETA, steps=1)
+
+
+def test_fit_radial_density_gate_prefers_density_on_density_data():
+    from ace_jax.fit.radial_density import fit_radial_density
+    prob, ds_fit, _ = make_problem(ncfg=12, per_batch=3, start=0)
+    _, ds_val, _ = make_problem(ncfg=12, per_batch=3, start=12)
+    Wt, eta_t, mask, c = _density_truth(prob, ds_fit)
+    ds_fit, ds_val = _relabel_rd(prob, ds_fit, Wt, eta_t, mask, c), _relabel_rd(prob, ds_val, Wt, eta_t, mask, c)
+    W, eta, info = fit_radial_density(prob, ds_fit, ds_val, prob.model.rnl_Wnlq, mask=mask, P=1,
+                                      theta0=None, profile=False, steps=20, map_steps=50)
+    print(info["scores"])
+    assert info["selected"].startswith("density") and eta is not None and info["P"] == 1
+    assert info["readout"].shape == (prob.cfg.len_basis + prob.cfg.NZ,)
+    assert set(info["scores"]) == {"init", "radials_only", "density_lam_eta=0"}
+
+
+def test_fit_radial_density_gate_rejects_density_on_linear_data():
+    from test_gp_learn_radial import _perturbed_truth, relabel
+    from ace_jax.fit.density import density_mask
+    from ace_jax.fit.radial_density import fit_radial_density
+    prob, ds_fit, _ = make_problem(ncfg=12, per_batch=3, start=0)
+    _, ds_val, _ = make_problem(ncfg=12, per_batch=3, start=12)
+    Wt, W0, c = _perturbed_truth(prob)
+    ds_fit, ds_val = relabel(prob, ds_fit, Wt, c), relabel(prob, ds_val, Wt, c)
+    W, eta, info = fit_radial_density(prob, ds_fit, ds_val, W0, mask=density_mask(prob.cfg, "full"), P=1,
+                                      theta0=None, profile=False, steps=20, map_steps=50)
+    print(info["scores"])
+    assert info["selected"] in ("init", "radials_only") and eta is None and info["P"] == 0
+    assert info["readout"].shape == (prob.cfg.len_basis,)
+
+
+def test_saved_density_model_matches_widened_rows(tmp_path):
+    """model.npz from save_result(eta=...) evaluates to [linear | density] rows @ readout + E0."""
+    from ace_jax.eval import load
+    from ace_jax.eval.fs_model import FSModel
+    from ace_jax.fit.radial_density import fit_radial_density
+    from ace_jax.fit.radial_learn import save_result
+    from ace_jax.fit.radial_model import with_radial
+    prob, ds_fit, _ = make_problem(ncfg=12, per_batch=3, start=0)
+    _, ds_val, _ = make_problem(ncfg=12, per_batch=3, start=12)
+    Wt, eta_t, mask, c = _density_truth(prob, ds_fit)
+    ds_fit, ds_val = _relabel_rd(prob, ds_fit, Wt, eta_t, mask, c), _relabel_rd(prob, ds_val, Wt, eta_t, mask, c)
+    W, eta, info = fit_radial_density(prob, ds_fit, ds_val, prob.model.rnl_Wnlq, mask=mask, P=1,
+                                      theta0=None, profile=False, steps=5, map_steps=20)
+    assert eta is not None
+    save_result(tmp_path, W, info, src_npz=MODEL, model=prob.model, eta=eta, mask=mask)
+    back, meta, z = load(tmp_path / "model.npz")
+    assert isinstance(back, FSModel) and np.load(tmp_path / "eta.npy").shape == eta.shape
+    E0 = np.asarray(z["E0"]); m = with_radial(prob.model, W); cr = jnp.asarray(info["readout"])
+    worst = 0.0
+    for i in range(ds_val.n_batches):
+        b = jax.tree.map(lambda a: a[i], ds_val)
+        r = _widened_rows(m, prob.cfg, b, eta, mask)
+        C = b.y_E.shape[0]; Ncap, K = b.nbr.shape
+        zi = jnp.broadcast_to(b.node_z[:, None], (Ncap, K))
+        e = back.site_energies_dense(b.rij, zi, b.node_z[b.nbr], b.nbr_mask, b.node_z)
+        E_model = np.asarray(jax.ops.segment_sum(e, b.node_cfg, num_segments=C + 1)[:C])
+        E0sum = np.asarray(jax.ops.segment_sum(jnp.where(b.node_mask, jnp.asarray(E0)[b.node_z], 0.0),
+                                               b.node_cfg, num_segments=C + 1)[:C])
+        E_lin = np.asarray(r.E @ cr) + E0sum
+        worst = max(worst, float(np.max(np.abs(E_model - E_lin) / np.abs(E_lin))))
+    assert worst < 1e-8
+
+
+def test_fit_radial_density_checkpoints(tmp_path, small):
+    from ace_jax.fit.density import density_mask
+    from ace_jax.fit.radial_density import fit_radial_density
+    prob, ds_fit, _ = small
+    _, ds_val, _ = make_problem(ncfg=6, start=6)
+    seen = []
+    fit_radial_density(prob, ds_fit, ds_val, prob.model.rnl_Wnlq, mask=density_mask(prob.cfg, "pair"),
+                       P=1, lam_eta_grid=(0.0, 1e-2), theta0=THETA, profile=False, steps=2, map_steps=20,
+                       checkpoint=lambda k, W, eta, info: seen.append((k, eta is None)))
+    assert seen == [("radials_only", True), ("density_lam_eta=0", False), ("density_lam_eta=0.01", False)]
