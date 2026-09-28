@@ -248,12 +248,13 @@ def predict_ard(post, prob, ds, node_chunk=256):
     """Posterior predictive on a Dataset: means from the ARD mean; F_var tempered by kappa^2 (the
     calibrated quantity), E_var/V_var the untempered posterior variances."""
     from .predict import _pack
-    from .rows import linear_rows_chunked
+    from .rows import chunked_rows_fn
     L, k2 = prob.cfg.len_basis, post.kappa ** 2
+    rows_fn = chunked_rows_fn(prob.model, prob.cfg, node_chunk)
     outs = []
     for i in range(ds.n_batches):
         b = jax.tree.map(lambda a, i=i: a[i], ds)
-        r = linear_rows_chunked(prob.model, prob.cfg, b, node_chunk=node_chunk)
+        r = rows_fn(b)
         E, F, V = np.asarray(r.E), np.asarray(r.F).reshape(-1, L), np.asarray(r.V).reshape(-1, L)
         outs.append((E @ post.mean, post.var_rows(E), (F @ post.mean).reshape(-1, 3),
                      k2 * post.var_rows(F).reshape(-1, 3), (V @ post.mean).reshape(-1, 6),
@@ -268,14 +269,15 @@ class ARDResult(NamedTuple):
 
 def _val_errors(post, prob, ds):
     """Per-atom squared force error and untempered s2 on the live force rows of ds."""
-    from .rows import linear_rows_chunked
+    from .rows import chunked_rows_fn
     L, e2, s2 = prob.cfg.len_basis, [], []
+    rows_fn = chunked_rows_fn(prob.model, prob.cfg)
     for i in range(ds.n_batches):
         b = jax.tree.map(lambda a, i=i: a[i], ds)
         live = np.asarray(b.w_F) > 0
         if not live.any():
             continue
-        F = np.asarray(linear_rows_chunked(prob.model, prob.cfg, b).F)[live]          # (n, 3, L)
+        F = np.asarray(rows_fn(b).F)[live]                                             # (n, 3, L)
         pred = (F.reshape(-1, L) @ post.mean).reshape(-1, 3)
         e2.append(np.sum((np.asarray(b.y_F)[live] - pred) ** 2, 1))
         s2.append(post.var_rows(F.reshape(-1, L)).reshape(-1, 3).sum(1))

@@ -251,7 +251,7 @@ class ACECalculator(Calculator):
         import jax
 
         from ..fit.data import Config, build_dataset
-        from ..fit.rows import linear_rows_chunked
+        from ..fit.rows import chunked_rows_fn
         at = self.atoms
         c = Config(at.get_positions(), at.get_atomic_numbers(), at.get_cell().array, at.get_pbc(),
                    None, None, None, 1.0, 1.0, 1.0)
@@ -262,7 +262,9 @@ class ACECalculator(Calculator):
         # F stays on the device (one copy of the Ncap*3*L rows): sigma of every padded node (the
         # padding rows are zero), then the mask on the (Ncap,) result -- no host copies of F
         with highest_precision():
-            F = linear_rows_chunked(self._fit_model, self._fit_cfg, b).F
+            if getattr(self, "_rows_fn", None) is None:        # compiled once per cell shape (MD)
+                self._rows_fn = chunked_rows_fn(self._fit_model, self._fit_cfg)
+            F = self._rows_fn(b).F
             s = self.posterior.forces_std(F)
         return s[np.asarray(b.node_mask)]
 

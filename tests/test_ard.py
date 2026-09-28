@@ -355,3 +355,33 @@ def test_ard_stage_reuses_cached_full_statistics(monkeypatch):
     np.testing.assert_allclose(np.asarray(p_got.F_var), np.asarray(p_ref.F_var), rtol=1e-4)
     Fm = np.asarray(p_ref.F_mean)
     np.testing.assert_allclose(np.asarray(p_got.F_mean), Fm, rtol=0, atol=1e-4 * np.abs(Fm).max())
+
+
+def test_predict_ard_traces_the_chunked_rows_once(tiny_linear_problem, monkeypatch):
+    """predict_ard over a multi-batch Dataset traces linear_rows_chunked ONCE.  Called eagerly,
+    its fori_loop is retraced per batch with that batch's arrays baked in as constants: an XLA
+    compile per batch (hours at the Cantor basis: ~200 prediction batches)."""
+    from ace_jax.fit import rows
+    from ace_jax.fit.ard import ARDEvidence, ard_posterior, ard_statistics, body_order_columns, predict_ard
+    from ace_jax.fit.hypers import default_prior
+    prob, ds = tiny_linear_problem
+    assert ds.n_batches >= 2
+    theta = default_prior(2.35).mu
+    meta = {"nnll": [[None] * o for o in _orders(prob)], "n_B": prob.cfg.n_B, "n_pair": prob.cfg.n_pair,
+            "NZ": prob.cfg.NZ, "rcut": prob.cfg.rcut, "elements": [14]}
+    with highest_precision():
+        ev = ARDEvidence(ard_statistics(theta, prob, ds, "joint"), np.asarray(prob.gamma),
+                         body_order_columns(meta, prob.cfg))
+        post = ard_posterior(ev, ev.h0(theta), 2.0, meta)
+        ref = predict_ard(post, prob, ds)
+        n = {"traces": 0}
+        orig = rows.linear_rows_chunked
+
+        def counting(*a, **k):
+            n["traces"] += 1
+            return orig(*a, **k)
+
+        monkeypatch.setattr(rows, "linear_rows_chunked", counting)
+        got = predict_ard(post, prob, ds)
+    assert n["traces"] == 1
+    np.testing.assert_allclose(np.asarray(got.F_var), np.asarray(ref.F_var), rtol=1e-12)

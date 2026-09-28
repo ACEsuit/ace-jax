@@ -67,6 +67,14 @@ def linear_rows(model, cfg, batch):
     return Rows(E, F, V[:C]), X, J
 
 
+def chunked_rows_fn(model, cfg, node_chunk=256):
+    """`batch -> linear_rows_chunked(model, cfg, batch, node_chunk)`, jitted: compiled once per
+    batch shape and reused.  Called eagerly, linear_rows_chunked's fori_loop is retraced on every
+    call with that batch's arrays baked into the body as constants -- an XLA compile per batch.
+    Build this once per (model, cfg) and loop batches through it."""
+    return jax.jit(lambda b: linear_rows_chunked(model, cfg, b, node_chunk=node_chunk))
+
+
 def linear_rows_chunked(model, cfg, batch, node_chunk=256):
     """`linear_rows(model, cfg, batch)[0]` computed a chunk of centre nodes at a time.
 
