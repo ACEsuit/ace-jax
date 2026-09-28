@@ -66,3 +66,13 @@ def test_sequential_mode_runs(tmp_path):
     cfg = _cfg(ard_mode="sequential").validate()
     res = fit(cfg, load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz")), log=lambda *a: None)
     assert res.ard.report["mode"] == "sequential" and len(res.ard.report["h"]) == len(res.ard.report["groups"])
+
+
+def test_joint_ard_noise_comes_from_the_ard_refit(ard_fit):
+    """Joint mode fits its own sigma_q: pred noise_* must be exp(2 h_q) of the ARD refit, not the MAP's."""
+    h = np.asarray(ard_fit.ard.posterior.h)
+    assert ard_fit.ard.report["h_names"][:3] == ["log_sigma_E", "log_sigma_F", "log_sigma_V"]
+    p = ard_fit.preds.arrays["test/map"]
+    np.testing.assert_allclose(p["noise_F"], np.exp(2 * h[1]), rtol=1e-12)
+    np.testing.assert_allclose(p["noise_E"], np.exp(2 * h[0]) * p["nat"], rtol=1e-12)
+    np.testing.assert_allclose(p["noise_V"], np.exp(2 * h[2]) * p["nat"], rtol=1e-12)

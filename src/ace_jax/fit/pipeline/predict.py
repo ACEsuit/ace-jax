@@ -115,7 +115,12 @@ def predict_splits(cfg, d, b, stats, theta, draws, log=print, ard=None):
             E, F, V = _labels(cfgs)
             Em = np.asarray(pred.E_mean) + bE; Fm = np.asarray(pred.F_mean) + bF
             Vm = np.asarray(pred.V_mean) + bV6
-            s2 = {k: float(np.mean(np.exp(2 * sub[:, i]))) for k, i in (("E", 7), ("F", 8), ("V", 9))}
+            if ard is not None and ard.report.get("mode") == "joint":
+                # joint ARD refits sigma_q (h[:3] = log sigma_E/F/V): its noise, not the MAP rung's
+                hq = np.asarray(ard.posterior.h)[:3]
+                s2 = {k: float(np.exp(2 * hq[i])) for i, k in enumerate("EFV")}
+            else:         # sequential ARD keeps sigma_q at the MAP (= sub[:, 7:10])
+                s2 = {k: float(np.mean(np.exp(2 * sub[:, i]))) for k, i in (("E", 7), ("F", 8), ("V", 9))}
             arrays[f"{split}/{rung}"] = dict(
                 nat=nat, E=E, E_mean=Em, E_var=np.asarray(pred.E_var), F=F, F_mean=Fm,
                 F_var=np.asarray(pred.F_var), V=V, V_mean=Vm, V_var=np.asarray(pred.V_var),
