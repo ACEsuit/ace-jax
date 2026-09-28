@@ -39,8 +39,7 @@ The ace-jax rows were re-run after the speed-up branch
 `bench/scaling/results/before-perf/`, and the before/after figures below
 compare the two. The tables are computed from the rows by
 `bench/scaling/plot.py` on every render: medium models, at exactly 8,192
-atoms on the GPUs and 2,048 on the CPU, as ranges over the two systems. A
-host whose ace-jax rows are still being re-run shows "pending".
+atoms on the GPUs and 2,048 on the CPU, as ranges over the two systems.
 
 {{findings}}
 
