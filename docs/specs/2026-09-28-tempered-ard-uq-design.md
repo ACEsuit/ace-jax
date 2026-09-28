@@ -110,7 +110,7 @@ The GP path keeps `linear_rows`.
   - On bench365 the two agree to 2.4 nats and 0.2 % in σ_F.
   - `FitConfig.ard_mode` ∈ {"joint", "sequential"}, default "joint"; CLI flag `--ard-mode`.
 - `laplace_hypers(stats, gamma, groups, h) -> (cov_h, report)` is the diagnostic.
-- `ArdPosterior(mean, chol, kappa, a, groups)` has two methods:
+- `ARDPosterior(mean, chol, kappa, a, groups)` has two methods:
   - `.forces_std(Phi_F)`, with Φ_F as (N, 3, L), returns (N,) values of κ‖L⁻¹Φᵀ‖;
   - `.save(path)` / `load(path)`.
 

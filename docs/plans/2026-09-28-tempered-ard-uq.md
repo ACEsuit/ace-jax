@@ -8,7 +8,7 @@
 - A new module `fit/ard.py` holds:
   - the evidence of the linear model in the prior-scaled system;
   - its joint (or sequential) type-II maximisation;
-  - the posterior object (`ArdPosterior`);
+  - the posterior object (`ARDPosterior`);
   - the held-out temperature κ;
   - batched prediction.
 - `fit/rows.py` gains `linear_rows_chunked`, which evaluates the edge Jacobian in node chunks so no tensor exceeds int32 indexing.
@@ -62,9 +62,9 @@
 
 - `src/ace_jax/fit/rows.py`: **modify**. Add `linear_rows_chunked(model, cfg, batch, node_chunk=256) -> Rows`.
 - `src/ace_jax/fit/ard.py`: **create**. It contains:
-  - `body_order_columns`, `ArdStats`, `ard_statistics`, `ArdEvidence`, `fit_ard`, `laplace_hypers`;
-  - `ArdPosterior` (with `save`/`load`), `ard_posterior`;
-  - `predict_ard`, `kappa_closed_form`, `run_ard_stage`, `ArdResult`.
+  - `body_order_columns`, `ARDStats`, `ard_statistics`, `ARDEvidence`, `fit_ard`, `laplace_hypers`;
+  - `ARDPosterior` (with `save`/`load`), `ard_posterior`;
+  - `predict_ard`, `kappa_closed_form`, `run_ard_stage`, `ARDResult`.
 - `src/ace_jax/fit/pipeline/config.py`: **modify**. `uq` gains `"ard"`; add `ard_mode`, `ard_val_frac`, `ard_cond_max`, `ard_laplace`, with validation.
 - `src/ace_jax/fit/pipeline/run.py`: **modify**. The ARD stage, and `FitResult.ard`.
 - `src/ace_jax/fit/pipeline/predict.py`: **modify**. The ARD predictive branch.
@@ -241,11 +241,11 @@ git commit -m "feat(rows): linear_rows_chunked -- node-chunked edge Jacobian for
   - `theta.log_sigma_{E,F,V}` and `theta.log_sigma_c`.
 - Produces:
   - `body_order_columns(meta, cfg) -> np.ndarray (L,) int`: body order 2, 3 or 4 per column, in `_place` layout.
-  - `ArdStats(G: tuple, b: tuple, yy: np.ndarray, n: np.ndarray, ls_fixed: np.ndarray | None)`.
+  - `ARDStats(G: tuple, b: tuple, yy: np.ndarray, n: np.ndarray, ls_fixed: np.ndarray | None)`.
     - Joint mode: G and b have 3 entries, one per quantity.
     - Sequential mode: 1 entry each (the combined Gram at `ls_fixed`).
-  - `ard_statistics(theta, prob, ds, mode) -> ArdStats`.
-  - `ArdEvidence(stats, gamma, body_col)`:
+  - `ard_statistics(theta, prob, ds, mode) -> ARDStats`.
+  - `ARDEvidence(stats, gamma, body_col)`:
     - `.groups` is a sorted tuple of body orders;
     - `.h0(theta) -> np.ndarray`;
     - `.value_and_grad(h) -> (float, np.ndarray)`;
@@ -254,12 +254,12 @@ git commit -m "feat(rows): linear_rows_chunked -- node-chunked edge Jacobian for
     - `.a_floor`.
   - `fit_ard(ev, h0, cond_max=1e14) -> (h, logev, info)`.
   - `laplace_hypers(ev, h, eps=1e-3) -> dict(std, eigs, cov, interior)`.
-  - `ArdPosterior`:
+  - `ARDPosterior`:
     - fields `mean` (L,), `chol` (L,L), `dinv` (L,), `kappa` (float), `h` (P,), `groups` (tuple), `body_col` (L,) and `meta` (dict with n_B, n_pair, NZ, rcut, elements);
     - `var_rows(Phi (n,L)) -> (n,)`;
     - `forces_std(Frows (N,3,L)) -> (N,)`;
-    - `.save(path, dtype=np.float32)` and the static `ArdPosterior.load(path)`.
-  - `ard_posterior(ev, h, kappa, meta) -> ArdPosterior`.
+    - `.save(path, dtype=np.float32)` and the static `ARDPosterior.load(path)`.
+  - `ard_posterior(ev, h, kappa, meta) -> ARDPosterior`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -313,14 +313,14 @@ def test_body_order_columns_layout():
 def test_evidence_matches_dense_marginal_likelihood(tiny_linear_problem):
     """Differences of log p between two h equal those of the explicit Gaussian marginal likelihood
     N(y_w | 0, Phi_w Lambda^-1 Phi_w^T + diag(sigma_q^2)) (constants cancel)."""
-    from ace_jax.fit.ard import ArdEvidence, ard_statistics, body_order_columns
+    from ace_jax.fit.ard import ARDEvidence, ard_statistics, body_order_columns
     from ace_jax.fit.hypers import default_prior
     prob, ds = tiny_linear_problem
     theta = default_prior(2.35).mu
     with highest_precision():
         st = ard_statistics(theta, prob, ds, "joint")
         meta = {"nnll": [[None] * o for o in np.asarray(_orders(prob))]}
-        ev = ArdEvidence(st, np.asarray(prob.gamma), body_order_columns(meta, prob.cfg))
+        ev = ARDEvidence(st, np.asarray(prob.gamma), body_order_columns(meta, prob.cfg))
         h1 = ev.h0(theta); h2 = h1 + np.r_[0.1, -0.2, 0.05, [0.3, -0.4, 0.2][: len(ev.groups)]]
         v1, v2 = ev.value_and_grad(h1)[0], ev.value_and_grad(h2)[0]
         Phi, y, q = _dense_rows(prob, ds)
@@ -339,14 +339,14 @@ def _orders(prob):
 
 
 def test_gradient_matches_finite_differences(tiny_linear_problem):
-    from ace_jax.fit.ard import ArdEvidence, ard_statistics, body_order_columns
+    from ace_jax.fit.ard import ARDEvidence, ard_statistics, body_order_columns
     from ace_jax.fit.hypers import default_prior
     prob, ds = tiny_linear_problem
     theta = default_prior(2.35).mu
     with highest_precision():
         st = ard_statistics(theta, prob, ds, "joint")
         meta = {"nnll": [[None] * o for o in _orders(prob)]}
-        ev = ArdEvidence(st, np.asarray(prob.gamma), body_order_columns(meta, prob.cfg))
+        ev = ARDEvidence(st, np.asarray(prob.gamma), body_order_columns(meta, prob.cfg))
         h = ev.h0(theta); v, g = ev.value_and_grad(h)
         d = np.random.default_rng(0).standard_normal(len(h)); d /= np.linalg.norm(d); e = 1e-5
         fd = (ev.value_and_grad(h + e * d)[0] - ev.value_and_grad(h - e * d)[0]) / (2 * e)
@@ -354,15 +354,15 @@ def test_gradient_matches_finite_differences(tiny_linear_problem):
 
 
 def test_joint_fit_beats_sequential_beats_start(tiny_linear_problem):
-    from ace_jax.fit.ard import ArdEvidence, ard_statistics, body_order_columns, fit_ard
+    from ace_jax.fit.ard import ARDEvidence, ard_statistics, body_order_columns, fit_ard
     from ace_jax.fit.hypers import default_prior
     prob, ds = tiny_linear_problem
     theta = default_prior(2.35).mu
     meta = {"nnll": [[None] * o for o in _orders(prob)]}
     with highest_precision():
-        evJ = ArdEvidence(ard_statistics(theta, prob, ds, "joint"), np.asarray(prob.gamma),
+        evJ = ARDEvidence(ard_statistics(theta, prob, ds, "joint"), np.asarray(prob.gamma),
                           body_order_columns(meta, prob.cfg))
-        evS = ArdEvidence(ard_statistics(theta, prob, ds, "sequential"), np.asarray(prob.gamma),
+        evS = ARDEvidence(ard_statistics(theta, prob, ds, "sequential"), np.asarray(prob.gamma),
                           body_order_columns(meta, prob.cfg))
         h0J, h0S = evJ.h0(theta), evS.h0(theta)
         hS, vS, _ = fit_ard(evS, h0S)
@@ -378,7 +378,7 @@ def test_joint_fit_beats_sequential_beats_start(tiny_linear_problem):
 def test_posterior_variance_matches_blr_path_at_gamma_prior(tiny_linear_problem):
     """With a_k = log(1/sigma_c^2) for every group and sigma_q at theta, the ARD posterior is the
     existing BLR posterior: same mean, same row variances."""
-    from ace_jax.fit.ard import ArdEvidence, ard_posterior, ard_statistics, body_order_columns
+    from ace_jax.fit.ard import ARDEvidence, ard_posterior, ard_statistics, body_order_columns
     from ace_jax.fit.hypers import default_prior
     from ace_jax.fit.objective import posterior
     from ace_jax.fit.predict import _rows_mean_var
@@ -389,7 +389,7 @@ def test_posterior_variance_matches_blr_path_at_gamma_prior(tiny_linear_problem)
     meta = {"nnll": [[None] * o for o in _orders(prob)], "n_B": prob.cfg.n_B, "n_pair": prob.cfg.n_pair,
             "NZ": prob.cfg.NZ, "rcut": prob.cfg.rcut, "elements": [14]}
     with highest_precision():
-        ev = ArdEvidence(ard_statistics(theta, prob, ds, "joint"), np.asarray(prob.gamma),
+        ev = ARDEvidence(ard_statistics(theta, prob, ds, "joint"), np.asarray(prob.gamma),
                          body_order_columns(meta, prob.cfg))
         post = ard_posterior(ev, ev.h0(theta), 1.0, meta)
         mu, Lc = posterior(theta, sufficient_statistics(theta, prob.spec, prob.model, prob.ind, prob.cfg, ds), prob)
@@ -401,7 +401,7 @@ def test_posterior_variance_matches_blr_path_at_gamma_prior(tiny_linear_problem)
 
 
 def test_posterior_save_load_float32(tiny_linear_problem, tmp_path):
-    from ace_jax.fit.ard import ArdEvidence, ArdPosterior, ard_posterior, ard_statistics, body_order_columns
+    from ace_jax.fit.ard import ARDEvidence, ARDPosterior, ard_posterior, ard_statistics, body_order_columns
     from ace_jax.fit.hypers import default_prior
     from ace_jax.fit.rows import linear_rows
     prob, ds = tiny_linear_problem
@@ -409,11 +409,11 @@ def test_posterior_save_load_float32(tiny_linear_problem, tmp_path):
     meta = {"nnll": [[None] * o for o in _orders(prob)], "n_B": prob.cfg.n_B, "n_pair": prob.cfg.n_pair,
             "NZ": prob.cfg.NZ, "rcut": prob.cfg.rcut, "elements": [14]}
     with highest_precision():
-        ev = ArdEvidence(ard_statistics(theta, prob, ds, "joint"), np.asarray(prob.gamma),
+        ev = ARDEvidence(ard_statistics(theta, prob, ds, "joint"), np.asarray(prob.gamma),
                          body_order_columns(meta, prob.cfg))
         post = ard_posterior(ev, ev.h0(theta), 2.5, meta)
         post.save(tmp_path / "posterior.npz")
-        back = ArdPosterior.load(tmp_path / "posterior.npz")
+        back = ARDPosterior.load(tmp_path / "posterior.npz")
         Fr = np.asarray(linear_rows(prob.model, prob.cfg, jax.tree.map(lambda a: a[0], ds))[0].F)
     a, b = post.forces_std(Fr), back.forces_std(Fr)
     assert back.kappa == 2.5 and back.meta["n_B"] == prob.cfg.n_B
@@ -421,13 +421,13 @@ def test_posterior_save_load_float32(tiny_linear_problem, tmp_path):
 
 
 def test_laplace_reports_interior_psd(tiny_linear_problem):
-    from ace_jax.fit.ard import ArdEvidence, ard_statistics, body_order_columns, fit_ard, laplace_hypers
+    from ace_jax.fit.ard import ARDEvidence, ard_statistics, body_order_columns, fit_ard, laplace_hypers
     from ace_jax.fit.hypers import default_prior
     prob, ds = tiny_linear_problem
     theta = default_prior(2.35).mu
     meta = {"nnll": [[None] * o for o in _orders(prob)]}
     with highest_precision():
-        ev = ArdEvidence(ard_statistics(theta, prob, ds, "joint"), np.asarray(prob.gamma),
+        ev = ARDEvidence(ard_statistics(theta, prob, ds, "joint"), np.asarray(prob.gamma),
                          body_order_columns(meta, prob.cfg))
         h, _, _ = fit_ard(ev, ev.h0(theta))
         rep = laplace_hypers(ev, h)
@@ -475,7 +475,7 @@ def body_order_columns(meta, cfg):
     return np.concatenate([np.tile(order_B, cfg.NZ), np.full(cfg.n_pair * cfg.NZ, 2)])
 
 
-class ArdStats(NamedTuple):
+class ARDStats(NamedTuple):
     G: tuple                 # (G_E, G_F, G_V) [joint] or (M,) combined at ls_fixed [sequential]
     b: tuple
     yy: np.ndarray           # (3,) [joint]; unused [sequential]
@@ -489,7 +489,7 @@ def ard_statistics(theta, prob, ds, mode):
     from .stats import sufficient_statistics
     if mode == "joint":
         st = sufficient_statistics(theta, prob.spec, prob.model, prob.ind, prob.cfg, ds)
-        return ArdStats(tuple(getattr(st, f"G_{q}") for q in "EFV"), tuple(getattr(st, f"b_{q}") for q in "EFV"),
+        return ARDStats(tuple(getattr(st, f"G_{q}") for q in "EFV"), tuple(getattr(st, f"b_{q}") for q in "EFV"),
                         np.array([float(getattr(st, f"yy_{q}")) for q in "EFV"]),
                         np.array([float(getattr(st, f"n_{q}")) for q in "EFV"]), None)
     if mode != "sequential":
@@ -511,10 +511,10 @@ def ard_statistics(theta, prob, ds, mode):
         return (M, bv), None
 
     (M, bv), _ = jax.lax.scan(jax.checkpoint(body), (jnp.zeros((L, L)), jnp.zeros(L)), ds)
-    return ArdStats((M,), (bv,), np.zeros(3), np.zeros(3), ls)
+    return ARDStats((M,), (bv,), np.zeros(3), np.zeros(3), ls)
 
 
-class ArdEvidence:
+class ARDEvidence:
     """log p(D|h) and its gradient in the prior-scaled system.  h = (log sigma_q [joint only], a_k)."""
 
     def __init__(self, stats, gamma, body_col):
@@ -614,7 +614,7 @@ def laplace_hypers(ev, h, eps=1e-3):
             "interior": interior.tolist()}
 
 
-class ArdPosterior(NamedTuple):
+class ARDPosterior(NamedTuple):
     mean: np.ndarray          # (L,) posterior mean coefficients (the readout)
     chol: np.ndarray          # (L, L) lower Cholesky factor of S = D^-1 A D^-1
     dinv: np.ndarray          # (L,) 1 / Gamma
@@ -649,7 +649,7 @@ class ArdPosterior(NamedTuple):
         z = np.load(pathlib.Path(path))
         if int(z["schema"]) != SCHEMA:
             raise ValueError(f"unsupported posterior schema {int(z['schema'])}")
-        return ArdPosterior(z["mean"], z["chol"].astype(np.float64), z["dinv"], float(z["kappa"]), z["h"],
+        return ARDPosterior(z["mean"], z["chol"].astype(np.float64), z["dinv"], float(z["kappa"]), z["h"],
                             tuple(int(g) for g in z["groups"]), z["body_col"],
                             json.loads(bytes(z["meta_json"]).decode()))
 
@@ -661,7 +661,7 @@ def ard_posterior(ev, h, kappa, meta):
     keep = {k: meta[k] for k in ("n_B", "n_pair", "NZ", "rcut", "elements") if k in meta}
     if "NZ" not in keep and "elements" in keep:          # model meta carries elements, not NZ
         keep["NZ"] = len(keep["elements"])
-    return ArdPosterior(np.asarray(ev.dinv * x), np.asarray(c), np.asarray(ev.dinv), float(kappa),
+    return ARDPosterior(np.asarray(ev.dinv * x), np.asarray(c), np.asarray(ev.dinv), float(kappa),
                         np.asarray(h, float), ev.groups, ev.body_col, keep)
 ```
 
@@ -675,7 +675,7 @@ Expected: 7 passed.
 ```bash
 uv run ruff check src/ace_jax/fit/ard.py tests/test_ard.py
 git add src/ace_jax/fit/ard.py tests/test_ard.py
-git commit -m "feat(ard): prior-scaled evidence, joint/sequential type-II ML, Laplace diagnostic, ArdPosterior"
+git commit -m "feat(ard): prior-scaled evidence, joint/sequential type-II ML, Laplace diagnostic, ARDPosterior"
 ```
 
 ---
@@ -697,8 +697,8 @@ git commit -m "feat(ard): prior-scaled evidence, joint/sequential type-II ML, La
 - Produces:
   - `kappa_closed_form(e2, s2) -> float`, where e2 is the per-atom |ΔF|² and s2 = Σ_c var.
   - `predict_ard(post, prob, ds, node_chunk=256) -> Prediction`. F_var is tempered by κ²; E_var and V_var are untempered.
-  - `ArdResult(posterior: ArdPosterior, report: dict)`.
-  - `run_ard_stage(cfg, data, built, theta, log=print) -> ArdResult`.
+  - `ARDResult(posterior: ARDPosterior, report: dict)`.
+  - `run_ard_stage(cfg, data, built, theta, log=print) -> ARDResult`.
 
 - [ ] **Step 1: Write the failing tests** (append to `tests/test_ard.py`)
 
@@ -789,8 +789,8 @@ def predict_ard(post, prob, ds, node_chunk=256):
     return _pack(outs, prob, ds)
 
 
-class ArdResult(NamedTuple):
-    posterior: ArdPosterior
+class ARDResult(NamedTuple):
+    posterior: ARDPosterior
     report: dict
 
 
@@ -830,7 +830,7 @@ def run_ard_stage(cfg, data, built, theta, log=print):
                          f"no force labels to fit the temperature kappa on")
     ds_fit = build_dataset(fit_, data.meta, data.E0, cfg.batch)
     ds_val = build_dataset(val, data.meta, data.E0, cfg.batch)
-    ev = ArdEvidence(ard_statistics(theta, prob, ds_fit, cfg.ard_mode), np.asarray(prob.gamma), body_col)
+    ev = ARDEvidence(ard_statistics(theta, prob, ds_fit, cfg.ard_mode), np.asarray(prob.gamma), body_col)
     h_fit, v_fit, info_fit = fit_ard(ev, ev.h0(theta), cfg.ard_cond_max)
     post_fit = ard_posterior(ev, h_fit, 1.0, data.meta)
     e2, s2 = _val_errors(post_fit, prob, ds_val)
@@ -843,7 +843,7 @@ def run_ard_stage(cfg, data, built, theta, log=print):
     log(f"ARD: fit-subset logev {v_fit:.2f} ({info_fit['message']}, nit {info_fit['nit']}); "
         f"kappa {kappa:.3f} from {len(e2)} held-out atoms")
     del ev
-    ev = ArdEvidence(ard_statistics(theta, prob, data.ds_train, cfg.ard_mode), np.asarray(prob.gamma), body_col)
+    ev = ARDEvidence(ard_statistics(theta, prob, data.ds_train, cfg.ard_mode), np.asarray(prob.gamma), body_col)
     v_start = ev.value_and_grad(np.clip(h_fit, *ev.bounds(h_fit, cfg.ard_cond_max)))[0]   # refit's start
     h, v, info = fit_ard(ev, h_fit, cfg.ard_cond_max)
     post = ard_posterior(ev, h, kappa, data.meta)
@@ -859,7 +859,7 @@ def run_ard_stage(cfg, data, built, theta, log=print):
     if cfg.ard_laplace:
         lap = laplace_hypers(ev, h)
         report["laplace_std_h"] = lap["std"].tolist(); report["laplace_eigs"] = lap["eigs"].tolist()
-    return ArdResult(post, report)
+    return ARDResult(post, report)
 ```
 
 - [ ] **Step 4: Run the tests** — `kappa_closed_form` passes now; the two `ard_stage` tests need `FitConfig.uq="ard"` (Task 4)
@@ -889,11 +889,11 @@ git commit -m "feat(ard): held-out temperature, batched tempered prediction, ARD
 - Test: `tests/test_ard_pipeline.py`
 
 **Interfaces:**
-- Consumes: `run_ard_stage`, `predict_ard`, `ArdResult` (Task 3).
+- Consumes: `run_ard_stage`, `predict_ard`, `ARDResult` (Task 3).
 - Produces:
   - `FitConfig.uq ∈ {"blr", "pops", "ard"}`;
   - `FitConfig.ard_mode="joint"`, `ard_val_frac=0.2`, `ard_cond_max=1e14`, `ard_laplace=False`;
-  - `FitResult.ard: ArdResult | None` (last field, default None);
+  - `FitResult.ard: ARDResult | None` (last field, default None);
   - `write_outputs` writes `posterior.npz` and `ard.json` when `res.ard`;
   - `model.npz` holds the ARD mean when `res.ard`.
 
@@ -949,11 +949,11 @@ def test_fit_ard_predicts_with_tempered_force_variance(ard_fit):
 
 def test_write_outputs_saves_posterior_and_report(ard_fit, tmp_path):
     from ace_jax import ACECalculator
-    from ace_jax.fit.ard import ArdPosterior
+    from ace_jax.fit.ard import ARDPosterior
     from ace_jax.fit.pipeline import write_outputs
     from ase import Atoms
     write_outputs(ard_fit, tmp_path, layout=("cli",), argv={})
-    post = ArdPosterior.load(tmp_path / "posterior.npz")
+    post = ARDPosterior.load(tmp_path / "posterior.npz")
     rep = json.load(open(tmp_path / "ard.json"))
     assert post.kappa == pytest.approx(ard_fit.ard.posterior.kappa) and rep["mode"] == "joint"
     calc = ACECalculator(str(tmp_path / "model.npz"))                  # model.npz = the ARD mean
@@ -1063,7 +1063,7 @@ git commit -m "feat(pipeline): uq='ard' -- ARD stage after the linear MAP, tempe
 - Test: `tests/test_ard_calc_cli.py`
 
 **Interfaces:**
-- Consumes: `ArdPosterior.load/forces_std` (Task 2), `linear_rows_chunked` (Task 1), `build_dataset`, `Config`, `GPConfig`, `ace_jax.eval.load`.
+- Consumes: `ARDPosterior.load/forces_std` (Task 2), `linear_rows_chunked` (Task 1), `build_dataset`, `Config`, `GPConfig`, `ace_jax.eval.load`.
 - Produces:
   - `ACECalculator(model_path, posterior=None, ...)`. When given a posterior, `results["forces_std"]` is an (N,) array.
   - `aj fit --uq ard [--ard-mode joint|sequential] [--ard-val-frac F]`.
@@ -1098,14 +1098,14 @@ def fitted(tmp_path_factory):
 
 def test_calculator_forces_std_matches_pipeline(fitted):
     from ace_jax import ACECalculator
-    from ace_jax.fit.ard import ArdPosterior, predict_ard
+    from ace_jax.fit.ard import ARDPosterior, predict_ard
     from ace_jax.fit.data import build_dataset, load_configs
     from ace_jax.fit.pipeline import FitConfig
     from ace_jax.fit.pipeline.problem import build_problem
     from ace_jax.fit.pipeline import load_fit_data
     calc = ACECalculator(str(fitted / "model.npz"), posterior=str(fitted / "posterior.npz"))
     cfgs = load_configs(XYZ, "dft_energy", "dft_force", "dft_virial")[:3]
-    post = ArdPosterior.load(fitted / "posterior.npz")
+    post = ARDPosterior.load(fitted / "posterior.npz")
     cfg = FitConfig(model=str(fitted / "model.npz"), arm="linear", r0=2.35, batch=1, energy_key="dft_energy",
                     force_key="dft_force", virial_key="dft_virial", e0="model").validate()
     d = load_fit_data(cfg, train=str(XYZ), test=str(XYZ))
@@ -1130,8 +1130,8 @@ def test_isolated_atom_has_zero_finite_std(fitted):
 
 def test_mismatched_posterior_is_refused(fitted, tmp_path):
     from ace_jax import ACECalculator
-    from ace_jax.fit.ard import ArdPosterior
-    p = ArdPosterior.load(fitted / "posterior.npz")
+    from ace_jax.fit.ard import ARDPosterior
+    p = ARDPosterior.load(fitted / "posterior.npz")
     bad = p._replace(mean=p.mean[:-1], dinv=p.dinv[:-1], chol=p.chol[:-1, :-1], body_col=p.body_col[:-1])
     bad.save(tmp_path / "bad.npz")
     with pytest.raises(ValueError, match="posterior"):
@@ -1240,11 +1240,11 @@ Add `posterior=None` to `__init__`'s keyword arguments. As the first line of `__
         self.posterior = None
         if posterior is not None:
             from ..eval import load as _load_fit_model
-            from ..fit.ard import ArdPosterior
+            from ..fit.ard import ARDPosterior
             from ..fit.inducing import GPConfig
             if not isinstance(model_path, (str, bytes)) and not hasattr(model_path, "__fspath__"):
                 raise ValueError("posterior= needs the model FILE path (the design rows use the fit model)")
-            post = ArdPosterior.load(posterior)
+            post = ARDPosterior.load(posterior)
             L = (meta["n_B"] + meta["n_pair"]) * len(meta["elements"])
             if len(post.mean) != L or post.meta.get("n_B") != meta["n_B"] or post.meta.get("NZ") != len(meta["elements"]):
                 raise ValueError(f"posterior {posterior} does not match the model: basis {len(post.mean)} vs {L}")
