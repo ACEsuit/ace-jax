@@ -118,8 +118,6 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges, k_dense=None,
 
     from ..eval.model import lean as _lean
     from ..calc.point import dense_budget_bytes
-    if lean:
-        model = _lean(model)
     model_z = [int(z) for z in meta["elements"]]
     type_elements = model_z if type_elements is None else [int(z) for z in type_elements]
     missing = sorted(set(type_elements) - set(model_z))
@@ -134,6 +132,12 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges, k_dense=None,
         fits = k_dense and estimate_a_bytes(model, "dense", n_rows, min(max_edges, n_rows * k_dense),
                                             k_dense, itemsize) <= dense_budget_bytes()
         layout = "dense" if fits else "sparse"
+    # layout="auto" above sized one block on the full model, as without lean:
+    # estimate_a_bytes fits the full dense path, and on the lean widths it
+    # underestimates the blocked path's compiled temp (measured 6.6-6.9x actual /
+    # estimate on CPU, against 3.0-5.1x full), so it could pick dense and OOM
+    if lean:
+        model = _lean(model)
     energy_fn = make_energy_fn(model, n_species, layout, k_dense,
                                None if type_map == list(range(len(model_z))) else type_map,
                                n_rows=max_owned if layout == "dense" else None)
