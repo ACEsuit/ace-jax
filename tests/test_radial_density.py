@@ -6,6 +6,7 @@ import pytest
 jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 
+from conftest import FIXTURE_DIR
 from test_gp_learn_radial import MODEL, THETA, XYZ, make_problem
 
 pytestmark = pytest.mark.skipif(not (XYZ.exists() and MODEL.exists()), reason="missing fixtures")
@@ -187,3 +188,182 @@ def test_density_gamma_and_compact_gamma():
     gw = density_gamma(g, 2, 2)
     assert gw.shape == (10,)
     np.testing.assert_allclose(np.asarray(gw[6:]), np.exp(np.mean(np.log(np.arange(1, 7)))), rtol=1e-12)
+
+
+def _rd_args(prob, ds, P=2, span="full", seed=0):
+    """Full positional args of _objective_rd after (xb, other), plus V, H, statics pieces."""
+    from ace_jax.fit.density import compact_gamma, density_gamma, density_mask
+    from ace_jax.fit.hypers import to_array
+    from ace_jax.fit.radial_density import init_density, normalise_rho, rho_gram
+    from ace_jax.fit.radial_model import normalise, radial_gram, roughness_matrix, row_active, spectral_weights
+    cfg = prob.cfg
+    W0 = prob.model.rnl_Wnlq
+    active = row_active(W0); Q = radial_gram(prob.model, ds)
+    V = normalise(W0, Q, active)
+    mask = density_mask(cfg, span)
+    S = rho_gram(prob.model, V, mask, cfg, ds)
+    H = normalise_rho(init_density(cfg, mask, P, seed), S)
+    nq = W0.shape[-1]
+    z = lambda: jnp.asarray(0.0)
+    common = (to_array(THETA), prob.model, ds, density_gamma(prob.gamma, P, cfg.NZ), Q, active,
+              roughness_matrix(prob.model), jnp.ones(W0.shape[2]), z(), V, spectral_weights(nq, 4.0), z(),
+              jnp.zeros((cfg.NZ, cfg.NZ, nq, nq)), z(), S, mask, compact_gamma(prob.gamma, cfg),
+              jnp.asarray(1e-3))
+    shapes = (tuple(V.shape), tuple(H.shape))
+    return V, H, common, shapes
+
+
+def test_rd_gradient_matches_fd(small):
+    from ace_jax.fit.radial_density import _objective_rd, _pack
+    prob, ds, _ = small
+    V, H, common, shapes = _rd_args(prob, ds)
+    r = jnp.asarray([1.0, 3.0])
+    x, other = _pack(V, H, r, "joint")
+    f = lambda y: _objective_rd(y, other, *common, r, prob.cfg, "joint", shapes)
+    g = jax.grad(f)(x)
+    D = jnp.asarray(np.random.default_rng(0).standard_normal(x.shape))
+    h = 1e-6
+    fd = (float(f(x + h * D)) - float(f(x - h * D))) / (2 * h)
+    assert abs(float(g @ D) - fd) < 1e-5 * abs(fd)
+
+
+def test_rd_objective_gauge_and_precond_invariant(small):
+    from ace_jax.fit.radial_density import _objective_rd, _pack
+    prob, ds, _ = small
+    V, H, common, shapes = _rd_args(prob, ds)
+    one = jnp.asarray([1.0, 1.0])
+    f = lambda V_, H_, r: float(_objective_rd(*_pack(V_, H_, r, "joint"), *common, r, prob.cfg, "joint", shapes))
+    f0 = f(V, H, one)
+    scale = jnp.asarray(np.random.default_rng(1).uniform(0.2, 5.0, H.shape[:2]))[..., None]
+    np.testing.assert_allclose(f(V, H * scale, one), f0, rtol=1e-10)               # per-(p, z) scale gauge
+    np.testing.assert_allclose(f(V, H.at[1].multiply(-1.0), one), f0, rtol=1e-10)  # sign of density p
+    np.testing.assert_allclose(f(V, H, jnp.asarray([1.0, 7.3])), f0, rtol=1e-12)    # preconditioner
+
+
+def _relabel_rd(prob, ds, W, eta, mask, c):
+    from ace_jax.fit.radial_model import with_radial
+    m = with_radial(prob.model, W)
+    yE, yF, yV = [], [], []
+    for i in range(ds.n_batches):
+        r = _widened_rows(m, prob.cfg, jax.tree.map(lambda a: a[i], ds), eta, mask)
+        yE.append(r.E @ c); yF.append(r.F @ c); yV.append(r.V @ c)
+    return ds._replace(y_E=jnp.stack(yE), y_F=jnp.stack(yF), y_V=jnp.stack(yV))
+
+
+def _density_truth(prob, ds, P=1, span="full", seed=5):
+    """Targets from the true radials plus a density whose weights differ from the init."""
+    from ace_jax.fit.density import density_mask
+    from ace_jax.fit.radial_density import init_density, normalise_rho, rho_gram
+    from ace_jax.fit.radial_model import normalise, radial_gram, row_active
+    cfg = prob.cfg
+    rng = np.random.default_rng(seed)
+    W0 = prob.model.rnl_Wnlq
+    Wt = normalise(W0, radial_gram(prob.model, ds), row_active(W0))
+    mask = density_mask(cfg, span)
+    S = rho_gram(prob.model, Wt, mask, cfg, ds)
+    Ht = init_density(cfg, mask, P, 0) + 0.5 * jnp.asarray(rng.standard_normal((P, cfg.NZ, cfg.D))) * mask
+    eta_t = normalise_rho(Ht, S)
+    c = jnp.concatenate([0.1 * jnp.asarray(rng.standard_normal(cfg.len_basis)), jnp.full(P * cfg.NZ, 0.5)])
+    return Wt, eta_t, mask, c
+
+
+@pytest.mark.parametrize("mode,factor", [("joint", 0.3), ("alternating", 0.5)])
+def test_learn_radial_density_reduces_objective_on_density_data(mode, factor):
+    from ace_jax.fit.density import density_gamma, linear_density_statistics
+    from ace_jax.fit.radial_density import init_density, learn_radial_density, normalise_rho, rho_gram
+    from ace_jax.fit.radial_learn import projected_residual_from_stats
+    from ace_jax.fit.radial_model import with_radial
+    prob, ds, _ = make_problem(ncfg=12, per_batch=3)
+    Wt, eta_t, mask, c = _density_truth(prob, ds)
+    ds = _relabel_rd(prob, ds, Wt, eta_t, mask, c)
+    gw = density_gamma(prob.gamma, 1, prob.cfg.NZ)
+    f = lambda W, eta: float(projected_residual_from_stats(
+        THETA, linear_density_statistics(with_radial(prob.model, W), eta, mask, prob.cfg, ds), gw))
+    S = rho_gram(prob.model, Wt, mask, prob.cfg, ds)
+    f0 = f(Wt, normalise_rho(init_density(prob.cfg, mask, 1), S))
+    V, eta, info = learn_radial_density(prob, ds, prob.model.rnl_Wnlq, mask=mask, P=1, mode=mode,
+                                        theta0=THETA, profile=False, steps=30, reprofile_every=10)
+    f1 = f(V, eta)
+    print(f"{mode}: f0={f0:.4e} f1={f1:.4e} reasons={info['reasons']} precond={info['precond']}")
+    assert f1 < factor * f0
+    assert info["mode"] == mode and info["P"] == 1 and len(info["precond"]) >= 1
+
+
+def test_learn_radial_density_zero_steps_is_normalised_init(small):
+    from ace_jax.fit.density import density_mask
+    from ace_jax.fit.radial_density import init_density, learn_radial_density, normalise_rho, rho_gram
+    from ace_jax.fit.radial_model import normalise, radial_gram, row_active
+    prob, ds, _ = small
+    mask = density_mask(prob.cfg, "full")
+    V, eta, info = learn_radial_density(prob, ds, prob.model.rnl_Wnlq, mask=mask, P=2, theta0=THETA,
+                                        profile=False, steps=0)
+    W0 = prob.model.rnl_Wnlq
+    Vr = normalise(W0, radial_gram(prob.model, ds), row_active(W0))
+    np.testing.assert_array_equal(np.asarray(V), np.asarray(Vr))
+    S = rho_gram(prob.model, Vr, mask, prob.cfg, ds)
+    np.testing.assert_array_equal(np.asarray(eta), np.asarray(normalise_rho(init_density(prob.cfg, mask, 2), S)))
+    assert info["steps"] == 0
+
+
+def test_normalise_rho_unit_mean_square(small):
+    from ace_jax.fit.density import density_mask
+    from ace_jax.fit.radial_density import init_density, normalise_rho, rho_gram
+    prob, ds, _ = small
+    mask = density_mask(prob.cfg, "full")
+    S = rho_gram(prob.model, prob.model.rnl_Wnlq, mask, prob.cfg, ds)
+    eta = normalise_rho(init_density(prob.cfg, mask, 2, seed=3), S)
+    q = jnp.einsum("pzd,zde,pze->pz", eta, S, eta)
+    np.testing.assert_allclose(np.asarray(q), 1.0, rtol=1e-10)
+
+
+def test_learn_radial_density_single_compile_joint(small):
+    from ace_jax.fit.density import density_mask
+    from ace_jax.fit.radial_density import learn_radial_density
+    from ace_jax.fit.radial_learn import _lbfgs_step
+    prob, ds, _ = small
+    kw = dict(mask=density_mask(prob.cfg, "full"), P=1, theta0=THETA, profile=False, reprofile_every=2)
+    learn_radial_density(prob, ds, prob.model.rnl_Wnlq, steps=2, **kw)          # warm the cache
+    n0 = _lbfgs_step._cache_size()
+    learn_radial_density(prob, ds, prob.model.rnl_Wnlq, steps=6, **kw)          # 3 rounds, new precond each
+    assert _lbfgs_step._cache_size() == n0
+
+
+def test_learn_radial_density_absent_species_is_zero_and_finite():
+    """SiGe basis on Si-only data: Ge has no sites, so its density weights are exactly 0."""
+    from ace_jax.eval import load
+    from ace_jax.fit.data import build_dataset, load_configs
+    from ace_jax.fit.density import density_mask
+    from ace_jax.fit.hypers import default_prior
+    from ace_jax.fit.inducing import GPConfig, descriptor_scale, select_inducing, site_features
+    from ace_jax.fit.kernels import KernelSpec
+    from ace_jax.fit.objective import Problem
+    from ace_jax.fit.radial_density import learn_radial_density
+    from ace_jax.fit.radial_model import to_analytic
+    spline, meta, z = load(FIXTURE_DIR / "sige_nofit.npz")
+    model, _ = to_analytic(spline, 12)
+    ds = build_dataset(load_configs(XYZ, "dft_energy", "dft_force", "dft_virial")[:6], meta,
+                       np.asarray(z["E0"]), configs_per_batch=3)
+    cfg = GPConfig(r0=2.35, rcut=float(meta["rcut"]), n_B=meta["n_B"], n_pair=meta["n_pair"],
+                   NZ=len(meta["elements"]), C=3)
+    X, S = site_features(model, cfg, ds)
+    ind = select_inducing(X, S, ds.node_z, ds.node_mask, 0, descriptor_scale(X, ds.node_mask))
+    prob = Problem(KernelSpec("cosine", True, cfg.D), model, ind, cfg, jnp.ones(cfg.len_basis), default_prior(2.35))
+    ge = list(meta["elements"]).index(32)
+    V, eta, info = learn_radial_density(prob, ds, model.rnl_Wnlq, mask=density_mask(cfg, "full"), P=1,
+                                        theta0=THETA, profile=False, steps=3, reprofile_every=3)
+    assert np.all(np.isfinite(np.asarray(eta))) and np.all(np.isfinite(np.asarray(V)))
+    assert np.all(np.asarray(eta)[:, ge] == 0.0)
+    assert all(np.isfinite(info["trace"]))
+
+
+def test_learn_radial_density_rejects_bad_options(small):
+    from ace_jax.fit.density import density_mask
+    from ace_jax.fit.radial_density import learn_radial_density
+    prob, ds, _ = small
+    mask = density_mask(prob.cfg, "full")
+    with pytest.raises(ValueError, match="mode"):
+        learn_radial_density(prob, ds, prob.model.rnl_Wnlq, mask=mask, mode="nope", theta0=THETA, steps=1)
+    with pytest.raises(ValueError, match="P"):
+        learn_radial_density(prob, ds, prob.model.rnl_Wnlq, mask=mask, P=0, theta0=THETA, steps=1)
+    with pytest.raises(ValueError, match="lam_eta"):
+        learn_radial_density(prob, ds, prob.model.rnl_Wnlq, mask=mask, lam_eta=-1.0, theta0=THETA, steps=1)
