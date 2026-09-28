@@ -18,7 +18,7 @@ import pathlib
 import modal
 
 DATA = pathlib.Path(os.environ.get("ACEGP_DATA", pathlib.Path.home() / "acegp-data")) / "cantor"
-BRANCH = "feat/multistart-map"
+BRANCH = "main"
 
 image = (
     modal.Image.debian_slim(python_version="3.11")

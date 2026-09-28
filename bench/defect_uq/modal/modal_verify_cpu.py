@@ -13,7 +13,7 @@ DATA = pathlib.Path(os.environ.get("ACEGP_DATA", pathlib.Path.home() / "acegp-da
 image = (
     modal.Image.debian_slim(python_version="3.11")
     .apt_install("git")
-    .run_commands("git clone --depth 1 --branch feat/multistart-map https://github.com/ACEsuit/ace-jax /root/ace-jax",
+    .run_commands("git clone --depth 1 --branch main https://github.com/ACEsuit/ace-jax /root/ace-jax",
                   "pip install -e '/root/ace-jax[gp]'")
     .add_local_file(str(DATA / "cantor4k_b_mh1.xyz"), "/data/cantor4k_b_mh1.xyz")
 )

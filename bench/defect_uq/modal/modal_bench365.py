@@ -16,7 +16,7 @@ WT = pathlib.Path(os.environ.get("ACEJAX_SRC", pathlib.Path(__file__).resolve().
 image = (
     modal.Image.debian_slim(python_version="3.11")
     .apt_install("git")
-    .run_commands("git clone --depth 1 --branch feat/pops-perf https://github.com/ACEsuit/ace-jax /root/ace-jax",
+    .run_commands("git clone --depth 1 --branch main https://github.com/ACEsuit/ace-jax /root/ace-jax",
                   "pip install -e '/root/ace-jax[gp,cuda]'")
     .add_local_file(str(DATA / "cantor_embed_d16_deg10.npz"), "/data/cantor_embed_d16_deg10.npz")
     .add_local_dir(str(DATA / "bench365"), "/data", ignore=["*.npy", "smoke/out_*/**"])
