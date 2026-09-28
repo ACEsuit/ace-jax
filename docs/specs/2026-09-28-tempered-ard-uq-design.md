@@ -180,3 +180,62 @@ The GP path keeps `linear_rows`.
   but a basis with L = 60k would need a low-rank or block approximation (a follow-up).
 - **κ fitted on bulk and simple defects may not transfer to regimes far from training** (big-cell
   cracks are the test). The acceptance run measures it.
+
+## Addendum (2026-09-28): cluster-sandwich force variance
+
+Status: approved to implement · Evidence: `bench/defect_uq` sandwich spike (PR #12, `eb607ad`),
+`~/acegp-data/results/2026-09-28/bench365_ard/ACCEPTANCE.md`.
+
+**Why.** Acceptance showed that the tempered ARD σ is calibrated and flags OOD, but ranks local
+errors inside a cell poorly (Spearman ρ 0.15–0.26; ceiling ≈ 0.4–0.5 for a single error draw).
+Active learning and adaptive refinement need that ranking. The posterior variance φA⁻¹φᵀ is purely
+epistemic, while the errors are misspecification at the σ_F scale: the in-sample whitened residuals
+have mean ρ² = 0.98. One scalar κ cannot say *where* the misspecification is.
+
+**What.** Replace κ²·φA⁻¹φᵀ by the configuration-clustered **sandwich**, i.e. the
+misspecification-robust (Huber–White) covariance of the fitted coefficients, which Müller (2013)
+uses as a Bayesian posterior under misspecification:
+
+  σ²(φ) = λ² · φ A⁻¹ M A⁻¹ φᵀ,  M = Σ_c g_c g_cᵀ,  g_c = Σ_{i∈c} ρ_i ψ_i,
+
+- ψ_i: noise-whitened training row (φ_i w_i / σ_q);
+- ρ_i = (y_i − φ_i c) w_i / σ_q: its residual at the ARD mean c;
+- the sum over i runs over every E/F/V row of training configuration c;
+- λ: one scale, fitted exactly as κ is (held-out subset errors against the served full posterior's
+  variance).
+
+κ²A⁻¹ is the homoscedastic special case (M ∝ A). POPS's parameter-set covariance is the same form
+with per-row weights ρ²/h².
+
+**Spike result (bench365).** Against the tempered ARD σ, the sandwich:
+- raises within-family ρ from 0.15–0.26 to 0.26–0.37 (big cells 0.35/0.26/0.26), surfaces included;
+- raises top-1 % error recall in the top 10 % from 0.29–0.62 to 0.42–0.79;
+- keeps OOD AUROC (0.74–0.91 families, 0.89–0.99 big cells) and calibration (rms-z 0.89–1.02);
+- makes the ARD term redundant: an NLL fit of a·ARD + b·sandwich gives a = 0.
+
+**Numerics and storage.**
+- M has rank ≤ n_cfg (the number of training configurations).
+- In the prior-scaled system (φ̃ = D⁻¹φ, S = LLᵀ), store Q = S⁻¹ G̃, with G̃ = D⁻¹[g_1 … g_n_cfg]
+  of shape (L, n_cfg). Then σ²(φ) = λ²‖Qᵀφ̃‖².
+- Q costs one pass over the training rows (the residuals need c), plus a Cholesky solve with n_cfg
+  right-hand sides.
+- It is stored as float32 in `posterior.npz`: 0.22 GB at L = 15k, n_cfg = 3.7k.
+- Prediction is one (n, L)·(L, n_cfg) product, cheaper than the triangular solve.
+- **Identity (test):** at the posterior mean, Σ_c g̃_c = D⁻¹Λc = diag(λ_prior)·x (stationarity).
+
+**Interface.**
+- `FitConfig.ard_variance` ∈ {"sandwich", "kappa"}, default **"sandwich"**; CLI `--ard-variance`.
+- `ARDPosterior` gains `Q` (None for "kappa") and `lam`. `forces_std` and `predict_ard` use λ²‖Qᵀφ̃‖²
+  when `Q` is present, else κ²φA⁻¹φᵀ.
+- `var_rows` stays the epistemic φA⁻¹φᵀ. κ is still fitted and reported (for comparison), and
+  `posterior.npz` schema goes to 2 (schema 1 still loads).
+- E/V variances unchanged (untempered, flagged).
+- Sequential mode works unchanged: the residual pass is independent of the evidence mode.
+
+**Decisions (review).**
+1. Clusters are training configurations: the standard cluster-robust choice, the best-calibrated in
+   the spike, and low-rank.
+2. POPS weights (ρ²/h²) ranked slightly better but need a leverage floor and calibrate worse on
+   surfaces: not implemented.
+3. Default "sandwich", so the acceptance rerun must reproduce the spike with λ from the train
+   hold-out (not test).
