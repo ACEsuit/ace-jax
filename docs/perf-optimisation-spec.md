@@ -138,7 +138,8 @@ coefficients inside the trace.
     static cap is safe. Receivers may still be ghosts, whose forces come out
     of the gradient as today.
   - Exceeding the row or slot capacity gives NaN, never a silent truncation.
-  - The export records `max_owned` alongside `max_atoms`.
+  - The export records `max_owned` alongside `max_atoms`, as `ace_jax.owned_rows`
+    (lammps-jax reads a `max_owned` key anywhere in the bundle as its own).
 - **Slots sized for the cutoff:** lammps-jax drops pairs beyond the cutoff
   before packing, so the benchmark's `capacity` sizes `k_dense` and
   `max_edges` for `rcut`, not `rcut + skin`. That also halves the sparse

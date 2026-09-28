@@ -92,7 +92,7 @@ def test_bundle_written(tmp_path):
     on_disk = json.loads((tmp_path / "m.json").read_text())
     assert on_disk["contract"]["n_species"] == 2
     assert on_disk["ace_jax"] == {"layout": "dense", "elements": [32, 14],
-                                  "type_elements": [32, 14], "k_dense": 64, "max_owned": None}
+                                  "type_elements": [32, 14], "k_dense": 64, "owned_rows": None}
     assert b["ace_jax"]["layout"] == "dense"
 
 
@@ -115,7 +115,7 @@ def test_lammps_type_order_differs_from_model_order(layout):
     assert E == pytest.approx(at.get_potential_energy(), abs=1e-10)
 
 
-def test_bundle_records_max_owned_even_for_sparse(tmp_path):
+def test_bundle_records_owned_rows_even_for_sparse(tmp_path):
     """The sparse layout has no row concept, but max_owned is still recorded
     (the value the caller sized the bundle's neighbour slots for)."""
     pytest.importorskip("lammps_jax")
@@ -124,7 +124,29 @@ def test_bundle_records_max_owned_even_for_sparse(tmp_path):
     model, meta, _ = load(y)
     b = export_lammps(model, meta, tmp_path / "m.json", max_atoms=256, max_edges=256 * 64,
                       layout="sparse", max_owned=200)
-    assert b["ace_jax"]["max_owned"] == 200 and b["ace_jax"]["layout"] == "sparse"
+    assert b["ace_jax"]["owned_rows"] == 200 and b["ace_jax"]["layout"] == "sparse"
+
+
+# JSON keys lammps-jax reads from a bundle (cpp/lammps_jax_model.cpp).  Its
+# reader matches a key name anywhere in the file, nested objects included, so
+# ace-jax's own metadata must not reuse one: a nested "max_owned" was taken as
+# the contract's and LAMMPS refused the bundle.
+LAMMPS_JAX_KEYS = {"comm_sites", "comm_widths", "custom_call_targets", "cutoff", "edge_pairing",
+                   "energy_and_forces_mlir", "energy_mlir", "force_mlir", "force_output",
+                   "format", "input_layout", "max_atoms", "max_edges", "max_neighbors",
+                   "max_owned", "n_hops", "n_species", "newton", "pair_sum", "precision",
+                   "unit_style", "uses_box"}
+
+
+@pytest.mark.parametrize("layout", ["sparse", "dense"])
+def test_bundle_metadata_keys_do_not_shadow_the_contract(tmp_path, layout):
+    pytest.importorskip("lammps_jax")
+    from ace_jax.export.lammps import export_lammps
+    y = str(pace_fixture(FIX / "gesi_sbessel.yace"))
+    model, meta, _ = load(y)
+    b = export_lammps(model, meta, tmp_path / "m.json", max_atoms=256, max_edges=256 * 64,
+                      k_dense=64, layout=layout, max_owned=200)
+    assert not set(b["ace_jax"]) & LAMMPS_JAX_KEYS
 
 
 def test_bundle_records_type_order(tmp_path):

@@ -117,6 +117,8 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges, k_dense=None,
                           precision=dtype, n_species=n_species)
     bundle["ace_jax"] = {"layout": layout, "elements": model_z, "type_elements": type_elements,
                          "k_dense": int(k_dense) if layout == "dense" else None,
-                         "max_owned": int(max_owned) if max_owned is not None else None}
+                         # not "max_owned": lammps-jax reads that key from anywhere in
+                         # the file and would take it as its own contract's
+                         "owned_rows": int(max_owned) if max_owned is not None else None}
     Path(path).write_text(json.dumps(bundle, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return bundle
