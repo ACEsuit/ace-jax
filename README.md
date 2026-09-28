@@ -124,7 +124,8 @@ fitted model. `si.npz` is any model definition, e.g. from
 `aj construct --elements Si --order 3 --max-degree 10 --out si.npz`. The examples
 below were checked on the Si test fixture (`si_fitted.npz`, with `si_tiny_train.xyz`
 split into train/test/ood files). The `--*-key` flags name the extxyz fields that
-hold the labels.
+hold the labels. Data is read with libAtoms `extxyz`, so any label name works as
+written, including `energy`/`forces`.
 
 ```bash
 K="--energy-key dft_energy --force-key dft_force --virial-key dft_virial"

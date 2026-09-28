@@ -39,9 +39,9 @@ def split_configs(configs, ntrain, ntest, test_start=None, seed=0):
 def _config_type_weights(path):
     """sigma_type: a weight-neutral named-weights dict over the file's config_type
     labels, so load_configs sets each config's type index (run.py behaviour)."""
-    from ase.io import read
+    from ..xyz import read_extxyz
     cts = []
-    for at in read(path, index=":"):
+    for at in read_extxyz(path):
         ct = str(at.info.get("config_type", ""))
         if ct and ct not in cts:
             cts.append(ct)

@@ -102,10 +102,10 @@ uv run ruff check                     # lint; `uv run pre-commit run --all-files
 
 ## Pitfalls
 
-- **Label keys:**
-  - ASE ≥ 3.23 moves extxyz `energy`/`forces` (calculator-property names) into a `SinglePointCalculator`.
-  - `fit.data.load_configs` reads labels from `atoms.info` and `atoms.arrays` only. With the default `--energy-key energy --force-key forces`, those labels come back as `None`.
-  - Use datasets whose keys are not calculator names (`dft_energy`, `dft_force`, `dft_virial`).
+- **Reading data:**
+  - Training and eval data are read with libAtoms `extxyz` (`fit/xyz.py`), never `ase.io.read`.
+  - ASE ≥ 3.23 moves extxyz `energy`/`forces`/`stress` into a `SinglePointCalculator`, so an `atoms.info` lookup finds nothing. That loss was silent.
+  - `read_extxyz` keeps ASE's value conventions (special 3×3 keys, flat 9-vectors, `_JSON`) so the committed fixtures read bit-identically. Keep it that way.
 - **Closures:** `jax.tree.map(lambda a: a[i], ds)` inside a loop is the batch-slicing idiom. It is safe because it is consumed in the same iteration. Ruff B023 is suppressed per file for exactly this.
 - **Python 3.11:** `requires-python` is `>=3.11`, so no PEP 701 f-strings (`f"{d["k"]}"`) in `src/` or `tests/`.
 - **Laplace compile time:** the Laplace rung (a Hessian through the whole LML) can take tens of minutes to compile. Keep `--rungs map` in quick checks.

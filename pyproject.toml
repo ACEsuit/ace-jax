@@ -28,8 +28,11 @@ dependencies = [
   "numpy>=1.24",
   "scipy>=1.10",
   "lineax>=0.1.1",
-  "ase>=3.22",          # core: neighbour-list fallback (eval) + calculators + xyz IO
+  "ase>=3.22",          # core: neighbour-list fallback (eval) + calculators + element data
   "pyyaml>=6",          # .yace (PACE) model files
+  # training/eval data reader (libAtoms C parser, binary wheels): labels come back
+  # as written, independent of ASE's calculator-key handling (see fit/xyz.py)
+  "extxyz>=0.4.5",
 ]
 
 [project.optional-dependencies]

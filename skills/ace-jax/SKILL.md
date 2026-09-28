@@ -32,8 +32,7 @@ aj construct --elements Cr,Mn,Fe,Co,Ni --order 3 --max-degree 10 \
 #    the smoothness prior (Gamma) is built in; --no-gamma skips it. --rcut
 #    defaults to 5.5 (with --embedding: 2.5 x mean bond length).
 
-# 2. fit. Label keys default to energy/forces/virial; pass yours explicitly
-#    (and see Gotchas: `energy`/`forces` as key names are not read).
+# 2. fit. Label keys default to energy/forces/virial; pass yours explicitly.
 K="--energy-key dft_energy --force-key dft_force --virial-key dft_virial"
 aj fit --model si.npz --train train.xyz --test test.xyz $K \
     --m-per-species 0 --r0 2.35 --out out_linear                      # linear ACE
@@ -182,11 +181,11 @@ Other entry points:
 
 ## Gotchas
 
-- **Label keys named `energy` / `forces` are not read.** ASE moves extxyz
-  fields with calculator-property names into a `SinglePointCalculator`. ace-jax
-  reads labels from `atoms.info` and `atoms.arrays` only, so those labels come
-  back empty. Store labels under other names (`dft_energy`, `dft_force`,
-  `dft_virial`) and pass them with the `--*-key` flags.
+- **Data is read with libAtoms `extxyz`, not `ase.io`.** Every label comes
+  back under the name it was written with, `energy`/`forces`/`stress`
+  included (ASE would move those into a calculator). ASE's `_JSON` 2-D info
+  values are decoded. A label that is present but not numeric raises a
+  `ValueError` naming the file, config and key.
 - **`GPCalculator` fails on a structure with no neighbours** (an isolated
   atom): `ValueError: cannot reshape array of size 0`. Drop isolated atoms from
   the data passed to `aj eval` on a `gp_model.npz`.
