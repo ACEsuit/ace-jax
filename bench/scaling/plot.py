@@ -11,6 +11,10 @@ dataviz skill); line style carries the mode (solid = standalone, dashed =
 LAMMPS) and marker fill the ace-jax layout, so identity never rests on colour
 alone.  Each figure has a legend and direct end-of-line labels, and every
 number is also in the Markdown tables (the palette's contrast relief).
+
+A case run more than once (repeat runs in `repeats/` beside the rows, e.g.
+separate Modal containers) is drawn at the median of its ok runs, with a thin
+min-max bar in the line's colour; a single run has no bar.
 """
 import glob
 import json
@@ -60,9 +64,17 @@ SIZES = ("small", "medium", "large", "mh1")
 MODES = {"standalone": "-", "lammps": "--"}
 
 
+REPEATS_DIR = "repeats"              # repeat runs of cases, beside the rows they repeat
+
+
 def load(pattern):
+    """The rows the pattern matches, plus the repeat runs in `repeats/` beside
+    them (the same file-name pattern); `before_pattern` rows get theirs from
+    `before-perf/repeats/` the same way."""
+    p = pathlib.Path(pattern)
+    files = set(glob.glob(pattern)) | set(glob.glob(str(p.parent / REPEATS_DIR / p.name)))
     rows = []
-    for f in sorted(glob.glob(pattern)):
+    for f in sorted(files):
         rows += [json.loads(l) for l in pathlib.Path(f).read_text().splitlines() if l.strip()]
     for r in rows:
         # rows written for a case that died (sweep.row_from_process) carry the
@@ -75,11 +87,69 @@ def load(pattern):
 
 
 def throughput(r):
-    """atom-steps/s: LAMMPS step time, or the standalone calculator call."""
+    """atom-steps/s: LAMMPS step time, or the standalone calculator call (the
+    median over runs for a case `aggregate` merged)."""
+    if "_tp" in r:
+        return r["_tp"]
     if r.get("atom_steps_per_s"):
         return r["atom_steps_per_s"]
     t = r.get("step_s") or r.get("call_s")
     return r["n_atoms"] / t if t else None
+
+
+_IDENTITY = ("host", "code", "mode", "model", "system", "size", "n_atoms", "dtype", "device", "gate")
+
+
+def case_id(r):
+    """What makes two rows the same case: host and `_key` (model, mode, N,
+    dtype, device), so runs differing only in timings, versions or `run`
+    group together. Rows without `_key` (synthetic ones) use those fields."""
+    if r.get("_key") is not None:
+        return (r.get("host"), json.dumps(r["_key"]))
+    return tuple(json.dumps(r.get(f)) for f in _IDENTITY)
+
+
+def aggregate(rows):
+    """One row per case. A case run more than once keeps its ok runs only (an
+    ok run beats an out-of-memory one) and becomes a copy of its median run
+    with the median throughput and peak memory and the min-max throughput
+    (`spread`). A case with a single run, or no ok run, is left as it was."""
+    groups = defaultdict(list)
+    for r in rows:
+        groups[case_id(r)].append(r)
+    out = []
+    for rs in groups.values():
+        ok = [r for r in rs if r.get("status") == "ok"]
+        timed = sorted((r for r in ok if throughput(r)), key=throughput)
+        if len(timed) < 2:
+            out.append(timed[0] if timed else ok[0] if ok else rs[0])
+            continue
+        tp = [throughput(r) for r in timed]
+        row = dict(timed[(len(timed) - 1) // 2])
+        row.update(_tp=statistics.median(tp), _tp_range=(tp[0], tp[-1]), _runs=len(timed))
+        mem = [r["peak_bytes"] for r in timed if r.get("peak_bytes") is not None]
+        if mem:
+            row["peak_bytes"] = statistics.median(mem)
+        out.append(row)
+    return out
+
+
+def spread(r):
+    """(min, max) throughput over a case's runs, or None for a single run."""
+    return r.get("_tp_range")
+
+
+def spread_pct(r):
+    """' ±x%' (half the min-max range over the median) for a repeated case."""
+    rng = spread(r)
+    return f" ±{(rng[1] - rng[0]) / 2 / throughput(r) * 100:.0f}%" if rng else ""
+
+
+def _bar(ax, x, y, rng, color):
+    """A thin min-max bar in the line's colour; nothing for a single run."""
+    if rng:
+        ax.errorbar([x], [y], yerr=[[y - rng[0]], [rng[1] - y]], fmt="none", ecolor=color,
+                    elinewidth=0.9, capsize=0, alpha=0.85, zorder=2.5)
 
 
 def _atoms_fmt(x, _pos):
@@ -176,7 +246,7 @@ def _measures_dtype(r):
 
 
 def fig_throughput(rows, out, dtype="float64", size="medium"):
-    ok = [r for r in rows if r.get("status") == "ok" and r.get("mode") in MODES
+    ok = [r for r in aggregate(rows) if r.get("status") == "ok" and r.get("mode") in MODES
           and r.get("dtype") == dtype and r.get("size") == size and throughput(r)
           and _measures_dtype(r)]
     if not ok:
@@ -191,12 +261,13 @@ def fig_throughput(rows, out, dtype="float64", size="medium"):
             for r in ok:
                 if r["system"] == system and r["host"] == host:
                     lines[(r["code"], r["mode"])].append((r["n_atoms"], throughput(r),
-                                                          r.get("layout")))
+                                                          r.get("layout"), spread(r)))
             for (code, mode), pts in sorted(lines.items()):
                 pts.sort()
                 xs, ys = [p[0] for p in pts], [p[1] for p in pts]
                 ax.plot(xs, ys, color=CODES[code][1], ls=MODES[mode], lw=1.6, zorder=2)
-                for x, y, lay in pts:                  # hollow marker = sparse layout
+                for x, y, lay, rng in pts:             # hollow marker = sparse layout
+                    _bar(ax, x, y, rng, CODES[code][1])
                     ax.plot(x, y, marker="o", ms=5, color=CODES[code][1], zorder=3,
                             mfc="none" if lay == "sparse" else CODES[code][1])
                 if mode == "standalone" or code == "mlpace":
@@ -238,7 +309,7 @@ def _size_tick(system, size):
 
 
 def fig_model_size(rows, out, dtype="float64"):
-    ok = [r for r in rows if r.get("status") == "ok" and r.get("mode") in MODES
+    ok = [r for r in aggregate(rows) if r.get("status") == "ok" and r.get("mode") in MODES
           and r.get("dtype") == dtype and throughput(r)]
     if not ok:
         return None
@@ -255,10 +326,13 @@ def fig_model_size(rows, out, dtype="float64"):
             ax = axes[i][j]
             for code in CODES:
                 for mode, ls in MODES.items():
-                    pts = [(SIZES.index(s), throughput(best[(code, mode, s, system)]))
+                    got = [(SIZES.index(s), best[(code, mode, s, system)])
                            for s in SIZES if (code, mode, s, system) in best]
-                    if pts:
-                        ax.plot(*zip(*pts), color=CODES[code][1], ls=ls, lw=1.6, marker="o", ms=5)
+                    if got:
+                        ax.plot([x for x, _ in got], [throughput(r) for _, r in got],
+                                color=CODES[code][1], ls=ls, lw=1.6, marker="o", ms=5)
+                        for x, r in got:
+                            _bar(ax, x, throughput(r), spread(r), CODES[code][1])
             _ylog(ax)
             ax.set_xticks(range(len(SIZES)), [_size_tick(system, s) for s in SIZES],
                           fontsize=7)
@@ -277,7 +351,7 @@ def fig_memory(rows, out, dtype="float64", size="medium"):
     """Peak device memory vs N (standalone), one panel per system x GPU host;
     dotted verticals mark the first size that did not fit, hollow markers the
     sizes where ace-jax chose the sparse layout."""
-    sel = [r for r in rows if r.get("mode") == "standalone" and r.get("dtype") == dtype
+    sel = [r for r in aggregate(rows) if r.get("mode") == "standalone" and r.get("dtype") == dtype
            and r.get("size") == size and r.get("peak_bytes") is not None]
     if not sel:
         return None
@@ -324,7 +398,7 @@ def fig_memory(rows, out, dtype="float64", size="medium"):
 
 def fig_precision(rows, out, size="medium"):
     """f32 / f64 throughput ratio vs N (standalone), one panel per system x host."""
-    ok = [r for r in rows if r.get("status") == "ok" and r.get("mode") == "standalone"
+    ok = [r for r in aggregate(rows) if r.get("status") == "ok" and r.get("mode") == "standalone"
           and r.get("size") == size and throughput(r)]
     by = defaultdict(dict)
     for r in ok:
@@ -373,12 +447,12 @@ def before_pattern(pattern):
 
 
 def before_after_series(after, before, host, dtype="float64", size="medium"):
-    """{(system, mode, code, phase): [(n, atom-steps/s, layout)]} for one host:
+    """{(system, mode, code, phase): [(n, atom-steps/s, layout, spread)]} for one host:
     ace-jax "before" (from before-perf/) and "after", and ML-PACE in LAMMPS as
     the "reference". Empty when the host has no re-run ace-jax rows yet, so a
     host still being measured is skipped rather than drawn from old rows."""
     def pick(rows, codes, modes):
-        return [r for r in rows if r.get("host") == host and r.get("status") == "ok"
+        return [r for r in aggregate(rows) if r.get("host") == host and r.get("status") == "ok"
                 and r.get("code") in codes and r.get("mode") in modes
                 and r.get("dtype") == dtype and r.get("size") == size and throughput(r)]
     aft = pick(after, ACEJAX, MODES)
@@ -391,7 +465,7 @@ def before_after_series(after, before, host, dtype="float64", size="medium"):
         for r in sel:
             for mode in (modes if phase == "reference" else (r["mode"],)):
                 out[(r["system"], mode, r["code"], phase)].append(
-                    (r["n_atoms"], throughput(r), r.get("layout")))
+                    (r["n_atoms"], throughput(r), r.get("layout"), spread(r)))
     return {k: sorted(v) for k, v in out.items()}
 
 
@@ -423,7 +497,8 @@ def fig_before_after(after, before, out, host, dtype="float64", size="medium"):
                 xs, ys = [p[0] for p in pts], [p[1] for p in pts]
                 ax.plot(xs, ys, color=c, ls=PHASES[phase], lw=1.2 if phase == "reference" else 1.6,
                         zorder=2)
-                for x, y, lay in pts:                  # hollow marker = sparse layout
+                for x, y, lay, rng in pts:             # hollow marker = sparse layout
+                    _bar(ax, x, y, rng, c)
                     ax.plot(x, y, marker="o", ms=4 if phase == "before" else 5, color=c, zorder=3,
                             mfc="none" if lay == "sparse" else c)
                 if phase != "before":
@@ -456,7 +531,8 @@ def fig_before_after(after, before, out, host, dtype="float64", size="medium"):
 
 def tables(rows):
     """Markdown: throughput at fixed N per host (the table view) and compile times."""
-    ok = [r for r in rows if r.get("status") == "ok" and r.get("mode") in MODES and throughput(r)]
+    ok = [r for r in aggregate(rows) if r.get("status") == "ok" and r.get("mode") in MODES
+          and throughput(r)]
     out = ["| host | system | code | mode | size | dtype | atoms | atom-steps/s |",
            "|---|---|---|---|---|---|---|---|"]
     for host in sorted({r["host"] for r in ok}):
@@ -464,7 +540,7 @@ def tables(rows):
                            2048 if "cpu" in host else 8192)
         for (code, mode, size, system), r in sorted(best.items()):
             out.append(f"| {host} | {system} | {CODES[code][0]} | {mode} | {size} | float64 "
-                       f"| {r['n_atoms']} | {throughput(r):.3g} |")
+                       f"| {r['n_atoms']} | {throughput(r):.3g}{spread_pct(r)} |")
     comp = defaultdict(list)
     for r in ok:
         if r.get("compile_s"):
@@ -479,7 +555,7 @@ def largest_fits(rows, size="medium", dtype="float64"):
     """Markdown: per host, system, code and mode, the largest size that ran and
     the first size that did not fit (oom), for one model size and dtype."""
     lines = defaultdict(list)
-    for r in rows:
+    for r in aggregate(rows):
         if r.get("mode") in MODES and r.get("size") == size and r.get("dtype") == dtype:
             lines[(r["host"], r["system"], r["code"], r["mode"])].append(r)
     out = ["| host | system | code | mode | largest that ran | first out of memory |",
@@ -513,7 +589,7 @@ def _rng(vals, fmt):
 def line_points(rows, host, code, mode, dtype="float64", size="medium"):
     """{system: {n: atom-steps/s}} for one line's ok rows on a host."""
     out = defaultdict(dict)
-    for r in rows:
+    for r in aggregate(rows):
         if (r.get("host") == host and r.get("code") == code and r.get("mode") == mode
                 and r.get("dtype") == dtype and r.get("size") == size
                 and r.get("status") == "ok" and throughput(r)):
@@ -622,6 +698,9 @@ def parity_table(rows):
     return "\n".join(out)
 
 
+REPEAT_NOTE = ("Where a case was run more than once (Modal: separate containers), the point is "
+               "the median and the bar spans min–max.")
+
 CAPTIONS = {
     "scaling_before_after": "ace-jax throughput before (dashed) and after (solid) the "
                             "speed-ups, float64, medium models; ML-PACE in LAMMPS for "
@@ -677,7 +756,7 @@ def write_doc(pattern, figs, doc="docs/benchmarks.md"):
     intro = pathlib.Path(__file__).with_name("benchmarks_intro.md").read_text().strip()
     intro = intro.replace("{{findings}}", findings(rows)).replace("{{parity}}", parity_table(rows))
     body = ["# Benchmarks", "", intro, "", "## Figures", "",
-            "Hollow markers: ace-jax chose the sparse layout.", ""]
+            "Hollow markers: ace-jax chose the sparse layout. " + REPEAT_NOTE, ""]
     pending = before_after_hosts(rows, load(before_pattern(pattern)))[1]
     if pending:
         body += [f"Before/after figures pending (ace-jax rows being re-run): {', '.join(pending)}.",
@@ -689,7 +768,8 @@ def write_doc(pattern, figs, doc="docs/benchmarks.md"):
         body += [f"![{stem}]({rel})", "", f"*{_caption(stem)}*", ""]
     body += ["## Model basis sizes", "", basis_table(), "",
              "## Largest system that fits (medium, float64)", "", largest_fits(rows), "",
-             "## Tables", "", tables(rows), "", "## Versions", ""]
+             "## Tables", "", "±x%: half the min–max range over the median, where a case "
+             "was run more than once.", "", tables(rows), "", "## Versions", ""]
     body += [f"- **{h}**: " + ", ".join(f"{k} {v}" for k, v in sorted(v.items())) for h, v in sorted(versions.items())]
     pathlib.Path(doc).write_text("\n".join(body) + "\n")
     return doc

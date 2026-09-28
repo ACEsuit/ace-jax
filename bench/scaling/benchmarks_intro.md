@@ -64,6 +64,12 @@ host whose ace-jax rows are still being re-run shows "pending".
   but every B function carries its own weight for each central element. So
   ACE-vs-PACE throughput differences mostly reflect basis size, not the code
   path. Matching the ladder is a follow-up.
+- **Modal A100 rows vary about 20–25% between containers,** even on the same
+  card type (A100-SXM4); the same-container A/B in
+  `bench/perf/results/microbench_*_fcf6f8e_ab.json` shows it. Where a case was
+  run more than once (Modal: separate containers), the point is the median
+  and the bar spans min–max. The controlled before/after comparisons are the
+  same-container micro-benchmarks in `docs/perf-optimisation-results.md`.
 - **Random weights.** The ace-jax and PACE models carry random coefficients
   where no fitted model exists. They are timing-only; their energies mean
   nothing physically.

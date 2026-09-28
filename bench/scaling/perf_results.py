@@ -5,6 +5,8 @@
 The prose lives in `perf_results_template.md`; its `{{name}}` placeholders are
 filled with tables computed here from:
 - the scaling rows (after: the pattern; before: `before-perf/` beside it);
+  both with their repeat runs from `repeats/` (`plot.load`; a repeated case
+  counts at its median);
 - the Task 10 micro-benchmarks, `bench/perf/results/microbench_{before,after}.json`.
 A host whose ace-jax rows are still being re-run is listed as pending.
 """
@@ -13,8 +15,9 @@ import pathlib
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
-from scaling.plot import (ACEJAX, CODES, MODES, before_after_hosts, before_pattern, load,  # noqa: E402
-                          parity_table, si, target_n, throughput)
+from scaling.plot import (ACEJAX, CODES, MODES, aggregate, before_after_hosts,  # noqa: E402
+                          before_pattern, load, parity_table, si, spread_pct, target_n,
+                          throughput)
 
 HERE = pathlib.Path(__file__).resolve().parent
 MICRO = HERE.parent / "perf" / "results"
@@ -28,8 +31,9 @@ MODEL_MS_TARGET, E2E_TARGET, LAMMPS_TARGET, LAMMPS_SIZES = 4.5, 1.1e6, 1.0e6, (3
 
 
 def _ok(rows, host, system, size, code, mode, dtype="float64"):
-    """{n: row} of a line's ok rows, and the line's largest ok N."""
-    got = {r["n_atoms"]: r for r in rows
+    """{n: row} of a line's ok rows (one per case, at the median of its runs),
+    and the line's largest ok N."""
+    got = {r["n_atoms"]: r for r in aggregate(rows)
            if (r.get("host"), r.get("system"), r.get("size"), r.get("code"), r.get("mode"),
                r.get("dtype"), r.get("status")) == (host, system, size, code, mode, dtype, "ok")
            and throughput(r)}
@@ -55,8 +59,10 @@ def summary_table(after, before, host):
                     tb = throughput(b[n0]) if n0 in b else None
                     ta = throughput(a[n0]) if n0 in a else None
                     up = f"{ta / tb:.1f}×" if ta and tb else "—"
+                    cb = si(tb) + spread_pct(b[n0]) if tb else "—"
+                    ca = si(ta) + spread_pct(a[n0]) if ta else "—"
                     out.append(f"| {system} | {size} | {CODES[code][0]} | {mode} "
-                               f"| {si(tb) if tb else '—'} | {si(ta) if ta else '—'} | {up} "
+                               f"| {cb} | {ca} | {up} "
                                f"| {ml_s} | {bmax or '—'} | {amax or '—'} |")
     return "\n".join(out)
 

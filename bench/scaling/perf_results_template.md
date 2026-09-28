@@ -69,6 +69,15 @@ The standalone method changed with the speed-ups:
 
 The neighbour reuse is part of what the branch delivers.
 
+Modal A100 rows vary about 20–25% between containers, even on the same card
+type (A100-SXM4); the same-container A/B in
+`bench/perf/results/microbench_*_fcf6f8e_ab.json` shows it. So the controlled
+before/after comparison is the micro-benchmarks above, which ran both sides in
+one container; the scaling suite's before and after ran in different
+containers. Where a case was run more than once (Modal: separate containers),
+the value is the median, and "±x%" gives half the min–max range over the
+median.
+
 {{summary}}
 
 The linear-ACE LAMMPS lines reach a smaller largest size than before on some

@@ -679,11 +679,12 @@ def test_before_after_series_selects_acejax_and_mlpace_reference():
     before = _ba_rows(t=4e-3)
     s = before_after_series(after, before, "modal-a100")
     assert {k[2] for k in s} == {"acejax-pace", "acejax-ace", "mlpace"}            # no MACE
-    assert s[("Cantor", "standalone", "acejax-pace", "after")] == [(4096, 4096e3, "dense"),
-                                                                  (8192, 8192e3, "dense")]
-    assert s[("Cantor", "standalone", "acejax-pace", "before")][-1] == (8192, 8192 / 4e-3, "dense")
-    assert s[("Cantor", "lammps", "mlpace", "reference")] == [(8192, 8192e3, "dense")]
-    assert s[("Cantor", "standalone", "mlpace", "reference")] == [(8192, 8192e3, "dense")]
+    assert s[("Cantor", "standalone", "acejax-pace", "after")] == [(4096, 4096e3, "dense", None),
+                                                                  (8192, 8192e3, "dense", None)]
+    assert s[("Cantor", "standalone", "acejax-pace", "before")][-1] == (8192, 8192 / 4e-3, "dense",
+                                                                       None)
+    assert s[("Cantor", "lammps", "mlpace", "reference")] == [(8192, 8192e3, "dense", None)]
+    assert s[("Cantor", "standalone", "mlpace", "reference")] == [(8192, 8192e3, "dense", None)]
     assert len(s) == 2 * 2 * 2 + 2              # modes x codes x phases, + reference per mode
 
 
@@ -788,3 +789,105 @@ def test_rows_record_the_device_they_ran_on(tmp_path, monkeypatch):
     rows = [json.loads(l) for l in (tmp_path / "r.jsonl").read_text().splitlines()]
     assert rows and all(r["device_name"] == "NVIDIA A100-SXM4-80GB" for r in rows)
     assert sweep.device_name("cpu")                          # the CPU model, never empty
+
+
+# ---- repeat runs: median point, min-max bar ---------------------------------
+
+def _rep(t, run=None, status="ok", n=8192, host="modal-a100", code="acejax-pace",
+         mode="standalone", **kw):
+    r = _ba_row(code, mode, n, host=host, status=status, t=t, **kw)
+    r["_key"] = [r["model"], mode, n, r["dtype"], r["device"]]
+    if run:
+        r["run"] = run
+    return r
+
+
+def test_load_picks_up_repeats_beside_the_live_files(tmp_path):
+    """repeats/*.jsonl beside the pattern joins the rows it loads, for the live
+    rows and (through before_pattern) for before-perf/repeats/ alike."""
+    from scaling.plot import before_pattern, load
+    res = tmp_path / "results"
+    (res / "repeats").mkdir(parents=True)
+    (res / "before-perf" / "repeats").mkdir(parents=True)
+    (res / "h.jsonl").write_text(json.dumps(_rep(1e-3)) + "\n")
+    (res / "repeats" / "h-run1.jsonl").write_text(json.dumps(_rep(2e-3, run="h-run1")) + "\n")
+    (res / "before-perf" / "h.jsonl").write_text(json.dumps(_rep(4e-3)) + "\n")
+    (res / "before-perf" / "repeats" / "h-run1.jsonl").write_text(
+        json.dumps(_rep(5e-3, run="h-run1")) + "\n")
+    pattern = str(res / "*.jsonl")
+    assert sorted(r.get("run", "live") for r in load(pattern)) == ["h-run1", "live"]
+    before = load(before_pattern(pattern))
+    assert sorted(r["call_s"] for r in before) == [4e-3, 5e-3]
+
+
+def test_aggregate_takes_the_median_and_the_min_max_of_repeats():
+    from scaling.plot import aggregate, spread, throughput
+    rows = [_rep(1e-3), _rep(2e-3, run="a"), _rep(4e-3, run="b"),     # 3 runs of one case
+            _rep(1e-3, n=4096)]                                        # a single run
+    agg = aggregate(rows)
+    assert len(agg) == 2
+    big = next(r for r in agg if r["n_atoms"] == 8192)
+    assert throughput(big) == pytest.approx(8192 / 2e-3)                 # the median run
+    assert spread(big) == pytest.approx((8192 / 4e-3, 8192 / 1e-3))
+    one = next(r for r in agg if r["n_atoms"] == 4096)
+    assert spread(one) is None and one == rows[-1]                       # untouched
+    assert aggregate(agg) == agg                                         # idempotent
+
+
+def test_a_case_ok_in_one_run_and_oom_in_another_is_ok():
+    from scaling.plot import aggregate, largest_fits, spread, throughput
+    rows = [_rep(1e-3, n=4096), _rep(1e-3, n=8192), _rep(None, status="oom", n=8192, run="a"),
+            _rep(None, status="oom", n=16384), _rep(None, status="oom", n=16384, run="a")]
+    agg = aggregate(rows)
+    at = {r["n_atoms"]: r for r in agg}
+    assert at[8192]["status"] == "ok" and spread(at[8192]) is None      # one ok run: no bar
+    assert throughput(at[8192]) == pytest.approx(8192e3)
+    assert at[16384]["status"] == "oom" and len(agg) == 3
+    assert "| modal-a100 | Cantor | ace-jax (PACE model) | standalone | 8192 | 16384 |" in largest_fits(rows)
+
+
+def _bars(fig):
+    """(x, y_lo, y_hi) of every error bar drawn in the figure."""
+    from matplotlib.collections import LineCollection
+    out = []
+    for ax in fig.axes:
+        for c in ax.collections:
+            if isinstance(c, LineCollection):
+                for seg in c.get_segments():
+                    out.append((seg[0][0], min(seg[0][1], seg[1][1]), max(seg[0][1], seg[1][1])))
+    return out
+
+
+@pytest.mark.parametrize("which", ["throughput", "before_after", "model_size"])
+def test_repeats_draw_a_min_max_bar_at_the_median(tmp_path, monkeypatch, which):
+    import matplotlib
+    matplotlib.use("Agg")
+    from scaling import plot
+    single = [_rep(1e-3, n=4096), _rep(1e-3, n=8192)]
+    repeated = single + [_rep(2e-3, run="a", n=8192), _rep(4e-3, run="b", n=8192)]
+    figs = []
+    monkeypatch.setattr(plot.plt, "close", lambda f=None: figs.append(f))
+    draw = {"throughput": lambda rows: plot.fig_throughput(rows, tmp_path),
+            "before_after": lambda rows: plot.fig_before_after(rows, [], tmp_path, "modal-a100"),
+            "model_size": lambda rows: plot.fig_model_size(rows, tmp_path)}[which]
+    draw(single)
+    assert _bars(figs[-1]) == []                                         # one run: no bar
+    draw(repeated)
+    bars = _bars(figs[-1])
+    assert len(bars) == 1
+    _, lo, hi = bars[0]
+    assert (lo, hi) == pytest.approx((8192 / 4e-3, 8192 / 1e-3))
+    ys = [y for ax in figs[-1].axes for ln in ax.lines for y in ln.get_ydata()]
+    assert pytest.approx(8192 / 2e-3) in ys                              # the line's point: median
+
+
+def test_tables_use_the_median_and_show_the_spread():
+    from scaling.perf_results import summaries
+    from scaling.plot import tables
+    rows = [_rep(1e-3, n=8192), _rep(2e-3, run="a", n=8192), _rep(4e-3, run="b", n=8192)]
+    t = tables(rows)
+    # median 4.1M; half the min-max range over the median: (8.19M - 2.05M) / 2 / 4.1M = 75%
+    assert "| 4.1e+06 ±75% |" in t
+    assert "| 8.19e+06 |" in tables(rows[:1])                            # no ± for a single run
+    s = summaries(rows, [_rep(8e-3, n=8192)])
+    assert "| 1.02M | 4.10M ±75% | 4.0× |" in s
