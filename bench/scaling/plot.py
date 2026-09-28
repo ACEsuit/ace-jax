@@ -3,6 +3,9 @@
     python bench/scaling/plot.py 'bench/scaling/results/*.jsonl' docs/figs
 
 Every figure is generated here from committed results; none is edited by hand.
+The ace-jax rows from before the speed-ups are read from the `before-perf/`
+directory beside the pattern, for the before/after figures; the findings and
+parity numbers in the page's intro are filled in from the rows as well.
 Colour follows the code family in a fixed categorical order (validated palette,
 dataviz skill); line style carries the mode (solid = standalone, dashed =
 LAMMPS) and marker fill the ace-jax layout, so identity never rests on colour
@@ -328,6 +331,99 @@ def fig_precision(rows, out, size="medium"):
     return p
 
 
+BEFORE_DIR = "before-perf"            # ace-jax rows from before the speed-ups
+ACEJAX = ("acejax-pace", "acejax-ace")
+PHASES = {"after": "-", "before": "--", "reference": "-"}
+
+
+def before_pattern(pattern):
+    """The glob for the pre-speed-up rows kept beside the live results."""
+    p = pathlib.Path(pattern)
+    return str(p.parent / BEFORE_DIR / p.name)
+
+
+def before_after_series(after, before, host, dtype="float64", size="medium"):
+    """{(system, mode, code, phase): [(n, atom-steps/s, layout)]} for one host:
+    ace-jax "before" (from before-perf/) and "after", and ML-PACE in LAMMPS as
+    the "reference". Empty when the host has no re-run ace-jax rows yet, so a
+    host still being measured is skipped rather than drawn from old rows."""
+    def pick(rows, codes, modes):
+        return [r for r in rows if r.get("host") == host and r.get("status") == "ok"
+                and r.get("code") in codes and r.get("mode") in modes
+                and r.get("dtype") == dtype and r.get("size") == size and throughput(r)]
+    aft = pick(after, ACEJAX, MODES)
+    if not aft:
+        return {}
+    modes = {r["mode"] for r in aft}          # CPU: standalone only (lammps-jax is GPU-only)
+    out = defaultdict(list)
+    for phase, sel in (("after", aft), ("before", pick(before, ACEJAX, modes)),
+                       ("reference", pick(after, ("mlpace",), ("lammps",)))):
+        for r in sel:
+            for mode in (modes if phase == "reference" else (r["mode"],)):
+                out[(r["system"], mode, r["code"], phase)].append(
+                    (r["n_atoms"], throughput(r), r.get("layout")))
+    return {k: sorted(v) for k, v in out.items()}
+
+
+def before_after_hosts(after, before):
+    """(hosts with re-run ace-jax rows, hosts whose re-run is pending)."""
+    def hosts(rows):
+        return {r["host"] for r in rows if r.get("code") in ACEJAX and r.get("mode") in MODES
+                and r.get("status") == "ok"}
+    done = hosts(after)
+    return sorted(done), sorted(hosts(before) - done)
+
+
+def fig_before_after(after, before, out, host, dtype="float64", size="medium"):
+    """ace-jax throughput vs N before (dashed) and after (solid) the speed-ups,
+    one panel per system x mode, with ML-PACE in LAMMPS for reference."""
+    series = before_after_series(after, before, host, dtype, size)
+    if not series:
+        return None
+    systems = sorted({k[0] for k in series})
+    modes = [m for m in MODES if any(k[1] == m for k in series)]
+    fig, axes = _panels(len(systems), len(modes))
+    for i, system in enumerate(systems):
+        for j, mode in enumerate(modes):
+            ax = axes[i][j]
+            for (s, m, code, phase), pts in sorted(series.items()):
+                if s != system or m != mode:
+                    continue
+                c = CODES[code][1]
+                xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+                ax.plot(xs, ys, color=c, ls=PHASES[phase], lw=1.2 if phase == "reference" else 1.6,
+                        zorder=2)
+                for x, y, lay in pts:                  # hollow marker = sparse layout
+                    ax.plot(x, y, marker="o", ms=4 if phase == "before" else 5, color=c, zorder=3,
+                            mfc="none" if lay == "sparse" else c)
+                if phase != "before":
+                    _end_label(ax, xs[-1], ys[-1], SHORT[code])
+            _xatoms(ax)
+            _ylog(ax)
+            ax.set_title(f"{system} · ace-jax {mode} · {host}", fontsize=9, color=INK)
+            if i == len(systems) - 1:
+                ax.set_xlabel("atoms", fontsize=8, color=INK2)
+            if j == 0:
+                ax.set_ylabel("atom-steps / s", fontsize=8, color=INK2)
+    from matplotlib.lines import Line2D
+    handles = [Line2D([], [], color=CODES[c][1], lw=2, marker="o", ms=6,
+                      label=CODES[c][0] + (" in LAMMPS (reference)" if c == "mlpace" else ""))
+               for c in (*ACEJAX, "mlpace") if any(k[2] == c for k in series)]
+    handles += [Line2D([], [], color=MUTED, lw=2, ls="-", label="after the speed-ups"),
+                Line2D([], [], color=MUTED, lw=2, ls="--", label="before"),
+                Line2D([], [], color=MUTED, lw=0, marker="o", ms=6, mfc="none",
+                       label="hollow = ace-jax sparse layout")]
+    fig.legend(handles=handles, loc="lower center", bbox_to_anchor=(0.5, 1.0),
+               ncol=max(2, min(len(handles), int(fig.get_figwidth() // 2))), frameon=False,
+               fontsize=8, labelcolor=INK2)
+    fig.tight_layout(rect=(0, 0, 0.94, 1), w_pad=3.0)
+    _place_labels(fig)
+    p = out / f"scaling_before_after_{dtype}_{size}_{host}.png"
+    fig.savefig(p, dpi=160, bbox_inches="tight")     # keeps the figure legend
+    plt.close(fig)
+    return p
+
+
 def tables(rows):
     """Markdown: throughput at fixed N per host (the table view) and compile times."""
     ok = [r for r in rows if r.get("status") == "ok" and r.get("mode") in MODES and throughput(r)]
@@ -368,7 +464,138 @@ def largest_fits(rows, size="medium", dtype="float64"):
     return "\n".join(out)
 
 
+def target_n(host):
+    """The fixed size compared across codes: 8,192 atoms on GPU, 2,048 on CPU."""
+    return 2048 if "cpu" in host else 8192
+
+
+def si(v):
+    """Compact atom-steps/s: 346k, 1.58M."""
+    return f"{v / 1e6:.2f}M" if v >= 1e6 else f"{v / 1e3:.0f}k" if v >= 1e3 else f"{v:.0f}"
+
+
+def _rng(vals, fmt):
+    """'a–b' over the values (one value when they format the same)."""
+    lo, hi = fmt(min(vals)), fmt(max(vals))
+    return lo if lo == hi else f"{lo}–{hi}"
+
+
+def line_points(rows, host, code, mode, dtype="float64", size="medium"):
+    """{system: {n: atom-steps/s}} for one line's ok rows on a host."""
+    out = defaultdict(dict)
+    for r in rows:
+        if (r.get("host") == host and r.get("code") == code and r.get("mode") == mode
+                and r.get("dtype") == dtype and r.get("size") == size
+                and r.get("status") == "ok" and throughput(r)):
+            out[r["system"]][r["n_atoms"]] = throughput(r)
+    return out
+
+
+def _ratio_cell(rows, host, num, den):
+    """num / den throughput per system, at the host's target N, or at the
+    largest N both ran below it (annotated). num, den: (code, mode, dtype)."""
+    a, b, n0 = line_points(rows, host, *num), line_points(rows, host, *den), target_n(host)
+    got = []
+    for s in sorted(set(a) & set(b)):
+        common = [n for n in set(a[s]) & set(b[s]) if n <= n0]
+        if common:
+            n = max(common)
+            got.append((n, a[s][n] / b[s][n]))
+    if not got:
+        return "—"
+    cell = _rng([g[1] for g in got], lambda v: f"{v:.2g}") + "×"
+    below = sorted({n for n, _ in got if n != n0})
+    return cell + (f" (at {', '.join(map(str, below))})" if below else "")
+
+
+def _value_cell(rows, host, code, mode):
+    pts = line_points(rows, host, code, mode)
+    vals = [p[target_n(host)] for p in pts.values() if target_n(host) in p]
+    return _rng(vals, si) if vals else "—"
+
+
+def _largest_cell(rows, host, code):
+    pts = line_points(rows, host, code, "standalone")
+    return _rng([max(p) for p in pts.values()], str) if pts else "—"
+
+
+def findings(rows):
+    """Markdown: the numbers behind the benchmarks page's findings, recomputed
+    from the rows on every render (medium models, ranges over the two systems).
+    A host whose ace-jax rows are still being re-run shows "pending"."""
+    hosts = sorted({r["host"] for r in rows if r.get("mode") in MODES and r.get("status") == "ok"})
+    has_acejax = {r["host"] for r in rows if r.get("code") in ACEJAX and r.get("mode") in MODES}
+    out = ["ML-PACE in LAMMPS against ace-jax PACE on the same `.yace` models (float64, "
+           "atom-steps/s):", "",
+           "| host | N | ML-PACE in LAMMPS | ace-jax standalone | ace-jax in LAMMPS "
+           "| ML-PACE ÷ ace-jax standalone | ML-PACE ÷ ace-jax in LAMMPS |",
+           "|---|---|---|---|---|---|---|"]
+    ml = ("mlpace", "lammps", "float64")
+    for h in hosts:
+        if h not in has_acejax:
+            out.append(f"| {h} | {target_n(h)} | {_value_cell(rows, h, 'mlpace', 'lammps')} "
+                       "| pending | pending | pending | pending |")
+            continue
+        out.append(f"| {h} | {target_n(h)} | {_value_cell(rows, h, 'mlpace', 'lammps')} "
+                   f"| {_value_cell(rows, h, 'acejax-pace', 'standalone')} "
+                   f"| {_value_cell(rows, h, 'acejax-pace', 'lammps')} "
+                   f"| {_ratio_cell(rows, h, ml, ('acejax-pace', 'standalone', 'float64'))} "
+                   f"| {_ratio_cell(rows, h, ml, ('acejax-pace', 'lammps', 'float64'))} |")
+    out += ["", "ace-jax against MACE, same mode (float64 throughput ratio; where MACE ran out "
+            "of memory at N, at the largest size both ran):", "",
+            "| host | mode | ace-jax PACE ÷ MACE | ace-jax ACE ÷ MACE |", "|---|---|---|---|"]
+    for h in hosts:
+        for mode in MODES:
+            if mode == "lammps" and "cpu" in h:     # lammps-jax is GPU-only
+                continue
+            if h not in has_acejax:
+                out.append(f"| {h} | {mode} | pending | pending |")
+                continue
+            cells = [_ratio_cell(rows, h, (c, mode, "float64"), ("mace", mode, "float64"))
+                     for c in ACEJAX]
+            if any(c != "—" for c in cells):
+                out.append(f"| {h} | {mode} | {cells[0]} | {cells[1]} |")
+    out += ["", "Largest system that ran standalone (float64, atoms), and the float32 / float64 "
+            "throughput ratio at N:", "",
+            "| host | largest: ace-jax PACE | ace-jax ACE | MACE "
+            "| f32 ÷ f64: ace-jax PACE | ace-jax ACE | MACE |", "|---|---|---|---|---|---|---|"]
+    for h in hosts:
+        pend = h not in has_acejax
+        big = ["pending" if pend and c in ACEJAX else _largest_cell(rows, h, c)
+               for c in (*ACEJAX, "mace")]
+        f32 = ["pending" if pend and c in ACEJAX else
+               _ratio_cell(rows, h, (c, "standalone", "float32"), (c, "standalone", "float64"))
+               for c in (*ACEJAX, "mace")]
+        out.append(f"| {h} | " + " | ".join(big + f32) + " |")
+    return "\n".join(out)
+
+
+def parity_table(rows):
+    """Markdown: the parity gates per host (gate x code): passed / run, and the
+    largest energy-per-atom and force differences. No rows: pending."""
+    by = defaultdict(list)
+    for r in rows:
+        if r.get("mode") == "parity" and str(r.get("status", "")).startswith("parity_"):
+            by[(r["host"], r.get("gate", r["code"]), r["code"])].append(r)
+    if not by:
+        return "No parity rows yet (pending)."
+    out = ["| host | gate | code | passed | max abs dE / atom (eV) | max abs dF (eV/Å) |",
+           "|---|---|---|---|---|---|"]
+    for (h, gate, code), rs in sorted(by.items()):
+        ok = sum(r["status"] == "parity_ok" for r in rs)
+        de = max(abs(r.get("dE_per_atom") or 0.0) for r in rs)
+        df = max(abs(r.get("max_dF") or 0.0) for r in rs)
+        out.append(f"| {h} | {gate} | {CODES[code][0]} | {ok}/{len(rs)} | {de:.1e} | {df:.1e} |")
+    timed = {r["host"] for r in rows if r.get("mode") in MODES}
+    for h in sorted(timed - {k[0] for k in by}):
+        out.append(f"| {h} | — | — | pending | | |")
+    return "\n".join(out)
+
+
 CAPTIONS = {
+    "scaling_before_after": "ace-jax throughput before (dashed) and after (solid) the "
+                            "speed-ups, float64, medium models; ML-PACE in LAMMPS for "
+                            "reference. Before rows: `bench/scaling/results/before-perf/`.",
     "scaling_throughput_float64": "Throughput vs system size (float64, medium models): "
                                   "solid = standalone, dashed = LAMMPS.",
     "scaling_throughput_float32": "The same in float32. ML-PACE and Symmetrix (MACE in "
@@ -391,6 +618,8 @@ def make_figures(pattern, outdir):
     out.mkdir(parents=True, exist_ok=True)
     figs = [fig_throughput(rows, out, dt) for dt in ("float64", "float32")]
     figs += [fig_model_size(rows, out), fig_memory(rows, out), fig_precision(rows, out)]
+    before = load(before_pattern(pattern))
+    figs += [fig_before_after(rows, before, out, h) for h in before_after_hosts(rows, before)[0]]
     return [str(f) for f in figs if f]
 
 
@@ -401,8 +630,13 @@ def write_doc(pattern, figs, doc="docs/benchmarks.md"):
         if r.get("versions"):
             versions[r["host"]] = r["versions"]
     intro = pathlib.Path(__file__).with_name("benchmarks_intro.md").read_text().strip()
+    intro = intro.replace("{{findings}}", findings(rows)).replace("{{parity}}", parity_table(rows))
     body = ["# Benchmarks", "", intro, "", "## Figures", "",
             "Hollow markers: ace-jax chose the sparse layout.", ""]
+    pending = before_after_hosts(rows, load(before_pattern(pattern)))[1]
+    if pending:
+        body += [f"Before/after figures pending (ace-jax rows being re-run): {', '.join(pending)}.",
+                 ""]
     for f in figs:
         stem = pathlib.Path(f).stem
         rel = (pathlib.Path(f).relative_to(pathlib.Path(doc).parent)

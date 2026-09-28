@@ -651,3 +651,100 @@ def test_model_size_figure_plots_only_the_target_size(tmp_path, monkeypatch):
     plot.fig_model_size(rows, tmp_path)
     xs = sorted(x for ax in figs[-1].axes for ln in ax.lines for x in ln.get_xdata())
     assert xs == [0, 2]                            # medium (only 4096) is absent
+
+
+def _ba_row(code, mode, n, host="modal-a100", dtype="float64", size="medium", system="Cantor",
+            status="ok", t=1e-3):
+    return {"code": code, "mode": mode, "model": f"{code}/{system}/{size}", "size": size,
+            "system": system, "n_atoms": n, "device": "cpu" if "cpu" in host else "gpu",
+            "dtype": dtype, "host": host, "status": status, "call_s": t, "step_s": t,
+            "layout": "dense"}
+
+
+def _ba_rows(host="modal-a100", t=1e-3):
+    rows = [_ba_row(c, m, n, host=host, t=t) for c in ("acejax-pace", "acejax-ace")
+            for m in ("standalone", "lammps") for n in (4096, 8192)]
+    rows += [_ba_row("acejax-pace", "standalone", 8192, host=host, dtype="float32", t=t),   # dtype
+             _ba_row("acejax-pace", "standalone", 8192, host=host, size="small", t=t),      # size
+             _ba_row("acejax-pace", "standalone", 16384, host=host, status="oom", t=t)]     # not ok
+    return rows
+
+
+def test_before_after_series_selects_acejax_and_mlpace_reference():
+    """The before/after figure: float64 medium ace-jax lines, before from
+    before-perf/ and after from the live rows, with ML-PACE in LAMMPS drawn
+    in every panel of its system as the reference."""
+    from scaling.plot import before_after_series
+    after = _ba_rows() + [_ba_row("mlpace", "lammps", 8192), _ba_row("mace", "standalone", 8192),
+                          _ba_row("acejax-pace", "standalone", 8192, host="moriarty-gpu")]
+    before = _ba_rows(t=4e-3)
+    s = before_after_series(after, before, "modal-a100")
+    assert {k[2] for k in s} == {"acejax-pace", "acejax-ace", "mlpace"}            # no MACE
+    assert s[("Cantor", "standalone", "acejax-pace", "after")] == [(4096, 4096e3, "dense"),
+                                                                  (8192, 8192e3, "dense")]
+    assert s[("Cantor", "standalone", "acejax-pace", "before")][-1] == (8192, 8192 / 4e-3, "dense")
+    assert s[("Cantor", "lammps", "mlpace", "reference")] == [(8192, 8192e3, "dense")]
+    assert s[("Cantor", "standalone", "mlpace", "reference")] == [(8192, 8192e3, "dense")]
+    assert len(s) == 2 * 2 * 2 + 2              # modes x codes x phases, + reference per mode
+
+
+def test_before_after_without_before_rows_or_host_rows(tmp_path, monkeypatch):
+    """Rows not yet re-run (moriarty) or no before-perf/ directory: the figure
+    draws what exists, skips a host with no re-run ace-jax rows, and the page
+    lists that host as pending instead of failing."""
+    import matplotlib
+    matplotlib.use("Agg")
+    from scaling import plot
+    after = _ba_rows() + [_ba_row("mlpace", "lammps", 8192, host="moriarty-gpu")]
+    before = _ba_rows(t=4e-3) + _ba_rows(host="moriarty-gpu", t=4e-3)
+    # no before rows at all: after + reference only
+    s = plot.before_after_series(after, [], "modal-a100")
+    assert s and {k[3] for k in s} == {"after"}
+    # a host whose ace-jax rows are pending: nothing drawn, listed as pending
+    assert plot.before_after_series(after, before, "moriarty-gpu") == {}
+    assert plot.fig_before_after(after, before, tmp_path, "moriarty-gpu") is None
+    assert plot.before_after_hosts(after, before) == (["modal-a100"], ["moriarty-gpu"])
+    # CPU: ace-jax runs standalone only, so the figure has one mode column
+    cpu = [r for r in _ba_rows(host="moriarty-cpu") if r["mode"] == "standalone"]
+    assert {k[1] for k in plot.before_after_series(cpu, [], "moriarty-cpu")} == {"standalone"}
+    # end to end: make_figures + write_doc with results/ and results/before-perf/
+    res = tmp_path / "results"
+    (res / plot.BEFORE_DIR).mkdir(parents=True)
+    (res / "h.jsonl").write_text("\n".join(json.dumps(r) for r in after))
+    figs = []
+    monkeypatch.setattr(plot.plt, "close", lambda f=None: figs.append(f))
+    out = plot.make_figures(str(res / "*.jsonl"), tmp_path / "figs")        # before-perf/ empty
+    assert any(pathlib.Path(f).name == "scaling_before_after_float64_medium_modal-a100.png"
+               for f in out)
+    (res / plot.BEFORE_DIR / "h.jsonl").write_text("\n".join(json.dumps(r) for r in before))
+    out = plot.make_figures(str(res / "*.jsonl"), tmp_path / "figs")
+    ba = [f for f in out if pathlib.Path(f).name.startswith("scaling_before_after")]
+    assert len(ba) == 1 and ba[0].endswith("modal-a100.png")
+    dashed = [ln for ax in figs[-1].axes for ln in ax.lines
+              if ln.get_linestyle() == "--" and len(ln.get_xdata()) > 1]
+    assert dashed                                                            # the before lines
+    text = pathlib.Path(plot.write_doc(str(res / "*.jsonl"), out, doc=str(tmp_path / "b.md"))).read_text()
+    assert "pending (ace-jax rows being re-run): moriarty-gpu" in text
+    assert "{{" not in text                                                  # placeholders filled
+    assert "| moriarty-gpu | 8192 | 8.19M | pending |" in text               # findings
+    gate = {"code": "mlpace", "mode": "parity", "gate": "mlpace", "host": "modal-a100",
+            "status": "parity_ok", "dE_per_atom": 1e-14, "max_dF": 1e-10}
+    par = plot.parity_table(after + [gate])
+    assert "| modal-a100 | mlpace | ML-PACE | 1/1 | 1.0e-14 | 1.0e-10 |" in par
+    assert par.endswith("| moriarty-gpu | — | — | pending | | |")        # gates not re-run yet
+
+
+def test_perf_results_tables_mark_pending_hosts():
+    """The results doc's summary covers every host with re-run rows and marks
+    the others pending; the criteria compare the Cantor medium A100 rows."""
+    from scaling.perf_results import criteria_table, summaries
+    after = _ba_rows(t=8192 / 1.2e6)
+    before = _ba_rows(t=8192 / 4e5) + _ba_rows(host="moriarty-gpu")
+    text = summaries(after, before)
+    assert "### modal-a100" in text and "### moriarty-gpu" in text
+    assert "Pending: the ace-jax rows are being re-run." in text
+    assert "| Cantor | medium | ace-jax (PACE model) | standalone | 400k | 1.20M | 3.0× | — | 8192 | 8192 |" in text
+    crit = criteria_table(after, before)
+    assert "| end to end (scaling suite, standalone) | ≥ 1.10M atom-steps/s | 400k | 1.20M | **met** |" in crit
+    assert "| LAMMPS throughput | ≥ 1.00M atom-steps/s | 400k | 1.20M | **met** |" in crit
+    assert "| LAMMPS runs at 32,768 atoms | runs | did not run | did not run | **missed** |" in crit
