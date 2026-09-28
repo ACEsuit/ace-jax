@@ -12,7 +12,9 @@ import modal
 HOME = pathlib.Path.home()
 ACEGP = pathlib.Path(os.environ.get("ACEGP_DATA", HOME / "acegp-data"))   # data + generated sets
 DATA = HOME / "acegp-data" / "cantor"
-WT = pathlib.Path(os.environ.get("ACEJAX_SRC", pathlib.Path(__file__).resolve().parents[3]))   # ace-jax checkout
+_HERE = pathlib.Path(__file__).resolve()
+# ace-jax checkout (local only: inside the container this module is /root/modal_bench365.py)
+WT = pathlib.Path(os.environ.get("ACEJAX_SRC", _HERE.parents[3] if len(_HERE.parents) > 3 else _HERE.parent))
 image = (
     modal.Image.debian_slim(python_version="3.11")
     .apt_install("git")
