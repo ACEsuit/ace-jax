@@ -213,18 +213,30 @@ def _rd_args(prob, ds, P=2, span="full", seed=0):
     return V, H, common, shapes
 
 
-def test_rd_gradient_matches_fd(small):
+@pytest.mark.parametrize("seed", [0, 3])
+def test_rd_gradient_matches_fd(small, seed):
     from ace_jax.fit.radial_density import _objective_rd, _pack
     prob, ds, _ = small
     V, H, common, shapes = _rd_args(prob, ds)
     r = jnp.asarray([1.0, 3.0])
     x, other = _pack(V, H, r, "joint")
-    f = lambda y: _objective_rd(y, other, *common, r, prob.cfg, "joint", shapes)
-    g = jax.grad(f)(x)
-    D = jnp.asarray(np.random.default_rng(0).standard_normal(x.shape))
-    h = 1e-6
-    fd = (float(f(x + h * D)) - float(f(x - h * D))) / (2 * h)
-    assert abs(float(g @ D) - fd) < 1e-5 * abs(fd)
+    f = lambda y: float(_objective_rd(y, other, *common, r, prob.cfg, "joint", shapes))
+    g = jax.grad(lambda y: _objective_rd(y, other, *common, r, prob.cfg, "joint", shapes))(x)
+    nV = V.size
+    # Per block: f ~ 2.5e8 with cond(G) ~ 5e23 leaves ~6.6e-5 absolute roundoff in f, so V needs
+    # h = 1e-4 and a gradient-weighted direction (a random one can be near-orthogonal to g_V);
+    # the ssqrt kink (sites with rho ~ 0) needs small h in H, hence a 5-point stencil there.
+    R = jnp.asarray(np.random.default_rng(seed).standard_normal(x.shape))
+    gV = g.at[nV:].set(0.0)
+    DV = (gV / jnp.linalg.norm(gV) * np.sqrt(nV) + R.at[nV:].set(0.0)) / np.sqrt(2)
+    DH = R.at[:nV].set(0.0)
+    h = 1e-4
+    fdV = (f(x + h * DV) - f(x - h * DV)) / (2 * h)
+    h = 1e-5
+    fdH = (-f(x + 2 * h * DH) + 8 * f(x + h * DH) - 8 * f(x - h * DH) + f(x - 2 * h * DH)) / (12 * h)
+    eV, eH = abs(float(g @ DV) - fdV) / abs(fdV), abs(float(g @ DH) - fdH) / abs(fdH)
+    print(f"seed={seed} V rel={eV:.2e} H rel={eH:.2e}")
+    assert eV < 2e-4 and eH < 1e-4
 
 
 def test_rd_objective_gauge_and_precond_invariant(small):
