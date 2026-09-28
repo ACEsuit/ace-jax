@@ -198,17 +198,17 @@ def step(model, u, arrays, rc, K):
                                        jnp.max(cnt, initial=0).astype(dt), jnp.sum(cnt).astype(dt)])])
 
 
-def jitted_step(model, rc):
-    """`step` compiled for `model` and cutoff `rc`: f(u, arrays, K=K) -> packed.
-    One jax.jit over the model's arrays (C++ dispatch); the static part of the
-    model and rc are closed over, and matmul precision is fixed at trace time."""
+def jitted_step(static, rc):
+    """`step` compiled for a model structure and cutoff `rc`: f(params, u, arrays,
+    K=K) -> packed, where (params, static) = eqx.partition(model, eqx.is_array).
+    One jax.jit over the model's arrays (C++ dispatch), passed per call so new
+    weights of the same structure take effect without a retrace; the static part
+    and rc are closed over, and matmul precision is fixed at trace time."""
     import equinox as eqx
-    params, static = eqx.partition(model, eqx.is_array)
     rc = float(rc)
 
     def packed(params, u, arrays, K):
         with jax.default_matmul_precision("highest"):
             return step(eqx.combine(params, static), u, arrays, rc, K)
 
-    f = jax.jit(packed, static_argnames=("K",))
-    return lambda u, arrays, K: f(params, u, arrays, K=K)
+    return jax.jit(packed, static_argnames=("K",))

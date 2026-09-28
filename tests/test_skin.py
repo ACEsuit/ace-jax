@@ -195,3 +195,72 @@ def test_unknown_element_named():
     at.numbers[3] = 6
     with pytest.raises(ValueError, match=r"\b6\b"):
         _efs(ACECalculator(M, layout="dense", skin=1.0), at)
+
+
+def _counting(monkeypatch):
+    """Count traces of the dense model body (the skin step's jit traces it once)."""
+    from ace_jax.eval.edge_model import EdgeSiteModel
+    calls = []
+    orig = EdgeSiteModel.energy_forces_virial_dense
+
+    def counted(self, *a, **k):
+        calls.append(1)
+        return orig(self, *a, **k)
+
+    monkeypatch.setattr(EdgeSiteModel, "energy_forces_virial_dense", counted)
+    return calls
+
+
+def _perturbed(model):
+    """The same structure with other weights: E0 shifted, the pair readout scaled."""
+    import equinox as eqx
+    return eqx.tree_at(lambda m: (m.E0, m.Wpair), model, (model.E0 + 1.0, model.Wpair * 1.1))
+
+
+@pytest.mark.parametrize("layout", ["dense", "sparse"])
+def test_model_swap_between_calls_uses_the_new_model(monkeypatch, layout):
+    """Setting calc.model takes effect on the next call (as it did before the
+    skin list), with no retrace when only the weights changed."""
+    calls = _counting(monkeypatch)
+    at = _cell("tric")
+    c = ACECalculator(M, layout=layout, skin=1.0)
+    old = _efs(c, at)
+    c.model = _perturbed(c.model)
+    at.positions[0] += [0.01, 0, 0]                        # inside the skin: no rebuild needed
+    got = _efs(c, at)
+    want = _efs(ACECalculator(c.model, c.meta, layout=layout, skin=0.0), at)
+    _close(got, want)
+    assert abs(got[0] - old[0] - len(at)) > 1e-6         # the pair weights took effect too
+    if layout == "dense":
+        assert c.last_layout == "dense"
+        assert len(calls) == 2                             # c's one trace + the fresh calc's
+    c.get_potential_energy(at)
+    c.model = _perturbed(c.model)                          # ASE's result cache is dropped too
+    assert c.get_potential_energy(at) != got[0]
+    # and back again, still without a retrace
+    n_calls = len(calls)
+    c.model = ACECalculator(M).model
+    at.positions[0] -= [0.01, 0, 0]
+    _close(_efs(c, at), old)
+    if layout == "dense":
+        assert len(calls) == n_calls
+
+
+def test_skin_toggled_after_construction():
+    """skin 0 -> 1 -> 0 on a live calculator: the skin list is built on first
+    use and dropped when skin is set back to 0."""
+    at = _cell("tric")
+    ref = ACECalculator(M, layout="dense", skin=0.0)
+    c = ACECalculator(M, layout="dense", skin=0.0)
+    _close(_efs(c, at), _efs(ref, at))
+    c.skin = 1.0
+    n0 = c.last_timing["rebuilds"]
+    for _ in range(2):
+        at.positions[0] += [0.01, 0, 0]
+        _close(_efs(c, at), _efs(ref, at))
+    assert c._skin_state is not None and c.last_timing["rebuilds"] == n0 + 1
+    c.skin = 0.0
+    assert c._skin_state is None
+    _close(_efs(c, at), _efs(ref, at))
+    assert c.last_timing["rebuilds"] == n0 + 2 and c._skin_state is None
+

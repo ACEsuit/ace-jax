@@ -85,22 +85,20 @@ class ACECalculator(Calculator):
         super().__init__(**kw)
         from ..eval.api import _resolve
         model, meta = _resolve(model, meta, dtype)
-        self.model = model
+        self._skin_jit = None                 # (static model part, cutoff, compiled step)
+        self.model = model                    # (the setter resets what derives from it)
         self.meta = meta
         self.edge_a_kind = edge_a_kind
         self.last_edge_a_kind = None
         self.layout = layout
         self.last_layout = None
-        self._by_kind = {}                    # form -> model in that form
-        self._by_bucket = {}                  # edge bucket -> calibrated form
         self.cutoff = float(cutoff if cutoff is not None else meta["rcut"])
         self._z2i = {int(z): i for i, z in enumerate(meta["elements"])}
         self.dtype = dtype
         self.last_timing = None
         self._k_hint = None                   # dense row capacity, learnt from the first call
         self._nl_gpu = True                   # build the dense graph on the GPU when possible
-        self.skin = float(skin)
-        self._skin_state = None               # the skin list in use (calc.skin.SkinState)
+        self.skin = skin                      # (the setter drops any skin list)
         self._rebuilds = 0                    # calls that built a neighbour list
         self._lut = skin_list.species_lut(meta["elements"])
         # compiled entry points: run eagerly, a call dispatches thousands of ops
@@ -113,7 +111,49 @@ class ACECalculator(Calculator):
         self._efv_sparse = eqx.filter_jit(
             lambda m, rij, zi, zj, s, r, n, nz, emask: m.energy_forces_virial(
                 rij, zi, zj, s, r, n, nz, emask))
-        self._skin_step = skin_list.jitted_step(self.model, self.cutoff) if self.skin > 0 else None
+
+    @property
+    def model(self):
+        return self._model
+
+    @model.setter
+    def model(self, model):
+        """A new model takes effect on the next call: what was derived from the
+        old one (its edge_a forms, the skin list and the step bound to its
+        weights) is dropped.  The compiled step is kept while the structure
+        (the static part) is unchanged, so new weights do not retrace.  ASE's
+        cached results are cleared too, as they are for a parameter change."""
+        if hasattr(self, "_model"):
+            self.reset()
+        self._model = model
+        self._by_kind = {}                    # form -> model in that form
+        self._by_bucket = {}                  # edge bucket -> calibrated form
+        self._skin_state = None               # the skin list in use (calc.skin.SkinState)
+        self._skin_step = None                # f(u, arrays, K), bound to this model's weights
+
+    @property
+    def skin(self):
+        return self._skin
+
+    @skin.setter
+    def skin(self, skin):
+        if not skin >= 0:
+            raise ValueError(f"skin must be >= 0, got {skin!r}")
+        self._skin = float(skin)
+        self._skin_state = None               # built for the old skin (or none)
+
+    def _step(self):
+        """The skin step bound to the current model's weights, compiled once per
+        (model structure, cutoff) and built on first use."""
+        if self._skin_step is None:
+            import equinox as eqx
+            params, static = eqx.partition(self.model, eqx.is_array)
+            key = (static, self.cutoff)
+            if self._skin_jit is None or not bool(self._skin_jit[:2] == key):
+                self._skin_jit = (*key, skin_list.jitted_step(static, self.cutoff))
+            f = self._skin_jit[2]
+            self._skin_step = lambda u, arrays, K: f(params, u, arrays, K=K)
+        return self._skin_step
 
     def _species_index(self, numbers):
         try:
@@ -167,7 +207,7 @@ class ACECalculator(Calculator):
         t0 = time.perf_counter()
         u = jax.device_put(st.displacements(pos, dtype))
         E, F, V, drift, overflow, k_max, n_edges = skin_list.unpack(
-            self._skin_step(u, st.arrays, K=st.K), n)
+            self._step()(u, st.arrays, K=st.K), n)
         if drift or overflow:
             # an atom moved skin / 2 (valid() checked in float64; this is the
             # model dtype), or gained neighbours inside the cutoff past K
@@ -179,7 +219,7 @@ class ACECalculator(Calculator):
             t0 += time.perf_counter() - t1
             u = jax.device_put(st.displacements(pos, dtype))       # zero: the list is new
             E, F, V, drift, overflow, k_max, n_edges = skin_list.unpack(
-                self._skin_step(u, st.arrays, K=st.K), n)
+                self._step()(u, st.arrays, K=st.K), n)
             if drift or overflow:
                 raise RuntimeError("skin list invalid straight after a rebuild")
         t_model = time.perf_counter() - t0
