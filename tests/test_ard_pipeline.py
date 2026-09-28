@@ -93,3 +93,23 @@ def test_fit_hands_the_cached_statistics_to_the_ard_stage(monkeypatch):
     cfg = _cfg().validate()
     fit(cfg, load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz")), log=lambda *a: None)
     assert len(seen) == 1 and seen[0] is not None and hasattr(seen[0], "G_F")
+
+
+def test_ard_checkpoint_survives_a_failure_in_prediction(tmp_path, monkeypatch):
+    """I2: the stock checkpoint writer writes posterior.npz and ard.json when the "ard" stage fires."""
+    import ace_jax.fit.pipeline.run as R
+    from ace_jax.fit.ard import ARDPosterior
+    from ace_jax.fit.pipeline import load_fit_data
+    from ace_jax.fit.pipeline.outputs import checkpoint_writer
+
+    def boom(*a, **k):
+        raise RuntimeError("OOM in prediction")
+
+    monkeypatch.setattr(R, "predict_splits", boom)
+    cfg = _cfg().validate()
+    with pytest.raises(RuntimeError, match="OOM"):
+        R.fit(cfg, load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz")), log=lambda *a: None,
+              on_stage=checkpoint_writer(tmp_path))
+    assert (tmp_path / "posterior.npz").exists() and (tmp_path / "ard.json").exists()
+    assert ARDPosterior.load(tmp_path / "posterior.npz").kappa > 0
+    assert json.load(open(tmp_path / "ard.json"))["mode"] == "joint"

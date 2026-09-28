@@ -31,7 +31,7 @@ p.add_argument("--pca-d", type=int, default=128, help="width of the --density pc
 p.add_argument("--warp", choices=["none", "sqrt"], default="none",
                help="feature warp: sqrt gives the Finnis-Sinclair sqrt-density embedding")
 p.add_argument("--no-deriv-dtc", action="store_true", help="force/virial variance SoR only (drop the derivative-DTC)")
-p.add_argument("--uq", choices=["blr", "pops"], default="blr", help="linear-arm predictive UQ: blr (posterior variance, today's default) or pops (weight-space misspecification). pops requires --arm linear.")
+p.add_argument("--uq", choices=["blr", "pops", "ard"], default="blr", help="linear-arm predictive UQ: blr (posterior variance, today's default), pops (weight-space misspecification) or ard (tempered ARD posterior, joint mode; writes posterior.npz and ard.json, and its mean replaces the MAP mean). pops and ard require --arm linear.")
 p.add_argument("--pops-posterior", choices=["hypercube", "ensemble"], default="hypercube", help="POPS posterior form (uq=pops): hypercube (PCA/box misspecification covariance; DEFAULT, matches upstream popsregression) or ensemble (committee of weight samples; centred). ('samples' is reserved for a future draw-from-Sigma route.)")
 p.add_argument("--pops-leverage-pct", type=float, default=0.0, help="POPS leverage percentile (uq=pops); 0 keeps every training point")
 p.add_argument("--pops-ridge", default="auto",

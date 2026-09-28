@@ -27,12 +27,21 @@ def _write_stage(out, name, payload):
             _dump(out / "laplace_info.json", payload.info["laplace"])
         if "nuts" in payload.info:
             _dump(out / "nuts_summary.json", payload.info["nuts"])
+    elif name == "ard":
+        _write_ard(out, payload)
+
+
+def _write_ard(out, ard):
+    """posterior.npz + ard.json of an ARDResult (the checkpoint and write_outputs alike)."""
+    ard.posterior.save(out / "posterior.npz")
+    _dump(out / "ard.json", ard.report)
 
 
 def checkpoint_writer(out):
     """An on_stage callback for fit(): writes split_perm.npy, theta_map.json,
-    map_restarts.json, draws_*.npy, laplace_info.json as each stage finishes (the
-    run.py layout), so they survive a failure in a later stage."""
+    map_restarts.json, draws_*.npy, laplace_info.json, and (uq "ard") posterior.npz and
+    ard.json as each stage finishes (the run.py layout), so they survive a failure in a
+    later stage."""
     out = pathlib.Path(out); out.mkdir(parents=True, exist_ok=True)
     return lambda name, payload: _write_stage(out, name, payload)
 
@@ -86,8 +95,7 @@ def write_outputs(res, out, layout=("run",), argv=None, save_model=True, model_d
                                         "len_basis": b.gpcfg.len_basis, "n_train": len(d.train),
                                         "n_test": len(d.test)})
     if res.ard is not None:
-        res.ard.posterior.save(out / "posterior.npz")
-        _dump(out / "ard.json", res.ard.report)
+        _write_ard(out, res.ard)
     if save_model:
         from .export import save_model as _save
         path = _save(res, out, n_draws=model_draws, log=log)
