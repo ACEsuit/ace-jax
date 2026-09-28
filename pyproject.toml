@@ -123,6 +123,7 @@ ignore = [
 "src/ace_jax/fit/radial_model.py" = ["B023"]
 "src/ace_jax/fit/solve.py" = ["B023"]
 "src/ace_jax/fit/stats.py" = ["B023"]
+"tests/test_ard.py" = ["B023"]
 "tests/test_gp_learn_radial.py" = ["B023"]
 "tests/test_gp_pops_paper.py" = ["B023"]
 "tests/test_gp_rows.py" = ["B023"]
