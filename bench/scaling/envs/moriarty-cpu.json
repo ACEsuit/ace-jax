@@ -1,0 +1,2 @@
+{"lmp": "/home/eng/essswb/bench-scaling/lmp.sh", "lmp_jax": "/home/eng/essswb/bench-scaling/lmp-jax.sh", "pjrt": "/home/eng/essswb/bench-scaling/venv/lib/python3.12/site-packages/jax_plugins/xla_cuda12/xla_cuda_plugin.so", "pythonpath": "/home/eng/essswb/bench-scaling/ace-jax/bench",
+ "python": "/home/eng/essswb/bench-scaling/venv/bin/python", "root": "/home/eng/essswb/bench-scaling"}

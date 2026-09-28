@@ -43,7 +43,7 @@ cuda = [
     { name = "jax", version = "0.11.2", source = { registry = "https://pypi.org/simple" }, extra = ["cuda12"], marker = "python_full_version >= '3.12'" },
 ]
 fast-neighbours = [
-    { name = "matscipy" },
+    { name = "matscipy-neighbours" },
 ]
 gp = [
     { name = "blackjax" },
@@ -71,7 +71,7 @@ requires-dist = [
     { name = "juliacall", marker = "extra == 'authoring'", specifier = ">=0.9.20" },
     { name = "juliapkg", marker = "extra == 'authoring'", specifier = ">=0.1.13" },
     { name = "lineax", specifier = ">=0.1.1" },
-    { name = "matscipy", marker = "extra == 'fast-neighbours'", specifier = ">=1.0" },
+    { name = "matscipy-neighbours", marker = "extra == 'fast-neighbours'", specifier = ">=1.0" },
     { name = "numpy", specifier = ">=1.24" },
     { name = "numpyro", marker = "extra == 'gp'", specifier = ">=0.16" },
     { name = "optax", marker = "extra == 'gp'", specifier = ">=0.2" },
@@ -689,38 +689,14 @@ wheels = [
 ]
 
 [[package]]
-name = "matscipy"
-version = "1.2.0"
+name = "matscipy-neighbours"
+version = "1.0.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "ase" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
-    { name = "packaging" },
-    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/3e/62/851f14fef0d47d5546cc3bb315a96d73e3cee9588adb069c09dc5463a64a/matscipy-1.2.0.tar.gz", hash = "sha256:1d0691be7e541357ec7a3363e1ed2d7289e5ef8942fbc94064567124d1fb7444", size = 10368600, upload-time = "2025-11-20T17:07:15.871Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/32/c4/965a7e7ad7c0b0e8aa496b46f178a31c5b4f6eb570f6025a249403fd06c2/matscipy-1.2.0-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:803acbd9459fd7ade405a64d080910abde885fd0d363bda2b9ec4412535cf7ea", size = 443434, upload-time = "2025-11-20T17:06:29.953Z" },
-    { url = "https://files.pythonhosted.org/packages/3d/a6/329e728770e6f6bd817544fde5ab6eb14f34a622996ab4ac0deab7548341/matscipy-1.2.0-cp311-cp311-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:26dcf0dcbd937bc09c2b73f4c792a258ffdf7e2e1852a0715f362e376a4f20ed", size = 452543, upload-time = "2025-11-20T17:06:31.6Z" },
-    { url = "https://files.pythonhosted.org/packages/a9/50/187ee780535079372df2d9b3e34d095c61fb5174c7521c62c271887b216c/matscipy-1.2.0-cp311-cp311-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:1a364a8158f8dd0406ffacb7c2d7928e4d5470af79ac31c49b4f5e02c785bd23", size = 452853, upload-time = "2025-11-20T17:06:33.028Z" },
-    { url = "https://files.pythonhosted.org/packages/4f/5e/a7bc77cd64e2277f1ce401d01b9fb34326cd2500175351f2aef8b2f5a0e7/matscipy-1.2.0-cp311-cp311-musllinux_1_2_aarch64.whl", hash = "sha256:7c64be3b911d2725bc6def4ba2ee4f38844e1f45f5efa65d1d14fd1ae7074711", size = 1432759, upload-time = "2025-11-20T17:06:34.899Z" },
-    { url = "https://files.pythonhosted.org/packages/64/8c/a6824f9659e066a8ab5abb66b208afcb839e502863908d90dc03db06f228/matscipy-1.2.0-cp311-cp311-musllinux_1_2_x86_64.whl", hash = "sha256:01f1a35d5cda14a9abd54681b49e32d177b7cd59a3e932e89933d1f38b329539", size = 1484856, upload-time = "2025-11-20T17:06:37.503Z" },
-    { url = "https://files.pythonhosted.org/packages/bf/ff/ea1bc2b5249ff877c9a68f435e6129ebcf480873abac5d055a32c4960240/matscipy-1.2.0-cp311-cp311-win_amd64.whl", hash = "sha256:4d41ec4e48647aa01c0e977364efcfa25e258862b1a4e1d8be75f7012aa36468", size = 573268, upload-time = "2025-11-20T17:06:39.222Z" },
-    { url = "https://files.pythonhosted.org/packages/1c/93/732c9ea8cb658a525f5f899193523eb27462fa2858677a34b75b38585c4c/matscipy-1.2.0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:7a499999f253d708873caf7e23feec21e94e031c21df79593eccf072cde6f4d2", size = 443317, upload-time = "2025-11-20T17:06:41.032Z" },
-    { url = "https://files.pythonhosted.org/packages/67/c7/442d9c612c59924f5b69fceee7f01f329633c60e569d43bd9eeefa9c56f7/matscipy-1.2.0-cp312-cp312-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:6433f4b719237b8134c701d13ad88dbfac105c6703820aab96324c5fd559a9af", size = 452705, upload-time = "2025-11-20T17:06:42.953Z" },
-    { url = "https://files.pythonhosted.org/packages/3c/ba/79020348dbdaa6786ff2162e11bc56095e0b949e8bb9813dee12ccc1f567/matscipy-1.2.0-cp312-cp312-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:14e1ec6d9c51b6a0664b0ad2190326f9cac14eae58554c57dea95e378b022864", size = 453057, upload-time = "2025-11-20T17:06:44.186Z" },
-    { url = "https://files.pythonhosted.org/packages/d6/16/dffd1f8894f38eb8ba1b55053534abda8f1e124c4dda6633e4f7a3b12d94/matscipy-1.2.0-cp312-cp312-musllinux_1_2_aarch64.whl", hash = "sha256:bb8743b61ec5fa8944ceab4dcd639a2005463ccea0d84bdc8f5960a922eff45e", size = 1432877, upload-time = "2025-11-20T17:06:45.927Z" },
-    { url = "https://files.pythonhosted.org/packages/98/94/d0c4e04a43a8dc9b84f18c25b95948f3e3113e8bd9d53b50b3be0b130d91/matscipy-1.2.0-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:f8d909f3fc99ed6457b4f6df9ce31bdc160ee388b00cf143283fb89dbaacb286", size = 1484981, upload-time = "2025-11-20T17:06:48.358Z" },
-    { url = "https://files.pythonhosted.org/packages/e0/ad/be93f306d1d1e6534d30ebb7e3b43f2c493bb2371f02aa452d717ee548c3/matscipy-1.2.0-cp312-cp312-win_amd64.whl", hash = "sha256:af2c181e72f0a0fac66bd75b763dbbab11b8ecff3c6c15a6aa6a18cee4e84ff1", size = 573455, upload-time = "2025-11-20T17:06:49.866Z" },
-    { url = "https://files.pythonhosted.org/packages/b2/ce/f43c642fed92127f5e56661fe97c378a893c967b7a2ceba9d0cb8ac4da8d/matscipy-1.2.0-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:366b39727ab8ea26611da9bdc27a256ad9769c32ac2384a608ede4fa1e214e85", size = 443315, upload-time = "2025-11-20T17:06:51.545Z" },
-    { url = "https://files.pythonhosted.org/packages/25/ca/bde59bef3e97f8b7d338700c3a176d26eb743be6c4cc25ce98ebff707e12/matscipy-1.2.0-cp313-cp313-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:c447eeb6c22c059e5d602dddcc6de088ff8ca645ecd24b640817afa3db2c5013", size = 452706, upload-time = "2025-11-20T17:06:53.816Z" },
-    { url = "https://files.pythonhosted.org/packages/74/f6/9862b530ed2df9a4e45bcd468c93b6d39b0c764000f00137ebd63c4404cf/matscipy-1.2.0-cp313-cp313-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:90ffe1d1abc5683f293950c35cd6ce8cb0cd8f329a6fb16d79f0ecf3f07473d0", size = 453061, upload-time = "2025-11-20T17:06:55.352Z" },
-    { url = "https://files.pythonhosted.org/packages/db/db/52ac59fcd14877a2aa965bf08b1f0e28276a185154e7eb4ac465a7b238bb/matscipy-1.2.0-cp313-cp313-musllinux_1_2_aarch64.whl", hash = "sha256:cbbaf24cd83d787660cb452e906a42cfa80d39bb8165d099bce41f31402929bf", size = 1432877, upload-time = "2025-11-20T17:06:57.155Z" },
-    { url = "https://files.pythonhosted.org/packages/44/1b/25f6b9ea546172f22314eb353697825ba7a2395627da08142ad1ff91f1db/matscipy-1.2.0-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:d8118378b06fae6f1846be288a0c54d6176e7a37c55439d48df176dd82640a70", size = 1484989, upload-time = "2025-11-20T17:07:01.627Z" },
-    { url = "https://files.pythonhosted.org/packages/98/4d/779281eea03f8cdc9e0ced7472685319099e11fa578a2130a29331241cf6/matscipy-1.2.0-cp313-cp313-win_amd64.whl", hash = "sha256:ee21b7511565e22c0df510a9f7c513dc3dffd69a1e64cdf3498cd4db63d68de5", size = 573442, upload-time = "2025-11-20T17:07:02.968Z" },
-]
+sdist = { url = "https://files.pythonhosted.org/packages/88/da/2ba0f1ba12c405baf9f7ac128780302815b289dc95c405ce6e0a5a43d866/matscipy_neighbours-1.0.0.tar.gz", hash = "sha256:f166ee92410421d69845dd57acade2030c75c61be97f8e86a0dc2301d6a40f1e", size = 503700, upload-time = "2026-09-27T09:02:42.476Z" }
 
 [[package]]
 name = "ml-dtypes"

@@ -9,3 +9,4 @@ build/
 .jax_cache/
 pace_ref/build/
 pace_ref/.venv/
+bench/scaling/models/

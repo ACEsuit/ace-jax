@@ -68,6 +68,15 @@ and FinnisSinclairShiftedScaled embeddings, `density` / `distance` / `zbl` inner
 cutoffs. `write_yace(model, spec, path)` writes a (possibly modified) model back.
 Checked against the ML-PACE C++ and python-ace; see `docs/pace-yace-spec.md`.
 
+## Performance
+
+[`docs/benchmarks.md`](docs/benchmarks.md) has throughput-vs-size, model-size,
+memory and precision scaling for ace-jax (standalone and in LAMMPS via
+lammps-jax), ML-PACE and MACE, on SiGe and Cantor, on CPU (moriarty) and GPU
+(RTX A4500, A100), each run behind a parity gate. The harness is in
+`bench/scaling/`. The ace-jax production model (linear + species + density
+embedding) and ACEpotentials.jl rows will be added in a follow-up.
+
 ## Authoring the coupling table in Python (EquivariantTensors)
 
 With the `authoring` extra, `ace_jax.construct` builds an ACE basis's

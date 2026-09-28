@@ -1,0 +1,199 @@
+{
+ "n_atoms": 4096,
+ "float32": {
+  "n_edges": 499712,
+  "n_a_local": 314,
+  "n_aa": 7406,
+  "radial_g": {
+   "fwd_s": 0.0005365529796108603,
+   "fwd_plus_vjp_s": 0.0007445336086675525
+  },
+  "R_crad_gather": {
+   "fwd_s": 0.0008294284343719482,
+   "fwd_plus_vjp_s": 0.0001353145344182849
+  },
+  "R_matmul_candidate": {
+   "fwd_s": 0.00028657354414463043,
+   "fwd_plus_vjp_s": 0.00024211045820266008
+  },
+  "Ylm": {
+   "fwd_s": 0.0026524829445406795,
+   "fwd_plus_vjp_s": 0.00018245901446789503
+  },
+  "eA_gather": {
+   "fwd_s": 0.0020545723382383585,
+   "fwd_plus_vjp_s": 0.07877416152041405
+  },
+  "pool_segment_sum": {
+   "fwd_s": 0.003914135391823947,
+   "fwd_plus_vjp_s": 0.0014979629777371883
+  },
+  "node_AA_rho_F": {
+   "fwd_s": 0.00225756608415395,
+   "fwd_plus_vjp_s": 0.008201386546716094
+  },
+  "total_energy_s": 0.013325465493835509,
+  "total_efv_s": 0.13499269296880811,
+  "gpu_kernel_total_s": 0.13482499733333334,
+  "top_gpu_kernels_s": [
+   [
+    "wrapped_scatter",
+    0.05785637933333333
+   ],
+   [
+    "wrapped_scatter_1",
+    0.055747156
+   ],
+   [
+    "input_scatter_fusion_4",
+    0.003818467
+   ],
+   [
+    "input_scatter_fusion_8",
+    0.003463319666666667
+   ],
+   [
+    "input_reduce_fusion",
+    0.002764692333333333
+   ],
+   [
+    "input_transpose_fusion",
+    0.002669246666666667
+   ],
+   [
+    "loop_concatenate_fusion",
+    0.00199269
+   ],
+   [
+    "loop_pad_fusion",
+    0.0011761643333333333
+   ],
+   [
+    "input_scatter_fusion_5",
+    0.0007561946666666667
+   ],
+   [
+    "input_scatter_fusion_1",
+    0.0005834686666666666
+   ],
+   [
+    "input_concatenate_fusion",
+    0.0003534093333333333
+   ],
+   [
+    "input_scatter_fusion_3",
+    0.00035214
+   ],
+   [
+    "loop_reduce_fusion",
+    0.000349996
+   ],
+   [
+    "loop_add_select_fusion_1",
+    0.00034452366666666665
+   ],
+   [
+    "loop_add_select_fusion",
+    0.00032623
+   ]
+  ]
+ },
+ "float64": {
+  "n_edges": 499712,
+  "n_a_local": 314,
+  "n_aa": 7406,
+  "radial_g": {
+   "fwd_s": 0.002528861863538623,
+   "fwd_plus_vjp_s": 0.0030483530135825276
+  },
+  "R_crad_gather": {
+   "fwd_s": 0.005964322132058442,
+   "fwd_plus_vjp_s": 0.00020187953487038612
+  },
+  "R_matmul_candidate": {
+   "fwd_s": 0.004321506479755044,
+   "fwd_plus_vjp_s": 0.00046999414917081594
+  },
+  "Ylm": {
+   "fwd_s": 0.016644224990159273,
+   "fwd_plus_vjp_s": 0.0029859435744583607
+  },
+  "eA_gather": {
+   "fwd_s": 0.0035518540535122156,
+   "fwd_plus_vjp_s": 0.08164365193806589
+  },
+  "pool_segment_sum": {
+   "fwd_s": 0.005904939491301775,
+   "fwd_plus_vjp_s": 0.0025165884289890528
+  },
+  "node_AA_rho_F": {
+   "fwd_s": 0.00398290844168514,
+   "fwd_plus_vjp_s": 0.01224012195598334
+  },
+  "total_energy_s": 0.041069920058362186,
+  "total_efv_s": 0.18460235057864338,
+  "gpu_kernel_total_s": 0.184132368,
+  "top_gpu_kernels_s": [
+   [
+    "wrapped_scatter",
+    0.06053265866666666
+   ],
+   [
+    "wrapped_scatter_1",
+    0.060471197000000004
+   ],
+   [
+    "input_reduce_fusion",
+    0.014870856666666665
+   ],
+   [
+    "loop_concatenate_fusion",
+    0.011146838666666666
+   ],
+   [
+    "input_scatter_fusion_8",
+    0.0053756739999999996
+   ],
+   [
+    "input_transpose_fusion",
+    0.005334703333333333
+   ],
+   [
+    "input_concatenate_fusion",
+    0.004843340999999999
+   ],
+   [
+    "input_scatter_fusion_4",
+    0.004639041666666667
+   ],
+   [
+    "loop_reduce_slice_fusion",
+    0.0019323186666666667
+   ],
+   [
+    "loop_add_multiply_select_fusion",
+    0.0019256950000000003
+   ],
+   [
+    "loop_add_select_fusion",
+    0.0018112836666666664
+   ],
+   [
+    "loop_pad_fusion",
+    0.0014519539999999999
+   ],
+   [
+    "ampere_dgemm_128x64_tn",
+    0.00140102
+   ],
+   [
+    "gemm_fusion_dot_7",
+    0.0010080156666666667
+   ],
+   [
+    "loop_concatenate_fusion_1",
+    0.0008897323333333334
+   ]
+  ]
+ }
+}

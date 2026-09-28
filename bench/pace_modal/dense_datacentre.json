@@ -1,0 +1,30 @@
+{
+ "dense_A100": {
+  "gpu": "",
+  "lines": [
+   "{\"dE\": 4.547473508864641e-13, \"E\": -569.0759790286274, \"max_dF\": 8.004708007547379e-14, \"max_F\": 2.5147591959365454}",
+   "{\"variant\": \"sparse\", \"dtype\": \"float32\", \"n_atoms\": 4096, \"n_edges\": 499712, \"K\": 122, \"energy_s\": 0.11882162149999687, \"energy_forces_s\": 0.19185738999999913, \"peak_gpu_bytes\": 1202593536}",
+   "{\"variant\": \"dense\", \"dtype\": \"float32\", \"n_atoms\": 4096, \"n_edges\": 499712, \"K\": 122, \"energy_s\": 0.0036043975000019657, \"energy_forces_s\": 0.014026449500001092, \"peak_gpu_bytes\": 587626240}",
+   "{\"variant\": \"sparse\", \"dtype\": \"float64\", \"n_atoms\": 4096, \"n_edges\": 499712, \"K\": 122, \"energy_s\": 0.022291774999999348, \"energy_forces_s\": 0.08219429849999926, \"peak_gpu_bytes\": 2392285696}",
+   "{\"variant\": \"dense\", \"dtype\": \"float64\", \"n_atoms\": 4096, \"n_edges\": 499712, \"K\": 122, \"energy_s\": 0.006089777500001503, \"energy_forces_s\": 0.01305276100000441, \"peak_gpu_bytes\": 958202112}",
+   "{\"variant\": \"sparse\", \"dtype\": \"float32\", \"n_atoms\": 13824, \"n_edges\": 1686528, \"K\": 122, \"energy_s\": 0.3996964675000072, \"energy_forces_s\": 0.648087746999991, \"peak_gpu_bytes\": 4064396800}",
+   "{\"variant\": \"dense\", \"dtype\": \"float32\", \"n_atoms\": 13824, \"n_edges\": 1686528, \"K\": 122, \"energy_s\": 0.010660583500005316, \"energy_forces_s\": 0.03277338699999177, \"peak_gpu_bytes\": 1719415040}",
+   "{\"variant\": \"sparse\", \"dtype\": \"float64\", \"n_atoms\": 13824, \"n_edges\": 1686528, \"K\": 122, \"energy_s\": 0.06187055199998781, \"energy_forces_s\": 0.28565743899999063, \"peak_gpu_bytes\": 8111398400}",
+   "{\"variant\": \"dense\", \"dtype\": \"float64\", \"n_atoms\": 13824, \"n_edges\": 1686528, \"K\": 122, \"energy_s\": 0.019676085999989823, \"energy_forces_s\": 0.035290770000003135, \"peak_gpu_bytes\": 3377981696}"
+  ]
+ },
+ "dense_H100": {
+  "gpu": "",
+  "lines": [
+   "{\"dE\": 4.547473508864641e-13, \"E\": -569.0759790286278, \"max_dF\": 9.836575998178887e-14, \"max_F\": 2.5147591959365103}",
+   "{\"variant\": \"sparse\", \"dtype\": \"float32\", \"n_atoms\": 4096, \"n_edges\": 499712, \"K\": 122, \"energy_s\": 0.0037950369999997235, \"energy_forces_s\": 0.04831695749999554, \"peak_gpu_bytes\": 1200594944}",
+   "{\"variant\": \"dense\", \"dtype\": \"float32\", \"n_atoms\": 4096, \"n_edges\": 499712, \"K\": 122, \"energy_s\": 0.001663953999997858, \"energy_forces_s\": 0.008738823500003434, \"peak_gpu_bytes\": 650344192}",
+   "{\"variant\": \"sparse\", \"dtype\": \"float64\", \"n_atoms\": 4096, \"n_edges\": 499712, \"K\": 122, \"energy_s\": 0.005295078000003173, \"energy_forces_s\": 0.04111622250000124, \"peak_gpu_bytes\": 2344313600}",
+   "{\"variant\": \"dense\", \"dtype\": \"float64\", \"n_atoms\": 4096, \"n_edges\": 499712, \"K\": 122, \"energy_s\": 0.0024971919999998704, \"energy_forces_s\": 0.006194044499999052, \"peak_gpu_bytes\": 1010309120}",
+   "{\"variant\": \"sparse\", \"dtype\": \"float32\", \"n_atoms\": 13824, \"n_edges\": 1686528, \"K\": 122, \"energy_s\": 0.012281090499996594, \"energy_forces_s\": 0.17110766249999898, \"peak_gpu_bytes\": 4064396544}",
+   "{\"variant\": \"dense\", \"dtype\": \"float32\", \"n_atoms\": 13824, \"n_edges\": 1686528, \"K\": 122, \"energy_s\": 0.004940686000004746, \"energy_forces_s\": 0.023428364499999077, \"peak_gpu_bytes\": 1720079104}",
+   "{\"variant\": \"sparse\", \"dtype\": \"float64\", \"n_atoms\": 13824, \"n_edges\": 1686528, \"K\": 122, \"energy_s\": 0.01839607099999796, \"energy_forces_s\": 0.14911079099999824, \"peak_gpu_bytes\": 7976828416}",
+   "{\"variant\": \"dense\", \"dtype\": \"float64\", \"n_atoms\": 13824, \"n_edges\": 1686528, \"K\": 122, \"energy_s\": 0.007308044500000221, \"energy_forces_s\": 0.018276469500001724, \"peak_gpu_bytes\": 3040545280}"
+  ]
+ }
+}

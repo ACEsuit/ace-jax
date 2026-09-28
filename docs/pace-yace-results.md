@@ -56,3 +56,46 @@ The LAMMPS step time includes neighbour-list upkeep and integration. The ace-jax
 | `sige_zbl` (2 elements) | 120 | 152 | 125 | 34 | 184 |
 
 The complex→real expansion costs at most about 2.3× on a production-size single-element model. Across centres, the two-element fixture merges to fewer real products than PACE ms-combs, which is consistent with the spec's assumption that the union is close to one element's set. A large multi-element production model is still unmeasured.
+
+## Force performance: A-basis layouts (PR #7)
+
+The force pass was dominated by the scatter-adds that are the adjoints of the
+per-edge A-basis column gathers (66–84 % of a call; `bench/pace_profile.py`).
+`EdgeSiteModel` (shared by `ACEModel` and `PACEModel`) now offers:
+
+- **sparse** edge-list layout, with two A-forms: `gather` (default) and `matmul`
+  (one-hot GEMMs, forced to `Precision.HIGHEST`);
+- **dense** (n, K) layout: A per node as a batched outer product
+  Σ_k cols_ik ⊗ Y_ik, then the used entries selected. There is no per-edge
+  column gather, so the reverse pass has no scatter.
+
+`ACECalculator(layout="auto", edge_a_kind="auto")` picks between them:
+- dense when `estimate_a_bytes` fits half the device memory and the neighbour
+  padding is ≥ 50 % full;
+- otherwise sparse, with the A-form calibrated once per edge-count bucket.
+
+Energy + forces + virial for `c_ace` carbon (122 neighbours per atom), through
+the model methods (`bench/pace_dense_proto.py model`; raw data in
+`bench/pace_modal/layout_*.json*`):
+
+| GPU | atoms | f32: best sparse → dense | f64: best sparse → dense | dense peak (estimate) f64 |
+|---|---|---|---|---|
+| RTX A4500 | 4,096 | 0.041 (matmul) → **0.014 s** | 0.231 (gather) → **0.084 s** | 1.21 GB (1.19) |
+| A100-80GB | 4,096 | 0.142 (matmul) → **0.015 s** | 0.038 (matmul) → **0.013 s** | 1.10 GB (1.19) |
+| H100 | 4,096 | 0.019 (matmul) → **0.010 s** | 0.023 (matmul) → **0.007 s** | 1.10 GB (1.19) |
+| RTX A4500 | 13,824 | 0.216 (matmul) → **0.157 s** | 0.877 (gather) → **0.399 s** | 4.18 GB (4.00) |
+| A100-80GB | 13,824 | 0.473 (matmul) → **0.035 s** | 0.135 (matmul) → **0.033 s** | 3.47 GB (4.00) |
+| H100 | 13,824 | 0.057 (matmul) → **0.024 s** | 0.068 (matmul) → **0.021 s** | 3.24 GB (4.00) |
+
+- **Dense is fastest everywhere,** and for this single-element model it also
+  uses about 2.5× less memory than sparse.
+- **Dense memory grows with neighbour-species channels and with (n, K)
+  padding.** Many-element or inhomogeneous systems therefore fall back to
+  sparse automatically.
+- **Among the sparse forms,** matmul wins on data-centre GPUs in both
+  precisions and on the A4500 in f32; gather wins on the A4500 in f64
+  (1/32-rate FP64).
+- **Tried and reverted:** a sorted segment-sum adjoint (pathological XLA
+  compile) and a forward-mode ("jvp") edge adjoint (recomputing the edge
+  features for three tangents cost more than the scatter). The measurements
+  are in the revert commits.
