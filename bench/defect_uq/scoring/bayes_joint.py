@@ -52,33 +52,55 @@ body_col = np.concatenate([np.tile(order_B + 1, NZ), np.tile(np.full(nP, 2), NZ)
 assert len(body_col) == L
 G_idx = jnp.asarray(body_col - 2)
 
-with highest_precision():
-    st = sufficient_statistics(theta, prob.spec, prob.model, prob.ind, prob.cfg, d.ds_train)
-log("stats done")
-Gq = [getattr(st, f"G_{q}") for q in "EFV"]
-bq = [getattr(st, f"b_{q}") for q in "EFV"]
-yy = jnp.asarray([float(getattr(st, f"yy_{q}")) for q in "EFV"])
-nq = jnp.asarray([float(getattr(st, f"n_{q}")) for q in "EFV"])
+import os                                                          # noqa: E402
+CACHE = os.path.join(os.path.dirname(out_path), "stats_cache.npz")
+if os.path.exists(CACHE):                                          # the statistics do not depend on h
+    zc = np.load(CACHE)
+    Gq = [jnp.asarray(zc[f"G_{q}"]) for q in "EFV"]; bq = [jnp.asarray(zc[f"b_{q}"]) for q in "EFV"]
+    yy, nq = jnp.asarray(zc["yy"]), jnp.asarray(zc["n"])
+    log("stats loaded from cache")
+else:
+    with highest_precision():
+        st = sufficient_statistics(theta, prob.spec, prob.model, prob.ind, prob.cfg, d.ds_train)
+    Gq = [getattr(st, f"G_{q}") for q in "EFV"]
+    bq = [getattr(st, f"b_{q}") for q in "EFV"]
+    yy = jnp.asarray([float(getattr(st, f"yy_{q}")) for q in "EFV"])
+    nq = jnp.asarray([float(getattr(st, f"n_{q}")) for q in "EFV"])
+    np.savez(CACHE, **{f"G_{q}": np.asarray(G) for q, G in zip("EFV", Gq)},
+             **{f"b_{q}": np.asarray(b) for q, b in zip("EFV", bq)}, yy=np.asarray(yy), n=np.asarray(nq))
+    log("stats done (cached)")
 gam2 = jnp.asarray(prob.gamma) ** 2
 ls_map = np.array([float(getattr(theta, f"log_sigma_{q}")) for q in "EFV"])
 a_blr = float(-2 * theta.log_sigma_c)                            # log(1/sigma_c^2)
 
 
+# Prior-scaled formulation (as PopsRidgePath): with D = diag(Gamma), A = D S D and
+#   S = D^-1 M D^-1 + diag(exp(a_k)),  log|A| = log|S| + 2 sum log Gamma,  b^T A^-1 b = (D^-1 b)^T S^-1 (D^-1 b).
+# cond(A) reaches 1e17 at the fitted point (beyond float64); the smoothness prior's dynamic range
+# drops out of cond(S).
+Dinv = 1.0 / jnp.sqrt(gam2)
+GqS = [Dinv[:, None] * G * Dinv[None, :] for G in Gq]
+bqS = [Dinv * b for b in bq]
+LOG_GAMMA = float(jnp.sum(jnp.log(jnp.sqrt(gam2))))
+
+
 def parts(h):
+    """Scaled pieces: S-matrix data part Ms, scaled moment bs, prior diagonal (scaled) e^a."""
     ls, a = h[:3], h[3:]
     w = jnp.exp(-2 * ls)
-    M = w[0] * Gq[0] + w[1] * Gq[1] + w[2] * Gq[2]
-    b = w[0] * bq[0] + w[1] * bq[1] + w[2] * bq[2]
-    lam = gam2 * jnp.exp(a)[G_idx]
-    return M, b, lam, ls, w
+    Ms = w[0] * GqS[0] + w[1] * GqS[1] + w[2] * GqS[2]
+    bs = w[0] * bqS[0] + w[1] * bqS[1] + w[2] * bqS[2]
+    lam_s = jnp.exp(a)[G_idx]
+    return Ms, bs, lam_s, ls, w
 
 
 def logev(h):
-    M, b, lam, ls, w = parts(h)
-    c, low = cho_factor(M + jnp.diag(lam), lower=True)
-    x = cho_solve((c, low), b)
-    return (-0.5 * jnp.sum(yy * w) + 0.5 * b @ x - jnp.sum(jnp.log(jnp.diag(c)))
-            + 0.5 * jnp.sum(jnp.log(lam)) - jnp.sum(nq * ls))
+    Ms, bs, lam_s, ls, w = parts(h)
+    c, low = cho_factor(Ms + jnp.diag(lam_s), lower=True)
+    x = cho_solve((c, low), bs)
+    # log|Lambda| = sum log(Gamma^2 e^a) = 2 LOG_GAMMA + sum a;  log|A| = log|S| + 2 LOG_GAMMA: they cancel
+    return (-0.5 * jnp.sum(yy * w) + 0.5 * bs @ x - jnp.sum(jnp.log(jnp.diag(c)))
+            + 0.5 * jnp.sum(jnp.log(lam_s)) - jnp.sum(nq * ls))
 
 
 vg = jax.jit(jax.value_and_grad(logev))
@@ -94,20 +116,35 @@ def maximise(h0, free):
     a large value with zero gradient (a rejected step), as in fit/multistart.lbfgs_map."""
     from scipy.optimize import minimize
     h0 = np.asarray(h0, float); free = np.asarray(free)
+    v0 = float(vg(jnp.asarray(h0))[0])
     def f(z):
         h = h0.copy(); h[free] = z
         v, g = vg(jnp.asarray(h))
-        v, g = float(v), np.asarray(g)[free]
+        v, g = float(v) - v0, np.asarray(g)[free]                 # relative: tolerances in nats
         if not (np.isfinite(v) and np.all(np.isfinite(g))):
-            return 1e300, np.zeros_like(z)
+            return 1e30, np.zeros_like(z)
         return -v, -g
     r = minimize(f, h0[free], jac=True, method="L-BFGS-B", bounds=list(zip(LO[free], HI[free])),
-                 options={"maxiter": 500})
+                 options={"maxiter": 500, "ftol": 1e-12, "gtol": 1e-4})
     h = h0.copy(); h[free] = r.x
-    return h, -r.fun, r
+    return h, v0 - r.fun, r
 
 
 h_blr = np.concatenate([ls_map, [a_blr] * 3])
+if os.environ.get("DIAG") or True:
+    h_old = np.concatenate([ls_map, [-13.271839019410685, -8.720070351833378, -5.391773375780003]])   # run 1
+    for lab, h in (("h_blr", h_blr), ("run-1 ARD", h_old)):
+        v, g = vg(jnp.asarray(h))
+        Ms, bs, lam_s, ls, w = (np.asarray(x) for x in parts(jnp.asarray(h)))
+        S_ = Ms + np.diag(lam_s)
+        ev_ = np.linalg.eigvalsh(S_)
+        sgn, ld = np.linalg.slogdet(S_)
+        ref = -0.5 * float(np.sum(np.asarray(yy) * w)) + 0.5 * bs @ np.linalg.solve(S_, bs) - 0.5 * ld \
+              + 0.5 * np.sum(np.log(lam_s)) - float(np.sum(np.asarray(nq) * ls))
+        log(f"DIAG {lab}: jax logev {float(v):.4f}  numpy {ref:.4f}  cond(S) {ev_[-1] / ev_[0]:.3e}  "
+            f"grad {np.round(np.asarray(g), 2)}")
+    if os.environ.get("DIAG"):
+        raise SystemExit(0)
 h_ardG, ev_ardG, rG = maximise(h_blr, [3, 4, 5])
 h_ardJ, ev_ardJ, rJ = maximise(h_ardG, [0, 1, 2, 3, 4, 5])
 ev_blr = float(vg(jnp.asarray(h_blr))[0])
@@ -137,9 +174,10 @@ log("Laplace std of h", np.round(std_h, 5), "eigs(-H)", np.round(np.linalg.eigva
 
 
 def posterior(h):
-    M, b, lam, _, _ = parts(jnp.asarray(h))
-    c, low = cho_factor(M + jnp.diag(lam), lower=True)
-    return c, cho_solve((c, low), b)
+    """(c, mean) with S = c c^T; force-row variance phi A^-1 phi^T = ||c^-1 (D^-1 phi)||^2."""
+    Ms, bs, lam_s, _, _ = parts(jnp.asarray(h))
+    c, low = cho_factor(Ms + jnp.diag(lam_s), lower=True)
+    return c, Dinv * cho_solve((c, low), bs)
 
 
 rng = np.random.default_rng(0)
@@ -157,12 +195,12 @@ with highest_precision():
             Fr = jnp.asarray(np.asarray(linear_rows(prob.model, gcfg, bt)[0].F)[live].reshape(-1, L))
             for m, (c, x) in models.items():
                 acc.setdefault(f"F_{m}", []).append(np.asarray(Fr @ x).reshape(-1, 3))
-                v = solve_triangular(c, Fr.T, lower=True)
+                v = solve_triangular(c, (Fr * Dinv[None, :]).T, lower=True)
                 acc.setdefault(f"varF_{m}", []).append(np.asarray(jnp.sum(v * v, 0)).reshape(-1, 3))
             Fd, Vd = [], []
             for c, x in dposts:
                 Fd.append(np.asarray(Fr @ x).reshape(-1, 3))
-                v = solve_triangular(c, Fr.T, lower=True)
+                v = solve_triangular(c, (Fr * Dinv[None, :]).T, lower=True)
                 Vd.append(np.asarray(jnp.sum(v * v, 0)).reshape(-1, 3))
             Fd, Vd = np.stack(Fd), np.stack(Vd)
             acc.setdefault("F_ardJm", []).append(Fd.mean(0))
