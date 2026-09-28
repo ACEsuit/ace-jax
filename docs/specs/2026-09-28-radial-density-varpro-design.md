@@ -106,14 +106,14 @@ The readout d gets a ridge weight of γ_d = the geometric mean of Γ (the ACE sm
 - `fit/predict.py:293`;
 - `fit/hostcache.py`.
 
-These must size from `prob.gamma.shape[0]` (or an explicit `L`), so a widened design works. This is a separate commit, and a pure refactor with identical results at P = 0.
+The two that read the prior (`prior_precision` and `solve._prior_block`) must size from `prob.gamma.shape[0]`, so a widened design works. The row-based paths (`solve`'s rows, `predict`, `hostcache`) build their rows from the base model with `batch_rows`, and never see density columns. They keep `len_basis`, because using the density in the GP arm is out of scope. This is a separate commit, and a pure refactor with identical results at P = 0.
 
 ### Outer variables and gauges
 
-The outer vector is `x = [vec(V)/s_W ; vec(H)/s_η]`:
+The outer vector is `x = [vec(V) ; r_η · vec(H)]` (see Preconditioner):
 
 - V is the radial parameter of `learn_radial`, after gauge normalisation (unchanged).
-- H is the raw density weight, and `η = normalise_ρ(H)` rescales each (p, z) so that the training ρ_{p,i} has unit mean square.
+- H is the raw density weight, and `η = normalise_ρ(H)` rescales each (p, z) so that the training ρ_{p,i} has unit mean square. This uses the per-species second moment S_z of the masked basis at the *initial* radials, computed once, just as the radial gauge Gram Q is. Species with no training sites get η = 0.
 
 That removes the scale gauge between η and d, which d absorbs. It also keeps ε meaningful. The sign gauge is left alone: ssqrt is odd, so d absorbs it.
 
@@ -128,9 +128,9 @@ Both are scaled relative to r0, as the radial priors are.
 
 ### Preconditioner
 
-The diagonal preconditioner scales are `s_W` and `s_η`, one per block. Each is set to the RMS of that block's gradient at the start of a round, and reset at every θ re-profile, because L-BFGS memory is reset there anyway.
+The outer variables are block-scaled as `u = [vec(V) ; r_η · vec(H)]`, with `r_η = RMS(∂f/∂H) / RMS(∂f/∂V)`, so the gradient with respect to u has the same RMS in both blocks. The radial block keeps `learn_radial`'s convention. r_η is recomputed at the start of every round, from one extra gradient evaluation, because L-BFGS memory is reset at each θ re-profile anyway. A zero or non-finite RMS falls back to r_η = 1.
 
-The step function stays a single compiled `_lbfgs_step`: the scales are traced arguments, not statics. The objective is invariant to the scales, which the tests below check.
+The step function stays a single compiled `_lbfgs_step`: r is a traced argument, not a static. The objective is invariant to r, which the tests below check.
 
 ### Modes
 
