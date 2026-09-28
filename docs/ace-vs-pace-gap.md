@@ -539,3 +539,67 @@ work.
 
 **Round 2's extras rows failed** (n = 0, a driver bug since fixed:
 `--extra-n`). They are kept in `gap_bench_r2.json`, and round 3 re-ran them.
+
+## 8. Landed
+
+Recommendations 1–3 are in `src/`, on branch `perf/ace-fast-path`.
+
+- **ACE: `ace_jax.eval.model.lean(model)`.** It composes three exact, load-time transforms of a folded `ACEModel`:
+  - `prune_columns`: the doc's `prune`.
+  - `fold_pair`: `pairfold`.
+  - `block_dense`: `lblock` + `compact` + `fm`. It is species-compact only where R_nl is block-sparse in z_j and NZ > 1.
+
+  `ACECalculator(lean=True)` and `export_lammps(lean=True)` apply it. Both default to on.
+- **`load` never applies it.** Fitting, descriptors and the learned radials keep the full model. A lean model is `energy_only`: its basis methods raise.
+- **The sparse layout.** Its code is unchanged, but it runs the pruned, pair-folded data. On CPU at 1024 atoms that gave 8–20% faster forces: Cantor_medium went from 46.9 to 37.6 ms, SiGe_medium from 22.6 to 18.5 ms, and SiGe_large from 92.4 to 84.4 ms. The l-blocked pool is dense-only. The sparse pool is already n_A wide per edge, so a per-l outer product would pool more, not less.
+- **PACE: `PACEModel.sbessel_form`.** It is fixed by `load_yace` as `"matmul"` (`pace_radial._sbessel_mm`) when `nradbase >= 12` (`SBESSEL_MATMUL_MIN_K`), and `"rotation"` otherwise.
+- **Parity.** `tests/test_lean.py` holds each transform to 1e-12 on E, F and virial. It covers five fixtures: 1, 2 and 5 species, with spline, analytic and factorised radials and a pair term in each. The largest differences were |ΔF| 1.4e-13 and |ΔV| 4.6e-13. `tests/test_perf_parity.py` (288 frozen cases) is unchanged. On the A100, the before and after energies agree to at most 1.1e-16 eV/atom.
+
+**Before/after measurement.**
+
+- **Setup:** Modal A100-SXM4-80GB, float64, `main` f69dfdb against this branch.
+- **Timed call:** `ACECalculator`, MD-like, with the skin list.
+- **Protocol:** each case ran in its own process, all in one container, with before and after alternating per case and per round (`modal_profile.py::microbench_ab`, 2 rounds × 15 reps).
+- **Quantity:** `step` is the compiled skin step with inputs on the device, and `call` is the whole calculator call. Each value is the median.
+- **Files:** the results are in `bench/perf/results/ace_fast_ab.json` (raw: `microbench_{before,after}_ace_fast_r2.json`). A first single-round pass (`ace_fast_ab_r1.json`) agrees within the 8192-atom noise, which is about ±10% on unchanged code.
+
+| model | N | step before (ms) | step after (ms) | step speed-up | call speed-up |
+|---|--:|--:|--:|--:|--:|
+| ace_SiGe_small | 8192 | 5.78 | 2.50 | 2.31× | 1.87× |
+| ace_SiGe_small | 131072 | 22.07 | 15.17 | 1.46× | 1.30× |
+| ace_SiGe_medium | 8192 | 4.36 | 3.86 | 1.13× | 1.12× |
+| ace_SiGe_medium | 131072 | 59.91 | 30.66 | 1.95× | 1.79× |
+| ace_SiGe_large | 8192 | 7.40 | 5.98 | 1.24× | 1.38× |
+| ace_SiGe_large | 131072 | 134.94 | 70.11 | 1.92× | 1.86× |
+| ace_Cantor_small | 8192 | 3.88 | 2.89 | 1.34× | 1.23× |
+| ace_Cantor_small | 131072 | 46.24 | 21.46 | 2.15× | 1.86× |
+| ace_Cantor_medium | 8192 | 7.13 | 3.52 | 2.03× | 1.70× |
+| ace_Cantor_medium | 131072 | 116.15 | 35.29 | **3.29×** | 2.92× |
+| ace_Cantor_large | 8192 | 5.64 | 4.08 | 1.38× | 1.29× |
+| ace_Cantor_large | 131072 | 74.04 | 43.25 | 1.71× | 1.62× |
+| pace_SiGe_small (nradbase 9, rotation) | 8192 | 5.07 | 4.68 | 1.08× | 0.99× |
+| pace_SiGe_small | 131072 | 50.00 | 49.97 | 1.00× | 1.01× |
+| pace_SiGe_medium (13, matmul) | 8192 | 8.54 | 8.35 | 1.02× | 1.10× |
+| pace_SiGe_medium | 131072 | 132.50 | 104.29 | **1.27×** | 1.26× |
+| pace_SiGe_large (15, matmul) | 8192 | 22.79 | 21.50 | 1.06× | 1.12× |
+| pace_SiGe_large | 131072 | 462.07 | 388.63 | **1.19×** | 1.18× |
+| pace_Cantor_small (4, rotation) | 8192 | 4.20 | 4.20 | 1.00× | 0.99× |
+| pace_Cantor_small | 131072 | 24.67 | 24.63 | 1.00× | 1.00× |
+| pace_Cantor_medium (8, rotation) | 8192 | 5.86 | 6.26 | 0.94×¹ | 0.98× |
+| pace_Cantor_medium | 131072 | 61.00 | 61.11 | 1.00× | 1.00× |
+| pace_Cantor_large (11, rotation) | 8192 | 13.50 | 13.52 | 1.00× | 1.02× |
+| pace_Cantor_large | 131072 | 238.03 | 237.98 | 1.00× | 1.00× |
+
+¹ The code is unchanged here. The single-round pass measured 1.12× the other way, so this is noise.
+
+**What the table shows:**
+
+- **Every ACE model is faster.** The step gain is 1.13–2.31× at 8192 atoms and 1.46–3.29× at 131k.
+- **The gain grows with N**, because the smaller per-row intermediates remove the chunking penalty (§3.4).
+- **Cantor_medium ACE against PACE.** At 131k atoms it goes from 116 ms, slower than PACE's 61 ms, to 35 ms, 1.7× faster than PACE. At 8192 it goes from 7.1 to 3.5 ms, against PACE's 5.9.
+- **The PACE switch.**
+  - SiGe_medium and SiGe_large (nradbase 13 and 15) gain 1.27× and 1.19× at 131k, and 2–6% at 8192.
+  - All Cantor models and SiGe_small stay on the rotation recurrence, and are unchanged within noise.
+- **Modal time:** about 38 min of A100: 16 min for the single-round pass and 22 min for the two-round pass.
+
+**Not re-measured here:** LAMMPS itself. The bundle is built from `lean(model)` (`ace_jax.lean` in the bundle), so it runs the same `site_energies_dense_blocked`. The controller's `bench/scaling` re-run measures it.

@@ -657,7 +657,7 @@ def block_dense(model):
 def lean(model):
     """The evaluation form of a folded ACEModel: `prune_columns`, `fold_pair`
     and the l-blocked dense A (`block_dense`).  Exact to roundoff in E, F and the
-    virial; 1.3-3x faster forces on the benchmark models (docs/ace-vs-pace-gap.md).
+    virial; 1.1-3.3x faster forces on the benchmark models (docs/ace-vs-pace-gap.md section 8).
 
     Energy only (see `fold_pair`): keep the original for descriptors and
     fitting.  Anything that is not a folded ACEModel (a PACEModel, an unfolded

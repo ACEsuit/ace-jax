@@ -152,7 +152,7 @@ load; faster only at large `nradbase`). Values are unchanged to roundoff.
 - `lean` (ACE `.npz` models): energies, forces and stress are evaluated with
   `ace_jax.eval.lean(model)`, exact to roundoff. It drops radial columns and
   harmonics the basis never reads, folds the pair weights into the pair
-  radial, and pools the dense A per l-block. This makes forces 1.3–3× faster.
+  radial, and pools the dense A per l-block. Forces are 1.1–3.3× faster (A100, docs/ace-vs-pace-gap.md §8).
   `calc.eval_model` is that form. `calc.model` stays the model as given, and
   descriptors use it. A lean model is energy-only: its `site_basis` and
   descriptor methods raise. Never fit from it; `aj.load` returns the full model.
