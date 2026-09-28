@@ -29,6 +29,11 @@ image = with_sources(base_image.run_commands(
     "cmake --build /opt/kokkos-tools/build -j 16",
     "find /opt/kokkos-tools/build -name 'libkp_kernel_timer*' -o -name 'kp_reader' | head",
 ))
+# BENCH_BASE_SRC=<checkout>: also mount that checkout's src at /ace-jax-base/src,
+# for microbench_ab (before and after on the same GPU)
+if modal.is_local() and __import__("os").environ.get("BENCH_BASE_SRC"):
+    image = image.add_local_dir(pathlib.Path(__import__("os").environ["BENCH_BASE_SRC"]) / "src",
+                                "/ace-jax-base/src")
 app = modal.App("ace-jax-perf-profile", image=image)
 OUT = HERE / "results"
 ENV = {"PYTHONPATH": "/ace-jax/bench:/ace-jax/src"}
@@ -420,3 +425,100 @@ def ab_fm(models: str = "SiGe_small,SiGe_medium,SiGe_large,Cantor_small,Cantor_m
         print(m, r.get("error", "")[:300],
               {k: (round(x["median_s"] * 1e3, 3), round(100 * x.get("vs_node_major", 0), 1),
                    x["dE_rel"], x["dF_max"]) for k, x in v.items()})
+
+
+# Task 10: before/after micro-benchmark (bench/perf/microbench.py).  "before" is
+# the merge base's src, mounted by BENCH_SRC_ROOT (scaling.modal_app.with_sources):
+#   git worktree add <dir> $(git merge-base HEAD feat/bench-scaling)
+#   BENCH_SRC_ROOT=<dir> uv run --with modal modal run bench/perf/modal_profile.py::microbench
+#   uv run --with modal modal run bench/perf/modal_profile.py::microbench
+MICROBENCH = [("pace_Cantor_medium.yace", 1024, 30), ("pace_Cantor_medium.yace", 8192, 30),
+              ("pace_Cantor_medium.yace", 65536, 10), ("ace_Cantor_medium.npz", 8192, 30)]
+
+
+def _src_commit():
+    import os
+    import subprocess
+    root = os.environ.get("BENCH_SRC_ROOT") or str(HERE.parents[1])
+    return subprocess.run(["git", "-C", root, "rev-parse", "HEAD"], capture_output=True,
+                          text=True).stdout.strip()
+
+
+@app.local_entrypoint()
+def microbench(which: str = "", dtype: str = "float64", tag: str = ""):
+    """Model call and end-to-end calculator time (MD-like calls), every case in
+    its own process on ONE A100; `which` defaults to before/after by BENCH_SRC_ROOT."""
+    import os
+    which = which or ("before" if os.environ.get("BENCH_SRC_ROOT") else "after")
+    argvs = [["bench/perf/microbench.py", "time", f"/ace-jax/bench/scaling/models/{m}",
+              _system(m.split("_", 1)[1]), str(n), "--dtype", dtype, "--reps", str(reps)]
+             for m, n, reps in MICROBENCH]
+    rows = script_remote.remote(argvs)
+    _save(f"microbench_{which}{tag}.json", {"which": which, "src_commit": _src_commit(),
+                                            "rows": rows})
+    for r in rows:
+        print(json.dumps({k: r.get(k) for k in ("model", "n", "device", "skin", "status",
+                                                 "model_s", "call_s", "call_atom_steps_per_s",
+                                                 "rebuilds", "error")}))
+
+
+@app.function(gpu="A100-80GB", timeout=3600)
+def microbench_ab_remote(argvs: list):
+    """Each case at the merge base (/ace-jax-base/src) then at HEAD (/ace-jax/src),
+    each in its own process, all on ONE GPU."""
+    import subprocess
+    gpu = subprocess.run("nvidia-smi --query-gpu=name --format=csv,noheader", shell=True,
+                         capture_output=True, text=True).stdout.strip()
+    out = {"before": [], "after": [], "gpu": gpu}
+    for argv in argvs:
+        for which, src in (("before", "/ace-jax-base/src"), ("after", "/ace-jax/src")):
+            p = _sh(["python"] + argv, cwd="/ace-jax",
+                    env={"PYTHONPATH": f"/ace-jax/bench:{src}"})
+            try:
+                out[which].append(json.loads(p.stdout.strip().splitlines()[-1]))
+            except Exception:                                      # noqa: BLE001
+                out[which].append({"argv": argv, "error": p.stdout[-1500:] + p.stderr[-3000:]})
+    return out
+
+
+@app.local_entrypoint()
+def microbench_ab(dtype: str = "float64", tag: str = ""):
+    """`microbench` before and after on the same A100 (A100-80GB may be SXM4 or
+    PCIe, which differ by ~15%):
+        BENCH_BASE_SRC=<merge-base worktree> uv run --with modal modal run \\
+            bench/perf/modal_profile.py::microbench_ab"""
+    import os
+    import subprocess
+    base = os.environ.get("BENCH_BASE_SRC")
+    if not base:
+        raise SystemExit("set BENCH_BASE_SRC to a worktree of the merge base")
+    commit = lambda root: subprocess.run(["git", "-C", root, "rev-parse", "HEAD"],
+                                         capture_output=True, text=True).stdout.strip()
+    argvs = [["bench/perf/microbench.py", "time", f"/ace-jax/bench/scaling/models/{m}",
+              _system(m.split("_", 1)[1]), str(n), "--dtype", dtype, "--reps", str(reps)]
+             for m, n, reps in MICROBENCH]
+    res = microbench_ab_remote.remote(argvs)
+    for which, root in (("before", base), ("after", str(HERE.parents[1]))):
+        _save(f"microbench_{which}{tag}.json", {"which": which, "src_commit": commit(root),
+                                                "gpu": res["gpu"], "same_container": True,
+                                                "rows": res[which]})
+        for r in res[which]:
+            print(which, json.dumps({k: r.get(k) for k in (
+                "model", "n", "skin", "status", "model_s", "step_s", "call_s",
+                "call_atom_steps_per_s", "rebuilds", "error")}))
+
+
+@app.local_entrypoint()
+def microbench_memory(models: str = "SiGe_small,SiGe_medium,SiGe_large,Cantor_small,"
+                                    "Cantor_medium,Cantor_large",
+                      ns: str = "1024,4096,8192", dtype: str = "float64", tag: str = ""):
+    """XLA compiled temp size of the dense E/F/V call vs estimate_a_bytes (PACE),
+    one container per model."""
+    groups = [[["bench/perf/microbench.py", "memory",
+                f"/ace-jax/bench/scaling/models/pace_{m}.yace", _system(m), n, "--dtype", dtype]
+               for n in ns.split(",")] for m in models.split(",")]
+    rows = [r for g in script_remote.map(groups) for r in g]
+    _save(f"microbench_memory_{dtype}{tag}.json", {"src_commit": _src_commit(), "rows": rows})
+    for r in rows:
+        print(json.dumps({k: r.get(k) for k in ("model", "n", "device", "temp_bytes",
+                                                 "estimate_bytes", "error")}))

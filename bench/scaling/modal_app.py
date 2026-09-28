@@ -97,9 +97,15 @@ base_image = (
 
 def with_sources(img):
     """`img` with this checkout's ace-jax source, bench and julia dirs mounted
-    (the last layers, so editing them never rebuilds the toolchain)."""
+    (the last layers, so editing them never rebuilds the toolchain).
+
+    BENCH_SRC_ROOT (default: this checkout) roots the `src` mount elsewhere, e.g.
+    a worktree of an older commit for a before/after comparison; bench and julia
+    stay this checkout's, so both sides run the same harness."""
+    import os
+    src_root = pathlib.Path(os.environ.get("BENCH_SRC_ROOT") or ROOT)
     return (img
-    .add_local_dir(ROOT / "src", "/ace-jax/src")
+    .add_local_dir(src_root / "src", "/ace-jax/src")
     .add_local_dir(ROOT / "bench", "/ace-jax/bench",
                    ignore=["**/__pycache__", "pace_modal/*.json*", "scaling/results/*"])
     .add_local_dir(ROOT / "julia", "/ace-jax/julia"))

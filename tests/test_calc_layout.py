@@ -68,7 +68,9 @@ def test_estimate_formula_pace_pool_first(yace):
     assert (nb, ny) == (m.nradbase, (m.lmax + 1) ** 2)
     C, nA = m.a_channels, int(m.aspec_r.shape[0])
     n, E, K = 64, 1500, 40
-    per_node = 3 * n * C * (nb * ny + nA)
+    nP = m.n_aa + sum(int(s.size) for s in m.aa_specs)
+    assert m.product_basis_width() == nP
+    per_node = n * C * (nb * ny + nA) + n * C * nb * nA + n * nP // 4
     dense = estimate_a_bytes(m, "dense", n, E, K, 8)
     assert dense == 8 * (2 * n * K * (C * nb + ny) + per_node)
     assert estimate_a_bytes(m, "sparse", n, E, K, 8) == 8 * (2 * E * (nb + ny + nb * ny) + per_node)
@@ -79,9 +81,41 @@ def test_estimate_formula_pace_pool_first(yace):
         estimate_a_bytes(m, "banded", n, E, K, 8)
 
 
+class _RecordedWidths:
+    """The pool-first model widths estimate_a_bytes reads, from a recorded row."""
+    uses_edge_a = False
+
+    def __init__(self, row):
+        self.row = row
+        self.a_channels = row["C"]
+        self.aspec_r = np.zeros(row["n_a"])
+
+    def pool_first_widths(self):
+        return self.row["n_b"], self.row["n_y"]
+
+    def product_basis_width(self):
+        return self.row["n_p"]
+
+
+def test_estimate_pace_dense_within_1p5x_of_a100_temp():
+    """The refit target: XLA's compiled temp size of the dense E/F/V call on an
+    A100 (six benchmark PACE models x 1k/4k/8k atoms, float64, recorded by
+    bench/perf/microbench.py memory).  Within 1.5x either way; the fit errs high."""
+    import json
+    rec = pathlib.Path(__file__).parent.parent / "bench" / "perf" / "results" / \
+        "microbench_memory_float64.json"
+    rows = json.loads(rec.read_text())["rows"]
+    assert len(rows) == 18 and all("A100" in r["device"] for r in rows)
+    ratios = [r["temp_bytes"] / estimate_a_bytes(_RecordedWidths(r), "dense", r["n"],
+                                                 r["n_edges"], r["K"], 8) for r in rows]
+    print(f"\n  A100 temp / estimate: {min(ratios):.2f}..{max(ratios):.2f}")
+    assert all(1 / 1.5 <= q <= 1.5 for q in ratios), ratios
+
+
 def test_estimate_pace_dense_within_3x_of_compiled_temp(yace):
     """Against XLA's compiled temp-buffer size for the whole dense E/F/V call on
-    CPU (a cheap stand-in for a measured peak): within 3x either way."""
+    the CPU: within 3x either way (the estimate is fitted to the A100, where XLA
+    keeps about half as much live as on the CPU: CPU temp / estimate is ~2)."""
     from ase.build import bulk
 
     from ace_jax.eval import sparse_graph

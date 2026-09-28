@@ -1,6 +1,12 @@
 """ace-jax inside LAMMPS (lammps-jax, pair_style jax/kk): the stock dense bundle
 vs a bundle that evaluates only the owned rows with cutoff-sized slots.
 
+Targets the pre-optimisation API (the merge base with feat/bench-scaling, 2eb629f):
+its variants (variants.py) call PACE methods removed by the pool-first rewrite
+(`_node_energies`, `edge_a_factors`), so it no longer runs on this branch.  Kept as the evidence
+behind docs/pace-performance-gap.md; bench/perf/microbench.py is the maintained
+harness.
+
 The stock bundle (export.lammps.make_energy_fn, sized by run_lammps.capacity)
 runs the dense model on all max_atoms rows (owned + ghost capacity) with
 k_dense = k(rcut + skin) + 8 slots.  But lammps-jax packs only owned senders

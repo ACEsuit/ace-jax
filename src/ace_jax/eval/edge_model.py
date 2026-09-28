@@ -17,8 +17,9 @@ neighbour-species channels A carries), plus the
 fields `aspec_r`, `aspec_y`, `edge_a_kind`, `a_sel_r`, `a_sel_y` and `E0`.
 
 A model whose A basis is built pool-first (`pool_first_dense` /
-`pool_first_sparse`; PACE) provides instead `pool_first_weights()` and
-`pool_first_sel_y`, and sets `uses_edge_a = False`: the `edge_a` form is then
+`pool_first_sparse`; PACE) provides instead `pool_first_weights()`,
+`pool_first_sel_y` (and `pool_first_widths()`, `product_basis_width()` for
+`estimate_a_bytes`), and sets `uses_edge_a = False`: the `edge_a` form is then
 inert and `ACECalculator` does not calibrate it.
 """
 import dataclasses
@@ -257,7 +258,8 @@ LAYOUTS = ("sparse", "dense")
 
 
 def estimate_a_bytes(model, layout, n_nodes, n_edges, max_neighbours, itemsize):
-    """Peak bytes of the A-basis stage (energy + forces), for choosing a layout.
+    """Peak bytes of the A-basis stage (energy + forces; pool-first: the whole
+    dense call), for choosing a layout.
 
     Fitted to measured peaks on A4500/A100/H100 (c_ace, 4k and 14k atoms):
     dense  ~ 2 n K (C n_cols + n_Y) + 3 n C n_cols n_Y   (factors + A_full)
@@ -266,16 +268,26 @@ def estimate_a_bytes(model, layout, n_nodes, n_edges, max_neighbours, itemsize):
     padding; sparse only with the edge count.
 
     A pool-first model (`uses_edge_a` False; PACE) never forms per-edge columns
-    or A rows: per edge it holds the fixed basis b (n_b wide) and Y, per node
-    the pooled b (x) Y and A, so with n_b, n_Y = `pool_first_widths()`
-    dense  ~ 2 n K (C n_b + n_Y) + 3 n C (n_b n_Y + n_A)
-    sparse ~ 2 E (n_b + n_Y + n_b n_Y) + 3 n C (n_b n_Y + n_A)
-    (same coefficients as above; not refitted on a GPU).
+    or A rows: per edge it holds the fixed basis b (n_b wide, one-hot over the C
+    channels) and Y; per node the pooled Ag = b (x) Y, A, the (n, C, n_b, n_a)
+    Agy = Ag @ sel_y that W[z_i] contracts, and the product basis (n_P =
+    `product_basis_width()`: the gathered A factors of every order and AA), so
+    with n_b, n_Y = `pool_first_widths()`
+    dense  ~ 2 n K (C n_b + n_Y) + per_node
+    sparse ~ 2 E (n_b + n_Y + n_b n_Y) + per_node
+    per_node = n C (n_b n_Y + n_a) + n C n_b n_a + n n_P / 4
+    Refitted to XLA's compiled temp size of the dense E/F/V call on an A100
+    (six PACE models x 1k/4k/8k atoms, float64,
+    bench/perf/results/microbench_memory_float64.json): measured / estimate
+    0.68-1.06, so the estimate errs high by at most 1.5x.  XLA's CPU backend
+    keeps about twice as much live (fewer fusions), so on the CPU this is low
+    by about 2x.
     """
     C, n_a = model.a_channels, int(model.aspec_r.shape[0])
     if not model.uses_edge_a:
         nb, ny = model.pool_first_widths()
-        per_node = 3 * n_nodes * C * (nb * ny + n_a)
+        per_node = (n_nodes * C * (nb * ny + n_a) + n_nodes * C * nb * n_a
+                    + n_nodes * model.product_basis_width() // 4)
         if layout == "dense":
             return itemsize * (2 * n_nodes * max_neighbours * (C * nb + ny) + per_node)
         if layout == "sparse":

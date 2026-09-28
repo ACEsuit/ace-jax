@@ -2,6 +2,12 @@
 (docs/pace-performance-gap.md).  Numerically these are the same model: each
 variant is checked against the unmodified PACEModel on energies and forces.
 
+Targets the pre-optimisation API (the merge base with feat/bench-scaling, 2eb629f):
+it overrides and calls PACE methods removed by the pool-first rewrite
+(`_node_energies`, `edge_a_factors`), so it no longer runs on this branch.  Kept as the evidence
+behind docs/pace-performance-gap.md; bench/perf/microbench.py is the maintained
+harness.
+
 Variants (combine with '+', e.g. "rec+pool+rev"):
 
   rec   SBessel radial basis by the Chebyshev recurrence for sin(kx): one sin

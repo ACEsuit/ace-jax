@@ -190,6 +190,11 @@ class PACEModel(EdgeSiteModel):
         (`estimate_a_bytes` for the pool-first form)."""
         return self.nradbase, (self.lmax + 1) ** 2
 
+    def product_basis_width(self):
+        """Per-node product-basis width, n_AA + sum_k k n_spec_k: the gathered
+        A factors of every order and AA (`estimate_a_bytes`)."""
+        return self.n_aa + sum(int(s.size) for s in self.aa_specs)
+
     def edge_a_widths(self):
         """(radial columns [g_k | R_nl], harmonic columns) of the per-edge form;
         inert for PACE's energy path (pool-first)."""

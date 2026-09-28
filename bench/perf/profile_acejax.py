@@ -1,6 +1,12 @@
 """Profile one ace-jax PACE case: time split, per-stage timings, cost analysis,
 and (optionally) a per-kernel GPU profile mapped back to HLO / JAX source.
 
+Targets the pre-optimisation API (the merge base with feat/bench-scaling, 2eb629f):
+it calls PACE methods removed by the pool-first rewrite (`_node_energies`,
+`edge_a_factors`), so it no longer runs on this branch.  Kept as the evidence
+behind docs/pace-performance-gap.md; bench/perf/microbench.py is the maintained
+harness.
+
     PYTHONPATH=bench:src python bench/perf/profile_acejax.py <yace> <system> <n> \
         [--dtype float64] [--layout dense|sparse] [--kind gather|matmul] \
         [--trace DIR] [--variant NAME]

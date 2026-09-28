@@ -50,8 +50,20 @@ def test_standalone_row_for_acejax(tmp_path):
     # and record the threading it used (spec: "the threading actually used")
     assert out["platform"] == "cpu" and out["threads"]["cpus"] >= 1
     assert out["nlist_backend"] and out["force_s"] + out["nlist_s"] <= out["call_s"] * 1.5
-    for k in ("call_s", "force_s", "nlist_s", "compile_s"):
+    for k in ("call_s", "force_s", "compile_s"):
         assert out[k] > 0
+    assert out["nlist_s"] >= 0            # 0 when the MD-like calls reuse the skin list
+
+
+def test_standalone_is_md_like(tmp_path):
+    """Each timed call displaces the atoms (MD-like), so ace-jax reuses its
+    skin list: the calls after the first build no neighbour list."""
+    from scaling.run_standalone import run_case
+    row = {"code": "acejax-pace", "system": "SiGe", "size": "small",
+           "path": str(pathlib.Path(__file__).parent.parent / "fixtures" / "pace" / "gesi_sbessel.yace"),
+           "elements": ["Si", "Ge"], "name": "acejax-pace/SiGe/small"}
+    out = run_case(row, 256, "float64", "cpu", reps=4)
+    assert out["md_like"] is True and out["rebuilds"] <= 2               # skin reused
 
 
 from scaling.run_lammps import lammps_input, parse_log
