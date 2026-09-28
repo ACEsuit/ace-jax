@@ -27,7 +27,9 @@ import numpy as np
 from ace_jax.construct.prior import prior_diagonal
 from ace_jax.eval import load
 from ace_jax.fit.data import build_dataset, load_configs
-from ace_jax.fit.hypers import default_prior, from_array
+from ace_jax.fit.hypers import default_prior, from_array, to_array
+from ace_jax.fit.ladder import run_map
+from ace_jax.fit.objective import log_marginal_likelihood
 from ace_jax.fit.inducing import GPConfig, descriptor_scale, select_inducing, site_features
 from ace_jax.fit.kernels import KernelSpec
 from ace_jax.fit.objective import Problem
@@ -47,6 +49,9 @@ p.add_argument("--n-q", type=int, default=12, help="must match the run that prod
 p.add_argument("--map-steps", type=int, default=300)
 p.add_argument("--mult", default="0.03,0.1,0.3,1,3,10,30,100,300",
                help="multipliers on the MAP sigma_E (larger = weight energies less)")
+p.add_argument("--gamma-powers", default=None,
+               help="instead of the sigma_E sweep: prior-shape sweep, Gamma -> Gamma**alpha for each alpha "
+                    "(0 = uniform ridge, 1 = the model's prior), sigmas re-MAP'd on the cached statistics")
 p.add_argument("--cand", action="append", required=True,
                help='"init" or a path to a learned rnl_Wnlq.npy (repeatable); label = its parent dir')
 p.add_argument("--out", required=True)
@@ -92,13 +97,35 @@ def val_rows(m):
 
 
 mults = [float(x) for x in a.mult.split(",")]
-res = {"mult": mults}
+res = {"mult": mults, "gamma_powers": a.gamma_powers}
 for cand in a.cand:
     label, W = ("init", W_init) if cand == "init" else (pathlib.Path(cand).parent.name, jnp.asarray(np.load(cand)))
     th = from_array(theta_map_linear(prob, ds_fit, W, steps=a.map_steps, init=a0))
     m = with_radial(model, W)
     st = jax.tree.map(np.asarray, linear_statistics(m, cfg, ds_fit))
     PE, yE, PF, yF = val_rows(m)
+    if a.gamma_powers:
+        pts = []
+        stj = jax.tree.map(jnp.asarray, st)
+        for alpha in (float(x) for x in a.gamma_powers.split(",")):
+            g_a = gamma ** alpha
+            prob_a = prob._replace(gamma=jnp.asarray(g_a))
+            lml = jax.jit(lambda v, pa=prob_a: log_marginal_likelihood(from_array(v), stj, pa))
+            # warm start: shift log sigma_c by the change in Gamma's geometric mean, so the prior
+            # strength on a typical basis function is unchanged; then re-MAP on the cached Gram
+            shift = float(np.mean(np.log(g_a)) - np.mean(np.log(gamma)))
+            th0 = th._replace(log_sigma_c=th.log_sigma_c + shift)
+            h = run_map(lml, prob.prior, steps=a.map_steps, init=th0)
+            sE, sF, sV, sc = (float(np.exp(getattr(h, f"log_sigma_{k}"))) for k in "EFVc")
+            G = st.G_E / sE ** 2 + st.G_F / sF ** 2 + st.G_V / sV ** 2 + np.diag(g_a ** 2 / sc ** 2)
+            c = np.linalg.solve(G, st.b_E / sE ** 2 + st.b_F / sF ** 2 + st.b_V / sV ** 2)
+            pts.append({"alpha": alpha, "sigma_c": sc, "sigma_E": sE, "sigma_F": sF,
+                        "E_rmse_meV_atom": float(1e3 * np.sqrt(np.mean((PE @ c - yE) ** 2))),
+                        "F_rmse_meV_A": float(1e3 * np.sqrt(np.mean((PF @ c - yF) ** 2)))})
+            print(f"{label:14s} Gamma^{alpha:<5g} sigma_c {sc:.3e}  val E {pts[-1]['E_rmse_meV_atom']:7.3f} meV/atom"
+                  f"  F {pts[-1]['F_rmse_meV_A']:7.2f} meV/A", flush=True)
+        res[label] = {"points": pts}
+        continue
     sE, sF, sV, sc = (float(np.exp(getattr(th, f"log_sigma_{k}"))) for k in "EFVc")
     lam = np.diag(gamma ** 2 / sc ** 2)
     pts = []
