@@ -53,20 +53,24 @@ def _stack(samples):
     return a.reshape(-1, len(FIELDS))
 
 
-def _svi(model, guide, steps, lr, seed):
+def _svi(model, guide, steps, lr, seed, return_losses=False):
     # Adam on a deterministic objective oscillates at the lr scale, so decay it
     # to 0.1% over the run; the MAP then converges rather than jitters.
     svi = SVI(model, guide, optax.adam(optax.linear_schedule(lr, 1e-3 * lr, steps)), Trace_ELBO())
     res = svi.run(jax.random.PRNGKey(seed), steps, progress_bar=False)
-    return res.params
+    return (res.params, np.asarray(res.losses)) if return_losses else res.params
 
 
-def run_map(lml, prior, *, steps=500, lr=0.02, seed=0, init=None):
+def run_map(lml, prior, *, steps=500, lr=0.02, seed=0, init=None, return_losses=False):
+    """theta-MAP by SVI/AutoDelta.  return_losses=True also returns the
+    per-step SVI loss trace (-log posterior up to a constant), for
+    convergence diagnostics; the MAP itself is unchanged."""
     model = numpyro_model(lml, prior)
     guide = AutoDelta(model, init_loc_fn=init_to_value(values=_init(prior, init)))
-    params = _svi(model, guide, steps, lr, seed)
+    params, losses = _svi(model, guide, steps, lr, seed, return_losses=True)
     med = guide.median(params)
-    return Hypers(*[float(med[f]) for f in FIELDS])
+    h = Hypers(*[float(med[f]) for f in FIELDS])
+    return (h, losses) if return_losses else h
 
 
 def run_map_vec(lml, mu, sigma, init, *, steps=500, lr=0.02, seed=0):

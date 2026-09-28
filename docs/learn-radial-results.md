@@ -1,0 +1,344 @@
+# Learned tensor-radial VarPro: benchmark results (Task 9 Step 6)
+
+Date 2026-09-27. Branch `feat/learn-radial`, code at `b3df415` (post fair-gate
+fix: `746d81d` fair held-out gate, `43a39c2` readout written into `model.npz`,
+`3724eba` per-λ checkpoints, `b3df415` cheaper bench defaults). Raw driver
+output is in
+`.superpowers/sdd/2026-09-26-learned-radial-varpro-phase1/benchmark-output.txt`
+(per-round logs, gate scores, `summary.json`, and `/usr/bin/time` wall-clock
+and max RSS for each system).
+
+## Setup
+
+- Host: moriarty, RTX A4500 GPU, float64 (`jax_enable_x64`).
+- `bench/learn_radial/run.py --n-q 30 --steps 40 --reprofile-every 20
+  --lam-grid 0,1e-2 --batch 4` (`--map-steps` left at its default, 300).
+- Labels: `mace_energy` / `mace_force` / `mace_virial`.
+- **SiGe:** `--model ~/acegp-run/sige/sige_base.npz --data
+  ~/acegp-run/sige/sige_mh1.xyz --r0 2.35 --ntrain 200 --nval 100`.
+- **Cantor (CrMnFeCoNi):** `--model ~/acegp-run/cantor/cantor_d4.npz --data
+  ~/ACEpotentials-jax/cantor1k_b_mh1.xyz --r0 2.5 --ntrain 150 --nval 100`.
+- **Si:** not run — no production Si dataset is available on moriarty, only
+  the 53-config `si_tiny_train.xyz` test fixture, which is far too small to
+  stand in for a production benchmark. Si has no row of results below.
+
+### Earlier attempts (recorded for the history)
+
+- The plan's original defaults (`--steps 200`, 4-value `--lam-grid`,
+  `--reprofile-every 10`) ran on SiGe for 11.5 h with no progress output and
+  were killed without finishing — that run predates the per-round progress
+  logging (`3ccd90d`), so there was no way to tell it was making progress at
+  all.
+- Measured per-pass costs on the shared GPU: a `linear_statistics` streaming
+  pass takes about 21 s; one L-BFGS value+grad step (`_lbfgs_step`) about
+  69 s.
+- A second run, on code before the fair-gate fix (`746d81d`), showed the
+  learned radials making progress, but its held-out gate scored candidates
+  unfairly (review finding C1: not every candidate went through the same
+  θ-MAP-then-score procedure) — that run's selection verdict is discarded;
+  only the current, fair-gate run below counts.
+
+## Per-system results
+
+### SiGe
+
+`n_q=30`, `to_analytic relres_max = 2.086e-04`, wall clock (`/usr/bin/time`)
+**1:06:18** (3978 s), max RSS **4,959,636 KB ≈ 4.73 GB**. Selected:
+**`learned_lam=0.01`**.
+
+| candidate | gate score (own θ-MAP) | score at common a0 | Δ vs init (gate score) | Δ vs init (at a0) |
+|---|---|---|---|---|
+| init | 14.033771 | 12.037410 | — | — |
+| learned_lam=0 | 11.089885 | 10.486020 | −20.98% | −12.89% |
+| **learned_lam=0.01 (selected)** | **11.068359** | 10.412930 | **−21.13%** | −13.49% |
+
+Fit-set VarPro+roughness objective (shared reference `r0 = 5.146111e+04` for
+both λ, from `learn_radial`'s per-round log; `reason=steps` for every round —
+the step budget ran out, not convergence or a line-search stop):
+
+| λ | r0 | round 1 obj (step 20/40) | round 2 obj (step 40/40, final) |
+|---|---|---|---|
+| 0 | 5.146111e+04 | 3.972087e+04 | 3.563010e+04 |
+| 0.01 | 5.146111e+04 | 4.020979e+04 | 3.613348e+04 |
+
+θ-MAP diagnostics at the gate (`map_grad_norm`, `map_dloss_last` over the
+last 10 MAP steps): init 2.975e+03 / −6.268e+00; learned_lam=0 2.551e+03 /
+−4.230e+00; learned_lam=0.01 2.532e+03 / −4.205e+00.
+
+### Cantor (CrMnFeCoNi)
+
+`n_q=30`, `to_analytic relres_max = 4.872e-07`, wall clock (`/usr/bin/time`)
+**17:15.93** (1035.93 s), max RSS **6,479,932 KB ≈ 6.18 GB**. Selected:
+**`learned_lam=0`**.
+
+| candidate | gate score (own θ-MAP) | score at common a0 | Δ vs init (gate score) | Δ vs init (at a0) |
+|---|---|---|---|---|
+| init | 207.830135 | 303.109400 | — | — |
+| **learned_lam=0 (selected)** | **108.437846** | 203.940400 | **−47.82%** | −32.72% |
+| learned_lam=0.01 | 115.820728 | 245.139400 | −44.27% | −19.13% |
+
+Fit-set VarPro+roughness objective (shared reference `r0 = 5.115108e+04` for
+both λ; `reason=steps` for every round here too):
+
+| λ | r0 | round 1 obj (step 20/40) | round 2 obj (step 40/40, final) |
+|---|---|---|---|
+| 0 | 5.115108e+04 | 3.091329e+04 | 1.650093e+04 |
+| 0.01 | 5.115108e+04 | 3.463251e+04 | 1.739522e+04 |
+
+θ-MAP diagnostics: init 1.637e+03 / −2.353e+00; learned_lam=0 8.110e+02 /
+−9.892e-01; learned_lam=0.01 1.082e+03 / −1.376e+00.
+
+### Si
+
+Not run — see Setup.
+
+## Production gradient-memory measurement (Task 6 Step 4)
+
+On moriarty, Cantor-scale statistics (`L = 1950`, 38 batches of 4 configs,
+`n_q = 30`): `value(all batches) = 1147.0 MB`, `grad(2 batches) = 1333.1 MB`,
+`grad(all batches) = 1333.6 MB` — a grad/value ratio of **1.16×**. This
+confirms, at production scale, what the CPU fixture-scale test
+(`test_gradient_memory_does_not_scale_with_batches`) already showed: gradient
+memory does not grow with the number of streamed batches, and it comfortably
+clears the spec's <3× bar. No two-pass adjoint is needed.
+
+## Verdict against the spec's success criterion
+
+The spec's criterion: *"learned wins the gate on held-out E+F on at least two
+of the three systems (Si, SiGe, CrMnFe)."*
+
+Of the two systems actually run, **both** show `learned` winning the fair
+held-out gate over `init`: SiGe by 21.1% (gate score), Cantor by 47.8%. **Si
+was not run** (no production dataset available). Stated plainly: 2 of the 2
+systems run show a win; the criterion as written needs a verdict on 3
+systems, and only 2 were measured. Taking the 2 measured systems at face
+value, the feature is worth keeping; a Si production run remains open before
+the ≥2-of-3 criterion can be called fully satisfied on the intended system
+set rather than on a 2-system subset.
+
+## Figures
+
+![Held-out gate scores](figures/learn-radial/1_gate_scores.png)
+
+![VarPro objective per L-BFGS step](figures/learn-radial/2_objective.png)
+
+## Shape of the learned radials: small, but high-frequency
+
+The radials barely move. Measured in the data-weighted norm, where each
+initial radial has norm 1, the median change is below 0.1%. The largest is
+about 1% on SiGe and 5% on Cantor at λ = 0. At plot scale the learned curves
+lie on top of the initial ones.
+
+The *change*, however, is not smooth:
+
+- **It is spectrally flat up to q = 30.** The initial radials are
+  band-limited: Legendre degree ≤ 9 on SiGe and ≤ 3 on Cantor, which reflects
+  the spline radials they were projected from. The change ΔW has roughly
+  equal power at every degree up to the widened span `--n-q 30`. The share of
+  that power at q ≥ 15 is 34% on SiGe and about 50% on Cantor.
+- **It sits on the pair-distance peaks.** ΔR(r) consists of wiggles about
+  0.3 Å wide, placed on the training pair-distance peaks near 2.5, 4.0 and
+  4.5 Å, and it is near zero in the gaps between them.
+
+The optimiser is using the widened polynomial span to add fine structure
+tuned to the training distance distribution. The validation split shares
+those peaks, so the held-out gate cannot tell physical improvement from this
+kind of fit. More steps would let the wiggles grow.
+
+The curvature penalty as implemented barely restrains this:
+
+- **SiGe:** λ = 1e-2 makes no visible difference. The relative scaling
+  `λ·r0/rough0` gives λ_abs ≈ 1e-5, because the degree-9 initial radials
+  already have a large curvature.
+- **Cantor:** λ = 1e-2 halves the wiggles but leaves the spectrum flat.
+
+![SiGe radials](figures/learn-radial/3_radials_SiGe.png)
+
+![Cantor radials](figures/learn-radial/3_radials_Cantor.png)
+
+![How much each radial moved, and the spectrum of the change](figures/learn-radial/4_change_spectrum.png)
+
+**Next: a stronger prior.** Three options, cheapest first:
+
+- **(a)** Cap the span at roughly the initial degree plus a few (`--n-q 12`).
+- **(b)** Add a spectral prior on the change ΔW, penalising ∝ q^p, as the
+  departure-from-init analogue of Γ's degree weighting.
+- **(c)** Use a much larger λ grid.
+
+The decisive test is whether most of the held-out gain survives when the
+change is forced to be smooth.
+
+## Prior experiments: capping the span beats a spectral prior
+
+Two follow-up runs on lestrade used the same data, split, 40 steps and gate as
+above:
+
+- **Capped span:** `--n-q 12`, with λ ∈ {0, 1e-1}.
+- **Spectral prior:** a penalty `λ_spec · Σ(1+q)^4 ΔW_q²` on the change from
+  the initial radials, with n_q = 30 and λ_spec ∈ {1e-5, 1e-4}.
+
+Held-out score, as the change relative to the initial radials:
+
+| System | n_q=30, no prior | n_q=30 + spectral 1e-4 | n_q=12, λ=0 | n_q=12, λ=0.1 |
+|---|---|---|---|---|
+| SiGe (init 14.03) | 11.09 (−21%) | 10.51 (−25%) | 1.43 (−90%) | **1.13 (−92%)** |
+| Cantor (init 207.8) | 108.4 (−48%) | 105.2 (−49%) | **94.5 (−55%)** | 96.9 (−53%) |
+
+The ranking is the same when every candidate is scored at the common θ.
+
+![scores](figures/learn-radial/compare_A_scores.png)
+
+**In physical units** (`bench/learn_radial/rmse.py`). The gate score is a
+σ-weighted sum of squared errors, so it cannot be read in physical units. This
+table repeats the gate's procedure and predicts the validation split directly:
+the θ-MAP is warm-started from the init MAP, and the M = 0 readout is fitted on
+the fit split. Raw numbers, including MAEs and training-split errors, are in
+`figures/learn-radial/rmse.json`.
+
+| System | Configuration | E RMSE (meV/atom) | F RMSE (meV/Å) | train E / F |
+|---|---|---|---|---|
+| SiGe | initial | 2.08 | 53.7 | 1.83 / 50.1 |
+| | n_q=30, no prior | 1.85 (−11%) | 49.9 (−7%) | 1.65 / 46.1 |
+| | n_q=30 + spectral 1e-4 | 1.80 (−14%) | 49.9 (−7%) | 1.59 / 46.1 |
+| | n_q=12, λ=0 | 0.62 (−70%) | 40.5 (−25%) | 0.47 / 37.4 |
+| | **n_q=12, λ=0.1** | **0.54 (−74%)** | **40.2 (−25%)** | 0.44 / 36.8 |
+| Cantor | initial | 10.29 | 152.0 | 7.26 / 139.9 |
+| | n_q=30, no prior | 7.43 (−28%) | 141.6 (−7%) | 4.65 / 125.3 |
+| | n_q=30 + spectral 1e-4 | 7.29 (−29%) | 138.2 (−9%) | 4.47 / 123.2 |
+| | **n_q=12, λ=0** | **6.94 (−33%)** | **129.6 (−15%)** | 4.86 / 116.3 |
+| | n_q=12, λ=0.1 | 7.07 (−31%) | 133.3 (−12%) | 5.20 / 122.4 |
+
+- **Energies gain far more than forces.** The gate weights favour energy,
+  which is why its −92% / −55% overstates the force gain.
+- **No sign of over-fitting.** Training errors fall in proportion to the
+  validation errors.
+
+**Capping the span fixes the optimisation; the spectral prior does not.**
+
+- **The n_q = 30 failure was conditioning, not missing regularisation.**
+  - With n_q = 30, 40 L-BFGS steps mostly move ill-conditioned high-degree
+    directions. The result is a tiny change (≤1–5%) with a flat spectrum.
+    Penalising those degrees with a spectral prior leaves this almost
+    unchanged.
+  - With n_q = 12 the same budget produces much larger changes: up to 26%
+    of a radial on SiGe and 11% on Cantor. These are smooth, with lobes about
+    1 Å wide, and the spectrum of the change decays with degree, as the
+    initial radials' spectrum does.
+- **Held-out error drops much further:** −92% on SiGe and −55% on Cantor.
+- **The largest lobes partly sit in gaps between coordination shells.** One
+  example is the SiGe Ge–Ge lobe of −0.65 at 3.5 Å, between the 2.4 Å and
+  4 Å peaks, where there is little training data. The validation split
+  shares those gaps, so this gate cannot say whether that behaviour
+  transfers, for example to MD that samples those distances. The fitting
+  prior should control change where the data density is low: a norm on ΔR
+  under a uniform-in-r measure, in addition to the data-weighted gauge.
+
+![SiGe radial change](figures/learn-radial/compare_B_radial_change_SiGe.png)
+
+![Cantor radial change](figures/learn-radial/compare_B_radial_change_Cantor.png)
+
+![change spectra](figures/learn-radial/compare_C_change_spectrum.png)
+
+**Recommended next steps:**
+
+- Make a modest span the default: `n_q` near the initial span plus a few,
+  e.g. `--n-q 12`.
+- Add a data-gap prior on ΔR.
+- Check transfer outside the training distribution (MD, OOD configs) before
+  adopting learned radials.
+
+Reproduce with `bench/learn_radial/compare_plots.py`.
+
+## Data-gap prior and MD transfer check
+
+**Data-gap prior.** `--gap-grid` adds the term `λ_gap · r0/n_active · Σ ΔW U ΔWᵀ`. `U` is the Gram matrix of the radials under a uniform-in-r measure on [0.8·r_min, rcut]. The term penalises change where training pairs are sparse.
+
+- **Scale.** On the real learned change, penalty/r0 ≈ λ_gap × 0.01–0.02.
+- **Runs.** n_q = 12 and λ_gap ∈ {1, 10, 30}. The gate picked λ_gap = 1 on both systems.
+- **Validation cost.** Small at λ_gap ≤ 10. At λ_gap = 30 it is noticeable on SiGe.
+
+Raw numbers are in `figures/learn-radial/gap_rmse_*.json`.
+
+| Validation RMSE (E meV/atom / F meV/Å) | SiGe | Cantor |
+|---|---|---|
+| initial | 2.08 / 53.7 | 10.29 / 152.0 |
+| n_q=12, no gap prior | 0.62 / 40.5 | 6.94 / 129.6 |
+| λ_gap = 1 | 0.54 / 39.8 | 7.00 / 129.2 |
+| λ_gap = 10 | 0.65 / 40.7 | 7.48 / 128.3 |
+| λ_gap = 30 | 0.89 / 41.3 | 7.33 / 131.0 |
+
+**MD transfer check** (`bench/learn_radial/md/`):
+
+- **Runs.** Each model ran Langevin MD for 2 ps at 1000 K and 2000 K, from 4 validation structures (1 fs step, a frame every 20 fs).
+- **Speed.** The padded, jitted calculator matches `ACECalculator` to 1e-12 and runs about 30× faster.
+- **Reference labels.** Frames were labelled with MACE-MH-1, head `matpes_r2scan`. That head reproduces the stored training labels: 0.00 meV/atom on SiGe and 0.04 meV/atom on Cantor.
+- **Scoring.** Every model is scored on every trajectory.
+- **Coverage.** MD frames put about 5× (SiGe) and 5–9× (Cantor) more pairs into the training data's gap bins than the training set does.
+
+Raw numbers are in `figures/learn-radial/md_eval_*.json`.
+
+RMSE against MACE, averaged over all models' trajectories at that temperature, with stopped frames excluded:
+
+| | SiGe 1000 K | Cantor 1000 K | Cantor 2000 K |
+|---|---|---|---|
+| initial | 3.80 / 114.0 | 11.48 / 248.4 | 51.7 / 741 |
+| n_q=12, no gap prior | **1.86 / 78.9** | **9.33 / 208.2** | 47.8 / 728 |
+| λ_gap = 1 | 1.88 / 77.5 | 10.20 / 206.9 | 49.0 / 723 |
+| λ_gap = 10 | 1.74 / 80.5 | 11.50 / 202.0 | 49.9 / 692 |
+| λ_gap = 30 | 1.92 / 83.9 | 11.46 / 206.5 | 51.7 / 700 |
+
+- **1000 K, both systems.** Every model is stable. The learned radials transfer: force errors are about 30% lower on SiGe and 16% lower on Cantor than with the initial radials, on MD frames outside the training distribution. The gap prior changes this by only a few percent, in either direction.
+- **2000 K is outside every model's domain.**
+  - Cantor is stable throughout, with errors of about 50 meV/atom for all models.
+  - SiGe melts at this temperature, and even the initial model's own trajectory is wrong by 2.5 eV/atom, although it never trips the stop criterion (max|F| > 50 eV/Å or r < 1 Å).
+  - The learned models with λ_gap ≤ 10 each collapse once, on the same start (#89). λ_gap = 30 avoids that collapse, but at +60% validation energy error.
+
+**Decision.** The gap prior is not a robust fix. At strengths that keep the accuracy gain, it does not prevent the one liquid-SiGe collapse, and in the regime where the models are valid it adds nothing. Following the agreed fallback:
+
+- `bench/learn_radial/run.py` now defaults to `--n-q 12`;
+- `--gap-grid` stays available and defaults to off (0);
+- the spectral prior likewise stays opt-in.
+
+## Caveats
+
+- **L-BFGS had not converged at 40 steps.** Every round in both systems ended
+  with `reason=steps` (the step budget was exhausted), never `converged` or
+  `linesearch`; the objective (see the r0→final tables above) was still
+  falling at the end of round 2 in every case. The reported objective and
+  gate-score values are therefore snapshots at a fixed compute budget, not
+  local optima.
+- **θ-MAP is not tightly converged at `map_steps=300`.** The reported
+  `map_grad_norm` values are of order 1e3 (ranging 8.1e2–3.0e3 across
+  candidates and systems), not near zero. Because every candidate's θ-MAP is
+  run with the same `map_steps=300` budget, warm-started from the same `a0`,
+  the *comparison* between candidates is fair — but none of the reported
+  scores or σ values should be read as converged absolute numbers.
+- **The gate score is a σ-normalised sum of squared errors over E and F**
+  (`Σ_{t∈{E,F}} SSE_t / (n_t σ_t²)`), not an RMSE and not in physical units.
+  Relative improvements (the "Δ vs init" columns above) are ratios of this
+  quantity and are meaningful as ratios, but the raw score numbers do not
+  convert directly to eV or eV/Å.
+- **Virials are not scored** by the held-out gate (`holdout_score`/`gate`
+  only sum over `t in "EF"`); a virial-only regression in the learned
+  radials, if any, would not be caught by this benchmark.
+
+## Next steps
+
+- **Performance (parked during this task):**
+  - λ continuation — each λ in the grid currently starts `learn_radial` fresh
+    from `W0` (see `fit_radial`'s loop), rather than warm-starting from the
+    previous λ's solution; continuation could cut the grid's total step count.
+  - Keeping L-BFGS optimiser state (memory) across θ-reprofiling rounds
+    instead of restarting L-BFGS every round — each re-profile currently
+    resets the line-search/memory state because the objective changed.
+  - A value-first line search, to avoid paying for a gradient on line-search
+    trial points that are rejected on value alone.
+  - Fusing round start (the post-round `theta_map_linear` re-profile) with
+    the next round's first `linear_statistics` pass, if profiling shows the
+    separate passes dominate wall time (the per-round logs above show
+    `profile_time` at 32–42 s per round, a large fraction of total round
+    time on Cantor).
+- **Phase 2:** MACE-initialised radials (`scripts/extract_mace_radial.py`,
+  `construct/mace_radial.py`), gated as a third/fourth candidate alongside
+  `init`/`learned` per the design spec's phase 2 section, and a production Si
+  run to close out the ≥2-of-3 criterion on the intended system set.

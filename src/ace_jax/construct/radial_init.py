@@ -241,6 +241,43 @@ def _init_Wnlq(spec_n, n_q, NZ, mode, seed):
 
 
 # ---------------------------------------------------------------------------
+#  sampled radials -> analytic Wnlq (spline conversion, MACE init)
+# ---------------------------------------------------------------------------
+
+def from_table(x, R, envelope, polys, weights=None):
+    """Project sampled tensor radials onto the analytic basis env(x) P_q(x).
+
+    x: (n_x,) grid in the transformed coordinate [-1, 1]; R: (NZ, NZ, n_x,
+    n_rnl) radial values, envelope INCLUDED; envelope: (NZ, NZ, 5)
+    PolyEnvelope2sX params; polys: (A, B, C) recursion arrays (n_q = len(A));
+    weights: optional (NZ, NZ, n_x) nonnegative quadrature/density weights
+    (default uniform).  Per species pair solves the weighted least squares
+    min_W sum_x w (env P W^T - R)^2 -- the envelope is part of the basis, so
+    nothing is divided by it.  Returns (Wnlq (NZ, NZ, n_rnl, n_q), relres
+    (NZ, NZ, n_rnl)): relres is ||weighted residual|| / ||weighted R|| per
+    radial, 0 for an all-zero radial."""
+    x = np.asarray(x, float)
+    R = np.asarray(R, float)
+    envelope = np.asarray(envelope, float)
+    NZ, _, n_x, n_rnl = R.shape
+    P = poly_eval(x, *polys)                                   # (n_x, n_q)
+    n_q = P.shape[1]
+    W = np.zeros((NZ, NZ, n_rnl, n_q))
+    rel = np.zeros((NZ, NZ, n_rnl))
+    for i in range(NZ):
+        for j in range(NZ):
+            basis = envelope2sx_eval(None, x, envelope[i, j])[:, None] * P
+            w = np.ones(n_x) if weights is None else np.asarray(weights[i, j], float)
+            sw = np.sqrt(w)[:, None]
+            Wij = np.linalg.lstsq(sw * basis, sw * R[i, j], rcond=None)[0]     # (n_q, n_rnl)
+            W[i, j] = Wij.T
+            res = np.linalg.norm(sw * (basis @ Wij - R[i, j]), axis=0)
+            nrm = np.linalg.norm(sw * R[i, j], axis=0)
+            rel[i, j] = np.where(nrm > 0, res / np.where(nrm > 0, nrm, 1.0), 0.0)
+    return W, rel
+
+
+# ---------------------------------------------------------------------------
 #  the two basis initialisers
 # ---------------------------------------------------------------------------
 
@@ -254,17 +291,22 @@ def transform_table(elements, rcut, r0, rin, p, q):
 
 
 def tensor_radial_init(elements, Rnl_spec, *, rcut,
-                       r0=None, rin=0.0, p=2, q=2, mode="glorot_normal", seed=0):
+                       r0=None, rin=0.0, p=2, q=2, mode="glorot_normal", seed=0,
+                       n_q_factor=1.5):
     """Coefficients for the many-body (tensor) radial basis.
 
     elements: atomic numbers; Rnl_spec: (n, l) list from `build_spec` (defines
     n_rnl and the onehot convention); r0: None (per-pair bond-length default),
-    a scalar or an (NZ, NZ) table.  Returns dict with rnl_transform (NZ,NZ,7),
+    a scalar or an (NZ, NZ) table; n_q_factor: polynomial span
+    n_q = ceil(n_q_factor * max n) (1.5 is ACEpotentials' default; learned
+    radials want 2-3).  Returns dict with rnl_transform (NZ,NZ,7),
     rnl_envelope (NZ,NZ,5), rnl_Wnlq (NZ,NZ,n_rnl,n_q) and polys_A/B/C (n_q,)."""
+    if not n_q_factor >= 1:
+        raise ValueError(f"n_q_factor must be >= 1 (n_q >= max n), got {n_q_factor!r}")
     NZ = len(elements)
     n_rnl = len(Rnl_spec)
     actual_maxn = max(n for n, _ in Rnl_spec)
-    n_q = math.ceil(actual_maxn * 1.5)
+    n_q = math.ceil(actual_maxn * n_q_factor)
     env = envelope2sx_params(-1.0, 1.0, 2, 2)
     A, B, C = legendre_3term(n_q)
     return {
