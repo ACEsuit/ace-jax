@@ -23,7 +23,7 @@ benchmark model uses `analytic` or `spline_factorised`.
 | **Pool-first A, `spline` radial** | C·n_b ≤ n_rnl, **and** radial + A assembly ≥ 15% | radial + A assembly is **21.6–56.4%** of GPU time, so the profile test passes on every model. The width test fails on every model: NZ·ncoef = 204 (SiGe) or 510 (Cantor), against n_rnl = 51–228 | **skip** |
 | Pool-first A, `analytic` radial | same rule | no benchmark model uses it, so there is nothing to measure | **skip** (not measured) |
 | Pool-first A, `spline_factorised` radial | same rule | no benchmark model uses it | **skip** (not measured) |
-| **Feature-major `_aa`** | `_aa` forward + adjoint ≥ 15% | **22–59%** on 5 of 6 models. SiGe_small is at 10.6% (upper bound 13.9%) | **apply** |
+| **Feature-major `_aa`** | `_aa` forward + adjoint ≥ 15% | **22–59%** on 5 of 6 models. SiGe_small is at 10.6% (upper bound 13.9%) | **apply** by the rule; **measured slower on every model in Task 9 and reverted** (§5) |
 
 Two notes qualify these verdicts.
 
@@ -239,11 +239,115 @@ width test would see.
   - A one-hot matmul form, or feature-major A, would remove this scatter.
   - It is part of the pool stage's adjoint in §2.2.
 
-## 5. Method and reproduction
+## 5. Task 9 outcome: feature-major product basis measured, not adopted
+
+Task 9 implemented the feature-major form the decision above marked **apply**,
+measured it against the committed node-major form, and **reverted it**: it is
+slower on all six models. `ACEModel` is unchanged. No pool-first was attempted
+for any radial kind (§3).
+
+### 5.1 What was measured
+
+The candidate (`fm`), as the controller's ruling specified, in the folded
+dense energy path:
+
+- A assembled feature-major, At (n_A, n): the batched outer product with the
+  node axis last, `einsum("nkr,nky->ryn")`, then the used rows selected;
+- `_aa` on rows, `jnp.prod(At[g.T], axis=0)`, the form of PACE's
+  `_node_energies_t`;
+- the readout `ctilde.T @ AA`, (NZ, n), then each node's centre-species entry.
+
+The unfolded path (`_from_pooled`) was made consistent (AA_t gathered by row for
+the sparse A2B, `A2B @ AA_t` for the dense). All tests passed with it, including
+the 288 frozen references, and E, F and V agreed with the node-major form to
+≤ 2e-16 relative in E and ≤ 2.4e-13 eV/Å in F on the A100.
+
+Three further variants attribute the difference:
+
+- `fm_T`: `fm` with At = `pool_a_dense(...).T`, the node-major assembly
+  transposed;
+- `fm_T_ein`: `fm_T` with the node-major readout's form, `ctilde[:, z]`
+  gathered and multiply-reduced, instead of the GEMM;
+- `nm_gemm`: the committed node-major form with only the readout replaced by
+  the GEMM, `(AA @ ctilde)[i, z_i]`.
+
+All variants are `ACEModel` subclasses in `bench/perf/ab_ace_fm.py`, so the
+candidate survives there and nowhere in `src/`.
+
+### 5.2 Results
+
+`energy_forces_virial_dense`, float64, 8192 atoms, readout folded, Modal
+A100-SXM4-80GB. Every variant ran in one process on one card, interleaved over
+rounds; each entry is the median over rounds of the median of 20 calls.
+Round-to-round spread after the first round was under 1%.
+
+Run 1 (5 rounds), `bench/perf/results/ab_fm_8192_float64.json`, ms (change
+against node-major):
+
+| model | node-major (committed) | `fm` (candidate) | `fm_T` |
+|---|--:|--:|--:|
+| SiGe_small | 3.16 | 3.73 (+17.9%) | 3.29 (+4.1%) |
+| SiGe_medium | 7.54 | 10.23 (+35.6%) | 8.44 (+11.8%) |
+| SiGe_large | 13.14 | 19.40 (+47.6%) | 17.73 (+35.0%) |
+| Cantor_small | 4.56 | 5.23 (+14.6%) | 4.92 (+7.9%) |
+| Cantor_medium | 10.28 | 12.38 (+20.5%) | 11.35 (+10.4%) |
+| Cantor_large | 34.48 | 47.89 (+38.9%) | 44.75 (+29.8%) |
+
+Run 2 (3 rounds, attribution), `bench/perf/results/ab_fm_8192_float64_attr.json`:
+
+| model | node-major | `fm_T` | `fm_T_ein` | `nm_gemm` |
+|---|--:|--:|--:|--:|
+| SiGe_small | 2.96 | 3.05 (+2.8%) | 2.97 (+0.3%) | 3.03 (+2.2%) |
+| SiGe_medium | 7.61 | 8.41 (+10.6%) | 7.81 (+2.7%) | 8.04 (+5.7%) |
+| SiGe_large | 13.14 | 17.69 (+34.7%) | 14.47 (+10.1%) | 16.10 (+22.5%) |
+| Cantor_small | 4.55 | 4.95 (+8.9%) | 4.64 (+1.9%) | 4.90 (+7.9%) |
+| Cantor_medium | 10.26 | 11.36 (+10.7%) | 10.51 (+2.5%) | 11.12 (+8.4%) |
+| Cantor_large | 34.34 | 44.45 (+29.4%) | 35.41 (+3.1%) | 41.75 (+21.6%) |
+
+### 5.3 Reading
+
+- **No variant is faster than node-major on any model.** The best
+  feature-major form, `fm_T_ein`, is neutral only on SiGe_small (+0.3%) and
+  slower by 1.9–10.1% elsewhere.
+- **The GEMM readout is the largest single loss** (`nm_gemm`: +2.2 to
+  +22.5%, growing with n_AA). A plausible reading, not checked in the HLO: the
+  node-major einsum lets XLA fuse the `ctilde[:, z]` gather into the `_aa`
+  adjoint kernel (§2.3), while the GEMM's adjoint materialises dAA =
+  ctilde · dE as a separate (n_AA, n) product first.
+- **Feature-major `_aa` alone does not pay either** (`fm_T_ein`). This is
+  consistent with §4 and with `bench/perf/variants.py`: XLA's layout
+  assignment already lays A out feature-major where it matters, so writing it
+  that way adds transposes rather than removing scatters.
+- **Assembling A with the node axis last costs more still** (`fm` against
+  `fm_T`: a further 3–14%).
+
+### 5.4 Decision
+
+The ruling's aggregate rule: keep the change only if it is faster or neutral
+(within ±3%) on every model and faster on some. The candidate is 14.6–47.6%
+slower on every model, so it is **reverted**, and no run-time flag was added.
+
+What Task 9 keeps:
+
+- a gradient guard, `tests/test_pool_first.py::test_ace_energy_gradient_wrt_linear_weights`:
+  dE/d(ctilde) (folded) and dE/d(WB) (unfolded) match a central finite
+  difference, in the sparse and dense layouts, on `si_ace_model` (analytic,
+  one species) and `sige_nofit` (spline, two species). A `stop_gradient` on
+  either weight fails all 8 cases;
+- the A/B harness `bench/perf/ab_ace_fm.py` and `modal_profile.py::ab_fm`.
+
+The remedy for the `_aa` adjoint scatter is still PACE's candidate #7 (§ Decision
+above): a custom kernel that keeps A and dA on chip.
+
+Cost: two single-container runs, about 6 A100-minutes in all.
+
+## 6. Method and reproduction
 
 ```bash
 uv run --with modal modal run bench/perf/modal_profile.py::ace
 # one model:   ... ::ace --models Cantor_medium
+# Task 9 A/B: uv run --with modal modal run bench/perf/modal_profile.py::ab_fm
+#   attribution: ... ::ab_fm --variants node_major,fm_T,fm_T_ein,nm_gemm --rounds 3 --tag _attr
 # locally:     PYTHONPATH=bench:src python bench/perf/profile_ace.py \
 #                  bench/scaling/models/ace_SiGe_small.npz SiGe 512 --reps 2
 ```

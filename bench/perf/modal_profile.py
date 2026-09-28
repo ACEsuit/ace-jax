@@ -402,3 +402,21 @@ def probe_main():
     for k, v in probe.remote().items():
         print("==", k)
         print(v)
+
+
+@app.local_entrypoint()
+def ab_fm(models: str = "SiGe_small,SiGe_medium,SiGe_large,Cantor_small,Cantor_medium,Cantor_large",
+          n: int = 8192, dtype: str = "float64", variants: str = "node_major,fm,fm_T",
+          rounds: int = 5, tag: str = ""):
+    """Task 9: ACEModel product-basis layout A/B (bench/perf/ab_ace_fm.py), every
+    model and variant on ONE container, variants interleaved per model."""
+    argvs = [["bench/perf/ab_ace_fm.py", f"bench/scaling/models/ace_{m}.npz", _system(m),
+              str(n), "--dtype", dtype, "--variants", variants, "--rounds", str(rounds)]
+             for m in models.split(",")]
+    res = script_remote.remote(argvs)
+    _save(f"ab_fm_{n}_{dtype}{tag}.json", res)
+    for m, r in zip(models.split(","), res):
+        v = r.get("variants", {})
+        print(m, r.get("error", "")[:300],
+              {k: (round(x["median_s"] * 1e3, 3), round(100 * x.get("vs_node_major", 0), 1),
+                   x["dE_rel"], x["dF_max"]) for k, x in v.items()})

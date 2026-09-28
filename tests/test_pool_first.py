@@ -6,6 +6,10 @@ afterwards.  The frozen references (test_perf_parity.py) are the equality oracle
 for E, F and V; these tests pin the pieces: A itself against the per-edge form,
 both layouts, and -- Review Focus 5 -- that crad stays trainable (W is built from
 crad inside the trace, not frozen into a host table).
+
+ACEModel keeps its per-edge A and node-major product basis (pool-first and the
+feature-major form were measured and not adopted: docs/perf-ace-profile.md
+sections 3 and 5); its test here guards the readout weights' gradient.
 """
 import dataclasses
 import pathlib
@@ -131,3 +135,44 @@ def test_zbl_close_contact_dense_equals_sparse():
                                     nz[idx], jnp.asarray(d.mask), nz)
     assert np.all(np.isfinite(np.asarray(e_s)))
     np.testing.assert_allclose(np.asarray(e_d), np.asarray(e_s), rtol=1e-12, atol=1e-12)
+
+
+# ------------------------------------------------------------------ ACEModel (Task 9)
+ACE_FIX = pathlib.Path(__file__).parent.parent / "fixtures"
+
+
+@pytest.mark.parametrize("fixture", ["si_ace_model", "sige_nofit"])
+@pytest.mark.parametrize("folded", [True, False])
+@pytest.mark.parametrize("dense", [False, True])
+def test_ace_energy_gradient_wrt_linear_weights(fixture, folded, dense):
+    """Review Focus 5 for ACE: the feature-major product basis must keep the
+    readout trainable.  dE/d(ctilde) (folded) or dE/d(WB) (unfolded) matches a
+    central finite difference, in both neighbour-list layouts."""
+    model, meta, _ = load(str(ACE_FIX / f"{fixture}.npz"), fold=folded)
+    field = "ctilde" if folded else "WB"
+    at = bulk("Si", "diamond", a=5.43, cubic=True)
+    at.numbers[::2] = meta["elements"][-1]
+    at.rattle(0.05, seed=2)
+    g = sparse_graph(at.positions, at.cell.array, at.pbc, meta["rcut"])
+    z2i = {int(z): i for i, z in enumerate(meta["elements"])}
+    nz = jnp.asarray([z2i[int(z)] for z in at.numbers], jnp.int32)
+    n = len(at)
+    if dense:
+        d = dense_from_sparse(g, meta["rcut"])
+        idx, mask, rij = jnp.asarray(d.idx), jnp.asarray(d.mask), jnp.asarray(d.rij)
+        zi, zj = jnp.broadcast_to(nz[:, None], idx.shape), nz[idx]
+        energies = lambda m: m.site_energies_dense(rij, zi, zj, mask, nz)
+    else:
+        s, r = jnp.asarray(g.senders), jnp.asarray(g.receivers)
+        rij = jnp.asarray(g.rij)
+        energies = lambda m: m.site_energies(rij, nz[s], nz[r], s, n, nz)
+
+    def E(w):
+        return jnp.sum(energies(dataclasses.replace(model, **{field: w})))
+
+    w0 = getattr(model, field)
+    grad = jax.grad(E)(w0)
+    assert float(jnp.max(jnp.abs(grad))) > 0.0            # not frozen out of the trace
+    d = np.zeros(w0.shape); d.flat[np.argmax(np.abs(np.asarray(grad)))] = 1e-6
+    fd = (E(w0 + d) - E(w0 - d)) / 2e-6
+    assert abs(float(jnp.vdot(grad, d / 1e-6)) - float(fd)) < 1e-6 * max(1.0, abs(float(fd)))
