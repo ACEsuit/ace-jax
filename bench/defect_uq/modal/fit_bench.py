@@ -19,7 +19,7 @@ common = dict(model="/data/cantor_embed_d16_deg10.npz" if data.startswith("/data
               opt="lbfgs", map_steps=3 if smoke else 40, predict_stats="recompute")
 if arm == "pops":
     cfg = FitConfig(**common, arm="linear", uq="pops", pops_ridge="auto")
-elif arm == "ard":      # tempered ARD posterior (feat/ard-uq): joint type-II ML, kappa from a 20 % train hold-out
+elif arm.startswith("ard"):   # "ard", or "ard_<tag>" for a separate output dir      # tempered ARD posterior (feat/ard-uq): joint type-II ML, kappa from a 20 % train hold-out
     cfg = FitConfig(**common, arm="linear", uq="ard", ard_mode="joint", ard_val_frac=0.2, ard_laplace=True)
 else:
     cfg = FitConfig(**common, arm="gp", m_per_species=100, density="pca", pca_d=128, lml="host-cache",
