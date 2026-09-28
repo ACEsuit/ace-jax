@@ -420,3 +420,74 @@ def test_ard_stage_kappa_is_refit_for_the_full_posterior(monkeypatch):
     assert s2_full.mean() < s2_sub.mean()                    # the refit saw the held-out configs
     assert res.posterior.kappa == k_full == res.report["kappa"]
     assert res.report["kappa_subset"] == k_sub and k_full > k_sub
+
+
+def _sandwich_setup(tiny_linear_problem):
+    from ace_jax.fit.ard import ARDEvidence, ard_posterior, ard_statistics, body_order_columns
+    from ace_jax.fit.hypers import default_prior
+    prob, ds = tiny_linear_problem
+    theta = default_prior(2.35).mu
+    meta = {"nnll": [[None] * o for o in _orders(prob)], "n_B": prob.cfg.n_B, "n_pair": prob.cfg.n_pair,
+            "NZ": prob.cfg.NZ, "rcut": prob.cfg.rcut, "elements": [14]}
+    ev = ARDEvidence(ard_statistics(theta, prob, ds, "joint"), np.asarray(prob.gamma),
+                     body_order_columns(meta, prob.cfg))
+    h = ev.h0(theta)
+    return prob, ds, ev, h, ard_posterior(ev, h, 2.0, meta)
+
+
+def test_sandwich_scores_sum_to_the_prior_force_at_the_mean(tiny_linear_problem):
+    """Stationarity: sum_c g~_c = D^-1 Lambda c = lam_prior * x at the posterior mean, so the
+    residuals, their whitening and the cluster sums are exactly the posterior's own."""
+    from ace_jax.fit.ard import sandwich_scores
+    with highest_precision():
+        prob, ds, ev, h, post = _sandwich_setup(tiny_linear_problem)
+        G = sandwich_scores(post, prob, ds, ev.sigmas(h))
+        _, _, lam, _ = ev._parts(jnp.asarray(h, float))
+        x = post.mean / post.dinv                                                    # scaled mean D c
+    n_cfg = int(np.asarray(ds.cfg_mask).sum())
+    assert G.shape == (prob.cfg.len_basis, n_cfg)                                    # padded configs dropped
+    np.testing.assert_allclose(G.sum(1), np.asarray(lam) * x, rtol=1e-6, atol=1e-8 * np.abs(G).max())
+
+
+def test_sandwich_variance_matches_dense_reference(tiny_linear_problem):
+    """lam^2 ||Q^T phi~||^2 == lam^2 phi A^-1 M A^-1 phi^T with A and M built densely in the original
+    coordinates (M = sum over configs of the outer product of the summed residual-weighted rows)."""
+    from ace_jax.fit.ard import sandwich_factor, sandwich_scores
+    with highest_precision():
+        prob, ds, ev, h, post = _sandwich_setup(tiny_linear_problem)
+        G = sandwich_scores(post, prob, ds, ev.sigmas(h))
+        post = post._replace(Q=sandwich_factor(post, G), lam=1.7)
+        Ms, _, lam, _ = ev._parts(jnp.asarray(h, float))
+        D = 1.0 / post.dinv
+        A = np.asarray(Ms + jnp.diag(lam)) * D[:, None] * D[None, :]                 # unscaled A
+        Gu = G * D[:, None]                                                          # unscaled scores
+        Sig = np.linalg.solve(A, np.linalg.solve(A, Gu @ Gu.T).T)                    # A^-1 M A^-1
+        b0 = jax.tree.map(lambda a: a[0], ds)
+        from ace_jax.fit.rows import linear_rows
+        Fr = np.asarray(linear_rows(prob.model, prob.cfg, b0)[0].F).reshape(-1, prob.cfg.len_basis)
+        got = post.force_var_rows(Fr)
+    ref = 1.7 ** 2 * np.einsum("nl,lm,nm->n", Fr, Sig, Fr)
+    np.testing.assert_allclose(got, ref, rtol=1e-6, atol=1e-12 * ref.max())
+
+
+def test_posterior_schema2_roundtrip_and_schema1_loads(tiny_linear_problem, tmp_path):
+    from ace_jax.fit.ard import ARDPosterior, sandwich_factor, sandwich_scores
+    from ace_jax.fit.rows import linear_rows
+    with highest_precision():
+        prob, ds, ev, h, post = _sandwich_setup(tiny_linear_problem)
+        post = post._replace(Q=sandwich_factor(post, sandwich_scores(post, prob, ds, ev.sigmas(h))), lam=3.0)
+        post.save(tmp_path / "p.npz")
+        back = ARDPosterior.load(tmp_path / "p.npz")
+        Fr = np.asarray(linear_rows(prob.model, prob.cfg, jax.tree.map(lambda a: a[0], ds))[0].F)
+        np.testing.assert_allclose(back.forces_std(Fr), post.forces_std(Fr), rtol=1e-3)
+        assert back.lam == 3.0 and back.Q.dtype == np.float64
+        # a schema-1 file (no Q / lam) still loads and serves kappa variance
+        z = dict(np.load(tmp_path / "p.npz"))
+        z.pop("Q"); z.pop("lam"); z["schema"] = np.array(1)
+        np.savez(tmp_path / "p1.npz", **z)
+        old = ARDPosterior.load(tmp_path / "p1.npz")
+        assert old.Q is None and old.lam == 1.0
+        np.testing.assert_allclose(old.forces_std(Fr), old.kappa * np.sqrt(
+            old.var_rows(Fr.reshape(-1, Fr.shape[-1])).reshape(-1, 3).sum(1)), rtol=1e-12)
+        zero = np.zeros((2, 3, prob.cfg.len_basis))
+        assert np.all(post.forces_std(zero) == 0.0)                                  # no neighbours: 0, not NaN

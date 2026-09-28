@@ -19,7 +19,7 @@ import jax.numpy as jnp
 import numpy as np
 from jax.scipy.linalg import cho_factor, cho_solve, solve_triangular
 
-SCHEMA = 1
+SCHEMA = 2
 
 
 def body_order_columns(meta, cfg):
@@ -81,6 +81,7 @@ class ARDEvidence:
 
     def __init__(self, stats, gamma, body_col):
         self.joint = stats.ls_fixed is None
+        self.ls_fixed = stats.ls_fixed
         self.groups = tuple(int(g) for g in np.unique(body_col))
         self.body_col = np.asarray(body_col)
         gidx = jnp.asarray(np.searchsorted(np.asarray(self.groups), self.body_col))
@@ -138,6 +139,11 @@ class ARDEvidence:
         self.lower, self.upper = lo, hi
         return lo, hi
 
+    def sigmas(self, h):
+        """Noise scales (sigma_E, sigma_F, sigma_V) of hyperparameters h: fitted [joint] or the fixed
+        linear MAP ones [sequential]."""
+        return np.exp(np.asarray(h[:3], float)) if self.joint else np.exp(np.asarray(self.ls_fixed, float))
+
 
 def fit_ard(ev, h0, cond_max=1e14, maxiter=500):
     """Type-II ML by L-BFGS-B, bounded (ev.bounds), on the objective relative to its start and divided
@@ -188,6 +194,8 @@ class ARDPosterior(NamedTuple):
     groups: tuple
     body_col: np.ndarray
     meta: dict                # n_B, n_pair, NZ, rcut, elements
+    Q: np.ndarray | None = None   # (L, n_cfg) S^-1 G~: configuration-clustered sandwich factor
+    lam: float = 1.0              # sandwich scale (fitted like kappa)
 
     def var_rows(self, Phi, chunk=4096):
         """Untempered posterior variance phi A^-1 phi^T of each row of Phi (n, L)."""
@@ -198,26 +206,43 @@ class ARDPosterior(NamedTuple):
             out.append(np.asarray(jnp.sum(v * v, axis=0)))
         return np.concatenate(out) if out else np.zeros(0)
 
+    def misspec_var_rows(self, Phi, chunk=4096):
+        """Unscaled cluster-sandwich variance ||Q^T (D^-1 phi)||^2 = phi A^-1 M A^-1 phi^T per row."""
+        Q = jnp.asarray(self.Q, jnp.float64)
+        out = []
+        for i in range(0, len(Phi), chunk):
+            v = (jnp.asarray(Phi[i:i + chunk]) * jnp.asarray(self.dinv)[None, :]) @ Q
+            out.append(np.asarray(jnp.sum(v * v, axis=1)))
+        return np.concatenate(out) if out else np.zeros(0)
+
+    def force_var_rows(self, Phi):
+        """The served (calibrated) variance of each force-component row: lam^2 x sandwich when Q is
+        set, else kappa^2 x the epistemic posterior variance."""
+        if self.Q is not None:
+            return self.lam ** 2 * self.misspec_var_rows(Phi)
+        return self.kappa ** 2 * self.var_rows(Phi)
+
     def forces_std(self, Frows):
-        """Tempered per-atom force std kappa * sqrt(sum_c phi_c A^-1 phi_c^T) from force rows (N, 3, L),
-        a numpy or a device array: a device array is solved in place, chunk by chunk, never copied
-        to the host (the rows are N*3*L*8 bytes)."""
-        v = self.var_rows(Frows.reshape(-1, Frows.shape[-1])).reshape(-1, 3)
-        return self.kappa * np.sqrt(np.maximum(v.sum(1), 0.0))
+        """Per-atom force std sqrt(sum_c force_var_rows) from force rows (N, 3, L), numpy or device."""
+        v = self.force_var_rows(Frows.reshape(-1, Frows.shape[-1])).reshape(-1, 3)
+        return np.sqrt(np.maximum(v.sum(1), 0.0))
 
     def save(self, path, dtype=np.float32):
         np.savez(path, mean=self.mean, chol=np.asarray(self.chol, dtype), dinv=self.dinv, kappa=self.kappa,
                  h=self.h, groups=np.asarray(self.groups), body_col=self.body_col, schema=SCHEMA,
-                 meta_json=np.frombuffer(json.dumps(self.meta).encode(), np.uint8))
+                 meta_json=np.frombuffer(json.dumps(self.meta).encode(), np.uint8),
+                 lam=self.lam, **({} if self.Q is None else {"Q": np.asarray(self.Q, dtype)}))
 
     @staticmethod
     def load(path):
         z = np.load(pathlib.Path(path))
-        if int(z["schema"]) != SCHEMA:
+        if int(z["schema"]) not in (1, 2):
             raise ValueError(f"unsupported posterior schema {int(z['schema'])}")
         return ARDPosterior(z["mean"], z["chol"].astype(np.float64), z["dinv"], float(z["kappa"]), z["h"],
                             tuple(int(g) for g in z["groups"]), z["body_col"],
-                            json.loads(bytes(z["meta_json"]).decode()))
+                            json.loads(bytes(z["meta_json"]).decode()),
+                            Q=z["Q"].astype(np.float64) if "Q" in z.files else None,
+                            lam=float(z["lam"]) if "lam" in z.files else 1.0)
 
 
 def ard_posterior(ev, h, kappa, meta):
@@ -229,6 +254,40 @@ def ard_posterior(ev, h, kappa, meta):
         keep["NZ"] = len(keep["elements"])
     return ARDPosterior(np.asarray(ev.dinv * x), np.asarray(c), np.asarray(ev.dinv), float(kappa),
                         np.asarray(h, float), ev.groups, ev.body_col, keep)
+
+
+def sandwich_scores(post, prob, ds, sig):
+    """Prior-scaled cluster scores G~ (L, n_cfg) of the configurations of ds at the posterior mean:
+    g~_c = D^-1 sum_{i in c} rho_i psi_i over every E/F/V row i of config c, psi_i = phi_i w_i/sigma_q,
+    rho_i = (y_i - phi_i c) w_i/sigma_q.  Padded configs (cfg_mask) are dropped; padded nodes carry
+    node_cfg == C and land in a discarded extra segment."""
+    from .rows import linear_rows
+    L = prob.cfg.len_basis
+    c, dinv = jnp.asarray(post.mean), jnp.asarray(post.dinv)
+    inv = jnp.asarray(1.0 / np.asarray(sig, float))
+
+    @jax.jit
+    def scores(bt):
+        r = linear_rows(prob.model, prob.cfg, bt)[0]
+        C = r.E.shape[0]
+        P = jnp.concatenate([r.E, r.F.reshape(-1, L), r.V.reshape(-1, L)])
+        y = jnp.concatenate([bt.y_E, bt.y_F.reshape(-1), bt.y_V.reshape(-1)])
+        w = jnp.concatenate([bt.w_E * inv[0], jnp.repeat(bt.w_F, 3) * inv[1], jnp.repeat(bt.w_V, 6) * inv[2]])
+        cid = jnp.concatenate([jnp.arange(C), jnp.repeat(bt.node_cfg, 3), jnp.repeat(jnp.arange(C), 6)])
+        g = jax.ops.segment_sum(P * ((y - P @ c) * w * w)[:, None], cid, num_segments=C + 1)[:C]
+        return g * dinv[None, :]
+
+    out = []
+    for i in range(ds.n_batches):
+        bt = jax.tree.map(lambda a, i=i: a[i], ds)
+        out.append(np.asarray(scores(bt))[np.asarray(bt.cfg_mask)])
+    return np.concatenate(out).T
+
+
+def sandwich_factor(post, G):
+    """Q = S^-1 G~ (L, n_cfg), so that phi A^-1 M A^-1 phi^T = ||Q^T (D^-1 phi)||^2."""
+    c = jnp.asarray(post.chol, jnp.float64)
+    return np.asarray(cho_solve((c, True), jnp.asarray(G)))
 
 
 def kappa_closed_form(e2, s2):
