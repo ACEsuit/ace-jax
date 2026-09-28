@@ -14,7 +14,7 @@ uncertainty** `forces_std`. It must:
 
 The construction is the **tempered ARD posterior**. It is the Bayesian linear regression (BLR)
 posterior of the linear model, with three changes:
-- (i) prior scales per body order, fitted by evidence;
+- (i) prior scales per body order, fitted by evidence **jointly with the noise scales**;
 - (ii) a single temperature κ, fitted by held-out NLL, that inflates the posterior to absorb model
   misspecification (a generalised or tempered posterior);
 - (iii) it is evaluated on per-atom force rows. Site energies are not identifiable from energy and
@@ -34,18 +34,34 @@ On the defect benchmark it is the best out-of-distribution ranker:
 ## Mathematics
 
 The linear model is E = Σᵢ φ(xᵢ)·c. The fit rows are energy, force and virial rows, weighted by
-w/σ_q, where σ_E, σ_F, σ_V come from the linear MAP as today. The pieces are:
+w/σ_q. The pieces are:
 - the data Gram M = Σ_q G_q/σ_q² and the moment b = Σ_q b_q/σ_q², from one sufficient-statistics
   pass;
 - the prior precision Λ = Γ² ⊙ exp(a_{k(j)}), where Γ is the smoothness prior and k(j) ∈ {2, 3, 4}
   is the body order of column j (pair and correlation-order-1 columns are 2-body);
 - A = M + Λ, the posterior N(A⁻¹b, A⁻¹), and the Cholesky factor A = LLᵀ.
 
-**Evidence** (up to Λ-independent terms): log p(D|a) = ½ bᵀA⁻¹b − ½ log|A| + ½ log|Λ|. It is
-maximised over the 3 scales a by L-BFGS with a JAX gradient, costing one Cholesky per evaluation.
+**Evidence.** The hyperparameters are h = (log σ_E, log σ_F, log σ_V, a₂, a₃, a₄), with the
+per-quantity statistics G_q, b_q, yᵀy_q and n_q taken from one statistics pass. Up to constants,
 
-**Temperature.** Hold out a fraction of training configurations (default 0.2, as POPS does). Fit
-the ARD posterior on the rest. Choose κ to minimise the Gaussian NLL of held-out per-atom force
+log p(D|h) = −½ Σ_q yᵀy_q/σ_q² + ½ bᵀA⁻¹b − ½ log|A| + ½ log|Λ| − Σ_q n_q log σ_q.
+
+- It is maximised **jointly over all six** (type-II ML) by L-BFGS with a JAX gradient, initialised
+  from the linear MAP (σ_q) and Γ-only scales. Each evaluation costs one Cholesky.
+- This is a dedicated linear-evidence optimiser. `Hypers` is untouched.
+- **Diagnostic, not a feature:** a Laplace approximation over h (6×6 Hessian by finite differences
+  of the gradient). It reports each scale's posterior std and the hyperparameter contribution to
+  σ_F. With thousands of configurations, the hyperparameter posterior is expected to be nearly a
+  point.
+
+**Temperature.** κ is deliberately *not* an evidence hyperparameter. It absorbs model
+misspecification: systematic, correlated residuals, with an effective sample size ~1/κ² of the
+nominal. Evidence maximisation cannot see this. It treats σ_F as independent noise, the
+Swinburne–Perez argument. κ is therefore a generalised-Bayes learning rate, chosen by held-out
+predictive performance.
+
+Hold out a fraction of training configurations (default 0.2, as POPS does). Fit the ARD posterior
+on the rest. Choose κ to minimise the Gaussian NLL of held-out per-atom force
 errors, with the error ~ N(0, κ² s²/3 · I₃) and s² = Σ_c φ_{F,i,c} A⁻¹ φ_{F,i,c}ᵀ. The closed form
 is κ² = mean(|ΔF|² / (s²/3)) / 3. Then refit the posterior on all the training data and keep κ.
 
@@ -72,7 +88,9 @@ The GP path keeps `linear_rows`.
 
 - `body_order_columns(meta, cfg) -> (L,) int` gives each column's body order in the `_place`
   layout.
-- `fit_ard(M, b, gamma, groups, a0) -> (a, logev)` fits the scales by evidence.
+- `fit_ard(stats, gamma, groups, h0) -> (h, logev)` does the joint type-II ML over
+  (σ_E, σ_F, σ_V, a₂, a₃, a₄).
+- `laplace_hypers(stats, gamma, groups, h) -> (cov_h, report)` is the diagnostic.
 - `ArdPosterior(mean, chol, kappa, a, groups)` has two methods:
   - `.forces_std(Phi_F)`, with Φ_F as (N, 3, L), returns (N,) values of κ‖L⁻¹Φᵀ‖;
   - `.save(path)` / `load(path)`.
@@ -104,9 +122,11 @@ The GP path keeps `linear_rows`.
 
 ## Decisions taken (review these)
 
-1. **The ARD stage runs after the linear MAP, with σ_q fixed.** It is not new hyperparameters in
-   the joint LML: `Hypers` is a fixed 10-field tuple used throughout. The benchmark used exactly
-   this and it worked.
+1. **Joint type-II ML over the noise scales and the ARD scales,** in a dedicated linear-evidence
+   optimiser initialised from the linear MAP. It supersedes an earlier draft that fitted ARD after
+   the MAP with σ_q fixed: that was one step of coordinate ascent on the same objective. The
+   hyperparameters are *maximised*, not marginalised. The Laplace diagnostic measures what
+   marginalising would add, and is to be revisited only if that is material.
 2. **κ comes from an internal train hold-out, never the test set.** The final posterior is refit on
    all the training data with the same κ. In the benchmark, κ was constant across families (rms-z
    6.2–7.0), so this should be stable.
@@ -120,8 +140,10 @@ The GP path keeps `linear_rows`.
 
 - The chunked rows equal the unchunked rows (E/F/V to 1e-12), including a chunk count that is not
   a divisor of N and a >2.8k-atom synthetic cell on CPU (slow marker).
-- `fit_ard` evidence gradient: forward-mode vs reverse-mode; the maximum beats Γ-only on the
+- `fit_ard` evidence gradient: forward-mode vs reverse-mode.
+- The joint maximum's evidence is ≥ both the Γ-only value and the ARD-after-MAP value on the
   fixture.
+- The evidence matches a dense reference (explicit marginal Gaussian likelihood on a tiny problem).
 - The κ closed form matches brute-force NLL minimisation.
 - A `posterior.npz` round trip reproduces `forces_std` (float32 within 1e-4 relative).
 - The calculator's `forces_std` equals the pipeline's predicted F σ for the same configurations.
