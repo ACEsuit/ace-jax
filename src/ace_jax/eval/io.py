@@ -153,4 +153,11 @@ def load(path, dtype=jnp.float64, a2b_sparse=False, edge_a_kind="gather", fold=T
     if fold:
         from .model import fold_readout
         model = fold_readout(model)
+    if "fs_eta" in z.files:                  # frozen sqrt-density term (fit.radial_density)
+        from .fs_model import FSModel
+        fs = meta.get("fs") or {}
+        if fs.get("F", "ssqrt") != "ssqrt":
+            raise ValueError(f"unsupported density embedding {fs.get('F')!r}")
+        model = FSModel(model, A("fs_eta"), A("fs_d"), jnp.asarray(z["fs_mask"], dtype),
+                        float(fs.get("eps", 1e-6)))
     return model, meta, z

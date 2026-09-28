@@ -180,6 +180,8 @@ def estimate_a_bytes(model, layout, n_nodes, n_edges, max_neighbours, itemsize):
 def with_edge_a_kind(model, kind):
     """Return `model` using the other A-basis form.  Values and gradients are
     unchanged (bit-identically, measured); only the reverse-pass cost differs."""
+    if hasattr(model, "with_base"):          # FSModel: switch the wrapped model's form
+        return model.with_base(with_edge_a_kind(model.base, kind))
     check_edge_a_kind(kind)
     if kind == model.edge_a_kind:
         return model

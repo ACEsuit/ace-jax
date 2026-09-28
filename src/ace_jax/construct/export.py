@@ -110,7 +110,7 @@ def readout_to_npz(c, n_B, n_pair, NZ):
     return np.ascontiguousarray(WB), np.ascontiguousarray(Wpair)
 
 
-def patch_radial_npz(src, dst, model, readout=None):
+def patch_radial_npz(src, dst, model, readout=None, fs=None):
     """Copy the npz at `src` to `dst` with the tensor radial replaced by
     `model`'s analytic one (rnl_Wnlq + polys_A/B/C; any rnl spline arrays are
     dropped and meta radial_kind/rnl_spline updated).  `readout`: the linear
@@ -120,7 +120,11 @@ def patch_radial_npz(src, dst, model, readout=None):
     exact branch conversion), stale otherwise.  Coupling, pair basis and E0
     are always copied verbatim.  This is how a learned radial is written back
     from a model that was loaded rather than authored (save_npz needs an
-    Authoring)."""
+    Authoring).
+
+    `fs`: (eta, d, mask, eps) of a frozen sqrt-density term (eval.fs_model);
+    written as fs_eta/fs_d/fs_mask + meta['fs'].  fs=None drops any density
+    keys of the source, which belong to the old radials."""
     if model.radial_kind != "analytic":
         raise ValueError(f"patch_radial_npz: model radial_kind {model.radial_kind!r} is not analytic")
     with np.load(src, allow_pickle=False) as z:
@@ -138,5 +142,14 @@ def patch_radial_npz(src, dst, model, readout=None):
         out["WB"], out["Wpair"] = readout_to_npz(readout, n_B, n_pair, NZ)
     meta["radial_kind"] = "analytic"
     meta["rnl_spline"] = None
+    for k in ("fs_eta", "fs_d", "fs_mask"):
+        out.pop(k, None)
+    meta.pop("fs", None)
+    if fs is not None:
+        eta, d, mask, eps = fs
+        out["fs_eta"] = np.asarray(eta, np.float64)
+        out["fs_d"] = np.asarray(d, np.float64)
+        out["fs_mask"] = np.asarray(mask, bool)
+        meta["fs"] = {"P": int(out["fs_eta"].shape[0]), "F": "ssqrt", "eps": float(eps)}
     out["meta_json"] = np.frombuffer(json.dumps(meta).encode(), dtype=np.uint8)
     np.savez(dst, **out)
