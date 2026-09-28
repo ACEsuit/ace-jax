@@ -57,7 +57,7 @@ class ACECalculator(Calculator):
 
     def __init__(self, model, meta=None, cutoff=None, dtype=None, edge_a_kind="auto",
                  layout="auto", posterior=None,
-                 forces_std_every_call=True, **kw):
+                 forces_std_every_call=False, **kw):
         """`ACECalculator("si_fitted.npz")` is the intended form: cutoff,
         species and dtype all come from the file.  A pre-loaded (model, meta)
         pair is still accepted, which is what the validation tests use.
@@ -75,9 +75,10 @@ class ACECalculator(Calculator):
 
         `posterior` (a `posterior.npz` from `fit --uq ard`, with `model` the matching
         `model.npz` FILE) adds `results["forces_std"]`: the tempered ARD per-atom force
-        std kappa * sqrt(sum_c phi_c A^-1 phi_c^T), shape (N,).  It is computed on every call
-        (`forces_std_every_call=True`, default) or only when requested
-        (`calc.get_property("forces_std", atoms)`), which then reuses the cached E/F/stress."""
+        std kappa * sqrt(sum_c phi_c A^-1 phi_c^T), shape (N,).  By default it is computed only
+        when requested (`calc.get_property("forces_std", atoms)`, which reuses the cached
+        E/F/stress): a design-row rebuild plus an L^2 solve per step is not a silent MD cost.
+        `forces_std_every_call=True` adds it to every calculation."""
         model_path = model
         if edge_a_kind != "auto":
             check_edge_a_kind(edge_a_kind)
@@ -125,6 +126,11 @@ class ACECalculator(Calculator):
                     or post.meta.get("NZ") != NZ):
                 raise ValueError(f"posterior {posterior} does not match the model: "
                                  f"basis {len(post.mean)} vs {L}")
+            p_els = [int(e) for e in post.meta.get("elements", [])]
+            m_els = [int(e) for e in meta["elements"]]
+            if p_els != m_els:                           # order-sensitive: columns are per species index
+                raise ValueError(f"posterior {posterior} does not match the model: "
+                                 f"elements {p_els} vs {m_els}")
             self.posterior = post
             self._fit_model = _load_fit_model(model_path)[0]
             self._fit_cfg = GPConfig(r0=1.0, rcut=float(meta["rcut"]), n_B=meta["n_B"],

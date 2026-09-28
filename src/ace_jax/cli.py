@@ -165,7 +165,7 @@ def cmd_eval(a):
             if gp:
                 rows[-1]["energy_std"] = float(calc.results["energy_std"])
             if ard:
-                s = np.asarray(calc.results["forces_std"])
+                s = np.asarray(calc.get_property("forces_std", at))   # on request: E/F reused
                 rows[-1]["fmax_std"] = float(s.max())
                 if getattr(a, "per_atom", None):
                     out_at = Atoms(numbers=c.numbers, positions=c.positions, cell=c.cell, pbc=c.pbc)

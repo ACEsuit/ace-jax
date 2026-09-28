@@ -40,7 +40,7 @@ def test_calculator_forces_std_matches_pipeline(fitted):
     got = []
     for c in cfgs:
         at = Atoms(numbers=c.numbers, positions=c.positions, cell=c.cell, pbc=c.pbc); at.calc = calc
-        at.get_forces(); got.append(calc.results["forces_std"])
+        got.append(calc.get_property("forces_std", at))
     np.testing.assert_allclose(np.concatenate(got), ref, rtol=1e-6, atol=1e-12)
 
 
@@ -48,8 +48,7 @@ def test_isolated_atom_has_zero_finite_std(fitted):
     from ace_jax import ACECalculator
     calc = ACECalculator(str(fitted / "model.npz"), posterior=str(fitted / "posterior.npz"))
     at = Atoms("Si", positions=[[0, 0, 0]], cell=[20, 20, 20], pbc=False); at.calc = calc
-    at.get_forces()
-    s = calc.results["forces_std"]
+    s = calc.get_property("forces_std", at)
     assert s.shape == (1,) and np.all(np.isfinite(s)) and s[0] == 0.0
 
 
@@ -81,20 +80,46 @@ def test_cli_eval_with_posterior_writes_per_atom_std(fitted, tmp_path):
     assert len(ats) == 3 and ats[0].arrays["forces_std"].shape == (len(ats[0]),)
 
 
-def test_forces_std_only_on_request_when_not_every_call(fitted):
-    """Spec: forces_std runs only when requested, or when set to compute every call (the default)."""
+
+def test_forces_std_only_on_request_by_default(fitted):
+    """Spec 4: forces_std runs only when requested (default), or every call when opted in."""
     from ace_jax import ACECalculator
     from ase.io import read
     at = read(XYZ, "1")
-    lazy = ACECalculator(str(fitted / "model.npz"), posterior=str(fitted / "posterior.npz"),
-                         forces_std_every_call=False)
+    lazy = ACECalculator(str(fitted / "model.npz"), posterior=str(fitted / "posterior.npz"))
     at.calc = lazy
     F = at.get_forces()
-    assert "forces_std" not in lazy.results
+    assert "forces_std" not in lazy.results                       # a plain get_forces() does not pay for it
     s = lazy.get_property("forces_std", at)
     np.testing.assert_allclose(lazy.results["forces"], F)          # the cached forces were kept
-    eager = ACECalculator(str(fitted / "model.npz"), posterior=str(fitted / "posterior.npz"))
+    eager = ACECalculator(str(fitted / "model.npz"), posterior=str(fitted / "posterior.npz"),
+                          forces_std_every_call=True)
     at2 = at.copy(); at2.calc = eager
     at2.get_forces()
     np.testing.assert_allclose(s, eager.results["forces_std"], rtol=1e-12)
     assert s.shape == (len(at),) and s.max() > 0
+
+
+def test_posterior_with_other_elements_is_refused(fitted, tmp_path):
+    from ace_jax import ACECalculator
+    from ace_jax.fit.ard import ARDPosterior
+    p = ARDPosterior.load(fitted / "posterior.npz")
+    els = list(p.meta["elements"])
+    for bad_els in ([14 if e != 14 else 6 for e in els], els[::-1] if len(els) > 1 else None):
+        if bad_els is None:
+            continue
+        p._replace(meta={**p.meta, "elements": bad_els}).save(tmp_path / "bad.npz")
+        with pytest.raises(ValueError, match="elements"):
+            ACECalculator(str(fitted / "model.npz"), posterior=str(tmp_path / "bad.npz"))
+
+
+def test_cli_eval_refuses_posterior_with_gp_model(fitted, tmp_path):
+    from ase.io import read, write
+    from ace_jax.cli import main
+    data = tmp_path / "d.xyz"
+    write(data, read(XYZ, ":2"))
+    gp_stub = tmp_path / "gp_model.npz"
+    np.savez(gp_stub, gp_json=np.frombuffer(b"{}", np.uint8))      # cmd_eval keys GP models on gp_json
+    with pytest.raises(ValueError, match="posterior"):
+        main(["eval", "--model", str(gp_stub), "--posterior", str(fitted / "posterior.npz"),
+              "--data", str(data), "--energy-key", "dft_energy", "--force-key", "dft_force"])
