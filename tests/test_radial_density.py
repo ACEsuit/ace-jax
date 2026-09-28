@@ -473,6 +473,53 @@ def test_save_result_eta_without_mask_raises(tmp_path):
         save_result(tmp_path, np.zeros(3), {}, eta=np.zeros((1, 2, 3)))
 
 
+def _driver(tmp_path, *extra, model=MODEL):
+    import subprocess, sys
+    from conftest import ROOT
+    return subprocess.run(
+        [sys.executable, str(ROOT / "bench/learn_radial/run.py"), "--model", str(model),
+         "--data", str(XYZ), "--energy-key", "dft_energy", "--force-key", "dft_force",
+         "--virial-key", "dft_virial", "--ntrain", "8", "--nval", "8", "--batch", "4",
+         "--n-q", "20", "--steps", "3", "--lam-grid", "0", "--map-steps", "20",
+         "--out", str(tmp_path), *extra], capture_output=True, text=True)
+
+
+def test_bench_driver_density_smoke(tmp_path):
+    import json, subprocess, sys
+    from conftest import ROOT
+    r = _driver(tmp_path, "--density", "full", "--P", "1")
+    assert r.returncode == 0, r.stderr[-3000:]
+    s = json.loads((tmp_path / "summary.json").read_text())
+    assert s["density"] == "full" and s["selected"] in s["scores"] and "radials_only" in s["scores"]
+    assert (tmp_path / "model.npz").exists()
+    r2 = subprocess.run([sys.executable, str(ROOT / "bench/learn_radial/rmse_npz.py"), "--model", str(MODEL),
+                         "--data", str(XYZ), "--energy-key", "dft_energy", "--force-key", "dft_force",
+                         "--virial-key", "dft_virial", "--ntrain", "8", "--nval", "8",
+                         "--model-npz", str(tmp_path / "model.npz"), "--out", str(tmp_path / "rmse.json")],
+                        capture_output=True, text=True)
+    assert r2.returncode == 0, r2.stderr[-3000:]
+    js = json.loads((tmp_path / "rmse.json").read_text())
+    (row,) = js.values()
+    assert np.isfinite(row["E_rmse_meV_atom"]) and np.isfinite(row["F_rmse_meV_A"])
+
+
+def test_bench_driver_density_rejects_grids(tmp_path):
+    r = _driver(tmp_path, "--density", "full", "--spec-grid", "0,1e-5")
+    assert r.returncode != 0 and "single-valued" in (r.stderr + r.stdout)
+
+
+def test_bench_driver_unwraps_density_model(tmp_path):
+    from ace_jax.construct.export import patch_radial_npz
+    from ace_jax.eval import load
+    base, meta, _ = load(MODEL)
+    NZ, D = len(meta["elements"]), meta["n_B"] + meta["n_pair"]
+    patch_radial_npz(MODEL, tmp_path / "fs.npz", base,
+                     fs=(1e-2 * np.ones((1, NZ, D)), np.ones((1, NZ)), np.ones(D), 1e-6))
+    r = _driver(tmp_path / "out", model=tmp_path / "fs.npz")
+    assert r.returncode == 0, r.stderr[-3000:]
+    assert "density term of the input model is dropped" in r.stdout
+
+
 def test_fit_radial_density_checkpoints(tmp_path, small):
     from ace_jax.fit.density import density_mask
     from ace_jax.fit.radial_density import fit_radial_density

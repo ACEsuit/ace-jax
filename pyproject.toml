@@ -115,6 +115,7 @@ ignore = [
 "bench/learn_radial/compare_plots.py" = ["B023"]
 "bench/learn_radial/plots.py" = ["B023"]
 "bench/learn_radial/rmse.py" = ["B023"]
+"bench/learn_radial/rmse_npz.py" = ["B023"]
 "bench/learn_radial/tradeoff.py" = ["B023"]
 "bench/pace_modal/run.py" = ["B023"]
 "bench/pace_profile.py" = ["B023"]

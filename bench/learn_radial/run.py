@@ -2,6 +2,8 @@
 
     uv run python bench/learn_radial/run.py --model M.npz --data D.xyz --out DIR \
         [--n-q 12] [--ntrain 200] [--steps 40] [--lam-grid 0,1e-2]
+    uv run python bench/learn_radial/run.py --model M.npz --data D.xyz --out DIR \
+        --density full --P 1 --lam-eta-grid 0,1e-2
 
 A splined (Julia-exported) model is converted to the analytic branch first
 (to_analytic); an analytic one is widened to --n-q.  Writes DIR/model.npz (the
@@ -9,7 +11,12 @@ selected radials and the readout fitted for them patched into a copy of
 --model), rnl_Wnlq.npy, readout.npy, radial_info.json and summary.json (gate
 scores, selected label, to_analytic_relres_max).  Each lambda's radials are
 checkpointed to DIR/lam_<lam>/ (rnl_Wnlq.npy, radial_info.json) as soon as its
-run finishes.  The residual GP / UQ fit then runs on DIR/model.npz as usual.
+run finishes.  With --density (a frozen sqrt-density term learned jointly with
+the radials, gated against the plain radials-only fit; see
+docs/specs/2026-09-28-radial-density-varpro-design.md), checkpoints go instead
+to DIR/radials_only/ and DIR/density_lam_eta=<l>/, each with rnl_Wnlq.npy (and
+eta.npy for the density runs).  The residual GP / UQ fit then runs on
+DIR/model.npz as usual.
 """
 import argparse
 import json
@@ -50,11 +57,21 @@ p.add_argument("--map-steps", type=int, default=300)
 p.add_argument("--learn-sigma-e-mult", type=float, default=1.0,
                help="scale sigma_E inside the radial objective only (>1 = force-heavier radial learning); "
                     "gate and final linear fit keep the MAP weights")
+p.add_argument("--density", choices=["none", "pair", "full"], default="none",
+               help="also learn sqrt-density features jointly with the radials over this span of the basis "
+                    "(docs/specs/2026-09-28-radial-density-varpro-design.md); the gate keeps them only if "
+                    "they win on the held-out split")
+p.add_argument("--P", type=int, default=1, help="number of density features (with --density)")
+p.add_argument("--density-mode", choices=["joint", "alternating"], default="joint")
+p.add_argument("--lam-eta-grid", default="0", help="relative density shape-prior weights (with --density)")
 a = p.parse_args()
 
 t0 = time.time()
 out = pathlib.Path(a.out); out.mkdir(parents=True, exist_ok=True)
 model, meta, z = load(a.model)
+if hasattr(model, "base"):              # an FSModel: learning starts from its linear part
+    model = model.base
+    print("note: the density term of the input model is dropped (it belongs to the old radials)", flush=True)
 model, relres = to_analytic(model, a.n_q)
 relres_max = float(np.max(relres))
 print(f"to_analytic: n_q={a.n_q} relres_max={relres_max:.3e}", flush=True)
@@ -91,18 +108,43 @@ def checkpoint(label, W_lam, run_info):
     print(f"checkpoint: {out / f'lam_{label}'}", flush=True)
 
 
-W, info = fit_radial(prob, ds_fit, ds_val, model.rnl_Wnlq, lam_grid=lam_grid, spec_grid=spec_grid,
-                     gap_grid=gap_grid, rough_weights=wn, spec_p=a.spec_p, steps=a.steps,
-                     reprofile_every=a.reprofile_every, map_steps=a.map_steps,
-                     learn_sigma_e_mult=a.learn_sigma_e_mult,
-                     log=lambda s: print(s, flush=True), checkpoint=checkpoint)
+if a.density == "none":
+    W, info = fit_radial(prob, ds_fit, ds_val, model.rnl_Wnlq, lam_grid=lam_grid, spec_grid=spec_grid,
+                         gap_grid=gap_grid, rough_weights=wn, spec_p=a.spec_p, steps=a.steps,
+                         reprofile_every=a.reprofile_every, map_steps=a.map_steps,
+                         learn_sigma_e_mult=a.learn_sigma_e_mult,
+                         log=lambda s: print(s, flush=True), checkpoint=checkpoint)
+    eta = mask = None
+else:
+    from ace_jax.fit.density import density_mask
+    from ace_jax.fit.radial_density import fit_radial_density
+    if max(len(lam_grid), len(spec_grid), len(gap_grid)) > 1:
+        raise SystemExit("--density needs single-valued --lam-grid, --spec-grid and --gap-grid "
+                         "(sweep --lam-eta-grid instead)")
+    if a.learn_sigma_e_mult != 1.0:
+        raise SystemExit("--density does not support --learn-sigma-e-mult")
+    mask = density_mask(cfg, a.density)
+
+    def checkpoint_rd(label, W_c, eta_c, run_info):
+        save_result(out / label, W_c, run_info, eta=eta_c, mask=mask)
+        print(f"checkpoint: {out / label}", flush=True)
+
+    W, eta, info = fit_radial_density(prob, ds_fit, ds_val, model.rnl_Wnlq, mask=mask, P=a.P,
+                                      mode=a.density_mode,
+                                      lam_eta_grid=tuple(float(x) for x in a.lam_eta_grid.split(",")),
+                                      lam_rough=lam_grid[0], lam_spec=spec_grid[0], lam_gap=gap_grid[0],
+                                      rough_weights=wn, spec_p=a.spec_p, steps=a.steps,
+                                      reprofile_every=a.reprofile_every, map_steps=a.map_steps,
+                                      log=lambda s: print(s, flush=True), checkpoint=checkpoint_rd)
 info["to_analytic_relres_max"] = relres_max
-save_result(out, W, info, src_npz=a.model, model=model)
+save_result(out, W, info, src_npz=a.model, model=model, eta=eta, mask=mask)
 summary = {"selected": info["selected"], "scores": info["scores"], "n_q": a.n_q,
            "ntrain": a.ntrain, "nval": a.nval, "lam_grid": list(lam_grid),
            "spec_grid": list(spec_grid), "spec_p": a.spec_p, "gap_grid": list(gap_grid),
            "steps": a.steps, "reprofile_every": a.reprofile_every,
            "learn_sigma_e_mult": a.learn_sigma_e_mult, "to_analytic_relres_max": relres_max,
+           "density": a.density, "P_selected": int(info.get("P", 0)), "density_mode": a.density_mode,
+           "lam_eta_grid": a.lam_eta_grid,
            "seconds": time.time() - t0}
 (out / "summary.json").write_text(json.dumps(summary, indent=1))
 print(json.dumps(summary, indent=1))

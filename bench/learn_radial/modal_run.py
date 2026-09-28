@@ -39,20 +39,39 @@ SYSTEMS = {
 KEYS = ["--energy-key", "mace_energy", "--force-key", "mace_force", "--virial-key", "mace_virial"]
 
 
+def _drop(args, *flags):
+    """args with each --flag/value pair removed (rmse_npz.py has no --r0/--n-q)."""
+    args = list(args)
+    for f in flags:
+        if f in args:
+            i = args.index(f)
+            del args[i:i + 2]
+    return args
+
+
 @app.function(gpu="A100-80GB", timeout=8 * 3600)
-def learn(system: str, steps: int, lam_grid: str, reprofile_every: int, n_q: int, mult: float = 1.0) -> dict:
-    out = pathlib.Path(f"/tmp/out_{system}_s{steps}_m{mult:g}")
+def learn(system: str, steps: int, lam_grid: str, reprofile_every: int, n_q: int, mult: float = 1.0,
+         density: str = "none", P: int = 1, density_mode: str = "joint", lam_eta_grid: str = "0") -> dict:
+    out = pathlib.Path(f"/tmp/out_{system}_s{steps}_m{mult:g}_{density}{P}")
     args = SYSTEMS[system] + KEYS + ["--n-q", str(n_q)]
     r = subprocess.run(["python", "/ace-jax/bench/learn_radial/run.py", *args, "--steps", str(steps),
                         "--reprofile-every", str(reprofile_every), "--lam-grid", lam_grid,
-                        "--learn-sigma-e-mult", str(mult), "--out", str(out)],
+                        "--learn-sigma-e-mult", str(mult), "--density", density, "--P", str(P),
+                        "--density-mode", density_mode, "--lam-eta-grid", lam_eta_grid,
+                        "--out", str(out)],
                        capture_output=True, text=True)
     log = r.stdout + r.stderr
     if r.returncode == 0:
-        cands = ["--cand", "init"] + sum((["--cand", str(p)] for p in sorted(out.glob("lam_*/rnl_Wnlq.npy"))), [])
+        glob = out.glob("*/rnl_Wnlq.npy") if density != "none" else out.glob("lam_*/rnl_Wnlq.npy")
+        cands = ["--cand", "init"] + sum((["--cand", str(p)] for p in sorted(glob)), [])
         r2 = subprocess.run(["python", "/ace-jax/bench/learn_radial/rmse.py", *args, *cands,
                              "--out", str(out / "rmse.json")], capture_output=True, text=True)
         log += "\n== rmse ==\n" + r2.stdout + r2.stderr
+        r3 = subprocess.run(["python", "/ace-jax/bench/learn_radial/rmse_npz.py",
+                             *_drop(args, "--r0", "--n-q"),
+                             "--model-npz", str(out / "model.npz"), "--out", str(out / "rmse_npz.json")],
+                            capture_output=True, text=True)
+        log += "\n== rmse_npz ==\n" + r3.stdout + r3.stderr
     files = {str(p.relative_to(out)): p.read_bytes() for p in out.rglob("*")
              if p.is_file() and p.suffix in (".json", ".npy")} if out.exists() else {}
     return {"log": log, "files": files, "returncode": r.returncode}
@@ -60,11 +79,14 @@ def learn(system: str, steps: int, lam_grid: str, reprofile_every: int, n_q: int
 
 @app.local_entrypoint()
 def main(system: str = "sige", steps: str = "100,200,400", lam_grid: str = "0.1",
-         reprofile_every: int = 50, n_q: int = 12, mults: str = "1", out: str = "runs/modal"):
+         reprofile_every: int = 50, n_q: int = 12, mults: str = "1", out: str = "runs/modal",
+         density: str = "none", P: int = 1, density_mode: str = "joint", lam_eta_grid: str = "0"):
     budgets = [int(s) for s in steps.split(",")]
-    calls = [(system, s, lam_grid, reprofile_every, n_q, float(m)) for s in budgets for m in mults.split(",")]
-    for (sy, s, _, _, _, m), res in zip(calls, learn.starmap(calls)):
-        d = pathlib.Path(out) / (f"{sy}_s{s}" if m == 1.0 else f"{sy}_s{s}_m{m:g}")
+    calls = [(system, s, lam_grid, reprofile_every, n_q, float(m), density, P, density_mode, lam_eta_grid)
+            for s in budgets for m in mults.split(",")]
+    for (sy, s, _, _, _, m, dn, _, _, _), res in zip(calls, learn.starmap(calls)):
+        suffix = f"_{dn}{P}" if dn != "none" else ""
+        d = pathlib.Path(out) / ((f"{sy}_s{s}" if m == 1.0 else f"{sy}_s{s}_m{m:g}") + suffix)
         d.mkdir(parents=True, exist_ok=True)
         (d / "log.txt").write_text(res["log"])
         for name, blob in res["files"].items():
