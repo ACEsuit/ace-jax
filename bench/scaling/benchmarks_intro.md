@@ -64,6 +64,13 @@ CPU. The ratios come from the rows in the table below.
 
 ## Caveats
 
+- **These are pre-optimisation numbers, and the linear ACE models are
+  oversized.** The ace-jax speed-up PR re-runs every ace-jax row and
+  supersedes this page. The linear ACE models here have 2–3× (SiGe) and
+  7–14× (Cantor) the basis functions per central element of the PACE models
+  beside them: the size ladder counted n_B / NZ, but every B function carries
+  its own weight per central element. ACE-vs-PACE differences on this page
+  therefore mostly reflect basis size.
 - **Random weights.** The ace-jax and PACE models carry random coefficients
   where no fitted model exists. They are timing-only; their energies mean
   nothing physically.
