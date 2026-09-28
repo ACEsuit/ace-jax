@@ -771,3 +771,20 @@ def test_end_labels_carry_basis_size(monkeypatch):
     assert plot._label("acejax-ace", "Cantor", "medium") == "ace-jax ACE · 3824 fn"
     assert plot._label("acejax-pace", "Cantor", "medium") == "ace-jax PACE · 496 fn"
     assert plot._label("mace", "Cantor", "medium") == "MACE"      # no size known: plain
+
+
+def test_rows_record_the_device_they_ran_on(tmp_path, monkeypatch):
+    """Modal hands out A100 variants (SXM4 / PCIe) that time differently, so
+    every row names the device: the GPU from nvidia-smi, else the CPU model."""
+    import types
+
+    from scaling import sweep
+    monkeypatch.setattr(sweep, "_DEVICE_NAMES", {})
+    monkeypatch.setattr(sweep.subprocess, "run", lambda *a, **k: types.SimpleNamespace(
+        returncode=0, stdout="NVIDIA A100-SXM4-80GB\n"))
+    only = lambda c: c.code == "acejax-pace" and c.mode == "standalone" and c.n_atoms == 256
+    sweep.run_sweep("moriarty-gpu", lambda c, prev: {"status": "ok"}, tmp_path / "r.jsonl",
+                    select=only)
+    rows = [json.loads(l) for l in (tmp_path / "r.jsonl").read_text().splitlines()]
+    assert rows and all(r["device_name"] == "NVIDIA A100-SXM4-80GB" for r in rows)
+    assert sweep.device_name("cpu")                          # the CPU model, never empty
