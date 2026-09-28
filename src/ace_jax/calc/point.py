@@ -56,7 +56,8 @@ class ACECalculator(Calculator):
                               "site_descriptors", "forces_std"]
 
     def __init__(self, model, meta=None, cutoff=None, dtype=None, edge_a_kind="auto",
-                 layout="auto", posterior=None, **kw):
+                 layout="auto", posterior=None,
+                 forces_std_every_call=True, **kw):
         """`ACECalculator("si_fitted.npz")` is the intended form: cutoff,
         species and dtype all come from the file.  A pre-loaded (model, meta)
         pair is still accepted, which is what the validation tests use.
@@ -74,7 +75,9 @@ class ACECalculator(Calculator):
 
         `posterior` (a `posterior.npz` from `fit --uq ard`, with `model` the matching
         `model.npz` FILE) adds `results["forces_std"]`: the tempered ARD per-atom force
-        std kappa * sqrt(sum_c phi_c A^-1 phi_c^T), shape (N,)."""
+        std kappa * sqrt(sum_c phi_c A^-1 phi_c^T), shape (N,).  It is computed on every call
+        (`forces_std_every_call=True`, default) or only when requested
+        (`calc.get_property("forces_std", atoms)`), which then reuses the cached E/F/stress."""
         model_path = model
         if edge_a_kind != "auto":
             check_edge_a_kind(edge_a_kind)
@@ -108,6 +111,7 @@ class ACECalculator(Calculator):
             lambda m, rij, zi, zj, s, r, n, nz, emask: m.energy_forces_virial(
                 rij, zi, zj, s, r, n, nz, emask))
         self.posterior = None
+        self.forces_std_every_call = bool(forces_std_every_call)
         if posterior is not None:
             from ..eval import load as _load_fit_model
             from ..fit.ard import ARDPosterior
@@ -134,6 +138,11 @@ class ACECalculator(Calculator):
                 f"element Z={e.args[0]} not in model elements {self.meta['elements']}") from e
 
     def calculate(self, atoms=None, properties=("energy",), system_changes=all_changes):
+        if (self.posterior is not None and not system_changes and "forces" in self.results
+                and set(properties) <= {"forces_std"}):
+            super().calculate(atoms, properties, system_changes)   # E/F/stress cached: std only
+            self.results["forces_std"] = self._forces_std()
+            return
         super().calculate(atoms, properties, system_changes)
         import time
 
@@ -202,7 +211,7 @@ class ACECalculator(Calculator):
             s = -np.asarray(V) / vol
             self.results["stress"] = np.array(
                 [s[0, 0], s[1, 1], s[2, 2], s[1, 2], s[0, 2], s[0, 1]])
-        if self.posterior is not None:
+        if self.posterior is not None and (self.forces_std_every_call or "forces_std" in properties):
             self.results["forces_std"] = self._forces_std()
 
     def _forces_std(self):

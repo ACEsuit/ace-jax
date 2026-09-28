@@ -79,3 +79,22 @@ def test_cli_eval_with_posterior_writes_per_atom_std(fitted, tmp_path):
     assert all(float(r["fmax_std"]) > 0 for r in rows[1:])
     ats = read(tmp_path / "atoms.xyz", ":")
     assert len(ats) == 3 and ats[0].arrays["forces_std"].shape == (len(ats[0]),)
+
+
+def test_forces_std_only_on_request_when_not_every_call(fitted):
+    """Spec: forces_std runs only when requested, or when set to compute every call (the default)."""
+    from ace_jax import ACECalculator
+    from ase.io import read
+    at = read(XYZ, "1")
+    lazy = ACECalculator(str(fitted / "model.npz"), posterior=str(fitted / "posterior.npz"),
+                         forces_std_every_call=False)
+    at.calc = lazy
+    F = at.get_forces()
+    assert "forces_std" not in lazy.results
+    s = lazy.get_property("forces_std", at)
+    np.testing.assert_allclose(lazy.results["forces"], F)          # the cached forces were kept
+    eager = ACECalculator(str(fitted / "model.npz"), posterior=str(fitted / "posterior.npz"))
+    at2 = at.copy(); at2.calc = eager
+    at2.get_forces()
+    np.testing.assert_allclose(s, eager.results["forces_std"], rtol=1e-12)
+    assert s.shape == (len(at),) and s.max() > 0
