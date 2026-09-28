@@ -84,14 +84,25 @@ def logev(h):
 vg = jax.jit(jax.value_and_grad(logev))
 
 
+LO = np.concatenate([ls_map - 3.0, [-25.0] * 3])      # log sigma within e^+-3 of the linear MAP
+HI = np.concatenate([ls_map + 3.0, [10.0] * 3])
+
+
 def maximise(h0, free):
+    """Bounded L-BFGS-B on -log p.  The log-sigma gradient scales with ~1e6 data rows, so unbounded
+    first steps fling sigma to extremes and the Cholesky fails; a non-finite evaluation is returned as
+    a large value with zero gradient (a rejected step), as in fit/multistart.lbfgs_map."""
     from scipy.optimize import minimize
     h0 = np.asarray(h0, float); free = np.asarray(free)
     def f(z):
         h = h0.copy(); h[free] = z
         v, g = vg(jnp.asarray(h))
-        return -float(v), -np.asarray(g)[free]
-    r = minimize(f, h0[free], jac=True, method="L-BFGS-B", options={"maxiter": 200})
+        v, g = float(v), np.asarray(g)[free]
+        if not (np.isfinite(v) and np.all(np.isfinite(g))):
+            return 1e300, np.zeros_like(z)
+        return -v, -g
+    r = minimize(f, h0[free], jac=True, method="L-BFGS-B", bounds=list(zip(LO[free], HI[free])),
+                 options={"maxiter": 500})
     h = h0.copy(); h[free] = r.x
     return h, -r.fun, r
 
@@ -100,7 +111,9 @@ h_blr = np.concatenate([ls_map, [a_blr] * 3])
 h_ardG, ev_ardG, rG = maximise(h_blr, [3, 4, 5])
 h_ardJ, ev_ardJ, rJ = maximise(h_ardG, [0, 1, 2, 3, 4, 5])
 ev_blr = float(vg(jnp.asarray(h_blr))[0])
-log("evidence blr", ev_blr, "ardG", ev_ardG, "ardJ", ev_ardJ, "| ardJ h", np.round(h_ardJ, 3), rJ.message)
+log("evidence blr", ev_blr, "ardG", ev_ardG, "ardJ", ev_ardJ, "| ardJ h", np.round(h_ardJ, 3), rJ.message,
+    "nit", rJ.nit)
+assert np.isfinite(ev_ardJ) and ev_ardJ >= ev_ardG - 1e-6, "joint maximum must not be worse than ARD-after-MAP"
 
 # Laplace: Hessian of log p at h_ardJ by central differences of the exact gradient
 eps = 1e-3
@@ -109,7 +122,16 @@ for i in range(6):
     e = np.zeros(6); e[i] = eps
     H[:, i] = (np.asarray(vg(jnp.asarray(h_ardJ + e))[1]) - np.asarray(vg(jnp.asarray(h_ardJ - e))[1])) / (2 * eps)
 H = 0.5 * (H + H.T)
-cov_h = np.linalg.inv(-H)
+eig = np.linalg.eigvalsh(-H)
+at_bound = (np.isclose(h_ardJ, LO) | np.isclose(h_ardJ, HI))
+if eig.min() <= 0 or at_bound.any():
+    log("WARNING: not an interior maximum (min eig of -H", eig.min(), ", at bound", at_bound.tolist(),
+        ") -- Laplace covariance uses the interior coordinates only")
+free_l = ~at_bound
+cov_h = np.zeros((6, 6))
+Hf = -H[np.ix_(free_l, free_l)]
+w_, V_ = np.linalg.eigh(Hf)
+cov_h[np.ix_(free_l, free_l)] = (V_ / np.clip(w_, 1e-12, None)) @ V_.T      # PSD by construction
 std_h = np.sqrt(np.clip(np.diag(cov_h), 0, None))
 log("Laplace std of h", np.round(std_h, 5), "eigs(-H)", np.round(np.linalg.eigvalsh(-H), 2))
 
@@ -121,7 +143,8 @@ def posterior(h):
 
 
 rng = np.random.default_rng(0)
-draws = rng.multivariate_normal(h_ardJ, cov_h, size=n_draws)
+draws = np.clip(rng.multivariate_normal(h_ardJ, cov_h, size=n_draws), LO, HI)   # flat directions (e.g. the
+                                                                                    # data-dominated 2-body scale)
 models = {"blr": posterior(h_blr), "ardG": posterior(h_ardG), "ardJ": posterior(h_ardJ)}
 dposts = [posterior(hd) for hd in draws]
 out = {}
