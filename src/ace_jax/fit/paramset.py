@@ -2,7 +2,7 @@
 the LML blocks, the outer VarOpt the VarOpt blocks; FIXED blocks never move.
 Both optimisers see a flat vector of their route's blocks; `materialise` turns
 the whole set back into the concrete objects stats/kernels/predict consume."""
-from typing import NamedTuple, Optional
+from typing import NamedTuple
 import jax.numpy as jnp
 
 ROUTES = ("fixed", "lml")
@@ -11,8 +11,8 @@ class ParamBlock(NamedTuple):
     name: str
     value: jnp.ndarray
     route: str
-    prior: Optional[object] = None    # (mu, sigma) log-normal for LML blocks
-    anchor: Optional[object] = None   # AnchorSpec for VarOpt blocks
+    prior: object | None = None    # (mu, sigma) log-normal for LML blocks
+    anchor: object | None = None   # AnchorSpec for VarOpt blocks
 
 class ParamSet(NamedTuple):
     blocks: tuple

@@ -4,7 +4,7 @@ jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 import numpy as np
 
-from ace_jax.fit.hypers import Hypers, Prior, default_prior, from_array, log_prior, to_array
+from ace_jax.fit.hypers import Hypers, default_prior, from_array, log_prior, to_array
 
 
 def test_roundtrip_and_field_order():

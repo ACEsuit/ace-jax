@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 from ace_jax.eval import load
 from ace_jax.fit.data import build_dataset, load_configs, flat_edges
 from ace_jax.fit.radial_model import (to_analytic, radial_gram, normalise, row_active,
-                                      poly_env, roughness_matrix)
+                                      poly_env)
 from ace_jax.construct.spec import build_spec
 
 C = dict(init="#2a78d6", l0="#eb6834", l1="#1baf7a")          # reference categorical slots 1-3

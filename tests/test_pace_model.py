@@ -9,7 +9,6 @@ import jax.numpy as jnp
 from ase import Atoms
 
 from ace_jax.eval import ACECalculator, load, sparse_graph
-from ace_jax.eval.pace_model import PACEModel, load_yace
 
 FIX = pathlib.Path(__file__).parent.parent / "fixtures" / "pace"
 NAMES = ["si_chebexpcos", "si_chebpow_fs", "si_cheblinear", "gesi_sbessel",

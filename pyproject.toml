@@ -56,7 +56,11 @@ Issues = "https://github.com/ACEsuit/ace-jax/issues"
 
 [dependency-groups]
 # mirrors the `gp` extra so a plain `uv run pytest` can run the GP ladder tests
-dev = ["pytest>=8", "pytest-split>=0.8", "pytest-xdist>=3.5", "numpyro>=0.16", "optax>=0.2", "blackjax>=1.6"]
+dev = [
+  "pytest>=8", "pytest-split>=0.8", "pytest-xdist>=3.5", "numpyro>=0.16", "optax>=0.2", "blackjax>=1.6",
+  # lint + hooks; keep ruff in step with the rev in .pre-commit-config.yaml
+  "ruff==0.16.9", "pre-commit>=4",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ace_jax"]
@@ -72,3 +76,56 @@ addopts = "--durations=15 -m 'not slow'"
 markers = [
     "slow: heavy integration (real-model MCMC ladder, bit-exact driver goldens); excluded by default -- run with `pytest -m slow`",
 ]
+
+[tool.ruff]
+# ~99.9% of src/tests lines are <= 110 already; no formatter is enforced
+# (`ruff format` would rewrite the deliberately dense one-line style).
+line-length = 110
+target-version = "py311"                       # requires-python >= 3.11
+# Not linted: reference generators / experiments that are not part of the package.
+extend-exclude = ["spike", "pace_ref", "julia", "docs", "fixtures", ".worktrees"]
+
+[tool.ruff.lint]
+# pycodestyle, pyflakes, bugbear, pyupgrade; NPY guards NumPy-2 removals.
+# No "I" (isort): ruff's isort always splits `import a, b` and re-wraps dense
+# parenthesised imports one-per-line (74 files, +270/-138), and reorders package
+# __init__ imports; that is a restyle, not a fix.
+select = ["E", "F", "W", "B", "UP", "NPY"]
+ignore = [
+  # House style, not bugs: dense `a = ...; b = ...` lines, one-line `if x: y`,
+  # short math names (l, I, O), named lambdas, `import os, sys`.
+  "E701", "E702", "E741", "E731", "E401",
+  # Imports after jax.config.update("jax_enable_x64", ...) / importorskip are deliberate.
+  "E402",
+  # Long lines are tolerated (no formatter); line-length documents the target.
+  "E501",
+  # zip(strict=True) would change behaviour on length mismatch; opt in case by case.
+  "B905",
+]
+
+
+[tool.ruff.lint.per-file-ignores]
+# B023 (closure over a loop variable): every site in these files was reviewed and
+# is a false positive -- the closure is consumed in the same iteration
+# (`jax.tree.map(lambda a: a[i], ds)`, in-loop jit timing).  Listed per file so
+# the rule still guards new files.  See the devops report (repo hygiene, 2026-09).
+"bench/learn_radial/compare_plots.py" = ["B023"]
+"bench/learn_radial/plots.py" = ["B023"]
+"bench/learn_radial/rmse.py" = ["B023"]
+"bench/pace_modal/run.py" = ["B023"]
+"bench/pace_profile.py" = ["B023"]
+"src/ace_jax/fit/hostcache.py" = ["B023"]
+"src/ace_jax/fit/pipeline/predict.py" = ["B023"]
+"src/ace_jax/fit/predict.py" = ["B023"]
+"src/ace_jax/fit/radial_model.py" = ["B023"]
+"src/ace_jax/fit/solve.py" = ["B023"]
+"src/ace_jax/fit/stats.py" = ["B023"]
+"tests/test_gp_learn_radial.py" = ["B023"]
+"tests/test_gp_pops_paper.py" = ["B023"]
+"tests/test_gp_rows.py" = ["B023"]
+"tests/test_gp_stats.py" = ["B023"]
+
+# plots.py:44 uses a PEP 701 f-string (`f"{d["k"]}"`), a SyntaxError on Python
+# 3.11 (requires-python >= 3.11).  Linted as 3.12 until fixed; see the devops report.
+[tool.ruff.per-file-target-version]
+"bench/learn_radial/plots.py" = "py312"

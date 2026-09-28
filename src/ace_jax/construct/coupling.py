@@ -272,7 +272,7 @@ def _read_entry(path, key):
         # net is the documented contract ("any unreadable entry is a miss"),
         # but the miss is announced so a permanently-broken entry is visible
         # in the log instead of silently recomputed on every authoring run.
-        warnings.warn(f"coupling cache: unreadable entry {path.name} "
+        warnings.warn(f"coupling cache: unreadable entry {path.name} "  # noqa: B028 -- see devops report
                       f"({type(e).__name__}: {e}); recomputing")
         return None, False
     return cpl, True

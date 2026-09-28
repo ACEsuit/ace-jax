@@ -1,7 +1,6 @@
-import itertools, pathlib
+import pathlib
 import jax
 import numpy as np
-import pytest
 from conftest import pace_fixture
 
 jax.config.update("jax_enable_x64", True)

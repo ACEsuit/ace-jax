@@ -1,7 +1,5 @@
 """Deterministic benchmark cells: SiGe (random 50/50 diamond) and Cantor
 (random equiatomic CrMnFeCoNi fcc), at any power-of-two atom count."""
-import itertools
-
 import numpy as np
 from ase.build import bulk
 
