@@ -90,7 +90,8 @@ These constraints are validated up front. A bad combination raises a
     the tempered ARD posterior) and `ard.json` (evidence, prior scales, κ, held-out
     NLL and rms-z). `ACECalculator(model, posterior="out_ard/posterior.npz")` and
     `aj eval --posterior out_ard/posterior.npz` add a `forces_std` result: per-atom
-    tempered force uncertainty.
+    tempered force uncertainty. `--uq ard` also changes the mean: `model.npz` is the
+    ARD posterior mean, not the BLR/MAP mean.
   - `gp_model.npz` (GP): self-contained, loaded by `GPCalculator.from_file` and
     `aj eval`. Its size is about 8·Dt²·(model draws) bytes, where Dt = basis
     size + M. The default stores 1 draw (the MAP); `--model-draws N` stores N
@@ -216,7 +217,10 @@ Other entry points:
   pass `forces_std_every_call=True` — costly for per-step MD on big cells. Only
   the force σ is tempered by κ; energy and virial variances are untempered.
   `ACECalculator(model, posterior=...)` raises `ValueError` if the posterior
-  doesn't match the model (basis size, species count or element list).
+  doesn't match the model (basis size, species count, element list, or a mean
+  that is not the model's coefficients, i.e. a posterior from another fit), and
+  `RuntimeError` unless `jax_enable_x64` is on. `forces_std` holds the whole
+  cell's force design rows, ~N·3·L·8 bytes.
 - **First `construct` of a new basis shape** runs Julia (via juliacall) to
   build the coupling table, then caches it in `~/.cache/ace-jax/coupling`.
   Later runs are pure Python.
