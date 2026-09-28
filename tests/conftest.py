@@ -30,6 +30,24 @@ import pytest
 
 ROOT = pathlib.Path(__file__).parent.parent
 
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_cmdline_main(config):
+    """A bare `pytest` (the whole suite) runs on parallel workers when pytest-xdist
+    is installed: 6 by default (ACEJAX_TEST_WORKERS overrides), the measured
+    optimum on a 12-core laptop -- each JAX worker is itself multi-threaded, so
+    more workers contend (8: 72 s, 12: 75 s vs 6: 68 s).  Targeted runs
+    (`pytest tests/test_x.py`), an explicit -n, --pdb, or no xdist stay serial.
+    Runs before xdist's own tryfirst hook (conftest hooks register later).
+
+    Never in a worker: workers re-run this hook with numprocesses reset to None, and
+    setting it there makes every worker spawn its own workers, recursively."""
+    if (os.environ.get("PYTEST_XDIST_WORKER") or hasattr(config, "workerinput")
+            or not config.pluginmanager.hasplugin("xdist") or config.option.numprocesses is not None
+            or config.getoption("usepdb", False) or config.args != config.getini("testpaths")):
+        return
+    config.option.numprocesses = int(os.environ.get("ACEJAX_TEST_WORKERS", min(6, os.cpu_count() or 1)))
+
 # ACEJAX_FIXTURE_DIR points the whole suite at a different set of exports -- used
 # by the divergence job in CI, which regenerates them from the Julia in the
 # working tree so the reference values are fresh rather than committed.
@@ -79,6 +97,90 @@ def pytest_generate_tests(metafunc):
                 paths.append(pytest.param(p, marks=pytest.mark.skip(
                     reason=f"missing fixture {p.name}; see julia/export_model.jl")))
         metafunc.parametrize("npz", paths, ids=ids)
+
+
+@pytest.fixture(scope="module")
+def tiny_linear_problem():
+    """M=0 (BLR-limit) Problem + Dataset on the si_tiny fixtures, shared by the
+    hyper-routing ladder/paramset tests.  Mirrors the `blr` construction at the
+    top of tests/test_gp_objective.py, returning just (prob, ds)."""
+    import numpy as np
+    import jax
+    jax.config.update("jax_enable_x64", True)
+    import jax.numpy as jnp
+    from ace_jax.eval import load
+    from ace_jax.fit.data import build_dataset, load_configs
+    from ace_jax.fit.hypers import default_prior
+    from ace_jax.fit.inducing import (GPConfig, descriptor_scale, select_inducing,
+                                       site_features)
+    from ace_jax.fit.kernels import KernelSpec
+    from ace_jax.fit.objective import Problem
+
+    xyz = FIXTURE_DIR / "si_tiny_train.xyz"
+    design = FIXTURE_DIR / "si_tiny_design.npz"
+    fitted = FIXTURE_DIR / "si_fitted.npz"
+    if not (xyz.exists() and design.exists() and fitted.exists()):
+        pytest.skip("missing GP fixtures")
+    model, meta, z = load(fitted)
+    configs = load_configs(xyz, "dft_energy", "dft_force", "dft_virial")[:6]
+    ds = build_dataset(configs, meta, np.asarray(z["E0"]), configs_per_batch=3)
+    cfg = GPConfig(r0=2.35, rcut=float(meta["rcut"]), n_B=meta["n_B"], n_pair=meta["n_pair"],
+                   NZ=len(meta["elements"]), C=3)
+    X, S = site_features(model, cfg, ds)
+    ind = select_inducing(X, S, ds.node_z, ds.node_mask, 0,
+                          descriptor_scale(X, ds.node_mask))  # M = 0
+    prob = Problem(KernelSpec("cosine", True, cfg.D), model, ind, cfg,
+                   jnp.asarray(z["gamma"]), default_prior(2.35))
+    return prob, ds
+
+
+@pytest.fixture(scope="module")
+def two_type_synthetic():
+    """M=0 (BLR-limit) Problem + Dataset with TWO config-types built from the 6
+    si_tiny configs.  Each config appears once as type 0 and once as type 1; the
+    type-1 ENERGY label carries 3x the Gaussian noise of its type-0 twin (added
+    element-wise, so the per-config weighted-residual ratio is exactly 3
+    regardless of the structural weights).  Forces/virials -- which vastly
+    outnumber the energy rows -- pin the shared linear model near the truth, so
+    each type's energy residual tracks its injected noise and the evidence should
+    recover an energy sigma ratio ~3.  Returns (prob, ds, n_types=2)."""
+    import numpy as np
+    import jax
+    jax.config.update("jax_enable_x64", True)
+    import jax.numpy as jnp
+    from ace_jax.eval import load
+    from ace_jax.fit.data import build_dataset, load_configs
+    from ace_jax.fit.hypers import default_prior
+    from ace_jax.fit.inducing import (GPConfig, descriptor_scale, select_inducing,
+                                       site_features)
+    from ace_jax.fit.kernels import KernelSpec
+    from ace_jax.fit.objective import Problem
+
+    xyz = FIXTURE_DIR / "si_tiny_train.xyz"
+    fitted = FIXTURE_DIR / "si_fitted.npz"
+    if not (xyz.exists() and fitted.exists()):
+        pytest.skip("missing GP fixtures")
+    model, meta, z = load(fitted)
+    base = load_configs(xyz, "dft_energy", "dft_force", "dft_virial")[:6]
+    rng = np.random.default_rng(0)
+    s = 0.1
+    noise = s * rng.normal(size=len(base))
+    configs = []
+    for c, cfg in enumerate(base):                       # type 0: 1x noise
+        e = None if cfg.energy is None else float(cfg.energy + noise[c])
+        configs.append(cfg._replace(energy=e, type_idx=0))
+    for c, cfg in enumerate(base):                       # type 1: 3x noise (element-wise)
+        e = None if cfg.energy is None else float(cfg.energy + 3.0 * noise[c])
+        configs.append(cfg._replace(energy=e, type_idx=1))
+    ds = build_dataset(configs, meta, np.asarray(z["E0"]), configs_per_batch=6)
+    cfg = GPConfig(r0=2.35, rcut=float(meta["rcut"]), n_B=meta["n_B"], n_pair=meta["n_pair"],
+                   NZ=len(meta["elements"]), C=6)
+    X, S = site_features(model, cfg, ds)
+    ind = select_inducing(X, S, ds.node_z, ds.node_mask, 0,
+                          descriptor_scale(X, ds.node_mask))  # M = 0
+    prob = Problem(KernelSpec("cosine", True, cfg.D), model, ind, cfg,
+                   jnp.asarray(z["gamma"]), default_prior(2.35))
+    return prob, ds, 2
 
 
 def species_index(z):

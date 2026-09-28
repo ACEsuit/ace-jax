@@ -73,24 +73,6 @@ def test_padded_gradient_is_finite(case):
     assert np.max(np.abs(g[len(z['test_edge_i']):])) == 0.0, "padding carries gradient"
 
 
-def test_zero_pad_would_nan(case):
-    """Documents WHY the cutoff pad is used: a zero pad vector does NaN."""
-    model, meta, z = case
-    rij, send, recv, mask, node_z, n_nodes = _padded(model, z, 500, [0.0, 0.0, 0.0])
-    zi, zj = node_z[send], node_z[recv]
-
-    def total(r):
-        return jnp.sum(model.site_energies(r, zi, zj, send, n_nodes, node_z, mask))
-
-    with highest_precision():
-        g = np.asarray(jax.grad(total)(rij))
-    n_bad = int((~np.isfinite(g)).sum())
-    print(f"  non-finite gradient entries with pad at ZERO: {n_bad}")
-    # recorded, not asserted either way: this is the trap, not a requirement
-    if n_bad == 0:
-        pytest.skip("zero pad happens not to NaN for this model; cutoff pad still used")
-
-
 def test_dense_padded_slots_are_parked_at_cutoff(case):
     """`neighbour_matrix` leaves unused slots as zero vectors, which would NaN
     the gradient exactly as the sparse zero pad does.  dense_graph must park them

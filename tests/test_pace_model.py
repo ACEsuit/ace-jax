@@ -61,23 +61,23 @@ SHIP_TOL = 1e-5   # 10x the largest measured gap (9.8e-7, si_chebpow_fs: the sqr
                   # 0.2.7+192.g66c35ea, deltaSplineBins 0.001)
 
 
-def _fd_forces(calc, at, h=1e-5):
-    F = np.zeros((len(at), 3))
-    for i in range(len(at)):
-        for d in range(3):
-            for sg in (1, -1):
-                a = at.copy(); a.positions[i, d] += sg * h; a.calc = calc
-                F[i, d] -= sg * a.get_potential_energy() / (2 * h)
-    return F
-
-
 @pytest.mark.parametrize("name", ["gesi_sbessel", "sige_zbl"])
 def test_forces_match_finite_differences(name):
     y, ref = _fixture(name)
     calc = ACECalculator(str(y))
     at = _atoms(ref, "close")[:12]
     at.calc = calc
-    np.testing.assert_allclose(at.get_forces(), _fd_forces(calc, at), atol=1e-6)
+    # directional derivative along random unit displacements: 2 energy calls per
+    # direction instead of 6 per atom, and every force component contributes
+    rng = np.random.default_rng(0)
+    F, h = at.get_forces(), 1e-5
+    for _ in range(3):
+        v = rng.standard_normal(F.shape); v /= np.linalg.norm(v)
+        e = []
+        for sg in (1, -1):
+            a = at.copy(); a.positions += sg * h * v; a.calc = calc
+            e.append(a.get_potential_energy())
+        assert abs(-(e[0] - e[1]) / (2 * h) - np.sum(F * v)) < 1e-6
 
 
 def test_rotation_invariance():

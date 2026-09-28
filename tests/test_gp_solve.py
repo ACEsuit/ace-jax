@@ -80,14 +80,17 @@ def test_qr_matches_cholesky_gp(gp):
 
 
 def test_streamed_operators_equal_joint_design_gp(gp):
-    """The matrix-free operators equal the materialised joint design's action at
-    M > 0 too (the residual block and the chol(K_MM)^T prior included)."""
+    """The matrix-free matvec / rmatvec are exactly the action of the (weighted,
+    prior-augmented) joint design stacked_design materialises -- linear block,
+    residual block and the chol(K_MM)^T prior -- so LSQR on them solves the same
+    least-squares problem without forming n_obs x Dt.  (M > 0 exercises the M = 0
+    linear block too.)"""
     prob, ds = gp
     theta = _theta()
     rng = np.random.default_rng(0)
     with highest_precision():
-        Phi, _ = stacked_design(prob, ds, theta)
-        matvec, rmatvec, _ = streamed_operators(prob, ds, theta)
+        Phi, y = stacked_design(prob, ds, theta)
+        matvec, rmatvec, y_op = streamed_operators(prob, ds, theta)
         Dt = prob.cfg.len_basis + prob.ind.XM.shape[0]
         x = jnp.asarray(rng.standard_normal(Dt))
         u = jnp.asarray(rng.standard_normal(Phi.shape[0]))
@@ -95,6 +98,7 @@ def test_streamed_operators_equal_joint_design_gp(gp):
     Phi = np.asarray(Phi)
     assert np.abs(np.asarray(Av) - Phi @ np.asarray(x)).max() < 1e-9 * max(1.0, np.abs(Phi @ np.asarray(x)).max())
     assert np.abs(np.asarray(Atu) - Phi.T @ np.asarray(u)).max() < 1e-9 * max(1.0, np.abs(Phi.T @ np.asarray(u)).max())
+    assert np.abs(np.asarray(y_op) - np.asarray(y)).max() < 1e-12
 
 
 def test_qr_matches_cholesky(m0):
@@ -157,27 +161,6 @@ def test_lsqr_algorithm_matches_scipy():
                             jnp.asarray(b), n, maxiter=4 * n))
     assert np.abs(x_sp - x_ref).max() < 1e-8          # scipy sanity
     assert np.abs(x_jax - x_ref).max() < 1e-6 * max(1.0, np.abs(x_ref).max())
-
-
-def test_streamed_operators_equal_materialised_design(m0):
-    """The matrix-free matvec / rmatvec are exactly the action of the (weighted,
-    prior-augmented) design matrix stacked_design materialises -- so LSQR on them
-    solves the same least-squares problem, without ever forming n_obs x L.  This
-    is the correctness of the streaming assembly (LSQR's own convergence rate is
-    conditioning-bound and tested separately)."""
-    prob, ds = m0
-    theta = _theta()
-    rng = np.random.default_rng(0)
-    with highest_precision():
-        Phi, y = stacked_design(prob, ds, theta)
-        matvec, rmatvec, y_op = streamed_operators(prob, ds, theta)
-        x = jnp.asarray(rng.standard_normal(prob.cfg.len_basis))
-        u = jnp.asarray(rng.standard_normal(Phi.shape[0]))
-        Av, Atu = matvec(x), rmatvec(u)
-    Phi = np.asarray(Phi)
-    assert np.abs(np.asarray(Av) - Phi @ np.asarray(x)).max() < 1e-9 * max(1.0, np.abs(Phi @ np.asarray(x)).max())
-    assert np.abs(np.asarray(Atu) - Phi.T @ np.asarray(u)).max() < 1e-9 * max(1.0, np.abs(Phi.T @ np.asarray(u)).max())
-    assert np.abs(np.asarray(y_op) - np.asarray(y)).max() < 1e-12
 
 
 @pytest.mark.skipif(not DESIGN.exists(), reason="missing si_tiny_design.npz")

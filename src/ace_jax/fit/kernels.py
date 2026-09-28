@@ -1,4 +1,4 @@
-"""k(x, x') = delta(s) delta(s') * kappa(x, x') * psi(|x - x'| / rho) * [z == z'].
+"""k(x, x') = delta(s) delta(s') * kappa(x, x') * psi(|x - x'| / rho) * (e(z).e(z')).
 
 delta is ONE-point (a property of a single environment: its non-stationary
 prior amplitude); kappa and psi are TWO-point (descriptor-space distances).
@@ -18,6 +18,11 @@ class KernelSpec:
     kind: str = "cosine"     # "cosine" | "matern32"
     bump: bool = True        # multiply by the SE magnitude factor psi_se
     D: int = 1               # descriptor width, informational (the kernels read x.shape[-1])
+    # lower floor on the delta(s) coordinate: delta is evaluated at max(s, s_floor), so
+    # the learned amplitude cannot extrapolate to zero below the training range of s
+    # (compressed environments), where the GP's prior variance is its OOD uncertainty.
+    # A lower floor only: isolated/padding sites (s ~ 1e3 r0) keep delta = 0.
+    s_floor: float | None = None
 
 
 def _sqdist(x, xm):
@@ -67,7 +72,7 @@ def psi_se(x, xm, rho):
     return jnp.exp(-(_sqdist(x, xm) / x.shape[-1]) / (2.0 * rho * rho))
 
 
-def kernel(theta, spec, x, s, z, xm, sm, zm):
+def kernel(theta, spec, x, s, z, xm, sm, zm, embed):
     ell = jnp.exp(theta.log_ell)
     if spec.kind == "cosine":
         kap = kappa_cosine(x, xm, ell)
@@ -75,25 +80,27 @@ def kernel(theta, spec, x, s, z, xm, sm, zm):
         kap = kappa_matern32(x, xm, ell)
     else:
         raise ValueError(f"unknown kernel kind {spec.kind!r}")
+    if spec.s_floor is not None:
+        s, sm = jnp.maximum(s, spec.s_floor), jnp.maximum(sm, spec.s_floor)
     k = delta(s, theta) * delta(sm, theta) * kap
     if spec.bump:
         k = k * psi_se(x, xm, jnp.exp(theta.log_rho))
-    return k * (z == zm)
+    return k * jnp.dot(embed[z], embed[zm])      # coregionalization; eye(NZ) -> (z==zm)
 
 
-def k_rows(theta, spec, X, S, Z, XM, SM, ZM):
-    f = lambda x, s, z: jax.vmap(lambda xm, sm, zm: kernel(theta, spec, x, s, z, xm, sm, zm))(XM, SM, ZM)
+def k_rows(theta, spec, X, S, Z, XM, SM, ZM, embed):
+    f = lambda x, s, z: jax.vmap(lambda xm, sm, zm: kernel(theta, spec, x, s, z, xm, sm, zm, embed))(XM, SM, ZM)
     return jax.vmap(f)(X, S, Z)                                            # (N, M)
 
 
-def grad_k_rows(theta, spec, X, S, Z, XM, SM, ZM):
-    g = jax.grad(kernel, argnums=(2, 3))
-    f = lambda x, s, z: jax.vmap(lambda xm, sm, zm: g(theta, spec, x, s, z, xm, sm, zm))(XM, SM, ZM)
+def grad_k_rows(theta, spec, X, S, Z, XM, SM, ZM, embed):
+    g = jax.grad(kernel, argnums=(2, 3))         # w.r.t. (x, s); embed is a frozen constant
+    f = lambda x, s, z: jax.vmap(lambda xm, sm, zm: g(theta, spec, x, s, z, xm, sm, zm, embed))(XM, SM, ZM)
     dKx, dKs = jax.vmap(f)(X, S, Z)                                       # (N, M, D), (N, M)
     return dKx, dKs
 
 
-def K_MM(theta, spec, XM, SM, ZM, jitter=1e-8):
-    K = k_rows(theta, spec, XM, SM, ZM, XM, SM, ZM)
+def K_MM(theta, spec, XM, SM, ZM, embed, jitter=1e-8):
+    K = k_rows(theta, spec, XM, SM, ZM, XM, SM, ZM, embed)
     K = 0.5 * (K + K.T)
     return K + jitter * jnp.mean(jnp.diag(K)) * jnp.eye(K.shape[0])

@@ -101,4 +101,7 @@ permutation from the `A2B` column order.
   `(elements, order, totaldegree, wL, lmax)` — not on data or the fit. So the
   shim runs **once per new shape**; the tiny table (a few KB–MB) is cached/shipped.
   New coefficients on an existing shape never invoke it → refitting is 100%
-  Julia-free.
+  Julia-free. This is now implemented as `couple_cached` — a per-shape disk
+  cache keyed by a sha256 of the specs, with hits that never import juliacall
+  (see `docs/python-authoring.md`, "Coupling cache"; `couple()` remains the
+  uncached parity oracle).

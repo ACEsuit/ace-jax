@@ -40,12 +40,37 @@ class Inducing(NamedTuple):
     scale: jnp.ndarray  # (D,)  per-component descriptor scale (isotropic map)
     Pmap: jnp.ndarray   # (D, d) residual feature projection (diag(scale) if isotropic)
     warp: str           # feature warp ("none" | "sqrt"); static
+    embed: jnp.ndarray  # (NZ, de) unit-normalized species embedding (eye = block-diagonal)
 
 
-def build_pmap(cfg, scale, density=None):
+from ..construct.embedding import _fix_signs, _rank_tol, principal_frame  # noqa: E402,F401  (shared)
+
+
+def _frame_from_rows(X, mask, scale, d, chunk=4096):
+    """`principal_frame`'s V for the scaled live rows of X without forming them:
+    eigh of the streamed uncentred second moment (D, D) -- the production-scale
+    path.  Same rank tolerance; signs fixed on V's columns (`_fix_signs`, the only
+    factor available here), so the map does not depend on the LAPACK build."""
+    import numpy as _np
+    Xl = _np.asarray(X)[_np.asarray(mask)] * _np.asarray(scale)
+    C = _np.zeros((Xl.shape[1], Xl.shape[1]))
+    for i in range(0, len(Xl), chunk):
+        C += Xl[i:i + chunk].T @ Xl[i:i + chunk]
+    w, V = _np.linalg.eigh(C)
+    w, V = w[::-1], V[:, ::-1]
+    sv = _np.sqrt(_np.maximum(w, 0.0))
+    k = min(int(d), int(_np.sum(sv > _rank_tol(Xl.shape, sv[0]))))
+    return _fix_signs(V[:, :k])
+
+
+def build_pmap(cfg, scale, density=None, d=None, X=None, mask=None):
     """Residual feature projection Pmap (D, d).  density=None -> isotropic
     (diag(scale), d = D).  density="pair" -> select the n_pair ACE pair-density
-    channels (the last n_pair compact components), scaled, d = n_pair."""
+    channels (the last n_pair compact components), scaled, d = n_pair.
+    density="pca" -> diag(scale) V_d, V_d the top-d uncentred principal frame of
+    the scaled live training-site descriptors X (nb, Ncap, D) under mask: a
+    low-rank view of the FULL descriptor (many-body included), so the kernel is
+    not limited to pair densities yet stays d-wide for the host cache."""
     import numpy as _np
     D = cfg.D
     if density is None:
@@ -55,6 +80,10 @@ def build_pmap(cfg, scale, density=None):
         P = _np.zeros((D, len(cols)))
         P[cols, _np.arange(len(cols))] = _np.asarray(scale)[cols]
         return P
+    if density == "pca":
+        if X is None or mask is None or d is None:
+            raise ValueError("density='pca' needs the training descriptors X, their node mask and d")
+        return _np.asarray(scale)[:, None] * _frame_from_rows(X, mask, scale, d)
     raise ValueError(f"unknown density {density!r}")
 
 
@@ -94,7 +123,7 @@ def farthest_point(X, m, start=0):
     return np.asarray(idx)
 
 
-def select_inducing(X, S, Z, node_mask, m_per_species, scale, Pmap=None, warp="none"):
+def select_inducing(X, S, Z, node_mask, m_per_species, scale, Pmap=None, warp="none", embed=None, nz=None, de=None):
     X = np.asarray(X).reshape(-1, X.shape[-1]); S = np.asarray(S).reshape(-1)
     Z = np.asarray(Z).reshape(-1); live = np.asarray(node_mask).reshape(-1)
     scale = np.asarray(scale)
@@ -108,9 +137,26 @@ def select_inducing(X, S, Z, node_mask, m_per_species, scale, Pmap=None, warp="n
         m = m_per_species if isinstance(m_per_species, int) else m_per_species[int(z)]
         pick = pool[farthest_point(X[pool] * scale, m)]     # FPS in scaled B-space
         xs.append(X[pick]); ss.append(S[pick]); zs.append(Z[pick])
+    from .embedding import species_onehot
     from .feature import apply as _apply
     Xpick = np.concatenate(xs) if xs else np.zeros((0, X.shape[-1]))
     UM = np.asarray(_apply(jnp.asarray(Xpick), jnp.asarray(Pmap), warp))
+    if embed is None:
+        # Default one-hot species embedding. Size it to the full model species count `nz`
+        # (e.g. len(meta["elements"])) when given: the kernel gathers embed[z] by centre
+        # species at PREDICTION too, and a test-only species with index >= width would be
+        # silently clamped by JAX's gather to the last row (spurious cross-covariance). Any
+        # width >= the species actually present reproduces (z==zm) bit-for-bit. Falls back to
+        # the present-species count when nz is None (correct only if prediction sees no unseen
+        # species); guards an all-masked batch.
+        zlive = np.asarray(Z).reshape(-1)[np.asarray(node_mask).reshape(-1)]
+        present = int(zlive.max()) + 1 if zlive.size else 1
+        NZ = present if nz is None else max(int(nz), present)
+        embed = species_onehot(NZ)
+    else:
+        embed = jnp.asarray(embed, jnp.float64)
+        if de is not None and embed.shape[1] != int(de):
+            raise ValueError(f"embed width {embed.shape[1]} != de {de}")
     return Inducing(jnp.asarray(UM), jnp.asarray(np.concatenate(ss) if ss else np.zeros(0)),
                     jnp.asarray(np.concatenate(zs) if zs else np.zeros(0), jnp.int32),
-                    jnp.asarray(scale), jnp.asarray(Pmap), warp)
+                    jnp.asarray(scale), jnp.asarray(Pmap), warp, embed=embed)

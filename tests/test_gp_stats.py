@@ -117,3 +117,52 @@ def test_theta_split_equals_full(setup):
         g_full = jax.grad(full)(to_array(THETA))
         g_split = jax.grad(split)(to_array(THETA))
     assert float(jnp.abs(g_full - g_split).max()) < 1e-7 * max(1.0, float(jnp.abs(g_full).max()))
+
+
+def test_streamed_pops_equals_monolithic(tiny_linear_problem):
+    """Task 9: streamed pops_statistics over a 2-batch dataset gives the SAME
+    deltas as Task-8's pops_corrections on the whole whitened design assembled
+    in one go (streaming == monolithic), for leverage_pct 0 and a top-fraction."""
+    from jax.scipy.linalg import cho_solve
+
+    from ace_jax.fit.objective import posterior
+    from ace_jax.fit.pops import pops_corrections, whiten
+    from ace_jax.fit.rows import linear_rows
+    from ace_jax.fit.stats import pops_statistics
+
+    prob, ds = tiny_linear_problem
+    assert ds.n_batches == 2                        # 6 configs / 3 per batch
+    theta = Hypers(log_ell=0.0, log_A=0.0, log_alpha=0.0, log_r0=np.log(2.35), log_eps=0.0,
+                   log_rho=0.0, log_sigma_c=np.log(0.3), log_sigma_E=np.log(0.01),
+                   log_sigma_F=np.log(0.01), log_sigma_V=np.log(0.01))
+    with highest_precision():
+        st = sufficient_statistics(theta, prob.spec, prob.model, prob.ind, prob.cfg, ds)
+        c_star, cholA = posterior(theta, st, prob)          # A^{-1} b, chol(A)
+        Ldim = c_star.shape[0]
+        Sigma0 = cho_solve((cholA, True), jnp.eye(Ldim))    # A^{-1}
+        sigma = {q: float(jnp.exp(getattr(theta, f"log_sigma_{q}"))) for q in "EFV"}
+
+        # Monolithic reference: whiten every batch's linear rows (in the E,F,V
+        # per-batch order the stream visits), concatenate, one pops_corrections.
+        def whitened(batch):
+            r, _, _ = linear_rows(prob.model, prob.cfg, batch)
+            Lc = r.E.shape[-1]
+            phis, resids = [], []
+            for phi, y, w, sq in (
+                    (r.E, batch.y_E, batch.w_E, sigma["E"]),
+                    (r.F.reshape(-1, Lc), batch.y_F.reshape(-1), jnp.repeat(batch.w_F, 3), sigma["F"]),
+                    (r.V.reshape(-1, Lc), batch.y_V.reshape(-1), jnp.repeat(batch.w_V, 6), sigma["V"])):
+                pt, rt = whiten(phi, y - phi @ c_star, w, sq)
+                phis.append(pt); resids.append(rt)
+            return jnp.concatenate(phis, 0), jnp.concatenate(resids, 0)
+
+        blocks = [whitened(jax.tree.map(lambda a: a[b], ds)) for b in range(ds.n_batches)]
+        phi_all = jnp.concatenate([p for p, _ in blocks], 0)
+        r_all = jnp.concatenate([rr for _, rr in blocks], 0)
+
+        for lev in (0.0, 50.0):
+            mono = pops_corrections(Sigma0, phi_all, r_all, lev)
+            stream = pops_statistics(c_star, Sigma0, prob, ds, sigma, leverage_pct=lev)
+            assert stream.shape == mono.shape, lev
+            tol = 1e-8 * max(1.0, float(jnp.abs(mono).max()))
+            assert float(jnp.abs(stream - mono).max()) < tol, lev
