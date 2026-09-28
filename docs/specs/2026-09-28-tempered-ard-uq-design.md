@@ -48,6 +48,19 @@ log p(D|h) = −½ Σ_q yᵀy_q/σ_q² + ½ bᵀA⁻¹b − ½ log|A| + ½ log|�
 
 - It is maximised **jointly over all six** (type-II ML) by L-BFGS with a JAX gradient, initialised
   from the linear MAP (σ_q) and Γ-only scales. Each evaluation costs one Cholesky.
+- **Numerics (measured on bench365):**
+  - Work in the prior-scaled system S = D⁻¹AD⁻¹, D = diag(Γ). cond(A) reached 1.3·10¹⁷ at the
+    fitted point, against 2.3·10¹³ for S.
+  - Divide the objective by its initial gradient norm. L-BFGS-B's first bounded step is the full
+    gradient (~3·10³), which otherwise lands on the box corner.
+  - Floor the 2-body prior precision so cond(S) ≲ 10¹⁴. At the unfloored ARD optimum cond(S) ≈
+    4·10¹⁷ and repeated evaluations differ by up to 0.3 nats, which breaks the line search.
+- **Measured effect of joint vs ARD-after-MAP:**
+  - +4865 nats for ARD over Γ-only, and a further ≈ +2.4 nats for the joint fit;
+  - log σ_F moves by 0.0023 (0.2 %): the noise scales are pinned by ~10⁶ force rows and nearly
+    decoupled from the prior scales;
+  - the Laplace std of h is 0.001–0.11 (log units), so marginalising adds a per-cent-level effect
+    on σ_F, negligible next to κ.
 - This is a dedicated linear-evidence optimiser. `Hypers` is untouched.
 - **Diagnostic, not a feature:** a Laplace approximation over h (6×6 Hessian by finite differences
   of the gradient). It reports each scale's posterior std and the hyperparameter contribution to
