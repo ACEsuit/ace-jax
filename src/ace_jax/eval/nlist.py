@@ -3,7 +3,8 @@
 Three backends, tried in order:
 
 1. `matscipy_neighbours` -- preferred when present: GPU, DLPack, and a native
-   `neighbour_matrix` for the dense layout.  Not on PyPI, so it is optional.
+   `neighbour_matrix` for the dense layout.  On PyPI as `matscipy-neighbours`
+   (the `fast-neighbours` extra; a source build, CUDA opt-in at build time).
 2. `matscipy` -- optional fast path.  C-accelerated, on PyPI, same `"ijdDS"` API,
    so it is interchangeable with (1) for the sparse path.
 3. `ase.neighborlist` -- the baseline.  ASE is a *core* dependency, so this path
@@ -164,7 +165,7 @@ def sparse_graph(positions, cell, pbc, cutoff, pad_to=None, pad_vector=None):
         mask=np.concatenate([np.ones(len(i), bool), np.zeros(npad, bool)]))
 
 
-def dense_graph(positions, cell, pbc, cutoff, max_neighbours, pad_vector=None):
+def dense_graph(positions, cell, pbc, cutoff, max_neighbours, pad_vector=None, device=None):
     """Build a DenseGraph via `neighbour_matrix` -- no scatter needed downstream.
 
     `neighbour_matrix` leaves unused slots as ZERO vectors.  Feeding those to the
@@ -173,22 +174,32 @@ def dense_graph(positions, cell, pbc, cutoff, max_neighbours, pad_vector=None):
     layout.  So the padded slots are parked at the cutoff here, where the
     envelope vanishes and the derivative stays defined -- the caller cannot get
     this wrong by forgetting.
+
+    device="cuda" (matscipy_neighbours built with CUDA): the graph is built on
+    the GPU and handed to JAX zero-copy through DLPack; the fields are then JAX
+    device arrays.  Raises ValueError when an atom has more than max_neighbours.
     """
+    xp = np
     if have_matscipy_neighbours():
         from matscipy_neighbours import neighbour_matrix
+        kw = {}
+        if device is not None:
+            import jax.numpy as jnp
+            xp = jnp
+            kw = {"device": device, "array_namespace": jnp}
         idx, dist, count = neighbour_matrix(
             positions=np.ascontiguousarray(positions, float),
             cell=np.ascontiguousarray(cell, float),
             pbc=tuple(bool(b) for b in np.broadcast_to(pbc, 3)), cutoff=float(cutoff),
-            max_neighbours=int(max_neighbours))
+            max_neighbours=int(max_neighbours), **kw)
     else:
         i, j, D, _ = _neighbour_list(positions, cell, pbc, cutoff)
         idx, dist, count = _dense_from_sparse(i, j, D, len(positions),
                                               int(max_neighbours))
     if pad_vector is None:
-        pad_vector = np.array([float(cutoff), 0.0, 0.0])
-    live = np.arange(dist.shape[1])[None, :] < count[:, None]
-    dist = np.where(live[..., None], dist, pad_vector)
+        pad_vector = xp.asarray([float(cutoff), 0.0, 0.0], dtype=dist.dtype)
+    live = xp.arange(dist.shape[1])[None, :] < count[:, None]
+    dist = xp.where(live[..., None], dist, pad_vector)
     return DenseGraph(dist, idx, count, len(positions))
 
 
