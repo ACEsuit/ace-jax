@@ -21,13 +21,26 @@ SIZES_JSON = ROOT / "bench" / "scaling" / "model_sizes.json"      # committed; m
 SIZES = ("small", "medium", "large")
 ELEMENTS = {"SiGe": ["Si", "Ge"], "Cantor": ["Cr", "Mn", "Fe", "Co", "Ni"]}
 PACE_FUNCS = {"small": 100, "medium": 500, "large": 2000}          # per element
-# (ACE_ORDER, ACE_TOTALDEGREE) targeting ~100 / 700 / 2800 basis functions per
-# element; `models.py ace` records the actual count and warns if off by > 2x
-ACE_DEG = {"small": (3, 8), "medium": (3, 12), "large": (4, 12)}
-# five species multiply the basis: Cantor gets its own (order, degree) ladder so
-# its per-element size tracks the same targets (measured: (3,8) -> 765/element)
+# The comparable count for a linear ACE model is n_B, "basis functions per
+# central element": every B function carries its own weight per central
+# element (WB is n_B x NZ), not n_B / NZ (see ace_functions_per_element).
+# (ACE_ORDER, ACE_TOTALDEGREE) below are chosen so n_B lands within ~20% of
+# the actual PACE n_B for that system/size (bench/scaling/model_sizes.json:
+# SiGe 100/499/1684, Cantor 96/496/1998) -- not the round PACE_FUNCS targets,
+# which pyace only approximates. `models.py ace` records the actual n_B and
+# warns if it differs from a matching pace_*.yace by more than 25%.
+ACE_DEG = {"small": (3, 6), "medium": (3, 9), "large": (4, 10)}
+# five species multiply the basis combinatorially: order 3 jumps too far
+# between consecutive totaldegree values to land near Cantor's (lower) PACE
+# targets (e.g. totaldegree 4 -> 370, 5 -> 734 against a target of 496), so
+# Cantor uses order 2 at small/medium -- its own (order, degree) ladder, so
+# its n_B still tracks the same per-system PACE targets as SiGe.
+# totaldegree <= 3 is not just coarse but unusable here: ACEpotentials derives
+# lmax from totaldegree, and at this rcut/r0 that hits lmax=0, which crashes
+# solid-harmonics evaluation in SpheriCart (BoundsError, independent of
+# order) -- so 4 is a hard floor, not a tuning choice.
 ACE_DEG_BY_SYSTEM = {"SiGe": ACE_DEG,
-                     "Cantor": {"small": (3, 6), "medium": (3, 8), "large": (3, 11)}}
+                     "Cantor": {"small": (2, 4), "medium": (2, 7), "large": (4, 5)}}
 # explicit bond length where ACEpotentials has no default (fcc nearest neighbour
 # a / sqrt(2) at a = 3.59 A); SiGe uses the library defaults
 ACE_R0 = {"Cantor": 2.54}
@@ -126,6 +139,12 @@ def build_ace():
                            cwd=ROOT, env=env, check=True)
             import numpy as np
             n_b = int(json.loads(bytes(np.load(p)["meta_json"]).decode())["n_B"])
+            yace = DIR / f"pace_{system}_{size}.yace"
+            if yace.exists():
+                n_pace = pace_functions_per_element(yace)
+                if abs(n_b - n_pace) > 0.25 * n_pace:
+                    print(f"WARNING: {p.name}: n_B={n_b} vs pace {yace.name} n_B={n_pace} "
+                          f"(off by {100 * (n_b - n_pace) / n_pace:+.0f}%)", file=sys.stderr)
             _update_manifest({str(p): {"builder": "julia/export_model.jl", "order": order,
                                         "totaldegree": deg, "n_params": n_b, "weights": "random",
                                         "sha256": _sha(p)}})   # per model: a later failure keeps it

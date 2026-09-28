@@ -1,31 +1,31 @@
 {
  "Cantor/large": {
-  "acejax-ace": 13930,
+  "acejax-ace": 1651,
   "acejax-pace": 1998,
   "mlpace": 1998
  },
  "Cantor/medium": {
-  "acejax-ace": 3824,
+  "acejax-ace": 447,
   "acejax-pace": 496,
   "mlpace": 496
  },
  "Cantor/small": {
-  "acejax-ace": 1348,
+  "acejax-ace": 126,
   "acejax-pace": 96,
   "mlpace": 96
  },
  "SiGe/large": {
-  "acejax-ace": 3727,
+  "acejax-ace": 1482,
   "acejax-pace": 1684,
   "mlpace": 1684
  },
  "SiGe/medium": {
-  "acejax-ace": 1434,
+  "acejax-ace": 469,
   "acejax-pace": 499,
   "mlpace": 499
  },
  "SiGe/small": {
-  "acejax-ace": 308,
+  "acejax-ace": 123,
   "acejax-pace": 100,
   "mlpace": 100
  }
