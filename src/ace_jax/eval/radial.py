@@ -12,7 +12,6 @@ No module-level jax.config here, or anywhere in this package: precision is the
 caller's to choose.
 """
 
-import jax
 import jax.numpy as jnp
 
 

@@ -120,8 +120,7 @@ def cmd_eval(a):
     """Evaluate a fitted/exported model on a dataset: predicted energy (and,
     with --forces, forces/virial) per configuration, and RMSE vs the labels
     when present.  Native E/F/V (no ASE), one forward pass per config."""
-    import jax.numpy as jnp
-    from .eval import highest_precision, load, sparse_graph, species_indices
+    from .eval import sparse_graph, species_indices
     keys = dict(energy_key=a.energy_key, force_key=a.force_key, virial_key=a.virial_key)
     configs = load_configs(a.data, **keys)
     gp = str(a.model).endswith(".npz") and "gp_json" in np.load(a.model).files   # gp_model.npz from `fit`

@@ -16,11 +16,9 @@ import sys
 
 import pytest
 
-from conftest import FIXTURE_DIR
-
 pytest.importorskip("juliacall", reason="authoring extra (juliacall) not installed")
 
-from ace_jax.construct.spec import rpe_admissible, ylm_spec, spec_from_export  # noqa: E402
+from ace_jax.construct.spec import rpe_admissible  # noqa: E402
 
 
 def test_rpe_admissible_port():

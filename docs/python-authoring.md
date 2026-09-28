@@ -8,8 +8,9 @@ init, pair basis, readout, packaging and evaluation are pure Python/NumPy/JAX.
 
 ## The authoring ladder
 
-`build_model(elements, order, totaldegree, *, wL, rcut, rin, radial_mode,
-pair_mode, seed, with_gamma, edge_a_kind)` (`construct/model.py`) walks the same
+`build_model(elements, order, totaldegree, *, wL, rcut, r0, rin, radial_mode,
+pair_mode, seed, with_gamma, edge_a_kind, coupling_cache, coupling_cache_dir,
+n_q_factor)` (`construct/model.py`) walks the same
 steps the Julia exporter walks, returning an `Authoring` NamedTuple:
 
 1. **`resolve_elements`** — atomic numbers or symbols (`14`, `"Si"`) → `zs`
@@ -132,9 +133,17 @@ pin change invalidates); writes are atomic (a unique tmp file per writer,
 then `os.replace`) and best-effort, and any entry that fails to read for
 whatever reason — torn zip, schema drift — is a miss, never an error.
 `couple()` stays
-the uncached parity oracle; `--no-coupling-cache` / `cache_dir="none"` opt
-out. Entries are self-describing npz files — ship one by copying it into a
+the uncached parity oracle; `--no-coupling-cache` / `coupling_cache=False`
+(or `coupling_cache_dir="none"`, `ACEJAX_COUPLING_CACHE=none`) opt out. Entries are self-describing npz files — ship one by copying it into a
 team's cache dir.
+
+## Embedded (species-compressed) models
+
+`build_embedding_model(elements, order, totaldegree, embedding, *, d_max, wL,
+maxl, rcut, reduction, ...)` authors ACEpotentials' ace1-compatible
+`ace_embedding_model` the same way (`ace-jax construct --embedding <table.json |
+identity> [--d-max N]`); its design record is
+[plans/embedded-model-authoring.md](plans/embedded-model-authoring.md).
 
 ## Known traps
 

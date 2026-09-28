@@ -98,7 +98,7 @@ def test_descriptor_subspace_matches_julia(case, monkeypatch):
     auth, z = _build(case)
     Dp, Dj = _descs(auth, z), z["desc"].T
     assert Dp.shape == Dj.shape
-    for s, zz in enumerate(z["zlist"]):
+    for zz in z["zlist"]:
         sites = z["Z"] == zz
         r1, ra, rb = _span_residual(Dp[sites], Dj[sites])
         r2, _, _ = _span_residual(Dj[sites], Dp[sites])

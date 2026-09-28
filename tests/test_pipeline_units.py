@@ -308,3 +308,16 @@ def test_pops_fit_with_host_rows_matches_device_rows():
         assert np.allclose(a[k], b[k], rtol=1e-5, atol=1e-7), k
     with pytest.raises(ValueError, match="pops_rows"):
         FitConfig(**base, pops_rows="gpu").validate()
+
+
+def test_fitting_a_yace_model_raises_a_clear_error():
+    """A .yace (PACEModel) is evaluate-only; fitting one used to die with
+    "TypeError: 'PACESpec' object is not subscriptable" deep in load_fit_data."""
+    import pathlib
+
+    from ace_jax.fit.pipeline import FitConfig
+    from ace_jax.fit.pipeline.data import load_fit_data
+    fix = pathlib.Path(__file__).parent.parent / "fixtures" / "pace"
+    cfg = FitConfig(model=str(fix / "gesi_sbessel.yace"), arm="linear")
+    with pytest.raises(ValueError, match=r"\.yace.*cannot be fitted"):
+        load_fit_data(cfg, train=str(pathlib.Path(__file__).parent.parent / "fixtures" / "si_tiny_train.xyz"))

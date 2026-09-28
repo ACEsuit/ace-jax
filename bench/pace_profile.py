@@ -12,7 +12,7 @@ def run_profile(yace, reps=10, n_rep=8):
     """Where does the force pass spend its time?  Stage-by-stage forward and
     VJP timings of PACEModel.site_energies on the 4k-atom carbon cell, plus the
     top GPU kernels from a jax.profiler trace of energy_forces_virial."""
-    import glob, gzip, json, sys, time
+    import glob, gzip, json, time
     from collections import defaultdict
     import jax, jax.numpy as jnp
     import numpy as np
