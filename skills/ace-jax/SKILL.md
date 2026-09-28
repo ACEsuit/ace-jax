@@ -141,7 +141,8 @@ write_yace(pm, spec, "copy.yace")                        # numeric leaves from p
 
 Supported: ChebExpCos, ChebPow, ChebLinear and SBessel radials,
 FinnisSinclair(ShiftedScaled) embeddings, and `density`, `distance` and `zbl`
-inner cutoffs. `aj fit` does not write a model file for a `.yace` input.
+inner cutoffs. `.yace` models are for evaluation and export only: `aj fit` needs
+an `.npz` ACE model.
 
 ### Calculator performance options
 
