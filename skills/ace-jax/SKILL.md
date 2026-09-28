@@ -186,9 +186,6 @@ Other entry points:
   included (ASE would move those into a calculator). ASE's `_JSON` 2-D info
   values are decoded. A label that is present but not numeric raises a
   `ValueError` naming the file, config and key.
-- **`GPCalculator` fails on a structure with no neighbours** (an isolated
-  atom): `ValueError: cannot reshape array of size 0`. Drop isolated atoms from
-  the data passed to `aj eval` on a `gp_model.npz`.
 - **Run time.** The default Adam MAP is 500 steps. On small data use
   `--opt lbfgs --map-steps 40–150`.
 - **`--rungs` defaults to `map`.** Adding `laplace` (or `pathfinder`, `vi`,

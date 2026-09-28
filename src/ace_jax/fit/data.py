@@ -182,6 +182,10 @@ def build_dataset(configs, meta, E0, configs_per_batch, rcut=None, n_cap=None, k
         k_cap = max(int(np.bincount(sparse_graph(c.positions, c.cell, c.pbc, rcut).senders,
                                     minlength=len(c.numbers)).max())
                     for c in configs)
+    # at least one (masked) neighbour slot: a batch of edgeless structures (an
+    # isolated atom) still needs an (n, K, 3) edge array, and the masked slot is
+    # parked at the cutoff, so it adds nothing -- E0 + the empty-environment term
+    k_cap = max(int(k_cap), 1)
     batches = [_batch(g, meta, E0, rcut, C, n_cap, k_cap) for g in groups]
     stack = lambda k: jnp.asarray(np.stack([b[k] for b in batches]))
     return Dataset(**{k: stack(k) for k in Dataset._fields})
