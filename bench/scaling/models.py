@@ -29,7 +29,7 @@ PACE_FUNCS = {"small": 100, "medium": 500, "large": 2000}          # per element
 # SiGe 100/499/1684, Cantor 96/496/1998) -- not the round PACE_FUNCS targets,
 # which pyace only approximates. `models.py ace` records the actual n_B and
 # warns if it differs from a matching pace_*.yace by more than 25%.
-ACE_DEG = {"small": (3, 6), "medium": (3, 9), "large": (4, 10)}
+ACE_DEG = {"small": (4, 5), "medium": (3, 9), "large": (4, 10)}   # small: (3,6) gives 123, (4,5) 101
 # five species multiply the basis combinatorially: order 3 jumps too far
 # between consecutive totaldegree values to land near Cantor's (lower) PACE
 # targets (e.g. totaldegree 4 -> 370, 5 -> 734 against a target of 496), so
