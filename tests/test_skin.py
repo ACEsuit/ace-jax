@@ -328,3 +328,21 @@ def test_skin_equals_rebuild_after_each_change(name):
     at.positions[0] += [0.02, -0.01, 0.01]               # just after (or without) the rebuild
     _close(_efs(c, at), _efs(ref, at))
     assert c.last_timing["rebuilds"] == n0 + rebuilt
+
+
+def test_step_counts_are_integers_in_float32():
+    """The step's flags and counts come back as integers, not in the model dtype:
+    float32 holds integers exactly only to 2**24, a 16.8M-edge system."""
+    import jax.numpy as jnp
+    at = _cell("tric")
+    c = ACECalculator(M, layout="dense", skin=1.0, dtype=jnp.float32)
+    _efs(c, at)
+    st = c._skin_state
+    out = c._step()(jax.device_put(st.displacements(at.positions, np.float32)), st.arrays, K=st.K)
+    values, counts = out
+    assert values.dtype == np.float32 and jnp.issubdtype(counts.dtype, jnp.integer)
+    _, _, _, drift, overflow, k_max, n_edges = skin_mod.unpack(out, len(at))
+    assert (drift, overflow, k_max, n_edges) == (False, False, st.k_max, st.n_edges)
+    n, big = 2, 2**24 + 1                                 # not representable in float32
+    got = skin_mod.unpack((np.zeros(10 + 3 * n, np.float32), np.array([0, 1, 7, big], np.int32)), n)
+    assert got[3:] == (False, True, 7, big)

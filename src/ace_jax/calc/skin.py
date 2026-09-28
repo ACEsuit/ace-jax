@@ -138,17 +138,18 @@ def valid(state, pos, cell, pbc, numbers, skin):
     return bool(d2 <= (0.5 * skin) ** 2)
 
 
-# packed output layout: [E, F (3n), V (9), drift, overflow, k_max, n_edges]
+# packed output: ([E, F (3n), V (9)] in the model dtype, [drift, overflow, k_max,
+# n_edges] in int32 -- float32 holds integers exactly only to 2**24)
 def unpack(out, n):
-    out = np.asarray(out)
-    E, F, V = float(out[0]), out[1:1 + 3 * n].reshape(n, 3), out[1 + 3 * n:10 + 3 * n].reshape(3, 3)
-    drift, overflow, k_max, n_edges = out[10 + 3 * n:]
-    return E, F, V, bool(drift), bool(overflow), int(k_max), int(n_edges)
+    values, counts = jax.device_get(out)
+    E, F, V = float(values[0]), values[1:1 + 3 * n].reshape(n, 3), values[1 + 3 * n:].reshape(3, 3)
+    drift, overflow, k_max, n_edges = (int(c) for c in counts)
+    return E, F, V, bool(drift), bool(overflow), k_max, n_edges
 
 
 def step(model, u, arrays, rc, K):
-    """Skin list -> compact (n, K) graph -> packed (E, F, V, drift, overflow,
-    k_max, n_edges).  u (n, 3): displacements since the build
+    """Skin list -> compact (n, K) graph -> packed ((E, F, V), (drift, overflow,
+    k_max, n_edges)); see `unpack`.  u (n, 3): displacements since the build
     (`SkinState.displacements`).  Traceable; `jitted_step` compiles it.  drift:
     an atom has moved more than skin / 2; overflow: a row has more than K
     neighbours inside the cutoff.  Either means the result is not to be used."""
@@ -192,10 +193,9 @@ def step(model, u, arrays, rc, K):
         F = (g_r.astype(acc).sum(axis=1) - back.astype(acc).sum(axis=1)).astype(g_r.dtype)
     drift = jnp.max(jnp.sum(u * u, axis=1), initial=0.0) > half_skin ** 2
     overflow = jnp.any(cnt > K)
-    dt = E.dtype
-    return jnp.concatenate([E[None], F.ravel(), V.ravel(),
-                            jnp.stack([drift.astype(dt), overflow.astype(dt),
-                                       jnp.max(cnt, initial=0).astype(dt), jnp.sum(cnt).astype(dt)])])
+    counts = jnp.stack([drift.astype(jnp.int32), overflow.astype(jnp.int32),
+                        jnp.max(cnt, initial=0), jnp.sum(cnt)]).astype(jnp.int32)
+    return jnp.concatenate([E[None], F.ravel(), V.ravel()]), counts
 
 
 def jitted_step(static, rc):
