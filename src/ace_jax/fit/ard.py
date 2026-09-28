@@ -206,14 +206,24 @@ class ARDPosterior(NamedTuple):
             out.append(np.asarray(jnp.sum(v * v, axis=0)))
         return np.concatenate(out) if out else np.zeros(0)
 
-    def misspec_var_rows(self, Phi, chunk=4096):
-        """Unscaled cluster-sandwich variance ||Q^T (D^-1 phi)||^2 = phi A^-1 M A^-1 phi^T per row."""
+    def misspec_var_rows(self, Phi, chunk=4096, own=None):
+        """Unscaled cluster-sandwich variance ||Q^T (D^-1 phi)||^2 = phi A^-1 M A^-1 phi^T per row.
+
+        own: optional (n,) Q column of each row's own training configuration (-1: none); returns
+        (all, without_own), where without_own drops that one cluster's term v_own^2 -- the variance a
+        genuinely new configuration would get, used only to fit lam on held-out TRAINING configs."""
         Q = jnp.asarray(self.Q, jnp.float64)
-        out = []
+        out, loo = [], []
         for i in range(0, len(Phi), chunk):
             v = (jnp.asarray(Phi[i:i + chunk]) * jnp.asarray(self.dinv)[None, :]) @ Q
-            out.append(np.asarray(jnp.sum(v * v, axis=1)))
-        return np.concatenate(out) if out else np.zeros(0)
+            tot = jnp.sum(v * v, axis=1)
+            out.append(np.asarray(tot))
+            if own is not None:
+                o = jnp.asarray(own[i:i + chunk])
+                vo = jnp.take_along_axis(v, jnp.maximum(o, 0)[:, None], axis=1)[:, 0]
+                loo.append(np.asarray(tot - jnp.where(o >= 0, vo * vo, 0.0)))
+        cat = lambda xs: np.concatenate(xs) if xs else np.zeros(0)
+        return cat(out) if own is None else (cat(out), cat(loo))
 
     def force_var_rows(self, Phi):
         """The served (calibrated) variance of each force-component row: lam^2 x sandwich when Q is
@@ -327,26 +337,42 @@ class ARDResult(NamedTuple):
     report: dict
 
 
-def _val_errors(post, prob, ds):
+def _val_errors(post, prob, ds, own_col=None):
     """Per-atom squared force error, untempered s2 and (when post.Q is set, else None) the unscaled
-    cluster-sandwich variance m2 on the live force rows of ds, in one pass over the rows."""
+    cluster-sandwich variance m2 on the live force rows of ds, in one pass over the rows.
+
+    own_col: (n_cfg(ds),) the Q column of each config of ds (in ds order) -- the held-out configs are
+    training configs, so each has its own cluster in Q.  m2 is then (m2_all, m2_without_own)."""
     from .rows import chunked_rows_fn
-    L, e2, s2, m2 = prob.cfg.len_basis, [], [], []
+    L, e2, s2, m2, m2o = prob.cfg.len_basis, [], [], [], []
     rows_fn = chunked_rows_fn(prob.model, prob.cfg)
+    off = 0                                          # configs of ds before this batch (padded ones excluded)
     for i in range(ds.n_batches):
         b = jax.tree.map(lambda a, i=i: a[i], ds)
-        live = np.asarray(b.w_F) > 0
-        if not live.any():
-            continue
-        F = np.asarray(rows_fn(b).F)[live]                                             # (n, 3, L)
-        pred = (F.reshape(-1, L) @ post.mean).reshape(-1, 3)
-        e2.append(np.sum((np.asarray(b.y_F)[live] - pred) ** 2, 1))
-        s2.append(post.var_rows(F.reshape(-1, L)).reshape(-1, 3).sum(1))
-        if post.Q is not None:
-            m2.append(post.misspec_var_rows(F.reshape(-1, L)).reshape(-1, 3).sum(1))
-    if not e2:
-        return np.zeros(0), np.zeros(0), (None if post.Q is None else np.zeros(0))
-    return np.concatenate(e2), np.concatenate(s2), (np.concatenate(m2) if post.Q is not None else None)
+        n_live_cfg = int(np.asarray(b.cfg_mask).sum())
+        live = np.asarray(b.w_F) > 0                 # padded nodes have w_F = 0 (and node_cfg == C)
+        if live.any():
+            F = np.asarray(rows_fn(b).F)[live]                                         # (n, 3, L)
+            Fr = F.reshape(-1, L)
+            pred = (Fr @ post.mean).reshape(-1, 3)
+            e2.append(np.sum((np.asarray(b.y_F)[live] - pred) ** 2, 1))
+            s2.append(post.var_rows(Fr).reshape(-1, 3).sum(1))
+            if post.Q is not None and own_col is not None:
+                own = np.repeat(np.asarray(own_col)[off + np.asarray(b.node_cfg)[live]], 3)
+                a, o = post.misspec_var_rows(Fr, own=own)
+                m2.append(a.reshape(-1, 3).sum(1))
+                m2o.append(o.reshape(-1, 3).sum(1))
+            elif post.Q is not None:
+                m2.append(post.misspec_var_rows(Fr).reshape(-1, 3).sum(1))
+        off += n_live_cfg
+    cat = lambda xs: np.concatenate(xs) if xs else np.zeros(0)
+    if post.Q is None:
+        m = None
+    elif own_col is not None:
+        m = (cat(m2), cat(m2o))
+    else:
+        m = cat(m2)
+    return cat(e2), cat(s2), m
 
 
 def _ard_fit_warnings(stage, info, names):
@@ -426,14 +452,20 @@ def run_ard_stage(cfg, data, built, theta, log=print, full_stats=None):
     # their s^2 is the full posterior's.  Misspecification-dominated error (kappa >> 1) does not shrink
     # on the refit while s^2 does, so the subset kappa alone is ~sqrt(n_train / n_fit) too small.
     # One pass over the held-out rows gives both s^2 (kappa) and the sandwich m^2 (lam, same rule).
-    _, s2_full, m2_full = _val_errors(post, prob, ds_val)
+    # lam leaves out each held-out atom's OWN cluster: the held-out configs are training configs of the
+    # full refit, so their m^2 carries (phi~^T Q[:, own])^2, which a genuinely new configuration never
+    # has -- keeping it biases lam low (x1.9 on the test fixture).  Held-out config j is Q column idx[j].
+    _, s2_full, m2_full = _val_errors(post, prob, ds_val, own_col=idx[:nval] if variance == "sandwich" else None)
     s2_full = s2_full[ok]
     kappa_subset, kappa = kappa, kappa_closed_form(e2, s2_full)
     log(f"ARD: kappa {kappa:.3f} for the full posterior (subset {kappa_subset:.3f}, x{kappa / kappa_subset:.3f})")
+    lam_incl_own = None
     if variance == "sandwich":
-        m2_full = m2_full[ok]
+        m2_incl, m2_full = m2_full[0][ok], m2_full[1][ok]
         lam = kappa_closed_form(e2, m2_full)
-        log(f"ARD: sandwich over {n_clusters} training configs; lam {lam:.3f}")
+        lam_incl_own = kappa_closed_form(e2, m2_incl)
+        log(f"ARD: sandwich over {n_clusters} training configs; lam {lam:.3f} "
+            f"(own cluster left out; {lam_incl_own:.3f} with it)")
     post = post._replace(kappa=kappa, lam=lam)
     report = {"mode": mode, "groups": list(ev.groups), "h": h.tolist(), "h_names": names,
               "logev_full": v, "logev_full_start": v_start, "optimiser": info, "optimiser_fit": info_fit,
@@ -444,7 +476,7 @@ def run_ard_stage(cfg, data, built, theta, log=print, full_stats=None):
               "val_rms_z_untempered": float(np.sqrt(np.mean(e2 / (s2_full / 3)) / 3)),
               "val_rms_z_tempered": float(np.sqrt(np.mean(e2 / (kappa ** 2 * s2_full / 3)) / 3)),
               "val_nll_untempered": _force_nll(e2, s2_full, 1.0), "val_nll_tempered": _force_nll(e2, s2_full, kappa),
-              "variance": variance, "lam": lam, "n_clusters": n_clusters,
+              "variance": variance, "lam": lam, "lam_incl_own": lam_incl_own, "n_clusters": n_clusters,
               "seconds": time.time() - t0}
     if variance == "sandwich":
         report["val_rms_z_sandwich"] = float(np.sqrt(np.mean(e2 / (lam ** 2 * m2_full / 3)) / 3))

@@ -517,7 +517,9 @@ def test_ard_stage_sandwich_variance_and_lam_rule(monkeypatch):
     assert post.Q is not None and post.Q.shape == (b.prob.cfg.len_basis, len(d.train))
     assert isinstance(post.Q, jax.Array)          # stage keeps Q on-device: no per-batch host->device copy
     assert rep["variance"] == "sandwich" and rep["n_clusters"] == len(d.train)
-    assert len(calls) == 3 and np.array_equal(calls[2][0], calls[0][0])       # kappa_sub, kappa, lam: same e2
+    # kappa_sub, kappa, lam (own cluster left out), lam_incl_own: the same e2
+    assert len(calls) == 4 and np.array_equal(calls[2][0], calls[0][0])
+    assert rep["lam_incl_own"] == orig(*calls[3])
     assert post.lam == orig(*calls[2]) == rep["lam"] and abs(rep["val_rms_z_sandwich"] - 1.0) < 1e-6
     np.testing.assert_allclose(pred.F_var, post.lam ** 2 * pred1.F_var, rtol=1e-12)
 
@@ -559,3 +561,48 @@ def test_sandwich_scores_columns_follow_config_order(tiny_linear_problem):
     assert all(not np.allclose(Gl[:, i], Gl[:, j]) for i in range(Gl.shape[1]) for j in range(i))
     for c in range(len(configs)):
         np.testing.assert_allclose(G3[:, c], G1[:, c], rtol=1e-10, atol=1e-14 * np.abs(G1).max())
+
+
+def test_ard_stage_lam_leaves_out_each_held_out_atoms_own_cluster(monkeypatch):
+    """lam is fitted against m^2 WITHOUT the held-out atom's own configuration's cluster: a genuinely
+    new configuration has no such term, so keeping it biases lam low.  Brute force: per held-out
+    config, zero its own column of Q (column idx[j] of the train order), recompute m^2 from that
+    config's force rows alone, and lam = kappa_closed_form(e2, m2)."""
+    from conftest import FIXTURE_DIR
+    from ace_jax.fit import ard
+    from ace_jax.fit.data import build_dataset
+    from ace_jax.fit.pipeline import load_fit_data
+    from ace_jax.fit.pipeline.mapfit import fit_map
+    from ace_jax.fit.pipeline.objective import make_objective
+    from ace_jax.fit.pipeline.problem import build_problem
+    from ace_jax.fit.rows import linear_rows
+    calls = []
+    orig = ard.kappa_closed_form
+    monkeypatch.setattr(ard, "kappa_closed_form", lambda e2, s2: calls.append(np.array(e2)) or orig(e2, s2))
+    cfg = _pipe_cfg(ard_variance="sandwich").validate()
+    d = load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz"))
+    b = build_problem(cfg, d)
+    with highest_precision():
+        theta = fit_map(cfg, d, b, make_objective(cfg, d, b), log=lambda *a: None).theta
+        res = ard.run_ard_stage(cfg, d, b, theta, log=lambda *a: None)
+        post, rep = res.posterior, res.report
+        L = b.prob.cfg.len_basis
+        idx = np.random.default_rng(cfg.seed).permutation(len(d.train))
+        nval = max(1, int(round(cfg.ard_val_frac * len(d.train))))
+        Q, dinv = np.asarray(post.Q), np.asarray(post.dinv)
+        m2_loo, m2_all = [], []
+        for j in range(nval):                               # one config at a time: no batch bookkeeping
+            bt = jax.tree.map(lambda a: a[0], build_dataset([d.train[idx[j]]], d.meta, d.E0, 1))
+            F = np.asarray(linear_rows(b.prob.model, b.prob.cfg, bt)[0].F)[np.asarray(bt.w_F) > 0]
+            F = F[np.abs(F).reshape(len(F), -1).max(1) > 0]                       # the stage's `ok` atoms
+            Ft = F.reshape(-1, L) * dinv[None, :]
+            Qo = Q.copy()
+            Qo[:, idx[j]] = 0.0
+            m2_loo.append(((Ft @ Qo) ** 2).reshape(-1, 3 * Q.shape[1]).sum(1))
+            m2_all.append(((Ft @ Q) ** 2).reshape(-1, 3 * Q.shape[1]).sum(1))
+    m2_loo, m2_all, e2 = np.concatenate(m2_loo), np.concatenate(m2_all), calls[0]
+    assert len(m2_loo) == len(e2) == rep["n_val_atoms"]
+    np.testing.assert_allclose(post.lam, orig(e2, m2_loo), rtol=1e-8)
+    np.testing.assert_allclose(rep["lam_incl_own"], orig(e2, m2_all), rtol=1e-8)
+    assert rep["lam"] == post.lam and rep["lam"] > rep["lam_incl_own"]
+    assert abs(rep["val_rms_z_sandwich"] - 1.0) < 1e-6                           # z of the served lam
