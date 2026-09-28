@@ -50,17 +50,39 @@ Sources read:
   - a TOML/MPI CLI.
 - Tests: unit tests, Aqua checks, and MPI regression tests on a 221 MB artifact (FHI-aims water, SiC, gold; DeepH graphene and Bi₂Te₃).
 
-**Maturity.** Pre-release (0.1.0) and not registered; install from git. It requires **Julia ≥ 1.12**. Quoll is an **input and output tool**, not a runtime dependency of fitting or evaluation.
+**Maturity.** Pre-release (0.1.0) and not registered; install from git. It requires **Julia ≥ 1.12**. That is not a blocker: ace-jax's `juliapkg.json` range `~1.10, ~1.11` was set only for Reactant, which the ET shim does not use, so ace-jax can move to Julia 1.12 (see §3 for what else the pin touches).
 
-**How ace-jax should consume it.** File-based, not juliacall.
-- The DeepH layout Quoll writes is Python-native:
-  - `hamiltonians.h5` / `overlaps.h5`, one row-major dataset per atom pair, keyed `"[Rx, Ry, Rz, i, j]"` (1-based atoms);
-  - `element.dat`, `lat.dat`, `site_positions.dat`, `orbital_types.dat` (ℓ per shell per atom), `R_list.dat`, `info.json`.
-- An `h5py` reader of about 150 LOC turns it into per-(z₁,z₂,shell pair) block arrays, the natural training layout.
-- File-based consumption keeps ace-jax's rule that Julia is needed only when authoring a new basis shape.
-- It also avoids a hard conflict: ace-jax's `juliapkg.json` pins Julia `~1.10, ~1.11`, while Quoll needs ≥ 1.12, and one juliacall process loads one environment.
-- Predictions are written back in the same layout (`hamiltonians_pred.h5`), which Quoll reads, so any downstream code converts them with Quoll.
-- An optional in-memory hand-off is also possible: a caller that already hosts Quoll in juliacall passes numpy blocks through `Quoll.wrap_data`.
+**Two ways to consume it.**
+
+- **(a) File-based: the DeepH layout Quoll writes.**
+  - The layout is Python-native:
+    - `hamiltonians.h5` / `overlaps.h5`, one row-major dataset per atom pair, keyed `"[Rx, Ry, Rz, i, j]"` (1-based atoms);
+    - `element.dat`, `lat.dat`, `site_positions.dat`, `orbital_types.dat` (ℓ per shell per atom), `R_list.dat`, `info.json`.
+  - An `h5py` reader of about 150 LOC turns it into per-(z₁,z₂,shell pair) block arrays, the natural training layout.
+  - Predictions are written back in the same layout (`hamiltonians_pred.h5`).
+- **(b) In-process through juliacall, in the same Julia 1.12 environment as ET.**
+  - Call `load_operators` → `convert_operator(…, CanonicalBlockRealMetadata, …; out_shconv=…)`, then hand the per-species-pair block arrays across to numpy.
+  - Predictions go back through `Quoll.wrap_data` and are written in any format Quoll supports.
+
+**Weighing the two:**
+
+| | (a) DeepH files | (b) juliacall + Quoll |
+|---|---|---|
+| Environments | Python only at train and predict time; Julia only for coupling authoring (unchanged rule) | One Julia 1.12 environment with ET and Quoll. Verified: ET `main` + Quoll `main` resolve together (200 packages; `using` both in 12 s after precompile). **Registered ET 0.5.1 does not co-resolve with Quoll**: 0.5.1 hard-depends on WignerD 0.1.4, which caps StructArrays below the 0.7 Quoll needs. ET `main` has already made WignerD test-only, so the next ET release fixes this. |
+| Maturity exposure | Depends on a format (stable, shared with DeepH-E3/MACE-H) | Depends on an unregistered pre-release API (git `rev` pin; `juliapkg.json` needs a `url`+`rev` entry, as the consumer below does). Also brings MPI.jl and HDF5.jl JLLs into the authoring environment. |
+| Conventions and units | ace-jax must re-implement DeepH's m-reordering and check units, i.e. duplicate `SHConvention` logic in Python | Quoll does it: `out_shconv` straight to ace-jax's convention, aims signs and core projection included. One source of truth. |
+| Consumer fit | Consumers read files through Quoll anyway | The DFT-injection consumer (§8) already runs Quoll under juliacall, so an in-memory hand-off avoids a disk round trip |
+| Formats beyond DeepH | Only what someone has already converted to DeepH | Every Quoll input (FHI-aims directly, future ONETEP/psinc sources for §5's learned orbitals), plus core projection and k-grids |
+| Testing and CI cost | Small committed DeepH fixture; pure-pytest; no Julia in the main test job | A Julia job, which `coupling-parity` already is: juliapkg provisioning (minutes; cacheable), precompiling about 200 packages, a git-pinned Quoll that can move under us. The test-data artifact is 221 MB, so fixtures must be subset. |
+
+**Recommendation: a hybrid.**
+- Use **(b) for conversion and ingestion** from raw code output (FHI-aims now, other sources later), so conventions, units, core projection and sparsity are handled by Quoll alone.
+  - Run it as a preprocessing step in an optional `ace_jax.ham` Julia extra, alongside ET in one Julia 1.12 environment.
+  - Emit a **frozen training cache**: npz per-species-pair blocks in ace-jax's own SH convention, plus the Quoll version.
+- Use **(a) DeepH files as the stable exchange format**, for data from other people and for consumers that read files.
+  - Keep a pure-Python DeepH reader and writer, validated against (b) in CI.
+- Fitting, evaluation and the main test job then stay Julia-free, and the unregistered API is touched only at ingestion.
+- Pin Quoll by commit in `juliapkg.json` until it is registered. Do (b) only once an ET release without the WignerD hard dependency is out; until then (a) alone.
 
 **Conventions are pinned by Quoll.**
 - ace-jax's real Y_lm (`eval/harmonics.py`, SpheriCart/P4ML, no Condon–Shortley phase) must be mapped to Quoll's wiki convention. That mapping is a per-ℓ `SHConvention`.
@@ -101,7 +123,13 @@ Sources read:
   - the `julia/` ACEpotentials export environment (a separate project);
   - the smoothness prior, which depends only on nnll.
 - **Newly authored potentials** get a differently normalised B basis with the same span. Fitted predictions are unchanged. Γ-weighted priors shift slightly, which is worth re-running on one benchmark.
-- **Julia version.** ET 0.5.1 supports Julia 1.10+, so the juliapkg Julia range can stay put.
+- **Julia version.** Moving `juliapkg.json` from `"~1.10, ~1.11"` to `"~1.12"` is safe for ET (and needed for Quoll). A grep of the repo shows what else touches 1.11:
+  - `.github/workflows/coupling-parity.yml` runs `setup-julia` with `1.11` for the juliapkg-provisioned ET. It **must** change to `1.12`; otherwise juliapkg downloads its own Julia on every run.
+  - `.github/workflows/julia-parity.yml` and `prior-parity.yml` also use `1.11`, but for the separate `julia/` ACEpotentials project (unpinned `Pkg.add`, no Manifest). ACEpotentials 0.10.2 declares `julia = "1.11, 1.12"`, so they may stay on 1.11 or move to 1.12. Either is fine; moving keeps a single Julia in CI.
+  - `docs/smoothness-prior-port.md` mentions regenerating the oracle fixtures "with Julia 1.11". Informational only.
+  - The committed coupling cache records the `juliapkg.json` hash, so any edit to the file (Julia range or ET pin) invalidates `fixtures/coupling_cache_embedding`. Bump the range and the ET pin in one commit, and regenerate that fixture once.
+  - Nothing else in `src/`, `tests/` or `pyproject.toml` depends on the Julia version, and nothing in the repo references Reactant.
+- **Co-installation with Quoll** needs the ET release after 0.5.1 (WignerD becomes test-only on ET `main`, §2).
 
 ## 4. Mapping onto ace-jax
 
@@ -198,7 +226,7 @@ Design commitments now:
 - consistent units and SH convention, handled via Quoll;
 - a per-element standard-deviation operator in the same layout.
 
-The port meets this by writing `hamiltonians_pred.h5` and an uncertainty twin in DeepH layout, plus its metadata files. It also offers an in-memory numpy block dict for callers already hosting Quoll. No new Julia dependency is needed in ace-jax.
+The port meets this by writing `hamiltonians_pred.h5` and an uncertainty twin in DeepH layout, plus its metadata files. For callers that already host Quoll under juliacall, it can also hand over an in-memory numpy block dict, or a Quoll operator built in the shared Julia 1.12 environment (§2 hybrid). Predicting never requires Julia.
 
 ## 9. Framework and application boundary
 
@@ -228,7 +256,7 @@ The sizes are rough, for one developer who knows ace-jax.
 
 | Phase | Content | Size |
 |---|---|---|
-| **0. Foundations** | Bump ET to 0.5.1: make coupling parity scale-invariant, regenerate the coupling cache fixture, re-run one potential benchmark. Add `couple_equivariant` (L, refl_sym, CG). Introduce the `core` boundary; move E/F/V out of `EdgeSiteModel`. Add the DeepH/Quoll reader and writer, and the ace-jax ↔ Quoll SH-convention test. | 3–4 wk |
+| **0. Foundations** | In one commit: bump `juliapkg.json` to Julia `~1.12` and the latest ET; switch `coupling-parity.yml` to 1.12 (optionally also `julia-parity`/`prior-parity`); make coupling parity scale-invariant; regenerate the coupling cache fixture; re-run one potential benchmark. Add `couple_equivariant` (L, refl_sym, CG). Introduce the `core` boundary; move E/F/V out of `EdgeSiteModel`. Add the pure-Python DeepH reader and writer; the Quoll ingestion path (juliacall, git-pinned Quoll, once an ET release without WignerD is out) writing a frozen npz training cache; a CI check that the two paths agree; the ace-jax ↔ Quoll SH-convention test. | 3–4 wk |
 | **1. Equivariant model and assembly** | On-site and bond models (triplet graph, cylindrical envelope, symmetrised bond basis, per-L readout). H(T)/S(T) → H(k). Structural test suite. npz schema. | 4–5 wk |
 | **2a. Stage-A fitting and UQ** | Generic rows. Per-(sub-model, L) streamed QR and BLR evidence. Block-covariance UQ and POPS. Accuracy benchmarks on Quoll data against MACE-H/DeepH-E3. DeepH-format prediction output for consumers. | 4–5 wk |
 | **2b. Observable fitting** | Degeneracy-safe spectral `custom_vjp`. Generalised eigenproblem. k-batching and bucketing. Combined loss with L-BFGS/Adam warm-started from 2a. Conformal calibration on eigenvalues. | 4–6 wk |
@@ -241,7 +269,9 @@ The sizes are rough, for one developer who knows ace-jax.
 
 1. **SH convention and units at the Quoll boundary.** A wrong sign fits well but breaks equivariance. Mitigated by the rotation test in phase 0.
 2. **ET 0.5.1 coupling changes.** Renormalisation, the purely-imaginary real-coupling edge case, and no ACEpotentials-backed regeneration of the coupling fixtures.
-3. **Quoll immaturity.** Pre-release, unregistered, one main author, Julia ≥ 1.12. Mitigated by consuming files, not the API.
+3. **Quoll immaturity.** Pre-release, unregistered, one main author, git-pinned in juliapkg.
+   - Mitigated by confining the Quoll API to ingestion, with a frozen npz cache and DeepH files as the exchange format.
+   - Co-resolution with ET needs the next ET release (the WignerD conflict).
 4. **Spectral gradients.** Degeneracies; ill-conditioned S(k) in large or diffuse bases (Cholesky); cost of eigh at scale; and a non-convex loss that loses the closed-form evidence.
 5. **Bond-environment edge cases.** Periodic self-images, atoms near the midpoint, long bonds; plus the number of jit variants across sub-models × L.
 6. **Physics constraints.** S(k) is not guaranteed positive definite, and on-site S = I holds only for orthonormal-on-site bases.
@@ -249,7 +279,8 @@ The sizes are rough, for one developer who knows ace-jax.
 ## 12. Open questions remaining
 
 1. **SH-convention anchor.** Should ace-jax emit Quoll's wiki convention natively, or keep SpheriCart's and convert at the IO boundary? The latter is proposed.
-2. **Quoll asks.** Is the owner willing to ask Quoll for a canonical on-disk format and registration? Or is DeepH layout the long-term exchange format?
-3. **Pseudo-tensor inclusion by default.** On, for parity with ACEhamiltonians' completeness; or opt-in, since it adds basis functions?
-4. **Stage-B loss priorities.** Which observables come first: eigenvalues in a window, band energy, density matrix, gaps?
-5. **Split timing.** Is "in-tree with a lint-enforced boundary, split later" acceptable?
+2. **Quoll asks.** Is the owner willing to ask Quoll for registration and a canonical on-disk format? Or is DeepH layout the long-term exchange format? Also, should ET be asked to cut the release that makes WignerD test-only? Until then, in-process Quoll cannot co-install with a registered ET.
+3. **Julia in CI.** Move `julia-parity`/`prior-parity` to 1.12 alongside `coupling-parity`, for a single Julia across CI? Or leave the ACEpotentials jobs on 1.11?
+4. **Pseudo-tensor inclusion by default.** On, for parity with ACEhamiltonians' completeness; or opt-in, since it adds basis functions?
+5. **Stage-B loss priorities.** Which observables come first: eigenvalues in a window, band energy, density matrix, gaps?
+6. **Split timing.** Is "in-tree with a lint-enforced boundary, split later" acceptable?
