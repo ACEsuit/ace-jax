@@ -346,15 +346,23 @@ def run_ard_stage(cfg, data, built, theta, log=print, full_stats=None):
     h, v, info = fit_ard(ev, h_fit, cond_max)
     for w in _ard_fit_warnings("full", info, names):
         log(w)
-    post = ard_posterior(ev, h, kappa, data.meta)
+    post = ard_posterior(ev, h, 1.0, data.meta)
+    # kappa for the SERVED (full-refit) posterior: the held-out errors stay the subset model's (honest),
+    # their s^2 is the full posterior's.  Misspecification-dominated error (kappa >> 1) does not shrink
+    # on the refit while s^2 does, so the subset kappa alone is ~sqrt(n_train / n_fit) too small.
+    s2_full = _val_errors(post, prob, ds_val)[1][ok]
+    kappa_subset, kappa = kappa, kappa_closed_form(e2, s2_full)
+    post = post._replace(kappa=kappa)
+    log(f"ARD: kappa {kappa:.3f} for the full posterior (subset {kappa_subset:.3f}, x{kappa / kappa_subset:.3f})")
     report = {"mode": mode, "groups": list(ev.groups), "h": h.tolist(), "h_names": names,
               "logev_full": v, "logev_full_start": v_start, "optimiser": info, "optimiser_fit": info_fit,
               "a_floor": ev.a_floor,
               "tempered_quantities": ["F"],        # E_var / V_var are the untempered posterior variances
-              "kappa": kappa, "n_val_atoms": int(len(e2)), "n_val_configs": len(val), "n_fit_configs": len(fit_),
-              "val_rms_z_untempered": float(np.sqrt(np.mean(e2 / (s2 / 3)) / 3)),
-              "val_rms_z_tempered": float(np.sqrt(np.mean(e2 / (kappa ** 2 * s2 / 3)) / 3)),
-              "val_nll_untempered": _force_nll(e2, s2, 1.0), "val_nll_tempered": _force_nll(e2, s2, kappa),
+              "kappa": kappa, "kappa_subset": kappa_subset, "n_val_atoms": int(len(e2)), "n_val_configs": len(val), "n_fit_configs": len(fit_),
+              # held-out errors (subset model) against the served posterior's s^2
+              "val_rms_z_untempered": float(np.sqrt(np.mean(e2 / (s2_full / 3)) / 3)),
+              "val_rms_z_tempered": float(np.sqrt(np.mean(e2 / (kappa ** 2 * s2_full / 3)) / 3)),
+              "val_nll_untempered": _force_nll(e2, s2_full, 1.0), "val_nll_tempered": _force_nll(e2, s2_full, kappa),
               "seconds": time.time() - t0}
     if cfg.ard_laplace:
         lap = laplace_hypers(ev, h)

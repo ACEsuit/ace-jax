@@ -349,7 +349,8 @@ def test_ard_stage_reuses_cached_full_statistics(monkeypatch):
     # the ~1e-15 summation-order difference, through cond(S) ~ 1e13, moves the evidence by ~1e-7 nats
     # and L-BFGS's stopping point along flat directions by ~1e-4: equal to the optimiser's resolution
     assert abs(v_got - v_ref) < 1e-6 and np.abs(g_got - g_ref).max() < 1e-5
-    assert got.posterior.kappa == pytest.approx(ref.posterior.kappa, rel=1e-12)   # subset stage unchanged
+    assert got.report["kappa_subset"] == pytest.approx(ref.report["kappa_subset"], rel=1e-12)   # subset stage unchanged
+    assert got.posterior.kappa == pytest.approx(ref.posterior.kappa, rel=1e-4)   # full-posterior s^2: refit resolution
     assert got.report["logev_full"] == pytest.approx(ref.report["logev_full"], abs=1e-5)
     np.testing.assert_allclose(got.posterior.h, ref.posterior.h, atol=1e-3)
     np.testing.assert_allclose(np.asarray(p_got.F_var), np.asarray(p_ref.F_var), rtol=1e-4)
@@ -385,3 +386,37 @@ def test_predict_ard_traces_the_chunked_rows_once(tiny_linear_problem, monkeypat
         got = predict_ard(post, prob, ds)
     assert n["traces"] == 1
     np.testing.assert_allclose(np.asarray(got.F_var), np.asarray(ref.F_var), rtol=1e-12)
+
+
+def test_ard_stage_kappa_is_refit_for_the_full_posterior(monkeypatch):
+    """kappa calibrates the FULL-refit posterior, not the subset one: the held-out atoms' errors
+    come from the subset model (honest), their s^2 from the full posterior (the one served).  The
+    misspecification that kappa absorbs does not shrink on the refit while s^2 does, so a subset
+    kappa would be ~sqrt(n_train / n_fit) too small (bench365: measured 1.105, predicted 1.118)."""
+    from conftest import FIXTURE_DIR
+    from ace_jax.fit import ard
+    from ace_jax.fit.pipeline import load_fit_data
+    from ace_jax.fit.pipeline.mapfit import fit_map
+    from ace_jax.fit.pipeline.objective import make_objective
+    from ace_jax.fit.pipeline.problem import build_problem
+    calls = []
+    orig = ard.kappa_closed_form
+
+    def spy(e2, s2):
+        k = orig(e2, s2)
+        calls.append((np.array(e2), np.array(s2), k))
+        return k
+
+    monkeypatch.setattr(ard, "kappa_closed_form", spy)
+    cfg = _pipe_cfg().validate()
+    d = load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz"))
+    b = build_problem(cfg, d)
+    with highest_precision():
+        theta = fit_map(cfg, d, b, make_objective(cfg, d, b), log=lambda *a: None).theta
+        res = ard.run_ard_stage(cfg, d, b, theta, log=lambda *a: None)
+    assert len(calls) == 2
+    (e2_sub, s2_sub, k_sub), (e2_full, s2_full, k_full) = calls
+    np.testing.assert_array_equal(e2_full, e2_sub)          # the same honest held-out errors
+    assert s2_full.mean() < s2_sub.mean()                    # the refit saw the held-out configs
+    assert res.posterior.kappa == k_full == res.report["kappa"]
+    assert res.report["kappa_subset"] == k_sub and k_full > k_sub
