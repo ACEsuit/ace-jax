@@ -116,22 +116,30 @@ def maximise(h0, free):
     a large value with zero gradient (a rejected step), as in fit/multistart.lbfgs_map."""
     from scipy.optimize import minimize
     h0 = np.asarray(h0, float); free = np.asarray(free)
-    v0 = float(vg(jnp.asarray(h0))[0])
+    v0, g0 = vg(jnp.asarray(h0))
+    v0 = float(v0)
+    # L-BFGS-B's first step on a bounded problem is the full gradient (B0 = I); at |g| ~ 3e3 that
+    # lands on the box corner (Cholesky fails) and the line search retreats to the start.  Scaling
+    # the objective by the initial gradient norm makes the first step O(1) in log-scale units.
+    gs = max(1.0, float(np.linalg.norm(np.asarray(g0)[free])))
     def f(z):
         h = h0.copy(); h[free] = z
         v, g = vg(jnp.asarray(h))
         v, g = float(v) - v0, np.asarray(g)[free]                 # relative: tolerances in nats
+        if os.environ.get("OPT_LOG"):
+            log(f"  opt eval h={np.round(h, 4).tolist()} dlogev={v:.4f} finite={np.isfinite(v)} "
+                f"|g|={np.linalg.norm(g):.3g}")
         if not (np.isfinite(v) and np.all(np.isfinite(g))):
             return 1e30, np.zeros_like(z)
-        return -v, -g
+        return -v / gs, -g / gs
     r = minimize(f, h0[free], jac=True, method="L-BFGS-B", bounds=list(zip(LO[free], HI[free])),
                  options={"maxiter": 500, "ftol": 1e-12, "gtol": 1e-4})
     h = h0.copy(); h[free] = r.x
-    return h, v0 - r.fun, r
+    return h, v0 - r.fun * gs, r
 
 
 h_blr = np.concatenate([ls_map, [a_blr] * 3])
-if os.environ.get("DIAG") or True:
+if os.environ.get("DIAG"):
     h_old = np.concatenate([ls_map, [-13.271839019410685, -8.720070351833378, -5.391773375780003]])   # run 1
     for lab, h in (("h_blr", h_blr), ("run-1 ARD", h_old)):
         v, g = vg(jnp.asarray(h))
@@ -151,6 +159,9 @@ ev_blr = float(vg(jnp.asarray(h_blr))[0])
 log("evidence blr", ev_blr, "ardG", ev_ardG, "ardJ", ev_ardJ, "| ardJ h", np.round(h_ardJ, 3), rJ.message,
     "nit", rJ.nit)
 assert np.isfinite(ev_ardJ) and ev_ardJ >= ev_ardG - 1e-6, "joint maximum must not be worse than ARD-after-MAP"
+if os.environ.get("OPT_ONLY"):
+    log("OPT_ONLY: ardG", rG.message, rG.nit, np.round(h_ardG, 4).tolist(), "| ardJ", rJ.message, rJ.nit)
+    raise SystemExit(0)
 
 # Laplace: Hessian of log p at h_ardJ by central differences of the exact gradient
 eps = 1e-3

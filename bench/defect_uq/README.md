@@ -121,5 +121,21 @@ of the in-distribution test configs only; everything else is evaluation.
 - POPS cannot be rescaled into calibration, because its σ does not grow off-distribution.
 - Adding the POPS term to the tempered ARD posterior degrades OOD calibration.
 
+### Joint type-II ML vs ARD after MAP (`scoring/bayes_joint.py`)
+
+The joint maximisation over (σ_E, σ_F, σ_V, a₂, a₃, a₄) was run on cached statistics.
+- ARD-after-MAP reproduces +4865.4 nats over Γ-only. Its value was checked against an independent
+  NumPy float64 evaluation to 0.013 nats.
+- The joint fit adds ≈ +2.4 nats and moves log σ_F by 0.0023 (0.2 %).
+- The hyperparameter Laplace std is 0.001–0.11.
+
+So maximisation suffices here, and the sequential and joint fits are equivalent at this data size.
+
+Numerics that matter:
+- evaluate in the prior-scaled system (cond 10¹⁷ → 10¹³);
+- gradient-scale the objective for L-BFGS-B;
+- floor the 2-body prior precision (cond ≈ 4·10¹⁷ at the ARD optimum; evaluation noise of ±0.3
+  nats).
+
 Next: node-chunked design rows (force σ on the big cells), then the tempered ARD posterior σ_F as a
 per-atom output of ace-jax fits and calculators.
