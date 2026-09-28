@@ -67,6 +67,55 @@ def linear_rows(model, cfg, batch):
     return Rows(E, F, V[:C]), X, J
 
 
+def linear_rows_chunked(model, cfg, batch, node_chunk=256):
+    """`linear_rows(model, cfg, batch)[0]` computed a chunk of centre nodes at a time.
+
+    `linear_rows` materialises the edge Jacobian J (Ncap*K, D, 3) of the whole batch.  For one
+    cell of more than ~2.8k atoms at the production Cantor basis (D = 3007, K ~ 85) that tensor
+    and the GEMM building it exceed 2^31 elements, and XLA's int32-indexed GEMM autotuning fails.
+    Here each chunk's J (node_chunk*K, D, 3) is built, scattered into E/F/V and dropped; the rows
+    are identical (tests/test_rows_chunked.py).  Returns Rows only (no X, J)."""
+    Ncap, K = batch.nbr.shape
+    C = batch.y_E.shape[0]
+    L = cfg.len_basis
+    nc = int(min(node_chunk, Ncap))
+    n_chunks = -(-Ncap // nc)
+    pad = n_chunks * nc - Ncap
+    Np = Ncap + pad
+    rij = jnp.concatenate([batch.rij, jnp.broadcast_to(batch.rij[-1:], (pad, K, 3))])
+    nbr = jnp.concatenate([batch.nbr, jnp.zeros((pad, K), batch.nbr.dtype)])
+    msk = jnp.concatenate([batch.nbr_mask, jnp.zeros((pad, K), bool)])
+    node_z = jnp.concatenate([batch.node_z, jnp.zeros(pad, batch.node_z.dtype)])
+    node_cfg = jnp.concatenate([batch.node_cfg, jnp.full(pad, C, batch.node_cfg.dtype)])
+    seg = lambda a, ids, n: jax.ops.segment_sum(a, ids, num_segments=n)
+    local = jnp.repeat(jnp.arange(nc), K)
+
+    def body(i, acc):
+        Enodes, F, V = acc
+        s0 = i * nc
+        r_c = jax.lax.dynamic_slice_in_dim(rij, s0, nc)
+        nb_c = jax.lax.dynamic_slice_in_dim(nbr, s0, nc)
+        m_c = jax.lax.dynamic_slice_in_dim(msk, s0, nc)
+        z_c = jax.lax.dynamic_slice_in_dim(node_z, s0, nc)
+        X, J = model.edge_jacobian_dense(r_c, jnp.broadcast_to(z_c[:, None], (nc, K)), node_z[nb_c], m_c)
+        send, recv = s0 + local, nb_c.reshape(-1)
+        zi, r_flat, edge_cfg = z_c[local], r_c.reshape(-1, 3), node_cfg[s0 + local]
+        E_c = jnp.zeros((nc, L))
+        for z in range(cfg.NZ):
+            E_c = _place(E_c, jnp.where((z_c == z)[:, None], X, 0.0), z, cfg)
+            Jz = jnp.where((zi == z)[:, None, None], J, 0.0)
+            dEdr = seg(Jz, recv, Np) - seg(Jz, send, Np)                      # (Np, D, 3)
+            F = _place(F, -jnp.swapaxes(dEdr, 1, 2), z, cfg)
+            V = _place(V, jnp.swapaxes(seg(_voigt(Jz, r_flat), edge_cfg, C + 1), 1, 2), z, cfg)
+        Enodes = jax.lax.dynamic_update_slice_in_dim(Enodes, E_c, s0, 0)
+        return Enodes, F, V
+
+    init = (jnp.zeros((Np, L)), jnp.zeros((Np, 3, L)), jnp.zeros((C + 1, 6, L)))
+    Enodes, F, V = jax.lax.fori_loop(0, n_chunks, body, init)
+    E = seg(Enodes, node_cfg, C + 1)[:C]
+    return Rows(E, F[:Ncap], V[:C])
+
+
 def residual_inputs(ind, cfg, batch, X):
     """The residual GP's site inputs for one batch: feature-mapped coordinates
     U = phi_res(X) (Ncap, d), summaries s (Ncap,) and the summary edge Jacobian

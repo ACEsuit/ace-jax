@@ -127,3 +127,4 @@ ignore = [
 "tests/test_gp_pops_paper.py" = ["B023"]
 "tests/test_gp_rows.py" = ["B023"]
 "tests/test_gp_stats.py" = ["B023"]
+"tests/test_rows_chunked.py" = ["B023"]
