@@ -144,6 +144,19 @@ class ACECalculator(Calculator):
             if p_els != m_els:                           # order-sensitive: columns are per species index
                 raise ValueError(f"posterior {posterior} does not match the model: "
                                  f"elements {p_els} vs {m_els}")
+            # the posterior must belong to THIS model's readout: its mean is the fit's coefficients in
+            # the `rows._place` layout (species-major WB blocks, then Wpair blocks), bit-identical when
+            # one run wrote both files
+            z = np.load(model_path)
+            if "WB" not in z.files or "Wpair" not in z.files:
+                raise ValueError(f"posterior= needs the model.npz written by the same fit; {model_path} "
+                                 f"has no WB/Wpair readout")
+            coef = np.concatenate([np.asarray(z["WB"]).T.ravel(), np.asarray(z["Wpair"]).T.ravel()])
+            mean = np.asarray(post.mean, np.float64)
+            if coef.shape != mean.shape or not np.allclose(
+                    coef, mean, rtol=1e-10, atol=1e-14 * max(float(np.abs(mean).max(initial=0.0)), 1e-300)):
+                raise ValueError(f"posterior {posterior} does not match the model: its mean is not the "
+                                 f"model's coefficients (a posterior from a different fit?)")
             self.posterior = post
             self._fit_model = _load_fit_model(model_path)[0]
             self._fit_cfg = GPConfig(r0=1.0, rcut=float(meta["rcut"]), n_B=meta["n_B"],

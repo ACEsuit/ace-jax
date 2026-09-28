@@ -144,3 +144,17 @@ def test_posterior_without_x64_raises(fitted):
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=env, timeout=300)
     assert out.returncode == 0, out.stderr
     assert "RAISED" in out.stdout and "jax_enable_x64" in out.stdout, out.stdout
+
+
+def test_posterior_from_another_fit_is_refused(fitted, tmp_path):
+    """M5: the posterior mean must be this model's readout (same `_place` column layout): a model
+    whose coefficients differ -- another fit's, or an edited file -- is refused; the true pair loads."""
+    from ace_jax import ACECalculator
+    ACECalculator(str(fitted / "model.npz"), posterior=str(fitted / "posterior.npz"))      # genuine pair
+    z = dict(np.load(fitted / "model.npz"))
+    for key in ("WB", "Wpair"):
+        bad = {**z, key: z[key].copy()}
+        bad[key][0, 0] *= 1 + 1e-6
+        np.savez(tmp_path / "other.npz", **bad)
+        with pytest.raises(ValueError, match="coefficients"):
+            ACECalculator(str(tmp_path / "other.npz"), posterior=str(fitted / "posterior.npz"))
