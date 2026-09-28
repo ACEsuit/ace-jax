@@ -141,11 +141,12 @@ coefficients inside the trace.
   - The export records `max_owned` alongside `max_atoms`, as `ace_jax.owned_rows`
     (lammps-jax reads a `max_owned` key anywhere in the bundle as its own).
 - **Slots sized for `rcut + skin`** (amended in Task 11): the plan sized
-  `k_dense` and `max_edges` for `rcut` alone, on the belief that lammps-jax
-  drops pairs beyond the cutoff before packing. It doesn't: its edge count is
-  LAMMPS's neighbour list, skin included, and the A100 runs overflowed ("edge
-  capacity exceeded", Cantor 256 atoms: 19968 = 256 × 78 edges, the
-  rcut + 1 Å coordination). `max_edges` still counts owned rows only.
+  `k_dense` and `max_edges` for `rcut` alone. lammps-jax does pack only pairs
+  within the cutoff, but the benchmark's random-weight structures compress
+  during the run (the largest coordination within rcut climbs from 42 to 50
+  on Cantor), so rcut-only slots overflowed. The rcut + skin list count bounds
+  the within-rcut coordination between rebuilds. `max_edges` still counts
+  owned rows only. See `docs/perf-lammps-large-n.md`.
 - **Model changes:** the bundle calls the same optimised model code
   (components 2–6).
 - **Unchanged:** `pair_style jax/kk`, the bundle contract, `layout="auto"` and

@@ -136,9 +136,10 @@ def test_capacity_covers_ghosts_and_neighbours():
 
 
 def test_capacity_slots_have_skin_headroom():
-    """lammps-jax's edge count is LAMMPS's neighbour list, skin included
-    (Cantor, 256 atoms: "global max 19968 edges" = 256 x 78, the rcut + 1 A
-    coordination), so slots sized for rcut alone overflowed its edge capacity."""
+    """Slots cover the rcut + skin coordination: the random-weight benchmark
+    structures compress during the run, and rcut-only slots overflowed (the
+    bundle returns NaN; lammps-jax then reports the full list, 256 x 78, as
+    "edge capacity exceeded").  See docs/perf-lammps-large-n.md."""
     from ace_jax.eval import sparse_graph
     from scaling.run_lammps import capacity
     at = supercell("Cantor", 256)

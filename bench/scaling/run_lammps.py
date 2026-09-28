@@ -97,9 +97,14 @@ def capacity(at, rcut, skin=1.0):
     """lammps-jax buffer sizes for this structure: owned + ghost atoms (the
     periodic shell within rcut + skin of each face) size the LAMMPS position
     buffer (max_atoms); neighbour slots (k_dense, max_edges) are sized for
-    rcut + skin, since lammps-jax's edge count is LAMMPS's neighbour list,
-    skin included; the dense energy function evaluates owned rows only
-    (max_owned), and senders are always owned, so max_edges counts owned rows."""
+    rcut + skin.  lammps-jax packs only pairs within rcut, but the benchmark's
+    random-weight structures compress during the run (Cantor: the largest
+    coordination within rcut climbs from 42 to 50 in 250 steps), and between
+    list rebuilds no atom can gain more neighbours within rcut than its
+    rcut + skin list holds -- so that count is the safe bound
+    (docs/perf-lammps-large-n.md).  The dense energy function evaluates owned
+    rows only (max_owned), and senders are always owned, so max_edges counts
+    owned rows."""
     from ace_jax.eval import sparse_graph
     L = np.linalg.norm(at.cell.array, axis=1)
     ghost = float(np.prod((L + 2 * (rcut + skin)) / L))
