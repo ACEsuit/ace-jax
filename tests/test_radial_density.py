@@ -685,3 +685,13 @@ def test_multi_species_density_roundtrip(tmp_path):
         worst_rt = max(worst_rt, float(np.max(np.abs(E_fs - E_lin) / np.abs(E_lin))))
     assert worst_fs < 1e-12
     assert worst_rt < 1e-8
+
+
+def test_bench_driver_extra_train_and_tol(tmp_path):
+    """--extra-train appends configs to the training split only; --tol reaches the learners."""
+    import json
+    r = _driver(tmp_path, "--density", "full", "--extra-train", str(XYZ), "--tol", "0")
+    assert r.returncode == 0, r.stderr[-3000:]
+    assert "extra training configs:" in r.stdout
+    s = json.loads((tmp_path / "summary.json").read_text())
+    assert s["extra_train"] == [str(XYZ)] and s["tol"] == 0.0 and s["nval"] == 8

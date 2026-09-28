@@ -70,6 +70,11 @@ p.add_argument("--density", choices=["none", "pair", "full"], default="none",
 p.add_argument("--P", type=int, default=1, help="number of density features (with --density)")
 p.add_argument("--density-mode", choices=["joint", "alternating"], default="joint")
 p.add_argument("--lam-eta-grid", default="0", help="relative density shape-prior weights (with --density)")
+p.add_argument("--extra-train", action="append", default=[],
+               help="extra xyz (same label keys) appended to the TRAINING split only, e.g. defect cells; "
+                    "the validation split is unchanged (repeatable)")
+p.add_argument("--tol", type=float, default=1e-6,
+               help="L-BFGS relative-decrease stopping tolerance (0 = always run the full step budget)")
 a = p.parse_args()
 if a.lam_grid is None:
     a.lam_grid = "1e-2" if a.density != "none" else "0,1e-2"
@@ -91,6 +96,10 @@ if a.ntrain + a.nval > len(configs):
     raise SystemExit(f"--ntrain + --nval = {a.ntrain + a.nval} > {len(configs)} configs")
 fit_c = [configs[i] for i in perm[:a.ntrain]]
 val_c = [configs[i] for i in perm[a.ntrain:a.ntrain + a.nval]]
+for x in a.extra_train:
+    extra = load_configs(x, a.energy_key, a.force_key, a.virial_key)
+    fit_c += extra
+    print(f"extra training configs: {len(extra)} from {x}", flush=True)
 E0 = np.asarray(z["E0"]) if "E0" in z else np.zeros(NZ)
 ds_fit = build_dataset(fit_c, meta, E0, configs_per_batch=a.batch)
 ds_val = build_dataset(val_c, meta, E0, configs_per_batch=a.batch)
@@ -118,7 +127,7 @@ def checkpoint(label, W_lam, run_info):
 
 if a.density == "none":
     W, info = fit_radial(prob, ds_fit, ds_val, model.rnl_Wnlq, lam_grid=lam_grid, spec_grid=spec_grid,
-                         gap_grid=gap_grid, rough_weights=wn, spec_p=a.spec_p, steps=a.steps,
+                         gap_grid=gap_grid, rough_weights=wn, spec_p=a.spec_p, steps=a.steps, tol=a.tol,
                          reprofile_every=a.reprofile_every, map_steps=a.map_steps,
                          learn_sigma_e_mult=a.learn_sigma_e_mult,
                          log=lambda s: print(s, flush=True), checkpoint=checkpoint)
@@ -141,7 +150,7 @@ else:
                                       mode=a.density_mode,
                                       lam_eta_grid=tuple(float(x) for x in a.lam_eta_grid.split(",")),
                                       lam_rough=lam_grid[0], lam_spec=spec_grid[0], lam_gap=gap_grid[0],
-                                      rough_weights=wn, spec_p=a.spec_p, steps=a.steps,
+                                      rough_weights=wn, spec_p=a.spec_p, steps=a.steps, tol=a.tol,
                                       reprofile_every=a.reprofile_every, map_steps=a.map_steps,
                                       log=lambda s: print(s, flush=True), checkpoint=checkpoint_rd)
     # every non-init candidate's own model.npz (readout fitted for it), not just the
@@ -160,7 +169,7 @@ summary = {"selected": info["selected"], "scores": info["scores"], "n_q": a.n_q,
            "spec_grid": list(spec_grid), "spec_p": a.spec_p, "gap_grid": list(gap_grid),
            "steps": a.steps, "reprofile_every": a.reprofile_every,
            "learn_sigma_e_mult": a.learn_sigma_e_mult, "to_analytic_relres_max": relres_max,
-           "density": a.density, "P_selected": int(info.get("P", 0)), "density_mode": a.density_mode,
+           "density": a.density, "extra_train": a.extra_train, "tol": a.tol, "P_selected": int(info.get("P", 0)), "density_mode": a.density_mode,
            "lam_eta_grid": a.lam_eta_grid,
            "seconds": time.time() - t0}
 (out / "summary.json").write_text(json.dumps(summary, indent=1))

@@ -36,6 +36,7 @@ SYSTEMS = {
     "cantor": ["--model", "/data/cantor_d4.npz", "--data", "/data/cantor1k_b_mh1.xyz", "--r0", "2.5",
                "--ntrain", "150", "--nval", "100"],
 }
+EXTRA = {"sige": "/data/sige_vac_mh1.xyz", "cantor": "/data/cantor_vac_train_mh1.xyz"}   # vacancy train cells
 KEYS = ["--energy-key", "mace_energy", "--force-key", "mace_force", "--virial-key", "mace_virial"]
 
 
@@ -51,13 +52,15 @@ def _drop(args, *flags):
 
 @app.function(gpu="A100-80GB", timeout=8 * 3600)
 def learn(system: str, steps: int, lam_grid: str, reprofile_every: int, n_q: int, mult: float = 1.0,
-         density: str = "none", P: int = 1, density_mode: str = "joint", lam_eta_grid: str = "0") -> dict:
+         density: str = "none", P: int = 1, density_mode: str = "joint", lam_eta_grid: str = "0",
+          vac: bool = False, tol: float = 1e-6) -> dict:
     out = pathlib.Path(f"/tmp/out_{system}_s{steps}_m{mult:g}_{density}{P}")
     args = SYSTEMS[system] + KEYS + ["--n-q", str(n_q)]
     r = subprocess.run(["python", "/ace-jax/bench/learn_radial/run.py", *args, "--steps", str(steps),
                         "--reprofile-every", str(reprofile_every), "--lam-grid", lam_grid,
                         "--learn-sigma-e-mult", str(mult), "--density", density, "--P", str(P),
                         "--density-mode", density_mode, "--lam-eta-grid", lam_eta_grid,
+                        "--tol", str(tol), *(["--extra-train", EXTRA[system]] if vac else []),
                         "--out", str(out)],
                        capture_output=True, text=True)
     log = r.stdout + r.stderr
@@ -90,14 +93,15 @@ def learn(system: str, steps: int, lam_grid: str, reprofile_every: int, n_q: int
 @app.local_entrypoint()
 def main(system: str = "sige", steps: str = "100,200,400", lam_grid: str = "0.1",
          reprofile_every: int = 50, n_q: int = 12, mults: str = "1", out: str = "runs/modal",
-         density: str = "none", n_density: int = 1, density_mode: str = "joint", lam_eta_grid: str = "0"):
+         density: str = "none", n_density: int = 1, density_mode: str = "joint", lam_eta_grid: str = "0",
+         vac: bool = False, tol: float = 1e-6):
     # n_density, not P: Modal lower-cases CLI flags, so a `P` parameter is unreachable as --P
     P = n_density
     budgets = [int(s) for s in steps.split(",")]
-    calls = [(system, s, lam_grid, reprofile_every, n_q, float(m), density, P, density_mode, lam_eta_grid)
+    calls = [(system, s, lam_grid, reprofile_every, n_q, float(m), density, P, density_mode, lam_eta_grid, vac, tol)
             for s in budgets for m in mults.split(",")]
-    for (sy, s, _, _, _, m, dn, _, _, _), res in zip(calls, learn.starmap(calls)):
-        suffix = f"_{dn}{P}" if dn != "none" else ""
+    for (sy, s, _, _, _, m, dn, _, _, _, _, _), res in zip(calls, learn.starmap(calls)):
+        suffix = (f"_{dn}{P}" if dn != "none" else "") + ("_vac" if vac else "")
         d = pathlib.Path(out) / ((f"{sy}_s{s}" if m == 1.0 else f"{sy}_s{s}_m{m:g}") + suffix)
         d.mkdir(parents=True, exist_ok=True)
         (d / "log.txt").write_text(res["log"])
