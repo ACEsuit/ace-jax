@@ -477,7 +477,8 @@ Cantor_medium ACE at order 2 costs 2.53 ms for 447 functions against PACE's
 
 ## 6. Recommendations
 
-1. **Land `prune` and `pairfold` in `ace_jax.eval.io.load`.** Make them a
+1. **Land `prune` and `pairfold` in `ace_jax.eval.io.load`.** (Landed, but
+   applied by the calculator and exporter, not `load`; see §8.) Make them a
    normalisation step next to `fold_readout`.
    - They are exact, static data transforms that need no new code in the hot
      path, and give 1.2–1.7× on every ACE model.
@@ -487,7 +488,8 @@ Cantor_medium ACE at order 2 costs 2.53 ms for 447 functions against PACE's
    - Keep `site_basis` and descriptors unaffected. Pruned columns carry no A
      entry, and the pair fold is readout-only. So apply `pairfold` only on the
      folded energy path, as `fold_readout` does.
-2. **Make `compact` + `lblock` + `fm` the `ACEModel` dense energy path** when
+2. **Make `compact` + `lblock` + `fm` the `ACEModel` dense energy path** (landed
+   in the lean form, dense only; see §8) when
    R_nl is species-block-sparse, which it is for every ACE1-compat model.
    - This adds 1.1–1.3× on the multi-species models.
    - Carry it to `site_energies` (sparse) and to the LAMMPS bundle, and re-run
@@ -542,7 +544,10 @@ work.
 
 ## 8. Landed
 
-Recommendations 1–3 are in `src/`, on branch `perf/ace-fast-path`.
+Recommendations 1–3 are in `src/`, on branch `perf/ace-fast-path`, with these deviations from §6:
+
+- **Not in `load`.** The transforms are applied by the calculator and the exporter (`ACECalculator(lean=True)`, `export_lammps(lean=True)`). The pair fold would break the fit rows, which need Apair, and the fit pipeline loads with `load`.
+- **The l-blocked pool is dense-only.** The sparse layout runs the pruned, pair-folded data with its unchanged code.
 
 - **ACE: `ace_jax.eval.model.lean(model)`.** It composes three exact, load-time transforms of a folded `ACEModel`:
   - `prune_columns`: the doc's `prune`.
@@ -598,7 +603,7 @@ Recommendations 1–3 are in `src/`, on branch `perf/ace-fast-path`.
 - **The gain grows with N**, because the smaller per-row intermediates remove the chunking penalty (§3.4).
 - **Cantor_medium ACE against PACE.** At 131k atoms it goes from 116 ms, slower than PACE's 61 ms, to 35 ms, 1.7× faster than PACE. At 8192 it goes from 7.1 to 3.5 ms, against PACE's 5.9.
 - **The PACE switch.**
-  - SiGe_medium and SiGe_large (nradbase 13 and 15) gain 1.27× and 1.19× at 131k, and 2–6% at 8192.
+  - SiGe_medium and SiGe_large (nradbase 13 and 15) gain 1.27× and 1.19× at 131k. At 8192 the change is within noise: there are only 2 samples per side, and SiGe_medium's overlap.
   - All Cantor models and SiGe_small stay on the rotation recurrence, and are unchanged within noise.
 - **Modal time:** about 38 min of A100: 16 min for the single-round pass and 22 min for the two-round pass.
 

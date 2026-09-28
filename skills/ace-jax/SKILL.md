@@ -155,7 +155,10 @@ load; faster only at large `nradbase`). Values are unchanged to roundoff.
   radial, and pools the dense A per l-block. Forces are 1.1–3.3× faster (A100, docs/ace-vs-pace-gap.md §8).
   `calc.eval_model` is that form. `calc.model` stays the model as given, and
   descriptors use it. A lean model is energy-only: its `site_basis` and
-  descriptor methods raise. Never fit from it; `aj.load` returns the full model.
+  descriptor methods raise. Never fit from it or edit it (the radial helpers
+  call `require_full()` and raise); edit the full model and re-apply `lean`.
+  `aj.load` returns the full model. Setting `calc.model` recomputes the lean
+  form on the host, a device-to-host copy per swap.
 - `layout`: `"sparse"` (edge list) or `"dense"` (padded per-node blocks, A by a
   batched outer product, several times faster forces on GPU). `"auto"` picks
   dense when the padding fill, edges / (atoms × max neighbours), is at least
@@ -197,7 +200,8 @@ This writes a lammps-jax bundle for `pair_style jax/kk` (GPU only).
 - The dense bundle runs in blocks of `BUNDLE_BLOCK_ROWS` (32,768) rows above
   one block, bounding memory at large N.
 - `lean=True` (default) exports `lean(model)` for an ACE model, as
-  `ACECalculator` does. It is recorded as `ace_jax.lean`.
+  `ACECalculator` does. It is recorded as `ace_jax.lean`. `layout="auto"` is
+  sized on the full model, so it chooses the same layout either way.
 
 Other entry points:
 - `aj.site_descriptors(...)`: per-atom ACE descriptors.

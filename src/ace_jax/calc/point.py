@@ -82,7 +82,10 @@ class ACECalculator(Calculator):
         `ace_jax.eval.model.lean(model)`: exact to roundoff, with the per-edge
         work the energy never reads removed (docs/ace-vs-pace-gap.md).  It is
         `eval_model`; `model` stays the model as given, and descriptors use it.
-        A PACE or unfolded model is evaluated as given either way."""
+        A PACE or unfolded model is evaluated as given either way.  Setting
+        `calc.model` recomputes the lean form on the host (a device-to-host copy
+        of the model's arrays): negligible for MD, but a per-step cost if the
+        model is swapped every step."""
         if edge_a_kind != "auto":
             check_edge_a_kind(edge_a_kind)
         if layout != "auto" and layout not in LAYOUTS:

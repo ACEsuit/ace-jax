@@ -95,6 +95,8 @@ uv run ruff check                     # lint; `uv run pre-commit run --all-files
     - `block_dense`: an l-blocked, species-compact, feature-major dense A, with `blk_aa_specs`; `aa_specs` stay for the sparse path.
     - `ACECalculator(lean=True)` and `export_lammps(lean=True)` apply it; `calc.eval_model` is the result, and `calc.model` stays as given.
     - `load` never applies it. Fitting, descriptors and learned radials need the full basis, and a lean model is `energy_only`: its basis methods raise.
+    - A lean model holds the radial twice (`rnl_coefs` sparse, `blk_rnl_coefs` dense). Radial editors (`fit/radial_model.py`, `patch_radial_npz`, `save_npz`) call `model.require_full()`. Edit the full model and re-apply `lean`.
+    - `export_lammps(layout="auto")` sizes memory on the full model: `estimate_a_bytes` underestimates the blocked path's temp on lean widths.
     - `tests/test_lean.py` holds each transform to 1e-12.
   - `PACEModel.sbessel_form` is `"matmul"` (`pace_radial._sbessel_mm`) when `nradbase >= SBESSEL_MATMUL_MIN_K` (12), else the rotation recurrence. `load_yace` fixes it per model.
 - **GP fit:**
