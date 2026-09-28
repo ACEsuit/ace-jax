@@ -27,7 +27,7 @@ AUTO_MIN_EDGES = 20_000
 # efficient (edges / (n * K) >= MIN_DENSE_FILL); otherwise the sparse edge list.
 # Memory is not a criterion: the dense model runs in blocks of CHUNK_NODES rows,
 # so its peak is bounded per block.  (dense_budget_bytes is for export_lammps,
-# whose bundles are not chunked.)
+# whose layout="auto" sizes one bundle block against it.)
 MIN_DENSE_FILL = 0.5
 DENSE_BUDGET_FRACTION = 0.5
 CPU_DENSE_BUDGET_BYTES = 4 * 2**30

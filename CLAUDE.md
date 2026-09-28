@@ -86,7 +86,9 @@ uv run ruff check                     # lint; `uv run pre-commit run --all-files
   - A model maps edge vectors `rij`, never positions and a cell, to site energies. That is what lets one core serve ASE and LAMMPS.
   - `EdgeSiteModel` owns E/F/virial: one `value_and_grad` over `rij`. It also owns the A-basis product (`edge_a`, `edge_a_kind` "gather" or "matmul"), the dense and sparse layouts (`LAYOUTS`) and `estimate_a_bytes`.
   - `ACEModel` and `PACEModel` subclass `EdgeSiteModel` and provide `site_energies` and `site_energies_dense`.
-  - `ACECalculator(path, layout="auto", edge_a_kind="auto")` pads the edge list to a power-of-two bucket, so MD reuses the jitted function. It picks dense when `estimate_a_bytes` fits `dense_budget_bytes()` and the padding fill is at least `MIN_DENSE_FILL`, and calibrates gather against matmul per edge bucket.
+  - `ACECalculator(path, layout="auto", edge_a_kind="auto", skin=1.0)` picks dense when the padding fill is at least `MIN_DENSE_FILL` (a pure fill test: the dense model runs in `CHUNK_NODES` blocks, so memory is not a criterion). The sparse edge list is padded to a power-of-two bucket, so MD reuses the jitted function, and gather is calibrated against matmul per edge bucket.
+  - `skin > 0` (dense only, `calc/skin.py`) reuses a Verlet list built for cutoff + skin until an atom moves skin / 2 or the cell, pbc, species or atom count change; `last_timing["rebuilds"]` counts builds. `skin=0` rebuilds every call and must match the skin path to 1e-12. Setting `calc.model` or `calc.skin` drops the list; the compiled step takes the model's arrays per call, so new weights do not retrace.
+  - `export_lammps(..., k_dense=, max_owned=)`: dense bundles evaluate owned rows only (recorded as `ace_jax.owned_rows`, never `max_owned`, which lammps-jax claims) in `BUNDLE_BLOCK_ROWS` blocks.
 - **GP fit:**
   - At fixed hyperparameters θ the model is Bayesian linear regression over `[B | k_θ(B, B_M)]`, with streamed sufficient statistics (`fit/stats`, `fit/objective`).
   - The LML is maximised by Adam or L-BFGS (multi-start is `map_restarts`).
