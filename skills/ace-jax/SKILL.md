@@ -67,6 +67,7 @@ or `--data` [+ `--ntrain/--ntest/--test-start`, a seeded split]. Without
 | Fit a residual over a pair baseline | `--baseline dimer_mean.npz` (then no model file is saved) |
 | Big data on limited GPU memory | `--lml host-cache` (**GP arm, `--density pair` or `pca`, `--opt lbfgs`, `--rungs map` only, single device**) |
 | Misspecification UQ for linear ACE | `--uq pops` (**linear only: `--m-per-species 0`**) |
+| Calibrated per-atom force uncertainty (e.g. big-cell fracture) | `--m-per-species 0 --uq ard` (`posterior.npz`; `ACECalculator(model, posterior=...)`) |
 | Per-config-type weights | `--weights '{"default":{"E":30,"F":1,"V":1},"bulk":{"E":100,"F":1,"V":1}}'` or a factor list |
 | E0 from data, not the model | `--e0 lsq` (default `model`) |
 | Out-of-distribution check | `--ood ood.xyz` (writes `metrics_ood.csv`) |
@@ -85,6 +86,11 @@ These constraints are validated up front. A bad combination raises a
 - **Fitted model:**
   - `model.npz` (linear): an ordinary ACE file, loaded by `ace_jax.load`,
     `ACECalculator` and `aj eval`.
+  - `--uq ard` (linear only) also writes `posterior.npz` (float32 Cholesky factor of
+    the tempered ARD posterior) and `ard.json` (evidence, prior scales, κ, held-out
+    NLL and rms-z). `ACECalculator(model, posterior="out_ard/posterior.npz")` and
+    `aj eval --posterior out_ard/posterior.npz` add a `forces_std` result: per-atom
+    tempered force uncertainty.
   - `gp_model.npz` (GP): self-contained, loaded by `GPCalculator.from_file` and
     `aj eval`. Its size is about 8·Dt²·(model draws) bytes, where Dt = basis
     size + M. The default stores 1 draw (the MAP); `--model-draws N` stores N
@@ -204,6 +210,13 @@ Other entry points:
 - **POPS.** `--uq pops` changes only the uncertainty. The mean is pinned to the
   BLR mean, and the ridge is selected per quantity by CRPS on a training
   hold-out (`--pops-ridge auto`; `blr` or a number fixes it).
+- **ARD `forces_std` is computed on request, not on every call.** A plain
+  `atoms.get_forces()` does not compute it; call
+  `calc.get_property("forces_std", atoms)` (reuses the cached E/F/stress), or
+  pass `forces_std_every_call=True` — costly for per-step MD on big cells. Only
+  the force σ is tempered by κ; energy and virial variances are untempered.
+  `ACECalculator(model, posterior=...)` raises `ValueError` if the posterior
+  doesn't match the model (basis size, species count or element list).
 - **First `construct` of a new basis shape** runs Julia (via juliacall) to
   build the coupling table, then caches it in `~/.cache/ace-jax/coupling`.
   Later runs are pure Python.
