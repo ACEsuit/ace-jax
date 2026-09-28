@@ -43,9 +43,6 @@ jobs:
     # those skips into failures (tests/conftest.py `require_optional`), so a
     # broken install cannot pass as all-skipped.  lammps-jax's export is pure
     # Python + JAX (no compiled LAMMPS); pinned to a commit of its main branch.
-    # Not test_perf_parity / test_gp_hostcache: their float32 gates and a 1e-12
-    # LML check were set without matscipy-neighbours, whose edge order changes
-    # the float rounding (they run, without it, in the shards above).
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -68,7 +65,7 @@ jobs:
         run: >-
           uv run --no-sync pytest -n 0 -m "not slow"
           tests/test_export_lammps.py tests/test_bench_scaling.py tests/test_calc_jit.py
-          tests/test_efv.py tests/test_skin.py
+          tests/test_efv.py tests/test_skin.py tests/test_perf_parity.py
   smoke:
     # Import + a small descriptor/EFV/kernel smoke on the other supported Pythons
     # -- a cheap compatibility check without re-running the whole (slow) matrix.

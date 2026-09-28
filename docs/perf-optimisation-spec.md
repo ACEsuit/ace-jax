@@ -176,15 +176,18 @@ coefficients inside the trace.
   - on open clusters and periodic cells.
 
   The optimised code must match them to 1e-12 relative in float64. In float32
-  the gate is accuracy, not bit-level agreement with the old float32 rounding:
-  each float32 result is compared with the float64 reference and must be no
-  worse than the old float32 result was, i.e. at most max(1e-5,
-  1.25 × old-float32 error) relative. (Two independently rounded float32
-  results differ by about their own error, around 1e-4 here, so a 1e-5 gate
-  on new-vs-old float32 would reject even a more accurate rewrite.) Forces on
-  a configuration whose float64 reference forces are below 1e-3 eV/Å
-  (max|F64| < 1e-3) are pure float32 rounding noise, so their factor is 2.0
-  instead of 1.25; energy and stress keep 1.25 (Task 5 ruling).
+  the gate is accuracy, not agreement with the old float32 rounding: each
+  float32 result is compared with the float64 reference and must lie within
+  rtol × max|x64| + atol, with (rtol, atol) = (5e-6, 1e-6 eV per atom) for the
+  energy, (2e-5, 1e-3 eV/Å) for forces and (5e-5, 1e-5 eV/Å³) for stress.
+  The atol covers zero-force cells, where float32 error is the cancellation
+  noise of the per-bond contributions. The bounds keep at least 3× margin
+  over the worst of all float32 cases in ASE and matscipy-neighbours
+  neighbour order, and over the forces CI's Linux x86 drew (measurements in
+  `tests/test_perf_parity.py`). An earlier rule, at most max(1e-5,
+  1.25 × old-float32 error), was dropped: float32 noise moves with
+  summation order, so a gate relative to one sampled old error failed on a
+  reordering rather than a bug.
 - **Existing parity tests stay green:** ML-PACE, python-ace, Julia
   (julia-parity CI), and `tests/test_export_lammps.py` (bundle vs calculator
   at 1e-10).

@@ -294,14 +294,19 @@ def _species(a):
 
 
 def _into_cutoff(a):
-    """Two atoms just under skin / 2 each toward each other: a pair in the skin
-    shell (rc < d) closes to inside rc with no rebuild."""
+    """Two atoms 0.45 A (0.9 x skin / 2) each toward each other: a pair in the
+    skin shell (rc < d) closes to inside rc with no rebuild.  Not atom 0, which
+    the follow-up step moves again, and well under skin / 2: at 0.499 A the
+    pair's pick followed the neighbour-list sort order, which differs between
+    numpy builds (x86 SIMD sort), and on Linux it picked atom 0, whose extra
+    0.0245 A step then took it past skin / 2 -- a legitimate rebuild."""
     from ase.neighborlist import neighbor_list
     rc = float(ACECalculator(M).cutoff)
     i, j, d, D = neighbor_list("ijdD", a, rc + 1.0)
-    # a shell pair that 2 * 0.499 A (each atom just under skin / 2) brings inside rc
-    k = np.flatnonzero((d > rc + 0.05) & (d < rc + 0.9) & (i != j))[0]
-    step = 0.499 * D[k] / d[k]
+    # the closest shell pair (away from atom 0) that 2 * 0.45 A brings inside rc
+    ok = (d > rc + 0.05) & (d < rc + 0.85) & (i < j) & (i != 0)
+    k = np.flatnonzero(ok)[np.argmin(d[ok])]
+    step = 0.45 * D[k] / d[k]
     a.positions[i[k]] += step
     a.positions[j[k]] -= step
     assert np.linalg.norm(D[k] - 2 * step) < rc - 0.05         # now inside the cutoff
