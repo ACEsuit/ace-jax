@@ -199,8 +199,9 @@ class ARDPosterior(NamedTuple):
         return np.concatenate(out) if out else np.zeros(0)
 
     def forces_std(self, Frows):
-        """Tempered per-atom force std kappa * sqrt(sum_c phi_c A^-1 phi_c^T) from force rows (N, 3, L)."""
-        Frows = np.asarray(Frows)
+        """Tempered per-atom force std kappa * sqrt(sum_c phi_c A^-1 phi_c^T) from force rows (N, 3, L),
+        a numpy or a device array: a device array is solved in place, chunk by chunk, never copied
+        to the host (the rows are N*3*L*8 bytes)."""
         v = self.var_rows(Frows.reshape(-1, Frows.shape[-1])).reshape(-1, 3)
         return self.kappa * np.sqrt(np.maximum(v.sum(1), 0.0))
 

@@ -78,7 +78,12 @@ class ACECalculator(Calculator):
         std kappa * sqrt(sum_c phi_c A^-1 phi_c^T), shape (N,).  By default it is computed only
         when requested (`calc.get_property("forces_std", atoms)`, which reuses the cached
         E/F/stress): a design-row rebuild plus an L^2 solve per step is not a silent MD cost.
-        `forces_std_every_call=True` adds it to every calculation."""
+        `forces_std_every_call=True` adds it to every calculation.
+
+        Memory: forces_std builds the force design rows of the WHOLE cell, about N*3*L*8 bytes
+        (N atoms padded, L = (n_B + n_pair) * NZ columns) -- 7 GB for N = 100k at L = 3k -- on
+        the JAX device, besides the posterior's L^2 factor.  The edge Jacobian is node-chunked
+        (`linear_rows_chunked`), the rows themselves are not: size cells to fit them."""
         model_path = model
         if edge_a_kind != "auto":
             check_edge_a_kind(edge_a_kind)
@@ -233,10 +238,12 @@ class ACECalculator(Calculator):
         b = jax.tree.map(lambda a: a[0], ds)
         if b.nbr.shape[1] == 0 or not bool(np.asarray(b.nbr_mask).any()):
             return np.zeros(len(at))                     # no neighbours: forces are identically zero
+        # F stays on the device (one copy of the Ncap*3*L rows): sigma of every padded node (the
+        # padding rows are zero), then the mask on the (Ncap,) result -- no host copies of F
         with highest_precision():
-            F = np.asarray(linear_rows_chunked(self._fit_model, self._fit_cfg, b).F)
-        F = F[np.asarray(b.node_mask)]
-        return self.posterior.forces_std(F)
+            F = linear_rows_chunked(self._fit_model, self._fit_cfg, b).F
+            s = self.posterior.forces_std(F)
+        return s[np.asarray(b.node_mask)]
 
     def _native_dense(self, pos, cell, pbc, n, dtype):
         """The dense graph straight from matscipy_neighbours' neighbour_matrix,

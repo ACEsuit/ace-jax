@@ -202,6 +202,8 @@ aj fit --model si.npz --data all.xyz --ntrain 40 --ntest 10 --e0 lsq $K \
 A single temperature κ, from a train hold-out, calibrates the force σ. On the Cantor defect
 benchmark it held rms-z 0.91–1.02 on held-out defect combinations. `posterior.npz` stores the
 float32 posterior factor, ~0.9 GB at L = 15k. `--ard-mode sequential` is the low-memory fallback.
+The calculator's `forces_std` holds the whole cell's force design rows, about N·3·L·8 bytes
+(N atoms, L columns; 7 GB for 100k atoms at L = 3k), so size cells to fit them.
 
 `aj fit` and the research driver `bench/acegp_cantor/run.py` share one pipeline
 (`ace_jax.fit.pipeline`: `FitConfig`, `load_fit_data`, `fit`, `write_outputs`,

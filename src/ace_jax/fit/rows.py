@@ -98,15 +98,18 @@ def linear_rows_chunked(model, cfg, batch, node_chunk=256):
         m_c = jax.lax.dynamic_slice_in_dim(msk, s0, nc)
         z_c = jax.lax.dynamic_slice_in_dim(node_z, s0, nc)
         X, J = model.edge_jacobian_dense(r_c, jnp.broadcast_to(z_c[:, None], (nc, K)), node_z[nb_c], m_c)
-        send, recv = s0 + local, nb_c.reshape(-1)
+        recv = nb_c.reshape(-1)
         zi, r_flat, edge_cfg = z_c[local], r_c.reshape(-1, 3), node_cfg[s0 + local]
         E_c = jnp.zeros((nc, L))
+        F_c = jnp.zeros((nc, 3, L))       # send side: the senders are this chunk's own centre nodes
         for z in range(cfg.NZ):
             E_c = _place(E_c, jnp.where((z_c == z)[:, None], X, 0.0), z, cfg)
             Jz = jnp.where((zi == z)[:, None, None], J, 0.0)
-            dEdr = seg(Jz, recv, Np) - seg(Jz, send, Np)                      # (Np, D, 3)
-            F = _place(F, -jnp.swapaxes(dEdr, 1, 2), z, cfg)
+            F = _place(F, -jnp.swapaxes(seg(Jz, recv, Np), 1, 2), z, cfg)     # (Np, 3, L): any node
+            F_c = _place(F_c, jnp.swapaxes(seg(Jz, local, nc), 1, 2), z, cfg)  # (nc, 3, L)
             V = _place(V, jnp.swapaxes(seg(_voigt(Jz, r_flat), edge_cfg, C + 1), 1, 2), z, cfg)
+        F = jax.lax.dynamic_update_slice_in_dim(
+            F, jax.lax.dynamic_slice_in_dim(F, s0, nc) + F_c, s0, 0)
         Enodes = jax.lax.dynamic_update_slice_in_dim(Enodes, E_c, s0, 0)
         return Enodes, F, V
 
