@@ -1,5 +1,5 @@
 """Run bench/learn_radial/run.py (and rmse.py on its candidates) on Modal GPUs,
-several step budgets in parallel.
+several step budgets (and learn_sigma_e_mult values, --mults) in parallel.
 
 ace-jax `src/` and `bench/learn_radial/` are mounted from this checkout, so code
 changes need no image rebuild. The model/xyz files come from a local directory
@@ -40,11 +40,12 @@ KEYS = ["--energy-key", "mace_energy", "--force-key", "mace_force", "--virial-ke
 
 
 @app.function(gpu="A100-80GB", timeout=8 * 3600)
-def learn(system: str, steps: int, lam_grid: str, reprofile_every: int, n_q: int) -> dict:
-    out = pathlib.Path(f"/tmp/out_{system}_s{steps}")
+def learn(system: str, steps: int, lam_grid: str, reprofile_every: int, n_q: int, mult: float = 1.0) -> dict:
+    out = pathlib.Path(f"/tmp/out_{system}_s{steps}_m{mult:g}")
     args = SYSTEMS[system] + KEYS + ["--n-q", str(n_q)]
     r = subprocess.run(["python", "/ace-jax/bench/learn_radial/run.py", *args, "--steps", str(steps),
-                        "--reprofile-every", str(reprofile_every), "--lam-grid", lam_grid, "--out", str(out)],
+                        "--reprofile-every", str(reprofile_every), "--lam-grid", lam_grid,
+                        "--learn-sigma-e-mult", str(mult), "--out", str(out)],
                        capture_output=True, text=True)
     log = r.stdout + r.stderr
     if r.returncode == 0:
@@ -59,15 +60,15 @@ def learn(system: str, steps: int, lam_grid: str, reprofile_every: int, n_q: int
 
 @app.local_entrypoint()
 def main(system: str = "sige", steps: str = "100,200,400", lam_grid: str = "0.1",
-         reprofile_every: int = 50, n_q: int = 12, out: str = "runs/modal"):
+         reprofile_every: int = 50, n_q: int = 12, mults: str = "1", out: str = "runs/modal"):
     budgets = [int(s) for s in steps.split(",")]
-    calls = [(system, s, lam_grid, reprofile_every, n_q) for s in budgets]
-    for (sy, s, *_), res in zip(calls, learn.starmap(calls)):
-        d = pathlib.Path(out) / f"{sy}_s{s}"
+    calls = [(system, s, lam_grid, reprofile_every, n_q, float(m)) for s in budgets for m in mults.split(",")]
+    for (sy, s, _, _, _, m), res in zip(calls, learn.starmap(calls)):
+        d = pathlib.Path(out) / (f"{sy}_s{s}" if m == 1.0 else f"{sy}_s{s}_m{m:g}")
         d.mkdir(parents=True, exist_ok=True)
         (d / "log.txt").write_text(res["log"])
         for name, blob in res["files"].items():
             (d / name).parent.mkdir(parents=True, exist_ok=True)
             (d / name).write_bytes(blob)
         tail = [l for l in res["log"].splitlines() if "meV" in l or "gate" in l or "Error" in l]
-        print(f"== {sy} steps={s} rc={res['returncode']}\n" + "\n".join(tail[-8:]), flush=True)
+        print(f"== {sy} steps={s} mult={m:g} rc={res['returncode']}\n" + "\n".join(tail[-8:]), flush=True)
