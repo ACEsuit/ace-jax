@@ -1,0 +1,570 @@
+[
+ {
+  "model": "Cantor_medium",
+  "n": 8192,
+  "dtype": "float64",
+  "K": 42,
+  "device": "NVIDIA A100-SXM4-80GB",
+  "jax": "0.11.2",
+  "parity": {
+   "ace:prune+pairfold": {
+    "dE_per_atom": 0.0,
+    "max_dF": 8.097689185859736e-15,
+    "max_dV": 6.821210263296962e-13
+   },
+   "ace:compact+pairfold": {
+    "dE_per_atom": 6.938893903907228e-18,
+    "max_dF": 8.43769498715119e-15,
+    "max_dV": 1.3642420526593924e-12
+   },
+   "ace:compact+pairfold+fm": {
+    "dE_per_atom": 6.938893903907228e-18,
+    "max_dF": 8.493206138382448e-15,
+    "max_dV": 9.094947017729282e-13
+   },
+   "ace:prune+lblock+fm+pairfold": {
+    "dE_per_atom": 6.938893903907228e-18,
+    "max_dF": 8.659739592076221e-15,
+    "max_dV": 1.5916157281026244e-12
+   },
+   "pace:sbessel_mm": {
+    "dE_per_atom": 2.7755575615628914e-17,
+    "max_dF": 1.9984014443252818e-15,
+    "max_dV": 4.547473508864641e-13
+   }
+  },
+  "cases": {
+   "ace": {
+    "compile_s": 3.5137768090000012,
+    "rounds": [
+     0.0065234879999991335,
+     0.005386704999999381,
+     0.005467714999998208
+    ],
+    "efv_s": 0.005467714999998208,
+    "atom_steps_per_s": 1498249.2686620802,
+    "vs_ace": 1.0
+   },
+   "ace:prune+pairfold": {
+    "compile_s": 1.6618107600000016,
+    "rounds": [
+     0.0037719855000020175,
+     0.003145841500003854,
+     0.003131141499999046
+    ],
+    "efv_s": 0.003145841500003854,
+    "atom_steps_per_s": 2604072.709953748,
+    "vs_ace": 1.73807707730714
+   },
+   "ace:compact+pairfold": {
+    "compile_s": 2.1871100289999994,
+    "rounds": [
+     0.003321357499999067,
+     0.00281943650000116,
+     0.0028555615000023238
+    ],
+    "efv_s": 0.0028555615000023238,
+    "atom_steps_per_s": 2868787.8023265596,
+    "vs_ace": 1.9147600218008816
+   },
+   "ace:compact+pairfold+fm": {
+    "compile_s": 2.2273001459999975,
+    "rounds": [
+     0.002929018999999755,
+     0.0024898974999985057,
+     0.002529761499996397
+    ],
+    "efv_s": 0.002529761499996397,
+    "atom_steps_per_s": 3238249.929889307,
+    "vs_ace": 2.1613559222899057
+   },
+   "ace:prune+lblock+fm+pairfold": {
+    "compile_s": 1.7191047390000023,
+    "rounds": [
+     0.00353991749999949,
+     0.0031359235000003594,
+     0.003076152000001997
+    ],
+    "efv_s": 0.0031359235000003594,
+    "atom_steps_per_s": 2612308.6229619635,
+    "vs_ace": 1.7435741018547108
+   },
+   "pace": {
+    "compile_s": 4.980896264000002,
+    "rounds": [
+     0.003774787999997642,
+     0.003677779000000214,
+     0.0036251404999987358
+    ],
+    "efv_s": 0.003677779000000214,
+    "atom_steps_per_s": 2227431.2839350933,
+    "vs_ace": 1.4866893850875458
+   },
+   "pace:sbessel_mm": {
+    "compile_s": 3.04849239,
+    "rounds": [
+     0.004207796499997585,
+     0.004140811999999272,
+     0.004159458499998436
+    ],
+    "efv_s": 0.004159458499998436,
+    "atom_steps_per_s": 1969487.1339630098,
+    "vs_ace": 1.3145256768399693
+   }
+  },
+  "peak_bytes": 973632256,
+  "gpu": "NVIDIA A100-SXM4-80GB",
+  "argv": [
+   "bench/perf/ace_gap_bench.py",
+   "Cantor_medium",
+   "8192",
+   "--variants",
+   "prune+pairfold,compact+pairfold,compact+pairfold+fm,prune+lblock+fm+pairfold",
+   "--pace-variants",
+   "sbessel_mm",
+   "--rounds",
+   "3"
+  ]
+ },
+ {
+  "model": "Cantor_medium",
+  "n": 131072,
+  "dtype": "float64",
+  "K": 42,
+  "device": "NVIDIA A100-SXM4-80GB",
+  "jax": "0.11.2",
+  "parity": {
+   "ace:prune+pairfold": {
+    "dE_per_atom": 0.0,
+    "max_dF": 7.993605777301127e-15,
+    "max_dV": 7.275957614183426e-12
+   },
+   "ace:compact+pairfold": {
+    "dE_per_atom": 0.0,
+    "max_dF": 1.0880185641326534e-14,
+    "max_dV": 1.0913936421275139e-11
+   },
+   "ace:compact+pairfold+fm": {
+    "dE_per_atom": 0.0,
+    "max_dF": 9.46465128492946e-15,
+    "max_dV": 7.275957614183426e-12
+   },
+   "ace:prune+lblock+fm+pairfold": {
+    "dE_per_atom": 0.0,
+    "max_dF": 9.7907792984131e-15,
+    "max_dV": 1.0913936421275139e-11
+   },
+   "pace:sbessel_mm": {
+    "dE_per_atom": 0.0,
+    "max_dF": 2.3314683517128287e-15,
+    "max_dV": 3.637978807091713e-12
+   }
+  },
+  "cases": {
+   "ace": {
+    "compile_s": 4.800029912999989,
+    "rounds": [
+     0.11271848750000402,
+     0.1128178259999828,
+     0.11255809349999879
+    ],
+    "efv_s": 0.11271848750000402,
+    "atom_steps_per_s": 1162826.106941821,
+    "vs_ace": 1.0
+   },
+   "ace:prune+pairfold": {
+    "compile_s": 2.8863586089999984,
+    "rounds": [
+     0.05048887700000648,
+     0.050375021999997216,
+     0.05044113950000906
+    ],
+    "efv_s": 0.05044113950000906,
+    "atom_steps_per_s": 2598513.85791902,
+    "vs_ace": 2.234653868197878
+   },
+   "ace:compact+pairfold": {
+    "compile_s": 2.9237945759999917,
+    "rounds": [
+     0.04000598550000234,
+     0.039817412499999705,
+     0.04000734549998697
+    ],
+    "efv_s": 0.04000598550000234,
+    "atom_steps_per_s": 3276309.7412009095,
+    "vs_ace": 2.8175405777717293
+   },
+   "ace:compact+pairfold+fm": {
+    "compile_s": 3.2092698380000115,
+    "rounds": [
+     0.03441844899998614,
+     0.03444917800000269,
+     0.034423838000009255
+    ],
+    "efv_s": 0.034423838000009255,
+    "atom_steps_per_s": 3807594.0282999463,
+    "vs_ace": 3.2744311514588733
+   },
+   "ace:prune+lblock+fm+pairfold": {
+    "compile_s": 2.733721701999997,
+    "rounds": [
+     0.04924252700000409,
+     0.0490689569999887,
+     0.04907865849999382
+    ],
+    "efv_s": 0.04907865849999382,
+    "atom_steps_per_s": 2670651.6438304135,
+    "vs_ace": 2.296690474944791
+   },
+   "pace": {
+    "compile_s": 6.486586657999993,
+    "rounds": [
+     0.059566466500001525,
+     0.059450072000004184,
+     0.059579611499998464
+    ],
+    "efv_s": 0.059566466500001525,
+    "atom_steps_per_s": 2200432.68807957,
+    "vs_ace": 1.892314487044504
+   },
+   "pace:sbessel_mm": {
+    "compile_s": 4.470872267999994,
+    "rounds": [
+     0.06766766399999824,
+     0.06741389649999974,
+     0.0674754704999998
+    ],
+    "efv_s": 0.0674754704999998,
+    "atom_steps_per_s": 1942513.316746719,
+    "vs_ace": 1.670510582064105
+   }
+  },
+  "peak_bytes": 2749538816,
+  "gpu": "NVIDIA A100-SXM4-80GB",
+  "argv": [
+   "bench/perf/ace_gap_bench.py",
+   "Cantor_medium",
+   "131072",
+   "--variants",
+   "prune+pairfold,compact+pairfold,compact+pairfold+fm,prune+lblock+fm+pairfold",
+   "--pace-variants",
+   "sbessel_mm",
+   "--rounds",
+   "3"
+  ]
+ },
+ {
+  "model": "SiGe_medium",
+  "n": 8192,
+  "dtype": "float64",
+  "K": 28,
+  "device": "NVIDIA A100-SXM4-80GB",
+  "jax": "0.11.2",
+  "parity": {
+   "ace:prune+pairfold": {
+    "dE_per_atom": 6.938893903907228e-18,
+    "max_dF": 3.8191672047105385e-14,
+    "max_dV": 1.2732925824820995e-11
+   },
+   "ace:compact+pairfold": {
+    "dE_per_atom": 8.326672684688674e-17,
+    "max_dF": 5.240252676230739e-14,
+    "max_dV": 3.637978807091713e-12
+   },
+   "ace:compact+pairfold+fm": {
+    "dE_per_atom": 8.326672684688674e-17,
+    "max_dF": 5.88418203051333e-14,
+    "max_dV": 5.4569682106375694e-12
+   },
+   "ace:prune+lblock+fm+pairfold": {
+    "dE_per_atom": 8.326672684688674e-17,
+    "max_dF": 4.1744385725905886e-14,
+    "max_dV": 1.0913936421275139e-11
+   },
+   "pace:sbessel_mm": {
+    "dE_per_atom": 5.551115123125783e-17,
+    "max_dF": 3.552713678800501e-15,
+    "max_dV": 5.4569682106375694e-12
+   }
+  },
+  "cases": {
+   "ace": {
+    "compile_s": 2.916643654999973,
+    "rounds": [
+     0.004258591500004627,
+     0.0034630149999941295,
+     0.003450974499997983
+    ],
+    "efv_s": 0.0034630149999941295,
+    "atom_steps_per_s": 2365568.7312974064,
+    "vs_ace": 1.0
+   },
+   "ace:prune+pairfold": {
+    "compile_s": 2.0545461579999937,
+    "rounds": [
+     0.0028952594999935855,
+     0.002455233500000986,
+     0.002464215000003378
+    ],
+    "efv_s": 0.002464215000003378,
+    "atom_steps_per_s": 3324385.2504707463,
+    "vs_ace": 1.4053217758959273
+   },
+   "ace:compact+pairfold": {
+    "compile_s": 1.856538809,
+    "rounds": [
+     0.00329398099999878,
+     0.0027955559999952584,
+     0.0027863830000001144
+    ],
+    "efv_s": 0.0027955559999952584,
+    "atom_steps_per_s": 2930365.193905575,
+    "vs_ace": 1.2387571560004533
+   },
+   "ace:compact+pairfold+fm": {
+    "compile_s": 1.9091172559999734,
+    "rounds": [
+     0.002802798499999426,
+     0.0024419390000076646,
+     0.0024216010000088772
+    ],
+    "efv_s": 0.0024419390000076646,
+    "atom_steps_per_s": 3354711.1537078884,
+    "vs_ace": 1.418141485099857
+   },
+   "ace:prune+lblock+fm+pairfold": {
+    "compile_s": 2.018170147999996,
+    "rounds": [
+     0.0028934214999907226,
+     0.0024898034999836227,
+     0.0024691665000062812
+    ],
+    "efv_s": 0.0024898034999836227,
+    "atom_steps_per_s": 3290219.4892303287,
+    "vs_ace": 1.3908788384372133
+   },
+   "pace": {
+    "compile_s": 6.969149991000023,
+    "rounds": [
+     0.007059247000015034,
+     0.006051606500008688,
+     0.006013097000007406
+    ],
+    "efv_s": 0.006051606500008688,
+    "atom_steps_per_s": 1353690.131701101,
+    "vs_ace": 0.5722472206329274
+   },
+   "pace:sbessel_mm": {
+    "compile_s": 2.6712127129999885,
+    "rounds": [
+     0.005691124999998465,
+     0.0057228255000012496,
+     0.0057018284999941216
+    ],
+    "efv_s": 0.0057018284999941216,
+    "atom_steps_per_s": 1436732.0939253864,
+    "vs_ace": 0.6073516592085679
+   }
+  },
+  "peak_bytes": 576298240,
+  "gpu": "NVIDIA A100-SXM4-80GB",
+  "argv": [
+   "bench/perf/ace_gap_bench.py",
+   "SiGe_medium",
+   "8192",
+   "--variants",
+   "prune+pairfold,compact+pairfold,compact+pairfold+fm,prune+lblock+fm+pairfold",
+   "--pace-variants",
+   "sbessel_mm",
+   "--rounds",
+   "3"
+  ]
+ },
+ {
+  "model": "SiGe_medium",
+  "n": 131072,
+  "dtype": "float64",
+  "K": 28,
+  "device": "NVIDIA A100-SXM4-80GB",
+  "jax": "0.11.2",
+  "parity": {
+   "ace:prune+pairfold": {
+    "dE_per_atom": 0.0,
+    "max_dF": 5.684341886080802e-14,
+    "max_dV": 1.1641532182693481e-10
+   },
+   "ace:compact+pairfold": {
+    "dE_per_atom": 7.632783294297951e-17,
+    "max_dF": 6.306066779870889e-14,
+    "max_dV": 5.820766091346741e-11
+   },
+   "ace:compact+pairfold+fm": {
+    "dE_per_atom": 7.632783294297951e-17,
+    "max_dF": 6.661338147750939e-14,
+    "max_dV": 5.820766091346741e-11
+   },
+   "ace:prune+lblock+fm+pairfold": {
+    "dE_per_atom": 7.632783294297951e-17,
+    "max_dF": 5.750955267558311e-14,
+    "max_dV": 1.4551915228366852e-10
+   },
+   "pace:sbessel_mm": {
+    "dE_per_atom": 0.0,
+    "max_dF": 4.496403249731884e-15,
+    "max_dV": 1.4424017535930034e-12
+   }
+  },
+  "cases": {
+   "ace": {
+    "compile_s": 4.500438702999986,
+    "rounds": [
+     0.06078735899998833,
+     0.06068055599999411,
+     0.06061372849995905
+    ],
+    "efv_s": 0.06068055599999411,
+    "atom_steps_per_s": 2160032.9436667114,
+    "vs_ace": 1.0
+   },
+   "ace:prune+pairfold": {
+    "compile_s": 2.7617559890000507,
+    "rounds": [
+     0.0341547129999924,
+     0.03394276200000945,
+     0.03389937699998313
+    ],
+    "efv_s": 0.03394276200000945,
+    "atom_steps_per_s": 3861559.64561645,
+    "vs_ace": 1.787731829247638
+   },
+   "ace:compact+pairfold": {
+    "compile_s": 3.1378097190000176,
+    "rounds": [
+     0.03883262049998848,
+     0.03873198200000161,
+     0.03871720949999258
+    ],
+    "efv_s": 0.03873198200000161,
+    "atom_steps_per_s": 3384076.755999591,
+    "vs_ace": 1.5666783073479584
+   },
+   "ace:compact+pairfold+fm": {
+    "compile_s": 3.5513197170000126,
+    "rounds": [
+     0.032463771999999835,
+     0.03273275899999817,
+     0.03257053200002247
+    ],
+    "efv_s": 0.03257053200002247,
+    "atom_steps_per_s": 4024251.1236816635,
+    "vs_ace": 1.8630508092392306
+   },
+   "ace:prune+lblock+fm+pairfold": {
+    "compile_s": 3.217064131000029,
+    "rounds": [
+     0.03236926950000907,
+     0.032269891999987976,
+     0.03239575949999107
+    ],
+    "efv_s": 0.03236926950000907,
+    "atom_steps_per_s": 4049272.7214608067,
+    "vs_ace": 1.8746347056110462
+   },
+   "pace": {
+    "compile_s": 10.378138620000016,
+    "rounds": [
+     0.13223202200001083,
+     0.13211563550001415,
+     0.1321811695000008
+    ],
+    "efv_s": 0.1321811695000008,
+    "atom_steps_per_s": 991608.717760658,
+    "vs_ace": 0.45907110846067783
+   },
+   "pace:sbessel_mm": {
+    "compile_s": 4.699381853000034,
+    "rounds": [
+     0.1043953584999997,
+     0.10430933099999606,
+     0.10435628950000364
+    ],
+    "efv_s": 0.10435628950000364,
+    "atom_steps_per_s": 1256004.794996045,
+    "vs_ace": 0.5814748329087726
+   }
+  },
+  "peak_bytes": 1428255744,
+  "gpu": "NVIDIA A100-SXM4-80GB",
+  "argv": [
+   "bench/perf/ace_gap_bench.py",
+   "SiGe_medium",
+   "131072",
+   "--variants",
+   "prune+pairfold,compact+pairfold,compact+pairfold+fm,prune+lblock+fm+pairfold",
+   "--pace-variants",
+   "sbessel_mm",
+   "--rounds",
+   "3"
+  ]
+ },
+ {
+  "argv": [
+   "bench/perf/ace_gap_bench.py",
+   "Cantor_large",
+   "0",
+   "--variants",
+   "prune+pairfold,compact+pairfold",
+   "--pace-variants",
+   "sbessel_mm",
+   "--rounds",
+   "3"
+  ],
+  "error": "Traceback (most recent call last):\n  File \"/ace-jax/bench/perf/ace_gap_bench.py\", line 146, in <module>\n    main()\n  File \"/ace-jax/bench/perf/ace_gap_bench.py\", line 101, in main\n    at, args = dense_args(meta_a, system, a.n, dt)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/ace-jax/bench/perf/ace_gap_bench.py\", line 36, in dense_args\n    K = int(np.bincount(i, minlength=len(at)).max())\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.12/site-packages/numpy/_core/_methods.py\", line 41, in _amax\n    return umr_maximum(a, axis, None, out, keepdims, initial, where)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nValueError: zero-size array to reduction operation maximum which has no identity\n",
+  "gpu": "NVIDIA A100-SXM4-80GB"
+ },
+ {
+  "argv": [
+   "bench/perf/ace_gap_bench.py",
+   "SiGe_large",
+   "0",
+   "--variants",
+   "prune+pairfold,compact+pairfold",
+   "--pace-variants",
+   "sbessel_mm",
+   "--rounds",
+   "3"
+  ],
+  "error": "Traceback (most recent call last):\n  File \"/ace-jax/bench/perf/ace_gap_bench.py\", line 146, in <module>\n    main()\n  File \"/ace-jax/bench/perf/ace_gap_bench.py\", line 101, in main\n    at, args = dense_args(meta_a, system, a.n, dt)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/ace-jax/bench/perf/ace_gap_bench.py\", line 36, in dense_args\n    K = int(np.bincount(i, minlength=len(at)).max())\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.12/site-packages/numpy/_core/_methods.py\", line 41, in _amax\n    return umr_maximum(a, axis, None, out, keepdims, initial, where)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nValueError: zero-size array to reduction operation maximum which has no identity\n",
+  "gpu": "NVIDIA A100-SXM4-80GB"
+ },
+ {
+  "argv": [
+   "bench/perf/ace_gap_bench.py",
+   "Cantor_small",
+   "0",
+   "--variants",
+   "prune+pairfold,compact+pairfold",
+   "--pace-variants",
+   "sbessel_mm",
+   "--rounds",
+   "3"
+  ],
+  "error": "Traceback (most recent call last):\n  File \"/ace-jax/bench/perf/ace_gap_bench.py\", line 146, in <module>\n    main()\n  File \"/ace-jax/bench/perf/ace_gap_bench.py\", line 101, in main\n    at, args = dense_args(meta_a, system, a.n, dt)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/ace-jax/bench/perf/ace_gap_bench.py\", line 36, in dense_args\n    K = int(np.bincount(i, minlength=len(at)).max())\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.12/site-packages/numpy/_core/_methods.py\", line 41, in _amax\n    return umr_maximum(a, axis, None, out, keepdims, initial, where)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nValueError: zero-size array to reduction operation maximum which has no identity\n",
+  "gpu": "NVIDIA A100-SXM4-80GB"
+ },
+ {
+  "argv": [
+   "bench/perf/ace_gap_bench.py",
+   "SiGe_small",
+   "0",
+   "--variants",
+   "prune+pairfold,compact+pairfold",
+   "--pace-variants",
+   "sbessel_mm",
+   "--rounds",
+   "3"
+  ],
+  "error": "Traceback (most recent call last):\n  File \"/ace-jax/bench/perf/ace_gap_bench.py\", line 146, in <module>\n    main()\n  File \"/ace-jax/bench/perf/ace_gap_bench.py\", line 101, in main\n    at, args = dense_args(meta_a, system, a.n, dt)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/ace-jax/bench/perf/ace_gap_bench.py\", line 36, in dense_args\n    K = int(np.bincount(i, minlength=len(at)).max())\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.12/site-packages/numpy/_core/_methods.py\", line 41, in _amax\n    return umr_maximum(a, axis, None, out, keepdims, initial, where)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nValueError: zero-size array to reduction operation maximum which has no identity\n",
+  "gpu": "NVIDIA A100-SXM4-80GB"
+ }
+]
