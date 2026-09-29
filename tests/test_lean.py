@@ -32,7 +32,7 @@ MODELS = {
     "si_ace_model": ROOT / "fixtures" / "si_ace_model.npz",      # 1 species, analytic, solid
     "sige_nofit": ROOT / "fixtures" / "sige_nofit.npz",          # 2 species, spline
     "emb_SiGe": ROOT / "fixtures" / "emb_ref_SiGe_o2d6.npz",     # 2 species, factorised radial
-    "Cantor_small": ROOT / "bench" / "scaling" / "models" / "ace_Cantor_small.npz",  # 5 species
+    "Cantor_small": ROOT / "fixtures" / "ace_cantor5_small.npz",  # 5 species (bench Cantor small ACE)
 }
 TOL = 1e-12
 

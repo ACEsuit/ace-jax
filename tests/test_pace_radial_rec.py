@@ -46,7 +46,7 @@ import pathlib  # noqa: E402
 
 import pytest  # noqa: E402
 
-MODELS = pathlib.Path(__file__).parent.parent / "bench" / "scaling" / "models"
+PACE_FIX = pathlib.Path(__file__).parent.parent / "fixtures" / "pace"
 
 
 def test_sbessel_matrix_form_is_exact():
@@ -69,13 +69,13 @@ def test_radbase_matrix_form_matches(inner):
     np.testing.assert_allclose(gb, ga, rtol=1e-10, atol=1e-11)
 
 
-@pytest.mark.parametrize("name,form", [("pace_SiGe_medium", "matmul"), ("pace_SiGe_large", "matmul"),
-                                       ("pace_Cantor_large", "rotation"),
-                                       ("pace_SiGe_small", "rotation")])
+# sige_sbessel13 is the benchmark's SiGe medium .yace (nradbase 13); gesi_sbessel
+# has a small radial basis
+@pytest.mark.parametrize("name,form", [("sige_sbessel13", "matmul"), ("gesi_sbessel", "rotation")])
 def test_load_picks_the_sbessel_form(name, form):
     from ace_jax.eval import load
     from ace_jax.eval.pace_model import SBESSEL_MATMUL_MIN_K
-    m, _, _ = load(str(MODELS / f"{name}.yace"))
+    m, _, _ = load(str(PACE_FIX / f"{name}.yace"))
     assert m.sbessel_form == form
     assert (m.nradbase >= SBESSEL_MATMUL_MIN_K) == (form == "matmul")
 
@@ -87,7 +87,7 @@ def test_matrix_form_model_is_exact(layout):
     from ace_jax.eval import load
     from ace_jax.eval.model import highest_precision
     from ace_jax.eval.nlist import dense_from_sparse, sparse_graph
-    m, meta, _ = load(str(MODELS / "pace_SiGe_medium.yace"))
+    m, meta, _ = load(str(PACE_FIX / "sige_sbessel13.yace"))
     at = bulk("Si", "diamond", a=5.43, cubic=True).repeat((2, 1, 1))
     at.numbers[::3] = 32
     at.rattle(0.08, seed=1)
