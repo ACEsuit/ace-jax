@@ -201,7 +201,7 @@ with highest_precision():
     for name, ds in (("test", d.ds_test), ("ood", d.ds_ood)):
         acc = {}
         for i in range(ds.n_batches):
-            bt = jax.tree.map(lambda a: a[i], ds)
+            bt = jax.tree.map(lambda a, i=i: a[i], ds)
             live = np.asarray(bt.node_mask)
             Fr = jnp.asarray(np.asarray(linear_rows(prob.model, gcfg, bt)[0].F)[live].reshape(-1, L))
             for m, (c, x) in models.items():

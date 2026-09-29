@@ -35,7 +35,7 @@ def cantor_properties(calc, rng, n_real=3, log=print):
         a0 = (at.get_volume() / len(at) * 4) ** (1 / 3); a0s.append(a0)
         # cubic constants from +-0.5 % strains of the relaxed-volume perfect lattice
         ref = species(np.random.default_rng(1000 + k), bulk("Ni", "fcc", a=a0, cubic=True).repeat((4, 4, 4)))
-        def stress(F):
+        def stress(F, ref=ref):
             b = ref.copy(); b.set_cell(ref.cell @ F, scale_atoms=True); b.calc = calc
             return -b.get_stress(voigt=True) / EV_A3_PER_GPA * -1   # GPa, tension positive
         e = 0.005

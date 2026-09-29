@@ -60,7 +60,7 @@ def metrics(s2, e2_):
 rows = {}
 for name, (npar, f) in MODELS.items():
     if npar:
-        r = minimize(lambda p: nll(f(p, "test")[cal], e2["test"][cal]), np.zeros(npar), method="Nelder-Mead")
+        r = minimize(lambda p, f=f: nll(f(p, "test")[cal], e2["test"][cal]), np.zeros(npar), method="Nelder-Mead")
         p = r.x
     else:
         p = np.zeros(0)

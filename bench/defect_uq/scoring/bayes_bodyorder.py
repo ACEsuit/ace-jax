@@ -132,13 +132,13 @@ with highest_precision():
         acc = {}
         X_all, _ = site_features(prob.model, gcfg, ds)
         for i in range(ds.n_batches):
-            bt = jax.tree.map(lambda a: a[i], ds)
+            bt = jax.tree.map(lambda a, i=i: a[i], ds)
             live = np.asarray(bt.node_mask)
             lin = linear_rows(prob.model, gcfg, bt)[0]
             Fr = np.asarray(lin.F)[live].reshape(-1, L)                    # (3 n_live, L)
             Xs = np.asarray(X_all[i])[live]; zs = np.asarray(bt.node_z)[live]
             Er = place_sites(Xs, zs)
-            for m, (c, x, _) in post.items():
+            for m, (c, _x, _) in post.items():
                 acc.setdefault(f"sdF_{m}", []).append(np.sqrt(var_rows(c, Fr).reshape(-1, 3).sum(1)))
                 acc.setdefault(f"sdE_{m}", []).append(np.sqrt(var_rows(c, Er)))
             for K, (c, x, cols) in nested.items():
@@ -161,7 +161,7 @@ with highest_precision():
     for i in range(big.n_batches):
         live = np.asarray(big.node_mask[i])
         Er = place_sites(np.asarray(X_all[i])[live], np.asarray(big.node_z[i])[live])
-        for m, (c, x, _) in post.items():
+        for m, (c, _x, _) in post.items():
             acc.setdefault(f"sdE_{m}", []).append(np.sqrt(var_rows(c, Er)))
     for k, v in acc.items():
         out[f"big/{k}"] = np.concatenate(v)
