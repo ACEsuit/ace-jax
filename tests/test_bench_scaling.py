@@ -161,7 +161,7 @@ def test_capacity_tight_slots_are_opt_in():
     safe, tight = capacity(at, 5.0), capacity(at, 5.0, tight=True)
     assert safe == capacity(at, 5.0, tight=False)
     assert tight["k_dense"] == neighbour_capacity(at, 5.0, slots="cutoff")["k_dense"] < safe["k_dense"]
-    assert tight["max_neighbors"] == safe["max_neighbors"] == safe["k_dense"]
+    assert tight["max_neighbors"] == safe["max_neighbors"] >= int(np.ceil(1.5 * safe["k_max"]))
     assert tight["max_edges"] == tight["max_owned"] * tight["k_dense"]
 
 

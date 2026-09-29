@@ -12,9 +12,12 @@ Variants (all sized by scaling.run_lammps.capacity, float64):
 
 * stock:  export_lammps(layout="dense"), k_dense = max_edges / max_owned =
   k(rcut + skin) + 8: the benchmark's bundle before this change.
-* matrix: layout="matrix", model slots = list slots = k(rcut + skin) + 8.
-* tight:  layout="matrix", list slots k(rcut + skin) + 8, model slots
-  k(rcut) + 8 (capacity(tight=True); compacted per step).
+* matrix: layout="matrix" as capacity() sizes it: list slots
+  ceil(1.5 k(rcut + skin)), model slots k(rcut + skin) + 8 (compacted).
+* matrix_direct: list slots = model slots = k(rcut + skin) + 8 (no
+  compaction; the first sizing, which overflowed the list on the bench deck).
+* tight:  layout="matrix", list slots as matrix, model slots k(rcut) + 8
+  (capacity(tight=True); compacted per step).
 
 Decks: "bench" is scaling.run_lammps.lammps_input (fix nve from a perfect
 lattice; the random-weight structures compress, so tight slots are not safe
@@ -71,6 +74,9 @@ def export(name, n, variant, out, ref=False, root=MODELS):
     elif variant == "matrix":
         b = export_lammps(model, meta, out, layout="matrix", k_dense=cap["k_dense"],
                           max_neighbors=cap["max_neighbors"], **kw)
+    elif variant == "matrix_direct":
+        b = export_lammps(model, meta, out, layout="matrix", k_dense=cap["k_dense"],
+                          max_neighbors=cap["k_dense"], **kw)
     elif variant == "tight":
         b = export_lammps(model, meta, out, layout="matrix", k_dense=tight["k_dense"],
                           max_neighbors=tight["max_neighbors"], **kw)

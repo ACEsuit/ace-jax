@@ -714,7 +714,9 @@ def test_matrix_supported_by_the_pinned_lammps_jax():
 def test_neighbour_capacity_skin_and_cutoff_slots():
     """slots="skin" (default, safe) sizes model slots for the rcut + skin list;
     "cutoff" for rcut pairs only.  The matrix list capacity (max_neighbors)
-    always covers the rcut + skin list: LAMMPS copies it whole."""
+    covers the rcut + skin list with 50% headroom: LAMMPS copies it whole at
+    each rebuild, and it grows faster than the rcut count as a structure
+    compresses (SiGe medium on the benchmark deck: 34 -> 45 by one rebuild)."""
     from ace_jax.export.lammps import neighbour_capacity
     at = bulk("Si", "diamond", a=5.43, cubic=True).repeat((3, 3, 3))
     at.rattle(0.02, seed=0)
@@ -722,7 +724,8 @@ def test_neighbour_capacity_skin_and_cutoff_slots():
     safe = neighbour_capacity(at, 5.0, skin=1.0)
     tight = neighbour_capacity(at, 5.0, skin=1.0, slots="cutoff")
     assert safe["k_dense"] == k_list + 8 and tight["k_dense"] == k_cut + 8
-    assert safe["max_neighbors"] == tight["max_neighbors"] == k_list + 8
+    assert safe["max_neighbors"] == tight["max_neighbors"] == int(np.ceil(1.5 * k_list))
+    assert neighbour_capacity(at, 5.0, list_headroom=0.0)["max_neighbors"] == k_list + 8
     assert (safe["k_list"], safe["k_cut"]) == (k_list, k_cut)
     for c in (safe, tight):
         assert c["max_owned"] == int(np.ceil(1.1 * len(at))) and c["max_atoms"] > c["max_owned"]

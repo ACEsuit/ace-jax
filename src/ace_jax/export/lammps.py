@@ -61,14 +61,23 @@ def matrix_supported():
             and "max_neighbors" in inspect.signature(export.export_model).parameters)
 
 
-def neighbour_capacity(atoms, rcut, skin=1.0, slots="skin", margin=8, owned=1.1):
+def neighbour_capacity(atoms, rcut, skin=1.0, slots="skin", margin=8, owned=1.1,
+                       list_headroom=0.5):
     """lammps-jax buffer sizes for `atoms` (a periodic ase.Atoms, the structure
     the run starts from).  Returns max_atoms (owned + ghost shell within
     rcut + skin of each face, estimated from the cell-vector lengths, x1.1),
     max_owned (owned x `owned`), k_list / k_cut (largest coordination within
-    rcut + skin / rcut), max_neighbors (neighbour-matrix list slots, k_list +
-    margin: LAMMPS copies its whole rcut + skin list), k_dense (model slots)
-    and max_edges (max_owned * k_dense).
+    rcut + skin / rcut), max_neighbors (neighbour-matrix list slots: LAMMPS
+    copies its whole rcut + skin list at every rebuild, and a wider row aborts
+    the run, so max(k_list + margin, ceil((1 + list_headroom) * k_list))), k_dense
+    (model slots; the matrix compacts the in-cutoff pairs into them) and
+    max_edges (max_owned * k_dense).
+
+    The list needs more headroom than the model slots: when a structure
+    compresses, the rcut + skin count grows as the rcut count does, from a
+    larger base.  On the benchmark deck SiGe medium's widest list row grew
+    from 34 to 45 by the first rebuild (k_list + 8 = 42 aborted), while its
+    rcut slots never overflowed (docs/perf-lammps-large-n.md).
 
     slots="skin" (default, always safe between list rebuilds): k_dense =
     k_list + margin.  No atom can gain more neighbours within rcut than its
@@ -97,8 +106,9 @@ def neighbour_capacity(atoms, rcut, skin=1.0, slots="skin", margin=8, owned=1.1)
     k_cut = k_max(rcut)
     max_owned = int(np.ceil(owned * n))
     k_dense = (k_list if slots == "skin" else k_cut) + margin
+    max_neighbors = max(k_list + margin, int(np.ceil((1 + list_headroom) * k_list)))
     return {"max_atoms": int(np.ceil(n * ghost * 1.1)), "max_owned": max_owned,
-            "k_list": k_list, "k_cut": k_cut, "max_neighbors": k_list + margin,
+            "k_list": k_list, "k_cut": k_cut, "max_neighbors": max_neighbors,
             "k_dense": k_dense, "max_edges": max_owned * k_dense}
 
 
