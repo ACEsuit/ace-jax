@@ -134,21 +134,36 @@ export_lammps(model, meta, "bundle", max_atoms=cap["max_atoms"], max_edges=cap["
 
 `layout="auto"` exports a dense-family layout when `k_dense` (max neighbours
 per atom) is given and one block's `estimate_a_bytes` fits the device budget,
-else sparse. The dense-family layout is `"matrix"` when the installed
-lammps-jax has its neighbour-matrix input (4a7f4fb and later), else `"dense"`.
+else sparse. The dense-family layout is `"matrix"` only when `max_neighbors`
+is passed, the installed lammps-jax has its neighbour-matrix input (4a7f4fb
+and later), and the block plus the matrix's unblocked pre-processing
+(`matrix_prep_bytes`) fits. Otherwise it is `"dense"`, so a call without
+`max_neighbors` keeps the packed dense bundle.
 `"matrix"` reads the LAMMPS neighbour list rows directly (copied only when
 LAMMPS rebuilds its list; the model drops the skin pairs), so there is no
 per-step packing; `"dense"` packs lammps-jax's edge buffer into slots every
-step. `max_owned` bounds the rows to the owned atoms (LAMMPS numbers them
-first), so ghost rows cost nothing. It is recorded as `ace_jax.owned_rows` in
-the bundle, and an atom past it, or past `k_dense` neighbours within the
-cutoff, gives NaN, never a silent truncation. A LAMMPS list row wider than
-`max_neighbors` (matrix only; default `k_dense`) aborts the run.
+step. `layout="matrix"` requires `max_neighbors`, the list slots per row. The
+list holds the rcut + skin pairs, so a `k_dense` sized for pairs within rcut
+is too small for it. `max_owned` bounds the rows to the owned atoms (LAMMPS
+numbers them first), so ghost rows cost nothing; it is recorded as
+`ace_jax.owned_rows`. Too many neighbours within the cutoff (past `k_dense`)
+gives NaN, never a silent truncation. So does an owned atom past `max_owned`
+in a dense bundle. For a matrix bundle, owned atoms past `max_owned` or a
+list row wider than `max_neighbors` abort the run in LAMMPS.
 
-`neighbour_capacity(atoms, rcut, skin=1.0, slots="skin", margin=8)` sizes all
-of these for a structure. It gives the matrix list 50% headroom over the
-rcut + skin coordination (`list_headroom`), because that count grows fastest
-when a structure compresses, and the model slots are compacted from the list.
+A LAMMPS lammps-jax plugin older than the Python package rejects a matrix
+bundle, with a message that suggests re-exporting. Re-exporting does not
+help: rebuild the plugin at the Python package's commit, or export
+`layout="dense"`. The bundle records the exporting lammps-jax as
+`ace_jax.lammps_jax`.
+
+`neighbour_capacity(atoms, rcut, skin=1.0, slots="skin", margin=8,
+list_headroom=0.5)` sizes all of these for a structure. The ghost shell is
+sized on the face spacings, so triclinic cells are covered. It gives the
+matrix list 50% headroom over the rcut + skin coordination, and the model
+slots are compacted from the list. The headroom is there because that count
+grows fastest when a structure compresses. The 0.5 is calibrated on a single
+observed overflow.
 The default `slots="skin"` sizes `k_dense` for the rcut + skin coordination,
 which is safe between list rebuilds.
 `slots="cutoff"` sizes it for rcut pairs only (the matrix list keeps its

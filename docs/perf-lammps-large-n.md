@@ -194,11 +194,16 @@ End to end in LAMMPS, 60 steps, identical first-step energies
 
 ## Neighbour-matrix bundles and tight slots (perf/lammps-matrix)
 
-Modal A100-SXM4-80GB, float64, lammps-jax 4a7f4fb, `bench/perf/modal_matrix_ab.py`
-(one container per run, variants interleaved within each case, each LAMMPS run
-a warm-up plus two timed segments; the table takes the faster segment).
-Results: `bench/perf/results/matrix_ab_a100_r1.json` (first sizing) and
-`matrix_ab_a100_r2.json` (final sizing).
+Modal A100 80GB, float64, lammps-jax 4a7f4fb, `bench/perf/modal_matrix_ab.py`.
+Each LAMMPS run is a warm-up plus two timed segments, and the table takes the
+faster segment. Variants are interleaved within each case, in one container.
+
+- `bench/perf/results/matrix_ab_a100_r2.json` holds the final sizing. It was
+  one container, an **A100 80GB PCIe**.
+- `matrix_ab_a100_r1.json` holds the first sizing, run as three containers:
+  - The parity rows and the PACE and 131k rows ran on an **A100 80GB PCIe**.
+  - ACE Cantor 16k and ACE SiGe 16k ran on an **A100-SXM4-80GB**.
+  - Each row records its `device_name`.
 
 **The lammps-jax neighbour-matrix contract** (`export_model(max_neighbors=,
 max_owned=)`, `pair_jax_kokkos.cpp`, `lammps_jax_model.cpp`):
@@ -222,17 +227,26 @@ max_owned=)`, `pair_jax_kokkos.cpp`, `lammps_jax_model.cpp`):
   float64.
 
 **ace-jax `layout="matrix"`** consumes the rows directly: `rij =
-positions[neighbors.T] - positions[row]`, skin pairs masked at `rcut`, same
-blocked evaluation and `type_map`. If `k_dense < max_neighbors`, the
+positions[neighbors.T] - positions[row]`, with skin pairs masked at `rcut`.
+It supports `type_map`. The model itself runs in the same `BUNDLE_BLOCK_ROWS`
+blocks. The pre-processing (the list gather, distances and compaction, over
+rows × `max_neighbors`) runs on all rows at once, not in blocks.
+`layout="auto"` adds it to its memory estimate (`matrix_prep_bytes`). If `k_dense < max_neighbors`, the
 in-cutoff pairs of each row are compacted into `k_dense` model slots with a
 cumsum and a search per row, as `calc/skin.py` does. Too many in-cutoff pairs,
 or a NaN distance, gives NaN energies and forces. `layout="auto"` picks it
-over packed dense when `matrix_supported()`.
+over packed dense only when `max_neighbors` is passed explicitly and
+`matrix_supported()`. A `k_dense` sized for pairs within rcut is not a list
+size, so the pre-matrix signature stays packed dense.
 
 **Parity in LAMMPS** (256 atoms, periodic, `run 0`, against the calculator):
 PACE Cantor, ACE Cantor and ACE SiGe medium, list-width and tight slots:
-|dE|/atom ≤ 1e-15 and |dF| ≤ 5e-14. First-step energies of stock, matrix and
-tight agree to the printed 17 digits in every timed case.
+|dE|/atom ≤ 1e-15 and |dF| ≤ 5e-14. These parity runs used the r1 sizing:
+a list of `k(rcut+skin)+8` slots, and tight slots compacted from it. The
+final sizing is gated in LAMMPS by the benchmark's parity gate, which now
+covers the matrix layout on both GPUs, when the suite is re-run.
+First-step energies of stock, matrix and tight agree to about 1 ULP in every
+timed case.
 
 **List sizing.** The first sizing gave the list `k(rcut + skin) + 8` slots
 (r1, `matrix_direct`). On the benchmark deck, ACE SiGe medium at 16k atoms
@@ -244,45 +258,60 @@ the rcut count as the random-weight structure compresses, so
 for SiGe. The model slots stay at `k(rcut + skin) + 8` and are compacted from
 the list (r2). With that sizing SiGe ran through two rebuilds.
 
-**Step time, ms** (A100). The "bench" deck is `run_lammps.lammps_input`. The
+**Step time, ms.** The "bench" deck is `run_lammps.lammps_input`. The
 "static" deck is the same without `fix nve`: atoms stay put and every step
 still evaluates energy and forces, a **stable-MD proxy** on which tight slots
 are safe (no list rebuilds after the first). The benchmark deck is not safe
-for tight slots. "matrix" is the final default sizing (r2). The
-"matrix_direct" column is r1's `list = model = k(rcut+skin)+8`, a separate
-container.
+for tight slots. Stock, matrix and tight are r2, on the A100 80GB PCIe;
+"matrix" is the final default sizing. The "matrix_direct" column is r1's
+`list = model = k(rcut+skin)+8`, which does no compaction. It ran in
+separate containers, on the GPU marked: P is the PCIe card and S the
+SXM4-80GB. Compare it to the r2 columns only roughly.
 
 | model | atoms | deck | stock | matrix | tight | matrix_direct (r1) | matrix / stock | tight / stock |
 |---|---|---|---|---|---|---|---|---|
-| PACE Cantor | 16k | bench | 14.34 | 11.20 | | 9.50 | 1.28× | |
-| PACE Cantor | 16k | static | 14.46 | 11.30 | 9.70 | 9.53 | 1.28× | 1.49× |
-| PACE Cantor | 131k | bench | 114.32 | 92.04 | | 74.74 | 1.24× | |
-| PACE Cantor | 131k | static | 114.51 | 92.03 | 78.49 | 74.71 | 1.24× | 1.46× |
-| ACE Cantor | 16k | bench | 13.25 | 9.29 | | 7.06 | 1.43× | |
-| ACE Cantor | 16k | static | 12.94 | 9.21 | 7.00 | 7.00 | 1.41× | 1.85× |
-| ACE Cantor | 131k | bench | 104.84 | 82.42 | | 65.43 | 1.27× | |
-| ACE Cantor | 131k | static | 104.72 | 82.45 | 59.29 | 65.38 | 1.27× | 1.77× |
-| ACE SiGe | 16k | bench | 6.65 | 5.13 | | abort (list 45 > 42) | 1.30× | |
-| ACE SiGe | 16k | static | 6.59 | 5.24 | 5.44 | 4.50 | 1.26× | 1.21× |
-| ACE SiGe | 131k | bench | 52.99 | 46.18 | | 40.35 | 1.15× | |
-| ACE SiGe | 131k | static | 52.84 | 45.99 | 41.71 | 40.34 | 1.15× | 1.27× |
+| PACE Cantor | 16k | bench | 14.34 | 11.20 | | 9.50 P | 1.28× | |
+| PACE Cantor | 16k | static | 14.46 | 11.30 | 9.70 | 9.53 P | 1.28× | 1.49× |
+| PACE Cantor | 131k | bench | 114.32 | 92.04 | | 74.74 P | 1.24× | |
+| PACE Cantor | 131k | static | 114.51 | 92.03 | 78.49 | 74.71 P | 1.24× | 1.46× |
+| ACE Cantor | 16k | bench | 13.25 | 9.29 | | 7.06 S | 1.43× | |
+| ACE Cantor | 16k | static | 12.94 | 9.21 | 7.00 | 7.00 S | 1.41× | 1.85× |
+| ACE Cantor | 131k | bench | 104.84 | 82.42 | | 65.43 P | 1.27× | |
+| ACE Cantor | 131k | static | 104.72 | 82.45 | 59.29 | 65.38 P | 1.27× | 1.77× |
+| ACE SiGe | 16k | bench | 6.65 | 5.13 | | abort S (list 45 > 42) | 1.30× | |
+| ACE SiGe | 16k | static | 6.59 | 5.24 | 5.44 | 4.50 S | 1.26× | 1.21× |
+| ACE SiGe | 131k | bench | 52.99 | 46.18 | | 40.35 P | 1.15× | |
+| ACE SiGe | 131k | static | 52.84 | 45.99 | 41.71 | 40.34 P | 1.15× | 1.27× |
 
-In r1 the tight variant compacted from a 86 / 42 slot list: 7.83 / 62.45 ms
-(PACE), 5.18 / 43.87 ms (ACE Cantor) and 5.04 / 36.45 ms (SiGe) at 16k /
+In r1 the tight variant was compacted from an 86-slot (Cantor) or 42-slot
+(SiGe) list. At 16k / 131k it ran 7.83 / 62.45 ms for PACE and 5.18 / 43.87
+ms for ACE Cantor. For SiGe it ran 5.04 ms at 16k (SXM4) and 36.45 ms at
 131k.
 
 - **The matrix removes the packing** and is 1.15–1.43× faster than stock at
-  the safe sizing. Without the list headroom it was 1.28–1.81× faster. The
-  difference is the per-step cost of reading and compacting a 117-slot list
-  against an 86-slot one.
+  the safe sizing (r2, same GPU). The r1 direct sizing ran about 1.3–1.8×
+  faster than stock, but that is across containers and, at ACE 16k, across
+  GPUs. The gap between the two is the per-step cost of reading and
+  compacting a larger list. On Cantor that is 117 against 86 slots, and the
+  direct form does no compaction at all. On SiGe it is 51 against 42.
 - **Tight slots** (`--tight-slots`, `slots="cutoff"`) give a further 1.1–1.4×
   on Cantor. On the stable-MD proxy they are 1.46–1.85× faster than stock.
 - **On SiGe, compaction can cost more than it saves.** At 16k, tight (36 model
   slots from a 51-slot list) is slower than the safe matrix (42 slots). SiGe's
   rcut and rcut + skin counts are close (28 against 34), so there are few slots
   to save.
-- **The 50% headroom is a guess** calibrated on one overflow. It is safe on
-  this deck, but it costs up to 20% of the matrix gain for Cantor. For a
-  stable MD deck, `list_headroom=0` with `margin` of 8 or more restores the
-  direct column (r1). A list that overflows aborts at a rebuild; it never
-  truncates.
+- **The 50% headroom is a guess** calibrated on one overflow, 34 to 45. It
+  held on this deck, but it costs a good part of the matrix gain on Cantor.
+  For a stable MD deck, `list_headroom=0` with `margin` of 8 or more should
+  roughly restore the direct column (r1). The benchmark can set it with
+  `run_lammps.py --list-headroom`. A list that overflows aborts at a
+  rebuild; it never truncates.
+- **Rebuilds are barely exercised.** Almost no timed run rebuilt its LAMMPS
+  list. The only exception is ACE SiGe 16k on the bench deck: two rebuilds,
+  stock and matrix in r2, stock only in r1. So two things are untested:
+  - the per-rebuild matrix copy cost;
+  - whether Cantor's 1.5× list headroom survives a rebuild.
+- **Triclinic cells.** `neighbour_capacity` sizes the ghost shell on the face
+  spacings (1/|reciprocal row|), not the cell-vector lengths, which
+  underestimated sheared cells. The benchmark cells are cubic, so the
+  numbers above are unaffected.

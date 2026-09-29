@@ -199,20 +199,30 @@ This writes a lammps-jax bundle for `pair_style jax/kk` (GPU only).
   `k_dense < max_neighbors`). No per-step packing.
 - `layout="auto"` chooses a dense-family layout only when `k_dense` (max
   neighbours per atom) is given and one dense block's `estimate_a_bytes` fits
-  `dense_budget_bytes()`: `"matrix"` if `matrix_supported()`, else `"dense"`.
-  `max_edges` is needed by sparse and dense only.
+  `dense_budget_bytes()`. It is `"matrix"` only if `max_neighbors` is passed,
+  `matrix_supported()`, and the block plus `matrix_prep_bytes` (the unblocked
+  list pre-processing) fits; otherwise `"dense"`. The old signature, without
+  `max_neighbors`, stays packed dense. `layout="matrix"` requires
+  `max_neighbors`: the list holds rcut + skin pairs, so a `k_dense` sized for
+  rcut is too small. `max_edges` is needed by sparse and dense only.
+- An older lammps-jax LAMMPS plugin rejects a matrix bundle ("re-export"). To
+  fix it, rebuild the plugin, or export `layout="dense"`. The bundle records
+  the exporting lammps-jax as `ace_jax.lammps_jax`.
 - `max_owned`: owned-row capacity of the dense and matrix bundles. LAMMPS
   numbers owned atoms first, so only rows below it are evaluated and ghosts
   cost nothing. The bundle records it as `ace_jax.owned_rows`; the key is not
   `max_owned` because lammps-jax reads that name from anywhere in the file
-  (so ace-jax metadata never reuses a lammps-jax contract key). An atom past
-  `max_owned`, or with more than `k_dense` neighbours within rcut, gives NaN,
-  never a silent truncation. A LAMMPS list row wider than `max_neighbors`
-  aborts the run in lammps-jax.
-- `neighbour_capacity(atoms, rcut, skin=1.0, slots="skin", margin=8)`: buffer
-  sizes. The matrix list gets 50% headroom over k(rcut + skin)
-  (`list_headroom`; a compressing structure grows it fastest), and model slots
-  are compacted from it. `slots="skin"` (default) is safe between list rebuilds.
+  (so ace-jax metadata never reuses a lammps-jax contract key). More than
+  `k_dense` neighbours within rcut gives NaN, never a silent truncation. So
+  does an atom past `max_owned` in a dense bundle. A matrix bundle instead
+  aborts the run in LAMMPS for an owned atom past `max_owned`, or for a list
+  row wider than `max_neighbors`.
+- `neighbour_capacity(atoms, rcut, skin=1.0, slots="skin", margin=8,
+  list_headroom=0.5)`: buffer sizes. The ghost shell uses the face spacings,
+  so triclinic cells are fine. The matrix list gets 50% headroom over
+  k(rcut + skin), because a compressing structure grows that count fastest.
+  The 0.5 comes from one observed overflow, 34 to 45; the benchmark has
+  `--list-headroom`. Model slots are compacted from the list. `slots="skin"` (default) is safe between list rebuilds.
   `slots="cutoff"` sizes model slots for rcut pairs, 1.2-1.4x faster on Cantor; use it
   only for stable MD with a fitted model (coordination within `margin` of the
   start). An overflow is a NaN step. The benchmark's `run_lammps.py
