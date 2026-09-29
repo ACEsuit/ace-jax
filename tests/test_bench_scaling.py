@@ -977,3 +977,20 @@ def test_tables_use_the_median_and_show_the_spread():
     assert "| 8.19e+06 |" in tables(rows[:1])                            # no ± for a single run
     s = summaries(rows, [_rep(8e-3, n=8192)])
     assert "| 1.02M | 4.10M ±75% | 4.0× |" in s
+
+
+def test_runner_hint_carries_the_matrix_overflow_flag(monkeypatch):
+    """The next size of a line must see that its matrix list overflowed, or it
+    goes back to the matrix layout (the hint is all a fresh process gets)."""
+    from scaling import sweep
+    seen = {}
+
+    def fake_capped(cmd, env, timeout, cap_bytes=None):
+        seen.update(json.loads(env["BENCH_PREV"]))
+        return 0, '{"status": "ok"}', "", 0, False
+
+    monkeypatch.setattr(sweep, "run_capped", fake_capped)
+    run = sweep.subprocess_runner("moriarty-gpu", {"lmp": "lmp", "lmp_jax": "lmp-jax"})
+    c = next(c for c in sweep.cases("moriarty-gpu") if c.code == "acejax-ace" and c.mode == "lammps")
+    run(c, prev={"step_s": 0.01, "n_atoms": 256, "layout": "dense", "matrix_overflow": True})
+    assert seen.get("matrix_overflow") is True
