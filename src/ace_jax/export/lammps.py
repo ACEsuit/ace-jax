@@ -61,11 +61,36 @@ def matrix_supported():
             and "max_neighbors" in inspect.signature(export.export_model).parameters)
 
 
+def lammps_jax_version():
+    """The installed lammps-jax as '<version>[+<git commit>]', or None."""
+    import importlib.metadata
+    try:
+        dist = importlib.metadata.distribution("lammps_jax")
+    except importlib.metadata.PackageNotFoundError:
+        return None
+    try:
+        commit = json.loads(dist.read_text("direct_url.json") or "{}").get(
+            "vcs_info", {}).get("commit_id")
+    except (ValueError, AttributeError):
+        commit = None
+    return dist.version + (f"+{commit[:7]}" if commit else "")
+
+
+def matrix_prep_bytes(rows, max_neighbors, k_dense, itemsize):
+    """Rough bytes of the matrix layout's pre-processing, which runs over every
+    row at once (not in BUNDLE_BLOCK_ROWS blocks): per list slot the neighbour
+    index, the edge vector and its cotangent, r2, masks and the running count;
+    per model slot the compacted vector and its cotangent, indices and mask."""
+    return int(rows) * (int(max_neighbors) * (6 * itemsize + 14)
+                        + int(k_dense) * (6 * itemsize + 13))
+
+
 def neighbour_capacity(atoms, rcut, skin=1.0, slots="skin", margin=8, owned=1.1,
                        list_headroom=0.5):
     """lammps-jax buffer sizes for `atoms` (a periodic ase.Atoms, the structure
-    the run starts from).  Returns max_atoms (owned + ghost shell within
-    rcut + skin of each face, estimated from the cell-vector lengths, x1.1),
+    the run starts from).  Returns max_atoms (owned + ghost shell rcut + skin
+    deep perpendicular to each face -- the face spacings, 1/|reciprocal row|,
+    so sheared cells are covered -- x1.1),
     max_owned (owned x `owned`), k_list / k_cut (largest coordination within
     rcut + skin / rcut), max_neighbors (neighbour-matrix list slots: LAMMPS
     copies its whole rcut + skin list at every rebuild, and a wider row aborts
@@ -75,9 +100,11 @@ def neighbour_capacity(atoms, rcut, skin=1.0, slots="skin", margin=8, owned=1.1,
 
     The list needs more headroom than the model slots: when a structure
     compresses, the rcut + skin count grows as the rcut count does, from a
-    larger base.  On the benchmark deck SiGe medium's widest list row grew
-    from 34 to 45 by the first rebuild (k_list + 8 = 42 aborted), while its
-    rcut slots never overflowed (docs/perf-lammps-large-n.md).
+    larger base.  list_headroom = 0.5 comes from ONE observed overflow: on the
+    benchmark deck SiGe medium's widest list row grew from 34 to 45 by the
+    first rebuild (k_list + 8 = 42 aborted), while its rcut slots never
+    overflowed (docs/perf-lammps-large-n.md).  It is a guess, not a bound;
+    for stable MD list_headroom=0 (with margin >= 8) is cheaper.
 
     slots="skin" (default, always safe between list rebuilds): k_dense =
     k_list + margin.  No atom can gain more neighbours within rcut than its
@@ -94,8 +121,8 @@ def neighbour_capacity(atoms, rcut, skin=1.0, slots="skin", margin=8, owned=1.1,
     if slots not in ("skin", "cutoff"):
         raise ValueError(f"slots must be 'skin' or 'cutoff', got {slots!r}")
     from ..eval import sparse_graph
-    L = np.linalg.norm(atoms.cell.array, axis=1)
-    ghost = float(np.prod((L + 2 * (rcut + skin)) / L))
+    h = 1.0 / np.linalg.norm(atoms.cell.reciprocal(), axis=1)   # face spacings
+    ghost = float(np.prod((h + 2 * (rcut + skin)) / h))
     n = len(atoms)
 
     def k_max(c):
@@ -236,10 +263,12 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
 
     Capacities: max_atoms (owned + ghost positions); max_edges (sparse / dense:
     the packed edge buffer, pairs within rcut); k_dense (dense / matrix: model
-    slots per atom); max_neighbors (matrix only: list slots per row, default
-    k_dense -- LAMMPS copies its rcut + skin list whole, and a wider row aborts
-    the run).  `neighbour_capacity` sizes all of them for a structure; its
-    slots="cutoff" gives tight model slots (k_dense < max_neighbors).
+    slots per atom, for the matrix default max_neighbors); max_neighbors
+    (matrix only, required: list slots per row -- LAMMPS copies its rcut + skin
+    list whole, so a k_dense sized for pairs within rcut is too small, and a
+    wider row aborts the run).  `neighbour_capacity` sizes all of them for a
+    structure; its slots="cutoff" gives tight model slots (k_dense <
+    max_neighbors).
 
     type_elements: atomic numbers in LAMMPS type order (type 1 first).  LAMMPS
     hands the model species = type - 1, and a model's own element order (a
@@ -255,8 +284,12 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
     estimate_a_bytes for one dense block (the row capacity -- max_owned if
     given, else max_atoms -- capped at BUNDLE_BLOCK_ROWS) fits
     ace_jax.calc.point.dense_budget_bytes(), else sparse.  The dense-family
-    layout is "matrix" when the installed lammps-jax supports it
-    (`matrix_supported`), else "dense".
+    layout is "matrix" when max_neighbors is given, the installed lammps-jax
+    supports it (`matrix_supported`) and the block plus the matrix's unblocked
+    pre-processing (`matrix_prep_bytes`) fits; else "dense".  A LAMMPS plugin
+    older than the Python package rejects a matrix bundle: rebuild the plugin,
+    or export layout="dense".  The bundle records the exporting lammps-jax as
+    `ace_jax.lammps_jax`.
 
     lean (default True): export `ace_jax.eval.model.lean(model)`, the exact
     evaluation form with the dead per-edge work removed (docs/ace-vs-pace-gap.md);
@@ -275,8 +308,9 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
     n_species = len(type_elements)
     if layout not in BUNDLE_LAYOUTS + ("auto",):
         raise ValueError(f"layout must be 'auto' or one of {BUNDLE_LAYOUTS}, got {layout!r}")
-    if layout == "matrix" and not (k_dense or max_neighbors):
-        raise ValueError("the matrix layout needs k_dense or max_neighbors (slots per atom)")
+    if layout == "matrix" and not max_neighbors:
+        raise ValueError("the matrix layout needs max_neighbors (list slots per row, for "
+                         "the rcut + skin list; see neighbour_capacity)")
     if layout in ("sparse", "dense") and max_edges is None:
         raise ValueError(f"the {layout} layout needs max_edges (the packed edge buffer)")
     if layout == "auto":
@@ -285,17 +319,21 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
         n_rows = min(max_owned if max_owned is not None else max_atoms, BUNDLE_BLOCK_ROWS)
         k = min(k_dense, max_neighbors or k_dense) if k_dense else 0
         edges = n_rows * k if max_edges is None else min(max_edges, n_rows * k)
-        fits = k and estimate_a_bytes(model, "dense", n_rows, edges, k,
-                                      itemsize) <= dense_budget_bytes()
-        matrix = matrix_supported()
-        if not matrix and max_edges is None:
-            raise ValueError("layout='auto' needs max_edges: this lammps-jax has no "
-                             "neighbour-matrix layout")
-        layout = ("matrix" if matrix else "dense") if fits else "sparse"
-        if layout == "sparse" and max_edges is None:
-            raise ValueError("layout='auto' fell back to sparse, which needs max_edges")
+        block = estimate_a_bytes(model, "dense", n_rows, edges, k, itemsize) if k else None
+        budget = dense_budget_bytes()
+        rows = max_owned if max_owned is not None else max_atoms
+        if (k and max_neighbors and matrix_supported() and block
+                + matrix_prep_bytes(rows, max_neighbors, k, itemsize) <= budget):
+            layout = "matrix"
+        elif k and max_edges is not None and block <= budget:
+            layout = "dense"
+        elif max_edges is not None:
+            layout = "sparse"
+        else:
+            raise ValueError("layout='auto' needs max_edges unless the matrix layout is "
+                             "chosen (max_neighbors given, supported, and fitting)")
     if layout == "matrix":
-        max_neighbors = int(max_neighbors or k_dense)
+        max_neighbors = int(max_neighbors)
         k_dense = min(int(k_dense or max_neighbors), max_neighbors)
     # layout="auto" above sized one block on the full model, as without lean:
     # estimate_a_bytes fits the full dense path, and on the lean widths it
@@ -316,6 +354,7 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
                          # not "max_owned": lammps-jax reads that key from anywhere in
                          # the file and would take it as its own contract's
                          "owned_rows": int(max_owned) if max_owned is not None else None,
-                         "lean": bool(getattr(model, "energy_only", False))}
+                         "lean": bool(getattr(model, "energy_only", False)),
+                         "lammps_jax": lammps_jax_version()}
     Path(path).write_text(json.dumps(bundle, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return bundle

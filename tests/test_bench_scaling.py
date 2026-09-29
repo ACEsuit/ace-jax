@@ -163,6 +163,7 @@ def test_capacity_tight_slots_are_opt_in():
     assert tight["k_dense"] == neighbour_capacity(at, 5.0, slots="cutoff")["k_dense"] < safe["k_dense"]
     assert tight["max_neighbors"] == safe["max_neighbors"] >= int(np.ceil(1.5 * safe["k_max"]))
     assert tight["max_edges"] == tight["max_owned"] * tight["k_dense"]
+    assert capacity(at, 5.0, list_headroom=0.0)["max_neighbors"] == safe["k_max"] + 8
 
 
 def test_lammps_retries_sparse_after_a_matrix_oom(tmp_path, monkeypatch):
@@ -171,7 +172,7 @@ def test_lammps_retries_sparse_after_a_matrix_oom(tmp_path, monkeypatch):
     from scaling import run_lammps
     layouts = []
 
-    def fake_export(row, at, dtype, work, layout="auto", slots="skin"):
+    def fake_export(row, at, dtype, work, layout="auto", slots="skin", list_headroom=0.5):
         layouts.append(layout)
         return "b.json", ("matrix" if layout == "auto" else "sparse"), 1.0
 
@@ -182,6 +183,27 @@ def test_lammps_retries_sparse_after_a_matrix_oom(tmp_path, monkeypatch):
            "path": "m.yace", "size": "small"}
     out = run_lammps.run_case(row, 256, "float64", "gpu", "lmp", 1, tmp_path)
     assert layouts == ["auto", "sparse"] and out["status"] == "ok" and out["dense_oom"]
+
+
+def test_export_passes_the_matrix_list_size(tmp_path, monkeypatch):
+    """The benchmark's export passes max_neighbors from neighbour_capacity, so
+    layout="auto" can pick the matrix (it never does without it)."""
+    from scaling import run_lammps
+    seen = {}
+
+    def fake_export(model, meta, path, **kw):
+        seen.update(kw)
+        return {"ace_jax": {"layout": "matrix"}}
+
+    import ace_jax.export.lammps as lx
+    monkeypatch.setattr(lx, "export_lammps", fake_export)
+    import ace_jax.eval as ev
+    monkeypatch.setattr(ev, "load", lambda p: (None, {"rcut": 5.0}, None))
+    at = supercell("SiGe", 256)
+    row = {"path": "m.npz", "elements": ["Si", "Ge"]}
+    run_lammps._export_inprocess(row, at, "float64", tmp_path, "auto", "skin", 0.25)
+    want = run_lammps.capacity(at, 5.0, list_headroom=0.25)
+    assert seen["max_neighbors"] == want["max_neighbors"] and seen["k_dense"] == want["k_dense"]
 
 
 def test_read_pe_and_dump(tmp_path):

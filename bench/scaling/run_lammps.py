@@ -93,7 +93,7 @@ def read_dump_forces(path):
     return rows[np.argsort(rows[:, 0]), 1:4]
 
 
-def capacity(at, rcut, skin=1.0, tight=False):
+def capacity(at, rcut, skin=1.0, tight=False, list_headroom=0.5):
     """lammps-jax buffer sizes for this structure (ace_jax.export.lammps.
     neighbour_capacity, margin 8): owned + ghost atoms (the periodic shell
     within rcut + skin of each face) size the LAMMPS position buffer
@@ -109,15 +109,19 @@ def capacity(at, rcut, skin=1.0, tight=False):
 
     tight=True (bench --tight-slots; opt-in, never the main suite): model slots
     for rcut pairs only, 1.2-1.4x faster on Cantor, safe only on a deck whose coordination
-    stays within 8 of the start (stable MD); an overflow is a NaN step."""
+    stays within 8 of the start (stable MD); an overflow is a NaN step.
+
+    list_headroom (bench --list-headroom): the matrix list's headroom over
+    k(rcut + skin); 0.5 from one observed overflow (neighbour_capacity)."""
     from ace_jax.export.lammps import neighbour_capacity
-    c = neighbour_capacity(at, rcut, skin=skin, slots="cutoff" if tight else "skin", margin=8)
+    c = neighbour_capacity(at, rcut, skin=skin, slots="cutoff" if tight else "skin", margin=8,
+                           list_headroom=list_headroom)
     return {"max_atoms": c["max_atoms"], "k_max": c["k_list"], "k_dense": c["k_dense"],
             "max_edges": c["max_edges"], "max_owned": c["max_owned"],
             "max_neighbors": c["max_neighbors"]}
 
 
-def _export_inprocess(row, at, dtype, workdir, layout="auto", slots="skin"):
+def _export_inprocess(row, at, dtype, workdir, layout="auto", slots="skin", list_headroom=0.5):
     """Export the ace-jax model as a lammps-jax bundle sized for `at` (this
     process: it initialises JAX, and on a GPU host keeps JAX's memory pool)."""
     import time
@@ -127,7 +131,7 @@ def _export_inprocess(row, at, dtype, workdir, layout="auto", slots="skin"):
     from ace_jax.eval import load
     from ace_jax.export.lammps import export_lammps
     model, meta, _ = load(row["path"])
-    cap = capacity(at, float(meta["rcut"]), tight=slots == "cutoff")
+    cap = capacity(at, float(meta["rcut"]), tight=slots == "cutoff", list_headroom=list_headroom)
     pathlib.Path(workdir).mkdir(parents=True, exist_ok=True)
     t0 = time.perf_counter()
     b = export_lammps(model, meta, pathlib.Path(workdir) / "bundle.json", max_atoms=cap["max_atoms"],
@@ -137,14 +141,14 @@ def _export_inprocess(row, at, dtype, workdir, layout="auto", slots="skin"):
     return str(pathlib.Path(workdir) / "bundle.json"), b["ace_jax"]["layout"], time.perf_counter() - t0
 
 
-def export_bundle(row, at, dtype, workdir, layout="auto", slots="skin"):
+def export_bundle(row, at, dtype, workdir, layout="auto", slots="skin", list_headroom=0.5):
     """Export the ace-jax model as a lammps-jax bundle sized for `at`, in a
     child process: exporting here would initialise JAX on the GPU, whose default
     pool (75% of the card) stays allocated while LAMMPS runs, leaving lammps-jax
     a quarter of it.  Returns (bundle path, layout used, export seconds)."""
     keep = {k: row[k] for k in ("name", "system", "path", "elements") if k in row}
     cmd = [sys.executable, str(pathlib.Path(__file__).resolve()), "--export", json.dumps(keep),
-           str(len(at)), dtype, str(workdir), layout, slots]
+           str(len(at)), dtype, str(workdir), layout, slots, str(list_headroom)]
     bench = str(pathlib.Path(__file__).resolve().parents[1])     # so the child imports scaling
     env = {**os.environ, "PYTHONPATH": os.pathsep.join(
         [bench] + [x for x in os.environ.get("PYTHONPATH", "").split(os.pathsep) if x])}
@@ -180,7 +184,7 @@ def bundle_layout(prev):
 
 
 def run_case(row, n_atoms, dtype, device, lmp, ranks, workdir, pjrt=None, prev=None,
-             slots="skin"):
+             slots="skin", list_headroom=0.5):
     work = pathlib.Path(workdir); work.mkdir(parents=True, exist_ok=True)
     at = supercell(row["system"], n_atoms)
     data = work / "x.data"
@@ -200,10 +204,13 @@ def run_case(row, n_atoms, dtype, device, lmp, ranks, workdir, pjrt=None, prev=N
     # bundle that runs out of memory is retried sparse
     layout = bundle_layout(prev)
     while True:
-        bundle, used, compile_s = export_bundle(row, at, dtype, work, layout=layout, slots=slots)
+        bundle, used, compile_s = export_bundle(row, at, dtype, work, layout=layout, slots=slots,
+                                                list_headroom=list_headroom)
         extra = {"layout": used, "compile_s": compile_s}
         if slots != "skin":
             extra["slots"] = slots
+        if list_headroom != 0.5:
+            extra["list_headroom"] = list_headroom
         out = _run_lammps(row, style, bundle, data, work, n_atoms, dtype, device, lmp, ranks, pjrt,
                           steps, warmup, extra)
         if out["status"] == "oom" and used in ("dense", "matrix"):
@@ -247,18 +254,26 @@ def _run_lammps(row, style, model, data, work, n_atoms, dtype, device, lmp, rank
 if __name__ == "__main__" and sys.argv[1:2] == ["--export"]:
     _row, _n, _dtype, _work, _layout = json.loads(sys.argv[2]), int(sys.argv[3]), *sys.argv[4:7]
     _slots = sys.argv[7] if len(sys.argv) > 7 else "skin"
+    _head = float(sys.argv[8]) if len(sys.argv) > 8 else 0.5
     _b, _l, _t = _export_inprocess(_row, supercell(_row["system"], _n), _dtype, _work, _layout,
-                                   _slots)
+                                   _slots, _head)
     print(json.dumps({"bundle": _b, "layout": _l, "compile_s": _t}))
 elif __name__ == "__main__":
     from scaling.models import planned_models
     # --tight-slots: model slots for rcut pairs (capacity(tight=True)); opt-in,
     # never the main suite, whose random-weight structures compress
+    # --list-headroom H: the matrix list's headroom over k(rcut + skin) (default 0.5)
     tight = "--tight-slots" in sys.argv
-    name, n, dtype, device, lmp, ranks, workdir = [x for x in sys.argv[1:] if x != "--tight-slots"][:7]
+    args = [x for x in sys.argv[1:] if x != "--tight-slots"]
+    head = 0.5
+    if "--list-headroom" in args:
+        i = args.index("--list-headroom")
+        head = float(args[i + 1])
+        del args[i:i + 2]
+    name, n, dtype, device, lmp, ranks, workdir = args[:7]
     row = next(r for r in planned_models() if r["name"] == name)
     row["bundle"] = os.environ.get("ACEJAX_BUNDLE", "")
     prev = json.loads(os.environ["BENCH_PREV"]) if os.environ.get("BENCH_PREV") else None
     print(json.dumps(run_case(row, int(n), dtype, device, lmp, int(ranks), workdir,
                               os.environ.get("PJRT_PLUGIN"), prev,
-                              slots="cutoff" if tight else "skin")))
+                              slots="cutoff" if tight else "skin", list_headroom=head)))
