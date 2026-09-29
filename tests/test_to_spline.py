@@ -412,3 +412,128 @@ def test_lammps_bundle_of_a_learned_radial(tmp_path, monkeypatch, layout):
     (E0, G0), (E1, G1) = vg(full), vg(f)
     assert abs(float(E1) - float(E0)) <= 1e-6 * abs(float(E0))
     assert np.abs(np.asarray(G1 - G0)).max() <= 1e-6 * np.abs(np.asarray(G0)).max()
+
+
+# ------------------------------------------------------------------ default tolerance, exposure
+def test_default_tol_is_1e_10():
+    import inspect
+    for f in (to_spline, lean, lean_keep_basis):
+        p = inspect.signature(f).parameters
+        assert p["tol" if f is to_spline else "spline_tol"].default == 1e-10
+
+
+@pytest.mark.parametrize("layout", ["sparse", "dense"])
+def test_default_lean_forces_to_1e_8(layout):
+    """At the default tol the lean form's forces agree with the full analytic
+    model to ~1e-8 of the largest force (docs/learned-radial-splining.md)."""
+    m, meta, _ = load(str(CANTOR))
+    a = _perturbed(m)
+    at = _structure(meta)
+    (E0, F0, V0), (E1, F1, V1) = _efv(a, meta, at, layout), _efv(lean(a), meta, at, layout)
+    assert abs(E1 - E0) <= 1e-9 * abs(E0)
+    assert np.abs(F1 - F0).max() <= 3e-8 * np.abs(F0).max()
+    assert np.abs(V1 - V0).max() <= 3e-8 * np.abs(V0).max()
+
+
+def test_calculator_spline_tol():
+    from ace_jax.calc.point import ACECalculator
+    m, meta, _ = load(str(SIGE))
+    a = _perturbed(m)
+    assert ACECalculator(a, meta).eval_model.radial_kind == "spline"
+    exact = ACECalculator(a, meta, spline_tol=None).eval_model
+    assert exact.radial_kind == "analytic" and exact.energy_only       # still lean
+    coarse = ACECalculator(a, meta, spline_tol=1e-6).eval_model
+    fine = ACECalculator(a, meta).eval_model
+    assert coarse.rnl_grid[2] < fine.rnl_grid[2]
+
+
+@pytest.mark.parametrize("tol", [1e-10, 1e-6, None])
+def test_export_records_spline_tol(tmp_path, monkeypatch, tol):
+    from conftest import require_optional
+    require_optional("lammps_jax")
+    from ace_jax.export import lammps as lx
+    m, meta, _ = load(str(SIGE))
+    a = _perturbed(m)
+    seen = []
+    real = lx.make_energy_fn
+    monkeypatch.setattr(lx, "make_energy_fn", lambda mm, *x, **k: seen.append(mm) or real(mm, *x, **k))
+    b = lx.export_lammps(a, meta, tmp_path / "m.json", max_atoms=64, max_edges=64 * 64,
+                         k_dense=64, layout="sparse", spline_tol=tol)
+    assert b["ace_jax"]["spline_tol"] == tol
+    assert seen[-1].radial_kind == ("analytic" if tol is None else "spline")
+    b = lx.export_lammps(m, meta, tmp_path / "s.json", max_atoms=64, max_edges=64 * 64,
+                         k_dense=64, layout="sparse", spline_tol=tol)
+    assert b["ace_jax"]["spline_tol"] is None                  # nothing was splined
+
+
+# ------------------------------------------------------------------ cache
+@pytest.fixture
+def fits(monkeypatch):
+    """Counts the table fits `to_spline` actually runs (cache misses)."""
+    from ace_jax.eval import splinify
+    splinify.clear_cache()
+    n = {"fit": 0}
+    real = splinify._fit
+
+    def spy(*a, **k):
+        n["fit"] += 1
+        return real(*a, **k)
+
+    monkeypatch.setattr(splinify, "_fit", spy)
+    yield n
+    splinify.clear_cache()
+
+
+def test_cache_hits_on_readout_only_changes(fits):
+    m, meta, _ = load(str(SIGE))
+    a = _analytic_pair(_perturbed(m))
+    s0, e0 = to_spline(a)
+    assert fits["fit"] == 2                                    # tensor + pair
+    b = dataclasses.replace(a, WB=2 * a.WB, Wpair=3 * a.Wpair, E0=a.E0 + 1,
+                            ctilde=5 * a.ctilde)
+    s1, e1 = to_spline(b)
+    assert fits["fit"] == 2 and e1 == e0                       # hit: no new fit
+    np.testing.assert_array_equal(np.asarray(s1.rnl_coefs), np.asarray(s0.rnl_coefs))
+    np.testing.assert_array_equal(np.asarray(s1.WB), np.asarray(b.WB))    # its own readout
+    lean(b)
+    assert fits["fit"] == 2
+
+
+def test_cache_misses_on_radial_edits(fits):
+    m, meta, _ = load(str(SIGE))
+    a = _perturbed(m)
+    s0, _ = to_spline(a)
+    W = np.array(a.rnl_Wnlq)
+    W[np.abs(W).max(-1) > 0] *= 1.0 + 1e-12                   # a tiny edit still misses
+    b = dataclasses.replace(a, rnl_Wnlq=jnp.asarray(W))
+    s1, _ = to_spline(b)
+    assert fits["fit"] == 2
+    assert not np.array_equal(np.asarray(s1.rnl_coefs), np.asarray(s0.rnl_coefs))
+    to_spline(a, tol=1e-6)                                     # tol is part of the key
+    assert fits["fit"] == 3
+    env = np.array(a.rnl_envelope); env[..., 4] *= 2           # the error check reads it
+    to_spline(dataclasses.replace(a, rnl_envelope=jnp.asarray(env)))
+    assert fits["fit"] == 4
+    to_spline(a)                                               # the first one: still cached
+    assert fits["fit"] == 4
+
+
+def test_cache_is_bounded(fits):
+    from ace_jax.eval import splinify
+    m, meta, _ = load(str(SIGE))
+    a = _perturbed(m)
+    for k in range(splinify.CACHE_SIZE + 3):
+        to_spline(dataclasses.replace(a, rnl_Wnlq=a.rnl_Wnlq * (1.0 + k)), n_intervals=32)
+    assert len(splinify._CACHE) == splinify.CACHE_SIZE
+
+
+def test_calculator_swap_reuses_the_spline(fits):
+    from ace_jax.calc.point import ACECalculator
+    m, meta, _ = load(str(SIGE))
+    a = _perturbed(m)
+    calc = ACECalculator(a, meta)
+    n = fits["fit"]
+    calc.model = dataclasses.replace(a, ctilde=2 * a.ctilde)
+    assert fits["fit"] == n
+    calc.model = dataclasses.replace(a, rnl_Wnlq=2 * a.rnl_Wnlq)
+    assert fits["fit"] == n + 1

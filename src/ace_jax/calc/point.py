@@ -54,7 +54,7 @@ class ACECalculator(Calculator):
                               "site_descriptors"]
 
     def __init__(self, model, meta=None, cutoff=None, dtype=None, edge_a_kind="auto",
-                 layout="auto", skin=1.0, lean=True, **kw):
+                 layout="auto", skin=1.0, lean=True, spline_tol=1e-10, **kw):
         """`ACECalculator("si_fitted.npz")` is the intended form: cutoff,
         species and dtype all come from the file.  A pre-loaded (model, meta)
         pair is still accepted, which is what the validation tests use.
@@ -81,8 +81,10 @@ class ACECalculator(Calculator):
         `lean` (default True) evaluates energies, forces and stress with
         `ace_jax.eval.model.lean(model)`: exact to roundoff, with the per-edge
         work the energy never reads removed (docs/ace-vs-pace-gap.md); an
-        analytic (learned) radial is splined first, to within 1e-8 per radial
-        rather than roundoff (`to_spline`, docs/learned-radial-splining.md).  It is
+        analytic (learned) radial is splined first, to within `spline_tol`
+        (default 1e-10) per radial rather than roundoff (`to_spline`,
+        docs/learned-radial-splining.md); spline_tol=None keeps it analytic,
+        exact.  The spline is cached on the radial's content.  It is
         `eval_model`; `model` stays the model as given, and descriptors use it.
         A PACE or unfolded model is evaluated as given either way.  Setting
         `calc.model` recomputes the lean form on the host (a device-to-host copy
@@ -99,6 +101,7 @@ class ACECalculator(Calculator):
         model, meta = _resolve(model, meta, dtype)
         self._skin_jit = None                 # (static model part, cutoff, compiled step)
         self._lean = bool(lean)
+        self._spline_tol = spline_tol
         self.model = model                    # (the setter resets what derives from it)
         self.meta = meta
         self.edge_a_kind = edge_a_kind
@@ -139,7 +142,7 @@ class ACECalculator(Calculator):
         if hasattr(self, "_model"):
             self.reset()
         self._model = model
-        self._eval_model = lean_form(model) if self._lean else model
+        self._eval_model = lean_form(model, self._spline_tol) if self._lean else model
         self._by_kind = {}                    # form -> model in that form
         self._by_bucket = {}                  # edge bucket -> calibrated form
         self._skin_state = None               # the skin list in use (calc.skin.SkinState)

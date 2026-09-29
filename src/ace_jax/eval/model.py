@@ -690,7 +690,7 @@ def _wraps(model):
     return hasattr(model, "base") and callable(getattr(model, "with_base", None))
 
 
-def lean_keep_basis(model, spline_tol=1e-8):
+def lean_keep_basis(model, spline_tol=1e-10):
     """The basis-preserving part of `lean`, for models that read the basis:
     `to_spline` (analytic radials only; agrees to `spline_tol`, see `lean`) and
     `prune_columns` (exact: B and Apair unchanged).  Never `fold_pair` or
@@ -704,7 +704,7 @@ def lean_keep_basis(model, spline_tol=1e-8):
     return prune_columns(_splined(model, spline_tol))
 
 
-def lean(model, spline_tol=1e-8):
+def lean(model, spline_tol=1e-10):
     """The evaluation form of a folded ACEModel: `prune_columns`, `fold_pair`
     and the l-blocked dense A (`block_dense`).  Exact to roundoff in E, F and the
     virial for a splined model; 1.1-3.3x faster forces on the benchmark models
@@ -716,6 +716,10 @@ def lean(model, spline_tol=1e-8):
     pattern, which learned radials keep), the species-compact blocks.  That
     step is an approximation: the lean form of an analytic model agrees with
     the full one to about `spline_tol` (relative, per radial), not to roundoff.
+    At the default 1e-10 that is ~1e-11 in energy and 4e-9 to 2e-8 of the
+    largest force on the benchmark models (docs/learned-radial-splining.md).
+    The conversion is cached on the radial's content (`splinify`), so a
+    re-lean after a readout-only change does not re-spline.
     spline_tol=None keeps the analytic radial (exact, no compaction).  For
     evaluation and export only: fitting keeps the analytic model, and a UQ
     variance should come from the full model.

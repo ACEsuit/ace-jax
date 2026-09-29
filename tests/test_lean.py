@@ -378,7 +378,8 @@ def test_lean_float32(layout):
 def test_authored_model_through_the_calculator(tmp_path, monkeypatch):
     """A Python-authored model (analytic R_nl and pair radial) with a nonzero
     readout: ACECalculator(lean=True), which splines both radials, agrees with
-    lean=False to the spline tolerance (1e-8 per radial)."""
+    lean=False to the spline tolerance (1e-10 per radial; ~2e-8 of the largest
+    force at worst on the benchmark models, hence the 1e-7 bound)."""
     from test_python_authoring import _primed_cache
 
     from ace_jax.calc.point import ACECalculator
@@ -402,7 +403,7 @@ def test_authored_model_through_the_calculator(tmp_path, monkeypatch):
         assert a.calc.eval_model.radial_kind == ("spline" if use else "analytic")
         res.append((a.get_potential_energy(), a.get_forces(), a.get_stress()))
     (E0, F0, S0), (E1, F1, S1) = res
-    tol = 100 * 1e-8
+    tol = 1e-7
     assert abs(E1 - E0) <= tol * abs(E0)
     np.testing.assert_allclose(F1, F0, rtol=0, atol=tol * np.abs(F0).max())
     np.testing.assert_allclose(S1, S0, rtol=0, atol=tol * np.abs(S0).max())

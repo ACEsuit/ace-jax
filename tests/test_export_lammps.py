@@ -93,7 +93,8 @@ def test_bundle_written(tmp_path):
     assert on_disk["contract"]["n_species"] == 2
     assert on_disk["ace_jax"] == {"layout": "dense", "elements": [32, 14],
                                   "type_elements": [32, 14], "k_dense": 64, "owned_rows": None,
-                                  "lean": False}           # PACE: no lean form
+                                  "lean": False,           # PACE: no lean form
+                                  "spline_tol": None}
     assert b["ace_jax"]["layout"] == "dense"
 
 

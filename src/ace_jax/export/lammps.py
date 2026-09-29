@@ -93,7 +93,7 @@ def make_energy_fn(model, n_species, layout, k_dense=None, type_map=None, n_rows
 
 def export_lammps(model, meta, path, *, max_atoms, max_edges, k_dense=None,
                   dtype="float64", layout="auto", type_elements=None, max_owned=None,
-                  lean=True):
+                  lean=True, spline_tol=1e-10):
     """Write a lammps-jax JSON bundle for `model`; returns the bundle dict.
 
     type_elements: atomic numbers in LAMMPS type order (type 1 first).  LAMMPS
@@ -112,9 +112,11 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges, k_dense=None,
 
     lean (default True): export `ace_jax.eval.model.lean(model)`, the exact
     evaluation form with the dead per-edge work removed (docs/ace-vs-pace-gap.md;
-    an analytic, learned radial is splined to within 1e-8 per radial first,
-    docs/learned-radial-splining.md);
-    recorded as `ace_jax.lean` (False for a model it does not apply to, e.g. PACE).
+    an analytic, learned radial is splined to within `spline_tol` per radial
+    first, docs/learned-radial-splining.md; spline_tol=None keeps it analytic);
+    recorded as `ace_jax.lean` (False for a model it does not apply to, e.g. PACE),
+    and the splining tolerance as `ace_jax.spline_tol` (None when no radial was
+    analytic, or with spline_tol=None or lean=False).
     """
     from lammps_jax.export import export_model
 
@@ -138,8 +140,12 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges, k_dense=None,
     # estimate_a_bytes fits the full dense path, and on the lean widths it
     # underestimates the blocked path's compiled temp (measured 6.6-6.9x actual /
     # estimate on CPU, against 3.0-5.1x full), so it could pick dense and OOM
+    splined = None
     if lean:
-        model = _lean(model)
+        was_analytic = "analytic" in (getattr(model, "radial_kind", None),
+                                      getattr(model, "pair_radial_kind", None))
+        model = _lean(model, spline_tol)
+        splined = spline_tol if was_analytic else None
     energy_fn = make_energy_fn(model, n_species, layout, k_dense,
                                None if type_map == list(range(len(model_z))) else type_map,
                                n_rows=max_owned if layout == "dense" else None)
@@ -151,6 +157,8 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges, k_dense=None,
                          # not "max_owned": lammps-jax reads that key from anywhere in
                          # the file and would take it as its own contract's
                          "owned_rows": int(max_owned) if max_owned is not None else None,
-                         "lean": bool(getattr(model, "energy_only", False))}
+                         "lean": bool(getattr(model, "energy_only", False)),
+                         # tolerance the analytic radial was splined to (None: not splined)
+                         "spline_tol": splined}
     Path(path).write_text(json.dumps(bundle, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return bundle

@@ -17,6 +17,8 @@ analytic model to the requested tolerance, not to roundoff.  Fitting keeps the
 analytic model; this is for evaluation and export (`lean` applies it).
 """
 import dataclasses
+import hashlib
+from collections import OrderedDict
 
 import jax.numpy as jnp
 import numpy as np
@@ -24,6 +26,50 @@ import numpy as np
 START_INTERVALS = 32
 MAX_INTERVALS = 1 << 16
 CHECK_PER_INTERVAL = 10
+
+# Converted tables, keyed on the content of what determines them (Wnlq, the
+# recursion, the R_nl envelope the error is measured with, n_intervals, tol),
+# never on object identity: an ACECalculator re-leans on every `calc.model`
+# swap, and a swap that changes only readout weights (ctilde, WB, Wpair, E0)
+# must not re-spline, while any radial edit must.  A small LRU: a few models
+# in flight at once, each entry one float64 table (a few MB).
+CACHE_SIZE = 8
+_CACHE = OrderedDict()
+
+
+def clear_cache():
+    _CACHE.clear()
+
+
+def _key(*parts):
+    h = hashlib.sha256()
+    for p in parts:
+        if p is None or isinstance(p, (int, float, str)):
+            h.update(repr(p).encode())
+        else:
+            a = np.ascontiguousarray(np.asarray(p, np.float64))
+            h.update(repr(a.shape).encode())
+            h.update(a.tobytes())
+    return h.hexdigest()
+
+
+def _fit_cached(W, polys, n_intervals, tol, env_params):
+    """`_fit` through the LRU; env_params (NZ, NZ, 5) or None (pair radial)."""
+    from .radial import env_poly2sx
+    key = _key("rnl" if env_params is not None else "pair", W, *polys, env_params,
+               None if n_intervals is None else int(n_intervals), float(tol))
+    if key in _CACHE:
+        _CACHE.move_to_end(key)
+        return _CACHE[key]
+    env_fn = None
+    if env_params is not None:
+        env_fn = lambda x: np.asarray(env_poly2sx(jnp.asarray(x)[None, None, :],   # noqa: E731
+                                                  jnp.asarray(env_params)[:, :, None, :]))
+    out = _fit(W, polys, n_intervals, tol, env_fn)
+    _CACHE[key] = out
+    while len(_CACHE) > CACHE_SIZE:
+        _CACHE.popitem(last=False)
+    return out
 
 
 def _poly_d012(x, A, B, C):
@@ -132,7 +178,7 @@ def _fit(W, polys, n_intervals, tol, env_fn):
     return c, n_int, err
 
 
-def to_spline(model, n_intervals=None, tol=1e-8):
+def to_spline(model, n_intervals=None, tol=1e-10):
     """Convert an ACEModel's analytic radials to the spline branch.
 
     The tensor radial (`rnl_Wnlq`, radial_kind "analytic") and the pair radial
@@ -155,9 +201,13 @@ def to_spline(model, n_intervals=None, tol=1e-8):
     `spline_factorised` R_nl, and a spline pair radial, are kept as they are.
     The result is an ordinary full model (float64 tables cast to the model's
     dtype), trainable as a spline; it agrees with `model` to `tol`, not to
-    roundoff.  Needs the full model (`require_full`)."""
+    roundoff.  Needs the full model (`require_full`).
+
+    Cached (`CACHE_SIZE`-entry LRU, `clear_cache()`) on the content of each
+    radial's Wnlq, polynomial recursion and (R_nl) envelope plus n_intervals
+    and tol, so converting a model whose radials are unchanged -- e.g. after
+    a readout-only swap -- costs a hash, not a fit."""
     from .model import ACEModel
-    from .radial import env_poly2sx
     if not isinstance(model, ACEModel):
         raise TypeError(f"to_spline needs an ACEModel, got {type(model).__name__}")
     model.require_full("to_spline")
@@ -170,9 +220,7 @@ def to_spline(model, n_intervals=None, tol=1e-8):
         W = np.asarray(model.rnl_Wnlq, np.float64)
         polys = tuple(np.asarray(v, np.float64) for v in (model.polys_A, model.polys_B, model.polys_C))
         envp = np.asarray(model.rnl_envelope, np.float64)
-        env_fn = lambda x: np.asarray(env_poly2sx(jnp.asarray(x)[None, None, :],   # noqa: E731
-                                                  jnp.asarray(envp)[:, :, None, :]))
-        c, n_int, err = _fit(W, polys, n_intervals, tol, env_fn)
+        c, n_int, err = _fit_cached(W, polys, n_intervals, tol, envp)
         dt = model.rnl_Wnlq.dtype
         kw.update(radial_kind="spline", rnl_coefs=jnp.asarray(c, dt),
                   rnl_Wnlq=jnp.zeros((1, 1, 1, 1), dt),
@@ -182,7 +230,7 @@ def to_spline(model, n_intervals=None, tol=1e-8):
         W = np.asarray(model.pair_Wnlq, np.float64)
         polys = tuple(np.asarray(v, np.float64)
                       for v in (model.pair_polys_A, model.pair_polys_B, model.pair_polys_C))
-        c, n_int, err = _fit(W, polys, n_intervals, tol, None)
+        c, n_int, err = _fit_cached(W, polys, n_intervals, tol, None)
         dt = model.pair_Wnlq.dtype
         kw.update(pair_radial_kind="spline", pair_coefs=jnp.asarray(c, dt),
                   pair_Wnlq=jnp.zeros((1, 1, 1, 1), dt),
