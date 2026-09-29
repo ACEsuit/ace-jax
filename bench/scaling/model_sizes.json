@@ -6,6 +6,8 @@
  },
  "Cantor/medium": {
   "acejax-ace": 447,
+  "acejax-ace-analytic": 447,
+  "acejax-ace-learned": 447,
   "acejax-pace": 496,
   "mlpace": 496
  },
@@ -21,6 +23,8 @@
  },
  "SiGe/medium": {
   "acejax-ace": 469,
+  "acejax-ace-analytic": 469,
+  "acejax-ace-learned": 469,
   "acejax-pace": 499,
   "mlpace": 499
  },
