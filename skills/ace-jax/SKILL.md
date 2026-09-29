@@ -159,6 +159,18 @@ load; faster only at large `nradbase`). Values are unchanged to roundoff.
   call `require_full()` and raise); edit the full model and re-apply `lean`.
   `aj.load` returns the full model. Setting `calc.model` recomputes the lean
   form on the host, a device-to-host copy per swap.
+  - An analytic radial (a learned one, e.g. a `bench/learn_radial` model.npz)
+    is first splined by `ace_jax.eval.to_spline(model, tol=1e-8)`: the spline
+    gather replaces the polynomial recursion, and the species-compact blocks
+    apply again (learned radials keep ACE1's one-neighbour-species-per-column
+    pattern). That step agrees with the full model to about `spline_tol` (1e-8
+    per radial; forces ~1e-7 relative), not to roundoff.
+    `lean(model, spline_tol=None)` keeps it analytic and exact. Take UQ
+    variances from the full model.
+  - A wrapper model with `.base` and `with_base(new_base)` (e.g. an
+    `FSModel(base, ...)`) gets `model.with_base(lean_keep_basis(model.base))`:
+    `to_spline` and `prune_columns` only, which keep `site_basis` and the
+    unfolded readout valid.
 - `layout`: `"sparse"` (edge list) or `"dense"` (padded per-node blocks, A by a
   batched outer product, several times faster forces on GPU). `"auto"` picks
   dense when the padding fill, edges / (atoms × max neighbours), is at least
@@ -212,7 +224,10 @@ Other entry points:
   --model M.npz --data D.xyz --out DIR --r0 2.35 [--n-q 12] [--lam-grid 0,1e-2]`
   learns the tensor radials by VarPro (`ace_jax.fit.radial_learn.learn_radial`)
   and writes `DIR/model.npz` with the radials a held-out gate selects. Fit the GP
-  on that file as usual. Needs float64.
+  on that file as usual. Needs float64. For MD, `ACECalculator` and
+  `export_lammps` spline the learned radial through `lean` (see above);
+  `ace_jax.eval.to_spline(model, n_intervals=None, tol=1e-8)` returns
+  `(spline model, max_rel_err)` directly.
 - Benchmarks: `docs/benchmarks.md` (harness in `bench/scaling/`).
 
 ## Gotchas
