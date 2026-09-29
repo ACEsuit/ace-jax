@@ -189,8 +189,16 @@ class ACECalculator(Calculator):
         old one (its edge_a forms, the skin list and the step bound to its
         weights) is dropped.  The compiled step is kept while the structure
         (the static part) is unchanged, so new weights do not retrace.  ASE's
-        cached results are cleared too, as they are for a parameter change."""
+        cached results are cleared too, as they are for a parameter change.
+
+        Refused when a posterior is attached: the posterior, its design-row model and the device
+        factors belong to the model FILE given at construction, so forces_std would silently
+        describe the old model.  Build a new ACECalculator(model, posterior=...) instead."""
         if hasattr(self, "_model"):
+            if getattr(self, "posterior", None) is not None:
+                raise ValueError("cannot swap calc.model on a calculator with posterior=: forces_std "
+                                 "would still describe the model it was built with; build a new "
+                                 "ACECalculator(model_file, posterior=posterior_file) instead")
             self.reset()
         self._model = model
         self._by_kind = {}                    # form -> model in that form

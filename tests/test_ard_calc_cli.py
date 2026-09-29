@@ -56,6 +56,18 @@ def test_calculator_caches_chol_on_device(fitted):
     assert isinstance(calc.posterior.chol, jax.Array) and calc.posterior.chol.dtype == np.float64
 
 
+def test_model_swap_is_refused_with_a_posterior(fitted):
+    """The posterior, its design-row model and the device factors all belong to the model FILE the
+    calculator was built with: swapping calc.model would leave forces_std serving the old model's
+    sigma beside the new model's forces, so it raises.  Without a posterior a swap still works."""
+    from ace_jax import ACECalculator
+    calc = ACECalculator(str(fitted / "model.npz"), posterior=str(fitted / "posterior.npz"))
+    with pytest.raises(ValueError, match="posterior"):
+        calc.model = calc.model
+    plain = ACECalculator(str(fitted / "model.npz"))
+    plain.model = plain.model                                         # no posterior: allowed
+
+
 def test_calculator_forces_std_matches_pipeline(fitted):
     from ace_jax import ACECalculator
     from ace_jax.fit.ard import ARDPosterior, predict_ard
