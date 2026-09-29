@@ -126,7 +126,8 @@ def test_error_is_measured_against_the_model():
             zi, zj = jnp.full(r.shape, i), jnp.full(r.shape, j)
             R0, P0 = a.radial(rij, zi, zj)
             R1, P1 = s.radial(rij, zi, zj)
-            R0, R1 = np.asarray(R0), np.asarray(R1)
+            read = np.unique(np.asarray(a.aspec_r))           # the columns tol is measured on
+            R0, R1 = np.asarray(R0)[:, read], np.asarray(R1)[:, read]
             live = np.abs(R0).max(0) > 0
             rel = np.abs(R1 - R0).max(0)[live] / np.abs(R0).max(0)[live]
             assert rel.max() <= 1.01 * err
@@ -518,15 +519,6 @@ def test_cache_misses_on_radial_edits(fits):
     assert fits["fit"] == 4
 
 
-def test_cache_is_bounded(fits):
-    from ace_jax.eval import splinify
-    m, meta, _ = load(str(SIGE))
-    a = _perturbed(m)
-    for k in range(splinify.CACHE_SIZE + 3):
-        to_spline(dataclasses.replace(a, rnl_Wnlq=a.rnl_Wnlq * (1.0 + k)), n_intervals=32)
-    assert len(splinify._CACHE) == splinify.CACHE_SIZE
-
-
 def test_calculator_swap_reuses_the_spline(fits):
     from ace_jax.calc.point import ACECalculator
     m, meta, _ = load(str(SIGE))
@@ -537,3 +529,171 @@ def test_calculator_swap_reuses_the_spline(fits):
     assert fits["fit"] == n
     calc.model = dataclasses.replace(a, rnl_Wnlq=2 * a.rnl_Wnlq)
     assert fits["fit"] == n + 1
+
+
+# ------------------------------------------------------------------ review round
+def test_intervals_are_bucketed():
+    """n_int is rounded up to a 2^(k/4) bucket (<= 19% more intervals), so
+    radials that need similar grids share a shape and a static grid."""
+    from ace_jax.eval import splinify
+    m, meta, _ = load(str(SIGE))
+    for tol in (1e-6, 1e-8, 1e-10):
+        s, err = to_spline(_perturbed(m), tol=tol)
+        n = s.rnl_grid[2] - 1
+        assert n in splinify.BUCKETS and err <= tol
+    ratios = [b2 / b1 for b1, b2 in zip(splinify.BUCKETS, splinify.BUCKETS[1:])]
+    assert max(ratios) <= 1.2 and min(ratios) > 1.18                  # 2^(1/4), integer-rounded
+
+
+@pytest.mark.parametrize("layout", ["sparse", "dense"])
+def test_radial_swap_does_not_retrace(layout):
+    """Two different learned-like radials bucket together: their lean forms have
+    the same structure, so one compiled step serves both; each stays within tol."""
+    m, meta, _ = load(str(SIGE))
+    a, b = _perturbed(m, seed=1), _perturbed(m, seed=2)
+    la, lb = lean(a), lean(b)
+    assert la.rnl_grid == lb.rnl_grid
+    traces = []
+
+    def f(mm, *x):
+        traces.append(1)                                   # runs at trace time only
+        return (mm.energy_forces_virial if layout == "sparse" else mm.energy_forces_virial_dense)(*x)
+
+    ff = eqx.filter_jit(f)
+    at = _structure(meta)
+    z2i = {int(z): i for i, z in enumerate(meta["elements"])}
+    nz = jnp.asarray([z2i[int(z)] for z in at.numbers], jnp.int32)
+    g = sparse_graph(at.positions, at.cell.array, at.pbc, meta["rcut"])
+    if layout == "sparse":
+        s, r = jnp.asarray(g.senders), jnp.asarray(g.receivers)
+        args = (jnp.asarray(g.rij), nz[s], nz[r], s, r, len(at), nz)
+    else:
+        d = dense_from_sparse(g, meta["rcut"])
+        idx = jnp.asarray(d.idx)
+        args = (jnp.asarray(d.rij), jnp.broadcast_to(nz[:, None], idx.shape), nz[idx], idx,
+                jnp.asarray(d.mask), nz)
+    with highest_precision():
+        outs = [tuple(np.asarray(v) for v in ff(mm, *args)) for mm in (la, lb)]
+    assert len(traces) == 1
+    for full, out in zip((a, b), outs):
+        _close(_efv(full, meta, at, layout), out, 1e-10, scale=1000.0)
+
+
+def test_spline_intervals_pins_the_grid():
+    from ace_jax.calc.point import ACECalculator
+    m, meta, _ = load(str(SIGE))
+    a = _perturbed(m)
+    assert lean(a, spline_intervals=700).rnl_grid == (-1.0, 2.0 / 700, 701)
+    assert lean_keep_basis(a, spline_intervals=700).rnl_grid[2] == 701
+    calc = ACECalculator(a, meta, spline_intervals=700)
+    assert calc.eval_model.rnl_grid[2] == 701
+    assert calc.splined["n_intervals"]["rnl"] == 700
+
+
+def test_calculator_reports_splining():
+    from ace_jax.calc.point import ACECalculator
+    m, meta, _ = load(str(SIGE))
+    a = _perturbed(m)
+    at = _structure(meta)
+    for model, tol, want in ((a, 1e-10, True), (a, None, False), (m, 1e-10, False)):
+        calc = ACECalculator(model, meta, spline_tol=tol)
+        if want:
+            assert calc.splined["spline_tol"] == tol and calc.splined["radials"] == ["rnl"]
+        else:
+            assert calc.splined is None
+        x = at.copy(); x.calc = calc
+        x.get_potential_energy()
+        assert calc.last_timing["spline_tol"] == (tol if want else None)
+
+
+def _export(model, meta, tmp_path, **kw):
+    from ace_jax.export import lammps as lx
+    return lx.export_lammps(model, meta, tmp_path / "m.json", max_atoms=64, max_edges=64 * 64,
+                            k_dense=64, layout="sparse", **kw)["ace_jax"]
+
+
+def test_export_records_what_lean_did(tmp_path):
+    from conftest import require_optional
+    require_optional("lammps_jax")
+    m, meta, _ = load(str(SIGE))
+    a = _perturbed(m)
+    b = _export(a, meta, tmp_path)
+    assert b["lean"] is True and b["spline_tol"] == 1e-10
+    assert b["spline_intervals"]["rnl"] == lean(a).rnl_grid[2] - 1
+    unfolded = dataclasses.replace(a, folded=False, ctilde=None)          # lean leaves it as given
+    b = _export(unfolded, meta, tmp_path)
+    assert b["lean"] is False and b["spline_tol"] is None
+    b = _export(Wrapper(a), meta, tmp_path)                                # the base is splined
+    assert b["lean"] is True and b["spline_tol"] == 1e-10
+    b = _export(Wrapper(a), meta, tmp_path, lean=False)
+    assert b["lean"] is False and b["spline_tol"] is None
+
+
+def test_derivative_error_is_measured_and_can_gate():
+    """tol bounds values; the S' error (what forces see, O(h^3)) is reported and,
+    with deriv_tol, also gated."""
+    m, meta, _ = load(str(SIGE))
+    a = _perturbed(m)
+    s, info = to_spline(a, return_info=True)
+    assert info["max_rel_err"] <= 1e-10 and info["n_intervals"]["rnl"] == s.rnl_grid[2] - 1
+    assert 1e-10 < info["max_rel_deriv_err"] < 1e-6
+    s2, info2 = to_spline(a, deriv_tol=1e-9, return_info=True)
+    assert info2["max_rel_deriv_err"] <= 1e-9
+    assert s2.rnl_grid[2] > s.rnl_grid[2]
+    assert to_spline(a)[1] == info["max_rel_err"]                          # the default return
+
+
+@pytest.mark.parametrize("tol", [0.0, -1e-8, 1e-16])
+def test_tol_is_validated(tol):
+    m, meta, _ = load(str(SIGE))
+    with pytest.raises(ValueError, match="tol"):
+        to_spline(_perturbed(m), tol=tol)
+
+
+def test_unread_columns_do_not_drive_the_grid():
+    """Only the R_nl columns A reads are measured: a rough column that
+    prune_columns will drop does not refine the table."""
+    m, meta, _ = load(str(SIGE))
+    a = _perturbed(m)
+    dead = np.setdiff1d(np.arange(a.rnl_Wnlq.shape[2]), np.unique(np.asarray(a.aspec_r)))
+    assert dead.size
+    W = np.array(a.rnl_Wnlq)
+    W[:, :, dead, -1] = 1e3 * np.abs(W).max()                          # rough, huge, unread
+    rough = dataclasses.replace(a, rnl_Wnlq=jnp.asarray(W))
+    assert to_spline(rough)[0].rnl_grid == to_spline(a)[0].rnl_grid
+    at = _structure(meta)
+    _close(_efv(rough, meta, at, "dense"), _efv(lean(rough), meta, at, "dense"), 1e-10,
+           scale=1000.0)
+
+
+def test_cache_misses_on_polys(fits):
+    m, meta, _ = load(str(SIGE))
+    a = _perturbed(m)
+    to_spline(a)
+    n = fits["fit"]
+    to_spline(dataclasses.replace(a, polys_A=a.polys_A * (1 + 1e-9)))
+    assert fits["fit"] == n + 1
+
+
+def test_cache_is_bounded_by_bytes(fits, monkeypatch):
+    from ace_jax.eval import splinify
+    m, meta, _ = load(str(SIGE))
+    a = _perturbed(m)
+    to_spline(a, n_intervals=64)
+    one = splinify._cache_bytes()
+    monkeypatch.setattr(splinify, "CACHE_BYTES", int(2.5 * one))
+    for k in range(5):
+        to_spline(dataclasses.replace(a, rnl_Wnlq=a.rnl_Wnlq * (2.0 + k)), n_intervals=64)
+    assert splinify._cache_bytes() <= 2.5 * one and len(splinify._CACHE) == 2
+
+
+def test_float32_tolerance_floor():
+    """A float32 model cannot hold a table better than ~eps32, so the tolerance
+    is floored at 10 eps of the model's dtype: fewer intervals, same gather."""
+    m, meta, _ = load(str(SIGE))
+    a = _perturbed(m)
+    a32 = jax.tree.map(lambda v: v.astype(jnp.float32)
+                       if hasattr(v, "dtype") and jnp.issubdtype(v.dtype, jnp.floating) else v, a)
+    s64, _ = to_spline(a)
+    s32, err = to_spline(a32)
+    assert err <= 10 * np.finfo(np.float32).eps and s32.rnl_grid[2] < s64.rnl_grid[2]

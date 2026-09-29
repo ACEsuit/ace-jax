@@ -676,12 +676,18 @@ def block_dense(model):
                                       if compact else None))
 
 
-def _splined(model, spline_tol):
-    """`to_spline(model, tol=spline_tol)` when a radial is analytic, else `model`."""
+from .splinify import DEFAULT_SPLINE_TOL  # noqa: E402
+
+
+def _splined(model, spline_tol, spline_intervals=None):
+    """`to_spline(model, n_intervals=spline_intervals, tol=spline_tol)` when a
+    radial is analytic, else `model`.  Which analytic models get splined is
+    decided here alone: every analytic radial (learned, Julia `ace_model`
+    export, Python-authored) unless spline_tol is None."""
     if spline_tol is None or "analytic" not in (model.radial_kind, model.pair_radial_kind):
         return model
     from .splinify import to_spline
-    return to_spline(model, tol=spline_tol)[0]
+    return to_spline(model, n_intervals=spline_intervals, tol=spline_tol)[0]
 
 
 def _wraps(model):
@@ -690,43 +696,64 @@ def _wraps(model):
     return hasattr(model, "base") and callable(getattr(model, "with_base", None))
 
 
-def lean_keep_basis(model, spline_tol=1e-10):
+def splining(before, after, spline_tol):
+    """What `lean` did to the radials, from the models before and after (looking
+    through a wrapper's `.base`): None when no radial went analytic -> spline,
+    else {"spline_tol", "radials" (["rnl"], ["pair"] or both), "n_intervals"
+    {radial: n}}.  Read off the result, so an unfolded model `lean` returned
+    as given, or spline_tol=None, reports None."""
+    b0 = before.base if _wraps(before) else before
+    b1 = after.base if _wraps(after) else after
+    rad = [name for name, k in (("rnl", "radial_kind"), ("pair", "pair_radial_kind"))
+           if getattr(b0, k, None) == "analytic" and getattr(b1, k, None) == "spline"]
+    if not rad:
+        return None
+    grid = {"rnl": "rnl_grid", "pair": "pair_grid"}
+    return {"spline_tol": spline_tol, "radials": rad,
+            "n_intervals": {r: int(getattr(b1, grid[r])[2]) - 1 for r in rad}}
+
+
+def lean_keep_basis(model, spline_tol=DEFAULT_SPLINE_TOL, spline_intervals=None):
     """The basis-preserving part of `lean`, for models that read the basis:
-    `to_spline` (analytic radials only; agrees to `spline_tol`, see `lean`) and
-    `prune_columns` (exact: B and Apair unchanged).  Never `fold_pair` or
-    `block_dense`, so `site_basis`, `site_basis_dense`, `_readout` (WB, Wpair)
-    and the descriptors keep working.  A wrapper model's `lean` applies this to
-    its `.base`.  Anything that is not an ACEModel is returned as given.
-    Needs the full model (`require_full`)."""
+    `to_spline` (every analytic radial, learned or not; agrees to `spline_tol`,
+    see `lean`) and `prune_columns` (exact: B and Apair unchanged).  Never
+    `fold_pair` or `block_dense`, so `site_basis`, `site_basis_dense`,
+    `_readout` (WB, Wpair) and the descriptors keep working.  A wrapper model's
+    `lean` applies this to its `.base`.  Anything that is not an ACEModel is
+    returned as given.  Needs the full model (`require_full`)."""
     if not isinstance(model, ACEModel):
         return model
     model.require_full("lean_keep_basis")
-    return prune_columns(_splined(model, spline_tol))
+    return prune_columns(_splined(model, spline_tol, spline_intervals))
 
 
-def lean(model, spline_tol=1e-10):
+def lean(model, spline_tol=DEFAULT_SPLINE_TOL, spline_intervals=None):
     """The evaluation form of a folded ACEModel: `prune_columns`, `fold_pair`
     and the l-blocked dense A (`block_dense`).  Exact to roundoff in E, F and the
     virial for a splined model; 1.1-3.3x faster forces on the benchmark models
     (docs/ace-vs-pace-gap.md section 8).
 
-    An analytic radial (a learned one, `rnl_Wnlq` / `pair_Wnlq`) is first
-    splined by `to_spline(model, tol=spline_tol)`, so it gets the spline
-    gather and, when each R_nl column belongs to one neighbour species (ACE1's
-    pattern, which learned radials keep), the species-compact blocks.  That
-    step is an approximation: the lean form of an analytic model agrees with
-    the full one to about `spline_tol` (relative, per radial), not to roundoff.
-    At the default 1e-10 that is ~1e-11 in energy and 4e-9 to 2e-8 of the
-    largest force on the benchmark models (docs/learned-radial-splining.md).
-    The conversion is cached on the radial's content (`splinify`), so a
-    re-lean after a readout-only change does not re-spline.
-    spline_tol=None keeps the analytic radial (exact, no compaction).  For
-    evaluation and export only: fitting keeps the analytic model, and a UQ
-    variance should come from the full model.
+    Every analytic radial (`rnl_Wnlq` / `pair_Wnlq`) is first splined by
+    `to_spline(model, n_intervals=spline_intervals, tol=spline_tol)`: learned
+    radials, but also every Julia `ace_model` export and every Python-authored
+    model, which are analytic too.  It then gets the spline gather and, when
+    each R_nl column belongs to one neighbour species (ACE1's pattern, which
+    learned radials keep), the species-compact blocks.  That step is an
+    approximation, not roundoff: at the default 1e-10 the lean energies agree
+    with the full model to up to ~1e-9 relative and forces to up to ~2.3e-8
+    of max|F| on the benchmark models (docs/learned-radial-splining.md).
+    spline_tol=None keeps the analytic radial (exact, no compaction);
+    spline_intervals pins the grid (default: the smallest `splinify.BUCKETS`
+    bucket meeting tol, so radial swaps keep the compiled step).  The
+    conversion is cached on the radial's content (`splinify`), so a re-lean
+    after a readout-only change does not re-spline.  For evaluation and
+    export only: fitting keeps the analytic model, and a UQ variance should
+    come from the full model.  `splining(model, lean(model), tol)` reports
+    what was splined.
 
     A wrapper model (`.base` and `with_base`, e.g. FSModel(base, ...)) returns
-    `model.with_base(lean_keep_basis(model.base, spline_tol))`: the wrapper
-    reads the basis, so only the basis-preserving transforms apply.
+    `model.with_base(lean_keep_basis(model.base, spline_tol, spline_intervals))`:
+    the wrapper reads the basis, so only the basis-preserving transforms apply.
 
     Energy only (see `fold_pair`): keep the original for descriptors and
     fitting.  Anything that is not a folded ACEModel (a PACEModel, an unfolded
@@ -736,7 +763,7 @@ def lean(model, spline_tol=1e-10):
     WB or ctilde on it changes one layout and not the other (`require_full`
     guards the radial helpers).  Change the full model and re-apply `lean`."""
     if _wraps(model):
-        return model.with_base(lean_keep_basis(model.base, spline_tol))
+        return model.with_base(lean_keep_basis(model.base, spline_tol, spline_intervals))
     if not isinstance(model, ACEModel) or not model.folded or model.energy_only:
         return model
-    return block_dense(fold_pair(prune_columns(_splined(model, spline_tol))))
+    return block_dense(fold_pair(prune_columns(_splined(model, spline_tol, spline_intervals))))

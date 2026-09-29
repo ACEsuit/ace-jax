@@ -12,6 +12,8 @@ from ase.calculators.calculator import Calculator, all_changes
 from ..eval.edge_model import LAYOUTS, calibrate_edge_a, check_edge_a_kind, with_edge_a_kind
 from ..eval.model import highest_precision
 from ..eval.model import lean as lean_form
+from ..eval.model import splining
+from ..eval.splinify import DEFAULT_SPLINE_TOL
 from ..eval.nlist import backend as nlist_backend
 from ..eval.nlist import dense_from_sparse, dense_graph, have_matscipy_neighbours, sparse_graph
 from . import skin as skin_list
@@ -54,7 +56,8 @@ class ACECalculator(Calculator):
                               "site_descriptors"]
 
     def __init__(self, model, meta=None, cutoff=None, dtype=None, edge_a_kind="auto",
-                 layout="auto", skin=1.0, lean=True, spline_tol=1e-10, **kw):
+                 layout="auto", skin=1.0, lean=True, spline_tol=DEFAULT_SPLINE_TOL,
+                 spline_intervals=None, **kw):
         """`ACECalculator("si_fitted.npz")` is the intended form: cutoff,
         species and dtype all come from the file.  A pre-loaded (model, meta)
         pair is still accepted, which is what the validation tests use.
@@ -80,11 +83,17 @@ class ACECalculator(Calculator):
 
         `lean` (default True) evaluates energies, forces and stress with
         `ace_jax.eval.model.lean(model)`: exact to roundoff, with the per-edge
-        work the energy never reads removed (docs/ace-vs-pace-gap.md); an
-        analytic (learned) radial is splined first, to within `spline_tol`
-        (default 1e-10) per radial rather than roundoff (`to_spline`,
-        docs/learned-radial-splining.md); spline_tol=None keeps it analytic,
-        exact.  The spline is cached on the radial's content.  It is
+        work the energy never reads removed (docs/ace-vs-pace-gap.md).  Every
+        analytic radial is splined first (`to_spline`): learned radials, but
+        also every Julia `ace_model` export and Python-authored model.  That is
+        not roundoff: at the default spline_tol=1e-10, energies agree with
+        lean=False to up to ~1e-9 relative and forces to up to ~2.3e-8 of
+        max|F| on the benchmark models (docs/learned-radial-splining.md).
+        spline_tol=None keeps the radial analytic (exact); spline_intervals
+        pins the grid.  `calc.splined` (and `last_timing["spline_tol"]`) says
+        what was splined, None when nothing was.  The spline is cached on the
+        radial's content, and its grid is bucketed, so radial swaps usually
+        keep the compiled step.  It is
         `eval_model`; `model` stays the model as given, and descriptors use it.
         A PACE or unfolded model is evaluated as given either way.  Setting
         `calc.model` recomputes the lean form on the host (a device-to-host copy
@@ -102,6 +111,7 @@ class ACECalculator(Calculator):
         self._skin_jit = None                 # (static model part, cutoff, compiled step)
         self._lean = bool(lean)
         self._spline_tol = spline_tol
+        self._spline_intervals = spline_intervals
         self.model = model                    # (the setter resets what derives from it)
         self.meta = meta
         self.edge_a_kind = edge_a_kind
@@ -142,11 +152,19 @@ class ACECalculator(Calculator):
         if hasattr(self, "_model"):
             self.reset()
         self._model = model
-        self._eval_model = lean_form(model, self._spline_tol) if self._lean else model
+        self._eval_model = (lean_form(model, self._spline_tol, self._spline_intervals)
+                            if self._lean else model)
+        self._splined = splining(model, self._eval_model, self._spline_tol)
         self._by_kind = {}                    # form -> model in that form
         self._by_bucket = {}                  # edge bucket -> calibrated form
         self._skin_state = None               # the skin list in use (calc.skin.SkinState)
         self._skin_step = None                # f(u, arrays, K), bound to this model's weights
+
+    @property
+    def splined(self):
+        """What the lean form splined, None when nothing: {"spline_tol",
+        "radials", "n_intervals"} (`eval.model.splining`)."""
+        return self._splined
 
     @property
     def eval_model(self):
@@ -198,7 +216,8 @@ class ACECalculator(Calculator):
         if out is None:
             out = self._rebuild_calculate(pos, cell, pbc, dtype)
         E, F, V, timing = out
-        self.last_timing = {**timing, "rebuilds": self._rebuilds}
+        self.last_timing = {**timing, "rebuilds": self._rebuilds,
+                            "spline_tol": self._splined["spline_tol"] if self._splined else None}
         E = float(E)
         self.results["energy"] = E
         self.results["free_energy"] = E

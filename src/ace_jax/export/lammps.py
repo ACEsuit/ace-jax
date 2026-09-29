@@ -19,6 +19,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from ..eval.edge_model import LAYOUTS, estimate_a_bytes
+from ..eval.splinify import DEFAULT_SPLINE_TOL
 
 # Dense rows per block in the bundle (lax.map + jax.checkpoint above one block;
 # the unblocked program at or below it).  Unblocked, XLA temp memory grows with
@@ -93,7 +94,7 @@ def make_energy_fn(model, n_species, layout, k_dense=None, type_map=None, n_rows
 
 def export_lammps(model, meta, path, *, max_atoms, max_edges, k_dense=None,
                   dtype="float64", layout="auto", type_elements=None, max_owned=None,
-                  lean=True, spline_tol=1e-10):
+                  lean=True, spline_tol=DEFAULT_SPLINE_TOL, spline_intervals=None):
     """Write a lammps-jax JSON bundle for `model`; returns the bundle dict.
 
     type_elements: atomic numbers in LAMMPS type order (type 1 first).  LAMMPS
@@ -110,17 +111,22 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges, k_dense=None,
     at BUNDLE_BLOCK_ROWS) fits ace_jax.calc.point.dense_budget_bytes(), else
     sparse.
 
-    lean (default True): export `ace_jax.eval.model.lean(model)`, the exact
-    evaluation form with the dead per-edge work removed (docs/ace-vs-pace-gap.md;
-    an analytic, learned radial is splined to within `spline_tol` per radial
-    first, docs/learned-radial-splining.md; spline_tol=None keeps it analytic);
-    recorded as `ace_jax.lean` (False for a model it does not apply to, e.g. PACE),
-    and the splining tolerance as `ace_jax.spline_tol` (None when no radial was
-    analytic, or with spline_tol=None or lean=False).
+    lean (default True): export `ace_jax.eval.model.lean(model, spline_tol,
+    spline_intervals)`, the evaluation form with the dead per-edge work removed
+    (docs/ace-vs-pace-gap.md).  Every analytic radial is splined first -- learned
+    radials, but also every Julia `ace_model` export and Python-authored model --
+    which is not roundoff: at the default 1e-10, energies agree with lean=False to
+    up to ~1e-9 relative and forces to up to ~2.3e-8 of max|F| on the benchmark
+    models (docs/learned-radial-splining.md).  spline_tol=None keeps it analytic.
+    Recorded from what lean actually did (looking through a wrapper's `.base`):
+    `ace_jax.lean` (False when lean returned the model as given, e.g. PACE or an
+    unfolded model), `ace_jax.spline_tol` and `ace_jax.spline_intervals`
+    ({radial: n}), both None when nothing was splined.
     """
     from lammps_jax.export import export_model
 
     from ..eval.model import lean as _lean
+    from ..eval.model import splining
     from ..calc.point import dense_budget_bytes
     model_z = [int(z) for z in meta["elements"]]
     type_elements = model_z if type_elements is None else [int(z) for z in type_elements]
@@ -140,12 +146,12 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges, k_dense=None,
     # estimate_a_bytes fits the full dense path, and on the lean widths it
     # underestimates the blocked path's compiled temp (measured 6.6-6.9x actual /
     # estimate on CPU, against 3.0-5.1x full), so it could pick dense and OOM
-    splined = None
+    splined, leaned = None, False
     if lean:
-        was_analytic = "analytic" in (getattr(model, "radial_kind", None),
-                                      getattr(model, "pair_radial_kind", None))
-        model = _lean(model, spline_tol)
-        splined = spline_tol if was_analytic else None
+        full = model
+        model = _lean(full, spline_tol, spline_intervals)
+        splined = splining(full, model, spline_tol)
+        leaned = model is not full or bool(getattr(model, "energy_only", False))
     energy_fn = make_energy_fn(model, n_species, layout, k_dense,
                                None if type_map == list(range(len(model_z))) else type_map,
                                n_rows=max_owned if layout == "dense" else None)
@@ -157,8 +163,9 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges, k_dense=None,
                          # not "max_owned": lammps-jax reads that key from anywhere in
                          # the file and would take it as its own contract's
                          "owned_rows": int(max_owned) if max_owned is not None else None,
-                         "lean": bool(getattr(model, "energy_only", False)),
-                         # tolerance the analytic radial was splined to (None: not splined)
-                         "spline_tol": splined}
+                         "lean": leaned,
+                         # what the analytic radials were splined to (None: not splined)
+                         "spline_tol": splined["spline_tol"] if splined else None,
+                         "spline_intervals": splined["n_intervals"] if splined else None}
     Path(path).write_text(json.dumps(bundle, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return bundle
