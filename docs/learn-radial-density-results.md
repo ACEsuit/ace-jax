@@ -163,6 +163,36 @@ E_i = c·X_i + √ρ_i + ΔE0_z
 
 **Most of the gap to pacemaker is not the embedding.** Even pacemaker's *linear* models get vacancies 0.5–0.95 eV closer to MACE than ours do. That points at the base model, meaning the radial basis and cutoff and the fit, rather than at the sqrt embedding.
 
+## Spike: pacemaker's radials with our linear fit
+
+Throwaway code: `spike/pace_refit*.py`. A linear pacemaker model (`ndensity 1`, `fs [1,1]`) is exactly linear in its C-tilde coefficients (checked: relative error 0).
+
+- Keep pacemaker's learned radials (SBessel × `crad`), converted to `.yace` and evaluated by `PACEModel`.
+- Refit the 3370 coefficients with our Bayesian linear fit: evidence-optimised σ_E, σ_F, σ_c, a per-species E0 shift, no virials, and the same split.
+- Our evaluator reproduces pyace's QoIs for the original pacemaker models (κ=0.02: elastic 5.9%, Si −0.74, Ge −0.52 eV).
+
+| SiGe, bulk data | E (meV/atom) | F (meV/Å) | Elastic \|%\| | Si vacancy (eV) | Ge vacancy (eV) |
+|---|---|---|---|---|---|
+| our radials (learned, 200 steps) + our fit | 0.536 | 36.2 | **1.6** | −1.57 | −1.14 |
+| pacemaker radials (κ=0.02) + **our fit** | 0.86 | **31.3** | 6.0 | **−0.59** | **−0.38** |
+| pacemaker radials (κ=0.1) + **our fit** | 0.91 | 30.7 | 7.0 | −0.58 | −0.41 |
+| pacemaker κ=0.02, its own fit | 0.85 | 32.2 | 5.9 | −0.73 | −0.52 |
+| pacemaker κ=0.1, its own fit | 0.97 | 31.1 | 6.7 | −0.74 | −0.44 |
+
+**The radial basis accounts for most of the vacancy gap:** about 1 eV of the Si error and 0.75 eV of the Ge error. Our fitting procedure is not the problem: on the same radials, our evidence-weighted fit is slightly better than pacemaker's own, on both forces and vacancies. There is a trade-off between the two sets of radials. Ours are much better on elastic constants (1.6% against 6–7%) and worse on vacancies.
+
+![Learned radials](figures/learn-radial/density/radials_ours_vs_pacemaker.png)
+
+**Why the two sets of radials behave differently:**
+- **Pacemaker's radials are short-ranged and steep through the first shell.** The leading l=0 radial falls monotonically from about 1.5 Å, through the first-neighbour peak, to about 0 by 3.3 Å. Other radials change sign between 1.5 and 2.5 Å.
+- **Ours are flat through the first shell and long-ranged.** Our leading l=0 radial is a plateau from 2.1 to 2.8 Å and keeps about 35% of its weight over the second and third shells. It vanishes below 1.5 Å because of the envelope.
+
+A vacancy is a first-shell event (one of four nearest neighbours is removed), so pacemaker's basis resolves it and ours dilutes it. The same dilution makes our learned densities barely react to vacancies. Since both sets of radials were fitted to the same data, the difference comes from the starting basis:
+- ours: Legendre in the Agnesi coordinate, with the `poly2sx` envelope;
+- pacemaker: SBessel with a distance cutoff.
+
+VarPro at n_q = 12 changes the radials only modestly from where they start.
+
 ## Conclusions
 
 1. **A linear readout over a learned sqrt(ρ) is not an FS embedding in practice.** The density column is nearly collinear with the linear ACE basis, the ridge suppresses it, and it neither helps nor hurts the physical properties. The rest of the linear-model advantages are unaffected: convex final fit, UQ and speed. So keeping the machinery is cheap, but on these data it does not buy vacancy accuracy.
