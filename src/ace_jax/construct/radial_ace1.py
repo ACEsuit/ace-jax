@@ -60,22 +60,33 @@ def _norms(A, B, C, a, b):
     return np.sqrt(((Q * Q) * (w * (1 - x) ** a * (1 + x) ** b)[:, None]).sum(0))
 
 
-def cubic_bspline_coefs(y):
+def cubic_bspline_coefs(y, end_d2=None):
     """Interpolations.jl `cubic_spline_interpolation` coefficients on a uniform
     grid: BSpline(Cubic(Line(OnGrid()))).  y (n, m) nodal values -> (n+2, m)
     coefficients (one pad each side): interior rows (c[i-1] + 4 c[i] + c[i+1])/6
-    = y[i], boundary rows c0 - 2 c1 + c2 = 0 (y'' = 0 at the end knots)."""
+    = y[i], boundary rows c0 - 2 c1 + c2 = 0 (y'' = 0 at the end knots).
+
+    end_d2 = (lo, hi), each (m,): prescribe h^2 y'' at the two end knots
+    instead (clamped second derivative).  Line(OnGrid()) is then the lo = hi = 0
+    case.  Interpolating a smooth f with its true end curvature makes the error
+    O(h^4) up to the ends, where y'' = 0 leaves an O(h^2) boundary layer
+    (`eval.splinify.to_spline`).  A banded (2, 2) solve: O(n), so fine grids
+    are cheap."""
+    from scipy.linalg import solve_banded
     y = np.asarray(y, dtype=np.float64)
     squeeze = y.ndim == 1
     y = y[:, None] if squeeze else y
     n = y.shape[0]
-    M = np.zeros((n + 2, n + 2))
-    M[0, :3] = (1.0, -2.0, 1.0)
-    M[-1, -3:] = (1.0, -2.0, 1.0)
-    i = np.arange(1, n + 1)
-    M[i, i - 1] = 1.0 / 6.0; M[i, i] = 2.0 / 3.0; M[i, i + 1] = 1.0 / 6.0
+    ab = np.zeros((5, n + 2))                    # ab[2 + i - j, j] = M[i, j]
+    ab[2, 1:-1] = 2.0 / 3.0
+    ab[1, 2:] = 1.0 / 6.0                        # M[i, i+1], rows 1..n
+    ab[3, :-2] = 1.0 / 6.0                       # M[i, i-1], rows 1..n
+    ab[2, 0], ab[1, 1], ab[0, 2] = 1.0, -2.0, 1.0            # row 0: c0 - 2 c1 + c2
+    ab[4, -3], ab[3, -2], ab[2, -1] = 1.0, -2.0, 1.0         # row n+1: c[n-1] - 2 c[n] + c[n+1]
     rhs = np.zeros((n + 2, y.shape[1])); rhs[1:-1] = y
-    c = np.linalg.solve(M, rhs)
+    if end_d2 is not None:
+        rhs[0], rhs[-1] = end_d2
+    c = solve_banded((2, 2), ab, rhs)
     return c[:, 0] if squeeze else c
 
 
