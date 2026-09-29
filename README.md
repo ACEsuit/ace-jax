@@ -3,15 +3,25 @@
 Fit and evaluate **Atomic Cluster Expansion (ACE)** interatomic potentials in
 pure **Python/JAX** — no Julia needed to fit or run.
 
-- **Evaluate** exported ACE models (energy / forces / stress) and site descriptors.
+- **Evaluate** exported ACE models and pacemaker **PACE `.yace`** potentials
+  (energy / forces / stress) and site descriptors; `.yace` files can be written back.
+- **Fast forces** on CPU and GPU: a shared edge-vector core with sparse and dense
+  (per-node outer-product) layouts picked automatically, jitted per padded shape.
 - **Fit** the linear (M=0) model with stable solvers (Cholesky / QR / streaming
   QR / LSQR), reproducing ACEfit to machine precision.
-- **Hybrid GP** fits with a calibrated uncertainty ladder (MAP → Laplace → VI →
-  NUTS) and predictive `energy_std` / `forces_std`.
-- **ASE calculator** (`ACECalculator`, `GPCalculator`).
-- **Author** the symmetry-adapted coupling coefficients from Python via
-  [EquivariantTensors.jl](https://github.com/ACEsuit/EquivariantTensors.jl) —
-  bit-for-bit with ACEpotentials, no manual Julia setup (optional `authoring` extra).
+- **Hybrid GP** fits with a calibrated uncertainty ladder (MAP → Laplace →
+  Pathfinder / VI → NUTS), multi-start L-BFGS MAP, frozen species
+  coregionalization, and predictive `energy_std` / `forces_std`; **POPS**
+  misspecification uncertainty for the linear model. Fitted models are saved
+  (`model.npz` / `gp_model.npz`).
+- **ASE calculators** (`ACECalculator`, `GPCalculator`) and **LAMMPS** deployment
+  through [lammps-jax](https://github.com/abhijeetgangan/lammps-jax)
+  (`ace_jax.export.lammps.export_lammps`).
+- **Author** whole models from Python — the symmetry-adapted coupling via
+  [EquivariantTensors.jl](https://github.com/ACEsuit/EquivariantTensors.jl),
+  bit-for-bit with ACEpotentials, no manual Julia setup (optional `authoring`
+  extra) — including species-embedded models and the smoothness prior.
+- Research: learned radial basis by variable projection (`bench/learn_radial/`).
 
 ## Install
 
@@ -20,7 +30,14 @@ pip install ace-jax             # core: evaluate + linear fit + ASE calculator
 pip install ace-jax[gp]         # + `ace-jax fit` pipeline: GP/UQ hyperparameter ladder
 pip install ace-jax[authoring]  # + Python basis coupling (EquivariantTensors via juliacall)
 pip install ace-jax[cuda]       # + CUDA 12 JAX
+pip install ace-jax[fast-neighbours]  # + matscipy-neighbours (C++ source build; ASE's list is the fallback)
 ```
+
+Training and evaluation data (extxyz) are read with libAtoms
+[`extxyz`](https://github.com/libAtoms/extxyz), a core dependency: labels come
+back under the names they were written with, including `energy` / `forces`.
+LAMMPS export needs [lammps-jax](https://github.com/abhijeetgangan/lammps-jax),
+which is not on PyPI: install it from a clone (`pip install -e <lammps-jax>`).
 
 No Julia is required to **use, fit, or evaluate** a model. A model **definition**
 (basis + splined radials) is exported to an `.npz` that ace-jax consumes. The
@@ -38,14 +55,14 @@ model-authoring seam has three paths:
   (`julia/export_model.jl`), still fully supported.
 
 Models come as **unfitted definitions** (coefficients to be fit here) or
-**fitted potentials** (ready to evaluate). A small model zoo is documented under
-`docs/`; large artifacts are hosted as release assets, not committed.
+**fitted potentials** (ready to evaluate). Large model files are not committed
+to the repository.
 
 ## Quickstart
 
 ```python
 import ace_jax as aj
-model, meta = aj.load("si_fitted.npz")
+model, meta, z = aj.load("si_fitted.npz")      # model, meta dict, raw npz
 from ace_jax import ACECalculator
 atoms.calc = ACECalculator("si_fitted.npz")
 atoms.get_potential_energy(); atoms.get_forces()
@@ -65,8 +82,51 @@ atoms.calc = ACECalculator("model.yace")
 
 Supported: ChebExpCos / ChebPow / ChebLinear / SBessel radials, FinnisSinclair
 and FinnisSinclairShiftedScaled embeddings, `density` / `distance` / `zbl` inner
-cutoffs. `write_yace(model, spec, path)` writes a (possibly modified) model back.
-Checked against the ML-PACE C++ and python-ace; see `docs/pace-yace-spec.md`.
+cutoffs. `aj.load("model.yace")` returns `(PACEModel, meta, spec)`, and
+`write_yace(model, spec, path)` (`ace_jax.eval`) writes a (possibly modified)
+model back. `.yace` models are for evaluation and export: `aj fit` needs an
+`.npz` ACE model. Checked against the ML-PACE C++, python-ace and LAMMPS; see
+`docs/pace-yace-spec.md` and `docs/pace-yace-results.md`.
+
+### Speed options and LAMMPS
+
+`ACECalculator(path, layout="auto", edge_a_kind="auto", skin=1.0)`:
+
+- **Layout.** `"auto"` picks the dense layout (A per node by a batched outer
+  product, several times faster forces on GPU) when the neighbour padding is
+  efficient, i.e. edges / (atoms × max neighbours) ≥ `MIN_DENSE_FILL` (0.5),
+  else the sparse edge list. Memory is not a criterion: the dense model runs in
+  blocks of 16,384 rows (`CHUNK_NODES`), so its peak is bounded per block.
+  Sparse edge lists are padded to power-of-two buckets so MD reuses the
+  compiled function.
+- **Skin (Verlet) neighbour list,** dense layout only. The list is built for
+  cutoff + `skin` (Å) and reused across MD-like calls, one compiled step each.
+  It is rebuilt automatically when an atom has moved more than skin / 2 since
+  the build, when the cell, pbc, species or atom count change, or when a row
+  outgrows its capacity. `calc.last_timing["rebuilds"]` counts the calls that
+  built a list, and `last_timing["nlist_s"]` is 0 on a reuse. For one-shot
+  evaluation of unrelated structures (a dataset, a screening loop) pass
+  `skin=0`, which builds a list for the cutoff alone on every call. Setting
+  `calc.model` or `calc.skin` drops the current list.
+
+To run in LAMMPS (`pair_style jax/kk`, GPU):
+
+```python
+from ace_jax.export.lammps import export_lammps
+model, meta, _ = aj.load("model.npz")                    # or a .yace
+export_lammps(model, meta, "bundle", max_atoms=4096, max_edges=200_000,
+              k_dense=64, max_owned=2048,                # dense rows: owned atoms only
+              type_elements=[14, 32])                    # Z of LAMMPS types 1, 2, ...
+```
+
+`layout="auto"` exports the dense layout when `k_dense` (max neighbours per
+atom) is given and one block's `estimate_a_bytes` fits the device budget, else
+sparse. `max_owned` bounds the dense rows to the owned atoms (LAMMPS numbers
+them first), so ghost rows cost nothing. It is recorded as
+`ace_jax.owned_rows` in the bundle, and an atom past it, or past `k_dense`
+neighbours, gives NaN, never a silent truncation. Above 32,768 rows
+(`BUNDLE_BLOCK_ROWS`) the dense bundle evaluates in blocks, which bounds
+memory at large N.
 
 ## Performance
 
@@ -111,6 +171,7 @@ See `docs/python-authoring.md`.
     ace-jax construct --elements Cr,Mn,Fe,Co,Ni --order 3 --max-degree 10 \
         --embedding mace_embedding.json --out cantor_embed.npz          # lossless widths
     ace-jax construct ... --d-max 16                                    # capped widths
+    ace-jax construct ... --embedding identity                          # identity (one-hot) element table
 
 builds the frozen-element-embedding model (`construct.model.build_embedding_model`,
 the ace1-compatible `ace_embedding_model`) without Julia, parity-tested against
@@ -124,7 +185,8 @@ fitted model. `si.npz` is any model definition, e.g. from
 `aj construct --elements Si --order 3 --max-degree 10 --out si.npz`. The examples
 below were checked on the Si test fixture (`si_fitted.npz`, with `si_tiny_train.xyz`
 split into train/test/ood files). The `--*-key` flags name the extxyz fields that
-hold the labels.
+hold the labels. Data is read with libAtoms `extxyz`, so any label name works as
+written, including `energy`/`forces`.
 
 ```bash
 K="--energy-key dft_energy --force-key dft_force --virial-key dft_virial"
@@ -192,19 +254,36 @@ A fit with `--baseline` saves no model, because its pair baseline is added outsi
 ## Running the tests
 
 ```bash
-uv run pytest                        # whole fast suite, 6 parallel workers (~1.5 min)
+uv run pytest                        # whole fast suite, 6 parallel workers (~2-4 min)
 uv run pytest tests/test_efv.py      # a targeted run stays single-process
 uv run pytest -m slow                # opt-in: real-model MCMC ladder, bit-exact driver goldens
 ```
 
 A bare `pytest` uses pytest-xdist when it is installed (`ACEJAX_TEST_WORKERS`
 sets the worker count; `-n 0` forces a single process, as CI does). The `slow`
-marker is excluded by default.
+marker is excluded by default. Tests needing an optional package (juliacall,
+lammps-jax, python-ace, sphericart, matscipy-neighbours, psutil) skip without
+it; for the lammps-jax tests put a clone on the path
+(`PYTHONPATH=<lammps-jax>/python`). See `CLAUDE.md` for the test switches.
+
+## Linting and pre-commit
+
+```bash
+uv run ruff check                    # lint (config in pyproject.toml [tool.ruff])
+uv run pre-commit install            # once per clone: ruff + whitespace/YAML/large-file hooks on commit
+uv run pre-commit run --all-files    # what the `lint` CI job runs
+```
+
+No formatter is enforced: the code keeps its dense one-line style, and the ruff
+rules that fight it (semicolon statements, short math names, import sorting,
+line length) are off. Bump the ruff pin in the dev group and the `rev` in
+`.pre-commit-config.yaml` together.
 
 ## Julia parity (maintainers / CI only)
 
 The everyday test suite is pip-only (no Julia), run against committed npz
-fixtures. Two path-gated CI jobs guard the Julia-facing seams:
+fixtures. Path-gated CI jobs regenerate the references and guard the seams to
+the reference codes:
 
 - **julia-parity** — the design-matrix rows match ACEfit to 1e-8 and the linear
   solve matches ACEfit's `solve(QR)` to 1e-9, checked against the committed
@@ -212,3 +291,9 @@ fixtures. Two path-gated CI jobs guard the Julia-facing seams:
 - **coupling-parity** — the Python coupling coefficients match ACEpotentials
   bit-for-bit, regenerating references from the same pinned EquivariantTensors
   (`julia/coupling_reference.jl`).
+- **prior-parity** — the smoothness prior (`construct/prior.py`) matches
+  ACEpotentials' `algebraic_smoothness_prior` bit-for-bit
+  (`julia/smoothness_reference.jl`), and the committed fixtures match a fresh run.
+- **pace-parity** — the PACE path against the ML-PACE C++ (pinned
+  `lammps-user-pace`) and python-ace, built from source in their own
+  environments; see `pace_ref/README.md`.

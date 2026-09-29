@@ -22,8 +22,7 @@ from .metrics import crps_gaussian
 from .pops import leverage_select, pops_var
 from .rows import Rows, linear_rows, residual_inputs, residual_rows
 from .stats import (DeviceRows, HostRows, _stream_pops_pointwise, available_host_bytes, host_rows_bytes,
-                    pops_envelope_streamed, pops_leverage_residual, pops_moment_sums,
-                    pops_projection_bounds, sufficient_statistics)
+                    sufficient_statistics)
 
 
 class Prediction(NamedTuple):

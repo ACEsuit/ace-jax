@@ -4,7 +4,7 @@ jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 import numpy as np
 
-from ace_jax.fit.hypers import Hypers, Prior, default_prior, from_array, log_prior, to_array
+from ace_jax.fit.hypers import Hypers, default_prior, from_array, log_prior, to_array
 
 
 def test_roundtrip_and_field_order():
@@ -33,4 +33,3 @@ def test_sigma_type_recovers_injected_ratio(two_type_synthetic):
     from ace_jax.fit.fit_api import fit_linear_with_sigma_type
     ratios = fit_linear_with_sigma_type(two_type_synthetic)   # exp(log_ratios)[:, 0]
     assert 2.0 < float(ratios[1] / ratios[0]) < 4.5           # ~3x recovered by evidence
-

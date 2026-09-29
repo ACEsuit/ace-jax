@@ -1,0 +1,769 @@
+{
+ "npz": "ace_SiGe_medium.npz",
+ "system": "SiGe",
+ "n": 8192,
+ "dtype": "float64",
+ "platform": "gpu",
+ "device": "NVIDIA A100-SXM4-80GB",
+ "jax": "0.11.2",
+ "folded": true,
+ "rcut": 5.0,
+ "n_edges": 229376,
+ "widths": {
+  "radial_kind": "spline",
+  "pair_radial_kind": "spline",
+  "NZ": 2,
+  "n_rnl": 108,
+  "n_Y": 49,
+  "n_b": 102,
+  "n_A": 165,
+  "n_AA": 4918,
+  "aa_orders": [
+   1,
+   2,
+   3
+  ],
+  "n_pair": 24,
+  "K": 28,
+  "pooled_now_per_node": 5292,
+  "pooled_pool_first_per_node_C1": 4998,
+  "pooled_pool_first_per_node_CNZ": 9996
+ },
+ "first_call_s": 4.558122325999996,
+ "E_per_atom": 0.45094779925590034,
+ "max_abs_F": 20.36179434803706,
+ "model": {
+  "efv_s": 0.009017730499998322,
+  "energy_only_s": 0.0028051325000006955,
+  "efv_cost": {
+   "flops": 9127580672.0,
+   "bytes": 5076302848.0
+  }
+ },
+ "stages": {
+  "radial": {
+   "fwd_s": 0.0008185765000021661,
+   "fwd_vjp_s": 0.001620876000000493,
+   "fwd_cost": {
+    "flops": 279379968.0,
+    "bytes": 305042880.0
+   },
+   "fwd_vjp_cost": {
+    "flops": 826441728.0,
+    "bytes": 445365920.0
+   },
+   "frac_of_sum": 0.11230620241648799
+  },
+  "angular": {
+   "fwd_s": 0.001947717499998447,
+   "fwd_vjp_s": 0.0021086654999997734,
+   "fwd_cost": {
+    "flops": 49774592.0,
+    "bytes": 115605504.0
+   },
+   "fwd_vjp_cost": {
+    "flops": 189464576.0,
+    "bytes": 144965648.0
+   },
+   "frac_of_sum": 0.1461038441383347
+  },
+  "pool": {
+   "fwd_s": 0.0009902305000011324,
+   "fwd_vjp_s": 0.0024181670000018585,
+   "fwd_cost": {
+    "flops": 2433024768.0,
+    "bytes": 1038157120.0
+   },
+   "fwd_vjp_cost": {
+    "flops": 7289808384.0,
+    "bytes": 3392473600.0
+   },
+   "frac_of_sum": 0.16754838283681023
+  },
+  "aa": {
+   "fwd_s": 0.0006580284999984087,
+   "fwd_vjp_s": 0.006678770500002429,
+   "fwd_cost": {
+    "flops": 75064560.0,
+    "bytes": 333175776.0
+   },
+   "fwd_vjp_cost": {
+    "flops": 621297600.0,
+    "bytes": 5089230848.0
+   },
+   "frac_of_sum": 0.46275430795835915
+  },
+  "readout": {
+   "fwd_s": 0.0005993985000003477,
+   "fwd_vjp_s": 0.00100674599999806,
+   "fwd_cost": {
+    "flops": 80969728.0,
+    "bytes": 324220160.0
+   },
+   "fwd_vjp_cost": {
+    "flops": 80969728.0,
+    "bytes": 648243712.0
+   },
+   "frac_of_sum": 0.06975476227529888
+  },
+  "force": {
+   "fwd_s": 0.0005994240000006812,
+   "fwd_vjp_s": null,
+   "fwd_cost": {
+    "flops": 2072576.0,
+    "bytes": 12910592.0
+   },
+   "frac_of_sum": 0.04153250037470906
+  },
+  "shapes": {
+   "Rnl": [
+    229376,
+    108
+   ],
+   "Y": [
+    229376,
+    49
+   ],
+   "A": [
+    8192,
+    165
+   ],
+   "AA": [
+    8192,
+    4918
+   ],
+   "Apair": [
+    8192,
+    24
+   ]
+  },
+  "sum_s": 0.014432649000003295
+ },
+ "peak_bytes": 2755564288,
+ "kernels": {
+  "total_gpu_us_per_call": 8346.4,
+  "n_kernels": 38,
+  "launches_per_call": 39.0,
+  "mixed_stage_us_per_call": 5055.6,
+  "hlo_module": "/tmp/tmpeoux82hh/module_0093.jit__lambda.sm_8.0_gpu_after_optimizations.txt",
+  "stages": {
+   "aa": {
+    "fwd_us": 230.5,
+    "bwd_us": 2280.3,
+    "us": 2510.7,
+    "frac": 0.3008,
+    "pure_frac": 0.0024,
+    "touch_frac": 0.3737
+   },
+   "angular": {
+    "fwd_us": 1449.7,
+    "bwd_us": 259.6,
+    "us": 1709.3,
+    "frac": 0.2048,
+    "pure_frac": 0.0,
+    "touch_frac": 0.2123
+   },
+   "force": {
+    "fwd_us": 1.9,
+    "bwd_us": 216.5,
+    "us": 218.4,
+    "frac": 0.0262,
+    "pure_frac": 0.0262,
+    "touch_frac": 0.0262
+   },
+   "other": {
+    "fwd_us": 25.5,
+    "bwd_us": 0.0,
+    "us": 25.5,
+    "frac": 0.0031,
+    "pure_frac": 0.0031,
+    "touch_frac": 0.0031
+   },
+   "pool": {
+    "fwd_us": 538.9,
+    "bwd_us": 1288.4,
+    "us": 1827.3,
+    "frac": 0.2189,
+    "pure_frac": 0.2012,
+    "touch_frac": 0.2722
+   },
+   "radial": {
+    "fwd_us": 564.5,
+    "bwd_us": 891.4,
+    "us": 1455.9,
+    "frac": 0.1744,
+    "pure_frac": 0.1511,
+    "touch_frac": 0.3856
+   },
+   "readout": {
+    "fwd_us": 97.8,
+    "bwd_us": 423.9,
+    "us": 521.8,
+    "frac": 0.0625,
+    "pure_frac": 0.001,
+    "touch_frac": 0.3779
+   },
+   "strain": {
+    "fwd_us": 28.8,
+    "bwd_us": 48.7,
+    "us": 77.5,
+    "frac": 0.0093,
+    "pure_frac": 0.0093,
+    "touch_frac": 0.0093
+   }
+  },
+  "rows": [
+   {
+    "kernel": "input_scatter_fusion_1",
+    "hlo": "input_scatter_fusion.1",
+    "us_per_call": 2397.07,
+    "frac": 0.2872,
+    "launches_per_call": 1.0,
+    "stages": {
+     "aa": 0.853,
+     "readout": 0.147
+    },
+    "bwd": true,
+    "GBps": 18.1,
+    "hlo_op": "fusion",
+    "out_shape": "f64[165,8192]{1,0}"
+   },
+   {
+    "kernel": "loop_concatenate_fusion",
+    "hlo": "loop_concatenate_fusion",
+    "us_per_call": 1438.03,
+    "frac": 0.1723,
+    "launches_per_call": 1.0,
+    "stages": {
+     "angular": 0.996,
+     "radial": 0.004
+    },
+    "bwd": false,
+    "GBps": 145.5,
+    "hlo_op": "fusion",
+    "out_shape": "f64[229376,49]{1,0}"
+   },
+   {
+    "kernel": "gemm_fusion_dot_general_17",
+    "hlo": "gemm_fusion_dot_general.17",
+    "us_per_call": 477.37,
+    "frac": 0.0572,
+    "launches_per_call": 1.0,
+    "stages": {
+     "pool": 1.0
+    },
+    "bwd": false,
+    "GBps": 1330.0,
+    "hlo_op": "fusion",
+    "out_shape": "f64[8192,108,49]{2,1,0}"
+   },
+   {
+    "kernel": "gemm_fusion_dot",
+    "hlo": "gemm_fusion_dot",
+    "us_per_call": 449.05,
+    "frac": 0.0538,
+    "launches_per_call": 1.0,
+    "stages": {
+     "pool": 1.0
+    },
+    "bwd": true,
+    "GBps": 1413.9,
+    "hlo_op": "fusion",
+    "out_shape": "f64[8192,28,49]{2,1,0}"
+   },
+   {
+    "kernel": "gemm_fusion_dot_1",
+    "hlo": "gemm_fusion_dot.1",
+    "us_per_call": 444.24,
+    "frac": 0.0532,
+    "launches_per_call": 1.0,
+    "stages": {
+     "pool": 1.0
+    },
+    "bwd": true,
+    "GBps": 1429.2,
+    "hlo_op": "fusion",
+    "out_shape": "f64[8192,28,108]{2,1,0}"
+   },
+   {
+    "kernel": "loop_reduce_select_fusion",
+    "hlo": "loop_reduce_select_fusion",
+    "us_per_call": 440.7,
+    "frac": 0.0528,
+    "launches_per_call": 1.0,
+    "stages": {
+     "radial": 1.0
+    },
+    "bwd": false,
+    "GBps": 1050.6,
+    "hlo_op": "fusion",
+    "out_shape": "(f64[229376,108]{1,0}, f64[229376,108]{1,0})"
+   },
+   {
+    "kernel": "input_reduce_fusion_1",
+    "hlo": "input_reduce_fusion.1",
+    "us_per_call": 361.89,
+    "frac": 0.0434,
+    "launches_per_call": 1.0,
+    "stages": {
+     "radial": 1.0
+    },
+    "bwd": true,
+    "GBps": 731.8,
+    "hlo_op": "fusion",
+    "out_shape": "f64[229376,4]{1,0}"
+   },
+   {
+    "kernel": "input_reduce_fusion",
+    "hlo": "input_reduce_fusion",
+    "us_per_call": 304.81,
+    "frac": 0.0365,
+    "launches_per_call": 1.0,
+    "stages": {
+     "readout": 0.244,
+     "aa": 0.756
+    },
+    "bwd": false,
+    "GBps": 48.9,
+    "hlo_op": "fusion",
+    "out_shape": "f64[60,8192]{1,0}"
+   },
+   {
+    "kernel": "loop_broadcast_fusion_1",
+    "hlo": "loop_broadcast_fusion.1",
+    "us_per_call": 254.67,
+    "frac": 0.0305,
+    "launches_per_call": 1.0,
+    "stages": {
+     "pool": 1.0
+    },
+    "bwd": true,
+    "GBps": 1361.8,
+    "hlo_op": "fusion",
+    "out_shape": "f64[8192,5292]{1,0}"
+   },
+   {
+    "kernel": "input_scatter_fusion",
+    "hlo": "input_scatter_fusion",
+    "us_per_call": 254.26,
+    "frac": 0.0305,
+    "launches_per_call": 1.0,
+    "stages": {
+     "aa": 0.792,
+     "readout": 0.208
+    },
+    "bwd": true,
+    "GBps": 170.6,
+    "hlo_op": "fusion",
+    "out_shape": "f64[165,8192]{1,0}"
+   },
+   {
+    "kernel": "input_reduce_fusion_2",
+    "hlo": "input_reduce_fusion.2",
+    "us_per_call": 229.37,
+    "frac": 0.0275,
+    "launches_per_call": 1.0,
+    "stages": {
+     "radial": 1.0
+    },
+    "bwd": true,
+    "GBps": 2601.1,
+    "hlo_op": "fusion",
+    "out_shape": "f64[229376]{0}"
+   },
+   {
+    "kernel": "input_scatter_fusion_3",
+    "hlo": "input_scatter_fusion.3",
+    "us_per_call": 206.02,
+    "frac": 0.0247,
+    "launches_per_call": 1.0,
+    "stages": {
+     "force": 1.0
+    },
+    "bwd": true,
+    "GBps": 60.9,
+    "hlo_op": "fusion",
+    "out_shape": "f64[8192,3]{1,0}"
+   },
+   {
+    "kernel": "loop_add_fusion_2",
+    "hlo": "loop_add_fusion.2",
+    "us_per_call": 171.01,
+    "frac": 0.0205,
+    "launches_per_call": 1.0,
+    "stages": {
+     "radial": 0.054,
+     "angular": 0.944,
+     "pool": 0.002
+    },
+    "bwd": true,
+    "GBps": 1899.3,
+    "hlo_op": "fusion",
+    "out_shape": "f64[229376,3]{1,0}"
+   },
+   {
+    "kernel": "loop_add_clamp_divide_multiply_select_fusion",
+    "hlo": "loop_add_clamp_divide_multiply_select_fusion",
+    "us_per_call": 168.02,
+    "frac": 0.0201,
+    "launches_per_call": 1.0,
+    "stages": {
+     "radial": 1.0
+    },
+    "bwd": true,
+    "GBps": 1703.8,
+    "hlo_op": "fusion",
+    "out_shape": "(s32[229376]{0}, f64[229376]{0}, f64[229376]{0}, f64[229376]{0}, f64[229376]{0}, /*index=5*/f64[229376]{0}, f64[229376]{"
+   },
+   {
+    "kernel": "input_scatter_fusion_5",
+    "hlo": "input_scatter_fusion.5",
+    "us_per_call": 137.74,
+    "frac": 0.0165,
+    "launches_per_call": 1.0,
+    "stages": {
+     "pool": 0.917,
+     "aa": 0.083
+    },
+    "bwd": true,
+    "GBps": 5114.4,
+    "hlo_op": "fusion",
+    "out_shape": "f64[8192,5292]{1,0}"
+   },
+   {
+    "kernel": "loop_select_fusion",
+    "hlo": "loop_select_fusion",
+    "us_per_call": 98.81,
+    "frac": 0.0118,
+    "launches_per_call": 1.0,
+    "stages": {
+     "angular": 0.994,
+     "pool": 0.002,
+     "radial": 0.005
+    },
+    "bwd": true,
+    "GBps": 2442.1,
+    "hlo_op": "fusion",
+    "out_shape": "(f64[229376]{0}, f64[229376]{0})"
+   },
+   {
+    "kernel": "loop_select_fusion_1",
+    "hlo": "loop_select_fusion.1",
+    "us_per_call": 73.32,
+    "frac": 0.0088,
+    "launches_per_call": 1.0,
+    "stages": {
+     "radial": 0.792,
+     "pool": 0.094,
+     "readout": 0.113
+    },
+    "bwd": true,
+    "GBps": 1331.1,
+    "hlo_op": "fusion",
+    "out_shape": "f64[229376]{0}"
+   },
+   {
+    "kernel": "loop_multiply_fusion",
+    "hlo": "loop_multiply_fusion",
+    "us_per_call": 66.27,
+    "frac": 0.0079,
+    "launches_per_call": 1.0,
+    "stages": {
+     "readout": 0.229,
+     "pool": 0.114,
+     "radial": 0.657
+    },
+    "bwd": false,
+    "GBps": 748.8,
+    "hlo_op": "fusion",
+    "out_shape": "f64[8192,24]{1,0}"
+   },
+   {
+    "kernel": "loop_add_clamp_divide_multiply_power_reduce_select_sqrt_subtract_fusion",
+    "hlo": "loop_add_clamp_divide_multiply_power_reduce_select_sqrt_subtract_fusion",
+    "us_per_call": 64.16,
+    "frac": 0.0077,
+    "launches_per_call": 1.0,
+    "stages": {
+     "radial": 0.736,
+     "angular": 0.264
+    },
+    "bwd": false,
+    "GBps": 557.8,
+    "hlo_op": "fusion",
+    "out_shape": "(f64[229376]{0}, s32[229376]{0}, f64[229376]{0}, f64[229376]{0}, f64[229376]{0}, /*index=5*/f64[229376]{0}, f64[229376]{"
+   },
+   {
+    "kernel": "loop_gather_fusion",
+    "hlo": "loop_gather_fusion",
+    "us_per_call": 54.0,
+    "frac": 0.0065,
+    "launches_per_call": 1.0,
+    "stages": {
+     "pool": 1.0
+    },
+    "bwd": false,
+    "GBps": 6622.8,
+    "hlo_op": "fusion",
+    "out_shape": "f64[165,8192,1]{2,1,0}"
+   },
+   {
+    "kernel": "loop_reduce_fusion",
+    "hlo": "loop_reduce_fusion",
+    "us_per_call": 45.3,
+    "frac": 0.0054,
+    "launches_per_call": 1.0,
+    "stages": {
+     "radial": 0.676,
+     "pool": 0.147,
+     "readout": 0.176
+    },
+    "bwd": true,
+    "GBps": 1060.8,
+    "hlo_op": "fusion",
+    "out_shape": "f64[229376,4]{1,0}"
+   },
+   {
+    "kernel": "loop_divide_subtract_fusion",
+    "hlo": "loop_divide_subtract_fusion",
+    "us_per_call": 33.75,
+    "frac": 0.004,
+    "launches_per_call": 1.0,
+    "stages": {
+     "radial": 1.0
+    },
+    "bwd": true,
+    "GBps": 4649.4,
+    "hlo_op": "fusion",
+    "out_shape": "(f64[229376]{0}, f64[229376]{0})"
+   },
+   {
+    "kernel": "gemm_fusion_dot_10",
+    "hlo": "gemm_fusion_dot.10",
+    "us_per_call": 31.1,
+    "frac": 0.0037,
+    "launches_per_call": 1.0,
+    "stages": {
+     "strain": 1.0
+    },
+    "bwd": true,
+    "GBps": 354.3,
+    "hlo_op": "fusion",
+    "out_shape": "f64[128,3,3]{2,1,0}"
+   },
+   {
+    "kernel": "loop_broadcast_fusion_2",
+    "hlo": "loop_broadcast_fusion.2",
+    "us_per_call": 25.5,
+    "frac": 0.0031,
+    "launches_per_call": 1.0,
+    "stages": {
+     "other": 1.0
+    },
+    "bwd": false,
+    "GBps": 848.0,
+    "hlo_op": "fusion",
+    "out_shape": "(f64[165,8192]{1,0}, f64[165,8192]{1,0})"
+   },
+   {
+    "kernel": "loop_transpose_fusion",
+    "hlo": "loop_transpose_fusion",
+    "us_per_call": 23.08,
+    "frac": 0.0028,
+    "launches_per_call": 2.0,
+    "stages": {
+     "radial": 1.0
+    },
+    "bwd": false,
+    "GBps": 1550.2,
+    "hlo_op": "fusion",
+    "out_shape": "f64[229376,4]{1,0}"
+   },
+   {
+    "kernel": "wrapped_add",
+    "hlo": "wrapped_add",
+    "us_per_call": 20.33,
+    "frac": 0.0024,
+    "launches_per_call": 1.0,
+    "stages": {
+     "aa": 1.0
+    },
+    "bwd": true,
+    "GBps": 1595.6,
+    "hlo_op": "fusion",
+    "out_shape": "f64[165,8192]{1,0}"
+   },
+   {
+    "kernel": "gemm_fusion_dot_3",
+    "hlo": "gemm_fusion_dot.3",
+    "us_per_call": 15.97,
+    "frac": 0.0019,
+    "launches_per_call": 1.0,
+    "stages": {
+     "strain": 1.0
+    },
+    "bwd": false,
+    "GBps": 689.6,
+    "hlo_op": "fusion",
+    "out_shape": "f64[229376,3]{1,0}"
+   },
+   {
+    "kernel": "gemm_fusion_dot_8",
+    "hlo": "gemm_fusion_dot.8",
+    "us_per_call": 14.94,
+    "frac": 0.0018,
+    "launches_per_call": 1.0,
+    "stages": {
+     "strain": 1.0
+    },
+    "bwd": true,
+    "GBps": 737.1,
+    "hlo_op": "fusion",
+    "out_shape": "f64[229376,3]{1,0}"
+   },
+   {
+    "kernel": "loop_add_fusion",
+    "hlo": "loop_add_fusion",
+    "us_per_call": 9.51,
+    "frac": 0.0011,
+    "launches_per_call": 1.0,
+    "stages": {
+     "strain": 1.0
+    },
+    "bwd": false,
+    "GBps": 1736.6,
+    "hlo_op": "fusion",
+    "out_shape": "f64[8192,28,3]{2,1,0}"
+   },
+   {
+    "kernel": "input_scatter_fusion_4",
+    "hlo": "input_scatter_fusion.4",
+    "us_per_call": 8.3,
+    "frac": 0.001,
+    "launches_per_call": 1.0,
+    "stages": {
+     "force": 1.0
+    },
+    "bwd": true,
+    "GBps": 1401.5,
+    "hlo_op": "fusion",
+    "out_shape": "f64[8192,3]{1,0}"
+   },
+   {
+    "kernel": "input_scatter_fusion_2",
+    "hlo": "input_scatter_fusion.2",
+    "us_per_call": 4.78,
+    "frac": 0.0006,
+    "launches_per_call": 1.0,
+    "stages": {
+     "aa": 0.545,
+     "readout": 0.455
+    },
+    "bwd": true,
+    "GBps": 4547.2,
+    "hlo_op": "fusion",
+    "out_shape": "f64[165,8192]{1,0}"
+   },
+   {
+    "kernel": "input_reduce_fusion_5",
+    "hlo": "input_reduce_fusion.5",
+    "us_per_call": 4.7,
+    "frac": 0.0006,
+    "launches_per_call": 1.0,
+    "stages": {
+     "readout": 1.0
+    },
+    "bwd": false,
+    "GBps": 851.0,
+    "hlo_op": "fusion",
+    "out_shape": "f64[8192]{0}"
+   },
+   {
+    "kernel": "input_concatenate_fusion",
+    "hlo": "input_concatenate_fusion",
+    "us_per_call": 4.63,
+    "frac": 0.0006,
+    "launches_per_call": 1.0,
+    "stages": {
+     "radial": 1.0
+    },
+    "bwd": false,
+    "GBps": 792.1,
+    "hlo_op": "fusion",
+    "out_shape": "s32[229376,2]{1,0}"
+   },
+   {
+    "kernel": "loop_add_fusion_1",
+    "hlo": "loop_add_fusion.1",
+    "us_per_call": 3.65,
+    "frac": 0.0004,
+    "launches_per_call": 1.0,
+    "stages": {
+     "readout": 1.0
+    },
+    "bwd": false,
+    "GBps": 475.3,
+    "hlo_op": "fusion",
+    "out_shape": "f64[8192]{0}"
+   },
+   {
+    "kernel": "input_reduce_fusion_3",
+    "hlo": "input_reduce_fusion.3",
+    "us_per_call": 3.31,
+    "frac": 0.0004,
+    "launches_per_call": 1.0,
+    "stages": {
+     "strain": 1.0
+    },
+    "bwd": false,
+    "GBps": 19.8,
+    "hlo_op": "fusion",
+    "out_shape": "f64[]"
+   },
+   {
+    "kernel": "input_reduce_fusion_4",
+    "hlo": "input_reduce_fusion.4",
+    "us_per_call": 2.64,
+    "frac": 0.0003,
+    "launches_per_call": 1.0,
+    "stages": {
+     "strain": 1.0
+    },
+    "bwd": true,
+    "GBps": 3.5,
+    "hlo_op": "fusion",
+    "out_shape": "f64[3,3]{0,1}"
+   },
+   {
+    "kernel": "loop_negate_fusion",
+    "hlo": "loop_negate_fusion",
+    "us_per_call": 2.19,
+    "frac": 0.0003,
+    "launches_per_call": 1.0,
+    "stages": {
+     "force": 1.0
+    },
+    "bwd": true,
+    "GBps": 0.1,
+    "hlo_op": "fusion",
+    "out_shape": "f64[3,3]{1,0}"
+   },
+   {
+    "kernel": "loop_broadcast_fusion",
+    "hlo": "loop_broadcast_fusion",
+    "us_per_call": 1.92,
+    "frac": 0.0002,
+    "launches_per_call": 1.0,
+    "stages": {
+     "force": 1.0
+    },
+    "bwd": false,
+    "GBps": 102.4,
+    "hlo_op": "fusion",
+    "out_shape": "f64[8192,3]{1,0}"
+   }
+  ]
+ },
+ "saved": "/vol/ace_SiGe_medium_8192_float64",
+ "gpu": "NVIDIA A100-SXM4-80GB"
+}

@@ -45,7 +45,7 @@ def linear_rows(model, cfg, batch):
     Ncap, K = batch.nbr.shape
     C = batch.y_E.shape[0]          # configs per batch is a property of the batch, not of cfg
     rij, send, recv, mask = flat_edges(batch.rij, batch.nbr, batch.nbr_mask)
-    zi, zj = batch.node_z[send], batch.node_z[recv]
+    zi = batch.node_z[send]
     # dense per-node contraction: the sparse edge_jacobian gathers dB/dA onto
     # every edge, 14 GB at the Cantor basis size (n_B 1348, 18k edges/batch)
     X, J = model.edge_jacobian_dense(batch.rij, jnp.broadcast_to(batch.node_z[:, None], (Ncap, K)),

@@ -304,7 +304,6 @@ def tensor_radial_init(elements, Rnl_spec, *, rcut,
     if not n_q_factor >= 1:
         raise ValueError(f"n_q_factor must be >= 1 (n_q >= max n), got {n_q_factor!r}")
     NZ = len(elements)
-    n_rnl = len(Rnl_spec)
     actual_maxn = max(n for n, _ in Rnl_spec)
     n_q = math.ceil(actual_maxn * n_q_factor)
     env = envelope2sx_params(-1.0, 1.0, 2, 2)

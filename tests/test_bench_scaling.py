@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent / "bench"))
+from conftest import require_optional
 from scaling.structures import SYSTEMS, n_ladder, supercell
 
 
@@ -50,8 +51,20 @@ def test_standalone_row_for_acejax(tmp_path):
     # and record the threading it used (spec: "the threading actually used")
     assert out["platform"] == "cpu" and out["threads"]["cpus"] >= 1
     assert out["nlist_backend"] and out["force_s"] + out["nlist_s"] <= out["call_s"] * 1.5
-    for k in ("call_s", "force_s", "nlist_s", "compile_s"):
+    for k in ("call_s", "force_s", "compile_s"):
         assert out[k] > 0
+    assert out["nlist_s"] >= 0            # 0 when the MD-like calls reuse the skin list
+
+
+def test_standalone_is_md_like(tmp_path):
+    """Each timed call displaces the atoms (MD-like), so ace-jax reuses its
+    skin list: the calls after the first build no neighbour list."""
+    from scaling.run_standalone import run_case
+    row = {"code": "acejax-pace", "system": "SiGe", "size": "small",
+           "path": str(pathlib.Path(__file__).parent.parent / "fixtures" / "pace" / "gesi_sbessel.yace"),
+           "elements": ["Si", "Ge"], "name": "acejax-pace/SiGe/small"}
+    out = run_case(row, 256, "float64", "cpu", reps=4)
+    assert out["md_like"] is True and out["rebuilds"] <= 2               # skin reused
 
 
 from scaling.run_lammps import lammps_input, parse_log
@@ -118,8 +131,24 @@ def test_capacity_covers_ghosts_and_neighbours():
     at = supercell("SiGe", 256)
     cap = capacity(at, 5.0)
     assert cap["max_atoms"] > 256                      # owned + ghost shell
-    assert cap["k_dense"] >= cap["k_max"] + 8
-    assert cap["max_edges"] >= 256 * cap["k_max"]
+    assert cap["k_dense"] == cap["k_max"] + 8
+    assert cap["max_edges"] == cap["max_owned"] * cap["k_dense"]
+    assert cap["max_owned"] == int(np.ceil(1.1 * 256))
+
+
+def test_capacity_slots_have_skin_headroom():
+    """Slots cover the rcut + skin coordination: the random-weight benchmark
+    structures compress during the run, and rcut-only slots overflowed (the
+    bundle returns NaN; lammps-jax then reports the full list, 256 x 78, as
+    "edge capacity exceeded").  See docs/perf-lammps-large-n.md."""
+    from ace_jax.eval import sparse_graph
+    from scaling.run_lammps import capacity
+    at = supercell("Cantor", 256)
+    c = capacity(at, 5.0, skin=1.0)
+    g = sparse_graph(at.positions, at.cell.array, at.pbc, 6.0)
+    assert c["k_dense"] >= int(np.bincount(g.senders, minlength=len(at)).max())
+    assert c["max_edges"] >= 1.5 * len(sparse_graph(at.positions, at.cell.array, at.pbc,
+                                                     5.0).senders)
 
 
 def test_read_pe_and_dump(tmp_path):
@@ -241,7 +270,6 @@ def test_main_reuses_recorded_parity_and_never_gates_in_process(tmp_path, monkey
     got = {}
     monkeypatch.setattr(sweep, "run_sweep", lambda host, runner, path, select: got.update(
         blocked=[c.code for c in sweep.cases(host) if not select(c)]))
-    envs = tmp_path / "envs"
     monkeypatch.setattr(sweep, "_env_path", lambda host: tmp_path / "env.json")
     (tmp_path / "env.json").write_text(_json.dumps({"lmp": "lmp"}))
     sweep.main(["moriarty-gpu", "--results", str(res)])
@@ -377,7 +405,6 @@ def test_row_from_process_reads_the_json_or_classifies_the_death():
 def test_moriarty_cpu_ranks_are_physical_cores():
     """Xeon Silver 4216: 16 cores x 2 hyperthreads.  Open MPI refuses 32 ranks
     ('not enough slots'); one rank per physical core."""
-    from scaling.sweep import HOSTS
     assert HOSTS["moriarty-cpu"]["ranks"] == 16
 
 
@@ -527,7 +554,7 @@ def test_export_bundle_runs_in_a_child_process(tmp_path, monkeypatch):
 
 
 def test_export_bundle_child_writes_a_bundle(tmp_path):
-    pytest.importorskip("lammps_jax")
+    require_optional("lammps_jax")
     from scaling.run_lammps import export_bundle
     from scaling.structures import supercell
     y = str(pathlib.Path(__file__).parent.parent / "fixtures" / "pace" / "gesi_sbessel.yace")
@@ -624,3 +651,244 @@ def test_model_size_figure_plots_only_the_target_size(tmp_path, monkeypatch):
     plot.fig_model_size(rows, tmp_path)
     xs = sorted(x for ax in figs[-1].axes for ln in ax.lines for x in ln.get_xdata())
     assert xs == [0, 2]                            # medium (only 4096) is absent
+
+
+def _ba_row(code, mode, n, host="modal-a100", dtype="float64", size="medium", system="Cantor",
+            status="ok", t=1e-3):
+    return {"code": code, "mode": mode, "model": f"{code}/{system}/{size}", "size": size,
+            "system": system, "n_atoms": n, "device": "cpu" if "cpu" in host else "gpu",
+            "dtype": dtype, "host": host, "status": status, "call_s": t, "step_s": t,
+            "layout": "dense"}
+
+
+def _ba_rows(host="modal-a100", t=1e-3):
+    rows = [_ba_row(c, m, n, host=host, t=t) for c in ("acejax-pace", "acejax-ace")
+            for m in ("standalone", "lammps") for n in (4096, 8192)]
+    rows += [_ba_row("acejax-pace", "standalone", 8192, host=host, dtype="float32", t=t),   # dtype
+             _ba_row("acejax-pace", "standalone", 8192, host=host, size="small", t=t),      # size
+             _ba_row("acejax-pace", "standalone", 16384, host=host, status="oom", t=t)]     # not ok
+    return rows
+
+
+def test_before_after_series_selects_acejax_and_mlpace_reference():
+    """The before/after figure: float64 medium ace-jax lines, before from
+    before-perf/ and after from the live rows, with ML-PACE in LAMMPS drawn
+    in every panel of its system as the reference."""
+    from scaling.plot import before_after_series
+    after = _ba_rows() + [_ba_row("mlpace", "lammps", 8192), _ba_row("mace", "standalone", 8192),
+                          _ba_row("acejax-pace", "standalone", 8192, host="moriarty-gpu")]
+    before = _ba_rows(t=4e-3)
+    s = before_after_series(after, before, "modal-a100")
+    assert {k[2] for k in s} == {"acejax-pace", "acejax-ace", "mlpace"}            # no MACE
+    assert s[("Cantor", "standalone", "acejax-pace", "after")] == [(4096, 4096e3, "dense", None),
+                                                                  (8192, 8192e3, "dense", None)]
+    assert s[("Cantor", "standalone", "acejax-pace", "before")][-1] == (8192, 8192 / 4e-3, "dense",
+                                                                       None)
+    assert s[("Cantor", "lammps", "mlpace", "reference")] == [(8192, 8192e3, "dense", None)]
+    assert s[("Cantor", "standalone", "mlpace", "reference")] == [(8192, 8192e3, "dense", None)]
+    assert len(s) == 2 * 2 * 2 + 2              # modes x codes x phases, + reference per mode
+
+
+def test_before_after_without_before_rows_or_host_rows(tmp_path, monkeypatch):
+    """Rows not yet re-run (moriarty) or no before-perf/ directory: the figure
+    draws what exists, skips a host with no re-run ace-jax rows, and the page
+    lists that host as pending instead of failing."""
+    import matplotlib
+    matplotlib.use("Agg")
+    from scaling import plot
+    after = _ba_rows() + [_ba_row("mlpace", "lammps", 8192, host="moriarty-gpu")]
+    before = _ba_rows(t=4e-3) + _ba_rows(host="moriarty-gpu", t=4e-3)
+    # no before rows at all: after + reference only
+    s = plot.before_after_series(after, [], "modal-a100")
+    assert s and {k[3] for k in s} == {"after"}
+    # a host whose ace-jax rows are pending: nothing drawn, listed as pending
+    assert plot.before_after_series(after, before, "moriarty-gpu") == {}
+    assert plot.fig_before_after(after, before, tmp_path, "moriarty-gpu") is None
+    assert plot.before_after_hosts(after, before) == (["modal-a100"], ["moriarty-gpu"])
+    # CPU: ace-jax runs standalone only, so the figure has one mode column
+    cpu = [r for r in _ba_rows(host="moriarty-cpu") if r["mode"] == "standalone"]
+    assert {k[1] for k in plot.before_after_series(cpu, [], "moriarty-cpu")} == {"standalone"}
+    # end to end: make_figures + write_doc with results/ and results/before-perf/
+    res = tmp_path / "results"
+    (res / plot.BEFORE_DIR).mkdir(parents=True)
+    (res / "h.jsonl").write_text("\n".join(json.dumps(r) for r in after))
+    figs = []
+    monkeypatch.setattr(plot.plt, "close", lambda f=None: figs.append(f))
+    out = plot.make_figures(str(res / "*.jsonl"), tmp_path / "figs")        # before-perf/ empty
+    assert any(pathlib.Path(f).name == "scaling_before_after_float64_medium_modal-a100.png"
+               for f in out)
+    (res / plot.BEFORE_DIR / "h.jsonl").write_text("\n".join(json.dumps(r) for r in before))
+    out = plot.make_figures(str(res / "*.jsonl"), tmp_path / "figs")
+    ba = [f for f in out if pathlib.Path(f).name.startswith("scaling_before_after")]
+    assert len(ba) == 1 and ba[0].endswith("modal-a100.png")
+    dashed = [ln for ax in figs[-1].axes for ln in ax.lines
+              if ln.get_linestyle() == "--" and len(ln.get_xdata()) > 1]
+    assert dashed                                                            # the before lines
+    text = pathlib.Path(plot.write_doc(str(res / "*.jsonl"), out, doc=str(tmp_path / "b.md"))).read_text()
+    assert "pending (ace-jax rows being re-run): moriarty-gpu" in text
+    assert "{{" not in text                                                  # placeholders filled
+    assert "| moriarty-gpu | 8192 | 8.19M | pending |" in text               # findings
+    gate = {"code": "mlpace", "mode": "parity", "gate": "mlpace", "host": "modal-a100",
+            "status": "parity_ok", "dE_per_atom": 1e-14, "max_dF": 1e-10}
+    par = plot.parity_table(after + [gate])
+    assert "| modal-a100 | mlpace | ML-PACE | 1/1 | 1.0e-14 | 1.0e-10 |" in par
+    assert par.endswith("| moriarty-gpu | — | — | pending | | |")        # gates not re-run yet
+
+
+def test_perf_results_tables_mark_pending_hosts():
+    """The results doc's summary covers every host with re-run rows and marks
+    the others pending; the criteria compare the Cantor medium A100 rows."""
+    from scaling.perf_results import criteria_table, summaries
+    after = _ba_rows(t=8192 / 1.2e6)
+    before = _ba_rows(t=8192 / 4e5) + _ba_rows(host="moriarty-gpu")
+    text = summaries(after, before)
+    assert "### modal-a100" in text and "### moriarty-gpu" in text
+    assert "Pending: the ace-jax rows are being re-run." in text
+    assert "| Cantor | medium | ace-jax (PACE model) | standalone | 400k | 1.20M | 3.0× | — | 8192 | 8192 |" in text
+    crit = criteria_table(after, before)
+    assert "| end to end (scaling suite, standalone) | ≥ 1.10M atom-steps/s | 400k | 1.20M | **met** |" in crit
+    assert "| LAMMPS throughput | ≥ 1.00M atom-steps/s | 400k | 1.20M | **met** |" in crit
+    assert "| LAMMPS runs at 32,768 atoms | runs | did not run | did not run | **missed** |" in crit
+
+
+def test_basis_size_counts_functions_per_central_element():
+    """PACE: .yace functions per element; linear ACE: rows of WB, since every
+    B function carries its own weight per central element (WB is n_B x NZ).
+    Dividing n_B by NZ undercounted the Cantor ACE models 5x."""
+    from scaling.models import ace_functions_per_element, pace_functions_per_element
+    fix = pathlib.Path(__file__).parent.parent / "fixtures"
+    y = fix / "pace" / "gesi_sbessel.yace"
+    import re
+    block = y.read_text().split("\nfunctions:\n", 1)[1]
+    per_el = [part.count("\n    - ") + part.startswith("    - ")
+              for part in re.split(r"^  \d+:\n", block, flags=re.M)[1:]]
+    assert len(per_el) == 2 and pace_functions_per_element(y) == max(per_el)
+    z = fix / "sige_nofit.npz"
+    assert ace_functions_per_element(z) == np.load(z)["WB"].shape[0]
+
+
+def test_end_labels_carry_basis_size(monkeypatch):
+    from scaling import plot
+    monkeypatch.setattr(plot, "BASIS", {"Cantor/medium": {"acejax-ace": 3824, "acejax-pace": 496}})
+    assert plot._label("acejax-ace", "Cantor", "medium") == "ace-jax ACE · 3824 fn"
+    assert plot._label("acejax-pace", "Cantor", "medium") == "ace-jax PACE · 496 fn"
+    assert plot._label("mace", "Cantor", "medium") == "MACE"      # no size known: plain
+
+
+def test_rows_record_the_device_they_ran_on(tmp_path, monkeypatch):
+    """Modal hands out A100 variants (SXM4 / PCIe) that time differently, so
+    every row names the device: the GPU from nvidia-smi, else the CPU model."""
+    import types
+
+    from scaling import sweep
+    monkeypatch.setattr(sweep, "_DEVICE_NAMES", {})
+    monkeypatch.setattr(sweep.subprocess, "run", lambda *a, **k: types.SimpleNamespace(
+        returncode=0, stdout="NVIDIA A100-SXM4-80GB\n"))
+    only = lambda c: c.code == "acejax-pace" and c.mode == "standalone" and c.n_atoms == 256
+    sweep.run_sweep("moriarty-gpu", lambda c, prev: {"status": "ok"}, tmp_path / "r.jsonl",
+                    select=only)
+    rows = [json.loads(l) for l in (tmp_path / "r.jsonl").read_text().splitlines()]
+    assert rows and all(r["device_name"] == "NVIDIA A100-SXM4-80GB" for r in rows)
+    assert sweep.device_name("cpu")                          # the CPU model, never empty
+
+
+# ---- repeat runs: median point, min-max bar ---------------------------------
+
+def _rep(t, run=None, status="ok", n=8192, host="modal-a100", code="acejax-pace",
+         mode="standalone", **kw):
+    r = _ba_row(code, mode, n, host=host, status=status, t=t, **kw)
+    r["_key"] = [r["model"], mode, n, r["dtype"], r["device"]]
+    if run:
+        r["run"] = run
+    return r
+
+
+def test_load_picks_up_repeats_beside_the_live_files(tmp_path):
+    """repeats/*.jsonl beside the pattern joins the rows it loads, for the live
+    rows and (through before_pattern) for before-perf/repeats/ alike."""
+    from scaling.plot import before_pattern, load
+    res = tmp_path / "results"
+    (res / "repeats").mkdir(parents=True)
+    (res / "before-perf" / "repeats").mkdir(parents=True)
+    (res / "h.jsonl").write_text(json.dumps(_rep(1e-3)) + "\n")
+    (res / "repeats" / "h-run1.jsonl").write_text(json.dumps(_rep(2e-3, run="h-run1")) + "\n")
+    (res / "before-perf" / "h.jsonl").write_text(json.dumps(_rep(4e-3)) + "\n")
+    (res / "before-perf" / "repeats" / "h-run1.jsonl").write_text(
+        json.dumps(_rep(5e-3, run="h-run1")) + "\n")
+    pattern = str(res / "*.jsonl")
+    assert sorted(r.get("run", "live") for r in load(pattern)) == ["h-run1", "live"]
+    before = load(before_pattern(pattern))
+    assert sorted(r["call_s"] for r in before) == [4e-3, 5e-3]
+
+
+def test_aggregate_takes_the_median_and_the_min_max_of_repeats():
+    from scaling.plot import aggregate, spread, throughput
+    rows = [_rep(1e-3), _rep(2e-3, run="a"), _rep(4e-3, run="b"),     # 3 runs of one case
+            _rep(1e-3, n=4096)]                                        # a single run
+    agg = aggregate(rows)
+    assert len(agg) == 2
+    big = next(r for r in agg if r["n_atoms"] == 8192)
+    assert throughput(big) == pytest.approx(8192 / 2e-3)                 # the median run
+    assert spread(big) == pytest.approx((8192 / 4e-3, 8192 / 1e-3))
+    one = next(r for r in agg if r["n_atoms"] == 4096)
+    assert spread(one) is None and one == rows[-1]                       # untouched
+    assert aggregate(agg) == agg                                         # idempotent
+
+
+def test_a_case_ok_in_one_run_and_oom_in_another_is_ok():
+    from scaling.plot import aggregate, largest_fits, spread, throughput
+    rows = [_rep(1e-3, n=4096), _rep(1e-3, n=8192), _rep(None, status="oom", n=8192, run="a"),
+            _rep(None, status="oom", n=16384), _rep(None, status="oom", n=16384, run="a")]
+    agg = aggregate(rows)
+    at = {r["n_atoms"]: r for r in agg}
+    assert at[8192]["status"] == "ok" and spread(at[8192]) is None      # one ok run: no bar
+    assert throughput(at[8192]) == pytest.approx(8192e3)
+    assert at[16384]["status"] == "oom" and len(agg) == 3
+    assert "| modal-a100 | Cantor | ace-jax (PACE model) | standalone | 8192 | 16384 |" in largest_fits(rows)
+
+
+def _bars(fig):
+    """(x, y_lo, y_hi) of every error bar drawn in the figure."""
+    from matplotlib.collections import LineCollection
+    out = []
+    for ax in fig.axes:
+        for c in ax.collections:
+            if isinstance(c, LineCollection):
+                for seg in c.get_segments():
+                    out.append((seg[0][0], min(seg[0][1], seg[1][1]), max(seg[0][1], seg[1][1])))
+    return out
+
+
+@pytest.mark.parametrize("which", ["throughput", "before_after", "model_size"])
+def test_repeats_draw_a_min_max_bar_at_the_median(tmp_path, monkeypatch, which):
+    import matplotlib
+    matplotlib.use("Agg")
+    from scaling import plot
+    single = [_rep(1e-3, n=4096), _rep(1e-3, n=8192)]
+    repeated = single + [_rep(2e-3, run="a", n=8192), _rep(4e-3, run="b", n=8192)]
+    figs = []
+    monkeypatch.setattr(plot.plt, "close", lambda f=None: figs.append(f))
+    draw = {"throughput": lambda rows: plot.fig_throughput(rows, tmp_path),
+            "before_after": lambda rows: plot.fig_before_after(rows, [], tmp_path, "modal-a100"),
+            "model_size": lambda rows: plot.fig_model_size(rows, tmp_path)}[which]
+    draw(single)
+    assert _bars(figs[-1]) == []                                         # one run: no bar
+    draw(repeated)
+    bars = _bars(figs[-1])
+    assert len(bars) == 1
+    _, lo, hi = bars[0]
+    assert (lo, hi) == pytest.approx((8192 / 4e-3, 8192 / 1e-3))
+    ys = [y for ax in figs[-1].axes for ln in ax.lines for y in ln.get_ydata()]
+    assert pytest.approx(8192 / 2e-3) in ys                              # the line's point: median
+
+
+def test_tables_use_the_median_and_show_the_spread():
+    from scaling.perf_results import summaries
+    from scaling.plot import tables
+    rows = [_rep(1e-3, n=8192), _rep(2e-3, run="a", n=8192), _rep(4e-3, run="b", n=8192)]
+    t = tables(rows)
+    # median 4.1M; half the min-max range over the median: (8.19M - 2.05M) / 2 / 4.1M = 75%
+    assert "| 4.1e+06 ±75% |" in t
+    assert "| 8.19e+06 |" in tables(rows[:1])                            # no ± for a single run
+    s = summaries(rows, [_rep(8e-3, n=8192)])
+    assert "| 1.02M | 4.10M ±75% | 4.0× |" in s

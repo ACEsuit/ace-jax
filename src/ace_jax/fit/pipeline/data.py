@@ -39,9 +39,9 @@ def split_configs(configs, ntrain, ntest, test_start=None, seed=0):
 def _config_type_weights(path):
     """sigma_type: a weight-neutral named-weights dict over the file's config_type
     labels, so load_configs sets each config's type index (run.py behaviour)."""
-    from ase.io import read
+    from ..xyz import read_extxyz
     cts = []
-    for at in read(path, index=":"):
+    for at in read_extxyz(path):
         ct = str(at.info.get("config_type", ""))
         if ct and ct not in cts:
             cts.append(ct)
@@ -54,6 +54,10 @@ def load_fit_data(cfg, *, data=None, train=None, test=None, ood=None):
     if (data is None) == (train is None):
         raise ValueError("pass exactly one of data= (split) or train= (+ test=)")
     model, meta, z = load(cfg.model)
+    from ...eval.pace_model import PACEModel
+    if isinstance(model, PACEModel):
+        raise ValueError(f"{cfg.model}: a PACE .yace model is evaluate-only and cannot be fitted; "
+                         "fit a linear ACE model (.npz, e.g. from `aj construct`) instead")
     keys = dict(energy_key=cfg.energy_key, force_key=cfg.force_key, virial_key=cfg.virial_key)
     if cfg.factors:
         keys["factors"] = cfg.factors

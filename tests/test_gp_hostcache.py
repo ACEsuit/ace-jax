@@ -107,7 +107,7 @@ def test_hostcache_statistics_match_device(cached_problem, chunk):
 
 
 @pytest.mark.parametrize("chunk", [1, 2])
-def test_hostcached_lml_matches_device_lml(cached_problem, chunk):
+def test_hostcached_lml_matches_device_lml(cached_problem, chunk, request):
     """Value and gradient of the host-cached LML equal make_lml's.  The statistics
     agree to ~1e-15 (above), but the posterior precision here has cond ~1e19, so
     summation-order roundoff reaches the LML at ~1e-9 relative: tolerances say so."""
@@ -120,7 +120,13 @@ def test_hostcached_lml_matches_device_lml(cached_problem, chunk):
         v, g = lik.value_and_grad(a)
         v_only = lik(a)
     assert np.isclose(float(v), float(ref_v), rtol=1e-7)
-    assert np.isclose(float(v_only), float(v), rtol=1e-12)
+    # value-only vs value_and_grad: two compiled reductions over the same
+    # statistics.  In pair mode their summation orders differ, and through the
+    # cond ~1e19 precision that cancellation reaches the LML: 0 in ASE neighbour
+    # order, 6.7e-10 (chunk 1) / 5.4e-11 (chunk 2) relative in matscipy-neighbours
+    # order.  1e-8 is ~15x that; pca stays <= 4e-15 in both orders, so keeps 1e-12.
+    rtol_v = 1e-8 if request.node.callspec.params["cached_problem"] == "pair" else 1e-12
+    assert np.isclose(float(v_only), float(v), rtol=rtol_v)
     assert float(jnp.max(jnp.abs(g - ref_g))) < 1e-6 * float(jnp.max(jnp.abs(ref_g)))
 
 

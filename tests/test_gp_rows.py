@@ -77,7 +77,7 @@ def test_residual_rows_match_autodiff_of_energy_rows(setup, kind, bump):
     model, meta, configs, ds, cfg, ind = setup
     spec = KernelSpec(kind=kind, bump=bump, D=cfg.D)
     batch = jax.tree.map(lambda a: a[0], ds)
-    L, M = cfg.len_basis, ind.XM.shape[0]
+    M = ind.XM.shape[0]
 
     Ncap, K = batch.nbr.shape
 

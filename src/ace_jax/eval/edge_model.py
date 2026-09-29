@@ -15,6 +15,12 @@ selectors), `edge_a_factors(rij, zi, zj, mask)` (the two per-edge factors of the
 A basis, zero on invalid edges) and `a_channels` (1, or the number of
 neighbour-species channels A carries), plus the
 fields `aspec_r`, `aspec_y`, `edge_a_kind`, `a_sel_r`, `a_sel_y` and `E0`.
+
+A model whose A basis is built pool-first (`pool_first_dense` /
+`pool_first_sparse`; PACE) provides instead `pool_first_weights()`,
+`pool_first_sel_y` (and `pool_first_widths()`, `product_basis_width()` for
+`estimate_a_bytes`), and sets `uses_edge_a = False`: the `edge_a` form is then
+inert and `ACECalculator` does not calibrate it.
 """
 import dataclasses
 import time
@@ -24,6 +30,8 @@ import jax
 import jax.numpy as jnp
 
 EDGE_A_KINDS = ("gather", "matmul")
+
+CHUNK_NODES = 16384   # dense rows per block: peak memory ~ block, not N (spec, component 2)
 
 
 def one_hot_selector(idx, width, dtype):
@@ -38,6 +46,10 @@ def check_edge_a_kind(kind):
 
 class EdgeSiteModel(eqx.Module):
     """Base class: no fields of its own, only the shared behaviour."""
+
+    # False for a model whose energy path is pool-first (A never formed per edge),
+    # so the `edge_a` form, and its calibration, do not apply.
+    uses_edge_a = True
 
     # -------------------------------------------------- A-basis product
     def edge_a(self, R, Y):
@@ -94,6 +106,45 @@ class EdgeSiteModel(eqx.Module):
         sel = ((mu * nc + self.aspec_r[None, :]) * ny + self.aspec_y[None, :]).reshape(-1)
         return A_full[:, sel]
 
+    # -------------------------------------------------- pool-first A (feature-major)
+    def pool_first_dense(self, b, Y, zj, node_z):
+        """A_t (C*n_a, n) = sum_k W[z_i, z_j] b_k (x) Y_y, pooled BEFORE W.
+
+        Every model here has a radial that is linear in per-pair coefficients
+        over a fixed per-edge basis b (PACE: g_k with crad; ACE: polynomials,
+        spline or factorised table with its weights), so the per-edge R_nl is
+        never formed: pool b (x) Y per (node, neighbour-species channel), then
+        apply W per node.  Feature-major output so the product-basis gathers read
+        whole rows.  b (n, K, n_b), Y (n, K, n_Y), zj (n, K) neighbour channel.
+        docs/pace-performance-gap.md #4, #5."""
+        n, K, nb = b.shape
+        C = self.a_channels
+        hi = jax.lax.Precision.HIGHEST
+        if C > 1:
+            oh = jax.nn.one_hot(zj, C, dtype=b.dtype)
+            b = (oh[..., :, None] * b[..., None, :]).reshape(n, K, C * nb)
+        Ag = jnp.einsum("nkg,nky->ngy", b, Y, precision=hi)                  # (n, C*nb, nY)
+        Agy = jnp.matmul(Ag, self.pool_first_sel_y, precision=hi)            # (n, C*nb, n_a)
+        Agy = Agy.reshape(n, C, nb, -1)
+        W = self.pool_first_weights()                                        # (NZ, C, n_a, nb)
+        At = jnp.einsum("nmka,nmak->man", Agy, W[node_z], precision=hi)     # (C, n_a, n)
+        return At.reshape(C * At.shape[1], n)
+
+    def pool_first_sparse(self, b, Y, seg, zj, node_z, n_nodes):
+        """`pool_first_dense` for an edge list: pool b (x) Y per (node, channel)
+        by segment_sum, then W per node.  Same output layout, (C*n_a, n_nodes)."""
+        C = self.a_channels
+        hi = jax.lax.Precision.HIGHEST
+        nb = b.shape[1]
+        outer = (b[:, :, None] * Y[:, None, :]).reshape(b.shape[0], nb * Y.shape[1])  # explicit: E may be 0
+        Ag = jax.ops.segment_sum(outer, seg * C + (zj if C > 1 else 0),
+                                 num_segments=n_nodes * C)
+        Ag = Ag.reshape(n_nodes, C, nb, -1)
+        Agy = jnp.matmul(Ag, self.pool_first_sel_y, precision=hi)             # (n, C, nb, n_a)
+        W = self.pool_first_weights()
+        At = jnp.einsum("nmka,nmak->man", Agy, W[node_z], precision=hi)     # (C, n_a, n)
+        return At.reshape(C * At.shape[1], n_nodes)
+
     # -------------------------------------------------- energy / forces / virial
     def energy_forces_virial(self, rij, zi, zj, senders, receivers, n_nodes,
                              node_z, mask=None):
@@ -121,20 +172,79 @@ class EdgeSiteModel(eqx.Module):
              .at[senders].add(g_r).at[receivers].add(-g_r))
         return E, F, -g_eps
 
-    def energy_forces_virial_dense(self, rij, zi, zj, idx, mask, node_z):
+    def site_energies_dense_blocked(self, rij, zi, zj, mask, node_z, chunk):
+        """`site_energies_dense` evaluated in row blocks of at most `chunk`:
+        per-row energies (n,), identical to the unblocked call.
+
+        At or below one block this IS the unblocked call (no lax.map, no
+        checkpoint).  Above it, rows are split into nb equal blocks of B <= chunk
+        (padded with parked, fully masked rows, dropped from the result) and
+        evaluated with lax.map under jax.checkpoint, so the backward pass
+        recomputes one block at a time: peak memory scales with the block, not
+        with n.  Exact, because a site energy depends only on its own row."""
+        n = mask.shape[0]
+        nb = max(1, -(-n // chunk))
+        if nb == 1:
+            return self.site_energies_dense(rij, zi, zj, mask, node_z)
+        B = -(-n // nb)
+        pad_n = nb * B - n
+        park = jnp.asarray([1.0, 0.0, 0.0], rij.dtype) * self.pad_cutoff()
+
+        def blocks(a, fill):
+            if pad_n:
+                a = jnp.concatenate([a, jnp.broadcast_to(jnp.asarray(fill, a.dtype),
+                                                         (pad_n,) + a.shape[1:])])
+            return a.reshape((nb, B) + a.shape[1:])
+
+        xs = (blocks(rij, park), blocks(zi, 0), blocks(zj, 0), blocks(mask, False),
+              blocks(node_z, 0))
+        block = jax.checkpoint(lambda a: self.site_energies_dense(*a))
+        return jax.lax.map(block, xs).reshape(-1)[:n]
+
+    def energy_forces_virial_dense(self, rij, zi, zj, idx, mask, node_z, chunk=CHUNK_NODES,
+                                   rev=None, return_edge_grad=False):
         """`energy_forces_virial` for the dense layout: rij (n, K, 3), zi / zj /
-        idx (neighbour index) / mask (n, K).  Same strain trick for the virial."""
+        idx (neighbour index) / mask (n, K).  Same strain trick for the virial.
+
+        Rows are evaluated in blocks of `chunk` (lax.map; jax.checkpoint so the
+        backward pass recomputes a block rather than storing all of them): peak
+        memory scales with the block.  A site energy depends only on its own row,
+        so blocks are independent; padding rows are fully masked.
+
+        `rev` (n, K), from `nlist.reverse_slots`, is optional and independent of
+        chunking: it only changes how the per-edge gradient `g_r` is turned into
+        forces, after the (possibly chunked) energy above has produced it.
+
+        `return_edge_grad=True` returns (E, g_r, V) instead: g_r (n, K, 3) is
+        dE/drij, zero on masked slots, for a caller that assembles the forces
+        itself (the skin list's step, `calc.skin.step`, which gathers in its own
+        slot space); `rev` is then ignored."""
         n = mask.shape[0]
 
         def total(r, eps):
             sym = 0.5 * (eps + eps.T)
-            return jnp.sum(self.site_energies_dense(r + r @ sym, zi, zj, mask, node_z))
+            return jnp.sum(self.site_energies_dense_blocked(r + r @ sym, zi, zj, mask,
+                                                            node_z, chunk))
 
         eps0 = jnp.zeros((3, 3), rij.dtype)
         E, (g_r, g_eps) = jax.value_and_grad(total, argnums=(0, 1))(rij, eps0)
         g_r = jnp.where(mask[..., None], g_r, 0.0)
-        F = (jnp.zeros((n, 3), rij.dtype).at[jnp.arange(n)].add(g_r.sum(axis=1))
-             .at[idx.reshape(-1)].add(-g_r.reshape(-1, 3)))
+        if return_edge_grad:
+            return E, g_r, -g_eps
+        if rev is None:
+            F = (jnp.zeros((n, 3), rij.dtype).at[jnp.arange(n)].add(g_r.sum(axis=1))
+                 .at[idx.reshape(-1)].add(-g_r.reshape(-1, 3)))
+        else:
+            # F_i = sum_k g[i,k] - sum_k g[j, rev[i,k]], j = idx[i,k]: the edge
+            # j -> i sits at slot rev[i,k] of row j (a full list is symmetric),
+            # so the force assembly is a gather, not a scatter-add.  Padded slots
+            # have idx = rev = 0; g_r there is already zeroed by the mask above,
+            # and `back` at those slots is masked out again below, so g_r[0, 0]
+            # (a live value, generally nonzero) never leaks into F -- and for a
+            # live edge, g_r[idx, rev] reads a live slot of row j, because the
+            # match found by reverse_slots guarantees the reverse edge is live.
+            back = g_r[idx, rev]
+            F = g_r.sum(axis=1) - jnp.where(mask[..., None], back, 0.0).sum(axis=1)
         return E, F, -g_eps
 
     # -------------------------------------------------- positions wrapper
@@ -159,16 +269,42 @@ LAYOUTS = ("sparse", "dense")
 
 
 def estimate_a_bytes(model, layout, n_nodes, n_edges, max_neighbours, itemsize):
-    """Peak bytes of the A-basis stage (energy + forces), for choosing a layout.
+    """Peak bytes of the A-basis stage (energy + forces; pool-first: the whole
+    dense call), for choosing a layout.
 
     Fitted to measured peaks on A4500/A100/H100 (c_ace, 4k and 14k atoms):
     dense  ~ 2 n K (C n_cols + n_Y) + 3 n C n_cols n_Y   (factors + A_full)
     sparse ~ 2 E (n_cols + n_Y + n_A)                    (factors + per-edge rows)
     with C neighbour-species channels.  Dense grows with C and with the (n, K)
     padding; sparse only with the edge count.
+
+    A pool-first model (`uses_edge_a` False; PACE) never forms per-edge columns
+    or A rows: per edge it holds the fixed basis b (n_b wide, one-hot over the C
+    channels) and Y; per node the pooled Ag = b (x) Y, A, the (n, C, n_b, n_a)
+    Agy = Ag @ sel_y that W[z_i] contracts, and the product basis (n_P =
+    `product_basis_width()`: the gathered A factors of every order and AA), so
+    with n_b, n_Y = `pool_first_widths()`
+    dense  ~ 2 n K (C n_b + n_Y) + per_node
+    sparse ~ 2 E (n_b + n_Y + n_b n_Y) + per_node
+    per_node = n C (n_b n_Y + n_a) + n C n_b n_a + n n_P / 4
+    Refitted to XLA's compiled temp size of the dense E/F/V call on an A100
+    (six PACE models x 1k/4k/8k atoms, float64,
+    bench/perf/results/microbench_memory_float64.json): measured / estimate
+    0.68-1.06, so the estimate errs high by at most 1.5x.  XLA's CPU backend
+    keeps about twice as much live (fewer fusions), so on the CPU this is low
+    by about 2x.
     """
-    nc, ny = model.edge_a_widths()
     C, n_a = model.a_channels, int(model.aspec_r.shape[0])
+    if not model.uses_edge_a:
+        nb, ny = model.pool_first_widths()
+        per_node = (n_nodes * C * (nb * ny + n_a) + n_nodes * C * nb * n_a
+                    + n_nodes * model.product_basis_width() // 4)
+        if layout == "dense":
+            return itemsize * (2 * n_nodes * max_neighbours * (C * nb + ny) + per_node)
+        if layout == "sparse":
+            return itemsize * (2 * n_edges * (nb + ny + nb * ny) + per_node)
+        raise ValueError(f"layout must be one of {LAYOUTS}, got {layout!r}")
+    nc, ny = model.edge_a_widths()
     if layout == "dense":
         return itemsize * (2 * n_nodes * max_neighbours * (C * nc + ny) + 3 * n_nodes * C * nc * ny)
     if layout == "sparse":

@@ -1,0 +1,115 @@
+{
+ "yace": "/ace-jax/bench/scaling/models/pace_Cantor_medium.yace",
+ "system": "Cantor",
+ "n": 8192,
+ "dtype": "float64",
+ "layout": "dense",
+ "variant": "baseline",
+ "platform": "gpu",
+ "device": "NVIDIA A100-SXM4-80GB",
+ "first_call_s": 7.100499168000001,
+ "calc": {
+  "call_s": 0.03109215150000111,
+  "nlist_s": 0.01889102700000045,
+  "model_s": 0.007613329999999863,
+  "layout": "dense",
+  "backend": "neighbour_matrix"
+ },
+ "E": 1639.909472802445,
+ "K": 44,
+ "n_slots": 360448,
+ "n_edges": 344064,
+ "pre_model_split": {
+  "neighbour_matrix_s": 0.01001203950000118,
+  "build_args_s": 0.0035478065000003056,
+  "species_index_s": 0.0020771955000018494,
+  "d2h_results_s": 1.1291000001634188e-05
+ },
+ "parity_vs_calc": {
+  "dE": 2.2737367544323206e-13,
+  "max_dF": 9.992007221626409e-16
+ },
+ "model": {
+  "efv_s": 0.006918261999999231,
+  "energy_only_s": 0.001976343000000824,
+  "efv_cost": {
+   "flops": 3778246144.0,
+   "bytes": 4927502848.0
+  },
+  "energy_cost": {
+   "flops": 1123606016.0,
+   "bytes": 1464364544.0
+  }
+ },
+ "stages": {
+  "factors": {
+   "fwd_s": 0.0013499219999992818,
+   "fwd_vjp_s": 0.0021833285000028013,
+   "fwd_cost": {
+    "flops": 179503104.0,
+    "bytes": 302447680.0
+   },
+   "fwd_vjp_cost": {
+    "flops": 466419712.0,
+    "bytes": 595520704.0
+   }
+  },
+  "pool": {
+   "fwd_s": 0.001183132499999573,
+   "fwd_vjp_s": 0.0028623819999999967,
+   "fwd_cost": {
+    "flops": 893912128.0,
+    "bytes": 1020854528.0
+   },
+   "fwd_vjp_cost": {
+    "flops": 2668431360.0,
+    "bytes": 2657518080.0
+   }
+  },
+  "core": {
+   "fwd_s": 0.000492061999995741,
+   "fwd_vjp_s": 0.00038556849999693554,
+   "fwd_cost": {
+    "flops": 20905984.0,
+    "bytes": 29197712.0
+   },
+   "fwd_vjp_cost": {
+    "flops": 40370176.0,
+    "bytes": 52266392.0
+   }
+  },
+  "node": {
+   "fwd_s": 0.0010235839999985785,
+   "fwd_vjp_s": 0.003088452000000075,
+   "fwd_cost": {
+    "flops": 22780394.0,
+    "bytes": 116288024.0
+   },
+   "fwd_vjp_cost": {
+    "flops": 427879040.0,
+    "bytes": 971045632.0
+   }
+  },
+  "shapes": {
+   "cols": [
+    8192,
+    44,
+    26
+   ],
+   "Y": [
+    8192,
+    44,
+    9
+   ],
+   "A": [
+    8192,
+    180
+   ]
+  }
+ },
+ "peak_bytes": 937229056,
+ "kernels": {
+  "error": "IndexError('list index out of range')",
+  "stderr": ""
+ }
+}
