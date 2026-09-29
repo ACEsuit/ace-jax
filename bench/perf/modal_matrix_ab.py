@@ -21,6 +21,9 @@ sys.path.insert(0, str(HERE.parent))
 from scaling.modal_app import base_image, with_sources  # noqa: E402
 
 app = modal.App("ace-jax-matrix-ab", image=with_sources(base_image))
+# rows are also appended here as they land, so a dropped client (run with
+# `modal run --detach`) loses nothing: `modal volume get ace-jax-matrix-ab <tag>.jsonl`
+vol = modal.Volume.from_name("ace-jax-matrix-ab", create_if_missing=True)
 OUT = HERE / "results"
 ENV = {"PYTHONPATH": "/ace-jax/bench:/ace-jax/src", "XLA_PYTHON_CLIENT_PREALLOCATE": "false"}
 MODELS = ("pace_Cantor_medium", "ace_Cantor_medium", "ace_SiGe_medium")
@@ -44,8 +47,8 @@ def _export(model, n, variant, out, ref=False):
                 str(n), variant, out] + (["--ref"] if ref else []), env={"JAX_PLATFORMS": "cpu"})
 
 
-@app.function(gpu="A100-80GB", timeout=3300)
-def ab(models: str, ns: str, parity: bool = True, rounds: int = 1):
+@app.function(gpu="A100-80GB", timeout=3300, volumes={"/results": vol})
+def ab(models: str, ns: str, parity: bool = True, rounds: int = 1, tag: str = "matrix_ab"):
     import subprocess
     import time
     sys.path.insert(0, "/ace-jax/bench/perf")
@@ -62,6 +65,9 @@ def ab(models: str, ns: str, parity: bool = True, rounds: int = 1):
         r.update(info)
         r["t"] = round(time.time() - t0, 1)
         rows.append(r)
+        with open(f"/results/{tag}.jsonl", "a") as fh:
+            fh.write(json.dumps(r) + "\n")
+        vol.commit()
         print(json.dumps({k: v for k, v in r.items() if k not in ("ref_F", "stderr")}), flush=True)
 
     if parity:
@@ -102,7 +108,7 @@ def ab(models: str, ns: str, parity: bool = True, rounds: int = 1):
 @app.local_entrypoint()
 def main(tag: str = "matrix_ab", models: str = ",".join(MODELS), ns: str = "16384,131072",
          parity: bool = True, rounds: int = 1):
-    rows = ab.remote(models, ns, parity, rounds)
+    rows = ab.remote(models, ns, parity, rounds, tag)
     OUT.mkdir(exist_ok=True)
     path = OUT / f"{tag}.json"
     path.write_text(json.dumps(rows, indent=1) + "\n")
