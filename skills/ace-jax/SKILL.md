@@ -155,10 +155,20 @@ an `.npz` ACE model.
 
 ### Calculator performance options
 
-`ACECalculator(path, dtype=None, layout="auto", edge_a_kind="auto")`:
+`ACECalculator(path, dtype=None, layout="auto", edge_a_kind="auto", skin=1.0)`:
 - `layout`: `"sparse"` (edge list) or `"dense"` (padded per-node blocks, A by a
   batched outer product, several times faster forces on GPU). `"auto"` picks
-  dense when its memory estimate fits the device budget.
+  dense when the padding fill, edges / (atoms × max neighbours), is at least
+  `MIN_DENSE_FILL` (0.5). Memory is not a criterion: the dense model runs in
+  blocks of `CHUNK_NODES` (16,384) rows.
+- `skin` (Å, dense layout only): a Verlet neighbour list built for cutoff +
+  skin and reused across MD-like calls, one compiled step each. It rebuilds
+  automatically when an atom moves more than skin / 2, when the cell, pbc,
+  species or atom count change, or when a row outgrows its capacity.
+  `calc.last_timing["rebuilds"]` counts the calls that built a list, and
+  `last_timing["nlist_s"]` is 0 on a reuse. Use `skin=0` for one-shot
+  evaluation of unrelated structures (it rebuilds on every call). Setting
+  `calc.model` or `calc.skin` drops the current list.
 - `edge_a_kind`: `"gather"` or `"matmul"`, the two A-basis forms. `"auto"` times
   both once per edge-count bucket.
 - Edge lists are padded to power-of-two buckets, so MD reuses the jitted
@@ -171,11 +181,21 @@ an `.npz` ACE model.
 from ace_jax.export.lammps import export_lammps          # needs lammps-jax installed
 model, meta, _ = aj.load("model.npz")                     # or a .yace
 export_lammps(model, meta, "bundle", max_atoms=4096, max_edges=200_000,
-              dtype="float64", layout="auto", type_elements=[14, 32])  # Z in LAMMPS type order
+              dtype="float64", layout="auto", k_dense=64, max_owned=2048,
+              type_elements=[14, 32])                     # Z in LAMMPS type order
 ```
 
-This writes a lammps-jax bundle for `pair_style jax/kk` (GPU only). For
-`layout="auto"` to choose dense, pass `k_dense` (max neighbours).
+This writes a lammps-jax bundle for `pair_style jax/kk` (GPU only).
+- `layout="auto"` chooses dense only when `k_dense` (max neighbours per atom) is
+  given and one dense block's `estimate_a_bytes` fits `dense_budget_bytes()`.
+- `max_owned`: owned-row capacity of the dense bundle. LAMMPS numbers owned
+  atoms first, so only rows below it are evaluated and ghosts cost nothing.
+  The bundle records it as `ace_jax.owned_rows`; the key is not `max_owned`
+  because lammps-jax reads that name from anywhere in the file. An atom past
+  `max_owned`, or with more than `k_dense` neighbours, gives NaN, never a
+  silent truncation.
+- The dense bundle runs in blocks of `BUNDLE_BLOCK_ROWS` (32,768) rows above
+  one block, bounding memory at large N.
 
 Other entry points:
 - `aj.site_descriptors(...)`: per-atom ACE descriptors.

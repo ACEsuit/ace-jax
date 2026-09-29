@@ -216,6 +216,32 @@ def dense_from_sparse(g: "SparseGraph", cutoff, max_neighbours=None):
     return DenseGraph(dist, idx, count, g.n_nodes)
 
 
+def reverse_slots(idx, rij, count, tol=1e-8):
+    """rev (n, K): slot of the edge j -> i in row j = idx[i, k], matched by
+    rij[j, rev] == -rij[i, k] (periodic images of one pair are distinct edges,
+    so matching is per image, by the edge vector rounded to 1e-6 A, not per
+    atom pair). Host numpy, O(E log E); raises ValueError if any live edge has
+    no reverse -- callers fall back to the scatter assembly in that case."""
+    idx, rij, count = np.asarray(idx), np.asarray(rij), np.asarray(count)
+    n, K = idx.shape
+    live = np.arange(K)[None, :] < count[:, None]
+    i = np.repeat(np.arange(n), K).reshape(n, K)[live]
+    k = np.tile(np.arange(K), n).reshape(n, K)[live]
+    j = idx[live]
+    d = rij[live]
+    q = np.round(d / 1e-6).astype(np.int64)
+    # forward key (i, j, d) and the reverse edge's key seen from its partner (j, i, -d)
+    fwd = np.lexsort((q[:, 2], q[:, 1], q[:, 0], j, i))
+    bwd = np.lexsort((-q[:, 2], -q[:, 1], -q[:, 0], i, j))
+    rev = np.zeros((n, K), np.int32)
+    # the e-th smallest forward key equals the e-th smallest reversed key
+    rev[i[bwd], k[bwd]] = k[fwd]
+    ok = (idx[j, rev[i, k]] == i) & (np.abs(rij[j, rev[i, k]] + d).max(axis=1) < tol)
+    if not ok.all():
+        raise ValueError(f"{(~ok).sum()} edges without a matched reverse")
+    return rev
+
+
 def dense_to_sparse(g: DenseGraph):
     """Flatten a DenseGraph, for cross-checking the two pooling paths."""
     m = g.mask

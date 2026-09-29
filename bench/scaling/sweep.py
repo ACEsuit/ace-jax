@@ -90,6 +90,33 @@ def _line(c):
     return (c.model, c.mode, c.dtype, c.device)
 
 
+_DEVICE_NAMES = {}
+
+
+def device_name(device):
+    """What a case ran on: the GPU's name (nvidia-smi; Modal's A100-80GB is an
+    SXM4 or a PCIe card, which time differently), else the CPU model."""
+    if device not in _DEVICE_NAMES:
+        name = ""
+        if device == "gpu":
+            try:
+                p = subprocess.run(["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+                                   capture_output=True, text=True, timeout=30)
+                name = p.stdout.strip().splitlines()[0] if p.returncode == 0 and p.stdout.strip() else ""
+            except (OSError, subprocess.SubprocessError):
+                pass
+        else:
+            try:
+                name = next((l.split(":", 1)[1].strip() for l in open("/proc/cpuinfo")
+                             if l.startswith("model name")), "")
+            except OSError:
+                pass
+            import platform
+            name = name or platform.processor() or platform.machine()
+        _DEVICE_NAMES[device] = name or "unknown"
+    return _DEVICE_NAMES[device]
+
+
 def run_sweep(host, runner, results_path, select=lambda c: True):
     """Run the cases in order (line by line, ascending n), resumably.  Each case
     gets the previous ok row of its line, which sizes its step count."""
@@ -115,6 +142,7 @@ def run_sweep(host, runner, results_path, select=lambda c: True):
             row = runner(c, prev.get(_line(c)))
             row["retried"], row["first_error"] = True, first
         row["_key"], row["_line"], row["host"] = list(c.key()), list(_line(c)), host
+        row["device_name"] = device_name(c.device)
         with results_path.open("a") as f:
             f.write(json.dumps(row) + "\n")
         if row["status"] != "ok":
@@ -288,6 +316,7 @@ def main(argv=None):
                 r["_key"] = ["parity", r["gate"], r["system"], r["code"]] + (
                     [r["bundle_layout"]] if r.get("bundle_layout") else [])
                 r["_line"] = ["parity"]
+                r["device_name"] = device_name(r.get("device", "gpu"))
                 f.write(json.dumps(r) + "\n")
     for r in rows:
         print(f"parity {r['gate']:7s} {r['system']:7s} {r['model']:28s} {r['status']}"

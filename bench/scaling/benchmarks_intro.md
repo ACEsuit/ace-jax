@@ -25,52 +25,50 @@ design is in `docs/benchmark-scaling-spec.md`, and how to reproduce it is in
 - **Hosts:** moriarty CPU (16-core Xeon Silver 4216; LAMMPS with 16 MPI
   ranks, standalone on all 32 hardware threads); moriarty GPU (RTX A4500,
   20 GB); Modal A100-80GB.
-- **Parity gate:** each host's parity checks passed before any timing ran.
-  - ace-jax vs ML-PACE: |dE|/atom ≤ 5e-14, |dF| ≤ 4e-10.
-  - ace-jax standalone vs ace-jax in LAMMPS, both bundle layouts: |dE|/atom
-    ≤ 3e-15, |dF| ≤ 3e-14.
-  - MACE vs Symmetrix: ≤ 7e-7.
+- **Parity gate:** each host's parity checks passed before any timing ran:
+  ace-jax against ML-PACE (gate `mlpace`), ace-jax standalone against
+  ace-jax in LAMMPS in both bundle layouts (gate `acejax`), and MACE against
+  Symmetrix (gate `mace`).
+
+{{parity}}
 
 ## Findings
 
-Medium models, float64, at exactly 8,192 atoms on the GPUs and 2,048 on the
-CPU. The ratios come from the rows in the table below.
+The ace-jax rows were re-run after the speed-up branch
+(`docs/perf-optimisation-results.md`); the rows from before it are kept in
+`bench/scaling/results/before-perf/`, and the before/after figures below
+compare the two. The tables are computed from the rows by
+`bench/scaling/plot.py` on every render: medium models, at exactly 8,192
+atoms on the GPUs and 2,048 on the CPU, as ranges over the two systems.
 
-- **ML-PACE in LAMMPS is the fastest code on every host.** It reaches
-  1.7–2.2M atom-steps/s on the A100, 0.7–1.0M on the A4500, and 0.2–0.3M on
-  16 CPU cores. On the same `.yace` models, ace-jax PACE is slower:
+{{findings}}
 
-  | host | vs ace-jax standalone | vs ace-jax in LAMMPS | note |
-  |---|---|---|---|
-  | A100 | 4.6–6.4× | about 5× | |
-  | A4500 | 4–6× | 10–18× | slow consumer-card float64 |
-  | CPU | about 30× | — | 16 MPI ranks against one process |
-
-  A profiling study (`docs/pace-performance-gap.md`, on the follow-up
-  speed-up branch) traces most of the GPU gap to calculator overhead and
-  specific model kernels. It prototypes changes that bring the model call
-  level with ML-PACE.
-- **ace-jax is faster than MACE at every size compared here:**
-  - standalone: 12–16× on the A100, 23–41× on the A4500, and 14–48× on the
-    CPU;
-  - in LAMMPS on the A100: 5–8×;
-  - on the A4500, where MACE in LAMMPS runs out of memory at 8,192 atoms,
-    about 2–10× at 4,096.
-- **ace-jax fits far more atoms than MACE in the same memory.** On the A100,
-  ace-jax PACE runs 524k–1M atoms standalone and linear ACE 262k–524k, where
-  MACE stops at 32k. That's 8–32× more, and similar on the A4500.
-- **float32** speeds ace-jax up 1–1.5× on the A100 and 1.5–3× on the
-  consumer A4500, where float64 is slow. MACE gains up to 6× on the A4500.
+- **ML-PACE in LAMMPS remains the fastest code on the A100,** and the gap to
+  ace-jax on the same `.yace` models is much narrower than before the
+  speed-ups. `docs/pace-performance-gap.md` traces the remaining gap.
+- **ace-jax is faster than MACE, and fits far more atoms** in the same
+  memory: on the A100 ace-jax now runs to the top of the size ladder
+  standalone.
+- **Standalone timing changed method with the speed-ups.** The ace-jax rows
+  after them are MD-like (atoms moved slightly between calls, the neighbour
+  list reused within its skin); the rows before, and the MACE rows, rebuild
+  the neighbour list on every call.
 
 ## Caveats
 
-- **These are pre-optimisation numbers, and the linear ACE models are
-  oversized.** The ace-jax speed-up PR re-runs every ace-jax row and
-  supersedes this page. The linear ACE models here have 2–3× (SiGe) and
-  7–14× (Cantor) the basis functions per central element of the PACE models
-  beside them: the size ladder counted n_B / NZ, but every B function carries
-  its own weight per central element. ACE-vs-PACE differences on this page
-  therefore mostly reflect basis size.
+- **The linear ACE models are larger than the PACE models they sit beside.**
+  Plot labels and the "Model basis sizes" table give basis functions per
+  central element. Linear ACE is 2–3× the PACE size on SiGe and 7–14× on
+  Cantor, because the size ladder counted linear ACE functions as n_B / NZ,
+  but every B function carries its own weight for each central element. So
+  ACE-vs-PACE throughput differences mostly reflect basis size, not the code
+  path. Matching the ladder is a follow-up.
+- **Modal A100 rows vary about 20–25% between containers,** even on the same
+  card type (A100-SXM4); the same-container A/B in
+  `bench/perf/results/microbench_*_fcf6f8e_ab.json` shows it. Where a case was
+  run more than once (Modal: separate containers), the point is the median
+  and the bar spans min–max. The controlled before/after comparisons are the
+  same-container micro-benchmarks in `docs/perf-optimisation-results.md`.
 - **Random weights.** The ace-jax and PACE models carry random coefficients
   where no fitted model exists. They are timing-only; their energies mean
   nothing physically.

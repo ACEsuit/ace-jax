@@ -12,7 +12,7 @@ import jax
 import numpy as np
 import pytest
 
-from conftest import species_index
+from conftest import require_optional, species_index
 
 jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
@@ -162,10 +162,8 @@ def test_dense_from_sparse_matches_neighbour_matrix(case):
     """The dense layout built by grouping the sparse list must match the native
     `neighbour_matrix` where that exists -- otherwise the two code paths could
     diverge silently on machines that have it."""
-    from ace_jax.eval.nlist import _dense_from_sparse, _neighbour_list, have_matscipy_neighbours
-    if not have_matscipy_neighbours():
-        pytest.skip("no neighbour_matrix to compare against")
-    from matscipy_neighbours import neighbour_matrix
+    from ace_jax.eval.nlist import _dense_from_sparse, _neighbour_list
+    neighbour_matrix = require_optional("matscipy_neighbours").neighbour_matrix
     model, meta, z, atoms = case
     pos, cell, pbc, rcut = (atoms.get_positions(), atoms.get_cell().array,
                             atoms.get_pbc(), float(meta["rcut"]))

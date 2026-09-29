@@ -59,12 +59,37 @@ def _sinc(x):
 
 
 def _sbessel(r, rc, K):
+    """PACE's SBessel basis.  sin(k x), k = 1..K+1, from one sin and one cos by
+    the angle-addition (rotation) recurrence
+        sin((k+1)x) = sin(kx) cos(x) + cos(kx) sin(x)
+        cos((k+1)x) = cos(kx) cos(x) - sin(kx) sin(x)
+    and one reciprocal instead of a division per k: the per-edge transcendental
+    cost no longer grows with K (-20% of a PACE force call,
+    docs/pace-performance-gap.md #3). Advancing sin and cos together this way
+    (rather than the three-term Chebyshev recurrence sin((k+1)x) =
+    2 cos(x) sin(kx) - sin((k-1)x), which is otherwise algebraically
+    equivalent) keeps float32 error growth close to O(k * eps) instead of the
+    three-term form's larger, cancellation-driven growth.
+    f(0) always reads terms through index 2, so at least one rotation step
+    runs even when K = 0 (K = 0 or 1 each return a single basis function, as
+    the pre-recurrence code did)."""
+    x = r * PI / rc
+    xs = jnp.where(x == 0, 1.0, x)
+    s1, c1 = jnp.sin(xs), jnp.cos(xs)
+    inv = 1.0 / xs
+    s, c = [jnp.zeros_like(xs), s1], [jnp.ones_like(xs), c1]
+    for _ in range(max(K, 1)):
+        sk, ck = s[-1], c[-1]
+        s.append(sk * c1 + ck * s1)
+        c.append(ck * c1 - sk * s1)
+    sinc = [None] + [jnp.where(x == 0, 1.0, s[k] * inv * (1.0 / k)) for k in range(1, len(s))]
+    rc15 = rc ** 1.5
+
     def f(n):
         pre = ((-1) ** n * math.sqrt(2) * PI * (n + 1) * (n + 2)
                / math.sqrt((n + 1) ** 2 + (n + 2) ** 2))
-        return pre / rc ** 1.5 * (_sinc(r * (n + 1) * PI / rc) + _sinc(r * (n + 2) * PI / rc))
-    g = [f(0)]
-    d_prev = 1.0
+        return pre / rc15 * (sinc[n + 1] + sinc[n + 2])
+    g, d_prev = [f(0)], 1.0
     for n in range(1, K):
         en = n ** 2 * (n + 2) ** 2 / (4 * (n + 1) ** 4 + 1)
         dn = 1 - en / d_prev
