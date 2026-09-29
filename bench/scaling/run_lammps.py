@@ -108,7 +108,7 @@ def capacity(at, rcut, skin=1.0, tight=False):
     (max_neighbors) holds the rcut + skin list whatever the model slots.
 
     tight=True (bench --tight-slots; opt-in, never the main suite): model slots
-    for rcut pairs only, ~1.5x faster, safe only on a deck whose coordination
+    for rcut pairs only, 1.2-1.4x faster on Cantor, safe only on a deck whose coordination
     stays within 8 of the start (stable MD); an overflow is a NaN step."""
     from ace_jax.export.lammps import neighbour_capacity
     c = neighbour_capacity(at, rcut, skin=skin, slots="cutoff" if tight else "skin", margin=8)

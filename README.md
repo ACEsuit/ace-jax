@@ -123,19 +123,40 @@ model back. `.yace` models are for evaluation and export: `aj fit` needs an
 To run in LAMMPS (`pair_style jax/kk`, GPU):
 
 ```python
-from ace_jax.export.lammps import export_lammps
+from ace_jax.export.lammps import export_lammps, neighbour_capacity
 model, meta, _ = aj.load("model.npz")                    # or a .yace
-export_lammps(model, meta, "bundle", max_atoms=4096, max_edges=200_000,
-              k_dense=64, max_owned=2048,                # dense rows: owned atoms only
+cap = neighbour_capacity(atoms, meta["rcut"], skin=1.0)  # the LAMMPS `neighbor` skin
+export_lammps(model, meta, "bundle", max_atoms=cap["max_atoms"], max_edges=cap["max_edges"],
+              k_dense=cap["k_dense"], max_neighbors=cap["max_neighbors"],
+              max_owned=cap["max_owned"],                # dense rows: owned atoms only
               type_elements=[14, 32])                    # Z of LAMMPS types 1, 2, ...
 ```
 
-`layout="auto"` exports the dense layout when `k_dense` (max neighbours per
-atom) is given and one block's `estimate_a_bytes` fits the device budget, else
-sparse. `max_owned` bounds the dense rows to the owned atoms (LAMMPS numbers
-them first), so ghost rows cost nothing. It is recorded as
-`ace_jax.owned_rows` in the bundle, and an atom past it, or past `k_dense`
-neighbours, gives NaN, never a silent truncation. Above 32,768 rows
+`layout="auto"` exports a dense-family layout when `k_dense` (max neighbours
+per atom) is given and one block's `estimate_a_bytes` fits the device budget,
+else sparse. The dense-family layout is `"matrix"` when the installed
+lammps-jax has its neighbour-matrix input (4a7f4fb and later), else `"dense"`.
+`"matrix"` reads the LAMMPS neighbour list rows directly (copied only when
+LAMMPS rebuilds its list; the model drops the skin pairs), so there is no
+per-step packing; `"dense"` packs lammps-jax's edge buffer into slots every
+step. `max_owned` bounds the rows to the owned atoms (LAMMPS numbers them
+first), so ghost rows cost nothing. It is recorded as `ace_jax.owned_rows` in
+the bundle, and an atom past it, or past `k_dense` neighbours within the
+cutoff, gives NaN, never a silent truncation. A LAMMPS list row wider than
+`max_neighbors` (matrix only; default `k_dense`) aborts the run.
+
+`neighbour_capacity(atoms, rcut, skin=1.0, slots="skin", margin=8)` sizes all
+of these for a structure. It gives the matrix list 50% headroom over the
+rcut + skin coordination (`list_headroom`), because that count grows fastest
+when a structure compresses, and the model slots are compacted from the list.
+The default `slots="skin"` sizes `k_dense` for the rcut + skin coordination,
+which is safe between list rebuilds.
+`slots="cutoff"` sizes it for rcut pairs only (the matrix list keeps its
+rcut + skin width, and the in-cutoff pairs are compacted into the tighter
+model slots): 1.2-1.4x faster than the default on Cantor (A100), and safe for stable MD with a
+fitted model, whose coordination stays within `margin` of the start. A
+structure that compresses (a random-weight model, a collapse) overflows it,
+and the step is NaN. Above 32,768 rows
 (`BUNDLE_BLOCK_ROWS`) the dense bundle evaluates in blocks, which bounds
 memory at large N. `lean=True` (the default) exports the lean form of an ACE
 model, as the calculator does, and records it as `ace_jax.lean`. The `"auto"`

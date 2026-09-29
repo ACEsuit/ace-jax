@@ -85,7 +85,7 @@ def neighbour_capacity(atoms, rcut, skin=1.0, slots="skin", margin=8, owned=1.1,
     run (the benchmark's random-weight models push Cantor's coordination within
     rcut from 42 to 50 in 250 steps; docs/perf-lammps-large-n.md).
 
-    slots="cutoff": k_dense = k_cut + margin, ~1.5x faster on Cantor (fewer
+    slots="cutoff": k_dense = k_cut + margin, 1.2-1.4x faster on Cantor (fewer
     model slots).  Safe for stable MD with a fitted model -- a thermalised
     crystal or liquid whose coordination within rcut stays within `margin` of
     the starting structure's.  If it does not, an atom overflows its slots and
