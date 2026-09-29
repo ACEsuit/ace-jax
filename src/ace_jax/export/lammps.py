@@ -111,7 +111,9 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges, k_dense=None,
     sparse.
 
     lean (default True): export `ace_jax.eval.model.lean(model)`, the exact
-    evaluation form with the dead per-edge work removed (docs/ace-vs-pace-gap.md);
+    evaluation form with the dead per-edge work removed (docs/ace-vs-pace-gap.md;
+    an analytic, learned radial is splined to within 1e-8 per radial first,
+    docs/learned-radial-splining.md);
     recorded as `ace_jax.lean` (False for a model it does not apply to, e.g. PACE).
     """
     from lammps_jax.export import export_model

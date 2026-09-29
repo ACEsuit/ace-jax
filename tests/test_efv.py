@@ -119,7 +119,8 @@ def test_dense_and_sparse_pooling_agree(case):
 def test_ase_calculator(case):
     model, meta, z, atoms = case
     atoms = atoms.copy()
-    atoms.calc = ACECalculator(model, meta)
+    # an analytic radial is splined by lean (to 1e-8, not roundoff): Julia parity needs it as given
+    atoms.calc = ACECalculator(model, meta, lean=model.radial_kind != "analytic")
     eE = abs(atoms.get_potential_energy() - float(z["test_E"][0]))
     eF = np.max(np.abs(atoms.get_forces() - np.asarray(z["test_F"]).T))
     s = atoms.get_stress(voigt=False)

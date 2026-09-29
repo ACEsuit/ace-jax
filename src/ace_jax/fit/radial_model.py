@@ -18,6 +18,7 @@ import numpy as np
 
 from ..construct.radial_init import from_table, legendre_3term
 from ..eval.radial import agnesi_normalized, env_poly2sx, poly_recursion, spline_eval
+from ..eval.splinify import to_spline  # noqa: F401  (to_analytic's inverse, for deployment)
 from .data import flat_edges
 
 

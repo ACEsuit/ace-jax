@@ -86,7 +86,8 @@ def test_calculator_from_bare_path(case, npz):
     """The usability gate: a path and nothing else."""
     model, meta, z, atoms, ref = case
     atoms = atoms.copy()
-    atoms.calc = ACECalculator(npz)
+    # an analytic radial is splined by lean (to 1e-8, not roundoff): Julia parity needs it as given
+    atoms.calc = ACECalculator(npz, lean=model.radial_kind != "analytic")
     dE = abs(atoms.get_potential_energy() - float(z["test_E"][0]))
     dF = np.max(np.abs(atoms.get_forces() - np.asarray(z["test_F"]).T))
     print(f"\n  {npz.stem}: |dE| = {dE:.3e}  |dF| = {dF:.3e}")

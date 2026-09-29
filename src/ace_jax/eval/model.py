@@ -33,7 +33,7 @@ from .edge_model import (EdgeSiteModel, calibrate_edge_a, one_hot_selector,  # n
                          with_edge_a_kind)
 from .harmonics import real_solid_harmonics, real_spherical_harmonics
 from .radial import (agnesi_normalized, env_ace1_poly1sr, env_poly1sr,
-                     env_poly2sx, poly_recursion, spline_eval)
+                     env_poly2sx, poly_recursion, spline_eval, spline_eval_pairs)
 
 
 @contextmanager
@@ -145,7 +145,7 @@ class ACEModel(EdgeSiteModel):
         x = agnesi_normalized(r, trans[zi, zj])
         if kind == "spline":
             x0, h, n = grid
-            val = jax.vmap(lambda xx, c: spline_eval(xx, c, x0, h, n))(x, coefs[zi, zj])
+            val = spline_eval_pairs(x, coefs, zi, zj, x0, h, n)     # never coefs[zi, zj]
         elif kind == "analytic":
             P = poly_recursion(x, *ABC)                        # (E, n_q)
             val = jnp.einsum("eq,enq->en", P, Wnlq[zi, zj])    # (E, n_rnl)
@@ -531,7 +531,10 @@ def _rnl_owner(model):
     """(n_rnl,) the neighbour species each R_nl column is nonzero for, or None
     when R_nl is not block-sparse in z_j.  ACE1's splined R_nl always is: every
     column is nonzero for exactly one z_j, whatever z_i (checked here, not
-    assumed).  Spline tables only; the other radial kinds return None."""
+    assumed), and so do learned radials splined by `to_spline`: learning keeps
+    the zero rows exactly zero, and a zero row tabulates to exact zeros.  Spline
+    tables only; the other radial kinds return None (`lean` splines an analytic
+    radial first)."""
     if model.radial_kind != "spline":
         return None
     nzm = _np.abs(_np.asarray(model.rnl_coefs)).max(axis=2) > 0         # (zi, zj, r)
@@ -673,10 +676,53 @@ def block_dense(model):
                                       if compact else None))
 
 
-def lean(model):
+def _splined(model, spline_tol):
+    """`to_spline(model, tol=spline_tol)` when a radial is analytic, else `model`."""
+    if spline_tol is None or "analytic" not in (model.radial_kind, model.pair_radial_kind):
+        return model
+    from .splinify import to_spline
+    return to_spline(model, tol=spline_tol)[0]
+
+
+def _wraps(model):
+    """A wrapper model (e.g. an FSModel(base, ...)) that evaluates through an
+    ACEModel's basis: it has `.base` and `with_base(new_base)`."""
+    return hasattr(model, "base") and callable(getattr(model, "with_base", None))
+
+
+def lean_keep_basis(model, spline_tol=1e-8):
+    """The basis-preserving part of `lean`, for models that read the basis:
+    `to_spline` (analytic radials only; agrees to `spline_tol`, see `lean`) and
+    `prune_columns` (exact: B and Apair unchanged).  Never `fold_pair` or
+    `block_dense`, so `site_basis`, `site_basis_dense`, `_readout` (WB, Wpair)
+    and the descriptors keep working.  A wrapper model's `lean` applies this to
+    its `.base`.  Anything that is not an ACEModel is returned as given.
+    Needs the full model (`require_full`)."""
+    if not isinstance(model, ACEModel):
+        return model
+    model.require_full("lean_keep_basis")
+    return prune_columns(_splined(model, spline_tol))
+
+
+def lean(model, spline_tol=1e-8):
     """The evaluation form of a folded ACEModel: `prune_columns`, `fold_pair`
     and the l-blocked dense A (`block_dense`).  Exact to roundoff in E, F and the
-    virial; 1.1-3.3x faster forces on the benchmark models (docs/ace-vs-pace-gap.md section 8).
+    virial for a splined model; 1.1-3.3x faster forces on the benchmark models
+    (docs/ace-vs-pace-gap.md section 8).
+
+    An analytic radial (a learned one, `rnl_Wnlq` / `pair_Wnlq`) is first
+    splined by `to_spline(model, tol=spline_tol)`, so it gets the spline
+    gather and, when each R_nl column belongs to one neighbour species (ACE1's
+    pattern, which learned radials keep), the species-compact blocks.  That
+    step is an approximation: the lean form of an analytic model agrees with
+    the full one to about `spline_tol` (relative, per radial), not to roundoff.
+    spline_tol=None keeps the analytic radial (exact, no compaction).  For
+    evaluation and export only: fitting keeps the analytic model, and a UQ
+    variance should come from the full model.
+
+    A wrapper model (`.base` and `with_base`, e.g. FSModel(base, ...)) returns
+    `model.with_base(lean_keep_basis(model.base, spline_tol))`: the wrapper
+    reads the basis, so only the basis-preserving transforms apply.
 
     Energy only (see `fold_pair`): keep the original for descriptors and
     fitting.  Anything that is not a folded ACEModel (a PACEModel, an unfolded
@@ -685,6 +731,8 @@ def lean(model):
     and its pair channel is the readout, so replacing rnl_coefs, Wnlq, Wpair,
     WB or ctilde on it changes one layout and not the other (`require_full`
     guards the radial helpers).  Change the full model and re-apply `lean`."""
+    if _wraps(model):
+        return model.with_base(lean_keep_basis(model.base, spline_tol))
     if not isinstance(model, ACEModel) or not model.folded or model.energy_only:
         return model
-    return block_dense(fold_pair(prune_columns(model)))
+    return block_dense(fold_pair(prune_columns(_splined(model, spline_tol))))

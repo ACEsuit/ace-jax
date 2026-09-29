@@ -188,11 +188,12 @@ def test_eval_pair_in_memory_handoff():
                   positions=np.asarray(z["test_pos"]).T,
                   cell=np.asarray(z["test_cell"]).T,
                   pbc=np.asarray(z["test_pbc"]).astype(bool))
-    atoms.calc = ACECalculator(*auth.eval_pair())
+    # lean=False: an analytic radial is splined by lean (to 1e-8), and this is Julia parity
+    atoms.calc = ACECalculator(*auth.eval_pair(), lean=False)
     E2, F2, S2 = (atoms.get_potential_energy(), atoms.get_forces(),
                   atoms.get_stress(voigt=False))
     d2 = atoms.calc.get_site_descriptors(atoms)
-    atoms.calc = ACECalculator(path)
+    atoms.calc = ACECalculator(path, lean=False)
     assert abs(E2 - atoms.get_potential_energy()) < 1e-12
     assert np.abs(F2 - atoms.get_forces()).max() < 1e-12
     assert np.abs(S2 - atoms.get_stress(voigt=False)).max() < 1e-12

@@ -80,7 +80,9 @@ class ACECalculator(Calculator):
 
         `lean` (default True) evaluates energies, forces and stress with
         `ace_jax.eval.model.lean(model)`: exact to roundoff, with the per-edge
-        work the energy never reads removed (docs/ace-vs-pace-gap.md).  It is
+        work the energy never reads removed (docs/ace-vs-pace-gap.md); an
+        analytic (learned) radial is splined first, to within 1e-8 per radial
+        rather than roundoff (`to_spline`, docs/learned-radial-splining.md).  It is
         `eval_model`; `model` stays the model as given, and descriptors use it.
         A PACE or unfolded model is evaluated as given either way.  Setting
         `calc.model` recomputes the lean form on the host (a device-to-host copy
