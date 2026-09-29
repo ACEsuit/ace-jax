@@ -139,3 +139,39 @@ Numerics that matter:
 
 Next: node-chunked design rows (force σ on the big cells), then the tempered ARD posterior σ_F as a
 per-atom output of ace-jax fits and calculators.
+
+## Acceptance of the ace-jax implementation (`--uq ard`, PR #18; 2026-09-28/29)
+
+Fits: `modal/fit_bench.py` arms `ard`, `ard_<tag>` and `ard_c<k>` (the last sets `ard_cond_max = 10**k`).
+Big cells: `modal_bench365.py::big_errors`. Scoring:
+- `scoring/eval_ard.py`: rms-z, cov90, NLL, ρ and AUROC per family, with 95 % confidence intervals from
+  a block bootstrap over configurations;
+- `scoring/rank_local.py`: ranking within a cell, against the ceiling a perfect σ could reach;
+- `scoring/sandwich_eval.py`: scoring for the sandwich spike, `modal/sandwich_spike.py`.
+
+**The κ-tempered posterior**, with κ refitted for the full posterior (runs `ard_v2`, `ard_c15`, `ard_c16`):
+- Calibrated with no test tuning. The test-refit factor is 0.984, so the pipeline's own κ was within
+  2 % of the test set's choice.
+- rms-z 0.90–1.01 on every held-out family.
+- `ard_cond_max` from 1e14 to 1e16 changes neither calibration nor ranking, although the evidence
+  rises by 835 nats. Ranking within cells is weak: ρ 0.15–0.26.
+
+**Why ranking needs more than a posterior.** The posterior σ is epistemic, but the local errors in the
+big cells are misspecification. They track novelty in the 2-body environment: whitened pair-kNN
+gives ρ 0.39/0.31/0.30 against a ceiling of 0.41–0.49.
+
+**The configuration-clustered sandwich** (the default, `ard_sw2`; λ fitted on the train hold-out,
+leaving each atom's own cluster out; test-refit factor 0.968):
+
+| | rms-z | cov90 | ρ, sandwich / κ | AUROC |
+|---|---|---|---|---|
+| test + held-out families | 0.86–0.98 | 0.90–0.95 | 0.30–0.37 / 0.19–0.26 | 0.74–0.91 |
+| crack (core ≤ 10 Å) | 0.90 (0.97) | 0.93 | 0.35 / 0.24 | 0.91 |
+| edge | 0.79 | 0.96 | 0.26 / 0.15 | 0.89 |
+| screw | 0.61 | 0.99 | 0.26 / 0.18 | 0.99 |
+
+- In the big cells, the top 10 % of atoms by σ hold 57–79 % of the atoms in the top 1 % of errors.
+- A likelihood fit of a·ARD + b·sandwich puts a = 0.
+- Leaving the own cluster out changes λ by +2.7 % at 3,680 configurations, against ×1.9 on a
+  30-configuration fixture.
+- Open: screw dislocations are over-covered by about 1.6× under every variance tried.
