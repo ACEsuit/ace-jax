@@ -1,0 +1,75 @@
+{
+ "before_cache": {
+  "SiGe_medium": {
+   "swap_readout_s": 0.07203224999830127,
+   "to_spline_s": 0.06953470900771208,
+   "prune_s": 0.0006307089934125543,
+   "fold_pair_s": 0.00014316599117591977,
+   "block_dense_s": 0.0008702079940121621,
+   "lean_spline_model_s": 0.000808625016361475
+  },
+  "Cantor_medium": {
+   "swap_readout_s": 0.7914720829867292,
+   "to_spline_s": 0.7864180420001503,
+   "prune_s": 0.0035843750229105353,
+   "fold_pair_s": 0.000179916009074077,
+   "block_dense_s": 0.004400415986310691,
+   "lean_spline_model_s": 0.0012961669999640435
+  },
+  "SiGe_large": {
+   "swap_readout_s": 0.08049483399372548,
+   "to_spline_s": 0.07859495899174362,
+   "prune_s": 0.0007272080110851675,
+   "fold_pair_s": 0.00014783299411647022,
+   "block_dense_s": 0.0010107910202350467,
+   "lean_spline_model_s": 0.0009115000138990581
+  },
+  "Cantor_large": {
+   "swap_readout_s": 0.3476035000057891,
+   "to_spline_s": 0.34099749999586493,
+   "prune_s": 0.002366417000303045,
+   "fold_pair_s": 0.00017354200826957822,
+   "block_dense_s": 0.0030952910019550472,
+   "lean_spline_model_s": 0.0011315829760860652
+  }
+ },
+ "after_cache": {
+  "SiGe_medium": {
+   "swap_readout_s": 0.0019762919982895255,
+   "to_spline_s": 0.00017458299407735467,
+   "to_spline_uncached_s": 0.070056290976936,
+   "prune_s": 0.0006623749795835465,
+   "fold_pair_s": 0.0001372499973513186,
+   "block_dense_s": 0.0008830000006128103,
+   "lean_spline_model_s": 0.0008614999824203551
+  },
+  "Cantor_medium": {
+   "swap_readout_s": 0.009547166002448648,
+   "to_spline_s": 0.0002862499968614429,
+   "to_spline_uncached_s": 0.7966221249953378,
+   "prune_s": 0.00362249999307096,
+   "fold_pair_s": 0.0001847500097937882,
+   "block_dense_s": 0.004356292018201202,
+   "lean_spline_model_s": 0.0013254160003270954
+  },
+  "SiGe_large": {
+   "swap_readout_s": 0.0022271669877227396,
+   "to_spline_s": 0.00018379100947640836,
+   "to_spline_uncached_s": 0.07935487499344163,
+   "prune_s": 0.0007216669910121709,
+   "fold_pair_s": 0.00013366699567995965,
+   "block_dense_s": 0.0010099170031026006,
+   "lean_spline_model_s": 0.0008847920107655227
+  },
+  "Cantor_large": {
+   "swap_readout_s": 0.006148083019070327,
+   "to_spline_s": 0.00022516600438393652,
+   "to_spline_uncached_s": 0.3408997090009507,
+   "prune_s": 0.002298417006386444,
+   "fold_pair_s": 0.00017170899081975222,
+   "block_dense_s": 0.003083832998527214,
+   "lean_spline_model_s": 0.0011206249764654785
+  }
+ },
+ "note": "host seconds, local Mac CPU, analytic n_q=12 perturbed, default spline_tol 1e-10; swap = calc.model = readout-only change"
+}

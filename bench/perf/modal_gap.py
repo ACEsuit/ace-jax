@@ -104,15 +104,17 @@ def bench(models: str = "Cantor_medium,SiGe_medium", ns: str = "1024,8192,32768,
 @app.local_entrypoint()
 def learned(models: str = "SiGe_medium,Cantor_medium", n: int = 8192, nqs: str = "8,12,16,20",
             filled_nq: int = 12, rounds: int = 3, reps: int = 10,
-            extra: str = "SiGe_large,Cantor_large", tag: str = ""):
+            extra: str = "SiGe_large,Cantor_large", spline_tol: float = 1e-10, tag: str = ""):
     """Learned (analytic) radials vs splines and the lean form of each, with
     to_spline (bench/perf/learned_radial_bench.py; docs/learned-radial-splining.md),
     every model on ONE container."""
     argvs = [["bench/perf/learned_radial_bench.py", m, str(n), "--nqs", nqs, "--filled-nq",
-              str(filled_nq), "--rounds", str(rounds), "--reps", str(reps), "--oldgather"]
+              str(filled_nq), "--rounds", str(rounds), "--reps", str(reps), "--oldgather",
+              "--spline-tol", str(spline_tol)]
              for m in models.split(",")]
     argvs += [["bench/perf/learned_radial_bench.py", m, str(n), "--nqs", "12", "--filled-nq", "0",
-               "--rounds", str(rounds), "--reps", str(reps)] for m in extra.split(",") if m]
+               "--rounds", str(rounds), "--reps", str(reps), "--spline-tol", str(spline_tol)]
+              for m in extra.split(",") if m]
     res = run.remote(argvs, "_learned" + tag, 900)
     _save(f"learned_radial_{n}{tag}.json", res)
     for r in res:

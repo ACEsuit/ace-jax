@@ -13,7 +13,7 @@ Cases, per n_q:
   aN                  analytic, n_q = N, Wnlq perturbed on its active rows
   aN:lean_exact       lean(aN, spline_tol=None): exact, analytic R_nl kept, so
                       the l-blocks are not species-compact
-  aN:lean             lean(aN): to_spline first (tol 1e-8), then the spline lean
+  aN:lean             lean(aN): to_spline first (--spline-tol, default 1e-10), then the spline lean
   aN_filled[...]      aN with every z_j block of Wnlq filled (no zero pattern):
                       compaction cannot apply
   X:oldgather         X evaluated with the spline radial's previous formula,
@@ -96,7 +96,7 @@ def main():
     ap.add_argument("--dtype", default="float64")
     ap.add_argument("--nqs", default="8,12,16,20")
     ap.add_argument("--filled-nq", type=int, default=12, help="0: no filled variant")
-    ap.add_argument("--spline-tol", type=float, default=1e-8)
+    ap.add_argument("--spline-tol", type=float, default=1e-10)
     ap.add_argument("--rounds", type=int, default=3)
     ap.add_argument("--reps", type=int, default=10)
     ap.add_argument("--oldgather", action="store_true", help="also the pre-spline_eval_pairs gather")
