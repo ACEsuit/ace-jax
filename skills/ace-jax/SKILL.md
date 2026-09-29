@@ -148,7 +148,7 @@ load; faster only at large `nradbase`). Values are unchanged to roundoff.
 
 ### Calculator performance options
 
-`ACECalculator(path, dtype=None, layout="auto", edge_a_kind="auto", skin=1.0, lean=True)`:
+`ACECalculator(path, dtype=None, layout="auto", edge_a_kind="auto", skin=1.0, lean=True, spline_tol=1e-10)`:
 - `lean` (ACE `.npz` models): energies, forces and stress are evaluated with
   `ace_jax.eval.lean(model)`, exact to roundoff. It drops radial columns and
   harmonics the basis never reads, folds the pair weights into the pair
@@ -160,13 +160,15 @@ load; faster only at large `nradbase`). Values are unchanged to roundoff.
   `aj.load` returns the full model. Setting `calc.model` recomputes the lean
   form on the host, a device-to-host copy per swap.
   - An analytic radial (a learned one, e.g. a `bench/learn_radial` model.npz)
-    is first splined by `ace_jax.eval.to_spline(model, tol=1e-8)`: the spline
+    is first splined by `ace_jax.eval.to_spline(model, tol=spline_tol)`: the spline
     gather replaces the polynomial recursion, and the species-compact blocks
     apply again (learned radials keep ACE1's one-neighbour-species-per-column
-    pattern). That step agrees with the full model to about `spline_tol` (1e-8
-    per radial; forces ~1e-7 relative), not to roundoff.
-    `lean(model, spline_tol=None)` keeps it analytic and exact. Take UQ
-    variances from the full model.
+    pattern). That step agrees with the full model to about `spline_tol`
+    (default 1e-10 per radial: energies ~1e-11, forces 4e-9 to 2e-8 of the
+    largest force), not to roundoff. `spline_tol=None` (on `lean`,
+    `ACECalculator` or `export_lammps`) keeps it analytic and exact. The spline
+    is cached on the radial's content, so a readout-only `calc.model` swap does
+    not redo it. Take UQ variances from the full model.
   - A wrapper model with `.base` and `with_base(new_base)` (e.g. an
     `FSModel(base, ...)`) gets `model.with_base(lean_keep_basis(model.base))`:
     `to_spline` and `prune_columns` only, which keep `site_basis` and the
@@ -211,8 +213,9 @@ This writes a lammps-jax bundle for `pair_style jax/kk` (GPU only).
   silent truncation.
 - The dense bundle runs in blocks of `BUNDLE_BLOCK_ROWS` (32,768) rows above
   one block, bounding memory at large N.
-- `lean=True` (default) exports `lean(model)` for an ACE model, as
-  `ACECalculator` does. It is recorded as `ace_jax.lean`. `layout="auto"` is
+- `lean=True` (default) exports `lean(model, spline_tol)` for an ACE model, as
+  `ACECalculator` does. It is recorded as `ace_jax.lean`, and the splining
+  tolerance as `ace_jax.spline_tol` (None when no radial was analytic). `layout="auto"` is
   sized on the full model, so it chooses the same layout either way.
 
 Other entry points:
@@ -226,7 +229,7 @@ Other entry points:
   and writes `DIR/model.npz` with the radials a held-out gate selects. Fit the GP
   on that file as usual. Needs float64. For MD, `ACECalculator` and
   `export_lammps` spline the learned radial through `lean` (see above);
-  `ace_jax.eval.to_spline(model, n_intervals=None, tol=1e-8)` returns
+  `ace_jax.eval.to_spline(model, n_intervals=None, tol=1e-10)` returns
   `(spline model, max_rel_err)` directly.
 - Benchmarks: `docs/benchmarks.md` (harness in `bench/scaling/`).
 

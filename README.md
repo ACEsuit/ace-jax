@@ -90,7 +90,7 @@ model back. `.yace` models are for evaluation and export: `aj fit` needs an
 
 ### Speed options and LAMMPS
 
-`ACECalculator(path, layout="auto", edge_a_kind="auto", skin=1.0, lean=True)`:
+`ACECalculator(path, layout="auto", edge_a_kind="auto", skin=1.0, lean=True, spline_tol=1e-10)`:
 
 - **Lean evaluation form** (ACE `.npz` models). With `lean=True` (the
   default), energies, forces and stress are evaluated with
@@ -102,6 +102,14 @@ model back. `.yace` models are for evaluation and export: `aj fit` needs an
     given. Descriptors use `calc.model`.
   - A lean model is energy-only: never edit or fit it. Edit the full model and
     re-apply `lean`.
+  - A learned (analytic) radial is first converted to a spline to within
+    `spline_tol` per radial (`ace_jax.eval.to_spline`), which recovers the
+    splined models' lean speed. At the default 1e-10 the lean energies agree
+    with the full model to ~1e-11 and forces to ~1e-8 of the largest force,
+    not to roundoff. `spline_tol=None` keeps the radial analytic (exact). The
+    spline is cached on the radial's content, so swapping in new readout
+    weights (`calc.model = ...`) does not redo it.
+    See `docs/learned-radial-splining.md`.
 
 - **Layout.** `"auto"` picks the dense layout (A per node by a batched outer
   product, several times faster forces on GPU) when the neighbour padding is
@@ -138,8 +146,9 @@ them first), so ghost rows cost nothing. It is recorded as
 neighbours, gives NaN, never a silent truncation. Above 32,768 rows
 (`BUNDLE_BLOCK_ROWS`) the dense bundle evaluates in blocks, which bounds
 memory at large N. `lean=True` (the default) exports the lean form of an ACE
-model, as the calculator does, and records it as `ace_jax.lean`. The `"auto"`
-layout is still sized on the full model.
+model, as the calculator does, and records it as `ace_jax.lean`; `spline_tol`
+(default 1e-10) is the calculator's, recorded as `ace_jax.spline_tol` (None when
+nothing was splined). The `"auto"` layout is still sized on the full model.
 
 ## Performance
 
