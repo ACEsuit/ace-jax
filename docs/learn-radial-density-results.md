@@ -25,7 +25,7 @@ For Cantor, 60 vacancy cells give a smaller change: the vacancy MAE goes from 0.
 3. **RMSE no worse than radials-only: holds on SiGe.** Energies are within ±5% and forces up to 6% worse. On Cantor, the density costs 15% in energy and 5% in forces at 200 steps.
 4. **Gate soundness: holds.**
 
-**Optimiser.** The joint L-BFGS with the block preconditioner (approach A) fails on Cantor. The preconditioner scale r_η goes to 3×10⁻³, and the line search breaks down after 11 accepted steps. Alternating blocks (approach B, the spec's fallback) complete their full budget on both systems. Approach A works on SiGe.
+**Optimiser.** The first joint preconditioner (a gradient-RMS ratio) failed on Cantor. The current curvature-matched scale, with a fallback to alternating blocks when a line search fails, completes its budget everywhere and gives the best density fits (see Optimiser).
 
 ## Setup
 
@@ -95,19 +95,43 @@ Once optimised properly (alternating mode, full budget), the density leaves the 
 
 ## Optimiser
 
-**Joint mode (approach A).** The preconditioner scale r_η = RMS(∂f/∂H)/RMS(∂f/∂V) behaved very differently on the two systems:
+Cantor, with vacancy data, `--tol 0`. Errors are E in meV/atom and F in meV/Å on validation.
 
-| System and density | r_η |
-|---|---|
-| SiGe, full P=1 | 8 to 280 |
-| Cantor, full P=1 | 1e-3 to 3e-3 |
-| Cantor, full P=2 | 0.5 to 5.5 |
+| Optimiser | Budget | 1 density: steps done | 1 density: E / F | 2 densities: steps done | 2 densities: E / F |
+|---|---|---|---|---|---|
+| joint, gradient-RMS scale (first version) | 200 | 11 (line search failed) | 8.74 / 149.7 | 55 (line search failed) | 6.59 / 142.2 |
+| joint, curvature scale | 200 | 31 (line search failed) | 8.89 / 149.7 | 120 (line search failed) | 5.97 / 130.5 |
+| joint, curvature scale + fallback (current) | 200 | 200 | 6.63 / 125.8 | 200 | **6.04 / 122.4** |
+| alternating | 200 | 200 | 6.82 / 125.7 | 200 | 6.84 / 124.6 |
+| joint, curvature scale + fallback | 40 | 40 (1 fallback) | 7.49 / 150.3 | 40 | 6.91 / 146.7 |
 
-On Cantor the tiny r_η gives huge density steps. In the strongly nonlinear density coordinates the line search then fails (after 11 accepted steps), or the relative-decrease test stops the run early.
+Radials-only on the same runs: 5.91–6.00 / 119.7–120.1 at 200 steps, 7.12 / 146.6 at 40.
 
-**Alternating mode (approach B).** It completes the full budget on Cantor.
+**Why it failed.** The first preconditioner scaled the density block by the ratio of gradient RMS. On Cantor that gave r_η ≈ 3×10⁻³, and the resulting huge density steps broke the line search.
 
-**Cost.** A joint 50-step round took 145 s on SiGe (A100), against 101–128 s for radials alone: +15–40%, including the extra gradient for the preconditioner.
+**The current scheme** has three parts:
+- **Curvature scale.** r_η = √(|h_H|/|h_V|), from one Hessian-vector-product probe per block, projected off each row's scale gauge.
+- **Clamp.** r_η ≥ 0.1.
+- **Fallback.** A failed joint line search spends the rest of that round on alternating V and H blocks.
+
+**How the pieces behave:**
+- Curvature scaling alone rescued P=2. It did not rescue P=1, where the density block is nearly flat and the clamp is what sets r_η. Any single block scale is defeated by the non-smooth density coordinates there.
+- The fallback makes joint mode complete its budget in every case.
+- Joint mode then gives the closest density results to radials-only (P=2: 6.04 / 122.4), better than alternating, which spends only half its steps on the radials.
+- On SiGe, curvature scaling is on par with the old scale: 0.665 / 37.8 against 0.652 / 38.3 at 200 steps (P=1, vacancy data).
+- Identical configurations differ between runs from GPU nondeterminism; for example Cantor P=1 at 200 steps needed no fallback on its last run. The fallback covers both outcomes.
+
+**Physical properties** of the best-optimised Cantor density models (200 steps, fallback):
+
+| Model | Vacancy MAE (eV) | B % per draw | C44 % per draw |
+|---|---|---|---|
+| 1 density | 0.45 | 0 / −1 / −13 | −10 / −10 / +5 |
+| 2 densities | 0.46 | 0 / −1 / −13 | −11 / −11 / +2 |
+| radials only | 0.45–0.47 | — | — |
+
+Once the density is properly optimised it changes the physical properties by nothing measurable, which confirms the collinearity argument in the summary.
+
+**Cost.** A joint 50-step round took 145 s on SiGe (A100), against 101–128 s for radials alone. The curvature probe adds two Hessian-vector products per round, about 5 gradient evaluations.
 
 ## Conclusions
 
@@ -118,4 +142,4 @@ On Cantor the tiny r_η gives huge density steps. In the strongly nonlinear dens
    - Alternatively, a density span that excludes the linear basis's own columns, so the linear part of sqrt(ρ) is not already representable.
 
    Both are separate decisions.
-4. **Optimiser.** If the density is kept, alternating mode should be the default, or the joint preconditioner should cap r_η ≤ 1 (never amplify density steps).
+4. **Optimiser.** Joint mode with the curvature-matched scale and the alternating fallback (the current default) is robust on both systems, and it is the best density optimiser measured.
