@@ -58,6 +58,7 @@ class Authoring(NamedTuple):
         meta["radial_kind"] = model.radial_kind
         meta["pair_radial_kind"] = model.pair_radial_kind
         meta["pair_envelope_kind"] = model.pair_envelope_kind
+        meta["radial_learned"] = bool(model.radial_learned)
         meta["ybasis_kind"] = ("real_solidharmonics" if model.ysolid
                                else "real_sphericalharmonics")
         checks = (

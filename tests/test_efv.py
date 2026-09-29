@@ -119,9 +119,7 @@ def test_dense_and_sparse_pooling_agree(case):
 def test_ase_calculator(case):
     model, meta, z, atoms = case
     atoms = atoms.copy()
-    # spline_tol=None: lean, but an analytic radial stays analytic.  Splined (1e-10)
-    # misses this reference tolerance: dE ~1e-9 against TOL.
-    atoms.calc = ACECalculator(model, meta, spline_tol=None)
+    atoms.calc = ACECalculator(model, meta)
     eE = abs(atoms.get_potential_energy() - float(z["test_E"][0]))
     eF = np.max(np.abs(atoms.get_forces() - np.asarray(z["test_F"]).T))
     s = atoms.get_stress(voigt=False)

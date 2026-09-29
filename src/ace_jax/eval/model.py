@@ -127,6 +127,11 @@ class ACEModel(EdgeSiteModel):
     # part of `lean`): the energy is unchanged, but the pair channel is no longer
     # Apair, so the basis methods (descriptors, Jacobians, fitting rows) refuse.
     energy_only: bool = eqx.field(static=True, default=False)
+    # The tensor radial's Wnlq were learned (`fit.radial_model.with_radial`,
+    # `radial_learn`), not exported or authored.  `lean`'s default ("auto")
+    # splines an analytic R_nl only when this is set; stored as meta_json
+    # "radial_learned" (absent = False).  Only the tensor radial is ever learned.
+    radial_learned: bool = eqx.field(static=True, default=False)
     # l-blocked dense A (`block_dense`, part of `lean`): per used l, (l, radial
     # column offset, width).  () keeps the n_rnl x n_Y outer product (`pool_a_dense`).
     # With `blk_compact` each edge evaluates only its own z_j's columns, from the
@@ -676,18 +681,19 @@ def block_dense(model):
                                       if compact else None))
 
 
-from .splinify import DEFAULT_SPLINE_TOL  # noqa: E402
+from .splinify import AUTO, spline_plan  # noqa: E402
 
 
 def _splined(model, spline_tol, spline_intervals=None):
-    """`to_spline(model, n_intervals=spline_intervals, tol=spline_tol)` when a
-    radial is analytic, else `model`.  Which analytic models get splined is
-    decided here alone: every analytic radial (learned, Julia `ace_model`
-    export, Python-authored) unless spline_tol is None."""
-    if spline_tol is None or "analytic" not in (model.radial_kind, model.pair_radial_kind):
+    """`to_spline` as `splinify.spline_plan` decides (the one decision point):
+    by default ("auto") only a learned analytic R_nl, at 1e-10; a float, every
+    analytic radial; None, nothing."""
+    plan = spline_plan(model, spline_tol)
+    if plan is None:
         return model
     from .splinify import to_spline
-    return to_spline(model, n_intervals=spline_intervals, tol=spline_tol)[0]
+    tol, radials = plan
+    return to_spline(model, n_intervals=spline_intervals, tol=tol, radials=radials)[0]
 
 
 def _wraps(model):
@@ -709,14 +715,15 @@ def splining(before, after, spline_tol):
     if not rad:
         return None
     grid = {"rnl": "rnl_grid", "pair": "pair_grid"}
-    return {"spline_tol": spline_tol, "radials": rad,
+    plan = spline_plan(b0, spline_tol)
+    return {"spline_tol": plan[0] if plan else spline_tol, "radials": rad,
             "n_intervals": {r: int(getattr(b1, grid[r])[2]) - 1 for r in rad}}
 
 
-def lean_keep_basis(model, spline_tol=DEFAULT_SPLINE_TOL, spline_intervals=None):
+def lean_keep_basis(model, spline_tol=AUTO, spline_intervals=None):
     """The basis-preserving part of `lean`, for models that read the basis:
-    `to_spline` (every analytic radial, learned or not; agrees to `spline_tol`,
-    see `lean`) and `prune_columns` (exact: B and Apair unchanged).  Never
+    `to_spline` (as `lean` decides: by default a learned analytic R_nl only;
+    agrees to the tolerance, see `lean`) and `prune_columns` (exact: B and Apair unchanged).  Never
     `fold_pair` or `block_dense`, so `site_basis`, `site_basis_dense`,
     `_readout` (WB, Wpair) and the descriptors keep working.  A wrapper model's
     `lean` applies this to its `.base`.  Anything that is not an ACEModel is
@@ -727,23 +734,25 @@ def lean_keep_basis(model, spline_tol=DEFAULT_SPLINE_TOL, spline_intervals=None)
     return prune_columns(_splined(model, spline_tol, spline_intervals))
 
 
-def lean(model, spline_tol=DEFAULT_SPLINE_TOL, spline_intervals=None):
+def lean(model, spline_tol=AUTO, spline_intervals=None):
     """The evaluation form of a folded ACEModel: `prune_columns`, `fold_pair`
     and the l-blocked dense A (`block_dense`).  Exact to roundoff in E, F and the
     virial for a splined model; 1.1-3.3x faster forces on the benchmark models
     (docs/ace-vs-pace-gap.md section 8).
 
-    Every analytic radial (`rnl_Wnlq` / `pair_Wnlq`) is first splined by
-    `to_spline(model, n_intervals=spline_intervals, tol=spline_tol)`: learned
-    radials, but also every Julia `ace_model` export and every Python-authored
-    model, which are analytic too.  It then gets the spline gather and, when
-    each R_nl column belongs to one neighbour species (ACE1's pattern, which
-    learned radials keep), the species-compact blocks.  That step is an
-    approximation, not roundoff: at the default 1e-10 the lean energies agree
-    with the full model to up to ~1e-9 relative and forces to up to ~2.3e-8
-    of max|F| on the benchmark models (docs/learned-radial-splining.md).
-    spline_tol=None keeps the analytic radial (exact, no compaction);
-    spline_intervals pins the grid (default: the smallest `splinify.BUCKETS`
+    Splining (`splinify.spline_plan`, the one decision point):
+    spline_tol="auto" (default) splines an analytic tensor radial only when it
+    was learned (`radial_learned`), at `DEFAULT_SPLINE_TOL` = 1e-10; the pair
+    radial is never learned and stays as is.  Julia `ace_model` exports and
+    Python-authored models are analytic but not learned, so they stay exact.
+    A float spline_tol opts every analytic radial in (e.g. 1e-10 for an old
+    learned-radial file without the flag); None never splines.  A splined
+    radial gets the spline gather and, when each R_nl column belongs to one
+    neighbour species (ACE1's pattern, which learned radials keep), the
+    species-compact blocks.  That step is an approximation, not roundoff: at
+    1e-10 the lean energies agree with the full model to up to ~1e-9 relative
+    and forces to up to ~2.3e-8 of max|F| on the benchmark models
+    (docs/learned-radial-splining.md).  spline_intervals pins the grid (default: the smallest `splinify.BUCKETS`
     bucket meeting tol, so radial swaps keep the compiled step).  The
     conversion is cached on the radial's content (`splinify`), so a re-lean
     after a readout-only change does not re-spline.  For evaluation and

@@ -53,7 +53,7 @@ def perturb(model, rel=0.2, seed=0, fill=False):
     W2 = W + rel * rms * noise * act[..., None]
     if fill:
         W2 = np.where(act[..., None], W2, rel * rms[act].mean() * noise)
-    return dataclasses.replace(model, rnl_Wnlq=jnp.asarray(W2, model.rnl_Wnlq.dtype))
+    return dataclasses.replace(model, rnl_Wnlq=jnp.asarray(W2, model.rnl_Wnlq.dtype), radial_learned=True)
 
 
 def old_gather(model):

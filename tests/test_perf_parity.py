@@ -65,11 +65,6 @@ def test_matches_frozen_reference(ref, skin):
     r = np.load(ref)
     at = Atoms(numbers=r["numbers"], positions=r["positions"], cell=r["cell"], pbc=r["pbc"])
     kw = {} if "skin" not in ACECalculator.__init__.__code__.co_varnames else {"skin": skin}
-    # spline_tol=None: lean, but an analytic radial stays analytic.  The frozen
-    # references are 1e-12 relative (float32: ~40 eps32 against float64), which
-    # a splined radial (1e-10 per radial; dE ~9e-9 here) does not meet.
-    if "spline_tol" in ACECalculator.__init__.__code__.co_varnames:
-        kw["spline_tol"] = None
     at.calc = ACECalculator(str(_model_path(stem)), layout=layout, dtype=getattr(jnp, dt), **kw)
     E, F = at.get_potential_energy(), at.get_forces()
     S = at.get_stress() if at.pbc.all() else None

@@ -13,7 +13,7 @@ from ..eval.edge_model import LAYOUTS, calibrate_edge_a, check_edge_a_kind, with
 from ..eval.model import highest_precision
 from ..eval.model import lean as lean_form
 from ..eval.model import splining
-from ..eval.splinify import DEFAULT_SPLINE_TOL
+from ..eval.splinify import AUTO
 from ..eval.nlist import backend as nlist_backend
 from ..eval.nlist import dense_from_sparse, dense_graph, have_matscipy_neighbours, sparse_graph
 from . import skin as skin_list
@@ -56,7 +56,7 @@ class ACECalculator(Calculator):
                               "site_descriptors"]
 
     def __init__(self, model, meta=None, cutoff=None, dtype=None, edge_a_kind="auto",
-                 layout="auto", skin=1.0, lean=True, spline_tol=DEFAULT_SPLINE_TOL,
+                 layout="auto", skin=1.0, lean=True, spline_tol=AUTO,
                  spline_intervals=None, **kw):
         """`ACECalculator("si_fitted.npz")` is the intended form: cutoff,
         species and dtype all come from the file.  A pre-loaded (model, meta)
@@ -83,14 +83,15 @@ class ACECalculator(Calculator):
 
         `lean` (default True) evaluates energies, forces and stress with
         `ace_jax.eval.model.lean(model)`: exact to roundoff, with the per-edge
-        work the energy never reads removed (docs/ace-vs-pace-gap.md).  Every
-        analytic radial is splined first (`to_spline`): learned radials, but
-        also every Julia `ace_model` export and Python-authored model.  That is
-        not roundoff: at the default spline_tol=1e-10, energies agree with
-        lean=False to up to ~1e-9 relative and forces to up to ~2.3e-8 of
-        max|F| on the benchmark models (docs/learned-radial-splining.md).
-        spline_tol=None keeps the radial analytic (exact); spline_intervals
-        pins the grid.  `calc.splined` (and `last_timing["spline_tol"]`) says
+        work the energy never reads removed (docs/ace-vs-pace-gap.md).
+        spline_tol="auto" (default) first splines a learned analytic tensor
+        radial (`radial_learned`, set by the radial learner) at 1e-10
+        (`to_spline`).  That is not roundoff: energies agree with lean=False to
+        up to ~1e-9 relative and forces to up to ~2.3e-8 of max|F| on the
+        benchmark models (docs/learned-radial-splining.md).  Other analytic
+        models -- Julia `ace_model` exports, Python-authored models -- stay
+        exact; a float spline_tol (e.g. 1e-10) opts them in, None never
+        splines.  spline_intervals pins the grid.  `calc.splined` (and `last_timing["spline_tol"]`) says
         what was splined, None when nothing was.  The spline is cached on the
         radial's content, and its grid is bucketed, so radial swaps usually
         keep the compiled step.  It is

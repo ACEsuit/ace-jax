@@ -24,9 +24,33 @@ from collections import OrderedDict
 import jax.numpy as jnp
 import numpy as np
 
-# The default splining tolerance of lean / ACECalculator / export_lammps, in one
-# place: None here would make splining opt-in everywhere.
+# The splining policy of lean / lean_keep_basis / ACECalculator / export_lammps,
+# decided in `spline_plan` alone.  Their default spline_tol is "auto": spline
+# an analytic tensor radial only when it was learned (`radial_learned`), at
+# DEFAULT_SPLINE_TOL.  A float is the explicit opt-in (every analytic radial,
+# learned or not: Julia ace_model exports, Python-authored models); None never
+# splines.
 DEFAULT_SPLINE_TOL = 1e-10
+AUTO = "auto"
+
+
+def spline_plan(model, spline_tol=AUTO):
+    """(tol, radials) that `lean` will pass to `to_spline`, or None for no
+    splining.  "auto": ("rnl",) at DEFAULT_SPLINE_TOL when R_nl is analytic
+    and `radial_learned`; the pair radial is never learned, so "auto" keeps
+    an analytic pair radial exact.  A float: every analytic radial at that
+    tol.  None: nothing."""
+    rk, pk = getattr(model, "radial_kind", None), getattr(model, "pair_radial_kind", None)
+    if spline_tol is None:
+        return None
+    if isinstance(spline_tol, str):
+        if spline_tol != AUTO:
+            raise ValueError(f"spline_tol must be 'auto', a float or None, got {spline_tol!r}")
+        if rk == "analytic" and getattr(model, "radial_learned", False):
+            return DEFAULT_SPLINE_TOL, ("rnl",)
+        return None
+    radials = tuple(r for r, k in (("rnl", rk), ("pair", pk)) if k == "analytic")
+    return (float(spline_tol), radials) if radials else None
 TOL_FLOOR = 1e-14                 # float64: below this the polynomial sum's own roundoff shows
 START_INTERVALS = 32
 MAX_INTERVALS = 1 << 16
@@ -240,11 +264,14 @@ def _fit(W, polys, n_intervals, tol, deriv_tol, env_params, cols):
     return r
 
 
-def to_spline(model, n_intervals=None, tol=DEFAULT_SPLINE_TOL, deriv_tol=None, return_info=False):
+def to_spline(model, n_intervals=None, tol=DEFAULT_SPLINE_TOL, deriv_tol=None,
+              return_info=False, radials=("rnl", "pair")):
     """Convert an ACEModel's analytic radials to the spline branch.
 
-    Every analytic radial is converted: a learned one, but equally a Julia
-    `ace_model` export or a Python-authored model, which are analytic too.
+    Converts every analytic radial named in `radials` ("rnl", "pair"), learned
+    or not (a Julia `ace_model` export or a Python-authored model too): this is
+    the conversion itself.  Whether `lean` applies it is `spline_plan`'s call
+    (by default only for learned radials).
 
     The tensor radial (`rnl_Wnlq`, radial_kind "analytic") and the pair radial
     (`pair_Wnlq`, pair_radial_kind "analytic") are each tabulated as
@@ -266,7 +293,7 @@ def to_spline(model, n_intervals=None, tol=DEFAULT_SPLINE_TOL, deriv_tol=None, r
     multiplies both alike).  `tol` bounds VALUES.  The derivative error, which
     forces see, is O(h^3) where values are O(h^4): it is measured the same way
     on d/dx and reported (`return_info`), and gated too when `deriv_tol` is
-    given.  At the default 1e-10 the lean energies agree with the full model to
+    given.  At 1e-10 the lean energies agree with the full model to
     up to ~1e-9 relative and forces to up to ~2.3e-8 of max|F| on the
     benchmark models (docs/learned-radial-splining.md).
 
@@ -302,7 +329,7 @@ def to_spline(model, n_intervals=None, tol=DEFAULT_SPLINE_TOL, deriv_tol=None, r
         return None if t is None else max(float(t), 10.0 * float(np.finfo(dt).eps))
 
     teff = None
-    if model.radial_kind == "analytic":
+    if model.radial_kind == "analytic" and "rnl" in radials:
         W = np.asarray(model.rnl_Wnlq, np.float64)
         polys = tuple(np.asarray(v, np.float64) for v in (model.polys_A, model.polys_B, model.polys_C))
         envp = np.asarray(model.rnl_envelope, np.float64)
@@ -315,7 +342,7 @@ def to_spline(model, n_intervals=None, tol=DEFAULT_SPLINE_TOL, deriv_tol=None, r
                   rnl_Wnlq=jnp.zeros((1, 1, 1, 1), dt),
                   rnl_grid=(-1.0, 2.0 / n_int, n_int + 1))
         errs.append(err); derrs.append(derr); nints["rnl"] = n_int
-    if model.pair_radial_kind == "analytic":
+    if model.pair_radial_kind == "analytic" and "pair" in radials:
         W = np.asarray(model.pair_Wnlq, np.float64)
         polys = tuple(np.asarray(v, np.float64)
                       for v in (model.pair_polys_A, model.pair_polys_B, model.pair_polys_C))

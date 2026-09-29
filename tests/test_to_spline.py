@@ -31,9 +31,11 @@ MULTI = {"sige_nofit": SIGE, "Cantor_small": CANTOR}
 N_Q = 12
 
 
-def _perturbed(m, n_q=N_Q, rel=0.2, seed=0, fill=False):
+def _perturbed(m, n_q=N_Q, rel=0.2, seed=0, fill=False, learned=True):
     """to_analytic(m, n_q) with Wnlq perturbed on its active rows (the zero
-    pattern kept, as learning keeps it); fill=True also fills the zero rows."""
+    pattern kept, as learning keeps it); fill=True also fills the zero rows.
+    Marked `radial_learned` (it stands in for a learned radial) unless
+    learned=False."""
     a, _ = to_analytic(m, n_q)
     W = np.asarray(a.rnl_Wnlq)
     act = np.abs(W).max(-1) > 0
@@ -42,7 +44,7 @@ def _perturbed(m, n_q=N_Q, rel=0.2, seed=0, fill=False):
     W2 = W + rel * rms * noise * act[..., None]
     if fill:
         W2 = np.where(act[..., None], W2, rel * rms[act].mean() * noise)
-    return dataclasses.replace(a, rnl_Wnlq=jnp.asarray(W2))
+    return dataclasses.replace(a, rnl_Wnlq=jnp.asarray(W2), radial_learned=learned)
 
 
 def _close(ref, got, tol, scale=100.0):
@@ -417,10 +419,14 @@ def test_lammps_bundle_of_a_learned_radial(tmp_path, monkeypatch, layout):
 
 # ------------------------------------------------------------------ default tolerance, exposure
 def test_default_tol_is_1e_10():
+    """to_spline's tol and the "auto" policy's tol are 1e-10; lean's default is "auto"."""
     import inspect
-    for f in (to_spline, lean, lean_keep_basis):
-        p = inspect.signature(f).parameters
-        assert p["tol" if f is to_spline else "spline_tol"].default == 1e-10
+
+    from ace_jax.eval import splinify
+    assert inspect.signature(to_spline).parameters["tol"].default == 1e-10
+    assert splinify.DEFAULT_SPLINE_TOL == 1e-10
+    for f in (lean, lean_keep_basis):
+        assert inspect.signature(f).parameters["spline_tol"].default == "auto"
 
 
 @pytest.mark.parametrize("layout", ["sparse", "dense"])
@@ -697,3 +703,110 @@ def test_float32_tolerance_floor():
     s64, _ = to_spline(a)
     s32, err = to_spline(a32)
     assert err <= 10 * np.finfo(np.float32).eps and s32.rnl_grid[2] < s64.rnl_grid[2]
+
+
+# ------------------------------------------------------------------ default policy: learned radials only
+JULIA_ANALYTIC = [ROOT / "fixtures" / f for f in ("si_ace_model.npz", "si_s69.npz")]
+
+
+@pytest.mark.parametrize("path", JULIA_ANALYTIC, ids=lambda p: p.stem)
+@pytest.mark.parametrize("layout", ["sparse", "dense"])
+def test_julia_analytic_exports_stay_exact_by_default(path, layout):
+    """A Julia ace_model export is analytic but not learned: the default lean
+    keeps it analytic, bitwise the same as spline_tol=None."""
+    m, meta, _ = load(str(path))
+    assert m.radial_kind == "analytic" and not m.radial_learned
+    d = lean(m)
+    assert d.radial_kind == "analytic"
+    at = _structure(meta)
+    for x0, x1 in zip(_efv(d, meta, at, layout), _efv(lean(m, spline_tol=None), meta, at, layout)):
+        np.testing.assert_array_equal(x0, x1)
+    s = lean(m, spline_tol=1e-10)                          # the explicit opt-in splines it
+    assert s.radial_kind == "spline"
+    _close(_efv(m, meta, at, layout), _efv(s, meta, at, layout), 1e-10, scale=1000.0)
+
+
+def test_auto_policy():
+    from ace_jax.calc.point import ACECalculator
+    from ace_jax.eval import splinify
+    m, meta, _ = load(str(SIGE))
+    learned, plain = _perturbed(m), _perturbed(m, learned=False)
+    assert lean(learned).radial_kind == "spline"
+    assert lean(plain).radial_kind == "analytic"
+    assert lean(plain, spline_tol=1e-8).radial_kind == "spline"
+    assert lean(learned, spline_tol=None).radial_kind == "analytic"
+    assert lean_keep_basis(plain).radial_kind == "analytic"
+    assert lean_keep_basis(learned).radial_kind == "spline"
+    c = ACECalculator(learned, meta)
+    assert c.splined["spline_tol"] == splinify.DEFAULT_SPLINE_TOL
+    assert ACECalculator(plain, meta).splined is None
+    assert ACECalculator(plain, meta, spline_tol=1e-8).splined["spline_tol"] == 1e-8
+
+
+def test_auto_never_splines_the_pair_radial():
+    """Only the tensor radial is ever learned (radial_learn moves rnl_Wnlq), so
+    "auto" splines R_nl of a learned model and keeps an analytic pair radial
+    exact; an explicit tol splines both."""
+    m, meta, _ = load(str(SIGE))
+    p = _analytic_pair(_perturbed(m))
+    d = lean(p)
+    assert d.radial_kind == "spline" and d.pair_radial_kind == "analytic"
+    e = lean(p, spline_tol=1e-10)
+    assert e.pair_radial_kind == "spline"
+
+
+def test_learned_flag_is_set_by_with_radial_not_by_conversion():
+    from ace_jax.fit.radial_model import widen_radial, with_radial
+    m, meta, _ = load(str(SIGE))
+    a, _ = to_analytic(m, N_Q)
+    assert not a.radial_learned                            # a projection of a table, not learned
+    w = with_radial(a, a.rnl_Wnlq * 1.01)
+    assert w.radial_learned
+    assert widen_radial(w, N_Q + 2).radial_learned         # widening keeps it
+    assert not widen_radial(a, N_Q + 2).radial_learned
+
+
+def test_learned_flag_round_trips(tmp_path):
+    """patch_radial_npz (what save_result writes model.npz with) stores it in
+    meta_json and load reads it; old files default to False, and
+    mark_radial_learned marks one."""
+    from ace_jax.construct.export import mark_radial_learned, patch_radial_npz
+    from ace_jax.fit.radial_learn import save_result
+    from ace_jax.fit.radial_model import with_radial
+    m, meta, _ = load(str(SIGE))
+    assert not m.radial_learned and "radial_learned" not in meta          # an old file
+    a, _ = to_analytic(m, N_Q)
+    W = np.asarray(a.rnl_Wnlq) * 1.01
+    n = (meta["n_B"] + meta["n_pair"]) * len(meta["elements"])
+    save_result(tmp_path / "r", W, {"selected": "learned_lam=0"}, src_npz=str(SIGE), model=a,
+                readout=np.zeros(n))
+    r, rmeta, _ = load(str(tmp_path / "r" / "model.npz"))
+    assert r.radial_learned and rmeta["radial_learned"] is True
+    assert lean(r).radial_kind == "spline"
+    save_result(tmp_path / "i", np.asarray(a.rnl_Wnlq), {"selected": "init"}, src_npz=str(SIGE),
+                model=a, readout=np.zeros(n))                        # the gate kept the init
+    assert not load(str(tmp_path / "i" / "model.npz"))[0].radial_learned
+    patch_radial_npz(str(SIGE), tmp_path / "p.npz", a)                 # not learned
+    assert not load(str(tmp_path / "p.npz"))[0].radial_learned
+    mark_radial_learned(tmp_path / "p.npz")
+    assert load(str(tmp_path / "p.npz"))[0].radial_learned
+    mark_radial_learned(tmp_path / "p.npz", tmp_path / "q.npz", learned=False)
+    assert not load(str(tmp_path / "q.npz"))[0].radial_learned
+    patch_radial_npz(str(SIGE), tmp_path / "w.npz", with_radial(a, W))
+    assert load(str(tmp_path / "w.npz"))[1]["radial_learned"] is True
+
+
+def test_save_npz_round_trips_the_flag(tmp_path, monkeypatch):
+    from test_python_authoring import _primed_cache
+
+    from ace_jax.construct.export import save_npz
+    from ace_jax.construct.model import build_model
+    monkeypatch.setenv("ACEJAX_NO_JULIA", "1")
+    auth = build_model([14], 3, 10, coupling_cache_dir=_primed_cache(tmp_path))
+    m, meta = auth.eval_pair()
+    assert not m.radial_learned and meta["radial_learned"] is False
+    save_npz(tmp_path / "a.npz", auth)
+    assert not load(str(tmp_path / "a.npz"))[0].radial_learned
+    auth = auth._replace(model=dataclasses.replace(auth.model, radial_learned=True))
+    save_npz(tmp_path / "b.npz", auth)
+    assert load(str(tmp_path / "b.npz"))[0].radial_learned

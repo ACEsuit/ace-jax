@@ -86,9 +86,7 @@ def test_calculator_from_bare_path(case, npz):
     """The usability gate: a path and nothing else."""
     model, meta, z, atoms, ref = case
     atoms = atoms.copy()
-    # spline_tol=None: lean, but an analytic radial stays analytic.  Splined (1e-10)
-    # misses this reference tolerance: dE ~1e-9 against TOL.
-    atoms.calc = ACECalculator(npz, spline_tol=None)
+    atoms.calc = ACECalculator(npz)
     dE = abs(atoms.get_potential_energy() - float(z["test_E"][0]))
     dF = np.max(np.abs(atoms.get_forces() - np.asarray(z["test_F"]).T))
     print(f"\n  {npz.stem}: |dE| = {dE:.3e}  |dF| = {dF:.3e}")

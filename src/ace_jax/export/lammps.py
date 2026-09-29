@@ -19,7 +19,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from ..eval.edge_model import LAYOUTS, estimate_a_bytes
-from ..eval.splinify import DEFAULT_SPLINE_TOL
+from ..eval.splinify import AUTO
 
 # Dense rows per block in the bundle (lax.map + jax.checkpoint above one block;
 # the unblocked program at or below it).  Unblocked, XLA temp memory grows with
@@ -94,7 +94,7 @@ def make_energy_fn(model, n_species, layout, k_dense=None, type_map=None, n_rows
 
 def export_lammps(model, meta, path, *, max_atoms, max_edges, k_dense=None,
                   dtype="float64", layout="auto", type_elements=None, max_owned=None,
-                  lean=True, spline_tol=DEFAULT_SPLINE_TOL, spline_intervals=None):
+                  lean=True, spline_tol=AUTO, spline_intervals=None):
     """Write a lammps-jax JSON bundle for `model`; returns the bundle dict.
 
     type_elements: atomic numbers in LAMMPS type order (type 1 first).  LAMMPS
@@ -113,11 +113,13 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges, k_dense=None,
 
     lean (default True): export `ace_jax.eval.model.lean(model, spline_tol,
     spline_intervals)`, the evaluation form with the dead per-edge work removed
-    (docs/ace-vs-pace-gap.md).  Every analytic radial is splined first -- learned
-    radials, but also every Julia `ace_model` export and Python-authored model --
-    which is not roundoff: at the default 1e-10, energies agree with lean=False to
-    up to ~1e-9 relative and forces to up to ~2.3e-8 of max|F| on the benchmark
-    models (docs/learned-radial-splining.md).  spline_tol=None keeps it analytic.
+    (docs/ace-vs-pace-gap.md).  spline_tol="auto" (default) first splines a
+    learned analytic tensor radial (`radial_learned`) at 1e-10, which is not
+    roundoff: energies agree with lean=False to up to ~1e-9 relative and forces
+    to up to ~2.3e-8 of max|F| on the benchmark models
+    (docs/learned-radial-splining.md).  Other analytic models (Julia
+    `ace_model` exports, Python-authored) stay exact; a float spline_tol opts
+    them in, None never splines.
     Recorded from what lean actually did (looking through a wrapper's `.base`):
     `ace_jax.lean` (False when lean returned the model as given, e.g. PACE or an
     unfolded model), `ace_jax.spline_tol` and `ace_jax.spline_intervals`
