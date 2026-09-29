@@ -2,7 +2,36 @@
 
 This note tests the joint radial and density learning of `docs/specs/2026-09-28-radial-density-varpro-design.md` against the success criteria in that spec. The data, splits, MACE teacher and QoI protocol are the same as in `docs/learn-radial-pacemaker-comparison.md`. Raw numbers are under `docs/figures/learn-radial/density/`, and `qoi_table.py` there regenerates the QoI tables.
 
-## Summary
+## Verdict: is sqrt(ρ) worth pursuing?
+
+**No, in any of the forms tested.** The question this branch set out to answer is whether a sqrt(ρ) term is worth adding to the linear ACE model. It is not about getting vacancies right: bulk-only vacancy energies are extrapolation for every model, so they are compared only as a probe of the term's effect.
+
+| Form | Result |
+|---|---|
+| Fitted weight, full or pair span, 1–2 densities, bulk data | d ≈ 10⁻³; RMSE and QoIs within run-to-run noise |
+| Fitted weight, with vacancy data | d ≈ 10⁻³; no gain over radials-only on the same data |
+| Fitted weight, prior on d weakened ×10⁻² to ×10⁻⁶ | One density: d unchanged, so the data drives it. Two densities: d_Si grows to −0.4, but E 0.624 vs 0.62–0.64 meV/atom, F 38.0 vs 36.3 meV/Å and vacancies are unchanged vs radials-only |
+| Fixed weight (pacemaker-style), bulk data | The term is used: elastic 1.6 → 0.8% with frozen radials; vacancies unchanged |
+| Fixed weight, jointly with radials, bulk data | E 0.511–0.546 meV/atom (best 0.511), F 36.7–37.7 meV/Å; vacancies unchanged or worse |
+| Fixed weight, jointly with radials, **with vacancy data** | Vacancies **worse** than radials-only on the same data: Si −0.99 / −1.29 vs −0.81 eV, Ge −0.53 / −0.36 vs −0.11 to −0.15 eV. E 0.73–2.08 meV/atom, F 37.5–37.8 meV/Å |
+
+**Why it adds nothing.**
+- **The fitted weight.** With a linear readout, the sqrt(ρ) column is nearly collinear with the ACE basis, since sqrt's linear part lies in the basis span. The data then give it no weight, independent of the prior.
+- **The fixed weight** forces a curvature that the data do not ask for. At best it trades a small bulk gain (elastic constants, one energy RMSE) against losing the convex linear fit that the UQ ladder depends on. With defect data it makes the defect energies worse.
+
+**Pacemaker's vacancy advantage comes from its radial basis, not its embedding.**
+- Its learned radials, refitted with our Bayesian linear fit, recover most of it (Si −0.59, Ge −0.38 eV, bulk data).
+- Projected into our Agnesi–Legendre family, the same shapes give the Ge gain but not the Si gain.
+- VarPro on bulk data then drifts back towards bulk-optimal shapes.
+
+**What is worth keeping from the branch:**
+- the joint optimiser: the curvature-matched block preconditioner with the alternating fallback, which is generic for mixed-scale VarPro blocks;
+- the `--extra-train`, `--tol` and `--init-radials` driver options;
+- n_q = 20. With the same 200 steps it gives E 0.514 against 0.536 meV/atom and elastic 1.4% against 1.6% (bulk). Worth confirming as a default.
+
+The density machinery (`FSModel`, `fit/radial_density.py`, the density columns) works and is tested, but it is not worth its complexity. It can be kept as a documented negative result or dropped.
+
+## Summary (as first written)
 
 **Learned sqrt(ρ) features in a linear readout do not improve the vacancy energies.** The fitted readout of the density term stays close to zero, with d ≈ 10⁻³, whether or not vacancies are in the training data. The term then contributes about 1 meV per atom, and under 1 meV across a vacancy.
 

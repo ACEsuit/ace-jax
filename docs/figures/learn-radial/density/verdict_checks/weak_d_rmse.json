@@ -1,0 +1,26 @@
+{
+ "runs/weak_d/full1/factor_1/model.npz": {
+  "E_rmse_meV_atom": 0.7526979663071629,
+  "E_mae_meV_atom": 0.5935458345836864,
+  "F_rmse_meV_A": 39.87555814530937,
+  "F_mae_meV_A": 29.109356643141503
+ },
+ "runs/weak_d/full1/factor_0.0001/model.npz": {
+  "E_rmse_meV_atom": 0.6444483481183362,
+  "E_mae_meV_atom": 0.5048404221350467,
+  "F_rmse_meV_A": 38.2460892595352,
+  "F_mae_meV_A": 27.841920474457307
+ },
+ "runs/weak_d/full2/factor_1/model.npz": {
+  "E_rmse_meV_atom": 0.7096364334257252,
+  "E_mae_meV_atom": 0.5662184051037933,
+  "F_rmse_meV_A": 39.441164917311966,
+  "F_mae_meV_A": 28.72941246027396
+ },
+ "runs/weak_d/full2/factor_0.0001/model.npz": {
+  "E_rmse_meV_atom": 0.623795423422071,
+  "E_mae_meV_atom": 0.4910187752490814,
+  "F_rmse_meV_A": 38.008707809679656,
+  "F_mae_meV_A": 27.680646522716064
+ }
+}
