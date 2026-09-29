@@ -185,6 +185,35 @@ def test_lammps_retries_sparse_after_a_matrix_oom(tmp_path, monkeypatch):
     assert layouts == ["auto", "sparse"] and out["status"] == "ok" and out["dense_oom"]
 
 
+def test_lammps_retries_dense_after_a_matrix_list_overflow(tmp_path, monkeypatch):
+    """The matrix list holds rcut + skin pairs and aborts when a row outgrows
+    max_neighbors (random-weight SiGe large at 131k: 53 against 51).  The
+    packed dense layout holds only pairs within rcut, so the case is retried
+    dense, and the line's larger sizes export dense directly."""
+    from scaling import run_lammps
+    layouts = []
+
+    def fake_export(row, at, dtype, work, layout="auto", slots="skin", list_headroom=0.5):
+        layouts.append(layout)
+        return "b.json", ("matrix" if layout == "auto" else layout), 1.0
+
+    def fake_run(*a, **k):
+        if a[-1]["layout"] == "matrix":
+            return {"status": "error", "error": "ERROR: LAMMPS-JAX neighbor capacity exceeded: "
+                    "global max 53 neighbors per atom, capacity 51", **a[-1]}
+        return {"status": "ok", **a[-1]}
+
+    monkeypatch.setattr(run_lammps, "export_bundle", fake_export)
+    monkeypatch.setattr(run_lammps, "_run_lammps", fake_run)
+    row = {"code": "acejax-ace", "system": "SiGe", "elements": ["Si", "Ge"], "name": "x",
+           "path": "m.npz", "size": "large"}
+    out = run_lammps.run_case(row, 256, "float64", "gpu", "lmp", 1, tmp_path)
+    assert layouts == ["auto", "dense"] and out["status"] == "ok" and out["matrix_overflow"]
+    layouts.clear()
+    nxt = run_lammps.run_case(row, 512, "float64", "gpu", "lmp", 1, tmp_path, prev=out)
+    assert layouts == ["dense"] and nxt["status"] == "ok" and nxt["matrix_overflow"]
+
+
 def test_export_passes_the_matrix_list_size(tmp_path, monkeypatch):
     """The benchmark's export passes max_neighbors from neighbour_capacity, so
     layout="auto" can pick the matrix (it never does without it)."""

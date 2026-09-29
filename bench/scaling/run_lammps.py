@@ -179,8 +179,12 @@ def choose_steps(prev_step_s, prev_n, n, target_s=STEP_BUDGET_S, max_steps=200, 
 
 def bundle_layout(prev):
     """The ace-jax bundle layout for this case: once a line has fallen back to
-    sparse (dense out of memory), its larger sizes export sparse directly."""
-    return "sparse" if (prev or {}).get("layout") == "sparse" else "auto"
+    sparse (dense out of memory), its larger sizes export sparse directly; once
+    its matrix list overflowed, they export packed dense directly."""
+    prev = prev or {}
+    if prev.get("layout") == "sparse":
+        return "sparse"
+    return "dense" if prev.get("matrix_overflow") else "auto"
 
 
 def run_case(row, n_atoms, dtype, device, lmp, ranks, workdir, pjrt=None, prev=None,
@@ -216,6 +220,15 @@ def run_case(row, n_atoms, dtype, device, lmp, ranks, workdir, pjrt=None, prev=N
         if out["status"] == "oom" and used in ("dense", "matrix"):
             layout = "sparse"
             continue
+        # the matrix list holds rcut + skin pairs and aborts when a row outgrows
+        # max_neighbors (random-weight structures compress); packed dense holds
+        # only pairs within rcut, so retry the case there
+        if (out["status"] == "error" and used == "matrix"
+                and "neighbor capacity exceeded" in str(out.get("error", ""))):
+            layout = "dense"
+            continue
+        if layout == "dense" and used == "dense" and bundle_layout(prev) != "sparse":
+            out["matrix_overflow"] = True               # this line left the matrix layout
         if layout == "sparse" and bundle_layout(prev) == "auto":
             out["dense_oom"] = True                     # this size is where the line went sparse
         return out
