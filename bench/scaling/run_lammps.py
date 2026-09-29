@@ -93,30 +93,31 @@ def read_dump_forces(path):
     return rows[np.argsort(rows[:, 0]), 1:4]
 
 
-def capacity(at, rcut, skin=1.0):
-    """lammps-jax buffer sizes for this structure: owned + ghost atoms (the
-    periodic shell within rcut + skin of each face) size the LAMMPS position
-    buffer (max_atoms); neighbour slots (k_dense, max_edges) are sized for
-    rcut + skin.  lammps-jax packs only pairs within rcut, but the benchmark's
-    random-weight structures compress during the run (Cantor: the largest
-    coordination within rcut climbs from 42 to 50 in 250 steps), and between
-    list rebuilds no atom can gain more neighbours within rcut than its
-    rcut + skin list holds -- so that count is the safe bound
-    (docs/perf-lammps-large-n.md).  The dense energy function evaluates owned
-    rows only (max_owned), and senders are always owned, so max_edges counts
-    owned rows."""
-    from ace_jax.eval import sparse_graph
-    L = np.linalg.norm(at.cell.array, axis=1)
-    ghost = float(np.prod((L + 2 * (rcut + skin)) / L))
-    g = sparse_graph(at.positions, at.cell.array, at.pbc, rcut + skin)
-    k_max = int(np.bincount(g.senders, minlength=len(at)).max())
-    max_owned = int(np.ceil(1.1 * len(at)))
-    k_dense = k_max + 8                     # overflow is loud (NaN), never a truncation
-    return {"max_atoms": int(np.ceil(len(at) * ghost * 1.1)), "k_max": k_max,
-            "k_dense": k_dense, "max_edges": max_owned * k_dense, "max_owned": max_owned}
+def capacity(at, rcut, skin=1.0, tight=False):
+    """lammps-jax buffer sizes for this structure (ace_jax.export.lammps.
+    neighbour_capacity, margin 8): owned + ghost atoms (the periodic shell
+    within rcut + skin of each face) size the LAMMPS position buffer
+    (max_atoms); model slots (k_dense, max_edges) are sized for rcut + skin.
+    lammps-jax packs only pairs within rcut, but the benchmark's random-weight
+    structures compress during the run (Cantor: the largest coordination within
+    rcut climbs from 42 to 50 in 250 steps), and between list rebuilds no atom
+    can gain more neighbours within rcut than its rcut + skin list holds -- so
+    that count is the safe bound (docs/perf-lammps-large-n.md).  The dense
+    energy function evaluates owned rows only (max_owned), and senders are
+    always owned, so max_edges counts owned rows.  The neighbour-matrix list
+    (max_neighbors) holds the rcut + skin list whatever the model slots.
+
+    tight=True (bench --tight-slots; opt-in, never the main suite): model slots
+    for rcut pairs only, ~1.5x faster, safe only on a deck whose coordination
+    stays within 8 of the start (stable MD); an overflow is a NaN step."""
+    from ace_jax.export.lammps import neighbour_capacity
+    c = neighbour_capacity(at, rcut, skin=skin, slots="cutoff" if tight else "skin", margin=8)
+    return {"max_atoms": c["max_atoms"], "k_max": c["k_list"], "k_dense": c["k_dense"],
+            "max_edges": c["max_edges"], "max_owned": c["max_owned"],
+            "max_neighbors": c["max_neighbors"]}
 
 
-def _export_inprocess(row, at, dtype, workdir, layout="auto"):
+def _export_inprocess(row, at, dtype, workdir, layout="auto", slots="skin"):
     """Export the ace-jax model as a lammps-jax bundle sized for `at` (this
     process: it initialises JAX, and on a GPU host keeps JAX's memory pool)."""
     import time
@@ -126,24 +127,24 @@ def _export_inprocess(row, at, dtype, workdir, layout="auto"):
     from ace_jax.eval import load
     from ace_jax.export.lammps import export_lammps
     model, meta, _ = load(row["path"])
-    cap = capacity(at, float(meta["rcut"]))
+    cap = capacity(at, float(meta["rcut"]), tight=slots == "cutoff")
     pathlib.Path(workdir).mkdir(parents=True, exist_ok=True)
     t0 = time.perf_counter()
     b = export_lammps(model, meta, pathlib.Path(workdir) / "bundle.json", max_atoms=cap["max_atoms"],
                       max_edges=cap["max_edges"], k_dense=cap["k_dense"], dtype=dtype, layout=layout,
                       type_elements=[atomic_numbers[e] for e in row["elements"]],  # data-file order
-                      max_owned=cap["max_owned"])
+                      max_owned=cap["max_owned"], max_neighbors=cap["max_neighbors"])
     return str(pathlib.Path(workdir) / "bundle.json"), b["ace_jax"]["layout"], time.perf_counter() - t0
 
 
-def export_bundle(row, at, dtype, workdir, layout="auto"):
+def export_bundle(row, at, dtype, workdir, layout="auto", slots="skin"):
     """Export the ace-jax model as a lammps-jax bundle sized for `at`, in a
     child process: exporting here would initialise JAX on the GPU, whose default
     pool (75% of the card) stays allocated while LAMMPS runs, leaving lammps-jax
     a quarter of it.  Returns (bundle path, layout used, export seconds)."""
     keep = {k: row[k] for k in ("name", "system", "path", "elements") if k in row}
     cmd = [sys.executable, str(pathlib.Path(__file__).resolve()), "--export", json.dumps(keep),
-           str(len(at)), dtype, str(workdir), layout]
+           str(len(at)), dtype, str(workdir), layout, slots]
     bench = str(pathlib.Path(__file__).resolve().parents[1])     # so the child imports scaling
     env = {**os.environ, "PYTHONPATH": os.pathsep.join(
         [bench] + [x for x in os.environ.get("PYTHONPATH", "").split(os.pathsep) if x])}
@@ -178,7 +179,8 @@ def bundle_layout(prev):
     return "sparse" if (prev or {}).get("layout") == "sparse" else "auto"
 
 
-def run_case(row, n_atoms, dtype, device, lmp, ranks, workdir, pjrt=None, prev=None):
+def run_case(row, n_atoms, dtype, device, lmp, ranks, workdir, pjrt=None, prev=None,
+             slots="skin"):
     work = pathlib.Path(workdir); work.mkdir(parents=True, exist_ok=True)
     at = supercell(row["system"], n_atoms)
     data = work / "x.data"
@@ -198,10 +200,13 @@ def run_case(row, n_atoms, dtype, device, lmp, ranks, workdir, pjrt=None, prev=N
     # bundle that runs out of memory is retried sparse
     layout = bundle_layout(prev)
     while True:
-        bundle, used, compile_s = export_bundle(row, at, dtype, work, layout=layout)
+        bundle, used, compile_s = export_bundle(row, at, dtype, work, layout=layout, slots=slots)
+        extra = {"layout": used, "compile_s": compile_s}
+        if slots != "skin":
+            extra["slots"] = slots
         out = _run_lammps(row, style, bundle, data, work, n_atoms, dtype, device, lmp, ranks, pjrt,
-                          steps, warmup, {"layout": used, "compile_s": compile_s})
-        if out["status"] == "oom" and used == "dense":
+                          steps, warmup, extra)
+        if out["status"] == "oom" and used in ("dense", "matrix"):
             layout = "sparse"
             continue
         if layout == "sparse" and bundle_layout(prev) == "auto":
@@ -241,13 +246,19 @@ def _run_lammps(row, style, model, data, work, n_atoms, dtype, device, lmp, rank
 
 if __name__ == "__main__" and sys.argv[1:2] == ["--export"]:
     _row, _n, _dtype, _work, _layout = json.loads(sys.argv[2]), int(sys.argv[3]), *sys.argv[4:7]
-    _b, _l, _t = _export_inprocess(_row, supercell(_row["system"], _n), _dtype, _work, _layout)
+    _slots = sys.argv[7] if len(sys.argv) > 7 else "skin"
+    _b, _l, _t = _export_inprocess(_row, supercell(_row["system"], _n), _dtype, _work, _layout,
+                                   _slots)
     print(json.dumps({"bundle": _b, "layout": _l, "compile_s": _t}))
 elif __name__ == "__main__":
     from scaling.models import planned_models
-    name, n, dtype, device, lmp, ranks, workdir = sys.argv[1:8]
+    # --tight-slots: model slots for rcut pairs (capacity(tight=True)); opt-in,
+    # never the main suite, whose random-weight structures compress
+    tight = "--tight-slots" in sys.argv
+    name, n, dtype, device, lmp, ranks, workdir = [x for x in sys.argv[1:] if x != "--tight-slots"][:7]
     row = next(r for r in planned_models() if r["name"] == name)
     row["bundle"] = os.environ.get("ACEJAX_BUNDLE", "")
     prev = json.loads(os.environ["BENCH_PREV"]) if os.environ.get("BENCH_PREV") else None
     print(json.dumps(run_case(row, int(n), dtype, device, lmp, int(ranks), workdir,
-                              os.environ.get("PJRT_PLUGIN"), prev)))
+                              os.environ.get("PJRT_PLUGIN"), prev,
+                              slots="cutoff" if tight else "skin")))

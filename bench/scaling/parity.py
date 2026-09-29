@@ -80,12 +80,13 @@ def _mace_ef(path, at, device, head=None):
 
 
 def gate_checks(small, system):
-    """(gate, model row, bundle layout) per check.  Both ace-jax bundle layouts are
-    gated: run_lammps falls back to a sparse bundle when dense runs out of memory,
-    so the sparse path (ghost atoms included) must be verified, not only dense."""
+    """(gate, model row, bundle layout) per check.  Every ace-jax bundle layout is
+    gated: layout="auto" exports the neighbour matrix (or packed dense on an older
+    lammps-jax), and run_lammps falls back to a sparse bundle when it runs out of
+    memory, so each path (ghost atoms included) must be verified."""
     checks = [("mlpace", small[("mlpace", system)], None)]
     for code in ("acejax-pace", "acejax-ace"):
-        checks += [("acejax", small[(code, system)], lay) for lay in ("dense", "sparse")]
+        checks += [("acejax", small[(code, system)], lay) for lay in ("matrix", "dense", "sparse")]
     return checks + [("mace", small[("mace", system)], None)]
 
 

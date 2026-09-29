@@ -151,6 +151,39 @@ def test_capacity_slots_have_skin_headroom():
                                                      5.0).senders)
 
 
+def test_capacity_tight_slots_are_opt_in():
+    """--tight-slots sizes model slots (k_dense, max_edges) for rcut pairs only;
+    the neighbour-matrix list (max_neighbors) still holds the rcut + skin list,
+    which LAMMPS copies whole.  The default stays safe."""
+    from ace_jax.export.lammps import neighbour_capacity
+    from scaling.run_lammps import capacity
+    at = supercell("Cantor", 256)
+    safe, tight = capacity(at, 5.0), capacity(at, 5.0, tight=True)
+    assert safe == capacity(at, 5.0, tight=False)
+    assert tight["k_dense"] == neighbour_capacity(at, 5.0, slots="cutoff")["k_dense"] < safe["k_dense"]
+    assert tight["max_neighbors"] == safe["max_neighbors"] == safe["k_dense"]
+    assert tight["max_edges"] == tight["max_owned"] * tight["k_dense"]
+
+
+def test_lammps_retries_sparse_after_a_matrix_oom(tmp_path, monkeypatch):
+    """The matrix bundle is auto's dense-family choice: its OOM falls back to
+    sparse just as the packed dense bundle's does."""
+    from scaling import run_lammps
+    layouts = []
+
+    def fake_export(row, at, dtype, work, layout="auto", slots="skin"):
+        layouts.append(layout)
+        return "b.json", ("matrix" if layout == "auto" else "sparse"), 1.0
+
+    monkeypatch.setattr(run_lammps, "export_bundle", fake_export)
+    monkeypatch.setattr(run_lammps, "_run_lammps", lambda *a, **k: {
+        "status": "oom" if a[-1]["layout"] == "matrix" else "ok", **a[-1]})
+    row = {"code": "acejax-pace", "system": "SiGe", "elements": ["Si", "Ge"], "name": "x",
+           "path": "m.yace", "size": "small"}
+    out = run_lammps.run_case(row, 256, "float64", "gpu", "lmp", 1, tmp_path)
+    assert layouts == ["auto", "sparse"] and out["status"] == "ok" and out["dense_oom"]
+
+
 def test_read_pe_and_dump(tmp_path):
     from scaling.run_lammps import read_dump_forces, read_pe
     log = "Step PotEng Atoms\n       0   -12.5    3\nLoop time of 0.1 on 1 procs for 0 steps with 3 atoms\n"
@@ -560,7 +593,7 @@ def test_export_bundle_child_writes_a_bundle(tmp_path):
     y = str(pathlib.Path(__file__).parent.parent / "fixtures" / "pace" / "gesi_sbessel.yace")
     row = {"name": "x", "system": "SiGe", "path": y, "elements": ["Si", "Ge"]}
     bundle, layout, t = export_bundle(row, supercell("SiGe", 256), "float64", tmp_path)
-    assert pathlib.Path(bundle).exists() and layout in ("dense", "sparse") and t > 0
+    assert pathlib.Path(bundle).exists() and layout in ("matrix", "dense", "sparse") and t > 0
 
 
 def test_float32_figure_omits_symmetrix_lammps(tmp_path, monkeypatch):
@@ -629,7 +662,8 @@ def test_parity_gate_covers_both_bundle_layouts():
     small = {(m["code"], m["system"]): m for m in planned_models() if m["size"] == "small"}
     got = {(g, m["code"], lay) for g, m, lay in gate_checks(small, "SiGe")}
     for code in ("acejax-pace", "acejax-ace"):
-        assert ("acejax", code, "dense") in got and ("acejax", code, "sparse") in got
+        for lay in ("matrix", "dense", "sparse"):
+            assert ("acejax", code, lay) in got
     assert ("mlpace", "mlpace", None) in got and ("mace", "mace", None) in got
 
 
