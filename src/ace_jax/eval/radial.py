@@ -12,8 +12,6 @@ No module-level jax.config here, or anywhere in this package: precision is the
 caller's to choose.
 """
 
-from functools import partial
-
 import jax
 import jax.numpy as jnp
 
@@ -83,19 +81,31 @@ def spline_eval(x, coefs, x0, h, n):
     return jnp.einsum("...k,...kf->...f", w, g)
 
 
-@partial(jax.jit, static_argnames=("x0", "h", "n"))
+def _pairs(x, coefs, zi, zj, x0, h, n):
+    return jax.vmap(lambda xx, c: spline_eval(xx, c, x0, h, n))(x, coefs[zi, zj])
+
+
+_pairs_jit = jax.jit(_pairs, static_argnames=("x0", "h", "n"))
+
+
 def spline_eval_pairs(x, coefs, zi, zj, x0, h, n):
     """`spline_eval` per edge on its own species pair's table: x, zi, zj (E,),
-    coefs (NZ, NZ, ncoef, F) -> (E, F).
+    coefs (NZ, NZ, ncoef, F) -> (E, F), as `vmap(spline_eval)(x, coefs[zi, zj])`.
 
-    Always jitted.  Written as `vmap(spline_eval)(x, coefs[zi, zj])`, which
-    XLA fuses into a 4-row gather per edge, but which run eagerly (op by op,
-    e.g. an un-jitted `model.radial` or `energy_forces_virial` call)
-    materialises the (E, ncoef, F) per-edge table first: 32 GB for 20k edges on
-    a 2000-interval `to_spline` table.  Inside an outer jit this inlines to
-    exactly that fused form; explicit row gathers measured 1-6% slower on an
-    A100 (bench/perf/results/learned_radial_8192_gather_*.json)."""
-    return jax.vmap(lambda xx, c: spline_eval(xx, c, x0, h, n))(x, coefs[zi, zj])
+    Under a trace (inside the caller's jit / grad / vmap) that expression is
+    inlined as is, so the caller's program -- its fusion, hence its rounding --
+    is exactly what it was before this helper existed; XLA fuses it into a
+    4-row gather per edge.  Called eagerly (op by op, e.g. an un-jitted
+    `model.radial`), the same expression would materialise the (E, ncoef, F)
+    per-edge table first -- 32 GB for 20k edges on a 2000-interval `to_spline`
+    table -- so the eager call goes through a jitted copy instead.  Wrapping
+    the traced call in its own jit too is NOT equivalent: the nested jit
+    changes the outer program's fusion, which moved the bit-exact
+    run_linear_pops_auto pipeline golden at 1e-12.  Explicit row gathers
+    measured 1-12% slower on an A100 (bench/perf/results/learned_radial_8192_gather_*.json)."""
+    if any(isinstance(a, jax.core.Tracer) for a in (x, coefs, zi, zj)):
+        return _pairs(x, coefs, zi, zj, x0, h, n)
+    return _pairs_jit(x, coefs, zi, zj, x0=x0, h=h, n=n)
 
 
 def env_poly1sr(r, params):

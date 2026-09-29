@@ -810,3 +810,24 @@ def test_save_npz_round_trips_the_flag(tmp_path, monkeypatch):
     auth = auth._replace(model=dataclasses.replace(auth.model, radial_learned=True))
     save_npz(tmp_path / "b.npz", auth)
     assert load(str(tmp_path / "b.npz"))[0].radial_learned
+
+
+def test_spline_gather_is_jitted_eagerly_and_inlined_under_trace(monkeypatch):
+    """Eager calls take the jitted copy (no (E, ncoef, F) per-edge table); a
+    traced call inlines the expression, so the caller's jitted program is the
+    one it was before the helper existed (a nested jit moved the bit-exact
+    run_linear_pops_auto pipeline golden)."""
+    from ace_jax.eval import radial
+    calls = []
+    real = radial._pairs_jit
+    monkeypatch.setattr(radial, "_pairs_jit", lambda *a, **k: calls.append(1) or real(*a, **k))
+    m, meta, _ = load(str(SIGE))
+    r = jnp.linspace(1.5, 4.0, 7)
+    rij = jnp.stack([r, 0 * r, 0 * r], -1)
+    z = jnp.zeros(7, jnp.int32)
+    R_eager = m.radial(rij, z, z)[0]
+    assert calls
+    calls.clear()
+    R_jit = jax.jit(lambda q: m.radial(q, z, z)[0])(rij)
+    assert not calls
+    np.testing.assert_allclose(np.asarray(R_jit), np.asarray(R_eager), rtol=1e-13, atol=1e-15)

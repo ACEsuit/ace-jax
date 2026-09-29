@@ -232,20 +232,24 @@ the fused `vmap(spline_eval)(x, coefs[zi, zj])` of #16 (the `:oldgather` rows).
 A slice gather and a flat-row gather were then measured at 1-6% slower
 (`learned_radial_8192_gather_{slice,flat}.json`).
 
-The code now keeps #16's expression inside an always-jitted
-`radial.spline_eval_pairs`. Compiled on CPU, it has the same fusion structure as
-#16's inline form: the same multiset of 2627 HLO instructions once names and
-source metadata are stripped. The results are bitwise equal. That is not a
-text-level identity of the HLO: instruction names and order differ.
+The code now keeps #16's expression in `radial.spline_eval_pairs`.
+- **Under a trace** (inside the caller's jit), it is inlined as is, so the caller's program is exactly #16's.
+- **Called eagerly,** it goes through a jitted copy.
+
+A first version jitted it always. In isolation that gave bitwise-equal results
+and the same multiset of 2627 HLO instructions on CPU, once names and metadata
+were stripped. But the nested jit changed the fusion of larger programs: it
+moved the bit-exact `run_linear_pops_auto` pipeline golden at 1e-12, which is
+why the traced path now inlines.
 
 So the `:lean` column above slightly overstates the final cost. The final code's
 cost is the `:oldgather` row: a12:lean is 2.51 ms (SiGe_medium) and 3.08 ms
 (Cantor_medium), the stock spline lean's 2.51 and 3.25.
 
-Why keep it always jitted: the fused expression, run eagerly (e.g. an
+Why jit the eager path: the fused expression, run eagerly (e.g. an
 un-jitted `model.radial`), materialises the (E, ncoef, n_rnl) per-edge table.
 On a 2000-interval table and 20k edges that is 32 GB. A local analysis script
-hit exactly this.
+hit exactly this. Through the jitted copy, the same eager call on a 2051-row Cantor table and 20k edges peaks at 587 MB RSS.
 
 ## 4. Does compaction apply to real learned radials?
 
