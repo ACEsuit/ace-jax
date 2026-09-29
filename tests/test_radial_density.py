@@ -433,7 +433,8 @@ def test_fit_radial_density_gate_prefers_density_on_density_data():
     _, ds_val, _ = make_problem(ncfg=12, per_batch=3, start=12)
     Wt, eta_t, mask, c = _density_truth(prob, ds_fit)
     ds_fit, ds_val = _relabel_rd(prob, ds_fit, Wt, eta_t, mask, c), _relabel_rd(prob, ds_val, Wt, eta_t, mask, c)
-    W, eta, info = fit_radial_density(prob, ds_fit, ds_val, prob.model.rnl_Wnlq, mask=mask, P=1,
+    # warm-start the density at the truth: this tests the gate, not the (non-convex) density search
+    W, eta, info = fit_radial_density(prob, ds_fit, ds_val, prob.model.rnl_Wnlq, mask=mask, P=1, H0=eta_t,
                                       theta0=None, profile=False, steps=20, map_steps=50)
     print(info["scores"])
     assert info["selected"].startswith("density") and eta is not None and info["P"] == 1
@@ -491,9 +492,12 @@ def test_saved_density_model_matches_widened_rows(tmp_path):
     _, ds_val, _ = make_problem(ncfg=12, per_batch=3, start=12)
     Wt, eta_t, mask, c = _density_truth(prob, ds_fit)
     ds_fit, ds_val = _relabel_rd(prob, ds_fit, Wt, eta_t, mask, c), _relabel_rd(prob, ds_val, Wt, eta_t, mask, c)
-    W, eta, info = fit_radial_density(prob, ds_fit, ds_val, prob.model.rnl_Wnlq, mask=mask, P=1,
-                                      theta0=None, profile=False, steps=5, map_steps=20)
-    assert eta is not None
+    _, _, info = fit_radial_density(prob, ds_fit, ds_val, prob.model.rnl_Wnlq, mask=mask, P=1,
+                                    theta0=None, profile=False, steps=5, map_steps=20)
+    # export the density candidate whatever the gate selected (per-candidate outputs)
+    lab = "density_lam_eta=0"
+    W, eta = info["cands_W"][lab], info["etas"][lab]
+    info = {**info, "readout": info["readouts"][lab]}
     save_result(tmp_path, W, info, src_npz=MODEL, model=prob.model, eta=eta, mask=mask)
     back, meta, z = load(tmp_path / "model.npz")
     assert isinstance(back, FSModel) and np.load(tmp_path / "eta.npy").shape == eta.shape
@@ -695,3 +699,73 @@ def test_bench_driver_extra_train_and_tol(tmp_path):
     assert "extra training configs:" in r.stdout
     s = json.loads((tmp_path / "summary.json").read_text())
     assert s["extra_train"] == [str(XYZ)] and s["tol"] == 0.0 and s["nval"] == 8
+
+
+def test_curvature_scale_equalises_block_curvature(small):
+    """r_eta = sqrt(|h_H|/|h_V|): in u = [V; r_eta H] the two blocks' probe curvature magnitudes agree
+    (unless clamped), and the density scale-gauge direction (H itself) is flat, which is
+    why the probes are projected off it."""
+    from ace_jax.fit.radial_density import (R_ETA_MIN, _curvature_scale, _hvp_rd, _pack,
+                                            _tangent_probe)
+    prob, ds, _ = small
+    V, H, common, shapes = _rd_args(prob, ds, P=1)
+    active, mask = common[5], common[15]
+    key = jax.random.PRNGKey(0)
+    r_eta, hV, hH = _curvature_scale(V, H, active, mask, common, prob.cfg, shapes, key)
+    print(f"h_V={hV:.3e} h_H={hH:.3e} r_eta={r_eta:.3e}")
+    assert np.isfinite(hV) and np.isfinite(hH) and hV != 0 and hH != 0
+    assert r_eta == max(np.sqrt(abs(hH) / abs(hV)), R_ETA_MIN)
+    r = jnp.asarray([1.0, r_eta])
+    x, other = _pack(V, H, r, "joint")
+    kV, kH = jax.random.split(key)
+    vV = _tangent_probe(V, active[..., None], kV).ravel()
+    vH = _tangent_probe(H, jnp.broadcast_to(mask, H.shape), kH).ravel()
+    h_u = []
+    for vb, sl in ((jnp.concatenate([vV, jnp.zeros(H.size)]), slice(0, V.size)),
+                   (jnp.concatenate([jnp.zeros(V.size), r_eta * vH]), slice(V.size, None))):
+        Hv = _hvp_rd(x, vb, other, *common, r, prob.cfg, "joint", shapes)
+        h_u.append(float(vb[sl] @ Hv[sl]) / float(vb[sl] @ vb[sl]))
+    # u_H = r_eta H, so the same raw probe has curvature h_H / r_eta^2 in u
+    np.testing.assert_allclose(h_u[1], hH / r_eta ** 2, rtol=1e-6)
+    if r_eta > R_ETA_MIN:
+        np.testing.assert_allclose(abs(h_u[1]), abs(h_u[0]), rtol=1e-6)
+    one = jnp.ones(2)
+    xg, og = _pack(V, H, one, "joint")
+    g = jnp.concatenate([jnp.zeros(V.size), H.ravel()])
+    hg = float(g @ _hvp_rd(xg, g, og, *common, one, prob.cfg, "joint", shapes)) / float(g @ g)
+    assert abs(hg) < 1e-6 * abs(hH)
+
+
+def test_alternating_mode_skips_curvature_probe(small):
+    from ace_jax.fit.density import density_mask
+    from ace_jax.fit.radial_density import learn_radial_density
+    prob, ds, _ = small
+    _, _, info = learn_radial_density(prob, ds, prob.model.rnl_Wnlq, mask=density_mask(prob.cfg, "full"),
+                                      P=1, mode="alternating", theta0=THETA, profile=False, steps=2,
+                                      reprofile_every=2)
+    assert info["precond"] == [1.0] and info["curvature"] == []
+
+
+def test_joint_linesearch_failure_falls_back_to_alternating(small, monkeypatch):
+    """A failed joint line search spends the rest of the round on V then H blocks
+    instead of ending the run; the next round tries joint again."""
+    from ace_jax.fit import radial_density as rd
+    from ace_jax.fit.density import density_mask
+    prob, ds, _ = small
+    real, calls = rd.lbfgs_loop, []
+
+    def fake(f, x0, *, steps, statics, **kw):
+        block = statics[1]
+        calls.append((block, steps))
+        if block == "joint":                          # one accepted step, then a failed line search
+            x, fx, trace, _ = real(f, x0, steps=1, statics=statics, **kw)
+            return x, fx, trace, "linesearch"
+        return real(f, x0, steps=steps, statics=statics, **kw)
+
+    monkeypatch.setattr(rd, "lbfgs_loop", fake)
+    _, _, info = rd.learn_radial_density(prob, ds, prob.model.rnl_Wnlq, mask=density_mask(prob.cfg, "full"),
+                                         P=1, theta0=THETA, profile=False, steps=12, reprofile_every=6)
+    # per round: joint (6) fails after 1 accepted step -> 6 - 1 - 1 = 4 left -> V 2, H 2
+    assert calls == [("joint", 6), ("V", 2), ("H", 2)] * 2
+    assert info["fallbacks"] == 2 and info["steps"] == 12
+    assert all(x.startswith("linesearch+") and x.count("+") == 2 for x in info["reasons"])

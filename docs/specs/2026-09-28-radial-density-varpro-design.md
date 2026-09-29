@@ -128,9 +128,15 @@ Both are scaled relative to r0, as the radial priors are: relative: `lam_eta * r
 
 ### Preconditioner
 
-The outer variables are block-scaled as `u = [vec(V) ; r_η · vec(H)]`, with `r_η = RMS(∂f/∂H) / RMS(∂f/∂V)`, so the gradient with respect to u has the same RMS in both blocks. The radial block keeps `learn_radial`'s convention. r_η is recomputed at the start of every round, from one extra gradient evaluation, because L-BFGS memory is reset at each θ re-profile anyway. A zero or non-finite RMS falls back to r_η = 1.
+The outer variables are block-scaled as `u = [vec(V) ; r_η · vec(H)]`, with `r_η = sqrt(|h_H| / |h_V|)`, where h_b = vᵀ∇²f v / vᵀv is the curvature along one random probe per block. Each probe covers only the block's live coordinates and is projected off each row's scale-gauge direction, which is flat by construction. A unit step in u then moves both blocks by a curvature-matched amount.
 
-The step function stays a single compiled `_lbfgs_step`: r is a traced argument, not a static. The objective is invariant to r, which the tests below check.
+- The probe uses one Hessian-vector product per block per round (forward over reverse through the checkpointed scan).
+- It uses curvature *magnitudes*, because the objective is often non-convex along both probes at the start.
+- r_η is clamped at `r_η ≥ 0.1`, so density steps are never amplified more than 10×. It falls back to 1 when a curvature is zero or non-finite.
+- r is a traced argument, so the step function stays a single compiled `_lbfgs_step`. The objective does not depend on r.
+- If a joint line search fails, the rest of that round is spent on alternating V and H blocks instead of ending the run, and the next round tries joint mode again.
+
+The first implementation scaled by the ratio of gradient RMS instead. On Cantor that gave r_η ≈ 3×10⁻³, and the huge density steps broke the line search (docs/learn-radial-density-results.md).
 
 ### Modes
 

@@ -9,9 +9,12 @@ density's scale gauge (unit mean-square rho on the training sites, S the
 per-species second moment at the initial radials -- the analogue of the radial
 gauge Gram Q).  d absorbs the scale and the sign of each density.
 
-The optimiser is L-BFGS on u = [vec(V) ; r_eta vec(H)] ("joint"), r_eta the
-ratio of the blocks' RMS gradients recomputed every round (one extra gradient
-evaluation), or alternating V / H blocks ("alternating", the fallback), both
+The optimiser is L-BFGS on u = [vec(V) ; r_eta vec(H)] ("joint"), r_eta =
+sqrt(|h_H| / |h_V|) from one Hessian-vector-product curvature probe per block per
+round (so a unit step in u moves both blocks by a curvature-matched amount;
+clamped to r_eta >= R_ETA_MIN so density steps are never amplified more than
+1 / R_ETA_MIN; a failed joint line search falls back to alternating blocks for
+the rest of that round), or alternating V / H blocks throughout ("alternating"), both
 through radial_learn's single compiled `_lbfgs_step`.  theta is re-profiled on
 the widened LML after every round.  After learning, eta is frozen and the
 final fit is the ordinary Bayesian linear solve over [c | d].
@@ -128,16 +131,48 @@ def _objective_rd(xb, other, a, model, ds, gamma_w, Q, active, D2, wn, lam, W_re
             + lam_eta * jnp.sum((gc[None] * eta) ** 2))
 
 
-_grad_rd = jax.jit(jax.grad(_objective_rd), static_argnums=(21, 22, 23))
+R_ETA_MIN = 0.1       # never amplify density steps more than 10x (Cantor: gradient-RMS scaling gave 3e-3)
 
 
-def _block_scale(g, nV):
-    """r_eta = RMS(grad_H) / RMS(grad_V), so both blocks' gradients in u have the same
-    RMS; 1 when either is zero or non-finite."""
-    gV, gH = np.asarray(g[:nV]), np.asarray(g[nV:])
-    rv, rh = float(np.sqrt(np.mean(gV ** 2))), float(np.sqrt(np.mean(gH ** 2)))
-    ok = np.isfinite(rv) and np.isfinite(rh) and rv > 0 and rh > 0
-    return rh / rv if ok else 1.0
+def _hvp(xb, v, other, *rest):
+    """Hessian-vector product of _objective_rd in xb along v (forward over reverse)."""
+    return jax.jvp(lambda y: jax.grad(_objective_rd)(y, other, *rest), (xb,), (v,))[1]
+
+
+_hvp_rd = jax.jit(_hvp, static_argnums=(22, 23, 24))   # cfg, block, shapes (after xb, v, other)
+
+
+def _tangent_probe(X, live, key):
+    """Random probe over the live coordinates of X (rows = last axis), with each
+    row's component along X itself removed: that direction is the row's scale
+    gauge (normalise / normalise_rho), where the curvature is exactly zero and
+    would bias the block's curvature estimate low."""
+    v = jax.random.normal(key, X.shape, X.dtype) * live
+    xx = jnp.sum(X * X, -1, keepdims=True)
+    return v - jnp.where(xx > 0, jnp.sum(v * X, -1, keepdims=True) / jnp.where(xx > 0, xx, 1.0), 0.0) * X
+
+
+def _curvature_scale(V, H, active, mask, common, cfg, shapes, key):
+    """(r_eta, h_V, h_H): h_b = v_b' Hess v_b / |v_b|^2 for one tangent probe per
+    block at r = (1, 1); r_eta = sqrt(|h_H| / |h_V|) equalises the magnitude of
+    the two blocks' curvature in u = [V ; r_eta H], clamped below at R_ETA_MIN.
+    Magnitudes, not signs: the VarPro objective is often non-convex along both
+    probes at the start (negative h), and the scale mismatch is still what the
+    line search trips on (saddle-free-Newton reasoning).  1 when either is zero
+    or non-finite."""
+    one = jnp.ones(2)
+    kV, kH = jax.random.split(key)
+    vV = _tangent_probe(V, active[..., None], kV)
+    vH = _tangent_probe(H, jnp.broadcast_to(mask, H.shape), kH)
+    x, other = _pack(V, H, one, "joint")
+    h = []
+    for vb, sl in ((jnp.concatenate([vV.ravel(), jnp.zeros(H.size)]), slice(0, V.size)),
+                   (jnp.concatenate([jnp.zeros(V.size), vH.ravel()]), slice(V.size, None))):
+        Hv = _hvp_rd(x, vb, other, *common, one, cfg, "joint", shapes)
+        h.append(float(vb[sl] @ Hv[sl]) / max(float(vb[sl] @ vb[sl]), 1e-300))
+    hV, hH = h
+    ok = np.isfinite(hV) and np.isfinite(hH) and hV != 0 and hH != 0
+    return (max(float(np.sqrt(abs(hH) / abs(hV))), R_ETA_MIN) if ok else 1.0), hV, hH
 
 
 def learn_radial_density(prob, ds, W0, *, mask, P=1, H0=None, mode="joint", theta0=None, profile=True,
@@ -206,7 +241,7 @@ def learn_radial_density(prob, ds, W0, *, mask, P=1, H0=None, mode="joint", thet
     lam_gap_abs = relative_lambda_gap(lam_gap, r0, n_active)
     pen0 = float(jnp.sum((gc[None] * H) ** 2))
     lam_eta_abs = relative_lambda_eta(lam_eta, r0, pen0)
-    info = {"trace": [], "reasons": [], "round_lengths": [], "theta": [np.asarray(a)], "precond": [],
+    info = {"trace": [], "reasons": [], "round_lengths": [], "theta": [np.asarray(a)], "precond": [], "curvature": [], "fallbacks": 0,
             "r0": r0, "lam_abs": lam, "lam_spec_abs": lam_spec_abs, "lam_gap_abs": lam_gap_abs,
             "lam_eta": float(lam_eta), "lam_eta_abs": lam_eta_abs, "pen0": pen0,
             "P": int(P), "mode": mode, "steps": 0}
@@ -215,7 +250,6 @@ def learn_radial_density(prob, ds, W0, *, mask, P=1, H0=None, mode="joint", thet
             f"lam_eta_abs={lam_eta_abs:.6e} pen0={pen0:.6e} r0={r0:.6e}")
     f64 = lambda v: jnp.asarray(v, jnp.float64)
     shapes = (tuple(V.shape), tuple(H.shape))
-    one = f64([1.0, 1.0])
     done, round_idx = 0, 0
     while done < int(steps):
         round_idx += 1
@@ -223,12 +257,19 @@ def learn_radial_density(prob, ds, W0, *, mask, P=1, H0=None, mode="joint", thet
         t_round = time.perf_counter()
         common = (a, prob.model, ds, prob_w.gamma, Q, active, D2, wn, f64(lam), W_ref, sw, f64(lam_spec_abs),
                   U, f64(lam_gap_abs), S, mask, gc, f64(lam_eta_abs))
-        g = _grad_rd(*_pack(V, H, one, "joint"), *common, one, cfg, "joint", shapes)
-        r = f64([1.0, _block_scale(g, V.size)])
+        if mode == "joint":
+            r_eta, hV, hH = _curvature_scale(V, H, active, mask, common, cfg, shapes,
+                                             jax.random.PRNGKey(seed * 1000 + round_idx))
+            info["curvature"].append((hV, hH))
+        else:
+            r_eta = 1.0                   # blocks optimised separately: no cross-block scale to match
+        r = f64([1.0, r_eta])
         info["precond"].append(float(r[1]))
-        blocks = [("joint", n)] if mode == "joint" else [("V", (n + 1) // 2), ("H", n // 2)]
-        reasons, obj = [], float("nan")
-        for block, nb in blocks:
+        alt = lambda m: [("V", (m + 1) // 2), ("H", m // 2)]
+        blocks = [("joint", n)] if mode == "joint" else alt(n)
+        reasons, obj, fell_back = [], float("nan"), False
+        while blocks:
+            block, nb = blocks.pop(0)
             if nb == 0:
                 continue
             xb, other = _pack(V, H, r, block)
@@ -238,6 +279,13 @@ def learn_radial_density(prob, ds, W0, *, mask, P=1, H0=None, mode="joint", thet
             info["trace"].extend(trace)
             info["round_lengths"].append(len(trace))
             reasons.append(reason)
+            if block == "joint" and reason == "linesearch" and nb - len(trace) - 1 > 0:
+                # the joint line search failed (on Cantor the density coordinates are too
+                # non-smooth for any single block scale): spend the rest of this round on
+                # alternating blocks instead of ending the run; the next round tries joint again
+                blocks = alt(nb - len(trace) - 1)
+                info["fallbacks"] += 1
+                fell_back = True
         info["reasons"].append(reasons[0] if len(reasons) == 1 else "+".join(reasons))
         done += n
         V, H = normalise(V, Q, active), normalise_rho(H, S)
@@ -247,7 +295,7 @@ def learn_radial_density(prob, ds, W0, *, mask, P=1, H0=None, mode="joint", thet
         if log is not None:
             log(f"learn_radial_density: round {round_idx} steps={done}/{int(steps)} obj={obj:.6e} "
                 f"reasons={reasons} precond={float(r[1]):.3e} time={time.perf_counter() - t_round:.1f}s")
-        if "nonfinite" in reasons or all(x != "steps" for x in reasons):
+        if "nonfinite" in reasons or all(x != "steps" for x in (reasons[1:] if fell_back else reasons)):
             break
     info["steps"] = done
     info["theta_final"] = np.asarray(a)
@@ -256,7 +304,7 @@ def learn_radial_density(prob, ds, W0, *, mask, P=1, H0=None, mode="joint", thet
 
 def fit_radial_density(prob, ds_fit, ds_val, W0, *, mask, P=1, mode="joint", lam_eta_grid=(0.0,),
                        lam_rough=0.0, lam_spec=0.0, lam_gap=0.0, theta0=None, map_steps=300, log=None,
-                       checkpoint=None, **learn_kw):
+                       checkpoint=None, H0=None, **learn_kw):
     """Held-out gate over {init, radials_only, density_lam_eta=<l> per l}: the
     radials alone (radial_learn.learn_radial) and the joint radials + density
     (learn_radial_density) from the same start and step budget, each candidate
@@ -264,6 +312,8 @@ def fit_radial_density(prob, ds_fit, ds_val, W0, *, mask, P=1, mode="joint", lam
     warm-started at a0, posterior-mean readout, sigma-normalised SSE on ds_val
     with sigma from a0) on its own design width -- so density is kept only when
     it wins on held-out data; ties go to the earlier, simpler candidate.
+    H0: optional density warm start for the density candidates only (e.g. a known
+    or previously learned eta; masked and normalised by learn_radial_density).
     Returns (W, eta or None, info); info["readout"] is the selected readout,
     [c | d] (len_basis + P * NZ) for a density candidate.  info["readouts"] and
     info["etas"] give every candidate's readout / eta (label -> array or, for
@@ -301,7 +351,7 @@ def fit_radial_density(prob, ds_fit, ds_val, W0, *, mask, P=1, mode="joint", lam
         key = f"density_lam_eta={float(l):g}"
         if log is not None:
             log(f"fit_radial_density: {key} starting")
-        W, eta, info = learn_radial_density(prob, ds_fit, W0, mask=mask, P=P, mode=mode, theta0=from_array(a0),
+        W, eta, info = learn_radial_density(prob, ds_fit, W0, mask=mask, P=P, mode=mode, H0=H0, theta0=from_array(a0),
                                             lam_eta=l, S=S, **kw)
         cands[key], runs[key] = (W, eta), info
         if checkpoint is not None:
