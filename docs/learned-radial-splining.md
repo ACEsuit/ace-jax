@@ -1,5 +1,7 @@
 # Learned radials at deployment: splining the analytic branch
 
+**Scope:** `lean` splines *every* analytic radial, not only learned ones. Every Julia `ace_model` export and every Python-authored model is `radial_kind="analytic"` too, so `ACECalculator(lean=True)` and `export_lammps` evaluate those splined by default. The result agrees with the full model to up to ~1e-9 in energy (relative) and ~2.3e-8 of max|F| in forces, not to roundoff. `spline_tol=None` keeps them exact. Whether the default should cover all analytic models is an open decision.
+
 A learned tensor radial (`fit/radial_learn.py`) lives on the **analytic** branch
 of `ACEModel._radial_one`:
 
@@ -80,7 +82,7 @@ shape:
 
 ## 2. `to_spline`: the conversion
 
-`ace_jax.eval.to_spline(model, n_intervals=None, tol=1e-10) -> (model, max_rel_err)`
+`ace_jax.eval.to_spline(model, n_intervals=None, tol=1e-10, deriv_tol=None, return_info=False) -> (model, max_rel_err)`
 lives in `src/ace_jax/eval/splinify.py`. `ace_jax.fit.radial_model` re-exports
 it, as the inverse of `to_analytic`.
 
@@ -88,8 +90,8 @@ it, as the inverse of `to_analytic`.
 - **Tabulates** the envelope-free S(x) = sum_q W P_q(x) at the knots of a uniform grid on [-1, 1]: (x0, h, n) = (-1, 2/n_int, n_int + 1).
 - **Interpolates** with the cubic B-spline `spline_eval` reads. The builder is `construct.radial_ace1.cubic_bspline_coefs`, the one behind the authored and Julia `splinify` tables. It is now a banded O(n) solve with an optional `end_d2`.
 - **End condition:** the polynomial's exact second derivative at the end knots, where Interpolations.jl's `Line(OnGrid())` puts y'' = 0. That keeps the error O(h^4) up to the ends, where y'' = 0 would leave an O(h^2) boundary layer. The layer matters for the pair radial, whose r-envelope does not vanish at x = 1.
-- **Error:** max over species pairs and columns of max|spline - exact| / max|exact|, on 10 points per interval. For R_nl it includes the envelope; the pair radial is envelope-free.
-- **Interval choice:** doubles from 32 until error <= tol. The last doubling can overshoot by up to 16x, so it also tries the n that the h^4 rate predicts and keeps it if that meets tol, which roughly halves the table.
+- **Error:** max over species pairs and the columns A reads of max|spline - exact| / max|exact|, on 10 points per interval. For R_nl it includes the envelope; the pair radial is envelope-free. The derivative error is measured too (section 2b).
+- **Interval choice:** doubles from 32 until error <= tol. The last doubling can overshoot by up to 16x, so it also tries buckets from the one the h^4 rate predicts. It returns the smallest bucket (section 2b) that meets tol.
 - **Pair radial:** converted too when analytic (`pair_Wnlq`), on its own grid.
 - **Already-spline radials:** a spline or `spline_factorised` R_nl, and a spline pair radial, are kept as they are.
 - **Result:** a normal full model. `require_full` passes, the basis methods work, and the table is a live, trainable leaf. `require_full` is enforced on the input.
@@ -134,6 +136,53 @@ looser than `tol`, which controls R_nl values.
 
   On the A100, 3 cases reach 1.0-2.2e-8.
 
+These rows predate two refinements in section 2b: interval bucketing, and
+measuring only the columns A reads. The re-measured table is there.
+
+### 2b. Review refinements: bucketing, derivative error, read columns
+
+Re-measured at 1024 atoms on the local CPU at tol 1e-10, for all four models
+and 20 cases (`bench/perf/results/learned_radial_spline_tol_parity_1024_bucketed.json`).
+
+**Measured columns.** The error is now measured on the R_nl columns the A basis
+reads (`np.unique(aspec_r)`) only. Columns that `prune_columns` drops no longer
+drive the grid, and the splining still happens before the pruning.
+
+**Bucketing.** The interval count is the smallest `splinify.BUCKETS` entry,
+round(2^(k/4)) for 32..65536, that meets tol:
+- At most 19% more intervals than needed (20% with integer rounding at small n), and on these 20 cases 4-19%, mean 11.5%. The minimal count was found by bisection.
+- Buckets are quarter-octave, so two radials needing similar grids share the table shape and the static `rnl_grid`: a radial swap reuses the compiled step instead of retracing. `tests/test_to_spline.py::test_radial_swap_does_not_retrace` counts the traces.
+- Why not multiples of 256: that costs 20% at 1258 intervals, and gives ~10 buckets over the 1258-3847 range 1e-10 needs, against 7.
+- `spline_intervals=N` on `lean`, `ACECalculator` and `export_lammps` pins the grid.
+
+**The derivative error.** `tol` bounds values. The error in d/dx(env S), which is
+what forces see, is O(h^3) and is now measured on the same grid:
+- `to_spline(..., return_info=True)` reports it as `max_rel_deriv_err`;
+- `deriv_tol` also gates on it.
+
+| | range over the 20 cases |
+|---|---|
+| intervals chosen | 1218-4096 |
+| value error | 4.1e-11 to 8.5e-11 |
+| derivative error | 1.8e-8 to 4.0e-8 |
+| \|dE\|/\|E\| | 1e-13 to 9.4e-10 |
+| max\|dF\| / max\|F\| | 2.5e-9 to 1.9e-8 |
+
+So at the 1e-10 default, the energies agree to up to ~1e-9 relative. The forces
+agree to up to ~2.3e-8 of max|F|, counting the earlier measurements, and the
+derivative error bounds them from above.
+
+**Tolerance handling:**
+- `tol` < 1e-14 (`TOL_FLOOR`) or <= 0 is rejected.
+- A float32 model's tol is floored at 10 eps(float32) = 1.2e-6.
+- The check grid is processed in 16k-point blocks, which bounds its memory.
+
+**Provenance.** `ACECalculator.splined`, `last_timing["spline_tol"]` and the
+bundle's `ace_jax.spline_tol` / `ace_jax.spline_intervals` are read off what
+`lean` returned (`eval.model.splining`), looking through a wrapper's `.base`:
+- an unfolded analytic model, which `lean` returns as given, records nothing;
+- a wrapper whose base was splined records it, and `ace_jax.lean` is True.
+
   The tolerance was not tightened past 1e-10 for these. Each 10x in forces costs about 1.8x in intervals (h^3).
 
 ## 3. Recovered speed
@@ -149,9 +198,16 @@ spline model in brackets:
 | SiGe_large | 4.11 ms (0.64) | n_q 12: 4.09 ms (0.63) | |
 | Cantor_large | 2.61 ms (0.67) | n_q 12: 2.62 ms (0.67) | |
 
-The 3x larger tables cost nothing: every analytic lean runs at the spline lean
-form's speed, to within 5%, and is 2.3-5.8x faster than the full analytic
-model. The filled radial is the exception, since it cannot be compacted.
+The 3x larger tables cost nothing. Every analytic lean runs at the spline lean
+form's speed, to within 5.4% (the worst is Cantor_medium n_q=20), and is
+1.93-5.8x faster than the full analytic model: 1.93x for SiGe_medium n_q=8,
+2.06x for Cantor_large n_q=12, and 5.81x for Cantor_medium n_q=20. The filled
+radial is the exception (+40%), since it cannot be compacted.
+
+These timings predate the interval bucketing of section 2b, which makes tables
+up to 19% larger. The gather reads 4 rows per edge whatever the table size, and
+the 3x step from 1e-8 to 1e-10 above made no measurable difference, so I did
+not re-time; the change is expected to be within noise.
 
 **At tol 1e-8** (the first run, A100-SXM4):
 - it runs at 0.69-0.74x of the stock spline full call (SiGe) and 0.49-0.59x (Cantor). The spline lean form's own speed is 0.73x and 0.48x, and the analytic lean matches it to within 5%, except Cantor n_q=16 and the filled variant (+22%);
@@ -170,8 +226,10 @@ A slice gather and a flat-row gather were then measured at 1-6% slower
 (`learned_radial_8192_gather_{slice,flat}.json`).
 
 The code now keeps #16's expression inside an always-jitted
-`radial.spline_eval_pairs`. Its compiled HLO is identical to #16's (checked on
-CPU, 2627 instructions) and the results are bitwise equal.
+`radial.spline_eval_pairs`. Compiled on CPU, it has the same fusion structure as
+#16's inline form: the same multiset of 2627 HLO instructions once names and
+source metadata are stripped. The results are bitwise equal. That is not a
+text-level identity of the HLO: instruction names and order differ.
 
 So the `:lean` column above slightly overstates the final cost. The final code's
 cost is the `:oldgather` row: a12:lean is 2.51 ms (SiGe_medium) and 3.08 ms

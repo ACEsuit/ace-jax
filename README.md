@@ -90,7 +90,7 @@ model back. `.yace` models are for evaluation and export: `aj fit` needs an
 
 ### Speed options and LAMMPS
 
-`ACECalculator(path, layout="auto", edge_a_kind="auto", skin=1.0, lean=True, spline_tol=1e-10)`:
+`ACECalculator(path, layout="auto", edge_a_kind="auto", skin=1.0, lean=True, spline_tol=1e-10, spline_intervals=None)`:
 
 - **Lean evaluation form** (ACE `.npz` models). With `lean=True` (the
   default), energies, forces and stress are evaluated with
@@ -102,14 +102,21 @@ model back. `.yace` models are for evaluation and export: `aj fit` needs an
     given. Descriptors use `calc.model`.
   - A lean model is energy-only: never edit or fit it. Edit the full model and
     re-apply `lean`.
-  - A learned (analytic) radial is first converted to a spline to within
-    `spline_tol` per radial (`ace_jax.eval.to_spline`), which recovers the
-    splined models' lean speed. At the default 1e-10 the lean energies agree
-    with the full model to ~1e-11 and forces to ~1e-8 of the largest force,
-    not to roundoff. `spline_tol=None` keeps the radial analytic (exact). The
-    spline is cached on the radial's content, so swapping in new readout
-    weights (`calc.model = ...`) does not redo it.
-    See `docs/learned-radial-splining.md`.
+  - **Analytic radials are splined.** Every analytic radial is first converted
+    to a spline to within `spline_tol` per radial (`ace_jax.eval.to_spline`).
+    That covers learned radials, and also every Julia `ace_model` export and
+    every Python-authored model, which are analytic too. It recovers the
+    splined models' lean speed, but it is not roundoff: at the default 1e-10
+    the lean energies agree with the full model to up to ~1e-9 relative and
+    forces to up to ~2.3e-8 of the largest force on the benchmark models.
+    - `spline_tol=None` keeps the radial analytic (exact).
+    - `calc.splined` (and `calc.last_timing["spline_tol"]`) says what was
+      splined, None when nothing was.
+    - The spline is cached on the radial's content, so swapping in new readout
+      weights (`calc.model = ...`) does not redo it.
+    - Its interval count is rounded up to a quarter-octave bucket, so a swapped
+      radial usually reuses the compiled step. `spline_intervals` pins it.
+    - See `docs/learned-radial-splining.md`.
 
 - **Layout.** `"auto"` picks the dense layout (A per node by a batched outer
   product, several times faster forces on GPU) when the neighbour padding is
@@ -146,9 +153,10 @@ them first), so ghost rows cost nothing. It is recorded as
 neighbours, gives NaN, never a silent truncation. Above 32,768 rows
 (`BUNDLE_BLOCK_ROWS`) the dense bundle evaluates in blocks, which bounds
 memory at large N. `lean=True` (the default) exports the lean form of an ACE
-model, as the calculator does, and records it as `ace_jax.lean`; `spline_tol`
-(default 1e-10) is the calculator's, recorded as `ace_jax.spline_tol` (None when
-nothing was splined). The `"auto"` layout is still sized on the full model.
+model, as the calculator does, and records it as `ace_jax.lean`. `spline_tol`
+and `spline_intervals` work as for the calculator. What was actually splined is
+recorded as `ace_jax.spline_tol` and `ace_jax.spline_intervals`, both None when
+nothing was. The `"auto"` layout is still sized on the full model.
 
 ## Performance
 
