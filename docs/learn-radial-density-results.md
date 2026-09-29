@@ -133,6 +133,36 @@ Once the density is properly optimised it changes the physical properties by not
 
 **Cost.** A joint 50-step round took 145 s on SiGe (A100), against 101–128 s for radials alone. The curvature probe adds two Hessian-vector products per round, about 5 gradient evaluations.
 
+## Spike: fixed-weight sqrt(ρ), as in pacemaker
+
+This spike is throwaway code, `spike/fixed_fs*.py`, and is not on the branch. It fixes the weight on the sqrt term at 1, as pacemaker's `fs_parameters [1,1,1,0.5]` does:
+
+E_i = c·X_i + √ρ_i + ΔE0_z
+
+- There is no scale gauge, so the magnitude of η sets how much curvature the model is forced to carry.
+- The fixed term is an offset on the targets, so the fit stays VarPro.
+- Per-species count columns fit ΔE0. The √ρ term carries a per-site constant that the ACE basis, which has no constant function, cannot absorb; pacemaker absorbs it in its reference energies.
+- η starts at 10⁻⁴ × the unit-mean-square pair density. Scaling η by s scales the term like √s but leaves the relative variation δρ/ρ unchanged, so a small start begins near the linear model. A start at 10⁻² stalls.
+- SiGe, bulk data only, the same split as pacemaker.
+
+| Model | E (meV/atom) | F (meV/Å) | Elastic \|%\| | Si vacancy (eV) | Ge vacancy (eV) |
+|---|---|---|---|---|---|
+| radials only (200 steps) | 0.536 | 36.2 | 1.6 | −1.57 | −1.14 |
+| fixed √ρ, η learned, radials frozen | 0.549 | 36.5 | **0.8** | −1.55 | −1.11 |
+| fixed √ρ + radials jointly (200 + 200 steps), pair span | **0.511** | 37.7 | 1.6 | −1.74 | −0.96 |
+| fixed √ρ + radials jointly, full span | 0.546 | 36.7 | 1.8 | −2.00 | −0.90 |
+| pacemaker linear, κ=0.02 | 0.85 | 32.2 | 5.9 | −0.74 | −0.52 |
+| pacemaker linear, κ=0.3 | 1.07 | 28.7 | 7.7 | −1.08 | −0.19 |
+| pacemaker √ρ, κ=0.3 | 0.94 | 26.5 | 5.9 | +0.03 | +0.14 |
+
+**Unlike the fitted-weight version, the fixed-form term is used.**
+- With frozen radials, the training residual drops 10% and the elastic deviation halves.
+- The term is large, 2–18 eV per site depending on the variant, and varies by 0.05–1.0 eV across a vacancy's neighbours.
+
+**The vacancies do not move.** The linear readout cancels most of the term's variation, and what remains is the curvature. That is small, because the learned densities stay smooth: near a vacancy ρ drops by only 5% (pair span), 11% (full span, frozen radials) or 16% (full span, joint). The √ curvature beyond the linear part, about (δρ/ρ)²/8·√ρ, is a few meV to tens of meV per neighbour. Bulk data gives the optimiser no reason to make ρ short-ranged and neighbour-counting. Learning the radials jointly does not change that.
+
+**Most of the gap to pacemaker is not the embedding.** Even pacemaker's *linear* models get vacancies 0.5–0.95 eV closer to MACE than ours do. That points at the base model, meaning the radial basis and cutoff and the fit, rather than at the sqrt embedding.
+
 ## Conclusions
 
 1. **A linear readout over a learned sqrt(ρ) is not an FS embedding in practice.** The density column is nearly collinear with the linear ACE basis, the ridge suppresses it, and it neither helps nor hurts the physical properties. The rest of the linear-model advantages are unaffected: convex final fit, UQ and speed. So keeping the machinery is cheap, but on these data it does not buy vacancy accuracy.
