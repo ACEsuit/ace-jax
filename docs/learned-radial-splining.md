@@ -1,6 +1,13 @@
 # Learned radials at deployment: splining the analytic branch
 
-**Scope:** `lean` splines *every* analytic radial, not only learned ones. Every Julia `ace_model` export and every Python-authored model is `radial_kind="analytic"` too, so `ACECalculator(lean=True)` and `export_lammps` evaluate those splined by default. The result agrees with the full model to up to ~1e-9 in energy (relative) and ~2.3e-8 of max|F| in forces, not to roundoff. `spline_tol=None` keeps them exact. Whether the default should cover all analytic models is an open decision.
+**Scope:** by default (`spline_tol="auto"`), `lean`, `ACECalculator` and `export_lammps` spline only a *learned* analytic tensor radial, at 1e-10.
+
+- **Learned radials:** the model has `radial_learned` set, which `radial_learn` writes into meta_json. The splined result agrees with the full model to up to ~1e-9 in energy (relative) and ~2.3e-8 of max|F| in forces, not to roundoff.
+- **Other analytic models:** Julia `ace_model` exports and Python-authored models are `radial_kind="analytic"` too, but not learned, so they stay exact by default. A float `spline_tol`, e.g. `1e-10`, opts them in; `None` never splines.
+- **Pair radial:** never learned, so `"auto"` keeps an analytic pair radial exact.
+- **Old files:** learned-radial files written before the flag load as not learned. Mark one with `ace_jax.construct.export.mark_radial_learned(path)`, or pass `spline_tol=1e-10`.
+
+The policy lives in `splinify.spline_plan` alone.
 
 A learned tensor radial (`fit/radial_learn.py`) lives on the **analytic** branch
 of `ACEModel._radial_one`:
@@ -257,7 +264,7 @@ Those still get the spline gather: 0.59-0.71x instead of 0.49-0.71x.
 
 ## 5. API
 
-- **`lean(model, spline_tol=1e-10)`:** applies `to_spline` when a radial is analytic, then prune, pairfold and block as before. `spline_tol=None` keeps the analytic radial, which is exact.
+- **`lean(model, spline_tol="auto")`:** applies `to_spline` to a learned analytic R_nl (at 1e-10), then prune, pairfold and block as before. A float splines every analytic radial; `spline_tol=None` never splines.
 - **`ACECalculator(..., spline_tol=1e-10)` and `export_lammps(..., spline_tol=1e-10)`:** pass the tolerance to `lean`. The bundle records it as `ace_jax.spline_tol`, or None when nothing was splined; that key is not one lammps-jax reads.
 - **The cache.** `to_spline` keeps a content-keyed LRU of 8 converted tables (`splinify.CACHE_SIZE`, `clear_cache()`).
   - **Key:** a sha256 of each radial's Wnlq, its polynomial recursion (A, B, C), the R_nl envelope (the error check reads it; the pair radial has none), n_intervals and tol. It never depends on object identity.
@@ -265,10 +272,14 @@ Those still get the spline gather: 0.59-0.71x instead of 0.49-0.71x.
   - **Misses:** any radial edit misses, down to a 1e-12 relative change of Wnlq, and so does a changed tol or envelope. The tests count the fits.
   - **Swap cost:** a readout-only `calc.model` swap of an analytic model (local CPU, `learned_radial_swap_cost.json`) dropped from 72 / 792 / 80 / 348 ms to 2.0 / 9.5 / 2.2 / 6.1 ms (SiGe_medium / Cantor_medium / SiGe_large / Cantor_large).
   - **Not cached:** `prune_columns`, `fold_pair` and `block_dense` cost 0.1-4.4 ms of host time each on these models.
-- **`lean_keep_basis(model, spline_tol=1e-10)`:** only the basis-preserving transforms, `to_spline` and `prune_columns`, never `fold_pair` or `block_dense`. After it, `site_basis`, `site_basis_dense`, `_readout` (WB, Wpair) and the descriptors still work:
+- **`lean_keep_basis(model, spline_tol="auto")`:** only the basis-preserving transforms, `to_spline` and `prune_columns`, never `fold_pair` or `block_dense`. After it, `site_basis`, `site_basis_dense`, `_readout` (WB, Wpair) and the descriptors still work:
   - B matches to roundoff: bitwise on Cantor_small, <= 6e-16 on sige_nofit, where XLA vectorises the pruned-width spline contraction differently;
   - Apair is bitwise.
 - **Wrapper models:** `lean(w)` for a model with `.base` and `with_base(new_base)`, e.g. `FSModel(base, ...)`, returns `w.with_base(lean_keep_basis(w.base))`.
+- **The learned flag:** `ACEModel.radial_learned` is a static field.
+  - It is set by `fit.radial_model.with_radial`. `to_analytic` clears it, since a projected table is not learned, and `widen_radial` keeps it.
+  - It is stored as meta_json `radial_learned` by `patch_radial_npz` (hence `radial_learn.save_result`, unless the gate kept `init`), `save_npz` / `eval_pair` and `mark_radial_learned`.
+  - It is read by `load`, defaulting to False.
 - **Unchanged:** `load` still returns the full model, and fitting keeps the analytic model.
 
 ## 6. Accuracy contract and UQ
@@ -286,8 +297,8 @@ full, unsplined model: it is the model the posterior was built on, and the
 basis methods need it anyway. The lean mean then differs from the full mean by
 at most ~tol, well below any σ.
 
-Some Julia-parity tests run analytic models through `ACECalculator`: `test_efv`, `test_descriptors`, `test_perf_parity` and `test_python_authoring`. They pass `spline_tol=None`, so they still run the lean path with the radial kept analytic.
+Some Julia-parity tests run analytic Julia exports through `ACECalculator` with the defaults: `test_efv`, `test_descriptors`, `test_perf_parity` and `test_python_authoring`. Those exports are not learned, so `"auto"` keeps them analytic and the tests are exact again. `test_to_spline.py` checks that `si_ace_model` and `si_s69` give bitwise the same result as `spline_tol=None`.
 
-Splined at 1e-10 misses their references:
+Splined at 1e-10, they would miss their references:
 - `test_efv` and `test_descriptors`: dE 1.5e-9 against 1e-10;
 - `test_perf_parity`: dE 8.8e-9 against 1e-12 of |E| in float64, and dF 2.9e-5 against a 2.5e-5 bound in float32.
