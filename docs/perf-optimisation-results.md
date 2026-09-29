@@ -186,15 +186,22 @@ Each row gives the checks passed out of those run, and the largest differences:
 | host | gate | code | passed | max abs dE / atom (eV) | max abs dF (eV/Å) |
 |---|---|---|---|---|---|
 | modal-a100 | acejax | ace-jax (linear ACE) | 6/6 | 2.7e-15 | 2.5e-14 |
+| modal-a100 | acejax | ace-jax (linear ACE, learned radial, analytic) | 4/4 | 1.7e-16 | 2.0e-14 |
+| modal-a100 | acejax | ace-jax (linear ACE, learned radial, splined) | 4/4 | 2.2e-16 | 7.2e-13 |
 | modal-a100 | acejax | ace-jax (PACE model) | 6/6 | 5.6e-17 | 2.7e-15 |
 | modal-a100 | mace | MACE | 2/2 | 6.9e-07 | 9.7e-05 |
 | modal-a100 | mlpace | ML-PACE | 2/2 | 4.9e-14 | 4.1e-10 |
+| modal-a100 | spline | ace-jax (linear ACE, learned radial, splined) | 2/2 | 2.1e-12 | 3.1e-08 |
 | moriarty-cpu | mace | MACE | 2/2 | 6.9e-07 | 9.7e-05 |
 | moriarty-cpu | mlpace | ML-PACE | 2/2 | 4.8e-14 | 4.1e-10 |
+| moriarty-cpu | spline | ace-jax (linear ACE, learned radial, splined) | 2/2 | 2.1e-12 | 3.1e-08 |
 | moriarty-gpu | acejax | ace-jax (linear ACE) | 4/4 | 3.3e-16 | 2.0e-14 |
+| moriarty-gpu | acejax | ace-jax (linear ACE, learned radial, analytic) | 4/4 | 1.1e-16 | 2.0e-14 |
+| moriarty-gpu | acejax | ace-jax (linear ACE, learned radial, splined) | 4/4 | 5.6e-17 | 1.2e-12 |
 | moriarty-gpu | acejax | ace-jax (PACE model) | 4/4 | 8.3e-17 | 2.7e-15 |
 | moriarty-gpu | mace | MACE | 2/2 | 6.9e-07 | 9.7e-05 |
 | moriarty-gpu | mlpace | ML-PACE | 2/2 | 4.9e-14 | 4.1e-10 |
+| moriarty-gpu | spline | ace-jax (linear ACE, learned radial, splined) | 2/2 | 2.1e-12 | 3.1e-08 |
 
 The frozen-reference parity test (`tests/test_perf_parity.py`) is part of the
 test suite and a hard gate for the branch. It checks the new code against the
