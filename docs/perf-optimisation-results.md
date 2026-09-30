@@ -186,8 +186,8 @@ Each row gives the checks passed out of those run, and the largest differences:
 | host | gate | code | passed | max abs dE / atom (eV) | max abs dF (eV/Å) |
 |---|---|---|---|---|---|
 | modal-a100 | acejax | ace-jax (linear ACE) | 8/8 | 2.7e-15 | 2.5e-14 |
-| modal-a100 | acejax | ace-jax (linear ACE, learned radial, analytic) | 4/4 | 1.7e-16 | 2.0e-14 |
-| modal-a100 | acejax | ace-jax (linear ACE, learned radial, splined) | 4/4 | 2.2e-16 | 7.2e-13 |
+| modal-a100 | acejax | ace-jax (linear ACE, learned radial, analytic) | 6/6 | 1.7e-16 | 2.0e-14 |
+| modal-a100 | acejax | ace-jax (linear ACE, learned radial, splined) | 6/6 | 2.2e-16 | 7.5e-13 |
 | modal-a100 | acejax | ace-jax (PACE model) | 8/8 | 8.3e-17 | 2.7e-15 |
 | modal-a100 | mace | MACE | 2/2 | 6.9e-07 | 9.7e-05 |
 | modal-a100 | mlpace | ML-PACE | 2/2 | 4.9e-14 | 4.1e-10 |
@@ -196,8 +196,8 @@ Each row gives the checks passed out of those run, and the largest differences:
 | moriarty-cpu | mlpace | ML-PACE | 2/2 | 4.8e-14 | 4.1e-10 |
 | moriarty-cpu | spline | ace-jax (linear ACE, learned radial, splined) | 2/2 | 2.1e-12 | 3.1e-08 |
 | moriarty-gpu | acejax | ace-jax (linear ACE) | 6/6 | 3.9e-16 | 2.4e-14 |
-| moriarty-gpu | acejax | ace-jax (linear ACE, learned radial, analytic) | 4/4 | 1.1e-16 | 2.0e-14 |
-| moriarty-gpu | acejax | ace-jax (linear ACE, learned radial, splined) | 4/4 | 5.6e-17 | 1.2e-12 |
+| moriarty-gpu | acejax | ace-jax (linear ACE, learned radial, analytic) | 6/6 | 1.1e-16 | 2.0e-14 |
+| moriarty-gpu | acejax | ace-jax (linear ACE, learned radial, splined) | 6/6 | 5.6e-17 | 1.2e-12 |
 | moriarty-gpu | acejax | ace-jax (PACE model) | 6/6 | 5.6e-17 | 2.7e-15 |
 | moriarty-gpu | mace | MACE | 2/2 | 6.9e-07 | 9.7e-05 |
 | moriarty-gpu | mlpace | ML-PACE | 2/2 | 4.9e-14 | 4.1e-10 |
