@@ -27,10 +27,34 @@ GP_SCHEMA = 1
 
 
 def _ace_arrays(res):
-    z = np.load(res.config.model)
+    return _ace_arrays_from(res.config.model, res.data.E0)
+
+
+def _ace_arrays_from(model_path, E0):
+    z = np.load(model_path)
     out = {k: z[k] for k in z.files}
-    out["E0"] = np.asarray(res.data.E0, np.float64)
+    out["E0"] = np.asarray(E0, np.float64)
     return out
+
+
+def linear_arrays_from_mean(config, E0, pcfg, mu):
+    """The ACE npz arrays of the input model (config.model) with readout mu, E0 as fitted.
+    Column layout: species-major B blocks, then pair blocks (fit/rows.py `_place`)."""
+    nB, nP, NZ = pcfg.n_B, pcfg.n_pair, pcfg.NZ
+    mu = np.asarray(mu)
+    out = _ace_arrays_from(config.model, E0)
+    out["WB"] = mu[:NZ * nB].reshape(NZ, nB).T.copy()
+    out["Wpair"] = mu[NZ * nB:NZ * (nB + nP)].reshape(NZ, nP).T.copy()
+    return out
+
+
+def model_file_blocked(cfg):
+    """Why no model file can represent this fit (None when one can)."""
+    if cfg.baseline is not None or cfg.base_npz is not None:
+        return "the baseline is added outside the model"
+    if str(cfg.model).endswith(".yace"):
+        return ".yace inputs are not supported"
+    return None
 
 
 def _posterior(res, theta):
@@ -50,17 +74,13 @@ def linear_model_arrays(res):
     """The ACE npz arrays with the posterior-mean readout at the MAP hyperparameters.
     Column layout of the linear block: species-major B blocks, then pair blocks
     (fit/rows.py `_place`), i.e. WB[b, z] = mu[z*n_B + b]."""
-    cfg = res.built.prob.cfg
-    nB, nP, NZ = cfg.n_B, cfg.n_pair, cfg.NZ
-    if "mean" in res.preds.pops:
+    if res.ard is not None:
+        mu = res.ard.posterior.mean           # ARD: the posterior mean the predictions use
+    elif "mean" in res.preds.pops:
         mu = res.preds.pops["mean"]      # POPS: exactly the mean the predictions used
     else:
         mu, _ = _posterior(res, res.theta)
-    mu = np.asarray(mu)
-    out = _ace_arrays(res)
-    out["WB"] = mu[:NZ * nB].reshape(NZ, nB).T.copy()
-    out["Wpair"] = mu[NZ * nB:NZ * (nB + nP)].reshape(NZ, nP).T.copy()
-    return out
+    return linear_arrays_from_mean(res.config, res.data.E0, res.built.prob.cfg, mu)
 
 
 def gp_model_arrays(res, n_draws=1):
@@ -86,12 +106,9 @@ def save_model(res, out, n_draws=1, log=print):
     gp_model.npz (GP arm).  Returns the path, or None when the fit cannot be
     represented as a model file (a dimer baseline is added back outside the model;
     a .yace input has no npz schema to write into)."""
-    cfg = res.config
-    if cfg.baseline is not None or cfg.base_npz is not None:
-        log("not saving a model file: the baseline is added outside the model")
-        return None
-    if str(cfg.model).endswith(".yace"):
-        log("not saving a model file: .yace inputs are not supported")
+    why = model_file_blocked(res.config)
+    if why is not None:
+        log(f"not saving a model file: {why}")
         return None
     out = pathlib.Path(out); out.mkdir(parents=True, exist_ok=True)
     if res.built.prob.ind.XM.shape[0] == 0:

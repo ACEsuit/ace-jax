@@ -40,7 +40,6 @@ EXTRA = {"sige": "/data/sige_vac_mh1.xyz", "cantor": "/data/cantor_vac_train_mh1
 KEYS = ["--energy-key", "mace_energy", "--force-key", "mace_force", "--virial-key", "mace_virial"]
 
 
-@app.function(gpu="A100-80GB", timeout=8 * 3600)
 def _drop(args, *flags):
     """args with each --flag/value pair removed (rmse_npz.py has no --r0/--n-q)."""
     args = list(args)
@@ -51,6 +50,7 @@ def _drop(args, *flags):
     return args
 
 
+@app.function(gpu="A100-80GB", timeout=8 * 3600)
 def learn(system: str, steps: int, lam_grid: str, reprofile_every: int, n_q: int, mult: float = 1.0,
           vac: bool = False, tol: float = 1e-6, init_radials: str = "") -> dict:
     out = pathlib.Path(f"/tmp/out_{system}_s{steps}_m{mult:g}")

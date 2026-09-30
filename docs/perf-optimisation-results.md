@@ -45,9 +45,9 @@ Cantor medium, float64, A100, 8,192 atoms.
 | model call, calculator-level incl. host-device traffic | ≤ 4.5 ms | 7.25 ms | 5.44 ms | **missed** |
 | end to end (micro-benchmark) | ≥ 1.10M atom-steps/s | 275k | 1.29M | **met** |
 | end to end (scaling suite, standalone) | ≥ 1.10M atom-steps/s | 346k | 1.26M | **met** |
-| LAMMPS throughput | ≥ 1.00M atom-steps/s | 450k | 1.00M | **met** |
-| LAMMPS runs at 32,768 atoms | runs | ran (dense), 331k | ran (dense), 1.19M | **met** |
-| LAMMPS runs at 131,072 atoms | runs | ran (sparse), 212k | ran (dense), 1.15M | **met** |
+| LAMMPS throughput | ≥ 1.00M atom-steps/s | 450k | 1.40M | **met** |
+| LAMMPS runs at 32,768 atoms | runs | ran (dense), 331k | ran (matrix), 1.54M | **met** |
+| LAMMPS runs at 131,072 atoms | runs | ran (sparse), 212k | ran (matrix), 1.45M | **met** |
 | LAMMPS largest N (for information) | — | 262144 | 2097152 | — |
 
 - **Model call:** met like for like. The calculator-level time misses the
@@ -99,58 +99,58 @@ median.
 | system | size | code | mode | before | after | speed-up | ML-PACE in LAMMPS | largest N before | largest N after |
 |---|---|---|---|---|---|---|---|---|---|
 | SiGe | small | ace-jax (PACE model) | standalone | 459k | 1.78M ±0% | 3.9× | 3.47M | 1048576 | 2097152 |
-| SiGe | small | ace-jax (PACE model) | lammps | 530k | 1.83M | 3.5× | 3.47M | 524288 | 2097152 |
+| SiGe | small | ace-jax (PACE model) | lammps | 530k | 2.40M | 4.5× | 3.47M | 524288 | 2097152 |
 | SiGe | small | ace-jax (linear ACE) | standalone | 218k | 2.07M | 9.5× | 3.47M | 2097152 | 2097152 |
-| SiGe | small | ace-jax (linear ACE) | lammps | 1.73M | 2.00M | 1.2× | 3.47M | 1048576 | 2097152 |
+| SiGe | small | ace-jax (linear ACE) | lammps | 1.73M | 3.39M | 2.0× | 3.47M | 1048576 | 2097152 |
 | SiGe | medium | ace-jax (PACE model) | standalone | 366k | 714k | 1.9× | 1.67M | 524288 | 2097152 |
-| SiGe | medium | ace-jax (PACE model) | lammps | 335k | 1.00M | 3.0× | 1.67M | 262144 | 2097152 |
+| SiGe | medium | ace-jax (PACE model) | lammps | 335k | 1.14M | 3.4× | 1.67M | 262144 | 2097152 |
 | SiGe | medium | ace-jax (linear ACE) | standalone | 310k | 1.48M | 4.8× | 1.67M | 524288 | 2097152 |
-| SiGe | medium | ace-jax (linear ACE) | lammps | 960k | 1.86M | 1.9× | 1.67M | 524288 | 2097152 |
+| SiGe | medium | ace-jax (linear ACE) | lammps | 960k | 2.27M | 2.4× | 1.67M | 524288 | 2097152 |
 | SiGe | large | ace-jax (PACE model) | standalone | 223k | 331k | 1.5× | 489k | 131072 | 2097152 |
-| SiGe | large | ace-jax (PACE model) | lammps | 126k | 367k | 2.9× | 489k | 32768 | 2097152 |
+| SiGe | large | ace-jax (PACE model) | lammps | 126k | 375k | 3.0× | 489k | 32768 | 2097152 |
 | SiGe | large | ace-jax (linear ACE) | standalone | 308k | 1.03M | 3.3× | 489k | 524288 | 2097152 |
-| SiGe | large | ace-jax (linear ACE) | lammps | 462k | 1.22M | 2.6× | 489k | 262144 | 2097152 |
+| SiGe | large | ace-jax (linear ACE) | lammps | 462k | 1.39M | 3.0× | 489k | 262144 | 2097152 |
 | Cantor | small | ace-jax (PACE model) | standalone | 422k | 1.74M ±20% | 4.1× | 5.14M | 2097152 | 2097152 |
-| Cantor | small | ace-jax (PACE model) | lammps | 935k | 1.39M | 1.5× | 5.14M | 524288 | 2097152 |
+| Cantor | small | ace-jax (PACE model) | lammps | 935k | 2.28M | 2.4× | 5.14M | 524288 | 2097152 |
 | Cantor | small | ace-jax (linear ACE) | standalone | 406k | 1.88M | 4.6× | 5.14M | 524288 | 2097152 |
-| Cantor | small | ace-jax (linear ACE) | lammps | 745k | 800k | 1.1× | 5.14M | 262144 | 2097152 |
+| Cantor | small | ace-jax (linear ACE) | lammps | 745k | 948k | 1.3× | 5.14M | 262144 | 2097152 |
 | Cantor | medium | ace-jax (PACE model) | standalone | 346k | 1.26M ±4% | 3.6× | 2.22M | 1048576 | 2097152 |
-| Cantor | medium | ace-jax (PACE model) | lammps | 450k | 1.00M | 2.2× | 2.22M | 262144 | 2097152 |
+| Cantor | medium | ace-jax (PACE model) | lammps | 450k | 1.40M | 3.1× | 2.22M | 262144 | 2097152 |
 | Cantor | medium | ace-jax (linear ACE) | standalone | 361k | 1.56M | 4.3× | 2.22M | 262144 | 2097152 |
-| Cantor | medium | ace-jax (linear ACE) | lammps | 366k | 959k | 2.6× | 2.22M | 131072 | 2097152 |
+| Cantor | medium | ace-jax (linear ACE) | lammps | 366k | 847k | 2.3× | 2.22M | 131072 | 2097152 |
 | Cantor | large | ace-jax (PACE model) | standalone | 280k | 520k ±2% | 1.9× | 717k | 262144 | 2097152 |
-| Cantor | large | ace-jax (PACE model) | lammps | 155k | 449k | 2.9× | 717k | 65536 | 2097152 |
+| Cantor | large | ace-jax (PACE model) | lammps | 155k | 492k | 3.2× | 717k | 65536 | 2097152 |
 | Cantor | large | ace-jax (linear ACE) | standalone | 360k | 1.55M | 4.3× | 717k | 524288 | 2097152 |
-| Cantor | large | ace-jax (linear ACE) | lammps | 522k | 804k | 1.5× | 717k | 262144 | 2097152 |
+| Cantor | large | ace-jax (linear ACE) | lammps | 522k | 1.27M | 2.4× | 717k | 262144 | 2097152 |
 
 ### moriarty-gpu (N = 8,192)
 
 | system | size | code | mode | before | after | speed-up | ML-PACE in LAMMPS | largest N before | largest N after |
 |---|---|---|---|---|---|---|---|---|---|
 | SiGe | small | ace-jax (PACE model) | standalone | 341k | 769k | 2.3× | 1.94M | 262144 | 1048576 |
-| SiGe | small | ace-jax (PACE model) | lammps | 188k | 608k | 3.2× | 1.94M | 131072 | 1048576 |
+| SiGe | small | ace-jax (PACE model) | lammps | 188k | 635k | 3.4× | 1.94M | 131072 | 1048576 |
 | SiGe | small | ace-jax (linear ACE) | standalone | 921k | 954k | 1.0× | 1.94M | 1048576 | 1048576 |
-| SiGe | small | ace-jax (linear ACE) | lammps | 387k | 881k | 2.3× | 1.94M | 1048576 | 1048576 |
+| SiGe | small | ace-jax (linear ACE) | lammps | 387k | 964k | 2.5× | 1.94M | 1048576 | 1048576 |
 | SiGe | medium | ace-jax (PACE model) | standalone | 167k | 251k | 1.5× | 684k | 131072 | 1048576 |
-| SiGe | medium | ace-jax (PACE model) | lammps | 65k | 206k | 3.2× | 684k | 32768 | 1048576 |
+| SiGe | medium | ace-jax (PACE model) | lammps | 65k | 209k | 3.2× | 684k | 32768 | 1048576 |
 | SiGe | medium | ace-jax (linear ACE) | standalone | 377k | 734k | 1.9× | 684k | 1048576 | 1048576 |
-| SiGe | medium | ace-jax (linear ACE) | lammps | 112k | 574k | 5.1× | 684k | 1048576 | 1048576 |
+| SiGe | medium | ace-jax (linear ACE) | lammps | 112k | 623k | 5.5× | 684k | 1048576 | 1048576 |
 | SiGe | large | ace-jax (PACE model) | standalone | 53k | 97k | 1.8× | 189k | 32768 | 1048576 |
-| SiGe | large | ace-jax (PACE model) | lammps | — | 87k | — | 189k | 4096 | 8192 |
+| SiGe | large | ace-jax (PACE model) | lammps | — | 87k | — | 189k | 4096 | 16384 |
 | SiGe | large | ace-jax (linear ACE) | standalone | 122k | 412k | 3.4× | 189k | 1048576 | 1048576 |
-| SiGe | large | ace-jax (linear ACE) | lammps | 38k | 315k | 8.2× | 189k | 1048576 | 1048576 |
+| SiGe | large | ace-jax (linear ACE) | lammps | 38k | 333k | 8.7× | 189k | 1048576 | 1048576 |
 | Cantor | small | ace-jax (PACE model) | standalone | 415k | 973k | 2.3× | 3.54M | 524288 | 1048576 |
-| Cantor | small | ace-jax (PACE model) | lammps | 195k | 585k | 3.0× | 3.54M | 131072 | 1048576 |
+| Cantor | small | ace-jax (PACE model) | lammps | 195k | 654k | 3.4× | 3.54M | 131072 | 1048576 |
 | Cantor | small | ace-jax (linear ACE) | standalone | 429k | 782k | 1.8× | 3.54M | 1048576 | 1048576 |
-| Cantor | small | ace-jax (linear ACE) | lammps | 117k | 459k | 3.9× | 3.54M | 1048576 | 1048576 |
+| Cantor | small | ace-jax (linear ACE) | lammps | 117k | 525k | 4.5× | 3.54M | 1048576 | 1048576 |
 | Cantor | medium | ace-jax (PACE model) | standalone | 167k | 416k | 2.5× | 1.02M | 262144 | 1048576 |
-| Cantor | medium | ace-jax (PACE model) | lammps | 55k | 258k | 4.7× | 1.02M | 65536 | 1048576 |
+| Cantor | medium | ace-jax (PACE model) | lammps | 55k | 271k | 4.9× | 1.02M | 65536 | 1048576 |
 | Cantor | medium | ace-jax (linear ACE) | standalone | 164k | 521k | 3.2× | 1.02M | 1048576 | 1048576 |
-| Cantor | medium | ace-jax (linear ACE) | lammps | 40k | 285k | 7.1× | 1.02M | 32768 | 1048576 |
+| Cantor | medium | ace-jax (linear ACE) | lammps | 40k | 314k | 7.8× | 1.02M | 32768 | 1048576 |
 | Cantor | large | ace-jax (PACE model) | standalone | 57k | 119k | 2.1× | 288k | 131072 | 1048576 |
 | Cantor | large | ace-jax (PACE model) | lammps | 18k | 82k | 4.7× | 288k | 16384 | 131072 |
 | Cantor | large | ace-jax (linear ACE) | standalone | 346k | 567k | 1.6× | 288k | 1048576 | 1048576 |
-| Cantor | large | ace-jax (linear ACE) | lammps | 65k | 352k | 5.4× | 288k | 524288 | 1048576 |
+| Cantor | large | ace-jax (linear ACE) | lammps | 65k | 389k | 6.0× | 288k | 524288 | 1048576 |
 
 ### moriarty-cpu (N = 2,048)
 
@@ -185,16 +185,23 @@ Each row gives the checks passed out of those run, and the largest differences:
 
 | host | gate | code | passed | max abs dE / atom (eV) | max abs dF (eV/Å) |
 |---|---|---|---|---|---|
-| modal-a100 | acejax | ace-jax (linear ACE) | 6/6 | 2.7e-15 | 2.5e-14 |
-| modal-a100 | acejax | ace-jax (PACE model) | 6/6 | 5.6e-17 | 2.7e-15 |
+| modal-a100 | acejax | ace-jax (linear ACE) | 8/8 | 2.7e-15 | 2.5e-14 |
+| modal-a100 | acejax | ace-jax (linear ACE, learned radial, analytic) | 6/6 | 1.7e-16 | 2.0e-14 |
+| modal-a100 | acejax | ace-jax (linear ACE, learned radial, splined) | 6/6 | 2.2e-16 | 7.5e-13 |
+| modal-a100 | acejax | ace-jax (PACE model) | 8/8 | 8.3e-17 | 2.7e-15 |
 | modal-a100 | mace | MACE | 2/2 | 6.9e-07 | 9.7e-05 |
 | modal-a100 | mlpace | ML-PACE | 2/2 | 4.9e-14 | 4.1e-10 |
+| modal-a100 | spline | ace-jax (linear ACE, learned radial, splined) | 2/2 | 2.1e-12 | 3.1e-08 |
 | moriarty-cpu | mace | MACE | 2/2 | 6.9e-07 | 9.7e-05 |
 | moriarty-cpu | mlpace | ML-PACE | 2/2 | 4.8e-14 | 4.1e-10 |
-| moriarty-gpu | acejax | ace-jax (linear ACE) | 4/4 | 3.3e-16 | 2.0e-14 |
-| moriarty-gpu | acejax | ace-jax (PACE model) | 4/4 | 8.3e-17 | 2.7e-15 |
+| moriarty-cpu | spline | ace-jax (linear ACE, learned radial, splined) | 2/2 | 2.1e-12 | 3.1e-08 |
+| moriarty-gpu | acejax | ace-jax (linear ACE) | 6/6 | 3.9e-16 | 2.4e-14 |
+| moriarty-gpu | acejax | ace-jax (linear ACE, learned radial, analytic) | 6/6 | 1.1e-16 | 2.0e-14 |
+| moriarty-gpu | acejax | ace-jax (linear ACE, learned radial, splined) | 6/6 | 5.6e-17 | 1.2e-12 |
+| moriarty-gpu | acejax | ace-jax (PACE model) | 6/6 | 5.6e-17 | 2.7e-15 |
 | moriarty-gpu | mace | MACE | 2/2 | 6.9e-07 | 9.7e-05 |
 | moriarty-gpu | mlpace | ML-PACE | 2/2 | 4.9e-14 | 4.1e-10 |
+| moriarty-gpu | spline | ace-jax (linear ACE, learned radial, splined) | 2/2 | 2.1e-12 | 3.1e-08 |
 
 The frozen-reference parity test (`tests/test_perf_parity.py`) is part of the
 test suite and a hard gate for the branch. It checks the new code against the

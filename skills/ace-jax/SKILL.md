@@ -67,6 +67,7 @@ or `--data` [+ `--ntrain/--ntest/--test-start`, a seeded split]. Without
 | Fit a residual over a pair baseline | `--baseline dimer_mean.npz` (then no model file is saved) |
 | Big data on limited GPU memory | `--lml host-cache` (**GP arm, `--density pair` or `pca`, `--opt lbfgs`, `--rungs map` only, single device**) |
 | Misspecification UQ for linear ACE | `--uq pops` (**linear only: `--m-per-species 0`**) |
+| Calibrated per-atom force uncertainty (e.g. big-cell fracture) | `--m-per-species 0 --uq ard` (`posterior.npz`; `ACECalculator(model, posterior=...)`) |
 | Per-config-type weights | `--weights '{"default":{"E":30,"F":1,"V":1},"bulk":{"E":100,"F":1,"V":1}}'` or a factor list |
 | E0 from data, not the model | `--e0 lsq` (default `model`) |
 | Out-of-distribution check | `--ood ood.xyz` (writes `metrics_ood.csv`) |
@@ -85,6 +86,14 @@ These constraints are validated up front. A bad combination raises a
 - **Fitted model:**
   - `model.npz` (linear): an ordinary ACE file, loaded by `ace_jax.load`,
     `ACECalculator` and `aj eval`.
+  - `--uq ard` (linear only) also writes `posterior.npz` (float32 Cholesky factor of
+    the ARD posterior, plus the (L, n_cfg) sandwich factor Q by default) and `ard.json`
+    (evidence, prior scales, κ, λ, held-out NLL and rms-z; `lam_incl_own` is the λ the
+    held-out atoms' own training clusters would give, for comparison only).
+    `ACECalculator(model, posterior="out_ard/posterior.npz")` and
+    `aj eval --posterior out_ard/posterior.npz` add a `forces_std` result: per-atom
+    calibrated force uncertainty. `--uq ard` also changes the mean: `model.npz` is the
+    ARD posterior mean, not the BLR/MAP mean.
   - `gp_model.npz` (GP): self-contained, loaded by `GPCalculator.from_file` and
     `aj eval`. Its size is about 8·Dt²·(model draws) bytes, where Dt = basis
     size + M. The default stores 1 draw (the MAP); `--model-draws N` stores N
@@ -148,7 +157,7 @@ load; faster only at large `nradbase`). Values are unchanged to roundoff.
 
 ### Calculator performance options
 
-`ACECalculator(path, dtype=None, layout="auto", edge_a_kind="auto", skin=1.0, lean=True)`:
+`ACECalculator(path, dtype=None, layout="auto", edge_a_kind="auto", skin=1.0, lean=True, spline_tol="auto", spline_intervals=None)`:
 - `lean` (ACE `.npz` models): energies, forces and stress are evaluated with
   `ace_jax.eval.lean(model)`, exact to roundoff. It drops radial columns and
   harmonics the basis never reads, folds the pair weights into the pair
@@ -159,6 +168,31 @@ load; faster only at large `nradbase`). Values are unchanged to roundoff.
   call `require_full()` and raise); edit the full model and re-apply `lean`.
   `aj.load` returns the full model. Setting `calc.model` recomputes the lean
   form on the host, a device-to-host copy per swap.
+  - **Learned radials are splined.** With `spline_tol="auto"` (the default),
+    an analytic tensor radial marked `radial_learned` (what `radial_learn`
+    writes, e.g. a `bench/learn_radial` model.npz) is splined at 1e-10 by
+    `ace_jax.eval.to_spline`.
+    - Julia `ace_model` exports and Python-authored models are analytic but not
+      learned, so they stay exact unless you pass a float, e.g.
+      `spline_tol=1e-10`.
+    - Old learned-radial files written before the flag existed load as not learned: mark one with `ace_jax.construct.export.mark_radial_learned("model.npz")`, or pass `spline_tol=1e-10`.
+    - The spline gather replaces the polynomial recursion, and the
+      species-compact blocks apply again (learned radials keep ACE1's
+      one-neighbour-species-per-column pattern).
+    - It is not roundoff: at 1e-10, energies agree with the full model to up to
+      ~1e-9 relative and forces to up to ~2.3e-8 of max|F|. `spline_tol=None`
+      (on `lean`, `ACECalculator` or `export_lammps`) never splines.
+    - `calc.splined` and `calc.last_timing["spline_tol"]` report it.
+    - The spline is cached on the radial's content, so a readout-only
+      `calc.model` swap does not redo it.
+    - The interval count is bucketed (quarter-octave, <= 20% extra), so a
+      radial swap usually reuses the compiled step. `spline_intervals=N`
+      pins it.
+    - Take UQ variances from the full model.
+  - A wrapper model with `.base` and `with_base(new_base)` (e.g. an
+    `FSModel(base, ...)`) gets `model.with_base(lean_keep_basis(model.base))`:
+    `to_spline` and `prune_columns` only, which keep `site_basis` and the
+    unfolded readout valid.
 - `layout`: `"sparse"` (edge list) or `"dense"` (padded per-node blocks, A by a
   batched outer product, several times faster forces on GPU). `"auto"` picks
   dense when the padding fill, edges / (atoms × max neighbours), is at least
@@ -181,26 +215,61 @@ load; faster only at large `nradbase`). Values are unchanged to roundoff.
 ### LAMMPS
 
 ```python
-from ace_jax.export.lammps import export_lammps          # needs lammps-jax installed
+from ace_jax.export.lammps import export_lammps, neighbour_capacity  # needs lammps-jax
 model, meta, _ = aj.load("model.npz")                     # or a .yace
-export_lammps(model, meta, "bundle", max_atoms=4096, max_edges=200_000,
-              dtype="float64", layout="auto", k_dense=64, max_owned=2048,
+cap = neighbour_capacity(atoms, meta["rcut"], skin=1.0)   # slots="cutoff": tight, opt-in
+export_lammps(model, meta, "bundle", max_atoms=cap["max_atoms"], max_edges=cap["max_edges"],
+              dtype="float64", layout="auto", k_dense=cap["k_dense"],
+              max_neighbors=cap["max_neighbors"], max_owned=cap["max_owned"],
               type_elements=[14, 32])                     # Z in LAMMPS type order
 ```
 
 This writes a lammps-jax bundle for `pair_style jax/kk` (GPU only).
-- `layout="auto"` chooses dense only when `k_dense` (max neighbours per atom) is
-  given and one dense block's `estimate_a_bytes` fits `dense_budget_bytes()`.
-- `max_owned`: owned-row capacity of the dense bundle. LAMMPS numbers owned
-  atoms first, so only rows below it are evaluated and ghosts cost nothing.
-  The bundle records it as `ace_jax.owned_rows`; the key is not `max_owned`
-  because lammps-jax reads that name from anywhere in the file. An atom past
-  `max_owned`, or with more than `k_dense` neighbours, gives NaN, never a
-  silent truncation.
+- Layouts: `"sparse"`, `"dense"` (lammps-jax's edge buffer, packed into
+  `k_dense` slots by an argsort every step) and `"matrix"` (lammps-jax's
+  neighbour-matrix input, `matrix_supported()`: the LAMMPS full list itself,
+  `(max_neighbors, max_owned)` slot-major, copied only on list rebuilds; the
+  model drops skin pairs at rcut, and compacts in-cutoff pairs when
+  `k_dense < max_neighbors`). No per-step packing.
+- `layout="auto"` chooses a dense-family layout only when `k_dense` (max
+  neighbours per atom) is given and one dense block's `estimate_a_bytes` fits
+  `dense_budget_bytes()`. It is `"matrix"` only if `max_neighbors` is passed,
+  `matrix_supported()`, and the block plus `matrix_prep_bytes` (the unblocked
+  list pre-processing) fits; otherwise `"dense"`. The old signature, without
+  `max_neighbors`, stays packed dense. `layout="matrix"` requires
+  `max_neighbors`: the list holds rcut + skin pairs, so a `k_dense` sized for
+  rcut is too small. `max_edges` is needed by sparse and dense only.
+- An older lammps-jax LAMMPS plugin rejects a matrix bundle ("re-export"). To
+  fix it, rebuild the plugin, or export `layout="dense"`. The bundle records
+  the exporting lammps-jax as `ace_jax.lammps_jax`.
+- `max_owned`: owned-row capacity of the dense and matrix bundles. LAMMPS
+  numbers owned atoms first, so only rows below it are evaluated and ghosts
+  cost nothing. The bundle records it as `ace_jax.owned_rows`; the key is not
+  `max_owned` because lammps-jax reads that name from anywhere in the file
+  (so ace-jax metadata never reuses a lammps-jax contract key). More than
+  `k_dense` neighbours within rcut gives NaN, never a silent truncation. So
+  does an atom past `max_owned` in a dense bundle. A matrix bundle instead
+  aborts the run in LAMMPS for an owned atom past `max_owned`, or for a list
+  row wider than `max_neighbors`.
+- `neighbour_capacity(atoms, rcut, skin=1.0, slots="skin", margin=8,
+  list_headroom=0.5)`: buffer sizes. The ghost shell uses the face spacings,
+  so triclinic cells are fine. The matrix list gets 50% headroom over
+  k(rcut + skin), because a compressing structure grows that count fastest.
+  The 0.5 comes from one observed overflow, 34 to 45; the benchmark has
+  `--list-headroom`. Model slots are compacted from the list. `slots="skin"` (default) is safe between list rebuilds.
+  `slots="cutoff"` sizes model slots for rcut pairs, 1.2-1.4x faster on Cantor; use it
+  only for stable MD with a fitted model (coordination within `margin` of the
+  start). An overflow is a NaN step. The benchmark's `run_lammps.py
+  --tight-slots` opts in; the main suite never does.
 - The dense bundle runs in blocks of `BUNDLE_BLOCK_ROWS` (32,768) rows above
   one block, bounding memory at large N.
-- `lean=True` (default) exports `lean(model)` for an ACE model, as
-  `ACECalculator` does. It is recorded as `ace_jax.lean`. `layout="auto"` is
+- `lean=True` (default) exports `lean(model, spline_tol, spline_intervals)` for
+  an ACE model, as `ACECalculator` does. The bundle records what `lean` actually
+  did, looking through a wrapper's `.base`:
+  - `ace_jax.lean`: False when `lean` returned the model as given, e.g. a PACE
+    or unfolded model.
+  - `ace_jax.spline_tol` and `ace_jax.spline_intervals`: both None when nothing
+    was splined. `layout="auto"` is
   sized on the full model, so it chooses the same layout either way.
 
 Other entry points:
@@ -212,7 +281,10 @@ Other entry points:
   --model M.npz --data D.xyz --out DIR --r0 2.35 [--n-q 12] [--lam-grid 0,1e-2]`
   learns the tensor radials by VarPro (`ace_jax.fit.radial_learn.learn_radial`)
   and writes `DIR/model.npz` with the radials a held-out gate selects. Fit the GP
-  on that file as usual. Needs float64.
+  on that file as usual. Needs float64. For MD, `ACECalculator` and
+  `export_lammps` spline the learned radial through `lean` (see above);
+  `ace_jax.eval.to_spline(model, n_intervals=None, tol=1e-10)` returns
+  `(spline model, max_rel_err)` directly.
 - Benchmarks: `docs/benchmarks.md` (harness in `bench/scaling/`).
 
 ## Gotchas
@@ -239,6 +311,21 @@ Other entry points:
 - **POPS.** `--uq pops` changes only the uncertainty. The mean is pinned to the
   BLR mean, and the ridge is selected per quantity by CRPS on a training
   hold-out (`--pops-ridge auto`; `blr` or a number fixes it).
+- **ARD `forces_std` is computed on request, not on every call.** A plain
+  `atoms.get_forces()` does not compute it; call
+  `calc.get_property("forces_std", atoms)` (reuses the cached E/F/stress), or
+  pass `forces_std_every_call=True` — costly for per-step MD on big cells. Only
+  the force σ is calibrated: by default it is λ × the configuration-clustered
+  sandwich σ, with `--ard-variance kappa` κ × the posterior σ. Energy and virial
+  variances are the uncalibrated posterior ones (`ard.json` `tempered_quantities: ["F"]`
+  names the calibrated quantity, whichever scale was used).
+  `ACECalculator(model, posterior=...)` raises `ValueError` if the posterior
+  doesn't match the model (basis size, species count, element list, or a mean
+  that is not the model's coefficients, i.e. a posterior from another fit), and
+  `RuntimeError` unless `jax_enable_x64` is on. `forces_std` holds the whole
+  cell's force design rows, ~N·3·L·8 bytes.
+- **The default sandwich variance (`--ard-variance sandwich`) needs the training data at fit
+  time and stores an (L, n_cfg) factor.** Use `--ard-variance kappa` for the smaller posterior.
 - **First `construct` of a new basis shape** runs Julia (via juliacall) to
   build the coupling table, then caches it in `~/.cache/ace-jax/coupling`.
   Later runs are pure Python.

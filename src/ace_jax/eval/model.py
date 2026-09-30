@@ -33,7 +33,7 @@ from .edge_model import (EdgeSiteModel, calibrate_edge_a, one_hot_selector,  # n
                          with_edge_a_kind)
 from .harmonics import real_solid_harmonics, real_spherical_harmonics
 from .radial import (agnesi_normalized, env_ace1_poly1sr, env_poly1sr,
-                     env_poly2sx, poly_recursion, spline_eval)
+                     env_poly2sx, poly_recursion, spline_eval, spline_eval_pairs)
 
 
 @contextmanager
@@ -127,6 +127,11 @@ class ACEModel(EdgeSiteModel):
     # part of `lean`): the energy is unchanged, but the pair channel is no longer
     # Apair, so the basis methods (descriptors, Jacobians, fitting rows) refuse.
     energy_only: bool = eqx.field(static=True, default=False)
+    # The tensor radial's Wnlq were learned (`fit.radial_model.with_radial`,
+    # `radial_learn`), not exported or authored.  `lean`'s default ("auto")
+    # splines an analytic R_nl only when this is set; stored as meta_json
+    # "radial_learned" (absent = False).  Only the tensor radial is ever learned.
+    radial_learned: bool = eqx.field(static=True, default=False)
     # l-blocked dense A (`block_dense`, part of `lean`): per used l, (l, radial
     # column offset, width).  () keeps the n_rnl x n_Y outer product (`pool_a_dense`).
     # With `blk_compact` each edge evaluates only its own z_j's columns, from the
@@ -145,7 +150,7 @@ class ACEModel(EdgeSiteModel):
         x = agnesi_normalized(r, trans[zi, zj])
         if kind == "spline":
             x0, h, n = grid
-            val = jax.vmap(lambda xx, c: spline_eval(xx, c, x0, h, n))(x, coefs[zi, zj])
+            val = spline_eval_pairs(x, coefs, zi, zj, x0, h, n)     # never coefs[zi, zj]
         elif kind == "analytic":
             P = poly_recursion(x, *ABC)                        # (E, n_q)
             val = jnp.einsum("eq,enq->en", P, Wnlq[zi, zj])    # (E, n_rnl)
@@ -531,7 +536,10 @@ def _rnl_owner(model):
     """(n_rnl,) the neighbour species each R_nl column is nonzero for, or None
     when R_nl is not block-sparse in z_j.  ACE1's splined R_nl always is: every
     column is nonzero for exactly one z_j, whatever z_i (checked here, not
-    assumed).  Spline tables only; the other radial kinds return None."""
+    assumed), and so do learned radials splined by `to_spline`: learning keeps
+    the zero rows exactly zero, and a zero row tabulates to exact zeros.  Spline
+    tables only; the other radial kinds return None (`lean` splines an analytic
+    radial first)."""
     if model.radial_kind != "spline":
         return None
     nzm = _np.abs(_np.asarray(model.rnl_coefs)).max(axis=2) > 0         # (zi, zj, r)
@@ -673,10 +681,88 @@ def block_dense(model):
                                       if compact else None))
 
 
-def lean(model):
+from .splinify import AUTO, spline_plan  # noqa: E402
+
+
+def _splined(model, spline_tol, spline_intervals=None):
+    """`to_spline` as `splinify.spline_plan` decides (the one decision point):
+    by default ("auto") only a learned analytic R_nl, at 1e-10; a float, every
+    analytic radial; None, nothing."""
+    plan = spline_plan(model, spline_tol)
+    if plan is None:
+        return model
+    from .splinify import to_spline
+    tol, radials = plan
+    return to_spline(model, n_intervals=spline_intervals, tol=tol, radials=radials)[0]
+
+
+def _wraps(model):
+    """A wrapper model (e.g. an FSModel(base, ...)) that evaluates through an
+    ACEModel's basis: it has `.base` and `with_base(new_base)`."""
+    return hasattr(model, "base") and callable(getattr(model, "with_base", None))
+
+
+def splining(before, after, spline_tol):
+    """What `lean` did to the radials, from the models before and after (looking
+    through a wrapper's `.base`): None when no radial went analytic -> spline,
+    else {"spline_tol", "radials" (["rnl"], ["pair"] or both), "n_intervals"
+    {radial: n}}.  Read off the result, so an unfolded model `lean` returned
+    as given, or spline_tol=None, reports None."""
+    b0 = before.base if _wraps(before) else before
+    b1 = after.base if _wraps(after) else after
+    rad = [name for name, k in (("rnl", "radial_kind"), ("pair", "pair_radial_kind"))
+           if getattr(b0, k, None) == "analytic" and getattr(b1, k, None) == "spline"]
+    if not rad:
+        return None
+    grid = {"rnl": "rnl_grid", "pair": "pair_grid"}
+    plan = spline_plan(b0, spline_tol)
+    return {"spline_tol": plan[0] if plan else spline_tol, "radials": rad,
+            "n_intervals": {r: int(getattr(b1, grid[r])[2]) - 1 for r in rad}}
+
+
+def lean_keep_basis(model, spline_tol=AUTO, spline_intervals=None):
+    """The basis-preserving part of `lean`, for models that read the basis:
+    `to_spline` (as `lean` decides: by default a learned analytic R_nl only;
+    agrees to the tolerance, see `lean`) and `prune_columns` (exact: B and Apair unchanged).  Never
+    `fold_pair` or `block_dense`, so `site_basis`, `site_basis_dense`,
+    `_readout` (WB, Wpair) and the descriptors keep working.  A wrapper model's
+    `lean` applies this to its `.base`.  Anything that is not an ACEModel is
+    returned as given.  Needs the full model (`require_full`)."""
+    if not isinstance(model, ACEModel):
+        return model
+    model.require_full("lean_keep_basis")
+    return prune_columns(_splined(model, spline_tol, spline_intervals))
+
+
+def lean(model, spline_tol=AUTO, spline_intervals=None):
     """The evaluation form of a folded ACEModel: `prune_columns`, `fold_pair`
     and the l-blocked dense A (`block_dense`).  Exact to roundoff in E, F and the
-    virial; 1.1-3.3x faster forces on the benchmark models (docs/ace-vs-pace-gap.md section 8).
+    virial for a splined model; 1.1-3.3x faster forces on the benchmark models
+    (docs/ace-vs-pace-gap.md section 8).
+
+    Splining (`splinify.spline_plan`, the one decision point):
+    spline_tol="auto" (default) splines an analytic tensor radial only when it
+    was learned (`radial_learned`), at `DEFAULT_SPLINE_TOL` = 1e-10; the pair
+    radial is never learned and stays as is.  Julia `ace_model` exports and
+    Python-authored models are analytic but not learned, so they stay exact.
+    A float spline_tol opts every analytic radial in (e.g. 1e-10 for an old
+    learned-radial file without the flag); None never splines.  A splined
+    radial gets the spline gather and, when each R_nl column belongs to one
+    neighbour species (ACE1's pattern, which learned radials keep), the
+    species-compact blocks.  That step is an approximation, not roundoff: at
+    1e-10 the lean energies agree with the full model to up to ~1e-9 relative
+    and forces to up to ~2.3e-8 of max|F| on the benchmark models
+    (docs/learned-radial-splining.md).  spline_intervals pins the grid (default: the smallest `splinify.BUCKETS`
+    bucket meeting tol, so radial swaps keep the compiled step).  The
+    conversion is cached on the radial's content (`splinify`), so a re-lean
+    after a readout-only change does not re-spline.  For evaluation and
+    export only: fitting keeps the analytic model, and a UQ variance should
+    come from the full model.  `splining(model, lean(model), tol)` reports
+    what was splined.
+
+    A wrapper model (`.base` and `with_base`, e.g. FSModel(base, ...)) returns
+    `model.with_base(lean_keep_basis(model.base, spline_tol, spline_intervals))`:
+    the wrapper reads the basis, so only the basis-preserving transforms apply.
 
     Energy only (see `fold_pair`): keep the original for descriptors and
     fitting.  Anything that is not a folded ACEModel (a PACEModel, an unfolded
@@ -685,6 +771,8 @@ def lean(model):
     and its pair channel is the readout, so replacing rnl_coefs, Wnlq, Wpair,
     WB or ctilde on it changes one layout and not the other (`require_full`
     guards the radial helpers).  Change the full model and re-apply `lean`."""
+    if _wraps(model):
+        return model.with_base(lean_keep_basis(model.base, spline_tol, spline_intervals))
     if not isinstance(model, ACEModel) or not model.folded or model.energy_only:
         return model
-    return block_dense(fold_pair(prune_columns(model)))
+    return block_dense(fold_pair(prune_columns(_splined(model, spline_tol, spline_intervals))))
