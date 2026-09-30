@@ -156,8 +156,10 @@ row factor; descriptors by the factor).
 
 ## Tests
 
-- `coupling/python/tests` — **bit-identical** (`np.array_equal`) to unpatched
-  upstream ET at the fork's base commit on 8 shapes (orders 1–8, up to
+- `coupling/python/tests` — against unpatched upstream ET at the fork's base
+  commit (reference computed on macOS arm64): every index array identical, A2B
+  values within 4 ulp (bit-identical on macOS arm64 and Linux aarch64; x86_64
+  differs in the last bit or two where ET's sparse LU runs) on 8 shapes (orders 1–8, up to
   6216×17302), via `coupling/julia/reference/` → `tests/data/et_reference.npz`;
   input validation, threads, SIGINT after load, lazy loading.
 - `tests/test_coupling_parity.py` — vs the ACEpotentials fixtures, in-process:

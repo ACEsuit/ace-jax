@@ -168,8 +168,10 @@ EquivariantTensors to produce the A→B symmetrisation matrix — through
 `juliac --trim=safe` into a self-contained library (`coupling/`), so you never
 install or manage Julia yourself.
 
-The coupling is **bit-identical** to EquivariantTensors (main, the fork rev in
-`ace_jax_coupling.build_info()`). Against ACEpotentials 0.10.1 exports (which pin
+The coupling matches EquivariantTensors (main, the fork rev in
+`ace_jax_coupling.build_info()`) exactly: bit-identical on macOS arm64 and Linux
+aarch64; on x86_64 identical structure with values within a few ulp (BLAS/sparse
+LU rounding in degenerate blocks). Against ACEpotentials 0.10.1 exports (which pin
 ET 0.4.3) it has the same `nnll` blocks and the same per-block row spaces for
 orders 2–4, including the degenerate blocks, but each B function is normalised
 differently (row-norm ratio 0.225–1): the same function space, so fitted
@@ -315,7 +317,8 @@ the reference codes:
   fixtures (`julia/export_model.jl`, `julia/acefit_qr_reference.jl`).
 - **coupling-wheels** — builds the `ace-jax-coupling` wheels (manylinux_2_28
   x86_64/aarch64, macOS arm64), tests them in clean environments with no Julia
-  (bit-identical to upstream EquivariantTensors), and runs the coupling parity
+  (matching upstream EquivariantTensors: exact indices, values within 4 ulp),
+  and runs the coupling parity
   against the ACEpotentials references (`julia/coupling_reference.jl`).
 - **prior-parity** — the smoothness prior (`construct/prior.py`) matches
   ACEpotentials' `algebraic_smoothness_prior` bit-for-bit
