@@ -20,8 +20,11 @@ class Built(NamedTuple):
 def build_problem(cfg, d):
     t = time.time()
     meta = d.meta
+    r0 = cfg.r0 if cfg.r0 is not None else d.r0
+    if r0 is None:
+        raise ValueError("r0 is not set and the model carries no basis r0: pass r0 (--r0)")
     els = [int(e) for e in meta["elements"]]
-    gpcfg = GPConfig(r0=cfg.r0, rcut=float(meta["rcut"]), n_B=meta["n_B"], n_pair=meta["n_pair"],
+    gpcfg = GPConfig(r0=r0, rcut=float(meta["rcut"]), n_B=meta["n_B"], n_pair=meta["n_pair"],
                      NZ=len(els), C=cfg.batch)
     with highest_precision():
         X, S = site_features(d.model, gpcfg, d.ds_train)
@@ -39,5 +42,5 @@ def build_problem(cfg, d):
             s_live = np.asarray(S)[np.asarray(d.ds_train.node_mask)]
             s_floor = float(np.quantile(s_live, cfg.delta_s_floor_q))
         prob = Problem(KernelSpec(cfg.kernel, cfg.bump, gpcfg.D, s_floor=s_floor), d.model, ind, gpcfg,
-                       jnp.asarray(prior_diagonal(d.z, meta, cfg.model)), default_prior(cfg.r0))
+                       jnp.asarray(prior_diagonal(d.z, meta, d.source)), default_prior(r0))
     return Built(prob, gpcfg, X, S, s_floor, {"inducing": time.time() - t})

@@ -13,6 +13,7 @@ that, not the ACE model, sets the file size.
 """
 import dataclasses
 import io
+import os
 import json
 import pathlib
 
@@ -27,7 +28,7 @@ GP_SCHEMA = 1
 
 
 def _ace_arrays(res):
-    z = np.load(res.config.model)
+    z = res.data.z                       # the arrays `load` read: from the path or the in-memory basis
     out = {k: z[k] for k in z.files}
     out["E0"] = np.asarray(res.data.E0, np.float64)
     return out
@@ -90,7 +91,7 @@ def save_model(res, out, n_draws=1, log=print):
     if cfg.baseline is not None or cfg.base_npz is not None:
         log("not saving a model file: the baseline is added outside the model")
         return None
-    if str(cfg.model).endswith(".yace"):
+    if isinstance(cfg.model, (str, os.PathLike)) and str(cfg.model).endswith(".yace"):
         log("not saving a model file: .yace inputs are not supported")
         return None
     out = pathlib.Path(out); out.mkdir(parents=True, exist_ok=True)

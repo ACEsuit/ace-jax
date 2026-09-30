@@ -1,3 +1,5 @@
+import dataclasses
+import io
 from typing import NamedTuple
 
 import equinox as eqx
@@ -5,6 +7,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from ...eval import load
+from ...basis.model import basis_r0
 from ..data import build_dataset, load_configs
 
 
@@ -16,10 +19,57 @@ class FitData(NamedTuple):
     ds_train: object; ds_test: object; ds_ood: object
     model: object; meta: dict; z: object
     perm: object
+    r0: float | None = None             # mean radial length of the basis, when it records one
+    source: str = ""                    # log label: the model path, or "basis Si order 3 ..."
+    basis: object = None                # the Basis when built/passed in memory, else None
 
 
 def _zero_base(c):
     return (0.0, np.zeros((len(c.numbers), 3)), np.zeros((3, 3)))
+
+
+def infer_elements(*splits):
+    """Sorted atomic numbers present in any of the config lists."""
+    return sorted({int(z) for s in splits for c in s for z in np.unique(c.numbers)})
+
+
+def _symbols(elements):
+    from ase.data import chemical_symbols
+    from ...basis.model import _zs
+    return [chemical_symbols[z] for z in _zs(elements)]
+
+
+def _model_source(cfg, train_o, test_o, ood_o, log):
+    """(load target, label, Basis or None) for cfg.model: a path stays a path; a
+    BasisSpec is built (species from the data unless given) and, like a Basis,
+    handed on as an in-memory npz -- approach A of the fit-builds-basis spec,
+    so everything downstream stays on the file-shaped path."""
+    from ...basis.export import save_npz
+    from ...basis.model import Basis, BasisSpec, _zs, build_basis
+    m = cfg.model
+    if isinstance(m, BasisSpec):
+        seen = infer_elements(train_o, test_o, ood_o)
+        if not seen:
+            raise ValueError("no configurations to infer the basis elements from")
+        inferred = m.elements is None
+        if inferred:
+            m = dataclasses.replace(m, elements=tuple(seen))
+        missing = sorted(set(seen) - set(_zs(m.elements)))
+        if missing:
+            raise ValueError(f"species {', '.join(_symbols(missing))} in the data are not in the "
+                             f"basis elements {list(m.elements)}")
+        label = f"basis {','.join(_symbols(m.elements))} order {m.order} max-degree {m.max_degree}"
+        b = build_basis(m, seed=cfg.seed)
+        log(f"{label} -> {b.meta['n_B']} B functions" + (" (elements from the data)" if inferred else ""))
+        m = b
+    else:
+        label = None
+    if isinstance(m, Basis):
+        buf = io.BytesIO()
+        save_npz(buf, m)
+        buf.seek(0)
+        return buf, label or f"basis {','.join(_symbols(m.meta['elements']))}", m
+    return m, str(m), None
 
 
 def split_configs(configs, ntrain, ntest, test_start=None, seed=0):
@@ -48,16 +98,11 @@ def _config_type_weights(path):
     return {"default": {"E": 1.0, "F": 1.0, "V": 1.0}, **{ct: {"E": 1.0, "F": 1.0, "V": 1.0} for ct in cts}}
 
 
-def load_fit_data(cfg, *, data=None, train=None, test=None, ood=None):
+def load_fit_data(cfg, *, data=None, train=None, test=None, ood=None, log=print):
     """Configs, baselines, E0 and datasets.  Either `data` (one file, split with
     split_configs) or `train` (+ optional `test`; defaults to train) files."""
     if (data is None) == (train is None):
         raise ValueError("pass exactly one of data= (split) or train= (+ test=)")
-    model, meta, z = load(cfg.model)
-    from ...eval.pace_model import PACEModel
-    if isinstance(model, PACEModel):
-        raise ValueError(f"{cfg.model}: a PACE .yace model is evaluate-only and cannot be fitted; "
-                         "fit a linear ACE model (.npz, e.g. from `aj basis`) instead")
     keys = dict(energy_key=cfg.energy_key, force_key=cfg.force_key, virial_key=cfg.virial_key)
     if cfg.factors:
         keys["factors"] = cfg.factors
@@ -73,6 +118,13 @@ def load_fit_data(cfg, *, data=None, train=None, test=None, ood=None):
         train_o = load_configs(train, **keys)
         test_o = load_configs(test, **keys) if test else train_o
     ood_o = load_configs(ood, **keys) if ood else []
+    # the model after the configs: a basis built here takes its species from them
+    src, label, basis = _model_source(cfg, train_o, test_o, ood_o, log)
+    model, meta, z = load(src)
+    from ...eval.pace_model import PACEModel
+    if isinstance(model, PACEModel):
+        raise ValueError(f"{label}: a PACE .yace model is evaluate-only and cannot be fitted; "
+                         "fit a linear ACE model (.npz, e.g. from `aj basis`) instead")
 
     if cfg.baseline:
         from ..baseline import load_mean, subtract_baseline
@@ -113,4 +165,5 @@ def load_fit_data(cfg, *, data=None, train=None, test=None, ood=None):
     ds_test = build_dataset(te, meta, E0, cfg.batch)
     ds_ood = build_dataset(od, meta, E0, cfg.batch) if od else None
     return FitData(tr, te, od, train_o, test_o, ood_o, base_train, base_test, base_ood,
-                   np.asarray(E0), ds_train, ds_test, ds_ood, model, meta, z, perm)
+                   np.asarray(E0), ds_train, ds_test, ds_ood, model, meta, z, perm,
+                   r0=basis_r0(meta), source=label, basis=basis)
