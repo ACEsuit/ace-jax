@@ -130,7 +130,7 @@ def couple(mb_spec, Rnl_spec, Ylm_spec):
 
 # --------------------------------------------------------------------- cache
 
-_CACHE_SCHEMA = 2
+_CACHE_SCHEMA = 1   # also hashed into coupling_key: bumping it moves every key; the "backend" stamp invalidates entries
 
 
 def coupling_key(mb_spec, Rnl_spec, Ylm_spec):

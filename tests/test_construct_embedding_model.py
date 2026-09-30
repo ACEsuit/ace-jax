@@ -36,10 +36,10 @@ def _x64():
 @pytest.fixture(scope="module", autouse=True)
 def _cache(tmp_path_factory):
     """The committed coupling entries, re-written into a temp cache by this
-    process (as test_python_authoring's _primed_cache does), so their pin stamp
-    is this environment's juliapkg hash -- which depends on where juliapkg.json
-    sits on sys.path, not on the coupling.  A stale coupling would still fail
-    the descriptor parity against Julia."""
+    process (as test_python_authoring's _primed_cache does), so their stamp
+    is the current coupling backend id (`coupling.backend_id()`), not the one
+    they were generated under.  A stale coupling would still fail the
+    descriptor parity against Julia."""
     import json as _json
     from ace_jax.construct import coupling as C
     global CACHE

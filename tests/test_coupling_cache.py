@@ -144,14 +144,14 @@ def test_backend_id_matches_extra_pin():
     assert C.backend_id() == f"ace-jax-coupling=={C.COUPLING_LIB_VERSION}"
 
 
-def test_schema1_entry_is_a_miss(tmp_path, shim):
-    """A pre-migration (juliapkg-stamped, schema 1) entry is recomputed, not an error."""
+def test_prebackend_entry_is_a_miss(tmp_path, shim):
+    """A pre-migration (juliapkg-stamped, no `backend`) entry is recomputed, not an error."""
     C.couple_cached(_MB, _RNL, _YLM, cache_dir=str(tmp_path))
     key = C.coupling_key(_MB, _RNL, _YLM)
     p = C._entry_path(tmp_path, key)
     z = dict(np.load(p))
     meta = json.loads(bytes(z["meta_json"]).decode())
-    meta["schema"] = 1; meta.pop("backend"); meta["juliapkg_hash"] = "0" * 64
+    meta.pop("backend"); meta["juliapkg_hash"] = "0" * 64
     z["meta_json"] = np.frombuffer(json.dumps(meta).encode(), np.uint8)
     np.savez(p, **z)
     C.couple_cached(_MB, _RNL, _YLM, cache_dir=str(tmp_path))
