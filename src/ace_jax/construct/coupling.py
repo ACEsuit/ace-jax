@@ -3,7 +3,7 @@
 `couple(mb_spec, Rnl_spec, Ylm_spec)` returns the L = 0 real-basis coupling of
 `EquivariantTensors.sparse_equivariant_tensor` in ace-jax's export layout (see
 `Coupling`).  It calls `ace_jax_coupling.couple_raw`, a juliac-compiled build of
-EquivariantTensors (no Julia at runtime), from the optional `authoring` extra;
+EquivariantTensors (no Julia at runtime), from the optional `basis` extra;
 the import is lazy so the core package never depends on it.
 
 `couple_cached(...)` wraps `couple` with a per-shape disk cache: the coupling
@@ -71,7 +71,7 @@ def subspace_residual(A, B):
     return float(np.abs(Qa @ Qa.T - Qb @ Qb.T).max())
 
 
-COUPLING_LIB_VERSION = "0.1.0"   # == the `authoring` extra pin (test_backend_id_matches_extra_pin)
+COUPLING_LIB_VERSION = "0.1.0"   # == the `basis` extra pin (test_backend_id_matches_extra_pin)
 
 
 def backend_id():
@@ -89,7 +89,7 @@ def _lib():
         import ace_jax_coupling
     except ModuleNotFoundError as e:
         raise ModuleNotFoundError(
-            "coupling generation needs the 'authoring' extra: pip install 'ace-jax[authoring]' "
+            "coupling generation needs the 'basis' extra: pip install 'ace-jax[basis]' "
             "(Linux x86_64/aarch64, macOS arm64)") from e
     if ace_jax_coupling.__version__ != COUPLING_LIB_VERSION:
         raise RuntimeError(f"ace-jax-coupling {ace_jax_coupling.__version__} installed, this ace-jax "

@@ -108,8 +108,8 @@ def build_model(elements, order, totaldegree, *, wL=1.5, rcut=5.5, r0=None,
 
     n_q_factor: tensor-radial polynomial span, n_q = ceil(n_q_factor * max n).
 
-    Returns an `Authoring`.  Requires the `authoring` extra (Julia coupling
-    shim) on a cache miss; evaluate in float64 with x64 enabled."""
+    Returns an `Authoring`.  Requires the `basis` extra (the compiled
+    ace-jax-coupling library) on a cache miss; evaluate in float64 with x64 enabled."""
     if edge_a_kind not in ("gather", "matmul"):
         raise ValueError(f'edge_a_kind must be "gather" or "matmul", got {edge_a_kind!r}')
     if not n_q_factor >= 1:          # checked before the (possibly Julia) coupling step

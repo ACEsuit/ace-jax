@@ -133,12 +133,12 @@ def test_disabled_cache_calls_shim_directly(shim):
 
 
 def test_backend_id_matches_extra_pin():
-    """The cache stamp, the version check on a miss, and the `authoring` extra
-    pin must name the same ace-jax-coupling version."""
+    """The cache stamp, the version check on a miss, and the `basis` extra
+    pin must name the same ace-jax-coupling version (the `basis` extra)."""
     import re
     import tomllib
     pp = tomllib.loads((pathlib.Path(__file__).resolve().parents[1] / "pyproject.toml").read_text())
-    extra = " ".join(pp["project"]["optional-dependencies"]["authoring"])
+    extra = " ".join(pp["project"]["optional-dependencies"]["basis"])
     m = re.search(r"ace-jax-coupling==([0-9][^;\s]*)", extra)
     assert m and m.group(1) == C.COUPLING_LIB_VERSION
     assert C.backend_id() == f"ace-jax-coupling=={C.COUPLING_LIB_VERSION}"

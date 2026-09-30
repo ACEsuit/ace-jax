@@ -19,7 +19,7 @@ pure **Python/JAX** — no Julia needed to fit or run.
   (`ace_jax.export.lammps.export_lammps`).
 - **Author** whole models from Python — the symmetry-adapted coupling via
   [EquivariantTensors.jl](https://github.com/ACEsuit/EquivariantTensors.jl),
-  compiled ahead of time so no Julia is needed at all (optional `authoring`
+  compiled ahead of time so no Julia is needed at all (optional `basis`
   extra) — including species-embedded models and the smoothness prior.
 - Research: learned radial basis by variable projection (`bench/learn_radial/`).
 
@@ -28,7 +28,7 @@ pure **Python/JAX** — no Julia needed to fit or run.
 ```bash
 pip install ace-jax             # core: evaluate + linear fit + ASE calculator
 pip install ace-jax[gp]         # + `ace-jax fit` pipeline: GP/UQ hyperparameter ladder
-pip install ace-jax[authoring]  # + Python basis coupling (compiled EquivariantTensors; Linux x86_64/aarch64, macOS arm64)
+pip install ace-jax[basis]  # + Python basis coupling (compiled EquivariantTensors; Linux x86_64/aarch64, macOS arm64)
 pip install ace-jax[cuda]       # + CUDA 12 JAX
 pip install ace-jax[fast-neighbours]  # + matscipy-neighbours (C++ source build; ASE's list is the fallback)
 ```
@@ -44,8 +44,8 @@ No Julia is required to **use, fit, or evaluate** a model. A model **definition*
 model-authoring seam has three paths:
 
 - **use / fit / evaluate an existing model** → only the `.npz` (no Julia);
-- **author a new model in Python** → the `authoring` extra builds the whole
-  model (`ace-jax construct`, including species-embedded models): the `(n,l)`
+- **author a new model in Python** → the `basis` extra builds the whole
+  model (`ace-jax basis`, including species-embedded models): the `(n,l)`
   specification and the symmetry-adapted A→B coefficients come from
   EquivariantTensors, shipped as the `ace-jax-coupling` platform wheel (a
   `juliac --trim` compiled library: no Julia install, nothing downloaded at
@@ -69,7 +69,7 @@ atoms.calc = ACECalculator("si_fitted.npz")
 atoms.get_potential_energy(); atoms.get_forces()
 ```
 
-CLI: `ace-jax` (short alias `aj`) with subcommands `construct`, `fit` and `eval`;
+CLI: `ace-jax` (short alias `aj`) with subcommands `basis`, `fit` and `eval`;
 see [Command line](#command-line-ace-jax--aj) below. An agent-oriented guide lives in
 [`skills/ace-jax/SKILL.md`](skills/ace-jax/SKILL.md).
 
@@ -153,7 +153,7 @@ embedding) and ACEpotentials.jl rows will be added in a follow-up.
 
 ## Authoring the coupling table in Python (EquivariantTensors)
 
-With the `authoring` extra, `ace_jax.construct` builds an ACE basis's
+With the `basis` extra, `ace_jax.construct` builds an ACE basis's
 symmetry-adapted coupling coefficients without a Julia export step:
 `construct.spec.build_spec(...)` enumerates the admissible `(n,l)` many-body
 specification (total-degree / `wL`), and `construct.coupling.couple(...)` calls
@@ -173,7 +173,7 @@ for usage.
 
 ## Authoring a whole model in Python (Tier 1)
 
-`ace-jax construct --elements Si --order 3 --max-degree 10 --out si.npz`
+`ace-jax basis --elements Si --order 3 --max-degree 10 --out si.npz`
 (`construct.model.build_model`) authors a complete frozen model in memory:
 coupling via the shim, seeded radial/pair init, zero readout, and the algebraic
 smoothness prior — then packages it in the export format, so the saved file
@@ -185,12 +185,12 @@ up to that per-row scale, then (with the fixture's coefficients rescaled)
 energies, forces, stress and descriptors to float noise.
 See `docs/python-authoring.md`.
 
-### Embedded (species-compressed) models: `ace-jax construct --embedding`
+### Embedded (species-compressed) models: `ace-jax basis --embedding`
 
-    ace-jax construct --elements Cr,Mn,Fe,Co,Ni --order 3 --max-degree 10 \
+    ace-jax basis --elements Cr,Mn,Fe,Co,Ni --order 3 --max-degree 10 \
         --embedding mace_embedding.json --out cantor_embed.npz          # lossless widths
-    ace-jax construct ... --d-max 16                                    # capped widths
-    ace-jax construct ... --embedding identity                          # identity (one-hot) element table
+    ace-jax basis ... --d-max 16                                    # capped widths
+    ace-jax basis ... --embedding identity                          # identity (one-hot) element table
 
 builds the frozen-element-embedding model (`construct.model.build_embedding_model`,
 the ace1-compatible `ace_embedding_model`) without Julia, parity-tested against
@@ -199,9 +199,9 @@ ACEpotentials' exports.
 ## Command line (`ace-jax` / `aj`)
 
 `aj` is the same entry point as `ace-jax`. Three subcommands cover the workflow:
-**construct** a model definition, **fit** it to labelled data, and **eval** the
+**basis** authors a model definition, **fit** fits it to labelled data, and **eval** evaluates the
 fitted model. `si.npz` is any model definition, e.g. from
-`aj construct --elements Si --order 3 --max-degree 10 --out si.npz`. The examples
+`aj basis --elements Si --order 3 --max-degree 10 --out si.npz`. The examples
 below were checked on the Si test fixture (`si_fitted.npz`, with `si_tiny_train.xyz`
 split into train/test/ood files). The `--*-key` flags name the extxyz fields that
 hold the labels. Data is read with libAtoms `extxyz`, so any label name works as

@@ -1,6 +1,6 @@
 # Coupling generation via the compiled EquivariantTensors library
 
-> **Update 2026-09-30.** juliacall/juliapkg are gone: the `authoring` extra is
+> **Update 2026-09-30.** juliacall/juliapkg are gone: the `basis` extra is
 > now `ace-jax-coupling`, EquivariantTensors' coupling construction compiled
 > with `juliac --trim=safe` and shipped as a platform wheel (plan:
 > [plans/2026-09-30-trim-coupling-lib.md](plans/2026-09-30-trim-coupling-lib.md)).

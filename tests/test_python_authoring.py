@@ -5,7 +5,7 @@ Two ladders:
 * unit tests (numpy only, always run): the normalized-Legendre recurrence, the
   agnesi transform 7-tuple, and the envelope formulas, pinned against
   fixtures/si_ace_model.npz and numpy's own polynomials.
-* bridge tests (need the `authoring` extra; skip cleanly otherwise): a Si
+* bridge tests (need the `basis` extra; skip cleanly otherwise): a Si
   order-3 totaldegree-10 model is authored from scratch, the committed Julia
   fixture's coefficients are injected (exact because the fixture's nnll row
   order fed back through `couple` reproduces its A2B up to a per-B-row scale --
@@ -308,7 +308,7 @@ def test_save_npz_spline_factorised_roundtrip(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-#  bridge tests (authoring extra)
+#  bridge tests (`basis` extra)
 # ---------------------------------------------------------------------------
 
 _BRIDGE = r"""

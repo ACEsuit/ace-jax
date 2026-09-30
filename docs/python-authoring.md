@@ -1,7 +1,7 @@
 # Python model authoring (Tier 1)
 
 **Goal.** Author a complete frozen `ace_model`-family model — `ACEModel` + `meta`
-— entirely from Python: `ace-jax construct --elements Si --order 3 --max-degree 10
+— entirely from Python: `ace-jax basis --elements Si --order 3 --max-degree 10
 --out si.npz`. Julia's role shrinks to the one thing it still owns, the SO(3)
 coupling via the [EquivariantTensors shim](coupling-etshim-spec.md); radial
 init, pair basis, readout, packaging and evaluation are pure Python/NumPy/JAX.
@@ -128,7 +128,7 @@ keyed by a sha256 of the order-preserving spec JSON — under
 `$ACEJAX_COUPLING_CACHE` (or `~/.cache/ace-jax/coupling`). A **hit
 reconstructs the `Coupling` without importing the coupling library**: pip
 install + populated cache dir = authoring of a known shape without the
-`authoring` extra. Entries store their input specs (hit-time re-check) and the
+`basis` extra. Entries store their input specs (hit-time re-check) and the
 coupling backend id `coupling.backend_id()` (`ace-jax-coupling==<version>`; a
 library change invalidates); writes are atomic (a unique tmp file per writer,
 then `os.replace`) and best-effort, and any entry that fails to read for
@@ -142,7 +142,7 @@ team's cache dir.
 
 `build_embedding_model(elements, order, totaldegree, embedding, *, d_max, wL,
 maxl, rcut, reduction, ...)` authors ACEpotentials' ace1-compatible
-`ace_embedding_model` the same way (`ace-jax construct --embedding <table.json |
+`ace_embedding_model` the same way (`ace-jax basis --embedding <table.json |
 identity> [--d-max N]`); its design record is
 [plans/embedded-model-authoring.md](plans/embedded-model-authoring.md).
 
@@ -164,7 +164,7 @@ identity> [--d-max N]`); its design record is
 - ~~Tier 2 point 2 — coupling cache~~: done (`couple_cached`, see
   [tier2-plan.md](tier2-plan.md)) — authoring an existing shape runs
   Julia-free from a populated cache dir.
-- ~~Drop juliacall~~: done — the `authoring` extra is the `ace-jax-coupling`
+- ~~Drop juliacall~~: done — the `basis` extra is the `ace-jax-coupling`
   wheel, a `juliac --trim` compiled EquivariantTensors (`coupling/`,
   [coupling-etshim-spec.md](coupling-etshim-spec.md)).
 - **Endgame — pure-JAX coupling**: reimplement ET's `SparseSymmProd`

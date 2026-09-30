@@ -1,7 +1,7 @@
 """Numerical parity of the Python coupling path vs a Julia/ACEpotentials reference
 (julia/coupling_reference.jl).
 
-All tests skip cleanly without a working `ace_jax_coupling` (the `authoring`
+All tests skip cleanly without a working `ace_jax_coupling` (the `basis`
 extra; `conftest.require_coupling_lib`), so the core pip suite stays Julia-free.
 The compiled library runs in-process.
 

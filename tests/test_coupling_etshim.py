@@ -1,6 +1,6 @@
 """Parity for the EquivariantTensors coupling shim (construct/coupling.py).
 
-The bridge test needs a working `ace_jax_coupling` (the `authoring` extra's
+The bridge test needs a working `ace_jax_coupling` (the `basis` extra's
 compiled library; `conftest.require_coupling_lib`) and runs in-process; the
 spec port test is pure Python and always runs.  See construct/coupling.py and
 docs/coupling-etshim-spec.md.

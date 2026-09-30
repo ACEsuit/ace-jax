@@ -18,7 +18,7 @@ reads (the same one `julia/export_model.jl` writes):
 
 This file is the compatibility path only: Python callers evaluate the
 in-memory tree directly (`Authoring.eval_pair`, no npz round-trip); the file
-serves ACEfit-fitted interchange and shell hand-off (`ace-jax construct
+serves ACEfit-fitted interchange and shell hand-off (`ace-jax basis
 --out`).  The round-trip test (`tests/test_python_authoring.py::test_bridge_*`)
 pins the writer against the committed Julia fixture, so any schema drift on
 either side is caught.

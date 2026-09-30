@@ -5,29 +5,29 @@ description: Build, fit and evaluate Atomic Cluster Expansion (ACE) interatomic 
 
 # ace-jax
 
-ACE potentials in pure Python/JAX. You can fit and evaluate models without Julia.
-Julia is only needed to author a *new* coupling table on a coupling-cache miss,
-and the `authoring` extra provisions it automatically.
+ACE potentials in pure Python/JAX. No Julia is needed anywhere: fitting and
+evaluation use only the core package, and authoring a *new* basis shape (`aj basis`)
+uses the `basis` extra, a compiled EquivariantTensors wheel.
 
 ## Install
 
 ```bash
 pip install ace-jax              # evaluate, linear fit, ASE calculator
 pip install "ace-jax[gp]"        # + `aj fit` (all arms: MAP optimisers, GP, UQ ladder, POPS)
-pip install "ace-jax[authoring]" # + `construct` (compiled EquivariantTensors wheel; no Julia; Linux x86_64/aarch64, macOS arm64)
+pip install "ace-jax[basis]" # + `aj basis` (compiled EquivariantTensors wheel; no Julia; Linux x86_64/aarch64, macOS arm64)
 pip install "ace-jax[cuda]"      # + CUDA 12 JAX
 ```
 
 `ace-jax` and `aj` are the same CLI. `aj <cmd> --help` lists every flag.
 
-## Workflow: construct → fit → eval
+## Workflow: basis → fit → eval
 
 ```bash
 # 1. a model definition (unfitted). Skip this step if you already have a .npz.
-aj construct --elements Si --order 3 --max-degree 10 --out si.npz
+aj basis --elements Si --order 3 --max-degree 10 --out si.npz
 #    multi-element with a frozen species embedding (MACE table JSON {Z, emb},
 #    or `identity`); --d-max caps the channel widths (default lossless):
-aj construct --elements Cr,Mn,Fe,Co,Ni --order 3 --max-degree 10 \
+aj basis --elements Cr,Mn,Fe,Co,Ni --order 3 --max-degree 10 \
     --embedding mace_embedding.json [--d-max 16] --out cantor.npz
 #    the smoothness prior (Gamma) is built in; --no-gamma skips it. --rcut
 #    defaults to 5.5 (with --embedding: 2.5 x mean bond length).
@@ -239,7 +239,7 @@ Other entry points:
 - **POPS.** `--uq pops` changes only the uncertainty. The mean is pinned to the
   BLR mean, and the ridge is selected per quantity by CRPS on a training
   hold-out (`--pops-ridge auto`; `blr` or a number fixes it).
-- **First `construct` of a new basis shape** calls the compiled coupling
+- **First `aj basis` of a new basis shape** calls the compiled coupling
   library (`ace-jax-coupling`, milliseconds) to build the coupling table, then
   caches it in `~/.cache/ace-jax/coupling`. Later runs do not need the library.
 - **Exit status.** `aj` exits 0 on success. Treat any non-zero exit as a

@@ -26,7 +26,7 @@ parity CI jobs. User docs: `README.md`. Agent-facing usage guide:
   - `model.py`: `build_model`, `build_embedding_model`.
   - `prior.py`: the smoothness prior. `export.py`: `save_npz`.
 - `src/ace_jax/export/lammps.py`: `export_lammps`, a lammps-jax bundle.
-- `src/ace_jax/cli.py`: `ace-jax`/`aj` with `construct`, `fit` and `eval`.
+- `src/ace_jax/cli.py`: `ace-jax`/`aj` with `basis`, `fit` and `eval`.
 - `tests/`: the pytest suite. `conftest.py` holds the shared fixtures and helpers.
 - `fixtures/`: committed reference data. These are bit-exact goldens: never hand-edit or reformat them.
 - `bench/`: benchmark and research drivers.
@@ -54,11 +54,11 @@ uv run ruff check                     # lint; `uv run pre-commit run --all-files
 
 - **Extras:**
   - `gp`: numpyro, optax, blackjax. The dev group mirrors it.
-  - `authoring`: the `ace-jax-coupling` platform wheel (Linux x86_64/aarch64, macOS arm64). Until it is on PyPI, `uv sync --extra authoring` builds a lib-less dev wheel from `coupling/python`; for the real library: `JULIA_DEPOT_PATH=$HOME/.julia-trim julia +1.13 --project=coupling/julia/build coupling/julia/build.jl coupling/build`, prune with `coupling/tools/prune_bundle.py`, then `ACEJAX_COUPLING_BUNDLE=$PWD/coupling/build/pruned ACEJAX_COUPLING_PLAT=<tag> uv sync --extra authoring --reinstall-package ace-jax-coupling`. (A separate depot because the default one's stale ACE registry crashes Julia 1.13's Pkg.)
+  - `basis`: the `ace-jax-coupling` platform wheel (Linux x86_64/aarch64, macOS arm64). Until it is on PyPI, `uv sync --extra basis` builds a lib-less dev wheel from `coupling/python`; for the real library: `JULIA_DEPOT_PATH=$HOME/.julia-trim julia +1.13 --project=coupling/julia/build coupling/julia/build.jl coupling/build`, prune with `coupling/tools/prune_bundle.py`, then `ACEJAX_COUPLING_BUNDLE=$PWD/coupling/build/pruned ACEJAX_COUPLING_PLAT=<tag> uv sync --extra basis --reinstall-package ace-jax-coupling`. (A separate depot because the default one's stale ACE registry crashes Julia 1.13's Pkg.)
   - `cuda`.
   - `fast-neighbours`: matscipy-neighbours, a C++ source build.
 - **Tests that silently skip** when an optional dependency is missing:
-  - `authoring`: `test_coupling_etshim`, `test_coupling_parity` and the authoring bridge tests skip unless a compiled `ace_jax_coupling` is installed (`conftest.require_coupling_lib`). The coupling cache tests still run: they use `ACEJAX_NO_JULIA=1` and the committed cache.
+  - `basis`: `test_coupling_etshim`, `test_coupling_parity` and the authoring bridge tests skip unless a compiled `ace_jax_coupling` is installed (`conftest.require_coupling_lib`). The coupling cache tests still run: they use `ACEJAX_NO_JULIA=1` and the committed cache.
   - lammps-jax: `test_export_lammps` and `test_bench_scaling`'s export test. Make lammps-jax importable with `PYTHONPATH=<lammps-jax>/python` or `uv pip install -e <lammps-jax>`.
   - `fast-neighbours` (matscipy-neighbours): `test_calc_jit`'s native `neighbour_matrix` test and `test_efv`'s dense-vs-neighbour_matrix check; without it the skin list and dense layout also take their fallback neighbour path.
   - `pyace` (python-ace, in its own venv under `pace_ref/`).
@@ -129,4 +129,4 @@ uv run ruff check                     # lint; `uv run pre-commit run --all-files
 - **Closures:** `jax.tree.map(lambda a: a[i], ds)` inside a loop is the batch-slicing idiom. It is safe because it is consumed in the same iteration. Ruff B023 is suppressed per file for exactly this.
 - **Python 3.11:** `requires-python` is `>=3.11`, so no PEP 701 f-strings (`f"{d["k"]}"`) in `src/` or `tests/`.
 - **Laplace compile time:** the Laplace rung (a Hessian through the whole LML) can take tens of minutes to compile. Keep `--rungs map` in quick checks.
-- **Coupling cache:** the first `construct` of a new basis shape calls the coupling library; later ones hit the cache (stamped with `coupling.backend_id()`). The per-shape cache lives in `~/.cache/ace-jax/coupling`, or `$ACEJAX_COUPLING_CACHE`.
+- **Coupling cache:** the first `aj basis` of a new basis shape calls the coupling library; later ones hit the cache (stamped with `coupling.backend_id()`). The per-shape cache lives in `~/.cache/ace-jax/coupling`, or `$ACEJAX_COUPLING_CACHE`.

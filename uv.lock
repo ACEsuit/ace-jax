@@ -35,7 +35,7 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
-authoring = [
+basis = [
     { name = "ace-jax-coupling", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 cuda = [
@@ -65,7 +65,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "ace-jax-coupling", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin' and extra == 'authoring') or (platform_machine == 'aarch64' and sys_platform == 'linux' and extra == 'authoring') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'authoring')", directory = "coupling/python" },
+    { name = "ace-jax-coupling", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin' and extra == 'basis') or (platform_machine == 'aarch64' and sys_platform == 'linux' and extra == 'basis') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'basis')", directory = "coupling/python" },
     { name = "ase", specifier = ">=3.22" },
     { name = "blackjax", marker = "extra == 'gp'", specifier = ">=1.6" },
     { name = "equinox", specifier = ">=0.11" },
@@ -80,7 +80,7 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6" },
     { name = "scipy", specifier = ">=1.10" },
 ]
-provides-extras = ["authoring", "gp", "cuda", "fast-neighbours"]
+provides-extras = ["basis", "gp", "cuda", "fast-neighbours"]
 
 [package.metadata.requires-dev]
 dev = [
