@@ -46,7 +46,8 @@ def traced(src):
     used = set()
     for line in r.stderr.splitlines():
         for tok in line.replace("=", " ").split():
-            if tok.startswith(root):
+            tok = tok.strip(":;,[]()'\"")            # LD_DEBUG writes "file=/p/lib.so:  ..."
+            if tok.startswith(root) and os.path.isfile(tok):
                 used.add(pathlib.Path(tok).relative_to(src))
     return used
 
