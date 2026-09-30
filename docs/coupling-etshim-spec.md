@@ -115,12 +115,22 @@ row's first stored column), both checked against the real ET objects in
 ### Bundle and wheels
 
 `coupling/tools/prune_bundle.py` keeps only the shared libraries actually
-loaded while running every test case (traced with `DYLD_PRINT_LIBRARIES` /
-`LD_DEBUG`, in an empty HOME so JLL artifacts resolve from the bundle and not a
-local depot), under the alias names other binaries use. `check_bundle.py`
+loaded, traced (`DYLD_PRINT_LIBRARIES` / `LD_DEBUG`) in two process states --
+every test case with numpy imported first, and a bare `ctypes` load (numpy
+pulls in the system `libgcc_s`, hiding the bundled one Julia's loader opens
+otherwise) -- in an empty HOME so JLL artifacts resolve from the bundle and not
+a local depot. Linux keeps exactly the names `LD_DEBUG` reports as opened and
+strips debug info from the unmodified third-party libraries (never from
+`libetcouple` or the patchelf'd `libjulia*`, which `strip` corrupts). macOS
+(dyld reports resolved files) keeps a library's alias names only when another
+traced binary or libjulia's loader list names them. Library copies are never
+symlinks (wheels cannot hold them), so duplicates matter: on macOS dyld keys
+images by path, and a duplicated `libblastrampoline` loaded twice and hung the
+solver -- `check_bundle.py` rejects duplicates outside libjulia's loader list,
+and `test_largest_case_is_fast` catches a double load. `check_bundle.py`
 asserts ABI, macOS `minos ≤ 11.0` and Linux `GLIBC ≤ 2.28`. Wheels are
 `py3-none-{manylinux_2_28_x86_64, manylinux_2_28_aarch64, macosx_11_0_arm64}`
-(~19 MB); without a bundle the build makes a lib-less `py3-none-any` dev wheel
+(macOS arm64 ~19 MB, Linux aarch64 ~31 MB); without a bundle the build makes a lib-less `py3-none-any` dev wheel
 whose `build_info()` raises `CouplingLibError`. `coupling/tools/test_wheel.sh`
 installs a wheel into a fresh venv with an empty HOME and no Julia on PATH and
 runs the package tests (and checks HOME is untouched). Bundled third-party

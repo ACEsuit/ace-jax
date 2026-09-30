@@ -39,6 +39,20 @@ def check(root):
                 if tuple(map(int, v)) > GLIBC_MAX:
                     bad.append(f"{f.relative_to(root)} GLIBC_{'.'.join(v)}")
     assert not bad, "platform floor violated:\n  " + "\n  ".join(bad)
+    if sys.platform == "darwin":
+        # dyld keys images by path: two copies of one library load as two images
+        # with separate state (a duplicated libblastrampoline hung the solver)
+        import hashlib
+        seen = {}
+        for f in _libs(root):
+            seen.setdefault(hashlib.sha256(f.read_bytes()).hexdigest(), []).append(str(f.relative_to(root)))
+        # Exception: names in libjulia's loader list (libjulia-internal.X.Y,
+        # libopenlibm) -- upstream symlinks, loaded once in practice
+        # (tests/test_api.py::test_largest_case_is_fast would catch a double load).
+        loader = b"".join(f.read_bytes() for f in (root / "lib").glob("*libjulia.*dylib"))
+        dups = [v for v in seen.values()
+                if len(v) > 1 and not any(pathlib.Path(n).name.encode() in loader for n in v)]
+        assert not dups, f"duplicate library copies (would load twice): {dups}"
     print(f"bundle OK: {info['platform']} et_rev={info['et_rev'][:12]} libs={len(_libs(root))} {platform.machine()}")
 
 

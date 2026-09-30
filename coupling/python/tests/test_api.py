@@ -18,6 +18,23 @@ def test_bit_exact_vs_upstream_et(cases, reference):
             assert np.array_equal(got, want), (name, f)
 
 
+def test_largest_case_is_fast():
+    """Guards against a mis-pruned bundle: duplicate library copies once made
+    the 6216x17302 case take ~1000 s on Linux and hang on macOS (0.15 s when
+    correct).  Run in a subprocess with a timeout so a regression fails, not hangs."""
+    import pathlib
+    import subprocess
+    import sys
+    data = pathlib.Path(__file__).parent / "data" / "cases.json"
+    code = ("import json, sys, time, ace_jax_coupling as a; "
+            f"c = json.load(open({str(data)!r}))['build_NZ3_o4_d10']; "
+            "t = time.perf_counter(); a.couple_raw(c['mb'], c['R'], c['Y']); "
+            "print(time.perf_counter() - t)")
+    r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr[-2000:]
+    assert float(r.stdout.split()[-1]) < 10.0
+
+
 def test_accepts_tuples_lists_and_numpy_ints(cases):
     c = cases["tiny"]
     a = ajc.couple_raw(c["mb"], c["R"], c["Y"])
