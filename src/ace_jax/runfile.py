@@ -53,7 +53,28 @@ def _dests(parser):
 
 
 def _value(k, v):
-    return ",".join(map(str, v)) if k in COMMA_KEYS and isinstance(v, (list, tuple)) else v
+    if k in COMMA_KEYS and v is not None:
+        return ",".join(map(str, v)) if isinstance(v, (list, tuple)) else str(v)
+    return v
+
+
+def _checked(where, key, act, v):
+    """argparse applies `type`/`choices` only to command-line strings, not to
+    defaults, so a file value is checked here (a bad one names its key)."""
+    if v is None:
+        return v
+    if act.nargs == 0:                                    # store_true flags
+        if not isinstance(v, bool):
+            raise ValueError(f"{where}: '{key}' must be true or false, got {v!r}")
+        return v
+    if act.type in (int, float):
+        ok = isinstance(v, int) if act.type is int else isinstance(v, (int, float))
+        if isinstance(v, bool) or not ok:
+            raise ValueError(f"{where}: '{key}' must be {'an integer' if act.type is int else 'a number'}, got {v!r}")
+        v = act.type(v)
+    if act.choices is not None and v not in act.choices:
+        raise ValueError(f"{where}: '{key}' must be one of {', '.join(map(str, act.choices))}, got {v!r}")
+    return v
 
 
 def defaults_for(parser, cfg, *, basis_fields, basis_dest_map):
@@ -62,6 +83,7 @@ def defaults_for(parser, cfg, *, basis_fields, basis_dest_map):
     the `basis:` block (empty: no block, every key is a parser dest);
     `basis_dest_map`: basis key -> parser dest where they differ."""
     dests = _dests(parser)
+    acts = {a.dest: a for a in parser._actions}
     basis_dests = {basis_dest_map.get(f, f) for f in basis_fields}
     top_known = sorted(dests - basis_dests - {"config"}) + (["basis"] if basis_fields else [])
     if "model" in cfg and "basis" in cfg:
@@ -72,13 +94,13 @@ def defaults_for(parser, cfg, *, basis_fields, basis_dest_map):
             continue
         if k not in top_known:
             raise ValueError(_unknown("fit.yaml", k, top_known))
-        out[k] = _value(k, v)
+        out[k] = _checked("fit.yaml", k, acts[k], _value(k, v))
     for k, v in (cfg.get("basis") or {}).items() if basis_fields else ():
         if k not in basis_fields:
             raise ValueError(_unknown("fit.yaml basis", k, list(basis_fields)))
         dest = basis_dest_map.get(k, k)
         if dest in dests:
-            out[dest] = _value(k, v)
+            out[dest] = _checked("fit.yaml basis", k, acts[dest], _value(k, v))
     return out
 
 
@@ -108,7 +130,7 @@ def resolved(a, data, *, fit_dests, argv):
     from .basis.coupling import backend_id
     from .basis.model import BasisSpec
 
-    basis_dests = set(BasisSpec.FIELDS) | {"basis_embedding"}
+    basis_dests = (set(BasisSpec.FIELDS) - {"embedding"}) | {"basis_embedding"}   # --embedding is the GP's
     d = {k: getattr(a, k) for k in sorted(fit_dests)
          if k not in basis_dests and k not in ("config", "cmd", "model")}
     for k in PATH_KEYS:

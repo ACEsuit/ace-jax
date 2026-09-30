@@ -3,8 +3,9 @@
 `couple(mb_spec, Rnl_spec, Ylm_spec)` returns the L = 0 real-basis coupling of
 `EquivariantTensors.sparse_equivariant_tensor` in ace-jax's export layout (see
 `Coupling`).  It calls `ace_jax_coupling.couple_raw`, a juliac-compiled build of
-EquivariantTensors (no Julia at runtime), from the optional `basis` extra;
-the import is lazy so the core package never depends on it.
+EquivariantTensors (no Julia at runtime), a core dependency on supported
+platforms; the import is lazy, so a refit or a cache hit never loads it and an
+unsupported platform raises `BasisUnavailable` only when a new shape is built.
 
 `couple_cached(...)` wraps `couple` with a per-shape disk cache: the coupling
 depends only on the three integer specs, so a new shape runs the shim once and

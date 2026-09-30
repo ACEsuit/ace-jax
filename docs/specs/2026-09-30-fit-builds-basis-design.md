@@ -71,7 +71,7 @@ shared argparse helper `add_basis_args(parser, prefix_collisions=True)`):
 `--r0` (GP hyperprior centre) stays required with `--model`; when the basis is
 built, it **defaults to the mean of the basis's per-pair radial `r0`**
 (`meta["basis"]["r0"]`, the tabulated bond lengths the basis itself uses), and
-the default is logged: `r0 2.351 A (mean bond length of Si; pass --r0 to override)`.
+the default is logged: `r0 2.351 A (mean bond length of the basis; pass --r0 to override)`.
 
 Log line for a build (no backend vocabulary):
 `basis: Si,Ge order 3 max-degree 10 -> 110 B functions (built, cached for next time)`
@@ -115,8 +115,12 @@ Rules:
 - Unknown keys (top level or in `basis:`) are errors with a nearest-match hint
   (`difflib`): `fit.yaml: unknown key 'm_per_specie' (did you mean 'm_per_species'?)`.
   `model:` and `basis:` together is an error.
+- Alternatives follow CLI > file too: `--train` on the command line drops a
+  file's `data:` (and the reverse), and `--model` drops a file's `basis:`
+  order/max-degree (and the reverse); each is logged as an override. File
+  values are checked against the flag's type and choices, naming the key.
 - Relative paths in the file (`train`, `test`, `ood`, `data`, `model`,
-  `weights`, `baseline`, `init`, `embedding`s) resolve against the YAML file's
+  `baseline`, `init`, `embedding`s) resolve against the YAML file's
   directory, not the working directory.
 - One reserved read-ignored key: `provenance:` (below).
 
@@ -204,7 +208,7 @@ regenerating. Historical plans/specs under `docs/plans/`, `docs/specs/` and
 | YAML not a mapping / bad type | error naming the key and expected type |
 | inferred species empty (no configs) | error |
 | test/ood species absent from an explicit `--elements` | error listing the missing species (a basis cannot evaluate them) |
-| library unavailable | §4 message, before data load |
+| library unavailable | §4 message once the configs are read (the species decide the shape), before any fitting; exit 2, no traceback |
 
 ## 7. Testing
 
@@ -224,7 +228,7 @@ regenerating. Historical plans/specs under `docs/plans/`, `docs/specs/` and
   missing a test species errors; `r0` default equals the mean of
   `meta["basis"]["r0"]` and is logged.
 - **Backend hiding:** unsupported-platform message (monkeypatched import
-  failure) raised before data load; a test that `ace_jax` source (help strings,
+  failure) raised after the configs are read, before any fitting; a test that `ace_jax` source (help strings,
   messages) and user docs (README, SKILL.md, CLAUDE.md user sections,
   `docs/basis.md`) contain no "Julia" outside the allowed files.
 - **Renames:** the full suite passes after the move; `git grep` finds no

@@ -219,7 +219,7 @@ def add_basis_args(p, *, fit):
     """The basis-definition flags, shared by `aj basis` and `aj fit`.  On `aj fit`
     the embedding flag is --basis-embedding (--embedding is the GP species
     table there) and --seed is the fit's own."""
-    p.add_argument("--elements", default=None, help="comma-separated Z numbers or symbols"
+    p.add_argument("--elements", default=None, required=not fit, help="comma-separated Z numbers or symbols"
                    + (" (default: the species in the data)" if fit else ""))
     p.add_argument("--order", type=int, required=not fit, help="correlation order")
     p.add_argument("--max-degree", type=int, required=not fit, help="TotalDegree level bound")
@@ -319,6 +319,15 @@ def _parse(argv=None):
         given = runfile.explicit_dests(subs[cmd], argv[argv.index(cmd) + 1:])
         for k in sorted(set(defaults) & given):
             print(f"override: {k} {defaults[k]} -> {getattr(a, k)} (command line)")
+        # alternatives: choosing one side on the command line drops the file's other side
+        # (argparse's mutual exclusion never sees a default, and _check_fit_args would refuse both)
+        for mine, other in (({"train"}, {"data"}), ({"data"}, {"train"}),
+                            ({"model"}, {"order", "max_degree"}), ({"order", "max_degree"}, {"model"})):
+            if a.cmd == "fit" and mine & given:
+                for k in sorted((other & set(defaults)) - given):
+                    print(f"override: {k} {defaults[k]} -> None (command line gives "
+                          f"{'/'.join('--' + m.replace('_', '-') for m in sorted(mine & given))})")
+                    setattr(a, k, None)
     if a.cmd == "fit":
         _check_fit_args(subs["fit"], a)
     return a
@@ -327,8 +336,15 @@ def _parse(argv=None):
 def main(argv=None):
     """Console entry point; returns 0 because the script wrapper passes the
     result to sys.exit (a returned dict would print and exit 1)."""
+    import sys
+
+    from .basis.coupling import BasisUnavailable
     a = _parse(argv)
-    {"eval": cmd_eval, "basis": cmd_basis}.get(a.cmd, run)(a)
+    try:
+        {"eval": cmd_eval, "basis": cmd_basis}.get(a.cmd, run)(a)
+    except BasisUnavailable as e:                     # a user-facing condition, not a crash
+        print(f"aj {a.cmd}: error: {e}", file=sys.stderr)
+        raise SystemExit(2) from None
     return 0
 
 

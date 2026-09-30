@@ -64,7 +64,9 @@ typical nearest-neighbour distance in Å, centring the GP hyperprior) defaults t
 the built basis's mean bond length and is required with `--model`. Without
 `--test`, the fit is scored on its own training set. `--config fit.yaml`
 supplies any of these (keys = flag names with underscores, the basis in a
-`basis:` block); typos in the file are errors with a did-you-mean hint.
+`basis:` block); typos and bad values in the file are errors naming the key.
+Command-line flags win, including switching an alternative: `--model m.npz`
+over a file's `basis:`, `--train` over its `data:` (each logged as an override).
 
 ## Choosing options
 

@@ -56,3 +56,18 @@ def test_model_file_run_records_model(tmp_path):
     d = yaml.safe_load((tmp_path / "m" / "fit.yaml").read_text())
     assert d["model"] == str((FIXTURE_DIR / "si_ace_model.npz").resolve()) and "basis" not in d
     assert d["provenance"]["coupling"] is None
+
+
+def test_resolved_keeps_gp_embedding(tmp_path):
+    """The fit's own --embedding (the GP species table) is a top-level key, not
+    the basis block's embedding: it must survive into the resolved file."""
+    from types import SimpleNamespace
+
+    from ace_jax import runfile
+    from ace_jax.cli import _parse, _parser
+    emb = tmp_path / "mace.json"; emb.write_text("{}")
+    argv = ["fit", "--model", "m.npz", "--r0", "2.4", "--embedding", str(emb), "--train", "t.xyz", "--out", "o"]
+    a = _parse(argv)
+    fit_dests = runfile._dests(_parser()._subparsers._group_actions[0].choices["fit"])
+    d = runfile.resolved(a, SimpleNamespace(r0=None, meta={}), fit_dests=fit_dests, argv=argv[1:])
+    assert d["embedding"] == str(emb) and "basis" not in d
