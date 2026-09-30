@@ -5,6 +5,7 @@ in whatever order LAMMPS built them, receivers that may be ghost atoms.  On an
 open cluster (no ghosts needed) it must equal ACECalculator exactly, in both
 layouts; periodic parity is checked end-to-end in LAMMPS (bench parity gate).
 """
+import importlib.metadata
 import json
 import pathlib
 
@@ -91,6 +92,8 @@ def test_bundle_written(tmp_path):
                       k_dense=64, dtype="float64", layout="dense")
     on_disk = json.loads((tmp_path / "m.json").read_text())
     assert on_disk["contract"]["n_species"] == 2
+    lj = on_disk["ace_jax"].pop("lammps_jax")
+    assert lj.startswith(importlib.metadata.version("lammps_jax"))
     assert on_disk["ace_jax"] == {"layout": "dense", "elements": [32, 14],
                                   "type_elements": [32, 14], "k_dense": 64, "owned_rows": None,
                                   "lean": False}           # PACE: no lean form
@@ -185,21 +188,22 @@ def test_bundle_records_owned_rows_even_for_sparse(tmp_path):
 # reader matches a key name anywhere in the file, nested objects included, so
 # ace-jax's own metadata must not reuse one: a nested "max_owned" was taken as
 # the contract's and LAMMPS refused the bundle.
-LAMMPS_JAX_KEYS = {"comm_sites", "comm_widths", "custom_call_targets", "cutoff", "edge_pairing",
+LAMMPS_JAX_KEYS = {"comm_sites", "comm_widths", "compile_options_b64", "custom_call_targets",
+                   "cutoff", "edge_pairing",
                    "energy_and_forces_mlir", "energy_mlir", "force_mlir", "force_output",
                    "format", "input_layout", "max_atoms", "max_edges", "max_neighbors",
                    "max_owned", "n_hops", "n_species", "newton", "pair_sum", "precision",
                    "unit_style", "uses_box"}
 
 
-@pytest.mark.parametrize("layout", ["sparse", "dense"])
+@pytest.mark.parametrize("layout", ["sparse", "dense", "matrix"])
 def test_bundle_metadata_keys_do_not_shadow_the_contract(tmp_path, layout):
     require_optional("lammps_jax")
     from ace_jax.export.lammps import export_lammps
     y = str(pace_fixture(FIX / "gesi_sbessel.yace"))
     model, meta, _ = load(y)
     b = export_lammps(model, meta, tmp_path / "m.json", max_atoms=256, max_edges=256 * 64,
-                      k_dense=64, layout=layout, max_owned=200)
+                      k_dense=64, max_neighbors=64, layout=layout, max_owned=200)
     assert not set(b["ace_jax"]) & LAMMPS_JAX_KEYS
 
 
@@ -395,6 +399,7 @@ def test_auto_layout_judges_one_dense_block(tmp_path, monkeypatch):
     from ace_jax.calc import point
     from ace_jax.eval.edge_model import estimate_a_bytes
     from ace_jax.export import lammps as lx
+    monkeypatch.setattr(lx, "matrix_supported", lambda: False)    # the packed dense choice
     y = str(pace_fixture(FIX / "gesi_sbessel.yace"))
     model, meta, _ = load(y)
     k, block, n = 64, lx.BUNDLE_BLOCK_ROWS, 4 * lx.BUNDLE_BLOCK_ROWS
@@ -439,6 +444,7 @@ def test_auto_layout_ignores_lean(tmp_path, monkeypatch):
     from ace_jax.eval.edge_model import estimate_a_bytes
     from ace_jax.eval.model import lean
     from ace_jax.export import lammps as lx
+    monkeypatch.setattr(lx, "matrix_supported", lambda: False)    # the packed dense choice
     model, meta, _ = load(MODELS["ace"]())
     k, n = 64, 1024
     full = estimate_a_bytes(model, "dense", n, n * k, k, 8)
@@ -449,3 +455,354 @@ def test_auto_layout_ignores_lean(tmp_path, monkeypatch):
             b = lx.export_lammps(model, meta, tmp_path / "m.json", max_atoms=n,
                                  max_edges=n * k, k_dense=k, layout="auto", lean=use)
             assert b["ace_jax"]["layout"] == want, (budget, use)
+
+
+# ------------------------------------------------------------ neighbour matrix
+# layout="matrix": lammps-jax's neighbor-matrix input (export_model(max_neighbors=,
+# max_owned=)).  The plugin hands the model the LAMMPS full list as is: slot-major
+# [max_neighbors, rows] int32, row i = atom i (owned atoms first), filled from slot
+# 0, padding = max_atoms, num_neighbors (rows,) alongside.  It is copied only on
+# list rebuilds, so it holds skin pairs (rcut < r < rcut + skin) the model must
+# drop itself (pair_jax_kokkos.cpp, CopyNeighborMatrixFunctor).
+
+class Matrix:                                   # the lammps-jax LammpsNeighborMatrix fields
+    def __init__(self, neighbors, num_neighbors):
+        self.neighbors, self.num_neighbors = neighbors, num_neighbors
+
+
+def _to_matrix(senders, receivers, rows, max_atoms, extra_slots=2):
+    """lammps-jax's own test helper (tests/test_eam_pallas.py::matrix_graph)."""
+    K = int(np.bincount(senders, minlength=rows).max()) + extra_slots
+    nb = np.full((K, rows), max_atoms, np.int32)
+    cnt = np.zeros(rows, np.int32)
+    for i, j in zip(senders, receivers):
+        nb[cnt[i], i] = j
+        cnt[i] += 1
+    return Matrix(jnp.asarray(nb), jnp.asarray(cnt))
+
+
+def _matrix_graph(at, rcut, skin=1.0, n_ghost=5, seed=0):
+    """Open cluster as the plugin presents it: the rcut + skin list in a random
+    (not our) order, and n_ghost far-away position rows no row points at."""
+    g = sparse_graph(at.positions, at.cell.array, at.pbc, rcut + skin)
+    order = np.random.default_rng(seed).permutation(len(g.senders))
+    n = len(at)
+    graph = _to_matrix(g.senders[order], g.receivers[order], n, n + n_ghost)
+    pos = np.concatenate([at.positions, at.positions[:n_ghost] + 100.0])
+    return graph, jnp.asarray(pos), g
+
+
+def _cut_k(at, rcut):
+    g = sparse_graph(at.positions, at.cell.array, at.pbc, rcut)
+    return int(np.bincount(g.senders, minlength=len(at)).max())
+
+
+def _species(at, meta, types=None):
+    types = list(meta["elements"]) if types is None else types
+    return jnp.asarray([types.index(int(z)) for z in at.numbers], jnp.int32)
+
+
+@pytest.mark.parametrize("slots", ["list", "cutoff"])
+@pytest.mark.parametrize("kind", sorted(MODELS))
+def test_matrix_energy_fn_matches_calculator(kind, slots):
+    """slots="list": the model runs at the list's width, skin pairs masked;
+    "cutoff": the in-cutoff pairs are compacted into k(rcut) + 2 model slots."""
+    y = MODELS[kind]()
+    model, meta, _ = load(y)
+    at = _cluster()
+    if kind == "ace":
+        at.numbers = np.where(at.numbers == 32, 32, 14)
+    rcut = float(meta["rcut"])
+    graph, pos, g = _matrix_graph(at, rcut)
+    assert np.any(np.linalg.norm(g.rij, axis=1) > rcut)            # skin pairs are in the list
+    species = jnp.concatenate([_species(at, meta), jnp.zeros(5, jnp.int32)])
+    k = None if slots == "list" else _cut_k(at, rcut) + 2
+    assert k is None or k < graph.neighbors.shape[0]
+    f = make_energy_fn(model, len(meta["elements"]), "matrix", k_dense=k, rcut=rcut)
+    e = jax.jit(lambda p: f(p, species, graph))(pos)
+    assert e.shape == (pos.shape[0],) and np.all(np.asarray(e[len(at):]) == 0.0)
+    E, G = jax.jit(jax.value_and_grad(lambda p: jnp.sum(f(p, species, graph))))(pos)
+    at.calc = ACECalculator(y, layout="sparse")
+    assert float(E) == pytest.approx(at.get_potential_energy(), abs=1e-10)
+    np.testing.assert_allclose(-np.asarray(G[:len(at)]), at.get_forces(), atol=1e-9)
+    assert np.all(np.asarray(G[len(at):]) == 0.0)
+
+
+def _periodic_ghosts(at, cutoff):
+    """LAMMPS's periodic picture: owned atoms, then one ghost per (atom, image)
+    some owned atom lists within `cutoff`; the full list of owned rows points at
+    ghosts across the boundary.  Returns positions, receivers, senders and the
+    owner of every ghost (for the reverse communication of ghost forces)."""
+    from ase.neighborlist import neighbor_list
+    i, j, S = neighbor_list("ijS", at, cutoff)
+    n = len(at)
+    ghosts = {}
+    recv = np.empty(len(i), np.int64)
+    for e, (jj, s) in enumerate(zip(j, map(tuple, S))):
+        recv[e] = jj if s == (0, 0, 0) else n + ghosts.setdefault((jj, s), len(ghosts))
+    owner = np.array([jj for jj, _ in ghosts], np.int64)
+    shift = np.array([s for _, s in ghosts], float).reshape(-1, 3) @ at.cell.array
+    pos = np.concatenate([at.positions, at.positions[owner] + shift])
+    return pos, i, recv, owner
+
+
+@pytest.mark.parametrize("kind", sorted(MODELS))
+def test_matrix_periodic_ghosts_match_calculator(kind):
+    """Periodic cell with ghost atoms, skin pairs, owned rows only (max_owned =
+    n): the owned energy, and the position gradient with ghost rows folded back
+    onto their owners (LAMMPS newton-on reverse comm), equal the calculator."""
+    y = MODELS[kind]()
+    model, meta, _ = load(y)
+    at = bulk("Si", "diamond", a=5.43, cubic=True).repeat((2, 2, 2))
+    at.numbers[::3] = 32
+    at.rattle(0.05, seed=1)
+    rcut = float(meta["rcut"])
+    pos, s, r, owner = _periodic_ghosts(at, rcut + 1.0)
+    n = len(at)
+    graph = _to_matrix(s, r, n, len(pos) + 3)
+    pos = jnp.asarray(np.concatenate([pos, np.zeros((3, 3))]))
+    z2i = {z: i for i, z in enumerate(meta["elements"])}
+    zall = np.concatenate([at.numbers, at.numbers[owner], [at.numbers[0]] * 3])
+    species = jnp.asarray([z2i[int(z)] for z in zall], jnp.int32)
+    for k in (None, _cut_k(at, rcut) + 1):
+        f = make_energy_fn(model, len(meta["elements"]), "matrix", k_dense=k, rcut=rcut)
+        E, G = jax.jit(jax.value_and_grad(
+            lambda p: jnp.sum(jnp.where(jnp.arange(p.shape[0]) < n, f(p, species, graph), 0.0))  # noqa: B023
+        ))(pos)
+        G = np.asarray(G)
+        F = -(G[:n] + np.bincount(np.repeat(owner, 3) * 3 + np.tile(np.arange(3), len(owner)),
+                                  weights=G[n:n + len(owner)].reshape(-1),
+                                  minlength=3 * n).reshape(n, 3))
+        at.calc = ACECalculator(y, layout="sparse", skin=0.0)
+        assert float(E) == pytest.approx(at.get_potential_energy(), abs=1e-10)
+        np.testing.assert_allclose(F, at.get_forces(), atol=1e-9)
+
+
+def test_matrix_compaction_overflow_is_nan():
+    """More in-cutoff pairs than k_dense model slots: NaN energy and forces."""
+    y = str(pace_fixture(FIX / "gesi_sbessel.yace"))
+    model, meta, _ = load(y)
+    at = _cluster()
+    graph, pos, _ = _matrix_graph(at, meta["rcut"])
+    species = jnp.zeros(pos.shape[0], jnp.int32)
+    f = make_energy_fn(model, len(meta["elements"]), "matrix", k_dense=2, rcut=meta["rcut"])
+    E, G = jax.value_and_grad(lambda p: jnp.sum(f(p, species, graph)))(pos)
+    assert np.isnan(float(E)) and np.isnan(np.asarray(G)).any()
+
+
+@pytest.mark.parametrize("k", [None, 2])
+def test_matrix_nan_position_is_loud(k):
+    """A NaN position gives NaN energies: the model itself zeroes a pair whose
+    distance is NaN, so the energy function flags NaN pairs explicitly rather
+    than let the step run on with them dropped (docs/perf-lammps-large-n.md)."""
+    y = str(pace_fixture(FIX / "gesi_sbessel.yace"))
+    model, meta, _ = load(y)
+    at = _cluster()
+    graph, pos, _ = _matrix_graph(at, meta["rcut"])
+    species = jnp.zeros(pos.shape[0], jnp.int32)
+    k = None if k is None else _cut_k(at, meta["rcut"]) + 2
+    f = make_energy_fn(model, len(meta["elements"]), "matrix", k_dense=k, rcut=meta["rcut"])
+    assert np.isfinite(float(jnp.sum(f(pos, species, graph))))
+    assert np.isnan(float(jnp.sum(f(pos.at[3, 0].set(jnp.nan), species, graph))))
+
+
+def test_matrix_needs_rcut():
+    model, meta, _ = load(MODELS["ace"]())
+    with pytest.raises(ValueError, match="rcut"):
+        make_energy_fn(model, 2, "matrix")
+
+
+def test_matrix_type_order_differs_from_model_order():
+    y = str(pace_fixture(FIX / "gesi_sbessel.yace"))
+    model, meta, _ = load(y)
+    at = _cluster()
+    graph, pos, _ = _matrix_graph(at, meta["rcut"], n_ghost=0)
+    types = [14, 32]
+    f = make_energy_fn(model, 2, "matrix", rcut=meta["rcut"],
+                       type_map=[list(meta["elements"]).index(z) for z in types])
+    E = float(jnp.sum(f(pos, _species(at, meta, types), graph)))
+    at.calc = ACECalculator(y, layout="sparse")
+    assert E == pytest.approx(at.get_potential_energy(), abs=1e-10)
+
+
+@pytest.mark.parametrize("k", ["list", "cutoff"])
+@pytest.mark.parametrize("kind", sorted(MODELS))
+def test_matrix_blocks_match_single_block(monkeypatch, kind, k):
+    from ace_jax.export import lammps
+    model, meta, _ = load(MODELS[kind]())
+    at = _big_cluster(kind)
+    graph, pos, _ = _matrix_graph(at, meta["rcut"], n_ghost=11)
+    species = jnp.concatenate([_species(at, meta), jnp.zeros(11, jnp.int32)])
+    kd = None if k == "list" else _cut_k(at, meta["rcut"]) + 2
+
+    def run(block):
+        monkeypatch.setattr(lammps, "BUNDLE_BLOCK_ROWS", block)
+        f = make_energy_fn(model, len(meta["elements"]), "matrix", k_dense=kd, rcut=meta["rcut"])
+        e = jax.jit(lambda p: f(p, species, graph))(pos)
+        G = jax.jit(jax.grad(lambda p: jnp.sum(f(p, species, graph))))(pos)
+        return np.asarray(e), np.asarray(G)
+
+    e1, G1 = run(10 ** 9)
+    e64, G64 = run(64)
+    assert np.isfinite(e1).all() and np.isfinite(G1).all()
+    np.testing.assert_allclose(e64, e1, rtol=1e-12, atol=0)
+    np.testing.assert_allclose(G64, G1, rtol=1e-12, atol=1e-12 * np.abs(G1).max())
+
+
+def test_matrix_lean_matches_full():
+    from ace_jax.eval.model import lean
+    model, meta, _ = load(MODELS["ace"]())
+    at = _cluster()
+    at.numbers = np.where(at.numbers == 32, 32, 14)
+    graph, pos, _ = _matrix_graph(at, meta["rcut"])
+    species = jnp.concatenate([_species(at, meta), jnp.zeros(5, jnp.int32)])
+    out = []
+    for m in (model, lean(model)):
+        f = make_energy_fn(m, 2, "matrix", rcut=meta["rcut"])
+        out.append(jax.value_and_grad(lambda p: jnp.sum(f(p, species, graph)))(pos))  # noqa: B023
+    assert float(out[1][0]) == pytest.approx(float(out[0][0]), rel=1e-12)
+    np.testing.assert_allclose(np.asarray(out[1][1]), np.asarray(out[0][1]), rtol=0, atol=1e-12)
+
+
+def test_matrix_bundle_written(tmp_path):
+    """The contract is lammps-jax's neighbor-matrix one: max_neighbors list slots,
+    max_owned rows, no max_edges; ace_jax.k_dense is the model's slot count,
+    which may be tighter than the list's (default: the list's)."""
+    require_optional("lammps_jax")
+    from ace_jax.export.lammps import export_lammps
+    model, meta, _ = load(str(pace_fixture(FIX / "gesi_sbessel.yace")))
+    b = export_lammps(model, meta, tmp_path / "m.json", max_atoms=256, k_dense=64,
+                      max_neighbors=64, max_owned=200, layout="matrix")
+    c = json.loads((tmp_path / "m.json").read_text())["contract"]
+    assert c["input_layout"] == "neighbor-matrix" and c["max_neighbors"] == 64
+    assert c["max_owned"] == 200 and "max_edges" not in c and c["precision"] == "float64"
+    assert b["ace_jax"]["layout"] == "matrix" and b["ace_jax"]["k_dense"] == 64
+    b = export_lammps(model, meta, tmp_path / "t.json", max_atoms=256, k_dense=40,
+                      max_neighbors=80, max_owned=200, layout="matrix")
+    assert b["contract"]["max_neighbors"] == 80 and b["ace_jax"]["k_dense"] == 40
+    assert not set(b["ace_jax"]) & LAMMPS_JAX_KEYS
+    b = export_lammps(model, meta, tmp_path / "d.json", max_atoms=256, max_neighbors=70,
+                      max_owned=200, layout="matrix")
+    assert b["ace_jax"]["k_dense"] == 70
+    # the exporting lammps-jax, for a plugin that rejects the bundle
+    assert b["ace_jax"]["lammps_jax"].startswith(importlib.metadata.version("lammps_jax"))
+
+
+def test_matrix_bundle_needs_slots(tmp_path):
+    require_optional("lammps_jax")
+    from ace_jax.export.lammps import export_lammps
+    model, meta, _ = load(str(pace_fixture(FIX / "gesi_sbessel.yace")))
+    with pytest.raises(ValueError, match="max_neighbors"):
+        export_lammps(model, meta, tmp_path / "m.json", max_atoms=256, layout="matrix")
+    # k_dense alone is not a list size: the list holds rcut + skin pairs
+    with pytest.raises(ValueError, match="max_neighbors"):
+        export_lammps(model, meta, tmp_path / "m.json", max_atoms=256, k_dense=64,
+                      layout="matrix")
+    with pytest.raises(ValueError, match="max_edges"):
+        export_lammps(model, meta, tmp_path / "m.json", max_atoms=256, k_dense=64, layout="dense")
+
+
+@pytest.mark.parametrize("supported, want", [(True, "matrix"), (False, "dense")])
+def test_auto_layout_prefers_the_matrix(tmp_path, monkeypatch, supported, want):
+    """auto's dense choice is the neighbour matrix when the installed lammps-jax
+    has it (no per-step packing), else the packed dense layout."""
+    require_optional("lammps_jax")
+    from ace_jax.export import lammps as lx
+    monkeypatch.setattr(lx, "matrix_supported", lambda: supported)
+    model, meta, _ = load(str(pace_fixture(FIX / "gesi_sbessel.yace")))
+    b = lx.export_lammps(model, meta, tmp_path / "m.json", max_atoms=256, max_edges=256 * 64,
+                         k_dense=64, max_neighbors=96, max_owned=200, layout="auto")
+    assert b["ace_jax"]["layout"] == want
+    assert b["contract"]["input_layout"] == ("neighbor-matrix" if supported else "sparse-edge")
+
+
+def test_auto_without_max_neighbors_keeps_the_packed_dense(tmp_path, monkeypatch):
+    """The pre-matrix signature (k_dense sized for pairs within rcut, no
+    max_neighbors) must not become a matrix bundle: its list holds the rcut +
+    skin pairs (78 on Cantor against 42 within rcut) and would abort at step 0."""
+    require_optional("lammps_jax")
+    from ace_jax.export import lammps as lx
+    monkeypatch.setattr(lx, "matrix_supported", lambda: True)
+    model, meta, _ = load(str(pace_fixture(FIX / "gesi_sbessel.yace")))
+    b = lx.export_lammps(model, meta, tmp_path / "m.json", max_atoms=256, max_edges=256 * 64,
+                         k_dense=64, max_owned=200)
+    assert b["ace_jax"]["layout"] == "dense" and b["contract"]["input_layout"] == "sparse-edge"
+
+
+def test_auto_matrix_prep_counts_toward_memory(tmp_path, monkeypatch):
+    """The matrix pre-processing (list gather, distances, compaction) runs over
+    all rows x max_neighbors, not in blocks: auto adds it to the one-block
+    estimate, and falls back to packed dense when the matrix would not fit."""
+    require_optional("lammps_jax")
+    from ace_jax.calc import point
+    from ace_jax.eval.edge_model import estimate_a_bytes
+    from ace_jax.export import lammps as lx
+    monkeypatch.setattr(lx, "matrix_supported", lambda: True)
+    model, meta, _ = load(str(pace_fixture(FIX / "gesi_sbessel.yace")))
+    n, k, K = 4096, 64, 96
+    block = estimate_a_bytes(model, "dense", n, n * k, k, 8)
+    prep = lx.matrix_prep_bytes(n, K, k, 8)
+    assert prep > 0
+    for budget, want in ((block + prep, "matrix"), (block + prep - 1, "dense")):
+        monkeypatch.setattr(point, "dense_budget_bytes", lambda b=budget: b)
+        b = lx.export_lammps(model, meta, tmp_path / "m.json", max_atoms=n + 100,
+                             max_edges=n * k, k_dense=k, max_neighbors=K, max_owned=n,
+                             layout="auto", lean=False)
+        assert b["ace_jax"]["layout"] == want, budget
+
+
+def test_matrix_supported_by_the_pinned_lammps_jax():
+    require_optional("lammps_jax")
+    from ace_jax.export.lammps import matrix_supported
+    assert matrix_supported()
+
+
+# ------------------------------------------------------------ slot sizing
+def test_neighbour_capacity_skin_and_cutoff_slots():
+    """slots="skin" (default, safe) sizes model slots for the rcut + skin list;
+    "cutoff" for rcut pairs only.  The matrix list capacity (max_neighbors)
+    covers the rcut + skin list with 50% headroom: LAMMPS copies it whole at
+    each rebuild, and it grows faster than the rcut count as a structure
+    compresses.  bench/perf/results/matrix_ab_a100_r1.json, ace_SiGe_medium
+    16384, bench deck, variant matrix: "LAMMPS-JAX neighbor capacity exceeded:
+    global max 45 neighbors per atom, capacity 42" (k_list 34 + 8) at the first
+    rebuild, where the packed dense bundle's rcut slots held."""
+    from ace_jax.export.lammps import neighbour_capacity
+    at = bulk("Si", "diamond", a=5.43, cubic=True).repeat((3, 3, 3))
+    at.rattle(0.02, seed=0)
+    k_cut, k_list = _cut_k(at, 5.0), _cut_k(at, 6.0)
+    safe = neighbour_capacity(at, 5.0, skin=1.0)
+    tight = neighbour_capacity(at, 5.0, skin=1.0, slots="cutoff")
+    assert safe["k_dense"] == k_list + 8 and tight["k_dense"] == k_cut + 8
+    assert safe["max_neighbors"] == tight["max_neighbors"] == int(np.ceil(1.5 * k_list))
+    assert neighbour_capacity(at, 5.0, list_headroom=0.0)["max_neighbors"] == k_list + 8
+    assert (safe["k_list"], safe["k_cut"]) == (k_list, k_cut)
+    for c in (safe, tight):
+        assert c["max_owned"] == int(np.ceil(1.1 * len(at))) and c["max_atoms"] > c["max_owned"]
+        assert c["max_edges"] == c["max_owned"] * c["k_dense"]
+    assert neighbour_capacity(at, 5.0, margin=3)["k_dense"] == k_list + 3
+    assert neighbour_capacity(at, 5.0, list_headroom=0.25)["max_neighbors"] == max(
+        k_list + 8, int(np.ceil(1.25 * k_list)))
+    with pytest.raises(ValueError, match="slots"):
+        neighbour_capacity(at, 5.0, slots="rcut")
+
+
+def test_neighbour_capacity_ghosts_use_face_spacings():
+    """The ghost shell is rcut + skin deep perpendicular to each face: on a
+    sheared cell the face spacing (1/|reciprocal row|), not the cell-vector
+    length, sets it.  It must hold every periodic image an owned atom lists."""
+    from ace_jax.export.lammps import neighbour_capacity
+    at = bulk("Si", "diamond", a=5.43, cubic=True).repeat((2, 2, 2))
+    cell = at.cell.array.copy()
+    cell[1] += 1.8 * cell[0]                                 # strongly triclinic
+    cell[2] += 1.5 * cell[0] + 1.2 * cell[1]
+    at.set_cell(cell, scale_atoms=False)
+    at.wrap()
+    rc, skin = 5.0, 1.0
+    h = 1.0 / np.linalg.norm(at.cell.reciprocal(), axis=1)
+    assert np.all(h < 0.8 * np.linalg.norm(cell, axis=1))
+    c = neighbour_capacity(at, rc, skin=skin)
+    n = len(at)
+    assert c["max_atoms"] == int(np.ceil(n * np.prod((h + 2 * (rc + skin)) / h) * 1.1))
+    pos, _, _, owner = _periodic_ghosts(at, rc + skin)
+    assert c["max_atoms"] >= len(pos)
