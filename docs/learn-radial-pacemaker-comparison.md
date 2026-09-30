@@ -8,7 +8,7 @@ This note compares our learned radials with pacemaker (python-ace + TensorPotent
 - forces that sit on pacemaker's energy–force trade-off curve;
 - much more faithful elastic constants than every pacemaker variant (2.3–2.4% against 5.9–7.7% mean deviation from the MACE teacher).
 
-Every linear model, ours included, misses SiGe vacancy formation energies by 0.2–1.8 eV. The pacemaker model with the sqrt(ρ) (Finnis–Sinclair) embedding gets them within 0.14 eV. That is the case for adding an optimised density term to our model, next.
+Every linear model, ours included, misses SiGe vacancy formation energies by 0.2–1.8 eV, and the pacemaker model with the sqrt(ρ) (Finnis–Sinclair) embedding gets them within 0.14 eV. But vacancies are absent from training, so this is extrapolation. Follow-up work traces most of the difference to pacemaker's radial basis rather than its embedding (conclusion 3).
 
 ## Setup
 
@@ -81,13 +81,21 @@ Every pacemaker variant overestimates C11 by 9–19% and underestimates C12, so 
 | ours, initial radials | +27 / +16 / +11 | −20 / +16 / −1 | 0.28 |
 | ours, learned, 40 steps | +13 / +14 / +32 | −20 / −16 / +8 | 0.58 |
 | ours, learned, 800 steps | **+6 / +2 / −8** | **−3 / −2 / −20** | 0.41 |
-| pacemaker linear κ=0.3 | −33 / −35 / −43 | −10 / −12 / +6 | 1.14 |
+| pacemaker linear κ=0.3 | −33 / −35 / −43 | −10 / −12 / +6 | 0.44 |
+
+**Correction (2026-09-30).** An earlier version of this table gave pacemaker's Cantor vacancy MAE as 1.14 eV. That figure was wrong:
+- **Cause.** Pacemaker is fitted to reference-corrected energies, and the potential file carries no per-element references.
+- **Effect.** For an alloy, E(N−1) − (N−1)/N·E(N) is then offset by mean(e_ref) − e_ref[removed species], which is several eV. Elemental vacancies (Si, Ge) are unaffected.
+- **Fix.** `qoi.py --eref <meta.json>` restores the references. The rerun reproduces the original fit's RMSE, B and C44 exactly.
 
 ## Conclusions
 
 1. **Learned radials are worth having, and a short budget is enough for most of the benefit.** Forty VarPro steps cut the SiGe elastic-property error from 12% to 2.4%. They keep the linear model's advantages: a convex final fit, Bayesian UQ, and fast refits.
 2. **Lower force RMSE doesn't mean better physics.** Pacemaker has the best forces, yet it is consistently worse on elastic constants, and its Cantor bulk modulus is off by about 35%. Model choices should be judged on quantities of interest.
-3. **Vacancies need a nonlinear embedding.** No linear model reproduces the vacancy formation energies, while the sqrt(ρ) embedding does. Next step: joint VarPro over the radials W and a density η spanning the full ACE basis, as pacemaker's second density does, with the sqrt(ρ) embedding. The existing pair-only density term had no effect on SiGe. The goal is to keep our elastic accuracy and reach sqrt(ρ)-level vacancy energies.
+3. **Vacancies are extrapolation here, and the sqrt(ρ) result needs care.** On SiGe, pacemaker's sqrt(ρ) model gets the vacancy formation energies within 0.14 eV, and no linear model does. But no model saw a vacancy in training.
+   - Follow-up work (branch `feat/radial-density`) found that most of the gap comes from pacemaker's radial basis rather than the embedding. Pacemaker's learned radials, refitted with our linear fit, recover most of it.
+   - A learned sqrt(ρ) term did not help our model, with or without vacancy data.
+   - On Cantor, pacemaker's sqrt(ρ) improves the vacancy MAE only modestly, from 0.44 to 0.35 eV.
 4. **Loose ends:**
    - converge the θ-MAP by default, or add a convergence check;
    - vacancy and defect configurations are absent from training, so these results are extrapolation for every model;

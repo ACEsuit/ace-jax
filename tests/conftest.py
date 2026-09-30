@@ -70,6 +70,20 @@ def pace_fixture(path):
     pytest.skip(f"PACE fixture {path} not generated (see pace_ref/README.md)")
 
 
+def require_optional(module):
+    """`pytest.importorskip(module)`, except under ACEJAX_REQUIRE_OPTIONAL (the CI
+    job that installs lammps-jax and matscipy-neighbours) a missing module fails
+    the test, so a broken install cannot pass as all-skipped.  Reads the env at
+    call time."""
+    if os.environ.get("ACEJAX_REQUIRE_OPTIONAL"):
+        import importlib
+        try:
+            return importlib.import_module(module)
+        except ImportError as e:
+            pytest.fail(f"ACEJAX_REQUIRE_OPTIONAL is set but {module} is not importable: {e}")
+    return pytest.importorskip(module)
+
+
 MODELS = {
     "ace1_spline_spherical": "si_fitted.npz",
     "ace_analytic_solid": "si_ace_model.npz",

@@ -17,7 +17,7 @@ from ase.calculators.calculator import all_changes
 
 from ace_jax.calc.point import ACECalculator
 from ace_jax.eval.edge_model import EdgeSiteModel
-from conftest import pace_fixture
+from conftest import pace_fixture, require_optional
 
 FIX = pathlib.Path(__file__).parent.parent / "fixtures" / "pace"
 
@@ -52,8 +52,9 @@ def test_model_body_runs_once_per_shape(monkeypatch, layout, method):
 
 def test_last_timing_splits_neighbour_list_and_model():
     """The benchmark reports model time on its own; `call - nlist` also counted
-    host regrouping and transfers as 'model'."""
-    calc = ACECalculator(str(pace_fixture(FIX / "gesi_sbessel.yace")))
+    host regrouping and transfers as 'model'.  skin=0: a list is built every
+    call (with the skin list, nlist_s is 0 on reuse; tests/test_skin.py)."""
+    calc = ACECalculator(str(pace_fixture(FIX / "gesi_sbessel.yace")), skin=0.0)
     at = _bulk()
     for _ in range(2):
         calc.calculate(at, ["energy", "forces", "stress"], all_changes)
@@ -65,10 +66,7 @@ def test_dense_path_uses_native_neighbour_matrix(monkeypatch):
     """With matscipy_neighbours, the dense (n, K) graph comes straight from
     neighbour_matrix (no sparse build + regroup), K cached across calls and
     re-learnt when an atom outgrows it; results match the sparse layout."""
-    import ace_jax.eval.nlist as nl
-    if not nl.have_matscipy_neighbours():
-        pytest.skip("matscipy_neighbours not installed")
-    import matscipy_neighbours
+    matscipy_neighbours = require_optional("matscipy_neighbours")
     calls = []
     orig = matscipy_neighbours.neighbour_matrix
 
@@ -79,7 +77,7 @@ def test_dense_path_uses_native_neighbour_matrix(monkeypatch):
     monkeypatch.setattr(matscipy_neighbours, "neighbour_matrix", counted)
     y = str(pace_fixture(FIX / "gesi_sbessel.yace"))
     at = _bulk()
-    dense = ACECalculator(y, layout="dense")
+    dense = ACECalculator(y, layout="dense", skin=0.0)      # the rebuild-every-call path
     for _ in range(3):
         dense.calculate(at, ["energy", "forces", "stress"], all_changes)
     assert len(calls) >= 2 and dense.last_timing["nlist_backend"] == "neighbour_matrix"

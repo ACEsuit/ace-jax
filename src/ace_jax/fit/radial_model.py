@@ -22,6 +22,7 @@ from .data import flat_edges
 
 
 def require_analytic(model):
+    model.require_full("editing the radial")
     if model.radial_kind != "analytic":
         raise ValueError(
             f"learned radials need the analytic radial branch, got radial_kind="
@@ -72,6 +73,7 @@ def to_analytic(model, n_q, n_x=2001):
     is projected onto env*P_q(x) (radial_init.from_table), and the branch is
     swapped.  An analytic model is only widened.  Returns (model, relres) with
     relres (NZ, NZ, n_rnl) the per-radial relative projection residual."""
+    model.require_full("to_analytic")
     if model.radial_kind == "analytic":
         wide = widen_radial(model, max(n_q, model.rnl_Wnlq.shape[-1]))
         return wide, np.zeros(model.rnl_Wnlq.shape[:3])

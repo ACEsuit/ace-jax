@@ -54,17 +54,19 @@ uv run ruff check                     # lint; `uv run pre-commit run --all-files
 - **Tests that silently skip** when an optional dependency is missing:
   - `authoring`: `test_coupling_etshim`, `test_coupling_parity`. The coupling cache tests still run: they use `ACEJAX_NO_JULIA=1` and the committed cache.
   - lammps-jax: `test_export_lammps` and `test_bench_scaling`'s export test. Make lammps-jax importable with `PYTHONPATH=<lammps-jax>/python` or `uv pip install -e <lammps-jax>`.
+  - `fast-neighbours` (matscipy-neighbours): `test_calc_jit`'s native `neighbour_matrix` test and `test_efv`'s dense-vs-neighbour_matrix check; without it the skin list and dense layout also take their fallback neighbour path.
   - `pyace` (python-ace, in its own venv under `pace_ref/`).
   - `sphericart`, `psutil`.
   - PACE fixtures.
 - **Test environment variables:**
   - `ACEJAX_REQUIRE_FIXTURES=1` turns a missing-fixture skip into a failure. CI parity jobs set it.
+  - `ACEJAX_REQUIRE_OPTIONAL=1` does the same for the lammps-jax and matscipy-neighbours tests (sites use `conftest.require_optional`, not `pytest.importorskip`). The `optional-deps` CI job sets it.
   - `ACEJAX_TEST_WORKERS` sets the xdist worker count. `-n 0` runs serially.
   - `ACEJAX_FIXTURE_DIR` points the suite at other exports.
   - `ACEJAX_CLI_FULL=1` runs the full CLI test.
 - `tests/conftest.py` sets `XLA_FLAGS=--xla_force_host_platform_device_count=2`, for the sharding tests, and a persistent compile cache in `.jax_cache/`. Both must be set before any jax import, so conftest must not import jax at the top level.
 - **CI** (`.github/workflows/`):
-  - `test.yml`: 3 pytest-split shards on Python 3.12, a smoke job on 3.11 and 3.13, and the `slow` ladder.
+  - `test.yml`: 3 pytest-split shards on Python 3.12, a smoke job on 3.11 and 3.13, the `slow` ladder, and `optional-deps` (matscipy-neighbours plus lammps-jax pinned to a commit, with `ACEJAX_REQUIRE_OPTIONAL=1`).
   - `lint.yml`.
   - Path-gated parity jobs: `julia-parity` (ACEfit rows/QR), `coupling-parity` (ET vs ACEpotentials), `prior-parity`, `pace-parity` (ML-PACE C++ + python-ace).
   - pytest-split balances on `.test_durations`. Refresh it with `pytest --store-durations` when adding slow tests.
@@ -84,7 +86,19 @@ uv run ruff check                     # lint; `uv run pre-commit run --all-files
   - A model maps edge vectors `rij`, never positions and a cell, to site energies. That is what lets one core serve ASE and LAMMPS.
   - `EdgeSiteModel` owns E/F/virial: one `value_and_grad` over `rij`. It also owns the A-basis product (`edge_a`, `edge_a_kind` "gather" or "matmul"), the dense and sparse layouts (`LAYOUTS`) and `estimate_a_bytes`.
   - `ACEModel` and `PACEModel` subclass `EdgeSiteModel` and provide `site_energies` and `site_energies_dense`.
-  - `ACECalculator(path, layout="auto", edge_a_kind="auto")` pads the edge list to a power-of-two bucket, so MD reuses the jitted function. It picks dense when `estimate_a_bytes` fits `dense_budget_bytes()` and the padding fill is at least `MIN_DENSE_FILL`, and calibrates gather against matmul per edge bucket.
+  - `ACECalculator(path, layout="auto", edge_a_kind="auto", skin=1.0)` picks dense when the padding fill is at least `MIN_DENSE_FILL` (a pure fill test: the dense model runs in `CHUNK_NODES` blocks, so memory is not a criterion). The sparse edge list is padded to a power-of-two bucket, so MD reuses the jitted function, and gather is calibrated against matmul per edge bucket.
+  - `skin > 0` (dense only, `calc/skin.py`) reuses a Verlet list built for cutoff + skin until an atom moves skin / 2 or the cell, pbc, species or atom count change; `last_timing["rebuilds"]` counts builds. `skin=0` rebuilds every call and must match the skin path to 1e-12. Setting `calc.model` or `calc.skin` drops the list; the compiled step takes the model's arrays per call, so new weights do not retrace.
+  - `export_lammps(..., k_dense=, max_owned=)`: dense bundles evaluate owned rows only (recorded as `ace_jax.owned_rows`, never `max_owned`, which lammps-jax claims) in `BUNDLE_BLOCK_ROWS` blocks.
+  - **Lean evaluation form** (`eval/model.py::lean`). It composes three exact, load-time transforms of a folded `ACEModel`:
+    - `prune_columns`: drop the R_nl columns A never reads, and the Y_lm above the used l.
+    - `fold_pair`: fold Wpair into the pair radial.
+    - `block_dense`: an l-blocked, species-compact, feature-major dense A, with `blk_aa_specs`; `aa_specs` stay for the sparse path.
+    - `ACECalculator(lean=True)` and `export_lammps(lean=True)` apply it; `calc.eval_model` is the result, and `calc.model` stays as given.
+    - `load` never applies it. Fitting, descriptors and learned radials need the full basis, and a lean model is `energy_only`: its basis methods raise.
+    - A lean model holds the radial twice (`rnl_coefs` sparse, `blk_rnl_coefs` dense). Radial editors (`fit/radial_model.py`, `patch_radial_npz`, `save_npz`) call `model.require_full()`. Edit the full model and re-apply `lean`.
+    - `export_lammps(layout="auto")` sizes memory on the full model: `estimate_a_bytes` underestimates the blocked path's temp on lean widths.
+    - `tests/test_lean.py` holds each transform to 1e-12.
+  - `PACEModel.sbessel_form` is `"matmul"` (`pace_radial._sbessel_mm`) when `nradbase >= SBESSEL_MATMUL_MIN_K` (12), else the rotation recurrence. `load_yace` fixes it per model.
 - **GP fit:**
   - At fixed hyperparameters θ the model is Bayesian linear regression over `[B | k_θ(B, B_M)]`, with streamed sufficient statistics (`fit/stats`, `fit/objective`).
   - The LML is maximised by Adam or L-BFGS (multi-start is `map_restarts`).

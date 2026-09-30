@@ -5,6 +5,10 @@ matmul form is 3x faster for f32 forces and 1.7x slower for f64), so "auto"
 calibrates on the real neighbour list -- once per power-of-two edge bucket --
 and small systems, where compile time dominates, just use the gather.  The
 A-form applies to the sparse layout, so these tests request it explicitly.
+
+The form is an ACEModel property: PACE builds A pool-first and never forms
+per-edge A rows, so for PACE the calibration is a no-op (Task 5 ruling; the
+form tests here moved from a PACE fixture to an ACEModel one).
 """
 import pathlib
 
@@ -17,17 +21,23 @@ from ase import Atoms
 
 import ace_jax.calc.point as point
 from ace_jax.calc.point import ACECalculator
-from conftest import pace_fixture
+from conftest import FIXTURE_DIR, pace_fixture
 
 FIX = pathlib.Path(__file__).parent.parent / "fixtures" / "pace"
 
 
+def _ref_atoms(z):
+    return Atoms(numbers=np.asarray(z["test_Z"]), positions=np.asarray(z["test_pos"]).T,
+                 cell=np.asarray(z["test_cell"]).T, pbc=np.asarray(z["test_pbc"]).astype(bool))
+
+
 @pytest.fixture
 def case():
-    y = pace_fixture(FIX / "gesi_sbessel.yace")
-    ref = np.load(pace_fixture(FIX / "gesi_sbessel_ref.npz"))
-    at = Atoms(numbers=ref["Z_bulk"], positions=ref["pos_bulk"], cell=ref["cell_bulk"], pbc=True)
-    return str(y), at
+    """A two-species ACEModel (the form applies to ACEModel only) on its test structure."""
+    p = FIXTURE_DIR / "sige_nofit.npz"
+    if not p.exists():
+        pytest.skip(f"{p.name} not generated")
+    return str(p), _ref_atoms(np.load(p))
 
 
 def _efs(calc, at):
@@ -83,3 +93,19 @@ def test_bad_kind_rejected(case):
     y, _ = case
     with pytest.raises(ValueError, match="edge_a_kind"):
         ACECalculator(y, edge_a_kind="scatter")
+
+
+def test_pace_is_pool_first_and_never_calibrates(monkeypatch):
+    """PACE never forms per-edge A rows, so "auto" (and an explicit form) is a
+    no-op for it: no calibration, and no form is reported."""
+    y = pace_fixture(FIX / "gesi_sbessel.yace")
+    ref = np.load(pace_fixture(FIX / "gesi_sbessel_ref.npz"))
+    at = Atoms(numbers=ref["Z_bulk"], positions=ref["pos_bulk"], cell=ref["cell_bulk"], pbc=True)
+    monkeypatch.setattr(point, "AUTO_MIN_EDGES", 0)
+    monkeypatch.setattr(point, "calibrate_edge_a", lambda *a, **k: pytest.fail("calibrated"))
+    E = {}
+    for kind in ("auto", "matmul"):
+        calc = ACECalculator(str(y), edge_a_kind=kind, layout="sparse")
+        E[kind] = _efs(calc, at)[0]
+        assert calc.last_edge_a_kind is None
+    assert E["auto"] == E["matmul"]

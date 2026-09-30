@@ -1,0 +1,1054 @@
+[
+ {
+  "model": "ace_Cantor_medium",
+  "n": 65536,
+  "dtype": "float64",
+  "order": "interleaved",
+  "edge_cut": "rcut",
+  "device": "NVIDIA A100-SXM4-80GB",
+  "max_atoms": 106308,
+  "max_edges": 6199740,
+  "k_dense": 86,
+  "k_skin": 78,
+  "k_rcut": 42,
+  "k_packed": 42,
+  "max_owned": 72090,
+  "n_edges": 2752512,
+  "nghost": 31107,
+  "variant": "model_fb",
+  "status": "ok",
+  "chunk": null,
+  "ckpt": true,
+  "compile_s": 4.6550673069999995,
+  "median_s": 0.20676819349999853,
+  "min_s": 0.20663710399999857,
+  "reps": 14,
+  "mem": {
+   "temp_size_in_bytes": 19338002440,
+   "argument_size_in_bytes": 204879780,
+   "output_size_in_bytes": 148793784
+  },
+  "atom_steps_per_s": 316953.9709694299,
+  "kernels": {
+   "total_gpu_us_per_call": 206857.04200000002,
+   "n_kernels": 30,
+   "launches_per_call": 31.0,
+   "hlo_module": "/tmp/dump/module_0093.jit_fn.sm_8.0_gpu_after_optimizations.txt",
+   "rows": [
+    {
+     "kernel": "input_scatter_fusion_1",
+     "us_per_call": 88107.14,
+     "frac": 0.4259,
+     "launches_per_call": 1.0,
+     "GBps": 23.7,
+     "hlo_op": "fusion",
+     "out_shape": "f64[157,72090]{1,0}",
+     "bytes_in": 1998508676,
+     "bytes_out": 90545040,
+     "bwd": true,
+     "srcs": [],
+     "op_names": [
+      "jit(fn)/jvp()/gather",
+      "jit(fn)/jvp()/select_n",
+      "jit(fn)/jvp(jvp())/pad",
+      "jit(fn)/jvp(jvp())/slice",
+      "jit(fn)/jvp(jvp(vmap(vmap(vmap()))))/mul",
+      "jit(fn)/jvp(nkr,nky->nry)/dot_general"
+     ]
+    },
+    {
+     "kernel": "loop_reduce_select_fusion",
+     "us_per_call": 23249.12,
+     "frac": 0.1124,
+     "launches_per_call": 1.0,
+     "GBps": 677.7,
+     "hlo_op": "fusion",
+     "out_shape": "(f64[6199740,126]{1,0}, f64[6199740,126]{1,0})",
+     "bytes_in": 3257433932,
+     "bytes_out": 12498675840,
+     "bwd": false,
+     "srcs": [],
+     "op_names": [
+      "jit(fn)/jvp()/gather",
+      "jit(fn)/jvp()/mul",
+      "jit(fn)/jvp(jit(_where))/broadcast_in_dim",
+      "jit(fn)/jvp(jit(_where))/select_n",
+      "jit(fn)/jvp(vmap())/add",
+      "jit(fn)/jvp(vmap())/convert_element_type"
+     ]
+    },
+    {
+     "kernel": "input_reduce_fusion_1",
+     "us_per_call": 14182.75,
+     "frac": 0.0686,
+     "launches_per_call": 1.0,
+     "GBps": 131.4,
+     "hlo_op": "fusion",
+     "out_shape": "f64[80,72090]{1,0}",
+     "bytes_in": 1817347896,
+     "bytes_out": 46137600,
+     "bwd": false,
+     "srcs": [],
+     "op_names": [
+      "jit(fn)/jvp()/concatenate",
+      "jit(fn)/jvp()/gather",
+      "jit(fn)/jvp()/select_n",
+      "jit(fn)/jvp(ia,ai->i)/dot_general",
+      "jit(fn)/jvp(jvp())/pad",
+      "jit(fn)/jvp(jvp())/slice"
+     ]
+    },
+    {
+     "kernel": "input_multiply_reduce_fusion",
+     "us_per_call": 11446.57,
+     "frac": 0.0553,
+     "launches_per_call": 1.0,
+     "GBps": 2319.8,
+     "hlo_op": "fusion",
+     "out_shape": "(f64[6199740]{0}, f64[6199740,126]{1,0})",
+     "bytes_in": 20254550580,
+     "bytes_out": 6298935840,
+     "bwd": true,
+     "srcs": [],
+     "op_names": [
+      "jit(fn)/jvp()/mul",
+      "jit(fn)/jvp(jit(_where))/broadcast_in_dim",
+      "jit(fn)/transpose(jvp())/mul",
+      "jit(fn)/transpose(jvp())/reduce_sum",
+      "jit(fn)/transpose(jvp(jit(_where)))/broadcast_in_dim",
+      "jit(fn)/transpose(jvp(jit(_where)))/select_n"
+     ]
+    },
+    {
+     "kernel": "input_reduce_fusion_2",
+     "us_per_call": 7876.11,
+     "frac": 0.0381,
+     "launches_per_call": 1.0,
+     "GBps": 1022.1,
+     "hlo_op": "fusion",
+     "out_shape": "f64[6199740,4]{1,0}",
+     "bytes_in": 7851441272,
+     "bytes_out": 198391680,
+     "bwd": true,
+     "srcs": [],
+     "op_names": [
+      "jit(fn)/jvp()/gather",
+      "jit(fn)/jvp(vmap())/add",
+      "jit(fn)/jvp(vmap())/convert_element_type",
+      "jit(fn)/jvp(vmap())/gather",
+      "jit(fn)/jvp(vmap())/lt",
+      "jit(fn)/jvp(vmap())/select_n"
+     ]
+    },
+    {
+     "kernel": "input_reduce_fusion_3",
+     "us_per_call": 7663.82,
+     "frac": 0.037,
+     "launches_per_call": 1.0,
+     "GBps": 424.8,
+     "hlo_op": "fusion",
+     "out_shape": "f64[6199740,4]{1,0}",
+     "bytes_in": 3057577812,
+     "bytes_out": 198391680,
+     "bwd": true,
+     "srcs": [],
+     "op_names": [
+      "jit(fn)/jvp()/gather",
+      "jit(fn)/jvp()/mul",
+      "jit(fn)/jvp()/select_n",
+      "jit(fn)/jvp(jit(_where))/broadcast_in_dim",
+      "jit(fn)/jvp(vmap())/add",
+      "jit(fn)/jvp(vmap())/convert_element_type"
+     ]
+    },
+    {
+     "kernel": "gemm_fusion_dot_1",
+     "us_per_call": 7010.62,
+     "frac": 0.0339,
+     "launches_per_call": 1.0,
+     "GBps": 1327.4,
+     "hlo_op": "fusion",
+     "out_shape": "f64[72090,86,126]{2,1,0}",
+     "bytes_in": 3056616000,
+     "bytes_out": 6249337920,
+     "bwd": true,
+     "srcs": [],
+     "op_names": [
+      "jit(fn)/transpose(jvp(nkr,nky->nry))/transpose"
+     ]
+    },
+    {
+     "kernel": "gemm_fusion_dot",
+     "us_per_call": 6430.54,
+     "frac": 0.0311,
+     "launches_per_call": 1.0,
+     "GBps": 1447.2,
+     "hlo_op": "fusion",
+     "out_shape": "f64[72090,86,25]{2,1,0}",
+     "bytes_in": 8066005920,
+     "bytes_out": 1239948000,
+     "bwd": true,
+     "srcs": [],
+     "op_names": [
+      "jit(fn)/transpose(jvp(nkr,nky->nry))/transpose"
+     ]
+    },
+    {
+     "kernel": "loop_add_fusion",
+     "us_per_call": 5773.18,
+     "frac": 0.0279,
+     "launches_per_call": 1.0,
+     "GBps": 3198.0,
+     "hlo_op": "fusion",
+     "out_shape": "f64[6199740,3]{1,0}",
+     "bytes_in": 18314033360,
+     "bytes_out": 148793760,
+     "bwd": true,
+     "srcs": [],
+     "op_names": [
+      "jit(fn)/jvp()/gather",
+      "jit(fn)/jvp()/mul",
+      "jit(fn)/jvp()/slice",
+      "jit(fn)/jvp()/sub",
+      "jit(fn)/transpose(jvp())/add_any",
+      "jit(fn)/transpose(jvp())/div"
+     ]
+    },
+    {
+     "kernel": "gemm_fusion_dot_general_13",
+     "us_per_call": 5720.3,
+     "frac": 0.0277,
+     "launches_per_call": 1.0,
+     "GBps": 1626.8,
+     "hlo_op": "fusion",
+     "out_shape": "f64[72090,126,25]{2,1,0}",
+     "bytes_in": 7489285920,
+     "bytes_out": 1816668000,
+     "bwd": false,
+     "srcs": [],
+     "op_names": [
+      "jit(fn)/jvp(nkr,nky->nry)/dot_general"
+     ]
+    },
+    {
+     "kernel": "input_scatter_fusion",
+     "us_per_call": 5617.23,
+     "frac": 0.0272,
+     "launches_per_call": 1.0,
+     "GBps": 371.9,
+     "hlo_op": "fusion",
+     "out_shape": "f64[157,72090]{1,0}",
+     "bytes_in": 1998366956,
+     "bytes_out": 90545040,
+     "bwd": true,
+     "srcs": [],
+     "op_names": [
+      "jit(fn)/jvp()/gather",
+      "jit(fn)/jvp()/select_n",
+      "jit(fn)/jvp(jvp())/slice",
+      "jit(fn)/jvp(nkr,nky->nry)/dot_general",
+      "jit(fn)/transpose(jvp())/scatter-add",
+      "jit(fn)/transpose(jvp())/split"
+     ]
+    },
+    {
+     "kernel": "loop_concatenate_fusion",
+     "us_per_call": 5529.06,
+     "frac": 0.0267,
+     "launches_per_call": 1.0,
+     "GBps": 2422.0,
+     "hlo_op": "fusion",
+     "out_shape": "f64[6199740,25]{1,0}",
+     "bytes_in": 12151490400,
+     "bytes_out": 1239948000,
+     "bwd": false,
+     "srcs": [],
+     "op_names": [
+      "jit(fn)/jvp()/add",
+      "jit(fn)/jvp()/div",
+      "jit(fn)/jvp()/mul",
+      "jit(fn)/jvp()/mul;jit(fn)/jvp()/mul",
+      "jit(fn)/jvp()/slice",
+      "jit(fn)/jvp()/stack"
+     ]
+    },
+    {
+     "kernel": "input_reduce_fusion_5",
+     "us_per_call": 5205.95,
+     "frac": 0.0252,
+     "launches_per_call": 1.0,
+     "GBps": 727.8,
+     "hlo_op": "fusion",
+     "out_shape": "(f64[6199740]{0}, f64[6199740,40]{1,0})",
+     "bytes_in": 1755632412,
+     "bytes_out": 2033514720,
+     "bwd": true,
+     "srcs": [],
+     "op_names": [
+      "jit(fn)/jvp()/gather",
+      "jit(fn)/jvp()/select_n",
+      "jit(fn)/jvp(jit(_where))/broadcast_in_dim",
+      "jit(fn)/jvp(vmap())/add",
+      "jit(fn)/jvp(vmap())/convert_element_type",
+      "jit(fn)/jvp(vmap())/gather"
+     ]
+    },
+    {
+     "kernel": "loop_add_select_fusion",
+     "us_per_call": 3647.89,
+     "frac": 0.0176,
+     "launches_per_call": 1.0,
+     "GBps": 9837.0,
+     "hlo_op": "fusion",
+     "out_shape": "(f64[6199740]{0}, f64[6199740]{0})",
+     "bytes_in": 35784903680,
+     "bytes_out": 99195840,
+     "bwd": true,
+     "srcs": [],
+     "op_names": [
+      "jit(fn)/jvp()/and",
+      "jit(fn)/jvp()/div",
+      "jit(fn)/jvp()/gather",
+      "jit(fn)/jvp()/gt",
+      "jit(fn)/jvp()/le",
+      "jit(fn)/jvp()/mul"
+     ]
+    },
+    {
+     "kernel": "loop_add_and_clamp_compare_divide_multiply_power_reduce_select_sqrt_subtract_fusion",
+     "us_per_call": 2815.74,
+     "frac": 0.0136,
+     "launches_per_call": 1.0,
+     "GBps": 603.3,
+     "hlo_op": "fusion",
+     "out_shape": "(f64[6199740]{0}, f64[6199740]{0}, f64[6199740]{0}, pred[6199740]{0}, f64[6199740]{0}, /*index=5*/s32[6199740]{0}, f64[6199740]{0}, f64[6199740]{0}, f64[6199740]{0}, f64[6199740]{0}, /*index=10*/f64[6199740]{0}, f64[6199740]{0}, s32[6199740]{0}, f64[6199740]{0}, f64[6199740]{0}, /*index=15*/f64[6199740]{0}, f64[6199740]{0}, f64[6199740]{0}, f64[6199740]{0}, f64[6199740]{0}, /*index=20*/f64[6199740]{0}, f64[6199740]{0}, f64[6199740]{0}, f64[6199740]{0}, f64[6199740]{0}, /*index=25*/f64[6199740]{0}, pred[6199740]{0}, f64[6199740]{0}, f64[6199740]{0}, f64[6199740]{0}, /*index=30*/f64[6199740]{0}, f64[6199740]{0}, f64[6199740]{0})",
+     "bytes_in": 198396080,
+     "bytes_out": 1500337080,
+     "bwd": false,
+     "srcs": [],
+     "op_names": [
+      "jit(fn)/jvp()/add",
+      "jit(fn)/jvp()/and",
+      "jit(fn)/jvp()/div",
+      "jit(fn)/jvp()/gather",
+      "jit(fn)/jvp()/gt",
+      "jit(fn)/jvp()/le"
+     ]
+    },
+    {
+     "kernel": "loop_broadcast_fusion",
+     "us_per_call": 1858.56,
+     "frac": 0.009,
+     "launches_per_call": 1.0,
+     "GBps": 977.5,
+     "hlo_op": "fusion",
+     "out_shape": "f64[72090,3150]{1,0}",
+     "bytes_in": 0,
+     "bytes_out": 1816668000,
+     "bwd": true,
+     "srcs": [],
+     "op_names": [
+      "jit(fn)/transpose(jvp())/broadcast_in_dim"
+     ]
+    },
+    {
+     "kernel": "loop_add_select_fusion_1",
+     "us_per_call": 1410.6,
+     "frac": 0.0068,
+     "launches_per_call": 1.0,
+     "GBps": 11902.0,
+     "hlo_op": "fusion",
+     "out_shape": "(f64[6199740]{0}, f64[6199740]{0}, f64[6199740]{0}, f64[6199740]{0}, f64[6199740]{0}, /*index=5*/f64[6199740]{0}, f64[6199740]{0}, f64[6199740]{0})",
+     "bytes_in": 16392112560,
+     "bytes_out": 396783360,
+     "bwd": true,
+     "srcs": [],
+     "op_names": [
+      "jit(fn)/jvp()/add",
+      "jit(fn)/jvp()/div",
+      "jit(fn)/jvp()/mul",
+      "jit(fn)/jvp()/mul;jit(fn)/jvp()/mul",
+      "jit(fn)/jvp()/slice",
+      "jit(fn)/jvp()/sub"
+     ]
+    },
+    {
+     "kernel": "input_scatter_fusion_3",
+     "us_per_call": 1372.3,
+     "frac": 0.0066,
+     "launches_per_call": 1.0,
+     "GBps": 2713.6,
+     "hlo_op": "fusion",
+     "out_shape": "f64[72090,3150]{1,0}",
+     "bytes_in": 1907213668,
+     "bytes_out": 1816668000,
+     "bwd": true,
+     "srcs": [],
+     "op_names": [
+      "jit(fn)/transpose(jvp())/scatter-add"
+     ]
+    },
+    {
+     "kernel": "input_reduce_fusion_4",
+     "us_per_call": 1223.22,
+     "frac": 0.0059,
+     "launches_per_call": 1.0,
+     "GBps": 2912.9,
+     "hlo_op": "fusion",
+     "out_shape": "f64[72090,40]{1,0}",
+     "bytes_in": 3540051540,
+     "bytes_out": 23068800,
+     "bwd": false,
+     "srcs": [],
+     "op_names": [
+      "jit(fn)/jvp()/mul",
+      "jit(fn)/jvp()/reduce_sum",
+      "jit(fn)/jvp(jit(_where))/broadcast_in_dim",
+      "jit(fn)/jvp(jit(_where))/select_n"
+     ]
+    },
+    {
+     "kernel": "loop_transpose_fusion",
+     "us_per_call": 324.57,
+     "frac": 0.0016,
+     "launches_per_call": 2.0,
+     "GBps": 5233.8,
+     "hlo_op": "fusion",
+     "out_shape": "f64[6199740,4]{1,0}",
+     "bytes_in": 1500337080,
+     "bytes_out": 198391680,
+     "bwd": false,
+     "srcs": [],
+     "op_names": [
+      "jit(fn)/jvp(vmap())/add",
+      "jit(fn)/jvp(vmap())/div",
+      "jit(fn)/jvp(vmap())/integer_pow",
+      "jit(fn)/jvp(vmap())/mul",
+      "jit(fn)/jvp(vmap())/stack",
+      "jit(fn)/jvp(vmap())/sub"
+     ]
+    },
+    {
+     "kernel": "wrapped_add",
+     "us_per_call": 143.16,
+     "frac": 0.0007,
+     "launches_per_call": 1.0,
+     "GBps": 1897.4,
+     "hlo_op": "fusion",
+     "out_shape": "f64[157,72090]{1,0}",
+     "bytes_in": 181090080,
+     "bytes_out": 90545040,
+     "bwd": true,
+     "srcs": [],
+     "op_names": [
+      "jit(fn)/transpose(jvp())/add_any"
+     ]
+    },
+    {
+     "kernel": "loop_broadcast_fusion_1",
+     "us_per_call": 90.82,
+     "frac": 0.0004,
+     "launches_per_call": 1.0,
+     "GBps": 1994.0,
+     "hlo_op": "fusion",
+     "out_shape": "(f64[157,72090]{1,0}, f64[157,72090]{1,0})",
+     "bytes_in": 0,
+     "bytes_out": 181090080,
+     "bwd": false,
+     "srcs": [],
+     "op_names": []
+    },
+    {
+     "kernel": "input_concatenate_fusion",
+     "us_per_call": 53.57,
+     "frac": 0.0003,
+     "launches_per_call": 1.0,
+     "GBps": 1851.8,
+     "hlo_op": "fusion",
+     "out_shape": "s32[6199740,2]{1,0}",
+     "bytes_in": 49597920,
+     "bytes_out": 49597920,
+     "bwd": false,
+     "srcs": [],
+     "op_names": [
+      "jit(fn)/jvp()/add",
+      "jit(fn)/jvp()/concatenate",
+      "jit(fn)/jvp()/lt",
+      "jit(fn)/jvp()/select_n",
+      "zi",
+      "zj"
+     ]
+    },
+    {
+     "kernel": "input_scatter_fusion_2",
+     "us_per_call": 37.95,
+     "frac": 0.0002,
+     "launches_per_call": 1.0,
+     "GBps": 4787.1,
+     "hlo_op": "fusion",
+     "out_shape": "f64[157,72090]{1,0}",
+     "bytes_in": 91137560,
+     "bytes_out": 90545040,
+     "bwd": true,
+     "srcs": [],
+     "op_names": [
+      "jit(fn)/jvp()/gather",
+      "jit(fn)/jvp()/select_n",
+      "jit(fn)/transpose(jvp())/scatter-add",
+      "jit(fn)/transpose(jvp())/split"
+     ]
+    },
+    {
+     "kernel": "input_reduce_fusion_8",
+     "us_per_call": 34.13,
+     "frac": 0.0002,
+     "launches_per_call": 1.0,
+     "GBps": 1368.6,
+     "hlo_op": "fusion",
+     "out_shape": "f64[72090]{0}",
+     "bytes_in": 46137600,
+     "bytes_out": 576720,
+     "bwd": false,
+     "srcs": [],
+     "op_names": [
+      "jit(fn)/jvp(ia,ai->i)/dot_general"
+     ]
+    }
+   ]
+  },
+  "lammps_jax": "4a7f4fb 2026-09-14 Neighbor Matrix format support",
+  "case_wall_s": 21.059755325317383
+ },
+ {
+  "model": "ace_Cantor_medium",
+  "n": 65536,
+  "dtype": "float64",
+  "order": "interleaved",
+  "edge_cut": "rcut",
+  "device": "NVIDIA A100-SXM4-80GB",
+  "max_atoms": 106308,
+  "max_edges": 6199740,
+  "k_dense": 86,
+  "k_skin": 78,
+  "k_rcut": 42,
+  "k_packed": 42,
+  "max_owned": 72090,
+  "n_edges": 2752512,
+  "nghost": 31107,
+  "variant": "model_fb@32768",
+  "status": "ok",
+  "chunk": 32768,
+  "ckpt": true,
+  "compile_s": 8.197199043000001,
+  "median_s": 0.15123149300000094,
+  "min_s": 0.1510179679999979,
+  "reps": 19,
+  "mem": {
+   "temp_size_in_bytes": 6416740120,
+   "argument_size_in_bytes": 204879780,
+   "output_size_in_bytes": 148793784
+  },
+  "atom_steps_per_s": 433348.8924823323,
+  "kernels": {
+   "total_gpu_us_per_call": 152040.76866666667,
+   "n_kernels": 48,
+   "launches_per_call": 152.0,
+   "hlo_module": "/tmp/dump/module_0093.jit_fn.sm_8.0_gpu_after_optimizations.txt",
+   "rows": [
+    {
+     "kernel": "input_scatter_fusion_1",
+     "us_per_call": 16703.21,
+     "frac": 0.1099,
+     "launches_per_call": 3.0,
+     "GBps": 18.4,
+     "hlo_op": "fusion",
+     "out_shape": "f64[157,24030]{1,0}",
+     "bytes_in": 277269672,
+     "bytes_out": 30181680,
+     "bwd": true,
+     "srcs": [],
+     "op_names": [
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/ia,ai->i/dot_general",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/jvp()/add_any",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/jvp()/pad",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/jvp(vmap(vmap(vmap())))/mul",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/rematted_computation/add",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/rematted_computation/gather"
+     ]
+    },
+    {
+     "kernel": "gemm_fusion_dot_general_4",
+     "us_per_call": 11508.21,
+     "frac": 0.0757,
+     "launches_per_call": 6.0,
+     "GBps": 269.5,
+     "hlo_op": "fusion",
+     "out_shape": "f64[24030,126,25]{2,1,0}",
+     "bytes_in": 2496428640,
+     "bytes_out": 605556000,
+     "bwd": false,
+     "srcs": [],
+     "op_names": [
+      "jit(fn)/jvp()/while/body/eval_jaxpr/nkr,nky->nry/dot_general"
+     ]
+    },
+    {
+     "kernel": "loop_select_fusion",
+     "us_per_call": 10997.08,
+     "frac": 0.0723,
+     "launches_per_call": 3.0,
+     "GBps": 433.9,
+     "hlo_op": "fusion",
+     "out_shape": "f64[2066580,126]{1,0}",
+     "bytes_in": 2688560344,
+     "bytes_out": 2083112640,
+     "bwd": true,
+     "srcs": [],
+     "op_names": [
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/rematted_computation/jit(_where)/broadcast_in_dim",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/rematted_computation/jit(_where)/select_n",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/rematted_computation/mul",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/remat2"
+     ]
+    },
+    {
+     "kernel": "loop_concatenate_fusion_1",
+     "us_per_call": 10709.77,
+     "frac": 0.0704,
+     "launches_per_call": 3.0,
+     "GBps": 94.2,
+     "hlo_op": "fusion",
+     "out_shape": "f64[2066580,25]{1,0}",
+     "bytes_in": 595175040,
+     "bytes_out": 413316000,
+     "bwd": false,
+     "srcs": [],
+     "op_names": [
+      "jit(fn)/jvp()/while/body/eval_jaxpr/add",
+      "jit(fn)/jvp()/while/body/eval_jaxpr/div",
+      "jit(fn)/jvp()/while/body/eval_jaxpr/jit(clip)/max",
+      "jit(fn)/jvp()/while/body/eval_jaxpr/mul",
+      "jit(fn)/jvp()/while/body/eval_jaxpr/mul;jit(fn)/mul",
+      "jit(fn)/jvp()/while/body/eval_jaxpr/slice"
+     ]
+    },
+    {
+     "kernel": "loop_select_fusion_2",
+     "us_per_call": 10676.67,
+     "frac": 0.0702,
+     "launches_per_call": 3.0,
+     "GBps": 1348.5,
+     "hlo_op": "fusion",
+     "out_shape": "f64[2066580,126]{1,0}",
+     "bytes_in": 12314581360,
+     "bytes_out": 2083112640,
+     "bwd": false,
+     "srcs": [],
+     "op_names": [
+      "jit(fn)/jvp()/while/body/eval_jaxpr/gather",
+      "jit(fn)/jvp()/while/body/eval_jaxpr/jit(_where)/broadcast_in_dim",
+      "jit(fn)/jvp()/while/body/eval_jaxpr/jit(_where)/select_n",
+      "jit(fn)/jvp()/while/body/eval_jaxpr/mul",
+      "jit(fn)/jvp()/while/body/eval_jaxpr/vmap()/add",
+      "jit(fn)/jvp()/while/body/eval_jaxpr/vmap()/convert_element_type"
+     ]
+    },
+    {
+     "kernel": "input_reduce_fusion",
+     "us_per_call": 8327.95,
+     "frac": 0.0548,
+     "launches_per_call": 3.0,
+     "GBps": 405.5,
+     "hlo_op": "fusion",
+     "out_shape": "f64[2066580,4]{1,0}",
+     "bytes_in": 3310540688,
+     "bytes_out": 66130560,
+     "bwd": true,
+     "srcs": [],
+     "op_names": [
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/jit(_where)/broadcast_in_dim",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/jit(_where)/select_n",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/mul",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/rematted_computation/gather",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/rematted_computation/jit(_where)/broadcast_in_dim",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/rematted_computation/mul"
+     ]
+    },
+    {
+     "kernel": "loop_reduce_fusion",
+     "us_per_call": 8315.51,
+     "frac": 0.0547,
+     "launches_per_call": 3.0,
+     "GBps": 581.8,
+     "hlo_op": "fusion",
+     "out_shape": "f64[2066580,126]{1,0}",
+     "bytes_in": 2754690904,
+     "bytes_out": 2083112640,
+     "bwd": true,
+     "srcs": [],
+     "op_names": [
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/rematted_computation/gather",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/rematted_computation/vmap()/add",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/rematted_computation/vmap()/convert_element_type",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/rematted_computation/vmap()/div",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/rematted_computation/vmap()/gather",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/rematted_computation/vmap()/iota"
+     ]
+    },
+    {
+     "kernel": "input_reduce_fusion_1",
+     "us_per_call": 7851.38,
+     "frac": 0.0516,
+     "launches_per_call": 3.0,
+     "GBps": 183.2,
+     "hlo_op": "fusion",
+     "out_shape": "f64[2066580,4]{1,0}",
+     "bytes_in": 1372064296,
+     "bytes_out": 66130560,
+     "bwd": true,
+     "srcs": [],
+     "op_names": [
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/broadcast_in_dim",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/ip,pi->i/dot_general",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/jit(_where)/broadcast_in_dim",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/jit(_where)/select_n",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/mul",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/rematted_computation/gather"
+     ]
+    },
+    {
+     "kernel": "input_reduce_fusion_5",
+     "us_per_call": 7465.45,
+     "frac": 0.0491,
+     "launches_per_call": 3.0,
+     "GBps": 1650.3,
+     "hlo_op": "fusion",
+     "out_shape": "f64[24030,40]{1,0}",
+     "bytes_in": 12312826960,
+     "bytes_out": 7689600,
+     "bwd": false,
+     "srcs": [],
+     "op_names": [
+      "jit(fn)/jvp()/while/body/eval_jaxpr/gather",
+      "jit(fn)/jvp()/while/body/eval_jaxpr/jit(_where)/broadcast_in_dim",
+      "jit(fn)/jvp()/while/body/eval_jaxpr/jit(_where)/select_n",
+      "jit(fn)/jvp()/while/body/eval_jaxpr/mul",
+      "jit(fn)/jvp()/while/body/eval_jaxpr/reduce_sum",
+      "jit(fn)/jvp()/while/body/eval_jaxpr/vmap()/add"
+     ]
+    },
+    {
+     "kernel": "gemm_fusion_dot_1",
+     "us_per_call": 7052.33,
+     "frac": 0.0464,
+     "launches_per_call": 3.0,
+     "GBps": 439.9,
+     "hlo_op": "fusion",
+     "out_shape": "f64[24030,86,126]{2,1,0}",
+     "bytes_in": 1018872000,
+     "bytes_out": 2083112640,
+     "bwd": true,
+     "srcs": [],
+     "op_names": [
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/nkr,nky->nry/transpose"
+     ]
+    },
+    {
+     "kernel": "input_reduce_fusion_2",
+     "us_per_call": 6887.09,
+     "frac": 0.0453,
+     "launches_per_call": 3.0,
+     "GBps": 617.8,
+     "hlo_op": "fusion",
+     "out_shape": "f64[2066580]{0}",
+     "bytes_in": 4238495344,
+     "bytes_out": 16532640,
+     "bwd": true,
+     "srcs": [],
+     "op_names": [
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/jit(_where)/broadcast_in_dim",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/jit(_where)/select_n",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/mul",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/reduce_sum",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/rematted_computation/jit(_where)/broadcast_in_dim",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/remat2"
+     ]
+    },
+    {
+     "kernel": "gemm_fusion_dot",
+     "us_per_call": 6487.49,
+     "frac": 0.0427,
+     "launches_per_call": 3.0,
+     "GBps": 478.1,
+     "hlo_op": "fusion",
+     "out_shape": "f64[24030,86,25]{2,1,0}",
+     "bytes_in": 2688668640,
+     "bytes_out": 413316000,
+     "bwd": true,
+     "srcs": [],
+     "op_names": [
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/nkr,nky->nry/transpose"
+     ]
+    },
+    {
+     "kernel": "loop_dynamic_update_slice_fusion",
+     "us_per_call": 6426.07,
+     "frac": 0.0423,
+     "launches_per_call": 3.0,
+     "GBps": 1167.1,
+     "hlo_op": "fusion",
+     "out_shape": "f64[3,24030,86,3]{3,2,1,0}",
+     "bytes_in": 7351341560,
+     "bytes_out": 148793760,
+     "bwd": true,
+     "srcs": [],
+     "op_names": [
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/add_any",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/div",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/jit(norm)/add_any",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/jit(norm)/broadcast_in_dim",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/jit(norm)/mul",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/mul"
+     ]
+    },
+    {
+     "kernel": "loop_concatenate_fusion",
+     "us_per_call": 5536.34,
+     "frac": 0.0364,
+     "launches_per_call": 3.0,
+     "GBps": 858.1,
+     "hlo_op": "fusion",
+     "out_shape": "f64[2066580,25]{1,0}",
+     "bytes_in": 4337691184,
+     "bytes_out": 413316000,
+     "bwd": true,
+     "srcs": [],
+     "op_names": [
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/rematted_computation/add",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/rematted_computation/div",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/rematted_computation/jit(clip)/max",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/rematted_computation/mul",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/rematted_computation/mul;jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/rematted_computation/mul",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/rematted_computation/slice"
+     ]
+    },
+    {
+     "kernel": "loop_add_fusion",
+     "us_per_call": 3960.86,
+     "frac": 0.0261,
+     "launches_per_call": 3.0,
+     "GBps": 2546.1,
+     "hlo_op": "fusion",
+     "out_shape": "f64[2066580]{0}",
+     "bytes_in": 10068136816,
+     "bytes_out": 16532640,
+     "bwd": true,
+     "srcs": [],
+     "op_names": [
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/add_any",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/div",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/jit(_where)/select_n",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/jit(clip)/mul",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/mul",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/neg"
+     ]
+    },
+    {
+     "kernel": "input_reduce_fusion_3",
+     "us_per_call": 3360.88,
+     "frac": 0.0221,
+     "launches_per_call": 3.0,
+     "GBps": 274.2,
+     "hlo_op": "fusion",
+     "out_shape": "f64[2066580]{0}",
+     "bytes_in": 905017216,
+     "bytes_out": 16532640,
+     "bwd": true,
+     "srcs": [],
+     "op_names": [
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/broadcast_in_dim",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/ip,pi->i/dot_general",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/jit(_where)/broadcast_in_dim",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/jit(_where)/select_n",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/mul",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/reduce_sum"
+     ]
+    },
+    {
+     "kernel": "loop_add_and_clamp_compare_divide_multiply_power_reduce_select_sqrt_subtract_fusion",
+     "us_per_call": 3236.39,
+     "frac": 0.0213,
+     "launches_per_call": 3.0,
+     "GBps": 281.5,
+     "hlo_op": "fusion",
+     "out_shape": "(f64[2066580]{0}, f64[2066580]{0}, f64[2066580]{0}, pred[2066580]{0}, f64[2066580]{0}, /*index=5*/f64[2066580]{0}, f64[2066580]{0}, f64[2066580]{0}, f64[2066580]{0}, f64[2066580]{0}, /*index=10*/pred[2066580]{0}, f64[2066580]{0}, f64[2066580]{0}, f64[2066580]{0}, f64[2066580]{0}, /*index=15*/f64[2066580]{0}, s32[2066580]{0}, f64[2066580]{0}, f64[2066580]{0}, f64[2066580]{0}, /*index=20*/f64[2066580]{0}, f64[2066580]{0}, s32[2066580]{0}, f64[2066580]{0}, f64[2066580]{0}, /*index=25*/f64[2066580]{0}, f64[2066580]{0}, f64[2066580]{0}, f64[2066580]{0}, f64[2066580]{0}, /*index=30*/f64[2066580]{0}, f64[2066580]{0}, f64[2066580]{0}, f64[2066580]{0}, f64[2066580]{0})",
+     "bytes_in": 377882960,
+     "bytes_out": 533177640,
+     "bwd": true,
+     "srcs": [],
+     "op_names": [
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/rematted_computation/add",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/rematted_computation/and",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/rematted_computation/div",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/rematted_computation/gather",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/rematted_computation/gt",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/rematted_computation/jit(_where)/select_n"
+     ]
+    },
+    {
+     "kernel": "input_reduce_fusion_4",
+     "us_per_call": 3234.61,
+     "frac": 0.0213,
+     "launches_per_call": 3.0,
+     "GBps": 1858.6,
+     "hlo_op": "fusion",
+     "out_shape": "f64[80,24030]{1,0}",
+     "bytes_in": 5996452708,
+     "bytes_out": 15379200,
+     "bwd": false,
+     "srcs": [],
+     "op_names": [
+      "jit(fn)/jvp()/while/body/eval_jaxpr/add",
+      "jit(fn)/jvp()/while/body/eval_jaxpr/concatenate",
+      "jit(fn)/jvp()/while/body/eval_jaxpr/gather",
+      "jit(fn)/jvp()/while/body/eval_jaxpr/ia,ai->i/dot_general",
+      "jit(fn)/jvp()/while/body/eval_jaxpr/jvp()/pad",
+      "jit(fn)/jvp()/while/body/eval_jaxpr/jvp()/slice"
+     ]
+    },
+    {
+     "kernel": "loop_broadcast_fusion_6",
+     "us_per_call": 2278.56,
+     "frac": 0.015,
+     "launches_per_call": 1.0,
+     "GBps": 914.2,
+     "hlo_op": "fusion",
+     "out_shape": "f64[2066580,126]{1,0}",
+     "bytes_in": 0,
+     "bytes_out": 2083112640,
+     "bwd": false,
+     "srcs": [],
+     "op_names": [
+      "jit(fn)/jit(_where)/broadcast_in_dim"
+     ]
+    },
+    {
+     "kernel": "loop_clamp_select_slice_subtract_fusion",
+     "us_per_call": 2029.74,
+     "frac": 0.0133,
+     "launches_per_call": 3.0,
+     "GBps": 5959.9,
+     "hlo_op": "fusion",
+     "out_shape": "(f64[2066580]{0}, s32[2066580]{0}, f64[2066580]{0}, f64[2066580]{0}, f64[2066580]{0}, /*index=5*/f64[2066580]{0}, f64[2066580,1]{1,0}, f64[2066580,1]{1,0}, f64[2066580]{0}, s32[2066580]{0})",
+     "bytes_in": 11948297280,
+     "bytes_out": 148793760,
+     "bwd": false,
+     "srcs": [],
+     "op_names": [
+      "jit(fn)/jvp()/while/body/eval_jaxpr/add",
+      "jit(fn)/jvp()/while/body/eval_jaxpr/and",
+      "jit(fn)/jvp()/while/body/eval_jaxpr/div",
+      "jit(fn)/jvp()/while/body/eval_jaxpr/gather",
+      "jit(fn)/jvp()/while/body/eval_jaxpr/gt",
+      "jit(fn)/jvp()/while/body/eval_jaxpr/jit(_where)/select_n"
+     ]
+    },
+    {
+     "kernel": "loop_broadcast_fusion_1",
+     "us_per_call": 1863.15,
+     "frac": 0.0123,
+     "launches_per_call": 3.0,
+     "GBps": 325.0,
+     "hlo_op": "fusion",
+     "out_shape": "f64[24030,3150]{1,0}",
+     "bytes_in": 0,
+     "bytes_out": 605556000,
+     "bwd": false,
+     "srcs": [],
+     "op_names": []
+    },
+    {
+     "kernel": "input_scatter_fusion",
+     "us_per_call": 1620.01,
+     "frac": 0.0107,
+     "launches_per_call": 3.0,
+     "GBps": 189.8,
+     "hlo_op": "fusion",
+     "out_shape": "f64[157,24030]{1,0}",
+     "bytes_in": 277269672,
+     "bytes_out": 30181680,
+     "bwd": true,
+     "srcs": [],
+     "op_names": [
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/ia,ai->i/dot_general",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/jvp()/add_any",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/jvp()/pad",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/jvp(vmap(vmap(vmap())))/mul",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/rematted_computation/add",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/rematted_computation/gather"
+     ]
+    },
+    {
+     "kernel": "loop_add_select_fusion",
+     "us_per_call": 1350.37,
+     "frac": 0.0089,
+     "launches_per_call": 3.0,
+     "GBps": 4393.7,
+     "hlo_op": "fusion",
+     "out_shape": "(f64[2066580]{0}, f64[2066580]{0}, f64[2066580]{0}, f64[2066580]{0}, f64[2066580]{0}, /*index=5*/f64[2066580]{0}, f64[2066580]{0})",
+     "bytes_in": 5817362464,
+     "bytes_out": 115728480,
+     "bwd": true,
+     "srcs": [],
+     "op_names": [
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/add_any",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/div",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/jit(_where)/select_n",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/mul",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/mul;jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/rematted_computation/mul",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/neg"
+     ]
+    },
+    {
+     "kernel": "input_scatter_fusion_3",
+     "us_per_call": 1279.65,
+     "frac": 0.0084,
+     "launches_per_call": 3.0,
+     "GBps": 1083.0,
+     "hlo_op": "fusion",
+     "out_shape": "f64[24030,3150]{1,0}",
+     "bytes_in": 780277808,
+     "bytes_out": 605556000,
+     "bwd": true,
+     "srcs": [],
+     "op_names": [
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/rematted_computation/add",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/rematted_computation/lt",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/rematted_computation/mul",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/rematted_computation/select_n",
+      "jit(fn)/transpose(jvp())/while/body/eval_jaxpr/checkpoint/scatter-add"
+     ]
+    },
+    {
+     "kernel": "loop_gather_fusion_1",
+     "us_per_call": 480.28,
+     "frac": 0.0032,
+     "launches_per_call": 3.0,
+     "GBps": 1323.7,
+     "hlo_op": "fusion",
+     "out_shape": "f64[157,24030,1]{2,1,0}",
+     "bytes_in": 605556628,
+     "bytes_out": 30181680,
+     "bwd": false,
+     "srcs": [],
+     "op_names": [
+      "jit(fn)/jvp()/while/body/eval_jaxpr/gather",
+      "jit(fn)/jvp()/while/body/eval_jaxpr/nkr,nky->nry/dot_general"
+     ]
+    }
+   ]
+  },
+  "lammps_jax": "4a7f4fb 2026-09-14 Neighbor Matrix format support",
+  "case_wall_s": 29.93163228034973
+ }
+]
