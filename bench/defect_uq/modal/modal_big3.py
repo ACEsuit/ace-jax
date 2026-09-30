@@ -74,3 +74,31 @@ def run() -> str:
 @app.local_entrypoint()
 def main():
     print(run.remote())
+
+
+@app.function(gpu="B200", image=image.add_local_file(str(pathlib.Path(__file__).parents[1] / "gen" / "big3_local.py"),
+                                                     "/root/big3_local.py"),
+              volumes={"/out": vol}, timeout=6 * 3600, memory=64 * 1024)
+def extra(first: int = 2, last: int = 9) -> str:
+    """Extra v3 CRACK realisations first..last (gen/big3_local.py's recipe and seeding) ->
+    /out/defects/big3_cracks_r<first>-<last>.xyz.  A local 20 GB GPU runs out of memory on one
+    3.3k-atom cell in float64 (needs ~27 GB), hence Modal."""
+    import os
+    import subprocess
+    import time
+    out = f"/out/defects/big3_cracks_r{first}-{last}.xyz"
+    env = dict(os.environ, MACE_MODEL="/data/mace-mh-1.model", BIG2_PROPS="/out/defects/big2_props.json")
+    with open(f"/out/defects/big3_cracks_r{first}-{last}.log", "a") as so:
+        p = subprocess.Popen(["python", "-u", "/root/big3_local.py", out, "--first", str(first), "--last", str(last)],
+                             stdout=so, stderr=subprocess.STDOUT, env=env, cwd="/root")
+        while p.poll() is None:
+            time.sleep(60); vol.commit()
+    vol.commit()
+    return f"realisations {first}-{last}: rc {p.returncode}"
+
+
+@app.local_entrypoint()
+def launch_extra(first: int = 2, last: int = 9, per: int = 2):
+    calls = [extra.spawn(r, min(r + per - 1, last)) for r in range(first, last + 1, per)]
+    for c in calls:
+        print(c.get())

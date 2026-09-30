@@ -15,7 +15,10 @@ nonconformity score s = |dF| / (sigma / sqrt 3) (chi_3 if sigma were a calibrate
 Coverage is P(s <= q(x)) on the target atoms (their MACE errors are used only for scoring).  Atoms in
 a cell are correlated, so the per-atom guarantee is approximate; n_eff is reported.
 
-    python conformal_shift.py <sites.npz> <ard_run_dir> <big3_desc.npz>
+    python conformal_shift.py <sites.npz> <ard_run_dir> <big3_desc.npz> [cal_realisation]
+
+cal_realisation (0 or 1): add that species realisation's labelled v3 CRACK cells to the pool and
+score only the other realisation's cells (target-regime calibration data under the same weighting).
 """
 import sys
 
@@ -40,9 +43,21 @@ pool_Z = np.concatenate([S["Z_test"], S["Z_ood"]])
 pool_cfg = np.concatenate([S["cfg_test"], 10 ** 6 + S["cfg_ood"]])
 free = ~C["fixed"].astype(bool)
 assert len(Dsc["X"]) == len(C["err"]), "big3 descriptor / error order mismatch"
-tg_s = score(C["err"] ** 2, C["sd"] ** 2)[free]
+real = (C["cfg"] // 3 >= 5).astype(int)                  # cells 0-4: realisation 0, 5-9: realisation 1
+famall = C["family"].astype(str)
+sc_all = score(C["err"] ** 2, C["sd"] ** 2)
+CAL_REAL = int(sys.argv[4]) if len(sys.argv) > 4 else None
+if CAL_REAL is not None:
+    add = free & (real == CAL_REAL) & (famall == "crack")
+    pool_s = np.concatenate([pool_s, sc_all[add]])
+    pool_X = np.concatenate([pool_X, Dsc["X"][add]])
+    pool_Z = np.concatenate([pool_Z, Dsc["Z"][add]])
+    pool_cfg = np.concatenate([pool_cfg, 2 * 10 ** 6 + C["cfg"][add] // 3])
+    free = free & (real != CAL_REAL)
+    print(f"pool += realisation {CAL_REAL} crack cells: {add.sum()} labelled atoms; target = realisation {1 - CAL_REAL}")
+tg_s = sc_all[free]
 tg_X, tg_Z = Dsc["X"][free], Dsc["Z"][free]
-fam, rc = C["family"].astype(str)[free], C["r_core"][free]
+fam, rc = famall[free], C["r_core"][free]
 NB = int(S["n_B"])
 PAIR = np.concatenate([np.flatnonzero(S["order"] == 1), np.arange(NB, S["X_train"].shape[1])])
 
@@ -139,5 +154,5 @@ for lab, m in groups:
     print(f"{lab:20s} {m.sum():6d} | {cov[0]:.3f} / {cov[1]:.3f} / {cov[2]:.3f} | "
           f"{np.median(res['B'][m]):.2f}, {np.median(res['C'][m]):.2f} | "
           f"{np.mean(np.isinf(res['B'][m])):.3f} / {np.mean(np.isinf(res['C'][m])):.3f} | {np.mean(logw[m]):+.2f}")
-np.savez(f"{run}/conformal_shift.npz", qA=qA, qB=res["B"], qC=res["C"], score=tg_s, family=fam, r_core=rc,
+np.savez(f"{run}/conformal_shift{'' if CAL_REAL is None else f'_cal{CAL_REAL}'}.npz", qA=qA, qB=res["B"], qC=res["C"], score=tg_s, family=fam, r_core=rc,
          logw=logw, dk=dk_all)
