@@ -36,3 +36,4 @@ for name in sort(collect(keys(cases)))
    println(rpad(name, 18), " A2B ", size(A2B), " nnz=", length(V))
 end
 npzwrite(ARGS[2], out)
+# committed file re-saved losslessly with numpy.savez_compressed (size only)
