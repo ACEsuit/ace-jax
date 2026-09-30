@@ -72,6 +72,24 @@ def main(src, dst):
         names = {}
         for u in opened:
             names.setdefault(pathlib.Path(os.path.realpath(src / u)).relative_to(src), []).append(u)
+        # Static closure over DT_NEEDED: a dependency the trace resolved outside
+        # the bundle (e.g. a host libunwind) must still ship, or a clean machine
+        # fails with "libunwind.so.8: cannot open shared object file".
+        libdirs = [src / "lib", src / "lib" / "julia"]
+        todo = [src / r for rels in names.values() for r in rels]
+        while todo:
+            f = todo.pop()
+            needed = subprocess.run(["patchelf", "--print-needed", str(f)], capture_output=True,
+                                    text=True, check=True).stdout.split()
+            for n in needed:
+                cand = next((d / n for d in libdirs if (d / n).exists()), None)
+                if cand is None:
+                    continue                                  # system library (libc, libm, ...)
+                rel = cand.relative_to(src)
+                real = pathlib.Path(os.path.realpath(cand)).relative_to(src)
+                if rel not in names.get(real, []):
+                    names.setdefault(real, []).append(rel)
+                    todo.append(cand)
         # one file per library (see the macOS branch): keep the name libjulia's
         # loader dlopens by path, point every DT_NEEDED at it
         loader_names = b"".join((src / u).read_bytes() for u in opened
