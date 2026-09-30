@@ -44,6 +44,9 @@ p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDes
 p.add_argument("--calc", required=True); p.add_argument("--system", choices=["sige", "cantor"], required=True)
 p.add_argument("--fmax", type=float, default=5e-3); p.add_argument("--vac-sites", type=int, default=2)
 p.add_argument("--seed", type=int, default=0); p.add_argument("--out", required=True)
+p.add_argument("--eref", default=None,
+               help="json with {'e_ref': {symbol: eV}} added to the energy (pacemaker fits to reference-corrected "
+                    "energies; without them alloy vacancy energies carry a mean(e_ref) - e_ref[removed] offset)")
 a = p.parse_args()
 
 
@@ -68,6 +71,26 @@ def make_calc(spec):
 
 
 calc = make_calc(a.calc)
+if a.eref:
+    from ase.calculators.calculator import Calculator, all_changes
+
+    class _ERef(Calculator):
+        """Adds sum of per-element reference energies to the wrapped calculator's energy."""
+        implemented_properties = ["energy", "free_energy", "forces", "stress"]
+
+        def __init__(self, inner, eref):
+            super().__init__(); self.inner, self.eref = inner, eref
+
+        def calculate(self, atoms=None, properties=("energy",), system_changes=all_changes):
+            Calculator.calculate(self, atoms, properties, system_changes)
+            at = self.atoms.copy(); at.calc = self.inner
+            shift = sum(self.eref[s_] for s_ in at.get_chemical_symbols())
+            e = at.get_potential_energy() + shift
+            self.results = {"energy": e, "free_energy": e, "forces": at.get_forces()}
+            if at.cell.rank == 3:
+                self.results["stress"] = at.get_stress()
+
+    calc = _ERef(calc, json.load(open(a.eref))["e_ref"])
 
 
 def attach(at):
