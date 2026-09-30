@@ -132,8 +132,7 @@ def theta_map_linear(prob, ds, W, *, steps=300, seed=0, init=None, return_stats=
     """theta-MAP of the M = 0 LML for the model with radials W (one streaming
     pass for the statistics, then run_map on the cached Gram).  init: optional
     theta array to warm-start from.  `lin`: the statistics of ds if the caller
-    already has them (then W is unused and may be None; e.g. the widened
-    statistics of fit.density).  Returns the theta array; with
+    already has them (then W is unused and may be None).  Returns the theta array; with
     return_stats=True returns (a, lin, diag): `lin` the linear statistics of
     ds it streamed (so a caller can reuse them without another pass) and
     `diag` a MAP convergence diagnostic computed on the cached `lin` (no extra
@@ -437,7 +436,7 @@ def holdout_score(W, a_fit, a_norm, prob, ds_fit, ds_val, *, lin_fit=None, lin_v
     linear statistics -- no design matrix.  A type with no rows in ds_val is
     skipped.  lin_fit / lin_val: the statistics of ds_fit / ds_val at W if the
     caller already has them (each saves one streaming pass).  With
-    return_readout=True returns (score, c)."""
+    return_readout=True returns (score, c); W may be None when both statistics are given."""
     if lin_fit is None or lin_val is None:
         model = with_radial(prob.model, W)
     if lin_fit is None:
@@ -456,37 +455,6 @@ def gate(candidates, score):
     scores = {k: float(score(k, w)) for k, w in candidates.items()}
     order = list(scores)
     return min(order, key=lambda k: (scores[k], order.index(k))), scores
-
-
-def _gate_setup(prob, ds_fit, W0, *, theta0, map_steps, need_U, n_prior=None):
-    """Candidate-independent setup shared by every fit_radial/fit_radial_density gate
-    call: the gauge Gram Q (n_prior forwarded to radial_gram), the roughness matrix
-    D2, the uniform-in-r Gram U (only when need_U, via one extra data_r_range pass;
-    None otherwise), the normalised init W_init, the common theta a0 (theta0 if
-    given, else the theta-MAP at W_init), its linear statistics lin0 (so a caller can
-    reuse them), and the projected residual r0 = r(W_init; a0).  fit_radial passes
-    this r0 to every learn_radial call, so it is the shared reference for every
-    candidate's relative lam_rough/spec/gap there.  fit_radial_density passes it
-    only to its "radials_only" candidate (plain learn_radial); its density
-    candidates do NOT receive it and instead recompute their own r0 inside
-    learn_radial_density -- the widened projected residual at (V, H) init, which
-    differs from this one (it includes the density columns) -- and scale their
-    priors, including lam_eta_abs = lam_eta * r0_widened / pen0, from that.
-    Returns (Q, D2, U, W_init, a0, lin0, r0)."""
-    Q = radial_gram(prob.model, ds_fit) if n_prior is None else radial_gram(prob.model, ds_fit, n_prior=n_prior)
-    D2 = roughness_matrix(prob.model)
-    U = None
-    if need_U:
-        r_min, _ = data_r_range(ds_fit)
-        U = uniform_gram(prob.model, 0.8 * r_min, prob.cfg.rcut)
-    W_init = normalise(W0, Q, row_active(W0))
-    if theta0 is not None:
-        a0 = to_array(theta0)
-        lin0 = linear_statistics(with_radial(prob.model, W_init), prob.cfg, ds_fit)
-    else:
-        a0, lin0, _ = theta_map_linear(prob, ds_fit, W_init, steps=map_steps, return_stats=True)
-    r0 = float(projected_residual_from_stats(from_array(a0), lin0, prob.gamma))
-    return Q, D2, U, W_init, a0, lin0, r0
 
 
 def fit_radial(prob, ds_fit, ds_val, W0, *, lam_grid=(0.0, 1e-3, 1e-2, 1e-1), spec_grid=(0.0,),
@@ -557,8 +525,19 @@ def fit_radial(prob, ds_fit, ds_val, W0, *, lam_grid=(0.0, 1e-3, 1e-2, 1e-1), sp
     # uniform-in-r Gram (if needed), and the relative-lambda reference
     # r0 = r(W_init; a0) (all runs start there)
     n_prior = learn_kw.pop("n_prior", None)
-    Q, D2, U, W_init, a0, lin0, r0 = _gate_setup(prob, ds_fit, W0, theta0=theta0, map_steps=map_steps,
-                                                 need_U=any(gap_grid), n_prior=n_prior)
+    Q = radial_gram(prob.model, ds_fit) if n_prior is None else radial_gram(prob.model, ds_fit, n_prior=n_prior)
+    D2 = roughness_matrix(prob.model)
+    U = None
+    if any(gap_grid):
+        r_min, _ = data_r_range(ds_fit)
+        U = uniform_gram(prob.model, 0.8 * r_min, prob.cfg.rcut)
+    W_init = normalise(W0, Q, row_active(W0))
+    if theta0 is not None:
+        a0 = to_array(theta0)
+        lin0 = linear_statistics(with_radial(prob.model, W_init), prob.cfg, ds_fit)
+    else:
+        a0, lin0, _ = theta_map_linear(prob, ds_fit, W_init, steps=map_steps, return_stats=True)
+    r0 = float(projected_residual_from_stats(from_array(a0), lin0, prob.gamma))
     rw = learn_kw.get("rough_weights")
     rough0 = float(roughness(W_init, D2, jnp.ones(W0.shape[2]) if rw is None
                              else jnp.asarray(rw, jnp.float64)))
@@ -611,7 +590,7 @@ def _jsonable(x):
     return x
 
 
-def save_result(out_dir, W, info, *, src_npz=None, model=None, readout=None, eta=None, mask=None):
+def save_result(out_dir, W, info, *, src_npz=None, model=None, readout=None):
     """Write rnl_Wnlq.npy and radial_info.json to out_dir.  With src_npz and
     model (the analytic model W belongs to, e.g. after widen_radial /
     to_analytic) also write model.npz = src_npz with the learned radial AND
@@ -619,15 +598,9 @@ def save_result(out_dir, W, info, *, src_npz=None, model=None, readout=None, eta
     by fit_radial; also saved as readout.npy).  The source npz's WB/Wpair
     belong to the old radials, so writing model.npz without a readout is
     refused rather than silently stale.  info["readout"] is kept out of the
-    JSON (it is len_basis long).
-
-    `eta`/`mask`: the frozen density of a fit_radial_density selection; then
-    the readout is [c | d] (len_basis + P * NZ), eta is also saved as
-    eta.npy, and model.npz carries the fs keys (eval.fs_model)."""
+    JSON (it is len_basis long)."""
     if readout is None:
         readout = info.get("readout")
-    if eta is not None and mask is None:
-        raise ValueError("save_result: eta needs the `mask` it was learned on")
     if src_npz is not None:
         if model is None:
             raise ValueError("save_result: src_npz needs the analytic `model` W belongs to")
@@ -641,19 +614,6 @@ def save_result(out_dir, W, info, *, src_npz=None, model=None, readout=None, eta
         json.dumps(_jsonable({k: v for k, v in info.items() if k != "readout"}), indent=1))
     if readout is not None:
         np.save(out / "readout.npy", np.asarray(readout))
-    if eta is not None:
-        np.save(out / "eta.npy", np.asarray(eta))
     if src_npz is not None:
         from ..construct.export import patch_radial_npz
-        fs = None
-        if eta is not None:
-            from .density import EPS
-            eta = np.asarray(eta)
-            k = eta.shape[0] * eta.shape[1]
-            readout = np.asarray(readout)
-            if readout.size <= k:
-                raise ValueError(f"save_result: readout has {readout.size} values, not enough for "
-                                 f"eta's P * NZ = {k} density columns plus a nonempty linear part")
-            fs = (eta, readout[-k:].reshape(eta.shape[0], eta.shape[1]), np.asarray(mask), EPS)
-            readout = readout[:-k]
-        patch_radial_npz(src_npz, out / "model.npz", with_radial(model, W), readout=readout, fs=fs)
+        patch_radial_npz(src_npz, out / "model.npz", with_radial(model, W), readout=readout)

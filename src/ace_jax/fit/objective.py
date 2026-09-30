@@ -19,7 +19,7 @@ class Problem(NamedTuple):
     model: object
     ind: object
     cfg: object
-    gamma: jnp.ndarray    # (len_basis,), or wider with fit.density columns
+    gamma: jnp.ndarray    # (len_basis,), or wider when extra linear columns are appended
     prior: object
 
 

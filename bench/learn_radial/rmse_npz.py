@@ -1,5 +1,4 @@
-"""Validation errors of exported models (model.npz, plain or with a frozen
-sqrt-density term) on the run.py split: energy RMSE/MAE in meV/atom and force
+"""Validation errors of exported models (model.npz) on the run.py split: energy RMSE/MAE in meV/atom and force
 RMSE/MAE in meV/Å, evaluated with the model itself (energy_forces_virial), so
 it measures exactly what qoi.py and MD will use.
 

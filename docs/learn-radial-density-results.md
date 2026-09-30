@@ -1,5 +1,13 @@
 # Radials + sqrt(density) by VarPro: results
 
+> **Branch status (2026-09-30).** The verdict below is that sqrt(ρ) is not worth pursuing, so the density machinery has been removed from the branch. That covers `eval/fs_model.py`, `fit/radial_density.py`, the density columns in `fit/density.py`, the fs npz keys and the `--density` driver flags. The last commit containing them is `3adb082`. What remains:
+> - the optimiser, generalised as `fit/block_lbfgs.py` (curvature-matched block scaling and the joint → alternating fallback), for future multi-block VarPro such as radials plus species embedding;
+> - the driver options `--extra-train`, `--tol` and `--init-radials`, plus `rmse_npz.py` and `qoi.py --eref`;
+> - this write-up.
+>
+> Code references below (`learn_radial_density`, `FSModel`, …) refer to that commit. The spike scripts (`spike/fixed_fs*.py`, `spike/pace_*.py`, …) were never committed.
+
+
 This note tests the joint radial and density learning of `docs/specs/2026-09-28-radial-density-varpro-design.md` against the success criteria in that spec. The data, splits, MACE teacher and QoI protocol are the same as in `docs/learn-radial-pacemaker-comparison.md`. Raw numbers are under `docs/figures/learn-radial/density/`, and `qoi_table.py` there regenerates the QoI tables.
 
 ## Verdict: is sqrt(ρ) worth pursuing?

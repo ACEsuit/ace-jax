@@ -6,11 +6,6 @@ square root, feature.py), contributes a species-blocked column to the linear
 design (site energy d_z * u_i).  eta (NZ, n_pair) is the VarPro parameter; given
 eta the fit is the ordinary M = 0 linear solve over [c | d].
 
-`density_rows_masked` generalises this to P >= 0 densities over an arbitrary
-masked span of the full compact basis (eta (P, NZ, D), mask (D,) 0/1), used by
-`fit.radial_density`'s joint radial + density VarPro to widen the linear design
-by P * NZ columns.
-
 Rows are analytic from the precomputed edge Jacobian J = dB/dr (linear_rows), so
 d/deta is cheap -- no autodiff through compact_basis.  Force/virial assembly
 mirrors rows.residual_rows and is FD-checked against autodiff of the energy rows.
@@ -19,7 +14,7 @@ import jax
 import jax.numpy as jnp
 
 from .data import VOIGT
-from .rows import Rows, linear_rows
+from .rows import Rows
 
 EPS = 1e-6
 
@@ -79,69 +74,3 @@ def density_rows_pair(eta, cfg, batch, Bpair, Jpair):
         val = -0.5 * (Tf[:, a] * rij[:, b] + Tf[:, b] * rij[:, a])      # (E,)
         V = V.at[:, v].add(jax.ops.segment_sum(val[:, None] * colhot, ecfg, num_segments=C + 1))
     return Rows(E, F, V[:C])
-
-
-def density_rows_masked(eta, mask, cfg, batch, X, J):
-    """P * NZ density columns over the masked compact basis: column p * NZ + z is
-    species z's ssqrt(eta[p, z] . (mask * X_i)).  eta (P, NZ, D), mask (D,) 0/1,
-    X (Ncap, D) and J (Ncap * K, D, 3) as linear_rows returns them.  Each p is
-    density_rows_pair over the full width with eta masked (its algebra is
-    width-agnostic), so P = 1 with the pair mask reproduces density_rows."""
-    Ncap, K = batch.nbr.shape
-    P = eta.shape[0]
-    if P == 0:
-        C = batch.y_E.shape[0]
-        return Rows(jnp.zeros((C, 0)), jnp.zeros((Ncap, 3, 0)), jnp.zeros((C, 6, 0)))
-    Jr = J.reshape(Ncap, K, cfg.D, 3)
-    rows = [density_rows_pair(eta[p] * mask, cfg, batch, X, Jr) for p in range(P)]
-    return Rows(*(jnp.concatenate([getattr(r, k) for r in rows], axis=-1) for k in "EFV"))
-
-
-def density_mask(cfg, span):
-    """(D,) 0/1 span of the density over the compact basis [B | pair]."""
-    if span == "full":
-        return jnp.ones(cfg.D)
-    if span == "pair":
-        return jnp.concatenate([jnp.zeros(cfg.n_B), jnp.ones(cfg.n_pair)])
-    raise ValueError(f"density span must be 'full' or 'pair', got {span!r}")
-
-
-def compact_gamma(gamma, cfg):
-    """The species-blocked prior diagonal (len_basis,) regrouped per species onto
-    the compact basis, (NZ, D), in the layout of rows._place."""
-    g, nB, nP, NZ = jnp.asarray(gamma), cfg.n_B, cfg.n_pair, cfg.NZ
-    return jnp.stack([jnp.concatenate([g[z * nB:(z + 1) * nB], g[NZ * nB + z * nP:NZ * nB + (z + 1) * nP]])
-                      for z in range(NZ)])
-
-
-def density_gamma(gamma, P, NZ):
-    """Prior diagonal of the widened readout [c | d]: Gamma, then the geometric
-    mean of Gamma for each of the P * NZ density coefficients."""
-    g = jnp.asarray(gamma)
-    return jnp.concatenate([g, jnp.full(P * NZ, jnp.exp(jnp.mean(jnp.log(g))))])
-
-
-def batch_density_stats(model, eta, mask, cfg, batch):
-    from .stats import Stats, _linear_type_stats
-    r, X, J = linear_rows(model, cfg, batch)
-    d = density_rows_masked(eta, mask, cfg, batch, X, J)
-    E, F, V = (jnp.concatenate([getattr(r, k), getattr(d, k)], -1) for k in "EFV")
-    Dt = E.shape[-1]
-    sE = _linear_type_stats(E, batch.y_E, batch.w_E)
-    sF = _linear_type_stats(F.reshape(-1, Dt), batch.y_F.reshape(-1), jnp.repeat(batch.w_F, 3))
-    sV = _linear_type_stats(V.reshape(-1, Dt), batch.y_V.reshape(-1), jnp.repeat(batch.w_V, 6))
-    return Stats(*(s[i] for i in range(5) for s in (sE, sF, sV)))
-
-
-def linear_density_statistics(model, eta, mask, cfg, ds):
-    """Streamed statistics of the widened design [linear | P * NZ density columns],
-    Dt = len_basis + P * NZ, same layout and checkpointed scan as
-    stats.linear_statistics.  P = 0 IS linear_statistics (bit-identical)."""
-    from .stats import Stats, linear_statistics
-    if eta.shape[0] == 0:
-        return linear_statistics(model, cfg, ds)
-    Dt = cfg.len_basis + eta.shape[0] * cfg.NZ
-    z2, z1, z0 = jnp.zeros((Dt, Dt)), jnp.zeros(Dt), jnp.zeros(())
-    zero = Stats(z2, z2, z2, z1, z1, z1, z0, z0, z0, z0, z0, z0, z0, z0, z0)
-    f = jax.checkpoint(lambda b: batch_density_stats(model, eta, mask, cfg, b))
-    return jax.lax.scan(lambda c, b: (jax.tree.map(jnp.add, c, f(b)), None), zero, ds)[0]
