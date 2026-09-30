@@ -1,0 +1,34 @@
+{
+ "selected": "density_lam_eta=0",
+ "scores": {
+  "init": 21.263258819388845,
+  "radials_only": 2.5422647916889924,
+  "density_lam_eta=0": 2.2181904528763288
+ },
+ "n_q": 12,
+ "ntrain": 200,
+ "nval": 100,
+ "lam_grid": [
+  0.1
+ ],
+ "spec_grid": [
+  0.0
+ ],
+ "spec_p": 4.0,
+ "gap_grid": [
+  0.0
+ ],
+ "steps": 40,
+ "reprofile_every": 50,
+ "learn_sigma_e_mult": 1.0,
+ "to_analytic_relres_max": 0.00021616685161215786,
+ "density": "full",
+ "extra_train": [
+  "/data/sige_vac_mh1.xyz"
+ ],
+ "tol": 0.0,
+ "P_selected": 2,
+ "density_mode": "joint",
+ "lam_eta_grid": "0",
+ "seconds": 478.2362117767334
+}
