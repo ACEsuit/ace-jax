@@ -201,7 +201,8 @@ def subprocess_runner(host, env):
         e = child_env(env, mode=c.mode, cpus=cpus)
         if prev and prev.get("step_s"):                  # sizes the LAMMPS step count
             e["BENCH_PREV"] = json.dumps({"step_s": prev["step_s"], "n_atoms": prev["n_atoms"],
-                                          "layout": prev.get("layout")})
+                                          "layout": prev.get("layout"),
+                                          "matrix_overflow": prev.get("matrix_overflow")})
         cap = HOSTS[host].get("rss_cap_gb")
         rc, out, err, peak, capped = run_capped(cmd, e, timeout=7200,
                                                 cap_bytes=cap and cap * 2**30)

@@ -56,6 +56,31 @@ def test_calculator_caches_chol_on_device(fitted):
     assert isinstance(calc.posterior.chol, jax.Array) and calc.posterior.chol.dtype == np.float64
 
 
+# How far lean=True may drift from lean=False.  The lean form (#16) is exact to roundoff today.  Once
+# lean() also splines learned radials (#19, spline_tol "auto" = 1e-10), the lean MEAN may differ from
+# the full model by up to that tolerance; sigma always comes from the full model.  Raise it then.
+LEAN_RTOL = 1e-8
+
+
+def test_posterior_lean_and_full_models_agree(fitted):
+    """With posterior=, lean=True and lean=False give the same forces and forces_std: E/F come from
+    eval_model (the lean, energy-only form when lean=True), sigma's design rows from the full model."""
+    from ase.io import read
+    from ace_jax import ACECalculator
+    at = max(read(XYZ, ":8"), key=len)                                # the largest fixture cell
+    out = {}
+    for lean in (True, False):
+        calc = ACECalculator(str(fitted / "model.npz"), posterior=str(fitted / "posterior.npz"), lean=lean)
+        if lean:
+            assert calc.eval_model is not calc.model                  # the lean path is really exercised
+        a = at.copy(); a.calc = calc
+        out[lean] = (a.get_forces(), np.asarray(calc.get_property("forces_std", a)))
+    (F1, s1), (F0, s0) = out[True], out[False]
+    np.testing.assert_allclose(F1, F0, rtol=LEAN_RTOL, atol=LEAN_RTOL * np.abs(F0).max())
+    np.testing.assert_allclose(s1, s0, rtol=LEAN_RTOL, atol=LEAN_RTOL * s0.max())
+    assert s0.max() > 0
+
+
 def test_model_swap_is_refused_with_a_posterior(fitted):
     """The posterior, its design-row model and the device factors all belong to the model FILE the
     calculator was built with: swapping calc.model would leave forces_std serving the old model's

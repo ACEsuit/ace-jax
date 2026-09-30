@@ -11,6 +11,7 @@ from ase.calculators.calculator import Calculator, all_changes
 
 from ..eval.edge_model import LAYOUTS, calibrate_edge_a, check_edge_a_kind, with_edge_a_kind
 from ..eval.model import highest_precision
+from ..eval.model import lean as lean_form
 from ..eval.nlist import backend as nlist_backend
 from ..eval.nlist import dense_from_sparse, dense_graph, have_matscipy_neighbours, sparse_graph
 from . import skin as skin_list
@@ -53,7 +54,7 @@ class ACECalculator(Calculator):
                               "site_descriptors", "forces_std"]
 
     def __init__(self, model, meta=None, cutoff=None, dtype=None, edge_a_kind="auto",
-                 layout="auto", skin=1.0, posterior=None,
+                 layout="auto", skin=1.0, lean=True, posterior=None,
                  forces_std_every_call=False, **kw):
         """`ACECalculator("si_fitted.npz")` is the intended form: cutoff,
         species and dtype all come from the file.  A pre-loaded (model, meta)
@@ -78,6 +79,15 @@ class ACECalculator(Calculator):
         `last_timing["rebuilds"]` counts the calls that built a neighbour list,
         and `last_timing["nlist_s"]` is this call's build time (0 on reuse).
 
+        `lean` (default True) evaluates energies, forces and stress with
+        `ace_jax.eval.model.lean(model)`: exact to roundoff, with the per-edge
+        work the energy never reads removed (docs/ace-vs-pace-gap.md).  It is
+        `eval_model`; `model` stays the model as given, and descriptors use it.
+        A PACE or unfolded model is evaluated as given either way.  Setting
+        `calc.model` recomputes the lean form on the host (a device-to-host copy
+        of the model's arrays): negligible for MD, but a per-step cost if the
+        model is swapped every step.
+
         `posterior` (a `posterior.npz` from `fit --uq ard`, with `model` the matching
         `model.npz` FILE) adds `results["forces_std"]`: the per-atom force std, shape (N,).
         By default (posteriors fitted with `--ard-variance sandwich`) it is lambda times the
@@ -92,7 +102,8 @@ class ACECalculator(Calculator):
         Memory: forces_std builds the force design rows of the WHOLE cell, about N*3*L*8 bytes
         (N atoms padded, L = (n_B + n_pair) * NZ columns) -- 7 GB for N = 100k at L = 3k -- on
         the JAX device, besides the posterior's L^2 factor.  The edge Jacobian is node-chunked
-        (`linear_rows_chunked`), the rows themselves are not: size cells to fit them."""
+        (`linear_rows_chunked`), the rows themselves are not: size cells to fit them.  The rows come
+        from the FULL `model` (never the energy-only `eval_model`), whatever `lean` is."""
         model_path = model
         if posterior is not None:
             import jax
@@ -111,6 +122,7 @@ class ACECalculator(Calculator):
         from ..eval.api import _resolve
         model, meta = _resolve(model, meta, dtype)
         self._skin_jit = None                 # (static model part, cutoff, compiled step)
+        self._lean = bool(lean)
         self.model = model                    # (the setter resets what derives from it)
         self.meta = meta
         self.edge_a_kind = edge_a_kind
@@ -175,7 +187,10 @@ class ACECalculator(Calculator):
             if post.Q is not None:
                 post = post._replace(Q=jnp.asarray(post.Q, jnp.float64))
             self.posterior = post
-            self._fit_model = _load_fit_model(model_path)[0]
+            # design rows from the full model as given (calc.model; the lean eval_model is energy-only);
+            # a non-float64 dtype would degrade sigma, so the fit model is then re-read in float64
+            self._fit_model = (self.model if dtype is None or np.dtype(dtype) == np.float64
+                               else _load_fit_model(model_path)[0])
             self._fit_cfg = GPConfig(r0=1.0, rcut=float(meta["rcut"]), n_B=meta["n_B"],
                                      n_pair=meta["n_pair"], NZ=NZ, C=1)
 
@@ -201,10 +216,17 @@ class ACECalculator(Calculator):
                                  "ACECalculator(model_file, posterior=posterior_file) instead")
             self.reset()
         self._model = model
+        self._eval_model = lean_form(model) if self._lean else model
         self._by_kind = {}                    # form -> model in that form
         self._by_bucket = {}                  # edge bucket -> calibrated form
         self._skin_state = None               # the skin list in use (calc.skin.SkinState)
         self._skin_step = None                # f(u, arrays, K), bound to this model's weights
+
+    @property
+    def eval_model(self):
+        """The model energies, forces and stress are evaluated with: `lean(model)`
+        (or `model` itself with lean=False).  Energy only: no descriptors."""
+        return self._eval_model
 
     @property
     def skin(self):
@@ -222,7 +244,7 @@ class ACECalculator(Calculator):
         (model structure, cutoff) and built on first use."""
         if self._skin_step is None:
             import equinox as eqx
-            params, static = eqx.partition(self.model, eqx.is_array)
+            params, static = eqx.partition(self.eval_model, eqx.is_array)
             key = (static, self.cutoff)
             if self._skin_jit is None or not bool(self._skin_jit[:2] == key):
                 self._skin_jit = (*key, skin_list.jitted_step(static, self.cutoff))
@@ -366,13 +388,13 @@ class ACECalculator(Calculator):
             jax.block_until_ready(args)
             t1 = time.perf_counter()
             with highest_precision():
-                E, F, V = jax.block_until_ready(self._efv_dense(self.model, *args))
+                E, F, V = jax.block_until_ready(self._efv_dense(self.eval_model, *args))
         else:
             # pad the edge list to a power-of-two bucket: MD changes the edge
             # count every few steps, and each new length was a new compiled shape
             n_e = len(g.senders)
             bucket = _edge_bucket(n_e)
-            park = np.array([float(self.model.pad_cutoff()), 0.0, 0.0])
+            park = np.array([float(self.eval_model.pad_cutoff()), 0.0, 0.0])
             rij = jnp.asarray(np.concatenate([np.asarray(g.rij), np.tile(park, (bucket - n_e, 1))]),
                               dtype=dtype)
             send = jnp.asarray(np.concatenate([np.asarray(g.senders), np.zeros(bucket - n_e, int)]),
@@ -456,14 +478,14 @@ class ACECalculator(Calculator):
 
     def _in_form(self, kind):
         if kind not in self._by_kind:
-            self._by_kind[kind] = with_edge_a_kind(self.model, kind)
+            self._by_kind[kind] = with_edge_a_kind(self.eval_model, kind)
         return self._by_kind[kind]
 
     def _model_for(self, rij, zi, zj, send, n_nodes, node_z):
         """The model in the A-basis form to use for this neighbour list."""
-        if not self.model.uses_edge_a:        # pool-first (PACE): the form is inert
+        if not self.eval_model.uses_edge_a:   # pool-first (PACE): the form is inert
             self.last_edge_a_kind = None
-            return self.model
+            return self.eval_model
         n_edges = int(rij.shape[0])
         if self.edge_a_kind != "auto":
             kind = self.edge_a_kind
@@ -473,7 +495,7 @@ class ACECalculator(Calculator):
             bucket = 1 << max(n_edges - 1, 0).bit_length()
             if bucket not in self._by_bucket:
                 with highest_precision():
-                    best, _ = calibrate_edge_a(self.model, rij, zi, zj, send, n_nodes,
+                    best, _ = calibrate_edge_a(self.eval_model, rij, zi, zj, send, n_nodes,
                                                node_z, reps=3)
                 self._by_bucket[bucket] = best.edge_a_kind
                 self._by_kind.setdefault(best.edge_a_kind, best)

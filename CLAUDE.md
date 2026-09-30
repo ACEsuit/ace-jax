@@ -88,7 +88,19 @@ uv run ruff check                     # lint; `uv run pre-commit run --all-files
   - `ACEModel` and `PACEModel` subclass `EdgeSiteModel` and provide `site_energies` and `site_energies_dense`.
   - `ACECalculator(path, layout="auto", edge_a_kind="auto", skin=1.0)` picks dense when the padding fill is at least `MIN_DENSE_FILL` (a pure fill test: the dense model runs in `CHUNK_NODES` blocks, so memory is not a criterion). The sparse edge list is padded to a power-of-two bucket, so MD reuses the jitted function, and gather is calibrated against matmul per edge bucket.
   - `skin > 0` (dense only, `calc/skin.py`) reuses a Verlet list built for cutoff + skin until an atom moves skin / 2 or the cell, pbc, species or atom count change; `last_timing["rebuilds"]` counts builds. `skin=0` rebuilds every call and must match the skin path to 1e-12. Setting `calc.model` or `calc.skin` drops the list; the compiled step takes the model's arrays per call, so new weights do not retrace.
-  - `export_lammps(..., k_dense=, max_owned=)`: dense bundles evaluate owned rows only (recorded as `ace_jax.owned_rows`, never `max_owned`, which lammps-jax claims) in `BUNDLE_BLOCK_ROWS` blocks.
+  - `export_lammps(..., k_dense=, max_owned=, max_neighbors=)`: dense and matrix bundles evaluate owned rows only (recorded as `ace_jax.owned_rows`, never `max_owned`, which lammps-jax claims: its reader takes a key name from anywhere in the file, and `tests/test_export_lammps.py::LAMMPS_JAX_KEYS` lists them) in `BUNDLE_BLOCK_ROWS` blocks.
+  - Bundle layouts: `sparse`, `dense` (lammps-jax's edge buffer, argsort-packed into slots every step) and `matrix` (lammps-jax's neighbour-matrix input: the LAMMPS full list, copied only on list rebuilds, so it holds skin pairs the model masks at rcut; no per-step packing; `k_dense < max_neighbors` compacts in-cutoff pairs into tighter model slots). `layout="matrix"` requires `max_neighbors` (list slots; a `k_dense` sized for rcut is too small for the rcut + skin list). `layout="auto"` picks `matrix` over `dense` only when `max_neighbors` is passed, `matrix_supported()`, and one block + `matrix_prep_bytes` fits. The bundle records `ace_jax.lammps_jax`; an older LAMMPS plugin rejects matrix bundles (rebuild it, or `layout="dense"`).
+  - `neighbour_capacity(atoms, rcut, skin, slots="skin"|"cutoff")` sizes the buffers. `"skin"` is the safe default; `"cutoff"` (tight model slots, 1.2-1.4x on Cantor) is opt-in for stable MD only. Overflow is always NaN or a LAMMPS abort, never truncation.
+  - **Lean evaluation form** (`eval/model.py::lean`). It composes three exact, load-time transforms of a folded `ACEModel`:
+    - `prune_columns`: drop the R_nl columns A never reads, and the Y_lm above the used l.
+    - `fold_pair`: fold Wpair into the pair radial.
+    - `block_dense`: an l-blocked, species-compact, feature-major dense A, with `blk_aa_specs`; `aa_specs` stay for the sparse path.
+    - `ACECalculator(lean=True)` and `export_lammps(lean=True)` apply it; `calc.eval_model` is the result, and `calc.model` stays as given.
+    - `load` never applies it. Fitting, descriptors and learned radials need the full basis, and a lean model is `energy_only`: its basis methods raise.
+    - A lean model holds the radial twice (`rnl_coefs` sparse, `blk_rnl_coefs` dense). Radial editors (`fit/radial_model.py`, `patch_radial_npz`, `save_npz`) call `model.require_full()`. Edit the full model and re-apply `lean`.
+    - `export_lammps(layout="auto")` sizes memory on the full model: `estimate_a_bytes` underestimates the blocked path's temp on lean widths.
+    - `tests/test_lean.py` holds each transform to 1e-12.
+  - `PACEModel.sbessel_form` is `"matmul"` (`pace_radial._sbessel_mm`) when `nradbase >= SBESSEL_MATMUL_MIN_K` (12), else the rotation recurrence. `load_yace` fixes it per model.
 - **GP fit:**
   - At fixed hyperparameters θ the model is Bayesian linear regression over `[B | k_θ(B, B_M)]`, with streamed sufficient statistics (`fit/stats`, `fit/objective`).
   - The LML is maximised by Adam or L-BFGS (multi-start is `map_restarts`).

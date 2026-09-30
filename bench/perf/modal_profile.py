@@ -466,15 +466,16 @@ def microbench_ab_remote(argvs: list, rounds: int = 1):
     """Each case at the merge base (/ace-jax-base/src) and at HEAD (/ace-jax/src),
     each in its own process, all on ONE GPU.  With rounds > 1 the order
     alternates per round (before, after, after, before, ...) to cancel drift;
-    every run lands in out[which] with its "round"."""
+    every run lands in out[which] with its "round".  The order also alternates
+    case by case, so with rounds=1 neither side always runs first."""
     import subprocess
     gpu = subprocess.run("nvidia-smi --query-gpu=name --format=csv,noheader", shell=True,
                          capture_output=True, text=True).stdout.strip()
     out = {"before": [], "after": [], "gpu": gpu}
     order = (("before", "/ace-jax-base/src"), ("after", "/ace-jax/src"))
-    for argv in argvs:
+    for i, argv in enumerate(argvs):
         for rnd in range(rounds):
-            for which, src in (order if rnd % 2 == 0 else order[::-1]):
+            for which, src in (order if (rnd + i) % 2 == 0 else order[::-1]):
                 p = _sh(["python"] + argv, cwd="/ace-jax",
                         env={"PYTHONPATH": f"/ace-jax/bench:{src}"})
                 try:

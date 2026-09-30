@@ -151,6 +151,90 @@ def test_capacity_slots_have_skin_headroom():
                                                      5.0).senders)
 
 
+def test_capacity_tight_slots_are_opt_in():
+    """--tight-slots sizes model slots (k_dense, max_edges) for rcut pairs only;
+    the neighbour-matrix list (max_neighbors) still holds the rcut + skin list,
+    which LAMMPS copies whole.  The default stays safe."""
+    from ace_jax.export.lammps import neighbour_capacity
+    from scaling.run_lammps import capacity
+    at = supercell("Cantor", 256)
+    safe, tight = capacity(at, 5.0), capacity(at, 5.0, tight=True)
+    assert safe == capacity(at, 5.0, tight=False)
+    assert tight["k_dense"] == neighbour_capacity(at, 5.0, slots="cutoff")["k_dense"] < safe["k_dense"]
+    assert tight["max_neighbors"] == safe["max_neighbors"] >= int(np.ceil(1.5 * safe["k_max"]))
+    assert tight["max_edges"] == tight["max_owned"] * tight["k_dense"]
+    assert capacity(at, 5.0, list_headroom=0.0)["max_neighbors"] == safe["k_max"] + 8
+
+
+def test_lammps_retries_sparse_after_a_matrix_oom(tmp_path, monkeypatch):
+    """The matrix bundle is auto's dense-family choice: its OOM falls back to
+    sparse just as the packed dense bundle's does."""
+    from scaling import run_lammps
+    layouts = []
+
+    def fake_export(row, at, dtype, work, layout="auto", slots="skin", list_headroom=0.5):
+        layouts.append(layout)
+        return "b.json", ("matrix" if layout == "auto" else "sparse"), 1.0
+
+    monkeypatch.setattr(run_lammps, "export_bundle", fake_export)
+    monkeypatch.setattr(run_lammps, "_run_lammps", lambda *a, **k: {
+        "status": "oom" if a[-1]["layout"] == "matrix" else "ok", **a[-1]})
+    row = {"code": "acejax-pace", "system": "SiGe", "elements": ["Si", "Ge"], "name": "x",
+           "path": "m.yace", "size": "small"}
+    out = run_lammps.run_case(row, 256, "float64", "gpu", "lmp", 1, tmp_path)
+    assert layouts == ["auto", "sparse"] and out["status"] == "ok" and out["dense_oom"]
+
+
+def test_lammps_retries_dense_after_a_matrix_list_overflow(tmp_path, monkeypatch):
+    """The matrix list holds rcut + skin pairs and aborts when a row outgrows
+    max_neighbors (random-weight SiGe large at 131k: 53 against 51).  The
+    packed dense layout holds only pairs within rcut, so the case is retried
+    dense, and the line's larger sizes export dense directly."""
+    from scaling import run_lammps
+    layouts = []
+
+    def fake_export(row, at, dtype, work, layout="auto", slots="skin", list_headroom=0.5):
+        layouts.append(layout)
+        return "b.json", ("matrix" if layout == "auto" else layout), 1.0
+
+    def fake_run(*a, **k):
+        if a[-1]["layout"] == "matrix":
+            return {"status": "error", "error": "ERROR: LAMMPS-JAX neighbor capacity exceeded: "
+                    "global max 53 neighbors per atom, capacity 51", **a[-1]}
+        return {"status": "ok", **a[-1]}
+
+    monkeypatch.setattr(run_lammps, "export_bundle", fake_export)
+    monkeypatch.setattr(run_lammps, "_run_lammps", fake_run)
+    row = {"code": "acejax-ace", "system": "SiGe", "elements": ["Si", "Ge"], "name": "x",
+           "path": "m.npz", "size": "large"}
+    out = run_lammps.run_case(row, 256, "float64", "gpu", "lmp", 1, tmp_path)
+    assert layouts == ["auto", "dense"] and out["status"] == "ok" and out["matrix_overflow"]
+    layouts.clear()
+    nxt = run_lammps.run_case(row, 512, "float64", "gpu", "lmp", 1, tmp_path, prev=out)
+    assert layouts == ["dense"] and nxt["status"] == "ok" and nxt["matrix_overflow"]
+
+
+def test_export_passes_the_matrix_list_size(tmp_path, monkeypatch):
+    """The benchmark's export passes max_neighbors from neighbour_capacity, so
+    layout="auto" can pick the matrix (it never does without it)."""
+    from scaling import run_lammps
+    seen = {}
+
+    def fake_export(model, meta, path, **kw):
+        seen.update(kw)
+        return {"ace_jax": {"layout": "matrix"}}
+
+    import ace_jax.export.lammps as lx
+    monkeypatch.setattr(lx, "export_lammps", fake_export)
+    import ace_jax.eval as ev
+    monkeypatch.setattr(ev, "load", lambda p: (None, {"rcut": 5.0}, None))
+    at = supercell("SiGe", 256)
+    row = {"path": "m.npz", "elements": ["Si", "Ge"]}
+    run_lammps._export_inprocess(row, at, "float64", tmp_path, "auto", "skin", 0.25)
+    want = run_lammps.capacity(at, 5.0, list_headroom=0.25)
+    assert seen["max_neighbors"] == want["max_neighbors"] and seen["k_dense"] == want["k_dense"]
+
+
 def test_read_pe_and_dump(tmp_path):
     from scaling.run_lammps import read_dump_forces, read_pe
     log = "Step PotEng Atoms\n       0   -12.5    3\nLoop time of 0.1 on 1 procs for 0 steps with 3 atoms\n"
@@ -560,7 +644,7 @@ def test_export_bundle_child_writes_a_bundle(tmp_path):
     y = str(pathlib.Path(__file__).parent.parent / "fixtures" / "pace" / "gesi_sbessel.yace")
     row = {"name": "x", "system": "SiGe", "path": y, "elements": ["Si", "Ge"]}
     bundle, layout, t = export_bundle(row, supercell("SiGe", 256), "float64", tmp_path)
-    assert pathlib.Path(bundle).exists() and layout in ("dense", "sparse") and t > 0
+    assert pathlib.Path(bundle).exists() and layout in ("matrix", "dense", "sparse") and t > 0
 
 
 def test_float32_figure_omits_symmetrix_lammps(tmp_path, monkeypatch):
@@ -629,7 +713,8 @@ def test_parity_gate_covers_both_bundle_layouts():
     small = {(m["code"], m["system"]): m for m in planned_models() if m["size"] == "small"}
     got = {(g, m["code"], lay) for g, m, lay in gate_checks(small, "SiGe")}
     for code in ("acejax-pace", "acejax-ace"):
-        assert ("acejax", code, "dense") in got and ("acejax", code, "sparse") in got
+        for lay in ("matrix", "dense", "sparse"):
+            assert ("acejax", code, lay) in got
     assert ("mlpace", "mlpace", None) in got and ("mace", "mace", None) in got
 
 
@@ -892,3 +977,20 @@ def test_tables_use_the_median_and_show_the_spread():
     assert "| 8.19e+06 |" in tables(rows[:1])                            # no ± for a single run
     s = summaries(rows, [_rep(8e-3, n=8192)])
     assert "| 1.02M | 4.10M ±75% | 4.0× |" in s
+
+
+def test_runner_hint_carries_the_matrix_overflow_flag(monkeypatch):
+    """The next size of a line must see that its matrix list overflowed, or it
+    goes back to the matrix layout (the hint is all a fresh process gets)."""
+    from scaling import sweep
+    seen = {}
+
+    def fake_capped(cmd, env, timeout, cap_bytes=None):
+        seen.update(json.loads(env["BENCH_PREV"]))
+        return 0, '{"status": "ok"}', "", 0, False
+
+    monkeypatch.setattr(sweep, "run_capped", fake_capped)
+    run = sweep.subprocess_runner("moriarty-gpu", {"lmp": "lmp", "lmp_jax": "lmp-jax"})
+    c = next(c for c in sweep.cases("moriarty-gpu") if c.code == "acejax-ace" and c.mode == "lammps")
+    run(c, prev={"step_s": 0.01, "n_atoms": 256, "layout": "dense", "matrix_overflow": True})
+    assert seen.get("matrix_overflow") is True
