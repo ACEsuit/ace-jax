@@ -3,7 +3,7 @@
 The real shim is monkeypatched: these tests pin the key derivation, the
 miss/hit lifecycle, and the two invalidation paths (stored-specs mismatch,
 coupling-library version change).  The end-to-end "a hit never launches Julia" guarantee is
-pinned by the ACEJAX_NO_JULIA subprocess test in test_python_authoring.py.
+pinned by the ACEJAX_COUPLING_CACHE_ONLY subprocess test in test_basis_build.py.
 """
 
 import json
@@ -13,7 +13,7 @@ import pathlib
 import numpy as np
 import pytest
 
-from ace_jax.construct import coupling as C
+from ace_jax.basis import coupling as C
 
 
 def _fake_coupling(mb, rnl, ylm):

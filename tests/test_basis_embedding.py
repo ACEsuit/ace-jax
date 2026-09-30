@@ -7,7 +7,7 @@ import pathlib
 import numpy as np
 import pytest
 
-from ace_jax.construct.embedding import (_fix_signs, _generic_frame, embedding_rows,
+from ace_jax.basis.embedding import (_fix_signs, _generic_frame, embedding_rows,
                                          embedding_widths, read_embedding)
 
 FIX = pathlib.Path(__file__).resolve().parents[1] / "fixtures"

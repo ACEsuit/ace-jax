@@ -4,7 +4,7 @@ from typing import NamedTuple
 import jax.numpy as jnp
 import numpy as np
 
-from ...construct.prior import prior_diagonal
+from ...basis.prior import prior_diagonal
 from ...eval import highest_precision
 from ..embedding import load_mace_embedding
 from ..hypers import default_prior

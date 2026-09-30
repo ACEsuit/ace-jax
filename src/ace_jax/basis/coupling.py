@@ -82,9 +82,9 @@ def backend_id():
 
 
 def _lib():
-    if os.environ.get("ACEJAX_NO_JULIA"):
-        raise RuntimeError("ACEJAX_NO_JULIA is set but a coupling was computed -- "
-                           "the coupling cache missed where it should have hit")
+    if os.environ.get("ACEJAX_COUPLING_CACHE_ONLY"):
+        raise RuntimeError("ACEJAX_COUPLING_CACHE_ONLY is set but the coupling cache missed: "
+                           "this basis shape has not been built before")
     try:
         import ace_jax_coupling
     except ModuleNotFoundError as e:

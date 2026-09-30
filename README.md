@@ -157,12 +157,12 @@ lammps-jax), ML-PACE and MACE, on SiGe and Cantor, on CPU (moriarty) and GPU
 `bench/scaling/`. The ace-jax production model (linear + species + density
 embedding) and ACEpotentials.jl rows will be added in a follow-up.
 
-## Authoring the coupling table in Python (EquivariantTensors)
+## Basis the coupling table in Python (EquivariantTensors)
 
-With the `basis` extra, `ace_jax.construct` builds an ACE basis's
+With the `basis` extra, `ace_jax.basis` builds an ACE basis's
 symmetry-adapted coupling coefficients without a Julia export step:
-`construct.spec.build_spec(...)` enumerates the admissible `(n,l)` many-body
-specification (total-degree / `wL`), and `construct.coupling.couple(...)` calls
+`basis.spec.build_spec(...)` enumerates the admissible `(n,l)` many-body
+specification (total-degree / `wL`), and `basis.coupling.couple(...)` calls
 EquivariantTensors to produce the A→B symmetrisation matrix — through
 `ace-jax-coupling`, EquivariantTensors' coupling construction compiled with
 `juliac --trim=safe` into a self-contained library (`coupling/`), so you never
@@ -179,10 +179,10 @@ coefficients are not interchangeable with 0.10.1 exports.
 See `docs/coupling-etshim-spec.md` for the design and `tests/test_coupling_parity.py`
 for usage.
 
-## Authoring a whole model in Python (Tier 1)
+## Basis a whole model in Python (Tier 1)
 
 `ace-jax basis --elements Si --order 3 --max-degree 10 --out si.npz`
-(`construct.model.build_model`) authors a complete frozen model in memory:
+(`basis.model.build_model`) authors a complete frozen model in memory:
 coupling via the shim, seeded radial/pair init, zero readout, and the algebraic
 smoothness prior — then packages it in the export format, so the saved file
 evaluates with the plain eval path. `save_npz` derives the branch-selector meta
@@ -191,7 +191,7 @@ injected via `dataclasses.replace` and round-trip through the loader. The
 bridge test verifies the whole chain against the committed Si fixture: `A2B`
 up to that per-row scale, then (with the fixture's coefficients rescaled)
 energies, forces, stress and descriptors to float noise.
-See `docs/python-authoring.md`.
+See `docs/basis.md`.
 
 ### Embedded (species-compressed) models: `ace-jax basis --embedding`
 
@@ -200,7 +200,7 @@ See `docs/python-authoring.md`.
     ace-jax basis ... --d-max 16                                    # capped widths
     ace-jax basis ... --embedding identity                          # identity (one-hot) element table
 
-builds the frozen-element-embedding model (`construct.model.build_embedding_model`,
+builds the frozen-element-embedding model (`basis.model.build_embedding_model`,
 the ace1-compatible `ace_embedding_model`) without Julia, parity-tested against
 ACEpotentials' exports.
 
@@ -320,7 +320,7 @@ the reference codes:
   (matching upstream EquivariantTensors: exact indices, values within 4 ulp),
   and runs the coupling parity
   against the ACEpotentials references (`julia/coupling_reference.jl`).
-- **prior-parity** — the smoothness prior (`construct/prior.py`) matches
+- **prior-parity** — the smoothness prior (`basis/prior.py`) matches
   ACEpotentials' `algebraic_smoothness_prior` bit-for-bit
   (`julia/smoothness_reference.jl`), and the committed fixtures match a fresh run.
 - **pace-parity** — the PACE path against the ML-PACE C++ (pinned

@@ -138,6 +138,6 @@ def prior_diagonal(z, meta, source=""):
     numpy; callers convert to jax."""
     if "gamma" in z.files:
         return np.asarray(z["gamma"], np.float64)
-    print(f"gamma missing from {source} -- rebuilt via construct.prior "
+    print(f"gamma missing from {source} -- rebuilt via basis.prior "
           "(algebraic smoothness prior)", flush=True)
     return gamma_from_model(meta)

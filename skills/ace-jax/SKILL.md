@@ -209,9 +209,9 @@ This writes a lammps-jax bundle for `pair_style jax/kk` (GPU only).
 
 Other entry points:
 - `aj.site_descriptors(...)`: per-atom ACE descriptors.
-- `ace_jax.construct.model.build_model` and `build_embedding_model`: author a
+- `ace_jax.basis.model.build_model` and `build_embedding_model`: author a
   model in memory.
-- `ace_jax.construct.export.save_npz`: write an authored model to `.npz`.
+- `ace_jax.basis.export.save_npz`: write an authored model to `.npz`.
 - Learned radial basis (research, linear arm): `bench/learn_radial/run.py
   --model M.npz --data D.xyz --out DIR --r0 2.35 [--n-q 12] [--lam-grid 0,1e-2]`
   learns the tensor radials by VarPro (`ace_jax.fit.radial_learn.learn_radial`)

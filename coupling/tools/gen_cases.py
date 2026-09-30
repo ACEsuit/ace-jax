@@ -4,7 +4,7 @@ backend test runs.  Run from the repo root with the ace-jax env:
 import json
 import pathlib
 
-from ace_jax.construct.spec import build_spec, spec_from_reference, ylm_spec
+from ace_jax.basis.spec import build_spec, spec_from_reference, ylm_spec
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 OUT = ROOT / "coupling/python/tests/data/cases.json"

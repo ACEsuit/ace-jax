@@ -21,7 +21,7 @@ parity CI jobs. User docs: `README.md`. Agent-facing usage guide:
   - The core modules are `rows`, `stats`, `objective`, `ladder`, `predict`, `pops`, `solve`, `hostcache`.
   - `pipeline/` is the `aj fit` pipeline.
   - `radial_learn.py` and `varpro.py` learn radials.
-- `src/ace_jax/construct/`: Python model authoring.
+- `src/ace_jax/basis/`: Python model authoring.
   - `spec.py`, `coupling.py`: the EquivariantTensors shim via the compiled `ace-jax-coupling` library.
   - `model.py`: `build_model`, `build_embedding_model`.
   - `prior.py`: the smoothness prior. `export.py`: `save_npz`.
@@ -58,7 +58,7 @@ uv run ruff check                     # lint; `uv run pre-commit run --all-files
   - `cuda`.
   - `fast-neighbours`: matscipy-neighbours, a C++ source build.
 - **Tests that silently skip** when an optional dependency is missing:
-  - `basis`: `test_coupling_etshim`, `test_coupling_parity` and the authoring bridge tests skip unless a compiled `ace_jax_coupling` is installed (`conftest.require_coupling_lib`). The coupling cache tests still run: they use `ACEJAX_NO_JULIA=1` and the committed cache.
+  - `basis`: `test_coupling_etshim`, `test_coupling_parity` and the authoring bridge tests skip unless a compiled `ace_jax_coupling` is installed (`conftest.require_coupling_lib`). The coupling cache tests still run: they use `ACEJAX_COUPLING_CACHE_ONLY=1` and the committed cache.
   - lammps-jax: `test_export_lammps` and `test_bench_scaling`'s export test. Make lammps-jax importable with `PYTHONPATH=<lammps-jax>/python` or `uv pip install -e <lammps-jax>`.
   - `fast-neighbours` (matscipy-neighbours): `test_calc_jit`'s native `neighbour_matrix` test and `test_efv`'s dense-vs-neighbour_matrix check; without it the skin list and dense layout also take their fallback neighbour path.
   - `pyace` (python-ace, in its own venv under `pace_ref/`).
@@ -84,7 +84,7 @@ uv run ruff check                     # lint; `uv run pre-commit run --all-files
   - Fitting and learned radials require float64: `radial_learn` raises without it.
   - Use `highest_precision()` (a matmul-precision context) around numerics that are compared to references.
 - **Model files:**
-  - `.npz` models follow the export schema: `meta_json` with `schema_version: 1`. The writers are `julia/export_model.jl` and `construct.export.save_npz`.
+  - `.npz` models follow the export schema: `meta_json` with `schema_version: 1`. The writers are `julia/export_model.jl` and `basis.export.save_npz`.
   - `aj.load(path)` returns `(model, meta, z)`. For a `.yace` it returns a `PACEModel` with `(model, meta, spec)`, and `write_yace(model, spec, path)` writes it back.
   - A fitted GP is `gp_model.npz`, identified by its `gp_json` key. Load it with `GPCalculator.from_file`.
   - Large models are release assets, not commits.

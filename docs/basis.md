@@ -10,16 +10,16 @@ init, pair basis, readout, packaging and evaluation are pure Python/NumPy/JAX.
 
 `build_model(elements, order, totaldegree, *, wL, rcut, r0, rin, radial_mode,
 pair_mode, seed, with_gamma, edge_a_kind, coupling_cache, coupling_cache_dir,
-n_q_factor)` (`construct/model.py`) walks the same
-steps the Julia exporter walks, returning an `Authoring` NamedTuple:
+n_q_factor)` (`basis/model.py`) walks the same
+steps the Julia exporter walks, returning an `Basis` NamedTuple:
 
 1. **`resolve_elements`** — atomic numbers or symbols (`14`, `"Si"`) → `zs`
    in the order given (it is the species index order, as ACEpotentials'
    `_convert_zlist` keeps it); duplicates are rejected.
-2. **`build_spec(NZ, order, totaldegree, wL)`** (`construct/spec.py`) — the three
+2. **`build_spec(NZ, order, totaldegree, wL)`** (`basis/spec.py`) — the three
    integer specs ET consumes: `mb_spec` (per-B `(n,l)` tuples under
    `TotalDegree` + `rpe_admissible`), `Rnl_spec`, `Ylm_spec`.
-3. **`couple(mb_spec, Rnl_spec, Ylm_spec)`** (`construct/coupling.py`) — the
+3. **`couple(mb_spec, Rnl_spec, Ylm_spec)`** (`basis/coupling.py`) — the
    compiled EquivariantTensors library (`ace-jax-coupling`); returns `A2B` `(n_B, n_AA)`, per-order `aa_specs`,
    `aspec`, and ET's `aa_sig` per AA column (signature-sorted, **not**
    evaluation-ordered — see below).
@@ -27,7 +27,7 @@ steps the Julia exporter walks, returning an `Authoring` NamedTuple:
    list from the block-diagonal `A2B` (first nonzero column → `aa_sig`, with
    multiplicity) and asserts it matches the shim dump as a row-multiset.
    Catches any ET-version drift in one place.
-5. **`tensor_radial_init` / `pair_radial_init`** (`construct/radial_init.py`) —
+5. **`tensor_radial_init` / `pair_radial_init`** (`basis/radial_init.py`) —
    seeded radial coefficients, frozen. `mode="glorot_normal"` (tensor),
    `"onehot"` (pair, `spl_n = δ(n, 2Z)`-style identity rows) or `"zero"`;
    the 7-tuple Agnesi transform `(p, q, a, rin, r0, yin, ycut)` is derived
@@ -41,11 +41,11 @@ steps the Julia exporter walks, returning an `Authoring` NamedTuple:
    fixture.
 6. **Zero readout** — `WB`, `Wpair`, `E0` zeros (the `acefit!`-fresh init), then
    `fold_readout` bakes the species pooling into the coefficient tables.
-7. **`smoothness_prior`** (`construct/prior.py`, ported in PR #3) — the
+7. **`smoothness_prior`** (`basis/prior.py`, ported in PR #3) — the
    `len_basis` γ vector, over tensor rows repeated per species and pair rows
    `[(n,0)]`; `--no-gamma` / `with_gamma=False` skips it.
 
-`save_npz(path, authoring)` (`construct/export.py`) writes the disposable
+`save_npz(path, authoring)` (`basis/export.py`) writes the disposable
 npz bridge file, for any of the three radial layouts the loader reads
 (`analytic`, `spline`, `spline_factorised`).
 
@@ -74,7 +74,7 @@ not errors — a wrong branch selector fails numerically, not loudly.
 
 ## Evaluation parity (the bridge test)
 
-`tests/test_python_authoring.py::test_bridge_wellformed_subprocess` covers the
+`tests/test_basis_build.py::test_bridge_wellformed_subprocess` covers the
 whole chain against `fixtures/si_ace_model.npz` (Si, order 3, TotalDegree 10):
 
 - **Structural**: authored `nnll_spec` matches the fixture as a row-multiset;
@@ -85,7 +85,7 @@ whole chain against `fixtures/si_ace_model.npz` (Si, order 3, TotalDegree 10):
   branch kinds (`radial_kind="analytic"`, `pair_radial_kind="spline"`,
   `pair_envelope_kind="poly1sr"`, spline grid `(x0, h, n)` from
   `meta["pair_spline"]`) are patched in via `dataclasses.replace`
-  (eqx `ACEModel` supports it; the `Authoring` tuple via `._replace`),
+  (eqx `ACEModel` supports it; the `Basis` tuple via `._replace`),
   packaged with `save_npz`, reloaded with `eval.io.load`, and every table is
   compared against the fixture. Then the round-tripped file runs through the
   native eval path (`ACECalculator`) and must reproduce Julia's energies,
@@ -160,7 +160,7 @@ identity> [--d-max N]`); its design record is
 
 ## Roadmap after Tier 1
 
-- ~~Tier 2 point 1 — in-memory hand-off~~: done (`Authoring.eval_pair`).
+- ~~Tier 2 point 1 — in-memory hand-off~~: done (`Basis.eval_pair`).
 - ~~Tier 2 point 2 — coupling cache~~: done (`couple_cached`, see
   [tier2-plan.md](tier2-plan.md)) — authoring an existing shape runs
   Julia-free from a populated cache dir.

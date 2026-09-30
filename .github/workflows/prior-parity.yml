@@ -1,11 +1,11 @@
 name: prior-parity
-# Guards the algebraic smoothness prior port (construct/prior.py): regenerates
+# Guards the algebraic smoothness prior port (basis/prior.py): regenerates
 # the committed oracle fixtures with ACEpotentials.jl and re-runs the parity
 # tests (bit-for-bit gamma). CI-only; not required for pip users.
 on:
   push:
     paths:
-      - "src/ace_jax/construct/prior.py"
+      - "src/ace_jax/basis/prior.py"
       - "tests/test_smoothness_parity.py"
       - "julia/smoothness_reference.jl"
       - "julia/Project.toml"

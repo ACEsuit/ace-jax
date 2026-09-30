@@ -28,7 +28,7 @@ def _load(path):
 @pytest.mark.parametrize("path", ENTRIES, ids=[p.name for p in ENTRIES])
 def test_committed_entry_matches_backend_up_to_row_scale(path):
     require_coupling_lib()
-    from ace_jax.construct.coupling import couple, subspace_residual
+    from ace_jax.basis.coupling import couple, subspace_residual
     mb, rnl, ylm, A_old, sig_old, aspec_old, nnll_old = _load(path)
     cpl = couple(mb, rnl, ylm)
     assert [tuple(r) for r in cpl.aspec] == aspec_old

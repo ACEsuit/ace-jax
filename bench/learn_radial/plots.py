@@ -17,7 +17,7 @@ from ace_jax.eval import load
 from ace_jax.fit.data import build_dataset, load_configs, flat_edges
 from ace_jax.fit.radial_model import (to_analytic, radial_gram, normalise, row_active,
                                       poly_env)
-from ace_jax.construct.spec import build_spec
+from ace_jax.basis.spec import build_spec
 
 C = dict(init="#2a78d6", l0="#eb6834", l1="#1baf7a")          # reference categorical slots 1-3
 INK, INK2, GRID, SURF = "#0b0b0b", "#52514e", "#e4e3df", "#fcfcfb"

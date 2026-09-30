@@ -1,13 +1,13 @@
-"""Parity for the EquivariantTensors coupling shim (construct/coupling.py).
+"""Parity for the EquivariantTensors coupling shim (basis/coupling.py).
 
 The bridge test needs a working `ace_jax_coupling` (the `basis` extra's
 compiled library; `conftest.require_coupling_lib`) and runs in-process; the
-spec port test is pure Python and always runs.  See construct/coupling.py and
+spec port test is pure Python and always runs.  See basis/coupling.py and
 docs/coupling-etshim-spec.md.
 """
 from conftest import require_coupling_lib
 
-from ace_jax.construct.spec import rpe_admissible, ylm_spec
+from ace_jax.basis.spec import rpe_admissible, ylm_spec
 
 
 def test_rpe_admissible_port():
@@ -21,7 +21,7 @@ def test_rpe_admissible_port():
 def test_bridge_wellformed():
     """The coupling library returns a coupling in the export layout."""
     require_coupling_lib()
-    from ace_jax.construct.coupling import couple
+    from ace_jax.basis.coupling import couple
     cpl = couple([[(1, 0)], [(1, 1), (1, 1)]], [(1, 0), (1, 1), (2, 0)], ylm_spec(1))
     A2B, aa_sig, aspec = cpl.A2B, cpl.aa_sig, cpl.aspec
     assert A2B.shape[1] == len(aa_sig)                     # (n_B, n_AA): one aa_sig per column

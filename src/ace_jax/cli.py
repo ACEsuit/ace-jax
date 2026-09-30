@@ -171,16 +171,16 @@ def cmd_eval(a):
 
 
 def cmd_basis(a):
-    from .construct.export import save_npz
+    from .basis.export import save_npz
     els = [int(e) if e.strip().isdigit() else e.strip() for e in a.elements.split(",")]
     if a.embedding:
-        from .construct.model import build_embedding_model
+        from .basis.model import build_embedding_model
         auth = build_embedding_model(els, a.order, a.max_degree, embedding=a.embedding, d_max=a.d_max,
                                      wL=a.wL, maxl=a.maxl, rcut=a.rcut, reduction=a.reduction,
                                      with_gamma=not a.no_gamma, coupling_cache=not a.no_coupling_cache,
                                      coupling_cache_dir=a.coupling_cache_dir)
     else:
-        from .construct.model import build_model
+        from .basis.model import build_model
         auth = build_model(els, a.order, a.max_degree, wL=a.wL, rcut=5.5 if a.rcut is None else a.rcut,
                            rin=a.rin, radial_mode=a.radial_mode, pair_mode=a.pair_mode,
                            seed=a.seed, with_gamma=not a.no_gamma,

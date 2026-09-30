@@ -11,7 +11,7 @@ the core pip suite (numpy only; no ET/Julia)."""
 import numpy as np
 import pytest
 
-from ace_jax.construct.coupling import subspace_residual
+from ace_jax.basis.coupling import subspace_residual
 
 
 def _random_orthogonal(m, rng):

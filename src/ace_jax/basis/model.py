@@ -23,7 +23,7 @@ from .prior import smoothness_prior
 from .spec import build_spec
 
 
-class Authoring(NamedTuple):
+class Basis(NamedTuple):
     """An authored model plus everything needed to reproduce or package it."""
 
     model: ACEModel
@@ -108,7 +108,7 @@ def build_model(elements, order, totaldegree, *, wL=1.5, rcut=5.5, r0=None,
 
     n_q_factor: tensor-radial polynomial span, n_q = ceil(n_q_factor * max n).
 
-    Returns an `Authoring`.  Requires the `basis` extra (the compiled
+    Returns an `Basis`.  Requires the `basis` extra (the compiled
     ace-jax-coupling library) on a cache miss; evaluate in float64 with x64 enabled."""
     if edge_a_kind not in ("gather", "matmul"):
         raise ValueError(f'edge_a_kind must be "gather" or "matmul", got {edge_a_kind!r}')
@@ -214,7 +214,7 @@ def build_model(elements, order, totaldegree, *, wL=1.5, rcut=5.5, r0=None,
         "rnl_spline": None, "pair_spline": None,
         "rcut": float(rcut),
         "nnll": [[list(b) for b in bb] for bb in cpl.nnll_spec],
-        "authoring": {
+        "basis": {
             "wL": float(wL), "rcut": float(rcut),
             "r0": tinit["rnl_transform"][:, :, 4].tolist(),      # (NZ, NZ) per pair
             "rin": float(rin), "radial_mode": radial_mode,
@@ -223,7 +223,7 @@ def build_model(elements, order, totaldegree, *, wL=1.5, rcut=5.5, r0=None,
             "pair_maxn": int(pair_maxn), "with_gamma": bool(with_gamma),
         },
     }
-    return Authoring(model=model, meta=meta, nnll_spec=cpl.nnll_spec, Rnl_spec=tuple(Rnl),
+    return Basis(model=model, meta=meta, nnll_spec=cpl.nnll_spec, Rnl_spec=tuple(Rnl),
                      Ylm_spec=tuple(Ylm), aa_sig=cpl.aa_sig, aspec=tuple(cpl.aspec),
                      aa_specs=tuple(np.asarray(g) for g in cpl.aa_specs),
                      nnll=nnll, gamma=gamma)
@@ -250,7 +250,7 @@ def build_embedding_model(elements, order, totaldegree, embedding=None, *, rows=
     embedding: a JSON artefact path (keys Z, emb), a (Z, table) pair, or
     "identity"; reduced with `embedding_rows(reduction, normalise)`.  rows: an
     explicit (NZ, d) block instead (e.g. to reproduce a Julia model exactly --
-    Julia leaves the PCA sign to LAPACK).  Returns an `Authoring` (readout zero);
+    Julia leaves the PCA sign to LAPACK).  Returns an `Basis` (readout zero);
     the coupling needs the ET shim on a cache miss, as `build_model`."""
     import io
     import json
@@ -327,7 +327,7 @@ def build_embedding_model(elements, order, totaldegree, embedding=None, *, rows=
         "aa_lens": [int(g.shape[0]) for g in cpl.aa_specs],
         "rnl_spline": spl, "pair_spline": dict(spl), "rcut": float(cut[2]),
         "nnll": [[list(b) for b in bb] for bb in cpl.nnll_spec],
-        "authoring": {"wL": float(wL), "rcut": float(cut[2]), "r0": float(cut[1]),
+        "basis": {"wL": float(wL), "rcut": float(cut[2]), "r0": float(cut[1]),
                       "maxl": maxl, "pair_maxn": maxq, "d_max": d_max,
                       "with_gamma": bool(with_gamma)},
     }
@@ -352,6 +352,6 @@ def build_embedding_model(elements, order, totaldegree, embedding=None, *, rows=
     np.savez(buf, **D)
     buf.seek(0)
     model, _, _ = load(buf, edge_a_kind=edge_a_kind)
-    return Authoring(model=model, meta=meta, nnll_spec=cpl.nnll_spec, Rnl_spec=tuple(sp.rspec),
+    return Basis(model=model, meta=meta, nnll_spec=cpl.nnll_spec, Rnl_spec=tuple(sp.rspec),
                      Ylm_spec=tuple(sp.Ylm), aa_sig=cpl.aa_sig, aspec=tuple(cpl.aspec),
                      aa_specs=tuple(np.asarray(g) for g in cpl.aa_specs), nnll=nnll, gamma=gamma)
