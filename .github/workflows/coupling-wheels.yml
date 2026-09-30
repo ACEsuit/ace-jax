@@ -31,9 +31,12 @@ jobs:
       - uses: actions/checkout@v4
       - name: Julia 1.13 (container)
         if: matrix.container != ''
+        # official tarball, not juliaup: juliaup keeps state in ~/.julia/juliaup,
+        # which the depot cache restores without the binaries
         run: |
-          curl -fsSL https://install.julialang.org | sh -s -- --yes --default-channel 1.13
-          echo "$HOME/.juliaup/bin" >> "$GITHUB_PATH"
+          V=1.13.0; A=$(uname -m); D=$([ "$A" = x86_64 ] && echo x64 || echo aarch64)
+          curl -fsSL "https://julialang-s3.julialang.org/bin/linux/$D/1.13/julia-$V-linux-$A.tar.gz" | tar xz -C /opt
+          echo "/opt/julia-$V/bin" >> "$GITHUB_PATH"
       - name: Julia 1.13 (macOS)
         if: matrix.container == ''
         uses: julia-actions/setup-julia@v2
