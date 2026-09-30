@@ -28,15 +28,30 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-# categorical slots 1-4, fixed order (never cycled); ink and chrome tokens
+# categorical slots 1-6, fixed order (never cycled; a new code takes the next
+# slot); ink and chrome tokens.  Slots 1-6 pass the dataviz validator on
+# adjacent pairs (light: CVD dE >= 9.1, normal >= 19.6).  Slots 2, 5 and 6
+# (stock ACE and the two learned-radial lines) are drawn together in the
+# learned-radial figure and do not clear the all-pairs floors (orange-magenta
+# normal-vision dE 12.9), so those lines also differ by marker (MARKERS) and
+# carry direct labels.
 CODES = {
     "acejax-pace": ("ace-jax (PACE model)", "#2a78d6"),
     "acejax-ace": ("ace-jax (linear ACE)", "#eb6834"),
     "mlpace": ("ML-PACE", "#1baf7a"),
     "mace": ("MACE", "#eda100"),
+    "acejax-ace-learned": ("ace-jax (linear ACE, learned radial, splined)", "#e87ba4"),
+    "acejax-ace-analytic": ("ace-jax (linear ACE, learned radial, analytic)", "#008300"),
 }
 SHORT = {"acejax-pace": "ace-jax PACE", "acejax-ace": "ace-jax ACE", "mlpace": "ML-PACE",
-         "mace": "MACE"}          # direct end-of-line labels: distinct, short
+         "mace": "MACE", "acejax-ace-learned": "ace-jax ACE, learned (splined)",
+         "acejax-ace-analytic": "ace-jax ACE, learned (analytic)"}   # direct end-of-line labels
+MARKERS = {"acejax-ace-learned": "s", "acejax-ace-analytic": "^"}    # the rest: "o"
+LEARNED = ("acejax-ace-learned", "acejax-ace-analytic")
+
+
+def _marker(code):
+    return MARKERS.get(code, "o")
 
 
 BASIS_JSON = pathlib.Path(__file__).with_name("model_sizes.json")
@@ -200,7 +215,7 @@ def _panels(n_rows, n_cols, w=4.2, h=3.2):
 
 def _legend(fig, codes, modes=True, layout=True):
     from matplotlib.lines import Line2D
-    handles = [Line2D([], [], color=CODES[c][1], lw=2, marker="o", ms=6, label=CODES[c][0])
+    handles = [Line2D([], [], color=CODES[c][1], lw=2, marker=_marker(c), ms=6, label=CODES[c][0])
                for c in codes]
     if modes:
         handles += [Line2D([], [], color=MUTED, lw=2, ls=ls, label=m) for m, ls in MODES.items()]
@@ -268,7 +283,7 @@ def fig_throughput(rows, out, dtype="float64", size="medium"):
                 ax.plot(xs, ys, color=CODES[code][1], ls=MODES[mode], lw=1.6, zorder=2)
                 for x, y, lay, rng in pts:             # hollow marker = sparse layout
                     _bar(ax, x, y, rng, CODES[code][1])
-                    ax.plot(x, y, marker="o", ms=5, color=CODES[code][1], zorder=3,
+                    ax.plot(x, y, marker=_marker(code), ms=5, color=CODES[code][1], zorder=3,
                             mfc="none" if lay == "sparse" else CODES[code][1])
                 if mode == "standalone" or code == "mlpace":
                     _end_label(ax, xs[-1], ys[-1], _label(code, system, size))
@@ -330,7 +345,7 @@ def fig_model_size(rows, out, dtype="float64"):
                            for s in SIZES if (code, mode, s, system) in best]
                     if got:
                         ax.plot([x for x, _ in got], [throughput(r) for _, r in got],
-                                color=CODES[code][1], ls=ls, lw=1.6, marker="o", ms=5)
+                                color=CODES[code][1], ls=ls, lw=1.6, marker=_marker(code), ms=5)
                         for x, r in got:
                             _bar(ax, x, throughput(r), spread(r), CODES[code][1])
             _ylog(ax)
@@ -529,6 +544,58 @@ def fig_before_after(after, before, out, host, dtype="float64", size="medium"):
     return p
 
 
+def learned_hosts(rows, dtype="float64"):
+    """Hosts with ok learned-radial rows (the learned-radial figure's hosts)."""
+    return sorted({r["host"] for r in rows if r.get("code") in LEARNED and r.get("mode") in MODES
+                   and r.get("status") == "ok" and r.get("dtype") == dtype and r.get("host")})
+
+
+def fig_learned(rows, out, host, dtype="float64", size="medium"):
+    """The cost of a learned radial and what splining recovers: throughput vs N
+    of the stock (spline) linear ACE model and its learned-radial proxy,
+    splined as deployed and kept analytic, one panel per system x mode, on one
+    host.  None when the host has no learned-radial rows yet (pending)."""
+    codes = ("acejax-ace", *LEARNED)
+    ok = [r for r in aggregate(rows) if r.get("host") == host and r.get("code") in codes
+          and r.get("status") == "ok" and r.get("mode") in MODES and r.get("dtype") == dtype
+          and r.get("size") == size and throughput(r)]
+    if not any(r["code"] in LEARNED for r in ok):
+        return None
+    systems = sorted({r["system"] for r in ok if r["code"] in LEARNED})
+    modes = [m for m in MODES if any(r["mode"] == m and r["code"] in LEARNED for r in ok)]
+    fig, axes = _panels(len(systems), len(modes))
+    for i, system in enumerate(systems):
+        for j, mode in enumerate(modes):
+            ax = axes[i][j]
+            for code in codes:
+                pts = sorted((r["n_atoms"], throughput(r), r.get("layout"), spread(r)) for r in ok
+                             if r["code"] == code and r["system"] == system and r["mode"] == mode)
+                if not pts:
+                    continue
+                c = CODES[code][1]
+                xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+                ax.plot(xs, ys, color=c, ls=MODES[mode], lw=1.6, zorder=2)
+                for x, y, lay, rng in pts:             # hollow marker = sparse layout
+                    _bar(ax, x, y, rng, c)
+                    ax.plot(x, y, marker=_marker(code), ms=5, color=c, zorder=3,
+                            mfc="none" if lay == "sparse" else c)
+                _end_label(ax, xs[-1], ys[-1], SHORT[code])
+            _xatoms(ax)
+            _ylog(ax)
+            ax.set_title(f"{system} · ace-jax {mode} · {host}", fontsize=9, color=INK)
+            if i == len(systems) - 1:
+                ax.set_xlabel("atoms", fontsize=8, color=INK2)
+            if j == 0:
+                ax.set_ylabel("atom-steps / s", fontsize=8, color=INK2)
+    _legend(fig, [c for c in codes if any(r["code"] == c for r in ok)], modes=len(modes) > 1)
+    fig.tight_layout(rect=(0, 0, 0.94, 1), w_pad=7.0)
+    _place_labels(fig)
+    p = out / f"scaling_learned_radial_{dtype}_{size}_{host}.png"
+    fig.savefig(p, dpi=160, bbox_inches="tight")     # keeps the figure legend
+    plt.close(fig)
+    return p
+
+
 def tables(rows):
     """Markdown: throughput at fixed N per host (the table view) and compile times."""
     ok = [r for r in aggregate(rows) if r.get("status") == "ok" and r.get("mode") in MODES
@@ -706,6 +773,12 @@ CAPTIONS = {
                             "speed-ups, float64, medium models; ML-PACE in LAMMPS for "
                             "reference. Before rows: `bench/scaling/results/before-perf/`. "
                             "“fn”: basis functions per central element.",
+    "scaling_learned_radial": "The cost of a learned radial, and what splining recovers "
+                              "(float64, medium linear ACE): the stock model (spline radial), "
+                              "its learned-radial proxy splined as deployed (`spline_tol=\"auto\"`, "
+                              "1e-10) and the same proxy kept analytic (`spline_tol=None`, exact). "
+                              "Solid = standalone, dashed = LAMMPS; see "
+                              "`docs/learned-radial-splining.md`.",
     "scaling_throughput_float64": "Throughput vs system size (float64, medium models): "
                                   "solid = standalone, dashed = LAMMPS. “fn”: basis functions per "
                                   "central element (linear ACE is 2–14× the PACE size).",
@@ -732,6 +805,7 @@ def make_figures(pattern, outdir):
     figs += [fig_model_size(rows, out), fig_memory(rows, out), fig_precision(rows, out)]
     before = load(before_pattern(pattern))
     figs += [fig_before_after(rows, before, out, h) for h in before_after_hosts(rows, before)[0]]
+    figs += [fig_learned(rows, out, h) for h in learned_hosts(rows)]
     return [str(f) for f in figs if f]
 
 
@@ -760,6 +834,9 @@ def write_doc(pattern, figs, doc="docs/benchmarks.md"):
     pending = before_after_hosts(rows, load(before_pattern(pattern)))[1]
     if pending:
         body += [f"Before/after figures pending (ace-jax rows being re-run): {', '.join(pending)}.",
+                 ""]
+    if not learned_hosts(rows):
+        body += ["Learned-radial figures pending (no `acejax-ace-learned` / `-analytic` rows yet).",
                  ""]
     for f in figs:
         stem = pathlib.Path(f).stem

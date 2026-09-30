@@ -137,16 +137,29 @@ def _export_inprocess(row, at, dtype, workdir, layout="auto", slots="skin", list
     b = export_lammps(model, meta, pathlib.Path(workdir) / "bundle.json", max_atoms=cap["max_atoms"],
                       max_edges=cap["max_edges"], k_dense=cap["k_dense"], dtype=dtype, layout=layout,
                       type_elements=[atomic_numbers[e] for e in row["elements"]],  # data-file order
-                      max_owned=cap["max_owned"], max_neighbors=cap["max_neighbors"])
-    return str(pathlib.Path(workdir) / "bundle.json"), b["ace_jax"]["layout"], time.perf_counter() - t0
+                      max_owned=cap["max_owned"], max_neighbors=cap["max_neighbors"],
+                      **({"spline_tol": row["spline_tol"]} if "spline_tol" in row else {}))
+    return (str(pathlib.Path(workdir) / "bundle.json"), b["ace_jax"]["layout"], time.perf_counter() - t0,
+            splined_meta(b["ace_jax"]))
 
 
-def export_bundle(row, at, dtype, workdir, layout="auto", slots="skin", list_headroom=0.5):
+def splined_meta(aj):
+    """What the bundle's lean form splined, from its `ace_jax` metadata:
+    {"spline_tol", "n_intervals"}, or None when every radial stayed exact."""
+    if aj.get("spline_tol") is None:
+        return None
+    return {"spline_tol": aj["spline_tol"], "n_intervals": aj.get("spline_intervals")}
+
+
+def export_bundle(row, at, dtype, workdir, layout="auto", slots="skin", list_headroom=0.5,
+                  info=None):
     """Export the ace-jax model as a lammps-jax bundle sized for `at`, in a
     child process: exporting here would initialise JAX on the GPU, whose default
     pool (75% of the card) stays allocated while LAMMPS runs, leaving lammps-jax
-    a quarter of it.  Returns (bundle path, layout used, export seconds)."""
-    keep = {k: row[k] for k in ("name", "system", "path", "elements") if k in row}
+    a quarter of it.  Returns (bundle path, layout used, export seconds); a
+    row's `spline_tol` is passed to export_lammps, and `info` (a dict), when
+    given, gets "splined" (`splined_meta` of the bundle)."""
+    keep = {k: row[k] for k in ("name", "system", "path", "elements", "spline_tol") if k in row}
     cmd = [sys.executable, str(pathlib.Path(__file__).resolve()), "--export", json.dumps(keep),
            str(len(at)), dtype, str(workdir), layout, slots, str(list_headroom)]
     bench = str(pathlib.Path(__file__).resolve().parents[1])     # so the child imports scaling
@@ -157,6 +170,8 @@ def export_bundle(row, at, dtype, workdir, layout="auto", slots="skin", list_hea
     if p.returncode != 0 or not lines:
         raise RuntimeError(f"bundle export failed ({p.returncode}): {(p.stderr or p.stdout)[-2000:]}")
     out = json.loads(lines[-1])
+    if info is not None:
+        info["splined"] = out.get("splined")
     return out["bundle"], out["layout"], out["compile_s"]
 
 
@@ -193,7 +208,7 @@ def run_case(row, n_atoms, dtype, device, lmp, ranks, workdir, pjrt=None, prev=N
     at = supercell(row["system"], n_atoms)
     data = work / "x.data"
     write(data, at, format="lammps-data", specorder=row["elements"], masses=True)
-    style = {"acejax-pace": "acejax", "acejax-ace": "acejax", "mlpace": "mlpace", "mace": "mace"}[row["code"]]
+    style = "acejax" if row["code"].startswith("acejax") else row["code"]    # mlpace, mace
     if style == "mace" and not pathlib.Path(row.get("symmetrix") or "").exists():  # e.g. MH-1
         return {"code": row["code"], "mode": "lammps", "model": row["name"], "size": row["size"],
                 "system": row["system"], "n_atoms": n_atoms, "device": device, "dtype": dtype,
@@ -208,9 +223,11 @@ def run_case(row, n_atoms, dtype, device, lmp, ranks, workdir, pjrt=None, prev=N
     # bundle that runs out of memory is retried sparse
     layout = bundle_layout(prev)
     while True:
+        info = {}
         bundle, used, compile_s = export_bundle(row, at, dtype, work, layout=layout, slots=slots,
-                                                list_headroom=list_headroom)
-        extra = {"layout": used, "compile_s": compile_s}
+                                                list_headroom=list_headroom, info=info)
+        extra = {"layout": used, "compile_s": compile_s,
+                 "spline_tol": row.get("spline_tol", "auto"), "splined": info.get("splined")}
         if slots != "skin":
             extra["slots"] = slots
         if list_headroom != 0.5:
@@ -268,9 +285,9 @@ if __name__ == "__main__" and sys.argv[1:2] == ["--export"]:
     _row, _n, _dtype, _work, _layout = json.loads(sys.argv[2]), int(sys.argv[3]), *sys.argv[4:7]
     _slots = sys.argv[7] if len(sys.argv) > 7 else "skin"
     _head = float(sys.argv[8]) if len(sys.argv) > 8 else 0.5
-    _b, _l, _t = _export_inprocess(_row, supercell(_row["system"], _n), _dtype, _work, _layout,
-                                   _slots, _head)
-    print(json.dumps({"bundle": _b, "layout": _l, "compile_s": _t}))
+    _b, _l, _t, _s = _export_inprocess(_row, supercell(_row["system"], _n), _dtype, _work, _layout,
+                                       _slots, _head)
+    print(json.dumps({"bundle": _b, "layout": _l, "compile_s": _t, "splined": _s}))
 elif __name__ == "__main__":
     from scaling.models import planned_models
     # --tight-slots: model slots for rcut pairs (capacity(tight=True)); opt-in,

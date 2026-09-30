@@ -4,7 +4,9 @@
 call_s: median ASE calculator call (energy+forces+stress) incl. neighbour list,
 for every code.  ace-jax also, from ACECalculator.last_timing: force_s (the
 compiled model call alone), nlist_s (list + layout + host->device), the
-neighbour-list backend and `rebuilds` (calls that built a neighbour list).
+neighbour-list backend and `rebuilds` (calls that built a neighbour list),
+and `spline_tol` (asked for: the row's, else "auto") with `splined`
+(`calc.splined`: what the lean form splined, None when exact).
 
 The timed calls are MD-like (`md_like: true`): each first displaces every atom
 by N(0, 1e-3 A), a random walk seeded at 0, as consecutive MD steps would, so
@@ -87,8 +89,13 @@ def run_case(row, n_atoms, dtype, device, reps=10):
             import jax.numpy as jnp
             from ace_jax.calc.point import ACECalculator
             from ace_jax.eval import sparse_graph
-            calc = ACECalculator(row["path"], dtype=getattr(jnp, dtype))   # default skin
+            # the learned-radial lines pin spline_tol ("auto" splines a learned
+            # radial at 1e-10, None keeps it analytic); the others take the default
+            kw = {"spline_tol": row["spline_tol"]} if "spline_tol" in row else {}
+            calc = ACECalculator(row["path"], dtype=getattr(jnp, dtype), **kw)   # default skin
             out["skin"] = calc.skin
+            out["spline_tol"] = row.get("spline_tol", "auto")         # what was asked for
+            out["splined"] = calc.splined                             # what lean did (None: exact)
             call = lambda: calc.calculate(at, ["energy", "forces", "stress"], all_changes)
             t0 = time.perf_counter(); call(); out["compile_s"] = time.perf_counter() - t0
             out["energy"] = calc.results["energy"]                         # undisplaced

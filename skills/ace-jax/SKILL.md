@@ -157,7 +157,7 @@ load; faster only at large `nradbase`). Values are unchanged to roundoff.
 
 ### Calculator performance options
 
-`ACECalculator(path, dtype=None, layout="auto", edge_a_kind="auto", skin=1.0, lean=True)`:
+`ACECalculator(path, dtype=None, layout="auto", edge_a_kind="auto", skin=1.0, lean=True, spline_tol="auto", spline_intervals=None)`:
 - `lean` (ACE `.npz` models): energies, forces and stress are evaluated with
   `ace_jax.eval.lean(model)`, exact to roundoff. It drops radial columns and
   harmonics the basis never reads, folds the pair weights into the pair
@@ -168,6 +168,31 @@ load; faster only at large `nradbase`). Values are unchanged to roundoff.
   call `require_full()` and raise); edit the full model and re-apply `lean`.
   `aj.load` returns the full model. Setting `calc.model` recomputes the lean
   form on the host, a device-to-host copy per swap.
+  - **Learned radials are splined.** With `spline_tol="auto"` (the default),
+    an analytic tensor radial marked `radial_learned` (what `radial_learn`
+    writes, e.g. a `bench/learn_radial` model.npz) is splined at 1e-10 by
+    `ace_jax.eval.to_spline`.
+    - Julia `ace_model` exports and Python-authored models are analytic but not
+      learned, so they stay exact unless you pass a float, e.g.
+      `spline_tol=1e-10`.
+    - Old learned-radial files written before the flag existed load as not learned: mark one with `ace_jax.construct.export.mark_radial_learned("model.npz")`, or pass `spline_tol=1e-10`.
+    - The spline gather replaces the polynomial recursion, and the
+      species-compact blocks apply again (learned radials keep ACE1's
+      one-neighbour-species-per-column pattern).
+    - It is not roundoff: at 1e-10, energies agree with the full model to up to
+      ~1e-9 relative and forces to up to ~2.3e-8 of max|F|. `spline_tol=None`
+      (on `lean`, `ACECalculator` or `export_lammps`) never splines.
+    - `calc.splined` and `calc.last_timing["spline_tol"]` report it.
+    - The spline is cached on the radial's content, so a readout-only
+      `calc.model` swap does not redo it.
+    - The interval count is bucketed (quarter-octave, <= 20% extra), so a
+      radial swap usually reuses the compiled step. `spline_intervals=N`
+      pins it.
+    - Take UQ variances from the full model.
+  - A wrapper model with `.base` and `with_base(new_base)` (e.g. an
+    `FSModel(base, ...)`) gets `model.with_base(lean_keep_basis(model.base))`:
+    `to_spline` and `prune_columns` only, which keep `site_basis` and the
+    unfolded readout valid.
 - `layout`: `"sparse"` (edge list) or `"dense"` (padded per-node blocks, A by a
   batched outer product, several times faster forces on GPU). `"auto"` picks
   dense when the padding fill, edges / (atoms × max neighbours), is at least
@@ -238,8 +263,13 @@ This writes a lammps-jax bundle for `pair_style jax/kk` (GPU only).
   --tight-slots` opts in; the main suite never does.
 - The dense bundle runs in blocks of `BUNDLE_BLOCK_ROWS` (32,768) rows above
   one block, bounding memory at large N.
-- `lean=True` (default) exports `lean(model)` for an ACE model, as
-  `ACECalculator` does. It is recorded as `ace_jax.lean`. `layout="auto"` is
+- `lean=True` (default) exports `lean(model, spline_tol, spline_intervals)` for
+  an ACE model, as `ACECalculator` does. The bundle records what `lean` actually
+  did, looking through a wrapper's `.base`:
+  - `ace_jax.lean`: False when `lean` returned the model as given, e.g. a PACE
+    or unfolded model.
+  - `ace_jax.spline_tol` and `ace_jax.spline_intervals`: both None when nothing
+    was splined. `layout="auto"` is
   sized on the full model, so it chooses the same layout either way.
 
 Other entry points:
@@ -251,7 +281,10 @@ Other entry points:
   --model M.npz --data D.xyz --out DIR --r0 2.35 [--n-q 12] [--lam-grid 0,1e-2]`
   learns the tensor radials by VarPro (`ace_jax.fit.radial_learn.learn_radial`)
   and writes `DIR/model.npz` with the radials a held-out gate selects. Fit the GP
-  on that file as usual. Needs float64.
+  on that file as usual. Needs float64. For MD, `ACECalculator` and
+  `export_lammps` spline the learned radial through `lean` (see above);
+  `ace_jax.eval.to_spline(model, n_intervals=None, tol=1e-10)` returns
+  `(spline model, max_rel_err)` directly.
 - Benchmarks: `docs/benchmarks.md` (harness in `bench/scaling/`).
 
 ## Gotchas
