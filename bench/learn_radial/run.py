@@ -73,6 +73,9 @@ p.add_argument("--lam-eta-grid", default="0", help="relative density shape-prior
 p.add_argument("--extra-train", action="append", default=[],
                help="extra xyz (same label keys) appended to the TRAINING split only, e.g. defect cells; "
                     "the validation split is unchanged (repeatable)")
+p.add_argument("--init-radials", default=None,
+               help="rnl_Wnlq.npy to start from instead of the model's own radials (shape (NZ, NZ, n_rnl, n_q) "
+                    "at --n-q); the gate's 'init' candidate is then this start")
 p.add_argument("--tol", type=float, default=1e-6,
                help="L-BFGS relative-decrease stopping tolerance (0 = always run the full step budget)")
 a = p.parse_args()
@@ -86,6 +89,13 @@ if hasattr(model, "base"):              # an FSModel: learning starts from its l
     model = model.base
     print("note: the density term of the input model is dropped (it belongs to the old radials)", flush=True)
 model, relres = to_analytic(model, a.n_q)
+if a.init_radials:
+    from ace_jax.fit.radial_model import with_radial
+    W_init = jnp.asarray(np.load(a.init_radials))
+    if W_init.shape != model.rnl_Wnlq.shape:
+        raise SystemExit(f"--init-radials shape {W_init.shape} != model radials {model.rnl_Wnlq.shape} at --n-q {a.n_q}")
+    model = with_radial(model, W_init)
+    print(f"starting from radials {a.init_radials}", flush=True)
 relres_max = float(np.max(relres))
 print(f"to_analytic: n_q={a.n_q} relres_max={relres_max:.3e}", flush=True)
 NZ = len(meta["elements"])
@@ -169,7 +179,7 @@ summary = {"selected": info["selected"], "scores": info["scores"], "n_q": a.n_q,
            "spec_grid": list(spec_grid), "spec_p": a.spec_p, "gap_grid": list(gap_grid),
            "steps": a.steps, "reprofile_every": a.reprofile_every,
            "learn_sigma_e_mult": a.learn_sigma_e_mult, "to_analytic_relres_max": relres_max,
-           "density": a.density, "extra_train": a.extra_train, "tol": a.tol, "P_selected": int(info.get("P", 0)), "density_mode": a.density_mode,
+           "density": a.density, "extra_train": a.extra_train, "init_radials": a.init_radials, "tol": a.tol, "P_selected": int(info.get("P", 0)), "density_mode": a.density_mode,
            "lam_eta_grid": a.lam_eta_grid,
            "seconds": time.time() - t0}
 (out / "summary.json").write_text(json.dumps(summary, indent=1))
