@@ -10,6 +10,6 @@ prior.py is deliberately numpy-only so the eval/fit path can import it as a
 fallback for exports that lack gamma (cli.py and the bench driver go through
 prior.prior_diagonal, which rebuilds it from the export's meta["nnll"]); the
 coupling shim is the only piece that
-needs the optional `authoring` extra (juliacall + juliapkg).  Refitting on an
+needs the optional `authoring` extra (the compiled ace-jax-coupling library).  Refitting on an
 existing model never touches it.
 """

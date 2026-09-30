@@ -2,11 +2,10 @@
 
 The real shim is monkeypatched: these tests pin the key derivation, the
 miss/hit lifecycle, and the two invalidation paths (stored-specs mismatch,
-pin-hash change).  The end-to-end "a hit never launches Julia" guarantee is
+coupling-library version change).  The end-to-end "a hit never launches Julia" guarantee is
 pinned by the ACEJAX_NO_JULIA subprocess test in test_python_authoring.py.
 """
 
-import hashlib
 import json
 import os
 import pathlib
@@ -88,16 +87,16 @@ def test_stored_specs_mismatch_recomputes(tmp_path, shim):
     assert len(shim) == 2
 
 
-def test_pin_hash_change_recomputes(tmp_path, shim, monkeypatch):
-    """A juliapkg.json pin change invalidates entries (recompute, then the
-    new pin is stored)."""
+def test_backend_change_recomputes(tmp_path, shim, monkeypatch):
+    """A coupling-library version change invalidates entries (recompute, then
+    the new backend id is stored)."""
     C.couple_cached(_MB, _RNL, _YLM, cache_dir=str(tmp_path))
     assert len(shim) == 1
-    monkeypatch.setattr(C, "juliapkg_hash", lambda: "changed-pin")
+    monkeypatch.setattr(C, "backend_id", lambda: "ace-jax-coupling==9.9.9")
     C.couple_cached(_MB, _RNL, _YLM, cache_dir=str(tmp_path))
     assert len(shim) == 2
     C.couple_cached(_MB, _RNL, _YLM, cache_dir=str(tmp_path))
-    assert len(shim) == 2                       # rewritten entry carries the new pin
+    assert len(shim) == 2                       # rewritten entry carries the new backend id
 
 
 def test_entry_loads_without_pickle(tmp_path, shim):
@@ -133,18 +132,30 @@ def test_disabled_cache_calls_shim_directly(shim):
     assert len(shim) == 2                       # nothing persisted anywhere
 
 
-def test_juliapkg_hash_finds_repo_pin(monkeypatch):
-    """The repo's own juliapkg.json is discoverable and hashed without
-    juliacall.  (CI's pytest may not have the repo root on sys.path, so the
-    test prepends cwd itself; the end-to-end pin re-check on a real entry is
-    covered by the ACEJAX_NO_JULIA subprocess test.)"""
-    if os.path.exists("juliapkg.json"):
-        expected = hashlib.sha256(open("juliapkg.json", "rb").read()).hexdigest()
-        monkeypatch.syspath_prepend(os.getcwd())
-        assert C.juliapkg_hash() == expected
-    h = C.juliapkg_hash()
-    assert h is None or len(h) == 64
+def test_backend_id_matches_extra_pin():
+    """The cache stamp, the version check on a miss, and the `authoring` extra
+    pin must name the same ace-jax-coupling version."""
+    import re
+    import tomllib
+    pp = tomllib.loads((pathlib.Path(__file__).resolve().parents[1] / "pyproject.toml").read_text())
+    extra = " ".join(pp["project"]["optional-dependencies"]["authoring"])
+    m = re.search(r"ace-jax-coupling==([0-9][^;\s]*)", extra)
+    assert m and m.group(1) == C.COUPLING_LIB_VERSION
+    assert C.backend_id() == f"ace-jax-coupling=={C.COUPLING_LIB_VERSION}"
 
+
+def test_schema1_entry_is_a_miss(tmp_path, shim):
+    """A pre-migration (juliapkg-stamped, schema 1) entry is recomputed, not an error."""
+    C.couple_cached(_MB, _RNL, _YLM, cache_dir=str(tmp_path))
+    key = C.coupling_key(_MB, _RNL, _YLM)
+    p = C._entry_path(tmp_path, key)
+    z = dict(np.load(p))
+    meta = json.loads(bytes(z["meta_json"]).decode())
+    meta["schema"] = 1; meta.pop("backend"); meta["juliapkg_hash"] = "0" * 64
+    z["meta_json"] = np.frombuffer(json.dumps(meta).encode(), np.uint8)
+    np.savez(p, **z)
+    C.couple_cached(_MB, _RNL, _YLM, cache_dir=str(tmp_path))
+    assert len(shim) == 2
 
 def test_corrupt_entry_recomputes(tmp_path, shim):
     """A torn entry (half-written zip) must read as a miss, not crash every
