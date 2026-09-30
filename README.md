@@ -33,6 +33,12 @@ pip install ace-jax[cuda]       # + CUDA 12 JAX
 pip install ace-jax[fast-neighbours]  # + matscipy-neighbours (C++ source build; ASE's list is the fallback)
 ```
 
+> **`basis` extra, pre-release:** its `ace-jax-coupling` wheel is not on PyPI
+> yet, so `pip install ace-jax[basis]` does not resolve outside this
+> repository. Build the wheel from `coupling/` (see CLAUDE.md "Extras" and
+> `docs/coupling-etshim-spec.md`) and install it next to ace-jax. Fitting and
+> evaluation never need it.
+
 Training and evaluation data (extxyz) are read with libAtoms
 [`extxyz`](https://github.com/libAtoms/extxyz), a core dependency: labels come
 back under the names they were written with, including `energy` / `forces`.

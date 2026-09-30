@@ -18,6 +18,10 @@ pip install "ace-jax[basis]" # + `aj basis` (compiled EquivariantTensors wheel; 
 pip install "ace-jax[cuda]"      # + CUDA 12 JAX
 ```
 
+`ace-jax-coupling` (the `basis` extra's wheel) is not on PyPI yet: until it is,
+`aj basis` for a new basis shape needs a locally built wheel (`coupling/` in the
+ace-jax repo); fit and eval are unaffected.
+
 `ace-jax` and `aj` are the same CLI. `aj <cmd> --help` lists every flag.
 
 ## Workflow: basis → fit → eval

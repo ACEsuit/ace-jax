@@ -96,6 +96,7 @@ int32_t etc_couple(
     int64_t *nnll_off /* [n_B+1] */, int64_t *nnll /* [2*n_nnll] */); // per B row (n,l) = get_nnll_spec(tensor, 1)
 // sizes = [nnz, n_B, n_AA, n_sig, n_A, n_aaidx, n_nnll]
 // returns 0 OK, 1 BUFFERS_TOO_SMALL (sizes filled), 2 INVALID_INPUT, 3 ORDER_TOO_HIGH (> 8)
+//         4 NO_INVARIANTS (no body admits an L=0 invariant), 5 INTERNAL_ERROR (ET threw / inconsistent sizes)
 ```
 
 Two-phase and stateless: call 1 with zero capacities returns the sizes, call 2
@@ -123,14 +124,19 @@ a local depot. Linux keeps exactly the names `LD_DEBUG` reports as opened and
 strips debug info from the unmodified third-party libraries (never from
 `libetcouple` or the patchelf'd `libjulia*`, which `strip` corrupts). macOS
 (dyld reports resolved files) keeps a library's alias names only when another
-traced binary or libjulia's loader list names them. Library copies are never
-symlinks (wheels cannot hold them), so duplicates matter: on macOS dyld keys
-images by path, and a duplicated `libblastrampoline` loaded twice and hung the
-solver -- `check_bundle.py` rejects duplicates outside libjulia's loader list,
-and `test_largest_case_is_fast` catches a double load. `check_bundle.py`
+traced binary or libjulia's loader list names them. Wheels cannot hold symlinks, and two
+copies of one library under different names load as two images with separate
+state (a duplicated `libblastrampoline` hung the solver; a second
+`libjulia-internal` is an uninitialised runtime). So each library ships once,
+under the name libjulia's loader opens by path, and every other reference is
+rewritten to it (`install_name_tool -change` on macOS, keeping install names so
+`dlopen("@rpath/<install name>")` still matches the loaded image;
+`patchelf --replace-needed` on Linux). `check_bundle.py` rejects any duplicate
+copy; `test_no_library_loaded_twice` checks the loaded image list and
+`test_largest_case_is_fast` catches a slow double load. `check_bundle.py`
 asserts ABI, macOS `minos ≤ 11.0` and Linux `GLIBC ≤ 2.28`. Wheels are
 `py3-none-{manylinux_2_28_x86_64, manylinux_2_28_aarch64, macosx_11_0_arm64}`
-(macOS arm64 ~19 MB, Linux aarch64 ~31 MB); without a bundle the build makes a lib-less `py3-none-any` dev wheel
+(macOS arm64 ~18 MB, Linux aarch64 ~24 MB); without a bundle the build makes a lib-less `py3-none-any` dev wheel
 whose `build_info()` raises `CouplingLibError`. `coupling/tools/test_wheel.sh`
 installs a wheel into a fresh venv with an empty HOME and no Julia on PATH and
 runs the package tests (and checks HOME is untouched). Bundled third-party

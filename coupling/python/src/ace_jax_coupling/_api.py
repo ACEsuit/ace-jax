@@ -7,7 +7,7 @@ import numpy as np
 from . import _loader
 
 MAX_ORDER = 8
-_OK, _SHORT, _INVALID, _ORDER = 0, 1, 2, 3
+_OK, _SHORT, _INVALID, _ORDER, _NOINV = 0, 1, 2, 3, 4
 
 
 class RawCoupling(NamedTuple):
@@ -112,4 +112,6 @@ def _error(code):
         return ValueError("coupling library rejected the specs (INVALID_INPUT)")
     if code == _ORDER:
         return ValueError(f"correlation order > {MAX_ORDER} (ORDER_TOO_HIGH)")
+    if code == _NOINV:
+        return ValueError("no body of mb_spec admits an L = 0 invariant (NO_INVARIANTS)")
     return _loader.CouplingLibError(f"etc_couple returned unexpected code {code}")

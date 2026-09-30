@@ -4,7 +4,7 @@
 using Test
 import EquivariantTensors as ET
 include(joinpath(@__DIR__, "..", "src", "ETCouple.jl"))
-using .ETCouple: validate, compute, required_sizes, etc_couple, OK, BUFFERS_TOO_SMALL, INVALID_INPUT, ORDER_TOO_HIGH
+using .ETCouple: validate, compute, required_sizes, etc_couple, OK, BUFFERS_TOO_SMALL, INVALID_INPUT, ORDER_TOO_HIGH, NO_INVARIANTS
 
 nl(n, l) = (n = n, l = l); lm(l, m) = (l = l, m = m)
 ylm(L) = [lm(l, m) for l in 0:L for m in -l:l]
@@ -49,6 +49,7 @@ end
    @test validate([[nl(1, 0)]], R, [lm(1, 2)]) == INVALID_INPUT                       # |m| > l
    @test validate([[nl(1, -1)]], [nl(1, -1)], Y) == INVALID_INPUT                     # l < 0
    @test validate([[nl(1, 0) for _ in 1:9]], R, Y) == ORDER_TOO_HIGH
+   @test compute([[nl(1, 1)]], R, Y) === nothing                        # no L = 0 invariant
 end
 
 @testset "etc_couple two-phase from Julia" begin

@@ -38,8 +38,10 @@ def _cache(tmp_path_factory):
     """The committed coupling entries, re-written into a temp cache by this
     process (as test_python_authoring's _primed_cache does), so their stamp
     is the current coupling backend id (`coupling.backend_id()`), not the one
-    they were generated under.  A stale coupling would still fail the
-    descriptor parity against Julia."""
+    they were generated under.  The entries predate the ET main backend (ET
+    0.4.3 era); tests/test_coupling_cache_fixtures.py pins that they equal the
+    current backend's couplings up to a per-B-row scale, which the subspace
+    descriptor parity here cannot see."""
     import json as _json
     from ace_jax.construct import coupling as C
     global CACHE

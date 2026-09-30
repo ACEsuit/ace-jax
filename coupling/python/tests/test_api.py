@@ -65,6 +65,21 @@ def test_invalid_inputs_raise(mb, R, Y, msg):
         ajc.couple_raw(mb, R, Y)
 
 
+def test_spec_without_invariants_raises_not_aborts():
+    """Every body without an L=0 invariant (e.g. a single l=1 body): ET finds no
+    coupling.  Must be a ValueError -- an exception escaping the C ABI aborts the
+    whole process, so run it in a subprocess."""
+    import subprocess
+    import sys
+    code = ("import ace_jax_coupling as a\n"
+            "try:\n"
+            "    a.couple_raw([[(1, 1)]], [(1, 0), (1, 1)], [(0, 0), (1, -1), (1, 0), (1, 1)])\n"
+            "except ValueError as e:\n"
+            "    print('VALUEERROR', e)\n")
+    r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=120)
+    assert r.returncode == 0 and "VALUEERROR" in r.stdout, (r.returncode, r.stdout, r.stderr[-1500:])
+
+
 def test_raw_invalid_returns_code():
     """A malformed direct ctypes call is rejected by the library (code 2), not a crash."""
     from ace_jax_coupling import _loader

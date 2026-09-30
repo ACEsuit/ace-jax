@@ -43,3 +43,38 @@ def test_sigint_still_raises_keyboardinterrupt(cases, tmp_path):
     p.send_signal(signal.SIGINT)
     out, _ = p.communicate(timeout=20)
     assert p.returncode == 7 and "kbi" in out
+
+
+_IMAGES = r"""
+import ctypes, hashlib, json, sys
+import ace_jax_coupling as a
+from ace_jax_coupling import _loader
+c = json.load(open(sys.argv[1]))["tiny"]
+a.couple_raw(c["mb"], c["R"], c["Y"])
+root = str(_loader.bundle_root())
+if sys.platform == "darwin":
+    d = ctypes.CDLL(None)
+    d._dyld_get_image_name.restype = ctypes.c_char_p
+    paths = [d._dyld_get_image_name(i).decode() for i in range(d._dyld_image_count())]
+else:
+    paths = [l.split()[-1] for l in open("/proc/self/maps") if len(l.split()) >= 6]
+paths = sorted({p for p in paths if p.startswith(root)})
+print(json.dumps({p: hashlib.sha256(open(p, "rb").read()).hexdigest() for p in paths}))
+"""
+
+
+def test_no_library_loaded_twice():
+    """Each bundled library is mapped once: two copies of one library under
+    different names are two images with separate state (a second
+    libjulia-internal is an uninitialised runtime)."""
+    import json
+    import pathlib
+    data = pathlib.Path(__file__).parent / "data" / "cases.json"
+    r = subprocess.run([sys.executable, "-c", _IMAGES, str(data)], capture_output=True, text=True, timeout=120)
+    assert r.returncode == 0, r.stderr[-2000:]
+    images = json.loads(r.stdout.splitlines()[-1])
+    assert any("libetcouple" in p for p in images)
+    by_hash = {}
+    for p, h in images.items():
+        by_hash.setdefault(h, []).append(p)
+    assert all(len(v) == 1 for v in by_hash.values()), [v for v in by_hash.values() if len(v) > 1]

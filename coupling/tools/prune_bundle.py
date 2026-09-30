@@ -72,7 +72,24 @@ def main(src, dst):
         names = {}
         for u in opened:
             names.setdefault(pathlib.Path(os.path.realpath(src / u)).relative_to(src), []).append(u)
-        return _write(src, dst, names)
+        # one file per library (see the macOS branch): keep the name libjulia's
+        # loader dlopens by path, point every DT_NEEDED at it
+        loader_names = b"".join((src / u).read_bytes() for u in opened
+                                if "libjulia." in u.name and "internal" not in u.name)
+        renames = {}
+        for real, rels in names.items():
+            if len(rels) > 1:
+                keep = next((r for r in sorted(rels) if r.name.encode() in loader_names), sorted(rels)[0])
+                renames.update({r.name: keep.name for r in rels if r != keep})
+                names[real] = [keep]
+        _write(src, dst, names)
+        for f in sorted(p for p in dst.rglob("*") if p.is_file() and _is_lib(p)):
+            needed = subprocess.run(["patchelf", "--print-needed", str(f)], capture_output=True,
+                                    text=True, check=True).stdout.split()
+            args = [x for old in needed if old in renames for x in ("--replace-needed", old, renames[old])]
+            if args:
+                subprocess.run(["patchelf", *args, str(f)], check=True)
+        return
     used = {pathlib.Path(os.path.realpath(src / u)).relative_to(src) for u in opened}
     assert pathlib.Path("lib") / f"libetcouple.{EXT}" in used, "trace did not see libetcouple"
     # libjulia's loader opens a fixed dependency list (libgcc_s, libstdc++,
@@ -81,9 +98,9 @@ def main(src, dst):
     # trace never sees the bundled one).  Keep every bundle library the loader
     # names, whatever the trace saw.
     loader = [u for u in used if "libjulia." in u.name and "internal" not in u.name]
-    names = b"".join((src / u).read_bytes() for u in loader)
+    loader_names = b"".join((src / u).read_bytes() for u in loader)
     for p in src.rglob("*"):
-        if p.is_file() and _is_lib(p) and p.name.encode() in names:
+        if p.is_file() and _is_lib(p) and p.name.encode() in loader_names:
             used.add(pathlib.Path(os.path.realpath(p)).relative_to(src))
     # The trace reports resolved files, but binaries refer to them by alias
     # (install names / SONAMEs / dlopen strings, e.g. @rpath/libunwind.1.dylib ->
@@ -101,7 +118,37 @@ def main(src, dst):
             names.setdefault(real, []).append(p.relative_to(src))
     for real in used:
         names.setdefault(real, [real])
-    return _write(src, dst, names)
+    # One file per library: dyld keys images by path, so a library shipped under
+    # two names (upstream: a symlink) loads as two images -- a second, never
+    # initialised libjulia-internal.  Keep the name libjulia's loader opens by
+    # path (a string we cannot rewrite), else the first referenced one, and
+    # point every load command at it.
+    renames = {}
+    for real, rels in names.items():
+        if len(rels) > 1:
+            keep = next((r for r in rels if r.name.encode() in loader_names), rels[0])
+            renames.update({r.name: keep.name for r in rels if r != keep})
+            names[real] = [keep]
+    _write(src, dst, names)
+    _relink_macos(dst, renames)
+
+
+def _relink_macos(dst, renames):
+    """Rewrite @rpath/<old> load commands to the kept names, then ad-hoc re-sign
+    every rewritten binary (arm64 refuses unsigned code).  Install names are left
+    alone: dyld matches a later dlopen("@rpath/<install name>") -- e.g.
+    OpenLibm_jll's "@rpath/libopenlibm.4.dylib" -- against images already
+    loaded, which is what keeps the dropped aliases unnecessary."""
+    for f in sorted(dst.rglob("*.dylib")):
+        out = subprocess.run(["otool", "-L", str(f)], capture_output=True, text=True, check=True).stdout
+        ident = subprocess.run(["otool", "-D", str(f)], capture_output=True, text=True, check=True).stdout.split()[-1]
+        args = []
+        for old, new in renames.items():
+            if f"@rpath/{old} " in out and ident != f"@rpath/{old}":
+                args += ["-change", f"@rpath/{old}", f"@rpath/{new}"]
+        if args:
+            subprocess.run(["install_name_tool", *args, str(f)], check=True, capture_output=True)
+            subprocess.run(["codesign", "--force", "--sign", "-", str(f)], check=True, capture_output=True)
 
 
 def _write(src, dst, names):

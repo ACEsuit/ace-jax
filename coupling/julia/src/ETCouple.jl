@@ -20,6 +20,8 @@ const OK = Cint(0)
 const BUFFERS_TOO_SMALL = Cint(1)
 const INVALID_INPUT = Cint(2)
 const ORDER_TOO_HIGH = Cint(3)
+const NO_INVARIANTS = Cint(4)             # no body of mb_spec admits an L = 0 invariant
+const INTERNAL_ERROR = Cint(5)            # anything else thrown by ET, or inconsistent sizes
 const NSIZES = 7                          # [nnz, n_B, n_AA, n_sig, n_A, n_aaidx, n_nnll]
 
 const NL = @NamedTuple{n::Int, l::Int}
@@ -65,8 +67,12 @@ function validate(mb::Vector{Vector{NL}}, rnl::Vector{NL}, ylm::Vector{LM})::Cin
    return OK
 end
 
-function compute(mb::Vector{Vector{NL}}, rnl::Vector{NL}, ylm::Vector{LM})::Result
-   t = ET.sparse_equivariant_tensor_spec(Val(0); mb_spec = mb, Rnl_spec = rnl, Ylm_spec = ylm, basis = real)
+# `nothing` when no body has an L = 0 invariant (ET would then throw reducing
+# over an empty 𝔸spec; an exception escaping the C ABI aborts the host process)
+function compute(mb::Vector{Vector{NL}}, rnl::Vector{NL}, ylm::Vector{LM})::Union{Result, Nothing}
+   symm, 𝔸spec = ET.symmetrisation_matrix(Val(0), mb; prune = true, PI = true, basis = real)
+   isempty(𝔸spec) && return nothing
+   t = ET._tensor_specs(symm, 𝔸spec, rnl, ylm)      # == sparse_equivariant_tensor_spec(Val(0); ...)
    I, J, V = findnz(t.symm)
    nB, nAA = size(t.symm)
    # SparseSymmProd(𝔸spec_raw) evaluation order: the constructor's own
@@ -126,7 +132,14 @@ Base.@ccallable function etc_couple(
    ylm = LM[(l = Int(unsafe_load(y_l, k)), m = Int(unsafe_load(y_m, k))) for k in 1:n_y]
    code = validate(mb, rnl, ylm)
    code == OK || return code
-   r = compute(mb, rnl, ylm)
+   r = try
+      compute(mb, rnl, ylm)
+   catch
+      return INTERNAL_ERROR
+   end
+   r === nothing && return NO_INVARIANTS
+   # the offset arrays below are sized from nAA / nB: never trust ET's shapes blindly
+   (length(r.sig) == r.nAA && length(r.aa) == r.nAA && length(r.nnll) == r.nB) || return INTERNAL_ERROR
    need = required_sizes(r)
    short = false
    for k in 1:NSIZES
