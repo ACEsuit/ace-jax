@@ -40,6 +40,7 @@ def save_npz(path, auth):
     in-memory hand-off share one source of truth.
     """
     model, meta = auth.eval_pair()
+    model.require_full("save_npz")
     NZ = len(meta["elements"])
     out = {
         "A2B_rows": np.asarray(model.a2b_rows, np.int32),
@@ -121,6 +122,7 @@ def patch_radial_npz(src, dst, model, readout=None):
     are always copied verbatim.  This is how a learned radial is written back
     from a model that was loaded rather than authored (save_npz needs an
     Authoring)."""
+    model.require_full("patch_radial_npz")
     if model.radial_kind != "analytic":
         raise ValueError(f"patch_radial_npz: model radial_kind {model.radial_kind!r} is not analytic")
     with np.load(src, allow_pickle=False) as z:
