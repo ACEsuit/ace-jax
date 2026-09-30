@@ -280,10 +280,33 @@ aj fit --model si.npz --train train.xyz --test test.xyz --ood ood.xyz $K \
 aj fit --model si.npz --train train.xyz --test test.xyz $K \
     --m-per-species 0 --uq pops --opt lbfgs --rungs map --r0 2.35 --out out_pops
 
+# calibrated per-atom force uncertainty: ARD posterior (linear model)
+aj fit --model si.npz --train train.xyz --test test.xyz $K \
+    --m-per-species 0 --uq ard --opt lbfgs --r0 2.35 --out out_ard
+aj eval --model out_ard/model.npz --posterior out_ard/posterior.npz --data big.xyz $K \
+    --forces --per-atom atoms_std.xyz          # per-atom forces_std, e.g. to colour a crack tip
+
 # one file split by a seeded permutation, E0 by least squares
 aj fit --model si.npz --data all.xyz --ntrain 40 --ntest 10 --e0 lsq $K \
     --m-per-species 0 --rungs map --r0 2.35 --out out_split
 ```
+
+`--uq ard` fits prior scales per body order and the noise scales by evidence (joint type-II ML).
+The default `--ard-variance sandwich` serves the configuration-clustered sandwich variance,
+σ² = λ²·φA⁻¹MA⁻¹φᵀ, the misspecification-robust covariance, with λ from the train hold-out (fitted
+the same way as κ, but with each held-out atom's own training-configuration cluster left out of M: a
+new configuration has no such term; `ard.json` also reports `lam_incl_own`, the λ with it). On the bench365 prototype it ranked local errors better than the tempered
+posterior (Spearman ρ 0.26–0.37 against 0.15–0.26) at the same calibration and OOD detection.
+`--ard-variance kappa` keeps the single-temperature posterior variance κ²φA⁻¹φᵀ instead. Only
+the force variance is calibrated (λ or κ; `ard.json` `tempered_quantities: ["F"]`); energy and virial
+variances are the uncalibrated posterior ones. The
+prototype of this method (`bench/defect_uq`, PR #12) held rms-z 0.91–1.02 on held-out Cantor
+defect combinations; the acceptance run of this implementation is pending. `--uq ard` changes the
+mean as well as the uncertainty: `model.npz` holds the ARD posterior mean, not the BLR/MAP mean.
+`posterior.npz` stores the float32 posterior factor, ~0.9 GB at L = 15k, and (for the default
+sandwich variance) an additional (L, n_train_configs) float32 factor. `--ard-mode sequential` is
+the low-memory fallback. The calculator's `forces_std` holds the whole cell's force design rows,
+about N·3·L·8 bytes (N atoms, L columns; 7 GB for 100k atoms at L = 3k), so size cells to fit them.
 
 `aj fit` and the research driver `bench/acegp_cantor/run.py` share one pipeline
 (`ace_jax.fit.pipeline`: `FitConfig`, `load_fit_data`, `fit`, `write_outputs`,
@@ -299,8 +322,8 @@ aj fit --model si.npz --data all.xyz --ntrain 40 --ntest 10 --e0 lsq $K \
   pair/pca features, L-BFGS, MAP only)
 - MAP: `--opt adam|lbfgs` (default adam, 500 steps; L-BFGS is much faster on small
   data), `--map-restarts N` (best of N L-BFGS starts; the joint LML is multimodal)
-- UQ: `--rungs map,laplace,pathfinder,vi,nuts` (`--laplace svi|fd`), or `--uq pops` on
-  the linear model. The default is `--rungs map`. The other rungs add
+- UQ: `--rungs map,laplace,pathfinder,vi,nuts` (`--laplace svi|fd`), or `--uq pops`/`--uq ard`
+  on the linear model. The default is `--rungs map`. The other rungs add
   hyperparameter draws and cost far more than the MAP: the Laplace rung takes a
   Hessian through the whole LML, which had not finished compiling after 30 min on a
   laptop CPU for 40 Si configs
@@ -310,7 +333,7 @@ quantity), `metrics_ood.csv`, `theta_map.json`, `draws_<rung>.npy`, `config.json
 and the **fitted model**:
 
 - linear: `model.npz`, an ordinary ACE model file (`aj.load`, `ACECalculator`,
-  `aj eval`);
+  `aj eval`); `--uq ard` also writes `posterior.npz` and `ard.json` (see above);
 - GP: `gp_model.npz`, self-contained, loaded by
   `GPCalculator.from_file("gp_model.npz")` (energy, forces, stress, `energy_std`,
   `forces_std`) or `aj eval`. It stores one (Dt, Dt) posterior factor per

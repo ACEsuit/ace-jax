@@ -53,11 +53,11 @@ def dense_budget_bytes():
 
 class ACECalculator(Calculator):
     implemented_properties = ["energy", "free_energy", "forces", "stress",
-                              "site_descriptors"]
+                              "site_descriptors", "forces_std"]
 
     def __init__(self, model, meta=None, cutoff=None, dtype=None, edge_a_kind="auto",
                  layout="auto", skin=1.0, lean=True, spline_tol=AUTO,
-                 spline_intervals=None, **kw):
+                 spline_intervals=None, posterior=None, forces_std_every_call=False, **kw):
         """`ACECalculator("si_fitted.npz")` is the intended form: cutoff,
         species and dtype all come from the file.  A pre-loaded (model, meta)
         pair is still accepted, which is what the validation tests use.
@@ -99,7 +99,32 @@ class ACECalculator(Calculator):
         A PACE or unfolded model is evaluated as given either way.  Setting
         `calc.model` recomputes the lean form on the host (a device-to-host copy
         of the model's arrays): negligible for MD, but a per-step cost if the
-        model is swapped every step."""
+        model is swapped every step.
+
+        `posterior` (a `posterior.npz` from `fit --uq ard`, with `model` the matching
+        `model.npz` FILE) adds `results["forces_std"]`: the per-atom force std, shape (N,).
+        By default (posteriors fitted with `--ard-variance sandwich`) it is lambda times the
+        configuration-clustered sandwich std, lambda * sqrt(sum_c phi_c A^-1 M A^-1 phi_c^T);
+        for `--ard-variance kappa` or a schema-1 posterior.npz it is the tempered epistemic
+        std, kappa * sqrt(sum_c phi_c A^-1 phi_c^T).  By default it is computed only
+        when requested (`calc.get_property("forces_std", atoms)`, which reuses the cached
+        E/F/stress): a design-row rebuild plus an L^2 solve per step is not a silent MD cost.
+        `forces_std_every_call=True` adds it to every calculation.  posterior= requires
+        `jax.config.update("jax_enable_x64", True)` (RuntimeError otherwise).
+
+        Memory: forces_std builds the force design rows of the WHOLE cell, about N*3*L*8 bytes
+        (N atoms padded, L = (n_B + n_pair) * NZ columns) -- 7 GB for N = 100k at L = 3k -- on
+        the JAX device, besides the posterior's L^2 factor.  The edge Jacobian is node-chunked
+        (`linear_rows_chunked`), the rows themselves are not: size cells to fit them.  The rows come
+        from the FULL `model` (never the energy-only `eval_model`), whatever `lean` is."""
+        model_path = model
+        if posterior is not None:
+            import jax
+            if not jax.config.jax_enable_x64:
+                # A^-1 at cond(S) ~ 1e13 is meaningless in float32; enabling x64 here would silently
+                # change every other JAX computation in the process
+                raise RuntimeError("posterior= (forces_std) needs float64: call "
+                                   "jax.config.update('jax_enable_x64', True) before creating the calculator")
         if edge_a_kind != "auto":
             check_edge_a_kind(edge_a_kind)
         if layout != "auto" and layout not in LAYOUTS:
@@ -138,6 +163,51 @@ class ACECalculator(Calculator):
         self._efv_sparse = eqx.filter_jit(
             lambda m, rij, zi, zj, s, r, n, nz, emask: m.energy_forces_virial(
                 rij, zi, zj, s, r, n, nz, emask))
+        self.posterior = None
+        self.forces_std_every_call = bool(forces_std_every_call)
+        if posterior is not None:
+            from ..eval import load as _load_fit_model
+            from ..fit.ard import ARDPosterior
+            from ..fit.inducing import GPConfig
+            if not isinstance(model_path, (str, bytes)) and not hasattr(model_path, "__fspath__"):
+                raise ValueError("posterior= needs the model FILE path (the design rows use the fit model)")
+            post = ARDPosterior.load(posterior)
+            NZ = len(meta["elements"])
+            L = (meta["n_B"] + meta["n_pair"]) * NZ
+            if (len(post.mean) != L or post.meta.get("n_B") != meta["n_B"]
+                    or post.meta.get("NZ") != NZ):
+                raise ValueError(f"posterior {posterior} does not match the model: "
+                                 f"basis {len(post.mean)} vs {L}")
+            p_els = [int(e) for e in post.meta.get("elements", [])]
+            m_els = [int(e) for e in meta["elements"]]
+            if p_els != m_els:                           # order-sensitive: columns are per species index
+                raise ValueError(f"posterior {posterior} does not match the model: "
+                                 f"elements {p_els} vs {m_els}")
+            # the posterior must belong to THIS model's readout: its mean is the fit's coefficients in
+            # the `rows._place` layout (species-major WB blocks, then Wpair blocks), bit-identical when
+            # one run wrote both files
+            z = np.load(model_path)
+            if "WB" not in z.files or "Wpair" not in z.files:
+                raise ValueError(f"posterior= needs the model.npz written by the same fit; {model_path} "
+                                 f"has no WB/Wpair readout")
+            coef = np.concatenate([np.asarray(z["WB"]).T.ravel(), np.asarray(z["Wpair"]).T.ravel()])
+            mean = np.asarray(post.mean, np.float64)
+            if coef.shape != mean.shape or not np.allclose(
+                    coef, mean, rtol=1e-10, atol=1e-14 * max(float(np.abs(mean).max(initial=0.0)), 1e-300)):
+                raise ValueError(f"posterior {posterior} does not match the model: its mean is not the "
+                                 f"model's coefficients (a posterior from a different fit?)")
+            # the L x L Cholesky factor and the sandwich factor: host->device once, not on every call
+            import jax.numpy as jnp
+            post = post._replace(chol=jnp.asarray(post.chol, jnp.float64))
+            if post.Q is not None:
+                post = post._replace(Q=jnp.asarray(post.Q, jnp.float64))
+            self.posterior = post
+            # design rows from the full model as given (calc.model; the lean eval_model is energy-only);
+            # a non-float64 dtype would degrade sigma, so the fit model is then re-read in float64
+            self._fit_model = (self.model if dtype is None or np.dtype(dtype) == np.float64
+                               else _load_fit_model(model_path)[0])
+            self._fit_cfg = GPConfig(r0=1.0, rcut=float(meta["rcut"]), n_B=meta["n_B"],
+                                     n_pair=meta["n_pair"], NZ=NZ, C=1)
 
     @property
     def model(self):
@@ -149,8 +219,16 @@ class ACECalculator(Calculator):
         old one (its edge_a forms, the skin list and the step bound to its
         weights) is dropped.  The compiled step is kept while the structure
         (the static part) is unchanged, so new weights do not retrace.  ASE's
-        cached results are cleared too, as they are for a parameter change."""
+        cached results are cleared too, as they are for a parameter change.
+
+        Refused when a posterior is attached: the posterior, its design-row model and the device
+        factors belong to the model FILE given at construction, so forces_std would silently
+        describe the old model.  Build a new ACECalculator(model, posterior=...) instead."""
         if hasattr(self, "_model"):
+            if getattr(self, "posterior", None) is not None:
+                raise ValueError("cannot swap calc.model on a calculator with posterior=: forces_std "
+                                 "would still describe the model it was built with; build a new "
+                                 "ACECalculator(model_file, posterior=posterior_file) instead")
             self.reset()
         self._model = model
         self._eval_model = (lean_form(model, self._spline_tol, self._spline_intervals)
@@ -205,6 +283,11 @@ class ACECalculator(Calculator):
                 f"element Z={e.args[0]} not in model elements {self.meta['elements']}") from e
 
     def calculate(self, atoms=None, properties=("energy",), system_changes=all_changes):
+        if (self.posterior is not None and not system_changes and "forces" in self.results
+                and set(properties) <= {"forces_std"}):
+            super().calculate(atoms, properties, system_changes)   # E/F/stress cached: std only
+            self.results["forces_std"] = self._forces_std()
+            return
         super().calculate(atoms, properties, system_changes)
         import jax.numpy as jnp
 
@@ -229,6 +312,8 @@ class ACECalculator(Calculator):
             s = -np.asarray(V) / vol
             self.results["stress"] = np.array(
                 [s[0, 0], s[1, 1], s[2, 2], s[1, 2], s[0, 2], s[0, 1]])
+        if self.posterior is not None and (self.forces_std_every_call or "forces_std" in properties):
+            self.results["forces_std"] = self._forces_std()
 
     def _skin_calculate(self, pos, cell, pbc, numbers, dtype):
         """E, F, V from the skin list (built or reused), or None when
@@ -352,6 +437,29 @@ class ACECalculator(Calculator):
         t2 = time.perf_counter()
         # nlist_s: neighbour list + layout + host->device; model_s: the compiled call
         return E, F, V, {"nlist_s": t1 - t0, "model_s": t2 - t1, "nlist_backend": backend}
+
+    def _forces_std(self):
+        """Calibrated ARD per-atom force std (posterior.npz: lam x the cluster sandwich, or kappa x
+        the posterior std for --ard-variance kappa / schema 1), from node-chunked design rows."""
+        import jax
+
+        from ..fit.data import Config, build_dataset
+        from ..fit.rows import chunked_rows_fn
+        at = self.atoms
+        c = Config(at.get_positions(), at.get_atomic_numbers(), at.get_cell().array, at.get_pbc(),
+                   None, None, None, 1.0, 1.0, 1.0)
+        ds = build_dataset([c], self.meta, np.zeros(len(self.meta["elements"])), 1)
+        b = jax.tree.map(lambda a: a[0], ds)
+        if b.nbr.shape[1] == 0 or not bool(np.asarray(b.nbr_mask).any()):
+            return np.zeros(len(at))                     # no neighbours: forces are identically zero
+        # F stays on the device (one copy of the Ncap*3*L rows): sigma of every padded node (the
+        # padding rows are zero), then the mask on the (Ncap,) result -- no host copies of F
+        with highest_precision():
+            if getattr(self, "_rows_fn", None) is None:        # compiled once per cell shape (MD)
+                self._rows_fn = chunked_rows_fn(self._fit_model, self._fit_cfg)
+            F = self._rows_fn(b).F
+            s = self.posterior.forces_std(F)
+        return s[np.asarray(b.node_mask)]
 
     def _native_dense(self, pos, cell, pbc, n, dtype):
         """The dense graph straight from matscipy_neighbours' neighbour_matrix,
