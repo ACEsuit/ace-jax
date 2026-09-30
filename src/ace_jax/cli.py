@@ -139,6 +139,10 @@ def run(a):
     res = fit(cfg, data)
     write_outputs(res, a.out, layout=("cli",), argv=vars(a), save_model=not a.no_save_model,
                   model_draws=a.model_draws)
+    from . import runfile
+    fit_p = _parser()._subparsers._group_actions[0].choices["fit"]
+    runfile.write(pathlib.Path(a.out) / "fit.yaml",
+                  runfile.resolved(a, data, fit_dests=runfile._dests(fit_p), argv=getattr(a, "_argv", [])))
     return {key.split("/")[1]: m for key, m in res.preds.metrics.items() if key.startswith("test/")}
 
 
@@ -309,6 +313,7 @@ def _parse(argv=None):
     path = _config_path(argv) if cmd in ("fit", "basis") else None
     defaults = _apply_config(subs[cmd], cmd, path) if path else {}
     a = top.parse_args(argv)
+    a._argv = argv                              # as typed: recorded in out/fit.yaml provenance
     if defaults:
         from . import runfile
         given = runfile.explicit_dests(subs[cmd], argv[argv.index(cmd) + 1:])
