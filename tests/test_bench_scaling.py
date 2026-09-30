@@ -1178,8 +1178,27 @@ def test_only_a_new_line_tops_up_the_recorded_gate(tmp_path, monkeypatch):
     lines = [json.loads(l) for l in res.read_text().splitlines()]
     assert [l["code"] for l in lines] == ["acejax-ace", "acejax-ace-learned"]   # old kept, new added
     assert got["run"] == []                                      # the failed spline gate blocks it
-    assert sweep.gate_missing(lines, "acejax-ace-learned") is False
     assert sweep.gate_missing(lines, None) is False
+
+
+def test_gate_missing_is_per_check(tmp_path):
+    """A code whose recorded gate lacks one of today's checks (the matrix layout
+    added after the learned line was gated) is topped up; a complete gate is not."""
+    from scaling import sweep
+    from scaling.parity import BUNDLE_LAYOUTS
+    code = "acejax-ace-learned"
+
+    def row(gate, system, layout=None):
+        return {"mode": "parity", "code": code, "gate": gate, "system": system,
+                "_key": ["parity", gate, system, code] + ([layout] if layout else [])}
+
+    full = [row("spline", s) for s in ("SiGe", "Cantor")] + [
+        row("acejax", s, lay) for s in ("SiGe", "Cantor") for lay in BUNDLE_LAYOUTS]
+    assert sweep.gate_missing(full, code) is False
+    no_matrix = [r for r in full if r["_key"][-1] != "matrix"]
+    assert sweep.gate_missing(no_matrix, code) is True
+    assert sweep.gate_missing(no_matrix, None) is False
+    assert sweep.gate_missing([], code) is True
 
 
 def _learned_rows(host="modal-a100"):

@@ -185,9 +185,19 @@ def gate_in_subprocess(host, env):
 
 
 def gate_missing(parity_rows, only):
-    """True when `--only` names a code with no recorded parity row (the gate
-    predates the line); False without --only (a resumed full sweep keeps its gate)."""
-    return bool(only) and not any(r.get("code") == only for r in parity_rows)
+    """True when `--only` names a code missing any of today's parity checks (the
+    gate predates the line, or a check added since, e.g. a new bundle layout);
+    False without --only (a resumed full sweep keeps its gate)."""
+    if not only:
+        return False
+    from scaling.parity import gate_checks            # plain python: no JAX/torch import
+    small = {(m["code"], m["system"]): m for m in planned_models() if m["size"] == "small"}
+    medium = {(m["code"], m["system"]): m for m in planned_models() if m["size"] == "medium"}
+    want = {json.dumps(["parity", g, system, m["code"]] + ([lay] if lay else []))
+            for system in ("SiGe", "Cantor")
+            for g, m, lay in gate_checks(small, system, medium) if m["code"] == only}
+    have = {json.dumps(r.get("_key")) for r in parity_rows}
+    return not want <= have if want else not any(r.get("code") == only for r in parity_rows)
 
 
 def _env_path(host):
