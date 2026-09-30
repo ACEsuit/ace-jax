@@ -12,15 +12,14 @@ uses the `basis` extra, a compiled EquivariantTensors wheel.
 ## Install
 
 ```bash
-pip install ace-jax              # evaluate, linear fit, ASE calculator
+pip install ace-jax              # evaluate, linear fit, build new bases, ASE calculator
 pip install "ace-jax[gp]"        # + `aj fit` (all arms: MAP optimisers, GP, UQ ladder, POPS)
-pip install "ace-jax[basis]" # + `aj basis` (compiled EquivariantTensors wheel; no Julia; Linux x86_64/aarch64, macOS arm64)
 pip install "ace-jax[cuda]"      # + CUDA 12 JAX
 ```
 
-`ace-jax-coupling` (the `basis` extra's wheel) is not on PyPI yet: until it is,
-`aj basis` for a new basis shape needs a locally built wheel (`coupling/` in the
-ace-jax repo); fit and eval are unaffected.
+Building a new basis shape works on Linux x86_64/aarch64 and macOS arm64;
+elsewhere fit from an existing `.npz` with `--model`. Pre-release: ace-jax's
+`ace-jax-coupling` dependency is not on PyPI yet, so install from the repo.
 
 `ace-jax` and `aj` are the same CLI. `aj <cmd> --help` lists every flag.
 

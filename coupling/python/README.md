@@ -7,8 +7,8 @@ compiled ahead of time with `juliac --trim=safe`. The wheel contains a
 trimmed Julia runtime plus the compiled library; **no Julia installation is
 needed**, and nothing is downloaded at runtime.
 
-- Install through ace-jax: `pip install "ace-jax[basis]"` (once published; until
-  then build the wheel from `coupling/`).
+- Installed as a dependency of ace-jax (once published; until then build the
+  wheel from `coupling/`).
 - Platforms: Linux x86_64 / aarch64 (manylinux_2_28), macOS arm64 (11+).
 - `ace_jax_coupling.build_info()` reports the EquivariantTensors source
   (repository + commit), Julia and JuliaC versions of the build.

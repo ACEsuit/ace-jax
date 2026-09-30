@@ -16,6 +16,8 @@ import hashlib
 import json
 import os
 import pathlib
+import platform
+import sys
 import tempfile
 import warnings
 
@@ -81,6 +83,11 @@ def backend_id():
     return f"ace-jax-coupling=={COUPLING_LIB_VERSION}"
 
 
+class BasisUnavailable(RuntimeError):
+    """Building a new basis needs the compiled coupling library, which is not
+    installed (unsupported platform) or has no compiled payload (dev build)."""
+
+
 def _lib():
     if os.environ.get("ACEJAX_COUPLING_CACHE_ONLY"):
         raise RuntimeError("ACEJAX_COUPLING_CACHE_ONLY is set but the coupling cache missed: "
@@ -88,13 +95,16 @@ def _lib():
     try:
         import ace_jax_coupling
     except ModuleNotFoundError as e:
-        raise ModuleNotFoundError(
-            "coupling generation needs the 'basis' extra: pip install 'ace-jax[basis]' "
-            "(Linux x86_64/aarch64, macOS arm64; until ace-jax-coupling is on PyPI, "
-            "build its wheel from coupling/ in the ace-jax repo)") from e
+        raise BasisUnavailable(
+            f"building a new basis is not available on this platform ({sys.platform} {platform.machine()}); "
+            "fit from an existing basis with --model <file.npz> built elsewhere") from e
+    try:
+        ace_jax_coupling.build_info()
+    except ace_jax_coupling.CouplingLibError as e:
+        raise BasisUnavailable(f"the ace-jax-coupling install has no compiled library: {e}") from e
     if ace_jax_coupling.__version__ != COUPLING_LIB_VERSION:
-        raise RuntimeError(f"ace-jax-coupling {ace_jax_coupling.__version__} installed, this ace-jax "
-                           f"needs =={COUPLING_LIB_VERSION}: pip install 'ace-jax-coupling=={COUPLING_LIB_VERSION}'")
+        raise BasisUnavailable(f"ace-jax-coupling {ace_jax_coupling.__version__} is installed; this ace-jax "
+                               f"needs =={COUPLING_LIB_VERSION}")
     return ace_jax_coupling
 
 

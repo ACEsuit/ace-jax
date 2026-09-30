@@ -170,7 +170,7 @@ format.
   raises one message, independent of the backend:
   `building a new basis is not available on this platform (<platform>); fit from an existing basis with --model <file.npz> built elsewhere`
   (dev build: `... the ace-jax-coupling install has no compiled library: <hint>`).
-  It is raised **before** any data is loaded.
+  It is raised when the basis is built — after the configs are read (the species come from them), before any fitting work.
 - `ACEJAX_NO_JULIA` → `ACEJAX_COUPLING_CACHE_ONLY` (no alias): with it set, a
   coupling-cache miss raises instead of computing (tests use it).
 - No user-facing string (help, log, error, docs outside `coupling/` and

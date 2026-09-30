@@ -10,7 +10,7 @@ LEGACY = ["ace_jax.construct", "from .construct", "from ..construct", "from ...c
 
 
 def _grep(pattern):
-    r = subprocess.run(["git", "grep", "-n", "-F", pattern, "--", ".", ":!uv.lock"],
+    r = subprocess.run(["git", "grep", "-n", "-F", "-e", pattern, "--", ".", ":!uv.lock"],
                        cwd=ROOT, capture_output=True, text=True)
     return [l for l in r.stdout.splitlines()
             if not l.startswith(HISTORICAL) and not l.startswith("tests/test_names.py")]

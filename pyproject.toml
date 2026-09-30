@@ -33,12 +33,12 @@ dependencies = [
   # training/eval data reader (libAtoms C parser, binary wheels): labels come back
   # as written, independent of ASE's calculator-key handling (see fit/xyz.py)
   "extxyz>=0.4.5",
+  # coupling tables for new basis shapes (a compiled library, nothing to install
+  # besides the wheel); platform wheels only -- elsewhere fit from an existing .npz
+  "ace-jax-coupling==0.1.0; (sys_platform == 'linux' and (platform_machine == 'x86_64' or platform_machine == 'aarch64')) or (sys_platform == 'darwin' and platform_machine == 'arm64')",
 ]
 
 [project.optional-dependencies]
-# Coupling tables for NEW basis shapes: a juliac-compiled EquivariantTensors (no Julia at runtime).
-# Refitting / evaluating never needs it.  Platform wheels: Linux x86_64/aarch64, macOS arm64.
-basis = ["ace-jax-coupling==0.1.0; (sys_platform == 'linux' and (platform_machine == 'x86_64' or platform_machine == 'aarch64')) or (sys_platform == 'darwin' and platform_machine == 'arm64')"]
 # Hybrid ACE+GP fitting with the marginalised-hyperparameter UQ ladder.
 gp = ["numpyro>=0.16", "optax>=0.2", "blackjax>=1.6"]
 cuda = ["jax[cuda12]>=0.10.1"]
@@ -60,10 +60,10 @@ Homepage = "https://github.com/ACEsuit/ace-jax"
 Issues = "https://github.com/ACEsuit/ace-jax/issues"
 
 [tool.uv.sources]
-# Until ace-jax-coupling is on PyPI.  A plain `uv sync --extra basis` builds a lib-less dev
-# wheel; for the real library build the bundle and reinstall:
+# Until ace-jax-coupling is on PyPI.  A plain `uv sync` builds a lib-less dev wheel;
+# for the real library point the build hook at a compiled bundle and reinstall:
 #   ACEJAX_COUPLING_BUNDLE=$PWD/coupling/build/pruned ACEJAX_COUPLING_PLAT=<tag> \
-#     uv sync --extra basis --reinstall-package ace-jax-coupling
+#     uv sync --reinstall-package ace-jax-coupling
 ace-jax-coupling = { path = "coupling/python" }
 
 [dependency-groups]

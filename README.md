@@ -26,18 +26,20 @@ pure **Python/JAX** — no Julia needed to fit or run.
 ## Install
 
 ```bash
-pip install ace-jax             # core: evaluate + linear fit + ASE calculator
+pip install ace-jax             # core: evaluate, fit, build new bases, ASE calculator
 pip install ace-jax[gp]         # + `ace-jax fit` pipeline: GP/UQ hyperparameter ladder
-pip install ace-jax[basis]  # + Python basis coupling (compiled EquivariantTensors; Linux x86_64/aarch64, macOS arm64)
 pip install ace-jax[cuda]       # + CUDA 12 JAX
 pip install ace-jax[fast-neighbours]  # + matscipy-neighbours (C++ source build; ASE's list is the fallback)
 ```
 
-> **`basis` extra, pre-release:** its `ace-jax-coupling` wheel is not on PyPI
-> yet, so `pip install ace-jax[basis]` does not resolve outside this
-> repository. Build the wheel from `coupling/` (see CLAUDE.md "Extras" and
-> `docs/coupling-etshim-spec.md`) and install it next to ace-jax. Fitting and
-> evaluation never need it.
+Building a new basis (`aj basis`, or `aj fit` with `--order/--max-degree`) is
+available on Linux x86_64/aarch64 and macOS arm64; elsewhere, fit and evaluate
+from an existing `.npz` basis (`--model`).
+
+> **Pre-release:** the `ace-jax-coupling` wheel that ace-jax depends on is not
+> on PyPI yet, so `pip install ace-jax` does not resolve outside this
+> repository. Build that wheel from `coupling/` (see CLAUDE.md "Setup" and
+> `docs/coupling-etshim-spec.md`) and install it next to ace-jax.
 
 Training and evaluation data (extxyz) are read with libAtoms
 [`extxyz`](https://github.com/libAtoms/extxyz), a core dependency: labels come
