@@ -18,8 +18,9 @@ from .fit.pipeline.objective import _pad_to_multiple  # noqa: F401  (moved to th
 
 
 def _add_fit_args(p):
-    p.add_argument("--model", required=True)
-    src = p.add_mutually_exclusive_group(required=True)
+    p.add_argument("--model", default=None,
+                   help="an ACE basis/model .npz (or give --order/--max-degree to build the basis)")
+    src = p.add_mutually_exclusive_group()
     src.add_argument("--train", help="training extxyz (with --test, or tested on itself)")
     src.add_argument("--data", help="one extxyz split by a seeded permutation (--ntrain/--ntest/--test-start)")
     p.add_argument("--test"); p.add_argument("--ood", help="extra out-of-distribution test extxyz")
@@ -54,11 +55,12 @@ def _add_fit_args(p):
     p.add_argument("--laplace", choices=["svi", "fd"], default="svi")
     p.add_argument("--map-steps", type=int, default=500); p.add_argument("--vi-steps", type=int, default=2000)
     p.add_argument("--nuts-warmup", type=int, default=500); p.add_argument("--nuts-samples", type=int, default=500)
-    p.add_argument("--nuts-chains", type=int, default=4); p.add_argument("--r0", type=float, required=True,
-                   help="typical nearest-neighbour distance (A); centres the GP hyperprior")
+    p.add_argument("--nuts-chains", type=int, default=4); p.add_argument("--r0", type=float, default=None,
+                   help="typical nearest-neighbour distance (A); centres the GP hyperprior "
+                        "(default when building the basis: its mean bond length)")
     p.add_argument("--uq", choices=["blr", "pops"], default="blr", help="pops: linear arm (--m-per-species 0)")
     p.add_argument("--pops-ridge", default="auto")
-    p.add_argument("--seed", type=int, default=0); p.add_argument("--out", required=True)
+    p.add_argument("--seed", type=int, default=0); p.add_argument("--out", default=None)
     p.add_argument("--model-draws", type=int, default=1,
                    help="GP arm: hyperparameter draws stored in gp_model.npz (1 = the MAP; more = "
                         "evenly spaced draws of the last rung, each adding a (Dt, Dt) factor)")
@@ -92,7 +94,8 @@ def _fit_config(a):
     rungs = tuple(r.strip() for r in a.rungs.split(","))
     ridge = a.pops_ridge if a.pops_ridge in ("auto", "blr") else float(a.pops_ridge)
     cfg = FitConfig(
-        model=a.model, arm="gp" if a.m_per_species > 0 else "linear", energy_key=a.energy_key,
+        model=a.model if a.model is not None else _basis_spec(a, embedding=a.basis_embedding),
+        arm="gp" if a.m_per_species > 0 else "linear", energy_key=a.energy_key,
         force_key=a.force_key, virial_key=a.virial_key, ntrain=a.ntrain, ntest=a.ntest,
         test_start=a.test_start, seed=a.seed, batch=a.configs_per_batch, weights=weights, factors=factors,
         baseline=a.baseline, e0=a.e0, m_per_species=a.m_per_species, kernel=a.kernel, bump=not a.no_bump,
@@ -105,11 +108,31 @@ def _fit_config(a):
     return cfg.validate()
 
 
+def _check_fit_args(p, a):
+    """Cross-flag rules for `aj fit` that argparse cannot express (run after any
+    fit.yaml merge, so the file may supply what the command line leaves out)."""
+    building = a.order is not None or a.max_degree is not None
+    if a.model is None and not building:
+        p.error("give one of --model, --order/--max-degree, or --config")
+    if a.model is not None and building:
+        p.error("--model and --order/--max-degree are alternatives: give one")
+    if building and (a.order is None or a.max_degree is None):
+        p.error("--order and --max-degree go together")
+    if a.train is None and a.data is None:
+        p.error("one of the arguments --train --data is required")
+    if a.out is None:
+        p.error("the following arguments are required: --out")
+    if a.model is not None and a.r0 is None:
+        p.error("--r0 is required with --model")
+
+
 def run(a):
     from .fit.pipeline import fit, load_fit_data, write_outputs
     cfg = _fit_config(a)
     data = (load_fit_data(cfg, data=a.data, ood=a.ood) if a.data
             else load_fit_data(cfg, train=a.train, test=a.test, ood=a.ood))
+    if a.r0 is None:
+        print(f"r0 {data.r0:.3f} A (mean bond length of the basis; pass --r0 to override)")
     res = fit(cfg, data)
     write_outputs(res, a.out, layout=("cli",), argv=vars(a), save_model=not a.no_save_model,
                   model_draws=a.model_draws)
@@ -226,7 +249,9 @@ def _parser():
     top = argparse.ArgumentParser(prog="ace-jax",
                                   description="Fit and evaluate ACE models in JAX (short alias: aj)")
     sub = top.add_subparsers(dest="cmd", required=True)
-    _add_fit_args(sub.add_parser("fit", help="fit the hybrid linear-ACE + residual GP (--m-per-species 0 = linear-only fit)"))
+    fit_p = sub.add_parser("fit", help="fit the hybrid linear-ACE + residual GP (--m-per-species 0 = linear-only fit)")
+    _add_fit_args(fit_p)
+    add_basis_args(fit_p.add_argument_group("basis (built in memory; instead of --model)"), fit=True)
     ev = sub.add_parser("eval", help="evaluate a model on a dataset (energy/forces, RMSE vs labels)")
     ev.add_argument("--model", required=True); ev.add_argument("--data", required=True)
     ev.add_argument("--energy-key", default="energy"); ev.add_argument("--force-key", default="forces")
@@ -238,10 +263,18 @@ def _parser():
     return top
 
 
+def _parse(argv=None):
+    top = _parser()
+    a = top.parse_args(argv)
+    if a.cmd == "fit":
+        _check_fit_args(top._subparsers._group_actions[0].choices["fit"], a)
+    return a
+
+
 def main(argv=None):
     """Console entry point; returns 0 because the script wrapper passes the
     result to sys.exit (a returned dict would print and exit 1)."""
-    a = _parser().parse_args(argv)
+    a = _parse(argv)
     {"eval": cmd_eval, "basis": cmd_basis}.get(a.cmd, run)(a)
     return 0
 
