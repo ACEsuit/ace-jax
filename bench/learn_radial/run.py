@@ -47,6 +47,9 @@ p.add_argument("--spec-grid", default="0", help="relative spectral-prior weights
 p.add_argument("--spec-p", type=float, default=4.0, help="spectral prior degree power (1+q)^p")
 p.add_argument("--gap-grid", default="0", help="relative data-gap-prior weights on the radial change, measured under a uniform-in-r Gram rather than the empirical pair-distance density; useful range ~1..30 (see relative_lambda_gap)")
 p.add_argument("--map-steps", type=int, default=300)
+p.add_argument("--learn-sigma-e-mult", type=float, default=1.0,
+               help="scale sigma_E inside the radial objective only (>1 = force-heavier radial learning); "
+                    "gate and final linear fit keep the MAP weights")
 a = p.parse_args()
 
 t0 = time.time()
@@ -91,6 +94,7 @@ def checkpoint(label, W_lam, run_info):
 W, info = fit_radial(prob, ds_fit, ds_val, model.rnl_Wnlq, lam_grid=lam_grid, spec_grid=spec_grid,
                      gap_grid=gap_grid, rough_weights=wn, spec_p=a.spec_p, steps=a.steps,
                      reprofile_every=a.reprofile_every, map_steps=a.map_steps,
+                     learn_sigma_e_mult=a.learn_sigma_e_mult,
                      log=lambda s: print(s, flush=True), checkpoint=checkpoint)
 info["to_analytic_relres_max"] = relres_max
 save_result(out, W, info, src_npz=a.model, model=model)
@@ -98,7 +102,7 @@ summary = {"selected": info["selected"], "scores": info["scores"], "n_q": a.n_q,
            "ntrain": a.ntrain, "nval": a.nval, "lam_grid": list(lam_grid),
            "spec_grid": list(spec_grid), "spec_p": a.spec_p, "gap_grid": list(gap_grid),
            "steps": a.steps, "reprofile_every": a.reprofile_every,
-           "to_analytic_relres_max": relres_max,
+           "learn_sigma_e_mult": a.learn_sigma_e_mult, "to_analytic_relres_max": relres_max,
            "seconds": time.time() - t0}
 (out / "summary.json").write_text(json.dumps(summary, indent=1))
 print(json.dumps(summary, indent=1))

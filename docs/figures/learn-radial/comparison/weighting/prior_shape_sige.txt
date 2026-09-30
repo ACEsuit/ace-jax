@@ -1,0 +1,15 @@
+init           Gamma^0     sigma_c 1.447e-01  val E   1.330 meV/atom  F   50.14 meV/A
+init           Gamma^0.25  sigma_c 7.687e-01  val E   1.341 meV/atom  F   50.23 meV/A
+init           Gamma^0.5   sigma_c 4.666e+00  val E   1.373 meV/atom  F   50.48 meV/A
+init           Gamma^0.75  sigma_c 3.044e+01  val E   1.418 meV/atom  F   50.67 meV/A
+init           Gamma^1     sigma_c 2.250e+02  val E   1.450 meV/atom  F   50.75 meV/A
+lam_0.1        Gamma^0     sigma_c 1.384e-01  val E   0.533 meV/atom  F   39.66 meV/A
+lam_0.1        Gamma^0.25  sigma_c 5.536e-01  val E   0.534 meV/atom  F   39.72 meV/A
+lam_0.1        Gamma^0.5   sigma_c 1.954e+00  val E   0.534 meV/atom  F   39.86 meV/A
+lam_0.1        Gamma^0.75  sigma_c 1.020e+01  val E   0.530 meV/atom  F   39.87 meV/A
+lam_0.1        Gamma^1     sigma_c 6.411e+01  val E   0.527 meV/atom  F   39.91 meV/A
+lam_0.1        Gamma^0     sigma_c 7.686e-02  val E   0.469 meV/atom  F   33.46 meV/A
+lam_0.1        Gamma^0.25  sigma_c 4.258e-01  val E   0.470 meV/atom  F   32.96 meV/A
+lam_0.1        Gamma^0.5   sigma_c 1.432e+00  val E   0.478 meV/atom  F   32.87 meV/A
+lam_0.1        Gamma^0.75  sigma_c 4.059e+00  val E   0.488 meV/atom  F   32.86 meV/A
+lam_0.1        Gamma^1     sigma_c 1.811e+01  val E   0.492 meV/atom  F   32.90 meV/A

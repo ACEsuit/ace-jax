@@ -562,3 +562,20 @@ def test_bench_driver_smoke(tmp_path):
     assert (tmp_path / "lam_0" / "rnl_Wnlq.npy").exists()
     assert s["to_analytic_relres_max"] == 0.0            # analytic fixture: widened only
     assert "relres_max=" in r.stdout
+
+
+def test_learn_sigma_e_mult_scales_only_the_radial_objective(small):
+    """A force-heavier radial objective (sigma_E x 10) changes the learned radials and
+    the objective's reference scale r0, but the recorded theta stays the plain MAP one."""
+    from ace_jax.fit.radial_learn import learn_radial
+    prob, ds, _ = small
+    W1, i1 = learn_radial(prob, ds, prob.model.rnl_Wnlq, theta0=THETA, profile=False, steps=3)
+    W10, i10 = learn_radial(prob, ds, prob.model.rnl_Wnlq, theta0=THETA, profile=False, steps=3,
+                            learn_sigma_e_mult=10.0)
+    assert i10["learn_sigma_e_mult"] == 10.0 and i1["learn_sigma_e_mult"] == 1.0
+    assert i10["r0"] < i1["r0"]                       # energy rows down-weighted 100x
+    np.testing.assert_array_equal(np.asarray(i10["theta"][0]), np.asarray(i1["theta"][0]))
+    assert bool(jnp.all(jnp.isfinite(W10))) and not np.allclose(np.asarray(W10), np.asarray(W1))
+    with pytest.raises(ValueError, match="learn_sigma_e_mult"):
+        learn_radial(prob, ds, prob.model.rnl_Wnlq, theta0=THETA, profile=False, steps=1,
+                     learn_sigma_e_mult=0.0)

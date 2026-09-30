@@ -1,0 +1,23 @@
+cutoff: 5.5
+seed: 42
+data:
+  filename: sige_train.pckl.gzip
+  test_filename: sige_val.pckl.gzip
+potential:
+  deltaSplineBins: 0.001
+  elements: [Ge, Si]
+  embeddings:
+    ALL: {npot: 'FinnisSinclairShiftedScaled', fs_parameters: [1, 1, 1, 0.5], ndensity: 2}
+  bonds:
+    ALL: {radbase: SBessel, radparameters: [5.25], rcut: 5.5, dcut: 0.01, NameOfCutoffFunction: cos}
+  functions:
+    number_of_functions_per_element: 714
+    ALL: {nradmax_by_orders: [12, 10, 8], lmax_by_orders: [0, 4, 3]}
+fit:
+  loss: {kappa: 0.3, L1_coeffs: 1e-8, L2_coeffs: 1e-8, w0_rad: 1e-8, w1_rad: 1e-8, w2_rad: 1e-8}
+  optimizer: BFGS
+  maxiter: 2000
+backend:
+  evaluator: tensorpot
+  batch_size: 50
+  display_step: 50
