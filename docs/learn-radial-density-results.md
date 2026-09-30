@@ -4,7 +4,7 @@ This note tests the joint radial and density learning of `docs/specs/2026-09-28-
 
 ## Verdict: is sqrt(ρ) worth pursuing?
 
-**No, in any of the forms tested.** The question this branch set out to answer is whether a sqrt(ρ) term is worth adding to the linear ACE model. It is not about getting vacancies right: bulk-only vacancy energies are extrapolation for every model, so they are compared only as a probe of the term's effect.
+**No, in any of the forms tested, on covalent SiGe or on the Cantor metal (see the Cantor ablation below).** The question this branch set out to answer is whether a sqrt(ρ) term is worth adding to the linear ACE model. It is not about getting vacancies right: bulk-only vacancy energies are extrapolation for every model, so they are compared only as a probe of the term's effect.
 
 | Form | Result |
 |---|---|
@@ -30,6 +30,36 @@ This note tests the joint radial and density learning of `docs/specs/2026-09-28-
 - n_q = 20. With the same 200 steps it gives E 0.514 against 0.536 meV/atom and elastic 1.4% against 1.6% (bulk). Worth confirming as a default.
 
 The density machinery (`FSModel`, `fit/radial_density.py`, the density columns) works and is tested, but it is not worth its complexity. It can be kept as a documented negative result or dropped.
+
+## Cantor ablation: sqrt(ρ) on a metal
+
+sqrt(ρ) is the second-moment tight-binding embedding. It suits d-band metals rather than covalent SiGe, so the decisive test is the Cantor alloy (fcc CrMnFeCoNi). Setup:
+- **Pacemaker.** Linear (`ndensity 1`) against sqrt(ρ) (`ndensity 2`, `fs [1,1,1,0.5]`), both at κ=0.3 with 2000 BFGS iterations, the same basis and the same 150/100 split. Each is trained on bulk data and on bulk plus 60 vacancy cells (`spike/pace_cantor_modal.py`).
+- **Ours.** Fixed-weight sqrt(ρ) with jointly learned radials, on the same data.
+
+Pacemaker QoIs use `qoi.py --eref`. Pacemaker fits reference-corrected energies, and alloy vacancy energies need the per-element references restored. The earlier 1.14 eV pacemaker Cantor figure was that offset; the corrected value is 0.44.
+
+| Cantor | E (meV/atom) | F (meV/Å) | B % per draw | C44 % per draw | Vacancy MAE (eV) |
+|---|---|---|---|---|---|
+| pacemaker linear, bulk | 7.31 | 88.7 | −33 / −35 / −43 | −10 / −12 / +6 | 0.44 |
+| pacemaker sqrt(ρ), bulk | 6.99 | 94.3 | −19 / −28 / −34 | −5 / −5 / −22 | 0.35 |
+| pacemaker linear, + vacancies | 6.52 | 86.3 | −11 / −12 / −25 | −4 / −4 / +14 | 0.33 |
+| pacemaker sqrt(ρ), + vacancies | 6.86 | 85.0 | −10 / −12 / −38 | −8 / −7 / −24 | 0.36 |
+| ours, radials only, bulk | 6.21–6.30 | 120 | +13 / +15 / +16 | −10 / −8 / −11 | 0.41 |
+| ours, radials only, + vacancies | 5.94–6.09 | 120 | 0 / 0 / −13 | −12 / −11 / +1 | 0.45 |
+| ours, fixed sqrt(ρ) + radials, bulk (pair / full) | 5.9* | 116* | +12 / +15 / +4 | −4 / −1 / −21 | 0.45 / 0.46 |
+| ours, fixed sqrt(ρ) + radials, + vacancies (pair / full) | — | — | +2 / +5 / −5 | −7 / −5 / −24 | 0.48 / 0.45 |
+
+\*The fixed-form spike also fits per-species E0 shifts, which radials-only does not, so its RMSE is not strictly comparable.
+
+**Within pacemaker, sqrt(ρ) is an extrapolation prior, and its benefit disappears with defect data.**
+- On bulk data it improves the vacancy MAE from 0.44 to 0.35 eV and B by about 10 points.
+- With vacancy data, linear and sqrt(ρ) are level (0.33 against 0.36 eV, similar B), and linear has the better energy.
+- Adding the data does more than adding sqrt(ρ).
+
+**In our framework** the fixed-weight η stays at its starting scale on Cantor (ρ² of 10⁻⁵ to 10⁻⁴), so the data never ask for the term.
+
+**Across frameworks,** ours is far better on the bulk modulus (0 / 0 / −13% with vacancy data, against −10 to −38%). Pacemaker's forces are better (85–94 against about 120 meV/Å). Vacancies are similar.
 
 ## Summary (as first written)
 
