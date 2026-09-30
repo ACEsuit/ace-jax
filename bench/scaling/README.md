@@ -73,7 +73,7 @@ does not). The tree is under `~/bench-scaling` (home: 2 TiB quota).
 rsync src bench fixtures julia pyproject.toml README.md LICENSE (+ bench/scaling/models/) to ~/bench-scaling/ace-jax, then
 bash bench/scaling/envs/sulis.sh sources venv              # login node: clone + download only
 sbatch bench/scaling/envs/sulis-build.sbatch               # compile on an A100 node, then check
-p=$(sbatch --parsable bench/scaling/envs/sulis-sweep.sbatch parity)     # fails unless the gates pass
+p=$(sbatch --parsable bench/scaling/envs/sulis-sweep.sbatch parity)     # fails only if no ace-jax gate passes
 sbatch --dependency=afterok:$p --kill-on-invalid-dep=yes bench/scaling/envs/sulis-sweep.sbatch acejax-ace-learned
 ```
 

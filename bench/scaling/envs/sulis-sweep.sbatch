@@ -4,8 +4,9 @@
 #   sbatch bench/scaling/envs/sulis-sweep.sbatch acejax-ace-learned   # sweep.py --only CODE
 #   sbatch bench/scaling/envs/sulis-sweep.sbatch all                  # every code
 #   sbatch bench/scaling/envs/sulis-sweep.sbatch parity               # --parity-only, then
-#       exit 1 unless every acejax / mlpace / spline gate is parity_ok, so sweeps
-#       queued with --dependency=afterok:<parity job> run only on a verified build
+#       exit 1 when no acejax gate is parity_ok (a broken build), so sweeps queued
+#       with --dependency=afterok:<parity job> never time an unverified build; a
+#       single failed gate blocks only its own line (sweep.py skips it)
 #
 # (or CODE=... via --export).  Rows: bench/scaling/results/sulis-a100.jsonl, each
 # with device_name from nvidia-smi.  One GPU of a node that other jobs may share:
@@ -44,7 +45,10 @@ rows = [json.loads(l) for l in pathlib.Path("bench/scaling/results/sulis-a100.js
 last = {json.dumps(r["_key"]): r for r in rows if r.get("mode") == "parity"}
 bad = [k for k, r in last.items() if r["gate"] != "mace" and r["status"] != "parity_ok"]
 print("gates not parity_ok (mace excluded):", bad or "none")
-raise SystemExit(1 if bad else 0)
+# a failed gate blocks only its own line (sweep.py: parity.blocked); fail the job,
+# and so cancel the dependent sweeps, only when no ace-jax gate passed (a broken build)
+ok = [k for k, r in last.items() if r["gate"] == "acejax" and r["status"] == "parity_ok"]
+raise SystemExit(0 if ok else 1)
 PYEOF
     ;;
   all) "$PY" bench/scaling/sweep.py sulis-a100 ;;
