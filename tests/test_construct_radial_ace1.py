@@ -89,3 +89,23 @@ def test_uniform_ace1_transforms_and_envelopes_match_julia(name, els):
     assert np.allclose(ra.tensor_envelope_table(NZ), z["rnl_envelope"], rtol=1e-14)
     assert np.allclose(ra.pair_envelope_table(NZ, cut), z["pair_envelope"], rtol=1e-12)
     assert np.allclose(z["rcuts"], cut[2]) and np.allclose(z["pair_rcuts"], cut[2])
+
+
+def test_cubic_bspline_coefs_default_path_is_the_dense_solve():
+    """end_d2=None (the authored / Julia-matching tables) is bit-for-bit the
+    original dense solve; only the clamped to_spline path uses the banded one."""
+    x = np.linspace(-1, 1, 100)
+    y = np.stack([np.sin(3 * x), x ** 3], axis=1)
+    n = y.shape[0]
+    M = np.zeros((n + 2, n + 2))
+    M[0, :3] = (1.0, -2.0, 1.0)
+    M[-1, -3:] = (1.0, -2.0, 1.0)
+    i = np.arange(1, n + 1)
+    M[i, i - 1] = 1.0 / 6.0; M[i, i] = 2.0 / 3.0; M[i, i + 1] = 1.0 / 6.0
+    rhs = np.zeros((n + 2, 2)); rhs[1:-1] = y
+    np.testing.assert_array_equal(ra.cubic_bspline_coefs(y), np.linalg.solve(M, rhs))
+    lo, hi = np.array([0.3, -0.2]), np.array([0.1, 0.4])
+    c = ra.cubic_bspline_coefs(y, (lo, hi))
+    np.testing.assert_allclose(c[0] - 2 * c[1] + c[2], lo, atol=1e-13)
+    np.testing.assert_allclose(c[-1] - 2 * c[-2] + c[-3], hi, atol=1e-13)
+    np.testing.assert_allclose((c[:-2] + 4 * c[1:-1] + c[2:]) / 6, y, atol=1e-13)

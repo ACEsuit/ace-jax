@@ -96,7 +96,8 @@ def test_bundle_written(tmp_path):
     assert lj.startswith(importlib.metadata.version("lammps_jax"))
     assert on_disk["ace_jax"] == {"layout": "dense", "elements": [32, 14],
                                   "type_elements": [32, 14], "k_dense": 64, "owned_rows": None,
-                                  "lean": False}           # PACE: no lean form
+                                  "lean": False,           # PACE: no lean form
+                                  "spline_tol": None, "spline_intervals": None}
     assert b["ace_jax"]["layout"] == "dense"
 
 
@@ -204,6 +205,10 @@ def test_bundle_metadata_keys_do_not_shadow_the_contract(tmp_path, layout):
     model, meta, _ = load(y)
     b = export_lammps(model, meta, tmp_path / "m.json", max_atoms=256, max_edges=256 * 64,
                       k_dense=64, max_neighbors=64, layout=layout, max_owned=200)
+    # every ace_jax key either side added (owned rows, lean / splining provenance,
+    # the exporting lammps-jax) is written for every layout, and none is a contract key
+    assert set(b["ace_jax"]) == {"layout", "elements", "type_elements", "k_dense", "owned_rows",
+                                 "lean", "spline_tol", "spline_intervals", "lammps_jax"}
     assert not set(b["ace_jax"]) & LAMMPS_JAX_KEYS
 
 

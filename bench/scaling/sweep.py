@@ -9,7 +9,7 @@ import pathlib
 import subprocess
 import sys
 
-from scaling.models import planned_models
+from scaling.models import LEARNED_CODES, planned_models
 from scaling.structures import n_ladder
 
 HOSTS = {
@@ -24,8 +24,11 @@ MODES = {"acejax-pace": ("standalone", "lammps"), "acejax-ace": ("standalone", "
          "mlpace": ("lammps",), "mace": ("standalone", "lammps")}
 DTYPES = {"acejax-pace": ("float64", "float32"), "acejax-ace": ("float64", "float32"),
           "mlpace": ("float64",), "mace": ("float64", "float32")}
+# the learned-radial lines are linear ACE models: the ACE line's modes and dtypes
+for _code in LEARNED_CODES:
+    MODES[_code], DTYPES[_code] = MODES["acejax-ace"], DTYPES["acejax-ace"]
 # lammps-jax ships only pair_style jax/kk, which needs KOKKOS built with CUDA
-GPU_ONLY_LAMMPS = ("acejax-pace", "acejax-ace")
+GPU_ONLY_LAMMPS = ("acejax-pace", "acejax-ace", *LEARNED_CODES)
 
 
 def lammps_supported(code, device):
@@ -181,6 +184,22 @@ def gate_in_subprocess(host, env):
     return rows
 
 
+def gate_missing(parity_rows, only):
+    """True when `--only` names a code missing any of today's parity checks (the
+    gate predates the line, or a check added since, e.g. a new bundle layout);
+    False without --only (a resumed full sweep keeps its gate)."""
+    if not only:
+        return False
+    from scaling.parity import gate_checks            # plain python: no JAX/torch import
+    small = {(m["code"], m["system"]): m for m in planned_models() if m["size"] == "small"}
+    medium = {(m["code"], m["system"]): m for m in planned_models() if m["size"] == "medium"}
+    want = {json.dumps(["parity", g, system, m["code"]] + ([lay] if lay else []))
+            for system in ("SiGe", "Cantor")
+            for g, m, lay in gate_checks(small, system, medium) if m["code"] == only}
+    have = {json.dumps(r.get("_key")) for r in parity_rows}
+    return not want <= have if want else not any(r.get("code") == only for r in parity_rows)
+
+
 def _env_path(host):
     return pathlib.Path(__file__).parent / "envs" / f"{host}.json"
 
@@ -309,16 +328,25 @@ def main(argv=None):
     res.parent.mkdir(parents=True, exist_ok=True)
     prior = [json.loads(l) for l in res.read_text().splitlines()] if res.exists() else []
     rows = [r for r in prior if r.get("mode") == "parity"]
-    if a.parity_only or not rows:                      # a resumed sweep keeps its gate
-        rows = gate_in_subprocess(a.host, env)
+    # a resumed sweep keeps its gate; `--only` a code the recorded gate never
+    # checked (a line added since, e.g. acejax-ace-learned) tops it up with the
+    # checks whose keys are new, so a new line is never timed ungated
+    top_up = bool(rows) and not a.parity_only and gate_missing(rows, a.only)
+    if a.parity_only or not rows or top_up:
+        have = {json.dumps(r.get("_key")) for r in rows}
+        new = gate_in_subprocess(a.host, env)
+        for r in new:
+            # the bundle layout keeps the dense and sparse ace-jax gates distinct
+            r["_key"] = ["parity", r["gate"], r["system"], r["code"]] + (
+                [r["bundle_layout"]] if r.get("bundle_layout") else [])
+            r["_line"] = ["parity"]
+            r["device_name"] = device_name(r.get("device", "gpu"))
+        if top_up:
+            new = [r for r in new if json.dumps(r["_key"]) not in have]
         with res.open("a") as f:
-            for r in rows:
-                # the bundle layout keeps the dense and sparse ace-jax gates distinct
-                r["_key"] = ["parity", r["gate"], r["system"], r["code"]] + (
-                    [r["bundle_layout"]] if r.get("bundle_layout") else [])
-                r["_line"] = ["parity"]
-                r["device_name"] = device_name(r.get("device", "gpu"))
+            for r in new:
                 f.write(json.dumps(r) + "\n")
+        rows = rows + new if top_up else new
     for r in rows:
         print(f"parity {r['gate']:7s} {r['system']:7s} {r['model']:28s} {r['status']}"
               + (f"  dE/atom {r['dE_per_atom']:.1e} dF {r['max_dF']:.1e}" if "dE_per_atom" in r else ""))

@@ -30,6 +30,7 @@ is sparse while the dense form avoids a scatter.  Neither is hard-wired.
 
 from typing import NamedTuple
 
+import os
 import numpy as np
 
 
@@ -55,7 +56,22 @@ class DenseGraph(NamedTuple):
         return np.arange(self.rij.shape[1])[None, :] < self.count[:, None]
 
 
+_PINS = ("matscipy-neighbours", "matscipy", "ase")
+
+
+def _pin():
+    """ACEJAX_NLIST pins the backend (one of _PINS), or '' for the default
+    order.  Neighbour order changes summation order, so order-sensitive
+    checks -- the pipeline goldens, recorded with ASE's list -- pin it."""
+    pin = os.environ.get("ACEJAX_NLIST", "")
+    if pin and pin not in _PINS:
+        raise ValueError(f"ACEJAX_NLIST={pin!r}: expected one of {_PINS}")
+    return pin
+
+
 def have_matscipy_neighbours():
+    if _pin() in ("matscipy", "ase"):
+        return False
     try:
         import matscipy_neighbours  # noqa: F401
         return True
@@ -64,6 +80,8 @@ def have_matscipy_neighbours():
 
 
 def have_matscipy():
+    if _pin() == "ase":
+        return False
     try:
         import matscipy.neighbours  # noqa: F401
         return True

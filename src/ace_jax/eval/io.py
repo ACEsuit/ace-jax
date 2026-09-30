@@ -148,6 +148,7 @@ def load(path, dtype=jnp.float64, a2b_sparse=False, edge_a_kind="gather", fold=T
         rnl_grid=(float(rs["x0"]), float(rs["h"]), int(rs["n"])),
         pair_grid=(float(ps_["x0"]), float(ps_["h"]), int(ps_["n"])),
         elements=tuple(int(e) for e in meta["elements"]),
+        radial_learned=bool(meta.get("radial_learned", False)),    # absent in old files
     )
     model = with_edge_a_kind(model, edge_a_kind)   # one-hot selectors if "matmul"
     if fold:

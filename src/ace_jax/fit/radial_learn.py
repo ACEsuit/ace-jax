@@ -571,7 +571,8 @@ def save_result(out_dir, W, info, *, src_npz=None, model=None, readout=None):
     by fit_radial; also saved as readout.npy).  The source npz's WB/Wpair
     belong to the old radials, so writing model.npz without a readout is
     refused rather than silently stale.  info["readout"] is kept out of the
-    JSON (it is len_basis long)."""
+    JSON (it is len_basis long).  model.npz is marked meta "radial_learned"
+    (so `lean` splines it by default) unless info["selected"] == "init"."""
     if readout is None:
         readout = info.get("readout")
     if src_npz is not None:
@@ -589,4 +590,7 @@ def save_result(out_dir, W, info, *, src_npz=None, model=None, readout=None):
         np.save(out / "readout.npy", np.asarray(readout))
     if src_npz is not None:
         from ..construct.export import patch_radial_npz
-        patch_radial_npz(src_npz, out / "model.npz", with_radial(model, W), readout=readout)
+        # the held-out gate may keep the initial radial: then nothing was learned
+        learned = info.get("selected") != "init"
+        patch_radial_npz(src_npz, out / "model.npz", with_radial(model, W, learned=learned),
+                         readout=readout)

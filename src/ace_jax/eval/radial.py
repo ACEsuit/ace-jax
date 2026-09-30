@@ -12,6 +12,7 @@ No module-level jax.config here, or anywhere in this package: precision is the
 caller's to choose.
 """
 
+import jax
 import jax.numpy as jnp
 
 
@@ -54,13 +55,8 @@ def env_ace1_poly1sr(r, params):
     return jnp.where(inside, val, 0.0)
 
 
-def spline_eval(x, coefs, x0, h, n):
-    """Uniform cubic B-spline, matching Interpolations.cubic_spline_interpolation.
-
-    `coefs` has shape (ncoef, F) with ncoef = n + 2: one pad coefficient at each
-    end, laid out so that Julia's OffsetArray index 0..n+1 is row 0..n+1 here.
-    Evaluation is a 4-coefficient gather and a cubic, as the plan anticipated.
-    """
+def _bspline_rows(x, x0, h, n):
+    """The 4 coefficient rows each x reads, (..., 4), and their cubic weights."""
     k = (x - x0) / h + 1.0                       # Julia 1-based grid coordinate
     ix = jnp.clip(jnp.floor(k).astype(jnp.int32), 1, n - 1)
     t = k - ix
@@ -70,9 +66,46 @@ def spline_eval(x, coefs, x0, h, n):
                    (4.0 - 6.0 * ct**2 + 3.0 * ct**3) / 6.0,
                    t**3 / 6.0], axis=-1)          # (..., 4)
     # Julia coefs[ix-1 .. ix+2] with OffsetArray base 0 -> rows ix-1 .. ix+2
-    idx = ix[..., None] + jnp.arange(-1, 3)       # (..., 4)
+    return ix[..., None] + jnp.arange(-1, 3), w
+
+
+def spline_eval(x, coefs, x0, h, n):
+    """Uniform cubic B-spline, matching Interpolations.cubic_spline_interpolation.
+
+    `coefs` has shape (ncoef, F) with ncoef = n + 2: one pad coefficient at each
+    end, laid out so that Julia's OffsetArray index 0..n+1 is row 0..n+1 here.
+    Evaluation is a 4-coefficient gather and a cubic, as the plan anticipated.
+    """
+    idx, w = _bspline_rows(x, x0, h, n)
     g = coefs[idx]                                # (..., 4, F)
     return jnp.einsum("...k,...kf->...f", w, g)
+
+
+def _pairs(x, coefs, zi, zj, x0, h, n):
+    return jax.vmap(lambda xx, c: spline_eval(xx, c, x0, h, n))(x, coefs[zi, zj])
+
+
+_pairs_jit = jax.jit(_pairs, static_argnames=("x0", "h", "n"))
+
+
+def spline_eval_pairs(x, coefs, zi, zj, x0, h, n):
+    """`spline_eval` per edge on its own species pair's table: x, zi, zj (E,),
+    coefs (NZ, NZ, ncoef, F) -> (E, F), as `vmap(spline_eval)(x, coefs[zi, zj])`.
+
+    Under a trace (inside the caller's jit / grad / vmap) that expression is
+    inlined as is, so the caller's program -- its fusion, hence its rounding --
+    is exactly what it was before this helper existed; XLA fuses it into a
+    4-row gather per edge.  Called eagerly (op by op, e.g. an un-jitted
+    `model.radial`), the same expression would materialise the (E, ncoef, F)
+    per-edge table first -- 32 GB for 20k edges on a 2000-interval `to_spline`
+    table -- so the eager call goes through a jitted copy instead.  Wrapping
+    the traced call in its own jit too is NOT equivalent: the nested jit
+    changes the outer program's fusion, which moved the bit-exact
+    run_linear_pops_auto pipeline golden at 1e-12.  Explicit row gathers
+    measured 1-12% slower on an A100 (bench/perf/results/learned_radial_8192_gather_*.json)."""
+    if any(isinstance(a, jax.core.Tracer) for a in (x, coefs, zi, zj)):
+        return _pairs(x, coefs, zi, zj, x0, h, n)
+    return _pairs_jit(x, coefs, zi, zj, x0=x0, h=h, n=n)
 
 
 def env_poly1sr(r, params):

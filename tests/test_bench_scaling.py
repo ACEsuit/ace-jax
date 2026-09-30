@@ -172,7 +172,8 @@ def test_lammps_retries_sparse_after_a_matrix_oom(tmp_path, monkeypatch):
     from scaling import run_lammps
     layouts = []
 
-    def fake_export(row, at, dtype, work, layout="auto", slots="skin", list_headroom=0.5):
+    def fake_export(row, at, dtype, work, layout="auto", slots="skin", list_headroom=0.5,
+                    info=None):
         layouts.append(layout)
         return "b.json", ("matrix" if layout == "auto" else "sparse"), 1.0
 
@@ -193,7 +194,8 @@ def test_lammps_retries_dense_after_a_matrix_list_overflow(tmp_path, monkeypatch
     from scaling import run_lammps
     layouts = []
 
-    def fake_export(row, at, dtype, work, layout="auto", slots="skin", list_headroom=0.5):
+    def fake_export(row, at, dtype, work, layout="auto", slots="skin", list_headroom=0.5,
+                    info=None):
         layouts.append(layout)
         return "b.json", ("matrix" if layout == "auto" else layout), 1.0
 
@@ -977,6 +979,305 @@ def test_tables_use_the_median_and_show_the_spread():
     assert "| 8.19e+06 |" in tables(rows[:1])                            # no ± for a single run
     s = summaries(rows, [_rep(8e-3, n=8192)])
     assert "| 1.02M | 4.10M ±75% | 4.0× |" in s
+
+
+# --- learned-radial proxy lines (acejax-ace-learned / acejax-ace-analytic) ---
+
+LEARNED_PAIR = ("acejax-ace-learned", "acejax-ace-analytic")
+
+
+@pytest.fixture(scope="module")
+def sige_learned(tmp_path_factory):
+    """The learned-radial proxy recipe applied to the committed sige_nofit
+    fixture (the benchmark models are git-ignored)."""
+    from scaling.models import learned_proxy
+    src = pathlib.Path(__file__).parent.parent / "fixtures" / "sige_nofit.npz"
+    dst = tmp_path_factory.mktemp("learned") / "sige_learned.npz"
+    learned_proxy(src, dst, n_q=12, scale=0.1, seed=0)
+    return src, dst
+
+
+def _learned_row(code, path):
+    from scaling.models import LEARNED_CODES
+    return {"code": code, "system": "SiGe", "size": "medium", "path": str(path),
+            "elements": ["Si", "Ge"], "name": f"{code}/SiGe/medium",
+            "spline_tol": LEARNED_CODES[code]}
+
+
+def test_learned_codes_are_planned_for_medium_only():
+    from scaling.models import LEARNED_CODES, learned_path
+    rows = planned_models()
+    assert LEARNED_CODES == {"acejax-ace-learned": "auto", "acejax-ace-analytic": None}
+    for code in LEARNED_PAIR:
+        for system in ("SiGe", "Cantor"):
+            got = [r for r in rows if r["code"] == code and r["system"] == system]
+            assert [r["size"] for r in got] == ["medium"], (code, system)
+            assert got[0]["path"] == str(learned_path(system)) and got[0]["path"].endswith(
+                f"ace_{system}_medium_learned.npz")
+            assert got[0]["spline_tol"] == LEARNED_CODES[code]
+    assert all("spline_tol" not in r for r in rows if r["code"] not in LEARNED_PAIR)
+
+
+@pytest.mark.parametrize("host", ["modal-a100", "moriarty-gpu", "moriarty-cpu"])
+def test_learned_lines_follow_the_ace_ladder(host):
+    """Same modes, dtypes and N ladder as the stock ACE medium line; --only works."""
+    from scaling.sweep import main
+    cs = cases(host)
+    def line(code):
+        return sorted((c.mode, c.dtype, c.n_atoms) for c in cs
+                      if c.code == code and c.model.endswith("/medium"))
+    for code in LEARNED_PAIR:
+        assert line(code) == line("acejax-ace") and line(code)
+    main([host, "--only", "acejax-ace-learned", "--dry-run"])
+
+
+def test_learned_proxy_is_deterministic_and_marked_learned(sige_learned, tmp_path):
+    import jax
+    jax.config.update("jax_enable_x64", True)
+    from ace_jax.eval import load
+    from ace_jax.fit.radial_model import row_active, to_analytic
+    from scaling.models import learned_proxy
+    src, dst = sige_learned
+    again = tmp_path / "again.npz"
+    learned_proxy(src, again, n_q=12, scale=0.1, seed=0)
+    a, b = np.load(dst), np.load(again)
+    assert set(a.files) == set(b.files)
+    for k in a.files:
+        assert np.array_equal(a[k], b[k]), k                     # bit-for-bit, same seed
+    m, meta, _ = load(str(dst))
+    assert m.radial_learned and meta["radial_learned"] is True and m.radial_kind == "analytic"
+    base, _ = to_analytic(load(str(src))[0], 12)
+    W0, W = np.asarray(base.rnl_Wnlq), np.asarray(m.rnl_Wnlq)
+    act = np.asarray(row_active(W0))
+    assert 0 < act.sum() < act.size                              # the per-z_j pattern exists
+    assert np.array_equal(np.asarray(row_active(W)), act)        # zero rows stay exactly zero
+    rel = np.linalg.norm(W[act] - W0[act]) / np.linalg.norm(W0[act])
+    assert 0.05 < rel < 0.2                                      # ~10% of each row's rms
+    other = tmp_path / "seed1.npz"
+    learned_proxy(src, other, n_q=12, scale=0.1, seed=1)
+    assert not np.array_equal(np.load(other)["rnl_Wnlq"], a["rnl_Wnlq"])
+
+
+def test_standalone_passes_spline_tol_per_code(sige_learned):
+    """-learned runs as deployed (auto: splined at 1e-10), -analytic exact."""
+    from scaling.run_standalone import run_case
+    _, dst = sige_learned
+    got = {code: run_case(_learned_row(code, dst), 256, "float64", "cpu", reps=2)
+           for code in LEARNED_PAIR}
+    lr, an = got["acejax-ace-learned"], got["acejax-ace-analytic"]
+    assert lr["status"] == "ok" and an["status"] == "ok"
+    assert lr["spline_tol"] == "auto" and lr["splined"]["spline_tol"] == 1e-10
+    assert lr["splined"]["radials"] == ["rnl"] and lr["splined"]["n_intervals"]["rnl"] > 100
+    assert an["spline_tol"] is None and an["splined"] is None
+    json.dumps(lr), json.dumps(an)                               # rows stay JSON
+    assert abs(lr["energy"] - an["energy"]) <= 1e-9 * abs(an["energy"])
+
+
+def test_lammps_rows_pass_and_record_spline_tol(tmp_path, monkeypatch):
+    """The row's spline_tol reaches the export child, and the bundle's record of
+    what was splined lands in the LAMMPS row."""
+    import subprocess as sp
+    from scaling import run_lammps
+    seen = {}
+
+    def fake_run(cmd, **kw):
+        seen["row"] = json.loads(cmd[cmd.index("--export") + 1])
+        return sp.CompletedProcess(cmd, 0, stdout='{"bundle": "/w/b.json", "layout": "dense", '
+                                   '"compile_s": 1.0, "splined": {"spline_tol": 1e-10, '
+                                   '"n_intervals": {"rnl": 2048}}}\n', stderr="")
+
+    monkeypatch.setattr(run_lammps.subprocess, "run", fake_run)
+    info = {}
+    row = _learned_row("acejax-ace-analytic", "m.npz")
+    run_lammps.export_bundle(row, supercell("SiGe", 256), "float64", tmp_path, info=info)
+    assert "spline_tol" in seen["row"] and seen["row"]["spline_tol"] is None
+    assert info["splined"] == {"spline_tol": 1e-10, "n_intervals": {"rnl": 2048}}
+    # run_case: the requested spline_tol and the bundle's record go into the row
+    extra = {}
+    monkeypatch.setattr(run_lammps, "export_bundle", lambda r, at, dt, w, info=None, **kw: (
+        info.update(splined={"spline_tol": 1e-10, "n_intervals": {"rnl": 2048}}), ("b", "dense", 1.0))[1])
+    monkeypatch.setattr(run_lammps, "_run_lammps", lambda *a: extra.update(a[-1]) or {"status": "ok"})
+    run_lammps.run_case(_learned_row("acejax-ace-learned", "m.npz"), 256, "float64", "gpu", "lmp", 1,
+                        tmp_path)
+    assert extra["spline_tol"] == "auto" and extra["splined"]["spline_tol"] == 1e-10
+    assert run_lammps.splined_meta({"spline_tol": None, "spline_intervals": None}) is None
+
+
+def test_learned_bundle_records_splining(sige_learned, tmp_path):
+    require_optional("lammps_jax")
+    from scaling.run_lammps import export_bundle
+    _, dst = sige_learned
+    for code, want in (("acejax-ace-learned", 1e-10), ("acejax-ace-analytic", None)):
+        info = {}
+        export_bundle(_learned_row(code, dst), supercell("SiGe", 256), "float64", tmp_path / code,
+                      info=info)
+        assert (info["splined"] or {}).get("spline_tol") == want, code
+
+
+def test_parity_gates_the_learned_lines():
+    from scaling.parity import TOL, blocked, compare_rel, gate_checks
+    small = {(m["code"], m["system"]): m for m in planned_models() if m["size"] == "small"}
+    medium = {(m["code"], m["system"]): m for m in planned_models() if m["size"] == "medium"}
+    got = [(g, m["code"], m["size"], lay) for g, m, lay in gate_checks(small, "Cantor", medium)]
+    for code in LEARNED_PAIR:
+        for lay in ("matrix", "dense", "sparse"):
+            assert ("acejax", code, "medium", lay) in got
+    assert ("spline", "acejax-ace-learned", "medium", None) in got
+    assert [g for g in got if g[0] == "acejax" and g[1] == "acejax-ace"][0][2] == "small"
+    assert gate_checks(small, "Cantor") == [c for c in gate_checks(small, "Cantor", medium)
+                                            if c[1]["code"] not in LEARNED_PAIR]
+    # splining accuracy, relative: ~1e-9 in E, ~3e-8 of max|F| (docs/learned-radial-splining.md)
+    assert TOL["spline"] == (1e-9, 3e-8)
+    F = np.array([[1.0, -2.0, 0.5], [0.0, 2.0, -1.0]])
+    ok = compare_rel(-100.0, F, -100.0 + 5e-8, F + 4e-8, 2, TOL["spline"])
+    assert ok["status"] == "parity_ok" and ok["dE_rel"] == pytest.approx(5e-10)
+    assert ok["dF_rel"] == pytest.approx(2e-8) and ok["max_dF"] == pytest.approx(4e-8)
+    assert compare_rel(-100.0, F, -100.0 + 2e-7, F, 2, TOL["spline"])["status"] == "parity_fail"
+    assert compare_rel(-100.0, F, -100.0, F + 1e-7, 2, TOL["spline"])["status"] == "parity_fail"
+    # a failed spline gate blocks the learned line in both modes; acejax only LAMMPS
+    rows = [{"code": "acejax-ace-learned", "gate": "spline", "status": "parity_fail"},
+            {"code": "acejax-ace-analytic", "gate": "acejax", "status": "parity_fail"}]
+    assert blocked(rows) == {("acejax-ace-learned", "lammps"), ("acejax-ace-learned", "standalone"),
+                             ("acejax-ace-analytic", "lammps")}
+
+
+def test_spline_gate_measures_learned_against_analytic(sige_learned, monkeypatch):
+    """The spline gate runs both learned lines standalone (no LAMMPS) and
+    passes on a real proxy; checks it cannot run are skipped here."""
+    from scaling import parity
+    _, dst = sige_learned
+    med = {(c, "SiGe"): _learned_row(c, dst) for c in LEARNED_PAIR}
+    monkeypatch.setattr(parity, "planned_models", lambda: [{**r, "size": "medium"} for r in med.values()])
+    monkeypatch.setattr(parity, "gate_checks", lambda small, system, medium: [
+        ("spline", medium[("acejax-ace-learned", system)], None)] if system == "SiGe" else [])
+    rows = parity.gate("moriarty-cpu", {"lmp": "lmp"})
+    assert len(rows) == 1 and rows[0]["status"] == "parity_ok", rows
+    assert rows[0]["gate"] == "spline" and rows[0]["dF_rel"] < 3e-8 and rows[0]["dE_rel"] < 1e-9
+
+
+def test_only_a_new_line_tops_up_the_recorded_gate(tmp_path, monkeypatch):
+    """A results file gated before the learned lines existed: `--only` one of
+    them runs the gate and appends only the checks whose keys are new."""
+    from scaling import sweep
+    old = {"mode": "parity", "code": "acejax-ace", "gate": "acejax", "system": "SiGe", "model": "m",
+           "status": "parity_ok", "bundle_layout": "dense",
+           "_key": ["parity", "acejax", "SiGe", "acejax-ace", "dense"], "_line": ["parity"]}
+    res = tmp_path / "r.jsonl"
+    res.write_text(json.dumps(old) + "\n")
+    fresh = [{k: v for k, v in old.items() if not k.startswith("_")},
+             {"mode": "parity", "code": "acejax-ace-learned", "gate": "spline", "system": "SiGe",
+              "model": "x", "status": "parity_fail", "device": "gpu"}]
+    monkeypatch.setattr(sweep, "gate_in_subprocess", lambda *a: [dict(r) for r in fresh])
+    monkeypatch.setattr(sweep, "device_name", lambda d: "gpu0")
+    got = {}
+    monkeypatch.setattr(sweep, "run_sweep", lambda host, runner, path, select: got.update(
+        run=sorted({(c.code, c.mode) for c in sweep.cases(host) if select(c)})))
+    monkeypatch.setattr(sweep, "_env_path", lambda host: tmp_path / "env.json")
+    (tmp_path / "env.json").write_text(json.dumps({"lmp": "lmp"}))
+    sweep.main(["moriarty-gpu", "--only", "acejax-ace-learned", "--results", str(res)])
+    lines = [json.loads(l) for l in res.read_text().splitlines()]
+    assert [l["code"] for l in lines] == ["acejax-ace", "acejax-ace-learned"]   # old kept, new added
+    assert got["run"] == []                                      # the failed spline gate blocks it
+    assert sweep.gate_missing(lines, None) is False
+
+
+def test_gate_missing_is_per_check(tmp_path):
+    """A code whose recorded gate lacks one of today's checks (the matrix layout
+    added after the learned line was gated) is topped up; a complete gate is not."""
+    from scaling import sweep
+    from scaling.parity import BUNDLE_LAYOUTS
+    code = "acejax-ace-learned"
+
+    def row(gate, system, layout=None):
+        return {"mode": "parity", "code": code, "gate": gate, "system": system,
+                "_key": ["parity", gate, system, code] + ([layout] if layout else [])}
+
+    full = [row("spline", s) for s in ("SiGe", "Cantor")] + [
+        row("acejax", s, lay) for s in ("SiGe", "Cantor") for lay in BUNDLE_LAYOUTS]
+    assert sweep.gate_missing(full, code) is False
+    no_matrix = [r for r in full if r["_key"][-1] != "matrix"]
+    assert sweep.gate_missing(no_matrix, code) is True
+    assert sweep.gate_missing(no_matrix, None) is False
+    assert sweep.gate_missing([], code) is True
+
+
+def _learned_rows(host="modal-a100"):
+    rows = []
+    for code, t in (("acejax-ace", 1e-3), ("acejax-ace-learned", 1.05e-3), ("acejax-ace-analytic", 2e-3)):
+        for system in ("SiGe", "Cantor"):
+            for mode in ("standalone", "lammps"):
+                for n in (256, 512, 1024):
+                    rows.append(_ba_row(code, mode, n, host=host, system=system, t=t * n / 256))
+    return rows
+
+
+def test_learned_radial_palette_and_labels():
+    from scaling import plot
+    assert list(plot.CODES)[-2:] == list(LEARNED_PAIR)          # appended, fixed order
+    cols = [c for _, c in plot.CODES.values()]
+    assert len(set(cols)) == len(cols)                          # never recycled
+    assert plot.CODES["acejax-ace-learned"][1] == "#e87ba4" and plot.CODES["acejax-ace-analytic"][1] == "#008300"
+    assert plot.SHORT["acejax-ace-learned"] == "ace-jax ACE, learned (splined)"
+    assert plot.SHORT["acejax-ace-analytic"] == "ace-jax ACE, learned (analytic)"
+    assert len({plot._marker(c) for c in ("acejax-ace", *LEARNED_PAIR)}) == 3   # not colour alone
+
+
+def test_learned_radial_figure_and_doc(tmp_path, monkeypatch):
+    import matplotlib
+    matplotlib.use("Agg")
+    from scaling import plot
+    rows = _learned_rows()
+    (tmp_path / "r.jsonl").write_text("\n".join(json.dumps(r) for r in rows))
+    figs = plot.make_figures(str(tmp_path / "*.jsonl"), tmp_path / "figs")
+    names = [pathlib.Path(f).name for f in figs]
+    assert "scaling_learned_radial_float64_medium_modal-a100.png" in names
+    assert "scaling_throughput_float64_medium.png" in names
+    doc = pathlib.Path(plot.write_doc(str(tmp_path / "*.jsonl"), figs, doc=str(tmp_path / "b.md"))).read_text()
+    assert "*The cost of a learned radial" in doc and "Learned-radial figures pending" not in doc
+    assert "ace-jax (linear ACE, learned radial, splined)" in doc     # the tables name the line
+    captured = []
+    monkeypatch.setattr(plot.plt, "close", lambda f=None: captured.append(f))
+    plot.fig_learned(rows, tmp_path, "modal-a100")
+    f = captured[-1]
+    assert len([ax for ax in f.axes if ax.lines]) == 4               # 2 systems x 2 modes
+    labels = {t.get_text() for lg in f.legends for t in lg.get_texts()}
+    assert {plot.CODES[c][0] for c in ("acejax-ace", *LEARNED_PAIR)} <= labels
+    plot.fig_throughput(rows, tmp_path)
+    labels = {t.get_text() for lg in captured[-1].legends for t in lg.get_texts()}
+    assert {plot.CODES[c][0] for c in LEARNED_PAIR} <= labels
+
+
+def test_learned_rows_absent_or_partial_are_pending(tmp_path, monkeypatch):
+    import matplotlib
+    matplotlib.use("Agg")
+    from scaling import plot
+    base = [r for r in _learned_rows() if r["code"] == "acejax-ace"]
+    assert plot.fig_learned(base, tmp_path, "modal-a100") is None
+    assert plot.learned_hosts(base) == []
+    (tmp_path / "r.jsonl").write_text("\n".join(json.dumps(r) for r in base))
+    figs = plot.make_figures(str(tmp_path / "*.jsonl"), tmp_path / "figs")
+    assert not any("learned" in pathlib.Path(f).name for f in figs)
+    doc = pathlib.Path(plot.write_doc(str(tmp_path / "*.jsonl"), figs, doc=str(tmp_path / "b.md"))).read_text()
+    assert "Learned-radial figures pending" in doc
+    # only the learned line, standalone only, one system: still draws, no crash
+    part = [r for r in _learned_rows() if r["code"] == "acejax-ace-learned"
+            and r["mode"] == "standalone" and r["system"] == "SiGe"]
+    assert plot.fig_learned(part, tmp_path, "modal-a100") is not None
+    # before/after figures ignore the learned lines (they have no before rows)
+    series = plot.before_after_series(_learned_rows(), [], "modal-a100")
+    assert series and not any(k[2] in LEARNED_PAIR for k in series)
+    # the parity table names the spline gate
+    t = plot.parity_table([{"mode": "parity", "host": "h", "gate": "spline", "code": "acejax-ace-learned",
+                            "status": "parity_ok", "dE_per_atom": 1e-12, "max_dF": 1e-9}])
+    assert "| h | spline | ace-jax (linear ACE, learned radial, splined) | 1/1 |" in t
+
+
+def test_basis_sizes_count_the_learned_lines(monkeypatch, tmp_path, sige_learned):
+    from scaling import models
+    _, dst = sige_learned
+    monkeypatch.setattr(models, "planned_models", lambda: [
+        {"code": "acejax-ace-learned", "system": "SiGe", "size": "medium", "path": str(dst)}])
+    assert models.basis_sizes() == {"SiGe/medium": {"acejax-ace-learned": np.load(dst)["WB"].shape[0]}}
 
 
 def test_runner_hint_carries_the_matrix_overflow_flag(monkeypatch):

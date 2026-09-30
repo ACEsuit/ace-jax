@@ -34,6 +34,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from ..eval.edge_model import LAYOUTS, estimate_a_bytes
+from ..eval.splinify import AUTO
 
 BUNDLE_LAYOUTS = LAYOUTS + ("matrix",)
 
@@ -258,7 +259,7 @@ def make_energy_fn(model, n_species, layout, k_dense=None, type_map=None, n_rows
 
 def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
                   dtype="float64", layout="auto", type_elements=None, max_owned=None,
-                  lean=True, max_neighbors=None):
+                  lean=True, spline_tol=AUTO, spline_intervals=None, max_neighbors=None):
     """Write a lammps-jax JSON bundle for `model`; returns the bundle dict.
 
     Capacities: max_atoms (owned + ghost positions); max_edges (sparse / dense:
@@ -291,13 +292,24 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
     or export layout="dense".  The bundle records the exporting lammps-jax as
     `ace_jax.lammps_jax`.
 
-    lean (default True): export `ace_jax.eval.model.lean(model)`, the exact
-    evaluation form with the dead per-edge work removed (docs/ace-vs-pace-gap.md);
-    recorded as `ace_jax.lean` (False for a model it does not apply to, e.g. PACE).
+    lean (default True): export `ace_jax.eval.model.lean(model, spline_tol,
+    spline_intervals)`, the evaluation form with the dead per-edge work removed
+    (docs/ace-vs-pace-gap.md).  spline_tol="auto" (default) first splines a
+    learned analytic tensor radial (`radial_learned`) at 1e-10, which is not
+    roundoff: energies agree with lean=False to up to ~1e-9 relative and forces
+    to up to ~2.3e-8 of max|F| on the benchmark models
+    (docs/learned-radial-splining.md).  Other analytic models (Julia
+    `ace_model` exports, Python-authored) stay exact; a float spline_tol opts
+    them in, None never splines.
+    Recorded from what lean actually did (looking through a wrapper's `.base`):
+    `ace_jax.lean` (False when lean returned the model as given, e.g. PACE or an
+    unfolded model), `ace_jax.spline_tol` and `ace_jax.spline_intervals`
+    ({radial: n}), both None when nothing was splined.
     """
     from lammps_jax.export import export_model
 
     from ..eval.model import lean as _lean
+    from ..eval.model import splining
     from ..calc.point import dense_budget_bytes
     model_z = [int(z) for z in meta["elements"]]
     type_elements = model_z if type_elements is None else [int(z) for z in type_elements]
@@ -339,8 +351,12 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
     # estimate_a_bytes fits the full dense path, and on the lean widths it
     # underestimates the blocked path's compiled temp (measured 6.6-6.9x actual /
     # estimate on CPU, against 3.0-5.1x full), so it could pick dense and OOM
+    splined, leaned = None, False
     if lean:
-        model = _lean(model)
+        full = model
+        model = _lean(full, spline_tol, spline_intervals)
+        splined = splining(full, model, spline_tol)
+        leaned = model is not full or bool(getattr(model, "energy_only", False))
     rcut = float(meta["rcut"])
     energy_fn = make_energy_fn(model, n_species, layout, k_dense,
                                None if type_map == list(range(len(model_z))) else type_map,
@@ -354,7 +370,10 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
                          # not "max_owned": lammps-jax reads that key from anywhere in
                          # the file and would take it as its own contract's
                          "owned_rows": int(max_owned) if max_owned is not None else None,
-                         "lean": bool(getattr(model, "energy_only", False)),
+                         "lean": leaned,
+                         # what the analytic radials were splined to (None: not splined)
+                         "spline_tol": splined["spline_tol"] if splined else None,
+                         "spline_intervals": splined["n_intervals"] if splined else None,
                          "lammps_jax": lammps_jax_version()}
     Path(path).write_text(json.dumps(bundle, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return bundle
