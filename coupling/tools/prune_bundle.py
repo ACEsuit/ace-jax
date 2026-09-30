@@ -56,6 +56,16 @@ def main(src, dst):
     src, dst = pathlib.Path(src).resolve(), pathlib.Path(dst).resolve()
     used = {pathlib.Path(os.path.realpath(src / u)).relative_to(src) for u in traced(src)}
     assert pathlib.Path("lib") / f"libetcouple.{EXT}" in used, "trace did not see libetcouple"
+    # libjulia's loader opens a fixed dependency list (libgcc_s, libstdc++,
+    # libjulia-internal, ...) by path from lib/julia -- unless the process already
+    # has a library of that name (numpy pulls in the system libgcc_s first, so the
+    # trace never sees the bundled one).  Keep every bundle library the loader
+    # names, whatever the trace saw.
+    loader = [u for u in used if "libjulia." in u.name and "internal" not in u.name]
+    names = b"".join((src / u).read_bytes() for u in loader)
+    for p in src.rglob("*"):
+        if p.is_file() and _is_lib(p) and p.name.encode() in names:
+            used.add(pathlib.Path(os.path.realpath(p)).relative_to(src))
     # The trace reports resolved files, but binaries refer to them by alias
     # (install names / SONAMEs / dlopen strings, e.g. @rpath/libunwind.1.dylib ->
     # libunwind.1.0.dylib).  Keep a name of a traced library iff that name occurs
@@ -68,7 +78,11 @@ def main(src, dst):
             continue
         real = pathlib.Path(os.path.realpath(p)).relative_to(src)
         # referenced from ANOTHER traced binary (a library's own bytes name itself)
-        if real in used and any(p.name.encode() in d for u, d in data.items() if u != real):
+        # Julia also dlopens by bare stem ("libpcre2-8" -> tries "libpcre2-8.so"),
+        # so a stem reference keeps the unversioned alias too
+        stem = p.name[:-len(f".{EXT}")] if p.name.endswith(f".{EXT}") else None
+        refs = [p.name.encode()] + ([stem.encode() + b"\0"] if stem else [])
+        if real in used and any(r in d for r in refs for u, d in data.items() if u != real):
             names.setdefault(real, []).append(p.relative_to(src))
     for real in used:
         names.setdefault(real, [real])
