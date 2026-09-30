@@ -20,7 +20,7 @@ steps the Julia exporter walks, returning an `Authoring` NamedTuple:
    integer specs ET consumes: `mb_spec` (per-B `(n,l)` tuples under
    `TotalDegree` + `rpe_admissible`), `Rnl_spec`, `Ylm_spec`.
 3. **`couple(mb_spec, Rnl_spec, Ylm_spec)`** (`construct/coupling.py`) — the
-   in-process JuliaCall shim; returns `A2B` `(n_B, n_AA)`, per-order `aa_specs`,
+   compiled EquivariantTensors library (`ace-jax-coupling`); returns `A2B` `(n_B, n_AA)`, per-order `aa_specs`,
    `aspec`, and ET's `aa_sig` per AA column (signature-sorted, **not**
    evaluation-ordered — see below).
 4. **nnll cross-check** — `nnll_from_coupling` recomputes each B row's body
@@ -126,10 +126,11 @@ The coupling depends only on the three integer specs, so
 `couple_cached` (default inside `build_model`) persists one entry per shape —
 keyed by a sha256 of the order-preserving spec JSON — under
 `$ACEJAX_COUPLING_CACHE` (or `~/.cache/ace-jax/coupling`). A **hit
-reconstructs the `Coupling` without importing juliacall**: pip install +
-populated cache dir = Julia-free authoring of a known shape. Entries store
-their input specs (hit-time re-check) and the `juliapkg.json` pin hash (a
-pin change invalidates); writes are atomic (a unique tmp file per writer,
+reconstructs the `Coupling` without importing the coupling library**: pip
+install + populated cache dir = authoring of a known shape without the
+`authoring` extra. Entries store their input specs (hit-time re-check) and the
+coupling backend id `coupling.backend_id()` (`ace-jax-coupling==<version>`; a
+library change invalidates); writes are atomic (a unique tmp file per writer,
 then `os.replace`) and best-effort, and any entry that fails to read for
 whatever reason — torn zip, schema drift — is a miss, never an error.
 `couple()` stays
@@ -147,14 +148,9 @@ identity> [--d-max N]`); its design record is
 
 ## Known traps
 
-- **juliapkg scans `sys.path` for `juliapkg.json`.** When running a script
-  outside the repo, `sys.path[0]` is the *script's* directory — a scratch
-  `juliapkg.json` there gets scanned and can poison `.venv/julia_env` with an
-  unresolvable spec (recovery: rename the file, delete `.venv/julia_env`).
-  Run probes with `PYTHONPATH=.` from the worktree root instead.
-- **The shim env has only EquivariantTensors** (bundling StaticArrays); no
-  `Interpolations`/`OffsetArrays`. Reconstructing Julia's spline evaluator
-  through a scratch Julia env does not resolve and is not needed —
+- **The coupling library contains only EquivariantTensors' construction code**;
+  there is no Julia session to evaluate anything else in. Reconstructing
+  Julia's spline evaluator is not needed —
   `spline_eval` (`eval/radial.py`) was validated exactly against the Julia
   batched evaluator (per-column ratio 1.0) on the fixture's prefiltered
   B-spline control points.
@@ -168,8 +164,10 @@ identity> [--d-max N]`); its design record is
 - ~~Tier 2 point 2 — coupling cache~~: done (`couple_cached`, see
   [tier2-plan.md](tier2-plan.md)) — authoring an existing shape runs
   Julia-free from a populated cache dir.
+- ~~Drop juliacall~~: done — the `authoring` extra is the `ace-jax-coupling`
+  wheel, a `juliac --trim` compiled EquivariantTensors (`coupling/`,
+  [coupling-etshim-spec.md](coupling-etshim-spec.md)).
 - **Endgame — pure-JAX coupling**: reimplement ET's `SparseSymmProd`
-  symmetrisation in JAX, dropping the `authoring` extra's juliacall
-  dependency entirely. The hard part: degenerate nnll blocks are only unique
+  symmetrisation in JAX, dropping the compiled library too. The hard part: degenerate nnll blocks are only unique
   up to a row-space rotation, so coefficient interchange needs the
   subspace-matching discipline the parity tests already use.

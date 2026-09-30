@@ -19,7 +19,7 @@ pure **Python/JAX** — no Julia needed to fit or run.
   (`ace_jax.export.lammps.export_lammps`).
 - **Author** whole models from Python — the symmetry-adapted coupling via
   [EquivariantTensors.jl](https://github.com/ACEsuit/EquivariantTensors.jl),
-  bit-for-bit with ACEpotentials, no manual Julia setup (optional `authoring`
+  compiled ahead of time so no Julia is needed at all (optional `authoring`
   extra) — including species-embedded models and the smoothness prior.
 - Research: learned radial basis by variable projection (`bench/learn_radial/`).
 
@@ -28,7 +28,7 @@ pure **Python/JAX** — no Julia needed to fit or run.
 ```bash
 pip install ace-jax             # core: evaluate + linear fit + ASE calculator
 pip install ace-jax[gp]         # + `ace-jax fit` pipeline: GP/UQ hyperparameter ladder
-pip install ace-jax[authoring]  # + Python basis coupling (EquivariantTensors via juliacall)
+pip install ace-jax[authoring]  # + Python basis coupling (compiled EquivariantTensors; Linux x86_64/aarch64, macOS arm64)
 pip install ace-jax[cuda]       # + CUDA 12 JAX
 pip install ace-jax[fast-neighbours]  # + matscipy-neighbours (C++ source build; ASE's list is the fallback)
 ```
@@ -47,10 +47,11 @@ model-authoring seam has three paths:
 - **author a new model in Python** → the `authoring` extra builds the whole
   model (`ace-jax construct`, including species-embedded models): the `(n,l)`
   specification and the symmetry-adapted A→B coefficients come from
-  EquivariantTensors, whose pinned private Julia `juliacall`/`juliapkg`
-  provision on first use (no manual install, no ACEpotentials stack); radials,
-  pair basis and embedding are built in Python. A per-shape coupling cache means
-  Julia runs only for a basis shape not seen before;
+  EquivariantTensors, shipped as the `ace-jax-coupling` platform wheel (a
+  `juliac --trim` compiled library: no Julia install, nothing downloaded at
+  runtime, no ACEpotentials stack); radials, pair basis and embedding are built
+  in Python. A per-shape coupling cache means the library runs only for a basis
+  shape not seen before;
 - **export a whole new basis from Julia** → the original path
   (`julia/export_model.jl`), still fully supported.
 
@@ -155,14 +156,18 @@ embedding) and ACEpotentials.jl rows will be added in a follow-up.
 With the `authoring` extra, `ace_jax.construct` builds an ACE basis's
 symmetry-adapted coupling coefficients without a Julia export step:
 `construct.spec.build_spec(...)` enumerates the admissible `(n,l)` many-body
-specification (total-degree / `wL`), and `construct.coupling.couple(...)` bridges
-to EquivariantTensors to produce the A→B symmetrisation matrix. `juliacall`
-calls EquivariantTensors.jl directly — a far lighter dependency than the full
-ACEpotentials stack — and `juliapkg` provisions the pinned Julia + ET
-automatically, so you never install or manage Julia yourself.
+specification (total-degree / `wL`), and `construct.coupling.couple(...)` calls
+EquivariantTensors to produce the A→B symmetrisation matrix — through
+`ace-jax-coupling`, EquivariantTensors' coupling construction compiled with
+`juliac --trim=safe` into a self-contained library (`coupling/`), so you never
+install or manage Julia yourself.
 
-The coupling is verified **bit-for-bit** against ACEpotentials for orders 2–4,
-including the degenerate `nnll` blocks that need a subspace (row-space) match.
+The coupling is **bit-identical** to EquivariantTensors (main, the fork rev in
+`ace_jax_coupling.build_info()`). Against ACEpotentials 0.10.1 exports (which pin
+ET 0.4.3) it has the same `nnll` blocks and the same per-block row spaces for
+orders 2–4, including the degenerate blocks, but each B function is normalised
+differently (row-norm ratio 0.225–1): the same function space, so fitted
+coefficients are not interchangeable with 0.10.1 exports.
 See `docs/coupling-etshim-spec.md` for the design and `tests/test_coupling_parity.py`
 for usage.
 
@@ -176,7 +181,8 @@ evaluates with the plain eval path. `save_npz` derives the branch-selector meta
 keys from the tree being saved, which is what lets fitted coefficients be
 injected via `dataclasses.replace` and round-trip through the loader. The
 bridge test verifies the whole chain against the committed Si fixture: `A2B`
-bit-for-bit, then energies, forces, stress and descriptors to float noise.
+up to that per-row scale, then (with the fixture's coefficients rescaled)
+energies, forces, stress and descriptors to float noise.
 See `docs/python-authoring.md`.
 
 ### Embedded (species-compressed) models: `ace-jax construct --embedding`
@@ -274,7 +280,7 @@ uv run pytest -m slow                # opt-in: real-model MCMC ladder, bit-exact
 
 A bare `pytest` uses pytest-xdist when it is installed (`ACEJAX_TEST_WORKERS`
 sets the worker count; `-n 0` forces a single process, as CI does). The `slow`
-marker is excluded by default. Tests needing an optional package (juliacall,
+marker is excluded by default. Tests needing an optional package (ace-jax-coupling,
 lammps-jax, python-ace, sphericart, matscipy-neighbours, psutil) skip without
 it; for the lammps-jax tests put a clone on the path
 (`PYTHONPATH=<lammps-jax>/python`). See `CLAUDE.md` for the test switches.
@@ -301,9 +307,10 @@ the reference codes:
 - **julia-parity** — the design-matrix rows match ACEfit to 1e-8 and the linear
   solve matches ACEfit's `solve(QR)` to 1e-9, checked against the committed
   fixtures (`julia/export_model.jl`, `julia/acefit_qr_reference.jl`).
-- **coupling-parity** — the Python coupling coefficients match ACEpotentials
-  bit-for-bit, regenerating references from the same pinned EquivariantTensors
-  (`julia/coupling_reference.jl`).
+- **coupling-wheels** — builds the `ace-jax-coupling` wheels (manylinux_2_28
+  x86_64/aarch64, macOS arm64), tests them in clean environments with no Julia
+  (bit-identical to upstream EquivariantTensors), and runs the coupling parity
+  against the ACEpotentials references (`julia/coupling_reference.jl`).
 - **prior-parity** — the smoothness prior (`construct/prior.py`) matches
   ACEpotentials' `algebraic_smoothness_prior` bit-for-bit
   (`julia/smoothness_reference.jl`), and the committed fixtures match a fresh run.

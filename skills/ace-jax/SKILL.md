@@ -14,7 +14,7 @@ and the `authoring` extra provisions it automatically.
 ```bash
 pip install ace-jax              # evaluate, linear fit, ASE calculator
 pip install "ace-jax[gp]"        # + `aj fit` (all arms: MAP optimisers, GP, UQ ladder, POPS)
-pip install "ace-jax[authoring]" # + `construct` (juliacall; first run provisions Julia)
+pip install "ace-jax[authoring]" # + `construct` (compiled EquivariantTensors wheel; no Julia; Linux x86_64/aarch64, macOS arm64)
 pip install "ace-jax[cuda]"      # + CUDA 12 JAX
 ```
 
@@ -239,8 +239,8 @@ Other entry points:
 - **POPS.** `--uq pops` changes only the uncertainty. The mean is pinned to the
   BLR mean, and the ridge is selected per quantity by CRPS on a training
   hold-out (`--pops-ridge auto`; `blr` or a number fixes it).
-- **First `construct` of a new basis shape** runs Julia (via juliacall) to
-  build the coupling table, then caches it in `~/.cache/ace-jax/coupling`.
-  Later runs are pure Python.
+- **First `construct` of a new basis shape** calls the compiled coupling
+  library (`ace-jax-coupling`, milliseconds) to build the coupling table, then
+  caches it in `~/.cache/ace-jax/coupling`. Later runs do not need the library.
 - **Exit status.** `aj` exits 0 on success. Treat any non-zero exit as a
   failure and read the last lines of stderr.
