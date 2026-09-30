@@ -18,6 +18,9 @@ from .fit.pipeline.objective import _pad_to_multiple  # noqa: F401  (moved to th
 
 
 def _add_fit_args(p):
+    p.add_argument("--config", default=None,
+                   help="a fit.yaml run file (flag names as keys, the basis in a `basis:` block); "
+                        "command-line flags override it")
     p.add_argument("--model", default=None,
                    help="an ACE basis/model .npz (or give --order/--max-degree to build the basis)")
     src = p.add_mutually_exclusive_group()
@@ -260,14 +263,59 @@ def _parser():
     con = sub.add_parser("basis", help="author a new ACE basis: a frozen model (seeded radial init) saved as .npz")
     add_basis_args(con, fit=False)
     con.add_argument("--out", required=True)
+    con.add_argument("--config", default=None,
+                     help="a fit.yaml: its `basis:` block (and `seed`); command-line flags override it")
     return top
 
 
+def _config_path(argv):
+    for i, t in enumerate(argv):
+        if t == "--config" and i + 1 < len(argv):
+            return argv[i + 1]
+        if t.startswith("--config="):
+            return t.split("=", 1)[1]
+    return None
+
+
+def _apply_config(sub, cmd, path):
+    """Load a fit.yaml into `sub`'s defaults (so explicit flags still win) and
+    un-require what the file supplies.  Returns the defaults applied."""
+    from . import runfile
+    from .basis.model import BasisSpec
+    try:
+        cfg = runfile.read(path)
+        if cmd == "basis":             # aj basis: the basis block (+ seed); the fit keys are not its business
+            flat = {**cfg.get("basis", {}), **({"seed": cfg["seed"]} if "seed" in cfg else {})}
+            defaults = runfile.defaults_for(sub, flat, basis_fields=(), basis_dest_map={})
+        else:
+            defaults = runfile.defaults_for(sub, cfg, basis_fields=BasisSpec.FIELDS,
+                                            basis_dest_map={"embedding": "basis_embedding"})
+    except (OSError, ValueError, TypeError) as e:
+        sub.error(str(e))
+    for act in sub._actions:
+        if act.dest in defaults:
+            act.required = False
+    sub.set_defaults(**defaults)
+    return defaults
+
+
 def _parse(argv=None):
+    """Parse the command line, layering a --config fit.yaml under it."""
+    import sys
+    argv = list(sys.argv[1:] if argv is None else argv)
     top = _parser()
+    subs = top._subparsers._group_actions[0].choices
+    cmd = next((t for t in argv if not t.startswith("-")), None)
+    path = _config_path(argv) if cmd in ("fit", "basis") else None
+    defaults = _apply_config(subs[cmd], cmd, path) if path else {}
     a = top.parse_args(argv)
+    if defaults:
+        from . import runfile
+        given = runfile.explicit_dests(subs[cmd], argv[argv.index(cmd) + 1:])
+        for k in sorted(set(defaults) & given):
+            print(f"override: {k} {defaults[k]} -> {getattr(a, k)} (command line)")
     if a.cmd == "fit":
-        _check_fit_args(top._subparsers._group_actions[0].choices["fit"], a)
+        _check_fit_args(subs["fit"], a)
     return a
 
 
