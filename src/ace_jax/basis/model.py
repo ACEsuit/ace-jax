@@ -109,8 +109,8 @@ def build_model(elements, order, totaldegree, *, wL=1.5, rcut=5.5, r0=None,
 
     n_q_factor: tensor-radial polynomial span, n_q = ceil(n_q_factor * max n).
 
-    Returns an `Basis`.  Requires the `basis` extra (the compiled
-    ace-jax-coupling library) on a cache miss; evaluate in float64 with x64 enabled."""
+    Returns a `Basis`.  Needs the compiled coupling library
+    (a core dependency on supported platforms) on a coupling-cache miss; evaluate in float64 with x64 enabled."""
     if edge_a_kind not in ("gather", "matmul"):
         raise ValueError(f'edge_a_kind must be "gather" or "matmul", got {edge_a_kind!r}')
     if not n_q_factor >= 1:          # checked before the (possibly Julia) coupling step
@@ -251,7 +251,7 @@ def build_embedding_model(elements, order, totaldegree, embedding=None, *, rows=
     embedding: a JSON artefact path (keys Z, emb), a (Z, table) pair, or
     "identity"; reduced with `embedding_rows(reduction, normalise)`.  rows: an
     explicit (NZ, d) block instead (e.g. to reproduce a Julia model exactly --
-    Julia leaves the PCA sign to LAPACK).  Returns an `Basis` (readout zero);
+    Julia leaves the PCA sign to LAPACK).  Returns a `Basis` (readout zero);
     the coupling needs the ET shim on a cache miss, as `build_model`."""
     import io
     import json

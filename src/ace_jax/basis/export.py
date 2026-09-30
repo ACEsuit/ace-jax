@@ -1,6 +1,6 @@
 """Disposable npz bridge writer for authored models.
 
-Packages an `Basis` bundle into exactly the npz schema `eval.io.load`
+Packages a `Basis` bundle into exactly the npz schema `eval.io.load`
 reads (the same one `julia/export_model.jl` writes):
 
     A2B_{rows,cols,vals,shape}   sparse coupling triplets (one nonzero/column)
@@ -30,7 +30,7 @@ import numpy as np
 
 
 def save_npz(path, auth):
-    """Write `auth` (an `Basis`) to `path` in the eval-io schema.
+    """Write `auth` (a `Basis`) to `path` in the eval-io schema.
 
     The meta written here is derived from the model being saved, not from the
     authoring defaults: any tree patched onto a different branch (e.g. the

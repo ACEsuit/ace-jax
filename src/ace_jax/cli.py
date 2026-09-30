@@ -209,7 +209,7 @@ def cmd_basis(a):
         out.parent.mkdir(parents=True, exist_ok=True)
     save_npz(out, auth)
     m, meta = auth.model, auth.meta
-    print(f"authored {m.A2B.shape[0]} B functions ({meta['n_AA']} AA), "
+    print(f"basis: {m.A2B.shape[0]} B functions ({meta['n_AA']} AA), "
           f"{meta['n_pair']} pair, {meta['len_basis']} basis entries, "
           f"lmax {meta['lmax']}, rcut {meta['rcut']} -> {a.out}")
     return auth

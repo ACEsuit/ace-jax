@@ -1,7 +1,8 @@
 # ace-jax
 
 Fit and evaluate **Atomic Cluster Expansion (ACE)** interatomic potentials in
-pure **Python/JAX** — no Julia needed to fit or run.
+pure **Python/JAX**: build a basis, fit it and run it, everything from
+`pip install ace-jax`.
 
 - **Evaluate** exported ACE models and pacemaker **PACE `.yace`** potentials
   (energy / forces / stress) and site descriptors; `.yace` files can be written back.
@@ -17,10 +18,12 @@ pure **Python/JAX** — no Julia needed to fit or run.
 - **ASE calculators** (`ACECalculator`, `GPCalculator`) and **LAMMPS** deployment
   through [lammps-jax](https://github.com/abhijeetgangan/lammps-jax)
   (`ace_jax.export.lammps.export_lammps`).
-- **Author** whole models from Python — the symmetry-adapted coupling via
-  [EquivariantTensors.jl](https://github.com/ACEsuit/EquivariantTensors.jl),
-  compiled ahead of time so no Julia is needed at all (optional `basis`
-  extra) — including species-embedded models and the smoothness prior.
+- **Build the basis and fit it in one step**: `aj fit --order 3 --max-degree 10
+  --train train.xyz --out fit/` builds the symmetry-adapted ACE basis (coupling
+  from [EquivariantTensors.jl](https://github.com/ACEsuit/EquivariantTensors.jl),
+  precompiled into the `ace-jax-coupling` wheel) and fits it; the `fit.yaml` it
+  writes reproduces the run. Species-embedded bases and the smoothness prior
+  included.
 - Research: learned radial basis by variable projection (`bench/learn_radial/`).
 
 ## Install
@@ -47,21 +50,20 @@ back under the names they were written with, including `energy` / `forces`.
 LAMMPS export needs [lammps-jax](https://github.com/abhijeetgangan/lammps-jax),
 which is not on PyPI: install it from a clone (`pip install -e <lammps-jax>`).
 
-No Julia is required to **use, fit, or evaluate** a model. A model **definition**
-(basis + splined radials) is exported to an `.npz` that ace-jax consumes. The
-model-authoring seam has three paths:
+A model **definition** (basis + radials) is an `.npz` that ace-jax consumes.
+There are three ways to get one:
 
-- **use / fit / evaluate an existing model** → only the `.npz` (no Julia);
-- **author a new model in Python** → the `basis` extra builds the whole
-  model (`ace-jax basis`, including species-embedded models): the `(n,l)`
-  specification and the symmetry-adapted A→B coefficients come from
-  EquivariantTensors, shipped as the `ace-jax-coupling` platform wheel (a
-  `juliac --trim` compiled library: no Julia install, nothing downloaded at
-  runtime, no ACEpotentials stack); radials, pair basis and embedding are built
-  in Python. A per-shape coupling cache means the library runs only for a basis
-  shape not seen before;
-- **export a whole new basis from Julia** → the original path
-  (`julia/export_model.jl`), still fully supported.
+- **as part of a fit**: `aj fit --order 3 --max-degree 10 ...` builds the basis
+  in memory; the fitted `model.npz` contains it;
+- **on its own**: `aj basis ... --out si.npz`, to save, share, inspect or fit it
+  several times (`aj fit --model si.npz`), including species-embedded bases;
+- **exported from ACEpotentials** (`julia/export_model.jl`), still fully
+  supported.
+
+The symmetry-adapted A→B coefficients come from EquivariantTensors, shipped
+precompiled in the `ace-jax-coupling` wheel (nothing else to install, nothing
+downloaded at runtime); radials, pair basis and embedding are built in Python. A
+per-shape coupling cache means a basis shape is computed only once.
 
 Models come as **unfitted definitions** (coefficients to be fit here) or
 **fitted potentials** (ready to evaluate). Large model files are not committed
@@ -75,6 +77,13 @@ model, meta, z = aj.load("si_fitted.npz")      # model, meta dict, raw npz
 from ace_jax import ACECalculator
 atoms.calc = ACECalculator("si_fitted.npz")
 atoms.get_potential_energy(); atoms.get_forces()
+```
+
+From labelled data to a fitted model in one command, and back from one file:
+
+```bash
+aj fit --order 3 --max-degree 10 --train train.xyz --test test.xyz --out fit/   # builds the basis, fits it
+aj fit --config fit/fit.yaml --out fit2/                                        # reproduce (or edit) the run
 ```
 
 CLI: `ace-jax` (short alias `aj`) with subcommands `basis`, `fit` and `eval`;
@@ -159,16 +168,13 @@ lammps-jax), ML-PACE and MACE, on SiGe and Cantor, on CPU (moriarty) and GPU
 `bench/scaling/`. The ace-jax production model (linear + species + density
 embedding) and ACEpotentials.jl rows will be added in a follow-up.
 
-## Basis the coupling table in Python (EquivariantTensors)
+## The coupling table (EquivariantTensors)
 
-With the `basis` extra, `ace_jax.basis` builds an ACE basis's
-symmetry-adapted coupling coefficients without a Julia export step:
-`basis.spec.build_spec(...)` enumerates the admissible `(n,l)` many-body
-specification (total-degree / `wL`), and `basis.coupling.couple(...)` calls
-EquivariantTensors to produce the A→B symmetrisation matrix — through
-`ace-jax-coupling`, EquivariantTensors' coupling construction compiled with
-`juliac --trim=safe` into a self-contained library (`coupling/`), so you never
-install or manage Julia yourself.
+`ace_jax.basis` builds an ACE basis's symmetry-adapted coupling coefficients in
+Python: `basis.spec.build_spec(...)` enumerates the admissible `(n,l)` many-body
+specification (total-degree / `wL`), and `basis.coupling.couple(...)` returns
+the A→B symmetrisation matrix computed by EquivariantTensors' own construction,
+which ships precompiled in the `ace-jax-coupling` wheel (`coupling/`).
 
 The coupling matches EquivariantTensors (main, the fork rev in
 `ace_jax_coupling.build_info()`) exactly: bit-identical on macOS arm64 and Linux
@@ -181,10 +187,13 @@ coefficients are not interchangeable with 0.10.1 exports.
 See `docs/coupling-etshim-spec.md` for the design and `tests/test_coupling_parity.py`
 for usage.
 
-## Basis a whole model in Python (Tier 1)
+## Building a basis (CLI and Python)
 
-`ace-jax basis --elements Si --order 3 --max-degree 10 --out si.npz`
-(`basis.model.build_model`) authors a complete frozen model in memory:
+`aj fit --order 3 --max-degree 10 ...` and
+`aj basis --elements Si --order 3 --max-degree 10 --out si.npz` both call
+`build_basis(BasisSpec(...))` (`ace_jax.basis.model`); in Python a `Basis` can be
+inspected or modified and handed straight to the fit
+(`FitConfig(model=basis_or_spec)`, no file). It builds a complete frozen model in memory:
 coupling via the shim, seeded radial/pair init, zero readout, and the algebraic
 smoothness prior — then packages it in the export format, so the saved file
 evaluates with the plain eval path. `save_npz` derives the branch-selector meta
@@ -203,15 +212,20 @@ See `docs/basis.md`.
     ace-jax basis ... --embedding identity                          # identity (one-hot) element table
 
 builds the frozen-element-embedding model (`basis.model.build_embedding_model`,
-the ace1-compatible `ace_embedding_model`) without Julia, parity-tested against
-ACEpotentials' exports.
+the ace1-compatible `ace_embedding_model`), parity-tested against ACEpotentials'
+exports. On `aj fit` the same flag is `--basis-embedding` (`--embedding` there
+is the GP's frozen species table).
 
 ## Command line (`ace-jax` / `aj`)
 
 `aj` is the same entry point as `ace-jax`. Three subcommands cover the workflow:
-**basis** authors a model definition, **fit** fits it to labelled data, and **eval** evaluates the
-fitted model. `si.npz` is any model definition, e.g. from
-`aj basis --elements Si --order 3 --max-degree 10 --out si.npz`. The examples
+**fit** fits labelled data (building the basis itself from `--order/--max-degree`,
+or taking one with `--model`), **basis** saves a basis on its own, and **eval**
+evaluates a fitted model. Every fit writes `fit.yaml`, the whole resolved run
+(`aj fit --config fit.yaml` reproduces it; command-line flags override the file).
+`si.npz` below is any model definition, e.g. from
+`aj basis --elements Si --order 3 --max-degree 10 --out si.npz`; replacing
+`--model si.npz` with `--order 3 --max-degree 10` builds it inside the fit. The examples
 below were checked on the Si test fixture (`si_fitted.npz`, with `si_tiny_train.xyz`
 split into train/test/ood files). The `--*-key` flags name the extxyz fields that
 hold the labels. Data is read with libAtoms `extxyz`, so any label name works as
@@ -252,7 +266,8 @@ aj fit --model si.npz --data all.xyz --ntrain 40 --ntest 10 --e0 lsq $K \
 
 - data: `--train/--test` files, or `--data` split with `--ntrain/--ntest/--test-start`;
   `--ood` for an extra test set; `--weights` takes an ACEfit weights dict or a list of
-  weight factors; `--r0` (required) is the typical nearest-neighbour distance
+  weight factors; `--r0` is the typical nearest-neighbour distance (required with
+  `--model`; when the basis is built it defaults to the basis's mean bond length)
 - model: `--m-per-species 0` is the linear model, `> 0` the hybrid GP (default 500)
 - GP features: `--density none|pair|pca` (`--pca-d`), `--embedding` (frozen species
   coregionalization)
@@ -308,17 +323,16 @@ rules that fight it (semicolon statements, short math names, import sorting,
 line length) are off. Bump the ruff pin in the dev group and the `rev` in
 `.pre-commit-config.yaml` together.
 
-## Julia parity (maintainers / CI only)
+## Reference parity (maintainers / CI only)
 
-The everyday test suite is pip-only (no Julia), run against committed npz
-fixtures. Path-gated CI jobs regenerate the references and guard the seams to
+The everyday test suite is pip-only, run against committed npz fixtures. Path-gated CI jobs regenerate the references and guard the seams to
 the reference codes:
 
-- **julia-parity** — the design-matrix rows match ACEfit to 1e-8 and the linear
+- **ACEfit parity** (`.github/workflows/julia-parity.yml`) — the design-matrix rows match ACEfit to 1e-8 and the linear
   solve matches ACEfit's `solve(QR)` to 1e-9, checked against the committed
   fixtures (`julia/export_model.jl`, `julia/acefit_qr_reference.jl`).
 - **coupling-wheels** — builds the `ace-jax-coupling` wheels (manylinux_2_28
-  x86_64/aarch64, macOS arm64), tests them in clean environments with no Julia
+  x86_64/aarch64, macOS arm64), tests them in clean environments
   (matching upstream EquivariantTensors: exact indices, values within 4 ulp),
   and runs the coupling parity
   against the ACEpotentials references (`julia/coupling_reference.jl`).

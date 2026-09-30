@@ -21,12 +21,13 @@ parity CI jobs. User docs: `README.md`. Agent-facing usage guide:
   - The core modules are `rows`, `stats`, `objective`, `ladder`, `predict`, `pops`, `solve`, `hostcache`.
   - `pipeline/` is the `aj fit` pipeline.
   - `radial_learn.py` and `varpro.py` learn radials.
-- `src/ace_jax/basis/`: Python model authoring.
-  - `spec.py`, `coupling.py`: the EquivariantTensors shim via the compiled `ace-jax-coupling` library.
-  - `model.py`: `build_model`, `build_embedding_model`.
+- `src/ace_jax/basis/`: building an ACE basis (a frozen, zero-readout model).
+  - `spec.py`, `coupling.py`: the EquivariantTensors shim via the compiled `ace-jax-coupling` library; `BasisUnavailable` when it cannot run.
+  - `model.py`: `BasisSpec`, `build_basis` (the one entry point: `aj basis`, `aj fit`, Python), over `build_model` / `build_embedding_model`; `Basis` (NamedTuple), `basis_r0`.
   - `prior.py`: the smoothness prior. `export.py`: `save_npz`.
 - `src/ace_jax/export/lammps.py`: `export_lammps`, a lammps-jax bundle.
-- `src/ace_jax/cli.py`: `ace-jax`/`aj` with `basis`, `fit` and `eval`.
+- `src/ace_jax/cli.py`: `ace-jax`/`aj` with `basis`, `fit` and `eval`. `aj fit` builds the basis from `--order/--max-degree` (flags shared with `aj basis` via `add_basis_args`) or takes `--model`; `_parse` layers a `--config fit.yaml` under the command line.
+- `src/ace_jax/runfile.py`: `fit.yaml` read/validate/merge (`defaults_for`, `explicit_dests`) and the resolved `out/fit.yaml` writer (`resolved`, `write`).
 - `tests/`: the pytest suite. `conftest.py` holds the shared fixtures and helpers.
 - `fixtures/`: committed reference data. These are bit-exact goldens: never hand-edit or reformat them.
 - `bench/`: benchmark and research drivers.
@@ -58,7 +59,7 @@ uv run ruff check                     # lint; `uv run pre-commit run --all-files
   - `cuda`.
   - `fast-neighbours`: matscipy-neighbours, a C++ source build.
 - **Tests that silently skip** when an optional dependency is missing:
-  - `basis`: `test_coupling_etshim`, `test_coupling_parity` and the authoring bridge tests skip unless a compiled `ace_jax_coupling` is installed (`conftest.require_coupling_lib`). The coupling cache tests still run: they use `ACEJAX_COUPLING_CACHE_ONLY=1` and the committed cache.
+  - compiled coupling library: `test_coupling_etshim`, `test_coupling_parity` and the basis bridge tests skip unless a compiled `ace_jax_coupling` is installed (`conftest.require_coupling_lib`). The coupling cache tests still run: they use `ACEJAX_COUPLING_CACHE_ONLY=1` and the committed cache.
   - lammps-jax: `test_export_lammps` and `test_bench_scaling`'s export test. Make lammps-jax importable with `PYTHONPATH=<lammps-jax>/python` or `uv pip install -e <lammps-jax>`.
   - `fast-neighbours` (matscipy-neighbours): `test_calc_jit`'s native `neighbour_matrix` test and `test_efv`'s dense-vs-neighbour_matrix check; without it the skin list and dense layout also take their fallback neighbour path.
   - `pyace` (python-ace, in its own venv under `pace_ref/`).
@@ -129,4 +130,4 @@ uv run ruff check                     # lint; `uv run pre-commit run --all-files
 - **Closures:** `jax.tree.map(lambda a: a[i], ds)` inside a loop is the batch-slicing idiom. It is safe because it is consumed in the same iteration. Ruff B023 is suppressed per file for exactly this.
 - **Python 3.11:** `requires-python` is `>=3.11`, so no PEP 701 f-strings (`f"{d["k"]}"`) in `src/` or `tests/`.
 - **Laplace compile time:** the Laplace rung (a Hessian through the whole LML) can take tens of minutes to compile. Keep `--rungs map` in quick checks.
-- **Coupling cache:** the first `aj basis` of a new basis shape calls the coupling library; later ones hit the cache (stamped with `coupling.backend_id()`). The per-shape cache lives in `~/.cache/ace-jax/coupling`, or `$ACEJAX_COUPLING_CACHE`.
+- **Coupling cache:** the first build of a new basis shape (`aj fit --order ...`, `aj basis`) calls the coupling library; later ones hit the cache (stamped with `coupling.backend_id()`). The per-shape cache lives in `~/.cache/ace-jax/coupling`, or `$ACEJAX_COUPLING_CACHE`.

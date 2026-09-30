@@ -5,9 +5,9 @@ description: Build, fit and evaluate Atomic Cluster Expansion (ACE) interatomic 
 
 # ace-jax
 
-ACE potentials in pure Python/JAX. No Julia is needed anywhere: fitting and
-evaluation use only the core package, and authoring a *new* basis shape (`aj basis`)
-uses the `basis` extra, a compiled EquivariantTensors wheel.
+ACE potentials in pure Python/JAX. `aj fit` builds the basis from
+`--order/--max-degree` and fits it in one command; everything installs with
+`pip install ace-jax`.
 
 ## Install
 
@@ -23,10 +23,18 @@ elsewhere fit from an existing `.npz` with `--model`. Pre-release: ace-jax's
 
 `ace-jax` and `aj` are the same CLI. `aj <cmd> --help` lists every flag.
 
-## Workflow: basis → fit → eval
+## Workflow: fit → eval (the basis is built inside the fit)
 
 ```bash
-# 1. a model definition (unfitted). Skip this step if you already have a .npz.
+K="--energy-key dft_energy --force-key dft_force --virial-key dft_virial"
+# 1. fit straight from data: the basis (species from the data) is built in memory.
+aj fit --order 3 --max-degree 10 --train train.xyz --test test.xyz $K \
+    --m-per-species 0 --out out_linear                                 # linear ACE
+#    every fit writes out_linear/fit.yaml: the whole resolved run. Reproduce or
+#    vary it (command-line flags override the file):
+aj fit --config out_linear/fit.yaml --m-per-species 6 --out out_gp     # same run, + GP
+
+# Optional: save a basis on its own (to share it, or fit it several times).
 aj basis --elements Si --order 3 --max-degree 10 --out si.npz
 #    multi-element with a frozen species embedding (MACE table JSON {Z, emb},
 #    or `identity`); --d-max caps the channel widths (default lossless):
@@ -35,8 +43,7 @@ aj basis --elements Cr,Mn,Fe,Co,Ni --order 3 --max-degree 10 \
 #    the smoothness prior (Gamma) is built in; --no-gamma skips it. --rcut
 #    defaults to 5.5 (with --embedding: 2.5 x mean bond length).
 
-# 2. fit. Label keys default to energy/forces/virial; pass yours explicitly.
-K="--energy-key dft_energy --force-key dft_force --virial-key dft_virial"
+# 2. fit a saved basis. Label keys default to energy/forces/virial; pass yours explicitly.
 aj fit --model si.npz --train train.xyz --test test.xyz $K \
     --m-per-species 0 --r0 2.35 --out out_linear                      # linear ACE
 aj fit --model si.npz --train train.xyz --test test.xyz $K \
@@ -49,10 +56,15 @@ aj eval --model out_gp/gp_model.npz  --data new.xyz $K --forces --out pred.csv  
 aj eval --model model.yace --data new.xyz $K --forces                            # PACE works too
 ```
 
-`aj fit` always needs `--model`, `--out`, `--r0` (the typical nearest-neighbour
-distance in Å, which centres the GP hyperprior), and either `--train` [+ `--test`]
-or `--data` [+ `--ntrain/--ntest/--test-start`, a seeded split]. Without
-`--test`, the fit is scored on its own training set.
+`aj fit` needs a basis — `--order/--max-degree` (built in the fit; `--elements`
+defaults to the species in the data, `--basis-embedding` adds a frozen element
+embedding) or `--model <file.npz>` — plus `--out` and either `--train` [+ `--test`]
+or `--data` [+ `--ntrain/--ntest/--test-start`, a seeded split]. `--r0` (the
+typical nearest-neighbour distance in Å, centring the GP hyperprior) defaults to
+the built basis's mean bond length and is required with `--model`. Without
+`--test`, the fit is scored on its own training set. `--config fit.yaml`
+supplies any of these (keys = flag names with underscores, the basis in a
+`basis:` block); typos in the file are errors with a did-you-mean hint.
 
 ## Choosing options
 
