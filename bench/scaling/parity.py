@@ -110,18 +110,22 @@ def _tol_kw(m):
     return {"spline_tol": m["spline_tol"]} if "spline_tol" in m else {}
 
 
+BUNDLE_LAYOUTS = ("matrix", "dense", "sparse")
+
+
 def gate_checks(small, system, medium=None):
-    """(gate, model row, bundle layout) per check.  Both ace-jax bundle layouts are
-    gated: run_lammps falls back to a sparse bundle when dense runs out of memory,
-    so the sparse path (ghost atoms included) must be verified, not only dense.
+    """(gate, model row, bundle layout) per check.  Every ace-jax bundle layout is
+    gated: layout="auto" exports the neighbour matrix (or packed dense on an older
+    lammps-jax), and run_lammps falls back to a sparse bundle when it runs out of
+    memory, so each path (ghost atoms included) must be verified.
     The learned-radial lines exist at medium only, so they are gated on
     `medium` (the rows planned at that size): acejax for both, and the spline
     gate (learned against analytic, standalone) once."""
     checks = [("mlpace", small[("mlpace", system)], None)]
     for code in ("acejax-pace", "acejax-ace"):
-        checks += [("acejax", small[(code, system)], lay) for lay in ("dense", "sparse")]
+        checks += [("acejax", small[(code, system)], lay) for lay in BUNDLE_LAYOUTS]
     for code in LEARNED_CODES if medium else ():
-        checks += [("acejax", medium[(code, system)], lay) for lay in ("dense", "sparse")]
+        checks += [("acejax", medium[(code, system)], lay) for lay in BUNDLE_LAYOUTS]
     if medium:
         checks.append(("spline", medium[(LEARNED, system)], None))
     return checks + [("mace", small[("mace", system)], None)]

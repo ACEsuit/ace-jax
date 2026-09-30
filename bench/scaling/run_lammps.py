@@ -93,30 +93,35 @@ def read_dump_forces(path):
     return rows[np.argsort(rows[:, 0]), 1:4]
 
 
-def capacity(at, rcut, skin=1.0):
-    """lammps-jax buffer sizes for this structure: owned + ghost atoms (the
-    periodic shell within rcut + skin of each face) size the LAMMPS position
-    buffer (max_atoms); neighbour slots (k_dense, max_edges) are sized for
-    rcut + skin.  lammps-jax packs only pairs within rcut, but the benchmark's
-    random-weight structures compress during the run (Cantor: the largest
-    coordination within rcut climbs from 42 to 50 in 250 steps), and between
-    list rebuilds no atom can gain more neighbours within rcut than its
-    rcut + skin list holds -- so that count is the safe bound
-    (docs/perf-lammps-large-n.md).  The dense energy function evaluates owned
-    rows only (max_owned), and senders are always owned, so max_edges counts
-    owned rows."""
-    from ace_jax.eval import sparse_graph
-    L = np.linalg.norm(at.cell.array, axis=1)
-    ghost = float(np.prod((L + 2 * (rcut + skin)) / L))
-    g = sparse_graph(at.positions, at.cell.array, at.pbc, rcut + skin)
-    k_max = int(np.bincount(g.senders, minlength=len(at)).max())
-    max_owned = int(np.ceil(1.1 * len(at)))
-    k_dense = k_max + 8                     # overflow is loud (NaN), never a truncation
-    return {"max_atoms": int(np.ceil(len(at) * ghost * 1.1)), "k_max": k_max,
-            "k_dense": k_dense, "max_edges": max_owned * k_dense, "max_owned": max_owned}
+def capacity(at, rcut, skin=1.0, tight=False, list_headroom=0.5):
+    """lammps-jax buffer sizes for this structure (ace_jax.export.lammps.
+    neighbour_capacity, margin 8): owned + ghost atoms (the periodic shell
+    within rcut + skin of each face) size the LAMMPS position buffer
+    (max_atoms); model slots (k_dense, max_edges) are sized for rcut + skin.
+    lammps-jax packs only pairs within rcut, but the benchmark's random-weight
+    structures compress during the run (Cantor: the largest coordination within
+    rcut climbs from 42 to 50 in 250 steps), and between list rebuilds no atom
+    can gain more neighbours within rcut than its rcut + skin list holds -- so
+    that count is the safe bound (docs/perf-lammps-large-n.md).  The dense
+    energy function evaluates owned rows only (max_owned), and senders are
+    always owned, so max_edges counts owned rows.  The neighbour-matrix list
+    (max_neighbors) holds the rcut + skin list whatever the model slots.
+
+    tight=True (bench --tight-slots; opt-in, never the main suite): model slots
+    for rcut pairs only, 1.2-1.4x faster on Cantor, safe only on a deck whose coordination
+    stays within 8 of the start (stable MD); an overflow is a NaN step.
+
+    list_headroom (bench --list-headroom): the matrix list's headroom over
+    k(rcut + skin); 0.5 from one observed overflow (neighbour_capacity)."""
+    from ace_jax.export.lammps import neighbour_capacity
+    c = neighbour_capacity(at, rcut, skin=skin, slots="cutoff" if tight else "skin", margin=8,
+                           list_headroom=list_headroom)
+    return {"max_atoms": c["max_atoms"], "k_max": c["k_list"], "k_dense": c["k_dense"],
+            "max_edges": c["max_edges"], "max_owned": c["max_owned"],
+            "max_neighbors": c["max_neighbors"]}
 
 
-def _export_inprocess(row, at, dtype, workdir, layout="auto"):
+def _export_inprocess(row, at, dtype, workdir, layout="auto", slots="skin", list_headroom=0.5):
     """Export the ace-jax model as a lammps-jax bundle sized for `at` (this
     process: it initialises JAX, and on a GPU host keeps JAX's memory pool)."""
     import time
@@ -126,13 +131,13 @@ def _export_inprocess(row, at, dtype, workdir, layout="auto"):
     from ace_jax.eval import load
     from ace_jax.export.lammps import export_lammps
     model, meta, _ = load(row["path"])
-    cap = capacity(at, float(meta["rcut"]))
+    cap = capacity(at, float(meta["rcut"]), tight=slots == "cutoff", list_headroom=list_headroom)
     pathlib.Path(workdir).mkdir(parents=True, exist_ok=True)
     t0 = time.perf_counter()
     b = export_lammps(model, meta, pathlib.Path(workdir) / "bundle.json", max_atoms=cap["max_atoms"],
                       max_edges=cap["max_edges"], k_dense=cap["k_dense"], dtype=dtype, layout=layout,
                       type_elements=[atomic_numbers[e] for e in row["elements"]],  # data-file order
-                      max_owned=cap["max_owned"],
+                      max_owned=cap["max_owned"], max_neighbors=cap["max_neighbors"],
                       **({"spline_tol": row["spline_tol"]} if "spline_tol" in row else {}))
     return (str(pathlib.Path(workdir) / "bundle.json"), b["ace_jax"]["layout"], time.perf_counter() - t0,
             splined_meta(b["ace_jax"]))
@@ -146,7 +151,8 @@ def splined_meta(aj):
     return {"spline_tol": aj["spline_tol"], "n_intervals": aj.get("spline_intervals")}
 
 
-def export_bundle(row, at, dtype, workdir, layout="auto", info=None):
+def export_bundle(row, at, dtype, workdir, layout="auto", slots="skin", list_headroom=0.5,
+                  info=None):
     """Export the ace-jax model as a lammps-jax bundle sized for `at`, in a
     child process: exporting here would initialise JAX on the GPU, whose default
     pool (75% of the card) stays allocated while LAMMPS runs, leaving lammps-jax
@@ -155,7 +161,7 @@ def export_bundle(row, at, dtype, workdir, layout="auto", info=None):
     given, gets "splined" (`splined_meta` of the bundle)."""
     keep = {k: row[k] for k in ("name", "system", "path", "elements", "spline_tol") if k in row}
     cmd = [sys.executable, str(pathlib.Path(__file__).resolve()), "--export", json.dumps(keep),
-           str(len(at)), dtype, str(workdir), layout]
+           str(len(at)), dtype, str(workdir), layout, slots, str(list_headroom)]
     bench = str(pathlib.Path(__file__).resolve().parents[1])     # so the child imports scaling
     env = {**os.environ, "PYTHONPATH": os.pathsep.join(
         [bench] + [x for x in os.environ.get("PYTHONPATH", "").split(os.pathsep) if x])}
@@ -188,11 +194,16 @@ def choose_steps(prev_step_s, prev_n, n, target_s=STEP_BUDGET_S, max_steps=200, 
 
 def bundle_layout(prev):
     """The ace-jax bundle layout for this case: once a line has fallen back to
-    sparse (dense out of memory), its larger sizes export sparse directly."""
-    return "sparse" if (prev or {}).get("layout") == "sparse" else "auto"
+    sparse (dense out of memory), its larger sizes export sparse directly; once
+    its matrix list overflowed, they export packed dense directly."""
+    prev = prev or {}
+    if prev.get("layout") == "sparse":
+        return "sparse"
+    return "dense" if prev.get("matrix_overflow") else "auto"
 
 
-def run_case(row, n_atoms, dtype, device, lmp, ranks, workdir, pjrt=None, prev=None):
+def run_case(row, n_atoms, dtype, device, lmp, ranks, workdir, pjrt=None, prev=None,
+             slots="skin", list_headroom=0.5):
     work = pathlib.Path(workdir); work.mkdir(parents=True, exist_ok=True)
     at = supercell(row["system"], n_atoms)
     data = work / "x.data"
@@ -213,14 +224,28 @@ def run_case(row, n_atoms, dtype, device, lmp, ranks, workdir, pjrt=None, prev=N
     layout = bundle_layout(prev)
     while True:
         info = {}
-        bundle, used, compile_s = export_bundle(row, at, dtype, work, layout=layout, info=info)
+        bundle, used, compile_s = export_bundle(row, at, dtype, work, layout=layout, slots=slots,
+                                                list_headroom=list_headroom, info=info)
+        extra = {"layout": used, "compile_s": compile_s,
+                 "spline_tol": row.get("spline_tol", "auto"), "splined": info.get("splined")}
+        if slots != "skin":
+            extra["slots"] = slots
+        if list_headroom != 0.5:
+            extra["list_headroom"] = list_headroom
         out = _run_lammps(row, style, bundle, data, work, n_atoms, dtype, device, lmp, ranks, pjrt,
-                          steps, warmup, {"layout": used, "compile_s": compile_s,
-                                          "spline_tol": row.get("spline_tol", "auto"),
-                                          "splined": info.get("splined")})
-        if out["status"] == "oom" and used == "dense":
+                          steps, warmup, extra)
+        if out["status"] == "oom" and used in ("dense", "matrix"):
             layout = "sparse"
             continue
+        # the matrix list holds rcut + skin pairs and aborts when a row outgrows
+        # max_neighbors (random-weight structures compress); packed dense holds
+        # only pairs within rcut, so retry the case there
+        if (out["status"] == "error" and used == "matrix"
+                and "neighbor capacity exceeded" in str(out.get("error", ""))):
+            layout = "dense"
+            continue
+        if layout == "dense" and used == "dense" and bundle_layout(prev) != "sparse":
+            out["matrix_overflow"] = True               # this line left the matrix layout
         if layout == "sparse" and bundle_layout(prev) == "auto":
             out["dense_oom"] = True                     # this size is where the line went sparse
         return out
@@ -258,13 +283,27 @@ def _run_lammps(row, style, model, data, work, n_atoms, dtype, device, lmp, rank
 
 if __name__ == "__main__" and sys.argv[1:2] == ["--export"]:
     _row, _n, _dtype, _work, _layout = json.loads(sys.argv[2]), int(sys.argv[3]), *sys.argv[4:7]
-    _b, _l, _t, _s = _export_inprocess(_row, supercell(_row["system"], _n), _dtype, _work, _layout)
+    _slots = sys.argv[7] if len(sys.argv) > 7 else "skin"
+    _head = float(sys.argv[8]) if len(sys.argv) > 8 else 0.5
+    _b, _l, _t, _s = _export_inprocess(_row, supercell(_row["system"], _n), _dtype, _work, _layout,
+                                       _slots, _head)
     print(json.dumps({"bundle": _b, "layout": _l, "compile_s": _t, "splined": _s}))
 elif __name__ == "__main__":
     from scaling.models import planned_models
-    name, n, dtype, device, lmp, ranks, workdir = sys.argv[1:8]
+    # --tight-slots: model slots for rcut pairs (capacity(tight=True)); opt-in,
+    # never the main suite, whose random-weight structures compress
+    # --list-headroom H: the matrix list's headroom over k(rcut + skin) (default 0.5)
+    tight = "--tight-slots" in sys.argv
+    args = [x for x in sys.argv[1:] if x != "--tight-slots"]
+    head = 0.5
+    if "--list-headroom" in args:
+        i = args.index("--list-headroom")
+        head = float(args[i + 1])
+        del args[i:i + 2]
+    name, n, dtype, device, lmp, ranks, workdir = args[:7]
     row = next(r for r in planned_models() if r["name"] == name)
     row["bundle"] = os.environ.get("ACEJAX_BUNDLE", "")
     prev = json.loads(os.environ["BENCH_PREV"]) if os.environ.get("BENCH_PREV") else None
     print(json.dumps(run_case(row, int(n), dtype, device, lmp, int(ranks), workdir,
-                              os.environ.get("PJRT_PLUGIN"), prev)))
+                              os.environ.get("PJRT_PLUGIN"), prev,
+                              slots="cutoff" if tight else "skin", list_headroom=head)))

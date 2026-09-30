@@ -417,6 +417,47 @@ def test_lammps_bundle_of_a_learned_radial(tmp_path, monkeypatch, layout):
     assert np.abs(np.asarray(G1 - G0)).max() <= 1e-6 * np.abs(np.asarray(G0)).max()
 
 
+@pytest.mark.parametrize("slots", ["list", "cutoff"])
+def test_matrix_bundle_of_a_learned_radial(tmp_path, monkeypatch, slots):
+    """layout="matrix" traces the same lean, splined model as the other layouts:
+    its energy function (skin pairs in the list, optionally compacted slots)
+    matches the lean, splined calculator to bundle parity, and the bundle
+    records the splining next to the matrix metadata."""
+    from conftest import require_optional
+    from test_export_lammps import LAMMPS_JAX_KEYS, _cluster, _cut_k, _matrix_graph, _species
+    require_optional("lammps_jax")
+    from ace_jax.calc.point import ACECalculator
+    from ace_jax.export import lammps as lx
+    m, meta, _ = load(str(SIGE))
+    a = _perturbed(m)
+    at = _cluster()
+    at.numbers = np.where(at.numbers == 32, 32, 14)
+    rcut = float(meta["rcut"])
+    graph, pos, _ = _matrix_graph(at, rcut)
+    K = graph.neighbors.shape[0]
+    k = K if slots == "list" else _cut_k(at, rcut) + 2
+    seen = []
+    real = lx.make_energy_fn
+    monkeypatch.setattr(lx, "make_energy_fn", lambda mm, *x, **kw: seen.append(mm) or real(mm, *x, **kw))
+    b = lx.export_lammps(a, meta, tmp_path / "m.json", max_atoms=pos.shape[0], k_dense=k,
+                         max_neighbors=K, max_owned=len(at), layout="matrix")
+    aj = b["ace_jax"]
+    assert aj["layout"] == "matrix" and aj["k_dense"] == k and aj["lean"] is True
+    assert aj["spline_tol"] == 1e-10 and aj["spline_intervals"]["rnl"] > 0 and aj["lammps_jax"]
+    assert not set(aj) & LAMMPS_JAX_KEYS
+    ml = seen[-1]
+    assert ml.radial_kind == "spline" and ml.blk_compact
+    f = real(ml, len(meta["elements"]), "matrix", k_dense=k, rcut=rcut)
+    species = jnp.concatenate([_species(at, meta), jnp.zeros(pos.shape[0] - len(at), jnp.int32)])
+    E, G = jax.jit(jax.value_and_grad(lambda p: jnp.sum(f(p, species, graph))))(pos)
+    calc = ACECalculator(a, meta, layout="sparse")
+    assert calc.eval_model.radial_kind == "spline"                  # the same lean, splined form
+    at.calc = calc
+    assert float(E) == pytest.approx(at.get_potential_energy(), abs=1e-10)
+    np.testing.assert_allclose(-np.asarray(G[:len(at)]), at.get_forces(), atol=1e-9)
+    assert np.all(np.asarray(G[len(at):]) == 0.0)
+
+
 # ------------------------------------------------------------------ default tolerance, exposure
 def test_default_tol_is_1e_10():
     """to_spline's tol and the "auto" policy's tol are 1e-10; lean's default is "auto"."""

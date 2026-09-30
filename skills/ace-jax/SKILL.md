@@ -206,22 +206,52 @@ load; faster only at large `nradbase`). Values are unchanged to roundoff.
 ### LAMMPS
 
 ```python
-from ace_jax.export.lammps import export_lammps          # needs lammps-jax installed
+from ace_jax.export.lammps import export_lammps, neighbour_capacity  # needs lammps-jax
 model, meta, _ = aj.load("model.npz")                     # or a .yace
-export_lammps(model, meta, "bundle", max_atoms=4096, max_edges=200_000,
-              dtype="float64", layout="auto", k_dense=64, max_owned=2048,
+cap = neighbour_capacity(atoms, meta["rcut"], skin=1.0)   # slots="cutoff": tight, opt-in
+export_lammps(model, meta, "bundle", max_atoms=cap["max_atoms"], max_edges=cap["max_edges"],
+              dtype="float64", layout="auto", k_dense=cap["k_dense"],
+              max_neighbors=cap["max_neighbors"], max_owned=cap["max_owned"],
               type_elements=[14, 32])                     # Z in LAMMPS type order
 ```
 
 This writes a lammps-jax bundle for `pair_style jax/kk` (GPU only).
-- `layout="auto"` chooses dense only when `k_dense` (max neighbours per atom) is
-  given and one dense block's `estimate_a_bytes` fits `dense_budget_bytes()`.
-- `max_owned`: owned-row capacity of the dense bundle. LAMMPS numbers owned
-  atoms first, so only rows below it are evaluated and ghosts cost nothing.
-  The bundle records it as `ace_jax.owned_rows`; the key is not `max_owned`
-  because lammps-jax reads that name from anywhere in the file. An atom past
-  `max_owned`, or with more than `k_dense` neighbours, gives NaN, never a
-  silent truncation.
+- Layouts: `"sparse"`, `"dense"` (lammps-jax's edge buffer, packed into
+  `k_dense` slots by an argsort every step) and `"matrix"` (lammps-jax's
+  neighbour-matrix input, `matrix_supported()`: the LAMMPS full list itself,
+  `(max_neighbors, max_owned)` slot-major, copied only on list rebuilds; the
+  model drops skin pairs at rcut, and compacts in-cutoff pairs when
+  `k_dense < max_neighbors`). No per-step packing.
+- `layout="auto"` chooses a dense-family layout only when `k_dense` (max
+  neighbours per atom) is given and one dense block's `estimate_a_bytes` fits
+  `dense_budget_bytes()`. It is `"matrix"` only if `max_neighbors` is passed,
+  `matrix_supported()`, and the block plus `matrix_prep_bytes` (the unblocked
+  list pre-processing) fits; otherwise `"dense"`. The old signature, without
+  `max_neighbors`, stays packed dense. `layout="matrix"` requires
+  `max_neighbors`: the list holds rcut + skin pairs, so a `k_dense` sized for
+  rcut is too small. `max_edges` is needed by sparse and dense only.
+- An older lammps-jax LAMMPS plugin rejects a matrix bundle ("re-export"). To
+  fix it, rebuild the plugin, or export `layout="dense"`. The bundle records
+  the exporting lammps-jax as `ace_jax.lammps_jax`.
+- `max_owned`: owned-row capacity of the dense and matrix bundles. LAMMPS
+  numbers owned atoms first, so only rows below it are evaluated and ghosts
+  cost nothing. The bundle records it as `ace_jax.owned_rows`; the key is not
+  `max_owned` because lammps-jax reads that name from anywhere in the file
+  (so ace-jax metadata never reuses a lammps-jax contract key). More than
+  `k_dense` neighbours within rcut gives NaN, never a silent truncation. So
+  does an atom past `max_owned` in a dense bundle. A matrix bundle instead
+  aborts the run in LAMMPS for an owned atom past `max_owned`, or for a list
+  row wider than `max_neighbors`.
+- `neighbour_capacity(atoms, rcut, skin=1.0, slots="skin", margin=8,
+  list_headroom=0.5)`: buffer sizes. The ghost shell uses the face spacings,
+  so triclinic cells are fine. The matrix list gets 50% headroom over
+  k(rcut + skin), because a compressing structure grows that count fastest.
+  The 0.5 comes from one observed overflow, 34 to 45; the benchmark has
+  `--list-headroom`. Model slots are compacted from the list. `slots="skin"` (default) is safe between list rebuilds.
+  `slots="cutoff"` sizes model slots for rcut pairs, 1.2-1.4x faster on Cantor; use it
+  only for stable MD with a fitted model (coordination within `margin` of the
+  start). An overflow is a NaN step. The benchmark's `run_lammps.py
+  --tight-slots` opts in; the main suite never does.
 - The dense bundle runs in blocks of `BUNDLE_BLOCK_ROWS` (32,768) rows above
   one block, bounding memory at large N.
 - `lean=True` (default) exports `lean(model, spline_tol, spline_intervals)` for
