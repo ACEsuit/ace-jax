@@ -92,7 +92,8 @@ def make_energy_fn(model, n_species, layout, k_dense=None, type_map=None, n_rows
 
 
 def export_lammps(model, meta, path, *, max_atoms, max_edges, k_dense=None,
-                  dtype="float64", layout="auto", type_elements=None, max_owned=None):
+                  dtype="float64", layout="auto", type_elements=None, max_owned=None,
+                  lean=True):
     """Write a lammps-jax JSON bundle for `model`; returns the bundle dict.
 
     type_elements: atomic numbers in LAMMPS type order (type 1 first).  LAMMPS
@@ -108,8 +109,14 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges, k_dense=None,
     dense block (the row capacity -- max_owned if given, else max_atoms -- capped
     at BUNDLE_BLOCK_ROWS) fits ace_jax.calc.point.dense_budget_bytes(), else
     sparse.
+
+    lean (default True): export `ace_jax.eval.model.lean(model)`, the exact
+    evaluation form with the dead per-edge work removed (docs/ace-vs-pace-gap.md);
+    recorded as `ace_jax.lean` (False for a model it does not apply to, e.g. PACE).
     """
     from lammps_jax.export import export_model
+
+    from ..eval.model import lean as _lean
     from ..calc.point import dense_budget_bytes
     model_z = [int(z) for z in meta["elements"]]
     type_elements = model_z if type_elements is None else [int(z) for z in type_elements]
@@ -125,6 +132,12 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges, k_dense=None,
         fits = k_dense and estimate_a_bytes(model, "dense", n_rows, min(max_edges, n_rows * k_dense),
                                             k_dense, itemsize) <= dense_budget_bytes()
         layout = "dense" if fits else "sparse"
+    # layout="auto" above sized one block on the full model, as without lean:
+    # estimate_a_bytes fits the full dense path, and on the lean widths it
+    # underestimates the blocked path's compiled temp (measured 6.6-6.9x actual /
+    # estimate on CPU, against 3.0-5.1x full), so it could pick dense and OOM
+    if lean:
+        model = _lean(model)
     energy_fn = make_energy_fn(model, n_species, layout, k_dense,
                                None if type_map == list(range(len(model_z))) else type_map,
                                n_rows=max_owned if layout == "dense" else None)
@@ -135,6 +148,7 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges, k_dense=None,
                          "k_dense": int(k_dense) if layout == "dense" else None,
                          # not "max_owned": lammps-jax reads that key from anywhere in
                          # the file and would take it as its own contract's
-                         "owned_rows": int(max_owned) if max_owned is not None else None}
+                         "owned_rows": int(max_owned) if max_owned is not None else None,
+                         "lean": bool(getattr(model, "energy_only", False))}
     Path(path).write_text(json.dumps(bundle, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return bundle

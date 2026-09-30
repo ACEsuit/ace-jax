@@ -90,7 +90,18 @@ model back. `.yace` models are for evaluation and export: `aj fit` needs an
 
 ### Speed options and LAMMPS
 
-`ACECalculator(path, layout="auto", edge_a_kind="auto", skin=1.0)`:
+`ACECalculator(path, layout="auto", edge_a_kind="auto", skin=1.0, lean=True)`:
+
+- **Lean evaluation form** (ACE `.npz` models). With `lean=True` (the
+  default), energies, forces and stress are evaluated with
+  `ace_jax.eval.lean(model)`, which is exact to roundoff. It drops the radial
+  columns and harmonics the basis never reads, folds the pair weights into the
+  pair radial, and pools the dense A per l-block. Forces are 1.1–3.3× faster on
+  an A100 (`docs/ace-vs-pace-gap.md` §8).
+  - `calc.eval_model` is the lean form, and `calc.model` stays the model as
+    given. Descriptors use `calc.model`.
+  - A lean model is energy-only: never edit or fit it. Edit the full model and
+    re-apply `lean`.
 
 - **Layout.** `"auto"` picks the dense layout (A per node by a batched outer
   product, several times faster forces on GPU) when the neighbour padding is
@@ -126,7 +137,9 @@ them first), so ghost rows cost nothing. It is recorded as
 `ace_jax.owned_rows` in the bundle, and an atom past it, or past `k_dense`
 neighbours, gives NaN, never a silent truncation. Above 32,768 rows
 (`BUNDLE_BLOCK_ROWS`) the dense bundle evaluates in blocks, which bounds
-memory at large N.
+memory at large N. `lean=True` (the default) exports the lean form of an ACE
+model, as the calculator does, and records it as `ace_jax.lean`. The `"auto"`
+layout is still sized on the full model.
 
 ## Performance
 

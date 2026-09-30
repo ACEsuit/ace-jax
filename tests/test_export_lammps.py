@@ -92,7 +92,8 @@ def test_bundle_written(tmp_path):
     on_disk = json.loads((tmp_path / "m.json").read_text())
     assert on_disk["contract"]["n_species"] == 2
     assert on_disk["ace_jax"] == {"layout": "dense", "elements": [32, 14],
-                                  "type_elements": [32, 14], "k_dense": 64, "owned_rows": None}
+                                  "type_elements": [32, 14], "k_dense": 64, "owned_rows": None,
+                                  "lean": False}           # PACE: no lean form
     assert b["ace_jax"]["layout"] == "dense"
 
 
@@ -113,6 +114,59 @@ def test_lammps_type_order_differs_from_model_order(layout):
     E = float(jnp.sum(f(jnp.asarray(at.positions), species, graph)))
     at.calc = ACECalculator(y, layout="sparse")
     assert E == pytest.approx(at.get_potential_energy(), abs=1e-10)
+
+
+@pytest.mark.parametrize("layout", ["sparse", "dense"])
+def test_ace_bundle_uses_the_lean_form(tmp_path, monkeypatch, layout):
+    """export_lammps builds the energy function from `lean(model)` (the lean
+    evaluation form, exact), unless lean=False."""
+    require_optional("lammps_jax")
+    from ace_jax.export import lammps as lx
+    model, meta, _ = load(MODELS["ace"]())
+    at = _cluster()
+    at.numbers = np.where(at.numbers == 32, 32, 14)
+    graph, g = _lammps_graph(at, meta["rcut"])
+    z2i = {z: i for i, z in enumerate(meta["elements"])}
+    species = jnp.asarray([z2i[int(z)] for z in at.numbers], jnp.int32)
+    pos = jnp.asarray(at.positions)
+    seen = []
+    real = lx.make_energy_fn
+
+    def spy(m, *a, **k):                   # the energy function export_model traces
+        f = real(m, *a, **k)
+        seen.append((m, f))
+        return f
+
+    monkeypatch.setattr(lx, "make_energy_fn", spy)
+    full = real(model, len(meta["elements"]), layout, k_dense=64)
+    e_full = np.asarray(full(pos, species, graph))
+    for use in (True, False):
+        b = lx.export_lammps(model, meta, tmp_path / "m.json", max_atoms=256,
+                             max_edges=256 * 64, k_dense=64, layout=layout, lean=use)
+        assert b["ace_jax"]["lean"] is use
+        m, f = seen[-1]
+        assert m.energy_only is use
+        np.testing.assert_allclose(np.asarray(f(pos, species, graph)), e_full, rtol=0, atol=1e-12)
+
+
+@pytest.mark.parametrize("layout", ["sparse", "dense"])
+def test_lean_energy_fn_matches_full(layout):
+    """The bundle's energy function on the lean model equals the full model's."""
+    from ace_jax.eval.model import lean
+    model, meta, _ = load(MODELS["ace"]())
+    at = _cluster()
+    at.numbers = np.where(at.numbers == 32, 32, 14)
+    graph, g = _lammps_graph(at, meta["rcut"])
+    z2i = {z: i for i, z in enumerate(meta["elements"])}
+    species = jnp.asarray([z2i[int(z)] for z in at.numbers], jnp.int32)
+    K = int(np.bincount(g.senders, minlength=len(at)).max())
+    pos = jnp.asarray(at.positions)
+    out = []
+    for m in (model, lean(model)):
+        f = make_energy_fn(m, len(meta["elements"]), layout, k_dense=K + 3)
+        out.append(jax.jit(jax.value_and_grad(lambda p: jnp.sum(f(p, species, graph))))(pos))  # noqa: B023
+    assert float(out[1][0]) == pytest.approx(float(out[0][0]), rel=1e-12)
+    np.testing.assert_allclose(np.asarray(out[1][1]), np.asarray(out[0][1]), rtol=0, atol=1e-12)
 
 
 def test_bundle_records_owned_rows_even_for_sparse(tmp_path):
@@ -350,3 +404,48 @@ def test_auto_layout_judges_one_dense_block(tmp_path, monkeypatch):
     b = lx.export_lammps(model, meta, tmp_path / "m.json", max_atoms=n + 100, max_edges=n * k,
                          k_dense=k, max_owned=n, layout="auto")
     assert b["ace_jax"]["layout"] == "dense"
+
+
+@pytest.mark.parametrize("layout", ["sparse", "dense"])
+def test_lean_energy_fn_with_type_map(layout):
+    """LAMMPS type order differing from the model's, through the lean form."""
+    from ace_jax.eval.model import lean
+    model, meta, _ = load(MODELS["ace"]())
+    at = _cluster()
+    at.numbers = np.where(at.numbers == 32, 32, 14)
+    graph, g = _lammps_graph(at, meta["rcut"])
+    types = [32, 14]                                       # reversed from the model's [14, 32]
+    assert list(meta["elements"]) == [14, 32]
+    species = jnp.asarray([types.index(int(z)) for z in at.numbers], jnp.int32)
+    tm = [list(meta["elements"]).index(z) for z in types]
+    K = int(np.bincount(g.senders, minlength=len(at)).max())
+    pos = jnp.asarray(at.positions)
+    out = []
+    for m in (model, lean(model)):
+        f = make_energy_fn(m, 2, layout, k_dense=K + 3, type_map=tm)
+        out.append(jax.value_and_grad(lambda p: jnp.sum(f(p, species, graph)))(pos))  # noqa: B023
+    assert float(out[1][0]) == pytest.approx(float(out[0][0]), rel=1e-12)
+    np.testing.assert_allclose(np.asarray(out[1][1]), np.asarray(out[0][1]), rtol=0, atol=1e-12)
+    at.calc = ACECalculator(MODELS["ace"](), layout="sparse", lean=False)
+    assert float(out[1][0]) == pytest.approx(at.get_potential_energy(), abs=1e-10)
+
+
+def test_auto_layout_ignores_lean(tmp_path, monkeypatch):
+    """layout="auto" sizes memory on the full model, so lean=True and
+    lean=False pick the same layout (the lean widths would underestimate the
+    compiled temp of the blocked path)."""
+    require_optional("lammps_jax")
+    from ace_jax.calc import point
+    from ace_jax.eval.edge_model import estimate_a_bytes
+    from ace_jax.eval.model import lean
+    from ace_jax.export import lammps as lx
+    model, meta, _ = load(MODELS["ace"]())
+    k, n = 64, 1024
+    full = estimate_a_bytes(model, "dense", n, n * k, k, 8)
+    assert estimate_a_bytes(lean(model), "dense", n, n * k, k, 8) < full
+    for budget, want in ((full - 1, "sparse"), (full, "dense")):
+        monkeypatch.setattr(point, "dense_budget_bytes", lambda b=budget: b)
+        for use in (True, False):
+            b = lx.export_lammps(model, meta, tmp_path / "m.json", max_atoms=n,
+                                 max_edges=n * k, k_dense=k, layout="auto", lean=use)
+            assert b["ace_jax"]["layout"] == want, (budget, use)

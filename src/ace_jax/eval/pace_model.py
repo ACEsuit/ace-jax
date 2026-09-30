@@ -23,6 +23,13 @@ from .pace_io import parse_yace
 from .pace_radial import cutoff_func_poly, fexp, fexp_shifted_scaled, pace_zbl, radbase, radcore
 
 
+# SBessel g_k by one sin per k and a constant matrix (`pace_radial._sbessel_mm`)
+# from this nradbase up, else the rotation recurrence.  Measured on an A100 in
+# float64 (docs/ace-vs-pace-gap.md 4.3): -6% (8192 atoms) and -21% (131072) at
+# nradbase 13, -6% at 15, -1% at 11, but +11-19% slower at 4-9.
+SBESSEL_MATMUL_MIN_K = 12
+
+
 class PACEModel(EdgeSiteModel):
     # trainable leaves (what write_yace serialises)
     crad: jax.Array            # (NZ, NZ, nradmax, lmax+1, K)
@@ -59,6 +66,8 @@ class PACEModel(EdgeSiteModel):
     # in the trace by pool_first_weights, so crad stays trainable)
     pf_col: jax.Array = None     # (n_a,) radial column of each local A entry
     pf_sel_y: jax.Array = None   # (n_Y, n_a) one-hot: Y columns -> A entries
+    # SBessel evaluation form, fixed per model by load_yace (SBESSEL_MATMUL_MIN_K)
+    sbessel_form: str = eqx.field(static=True, default="rotation")
 
     uses_edge_a = False
 
@@ -90,7 +99,7 @@ class PACEModel(EdgeSiteModel):
         bp, valid, r, rij_s = self._geometry(rij, zi, zj, mask)
         lam, rc, dcut, cin, dcin = (bp[:, k] for k in range(5))
         g = radbase(r, self.radbasename, self.inner_cutoff_type, lam, rc, dcut,
-                    cin, dcin, self.nradbase)                             # (E, K)
+                    cin, dcin, self.nradbase, self.sbessel_form)          # (E, K)
         return jnp.where(valid[:, None], g, 0.0), real_spherical_harmonics(rij_s, self.lmax)
 
     @property
@@ -227,7 +236,9 @@ def load_yace(path, dtype=jnp.float64, edge_a_kind="gather"):
         radbasename=a["radbasename"], inner_cutoff_type=a["inner_cutoff_type"],
         npoti=a["npoti"], ndensity=int(a["ndensity"]), nradbase=int(a["nradbase"]),
         lmax=int(a["lmax"]), n_a_local=int(b["n_a_local"]), n_aa=int(b["n_aa"]),
-        pf_col=I(b["a_rad"]), pf_sel_y=A(sel))
+        pf_col=I(b["a_rad"]), pf_sel_y=A(sel),
+        sbessel_form=("matmul" if a["radbasename"] == "SBessel"
+                      and int(a["nradbase"]) >= SBESSEL_MATMUL_MIN_K else "rotation"))
     model = with_edge_a_kind(model, edge_a_kind)
     meta = {"elements": [int(z) for z in a["Z"]], "rcut": float(a["radparams"][..., 1].max()),
             "format": "yace"}

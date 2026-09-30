@@ -142,11 +142,23 @@ write_yace(pm, spec, "copy.yace")                        # numeric leaves from p
 Supported: ChebExpCos, ChebPow, ChebLinear and SBessel radials,
 FinnisSinclair(ShiftedScaled) embeddings, and `density`, `distance` and `zbl`
 inner cutoffs. `.yace` models are for evaluation and export only: `aj fit` needs
-an `.npz` ACE model.
+an `.npz` ACE model. An SBessel radial with `nradbase >= 12` is evaluated as one
+sin per basis function and a constant matrix (`PACEModel.sbessel_form`, fixed at
+load; faster only at large `nradbase`). Values are unchanged to roundoff.
 
 ### Calculator performance options
 
-`ACECalculator(path, dtype=None, layout="auto", edge_a_kind="auto", skin=1.0)`:
+`ACECalculator(path, dtype=None, layout="auto", edge_a_kind="auto", skin=1.0, lean=True)`:
+- `lean` (ACE `.npz` models): energies, forces and stress are evaluated with
+  `ace_jax.eval.lean(model)`, exact to roundoff. It drops radial columns and
+  harmonics the basis never reads, folds the pair weights into the pair
+  radial, and pools the dense A per l-block. Forces are 1.1–3.3× faster (A100, docs/ace-vs-pace-gap.md §8).
+  `calc.eval_model` is that form. `calc.model` stays the model as given, and
+  descriptors use it. A lean model is energy-only: its `site_basis` and
+  descriptor methods raise. Never fit from it or edit it (the radial helpers
+  call `require_full()` and raise); edit the full model and re-apply `lean`.
+  `aj.load` returns the full model. Setting `calc.model` recomputes the lean
+  form on the host, a device-to-host copy per swap.
 - `layout`: `"sparse"` (edge list) or `"dense"` (padded per-node blocks, A by a
   batched outer product, several times faster forces on GPU). `"auto"` picks
   dense when the padding fill, edges / (atoms × max neighbours), is at least
@@ -187,6 +199,9 @@ This writes a lammps-jax bundle for `pair_style jax/kk` (GPU only).
   silent truncation.
 - The dense bundle runs in blocks of `BUNDLE_BLOCK_ROWS` (32,768) rows above
   one block, bounding memory at large N.
+- `lean=True` (default) exports `lean(model)` for an ACE model, as
+  `ACECalculator` does. It is recorded as `ace_jax.lean`. `layout="auto"` is
+  sized on the full model, so it chooses the same layout either way.
 
 Other entry points:
 - `aj.site_descriptors(...)`: per-atom ACE descriptors.
