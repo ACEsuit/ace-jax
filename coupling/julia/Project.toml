@@ -1,0 +1,10 @@
+[deps]
+EquivariantTensors = "5e107534-7145-4f8f-b06f-47a52840c895"
+SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[sources]
+EquivariantTensors = {url = "https://github.com/jameskermode/EquivariantTensors.jl", rev = "229f99d074651c8553dbcd1a40c44f2c99b6a9d3"}
+
+[compat]
+julia = "1.13"
