@@ -89,3 +89,29 @@ def test_r0_missing_everywhere_errors(tmp_path):
     if d.r0 is None:
         with pytest.raises(ValueError, match="r0"):
             fit(cfg, d, log=QUIET)
+
+
+def test_ard_on_a_built_basis_equals_file(tmp_path, monkeypatch):
+    """uq='ard' writes its posterior-mean model arrays during fit (run.py's "model"
+    stage) from the arrays the pipeline loaded, so a BasisSpec model (no file to
+    re-read) works and equals the same basis fitted from a file."""
+    from ace_jax.basis.export import save_npz
+    from ace_jax.basis.model import BasisSpec, build_basis
+    from ace_jax.fit.pipeline import fit, load_fit_data
+    monkeypatch.setenv("ACEJAX_COUPLING_CACHE_ONLY", "1")
+    cache = _primed_cache(tmp_path)
+    spec = BasisSpec(order=3, max_degree=10, coupling_cache_dir=cache)
+    f = tmp_path / "si.npz"
+    save_npz(f, build_basis(BasisSpec(order=3, max_degree=10, elements=("Si",), coupling_cache_dir=cache)))
+    kw = dict(uq="ard", opt="lbfgs", map_steps=5, predict_stats="recompute")
+    out = {}
+    for name, model in (("spec", spec), ("file", str(f))):
+        staged = {}
+        cfg = _cfg(model, **kw)
+        d = load_fit_data(cfg, train=str(XYZ), log=QUIET)
+        fit(cfg, d, log=QUIET, on_stage=lambda k, v, s=staged: s.__setitem__(k, v))
+        out[name] = staged["model"]
+    assert out["spec"].keys() == out["file"].keys()
+    for k in ("WB", "Wpair", "E0"):        # ARD is not bit-reproducible run to run (GPU: ~4e-8)
+        x, y = out["spec"][k], out["file"][k]
+        assert np.abs(x - y).max() <= 1e-6 * max(np.abs(y).max(), 1e-300), k

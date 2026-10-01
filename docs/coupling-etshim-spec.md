@@ -55,7 +55,8 @@ Pure Python, no deps.
 ## Architecture (three layers)
 
 1. **ET fork** — [jameskermode/EquivariantTensors.jl](https://github.com/jameskermode/EquivariantTensors.jl),
-   branch `jk/trim-safe-coupling`, on ACEsuit `main` (v0.5.1). It adds a
+   branch `jk/trim-coupling`: four linear commits on ACEsuit `main` (v0.5.1), the
+   single proposed upstream PR. It adds a
    type-stable construction API with unchanged public behaviour:
    `symmetrisation_matrix(Val(L), mb_spec; ...)`, `O3.coupling_coeffs(Val(L),
    ll::Vector{Int}, nn::Vector{Int}; ...)` (correlation order resolved through a
@@ -63,7 +64,11 @@ Pure Python, no deps.
    `sparse_equivariant_tensor_spec(Val(L); ...)` (the layer-free half of
    `sparse_equivariant_tensor`), plus trim-safety fixes (`basis`/`hashfcn`
    argument specialisation, concrete `SetLl` containers, a trim-safe sparse
-   transpose and UMFPACK `L'`/`p`/`Rs` extraction in `solver_inner`). The fork's
+   transpose and UMFPACK `L'`/`p`/`Rs` extraction in `solver_inner`), and
+   `nullspace_solver = :dense`, a LAPACK LU for the last block's kernel, which the
+   shim always selects, so UMFPACK is never called. It spans the same coupled space
+   as upstream's default; single B rows can differ by a sign and a degenerate nnll
+   block by an orthogonal rotation. The fork's
    CI compiles `test/trim/entry.jl` with `juliac --trim=safe` on Julia 1.13 and
    compares the executable with ordinary Julia. The rev ace-jax uses is pinned
    (full sha) in `coupling/julia/Project.toml` `[sources]`.
@@ -140,8 +145,10 @@ asserts ABI, macOS `minos ≤ 11.0` and Linux `GLIBC ≤ 2.28`. Wheels are
 whose `build_info()` raises `CouplingLibError`. `coupling/tools/test_wheel.sh`
 installs a wheel into a fresh venv with an empty HOME and no Julia on PATH and
 runs the package tests (and checks HOME is untouched). Bundled third-party
-licences: `coupling/python/THIRD_PARTY_NOTICES.md` (includes GPL-2.0+
-SuiteSparse modules; the wheel's licence declaration is still open).
+licences: `coupling/python/THIRD_PARTY_NOTICES.md`. The GPL-2.0+ SuiteSparse
+modules (UMFPACK, SPQR, RBio, CHOLMOD) are empty placeholders made by
+`prune_bundle.py` and enforced by `check_bundle.py`, so the wheel ships no GPL-only
+code; its licence expression is still to be declared.
 
 ## ET version vs the ACEpotentials fixtures
 

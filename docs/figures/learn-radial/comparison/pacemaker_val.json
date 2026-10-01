@@ -1,0 +1,6 @@
+{"note": "pyace evaluation on the same seed-0 validation split (eval_pace.py); E meV/atom, F meV/A",
+ "sige_linear_k0.3_2000it": {"val": [1.075, 28.70], "train": [1.109, 25.16]},
+ "sige_linear_k0.1_1000it": {"val": [0.966, 31.08], "train": [0.852, 27.90]},
+ "sige_linear_k0.02_1000it": {"val": [0.850, 32.22], "train": [0.711, 29.48]},
+ "sige_fs_k0.3_2000it": {"val": [0.939, 26.53], "train": [0.978, 22.09]},
+ "cantor_linear_k0.3_2000it": {"val": [7.318, 88.69], "train": [6.593, 75.55]}}

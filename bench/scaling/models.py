@@ -3,6 +3,7 @@
     python bench/scaling/models.py pace   # pyace venv: random-coefficient .yace x3 x2
     python bench/scaling/models.py ace    # Julia: linear ACE .npz x3 x2
     python bench/scaling/models.py mace   # MACE-MP-0b2 s/m/l + MH-1 + Symmetrix .json per system
+    python bench/scaling/models.py ace-learned  # learned-radial proxies of ace_*_medium.npz (after `ace`)
     python bench/scaling/models.py sizes  # basis functions per central element -> model_sizes.json
 Model files live in bench/scaling/models/ (git-ignored); manifest.json records
 provenance (builder, parameters, n_params, sha256).
@@ -52,6 +53,18 @@ MACE_SIZES = tuple(MACE)
 # multi-head models: the head both the standalone calculator and the Symmetrix
 # export evaluate (materials PBE -- the one that fits SiGe and Cantor)
 MACE_HEAD = {"mh1": "omat_pbe"}
+# Learned-radial proxy lines (docs/learned-radial-splining.md): the medium
+# linear ACE model on the analytic radial branch with perturbed weights
+# (`build_ace_learned`), evaluated as deployed -- spline_tol="auto", which
+# splines a learned radial at 1e-10 -- and kept analytic (None, exact).  Medium
+# only: that is the size the other figures compare at.
+LEARNED_CODES = {"acejax-ace-learned": "auto", "acejax-ace-analytic": None}   # code -> spline_tol
+LEARNED_SIZES = ("medium",)
+LEARNED_RECIPE = {"n_q": 12, "scale": 0.1, "seed": 0}
+
+
+def learned_path(system, size="medium"):
+    return DIR / f"ace_{system}_{size}_learned.npz"
 
 
 def planned_models():
@@ -66,6 +79,10 @@ def planned_models():
                      dict(name=f"acejax-ace/{system}/{size}", code="acejax-ace", system=system,
                           size=size, path=str(DIR / f"ace_{system}_{size}.npz"), elements=els),
                      ]
+            if size in LEARNED_SIZES:
+                rows += [dict(name=f"{code}/{system}/{size}", code=code, system=system, size=size,
+                              path=str(learned_path(system, size)), elements=els, spline_tol=tol)
+                         for code, tol in LEARNED_CODES.items()]
         for size in MACE_SIZES:
             rows.append(dict(name=f"mace/{system}/{size}", code="mace", system=system, size=size,
                              path=str(DIR / f"mace_{size}.model"), elements=els,
@@ -149,6 +166,56 @@ def build_ace():
                                         "sha256": _sha(p)}})   # per model: a later failure keeps it
 
 
+def learned_proxy(src, dst, n_q=12, scale=0.1, seed=0):
+    """Write a learned-radial proxy of the linear ACE model at `src` to `dst`.
+
+    Recipe: `to_analytic(model, n_q)` (projects the spline R_nl onto n_q
+    normalized Legendre polynomials; the zero rows of ACE1's per-z_j pattern
+    project to exact zeros), then every active row (`row_active`) of rnl_Wnlq
+    gets W += scale * rms(row) * N(0, 1), with numpy's default_rng(seed), and
+    the zero rows stay exactly zero -- as learning keeps them
+    (`radial_model.normalise`), so `lean`'s species compaction still applies.
+    `with_radial(..., learned=True)` marks it learned and `patch_radial_npz`
+    stores meta_json "radial_learned": true; WB, Wpair, the coupling and the
+    pair radial are copied verbatim (random-weight timing models).  Returns
+    (n_active, n_rows) of the radial table.  Deterministic: same src and
+    arguments, same arrays."""
+    import jax
+    jax.config.update("jax_enable_x64", True)            # to_analytic's projection is f64
+    import numpy as np
+    from ace_jax.basis.export import patch_radial_npz
+    from ace_jax.eval import load
+    from ace_jax.fit.radial_model import row_active, to_analytic, with_radial
+    model, _, _ = load(str(src))
+    m, _ = to_analytic(model, n_q)
+    W = np.asarray(m.rnl_Wnlq, np.float64)
+    act = np.asarray(row_active(W))
+    rms = np.sqrt(np.mean(W[act] ** 2, axis=-1, keepdims=True))
+    rng = np.random.default_rng(seed)
+    W = W.copy()
+    W[act] += scale * rms * rng.standard_normal(W[act].shape)
+    patch_radial_npz(src, dst, with_radial(m, W, learned=True))
+    return int(act.sum()), int(act.size)
+
+
+def build_ace_learned():
+    """The learned-radial proxies, from the medium linear ACE models (run
+    `models.py ace` first).  Rebuilt every time: seconds per model."""
+    import numpy as np
+    for system in ELEMENTS:
+        for size in LEARNED_SIZES:
+            src, dst = DIR / f"ace_{system}_{size}.npz", learned_path(system, size)
+            n_act, n_rows = learned_proxy(src, dst, **LEARNED_RECIPE)
+            _update_manifest({str(dst): {
+                "builder": "models.py ace-learned (learned_proxy)", "from": str(src),
+                "from_sha256": _sha(src), **LEARNED_RECIPE,
+                "recipe": "to_analytic(n_q); active rnl_Wnlq rows += scale * row rms * N(0,1), "
+                          "default_rng(seed); with_radial(learned=True); patch_radial_npz",
+                "active_rows": n_act, "rows": n_rows, "radial_learned": True,
+                "n_params": int(np.load(dst)["WB"].shape[0]), "weights": "random",
+                "sha256": _sha(dst)}})
+
+
 def symmetrix_cmd(model, zs, head, out):
     cmd = [shutil.which("symmetrix_extract_mace") or "symmetrix_extract_mace", "--model", str(model),
            "--atomic-numbers", *map(str, zs), "--output", str(out)]
@@ -219,7 +286,7 @@ def basis_sizes():
         p = pathlib.Path(r["path"])
         if r["code"] == "mace" or not p.exists():
             continue
-        n = (ace_functions_per_element(p) if r["code"] == "acejax-ace"
+        n = (ace_functions_per_element(p) if r["code"].startswith("acejax-ace")
              else pace_functions_per_element(p))
         out.setdefault(f"{r['system']}/{r['size']}", {})[r["code"]] = n
     return out
@@ -231,5 +298,5 @@ def write_sizes():
 
 
 if __name__ == "__main__":
-    {"pace": build_pace, "ace": build_ace, "mace": build_mace,
+    {"pace": build_pace, "ace": build_ace, "ace-learned": build_ace_learned, "mace": build_mace,
      "sizes": write_sizes}[sys.argv[1]]()

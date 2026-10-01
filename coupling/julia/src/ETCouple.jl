@@ -70,7 +70,10 @@ end
 # `nothing` when no body has an L = 0 invariant (ET would then throw reducing
 # over an empty 𝔸spec; an exception escaping the C ABI aborts the host process)
 function compute(mb::Vector{Vector{NL}}, rnl::Vector{NL}, ylm::Vector{LM})::Union{Result, Nothing}
-   symm, 𝔸spec = ET.symmetrisation_matrix(Val(0), mb; prune = true, PI = true, basis = real)
+   # :dense -- LAPACK, never UMFPACK (GPL-2.0+), so the bundle ships no GPL code;
+   # same coupled space as upstream's default :sparse (signs / degenerate-block rotations)
+   symm, 𝔸spec = ET.symmetrisation_matrix(Val(0), mb; prune = true, PI = true, basis = real,
+                                         nullspace_solver = :dense)
    isempty(𝔸spec) && return nothing
    t = ET._tensor_specs(symm, 𝔸spec, rnl, ylm)      # == sparse_equivariant_tensor_spec(Val(0); ...)
    I, J, V = findnz(t.symm)

@@ -18,6 +18,7 @@ import numpy as np
 
 from ..basis.radial_init import from_table, legendre_3term
 from ..eval.radial import agnesi_normalized, env_poly2sx, poly_recursion, spline_eval
+from ..eval.splinify import to_spline  # noqa: F401  (to_analytic's inverse, for deployment)
 from .data import flat_edges
 
 
@@ -29,13 +30,16 @@ def require_analytic(model):
             f"{model.radial_kind!r}; convert with fit.radial_model.to_analytic(model, n_q)")
 
 
-def with_radial(model, W):
-    """`model` with its tensor-radial weights replaced by W (same shape)."""
+def with_radial(model, W, learned=True):
+    """`model` with its tensor-radial weights replaced by W (same shape),
+    marked `radial_learned` (the learner's weights; `lean`'s default splines
+    those).  learned=False for weights that are not learned."""
     require_analytic(model)
     W = jnp.asarray(W)
     if W.shape != model.rnl_Wnlq.shape:
         raise ValueError(f"W shape {W.shape} != rnl_Wnlq shape {model.rnl_Wnlq.shape}")
-    return eqx.tree_at(lambda m: m.rnl_Wnlq, model, W)
+    out = eqx.tree_at(lambda m: m.rnl_Wnlq, model, W)
+    return out if out.radial_learned == learned else dataclasses.replace(out, radial_learned=learned)
 
 
 def _legendre(n_q):
@@ -90,8 +94,9 @@ def to_analytic(model, n_q, n_x=2001):
     polys = legendre_3term(n_q)
     W, rel = from_table(x, env[..., None] * S, envp, polys)
     A, B, C = (jnp.asarray(a) for a in polys)
+    # a projection of an exported table: not learned
     out = dataclasses.replace(model, radial_kind="analytic", rnl_Wnlq=jnp.asarray(W),
-                              polys_A=A, polys_B=B, polys_C=C)
+                              polys_A=A, polys_B=B, polys_C=C, radial_learned=False)
     return out, rel
 
 

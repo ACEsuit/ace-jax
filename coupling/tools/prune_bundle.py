@@ -10,6 +10,13 @@ import subprocess
 import sys
 import tempfile
 
+# GPL-2.0+ SuiteSparse modules.  The shim never calls them (EquivariantTensors'
+# nullspace_solver = :dense), but SuiteSparse_jll's __init__ dlopens every
+# SuiteSparse library, so each is replaced by an empty placeholder of the same
+# name: the wheel ships no GPL code.  check_bundle.py enforces the marker.
+GPL_LIBS = ("libumfpack", "libspqr", "librbio", "libcholmod")
+PLACEHOLDER_MARK = "ace-jax-coupling GPL placeholder"
+
 REPO = pathlib.Path(__file__).resolve().parents[2]
 EXT = "dylib" if sys.platform == "darwin" else "so"
 # Two process states: the full cases (numpy loaded first, as for any user),
@@ -107,6 +114,7 @@ def main(src, dst):
             args = [x for old in needed if old in renames for x in ("--replace-needed", old, renames[old])]
             if args:
                 subprocess.run(["patchelf", *args, str(f)], check=True)
+        _replace_gpl(dst)
         return
     used = {pathlib.Path(os.path.realpath(src / u)).relative_to(src) for u in opened}
     assert pathlib.Path("lib") / f"libetcouple.{EXT}" in used, "trace did not see libetcouple"
@@ -149,6 +157,39 @@ def main(src, dst):
             names[real] = [keep]
     _write(src, dst, names)
     _relink_macos(dst, renames)
+    _replace_gpl(dst)
+
+
+def _replace_gpl(dst):
+    """Swap each GPL SuiteSparse library for an empty placeholder under the same
+    name (SONAME / install name kept, so the JLL's dlopen still succeeds), then
+    re-run the trace drivers on the final bundle: they must still pass."""
+    done = []
+    for f in sorted(p for p in dst.rglob("*") if p.is_file() and _is_lib(p)):
+        if not f.name.startswith(GPL_LIBS):
+            continue
+        with tempfile.TemporaryDirectory() as tmp:
+            c = pathlib.Path(tmp) / "placeholder.c"
+            # the name makes each placeholder's bytes unique (check_bundle: one file per library)
+            c.write_text(f'const char acejax_gpl_placeholder[] = "{PLACEHOLDER_MARK}: {f.name} '
+                         '(no SuiteSparse code; never called)";\n')
+            out = pathlib.Path(tmp) / f.name
+            if sys.platform == "darwin":
+                ident = subprocess.run(["otool", "-D", str(f)], capture_output=True, text=True,
+                                       check=True).stdout.split()[-1]
+                subprocess.run(["cc", "-dynamiclib", "-mmacosx-version-min=11.0", "-install_name", ident,
+                                "-o", str(out), str(c)], check=True)
+                subprocess.run(["codesign", "--force", "--sign", "-", str(out)], check=True, capture_output=True)
+            else:
+                soname = subprocess.run(["patchelf", "--print-soname", str(f)], capture_output=True,
+                                        text=True, check=True).stdout.strip() or f.name
+                subprocess.run(["cc", "-shared", "-fPIC", "-nostdlib", f"-Wl,-soname,{soname}",
+                                "-o", str(out), str(c)], check=True)
+            shutil.copy2(out, f)
+        done.append(f.name)
+    assert len(done) == len(GPL_LIBS), f"expected one each of {GPL_LIBS} in the bundle, replaced {done}"
+    traced(dst)                                     # the coupling still runs on the placeholders
+    print(f"GPL libraries replaced by placeholders: {', '.join(done)}")
 
 
 def _relink_macos(dst, renames):
@@ -184,6 +225,7 @@ def _write(src, dst, names):
             out = dst / rel
             out.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src / real, out)           # dereference symlinks
+            out.chmod(out.stat().st_mode | 0o200)   # artifacts are read-only; strip/patchelf write in place
             kept += 1
     if sys.platform != "darwin":
         # Linux JLL libraries ship with debug info (libstdc++ 21 MB -> 3.7 MB).

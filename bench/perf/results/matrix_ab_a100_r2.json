@@ -1,0 +1,1496 @@
+[
+ {
+  "kind": "time",
+  "variant": "stock",
+  "round": 0,
+  "model": "pace_Cantor_medium",
+  "n": 16384,
+  "export_s": 1.5030681070000007,
+  "layout": "dense",
+  "k_dense": 86,
+  "input_layout": "sparse-edge",
+  "max_neighbors": null,
+  "max_edges": 1549978,
+  "max_owned": 18023,
+  "max_atoms": 31842,
+  "k_list": 78,
+  "k_cut": 42,
+  "bundle_bytes": 824467,
+  "deck": "bench",
+  "wall_s": 17.514851955999998,
+  "returncode": 0,
+  "log_errors": [],
+  "widest_row": [],
+  "neigh": [
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0"
+  ],
+  "pe0": 3288.6275866304404,
+  "nan": false,
+  "step_s": [
+   0.0143489,
+   0.01433925
+  ],
+  "status": "ok",
+  "atom_steps_per_s": 1142598.1135693986,
+  "device_name": "NVIDIA A100 80GB PCIe",
+  "lammps_jax": "4a7f4fb 2026-09-14",
+  "t": 45.4
+ },
+ {
+  "kind": "time",
+  "variant": "matrix",
+  "round": 0,
+  "model": "pace_Cantor_medium",
+  "n": 16384,
+  "export_s": 1.6594196309999987,
+  "layout": "matrix",
+  "k_dense": 86,
+  "input_layout": "neighbor-matrix",
+  "max_neighbors": 117,
+  "max_edges": null,
+  "max_owned": 18023,
+  "max_atoms": 31842,
+  "k_list": 78,
+  "k_cut": 42,
+  "bundle_bytes": 828796,
+  "deck": "bench",
+  "wall_s": 16.395505326000006,
+  "returncode": 0,
+  "log_errors": [],
+  "widest_row": [
+   [
+    "78",
+    "117"
+   ],
+   [
+    "78",
+    "117"
+   ],
+   [
+    "78",
+    "117"
+   ]
+  ],
+  "neigh": [
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0"
+  ],
+  "pe0": 3288.6275866304404,
+  "nan": false,
+  "step_s": [
+   0.011220349999999999,
+   0.011200449999999999
+  ],
+  "status": "ok",
+  "atom_steps_per_s": 1462798.3697083602,
+  "device_name": "NVIDIA A100 80GB PCIe",
+  "lammps_jax": "4a7f4fb 2026-09-14",
+  "t": 73.4
+ },
+ {
+  "kind": "time",
+  "variant": "stock",
+  "round": 0,
+  "model": "pace_Cantor_medium",
+  "n": 16384,
+  "export_s": 1.5030681070000007,
+  "layout": "dense",
+  "k_dense": 86,
+  "input_layout": "sparse-edge",
+  "max_neighbors": null,
+  "max_edges": 1549978,
+  "max_owned": 18023,
+  "max_atoms": 31842,
+  "k_list": 78,
+  "k_cut": 42,
+  "bundle_bytes": 824467,
+  "deck": "static",
+  "wall_s": 17.379744469000002,
+  "returncode": 0,
+  "log_errors": [],
+  "widest_row": [],
+  "neigh": [
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0"
+  ],
+  "pe0": 3288.6275866304404,
+  "nan": false,
+  "step_s": [
+   0.014460200000000001,
+   0.014455150000000002
+  ],
+  "status": "ok",
+  "atom_steps_per_s": 1133436.8719798825,
+  "device_name": "NVIDIA A100 80GB PCIe",
+  "lammps_jax": "4a7f4fb 2026-09-14",
+  "t": 92.3
+ },
+ {
+  "kind": "time",
+  "variant": "matrix",
+  "round": 0,
+  "model": "pace_Cantor_medium",
+  "n": 16384,
+  "export_s": 1.6594196309999987,
+  "layout": "matrix",
+  "k_dense": 86,
+  "input_layout": "neighbor-matrix",
+  "max_neighbors": 117,
+  "max_edges": null,
+  "max_owned": 18023,
+  "max_atoms": 31842,
+  "k_list": 78,
+  "k_cut": 42,
+  "bundle_bytes": 828796,
+  "deck": "static",
+  "wall_s": 16.711644210000003,
+  "returncode": 0,
+  "log_errors": [],
+  "widest_row": [
+   [
+    "78",
+    "117"
+   ],
+   [
+    "78",
+    "117"
+   ],
+   [
+    "78",
+    "117"
+   ]
+  ],
+  "neigh": [
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0"
+  ],
+  "pe0": 3288.627586630441,
+  "nan": false,
+  "step_s": [
+   0.01131395,
+   0.0113041
+  ],
+  "status": "ok",
+  "atom_steps_per_s": 1449385.62114631,
+  "device_name": "NVIDIA A100 80GB PCIe",
+  "lammps_jax": "4a7f4fb 2026-09-14",
+  "t": 110.4
+ },
+ {
+  "kind": "time",
+  "variant": "tight",
+  "round": 0,
+  "model": "pace_Cantor_medium",
+  "n": 16384,
+  "export_s": 1.6130629060000032,
+  "layout": "matrix",
+  "k_dense": 50,
+  "input_layout": "neighbor-matrix",
+  "max_neighbors": 117,
+  "max_edges": null,
+  "max_owned": 18023,
+  "max_atoms": 31842,
+  "k_list": 78,
+  "k_cut": 42,
+  "bundle_bytes": 828644,
+  "deck": "static",
+  "wall_s": 15.509961661999995,
+  "returncode": 0,
+  "log_errors": [],
+  "widest_row": [
+   [
+    "78",
+    "117"
+   ],
+   [
+    "78",
+    "117"
+   ],
+   [
+    "78",
+    "117"
+   ]
+  ],
+  "neigh": [
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0"
+  ],
+  "pe0": 3288.6275866304404,
+  "nan": false,
+  "step_s": [
+   0.00978785,
+   0.00969795
+  ],
+  "status": "ok",
+  "atom_steps_per_s": 1689429.2092658756,
+  "device_name": "NVIDIA A100 80GB PCIe",
+  "lammps_jax": "4a7f4fb 2026-09-14",
+  "t": 127.0
+ },
+ {
+  "kind": "time",
+  "variant": "stock",
+  "round": 0,
+  "model": "pace_Cantor_medium",
+  "n": 131072,
+  "export_s": 3.8684118939999905,
+  "layout": "dense",
+  "k_dense": 86,
+  "input_layout": "sparse-edge",
+  "max_neighbors": null,
+  "max_edges": 12399480,
+  "max_owned": 144180,
+  "max_atoms": 194245,
+  "k_list": 78,
+  "k_cut": 42,
+  "bundle_bytes": 898426,
+  "deck": "bench",
+  "wall_s": 29.76234630899998,
+  "returncode": 0,
+  "log_errors": [],
+  "widest_row": [],
+  "neigh": [
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0"
+  ],
+  "pe0": 26388.463794658466,
+  "nan": false,
+  "step_s": [
+   0.11449283333333334,
+   0.11431666666666666
+  ],
+  "status": "ok",
+  "atom_steps_per_s": 1146569.4707683336,
+  "device_name": "NVIDIA A100 80GB PCIe",
+  "lammps_jax": "4a7f4fb 2026-09-14",
+  "t": 200.6
+ },
+ {
+  "kind": "time",
+  "variant": "matrix",
+  "round": 0,
+  "model": "pace_Cantor_medium",
+  "n": 131072,
+  "export_s": 4.0454159599999855,
+  "layout": "matrix",
+  "k_dense": 86,
+  "input_layout": "neighbor-matrix",
+  "max_neighbors": 117,
+  "max_edges": null,
+  "max_owned": 144180,
+  "max_atoms": 194245,
+  "k_list": 78,
+  "k_cut": 42,
+  "bundle_bytes": 901891,
+  "deck": "bench",
+  "wall_s": 27.099433470999998,
+  "returncode": 0,
+  "log_errors": [],
+  "widest_row": [
+   [
+    "78",
+    "117"
+   ],
+   [
+    "78",
+    "117"
+   ],
+   [
+    "78",
+    "117"
+   ]
+  ],
+  "neigh": [
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0"
+  ],
+  "pe0": 26388.46379465847,
+  "nan": false,
+  "step_s": [
+   0.09203616666666667,
+   0.09205833333333334
+  ],
+  "status": "ok",
+  "atom_steps_per_s": 1424135.8016866557,
+  "device_name": "NVIDIA A100 80GB PCIe",
+  "lammps_jax": "4a7f4fb 2026-09-14",
+  "t": 229.3
+ },
+ {
+  "kind": "time",
+  "variant": "stock",
+  "round": 0,
+  "model": "pace_Cantor_medium",
+  "n": 131072,
+  "export_s": 3.8684118939999905,
+  "layout": "dense",
+  "k_dense": 86,
+  "input_layout": "sparse-edge",
+  "max_neighbors": null,
+  "max_edges": 12399480,
+  "max_owned": 144180,
+  "max_atoms": 194245,
+  "k_list": 78,
+  "k_cut": 42,
+  "bundle_bytes": 898426,
+  "deck": "static",
+  "wall_s": 30.030587302999976,
+  "returncode": 0,
+  "log_errors": [],
+  "widest_row": [],
+  "neigh": [
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0"
+  ],
+  "pe0": 26388.46379465847,
+  "nan": false,
+  "step_s": [
+   0.114507,
+   0.11451083333333334
+  ],
+  "status": "ok",
+  "atom_steps_per_s": 1144663.6450173352,
+  "device_name": "NVIDIA A100 80GB PCIe",
+  "lammps_jax": "4a7f4fb 2026-09-14",
+  "t": 260.9
+ },
+ {
+  "kind": "time",
+  "variant": "matrix",
+  "round": 0,
+  "model": "pace_Cantor_medium",
+  "n": 131072,
+  "export_s": 4.0454159599999855,
+  "layout": "matrix",
+  "k_dense": 86,
+  "input_layout": "neighbor-matrix",
+  "max_neighbors": 117,
+  "max_edges": null,
+  "max_owned": 144180,
+  "max_atoms": 194245,
+  "k_list": 78,
+  "k_cut": 42,
+  "bundle_bytes": 901891,
+  "deck": "static",
+  "wall_s": 26.779550521000033,
+  "returncode": 0,
+  "log_errors": [],
+  "widest_row": [
+   [
+    "78",
+    "117"
+   ],
+   [
+    "78",
+    "117"
+   ],
+   [
+    "78",
+    "117"
+   ]
+  ],
+  "neigh": [
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0"
+  ],
+  "pe0": 26388.46379465847,
+  "nan": false,
+  "step_s": [
+   0.09203049999999999,
+   0.09204949999999999
+  ],
+  "status": "ok",
+  "atom_steps_per_s": 1424223.491125225,
+  "device_name": "NVIDIA A100 80GB PCIe",
+  "lammps_jax": "4a7f4fb 2026-09-14",
+  "t": 289.2
+ },
+ {
+  "kind": "time",
+  "variant": "tight",
+  "round": 0,
+  "model": "pace_Cantor_medium",
+  "n": 131072,
+  "export_s": 4.022246480999996,
+  "layout": "matrix",
+  "k_dense": 50,
+  "input_layout": "neighbor-matrix",
+  "max_neighbors": 117,
+  "max_edges": null,
+  "max_owned": 144180,
+  "max_atoms": 194245,
+  "k_list": 78,
+  "k_cut": 42,
+  "bundle_bytes": 901759,
+  "deck": "static",
+  "wall_s": 25.01778412799996,
+  "returncode": 0,
+  "log_errors": [],
+  "widest_row": [
+   [
+    "78",
+    "117"
+   ],
+   [
+    "78",
+    "117"
+   ],
+   [
+    "78",
+    "117"
+   ]
+  ],
+  "neigh": [
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0"
+  ],
+  "pe0": 26388.46379465847,
+  "nan": false,
+  "step_s": [
+   0.07849383333333333,
+   0.07876616666666666
+  ],
+  "status": "ok",
+  "atom_steps_per_s": 1669838.1826173181,
+  "device_name": "NVIDIA A100 80GB PCIe",
+  "lammps_jax": "4a7f4fb 2026-09-14",
+  "t": 315.9
+ },
+ {
+  "kind": "time",
+  "variant": "stock",
+  "round": 0,
+  "model": "ace_Cantor_medium",
+  "n": 16384,
+  "export_s": 1.600395505999984,
+  "layout": "dense",
+  "k_dense": 86,
+  "input_layout": "sparse-edge",
+  "max_neighbors": null,
+  "max_edges": 1549978,
+  "max_owned": 18023,
+  "max_atoms": 31842,
+  "k_list": 78,
+  "k_cut": 42,
+  "bundle_bytes": 1343718,
+  "deck": "bench",
+  "wall_s": 14.157750370999963,
+  "returncode": 0,
+  "log_errors": [],
+  "widest_row": [],
+  "neigh": [
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0"
+  ],
+  "pe0": -818.8103789525715,
+  "nan": false,
+  "step_s": [
+   0.013300449999999998,
+   0.013251299999999999
+  ],
+  "status": "ok",
+  "atom_steps_per_s": 1236406.9940307743,
+  "device_name": "NVIDIA A100 80GB PCIe",
+  "lammps_jax": "4a7f4fb 2026-09-14",
+  "t": 354.5
+ },
+ {
+  "kind": "time",
+  "variant": "matrix",
+  "round": 0,
+  "model": "ace_Cantor_medium",
+  "n": 16384,
+  "export_s": 2.0104896519999897,
+  "layout": "matrix",
+  "k_dense": 86,
+  "input_layout": "neighbor-matrix",
+  "max_neighbors": 117,
+  "max_edges": null,
+  "max_owned": 18023,
+  "max_atoms": 31842,
+  "k_list": 78,
+  "k_cut": 42,
+  "bundle_bytes": 1346795,
+  "deck": "bench",
+  "wall_s": 12.480535683000028,
+  "returncode": 0,
+  "log_errors": [],
+  "widest_row": [
+   [
+    "78",
+    "117"
+   ],
+   [
+    "78",
+    "117"
+   ],
+   [
+    "78",
+    "117"
+   ]
+  ],
+  "neigh": [
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0"
+  ],
+  "pe0": -818.8103789525715,
+  "nan": false,
+  "step_s": [
+   0.010086850000000001,
+   0.0092861
+  ],
+  "status": "ok",
+  "atom_steps_per_s": 1764357.4805354238,
+  "device_name": "NVIDIA A100 80GB PCIe",
+  "lammps_jax": "4a7f4fb 2026-09-14",
+  "t": 367.9
+ },
+ {
+  "kind": "time",
+  "variant": "stock",
+  "round": 0,
+  "model": "ace_Cantor_medium",
+  "n": 16384,
+  "export_s": 1.600395505999984,
+  "layout": "dense",
+  "k_dense": 86,
+  "input_layout": "sparse-edge",
+  "max_neighbors": null,
+  "max_edges": 1549978,
+  "max_owned": 18023,
+  "max_atoms": 31842,
+  "k_list": 78,
+  "k_cut": 42,
+  "bundle_bytes": 1343718,
+  "deck": "static",
+  "wall_s": 13.403587362999986,
+  "returncode": 0,
+  "log_errors": [],
+  "widest_row": [],
+  "neigh": [
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0"
+  ],
+  "pe0": -818.8103789525715,
+  "nan": false,
+  "step_s": [
+   0.013004549999999998,
+   0.01294195
+  ],
+  "status": "ok",
+  "atom_steps_per_s": 1265960.6937130804,
+  "device_name": "NVIDIA A100 80GB PCIe",
+  "lammps_jax": "4a7f4fb 2026-09-14",
+  "t": 382.5
+ },
+ {
+  "kind": "time",
+  "variant": "matrix",
+  "round": 0,
+  "model": "ace_Cantor_medium",
+  "n": 16384,
+  "export_s": 2.0104896519999897,
+  "layout": "matrix",
+  "k_dense": 86,
+  "input_layout": "neighbor-matrix",
+  "max_neighbors": 117,
+  "max_edges": null,
+  "max_owned": 18023,
+  "max_atoms": 31842,
+  "k_list": 78,
+  "k_cut": 42,
+  "bundle_bytes": 1346795,
+  "deck": "static",
+  "wall_s": 11.679393441000002,
+  "returncode": 0,
+  "log_errors": [],
+  "widest_row": [
+   [
+    "78",
+    "117"
+   ],
+   [
+    "78",
+    "117"
+   ],
+   [
+    "78",
+    "117"
+   ]
+  ],
+  "neigh": [
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0"
+  ],
+  "pe0": -818.8103789525715,
+  "nan": false,
+  "step_s": [
+   0.00927415,
+   0.00920855
+  ],
+  "status": "ok",
+  "atom_steps_per_s": 1779216.0546448682,
+  "device_name": "NVIDIA A100 80GB PCIe",
+  "lammps_jax": "4a7f4fb 2026-09-14",
+  "t": 395.3
+ },
+ {
+  "kind": "time",
+  "variant": "tight",
+  "round": 0,
+  "model": "ace_Cantor_medium",
+  "n": 16384,
+  "export_s": 2.3037165339999888,
+  "layout": "matrix",
+  "k_dense": 50,
+  "input_layout": "neighbor-matrix",
+  "max_neighbors": 117,
+  "max_edges": null,
+  "max_owned": 18023,
+  "max_atoms": 31842,
+  "k_list": 78,
+  "k_cut": 42,
+  "bundle_bytes": 1346579,
+  "deck": "static",
+  "wall_s": 10.588140001999989,
+  "returncode": 0,
+  "log_errors": [],
+  "widest_row": [
+   [
+    "78",
+    "117"
+   ],
+   [
+    "78",
+    "117"
+   ],
+   [
+    "78",
+    "117"
+   ]
+  ],
+  "neigh": [
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0"
+  ],
+  "pe0": -818.8103789525715,
+  "nan": false,
+  "step_s": [
+   0.0070238,
+   0.00700445
+  ],
+  "status": "ok",
+  "atom_steps_per_s": 2339084.4391779513,
+  "device_name": "NVIDIA A100 80GB PCIe",
+  "lammps_jax": "4a7f4fb 2026-09-14",
+  "t": 407.2
+ },
+ {
+  "kind": "time",
+  "variant": "stock",
+  "round": 0,
+  "model": "ace_Cantor_medium",
+  "n": 131072,
+  "export_s": 3.2869176340000195,
+  "layout": "dense",
+  "k_dense": 86,
+  "input_layout": "sparse-edge",
+  "max_neighbors": null,
+  "max_edges": 12399480,
+  "max_owned": 144180,
+  "max_atoms": 194245,
+  "k_list": 78,
+  "k_cut": 42,
+  "bundle_bytes": 1404697,
+  "deck": "bench",
+  "wall_s": 23.75001813800003,
+  "returncode": 0,
+  "log_errors": [],
+  "widest_row": [],
+  "neigh": [
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0"
+  ],
+  "pe0": -6539.392754502789,
+  "nan": false,
+  "step_s": [
+   0.10498416666666667,
+   0.104837
+  ],
+  "status": "ok",
+  "atom_steps_per_s": 1250245.619390101,
+  "device_name": "NVIDIA A100 80GB PCIe",
+  "lammps_jax": "4a7f4fb 2026-09-14",
+  "t": 469.6
+ },
+ {
+  "kind": "time",
+  "variant": "matrix",
+  "round": 0,
+  "model": "ace_Cantor_medium",
+  "n": 131072,
+  "export_s": 3.1147139500000094,
+  "layout": "matrix",
+  "k_dense": 86,
+  "input_layout": "neighbor-matrix",
+  "max_neighbors": 117,
+  "max_edges": null,
+  "max_owned": 144180,
+  "max_atoms": 194245,
+  "k_list": 78,
+  "k_cut": 42,
+  "bundle_bytes": 1408338,
+  "deck": "bench",
+  "wall_s": 21.359484106000025,
+  "returncode": 0,
+  "log_errors": [],
+  "widest_row": [
+   [
+    "78",
+    "117"
+   ],
+   [
+    "78",
+    "117"
+   ],
+   [
+    "78",
+    "117"
+   ]
+  ],
+  "neigh": [
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0"
+  ],
+  "pe0": -6539.392754502789,
+  "nan": false,
+  "step_s": [
+   0.0825535,
+   0.08242316666666666
+  ],
+  "status": "ok",
+  "atom_steps_per_s": 1590232.5195788404,
+  "device_name": "NVIDIA A100 80GB PCIe",
+  "lammps_jax": "4a7f4fb 2026-09-14",
+  "t": 492.7
+ },
+ {
+  "kind": "time",
+  "variant": "stock",
+  "round": 0,
+  "model": "ace_Cantor_medium",
+  "n": 131072,
+  "export_s": 3.2869176340000195,
+  "layout": "dense",
+  "k_dense": 86,
+  "input_layout": "sparse-edge",
+  "max_neighbors": null,
+  "max_edges": 12399480,
+  "max_owned": 144180,
+  "max_atoms": 194245,
+  "k_list": 78,
+  "k_cut": 42,
+  "bundle_bytes": 1404697,
+  "deck": "static",
+  "wall_s": 23.709389630000032,
+  "returncode": 0,
+  "log_errors": [],
+  "widest_row": [],
+  "neigh": [
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0"
+  ],
+  "pe0": -6539.39275450279,
+  "nan": false,
+  "step_s": [
+   0.10486833333333333,
+   0.104723
+  ],
+  "status": "ok",
+  "atom_steps_per_s": 1251606.6193672833,
+  "device_name": "NVIDIA A100 80GB PCIe",
+  "lammps_jax": "4a7f4fb 2026-09-14",
+  "t": 518.1
+ },
+ {
+  "kind": "time",
+  "variant": "matrix",
+  "round": 0,
+  "model": "ace_Cantor_medium",
+  "n": 131072,
+  "export_s": 3.1147139500000094,
+  "layout": "matrix",
+  "k_dense": 86,
+  "input_layout": "neighbor-matrix",
+  "max_neighbors": 117,
+  "max_edges": null,
+  "max_owned": 144180,
+  "max_atoms": 194245,
+  "k_list": 78,
+  "k_cut": 42,
+  "bundle_bytes": 1408338,
+  "deck": "static",
+  "wall_s": 21.146456429999944,
+  "returncode": 0,
+  "log_errors": [],
+  "widest_row": [
+   [
+    "78",
+    "117"
+   ],
+   [
+    "78",
+    "117"
+   ],
+   [
+    "78",
+    "117"
+   ]
+  ],
+  "neigh": [
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0"
+  ],
+  "pe0": -6539.39275450279,
+  "nan": false,
+  "step_s": [
+   0.08258166666666668,
+   0.08244516666666667
+  ],
+  "status": "ok",
+  "atom_steps_per_s": 1589808.1755348505,
+  "device_name": "NVIDIA A100 80GB PCIe",
+  "lammps_jax": "4a7f4fb 2026-09-14",
+  "t": 540.9
+ },
+ {
+  "kind": "time",
+  "variant": "tight",
+  "round": 0,
+  "model": "ace_Cantor_medium",
+  "n": 131072,
+  "export_s": 3.357410518999984,
+  "layout": "matrix",
+  "k_dense": 50,
+  "input_layout": "neighbor-matrix",
+  "max_neighbors": 117,
+  "max_edges": null,
+  "max_owned": 144180,
+  "max_atoms": 194245,
+  "k_list": 78,
+  "k_cut": 42,
+  "bundle_bytes": 1408222,
+  "deck": "static",
+  "wall_s": 17.387730218,
+  "returncode": 0,
+  "log_errors": [],
+  "widest_row": [
+   [
+    "78",
+    "117"
+   ],
+   [
+    "78",
+    "117"
+   ],
+   [
+    "78",
+    "117"
+   ]
+  ],
+  "neigh": [
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0"
+  ],
+  "pe0": -6539.39275450279,
+  "nan": false,
+  "step_s": [
+   0.059306500000000005,
+   0.0592885
+  ],
+  "status": "ok",
+  "atom_steps_per_s": 2210749.133474451,
+  "device_name": "NVIDIA A100 80GB PCIe",
+  "lammps_jax": "4a7f4fb 2026-09-14",
+  "t": 559.8
+ },
+ {
+  "kind": "time",
+  "variant": "stock",
+  "round": 0,
+  "model": "ace_SiGe_medium",
+  "n": 16384,
+  "export_s": 1.6641664479999463,
+  "layout": "dense",
+  "k_dense": 42,
+  "input_layout": "sparse-edge",
+  "max_neighbors": null,
+  "max_edges": 756966,
+  "max_owned": 18023,
+  "max_atoms": 29523,
+  "k_list": 34,
+  "k_cut": 28,
+  "bundle_bytes": 496873,
+  "deck": "bench",
+  "wall_s": 9.823872723000022,
+  "returncode": 0,
+  "log_errors": [],
+  "widest_row": [],
+  "neigh": [
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Neighbor list builds = 1",
+   "Dangerous builds = 0",
+   "Neighbor list builds = 2",
+   "Dangerous builds = 0"
+  ],
+  "pe0": -799.7378824364658,
+  "nan": false,
+  "step_s": [
+   0.0066541,
+   0.00674555
+  ],
+  "status": "ok",
+  "atom_steps_per_s": 2462241.324897432,
+  "device_name": "NVIDIA A100 80GB PCIe",
+  "lammps_jax": "4a7f4fb 2026-09-14",
+  "t": 591.5
+ },
+ {
+  "kind": "time",
+  "variant": "matrix",
+  "round": 0,
+  "model": "ace_SiGe_medium",
+  "n": 16384,
+  "export_s": 1.788864093999905,
+  "layout": "matrix",
+  "k_dense": 42,
+  "input_layout": "neighbor-matrix",
+  "max_neighbors": 51,
+  "max_edges": null,
+  "max_owned": 18023,
+  "max_atoms": 29523,
+  "k_list": 34,
+  "k_cut": 28,
+  "bundle_bytes": 499946,
+  "deck": "bench",
+  "wall_s": 10.067280908000043,
+  "returncode": 0,
+  "log_errors": [],
+  "widest_row": [
+   [
+    "34",
+    "51"
+   ],
+   [
+    "34",
+    "51"
+   ],
+   [
+    "45",
+    "51"
+   ]
+  ],
+  "neigh": [
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Neighbor list builds = 1",
+   "Dangerous builds = 0",
+   "Neighbor list builds = 2",
+   "Dangerous builds = 0"
+  ],
+  "pe0": -799.7378824364657,
+  "nan": false,
+  "step_s": [
+   0.0052967,
+   0.005130050000000001
+  ],
+  "status": "ok",
+  "atom_steps_per_s": 3193731.0552528724,
+  "device_name": "NVIDIA A100 80GB PCIe",
+  "lammps_jax": "4a7f4fb 2026-09-14",
+  "t": 602.5
+ },
+ {
+  "kind": "time",
+  "variant": "stock",
+  "round": 0,
+  "model": "ace_SiGe_medium",
+  "n": 16384,
+  "export_s": 1.6641664479999463,
+  "layout": "dense",
+  "k_dense": 42,
+  "input_layout": "sparse-edge",
+  "max_neighbors": null,
+  "max_edges": 756966,
+  "max_owned": 18023,
+  "max_atoms": 29523,
+  "k_list": 34,
+  "k_cut": 28,
+  "bundle_bytes": 496873,
+  "deck": "static",
+  "wall_s": 9.883499818000018,
+  "returncode": 0,
+  "log_errors": [],
+  "widest_row": [],
+  "neigh": [
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0"
+  ],
+  "pe0": -799.7378824364656,
+  "nan": false,
+  "step_s": [
+   0.0065987,
+   0.0065914
+  ],
+  "status": "ok",
+  "atom_steps_per_s": 2485663.136814637,
+  "device_name": "NVIDIA A100 80GB PCIe",
+  "lammps_jax": "4a7f4fb 2026-09-14",
+  "t": 613.3
+ },
+ {
+  "kind": "time",
+  "variant": "matrix",
+  "round": 0,
+  "model": "ace_SiGe_medium",
+  "n": 16384,
+  "export_s": 1.788864093999905,
+  "layout": "matrix",
+  "k_dense": 42,
+  "input_layout": "neighbor-matrix",
+  "max_neighbors": 51,
+  "max_edges": null,
+  "max_owned": 18023,
+  "max_atoms": 29523,
+  "k_list": 34,
+  "k_cut": 28,
+  "bundle_bytes": 499946,
+  "deck": "static",
+  "wall_s": 10.103792448000036,
+  "returncode": 0,
+  "log_errors": [],
+  "widest_row": [
+   [
+    "34",
+    "51"
+   ],
+   [
+    "34",
+    "51"
+   ],
+   [
+    "34",
+    "51"
+   ]
+  ],
+  "neigh": [
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0"
+  ],
+  "pe0": -799.7378824364657,
+  "nan": false,
+  "step_s": [
+   0.005299399999999999,
+   0.0052422
+  ],
+  "status": "ok",
+  "atom_steps_per_s": 3125405.3641600856,
+  "device_name": "NVIDIA A100 80GB PCIe",
+  "lammps_jax": "4a7f4fb 2026-09-14",
+  "t": 624.3
+ },
+ {
+  "kind": "time",
+  "variant": "tight",
+  "round": 0,
+  "model": "ace_SiGe_medium",
+  "n": 16384,
+  "export_s": 1.7554830459999948,
+  "layout": "matrix",
+  "k_dense": 36,
+  "input_layout": "neighbor-matrix",
+  "max_neighbors": 51,
+  "max_edges": null,
+  "max_owned": 18023,
+  "max_atoms": 29523,
+  "k_list": 34,
+  "k_cut": 28,
+  "bundle_bytes": 499946,
+  "deck": "static",
+  "wall_s": 9.677046328000074,
+  "returncode": 0,
+  "log_errors": [],
+  "widest_row": [
+   [
+    "34",
+    "51"
+   ],
+   [
+    "34",
+    "51"
+   ],
+   [
+    "34",
+    "51"
+   ]
+  ],
+  "neigh": [
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0"
+  ],
+  "pe0": -799.7378824364657,
+  "nan": false,
+  "step_s": [
+   0.0054884,
+   0.00544385
+  ],
+  "status": "ok",
+  "atom_steps_per_s": 3009634.7254241025,
+  "device_name": "NVIDIA A100 80GB PCIe",
+  "lammps_jax": "4a7f4fb 2026-09-14",
+  "t": 635.3
+ },
+ {
+  "kind": "time",
+  "variant": "stock",
+  "round": 0,
+  "model": "ace_SiGe_medium",
+  "n": 131072,
+  "export_s": 3.4190806840000505,
+  "layout": "dense",
+  "k_dense": 42,
+  "input_layout": "sparse-edge",
+  "max_neighbors": null,
+  "max_edges": 6055560,
+  "max_owned": 144180,
+  "max_atoms": 186610,
+  "k_list": 34,
+  "k_cut": 28,
+  "bundle_bytes": 558992,
+  "deck": "bench",
+  "wall_s": 16.470804422000015,
+  "returncode": 0,
+  "log_errors": [],
+  "widest_row": [],
+  "neigh": [
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0"
+  ],
+  "pe0": -6335.491628618067,
+  "nan": false,
+  "step_s": [
+   0.05298716666666667,
+   0.05305016666666666
+  ],
+  "status": "ok",
+  "atom_steps_per_s": 2473655.5706885,
+  "device_name": "NVIDIA A100 80GB PCIe",
+  "lammps_jax": "4a7f4fb 2026-09-14",
+  "t": 685.9
+ },
+ {
+  "kind": "time",
+  "variant": "matrix",
+  "round": 0,
+  "model": "ace_SiGe_medium",
+  "n": 131072,
+  "export_s": 3.3022583709999935,
+  "layout": "matrix",
+  "k_dense": 42,
+  "input_layout": "neighbor-matrix",
+  "max_neighbors": 51,
+  "max_edges": null,
+  "max_owned": 144180,
+  "max_atoms": 186610,
+  "k_list": 34,
+  "k_cut": 28,
+  "bundle_bytes": 562565,
+  "deck": "bench",
+  "wall_s": 15.753717980000033,
+  "returncode": 0,
+  "log_errors": [],
+  "widest_row": [
+   [
+    "34",
+    "51"
+   ],
+   [
+    "34",
+    "51"
+   ],
+   [
+    "40",
+    "51"
+   ]
+  ],
+  "neigh": [
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0"
+  ],
+  "pe0": -6335.491628618067,
+  "nan": false,
+  "step_s": [
+   0.0461865,
+   0.04617716666666667
+  ],
+  "status": "ok",
+  "atom_steps_per_s": 2838459.1230153427,
+  "device_name": "NVIDIA A100 80GB PCIe",
+  "lammps_jax": "4a7f4fb 2026-09-14",
+  "t": 703.1
+ },
+ {
+  "kind": "time",
+  "variant": "stock",
+  "round": 0,
+  "model": "ace_SiGe_medium",
+  "n": 131072,
+  "export_s": 3.4190806840000505,
+  "layout": "dense",
+  "k_dense": 42,
+  "input_layout": "sparse-edge",
+  "max_neighbors": null,
+  "max_edges": 6055560,
+  "max_owned": 144180,
+  "max_atoms": 186610,
+  "k_list": 34,
+  "k_cut": 28,
+  "bundle_bytes": 558992,
+  "deck": "static",
+  "wall_s": 16.378809950999994,
+  "returncode": 0,
+  "log_errors": [],
+  "widest_row": [],
+  "neigh": [
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0"
+  ],
+  "pe0": -6335.491628618067,
+  "nan": false,
+  "step_s": [
+   0.052838333333333334,
+   0.052894666666666666
+  ],
+  "status": "ok",
+  "atom_steps_per_s": 2480623.2848626315,
+  "device_name": "NVIDIA A100 80GB PCIe",
+  "lammps_jax": "4a7f4fb 2026-09-14",
+  "t": 721.2
+ },
+ {
+  "kind": "time",
+  "variant": "matrix",
+  "round": 0,
+  "model": "ace_SiGe_medium",
+  "n": 131072,
+  "export_s": 3.3022583709999935,
+  "layout": "matrix",
+  "k_dense": 42,
+  "input_layout": "neighbor-matrix",
+  "max_neighbors": 51,
+  "max_edges": null,
+  "max_owned": 144180,
+  "max_atoms": 186610,
+  "k_list": 34,
+  "k_cut": 28,
+  "bundle_bytes": 562565,
+  "deck": "static",
+  "wall_s": 15.60019604799993,
+  "returncode": 0,
+  "log_errors": [],
+  "widest_row": [
+   [
+    "34",
+    "51"
+   ],
+   [
+    "34",
+    "51"
+   ],
+   [
+    "34",
+    "51"
+   ]
+  ],
+  "neigh": [
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0"
+  ],
+  "pe0": -6335.491628618068,
+  "nan": false,
+  "step_s": [
+   0.046143833333333335,
+   0.045993
+  ],
+  "status": "ok",
+  "atom_steps_per_s": 2849824.973365512,
+  "device_name": "NVIDIA A100 80GB PCIe",
+  "lammps_jax": "4a7f4fb 2026-09-14",
+  "t": 738.3
+ },
+ {
+  "kind": "time",
+  "variant": "tight",
+  "round": 0,
+  "model": "ace_SiGe_medium",
+  "n": 131072,
+  "export_s": 3.458979678999981,
+  "layout": "matrix",
+  "k_dense": 36,
+  "input_layout": "neighbor-matrix",
+  "max_neighbors": 51,
+  "max_edges": null,
+  "max_owned": 144180,
+  "max_atoms": 186610,
+  "k_list": 34,
+  "k_cut": 28,
+  "bundle_bytes": 562421,
+  "deck": "static",
+  "wall_s": 15.954831330000047,
+  "returncode": 0,
+  "log_errors": [],
+  "widest_row": [
+   [
+    "34",
+    "51"
+   ],
+   [
+    "34",
+    "51"
+   ],
+   [
+    "34",
+    "51"
+   ]
+  ],
+  "neigh": [
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0",
+   "Neighbor list builds = 0",
+   "Dangerous builds = 0"
+  ],
+  "pe0": -6335.491628618067,
+  "nan": false,
+  "step_s": [
+   0.04175333333333333,
+   0.041707999999999995
+  ],
+  "status": "ok",
+  "atom_steps_per_s": 3142610.5303538893,
+  "device_name": "NVIDIA A100 80GB PCIe",
+  "lammps_jax": "4a7f4fb 2026-09-14",
+  "t": 756.1
+ }
+]

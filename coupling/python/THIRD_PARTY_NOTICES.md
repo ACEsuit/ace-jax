@@ -30,19 +30,20 @@ upstream's own licence file and Julia's `THIRDPARTY.md`
 | SuiteSparse BTF | `libbtf.2` | LGPL-2.1-or-later | `licenses/SuiteSparse-BTF.txt`, `licenses/LGPL-2.1.txt` |
 | SuiteSparse KLU | `libklu.2` | LGPL-2.1-or-later | `licenses/SuiteSparse-KLU.txt`, `licenses/LGPL-2.1.txt` |
 | SuiteSparse LDL | `libldl.3` | LGPL-2.1-or-later | `licenses/SuiteSparse-LDL.txt`, `licenses/LGPL-2.1.txt` |
-| SuiteSparse CHOLMOD | `libcholmod.5` | LGPL-2.1-or-later AND GPL-2.0-or-later | `licenses/SuiteSparse-CHOLMOD.txt`, `licenses/LGPL-2.1.txt`, `licenses/GPL-2.0.txt` |
-| **SuiteSparse UMFPACK** (used: sparse LU in EquivariantTensors' coupling solver) | `libumfpack.6` | **GPL-2.0-or-later** | `licenses/SuiteSparse-UMFPACK.txt`, `licenses/GPL-2.0.txt` |
-| **SuiteSparse SPQR** (loaded by SparseArrays) | `libspqr.4` | **GPL-2.0-or-later** | `licenses/SuiteSparse-SPQR.txt`, `licenses/GPL-2.0.txt` |
-| **SuiteSparse RBio** (loaded by SparseArrays) | `librbio.4` | **GPL-2.0-or-later** | `licenses/SuiteSparse-RBio.txt`, `licenses/GPL-2.0.txt` |
+| SuiteSparse CHOLMOD, UMFPACK, SPQR, RBio: **not bundled** | `libcholmod.5`, `libumfpack.6`, `libspqr.4`, `librbio.4` are empty placeholders of the same names, built by `coupling/tools/prune_bundle.py` (SuiteSparse_jll's init opens every SuiteSparse library; the coupling never calls these, as it uses EquivariantTensors' `nullspace_solver = :dense`) | MIT (ace-jax glue; no SuiteSparse code) | `LICENSE` |
 | GCC runtime: libgcc_s, libgfortran, libgomp, libatomic, libssp, libstdc++ | `libgcc_s.1.1`, `libgfortran.5`, `libgomp.1`, `libatomic.1`, `libssp.0`, `libstdc++.6` | GPL-3.0-or-later WITH GCC-exception-3.1 | `licenses/GPL-3.0.txt`, `licenses/GCC-exception-3.1.txt` |
 | libquadmath (GCC) | `libquadmath.0` | LGPL-2.1-or-later | `licenses/LGPL-2.1.txt` |
 | GNU libiconv / libcharset (Julia artifact, loaded by Libiconv_jll's init) | `share/julia/artifacts/.../libiconv.2`, `libcharset.1` | LGPL-2.1-or-later (library) | `licenses/Libiconv.txt`, `licenses/LGPL-2.1.txt` |
 | OpenSpecFun (Julia artifact, loaded by OpenSpecFun_jll's init) | `share/julia/artifacts/.../libopenspecfun.2.1` | MIT (Faddeeva) AND public domain (AMOS) | `licenses/OpenSpecFun.txt` |
 
-**Licence status of the combined wheel: undecided.** Because the bundle contains
-GPL-2.0-or-later components (UMFPACK, SPQR, RBio, parts of CHOLMOD), the wheel
-as a whole is distributed subject to the GPL's terms for those components. No
-`License-Expression` is declared in the package metadata until that is settled.
+**No GPL-only code is bundled.** The GPL-2.0-or-later SuiteSparse modules
+(UMFPACK, SPQR, RBio and the GPL parts of CHOLMOD) are replaced by the
+placeholders above; `coupling/tools/check_bundle.py` fails a bundle that holds
+any real copy. The copyleft that remains is (a) LGPL libraries, each shipped as a
+separate, replaceable shared library, and (b) the GCC runtime under GPL-3.0 with
+the GCC Runtime Library Exception, which permits its use in non-GPL works. GMP is
+used under its LGPL-3.0-or-later option. The `License-Expression` in the package
+metadata is still to be declared before publication.
 Source for every component is available from the upstream projects linked in
 `licenses/Julia-THIRDPARTY.md`; the EquivariantTensors source is the fork
 commit reported by `ace_jax_coupling.build_info()`.

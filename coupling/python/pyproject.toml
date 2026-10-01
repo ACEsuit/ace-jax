@@ -4,12 +4,13 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ace-jax-coupling"
-version = "0.1.0"
+version = "0.2.0"
 description = "EquivariantTensors.jl SO(3) coupling tables for ace-jax, as a juliac-compiled library (no Julia needed)"
 readme = "README.md"
 requires-python = ">=3.11"
-# No `license =` expression yet: the wheel bundles GPL-2.0+ SuiteSparse modules
-# (see THIRD_PARTY_NOTICES.md); the declaration is decided before any publication.
+# No `license =` expression yet. The wheel bundles no GPL-only code (GPL SuiteSparse
+# modules are placeholders, see THIRD_PARTY_NOTICES.md); the declaration of the
+# MIT/BSD/LGPL/GCC-exception combination is made before any publication.
 license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md", "licenses/*"]
 authors = [{ name = "ACEsuit contributors" }]
 dependencies = ["numpy>=1.24"]

@@ -74,7 +74,7 @@ def subspace_residual(A, B):
     return float(np.abs(Qa @ Qa.T - Qb @ Qb.T).max())
 
 
-COUPLING_LIB_VERSION = "0.1.0"   # == the `basis` extra pin (test_backend_id_matches_extra_pin)
+COUPLING_LIB_VERSION = "0.2.0"   # == the core dependency pin (test_backend_id_matches_dependency_pin)
 
 
 def backend_id():

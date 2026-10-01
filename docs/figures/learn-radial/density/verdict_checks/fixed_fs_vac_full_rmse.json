@@ -1,0 +1,8 @@
+{
+ "/tmp/fixed_fs_joint_full/model.npz": {
+  "E_rmse_meV_atom": 0.728087921002315,
+  "E_mae_meV_atom": 0.5889022901786234,
+  "F_rmse_meV_A": 37.7483130654361,
+  "F_mae_meV_A": 27.567457032560547
+ }
+}

@@ -12,11 +12,13 @@ from .rungs import run_rungs
 class FitResult(NamedTuple):
     config: object; data: object; built: object; theta: object
     map: object; rungs: object; preds: object; timings: dict
+    ard: object = None                   # ARDResult when uq == "ard" (last: positional use unaffected)
 
 
 def fit(cfg, data, log=print, on_stage=None):
     """Run the pipeline.  on_stage(name, payload), if given, is called as each
-    expensive stage finishes ("data" -> FitData, "map" -> MapFit, "rungs" -> Rungs),
+    expensive stage finishes ("data" -> FitData, "map" -> MapFit, "rungs" -> Rungs,
+    "ard" -> ARDResult and "model" -> the ARD-mean model.npz arrays when uq == "ard"),
     so a driver can write those results before a later stage (e.g. POPS or
     prediction running out of memory) can lose them."""
     T0 = time.time()
@@ -30,6 +32,21 @@ def fit(cfg, data, log=print, on_stage=None):
         stage("map", mf)
         rg = run_rungs(cfg, b, obj, mf.theta, log=log)
         stage("rungs", rg)
+        ard = None
+        if cfg.uq == "ard":
+            from ..ard import run_ard_stage
+            # joint mode refits on the objective's cached linear statistics (not a second pass);
+            # drop everything else the objective holds -- the LML, its jitted objective and the
+            # stats closure (ARD predicts from its own posterior) -- then free their buffers
+            full = obj.lin if cfg.ard_mode == "joint" else None
+            obj = obj._replace(lik=None, vg=None, host_cache=None, stats=None, lin=None)
+            release()
+            ard = run_ard_stage(cfg, data, b, mf.theta, log=log, full_stats=full)
+            del full
+            stage("ard", ard)
+            from .export import linear_arrays_from_mean, model_file_blocked
+            if model_file_blocked(cfg) is None:      # the ARD-mean model.npz, before prediction
+                stage("model", linear_arrays_from_mean(data.z, data.E0, b.prob.cfg, ard.posterior.mean))
         # cached linear statistics (run.py) or a full recompute per draw (the CLI's
         # historical path): equal in exact arithmetic, not in summation order
         stats = obj.stats if cfg.predict_stats == "cached" else None
@@ -39,6 +56,9 @@ def fit(cfg, data, log=print, on_stage=None):
             # drop the LML and its jitted objective, then free their buffers
             obj = obj._replace(lik=None, vg=None, host_cache=None)
             release()
-        pr = predict_splits(cfg, data, b, stats, mf.theta, rg.draws, log=log)
-    tm = {**b.timings, **obj.timings, **mf.timings, **rg.timings, **pr.timings, "total": time.time() - T0}
-    return FitResult(cfg, data, b, mf.theta, mf, rg, pr, tm)
+        pr = predict_splits(cfg, data, b, stats, mf.theta, rg.draws, log=log, ard=ard)
+    tm = {**b.timings, **obj.timings, **mf.timings, **rg.timings, **pr.timings}
+    if ard is not None:
+        tm["ard"] = ard.report["seconds"]
+    tm["total"] = time.time() - T0
+    return FitResult(cfg, data, b, mf.theta, mf, rg, pr, tm, ard)

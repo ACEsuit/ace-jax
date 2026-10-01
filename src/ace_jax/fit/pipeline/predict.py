@@ -82,7 +82,7 @@ def _pops_setup(cfg, d, b, stats, theta, log):
     return out
 
 
-def predict_splits(cfg, d, b, stats, theta, draws, log=print):
+def predict_splits(cfg, d, b, stats, theta, draws, log=print, ard=None):
     prob, arrays, metrics, tm = b.prob, {}, {}, {}
     pops = {}
     if cfg.uq == "pops":
@@ -98,7 +98,10 @@ def predict_splits(cfg, d, b, stats, theta, draws, log=print):
         sub = dr if len(dr) <= cfg.n_draws else dr[np.linspace(0, len(dr) - 1, cfg.n_draws).astype(int)]
         for split, cfgs, ds, base in splits:
             t = time.time()
-            if cfg.uq == "pops":
+            if cfg.uq == "ard":
+                from ..ard import predict_ard
+                pred = predict_ard(ard.posterior, prob, ds)
+            elif cfg.uq == "pops":
                 pred = predict_fixed(theta, prob, d.ds_train, ds, deriv_dtc=cfg.deriv_dtc, uq="pops",
                                      pops_form=cfg.pops_posterior, leverage_pct=cfg.pops_leverage_pct,
                                      pops_ridge=pops["ridge"], pops_path=pops["path"], stats=stats)
@@ -112,7 +115,12 @@ def predict_splits(cfg, d, b, stats, theta, draws, log=print):
             E, F, V = _labels(cfgs)
             Em = np.asarray(pred.E_mean) + bE; Fm = np.asarray(pred.F_mean) + bF
             Vm = np.asarray(pred.V_mean) + bV6
-            s2 = {k: float(np.mean(np.exp(2 * sub[:, i]))) for k, i in (("E", 7), ("F", 8), ("V", 9))}
+            if ard is not None and ard.report.get("mode") == "joint":
+                # joint ARD refits sigma_q (h[:3] = log sigma_E/F/V): its noise, not the MAP rung's
+                hq = np.asarray(ard.posterior.h)[:3]
+                s2 = {k: float(np.exp(2 * hq[i])) for i, k in enumerate("EFV")}
+            else:         # sequential ARD keeps sigma_q at the MAP (= sub[:, 7:10])
+                s2 = {k: float(np.mean(np.exp(2 * sub[:, i]))) for k, i in (("E", 7), ("F", 8), ("V", 9))}
             arrays[f"{split}/{rung}"] = dict(
                 nat=nat, E=E, E_mean=Em, E_var=np.asarray(pred.E_var), F=F, F_mean=Fm,
                 F_var=np.asarray(pred.F_var), V=V, V_mean=Vm, V_var=np.asarray(pred.V_var),

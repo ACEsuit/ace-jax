@@ -8,7 +8,7 @@ LAMMPS, on SiGe and Cantor at three model sizes each. Design:
 | file | role |
 |---|---|
 | `structures.py` | SiGe diamond / Cantor fcc supercells, the atom-count ladder |
-| `models.py` | builds and lists every model (`python models.py pace\|ace\|mace`) |
+| `models.py` | builds and lists every model (`python models.py pace\|ace\|ace-learned\|mace`) |
 | `run_standalone.py` | one standalone case (ace-jax calculator or MACE PyTorch) |
 | `run_lammps.py` | one LAMMPS case: writes the input, runs, parses the timed segment |
 | `parity.py` | the per-host parity gates that must pass before any timing |
@@ -31,6 +31,12 @@ LAMMPS, on SiGe and Cantor at three model sizes each. Design:
     or density block. The original MP-0 checkpoints and MH-1 have a residual
     first block, which is why the b2 revision is used.
   - MH-1 therefore has no LAMMPS rows; its status is `unsupported`.
+- **Learned-radial proxies** (`models.py ace-learned`, after `ace`): the medium ACE models
+  on the analytic radial branch, `to_analytic(n_q=12)`, with the active `rnl_Wnlq` rows
+  perturbed by 10% of each row's rms (seed 0) and marked `radial_learned`, as
+  `ace_{SiGe,Cantor}_medium_learned.npz`. Two lines run them: `acejax-ace-learned`
+  (`spline_tol="auto"`, splined at 1e-10, as deployed) and `acejax-ace-analytic`
+  (`spline_tol=None`, exact). Rows record `spline_tol` and `splined`. Medium only.
 
 ## Environments
 
@@ -78,10 +84,14 @@ PYTHONPATH=bench:src python bench/scaling/sweep.py <host> [--only CODE] [--dry-r
 preallocation would starve every case after it. It compares:
 - ace-jax standalone with ML-PACE;
 - ace-jax standalone with ace-jax in LAMMPS;
-- MACE PyTorch with Symmetrix.
+- MACE PyTorch with Symmetrix;
+- the learned-radial proxy splined against kept analytic (gate `spline`,
+  standalone: |dE|/|E| <= 1e-9, max|dF| / max|F| <= 3e-8).
 
-A failed gate blocks that code's LAMMPS rows on the host, and a resumed sweep
-reuses the recorded gate.
+A failed gate blocks that code's LAMMPS rows on the host (a failed `spline`
+gate blocks both modes of `acejax-ace-learned`), and a resumed sweep reuses
+the recorded gate. `--only CODE` for a code the recorded gate never checked
+(a line added since) re-runs the gate and appends only the new checks.
 
 **Each case runs in a fresh process,** so peak memory is measured per case. A
 line (model × mode × dtype × device) stops at its first `oom`, `error` or

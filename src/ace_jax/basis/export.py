@@ -140,5 +140,20 @@ def patch_radial_npz(src, dst, model, readout=None):
         out["WB"], out["Wpair"] = readout_to_npz(readout, n_B, n_pair, NZ)
     meta["radial_kind"] = "analytic"
     meta["rnl_spline"] = None
+    meta["radial_learned"] = bool(model.radial_learned)
     out["meta_json"] = np.frombuffer(json.dumps(meta).encode(), dtype=np.uint8)
     np.savez(dst, **out)
+
+
+def mark_radial_learned(src, dst=None, learned=True):
+    """Set meta_json "radial_learned" in the npz at `src` (in place, or into
+    `dst`), leaving every array as is.  For learned-radial files written before
+    the flag existed, which load as not learned, so `lean`'s default keeps
+    their radial analytic: `mark_radial_learned("model.npz")`.  (Or pass
+    spline_tol=1e-10 to ACECalculator / export_lammps / lean instead.)"""
+    with np.load(src, allow_pickle=False) as z:
+        out = {k: z[k] for k in z.files}
+    meta = json.loads(bytes(out["meta_json"]).decode())
+    meta["radial_learned"] = bool(learned)
+    out["meta_json"] = np.frombuffer(json.dumps(meta).encode(), dtype=np.uint8)
+    np.savez(src if dst is None else dst, **out)
