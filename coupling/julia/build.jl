@@ -7,6 +7,13 @@ using JuliaC, TOML
 const HERE = @__DIR__
 const LIBPROJ = HERE                                   # coupling/julia (the shim project)
 const ENTRY = joinpath(HERE, "src", "ETCouple.jl")
+# Build with exactly the Julia the Manifests were resolved with: the bundled runtime
+# libraries (THIRD_PARTY_NOTICES.md versions) come with it, so a patch release
+# picked up by a loose "1.13" would ship different builds unannounced.
+for m in (joinpath(LIBPROJ, "Manifest.toml"), joinpath(HERE, "build", "Manifest.toml"))
+   want = TOML.parsefile(m)["julia_version"]
+   string(VERSION) == want || error("build needs Julia $want (julia_version in $m), got $VERSION")
+end
 out = abspath(length(ARGS) >= 1 ? ARGS[1] : joinpath(HERE, "..", "build"))
 bundle = joinpath(out, "bundle")
 rm(bundle; force = true, recursive = true); mkpath(out)

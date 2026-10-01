@@ -50,7 +50,7 @@ jobs:
       - name: Julia 1.13 (macOS)
         if: matrix.container == ''
         uses: julia-actions/setup-julia@v2
-        with: { version: "1.13" }
+        with: { version: "1.13.0" }   # exact: == the Manifests' julia_version (build.jl checks)
       - uses: actions/cache@v4
         with:
           path: ~/.julia
