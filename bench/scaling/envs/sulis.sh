@@ -118,8 +118,16 @@ nvcc129() {               # fallback toolkit: CUDA 12.9 from conda-forge, via mi
     libcublas-dev=12.9 libcusparse-dev=12.9 libcufft-dev=12.9 libcurand-dev=12.9 "gxx_linux-64=12.*"
 }
 
+cmake327() {              # Symmetrix's sphericart needs CMake >= 3.27; the module is 3.26.3
+  # (Sulis's 3.27+ modules are GCCcore 13.2 builds that clash with the GCC 12.3 toolchain)
+  [ -x "$VENV/bin/cmake" ] || uv pip install --python "$VENV/bin/python" -q "cmake>=3.27,<4"
+  export PATH=$VENV/bin:$PATH
+}
+
 lammps() {
   [ -x "$BUILD/lmp" ] && return 0
+  cmake327
+  rm -rf "$BUILD"                # a failed configure leaves a cache made by the old cmake
   cmake -S "$LAMMPS/cmake" -B "$BUILD" \
     -D CMAKE_BUILD_TYPE=Release -D CMAKE_CXX_STANDARD=20 -D CMAKE_CXX_STANDARD_REQUIRED=ON \
     -D CMAKE_CXX_COMPILER="$LAMMPS/lib/kokkos/bin/nvcc_wrapper" \
@@ -132,6 +140,7 @@ lammps() {
 }
 
 lmp_python() {
+  cmake327                       # the build tree was configured by it
   cmake --build "$BUILD" --target install-python
 }
 
