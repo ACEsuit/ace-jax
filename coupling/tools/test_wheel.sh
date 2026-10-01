@@ -17,11 +17,17 @@ unset JULIA_DEPOT_PATH JULIA_PROJECT ACEJAX_COUPLING_LIB PYTHONPATH
 NEWPATH=""
 while IFS= read -r d; do
   case "$d" in *[Jj]ulia*) continue ;; esac
-  [ -e "$d/julia" ] || [ -e "$d/julia.exe" ] || [ -e "$d/libjulia.dll" ] && continue
+  # never drop a system directory (that would take cp, find, ... with it): a Julia
+  # installed there is left for the guard below to report
+  case "$d" in /bin|/sbin|/usr/bin|/usr/sbin|/usr/local/bin|/usr/local/sbin) ;; *)
+    [ -e "$d/julia" ] || [ -e "$d/julia.exe" ] || [ -e "$d/libjulia.dll" ] && continue ;;
+  esac
   NEWPATH="${NEWPATH:+$NEWPATH:}$d"
 done < <(echo "$PATH" | tr ':' '\n')
 export PATH="$NEWPATH"
-if command -v julia >/dev/null; then echo "julia still on PATH: $(command -v julia)"; exit 1; fi
+if command -v julia >/dev/null; then
+  echo "julia still on PATH: $(command -v julia) (a system install; run in a container without it)"; exit 1
+fi
 export PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 "$PY" -m venv "$WORK/venv"
 VBIN="$WORK/venv/$([ "$WIN" = 1 ] && echo Scripts || echo bin)"
