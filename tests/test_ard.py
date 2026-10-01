@@ -236,9 +236,11 @@ def _pipe_cfg(**kw):
     return FitConfig(**{**base, **kw})
 
 
-def test_ard_stage_fits_kappa_and_refits_on_all_training_data():
+@pytest.fixture(scope="module")
+def ard_map():
+    """load_fit_data + build_problem + fit_map for _pipe_cfg(): identical for every ARD stage
+    test (ard_variance / ard_mode only change the stage that follows), so done once."""
     from conftest import FIXTURE_DIR
-    from ace_jax.fit.ard import predict_ard, run_ard_stage
     from ace_jax.fit.pipeline import load_fit_data
     from ace_jax.fit.pipeline.mapfit import fit_map
     from ace_jax.fit.pipeline.objective import make_objective
@@ -248,6 +250,14 @@ def test_ard_stage_fits_kappa_and_refits_on_all_training_data():
     b = build_problem(cfg, d)
     with highest_precision():
         theta = fit_map(cfg, d, b, make_objective(cfg, d, b), log=lambda *a: None).theta
+    return d, b, theta
+
+
+def test_ard_stage_fits_kappa_and_refits_on_all_training_data(ard_map):
+    from ace_jax.fit.ard import predict_ard, run_ard_stage
+    cfg = _pipe_cfg().validate()
+    d, b, theta = ard_map                                  # the shared MAP (stage options differ)
+    with highest_precision():
         res = run_ard_stage(cfg, d, b, theta, log=lambda *a: None)
         pred = predict_ard(res.posterior, b.prob, d.ds_test)
         pred1 = predict_ard(res.posterior._replace(kappa=1.0), b.prob, d.ds_test)
@@ -388,17 +398,12 @@ def test_predict_ard_traces_the_chunked_rows_once(tiny_linear_problem, monkeypat
     np.testing.assert_allclose(np.asarray(got.F_var), np.asarray(ref.F_var), rtol=1e-12)
 
 
-def test_ard_stage_kappa_is_refit_for_the_full_posterior(monkeypatch):
+def test_ard_stage_kappa_is_refit_for_the_full_posterior(monkeypatch, ard_map):
     """kappa calibrates the FULL-refit posterior, not the subset one: the held-out atoms' errors
     come from the subset model (honest), their s^2 from the full posterior (the one served).  The
     misspecification that kappa absorbs does not shrink on the refit while s^2 does, so a subset
     kappa would be ~sqrt(n_train / n_fit) too small (bench365: measured 1.105, predicted 1.118)."""
-    from conftest import FIXTURE_DIR
     from ace_jax.fit import ard
-    from ace_jax.fit.pipeline import load_fit_data
-    from ace_jax.fit.pipeline.mapfit import fit_map
-    from ace_jax.fit.pipeline.objective import make_objective
-    from ace_jax.fit.pipeline.problem import build_problem
     calls = []
     orig = ard.kappa_closed_form
 
@@ -409,10 +414,8 @@ def test_ard_stage_kappa_is_refit_for_the_full_posterior(monkeypatch):
 
     monkeypatch.setattr(ard, "kappa_closed_form", spy)
     cfg = _pipe_cfg().validate()
-    d = load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz"))
-    b = build_problem(cfg, d)
+    d, b, theta = ard_map                                  # the shared MAP (stage options differ)
     with highest_precision():
-        theta = fit_map(cfg, d, b, make_objective(cfg, d, b), log=lambda *a: None).theta
         res = ard.run_ard_stage(cfg, d, b, theta, log=lambda *a: None)
     assert len(calls) == 2
     (e2_sub, s2_sub, k_sub), (e2_full, s2_full, k_full) = calls
@@ -493,23 +496,16 @@ def test_posterior_schema2_roundtrip_and_schema1_loads(tiny_linear_problem, tmp_
         assert np.all(post.forces_std(zero) == 0.0)                                  # no neighbours: 0, not NaN
 
 
-def test_ard_stage_sandwich_variance_and_lam_rule(monkeypatch):
+def test_ard_stage_sandwich_variance_and_lam_rule(monkeypatch, ard_map):
     """Default variance: Q from the full refit's training residuals, lam by the kappa refit rule
     (held-out subset errors against the served posterior's sandwich variance), F_var = lam^2 sandwich."""
-    from conftest import FIXTURE_DIR
     from ace_jax.fit import ard
-    from ace_jax.fit.pipeline import load_fit_data
-    from ace_jax.fit.pipeline.mapfit import fit_map
-    from ace_jax.fit.pipeline.objective import make_objective
-    from ace_jax.fit.pipeline.problem import build_problem
     calls = []
     orig = ard.kappa_closed_form
     monkeypatch.setattr(ard, "kappa_closed_form", lambda e2, s2: calls.append((np.array(e2), np.array(s2))) or orig(e2, s2))
     cfg = _pipe_cfg(ard_variance="sandwich").validate()
-    d = load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz"))
-    b = build_problem(cfg, d)
+    d, b, theta = ard_map                                  # the shared MAP (stage options differ)
     with highest_precision():
-        theta = fit_map(cfg, d, b, make_objective(cfg, d, b), log=lambda *a: None).theta
         res = ard.run_ard_stage(cfg, d, b, theta, log=lambda *a: None)
         pred = ard.predict_ard(res.posterior, b.prob, d.ds_test)
         pred1 = ard.predict_ard(res.posterior._replace(lam=1.0), b.prob, d.ds_test)
@@ -524,19 +520,12 @@ def test_ard_stage_sandwich_variance_and_lam_rule(monkeypatch):
     np.testing.assert_allclose(pred.F_var, post.lam ** 2 * pred1.F_var, rtol=1e-12)
 
 
-def test_ard_stage_sandwich_in_sequential_mode():
-    from conftest import FIXTURE_DIR
+def test_ard_stage_sandwich_in_sequential_mode(ard_map):
     from ace_jax.fit import ard
-    from ace_jax.fit.pipeline import load_fit_data
-    from ace_jax.fit.pipeline.mapfit import fit_map
-    from ace_jax.fit.pipeline.objective import make_objective
-    from ace_jax.fit.pipeline.problem import build_problem
     theta_ls = lambda t: [float(getattr(t, f"log_sigma_{q}")) for q in "EFV"]
     cfg = _pipe_cfg(ard_variance="sandwich", ard_mode="sequential").validate()
-    d = load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz"))
-    b = build_problem(cfg, d)
+    d, b, theta = ard_map                                  # the shared MAP (stage options differ)
     with highest_precision():
-        theta = fit_map(cfg, d, b, make_objective(cfg, d, b), log=lambda *a: None).theta
         res = ard.run_ard_stage(cfg, d, b, theta, log=lambda *a: None)
         post = res.posterior
         # rebuild the stage's full-refit evidence: its sequential sigmas are the fixed linear MAP ones
@@ -576,27 +565,20 @@ def test_sandwich_scores_columns_follow_config_order(tiny_linear_problem):
         np.testing.assert_allclose(G3[:, c], G1[:, c], rtol=1e-10, atol=1e-14 * np.abs(G1).max())
 
 
-def test_ard_stage_lam_leaves_out_each_held_out_atoms_own_cluster(monkeypatch):
+def test_ard_stage_lam_leaves_out_each_held_out_atoms_own_cluster(monkeypatch, ard_map):
     """lam is fitted against m^2 WITHOUT the held-out atom's own configuration's cluster: a genuinely
     new configuration has no such term, so keeping it biases lam low.  Brute force: per held-out
     config, zero its own column of Q (column idx[j] of the train order), recompute m^2 from that
     config's force rows alone, and lam = kappa_closed_form(e2, m2)."""
-    from conftest import FIXTURE_DIR
     from ace_jax.fit import ard
     from ace_jax.fit.data import build_dataset
-    from ace_jax.fit.pipeline import load_fit_data
-    from ace_jax.fit.pipeline.mapfit import fit_map
-    from ace_jax.fit.pipeline.objective import make_objective
-    from ace_jax.fit.pipeline.problem import build_problem
     from ace_jax.fit.rows import linear_rows
     calls = []
     orig = ard.kappa_closed_form
     monkeypatch.setattr(ard, "kappa_closed_form", lambda e2, s2: calls.append(np.array(e2)) or orig(e2, s2))
     cfg = _pipe_cfg(ard_variance="sandwich").validate()
-    d = load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz"))
-    b = build_problem(cfg, d)
+    d, b, theta = ard_map                                  # the shared MAP (stage options differ)
     with highest_precision():
-        theta = fit_map(cfg, d, b, make_objective(cfg, d, b), log=lambda *a: None).theta
         res = ard.run_ard_stage(cfg, d, b, theta, log=lambda *a: None)
         post, rep = res.posterior, res.report
         L = b.prob.cfg.len_basis
