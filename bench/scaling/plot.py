@@ -28,25 +28,34 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-# categorical slots 1-6, fixed order (never cycled; a new code takes the next
+# categorical slots 1-8, fixed order (never cycled; a new code takes the next
 # slot); ink and chrome tokens.  Slots 1-6 pass the dataviz validator on
 # adjacent pairs (light: CVD dE >= 9.1, normal >= 19.6).  Slots 2, 5 and 6
 # (stock ACE and the two learned-radial lines) are drawn together in the
 # learned-radial figure and do not clear the all-pairs floors (orange-magenta
 # normal-vision dE 12.9), so those lines also differ by marker (MARKERS) and
-# carry direct labels.
+# carry direct labels.  The ACEpotentials.jl lines take slots 8 (red) and 7
+# (violet), in that order and listed before the learned pair (whose last-two
+# position is fixed): in this order every adjacent pair passes (CVD >= 9.1,
+# normal >= 20.8), where slot 7 then 8 put red beside magenta (normal 13.2).
+# Red sits 7.1 (normal) from slot 2's orange, all-pairs: the ACEpotentials.jl
+# lines have their own markers and direct labels, and the trim line is dashed.
 CODES = {
     "acejax-pace": ("ace-jax (PACE model)", "#2a78d6"),
     "acejax-ace": ("ace-jax (linear ACE)", "#eb6834"),
     "mlpace": ("ML-PACE", "#1baf7a"),
     "mace": ("MACE", "#eda100"),
+    "acepotentials": ("ACEpotentials.jl (linear ACE, direct)", "#e34948"),
+    "acepotentials-trim": ("ACEpotentials.jl (linear ACE, trim library in LAMMPS)", "#4a3aa7"),
     "acejax-ace-learned": ("ace-jax (linear ACE, learned radial, splined)", "#e87ba4"),
     "acejax-ace-analytic": ("ace-jax (linear ACE, learned radial, analytic)", "#008300"),
 }
 SHORT = {"acejax-pace": "ace-jax PACE", "acejax-ace": "ace-jax ACE", "mlpace": "ML-PACE",
          "mace": "MACE", "acejax-ace-learned": "ace-jax ACE, learned (splined)",
-         "acejax-ace-analytic": "ace-jax ACE, learned (analytic)"}   # direct end-of-line labels
-MARKERS = {"acejax-ace-learned": "s", "acejax-ace-analytic": "^"}    # the rest: "o"
+         "acejax-ace-analytic": "ace-jax ACE, learned (analytic)",
+         "acepotentials": "ACEpotentials.jl", "acepotentials-trim": "ACEpotentials.jl trim"}  # end labels
+MARKERS = {"acejax-ace-learned": "s", "acejax-ace-analytic": "^",
+           "acepotentials": "D", "acepotentials-trim": "v"}         # the rest: "o"
 LEARNED = ("acejax-ace-learned", "acejax-ace-analytic")
 
 
@@ -781,7 +790,10 @@ CAPTIONS = {
                               "`docs/learned-radial-splining.md`.",
     "scaling_throughput_float64": "Throughput vs system size (float64, medium models): "
                                   "solid = standalone, dashed = LAMMPS. “fn”: basis functions per "
-                                  "central element (linear ACE is 2–14× the PACE size).",
+                                  "central element (linear ACE is 2–14× the PACE size). "
+                                  "The ACEpotentials.jl lines (CPU only) evaluate the linear ACE "
+                                  "model: direct (splined, as ace-jax) and its trim library (exact "
+                                  "radials, a spline error apart).",
     "scaling_throughput_float32": "The same in float32. ML-PACE and Symmetrix (MACE in "
                                   "LAMMPS) evaluate in double, so they are absent.",
     "scaling_model_size": "Throughput vs model size at exactly 8,192 atoms on GPU and "
@@ -825,8 +837,8 @@ def write_doc(pattern, figs, doc="docs/benchmarks.md"):
     rows = load(pattern)
     versions = {}
     for r in rows:
-        if r.get("versions"):
-            versions[r["host"]] = r["versions"]
+        if r.get("versions"):                 # union: the Julia lines add julia, ACEpotentials
+            versions.setdefault(r["host"], {}).update(r["versions"])
     intro = pathlib.Path(__file__).with_name("benchmarks_intro.md").read_text().strip()
     intro = intro.replace("{{findings}}", findings(rows)).replace("{{parity}}", parity_table(rows))
     body = ["# Benchmarks", "", intro, "", "## Figures", "",

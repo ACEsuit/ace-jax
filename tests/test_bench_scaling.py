@@ -1295,3 +1295,454 @@ def test_runner_hint_carries_the_matrix_overflow_flag(monkeypatch):
     c = next(c for c in sweep.cases("moriarty-gpu") if c.code == "acejax-ace" and c.mode == "lammps")
     run(c, prev={"step_s": 0.01, "n_atoms": 256, "layout": "dense", "matrix_overflow": True})
     assert seen.get("matrix_overflow") is True
+
+
+# --- ACEpotentials.jl lines: acepotentials (direct) and acepotentials-trim (PR 309 library) ---
+
+ACEPOT = ("acepotentials", "acepotentials-trim")
+
+
+def _acepot_rows(size="small", system="SiGe"):
+    return {r["code"]: r for r in planned_models() if r["code"] in ACEPOT
+            and r["size"] == size and r["system"] == system}
+
+
+def test_acepotentials_rows_are_the_ace_models():
+    """Both lines evaluate the acejax-ace npz (they rebuild it and assert identity);
+    the trim line also names its compiled library under models/trim/."""
+    from scaling.models import ACE_DEG_BY_SYSTEM, DIR
+    rows = planned_models()
+    for system in ("SiGe", "Cantor"):
+        ace = {r["size"]: r for r in rows if r["code"] == "acejax-ace" and r["system"] == system}
+        for code in ACEPOT:
+            got = {r["size"]: r for r in rows if r["code"] == code and r["system"] == system}
+            assert sorted(got) == sorted(SIZES), code
+            for size, r in got.items():
+                assert r["path"] == ace[size]["path"] and r["elements"] == ace[size]["elements"]
+                order, deg = ACE_DEG_BY_SYSTEM[system][size]
+                spec = r["ace1"]
+                assert (spec["order"], spec["totaldegree"], spec["rcut"]) == (order, deg, 5.0)
+                assert spec["elements"] == r["elements"] and spec["npz"] == r["path"]
+                assert spec.get("r0") == (2.54 if system == "Cantor" else None)
+    trim = _acepot_rows()["acepotentials-trim"]
+    assert trim["trim_lib"] == str(DIR / "trim" / "libace_SiGe_small.so")
+    assert "trim_lib" not in _acepot_rows()["acepotentials"]
+
+
+def test_acepotentials_lines_are_cpu_only_float64():
+    from scaling.sweep import cpu_only, lammps_supported
+    cpu = cases("moriarty-cpu")
+    for code, mode in (("acepotentials", "standalone"), ("acepotentials-trim", "lammps")):
+        got = [c for c in cpu if c.code == code]
+        assert got and {c.mode for c in got} == {mode} and {c.dtype for c in got} == {"float64"}
+        assert {c.model.split("/")[1] for c in got} == {"SiGe", "Cantor"}
+        assert cpu_only(code)
+    assert not cpu_only("acejax-ace") and not cpu_only("mlpace")
+    for host in ("moriarty-gpu", "modal-a100"):                 # GPU hosts never plan them
+        assert not [c for c in cases(host) if c.code in ACEPOT]
+    assert lammps_supported("acepotentials-trim", "cpu")        # not a lammps-jax line
+    trim = [c for c in cpu if c.code == "acepotentials-trim"]
+    assert {c.ranks for c in trim} == {16}                     # MPI ranks, like mlpace
+    from scaling.sweep import main
+    main(["moriarty-cpu", "--only", "acepotentials-trim", "--dry-run"])
+
+
+def test_lammps_binary_per_code():
+    from scaling.sweep import lammps_binary
+    env = {"lmp": "lmp", "lmp_jax": "lmp-jax", "lmp_ace": "lmp-ace"}
+    assert lammps_binary("acepotentials-trim", env) == "lmp-ace"
+    assert lammps_binary("acejax-ace", env) == "lmp-jax" and lammps_binary("mlpace", env) == "lmp"
+    with pytest.raises(KeyError, match="lmp_ace"):
+        lammps_binary("acepotentials-trim", {"lmp": "lmp"})
+
+
+def test_runner_routes_the_acepotentials_lines(monkeypatch):
+    from scaling import sweep
+    seen = []
+    monkeypatch.setattr(sweep, "run_capped", lambda cmd, env, timeout, cap_bytes=None: (
+        seen.append((cmd, env)) or (0, '{"status": "ok"}', "", 0, False)))
+    env = {"lmp": "lmp", "lmp_ace": "/r/lmp-ace.sh", "ace_plugin": "/r/aceplugin.so",
+           "julia": "julia +1.12.6", "julia_depot": "/d", "julia_project": "/p"}
+    run = sweep.subprocess_runner("moriarty-cpu", env)
+    cs = sweep.cases("moriarty-cpu")
+    run(next(c for c in cs if c.code == "acepotentials-trim"))
+    cmd, e = seen[-1]
+    assert cmd[1].endswith("run_lammps.py") and cmd[6] == "/r/lmp-ace.sh" and cmd[7] == "16"
+    assert e["ACE_PLUGIN"] == "/r/aceplugin.so" and e["OMP_NUM_THREADS"] == "1"
+    assert e["JULIA_NUM_THREADS"] == "1"
+    run(next(c for c in cs if c.code == "acepotentials"))
+    cmd, e = seen[-1]
+    assert cmd[1].endswith("run_standalone.py")
+    assert e["JULIA_NUM_THREADS"] == e["OMP_NUM_THREADS"]       # the standalone thread count
+    assert (e["ACEPOT_JULIA"], e["ACEPOT_JULIA_DEPOT"], e["ACEPOT_JULIA_PROJECT"]) == ("julia +1.12.6", "/d", "/p")
+
+
+def test_child_env_julia_threads_and_keys(monkeypatch):
+    from scaling.sweep import child_env
+    monkeypatch.delenv("ACE_PLUGIN", raising=False)
+    env = {"pythonpath": "/p", "julia": "j", "julia_depot": "/d", "julia_project": "/jp",
+           "ace_plugin": "/a.so"}
+    s = child_env(env, mode="standalone", cpus=32)
+    assert s["JULIA_NUM_THREADS"] == "32" and s["ACEPOT_JULIA_DEPOT"] == "/d"
+    assert child_env(env, mode="lammps", cpus=32)["JULIA_NUM_THREADS"] == "1"
+    assert child_env(env)["ACE_PLUGIN"] == "/a.so" and child_env(env)["ACEPOT_JULIA"] == "j"
+    assert "ACE_PLUGIN" not in child_env({"pythonpath": "/p"})
+
+
+def test_lammps_input_trim_pair_lines():
+    from scaling.run_lammps import lammps_input, lammps_vars
+    txt = lammps_input("acepotentials-trim", "/m/libace_SiGe_small.so", ["Si", "Ge"], "/d/x.data", "cpu", 200)
+    assert "plugin load ${aceplugin}\npair_style ace\npair_coeff * * /m/libace_SiGe_small.so Si Ge\n" in txt
+    assert txt.index("plugin load") > txt.index("read_data")
+    assert lammps_vars("acepotentials-trim", aceplugin="/a.so") == ["-var", "aceplugin", "/a.so"]
+    assert lammps_vars("acejax", pjrt="/x.so") == ["-var", "pjrt", "/x.so"]
+    assert lammps_vars("mlpace") == []
+    with pytest.raises(ValueError, match="ace_plugin"):
+        lammps_vars("acepotentials-trim")
+
+
+def _fake_lammps(seen, n_atoms=256):
+    import subprocess as sp
+
+    def run(cmd, cwd=None, **kw):
+        seen.append(cmd)
+        (pathlib.Path(cwd) / "log.lammps").write_text(
+            f"Step PotEng\n 0 -1.0\nLoop time of 0.5 on 8 procs for 50 steps with {n_atoms} atoms\n"
+            f"Loop time of 2.0 on 8 procs for 200 steps with {n_atoms} atoms\nTotal wall time: 0:00:03\n")
+        return sp.CompletedProcess(cmd, 0, stdout="", stderr="")
+    return run
+
+
+def test_trim_lammps_case_runs_mpi_ranks_with_the_plugin(tmp_path, monkeypatch):
+    from scaling import run_lammps
+    seen = []
+    monkeypatch.setattr(run_lammps.subprocess, "run", _fake_lammps(seen))
+    lib = tmp_path / "libace_SiGe_small.so"
+    lib.write_bytes(b"\x7fELF")
+    row = {**_acepot_rows()["acepotentials-trim"], "trim_lib": str(lib)}
+    out = run_lammps.run_case(row, 256, "float64", "cpu", "/r/lmp-ace.sh", 8, tmp_path / "w",
+                              aceplugin="/r/aceplugin.so")
+    cmd = seen[-1]
+    assert cmd[:3] == ["mpirun", "-np", "8"] and cmd[3] == "/r/lmp-ace.sh"
+    assert cmd[-2:] == ["aceplugin", "/r/aceplugin.so"] and "-k" not in cmd
+    assert out["status"] == "ok" and out["step_s"] == pytest.approx(0.01) and out["ranks"] == 8
+    assert out["trim_lib"] == str(lib)
+    txt = (tmp_path / "w" / "in.bench").read_text()
+    assert f"pair_coeff * * {lib} Si Ge" in txt
+
+
+def test_trim_lammps_case_without_a_library(tmp_path, monkeypatch):
+    """No library: an error naming the build step; one the exporter refused
+    (manifest `unsupported`): unsupported, like a MACE model Symmetrix cannot export."""
+    from scaling import models, run_lammps
+    monkeypatch.setattr(run_lammps.subprocess, "run", lambda *a, **k: pytest.fail("ran LAMMPS"))
+    row = {**_acepot_rows()["acepotentials-trim"], "trim_lib": str(tmp_path / "missing.so")}
+    monkeypatch.setattr(models, "load_manifest", lambda: {})
+    out = run_lammps.run_case(row, 256, "float64", "cpu", "lmp", 8, tmp_path, aceplugin="/a.so")
+    assert out["status"] == "error" and "models.py acepotentials-trim" in out["error"]
+    monkeypatch.setattr(models, "load_manifest", lambda: {row["trim_lib"]: {"unsupported": "refused"}})
+    out = run_lammps.run_case(row, 256, "float64", "cpu", "lmp", 8, tmp_path, aceplugin="/a.so")
+    assert out["status"] == "unsupported" and "refused" in out["error"]
+
+
+def test_parity_gates_the_acepotentials_lines():
+    from scaling.parity import TOL, blocked, gate_checks
+    small = {(m["code"], m["system"]): m for m in planned_models() if m["size"] == "small"}
+    got = [(g, m["code"], m["size"], lay) for g, m, lay in gate_checks(small, "Cantor")]
+    assert ("acepot", "acepotentials", "small", None) in got
+    assert ("trim", "acepotentials-trim", "small", None) in got
+    assert ("trim-ace", "acepotentials-trim", "small", None) in got
+    assert TOL["acepot"] == (1e-10, 1e-9) and TOL["trim"] == (1e-10, 1e-9)
+    assert TOL["trim-ace"][1] == 1e-3                       # the spline error: a sanity check
+    rows = [{"code": "acepotentials", "gate": "acepot", "status": "parity_fail"},
+            {"code": "acepotentials-trim", "gate": "trim", "status": "parity_ok"},
+            {"code": "acepotentials-trim", "gate": "trim-ace", "status": "error"}]
+    assert blocked(rows) == {("acepotentials", "standalone"), ("acepotentials-trim", "lammps")}
+    assert blocked(rows[1:2]) == set()
+
+
+def test_gate_missing_for_the_acepotentials_lines():
+    from scaling import sweep
+
+    def row(gate, system, code):
+        return {"mode": "parity", "code": code, "gate": gate, "system": system,
+                "_key": ["parity", gate, system, code]}
+    full = [row(g, s, "acepotentials-trim") for s in ("SiGe", "Cantor") for g in ("trim", "trim-ace")]
+    assert sweep.gate_missing(full, "acepotentials-trim") is False
+    assert sweep.gate_missing(full[:-1], "acepotentials-trim") is True
+    assert sweep.gate_missing(full, "acepotentials") is True
+    assert sweep.gate_missing([row("acepot", s, "acepotentials") for s in ("SiGe", "Cantor")],
+                              "acepotentials") is False
+
+
+def test_parity_gate_runs_the_acepotentials_checks(monkeypatch, tmp_path):
+    """acepot: Julia (splined) vs ACECalculator; trim: LAMMPS (trim library) vs
+    Julia ETACE (exact twin); trim-ace: LAMMPS vs ACECalculator, loose.  All on
+    the extxyz-roundtripped structure, LAMMPS through lmp_ace with the plugin;
+    GPU hosts record them unsupported."""
+    from scaling import parity
+    F = np.zeros((256, 3))
+    calls = []
+    monkeypatch.setattr(parity, "_acejax_ef", lambda path, at, **kw: (
+        calls.append(("acejax", at.positions[0, 0])) or (-100.0, F)))
+    monkeypatch.setattr(parity, "_julia_ef", lambda env, m, at, work, which: (
+        calls.append(("julia", which, env["julia_depot"])) or (-100.0 + 1e-9 * (which == "etace"), F)))
+
+    def fake_lmp(style, model_path, els, at, device, lmp, work, pjrt=None, aceplugin=None):
+        calls.append(("lammps", style, model_path, lmp, aceplugin))
+        return -100.0 + 1e-9, F + 1e-4
+    monkeypatch.setattr(parity, "_lammps_ef", fake_lmp)
+    small = _acepot_rows()
+    monkeypatch.setattr(parity, "gate_checks", lambda s, system, medium=None: [
+        (g, small[c], None) for g, c in (("acepot", "acepotentials"), ("trim", "acepotentials-trim"),
+                                         ("trim-ace", "acepotentials-trim"))] if system == "SiGe" else [])
+    env = {"lmp": "lmp", "lmp_ace": "lmp-ace", "ace_plugin": "/a.so", "julia_depot": "/d"}
+    rows = {r["gate"]: r for r in parity.gate("moriarty-cpu", env, workroot=str(tmp_path))}
+    assert rows["acepot"]["status"] == "parity_ok" and rows["acepot"]["dE_per_atom"] == 0.0
+    assert rows["trim"]["status"] == "parity_fail"             # 1e-4 eV/Å is far over the trim gate
+    assert rows["trim"]["max_dF"] == pytest.approx(1e-4) and rows["trim"]["dE_per_atom"] < 1e-10
+    assert rows["trim-ace"]["status"] == "parity_ok"          # within the spline-error sanity bound
+    assert ("lammps", "acepotentials-trim", small["acepotentials-trim"]["trim_lib"], "lmp-ace", "/a.so") in calls
+    assert ("julia", "etace", "/d") in calls and ("julia", "splined", "/d") in calls
+    gpu = parity.gate("moriarty-gpu", env, workroot=str(tmp_path))
+    assert {r["status"] for r in gpu} == {"unsupported"}
+
+
+def test_xyz_roundtrip_is_what_both_sides_see(tmp_path):
+    """extxyz rounds positions to 1e-8 A: both sides must evaluate the re-read structure."""
+    from scaling.acepot import roundtrip
+    at = supercell("SiGe", 256)
+    at.positions += 1.234567891234e-5
+    rt = roundtrip(at, tmp_path / "x.extxyz")
+    assert (tmp_path / "x.extxyz").exists() and np.array_equal(rt.numbers, at.numbers)
+    assert 0 < np.abs(rt.positions - at.positions).max() <= 1e-8
+    assert np.array_equal(roundtrip(rt, tmp_path / "y.extxyz").positions, rt.positions)
+
+
+def test_julia_config_from_env_json_and_environment(monkeypatch):
+    from scaling import acepot
+    cfg = acepot.julia_config({"julia": "julia +1.12.6", "julia_depot": "/d", "julia_project": "/p"})
+    assert cfg["julia"] == ["julia", "+1.12.6"] and cfg["depot"] == "/d" and cfg["project"] == "/p"
+    monkeypatch.setenv("ACEPOT_JULIA", "jl")
+    monkeypatch.setenv("ACEPOT_JULIA_DEPOT", "/d2")
+    monkeypatch.delenv("ACEPOT_JULIA_PROJECT", raising=False)
+    cfg = acepot.julia_config()
+    assert cfg["julia"] == ["jl"] and cfg["depot"] == "/d2" and cfg["project"].endswith("bench/scaling/julia")
+    cmd = acepot.julia_cmd(cfg, "run_standalone.jl", "a", "b")
+    assert cmd[:3] == ["jl", "--startup-file=no", f"--project={cfg['project']}"]
+    assert cmd[3].endswith("bench/scaling/julia/run_standalone.jl") and cmd[4:] == ["a", "b"]
+    e = acepot.julia_env(cfg, threads=4)
+    assert e["JULIA_DEPOT_PATH"] == "/d2" and e["JULIA_NUM_THREADS"] == "4"
+    monkeypatch.delenv("ACEPOT_JULIA_DEPOT")
+    with pytest.raises(RuntimeError, match="julia_depot"):           # never the default ~/.julia
+        acepot.julia_config()
+
+
+def test_run_julia_reads_the_last_json_line(monkeypatch):
+    import subprocess as sp
+    from scaling import acepot
+    cfg = {"julia": ["jl"], "depot": "/d", "project": "/p"}
+    monkeypatch.setattr(acepot.subprocess, "run", lambda cmd, **kw: sp.CompletedProcess(
+        cmd, 0, stdout='noise {\n{"a": 1}\n', stderr=""))
+    assert acepot.run_julia(cfg, "x.jl", []) == {"a": 1}
+    monkeypatch.setattr(acepot.subprocess, "run", lambda cmd, **kw: sp.CompletedProcess(
+        cmd, 1, stdout="", stderr="ERROR: rebuilt ace1_model is NOT the npz model"))
+    with pytest.raises(RuntimeError, match="NOT the npz model"):
+        acepot.run_julia(cfg, "x.jl", [])
+
+
+def test_md_positions_follow_the_standalone_random_walk():
+    from scaling.run_standalone import md_positions
+    at = supercell("SiGe", 256)
+    X = md_positions(at, 3)
+    rng, p = np.random.default_rng(0), at.positions.copy()
+    for k in range(3):
+        p = p + rng.normal(0, 1e-3, p.shape)
+        assert np.array_equal(X[k], p)
+    assert X.shape == (3, 256, 3)
+
+
+def test_standalone_acepotentials_row(monkeypatch, tmp_path):
+    from scaling import acepot, run_standalone
+    seen = {}
+
+    def fake(cfg, script, args, threads=None, timeout=None):
+        seen.update(script=script, args=args, threads=threads, cfg=cfg)
+        seen["X"] = np.load(args[2])
+        seen["spec"] = json.loads(pathlib.Path(args[0]).read_text())
+        return {"call_s": 0.01, "compile_s": 5.0, "energy": -1.5, "peak_bytes": 123,
+                "julia_threads": 4, "gc_frac": 0.1, "identity": {"A2B": True},
+                "versions": {"julia": "1.12.6", "ACEpotentials": "0.10.2"}}
+    monkeypatch.setattr(acepot, "run_julia", fake)
+    monkeypatch.setenv("ACEPOT_JULIA_DEPOT", "/d")
+    monkeypatch.setenv("JULIA_NUM_THREADS", "4")
+    row = _acepot_rows()["acepotentials"]
+    out = run_standalone.run_case(row, 256, "float64", "cpu", reps=3)
+    assert out["status"] == "ok", out
+    assert seen["script"] == "run_standalone.jl" and seen["threads"] == 4
+    assert seen["X"].shape == (3, 256, 3) and seen["spec"] == row["ace1"]
+    assert (out["call_s"], out["compile_s"], out["energy"], out["peak_bytes"]) == (0.01, 5.0, -1.5, 123)
+    assert out["threads"]["julia"] == 4 and out["versions"]["julia"] == "1.12.6"
+    assert out["versions"]["ACEpotentials"] == "0.10.2" and "python" in out["versions"]
+    assert out["gc_frac"] == 0.1 and out["md_like"] is True and out["identity"] == {"A2B": True}
+    json.dumps(out)
+    bad = run_standalone.run_case(row, 256, "float32", "cpu", reps=1)
+    assert bad["status"] == "error" and "float64" in bad["error"]
+
+
+def test_trim_builder_is_idempotent(monkeypatch, tmp_path):
+    from scaling import acepot, models
+    calls = []
+    monkeypatch.setattr(models, "DIR", tmp_path)
+    npz = tmp_path / "ace_SiGe_small.npz"
+    npz.write_bytes(b"model-1")
+    row = {**_acepot_rows()["acepotentials-trim"], "path": str(npz),
+           "trim_lib": str(tmp_path / "trim" / "libace_SiGe_small.so")}
+    monkeypatch.setattr(models, "planned_models", lambda: [row])
+
+    def fake(cfg, script, args, threads=None, timeout=None):
+        calls.append(args)
+        pathlib.Path(args[2]).parent.mkdir(parents=True, exist_ok=True)
+        pathlib.Path(args[2]).write_bytes(b"so-%d" % len(calls))
+        return {"so": args[2], "build_id": "abc", "gates": {}, "versions": {"julia": "1.12.6"},
+                "export_s": 5.0, "juliac_s": 10.0}
+    monkeypatch.setattr(acepot, "run_julia", fake)
+    monkeypatch.setenv("ACEPOT_JULIA_DEPOT", "/d")
+    monkeypatch.delenv("FORCE", raising=False)
+    models.build_acepotentials_trim()
+    assert len(calls) == 1 and calls[0][0].endswith(".json") and calls[0][1].endswith(".extxyz")
+    m = models.load_manifest()[row["trim_lib"]]
+    assert m["sha256"] == models._sha(row["trim_lib"]) and m["from_sha256"] == models._sha(npz)
+    assert m["build_id"] == "abc" and m["build_cpu"] and m["builder"].endswith("build_trim.jl")
+    models.build_acepotentials_trim()
+    assert len(calls) == 1                                   # up to date: skipped
+    npz.write_bytes(b"model-2")
+    models.build_acepotentials_trim()
+    assert len(calls) == 2                                   # the npz changed
+    monkeypatch.setenv("FORCE", "1")
+    models.build_acepotentials_trim()
+    assert len(calls) == 3
+    monkeypatch.delenv("FORCE")
+    models.build_acepotentials_trim(["Cantor/small"])        # a selection that excludes it
+    assert len(calls) == 3
+
+
+def test_trim_builder_records_a_refused_export(monkeypatch, tmp_path):
+    from scaling import acepot, models
+    monkeypatch.setattr(models, "DIR", tmp_path)
+    npz = tmp_path / "ace_SiGe_small.npz"
+    npz.write_bytes(b"m")
+    row = {**_acepot_rows()["acepotentials-trim"], "path": str(npz),
+           "trim_lib": str(tmp_path / "trim" / "libace_SiGe_small.so")}
+    monkeypatch.setattr(models, "planned_models", lambda: [row])
+    monkeypatch.setattr(acepot, "run_julia", lambda *a, **k: (_ for _ in ()).throw(
+        RuntimeError("export refused: unsupported angular basis")))
+    monkeypatch.setenv("ACEPOT_JULIA_DEPOT", "/d")
+    models.build_acepotentials_trim()
+    assert "export refused" in models.load_manifest()[row["trim_lib"]]["unsupported"]
+
+
+def test_acepotentials_palette_and_labels():
+    from scaling import plot
+    order = list(plot.CODES)
+    assert order[-4:] == [*ACEPOT, *LEARNED_PAIR]               # before the learned pair
+    cols = [c for _, c in plot.CODES.values()]
+    assert len(set(cols)) == len(cols)
+    for code in ACEPOT:
+        assert plot.SHORT[code] and plot.CODES[code][0].startswith("ACEpotentials.jl")
+    marks = [plot._marker(c) for c in ("acejax-ace", *ACEPOT)]
+    assert len(set(marks)) == 3                                 # not colour alone
+
+
+def test_acepotentials_rows_plot_and_tabulate(tmp_path, monkeypatch):
+    import matplotlib
+    matplotlib.use("Agg")
+    from scaling import plot
+    rows = [_ba_row(c, m, n, host="moriarty-cpu", t=1e-3 * n / 256)
+            for c, m in (("acejax-ace", "standalone"), ("acepotentials", "standalone"),
+                         ("acepotentials-trim", "lammps")) for n in (256, 512)]
+    figs = []
+    monkeypatch.setattr(plot.plt, "close", lambda f=None: figs.append(f))
+    plot.fig_throughput(rows, tmp_path)
+    labels = {t.get_text() for lg in figs[-1].legends for t in lg.get_texts()}
+    assert {plot.CODES[c][0] for c in ACEPOT} <= labels
+    assert "ACEpotentials.jl" in plot.tables(rows)
+    par = plot.parity_table([{"mode": "parity", "host": "h", "gate": "trim", "code": "acepotentials-trim",
+                              "status": "parity_ok", "dE_per_atom": 1e-15, "max_dF": 1e-13}])
+    assert f"| h | trim | {plot.CODES['acepotentials-trim'][0]} | 1/1 |" in par
+
+
+def test_doc_versions_merge_per_host(tmp_path):
+    """A host's rows carry different version sets (Python packages; Julia and
+    ACEpotentials for the Julia lines): the page lists their union."""
+    from scaling.plot import write_doc
+    rows = [{**_ba_row("acejax-ace", "standalone", 256, host="h"), "versions": {"jax": "0.7"}},
+            {**_ba_row("acepotentials", "standalone", 256, host="h"),
+             "versions": {"julia": "1.12.6", "ACEpotentials": "0.10.2"}}]
+    res = tmp_path / "r.jsonl"
+    res.write_text("\n".join(json.dumps(r) for r in rows))
+    text = pathlib.Path(write_doc(str(res), [], doc=str(tmp_path / "b.md"))).read_text()
+    line = next(l for l in text.splitlines() if l.startswith("- **h**"))
+    assert "jax 0.7" in line and "julia 1.12.6" in line and "ACEpotentials 0.10.2" in line
+
+
+def test_basis_sizes_count_the_acepotentials_lines(monkeypatch):
+    from scaling import models
+    z = str(pathlib.Path(__file__).parent.parent / "fixtures" / "sige_nofit.npz")
+    monkeypatch.setattr(models, "planned_models", lambda: [
+        {"code": c, "system": "SiGe", "size": "small", "path": z} for c in ACEPOT])
+    n = np.load(z)["WB"].shape[0]
+    assert models.basis_sizes() == {"SiGe/small": {c: n for c in ACEPOT}}
+
+
+def _julia_cfg_or_skip():
+    import os
+    import shutil
+    if os.environ.get("ACEJAX_NO_JULIA") == "1":
+        pytest.skip("ACEJAX_NO_JULIA=1")
+    if not os.environ.get("ACEPOT_JULIA_DEPOT"):
+        pytest.skip("ACEPOT_JULIA_DEPOT unset (the PR 309 Julia env; see bench/scaling/README.md)")
+    from scaling.acepot import julia_config
+    cfg = julia_config()
+    if not shutil.which(cfg["julia"][0]):
+        pytest.skip(f"no {cfg['julia'][0]}")
+    return cfg
+
+
+def _acepot_row_for(z, spec):
+    return {"code": "acepotentials", "system": "SiGe", "size": "small", "path": str(z),
+            "elements": ["Si", "Ge"], "name": "acepotentials/SiGe/small", "ace1": {**spec, "npz": str(z)}}
+
+
+def test_acepotentials_standalone_real_julia():
+    """The real Julia driver on the SiGe small benchmark model (git-ignored: skips
+    when absent): the identity check passes and its energy is ace-jax's (the same
+    splined model)."""
+    _julia_cfg_or_skip()
+    from scaling.models import ace1_spec
+    spec = ace1_spec("SiGe", "small")
+    if not pathlib.Path(spec["npz"]).exists():
+        pytest.skip("no bench/scaling/models/ace_SiGe_small.npz (models.py ace)")
+    import jax
+    jax.config.update("jax_enable_x64", True)
+    from ace_jax.calc.point import ACECalculator
+    from scaling.run_standalone import run_case
+    out = run_case(_acepot_row_for(spec["npz"], spec), 256, "float64", "cpu", reps=2)
+    assert out["status"] == "ok", out.get("error")
+    assert all(v for k, v in out["identity"].items() if isinstance(v, bool))
+    at = supercell("SiGe", 256)
+    at.calc = ACECalculator(spec["npz"])
+    assert out["energy"] == pytest.approx(at.get_potential_energy(), rel=1e-9)  # extxyz-rounded positions
+    assert out["call_s"] > 0 and out["peak_bytes"] > 0 and out["versions"]["ACEpotentials_rev"]
+
+
+def test_acepotentials_identity_guard_rejects_another_model():
+    """The committed sige_nofit fixture (written by Julia 1.12.7) rebuilds with
+    another basis order in the pinned env: the driver must refuse it, loudly,
+    rather than time a different model."""
+    _julia_cfg_or_skip()
+    from scaling.run_standalone import run_case
+    z = pathlib.Path(__file__).parent.parent / "fixtures" / "sige_nofit.npz"
+    out = run_case(_acepot_row_for(z, {"elements": ["Si", "Ge"], "order": 3, "totaldegree": 6,
+                                       "rcut": None}), 256, "float64", "cpu", reps=1)
+    assert out["status"] == "error" and "NOT the npz model" in out["error"]
