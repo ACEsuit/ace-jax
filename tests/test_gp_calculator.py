@@ -96,9 +96,14 @@ def test_calculator_buckets_neighbour_slots():
     dimers = [c for c in configs if len(c.numbers) == 2]
     k = [int(np.bincount(sparse_graph(c.positions, c.cell, c.pbc, rcut).senders, minlength=2).max())
          for c in dimers]
+    picks = {}                                    # two dimers with different counts per bucket
+    for c, ki in zip(dimers, k):
+        picks.setdefault(slot_bucket(ki), {}).setdefault(ki, c)
+    picks = [c for v in picks.values() for c in list(v.values())[:2]]
     calc = GPCalculator(fitted, meta)
-    for c in dimers:
+    for c in picks:
         atoms = Atoms(numbers=c.numbers, positions=c.positions, cell=c.cell, pbc=c.pbc)
         atoms.calc = calc
         atoms.get_potential_energy()
+    assert len(picks) > len({slot_bucket(x) for x in k})                 # some bucket is shared
     assert calc._predict._cache_size() == len({slot_bucket(x) for x in k}) <= 4, sorted(set(k))
