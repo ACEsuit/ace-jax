@@ -1,3 +1,23 @@
+ace-jax-coupling licence
+========================
+
+ace-jax-coupling's own code (the `ace_jax_coupling` Python package and the Julia
+C-ABI shim compiled into `libetcouple`, both part of ace-jax) and
+EquivariantTensors.jl, compiled into `libetcouple`, are MIT-licensed. The ace-jax
+licence is below; EquivariantTensors.jl's is in `licenses/EquivariantTensors.txt`.
+
+The binary wheels also bundle the Julia runtime and the third-party shared
+libraries it loads, each under its own licence: MIT, BSD-2-Clause, BSD-3-Clause,
+ISC, Zlib, LGPL-2.1-or-later and LGPL-3.0-or-later (each LGPL library is a
+separate, replaceable shared library), and the GCC runtime under GPL-3.0-or-later
+WITH GCC-exception-3.1. `THIRD_PARTY_NOTICES.md` lists every bundled component,
+and `licenses/` holds their full texts. No GPL-only code is bundled: the GPL
+SuiteSparse modules are replaced by empty placeholders.
+
+--------------------------------------------------------------------------------
+ace-jax (and ace-jax-coupling's own code)
+--------------------------------------------------------------------------------
+
 MIT License
 
 Copyright (c) 2022 Christoph Ortner <christophortner0@gmail.com> and contributors
