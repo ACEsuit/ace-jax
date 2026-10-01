@@ -24,10 +24,17 @@ constant**, a0 = 3.6502 Å.
 | `make_defects.py`, train families | vacancy, (100) and (111) slabs, intrinsic stacking fault (pure Ni check: 80 mJ/m² unrelaxed) | 120 train / 30 test each |
 | `make_defects.py`, OOD families | NN divacancy, vacancy in the surface layer, vacancy at the stacking fault, slab under 4–8 % tension | 100 each, held out |
 | `big2.py` + `modal/modal_big2.py` | (111)[1-10] crack cylinders (R = 60 Å, 3236 atoms) at K/K_G = 1.1/1.2/1.3 with K_G from MACE's C_ij and γ; edge (R = 50 Å) and screw (R = 60 Å) a/2⟨110⟩ dislocations built dissociated; relaxed with the boundary fixed, plus 0.05 and 0.10 Å rattles | 30 configs, held out |
+| `big3.py` + `modal/modal_big3.py` (v3, use this) | the same cells made thick along the line (period > 2 r_cut = 12.5 Å: screw 5 × 2.58 Å, edge 3 × 4.47 Å, crack 3 × 5.16 Å) with species drawn after the repeat, so the chemistry is random along the line; R = 29–34 Å for ~4k atoms | 30 configs, held out |
 
 All six cracks stay open and lattice-trapped, with the tip within ±4 Å of the seed. MACE-MH-1 in
 float64 fails on single cells above ~7k atoms (A100 out of memory, B200 illegal memory access), so
 the cylinders were sized to 3–4k atoms.
+
+**v2 is chemically ordered along the line; use v3.** The v2 cells are one period thick along the
+line (2.58 / 4.47 / 5.16 Å) under the model's r_cut = 6.25 Å. So every atom sees its own periodic
+images (in the screw cells as nearest neighbours) and sits in a single-species column. No
+random-alloy training config looks like that. σ correctly flags those environments as novel, but
+the errors barely grow, so v2 over-covers: screw rms-z 0.61, edge 0.79. `big3.py` fixes it.
 
 ## Fits (`modal/`)
 
@@ -174,4 +181,18 @@ leaving each atom's own cluster out; test-refit factor 0.968):
 - A likelihood fit of a·ARD + b·sandwich puts a = 0.
 - Leaving the own cluster out changes λ by +2.7 % at 3,680 configurations, against ×1.9 on a
   30-configuration fixture.
-- Open: screw dislocations are over-covered by about 1.6× under every variance tried.
+- *(Withdrawn.)* "Screw dislocations are over-covered by about 1.6×" was a v2 artefact (see
+  Benchmark). The table above uses the v2 big cells.
+
+**The same posterior on the v3 big cells** (`ard_sw2`, no refit; `scoring/eval_big.py`; the CIs
+come from a block bootstrap over cells, with only 2 cells per dislocation family):
+
+| | rms-z, v2 → v3 [95% CI] | cov90 | core ≤ 10 Å | ρ, v2 → v3 |
+|---|---|---|---|---|
+| crack (6 cells) | 0.90 → 1.01 [1.00, 1.02] | 0.89 | 1.08 [1.05, 1.10] | 0.35 → 0.41 |
+| edge (2 cells) | 0.79 → 0.91 [0.91, 0.92] | 0.93 | 0.96 | 0.26 → 0.30 |
+| screw (2 cells) | 0.61 → 0.90 [0.88, 0.91] | 0.93 | 0.98 | 0.26 → 0.32 |
+
+- Dislocations are calibrated and slightly conservative.
+- Crack tips are slightly overconfident: rms-z 1.08 and cov90 0.85 within 10 Å of the tip, across
+  all 6 cells.
