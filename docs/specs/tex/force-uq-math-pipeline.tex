@@ -1,0 +1,332 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=2.3cm]{geometry}
+\usepackage{amsmath,amssymb,mathtools,bm}
+\usepackage{booktabs}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage[colorlinks=true,linkcolor=blue!50!black,citecolor=blue!50!black,urlcolor=blue!50!black]{hyperref}
+
+\newcommand{\bphi}{\bm{\phi}}
+\newcommand{\bpsi}{\bm{\psi}}
+\newcommand{\bc}{\bm{c}}
+\newcommand{\cbar}{\bar{\bm{c}}}
+\newcommand{\bg}{\bm{g}}
+\newcommand{\tran}{^{\mathsf T}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\Prob}{\mathbb{P}}
+\newcommand{\diag}{\operatorname{diag}}
+\newcommand{\Tfit}{T_{\mathrm{fit}}}
+\newcommand{\Tval}{T_{\mathrm{val}}}
+\newcommand{\vcal}{v^{\mathrm{cal}}}
+\newcommand{\chiinv}{\chi^{-1}_3}
+
+\title{Calibrated per-atom force uncertainty for linear ACE:\\
+\large the full mathematical pipeline (current, and the proposed conformal scale)}
+\author{ace-jax \texttt{feat/conformal-uq} --- for review}
+\date{1 October 2026}
+
+\begin{document}
+\maketitle
+
+\noindent Companion to \texttt{docs/specs/2026-09-30-conformal-force-sigma-design.md} (interfaces)
+and \texttt{2026-09-28-tempered-ard-uq-design.md} (ARD and sandwich, merged in \#18).
+Notation: atoms $i$, Cartesian components $\alpha\in\{x,y,z\}$, training configurations $c\in T$.
+
+\paragraph{Summary: the conformal step does not replace the sandwich.}
+The served force uncertainty is a product of two factors.
+\begin{itemize}[nosep]
+  \item The \emph{shape} $v(x)$ is the unscaled per-atom variance (the sandwich by default). It
+    decides how $\sigma$ varies from atom to atom, so it carries all the ranking information. This
+    proposal leaves it \textbf{unchanged}.
+  \item The \emph{scale} is currently one scalar $\lambda$ (or $\kappa$), fitted so that the rms
+    normalised error is~1. The proposal replaces it with one conformal factor $\lambda_g$ per group
+    $g$ of a geometric feature, obtained from score \emph{quantiles}. The score itself is normalised
+    by the sandwich variance.
+\end{itemize}
+Within a group, atoms are ordered by $\sigma$ exactly as the sandwich orders them. Across groups the
+ordering changes only through the ratios $\lambda_g/\lambda_{g'}$.
+
+\tableofcontents
+
+%======================================================================
+\section{Model and data}
+
+Each atom $i$ with environment $x_i$ has a site descriptor $\bphi(x_i)\in\mathbb R^L$: the ACE product
+basis in species-major blocks, plus pair blocks. The model is linear in the coefficients $\bc$:
+\begin{equation}
+  E(\mathbf R) = \sum_i \bphi(x_i)\cdot\bc + \sum_i E^0_{Z_i}.
+\end{equation}
+A training configuration contributes energy, force and virial observations, each linear in $\bc$:
+\begin{equation}
+  \bphi_E=\sum_i\bphi(x_i),\qquad
+  \bphi_{F,i\alpha} = -\frac{\partial\bphi_E}{\partial r_{i\alpha}},\qquad
+  \bphi_{V,\alpha\beta} = -\sum_i r_{i\alpha}\frac{\partial\bphi_E}{\partial r_{i\beta}}.
+\end{equation}
+Each row has a structural weight $w$ (per-atom energy normalisation and per-type weights) and a
+noise scale $\sigma_q$ for its quantity $q\in\{E,F,V\}$. The whitened rows and targets are
+\begin{equation}
+  \bpsi = \bphi\, w/\sigma_q,\qquad \tilde y = y\, w/\sigma_q,
+\end{equation}
+where $y$ is the label minus the $E^0$ baseline.
+
+%======================================================================
+\section{Prior and posterior}
+
+The prior is $\bc\sim\mathcal N(0,\Lambda^{-1})$ with
+\begin{equation}
+  \Lambda=\diag\big(\Gamma_j^2\,e^{a_{k(j)}}\big).
+\end{equation}
+Here $\Gamma_j$ is the smoothness prior of column $j$, $k(j)\in\{2,3,4\}$ is the column's body
+order, and $a_k$ is the ARD log-precision multiplier of body order $k$. Pair columns and
+correlation-order-1 columns both count as 2-body. The posterior is Gaussian:
+\begin{equation}
+  A=\sum_{\text{rows}}\bpsi\bpsi\tran+\Lambda,\qquad
+  \cbar = A^{-1}\sum_{\text{rows}}\bpsi\,\tilde y,\qquad
+  \operatorname{Cov}(\bc)=A^{-1}.
+\end{equation}
+Numerically we work in the prior-scaled system $S=D^{-1}AD^{-1}=LL\tran$, with $D=\diag\Gamma$.
+Each $a_k$ is floored, $a_k\ge a_{\mathrm{floor}}$, so that $\operatorname{cond}(S)\le10^{14}$.
+
+%======================================================================
+\section{Hyperparameters: type-II maximum likelihood (unchanged)}
+
+The hyperparameters are $h=(\log\sigma_E,\log\sigma_F,\log\sigma_V,a_2,a_3,a_4)$. The evidence uses
+the per-quantity statistics $G_q=\sum\bpsi\bpsi\tran$, $\bm b_q$, $\bm y\tran\bm y_q$ and $n_q$, and
+up to constants is
+\begin{equation}
+  \log p(\mathcal D\mid h) = -\tfrac12\sum_q\frac{\bm y\tran\bm y_q}{\sigma_q^2}
+  +\tfrac12\bm b\tran A^{-1}\bm b-\tfrac12\log|A|+\tfrac12\log|\Lambda|-\sum_q n_q\log\sigma_q .
+\end{equation}
+The \emph{joint} mode maximises it over all six components of $h$, with L-BFGS-B on the
+gradient-normalised objective. The \emph{sequential} mode fixes $\sigma_q$ at the linear MAP and
+fits only the $a_k$.
+
+%======================================================================
+\section{The hold-out protocol (unchanged; it feeds every scale)}
+\label{sec:holdout}
+\begin{enumerate}[nosep]
+  \item Split the training configurations, by configuration, into $\Tfit$ (fraction $1-f$) and
+    $\Tval$ (fraction $f=0.2$).
+  \item Fit $h$ on $\Tfit$ to obtain the posterior $P_{\mathrm{fit}}$. For each held-out atom
+    $i\in\Tval$, record the error $\bm e_i=\bm F_i-\hat{\bm F}_i(\cbar_{\mathrm{fit}})$. These errors
+    are \emph{honest}, because $P_{\mathrm{fit}}$ never saw $\Tval$.
+  \item Refit on all of $T$, starting from $h_{\mathrm{fit}}$. This gives the \textbf{served}
+    posterior $P$, with mean $\cbar$ and factor $L$.
+\end{enumerate}
+
+%======================================================================
+\section{The shape \texorpdfstring{$v(x)$}{v(x)}: unscaled per-atom variance (unchanged)}
+\label{sec:shape}
+
+A target atom has force rows $\bphi_\alpha(x)$, $\alpha=x,y,z$ (raw, unweighted). There are two
+variants of the shape.
+
+\paragraph{Epistemic (\texttt{-{}-ard-variance kappa}).}
+\begin{equation}
+  s^2(x)=\sum_\alpha\bphi_\alpha A^{-1}\bphi_\alpha\tran=\sum_\alpha\big\|L^{-1}D^{-1}\bphi_\alpha\tran\big\|^2.
+\end{equation}
+
+\paragraph{Configuration-clustered sandwich (\texttt{-{}-ard-variance sandwich}, default).}
+The residuals at the served mean are $\rho_r=\tilde y_r-\bpsi_r\cdot\cbar$. Each training
+configuration's score sums its rows, over all of $c$'s energy, force and virial rows:
+\begin{equation}
+  \bg_c=\sum_{r\in c}\bpsi_r\rho_r .
+\end{equation}
+The ``meat'' is $M=\sum_c\bg_c\bg_c\tran$, of rank at most $|T|$, and
+\begin{equation}
+  m^2(x)=\sum_\alpha\bphi_\alpha A^{-1}MA^{-1}\bphi_\alpha\tran
+  =\sum_\alpha\big\|Q\tran D^{-1}\bphi_\alpha\tran\big\|^2,
+  \qquad Q=S^{-1}D^{-1}\big[\bg_1\cdots\bg_{|T|}\big]\in\mathbb R^{L\times|T|}.
+  \label{eq:sandwich}
+\end{equation}
+This is the Huber--White misspecification-robust covariance of $\hat{\bc}$, and also M\"uller's
+(2013) sandwich posterior; $\kappa^2A^{-1}$ is its homoscedastic special case ($M\propto A$). The
+term $\bphi_\alpha A^{-1}\bg_c$ is the one-step change in the prediction at $x$ when configuration
+$c$ is deleted. So $m^2(x)$ is the \emph{infinitesimal-jackknife} variance of the prediction over
+training configurations. This is what ranks local errors: on bench365 the Spearman correlation
+$\rho$ is $0.30$--$0.37$ for $m^2$, against $0.19$--$0.26$ for $s^2$.
+
+\paragraph{Leave-own-cluster-out (calibration only).}
+A held-out atom $i$ belongs to training configuration $c(i)$, and a genuinely new configuration has
+no ``own'' term. For calibration we therefore use
+\begin{equation}
+  m^2_{-\mathrm{own}}(x_i)=\sum_\alpha\sum_{c\neq c(i)}\big(\bphi_\alpha A^{-1}\bg_c\big)^2 .
+\end{equation}
+The \emph{served} variances use all $c$. Below, $v(x)$ denotes the chosen shape ($m^2$ or $s^2$), and
+$\vcal_i$ its calibration version ($m^2_{-\mathrm{own}}$, or $s^2$) at the held-out atoms.
+
+%======================================================================
+\section{The scale: current (Gaussian) and proposed (conformal)}
+\label{sec:scale}
+
+For a labelled calibration atom, the normalised score is
+\begin{equation}
+  s_i=\frac{|\bm e_i|}{\sqrt{\vcal_i/3}} .
+\end{equation}
+If $\sqrt{v/3}$ were an exact isotropic Gaussian per-component scale, $s$ would follow $\chi_3$, the
+chi distribution with 3 degrees of freedom.
+
+\subsection{Current: Gaussian rms matching (one scalar)}
+\begin{equation}
+  \lambda^2=\frac13\,\overline{s^2}_{\,i\in\Tval}\qquad(\text{the Gaussian NLL optimum; $\kappa$ is the same formula with $s^2$}).
+\end{equation}
+The served value is $\sigma(x)=\lambda\sqrt{v(x)}$, read as $\Delta\bm F\sim\mathcal N(0,\sigma^2/3\,I_3)$.
+The only claim made is rms-$z=1$ on $\Tval$; any coverage statement rests on the Gaussian
+assumption.
+
+\subsection{Proposed: Mondrian split conformal (one factor per group)}
+
+The groups $g(x)\in\{1,\dots,G\}$ are computed from geometry alone (Section~\ref{sec:groups}). For a
+target coverage $1-\alpha$, and each group $g$ with $n_g$ calibration atoms, take
+\begin{equation}
+  q_g=\text{the }\frac{\lceil(n_g+1)(1-\alpha)\rceil}{n_g}\text{ empirical quantile of }\{s_i: g(x_i)=g\}.
+\end{equation}
+The served quantities are
+\begin{align}
+  \texttt{forces\_q}(x)  &= q_{g(x)}\sqrt{v(x)/3}, \label{eq:fq}\\
+  \texttt{forces\_std}(x)&= \lambda_{g(x)}\sqrt{v(x)},\qquad \lambda_g\coloneqq q_g/\chiinv(1-\alpha). \label{eq:fs}
+\end{align}
+Here \eqref{eq:fq} is the guaranteed radius, and \eqref{eq:fs} is the $\sigma$ whose Gaussian
+$(1-\alpha)$ ball is that radius.
+
+\paragraph{Guarantee (split conformal, per group).}
+If a target atom is exchangeable with group $g$'s calibration atoms, then
+\begin{equation}
+  1-\alpha\;\le\;\Prob\big(|\Delta\bm F|\le\texttt{forces\_q}\big)\;\le\;1-\alpha+\frac{1}{n_g+1}.
+\end{equation}
+No Gaussianity is assumed: within a group, $s$ may have any distribution. Atoms within a
+configuration are correlated, so the exact statement holds at the level of configurations, and the
+atom-level version is the standard approximation. We report $n_{\mathrm{cfg}}$ per group and merge
+groups below $n_{\min}$.
+
+\paragraph{Relation to the Gaussian scale.}
+The Gaussian scale is the case $G=1$, with the rms in place of the $(1-\alpha)$ quantile. In
+distribution the two scales agree to about 1\%: on bench365, $q=2.48$ against
+$\lambda\,\chiinv(0.9)=2.50$. Where they differ, the conformal scale is the one with a stated coverage.
+
+\paragraph{What is invariant.}
+The mean $\cbar$ and the energy and virial predictions; the shape $v(x)$; and the ordering of atoms by
+$\sigma$ \emph{within a group}, since the transformation there is a single positive factor.
+What changes is the relative $\sigma$ \emph{between} groups, by $\lambda_g/\lambda_{g'}$. This is how
+crack-tip groups receive more $\sigma$ without inflating the bulk.
+
+%======================================================================
+\section{The group feature (Mondrian)}
+\label{sec:groups}
+
+Two constants are fixed at fit time: $r_1$, the first minimum of the training radial distribution
+function, and $z^\star$, the modal training coordination. For each atom,
+\begin{equation}
+  z_i=\#\{j:r_{ij}<r_1\},\qquad
+  d_i=\frac{\operatorname{std}\{r_{ij}:r_{ij}<r_1\}}{\operatorname{mean}\{r_{ij}:r_{ij}<r_1\}}
+  \quad(\text{NaN if }z_i<2).
+\end{equation}
+The band edges are quantiles of $d$ over the calibration pool: $p_{50}$, $p_{90}$ and $p_{99}$ by
+default, giving four bands. The group is
+\begin{equation}
+  g=\operatorname{band}(d)\times[\,z=z^\star\,],\qquad G=8 .
+\end{equation}
+These features were chosen from the big-cell results. There, miscoverage tracked distortion ($\sigma$
+grows $\times1.7$ from low to high distortion, while the error grows $\times2.0$) and coordination:
+bulk-like atoms were calibrated, surface-like atoms conservative, and atoms with a strained first
+shell overconfident. In distribution, coverage is flat across these groups, so the grouping costs
+calibration samples only where nothing is wrong.
+
+%======================================================================
+\section{Calibration sets}
+
+\paragraph{Default (inside the fit).}
+$\Tval$, with its honest errors (Section~\ref{sec:holdout}) and $\vcal$ (Section~\ref{sec:shape}).
+
+\paragraph{\texttt{aj calibrate} (target regime).}
+A set $U$ of labelled configurations, for example a few cells from the production regime labelled
+with MACE or DFT. The errors are those of the \emph{served} model, $\bm e_u=\bm F_u-\hat{\bm
+F}_u(\cbar)$; since $U$ is disjoint from training, these are honest too. The variance $v_u$ is the
+served $v$, with no own term because $U\notin T$. The scores $s_u$ are appended to $\Tval$'s within
+each group (or replace them, with \texttt{-{}-replace}), and the $q_g$ are recomputed.
+Exchangeability is then with $\Tval\cup U$ within each group, so target atoms that resemble $U$ are
+covered because $U$ is in the pool.
+
+\paragraph{Evidence.}
+On bench365, leaving out one realisation at a time over 10 crack realisations (30 cells): the whole
+crack cell reaches coverage $0.899$, the crack tip $0.885$ (fold range $0.864$--$0.900$), and the
+dislocations $0.92$--$0.93$.
+
+%======================================================================
+\section{The support diagnostic (covariate-shift weighted conformal; not served)}
+
+Our labels are a deterministic function of the structure, so $P(y\mid x)$ is fixed and going from
+training to a target is a pure \emph{covariate shift}. For a target structure, given only its
+unlabelled atoms:
+\begin{enumerate}[nosep]
+  \item \textbf{Density ratio.} For each species, fit an L2 logistic classifier on whitened 2-body
+    descriptors, with target $=1$ and calibration $=0$, class-balanced. This gives
+    $w(x)\propto P(t\mid x)/P(c\mid x)$.
+  \item \textbf{Weighted quantile} (Tibshirani, Barber, Cand\`es \& Ramdas, 2019). Let
+    $W=\sum_j w(x_j)+w(x)$. For each target atom $x$,
+    \begin{equation}
+      q_w(x)=\text{the }(1-\alpha)\text{ quantile of }
+      \sum_{i\in\mathrm{cal}}\frac{w(x_i)}{W}\,\delta_{s_i}+\frac{w(x)}{W}\,\delta_{+\infty}.
+    \end{equation}
+  \item \textbf{Report} \texttt{support\_q}$=q_w(x)$ and \texttt{support\_ok}$=[q_w<\infty]$ per
+    atom, and $n_{\mathrm{eff}}=(\sum w)^2/\sum w^2$ per species.
+\end{enumerate}
+A value \texttt{support\_ok}$=$False means that, under the estimated shift, the calibration data
+cannot certify coverage for that atom; these are the atoms to label next (active learning). On
+bench365 with no target labels, the check flags $10.7\%$ of crack-tip atoms against $0.4$--$0.5\%$
+for the dislocations. The diagnostic is \emph{not} used to scale $\sigma$. With target labels in the
+pool it adds nothing over the Mondrian scale, and without them its finite quantiles rest on
+$n_{\mathrm{eff}}\sim10$--$10^3$.
+
+%======================================================================
+\section{End-to-end summary}
+
+\begin{center}
+\fbox{\begin{minipage}{0.93\linewidth}
+\begin{description}[leftmargin=2.2cm,style=nextline]
+\item[fit] Data $\to$ whitened rows $\bpsi$, $\tilde y$ $\to$ type-II ML $h$ (on $\Tfit$; refit on $T$)
+  $\to$ served posterior $(\cbar,L)$ $\to$ configuration scores $\bg_c$ at $\cbar$ $\to$
+  $Q=S^{-1}D^{-1}G$ (the shape) $\to$ held-out scores $s_i=|\bm e_i|/\sqrt{\vcal_i/3}$ with groups
+  $g(x_i)$ $\to$ per-group $q_g$ (conformal) or a scalar $\lambda$ (Gaussian).
+\item[calibrate] A labelled target set $U$ $\to$ append $s_u$ within each group $\to$ recompute $q_g$.
+\item[serve] $v(x)$ (the shape) $\times\,\lambda_{g(x)}=q_{g(x)}/\chiinv(1-\alpha)$ $\to$
+  \texttt{forces\_std}, \texttt{forces\_q}.
+\item[diagnose] An unlabelled target $\to$ $w(x)$ $\to$ weighted quantile $\to$
+  \texttt{support\_ok}, \texttt{support\_q}, $n_{\mathrm{eff}}$.
+\end{description}
+\end{minipage}}
+\end{center}
+
+%======================================================================
+\section{Assumptions and known limitations}
+\begin{enumerate}[nosep]
+  \item \textbf{Exchangeability within a group, at configuration level.} The per-atom guarantee is
+    approximate; the groups and $n_{\mathrm{cfg}}$ are reported.
+  \item \textbf{The groups were chosen from benchmark evidence.} A shift the groups do not resolve
+    (chemical short-range order, a new phase) is covered only marginally. The support diagnostic is
+    the guard: it flags unsupported atoms without needing labels.
+  \item \textbf{A residual gap at the crack tip.} Even with labelled crack cells, coverage at the tip
+    itself is about 1.5 points below target. No feature tried (distortion, coordination, 2-body
+    density ratio, 2-body $k$NN) resolves the tip completely.
+  \item \textbf{Forces only.} The energy and virial variances remain the unscaled posterior
+    variances, unchanged.
+  \item \textbf{No aleatoric term.} The labels are deterministic, so all error is approximation
+    error. The scale ($\lambda$ or $q_g$) absorbs its size; the shape $v(x)$ decides where it is
+    larger.
+\end{enumerate}
+
+\begin{thebibliography}{9}\small
+\bibitem{huber} P.~J.~Huber, \emph{The behavior of maximum likelihood estimates under nonstandard
+  conditions}, Proc.\ 5th Berkeley Symp.\ (1967); H.~White, Econometrica 50, 1 (1982).
+\bibitem{muller} U.~K.~M\"uller, \emph{Risk of Bayesian inference in misspecified models, and the
+  sandwich covariance matrix}, Econometrica 81, 1805 (2013).
+\bibitem{tibshirani} R.~J.~Tibshirani, R.~F.~Barber, E.~J.~Cand\`es, A.~Ramdas, \emph{Conformal
+  prediction under covariate shift}, NeurIPS (2019), arXiv:1904.06019.
+\bibitem{vovk} V.~Vovk, A.~Gammerman, G.~Shafer, \emph{Algorithmic Learning in a Random World},
+  Springer (2005) --- Mondrian conformal prediction.
+\end{thebibliography}
+
+\end{document}
