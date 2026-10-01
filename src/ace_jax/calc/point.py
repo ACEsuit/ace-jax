@@ -448,16 +448,32 @@ class ACECalculator(Calculator):
         # nlist_s: neighbour list + layout + host->device; model_s: the compiled call
         return E, F, V, {"nlist_s": t1 - t0, "model_s": t2 - t1, "nlist_backend": backend}
 
+    def _served_set(self):
+        """The posterior properties that share one pass over the force rows and the shape V: forces_std,
+        plus forces_cov / forces_q / forces_group (schema 3) and forces_q_mahal (aniso).  Any one of them
+        requested computes and caches all of them (cleared with the other results on a system change)."""
+        post = self.posterior
+        out = {"forces_std"}
+        if post.group_table is not None:
+            out |= {"forces_cov", "forces_q", "forces_group"}
+            if post.force_shape == "aniso":
+                out.add("forces_q_mahal")
+        return out
+
     def _posterior_quantities(self, which):
-        """The requested posterior-served per-atom properties (subset of POSTERIOR_PROPS) as a dict:
+        """Posterior-served per-atom properties as a dict: the requested ones (subset of POSTERIOR_PROPS)
+        together with every other property of `_served_set` (one rows + shape pass serves them all):
         forces_std (N,), forces_cov (N,3,3), forces_q (N,), forces_q_mahal (N,; aniso only),
-        forces_group (N,) int, forces_support (dict).  Calibrated ARD std (lam x the shape, or kappa x
-        the posterior std for --ard-variance kappa / schema 1) from node-chunked design rows of the
-        full fit model; support (the expensive one) is computed only when requested."""
+        forces_group (N,) int; forces_support (dict) only when requested (it is the expensive one).
+        Calibrated ARD std (lam x the shape, or kappa x the posterior std for --ard-variance kappa /
+        schema 1) from node-chunked design rows of the full fit model."""
 
         from ..fit.ard import _NEED3
         from ..fit.rows import chunked_rows_fn
         post = self.posterior
+        which = set(which)
+        if which & {"forces_cov", "forces_q", "forces_q_mahal", "forces_group"} and post.group_table is None:
+            raise ValueError(_NEED3)
         if "forces_q_mahal" in which and post.force_shape != "aniso":
             from ase.calculators.calculator import PropertyNotImplementedError
             raise PropertyNotImplementedError("forces_q_mahal needs an aniso posterior (--uq ard "
@@ -465,48 +481,32 @@ class ACECalculator(Calculator):
         if "forces_support" in which and post.support is None:
             raise ValueError("this posterior has no support reference (fitted with --no-ard-support, or "
                              "predates it): refit with --uq ard without --no-ard-support")
-        if which & {"forces_cov", "forces_q", "forces_q_mahal", "forces_group"} and post.group_table is None:
-            raise ValueError(_NEED3)
+        shared = self._served_set() if which - {"forces_support"} else set()
         at = self.atoms
         n = len(at)
         ds, b, live = self._one_config_dataset(at)
         groups = (np.asarray(post.groups_of(b))[live].astype(np.int64)
                   if post.group_consts is not None else None)
         out = {}
+        if "forces_support" in which:
+            out["forces_support"] = self._support(ds, live, b)
+        if not shared:
+            return out
         if b.nbr.shape[1] == 0 or not bool(np.asarray(b.nbr_mask).any()):
             # no neighbours: forces are identically zero, so is every spread
-            zero = np.zeros(n)
-            for k in which:
-                if k in ("forces_std", "forces_q"):
-                    out[k] = zero
-                elif k == "forces_cov":
-                    out[k] = np.zeros((n, 3, 3))
-                elif k == "forces_q_mahal":
-                    out[k] = post.forces_q_mahal(groups)
-                elif k == "forces_group":
-                    out[k] = groups
-            if "forces_support" in which:
-                out["forces_support"] = self._support(ds, live, b)
-            return out
-        need_F = which & {"forces_std", "forces_cov", "forces_q"}
-        if need_F:
+            F = np.zeros((n, 3, len(np.asarray(post.mean))))
+        else:
             with highest_precision():
                 if getattr(self, "_rows_fn", None) is None:    # compiled once per cell shape (MD)
                     self._rows_fn = chunked_rows_fn(self._fit_model, self._fit_cfg)
                 # padding rows are zero; F[live] drops the padded nodes
                 F = self._rows_fn(b).F[live]
-            if "forces_std" in which:
-                out["forces_std"] = np.asarray(post.forces_std(F, groups))
-            if "forces_cov" in which:
-                out["forces_cov"] = np.asarray(post.forces_cov(F, groups))
-            if "forces_q" in which:
-                out["forces_q"] = np.asarray(post.forces_q(F, groups))
-        if "forces_q_mahal" in which:
-            out["forces_q_mahal"] = np.asarray(post.forces_q_mahal(groups))
-        if "forces_group" in which:
+        if post.group_table is not None:
+            out.update({k: np.asarray(v) for k, v in
+                        post.served(F, groups, shared - {"forces_group"}).items()})
             out["forces_group"] = groups
-        if "forces_support" in which:
-            out["forces_support"] = self._support(ds, live, b)
+        else:
+            out["forces_std"] = np.asarray(post.forces_std(F, groups))
         return out
 
     def _support(self, ds, live, b):

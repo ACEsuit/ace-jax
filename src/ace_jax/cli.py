@@ -275,6 +275,10 @@ def cmd_eval(a):
 _NEED3 = "this posterior predates schema 3; refit with --uq ard"
 
 
+class UsageError(ValueError):
+    """A user-facing condition: `main` prints "aj <cmd>: error: ..." and exits 2 instead of a traceback."""
+
+
 def _print_group_table(t):
     d = t.to_dict() if hasattr(t, "to_dict") else t
     merged = {int(k): int(src) for k, src in d["merged"]}
@@ -287,8 +291,9 @@ def _print_group_table(t):
 
 def cmd_calibrate(a):
     """Recalibrate the per-group conformal scales of an ARD posterior on a labelled set U (the posterior
-    mean and covariance are untouched): per-group replace by default (groups with >= n_min U configurations
-    use U only, the rest pool T_val + U), --append pools everywhere, --replace uses U only."""
+    mean and covariance are untouched): per-group replace by default (groups with >= effective_n_min(n_min,
+    alpha) U configurations -- n_min at the default coverage -- use U only, the rest pool T_val + U),
+    --append pools everywhere, --replace uses U only."""
     import dataclasses
     import hashlib
 
@@ -296,10 +301,10 @@ def cmd_calibrate(a):
 
     from .calc.point import ACECalculator
     from .fit.ard import ARDPosterior, conformal_scores
-    from .fit.conformal import group_scales
+    from .fit.conformal import effective_n_min, group_scales
     post = ARDPosterior.load(a.posterior)
     if post.group_table is None or post.cal is None:
-        raise ValueError(_NEED3)
+        raise UsageError(f"{a.posterior}: {_NEED3}")
     configs = load_configs(a.data, energy_key=a.energy_key, force_key=a.force_key, virial_key=a.virial_key)
     if not any(c.forces is not None for c in configs):
         raise ValueError(f"calibrate: no forces under --force-key {a.force_key!r} in {a.data}")
@@ -307,6 +312,7 @@ def cmd_calibrate(a):
     t0 = post.group_table
     lam_g = np.asarray(t0["lam_rms"], float)
     G, n_min = len(t0["q"]), int(t0["n_min"])
+    n_keep = effective_n_min(n_min, t0["alpha"])     # a group replaced by U alone must reach a finite q
     want_support = post.support is not None
     s_u, g_u, c_u, X_u, Z_u = [], [], [], [], []
     with highest_precision():
@@ -343,12 +349,12 @@ def cmd_calibrate(a):
     elif a.append:
         keep_old = np.ones(len(g_old), bool)
     else:
-        keep_old = u_cfg[g_old] < n_min                                   # per-group replace
+        keep_old = u_cfg[g_old] < n_keep                                  # per-group replace
     S = np.r_[np.asarray(cal["scores"], np.float32)[keep_old], s_u.astype(np.float32)]
     Gg = np.r_[g_old[keep_old], g_u]
     Cc = np.r_[c_old[keep_old], c_u]
     Ss = np.r_[np.asarray(cal["src"]).astype(int)[keep_old], np.full(len(s_u), src_new)]
-    tab = group_scales(S.astype(float), Gg, Cc, G, t0["alpha"], n_min, src=Ss)
+    tab = group_scales(S.astype(float), Gg, Cc, G, t0["alpha"], n_min, src=Ss, log=print)
     h = hashlib.sha256()
     with open(a.data, "rb") as fh:
         for blk in iter(lambda: fh.read(1 << 20), b""):
@@ -361,7 +367,7 @@ def cmd_calibrate(a):
     support = None
     if want_support:
         from .fit.support import recalibrate_support
-        support = recalibrate_support(post.support, mode, u_cfg, n_min, np.concatenate(X_u),
+        support = recalibrate_support(post.support, mode, u_cfg, n_keep, np.concatenate(X_u),
                                       np.concatenate(Z_u), s_u, c_u, g_u)
     new = post._replace(group_table=tab.to_dict(),
                         cal={"scores": S.astype(np.float32), "groups": Gg.astype(np.int8),
@@ -529,7 +535,7 @@ def main(argv=None):
     a = _parse(argv)
     try:
         {"eval": cmd_eval, "basis": cmd_basis, "calibrate": cmd_calibrate}.get(a.cmd, run)(a)
-    except BasisUnavailable as e:                     # a user-facing condition, not a crash
+    except (BasisUnavailable, UsageError) as e:       # a user-facing condition, not a crash
         print(f"aj {a.cmd}: error: {e}", file=sys.stderr)
         raise SystemExit(2) from None
     return 0

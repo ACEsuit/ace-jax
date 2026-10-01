@@ -360,7 +360,7 @@ def test_calibrate_rebuilds_support(fitted, calib_set, tmp_path):
     assert "support_ok" in at.calc.get_property("forces_support", at)
 
 
-def test_calibrate_refuses_schema2(fitted, calib_set, tmp_path):
+def test_calibrate_refuses_schema2(fitted, calib_set, tmp_path, capsys):
     from ace_jax.cli import main
     z = dict(np.load(fitted / "posterior.npz"))
     z["schema"] = np.array(2)
@@ -369,8 +369,11 @@ def test_calibrate_refuses_schema2(fitted, calib_set, tmp_path):
     np.savez(tmp_path / "p2.npz", **z)
     args = _calib_args(fitted, calib_set, ["--out", str(tmp_path / "o.npz")])
     args[args.index("--posterior") + 1] = str(tmp_path / "p2.npz")
-    with pytest.raises(ValueError, match="refit with --uq ard"):
+    with pytest.raises(SystemExit) as ex:                  # m3: the user-facing error path, no traceback
         main(args)
+    assert ex.value.code == 2
+    err = capsys.readouterr().err
+    assert err.startswith("aj calibrate: error:") and "refit with --uq ard" in err
 
 
 def test_calibrate_requires_forces(fitted, calib_set, tmp_path):
@@ -534,3 +537,47 @@ def test_calibrate_loads_legacy_int8_cal_arrays(fitted, calib_set, tmp_path):
     s = np.asarray(new.cal["src"])
     np.testing.assert_array_equal(s[:n], src)                             # --append keeps every old score
     assert len(s) > n and (s[n:] == 5).all()
+
+
+def test_posterior_properties_share_one_rows_and_shape_pass(fitted, monkeypatch):
+    """I4: forces_std / forces_cov / forces_q / forces_group on the same atoms build the (N, 3, L) force rows
+    and the shape V once; moving the atoms invalidates and recomputes them once more."""
+    from ase.io import read
+    import ace_jax.fit.rows as rows_mod
+    from ace_jax import ACECalculator
+    from ace_jax.fit.ard import ARDPosterior
+    n_rows, n_shape = [], []
+    real_rows, real_shape = rows_mod.chunked_rows_fn, ARDPosterior.atom_shape
+
+    def spy_rows(*a, **k):
+        f = real_rows(*a, **k)
+        return lambda b: (n_rows.append(1), f(b))[1]
+
+    monkeypatch.setattr(rows_mod, "chunked_rows_fn", spy_rows)
+    monkeypatch.setattr(ARDPosterior, "atom_shape", lambda self, F: (n_shape.append(1), real_shape(self, F))[1])
+    at = read(XYZ, "1")
+    calc = ACECalculator(str(fitted / "model.npz"), posterior=str(fitted / "posterior.npz"))
+    at.calc = calc
+    at.get_forces()
+    props = {p: np.asarray(calc.get_property(p, at)) for p in ("forces_std", "forces_cov", "forces_q", "forces_group")}
+    assert len(n_rows) == 1 and len(n_shape) == 1
+    np.testing.assert_allclose(np.trace(props["forces_cov"], axis1=1, axis2=2), props["forces_std"] ** 2, rtol=1e-10)
+    at.positions[0] += 0.01
+    for p in ("forces_q", "forces_std", "forces_cov"):
+        calc.get_property(p, at)
+    assert len(n_rows) == 2 and len(n_shape) == 2
+
+
+def test_forces_q_mahal_on_schema2_raises_need3(fitted, tmp_path):
+    """m3: forces_q_mahal on a schema-2 posterior is the schema error, not "needs an aniso posterior"."""
+    from ase.io import read
+    from ace_jax import ACECalculator
+    z = dict(np.load(fitted / "posterior.npz"))
+    z["schema"] = np.array(2)
+    for k in [k for k in z if k.startswith(("R", "group_", "cal_", "support", "force_shape", "eps"))]:
+        z.pop(k)
+    np.savez(tmp_path / "p2.npz", **z)
+    at = read(XYZ, "1")
+    at.calc = ACECalculator(str(fitted / "model.npz"), posterior=str(tmp_path / "p2.npz"))
+    with pytest.raises(ValueError, match="refit with --uq ard"):
+        at.calc.get_property("forces_q_mahal", at)
