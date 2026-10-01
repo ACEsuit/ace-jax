@@ -25,6 +25,8 @@ image = (
     .add_local_file(str(DATA / "cantor_embed_d16_deg10.npz"), "/data/cantor_embed_d16_deg10.npz")
     .add_local_dir(str(DATA / "bench365"), "/data", ignore=["*.npy", "smoke/out_*/**"])
     .add_local_file(str(pathlib.Path(__file__).parent / "fit_bench.py"), "/root/fit_bench.py")
+    .add_local_file(str(pathlib.Path(__file__).parent / "ard_arms.py"), "/root/ard_arms.py")
+    .add_local_file(str(pathlib.Path(__file__).parent / "served_arrays.py"), "/root/served_arrays.py")
     .add_local_dir(str(WT / "src"), "/root/ace-jax/src", ignore=["**/__pycache__/**"])
 )
 app = modal.App("acegp-bench365")
@@ -32,13 +34,15 @@ vol = modal.Volume.from_name("acegp-prod-out")
 
 
 @app.function(gpu="B200", image=image, volumes={"/out": vol}, timeout=86400, memory=200 * 1024)
-def fit_arm(arm: str, smoke: bool = False) -> int:
+def fit_arm(arm: str, smoke: bool = False, tag: str = "", train_extra: str = "") -> int:
+    """tag: suffix of the output dir (bench365_<arm><tag>); train_extra: comma-separated container paths of xyz
+    files appended to the training set (e.g. /out/defects/big3_cracks_r2-3.xyz)."""
     import subprocess, time
-    out = f"/out/bench365_{arm}{'_smoke' if smoke else ''}"
+    out = f"/out/bench365_{arm}{tag}{'_smoke' if smoke else ''}"
     os.makedirs(out, exist_ok=True)
     env = dict(os.environ, JAX_ENABLE_X64="1", XLA_PYTHON_CLIENT_PREALLOCATE="false")
     argv = ["python", "-u", "/root/fit_bench.py", "/data/smoke" if smoke else "/data", out, arm] + \
-        (["--smoke"] if smoke else [])
+        (["--smoke"] if smoke else []) + (["--train-extra", train_extra] if train_extra else [])
     t0 = time.time()
     with open(f"{out}/stdout.log", "w") as so, open(f"{out}/stderr.log", "w") as se:
         p = subprocess.Popen(argv, stdout=so, stderr=se, env=env)
@@ -50,10 +54,10 @@ def fit_arm(arm: str, smoke: bool = False) -> int:
 
 
 @app.local_entrypoint()
-def launch(arms: str = "pops,gp", smoke: bool = False):
+def launch(arms: str = "pops,gp", smoke: bool = False, tag: str = "", train_extra: str = ""):
     f = modal.Function.from_name("acegp-bench365", "fit_arm")
     for arm in arms.split(","):
-        print("spawned", arm, f.spawn(arm, smoke).object_id)
+        print("spawned", arm, f.spawn(arm, smoke, tag, train_extra).object_id)
 
 
 @app.function(gpu="A100-80GB", image=image, volumes={"/out": vol}, timeout=4 * 3600)
@@ -61,10 +65,12 @@ def big_errors(run: str = "bench365_pops", xyz: str = "/data/big.xyz", tag: str 
     """Per-atom |F_model - F_MACE| on the big crack / dislocation cells (xyz: data/big.xyz, or e.g.
     /out/defects/big3_mh1.xyz), from the run's saved linear model.  If the run wrote posterior.npz
     (--uq ard), also the per-atom ARD force sigma (ACECalculator(posterior=): node-chunked design
-    rows, fine above 2.8k atoms).  Writes <run>/big<tag>_err.npz with the per-atom family, r_core,
-    fixed mask and config index, so the file scores without sites.npz."""
+    rows, fine above 2.8k atoms); a schema-3 posterior also serves forces_q, forces_group and forces_cov, saved
+    with the error vector dF (validate_shape.py).  Writes <run>/big<tag>_err.npz with the per-atom family,
+    r_core, fixed mask and config index, so the file scores without sites.npz."""
     import os
     os.environ["JAX_ENABLE_X64"] = "1"
+    import sys
     import time
     import jax
     jax.config.update("jax_enable_x64", True)
@@ -74,25 +80,35 @@ def big_errors(run: str = "bench365_pops", xyz: str = "/data/big.xyz", tag: str 
     post = f"/out/{run}/posterior.npz"
     calc = ACECalculator(f"/out/{run}/model.npz", posterior=post) if os.path.exists(post) \
         else ACECalculator(f"/out/{run}/model.npz")
-    err, sd, fam, rc, fx, cid, t0 = [], [], [], [], [], [], time.time()
+    sys.path.insert(0, "/root")
+    import served_arrays
+    # served properties of a schema-3 posterior; older posteriors serve forces_std only
+    props = ["forces_std"]
+    if os.path.exists(post):
+        if "group_table_json" in np.load(post).files:      # schema 3
+            props += ["forces_q", "forces_group", "forces_cov"]
+    err, dfv, srv, fam, rc, fx, cid, t0 = [], [], [], [], [], [], [], time.time()
     for k, a in enumerate(read(xyz, ":")):
         fam.append(np.full(len(a), a.info.get("family", "?")))
         rc.append(a.arrays.get("r_core", np.full(len(a), np.nan)))
         fx.append(a.arrays.get("fixed", np.zeros(len(a), bool)).astype(bool))
         cid.append(np.full(len(a), k))
         a.calc = calc
-        err.append(np.linalg.norm(a.get_forces() - a.arrays["mace_force"], axis=1))
-        if os.path.exists(post):
-            sd.append(np.asarray(calc.get_property("forces_std", a)))
-    out = dict(err=np.concatenate(err), family=np.concatenate(fam), r_core=np.concatenate(rc),
-               fixed=np.concatenate(fx), cfg=np.concatenate(cid))
-    if sd:
-        out["sd"] = np.concatenate(sd)
+        d = a.get_forces() - a.arrays["mace_force"]
+        dfv.append(d.astype(np.float32))
+        err.append(np.linalg.norm(d, axis=1))
+        if os.path.exists(post):      # E/F reused from the get_forces call above
+            srv.append(served_arrays.collect(calc, [a], props))
+    out = dict(err=np.concatenate(err), dF=np.concatenate(dfv), family=np.concatenate(fam),
+               r_core=np.concatenate(rc), fixed=np.concatenate(fx), cfg=np.concatenate(cid))
+    if srv:
+        out.update({k: np.concatenate([x[k] for x in srv]) for k in srv[0]})
+    sd = out.get("sd", [])
     np.savez(f"/out/{run}/big{tag}_err.npz", **out)
     vol.commit()
     e = out["err"]
     return (f"{len(e)} atoms, median |dF| {np.median(e):.3f}, 99th {np.percentile(e, 99):.3f} eV/A"
-            + (f"; median sigma {np.median(out['sd']):.3f}" if sd else "") + f"; {time.time() - t0:.0f} s")
+            + (f"; median sigma {np.median(out['sd']):.3f}" if len(sd) else "") + f"; {time.time() - t0:.0f} s")
 
 
 @app.local_entrypoint()
