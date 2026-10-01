@@ -27,6 +27,7 @@ image = (
     .add_local_file(str(pathlib.Path(__file__).parent / "fit_bench.py"), "/root/fit_bench.py")
     .add_local_file(str(pathlib.Path(__file__).parent / "ard_arms.py"), "/root/ard_arms.py")
     .add_local_file(str(pathlib.Path(__file__).parent / "served_arrays.py"), "/root/served_arrays.py")
+    .add_local_file(str(pathlib.Path(__file__).parent / "train_extra.py"), "/root/train_extra.py")
     .add_local_dir(str(WT / "src"), "/root/ace-jax/src", ignore=["**/__pycache__/**"])
 )
 app = modal.App("acegp-bench365")

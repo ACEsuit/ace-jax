@@ -10,12 +10,13 @@ Per run directory (ard.json, posterior.npz, big3*_err.npz written by modal_bench
 Runs that predate forces_q / forces_group (or schema 3) are reported as far as their arrays allow and
 marked n/a elsewhere.
 
-    python validate_shape.py --runs DIR [DIR ...] --out report.md [--boot 1000]
+    python validate_shape.py --runs DIR[:PAT] [DIR[:PAT] ...] --out report.md [--boot 1000] [--files PAT]
 
 The bootstrap and tip band follow conformal_cv.py (cells = cfg // 3, tip = r_core <= 10 A); that file is
 a script that runs on import, so its few lines are mirrored here rather than imported.
 """
 import argparse
+import fnmatch
 import glob
 import json
 import os
@@ -28,8 +29,9 @@ OPT = ("forces_q", "forces_group", "forces_cov", "dF")
 NA = "n/a"
 
 
-def load_run(d):
-    """Run dictionary: name, ard (ard.json or {}), force_shape/eps (posterior.npz), and the per-atom free-atom
+def load_run(d, files="big3*_err.npz"):
+    """`files`: comma-separated fnmatch patterns on the err-file basenames (default all big3*_err.npz); use it to
+    score only the cells a fold run did not train on.  Run dictionary: name, ard (ard.json or {}), force_shape/eps (posterior.npz), and the per-atom free-atom
     arrays of every big3*_err.npz (cell = (file, cfg // 3)); optional arrays only when present in all files."""
     d = str(d)
     ard = json.load(open(f"{d}/ard.json")) if os.path.exists(f"{d}/ard.json") else {}
@@ -40,7 +42,8 @@ def load_run(d):
             shape = str(z["force_shape"])
         if "eps" in z.files:
             eps = float(z["eps"])
-    files = sorted(glob.glob(f"{d}/big3*_err.npz"))
+    pats = files.split(",")
+    files = sorted(f for f in glob.glob(f"{d}/big3*_err.npz") if any(fnmatch.fnmatch(os.path.basename(f), q) for q in pats))
     parts = [np.load(f, allow_pickle=True) for f in files]
     A = {}
     if parts:
@@ -126,6 +129,8 @@ def coverage_table(R, B=1000, seed=0):
                "atom": None, "cell": None, "ci": None, "ci_atom": None}
         if h is not None:
             hc, nc = _cell_stats(h[0], R["A"]["cell"], m)
+            ok = nc > 0                      # resample only the subset's own cells
+            hc, nc = hc[ok], nc[ok]
             W = np.random.default_rng(seed).multinomial(len(nc), np.full(len(nc), 1 / len(nc)), B).astype(float)
             a1, c1 = _est(hc, nc, np.ones((1, len(nc))))
             ba, bc = _est(hc, nc, W)
@@ -253,11 +258,18 @@ def _f_list(x):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--runs", nargs="+", required=True)
+    ap.add_argument("--runs", nargs="+", required=True,
+                    help="run dirs; DIR:PAT[,PAT] restricts that run to err files whose basename matches (fnmatch), "
+                         "e.g. a fold run scored on the cells it did not train on")
+    ap.add_argument("--files", default="big3*_err.npz", help="default err-file pattern(s) for runs without :PAT")
     ap.add_argument("--out", required=True)
     ap.add_argument("--boot", type=int, default=1000)
     a = ap.parse_args()
-    md = report([load_run(d) for d in a.runs], a.boot)
+    runs = []
+    for spec in a.runs:
+        d, _, pat = spec.partition(":")
+        runs.append(load_run(d, pat or a.files))
+    md = report(runs, a.boot)
     open(a.out, "w").write(md)
     print(md)
 

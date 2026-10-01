@@ -40,12 +40,11 @@ else:
                     map_restarts=1 if smoke else 4)
 cfg.validate()
 train = f"{data}/train.xyz"
-if extra:   # train.xyz + the extra configurations in one extxyz (labels and arrays kept as written)
-    from ase.io import read, write
+if extra:   # train.xyz + the validated extra configurations in one extxyz (see train_extra.py)
+    from train_extra import prepare
     os.makedirs(out, exist_ok=True)
     train = f"{out}/train_plus_extra.xyz"
-    write(train, read(f"{data}/train.xyz", ":") + [a for p in extra for a in read(p, ":")], format="extxyz")
-    print("train-extra:", extra, flush=True)
+    prepare(f"{data}/train.xyz", extra, train, log=lambda *s: print(*s, flush=True))
 d = load_fit_data(cfg, train=train, test=f"{data}/test.xyz", ood=f"{data}/ood.xyz")
 res = fit(cfg, d, log=lambda *s: print(*s, flush=True), on_stage=checkpoint_writer(out))   # stages survive a later failure
 write_outputs(res, out, layout=("run", "cli"), argv={"arm": arm, "data": data, "train_extra": extra})

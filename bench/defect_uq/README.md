@@ -236,19 +236,25 @@ modal deploy modal_bench365.py
 modal run modal_bench365.py::launch --arms ard_legacy,ard_A,ard_AB,ard_ABblk,ard_aniso
 
 # 2. ell sweep: ell in {2,3,4,6,inf} = ard_ell2, ard_ABblk, ard_ell4, ard_ell6, ard_AB. First without tip data
-#    (calibration only; ard_ell{2,4,6} + the arms of step 1), then with the crack realisations NOT held out in T,
-#    one leave-one-realisation fold at a time. Fold r holds out r{r}; train on the other realisations'
-#    cracks. Start with 3 folds (e.g. r2, r5, r8; files are pairs, so fold r2 holds out r2 and keeps r3):
+#    (calibration only: the runs of step 1 + ard_ell2/4/6), then with crack realisations NOT held out in T.
+#    A fold holds out one crack FILE (a realisation pair: r2-3, r4-5, r6-7 or r8-9) and trains on the other three
+#    via --train-extra; tag _fold_<pair>. Start with 3 folds (r2-3, r4-5, r8-9); extend to all 4 if the
+#    spread between folds is > 1 point.
 for ell in ard_ell2 ard_ABblk ard_ell4 ard_ell6 ard_AB; do
-  modal run modal_bench365.py::launch --arms $ell --tag _fold_r2 \
+  modal run modal_bench365.py::launch --arms $ell --tag _fold_r2-3 \
       --train-extra /out/defects/big3_cracks_r4-5.xyz,/out/defects/big3_cracks_r6-7.xyz,/out/defects/big3_cracks_r8-9.xyz
 done
-# (repeat for the other folds with the remaining files; extend to all folds if fold spread > 1 point)
+# (repeat with --tag _fold_r4-5 and the extras r2-3,r6-7,r8-9, and so on for each fold)
+# --train-extra checks every frame for mace_energy and mace_force (error naming file, frame, key), allows a
+# missing mace_virial (no virial row, logged), and logs the counts of frames, virial-less frames and fixed
+# boundary atoms. Fixed atoms stay in the fit with their MACE force labels (the loader has one force weight per
+# configuration, no per-atom mask); see modal/train_extra.py.
 
 # 3. f sweep (0.2 = ard_ABblk)
 modal run modal_bench365.py::launch --arms ard_f1,ard_f3
 
-# per-atom errors + served arrays on the v3 cells for each run (one call per file; tag names the file)
+# per-atom errors + served arrays on the v3 cells (one call per file; the tag names the file).
+# Non-fold runs: all five files.
 for run in bench365_ard_legacy bench365_ard_A bench365_ard_AB bench365_ard_ABblk bench365_ard_aniso \
            bench365_ard_ell2 bench365_ard_ell4 bench365_ard_ell6 bench365_ard_f1 bench365_ard_f3; do
   modal run modal_bench365.py::launch_big --run $run --xyz /out/defects/big3_mh1.xyz --tag 3
@@ -256,7 +262,13 @@ for run in bench365_ard_legacy bench365_ard_A bench365_ard_AB bench365_ard_ABblk
     modal run modal_bench365.py::launch_big --run $run --xyz /out/defects/big3_cracks_r$p.xyz --tag 3x_r$p
   done
 done
-# (fold runs: the held-out realisation's cells are the target; the training cracks are not scored)
+# Fold runs: only the held-out pair's file and the main file (r0-1 cracks + edge/screw, never in T); the
+# training cracks must not be scored. Example for fold r2-3:
+for ell in ard_ell2 ard_ABblk ard_ell4 ard_ell6 ard_AB; do
+  run=bench365_${ell}_fold_r2-3
+  modal run modal_bench365.py::launch_big --run $run --xyz /out/defects/big3_mh1.xyz --tag 3
+  modal run modal_bench365.py::launch_big --run $run --xyz /out/defects/big3_cracks_r2-3.xyz --tag 3x_r2-3
+done
 
 # 4. leave-one-realisation-out aj calibrate on the v3 crack cells, default arm (local, CPU is enough
 #    for the labels; GPU for the descriptor pass): for each held-out realisation r
@@ -264,8 +276,16 @@ done
 #          --force-key mace_force --energy-key mace_energy --replace --out $RUN/posterior_cal_r$r.npz
 #    then big_errors against posterior_cal_r$r.npz on realisation r and score with validate_shape.py.
 
-# report (after fetching the runs: modal volume get acegp-prod-out <run> results/2026-10-xx/)
-uv run python ../scoring/validate_shape.py --runs results/2026-10-xx/bench365_ard_* --out validate_shape.md
+# report (after fetching the runs: modal volume get acegp-prod-out <run> results/2026-10-xx/).
+# Non-fold arms, and the ell sweep with tip data (fold runs restricted to the files they did not train on
+# with DIR:PATTERN; patterns are fnmatch on the err-file basenames, comma-separated):
+R=results/2026-10-xx
+uv run python ../scoring/validate_shape.py --out validate_shape.md --runs \
+    $R/bench365_ard_legacy $R/bench365_ard_A $R/bench365_ard_AB $R/bench365_ard_ABblk $R/bench365_ard_aniso
+uv run python ../scoring/validate_shape.py --out validate_ell_tip_r2-3.md --runs \
+    $R/bench365_ard_ell2_fold_r2-3:big3_err.npz,big3x_r2-3_err.npz $R/bench365_ard_ABblk_fold_r2-3:big3_err.npz,big3x_r2-3_err.npz \
+    $R/bench365_ard_ell4_fold_r2-3:big3_err.npz,big3x_r2-3_err.npz $R/bench365_ard_ell6_fold_r2-3:big3_err.npz,big3x_r2-3_err.npz \
+    $R/bench365_ard_AB_fold_r2-3:big3_err.npz,big3x_r2-3_err.npz
 ```
 
 Step 4 needs a one-off driver for the held-out loop (not written; `big_errors` reads `<run>/posterior.npz`,

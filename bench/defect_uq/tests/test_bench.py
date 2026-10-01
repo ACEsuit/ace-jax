@@ -22,6 +22,7 @@ def _load(rel, name):
 ard_arms = _load("modal/ard_arms.py", "ard_arms")
 served = _load("modal/served_arrays.py", "served_arrays")
 vs = _load("scoring/validate_shape.py", "validate_shape")
+te = _load("modal/train_extra.py", "train_extra")
 
 
 def test_arm_names():
@@ -151,3 +152,68 @@ def test_sweeps(tmp_path):
     assert fs["group 0"] == pytest.approx(-0.5) and fs["group 1"] == pytest.approx(-0.5)
     es = vs.ell_sweep(runs)
     assert [e[0] for e in es] == [2.0, 4.0, 6.0] and es[0][1] is not None
+
+
+def test_bootstrap_resamples_only_subset_cells(tmp_path):
+    """A 2-cell subset in a 12-cell run: all its atoms covered -> CI is exactly (1, 1), never a 0 bound;
+    with one of its two cells missed, the CI brackets the estimate."""
+    n_cells, per = 12, 6
+    cfg = np.repeat(np.arange(n_cells * 3), per)
+    cell = cfg // 3
+    fam = np.where(cell < 2, "edge", "crack")
+    for hit_edge, name in ((np.ones(len(cfg), bool), "all"), (cell != 1, "half")):
+        hit = np.where(fam == "edge", hit_edge, True)
+        d = tmp_path / name
+        d.mkdir()
+        np.savez(d / "big3_err.npz", err=np.where(hit, 0.5, 2.0), sd=np.full(len(cfg), 0.3), family=fam,
+                 r_core=np.full(len(cfg), 30.0), fixed=np.zeros(len(cfg), bool), cfg=cfg,
+                 forces_q=np.ones(len(cfg)), forces_group=np.zeros(len(cfg), np.int16))
+        row = {r["label"]: r for r in vs.coverage_table(vs.load_run(d), B=1000, seed=3)}["edge"]
+        if name == "all":
+            assert row["ci"] == (1.0, 1.0) and row["ci_atom"] == (1.0, 1.0)
+        else:
+            lo, hi = row["ci"]
+            assert row["cell"] == pytest.approx(0.5) and lo <= 0.5 <= hi and 0.0 <= lo
+
+
+def test_file_selector(tmp_path):
+    d, *_ = _synthetic_run(tmp_path)
+    z = dict(np.load(d / "big3_err.npz"))
+    np.savez(d / "big3x_r2-3_err.npz", **z)
+    assert len(vs.load_run(d)["A"]["err"]) == 2 * len(z["err"])
+    R = vs.load_run(d, "big3x_r2-3_err.npz")
+    assert len(R["A"]["err"]) == len(z["err"])
+    assert len(vs.load_run(d, "big3_err.npz,nomatch*")["A"]["err"]) == len(z["err"])
+
+
+def _frames(path, n=3, virial=True, keys=("mace_energy", "mace_force"), nfixed=2):
+    from ase import Atoms
+    from ase.io import write
+    out = []
+    for i in range(n):
+        a = Atoms("Ni4", positions=np.random.default_rng(i).random((4, 3)), cell=[8, 8, 8], pbc=True)
+        if "mace_energy" in keys:
+            a.info["mace_energy"] = -1.0
+        if "mace_force" in keys:
+            a.arrays["mace_force"] = np.zeros((4, 3))
+        if virial and i != 1:
+            a.info["mace_virial"] = np.zeros(9)
+        a.arrays["fixed"] = np.arange(4) < nfixed
+        out.append(a)
+    write(path, out, format="extxyz")
+
+
+def test_train_extra_validates_and_counts(tmp_path):
+    _frames(tmp_path / "train.xyz", virial=True, nfixed=0)
+    _frames(tmp_path / "x.xyz")
+    c = te.prepare(tmp_path / "train.xyz", [tmp_path / "x.xyz"], tmp_path / "out.xyz", log=lambda *a: None)
+    assert c == {"n_train": 3, "n_extra": 3, "n_extra_no_virial": 1, "n_extra_fixed_atoms": 6}
+    from ase.io import read
+    assert len(read(tmp_path / "out.xyz", ":")) == 6
+    with pytest.raises(ValueError, match="x.xyz frame 0.*mace_force"):
+        _frames(tmp_path / "x.xyz", keys=("mace_energy",))
+        te.prepare(tmp_path / "train.xyz", [tmp_path / "x.xyz"], tmp_path / "o2.xyz", log=lambda *a: None)
+    _frames(tmp_path / "x.xyz")
+    with pytest.raises(ValueError, match="fixed"):
+        te.prepare(tmp_path / "train.xyz", [tmp_path / "x.xyz"], tmp_path / "o3.xyz", log=lambda *a: None,
+                   fixed="error")
