@@ -51,9 +51,13 @@ def dense_budget_bytes():
     return DENSE_BUDGET_FRACTION * limit if limit else CPU_DENSE_BUDGET_BYTES
 
 
+POSTERIOR_PROPS = ("forces_std", "forces_cov", "forces_q", "forces_q_mahal", "forces_group",
+                   "forces_support")
+
+
 class ACECalculator(Calculator):
     implemented_properties = ["energy", "free_energy", "forces", "stress",
-                              "site_descriptors", "forces_std"]
+                              "site_descriptors", *POSTERIOR_PROPS]
 
     def __init__(self, model, meta=None, cutoff=None, dtype=None, edge_a_kind="auto",
                  layout="auto", skin=1.0, lean=True, spline_tol=AUTO,
@@ -201,6 +205,8 @@ class ACECalculator(Calculator):
             post = post._replace(chol=jnp.asarray(post.chol, jnp.float64))
             if post.Q is not None:
                 post = post._replace(Q=jnp.asarray(post.Q, jnp.float64))
+            if post.R is not None:
+                post = post._replace(R=jnp.asarray(post.R, jnp.float64))
             self.posterior = post
             # design rows from the full model as given (calc.model; the lean eval_model is energy-only);
             # a non-float64 dtype would degrade sigma, so the fit model is then re-read in float64
@@ -284,9 +290,9 @@ class ACECalculator(Calculator):
 
     def calculate(self, atoms=None, properties=("energy",), system_changes=all_changes):
         if (self.posterior is not None and not system_changes and "forces" in self.results
-                and set(properties) <= {"forces_std"}):
-            super().calculate(atoms, properties, system_changes)   # E/F/stress cached: std only
-            self.results["forces_std"] = self._forces_std()
+                and set(properties) <= set(POSTERIOR_PROPS)):
+            super().calculate(atoms, properties, system_changes)   # E/F/stress cached: posterior only
+            self.results.update(self._posterior_quantities(set(properties)))
             return
         super().calculate(atoms, properties, system_changes)
         import jax.numpy as jnp
@@ -312,8 +318,12 @@ class ACECalculator(Calculator):
             s = -np.asarray(V) / vol
             self.results["stress"] = np.array(
                 [s[0, 0], s[1, 1], s[2, 2], s[1, 2], s[0, 2], s[0, 1]])
-        if self.posterior is not None and (self.forces_std_every_call or "forces_std" in properties):
-            self.results["forces_std"] = self._forces_std()
+        if self.posterior is not None:
+            want = {p for p in properties if p in POSTERIOR_PROPS}
+            if self.forces_std_every_call:
+                want.add("forces_std")
+            if want:
+                self.results.update(self._posterior_quantities(want))
 
     def _skin_calculate(self, pos, cell, pbc, numbers, dtype):
         """E, F, V from the skin list (built or reused), or None when
@@ -438,28 +448,83 @@ class ACECalculator(Calculator):
         # nlist_s: neighbour list + layout + host->device; model_s: the compiled call
         return E, F, V, {"nlist_s": t1 - t0, "model_s": t2 - t1, "nlist_backend": backend}
 
-    def _forces_std(self):
-        """Calibrated ARD per-atom force std (posterior.npz: lam x the cluster sandwich, or kappa x
-        the posterior std for --ard-variance kappa / schema 1), from node-chunked design rows."""
+    def _posterior_quantities(self, which):
+        """The requested posterior-served per-atom properties (subset of POSTERIOR_PROPS) as a dict:
+        forces_std (N,), forces_cov (N,3,3), forces_q (N,), forces_q_mahal (N,; aniso only),
+        forces_group (N,) int, forces_support (dict).  Calibrated ARD std (lam x the shape, or kappa x
+        the posterior std for --ard-variance kappa / schema 1) from node-chunked design rows of the
+        full fit model; support (the expensive one) is computed only when requested."""
         import jax
 
+        from ..fit.ard import _NEED3
         from ..fit.data import Config, build_dataset
         from ..fit.rows import chunked_rows_fn
+        post = self.posterior
+        if "forces_q_mahal" in which and post.force_shape != "aniso":
+            from ase.calculators.calculator import PropertyNotImplementedError
+            raise PropertyNotImplementedError("forces_q_mahal needs an aniso posterior (--uq ard "
+                                              "--force-shape aniso)")
+        if "forces_support" in which and post.support is None:
+            raise ValueError("this posterior has no support reference (fitted with --no-ard-support, or "
+                             "predates it): refit with --uq ard without --no-ard-support")
+        if which & {"forces_cov", "forces_q", "forces_q_mahal", "forces_group"} and post.group_table is None:
+            raise ValueError(_NEED3)
         at = self.atoms
+        n = len(at)
         c = Config(at.get_positions(), at.get_atomic_numbers(), at.get_cell().array, at.get_pbc(),
                    None, None, None, 1.0, 1.0, 1.0)
         ds = build_dataset([c], self.meta, np.zeros(len(self.meta["elements"])), 1)
         b = jax.tree.map(lambda a: a[0], ds)
+        live = np.asarray(b.node_mask)
+        groups = (np.asarray(post.groups_of(b))[live].astype(np.int64)
+                  if post.group_consts is not None else None)
+        out = {}
         if b.nbr.shape[1] == 0 or not bool(np.asarray(b.nbr_mask).any()):
-            return np.zeros(len(at))                     # no neighbours: forces are identically zero
-        # F stays on the device (one copy of the Ncap*3*L rows): sigma of every padded node (the
-        # padding rows are zero), then the mask on the (Ncap,) result -- no host copies of F
+            # no neighbours: forces are identically zero, so is every spread
+            zero = np.zeros(n)
+            for k in which:
+                if k in ("forces_std", "forces_q"):
+                    out[k] = zero
+                elif k == "forces_cov":
+                    out[k] = np.zeros((n, 3, 3))
+                elif k == "forces_q_mahal":
+                    out[k] = post.forces_q_mahal(groups)
+                elif k == "forces_group":
+                    out[k] = groups
+            if "forces_support" in which:
+                out["forces_support"] = self._support(ds, live, b)
+            return out
+        need_F = which & {"forces_std", "forces_cov", "forces_q"}
+        if need_F:
+            with highest_precision():
+                if getattr(self, "_rows_fn", None) is None:    # compiled once per cell shape (MD)
+                    self._rows_fn = chunked_rows_fn(self._fit_model, self._fit_cfg)
+                # padding rows are zero; F[live] drops the padded nodes
+                F = self._rows_fn(b).F[live]
+            if "forces_std" in which:
+                out["forces_std"] = np.asarray(post.forces_std(F, groups))
+            if "forces_cov" in which:
+                out["forces_cov"] = np.asarray(post.forces_cov(F, groups))
+            if "forces_q" in which:
+                out["forces_q"] = np.asarray(post.forces_q(F, groups))
+        if "forces_q_mahal" in which:
+            out["forces_q_mahal"] = np.asarray(post.forces_q_mahal(groups))
+        if "forces_group" in which:
+            out["forces_group"] = groups
+        if "forces_support" in which:
+            out["forces_support"] = self._support(ds, live, b)
+        return out
+
+    def _support(self, ds, live, b):
+        """Covariate-shift support of each atom against the posterior's reference (fit/support.py), from
+        the same site_features descriptors the fit stage used (they depend on the model only)."""
+        from ..fit.inducing import site_features
+        from ..fit.support import support_check
+        post = self.posterior
         with highest_precision():
-            if getattr(self, "_rows_fn", None) is None:        # compiled once per cell shape (MD)
-                self._rows_fn = chunked_rows_fn(self._fit_model, self._fit_cfg)
-            F = self._rows_fn(b).F
-            s = self.posterior.forces_std(F)
-        return s[np.asarray(b.node_mask)]
+            X = np.asarray(site_features(self._fit_model, self._fit_cfg, ds)[0])[0]
+        alpha = float(np.asarray(post.group_table["alpha"]))
+        return support_check(post.support, X[live], np.asarray(b.node_z)[live], 1 - alpha)
 
     def _native_dense(self, pos, cell, pbc, n, dtype):
         """The dense graph straight from matscipy_neighbours' neighbour_matrix,

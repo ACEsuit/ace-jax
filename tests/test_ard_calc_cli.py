@@ -232,3 +232,57 @@ def test_posterior_from_another_fit_is_refused(fitted, tmp_path):
         np.savez(tmp_path / "other.npz", **bad)
         with pytest.raises(ValueError, match="coefficients"):
             ACECalculator(str(tmp_path / "other.npz"), posterior=str(fitted / "posterior.npz"))
+
+
+def test_calculator_served_quantities_and_lean_parity(fitted):
+    from ase.io import read
+    from ace_jax import ACECalculator
+    from ace_jax.fit.ard import ARDPosterior
+    tab = ARDPosterior.load(fitted / "posterior.npz").group_table
+    at = max(read(XYZ, ":8"), key=len)
+    out = {}
+    for lean in (True, False):
+        calc = ACECalculator(str(fitted / "model.npz"), posterior=str(fitted / "posterior.npz"), lean=lean)
+        a = at.copy()
+        a.calc = calc
+        a.get_forces()
+        sd = np.asarray(calc.get_property("forces_std", a))
+        cov = np.asarray(calc.get_property("forces_cov", a))
+        q = np.asarray(calc.get_property("forces_q", a))
+        g = np.asarray(calc.get_property("forces_group", a))
+        assert sd.shape == (len(a),) and cov.shape == (len(a), 3, 3) and g.dtype.kind == "i"
+        np.testing.assert_allclose(np.trace(cov, axis1=1, axis2=2), sd ** 2, rtol=1e-10)
+        v = sd ** 2 / np.asarray(tab["lam_rms"])[g] ** 2
+        np.testing.assert_allclose(q, np.asarray(tab["q"])[g] * np.sqrt(v / 3), rtol=1e-8)
+        out[lean] = (sd, q, g)
+    np.testing.assert_allclose(out[True][0], out[False][0], rtol=LEAN_RTOL)
+    np.testing.assert_allclose(out[True][1], out[False][1], rtol=LEAN_RTOL)
+    assert np.array_equal(out[True][2], out[False][2])
+
+
+def test_calculator_forces_support(fitted):
+    from ase.io import read
+    from ace_jax import ACECalculator
+    at = max(read(XYZ, ":8"), key=len)
+    calc = ACECalculator(str(fitted / "model.npz"), posterior=str(fitted / "posterior.npz"))
+    at.calc = calc
+    sup = calc.get_property("forces_support", at)
+    ok = sup["support_ok"]
+    assert ok.shape == (len(at),) and ok.dtype == bool and all(v > 0 for v in sup["n_eff"].values())
+    assert np.isfinite(sup["support_q"][ok]).all() and np.isinf(sup["support_q"][~ok]).all()
+
+
+def test_calculator_schema2_new_properties_raise(fitted, tmp_path):
+    from ase.io import read
+    from ace_jax import ACECalculator
+    z = dict(np.load(fitted / "posterior.npz"))
+    z["schema"] = np.array(2)
+    for k in [k for k in z if k.startswith(("R", "group_", "cal_", "support", "force_shape", "eps"))]:
+        z.pop(k)
+    np.savez(tmp_path / "p2.npz", **z)
+    at = read(XYZ, "0")
+    calc = ACECalculator(str(fitted / "model.npz"), posterior=str(tmp_path / "p2.npz"))
+    at.calc = calc
+    assert np.isfinite(calc.get_property("forces_std", at)).all()
+    with pytest.raises(ValueError, match="refit with --uq ard"):
+        calc.get_property("forces_q", at)
