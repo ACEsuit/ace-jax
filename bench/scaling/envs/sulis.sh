@@ -202,12 +202,17 @@ export LD_LIBRARY_PATH=$BUILD_DEV:\${LD_LIBRARY_PATH:-}
 exec $BUILD_DEV/lmp "\$@"
 EOF
   fi
+  # the PJRT plugin must load the pip CUDA libraries it was built against
+  # (venv nvidia/*/lib), not the module's 12.8 ones: with those first on the
+  # path, XLA segfaults compiling the model (ConfigAssigner, at pair_coeff)
+  local nv
+  nv=$(ls -d "$VENV"/lib/python3.12/site-packages/nvidia/*/lib | grep -v /cu13/ | tr '\n' :)
   cat > "$ROOT/lmp-jax.sh" <<EOF
 #!/usr/bin/env bash
 source /etc/profile.d/modules.sh 2>/dev/null || true
 $dev_env
 export LAMMPS_PLUGIN_PATH=$ROOT/lammps-jax/build-plugin-gpu-pjrt
-export LD_LIBRARY_PATH=$BUILD_DEV:\${LD_LIBRARY_PATH:-}
+export LD_LIBRARY_PATH=$nv$BUILD_DEV:\${LD_LIBRARY_PATH:-}
 exec $BUILD_DEV/lmp "\$@"
 EOF
   chmod +x "$ROOT/lmp.sh" "$ROOT/lmp-jax.sh"
