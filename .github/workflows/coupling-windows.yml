@@ -20,7 +20,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: julia-actions/setup-julia@v2
-        with: { version: "1.13", arch: x64 }
+        with: { version: "1.13.0", arch: x64 }   # == the Manifests' julia_version
       - uses: actions/cache@v4
         with:
           path: ~/.julia
@@ -40,8 +40,8 @@ jobs:
       - name: Load and run the wheel tests against the bundle
         run: |
           python -m pip install -q numpy pytest
-          LIB=$(cygpath -w "$(find coupling/build/bundle -iname 'libetcouple.dll' | head -1)")
+          LIB=$(cygpath -w "$PWD/$(find coupling/build/bundle -iname 'libetcouple.dll' | head -1)")   # absolute: tests run from coupling/python
           echo "ACEJAX_COUPLING_LIB=$LIB"
-          export ACEJAX_COUPLING_LIB="$LIB" PYTHONPATH=coupling/python/src
+          export ACEJAX_COUPLING_LIB="$LIB" PYTHONPATH="$(cygpath -w "$PWD/coupling/python/src")"
           python -c "import ace_jax_coupling as a; print(a.build_info()); print(a.couple_raw([[(1, 0)], [(1, 1), (1, 1)]], [(1, 0), (1, 1), (2, 0)], [(0, 0), (1, -1), (1, 0), (1, 1)]).A2B_shape)"
           cd coupling/python && python -m pytest -q tests
