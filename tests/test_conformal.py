@@ -3,10 +3,11 @@ import pytest
 from ase.build import bulk, fcc111
 
 
-def _wq(s, w, alpha):
-    """Brute-force pooled-CDF quantile: smallest t with (sum_{s_i<=t} w_i) / (W + 1) >= 1 - alpha."""
+def _wq(s, w, alpha, n_cfg=None):
+    """Brute-force pooled-CDF quantile: smallest t with (sum_{s_i<=t} w_i) / (W + W/n_cfg) >= 1 - alpha
+    (the +inf test point weighs W / n_cfg; n_cfg=None means W, i.e. weight 1)."""
     o = np.argsort(s)
-    cw = np.cumsum(w[o]) / (w.sum() + 1.0)
+    cw = np.cumsum(w[o]) / (w.sum() * (1.0 + (1.0 / n_cfg if n_cfg else 1.0 / w.sum())))
     k = np.searchsorted(cw, 1 - alpha - 1e-15)
     return np.inf if k >= len(s) else s[o][k]
 
@@ -73,7 +74,7 @@ def test_config_weighted_scales_against_brute_force():
     t = group_scales(s, g, cfg, G=2, alpha=0.1, n_min=20)
     w = 1.0 / np.bincount(cfg)[cfg]
     assert t.lam_rms[0] == pytest.approx(np.sqrt(np.sum(w * s ** 2) / (3 * n_cfg))) and t.n_cfg[0] == n_cfg
-    assert t.q[0] == pytest.approx(_wq(s, w, 0.1))
+    assert t.q[0] == pytest.approx(_wq(s, w, 0.1, n_cfg))
     assert t.r[0] == pytest.approx(t.q[0] / (t.lam_rms[0] * chi3_ppf(0.9)))
     assert chi3_ppf(0.9) == pytest.approx(2.50028, abs=1e-4)
 
@@ -220,7 +221,7 @@ def test_fallback_scale_normalised_by_total_weight():
     assert all(src == -1 for _, src in t.merged) and len(t.merged) == 8
     np.testing.assert_allclose(t.lam_rms, brute, rtol=1e-12)
     assert abs(t.lam_rms[0] - 1.0) < 0.05
-    assert t.q[0] == pytest.approx(_wq(s, w, 0.1))
+    assert t.q[0] == pytest.approx(_wq(s, w, 0.1, n_cfg))
     tp = group_scales(s, g, cfg, G=8, alpha=0.1, n_min=20)               # per-group values unchanged
     for k in range(8):
         m = g == k
@@ -274,3 +275,49 @@ def test_extend_support_notes_species_without_reference(capsys):
     assert 7 not in out and 0 in out
     msg = capsys.readouterr().out
     assert "note:" in msg and "7" in msg and "10 atoms" in msg
+
+
+def _old_pooled_q(s, w, alpha):
+    """Frozen copy of the pre-fix pooled quantile (test point of weight 1)."""
+    o = np.argsort(s)
+    cw = np.cumsum(w[o]) / (w.sum() + 1.0)
+    k = int(np.searchsorted(cw, 1 - alpha - 1e-15))
+    return float(s[o][k]) if k < len(s) else np.inf
+
+
+@pytest.mark.parametrize("n_cfg,finite", [(2, False), (5, False), (8, False), (9, True), (12, True)])
+def test_fallback_q_needs_ceil_configurations(n_cfg, finite):
+    """Residual fix: in the all-groups fallback each config spans 8 groups (total weight 8), yet the +inf test
+    point must weigh one configuration's mean weight, so q is finite iff n_cfg >= ceil((1-alpha)/alpha) = 9."""
+    from ace_jax.fit.conformal import group_scales
+    rng = np.random.default_rng(21)
+    cfg = np.repeat(np.arange(n_cfg), 8 * 3)
+    g = np.tile(np.repeat(np.arange(8), 3), n_cfg)
+    s = np.sqrt(rng.chisquare(3, len(cfg)))
+    logs = []
+    t = group_scales(s, g, cfg, G=8, alpha=0.1, n_min=1000, log=logs.append)   # fallback everywhere
+    assert len(t.merged) == 8 and all(src == -1 for _, src in t.merged)
+    assert np.isfinite(t.q).all() == finite
+    assert (len(logs) == 0) == finite
+    if not finite:
+        assert "WARNING" in logs[0]
+
+
+def test_per_group_pool_unchanged_by_test_point_weight():
+    """Single-group pools have sum w = n_cfg, so q and lam_rms equal the old formula (weight-1 test point)."""
+    from ace_jax.fit.conformal import group_scales
+    rng = np.random.default_rng(22)
+    n = 600
+    cfg = rng.integers(0, 60, n)
+    g = rng.integers(0, 4, n)
+    s = np.sqrt(rng.chisquare(3, n)) * (1 + g)
+    for alpha in (0.1, 0.2):
+        t = group_scales(s, g, cfg, G=4, alpha=alpha, n_min=1)
+        _, inv, cnt = np.unique(cfg * 4 + g, return_inverse=True, return_counts=True)
+        w = 1.0 / cnt[inv]
+        for k in range(4):
+            m = g == k
+            if np.isfinite(t.q[k]) and not any(k == a for a, _ in t.merged):
+                assert t.q[k] == _old_pooled_q(s[m], w[m], alpha)
+                np.testing.assert_allclose(t.lam_rms[k], np.sqrt(np.sum(w[m] * s[m] ** 2) / (3 * w[m].sum())),
+                                           rtol=0, atol=1e-15)

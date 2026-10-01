@@ -92,6 +92,10 @@ other than the bench-only ablation switches (Decision 7).
   - (λ_g^rms)² = (1/(3 n_cfg,g)) Σ_c (1/n_{c,g}) Σ_i s_i²;
   - q_g = inf{t : F̂_g(t) ≥ 1 − α}, with F̂_g the pooled CDF including a +∞ test point (Dunn,
     Wasserman & Ramdas).
+  - **All-groups fallback:** when no neighbour qualifies, the pool is all atoms with the same weights
+    1/n_{c,g} (a configuration spanning k groups has total weight k), and the +∞ test point weighs
+    Σw/n_cfg (one configuration's mean total weight): F̂(t) = [Σ_i w_i 1{s_i ≤ t} + (Σw/n_cfg)·1{∞ ≤ t}] /
+    (Σw (1 + 1/n_cfg)), so q is finite iff n_cfg ≥ ⌈(1−α)/α⌉ in every pool.
 - **Merging:** groups with n_cfg,g < n_min (default **20**) merge into the neighbouring band with the
   same [z = z*] flag, then across the flag. Merges are recorded.
 - **The per-group table** (stored): n_cfg,g from T_val and from U, total atoms, λ_g^rms, q_g,

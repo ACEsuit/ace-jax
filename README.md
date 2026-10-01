@@ -341,7 +341,7 @@ The force uncertainty has a shape and two scales (mathematics:
 - **Groups.** 8 Mondrian groups = 4 distortion bands x [coordination = modal]
   (`--ard-groups distortion|none`); groups with fewer than `--ard-n-min` (default 20)
   calibration configurations borrow from a neighbour (the threshold rises to ⌈(1−α)/α⌉, e.g. 99 at
-  `--ard-coverage 0.99`, so that a finite `q` is reachable). If even all groups pooled are too few for
+  `--ard-coverage 0.99`, so that a finite `q` is reachable). If even all groups pooled have fewer than ⌈(1−α)/α⌉ configurations (a configuration counts once in the pool, however many groups it spans) for
   the coverage, `q` (and `forces_q`) is infinite and the fit logs a WARNING. `forces_group` gives
   each atom's group.
   `posterior.npz` holds the per-group table: `lam_rms`, `q`, `r = q/(lam_rms·χ₃⁻¹(0.9))`

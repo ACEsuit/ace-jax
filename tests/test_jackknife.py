@@ -304,4 +304,5 @@ def test_solve_sym_guards_nonpositive_mu():
         assert np.isfinite(x).all() and np.abs(x).max() <= np.abs(b).sum() / _MU_FLOOR
         assert 1.0 - lev < 1e-8
     x, lev = _solve_sym(np.diag([0.5, 1.0]), np.array([1.0, 1.0]))
-    np.testing.assert_allclose(x, [2.0, 1.0]) and lev == 0.5
+    np.testing.assert_allclose(x, [2.0, 1.0])
+    assert lev == 0.5

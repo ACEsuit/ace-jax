@@ -82,17 +82,22 @@ def stratified_split(strata, f, seed):
 
 def effective_n_min(n_min, alpha):
     """The merge threshold: n_min, raised to the fewest configurations whose pooled CDF (with its +inf test
-    point of weight 1) can reach 1 - alpha, ceil((1 - alpha) / alpha); a smaller pool has q = inf."""
+    point of one configuration's weight) can reach 1 - alpha, ceil((1 - alpha) / alpha); a smaller pool has
+    q = inf, in a per-group pool and in the all-groups fallback alike."""
     return max(int(n_min), int(np.ceil((1 - alpha) / alpha - 1e-9)))
 
 
-def _pooled_q(s, w, alpha):
-    """inf{t : F(t) >= 1 - alpha} for the pooled CDF F(t) = sum_{s_i <= t} w_i / (sum w + 1): the +1 is
-    the one +inf test point of the pool (Dunn, Wasserman & Ramdas), one configuration's worth of weight."""
+def _pooled_q(s, w, alpha, n_cfg):
+    """inf{t : F(t) >= 1 - alpha} for the pooled CDF F(t) = sum_{s_i <= t} w_i / (W (1 + 1/n_cfg)), W = sum w:
+    the +inf test point of the pool (Dunn, Wasserman & Ramdas) weighs W / n_cfg, one configuration's mean
+    total weight.  For a single group W = n_cfg and this is sum_{s_i <= t} w_i / (W + 1); for the all-groups
+    pool, where a configuration spans several groups, it keeps the test point at one configuration's share, so
+    q is finite iff n_cfg >= ceil((1 - alpha) / alpha)."""
     if len(s) == 0:
         return np.inf
     o = np.argsort(s)
-    cw = np.cumsum(w[o]) / (w.sum() + 1.0)
+    W = w.sum()
+    cw = np.cumsum(w[o]) / (W + W / n_cfg)
     k = int(np.searchsorted(cw, 1 - alpha - 1e-15))
     return float(s[o][k]) if k < len(s) else np.inf
 
@@ -155,8 +160,9 @@ def group_scales(scores, groups, cfg, G, alpha, n_min, src=None, log=None):
     effective_n_min(n_min, alpha) configurations take the nearest qualifying band's values (same z-flag,
     then the other flag, then all groups pooled).  lam_rms^2 = sum w s^2 / (3 sum w): sum w is n_cfg for
     one group, and the total weight (not n_cfg) for the all-groups pool, where a configuration counts once
-    per group it spans.  If even the all-groups pool cannot reach 1 - alpha, q stays inf (that coverage is
-    not attainable from this many configurations) and a WARNING goes to log.
+    per group it spans; its CDF puts the +inf test point at weight sum w / n_cfg, so every pool needs
+    effective_n_min configurations for a finite q.  If even the all-groups pool has fewer, q stays inf (that
+    coverage is not attainable from this many configurations) and a WARNING goes to log.
     src per atom: 0 = T_val, >= 1 = a calibrate set (composition counts only)."""
     s, g, c = np.asarray(scores, float), np.asarray(groups), np.asarray(cfg)
     src = np.zeros(len(s), int) if src is None else np.asarray(src)
@@ -167,7 +173,7 @@ def group_scales(scores, groups, cfg, G, alpha, n_min, src=None, log=None):
         nc = len(np.unique(c[m]))
         if nc == 0:
             return np.nan, np.inf, 0
-        return float(np.sqrt(np.sum(w[m] * s[m] ** 2) / (3 * np.sum(w[m])))), _pooled_q(s[m], w[m], alpha), nc
+        return float(np.sqrt(np.sum(w[m] * s[m] ** 2) / (3 * np.sum(w[m])))), _pooled_q(s[m], w[m], alpha, nc), nc
 
     lam, q, ncfg = np.full(G, np.nan), np.full(G, np.inf), np.zeros(G, int)
     nval, ncal, nat = np.zeros(G, int), np.zeros(G, int), np.zeros(G, int)
@@ -192,8 +198,8 @@ def group_scales(scores, groups, cfg, G, alpha, n_min, src=None, log=None):
     if log is not None and not np.isfinite(q_s).all():
         need = effective_n_min(1, alpha)
         log(f"WARNING: ARD conformal: coverage {1 - alpha:.6g} needs at least {need} configurations in a pool "
-            f"for a finite q (a configuration counts once per group it spans), but the calibration set has "
-            f"{len(np.unique(c))} configurations (pool weight {w.sum():.4g}): forces_q is infinite for "
+            f"for a finite q, but the calibration set has "
+            f"{len(np.unique(c))} configurations: forces_q is infinite for "
             f"{int(np.sum(~np.isfinite(q_s)))} of {G} groups (lower the coverage or add configurations)")
     r = q_s / (lam_s * chi3_ppf(1 - alpha))
     return GroupTable(float(alpha), int(n_min), lam_s, q_s, r, ncfg, nval, ncal, nat, merged)

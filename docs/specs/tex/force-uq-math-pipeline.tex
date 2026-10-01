@@ -333,6 +333,12 @@ $+\infty$, is
 \qquad q_g=\inf\{t:\hat F_g(t)\ge1-\alpha\}.
 \label{eq:pooled}
 \end{equation}
+When no neighbouring group qualifies, the fallback pool is all atoms with the same weights $1/n_{c,g}$
+(a configuration spanning $k$ groups has total weight $k$), and the $+\infty$ test point carries the weight
+$W/\ncfg$ of one configuration's mean total weight, $W=\sum_i w_i$:
+$\hat F(t)=\big[\sum_i w_i\mathbb{1}\{s_i\le t\}+(W/\ncfg)\mathbb{1}\{+\infty\le t\}\big]/\big(W(1+1/\ncfg)\big)$,
+which reduces to \eqref{eq:pooled} for a single group ($W=\ncfg$); in every pool $q$ is finite iff
+$\ncfg\ge\lceil(1-\alpha)/\alpha\rceil$.
 The served regions are
 \begin{align}
 \text{isotropic:}\quad & \{\Delta F: |\Delta F|\le \code{forces\_q}(x)\},\qquad
