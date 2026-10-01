@@ -122,3 +122,51 @@ def test_stage_refuses_an_empty_split():
     d = _data(cfg)
     with pytest.raises(ValueError, match="radial_val_frac"):
         learn_radials(cfg, d, log=QUIET)
+
+
+def test_fit_learn_radial_end_to_end(fast, tmp_path):
+    """fit() runs the stage, refits on the full training set, saves the learned
+    model (marked when learned) and radial_info.json."""
+    import json
+    from ace_jax import ACECalculator
+    from ace_jax.fit.pipeline import fit, write_outputs
+    cfg = _cfg(learn_radial=True, radial_steps=4, radial_lam_grid=(0.0,))
+    d = _data(cfg)
+    staged = {}
+    res = fit(cfg, d, log=QUIET, on_stage=lambda k, v: staged.__setitem__(k, v))
+    assert res.radial is staged["radial"]
+    assert len(res.data.ds_train.y_E.reshape(-1)) >= len(d.train)            # full train, not the fit split
+    write_outputs(res, tmp_path, layout=("cli",), log=QUIET)
+    info = json.loads((tmp_path / "radial_info.json").read_text())
+    assert set(info) >= {"selected", "scores", "n_q", "lam_grid", "val_frac", "to_analytic_relres_max",
+                         "n_fit", "n_val", "seconds"}
+    z = np.load(tmp_path / "model.npz")
+    np.testing.assert_allclose(z["rnl_Wnlq"], res.radial.W, rtol=0, atol=1e-12)
+    learned = json.loads(bytes(z["meta_json"]).decode())["radial_learned"]
+    assert learned == (info["selected"] != "init")
+    if learned:
+        assert ACECalculator(str(tmp_path / "model.npz"), lean=True).splined
+
+
+@pytest.mark.slow                    # ~1 min each; the CI slow job runs on every PR
+def test_fit_learn_radial_on_built_basis(fast, tmp_path, monkeypatch):
+    from test_basis_build import _primed_cache
+    from ace_jax.basis.model import BasisSpec
+    from ace_jax.fit.pipeline import fit
+    monkeypatch.setenv("ACEJAX_COUPLING_CACHE_ONLY", "1")
+    cfg = _cfg(model=BasisSpec(order=3, max_degree=10, coupling_cache_dir=_primed_cache(tmp_path)),
+               r0=None, e0="lsq", learn_radial=True, radial_steps=2, radial_lam_grid=(0.0,))
+    res = fit(cfg, _data(cfg), log=QUIET)
+    assert res.radial is not None and res.radial.n_val >= 1
+
+
+@pytest.mark.slow                    # ~1 min each; the CI slow job runs on every PR
+def test_fit_learn_radial_then_gp(fast, tmp_path):
+    """The radial stage is linear; a GP final fit after it still runs and saves."""
+    from ace_jax.fit.pipeline import fit, write_outputs
+    cfg = _cfg(arm="gp", m_per_species=2, map_steps=5, learn_radial=True, radial_steps=2,
+               radial_lam_grid=(0.0,))
+    res = fit(cfg, _data(cfg), log=QUIET)
+    write_outputs(res, tmp_path, layout=("cli",), log=QUIET)
+    z = np.load(tmp_path / "gp_model.npz")
+    np.testing.assert_allclose(z["ace/rnl_Wnlq"], res.radial.W, rtol=0, atol=1e-12)
