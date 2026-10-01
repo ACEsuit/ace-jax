@@ -16,14 +16,19 @@ design is in `docs/benchmark-scaling-spec.md`, and how to reproduce it is in
   - ML-PACE, which runs the same `.yace` files;
   - MACE: MP-0b2 small, medium and large, plus MH-1 on its `omat_pbe` head;
   - ace-jax on learned-radial proxies of the medium linear ACE models,
-    splined as deployed and kept analytic (below).
+    splined as deployed and kept analytic (below);
+  - ACEpotentials.jl on the same linear ACE models, CPU only: direct
+    evaluation (`acepotentials`), and the model compiled by ACEpotentials.jl
+    PR 309's `juliac --trim` export and run in LAMMPS (`acepotentials-trim`;
+    below).
 - **Modes:**
   - **standalone** is one ASE calculator call (energy, forces and stress,
     neighbour list included), timed as the median of repeated calls;
   - **LAMMPS** is the MD step time.
 
   ace-jax runs in LAMMPS through lammps-jax (`pair_style jax/kk`), ML-PACE as
-  `pace` / `pace/kk`, and MACE through Symmetrix.
+  `pace` / `pace/kk`, MACE through Symmetrix, and the ACEpotentials.jl trim
+  library through the PR's `pair_style ace` plugin (MPI ranks, as ML-PACE).
 - **Systems:** SiGe (a random alloy on diamond) and Cantor (a random
   equiatomic CrMnFeCoNi alloy on fcc).
 - **Hosts:** moriarty CPU (16-core Xeon Silver 4216; LAMMPS with 16 MPI
@@ -35,7 +40,12 @@ design is in `docs/benchmark-scaling-spec.md`, and how to reproduce it is in
   Symmetrix (gate `mace`). The learned-radial lines are gated on the medium
   models: standalone against LAMMPS (gate `acejax`), and splined against
   analytic (gate `spline`: |dE|/|E| <= 1e-9, max|dF| / max|F| <= 3e-8, the
-  splining accuracy at 1e-10 rather than roundoff).
+  splining accuracy at 1e-10 rather than roundoff). The ACEpotentials.jl
+  lines are gated on the small models (CPU hosts): direct ACEpotentials.jl
+  against ace-jax on the npz (gate `acepot`, |dE|/atom <= 1e-10, |dF| <= 1e-9),
+  the trim library in LAMMPS against Julia's ETACE evaluation of the exact
+  model it compiles (gate `trim`, the same thresholds), and the trim library
+  against ace-jax (gate `trim-ace`, |dF| <= 1e-3: the spline error, below).
 
 | host | gate | code | passed | max abs dE / atom (eV) | max abs dF (eV/Å) |
 |---|---|---|---|---|---|
@@ -69,6 +79,25 @@ rows of the radial weights perturbed by 10% (seed 0) to mimic learning while
 keeping the per-species zero pattern that learning preserves
 (`models.py ace-learned`). Medium models only. The method and the
 same-container measurements are in `docs/learned-radial-splining.md`.
+
+**ACEpotentials.jl.** Both lines run the linear ACE models the ace-jax
+`acejax-ace` line runs, rebuilt in a pinned Julia 1.12 env
+(`bench/scaling/julia/`, ACEpotentials.jl PR 309): every run rebuilds the
+`ace1_model` with the seed the `.npz` was built with and checks it identical
+to the `.npz` (bases, A2B map, spline tables, weights, and energy, forces and
+virial on the `.npz`'s test structure), failing rather than timing another
+model. `acepotentials` times `AtomsCalculators.energy_forces_virial` (neighbour
+list included) on the same displaced structures as the other standalone
+lines, after a warm-up call, and records each call's garbage-collection
+share. `acepotentials-trim` exports the model's *exact twin* (the same basis
+and weights with the polynomial radials `ace1_model` tabulates, instead of its
+splines) to a `--trim=safe` shared library, run by LAMMPS in float64 on the
+CPU. **The two lines therefore differ by the spline error:** ace-jax and
+direct ACEpotentials.jl evaluate the `.npz`'s spline tables, the trim library
+the exact radials, which differ by 2.8e-6 to 5.5e-4 eV/Å in force on these
+random-weight models (rattled 256-atom structures, the PR 309 spike). The
+`trim-ace` gate checks that bound; the `trim` gate
+checks the library against the exact model to round-off.
 
 ## Findings
 
@@ -152,9 +181,12 @@ Largest system that ran standalone (float64, atoms), and the float32 / float64 t
 - **Out-of-memory markers.** On the CPU host, cases are killed at 48 GB of
   resident memory (the node has 62 GB); on GPUs they stop at the device
   limit. A dotted vertical line marks the first size that did not fit.
-- **Follow-ups:** ACEpotentials.jl rows (direct evaluation, and the `--trim`
-  LAMMPS export) and the production ace-jax model (linear + species +
-  density embedding) will be added later.
+- **ACEpotentials.jl lines are CPU only,** float64, and their trim libraries
+  are compiled for the CPU they are built on (`models.py acepotentials-trim`
+  rebuilds on another CPU model); the `.so` links the Julia runtime of the
+  build machine by absolute path.
+- **Follow-up:** the production ace-jax model (linear + species + density
+  embedding) will be added later.
 
 ## Figures
 

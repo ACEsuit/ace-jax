@@ -90,7 +90,11 @@ These are the gates the scaling suite ran on each host before any timing:
 - **`acejax`:** ace-jax standalone against ace-jax in LAMMPS, in both bundle
   layouts;
 - **`mlpace`:** ace-jax against ML-PACE;
-- **`mace`:** MACE against Symmetrix.
+- **`mace`:** MACE against Symmetrix;
+- **`acepot`, `trim`, `trim-ace`:** the ACEpotentials.jl lines (CPU hosts):
+  direct ACEpotentials.jl against ace-jax, the trim library in LAMMPS against
+  Julia ETACE on its exact twin, and the trim library against ace-jax (the
+  spline error).
 
 Each row gives the checks passed out of those run, and the largest differences:
 

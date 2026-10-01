@@ -18,7 +18,7 @@
 - trim:     the PR 309 trim library in LAMMPS vs Julia ETACE on the exact twin
            it compiles (|dE|/atom <= 1e-10, |dF| <= 1e-9)
 - trim-ace: the trim library in LAMMPS vs ace-jax standalone: a sanity check at
-           the spline error (|dE|/atom <= 1e-5, |dF| <= 1e-3; measured 8.6e-6 ..
+           the spline error (|dE|/atom <= 1e-5, |dF| <= 1e-3; measured 2.8e-6 ..
            5.5e-4 eV/A): the library evaluates the exact polynomial radials,
            ace-jax and ACEpotentials.jl direct the npz's spline tables
 The ACEpotentials.jl checks evaluate the extxyz-roundtripped structure on every
