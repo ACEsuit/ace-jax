@@ -203,3 +203,60 @@ def test_support_check_time_large_reference():
     support_check(ref, rng.normal(size=(1000, 40)), np.zeros(1000, int), 0.1)
     print("SUPPORT_CHECK_SECONDS", time.time() - t)
     assert time.time() - t < 60
+
+
+def test_fallback_scale_normalised_by_total_weight():
+    """C1: the all-groups fallback (no group reaches n_min) normalises sum w s^2 by sum w, not by the number
+    of configurations -- each configuration spans 8 groups, so 3 n_cfg would inflate lam by sqrt(8)."""
+    from ace_jax.fit.conformal import group_scales
+    rng = np.random.default_rng(11)
+    n_cfg, per = 40, 8 * 6
+    cfg = np.repeat(np.arange(n_cfg), per)
+    g = np.tile(np.repeat(np.arange(8), 6), n_cfg)                       # every config spans all 8 groups
+    s = np.sqrt(rng.chisquare(3, len(cfg)))                               # true lam = 1
+    t = group_scales(s, g, cfg, G=8, alpha=0.1, n_min=1000)              # forces the fallback everywhere
+    w = 1.0 / np.bincount(cfg * 8 + g)[cfg * 8 + g]
+    brute = np.sqrt(np.sum(w * s ** 2) / (3 * w.sum()))
+    assert all(src == -1 for _, src in t.merged) and len(t.merged) == 8
+    np.testing.assert_allclose(t.lam_rms, brute, rtol=1e-12)
+    assert abs(t.lam_rms[0] - 1.0) < 0.05
+    assert t.q[0] == pytest.approx(_wq(s, w, 0.1))
+    tp = group_scales(s, g, cfg, G=8, alpha=0.1, n_min=20)               # per-group values unchanged
+    for k in range(8):
+        m = g == k
+        assert tp.lam_rms[k] == pytest.approx(np.sqrt(np.sum(w[m] * s[m] ** 2) / (3 * n_cfg)), rel=1e-12)
+
+
+def test_small_pools_merge_to_finite_q_or_warn():
+    """I2: a group whose n_cfg cannot give a finite q at this alpha (n_cfg < (1-alpha)/alpha) merges even
+    when n_cfg >= n_min; a pool too small overall keeps q = inf and logs a WARNING."""
+    from ace_jax.fit.conformal import effective_n_min, group_scales
+    assert effective_n_min(20, 0.1) == 20 and effective_n_min(20, 0.01) == 99 and effective_n_min(5, 0.1) == 9
+    rng = np.random.default_rng(12)
+    cfg = np.r_[np.arange(1200) // 10, 1000 + np.arange(400) // 10]     # 120 cfgs in g=0, 40 in g=2
+    g = np.r_[np.zeros(1200, int), np.full(400, 2)]
+    s = np.sqrt(rng.chisquare(3, len(cfg)))
+    logs = []
+    t = group_scales(s, g, cfg, G=8, alpha=0.01, n_min=20, log=logs.append)
+    assert [2, 0] in t.merged and np.isfinite(t.q).all() and not logs
+    logs = []
+    t = group_scales(s[:50], g[:50], cfg[:50], G=8, alpha=0.1, n_min=20, log=logs.append)   # 5 cfgs in all
+    assert np.isinf(t.q).all() and np.isfinite(t.lam_rms).all()
+    assert len(logs) == 1 and "WARNING" in logs[0] and "0.9" in logs[0] and " 9 " in logs[0]
+
+
+def test_band_edges_and_groups_tie_safe():
+    """m1: > 50 % identical d (perfect-lattice atoms) must not empty the low bands."""
+    from ace_jax.fit.conformal import assign_groups, band_edges, n_groups
+    rng = np.random.default_rng(13)
+    d = np.r_[np.zeros(700), rng.random(300) * 0.1]
+    e = band_edges(d)
+    assert np.all(np.diff(e) > 0)
+    gr = assign_groups(np.full(len(d), 12), d, 12, e)
+    assert np.all(gr[:700] == 0)
+    assert set(np.unique(gr // 2).tolist()) == set(range(n_groups(e) // 2))   # every band populated
+    d2 = np.r_[np.zeros(950), rng.random(50) * 0.1]                           # p50 = p90 = 0
+    e2 = band_edges(d2)
+    g2 = assign_groups(np.full(len(d2), 12), d2, 12, e2)
+    assert np.all(np.diff(e2) > 0) and np.all(g2[:950] == 0)
+    assert set(np.unique(g2 // 2).tolist()) == set(range(n_groups(e2) // 2))

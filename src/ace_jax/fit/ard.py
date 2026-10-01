@@ -206,9 +206,12 @@ class ARDPosterior(NamedTuple):
     cal: dict | None = None             # arrays scores f32, groups i8, cfg i64, src i8
     support: dict | None = None
 
-    def _tab(self):
+    def _tab(self, groups=None, need_groups=True):
         if self.group_table is None:
             raise ValueError(_NEED3)
+        if need_groups and groups is None:
+            raise ValueError("groups required for a schema-3 posterior; use groups_of(batch) (per node of the "
+                             "batch) for the per-atom group ids")
         return self.group_table
 
     def groups_of(self, batch):
@@ -232,20 +235,42 @@ class ARDPosterior(NamedTuple):
         return np.einsum("nar,nbr->nab", W, W)
 
     def forces_cov(self, Frows, groups):
-        lam = np.asarray(self._tab()["lam_rms"])[groups]
-        return lam[:, None, None] ** 2 * self.atom_shape(Frows)
+        return self.served(Frows, groups, ("forces_cov",))["forces_cov"]
 
     def forces_q(self, Frows, groups):
-        q = np.asarray(self._tab()["q"])[groups]
-        V = self.atom_shape(Frows)
-        v = np.trace(V, axis1=1, axis2=2)
-        if self.force_shape == "aniso":
-            lm = np.linalg.eigvalsh(V + self.eps * (v / 3)[:, None, None] * np.eye(3)).max(1)
-            return q * np.sqrt(lm)
-        return q * np.sqrt(v / 3)
+        return self.served(Frows, groups, ("forces_q",))["forces_q"]
 
     def forces_q_mahal(self, groups):
-        return np.asarray(self._tab()["q"])[groups]
+        return np.asarray(self._tab(groups)["q"], float)[groups]
+
+    def served(self, Frows, groups, which=("forces_std", "forces_cov", "forces_q")):
+        """The schema-3 per-atom quantities in `which` (forces_std, forces_cov, forces_q, forces_q_mahal)
+        from ONE shape evaluation V of the force rows (N, 3, L).  forces_q = q_g x the region's radius
+        (sqrt(v/3) iso, sqrt(lambda_max(V + eps v/3 I)) aniso): inf wherever q_g = inf (the coverage is
+        not attainable from the calibration set -- even at v = 0, never 0 x inf = NaN), 0 where v = 0."""
+        t = self._tab(groups)
+        lam = np.asarray(t["lam_rms"], float)[groups]
+        q = np.asarray(t["q"], float)[groups]
+        which = set(which)
+        out = {}
+        if which & {"forces_std", "forces_cov", "forces_q"}:
+            V = self.atom_shape(Frows)
+            v = np.trace(V, axis1=1, axis2=2)
+            if "forces_std" in which:
+                out["forces_std"] = lam * np.sqrt(np.maximum(v, 0.0))
+            if "forces_cov" in which:
+                out["forces_cov"] = lam[:, None, None] ** 2 * V
+            if "forces_q" in which:
+                if self.force_shape == "aniso":
+                    rad = np.linalg.eigvalsh(V + self.eps * (v / 3)[:, None, None] * np.eye(3)).max(1)
+                else:
+                    rad = v / 3
+                rad = np.sqrt(np.maximum(rad, 0.0))
+                fin = np.isfinite(q)
+                out["forces_q"] = np.where(fin, np.where(fin, q, 0.0) * rad, np.inf)
+        if "forces_q_mahal" in which:
+            out["forces_q_mahal"] = q
+        return out
 
     def var_rows(self, Phi, chunk=4096):
         """Untempered posterior variance phi A^-1 phi^T of each row of Phi (n, L)."""
@@ -285,10 +310,9 @@ class ARDPosterior(NamedTuple):
 
     def forces_std(self, Frows, groups=None):
         """Per-atom force std from force rows (N, 3, L), numpy or device.  With a schema-3 group table
-        and groups: lam_rms[g] sqrt(tr V); else sqrt(sum_c force_var_rows) (schema 1/2)."""
-        if self.group_table is not None and groups is not None:
-            v = np.trace(self.atom_shape(Frows), axis1=1, axis2=2)
-            return np.asarray(self.group_table["lam_rms"])[groups] * np.sqrt(v)
+        (groups required): lam_rms[g] sqrt(tr V); else sqrt(sum_c force_var_rows) (schema 1/2)."""
+        if self.group_table is not None:
+            return self.served(Frows, groups, ("forces_std",))["forces_std"]
         v = self.force_var_rows(Frows.reshape(-1, Frows.shape[-1])).reshape(-1, 3)
         return np.sqrt(np.maximum(v.sum(1), 0.0))
 
@@ -307,7 +331,8 @@ class ARDPosterior(NamedTuple):
         if self.group_consts is not None:
             out["group_consts_json"] = js(self.group_consts)
         if self.group_table is not None:
-            out["group_table_json"] = js(self.group_table)
+            from .conformal import json_safe
+            out["group_table_json"] = js(json_safe(self.group_table))       # strict JSON: inf -> "inf"
         if self.cal is not None:
             for k, t in (("scores", np.float32), ("groups", np.int8), ("cfg", np.int64), ("src", np.int16)):
                 out[f"cal_{k}"] = np.asarray(self.cal[k], t)
@@ -319,6 +344,7 @@ class ARDPosterior(NamedTuple):
     @staticmethod
     def load(path):
         z = np.load(pathlib.Path(path))
+        from .conformal import restore_table
         from .support import unflatten_support
         js = lambda k: json.loads(bytes(z[k]).decode()) if k in z.files else None
         if int(z["schema"]) not in (1, 2, 3):
@@ -331,7 +357,7 @@ class ARDPosterior(NamedTuple):
                             R=jnp.asarray(z["R"], jnp.float64) if "R" in z.files else None,
                             force_shape=str(z["force_shape"]) if "force_shape" in z.files else "iso",
                             eps=float(z["eps"]) if "eps" in z.files else 1e-3,
-                            group_consts=js("group_consts_json"), group_table=js("group_table_json"),
+                            group_consts=js("group_consts_json"), group_table=restore_table(js("group_table_json")),
                             cal={k: z[f"cal_{k}"] for k in ("scores", "groups", "cfg", "src")}
                             if "cal_scores" in z.files else None,
                             support=unflatten_support({k[8:]: z[k] for k in z.files if k.startswith("support_")})
@@ -708,7 +734,7 @@ def run_ard_stage(cfg, data, built, theta, log=print, full_stats=None):
     s = conformal_scores(e, V, cfg.ard_force_shape, cfg.ard_shape_eps)
     gv = assign_groups(E.z[ok], E.d[ok], z_star, edges)
     cv = np.asarray(val_idx)[E.cfg[ok]]            # training-set index of each calibration atom's config
-    tab = group_scales(s, gv, cv, G, 1 - cfg.ard_coverage, cfg.ard_n_min)
+    tab = group_scales(s, gv, cv, G, 1 - cfg.ard_coverage, cfg.ard_n_min, log=log)
     post = post._replace(kappa=kappa, lam=lam, force_shape=cfg.ard_force_shape, eps=cfg.ard_shape_eps,
                          group_consts={"r1": float(r1), "z_star": z_star, "edges": edges.tolist()},
                          group_table=tab.to_dict(),

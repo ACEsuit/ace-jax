@@ -36,8 +36,13 @@ def shell_features(batch, r1):
 
 
 def band_edges(d, qs=(0.5, 0.9, 0.99)):
+    """The p50 / p90 / p99 quantiles of the finite d, tie-safe: tied quantiles collapse (np.unique) and an
+    edge at the minimum d is dropped, since many identical d (perfect-lattice atoms) would otherwise give
+    empty bands (band k is edges[k-1] <= d < edges[k]).  Fewer edges, fewer groups; continuous d unchanged."""
     d = np.asarray(d, float)
-    return np.quantile(d[np.isfinite(d)], qs)
+    d = d[np.isfinite(d)]
+    e = np.unique(np.quantile(d, qs))
+    return e[e > d.min()]
 
 
 def n_groups(edges):
@@ -45,6 +50,7 @@ def n_groups(edges):
 
 
 def assign_groups(z, d, z_star, edges):
+    """band(d) * 2 + [z != z*], band k holding edges[k-1] <= d < edges[k]; NaN d goes in the top band."""
     band = np.searchsorted(np.asarray(edges, float), np.nan_to_num(np.asarray(d, float), nan=np.inf), side="right")
     return (band * 2 + (np.asarray(z) != z_star)).astype(np.int64)
 
@@ -74,13 +80,48 @@ def stratified_split(strata, f, seed):
     return np.setdiff1d(np.arange(len(s)), val), val
 
 
+def effective_n_min(n_min, alpha):
+    """The merge threshold: n_min, raised to the fewest configurations whose pooled CDF (with its +inf test
+    point of weight 1) can reach 1 - alpha, ceil((1 - alpha) / alpha); a smaller pool has q = inf."""
+    return max(int(n_min), int(np.ceil((1 - alpha) / alpha - 1e-9)))
+
+
 def _pooled_q(s, w, alpha):
+    """inf{t : F(t) >= 1 - alpha} for the pooled CDF F(t) = sum_{s_i <= t} w_i / (sum w + 1): the +1 is
+    the one +inf test point of the pool (Dunn, Wasserman & Ramdas), one configuration's worth of weight."""
     if len(s) == 0:
         return np.inf
     o = np.argsort(s)
     cw = np.cumsum(w[o]) / (w.sum() + 1.0)
     k = int(np.searchsorted(cw, 1 - alpha - 1e-15))
     return float(s[o][k]) if k < len(s) else np.inf
+
+
+def json_safe(obj):
+    """obj with every non-finite float replaced by the string "inf" / "-inf" / "nan", so json.dumps writes
+    strict JSON (no bare Infinity / NaN tokens); `restore_table` and np.asarray(..., float) read them back."""
+    if isinstance(obj, dict):
+        return {k: json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [json_safe(v) for v in obj]
+    if isinstance(obj, (float, np.floating)) and not np.isfinite(obj):
+        return "nan" if np.isnan(obj) else ("inf" if obj > 0 else "-inf")
+    return obj
+
+
+_TABLE_FLOATS = ("lam_rms", "q", "r")
+
+
+def restore_table(d):
+    """A group-table dict read from JSON with its float columns as floats: "inf"/"nan" strings (json_safe),
+    None, and the legacy bare Infinity token (already a float) all map back to inf / nan."""
+    if d is None:
+        return None
+    out = dict(d)
+    for k in _TABLE_FLOATS:
+        if k in out:
+            out[k] = [np.nan if x is None else float(x) for x in out[k]]
+    return out
 
 
 @dataclasses.dataclass(frozen=True)
@@ -102,16 +143,21 @@ class GroupTable:
 
     @classmethod
     def from_dict(cls, d):
+        d = restore_table(d)
         return cls(float(d["alpha"]), int(d["n_min"]),
                    *(np.asarray(d[k], float) for k in ("lam_rms", "q", "r")),
                    *(np.asarray(d[k], int) for k in ("n_cfg", "n_cfg_val", "n_cfg_cal", "n_atoms")),
                    [list(m) for m in d["merged"]], list(d.get("sources", [])))
 
 
-def group_scales(scores, groups, cfg, G, alpha, n_min, src=None):
+def group_scales(scores, groups, cfg, G, alpha, n_min, src=None, log=None):
     """Configuration-weighted per-group lam_rms and pooled-CDF q (atom weights 1/n_{c,g}).  Groups below
-    n_min configurations take the nearest qualifying band's values (same z-flag, then the other flag,
-    then all groups pooled).  src per atom: 0 = T_val, >= 1 = a calibrate set (composition counts only)."""
+    effective_n_min(n_min, alpha) configurations take the nearest qualifying band's values (same z-flag,
+    then the other flag, then all groups pooled).  lam_rms^2 = sum w s^2 / (3 sum w): sum w is n_cfg for
+    one group, and the total weight (not n_cfg) for the all-groups pool, where a configuration counts once
+    per group it spans.  If even the all-groups pool cannot reach 1 - alpha, q stays inf (that coverage is
+    not attainable from this many configurations) and a WARNING goes to log.
+    src per atom: 0 = T_val, >= 1 = a calibrate set (composition counts only)."""
     s, g, c = np.asarray(scores, float), np.asarray(groups), np.asarray(cfg)
     src = np.zeros(len(s), int) if src is None else np.asarray(src)
     _, inv, cnt = np.unique(c * G + g, return_inverse=True, return_counts=True)
@@ -121,7 +167,7 @@ def group_scales(scores, groups, cfg, G, alpha, n_min, src=None):
         nc = len(np.unique(c[m]))
         if nc == 0:
             return np.nan, np.inf, 0
-        return float(np.sqrt(np.sum(w[m] * s[m] ** 2) / (3 * nc))), _pooled_q(s[m], w[m], alpha), nc
+        return float(np.sqrt(np.sum(w[m] * s[m] ** 2) / (3 * np.sum(w[m])))), _pooled_q(s[m], w[m], alpha), nc
 
     lam, q, ncfg = np.full(G, np.nan), np.full(G, np.inf), np.zeros(G, int)
     nval, ncal, nat = np.zeros(G, int), np.zeros(G, int), np.zeros(G, int)
@@ -131,7 +177,8 @@ def group_scales(scores, groups, cfg, G, alpha, n_min, src=None):
         nval[k] = len(np.unique(c[m & (src == 0)]))
         ncal[k] = len(np.unique(c[m & (src > 0)]))
         nat[k] = int(m.sum())
-    ok = ncfg >= n_min
+    n_eff = effective_n_min(n_min, alpha)
+    ok = ncfg >= n_eff
     lam_all, q_all, _ = stats(np.ones(len(s), bool))
     lam_s, q_s, merged = lam.copy(), q.copy(), []
     for k in np.flatnonzero(~ok):
@@ -142,5 +189,11 @@ def group_scales(scores, groups, cfg, G, alpha, n_min, src=None):
         k_src = cand[0][2] if cand else -1
         lam_s[k], q_s[k] = (lam[k_src], q[k_src]) if k_src >= 0 else (lam_all, q_all)
         merged.append([int(k), int(k_src)])
+    if log is not None and not np.isfinite(q_s).all():
+        need = effective_n_min(1, alpha)
+        log(f"WARNING: ARD conformal: coverage {1 - alpha:.6g} needs at least {need} configurations in a pool "
+            f"for a finite q (a configuration counts once per group it spans), but the calibration set has "
+            f"{len(np.unique(c))} configurations (pool weight {w.sum():.4g}): forces_q is infinite for "
+            f"{int(np.sum(~np.isfinite(q_s)))} of {G} groups (lower the coverage or add configurations)")
     r = q_s / (lam_s * chi3_ppf(1 - alpha))
     return GroupTable(float(alpha), int(n_min), lam_s, q_s, r, ncfg, nval, ncal, nat, merged)

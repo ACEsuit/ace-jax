@@ -743,7 +743,7 @@ def test_stage_reports_and_warns_near_unit_leverage(monkeypatch):
         return G, lev
 
     monkeypatch.setattr(jackknife, "press_scores", near1)
-    cfg = _pipe_cfg(ard_variance="sandwich").validate()
+    cfg = _pipe_cfg(ard_variance="sandwich", ard_coverage=0.99).validate()
     d = load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz"))
     b = build_problem(cfg, d)
     lines = []
@@ -771,3 +771,85 @@ def test_stage_support_reference_and_roundtrip(tmp_path):
     a = support_check(post.support, Xt, np.full(5, z0), 0.1)
     b = support_check(back.support, Xt, np.full(5, z0), 0.1)
     assert (a["support_ok"] == b["support_ok"]).all()
+
+
+def _p3(ard_setup, tab):
+    from ace_jax.fit.clusters import row_clusters
+    from ace_jax.fit.jackknife import press_scores, shape_factor
+    from ace_jax.fit.rows import linear_rows
+    prob, ds, ev, h, post = ard_setup
+    rc, K = row_clusters(ds, None, float("inf"))
+    R = shape_factor(post, press_scores(post, prob, ds, rc, K, ev.sigmas(h))[0])
+    p = post._replace(R=R, group_consts={"r1": 3.0, "z_star": 4, "edges": []}, group_table=tab.to_dict())
+    Fr = np.asarray(linear_rows(prob.model, prob.cfg, jax.tree.map(lambda a: a[0], ds))[0].F)
+    return p, Fr
+
+
+def test_infinite_q_served_as_inf_not_nan_and_json_roundtrip(ard_setup, tmp_path):
+    """I2: q = inf (coverage not attainable) serves forces_q = inf, also where v = 0 (never NaN); finite q
+    with v = 0 serves 0.  Non-finite table values survive posterior.npz and ard.json as strings, and files
+    written with the bare JSON `Infinity` token still load."""
+    import dataclasses
+    import json
+    from ace_jax.fit.ard import ARDPosterior
+    from ace_jax.fit.pipeline.outputs import _write_ard
+    tab = dataclasses.replace(_table(), q=np.array([5.0, np.inf]), r=np.array([1.0, np.inf]))
+    p, Fr = _p3(ard_setup, tab)
+    Fr = Fr.copy()
+    Fr[:2] = 0.0                                                    # two atoms with v = 0
+    g = np.arange(Fr.shape[0]) % 2
+    for shape in ("iso", "aniso"):
+        fq = p._replace(force_shape=shape).forces_q(Fr, g)
+        assert not np.isnan(fq).any(), shape
+        assert fq[0] == 0.0 and np.isinf(fq[1]) and np.isinf(fq[g == 1]).all() and np.isfinite(fq[g == 0]).all()
+    p.save(tmp_path / "p.npz")
+    raw = bytes(np.load(tmp_path / "p.npz")["group_table_json"]).decode()
+    assert "Infinity" not in raw and "NaN" not in raw
+    back = ARDPosterior.load(tmp_path / "p.npz")
+    assert np.isinf(back.group_table["q"][1]) and back.group_table["q"][0] == 5.0
+    np.testing.assert_allclose(back.forces_q(Fr, g), p.forces_q(Fr, g), rtol=1e-5)   # R stored float32
+    z = dict(np.load(tmp_path / "p.npz"))                           # a file written before the fix
+    z["group_table_json"] = np.frombuffer(json.dumps(tab.to_dict()).encode(), np.uint8)
+    assert b"Infinity" in bytes(z["group_table_json"])
+    np.savez(tmp_path / "old.npz", **z)
+    assert np.isinf(ARDPosterior.load(tmp_path / "old.npz").group_table["q"][1])
+
+    class _R:
+        posterior, report = p, {"groups": tab.to_dict(), "lam": float("nan")}
+    _write_ard(tmp_path, _R)
+    txt = (tmp_path / "ard.json").read_text()
+    assert "Infinity" not in txt and "NaN" not in txt
+    rep = json.loads(txt)                                           # strict JSON parses it
+    assert np.isinf(np.asarray(rep["groups"]["q"], float)[1])
+
+
+def test_schema3_requires_groups(ard_setup):
+    """I3: a schema-3 posterior must not silently serve kappa^2 A^-1 / broadcast lam when groups is None."""
+    p, Fr = _p3(ard_setup, _table())
+    for f in (p.forces_std, p.forces_cov, p.forces_q):
+        with pytest.raises(ValueError, match="groups required"):
+            f(Fr, None)
+    with pytest.raises(ValueError, match="groups required"):
+        p.forces_std(Fr)
+    with pytest.raises(ValueError, match="groups required"):
+        p.forces_q_mahal(None)
+
+
+def test_ard_stage_warns_when_coverage_unattainable():
+    """I2(b): a T_val too small for the coverage (~6 configs x <= 8 groups at 0.99 needs 99) keeps q = inf
+    and says so in the stage log."""
+    from conftest import FIXTURE_DIR
+    from ace_jax.fit import ard
+    from ace_jax.fit.hypers import default_prior
+    from ace_jax.fit.pipeline import load_fit_data
+    from ace_jax.fit.pipeline.problem import build_problem
+    cfg = _pipe_cfg(ard_variance="sandwich", ard_coverage=0.99).validate()
+    d = load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz"))
+    b = build_problem(cfg, d)
+    lines = []
+    with highest_precision():
+        res = ard.run_ard_stage(cfg, d, b, default_prior(2.35).mu, log=lines.append)
+    assert res.report["n_val_configs"] * 8 < 99
+    assert np.isinf(res.posterior.group_table["q"]).all()
+    w = [s for s in lines if "WARNING" in s and "coverage" in s]
+    assert len(w) == 1 and "99 configurations" in w[0]
