@@ -45,12 +45,12 @@ def site_descriptors(model, positions, numbers, cell=None, pbc=False,
     """Site descriptors, (n_atoms, (n_B + n_pair) * n_species).
 
     Parity target is `ACEpotentials.site_descriptors`, which is marked in the
-    Julia source as "RETIRING THIS FOR NOW BECAUSE IT IS HIGHLY INEFFICIENT"
+    ACEpotentials source as "RETIRING THIS FOR NOW BECAUSE IT IS HIGHLY INEFFICIENT"
     because it recomputes per site.  This takes the whole batch from one forward
     pass -- the same pass the energy uses -- so the port is genuinely faster
     here, not merely equivalent.
 
-    `domain` restricts the returned rows (as Julia's does); the forward pass
+    `domain` restricts the returned rows (as ACEpotentials does); the forward pass
     still covers the whole structure, since a site's descriptor needs its
     neighbours regardless.
     """

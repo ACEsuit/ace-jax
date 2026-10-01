@@ -243,7 +243,7 @@ def test_holdout_score_energy_only_split(small):
     from ace_jax.fit.hypers import to_array
     from ace_jax.fit.radial_learn import holdout_score
     prob, ds_fit, _ = small
-    _, ds_val, _ = make_problem(ncfg=6, start=6, force_key="__no_such_key__")
+    _, ds_val, _ = make_problem(ncfg=6, start=6, force_key=None)            # no force labels
     from ace_jax.fit.objective import posterior
     from ace_jax.fit.stats import linear_statistics
     a = to_array(THETA)

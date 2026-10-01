@@ -298,8 +298,8 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
     learned analytic tensor radial (`radial_learned`) at 1e-10, which is not
     roundoff: energies agree with lean=False to up to ~1e-9 relative and forces
     to up to ~2.3e-8 of max|F| on the benchmark models
-    (docs/learned-radial-splining.md).  Other analytic models (Julia
-    `ace_model` exports, Python-authored) stay exact; a float spline_tol opts
+    (docs/learned-radial-splining.md).  Other analytic models (ACEpotentials
+    `ace_model` exports, built bases) stay exact; a float spline_tol opts
     them in, None never splines.
     Recorded from what lean actually did (looking through a wrapper's `.base`):
     `ace_jax.lean` (False when lean returned the model as given, e.g. PACE or an

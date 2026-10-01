@@ -12,14 +12,14 @@ ACE potentials in pure Python/JAX. `aj fit` builds the basis from
 ## Install
 
 ```bash
-pip install ace-jax              # evaluate, linear fit, build new bases, ASE calculator
-pip install "ace-jax[gp]"        # + `aj fit` (all arms: MAP optimisers, GP, UQ ladder, POPS)
+pip install ace-jax              # build bases, `aj fit` (every arm), evaluate, ASE calculator
+pip install "ace-jax[gp]"        # + blackjax: the pathfinder rung of --rungs
 pip install "ace-jax[cuda]"      # + CUDA 12 JAX
 ```
 
-Building a new basis shape works on Linux x86_64/aarch64 and macOS arm64;
-elsewhere fit from an existing `.npz` with `--model`. Pre-release: ace-jax's
-`ace-jax-coupling` dependency is not on PyPI yet, so install from the repo.
+Building a new basis shape works on Linux x86_64/aarch64, macOS arm64 and
+Windows x64; elsewhere fit from an existing `.npz` with `--model`. Pre-release:
+ace-jax itself is not on PyPI yet, so install it from the repo (git URL).
 
 `ace-jax` and `aj` are the same CLI. `aj <cmd> --help` lists every flag.
 

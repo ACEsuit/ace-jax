@@ -1,0 +1,105 @@
+site_name: ace-jax
+site_description: Fit and evaluate ACE and PACE interatomic potentials in Python/JAX
+site_url: https://acesuit.github.io/ace-jax/
+repo_url: https://github.com/ACEsuit/ace-jax
+repo_name: ACEsuit/ace-jax
+edit_uri: edit/main/docs/user/
+# The user docs live in docs/user/; the rest of docs/ is design notes and results.
+docs_dir: docs/user
+strict: true
+validation:            # with strict, broken links and anchors fail the build
+  omitted_files: warn
+  absolute_links: warn
+  unrecognized_links: warn
+  anchors: warn
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - navigation.indexes
+    - navigation.footer
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - toc.follow
+
+hooks:
+  - docs/mkdocs_hooks.py   # `aj <cmd> --help` into the CLI reference, at build time
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]
+          options:
+            docstring_style: google
+            merge_init_into_class: true
+            show_source: false
+            show_root_heading: true
+            show_root_full_path: true
+            show_signature_annotations: false
+            separate_signature: true
+            members_order: source
+            heading_level: 3
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - md_in_html
+  - tables
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets:
+      # shared fragments (e.g. the install line) live outside docs_dir, so one edit updates every page
+      base_path: [docs/snippets]
+      check_paths: true
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - toc:
+      permalink: true
+
+not_in_nav: |
+  /tutorials/data/**
+  /tutorials/notebooks/**
+
+nav:
+  - Home: index.md
+  - Installation: installation.md
+  - Quickstart: quickstart.md
+  - Tutorials:
+      - tutorials/index.md
+      - "1. First fit: silicon": tutorials/first-fit.md
+      - "2. Learned radials: silicon": tutorials/learned-radials.md
+  - Concepts: concepts.md
+  - How-to guides:
+      - Run files (fit.yaml): howto/fit-yaml.md
+      - Multi-element fits: howto/multi-element.md
+      - ASE calculators: howto/ase.md
+      - LAMMPS export: howto/lammps.md
+      - PACE .yace models: howto/pace.md
+      - Learn the radial basis: howto/learned-radials.md
+      - Reproducibility: howto/reproducibility.md
+  - Reference:
+      - CLI: reference/cli.md
+      - Python API: reference/api.md
+  - FAQ and troubleshooting: faq.md
+  - Licence and citation: licence.md

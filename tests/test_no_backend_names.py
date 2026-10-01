@@ -7,6 +7,8 @@ import subprocess
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 USER_DOCS = ["README.md", "skills/ace-jax/SKILL.md", "docs/basis.md"]
+# the user documentation site (docs/user); the licence page credits the bundled runtime by name
+USER_DOCS += sorted(str(f.relative_to(ROOT)) for f in (ROOT / "docs/user").rglob("*.md") if f.name != "licence.md")
 JULIA = re.compile(r"julia", re.I)
 FILE_REF = re.compile(r"julia/|\.jl\b|\.jl`|\.github/workflows/\S+")   # maintainer file paths, not prose
 

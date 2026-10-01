@@ -321,3 +321,38 @@ def test_fitting_a_yace_model_raises_a_clear_error():
     cfg = FitConfig(model=str(fix / "gesi_sbessel.yace"), arm="linear")
     with pytest.raises(ValueError, match=r"\.yace.*cannot be fitted"):
         load_fit_data(cfg, train=str(pathlib.Path(__file__).parent.parent / "fixtures" / "si_tiny_train.xyz"))
+
+
+def _cfgs(spec):
+    """Synthetic Configs: (numbers, energy, cell edge or None for non-periodic)."""
+    from ace_jax.fit.data import Config
+    out = []
+    for nums, E, a in spec:
+        n = len(nums)
+        pos = np.c_[np.arange(n) * 2.3, np.zeros(n), np.zeros(n)]
+        cell, pbc = (np.zeros((3, 3)), np.zeros(3, bool)) if a is None else (np.eye(3) * a, np.ones(3, bool))
+        out.append(Config(pos, np.asarray(nums), cell, pbc, E, None, None, 1.0, 1.0, 1.0))
+    return out
+
+
+def test_lsq_e0_takes_isolated_atom_energies_exactly():
+    """An isolated atom's energy is E0 alone: least squares must not compromise it
+    against the bulk.  Species without one are fitted to the rest, after subtracting."""
+    from ace_jax.fit.pipeline.data import lsq_e0
+    cs = _cfgs([([6], -5.0, None),                 # isolated C, non-periodic
+                ([14], -2.0, 12.0),                # isolated Si: periodic, but no image within rcut
+                ([14, 14], -11.0, 4.6), ([14, 6], -14.0, 4.6), ([14, 14, 6], -20.0, 6.9)])
+    E0 = lsq_e0(cs, [14, 6], rcut=5.5, log=lambda *a: None)
+    assert E0.tolist() == [-2.0, -5.0]
+    # one isolated species only: C fixed, Si by least squares on the residual
+    cs2 = [c for c in cs if not (len(c.numbers) == 1 and c.numbers[0] == 14)]
+    E0 = lsq_e0(cs2, [14, 6], rcut=5.5, log=lambda *a: None)
+    counts = np.array([[2.0], [1.0], [2.0]]); r = np.array([-11.0, -14.0 + 5.0, -20.0 + 5.0])
+    assert E0[1] == -5.0 and np.isclose(E0[0], np.linalg.lstsq(counts, r, rcond=None)[0][0])
+
+
+def test_lsq_e0_single_atom_with_close_images_is_not_isolated():
+    from ace_jax.fit.pipeline.data import lsq_e0
+    cs = _cfgs([([14], -4.0, 2.7), ([14, 14], -9.0, 4.6)])     # 2.7 A cell: images within rcut -> bulk
+    E0 = lsq_e0(cs, [14], rcut=5.5, log=lambda *a: None)
+    assert np.isclose(E0[0], np.linalg.lstsq([[1.0], [2.0]], [-4.0, -9.0], rcond=None)[0][0])

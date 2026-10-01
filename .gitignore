@@ -13,3 +13,6 @@ bench/scaling/models/
 coupling/build/
 !coupling/julia/build/
 dist-linux/
+# marimo session caches (written by `marimo export`/`edit`); also the docs build output
+__marimo__/
+site/

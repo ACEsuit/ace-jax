@@ -37,3 +37,15 @@ def test_symbols_and_numbers_are_equivalent(tmp_path, monkeypatch):
     cache = _primed_cache(tmp_path)
     a = build_basis(BasisSpec(order=3, max_degree=10, elements=("Si",), coupling_cache_dir=cache))
     assert list(a.meta["elements"]) == [14]
+
+
+def test_default_radial_mode_is_onehot():
+    """Frozen bases are what aj fit/aj basis build: onehot (R_n = P_n) fits several times
+    better kept frozen than seeded glorot mixtures (24 vs 470 meV/atom on the Si tutorial),
+    and does not depend on a random draw."""
+    import inspect
+    from ace_jax.basis.model import BasisSpec, build_model
+    from ace_jax.cli import _parse
+    assert BasisSpec(order=2, max_degree=6).radial_mode == "onehot"
+    assert inspect.signature(build_model).parameters["radial_mode"].default == "onehot"
+    assert _parse(["basis", "--elements", "Si", "--order", "2", "--max-degree", "6", "--out", "x.npz"]).radial_mode == "onehot"

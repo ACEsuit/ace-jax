@@ -42,6 +42,7 @@ parity CI jobs. User docs: `README.md`. Agent-facing usage guide:
 - `pace_ref/`: ML-PACE and python-ace reference tooling.
 - `spike/`: throwaway experiments, not linted.
 - `docs/`: specs, plans and results. `docs/benchmarks.md` has the performance numbers.
+  - `docs/user/`: the user documentation site (MkDocs Material, `mkdocs.yml`, toolchain pinned in `docs/requirements.txt`; build with `uv pip install -r docs/requirements.txt && uv run --no-sync mkdocs build --strict`). `docs/mkdocs_hooks.py` renders the CLI reference from `aj --help`; `docs/snippets/` holds shared fragments (the install line). Tutorials are marimo notebooks in `docs/user/tutorials/notebooks/` with PEP 723 headers; keep each a few CPU minutes. `tests/test_no_backend_names.py` also covers `docs/user` (except `licence.md`).
 
 ## Setup and tests
 
@@ -54,7 +55,7 @@ uv run ruff check                     # lint; `uv run pre-commit run --all-files
 ```
 
 - **Extras:**
-  - `gp`: numpyro, optax, blackjax. The dev group mirrors it.
+  - `gp`: blackjax, for the pathfinder rung only (numpyro and optax are core: the MAP and the optimisers). The dev group includes it. `tests/test_core_deps.py` fails if a module-level import is not a core dependency: import optional packages inside the function that needs them.
   - (no extra for building bases: `ace-jax-coupling` from PyPI is a core dependency on Linux x86_64/aarch64, macOS arm64 and Windows x64; no Julia.) To try a locally built library without reinstalling, point the installed package at it with `ACEJAX_COUPLING_LIB=<bundle>/lib/libetcouple.<so|dylib>` (Windows: `<bundle>/bin/libetcouple.dll`), or `uv pip install` its wheel and use `uv run --no-sync`. Building the library: `coupling/RELEASING.md` and `coupling-wheels.yml` (JuliaC on Julia 1.13.1, then `coupling/tools/prune_bundle.py` and `check_bundle.py`).
   - `cuda`.
   - `fast-neighbours`: matscipy-neighbours, a C++ source build.
@@ -75,6 +76,7 @@ uv run ruff check                     # lint; `uv run pre-commit run --all-files
 - **CI** (`.github/workflows/`):
   - `test.yml`: 3 pytest-split shards on Python 3.12, a smoke job on 3.11 and 3.13, the `slow` ladder, and `optional-deps` (matscipy-neighbours plus lammps-jax pinned to a commit, with `ACEJAX_REQUIRE_OPTIONAL=1`).
   - `lint.yml`.
+  - `docs.yml`: strict site build and a headless run of each tutorial notebook (path-gated); on `main` it deploys to GitHub Pages.
   - Path-gated parity jobs: `julia-parity` (ACEfit rows/QR), `coupling-wheels` (builds + clean-env-tests the coupling wheels, then parity vs ACEpotentials), `prior-parity`, `pace-parity` (ML-PACE C++ + python-ace).
   - pytest-split balances on `.test_durations`. Refresh it with `pytest --store-durations` when adding slow tests.
 
