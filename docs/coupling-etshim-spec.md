@@ -148,7 +148,9 @@ runs the package tests (and checks HOME is untouched). Bundled third-party
 licences: `coupling/python/THIRD_PARTY_NOTICES.md`. The GPL-2.0+ SuiteSparse
 modules (UMFPACK, SPQR, RBio, CHOLMOD) are empty placeholders made by
 `prune_bundle.py` and enforced by `check_bundle.py`, so the wheel ships no GPL-only
-code; its licence expression is still to be declared.
+code. The wheel declares a whole-wheel SPDX `License-Expression` (MIT for
+ace-jax-coupling and EquivariantTensors, plus the bundled components); `LICENSE`
+summarises it.
 
 ## ET version vs the ACEpotentials fixtures
 

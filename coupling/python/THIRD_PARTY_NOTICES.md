@@ -42,8 +42,8 @@ placeholders above; `coupling/tools/check_bundle.py` fails a bundle that holds
 any real copy. The copyleft that remains is (a) LGPL libraries, each shipped as a
 separate, replaceable shared library, and (b) the GCC runtime under GPL-3.0 with
 the GCC Runtime Library Exception, which permits its use in non-GPL works. GMP is
-used under its LGPL-3.0-or-later option. The `License-Expression` in the package
-metadata is still to be declared before publication.
+used under its LGPL-3.0-or-later option. The package metadata declares the whole-wheel
+SPDX expression (`coupling/python/pyproject.toml`); `LICENSE` summarises it.
 Source for every component is available from the upstream projects linked in
 `licenses/Julia-THIRDPARTY.md`; the EquivariantTensors source is the fork
 commit reported by `ace_jax_coupling.build_info()`.
