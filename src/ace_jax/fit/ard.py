@@ -525,15 +525,15 @@ def _support_reference(cfg, data, built, ds_val, bn, scores, cfg_ids, log=print)
     ds = data.ds_train
     rng = np.random.default_rng(cfg.seed)
     cap = int(cfg.ard_support_max_atoms)
+    one = lambda ds_, i: jax.tree.map(lambda a: a[i:i + 1], ds_)      # batch i, leading axis kept
     pool = {}
     n_species = len(np.unique(np.asarray(ds.node_z)[np.asarray(ds.node_mask)]))
-    for chunk in np.array_split(rng.permutation(ds.n_batches), max(1, -(-ds.n_batches // 4))):
+    for i in rng.permutation(ds.n_batches):
         if pool and len(pool) == n_species and all(sum(len(x) for x in v) >= cap for v in pool.values()):
             break
-        idx = np.sort(chunk)
-        sub = jax.tree.map(lambda a, idx=idx: a[idx], ds)
-        X = np.asarray(site_features(prob.model, built.gpcfg, sub)[0])
-        live, Zs = np.asarray(sub.node_mask), np.asarray(sub.node_z)
+        sub = one(ds, int(i))
+        X = np.asarray(site_features(prob.model, built.gpcfg, sub)[0])[0]
+        live, Zs = np.asarray(sub.node_mask)[0], np.asarray(sub.node_z)[0]
         for z in np.unique(Zs[live]):
             pool.setdefault(int(z), []).append(X[live & (Zs == z)])
     Xp = {}
@@ -541,8 +541,14 @@ def _support_reference(cfg, data, built, ds_val, bn, scores, cfg_ids, log=print)
         v = np.concatenate(v)
         Xp[z] = v[rng.permutation(len(v))[:cap]]
     pca = fit_pca(Xp)
-    Xv = np.asarray(site_features(prob.model, built.gpcfg, ds_val)[0])
-    Xc, Zc = Xv[bn[:, 0], bn[:, 1]], np.asarray(ds_val.node_z)[bn[:, 0], bn[:, 1]]
+    Xc = np.zeros((len(bn), 0))
+    for i in np.unique(bn[:, 0]):                    # only the live T_val atoms are kept
+        Xi = np.asarray(site_features(prob.model, built.gpcfg, one(ds_val, int(i)))[0])[0]
+        sel = bn[:, 0] == i
+        if Xc.shape[1] == 0:
+            Xc = np.zeros((len(bn), Xi.shape[1]))
+        Xc[sel] = Xi[bn[sel, 1]]
+    Zc = np.asarray(ds_val.node_z)[bn[:, 0], bn[:, 1]]
     k = np.isin(Zc, list(pca))
     return build_support(pca, Xc[k], Zc[k], np.asarray(scores, float)[k], np.asarray(cfg_ids)[k],
                          cap, cfg.seed)

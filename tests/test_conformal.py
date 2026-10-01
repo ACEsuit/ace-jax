@@ -132,3 +132,74 @@ def test_support_flatten_roundtrip_and_absent_species():
     a, b = support_check(ref, Xt, Zt, 0.1), support_check(back, Xt, Zt, 0.1)
     assert not b["support_ok"][25:].any() and np.isinf(b["support_q"][25:]).all() and b["n_eff"][7] == 0
     assert (a["support_ok"] == b["support_ok"]).mean() > 0.9
+
+
+def test_support_logistic_separable_no_nan_and_fails_closed():
+    import warnings
+    from ace_jax.fit.support import _logistic, build_support, fit_pca, support_check
+    rng = np.random.default_rng(3)
+    X = np.r_[rng.normal(size=(50, 3)) - 20, rng.normal(size=(50, 3)) + 20]
+    y = np.r_[np.zeros(50), np.ones(50)]
+    beta, conv = _logistic(X, y, np.ones(100), 1e-12, iters=60)
+    assert np.isfinite(beta).all() and not conv
+    # a reference whose classifier cannot converge must fail closed with a warning
+    Xr = rng.normal(size=(300, 4))
+    ref = build_support(fit_pca({0: Xr}), Xr, np.zeros(300, int), rng.random(300), np.arange(300) // 5, 1000, 0)
+    import ace_jax.fit.support as sp
+    orig = sp._logistic
+    sp._logistic = lambda *a, **k: (orig(*a, **k)[0], False)
+    try:
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            r = support_check(ref, rng.normal(size=(20, 4)), np.zeros(20, int), 0.1)
+    finally:
+        sp._logistic = orig
+    assert not r["support_ok"].any() and np.isinf(r["support_q"]).all() and r["n_eff"][0] == 0
+    assert any("did not converge" in str(x.message) for x in w)
+
+
+def test_support_zero_mass_gives_neff_zero():
+    from ace_jax.fit.support import build_support, fit_pca, support_check
+    rng = np.random.default_rng(4)
+    Xr = rng.normal(size=(200, 3))
+    ref = build_support(fit_pca({0: Xr}), Xr, np.zeros(200, int), rng.random(200), np.arange(200) // 5, 1000, 0)
+    ref[0]["m"] = np.zeros(200)
+    r = support_check(ref, rng.normal(size=(10, 3)), np.zeros(10, int), 0.1)
+    assert r["n_eff"][0] == 0.0 and not r["support_ok"].any() and np.isfinite(r["n_eff"][0])
+
+
+def test_support_weighted_quantile_matches_direct_formula(monkeypatch):
+    import ace_jax.fit.support as sp
+    rng = np.random.default_rng(5)
+    n = 40
+    s = rng.random(n)
+    m = rng.random(n) + 0.1
+    lc, lt = rng.normal(size=n), np.array([0.3, -1.0])
+    ref = {"pca": {0: (np.zeros(2), np.ones(2), np.eye(2))},
+           0: {"Xc": np.zeros((n, 2)), "s": s, "m": m, "g": np.arange(n)}}
+    monkeypatch.setattr(sp, "_ratio", lambda *a, **k: (lc, lt, True))
+    alpha = 0.2
+    out = sp.support_check(ref, np.zeros((2, 2)), np.zeros(2, int), alpha)
+    for j in range(2):
+        w = m * np.exp(lc)
+        pt = np.exp(lt[j])
+        tot = w.sum() + pt
+        o = np.argsort(s)
+        cum = np.cumsum(w[o]) / tot
+        k = np.flatnonzero(cum >= 1 - alpha)
+        if len(k):
+            assert out["support_ok"][j] and out["support_q"][j] == s[o][k[0]]
+        else:
+            assert not out["support_ok"][j] and np.isinf(out["support_q"][j])
+
+
+def test_support_check_time_large_reference():
+    import time
+    from ace_jax.fit.support import build_support, fit_pca, support_check
+    rng = np.random.default_rng(6)
+    X = rng.normal(size=(50000, 40))
+    ref = build_support(fit_pca({0: X}), X, np.zeros(50000, int), rng.random(50000), np.arange(50000) // 25, 50000, 0)
+    t = time.time()
+    support_check(ref, rng.normal(size=(1000, 40)), np.zeros(1000, int), 0.1)
+    print("SUPPORT_CHECK_SECONDS", time.time() - t)
+    assert time.time() - t < 60
