@@ -31,11 +31,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
+      # Restore all three groups' caches into one dir (entries are content-hashed files, so
+      # the union is safe): a test that moves between shards when .test_durations is
+      # refreshed then still finds its compiled programs, instead of compiling cold.
       - uses: actions/cache/restore@v4
         with:
           path: .jax_cache
-          key: jaxcache-${{ runner.os }}-g${{ matrix.group }}-${{ hashFiles('uv.lock') }}-${{ github.sha }}
-          restore-keys: jaxcache-${{ runner.os }}-g${{ matrix.group }}-${{ hashFiles('uv.lock') }}-
+          key: jaxcache-${{ runner.os }}-g1-${{ hashFiles('uv.lock') }}-${{ github.sha }}
+          restore-keys: jaxcache-${{ runner.os }}-g1-${{ hashFiles('uv.lock') }}-
+      - uses: actions/cache/restore@v4
+        with:
+          path: .jax_cache
+          key: jaxcache-${{ runner.os }}-g2-${{ hashFiles('uv.lock') }}-${{ github.sha }}
+          restore-keys: jaxcache-${{ runner.os }}-g2-${{ hashFiles('uv.lock') }}-
+      - uses: actions/cache/restore@v4
+        with:
+          path: .jax_cache
+          key: jaxcache-${{ runner.os }}-g3-${{ hashFiles('uv.lock') }}-${{ github.sha }}
+          restore-keys: jaxcache-${{ runner.os }}-g3-${{ hashFiles('uv.lock') }}-
       - name: Suite shard ${{ matrix.group }}/3 (CPU JAX)
         env:
           JAX_PLATFORM_NAME: cpu
