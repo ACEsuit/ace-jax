@@ -364,7 +364,7 @@ def cmd_calibrate(a):
                                       np.concatenate(Z_u), s_u, c_u, g_u)
     new = post._replace(group_table=tab.to_dict(),
                         cal={"scores": S.astype(np.float32), "groups": Gg.astype(np.int8),
-                             "cfg": Cc.astype(np.int64), "src": Ss.astype(np.int8)},
+                             "cfg": Cc.astype(np.int64), "src": Ss.astype(np.int16)},
                         support=support)
     new.save(a.out)
     _print_group_table(tab)

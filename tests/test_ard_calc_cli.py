@@ -477,3 +477,35 @@ def test_aniso_fit_eval_and_calibrate(tmp_path_factory, calib_set):
     assert a.arrays["forces_cov"].shape == (len(a), 9) and "forces_q_mahal" in a.arrays
     assert main(_calib_args(out, calib_set, ["--out", str(out / "c.npz")])) == 0
     assert ARDPosterior.load(out / "c.npz").force_shape == "aniso"
+
+
+def test_resolved_yaml_records_ard_flags_and_roundtrips(tmp_path):
+    import yaml
+    from ace_jax.cli import _fit_config, _parse, main
+    out = tmp_path / "r"
+    ard = ["--force-shape", "aniso", "--ard-coverage", "0.8", "--ard-groups", "none", "--ard-cluster-size",
+           "inf", "--ard-press", "block", "--ard-n-min", "5", "--no-ard-support"]
+    assert main(["fit", "--model", str(FIXTURE_DIR / "si_fitted.npz"), "--data", str(XYZ), "--ntrain", "30",
+                 "--ntest", "8", "--energy-key", "dft_energy", "--force-key", "dft_force", "--virial-key",
+                 "dft_virial", "--m-per-species", "0", "--uq", "ard", "--opt", "lbfgs", "--map-steps", "5",
+                 "--configs-per-batch", "4", "--r0", "2.35", "--out", str(out), *ard]) == 0
+    d = yaml.safe_load((out / "fit.yaml").read_text())
+    assert (d["force_shape"], d["ard_coverage"], d["ard_groups"], d["ard_press"], d["ard_n_min"]) == \
+        ("aniso", 0.8, "none", "block", 5)
+    assert d["ard_cluster_size"] == float("inf") and d["no_ard_support"] is True
+    a = _parse(["fit", "--config", str(out / "fit.yaml")])
+    b = _parse(["fit", "--model", str(FIXTURE_DIR / "si_fitted.npz"), "--data", str(XYZ), "--r0", "2.35",
+                "--out", "x", "--uq", "ard", "--m-per-species", "0", *ard])
+    keys = ("ard_force_shape", "ard_coverage", "ard_groups", "ard_cluster_size", "ard_press", "ard_n_min",
+            "ard_support")
+    ca, cb = _fit_config(a), _fit_config(b)
+    assert all(getattr(ca, k) == getattr(cb, k) for k in keys) and ca.ard_support is False
+    # default fit: the negative flag is written false, and reads back as support on
+    out2 = tmp_path / "d"
+    assert main(["fit", "--model", str(FIXTURE_DIR / "si_fitted.npz"), "--data", str(XYZ), "--ntrain", "30",
+                 "--ntest", "8", "--energy-key", "dft_energy", "--force-key", "dft_force", "--virial-key",
+                 "dft_virial", "--m-per-species", "0", "--uq", "ard", "--opt", "lbfgs", "--map-steps", "5",
+                 "--configs-per-batch", "4", "--r0", "2.35", "--out", str(out2)]) == 0
+    d2 = yaml.safe_load((out2 / "fit.yaml").read_text())
+    assert d2["no_ard_support"] is False and d2["ard_cluster_size"] == 3.0
+    assert _fit_config(_parse(["fit", "--config", str(out2 / "fit.yaml")])).ard_support is True
