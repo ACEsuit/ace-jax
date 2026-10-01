@@ -30,6 +30,8 @@ dependencies = [
     { name = "lineax" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "numpyro" },
+    { name = "optax" },
     { name = "pyyaml" },
     { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
@@ -45,8 +47,6 @@ fast-neighbours = [
 ]
 gp = [
     { name = "blackjax" },
-    { name = "numpyro" },
-    { name = "optax" },
 ]
 
 [package.dev-dependencies]
@@ -73,8 +73,8 @@ requires-dist = [
     { name = "lineax", specifier = ">=0.1.1" },
     { name = "matscipy-neighbours", marker = "extra == 'fast-neighbours'", specifier = ">=1.0" },
     { name = "numpy", specifier = ">=1.24" },
-    { name = "numpyro", marker = "extra == 'gp'", specifier = ">=0.16" },
-    { name = "optax", marker = "extra == 'gp'", specifier = ">=0.2" },
+    { name = "numpyro", specifier = ">=0.16" },
+    { name = "optax", specifier = ">=0.2" },
     { name = "pyyaml", specifier = ">=6" },
     { name = "scipy", specifier = ">=1.10" },
 ]

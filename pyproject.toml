@@ -33,14 +33,18 @@ dependencies = [
   # training/eval data reader (libAtoms C parser, binary wheels): labels come back
   # as written, independent of ASE's calculator-key handling (see fit/xyz.py)
   "extxyz>=0.4.5",
+  # the fit pipeline: the theta-MAP (numpyro SVI) and the L-BFGS / Adam optimisers (optax)
+  "numpyro>=0.16",
+  "optax>=0.2",
   # coupling tables for new basis shapes (a compiled library, nothing to install
   # besides the wheel); platform wheels only -- elsewhere fit from an existing .npz
   "ace-jax-coupling==0.2.0; (sys_platform == 'linux' and (platform_machine == 'x86_64' or platform_machine == 'aarch64')) or (sys_platform == 'darwin' and platform_machine == 'arm64') or (sys_platform == 'win32' and platform_machine == 'AMD64')",
 ]
 
 [project.optional-dependencies]
-# Hybrid ACE+GP fitting with the marginalised-hyperparameter UQ ladder.
-gp = ["numpyro>=0.16", "optax>=0.2", "blackjax>=1.6"]
+# The pathfinder rung of the hyperparameter UQ ladder (everything else in `aj fit`,
+# GP arm included, needs only the core dependencies).
+gp = ["blackjax>=1.6"]
 cuda = ["jax[cuda12]>=0.10.1"]
 # Fast neighbour lists; ace-jax uses them when present and falls back to ASE's
 # list otherwise, so they are intentionally NOT core deps.  matscipy-neighbours
