@@ -104,12 +104,12 @@ These constraints are validated up front. A bad combination raises a
   - `model.npz` (linear): an ordinary ACE file, loaded by `ace_jax.load`,
     `ACECalculator` and `aj eval`.
   - `--uq ard` (linear only) also writes `posterior.npz` (float32 Cholesky factor of
-    the ARD posterior, plus the (L, n_cfg) sandwich factor Q by default) and `ard.json`
-    (evidence, prior scales, κ, λ, held-out NLL and rms-z; `lam_incl_own` is the λ the
-    held-out atoms' own training clusters would give, for comparison only).
+    the ARD posterior, the jackknife cluster factors and the per-group conformal table) and
+    `ard.json` (evidence, prior scales, per-group scales, held-out NLL and rms-z).
     `ACECalculator(model, posterior="out_ard/posterior.npz")` and
-    `aj eval --posterior out_ard/posterior.npz` add a `forces_std` result: per-atom
-    calibrated force uncertainty. `--uq ard` also changes the mean: `model.npz` is the
+    `aj eval --posterior out_ard/posterior.npz` add per-atom calibrated force
+    uncertainty: `forces_std`, plus `forces_cov`, `forces_q`, `forces_group`, `forces_support`
+    (see README, `--uq ard`). `--uq ard` also changes the mean: `model.npz` is the
     ARD posterior mean, not the BLR/MAP mean.
   - `gp_model.npz` (GP): self-contained, loaded by `GPCalculator.from_file` and
     `aj eval`. Its size is about 8·Dt²·(model draws) bytes, where Dt = basis
@@ -332,17 +332,26 @@ Other entry points:
   `atoms.get_forces()` does not compute it; call
   `calc.get_property("forces_std", atoms)` (reuses the cached E/F/stress), or
   pass `forces_std_every_call=True` — costly for per-step MD on big cells. Only
-  the force σ is calibrated: by default it is λ × the configuration-clustered
-  sandwich σ, with `--ard-variance kappa` κ × the posterior σ. Energy and virial
-  variances are the uncalibrated posterior ones (`ard.json` `tempered_quantities: ["F"]`
-  names the calibrated quantity, whichever scale was used).
+  the force uncertainty is calibrated (`ard.json` `tempered_quantities: ["F"]`);
+  energy and virial variances are the uncalibrated posterior ones.
   `ACECalculator(model, posterior=...)` raises `ValueError` if the posterior
   doesn't match the model (basis size, species count, element list, or a mean
   that is not the model's coefficients, i.e. a posterior from another fit), and
   `RuntimeError` unless `jax_enable_x64` is on. `forces_std` holds the whole
   cell's force design rows, ~N·3·L·8 bytes.
-- **The default sandwich variance (`--ard-variance sandwich`) needs the training data at fit
-  time and stores an (L, n_cfg) factor.** Use `--ard-variance kappa` for the smaller posterior.
+- **ARD properties.** `forces_std`/`forces_cov` use a per-group rms scale on the PRESS jackknife
+  shape (`--ard-cluster-size`, `--force-shape aniso`); `forces_q` is the per-group conformal
+  radius at `--ard-coverage` (default 0.9); `forces_group` names each atom's group.
+  `--ard-variance kappa` keeps the A⁻¹ shape and also gets the per-group scales.
+- **Coverage is conditional on exchangeability.** It holds for atoms exchangeable with their
+  group's calibration configurations. For a new regime (cracks, interfaces), run
+  `aj calibrate --model M --posterior P --data labelled.xyz --out DIR` on a few labelled cells
+  like it (per-group replace by default; `--append`, `--replace`).
+- **`support_ok = False` marks candidates for labelling** (`forces_support`; `aj eval --posterior P
+  --per-atom out.xyz --support`; `--no-ard-support` at fit time skips it).
+- **Schema-2 posteriors serve only the old scalar `forces_std`.** The new properties raise and ask
+  you to refit with `--uq ard`. The validation programme for the new scales is in
+  `bench/defect_uq/README.md` and has not been run yet.
 - **First `aj basis` of a new basis shape** calls the compiled coupling
   library (`ace-jax-coupling`, milliseconds) to build the coupling table, then
   caches it in `~/.cache/ace-jax/coupling`. Later runs do not need the library.

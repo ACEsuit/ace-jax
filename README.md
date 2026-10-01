@@ -314,7 +314,7 @@ aj fit --model si.npz --train train.xyz --test test.xyz $K \
 aj fit --model si.npz --train train.xyz --test test.xyz $K \
     --m-per-species 0 --uq ard --opt lbfgs --r0 2.35 --out out_ard
 aj eval --model out_ard/model.npz --posterior out_ard/posterior.npz --data big.xyz $K \
-    --forces --per-atom atoms_std.xyz          # per-atom forces_std, e.g. to colour a crack tip
+    --forces --per-atom atoms_std.xyz --support   # per-atom forces_std + support flags, e.g. to colour a crack tip
 
 # one file split by a seeded permutation, E0 by least squares
 aj fit --model si.npz --data all.xyz --ntrain 40 --ntest 10 --e0 lsq $K \
@@ -322,21 +322,48 @@ aj fit --model si.npz --data all.xyz --ntrain 40 --ntest 10 --e0 lsq $K \
 ```
 
 `--uq ard` fits prior scales per body order and the noise scales by evidence (joint type-II ML).
-The default `--ard-variance sandwich` serves the configuration-clustered sandwich variance,
-σ² = λ²·φA⁻¹MA⁻¹φᵀ, the misspecification-robust covariance, with λ from the train hold-out (fitted
-the same way as κ, but with each held-out atom's own training-configuration cluster left out of M: a
-new configuration has no such term; `ard.json` also reports `lam_incl_own`, the λ with it). On the bench365 prototype it ranked local errors better than the tempered
-posterior (Spearman ρ 0.26–0.37 against 0.15–0.26) at the same calibration and OOD detection.
-`--ard-variance kappa` keeps the single-temperature posterior variance κ²φA⁻¹φᵀ instead. Only
-the force variance is calibrated (λ or κ; `ard.json` `tempered_quantities: ["F"]`); energy and virial
-variances are the uncalibrated posterior ones. The
-prototype of this method (`bench/defect_uq`, PR #12) held rms-z 0.91–1.02 on held-out Cantor
-defect combinations; the acceptance run of this implementation is pending. `--uq ard` changes the
-mean as well as the uncertainty: `model.npz` holds the ARD posterior mean, not the BLR/MAP mean.
-`posterior.npz` stores the float32 posterior factor, ~0.9 GB at L = 15k, and (for the default
-sandwich variance) an additional (L, n_train_configs) float32 factor. `--ard-mode sequential` is
-the low-memory fallback. The calculator's `forces_std` holds the whole cell's force design rows,
-about N·3·L·8 bytes (N atoms, L columns; 7 GB for 100k atoms at L = 3k), so size cells to fit them.
+The force uncertainty has a shape and two scales (mathematics:
+[`docs/specs/tex/force-uq-math-pipeline.tex`](docs/specs/tex/force-uq-math-pipeline.tex)):
+
+- **Shape.** The centred delete-one-cluster (PRESS) jackknife covariance of the force at each
+  atom, with spatial clusters of `--ard-cluster-size` r_cut (default 3; `inf` = whole
+  configurations), so large cells are split into ~3 r_cut blocks by default. `--force-shape aniso`
+  keeps a full 3x3 shape instead of an isotropic one. `--ard-variance kappa` keeps the posterior
+  shape A⁻¹ instead and still gets the per-group scales below.
+- **Two scales, per group.** `forces_std` / `forces_cov` use a per-group rms factor (the scale at
+  which the standardised error has unit rms). `forces_q` is the per-group conformal radius at
+  `--ard-coverage` (default 0.9): `|F_err| <= forces_q` with that probability for atoms
+  exchangeable with the group's calibration configurations. Scores come from a stratified
+  hold-out (`--ard-val-frac`) scored with the hold-out posterior.
+- **Groups.** 8 Mondrian groups = 4 distortion bands x [coordination = modal]
+  (`--ard-groups distortion|none`); groups with fewer than `--ard-n-min` (default 20)
+  calibration configurations borrow from a neighbour. `forces_group` gives each atom's group.
+  `posterior.npz` holds the per-group table: `lam_rms`, `q`, `r = q/(lam_rms·χ₃⁻¹(0.9))`
+  (r near 1 means the Gaussian shape fits), `n_cfg` (T_val / U), merges and sources.
+- **Support.** `forces_support` (`support_ok`, `support_q`, `n_eff`) flags atoms the calibration
+  cannot certify (covariate shift); `aj eval --posterior P --per-atom out.xyz --support` writes
+  it. `--no-ard-support` skips the reference at fit time.
+
+For a regime the fit data does not cover (cracks, interfaces), recalibrate on a few labelled
+cells of that kind; only the scales change, the model is untouched:
+
+```bash
+aj calibrate --model out_ard/model.npz --posterior out_ard/posterior.npz \
+    --data crack_cells.xyz --out out_ard_crack      # replaces the scores in the groups these cells populate
+```
+
+`--append` pools the new cells with the stored hold-out scores; `--replace` uses them alone in
+every group. The default replaces per group, leaving the others as fitted. Posteriors are schema 3;
+older schema-2 posteriors serve only the old scalar `forces_std` (the new properties raise and ask
+you to refit with `--uq ard`). The validation programme for this revision is described in
+[`bench/defect_uq/README.md`](bench/defect_uq/README.md); it has not been run yet, so treat the
+coverage as nominal until it is. Only the force uncertainty is calibrated
+(`ard.json` `tempered_quantities: ["F"]`); energy and virial variances are the uncalibrated
+posterior ones. `--uq ard` changes the mean as well as the uncertainty: `model.npz` holds the ARD
+posterior mean, not the BLR/MAP mean. `posterior.npz` stores the float32 posterior factor, ~0.9 GB
+at L = 15k, plus the cluster factors. `--ard-mode sequential` is the low-memory fallback. The calculator's
+`forces_std` holds the whole cell's force design rows, about N·3·L·8 bytes (N atoms, L columns;
+7 GB for 100k atoms at L = 3k), so size cells to fit them.
 
 `aj fit` and the research driver `bench/acegp_cantor/run.py` share one pipeline
 (`ace_jax.fit.pipeline`: `FitConfig`, `load_fit_data`, `fit`, `write_outputs`,
