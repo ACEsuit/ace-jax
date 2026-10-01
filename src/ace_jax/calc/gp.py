@@ -7,11 +7,18 @@ import jax.numpy as jnp
 import numpy as np
 from ase.calculators.calculator import Calculator, all_changes
 
+from ..eval import sparse_graph
 from ..fit.data import Config, build_dataset
 from ..fit.hypers import from_array
 from ..fit.objective import posterior
-from ..fit.predict import _e0_offset, _predict_batch
+from ..fit.predict import _e0_offset, _predict_fn
 from ..fit.stats import sufficient_statistics
+
+
+# Neighbour slots are padded to a multiple of this, not the exact maximum count, so
+# structures (and MD steps) whose counts differ a little reuse one compiled predictor.
+# Padded slots sit at the cutoff, where the envelope vanishes: the result is unchanged.
+K_BUCKET = 8
 
 
 class FittedGP(NamedTuple):
@@ -42,6 +49,9 @@ class GPCalculator(Calculator):
         super().__init__(**kw)
         self.fitted, self.meta = fitted, meta
         self._E0 = np.asarray(fitted.prob.model.E0)
+        # one jitted predictor per calculator, reused across draws and calls (theta/mu/L
+        # are arguments): run eagerly, the derivative-DTC dispatches op by op, ~5x slower
+        self._predict = _predict_fn(fitted.prob, True, True)
 
     def calculate(self, atoms=None, properties=("energy",), system_changes=all_changes):
         super().calculate(atoms, properties, system_changes)
@@ -49,13 +59,16 @@ class GPCalculator(Calculator):
         cfg = prob.cfg
         c = Config(np.asarray(atoms.positions), np.asarray(atoms.numbers), np.asarray(atoms.cell.array),
                    np.asarray(atoms.pbc), None, None, None, 1.0, 1.0, 1.0)
-        ds = build_dataset([c], self.meta, self._E0, 1, rcut=cfg.rcut, node_chunk=cfg.node_chunk)
+        k = int(np.bincount(sparse_graph(c.positions, c.cell, c.pbc, cfg.rcut).senders,
+                            minlength=len(c.numbers)).max())
+        ds = build_dataset([c], self.meta, self._E0, 1, rcut=cfg.rcut, node_chunk=cfg.node_chunk,
+                           k_cap=-(-max(k, 1) // K_BUCKET) * K_BUCKET)
         batch = jax.tree.map(lambda a: a[0], ds)
         live = np.asarray(batch.node_mask)
         Es, Fs, Vs, Ev, Fv = [], [], [], [], []
         for d, (mu, L) in zip(self.fitted.draws, self.fitted.posteriors):
             theta = from_array(jnp.asarray(d))
-            Em, Ev_, Fm, Fv_, Vm, _ = _predict_batch(theta, prob, mu, L, batch)
+            Em, Ev_, Fm, Fv_, Vm, _ = self._predict(theta, mu, L, batch)
             Es.append(float(Em[0]) + float(_e0_offset(prob, ds)[0, 0]))
             Ev.append(float(Ev_[0])); Fs.append(np.asarray(Fm)[live]); Fv.append(np.asarray(Fv_)[live])
             Vs.append(np.asarray(Vm)[0])
