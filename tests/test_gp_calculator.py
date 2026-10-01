@@ -20,8 +20,9 @@ XYZ = FIXTURE_DIR / "si_tiny_train.xyz"
 pytestmark = pytest.mark.skipif(not XYZ.exists(), reason="missing si_tiny_train.xyz")
 
 
-def test_calculator_agrees_with_predict_mixture():
-    from ase import Atoms
+def _fitted_si():
+    """A two-draw fitted GP on the first six si_tiny configs: (fitted, meta, E0,
+    configs, prob, train, draws)."""
     model, meta, z = load(FIXTURE_DIR / "si_fitted.npz")
     configs = load_configs(XYZ, "dft_energy", "dft_force", "dft_virial")
     E0 = np.asarray(z["E0"])
@@ -39,6 +40,13 @@ def test_calculator_agrees_with_predict_mixture():
     draws = np.stack([a, a + np.array([0.2] + [0.0] * 9)])
     with highest_precision():
         fitted = fit_posteriors(prob, train, draws)
+    return fitted, meta, E0, configs, prob, train, draws
+
+
+def test_calculator_agrees_with_predict_mixture():
+    from ase import Atoms
+    fitted, meta, E0, configs, prob, train, draws = _fitted_si()
+    with highest_precision():
         c = configs[7]
         atoms = Atoms(numbers=c.numbers, positions=c.positions, cell=c.cell, pbc=c.pbc)
         atoms.calc = GPCalculator(fitted, meta)
@@ -49,3 +57,45 @@ def test_calculator_agrees_with_predict_mixture():
     assert abs(E - p.E_mean[0]) < 1e-8 and np.abs(F - p.F_mean).max() < 1e-8
     assert abs(E_std - np.sqrt(p.E_var[0])) < 1e-8
     assert np.allclose(s, -p.V_mean[0] / atoms.get_volume())
+
+
+def test_calculator_compiles_its_predictor_once():
+    """GPCalculator runs the jitted per-batch predictor (predict._predict_fn), built
+    once per calculator. An eager _predict_batch dispatched the derivative-DTC op by
+    op: ~7.5 s per structure on si_tiny, 5x the jitted path. A second structure of
+    the same shape must reuse the compiled predictor."""
+    from ase import Atoms
+    fitted, meta, E0, configs, prob, train, draws = _fitted_si()
+    calc = GPCalculator(fitted, meta)
+    c = configs[7]
+    for shift in (0.0, 1e-3):                       # a new calculation, same padded shape
+        atoms = Atoms(numbers=c.numbers, positions=c.positions + shift, cell=c.cell, pbc=c.pbc)
+        atoms.calc = calc
+        atoms.get_potential_energy()
+    assert calc._predict._cache_size() == 1
+
+
+def test_calculator_buckets_neighbour_slots():
+    """Neighbour slots are padded to a multiple of K_BUCKET, not the exact maximum
+    neighbour count: si_tiny's 53 configs had 27 distinct exact counts (39-76), so
+    nearly every structure (and every MD step) compiled the predictor again.
+    Structures with different counts in one bucket share one compiled predictor."""
+    from ase import Atoms
+    from ace_jax.calc.gp import K_BUCKET
+    from ace_jax.fit.data import sparse_graph
+    fitted, meta, E0, configs, prob, train, draws = _fitted_si()
+    rcut = float(meta["rcut"])
+    k = [int(np.bincount(sparse_graph(c.positions, c.cell, c.pbc, rcut).senders, minlength=len(c.numbers)).max())
+         for c in configs]
+    by_bucket = {}
+    for i, ki in enumerate(k):
+        by_bucket.setdefault(-(-ki // K_BUCKET), {}).setdefault(ki, i)
+    pair = next(list(v.values())[:2] for v in by_bucket.values() if len(v) >= 2)
+    assert k[pair[0]] != k[pair[1]]
+    calc = GPCalculator(fitted, meta)
+    for i in pair:
+        c = configs[i]
+        atoms = Atoms(numbers=c.numbers, positions=c.positions, cell=c.cell, pbc=c.pbc)
+        atoms.calc = calc
+        atoms.get_potential_energy()
+    assert calc._predict._cache_size() == 1, (k[pair[0]], k[pair[1]])
