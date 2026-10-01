@@ -61,6 +61,11 @@ class FitConfig:
                               1e-12, 1e-13, 1e-14)
     pops_val_frac: float = 0.2; pops_env_nf: int = 2000
     pops_rows: str = "auto"              # "auto" | "host" (rows cached in host RAM) | "device" (re-evaluated)
+    learn_radial: bool = False           # learn the tensor radials (radial_learn.fit_radial) before the fit
+    radial_n_q: int = 12                 # polynomial span after to_analytic widening
+    radial_steps: int = 40               # L-BFGS steps per roughness weight
+    radial_lam_grid: tuple = (0.0, 1e-2) # relative roughness weights; the gate picks among them and init
+    radial_val_frac: float = 0.2         # train hold-out for the gate
 
     def validate(self):
         if self.arm not in ("linear", "gp"):
@@ -96,4 +101,13 @@ class FitConfig:
             raise ValueError(f"predict_stats must be 'cached' or 'recompute', got {self.predict_stats!r}")
         if self.fix_rho is not None and self.opt != "lbfgs":
             raise ValueError("fix_rho is implemented for opt lbfgs only")
+        if self.learn_radial:
+            if not 0.0 < self.radial_val_frac < 1.0:
+                raise ValueError(f"radial_val_frac must be in (0, 1), got {self.radial_val_frac}")
+            if self.radial_n_q < 1:
+                raise ValueError(f"radial_n_q must be >= 1, got {self.radial_n_q}")
+            if self.radial_steps < 0:
+                raise ValueError(f"radial_steps must be >= 0, got {self.radial_steps}")
+            if not len(self.radial_lam_grid):
+                raise ValueError("radial_lam_grid must hold at least one roughness weight")
         return self
