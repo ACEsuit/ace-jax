@@ -26,7 +26,7 @@
 # 12.9 toolkit with micromamba and CUDA_DEV=nvcc129 rebuilds lammps-dev and the
 # plugin against it (CUDA_DEV=nvcc129 bash sulis.sh nvcc129 lammps_dev plugin env_json).
 #
-# Steps: sources venv neighbours lammps lmp_python symmetrix_py lammps_dev plugin env_json
+# Steps: sources venv torch_cu126 neighbours lammps lmp_python symmetrix_py lammps_dev plugin env_json
 set -euo pipefail
 ROOT=${BENCH_ROOT:-$HOME/bench-scaling}
 ACEJAX=${ACEJAX_SRC:-$ROOT/ace-jax}          # rsynced from a checkout (src bench fixtures julia pyproject.toml)
@@ -37,7 +37,7 @@ BUILD_DEV=$LAMMPS_DEV/build-kk
 VENV=$ROOT/venv
 JOBS=${JOBS:-${SLURM_CPUS_PER_TASK:-16}}
 ARCH=AMPERE80                                  # A100
-MODS="GCC/12.3.0 OpenMPI/4.1.5 CUDA/12.8.0 CMake/3.26.3"   # gompi/2023a + CUDA; C++20 for Symmetrix
+MODS="GCC/12.3.0 OpenMPI/4.1.5 OpenBLAS/0.3.23 CUDA/12.8.0 CMake/3.26.3"   # foss/2023a parts + CUDA; Symmetrix needs BLAS, C++20
 CUDA_DEV=${CUDA_DEV:-CUDA/12.8.0}             # the dev tree + plugin; "nvcc129": the micromamba toolkit
 CUDA129=$ROOT/cuda-12.9
 LAMMPS_REV=9792f6a9a32517780a8276c8ab201f17cae37d6b       # patch_10Sep2025
@@ -92,6 +92,18 @@ venv() {
   uv pip install --python "$VENV/bin/python" -q pip "jax[cuda12]" matscipy ase matplotlib pyyaml psutil \
     mace-torch cuequivariance-torch cuequivariance-ops-torch-cu12 \
     -e "$ACEJAX" -e "$ROOT/lammps-jax"
+  torch_cu126
+}
+
+torch_cu126() {           # PyPI's torch is a CUDA 13 build (driver >= 580); Sulis's is 560
+  local v
+  v=$("$VENV/bin/python" -c "import importlib.metadata as m; print(m.version('torch').split('+')[0])")
+  case $("$VENV/bin/python" -c "import importlib.metadata as m; print(m.version('torch'))") in
+    *+cu126) return 0 ;;
+  esac
+  uv pip install --python "$VENV/bin/python" -q --reinstall-package torch "torch==$v" \
+    --index-url https://download.pytorch.org/whl/cu126 --extra-index-url https://pypi.org/simple \
+    --index-strategy unsafe-best-match
 }
 
 nvcc129() {               # fallback toolkit: CUDA 12.9 from conda-forge, via micromamba

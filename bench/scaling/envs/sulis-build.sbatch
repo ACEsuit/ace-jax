@@ -26,13 +26,14 @@ nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv
 # ace-jax's path first (neighbours, the dev tree, the plugin); the Symmetrix
 # tree last, so a Symmetrix failure costs only the MACE rows
 fail=()
-for s in neighbours lammps_dev plugin lammps lmp_python symmetrix_py env_json; do
+for s in torch_cu126 neighbours lammps_dev plugin lammps lmp_python symmetrix_py env_json; do
   bash "$SH" "$s" || fail+=("$s")
 done
 echo "=== failed steps: ${fail[*]:-none}"
 
 echo "=== checks"
 "$ROOT/venv/bin/python" -c "import jax; print(jax.devices())"
+"$ROOT/venv/bin/python" -c "import torch; print(torch.__version__, 'cuda', torch.cuda.is_available())"
 "$ROOT/lmp-jax.sh" -h | grep -i -E "jax" | head -5
 "$ROOT/lmp.sh" -h | grep -i -E "pace|symmetrix" | head -10
 cat "$ROOT/VERSIONS"
