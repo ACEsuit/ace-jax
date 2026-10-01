@@ -170,3 +170,52 @@ def test_fit_learn_radial_then_gp(fast, tmp_path):
     write_outputs(res, tmp_path, layout=("cli",), log=QUIET)
     z = np.load(tmp_path / "gp_model.npz")
     np.testing.assert_allclose(z["ace/rnl_Wnlq"], res.radial.W, rtol=0, atol=1e-12)
+
+
+FAST_CLI = ["--model", str(MODEL), "--r0", "2.35", "--train", str(XYZ), "--energy-key", "dft_energy",
+            "--force-key", "dft_force", "--virial-key", "dft_virial", "--m-per-species", "0",
+            "--rungs", "map", "--map-steps", "20", "--opt", "adam", "--configs-per-batch", "4"]
+
+
+@pytest.mark.slow                    # two full CLI runs (~80 s)
+def test_cli_learn_radial_writes_info_and_reproduces(fast, tmp_path):
+    import json
+    import yaml
+    from ace_jax.cli import main
+    a = tmp_path / "a"
+    main(["fit", *FAST_CLI, "--learn-radial", "--radial-steps", "3", "--radial-lam-grid", "0",
+          "--out", str(a)])
+    info = json.loads((a / "radial_info.json").read_text())
+    assert info["lam_grid"] == [0.0] and info["n_q"] == 12
+    y = yaml.safe_load((a / "fit.yaml").read_text())
+    assert y["learn_radial"] is True and y["radial_steps"] == 3 and y["radial_lam_grid"] in ("0", [0.0], "0.0")
+    b = tmp_path / "b"
+    main(["fit", "--config", str(a / "fit.yaml"), "--out", str(b)])
+    np.testing.assert_allclose(np.load(b / "model.npz")["rnl_Wnlq"], np.load(a / "model.npz")["rnl_Wnlq"],
+                               rtol=0, atol=1e-10)   # two separate runs
+
+
+def test_cli_radial_option_needs_learn_radial(capsys):
+    from ace_jax.cli import _parse
+    with pytest.raises(SystemExit):
+        _parse(["fit", *FAST_CLI, "--radial-steps", "3", "--out", "o"])
+    assert "--radial-steps needs --learn-radial" in capsys.readouterr().err
+
+
+def test_yaml_radial_defaults_without_learning_are_fine(tmp_path):
+    """A resolved fit.yaml records every dest, radial defaults included; re-running
+    it with learn_radial false must not trip the stray-option check."""
+    import yaml
+    from ace_jax.cli import _parse
+    f = tmp_path / "fit.yaml"
+    f.write_text(yaml.safe_dump({"model": str(MODEL), "r0": 2.35, "train": str(XYZ), "out": "o",
+                                 "learn_radial": False, "radial_steps": 40, "radial_n_q": 12,
+                                 "radial_lam_grid": "0,0.01", "radial_val_frac": 0.2}))
+    a = _parse(["fit", "--config", str(f)])
+    assert a.learn_radial is False and a.radial_steps == 40
+
+
+def test_cli_lam_grid_parses_to_floats():
+    from ace_jax.cli import _fit_config, _parse
+    a = _parse(["fit", *FAST_CLI, "--learn-radial", "--radial-lam-grid", "0,1e-3,1e-2", "--out", "o"])
+    assert _fit_config(a).radial_lam_grid == (0.0, 1e-3, 1e-2)
