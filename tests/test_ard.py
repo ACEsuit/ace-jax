@@ -610,3 +610,58 @@ def test_posterior_chol_and_sandwich_factor_stay_on_device(ard_setup):
         Q = sandwich_factor(post, sandwich_scores(post, prob, ds, ev.sigmas(h)))
     assert isinstance(post.chol, jax.Array) and post.chol.dtype == np.float64
     assert isinstance(Q, jax.Array) and Q.dtype == np.float64
+
+
+def _table(G=2):
+    from ace_jax.fit.conformal import GroupTable
+    return GroupTable(alpha=0.1, n_min=20, lam_rms=np.array([2.0, 3.0]), q=np.array([5.0, 9.0]),
+                      r=np.array([1.0, 1.2]), n_cfg=np.array([30, 30]), n_cfg_val=np.array([30, 30]),
+                      n_cfg_cal=np.array([0, 0]), n_atoms=np.array([100, 100]), merged=[])
+
+
+def test_schema3_served_quantities(ard_setup, tmp_path):
+    from ace_jax.fit.ard import ARDPosterior
+    from ace_jax.fit.clusters import row_clusters
+    from ace_jax.fit.jackknife import press_scores, shape_factor
+    from ace_jax.fit.rows import linear_rows
+    prob, ds, ev, h, post = ard_setup
+    rc, K = row_clusters(ds, None, float("inf"))
+    R = shape_factor(post, press_scores(post, prob, ds, rc, K, ev.sigmas(h))[0])
+    tab = _table()
+    p = post._replace(R=R, group_consts={"r1": 3.0, "z_star": 4, "edges": []}, group_table=tab.to_dict())
+    Fr = np.asarray(linear_rows(prob.model, prob.cfg, jax.tree.map(lambda a: a[0], ds))[0].F)
+    g = np.arange(Fr.shape[0]) % 2
+    V = p.atom_shape(Fr)
+    v = np.trace(V, axis1=1, axis2=2)
+    np.testing.assert_allclose(p.forces_std(Fr, g), tab.lam_rms[g] * np.sqrt(v), rtol=1e-12)
+    np.testing.assert_allclose(p.forces_cov(Fr, g), tab.lam_rms[g, None, None] ** 2 * V, rtol=1e-12)
+    np.testing.assert_allclose(np.trace(p.forces_cov(Fr, g), axis1=1, axis2=2), p.forces_std(Fr, g) ** 2,
+                               rtol=1e-12)
+    np.testing.assert_allclose(p.forces_q(Fr, g), tab.q[g] * np.sqrt(v / 3), rtol=1e-12)
+    pa = p._replace(force_shape="aniso")
+    lam_max = np.linalg.eigvalsh(V + p.eps * (v / 3)[:, None, None] * np.eye(3)).max(1)
+    np.testing.assert_allclose(pa.forces_q(Fr, g), tab.q[g] * np.sqrt(lam_max), rtol=1e-10)
+    np.testing.assert_allclose(pa.forces_q_mahal(g), tab.q[g])
+    p.save(tmp_path / "p.npz")
+    back = ARDPosterior.load(tmp_path / "p.npz")
+    np.testing.assert_allclose(back.forces_std(Fr, g), p.forces_std(Fr, g), rtol=1e-3)   # R stored float32
+    assert back.group_table["q"] == tab.q.tolist() and back.force_shape == "iso"
+
+
+def test_schema2_serves_scalar(ard_setup, tmp_path):
+    from ace_jax.fit.ard import ARDPosterior, sandwich_factor, sandwich_scores
+    from ace_jax.fit.rows import linear_rows
+    prob, ds, ev, h, post = ard_setup
+    old = post._replace(Q=sandwich_factor(post, sandwich_scores(post, prob, ds, ev.sigmas(h))), lam=2.0)
+    old.save(tmp_path / "p.npz")
+    z = dict(np.load(tmp_path / "p.npz"))
+    z["schema"] = np.array(2)
+    for k in [k for k in z if k.startswith(("R", "group_", "cal_", "support", "force_shape", "eps"))]:
+        z.pop(k)
+    np.savez(tmp_path / "p2.npz", **z)
+    p2 = ARDPosterior.load(tmp_path / "p2.npz")
+    Fr = np.asarray(linear_rows(prob.model, prob.cfg, jax.tree.map(lambda a: a[0], ds))[0].F)
+    np.testing.assert_allclose(p2.forces_std(Fr), old.forces_std(Fr), rtol=1e-3)
+    for f in (lambda: p2.forces_q(Fr, None), lambda: p2.forces_cov(Fr, None), lambda: p2.forces_q_mahal(None)):
+        with pytest.raises(ValueError, match="refit with --uq ard"):
+            f()

@@ -19,7 +19,8 @@ import jax.numpy as jnp
 import numpy as np
 from jax.scipy.linalg import cho_factor, cho_solve, solve_triangular
 
-SCHEMA = 2
+SCHEMA = 3
+_NEED3 = "this posterior predates schema 3; refit with --uq ard to get forces_q/forces_cov/forces_group"
 
 
 def body_order_columns(meta, cfg):
@@ -197,6 +198,54 @@ class ARDPosterior(NamedTuple):
     meta: dict                # n_B, n_pair, NZ, rcut, elements
     Q: jax.Array | None = None    # (L, n_cfg) S^-1 G~: configuration-clustered sandwich factor (device)
     lam: float = 1.0              # sandwich scale (fitted like kappa)
+    R: object = None              # (L, r) schema-3 shape factor (device float64)
+    force_shape: str = "iso"
+    eps: float = 1e-3
+    group_consts: dict | None = None    # {"r1", "z_star", "edges"}
+    group_table: dict | None = None     # GroupTable.to_dict()
+    cal: dict | None = None             # arrays scores f32, groups i8, cfg i64, src i8
+    support: dict | None = None
+
+    def _tab(self):
+        if self.group_table is None:
+            raise ValueError(_NEED3)
+        return self.group_table
+
+    def groups_of(self, batch):
+        from .conformal import assign_groups, shell_features
+        if self.group_consts is None:
+            raise ValueError(_NEED3)
+        gc = self.group_consts
+        z, d = shell_features(batch, gc["r1"])
+        return assign_groups(z, d, gc["z_star"], np.asarray(gc["edges"], float))
+
+    def atom_shape(self, Frows):
+        """Unscaled per-atom shape V (N, 3, 3) from force rows (N, 3, L)."""
+        from .jackknife import atom_shape
+        if self.R is not None:
+            return atom_shape(self.R, self.dinv, Frows)
+        if self.Q is not None:                                   # schema 2: uncentred sandwich factor
+            return atom_shape(self.Q, self.dinv, Frows)
+        U = np.asarray(Frows) * np.asarray(self.dinv)[None, None, :]          # kappa: V = u^T S^-1 u
+        W = np.asarray(solve_triangular(jnp.asarray(self.chol), jnp.asarray(U.reshape(-1, U.shape[-1]).T),
+                                        lower=True)).T.reshape(U.shape[0], 3, -1)
+        return np.einsum("nar,nbr->nab", W, W)
+
+    def forces_cov(self, Frows, groups):
+        lam = np.asarray(self._tab()["lam_rms"])[groups]
+        return lam[:, None, None] ** 2 * self.atom_shape(Frows)
+
+    def forces_q(self, Frows, groups):
+        q = np.asarray(self._tab()["q"])[groups]
+        V = self.atom_shape(Frows)
+        v = np.trace(V, axis1=1, axis2=2)
+        if self.force_shape == "aniso":
+            lm = np.linalg.eigvalsh(V + self.eps * (v / 3)[:, None, None] * np.eye(3)).max(1)
+            return q * np.sqrt(lm)
+        return q * np.sqrt(v / 3)
+
+    def forces_q_mahal(self, groups):
+        return np.asarray(self._tab()["q"])[groups]
 
     def var_rows(self, Phi, chunk=4096):
         """Untempered posterior variance phi A^-1 phi^T of each row of Phi (n, L)."""
@@ -234,8 +283,12 @@ class ARDPosterior(NamedTuple):
             return self.lam ** 2 * self.misspec_var_rows(Phi)
         return self.kappa ** 2 * self.var_rows(Phi)
 
-    def forces_std(self, Frows):
-        """Per-atom force std sqrt(sum_c force_var_rows) from force rows (N, 3, L), numpy or device."""
+    def forces_std(self, Frows, groups=None):
+        """Per-atom force std from force rows (N, 3, L), numpy or device.  With a schema-3 group table
+        and groups: lam_rms[g] sqrt(tr V); else sqrt(sum_c force_var_rows) (schema 1/2)."""
+        if self.group_table is not None and groups is not None:
+            v = np.trace(self.atom_shape(Frows), axis1=1, axis2=2)
+            return np.asarray(self.group_table["lam_rms"])[groups] * np.sqrt(v)
         v = self.force_var_rows(Frows.reshape(-1, Frows.shape[-1])).reshape(-1, 3)
         return np.sqrt(np.maximum(v.sum(1), 0.0))
 
@@ -243,18 +296,44 @@ class ARDPosterior(NamedTuple):
         np.savez(path, mean=self.mean, chol=np.asarray(self.chol, dtype), dinv=self.dinv, kappa=self.kappa,
                  h=self.h, groups=np.asarray(self.groups), body_col=self.body_col, schema=SCHEMA,
                  meta_json=np.frombuffer(json.dumps(self.meta).encode(), np.uint8),
-                 lam=self.lam, **({} if self.Q is None else {"Q": np.asarray(self.Q, dtype)}))
+                 lam=self.lam, **({} if self.Q is None else {"Q": np.asarray(self.Q, dtype)}),
+                 **self._extra_arrays(dtype))
+
+    def _extra_arrays(self, dtype):
+        js = lambda d: np.frombuffer(json.dumps(d).encode(), np.uint8)
+        out = {"force_shape": np.array(self.force_shape), "eps": self.eps}
+        if self.R is not None:
+            out["R"] = np.asarray(self.R, dtype)
+        if self.group_consts is not None:
+            out["group_consts_json"] = js(self.group_consts)
+        if self.group_table is not None:
+            out["group_table_json"] = js(self.group_table)
+        if self.cal is not None:
+            for k, t in (("scores", np.float32), ("groups", np.int8), ("cfg", np.int64), ("src", np.int8)):
+                out[f"cal_{k}"] = np.asarray(self.cal[k], t)
+        if self.support is not None:
+            for k, v in self.support.items():
+                out[f"support_{k}"] = np.asarray(v)
+        return out
 
     @staticmethod
     def load(path):
         z = np.load(pathlib.Path(path))
-        if int(z["schema"]) not in (1, 2):
+        js = lambda k: json.loads(bytes(z[k]).decode()) if k in z.files else None
+        if int(z["schema"]) not in (1, 2, 3):
             raise ValueError(f"unsupported posterior schema {int(z['schema'])}")
         return ARDPosterior(z["mean"], z["chol"].astype(np.float64), z["dinv"], float(z["kappa"]), z["h"],
                             tuple(int(g) for g in z["groups"]), z["body_col"],
                             json.loads(bytes(z["meta_json"]).decode()),
                             Q=z["Q"].astype(np.float64) if "Q" in z.files else None,
-                            lam=float(z["lam"]) if "lam" in z.files else 1.0)
+                            lam=float(z["lam"]) if "lam" in z.files else 1.0,
+                            R=jnp.asarray(z["R"], jnp.float64) if "R" in z.files else None,
+                            force_shape=str(z["force_shape"]) if "force_shape" in z.files else "iso",
+                            eps=float(z["eps"]) if "eps" in z.files else 1e-3,
+                            group_consts=js("group_consts_json"), group_table=js("group_table_json"),
+                            cal={k: z[f"cal_{k}"] for k in ("scores", "groups", "cfg", "src")}
+                            if "cal_scores" in z.files else None,
+                            support={k[8:]: z[k] for k in z.files if k.startswith("support_")} or None)
 
 
 def ard_posterior(ev, h, kappa, meta):
