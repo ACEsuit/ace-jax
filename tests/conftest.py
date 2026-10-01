@@ -241,3 +241,39 @@ def _release_jax_memory():
         jax.clear_caches()
     except Exception:
         pass
+
+
+def small_si_xyz(path, n=12):
+    """The first n frames of si_tiny_train.xyz (the isolated atom first), byte for byte:
+    the CLI plumbing and reproduction tests need a fit, not 53 configurations."""
+    lines, out, i = (FIXTURE_DIR / "si_tiny_train.xyz").read_text().splitlines(keepends=True), [], 0
+    for _ in range(n):
+        k = int(lines[i]); out += lines[i:i + k + 2]; i += k + 2
+    path.write_text("".join(out))
+    return path
+
+
+CLI_FAST = ["--energy-key", "dft_energy", "--force-key", "dft_force", "--virial-key", "dft_virial",
+            "--m-per-species", "0", "--rungs", "map", "--map-steps", "5", "--opt", "adam",
+            "--configs-per-batch", "4"]
+
+
+@pytest.fixture(scope="session")
+def built_cli_run(tmp_path_factory):
+    """One `aj fit --order 3 --max-degree 10` (basis built inline, default r0) on a
+    12-config Si subset, shared by the CLI/run-file tests that only read its outputs:
+    a SimpleNamespace(out, xyz, cache, stdout)."""
+    import contextlib
+    import io
+    from types import SimpleNamespace
+    from test_basis_build import _primed_cache
+    from ace_jax.cli import main
+    root = tmp_path_factory.mktemp("built_cli_run")
+    xyz = small_si_xyz(root / "si12.xyz")
+    cache = _primed_cache(root / "cache")
+    buf = io.StringIO()
+    with pytest.MonkeyPatch.context() as mp, contextlib.redirect_stdout(buf):
+        mp.setenv("ACEJAX_COUPLING_CACHE_ONLY", "1")
+        main(["fit", "--order", "3", "--max-degree", "10", "--coupling-cache-dir", cache,
+              "--train", str(xyz), "--out", str(root / "a"), *CLI_FAST])
+    return SimpleNamespace(out=root / "a", xyz=xyz, cache=cache, stdout=buf.getvalue())
