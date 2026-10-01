@@ -309,7 +309,7 @@ class ARDPosterior(NamedTuple):
         if self.group_table is not None:
             out["group_table_json"] = js(self.group_table)
         if self.cal is not None:
-            for k, t in (("scores", np.float32), ("groups", np.int8), ("cfg", np.int64), ("src", np.int8)):
+            for k, t in (("scores", np.float32), ("groups", np.int8), ("cfg", np.int64), ("src", np.int16)):
                 out[f"cal_{k}"] = np.asarray(self.cal[k], t)
         if self.support is not None:
             from .support import flatten_support
@@ -515,7 +515,7 @@ def _val_atoms(post, prob, ds, r1=None, shape=True, own_col=None):
                      cat("bn", (0, 2)).astype(np.int64))
 
 
-def _support_reference(cfg, data, built, ds_val, bn, scores, cfg_ids, log=print):
+def _support_reference(cfg, data, built, ds_val, bn, scores, cfg_ids, grp, log=print):
     """The covariate-shift reference (fit/support.py): per-species descriptor PCA from a random sample of
     training batches (<= ard_support_max_atoms atoms per species), and the T_val atoms (batch, node) = bn
     with their conformal scores and configuration ids.  Site descriptors are evaluated only on those."""
@@ -551,10 +551,10 @@ def _support_reference(cfg, data, built, ds_val, bn, scores, cfg_ids, log=print)
     Zc = np.asarray(ds_val.node_z)[bn[:, 0], bn[:, 1]]
     k = np.isin(Zc, list(pca))
     return build_support(pca, Xc[k], Zc[k], np.asarray(scores, float)[k], np.asarray(cfg_ids)[k],
-                         cap, cfg.seed)
+                         cap, cfg.seed, grp=np.asarray(grp)[k])
 
 
-def _scores(e, V, force_shape, eps):
+def conformal_scores(e, V, force_shape, eps):
     """iso: s = |e| / sqrt(v/3); aniso: s = sqrt(e^T (V + eps (v/3) I)^-1 e), v = tr V."""
     v = np.trace(V, axis1=1, axis2=2)
     if force_shape == "aniso":
@@ -705,7 +705,7 @@ def run_ard_stage(cfg, data, built, theta, log=print, full_stats=None):
             lam_incl_own = kappa_closed_form(e2, Ef.v_incl[ok])
 
     # 5. per-group scales on T_val
-    s = _scores(e, V, cfg.ard_force_shape, cfg.ard_shape_eps)
+    s = conformal_scores(e, V, cfg.ard_force_shape, cfg.ard_shape_eps)
     gv = assign_groups(E.z[ok], E.d[ok], z_star, edges)
     cv = np.asarray(val_idx)[E.cfg[ok]]            # training-set index of each calibration atom's config
     tab = group_scales(s, gv, cv, G, 1 - cfg.ard_coverage, cfg.ard_n_min)
@@ -713,9 +713,9 @@ def run_ard_stage(cfg, data, built, theta, log=print, full_stats=None):
                          group_consts={"r1": float(r1), "z_star": z_star, "edges": edges.tolist()},
                          group_table=tab.to_dict(),
                          cal={"scores": s.astype(np.float32), "groups": gv.astype(np.int8),
-                              "cfg": cv.astype(np.int64), "src": np.zeros(len(s), np.int8)})
+                              "cfg": cv.astype(np.int64), "src": np.zeros(len(s), np.int16)})
     if cfg.ard_support:
-        post = post._replace(support=_support_reference(cfg, data, built, ds_val, E.bn[ok], s, cv, log))
+        post = post._replace(support=_support_reference(cfg, data, built, ds_val, E.bn[ok], s, cv, gv, log))
     log(f"ARD: {G} groups over {len(np.unique(cv))} held-out configs ({len(s)} atoms); lam_rms "
         f"{np.array2string(tab.lam_rms, precision=3)}, q {np.array2string(tab.q, precision=3)}"
         + (f"; merged {tab.merged}" if tab.merged else ""))

@@ -294,7 +294,7 @@ def cmd_calibrate(a):
     from ase import Atoms
 
     from .calc.point import ACECalculator
-    from .fit.ard import ARDPosterior
+    from .fit.ard import ARDPosterior, conformal_scores
     from .fit.conformal import group_scales
     post = ARDPosterior.load(a.posterior)
     if post.group_table is None or post.cal is None:
@@ -323,11 +323,7 @@ def cmd_calibrate(a):
             ok = np.isfinite(v) & (v > 0)
             if not ok.any():
                 continue
-            if post.force_shape == "aniso":
-                M = V[ok] + post.eps * (v[ok] / 3)[:, None, None] * np.eye(3)
-                s = np.sqrt(np.einsum("na,na->n", e[ok], np.linalg.solve(M, e[ok][:, :, None])[:, :, 0]))
-            else:
-                s = np.sqrt(np.sum(e[ok] ** 2, 1) / (v[ok] / 3))
+            s = conformal_scores(e[ok], V[ok], post.force_shape, post.eps)
             s_u.append(s); g_u.append(g[ok]); c_u.append(np.full(int(ok.sum()), ci))
             if want_support:
                 X, Z = calc.support_descriptors(at)
@@ -363,8 +359,9 @@ def cmd_calibrate(a):
     tab = dataclasses.replace(tab, sources=sources)
     support = None
     if want_support:
-        support = _recalibrated_support(post.support, cal, keep_old, np.concatenate(X_u), np.concatenate(Z_u),
-                                        s_u, c_u, mode)
+        from .fit.support import recalibrate_support
+        support = recalibrate_support(post.support, mode, u_cfg, n_min, np.concatenate(X_u),
+                                      np.concatenate(Z_u), s_u, c_u, g_u)
     new = post._replace(group_table=tab.to_dict(),
                         cal={"scores": S.astype(np.float32), "groups": Gg.astype(np.int8),
                              "cfg": Cc.astype(np.int64), "src": Ss.astype(np.int8)},
@@ -373,39 +370,6 @@ def cmd_calibrate(a):
     _print_group_table(tab)
     print(f"wrote recalibrated posterior ({mode}, {len(s_u)} atoms in {len(np.unique(c_u))} configs) to {a.out}")
     return 0
-
-
-def _recalibrated_support(ref, cal, keep_old, X, Z, s_u, c_u, mode, max_atoms=50000, seed=0):
-    """The support reference on the pooled calibration atoms, or None (with a notice) when it cannot be
-    rebuilt consistently.  The stored reference holds a sample of the T_val atoms (descriptors, scores, local
-    configuration ids) but not their groups, so with a partial per-group replace each stored point is matched
-    to its calibration record by its (float32) score to learn its group (a stored point whose score also
-    belongs to a replaced-group record is dropped; an unmatched one drops the reference).  --replace needs no match (U only); --append keeps every stored point."""
-    from .fit.support import extend_support
-    keep, n_amb = {}, 0
-    if mode == "per-group":
-        order = np.argsort(cal["scores"], kind="stable")
-        ss = np.asarray(cal["scores"], np.float32)[order]
-        for z, r in ref.items():
-            if z == "pca":
-                continue
-            s32 = np.asarray(r["s"], np.float32)
-            lo, hi = np.searchsorted(ss, s32, "left"), np.searchsorted(ss, s32, "right")
-            if (hi == lo).any():
-                print("note: support reference dropped: stored points do not match the calibration scores")
-                return None
-            kk = np.zeros(len(s32), bool)
-            for i, (l, h) in enumerate(zip(lo, hi)):
-                st = keep_old[order[l:h]]
-                kk[i] = st.min()                     # kept only if every equal-score record is kept
-                n_amb += int(st.min() != st.max())
-            keep[z] = kk
-    elif mode == "replace":
-        keep = {z: np.zeros(len(r["s"]), bool) for z, r in ref.items() if z != "pca"}
-    if n_amb:
-        print(f"note: support reference: {n_amb} stored points shared a score with a replaced-group record "
-              f"and were dropped")
-    return extend_support(ref, keep, X, Z, s_u, c_u, max_atoms, seed)
 
 
 def cmd_basis(a):

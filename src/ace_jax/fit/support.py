@@ -35,7 +35,7 @@ def _fit_subset(g, cap, rng):
     return np.sort(np.concatenate(keep))
 
 
-def build_support(pca, X, Z, scores, cfg, max_atoms, seed, fit_max=10000):
+def build_support(pca, X, Z, scores, cfg, max_atoms, seed, fit_max=10000, grp=None):
     rng = np.random.default_rng(seed)
     ref = {"pca": pca}
     for z in np.unique(Z):
@@ -51,6 +51,8 @@ def build_support(pca, X, Z, scores, cfg, max_atoms, seed, fit_max=10000):
         _, inv, cnt = np.unique(cfg[m], return_inverse=True, return_counts=True)
         ref[int(z)] = {"Xc": _proj(pca, z, X[m]), "s": np.asarray(scores, float)[m],
                        "m": 1.0 / cnt[inv], "g": inv, "f": _fit_subset(inv, fit_max, rng)}
+        if grp is not None:                          # conformal group of each stored point (for calibrate)
+            ref[int(z)]["grp"] = np.asarray(grp)[m].astype(np.int64)
     return ref
 
 
@@ -162,6 +164,8 @@ def flatten_support(ref, dtype=np.float32):
         for k in ("Xc", "s", "m"):
             out[f"support_{z}_{k}"] = np.asarray(r[k], dtype)
         out[f"support_{z}_g"] = np.asarray(r["g"], np.int64)
+        if "grp" in r:
+            out[f"support_{z}_grp"] = np.asarray(r["grp"], np.int64)
         if "f" in r:
             out[f"support_{z}_f"] = np.asarray(r["f"], np.int64)
     return out
@@ -175,28 +179,29 @@ def unflatten_support(flat):
         if p[0] == "pca":
             ref["pca"].setdefault(int(p[1]), {})[p[2]] = np.asarray(v, np.float64)
         else:
-            ref.setdefault(int(p[0]), {})[p[1]] = np.asarray(v) if p[1] in ("g", "f") else np.asarray(v, np.float64)
+            ref.setdefault(int(p[0]), {})[p[1]] = np.asarray(v) if p[1] in ("g", "f", "grp") else np.asarray(v, np.float64)
     ref["pca"] = {z: (d["mu"], d["sd"], d["W"]) for z, d in ref["pca"].items()}
     return ref
 
 
-def extend_support(ref, keep, X, Z, scores, cfg, max_atoms, seed, fit_max=10000):
+def extend_support(ref, keep, X, Z, scores, cfg, max_atoms, seed, grp, fit_max=10000):
     """Rebuild a support reference on (kept stored points) + new atoms under the SAME per-species PCA.
 
-    keep[z]: boolean mask over ref[z]'s stored points to retain (None: all, absent species: all).
-    X (n, D) raw descriptors, Z, scores, cfg of the new atoms.  Per species the pooled configurations are
-    capped at max_atoms atoms (whole configurations, random order), masses re-derived as 1/(atoms per
-    configuration), and the classifier-fit subset redrawn.  Scores are rounded through float32, as a
-    saved reference holds them."""
+    keep[z]: boolean mask over ref[z]'s stored points to retain (None/absent: all).
+    X (n, D) raw descriptors, Z, scores, cfg, grp (conformal group) of the new atoms.  Per species the pooled
+    configurations are capped at max_atoms atoms (whole configurations, random order), masses re-derived as
+    1/(atoms per configuration), and the classifier-fit subset redrawn.  Scores are rounded through float32,
+    as a saved reference holds them."""
     rng = np.random.default_rng(seed)
     out = {"pca": ref["pca"]}
-    Z, cfg = np.asarray(Z), np.asarray(cfg)
+    Z, cfg, grp = np.asarray(Z), np.asarray(cfg), np.asarray(grp)
     for z in sorted(k for k in ref if k != "pca"):
         r = ref[z]
         k = np.ones(len(r["s"]), bool) if keep.get(z) is None else np.asarray(keep[z], bool)
         m = np.flatnonzero(Z == z)
         Xc = np.r_[r["Xc"][k], _proj(ref["pca"], z, np.asarray(X)[m])]
         s = np.r_[r["s"][k], np.asarray(scores, np.float32).astype(float)[m]]
+        gr = np.r_[np.asarray(r["grp"])[k], grp[m]].astype(np.int64)
         g_old = np.asarray(r["g"])[k]
         _, g_new = np.unique(cfg[m], return_inverse=True)
         g = np.r_[g_old, g_new + (g_old.max() + 1 if len(g_old) else 0)].astype(np.int64)
@@ -210,5 +215,24 @@ def extend_support(ref, keep, X, Z, scores, cfg, max_atoms, seed, fit_max=10000)
             sel.append(mc); n += len(mc)
         sel = np.sort(np.concatenate(sel))
         _, inv, cnt = np.unique(g[sel], return_inverse=True, return_counts=True)
-        out[z] = {"Xc": Xc[sel], "s": s[sel], "m": 1.0 / cnt[inv], "g": inv, "f": _fit_subset(inv, fit_max, rng)}
+        out[z] = {"Xc": Xc[sel], "s": s[sel], "m": 1.0 / cnt[inv], "g": inv, "grp": gr[sel],
+                  "f": _fit_subset(inv, fit_max, rng)}
     return out
+
+
+def keep_for_mode(ref, mode, u_cfg, n_min):
+    """Boolean keep mask per species over the stored support points: replace -> none; append -> all;
+    per-group -> points whose conformal group has fewer than n_min U configurations (u_cfg[g])."""
+    return {z: (np.zeros(len(r["s"]), bool) if mode == "replace" else
+                np.ones(len(r["s"]), bool) if mode == "append" else
+                np.asarray(u_cfg)[np.asarray(r["grp"])] < n_min)
+            for z, r in ref.items() if z != "pca"}
+
+
+def recalibrate_support(ref, mode, u_cfg, n_min, X, Z, scores, cfg, grp, max_atoms=50000, seed=0):
+    """The support reference on the pooled calibration atoms (stored points kept per `keep_for_mode`, plus
+    U); None, with a notice, when the stored reference has no per-point group labels."""
+    if any("grp" not in r for z, r in ref.items() if z != "pca"):
+        print("note: support reference dropped: it stores no per-point conformal groups (refit with --uq ard)")
+        return None
+    return extend_support(ref, keep_for_mode(ref, mode, u_cfg, n_min), X, Z, scores, cfg, max_atoms, seed, grp)

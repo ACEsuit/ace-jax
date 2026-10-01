@@ -414,19 +414,49 @@ def test_fit_flags_map_to_config():
 
 
 def test_calibrate_per_group_keeps_support_consistent(fitted, calib_set, tmp_path):
+    """Stored (T_val) support points survive exactly when their conformal group is not replaced."""
     from ace_jax.cli import main
     from ace_jax.fit.ard import ARDPosterior
     base = ARDPosterior.load(fitted / "posterior.npz")
     assert main(_calib_args(fitted, calib_set, ["--out", str(tmp_path / "d.npz")])) == 0
     new = ARDPosterior.load(tmp_path / "d.npz")
-    assert new.support is not None                      # rebuilt (matched by score), not stale and not dropped
-    for z in (z for z in base.support if z != "pca"):
-        assert len(new.support[z]["s"]) >= len(calib_set_atoms(calib_set, z))
+    assert new.support is not None
+    t = new.group_table
+    replaced = np.array([nc >= t["n_min"] for nc in t["n_cfg_cal"]])
+    assert replaced.any()
+    zs = [z for z in base.support if z != "pca"]
+    grp = lambda ref: np.concatenate([ref[z]["grp"] for z in zs])
+    n_old_kept = int((~replaced[grp(base.support)]).sum())
+    u_in_kept = int(((new.cal["src"] > 0) & ~replaced[new.cal["groups"].astype(int)]).sum())
+    gn = grp(new.support)
+    assert int((~replaced[gn]).sum()) == n_old_kept + u_in_kept          # stored points of kept groups, all of them
+    n_u_replaced = int(((new.cal["src"] > 0) & replaced[new.cal["groups"].astype(int)]).sum())
+    assert int(replaced[gn].sum()) == n_u_replaced                        # replaced groups hold U points only
 
 
-def calib_set_atoms(path, z):
-    from ase.io import read
-    return [x for a in read(path, ":") for x in a.numbers if x == z]
+def test_keep_for_mode_two_groups():
+    from ace_jax.fit.support import fit_pca, build_support, recalibrate_support
+    rng = np.random.default_rng(0)
+    X = rng.normal(size=(120, 4))
+    Z = np.zeros(120, int)
+    grp = np.arange(120) % 3                                              # groups 0, 1, 2
+    ref = build_support(fit_pca({0: X}), X, Z, rng.random(120), np.arange(120) // 4, 1000, 0, grp=grp)
+    u_cfg = np.array([25, 3, 0])                                          # n_min 20: only group 0 is replaced
+    Xu = rng.normal(size=(10, 4))
+    new = recalibrate_support(ref, "per-group", u_cfg, 20, Xu, np.zeros(10, int), rng.random(10),
+                              np.arange(10), np.zeros(10, int))
+    assert (new[0]["grp"] == 0).sum() == 10                               # group 0: U only
+    assert (new[0]["grp"] == 1).sum() == (grp == 1).sum() and (new[0]["grp"] == 2).sum() == (grp == 2).sum()
+    assert len(new[0]["g"]) == len(new[0]["m"]) == len(new[0]["s"]) == len(new[0]["Xc"])
+    app = recalibrate_support(ref, "append", u_cfg, 20, Xu, np.zeros(10, int), rng.random(10),
+                              np.arange(10), np.zeros(10, int))
+    assert len(app[0]["s"]) == 130
+    rep = recalibrate_support(ref, "replace", u_cfg, 20, Xu, np.zeros(10, int), rng.random(10),
+                              np.arange(10), np.zeros(10, int))
+    assert len(rep[0]["s"]) == 10
+    legacy = {z: {k: v for k, v in r.items() if k != "grp"} if z != "pca" else r for z, r in ref.items()}
+    assert recalibrate_support(legacy, "per-group", u_cfg, 20, Xu, np.zeros(10, int), rng.random(10),
+                               np.arange(10), np.zeros(10, int)) is None
 
 
 def test_aniso_fit_eval_and_calibrate(tmp_path_factory, calib_set):

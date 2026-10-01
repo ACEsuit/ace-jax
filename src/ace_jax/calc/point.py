@@ -454,10 +454,8 @@ class ACECalculator(Calculator):
         forces_group (N,) int, forces_support (dict).  Calibrated ARD std (lam x the shape, or kappa x
         the posterior std for --ard-variance kappa / schema 1) from node-chunked design rows of the
         full fit model; support (the expensive one) is computed only when requested."""
-        import jax
 
         from ..fit.ard import _NEED3
-        from ..fit.data import Config, build_dataset
         from ..fit.rows import chunked_rows_fn
         post = self.posterior
         if "forces_q_mahal" in which and post.force_shape != "aniso":
@@ -471,11 +469,7 @@ class ACECalculator(Calculator):
             raise ValueError(_NEED3)
         at = self.atoms
         n = len(at)
-        c = Config(at.get_positions(), at.get_atomic_numbers(), at.get_cell().array, at.get_pbc(),
-                   None, None, None, 1.0, 1.0, 1.0)
-        ds = build_dataset([c], self.meta, np.zeros(len(self.meta["elements"])), 1)
-        b = jax.tree.map(lambda a: a[0], ds)
-        live = np.asarray(b.node_mask)
+        ds, b, live = self._one_config_dataset(at)
         groups = (np.asarray(post.groups_of(b))[live].astype(np.int64)
                   if post.group_consts is not None else None)
         out = {}
@@ -518,29 +512,33 @@ class ACECalculator(Calculator):
     def _support(self, ds, live, b):
         """Covariate-shift support of each atom against the posterior's reference (fit/support.py), from
         the same site_features descriptors the fit stage used (they depend on the model only)."""
-        from ..fit.inducing import site_features
         from ..fit.support import support_check
         post = self.posterior
-        with highest_precision():
-            X = np.asarray(site_features(self._fit_model, self._fit_cfg, ds)[0])[0]
         alpha = float(np.asarray(post.group_table["alpha"]))
-        return support_check(post.support, X[live], np.asarray(b.node_z)[live], 1 - alpha)
+        return support_check(post.support, self._site_X(ds, b), np.asarray(b.node_z)[live], 1 - alpha)
 
-    def support_descriptors(self, atoms):
-        """(X, Z) site descriptors (live atoms, the same site_features the support reference uses) and
-        atomic numbers of atoms; for `aj calibrate` to rebuild the support reference."""
+    def _one_config_dataset(self, at):
+        """(ds, b, live): the one-config dataset of atoms, its batch, and the live-node mask."""
         import jax
 
         from ..fit.data import Config, build_dataset
-        from ..fit.inducing import site_features
-        c = Config(atoms.get_positions(), atoms.get_atomic_numbers(), atoms.get_cell().array, atoms.get_pbc(),
+        c = Config(at.get_positions(), at.get_atomic_numbers(), at.get_cell().array, at.get_pbc(),
                    None, None, None, 1.0, 1.0, 1.0)
         ds = build_dataset([c], self.meta, np.zeros(len(self.meta["elements"])), 1)
         b = jax.tree.map(lambda a: a[0], ds)
+        return ds, b, np.asarray(b.node_mask)
+
+    def _site_X(self, ds, b):
+        """Live-atom site descriptors (the ones the support reference uses) of one-config dataset ds."""
+        from ..fit.inducing import site_features
         live = np.asarray(b.node_mask)
         with highest_precision():
-            X = np.asarray(site_features(self._fit_model, self._fit_cfg, ds)[0])[0]
-        return X[live], np.asarray(b.node_z)[live]
+            return np.asarray(site_features(self._fit_model, self._fit_cfg, ds)[0])[0][live]
+
+    def support_descriptors(self, atoms):
+        """(X, Z) site descriptors and atomic numbers of the live atoms; for `aj calibrate`."""
+        ds, b, live = self._one_config_dataset(atoms)
+        return self._site_X(ds, b), np.asarray(b.node_z)[live]
 
     def _native_dense(self, pos, cell, pbc, n, dtype):
         """The dense graph straight from matscipy_neighbours' neighbour_matrix,
