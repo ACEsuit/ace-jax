@@ -55,7 +55,8 @@ Pure Python, no deps.
 ## Architecture (three layers)
 
 1. **ET fork** — [jameskermode/EquivariantTensors.jl](https://github.com/jameskermode/EquivariantTensors.jl),
-   branch `jk/trim-safe-coupling`, on ACEsuit `main` (v0.5.1). It adds a
+   branch `jk/trim-coupling`: four linear commits on ACEsuit `main` (v0.5.1), the
+   single proposed upstream PR. It adds a
    type-stable construction API with unchanged public behaviour:
    `symmetrisation_matrix(Val(L), mb_spec; ...)`, `O3.coupling_coeffs(Val(L),
    ll::Vector{Int}, nn::Vector{Int}; ...)` (correlation order resolved through a
@@ -63,8 +64,7 @@ Pure Python, no deps.
    `sparse_equivariant_tensor_spec(Val(L); ...)` (the layer-free half of
    `sparse_equivariant_tensor`), plus trim-safety fixes (`basis`/`hashfcn`
    argument specialisation, concrete `SetLl` containers, a trim-safe sparse
-   transpose and UMFPACK `L'`/`p`/`Rs` extraction in `solver_inner`), merged with
-   `jk/dense-nullspace` (upstream main + one commit, the proposed upstream PR):
+   transpose and UMFPACK `L'`/`p`/`Rs` extraction in `solver_inner`), and
    `nullspace_solver = :dense`, a LAPACK LU for the last block's kernel, which the
    shim always selects, so UMFPACK is never called. It spans the same coupled space
    as upstream's default; single B rows can differ by a sign and a degenerate nnll

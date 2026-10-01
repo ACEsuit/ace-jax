@@ -13,6 +13,7 @@ from ..stats import assemble_statistics, linear_statistics, residual_statistics
 
 class Objective(NamedTuple):
     lik: object; vg: object; stats: object; host_cache: object; prior_mu: object; timings: dict
+    lin: object = None           # the cached theta-independent linear Stats (shared with `stats`)
 
 
 def _pad_to_multiple(ds, n):
@@ -43,7 +44,7 @@ def make_objective(cfg, d, b):
             v, g = lik.value_and_grad(a); pv, pg = prior_vg(a)
             return v + pv, g + pg
         stats = lambda th: assemble_statistics(lik.lin, lik._residual_stats(to_array(th)))
-        host = lik
+        host, lin = lik, lik.lin
     else:
         mesh = None
         if cfg.devices > 1:
@@ -63,7 +64,7 @@ def make_objective(cfg, d, b):
         stats = lambda th: assemble_statistics(lin, residual_statistics(th, prob.spec, prob.model,
                                                                         prob.ind, prob.cfg, d.ds_train))
         host = None
-    return Objective(lik, vg, stats, host, prob.prior.mu, {"stats_once": time.time() - t})
+    return Objective(lik, vg, stats, host, prob.prior.mu, {"stats_once": time.time() - t}, lin)
 
 
 def release():

@@ -66,7 +66,7 @@ def _prior_block(prob, theta):
     blockdiag(diag(gamma^2/sigma_c^2), K_MM), so R0 = blockdiag(diag(gamma/sigma_c),
     chol(K_MM)^T) -- upper triangular (both blocks are), so it also seeds the
     streaming QR.  M = 0 recovers diag(gamma/sigma_c)."""
-    L, M = prob.cfg.len_basis, prob.ind.XM.shape[0]
+    L, M = prob.gamma.shape[0], prob.ind.XM.shape[0]
     sc = jnp.exp(theta.log_sigma_c)
     R0 = jnp.zeros((L + M, L + M)).at[jnp.arange(L), jnp.arange(L)].set(prob.gamma / sc)
     if M > 0:

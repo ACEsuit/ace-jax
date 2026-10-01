@@ -19,12 +19,12 @@ class Problem(NamedTuple):
     model: object
     ind: object
     cfg: object
-    gamma: jnp.ndarray    # (len_basis,)
+    gamma: jnp.ndarray    # (len_basis,), or wider when extra linear columns are appended
     prior: object
 
 
 def prior_precision(theta, prob):
-    L = prob.cfg.len_basis
+    L = prob.gamma.shape[0]
     M = prob.ind.XM.shape[0]
     sc2 = jnp.exp(2.0 * theta.log_sigma_c)
     lin = prob.gamma ** 2 / sc2

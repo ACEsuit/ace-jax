@@ -12,7 +12,9 @@ design is in `docs/benchmark-scaling-spec.md`, and how to reproduce it is in
   - ace-jax evaluating PACE `.yace` files (`PACEModel`);
   - ace-jax evaluating linear ACE models (`ACEModel`);
   - ML-PACE, which runs the same `.yace` files;
-  - MACE: MP-0b2 small, medium and large, plus MH-1 on its `omat_pbe` head.
+  - MACE: MP-0b2 small, medium and large, plus MH-1 on its `omat_pbe` head;
+  - ace-jax on learned-radial proxies of the medium linear ACE models,
+    splined as deployed and kept analytic (below).
 - **Modes:**
   - **standalone** is one ASE calculator call (energy, forces and stress,
     neighbour list included), timed as the median of repeated calls;
@@ -28,9 +30,25 @@ design is in `docs/benchmark-scaling-spec.md`, and how to reproduce it is in
 - **Parity gate:** each host's parity checks passed before any timing ran:
   ace-jax against ML-PACE (gate `mlpace`), ace-jax standalone against
   ace-jax in LAMMPS in both bundle layouts (gate `acejax`), and MACE against
-  Symmetrix (gate `mace`).
+  Symmetrix (gate `mace`). The learned-radial lines are gated on the medium
+  models: standalone against LAMMPS (gate `acejax`), and splined against
+  analytic (gate `spline`: |dE|/|E| <= 1e-9, max|dF| / max|F| <= 3e-8, the
+  splining accuracy at 1e-10 rather than roundoff).
 
 {{parity}}
+
+**Learned radials.** A learned radial (`fit/radial_learn.py`) lives on the
+analytic branch, a per-edge polynomial recursion that costs more than the
+stock models' spline gather and loses the species-compact lean form;
+`lean`'s default (`spline_tol="auto"`) splines it back at 1e-10. The
+`acejax-ace-learned` (splined, as deployed) and `acejax-ace-analytic`
+(`spline_tol=None`, exact) lines measure both, beside the stock linear ACE
+line. They are learned-radial *proxies*, not fitted radials: the medium ACE
+models projected onto n_q = 12 polynomials (`to_analytic`), with the active
+rows of the radial weights perturbed by 10% (seed 0) to mimic learning while
+keeping the per-species zero pattern that learning preserves
+(`models.py ace-learned`). Medium models only. The method and the
+same-container measurements are in `docs/learned-radial-splining.md`.
 
 ## Findings
 

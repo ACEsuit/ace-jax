@@ -128,17 +128,19 @@ def lbfgs_loop(f, x0, *, steps, args=(), statics=(), tol=1e-6, patience=3, memor
     return x_best, f_best, trace, "steps"
 
 
-def theta_map_linear(prob, ds, W, *, steps=300, seed=0, init=None, return_stats=False):
+def theta_map_linear(prob, ds, W, *, steps=300, seed=0, init=None, return_stats=False, lin=None):
     """theta-MAP of the M = 0 LML for the model with radials W (one streaming
     pass for the statistics, then run_map on the cached Gram).  init: optional
-    theta array to warm-start from.  Returns the theta array; with
+    theta array to warm-start from.  `lin`: the statistics of ds if the caller
+    already has them (then W is unused and may be None).  Returns the theta array; with
     return_stats=True returns (a, lin, diag): `lin` the linear statistics of
     ds it streamed (so a caller can reuse them without another pass) and
     `diag` a MAP convergence diagnostic computed on the cached `lin` (no extra
     pass): the final LML, the change in the SVI loss (-log posterior) over the
     last min(10, steps) steps, and the norm of the log-posterior gradient at
     the returned theta."""
-    lin = linear_statistics(with_radial(prob.model, W), prob.cfg, ds)
+    if lin is None:
+        lin = linear_statistics(with_radial(prob.model, W), prob.cfg, ds)
     lml = jax.jit(lambda a: log_marginal_likelihood(from_array(a), lin, prob))
     h, losses = run_map(lml, prob.prior, steps=steps, seed=seed, return_losses=True,
                         init=None if init is None else from_array(jnp.asarray(init)))
@@ -236,11 +238,31 @@ def relative_lambda_gap(lam_gap, r0, n_active):
     return float(lam_gap) * r0 / n_active
 
 
+_I_SIGMA_E = None
+
+
+def _learn_theta(a, mult):
+    """theta array for the radial objective: log_sigma_E shifted by log(mult)."""
+    global _I_SIGMA_E
+    if mult == 1.0:
+        return a
+    if _I_SIGMA_E is None:
+        from .hypers import Hypers
+        _I_SIGMA_E = Hypers._fields.index("log_sigma_E")
+    return jnp.asarray(a).at[_I_SIGMA_E].add(float(np.log(mult)))
+
+
 def learn_radial(prob, ds, W0, *, theta0=None, profile=True, lam_rough=0.0, rough_weights=None,
                  lam_spec=0.0, spec_p=4.0, lam_gap=0.0, steps=200, reprofile_every=10, tol=1e-6,
                  patience=3, map_steps=300, n_prior=None, seed=0, log=None, Q=None, D2=None,
-                 r0=None, U=None):
+                 r0=None, U=None, learn_sigma_e_mult=1.0):
     """VarPro-learn the tensor radials of prob.model (analytic branch, M = 0).
+
+    learn_sigma_e_mult scales sigma_E inside the radial objective only (after
+    every theta re-MAP): > 1 learns the radials under a force-heavier weighting
+    than the evidence picks. Everything downstream (gate, final linear fit) keeps
+    the plain MAP theta. With a multiplier != 1, r0 (the reference scale of the
+    relative priors) is taken at the scaled theta.
 
     Minimises  r(W; theta) + lam * roughness(W) + lam_spec_abs * spectral_penalty(W, W_ref)
               + lam_gap_abs * gap_penalty(W, W_ref, U)
@@ -306,10 +328,12 @@ def learn_radial(prob, ds, W0, *, theta0=None, profile=True, lam_rough=0.0, roug
         a, lin0, _ = theta_map_linear(prob, ds, V, steps=map_steps, seed=seed, return_stats=True)
     else:
         raise ValueError("learn_radial: profile=False needs theta0")
-    if r0 is None:
+    if learn_sigma_e_mult <= 0:
+        raise ValueError(f"learn_sigma_e_mult must be > 0, got {learn_sigma_e_mult}")
+    if r0 is None or learn_sigma_e_mult != 1.0:
         if lin0 is None:
             lin0 = linear_statistics(with_radial(prob.model, V), prob.cfg, ds)
-        r0 = projected_residual_from_stats(from_array(a), lin0, prob.gamma)
+        r0 = projected_residual_from_stats(from_array(_learn_theta(a, learn_sigma_e_mult)), lin0, prob.gamma)
     r0 = float(r0)
     rough0 = float(roughness(V, D2, wn))
     lam = relative_lambda(lam_rough, r0, rough0)
@@ -319,12 +343,13 @@ def learn_radial(prob, ds, W0, *, theta0=None, profile=True, lam_rough=0.0, roug
     info = {"trace": [], "reasons": [], "theta": [np.asarray(a)], "lam_abs": lam,
             "lam_rough": float(lam_rough), "r0": r0, "rough0": rough0, "steps": 0,
             "round_lengths": [], "lam_spec": float(lam_spec), "lam_spec_abs": lam_spec_abs,
-            "spec_p": float(spec_p), "lam_gap": float(lam_gap), "lam_gap_abs": lam_gap_abs}
+            "spec_p": float(spec_p), "lam_gap": float(lam_gap), "lam_gap_abs": lam_gap_abs,
+            "learn_sigma_e_mult": float(learn_sigma_e_mult)}
     if log is not None:
         log(f"learn_radial: lam_rough={float(lam_rough):g} lam_abs={lam:.6e} "
             f"lam_spec={float(lam_spec):g} lam_spec_abs={lam_spec_abs:.6e} spec_p={float(spec_p):g} "
             f"lam_gap={float(lam_gap):g} lam_gap_abs={lam_gap_abs:.6e} "
-            f"r0={r0:.6e} profile={bool(profile)}")
+            f"r0={r0:.6e} profile={bool(profile)} learn_sigma_e_mult={float(learn_sigma_e_mult):g}")
     lam = jnp.asarray(lam, jnp.float64)
     lam_spec_abs = jnp.asarray(lam_spec_abs, jnp.float64)
     lam_gap_abs = jnp.asarray(lam_gap_abs, jnp.float64)
@@ -340,7 +365,8 @@ def learn_radial(prob, ds, W0, *, theta0=None, profile=True, lam_rough=0.0, roug
         # `args` change VALUE each round (a is re-profiled) but not shape/dtype.
         V, f_best, trace, reason = lbfgs_loop(
             _objective, V, steps=n, tol=tol, patience=patience,
-            args=(a, prob.model, ds, prob.gamma, Q, active, D2, wn, lam, W_ref, sw, lam_spec_abs,
+            args=(_learn_theta(a, learn_sigma_e_mult), prob.model, ds, prob.gamma, Q, active, D2, wn, lam,
+                  W_ref, sw, lam_spec_abs,
                   U, lam_gap_abs),
             statics=(prob.cfg,))
         info["trace"].extend(trace)
@@ -410,8 +436,9 @@ def holdout_score(W, a_fit, a_norm, prob, ds_fit, ds_val, *, lin_fit=None, lin_v
     linear statistics -- no design matrix.  A type with no rows in ds_val is
     skipped.  lin_fit / lin_val: the statistics of ds_fit / ds_val at W if the
     caller already has them (each saves one streaming pass).  With
-    return_readout=True returns (score, c)."""
-    model = with_radial(prob.model, W)
+    return_readout=True returns (score, c); W may be None when both statistics are given."""
+    if lin_fit is None or lin_val is None:
+        model = with_radial(prob.model, W)
     if lin_fit is None:
         lin_fit = linear_statistics(model, prob.cfg, ds_fit)
     if lin_val is None:
@@ -571,7 +598,8 @@ def save_result(out_dir, W, info, *, src_npz=None, model=None, readout=None):
     by fit_radial; also saved as readout.npy).  The source npz's WB/Wpair
     belong to the old radials, so writing model.npz without a readout is
     refused rather than silently stale.  info["readout"] is kept out of the
-    JSON (it is len_basis long)."""
+    JSON (it is len_basis long).  model.npz is marked meta "radial_learned"
+    (so `lean` splines it by default) unless info["selected"] == "init"."""
     if readout is None:
         readout = info.get("readout")
     if src_npz is not None:
@@ -589,4 +617,7 @@ def save_result(out_dir, W, info, *, src_npz=None, model=None, readout=None):
         np.save(out / "readout.npy", np.asarray(readout))
     if src_npz is not None:
         from ..construct.export import patch_radial_npz
-        patch_radial_npz(src_npz, out / "model.npz", with_radial(model, W), readout=readout)
+        # the held-out gate may keep the initial radial: then nothing was learned
+        learned = info.get("selected") != "init"
+        patch_radial_npz(src_npz, out / "model.npz", with_radial(model, W, learned=learned),
+                         readout=readout)

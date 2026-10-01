@@ -56,7 +56,17 @@ def _add_fit_args(p):
     p.add_argument("--nuts-warmup", type=int, default=500); p.add_argument("--nuts-samples", type=int, default=500)
     p.add_argument("--nuts-chains", type=int, default=4); p.add_argument("--r0", type=float, required=True,
                    help="typical nearest-neighbour distance (A); centres the GP hyperprior")
-    p.add_argument("--uq", choices=["blr", "pops"], default="blr", help="pops: linear arm (--m-per-species 0)")
+    p.add_argument("--uq", choices=["blr", "pops", "ard"], default="blr",
+                   help="pops/ard: linear arm (--m-per-species 0); ard = ARD posterior with a "
+                        "calibrated per-atom forces_std (see --ard-variance), writes posterior.npz")
+    p.add_argument("--ard-mode", choices=["joint", "sequential"], default="joint",
+                   help="joint: noise + ARD scales by evidence; sequential: ARD only, one Gram (low memory)")
+    p.add_argument("--ard-variance", choices=["sandwich", "kappa"], default="sandwich",
+                   help="ARD force variance: sandwich = configuration-clustered misspecification-robust "
+                        "(scaled by lam on the train hold-out); kappa = kappa^2 x the posterior variance")
+    p.add_argument("--ard-val-frac", type=float, default=0.2,
+                   help="train fraction held out to fit the force-variance scale: lam (sandwich) "
+                        "and kappa")
     p.add_argument("--pops-ridge", default="auto")
     p.add_argument("--seed", type=int, default=0); p.add_argument("--out", required=True)
     p.add_argument("--model-draws", type=int, default=1,
@@ -100,7 +110,8 @@ def _fit_config(a):
         lml=a.lml, devices=a.devices, opt=a.opt, map_steps=a.map_steps, map_restarts=a.map_restarts,
         init=json.load(open(a.init)) if a.init else None, rungs=rungs, laplace=a.laplace,
         n_draws=a.n_draws, vi_steps=a.vi_steps, nuts_warmup=a.nuts_warmup, nuts_samples=a.nuts_samples,
-        nuts_chains=a.nuts_chains, uq=a.uq, predict_train=False, pops_ridge=ridge,
+        nuts_chains=a.nuts_chains, uq=a.uq, ard_mode=a.ard_mode, ard_variance=a.ard_variance, ard_val_frac=a.ard_val_frac,
+        predict_train=False, pops_ridge=ridge,
         predict_stats="recompute", pf_samples=16, pf_maxiter=15)
     return cfg.validate()
 
@@ -124,18 +135,25 @@ def cmd_eval(a):
     keys = dict(energy_key=a.energy_key, force_key=a.force_key, virial_key=a.virial_key)
     configs = load_configs(a.data, **keys)
     gp = str(a.model).endswith(".npz") and "gp_json" in np.load(a.model).files   # gp_model.npz from `fit`
-    if gp:
+    ard = getattr(a, "posterior", None) is not None
+    if gp and ard:
+        raise ValueError("--posterior is for a linear model.npz from `fit --uq ard`, not a gp_model.npz")
+    if gp or ard:
         from ase import Atoms
-        from .calc.gp import GPCalculator
-        calc = GPCalculator.from_file(a.model)
+        if gp:
+            from .calc.gp import GPCalculator
+            calc = GPCalculator.from_file(a.model)
+        else:
+            from .calc.point import ACECalculator
+            calc = ACECalculator(a.model, posterior=a.posterior)
     else:
         model, meta, z = load(a.model)
         rcut = float(meta["rcut"])
     esq = ecnt = fsq = fcnt = 0.0
-    rows = []
+    rows, per_atom = [], []
     with highest_precision():
         for i, c in enumerate(configs):
-            if gp:
+            if gp or ard:
                 at = Atoms(numbers=c.numbers, positions=c.positions, cell=c.cell, pbc=c.pbc)
                 at.calc = calc
                 E, F = at.get_potential_energy(), at.get_forces()
@@ -150,10 +168,22 @@ def cmd_eval(a):
                          "energy_per_atom": E / nat, "fmax": float(np.abs(F).max())})
             if gp:
                 rows[-1]["energy_std"] = float(calc.results["energy_std"])
+            if ard:
+                s = np.asarray(calc.get_property("forces_std", at))   # on request: E/F reused
+                rows[-1]["fmax_std"] = float(s.max())
+                if getattr(a, "per_atom", None):
+                    out_at = Atoms(numbers=c.numbers, positions=c.positions, cell=c.cell, pbc=c.pbc)
+                    out_at.arrays["forces_pred"] = F
+                    out_at.arrays["forces_std"] = s
+                    per_atom.append(out_at)
             if c.energy is not None:
                 esq += ((E - c.energy) / nat) ** 2; ecnt += 1
             if c.forces is not None:
                 fsq += float(((F - c.forces) ** 2).sum()); fcnt += c.forces.size
+    if per_atom:
+        from ase.io import write as _write
+        _write(a.per_atom, per_atom)
+        print(f"wrote per-atom forces_std for {len(per_atom)} configs to {a.per_atom}")
     if a.out:
         with open(a.out, "w", newline="") as fh:
             w = csv.DictWriter(fh, fieldnames=list(rows[0])); w.writeheader(); w.writerows(rows)
@@ -207,6 +237,8 @@ def _parser():
     ev.add_argument("--energy-key", default="energy"); ev.add_argument("--force-key", default="forces")
     ev.add_argument("--virial-key", default="virial"); ev.add_argument("--forces", action="store_true")
     ev.add_argument("--out", default=None, help="CSV of per-config predictions (default: print head)")
+    ev.add_argument("--posterior", default=None, help="posterior.npz from `fit --uq ard`: adds forces_std")
+    ev.add_argument("--per-atom", default=None, help="extxyz with per-atom forces and forces_std arrays")
     con = sub.add_parser("basis", help="author a new ACE basis: a frozen model (seeded radial init) saved as .npz")
     con.add_argument("--elements", required=True, help="comma-separated Z numbers or symbols")
     con.add_argument("--order", type=int, required=True, help="correlation order")

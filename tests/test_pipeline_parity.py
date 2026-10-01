@@ -66,6 +66,8 @@ def test_driver_reproduces_golden(name, tmp_path):
     driver, argv = SCENARIOS[name]
     out = tmp_path / name; out.mkdir()
     cmd = cli_argv(out) if driver == "cli" else run_argv(argv, out)
-    env = dict(os.environ, JAX_ENABLE_X64="1", PYTHONPATH=str(ROOT))
+    # the goldens were recorded with ASE's neighbour list; another backend's
+    # order changes summation order, which the MAP optimisers amplify
+    env = dict(os.environ, JAX_ENABLE_X64="1", PYTHONPATH=str(ROOT), ACEJAX_NLIST="ase")
     subprocess.run(cmd, check=True, env=env, cwd=ROOT, capture_output=True)
     _compare(out, GOLD / name)

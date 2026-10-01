@@ -10,6 +10,10 @@ leave E, forces and the virial unchanged to roundoff (docs/ace-vs-pace-gap.md):
 
 Fitting never sees these: `load` returns the full model, and a pair-folded
 model refuses the basis methods (its pair channel is the readout, not Apair).
+
+`lean` also splines an analytic radial (`to_spline`), which is an
+approximation to its tolerance, not exact: here `lean_exact` (spline_tol=None)
+keeps it analytic, and tests/test_to_spline.py covers the splined form.
 """
 import dataclasses
 import pathlib
@@ -35,6 +39,11 @@ MODELS = {
     "Cantor_small": ROOT / "fixtures" / "ace_cantor5_small.npz",  # 5 species (bench Cantor small ACE)
 }
 TOL = 1e-12
+
+
+def lean_exact(m):
+    """`lean` without `to_spline`: every transform exact to roundoff."""
+    return lean(m, spline_tol=None)
 
 
 def _structure(meta, seed=0):
@@ -92,7 +101,7 @@ TRANSFORMS = {
     "pairfold": fold_pair,
     "prune+pairfold": lambda m: fold_pair(prune_columns(m)),
     "block": block_dense,
-    "lean": lean,
+    "lean": lean_exact,
 }
 
 
@@ -171,7 +180,7 @@ def test_lean_keeps_the_matmul_form(loaded):
     from ace_jax.eval.edge_model import with_edge_a_kind
     name, m, meta, at = loaded
     mm = with_edge_a_kind(m, "matmul")
-    m1 = lean(mm)
+    m1 = lean_exact(mm)
     assert m1.edge_a_kind == "matmul"
     assert m1.a_sel_r.shape[0] == m1.edge_a_widths()[0]
     _assert_same(_efv(m, meta, at, "sparse"), _efv(m1, meta, at, "sparse"))
@@ -345,7 +354,7 @@ def test_lean_is_exact_on_synthetic_variants(variant, layout):
     m, meta, _ = load(str(MODELS["sige_nofit"]))
     m = VARIANTS[variant](m)
     at = _structure(meta)
-    m1 = lean(m)
+    m1 = lean_exact(m)
     assert m1.energy_only
     if variant == "two_l_column":
         assert m1.blk == ()                                # the unblocked fallback
@@ -368,7 +377,9 @@ def test_lean_float32(layout):
 
 def test_authored_model_through_the_calculator(tmp_path, monkeypatch):
     """A Python-authored model (analytic R_nl and pair radial) with a nonzero
-    readout: ACECalculator(lean=True) equals lean=False."""
+    readout: ACECalculator(lean=True) equals lean=False to roundoff.  Its
+    radials are analytic but not learned, so the default lean keeps them
+    analytic (no splining)."""
     from test_python_authoring import _primed_cache
 
     from ace_jax.calc.point import ACECalculator
@@ -389,6 +400,7 @@ def test_authored_model_through_the_calculator(tmp_path, monkeypatch):
         a = at.copy()
         a.calc = ACECalculator(m, meta, lean=use, layout="dense")
         assert a.calc.eval_model.energy_only is use
+        assert a.calc.eval_model.radial_kind == "analytic" and a.calc.splined is None
         res.append((a.get_potential_energy(), a.get_forces(), a.get_stress()))
     (E0, F0, S0), (E1, F1, S1) = res
     assert abs(E1 - E0) <= TOL * max(1.0, abs(E0))

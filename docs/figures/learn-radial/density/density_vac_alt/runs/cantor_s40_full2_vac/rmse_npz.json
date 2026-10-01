@@ -1,0 +1,20 @@
+{
+ "/tmp/out_cantor_s40_m1_full2/model.npz": {
+  "E_rmse_meV_atom": 7.116633926309777,
+  "E_mae_meV_atom": 5.3645462185752395,
+  "F_rmse_meV_A": 146.63064890987496,
+  "F_mae_meV_A": 103.8632288229266
+ },
+ "/tmp/out_cantor_s40_m1_full2/density_lam_eta=0/model.npz": {
+  "E_rmse_meV_atom": 7.188182422773255,
+  "E_mae_meV_atom": 5.553892794911069,
+  "F_rmse_meV_A": 150.22411561234009,
+  "F_mae_meV_A": 106.19928832734493
+ },
+ "/tmp/out_cantor_s40_m1_full2/radials_only/model.npz": {
+  "E_rmse_meV_atom": 7.116633926309768,
+  "E_mae_meV_atom": 5.364546218575216,
+  "F_rmse_meV_A": 146.630648909875,
+  "F_mae_meV_A": 103.86322882292662
+ }
+}
