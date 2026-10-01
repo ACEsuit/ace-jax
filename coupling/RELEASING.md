@@ -25,17 +25,21 @@ library. ace-jax's dependency marker already limits the install to these platfor
    pin, whenever the coupling output can change (a new EquivariantTensors rev, a
    changed solver). The version is the cache's backend id, so a bump turns stale
    cache entries into misses.
-2. **Update the notices.** In `THIRD_PARTY_NOTICES.md`, update the Version column
+2. **Moving Julia** (even a patch release) means changing together the
+   Manifests' `julia_version` (re-resolve both), the Linux tarball `V=` and the
+   macOS `setup-julia` version in `coupling-wheels.yml`. `build.jl` refuses to build
+   when the running Julia differs from the Manifests.
+3. **Update the notices.** In `THIRD_PARTY_NOTICES.md`, update the Version column
    for any changed Manifest or Julia pin. `tests/test_coupling_notices.py` fails
    until it matches.
-3. **Tag the EquivariantTensors commit** pinned in `coupling/julia/Project.toml`, for
+4. **Tag the EquivariantTensors commit** pinned in `coupling/julia/Project.toml`, for
    example `ace-jax-coupling-v<version>` on the fork. `build_info()` records it, and
    the tag keeps it reachable if the branch is rebased.
-4. **Dry run on TestPyPI.** Actions → coupling-wheels → Run workflow, with
+5. **Dry run on TestPyPI.** Actions → coupling-wheels → Run workflow, with
    publish = `testpypi`. Then install it in a clean environment:
    `pip install -i https://test.pypi.org/simple/ ace-jax-coupling==<version>`, and
    check `ace_jax_coupling.build_info()`.
-5. **Release.** Push the tag `coupling-v<version>`. The publish job runs only after
+6. **Release.** Push the tag `coupling-v<version>`. The publish job runs only after
    all three wheels have passed their clean-environment tests and the ACEpotentials
    parity, and only if the tag equals the package version. PyPI versions cannot be
    re-uploaded, so a broken release needs a new version.
