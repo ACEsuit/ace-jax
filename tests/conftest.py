@@ -162,6 +162,33 @@ def tiny_linear_problem():
     return prob, ds
 
 
+def _orders(prob):
+    """Correlation order of each B column of the tiny problem's model (all body orders present)."""
+    import json
+    import numpy as np
+    z = np.load(FIXTURE_DIR / "si_fitted.npz")
+    return [len(x) for x in json.loads(bytes(z["meta_json"]).decode())["nnll"]]
+
+
+@pytest.fixture
+def ard_setup(tiny_linear_problem):
+    """(prob, ds, ev, h, post): the joint ARD evidence of the tiny problem and its posterior at h0."""
+    import numpy as np
+    from ace_jax.eval import highest_precision
+    from ace_jax.fit.ard import ARDEvidence, ard_posterior, ard_statistics, body_order_columns
+    from ace_jax.fit.hypers import default_prior
+    prob, ds = tiny_linear_problem
+    theta = default_prior(2.35).mu
+    meta = {"nnll": [[None] * o for o in _orders(prob)], "n_B": prob.cfg.n_B, "n_pair": prob.cfg.n_pair,
+            "NZ": prob.cfg.NZ, "rcut": prob.cfg.rcut, "elements": [14]}
+    with highest_precision():
+        ev = ARDEvidence(ard_statistics(theta, prob, ds, "joint"), np.asarray(prob.gamma),
+                         body_order_columns(meta, prob.cfg))
+        h = ev.h0(theta)
+        post = ard_posterior(ev, h, 2.0, meta)
+    return prob, ds, ev, h, post
+
+
 @pytest.fixture(scope="module")
 def two_type_synthetic():
     """M=0 (BLR-limit) Problem + Dataset with TWO config-types built from the 6

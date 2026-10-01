@@ -6,6 +6,7 @@ jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 
 from ace_jax.eval import highest_precision
+from conftest import _orders
 
 
 def _dense_rows(prob, ds):
@@ -61,14 +62,6 @@ def test_evidence_matches_dense_marginal_likelihood(tiny_linear_problem):
         d1 = _dense_logev(Phi, y, q, h1, np.asarray(prob.gamma), gidx, len(ev.groups))
         d2 = _dense_logev(Phi, y, q, h2, np.asarray(prob.gamma), gidx, len(ev.groups))
     assert abs((v2 - v1) - (d2 - d1)) < 1e-6 * max(1.0, abs(d2 - d1))
-
-
-def _orders(prob):
-    """Correlation order of each B column of the tiny problem's model (all body orders present)."""
-    import json
-    from conftest import FIXTURE_DIR
-    z = np.load(FIXTURE_DIR / "si_fitted.npz")
-    return [len(x) for x in json.loads(bytes(z["meta_json"]).decode())["nnll"]]
 
 
 def test_gradient_matches_finite_differences(tiny_linear_problem):
@@ -422,25 +415,12 @@ def test_ard_stage_kappa_is_refit_for_the_full_posterior(monkeypatch):
     assert res.report["kappa_subset"] == k_sub and k_full > k_sub
 
 
-def _sandwich_setup(tiny_linear_problem):
-    from ace_jax.fit.ard import ARDEvidence, ard_posterior, ard_statistics, body_order_columns
-    from ace_jax.fit.hypers import default_prior
-    prob, ds = tiny_linear_problem
-    theta = default_prior(2.35).mu
-    meta = {"nnll": [[None] * o for o in _orders(prob)], "n_B": prob.cfg.n_B, "n_pair": prob.cfg.n_pair,
-            "NZ": prob.cfg.NZ, "rcut": prob.cfg.rcut, "elements": [14]}
-    ev = ARDEvidence(ard_statistics(theta, prob, ds, "joint"), np.asarray(prob.gamma),
-                     body_order_columns(meta, prob.cfg))
-    h = ev.h0(theta)
-    return prob, ds, ev, h, ard_posterior(ev, h, 2.0, meta)
-
-
-def test_sandwich_scores_sum_to_the_prior_force_at_the_mean(tiny_linear_problem):
+def test_sandwich_scores_sum_to_the_prior_force_at_the_mean(ard_setup):
     """Stationarity: sum_c g~_c = D^-1 Lambda c = lam_prior * x at the posterior mean, so the
     residuals, their whitening and the cluster sums are exactly the posterior's own."""
     from ace_jax.fit.ard import sandwich_scores
     with highest_precision():
-        prob, ds, ev, h, post = _sandwich_setup(tiny_linear_problem)
+        prob, ds, ev, h, post = ard_setup
         G = sandwich_scores(post, prob, ds, ev.sigmas(h))
         _, _, lam, _ = ev._parts(jnp.asarray(h, float))
         x = post.mean / post.dinv                                                    # scaled mean D c
@@ -449,12 +429,12 @@ def test_sandwich_scores_sum_to_the_prior_force_at_the_mean(tiny_linear_problem)
     np.testing.assert_allclose(G.sum(1), np.asarray(lam) * x, rtol=1e-6, atol=1e-8 * np.abs(G).max())
 
 
-def test_sandwich_variance_matches_dense_reference(tiny_linear_problem):
+def test_sandwich_variance_matches_dense_reference(ard_setup):
     """lam^2 ||Q^T phi~||^2 == lam^2 phi A^-1 M A^-1 phi^T with A and M built densely in the original
     coordinates (M = sum over configs of the outer product of the summed residual-weighted rows)."""
     from ace_jax.fit.ard import sandwich_factor, sandwich_scores
     with highest_precision():
-        prob, ds, ev, h, post = _sandwich_setup(tiny_linear_problem)
+        prob, ds, ev, h, post = ard_setup
         G = sandwich_scores(post, prob, ds, ev.sigmas(h))
         post = post._replace(Q=sandwich_factor(post, G), lam=1.7)
         Ms, _, lam, _ = ev._parts(jnp.asarray(h, float))
@@ -470,11 +450,11 @@ def test_sandwich_variance_matches_dense_reference(tiny_linear_problem):
     np.testing.assert_allclose(got, ref, rtol=1e-6, atol=1e-12 * ref.max())
 
 
-def test_posterior_schema2_roundtrip_and_schema1_loads(tiny_linear_problem, tmp_path):
+def test_posterior_schema2_roundtrip_and_schema1_loads(ard_setup, tmp_path):
     from ace_jax.fit.ard import ARDPosterior, sandwich_factor, sandwich_scores
     from ace_jax.fit.rows import linear_rows
     with highest_precision():
-        prob, ds, ev, h, post = _sandwich_setup(tiny_linear_problem)
+        prob, ds, ev, h, post = ard_setup
         post = post._replace(Q=sandwich_factor(post, sandwich_scores(post, prob, ds, ev.sigmas(h))), lam=3.0)
         post.save(tmp_path / "p.npz")
         back = ARDPosterior.load(tmp_path / "p.npz")
@@ -553,7 +533,7 @@ def test_ard_stage_sandwich_in_sequential_mode():
     assert np.array_equal(ev.sigmas(h), np.exp(np.asarray(theta_ls(theta))))
 
 
-def test_sandwich_scores_columns_follow_config_order(tiny_linear_problem):
+def test_sandwich_scores_columns_follow_config_order(ard_setup):
     """Column c of G~ is config c: the batched dataset (3 configs per batch) and one config per batch
     give the same score matrix column by column, so no cid permutation / cross-batch misassignment."""
     from ace_jax.eval import load
@@ -563,7 +543,7 @@ def test_sandwich_scores_columns_follow_config_order(tiny_linear_problem):
     _, meta, z = load(FIXTURE_DIR / "si_fitted.npz")
     configs = load_configs(FIXTURE_DIR / "si_tiny_train.xyz", "dft_energy", "dft_force", "dft_virial")[:6]
     with highest_precision():
-        prob, ds, ev, h, post = _sandwich_setup(tiny_linear_problem)
+        prob, ds, ev, h, post = ard_setup
         sig = ev.sigmas(h)
         G3 = sandwich_scores(post, prob, build_dataset(configs, meta, np.asarray(z["E0"]), configs_per_batch=3), sig)
         G1 = sandwich_scores(post, prob, build_dataset(configs, meta, np.asarray(z["E0"]), configs_per_batch=1), sig)
@@ -621,12 +601,12 @@ def test_ard_stage_lam_leaves_out_each_held_out_atoms_own_cluster(monkeypatch):
     assert abs(rep["val_rms_z_sandwich"] - 1.0) < 1e-6                           # z of the served lam
 
 
-def test_posterior_chol_and_sandwich_factor_stay_on_device(tiny_linear_problem):
+def test_posterior_chol_and_sandwich_factor_stay_on_device(ard_setup):
     """chol (1.8 GB at L = 15k) and Q are float64 device arrays: var_rows / misspec_var_rows run once
     per batch and jnp.asarray of a numpy factor re-uploads it on every call."""
     from ace_jax.fit.ard import sandwich_factor, sandwich_scores
     with highest_precision():
-        prob, ds, ev, h, post = _sandwich_setup(tiny_linear_problem)
+        prob, ds, ev, h, post = ard_setup
         Q = sandwich_factor(post, sandwich_scores(post, prob, ds, ev.sigmas(h)))
     assert isinstance(post.chol, jax.Array) and post.chol.dtype == np.float64
     assert isinstance(Q, jax.Array) and Q.dtype == np.float64
