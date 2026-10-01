@@ -20,6 +20,20 @@ def _libs(root):
     return sorted({p for pat in pats for p in root.rglob(pat) if p.is_file() and not p.is_symlink()})
 
 
+def _exports(f):
+    """Defined dynamic symbols, minus linker-reserved (_-prefixed) ones.  A placeholder
+    exports only `acejax_gpl_placeholder`; a real SuiteSparse library exports its API.
+    (Not a size test: aarch64's 64 KiB page alignment pads even an empty library.)"""
+    if sys.platform == "darwin":
+        out = subprocess.run(["nm", "-gU", str(f)], capture_output=True, text=True, check=True).stdout
+        names = [ln.split()[-1][1:] for ln in out.splitlines() if ln.strip()]   # Mach-O adds one '_'
+    else:
+        out = subprocess.run(["nm", "-D", "--defined-only", str(f)], capture_output=True, text=True,
+                             check=True).stdout
+        names = [ln.split()[-1] for ln in out.splitlines() if ln.strip()]
+    return {n for n in names if not n.startswith("_")}
+
+
 def check(root):
     root = pathlib.Path(root).resolve()
     info = json.loads((root / "build_info.json").read_text())
@@ -49,8 +63,9 @@ def check(root):
     dups = [v for v in seen.values() if len(v) > 1]
     assert not dups, f"duplicate library copies (would load twice): {dups}"
     gpl = ("libumfpack", "libspqr", "librbio", "libcholmod")       # == prune_bundle.GPL_LIBS
-    real = [str(f.relative_to(root)) for f in _libs(root) if f.name.startswith(gpl)
-            and (b"ace-jax-coupling GPL placeholder" not in f.read_bytes() or f.stat().st_size > 65536)]
+    real = [f"{f.relative_to(root)} exports {sorted(x)[:3]}" for f in _libs(root) if f.name.startswith(gpl)
+            and (x := _exports(f) - {"acejax_gpl_placeholder"} or
+                 ({"<no marker>"} if b"ace-jax-coupling GPL placeholder" not in f.read_bytes() else set()))]
     assert not real, f"GPL SuiteSparse libraries in the bundle (not placeholders): {real}"
     print(f"bundle OK: {info['platform']} et_rev={info['et_rev'][:12]} libs={len(_libs(root))} {platform.machine()}")
 
