@@ -1,7 +1,7 @@
 # Releasing ace-jax-coupling
 
 The wheels are built, tested and published by `.github/workflows/coupling-wheels.yml`.
-It publishes **wheels only**: Linux x86_64 and aarch64 (manylinux_2_28) and macOS arm64.
+It publishes **wheels only**: Linux x86_64 and aarch64 (manylinux_2_28), macOS arm64 and Windows x64.
 There is no sdist, because on an unsupported platform it would build a wheel with no
 library. ace-jax's dependency marker already limits the install to these platforms.
 
@@ -38,8 +38,13 @@ library. ace-jax's dependency marker already limits the install to these platfor
 5. **Dry run on TestPyPI.** Actions → coupling-wheels → Run workflow, with
    publish = `testpypi`. Then install it in a clean environment:
    `pip install -i https://test.pypi.org/simple/ ace-jax-coupling==<version>`, and
-   check `ace_jax_coupling.build_info()`.
+   check `ace_jax_coupling.build_info()`. To test the published wheels on all four
+   platforms, including Windows, run Actions → coupling-index-check with
+   index = `testpypi`. It downloads each platform's wheel from the index and runs
+   the clean-environment test on it.
 6. **Release.** Push the tag `coupling-v<version>`. The publish job runs only after
-   all three wheels have passed their clean-environment tests and the ACEpotentials
+   all four wheels have passed their clean-environment tests and the ACEpotentials
    parity, and only if the tag equals the package version. PyPI versions cannot be
    re-uploaded, so a broken release needs a new version.
+7. **Check the release.** Run coupling-index-check with index = `pypi` and the new
+   version.

@@ -27,9 +27,15 @@ JuliaC.main(["--output-lib", joinpath(out, "libetcouple"), "--project=$LIBPROJ",
              "--jl-option", "handle-signals=no", "--privatize",
              "--bundle", bundle, ENTRY])
 
-ext = Sys.isapple() ? "dylib" : "so"
+ext = Sys.isapple() ? "dylib" : Sys.iswindows() ? "dll" : "so"
 lib = joinpath(bundle, "lib", "libetcouple.$ext")
-isfile(lib) || error("expected $lib; bundle/lib has $(readdir(joinpath(bundle, "lib")))")
+if Sys.iswindows() && !isfile(lib)            # Windows bundles keep DLLs next to each other in bin/
+   lib = joinpath(bundle, "bin", "libetcouple.$ext")
+end
+if !isfile(lib)
+   found = [joinpath(r, f) for (r, _, fs) in walkdir(bundle) for f in fs if startswith(f, "libetcouple")]
+   error("expected $lib; libetcouple files in the bundle: $found")
+end
 
 # privatize/bundling rewrites load commands, which invalidates macOS signatures;
 # arm64 macOS refuses to load unsigned modified code, so re-sign ad hoc.

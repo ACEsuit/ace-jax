@@ -8,7 +8,8 @@ import threading
 from ctypes import c_int32, c_int64, c_void_p
 
 ABI_VERSION = 1
-_EXT = "dylib" if sys.platform == "darwin" else "so"
+_EXT = {"darwin": "dylib", "win32": "dll"}.get(sys.platform, "so")
+_LIBDIR = "bin" if sys.platform == "win32" else "lib"      # Windows bundles keep the DLLs in bin/
 _PKG = pathlib.Path(__file__).resolve().parent
 _LIB = None
 LOCK = threading.Lock()
@@ -22,7 +23,7 @@ def lib_path() -> pathlib.Path:
     env = os.environ.get("ACEJAX_COUPLING_LIB")
     if env:
         return pathlib.Path(env).expanduser().resolve()
-    return _PKG / "_lib" / "lib" / f"libetcouple.{_EXT}"
+    return _PKG / "_lib" / _LIBDIR / f"libetcouple.{_EXT}"
 
 
 def bundle_root() -> pathlib.Path:
@@ -40,6 +41,20 @@ def build_info() -> dict:
     return json.loads(p.read_text())
 
 
+def _win_dll_dirs(root):
+    """Make the bundle's DLL directories win every DLL lookup in this process.
+    add_dll_directory covers ctypes' load of libetcouple and its import table, but the
+    embedded Julia runtime loads its dependencies by name at run time through the
+    standard search (application directory, then PATH), which add_dll_directory does
+    not reach. Prepending to PATH makes the bundle's copies win over any other DLL of
+    the same name elsewhere on PATH."""
+    dirs = sorted({str(f.parent) for f in pathlib.Path(root).rglob("*.dll")})
+    for d in dirs:
+        os.add_dll_directory(d)
+    path = os.environ.get("PATH", "").split(os.pathsep)
+    os.environ["PATH"] = os.pathsep.join(dirs + [d for d in path if d and d not in dirs])
+
+
 def lib():
     global _LIB
     if _LIB is not None:
@@ -50,7 +65,11 @@ def lib():
         build_info()                                   # clear error if the bundle is absent
         p = lib_path()
         try:
-            h = ctypes.CDLL(str(p), mode=os.RTLD_NOW | os.RTLD_LOCAL)
+            if sys.platform == "win32":
+                _win_dll_dirs(bundle_root())
+                h = ctypes.CDLL(str(p))
+            else:
+                h = ctypes.CDLL(str(p), mode=os.RTLD_NOW | os.RTLD_LOCAL)
         except OSError as e:
             raise CouplingLibError(f"cannot load {p}: {e}") from e
         h.etc_abi_version.restype = c_int32
@@ -64,3 +83,31 @@ def lib():
                                   c_void_p] + [c_void_p] * 10)
         _LIB = h
         return _LIB
+
+
+def _loaded_images():
+    """Paths of every shared library mapped into this process (prune tracing on
+    Windows, and the load-once test). Diagnostics only; it never loads anything."""
+    if sys.platform == "darwin":
+        d = ctypes.CDLL(None)
+        d._dyld_get_image_name.restype = ctypes.c_char_p
+        return [d._dyld_get_image_name(i).decode() for i in range(d._dyld_image_count())]
+    if sys.platform == "win32":
+        from ctypes import wintypes
+        k32, psapi = ctypes.WinDLL("kernel32"), ctypes.WinDLL("psapi")
+        k32.GetCurrentProcess.restype = wintypes.HANDLE
+        psapi.EnumProcessModulesEx.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.HMODULE),
+                                               wintypes.DWORD, ctypes.POINTER(wintypes.DWORD), wintypes.DWORD]
+        k32.GetModuleFileNameW.argtypes = [wintypes.HMODULE, wintypes.LPWSTR, wintypes.DWORD]
+        mods, need = (wintypes.HMODULE * 4096)(), wintypes.DWORD()
+        if not psapi.EnumProcessModulesEx(k32.GetCurrentProcess(), mods, ctypes.sizeof(mods),
+                                          ctypes.byref(need), 3):           # LIST_MODULES_ALL
+            raise OSError(ctypes.get_last_error(), "EnumProcessModulesEx failed")
+        buf = ctypes.create_unicode_buffer(32768)
+        out = []
+        for m in mods[: need.value // ctypes.sizeof(wintypes.HMODULE)]:
+            if k32.GetModuleFileNameW(m, buf, len(buf)):
+                out.append(buf.value)
+        return out
+    with open("/proc/self/maps") as f:
+        return [ln.split()[-1] for ln in f if len(ln.split()) >= 6]

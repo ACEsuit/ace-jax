@@ -36,7 +36,7 @@ dependencies = [
 
 [package.optional-dependencies]
 basis = [
-    { name = "ace-jax-coupling", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "ace-jax-coupling", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')" },
 ]
 cuda = [
     { name = "jax", version = "0.10.2", source = { registry = "https://pypi.org/simple" }, extra = ["cuda12"], marker = "python_full_version < '3.12'" },
@@ -65,7 +65,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "ace-jax-coupling", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin' and extra == 'basis') or (platform_machine == 'aarch64' and sys_platform == 'linux' and extra == 'basis') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'basis')", directory = "coupling/python" },
+    { name = "ace-jax-coupling", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin' and extra == 'basis') or (platform_machine == 'aarch64' and sys_platform == 'linux' and extra == 'basis') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'basis') or (platform_machine == 'AMD64' and sys_platform == 'win32' and extra == 'basis')", directory = "coupling/python" },
     { name = "ase", specifier = ">=3.22" },
     { name = "blackjax", marker = "extra == 'gp'", specifier = ">=1.6" },
     { name = "equinox", specifier = ">=0.11" },

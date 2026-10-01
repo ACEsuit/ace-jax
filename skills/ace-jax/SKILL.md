@@ -14,7 +14,7 @@ uses the `basis` extra, a compiled EquivariantTensors wheel.
 ```bash
 pip install ace-jax              # evaluate, linear fit, ASE calculator
 pip install "ace-jax[gp]"        # + `aj fit` (all arms: MAP optimisers, GP, UQ ladder, POPS)
-pip install "ace-jax[basis]" # + `aj basis` (compiled EquivariantTensors wheel; no Julia; Linux x86_64/aarch64, macOS arm64)
+pip install "ace-jax[basis]" # + `aj basis` (compiled EquivariantTensors wheel; no Julia; Linux x86_64/aarch64, macOS arm64, Windows x64)
 pip install "ace-jax[cuda]"      # + CUDA 12 JAX
 ```
 

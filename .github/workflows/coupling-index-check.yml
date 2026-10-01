@@ -1,0 +1,48 @@
+name: coupling-index-check
+# Test the ace-jax-coupling wheels as published: on each platform, download the
+# exact wheel for that platform from PyPI or TestPyPI, then run the release
+# pipeline's clean-environment test on it (fresh venv, empty home, no Julia on
+# PATH), with the package tests of the chosen commit.
+on:
+  workflow_dispatch:
+    inputs:
+      index:
+        description: "where to install from"
+        type: choice
+        options: [testpypi, pypi]
+        default: testpypi
+      version:
+        description: "ace-jax-coupling version"
+        required: true
+        default: "0.2.0"
+      ref:
+        description: "commit/branch whose package tests to run (should match the published build)"
+        default: main
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: linux-x86_64,   runner: ubuntu-latest }
+          - { name: linux-aarch64,  runner: ubuntu-24.04-arm }
+          - { name: macos-arm64,    runner: macos-14 }
+          - { name: windows-x86_64, runner: windows-latest }
+    name: ${{ inputs.index }} ${{ inputs.version }} on ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    defaults: { run: { shell: bash } }
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: "${{ inputs.ref }}" }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Download the published wheel for this platform
+        env:
+          INDEX: ${{ inputs.index == 'pypi' && 'https://pypi.org/simple/' || 'https://test.pypi.org/simple/' }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          python -m pip download -q --no-deps --only-binary :all: -d wheels -i "$INDEX" "ace-jax-coupling==$VERSION"
+          ls -l wheels
+          test "$(ls wheels/*.whl | wc -l)" -eq 1
+      - name: Clean-environment test (no Julia, empty home)
+        run: bash coupling/tools/test_wheel.sh wheels/*.whl python

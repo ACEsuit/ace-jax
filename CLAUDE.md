@@ -54,7 +54,7 @@ uv run ruff check                     # lint; `uv run pre-commit run --all-files
 
 - **Extras:**
   - `gp`: numpyro, optax, blackjax. The dev group mirrors it.
-  - `basis`: the `ace-jax-coupling` platform wheel (Linux x86_64/aarch64, macOS arm64). Until it is on PyPI, `uv sync --extra basis` builds a lib-less dev wheel from `coupling/python`; for the real library: `JULIA_DEPOT_PATH=$HOME/.julia-trim julia +1.13 --project=coupling/julia/build coupling/julia/build.jl coupling/build`, prune with `coupling/tools/prune_bundle.py`, then `ACEJAX_COUPLING_BUNDLE=$PWD/coupling/build/pruned ACEJAX_COUPLING_PLAT=<tag> uv sync --extra basis --reinstall-package ace-jax-coupling`. (A separate depot because the default one's stale ACE registry crashes Julia 1.13's Pkg.)
+  - `basis`: the `ace-jax-coupling` platform wheel (Linux x86_64/aarch64, macOS arm64, Windows x64). Until it is on PyPI, `uv sync --extra basis` builds a lib-less dev wheel from `coupling/python`; for the real library: `JULIA_DEPOT_PATH=$HOME/.julia-trim julia +1.13 --project=coupling/julia/build coupling/julia/build.jl coupling/build`, prune with `coupling/tools/prune_bundle.py`, then `ACEJAX_COUPLING_BUNDLE=$PWD/coupling/build/pruned ACEJAX_COUPLING_PLAT=<tag> uv sync --extra basis --reinstall-package ace-jax-coupling`. (A separate depot because the default one's stale ACE registry crashes Julia 1.13's Pkg.)
   - `cuda`.
   - `fast-neighbours`: matscipy-neighbours, a C++ source build.
 - **Tests that silently skip** when an optional dependency is missing:
