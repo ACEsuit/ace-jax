@@ -217,3 +217,18 @@ def test_train_extra_validates_and_counts(tmp_path):
     with pytest.raises(ValueError, match="fixed"):
         te.prepare(tmp_path / "train.xyz", [tmp_path / "x.xyz"], tmp_path / "o3.xyz", log=lambda *a: None,
                    fixed="error")
+
+
+def test_report_shows_scalar_lam_beside_lambda_rms(tmp_path):
+    """m6: the 30-Sep scalar-lambda comparison reads report["lam"] (the #18 scalar, still reported) when the
+    run has it; lambda_rms stays the per-group configuration-weighted pooled value."""
+    d, *_ = _synthetic_run(tmp_path)
+    rep = json.loads((d / "ard.json").read_text())
+    rep.update(variance="sandwich", lam=1.2345)
+    (d / "ard.json").write_text(json.dumps(rep))
+    R = vs.load_run(d)
+    assert vs.scalar_lam(R) == pytest.approx(1.2345)
+    md = vs.report([R], B=50)
+    assert "lam (scalar)" in md and "1.2345" in md
+    (d / "ard.json").write_text(json.dumps({"kappa": 1.0}))
+    assert vs.scalar_lam(vs.load_run(d)) is None

@@ -168,6 +168,14 @@ def lambda_rms(R):
     return float(np.sqrt(np.sum(w * np.asarray(g["lam_rms"], float) ** 2) / w.sum()))
 
 
+def scalar_lam(R):
+    """The #18 scalar lam of a sandwich run (ard.json "lam": kappa_closed_form on the T_val (e^2, v), still
+    reported beside the per-group scales) -- the 30-Sep scalar-lambda comparison; None if absent."""
+    a = R["ard"]
+    lam = a.get("lam")
+    return float(lam) if lam is not None and a.get("variance", "sandwich") == "sandwich" else None
+
+
 def spearman_by_family(R):
     A = R["A"]
     if "fam" not in A or "sd" not in A:
@@ -214,16 +222,18 @@ def ell_sweep(runs):
 def report(runs, B=1000):
     out = ["# Jackknife shape / conformal scale validation", ""]
     out += ["## Summary", "", "| run | variant | ell | K / K_fit | rank R | lev p50 / p99 / max | n lev~1 | lambda_rms | "
-            "vol | vol @ nominal |", "|---|---|---|---|---|---|---|---|---|---|"]
+            "lam (scalar) | vol | vol @ nominal |", "|---|---|---|---|---|---|---|---|---|---|---|"]
     for r in runs:
         s = r["ard"].get("shape") or {}
         v = volumes(r)
-        out.append("| {} | {} | {} | {} / {} | {} | {} / {} / {} | {} | {} | {} | {} |".format(
+        out.append("| {} | {} | {} | {} / {} | {} | {} / {} / {} | {} | {} | {} | {} | {} |".format(
             r["name"], s.get("variant", NA), _f(s.get("ell"), "{:g}"), s.get("K", NA), s.get("K_fit", NA),
             s.get("rank_R", NA), _f(s.get("lev_p50")), _f(s.get("lev_p99")), _f(s.get("lev_max")),
-            s.get("n_lev_near1", NA), _f(lambda_rms(r), "{:.4f}"), _f(v and v[0], "{:.4g}"), _f(v and v[1], "{:.4g}")))
+            s.get("n_lev_near1", NA), _f(lambda_rms(r), "{:.4f}"), _f(scalar_lam(r), "{:.4f}"),
+            _f(v and v[0], "{:.4g}"), _f(v and v[1], "{:.4g}")))
     out += ["", "lambda_rms: T_val pooled, configuration-weighted over the conformal groups "
-            "(sqrt(sum n_cfg_val lam_g^2 / sum n_cfg_val)).", ""]
+            "(sqrt(sum n_cfg_val lam_g^2 / sum n_cfg_val)).  lam (scalar): the #18 scalar lam of ard.json "
+            "(atom-weighted kappa_closed_form over T_val), the 30-Sep scalar-lambda comparison.", ""]
     out += ["## Spearman rho(sigma, |e|) per family", "", "| run | crack | edge | screw |", "|---|---|---|---|"]
     for r in runs:
         rho = spearman_by_family(r)

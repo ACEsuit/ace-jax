@@ -209,13 +209,17 @@ has been run yet; the acceptance numbers are the targets in `docs/specs/2026-09-
 
   | arm | what it ablates |
   |---|---|
-  | `ard_legacy` | #18 uncentred sandwich, own-cluster-out scores, 2 groups |
+  | `ard_legacy` | #18 uncentred sandwich, own-cluster-out scores, 2 groups (see note) |
   | `ard_A` | #18 shape with scores from the fit split, distortion groups |
   | `ard_AB` | centred PRESS shape, whole-configuration clusters (ell = inf) |
   | `ard_ABblk` | defaults: PRESS, ell = 3 r_cut |
   | `ard_aniso` | Mahalanobis region (`forces_q_mahal`) |
   | `ard_ell{2,4,6}` | ell sweep (3 = `ard_ABblk`, inf = `ard_AB`) |
   | `ard_f{1,3}` | `ard_val_frac` 0.1 / 0.3 (0.2 = `ard_ABblk`) |
+  Note: `ard_legacy` reproduces the 30-Sep *shape* and scores, but it still serves the revision-2
+  scales: per-group (G = 2, [z = z*]) configuration-weighted `lam_rms` / `q`, not the 30-Sep single
+  atom-weighted scalar lambda. The scalar is still computed and stored as `ard.json` `"lam"`;
+  `validate_shape.py` prints it as the `lam (scalar)` column beside `lambda_rms` for that comparison.
 - `fit_bench.py --train-extra A.xyz,B.xyz` appends those configurations to `train.xyz` (written to
   `<out>/train_plus_extra.xyz`); the Modal `launch` takes `--train-extra` and `--tag` (output dir suffix).
 - `modal_bench365.py::big_errors` now saves `sd`, `forces_q`, `forces_group`, `forces_cov` (schema-3 posteriors)

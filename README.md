@@ -340,15 +340,22 @@ The force uncertainty has a shape and two scales (mathematics:
   hold-out (`--ard-val-frac`) scored with the hold-out posterior.
 - **Groups.** 8 Mondrian groups = 4 distortion bands x [coordination = modal]
   (`--ard-groups distortion|none`); groups with fewer than `--ard-n-min` (default 20)
-  calibration configurations borrow from a neighbour. `forces_group` gives each atom's group.
+  calibration configurations borrow from a neighbour (the threshold rises to ⌈(1−α)/α⌉, e.g. 99 at
+  `--ard-coverage 0.99`, so that a finite `q` is reachable). If even all groups pooled are too few for
+  the coverage, `q` (and `forces_q`) is infinite and the fit logs a WARNING. `forces_group` gives
+  each atom's group.
   `posterior.npz` holds the per-group table: `lam_rms`, `q`, `r = q/(lam_rms·χ₃⁻¹(0.9))`
   (r near 1 means the Gaussian shape fits), `n_cfg` (T_val / U), merges and sources.
 - **Support.** `forces_support` (`support_ok`, `support_q`, `n_eff`) flags atoms the calibration
   cannot certify (covariate shift); `aj eval --posterior P --per-atom out.xyz --support` writes
   it. `--no-ard-support` skips the reference at fit time.
 
-For a regime the fit data does not cover (cracks, interfaces), recalibrate on a few labelled
-cells of that kind; only the scales change, the model is untouched:
+For a regime the fit data does not cover (cracks, interfaces), recalibrate on labelled cells of
+that kind; only the scales change, the model is untouched. A group is recalibrated on the new cells
+alone only when they contribute at least `--ard-n-min` (default 20) configurations to it; with fewer,
+their scores are pooled with the stored hold-out scores, so a few cells move that group's scale only
+slightly. The labelled cells must not be in the training set (`aj calibrate` does not check this),
+or the scales come out too small:
 
 ```bash
 aj calibrate --model out_ard/model.npz --posterior out_ard/posterior.npz \
@@ -357,8 +364,8 @@ aj eval --model out_ard/model.npz --posterior crack_posterior.npz --data big.xyz
 # or ACECalculator(model, posterior="crack_posterior.npz")
 ```
 
-By default, groups where the new cells have at least `--ard-n-min` (default 20) configurations use
-them alone; every other group pools the stored hold-out scores with them. `--append` pools in every
+By default, groups where the new cells have at least `--ard-n-min` (default 20; ⌈(1−α)/α⌉ if that is
+larger) configurations use them alone; every other group pools the stored hold-out scores with them. `--append` pools in every
 group; `--replace` uses the new cells alone in every group. Posteriors are schema 3;
 older schema-2 posteriors serve only the old scalar `forces_std` (the new properties raise and ask
 you to refit with `--uq ard`). The validation programme for this revision is described in

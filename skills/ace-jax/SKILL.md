@@ -347,11 +347,16 @@ Other entry points:
   `--ard-variance kappa` keeps the A⁻¹ shape and also gets the per-group scales.
 - **Coverage is conditional on exchangeability.** It holds for atoms exchangeable with their
   group's calibration configurations. For a new regime (cracks, interfaces), run
-  `aj calibrate --model M --posterior P --data labelled.xyz --out new_posterior.npz` on a few labelled
+  `aj calibrate --model M --posterior P --data labelled.xyz --out new_posterior.npz` on labelled
   cells like it, then use `posterior="new_posterior.npz"` / `aj eval --posterior new_posterior.npz`.
-  `--out` is a file. Default: groups where the new cells have >= `--ard-n-min` (20)
-  configurations use them alone, other groups pool stored + new; `--append` pools in every group,
-  `--replace` uses the new cells alone in every group.
+  `--out` is a file. Default: groups where the new cells have >= `--ard-n-min` (20; ⌈(1−α)/α⌉ if
+  larger) configurations use them alone; with fewer, the new scores only pool with the stored
+  hold-out, so a few cells barely move that group. `--append` pools in every group, `--replace` uses
+  the new cells alone in every group. The labelled cells must not be training configurations;
+  `aj calibrate` does not check.
+- **An unattainable coverage gives `forces_q = inf`.** A pool needs ⌈(1−α)/α⌉ configurations (9 at
+  0.9, 99 at 0.99) for a finite conformal radius; below that the fit logs a WARNING and `q` stays
+  infinite (stored as the string "inf" in `ard.json` / `posterior.npz`).
 - **`support_ok = False` marks candidates for labelling** (`forces_support`; `aj eval --posterior P
   --per-atom out.xyz --support`; `--no-ard-support` at fit time skips it).
 - **Schema-2 posteriors serve only the old scalar `forces_std`.** The new properties raise and ask
