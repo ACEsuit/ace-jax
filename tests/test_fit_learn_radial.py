@@ -80,12 +80,16 @@ def test_stage_matches_fit_radial_on_the_same_split(fast):
 
 
 def test_stage_gate_keeps_init(fast):
-    """radial_steps=0: learned == init, the tie goes to init, nothing is marked learned."""
+    """radial_steps=0: learned == init, the tie goes to init, nothing is marked learned.
+    With e0='lsq' (written into the model by load_fit_data) the fitted E0 survives the
+    reload from the patched arrays (the reload does not depend on the step count)."""
     from ace_jax.fit.pipeline.radials import learn_radials
     from ace_jax.fit.radial_model import to_analytic
-    cfg = _cfg(learn_radial=True, radial_steps=0, radial_lam_grid=(0.0,))
+    cfg = _cfg(e0="lsq", learn_radial=True, radial_steps=0, radial_lam_grid=(0.0,))
     d = _data(cfg)
     d2, rr = learn_radials(cfg, d, log=QUIET)
+    np.testing.assert_allclose(np.asarray(d2.model.E0), d.E0, rtol=0, atol=0)
+    np.testing.assert_allclose(d2.E0, d.E0, rtol=0, atol=0)
     assert rr.info["selected"] == "init"
     assert not d2.model.radial_learned and d2.meta.get("radial_learned") is False
     np.testing.assert_allclose(np.asarray(d2.model.rnl_Wnlq), rr.W, rtol=0, atol=1e-12)
@@ -94,16 +98,6 @@ def test_stage_gate_keeps_init(fast):
     nrm = lambda W: np.linalg.norm(W, axis=-1, keepdims=True)
     live = nrm(W0)[..., 0] > 0
     np.testing.assert_allclose((rr.W / nrm(rr.W))[live], (W0 / nrm(W0))[live], rtol=0, atol=1e-12)
-
-
-def test_stage_keeps_fitted_e0(fast):
-    """e0='lsq' E0 (set on the model by load_fit_data) survives the reload."""
-    from ace_jax.fit.pipeline.radials import learn_radials
-    cfg = _cfg(e0="lsq", learn_radial=True, radial_steps=2, radial_lam_grid=(0.0,))
-    d = _data(cfg)
-    d2, _ = learn_radials(cfg, d, log=QUIET)
-    np.testing.assert_allclose(np.asarray(d2.model.E0), d.E0, rtol=0, atol=0)
-    np.testing.assert_allclose(d2.E0, d.E0, rtol=0, atol=0)
 
 
 def test_stage_refuses_factorised_radial():
