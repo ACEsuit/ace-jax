@@ -12,7 +12,15 @@ if [ "$WIN" = 1 ]; then                                    # Windows resolves "h
   mkdir -p "$APPDATA" "$LOCALAPPDATA"
 fi
 unset JULIA_DEPOT_PATH JULIA_PROJECT ACEJAX_COUPLING_LIB PYTHONPATH
-PATH=$(echo "$PATH" | tr ':' '\n' | grep -v -i julia | paste -sd: -); export PATH
+# drop every PATH entry that holds a Julia (by name or by content: the Windows runner
+# image has a Chocolatey julia shim in C:\ProgramData\Chocolatey\bin)
+NEWPATH=""
+while IFS= read -r d; do
+  case "$d" in *[Jj]ulia*) continue ;; esac
+  [ -e "$d/julia" ] || [ -e "$d/julia.exe" ] || [ -e "$d/libjulia.dll" ] && continue
+  NEWPATH="${NEWPATH:+$NEWPATH:}$d"
+done < <(echo "$PATH" | tr ':' '\n')
+export PATH="$NEWPATH"
 if command -v julia >/dev/null; then echo "julia still on PATH: $(command -v julia)"; exit 1; fi
 export PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 "$PY" -m venv "$WORK/venv"

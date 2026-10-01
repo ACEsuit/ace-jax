@@ -74,21 +74,44 @@ print("traced-ok")
 """]
 
 
+def _julia_free_path(path):
+    """PATH without any directory holding a Julia install (an executable or runtime
+    DLLs): the build's own Julia (setup-julia) and the runner image's (Chocolatey)
+    would otherwise satisfy DLL lookups the bundle must satisfy itself."""
+    keep = []
+    for d in path.split(os.pathsep):
+        p = pathlib.Path(d)
+        if any((p / n).exists() for n in ("julia.exe", "julia", "libjulia.dll", "libblastrampoline-5.dll")):
+            continue
+        keep.append(d)
+    return os.pathsep.join(keep)
+
+
 def _traced_windows(src):
     env = {k: v for k, v in os.environ.items() if not k.startswith("JULIA")}
     home = tempfile.mkdtemp(prefix="prune-home-")
     env.update(HOME=home, USERPROFILE=home, APPDATA=home, LOCALAPPDATA=home)
+    env["PATH"] = _julia_free_path(env.get("PATH", ""))
     env["ACEJAX_COUPLING_LIB"] = str(src / LIBDIR / f"libetcouple.{EXT}")
     root = os.path.normcase(str(src)) + os.sep
-    used = set()
+    bundled = {p.name.lower() for p in src.rglob("*") if p.is_file() and _is_lib(p)}
+    used, outside = set(), set()
     for drv in WIN_DRIVERS:
         r = subprocess.run([sys.executable, "-c", drv, str(REPO / "coupling/python/src"),
                             str(REPO / "coupling/python/tests/data/cases.json")],
                            env=env, capture_output=True, text=True)
         assert r.returncode == 0 and "traced-ok" in r.stdout, (r.stdout[-2000:], r.stderr[-3000:])
         for line in r.stdout.splitlines():
-            if line.startswith("MOD ") and os.path.normcase(line[4:]).startswith(root):
-                used.add(pathlib.Path(line[4:]).relative_to(src))
+            if not line.startswith("MOD "):
+                continue
+            m = line[4:]
+            if os.path.normcase(m).startswith(root):
+                used.add(pathlib.Path(m).relative_to(src))
+            elif pathlib.Path(m).name.lower() in bundled:
+                outside.add(m)                        # a bundled library resolved elsewhere
+    # a library the bundle ships but the process took from outside it would be
+    # silently missing from the wheel: refuse rather than prune it away
+    assert not outside, f"bundle libraries loaded from outside the bundle: {sorted(outside)}"
     return used
 
 
