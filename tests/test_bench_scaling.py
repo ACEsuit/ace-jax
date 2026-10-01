@@ -1746,3 +1746,19 @@ def test_acepotentials_identity_guard_rejects_another_model():
     out = run_case(_acepot_row_for(z, {"elements": ["Si", "Ge"], "order": 3, "totaldegree": 6,
                                        "rcut": None}), 256, "float64", "cpu", reps=1)
     assert out["status"] == "error" and "NOT the npz model" in out["error"]
+
+
+def test_moriarty_env_json_has_the_acepotentials_keys():
+    """The committed env json and the env_json step that writes it carry the
+    Julia (never the default depot) and plugin keys the new lines read."""
+    envs = pathlib.Path(__file__).parent.parent / "bench" / "scaling" / "envs"
+    keys = ("lmp_ace", "ace_plugin", "julia", "julia_depot", "julia_project")
+    sh = (envs / "moriarty.sh").read_text()
+    for host in ("moriarty-cpu", "moriarty-gpu"):
+        env = json.loads((envs / f"{host}.json").read_text())
+        assert all(env.get(k) for k in keys), host
+        assert not env["julia_depot"].rstrip("/").endswith(".julia")
+        assert env["julia_project"].endswith("bench/scaling/julia")
+    for k in keys:
+        assert f'"{k}": "$' in sh, k
+    assert "lmp-ace.sh" in sh and "ace_plugin()" in sh and "julia_env()" in sh

@@ -13,16 +13,28 @@
 #               plugin needs Pair::eflag_only, newer than 10 Sep 2025, while
 #               Symmetrix does not compile against current develop)
 #
-# Steps: sources venv neighbours lammps lmp_python symmetrix_py lammps_dev plugin env_json
+# The ACEpotentials.jl lines (CPU only) add a pinned Julia env (bench/scaling/julia:
+# ACEpotentials.jl PR 309) in its own depot, and the PR's LAMMPS plugin
+# (pair_style ace), built with mpicxx against the lammps-dev headers; lmp-ace.sh
+# runs lammps-dev in plain CPU mode (no KOKKOS at run time, no lammps-jax plugin).
+#
+# Steps: sources venv neighbours lammps lmp_python symmetrix_py lammps_dev plugin
+#        julia_env ace_plugin env_json
 set -euo pipefail
 ROOT=${BENCH_ROOT:-$HOME/bench-scaling}
 ACEJAX=${ACEJAX_SRC:-$ROOT/ace-jax}          # synced checkout of this branch
 LAMMPS=$ROOT/lammps
 BUILD=$LAMMPS/build-kk
-LAMMPS_DEV=$ROOT/lammps-dev
-BUILD_DEV=$LAMMPS_DEV/build-kk
+LAMMPS_DEV=${LAMMPS_DEV:-$ROOT/lammps-dev}
+BUILD_DEV=${BUILD_DEV:-$LAMMPS_DEV/build-kk}
 VENV=$ROOT/venv
 JOBS=${JOBS:-24}
+# Julia for the ACEpotentials.jl lines: juliaup's 1.12.6, a depot of its own on
+# /storage (never ~/.julia), the env pinned in this checkout
+JULIA=${ACEPOT_JULIA:-$HOME/.juliaup/bin/julia +1.12.6}
+JULIA_DEPOT=${ACEPOT_JULIA_DEPOT:-/storage/eng/essswb/cache/julia-pr309}
+JULIA_PROJECT_DIR=$ACEJAX/bench/scaling/julia
+ACE_PLUGIN_BUILD=${ACE_PLUGIN_BUILD:-$ROOT/ace-plugin}
 mkdir -p "$ROOT"
 source /etc/profile.d/modules.sh 2>/dev/null || true
 module purge
@@ -118,13 +130,33 @@ plugin() {
   cmake --build "$ROOT/lammps-jax/build-plugin-gpu-pjrt" -j "$JOBS"
 }
 
+julia_env() {          # instantiate + precompile the pinned PR 309 env (~7 min, 2.2 GB)
+  JULIA_DEPOT_PATH=$JULIA_DEPOT JULIA_NUM_THREADS=1 $JULIA --startup-file=no --project="$JULIA_PROJECT_DIR" \
+    -e 'using Pkg; Pkg.instantiate(); Pkg.precompile(); using ACEpotentials; println(pkgdir(ACEpotentials))'
+}
+
+ace_plugin() {         # PR 309's export/lammps/plugin -> $ACE_PLUGIN_BUILD/aceplugin.so (seconds)
+  local src
+  module swap CUDA/12.4.0 "$CUDA_DEV" 2>/dev/null || true   # lammps-dev's modules (mpicxx: gompi)
+  src=$(JULIA_DEPOT_PATH=$JULIA_DEPOT $JULIA --startup-file=no --project="$JULIA_PROJECT_DIR" \
+        -e 'using ACEpotentials; print(pkgdir(ACEpotentials))')/export/lammps/plugin/cmake
+  [ -f "$ACE_PLUGIN_BUILD/aceplugin.so" ] && [ "$(cat "$ACE_PLUGIN_BUILD/.src" 2>/dev/null)" = "$src" ] && return 0
+  rm -rf "$ACE_PLUGIN_BUILD"
+  cmake -S "$src" -B "$ACE_PLUGIN_BUILD" -D CMAKE_BUILD_TYPE=Release -D CMAKE_CXX_COMPILER=mpicxx \
+    -D LAMMPS_SOURCE_DIR="$LAMMPS_DEV/src"
+  cmake --build "$ACE_PLUGIN_BUILD" -j "$JOBS"
+  echo "$src" > "$ACE_PLUGIN_BUILD/.src"
+}
+
 env_json() {
   local pjrt
   pjrt=$("$VENV/bin/python" -c "import jax_plugins.xla_cuda12 as p, os; print(os.path.join(os.path.dirname(p.__file__), 'xla_cuda_plugin.so'))")
   for host in moriarty-gpu moriarty-cpu; do
     cat > "$ACEJAX/bench/scaling/envs/$host.json" <<EOF
 {"lmp": "$ROOT/lmp.sh", "lmp_jax": "$ROOT/lmp-jax.sh", "pjrt": "$pjrt", "pythonpath": "$ACEJAX/bench",
- "python": "$VENV/bin/python", "root": "$ROOT"}
+ "python": "$VENV/bin/python", "root": "$ROOT",
+ "lmp_ace": "$ROOT/lmp-ace.sh", "ace_plugin": "$ACE_PLUGIN_BUILD/aceplugin.so",
+ "julia": "$JULIA", "julia_depot": "$JULIA_DEPOT", "julia_project": "$JULIA_PROJECT_DIR"}
 EOF
   done
   # lmp wrappers: modules (+ plugin path), so every LAMMPS call sees the same env
@@ -143,11 +175,20 @@ export LAMMPS_PLUGIN_PATH=$ROOT/lammps-jax/build-plugin-gpu-pjrt
 export LD_LIBRARY_PATH=$BUILD_DEV:\${LD_LIBRARY_PATH:-}
 exec $BUILD_DEV/lmp "\$@"
 EOF
-  chmod +x "$ROOT/lmp.sh" "$ROOT/lmp-jax.sh"
+  # the trim line: lammps-dev on the CPU (the input's `plugin load` loads the PR 309
+  # plugin; the trim .so links juliaup's libjulia by absolute path)
+  cat > "$ROOT/lmp-ace.sh" <<EOF
+#!/usr/bin/env bash
+source /etc/profile.d/modules.sh 2>/dev/null || true
+module purge; module load gompi/2023a $CUDA_DEV
+export LD_LIBRARY_PATH=$BUILD_DEV:\${LD_LIBRARY_PATH:-}
+exec $BUILD_DEV/lmp "\$@"
+EOF
+  chmod +x "$ROOT/lmp.sh" "$ROOT/lmp-jax.sh" "$ROOT/lmp-ace.sh"
 }
 
 steps=("$@")
-[ ${#steps[@]} -eq 0 ] && steps=(sources venv neighbours lammps lmp_python symmetrix_py lammps_dev plugin env_json)
+[ ${#steps[@]} -eq 0 ] && steps=(sources venv neighbours lammps lmp_python symmetrix_py lammps_dev plugin julia_env ace_plugin env_json)
 for s in "${steps[@]}"; do
   echo "=== $s"
   "$s"
