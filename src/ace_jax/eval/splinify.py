@@ -269,7 +269,7 @@ def to_spline(model, n_intervals=None, tol=DEFAULT_SPLINE_TOL, deriv_tol=None,
     """Convert an ACEModel's analytic radials to the spline branch.
 
     Converts every analytic radial named in `radials` ("rnl", "pair"), learned
-    or not (a Julia `ace_model` export or a Python-authored model too): this is
+    or not (an ACEpotentials `ace_model` export or a built basis too): this is
     the conversion itself.  Whether `lean` applies it is `spline_plan`'s call
     (by default only for learned radials).
 

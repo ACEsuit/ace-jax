@@ -89,7 +89,7 @@ class ACECalculator(Calculator):
         (`to_spline`).  That is not roundoff: energies agree with lean=False to
         up to ~1e-9 relative and forces to up to ~2.3e-8 of max|F| on the
         benchmark models (docs/learned-radial-splining.md).  Other analytic
-        models -- Julia `ace_model` exports, Python-authored models -- stay
+        models -- ACEpotentials `ace_model` exports, built bases -- stay
         exact; a float spline_tol (e.g. 1e-10) opts them in, None never
         splines.  spline_intervals pins the grid.  `calc.splined` (and `last_timing["spline_tol"]`) says
         what was splined, None when nothing was.  The spline is cached on the

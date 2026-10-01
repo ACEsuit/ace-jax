@@ -743,8 +743,8 @@ def lean(model, spline_tol=AUTO, spline_intervals=None):
     Splining (`splinify.spline_plan`, the one decision point):
     spline_tol="auto" (default) splines an analytic tensor radial only when it
     was learned (`radial_learned`), at `DEFAULT_SPLINE_TOL` = 1e-10; the pair
-    radial is never learned and stays as is.  Julia `ace_model` exports and
-    Python-authored models are analytic but not learned, so they stay exact.
+    radial is never learned and stays as is.  ACEpotentials `ace_model` exports and
+    built bases are analytic but not learned, so they stay exact.
     A float spline_tol opts every analytic radial in (e.g. 1e-10 for an old
     learned-radial file without the flag); None never splines.  A splined
     radial gets the spline gather and, when each R_nl column belongs to one
