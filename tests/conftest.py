@@ -239,3 +239,18 @@ def _release_jax_memory():
         jax.clear_caches()
     except Exception:
         pass
+
+
+@pytest.fixture
+def one_config_batch():
+    """Factory: ASE Atoms -> the one-config Dataset batch (the calculator's construction)."""
+    import jax
+    import numpy as np
+    from ace_jax.fit.data import Config, build_dataset
+
+    def make(atoms, rcut=6.25):
+        meta = {"elements": sorted({int(z) for z in atoms.numbers}), "rcut": rcut}
+        c = Config(atoms.get_positions(), atoms.get_atomic_numbers(), atoms.get_cell().array, atoms.get_pbc(),
+                   None, None, None, 1.0, 1.0, 1.0)
+        return jax.tree.map(lambda a: a[0], build_dataset([c], meta, np.zeros(len(meta["elements"])), 1))
+    return make
