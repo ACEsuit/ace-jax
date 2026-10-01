@@ -15,7 +15,7 @@ import yaml
 PATH_KEYS = ("train", "test", "ood", "data", "model", "baseline", "init", "embedding")
 BASIS_PATH_KEYS = ("embedding", "coupling_cache_dir")
 IGNORED = ("provenance",)
-COMMA_KEYS = ("rungs", "elements")
+COMMA_KEYS = ("rungs", "elements", "radial_lam_grid")
 
 
 def _resolve(v, base):

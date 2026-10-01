@@ -72,6 +72,18 @@ def _add_fit_args(p):
     p.add_argument("--ard-val-frac", type=float, default=0.2,
                    help="train fraction held out to fit the force-variance scale: lam (sandwich) "
                         "and kappa")
+    p.add_argument("--learn-radial", action="store_true",
+                   help="learn the tensor radials (VarPro, held-out gate) before the fit; the saved model "
+                        "is marked radial_learned and splined at deploy time")
+    p.add_argument("--radial-n-q", type=int, default=12,
+                   help="tensor-radial polynomial span after widening (with --learn-radial)")
+    p.add_argument("--radial-steps", type=int, default=40,
+                   help="L-BFGS steps per roughness weight (with --learn-radial)")
+    p.add_argument("--radial-lam-grid", default="0,1e-2",
+                   help="comma-separated relative roughness weights the gate picks among, "
+                        "alongside the initial radials (with --learn-radial)")
+    p.add_argument("--radial-val-frac", type=float, default=0.2,
+                   help="fraction of the training configs held out for the gate (with --learn-radial)")
     p.add_argument("--pops-ridge", default="auto")
     p.add_argument("--seed", type=int, default=0); p.add_argument("--out", default=None)
     p.add_argument("--model-draws", type=int, default=1,
@@ -117,6 +129,9 @@ def _fit_config(a):
         init=json.load(open(a.init)) if a.init else None, rungs=rungs, laplace=a.laplace,
         n_draws=a.n_draws, vi_steps=a.vi_steps, nuts_warmup=a.nuts_warmup, nuts_samples=a.nuts_samples,
         nuts_chains=a.nuts_chains, uq=a.uq, ard_mode=a.ard_mode, ard_variance=a.ard_variance, ard_val_frac=a.ard_val_frac,
+        learn_radial=a.learn_radial, radial_n_q=a.radial_n_q, radial_steps=a.radial_steps,
+        radial_lam_grid=tuple(float(x) for x in str(a.radial_lam_grid).split(",") if x.strip()),
+        radial_val_frac=a.radial_val_frac,
         predict_train=False, pops_ridge=ridge,
         predict_stats="recompute", pf_samples=16, pf_maxiter=15)
     return cfg.validate()
@@ -360,6 +375,12 @@ def _parse(argv=None):
                     print(f"override: {k} {defaults[k]} -> None (command line gives "
                           f"{'/'.join('--' + m.replace('_', '-') for m in sorted(mine & given))})")
                     setattr(a, k, None)
+    if a.cmd == "fit" and not a.learn_radial:   # typed options only: a fit.yaml records every default
+        from . import runfile
+        typed = runfile.explicit_dests(subs["fit"], argv[argv.index(cmd) + 1:])
+        stray = sorted(d for d in typed if d.startswith("radial_"))
+        if stray:
+            subs["fit"].error(f"--{stray[0].replace('_', '-')} needs --learn-radial")
     if a.cmd == "fit":
         _check_fit_args(subs["fit"], a)
     return a
