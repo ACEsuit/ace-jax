@@ -1,6 +1,7 @@
 import jax
 import jax.numpy as jnp
 import numpy as np
+import pytest
 import scipy.linalg
 from ase.build import bulk
 from conftest import _orders
@@ -150,6 +151,13 @@ def test_press_high_leverage_cluster(ard_setup):
     post2 = post._replace(**_posterior_at(ev, hh, post))
     G2, lev2 = press_scores(post2, prob, ds, rc, K, ev.sigmas(hh))
     assert lev2.max() > lev.max() and np.all(lev2 < 1) and np.isfinite(G2).all()
+    Psi, y, cf = _rows(prob, ds, ev.sigmas(hh))                                  # exact at high leverage too
+    A = _A(post2)
+    c = np.linalg.solve(A, Psi.T @ y)
+    for k in range(K):
+        m = cf == k
+        ck = np.linalg.solve(A - Psi[m].T @ Psi[m], Psi[~m].T @ y[~m])
+        np.testing.assert_allclose(c - ck, np.linalg.solve(A, G2[:, k]), rtol=1e-6, atol=_REFIT_ATOL * np.abs(c).max())
 
 
 def _posterior_at(ev, h, post):
@@ -219,3 +227,65 @@ def test_centring_and_factor(ard_setup):
     Vref = np.einsum("nal,lm,nbm->nab", u, M, u)
     np.testing.assert_allclose(V, Vref, rtol=1e-8, atol=1e-14 * max(np.abs(Vref).max(), 1e-300))
     np.testing.assert_allclose(V, np.swapaxes(V, 1, 2))
+
+
+def _row_block_clusters(ds):
+    """Every row-block (an E row, an atom's F triple, a config's V sextet) its own cluster, ids contiguous
+    within each batch and increasing across batches."""
+    out, k = [], 0
+    for i in range(ds.n_batches):
+        cm, nc = np.asarray(ds.cfg_mask[i]), np.asarray(ds.node_cfg[i])
+        E, F, V = np.full(len(cm), -1), np.full(len(nc), -1), np.full(len(cm), -1)
+        for c in np.flatnonzero(cm):
+            E[c] = k; k += 1
+            for n in np.flatnonzero(nc == c):
+                F[n] = k; k += 1
+            V[c] = k; k += 1
+        out.append({"E": E, "F": F, "V": V})
+    return out, k
+
+
+def test_press_block_mode(ard_setup):
+    """Block mode is exact when every cluster is one row-block, and an approximation (finite, same order,
+    not identical) for whole-configuration clusters."""
+    from ace_jax.fit.clusters import row_clusters
+    from ace_jax.fit.jackknife import press_scores
+    prob, ds, ev, h, post = ard_setup
+    sig = ev.sigmas(h)
+    rb, Kb = _row_block_clusters(ds)
+    Ge, le = press_scores(post, prob, ds, rb, Kb, sig, mode="exact")
+    Gb, lb = press_scores(post, prob, ds, rb, Kb, sig, mode="block")
+    np.testing.assert_allclose(Gb, Ge, rtol=1e-8, atol=1e-10 * np.abs(Ge).max())
+    np.testing.assert_allclose(lb, le)
+    rc, K = row_clusters(ds, None, float("inf"))
+    Ge, _ = press_scores(post, prob, ds, rc, K, sig, mode="exact")
+    Gb, _ = press_scores(post, prob, ds, rc, K, sig, mode="block")
+    assert np.isfinite(Gb).all() and not np.allclose(Gb, Ge)
+    rel = np.linalg.norm(Gb - Ge) / np.linalg.norm(Ge)
+    assert rel < 1.0
+
+
+def test_press_rejects_cluster_spanning_batches(ard_setup):
+    from ace_jax.fit.clusters import row_clusters
+    from ace_jax.fit.jackknife import press_scores
+    prob, ds, ev, h, post = ard_setup
+    rc, K = row_clusters(ds, None, float("inf"))
+    assert ds.n_batches >= 2
+    bad = [dict(b) for b in rc]
+    first = int(np.max(bad[0]["E"]))
+    bad[1] = {q: np.where(v >= 0, first, v) for q, v in bad[1].items()}             # batch 1 reuses an id
+    with pytest.raises(ValueError, match="spans batches"):
+        press_scores(post, prob, ds, bad, K, ev.sigmas(h))
+
+
+def test_shape_factor_zero_spread_gives_zero_column(ard_setup):
+    """K = 1 (or all-zero scores) centre to zero: R is a single zero column for any tau."""
+    from ace_jax.fit.jackknife import shape_factor
+    _, _, _, _, post = ard_setup
+    L = len(post.mean)
+    G = np.random.default_rng(0).normal(size=(L, 1))
+    for tau in (1.0, 0.9):
+        R = np.asarray(shape_factor(post, G, tau=tau))
+        assert R.shape == (L, 1) and np.all(R == 0)
+    R = np.asarray(shape_factor(post, np.zeros((L, 3)), tau=0.9))
+    assert R.shape == (L, 1) and np.all(R == 0)
