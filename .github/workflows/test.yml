@@ -16,6 +16,12 @@ jobs:
     # here (like the ladder job); xdist workers get the runner killed mid-run.
     # `-n 0` overrides tests/conftest.py, which parallelises a bare local `pytest`.
     # Each shard has its own VM + JAX compile cache. NO Julia.
+    # The JAX cache is restored on every run but saved only from main, so PR runs
+    # cannot evict main's caches (each is ~0.8 GB; the repo has 10 GB), and keyed
+    # on uv.lock so a dependency bump starts a fresh cache, not an ever-growing one.
+    # Each shard also records the durations of the tests it ran (`--clean-durations`
+    # writes only those; the split reads the committed .test_durations first); the
+    # `durations` job merges them into one refreshed .test_durations artifact.
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -25,16 +31,51 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - uses: actions/cache@v4
+      - uses: actions/cache/restore@v4
         with:
           path: .jax_cache
-          key: jaxcache-${{ runner.os }}-g${{ matrix.group }}-${{ github.sha }}
-          restore-keys: jaxcache-${{ runner.os }}-g${{ matrix.group }}-
+          key: jaxcache-${{ runner.os }}-g${{ matrix.group }}-${{ hashFiles('uv.lock') }}-${{ github.sha }}
+          restore-keys: jaxcache-${{ runner.os }}-g${{ matrix.group }}-${{ hashFiles('uv.lock') }}-
       - name: Suite shard ${{ matrix.group }}/3 (CPU JAX)
         env:
           JAX_PLATFORM_NAME: cpu
           JAX_ENABLE_X64: "1"
-        run: uv run --python 3.12 --extra gp pytest -n 0 -m "not slow" --splits 3 --group ${{ matrix.group }} --splitting-algorithm least_duration
+        run: |
+          cp .test_durations durations-g${{ matrix.group }}.json
+          uv run --python 3.12 --extra gp pytest -n 0 -m "not slow" --splits 3 --group ${{ matrix.group }} \
+            --splitting-algorithm least_duration \
+            --durations-path durations-g${{ matrix.group }}.json --store-durations --clean-durations
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with: { name: "durations-g${{ matrix.group }}", path: "durations-g${{ matrix.group }}.json", retention-days: 7 }
+      - uses: actions/cache/save@v4
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          path: .jax_cache
+          key: jaxcache-${{ runner.os }}-g${{ matrix.group }}-${{ hashFiles('uv.lock') }}-${{ github.sha }}
+  durations:
+    # One refreshed .test_durations from the three shards (the tests each ran), as
+    # an artifact. To rebalance the shards: download it from a recent main run and
+    # commit it as .test_durations.
+    needs: pytest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { pattern: "durations-g*", merge-multiple: true }
+      - name: Merge
+        run: |
+          python3 - <<'PY'
+          import glob, json
+          d = {}
+          for f in sorted(glob.glob("durations-g*.json")):
+              d.update(json.load(open(f)))
+          json.dump(d, open(".test_durations", "w"), sort_keys=True, indent=4)
+          print(len(d), "tests;", round(sum(d.values()) / 60, 1), "min in total")
+          for k, v in sorted(d.items(), key=lambda kv: -kv[1])[:5]:
+              print("  %7.1fs  %s" % (v, k))
+          PY
+      - uses: actions/upload-artifact@v4
+        with: { name: test-durations, path: .test_durations, retention-days: 30, include-hidden-files: true }
   optional-deps:
     # The tests that skip without the optional dependencies: lammps-jax's export
     # (tests/test_export_lammps.py, the scaling suite's bundle export) and
@@ -48,11 +89,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - uses: actions/cache@v4
+      - uses: actions/cache/restore@v4
         with:
           path: .jax_cache
-          key: jaxcache-${{ runner.os }}-optional-${{ github.sha }}
-          restore-keys: jaxcache-${{ runner.os }}-optional-
+          key: jaxcache-${{ runner.os }}-optional-${{ hashFiles('uv.lock') }}-${{ github.sha }}
+          restore-keys: jaxcache-${{ runner.os }}-optional-${{ hashFiles('uv.lock') }}-
       - name: Install matscipy-neighbours (C++ source build) and lammps-jax
         run: |
           uv sync --python 3.12 --extra gp --extra fast-neighbours
@@ -66,6 +107,11 @@ jobs:
           uv run --no-sync pytest -n 0 -m "not slow"
           tests/test_export_lammps.py tests/test_bench_scaling.py tests/test_calc_jit.py
           tests/test_efv.py tests/test_skin.py tests/test_perf_parity.py
+      - uses: actions/cache/save@v4
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          path: .jax_cache
+          key: jaxcache-${{ runner.os }}-optional-${{ hashFiles('uv.lock') }}-${{ github.sha }}
   smoke:
     # Import + a small descriptor/EFV/kernel smoke on the other supported Pythons
     # -- a cheap compatibility check without re-running the whole (slow) matrix.
@@ -77,11 +123,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - uses: actions/cache@v4
+      - uses: actions/cache/restore@v4
         with:
           path: .jax_cache
-          key: jaxcache-${{ runner.os }}-${{ github.sha }}
-          restore-keys: jaxcache-${{ runner.os }}-
+          key: jaxsmoke-${{ runner.os }}-py${{ matrix.python }}-${{ hashFiles('uv.lock') }}-${{ github.sha }}
+          restore-keys: jaxsmoke-${{ runner.os }}-py${{ matrix.python }}-${{ hashFiles('uv.lock') }}-
       - name: Import + smoke
         env:
           JAX_PLATFORM_NAME: cpu
@@ -90,6 +136,11 @@ jobs:
           uv run --python ${{ matrix.python }} --extra gp python -c "import ace_jax, ace_jax.fit, ace_jax.eval; print('import OK')"
           uv run --python ${{ matrix.python }} --extra gp pytest -m "not slow" \
             tests/test_descriptors.py tests/test_efv.py tests/test_gp_kernels.py -q
+      - uses: actions/cache/save@v4
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          path: .jax_cache
+          key: jaxsmoke-${{ runner.os }}-py${{ matrix.python }}-${{ hashFiles('uv.lock') }}-${{ github.sha }}
   ladder:
     # Heavy integration run ONCE (not per-Python): the real-model MCMC ladder
     # (MAP/Laplace/Pathfinder/NUTS, fast mode) and any other `slow` test.
