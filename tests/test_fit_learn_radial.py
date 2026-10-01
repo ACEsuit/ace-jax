@@ -142,10 +142,9 @@ def test_fit_learn_radial_end_to_end(fast, tmp_path):
                          "n_fit", "n_val", "seconds"}
     z = np.load(tmp_path / "model.npz")
     np.testing.assert_allclose(z["rnl_Wnlq"], res.radial.W, rtol=0, atol=1e-12)
-    learned = json.loads(bytes(z["meta_json"]).decode())["radial_learned"]
-    assert learned == (info["selected"] != "init")
-    if learned:
-        assert ACECalculator(str(tmp_path / "model.npz"), lean=True).splined
+    assert info["selected"] != "init"            # a recoverable case: the learned candidate wins the gate
+    assert json.loads(bytes(z["meta_json"]).decode())["radial_learned"] is True
+    assert ACECalculator(str(tmp_path / "model.npz"), lean=True).splined
 
 
 @pytest.mark.slow                    # ~1 min each; the CI slow job runs on every PR
@@ -219,3 +218,10 @@ def test_cli_lam_grid_parses_to_floats():
     from ace_jax.cli import _fit_config, _parse
     a = _parse(["fit", *FAST_CLI, "--learn-radial", "--radial-lam-grid", "0,1e-3,1e-2", "--out", "o"])
     assert _fit_config(a).radial_lam_grid == (0.0, 1e-3, 1e-2)
+
+
+def test_config_refuses_learn_radial_with_a_baseline():
+    """A baseline fit saves no model file, so the learned radials would be lost."""
+    for kw in (dict(baseline="dimer_mean.npz"), dict(base_npz="mu0.npz")):
+        with pytest.raises(ValueError, match="learn_radial.*baseline"):
+            _cfg(learn_radial=True, **kw).validate()

@@ -102,6 +102,9 @@ class FitConfig:
         if self.fix_rho is not None and self.opt != "lbfgs":
             raise ValueError("fix_rho is implemented for opt lbfgs only")
         if self.learn_radial:
+            if self.baseline is not None or self.base_npz is not None:
+                raise ValueError("learn_radial with a baseline: the fit saves no model file, so the "
+                                 "learned radials would be lost")
             if not 0.0 < self.radial_val_frac < 1.0:
                 raise ValueError(f"radial_val_frac must be in (0, 1), got {self.radial_val_frac}")
             if self.radial_n_q < 1:
