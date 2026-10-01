@@ -36,14 +36,14 @@ def _x64():
 @pytest.fixture(scope="module", autouse=True)
 def _cache(tmp_path_factory):
     """The committed coupling entries, re-written into a temp cache by this
-    process (as test_python_authoring's _primed_cache does), so their stamp
+    process (as test_basis_build's _primed_cache does), so their stamp
     is the current coupling backend id (`coupling.backend_id()`), not the one
     they were generated under.  The entries predate the ET main backend (ET
     0.4.3 era); tests/test_coupling_cache_fixtures.py pins that they equal the
     current backend's couplings up to a per-B-row scale, which the subspace
     descriptor parity here cannot see."""
     import json as _json
-    from ace_jax.construct import coupling as C
+    from ace_jax.basis import coupling as C
     global CACHE
     out = tmp_path_factory.mktemp("cpl")
     for f in sorted((FIX / "coupling_cache_embedding").glob("cpl-*.npz")):
@@ -63,7 +63,7 @@ def _cache(tmp_path_factory):
 
 
 def _build(case, rows=True, **kw):
-    from ace_jax.construct.model import build_embedding_model
+    from ace_jax.basis.model import build_embedding_model
     z = _need(FIX / f"embdesc_ref_{case}.npz")
     dmax = int(z["dmax"])
     src = dict(rows=z["rows"]) if rows else kw.pop("src")
@@ -96,7 +96,7 @@ def _span_residual(A, B, rtol=1e-9):
 
 @pytest.mark.parametrize("case", CASES)
 def test_descriptor_subspace_matches_julia(case, monkeypatch):
-    monkeypatch.setenv("ACEJAX_NO_JULIA", "1")
+    monkeypatch.setenv("ACEJAX_COUPLING_CACHE_ONLY", "1")
     auth, z = _build(case)
     Dp, Dj = _descs(auth, z), z["desc"].T
     assert Dp.shape == Dj.shape
@@ -110,7 +110,7 @@ def test_descriptor_subspace_matches_julia(case, monkeypatch):
 
 @pytest.mark.parametrize("case", CASES)
 def test_basis_sizes_and_prior_match_julia(case, monkeypatch):
-    monkeypatch.setenv("ACEJAX_NO_JULIA", "1")
+    monkeypatch.setenv("ACEJAX_COUPLING_CACHE_ONLY", "1")
     auth, z = _build(case)
     ref = _need(FIX / f"{CASES[case]}.npz")
     rm = json.loads(bytes(ref["meta_json"]).decode())
@@ -123,7 +123,7 @@ def test_basis_sizes_and_prior_match_julia(case, monkeypatch):
 def test_lossless_model_is_independent_of_the_pca_sign(monkeypatch):
     """Lossless widths: built from the port's own (sign-fixed) reduction of the
     MH-1 table, the model spans the same space as Julia's."""
-    monkeypatch.setenv("ACEJAX_NO_JULIA", "1")
+    monkeypatch.setenv("ACEJAX_COUPLING_CACHE_ONLY", "1")
     t = _need(FIX / "embedding_ref_mh1_SiGe.npz")
     auth, z = _build("SiGe_o2d6", rows=False, src=dict(embedding=([14, 32], t["table"])))
     Dp, Dj = _descs(auth, z), z["desc"].T
@@ -133,8 +133,8 @@ def test_lossless_model_is_independent_of_the_pca_sign(monkeypatch):
 
 
 def test_save_npz_round_trip(tmp_path, monkeypatch):
-    monkeypatch.setenv("ACEJAX_NO_JULIA", "1")
-    from ace_jax.construct.export import save_npz
+    monkeypatch.setenv("ACEJAX_COUPLING_CACHE_ONLY", "1")
+    from ace_jax.basis.export import save_npz
     from ace_jax.eval import load
     from ace_jax.eval.api import site_descriptors
     auth, z = _build("SiGe_o2d6")

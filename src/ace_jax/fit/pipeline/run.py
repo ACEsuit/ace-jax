@@ -46,7 +46,7 @@ def fit(cfg, data, log=print, on_stage=None):
             stage("ard", ard)
             from .export import linear_arrays_from_mean, model_file_blocked
             if model_file_blocked(cfg) is None:      # the ARD-mean model.npz, before prediction
-                stage("model", linear_arrays_from_mean(cfg, data.E0, b.prob.cfg, ard.posterior.mean))
+                stage("model", linear_arrays_from_mean(data.z, data.E0, b.prob.cfg, ard.posterior.mean))
         # cached linear statistics (run.py) or a full recompute per draw (the CLI's
         # historical path): equal in exact arithmetic, not in summation order
         stats = obj.stats if cfg.predict_stats == "cached" else None

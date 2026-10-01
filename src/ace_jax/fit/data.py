@@ -155,6 +155,8 @@ def _batch(configs, meta, E0, rcut, C, n_cap, k_cap):
     yF, wF = cat(yF).reshape(-1, 3), cat(wF)
     n_nodes = off
     assert n_nodes <= n_cap, (n_nodes, n_cap)
+    # symmetric cutoff list: <= k_cap edges into any node (predict._dtc_deriv_residual relies on it)
+    assert not nbr.size or np.bincount(nbr[nmask], minlength=1).max() <= k_cap
     pn = n_cap - n_nodes
     pad = lambda a, k, v: np.concatenate([a, np.full((k,) + a.shape[1:], v, a.dtype)])
     # padded nodes get K padded slots at the cutoff, where the envelope vanishes

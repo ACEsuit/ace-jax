@@ -7,9 +7,16 @@ on:
   pull_request:
     paths:
       - "coupling/**"
-      - "src/ace_jax/construct/**"
+      - "src/ace_jax/basis/**"
+      - "src/ace_jax/fit/pipeline/data.py"
+      - "src/ace_jax/cli.py"
+      - "src/ace_jax/runfile.py"
+      - "pyproject.toml"
+      - "uv.lock"
       - "tests/test_coupling_*.py"
-      - "tests/test_python_authoring.py"
+      - "tests/test_basis_*.py"
+      - "tests/test_fit_basis_pipeline.py"
+      - "tests/test_cli_fit_basis.py"
       - "fixtures/coupling_ref_*.npz"
       - ".github/workflows/coupling-wheels.yml"
   push:
@@ -128,7 +135,7 @@ jobs:
         run: |
           uv sync --python 3.12 --extra gp
           uv pip install --reinstall dist/*.whl
-          uv run --no-sync pytest -n 0 -v tests/test_coupling_parity.py tests/test_coupling_etshim.py tests/test_coupling_cache.py tests/test_python_authoring.py
+          uv run --no-sync pytest -n 0 -v tests/test_coupling_parity.py tests/test_coupling_etshim.py tests/test_coupling_cache.py tests/test_basis_build.py tests/test_fit_basis_pipeline.py tests/test_cli_fit_basis.py
 
   publish:
     # only after every platform's wheel built, passed its clean-environment tests,

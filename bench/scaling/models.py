@@ -183,7 +183,7 @@ def learned_proxy(src, dst, n_q=12, scale=0.1, seed=0):
     import jax
     jax.config.update("jax_enable_x64", True)            # to_analytic's projection is f64
     import numpy as np
-    from ace_jax.construct.export import patch_radial_npz
+    from ace_jax.basis.export import patch_radial_npz
     from ace_jax.eval import load
     from ace_jax.fit.radial_model import row_active, to_analytic, with_radial
     model, _, _ = load(str(src))

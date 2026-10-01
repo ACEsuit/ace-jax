@@ -1,6 +1,6 @@
 """Disposable npz bridge writer for authored models.
 
-Packages an `Authoring` bundle into exactly the npz schema `eval.io.load`
+Packages a `Basis` bundle into exactly the npz schema `eval.io.load`
 reads (the same one `julia/export_model.jl` writes):
 
     A2B_{rows,cols,vals,shape}   sparse coupling triplets (one nonzero/column)
@@ -17,9 +17,9 @@ reads (the same one `julia/export_model.jl` writes):
     meta_json                    schema_version = 1
 
 This file is the compatibility path only: Python callers evaluate the
-in-memory tree directly (`Authoring.eval_pair`, no npz round-trip); the file
+in-memory tree directly (`Basis.eval_pair`, no npz round-trip); the file
 serves ACEfit-fitted interchange and shell hand-off (`ace-jax basis
---out`).  The round-trip test (`tests/test_python_authoring.py::test_bridge_*`)
+--out`).  The round-trip test (`tests/test_basis_build.py::test_bridge_*`)
 pins the writer against the committed Julia fixture, so any schema drift on
 either side is caught.
 """
@@ -30,13 +30,13 @@ import numpy as np
 
 
 def save_npz(path, auth):
-    """Write `auth` (an `Authoring`) to `path` in the eval-io schema.
+    """Write `auth` (a `Basis`) to `path` in the eval-io schema.
 
     The meta written here is derived from the model being saved, not from the
     authoring defaults: any tree patched onto a different branch (e.g. the
     fixture-injection round trip) must save as what it now is, or the loader
     silently routes branch arrays to placeholders.  The derivation and the
-    structural checks live in `Authoring.eval_pair` -- the file path and the
+    structural checks live in `Basis.eval_pair` -- the file path and the
     in-memory hand-off share one source of truth.
     """
     model, meta = auth.eval_pair()
@@ -121,7 +121,7 @@ def patch_radial_npz(src, dst, model, readout=None):
     exact branch conversion), stale otherwise.  Coupling, pair basis and E0
     are always copied verbatim.  This is how a learned radial is written back
     from a model that was loaded rather than authored (save_npz needs an
-    Authoring)."""
+    Basis)."""
     model.require_full("patch_radial_npz")
     if model.radial_kind != "analytic":
         raise ValueError(f"patch_radial_npz: model radial_kind {model.radial_kind!r} is not analytic")

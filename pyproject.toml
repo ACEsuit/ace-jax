@@ -33,12 +33,12 @@ dependencies = [
   # training/eval data reader (libAtoms C parser, binary wheels): labels come back
   # as written, independent of ASE's calculator-key handling (see fit/xyz.py)
   "extxyz>=0.4.5",
+  # coupling tables for new basis shapes (a compiled library, nothing to install
+  # besides the wheel); platform wheels only -- elsewhere fit from an existing .npz
+  "ace-jax-coupling==0.2.0; (sys_platform == 'linux' and (platform_machine == 'x86_64' or platform_machine == 'aarch64')) or (sys_platform == 'darwin' and platform_machine == 'arm64') or (sys_platform == 'win32' and platform_machine == 'AMD64')",
 ]
 
 [project.optional-dependencies]
-# Coupling tables for NEW basis shapes: a juliac-compiled EquivariantTensors (no Julia at runtime).
-# Refitting / evaluating never needs it.  Platform wheels: Linux x86_64/aarch64, macOS arm64, Windows x64.
-basis = ["ace-jax-coupling==0.2.0; (sys_platform == 'linux' and (platform_machine == 'x86_64' or platform_machine == 'aarch64')) or (sys_platform == 'darwin' and platform_machine == 'arm64') or (sys_platform == 'win32' and platform_machine == 'AMD64')"]
 # Hybrid ACE+GP fitting with the marginalised-hyperparameter UQ ladder.
 gp = ["numpyro>=0.16", "optax>=0.2", "blackjax>=1.6"]
 cuda = ["jax[cuda12]>=0.10.1"]

@@ -172,7 +172,7 @@ def _bspline_eval(x, c, n_int, deriv=False):
 
 def _table(W, polys, n_int):
     """Spline coefficients (NZ, NZ, n_int+3, F) of S = W . P on n_int intervals."""
-    from ..construct.radial_ace1 import cubic_bspline_coefs
+    from ..basis.radial_ace1 import cubic_bspline_coefs
     NZ, _, F, n_q = W.shape
     xs = np.linspace(-1.0, 1.0, n_int + 1)
     P, _, _ = _poly_d012(xs, *polys)

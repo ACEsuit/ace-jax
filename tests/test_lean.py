@@ -310,7 +310,7 @@ def test_radial_edits_refuse_a_lean_model():
 
 # ------------------------------------------------------------------ synthetic variants
 def _legendre(n_q):
-    from ace_jax.construct.radial_init import legendre_3term
+    from ace_jax.basis.radial_init import legendre_3term
     return tuple(jnp.asarray(x) for x in legendre_3term(n_q))
 
 
@@ -380,12 +380,12 @@ def test_authored_model_through_the_calculator(tmp_path, monkeypatch):
     readout: ACECalculator(lean=True) equals lean=False to roundoff.  Its
     radials are analytic but not learned, so the default lean keeps them
     analytic (no splining)."""
-    from test_python_authoring import _primed_cache
+    from test_basis_build import _primed_cache
 
     from ace_jax.calc.point import ACECalculator
-    from ace_jax.construct.model import build_model
+    from ace_jax.basis.model import build_model
     from ace_jax.eval.model import fold_readout
-    monkeypatch.setenv("ACEJAX_NO_JULIA", "1")
+    monkeypatch.setenv("ACEJAX_COUPLING_CACHE_ONLY", "1")
     auth = build_model([14], 3, 10, coupling_cache_dir=_primed_cache(tmp_path))
     m, meta = auth.eval_pair()
     assert m.pair_radial_kind == "analytic" and m.radial_kind == "analytic"

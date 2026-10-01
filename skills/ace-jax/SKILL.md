@@ -5,29 +5,36 @@ description: Build, fit and evaluate Atomic Cluster Expansion (ACE) interatomic 
 
 # ace-jax
 
-ACE potentials in pure Python/JAX. No Julia is needed anywhere: fitting and
-evaluation use only the core package, and authoring a *new* basis shape (`aj basis`)
-uses the `basis` extra, a compiled EquivariantTensors wheel.
+ACE potentials in pure Python/JAX. `aj fit` builds the basis from
+`--order/--max-degree` and fits it in one command; everything installs with
+`pip install ace-jax`.
 
 ## Install
 
 ```bash
-pip install ace-jax              # evaluate, linear fit, ASE calculator
+pip install ace-jax              # evaluate, linear fit, build new bases, ASE calculator
 pip install "ace-jax[gp]"        # + `aj fit` (all arms: MAP optimisers, GP, UQ ladder, POPS)
-pip install "ace-jax[basis]" # + `aj basis` (compiled EquivariantTensors wheel; no Julia; Linux x86_64/aarch64, macOS arm64, Windows x64)
 pip install "ace-jax[cuda]"      # + CUDA 12 JAX
 ```
 
-`ace-jax-coupling` (the `basis` extra's wheel) is not on PyPI yet: until it is,
-`aj basis` for a new basis shape needs a locally built wheel (`coupling/` in the
-ace-jax repo); fit and eval are unaffected.
+Building a new basis shape works on Linux x86_64/aarch64 and macOS arm64;
+elsewhere fit from an existing `.npz` with `--model`. Pre-release: ace-jax's
+`ace-jax-coupling` dependency is not on PyPI yet, so install from the repo.
 
 `ace-jax` and `aj` are the same CLI. `aj <cmd> --help` lists every flag.
 
-## Workflow: basis → fit → eval
+## Workflow: fit → eval (the basis is built inside the fit)
 
 ```bash
-# 1. a model definition (unfitted). Skip this step if you already have a .npz.
+K="--energy-key dft_energy --force-key dft_force --virial-key dft_virial"
+# 1. fit straight from data: the basis (species from the data) is built in memory.
+aj fit --order 3 --max-degree 10 --train train.xyz --test test.xyz $K \
+    --m-per-species 0 --out out_linear                                 # linear ACE
+#    every fit writes out_linear/fit.yaml: the whole resolved run. Reproduce or
+#    vary it (command-line flags override the file):
+aj fit --config out_linear/fit.yaml --m-per-species 6 --out out_gp     # same run, + GP
+
+# Optional: save a basis on its own (to share it, or fit it several times).
 aj basis --elements Si --order 3 --max-degree 10 --out si.npz
 #    multi-element with a frozen species embedding (MACE table JSON {Z, emb},
 #    or `identity`); --d-max caps the channel widths (default lossless):
@@ -36,8 +43,7 @@ aj basis --elements Cr,Mn,Fe,Co,Ni --order 3 --max-degree 10 \
 #    the smoothness prior (Gamma) is built in; --no-gamma skips it. --rcut
 #    defaults to 5.5 (with --embedding: 2.5 x mean bond length).
 
-# 2. fit. Label keys default to energy/forces/virial; pass yours explicitly.
-K="--energy-key dft_energy --force-key dft_force --virial-key dft_virial"
+# 2. fit a saved basis. Label keys default to energy/forces/virial; pass yours explicitly.
 aj fit --model si.npz --train train.xyz --test test.xyz $K \
     --m-per-species 0 --r0 2.35 --out out_linear                      # linear ACE
 aj fit --model si.npz --train train.xyz --test test.xyz $K \
@@ -50,10 +56,17 @@ aj eval --model out_gp/gp_model.npz  --data new.xyz $K --forces --out pred.csv  
 aj eval --model model.yace --data new.xyz $K --forces                            # PACE works too
 ```
 
-`aj fit` always needs `--model`, `--out`, `--r0` (the typical nearest-neighbour
-distance in Å, which centres the GP hyperprior), and either `--train` [+ `--test`]
-or `--data` [+ `--ntrain/--ntest/--test-start`, a seeded split]. Without
-`--test`, the fit is scored on its own training set.
+`aj fit` needs a basis — `--order/--max-degree` (built in the fit; `--elements`
+defaults to the species in the data, `--basis-embedding` adds a frozen element
+embedding) or `--model <file.npz>` — plus `--out` and either `--train` [+ `--test`]
+or `--data` [+ `--ntrain/--ntest/--test-start`, a seeded split]. `--r0` (the
+typical nearest-neighbour distance in Å, centring the GP hyperprior) defaults to
+the built basis's mean bond length and is required with `--model`. Without
+`--test`, the fit is scored on its own training set. `--config fit.yaml`
+supplies any of these (keys = flag names with underscores, the basis in a
+`basis:` block); typos and bad values in the file are errors naming the key.
+Command-line flags win, including switching an alternative: `--model m.npz`
+over a file's `basis:`, `--train` over its `data:` (each logged as an override).
 
 ## Choosing options
 
@@ -176,10 +189,10 @@ load; faster only at large `nradbase`). Values are unchanged to roundoff.
     an analytic tensor radial marked `radial_learned` (what `radial_learn`
     writes, e.g. a `bench/learn_radial` model.npz) is splined at 1e-10 by
     `ace_jax.eval.to_spline`.
-    - Julia `ace_model` exports and Python-authored models are analytic but not
+    - ACEpotentials `ace_model` exports and built bases (`aj basis`, `aj fit`) are analytic but not
       learned, so they stay exact unless you pass a float, e.g.
       `spline_tol=1e-10`.
-    - Old learned-radial files written before the flag existed load as not learned: mark one with `ace_jax.construct.export.mark_radial_learned("model.npz")`, or pass `spline_tol=1e-10`.
+    - Old learned-radial files written before the flag existed load as not learned: mark one with `ace_jax.basis.export.mark_radial_learned("model.npz")`, or pass `spline_tol=1e-10`.
     - The spline gather replaces the polynomial recursion, and the
       species-compact blocks apply again (learned radials keep ACE1's
       one-neighbour-species-per-column pattern).
@@ -278,9 +291,9 @@ This writes a lammps-jax bundle for `pair_style jax/kk` (GPU only).
 
 Other entry points:
 - `aj.site_descriptors(...)`: per-atom ACE descriptors.
-- `ace_jax.construct.model.build_model` and `build_embedding_model`: author a
+- `ace_jax.basis.model.build_model` and `build_embedding_model`: author a
   model in memory.
-- `ace_jax.construct.export.save_npz`: write an authored model to `.npz`.
+- `ace_jax.basis.export.save_npz`: write an authored model to `.npz`.
 - Learned radial basis (research, linear arm): `bench/learn_radial/run.py
   --model M.npz --data D.xyz --out DIR --r0 2.35 [--n-q 12] [--lam-grid 0,1e-2]`
   learns the tensor radials by VarPro (`ace_jax.fit.radial_learn.learn_radial`)

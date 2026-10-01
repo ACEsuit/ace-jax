@@ -16,7 +16,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from ..construct.radial_init import from_table, legendre_3term
+from ..basis.radial_init import from_table, legendre_3term
 from ..eval.radial import agnesi_normalized, env_poly2sx, poly_recursion, spline_eval
 from ..eval.splinify import to_spline  # noqa: F401  (to_analytic's inverse, for deployment)
 from .data import flat_edges
@@ -237,9 +237,9 @@ def rnl_degrees(meta, wL=1.5):
     (onehot) convention, n' = (n - 1) // NZ, from the model's (n, l) spec.
     Rebuilds the spec with build_spec; raises if its length disagrees with
     meta["n_rnl"] (e.g. a Julia export with a different wL)."""
-    from ..construct.spec import build_spec
+    from ..basis.spec import build_spec
     NZ = len(meta["elements"])
-    wL = meta.get("authoring", {}).get("wL", wL)
+    wL = meta.get("basis", {}).get("wL", wL)
     _, Rnl, _ = build_spec(NZ, meta["order"], meta["totaldegree"], wL)
     if len(Rnl) != meta["n_rnl"]:
         raise ValueError(f"rnl_degrees: rebuilt spec has {len(Rnl)} radials, meta n_rnl={meta['n_rnl']}")

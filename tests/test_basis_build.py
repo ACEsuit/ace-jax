@@ -38,7 +38,7 @@ def _fixture(name):
 
 
 def test_legendre_recurrence():
-    from ace_jax.construct.radial_init import legendre_3term, poly_eval
+    from ace_jax.basis.radial_init import legendre_3term, poly_eval
     x = np.linspace(-1, 1, 41)
     n = 15
     A, B, C = legendre_3term(n)
@@ -54,7 +54,7 @@ def test_legendre_3term_matches_fixture():
     coefficient: Julia's legendre_basis folds the P0 normalisation into A[2]
     (P1 = A[2] x + B[2], no P0 factor), so A[1] here is sqrt(3/2), not
     sqrt(3)."""
-    from ace_jax.construct.radial_init import legendre_3term
+    from ace_jax.basis.radial_init import legendre_3term
     z = _fixture("si_ace_model.npz")
     A, B, C = legendre_3term(len(z["polys_A"]))
     assert np.allclose(A, z["polys_A"], atol=1e-12)
@@ -69,7 +69,7 @@ def test_poly_eval_matches_eval_path():
     import jax
     jax.config.update("jax_enable_x64", True)
     import jax.numpy as jnp
-    from ace_jax.construct.radial_init import legendre_3term, poly_eval
+    from ace_jax.basis.radial_init import legendre_3term, poly_eval
     from ace_jax.eval.radial import poly_recursion
     x = np.linspace(-1, 1, 41)
     for n in (2, 3, 15):
@@ -82,7 +82,7 @@ def test_poly_eval_matches_eval_path():
 
 
 def test_resolve_elements_rejects_duplicates():
-    from ace_jax.construct.radial_init import resolve_elements
+    from ace_jax.basis.radial_init import resolve_elements
     assert resolve_elements(["C", "Si", 32]) == [6, 14, 32]     # order kept
     with pytest.raises(ValueError, match="duplicate"):
         resolve_elements(["Si", 14])
@@ -91,7 +91,7 @@ def test_resolve_elements_rejects_duplicates():
 def test_per_pair_r0_default():
     """ACEpotentials _default_rin0cuts: r0(zi, zj) = (bond_len(zi) +
     bond_len(zj)) / 2 per species pair, not one global mean."""
-    from ace_jax.construct.radial_init import (agnesi_transform_params,
+    from ace_jax.basis.radial_init import (agnesi_transform_params,
                                                pair_radial_init,
                                                tensor_radial_init)
     Rnl = [(1, 0), (2, 0), (1, 1)]
@@ -107,7 +107,7 @@ def test_per_pair_r0_default():
 
 
 def test_r0_override_scalar_or_table():
-    from ace_jax.construct.radial_init import tensor_radial_init
+    from ace_jax.basis.radial_init import tensor_radial_init
     Rnl = [(1, 0), (2, 0)]
     t = tensor_radial_init([14, 6], Rnl, rcut=5.5, r0=2.0)
     assert np.allclose(t["rnl_transform"][..., 4], 2.0)
@@ -121,13 +121,13 @@ def test_r0_override_scalar_or_table():
 def test_untabulated_bond_length_raises():
     """Julia errors per element (`bond_len(z)`); a silent average over the
     known species would give a wrong transform for the unknown one."""
-    from ace_jax.construct.radial_init import tensor_radial_init
+    from ace_jax.basis.radial_init import tensor_radial_init
     with pytest.raises(ValueError, match="bond length"):
         tensor_radial_init([14, 2], [(1, 0)], rcut=5.5)
 
 
 def test_agnesi_params_match_fixture():
-    from ace_jax.construct.radial_init import (agnesi_a, agnesi_transform_params,
+    from ace_jax.basis.radial_init import (agnesi_a, agnesi_transform_params,
                                                agnesi_normalized)
     z = _fixture("si_ace_model.npz")
     ref_t = np.asarray(z["rnl_transform"], float)[0, 0]
@@ -135,7 +135,7 @@ def test_agnesi_params_match_fixture():
     assert np.allclose(tr, ref_t, atol=1e-12)
     assert abs(agnesi_a(2, 2) - 2 / 3) < 1e-14
     # ycut must follow from the raw transform, not be stored independently
-    from ace_jax.construct.radial_init import agnesi_raw
+    from ace_jax.basis.radial_init import agnesi_raw
     assert abs(agnesi_raw(5.5, 2, 2, agnesi_a(2, 2), 0.0, 2.4) - ref_t[6]) < 1e-12
     # and the normalized eval agrees with the fixture's probe_x at probe_r
     x = agnesi_normalized(np.asarray(z["probe_r"], float), ref_t)
@@ -143,7 +143,7 @@ def test_agnesi_params_match_fixture():
 
 
 def test_envelope_formulas():
-    from ace_jax.construct.radial_init import envelope1sr_eval, envelope2sx_eval
+    from ace_jax.basis.radial_init import envelope1sr_eval, envelope2sx_eval
     x = np.linspace(-1, 1, 21)
     env = (-1.0, 1.0, 2.0, 2.0, 1.0)
     e = envelope2sx_eval(None, x, env)
@@ -163,18 +163,18 @@ def test_eval_pair_in_memory_handoff():
 
     eval_pair's derived meta must equal the loader's for a fixture tree, and
     the pair path must agree with the path-based calculator (which test_efv
-    separately pins against Julia).  Authoring is exercised via a directly
+    separately pins against Julia).  Basis is exercised via a directly
     instantiated NamedTuple, so this needs no Julia."""
     import jax
     jax.config.update("jax_enable_x64", True)
     from ase import Atoms
     from ace_jax.eval import ACECalculator, load
-    from ace_jax.construct.model import Authoring
+    from ace_jax.basis.model import Basis
 
     path = os.path.join(FIX, "si_ace_model.npz")
     z = _fixture("si_ace_model.npz")
     model, meta, _ = load(path)
-    auth = Authoring(model=model, meta=meta, nnll_spec=(), Rnl_spec=(),
+    auth = Basis(model=model, meta=meta, nnll_spec=(), Rnl_spec=(),
                      Ylm_spec=(), aa_sig=(), aspec=(), aa_specs=(), nnll=(),
                      gamma=None)
     _, meta2 = auth.eval_pair()
@@ -210,8 +210,8 @@ def _atoms_from(z):
 
 
 def _blank_authoring(model, meta):
-    from ace_jax.construct.model import Authoring
-    return Authoring(model=model, meta=meta, nnll_spec=(), Rnl_spec=(),
+    from ace_jax.basis.model import Basis
+    return Basis(model=model, meta=meta, nnll_spec=(), Rnl_spec=(),
                      Ylm_spec=(), aa_sig=(), aspec=(), aa_specs=(), nnll=(),
                      gamma=None)
 
@@ -220,8 +220,8 @@ def _fixture_coupling():
     """A `Coupling` reconstructed from fixtures/si_ace_model.npz.  The
     fixture's A2B columns are in aa_spec (evaluation) order, so each column's
     (n, l, m) signature comes from the fixture's own aspec gathers."""
-    from ace_jax.construct.coupling import Coupling
-    from ace_jax.construct.spec import build_spec
+    from ace_jax.basis.coupling import Coupling
+    from ace_jax.basis.spec import build_spec
     z = _fixture("si_ace_model.npz")
     meta = json.loads(bytes(z["meta_json"]).decode())
     _, Rnl, Ylm = build_spec(1, 3, 10, 1.5)
@@ -238,8 +238,8 @@ def _fixture_coupling():
 def _primed_cache(tmp_path):
     """A coupling cache dir holding the fixture coupling under the key
     build_model([14], 3, 10) asks for, so authoring never touches Julia."""
-    from ace_jax.construct import coupling as C
-    from ace_jax.construct.spec import build_spec
+    from ace_jax.basis import coupling as C
+    from ace_jax.basis.spec import build_spec
     mb, Rnl, Ylm = build_spec(1, 3, 10, 1.5)
     key = C.coupling_key(mb, Rnl, Ylm)
     C._write_entry(C._entry_path(tmp_path, key), _fixture_coupling(), key, mb, Rnl, Ylm)
@@ -252,9 +252,9 @@ def test_build_model_edge_a_kind_matmul(tmp_path, monkeypatch):
     gather form (WB is zero at authoring, so compare descriptors)."""
     import jax
     jax.config.update("jax_enable_x64", True)
-    from ace_jax.construct.model import build_model
+    from ace_jax.basis.model import build_model
     from ace_jax.eval import ACECalculator
-    monkeypatch.setenv("ACEJAX_NO_JULIA", "1")
+    monkeypatch.setenv("ACEJAX_COUPLING_CACHE_ONLY", "1")
     cache = _primed_cache(tmp_path)
     g = build_model([14], 3, 10, coupling_cache_dir=cache)
     m = build_model([14], 3, 10, coupling_cache_dir=cache, edge_a_kind="matmul")
@@ -278,7 +278,7 @@ def test_save_npz_spline_factorised_roundtrip(tmp_path):
     import jax
     jax.config.update("jax_enable_x64", True)
     import jax.numpy as jnp
-    from ace_jax.construct.export import save_npz
+    from ace_jax.basis.export import save_npz
     from ace_jax.eval import ACECalculator, load
 
     path = os.path.join(FIX, "si_1429.npz")
@@ -320,10 +320,10 @@ import ace_jax_coupling  # noqa: F401  (fail loudly here if the extra is missing
 import jax
 jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
-from ace_jax.construct.model import build_model
-from ace_jax.construct.spec import build_spec
-from ace_jax.construct.coupling import couple
-from ace_jax.construct.export import save_npz
+from ace_jax.basis.model import build_model
+from ace_jax.basis.spec import build_spec
+from ace_jax.basis.coupling import couple
+from ace_jax.basis.export import save_npz
 from ace_jax.eval import io as eio
 from ace_jax.eval.model import fold_readout
 
@@ -476,7 +476,7 @@ import numpy as np
 import ace_jax_coupling  # noqa: F401  (fail loudly here if the extra is missing)
 import jax
 jax.config.update("jax_enable_x64", True)
-from ace_jax.construct.model import build_model
+from ace_jax.basis.model import build_model
 
 auth = build_model([14], 2, 5, coupling_cache=True, coupling_cache_dir=sys.argv[1])
 print("RESULT", float(np.asarray(auth.model.A2B).sum()), len(auth.meta["nnll"]))
@@ -485,7 +485,7 @@ print("RESULT", float(np.asarray(auth.model.A2B).sum()), len(auth.meta["nnll"]))
 
 def test_coupling_cache_no_julia_on_hit(tmp_path):
     """Tier 2 point 2: run 1 populates the per-shape cache (Julia allowed);
-    run 2 repeats with ACEJAX_NO_JULIA=1, which makes the shim raise if the
+    run 2 repeats with ACEJAX_COUPLING_CACHE_ONLY=1, which makes the shim raise if the
     coupling library is ever called -- the build must be served entirely from cache and
     produce the same A2B."""
     require_coupling_lib()
@@ -494,7 +494,16 @@ def test_coupling_cache_no_julia_on_hit(tmp_path):
     assert p1.returncode == 0, f"cache-populating run failed:\n{p1.stderr[-2000:]}"
     p2 = subprocess.run([sys.executable, "-c", _NOJULIA, str(tmp_path)],
                         capture_output=True, text=True, timeout=1200,
-                        env=dict(os.environ, ACEJAX_NO_JULIA="1"))
+                        env=dict(os.environ, ACEJAX_COUPLING_CACHE_ONLY="1"))
     assert p2.returncode == 0, (f"cache-hit run failed (missed the cache, or "
                                 f"touched Julia):\n{p2.stderr[-2000:]}")
     assert p1.stdout.split("RESULT ")[-1] == p2.stdout.split("RESULT ")[-1]
+
+
+def test_model_without_basis_meta_still_fits_radial():
+    """A model file without meta['basis'] (e.g. a Julia export, or a pre-rename
+    save) takes the radial-model defaults instead of failing."""
+    import inspect
+
+    from ace_jax.fit import radial_model as rm
+    assert 'meta.get("basis", {})' in inspect.getsource(rm)

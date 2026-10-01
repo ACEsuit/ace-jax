@@ -5,7 +5,7 @@
 - **Learned radials:** the model has `radial_learned` set, which `radial_learn` writes into meta_json. The splined result agrees with the full model to up to ~1e-9 in energy (relative) and ~2.3e-8 of max|F| in forces, not to roundoff.
 - **Other analytic models:** Julia `ace_model` exports and Python-authored models are `radial_kind="analytic"` too, but not learned, so they stay exact by default. A float `spline_tol`, e.g. `1e-10`, opts them in; `None` never splines.
 - **Pair radial:** never learned, so `"auto"` keeps an analytic pair radial exact.
-- **Old files:** learned-radial files written before the flag load as not learned. Mark one with `ace_jax.construct.export.mark_radial_learned(path)`, or pass `spline_tol=1e-10`.
+- **Old files:** learned-radial files written before the flag load as not learned. Mark one with `ace_jax.basis.export.mark_radial_learned(path)`, or pass `spline_tol=1e-10`.
 
 The policy lives in `splinify.spline_plan` alone.
 
@@ -95,7 +95,7 @@ it, as the inverse of `to_analytic`.
 
 **What it does:**
 - **Tabulates** the envelope-free S(x) = sum_q W P_q(x) at the knots of a uniform grid on [-1, 1]: (x0, h, n) = (-1, 2/n_int, n_int + 1).
-- **Interpolates** with the cubic B-spline `spline_eval` reads. The builder is `construct.radial_ace1.cubic_bspline_coefs`, the one behind the authored and Julia `splinify` tables. It is now a banded O(n) solve with an optional `end_d2`.
+- **Interpolates** with the cubic B-spline `spline_eval` reads. The builder is `basis.radial_ace1.cubic_bspline_coefs`, the one behind the authored and Julia `splinify` tables. It is now a banded O(n) solve with an optional `end_d2`.
 - **End condition:** the polynomial's exact second derivative at the end knots, where Interpolations.jl's `Line(OnGrid())` puts y'' = 0. That keeps the error O(h^4) up to the ends, where y'' = 0 would leave an O(h^2) boundary layer. The layer matters for the pair radial, whose r-envelope does not vanish at x = 1.
 - **Error:** max over species pairs and the columns A reads of max|spline - exact| / max|exact|, on 10 points per interval. For R_nl it includes the envelope; the pair radial is envelope-free. The derivative error is measured too (section 2b).
 - **Interval choice:** doubles from 32 until error <= tol. The last doubling can overshoot by up to 16x, so it also tries buckets from the one the h^4 rate predicts. It returns the smallest bucket (section 2b) that meets tol.
@@ -301,7 +301,7 @@ full, unsplined model: it is the model the posterior was built on, and the
 basis methods need it anyway. The lean mean then differs from the full mean by
 at most ~tol, well below any σ.
 
-Some Julia-parity tests run analytic Julia exports through `ACECalculator` with the defaults: `test_efv`, `test_descriptors`, `test_perf_parity` and `test_python_authoring`. Those exports are not learned, so `"auto"` keeps them analytic and the tests are exact again. `test_to_spline.py` checks that `si_ace_model` and `si_s69` give bitwise the same result as `spline_tol=None`.
+Some Julia-parity tests run analytic Julia exports through `ACECalculator` with the defaults: `test_efv`, `test_descriptors`, `test_perf_parity` and `test_basis_build`. Those exports are not learned, so `"auto"` keeps them analytic and the tests are exact again. `test_to_spline.py` checks that `si_ace_model` and `si_s69` give bitwise the same result as `spline_tol=None`.
 
 Splined at 1e-10, they would miss their references:
 - `test_efv` and `test_descriptors`: dE 1.5e-9 against 1e-10;

@@ -504,7 +504,7 @@ def test_save_result_refuses_stale_readout(tmp_path, small):
 
 
 def test_readout_to_npz_layout():
-    from ace_jax.construct.export import readout_to_npz
+    from ace_jax.basis.export import readout_to_npz
     nB, nP, NZ = 3, 2, 2
     c = np.arange((nB + nP) * NZ, dtype=float)
     WB, Wpair = readout_to_npz(c, nB, nP, NZ)

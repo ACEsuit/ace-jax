@@ -8,7 +8,7 @@ The compiled library runs in-process.
 Levels (each self-configures NZ/order/totaldegree/wL from the fixture metadata):
   * bridge parity      -- feed the ORACLE's own mb_spec through the coupling
                           library and compare to the reference coupling.
-  * END-TO-END parity  -- generate mb_spec FROM SCRATCH in Python (construct.spec
+  * END-TO-END parity  -- generate mb_spec FROM SCRATCH in Python (basis.spec
                           build_spec, reproducing ACEpotentials' TotalDegree/wL
                           selection), feed it through the library, and compare.
 
@@ -27,7 +27,7 @@ All residuals must be < 1e-12.
 
 Column identities come from the tensor's meta `𝔸spec` (the spec returned WITH the
 symmetrisation matrix), which is the true A2B column order -- see
-construct/coupling.py.
+basis/coupling.py.
 
 ET VERSIONS.  The library is EquivariantTensors main (the jameskermode fork rev
 in `ace_jax_coupling.build_info()`, based on ACEsuit v0.5.1); the fixtures were
@@ -58,8 +58,8 @@ def _parity(ref, mode):
     """mode "oracle": the reference's own mb_spec (isolates the library);
     mode "build": mb_spec from build_spec (end-to-end; also checks the mb SET)."""
     require_coupling_lib()
-    from ace_jax.construct.coupling import couple, subspace_residual
-    from ace_jax.construct.spec import _unflat, build_spec, spec_from_reference
+    from ace_jax.basis.coupling import couple, subspace_residual
+    from ace_jax.basis.spec import _unflat, build_spec, spec_from_reference
     path = FIXTURE_DIR / ref
     if not path.exists():
         pytest.skip(f"missing reference {ref}")

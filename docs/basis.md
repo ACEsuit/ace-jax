@@ -1,25 +1,49 @@
-# Python model authoring (Tier 1)
+# Building a basis (CLI and Python)
 
-**Goal.** Author a complete frozen `ace_model`-family model — `ACEModel` + `meta`
-— entirely from Python: `ace-jax basis --elements Si --order 3 --max-degree 10
---out si.npz`. Julia's role shrinks to the one thing it still owns, the SO(3)
-coupling via the [EquivariantTensors shim](coupling-etshim-spec.md); radial
-init, pair basis, readout, packaging and evaluation are pure Python/NumPy/JAX.
+A basis is a complete frozen `ace_model`-family model — `ACEModel` + `meta` —
+with a zero readout, ready to fit. There is one builder behind every route:
 
-## The authoring ladder
+```bash
+aj fit --order 3 --max-degree 10 --train train.xyz --out fit/     # build it inside the fit
+aj basis --elements Si --order 3 --max-degree 10 --out si.npz    # or save it on its own
+aj fit --config fit/fit.yaml --out fit2/                         # the run file carries the basis: block
+```
+
+```python
+from ace_jax.basis.model import BasisSpec, build_basis
+from ace_jax.fit.pipeline import FitConfig, fit, load_fit_data
+
+spec = BasisSpec(order=3, max_degree=10)             # elements=None: the species in the data
+b = build_basis(BasisSpec(order=3, max_degree=10, elements=("Si",)), seed=0)
+b.meta["n_B"], b.model.A2B.shape                     # inspect; modify with b._replace(model=...)
+cfg = FitConfig(model=b, arm="linear", m_per_species=0, r0=None)   # a Basis, a BasisSpec or a path
+res = fit(cfg, load_fit_data(cfg, train="train.xyz"))
+```
+
+`FitConfig(model=...)` takes a path, a `Basis` or a `BasisSpec`. A `BasisSpec`
+is built inside `load_fit_data` from the species found in the train/test/ood
+data (an explicit `elements` that misses a species in the data is an error);
+`r0=None` takes the basis's mean bond length as the GP hyperprior centre. The
+basis is handed to the fit as an in-memory npz, so a definition-built fit is
+bit-identical to a fit of the same basis saved to a file. The SO(3) coupling
+comes from EquivariantTensors' own construction, shipped precompiled in the
+`ace-jax-coupling` wheel ([maintainer notes](coupling-etshim-spec.md)); radial
+init, pair basis, readout, packaging and evaluation are Python/NumPy/JAX.
+
+## How a basis is built
 
 `build_model(elements, order, totaldegree, *, wL, rcut, r0, rin, radial_mode,
 pair_mode, seed, with_gamma, edge_a_kind, coupling_cache, coupling_cache_dir,
-n_q_factor)` (`construct/model.py`) walks the same
-steps the Julia exporter walks, returning an `Authoring` NamedTuple:
+n_q_factor)` (`basis/model.py`) walks the same
+steps the ACEpotentials exporter walks, returning a `Basis` NamedTuple:
 
 1. **`resolve_elements`** — atomic numbers or symbols (`14`, `"Si"`) → `zs`
    in the order given (it is the species index order, as ACEpotentials'
    `_convert_zlist` keeps it); duplicates are rejected.
-2. **`build_spec(NZ, order, totaldegree, wL)`** (`construct/spec.py`) — the three
+2. **`build_spec(NZ, order, totaldegree, wL)`** (`basis/spec.py`) — the three
    integer specs ET consumes: `mb_spec` (per-B `(n,l)` tuples under
    `TotalDegree` + `rpe_admissible`), `Rnl_spec`, `Ylm_spec`.
-3. **`couple(mb_spec, Rnl_spec, Ylm_spec)`** (`construct/coupling.py`) — the
+3. **`couple(mb_spec, Rnl_spec, Ylm_spec)`** (`basis/coupling.py`) — the
    compiled EquivariantTensors library (`ace-jax-coupling`); returns `A2B` `(n_B, n_AA)`, per-order `aa_specs`,
    `aspec`, and ET's `aa_sig` per AA column (signature-sorted, **not**
    evaluation-ordered — see below).
@@ -27,7 +51,7 @@ steps the Julia exporter walks, returning an `Authoring` NamedTuple:
    list from the block-diagonal `A2B` (first nonzero column → `aa_sig`, with
    multiplicity) and asserts it matches the shim dump as a row-multiset.
    Catches any ET-version drift in one place.
-5. **`tensor_radial_init` / `pair_radial_init`** (`construct/radial_init.py`) —
+5. **`tensor_radial_init` / `pair_radial_init`** (`basis/radial_init.py`) —
    seeded radial coefficients, frozen. `mode="glorot_normal"` (tensor),
    `"onehot"` (pair, `spl_n = δ(n, 2Z)`-style identity rows) or `"zero"`;
    the 7-tuple Agnesi transform `(p, q, a, rin, r0, yin, ycut)` is derived
@@ -41,11 +65,11 @@ steps the Julia exporter walks, returning an `Authoring` NamedTuple:
    fixture.
 6. **Zero readout** — `WB`, `Wpair`, `E0` zeros (the `acefit!`-fresh init), then
    `fold_readout` bakes the species pooling into the coefficient tables.
-7. **`smoothness_prior`** (`construct/prior.py`, ported in PR #3) — the
+7. **`smoothness_prior`** (`basis/prior.py`, ported in PR #3) — the
    `len_basis` γ vector, over tensor rows repeated per species and pair rows
    `[(n,0)]`; `--no-gamma` / `with_gamma=False` skips it.
 
-`save_npz(path, authoring)` (`construct/export.py`) writes the disposable
+`save_npz(path_or_file, basis)` (`basis/export.py`) writes the
 npz bridge file, for any of the three radial layouts the loader reads
 (`analytic`, `spline`, `spline_factorised`).
 
@@ -60,7 +84,7 @@ model.pair_radial_kind`, `pair_envelope_kind = model.pair_envelope_kind`,
 Rationale: the loader (`eval/io.py`) reconstructs the eval graph from
 `meta` alone — `radial_kind`/`pair_radial_kind` pick the radial branch,
 `pair_envelope_kind` the pair envelope formula, `rnl_spline`/`pair_spline`
-the `(x0, h, n)` grids. If the writer echoed authoring defaults while the
+the `(x0, h, n)` grids. If the writer echoed build defaults while the
 arrays came from a patched model (e.g. the fixture-injection test swaps
 analytic radials for spline ones), the loader would silently wire the
 placeholder branch `(0.0, 1.0, 2)` and the wrong envelope — coefficients
@@ -74,21 +98,22 @@ not errors — a wrong branch selector fails numerically, not loudly.
 
 ## Evaluation parity (the bridge test)
 
-`tests/test_python_authoring.py::test_bridge_wellformed_subprocess` covers the
+`tests/test_basis_build.py::test_bridge_wellformed_subprocess` covers the
 whole chain against `fixtures/si_ace_model.npz` (Si, order 3, TotalDegree 10):
 
-- **Structural**: authored `nnll_spec` matches the fixture as a row-multiset;
+- **Structural**: the built `nnll_spec` matches the fixture as a row-multiset;
   feeding the fixture's own nnll row order back through `couple` reproduces
-  `A2B` bit-for-bit (the injection premise — coefficient rows are only
-  interchangeable when the map is).
+  `A2B` up to a per-B-row scale (EquivariantTensors main normalises B rows
+  differently from the ET 0.4.3 the ACEpotentials 0.10.1 fixture used; the
+  injected `WB` and the descriptor reference are rescaled accordingly).
 - **Injected + evaluated**: the fixture's fitted coefficients and fitted
   branch kinds (`radial_kind="analytic"`, `pair_radial_kind="spline"`,
   `pair_envelope_kind="poly1sr"`, spline grid `(x0, h, n)` from
   `meta["pair_spline"]`) are patched in via `dataclasses.replace`
-  (eqx `ACEModel` supports it; the `Authoring` tuple via `._replace`),
+  (eqx `ACEModel` supports it; the `Basis` tuple via `._replace`),
   packaged with `save_npz`, reloaded with `eval.io.load`, and every table is
   compared against the fixture. Then the round-tripped file runs through the
-  native eval path (`ACECalculator`) and must reproduce Julia's energies,
+  native eval path (`ACECalculator`) and must reproduce ACEpotentials' energies,
   forces, stress and descriptors to float noise (`< 1e-8`, E exact).
 
 Two conventions to know when reading fixtures:
@@ -99,7 +124,7 @@ Two conventions to know when reading fixtures:
   `probe_env` the tensor envelope, `probe_Rnl` the tensor radial. The one
   pair-basis row is `probe_Rpair = spl(x_ij) * e_ij` from
   `evaluate_batched(m.pairbasis, ...)`.
-- **Virial vs stress**: the fixture's `test_V` is the *Julia virial*
+- **Virial vs stress**: the fixture's `test_V` is the *ACEpotentials virial*
   (`site_virial = -sum(dv_i r_i')`, i.e. `V = -dE/dε`); ASE's
   `get_stress(voigt=False)` is `stress = -virial / volume`. The eval path
   (`calc/point.py`) stores ASE-convention stress; compare with
@@ -126,9 +151,9 @@ The coupling depends only on the three integer specs, so
 `couple_cached` (default inside `build_model`) persists one entry per shape —
 keyed by a sha256 of the order-preserving spec JSON — under
 `$ACEJAX_COUPLING_CACHE` (or `~/.cache/ace-jax/coupling`). A **hit
-reconstructs the `Coupling` without importing the coupling library**: pip
-install + populated cache dir = authoring of a known shape without the
-`basis` extra. Entries store their input specs (hit-time re-check) and the
+reconstructs the `Coupling` without importing the coupling library**: a
+known shape builds from a populated cache dir even where the coupling library
+is unavailable. Entries store their input specs (hit-time re-check) and the
 coupling backend id `coupling.backend_id()` (`ace-jax-coupling==<version>`; a
 library change invalidates); writes are atomic (a unique tmp file per writer,
 then `os.replace`) and best-effort, and any entry that fails to read for
@@ -148,25 +173,25 @@ identity> [--d-max N]`); its design record is
 
 ## Known traps
 
-- **The coupling library contains only EquivariantTensors' construction code**;
-  there is no Julia session to evaluate anything else in. Reconstructing
-  Julia's spline evaluator is not needed —
-  `spline_eval` (`eval/radial.py`) was validated exactly against the Julia
-  batched evaluator (per-column ratio 1.0) on the fixture's prefiltered
-  B-spline control points.
+- **The coupling library contains only EquivariantTensors' construction code**,
+  nothing else to evaluate. Reconstructing ACEpotentials' spline evaluator is
+  not needed — `spline_eval` (`eval/radial.py`) was validated exactly against
+  ACEpotentials' batched evaluator (per-column ratio 1.0) on the fixture's
+  prefiltered B-spline control points.
 - **angular table width differs from the fixture** (mine 64 / lmax 7 vs
   fixture 25 / lmax 4): compare angular quantities through the `aspec_y`
   gathers, not positionally.
 
 ## Roadmap after Tier 1
 
-- ~~Tier 2 point 1 — in-memory hand-off~~: done (`Authoring.eval_pair`).
+- ~~Tier 2 point 1 — in-memory hand-off~~: done (`Basis.eval_pair`).
 - ~~Tier 2 point 2 — coupling cache~~: done (`couple_cached`, see
-  [tier2-plan.md](tier2-plan.md)) — authoring an existing shape runs
-  Julia-free from a populated cache dir.
-- ~~Drop juliacall~~: done — the `basis` extra is the `ace-jax-coupling`
-  wheel, a `juliac --trim` compiled EquivariantTensors (`coupling/`,
-  [coupling-etshim-spec.md](coupling-etshim-spec.md)).
+  [tier2-plan.md](tier2-plan.md)) — a known shape builds from a populated
+  cache dir.
+- ~~Precompiled coupling~~: done — `ace-jax-coupling` is a core dependency
+  (`coupling/`, [coupling-etshim-spec.md](coupling-etshim-spec.md)).
+- ~~`aj fit` builds the basis~~: done (`FitConfig(model=BasisSpec|Basis)`,
+  `fit.yaml`).
 - **Endgame — pure-JAX coupling**: reimplement ET's `SparseSymmProd`
   symmetrisation in JAX, dropping the compiled library too. The hard part: degenerate nnll blocks are only unique
   up to a row-space rotation, so coefficient interchange needs the

@@ -9,7 +9,7 @@ What `ace1_model` / `ace_embedding_model(ace1_compat=true)` build in Julia:
     pair radial     Agnesi (1, 3), ACE1_PolyEnvelope1sR(rcut, r0, 2), Legendre,
                     one-hot species weights, splined the same way
 
-Parity: tests/test_construct_radial_ace1.py against Julia-exported models.
+Parity: tests/test_basis_radial_ace1.py against Julia-exported models.
 Polynomials4ML normalises the recurrence by quadgk (atol 1e-10); here the
 normalising integrals are exact (Gauss-Legendre on a polynomial integrand), so
 the tables agree to ~1e-10 rather than bit-for-bit.

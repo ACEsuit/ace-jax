@@ -3,7 +3,7 @@
 The real shim is monkeypatched: these tests pin the key derivation, the
 miss/hit lifecycle, and the two invalidation paths (stored-specs mismatch,
 coupling-library version change).  The end-to-end "a hit never launches Julia" guarantee is
-pinned by the ACEJAX_NO_JULIA subprocess test in test_python_authoring.py.
+pinned by the ACEJAX_COUPLING_CACHE_ONLY subprocess test in test_basis_build.py.
 """
 
 import json
@@ -13,7 +13,7 @@ import pathlib
 import numpy as np
 import pytest
 
-from ace_jax.construct import coupling as C
+from ace_jax.basis import coupling as C
 
 
 def _fake_coupling(mb, rnl, ylm):
@@ -132,14 +132,14 @@ def test_disabled_cache_calls_shim_directly(shim):
     assert len(shim) == 2                       # nothing persisted anywhere
 
 
-def test_backend_id_matches_extra_pin():
-    """The cache stamp, the version check on a miss, and the `basis` extra
-    pin must name the same ace-jax-coupling version (the `basis` extra)."""
+def test_backend_id_matches_dependency_pin():
+    """The cache stamp, the version check on a miss, and the dependency
+    pin must name the same ace-jax-coupling version (a core dependency)."""
     import re
     import tomllib
     pp = tomllib.loads((pathlib.Path(__file__).resolve().parents[1] / "pyproject.toml").read_text())
-    extra = " ".join(pp["project"]["optional-dependencies"]["basis"])
-    m = re.search(r"ace-jax-coupling==([0-9][^;\s]*)", extra)
+    deps = " ".join(pp["project"]["dependencies"])
+    m = re.search(r"ace-jax-coupling==([0-9][^;\s]*)", deps)
     assert m and m.group(1) == C.COUPLING_LIB_VERSION
     assert C.backend_id() == f"ace-jax-coupling=={C.COUPLING_LIB_VERSION}"
 

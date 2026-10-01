@@ -5,7 +5,7 @@
 > with `juliac --trim=safe` and shipped as a platform wheel (plan:
 > [plans/2026-09-30-trim-coupling-lib.md](plans/2026-09-30-trim-coupling-lib.md)).
 > Radials, pair basis and embedding are authored in Python
-> ([python-authoring.md](python-authoring.md)), with a per-shape coupling cache.
+> ([basis.md](basis.md)), with a per-shape coupling cache.
 
 **Goal.** Generate the SO(3) coupling artifacts (`A2B` map + `aa_spec`) — the one
 piece [EquivariantTensors.jl](https://github.com/ACEsuit/EquivariantTensors.jl)
@@ -34,7 +34,7 @@ coefficients stop being interchangeable and the ACEfit-parity guarantee breaks.
 parity reduces to: **feed ET the same `mb_spec`/`Rnl_spec`/`Ylm_spec` the Julia
 path fed it.**
 
-## Python spec builder (`construct/spec.py`)
+## Python spec builder (`basis/spec.py`)
 
 `build_spec(NZ, order, totaldegree, wL)` produces the three integer specs ET
 consumes, and `spec_from_export` / `spec_from_reference` recover them from an
@@ -82,7 +82,7 @@ Pure Python, no deps.
 3. **Python package** — `coupling/python` (dist `ace-jax-coupling`, import
    `ace_jax_coupling`): ctypes loader (lazy, `RTLD_LOCAL`, calls serialised by a
    lock), Python-side input validation, and `couple_raw(...)`.
-   `construct.coupling.couple()` converts its arrays to the `Coupling` tuple.
+   `basis.coupling.couple()` converts its arrays to the `Coupling` tuple.
 
 ### C ABI v1 (`libetcouple`)
 
@@ -176,7 +176,7 @@ row factor; descriptors by the factor).
 - `tests/test_coupling_parity.py` — vs the ACEpotentials fixtures, in-process:
   multiplicity-1 blocks equal up to a per-row scale, degenerate blocks on the
   row subspace (`subspace_residual`), all residuals < 1e-12.
-- `tests/test_python_authoring.py` — authored model vs the Si fixture with the
+- `tests/test_basis_build.py` — authored model vs the Si fixture with the
   fixture's coefficients rescaled: energies, forces, stress, descriptors.
 - All of them skip without a compiled `ace_jax_coupling`
   (`conftest.require_coupling_lib`); CI (`coupling-wheels.yml`) builds the
@@ -188,5 +188,5 @@ row factor; descriptors by the factor).
 `A2B`/`aa_spec` depend only on the three integer specs. `couple_cached` stores
 one entry per shape (sha256 of the order-preserving spec JSON) stamped with
 `coupling.backend_id()` (`ace-jax-coupling==<version>`); a hit never imports the
-library, a backend change invalidates entries (see `docs/python-authoring.md`,
+library, a backend change invalidates entries (see `docs/basis.md`,
 "Coupling cache"). `couple()` remains the uncached parity oracle.

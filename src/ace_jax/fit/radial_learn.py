@@ -616,7 +616,7 @@ def save_result(out_dir, W, info, *, src_npz=None, model=None, readout=None):
     if readout is not None:
         np.save(out / "readout.npy", np.asarray(readout))
     if src_npz is not None:
-        from ..construct.export import patch_radial_npz
+        from ..basis.export import patch_radial_npz
         # the held-out gate may keep the initial radial: then nothing was learned
         learned = info.get("selected") != "init"
         patch_radial_npz(src_npz, out / "model.npz", with_radial(model, W, learned=learned),

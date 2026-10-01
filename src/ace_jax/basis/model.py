@@ -11,7 +11,8 @@ the caller to have enabled x64 (`jax.config.update("jax_enable_x64", True)`) —
 nothing here touches jax.config, same contract as `eval.io.load`.
 """
 
-from typing import NamedTuple
+import dataclasses
+from typing import ClassVar, NamedTuple
 
 import jax.numpy as jnp
 import numpy as np
@@ -23,7 +24,7 @@ from .prior import smoothness_prior
 from .spec import build_spec
 
 
-class Authoring(NamedTuple):
+class Basis(NamedTuple):
     """An authored model plus everything needed to reproduce or package it."""
 
     model: ACEModel
@@ -109,8 +110,8 @@ def build_model(elements, order, totaldegree, *, wL=1.5, rcut=5.5, r0=None,
 
     n_q_factor: tensor-radial polynomial span, n_q = ceil(n_q_factor * max n).
 
-    Returns an `Authoring`.  Requires the `basis` extra (the compiled
-    ace-jax-coupling library) on a cache miss; evaluate in float64 with x64 enabled."""
+    Returns a `Basis`.  Needs the compiled coupling library
+    (a core dependency on supported platforms) on a coupling-cache miss; evaluate in float64 with x64 enabled."""
     if edge_a_kind not in ("gather", "matmul"):
         raise ValueError(f'edge_a_kind must be "gather" or "matmul", got {edge_a_kind!r}')
     if not n_q_factor >= 1:          # checked before the (possibly Julia) coupling step
@@ -215,7 +216,7 @@ def build_model(elements, order, totaldegree, *, wL=1.5, rcut=5.5, r0=None,
         "rnl_spline": None, "pair_spline": None,
         "rcut": float(rcut),
         "nnll": [[list(b) for b in bb] for bb in cpl.nnll_spec],
-        "authoring": {
+        "basis": {
             "wL": float(wL), "rcut": float(rcut),
             "r0": tinit["rnl_transform"][:, :, 4].tolist(),      # (NZ, NZ) per pair
             "rin": float(rin), "radial_mode": radial_mode,
@@ -224,7 +225,7 @@ def build_model(elements, order, totaldegree, *, wL=1.5, rcut=5.5, r0=None,
             "pair_maxn": int(pair_maxn), "with_gamma": bool(with_gamma),
         },
     }
-    return Authoring(model=model, meta=meta, nnll_spec=cpl.nnll_spec, Rnl_spec=tuple(Rnl),
+    return Basis(model=model, meta=meta, nnll_spec=cpl.nnll_spec, Rnl_spec=tuple(Rnl),
                      Ylm_spec=tuple(Ylm), aa_sig=cpl.aa_sig, aspec=tuple(cpl.aspec),
                      aa_specs=tuple(np.asarray(g) for g in cpl.aa_specs),
                      nnll=nnll, gamma=gamma)
@@ -251,7 +252,7 @@ def build_embedding_model(elements, order, totaldegree, embedding=None, *, rows=
     embedding: a JSON artefact path (keys Z, emb), a (Z, table) pair, or
     "identity"; reduced with `embedding_rows(reduction, normalise)`.  rows: an
     explicit (NZ, d) block instead (e.g. to reproduce a Julia model exactly --
-    Julia leaves the PCA sign to LAPACK).  Returns an `Authoring` (readout zero);
+    Julia leaves the PCA sign to LAPACK).  Returns a `Basis` (readout zero);
     the coupling needs the ET shim on a cache miss, as `build_model`."""
     import io
     import json
@@ -328,7 +329,7 @@ def build_embedding_model(elements, order, totaldegree, embedding=None, *, rows=
         "aa_lens": [int(g.shape[0]) for g in cpl.aa_specs],
         "rnl_spline": spl, "pair_spline": dict(spl), "rcut": float(cut[2]),
         "nnll": [[list(b) for b in bb] for bb in cpl.nnll_spec],
-        "authoring": {"wL": float(wL), "rcut": float(cut[2]), "r0": float(cut[1]),
+        "basis": {"wL": float(wL), "rcut": float(cut[2]), "r0": float(cut[1]),
                       "maxl": maxl, "pair_maxn": maxq, "d_max": d_max,
                       "with_gamma": bool(with_gamma)},
     }
@@ -353,6 +354,64 @@ def build_embedding_model(elements, order, totaldegree, embedding=None, *, rows=
     np.savez(buf, **D)
     buf.seek(0)
     model, _, _ = load(buf, edge_a_kind=edge_a_kind)
-    return Authoring(model=model, meta=meta, nnll_spec=cpl.nnll_spec, Rnl_spec=tuple(sp.rspec),
+    return Basis(model=model, meta=meta, nnll_spec=cpl.nnll_spec, Rnl_spec=tuple(sp.rspec),
                      Ylm_spec=tuple(sp.Ylm), aa_sig=cpl.aa_sig, aspec=tuple(cpl.aspec),
                      aa_specs=tuple(np.asarray(g) for g in cpl.aa_specs), nnll=nnll, gamma=gamma)
+
+
+@dataclasses.dataclass(frozen=True)
+class BasisSpec:
+    """A basis definition: the `aj basis` flags (and the `basis:` block of a
+    fit.yaml).  `elements=None` means "the species of the training data"."""
+    order: int
+    max_degree: int
+    elements: tuple | None = None
+    wL: float = 1.5
+    rcut: float | None = None
+    rin: float = 0.0
+    maxl: int | None = None
+    d_max: int | None = None
+    reduction: str = "pca"
+    radial_mode: str = "glorot_normal"
+    pair_mode: str = "onehot"
+    embedding: str | None = None
+    no_gamma: bool = False
+    no_coupling_cache: bool = False
+    coupling_cache_dir: str | None = None
+
+    FIELDS: ClassVar[tuple] = ()
+
+
+BasisSpec.FIELDS = tuple(f.name for f in dataclasses.fields(BasisSpec))
+
+
+def _zs(elements):
+    """Atomic numbers from Z ints or chemical symbols (as strings or ints)."""
+    from ase.data import atomic_numbers
+    return [int(e) if isinstance(e, (int, np.integer)) or str(e).strip().isdigit()
+            else atomic_numbers[str(e).strip()] for e in elements]
+
+
+def build_basis(spec, *, seed=0):
+    """The one basis builder (`aj basis`, `aj fit`, Python): a `Basis` from a
+    `BasisSpec`.  Categorical (`build_model`) unless `spec.embedding` is set
+    (`build_embedding_model`)."""
+    if not spec.elements:
+        raise ValueError("build_basis: spec.elements is not set (aj fit infers it from the data)")
+    els = _zs(spec.elements)
+    common = dict(with_gamma=not spec.no_gamma, coupling_cache=not spec.no_coupling_cache,
+                  coupling_cache_dir=spec.coupling_cache_dir)
+    if spec.embedding:
+        return build_embedding_model(els, spec.order, spec.max_degree, embedding=spec.embedding,
+                                     d_max=spec.d_max, wL=spec.wL, maxl=spec.maxl, rcut=spec.rcut,
+                                     reduction=spec.reduction, **common)
+    return build_model(els, spec.order, spec.max_degree, wL=spec.wL,
+                       rcut=5.5 if spec.rcut is None else spec.rcut, rin=spec.rin,
+                       radial_mode=spec.radial_mode, pair_mode=spec.pair_mode, seed=seed, **common)
+
+
+def basis_r0(meta):
+    """Mean radial length scale the basis was built with (per-pair table or a
+    scalar): the default GP hyperprior centre for a fit of this basis."""
+    r0 = meta.get("basis", {}).get("r0")
+    return None if r0 is None else float(np.mean(np.asarray(r0, float)))

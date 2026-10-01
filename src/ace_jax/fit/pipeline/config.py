@@ -5,7 +5,7 @@ from dataclasses import dataclass
 class FitConfig:
     """Every option of the fitting pipeline.  Defaults are run.py's; the CLI
     overrides the ones where it differs (see cli.py)."""
-    model: str
+    model: object                        # str | os.PathLike | basis.model.Basis | basis.model.BasisSpec
     arm: str = "gp"                      # "linear" (M = 0) | "gp"
     # data
     energy_key: str = "energy"; force_key: str = "forces"; virial_key: str = "virial"
@@ -27,7 +27,7 @@ class FitConfig:
     embedding: str | None = None         # MACE table JSON: frozen coregionalization
     delta_s_floor_q: float | None = None
     fix_rho: str | None = None           # "auto" or a number (L-BFGS only)
-    r0: float = 2.5
+    r0: float | None = 2.5              # None: the basis's own mean radial length (FitData.r0)
     # objective
     objective: str = "lml"               # "lml" | "loo"
     lml: str = "device"                  # "device" | "host-cache"

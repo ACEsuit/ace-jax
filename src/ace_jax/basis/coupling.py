@@ -3,8 +3,9 @@
 `couple(mb_spec, Rnl_spec, Ylm_spec)` returns the L = 0 real-basis coupling of
 `EquivariantTensors.sparse_equivariant_tensor` in ace-jax's export layout (see
 `Coupling`).  It calls `ace_jax_coupling.couple_raw`, a juliac-compiled build of
-EquivariantTensors (no Julia at runtime), from the optional `basis` extra;
-the import is lazy so the core package never depends on it.
+EquivariantTensors (no Julia at runtime), a core dependency on supported
+platforms; the import is lazy, so a refit or a cache hit never loads it and an
+unsupported platform raises `BasisUnavailable` only when a new shape is built.
 
 `couple_cached(...)` wraps `couple` with a per-shape disk cache: the coupling
 depends only on the three integer specs, so a new shape runs the shim once and
@@ -16,6 +17,8 @@ import hashlib
 import json
 import os
 import pathlib
+import platform
+import sys
 import tempfile
 import warnings
 
@@ -71,7 +74,7 @@ def subspace_residual(A, B):
     return float(np.abs(Qa @ Qa.T - Qb @ Qb.T).max())
 
 
-COUPLING_LIB_VERSION = "0.2.0"   # == the `basis` extra pin (test_backend_id_matches_extra_pin)
+COUPLING_LIB_VERSION = "0.2.0"   # == the core dependency pin (test_backend_id_matches_dependency_pin)
 
 
 def backend_id():
@@ -81,19 +84,28 @@ def backend_id():
     return f"ace-jax-coupling=={COUPLING_LIB_VERSION}"
 
 
+class BasisUnavailable(RuntimeError):
+    """Building a new basis needs the compiled coupling library, which is not
+    installed (unsupported platform) or has no compiled payload (dev build)."""
+
+
 def _lib():
-    if os.environ.get("ACEJAX_NO_JULIA"):
-        raise RuntimeError("ACEJAX_NO_JULIA is set but a coupling was computed -- "
-                           "the coupling cache missed where it should have hit")
+    if os.environ.get("ACEJAX_COUPLING_CACHE_ONLY"):
+        raise RuntimeError("ACEJAX_COUPLING_CACHE_ONLY is set but the coupling cache missed: "
+                           "this basis shape has not been built before")
     try:
         import ace_jax_coupling
     except ModuleNotFoundError as e:
-        raise ModuleNotFoundError(
-            "coupling generation needs the 'basis' extra: pip install 'ace-jax[basis]' "
-            "(ace-jax-coupling wheels: Linux x86_64/aarch64, macOS arm64, Windows x64)") from e
+        raise BasisUnavailable(
+            f"building a new basis is not available on this platform ({sys.platform} {platform.machine()}); "
+            "fit from an existing basis with --model <file.npz> built elsewhere") from e
+    try:
+        ace_jax_coupling.build_info()
+    except ace_jax_coupling.CouplingLibError as e:
+        raise BasisUnavailable(f"the ace-jax-coupling install has no compiled library: {e}") from e
     if ace_jax_coupling.__version__ != COUPLING_LIB_VERSION:
-        raise RuntimeError(f"ace-jax-coupling {ace_jax_coupling.__version__} installed, this ace-jax "
-                           f"needs =={COUPLING_LIB_VERSION}: pip install 'ace-jax-coupling=={COUPLING_LIB_VERSION}'")
+        raise BasisUnavailable(f"ace-jax-coupling {ace_jax_coupling.__version__} is installed; this ace-jax "
+                               f"needs =={COUPLING_LIB_VERSION}")
     return ace_jax_coupling
 
 

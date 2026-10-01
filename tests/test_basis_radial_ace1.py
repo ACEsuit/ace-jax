@@ -8,8 +8,8 @@ import pathlib
 import numpy as np
 import pytest
 
-from ace_jax.construct import radial_ace1 as ra
-from ace_jax.construct.radial_init import legendre_3term, poly_eval
+from ace_jax.basis import radial_ace1 as ra
+from ace_jax.basis.radial_init import legendre_3term, poly_eval
 
 FIX = pathlib.Path(__file__).resolve().parents[1] / "fixtures"
 CASES = [("emb_ref_SiGe_o2d6", [14, 32]), ("emb_ref_CrMnFe_o3d5_dmax4", [24, 25, 26])]

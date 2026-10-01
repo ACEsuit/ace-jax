@@ -13,6 +13,7 @@ that, not the ACE model, sets the file size.
 """
 import dataclasses
 import io
+import os
 import json
 import pathlib
 
@@ -27,22 +28,23 @@ GP_SCHEMA = 1
 
 
 def _ace_arrays(res):
-    return _ace_arrays_from(res.config.model, res.data.E0)
+    return _ace_arrays_from(res.data.z, res.data.E0)
 
 
-def _ace_arrays_from(model_path, E0):
-    z = np.load(model_path)
+def _ace_arrays_from(z, E0):
+    """The input model's npz arrays (`FitData.z`: read from the path or from the
+    in-memory basis) with E0 as fitted."""
     out = {k: z[k] for k in z.files}
     out["E0"] = np.asarray(E0, np.float64)
     return out
 
 
-def linear_arrays_from_mean(config, E0, pcfg, mu):
-    """The ACE npz arrays of the input model (config.model) with readout mu, E0 as fitted.
+def linear_arrays_from_mean(z, E0, pcfg, mu):
+    """The ACE npz arrays of the input model (`z` = FitData.z) with readout mu, E0 as fitted.
     Column layout: species-major B blocks, then pair blocks (fit/rows.py `_place`)."""
     nB, nP, NZ = pcfg.n_B, pcfg.n_pair, pcfg.NZ
     mu = np.asarray(mu)
-    out = _ace_arrays_from(config.model, E0)
+    out = _ace_arrays_from(z, E0)
     out["WB"] = mu[:NZ * nB].reshape(NZ, nB).T.copy()
     out["Wpair"] = mu[NZ * nB:NZ * (nB + nP)].reshape(NZ, nP).T.copy()
     return out
@@ -52,7 +54,7 @@ def model_file_blocked(cfg):
     """Why no model file can represent this fit (None when one can)."""
     if cfg.baseline is not None or cfg.base_npz is not None:
         return "the baseline is added outside the model"
-    if str(cfg.model).endswith(".yace"):
+    if isinstance(cfg.model, (str, os.PathLike)) and str(cfg.model).endswith(".yace"):   # a built basis is npz
         return ".yace inputs are not supported"
     return None
 
@@ -80,7 +82,7 @@ def linear_model_arrays(res):
         mu = res.preds.pops["mean"]      # POPS: exactly the mean the predictions used
     else:
         mu, _ = _posterior(res, res.theta)
-    return linear_arrays_from_mean(res.config, res.data.E0, res.built.prob.cfg, mu)
+    return linear_arrays_from_mean(res.data.z, res.data.E0, res.built.prob.cfg, mu)
 
 
 def gp_model_arrays(res, n_draws=1):

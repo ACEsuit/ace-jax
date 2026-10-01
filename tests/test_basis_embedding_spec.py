@@ -7,8 +7,8 @@ import pathlib
 import numpy as np
 import pytest
 
-from ace_jax.construct import radial_ace1 as ra
-from ace_jax.construct.spec import build_embedding_spec
+from ace_jax.basis import radial_ace1 as ra
+from ace_jax.basis.spec import build_embedding_spec
 
 FIX = pathlib.Path(__file__).resolve().parents[1] / "fixtures"
 CASES = ["emb_ref_SiGe_o2d6", "emb_ref_CrMnFe_o3d5_dmax4"]

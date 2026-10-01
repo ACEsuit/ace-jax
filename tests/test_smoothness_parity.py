@@ -1,4 +1,4 @@
-"""Parity of the Python smoothness-prior port (construct/prior.py) against the
+"""Parity of the Python smoothness-prior port (basis/prior.py) against the
 Julia/ACEpotentials oracle fixtures (julia/smoothness_reference.jl) -- pip-only,
 no Julia needed (the CI prior-parity job regenerates the fixtures).
 
@@ -20,7 +20,7 @@ import pytest
 
 from conftest import FIXTURE_DIR, REQUIRE
 
-from ace_jax.construct.prior import (
+from ace_jax.basis.prior import (
     P, WL, WN, gamma_from_model, model_nnll, prior_diagonal, smoothness_prior,
     unflatten_nnll)
 
