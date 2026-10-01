@@ -50,9 +50,9 @@ MACE-labelled datasets (200 SiGe and 150 CrMnFeCoNi training configurations),
 learning from the ACEpotentials default radials lowered the held-out gate
 score by 21% and 48%.
 
-The learning step uses the Python API (`ace_jax.fit.radial_learn`); see
-[Learn the radial basis](../howto/learned-radials.md) for the same steps
-outside a notebook.
+The learning step uses the Python API (`ace_jax.fit.radial_learn`). On the
+command line, `aj fit --learn-radial` runs the same steps in one fit; see
+[Learn the radial basis](../howto/learned-radials.md).
 
 ## Exercises
 

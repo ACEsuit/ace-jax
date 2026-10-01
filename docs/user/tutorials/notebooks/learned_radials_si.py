@@ -388,9 +388,9 @@ def _(mo):
     3. **Smoothness.** Pass `lam_grid=(0.0, 1e-2)` to `fit_radial`. A positive
        weight penalises rough radials; the gate picks the best of all
        candidates. When might a smoother radial generalise better?
-    4. **Command line.** The research driver `bench/learn_radial/run.py` in
-       the ace-jax repository runs the same steps on one extxyz file; see the
-       [how-to guide](https://acesuit.github.io/ace-jax/howto/learned-radials/).
+    4. **Command line.** `aj fit ... --learn-radial` runs the same steps in one
+       fit (the hold-out split, the gate and the final fit on the whole training
+       set); see the [how-to guide](https://acesuit.github.io/ace-jax/howto/learned-radials/).
     """)
     return
 
