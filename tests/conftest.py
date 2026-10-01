@@ -229,9 +229,11 @@ def species_index(z):
 
 # Bound peak memory across the suite: JAX retains compiled executables and traced
 # artifacts in-process, which under xdist workers accumulates and can OOM a CI
-# runner mid-run. Release them after each test; the persistent on-disk cache
-# above keeps the next compile cheap, so this costs little.
-@pytest.fixture(autouse=True)
+# runner mid-run. Release them after each MODULE, not each test: the on-disk cache
+# saves XLA compiles but not tracing/lowering, and clearing per test re-traced every
+# model in every test (test_lean + test_to_spline: 279 s per test, 134 s per module,
+# 120 s never; peak 2.4 / 2.8 / 3.1 GB).
+@pytest.fixture(autouse=True, scope="module")
 def _release_jax_memory():
     yield
     try:
