@@ -33,11 +33,11 @@ version = "0.3.1"
 
 [[deps.ACEpotentials]]
 deps = ["ACEfit", "ArgParse", "AtomsBase", "AtomsBuilder", "AtomsCalculators", "AtomsCalculatorsUtilities", "BenchmarkTools", "Bumper", "ChainRulesCore", "ChunkSplitters", "ConcreteStructs", "DecoratedParticles", "DynamicPolynomials", "EmpiricalPotentials", "EquivariantTensors", "ExtXYZ", "Folds", "ForwardDiff", "Interpolations", "JSON", "LazyArtifacts", "LinearAlgebra", "Lux", "LuxCore", "NamedTupleTools", "NeighbourLists", "OffsetArrays", "Optim", "Optimisers", "OrderedCollections", "PackageCompiler", "Pkg", "Polynomials4ML", "PrettyTables", "Random", "Reexport", "Roots", "SparseArrays", "SpheriCart", "StaticArrays", "StaticPolynomials", "StrideArrays", "TOML", "Unitful", "WithAlloc", "YAML", "Zygote"]
-git-tree-sha1 = "9648e20d381116af4372840638ea50141eb255bd"
-repo-rev = "b1477f644460a17c1b541e3a7816dbf07526fb0a"
+git-tree-sha1 = "84653a147a870ec3e196fe51ae5f321a1401c4d1"
+repo-rev = "b28a5a8c3c3c25fe9d3193e6ae06628103b992d1"
 repo-url = "https://github.com/ACEsuit/ACEpotentials.jl"
 uuid = "3b96b61c-0fcc-4693-95ed-1ef9f35fcc53"
-version = "0.10.1"
+version = "0.10.2"
 
 [[deps.ADTypes]]
 deps = ["PrecompileTools"]
