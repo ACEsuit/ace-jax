@@ -78,7 +78,7 @@ dev = [
 packages = ["src/ace_jax"]
 
 [tool.hatch.build.targets.sdist]
-include = ["src/ace_jax", "README.md", "LICENSE"]
+include = ["/src/ace_jax", "/README.md", "/LICENSE"]   # anchored: unanchored names match nested READMEs too
 
 [tool.pytest.ini_options]
 pythonpath = ["src", "tests"]
