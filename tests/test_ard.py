@@ -752,3 +752,22 @@ def test_stage_reports_and_warns_near_unit_leverage(monkeypatch):
         res = ard.run_ard_stage(cfg, d, b, theta, log=lines.append)
     assert res.report["shape"]["n_lev_near1"] == 1
     assert any("WARNING" in s and "leverage" in s for s in lines)
+
+
+def test_stage_support_reference_and_roundtrip(tmp_path):
+    from ace_jax.fit.ard import ARDPosterior
+    from ace_jax.fit.support import support_check
+    d, res, _ = _stage(**_FINITE_Q)
+    post = res.posterior
+    zs = {int(z) for z in np.unique(np.asarray(d.ds_train.node_z)[np.asarray(d.ds_train.node_mask)])}
+    assert post.support is not None and zs <= {k for k in post.support if k != "pca"}
+    assert set(post.support["pca"]) == zs
+    assert _stage(ard_support=False, **_FINITE_Q)[1].posterior.support is None
+    post.save(tmp_path / "p.npz")
+    back = ARDPosterior.load(tmp_path / "p.npz")
+    z0 = sorted(zs)[0]
+    Xt = np.asarray(post.support[z0]["Xc"])[:5] @ np.linalg.pinv(np.asarray(post.support["pca"][z0][2])) \
+        * np.asarray(post.support["pca"][z0][1]) + np.asarray(post.support["pca"][z0][0])
+    a = support_check(post.support, Xt, np.full(5, z0), 0.1)
+    b = support_check(back.support, Xt, np.full(5, z0), 0.1)
+    assert (a["support_ok"] == b["support_ok"]).all()

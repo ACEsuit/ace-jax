@@ -91,3 +91,44 @@ def test_scales_merge_small_groups():
     assert t.n_cfg_val[0] == 40 and t.n_cfg_cal[2] == 3 and t.n_min == 20
     back = GroupTable.from_dict(t.to_dict())
     assert np.array_equal(back.q, t.q) and back.merged == t.merged and back.n_min == 20
+
+
+def test_support_flags_out_of_support_with_config_masses():
+    from ace_jax.fit.support import build_support, fit_pca, support_check
+    rng = np.random.default_rng(0)
+    X = rng.normal(size=(4000, 10))
+    Z = np.zeros(4000, int)
+    cfg = np.arange(4000) // 20
+    s = rng.chisquare(3, 4000) ** 0.5
+    ref = build_support(fit_pca({0: X}), X, Z, s, cfg, max_atoms=50000, seed=0)
+    Xin, Xout = rng.normal(size=(400, 10)), rng.normal(size=(400, 10)) + 10.0
+    a = support_check(ref, np.r_[Xin, Xout], np.zeros(800, int), 0.1)
+    assert a["support_ok"][:400].mean() > 0.95 and a["support_ok"][400:].mean() < 0.05
+    assert np.isinf(a["support_q"][400:][~a["support_ok"][400:]]).all()
+    b = support_check(ref, Xin, np.zeros(400, int), 0.1)
+    assert b["n_eff"][0] > 0.4 * 200 and np.isfinite(b["support_q"]).all()      # over 200 config masses
+
+
+def test_support_pca_cap_and_variance():
+    from ace_jax.fit.support import fit_pca
+    rng = np.random.default_rng(1)
+    X = rng.normal(size=(500, 3)) @ rng.normal(size=(3, 100)) + 1e-6 * rng.normal(size=(500, 100))
+    mu, sd, W = fit_pca({0: X})[0]
+    assert W.shape[1] == 3
+    mu, sd, W = fit_pca({0: rng.normal(size=(2000, 200))})[0]
+    assert W.shape[1] == 64
+
+
+def test_support_flatten_roundtrip_and_absent_species():
+    from ace_jax.fit.support import build_support, fit_pca, flatten_support, support_check, unflatten_support
+    rng = np.random.default_rng(2)
+    X = rng.normal(size=(600, 6))
+    Z = np.arange(600) % 2
+    ref = build_support(fit_pca({0: X[Z == 0], 1: X[Z == 1]}), X, Z, rng.random(600), np.arange(600) // 10, 1000, 0)
+    flat = flatten_support(ref)
+    assert "support_pca_0_mu" in flat and "support_1_Xc" in flat and flat["support_0_g"].dtype.kind == "i"
+    back = unflatten_support({k[8:]: v for k, v in flat.items()})
+    Xt, Zt = rng.normal(size=(30, 6)), np.r_[np.zeros(15, int), np.ones(10, int), np.full(5, 7)]
+    a, b = support_check(ref, Xt, Zt, 0.1), support_check(back, Xt, Zt, 0.1)
+    assert not b["support_ok"][25:].any() and np.isinf(b["support_q"][25:]).all() and b["n_eff"][7] == 0
+    assert (a["support_ok"] == b["support_ok"]).mean() > 0.9

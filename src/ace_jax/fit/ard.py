@@ -312,13 +312,14 @@ class ARDPosterior(NamedTuple):
             for k, t in (("scores", np.float32), ("groups", np.int8), ("cfg", np.int64), ("src", np.int8)):
                 out[f"cal_{k}"] = np.asarray(self.cal[k], t)
         if self.support is not None:
-            for k, v in self.support.items():
-                out[f"support_{k}"] = np.asarray(v)
+            from .support import flatten_support
+            out.update(flatten_support(self.support, dtype))
         return out
 
     @staticmethod
     def load(path):
         z = np.load(pathlib.Path(path))
+        from .support import unflatten_support
         js = lambda k: json.loads(bytes(z[k]).decode()) if k in z.files else None
         if int(z["schema"]) not in (1, 2, 3):
             raise ValueError(f"unsupported posterior schema {int(z['schema'])}")
@@ -333,7 +334,8 @@ class ARDPosterior(NamedTuple):
                             group_consts=js("group_consts_json"), group_table=js("group_table_json"),
                             cal={k: z[f"cal_{k}"] for k in ("scores", "groups", "cfg", "src")}
                             if "cal_scores" in z.files else None,
-                            support={k[8:]: z[k] for k in z.files if k.startswith("support_")} or None)
+                            support=unflatten_support({k[8:]: z[k] for k in z.files if k.startswith("support_")})
+                            if any(k.startswith("support_") for k in z.files) else None)
 
 
 def ard_posterior(ev, h, kappa, meta):
@@ -463,6 +465,7 @@ class _ValAtoms(NamedTuple):
     z: np.ndarray | None
     d: np.ndarray | None
     cfg: np.ndarray          # (n,) live-configuration index into ds
+    bn: np.ndarray | None = None    # (n, 2) (batch, node) index of each atom in ds
 
 
 def _val_atoms(post, prob, ds, r1=None, shape=True, own_col=None):
@@ -488,6 +491,7 @@ def _val_atoms(post, prob, ds, r1=None, shape=True, own_col=None):
             acc["s2"].append(post.var_rows(Fr).reshape(-1, 3).sum(1))
             cfg = off + np.asarray(b.node_cfg)[live]
             acc["cfg"].append(cfg)
+            acc["bn"].append(np.c_[np.full(live.sum(), i), np.flatnonzero(live)])
             if own_col is not None:
                 Pr = (jnp.asarray(F, jnp.float64) * dinv[None, None, :]) @ jnp.asarray(post.Q, jnp.float64)
                 acc["v_incl"].append(np.asarray(jnp.sum(Pr * Pr, axis=(1, 2))))
@@ -507,7 +511,41 @@ def _val_atoms(post, prob, ds, r1=None, shape=True, own_col=None):
                      cat("V", (0, 3, 3)) if (shape or own_col is not None) else None,
                      cat("v_incl", (0,)) if own_col is not None else None,
                      cat("z", (0,)).astype(np.int64) if r1 is not None else None,
-                     cat("d", (0,)) if r1 is not None else None, cat("cfg", (0,)).astype(np.int64))
+                     cat("d", (0,)) if r1 is not None else None, cat("cfg", (0,)).astype(np.int64),
+                     cat("bn", (0, 2)).astype(np.int64))
+
+
+def _support_reference(cfg, data, built, ds_val, bn, scores, cfg_ids, log=print):
+    """The covariate-shift reference (fit/support.py): per-species descriptor PCA from a random sample of
+    training batches (<= ard_support_max_atoms atoms per species), and the T_val atoms (batch, node) = bn
+    with their conformal scores and configuration ids.  Site descriptors are evaluated only on those."""
+    from .inducing import site_features
+    from .support import build_support, fit_pca
+    prob = built.prob
+    ds = data.ds_train
+    rng = np.random.default_rng(cfg.seed)
+    cap = int(cfg.ard_support_max_atoms)
+    pool = {}
+    n_species = len(np.unique(np.asarray(ds.node_z)[np.asarray(ds.node_mask)]))
+    for chunk in np.array_split(rng.permutation(ds.n_batches), max(1, -(-ds.n_batches // 4))):
+        if pool and len(pool) == n_species and all(sum(len(x) for x in v) >= cap for v in pool.values()):
+            break
+        idx = np.sort(chunk)
+        sub = jax.tree.map(lambda a, idx=idx: a[idx], ds)
+        X = np.asarray(site_features(prob.model, built.gpcfg, sub)[0])
+        live, Zs = np.asarray(sub.node_mask), np.asarray(sub.node_z)
+        for z in np.unique(Zs[live]):
+            pool.setdefault(int(z), []).append(X[live & (Zs == z)])
+    Xp = {}
+    for z, v in pool.items():
+        v = np.concatenate(v)
+        Xp[z] = v[rng.permutation(len(v))[:cap]]
+    pca = fit_pca(Xp)
+    Xv = np.asarray(site_features(prob.model, built.gpcfg, ds_val)[0])
+    Xc, Zc = Xv[bn[:, 0], bn[:, 1]], np.asarray(ds_val.node_z)[bn[:, 0], bn[:, 1]]
+    k = np.isin(Zc, list(pca))
+    return build_support(pca, Xc[k], Zc[k], np.asarray(scores, float)[k], np.asarray(cfg_ids)[k],
+                         cap, cfg.seed)
 
 
 def _scores(e, V, force_shape, eps):
@@ -670,6 +708,8 @@ def run_ard_stage(cfg, data, built, theta, log=print, full_stats=None):
                          group_table=tab.to_dict(),
                          cal={"scores": s.astype(np.float32), "groups": gv.astype(np.int8),
                               "cfg": cv.astype(np.int64), "src": np.zeros(len(s), np.int8)})
+    if cfg.ard_support:
+        post = post._replace(support=_support_reference(cfg, data, built, ds_val, E.bn[ok], s, cv, log))
     log(f"ARD: {G} groups over {len(np.unique(cv))} held-out configs ({len(s)} atoms); lam_rms "
         f"{np.array2string(tab.lam_rms, precision=3)}, q {np.array2string(tab.q, precision=3)}"
         + (f"; merged {tab.merged}" if tab.merged else ""))
