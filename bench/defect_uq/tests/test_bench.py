@@ -232,3 +232,24 @@ def test_report_shows_scalar_lam_beside_lambda_rms(tmp_path):
     assert "lam (scalar)" in md and "1.2345" in md
     (d / "ard.json").write_text(json.dumps({"kappa": 1.0}))
     assert vs.scalar_lam(vs.load_run(d)) is None
+
+
+def test_calibrate_u_files_and_concat(tmp_path):
+    import sys
+    pytest.importorskip("modal")
+    sys.path.insert(0, str(__import__("pathlib").Path(__file__).parents[1] / "modal"))
+    from big_err_core import concat_xyz
+    import os
+    os.environ.setdefault("ACEGP_DATA", str(tmp_path))
+    from modal_calibrate import u_files
+    assert u_files("2-3") == [f"/out/defects/big3_cracks_r{p}.xyz" for p in ("4-5", "6-7", "8-9")]
+    try:
+        u_files("0-1")
+        raise AssertionError
+    except ValueError:
+        pass
+    from ase import Atoms
+    from ase.io import write
+    for i in range(2):
+        write(tmp_path / f"a{i}.xyz", [Atoms("H", positions=[[0, 0, 0]], cell=[3, 3, 3], pbc=True)] * (i + 1))
+    assert concat_xyz([tmp_path / "a0.xyz", tmp_path / "a1.xyz"], tmp_path / "U.xyz") == 3

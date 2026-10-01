@@ -292,8 +292,17 @@ uv run python ../scoring/validate_shape.py --out validate_ell_tip_r2-3.md --runs
     $R/bench365_ard_AB_fold_r2-3:big3_err.npz,big3x_r2-3_err.npz
 ```
 
-Step 4 needs a one-off driver for the held-out loop (not written; `big_errors` reads `<run>/posterior.npz`,
-so copy each calibrated posterior into its own run directory first).
+Step 4 driver: `modal/modal_calibrate.py` (own app `acegp-calibrate`; `modal_bench365.py` untouched). Per
+held-out pair it runs `aj calibrate` (per-group by default; `--mode append|replace`) on the other three
+`big3_cracks_r*.xyz` files and writes `/out/<run>_cal_r<pair>/{model.npz,posterior.npz,calibrate.log,
+big3x_r<pair>_err.npz,big3_err.npz}`:
+
+```
+cd bench/defect_uq/modal && modal deploy modal_calibrate.py
+modal run modal_calibrate.py::launch --run bench365_ard_ABblk      # 4 calls: holds 2-3,4-5,6-7,8-9
+for p in 2-3 4-5 6-7 8-9; do modal volume get acegp-prod-out bench365_ard_ABblk_cal_r$p $R/; done
+uv run python ../scoring/validate_shape.py --out validate_loro.md --runs $R/bench365_ard_ABblk_cal_r2-3 ...
+```
 
 **Estimated cost.** 25 fits: 5 ablation + 3 ell (no tip data) + 15 ell with tip data (5 ell x 3 folds) +
 2 f. A bench365 ARD fit was 19-31 min of solver time (`ard.json` `seconds`, 2026-09-28) plus loading and
