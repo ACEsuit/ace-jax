@@ -509,3 +509,28 @@ def test_resolved_yaml_records_ard_flags_and_roundtrips(tmp_path):
     d2 = yaml.safe_load((out2 / "fit.yaml").read_text())
     assert d2["no_ard_support"] is False and d2["ard_cluster_size"] == 3.0
     assert _fit_config(_parse(["fit", "--config", str(out2 / "fit.yaml")])).ard_support is True
+
+
+def test_calibrate_loads_legacy_int8_cal_arrays(fitted, calib_set, tmp_path):
+    """Posteriors saved with int8 cal_src/cal_groups still load and recalibrate; the output src is int16."""
+    from ace_jax.cli import main
+    from ace_jax.fit.ard import ARDPosterior
+    z = dict(np.load(fitted / "posterior.npz"))
+    n = len(z["cal_src"])
+    src = (np.arange(n) % 5).astype(np.int8)                              # max 4 -> U source id 5
+    z["cal_src"] = src
+    z["cal_groups"] = z["cal_groups"].astype(np.int8)
+    old = tmp_path / "old.npz"
+    np.savez(old, **z)
+    assert np.load(old)["cal_src"].dtype == np.int8
+    post = ARDPosterior.load(old)
+    np.testing.assert_array_equal(np.asarray(post.cal["src"]), src)
+    args = ["calibrate", "--model", str(fitted / "model.npz"), "--posterior", str(old),
+            "--data", str(calib_set), "--energy-key", "dft_energy", "--force-key", "dft_force",
+            "--virial-key", "dft_virial", "--append", "--out", str(tmp_path / "new.npz")]
+    assert main(args) == 0
+    assert np.load(tmp_path / "new.npz")["cal_src"].dtype == np.int16
+    new = ARDPosterior.load(tmp_path / "new.npz")
+    s = np.asarray(new.cal["src"])
+    np.testing.assert_array_equal(s[:n], src)                             # --append keeps every old score
+    assert len(s) > n and (s[n:] == 5).all()
