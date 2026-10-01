@@ -43,7 +43,7 @@ library. ace-jax's dependency marker already limits the install to these platfor
    index = `testpypi`. It downloads each platform's wheel from the index and runs
    the clean-environment test on it.
 6. **Release.** Push the tag `coupling-v<version>`. The publish job runs only after
-   all three wheels have passed their clean-environment tests and the ACEpotentials
+   all four wheels have passed their clean-environment tests and the ACEpotentials
    parity, and only if the tag equals the package version. PyPI versions cannot be
    re-uploaded, so a broken release needs a new version.
 7. **Check the release.** Run coupling-index-check with index = `pypi` and the new
