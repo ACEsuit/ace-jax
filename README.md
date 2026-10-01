@@ -410,7 +410,7 @@ the reference codes:
   solve matches ACEfit's `solve(QR)` to 1e-9, checked against the committed
   fixtures (`julia/export_model.jl`, `julia/acefit_qr_reference.jl`).
 - **coupling-wheels** — builds the `ace-jax-coupling` wheels (manylinux_2_28
-  x86_64/aarch64, macOS arm64), tests them in clean environments
+  x86_64/aarch64, macOS arm64, Windows x64), tests them in clean environments
   (matching upstream EquivariantTensors: exact indices, values within 4 ulp),
   and runs the coupling parity
   against the ACEpotentials references (`julia/coupling_reference.jl`).

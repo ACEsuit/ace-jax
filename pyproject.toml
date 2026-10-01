@@ -35,7 +35,7 @@ dependencies = [
   "extxyz>=0.4.5",
   # coupling tables for new basis shapes (a compiled library, nothing to install
   # besides the wheel); platform wheels only -- elsewhere fit from an existing .npz
-  "ace-jax-coupling==0.2.0; (sys_platform == 'linux' and (platform_machine == 'x86_64' or platform_machine == 'aarch64')) or (sys_platform == 'darwin' and platform_machine == 'arm64')",
+  "ace-jax-coupling==0.2.0; (sys_platform == 'linux' and (platform_machine == 'x86_64' or platform_machine == 'aarch64')) or (sys_platform == 'darwin' and platform_machine == 'arm64') or (sys_platform == 'win32' and platform_machine == 'AMD64')",
 ]
 
 [project.optional-dependencies]
@@ -59,13 +59,6 @@ aj = "ace_jax.cli:main"          # short alias
 Homepage = "https://github.com/ACEsuit/ace-jax"
 Issues = "https://github.com/ACEsuit/ace-jax/issues"
 
-[tool.uv.sources]
-# Until ace-jax-coupling is on PyPI.  A plain `uv sync` builds a lib-less dev wheel;
-# for the real library point the build hook at a compiled bundle and reinstall:
-#   ACEJAX_COUPLING_BUNDLE=$PWD/coupling/build/pruned ACEJAX_COUPLING_PLAT=<tag> \
-#     uv sync --reinstall-package ace-jax-coupling
-ace-jax-coupling = { path = "coupling/python" }
-
 [dependency-groups]
 # mirrors the `gp` extra so a plain `uv run pytest` can run the GP ladder tests
 dev = [
@@ -78,7 +71,7 @@ dev = [
 packages = ["src/ace_jax"]
 
 [tool.hatch.build.targets.sdist]
-include = ["src/ace_jax", "README.md", "LICENSE"]
+include = ["/src/ace_jax", "/README.md", "/LICENSE"]   # anchored: unanchored names match nested READMEs too
 
 [tool.pytest.ini_options]
 pythonpath = ["src", "tests"]

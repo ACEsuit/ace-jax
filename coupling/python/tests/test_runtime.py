@@ -8,6 +8,7 @@ import textwrap
 import time
 
 import numpy as np
+import pytest
 
 import ace_jax_coupling as ajc
 
@@ -25,6 +26,8 @@ def test_threads_concurrent_calls(cases):
     assert all(np.array_equal(o.A2B_vals, ref.A2B_vals) and np.array_equal(o.aa_idx, ref.aa_idx) for o in outs)
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals: Windows has console control events, and a "
+                    "child cannot be sent Ctrl-C from Python without sharing the runner's console")
 def test_sigint_still_raises_keyboardinterrupt(cases, tmp_path):
     """Loading the library must not take over SIGINT (built with handle-signals=no)."""
     c = cases["tiny"]
@@ -46,19 +49,13 @@ def test_sigint_still_raises_keyboardinterrupt(cases, tmp_path):
 
 
 _IMAGES = r"""
-import ctypes, hashlib, json, sys
+import hashlib, json, os, sys
 import ace_jax_coupling as a
 from ace_jax_coupling import _loader
 c = json.load(open(sys.argv[1]))["tiny"]
 a.couple_raw(c["mb"], c["R"], c["Y"])
-root = str(_loader.bundle_root())
-if sys.platform == "darwin":
-    d = ctypes.CDLL(None)
-    d._dyld_get_image_name.restype = ctypes.c_char_p
-    paths = [d._dyld_get_image_name(i).decode() for i in range(d._dyld_image_count())]
-else:
-    paths = [l.split()[-1] for l in open("/proc/self/maps") if len(l.split()) >= 6]
-paths = sorted({p for p in paths if p.startswith(root)})
+root = os.path.normcase(str(_loader.bundle_root()))
+paths = sorted({p for p in _loader._loaded_images() if os.path.normcase(p).startswith(root)})
 print(json.dumps({p: hashlib.sha256(open(p, "rb").read()).hexdigest() for p in paths}))
 """
 

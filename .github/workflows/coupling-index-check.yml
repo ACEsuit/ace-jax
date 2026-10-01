@@ -1,0 +1,52 @@
+name: coupling-index-check
+# Test the ace-jax-coupling wheels as published: on each platform, download the
+# exact wheel for that platform from PyPI or TestPyPI, then run the release
+# pipeline's clean-environment test on it (fresh venv, empty home, no Julia on
+# PATH), with the package tests of the chosen commit.
+on:
+  workflow_dispatch:
+    inputs:
+      index:
+        description: "where to install from"
+        type: choice
+        options: [testpypi, pypi]
+        default: testpypi
+      version:
+        description: "ace-jax-coupling version"
+        required: true
+        default: "0.2.0"
+      ref:
+        description: "branch, tag or full commit SHA whose package tests to run (match the published build)"
+        default: main
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        # Linux in the manylinux_2_28 containers, as the release tests: a clean system with
+        # the oldest glibc the wheels claim (the Ubuntu runner images ship /usr/bin/julia)
+        include:
+          - { name: linux-x86_64,   runner: ubuntu-latest,    container: "quay.io/pypa/manylinux_2_28_x86_64",  py: /opt/python/cp312-cp312/bin/python }
+          - { name: linux-aarch64,  runner: ubuntu-24.04-arm, container: "quay.io/pypa/manylinux_2_28_aarch64", py: /opt/python/cp312-cp312/bin/python }
+          - { name: macos-arm64,    runner: macos-14,         container: "",                                     py: python }
+          - { name: windows-x86_64, runner: windows-latest,   container: "",                                     py: python }
+    name: ${{ inputs.index }} ${{ inputs.version }} on ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    container: ${{ matrix.container || null }}
+    defaults: { run: { shell: bash } }
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: "${{ inputs.ref }}" }
+      - uses: actions/setup-python@v5
+        if: matrix.container == ''
+        with: { python-version: "3.12" }
+      - name: Download the published wheel for this platform
+        env:
+          INDEX: ${{ inputs.index == 'pypi' && 'https://pypi.org/simple/' || 'https://test.pypi.org/simple/' }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          "${{ matrix.py }}" -m pip download -q --no-deps --only-binary :all: -d wheels -i "$INDEX" "ace-jax-coupling==$VERSION"
+          ls -l wheels
+          test "$(ls wheels/*.whl | wc -l)" -eq 1
+      - name: Clean-environment test (no Julia, empty home)
+        run: bash coupling/tools/test_wheel.sh wheels/*.whl "${{ matrix.py }}"

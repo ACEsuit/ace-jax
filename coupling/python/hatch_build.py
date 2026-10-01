@@ -1,7 +1,7 @@
 """Wheel hook: embed the compiled bundle and tag the wheel for its platform.
 
 ACEJAX_COUPLING_BUNDLE  path to a (pruned) bundle dir with build_info.json
-ACEJAX_COUPLING_PLAT    wheel platform tag, e.g. manylinux_2_28_x86_64, macosx_11_0_arm64
+ACEJAX_COUPLING_PLAT    wheel platform tag, e.g. manylinux_2_28_x86_64, macosx_11_0_arm64, win_amd64
 Without ACEJAX_COUPLING_BUNDLE a lib-less py3-none-any development wheel is built."""
 import os
 import pathlib

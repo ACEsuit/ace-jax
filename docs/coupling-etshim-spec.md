@@ -140,15 +140,19 @@ rewritten to it (`install_name_tool -change` on macOS, keeping install names so
 copy; `test_no_library_loaded_twice` checks the loaded image list and
 `test_largest_case_is_fast` catches a slow double load. `check_bundle.py`
 asserts ABI, macOS `minos ≤ 11.0` and Linux `GLIBC ≤ 2.28`. Wheels are
-`py3-none-{manylinux_2_28_x86_64, manylinux_2_28_aarch64, macosx_11_0_arm64}`
-(macOS arm64 ~18 MB, Linux aarch64 ~24 MB); without a bundle the build makes a lib-less `py3-none-any` dev wheel
+`py3-none-{manylinux_2_28_x86_64, manylinux_2_28_aarch64, macosx_11_0_arm64, win_amd64}`
+(macOS arm64 ~16 MB, Linux ~22–24 MB, Windows ~22 MB). On Windows the DLLs sit in `bin/`; the
+loader registers the bundle's DLL directories and prepends them to PATH, because the embedded
+Julia runtime loads its dependencies through the standard search, not `add_dll_directory`; without a bundle the build makes a lib-less `py3-none-any` dev wheel
 whose `build_info()` raises `CouplingLibError`. `coupling/tools/test_wheel.sh`
 installs a wheel into a fresh venv with an empty HOME and no Julia on PATH and
 runs the package tests (and checks HOME is untouched). Bundled third-party
 licences: `coupling/python/THIRD_PARTY_NOTICES.md`. The GPL-2.0+ SuiteSparse
 modules (UMFPACK, SPQR, RBio, CHOLMOD) are empty placeholders made by
 `prune_bundle.py` and enforced by `check_bundle.py`, so the wheel ships no GPL-only
-code; its licence expression is still to be declared.
+code. The wheel declares a whole-wheel SPDX `License-Expression` (MIT for
+ace-jax-coupling and EquivariantTensors, plus the bundled components); `LICENSE`
+summarises it.
 
 ## ET version vs the ACEpotentials fixtures
 
