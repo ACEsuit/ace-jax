@@ -604,8 +604,11 @@ def test_ard_stage_lam_leaves_out_each_held_out_atoms_own_cluster(monkeypatch):
         nval = max(1, int(round(cfg.ard_val_frac * len(d.train))))
         Q, dinv = np.asarray(post.Q), np.asarray(post.dinv)
         m2_loo, m2_all = [], []
-        for j in range(nval):                               # one config at a time: no batch bookkeeping
-            bt = jax.tree.map(lambda a: a[0], build_dataset([d.train[idx[j]]], d.meta, d.E0, 1))
+        # one config per batch, but ONE dataset: shared padding caps, so linear_rows compiles
+        # once (a dataset per config gave each its own n_cap/k_cap and a compile each)
+        dsv = build_dataset([d.train[idx[j]] for j in range(nval)], d.meta, d.E0, 1)
+        for j in range(nval):
+            bt = jax.tree.map(lambda a: a[j], dsv)
             F = np.asarray(linear_rows(b.prob.model, b.prob.cfg, bt)[0].F)[np.asarray(bt.w_F) > 0]
             F = F[np.abs(F).reshape(len(F), -1).max(1) > 0]                       # the stage's `ok` atoms
             Ft = F.reshape(-1, L) * dinv[None, :]
