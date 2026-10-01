@@ -10,3 +10,6 @@ build/
 pace_ref/build/
 pace_ref/.venv/
 bench/scaling/models/
+coupling/build/
+!coupling/julia/build/
+dist-linux/

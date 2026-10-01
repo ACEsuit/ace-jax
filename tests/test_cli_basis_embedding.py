@@ -20,7 +20,7 @@ def _restamped_cache(tmp):
     return out
 
 
-def test_construct_embedding_matches_the_library(tmp_path, monkeypatch):
+def test_basis_embedding_matches_the_library(tmp_path, monkeypatch):
     import jax
     jax.config.update("jax_enable_x64", True)
     monkeypatch.setenv("ACEJAX_NO_JULIA", "1")
@@ -32,7 +32,7 @@ def test_construct_embedding_matches_the_library(tmp_path, monkeypatch):
     table.write_text(json.dumps({"Z": [14, 32], "emb": z["table"].tolist()}))
     cache = _restamped_cache(tmp_path)
     out = tmp_path / "m.npz"
-    main(["construct", "--elements", "Si,Ge", "--order", "2", "--max-degree", "6", "--embedding", str(table),
+    main(["basis", "--elements", "Si,Ge", "--order", "2", "--max-degree", "6", "--embedding", str(table),
           "--maxl", "6", "--coupling-cache-dir", str(cache), "--out", str(out)])
     model, meta, _ = load(out)
     ref = build_embedding_model([14, 32], 2, 6, embedding=([14, 32], z["table"]), maxl=6,

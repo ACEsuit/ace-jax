@@ -1,7 +1,7 @@
 {
     "tests/test_cli_alias.py::test_aj_and_ace_jax_are_the_same_entry_point": 0.001275458955205977,
     "tests/test_cli_alias.py::test_installed_aj_runs": 0.0002507090102881193,
-    "tests/test_cli_construct_embedding.py::test_construct_embedding_matches_the_library": 0.0314555840450339,
+    "tests/test_cli_basis_embedding.py::test_basis_embedding_matches_the_library": 0.0314555840450339,
     "tests/test_construct_embedding.py::test_embedding_widths_match_julia[identity5]": 0.0005126660107634962,
     "tests/test_construct_embedding.py::test_embedding_widths_match_julia[mh1_CrMnFeCoNi]": 0.0008227499783970416,
     "tests/test_construct_embedding.py::test_embedding_widths_match_julia[mh1_SiGe]": 0.0005193750257603824,

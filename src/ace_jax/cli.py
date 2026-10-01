@@ -200,7 +200,7 @@ def cmd_eval(a):
     return rows
 
 
-def cmd_construct(a):
+def cmd_basis(a):
     from .construct.export import save_npz
     els = [int(e) if e.strip().isdigit() else e.strip() for e in a.elements.split(",")]
     if a.embedding:
@@ -239,7 +239,7 @@ def _parser():
     ev.add_argument("--out", default=None, help="CSV of per-config predictions (default: print head)")
     ev.add_argument("--posterior", default=None, help="posterior.npz from `fit --uq ard`: adds forces_std")
     ev.add_argument("--per-atom", default=None, help="extxyz with per-atom forces and forces_std arrays")
-    con = sub.add_parser("construct", help="author a frozen ACE model (seeded radial init) and save it")
+    con = sub.add_parser("basis", help="author a new ACE basis: a frozen model (seeded radial init) saved as .npz")
     con.add_argument("--elements", required=True, help="comma-separated Z numbers or symbols")
     con.add_argument("--order", type=int, required=True, help="correlation order")
     con.add_argument("--max-degree", type=int, required=True, help="TotalDegree level bound")
@@ -252,7 +252,7 @@ def _parser():
     con.add_argument("--seed", type=int, default=0)
     con.add_argument("--no-gamma", action="store_true", help="skip the smoothness prior")
     con.add_argument("--no-coupling-cache", action="store_true",
-                     help="always run the Julia coupling shim instead of the per-shape cache")
+                     help="always compute the coupling (ace-jax-coupling library) instead of using the per-shape cache")
     con.add_argument("--coupling-cache-dir", default=None,
                      help="override the coupling cache directory (default: $ACEJAX_COUPLING_CACHE "
                           "or ~/.cache/ace-jax/coupling)")
@@ -270,7 +270,7 @@ def main(argv=None):
     """Console entry point; returns 0 because the script wrapper passes the
     result to sys.exit (a returned dict would print and exit 1)."""
     a = _parser().parse_args(argv)
-    {"eval": cmd_eval, "construct": cmd_construct}.get(a.cmd, run)(a)
+    {"eval": cmd_eval, "basis": cmd_basis}.get(a.cmd, run)(a)
     return 0
 
 

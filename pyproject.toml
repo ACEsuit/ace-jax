@@ -36,7 +36,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-authoring = ["juliacall>=0.9.20", "juliapkg>=0.1.13"]  # ET coupling shim (heavy; ET pulls Lux/GPU). Not needed to refit.
+# Coupling tables for NEW basis shapes: a juliac-compiled EquivariantTensors (no Julia at runtime).
+# Refitting / evaluating never needs it.  Platform wheels: Linux x86_64/aarch64, macOS arm64.
+basis = ["ace-jax-coupling==0.2.0; (sys_platform == 'linux' and (platform_machine == 'x86_64' or platform_machine == 'aarch64')) or (sys_platform == 'darwin' and platform_machine == 'arm64')"]
 # Hybrid ACE+GP fitting with the marginalised-hyperparameter UQ ladder.
 gp = ["numpyro>=0.16", "optax>=0.2", "blackjax>=1.6"]
 cuda = ["jax[cuda12]>=0.10.1"]
@@ -56,6 +58,13 @@ aj = "ace_jax.cli:main"          # short alias
 [project.urls]
 Homepage = "https://github.com/ACEsuit/ace-jax"
 Issues = "https://github.com/ACEsuit/ace-jax/issues"
+
+[tool.uv.sources]
+# Until ace-jax-coupling is on PyPI.  A plain `uv sync --extra basis` builds a lib-less dev
+# wheel; for the real library build the bundle and reinstall:
+#   ACEJAX_COUPLING_BUNDLE=$PWD/coupling/build/pruned ACEJAX_COUPLING_PLAT=<tag> \
+#     uv sync --extra basis --reinstall-package ace-jax-coupling
+ace-jax-coupling = { path = "coupling/python" }
 
 [dependency-groups]
 # mirrors the `gp` extra so a plain `uv run pytest` can run the GP ladder tests

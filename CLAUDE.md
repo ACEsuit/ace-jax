@@ -2,7 +2,9 @@
 
 ace-jax fits and evaluates ACE and PACE interatomic potentials in Python/JAX,
 with a hybrid ACE + GP fit and a calibrated UQ ladder. No Julia is needed to
-fit or evaluate; Julia is only used to author new coupling tables, and in the
+fit or evaluate. New coupling tables come from `ace-jax-coupling`, a
+`juliac --trim` compiled EquivariantTensors shipped as a platform wheel (no
+Julia at runtime); Julia itself runs only when building that library and in the
 parity CI jobs. User docs: `README.md`. Agent-facing usage guide:
 `skills/ace-jax/SKILL.md` (keep it in step with CLI and API changes).
 
@@ -20,17 +22,21 @@ parity CI jobs. User docs: `README.md`. Agent-facing usage guide:
   - `pipeline/` is the `aj fit` pipeline.
   - `radial_learn.py` and `varpro.py` learn radials.
 - `src/ace_jax/construct/`: Python model authoring.
-  - `spec.py`, `coupling.py`: the EquivariantTensors shim via juliacall.
+  - `spec.py`, `coupling.py`: the EquivariantTensors shim via the compiled `ace-jax-coupling` library.
   - `model.py`: `build_model`, `build_embedding_model`.
   - `prior.py`: the smoothness prior. `export.py`: `save_npz`.
 - `src/ace_jax/export/lammps.py`: `export_lammps`, a lammps-jax bundle.
-- `src/ace_jax/cli.py`: `ace-jax`/`aj` with `construct`, `fit` and `eval`.
+- `src/ace_jax/cli.py`: `ace-jax`/`aj` with `basis`, `fit` and `eval`.
 - `tests/`: the pytest suite. `conftest.py` holds the shared fixtures and helpers.
 - `fixtures/`: committed reference data. These are bit-exact goldens: never hand-edit or reformat them.
 - `bench/`: benchmark and research drivers.
   - `acegp_cantor/run.py`: the research fit driver.
   - `scaling/`: the benchmark suite, tested by `tests/test_bench_scaling.py`.
   - `learn_radial/`.
+- `coupling/`: the `ace-jax-coupling` distribution.
+  - `julia/src/ETCouple.jl`: the C ABI over EquivariantTensors (fork rev pinned in `julia/Project.toml` `[sources]`); `julia/build.jl` compiles it with JuliaC (`--trim=safe`, Julia 1.13); `julia/reference/` is the unpatched-upstream oracle.
+  - `python/`: the ctypes package `ace_jax_coupling` and its wheel hook; `tools/`: bundle check, trace-based pruning, clean-env wheel test.
+  - Spec: `docs/coupling-etshim-spec.md`.
 - `julia/`: ACEpotentials reference generators.
 - `pace_ref/`: ML-PACE and python-ace reference tooling.
 - `spike/`: throwaway experiments, not linted.
@@ -48,11 +54,11 @@ uv run ruff check                     # lint; `uv run pre-commit run --all-files
 
 - **Extras:**
   - `gp`: numpyro, optax, blackjax. The dev group mirrors it.
-  - `authoring`: juliacall and juliapkg. They provision the Julia pinned in `juliapkg.json`.
+  - `basis`: the `ace-jax-coupling` platform wheel (Linux x86_64/aarch64, macOS arm64). Until it is on PyPI, `uv sync --extra basis` builds a lib-less dev wheel from `coupling/python`; for the real library: `JULIA_DEPOT_PATH=$HOME/.julia-trim julia +1.13 --project=coupling/julia/build coupling/julia/build.jl coupling/build`, prune with `coupling/tools/prune_bundle.py`, then `ACEJAX_COUPLING_BUNDLE=$PWD/coupling/build/pruned ACEJAX_COUPLING_PLAT=<tag> uv sync --extra basis --reinstall-package ace-jax-coupling`. (A separate depot because the default one's stale ACE registry crashes Julia 1.13's Pkg.)
   - `cuda`.
   - `fast-neighbours`: matscipy-neighbours, a C++ source build.
 - **Tests that silently skip** when an optional dependency is missing:
-  - `authoring`: `test_coupling_etshim`, `test_coupling_parity`. The coupling cache tests still run: they use `ACEJAX_NO_JULIA=1` and the committed cache.
+  - `basis`: `test_coupling_etshim`, `test_coupling_parity` and the authoring bridge tests skip unless a compiled `ace_jax_coupling` is installed (`conftest.require_coupling_lib`). The coupling cache tests still run: they use `ACEJAX_NO_JULIA=1` and the committed cache.
   - lammps-jax: `test_export_lammps` and `test_bench_scaling`'s export test. Make lammps-jax importable with `PYTHONPATH=<lammps-jax>/python` or `uv pip install -e <lammps-jax>`.
   - `fast-neighbours` (matscipy-neighbours): `test_calc_jit`'s native `neighbour_matrix` test and `test_efv`'s dense-vs-neighbour_matrix check; without it the skin list and dense layout also take their fallback neighbour path.
   - `pyace` (python-ace, in its own venv under `pace_ref/`).
@@ -68,7 +74,7 @@ uv run ruff check                     # lint; `uv run pre-commit run --all-files
 - **CI** (`.github/workflows/`):
   - `test.yml`: 3 pytest-split shards on Python 3.12, a smoke job on 3.11 and 3.13, the `slow` ladder, and `optional-deps` (matscipy-neighbours plus lammps-jax pinned to a commit, with `ACEJAX_REQUIRE_OPTIONAL=1`).
   - `lint.yml`.
-  - Path-gated parity jobs: `julia-parity` (ACEfit rows/QR), `coupling-parity` (ET vs ACEpotentials), `prior-parity`, `pace-parity` (ML-PACE C++ + python-ace).
+  - Path-gated parity jobs: `julia-parity` (ACEfit rows/QR), `coupling-wheels` (builds + clean-env-tests the coupling wheels, then parity vs ACEpotentials), `prior-parity`, `pace-parity` (ML-PACE C++ + python-ace).
   - pytest-split balances on `.test_durations`. Refresh it with `pytest --store-durations` when adding slow tests.
 
 ## Conventions
@@ -128,4 +134,4 @@ uv run ruff check                     # lint; `uv run pre-commit run --all-files
 - **Closures:** `jax.tree.map(lambda a: a[i], ds)` inside a loop is the batch-slicing idiom. It is safe because it is consumed in the same iteration. Ruff B023 is suppressed per file for exactly this.
 - **Python 3.11:** `requires-python` is `>=3.11`, so no PEP 701 f-strings (`f"{d["k"]}"`) in `src/` or `tests/`.
 - **Laplace compile time:** the Laplace rung (a Hessian through the whole LML) can take tens of minutes to compile. Keep `--rungs map` in quick checks.
-- **Coupling cache:** the first `construct` of a new basis shape runs Julia. The per-shape cache lives in `~/.cache/ace-jax/coupling`, or `$ACEJAX_COUPLING_CACHE`.
+- **Coupling cache:** the first `aj basis` of a new basis shape calls the coupling library; later ones hit the cache (stamped with `coupling.backend_id()`). The per-shape cache lives in `~/.cache/ace-jax/coupling`, or `$ACEJAX_COUPLING_CACHE`.
