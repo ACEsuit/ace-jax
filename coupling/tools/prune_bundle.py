@@ -249,9 +249,13 @@ def _replace_gpl(dst):
             shutil.copy2(out, f)
         done.append(f.name)
     missing = [g for g in GPL_LIBS if not any(n.startswith(g + ".") or n.startswith(g + "-") for n in done)]
-    assert not missing, f"expected one each of {GPL_LIBS} in the bundle; missing {missing}, replaced {done}"
+    # Linux/macOS: SuiteSparse_jll's __init__ opens every SuiteSparse library, so all four are
+    # traced and must have been replaced (a miss means a renamed file slipped through).  Windows:
+    # the trimmed coupling never maps them, so the trace drops them and there is nothing to ship.
+    if sys.platform != "win32":
+        assert not missing, f"expected one each of {GPL_LIBS} in the bundle; missing {missing}, replaced {done}"
     (_traced_windows if sys.platform == "win32" else traced)(dst)   # the coupling still runs on the placeholders
-    print(f"GPL libraries replaced by placeholders: {', '.join(done)}")
+    print(f"GPL libraries replaced by placeholders: {', '.join(done) or 'none (none traced)'}")
 
 
 def _relink_macos(dst, renames):
