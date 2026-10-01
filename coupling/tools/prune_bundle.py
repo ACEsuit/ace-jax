@@ -105,7 +105,11 @@ def _traced_windows(src):
                 continue
             m = line[4:]
             if os.path.normcase(m).startswith(root):
-                used.add(pathlib.Path(m).relative_to(src))
+                rel = pathlib.Path(m).relative_to(src)
+                # Windows reports the name a module was loaded by (e.g. "libpcre2-8.DLL");
+                # keep the file's own on-disk spelling
+                on_disk = {p.name.lower(): p.name for p in (src / rel).parent.iterdir()}
+                used.add(rel.with_name(on_disk.get(rel.name.lower(), rel.name)))
             elif pathlib.Path(m).name.lower() in bundled:
                 outside.add(m)                        # a bundled library resolved elsewhere
     # a library the bundle ships but the process took from outside it would be

@@ -28,7 +28,7 @@ pure **Python/JAX** — no Julia needed to fit or run.
 ```bash
 pip install ace-jax             # core: evaluate + linear fit + ASE calculator
 pip install ace-jax[gp]         # + `ace-jax fit` pipeline: GP/UQ hyperparameter ladder
-pip install ace-jax[basis]  # + Python basis coupling (compiled EquivariantTensors; Linux x86_64/aarch64, macOS arm64)
+pip install ace-jax[basis]  # + Python basis coupling (compiled EquivariantTensors; Linux x86_64/aarch64, macOS arm64, Windows x64)
 pip install ace-jax[cuda]       # + CUDA 12 JAX
 pip install ace-jax[fast-neighbours]  # + matscipy-neighbours (C++ source build; ASE's list is the fallback)
 ```
@@ -394,7 +394,7 @@ the reference codes:
   solve matches ACEfit's `solve(QR)` to 1e-9, checked against the committed
   fixtures (`julia/export_model.jl`, `julia/acefit_qr_reference.jl`).
 - **coupling-wheels** — builds the `ace-jax-coupling` wheels (manylinux_2_28
-  x86_64/aarch64, macOS arm64), tests them in clean environments with no Julia
+  x86_64/aarch64, macOS arm64, Windows x64), tests them in clean environments with no Julia
   (matching upstream EquivariantTensors: exact indices, values within 4 ulp),
   and runs the coupling parity
   against the ACEpotentials references (`julia/coupling_reference.jl`).

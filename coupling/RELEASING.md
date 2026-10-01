@@ -1,7 +1,7 @@
 # Releasing ace-jax-coupling
 
 The wheels are built, tested and published by `.github/workflows/coupling-wheels.yml`.
-It publishes **wheels only**: Linux x86_64 and aarch64 (manylinux_2_28) and macOS arm64.
+It publishes **wheels only**: Linux x86_64 and aarch64 (manylinux_2_28), macOS arm64 and Windows x64.
 There is no sdist, because on an unsupported platform it would build a wheel with no
 library. ace-jax's dependency marker already limits the install to these platforms.
 

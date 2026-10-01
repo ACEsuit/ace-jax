@@ -9,7 +9,7 @@ needed**, and nothing is downloaded at runtime.
 
 - Install through ace-jax: `pip install "ace-jax[basis]"` (once published; until
   then build the wheel from `coupling/`).
-- Platforms: Linux x86_64 / aarch64 (manylinux_2_28), macOS arm64 (11+).
+- Platforms: Linux x86_64 / aarch64 (manylinux_2_28), macOS arm64 (11+), Windows x64.
 - `ace_jax_coupling.build_info()` reports the EquivariantTensors source
   (repository + commit), Julia and JuliaC versions of the build.
 - `ACEJAX_COUPLING_LIB=<bundle>/lib/libetcouple.<so|dylib>` points the package

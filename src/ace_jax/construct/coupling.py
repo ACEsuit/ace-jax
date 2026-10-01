@@ -90,7 +90,7 @@ def _lib():
     except ModuleNotFoundError as e:
         raise ModuleNotFoundError(
             "coupling generation needs the 'basis' extra: pip install 'ace-jax[basis]' "
-            "(Linux x86_64/aarch64, macOS arm64; until ace-jax-coupling is on PyPI, "
+            "(Linux x86_64/aarch64, macOS arm64, Windows x64; until ace-jax-coupling is on PyPI, "
             "build its wheel from coupling/ in the ace-jax repo)") from e
     if ace_jax_coupling.__version__ != COUPLING_LIB_VERSION:
         raise RuntimeError(f"ace-jax-coupling {ace_jax_coupling.__version__} installed, this ace-jax "
