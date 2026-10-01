@@ -67,11 +67,12 @@ def _add_fit_args(p):
     p.add_argument("--ard-mode", choices=["joint", "sequential"], default="joint",
                    help="joint: noise + ARD scales by evidence; sequential: ARD only, one Gram (low memory)")
     p.add_argument("--ard-variance", choices=["sandwich", "kappa"], default="sandwich",
-                   help="ARD force variance: sandwich = configuration-clustered misspecification-robust "
-                        "(scaled by lam on the train hold-out); kappa = kappa^2 x the posterior variance")
+                   help="ARD force-uncertainty shape: sandwich (default) = delete-one-cluster PRESS jackknife "
+                        "(misspecification-robust); kappa = the posterior A^-1 shape. Both get the "
+                        "per-group scales")
     p.add_argument("--ard-val-frac", type=float, default=0.2,
-                   help="train fraction held out to fit the force-variance scale: lam (sandwich) "
-                        "and kappa")
+                   help="stratified train fraction held out to score the per-group force scales "
+                        "(rms factor and conformal quantile) with the hold-out posterior")
     p.add_argument("--force-shape", choices=["iso", "aniso"], default="iso",
                    help="ard: isotropic (|e|/sqrt(v/3)) or anisotropic (Mahalanobis) conformal force scores")
     p.add_argument("--ard-coverage", type=float, default=0.9,
@@ -81,7 +82,7 @@ def _add_fit_args(p):
     p.add_argument("--ard-cluster-size", type=float, default=3.0,
                    help="ard: sandwich block side in units of r_cut ('inf': whole configurations)")
     p.add_argument("--ard-press", choices=["exact", "block"], default="exact",
-                   help="ard: PRESS correction of the jackknife scores")
+                   help="ard: PRESS correction of the jackknife scores (exact: per-cluster solve; block: block approximation)")
     p.add_argument("--ard-n-min", type=int, default=20,
                    help="ard: groups with fewer configurations borrow a neighbouring group's scales")
     p.add_argument("--no-ard-support", action="store_true",

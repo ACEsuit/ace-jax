@@ -339,14 +339,19 @@ Other entry points:
   that is not the model's coefficients, i.e. a posterior from another fit), and
   `RuntimeError` unless `jax_enable_x64` is on. `forces_std` holds the whole
   cell's force design rows, ~N·3·L·8 bytes.
-- **ARD properties.** `forces_std`/`forces_cov` use a per-group rms scale on the PRESS jackknife
+- **ARD properties.** `--ard-variance sandwich` (default) is the PRESS jackknife shape
+  (`--ard-press exact|block`). `forces_cov` is always the full 3x3; `forces_q_mahal` exists for
+  `--force-shape aniso`. `forces_std`/`forces_cov` use a per-group rms scale on the PRESS jackknife
   shape (`--ard-cluster-size`, `--force-shape aniso`); `forces_q` is the per-group conformal
   radius at `--ard-coverage` (default 0.9); `forces_group` names each atom's group.
   `--ard-variance kappa` keeps the A⁻¹ shape and also gets the per-group scales.
 - **Coverage is conditional on exchangeability.** It holds for atoms exchangeable with their
   group's calibration configurations. For a new regime (cracks, interfaces), run
-  `aj calibrate --model M --posterior P --data labelled.xyz --out DIR` on a few labelled cells
-  like it (per-group replace by default; `--append`, `--replace`).
+  `aj calibrate --model M --posterior P --data labelled.xyz --out new_posterior.npz` on a few labelled
+  cells like it, then use `posterior="new_posterior.npz"` / `aj eval --posterior new_posterior.npz`.
+  `--out` is a file. Default: groups where the new cells have >= `--ard-n-min` (20)
+  configurations use them alone, other groups pool stored + new; `--append` pools in every group,
+  `--replace` uses the new cells alone in every group.
 - **`support_ok = False` marks candidates for labelling** (`forces_support`; `aj eval --posterior P
   --per-atom out.xyz --support`; `--no-ard-support` at fit time skips it).
 - **Schema-2 posteriors serve only the old scalar `forces_std`.** The new properties raise and ask

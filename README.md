@@ -328,12 +328,15 @@ The force uncertainty has a shape and two scales (mathematics:
 - **Shape.** The centred delete-one-cluster (PRESS) jackknife covariance of the force at each
   atom, with spatial clusters of `--ard-cluster-size` r_cut (default 3; `inf` = whole
   configurations), so large cells are split into ~3 r_cut blocks by default. `--force-shape aniso`
-  keeps a full 3x3 shape instead of an isotropic one. `--ard-variance kappa` keeps the posterior
-  shape A⁻¹ instead and still gets the per-group scales below.
+  keeps a full 3x3 shape instead of an isotropic one. The default `--ard-variance sandwich` now means this
+  jackknife shape (`--ard-press exact|block` picks the exact per-cluster correction or a block
+  approximation); `--ard-variance kappa` keeps the posterior shape A⁻¹ instead and still gets the
+  per-group scales below.
 - **Two scales, per group.** `forces_std` / `forces_cov` use a per-group rms factor (the scale at
-  which the standardised error has unit rms). `forces_q` is the per-group conformal radius at
+  which the standardised error has unit rms). `forces_cov` is always the full 3x3. `forces_q` is the per-group conformal radius at
   `--ard-coverage` (default 0.9): `|F_err| <= forces_q` with that probability for atoms
-  exchangeable with the group's calibration configurations. Scores come from a stratified
+  exchangeable with the group's calibration configurations (with `--force-shape aniso` the score is
+  Mahalanobis and `forces_q_mahal` is also available). Scores come from a stratified
   hold-out (`--ard-val-frac`) scored with the hold-out posterior.
 - **Groups.** 8 Mondrian groups = 4 distortion bands x [coordination = modal]
   (`--ard-groups distortion|none`); groups with fewer than `--ard-n-min` (default 20)
@@ -349,11 +352,14 @@ cells of that kind; only the scales change, the model is untouched:
 
 ```bash
 aj calibrate --model out_ard/model.npz --posterior out_ard/posterior.npz \
-    --data crack_cells.xyz --out out_ard_crack      # replaces the scores in the groups these cells populate
+    --data crack_cells.xyz --out crack_posterior.npz
+aj eval --model out_ard/model.npz --posterior crack_posterior.npz --data big.xyz $K --forces --per-atom atoms_std.xyz
+# or ACECalculator(model, posterior="crack_posterior.npz")
 ```
 
-`--append` pools the new cells with the stored hold-out scores; `--replace` uses them alone in
-every group. The default replaces per group, leaving the others as fitted. Posteriors are schema 3;
+By default, groups where the new cells have at least `--ard-n-min` (default 20) configurations use
+them alone; every other group pools the stored hold-out scores with them. `--append` pools in every
+group; `--replace` uses the new cells alone in every group. Posteriors are schema 3;
 older schema-2 posteriors serve only the old scalar `forces_std` (the new properties raise and ask
 you to refit with `--uq ard`). The validation programme for this revision is described in
 [`bench/defect_uq/README.md`](bench/defect_uq/README.md); it has not been run yet, so treat the
