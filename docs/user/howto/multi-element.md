@@ -27,7 +27,7 @@ records how the subsets were made.
 ## Fit
 
 ```bash
-aj fit --order 2 --max-degree 5 --radial-mode onehot \
+aj fit --order 2 --max-degree 5 \
     --train cantor_train.xyz --test cantor_test.xyz --ood cantor_vacancy.xyz $K \
     --e0 lsq --m-per-species 0 --opt lbfgs --out fit
 ```

@@ -27,7 +27,7 @@ radial basis that a basis is built with by default. Do
 | Step | What happens | Checkpoint |
 |---|---|---|
 | 1. Data | the Tutorial 1 split, plus a fit / validation split of the training set | |
-| 2. Frozen baseline | the default basis (`radial_mode="glorot_normal"`), fitted and tested | |
+| 2. Frozen baseline | a random-start basis (`radial_mode="glorot_normal"`), fitted and tested | |
 | 3. Learn | `fit_radial`: 40 L-BFGS steps, then the gate | the learned radials win the gate |
 | 4. Inspect | the radial functions before and after, over the pair-distance histogram | |
 | 5. Refit and test | the learned basis, fitted exactly as the baseline | smaller test force error |
@@ -41,10 +41,11 @@ Typical results on the 13-configuration test set:
 | frozen seeded radials | 470 | 0.197 |
 | learned radials | 28 | 0.149 |
 
-The frozen seeded basis is a poor fit here, and the learned one recovers
-most of the difference. The frozen `onehot` basis of Tutorial 1 is already
-good on this small dataset (24 meV/atom, 0.103 eV/Å), and exercise 2 shows
-what the gate does when learning cannot improve on its start. On larger
+The notebook starts from seeded random radials on purpose: kept frozen they
+are a poor fit, and the learned ones recover most of the difference. The
+default `onehot` basis of Tutorial 1 is already good on this small dataset
+(24 meV/atom, 0.103 eV/Å); learning from it (exercise 2) lowers the energy
+error to about 19 meV/atom and leaves the force error unchanged. On larger
 MACE-labelled datasets (200 SiGe and 150 CrMnFeCoNi training configurations),
 learning from the ACEpotentials default radials lowered the held-out gate
 score by 21% and 48%.

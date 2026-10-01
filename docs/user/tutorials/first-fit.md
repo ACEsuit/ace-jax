@@ -41,9 +41,10 @@ B = 88 GPa.
 ## Exercises
 
 1. Change the maximum degree to 8 and 12: how do the basis size and the
-   test errors move?
-2. Switch the radial mode to `glorot_normal`, the default of `aj basis` and
-   `aj fit`, and compare.
-3. Keep the isolated atom in the training set: why does the energy error
-   jump? (See [E0](../concepts.md#e0-the-reference-energy).)
+   test errors move? Why is degree 8 so much worse in energy? (Look at
+   `log_sigma_E`; see the [FAQ](../faq.md#my-fit-is-much-worse-than-expected).)
+2. Switch the radial mode to `glorot_normal` (seeded random radial mixtures)
+   and compare.
+3. Keep the isolated atom in the training set: how do E0 and the test errors
+   change? (See [E0](../concepts.md#e0-the-reference-energy).)
 4. Repeat the equation of state for β-tin.

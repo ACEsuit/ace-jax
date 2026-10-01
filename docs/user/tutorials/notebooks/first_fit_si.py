@@ -1,8 +1,8 @@
 # /// script
 # requires-python = ">=3.11,<3.14"
 # dependencies = [
-#     # TODO(pypi): replace this git requirement with "ace-jax[gp]" once ace-jax is on PyPI.
-#     "ace-jax[gp] @ git+https://github.com/ACEsuit/ace-jax@main",
+#     # TODO(pypi): replace this git requirement with "ace-jax" once ace-jax is on PyPI.
+#     "ace-jax @ git+https://github.com/ACEsuit/ace-jax@main",
 #     "marimo>=0.25",
 #     "matplotlib>=3.8",
 # ]
@@ -125,13 +125,13 @@ def _(mo):
     An ACE basis is set by the elements, the **correlation order** (how many
     neighbours each basis function couples; order 3 means four-body terms) and
     the **maximum total degree**, which bounds the polynomial degree and so the
-    basis size. `radial_mode="onehot"` uses the radial polynomials themselves
-    as the radial basis.
+    basis size. `radial_mode="onehot"` (the default) uses the radial
+    polynomials themselves as the radial basis.
 
     `BasisSpec` describes the basis and `build_basis` builds it; the first
     build of a new shape computes its coupling coefficients (milliseconds) and
-    caches them. On the command line, `aj fit --order 3 --max-degree 10
-    --radial-mode onehot ...` builds the same basis inside the fit, and
+    caches them. On the command line, `aj fit --order 3 --max-degree 10 ...`
+    builds the same basis inside the fit, and
     `aj basis` saves one on its own.
     """)
     return
@@ -171,8 +171,7 @@ def _(mo):
     The command-line equivalent is
 
     ```bash
-    aj fit --order 3 --max-degree 10 --radial-mode onehot \
-        --train train.xyz --test test.xyz \
+    aj fit --order 3 --max-degree 10 --train train.xyz --test test.xyz \
         --energy-key dft_energy --force-key dft_force --virial-key dft_virial \
         --e0 lsq --m-per-species 0 --opt lbfgs --out fit
     ```
@@ -396,15 +395,17 @@ def _(mo):
 
     1. **Basis size.** Change *max degree* to 8 and to 12 in Step 2. How do the
        basis size and the test errors change? With 39 small training cells,
-       does a bigger basis keep helping?
-    2. **Radial basis.** Switch *radial mode* to `glorot_normal`, the default
-       of `aj basis`, which mixes the radial polynomials with seeded random
-       weights. Compare the test errors. Tutorial 2 shows how to *learn* the
-       radial weights instead of keeping them frozen.
+       does a bigger basis keep helping? Why is degree 8 so much worse in
+       energy than in forces?
+    2. **Radial basis.** Switch *radial mode* to `glorot_normal`, which mixes
+       the radial polynomials with seeded random weights. Compare the test
+       errors. Tutorial 2 shows how to *learn* the radial weights instead of
+       keeping them frozen.
     3. **E0 and the isolated atom.** In Step 1, keep the isolated atom in the
-       training set (edit the list comprehension). Why does the energy error
-       grow so much with `e0="lsq"`? (Hint: an isolated atom has no
-       neighbours, so its predicted energy is E0 alone.)
+       training set (edit the list comprehension). How do the fitted E0
+       (`np.load(...)["E0"]` of the saved model) and the test errors change?
+       (Hint: an isolated atom has no neighbours, so its predicted energy is
+       E0 alone.)
     4. **β-tin.** Repeat the equation of state for β-tin
        (`bulk("Si", "beta-tin", a=4.9, c=2.7)` is a reasonable start) and compare
        the two energy minima per atom.
@@ -415,13 +416,18 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.accordion({
+        "Hint for exercise 1": mo.md(
+            "Degree 8 gives 54 functions, too few to fit energies and forces together: it "
+            "cannot separate diamond from beta-tin. The evidence then treats the energies "
+            "as noise (a large `log_sigma_E` in `theta_map.json`, about -1.2 against -3.7 "
+            "at degree 10) and fits the forces. Test E RMSE: about 239, 24 and 16 meV/atom "
+            "at degrees 8, 10 and 12."),
         "Hint for exercise 3": mo.md(
-            "With `e0='lsq'` the per-species reference energy is a least-squares "
-            "fit to all training energies. The isolated atom's energy is about 4.6 eV "
-            "higher per atom than the bulk's, and no coefficient can change the "
-            "prediction for an atom with no neighbours, so E0 is pulled away from "
-            "both. Either leave the atom out or set E0 to its energy and use "
-            "`e0='model'` (see the Concepts page)."),
+            "No coefficient can change the prediction for an atom with no neighbours, so "
+            "with `e0='lsq'` an isolated atom in the training set fixes its species' E0 "
+            "to its energy exactly (-158.545 eV here, against -162.505 eV fitted to the "
+            "bulk energies alone). The bulk is then fitted relative to the free atom; "
+            "the test errors barely move (about 25 meV/atom and 0.097 eV/A)."),
     })
     return
 

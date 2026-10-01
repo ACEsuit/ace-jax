@@ -2,9 +2,9 @@
 
 ## Installing
 
-### `aj fit` fails with `ModuleNotFoundError: No module named 'numpyro'`
+### `--rungs pathfinder` fails with an `ImportError` about blackjax
 
-Fitting needs the `gp` extra, also for the linear model:
+The pathfinder rung is the one part of `aj fit` outside the core install:
 `pip install "ace-jax[gp]"`.
 
 ### Building a basis raises `BasisUnavailable`
@@ -29,28 +29,38 @@ Check, in order:
 
 1. **Label keys.** `aj fit` reads `energy`, `forces` and `virial` unless told
    otherwise; pass `--energy-key`, `--force-key` and `--virial-key` with the
-   names in your file. A key that is not in the file is not an error: that
-   label is treated as absent, so a misspelt key silently drops it from the
-   fit.
+   names in your file. A key you name that no configuration has is an
+   error that lists the keys the file does have. (Virials are the
+   exception for files without a periodic cell, which have none.)
 2. **E0.** A freshly built basis has E0 = 0. Use `--e0 lsq` to fit the
    reference energies to the training energies, or set them yourself (next
    question).
-3. **Isolated atoms with `--e0 lsq`.** An isolated atom's predicted energy is
-   E0 alone, so least squares compromises between it and the bulk energies
-   and every energy is shifted. Leave isolated atoms out of the training set
-   with `--e0 lsq`, or use their energies as E0.
-4. **The radial basis.** The default `--radial-mode glorot_normal` mixes the
-   radial polynomials with seeded random weights. Kept frozen, it fitted
-   several times worse than `--radial-mode onehot` in our tests (on the
+3. **A basis too small for the data.** When the basis cannot fit energies
+   and forces together, the evidence explains the energies as noise: look
+   for a large `log_sigma_E` in `theta_map.json` (around -1, against -3 to
+   -5 for a good fit). On the silicon tutorial data, `--max-degree 8` (54
+   functions) cannot separate the diamond and β-tin phases and gives
+   239 meV/atom; `--max-degree 10` (110 functions) gives 24. Raise
+   `--max-degree` (or `--order`).
+4. **The radial basis.** The default `--radial-mode onehot` uses the radial
+   polynomials themselves. `--radial-mode glorot_normal` mixes them with
+   seeded random weights; kept frozen it fits several times worse (on the
    silicon tutorial data, 470 against 24 meV/atom in energy and 0.20
-   against 0.10 eV/Å in forces). Use `onehot` for a frozen basis, or
-   [learn the radials](howto/learned-radials.md).
+   against 0.10 eV/Å in forces). It is a starting point for
+   [learned radials](howto/learned-radials.md), not for a frozen fit.
 5. **The optimiser.** The default `--opt adam` runs 500 steps and can stop
    short on small data; `--opt lbfgs` converges in tens of evaluations.
 
 ### How do I use isolated-atom energies as E0?
 
-Set E0 on the basis model before fitting and keep the default `e0="model"`:
+Keep the isolated atoms in the training set and fit with `--e0 lsq`. A
+single atom with no neighbour within the cutoff is recognised as isolated,
+and its species takes its energy as E0 exactly; species without one are
+fitted by least squares to the other configurations. The log names the
+species it fixed (`E0: isolated-atom energies for Z=14 ...`).
+
+To set E0 by hand instead, set it on the basis model before fitting and
+keep the default `e0="model"`:
 
 ```python
 import jax
@@ -60,13 +70,10 @@ import jax.numpy as jnp
 from ace_jax.basis.model import BasisSpec, build_basis
 from ace_jax.basis.export import save_npz
 
-b = build_basis(BasisSpec(order=3, max_degree=10, elements=("Si",), radial_mode="onehot"))
+b = build_basis(BasisSpec(order=3, max_degree=10, elements=("Si",)))
 b = b._replace(model=eqx.tree_at(lambda m: m.E0, b.model, jnp.array([-158.54496821])))  # eV, element order
 save_npz("si_e0.npz", b)        # then: aj fit --model si_e0.npz --r0 2.4 ...
 ```
-
-or pass `b` directly as `FitConfig(model=b, e0="model", ...)`. The isolated
-atoms can then stay in the training set.
 
 ### The fit is slow, or seems to hang
 
@@ -100,13 +107,6 @@ On small datasets it is typically too small. See
 
 ## Evaluating
 
-### `aj eval` is slow
-
-`aj eval` evaluates one configuration at a time without compiling, which is
-simple but slow on many configurations. In Python, `ACECalculator(path,
-skin=0)` compiles once per structure size and is much faster on a dataset;
-see [ASE calculators](howto/ase.md).
-
 ### The first calculator call takes seconds
 
 JAX compiles the model for each new padded structure size. Later calls with
@@ -124,4 +124,7 @@ bit. See [Reproducible fits](howto/reproducibility.md).
 ace-jax reads extxyz with the libAtoms `extxyz` parser, so every label keeps
 the name it was written with, including `energy` and `forces`. (ASE's reader
 moves those two into a calculator, which is why ace-jax does not use it for
-training data.) Pass the names as they appear in your file's header.
+training data.) Pass the names as they appear in your file's header. A name
+that no configuration in the file has is an error listing the keys it does
+have; the default names (`energy`, `forces`, `virial`) are simply absent when
+the file does not use them.

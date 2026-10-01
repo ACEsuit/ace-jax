@@ -23,7 +23,7 @@ one `pip install`. It also evaluates pacemaker **PACE `.yace`** potentials.
 
 ```bash
 --8<-- "install.txt"
-aj fit --order 3 --max-degree 10 --radial-mode onehot \
+aj fit --order 3 --max-degree 10 \
     --train train.xyz --test test.xyz --e0 lsq --m-per-species 0 --opt lbfgs --out fit
 aj eval --model fit/model.npz --data test.xyz --forces
 ```

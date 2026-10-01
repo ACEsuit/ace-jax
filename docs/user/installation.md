@@ -15,8 +15,8 @@ requirement in a project.
 
 | Install | Adds | Needed for |
 |---|---|---|
-| `ace-jax` | the core: building a basis, model loading, evaluation, ASE calculators, `aj basis`, `aj eval` | evaluating a model, building a basis |
-| `ace-jax[gp]` | numpyro, optax, blackjax | `aj fit` (every arm, the linear one included) and learned radials |
+| `ace-jax` | the core: building a basis, fitting (`aj fit`, every arm), learned radials, model loading, evaluation, ASE calculators, `aj basis`, `aj eval` | everything below except the pathfinder rung |
+| `ace-jax[gp]` | blackjax | the `pathfinder` rung of `--rungs` |
 | `ace-jax[cuda]` | `jax[cuda12]` | running on an NVIDIA GPU |
 | `ace-jax[fast-neighbours]` | matscipy-neighbours | faster neighbour lists (ASE's list is the fallback) |
 

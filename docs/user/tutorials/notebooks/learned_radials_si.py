@@ -1,8 +1,8 @@
 # /// script
 # requires-python = ">=3.11,<3.14"
 # dependencies = [
-#     # TODO(pypi): replace this git requirement with "ace-jax[gp]" once ace-jax is on PyPI.
-#     "ace-jax[gp] @ git+https://github.com/ACEsuit/ace-jax@main",
+#     # TODO(pypi): replace this git requirement with "ace-jax" once ace-jax is on PyPI.
+#     "ace-jax @ git+https://github.com/ACEsuit/ace-jax@main",
 #     "marimo>=0.25",
 #     "matplotlib>=3.8",
 # ]
@@ -110,9 +110,11 @@ def _(mo):
     mo.md(r"""
     ## Step 2: the frozen baseline
 
-    Build the default basis (`aj basis --elements Si --order 3 --max-degree 10`,
-    or `aj fit --order 3 --max-degree 10 ...`): its radial weights W are seeded
-    random mixtures (`radial_mode="glorot_normal"`). Save it to a file, since
+    Build a basis whose radial weights W are seeded random mixtures
+    (`radial_mode="glorot_normal"`, or `aj basis ... --radial-mode
+    glorot_normal`). That is a deliberately poor start, so the effect of
+    learning is easy to see; the default `onehot` basis is a good frozen basis
+    (exercise 2). Save it to a file, since
     the learner writes its result into a copy of that file, then fit it as in
     Tutorial 1 and record the test errors.
     """)
@@ -126,8 +128,9 @@ def _(files, keys, work):
     from ace_jax.fit.pipeline import FitConfig, fit, load_fit_data, save_model
 
     basis_file = work / "si_basis.npz"
-    # the default radial_mode="glorot_normal", seed 0: what `aj basis` / `aj fit --order` build
-    save_npz(basis_file, build_basis(BasisSpec(order=3, max_degree=10, elements=("Si",))))
+    # seeded random radial mixtures (seed 0): a poor frozen basis, a clear start for learning
+    save_npz(basis_file, build_basis(BasisSpec(order=3, max_degree=10, elements=("Si",),
+                                               radial_mode="glorot_normal")))
 
     def config(model_file):
         """The linear fit used throughout: evidence-maximised, E0 by least squares."""
@@ -379,8 +382,9 @@ def _(mo):
        steps nothing is learned and the gate keeps `init`; how quickly does
        the validation score improve with steps?
     2. **A better start.** In Step 2, build the basis with
-       `BasisSpec(..., radial_mode="onehot")` (Tutorial 1's choice). Does learning still help,
-       and what does the gate select? The gate is there for exactly this case.
+       the default `radial_mode="onehot"` (Tutorial 1's basis). Does learning still help,
+       and in which of energy, forces and virials? The gate keeps the starting
+       radials whenever learning does not improve the held-out score.
     3. **Smoothness.** Pass `lam_grid=(0.0, 1e-2)` to `fit_radial`. A positive
        weight penalises rough radials; the gate picks the best of all
        candidates. When might a smoother radial generalise better?

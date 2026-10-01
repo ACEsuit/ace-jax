@@ -55,7 +55,7 @@ uv run ruff check                     # lint; `uv run pre-commit run --all-files
 ```
 
 - **Extras:**
-  - `gp`: numpyro, optax, blackjax. The dev group mirrors it.
+  - `gp`: blackjax, for the pathfinder rung only (numpyro and optax are core: the MAP and the optimisers). The dev group includes it. `tests/test_core_deps.py` fails if a module-level import is not a core dependency: import optional packages inside the function that needs them.
   - (no extra for building bases: `ace-jax-coupling` from PyPI is a core dependency on Linux x86_64/aarch64, macOS arm64 and Windows x64; no Julia.) To try a locally built library without reinstalling, point the installed package at it with `ACEJAX_COUPLING_LIB=<bundle>/lib/libetcouple.<so|dylib>` (Windows: `<bundle>/bin/libetcouple.dll`), or `uv pip install` its wheel and use `uv run --no-sync`. Building the library: `coupling/RELEASING.md` and `coupling-wheels.yml` (JuliaC on Julia 1.13.1, then `coupling/tools/prune_bundle.py` and `check_bundle.py`).
   - `cuda`.
   - `fast-neighbours`: matscipy-neighbours, a C++ source build.

@@ -24,9 +24,10 @@ below passes the names explicitly:
 K="--energy-key dft_energy --force-key dft_force --virial-key dft_virial"
 ```
 
-Split the file into a training and a test set. The isolated atom is left out:
-its energy is the reference energy E0 itself, and here E0 is fitted to the
-bulk energies instead (`--e0 lsq` below; see [E0](concepts.md#e0-the-reference-energy)).
+Split the file into a training and a test set of bulk configurations. The
+isolated atom is left out, so E0 is fitted to the bulk energies (`--e0 lsq`
+below; kept in, its energy would be taken as E0 exactly, see
+[E0](concepts.md#e0-the-reference-energy)).
 
 ```bash
 python - <<'EOF'
@@ -40,8 +41,7 @@ EOF
 ## 2. Fit
 
 ```bash
-aj fit --order 3 --max-degree 10 --radial-mode onehot \
-    --train train.xyz --test test.xyz $K \
+aj fit --order 3 --max-degree 10 --train train.xyz --test test.xyz $K \
     --e0 lsq --m-per-species 0 --opt lbfgs --out fit
 ```
 
@@ -49,10 +49,9 @@ aj fit --order 3 --max-degree 10 --radial-mode onehot \
   species found in the data. `--order` is the correlation order (how many
   neighbours a basis function couples; 3 gives four-body terms) and
   `--max-degree` bounds the polynomial degree, which sets the basis size.
-- `--radial-mode onehot` uses the radial polynomials themselves as the
-  radial basis. The default, `glorot_normal`, mixes them with seeded random
-  weights: the usual start for [learning the radials](howto/learned-radials.md),
-  but a noticeably worse frozen basis (see the [FAQ](faq.md#my-fit-is-much-worse-than-expected)).
+- The radial basis is the radial polynomials themselves (`--radial-mode
+  onehot`, the default); it stays frozen, and only the readout is fitted
+  (to learn it too, see [learned radials](howto/learned-radials.md)).
 - `--m-per-species 0` selects the linear model (no Gaussian-process arm).
 - `--e0 lsq` fits the per-species reference energy by least squares on the
   training energies; a freshly built basis has E0 = 0.
@@ -125,7 +124,7 @@ unfitted basis, for example to fit it to several datasets or share it, build
 it with `aj basis` and pass it to the fit with `--model`:
 
 ```bash
-aj basis --elements Si --order 3 --max-degree 10 --radial-mode onehot --out si.npz
+aj basis --elements Si --order 3 --max-degree 10 --out si.npz
 aj fit --model si.npz --train train.xyz --test test.xyz $K \
     --e0 lsq --m-per-species 0 --opt lbfgs --r0 2.4 --out fit_from_file
 ```

@@ -27,8 +27,8 @@ data.
 
 ## Seeds
 
-`--seed` (default 0) seeds both the seeded radial weights of a built basis
-(`--radial-mode glorot_normal`) and the train/test permutation of
+`--seed` (default 0) seeds both the random radial weights of a built basis
+(with `--radial-mode glorot_normal`) and the train/test permutation of
 `--data ... --ntrain/--ntest`. Fixed seeds give the same basis and the same
 split every time.
 

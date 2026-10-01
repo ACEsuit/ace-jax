@@ -28,8 +28,9 @@ and the summary is in the wheel's
 
 - `si_tiny_train.xyz` is part of the ace-jax test fixtures.
 - The CrMnFeCoNi subsets under `docs/user/tutorials/data/cantor/` are
-  labelled with the MACE-MH-1 foundation model; see the `README.md` next to
-  them for their provenance and terms.
+  labelled with the MACE-MH-1 foundation model. The data are MIT-licensed;
+  the MACE-MH-1 weights, which are not included, are under the Academic
+  Software License. Provenance: the `README.md` next to them.
 
 ## Credits
 

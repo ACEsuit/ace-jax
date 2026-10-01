@@ -43,6 +43,8 @@ Total size about 670 KB.
 
 ## Terms
 
-These labels are outputs of MACE-MH-1. Check the MACE-MH-1 model licence
-before redistributing them or using them beyond research and teaching.
-<!-- TODO(maintainers): confirm the MACE-MH-1 licence terms for redistributing model outputs, and state them here. -->
+These datasets (structures and their MACE-MH-1 labels) are distributed under
+the MIT licence, like the rest of ace-jax. The MACE-MH-1 model weights that
+produced the labels are not included: they are under the Academic Software
+License (academic, non-commercial use), and that licence governs any use of
+the model itself.

@@ -46,11 +46,10 @@ targets E − Σᵢ E0(zᵢ), so E0 decides what the basis has to represent.
 - `aj fit --e0 lsq` fits E0 by least squares on the training energies, so
   the basis only has to represent energy differences. Use it for a freshly
   built basis.
-- An **isolated-atom** configuration is fitted by E0 alone. With `--e0 lsq`
-  leave it out of the training set: least squares would otherwise compromise
-  between it and the bulk energies, and no coefficient can repair the
-  mismatch. To use the isolated-atom energy as E0 instead, set it on the
-  basis model in Python and keep `--e0 model` (see the
+- An **isolated-atom** configuration (one atom, no neighbour within the
+  cutoff) is predicted as E0 alone. With `--e0 lsq`, a species that has one
+  in the training set takes its energy as E0 exactly, and the remaining
+  species are fitted by least squares to the other configurations (see the
   [FAQ](faq.md#how-do-i-use-isolated-atom-energies-as-e0)).
 
 ## The radial basis
@@ -64,8 +63,10 @@ Rₙₗ(r) = envelope(x) · Σq W[zᵢ, zⱼ, n, q] · Pq(x)
 - `--radial-mode` (on `aj fit` and `aj basis`) chooses the initial weights
   W. `onehot` is the linear-ACE (ACE1) convention: each radial is one
   polynomial times an indicator of one neighbour species, so for a single
-  element Rₙ = Pₙ. `glorot_normal` (the default) uses seeded random mixtures
-  of the polynomials. `aj fit` keeps W frozen and fits only the readout c.
+  element Rₙ = Pₙ. It is the default. `glorot_normal` uses seeded random
+  mixtures of the polynomials: a random starting point for learned radials,
+  several times worse kept frozen. `aj fit` keeps W frozen and fits only the
+  readout c.
 - **Learned radials** optimise W itself by variable projection (VarPro):
   for any W the best readout c is a closed-form ridge solve, so the optimiser
   works on W alone and c is projected out exactly. A held-out gate then
