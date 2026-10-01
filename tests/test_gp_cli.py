@@ -71,3 +71,24 @@ def test_cli_eval(tmp_path, capsys):
         rows = list(csv.DictReader(fh))
     assert len(rows) > 0 and "energy_per_atom" in rows[0]
     assert "E RMSE" in capsys.readouterr().out
+
+
+def test_cli_eval_matches_the_exact_model_per_config(tmp_path):
+    """aj eval of a linear model.npz (the jitted calculator path) reproduces the exact
+    per-config E/F of the model itself, isolated atom included."""
+    import jax.numpy as jnp
+    from ace_jax.eval import load, sparse_graph, species_indices
+    from ace_jax.fit.data import load_configs
+    out = tmp_path / "p.csv"
+    assert main(["eval", "--model", str(FIXTURE_DIR / "si_fitted.npz"), "--data", str(XYZ),
+                 "--energy-key", "dft_energy", "--force-key", "dft_force", "--forces", "--out", str(out)]) == 0
+    rows = list(csv.DictReader(open(out)))
+    model, meta, _ = load(FIXTURE_DIR / "si_fitted.npz")
+    cs = load_configs(XYZ, energy_key="dft_energy", force_key="dft_force", virial_key="dft_virial")
+    assert len(rows) == len(cs)
+    for r, c in list(zip(rows, cs))[::6]:
+        g = sparse_graph(c.positions, c.cell, c.pbc, float(meta["rcut"]))
+        nz = jnp.asarray(species_indices(meta, c.numbers)); s, v = jnp.asarray(g.senders), jnp.asarray(g.receivers)
+        E, F, _ = model.energy_forces_virial(jnp.asarray(g.rij), nz[s], nz[v], s, v, g.n_nodes, nz)
+        assert abs(float(r["energy"]) - float(E)) <= 1e-9 * max(1.0, abs(float(E)))
+        assert abs(float(r["fmax"]) - float(np.abs(np.asarray(F)).max())) <= 1e-8

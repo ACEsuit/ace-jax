@@ -10,9 +10,8 @@ import jax
 import numpy as np
 
 jax.config.update("jax_enable_x64", True)
-import jax.numpy as jnp
 
-from .eval import highest_precision, load
+from .eval import highest_precision
 from .fit.data import load_configs
 from .fit.pipeline.objective import _pad_to_multiple  # noqa: F401  (moved to the pipeline; kept importable)
 
@@ -160,39 +159,30 @@ def run(a):
 def cmd_eval(a):
     """Evaluate a fitted/exported model on a dataset: predicted energy (and,
     with --forces, forces/virial) per configuration, and RMSE vs the labels
-    when present.  Native E/F/V (no ASE), one forward pass per config."""
-    from .eval import sparse_graph, species_indices
+    when present.  Every model goes through its jitted calculator: the edge list is
+    padded to power-of-two buckets, so configs of similar size share one compile (an
+    eager pass per config recompiled every op, ~3 s a config).  A linear model is
+    evaluated exactly (lean, never splined: spline_tol=None)."""
+    from ase import Atoms
     keys = dict(energy_key=a.energy_key, force_key=a.force_key, virial_key=a.virial_key)
     configs = load_configs(a.data, **keys)
     gp = str(a.model).endswith(".npz") and "gp_json" in np.load(a.model).files   # gp_model.npz from `fit`
     ard = getattr(a, "posterior", None) is not None
     if gp and ard:
         raise ValueError("--posterior is for a linear model.npz from `fit --uq ard`, not a gp_model.npz")
-    if gp or ard:
-        from ase import Atoms
-        if gp:
-            from .calc.gp import GPCalculator
-            calc = GPCalculator.from_file(a.model)
-        else:
-            from .calc.point import ACECalculator
-            calc = ACECalculator(a.model, posterior=a.posterior)
+    if gp:
+        from .calc.gp import GPCalculator
+        calc = GPCalculator.from_file(a.model)
     else:
-        model, meta, z = load(a.model)
-        rcut = float(meta["rcut"])
+        from .calc.point import ACECalculator
+        calc = ACECalculator(a.model, posterior=a.posterior if ard else None, spline_tol=None)
     esq = ecnt = fsq = fcnt = 0.0
     rows, per_atom = [], []
     with highest_precision():
         for i, c in enumerate(configs):
-            if gp or ard:
-                at = Atoms(numbers=c.numbers, positions=c.positions, cell=c.cell, pbc=c.pbc)
-                at.calc = calc
-                E, F = at.get_potential_energy(), at.get_forces()
-            else:
-                g = sparse_graph(c.positions, c.cell, c.pbc, rcut)
-                nz = jnp.asarray(species_indices(meta, c.numbers))
-                send, recv = jnp.asarray(g.senders), jnp.asarray(g.receivers)
-                E, F, V = model.energy_forces_virial(jnp.asarray(g.rij), nz[send], nz[recv],
-                                                     send, recv, g.n_nodes, nz)
+            at = Atoms(numbers=c.numbers, positions=c.positions, cell=c.cell, pbc=c.pbc)
+            at.calc = calc
+            E, F = at.get_potential_energy(), at.get_forces()
             E = float(E); F = np.asarray(F); nat = len(c.numbers)
             rows.append({"config": i, "natoms": nat, "energy": E,
                          "energy_per_atom": E / nat, "fmax": float(np.abs(F).max())})
