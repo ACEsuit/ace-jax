@@ -92,7 +92,7 @@ def nnll_from_coupling(A2B, aa_sig, tol=1e-12):
 
 
 def build_model(elements, order, totaldegree, *, wL=1.5, rcut=5.5, r0=None,
-                rin=0.0, radial_mode="glorot_normal", pair_mode="onehot",
+                rin=0.0, radial_mode="onehot", pair_mode="onehot",
                 seed=0, with_gamma=True, edge_a_kind="gather",
                 coupling_cache=True, coupling_cache_dir=None, n_q_factor=1.5):
     """Author a frozen `ace_model`-family model in memory.
@@ -372,7 +372,7 @@ class BasisSpec:
     maxl: int | None = None
     d_max: int | None = None
     reduction: str = "pca"
-    radial_mode: str = "glorot_normal"
+    radial_mode: str = "onehot"
     pair_mode: str = "onehot"
     embedding: str | None = None
     no_gamma: bool = False

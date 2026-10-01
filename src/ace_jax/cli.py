@@ -247,7 +247,9 @@ def add_basis_args(p, *, fit):
     p.add_argument("--rcut", type=float, default=None,
                    help="cutoff (default 5.5; with an embedding, 2.5 x mean bond length)")
     p.add_argument("--rin", type=float, default=0.0)
-    p.add_argument("--radial-mode", default="glorot_normal")
+    p.add_argument("--radial-mode", default="onehot", choices=["onehot", "glorot_normal", "zero"],
+                   help="initial tensor radials: onehot (R_n = P_n, the frozen-fit default) or seeded "
+                        "glorot_normal mixtures (a random start, e.g. for learned radials)")
     p.add_argument("--pair-mode", default="onehot")
     p.add_argument("--no-gamma", action="store_true", help="skip the smoothness prior")
     p.add_argument("--no-coupling-cache", action="store_true",
