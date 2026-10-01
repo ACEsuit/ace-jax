@@ -15,10 +15,14 @@ import tempfile
 # SuiteSparse library, so each is replaced by an empty placeholder of the same
 # name: the wheel ships no GPL code.  check_bundle.py enforces the marker.
 GPL_LIBS = ("libumfpack", "libspqr", "librbio", "libcholmod")
+# also replaced where present: KLU's CHOLMOD interface (LGPL) imports CHOLMOD symbols,
+# which Windows resolves when the DLL loads, so it cannot load against a placeholder
+PLACEHOLDER_LIBS = GPL_LIBS + ("libklu_cholmod",)
 PLACEHOLDER_MARK = "ace-jax-coupling GPL placeholder"
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
-EXT = "dylib" if sys.platform == "darwin" else "so"
+EXT = {"darwin": "dylib", "win32": "dll"}.get(sys.platform, "so")
+LIBDIR = "bin" if sys.platform == "win32" else "lib"
 # Two process states: the full cases (numpy loaded first, as for any user),
 # and a bare ctypes load (no numpy: Julia's loader then opens its own libgcc_s
 # etc. from the bundle instead of reusing the system copies numpy pulled in).
@@ -39,7 +43,53 @@ print("traced-ok")
 
 def _is_lib(p):
     n = p.name
+    if sys.platform == "win32":
+        return n.lower().endswith(".dll")
     return n.endswith(".dylib") if sys.platform == "darwin" else (n.endswith(".so") or ".so." in n)
+
+
+# Windows: no loader trace variable, so each driver lists the modules mapped into its
+# own process (the package's _loaded_images, loaded from source: no package import in
+# the bare driver, so numpy stays out of that process).
+WIN_DRIVERS = ["""
+import json, sys
+sys.path.insert(0, sys.argv[1])
+import ace_jax_coupling as ajc
+from ace_jax_coupling import _loader
+for c in json.load(open(sys.argv[2])).values():
+    ajc.couple_raw(c["mb"], c["R"], c["Y"])
+for p in _loader._loaded_images(): print("MOD", p)
+print("traced-ok")
+""", """
+import ctypes, importlib.util, os, pathlib, sys
+spec = importlib.util.spec_from_file_location("_l", pathlib.Path(sys.argv[1]) / "ace_jax_coupling" / "_loader.py")
+_l = importlib.util.module_from_spec(spec); spec.loader.exec_module(_l)
+lib = pathlib.Path(os.environ["ACEJAX_COUPLING_LIB"])
+for d in sorted({f.parent for f in lib.parent.parent.rglob("*.dll")}):
+    os.add_dll_directory(str(d))
+h = ctypes.CDLL(str(lib))
+assert h.etc_abi_version() == 1
+for p in _l._loaded_images(): print("MOD", p)
+print("traced-ok")
+"""]
+
+
+def _traced_windows(src):
+    env = {k: v for k, v in os.environ.items() if not k.startswith("JULIA")}
+    home = tempfile.mkdtemp(prefix="prune-home-")
+    env.update(HOME=home, USERPROFILE=home, APPDATA=home, LOCALAPPDATA=home)
+    env["ACEJAX_COUPLING_LIB"] = str(src / LIBDIR / f"libetcouple.{EXT}")
+    root = os.path.normcase(str(src)) + os.sep
+    used = set()
+    for drv in WIN_DRIVERS:
+        r = subprocess.run([sys.executable, "-c", drv, str(REPO / "coupling/python/src"),
+                            str(REPO / "coupling/python/tests/data/cases.json")],
+                           env=env, capture_output=True, text=True)
+        assert r.returncode == 0 and "traced-ok" in r.stdout, (r.stdout[-2000:], r.stderr[-3000:])
+        for line in r.stdout.splitlines():
+            if line.startswith("MOD ") and os.path.normcase(line[4:]).startswith(root):
+                used.add(pathlib.Path(line[4:]).relative_to(src))
+    return used
 
 
 def traced(src):
@@ -72,6 +122,14 @@ def traced(src):
 
 def main(src, dst):
     src, dst = pathlib.Path(src).resolve(), pathlib.Path(dst).resolve()
+    if sys.platform == "win32":
+        # DLLs are found by name in the directories the loader registers, and each
+        # traced file is one image, so keep exactly the traced files
+        used = _traced_windows(src)
+        assert pathlib.Path(LIBDIR) / f"libetcouple.{EXT}" in used, "trace did not see libetcouple"
+        _write(src, dst, {u: [u] for u in used})
+        _replace_gpl(dst)
+        return
     opened = traced(src)
     if sys.platform != "darwin":
         # LD_DEBUG reports each library under the name it was opened by
@@ -166,15 +224,18 @@ def _replace_gpl(dst):
     re-run the trace drivers on the final bundle: they must still pass."""
     done = []
     for f in sorted(p for p in dst.rglob("*") if p.is_file() and _is_lib(p)):
-        if not f.name.startswith(GPL_LIBS):
+        if not f.name.startswith(PLACEHOLDER_LIBS):
             continue
         with tempfile.TemporaryDirectory() as tmp:
             c = pathlib.Path(tmp) / "placeholder.c"
             # the name makes each placeholder's bytes unique (check_bundle: one file per library)
-            c.write_text(f'const char acejax_gpl_placeholder[] = "{PLACEHOLDER_MARK}: {f.name} '
+            c.write_text('#ifdef _WIN32\n__declspec(dllexport)\n#endif\n'
+                         f'const char acejax_gpl_placeholder[] = "{PLACEHOLDER_MARK}: {f.name} '
                          '(no SuiteSparse code; never called)";\n')
             out = pathlib.Path(tmp) / f.name
-            if sys.platform == "darwin":
+            if sys.platform == "win32":
+                subprocess.run(["gcc", "-shared", "-static-libgcc", "-o", str(out), str(c)], check=True)
+            elif sys.platform == "darwin":
                 ident = subprocess.run(["otool", "-D", str(f)], capture_output=True, text=True,
                                        check=True).stdout.split()[-1]
                 subprocess.run(["cc", "-dynamiclib", "-mmacosx-version-min=11.0", "-install_name", ident,
@@ -187,8 +248,9 @@ def _replace_gpl(dst):
                                 "-o", str(out), str(c)], check=True)
             shutil.copy2(out, f)
         done.append(f.name)
-    assert len(done) == len(GPL_LIBS), f"expected one each of {GPL_LIBS} in the bundle, replaced {done}"
-    traced(dst)                                     # the coupling still runs on the placeholders
+    missing = [g for g in GPL_LIBS if not any(n.startswith(g + ".") or n.startswith(g + "-") for n in done)]
+    assert not missing, f"expected one each of {GPL_LIBS} in the bundle; missing {missing}, replaced {done}"
+    (_traced_windows if sys.platform == "win32" else traced)(dst)   # the coupling still runs on the placeholders
     print(f"GPL libraries replaced by placeholders: {', '.join(done)}")
 
 

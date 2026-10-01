@@ -72,3 +72,31 @@ def lib():
                                   c_void_p] + [c_void_p] * 10)
         _LIB = h
         return _LIB
+
+
+def _loaded_images():
+    """Paths of every shared library mapped into this process (prune tracing on
+    Windows, and the load-once test). Diagnostics only; it never loads anything."""
+    if sys.platform == "darwin":
+        d = ctypes.CDLL(None)
+        d._dyld_get_image_name.restype = ctypes.c_char_p
+        return [d._dyld_get_image_name(i).decode() for i in range(d._dyld_image_count())]
+    if sys.platform == "win32":
+        from ctypes import wintypes
+        k32, psapi = ctypes.WinDLL("kernel32"), ctypes.WinDLL("psapi")
+        k32.GetCurrentProcess.restype = wintypes.HANDLE
+        psapi.EnumProcessModulesEx.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.HMODULE),
+                                               wintypes.DWORD, ctypes.POINTER(wintypes.DWORD), wintypes.DWORD]
+        k32.GetModuleFileNameW.argtypes = [wintypes.HMODULE, wintypes.LPWSTR, wintypes.DWORD]
+        mods, need = (wintypes.HMODULE * 4096)(), wintypes.DWORD()
+        if not psapi.EnumProcessModulesEx(k32.GetCurrentProcess(), mods, ctypes.sizeof(mods),
+                                          ctypes.byref(need), 3):           # LIST_MODULES_ALL
+            raise OSError(ctypes.get_last_error(), "EnumProcessModulesEx failed")
+        buf = ctypes.create_unicode_buffer(32768)
+        out = []
+        for m in mods[: need.value // ctypes.sizeof(wintypes.HMODULE)]:
+            if k32.GetModuleFileNameW(m, buf, len(buf)):
+                out.append(buf.value)
+        return out
+    with open("/proc/self/maps") as f:
+        return [ln.split()[-1] for ln in f if len(ln.split()) >= 6]

@@ -33,10 +33,12 @@ jobs:
           - { name: linux-x86_64,  runner: ubuntu-latest,    container: "quay.io/pypa/manylinux_2_28_x86_64",  plat: manylinux_2_28_x86_64 }
           - { name: linux-aarch64, runner: ubuntu-24.04-arm, container: "quay.io/pypa/manylinux_2_28_aarch64", plat: manylinux_2_28_aarch64 }
           - { name: macos-arm64,   runner: macos-14,         container: "",                                     plat: macosx_11_0_arm64 }
+          - { name: windows-x86_64, runner: windows-latest,  container: "",                                     plat: win_amd64 }
     name: build ${{ matrix.name }}
     runs-on: ${{ matrix.runner }}
     container: ${{ matrix.container || null }}
     timeout-minutes: 60
+    defaults: { run: { shell: bash } }   # Git Bash on Windows (a bare `bash` from pwsh can be WSL's)
     steps:
       - uses: actions/checkout@v4
       - name: Julia 1.13 (container)
@@ -47,7 +49,7 @@ jobs:
           V=1.13.1; A=$(uname -m); D=$([ "$A" = x86_64 ] && echo x64 || echo aarch64)
           curl -fsSL "https://julialang-s3.julialang.org/bin/linux/$D/1.13/julia-$V-linux-$A.tar.gz" | tar xz -C /opt
           echo "/opt/julia-$V/bin" >> "$GITHUB_PATH"
-      - name: Julia 1.13 (macOS)
+      - name: Julia 1.13 (macOS, Windows)
         if: matrix.container == ''
         uses: julia-actions/setup-julia@v2
         with: { version: "1.13.1" }   # exact: == the Manifests' julia_version (build.jl checks)
@@ -59,24 +61,33 @@ jobs:
         run: |
           julia --project=coupling/julia/build -e 'using Pkg; Pkg.instantiate()'
           julia --project=coupling/julia/build coupling/julia/build.jl coupling/build
+      - uses: actions/setup-python@v5          # macOS, Windows (Windows' bare python3 can be the Store stub)
+        if: matrix.container == ''
+        with: { python-version: "3.12" }
       - name: Python for pruning/packaging
         run: |
-          PY=$( [ -x /opt/python/cp312-cp312/bin/python ] && echo /opt/python/cp312-cp312/bin/python || echo python3 )
-          "$PY" -m venv .buildenv && .buildenv/bin/pip install -q numpy build
+          PY=$( [ -x /opt/python/cp312-cp312/bin/python ] && echo /opt/python/cp312-cp312/bin/python || echo python )
+          "$PY" -m venv .buildenv
+          B=.buildenv/bin/python; [ -x "$B" ] || B=.buildenv/Scripts/python   # Windows venv layout
+          "$B" -m pip install -q numpy build
+          echo "BUILDPY=$B" >> "$GITHUB_ENV"
+      - name: C compiler for the GPL placeholders (Windows)
+        if: runner.os == 'Windows'
+        run: gcc --version | head -1
       - name: Prune + check bundle
         run: |
-          .buildenv/bin/python coupling/tools/prune_bundle.py coupling/build/bundle coupling/build/pruned
-          .buildenv/bin/python coupling/tools/check_bundle.py coupling/build/pruned
+          "$BUILDPY" coupling/tools/prune_bundle.py coupling/build/bundle coupling/build/pruned
+          "$BUILDPY" coupling/tools/check_bundle.py coupling/build/pruned
       - name: Wheel
         env:
           ACEJAX_COUPLING_BUNDLE: ${{ github.workspace }}/coupling/build/pruned
           ACEJAX_COUPLING_PLAT: ${{ matrix.plat }}
-        run: .buildenv/bin/python -m build --wheel coupling/python -o dist
+        run: '"$BUILDPY" -m build --wheel coupling/python -o dist'
       - name: auditwheel (Linux, informational)
         if: matrix.container != ''
         run: |
-          .buildenv/bin/pip install -q auditwheel
-          .buildenv/bin/auditwheel show dist/*.whl || true   # gates: check_bundle.py (GLIBC <= 2.28) + the manylinux_2_28 test job
+          "$BUILDPY" -m pip install -q auditwheel
+          "$BUILDPY" -m auditwheel show dist/*.whl || true   # gates: check_bundle.py (GLIBC <= 2.28) + the manylinux_2_28 test job
       - uses: actions/upload-artifact@v4
         with: { name: "wheel-${{ matrix.name }}", path: dist/*.whl, retention-days: 7 }
 
@@ -89,11 +100,16 @@ jobs:
           - { name: linux-x86_64,  runner: ubuntu-latest,    container: "quay.io/pypa/manylinux_2_28_x86_64",  py: /opt/python/cp311-cp311/bin/python }
           - { name: linux-aarch64, runner: ubuntu-24.04-arm, container: "quay.io/pypa/manylinux_2_28_aarch64", py: /opt/python/cp313-cp313/bin/python }
           - { name: macos-arm64,   runner: macos-14,         container: "",                                     py: python3 }
+          - { name: windows-x86_64, runner: windows-latest,  container: "",                                     py: python }
     name: test wheel ${{ matrix.name }} (no Julia)
     runs-on: ${{ matrix.runner }}
     container: ${{ matrix.container || null }}
+    defaults: { run: { shell: bash } }
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        if: runner.os == 'Windows'
+        with: { python-version: "3.12" }
       - uses: actions/download-artifact@v4
         with: { name: "wheel-${{ matrix.name }}", path: dist }
       - run: bash coupling/tools/test_wheel.sh dist/*.whl ${{ matrix.py }}
@@ -134,7 +150,7 @@ jobs:
         with: { pattern: "wheel-*", path: dist, merge-multiple: true }
       - name: Check the release set
         # wheels only, no sdist: an sdist would build a library-less wheel on an
-        # unsupported platform. Exactly the three platform wheels, none library-less,
+        # unsupported platform. Exactly the four platform wheels, none library-less,
         # and a tag must name the package version.
         env: { REF_NAME: "${{ github.ref_name }}", EVENT: "${{ github.event_name }}" }
         run: |
@@ -143,10 +159,10 @@ jobs:
             echo "tag $REF_NAME does not match ace-jax-coupling $V"; exit 1
           fi
           ls dist
-          for p in manylinux_2_28_x86_64 manylinux_2_28_aarch64 macosx_11_0_arm64; do
+          for p in manylinux_2_28_x86_64 manylinux_2_28_aarch64 macosx_11_0_arm64 win_amd64; do
             test -f "dist/ace_jax_coupling-$V-py3-none-$p.whl" || { echo "missing $p wheel for $V"; exit 1; }
           done
-          test "$(ls dist | wc -l)" -eq 3 || { echo "expected exactly 3 wheels"; exit 1; }
+          test "$(ls dist | wc -l)" -eq 4 || { echo "expected exactly 4 wheels"; exit 1; }
       - uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist
