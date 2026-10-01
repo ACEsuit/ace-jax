@@ -526,6 +526,22 @@ class ACECalculator(Calculator):
         alpha = float(np.asarray(post.group_table["alpha"]))
         return support_check(post.support, X[live], np.asarray(b.node_z)[live], 1 - alpha)
 
+    def support_descriptors(self, atoms):
+        """(X, Z) site descriptors (live atoms, the same site_features the support reference uses) and
+        atomic numbers of atoms; for `aj calibrate` to rebuild the support reference."""
+        import jax
+
+        from ..fit.data import Config, build_dataset
+        from ..fit.inducing import site_features
+        c = Config(atoms.get_positions(), atoms.get_atomic_numbers(), atoms.get_cell().array, atoms.get_pbc(),
+                   None, None, None, 1.0, 1.0, 1.0)
+        ds = build_dataset([c], self.meta, np.zeros(len(self.meta["elements"])), 1)
+        b = jax.tree.map(lambda a: a[0], ds)
+        live = np.asarray(b.node_mask)
+        with highest_precision():
+            X = np.asarray(site_features(self._fit_model, self._fit_cfg, ds)[0])[0]
+        return X[live], np.asarray(b.node_z)[live]
+
     def _native_dense(self, pos, cell, pbc, n, dtype):
         """The dense graph straight from matscipy_neighbours' neighbour_matrix,
         on the GPU when JAX runs there (zero-copy via DLPack), with the K learnt

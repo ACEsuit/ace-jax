@@ -286,3 +286,164 @@ def test_calculator_schema2_new_properties_raise(fitted, tmp_path):
     assert np.isfinite(calc.get_property("forces_std", at)).all()
     with pytest.raises(ValueError, match="refit with --uq ard"):
         calc.get_property("forces_q", at)
+
+
+def _calib_args(fitted, data, extra=()):
+    return ["calibrate", "--model", str(fitted / "model.npz"), "--posterior", str(fitted / "posterior.npz"),
+            "--data", str(data), "--energy-key", "dft_energy", "--force-key", "dft_force",
+            "--virial-key", "dft_virial", *extra]
+
+
+@pytest.fixture(scope="module")
+def calib_set(tmp_path_factory):
+    """25 rattled copies of one training config (index 1: config 0 is the isolated atom, whose shape is zero)."""
+    from ase.io import read, write
+    base = read(XYZ, "1")
+    out = []
+    for i in range(25):
+        a = base.copy()
+        a.rattle(0.01, seed=i)
+        out.append(a)
+    p = tmp_path_factory.mktemp("cal") / "U.xyz"
+    write(p, out)
+    return p
+
+
+def test_calibrate_per_group_replace(fitted, calib_set, tmp_path):
+    from ace_jax.cli import main
+    from ace_jax.fit.ard import ARDPosterior
+    base = ARDPosterior.load(fitted / "posterior.npz")
+    assert main(_calib_args(fitted, calib_set, ["--out", str(tmp_path / "d.npz")])) == 0
+    new = ARDPosterior.load(tmp_path / "d.npz")
+    t = new.group_table
+    replaced = [g for g, nc in enumerate(t["n_cfg_cal"]) if nc >= t["n_min"]]
+    assert replaced                                                       # the 25 copies cover >= 1 group
+    for g in replaced:
+        assert t["n_cfg_val"][g] == 0, g
+    for g, (nv0, nc) in enumerate(zip(base.group_table["n_cfg_val"], t["n_cfg_cal"])):
+        if nc < t["n_min"]:
+            assert t["n_cfg_val"][g] == nv0, g                             # short groups keep T_val
+    np.testing.assert_array_equal(new.mean, base.mean)
+    assert t["sources"] and t["sources"][-1]["n_cfg"] == 25
+    assert {"path", "sha256", "n_cfg", "n_atoms", "mode"} <= set(t["sources"][-1])
+
+
+def test_calibrate_append_and_replace(fitted, calib_set, tmp_path):
+    from ace_jax.cli import main
+    from ace_jax.fit.ard import ARDPosterior
+    assert main(_calib_args(fitted, calib_set, ["--append", "--out", str(tmp_path / "a.npz")])) == 0
+    assert main(_calib_args(fitted, calib_set, ["--replace", "--out", str(tmp_path / "r.npz")])) == 0
+    a, r = ARDPosterior.load(tmp_path / "a.npz"), ARDPosterior.load(tmp_path / "r.npz")
+    assert set(np.unique(a.cal["src"]).tolist()) == {0, 1} and set(np.unique(r.cal["src"]).tolist()) == {1}
+    assert sum(r.group_table["n_cfg_val"]) == 0
+
+
+def test_calibrate_rebuilds_support(fitted, calib_set, tmp_path):
+    """The support reference is rebuilt on the pooled atoms: the replace-mode reference is U only, append is T_val + U."""
+    from ace_jax.cli import main
+    from ace_jax.fit.ard import ARDPosterior
+    base = ARDPosterior.load(fitted / "posterior.npz")
+    assert base.support is not None
+    assert main(_calib_args(fitted, calib_set, ["--append", "--out", str(tmp_path / "a.npz")])) == 0
+    assert main(_calib_args(fitted, calib_set, ["--replace", "--out", str(tmp_path / "r.npz")])) == 0
+    a, r = ARDPosterior.load(tmp_path / "a.npz"), ARDPosterior.load(tmp_path / "r.npz")
+    zs = [z for z in base.support if z != "pca"]
+    assert a.support is not None and r.support is not None
+    for z in zs:
+        assert len(a.support[z]["s"]) == len(base.support[z]["s"]) + len(r.support[z]["s"])
+        assert len(a.support[z]["g"]) == len(a.support[z]["s"]) == len(a.support[z]["m"])
+    assert a.support["pca"].keys() == base.support["pca"].keys()
+    from ase.io import read
+    from ace_jax import ACECalculator
+    at = read(XYZ, "1")
+    at.calc = ACECalculator(str(fitted / "model.npz"), posterior=str(tmp_path / "a.npz"))
+    assert "support_ok" in at.calc.get_property("forces_support", at)
+
+
+def test_calibrate_refuses_schema2(fitted, calib_set, tmp_path):
+    from ace_jax.cli import main
+    z = dict(np.load(fitted / "posterior.npz"))
+    z["schema"] = np.array(2)
+    for k in [k for k in z if k.startswith(("R", "group_", "cal_", "support", "force_shape", "eps"))]:
+        z.pop(k)
+    np.savez(tmp_path / "p2.npz", **z)
+    args = _calib_args(fitted, calib_set, ["--out", str(tmp_path / "o.npz")])
+    args[args.index("--posterior") + 1] = str(tmp_path / "p2.npz")
+    with pytest.raises(ValueError, match="refit with --uq ard"):
+        main(args)
+
+
+def test_calibrate_requires_forces(fitted, calib_set, tmp_path):
+    from ace_jax.cli import main
+    args = _calib_args(fitted, calib_set, ["--out", str(tmp_path / "o.npz")])
+    args[args.index("--force-key") + 1] = "no_such_force"
+    with pytest.raises(ValueError, match="no_such_force"):
+        main(args)
+
+
+def test_calibrate_append_replace_exclusive(fitted, calib_set, tmp_path):
+    from ace_jax.cli import main
+    with pytest.raises(SystemExit):
+        main(_calib_args(fitted, calib_set, ["--append", "--replace", "--out", str(tmp_path / "o.npz")]))
+
+
+def test_eval_per_atom_writes_served_arrays(fitted, tmp_path):
+    from ase.io import read
+    from ace_jax.cli import main
+    assert main(["eval", "--model", str(fitted / "model.npz"), "--posterior", str(fitted / "posterior.npz"),
+                 "--data", str(XYZ), "--energy-key", "dft_energy", "--force-key", "dft_force",
+                 "--per-atom", str(tmp_path / "pa.xyz"), "--support"]) == 0
+    a = read(tmp_path / "pa.xyz", "0")
+    for k in ("forces_std", "forces_q", "forces_group", "support_ok", "support_q"):
+        assert k in a.arrays, k
+
+
+def test_fit_flags_map_to_config():
+    from ace_jax.cli import _fit_config, _parser
+    a = _parser().parse_args(["fit", "--model", "m.npz", "--data", "d.xyz", "--r0", "2.3", "--out", "o",
+                              "--uq", "ard", "--m-per-species", "0", "--force-shape", "aniso",
+                              "--ard-coverage", "0.8", "--ard-groups", "none", "--ard-cluster-size", "inf",
+                              "--ard-press", "block", "--ard-n-min", "7", "--no-ard-support"])
+    c = _fit_config(a)
+    assert (c.ard_force_shape, c.ard_coverage, c.ard_groups, c.ard_press, c.ard_n_min, c.ard_support) == \
+        ("aniso", 0.8, "none", "block", 7, False)
+    assert c.ard_cluster_size == float("inf")
+    d = _fit_config(_parser().parse_args(["fit", "--model", "m.npz", "--data", "d.xyz", "--r0", "2.3", "--out", "o"]))
+    assert (d.ard_force_shape, d.ard_coverage, d.ard_groups, d.ard_press, d.ard_n_min, d.ard_support) == \
+        ("iso", 0.9, "distortion", "exact", 20, True)
+
+
+def test_calibrate_per_group_keeps_support_consistent(fitted, calib_set, tmp_path):
+    from ace_jax.cli import main
+    from ace_jax.fit.ard import ARDPosterior
+    base = ARDPosterior.load(fitted / "posterior.npz")
+    assert main(_calib_args(fitted, calib_set, ["--out", str(tmp_path / "d.npz")])) == 0
+    new = ARDPosterior.load(tmp_path / "d.npz")
+    assert new.support is not None                      # rebuilt (matched by score), not stale and not dropped
+    for z in (z for z in base.support if z != "pca"):
+        assert len(new.support[z]["s"]) >= len(calib_set_atoms(calib_set, z))
+
+
+def calib_set_atoms(path, z):
+    from ase.io import read
+    return [x for a in read(path, ":") for x in a.numbers if x == z]
+
+
+def test_aniso_fit_eval_and_calibrate(tmp_path_factory, calib_set):
+    from ase.io import read
+    from ace_jax.cli import main
+    from ace_jax.fit.ard import ARDPosterior
+    out = tmp_path_factory.mktemp("aniso")
+    assert main(["fit", "--model", str(FIXTURE_DIR / "si_fitted.npz"), "--data", str(XYZ), "--ntrain", "30",
+                 "--ntest", "8", "--energy-key", "dft_energy", "--force-key", "dft_force", "--virial-key",
+                 "dft_virial", "--m-per-species", "0", "--uq", "ard", "--force-shape", "aniso", "--opt",
+                 "lbfgs", "--map-steps", "5", "--configs-per-batch", "4", "--r0", "2.35",
+                 "--out", str(out)]) == 0
+    assert ARDPosterior.load(out / "posterior.npz").force_shape == "aniso"
+    assert main(["eval", "--model", str(out / "model.npz"), "--posterior", str(out / "posterior.npz"),
+                 "--data", str(XYZ), "--energy-key", "dft_energy", "--force-key", "dft_force",
+                 "--per-atom", str(out / "pa.xyz")]) == 0
+    a = read(out / "pa.xyz", "1")
+    assert a.arrays["forces_cov"].shape == (len(a), 9) and "forces_q_mahal" in a.arrays
+    assert main(_calib_args(out, calib_set, ["--out", str(out / "c.npz")])) == 0
+    assert ARDPosterior.load(out / "c.npz").force_shape == "aniso"

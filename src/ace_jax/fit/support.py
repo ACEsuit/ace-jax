@@ -178,3 +178,37 @@ def unflatten_support(flat):
             ref.setdefault(int(p[0]), {})[p[1]] = np.asarray(v) if p[1] in ("g", "f") else np.asarray(v, np.float64)
     ref["pca"] = {z: (d["mu"], d["sd"], d["W"]) for z, d in ref["pca"].items()}
     return ref
+
+
+def extend_support(ref, keep, X, Z, scores, cfg, max_atoms, seed, fit_max=10000):
+    """Rebuild a support reference on (kept stored points) + new atoms under the SAME per-species PCA.
+
+    keep[z]: boolean mask over ref[z]'s stored points to retain (None: all, absent species: all).
+    X (n, D) raw descriptors, Z, scores, cfg of the new atoms.  Per species the pooled configurations are
+    capped at max_atoms atoms (whole configurations, random order), masses re-derived as 1/(atoms per
+    configuration), and the classifier-fit subset redrawn.  Scores are rounded through float32, as a
+    saved reference holds them."""
+    rng = np.random.default_rng(seed)
+    out = {"pca": ref["pca"]}
+    Z, cfg = np.asarray(Z), np.asarray(cfg)
+    for z in sorted(k for k in ref if k != "pca"):
+        r = ref[z]
+        k = np.ones(len(r["s"]), bool) if keep.get(z) is None else np.asarray(keep[z], bool)
+        m = np.flatnonzero(Z == z)
+        Xc = np.r_[r["Xc"][k], _proj(ref["pca"], z, np.asarray(X)[m])]
+        s = np.r_[r["s"][k], np.asarray(scores, np.float32).astype(float)[m]]
+        g_old = np.asarray(r["g"])[k]
+        _, g_new = np.unique(cfg[m], return_inverse=True)
+        g = np.r_[g_old, g_new + (g_old.max() + 1 if len(g_old) else 0)].astype(np.int64)
+        if len(s) == 0:
+            continue
+        sel, n = [], 0
+        for c in rng.permutation(np.unique(g)):
+            mc = np.flatnonzero(g == c)
+            if n + len(mc) > max_atoms and sel:
+                break
+            sel.append(mc); n += len(mc)
+        sel = np.sort(np.concatenate(sel))
+        _, inv, cnt = np.unique(g[sel], return_inverse=True, return_counts=True)
+        out[z] = {"Xc": Xc[sel], "s": s[sel], "m": 1.0 / cnt[inv], "g": inv, "f": _fit_subset(inv, fit_max, rng)}
+    return out

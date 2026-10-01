@@ -72,6 +72,20 @@ def _add_fit_args(p):
     p.add_argument("--ard-val-frac", type=float, default=0.2,
                    help="train fraction held out to fit the force-variance scale: lam (sandwich) "
                         "and kappa")
+    p.add_argument("--force-shape", choices=["iso", "aniso"], default="iso",
+                   help="ard: isotropic (|e|/sqrt(v/3)) or anisotropic (Mahalanobis) conformal force scores")
+    p.add_argument("--ard-coverage", type=float, default=0.9,
+                   help="ard: nominal coverage 1 - alpha of the per-group conformal quantile")
+    p.add_argument("--ard-groups", choices=["distortion", "none"], default="distortion",
+                   help="ard: conformal groups = distortion bands x [z = z*] (8), or none (2)")
+    p.add_argument("--ard-cluster-size", type=float, default=3.0,
+                   help="ard: sandwich block side in units of r_cut ('inf': whole configurations)")
+    p.add_argument("--ard-press", choices=["exact", "block"], default="exact",
+                   help="ard: PRESS correction of the jackknife scores")
+    p.add_argument("--ard-n-min", type=int, default=20,
+                   help="ard: groups with fewer configurations borrow a neighbouring group's scales")
+    p.add_argument("--no-ard-support", action="store_true",
+                   help="ard: skip the covariate-shift support reference")
     p.add_argument("--pops-ridge", default="auto")
     p.add_argument("--seed", type=int, default=0); p.add_argument("--out", default=None)
     p.add_argument("--model-draws", type=int, default=1,
@@ -117,6 +131,9 @@ def _fit_config(a):
         init=json.load(open(a.init)) if a.init else None, rungs=rungs, laplace=a.laplace,
         n_draws=a.n_draws, vi_steps=a.vi_steps, nuts_warmup=a.nuts_warmup, nuts_samples=a.nuts_samples,
         nuts_chains=a.nuts_chains, uq=a.uq, ard_mode=a.ard_mode, ard_variance=a.ard_variance, ard_val_frac=a.ard_val_frac,
+        ard_force_shape=a.force_shape, ard_coverage=a.ard_coverage, ard_groups=a.ard_groups,
+        ard_cluster_size=a.ard_cluster_size, ard_press=a.ard_press, ard_n_min=a.ard_n_min,
+        ard_support=not a.no_ard_support,
         predict_train=False, pops_ridge=ridge,
         predict_stats="recompute", pf_samples=16, pf_maxiter=15)
     return cfg.validate()
@@ -181,6 +198,19 @@ def cmd_eval(a):
         rcut = float(meta["rcut"])
     esq = ecnt = fsq = fcnt = 0.0
     rows, per_atom = [], []
+    served = {}
+    if ard:
+        post = calc.posterior
+        want_pa = bool(getattr(a, "per_atom", None))
+        if want_pa and post.group_table is None:
+            print("note: schema-2 posterior: forces_q/forces_group/forces_cov are not written "
+                  "(refit with --uq ard)")
+        served = {"q": want_pa and post.group_table is not None,
+                  "mahal": want_pa and post.group_table is not None and post.force_shape == "aniso",
+                  "support": want_pa and getattr(a, "support", False)}
+        if served["support"] and post.support is None:
+            print("note: this posterior has no support reference: support_ok/support_q are not written")
+            served["support"] = False
     with highest_precision():
         for i, c in enumerate(configs):
             if gp or ard:
@@ -205,6 +235,17 @@ def cmd_eval(a):
                     out_at = Atoms(numbers=c.numbers, positions=c.positions, cell=c.cell, pbc=c.pbc)
                     out_at.arrays["forces_pred"] = F
                     out_at.arrays["forces_std"] = s
+                    if served["q"]:
+                        out_at.arrays["forces_q"] = np.asarray(calc.get_property("forces_q", at))
+                        out_at.arrays["forces_group"] = np.asarray(calc.get_property("forces_group", at))
+                        if served["mahal"]:
+                            out_at.arrays["forces_cov"] = np.asarray(
+                                calc.get_property("forces_cov", at)).reshape(len(at), 9)
+                            out_at.arrays["forces_q_mahal"] = np.asarray(calc.get_property("forces_q_mahal", at))
+                    if served["support"]:
+                        sup = calc.get_property("forces_support", at)
+                        out_at.arrays["support_ok"] = np.asarray(sup["support_ok"], bool)
+                        out_at.arrays["support_q"] = np.asarray(sup["support_q"], float)
                     per_atom.append(out_at)
             if c.energy is not None:
                 esq += ((E - c.energy) / nat) ** 2; ecnt += 1
@@ -213,7 +254,7 @@ def cmd_eval(a):
     if per_atom:
         from ase.io import write as _write
         _write(a.per_atom, per_atom)
-        print(f"wrote per-atom forces_std for {len(per_atom)} configs to {a.per_atom}")
+        print(f"wrote per-atom uncertainty arrays for {len(per_atom)} configs to {a.per_atom}")
     if a.out:
         with open(a.out, "w", newline="") as fh:
             w = csv.DictWriter(fh, fieldnames=list(rows[0])); w.writeheader(); w.writerows(rows)
@@ -228,6 +269,143 @@ def cmd_eval(a):
     if fcnt:
         print(f"F RMSE {np.sqrt(fsq / fcnt):.4f} eV/A  ({fcnt} components)")
     return rows
+
+
+_NEED3 = "this posterior predates schema 3; refit with --uq ard"
+
+
+def _print_group_table(t):
+    d = t.to_dict() if hasattr(t, "to_dict") else t
+    merged = {int(k): int(src) for k, src in d["merged"]}
+    print(f"{'g':>2} {'n_cfg (T_val/U)':>16} {'lam_rms':>9} {'q':>8} {'r':>7}")
+    for g in range(len(d["q"])):
+        line = (f"{g:>2} {d['n_cfg'][g]:>6} ({d['n_cfg_val'][g]}/{d['n_cfg_cal'][g]})".ljust(26)
+                + f" {d['lam_rms'][g]:9.4g} {d['q'][g]:8.4g} {d['r'][g]:7.3g}")
+        print(line + (f"  -> g_src {merged[g]}" if g in merged else ""))
+
+
+def cmd_calibrate(a):
+    """Recalibrate the per-group conformal scales of an ARD posterior on a labelled set U (the posterior
+    mean and covariance are untouched): per-group replace by default (groups with >= n_min U configurations
+    use U only, the rest pool T_val + U), --append pools everywhere, --replace uses U only."""
+    import dataclasses
+    import hashlib
+
+    from ase import Atoms
+
+    from .calc.point import ACECalculator
+    from .fit.ard import ARDPosterior
+    from .fit.conformal import group_scales
+    post = ARDPosterior.load(a.posterior)
+    if post.group_table is None or post.cal is None:
+        raise ValueError(_NEED3)
+    configs = load_configs(a.data, energy_key=a.energy_key, force_key=a.force_key, virial_key=a.virial_key)
+    if not any(c.forces is not None for c in configs):
+        raise ValueError(f"calibrate: no forces under --force-key {a.force_key!r} in {a.data}")
+    calc = ACECalculator(a.model, posterior=a.posterior)
+    t0 = post.group_table
+    lam_g = np.asarray(t0["lam_rms"], float)
+    G, n_min = len(t0["q"]), int(t0["n_min"])
+    want_support = post.support is not None
+    s_u, g_u, c_u, X_u, Z_u = [], [], [], [], []
+    with highest_precision():
+        for ci, c in enumerate(configs):
+            if c.forces is None:
+                continue
+            at = Atoms(numbers=c.numbers, positions=c.positions, cell=c.cell, pbc=c.pbc)
+            at.calc = calc
+            cov = np.asarray(calc.get_property("forces_cov", at))
+            g = np.asarray(calc.get_property("forces_group", at)).astype(int)
+            e = np.asarray(c.forces) - at.get_forces()
+            lam = lam_g[g]
+            V = cov / np.where(lam > 0, lam, np.nan)[:, None, None] ** 2          # exact: cov = lam^2 V
+            v = np.trace(V, axis1=1, axis2=2)
+            ok = np.isfinite(v) & (v > 0)
+            if not ok.any():
+                continue
+            if post.force_shape == "aniso":
+                M = V[ok] + post.eps * (v[ok] / 3)[:, None, None] * np.eye(3)
+                s = np.sqrt(np.einsum("na,na->n", e[ok], np.linalg.solve(M, e[ok][:, :, None])[:, :, 0]))
+            else:
+                s = np.sqrt(np.sum(e[ok] ** 2, 1) / (v[ok] / 3))
+            s_u.append(s); g_u.append(g[ok]); c_u.append(np.full(int(ok.sum()), ci))
+            if want_support:
+                X, Z = calc.support_descriptors(at)
+                X_u.append(X[ok]); Z_u.append(Z[ok])
+    if not s_u:
+        raise ValueError("calibrate: no atoms with a positive posterior shape and a force label")
+    s_u, g_u, c_u = map(np.concatenate, (s_u, g_u, c_u))
+    cal = post.cal
+    src_new = int(np.max(cal["src"])) + 1
+    c_old = np.asarray(cal["cfg"], np.int64)
+    c_u = c_u + (int(c_old.max()) + 1 if len(c_old) else 0)
+    u_cfg = np.array([len(np.unique(c_u[g_u == g])) for g in range(G)])
+    g_old = np.asarray(cal["groups"]).astype(int)
+    if a.replace:
+        keep_old = np.zeros(len(g_old), bool)
+    elif a.append:
+        keep_old = np.ones(len(g_old), bool)
+    else:
+        keep_old = u_cfg[g_old] < n_min                                   # per-group replace
+    S = np.r_[np.asarray(cal["scores"], np.float32)[keep_old], s_u.astype(np.float32)]
+    Gg = np.r_[g_old[keep_old], g_u]
+    Cc = np.r_[c_old[keep_old], c_u]
+    Ss = np.r_[np.asarray(cal["src"]).astype(int)[keep_old], np.full(len(s_u), src_new)]
+    tab = group_scales(S.astype(float), Gg, Cc, G, t0["alpha"], n_min, src=Ss)
+    h = hashlib.sha256()
+    with open(a.data, "rb") as fh:
+        for blk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(blk)
+    mode = "replace" if a.replace else ("append" if a.append else "per-group")
+    sources = list(t0.get("sources", [])) + [{"path": str(a.data), "sha256": h.hexdigest(),
+                                               "n_cfg": int(len(np.unique(c_u))), "n_atoms": int(len(s_u)),
+                                               "mode": mode}]
+    tab = dataclasses.replace(tab, sources=sources)
+    support = None
+    if want_support:
+        support = _recalibrated_support(post.support, cal, keep_old, np.concatenate(X_u), np.concatenate(Z_u),
+                                        s_u, c_u, mode)
+    new = post._replace(group_table=tab.to_dict(),
+                        cal={"scores": S.astype(np.float32), "groups": Gg.astype(np.int8),
+                             "cfg": Cc.astype(np.int64), "src": Ss.astype(np.int8)},
+                        support=support)
+    new.save(a.out)
+    _print_group_table(tab)
+    print(f"wrote recalibrated posterior ({mode}, {len(s_u)} atoms in {len(np.unique(c_u))} configs) to {a.out}")
+    return 0
+
+
+def _recalibrated_support(ref, cal, keep_old, X, Z, s_u, c_u, mode, max_atoms=50000, seed=0):
+    """The support reference on the pooled calibration atoms, or None (with a notice) when it cannot be
+    rebuilt consistently.  The stored reference holds a sample of the T_val atoms (descriptors, scores, local
+    configuration ids) but not their groups, so with a partial per-group replace each stored point is matched
+    to its calibration record by its (float32) score to learn its group (a stored point whose score also
+    belongs to a replaced-group record is dropped; an unmatched one drops the reference).  --replace needs no match (U only); --append keeps every stored point."""
+    from .fit.support import extend_support
+    keep, n_amb = {}, 0
+    if mode == "per-group":
+        order = np.argsort(cal["scores"], kind="stable")
+        ss = np.asarray(cal["scores"], np.float32)[order]
+        for z, r in ref.items():
+            if z == "pca":
+                continue
+            s32 = np.asarray(r["s"], np.float32)
+            lo, hi = np.searchsorted(ss, s32, "left"), np.searchsorted(ss, s32, "right")
+            if (hi == lo).any():
+                print("note: support reference dropped: stored points do not match the calibration scores")
+                return None
+            kk = np.zeros(len(s32), bool)
+            for i, (l, h) in enumerate(zip(lo, hi)):
+                st = keep_old[order[l:h]]
+                kk[i] = st.min()                     # kept only if every equal-score record is kept
+                n_amb += int(st.min() != st.max())
+            keep[z] = kk
+    elif mode == "replace":
+        keep = {z: np.zeros(len(r["s"]), bool) for z, r in ref.items() if z != "pca"}
+    if n_amb:
+        print(f"note: support reference: {n_amb} stored points shared a score with a replaced-group record "
+              f"and were dropped")
+    return extend_support(ref, keep, X, Z, s_u, c_u, max_atoms, seed)
 
 
 def cmd_basis(a):
@@ -296,6 +474,18 @@ def _parser():
     ev.add_argument("--out", default=None, help="CSV of per-config predictions (default: print head)")
     ev.add_argument("--posterior", default=None, help="posterior.npz from `fit --uq ard`: adds forces_std")
     ev.add_argument("--per-atom", default=None, help="extxyz with per-atom forces and forces_std arrays")
+    ev.add_argument("--support", action="store_true",
+                    help="with --posterior --per-atom: add support_ok and support_q (covariate-shift support)")
+    cal = sub.add_parser("calibrate", help="recalibrate the per-group conformal scales of an ARD posterior "
+                                           "on a labelled set (per-group replace by default)")
+    cal.add_argument("--model", required=True); cal.add_argument("--posterior", required=True)
+    cal.add_argument("--data", required=True, help="labelled extxyz U (needs forces under --force-key)")
+    cal.add_argument("--energy-key", default="energy"); cal.add_argument("--force-key", default="forces")
+    cal.add_argument("--virial-key", default="virial")
+    mode = cal.add_mutually_exclusive_group()
+    mode.add_argument("--append", action="store_true", help="pool U with the stored T_val scores in every group")
+    mode.add_argument("--replace", action="store_true", help="use U only in every group")
+    cal.add_argument("--out", required=True)
     con = sub.add_parser("basis", help="author a new ACE basis: a frozen model (seeded radial init) saved as .npz")
     add_basis_args(con, fit=False)
     con.add_argument("--out", required=True)
@@ -373,7 +563,7 @@ def main(argv=None):
     from .basis.coupling import BasisUnavailable
     a = _parse(argv)
     try:
-        {"eval": cmd_eval, "basis": cmd_basis}.get(a.cmd, run)(a)
+        {"eval": cmd_eval, "basis": cmd_basis, "calibrate": cmd_calibrate}.get(a.cmd, run)(a)
     except BasisUnavailable as e:                     # a user-facing condition, not a crash
         print(f"aj {a.cmd}: error: {e}", file=sys.stderr)
         raise SystemExit(2) from None
