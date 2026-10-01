@@ -323,8 +323,8 @@ weakdeps = ["Adapt", "ChainRulesCore"]
 
 [[deps.EquivariantTensors]]
 deps = ["ACEbase", "Adapt", "Bumper", "ChainRulesCore", "Combinatorics", "ConcreteStructs", "DecoratedParticles", "ForwardDiff", "Functors", "GPUArraysCore", "KernelAbstractions", "LinearAlgebra", "Lux", "LuxCore", "MLDataDevices", "NamedTupleTools", "PartialWaveFunctions", "Polynomials4ML", "Random", "Rotations", "SparseArrays", "StaticArrays", "WithAlloc"]
-git-tree-sha1 = "41c9f51a5fe67e8eb4a73ac83f131cd69432ccb1"
-repo-rev = "229f99d074651c8553dbcd1a40c44f2c99b6a9d3"
+git-tree-sha1 = "662e51cb681972888b5c2a0660576588c38c7b21"
+repo-rev = "134087dcfbf9da75cd6ce862a6afaabfe9ec3f12"
 repo-url = "https://github.com/jameskermode/EquivariantTensors.jl"
 uuid = "5e107534-7145-4f8f-b06f-47a52840c895"
 version = "0.5.1"

@@ -1,5 +1,8 @@
-# Oracle for ace-jax-coupling: UNPATCHED upstream EquivariantTensors at BASE_SHA
-# (pinned in ./Project.toml [sources]).
+# Oracle for ace-jax-coupling: upstream EquivariantTensors main plus ONLY the
+# nullspace_solver commit (jameskermode/EquivariantTensors.jl jk/dense-nullspace,
+# pinned in ./Project.toml [sources]), run untrimmed with nullspace_solver = :dense,
+# the solver the shim uses.  et_reference_umfpack.npz is the earlier oracle (unpatched
+# upstream, default :sparse), kept for the row-space check in test_api.py.
 #   julia +1.13 --project=coupling/julia/reference coupling/julia/reference/reference.jl \
 #         coupling/python/tests/data/cases.json coupling/python/tests/data/et_reference.npz
 import EquivariantTensors as ET
@@ -15,7 +18,8 @@ for name in sort(collect(keys(cases)))
    mb = [[(n = Int(b[1]), l = Int(b[2])) for b in bb] for bb in c["mb"]]
    R = [(n = Int(b[1]), l = Int(b[2])) for b in c["R"]]
    Y = [(l = Int(b[1]), m = Int(b[2])) for b in c["Y"]]
-   t = ET.sparse_equivariant_tensor(L = 0, mb_spec = mb, Rnl_spec = R, Ylm_spec = Y, basis = real)
+   t = ET.sparse_equivariant_tensor(L = 0, mb_spec = mb, Rnl_spec = R, Ylm_spec = Y, basis = real,
+                                    nullspace_solver = :dense)
    A2B = sparse(t.A2Bmaps[1])
    I, J, V = findnz(A2B)
    sig = t.meta["𝔸spec"]

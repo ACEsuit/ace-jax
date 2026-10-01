@@ -1,4 +1,9 @@
-"""ace_jax_coupling against unpatched upstream EquivariantTensors (BASE_SHA)."""
+"""ace_jax_coupling against its untrimmed EquivariantTensors oracle (upstream
+main + the nullspace_solver commit, :dense; coupling/julia/reference), and
+against unpatched upstream (default :sparse, UMFPACK) up to the documented
+freedom: per-row sign, rotation inside a degenerate nnll block."""
+import pathlib
+
 import numpy as np
 import pytest
 
@@ -9,11 +14,9 @@ FIELDS = ["A2B_rows", "A2B_cols", "A2B_vals", "aa_sig_off", "aa_sig", "aspec",
 
 
 def test_matches_upstream_et(cases, reference):
-    """Every index array bit-identical to unpatched upstream ET (reference made
-    on macOS arm64); A2B values within 4 ulp.  The values ARE bit-identical on
-    macOS arm64 and Linux aarch64; on x86_64 the cases that go through ET's
-    sparse LU (degenerate blocks) differ in the last bit or two (<= 1.1e-16 on
-    O(1) values), which is BLAS/UMFPACK rounding, not a different coupling."""
+    """Every index array bit-identical to the untrimmed oracle (ET with
+    nullspace_solver = :dense; reference made on Linux x86_64); A2B values within
+    4 ulp, which leaves room for BLAS rounding across platforms."""
     for name, c in cases.items():
         r = ajc.couple_raw(c["mb"], c["R"], c["Y"])
         assert r.A2B_shape == tuple(int(v) for v in reference[f"{name}__A2B_shape"]), name
@@ -25,6 +28,31 @@ def test_matches_upstream_et(cases, reference):
                 assert np.all(np.abs(got - want) <= tol), (name, f, float(np.abs(got - want).max()))
             else:
                 assert np.array_equal(got, want), (name, f)
+
+
+def test_spans_upstream_umfpack_coupling(cases):
+    """Against unpatched upstream ET (et_reference_umfpack.npz, UMFPACK LU): the
+    same A basis, AA columns and nnll rows, and per nnll block the same row space
+    (a single row may flip sign; a degenerate block may rotate)."""
+    ref = np.load(pathlib.Path(__file__).parent / "data" / "et_reference_umfpack.npz")
+    for name, c in cases.items():
+        r = ajc.couple_raw(c["mb"], c["R"], c["Y"])
+        for f in ("aa_sig_off", "aa_sig", "aspec", "aa_off", "aa_idx", "nnll_off", "nnll"):
+            assert np.array_equal(getattr(r, f), ref[f"{name}__{f}"]), (name, f)
+        shape = tuple(int(v) for v in ref[f"{name}__A2B_shape"])
+        assert r.A2B_shape == shape, name
+        A, U = np.zeros(shape), np.zeros(shape)
+        A[r.A2B_rows, r.A2B_cols] = r.A2B_vals
+        U[ref[f"{name}__A2B_rows"], ref[f"{name}__A2B_cols"]] = ref[f"{name}__A2B_vals"]
+        no, nl = r.nnll_off, r.nnll
+        blocks = {}
+        for i in range(shape[0]):
+            blocks.setdefault(tuple(map(tuple, nl[no[i]:no[i + 1]])), []).append(i)
+        for rows in blocks.values():
+            cols = np.flatnonzero(np.abs(A[rows]).sum(0) + np.abs(U[rows]).sum(0))   # the block's own columns
+            a, u = A[np.ix_(rows, cols)], U[np.ix_(rows, cols)]
+            P, Q = np.linalg.pinv(a) @ a, np.linalg.pinv(u) @ u                       # row-space projectors
+            assert np.abs(P - Q).max() < 1e-10, (name, rows[:3])
 
 
 def test_largest_case_is_fast():

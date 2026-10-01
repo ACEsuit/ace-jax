@@ -1,5 +1,6 @@
-"""Check a libetcouple bundle: loads, ABI 1, max order 8, and the platform floor
-(macOS: every Mach-O minos <= 11.0; Linux: no GLIBC_ symbol newer than 2.28).
+"""Check a libetcouple bundle: loads, ABI 1, max order 8, the platform floor
+(macOS: every Mach-O minos <= 11.0; Linux: no GLIBC_ symbol newer than 2.28), and
+no GPL code: each GPL SuiteSparse library is prune_bundle.py's placeholder.
     python coupling/tools/check_bundle.py coupling/build/bundle"""
 import ctypes
 import json
@@ -47,6 +48,10 @@ def check(root):
         seen.setdefault(hashlib.sha256(f.read_bytes()).hexdigest(), []).append(str(f.relative_to(root)))
     dups = [v for v in seen.values() if len(v) > 1]
     assert not dups, f"duplicate library copies (would load twice): {dups}"
+    gpl = ("libumfpack", "libspqr", "librbio", "libcholmod")       # == prune_bundle.GPL_LIBS
+    real = [str(f.relative_to(root)) for f in _libs(root) if f.name.startswith(gpl)
+            and (b"ace-jax-coupling GPL placeholder" not in f.read_bytes() or f.stat().st_size > 65536)]
+    assert not real, f"GPL SuiteSparse libraries in the bundle (not placeholders): {real}"
     print(f"bundle OK: {info['platform']} et_rev={info['et_rev'][:12]} libs={len(_libs(root))} {platform.machine()}")
 
 

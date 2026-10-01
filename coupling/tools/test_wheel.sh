@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Install a built wheel into a fresh venv with an EMPTY HOME and no Julia on
 # PATH, run the package tests, and check the library wrote nothing to HOME.
-#   bash coupling/tools/test_wheel.sh dist/ace_jax_coupling-0.1.0-py3-none-<tag>.whl [python]
+#   bash coupling/tools/test_wheel.sh dist/ace_jax_coupling-0.2.0-py3-none-<tag>.whl [python]
 set -euo pipefail
 WHEEL=$(realpath "$1"); PY=${2:-python3}
 REPO=$(cd "$(dirname "$0")/../.." && pwd)

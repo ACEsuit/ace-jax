@@ -5,4 +5,4 @@ NPZ = "15e1cf62-19b3-5cfa-8e77-841668bca605"
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 
 [sources]
-EquivariantTensors = {url = "https://github.com/ACEsuit/EquivariantTensors.jl", rev = "534231013c1f4fb6f3921e4745750a030908136b"}
+EquivariantTensors = {url = "https://github.com/jameskermode/EquivariantTensors.jl", rev = "89670532e222451fd5b9498dec34d4a03dcc8767"}
