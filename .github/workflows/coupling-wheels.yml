@@ -166,4 +166,7 @@ jobs:
       - uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist
+          # TestPyPI dry runs may add files to a version already there (e.g. a new
+          # platform); a real release must fail loudly on any file PyPI already has
+          skip-existing: ${{ github.event_name != 'push' }}
           repository-url: ${{ github.event_name == 'push' && 'https://upload.pypi.org/legacy/' || 'https://test.pypi.org/legacy/' }}
