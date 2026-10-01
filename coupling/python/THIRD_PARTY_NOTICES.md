@@ -3,7 +3,7 @@
 The wheel's `ace_jax_coupling/_lib/` holds a `juliac --trim` compiled library
 (`libetcouple`) and the shared libraries it loads at runtime. The list below is
 exactly the set traced as loaded by `coupling/tools/prune_bundle.py` (Julia
-1.13.0, macOS arm64 build, traced with an empty HOME so artifacts resolve from the bundle; Linux builds load the same components). Full licence
+1.13.1, macOS arm64 build, traced with an empty HOME so artifacts resolve from the bundle; Linux builds load the same components). Full licence
 texts are in `licenses/` next to this file. SPDX identifiers follow each
 upstream's own licence file and Julia's `THIRDPARTY.md`
 (`licenses/Julia-THIRDPARTY.md`).
@@ -13,13 +13,13 @@ package (JLL) at the exact build listed. Every JLL is built by a public recipe i
 [JuliaPackaging/Yggdrasil](https://github.com/JuliaPackaging/Yggdrasil) from the
 upstream release of that version, which is the corresponding source, for example
 for the LGPL libraries. The versions follow `coupling/julia/Manifest.toml` and
-Julia 1.13.0's standard library; `tests/test_coupling_notices.py` checks them.
+Julia 1.13.1's standard library; `tests/test_coupling_notices.py` checks them.
 
 | Component | Version | Bundled file(s) | Licence (SPDX) | Text |
 |---|---|---|---|---|
 | ace-jax glue (Python + Julia shim) | ace-jax-coupling 0.2.0 | `ace_jax_coupling/*.py`, `libetcouple` | MIT | `LICENSE` |
 | EquivariantTensors.jl (compiled into `libetcouple`; fork rev in `build_info()`) | 0.5.1 at jameskermode/EquivariantTensors.jl `1f24438` (exact commit: `build_info()`) | `libetcouple` | MIT | `licenses/EquivariantTensors.txt` |
-| Julia runtime and standard library | Julia 1.13.0 | `libjulia`, `libjulia-internal` (privatized names), `libetcouple` | MIT (+ components listed in THIRDPARTY.md) | `licenses/Julia.txt`, `licenses/Julia-THIRDPARTY.md` |
+| Julia runtime and standard library | Julia 1.13.1 | `libjulia`, `libjulia-internal` (privatized names), `libetcouple` | MIT (+ components listed in THIRDPARTY.md) | `licenses/Julia.txt`, `licenses/Julia-THIRDPARTY.md` |
 | libunwind | 1.8.3 (LibUnwind_jll 1.8.3+1) | `libunwind.1` | MIT | `licenses/libunwind.txt` |
 | OpenBLAS (incl. reference LAPACK) | 0.3.30 (OpenBLAS_jll 0.3.30+0) | `libopenblas64_` | BSD-3-Clause | `licenses/OpenBLAS.txt` |
 | libblastrampoline | 5.15.0 (libblastrampoline_jll 5.15.0+0) | `libblastrampoline.5` | MIT | `licenses/libblastrampoline.txt` |
