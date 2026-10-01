@@ -65,8 +65,7 @@ import ctypes, importlib.util, os, pathlib, sys
 spec = importlib.util.spec_from_file_location("_l", pathlib.Path(sys.argv[1]) / "ace_jax_coupling" / "_loader.py")
 _l = importlib.util.module_from_spec(spec); spec.loader.exec_module(_l)
 lib = pathlib.Path(os.environ["ACEJAX_COUPLING_LIB"])
-for d in sorted({f.parent for f in lib.parent.parent.rglob("*.dll")}):
-    os.add_dll_directory(str(d))
+_l._win_dll_dirs(lib.parent.parent)                 # exactly as the package loads it
 h = ctypes.CDLL(str(lib))
 assert h.etc_abi_version() == 1
 for p in _l._loaded_images(): print("MOD", p)

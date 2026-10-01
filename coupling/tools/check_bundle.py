@@ -63,8 +63,9 @@ def check(root):
     root = pathlib.Path(root).resolve()
     info = json.loads((root / "build_info.json").read_text())
     if sys.platform == "win32":
-        for d in sorted({f.parent for f in _libs(root)}):
-            os.add_dll_directory(str(d))
+        sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "python" / "src"))
+        from ace_jax_coupling._loader import _win_dll_dirs
+        _win_dll_dirs(root)                           # exactly as the package loads it
         lib = ctypes.CDLL(str(root / "bin" / "libetcouple.dll"))
     else:
         ext = "dylib" if sys.platform == "darwin" else "so"

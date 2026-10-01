@@ -41,6 +41,20 @@ def build_info() -> dict:
     return json.loads(p.read_text())
 
 
+def _win_dll_dirs(root):
+    """Make the bundle's DLL directories win every DLL lookup in this process.
+    add_dll_directory covers ctypes' load of libetcouple and its import table, but the
+    embedded Julia runtime loads its dependencies by name at run time through the
+    standard search (application directory, then PATH), which add_dll_directory does
+    not reach. Prepending to PATH makes the bundle's copies win over any other DLL of
+    the same name elsewhere on PATH."""
+    dirs = sorted({str(f.parent) for f in pathlib.Path(root).rglob("*.dll")})
+    for d in dirs:
+        os.add_dll_directory(d)
+    path = os.environ.get("PATH", "").split(os.pathsep)
+    os.environ["PATH"] = os.pathsep.join(dirs + [d for d in path if d and d not in dirs])
+
+
 def lib():
     global _LIB
     if _LIB is not None:
@@ -52,10 +66,7 @@ def lib():
         p = lib_path()
         try:
             if sys.platform == "win32":
-                # dependent DLLs resolve from directories registered here, not from PATH
-                root = bundle_root()
-                for d in sorted({f.parent for f in root.rglob("*.dll")}):
-                    os.add_dll_directory(str(d))
+                _win_dll_dirs(bundle_root())
                 h = ctypes.CDLL(str(p))
             else:
                 h = ctypes.CDLL(str(p), mode=os.RTLD_NOW | os.RTLD_LOCAL)
