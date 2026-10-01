@@ -36,6 +36,9 @@ def test_config_validates_ard():
                        ("ard_n_min", 0), ("ard_cluster_size", 0.0)):
         with pytest.raises(ValueError, match=field):
             _cfg(**{field: bad}).validate()
+    with pytest.raises(ValueError, match="ard_shape_eps"):         # m4: eps 0 can make the Mahalanobis solve singular
+        _cfg(ard_force_shape="aniso", ard_shape_eps=0.0).validate()
+    assert _cfg(ard_force_shape="iso", ard_shape_eps=0.0).validate().ard_shape_eps == 0.0
 
 
 @pytest.fixture(scope="module")

@@ -260,3 +260,17 @@ def test_band_edges_and_groups_tie_safe():
     g2 = assign_groups(np.full(len(d2), 12), d2, 12, e2)
     assert np.all(np.diff(e2) > 0) and np.all(g2[:950] == 0)
     assert set(np.unique(g2 // 2).tolist()) == set(range(n_groups(e2) // 2))
+
+
+def test_extend_support_notes_species_without_reference(capsys):
+    """m5: U atoms of a species the stored reference does not have are not added -- say so."""
+    from ace_jax.fit.support import build_support, extend_support, fit_pca
+    rng = np.random.default_rng(14)
+    X = rng.normal(size=(200, 4))
+    Z = np.zeros(200, int)
+    ref = build_support(fit_pca({0: X}), X, Z, rng.random(200), np.arange(200) // 10, 1000, 0, grp=np.zeros(200, int))
+    Xu, Zu = rng.normal(size=(30, 4)), np.r_[np.zeros(20, int), np.full(10, 7)]
+    out = extend_support(ref, {}, Xu, Zu, rng.random(30), np.arange(30) // 5, 1000, 0, np.zeros(30, int))
+    assert 7 not in out and 0 in out
+    msg = capsys.readouterr().out
+    assert "note:" in msg and "7" in msg and "10 atoms" in msg

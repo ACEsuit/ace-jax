@@ -27,10 +27,16 @@ def _batch_rows(r, bt, ids, sig):
     return P[live] * w[live, None], y[live] * w[live], k[live], blk[live]
 
 
+_MU_FLOOR = 1e-12     # eigenvalues of I - H_kk below this (leverage 1 within roundoff) are clamped to it
+
+
 def _solve_sym(M, b):
-    """M^-1 b for a symmetric positive definite M (cond ~ 1/(1 - lambda_max)), and lambda_max(I - M)."""
+    """M^-1 b for a symmetric positive definite M = I - H_kk (cond ~ 1/(1 - lambda_max)), and
+    lambda_max(H_kk) = 1 - mu_min.  mu <= _MU_FLOOR (lambda_max = 1 within roundoff, where 1/mu would be
+    ~1e16 garbage or of the wrong sign) is clamped to _MU_FLOOR; the returned leverage is unclamped, so
+    the stage counts such clusters in n_lev_near1 / n_mu_clamped."""
     mu, U = np.linalg.eigh(M)
-    return U @ ((U.T @ b) / mu), float(1.0 - mu.min())
+    return U @ ((U.T @ b) / np.maximum(mu, _MU_FLOOR)), float(1.0 - mu.min())
 
 
 def press_scores(post, prob, ds, clusters, K, sig, mode="exact"):

@@ -747,10 +747,13 @@ def run_ard_stage(cfg, data, built, theta, log=print, full_stats=None):
         + (f"; merged {tab.merged}" if tab.merged else ""))
 
     # 6. report
+    from .jackknife import _MU_FLOOR
     n_near1 = int(np.sum(1.0 - lev < 1e-8))
+    n_clamp = int(np.sum(1.0 - lev <= _MU_FLOOR)) if cfg.ard_press == "exact" else 0
     if n_near1:
         log(f"WARNING: ARD shape: {n_near1} of {K} clusters have leverage 1 - lambda_max(H_kk) < 1e-8; "
-            f"their PRESS scores are accurate only to ~eps/(1 - lambda)")
+            f"their PRESS scores are accurate only to ~eps/(1 - lambda)"
+            + (f"; {n_clamp} at leverage 1 within roundoff had 1 - lambda clamped to {_MU_FLOOR:g}" if n_clamp else ""))
     shp = post.R if post.R is not None else post.Q
     lq = (lambda f: float(f(lev))) if len(lev) else (lambda f: None)
     report = {"mode": mode, "body_groups": list(ev.groups), "h": h.tolist(), "h_names": names,
@@ -768,7 +771,7 @@ def run_ard_stage(cfg, data, built, theta, log=print, full_stats=None):
                         "ell": ell, "K": K, "K_fit": K_fit,
                         "rank_R": None if shp is None else int(np.shape(shp)[1]),
                         "lev_p50": lq(np.median), "lev_p99": lq(lambda x: np.quantile(x, 0.99)),
-                        "lev_max": lq(np.max), "n_lev_near1": n_near1},
+                        "lev_max": lq(np.max), "n_lev_near1": n_near1, "n_mu_clamped": n_clamp},
               "groups": tab.to_dict(),
               "split": {"n_fit": len(fit_), "n_val": len(val), "val_idx": np.asarray(val_idx).tolist(),
                         "strata": np.bincount(strata, minlength=G).tolist()},

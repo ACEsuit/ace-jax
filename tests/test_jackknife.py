@@ -289,3 +289,19 @@ def test_shape_factor_zero_spread_gives_zero_column(ard_setup):
         assert R.shape == (L, 1) and np.all(R == 0)
     R = np.asarray(shape_factor(post, np.zeros((L, 3)), tau=0.9))
     assert R.shape == (L, 1) and np.all(R == 0)
+
+
+def test_solve_sym_guards_nonpositive_mu():
+    """m2: I - H_kk with lambda_max(H_kk) = 1 (mu <= 0 within roundoff) gives a finite, floored solve, and
+    the returned leverage is >= 1 - 1e-8 so the stage counts the cluster in n_lev_near1."""
+    from ace_jax.fit.jackknife import _MU_FLOOR, _solve_sym
+    rng = np.random.default_rng(0)
+    U = np.linalg.qr(rng.normal(size=(4, 4)))[0]
+    for mu0 in (0.0, -1e-17, -1e-12):
+        M = U @ np.diag([mu0, 0.3, 0.7, 1.0]) @ U.T
+        b = rng.normal(size=4)
+        x, lev = _solve_sym(M, b)
+        assert np.isfinite(x).all() and np.abs(x).max() <= np.abs(b).sum() / _MU_FLOOR
+        assert 1.0 - lev < 1e-8
+    x, lev = _solve_sym(np.diag([0.5, 1.0]), np.array([1.0, 1.0]))
+    np.testing.assert_allclose(x, [2.0, 1.0]) and lev == 0.5

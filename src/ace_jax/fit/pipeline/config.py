@@ -109,6 +109,9 @@ class FitConfig:
                 raise ValueError(f"ard_shape_tau must be in (0, 1], got {self.ard_shape_tau}")
             if not self.ard_shape_eps >= 0:
                 raise ValueError(f"ard_shape_eps must be >= 0, got {self.ard_shape_eps}")
+            if self.ard_force_shape == "aniso" and not self.ard_shape_eps > 0:
+                raise ValueError(f"ard_shape_eps must be > 0 with ard_force_shape='aniso' (the Mahalanobis "
+                                 f"solve of V + eps tr(V)/3 I is singular for a rank-deficient V), got {self.ard_shape_eps}")
         if self.lml == "host-cache":
             if (self.arm != "gp" or self.density not in ("pair", "pca") or tuple(self.rungs) != ("map",)
                     or self.opt != "lbfgs"):

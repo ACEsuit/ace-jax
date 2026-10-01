@@ -536,7 +536,7 @@ class ACECalculator(Calculator):
             return np.asarray(site_features(self._fit_model, self._fit_cfg, ds)[0])[0][live]
 
     def support_descriptors(self, atoms):
-        """(X, Z) site descriptors and atomic numbers of the live atoms; for `aj calibrate`."""
+        """(X, Z) site descriptors and species indices of the live atoms; for `aj calibrate`."""
         ds, b, live = self._one_config_dataset(atoms)
         return self._site_X(ds, b), np.asarray(b.node_z)[live]
 

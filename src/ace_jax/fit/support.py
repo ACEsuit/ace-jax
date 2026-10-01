@@ -184,17 +184,23 @@ def unflatten_support(flat):
     return ref
 
 
-def extend_support(ref, keep, X, Z, scores, cfg, max_atoms, seed, grp, fit_max=10000):
+def extend_support(ref, keep, X, Z, scores, cfg, max_atoms, seed, grp, fit_max=10000, log=print):
     """Rebuild a support reference on (kept stored points) + new atoms under the SAME per-species PCA.
 
     keep[z]: boolean mask over ref[z]'s stored points to retain (None/absent: all).
     X (n, D) raw descriptors, Z, scores, cfg, grp (conformal group) of the new atoms.  Per species the pooled
     configurations are capped at max_atoms atoms (whole configurations, random order), masses re-derived as
     1/(atoms per configuration), and the classifier-fit subset redrawn.  Scores are rounded through float32,
-    as a saved reference holds them."""
+    as a saved reference holds them.  A species of the new atoms with no stored reference (no PCA) is not
+    added -- support_check reports its atoms out of support -- and a species left with no points is
+    dropped; both are noted through log."""
     rng = np.random.default_rng(seed)
     out = {"pca": ref["pca"]}
     Z, cfg, grp = np.asarray(Z), np.asarray(cfg), np.asarray(grp)
+    stored = {k for k in ref if k != "pca"}
+    for z in sorted(set(np.unique(Z).tolist()) - stored):
+        log(f"note: support: species index {z} ({int(np.sum(Z == z))} atoms in the calibration set) has no "
+            f"stored support reference; its atoms are not added and stay out of support")
     for z in sorted(k for k in ref if k != "pca"):
         r = ref[z]
         k = np.ones(len(r["s"]), bool) if keep.get(z) is None else np.asarray(keep[z], bool)
@@ -206,6 +212,8 @@ def extend_support(ref, keep, X, Z, scores, cfg, max_atoms, seed, grp, fit_max=1
         _, g_new = np.unique(cfg[m], return_inverse=True)
         g = np.r_[g_old, g_new + (g_old.max() + 1 if len(g_old) else 0)].astype(np.int64)
         if len(s) == 0:
+            log(f"note: support: species index {z} has no points left after this recalibration; dropped from "
+                f"the support reference (its atoms are out of support)")
             continue
         sel, n = [], 0
         for c in rng.permutation(np.unique(g)):
