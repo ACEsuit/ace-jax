@@ -41,3 +41,27 @@ def test_row_clusters_ids():
     assert np.all(b["F"][ns + nl:] == -1)
     rc_inf, K_inf = row_clusters(ds, None, float("inf"))
     assert K_inf == 2 and np.all(rc_inf[0]["F"][ns:ns + nl] == 1)
+
+
+def test_config_blocks_degenerate_cell_uses_cartesian_bounding_box():
+    from ace_jax.fit.clusters import config_blocks
+    for pbc in (False, True):
+        at = bulk("Ni", "fcc", a=3.65, cubic=True).repeat((12, 4, 4))
+        at.set_cell(np.zeros((3, 3)))
+        at.pbc = pbc
+        b = config_blocks(_cfg(at), 3 * 6.25)
+        assert b is not None and len(np.unique(b)) == 2
+        x = at.get_positions()[:, 0]
+        assert len({(int(xi > x.min() + (x.max() - x.min()) / 2), int(bi)) for xi, bi in zip(x, b)}) == 2
+
+
+def test_row_clusters_validates_configs():
+    import pytest
+    from ace_jax.fit.clusters import row_clusters
+    from ace_jax.fit.data import build_dataset
+    small = _cfg(bulk("Ni", "fcc", a=3.65, cubic=True).repeat(2))
+    ds = build_dataset([small], {"elements": [28], "rcut": 6.25}, np.zeros(1), 1)
+    with pytest.raises(ValueError):
+        row_clusters(ds, None, 18.75)
+    with pytest.raises(ValueError):
+        row_clusters(ds, [small, small], 18.75)

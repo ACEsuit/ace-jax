@@ -10,12 +10,13 @@ def _widths_and_frac(cfg):
     inv = np.linalg.inv(cell) if vol > 0 else None
     for a in range(3):
         cr = np.cross(cell[(a + 1) % 3], cell[(a + 2) % 3])
-        nrm = cr / max(np.linalg.norm(cr), 1e-12)
-        if pbc[a] and inv is not None:
-            w[a] = vol / max(np.linalg.norm(cr), 1e-12)
+        ncr = np.linalg.norm(cr)
+        if pbc[a] and inv is not None and ncr > 1e-12:
+            w[a] = vol / ncr
             frac[:, a] = (pos @ inv)[:, a] % 1.0
-        else:
-            p = pos @ nrm
+        elif len(pos):
+            # bounding box: along the cell-face normal when usable, else the Cartesian axis
+            p = pos @ (cr / ncr) if ncr > 1e-12 else pos[:, a]
             w[a] = p.max() - p.min()
             frac[:, a] = (p - p.min()) / max(w[a], 1e-12)
     return w, frac
@@ -36,6 +37,12 @@ def config_blocks(cfg, ell):
 
 def row_clusters(ds, configs, ell):
     """Per batch {"E": (C,), "F": (Ncap,), "V": (C,)} int64 cluster ids (-1 = padding), and K."""
+    if np.isfinite(ell):
+        if configs is None:
+            raise ValueError("row_clusters: configs is required when ell is finite")
+        n_live = int(np.asarray(ds.cfg_mask).sum())
+        if len(configs) != n_live:
+            raise ValueError(f"row_clusters: {len(configs)} configs but {n_live} live configurations in ds")
     out, k, gc = [], 0, 0
     for i in range(ds.n_batches):
         cm = np.asarray(ds.cfg_mask[i])
