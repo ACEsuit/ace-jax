@@ -8,7 +8,8 @@ import threading
 from ctypes import c_int32, c_int64, c_void_p
 
 ABI_VERSION = 1
-_EXT = "dylib" if sys.platform == "darwin" else "so"
+_EXT = {"darwin": "dylib", "win32": "dll"}.get(sys.platform, "so")
+_LIBDIR = "bin" if sys.platform == "win32" else "lib"      # Windows bundles keep the DLLs in bin/
 _PKG = pathlib.Path(__file__).resolve().parent
 _LIB = None
 LOCK = threading.Lock()
@@ -22,7 +23,7 @@ def lib_path() -> pathlib.Path:
     env = os.environ.get("ACEJAX_COUPLING_LIB")
     if env:
         return pathlib.Path(env).expanduser().resolve()
-    return _PKG / "_lib" / "lib" / f"libetcouple.{_EXT}"
+    return _PKG / "_lib" / _LIBDIR / f"libetcouple.{_EXT}"
 
 
 def bundle_root() -> pathlib.Path:
@@ -50,7 +51,14 @@ def lib():
         build_info()                                   # clear error if the bundle is absent
         p = lib_path()
         try:
-            h = ctypes.CDLL(str(p), mode=os.RTLD_NOW | os.RTLD_LOCAL)
+            if sys.platform == "win32":
+                # dependent DLLs resolve from directories registered here, not from PATH
+                root = bundle_root()
+                for d in sorted({f.parent for f in root.rglob("*.dll")}):
+                    os.add_dll_directory(str(d))
+                h = ctypes.CDLL(str(p))
+            else:
+                h = ctypes.CDLL(str(p), mode=os.RTLD_NOW | os.RTLD_LOCAL)
         except OSError as e:
             raise CouplingLibError(f"cannot load {p}: {e}") from e
         h.etc_abi_version.restype = c_int32
