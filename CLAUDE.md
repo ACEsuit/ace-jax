@@ -19,7 +19,7 @@ parity CI jobs. User docs: `README.md`. Agent-facing usage guide:
 - `src/ace_jax/fit/`: linear and GP fitting.
   - `data.py` reads extxyz into `Config`s and padded `Dataset` batches.
   - The core modules are `rows`, `stats`, `objective`, `ladder`, `predict`, `pops`, `solve`, `hostcache`.
-  - `pipeline/` is the `aj fit` pipeline.
+  - `pipeline/` is the `aj fit` pipeline (`radials.py`: the `--learn-radial` stage).
   - `radial_learn.py` and `varpro.py` learn radials.
 - `src/ace_jax/basis/`: building an ACE basis (a frozen, zero-readout model).
   - `spec.py`, `coupling.py`: the EquivariantTensors shim via the compiled `ace-jax-coupling` library; `BasisUnavailable` when it cannot run.

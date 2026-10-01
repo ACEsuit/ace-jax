@@ -13,11 +13,13 @@ class FitResult(NamedTuple):
     config: object; data: object; built: object; theta: object
     map: object; rungs: object; preds: object; timings: dict
     ard: object = None                   # ARDResult when uq == "ard" (last: positional use unaffected)
+    radial: object = None                # RadialResult when cfg.learn_radial (last: positional use unaffected)
 
 
 def fit(cfg, data, log=print, on_stage=None):
     """Run the pipeline.  on_stage(name, payload), if given, is called as each
-    expensive stage finishes ("data" -> FitData, "map" -> MapFit, "rungs" -> Rungs,
+    expensive stage finishes ("data" -> FitData, "radial" -> RadialResult when
+    cfg.learn_radial, "map" -> MapFit, "rungs" -> Rungs,
     "ard" -> ARDResult and "model" -> the ARD-mean model.npz arrays when uq == "ard"),
     so a driver can write those results before a later stage (e.g. POPS or
     prediction running out of memory) can lose them."""
@@ -25,6 +27,11 @@ def fit(cfg, data, log=print, on_stage=None):
     cfg.validate()
     stage = on_stage or (lambda name, payload: None)
     stage("data", data)
+    radial = None
+    if cfg.learn_radial:
+        from .radials import learn_radials
+        data, radial = learn_radials(cfg, data, log=log)
+        stage("radial", radial)
     b = build_problem(cfg, data)
     with highest_precision():
         obj = make_objective(cfg, data, b)
@@ -60,5 +67,7 @@ def fit(cfg, data, log=print, on_stage=None):
     tm = {**b.timings, **obj.timings, **mf.timings, **rg.timings, **pr.timings}
     if ard is not None:
         tm["ard"] = ard.report["seconds"]
+    if radial is not None:
+        tm["radial"] = radial.seconds
     tm["total"] = time.time() - T0
-    return FitResult(cfg, data, b, mf.theta, mf, rg, pr, tm, ard)
+    return FitResult(cfg, data, b, mf.theta, mf, rg, pr, tm, ard, radial)

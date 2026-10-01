@@ -85,9 +85,20 @@ over a file's `basis:`, `--train` over its `data:` (each logged as an override).
 | Big data on limited GPU memory | `--lml host-cache` (**GP arm, `--density pair` or `pca`, `--opt lbfgs`, `--rungs map` only, single device**) |
 | Misspecification UQ for linear ACE | `--uq pops` (**linear only: `--m-per-species 0`**) |
 | Calibrated per-atom force uncertainty (e.g. big-cell fracture) | `--m-per-species 0 --uq ard` (`posterior.npz`; `ACECalculator(model, posterior=...)`) |
+| Learn the tensor radials before the fit | `--learn-radial` (writes `radial_info.json`; not with embedding models) |
 | Per-config-type weights | `--weights '{"default":{"E":30,"F":1,"V":1},"bulk":{"E":100,"F":1,"V":1}}'` or a factor list |
 | E0 from data, not the model | `--e0 lsq` (default `model`) |
 | Out-of-distribution check | `--ood ood.xyz` (writes `metrics_ood.csv`) |
+
+- **Learned radials: `aj fit --learn-radial`.** Learns the tensor radials before
+  the fit (VarPro over the training configs, gated on a seeded
+  `--radial-val-frac` hold-out, default 0.2), then fits as usual on the full
+  training set. Options: `--radial-n-q 12`, `--radial-steps 40`,
+  `--radial-lam-grid 0,1e-2`. Writes `out/radial_info.json` (the gate's
+  selection and scores). The saved model is marked `radial_learned`, so
+  `ACECalculator`/`export_lammps` spline it. Works with `--model` and with
+  `--order/--max-degree`; not with embedding models (issue #31). Advanced priors:
+  `ace_jax.fit.radial_learn.fit_radial`.
 
 These constraints are validated up front. A bad combination raises a
 `ValueError` that names the fix, so read it rather than retrying variants.

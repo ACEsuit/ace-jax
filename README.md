@@ -89,6 +89,7 @@ From labelled data to a fitted model in one command, and back from one file:
 ```bash
 aj fit --order 3 --max-degree 10 --train train.xyz --test test.xyz --out fit/   # builds the basis, fits it
 aj fit --config fit/fit.yaml --out fit2/                                        # reproduce (or edit) the run
+aj fit --order 3 --max-degree 10 --train train.xyz --learn-radial --out fit/   # + learned radials
 ```
 
 CLI: `ace-jax` (short alias `aj`) with subcommands `basis`, `fit` and `eval`;
