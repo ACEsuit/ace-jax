@@ -82,7 +82,7 @@ def load_configs(path, energy_key="energy", force_key="forces", virial_key="viri
         named = {k: v for k, v in weights.items() if k != "default"}
         factors = [Structural(), ConfigType(named, key=weight_key, default=weights["default"])]
     weigh = compose(factors)
-    out = []
+    out, found, seen, periodic = [], set(), {"info": set(), "arrays": set()}, False
     for i, at in enumerate(read_extxyz(path)):
         n, where = len(at.numbers), f"{path} config {i}"
         ct = str(at.info.get(weight_key, ""))
@@ -90,6 +90,9 @@ def load_configs(path, energy_key="energy", force_key="forces", virial_key="viri
         E = _get(at.info, energy_key)
         F = _get(at.arrays, force_key)
         V = _get(at.info, virial_key)
+        found |= {k for k, v in ((energy_key, E), (force_key, F), (virial_key, V)) if v is not None}
+        seen["info"] |= set(at.info); seen["arrays"] |= set(at.arrays)
+        periodic = periodic or bool(np.any(at.pbc))
         meta = {"n_atoms": n, "config_type": at.info.get(weight_key), **at.info}
         out.append(Config(
             positions=at.positions, numbers=at.numbers, cell=at.cell, pbc=at.pbc,
@@ -98,6 +101,13 @@ def load_configs(path, energy_key="energy", force_key="forces", virial_key="viri
             virial=None if V is None else _label(V, virial_key, (3, 3), where),
             w_E=weigh(meta, "E"), w_F=weigh(meta, "F"), w_V=weigh(meta, "V"),
             type_idx=ti))
+    # a key the caller named (not the default) that no config has is a typo, not "no label"
+    for key, default, where, expected in ((energy_key, "energy", "info", True),
+                                          (force_key, "forces", "arrays", True),
+                                          (virial_key, "virial", "info", periodic)):   # no virial without a cell
+        if expected and key is not None and key != default and key not in found and out:
+            raise ValueError(f"{path}: no config has the label {key!r}; its per-config {where} keys are "
+                             f"{sorted(seen[where] - {'config_type'})}")
     return out
 
 
