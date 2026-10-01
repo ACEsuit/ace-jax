@@ -399,20 +399,29 @@ def _force_nll(e2, s2, kappa):
 
 def predict_ard(post, prob, ds, node_chunk=256):
     """Posterior predictive on a Dataset: means from the ARD mean; F_var the served calibrated force
-    variance (`force_var_rows`: lam^2 x cluster sandwich when post.Q is set, else kappa^2 x the posterior
-    variance), E_var/V_var the untempered posterior variances."""
+    variance, E_var/V_var the untempered posterior variances.  Schema 3 (post.group_table set):
+    F_var = lam_rms[g]^2 diag V per atom (g = post.groups_of(batch)), so sum_a F_var = forces_std^2.
+    Schema 1/2: `force_var_rows` (lam^2 x cluster sandwich when post.Q is set, else kappa^2 x the
+    posterior variance)."""
     from .predict import _pack
     from .rows import chunked_rows_fn
     L = prob.cfg.len_basis
     rows_fn = chunked_rows_fn(prob.model, prob.cfg, node_chunk)
+    lam_rms = None if post.group_table is None else np.asarray(post.group_table["lam_rms"], float)
     outs = []
     for i in range(ds.n_batches):
         b = jax.tree.map(lambda a, i=i: a[i], ds)
         r = rows_fn(b)
-        E, F, V = np.asarray(r.E), np.asarray(r.F).reshape(-1, L), np.asarray(r.V).reshape(-1, L)
-        outs.append((E @ post.mean, post.var_rows(E), (F @ post.mean).reshape(-1, 3),
-                     post.force_var_rows(F).reshape(-1, 3), (V @ post.mean).reshape(-1, 6),
-                     post.var_rows(V).reshape(-1, 6)))
+        Fn = np.asarray(r.F)                                                   # (Ncap, 3, L)
+        E, F, V = np.asarray(r.E), Fn.reshape(-1, L), np.asarray(r.V).reshape(-1, L)
+        if lam_rms is not None:
+            g = post.groups_of(b)
+            Fv = lam_rms[g][:, None] ** 2 * np.diagonal(post.atom_shape(Fn), axis1=1, axis2=2)
+            Fv = np.where(np.asarray(b.node_mask)[:, None], Fv, 0.0)
+        else:
+            Fv = post.force_var_rows(F).reshape(-1, 3)
+        outs.append((E @ post.mean, post.var_rows(E), (F @ post.mean).reshape(-1, 3), Fv,
+                     (V @ post.mean).reshape(-1, 6), post.var_rows(V).reshape(-1, 6)))
     return _pack(outs, prob, ds)
 
 
@@ -421,42 +430,93 @@ class ARDResult(NamedTuple):
     report: dict
 
 
-def _val_errors(post, prob, ds, own_col=None):
-    """Per-atom squared force error, untempered s2 and (when post.Q is set, else None) the unscaled
-    cluster-sandwich variance m2 on the live force rows of ds, in one pass over the rows.
+def _shell_dists(ds, max_batches=200):
+    """Live neighbour distances |r_ij| (node_mask & nbr_mask) of up to max_batches evenly spaced
+    batches of ds: the sample r1 (`conformal.shell_reference`) is taken from."""
+    sel = np.unique(np.linspace(0, ds.n_batches - 1, min(ds.n_batches, max_batches)).round().astype(int))
+    out = []
+    for i in sel:
+        m = np.asarray(ds.nbr_mask[i]) & np.asarray(ds.node_mask[i])[:, None]
+        out.append(np.linalg.norm(np.asarray(ds.rij[i]), axis=-1)[m])
+    return np.concatenate(out) if out else np.zeros(0)
 
-    own_col: (n_cfg(ds),) the Q column of each config of ds (in ds order) -- the held-out configs are
-    training configs, so each has its own cluster in Q.  m2 is then (m2_all, m2_without_own)."""
+
+def _shell_table(ds, r1):
+    """(z, d, cfg_index, batch_idx, node_idx) of every live node of ds; cfg_index counts the live
+    configurations of ds in order (the order build_dataset received them)."""
+    from .conformal import shell_features
+    cols, off = [], 0
+    for i in range(ds.n_batches):
+        b = jax.tree.map(lambda a, i=i: a[i], ds)
+        live = np.flatnonzero(np.asarray(b.node_mask))
+        z, d = shell_features(b, r1)
+        cols.append((z[live], d[live], off + np.asarray(b.node_cfg)[live], np.full(len(live), i), live))
+        off += int(np.asarray(b.cfg_mask).sum())
+    return tuple(np.concatenate([c[k] for c in cols]) for k in range(5))
+
+
+class _ValAtoms(NamedTuple):
+    e: np.ndarray            # (n, 3) F_label - F_pred(post.mean)
+    s2: np.ndarray           # (n,) untempered posterior variance tr(phi A^-1 phi^T)
+    V: np.ndarray | None     # (n, 3, 3) post.atom_shape (own cluster left out when own_col is given)
+    v_incl: np.ndarray | None    # (n,) tr V with the own cluster kept (own_col only)
+    z: np.ndarray | None
+    d: np.ndarray | None
+    cfg: np.ndarray          # (n,) live-configuration index into ds
+
+
+def _val_atoms(post, prob, ds, r1=None, shape=True, own_col=None):
+    """Per live force-labelled atom (w_F > 0) of ds, in one pass over its rows: the force error at
+    post.mean, the untempered s^2, (shape) the unscaled shape V = post.atom_shape, and (r1) the shell
+    features z, d.  own_col: (n_cfg(ds),) the Q column of each config of ds -- the #18 own-cluster-out
+    rule of the legacy "mixed" ablation (held-out configs are training configs of the full refit): V
+    then drops that one cluster's column of Q, and v_incl = tr V with it."""
+    from .conformal import shell_features
     from .rows import chunked_rows_fn
-    L, e2, s2, m2, m2o = prob.cfg.len_basis, [], [], [], []
+    L = prob.cfg.len_basis
     rows_fn = chunked_rows_fn(prob.model, prob.cfg)
+    acc = {k: [] for k in _ValAtoms._fields}
+    dinv = jnp.asarray(post.dinv, jnp.float64)
     off = 0                                          # configs of ds before this batch (padded ones excluded)
     for i in range(ds.n_batches):
         b = jax.tree.map(lambda a, i=i: a[i], ds)
-        n_live_cfg = int(np.asarray(b.cfg_mask).sum())
-        live = np.asarray(b.w_F) > 0                 # padded nodes have w_F = 0 (and node_cfg == C)
+        live = (np.asarray(b.w_F) > 0) & np.asarray(b.node_mask)
         if live.any():
             F = np.asarray(rows_fn(b).F)[live]                                         # (n, 3, L)
             Fr = F.reshape(-1, L)
-            pred = (Fr @ post.mean).reshape(-1, 3)
-            e2.append(np.sum((np.asarray(b.y_F)[live] - pred) ** 2, 1))
-            s2.append(post.var_rows(Fr).reshape(-1, 3).sum(1))
-            if post.Q is not None and own_col is not None:
-                own = np.repeat(np.asarray(own_col)[off + np.asarray(b.node_cfg)[live]], 3)
-                a, o = post.misspec_var_rows(Fr, own=own)
-                m2.append(a.reshape(-1, 3).sum(1))
-                m2o.append(o.reshape(-1, 3).sum(1))
-            elif post.Q is not None:
-                m2.append(post.misspec_var_rows(Fr).reshape(-1, 3).sum(1))
-        off += n_live_cfg
-    cat = lambda xs: np.concatenate(xs) if xs else np.zeros(0)
-    if post.Q is None:
-        m = None
-    elif own_col is not None:
-        m = (cat(m2), cat(m2o))
-    else:
-        m = cat(m2)
-    return cat(e2), cat(s2), m
+            acc["e"].append(np.asarray(b.y_F)[live] - (Fr @ post.mean).reshape(-1, 3))
+            acc["s2"].append(post.var_rows(Fr).reshape(-1, 3).sum(1))
+            cfg = off + np.asarray(b.node_cfg)[live]
+            acc["cfg"].append(cfg)
+            if own_col is not None:
+                Pr = (jnp.asarray(F, jnp.float64) * dinv[None, None, :]) @ jnp.asarray(post.Q, jnp.float64)
+                acc["v_incl"].append(np.asarray(jnp.sum(Pr * Pr, axis=(1, 2))))
+                own = jnp.asarray(np.asarray(own_col)[cfg])
+                # drop the own column before squaring (no tot - v_own^2 cancellation; >= 0 by construction)
+                Pr = jnp.where(jnp.arange(Pr.shape[2])[None, None, :] == own[:, None, None], 0.0, Pr)
+                acc["V"].append(np.asarray(jnp.einsum("nar,nbr->nab", Pr, Pr)))
+            elif shape:
+                acc["V"].append(post.atom_shape(F))
+            if r1 is not None:
+                z, d = shell_features(b, r1)
+                acc["z"].append(z[live])
+                acc["d"].append(d[live])
+        off += int(np.asarray(b.cfg_mask).sum())
+    cat = lambda k, shp: np.concatenate(acc[k]) if acc[k] else np.zeros(shp)
+    return _ValAtoms(cat("e", (0, 3)), cat("s2", (0,)),
+                     cat("V", (0, 3, 3)) if (shape or own_col is not None) else None,
+                     cat("v_incl", (0,)) if own_col is not None else None,
+                     cat("z", (0,)).astype(np.int64) if r1 is not None else None,
+                     cat("d", (0,)) if r1 is not None else None, cat("cfg", (0,)).astype(np.int64))
+
+
+def _scores(e, V, force_shape, eps):
+    """iso: s = |e| / sqrt(v/3); aniso: s = sqrt(e^T (V + eps (v/3) I)^-1 e), v = tr V."""
+    v = np.trace(V, axis1=1, axis2=2)
+    if force_shape == "aniso":
+        M = V + eps * (v / 3)[:, None, None] * np.eye(3)
+        return np.sqrt(np.einsum("na,na->n", e, np.linalg.solve(M, e[:, :, None])[:, :, 0]))
+    return np.sqrt(np.sum(e * e, 1) / (v / 3))
 
 
 def _ard_fit_warnings(stage, info, names):
@@ -472,27 +532,62 @@ def _ard_fit_warnings(stage, info, names):
 
 
 def run_ard_stage(cfg, data, built, theta, log=print, full_stats=None):
-    """Fit ARD on a train subset, keep its errors on the held-out rest (never the test set), refit on
-    ALL training data (started from the subset optimum), and fit kappa (and, for the sandwich, lam)
-    from those held-out errors against the refit posterior's variance.
+    """The schema-3 ARD stage (docs/specs/2026-09-30-conformal-force-sigma-design.md section 4):
+
+    1. shell features of every training atom -> r1, z*, band edges (all of T), configuration strata,
+       and the stratified split T = T_fit + T_val;
+    2. the hold-out posterior P_fit on T_fit, with its own shape (PRESS jackknife R_fit, or the legacy
+       sandwich Q_fit, or A_fit^-1 for ard_variance "kappa");
+    3. T_val scores from P_fit's errors and shape (or, for the legacy "mixed" ablation, from the
+       served posterior's own-cluster-out sandwich);
+    4. the served posterior P on all of T (started from the subset optimum) and its stored shape;
+    5. per-group configuration-weighted lam_rms and q from the T_val scores, stored in the posterior.
+    kappa and the scalar lam of #18 are still reported for comparison.
 
     full_stats: the linear statistics of data.ds_train (`stats.linear_statistics`) the caller has
     already cached -- the pipeline objective's.  The joint full refit then uses them as they are
     instead of a second pass over the training set (spec 3); sequential mode ignores them."""
     import time
+    from .clusters import row_clusters
+    from .conformal import (assign_groups, band_edges, config_strata, group_scales, n_groups,
+                            shell_reference, stratified_split)
     from .data import build_dataset
+    from .jackknife import press_scores, shape_factor
     mode, val_frac, cond_max = cfg.ard_mode, cfg.ard_val_frac, cfg.ard_cond_max
+    variance, variant, source = cfg.ard_variance, cfg._shape_variant, cfg._score_source
     t0 = time.time()
     prob = built.prob
     body_col = body_order_columns(data.meta, prob.cfg)
-    rng = np.random.default_rng(cfg.seed)
-    idx = rng.permutation(len(data.train))
-    nval = max(1, int(round(val_frac * len(data.train))))
-    val = [data.train[i] for i in idx[:nval]]
-    fit_ = [data.train[i] for i in idx[nval:]]
+    N = len(data.train)
+
+    # 1. groups and strata from T (all live training atoms), then the stratified split
+    dists = _shell_dists(data.ds_train)
+    if len(dists):
+        r1 = shell_reference(dists)
+    else:
+        r1 = float(prob.cfg.rcut)
+        log(f"ARD: no neighbour pairs in the training set; shell reference r1 = r_cut = {r1:.3f}")
+    z_all, d_all, cfg_all, _, _ = _shell_table(data.ds_train, r1)
+    z_star = int(np.bincount(z_all).argmax()) if len(z_all) else 0
+    edges = np.zeros(0)
+    if cfg.ard_groups == "distortion":
+        if np.isfinite(d_all).any():
+            edges = band_edges(d_all)
+        else:
+            log("ARD: no training atom has a finite shell distortion d; distortion groups disabled (2 groups)")
+    G = n_groups(edges)
+    g_all = assign_groups(z_all, d_all, z_star, edges)
+    o = np.argsort(cfg_all, kind="stable")
+    strata = config_strata(np.split(g_all[o], np.searchsorted(cfg_all[o], np.arange(1, N))))
+    fit_idx, val_idx = stratified_split(strata, val_frac, cfg.seed)
+    val = [data.train[i] for i in val_idx]
+    fit_ = [data.train[i] for i in fit_idx]
     if not any(c.forces is not None and c.w_F > 0 for c in val):
-        raise ValueError(f"the ARD validation split ({nval} configs, ard_val_frac={val_frac}) has "
-                         f"no force labels to fit the temperature kappa on")
+        raise ValueError(f"the ARD validation split ({len(val)} configs, ard_val_frac={val_frac}) has "
+                         f"no force labels to fit the force-sigma scales on")
+    ell = cfg.ard_cluster_size * float(prob.cfg.rcut)
+
+    # 2. P_fit and its own shape
     ds_fit = build_dataset(fit_, data.meta, data.E0, cfg.batch)
     ds_val = build_dataset(val, data.meta, data.E0, cfg.batch)
     ev = ARDEvidence(ard_statistics(theta, prob, ds_fit, mode), np.asarray(prob.gamma), body_col)
@@ -501,17 +596,24 @@ def run_ard_stage(cfg, data, built, theta, log=print, full_stats=None):
     for w in _ard_fit_warnings("fit-subset", info_fit, names):
         log(w)
     post_fit = ard_posterior(ev, h_fit, 1.0, data.meta)
-    e2, s2, _ = _val_errors(post_fit, prob, ds_val)
-    del post_fit                           # free the subset fit's L x L Cholesky factor before the refit
-    ok = s2 > 0                            # atoms with zero force rows (isolated, 1-atom configs): no information
-    e2, s2 = e2[ok], s2[ok]
-    if len(e2) == 0:
-        raise ValueError(f"the ARD validation split (ard_val_frac={val_frac}) has no atom with a "
-                         f"non-zero force row to fit the temperature kappa on")
-    kappa = kappa_closed_form(e2, s2)
-    log(f"ARD: fit-subset logev {v_fit:.2f} ({info_fit['message']}, nit {info_fit['nit']}); "
-        f"kappa {kappa:.3f} from {len(e2)} held-out atoms")
+    K_fit = 0
+    if variance == "sandwich" and source == "fit":
+        if variant == "press":
+            rc, K_fit = row_clusters(ds_fit, fit_, ell)
+            Gs, _ = press_scores(post_fit, prob, ds_fit, rc, K_fit, ev.sigmas(h_fit), mode=cfg.ard_press)
+            post_fit = post_fit._replace(R=shape_factor(post_fit, Gs, cfg.ard_shape_tau))
+        else:
+            Gs = sandwich_scores(post_fit, prob, ds_fit, ev.sigmas(h_fit))
+            K_fit = int(Gs.shape[1])
+            post_fit = post_fit._replace(Q=sandwich_factor(post_fit, Gs))
+        del Gs
     del ev
+
+    # 3. T_val errors (and, unless "mixed", the scores' shape) from P_fit
+    E = _val_atoms(post_fit, prob, ds_val, r1=r1, shape=(source == "fit"))
+    del post_fit                           # free the subset fit's L x L Cholesky factor before the refit
+
+    # 4. the served posterior on all of T and its shape
     st = (joint_ard_stats(full_stats) if (full_stats is not None and mode == "joint")
           else ard_statistics(theta, prob, data.ds_train, mode))
     ev = ARDEvidence(st, np.asarray(prob.gamma), body_col)
@@ -521,53 +623,89 @@ def run_ard_stage(cfg, data, built, theta, log=print, full_stats=None):
     for w in _ard_fit_warnings("full", info, names):
         log(w)
     post = ard_posterior(ev, h, 1.0, data.meta)
-    variance = cfg.ard_variance
-    lam, n_clusters = 1.0, 0
+    K, lev = 0, np.zeros(0)
     if variance == "sandwich":
-        # configuration-clustered sandwich (spec addendum): scores of the full refit's own training
-        # residuals, one cluster per training config; Q = S^-1 G~ is set before the held-out pass
-        G = sandwich_scores(post, prob, data.ds_train, ev.sigmas(h))
-        # Q is a float64 device array (sandwich_factor): misspec_var_rows/predict_ard/_val_errors call
-        # jnp.asarray(self.Q, ...) once per batch, a no-op on it -- as numpy it would re-upload the full
-        # (L, n_cfg) factor (0.44 GB at production size) on every one of those calls.
-        post = post._replace(Q=sandwich_factor(post, G))
-        n_clusters = int(G.shape[1])
-        del G
-    # kappa for the SERVED (full-refit) posterior: the held-out errors stay the subset model's (honest),
-    # their s^2 is the full posterior's.  Misspecification-dominated error (kappa >> 1) does not shrink
-    # on the refit while s^2 does, so the subset kappa alone is ~sqrt(n_train / n_fit) too small.
-    # One pass over the held-out rows gives both s^2 (kappa) and the sandwich m^2 (lam, same rule).
-    # lam leaves out each held-out atom's OWN cluster: the held-out configs are training configs of the
-    # full refit, so their m^2 carries (phi~^T Q[:, own])^2, which a genuinely new configuration never
-    # has -- keeping it biases lam low (x1.9 on the test fixture).  Held-out config j is Q column idx[j].
-    _, s2_full, m2_full = _val_errors(post, prob, ds_val, own_col=idx[:nval] if variance == "sandwich" else None)
-    s2_full = s2_full[ok]
-    kappa_subset, kappa = kappa, kappa_closed_form(e2, s2_full)
-    log(f"ARD: kappa {kappa:.3f} for the full posterior (subset {kappa_subset:.3f}, x{kappa / kappa_subset:.3f})")
-    lam_incl_own = None
-    if variance == "sandwich":
-        m2_incl, m2_full = m2_full[0][ok], m2_full[1][ok]
-        lam = kappa_closed_form(e2, m2_full)
-        lam_incl_own = kappa_closed_form(e2, m2_incl)
-        log(f"ARD: sandwich over {n_clusters} training configs; lam {lam:.3f} "
-            f"(own cluster left out; {lam_incl_own:.3f} with it)")
-    post = post._replace(kappa=kappa, lam=lam)
-    report = {"mode": mode, "groups": list(ev.groups), "h": h.tolist(), "h_names": names,
+        if variant == "press":
+            rc, K = row_clusters(data.ds_train, data.train, ell)
+            Gf, lev = press_scores(post, prob, data.ds_train, rc, K, ev.sigmas(h), mode=cfg.ard_press)
+            post = post._replace(R=shape_factor(post, Gf, cfg.ard_shape_tau))
+        else:
+            # Q is a float64 device array (sandwich_factor): its per-batch consumers call jnp.asarray on
+            # it, a no-op there -- as numpy it would re-upload the (L, n_cfg) factor on every call
+            Gf = sandwich_scores(post, prob, data.ds_train, ev.sigmas(h))
+            K, lev = int(Gf.shape[1]), np.zeros(Gf.shape[1])
+            post = post._replace(Q=sandwich_factor(post, Gf))
+        del Gf
+    # held-out rows against the served posterior: its s^2 (kappa) and, for "mixed", the #18 shape
+    Ef = _val_atoms(post, prob, ds_val, shape=False, own_col=val_idx if source == "mixed" else None)
+    V = E.V if source == "fit" else Ef.V
+    vtr = np.trace(V, axis1=1, axis2=2)
+    ok = (E.s2 > 0) & (vtr > 0)            # atoms with zero force rows (isolated, 1-atom configs): no information
+    if not ok.any():
+        raise ValueError(f"the ARD validation split (ard_val_frac={val_frac}) has no atom with a "
+                         f"non-zero force row to fit the force-sigma scales on")
+    e, V, vtr = E.e[ok], V[ok], vtr[ok]
+    e2 = np.sum(e * e, 1)
+    s2_sub, s2_full = E.s2[ok], Ef.s2[ok]
+
+    # kappa (kept for comparison): the subset model's held-out errors against the subset and the
+    # served posterior's untempered s^2
+    kappa_subset = kappa_closed_form(e2, s2_sub)
+    kappa = kappa_closed_form(e2, s2_full)
+    log(f"ARD: fit-subset logev {v_fit:.2f} ({info_fit['message']}, nit {info_fit['nit']}); "
+        f"kappa {kappa_subset:.3f} from {len(e2)} held-out atoms; {kappa:.3f} for the full posterior")
+    lam, lam_incl_own = 1.0, None
+    if variance == "sandwich":                     # the #18 scalar lam, from the new T_val (e^2, v)
+        lam = kappa_closed_form(e2, vtr)
+        if source == "mixed":
+            lam_incl_own = kappa_closed_form(e2, Ef.v_incl[ok])
+
+    # 5. per-group scales on T_val
+    s = _scores(e, V, cfg.ard_force_shape, cfg.ard_shape_eps)
+    gv = assign_groups(E.z[ok], E.d[ok], z_star, edges)
+    cv = np.asarray(val_idx)[E.cfg[ok]]            # training-set index of each calibration atom's config
+    tab = group_scales(s, gv, cv, G, 1 - cfg.ard_coverage, cfg.ard_n_min)
+    post = post._replace(kappa=kappa, lam=lam, force_shape=cfg.ard_force_shape, eps=cfg.ard_shape_eps,
+                         group_consts={"r1": float(r1), "z_star": z_star, "edges": edges.tolist()},
+                         group_table=tab.to_dict(),
+                         cal={"scores": s.astype(np.float32), "groups": gv.astype(np.int8),
+                              "cfg": cv.astype(np.int64), "src": np.zeros(len(s), np.int8)})
+    log(f"ARD: {G} groups over {len(np.unique(cv))} held-out configs ({len(s)} atoms); lam_rms "
+        f"{np.array2string(tab.lam_rms, precision=3)}, q {np.array2string(tab.q, precision=3)}"
+        + (f"; merged {tab.merged}" if tab.merged else ""))
+
+    # 6. report
+    n_near1 = int(np.sum(1.0 - lev < 1e-8))
+    if n_near1:
+        log(f"WARNING: ARD shape: {n_near1} of {K} clusters have leverage 1 - lambda_max(H_kk) < 1e-8; "
+            f"their PRESS scores are accurate only to ~eps/(1 - lambda)")
+    shp = post.R if post.R is not None else post.Q
+    lq = (lambda f: float(f(lev))) if len(lev) else (lambda f: None)
+    report = {"mode": mode, "body_groups": list(ev.groups), "h": h.tolist(), "h_names": names,
               "logev_full": v, "logev_full_start": v_start, "optimiser": info, "optimiser_fit": info_fit,
               "a_floor": ev.a_floor,
-              "tempered_quantities": ["F"],        # F_var is calibrated (lam^2 sandwich, or kappa^2 posterior
-                                                   # for variance "kappa"); E_var / V_var are untempered
-              "kappa": kappa, "kappa_subset": kappa_subset, "n_val_atoms": int(len(e2)), "n_val_configs": len(val), "n_fit_configs": len(fit_),
+              "tempered_quantities": ["F"],        # F_var is lam_rms[g]^2 diag V; E_var / V_var untempered
+              "kappa": kappa, "kappa_subset": kappa_subset, "n_val_atoms": int(len(e2)),
+              "n_val_configs": len(val), "n_fit_configs": len(fit_),
               # held-out errors (subset model) against the served posterior's s^2
               "val_rms_z_untempered": float(np.sqrt(np.mean(e2 / (s2_full / 3)) / 3)),
               "val_rms_z_tempered": float(np.sqrt(np.mean(e2 / (kappa ** 2 * s2_full / 3)) / 3)),
               "val_nll_untempered": _force_nll(e2, s2_full, 1.0), "val_nll_tempered": _force_nll(e2, s2_full, kappa),
-              "variance": variance, "lam": lam, "lam_incl_own": lam_incl_own, "n_clusters": n_clusters,
-              "seconds": time.time() - t0}
+              "variance": variance, "lam": lam, "lam_incl_own": lam_incl_own, "n_clusters": K,
+              "shape": {"variant": variant if variance == "sandwich" else "kappa", "mode": cfg.ard_press,
+                        "ell": ell, "K": K, "K_fit": K_fit,
+                        "rank_R": None if shp is None else int(np.shape(shp)[1]),
+                        "lev_p50": lq(np.median), "lev_p99": lq(lambda x: np.quantile(x, 0.99)),
+                        "lev_max": lq(np.max), "n_lev_near1": n_near1},
+              "groups": tab.to_dict(),
+              "split": {"n_fit": len(fit_), "n_val": len(val), "val_idx": np.asarray(val_idx).tolist(),
+                        "strata": np.bincount(strata, minlength=G).tolist()},
+              "transfer": {"f": val_frac, "N_fit": len(fit_), "N": N, "score_source": source}}
     if variance == "sandwich":
-        report["val_rms_z_sandwich"] = float(np.sqrt(np.mean(e2 / (lam ** 2 * m2_full / 3)) / 3))
+        report["val_rms_z_sandwich"] = float(np.sqrt(np.mean(e2 / (lam ** 2 * vtr / 3)) / 3))
     if cfg.ard_laplace:
         lap = laplace_hypers(ev, h)
         report["laplace_std_h"] = lap["std"].tolist()
         report["laplace_eigs"] = lap["eigs"].tolist()
+    report["seconds"] = time.time() - t0
     return ARDResult(post, report)

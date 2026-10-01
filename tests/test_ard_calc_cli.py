@@ -22,12 +22,13 @@ def fitted(tmp_path_factory):
 
 
 def test_cli_fit_ard_variance_default_sandwich_and_kappa_flag(fitted, tmp_path):
-    """--ard-variance: default sandwich (the fixture fit, Q in posterior.npz); `kappa` once."""
+    """--ard-variance: default sandwich (the fixture fit, the PRESS shape factor R in posterior.npz); `kappa` once."""
     import json
     from ace_jax.cli import main
     from ace_jax.fit.ard import ARDPosterior
     assert json.load(open(fitted / "ard.json"))["variance"] == "sandwich"
-    assert ARDPosterior.load(fitted / "posterior.npz").Q is not None
+    p = ARDPosterior.load(fitted / "posterior.npz")
+    assert p.R is not None and p.Q is None and p.group_table is not None
     out = tmp_path / "kappa"
     assert main(["fit", "--model", str(FIXTURE_DIR / "si_fitted.npz"), "--data", str(XYZ), "--ntrain", "30",
                  "--ntest", "8", "--energy-key", "dft_energy", "--force-key", "dft_force", "--virial-key",
@@ -35,15 +36,16 @@ def test_cli_fit_ard_variance_default_sandwich_and_kappa_flag(fitted, tmp_path):
                  "lbfgs", "--map-steps", "5", "--configs-per-batch", "4", "--r0", "2.35",
                  "--out", str(out)]) == 0
     assert json.load(open(out / "ard.json"))["variance"] == "kappa"
-    assert ARDPosterior.load(out / "posterior.npz").Q is None
+    pk = ARDPosterior.load(out / "posterior.npz")
+    assert pk.Q is None and pk.R is None and pk.group_table is not None
 
 
-def test_calculator_caches_Q_on_device(fitted):
-    """The sandwich factor is moved to the device once at construction, not on every forces_std."""
+def test_calculator_caches_shape_factor_on_device(fitted):
+    """The shape factor (R, schema 3) is on the device once at construction, not moved on every forces_std."""
     from ace_jax import ACECalculator
     calc = ACECalculator(str(fitted / "model.npz"), posterior=str(fitted / "posterior.npz"))
-    assert calc.posterior.Q is not None and isinstance(calc.posterior.Q, jax.Array)
-    assert calc.posterior.Q.dtype == np.float64
+    assert calc.posterior.R is not None and isinstance(calc.posterior.R, jax.Array)
+    assert calc.posterior.R.dtype == np.float64
 
 
 def test_calculator_caches_chol_on_device(fitted):

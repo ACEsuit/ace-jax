@@ -225,7 +225,7 @@ def _pipe_cfg(**kw):
     from ace_jax.fit.pipeline import FitConfig
     base = dict(model=str(FIXTURE_DIR / "si_fitted.npz"), energy_key="dft_energy", force_key="dft_force",
                 virial_key="dft_virial", ntrain=30, ntest=8, batch=4, r0=2.35, arm="linear", uq="ard",
-                opt="lbfgs", rungs=("map",), map_steps=5, predict_train=False, ard_variance="kappa")
+                opt="lbfgs", rungs=("map",), map_steps=5, predict_train=False, ard_variance="kappa", ard_n_min=1)
     return FitConfig(**{**base, **kw})
 
 
@@ -250,9 +250,10 @@ def test_ard_stage_fits_kappa_and_refits_on_all_training_data():
     assert abs(rep["val_rms_z_tempered"] - 1.0) < 1e-6          # kappa closed form on the val set
     assert rep["logev_full"] >= rep["logev_full_start"] - 1e-6
     assert np.isfinite(rep["val_nll_tempered"]) and rep["val_nll_tempered"] <= rep["val_nll_untempered"] + 1e-9
-    # F_var tempered by kappa^2; E_var / V_var untempered; means independent of kappa
-    k2 = res.posterior.kappa ** 2
-    np.testing.assert_allclose(pred.F_var, k2 * pred1.F_var, rtol=1e-12)
+    # schema 3: F_var = lam_rms[g]^2 diag V_kappa from the group table, so the reported kappa no longer
+    # scales it; E_var / V_var untempered; means independent of kappa
+    assert res.posterior.group_table is not None and res.posterior.R is None and res.posterior.Q is None
+    np.testing.assert_allclose(pred.F_var, pred1.F_var, rtol=1e-12)
     np.testing.assert_allclose(pred.E_var, pred1.E_var, rtol=1e-12)
     np.testing.assert_allclose(pred.V_var, pred1.V_var, rtol=1e-12)
     np.testing.assert_allclose(pred.F_mean, pred1.F_mean, rtol=1e-12)
@@ -474,8 +475,9 @@ def test_posterior_schema2_roundtrip_and_schema1_loads(ard_setup, tmp_path):
 
 
 def test_ard_stage_sandwich_variance_and_lam_rule(monkeypatch):
-    """Default variance: Q from the full refit's training residuals, lam by the kappa refit rule
-    (held-out subset errors against the served posterior's sandwich variance), F_var = lam^2 sandwich."""
+    """The legacy ("mixed") ablation arm of #18: Q from the full refit's training residuals, the scalar
+    lam by the kappa refit rule (held-out subset errors against the served posterior's own-cluster-out
+    sandwich variance).  Schema 3 serves lam_rms[g], so F_var no longer scales with the scalar lam."""
     from conftest import FIXTURE_DIR
     from ace_jax.fit import ard
     from ace_jax.fit.pipeline import load_fit_data
@@ -485,7 +487,7 @@ def test_ard_stage_sandwich_variance_and_lam_rule(monkeypatch):
     calls = []
     orig = ard.kappa_closed_form
     monkeypatch.setattr(ard, "kappa_closed_form", lambda e2, s2: calls.append((np.array(e2), np.array(s2))) or orig(e2, s2))
-    cfg = _pipe_cfg(ard_variance="sandwich").validate()
+    cfg = _pipe_cfg(ard_variance="sandwich", _shape_variant="legacy", _score_source="mixed").validate()
     d = load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz"))
     b = build_problem(cfg, d)
     with highest_precision():
@@ -501,7 +503,7 @@ def test_ard_stage_sandwich_variance_and_lam_rule(monkeypatch):
     assert len(calls) == 4 and np.array_equal(calls[2][0], calls[0][0])
     assert rep["lam_incl_own"] == orig(*calls[3])
     assert post.lam == orig(*calls[2]) == rep["lam"] and abs(rep["val_rms_z_sandwich"] - 1.0) < 1e-6
-    np.testing.assert_allclose(pred.F_var, post.lam ** 2 * pred1.F_var, rtol=1e-12)
+    np.testing.assert_allclose(pred.F_var, pred1.F_var, rtol=1e-12)
 
 
 def test_ard_stage_sandwich_in_sequential_mode():
@@ -512,7 +514,7 @@ def test_ard_stage_sandwich_in_sequential_mode():
     from ace_jax.fit.pipeline.objective import make_objective
     from ace_jax.fit.pipeline.problem import build_problem
     theta_ls = lambda t: [float(getattr(t, f"log_sigma_{q}")) for q in "EFV"]
-    cfg = _pipe_cfg(ard_variance="sandwich", ard_mode="sequential").validate()
+    cfg = _pipe_cfg(ard_variance="sandwich", ard_mode="sequential", _shape_variant="legacy").validate()
     d = load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz"))
     b = build_problem(cfg, d)
     with highest_precision():
@@ -557,7 +559,7 @@ def test_sandwich_scores_columns_follow_config_order(ard_setup):
 
 
 def test_ard_stage_lam_leaves_out_each_held_out_atoms_own_cluster(monkeypatch):
-    """lam is fitted against m^2 WITHOUT the held-out atom's own configuration's cluster: a genuinely
+    """Legacy "mixed" ablation: lam is fitted against m^2 WITHOUT the held-out atom's own configuration's cluster: a genuinely
     new configuration has no such term, so keeping it biases lam low.  Brute force: per held-out
     config, zero its own column of Q (column idx[j] of the train order), recompute m^2 from that
     config's force rows alone, and lam = kappa_closed_form(e2, m2)."""
@@ -572,7 +574,7 @@ def test_ard_stage_lam_leaves_out_each_held_out_atoms_own_cluster(monkeypatch):
     calls = []
     orig = ard.kappa_closed_form
     monkeypatch.setattr(ard, "kappa_closed_form", lambda e2, s2: calls.append(np.array(e2)) or orig(e2, s2))
-    cfg = _pipe_cfg(ard_variance="sandwich").validate()
+    cfg = _pipe_cfg(ard_variance="sandwich", _shape_variant="legacy", _score_source="mixed").validate()
     d = load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz"))
     b = build_problem(cfg, d)
     with highest_precision():
@@ -580,8 +582,8 @@ def test_ard_stage_lam_leaves_out_each_held_out_atoms_own_cluster(monkeypatch):
         res = ard.run_ard_stage(cfg, d, b, theta, log=lambda *a: None)
         post, rep = res.posterior, res.report
         L = b.prob.cfg.len_basis
-        idx = np.random.default_rng(cfg.seed).permutation(len(d.train))
-        nval = max(1, int(round(cfg.ard_val_frac * len(d.train))))
+        idx = np.asarray(rep["split"]["val_idx"])              # the stage's stratified hold-out
+        nval = len(idx)
         Q, dinv = np.asarray(post.Q), np.asarray(post.dinv)
         m2_loo, m2_all = [], []
         for j in range(nval):                               # one config at a time: no batch bookkeeping
@@ -665,3 +667,88 @@ def test_schema2_serves_scalar(ard_setup, tmp_path):
     for f in (lambda: p2.forces_q(Fr, None), lambda: p2.forces_cov(Fr, None), lambda: p2.forces_q_mahal(None)):
         with pytest.raises(ValueError, match="refit with --uq ard"):
             f()
+
+
+def _stage(**kw):
+    from conftest import FIXTURE_DIR
+    from ace_jax.fit import ard
+    from ace_jax.fit.pipeline import load_fit_data
+    from ace_jax.fit.pipeline.mapfit import fit_map
+    from ace_jax.fit.pipeline.objective import make_objective
+    from ace_jax.fit.pipeline.problem import build_problem
+    cfg = _pipe_cfg(ard_variance="sandwich", **kw).validate()
+    d = load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz"))
+    b = build_problem(cfg, d)
+    with highest_precision():
+        theta = fit_map(cfg, d, b, make_objective(cfg, d, b), log=lambda *a: None).theta
+        res = ard.run_ard_stage(cfg, d, b, theta, log=lambda *a: None)
+        pred = ard.predict_ard(res.posterior, b.prob, d.ds_test)
+    return d, res, pred
+
+
+def test_stage_default_press_shape_and_group_scales():
+    from ace_jax.fit.conformal import chi3_ppf
+    d, res, pred = _stage()
+    post, rep = res.posterior, res.report
+    assert post.R is not None and post.group_table is not None and post.cal is not None
+    assert set(rep) >= {"shape", "groups", "split", "transfer"}
+    assert rep["split"]["n_val"] + rep["split"]["n_fit"] == len(d.train) and rep["split"]["n_val"] >= 1
+    assert rep["transfer"]["score_source"] == "fit"
+    assert rep["shape"]["K_fit"] < rep["shape"]["K"]                 # T_val scores used P_fit's own shape
+    assert 0 <= rep["shape"]["lev_max"] < 1
+    t = post.group_table
+    np.testing.assert_allclose(np.asarray(t["r"]),
+                               np.asarray(t["q"]) / (np.asarray(t["lam_rms"]) * chi3_ppf(0.9)), rtol=1e-10)
+    assert len(post.cal["scores"]) == sum(t["n_atoms"])
+    assert np.isfinite(pred.F_var).all() and np.all(pred.F_var >= 0)
+
+
+# A finite conformal q needs >= 9 configurations in its pool at alpha = 0.1 ((1 - alpha)(n + 1) <= n):
+# the tiny fixture's default split holds 8, so the finite-q tests hold out 40 % and pool every group.
+_FINITE_Q = dict(ard_val_frac=0.4, ard_n_min=50)
+
+
+def test_stage_aniso_variant():
+    _, res, _ = _stage(ard_force_shape="aniso", **_FINITE_Q)
+    assert res.posterior.force_shape == "aniso" and np.isfinite(res.posterior.group_table["q"]).all()
+
+
+def test_stage_legacy_ablation_variant():
+    _, res, _ = _stage(_shape_variant="legacy", _score_source="mixed", **_FINITE_Q)
+    post = res.posterior
+    assert post.R is None and post.Q is not None and res.report["transfer"]["score_source"] == "mixed"
+    assert np.isfinite(post.group_table["q"]).all()
+
+
+def test_stage_groups_none_is_two_groups():
+    _, res, _ = _stage(ard_groups="none")
+    assert len(res.posterior.group_table["q"]) == 2 and res.posterior.group_consts["edges"] == []
+
+
+def test_stage_reports_and_warns_near_unit_leverage(monkeypatch):
+    """A cluster with 1 - lambda_max(H_kk) < 1e-8 is counted in report["shape"]["n_lev_near1"] and
+    logged: its PRESS score is accurate only to ~eps/(1 - lambda)."""
+    from conftest import FIXTURE_DIR
+    from ace_jax.fit import ard, jackknife
+    from ace_jax.fit.pipeline import load_fit_data
+    from ace_jax.fit.pipeline.mapfit import fit_map
+    from ace_jax.fit.pipeline.objective import make_objective
+    from ace_jax.fit.pipeline.problem import build_problem
+    real = jackknife.press_scores
+
+    def near1(*a, **k):
+        G, lev = real(*a, **k)
+        lev = lev.copy()
+        lev[0] = 1 - 1e-12
+        return G, lev
+
+    monkeypatch.setattr(jackknife, "press_scores", near1)
+    cfg = _pipe_cfg(ard_variance="sandwich").validate()
+    d = load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz"))
+    b = build_problem(cfg, d)
+    lines = []
+    with highest_precision():
+        theta = fit_map(cfg, d, b, make_objective(cfg, d, b), log=lambda *a: None).theta
+        res = ard.run_ard_stage(cfg, d, b, theta, log=lines.append)
+    assert res.report["shape"]["n_lev_near1"] == 1
+    assert any("WARNING" in s and "leverage" in s for s in lines)
