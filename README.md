@@ -1,5 +1,11 @@
 # ace-jax
 
+[![Docs](https://img.shields.io/github/actions/workflow/status/ACEsuit/ace-jax/docs.yml?branch=main&label=docs)](https://acesuit.github.io/ace-jax/)
+[![Tests](https://img.shields.io/github/actions/workflow/status/ACEsuit/ace-jax/test.yml?branch=main&label=tests)](https://github.com/ACEsuit/ace-jax/actions/workflows/test.yml)
+
+**Documentation: <https://acesuit.github.io/ace-jax/>** (installation, quickstart,
+tutorial notebooks, how-to guides, CLI and API reference).
+
 Fit and evaluate **Atomic Cluster Expansion (ACE)** interatomic potentials in
 pure **Python/JAX**: build a basis, fit it and run it, everything from
 `pip install ace-jax`.

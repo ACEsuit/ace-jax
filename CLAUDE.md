@@ -42,6 +42,7 @@ parity CI jobs. User docs: `README.md`. Agent-facing usage guide:
 - `pace_ref/`: ML-PACE and python-ace reference tooling.
 - `spike/`: throwaway experiments, not linted.
 - `docs/`: specs, plans and results. `docs/benchmarks.md` has the performance numbers.
+  - `docs/user/`: the user documentation site (MkDocs Material, `mkdocs.yml`, toolchain pinned in `docs/requirements.txt`; build with `uv pip install -r docs/requirements.txt && uv run --no-sync mkdocs build --strict`). `docs/mkdocs_hooks.py` renders the CLI reference from `aj --help`; `docs/snippets/` holds shared fragments (the install line). Tutorials are marimo notebooks in `docs/user/tutorials/notebooks/` with PEP 723 headers; keep each a few CPU minutes. `tests/test_no_backend_names.py` also covers `docs/user` (except `licence.md`).
 
 ## Setup and tests
 
@@ -75,6 +76,7 @@ uv run ruff check                     # lint; `uv run pre-commit run --all-files
 - **CI** (`.github/workflows/`):
   - `test.yml`: 3 pytest-split shards on Python 3.12, a smoke job on 3.11 and 3.13, the `slow` ladder, and `optional-deps` (matscipy-neighbours plus lammps-jax pinned to a commit, with `ACEJAX_REQUIRE_OPTIONAL=1`).
   - `lint.yml`.
+  - `docs.yml`: strict site build and a headless run of each tutorial notebook (path-gated); on `main` it deploys to GitHub Pages.
   - Path-gated parity jobs: `julia-parity` (ACEfit rows/QR), `coupling-wheels` (builds + clean-env-tests the coupling wheels, then parity vs ACEpotentials), `prior-parity`, `pace-parity` (ML-PACE C++ + python-ace).
   - pytest-split balances on `.test_durations`. Refresh it with `pytest --store-durations` when adding slow tests.
 
