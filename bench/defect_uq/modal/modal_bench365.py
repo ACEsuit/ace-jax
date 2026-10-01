@@ -11,7 +11,7 @@ import modal
 
 HOME = pathlib.Path.home()
 ACEGP = pathlib.Path(os.environ.get("ACEGP_DATA", HOME / "acegp-data"))   # data + generated sets
-DATA = HOME / "acegp-data" / "cantor"
+DATA = ACEGP / "cantor"
 _HERE = pathlib.Path(__file__).resolve()
 # ace-jax checkout (local only: inside the container this module is /root/modal_bench365.py)
 WT = pathlib.Path(os.environ.get("ACEJAX_SRC", _HERE.parents[3] if len(_HERE.parents) > 3 else _HERE.parent))
@@ -57,10 +57,12 @@ def launch(arms: str = "pops,gp", smoke: bool = False):
 
 
 @app.function(gpu="A100-80GB", image=image, volumes={"/out": vol}, timeout=4 * 3600)
-def big_errors(run: str = "bench365_pops") -> str:
-    """Per-atom |F_model - F_MACE| on the big crack / dislocation cells (data/big.xyz), from the
-    run's saved linear model.  If the run wrote posterior.npz (--uq ard), also the per-atom tempered
-    ARD force sigma (ACECalculator(posterior=): node-chunked design rows, fine above 2.8k atoms)."""
+def big_errors(run: str = "bench365_pops", xyz: str = "/data/big.xyz", tag: str = "") -> str:
+    """Per-atom |F_model - F_MACE| on the big crack / dislocation cells (xyz: data/big.xyz, or e.g.
+    /out/defects/big3_mh1.xyz), from the run's saved linear model.  If the run wrote posterior.npz
+    (--uq ard), also the per-atom ARD force sigma (ACECalculator(posterior=): node-chunked design
+    rows, fine above 2.8k atoms).  Writes <run>/big<tag>_err.npz with the per-atom family, r_core,
+    fixed mask and config index, so the file scores without sites.npz."""
     import os
     os.environ["JAX_ENABLE_X64"] = "1"
     import time
@@ -72,16 +74,21 @@ def big_errors(run: str = "bench365_pops") -> str:
     post = f"/out/{run}/posterior.npz"
     calc = ACECalculator(f"/out/{run}/model.npz", posterior=post) if os.path.exists(post) \
         else ACECalculator(f"/out/{run}/model.npz")
-    err, sd, t0 = [], [], time.time()
-    for a in read("/data/big.xyz", ":"):
+    err, sd, fam, rc, fx, cid, t0 = [], [], [], [], [], [], time.time()
+    for k, a in enumerate(read(xyz, ":")):
+        fam.append(np.full(len(a), a.info.get("family", "?")))
+        rc.append(a.arrays.get("r_core", np.full(len(a), np.nan)))
+        fx.append(a.arrays.get("fixed", np.zeros(len(a), bool)).astype(bool))
+        cid.append(np.full(len(a), k))
         a.calc = calc
         err.append(np.linalg.norm(a.get_forces() - a.arrays["mace_force"], axis=1))
         if os.path.exists(post):
             sd.append(np.asarray(calc.get_property("forces_std", a)))
-    out = dict(err=np.concatenate(err))
+    out = dict(err=np.concatenate(err), family=np.concatenate(fam), r_core=np.concatenate(rc),
+               fixed=np.concatenate(fx), cfg=np.concatenate(cid))
     if sd:
         out["sd"] = np.concatenate(sd)
-    np.savez(f"/out/{run}/big_err.npz", **out)
+    np.savez(f"/out/{run}/big{tag}_err.npz", **out)
     vol.commit()
     e = out["err"]
     return (f"{len(e)} atoms, median |dF| {np.median(e):.3f}, 99th {np.percentile(e, 99):.3f} eV/A"
@@ -89,8 +96,8 @@ def big_errors(run: str = "bench365_pops") -> str:
 
 
 @app.local_entrypoint()
-def launch_big(run: str = "bench365_pops"):
-    print(big_errors.remote(run))
+def launch_big(run: str = "bench365_pops", xyz: str = "/data/big.xyz", tag: str = ""):
+    print(big_errors.remote(run, xyz, tag))
 
 
 @app.function(gpu="B200", image=image.add_local_file(str(pathlib.Path(__file__).parents[1] / "scoring" / "bayes_bodyorder.py"),

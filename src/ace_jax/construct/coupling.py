@@ -1,26 +1,21 @@
-"""In-process EquivariantTensors coupling shim via JuliaCall.
+"""EquivariantTensors coupling via the compiled ace-jax-coupling library.
 
-`couple(mb_spec, Rnl_spec, Ylm_spec)` calls
-`EquivariantTensors.sparse_equivariant_tensor(L=0, ...)` and returns the coupling
-in ace-jax's export layout (see `Coupling`).  Requires the optional `authoring`
-extra (juliacall + juliapkg, which auto-provisions Julia + EquivariantTensors);
+`couple(mb_spec, Rnl_spec, Ylm_spec)` returns the L = 0 real-basis coupling of
+`EquivariantTensors.sparse_equivariant_tensor` in ace-jax's export layout (see
+`Coupling`).  It calls `ace_jax_coupling.couple_raw`, a juliac-compiled build of
+EquivariantTensors (no Julia at runtime), from the optional `basis` extra;
 the import is lazy so the core package never depends on it.
 
 `couple_cached(...)` wraps `couple` with a per-shape disk cache: the coupling
 depends only on the three integer specs, so a new shape runs the shim once and
 every later authoring of the same shape reconstructs the `Coupling` from the
-cache without importing juliacall at all.
-
-juliacall note: dependency discovery scans `sys.path` for `juliapkg.json`, so a
-standalone script must put the repo root on `PYTHONPATH` (pytest and
-`python -m acegp.cli` do this implicitly).
+cache without importing the library at all.
 """
 
 import hashlib
 import json
 import os
 import pathlib
-import sys
 import tempfile
 import warnings
 
@@ -76,24 +71,31 @@ def subspace_residual(A, B):
     return float(np.abs(Qa @ Qa.T - Qb @ Qb.T).max())
 
 
-def _jl():
+COUPLING_LIB_VERSION = "0.2.0"   # == the `basis` extra pin (test_backend_id_matches_extra_pin)
+
+
+def backend_id():
+    """Identity of the coupling backend, stored in cache entries so a library
+    change invalidates them.  Computed WITHOUT importing the library (a cache
+    hit must not need it installed)."""
+    return f"ace-jax-coupling=={COUPLING_LIB_VERSION}"
+
+
+def _lib():
     if os.environ.get("ACEJAX_NO_JULIA"):
-        raise RuntimeError("ACEJAX_NO_JULIA is set but Julia was invoked -- "
+        raise RuntimeError("ACEJAX_NO_JULIA is set but a coupling was computed -- "
                            "the coupling cache missed where it should have hit")
     try:
-        from juliacall import Main as jl
-    except ModuleNotFoundError as e:  # pragma: no cover - exercised only with the extra
+        import ace_jax_coupling
+    except ModuleNotFoundError as e:
         raise ModuleNotFoundError(
-            "coupling generation needs the 'authoring' extra: pip install ace-jax[authoring]"
-        ) from e
-    # Activate the juliapkg-provisioned project explicitly before `using`: under
-    # some harnesses (pytest capture) the ambient project is not the one juliapkg
-    # resolved EquivariantTensors into, giving "Package ... not found in current path".
-    import juliapkg
-    jl.seval("import Pkg")
-    jl.seval(f'Pkg.activate(raw"{juliapkg.project()}"; io=devnull)')
-    jl.seval("using EquivariantTensors")
-    return jl
+            "coupling generation needs the 'basis' extra: pip install 'ace-jax[basis]' "
+            "(Linux x86_64/aarch64, macOS arm64, Windows x64; until ace-jax-coupling is on PyPI, "
+            "build its wheel from coupling/ in the ace-jax repo)") from e
+    if ace_jax_coupling.__version__ != COUPLING_LIB_VERSION:
+        raise RuntimeError(f"ace-jax-coupling {ace_jax_coupling.__version__} installed, this ace-jax "
+                           f"needs =={COUPLING_LIB_VERSION}: pip install 'ace-jax-coupling=={COUPLING_LIB_VERSION}'")
+    return ace_jax_coupling
 
 
 def couple(mb_spec, Rnl_spec, Ylm_spec):
@@ -109,53 +111,27 @@ def couple(mb_spec, Rnl_spec, Ylm_spec):
     what makes end-to-end parity work for an arbitrary (Python-generated) mb_spec
     rather than only for the oracle's ordering."""
     import numpy as np
-    jl = _jl()
-    ET = jl.EquivariantTensors
-    # Build CONCRETELY-typed Julia vectors (juliacall would otherwise pass Python
-    # lists as Vector{Any}, which _make_idx_A_spec cannot dispatch on).  The Julia
-    # comprehensions re-type from the numpy int arrays.
-    ai = lambda xs: np.asarray(xs, np.int64)
-    rnl = jl.seval("(ns,ls)->[(n=Int(n),l=Int(l)) for (n,l) in zip(ns,ls)]")(
-        ai([n for n, l in Rnl_spec]), ai([l for n, l in Rnl_spec]))
-    ylm = jl.seval("(ls,ms)->[(l=Int(l),m=Int(m)) for (l,m) in zip(ls,ms)]")(
-        ai([l for l, m in Ylm_spec]), ai([m for l, m in Ylm_spec]))
-    mb = jl.seval("()->Vector{Vector{@NamedTuple{n::Int,l::Int}}}()")()
-    push = jl.seval("(v,ns,ls)->push!(v, [(n=Int(n),l=Int(l)) for (n,l) in zip(ns,ls)])")
-    for bb in mb_spec:
-        push(mb, ai([n for n, l in bb]), ai([l for n, l in bb]))
-    tensor = ET.sparse_equivariant_tensor(L=0, mb_spec=mb, Rnl_spec=rnl,
-                                          Ylm_spec=ylm, basis=jl.real)
-    A2B = np.asarray(jl.Matrix(jl.getindex(tensor.A2Bmaps, 1)), float)    # (n_B, n_AA)
-    tomat = jl.seval("s -> permutedims(reduce(hcat, collect.(s)))")       # Vector{NTuple} -> (n, k), 1-based
-    # Per-column (n,l,m) signatures in A2B COLUMN order, straight from meta 𝔸spec
-    # (raw row order -- sorting here would lose the original body channel order
-    # that get_nnll_spec dumps; consumers sort when comparing).
-    aaspec = tensor.meta["𝔸spec"]
-    col_sig = jl.seval(
-        "row -> [(Int(b.n), Int(b.l), Int(b.m)) for b in row]")
-    aa_sig = tuple(
-        tuple((int(n), int(l), int(m)) for n, l, m in col_sig(jl.getindex(aaspec, k)))
-        for k in range(1, int(jl.length(aaspec)) + 1))
-    aspec_arr = np.asarray(tomat(tensor.abasis.spec), np.int64) - 1        # (n_A, 2): (Rnl_idx, Ylm_idx)
-    aspec = tuple((int(r), int(y)) for r, y in aspec_arr)
-    # AA basis in EVALUATION order, split by correlation order (aa_lens), and
-    # the per-row body dump.  Both are exporter-artifact sources.
-    aa_specs = tuple(
-        np.asarray(tomat(jl.getindex(tensor.aabasis.specs, k)), np.int64) - 1
-        for k in range(1, int(jl.length(tensor.aabasis.specs)) + 1))
-    nnll = jl.seval("t -> EquivariantTensors.get_nnll_spec(t, 1)")(tensor)
-    row_sig = jl.seval(
-        "row -> [(Int(b.n), Int(b.l)) for b in row]")
-    nnll_spec = tuple(
-        tuple((int(n), int(l)) for n, l in row_sig(jl.getindex(nnll, k)))
-        for k in range(1, int(jl.length(nnll)) + 1))
-    return Coupling(A2B=A2B, aa_sig=aa_sig, aspec=aspec,
-                    aa_specs=aa_specs, nnll_spec=nnll_spec)
+    raw = _lib().couple_raw(mb_spec, Rnl_spec, Ylm_spec)
+    A2B = np.zeros(raw.A2B_shape, np.float64)
+    A2B[raw.A2B_rows, raw.A2B_cols] = raw.A2B_vals
+    so = raw.aa_sig_off
+    aa_sig = tuple(tuple((int(n), int(l), int(m)) for n, l, m in raw.aa_sig[so[k]:so[k + 1]])
+                   for k in range(len(so) - 1))
+    aspec = tuple((int(r), int(y)) for r, y in raw.aspec)
+    ao = raw.aa_off
+    rows = [raw.aa_idx[ao[k]:ao[k + 1]] for k in range(len(ao) - 1)]
+    max_ord = max(len(r) for r in rows)
+    aa_specs = tuple(np.asarray([r for r in rows if len(r) == k], np.int64).reshape(-1, k)
+                     for k in range(1, max_ord + 1))
+    no = raw.nnll_off
+    nnll_spec = tuple(tuple((int(n), int(l)) for n, l in raw.nnll[no[i]:no[i + 1]])
+                      for i in range(len(no) - 1))
+    return Coupling(A2B=A2B, aa_sig=aa_sig, aspec=aspec, aa_specs=aa_specs, nnll_spec=nnll_spec)
 
 
 # --------------------------------------------------------------------- cache
 
-_CACHE_SCHEMA = 1
+_CACHE_SCHEMA = 1   # also hashed into coupling_key: bumping it moves every key; the "backend" stamp invalidates entries
 
 
 def coupling_key(mb_spec, Rnl_spec, Ylm_spec):
@@ -185,20 +161,6 @@ def default_cache_dir(env=None):
     return pathlib.Path(root) / "ace-jax" / "coupling"
 
 
-def juliapkg_hash():
-    """sha256 of the `juliapkg.json` on `sys.path` -- the same discovery rule
-    juliapkg uses, but readable WITHOUT importing juliacall (that is the
-    point: a cache hit must not launch Julia).  Stored in entries so a pin
-    change invalidates them.  None if no file is found."""
-    for p in sys.path:
-        if not p:
-            continue
-        cand = pathlib.Path(p) / "juliapkg.json"
-        if cand.is_file():
-            return hashlib.sha256(cand.read_bytes()).hexdigest()
-    return None
-
-
 def _entry_path(cache_dir, key):
     return pathlib.Path(cache_dir) / f"cpl-{key[:16]}.npz"
 
@@ -219,7 +181,7 @@ def _write_entry(path, cpl, key, mb_spec, Rnl_spec, Ylm_spec):
             "aspec": [[r, y] for r, y in cpl.aspec],
             "aa_sig": [[list(t) for t in sig] for sig in cpl.aa_sig],
             "nnll_spec": [[list(b) for b in bb] for bb in cpl.nnll_spec],
-            "juliapkg_hash": juliapkg_hash(),
+            "backend": backend_id(),
         }).encode(), np.uint8),
     }
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -252,7 +214,7 @@ def _read_entry(path, key):
         z = np.load(path)
         meta = json.loads(bytes(z["meta_json"]).decode())
         ok = (meta.get("schema") == _CACHE_SCHEMA and meta.get("key") == key
-              and meta.get("juliapkg_hash") == juliapkg_hash())
+              and meta.get("backend") == backend_id())
         if not ok:
             return None, False
         n_orders = sum(1 for f in z.files if f.startswith("aa_spec_"))

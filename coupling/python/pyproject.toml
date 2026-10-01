@@ -1,0 +1,29 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ace-jax-coupling"
+version = "0.2.0"
+description = "EquivariantTensors.jl SO(3) coupling tables for ace-jax, as a juliac-compiled library (no Julia needed)"
+readme = "README.md"
+requires-python = ">=3.11"
+# PEP 639: the expression covers the whole wheel, i.e. ace-jax-coupling and
+# EquivariantTensors (MIT) plus the bundled Julia runtime and libraries (see
+# LICENSE and THIRD_PARTY_NOTICES.md). AMOS (in OpenSpecFun) is public domain.
+license = "MIT AND BSD-2-Clause AND BSD-3-Clause AND (BSD-3-Clause WITH PCRE2-exception) AND ISC AND Zlib AND LGPL-2.1-or-later AND LGPL-3.0-or-later AND (GPL-3.0-or-later WITH GCC-exception-3.1) AND LicenseRef-Public-Domain"
+license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md", "licenses/*"]
+authors = [{ name = "ACEsuit contributors" }]
+dependencies = ["numpy>=1.24"]
+
+[project.urls]
+Homepage = "https://github.com/ACEsuit/ace-jax"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ace_jax_coupling"]
+
+[tool.hatch.build.targets.wheel.hooks.custom]
+path = "hatch_build.py"
+
+[tool.hatch.build.targets.sdist]
+include = ["src", "hatch_build.py", "README.md", "LICENSE", "THIRD_PARTY_NOTICES.md", "licenses"]

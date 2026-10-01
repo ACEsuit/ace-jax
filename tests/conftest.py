@@ -84,6 +84,20 @@ def require_optional(module):
     return pytest.importorskip(module)
 
 
+def require_coupling_lib():
+    """Skip (or fail under ACEJAX_REQUIRE_OPTIONAL) unless ace_jax_coupling is
+    installed WITH its compiled library (the uv path source builds a lib-less
+    dev wheel when no bundle is given)."""
+    ajc = require_optional("ace_jax_coupling")
+    try:
+        ajc.build_info()
+    except ajc.CouplingLibError as e:
+        if os.environ.get("ACEJAX_REQUIRE_OPTIONAL"):
+            pytest.fail(f"ace_jax_coupling has no compiled library: {e}")
+        pytest.skip(f"ace_jax_coupling has no compiled library: {e}")
+    return ajc
+
+
 MODELS = {
     "ace1_spline_spherical": "si_fitted.npz",
     "ace_analytic_solid": "si_ace_model.npz",

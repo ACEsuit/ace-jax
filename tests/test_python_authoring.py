@@ -5,15 +5,14 @@ Two ladders:
 * unit tests (numpy only, always run): the normalized-Legendre recurrence, the
   agnesi transform 7-tuple, and the envelope formulas, pinned against
   fixtures/si_ace_model.npz and numpy's own polynomials.
-* bridge tests (need the `authoring` extra; skip cleanly otherwise): a Si
+* bridge tests (need the `basis` extra; skip cleanly otherwise): a Si
   order-3 totaldegree-10 model is authored from scratch, the committed Julia
   fixture's coefficients are injected (exact because the fixture's nnll row
-  order fed back through `couple` reproduces its A2B bit-for-bit), packaged
-  with `save_npz`, and compared array-for-array against the fixture, then
-  evaluated against the fixture's energies, forces and descriptors.
-
-juliacall note: standalone scripts need the repo root on PYTHONPATH so
-juliapkg finds the repo's juliapkg.json (pytest provides it implicitly).
+  order fed back through `couple` reproduces its A2B up to a per-B-row scale --
+  the coupling library is EquivariantTensors main, the fixture ACEpotentials
+  0.10.1 / ET 0.4.3 -- which the injected WB absorbs), packaged with
+  `save_npz`, and compared array-for-array against the fixture, then evaluated
+  against the fixture's energies, forces and descriptors.
 """
 
 import json
@@ -24,6 +23,8 @@ import sys
 
 import numpy as np
 import pytest
+
+from conftest import require_coupling_lib
 
 FIX = os.path.join(os.path.dirname(__file__), "..", "fixtures")
 
@@ -307,7 +308,7 @@ def test_save_npz_spline_factorised_roundtrip(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-#  bridge tests (authoring extra)
+#  bridge tests (`basis` extra)
 # ---------------------------------------------------------------------------
 
 _BRIDGE = r"""
@@ -315,7 +316,7 @@ import json, sys
 import dataclasses
 
 import numpy as np
-import juliacall  # noqa: F401  (fail loudly here if the extra is missing)
+import ace_jax_coupling  # noqa: F401  (fail loudly here if the extra is missing)
 import jax
 jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
@@ -338,7 +339,20 @@ res["nnll_multiset"] = (sorted(sorted(b) for b in auth.nnll_spec)
 # fixture nnll row order -> identical A2B (exact injection premise)
 mb, Rnl, Ylm = build_spec(1, 3, 10, wL=1.5)
 cpl = couple(mb_ref, Rnl, Ylm)
-res["a2b_exact"] = bool(np.array_equal(cpl.A2B, np.asarray(zf["A2B"], float)))
+# fixture A2B columns are in its aa_spec evaluation order; identify each by its
+# (n,l,m) body (ET main may enumerate a block's m-columns differently from 0.4.3)
+ar, ay = zf["aspec_r"], zf["aspec_y"]
+fsig = [tuple(sorted((Rnl[ar[i]][0], Rnl[ar[i]][1], Ylm[ay[i]][1]) for i in row))
+        for k in range(len(fmeta["aa_lens"])) for row in zf[f"aa_spec_{k+1}"]]
+col = {sg: j for j, sg in enumerate(fsig)}
+perm = np.array([col[tuple(sorted(sg))] for sg in cpl.aa_sig])
+res["col_perm_identity"] = bool((perm == np.arange(len(perm))).all())   # informational
+A2B_f = np.asarray(zf["A2B"], float)[:, perm]                # fixture columns in cpl's column order
+s = (cpl.A2B * A2B_f).sum(1) / (A2B_f * A2B_f).sum(1)        # ET main rescales B rows vs the 0.4.3 export
+res["a2b_rowscale"] = float(np.abs(cpl.A2B - s[:, None] * A2B_f).max())
+res["scale_range"] = [float(np.abs(s).min()), float(np.abs(s).max())]
+# descriptors are the B basis values (then the pair ones): the B part scales with s
+desc_ref = zf["test_desc"].T * np.concatenate([s, np.ones(zf["test_desc"].shape[0] - len(s))])[None, :]
 res["aspec_tuple"] = isinstance(cpl.aspec, tuple)     # same type as a cache hit
 res["shapes"] = {
     "A2B": list(m.A2B.shape), "WB": list(m.WB.shape), "Wpair": list(m.Wpair.shape),
@@ -366,7 +380,7 @@ m2 = dataclasses.replace(m,
     pair_grid=(float(psp["x0"]), float(psp["h"]), int(psp["n"])),
     a2b_sparse=True, radial_kind="analytic", pair_radial_kind="spline",
     pair_envelope_kind="poly1sr",
-    WB=jnp.asarray(zf["WB"]), Wpair=jnp.asarray(zf["Wpair"]),
+    WB=jnp.asarray(np.asarray(zf["WB"]) / s[:, None]), Wpair=jnp.asarray(zf["Wpair"]),
     E0=jnp.asarray(zf["E0"]), folded=False)
 # WB was replaced on a folded model: ctilde must be rebuilt (the stale-ctilde
 # trap fold_readout's docstring warns about -- the round-trip below hid it,
@@ -382,7 +396,7 @@ model, rmeta, rz = eio.load(out)
 
 res["arrays"] = {}
 for name, got, ref in (
-        ("A2B", model.A2B, zf["A2B"]), ("WB", model.WB, zf["WB"]),
+        ("A2B", model.A2B, s[:, None] * A2B_f), ("WB", model.WB, np.asarray(zf["WB"]) / s[:, None]),
         ("Wpair", model.Wpair, zf["Wpair"]), ("E0", model.E0, zf["E0"]),
         ("rnl_Wnlq", model.rnl_Wnlq, zf["rnl_Wnlq"]),
         ("pair_spline_coefs", model.pair_coefs, zf["pair_spline_coefs"]),
@@ -409,7 +423,7 @@ res["efv"] = {
     "F": float(np.abs(np.asarray(F) - zf["test_F"].T).max()),
     # ASE stress is -virial/volume; the fixture stores the Julia virial
     "S": float(np.abs(np.asarray(S) + Vj / vol).max()),
-    "desc": float(np.abs(d - zf["test_desc"].T).max()),
+    "desc": float(np.abs(d - desc_ref).max()),
 }
 
 # same tree, in memory (no file): eval_pair hand-off must match the round-trip
@@ -419,7 +433,7 @@ res["inmem"] = {
     "F": float(np.abs(np.asarray(atoms.get_forces()) - zf["test_F"].T).max()),
     "S": float(np.abs(np.asarray(atoms.get_stress(voigt=False)) + Vj / vol).max()),
     "desc": float(np.abs(np.asarray(atoms.calc.get_site_descriptors(atoms))
-                         - zf["test_desc"].T).max()),
+                         - desc_ref).max()),
 }
 print("RESULT", json.dumps(res))
 """
@@ -431,10 +445,7 @@ def test_bridge_wellformed_subprocess(tmp_path):
     """Authored model is structurally identical to the committed Julia fixture,
     and with the fixture's coefficients injected it reproduces Julia's
     energies, forces, stress and descriptors through the eval path."""
-    try:
-        import juliacall  # noqa: F401
-    except ImportError:
-        pytest.skip("authoring extra (juliacall) not installed")
+    require_coupling_lib()
     p = subprocess.run([sys.executable, "-c", _BRIDGE,
                         os.path.join(FIX, "si_ace_model.npz"),
                         str(tmp_path / "roundtrip.npz")],
@@ -442,7 +453,9 @@ def test_bridge_wellformed_subprocess(tmp_path):
     assert p.returncode == 0, f"bridge subprocess failed:\n{p.stderr[-2000:]}"
     line = [l for l in p.stdout.splitlines() if l.startswith("RESULT")][-1]
     r = json.loads(line[len("RESULT "):])
-    assert r["nnll_multiset"] and r["a2b_exact"] and r["aspec_tuple"]
+    assert r["nnll_multiset"] and r["aspec_tuple"]
+    assert r["a2b_rowscale"] < 1e-12, r["a2b_rowscale"]
+    assert 0.2 < r["scale_range"][0] <= r["scale_range"][1] <= 1.0 + 1e-12, r["scale_range"]
     assert r["shapes"]["A2B"] == [110, 230]
     assert r["shapes"]["WB"] == [110, 1] and r["shapes"]["Wpair"] == [10, 1]
     assert r["shapes"]["rnl_Wnlq"] == [1, 1, 37, 15]
@@ -460,7 +473,7 @@ def test_bridge_wellformed_subprocess(tmp_path):
 _NOJULIA = r"""
 import sys
 import numpy as np
-import juliacall  # noqa: F401  (fail loudly here if the extra is missing)
+import ace_jax_coupling  # noqa: F401  (fail loudly here if the extra is missing)
 import jax
 jax.config.update("jax_enable_x64", True)
 from ace_jax.construct.model import build_model
@@ -472,13 +485,10 @@ print("RESULT", float(np.asarray(auth.model.A2B).sum()), len(auth.meta["nnll"]))
 
 def test_coupling_cache_no_julia_on_hit(tmp_path):
     """Tier 2 point 2: run 1 populates the per-shape cache (Julia allowed);
-    run 2 repeats with ACEJAX_NO_JULIA=1, which makes the shim raise if Julia
-    is ever touched -- the build must be served entirely from cache and
+    run 2 repeats with ACEJAX_NO_JULIA=1, which makes the shim raise if the
+    coupling library is ever called -- the build must be served entirely from cache and
     produce the same A2B."""
-    try:
-        import juliacall  # noqa: F401
-    except ImportError:
-        pytest.skip("authoring extra (juliacall) not installed")
+    require_coupling_lib()
     p1 = subprocess.run([sys.executable, "-c", _NOJULIA, str(tmp_path)],
                         capture_output=True, text=True, timeout=1200)
     assert p1.returncode == 0, f"cache-populating run failed:\n{p1.stderr[-2000:]}"
