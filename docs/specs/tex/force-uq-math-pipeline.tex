@@ -39,8 +39,7 @@ the full mathematical pipeline, revision 2}
 \path{docs/specs/2026-09-30-conformal-force-sigma-design.md} (interfaces; needs updating for the
 new outputs in Section~\ref{sec:scale}) and \path{2026-09-28-tempered-ard-uq-design.md} (ARD and
 sandwich, merged in \#18). Notation: atoms $i$, Cartesian components $\alpha\in\{x,y,z\}$, training
-configurations $c\in T$, sandwich clusters $k\in\mathcal{K}$, Mondrian groups $g$. Open questions
-for review are marked in red; grey italic notes quote evidence measured with the previous version.
+configurations $c\in T$, sandwich clusters $k\in\mathcal{K}$, Mondrian groups $g$. Grey italic notes quote evidence measured with the previous version.
 
 \paragraph{Summary.} The served force uncertainty is still a shape times a per-group scale.
 \begin{itemize}[nosep]
@@ -65,7 +64,7 @@ Item & Change & Section \\
 A & Calibration shape from $P_{\mathrm{fit}}$; $m^2_{-\mathrm{own}}$ removed & \ref{sec:scores} \\
 B & Leverage-corrected (PRESS) cluster scores; exact deletion jackknife & \ref{sec:shape} \\
 B$'$ & Spatial sub-clustering of force rows in large cells & \ref{sec:clusters} \\
-2$'$ & Units are (configuration, group); configuration-weighted quantile; stratified split; configuration bootstrap; band edges from $\Tfit$ & \ref{sec:holdout}, \ref{sec:scale}, \ref{sec:groups} \\
+2$'$ & Units are (configuration, group); configuration-weighted quantile; stratified split; configuration bootstrap; band edges frozen at fit time & \ref{sec:holdout}, \ref{sec:scale}, \ref{sec:groups} \\
 3 & \code{calibrate}: per-group replace by default & \ref{sec:calsets} \\
 5 & \code{forces\_std} (rms) decoupled from \code{forces\_q} (conformal) & \ref{sec:scale} \\
 6 & Anisotropic $3\times3$ shape and Mahalanobis score; \code{forces\_cov} & \ref{sec:shape}, \ref{sec:scores} \\
@@ -126,17 +125,14 @@ fits only the $a_k$.
 
 \begin{enumerate}
 \item \textbf{Stratified split by configuration.} Compute the Mondrian group of every training atom
-(Section~\ref{sec:groups}). Assign each configuration $c$ the stratum
+(Section~\ref{sec:groups}), with the band edges computed from all of $T$. Assign each configuration $c$ the stratum
 $\varsigma(c)$, the \emph{most extreme} group it populates: the highest distortion band, with ties
 broken in favour of $z\ne z^\star$. Within each stratum, randomly assign a fraction $f=0.2$ of
 configurations to $\Tval$ and the rest to $\Tfit$, rounding so that every stratum with at least two
 configurations has at least one on each side. Strata with fewer than two configurations are merged
 into the next less extreme stratum. A crack cell is therefore split as a crack cell, even though
 most of its atoms are bulk-like.
-\open{The groups need band edges, but Section~\ref{sec:groups} defines the edges on $\Tfit$, which
-the split has not produced yet. Proposed: compute \emph{provisional} edges from all of $T$, used only
-to assign strata. Then compute the stored edges from $\Tfit$ once the split exists. The calibration
-pool's own atoms would then influence the stratification but not the partition that is served.}
+
 
 \item \textbf{Hold-out posterior.} Fit $h$ on $\Tfit$, giving $P_{\mathrm{fit}}$ with mean
 $\cfit$, factor $L_{\mathrm{fit}}$ and the shape factor $\Qt_{\mathrm{fit}}$ (Section~\ref{sec:shape},
@@ -177,12 +173,12 @@ fractional coordinates, respecting periodicity.
 $r_{\mathrm{cut}}$, so the minimum sensible size is $\ell=2r_{\mathrm{cut}}$. The default is
 $\ell=3r_{\mathrm{cut}}$. $\ell$ is validated by the plateau check of Section~\ref{sec:validation}:
 increase $\ell$ until $v(x)$ and the $\lambda_g$ stop changing. This is standard practice for
-cluster-robust variances \cite{cameron2015}.
+cluster-robust variances \cite{cameron2015}. Sub-clustering acts only on the sandwich, which is built
+from $T$: with $\ell=3r_{\mathrm{cut}}=18.75$\,\AA\ every bench365 training configuration is small, and
+large cells that appear only in a calibration set $U$ never enter the sandwich. The feature matters
+once large cells are in training, which is the fracture use case, and is validated in that setting.
 
-\open{With $\ell=3r_{\mathrm{cut}}=18.75$\,\AA, every bench365 \emph{training} configuration is small,
-so sub-clustering changes nothing on the present benchmark until large cells enter training or
-calibration. That is the fracture use case. Should the block-size plateau (validation item~3) be run
-with crack cells added to training, so that it tests something?}
+
 
 \paragraph{Two kinds of unit.} Sandwich clusters are an ingredient of the shape only. The hold-out
 split, the conformal quantiles and the bootstrap all operate on whole configurations
@@ -293,16 +289,19 @@ reading of \code{forces\_std} does. The mode is chosen at fit time (\code{-{}-fo
 default \code{iso} until the ablation of Section~\ref{sec:validation} is in), and every scale in
 Section~\ref{sec:scale} is computed in that mode.
 
-\paragraph{Transfer assumption.} The scores are computed from a model trained on about $(1-f)|T|$
-configurations, but the scale is applied to the shape of the model trained on all of $T$. This
-assumes that the ratio of squared error to shape is the same for both models. Error and shape both
-shrink as data are added, so this is a weak assumption. It is checked by repeating the protocol at
-$f\in\{0.1,0.2,0.3\}$ (Section~\ref{sec:validation}). It replaces the mixed construction of the previous
-version, which paired errors from $\cfit$ with $m^2_{-\mathrm{own}}$ from the full fit.
+\paragraph{Transfer assumption.} The scores come from a model trained on about $(1-f)|T|$
+configurations; the scale is applied to the shape of the model trained on $T$. The shape is a
+parameter variance, scaling roughly as $1/N$, whereas the error is dominated by approximation
+error ($\lambda^2\approx39$ on bench365). The ratio of squared error to shape is therefore
+unchanged only if the error is variance-dominated; if it is bias-dominated, $\lambda^2$ grows
+roughly in proportion to $N$, and the hold-out scale underestimates the served one by up to
+$(1-f)^{-1/2}$. This is an empirical assumption. It is checked by repeating the protocol at
+$f\in\{0.1,0.2,0.3\}$. If $\lambda_g$ trends with $N_{\mathrm{fit}}$ by more than a few per
+cent, fit $\log\lambda_g$ against $\log N_{\mathrm{fit}}$ and extrapolate to $N=|T|$.
 
-\prev{the mixed construction transferred to within $2.7\%$ of the corrected scale: $\lambda=6.27$
-with the own cluster left out, against $6.11$ with it. A test-set refit of the scale changed it by
-$\times0.968$.}
+\prev{a test-set refit of the scale changed it by $\times0.968$, i.e.\ the served $\sigma$ was very
+slightly conservative, not the up-to-$\times1.12$ underestimate the bias-dominated limit allows at
+$f=0.2$. (The own-cluster correction, $\lambda=6.27$ against $6.11$, moved it by $2.7\%$.)}
 
 %======================================================================
 \section{The scale (revised)}\label{sec:scale}
@@ -355,13 +354,18 @@ the finite-sample correction is at the level of $\ncfg$.
 \paragraph{Merging.} Groups with $\ncfg<\nmin$ (default 20) are merged with their neighbouring
 distortion band within the same $[z=z^\star]$ flag, and then across the flag. The merges are reported.
 
-\paragraph{Reported per group.} $\ncfg$, total atoms, $\lambda_g^{\mathrm{rms}}$, $q_g$, the pool used
-(Section~\ref{sec:calsets}), and the Gaussianity diagnostic
+\paragraph{Reported per group, and per atom.} Each atom is served its group id, \code{forces\_group}.
+The per-group table stored with the model holds $\ncfg$ (split into configurations from $\Tval$ and
+from $U$, Section~\ref{sec:calsets}), total atoms, $\lambda_g^{\mathrm{rms}}$, $q_g$, the merges, and the
+Gaussianity diagnostic
 \begin{equation}
 r_g=\frac{q_g}{\lambda_g^{\mathrm{rms}}\,\chiinv}.
 \end{equation}
 $r_g\approx1$ means that reading \code{forces\_std} as a Gaussian reproduces the conformal coverage
-in that group. $r_g>1$ means the score distribution has heavier tails than $\chi_3$.
+in that group. $r_g>1$ means the score distribution has heavier tails than $\chi_3$; within the group,
+\code{forces\_q} is $r_g$ times the radius implied by \code{forces\_std} read as a Gaussian. $r_g$ is
+constant within a group, so it is not served per atom: \code{forces\_group} joins each atom to it,
+and to $\ncfg$, the pool composition and the merges.
 
 \prev{in distribution, with one group, the conformal 90\% quantile of the isotropic score was
 $q=2.48$, against $\lambda\,\chi_3^{-1}(0.9)=2.50$ for the rms scale, i.e.\ $r\approx0.99$.}
@@ -370,9 +374,7 @@ $q=2.48$, against $\lambda\,\chi_3^{-1}(0.9)=2.50$ for the rms scale, i.e.\ $r\a
 ordering by $\sigma$ within a group. Across groups, the relative $\sigma$ changes by
 $\lambda^{\mathrm{rms}}_g/\lambda^{\mathrm{rms}}_{g'}$ and the relative radius by $q_g/q_{g'}$.
 
-\open{\code{forces\_std} is calibrated per group by the rms, and \code{forces\_q} by the quantile.
-So inside one group \code{forces\_q} is $r_g$ times the radius implied by \code{forces\_std} read
-as a Gaussian, $\lambda_g^{\mathrm{rms}}\chiinv\sqrt{v/3}$. Should $r_{g(x)}$ also be served per atom, so users can see the tail factor directly?}
+
 
 %======================================================================
 \section{The group feature (Mondrian; band edges revised)}\label{sec:groups}
@@ -385,9 +387,12 @@ z_i=\#\{j:r_{ij}<r_1\},\qquad
 d_i=\frac{\operatorname{std}\{r_{ij}:r_{ij}<r_1\}}{\operatorname{mean}\{r_{ij}:r_{ij}<r_1\}}
 \quad(\text{NaN if }z_i<2).
 \end{equation}
-The band edges are now the p50, p90 and p99 quantiles of $d$ over the atoms of $\Tfit$, not over the
-calibration pool. The partition therefore does not depend on the calibration data, and
-\code{calibrate} never changes which group an atom is in. The group is
+The band edges are the p50, p90 and p99 quantiles of $d$ over all atoms of $T$. The same edges
+stratify the hold-out split (Section~\ref{sec:holdout}) and are stored with the model. They depend
+only on geometry, never on labels or scores, so letting $\Tval$'s geometry into three quantiles over
+thousands of atoms has a negligible effect on exchangeability, and the p99 edge is estimated from
+25\% more atoms. What matters is that the edges are frozen at fit time: \code{calibrate} never changes
+which group an atom is in. The group is
 $g=\operatorname{band}(d)\times[z=z^\star]$, so $G=8$ before merging.
 
 \prev{on the big cells, miscoverage tracked distortion ($\sigma$ grew $\times1.7$ from low to high
@@ -409,17 +414,17 @@ replace}, the default);
 \item otherwise the pool is $\Tval\cup U$, with configuration weights as in Section~\ref{sec:scale}.
 \end{itemize}
 \code{-{}-append} forces $\Tval\cup U$ in every group, and \code{-{}-replace} forces $U$ alone in every
-group (merging as needed). $\lambda_g^{\mathrm{rms}}$ and $q_g$ are recomputed, and the pool used in
-each group is reported.
+group (merging as needed). $\lambda_g^{\mathrm{rms}}$ and $q_g$ are recomputed. Each group reports its
+pool composition: the number of configurations from $\Tval$ and from $U$. With equal configuration
+weights these counts give the pool's exact makeup. Mixed groups are where the transfer assumption
+(Section~\ref{sec:scores}) matters most, since $\Tval$ scores come from $P_{\mathrm{fit}}$ and $U$ scores
+from the served model.
 
 \paragraph{Rationale.} A target atom resembling $U$ should be calibrated against $U$. Mixing in
 $\Tval$ scores from easier atoms of the same group dilutes the quantile and gives the coverage of a
 mixture.
 
-\open{$U$'s scores pair the \emph{served} model's errors with the \emph{served} shape, while $\Tval$'s
-pair $P_{\mathrm{fit}}$'s errors with $P_{\mathrm{fit}}$'s shape. Mixing them in one group relies on
-the same transfer assumption (Section~\ref{sec:scores}) in the other direction. That seems fine, but
-should the per-group report say which pool type each group's $q_g$ comes from?}
+
 
 \prev{leaving out one realisation at a time over 10 crack realisations (30 cells), with $\Tval\cup U$
 pooled: whole crack cell $0.899$, crack tip $0.885$ (fold range $0.864$--$0.900$), dislocations
@@ -464,7 +469,7 @@ about 12.5k.}
 \section{End-to-end summary}
 
 \begin{description}[style=nextline,leftmargin=1.2em]
-\item[fit] Data $\to$ group features (fixing $r_1$, $z^\star$ and band edges from $\Tfit$) $\to$
+\item[fit] Data $\to$ group features (fixing $r_1$, $z^\star$ and band edges from $T$) $\to$
 stratified split $\to$ type-II ML on $\Tfit$ $\to$ $P_{\mathrm{fit}}$ $\to$ clusters, PRESS scores,
 centred $\Qt_{\mathrm{fit}}$ $\to$ $V_{\mathrm{fit}}(x_i)$ and errors $e_i$ on $\Tval$ $\to$ scores
 $s_i$ $\to$ refit on $T$ $\to$ $P$, clusters, PRESS scores, centred $\Qt$ $\to$ stored factor $R$ $\to$
@@ -472,8 +477,8 @@ per-group $\lambda^{\mathrm{rms}}_g$ and $q_g$ (configuration-weighted, merged b
 \item[calibrate] Labelled target set $U$ $\to$ scores with the served model and shape $\to$ per-group
 replace (or append) $\to$ recompute $\lambda^{\mathrm{rms}}_g$ and $q_g$.
 \item[serve] Shape $V(x)$ from the projections $R^\T u_\alpha(x)$ $\to$\\ \code{forces\_std},
-\code{forces\_cov},
-\code{forces\_q} (and \code{forces\_q\_mahal} in anisotropic mode).
+\code{forces\_cov}, \code{forces\_q} (and \code{forces\_q\_mahal} in anisotropic mode) and
+\code{forces\_group}; the per-group table is stored with the model.
 \item[diagnose] An unlabelled target $\to$ descriptor PCA $\to$ $w(x)$ $\to$ weighted quantile $\to$
 \code{support\_ok}, \code{support\_q}, $n_{\mathrm{eff}}$.
 \end{description}
@@ -487,9 +492,12 @@ and check \eqref{eq:dfbeta} to machine precision. Do this for a whole-configurat
 block, and an energy/virial cluster.
 \item \textbf{Leverage report.} Report $\lambda_{\max}(H_{kk})$ per cluster, and whether the high-leverage
 clusters are the crack-like ones.
-\item \textbf{Block size.} On bench365, compute $v(x)$ and $\lambda_g$ against $\ell/r_{\mathrm{cut}}\in
-\{2,3,4,6,\infty\}$, where $\infty$ means whole configurations. The default is the smallest $\ell$ on the
-plateau.
+\item \textbf{Block size, with crack cells in training.} In each leave-one-realisation fold, put the
+other nine realisations' crack cells into $T$, refit, and sweep $\ell/r_{\mathrm{cut}}\in\{2,3,4,6,\infty\}$
+($\infty$ = whole configurations), recording $v(x)$ and the $\lambda_g$. The default is the smallest
+$\ell$ on the plateau. The same run compares tip coverage with tip-like data in \emph{training} (which
+changes the shape) against tip-like data only in \emph{calibration} (which changes only the scale);
+both are reported.
 \item \textbf{Transfer.} Compute the $\lambda_g^{\mathrm{rms}}$ and $q_g$ at $f\in\{0.1,0.2,0.3\}$.
 \item \textbf{Ablation on bench365} (10-realisation leave-one-out as before), for each of:
   \begin{itemize}[nosep]
@@ -502,7 +510,7 @@ plateau.
 Measure:
   \begin{itemize}[nosep]
   \item Spearman $\rho(\sigma,|e|)$;
-  \item the global $\lambda^{\mathrm{rms}}$ (does $\lambda\approx1$ survive?);
+  \item the global $\lambda^{\mathrm{rms}}$ for each variant;
   \item per-group coverage, configuration- and atom-weighted, with configuration-bootstrap 90\%
   intervals ($B=1000$);
   \item crack-tip coverage;
@@ -510,11 +518,7 @@ Measure:
   \end{itemize}
 \end{enumerate}
 
-\open{Item~5 asks whether ``$\lambda\approx1$ survives''. In the 30 September pipeline the scale itself
-was $\lambda=6.27$ ($\lambda^2\approx39$, since the in-sample residuals sit at the noise level). What
-was $\approx1$ was the factor by which a test-set refit would change it, $0.968$. Which quantity is
-meant? With PRESS residuals I would expect $\lambda$ to stay well above~1: the per-row leverages are
-small (median $0.02$), so the out-of-sample residuals are close to the in-sample ones.}
+
 
 %======================================================================
 \section{Assumptions and known limitations}\label{sec:limits}
@@ -522,8 +526,13 @@ small (median $0.02$), so the out-of-sample residuals are close to the in-sample
 \begin{enumerate}
 \item \textbf{Exchangeability at configuration level, within a group.} The coverage statement is
 approximate, with error controlled by $\ncfg$. $\ncfg$ and the merges are reported.
-\item \textbf{Transfer} from the hold-out model to the served model (Section~\ref{sec:scores}). This is
-checked, not assumed silently.
+\item \textbf{Transfer} from the hold-out model to the served model (Section~\ref{sec:scores}). This is an
+empirical assumption, exact only if the error is variance-dominated. It is checked across $f$, and
+extrapolated in $N_{\mathrm{fit}}$ if it trends.
+\item \textbf{The shape is a parameter variance used as a proxy for where approximation error is large.}
+$v(x)$ measures how much the prediction at $x$ depends on which clusters were in the fit, not the
+approximation error itself. The Spearman $\rho=0.30$--$0.37$ measures only how well the one ranks the
+other.
 \item \textbf{Independence of sandwich clusters.} Spatial blocks assume that errors are uncorrelated
 across block boundaries beyond about $2r_{\mathrm{cut}}$. The block-size plateau tests this.
 \item \textbf{Hyperparameters fixed in the jackknife.} The deletion jackknife holds $h$ fixed, so the
