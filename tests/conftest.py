@@ -277,3 +277,38 @@ def built_cli_run(tmp_path_factory):
         main(["fit", "--order", "3", "--max-degree", "10", "--coupling-cache-dir", cache,
               "--train", str(xyz), "--out", str(root / "a"), *CLI_FAST])
     return SimpleNamespace(out=root / "a", xyz=xyz, cache=cache, stdout=buf.getvalue())
+
+
+def shard_files(files, durations, i, n):
+    """The files of shard i (1-based) of n: whole files, by longest-processing-time-first
+    over their summed recorded durations (a file not yet recorded weighs the median file).
+    Splitting per TEST scattered a module across shards, and each shard then repaid its
+    module fixtures and first compiles, so the shards came out far from the balance the
+    recorded per-test durations predicted (1238 / 773 / 900 s against 1030 each)."""
+    import statistics
+    w = {}
+    for k, v in durations.items():
+        f = k.split("::")[0]
+        if f in files:
+            w[f] = w.get(f, 0.0) + v
+    fill = statistics.median(w.values()) if w else 1.0
+    load, out = [0.0] * n, [[] for _ in range(n)]
+    for f in sorted(files, key=lambda f: (-w.get(f, fill), f)):
+        j = min(range(n), key=lambda j: (load[j], j))
+        load[j] += w.get(f, fill); out[j].append(f)
+    return sorted(out[i - 1])
+
+
+def pytest_collection_modifyitems(config, items):
+    """ACEJAX_SHARD=i/n keeps only shard i's files (shard_files over .test_durations)."""
+    shard = os.environ.get("ACEJAX_SHARD")
+    if not shard:
+        return
+    import json
+    i, n = (int(x) for x in shard.split("/"))
+    path = ROOT / ".test_durations"
+    durations = json.loads(path.read_text()) if path.exists() else {}
+    keep = set(shard_files(sorted({it.nodeid.split("::")[0] for it in items}), durations, i, n))
+    selected = [it for it in items if it.nodeid.split("::")[0] in keep]
+    config.hook.pytest_deselected(items=[it for it in items if it.nodeid.split("::")[0] not in keep])
+    items[:] = selected
