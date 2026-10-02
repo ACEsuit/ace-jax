@@ -21,7 +21,7 @@ from scaling.plot import (ACEJAX, CODES, MODES, aggregate, before_after_hosts,  
 
 HERE = pathlib.Path(__file__).resolve().parent
 MICRO = HERE.parent / "perf" / "results"
-HOST_ORDER = ("modal-a100", "moriarty-gpu", "moriarty-cpu")
+HOST_ORDER = ("modal-a100", "sulis-a100", "moriarty-gpu", "moriarty-cpu")
 SYSTEMS, SIZES = ("SiGe", "Cantor"), ("small", "medium", "large")
 
 # the spec's success criteria (docs/dev/perf-optimisation-spec.md): Cantor medium,
