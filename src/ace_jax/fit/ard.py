@@ -658,8 +658,8 @@ def run_ard_stage(cfg, data, built, theta, log=print, full_stats=None):
     ell = cfg.ard_cluster_size * float(prob.cfg.rcut)
 
     # 2. P_fit and its own shape
-    ds_fit = build_dataset(fit_, data.meta, data.E0, cfg.batch)
-    ds_val = build_dataset(val, data.meta, data.E0, cfg.batch)
+    ds_fit = build_dataset(fit_, data.meta, data.E0, cfg.batch, pack=cfg.pack_mode, log=log)
+    ds_val = build_dataset(val, data.meta, data.E0, cfg.batch, pack=cfg.pack_mode, log=log)
     ev = ARDEvidence(ard_statistics(theta, prob, ds_fit, mode), np.asarray(prob.gamma), body_col)
     names = (["log_sigma_E", "log_sigma_F", "log_sigma_V"] if ev.joint else []) + [f"a_{g}body" for g in ev.groups]
     h_fit, v_fit, info_fit = fit_ard(ev, ev.h0(theta), cond_max)

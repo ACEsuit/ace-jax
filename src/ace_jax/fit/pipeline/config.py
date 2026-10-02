@@ -11,6 +11,7 @@ class FitConfig:
     energy_key: str = "energy"; force_key: str = "forces"; virial_key: str = "virial"
     ntrain: int = 800; ntest: int = 200; test_start: int | None = None
     seed: int = 0; batch: int = 4
+    batch_pack: str = "auto"             # "auto" | "on" | "off": size-aware batching (fit.data.build_dataset)
     weights: dict | None = None          # ACEfit weights dict (per config type)
     factors: list | None = None          # ace_jax.fit.weights factor instances
     sigma_type: bool = False             # per-config-type noise block (diagnostic)
@@ -75,7 +76,16 @@ class FitConfig:
     pops_val_frac: float = 0.2; pops_env_nf: int = 2000
     pops_rows: str = "auto"              # "auto" | "host" (rows cached in host RAM) | "device" (re-evaluated)
 
+    @property
+    def pack_mode(self):
+        """The build_dataset `pack` the pipeline uses: batch_pack, except that "auto" is "off" under the
+        LOO objective, whose per-config (R, R) leverage blocks (R = 1 + 3 n_max + 6) are vmapped over a
+        batch's C slots, so the larger C_eff of a packed layout would multiply that memory."""
+        return "off" if (self.batch_pack == "auto" and self.objective == "loo") else self.batch_pack
+
     def validate(self):
+        if self.batch_pack not in ("auto", "on", "off"):
+            raise ValueError(f"batch_pack must be 'auto', 'on' or 'off', got {self.batch_pack!r}")
         if self.arm not in ("linear", "gp"):
             raise ValueError(f"arm must be 'linear' or 'gp', got {self.arm!r}")
         if self.uq == "pops" and self.arm != "linear":

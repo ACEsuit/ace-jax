@@ -171,12 +171,69 @@ def _batch(configs, meta, E0, rcut, C, n_cap, k_cap):
         cfg_type=ctype, node_type=pad(node_ty, pn, 0))
 
 
+PACK_MAX_CONFIGS = 256      # cap on configs per packed group (see _pack_groups)
+PACK_MIN_SAVED = 4096       # auto packs only when it saves at least this many padded nodes
+
+
+def _round_up(n, k):
+    return -(-int(n) // k) * k
+
+
+def _pack_groups(sizes, A, C):
+    """Order-preserving greedy packing: walk the configs in order and start a new group when the
+    next one would push the group past A atoms or the group already holds Cmax configs.
+    Cmax = max(C, A // smallest) bounded by PACK_MAX_CONFIGS: enough slots that the atom budget,
+    not the slot count, closes a group of small configs, while the per-config arrays and E/V design
+    rows of a batch (7 C rows) stay small next to its 3 A force rows.  Returns index lists."""
+    cmax = min(PACK_MAX_CONFIGS, max(int(C), A // max(1, min(sizes))))
+    groups, cur, tot = [], [], 0
+    for i, n in enumerate(sizes):
+        if cur and (tot + n > A or len(cur) >= cmax):
+            groups.append(cur); cur, tot = [], 0
+        cur.append(i); tot += n
+    if cur:
+        groups.append(cur)
+    return groups
+
+
 def build_dataset(configs, meta, E0, configs_per_batch, rcut=None, n_cap=None, k_cap=None,
-                  node_chunk=32):
+                  node_chunk=32, pack=None, log=print):
+    """Padded, stacked batches of `configs`, in their given order.
+
+    pack: None/"auto" (default), True/"on", False/"off".  Off: consecutive groups of
+    configs_per_batch configs, every batch padded to one n_cap (the largest group).  On: the
+    order-preserving atom-budget packing of `_pack_groups`, budget A = the largest config rounded
+    up to node_chunk (or an explicit n_cap), so a set of bulk cells plus a few big cells does not
+    pad every batch to C x the big cell.  The batch config axis is then C_eff = the longest group,
+    which can differ from configs_per_batch: consumers read C from the Dataset (ds.y_E.shape[1]).
+    Padded configs and nodes keep the usual conventions (cfg_mask False, node_cfg == C_eff).
+    Auto packs only when the fixed layout pads badly -- more than 2x the nodes the packed layout
+    needs, and by at least PACK_MIN_SAVED nodes -- and never with an explicit n_cap; otherwise
+    it is the fixed layout byte for byte.  log: one line when packing is used."""
     rcut = float(meta["rcut"] if rcut is None else rcut)
     E0 = np.asarray(E0, float)
     C = int(configs_per_batch)
+    mode = {None: "auto", "auto": "auto", True: "on", "on": "on", False: "off", "off": "off"}.get(
+        pack if isinstance(pack, (str, bool)) or pack is None else object())
+    if mode is None:
+        raise ValueError(f"build_dataset: pack must be None/'auto', True/'on' or False/'off', got {pack!r}")
     groups = [configs[i:i + C] for i in range(0, len(configs), C)]
+    packed = None
+    if mode != "off" and configs and not (mode == "auto" and n_cap is not None):
+        sizes = [len(c.numbers) for c in configs]
+        A = _round_up(max(sizes) if n_cap is None else n_cap, node_chunk)
+        if max(sizes) > A:
+            raise ValueError(f"build_dataset: n_cap = {n_cap} is below the largest config ({max(sizes)} atoms)")
+        idx = _pack_groups(sizes, A, C)
+        fixed = len(groups) * _round_up(max(sum(len(c.numbers) for c in g) for g in groups), node_chunk)
+        new = len(idx) * A
+        if mode == "on" or (fixed > 2 * new and fixed - new >= PACK_MIN_SAVED):
+            packed = [[configs[i] for i in g] for g in idx]
+            C_eff = max(len(g) for g in idx)
+            log(f"build_dataset: size-aware packing, atom budget A = {A}, C_eff = {C_eff} "
+                f"(configs_per_batch {C}), batches {len(groups)} -> {len(idx)}, padded nodes "
+                f"{fixed} -> {new} ({new / sum(sizes):.2f}x the {sum(sizes)} atoms)")
+            groups, C, n_cap = packed, C_eff, A
     if n_cap is None:
         n_cap = max(sum(len(c.numbers) for c in g) for g in groups)
     n_cap = -(-n_cap // node_chunk) * node_chunk          # Task 7 scans node chunks

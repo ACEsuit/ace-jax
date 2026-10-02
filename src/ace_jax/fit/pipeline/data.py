@@ -161,9 +161,10 @@ def load_fit_data(cfg, *, data=None, train=None, test=None, ood=None, log=print)
         E0 = np.asarray(z["E0"])
     else:
         raise ValueError(f"e0 must be 'lsq' or 'model', got {cfg.e0!r}")
-    ds_train = build_dataset(tr, meta, E0, cfg.batch)
-    ds_test = build_dataset(te, meta, E0, cfg.batch)
-    ds_ood = build_dataset(od, meta, E0, cfg.batch) if od else None
+    pk = dict(pack=cfg.pack_mode, log=log)
+    ds_train = build_dataset(tr, meta, E0, cfg.batch, **pk)
+    ds_test = build_dataset(te, meta, E0, cfg.batch, **pk)
+    ds_ood = build_dataset(od, meta, E0, cfg.batch, **pk) if od else None
     return FitData(tr, te, od, train_o, test_o, ood_o, base_train, base_test, base_ood,
                    np.asarray(E0), ds_train, ds_test, ds_ood, model, meta, z, perm,
                    r0=basis_r0(meta), source=label, basis=basis)

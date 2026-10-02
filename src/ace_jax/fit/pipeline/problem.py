@@ -25,7 +25,7 @@ def build_problem(cfg, d):
         raise ValueError("r0 is not set and the model carries no basis r0: pass r0 (--r0)")
     els = [int(e) for e in meta["elements"]]
     gpcfg = GPConfig(r0=r0, rcut=float(meta["rcut"]), n_B=meta["n_B"], n_pair=meta["n_pair"],
-                     NZ=len(els), C=cfg.batch)
+                     NZ=len(els), C=int(d.ds_train.y_E.shape[1]))   # the Dataset's C (packing can change it)
     with highest_precision():
         X, S = site_features(d.model, gpcfg, d.ds_train)
         scale = descriptor_scale(X, d.ds_train.node_mask)

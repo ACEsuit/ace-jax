@@ -39,8 +39,8 @@ def _pops_setup(cfg, d, b, stats, theta, log):
     prob, out = b.prob, {}
     if cfg.pops_ridge == "auto":
         nval = max(1, int(cfg.pops_val_frac * len(d.train)))
-        ds_fit = build_dataset(d.train[:-nval], d.meta, d.E0, cfg.batch)
-        ds_val = build_dataset(d.train[-nval:], d.meta, d.E0, cfg.batch)
+        ds_fit = build_dataset(d.train[:-nval], d.meta, d.E0, cfg.batch, pack=cfg.pack_mode, log=log)
+        ds_val = build_dataset(d.train[-nval:], d.meta, d.E0, cfg.batch, pack=cfg.pack_mode, log=log)
         ridge, scores = select_pops_ridge(theta, prob, ds_fit, ds_val, list(cfg.pops_ridge_grid),
                                           form=cfg.pops_posterior, leverage_pct=cfg.pops_leverage_pct, rows=cfg.pops_rows)
         out["ridge_scores"] = {"grid": list(cfg.pops_ridge_grid), "ridge": ridge, "n_val": nval,

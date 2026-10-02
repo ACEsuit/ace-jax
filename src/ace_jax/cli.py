@@ -38,6 +38,10 @@ def _add_fit_args(p):
                    help="per-species E0: the model's (default) or least squares on the training energies")
     p.add_argument("--baseline", default=None, help="dimer_mean.npz: fit the residual to this pair mean")
     p.add_argument("--configs-per-batch", type=int, default=8)
+    p.add_argument("--batch-pack", choices=["auto", "on", "off"], default="auto",
+                   help="size-aware batching: pack configs into batches by an atom budget (the largest "
+                        "config) instead of fixed groups of --configs-per-batch; auto = only when the "
+                        "fixed layout would pad badly (mixed bulk + big cells)")
     p.add_argument("--m-per-species", type=int, default=500)
     p.add_argument("--kernel", default="cosine", choices=["cosine", "matern32"])
     p.add_argument("--no-bump", action="store_true")
@@ -125,7 +129,8 @@ def _fit_config(a):
         model=a.model if a.model is not None else _basis_spec(a, embedding=a.basis_embedding),
         arm="gp" if a.m_per_species > 0 else "linear", energy_key=a.energy_key,
         force_key=a.force_key, virial_key=a.virial_key, ntrain=a.ntrain, ntest=a.ntest,
-        test_start=a.test_start, seed=a.seed, batch=a.configs_per_batch, weights=weights, factors=factors,
+        test_start=a.test_start, seed=a.seed, batch=a.configs_per_batch,
+        batch_pack=a.batch_pack, weights=weights, factors=factors,
         baseline=a.baseline, e0=a.e0, m_per_species=a.m_per_species, kernel=a.kernel, bump=not a.no_bump,
         density=a.density, pca_d=a.pca_d, embedding=a.embedding, r0=a.r0, objective=a.objective,
         lml=a.lml, devices=a.devices, opt=a.opt, map_steps=a.map_steps, map_restarts=a.map_restarts,

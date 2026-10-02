@@ -325,6 +325,9 @@ Other entry points:
   per-batch kernel tensors.
   - Lower `--configs-per-batch` (default 8) or M.
   - Or use `--lml host-cache`.
+  - Mixed bulk + big cells: `--batch-pack auto` (default) packs batches by an
+    atom budget (the largest config) instead of padding every batch to
+    C x the biggest cell; `on` forces it, `off` keeps fixed groups of C.
 - **POPS.** `--uq pops` changes only the uncertainty. The mean is pinned to the
   BLR mean, and the ridge is selected per quantity by CRPS on a training
   hold-out (`--pops-ridge auto`; `blr` or a number fixes it).
