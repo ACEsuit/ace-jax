@@ -63,9 +63,54 @@ def e1x_structures(source):
     return out
 
 
+E2_VACUA_LABELLED = tuple(v for v in T.E2_VACUA if v >= 6.0)    # 4 A fails the gap check unlabelled
+
+
+def e2_labels():
+    """Tutorial 6: every grid slab (layers x vacuum >= 6 A) and the bulk reference; the repair
+    thicknesses (4, 6 layers) are on the grid; their displaced copies; and the labeller's own
+    relaxed truth for every grid slab (BFGS, fmax 0.03, 200 steps), keyed by the unrelaxed slab."""
+    from ase.optimize import BFGS
+    grid = [x for L_ in T.E2_LAYERS for v in E2_VACUA_LABELLED for x in T.e2_slabs(L_, v)]
+    disp = [x for r in (4, 6) for v in E2_VACUA_LABELLED for x in T.e2_displaced(T.e2_slabs(r, v))]
+    _write(HERE / "e2" / "labels-mpa-0.xyz", [T.c_structures()["bulk"], *grid, *disp], "mpa-0")
+    calc, out, t = L._mace_calculator("mpa-0"), [], time.time()
+    for s in grid:
+        a = s.copy(); a.calc = calc
+        BFGS(a, logfile=None).run(fmax=0.03, steps=200)
+        r = a.copy(); r.calc = None
+        r.info = {"from_key": L.structure_key(s), "energy": float(a.get_potential_energy()),
+                  "label_model": "mpa-0", "miller": s.info["miller"], "config_type": "slab-relaxed"}
+        out.append(r)
+    from ase.io import write
+    write(str(HERE / "e2" / "relaxed-mpa-0.xyz"), out, format="extxyz")
+    print(f"e2/relaxed-mpa-0.xyz: {len(out)} relaxed slabs, {time.time() - t:.0f} s", flush=True)
+
+
+def e3_labels(seed=0):
+    """Tutorial 7: the canonical campaign (seed 0; drivers random, novelty, uncertainty; 2 rounds
+    x 4 picks), run offline with live labels. Ships every round's MD pool (info driver, round)
+    and the labels of every pool frame, so the notebook's selection always hits the cache."""
+    from ace_jax.tutorials import campaign as C
+    from ace_jax.tutorials.curation import CAMPAIGN, run_campaign
+    calc = L._mace_calculator("mpa-0")
+    pools, t = [], time.time()
+    for driver in CAMPAIGN["drivers"]:
+        hist = run_campaign(driver, labeller=lambda xs: L.label(xs, model="mpa-0", calculator=calc),
+                            work=HERE / "_e3_work", seed=seed)
+        for r, pool in enumerate(hist["pools"]):
+            for i, f in enumerate(pool):
+                f = f.copy(); f.info.update(driver=driver, round=r, index=i); pools.append(f)
+        print(f"e3 {driver}: errors {[round(h['err'], 6) for h in hist['history']]}", flush=True)
+    from ase.io import write
+    write(str(HERE / "e3" / "pools.xyz"), pools, format="extxyz")
+    _write(HERE / "e3" / "labels-mpa-0.xyz", pools, "mpa-0")
+    print(f"e3: {len(pools)} pool frames, {time.time() - t:.0f} s", flush=True)
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    p.add_argument("what", choices=["a0", "all", "e1", "e1x", "c"])
+    p.add_argument("what", choices=["a0", "all", "e1", "e1x", "c", "e2", "e3", "d"])
     p.add_argument("--e1x-source", default=None, help="the school's e1x-bulk-reference.xyz")
     a = p.parse_args()
     if a.what == "a0":
@@ -84,6 +129,15 @@ def main():
         c = T.c_structures()
         for m in ("mpa-0", "mp-0b3"):
             _write(HERE / "c" / f"labels-{m}.xyz", [c["bulk"], c["slab111"], *c["recipe"]], m)
+    if a.what in ("all", "e2"):
+        e2_labels()
+    if a.what in ("all", "e3"):
+        e3_labels()
+    if a.what in ("all", "d"):
+        sysm = T.d_system()
+        grid = [x for s in T.D_STRAINS for r in T.D_RATTLES for n in T.D_NTRAIN for x in T.d_training(sysm, s, r, n)]
+        _write(HERE / "d" / "labels-mpa-0.xyz",
+               [*T.d_isolated(("As", "Ga")), *T.d_targets(sysm), *grid, *T.d_repair(sysm)], "mpa-0")
 
 
 if __name__ == "__main__":

@@ -146,9 +146,11 @@ def e3_md_starts():
 
 
 # --- D: bring your own data -------------------------------------------------------------
-D_STRAINS = (0.02, 0.04, 0.06, 0.08, 0.10, 0.12)
-D_RATTLES = (0.0, 0.03, 0.06, 0.09)
-D_NTRAIN = (10, 20, 40, 64)
+# D's sliders snap to these (the school's defaults 0.06 / 0.03 / 40 are on the grid); 27 settings,
+# about 1100 labelled GaAs cells
+D_STRAINS = (0.02, 0.06, 0.10)
+D_RATTLES = (0.0, 0.03, 0.06)
+D_NTRAIN = (20, 40, 64)
 
 
 def d_system():
