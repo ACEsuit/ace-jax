@@ -28,6 +28,7 @@ class Config(NamedTuple):
     w_F: float
     w_V: float
     type_idx: int = 0          # config-type index (default type -> 0), for per-type sigma
+    config_type: str = None    # the config_type label as written (reports, eval output)
 
 
 def _get(d, key):
@@ -100,7 +101,7 @@ def load_configs(path, energy_key="energy", force_key="forces", virial_key="viri
             forces=None if F is None else _label(F, force_key, (n, 3), where),
             virial=None if V is None else _label(V, virial_key, (3, 3), where),
             w_E=weigh(meta, "E"), w_F=weigh(meta, "F"), w_V=weigh(meta, "V"),
-            type_idx=ti))
+            type_idx=ti, config_type=None if at.info.get(weight_key) is None else str(at.info.get(weight_key))))
     # a key the caller named (not the default) that no config has is a typo, not "no label"
     for key, default, where, expected in ((energy_key, "energy", "info", True),
                                           (force_key, "forces", "arrays", True),
