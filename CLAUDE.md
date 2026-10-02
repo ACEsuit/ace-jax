@@ -75,7 +75,7 @@ uv run ruff check                     # lint; `uv run pre-commit run --all-files
   - `ACEJAX_CLI_FULL=1` runs the full CLI test.
 - `tests/conftest.py` sets `XLA_FLAGS=--xla_force_host_platform_device_count=2`, for the sharding tests, and a persistent compile cache in `.jax_cache/`. Both must be set before any jax import, so conftest must not import jax at the top level.
 - **CI** (`.github/workflows/`):
-  - `test.yml`: 3 shards on Python 3.12 (whole files each: `ACEJAX_SHARD=i/n`, `conftest.shard_files`), a smoke job on 3.11 and 3.13, the `slow` ladder, and `optional-deps` (matscipy-neighbours plus lammps-jax pinned to a commit, with `ACEJAX_REQUIRE_OPTIONAL=1`).
+  - `test.yml`: 3 shards on Python 3.12 (whole files each: `ACEJAX_SHARD=i/n`, `conftest.shard_files`), a smoke job on 3.11, 3.13 and 3.14, the `slow` ladder, and `optional-deps` (matscipy-neighbours plus lammps-jax pinned to a commit, with `ACEJAX_REQUIRE_OPTIONAL=1`).
   - `lint.yml`.
   - `docs.yml`: strict site build and a headless run of each tutorial notebook (path-gated); on `main` it deploys to GitHub Pages.
   - Path-gated parity jobs: `julia-parity` (ACEfit rows/QR), `coupling-wheels` (builds + clean-env-tests the coupling wheels, then parity vs ACEpotentials), `prior-parity`, `pace-parity` (ML-PACE C++ + python-ace).

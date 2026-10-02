@@ -9,7 +9,7 @@ description = "Fit and evaluate ACE interatomic potentials in Python/JAX"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
-requires-python = ">=3.11,<3.14"
+requires-python = ">=3.11"
 authors = [{ name = "ACEsuit contributors" }]
 keywords = ["ace", "interatomic-potential", "jax", "molecular-dynamics", "chemistry", "gaussian-process"]
 classifiers = [
@@ -19,6 +19,7 @@ classifiers = [
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "Topic :: Scientific/Engineering :: Chemistry",
   "Topic :: Scientific/Engineering :: Physics",
 ]
@@ -64,7 +65,10 @@ aj = "ace_jax.cli:main"          # short alias
 
 [project.urls]
 Homepage = "https://github.com/ACEsuit/ace-jax"
+Documentation = "https://acesuit.github.io/ace-jax/"
+Source = "https://github.com/ACEsuit/ace-jax"
 Issues = "https://github.com/ACEsuit/ace-jax/issues"
+Changelog = "https://github.com/ACEsuit/ace-jax/blob/main/CHANGELOG.md"
 
 [dependency-groups]
 # mirrors the `gp` extra so a plain `uv run pytest` can run the GP ladder tests

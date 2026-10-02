@@ -1,0 +1,62 @@
+name: publish
+# Build, check and publish the ace-jax sdist and wheel (RELEASING.md).
+#  - a `v<version>` tag uploads to PyPI (environment `pypi`);
+#  - a manual run uploads to TestPyPI (environment `testpypi`), a dry run of the same files.
+# Both use trusted publishing (OIDC): the PyPI / TestPyPI project trusts this workflow
+# file, publish.yml, in the named environment, so no API token is stored anywhere.
+# (The coupling library has its own workflow and `coupling-v*` tags: coupling-wheels.yml.)
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Check the tag names the package version
+        if: github.event_name == 'push'
+        env: { REF_NAME: "${{ github.ref_name }}" }
+        run: |
+          V=$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml)
+          test "$REF_NAME" = "v$V" || { echo "tag $REF_NAME does not match ace-jax $V"; exit 1; }
+      - name: Build the sdist and wheel
+        run: uv build --out-dir dist
+      - name: Check the metadata renders on PyPI
+        run: uvx twine check --strict dist/*
+      - name: Install the wheel in a clean environment and run it
+        # outside the checkout, so `import ace_jax` cannot pick up src/
+        run: |
+          uv venv --python 3.12 /tmp/smoke
+          uv pip install --python /tmp/smoke/bin/python dist/*.whl
+          cd /tmp
+          /tmp/smoke/bin/aj --version
+          /tmp/smoke/bin/aj fit --help > /dev/null
+          /tmp/smoke/bin/python -c "import ace_jax, ace_jax.tutorials.labels; print(ace_jax.__version__, ace_jax.__file__)"
+      - uses: actions/upload-artifact@v4
+        with: { name: dist, path: dist }
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ github.event_name == 'push' && 'pypi' || 'testpypi' }}
+      url: ${{ github.event_name == 'push' && 'https://pypi.org/p/ace-jax' || 'https://test.pypi.org/p/ace-jax' }}
+    permissions:
+      id-token: write          # trusted publishing
+      contents: read
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: dist, path: dist }
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+          # a TestPyPI dry run may be repeated on a version already there; a real
+          # release must fail on any file PyPI already has
+          skip-existing: ${{ github.event_name != 'push' }}
+          repository-url: ${{ github.event_name == 'push' && 'https://upload.pypi.org/legacy/' || 'https://test.pypi.org/legacy/' }}
