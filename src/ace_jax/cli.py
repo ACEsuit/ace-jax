@@ -299,6 +299,8 @@ def _basis_spec(a, *, embedding):
 def _parser():
     top = argparse.ArgumentParser(prog="ace-jax",
                                   description="Fit and evaluate ACE models in JAX (short alias: aj)")
+    from . import __version__
+    top.add_argument("--version", action="version", version=f"ace-jax {__version__}")
     sub = top.add_subparsers(dest="cmd", required=True)
     fit_p = sub.add_parser("fit", help="fit the hybrid linear-ACE + residual GP (--m-per-species 0 = linear-only fit)")
     _add_fit_args(fit_p)
