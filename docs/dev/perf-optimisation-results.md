@@ -190,7 +190,7 @@ Each row gives the checks passed out of those run, and the largest differences:
 | host | gate | code | passed | max abs dE / atom (eV) | max abs dF (eV/Å) |
 |---|---|---|---|---|---|
 | lestrade-cpu | acepot | ACEpotentials.jl (linear ACE, direct) | 2/2 | 2.2e-16 | 1.8e-14 |
-| lestrade-cpu | mace | MACE | 0/2 (2 error) | — | — |
+| lestrade-cpu | mace | MACE | 2/2 | 6.9e-07 | 9.7e-05 |
 | lestrade-cpu | mlpace | ML-PACE | 2/2 | 4.8e-14 | 4.1e-10 |
 | lestrade-cpu | spline | ace-jax (linear ACE, learned radial, splined) | 2/2 | 2.1e-12 | 3.1e-08 |
 | lestrade-cpu | trim | ACEpotentials.jl (linear ACE, trim library in LAMMPS) | 2/2 | 5.6e-17 | 4.4e-15 |

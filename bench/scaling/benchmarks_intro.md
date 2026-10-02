@@ -140,10 +140,12 @@ atoms on the GPUs and 2,048 on the CPU, as ranges over the two systems.
   sized from the previous size's step time) after 3–50 warm-up steps. This
   is a deviation from the spec's fixed 200/50, made so the slow MACE CPU
   cases finish.
-- **No MACE in LAMMPS on lestrade.** The Symmetrix tree is moriarty's
-  build, compiled for its AVX-512 CPU; on the i9-14900K (no AVX-512) it dies
-  with an illegal instruction while loading the model, so lestrade's `mace`
-  gate is an error and only MACE standalone (PyTorch) runs there.
+- **lestrade has its own Symmetrix tree.** moriarty's build is compiled for
+  its AVX-512 CPU and dies with an illegal instruction on the i9-14900K, so
+  lestrade's MACE LAMMPS rows use a CPU-only build of the same pinned sources
+  (lammps patch_10Sep2025 + Symmetrix 0d86e1e, no Kokkos, ML-PACE on, libsymmetrix
+  at `-march=native` = AVX2) via `lmp-cpu.sh`. lestrade's ML-PACE rows were
+  recorded earlier with moriarty's binary (ML-PACE runs fine there).
 - **Out-of-memory markers.** On the CPU hosts, cases are killed at 48 GB of
   resident memory (the node has 62 GB); on GPUs they stop at the device
   limit. A dotted vertical line marks the first size that did not fit.
