@@ -49,3 +49,19 @@ def test_prior_diagonal_fallback_goes_through_log(capsys):
     got = []
     prior_diagonal(z, meta, "sige_nofit.npz", log=got.append)
     assert capsys.readouterr().out == "" and "sige_nofit.npz" in got[0]
+
+
+def test_identity_embedding_cannot_be_compressed():
+    import pytest
+    from ace_jax.basis.model import BasisSpec, build_basis
+    with pytest.raises(ValueError, match="identity.*one channel per element"):
+        build_basis(BasisSpec(order=2, max_degree=4, elements=("Cr", "Mn", "Fe"), embedding="identity", d_max=2))
+
+
+def test_embedding_rows_warn_when_elements_merge():
+    import pytest
+    from ace_jax.basis.embedding import embedding_rows
+    T = np.array([[1.0, 0.0], [-1.0, 0.1], [-1.0, -0.1]])      # PC1 splits 24 from {25, 26}
+    with pytest.warns(UserWarning, match=r"indistinguishable: \[\[25, 26\]\]"):
+        r = embedding_rows(T, [24, 25, 26], [24, 25, 26], d=1)   # unit rows in 1-d: only +1 or -1
+    assert set(np.round(r[:, 0], 6)) <= {-1.0, 1.0}
