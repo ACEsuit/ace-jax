@@ -111,6 +111,7 @@ def test_served_uncertainty_is_equivariant(fit_dir, lean, proper):
     from ace_jax.fit.ard import ARDPosterior
     model, pp = fit_dir
     post = ARDPosterior.load(pp)
+    assert post.support is not None          # the default fit carries a support reference: check it, don't skip it
     calc = ACECalculator(str(model), posterior=str(pp), lean=lean)
     at = _cell()
     Q = _rand_q(11 if proper else 12, proper)
