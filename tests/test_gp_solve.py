@@ -36,7 +36,7 @@ def _theta(**kw):
 @pytest.fixture(scope="module")
 def m0():
     model, meta, z = load(FIXTURE_DIR / "si_fitted.npz")
-    configs = load_configs(XYZ, "dft_energy", "dft_force", "dft_virial")
+    configs = load_configs(XYZ, "dft_energy", "dft_force", "dft_virial")[:12]   # solver equivalences: 12 suffice
     ds = build_dataset(configs, meta, np.asarray(z["E0"]), 4)
     cfg = GPConfig(r0=2.35, rcut=float(meta["rcut"]), n_B=meta["n_B"], n_pair=meta["n_pair"],
                    NZ=len(meta["elements"]), C=4)
@@ -50,7 +50,7 @@ def m0():
 @pytest.fixture(scope="module")
 def gp():
     model, meta, z = load(FIXTURE_DIR / "si_fitted.npz")
-    configs = load_configs(XYZ, "dft_energy", "dft_force", "dft_virial")
+    configs = load_configs(XYZ, "dft_energy", "dft_force", "dft_virial")[:12]   # solver equivalences: 12 suffice
     ds = build_dataset(configs, meta, np.asarray(z["E0"]), 4)
     cfg = GPConfig(r0=2.35, rcut=float(meta["rcut"]), n_B=meta["n_B"], n_pair=meta["n_pair"],
                    NZ=len(meta["elements"]), C=4)

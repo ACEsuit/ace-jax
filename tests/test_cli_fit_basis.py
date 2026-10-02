@@ -5,36 +5,27 @@ import pytest
 
 jax.config.update("jax_enable_x64", True)
 
-from conftest import FIXTURE_DIR
-from test_basis_build import _primed_cache
+from conftest import CLI_FAST
 
 from ace_jax.cli import main
 
-XYZ = FIXTURE_DIR / "si_tiny_train.xyz"
-FAST = ["--energy-key", "dft_energy", "--force-key", "dft_force", "--virial-key", "dft_virial",
-        "--m-per-species", "0", "--rungs", "map", "--map-steps", "20", "--opt", "adam",
-        "--configs-per-batch", "4"]
 
 
-def test_cli_basis_flags_fit_equals_model_file(tmp_path, monkeypatch):
+def test_cli_basis_flags_fit_equals_model_file(built_cli_run, tmp_path, monkeypatch):
+    """`aj basis` + `aj fit --model` gives the same model.npz as the inline build."""
+    import yaml
     monkeypatch.setenv("ACEJAX_COUPLING_CACHE_ONLY", "1")
-    cache = _primed_cache(tmp_path)
+    r0 = yaml.safe_load((built_cli_run.out / "fit.yaml").read_text())["r0"]
     main(["basis", "--elements", "Si", "--order", "3", "--max-degree", "10",
-          "--coupling-cache-dir", cache, "--out", str(tmp_path / "si.npz")])
-    main(["fit", "--model", str(tmp_path / "si.npz"), "--train", str(XYZ), "--r0", "2.35",
-          "--out", str(tmp_path / "a"), *FAST])
-    main(["fit", "--order", "3", "--max-degree", "10", "--coupling-cache-dir", cache,
-          "--train", str(XYZ), "--r0", "2.35", "--out", str(tmp_path / "b"), *FAST])
-    za, zb = np.load(tmp_path / "a" / "model.npz"), np.load(tmp_path / "b" / "model.npz")
+          "--coupling-cache-dir", built_cli_run.cache, "--out", str(tmp_path / "si.npz")])
+    main(["fit", "--model", str(tmp_path / "si.npz"), "--train", str(built_cli_run.xyz), "--r0", repr(r0),
+          "--out", str(tmp_path / "a"), *CLI_FAST])
+    za, zb = np.load(tmp_path / "a" / "model.npz"), np.load(built_cli_run.out / "model.npz")
     assert sorted(za.files) == sorted(zb.files) and all(np.array_equal(za[k], zb[k]) for k in za.files)
 
 
-def test_cli_r0_defaults_when_building(tmp_path, monkeypatch, capsys):
-    monkeypatch.setenv("ACEJAX_COUPLING_CACHE_ONLY", "1")
-    cache = _primed_cache(tmp_path)
-    main(["fit", "--order", "3", "--max-degree", "10", "--coupling-cache-dir", cache,
-          "--train", str(XYZ), "--out", str(tmp_path / "c"), *FAST])
-    out = capsys.readouterr().out
+def test_cli_r0_defaults_when_building(built_cli_run):
+    out = built_cli_run.stdout
     assert "r0 " in out and "mean bond length" in out and "(elements from the data)" in out
 
 

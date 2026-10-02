@@ -58,14 +58,18 @@ def _f32_ok(x, x64, kind, n_atoms=1):
     assert err <= bound, f"{kind}: float32 error {err:.3g} > bound {bound:.3g}"
 
 
-@pytest.mark.parametrize("skin", [0.0, 1.0])
-@pytest.mark.parametrize("ref", CASES, ids=[c.stem for c in CASES])
+# the sparse layout never takes the skin path (ACECalculator._calculate: skin > 0 and
+# layout != "sparse"), so sparse x skin=1 would repeat its skin=0 case exactly
+SKIN_CASES = [pytest.param(ref, skin, id=f"{skin}-{ref.stem}") for ref in CASES
+              for skin in ((0.0,) if ref.stem.rsplit("_", 3)[2] == "sparse" else (0.0, 1.0))]
+
+
+@pytest.mark.parametrize("ref, skin", SKIN_CASES)
 def test_matches_frozen_reference(ref, skin):
     stem, cname, layout, dt = ref.stem.rsplit("_", 3)
     r = np.load(ref)
     at = Atoms(numbers=r["numbers"], positions=r["positions"], cell=r["cell"], pbc=r["pbc"])
-    kw = {} if "skin" not in ACECalculator.__init__.__code__.co_varnames else {"skin": skin}
-    at.calc = ACECalculator(str(_model_path(stem)), layout=layout, dtype=getattr(jnp, dt), **kw)
+    at.calc = ACECalculator(str(_model_path(stem)), layout=layout, dtype=getattr(jnp, dt), skin=skin)
     E, F = at.get_potential_energy(), at.get_forces()
     S = at.get_stress() if at.pbc.all() else None
 

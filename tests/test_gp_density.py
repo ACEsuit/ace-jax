@@ -20,7 +20,7 @@ pytestmark = pytest.mark.skipif(not XYZ.exists(), reason="missing fixtures")
 def test_density_rows_match_autodiff_of_energy():
     model, meta, z = load(FIXTURE_DIR / "si_fitted.npz")
     configs = load_configs(XYZ, "dft_energy", "dft_force", "dft_virial")
-    ds = build_dataset(configs, meta, np.asarray(z["E0"]), 4)
+    ds = build_dataset(configs[:4], meta, np.asarray(z["E0"]), 4)      # one batch: batch 0, unpadded
     cfg = GPConfig(r0=2.35, rcut=float(meta["rcut"]), n_B=meta["n_B"], n_pair=meta["n_pair"],
                    NZ=len(meta["elements"]), C=4)
     batch = jax.tree.map(lambda a: a[0], ds)
