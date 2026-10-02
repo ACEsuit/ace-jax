@@ -426,7 +426,7 @@ def test_lstsq_predictions_use_the_readout_with_zero_variance():
     # energies straight from the design rows and the readout (+ E0), per config
     Em = []
     for i in range(d.ds_train.n_batches):
-        bt = jax.tree.map(lambda x: x[i], d.ds_train)
+        bt = jax.tree.map(lambda x, i=i: x[i], d.ds_train)
         r = linear_rows(res.built.prob.model, res.built.prob.cfg, bt)[0]
         E0 = np.asarray(res.built.prob.model.E0)[np.asarray(bt.node_z)] * np.asarray(bt.node_mask)
         e0c = np.array([E0[np.asarray(bt.node_cfg) == c].sum() for c in range(r.E.shape[0])])
