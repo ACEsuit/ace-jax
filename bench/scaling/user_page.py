@@ -99,7 +99,7 @@ def label(code):
 
 
 def short(code):
-    return plot.SHORT.get(code, label(code))
+    return plot.SHORT.get(code, code)
 
 
 def colour(code):
@@ -137,6 +137,14 @@ def figure(rows, s, out, hosts=None):
         for r in sel:
             if r["system"] == system:
                 lines[(r["code"], r["mode"])].append((r["n_atoms"], plot.throughput(r)))
+        ax.set_title(system, fontsize=10, color=plot.INK)
+        ax.set_xlabel("atoms", fontsize=8, color=plot.INK2)
+        if not lines:                                  # nothing ran for this system here
+            ax.text(0.5, 0.5, "no results", transform=ax.transAxes, ha="center", va="center",
+                    fontsize=9, color=plot.MUTED)
+            ax.set_xticks([])
+            ax.set_yticks([])
+            continue
         for code in codes:
             ends = []
             for mode in MODE_STYLE:
@@ -152,8 +160,6 @@ def figure(rows, s, out, hosts=None):
                 plot._end_label(ax, *max(ends), short(code))
         _xatoms(ax)
         plot._ylog(ax)
-        ax.set_title(system, fontsize=10, color=plot.INK)
-        ax.set_xlabel("atoms", fontsize=8, color=plot.INK2)
     axes[0][0].set_ylabel("atom-steps / s", fontsize=8, color=plot.INK2)
     # two legend rows, filled column by column: the codes, then a column for the modes
     k = -(-len(codes) // 2)

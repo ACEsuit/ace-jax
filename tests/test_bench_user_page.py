@@ -213,3 +213,20 @@ def test_nav_has_performance_after_how_to_guides():
 
 def test_atom_ticks_are_compact(up):
     assert [up._atoms_fmt(n, None) for n in (256, 4096, 1 << 20, 1 << 21)] == ["256", "4k", "1M", "2M"]
+
+
+def test_end_label_falls_back_to_the_code_name(up, monkeypatch):
+    """A code with a plot.CODES entry but no plot.SHORT one: its long legend
+    label would run off the figure as an end label."""
+    from scaling import plot
+    monkeypatch.setitem(plot.CODES, "zz-new", ("A very long legend label for zz-new", "#4a3aa7"))
+    assert up.short("zz-new") == "zz-new"
+    assert up.short("zz-newcode") == "zz-newcode"
+    assert up.short("acejax-pace") == plot.SHORT["acejax-pace"]
+
+
+def test_a_system_with_no_rows_gets_a_labelled_empty_panel(up, tmp_path, monkeypatch):
+    rows = [r for r in _matrix() if r["system"] == "SiGe"]
+    _, fig = _figure(up, rows, "gpu_float64", tmp_path, monkeypatch)
+    cantor = next(ax for ax in fig.axes if ax.get_title() == "Cantor")
+    assert not cantor.lines and "no results" in " ".join(t.get_text() for t in cantor.texts)
