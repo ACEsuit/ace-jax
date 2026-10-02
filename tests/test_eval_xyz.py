@@ -68,3 +68,24 @@ def test_eval_prefix(tmp_path):
                  "--out", str(tmp_path / "p.xyz"), "--prefix", "mine_"]) == 0
     f = _frames(tmp_path / "p.xyz")[1]
     assert "mine_energy" in f.info and "mine_forces" in f.arrays and "ace_energy" not in f.info
+
+
+def test_write_raw_round_trips_the_cell_and_every_label(tmp_path):
+    """extxyz.iread_dicts returns the lattice column-major but write_dicts takes it
+    row-major: written back unchanged, every non-symmetric cell came out transposed."""
+    from ace_jax.fit.xyz import read_extxyz, read_raw, write_raw
+    write_raw(tmp_path / "rt.xyz", read_raw(XYZ))
+    for a, b in zip(read_extxyz(XYZ), read_extxyz(tmp_path / "rt.xyz")):
+        np.testing.assert_array_equal(b.cell, a.cell)
+        np.testing.assert_array_equal(b.pbc, a.pbc)
+        np.testing.assert_allclose(b.positions, a.positions, rtol=0, atol=1e-8)
+        assert set(b.info) == set(a.info) and set(b.arrays) == set(a.arrays)
+
+
+def test_eval_output_keeps_the_input_cells(tmp_path):
+    from ace_jax.fit.xyz import read_extxyz
+    data = first_frames(tmp_path / "d.xyz", 4)
+    assert main(["eval", "--model", str(FIXTURE_DIR / "si_fitted.npz"), "--data", str(data), *KEYS,
+                 "--out", str(tmp_path / "p.xyz")]) == 0
+    for a, b in zip(read_extxyz(data), read_extxyz(tmp_path / "p.xyz")):
+        np.testing.assert_array_equal(b.cell, a.cell)

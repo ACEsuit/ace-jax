@@ -84,9 +84,19 @@ def read_raw(path):
 
 
 def write_raw(path, frames):
-    """Write read_raw-style frames (libAtoms extxyz; floats at its %16.8f)."""
+    """Write read_raw-style frames (libAtoms extxyz; floats at its %16.8f).  iread_dicts
+    returns the lattice column-major but write_dicts takes it row-major, so the cell is
+    transposed on the way out (unchanged, every non-symmetric cell came back transposed).
+    The frames passed in are left as they were."""
+    import copy
+
     import extxyz
-    extxyz.write_dicts(str(path), frames)
+    out = []
+    for f in frames:
+        g = copy.copy(f)
+        g.cell = np.asarray(f.cell).T
+        out.append(g)
+    extxyz.write_dicts(str(path), out)
 
 
 def read_extxyz(path):
