@@ -14,6 +14,7 @@ LAMMPS, on SiGe and Cantor at three model sizes each. Design:
 | `parity.py` | the per-host parity gates that must pass before any timing |
 | `sweep.py` | expands the case matrix for a host and runs it resumably |
 | `plot.py` | figures and tables for `docs/benchmarks.md` |
+| `user_page.py` | the user docs' Performance page: `docs/user/assets/benchmarks/*.png` and the `docs/snippets/benchmarks-*.md` table and notes, from the hosts in `USER_HOSTS` (`--cpu-host` / `--gpu-host` override) |
 | `envs/moriarty.sh`, `modal_app.py` | the two environments |
 
 ## Models
