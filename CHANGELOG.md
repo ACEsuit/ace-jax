@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Fixed: a built basis keeps its smoothness prior when saved, so fits from a
+  `BasisSpec` or `Basis` no longer print "gamma missing ... rebuilt"; the
+  notice for older exports goes through the caller's `log`.
+- `embedding="identity"` with fewer channels than elements is an error with an
+  explanation (it used to fail with "zero embedding row"); embedding tables that
+  make two elements indistinguishable (e.g. `d_max=1`) raise a warning.
 - Tutorial 3, multi-element fits: categorical against embedded species bases on a
   five-element alloy. The school tutorials are renumbered 4, 5 and 8.
 

@@ -107,7 +107,9 @@ def gp_model_arrays(res, n_draws=1):
 
 def save_model(res, out, n_draws=1, log=print):
     """Write the fitted model into directory `out`: model.npz (linear arm) or
-    gp_model.npz (GP arm).  Returns the path, or None when the fit cannot be
+    gp_model.npz (GP arm). Only the model: the fitted hyperparameters are
+    `res.theta` (and `res.map.log_evidence`), and `write_outputs(res, out)` also
+    writes them (theta_map.json) with the metrics.  Returns the path, or None when the fit cannot be
     represented as a model file (a dimer baseline is added back outside the model;
     a .yace input has no npz schema to write into)."""
     why = model_file_blocked(res.config)
