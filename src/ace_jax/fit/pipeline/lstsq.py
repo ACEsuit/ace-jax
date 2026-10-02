@@ -1,4 +1,4 @@
-"""solver="lstsq": plain weighted least squares, for teaching (tutorial 4).
+"""solver="lstsq": plain weighted least squares, for teaching (tutorial 5).
 
 The readout minimises sum_rows (w (y - Phi c))^2 with the configured per-config-type
 weights and unit noise, and no prior: the smoothness prior and sigma_c rows of

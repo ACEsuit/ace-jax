@@ -6,7 +6,7 @@
 #     "matplotlib>=3.8",
 # ]
 # ///
-"""Tutorial 3: build a dataset, fit it, and test a property it does not contain.
+"""Tutorial 4: build a dataset, fit it, and test a property it does not contain.
 
 Adapted from the MLIP-school-2026 notebook E1 (ACEsuit/MLIP-school-2026). Run it with
 `uvx marimo edit --sandbox school_dataset_si.py`, or as a plain script
@@ -22,7 +22,7 @@ app = marimo.App(width="medium")
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    # Tutorial 3: your data, your property
+    # Tutorial 4: your data, your property
 
     Build a deliberately narrow silicon dataset, fit an ACE model to it, and
     then ask the model about a property the dataset does not represent. The fit
@@ -101,7 +101,7 @@ def _(L, mo, pathlib):
                   "docs/user/tutorials/data/school/e1/labels-mpa-0.xyz")
     _local = (mo.notebook_dir() / "../data/school/e1/labels-mpa-0.xyz") if mo.notebook_dir() else None
     cache = L.LabelCache.from_file(_local if _local is not None and _local.exists() else LABELS_URL)
-    work = pathlib.Path("ace_jax_tutorial_3")
+    work = pathlib.Path("ace_jax_tutorial_4")
     work.mkdir(exist_ok=True)
     return cache, work
 
@@ -386,7 +386,7 @@ def _(mo):
     Would this bulk-only dataset give a good silicon *surface* energy? Write a
     couple of sentences, linking the environments of surface atoms to what the
     training set contained, before you open the answer below.
-    [Tutorial 7](https://acesuit.github.io/ace-jax/tutorials/truth-about-the-truth/)
+    [Tutorial 8](https://acesuit.github.io/ace-jax/tutorials/truth-about-the-truth/)
     computes a surface energy.
     """)
     return
@@ -459,7 +459,7 @@ def _(mo):
       its data. It says nothing about structures unlike them: test the
       properties you care about.
 
-    Next: [Tutorial 4](https://acesuit.github.io/ace-jax/tutorials/basis-and-evidence/)
+    Next: [Tutorial 5](https://acesuit.github.io/ace-jax/tutorials/basis-and-evidence/)
     asks how large a basis the data can support.
     """)
     return
