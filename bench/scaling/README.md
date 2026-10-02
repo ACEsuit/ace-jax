@@ -15,7 +15,7 @@ LAMMPS, on SiGe and Cantor at three model sizes each. Design:
 | `sweep.py` | expands the case matrix for a host and runs it resumably |
 | `plot.py` | figures and tables for `docs/benchmarks.md` |
 | `acepot.py`, `julia/` | the ACEpotentials.jl lines: Python side, and the pinned Julia env + drivers |
-| `envs/moriarty.sh`, `modal_app.py` | the two environments |
+| `envs/moriarty.sh`, `envs/lestrade.sh`, `modal_app.py` | the environments |
 
 ## Models
 
@@ -104,6 +104,24 @@ ACEPOT_JULIA="$HOME/.juliaup/bin/julia +1.12.6" ACEPOT_JULIA_DEPOT=/storage/eng/
   CPU (set `JULIA_CPU_TARGET` for another), and the `.so` links juliaup's
   `libjulia` by absolute path. A cluster needs the runtime bundled (PR 309's
   `bundle_julia_libs!`) or a per-cluster build.
+
+### lestrade (i9-14900K, CPU only: `lestrade-cpu`)
+
+```bash
+bash bench/scaling/envs/lestrade.sh          # plugin, lmp-ace.sh, envs/lestrade-cpu.json (git-ignored)
+ACEPOT_JULIA="$HOME/.juliaup/bin/julia +1.12.6" ACEPOT_JULIA_DEPOT=/storage/eng/essswb/cache/julia-pr309 \
+  python bench/scaling/models.py acepotentials-trim      # built here: juliac targets this CPU
+taskset -c 0-15 python bench/scaling/sweep.py lestrade-cpu --only CODE
+```
+
+- Reuses moriarty's venv, `lmp.sh` and lammps-dev headers read-only through the
+  shared home; the plugin and `lmp-ace.sh` go to `/storage/eng/essswb/bench-scaling-lestrade/`.
+- **P-cores only.** The 14900K's P-cores are CPUs 0-15 (8 cores x 2 HT) and its
+  E-cores 16-31. `HOSTS["lestrade-cpu"]["cpus"]` pins the sweep (and so every
+  case) to 0-15, giving standalone codes 16 threads; MPI codes run 8 ranks bound
+  one per P-core (`mpirun_args`: `--bind-to core --map-by core`). Rows record
+  `cpu_affinity` and `mpirun_args`.
+- MACE is not run here (it stays on moriarty-cpu).
 
 ### Modal (A100-80GB)
 
