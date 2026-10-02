@@ -13,8 +13,8 @@ Which hosts feed the page is USER_HOSTS, the one place to change.  Every code
 with rows on those hosts is drawn, except the learned-radial proxy lines
 (plot.LEARNED).  Colour and order follow plot.CODES (so the page matches
 docs/benchmarks.md); a code not in plot.CODES is drawn after them in a neutral
-ink.  Line style is the mode, on this page: solid = LAMMPS, dashed =
-standalone.  Repeated cases use plot.aggregate's median.
+ink.  Line style is the mode, as in docs/benchmarks.md: solid = standalone,
+dashed = LAMMPS.  Repeated cases use plot.aggregate's median.
 """
 import argparse
 import pathlib
@@ -62,7 +62,7 @@ SYSTEMS = ("SiGe", "Cantor")
 SIZE = "medium"
 TABLE_N = 8192
 EXCLUDED = tuple(plot.LEARNED)
-MODE_STYLE = {"lammps": "-", "standalone": "--"}      # this page: solid = LAMMPS
+MODE_STYLE = {"standalone": "-", "lammps": "--"}      # as docs/benchmarks.md: solid = standalone
 MODE_LABEL = {"lammps": "LAMMPS", "standalone": "standalone"}
 UNKNOWN_COLOUR = plot.INK2                            # never a generated hue
 
@@ -159,6 +159,8 @@ def figure(rows, s, out, hosts=None):
             if ends:                                   # one direct label per code
                 plot._end_label(ax, *max(ends), short(code))
         _xatoms(ax)
+        xs_all = [n for pts in lines.values() for n, _ in pts]
+        ax.set_xlim(min(xs_all) / 1.4, max(xs_all) * 3.0)   # tight left; room for end labels
         plot._ylog(ax)
     axes[0][0].set_ylabel("atom-steps / s", fontsize=8, color=plot.INK2)
     # two legend rows, filled column by column: the codes, then a column for the modes
@@ -218,6 +220,9 @@ def notes(rows, hosts=None):
     codes = {r["code"] for r in present}
     out = [f"- **CPU:** `{hosts['cpu']}`, {_hardware(rows, hosts['cpu'])}.",
            f"- **GPU:** `{hosts['gpu']}`, {_hardware(rows, hosts['gpu'])}."]
+    if "acepotentials" in codes:
+        out.append("- ACEpotentials.jl standalone is one `energy_forces` call in Julia "
+                   "(neighbour list included), timed after a warm-up call.")
     trim = sorted(c for c in codes if c.endswith("-trim"))
     if trim:
         out.append(f"- {', '.join(label(c) for c in trim)} evaluates the exact radial basis; "

@@ -9,9 +9,9 @@ compilation is not timed. The models are **medium-size models with random
 weights**, so they cost what a fitted model costs but predict nothing: PACE
 `.yace` models of about 500 basis functions per element (ace-jax and ML-PACE
 evaluate the same files), linear ACE models of about 450 per element, and
-MACE-MP-0b2 medium. **Standalone** (dashed lines) is a direct call of the
+MACE-MP-0b2 medium. **Standalone** (solid lines) is a direct call of the
 evaluator, outside any MD engine (for ace-jax and MACE, one ASE calculator
-call from Python, neighbour list included). **LAMMPS** (solid lines) is the
+call from Python, neighbour list included). **LAMMPS** (dashed lines) is the
 MD step time inside LAMMPS: ace-jax through lammps-jax ([LAMMPS
 export](howto/lammps.md)), ML-PACE as `pair_style pace`, MACE through
 Symmetrix. The systems are SiGe, a random alloy on diamond, and Cantor, the

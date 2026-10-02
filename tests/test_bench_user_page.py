@@ -109,7 +109,7 @@ def _figure(up, rows, name, tmp_path, monkeypatch):
     return path, figs[-1]
 
 
-def test_figure_is_one_row_sige_then_cantor_lammps_solid_standalone_dashed(up, tmp_path, monkeypatch):
+def test_figure_is_one_row_sige_then_cantor_standalone_solid_lammps_dashed(up, tmp_path, monkeypatch):
     path, fig = _figure(up, _matrix(), "gpu_float64", tmp_path, monkeypatch)
     assert path == tmp_path / "gpu_float64.png" and path.exists()
     axes = [ax for ax in fig.axes if ax.lines]
@@ -122,8 +122,10 @@ def test_figure_is_one_row_sige_then_cantor_lammps_solid_standalone_dashed(up, t
                 assert ax.get_xscale() == "log" and ax.get_yscale() == "log"
         pace = up.colour("acejax-pace")
         assert styles[pace] == {"-", "--"}                         # both modes
-        assert styles[up.colour("mlpace")] == {"-"}                # LAMMPS only: solid
-        assert styles[up.colour("mace")] == {"--"}                 # standalone only: dashed
+        assert styles[up.colour("mlpace")] == {"--"}               # LAMMPS only: dashed
+        assert styles[up.colour("mace")] == {"-"}                  # standalone only: solid
+        lo = min(min(ln.get_xdata()) for ln in ax.lines if len(ln.get_xdata()) > 1)
+        assert lo / 2 <= ax.get_xlim()[0] < lo                     # no empty strip left of the data
     assert len(fig.legends) == 1                                   # one legend per figure
     texts = {t.get_text() for t in fig.legends[0].get_texts()}
     assert {"LAMMPS", "standalone"} <= texts
@@ -173,6 +175,9 @@ def test_notes_name_the_hosts_and_flag_the_trim_line_only_when_present(up):
     assert "trim" not in notes
     rows += [_row("acepotentials-trim", "lammps", n) for n in (4096, 8192)]
     assert "exact radial" in up.notes(rows)
+    assert "Julia" not in up.notes(rows)                   # no direct Julia line yet
+    rows += [_row("acepotentials", "standalone", n) for n in (4096, 8192)]
+    assert "in Julia" in up.notes(rows)
 
 
 def test_main_writes_the_figures_and_snippets(up, tmp_path):
