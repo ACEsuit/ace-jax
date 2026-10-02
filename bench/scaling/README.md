@@ -50,7 +50,12 @@ LAMMPS, on SiGe and Cantor at three model sizes each. Design:
   - Both drivers rebuild the model with `ace1_model` + seed 11, as
     `julia/export_model.jl` did, and assert it identical to the npz (bases,
     A2B, spline tables, weights, E/F/V on the npz's test structure), failing
-    loudly otherwise.
+    loudly otherwise. A2B alone is compared to roundoff (`julia/a2b_check.jl`:
+    the same pattern once |v| < 1e-12 cancellation noise is dropped, within
+    4 eps max|A2B|): its coupling coefficients differ at the ULP level between
+    Julia 1.11 (the npz files) and 1.12 (ace_SiGe_large: 72 of 3860 entries,
+    <= 8.3e-16 relative). Rows and the trim manifest record `A2B_max_abs_diff`
+    and `A2B_max_rel_diff` under `identity`.
   - The trim library compiles the *exact twin* (PR 309's
     `test/etmodels/ace1_exact_twin.jl`: the same basis and weights, unsplined
     radials). It differs from `acejax-ace` and `acepotentials` (both on the

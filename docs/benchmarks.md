@@ -86,7 +86,10 @@ same-container measurements are in `docs/learned-radial-splining.md`.
 `ace1_model` with the seed the `.npz` was built with and checks it identical
 to the `.npz` (bases, A2B map, spline tables, weights, and energy, forces and
 virial on the `.npz`'s test structure), failing rather than timing another
-model. `acepotentials` times `AtomsCalculators.energy_forces_virial` (neighbour
+model. Everything is compared exactly except the A2B map, which is compared
+to roundoff: its coupling coefficients differ at the ULP level between Julia
+1.11, which wrote the `.npz` files, and the 1.12 env (SiGe large: 72 entries,
+at most 8.3e-16 relative). `acepotentials` times `AtomsCalculators.energy_forces_virial` (neighbour
 list included) on the same displaced structures as the other standalone
 lines, after a warm-up call, and records each call's garbage-collection
 share. `acepotentials-trim` exports the model's *exact twin* (the same basis

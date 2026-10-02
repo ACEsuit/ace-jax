@@ -243,7 +243,8 @@ def _trim_build(row):
         e = models.load_manifest().get(row["trim_lib"], {})
     except (OSError, ValueError):
         return None
-    return {k: e[k] for k in ("build_id", "sha256", "build_cpu", "cpu_target", "versions") if k in e} or None
+    return {k: e[k] for k in ("build_id", "sha256", "build_cpu", "cpu_target", "versions", "identity")
+            if k in e} or None
 
 
 def run_case(row, n_atoms, dtype, device, lmp, ranks, workdir, pjrt=None, prev=None,

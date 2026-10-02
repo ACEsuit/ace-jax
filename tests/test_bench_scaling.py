@@ -1848,3 +1848,39 @@ def test_cpu_rows_record_their_affinity(tmp_path, monkeypatch):
 def test_perf_results_orders_lestrade_after_moriarty():
     from scaling.perf_results import HOST_ORDER
     assert HOST_ORDER.index("lestrade-cpu") > HOST_ORDER.index("moriarty-cpu")
+
+
+A2B_CASES = r'''
+include(ARGS[1])
+B = sparse([1, 2, 2, 3, 3], [1, 1, 3, 2, 4], [1.5491933384829668, -0.7745966692414834, 3e-16, 1.0, -2e-13], 3, 4)
+ulp = copy(B); ulp[1, 1] += 2.2e-16; ulp[2, 1] -= 1.1e-16
+noise = copy(ulp); noise[2, 3] = -1e-16; noise[3, 4] = 0.0          # cancellation noise moves
+pattern = copy(B); pattern[1, 4] = 0.5
+rel = copy(B); rel[1, 1] *= 1 + 1e-10
+shape = sparse(Matrix(B)[:, 1:3])
+for (k, A) in (("same", B), ("ulp", ulp), ("noise", noise), ("pattern", pattern), ("rel", rel), ("shape", shape))
+    ok, a, r = a2b_compare(A, B)
+    println(k, " ", ok, " ", a, " ", r)
+end
+'''
+
+
+def test_a2b_compare_accepts_ulp_noise_only(tmp_path):
+    """The A2B identity check: coupling coefficients differ at the ULP level
+    between Julia 1.11 and 1.12, so 1-4 ULP and moving cancellation noise
+    (|v| < 1e-12) pass; a changed pattern, shape, or a 1e-10 relative change fail."""
+    import subprocess
+    cfg = _julia_cfg_or_skip()
+    src = pathlib.Path(__file__).parent.parent / "bench" / "scaling" / "julia" / "a2b_check.jl"
+    (tmp_path / "t.jl").write_text(A2B_CASES)
+    p = subprocess.run([*cfg["julia"], "--startup-file=no", str(tmp_path / "t.jl"), str(src)],
+                       capture_output=True, text=True, timeout=600,
+                       env={**__import__("os").environ, "JULIA_DEPOT_PATH": cfg["depot"]})
+    assert p.returncode == 0, p.stderr[-1500:]
+    got = {l.split()[0]: (l.split()[1] == "true", float(l.split()[2]), float(l.split()[3]))
+           for l in p.stdout.splitlines() if l.strip()}
+    assert got["same"] == (True, 0.0, 0.0)
+    assert got["ulp"][0] and 0 < got["ulp"][1] <= 4 * np.finfo(float).eps * 1.55
+    assert got["noise"][0]
+    assert not got["pattern"][0] and not got["shape"][0]
+    assert not got["rel"][0] and got["rel"][2] == pytest.approx(1e-10, rel=1e-3)

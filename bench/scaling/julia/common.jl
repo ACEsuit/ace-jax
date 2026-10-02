@@ -10,6 +10,7 @@
 using ACEpotentials, NPZ, JSON, StaticArrays, LinearAlgebra, Random, SparseArrays, Printf
 using AtomsBase, AtomsCalculators, ExtXYZ, Unitful, Lux, LuxCore
 import Pkg
+include(joinpath(@__DIR__, "a2b_check.jl"))          # a2b_compare: A2B to roundoff (Julia 1.11 vs 1.12)
 const M = ACEpotentials.Models
 const ETM = ACEpotentials.ETModels
 
@@ -55,7 +56,7 @@ end
 `ace1_model` rebuilt exactly as `julia/export_model.jl` (ACE_NOFIT=1) built the npz:
 Random.seed!(11), WB / Wpair .= 0.02 randn.  Then the npz weights are copied in and the
 rebuilt model is ASSERTED identical to the npz: basis sizes, the A, AA and nnll
-specifications, the A2B map, both spline tables, the seed-11 weights, and E/F/V on the
+specifications, the A2B map (to roundoff, `a2b_compare`), both spline tables, the seed-11 weights, and E/F/V on the
 npz's own test structure (evaluated when the npz was written, possibly on another Julia).
 Any difference throws: these lines must evaluate the model ace-jax evaluates.
 """
@@ -70,6 +71,7 @@ function build_splined(spec)
     aa = m.tensor.aabasis.specs
     A2B = sparse(Matrix(m.tensor.A2Bmaps[1]))
     A2Bn = sparse(D["A2B_rows"] .+ 1, D["A2B_cols"] .+ 1, D["A2B_vals"], D["A2B_shape"]...)
+    a2b_ok, a2b_abs, a2b_rel = a2b_compare(A2B, A2Bn)
     id = Dict{String,Any}(
         "n_B" => Base.size(calc.ps.WB, 1) == mt["n_B"] && Base.size(calc.ps.WB) == Base.size(D["WB"]),
         "n_pair" => Base.size(calc.ps.Wpair) == Base.size(D["Wpair"]),
@@ -78,7 +80,7 @@ function build_splined(spec)
                                Int32.(reduce(hcat, [collect(t) for t in aa[k]])' .- 1) == D["aa_spec_$k"],
                           1:length(aa)),
         "nnll" => [[[b.n, b.l] for b in bb] for bb in M.get_nnll_spec(m.tensor)] == mt["nnll"],
-        "A2B" => maxdiff(A2B, A2Bn) == 0.0,
+        "A2B" => a2b_ok,
         "rnl_spline" => maxdiff(spline_table(m.rbasis), D["rnl_spline_coefs"]) == 0.0,
         "pair_spline" => maxdiff(spline_table(m.pairbasis), D["pair_spline_coefs"]) == 0.0,
         "WB_seed11" => maxdiff(calc.ps.WB, D["WB"]) == 0.0,
@@ -90,6 +92,7 @@ function build_splined(spec)
     dE, dF, dV = abs(E - D["test_E"][1]) / nat, maxdiff(F, D["test_F"]), maxdiff(V, D["test_V"])
     id["test_EFV"] = dE <= 1e-10 && dF <= 1e-9 && dV <= 1e-9
     id["test_dE_per_atom"], id["test_max_dF"], id["test_max_dV"] = dE, dF, dV
+    id["A2B_max_abs_diff"], id["A2B_max_rel_diff"] = a2b_abs, a2b_rel
     bad = [k for (k, v) in id if v === false]
     isempty(bad) || error("rebuilt ace1_model is NOT the npz model $(spec["npz"]): $(join(sort(bad), ", ")) " *
                           "differ (npz: ACEpotentials $(mt["acepotentials_version"]), Julia $(mt["julia_version"]); " *
