@@ -16,6 +16,13 @@ LBFGS_HI = np.log([50.0, 1e3, 50.0, 4.0, 50.0, 100.0, 1e4, 10.0, 10.0, 10.0])
 
 class MapFit(NamedTuple):
     theta: object; restarts: object; sigma_type_ratios: object; timings: dict
+    log_evidence: object = None          # log marginal likelihood at theta (no hyperprior); None for sigma_type
+
+
+def _log_evidence(obj, theta):
+    """The LML at theta, comparable across bases on the same data (the logged L-BFGS
+    'logpost' adds the hyperprior, so it is not used)."""
+    return float(obj.lik(to_array(theta)))
 
 
 def _rho_fix(cfg, prob):
@@ -42,7 +49,7 @@ def fit_map(cfg, d, b, obj, log=print):
                       None if ratios is None else np.asarray(ratios), {"map": time.time() - t})
     if cfg.opt == "adam":
         theta = run_map(obj.lik, prob.prior, steps=cfg.map_steps, lr=cfg.map_lr, seed=cfg.seed, init=init)
-        return MapFit(theta, None, None, {"map": time.time() - t})
+        return MapFit(theta, None, None, {"map": time.time() - t}, _log_evidence(obj, theta))
     x0 = np.asarray(to_array(init or prob.prior.mu), float)
     lo, hi = LBFGS_LO.copy(), LBFGS_HI.copy()
     if cfg.fix_rho is not None:
@@ -62,4 +69,5 @@ def fit_map(cfg, d, b, obj, log=print):
     restarts = [{"start": r["start"], "logpost": r["value"], "nfev": r["nfev"], "message": r["message"],
                  "x0": r["x0"].tolist(), "x": r["x"].tolist()} for r in runs]
     log(f"L-BFGS: best of {len(runs)} start(s) = start {best['start']}, logpost {best['value']:.6g}")
-    return MapFit(Hypers(*[float(v) for v in best["x"]]), restarts, None, {"map": time.time() - t})
+    theta = Hypers(*[float(v) for v in best["x"]])
+    return MapFit(theta, restarts, None, {"map": time.time() - t}, _log_evidence(obj, theta))

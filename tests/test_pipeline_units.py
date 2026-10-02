@@ -356,3 +356,21 @@ def test_lsq_e0_single_atom_with_close_images_is_not_isolated():
     cs = _cfgs([([14], -4.0, 2.7), ([14, 14], -9.0, 4.6)])     # 2.7 A cell: images within rcut -> bulk
     E0 = lsq_e0(cs, [14], rcut=5.5, log=lambda *a: None)
     assert np.isclose(E0[0], np.linalg.lstsq([[1.0], [2.0]], [-4.0, -9.0], rcond=None)[0][0])
+
+
+def test_fit_reports_the_log_evidence_for_both_optimisers():
+    from conftest import FIXTURE_DIR
+    from ace_jax.fit.hypers import to_array
+    from ace_jax.fit.pipeline import FitConfig, fit, load_fit_data
+    from ace_jax.fit.pipeline.objective import make_objective
+    from ace_jax.fit.pipeline.problem import build_problem
+    base = dict(model=str(FIXTURE_DIR / "si_fitted.npz"), energy_key="dft_energy", force_key="dft_force",
+                virial_key="dft_virial", ntrain=16, ntest=6, batch=4, r0=2.35, arm="linear",
+                m_per_species=0, rungs=("map",), map_steps=5, predict_train=False)
+    for opt in ("adam", "lbfgs"):
+        cfg = FitConfig(opt=opt, **base)
+        d = load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz"), log=lambda *a: None)
+        res = fit(cfg, d, log=lambda *a: None)
+        b = build_problem(cfg, d)
+        ref = float(make_objective(cfg, d, b).lik(to_array(res.theta)))
+        assert np.isfinite(res.map.log_evidence) and abs(res.map.log_evidence - ref) <= 1e-8 * abs(ref), opt
