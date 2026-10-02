@@ -62,13 +62,13 @@ def test_cli_eval(tmp_path, capsys):
     script passes its value to sys.exit, and returning the rows once made every
     successful run exit 1."""
     from ase.io import read, write
-    from ace_jax.fit.xyz import read_raw
+    from ace_jax.fit.xyz import read_extxyz
     data = tmp_path / "d.xyz"
     write(data, read(XYZ, ":4"))                  # each config size compiles anew: keep it small
     out = tmp_path / "pred.xyz"
     assert main(["eval", "--model", str(FIXTURE_DIR / "si_fitted.npz"), "--data", str(data),
                  "--energy-key", "dft_energy", "--force-key", "dft_force", "--out", str(out)]) == 0
-    frames = read_raw(out)
+    frames = read_extxyz(out)
     assert len(frames) == 4 and all("ace_energy" in f.info and "ace_forces" in f.arrays for f in frames)
     assert "config type" in capsys.readouterr().out
 
@@ -80,12 +80,12 @@ def test_cli_eval_matches_the_exact_model_per_config(tmp_path):
     from ace_jax.eval import load, sparse_graph, species_indices
     from ace_jax.fit.data import load_configs
     from conftest import small_si_xyz
-    from ace_jax.fit.xyz import read_raw
+    from ace_jax.fit.xyz import read_extxyz
     xyz = small_si_xyz(tmp_path / "si12.xyz")                 # the isolated atom + 11 cells
     out = tmp_path / "p.xyz"
     assert main(["eval", "--model", str(FIXTURE_DIR / "si_fitted.npz"), "--data", str(xyz),
                  "--energy-key", "dft_energy", "--force-key", "dft_force", "--out", str(out)]) == 0
-    rows = read_raw(out)
+    rows = read_extxyz(out)
     model, meta, _ = load(FIXTURE_DIR / "si_fitted.npz")
     cs = load_configs(xyz, energy_key="dft_energy", force_key="dft_force", virial_key="dft_virial")
     assert len(rows) == len(cs) == 12

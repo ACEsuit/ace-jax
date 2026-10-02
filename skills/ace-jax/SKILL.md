@@ -53,6 +53,7 @@ aj fit --model si.npz --train train.xyz --test test.xyz $K \
 # 3. evaluate the fitted model on any extxyz
 #    prints an E/F/V RMSE table per config_type (labels present); --out writes the
 #    structures back as extxyz, every label kept, plus ace_energy, ace_forces, ace_stress
+#    (written by the ase-extxyz plugin; read it with ase.io.read(f, ':', format='cextxyz'))
 aj eval --model out_linear/model.npz --data new.xyz $K --out pred.xyz
 aj eval --model out_gp/gp_model.npz  --data new.xyz $K --out pred.xyz   # adds ace_energy_std, ace_forces_std
 aj eval --model model.yace --data new.xyz $K                            # PACE works too; --prefix renames ace_

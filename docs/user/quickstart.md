@@ -94,8 +94,20 @@ wrote 13 configurations with predictions (ace_energy, ace_forces, ...) to predic
 
 `predictions.xyz` keeps every original label and adds `ace_energy` (eV),
 `ace_forces` (eV/Å, per atom) and, for periodic cells, `ace_stress`
-(eV/Å³). Open it with ASE or any extended-XYZ reader to make parity plots.
-Without `--out`, `aj eval` only prints the table.
+(eV/Å³). Without `--out`, `aj eval` only prints the table. To make parity
+plots, read it in Python with the `cextxyz` format (the ase-extxyz plugin,
+installed with ace-jax), which keeps every label under its own name:
+
+```python
+from ase.io import read
+
+frames = read("predictions.xyz", ":", format="cextxyz")
+dft = [a.info["energy"] / len(a) for a in frames]
+ace = [a.info["ace_energy"] / len(a) for a in frames]
+```
+
+ASE's built-in `extxyz` reader moves `energy` and `forces` into a calculator and
+rejects 3×3 values such as `virial` written as nested lists, so use `cextxyz`.
 
 ## 4. Use the model from Python
 

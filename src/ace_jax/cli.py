@@ -176,7 +176,8 @@ def cmd_eval(a):
     structures back as extxyz with every original label kept and the predictions added:
     info <prefix>energy (eV) and <prefix>stress (3x3, eV/A^3, periodic cells only),
     arrays <prefix>forces (eV/A); a gp_model.npz adds info <prefix>energy_std and arrays
-    <prefix>forces_std, --posterior (ARD) arrays <prefix>forces_std.
+    <prefix>forces_std, --posterior (ARD) arrays <prefix>forces_std.  The structures go
+    through the ase-extxyz plugin (create_calc=False: no label moves into a calculator).
     Every model goes through its jitted calculator: the edge list is padded to buckets,
     so configs of similar size share one compile.  A linear model is evaluated exactly
     (lean, never splined: spline_tol=None)."""
@@ -184,10 +185,12 @@ def cmd_eval(a):
     from ase.stress import voigt_6_to_full_3x3_stress
     from .fit.data import VOIGT
     from .fit.report import format_rmse_table, rmse_by_type
-    from .fit.xyz import read_raw, write_raw
     keys = dict(energy_key=a.energy_key, force_key=a.force_key, virial_key=a.virial_key)
     configs = load_configs(a.data, **keys)
-    frames = read_raw(a.data) if a.out else None
+    frames = None
+    if a.out:                 # passed through as ASE Atoms: create_calc=False keeps every label as written
+        from ase_extxyz.io import read_cextxyz
+        frames = list(read_cextxyz(a.data, index=":", create_calc=False))
     gp = str(a.model).endswith(".npz") and "gp_json" in np.load(a.model).files   # gp_model.npz from `fit`
     ard = getattr(a, "posterior", None) is not None
     if gp and ard:
@@ -229,7 +232,8 @@ def cmd_eval(a):
         out = pathlib.Path(a.out).expanduser()
         if out.parent and str(out.parent) != ".":
             out.parent.mkdir(parents=True, exist_ok=True)
-        write_raw(out, frames)
+        from ase_extxyz.io import write_cextxyz
+        write_cextxyz(str(out), frames)
         print(f"wrote {len(frames)} configurations with predictions ({p}energy, {p}forces, ...) to {out}")
     return 0
 
