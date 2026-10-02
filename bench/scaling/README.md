@@ -15,7 +15,7 @@ LAMMPS, on SiGe and Cantor at three model sizes each. Design:
 | `sweep.py` | expands the case matrix for a host and runs it resumably |
 | `plot.py` | figures and tables for `docs/dev/benchmarks.md` |
 | `acepot.py`, `julia/` | the ACEpotentials.jl lines: Python side, and the pinned Julia env + drivers |
-| `envs/moriarty.sh`, `envs/lestrade.sh`, `modal_app.py` | the environments |
+| `envs/moriarty.sh`, `envs/sulis.sh`, `envs/lestrade.sh`, `modal_app.py` | the environments |
 
 ## Models
 
@@ -84,6 +84,24 @@ Why each tree is pinned the way it is:
   (12.4 rejects the parenthesised aggregate init in `emplace_back`).
 
 The wrappers `lmp.sh` and `lmp-jax.sh` load the matching modules. `envs/moriarty-{gpu,cpu}.json` point at them.
+
+### Sulis (A100, Slurm)
+
+The moriarty recipe with Sulis modules (`GCC/12.3.0 OpenMPI/4.1.5 CUDA/12.8.0
+CMake/3.26.3`), `Kokkos_ARCH_AMPERE80`, and the sources pinned to the commits
+in `envs/moriarty-VERSIONS`. nvcc 12.8 compiles the lammps-jax plugin (12.4
+does not). The tree is under `~/bench-scaling` (home: 2 TiB quota).
+
+```bash
+rsync src bench fixtures julia pyproject.toml README.md LICENSE (+ bench/scaling/models/) to ~/bench-scaling/ace-jax, then
+bash bench/scaling/envs/sulis.sh sources venv              # login node: clone + download only
+sbatch bench/scaling/envs/sulis-build.sbatch               # compile on an A100 node, then check
+p=$(sbatch --parsable bench/scaling/envs/sulis-sweep.sbatch parity)     # fails only if no ace-jax gate passes
+sbatch --dependency=afterok:$p --kill-on-invalid-dep=yes bench/scaling/envs/sulis-sweep.sbatch acejax-ace-learned
+```
+
+A failed Symmetrix build only costs the MACE rows: `lmp.sh` then runs the dev
+tree, which has ML-PACE too.
 
 The ACEpotentials.jl lines need three more steps (part of the default run):
 

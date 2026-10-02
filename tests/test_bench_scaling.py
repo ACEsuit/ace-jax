@@ -494,6 +494,20 @@ def test_moriarty_cpu_ranks_are_physical_cores():
     assert HOSTS["moriarty-cpu"]["ranks"] == 16
 
 
+def test_sulis_a100_host():
+    """The Sulis A100 host: the A100's ladder (as Modal), one rank, and a memory
+    cap under the batch script's --mem (the cap, not Slurm, must kill a case)."""
+    import re
+    from scaling.perf_results import HOST_ORDER
+    h = HOSTS["sulis-a100"]
+    assert (h["device"], h["n_max"], h["ranks"]) == ("gpu", 1 << 21, 1)
+    sbatch = (pathlib.Path(__file__).parents[1] / "bench/scaling/envs/sulis-sweep.sbatch").read_text()
+    mem = int(re.search(r"#SBATCH --mem=(\d+)G", sbatch).group(1))
+    assert h["rss_cap_gb"] < mem
+    assert "sulis-a100" in HOST_ORDER
+    assert {c.code for c in cases("sulis-a100")} == {c.code for c in cases("modal-a100")}
+
+
 def test_choose_steps_budgets_the_timed_segment():
     """Fixed 200 steps took ~3.5 h per 32k-atom MACE CPU case; scale the step
     count from the previous (smaller) case of the same line to ~60 s of MD."""

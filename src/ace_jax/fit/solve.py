@@ -63,9 +63,12 @@ def _prior_block(prob, theta):
     blockdiag(diag(gamma^2/sigma_c^2), K_MM), so R0 = blockdiag(diag(gamma/sigma_c),
     chol(K_MM)^T) -- upper triangular (both blocks are), so it also seeds the
     streaming QR.  M = 0 recovers diag(gamma/sigma_c)."""
-    L, M = prob.gamma.shape[0], prob.ind.XM.shape[0]
     sc = jnp.exp(theta.log_sigma_c)
-    R0 = jnp.zeros((L + M, L + M)).at[jnp.arange(L), jnp.arange(L)].set(prob.gamma / sc)
+    lin = prob.gamma / sc                               # gamma / sigma_c, as written (bit-stable)
+    if getattr(prob, "e0_prec", None) is not None:      # the joint-E0 columns' fixed precision
+        lin = jnp.concatenate([lin, jnp.sqrt(jnp.asarray(prob.e0_prec, lin.dtype))])
+    L, M = lin.shape[0], prob.ind.XM.shape[0]
+    R0 = jnp.zeros((L + M, L + M)).at[jnp.arange(L), jnp.arange(L)].set(lin)
     if M > 0:
         LMM = jnp.linalg.cholesky(K_MM(theta, prob.spec, prob.ind.XM, prob.ind.SM, prob.ind.ZM, prob.ind.embed))
         R0 = R0.at[L:, L:].set(LMM.T)                    # chol(K_MM)^T, upper triangular

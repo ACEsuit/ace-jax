@@ -34,8 +34,10 @@ def _add_fit_args(p):
     p.add_argument("--weights", default=None,
                    help='JSON: an ACEfit weights dict {"default": {"E":..,"F":..,"V":..}, <config_type>: ..} '
                         'or a list of weight factors [{"Structural": {}}, {"ConfigType": {...}}]')
-    p.add_argument("--e0", choices=["model", "lsq"], default="model",
-                   help="per-species E0: the model's (default) or least squares on the training energies")
+    p.add_argument("--e0", choices=["model", "lsq", "prefit"], default="model",
+                   help="per-species E0: the model's (default); lsq fits it jointly with the readout (a wide "
+                        "prior around a least-squares start); prefit fixes it at least squares on the training "
+                        "energies before the fit")
     p.add_argument("--baseline", default=None, help="dimer_mean.npz: fit the residual to this pair mean")
     p.add_argument("--configs-per-batch", type=int, default=8)
     p.add_argument("--m-per-species", type=int, default=500)

@@ -18,7 +18,8 @@ class FitConfig:
     route: dict | None = None            # ParamSet route overrides
     baseline: str | None = None          # dimer_mean.npz (mu_0 subtracted, added back)
     base_npz: str | None = None          # precomputed per-config mu_0 offsets
-    e0: str = "lsq"                      # "lsq" (fit on train energies) | "model" (z["E0"])
+    e0: str = "lsq"                      # "lsq" (fit jointly with the readout) | "prefit" (least squares on
+                                         # the composition, then fixed) | "model" (z["E0"])
     # GP
     m_per_species: int = 100
     kernel: str = "cosine"; bump: bool = True
@@ -69,7 +70,16 @@ class FitConfig:
     radial_lam_grid: tuple = (0.0, 1e-2) # relative roughness weights; the gate picks among them and init
     radial_val_frac: float = 0.2         # train hold-out for the gate
 
+    @property
+    def joint_e0(self):
+        """e0='lsq' fits E0 jointly (E0 columns in the linear model, a wide prior around the
+        pre-fit value). ARD and POPS keep the pre-fit E0: they build their own readout prior.
+        (A learned-radial fit learns its radials with the pre-fit E0, then fits jointly.)"""
+        return self.e0 == "lsq" and self.uq == "blr"
+
     def validate(self):
+        if self.e0 not in ("lsq", "prefit", "model"):
+            raise ValueError(f"e0 must be 'lsq', 'prefit' or 'model', got {self.e0!r}")
         if self.arm not in ("linear", "gp"):
             raise ValueError(f"arm must be 'linear' or 'gp', got {self.arm!r}")
         if self.uq == "pops" and self.arm != "linear":

@@ -35,11 +35,21 @@ from .radial_model import (data_r_range, gap_penalty, normalise, radial_gram, re
 from .stats import linear_statistics
 
 
+def _prior(prob):
+    """The readout prior the objective needs: gamma, or (gamma, e0_prec) with joint-E0 columns."""
+    e0p = getattr(prob, "e0_prec", None)
+    return prob.gamma if e0p is None else (prob.gamma, e0p)
+
+
 def projected_residual_from_stats(theta, lin, gamma):
-    """yy - b^T (G + Lambda)^{-1} b from linear statistics `lin` (M = 0).
+    """yy - b^T (G + Lambda)^{-1} b from linear statistics `lin` (M = 0); `gamma` is the
+    readout's prior diagonal, or (gamma, e0_prec) when joint-E0 columns follow it.
     A failed Cholesky yields NaN; the learner treats that as a stop signal."""
     G, b, yy, _, _ = combine(theta, lin)
-    lam = gamma ** 2 * jnp.exp(-2.0 * theta.log_sigma_c)
+    g, e0p = gamma if isinstance(gamma, tuple) else (gamma, None)
+    lam = g ** 2 * jnp.exp(-2.0 * theta.log_sigma_c)
+    if e0p is not None:          # the fixed E0 precision does not scale with sigma_c
+        lam = jnp.concatenate([lam, jnp.asarray(e0p, lam.dtype)])
     L = jnp.linalg.cholesky(G + jnp.diag(lam))
     v = solve_triangular(L, b, lower=True)
     return yy - v @ v
@@ -49,7 +59,7 @@ def projected_residual(W, theta, prob, ds):
     """VarPro objective of the linear ACE with tensor radials W (one full
     streaming pass over ds)."""
     lin = linear_statistics(with_radial(prob.model, W), prob.cfg, ds)
-    return projected_residual_from_stats(theta, lin, prob.gamma)
+    return projected_residual_from_stats(theta, lin, _prior(prob))
 
 
 def require_x64():
@@ -333,7 +343,7 @@ def learn_radial(prob, ds, W0, *, theta0=None, profile=True, lam_rough=0.0, roug
     if r0 is None or learn_sigma_e_mult != 1.0:
         if lin0 is None:
             lin0 = linear_statistics(with_radial(prob.model, V), prob.cfg, ds)
-        r0 = projected_residual_from_stats(from_array(_learn_theta(a, learn_sigma_e_mult)), lin0, prob.gamma)
+        r0 = projected_residual_from_stats(from_array(_learn_theta(a, learn_sigma_e_mult)), lin0, _prior(prob))
     r0 = float(r0)
     rough0 = float(roughness(V, D2, wn))
     lam = relative_lambda(lam_rough, r0, rough0)
@@ -365,7 +375,7 @@ def learn_radial(prob, ds, W0, *, theta0=None, profile=True, lam_rough=0.0, roug
         # `args` change VALUE each round (a is re-profiled) but not shape/dtype.
         V, f_best, trace, reason = lbfgs_loop(
             _objective, V, steps=n, tol=tol, patience=patience,
-            args=(_learn_theta(a, learn_sigma_e_mult), prob.model, ds, prob.gamma, Q, active, D2, wn, lam,
+            args=(_learn_theta(a, learn_sigma_e_mult), prob.model, ds, _prior(prob), Q, active, D2, wn, lam,
                   W_ref, sw, lam_spec_abs,
                   U, lam_gap_abs),
             statics=(prob.cfg,))
@@ -537,7 +547,7 @@ def fit_radial(prob, ds_fit, ds_val, W0, *, lam_grid=(0.0, 1e-3, 1e-2, 1e-1), sp
         lin0 = linear_statistics(with_radial(prob.model, W_init), prob.cfg, ds_fit)
     else:
         a0, lin0, _ = theta_map_linear(prob, ds_fit, W_init, steps=map_steps, return_stats=True)
-    r0 = float(projected_residual_from_stats(from_array(a0), lin0, prob.gamma))
+    r0 = float(projected_residual_from_stats(from_array(a0), lin0, _prior(prob)))
     rw = learn_kw.get("rough_weights")
     rough0 = float(roughness(W_init, D2, jnp.ones(W0.shape[2]) if rw is None
                              else jnp.asarray(rw, jnp.float64)))

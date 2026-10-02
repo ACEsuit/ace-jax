@@ -18,6 +18,8 @@ HOSTS = {
     "moriarty-cpu": {"device": "cpu", "n_max": 32768, "ranks": 16, "rss_cap_gb": 48},
     "moriarty-gpu": {"device": "gpu", "n_max": 1 << 20, "ranks": 1, "rss_cap_gb": 48},
     "modal-a100": {"device": "gpu", "n_max": 1 << 21, "ranks": 1},
+    # Sulis A100 (envs/sulis.sh): one GPU of a shared node, --mem=120G per job
+    "sulis-a100": {"device": "gpu", "n_max": 1 << 21, "ranks": 1, "rss_cap_gb": 100},
     "local-cpu": {"device": "cpu", "n_max": 8192, "ranks": 8},
     # i9-14900K (hybrid): P-cores = logical CPUs 0-15 (8 cores x 2 HT), E-cores 16-31.
     # P-cores only: the sweep pins itself (and so every case) to `cpus`, so a

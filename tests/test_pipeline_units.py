@@ -408,13 +408,15 @@ def test_lstsq_solver_is_plain_weighted_least_squares():
     b = build_problem(cfg, d)
     with highest_precision():
         Phi, y = stacked_design(b.prob, d.ds_train, lstsq_theta(b.prob))
-    Dt = Phi.shape[1]
-    ref = np.linalg.lstsq(np.asarray(Phi)[:-Dt], np.asarray(y)[:-Dt], rcond=None)[0]   # no prior rows
+    Dt, L0 = Phi.shape[1], b.prob.cfg.len_readout
+    keep = np.r_[np.arange(Phi.shape[0] - Dt), Phi.shape[0] - Dt + np.arange(L0, Dt)]   # data + the E0 prior rows
+    ref = np.linalg.lstsq(np.asarray(Phi)[keep], np.asarray(y)[keep], rcond=None)[0]    # no readout prior
     np.testing.assert_allclose(res.readout, ref, rtol=1e-8, atol=1e-10 * np.abs(ref).max())
     arr = linear_model_arrays(res)                       # the saved model carries that readout
     n = b.prob.cfg.n_B
     np.testing.assert_array_equal(arr["WB"][:, 0], np.asarray(res.readout)[:n])
     assert res.map.log_evidence is None and set(res.rungs.draws) == {"lstsq"}
+    assert abs(arr["E0"][0] - d.E0[0]) < 3.0          # E0 keeps its 1 eV prior: no arbitrary offset
 
 
 def test_lstsq_predictions_use_the_readout_with_zero_variance():

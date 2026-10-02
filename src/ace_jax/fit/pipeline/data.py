@@ -196,13 +196,13 @@ def load_fit_data(cfg, *, data=None, train=None, test=None, ood=None, log=print)
         base_ood = [_zero_base(c) for c in ood_o]
 
     els = [int(e) for e in meta["elements"]]
-    if cfg.e0 == "lsq":
+    if cfg.e0 in ("lsq", "prefit"):    # lsq refines it jointly in the fit (cfg.joint_e0)
         E0 = lsq_e0(tr, els, float(meta["rcut"]), log=log)
         model = eqx.tree_at(lambda m: m.E0, model, jnp.asarray(E0))
     elif cfg.e0 == "model":
         E0 = np.asarray(z["E0"])
     else:
-        raise ValueError(f"e0 must be 'lsq' or 'model', got {cfg.e0!r}")
+        raise ValueError(f"e0 must be 'lsq', 'prefit' or 'model', got {cfg.e0!r}")
     ds_train = build_dataset(tr, meta, E0, cfg.batch)
     ds_test = build_dataset(te, meta, E0, cfg.batch)
     ds_ood = build_dataset(od, meta, E0, cfg.batch) if od else None
