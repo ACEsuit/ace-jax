@@ -75,6 +75,13 @@ design is in `docs/dev/benchmark-scaling-spec.md`, and how to reproduce it is in
 | moriarty-gpu | mace | MACE | 2/2 | 6.9e-07 | 9.7e-05 |
 | moriarty-gpu | mlpace | ML-PACE | 2/2 | 4.9e-14 | 4.1e-10 |
 | moriarty-gpu | spline | ace-jax (linear ACE, learned radial, splined) | 2/2 | 2.1e-12 | 3.1e-08 |
+| sulis-a100 | acejax | ace-jax (linear ACE) | 6/6 | 3.3e-16 | 2.2e-14 |
+| sulis-a100 | acejax | ace-jax (linear ACE, learned radial, analytic) | 6/6 | 2.8e-16 | 2.0e-14 |
+| sulis-a100 | acejax | ace-jax (linear ACE, learned radial, splined) | 6/6 | 1.1e-16 | 8.0e-13 |
+| sulis-a100 | acejax | ace-jax (PACE model) | 6/6 | 5.6e-17 | 2.7e-15 |
+| sulis-a100 | mace | MACE | 2/2 | 6.9e-07 | 9.7e-05 |
+| sulis-a100 | mlpace | ML-PACE | 2/2 | 4.9e-14 | 4.1e-10 |
+| sulis-a100 | spline | ace-jax (linear ACE, learned radial, splined) | 2/2 | 2.1e-12 | 3.1e-08 |
 
 **Learned radials.** A learned radial (`fit/radial_learn.py`) lives on the
 analytic branch, a per-edge polynomial recursion that costs more than the
@@ -128,6 +135,7 @@ ML-PACE in LAMMPS against ace-jax PACE on the same `.yace` models (float64, atom
 | modal-a100 | 8192 | 1.67M–2.22M | 714k–1.26M | 1.14M–1.40M | 1.8–2.3× | 1.5–1.6× |
 | moriarty-cpu | 2048 | 208k–275k | 16k–23k | — | 12–13× | — |
 | moriarty-gpu | 8192 | 684k–1.02M | 251k–416k | 209k–271k | 2.4–2.7× | 3.3–3.8× |
+| sulis-a100 | 8192 | 2.91M–3.30M | 892k–961k | 1.09M–1.33M | 3.3–3.4× | 2.5–2.7× |
 
 ace-jax against MACE, same mode (float64 throughput ratio; where MACE ran out of memory at N, at the largest size both ran):
 
@@ -139,6 +147,8 @@ ace-jax against MACE, same mode (float64 throughput ratio; where MACE ran out of
 | moriarty-cpu | standalone | 65–1.1e+02× | 92–1.5e+02× |
 | moriarty-gpu | standalone | 49–1e+02× | 1.3e+02–1.4e+02× |
 | moriarty-gpu | lammps | 17–29× (at 4096) | 32–48× (at 4096) |
+| sulis-a100 | standalone | 37–50× | 60–78× |
+| sulis-a100 | lammps | 18–28× | 31–41× |
 
 Largest system that ran standalone (float64, atoms), and the float32 / float64 throughput ratio at N:
 
@@ -148,6 +158,7 @@ Largest system that ran standalone (float64, atoms), and the float32 / float64 t
 | modal-a100 | 2097152 | 2097152 | 32768 | 1.2–1.4× | 1.2–1.4× | 1.1× |
 | moriarty-cpu | 32768 | 32768 | 4096–8192 | 1.6–1.7× | 1.4× | 1.9–2× |
 | moriarty-gpu | 1048576 | 1048576 | 8192 | 3.5–3.8× | 2.7–3.4× | 5.8–6.4× |
+| sulis-a100 | 2097152 | 2097152 | 16384 | 1–1.5× | 1.4× | 1–1.1× |
 
 - **ML-PACE in LAMMPS remains the fastest code on the A100,** and the gap to
   ace-jax on the same `.yace` models is much narrower than before the
@@ -255,6 +266,10 @@ Hollow markers: ace-jax chose the sparse layout. Where a case was run more than 
 
 *The cost of a learned radial, and what splining recovers (float64, medium linear ACE): the stock model (spline radial), its learned-radial proxy splined as deployed (`spline_tol="auto"`, 1e-10) and the same proxy kept analytic (`spline_tol=None`, exact). Solid = standalone, dashed = LAMMPS; see `docs/dev/learned-radial-splining.md`.*
 
+![scaling_learned_radial_float64_medium_sulis-a100](figs/scaling_learned_radial_float64_medium_sulis-a100.png)
+
+*The cost of a learned radial, and what splining recovers (float64, medium linear ACE): the stock model (spline radial), its learned-radial proxy splined as deployed (`spline_tol="auto"`, 1e-10) and the same proxy kept analytic (`spline_tol=None`, exact). Solid = standalone, dashed = LAMMPS; see `docs/dev/learned-radial-splining.md`.*
+
 ## Model basis sizes
 
 | system | size | PACE | linear ACE | ACE / PACE |
@@ -340,6 +355,28 @@ Hollow markers: ace-jax chose the sparse layout. Where a case was run more than 
 | moriarty-gpu | SiGe | MACE | lammps | 4096 | 8192 |
 | moriarty-gpu | SiGe | MACE | standalone | 8192 | 16384 |
 | moriarty-gpu | SiGe | ML-PACE | lammps | 1048576 | — |
+| sulis-a100 | Cantor | ace-jax (linear ACE) | lammps | 2097152 | — |
+| sulis-a100 | Cantor | ace-jax (linear ACE) | standalone | 2097152 | — |
+| sulis-a100 | Cantor | ace-jax (linear ACE, learned radial, analytic) | lammps | 2097152 | — |
+| sulis-a100 | Cantor | ace-jax (linear ACE, learned radial, analytic) | standalone | 2097152 | — |
+| sulis-a100 | Cantor | ace-jax (linear ACE, learned radial, splined) | lammps | 2097152 | — |
+| sulis-a100 | Cantor | ace-jax (linear ACE, learned radial, splined) | standalone | 2097152 | — |
+| sulis-a100 | Cantor | ace-jax (PACE model) | lammps | 2097152 | — |
+| sulis-a100 | Cantor | ace-jax (PACE model) | standalone | 2097152 | — |
+| sulis-a100 | Cantor | MACE | lammps | 8192 | 16384 |
+| sulis-a100 | Cantor | MACE | standalone | 16384 | 32768 |
+| sulis-a100 | Cantor | ML-PACE | lammps | 2097152 | — |
+| sulis-a100 | SiGe | ace-jax (linear ACE) | lammps | 2097152 | — |
+| sulis-a100 | SiGe | ace-jax (linear ACE) | standalone | 2097152 | — |
+| sulis-a100 | SiGe | ace-jax (linear ACE, learned radial, analytic) | lammps | 2097152 | — |
+| sulis-a100 | SiGe | ace-jax (linear ACE, learned radial, analytic) | standalone | 2097152 | — |
+| sulis-a100 | SiGe | ace-jax (linear ACE, learned radial, splined) | lammps | 2097152 | — |
+| sulis-a100 | SiGe | ace-jax (linear ACE, learned radial, splined) | standalone | 2097152 | — |
+| sulis-a100 | SiGe | ace-jax (PACE model) | lammps | 2097152 | — |
+| sulis-a100 | SiGe | ace-jax (PACE model) | standalone | 2097152 | — |
+| sulis-a100 | SiGe | MACE | lammps | 8192 | 16384 |
+| sulis-a100 | SiGe | MACE | standalone | 16384 | 32768 |
+| sulis-a100 | SiGe | ML-PACE | lammps | 2097152 | — |
 
 ## Tables
 
@@ -525,6 +562,58 @@ Hollow markers: ace-jax chose the sparse layout. Where a case was run more than 
 | moriarty-gpu | SiGe | ML-PACE | lammps | medium | float64 | 8192 | 6.84e+05 |
 | moriarty-gpu | Cantor | ML-PACE | lammps | small | float64 | 8192 | 3.54e+06 |
 | moriarty-gpu | SiGe | ML-PACE | lammps | small | float64 | 8192 | 1.94e+06 |
+| sulis-a100 | Cantor | ace-jax (linear ACE) | lammps | large | float64 | 8192 | 1.55e+06 |
+| sulis-a100 | SiGe | ace-jax (linear ACE) | lammps | large | float64 | 8192 | 1.49e+06 |
+| sulis-a100 | Cantor | ace-jax (linear ACE) | lammps | medium | float64 | 8192 | 1.49e+06 |
+| sulis-a100 | SiGe | ace-jax (linear ACE) | lammps | medium | float64 | 8192 | 2.47e+06 |
+| sulis-a100 | Cantor | ace-jax (linear ACE) | lammps | small | float64 | 8192 | 2.09e+06 |
+| sulis-a100 | SiGe | ace-jax (linear ACE) | lammps | small | float64 | 8192 | 2.25e+06 |
+| sulis-a100 | Cantor | ace-jax (linear ACE) | standalone | large | float64 | 8192 | 1.28e+06 |
+| sulis-a100 | SiGe | ace-jax (linear ACE) | standalone | large | float64 | 8192 | 8.96e+05 |
+| sulis-a100 | Cantor | ace-jax (linear ACE) | standalone | medium | float64 | 8192 | 1.48e+06 |
+| sulis-a100 | SiGe | ace-jax (linear ACE) | standalone | medium | float64 | 8192 | 1.47e+06 |
+| sulis-a100 | Cantor | ace-jax (linear ACE) | standalone | small | float64 | 8192 | 1.88e+06 |
+| sulis-a100 | SiGe | ace-jax (linear ACE) | standalone | small | float64 | 8192 | 2.01e+06 |
+| sulis-a100 | Cantor | ace-jax (linear ACE, learned radial, analytic) | lammps | medium | float64 | 8192 | 7.48e+05 |
+| sulis-a100 | SiGe | ace-jax (linear ACE, learned radial, analytic) | lammps | medium | float64 | 8192 | 1.91e+06 |
+| sulis-a100 | Cantor | ace-jax (linear ACE, learned radial, analytic) | standalone | medium | float64 | 8192 | 7.79e+05 |
+| sulis-a100 | SiGe | ace-jax (linear ACE, learned radial, analytic) | standalone | medium | float64 | 8192 | 1.15e+06 |
+| sulis-a100 | Cantor | ace-jax (linear ACE, learned radial, splined) | lammps | medium | float64 | 8192 | 1.53e+06 |
+| sulis-a100 | SiGe | ace-jax (linear ACE, learned radial, splined) | lammps | medium | float64 | 8192 | 2.51e+06 |
+| sulis-a100 | Cantor | ace-jax (linear ACE, learned radial, splined) | standalone | medium | float64 | 8192 | 1.48e+06 |
+| sulis-a100 | SiGe | ace-jax (linear ACE, learned radial, splined) | standalone | medium | float64 | 8192 | 1.48e+06 |
+| sulis-a100 | Cantor | ace-jax (PACE model) | lammps | large | float64 | 8192 | 4.98e+05 |
+| sulis-a100 | SiGe | ace-jax (PACE model) | lammps | large | float64 | 8192 | 3.51e+05 |
+| sulis-a100 | Cantor | ace-jax (PACE model) | lammps | medium | float64 | 8192 | 1.33e+06 |
+| sulis-a100 | SiGe | ace-jax (PACE model) | lammps | medium | float64 | 8192 | 1.09e+06 |
+| sulis-a100 | Cantor | ace-jax (PACE model) | lammps | small | float64 | 8192 | 2.27e+06 |
+| sulis-a100 | SiGe | ace-jax (PACE model) | lammps | small | float64 | 8192 | 2.39e+06 |
+| sulis-a100 | Cantor | ace-jax (PACE model) | standalone | large | float64 | 8192 | 4.69e+05 |
+| sulis-a100 | SiGe | ace-jax (PACE model) | standalone | large | float64 | 8192 | 3.54e+05 |
+| sulis-a100 | Cantor | ace-jax (PACE model) | standalone | medium | float64 | 8192 | 9.61e+05 |
+| sulis-a100 | SiGe | ace-jax (PACE model) | standalone | medium | float64 | 8192 | 8.92e+05 |
+| sulis-a100 | Cantor | ace-jax (PACE model) | standalone | small | float64 | 8192 | 1.18e+06 |
+| sulis-a100 | SiGe | ace-jax (PACE model) | standalone | small | float64 | 8192 | 1.09e+06 |
+| sulis-a100 | Cantor | MACE | lammps | large | float64 | 4096 | 2.15e+04 |
+| sulis-a100 | SiGe | MACE | lammps | large | float64 | 4096 | 2.76e+04 |
+| sulis-a100 | Cantor | MACE | lammps | medium | float64 | 8192 | 4.76e+04 |
+| sulis-a100 | SiGe | MACE | lammps | medium | float64 | 8192 | 5.97e+04 |
+| sulis-a100 | Cantor | MACE | lammps | small | float64 | 8192 | 1.26e+05 |
+| sulis-a100 | SiGe | MACE | lammps | small | float64 | 8192 | 1.55e+05 |
+| sulis-a100 | Cantor | MACE | standalone | large | float64 | 8192 | 1.65e+04 |
+| sulis-a100 | SiGe | MACE | standalone | large | float64 | 8192 | 2.15e+04 |
+| sulis-a100 | Cantor | MACE | standalone | medium | float64 | 8192 | 1.91e+04 |
+| sulis-a100 | SiGe | MACE | standalone | medium | float64 | 8192 | 2.44e+04 |
+| sulis-a100 | Cantor | MACE | standalone | mh1 | float64 | 4096 | 7.5e+03 |
+| sulis-a100 | SiGe | MACE | standalone | mh1 | float64 | 8192 | 1.43e+04 |
+| sulis-a100 | Cantor | MACE | standalone | small | float64 | 8192 | 2e+04 |
+| sulis-a100 | SiGe | MACE | standalone | small | float64 | 8192 | 2.51e+04 |
+| sulis-a100 | Cantor | ML-PACE | lammps | large | float64 | 8192 | 1.2e+06 |
+| sulis-a100 | SiGe | ML-PACE | lammps | large | float64 | 8192 | 8.98e+05 |
+| sulis-a100 | Cantor | ML-PACE | lammps | medium | float64 | 8192 | 3.3e+06 |
+| sulis-a100 | SiGe | ML-PACE | lammps | medium | float64 | 8192 | 2.91e+06 |
+| sulis-a100 | Cantor | ML-PACE | lammps | small | float64 | 8192 | 6.03e+06 |
+| sulis-a100 | SiGe | ML-PACE | lammps | small | float64 | 8192 | 4.82e+06 |
 
 | host | code | mode | median compile / export (s) |
 |---|---|---|---|
@@ -555,6 +644,15 @@ Hollow markers: ace-jax chose the sparse layout. Where a case was run more than 
 | moriarty-gpu | ace-jax (PACE model) | lammps | 1.3 |
 | moriarty-gpu | ace-jax (PACE model) | standalone | 6.1 |
 | moriarty-gpu | MACE | standalone | 12.5 |
+| sulis-a100 | ace-jax (linear ACE) | lammps | 1.2 |
+| sulis-a100 | ace-jax (linear ACE) | standalone | 3.5 |
+| sulis-a100 | ace-jax (linear ACE, learned radial, analytic) | lammps | 1.2 |
+| sulis-a100 | ace-jax (linear ACE, learned radial, analytic) | standalone | 4.2 |
+| sulis-a100 | ace-jax (linear ACE, learned radial, splined) | lammps | 1.8 |
+| sulis-a100 | ace-jax (linear ACE, learned radial, splined) | standalone | 3.4 |
+| sulis-a100 | ace-jax (PACE model) | lammps | 1.3 |
+| sulis-a100 | ace-jax (PACE model) | standalone | 6.7 |
+| sulis-a100 | MACE | standalone | 11.5 |
 
 ## Versions
 
@@ -562,3 +660,4 @@ Hollow markers: ace-jax chose the sparse layout. Where a case was run more than 
 - **modal-a100**: ase 3.29.0, jax 0.11.2, jaxlib 0.11.2, mace-torch 0.3.16, matscipy 1.2.0, matscipy-neighbours 1.0.0, python 3.12.1, torch 2.14.0
 - **moriarty-cpu**: ace-jax 0.1.0, ase 3.29.0, jax 0.11.2, jaxlib 0.11.2, mace-torch 0.3.16, matscipy 1.2.0, matscipy-neighbours 0.1.0, python 3.12.8, torch 2.14.0
 - **moriarty-gpu**: ace-jax 0.1.0, ase 3.29.0, jax 0.11.2, jaxlib 0.11.2, mace-torch 0.3.16, matscipy 1.2.0, matscipy-neighbours 0.1.0, python 3.12.8, torch 2.14.0
+- **sulis-a100**: ace-jax 0.1.0, ase 3.29.0, jax 0.11.2, jaxlib 0.11.2, mace-torch 0.3.16, matscipy 1.3.0, matscipy-neighbours 1.0.0, python 3.12.13, torch 2.14.0+cu126

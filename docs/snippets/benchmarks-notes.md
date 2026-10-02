@@ -1,4 +1,6 @@
-- **CPU:** `moriarty-cpu`, Intel(R) Xeon(R) Silver 4216 CPU @ 2.10GHz.
-- **GPU:** `modal-a100`, NVIDIA A100 80GB PCIe, NVIDIA A100-SXM4-80GB.
+- **CPU:** `lestrade-cpu`, Intel(R) Core(TM) i9-14900K: standalone with 16 threads, LAMMPS with 8 MPI ranks, on CPUs 0-15.
+- **GPU:** `sulis-a100`, NVIDIA A100-PCIE-40GB.
+- ACEpotentials.jl standalone is one `energy_forces` call in Julia (neighbour list included), timed after a warm-up call.
+- ACEpotentials.jl (linear ACE, trim library in LAMMPS) evaluates the exact radial basis; the other ACE lines evaluate splined radials.
 - ML-PACE runs only in float64, so it is absent from the float32 figure.
 - MACE in LAMMPS (Symmetrix) evaluates in double whatever the input, so it is shown in float64 only. A MACE line that stops early ran out of memory.

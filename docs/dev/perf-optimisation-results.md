@@ -212,6 +212,13 @@ Each row gives the checks passed out of those run, and the largest differences:
 | moriarty-gpu | mace | MACE | 2/2 | 6.9e-07 | 9.7e-05 |
 | moriarty-gpu | mlpace | ML-PACE | 2/2 | 4.9e-14 | 4.1e-10 |
 | moriarty-gpu | spline | ace-jax (linear ACE, learned radial, splined) | 2/2 | 2.1e-12 | 3.1e-08 |
+| sulis-a100 | acejax | ace-jax (linear ACE) | 6/6 | 3.3e-16 | 2.2e-14 |
+| sulis-a100 | acejax | ace-jax (linear ACE, learned radial, analytic) | 6/6 | 2.8e-16 | 2.0e-14 |
+| sulis-a100 | acejax | ace-jax (linear ACE, learned radial, splined) | 6/6 | 1.1e-16 | 8.0e-13 |
+| sulis-a100 | acejax | ace-jax (PACE model) | 6/6 | 5.6e-17 | 2.7e-15 |
+| sulis-a100 | mace | MACE | 2/2 | 6.9e-07 | 9.7e-05 |
+| sulis-a100 | mlpace | ML-PACE | 2/2 | 4.9e-14 | 4.1e-10 |
+| sulis-a100 | spline | ace-jax (linear ACE, learned radial, splined) | 2/2 | 2.1e-12 | 3.1e-08 |
 
 The frozen-reference parity test (`tests/test_perf_parity.py`) is part of the
 test suite and a hard gate for the branch. It checks the new code against the
