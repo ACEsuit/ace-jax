@@ -134,9 +134,11 @@ def _(mo):
 
     ```bash
     aj fit --order 3 --max-degree 12 --train train.xyz --test test.xyz \
-        --m-per-species 0 --e0 lsq --solver lstsq --out lstsq12
+        --m-per-species 0 --e0 lsq --weights '{"default": {"E": 30, "F": 1, "V": 1}}' \
+        --solver lstsq --out lstsq12
     aj fit --order 3 --max-degree 12 --train train.xyz --test test.xyz \
-        --m-per-species 0 --e0 lsq --opt lbfgs --out evidence12
+        --m-per-species 0 --e0 lsq --weights '{"default": {"E": 30, "F": 1, "V": 1}}' \
+        --opt lbfgs --out evidence12
     ```
     """)
     return

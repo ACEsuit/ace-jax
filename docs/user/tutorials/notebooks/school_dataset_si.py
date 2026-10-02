@@ -327,7 +327,8 @@ def _(mo):
 
 
 @app.cell
-def _(L, T, cache, calc, mo):
+def _(L, T, cache):
+    # labelled apart from the fit, so exercise 3 can train on the vacancy cell without a cycle
     supercell, vacancy = T.e1_vacancy_pair()
     labelled_probe = L.label([supercell, vacancy], model="mpa-0", cache=cache)
 
@@ -337,6 +338,11 @@ def _(L, T, cache, calc, mo):
 
 
     ref_vacancy = e_vac(labelled_probe[0].info["energy"], 64, labelled_probe[1].info["energy"], 63)
+    return e_vac, labelled_probe, ref_vacancy, supercell, vacancy
+
+
+@app.cell
+def _(L, calc, e_vac, mo, ref_vacancy, supercell, vacancy):
     _model_E = []
     for _a in (supercell, vacancy):
         _b = _a.copy(); _b.calc = calc
@@ -346,7 +352,7 @@ def _(L, T, cache, calc, mo):
     mo.md(f"| | E_vac (eV) |\n|---|---|\n| MACE-MPA-0 | {ref_vacancy:.3f} |\n"
           f"| ACE (fitted to bulk) | {ace_vacancy:.3f} |\n| error | {vacancy_error:+.3f} |\n\n"
           f"Labels used so far: **{L.labels_used()}**.")
-    return ace_vacancy, ref_vacancy, vacancy_error
+    return ace_vacancy, vacancy_error
 
 
 @app.cell(hide_code=True)
@@ -409,7 +415,7 @@ def _(mo):
        zero forces by symmetry: what does the fit learn from them, and what
        happens to the vacancy error?
     3. **Add the defect.** Append `labelled_probe[1]` (the vacancy cell) to the
-       training set in Step 4, and refit. What happens to the vacancy error now,
+       training set in Step 4 (`train=labelled_bulk + [labelled_probe[1]]`), and refit. What happens to the vacancy error now,
        and why is that not a fair test any more?
     4. **Off the grid.** The sliders snap to the settings whose labels ship.
        To label any other structure, install the labeller into the notebook's

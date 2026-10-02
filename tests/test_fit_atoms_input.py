@@ -82,8 +82,51 @@ def test_a_calculator_shared_across_structures_is_not_read_as_labels():
     for a in s:
         a.calc = calc
         a.get_forces()
-    with pytest.raises(ValueError, match="another structure"):
+    with pytest.raises(ValueError, match="shared across structures"):
         load_configs(s, energy_key="energy", force_key="forces", virial_key=None)
     one = s[1]                                             # the structure calc last saw: still valid
     assert load_configs([one], energy_key="energy", force_key="forces", virial_key=None)[0].energy \
         == pytest.approx(one.get_potential_energy())
+
+
+def _read_labelled(tmp_path):
+    from ase.calculators.emt import EMT
+    from ase.io import read, write
+    s = []
+    for x in (0.98, 1.02):
+        a = bulk("Cu", "fcc", a=3.6 * x, cubic=True); a.rattle(0.02, seed=3); a.positions[0] += 0.3 * a.cell[0]
+        a.calc = EMT(); a.get_forces(); a.get_stress(); s.append(a)
+    write(tmp_path / "s.xyz", s)
+    return read(tmp_path / "s.xyz", ":")
+
+
+def test_harmless_edits_to_read_frames_keep_their_labels(tmp_path):
+    keys = dict(energy_key="energy", force_key="forces", virial_key=None, stress_key="stress")
+    ref = load_configs(_read_labelled(tmp_path), **keys)
+    wrapped = _read_labelled(tmp_path)
+    for a in wrapped:
+        a.wrap()                                           # positions move by lattice vectors only
+    mag = _read_labelled(tmp_path)
+    for a in mag:
+        a.set_initial_magnetic_moments([1.0] * len(a))     # not a label input
+    for frames in (wrapped, mag):
+        got = load_configs(frames, **keys)
+        for g, r in zip(got, ref):
+            assert g.energy == r.energy and np.allclose(g.forces, r.forces) and np.allclose(g.virial, r.virial)
+
+
+def test_info_labels_with_a_shared_live_calculator_are_read(tmp_path):
+    # labels in info/arrays: the calculator's (stale) results are never used, so nothing to reject
+    from ase.calculators.emt import EMT
+    calc, s = EMT(), []
+    for x in (0.98, 1.02):
+        a = bulk("Cu", "fcc", a=3.6 * x, cubic=True); a.info["dft_energy"] = -x
+        a.arrays["dft_forces"] = np.zeros((len(a), 3)); a.calc = calc; a.get_forces(); s.append(a)
+    got = load_configs(s, energy_key="dft_energy", force_key="dft_forces", virial_key=None)
+    assert [g.energy for g in got] == [-0.98, -1.02]
+
+
+def test_moved_atoms_name_what_changed(tmp_path):
+    a = _read_labelled(tmp_path)[0]; a.positions[1] += 0.1
+    with pytest.raises(ValueError, match="positions"):
+        load_configs([a], energy_key="energy", force_key="forces", virial_key=None)

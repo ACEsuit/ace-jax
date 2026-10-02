@@ -56,26 +56,51 @@ def _label(value, key, shape, where):
     return a.reshape(shape)
 
 
-def _atoms_frames(source):
-    """ase.Atoms -> fit.xyz.Frame records, keys as named; SinglePointCalculator results
-    (what MACE and ASE leave behind) become info energy/stress and arrays forces."""
+_LABEL_INPUTS = ("numbers", "cell", "pbc", "positions")   # check_state changes that invalidate E/F/stress
+
+
+def _stale(a):
+    """The changes since a's calculator computed its results that would make them another
+    structure's labels; [] when they still belong to a. A move by lattice vectors along
+    periodic axes (wrap, center) and non-geometric changes (magnetic moments, charges) keep them."""
+    changed = [c for c in a.calc.check_state(a) if c in _LABEL_INPUTS]
+    ref = getattr(a.calc, "atoms", None)
+    if changed == ["positions"] and ref is not None and len(ref) == len(a):
+        cell = np.asarray(a.cell.array, float)
+        if abs(np.linalg.det(cell)) > 1e-12:
+            d = np.linalg.solve(cell.T, (np.asarray(a.positions) - np.asarray(ref.positions)).T).T
+            d = np.where(np.asarray(a.pbc), d - np.round(d), d)
+            if np.max(np.abs(d @ cell)) < 1e-8:
+                return []
+    return changed
+
+
+def _atoms_frames(source, keys=("energy", "forces", "stress")):
+    """ase.Atoms -> fit.xyz.Frame records, keys as named; calculator results (what MACE and ASE
+    leave behind, e.g. a SinglePointCalculator) fill energy/stress (info) and forces (arrays)
+    where info/arrays lack them. Only results a requested key reads are taken, and those must
+    still belong to the structure (see _stale)."""
     from .xyz import Frame
     out = []
     for i, a in enumerate(source):
         info = dict(a.info)
         arrays = {k: np.asarray(v) for k, v in a.arrays.items() if k not in ("numbers", "positions")}
         res = getattr(a.calc, "results", None) or {}
-        if res and hasattr(a.calc, "check_state") and a.calc.check_state(a):
-            # one live calculator attached to several structures holds only the last one's results
-            raise ValueError(f"structure {i}: its calculator's results belong to another structure "
-                             "(one calculator shared across structures?); label each structure with "
-                             "its own SinglePointCalculator or copy the results into info/arrays")
-        if "energy" in res or "free_energy" in res:
-            info.setdefault("energy", float(res.get("energy", res.get("free_energy"))))
-        if "stress" in res:
-            info.setdefault("stress", np.asarray(res["stress"]))
-        if "forces" in res:
-            arrays.setdefault("forces", np.asarray(res["forces"]))
+        take = {}
+        if "energy" in keys and "energy" not in info and ("energy" in res or "free_energy" in res):
+            take["energy"] = ("info", float(res.get("energy", res.get("free_energy"))))
+        if "stress" in keys and "stress" not in info and "stress" in res:
+            take["stress"] = ("info", np.asarray(res["stress"]))
+        if "forces" in keys and "forces" not in arrays and "forces" in res:
+            take["forces"] = ("arrays", np.asarray(res["forces"]))
+        if take and hasattr(a.calc, "check_state") and (bad := _stale(a)):
+            # e.g. one live calculator attached to several structures holds only the last one's results
+            raise ValueError(f"structure {i}: its calculator's results were computed before its "
+                             f"{', '.join(bad)} changed (one calculator shared across structures?); label "
+                             "each structure with its own SinglePointCalculator or copy the results "
+                             "into info/arrays")
+        for k, (where, v) in take.items():
+            (info if where == "info" else arrays)[k] = v
         cell = np.asarray(a.cell.array, float)
         out.append(Frame(np.asarray(a.numbers), np.asarray(a.positions, float), cell,
                          np.asarray(a.pbc, bool) if cell.any() else np.zeros(3, bool), info, arrays))
@@ -122,7 +147,8 @@ def load_configs(source, energy_key="energy", force_key="forces", virial_key="vi
     weigh = compose(factors)
     out, found, seen, periodic = [], set(), {"info": set(), "arrays": set()}, False
     is_path = isinstance(source, (str, os.PathLike))
-    for i, at in enumerate(read_extxyz(source) if is_path else _atoms_frames(source)):
+    for i, at in enumerate(read_extxyz(source) if is_path
+                               else _atoms_frames(source, (energy_key, force_key, stress_key))):
         n, where = len(at.numbers), (f"{source} config {i}" if is_path else f"structure {i}")
         ct = str(at.info.get(weight_key, ""))
         ti = next((idx for name, idx in type_index.items() if name.lower() == ct.lower()), 0)

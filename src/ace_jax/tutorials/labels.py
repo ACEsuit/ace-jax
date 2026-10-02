@@ -30,14 +30,26 @@ def reset_labels_used():
     _used[0] = 0
 
 
-def structure_key(atoms):
-    """Content hash: numbers, pbc, cell (1e-6 A) and wrapped fractional positions (1e-6);
-    atom order is part of the identity (labels are per atom)."""
+TOL = 1e-5      # A: the largest position (and cell) difference LabelCache.get still treats as the same structure
+
+
+def _frac(atoms):
+    """Fractional positions, or None for a cell that cannot have them."""
     cell = np.asarray(atoms.cell.array, float)
     if np.any(atoms.pbc) and abs(np.linalg.det(cell)) > 1e-12:
-        frac = np.linalg.solve(cell.T, np.asarray(atoms.positions, float).T).T
-        frac = np.where(np.asarray(atoms.pbc), np.mod(np.round(frac, 6), 1.0), frac)
-        pos = np.round(np.mod(np.round(frac, 6), 1.0), 6)
+        return np.linalg.solve(cell.T, np.asarray(atoms.positions, float).T).T
+    return None
+
+
+def structure_key(atoms):
+    """Content hash: numbers, pbc, cell (1e-6 A) and fractional positions (1e-6), wrapped along
+    periodic axes only; atom order is part of the identity (labels are per atom). The exact
+    key; LabelCache.get falls back to a TOL match, since noise can straddle a rounding boundary."""
+    cell = np.asarray(atoms.cell.array, float)
+    frac = _frac(atoms)
+    if frac is not None:
+        f = np.round(frac, 6)
+        pos = np.round(np.where(np.asarray(atoms.pbc), np.mod(f, 1.0), f), 6)
     else:
         pos = np.round(np.asarray(atoms.positions, float), 6)
     h = hashlib.sha256()
@@ -62,6 +74,27 @@ def _labelled_copy(atoms, energy, forces, stress, model):
 class LabelCache:
     def __init__(self, entries):
         self._d = entries                                    # (model, key) -> labelled Atoms
+        self._near = {}                                      # (model, numbers, pbc) -> [Atoms]: the TOL fallback
+        for (m, _), a in entries.items():
+            self._near.setdefault(self._coarse(a, m), []).append(a)
+
+    @staticmethod
+    def _coarse(a, model):
+        return (model, np.asarray(a.numbers).tobytes(), tuple(bool(x) for x in a.pbc))
+
+    @staticmethod
+    def _same(a, b):
+        """a and b within TOL: cells, and positions modulo the periodic lattice vectors."""
+        ca, cb = np.asarray(a.cell.array, float), np.asarray(b.cell.array, float)
+        if not np.allclose(ca, cb, rtol=0, atol=TOL):
+            return False
+        fa, fb = _frac(a), _frac(b)
+        if fa is None or fb is None:
+            return (fa is None and fb is None
+                    and np.allclose(a.positions, b.positions, rtol=0, atol=TOL))
+        d = fa - fb
+        d = np.where(np.asarray(a.pbc), d - np.round(d), d)
+        return bool(np.max(np.linalg.norm(d @ ca, axis=1)) <= TOL)
 
     @classmethod
     def from_file(cls, path_or_url):
@@ -91,6 +124,8 @@ class LabelCache:
 
     def get(self, atoms, model):
         hit = self._d.get((model, structure_key(atoms)))
+        if hit is None:
+            hit = next((c for c in self._near.get(self._coarse(atoms, model), ()) if self._same(atoms, c)), None)
         if hit is None:
             return None
         out = atoms.copy(); out.calc = None

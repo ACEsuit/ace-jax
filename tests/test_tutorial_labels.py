@@ -95,3 +95,32 @@ def test_downloaded_caches_with_the_same_file_name_do_not_collide(tmp_path, monk
     monkeypatch.setattr(L.urllib.request, "urlretrieve", lambda url, dst: dst.write_bytes(srcs[url][0].read_bytes()))
     for url, (_, a) in srcs.items():
         assert L.LabelCache.from_file(url).get(a, "mpa-0") is not None
+
+
+def test_cache_hits_survive_1e7_noise_on_many_rattled_cells(tmp_path):
+    # a hash of rounded coordinates flips whenever noise straddles a rounding boundary
+    from ace_jax.tutorials.structures import e1_cells
+    cells = e1_cells(0.08, 0.02)
+    for a in cells:
+        a.numbers[:] = 29                                          # EMT has no Si; the geometry is what is keyed
+    cache, _ = _cache(tmp_path, cells)
+    rng = np.random.default_rng(0)
+    for _ in range(10):
+        noisy = [a.copy() for a in cells]
+        for a in noisy:
+            a.positions += rng.uniform(-1e-7, 1e-7, a.positions.shape)
+        assert all(cache.get(a, "mpa-0") is not None for a in noisy)
+
+
+def test_near_miss_beyond_the_tolerance_is_a_miss(tmp_path):
+    cache, _ = _cache(tmp_path, _cells())
+    a = _cells()[0]; a.positions[0, 0] += 1e-3
+    assert cache.get(a, "mpa-0") is None
+
+
+def test_non_periodic_axis_is_not_wrapped():
+    # a slab atom moved by the vacuum-direction cell vector is a different structure
+    from ace_jax.tutorials.structures import slab
+    s = slab((1, 1, 1), 4)
+    t = s.copy(); t.positions[0] += s.cell[2]
+    assert L.structure_key(s) != L.structure_key(t)
