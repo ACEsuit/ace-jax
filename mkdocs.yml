@@ -100,6 +100,7 @@ nav:
       - tutorials/index.md
       - "1. First fit: silicon": tutorials/first-fit.md
       - "2. Learned radials: silicon": tutorials/learned-radials.md
+      - "3. Your data, your property": tutorials/dataset-and-properties.md
   - Concepts: concepts.md
   - How-to guides:
       - Run files (fit.yaml): howto/fit-yaml.md

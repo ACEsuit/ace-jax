@@ -13,6 +13,9 @@ no GPU or cloud account.
 |---|---|---|---|
 | 1 | [First fit: silicon](first-fit.md) | build a basis, fit linear ACE, check it with a parity plot, an equation of state and NVE molecular dynamics | ~1 min |
 | 2 | [Learned radials](learned-radials.md) | learn the radial basis by variable projection, compare with the frozen basis, deploy the splined model | ~3 min |
+| 3 | [Your data, your property](dataset-and-properties.md) | build and label a strain/rattle dataset, fit it, score it with R², and find what a vacancy reveals that the RMSE hides | ~1 min |
+
+Tutorial 3 is adapted from the [MLIP school 2026](https://github.com/ACEsuit/MLIP-school-2026) notebooks; more will follow. Their reference labels come from MIT-licensed MACE foundation models and ship with the tutorials, so the default settings need no labeller.
 
 Every tutorial has the same shape: **goals** at the top, numbered **steps**,
 a **checkpoint** after each step that says whether it worked, and
