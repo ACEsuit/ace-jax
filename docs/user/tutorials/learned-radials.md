@@ -1,13 +1,15 @@
 # Tutorial 2: learned radials
 
-[![Open in molab](https://marimo.io/molab-shield.svg)](https://molab.marimo.io/github/ACEsuit/ace-jax/blob/main/docs/user/tutorials/notebooks/learned_radials_si.py)
-
-Notebook: [`learned_radials_si.py`](notebooks/learned_radials_si.py) ·
-[view on GitHub](https://github.com/ACEsuit/ace-jax/blob/main/docs/user/tutorials/notebooks/learned_radials_si.py)
+Run it with one command (needs only [uv](https://docs.astral.sh/uv/); no account):
 
 ```bash
-uvx marimo edit --sandbox learned_radials_si.py
+uvx marimo edit --sandbox https://raw.githubusercontent.com/ACEsuit/ace-jax/main/docs/user/tutorials/notebooks/learned_radials_si.py
 ```
+
+Or [open it in molab](https://molab.marimo.io/github/ACEsuit/ace-jax/blob/main/docs/user/tutorials/notebooks/learned_radials_si.py)
+(marimo's hosted service: a free preview, sign in to run it) ·
+[view the notebook on GitHub](https://github.com/ACEsuit/ace-jax/blob/main/docs/user/tutorials/notebooks/learned_radials_si.py).
+See [Running a notebook](index.md#running-a-notebook) for the options.
 
 Learn the radial basis of a silicon ACE model from data, by variable
 projection with a held-out gate, and compare it with the frozen, seeded

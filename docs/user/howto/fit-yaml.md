@@ -35,17 +35,16 @@ and the basis settings go in a `basis:` block (the `aj basis` flag names):
 # fit_si.yaml
 train: train.xyz
 test: test.xyz
-energy_key: dft_energy
-force_key: dft_force
-virial_key: dft_virial
 e0: lsq
 m_per_species: 0
 opt: lbfgs
 basis:
   order: 3
   max_degree: 10
-  radial_mode: onehot
 ```
+
+If your labels are not stored as `energy`, `forces` and `virial`, add
+`energy_key:`, `force_key:` and `virial_key:` lines.
 
 ```bash
 aj fit --config fit_si.yaml --out fit

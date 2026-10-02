@@ -9,10 +9,15 @@ takes about four minutes on a CPU.
 ## The data
 
 ```bash
-B=https://raw.githubusercontent.com/ACEsuit/ace-jax/main/docs/user/tutorials/data/cantor
-for f in train test vacancy compressed; do curl -LO $B/cantor_$f.xyz; done
-K="--energy-key mace_energy --force-key mace_force --virial-key mace_virial"
+curl -LO https://raw.githubusercontent.com/ACEsuit/ace-jax/main/docs/user/tutorials/data/cantor/cantor_train.xyz
+curl -LO https://raw.githubusercontent.com/ACEsuit/ace-jax/main/docs/user/tutorials/data/cantor/cantor_test.xyz
+curl -LO https://raw.githubusercontent.com/ACEsuit/ace-jax/main/docs/user/tutorials/data/cantor/cantor_vacancy.xyz
+curl -LO https://raw.githubusercontent.com/ACEsuit/ace-jax/main/docs/user/tutorials/data/cantor/cantor_compressed.xyz
 ```
+
+These files store their labels as `mace_energy`, `mace_force` and
+`mace_virial`, so every command below names them with `--energy-key`,
+`--force-key` and `--virial-key`.
 
 | File | Configs | Contents |
 |---|---|---|
@@ -28,17 +33,29 @@ records how the subsets were made.
 
 ```bash
 aj fit --order 2 --max-degree 5 \
-    --train cantor_train.xyz --test cantor_test.xyz --ood cantor_vacancy.xyz $K \
-    --e0 lsq --m-per-species 0 --opt lbfgs --out fit
+    --train cantor_train.xyz --test cantor_test.xyz --ood cantor_vacancy.xyz \
+    --energy-key mace_energy --force-key mace_force --virial-key mace_virial \
+    --e0 lsq --m-per-species 0 --opt lbfgs \
+    --out fit
 ```
 
 ```text
 basis Cr,Mn,Fe,Co,Ni order 2 max-degree 5 -> 206 B functions (elements from the data)
 r0 2.500 A (mean bond length of the basis; pass --r0 to override)
 ...
-test map {'E': {'rmse': 25.5964, ...}, 'F': {'rmse': 0.175, ...}, 'V': {'rmse': 10.8308, ...}}
-ood map {'E': {'rmse': 30.316, ...}, 'F': {'rmse': 0.1982, ...}, 'V': {'rmse': 10.5128, ...}}
+RMSE, test (map)
+-----------------------------------------------------------------
+config type  configs  atoms  E (meV/atom)  F (eV/Å)  V (meV/atom)
+-----------------------------------------------------------------
+all               30   1200         25.60    0.1750        258.42
+RMSE, ood (map)
+-----------------------------------------------------------------
+config type  configs  atoms  E (meV/atom)  F (eV/Å)  V (meV/atom)
+-----------------------------------------------------------------
+all               30   1122         30.32    0.1982        281.66
 ```
+
+The files carry no `config_type`, so each table has a single row.
 
 - With five elements the default **categorical** basis gives every species
   pair its own radial functions, so it grows quickly: 206 many-body functions
@@ -53,12 +70,16 @@ ood map {'E': {'rmse': 30.316, ...}, 'F': {'rmse': 0.1982, ...}, 'V': {'rmse': 1
 ## Out of distribution: compression
 
 ```bash
-aj eval --model fit/model.npz --data cantor_compressed.xyz $K --forces
+aj eval --model fit/model.npz --data cantor_compressed.xyz \
+    --energy-key mace_energy --force-key mace_force --virial-key mace_virial
 ```
 
 ```text
-E RMSE 179.236 meV/atom  (30.0 configs)
-F RMSE 0.9296 eV/A  (3456.0 components)
+RMSE, cantor_compressed.xyz vs fit/model.npz
+-----------------------------------------------------------------
+config type  configs  atoms  E (meV/atom)  F (eV/Å)  V (meV/atom)
+-----------------------------------------------------------------
+all               30   1152        179.24    0.9296       1097.39
 ```
 
 The errors are several times larger than in distribution: compressed cells

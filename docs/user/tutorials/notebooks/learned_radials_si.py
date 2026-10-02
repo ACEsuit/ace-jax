@@ -24,7 +24,7 @@ def _(mo):
     mo.md(r"""
     # Tutorial 2: learned radials
 
-    An ACE basis function multiplies radial functions Rₙₗ(r) of the neighbour
+    An ACE basis function multiplies radial functions $R_{nl}(r)$ of the neighbour
     distances with spherical harmonics. The radial functions are mixtures of
     a fixed polynomial basis,
 
@@ -250,7 +250,7 @@ def _(mo):
     mo.md(r"""
     ## Step 4: what changed?
 
-    Plot the first few radial functions Rₙ(r), before and after learning.
+    Plot the first few radial functions $R_n(r)$, before and after learning.
     Each curve is scaled to unit root-mean-square over the plotted range, so
     only their shapes are compared. The grey histogram shows where the training data
     has neighbour pairs: the radials can only be learned where there is data.

@@ -18,7 +18,7 @@ atoms.get_potential_energy(); atoms.get_forces()
 From the shell:
 
 ```bash
-aj eval --model model.yace --data test.xyz --forces
+aj eval --model model.yace --data test.xyz --out predictions.xyz
 ```
 
 ## Supported features

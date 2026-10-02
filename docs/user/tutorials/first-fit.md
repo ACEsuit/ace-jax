@@ -1,13 +1,15 @@
 # Tutorial 1: a first fit for silicon
 
-[![Open in molab](https://marimo.io/molab-shield.svg)](https://molab.marimo.io/github/ACEsuit/ace-jax/blob/main/docs/user/tutorials/notebooks/first_fit_si.py)
-
-Notebook: [`first_fit_si.py`](notebooks/first_fit_si.py) ·
-[view on GitHub](https://github.com/ACEsuit/ace-jax/blob/main/docs/user/tutorials/notebooks/first_fit_si.py)
+Run it with one command (needs only [uv](https://docs.astral.sh/uv/); no account):
 
 ```bash
-uvx marimo edit --sandbox first_fit_si.py
+uvx marimo edit --sandbox https://raw.githubusercontent.com/ACEsuit/ace-jax/main/docs/user/tutorials/notebooks/first_fit_si.py
 ```
+
+Or [open it in molab](https://molab.marimo.io/github/ACEsuit/ace-jax/blob/main/docs/user/tutorials/notebooks/first_fit_si.py)
+(marimo's hosted service: a free preview, sign in to run it) ·
+[view the notebook on GitHub](https://github.com/ACEsuit/ace-jax/blob/main/docs/user/tutorials/notebooks/first_fit_si.py).
+See [Running a notebook](index.md#running-a-notebook) for the options.
 
 Fit a linear ACE model to `si_tiny_train.xyz`, a 53-configuration silicon
 dataset (DFT labels), and use it as an ASE calculator. It is the
