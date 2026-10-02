@@ -185,6 +185,11 @@ def spearman_by_family(R):
 
 
 def _f(x, fmt="{:.3f}"):
+    if isinstance(x, str):                       # ard.json stores non-finite floats as "inf"/"nan" strings
+        try:
+            x = float(x)
+        except ValueError:
+            return x
     return NA if x is None or (isinstance(x, float) and not np.isfinite(x)) else fmt.format(x)
 
 
