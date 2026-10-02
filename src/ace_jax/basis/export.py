@@ -94,6 +94,8 @@ def save_npz(path, auth):
                                "ncoef": model.pair_coefs.shape[2]}
     for k, spec in enumerate(model.aa_specs):
         out[f"aa_spec_{k+1}"] = np.asarray(spec, np.int32)
+    if getattr(auth, "gamma", None) is not None and auth.meta.get("basis", {}).get("with_gamma", True):
+        out["gamma"] = np.asarray(auth.gamma, np.float64)    # the prior it was built with: no rebuild on load
     out["meta_json"] = np.frombuffer(json.dumps(meta).encode(), np.uint8)
     np.savez(path, **out)
 
