@@ -200,3 +200,4 @@ def test_matches_acefit_qr_reference():
     ystk = np.concatenate([yw, np.zeros(A.shape[1])])
     c_py = np.linalg.lstsq(Astk, ystk, rcond=None)[0]
     assert np.abs(c_py - C_acefit).max() < 1e-9 * max(1.0, np.abs(C_acefit).max())
+
