@@ -91,6 +91,7 @@ over a file's `basis:`, `--train` over its `data:` (each logged as an override).
 | Learn the tensor radials before the fit | `--learn-radial` (writes `radial_info.json`; not with embedding models) |
 | Per-config-type weights | `--weights '{"default":{"E":30,"F":1,"V":1},"bulk":{"E":100,"F":1,"V":1}}'` or a factor list |
 | E0 from data, not the model | `--e0 lsq` (default `model`) |
+| Stress labels (MACE, ASE, DFT codes) | `--stress-key stress` (virial = −stress × volume for periodic configs without a virial label; also on `aj eval`) |
 | Plain least squares, no prior (teaching: shows overfitting) | `--m-per-species 0 --solver lstsq` (no evidence, no UQ: zero predictive variance; weights from `--weights`) |
 | Out-of-distribution check | `--ood ood.xyz` (writes `metrics_ood.csv`) |
 
@@ -155,7 +156,10 @@ cfg = FitConfig(model="si.npz", arm="gp", m_per_species=6, opt="lbfgs", r0=2.35,
                 rungs=("map",), energy_key="dft_energy", force_key="dft_force",
                 virial_key="dft_virial", predict_stats="recompute").validate()
 data = load_fit_data(cfg, train="train.xyz", test="test.xyz")   # or data="all.xyz" (split)
+# train=/test= also take lists of ase.Atoms: labels from info/arrays or the attached
+# calculator's results (a calculator shared by several Atoms raises: its results are the last one's)
 res = fit(cfg, data)             # res.preds.metrics, res.theta, res.rungs.draws
+res.map.log_evidence             # the LML at the MAP: compare bases fitted to the same data
 write_outputs(res, "out", layout=("cli",))                       # metrics + model file
 ```
 
