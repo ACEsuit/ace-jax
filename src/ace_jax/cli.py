@@ -77,8 +77,8 @@ def _add_fit_args(p):
     p.add_argument("--ard-val-frac", type=float, default=0.2,
                    help="stratified train fraction held out to score the per-group force scales "
                         "(rms factor and conformal quantile) with the hold-out posterior")
-    p.add_argument("--force-shape", choices=["iso", "aniso"], default="iso",
-                   help="ard: isotropic (|e|/sqrt(v/3)) or anisotropic (Mahalanobis) conformal force scores")
+    p.add_argument("--force-shape", choices=["iso", "aniso"], default="aniso",
+                   help="ard: anisotropic (Mahalanobis, default) or isotropic (|e|/sqrt(v/3), spherical radius) conformal force scores")
     p.add_argument("--ard-coverage", type=float, default=0.9,
                    help="ard: nominal coverage 1 - alpha of the per-group conformal quantile")
     p.add_argument("--ard-groups", choices=["distortion", "none"], default="distortion",

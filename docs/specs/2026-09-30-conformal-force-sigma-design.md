@@ -177,7 +177,7 @@ Methods:
 
   The shape uses the **full** `calc.model`, never `eval_model`, as now.
 - **`aj fit --uq ard`** flags:
-  - `--force-shape iso|aniso` (default iso);
+  - `--force-shape iso|aniso` (default aniso);
   - `--ard-coverage 0.9`;
   - `--ard-groups distortion|none` (none means G = 1);
   - `--ard-cluster-size 3` (× r_cut; `inf` = whole configurations);
@@ -200,7 +200,7 @@ Methods:
 
 ## Decisions (review these)
 
-1. **Default `--force-shape iso`** until the ablation (§13, item 5) shows the anisotropic mode helps.
+1. **Default `--force-shape aniso`** (changed 2026-10-02 from iso). Users will not generally have large-cell target data for `aj calibrate`, and on the bench365 v3 validation the anisotropic Mahalanobis region is the only uncalibrated variant meeting the targets: whole crack 0.899-0.905 (iso 0.887-0.893), tip 0.881-0.884 (iso 0.860-0.863), edge/screw 0.937/0.941, in-distribution force rms-z 0.98. `--force-shape iso` remains available; `ARDPosterior` files without a `force_shape` field still load as iso.
 2. **ℓ = 3 r_cut by default**, to be revised to the smallest ℓ on the plateau of validation item 3.
 3. **n_min = 20 configurations per group** (not an atom threshold).
 4. **Band edges from all of T**, used for both stratification and storage, and frozen before

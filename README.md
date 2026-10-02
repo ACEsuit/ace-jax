@@ -327,16 +327,20 @@ The force uncertainty has a shape and two scales (mathematics:
 
 - **Shape.** The centred delete-one-cluster (PRESS) jackknife covariance of the force at each
   atom, with spatial clusters of `--ard-cluster-size` r_cut (default 3; `inf` = whole
-  configurations), so large cells are split into ~3 r_cut blocks by default. `--force-shape aniso`
-  keeps a full 3x3 shape instead of an isotropic one. The default `--ard-variance sandwich` now means this
+  configurations), so large cells are split into ~3 r_cut blocks by default. The default
+  `--force-shape aniso` keeps a full 3x3 shape and Mahalanobis conformal scores; `--force-shape iso`
+  gives the spherical radius instead. The default `--ard-variance sandwich` now means this
   jackknife shape (`--ard-press exact|block` picks the exact per-cluster correction or a block
   approximation); `--ard-variance kappa` keeps the posterior shape A⁻¹ instead and still gets the
   per-group scales below.
 - **Two scales, per group.** `forces_std` / `forces_cov` use a per-group rms factor (the scale at
   which the standardised error has unit rms). `forces_cov` is always the full 3x3. `forces_q` is the per-group conformal radius at
   `--ard-coverage` (default 0.9): `|F_err| <= forces_q` with that probability for atoms
-  exchangeable with the group's calibration configurations (with `--force-shape aniso` the score is
-  Mahalanobis and `forces_q_mahal` is also available). Scores come from a stratified
+  exchangeable with the group's calibration configurations (with the default `--force-shape aniso` the score is
+  Mahalanobis: `forces_q` is then the largest semi-axis q_g sqrt(lambda_max(M)) of the region and
+  `forces_q_mahal` the Mahalanobis radius q_g; `--force-shape iso` gives the spherical radius).
+  On the bench365 v3 validation aniso is the only uncalibrated variant meeting the targets, and
+  `aj calibrate` with labelled target cells remains the most reliable route when such data exist. Scores come from a stratified
   hold-out (`--ard-val-frac`) scored with the hold-out posterior, then carried to the served posterior
   by (N/N_fit)^β, with β fitted per run from a second, smaller hold-out fit and clipped to [0, ½]
   (`--ard-transfer exponent`, the default; `sqrt` fixes β = ½, `none` β = 0).

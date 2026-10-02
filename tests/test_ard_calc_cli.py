@@ -404,7 +404,7 @@ def test_fit_flags_map_to_config():
     assert c.ard_cluster_size == float("inf")
     d = _fit_config(_parser().parse_args(["fit", "--model", "m.npz", "--data", "d.xyz", "--r0", "2.3", "--out", "o"]))
     assert (d.ard_force_shape, d.ard_coverage, d.ard_groups, d.ard_press, d.ard_n_min, d.ard_support) == \
-        ("iso", 0.9, "distortion", "exact", 20, True)
+        ("aniso", 0.9, "distortion", "exact", 20, True)
     assert d.ard_transfer == "exponent"
 
 

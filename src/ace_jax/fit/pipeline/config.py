@@ -54,7 +54,7 @@ class FitConfig:
     ard_cond_max: float = 1e14           # prior floor: cond(S) <= ard_cond_max
     ard_laplace: bool = False            # Laplace diagnostic of the hyperparameters (ard.json)
     # schema-3 force sigma (docs/specs/2026-09-30-conformal-force-sigma-design.md, rev 2)
-    ard_force_shape: str = "iso"         # "iso" | "aniso" (Mahalanobis scores, forces_q_mahal)
+    ard_force_shape: str = "aniso"       # "iso" | "aniso" (Mahalanobis scores, forces_q_mahal)
     ard_shape_eps: float = 1e-3          # aniso ridge: V + eps tr(V)/3 I
     ard_coverage: float = 0.9            # 1 - alpha of the per-group conformal quantile q_g
     ard_groups: str = "distortion"       # "distortion" (8 groups: d bands x [z = z*]) | "none" (2)

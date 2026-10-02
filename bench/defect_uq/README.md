@@ -212,8 +212,8 @@ has been run yet; the acceptance numbers are the targets in `docs/specs/2026-09-
   | `ard_legacy` | #18 uncentred sandwich, own-cluster-out scores, 2 groups (see note) |
   | `ard_A` | #18 shape with scores from the fit split, distortion groups |
   | `ard_AB` | centred PRESS shape, whole-configuration clusters (ell = inf) |
-  | `ard_ABblk` | defaults: PRESS, ell = 3 r_cut |
-  | `ard_aniso` | Mahalanobis region (`forces_q_mahal`) |
+  | `ard_ABblk` | PRESS, ell = 3 r_cut, **iso** (explicitly `ard_force_shape="iso"`, since the library default became aniso on 2026-10-02; keeps the recorded ablation reproducible) |
+  | `ard_aniso` | Mahalanobis region (`forces_q_mahal`); now equal to the library defaults |
   | `ard_ell{2,4,6}` | ell sweep (3 = `ard_ABblk`, inf = `ard_AB`) |
   | `ard_f{1,3}` | `ard_val_frac` 0.1 / 0.3 (0.2 = `ard_ABblk`) |
   Note: `ard_legacy` reproduces the 30-Sep *shape* and scores, but it still serves the revision-2

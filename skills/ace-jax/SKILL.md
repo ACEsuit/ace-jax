@@ -347,8 +347,10 @@ Other entry points:
   cell's force design rows, ~N·3·L·8 bytes.
 - **ARD properties.** `--ard-variance sandwich` (default) is the PRESS jackknife shape
   (`--ard-press exact|block`). `forces_cov` is always the full 3x3; `forces_q_mahal` exists for
-  `--force-shape aniso`. `forces_std`/`forces_cov` use a per-group rms scale on the PRESS jackknife
-  shape (`--ard-cluster-size`, `--force-shape aniso`); `forces_q` is the per-group conformal
+  `--force-shape aniso` (the default; `--force-shape iso` gives the spherical radius, and for aniso
+  `forces_q` is the largest semi-axis q_g sqrt(lambda_max(M)) while `forces_q_mahal` is the Mahalanobis
+  radius q_g). `forces_std`/`forces_cov` use a per-group rms scale on the PRESS jackknife
+  shape (`--ard-cluster-size`, `--force-shape`); `forces_q` is the per-group conformal
   radius at `--ard-coverage` (default 0.9); `forces_group` names each atom's group.
   `--ard-variance kappa` keeps the A⁻¹ shape and also gets the per-group scales.
 - **Coverage is conditional on exchangeability.** It holds for atoms exchangeable with their

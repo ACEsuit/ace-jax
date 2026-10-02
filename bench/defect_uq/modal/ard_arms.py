@@ -7,7 +7,7 @@ ARD_ARMS = {
     "ard_legacy": {"_shape_variant": "legacy", "_score_source": "mixed", "ard_groups": "none"},
     "ard_A":      {"_shape_variant": "legacy", "_score_source": "fit"},
     "ard_AB":     {"ard_cluster_size": float("inf")},
-    "ard_ABblk":  {},                                                     # defaults: press, ell = 3 r_cut
+    "ard_ABblk":  {"ard_force_shape": "iso"},                           # PRESS, ell = 3 r_cut, iso (the pre-2026-10-02 defaults, kept for the recorded ablation)
     "ard_aniso":  {"ard_force_shape": "aniso"},
     **{f"ard_ell{k}": {"ard_cluster_size": float(k)} for k in (2, 4, 6)},
     **{f"ard_f{int(f * 10)}": {"ard_val_frac": f} for f in (0.1, 0.3)},

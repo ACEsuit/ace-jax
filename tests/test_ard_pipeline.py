@@ -29,7 +29,7 @@ def test_config_validates_ard():
         _cfg(ard_val_frac=1.0).validate()
     c = _cfg().validate()
     assert (c.ard_force_shape, c.ard_coverage, c.ard_groups, c.ard_cluster_size, c.ard_press, c.ard_n_min,
-            c.ard_support, c._shape_variant, c._score_source) == ("iso", 0.9, "distortion", 3.0, "exact", 20,
+            c.ard_support, c._shape_variant, c._score_source) == ("aniso", 0.9, "distortion", 3.0, "exact", 20,
                                                                   True, "press", "fit")
     assert c.ard_transfer == "exponent"
     for field, bad in (("ard_force_shape", "x"), ("ard_groups", "x"), ("ard_press", "x"),
