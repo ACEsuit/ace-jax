@@ -199,7 +199,7 @@ def cmd_eval(a):
         from ase import Atoms
         if gp:
             from .calc.gp import GPCalculator
-            calc = GPCalculator.from_file(a.model)
+            calc = GPCalculator.from_file(a.model, deriv_dtc=not getattr(a, "no_deriv_dtc", False))
         else:
             from .calc.point import ACECalculator
             calc = ACECalculator(a.model, posterior=a.posterior)
@@ -456,6 +456,9 @@ def _parser():
     ev.add_argument("--per-atom", default=None, help="extxyz with per-atom forces and forces_std arrays")
     ev.add_argument("--support", action="store_true",
                     help="with --posterior --per-atom: add support_ok and support_q (covariate-shift support)")
+    ev.add_argument("--no-deriv-dtc", action="store_true",
+                    help="gp_model.npz only: SoR-only forces_std, without the derivative-DTC term "
+                         "(whose whole-cell (n, K, d, 3) arrays may not fit for a big cell)")
     cal = sub.add_parser("calibrate", help="recalibrate the per-group conformal scales of an ARD posterior "
                                            "on a labelled set (per-group replace by default)")
     cal.add_argument("--model", required=True); cal.add_argument("--posterior", required=True)

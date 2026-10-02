@@ -187,14 +187,40 @@ def test_statistics_memory_shape_bounded(packed, monkeypatch):
     assert peak(Ncap) >= Ncap * K * g.D
 
 
-def test_derivative_dtc_over_budget_raises(hybrid, monkeypatch):
-    """The derivative DTC is not node-chunked: over budget with a wide map it refuses, not OOMs."""
-    from ace_jax.fit import rows
+def test_derivative_dtc_over_budget_warns_and_matches(hybrid, monkeypatch):
+    """The derivative DTC is not node-chunked: over budget it still builds its whole-batch
+    arrays (same result) and warns once, naming the remedies."""
+    from ace_jax.fit import predict, rows
     from ace_jax.fit.predict import _dtc_deriv_residual
     prob, ds, theta = hybrid
+    b = jax.tree.map(lambda a: a[0], ds)
+    ref = _dtc_deriv_residual(theta, prob, b)
     monkeypatch.setattr(rows, "ROWS_EDGE_BUDGET", 1)
-    with pytest.raises(ValueError, match="deriv_dtc=False"):
-        _dtc_deriv_residual(theta, prob, jax.tree.map(lambda a: a[0], ds))
+    monkeypatch.setattr(predict, "_DERIV_DTC_WARNED", False)
+    with pytest.warns(UserWarning, match="deriv_dtc=False.*--no-deriv-dtc"):
+        got = _dtc_deriv_residual(theta, prob, b)
+    for x, r in zip(got, ref):
+        _close(x, r)
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")              # one-time: no second warning
+        _dtc_deriv_residual(theta, prob, b)
+
+
+def test_pace_model_has_no_rows():
+    """A PACE model reaching the rows fails with the clear no-B-basis error, and the budget probe
+    falls back to J's size instead of raising AttributeError."""
+    from types import SimpleNamespace
+    from conftest import pace_fixture
+    from ace_jax.eval import load
+    from ace_jax.fit import rows
+    y = pace_fixture(FIXTURE_DIR / "pace" / "gesi_sbessel.yace")
+    model = load(y)[0]
+    K = 8
+    with pytest.raises(NotImplementedError, match="no B-basis"):
+        model.edge_jacobian_dense(jnp.ones((1, K, 3)), jnp.zeros((1, K), jnp.int32),
+                                  jnp.zeros((1, K), jnp.int32), jnp.ones((1, K), bool))
+    assert rows._node_elems(model, SimpleNamespace(D=10), K) == K * 10 * 3
 
 
 def _grad_peak(f, args):

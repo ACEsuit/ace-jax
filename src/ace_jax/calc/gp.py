@@ -38,13 +38,16 @@ class GPCalculator(Calculator):
         from ..fit.pipeline.export import load_gp_model
         return cls(*load_gp_model(path), **kw)
 
-    def __init__(self, fitted, meta, **kw):
+    def __init__(self, fitted, meta, deriv_dtc=True, **kw):
+        """deriv_dtc=False drops the derivative-DTC term from forces_std (SoR-only force
+        variance): cheaper, and needed when a big cell's (n, K, d, 3) arrays do not fit."""
         super().__init__(**kw)
+        self.deriv_dtc = bool(deriv_dtc)
         self.fitted, self.meta = fitted, meta
         self._E0 = np.asarray(fitted.prob.model.E0)
         # jitted once, theta/mu/L as arguments: one compile per cell shape serves every draw
         # (eagerly, the node-chunked rows' fori_loop would recompile per draw and per call)
-        self._predict = _predict_fn(fitted.prob, True, True)
+        self._predict = _predict_fn(fitted.prob, True, self.deriv_dtc)
 
     def calculate(self, atoms=None, properties=("energy",), system_changes=all_changes):
         super().calculate(atoms, properties, system_changes)

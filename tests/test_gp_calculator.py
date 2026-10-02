@@ -20,6 +20,44 @@ XYZ = FIXTURE_DIR / "si_tiny_train.xyz"
 pytestmark = pytest.mark.skipif(not XYZ.exists(), reason="missing si_tiny_train.xyz")
 
 
+def _setup():
+    model, meta, z = load(FIXTURE_DIR / "si_fitted.npz")
+    configs = load_configs(XYZ, "dft_energy", "dft_force", "dft_virial")
+    E0 = np.asarray(z["E0"])
+    train = build_dataset(configs[:6], meta, E0, 3)
+    cfg = GPConfig(r0=2.35, rcut=float(meta["rcut"]), n_B=meta["n_B"], n_pair=meta["n_pair"],
+                   NZ=len(meta["elements"]), C=3)
+    X, S = site_features(model, cfg, train)
+    ind = select_inducing(X, S, train.node_z, train.node_mask, 6, descriptor_scale(X, train.node_mask))
+    prob = Problem(KernelSpec("cosine", True, cfg.D), model, ind, cfg, jnp.asarray(z["gamma"]),
+                   default_prior(2.35))
+    theta = Hypers(log_ell=np.log(0.8), log_A=np.log(0.05), log_alpha=0.0, log_r0=np.log(2.35),
+                   log_eps=np.log(0.3), log_rho=np.log(4.0), log_sigma_c=np.log(0.3),
+                   log_sigma_E=np.log(1e-3), log_sigma_F=np.log(0.02), log_sigma_V=np.log(0.02))
+    a = np.asarray(to_array(theta))
+    draws = np.stack([a, a + np.array([0.2] + [0.0] * 9)])
+    return meta, configs, E0, prob, train, draws
+
+
+def test_calculator_deriv_dtc_false_is_sor_forces_std():
+    """GPCalculator(deriv_dtc=False): forces_std from the SoR-only force variance, the mixture of
+    predict_mixture(deriv_dtc=False); the default keeps the (larger) derivative-DTC term."""
+    from ase import Atoms
+    meta, configs, E0, prob, train, draws = _setup()
+    with highest_precision():
+        fitted = fit_posteriors(prob, train, draws)
+        c = configs[7]
+        test = build_dataset([c], meta, E0, 1)
+        sd = {}
+        for flag in (True, False):
+            atoms = Atoms(numbers=c.numbers, positions=c.positions, cell=c.cell, pbc=c.pbc)
+            atoms.calc = GPCalculator(fitted, meta, deriv_dtc=flag)
+            sd[flag] = atoms.calc.get_property("forces_std", atoms)
+        p = predict_mixture(draws, prob, train, test, deriv_dtc=False)
+    assert np.allclose(sd[False] ** 2, p.F_var, rtol=1e-8, atol=1e-14)
+    assert np.all(sd[True] >= sd[False] - 1e-12) and not np.allclose(sd[True], sd[False])
+
+
 def test_calculator_agrees_with_predict_mixture():
     from ase import Atoms
     model, meta, z = load(FIXTURE_DIR / "si_fitted.npz")

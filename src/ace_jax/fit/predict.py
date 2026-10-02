@@ -105,6 +105,31 @@ def _dtc_D(theta, prob, batch, deL, deR):
     return jnp.diag(seg(seg(R).T))[:C]
 
 
+_DERIV_DTC_WARNED = False
+
+
+def _warn_deriv_dtc_size(Ncap, K, d):
+    """One-time warning when the derivative DTC's whole-batch (Ncap, K, d, 3) arrays (JU, the
+    slot velocities vU, the strain velocities cbU -- not node-chunked: a node's velocity gathers
+    the edges INTO it, which live in other nodes' chunks) exceed rows.ROWS_EDGE_BUDGET.  They are
+    built anyway, as before the rows were chunked; this only says why memory may run out."""
+    global _DERIV_DTC_WARNED
+    from . import rows as _rows
+    n = Ncap * K * d * 3
+    if _DERIV_DTC_WARNED or n <= _rows.ROWS_EDGE_BUDGET:
+        return
+    _DERIV_DTC_WARNED = True
+    import warnings
+    warnings.warn(
+        f"derivative-DTC force/virial variance on a batch of n_cap={Ncap}, k_cap={K} with a "
+        f"{d}-wide residual feature map builds whole-batch (n_cap, k_cap, d, 3) arrays of "
+        f"{n * 8 / 1e9:.3g} GB each (several are live at once); they are not node-chunked, so "
+        f"ACEJAX_ROWS_EDGE_BUDGET does not bound them.  If memory runs out: deriv_dtc=False "
+        f"(SoR-only F/V variance; GPCalculator(..., deriv_dtc=False), `aj eval --no-deriv-dtc`, "
+        f"predict_fixed/predict_mixture(deriv_dtc=False)), or fit with a narrow feature map "
+        f"(--density pair / pca).", stacklevel=3)
+
+
 DERIV_DTC_NODE_BATCH = 4    # nodes per vmapped chunk of the force double jvp: bounds its temp
 
 
@@ -133,17 +158,7 @@ def _dtc_deriv_residual(theta, prob, batch, X=None, J=None, res=None, JU0=None):
             f"Pass deriv_dtc=False for SoR-only force/virial variance.")
     if ind.XM.shape[0] == 0:
         return jnp.zeros((Ncap, 3)), jnp.zeros((C, 6))
-    from . import rows as _rows
-    d_feat = ind.Pmap.shape[1]
-    if Ncap * K * d_feat * 3 > _rows.ROWS_EDGE_BUDGET:
-        # vU / cbU / JU are whole-batch (Ncap, K, d, 3) objects (each node's velocity gathers the
-        # edges INTO it, which live in other nodes' chunks): not node-chunked, so refuse rather
-        # than OOM.  Within budget whenever the rows themselves are unchunked.
-        raise ValueError(
-            f"derivative-DTC on a batch of n_cap={Ncap}, k_cap={K} with a {d_feat}-wide feature map "
-            f"needs (n_cap, k_cap, d, 3) = {Ncap * K * d_feat * 3:.3g} elements per array, over "
-            f"rows.ROWS_EDGE_BUDGET = {_rows.ROWS_EDGE_BUDGET:.3g}: pass deriv_dtc=False (SoR-only "
-            f"force/virial variance), use a narrow feature map (--density pair / pca), or smaller batches")
+    _warn_deriv_dtc_size(Ncap, K, ind.Pmap.shape[1])
     if X is None or (J is None and JU0 is None) or res is None:
         _, res, X, JU0 = batch_rows_parts(theta, spec, prob.model, ind, cfg, batch,
                                           with_X=True, with_JU0=True)
