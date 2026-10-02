@@ -171,6 +171,16 @@ maxl, rcut, reduction, ...)` authors ACEpotentials' ace1-compatible
 identity> [--d-max N]`); its design record is
 [docs/dev/plans/embedded-model-authoring.md](https://github.com/ACEsuit/ace-jax/blob/main/docs/dev/plans/embedded-model-authoring.md).
 
+Choosing the table and `d_max`:
+
+- `identity` is the one-hot element table: one channel per element, so it is
+  lossless only. A `d_max` below the number of elements is an error, because a
+  one-hot table has no preferred directions to compress onto; compress a table
+  of element properties instead.
+- The rows are normalised to unit length, so with `d_max=1` each element is
+  either +1 or −1 and the elements fall into at most two groups. ace-jax warns
+  when two elements end up with the same row: the basis cannot tell them apart.
+
 ## Known traps
 
 - **The coupling library contains only EquivariantTensors' construction code**,

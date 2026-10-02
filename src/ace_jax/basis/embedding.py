@@ -131,4 +131,12 @@ def embedding_rows(table, Z, zlist, d=None, reduction="pca", normalise=True):
             if not n > 0:
                 raise ValueError(f"element {z} has a zero embedding row at d = {d}")
         rows = rows / nrm[:, None]
+    groups = {}
+    for z, r in zip(zlist, np.round(rows, 8)):
+        groups.setdefault(tuple(r + 0.0), []).append(int(z))
+    merged = [g for g in groups.values() if len(g) > 1]
+    if merged:     # e.g. d = 1 with normalise: every row is +1 or -1
+        import warnings
+        warnings.warn(f"embedding rows at d = {d} make elements indistinguishable: {merged} "
+                      "(the basis cannot tell them apart; use more channels)", UserWarning, stacklevel=2)
     return rows
