@@ -124,7 +124,7 @@ def test_to_analytic_matches_spline_radials(si):
 
 
 def test_patch_radial_npz_roundtrip(tmp_path, si):
-    from ace_jax.construct.export import patch_radial_npz
+    from ace_jax.basis.export import patch_radial_npz
     from ace_jax.fit.radial_model import to_analytic
     spline, *_ = _setup(SI_SPLINE)
     ana, _ = to_analytic(spline, 30)
@@ -187,7 +187,7 @@ def test_roughness_matrix_properties(si):
     np.testing.assert_allclose(D2, D2.T, atol=1e-10)
     assert np.abs(D2[:2]).max() < 1e-9                  # degrees 0, 1 have zero curvature
     assert np.linalg.eigvalsh(D2).min() > -1e-8 * np.abs(D2).max()
-    from ace_jax.construct.radial_init import poly_eval
+    from ace_jax.basis.radial_init import poly_eval
     # finite-difference check of one entry: int P_5'' P_7'' dx.  The double
     # np.gradient + trapezoid reference converges only at O(h) here (measured:
     # reldiff 1.29e-2 at n=2001, 1.28e-3 at n=20001, 1.28e-4 at n=200001,

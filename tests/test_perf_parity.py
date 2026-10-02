@@ -2,7 +2,7 @@
 (tests/fixtures/perf_ref, written by tests/perf_ref.py from the code before the
 speed-ups): 1e-12 relative in float64. float32 is gated on accuracy against
 the float64 reference: an absolute bound set by float32 precision, not
-agreement with the old float32 rounding (docs/perf-optimisation-spec.md).
+agreement with the old float32 rounding (docs/dev/perf-optimisation-spec.md).
 float32 noise moves with summation order (neighbour order: ASE vs
 matscipy-neighbours; numpy/XLA build: macOS arm64 vs Linux x86), so a gate
 relative to one sampled old-float32 error rejects a reordering, not a bug.
@@ -58,14 +58,18 @@ def _f32_ok(x, x64, kind, n_atoms=1):
     assert err <= bound, f"{kind}: float32 error {err:.3g} > bound {bound:.3g}"
 
 
-@pytest.mark.parametrize("skin", [0.0, 1.0])
-@pytest.mark.parametrize("ref", CASES, ids=[c.stem for c in CASES])
+# the sparse layout never takes the skin path (ACECalculator._calculate: skin > 0 and
+# layout != "sparse"), so sparse x skin=1 would repeat its skin=0 case exactly
+SKIN_CASES = [pytest.param(ref, skin, id=f"{skin}-{ref.stem}") for ref in CASES
+              for skin in ((0.0,) if ref.stem.rsplit("_", 3)[2] == "sparse" else (0.0, 1.0))]
+
+
+@pytest.mark.parametrize("ref, skin", SKIN_CASES)
 def test_matches_frozen_reference(ref, skin):
     stem, cname, layout, dt = ref.stem.rsplit("_", 3)
     r = np.load(ref)
     at = Atoms(numbers=r["numbers"], positions=r["positions"], cell=r["cell"], pbc=r["pbc"])
-    kw = {} if "skin" not in ACECalculator.__init__.__code__.co_varnames else {"skin": skin}
-    at.calc = ACECalculator(str(_model_path(stem)), layout=layout, dtype=getattr(jnp, dt), **kw)
+    at.calc = ACECalculator(str(_model_path(stem)), layout=layout, dtype=getattr(jnp, dt), skin=skin)
     E, F = at.get_potential_energy(), at.get_forces()
     S = at.get_stress() if at.pbc.all() else None
 

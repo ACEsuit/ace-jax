@@ -5,7 +5,7 @@ FIX = pathlib.Path(__file__).resolve().parents[1] / "fixtures"
 
 
 def _restamped_cache(tmp):
-    from ace_jax.construct import coupling as C
+    from ace_jax.basis import coupling as C
     out = tmp / "cpl"
     for f in sorted((FIX / "coupling_cache_embedding").glob("cpl-*.npz")):
         z = np.load(f); m = json.loads(bytes(z["meta_json"]).decode())
@@ -23,9 +23,9 @@ def _restamped_cache(tmp):
 def test_basis_embedding_matches_the_library(tmp_path, monkeypatch):
     import jax
     jax.config.update("jax_enable_x64", True)
-    monkeypatch.setenv("ACEJAX_NO_JULIA", "1")
+    monkeypatch.setenv("ACEJAX_COUPLING_CACHE_ONLY", "1")
     from ace_jax.cli import main
-    from ace_jax.construct.model import build_embedding_model
+    from ace_jax.basis.model import build_embedding_model
     from ace_jax.eval import load
     z = np.load(FIX / "embedding_ref_mh1_SiGe.npz")
     table = tmp_path / "emb.json"

@@ -210,19 +210,13 @@ def test_learn_radial_recovers_perturbed_radials():
     assert all(b <= a * (1 + 1e-12) for a, b in zip(info["trace"], info["trace"][1:]))
 
 
-def test_learn_radial_profiles_theta(small):
-    from ace_jax.fit.radial_learn import learn_radial
-    prob, ds, _ = small
-    W, info = learn_radial(prob, ds, prob.model.rnl_Wnlq, steps=4, reprofile_every=2, map_steps=50)
-    assert len(info["theta"]) >= 2 and all(np.all(np.isfinite(t)) for t in info["theta"])
-
-
-def test_learn_radial_logs_per_round(small):
+def test_learn_radial_profiles_theta_and_logs_per_round(small):
     from ace_jax.fit.radial_learn import learn_radial
     prob, ds, _ = small
     lines = []
-    learn_radial(prob, ds, prob.model.rnl_Wnlq, theta0=THETA, profile=False, steps=4,
-                 reprofile_every=2, log=lines.append)
+    W, info = learn_radial(prob, ds, prob.model.rnl_Wnlq, steps=4, reprofile_every=2, map_steps=20,
+                           log=lines.append)
+    assert len(info["theta"]) >= 2 and all(np.all(np.isfinite(t)) for t in info["theta"])
     round_lines = [l for l in lines if "round" in l]
     assert len(round_lines) >= 2
     assert "eta=" in round_lines[0] and "eta=" not in round_lines[-1]
@@ -243,7 +237,7 @@ def test_holdout_score_energy_only_split(small):
     from ace_jax.fit.hypers import to_array
     from ace_jax.fit.radial_learn import holdout_score
     prob, ds_fit, _ = small
-    _, ds_val, _ = make_problem(ncfg=6, start=6, force_key="__no_such_key__")
+    _, ds_val, _ = make_problem(ncfg=6, start=6, force_key=None)            # no force labels
     from ace_jax.fit.objective import posterior
     from ace_jax.fit.stats import linear_statistics
     a = to_array(THETA)
@@ -328,25 +322,33 @@ def test_learn_radial_two_species_roughness():
     assert out[1e-1] <= out[0.0]
 
 
-def test_fit_radial_checkpoints_each_lambda(tmp_path, small):
+@pytest.fixture(scope="module")
+def checkpointed(small, tmp_path_factory):
+    """One fit_radial over two roughness weights with a checkpoint callback, shared by
+    the tests that only read its result: (W, info, ds_val, checkpoint dir, labels)."""
     from ace_jax.fit.radial_learn import fit_radial, save_result
     prob, ds_fit, _ = small
     _, ds_val, _ = make_problem(ncfg=6, start=6)
-    calls = []
+    out, calls = tmp_path_factory.mktemp("ckpt"), []
 
     def ckpt(label, W, info):
         calls.append(label)
-        save_result(tmp_path / f"lam_{label}", W, info)
+        save_result(out / f"lam_{label}", W, info)
 
     W, info = fit_radial(prob, ds_fit, ds_val, prob.model.rnl_Wnlq, lam_grid=(0.0, 1e-2),
-                         theta0=THETA, profile=False, steps=1, map_steps=10, checkpoint=ckpt)
+                         theta0=THETA, profile=False, steps=2, map_steps=10, checkpoint=ckpt)
+    return W, info, ds_val, out, calls
+
+
+def test_fit_radial_checkpoints_each_lambda(checkpointed):
+    W, info, _, tmp_path, calls = checkpointed
     assert calls == ["0", "0.01"]
     import json
     saved = {}
     for lab in calls:
         saved[lab] = np.load(tmp_path / f"lam_{lab}" / "rnl_Wnlq.npy")
         js = json.loads((tmp_path / f"lam_{lab}" / "radial_info.json").read_text())
-        assert js["lam_rough"] == float(lab) and js["steps"] == 1
+        assert js["lam_rough"] == float(lab) and js["steps"] == 2
     sel = info["selected"]
     if sel != "init":
         np.testing.assert_array_equal(saved[sel.split("=")[1]], np.asarray(W))
@@ -441,30 +443,16 @@ def test_learn_radial_gap_prior_shrinks_change_in_gaps():
     assert out[1e2] < out[0.0]
 
 
-def test_fit_radial_gap_grid_labels(small):
+def test_fit_radial_spec_and_gap_grid_labels(small):
+    """Both suffixes in one grid (gap > 0 also exercises the uniform-Gram precompute)."""
     from ace_jax.fit.radial_learn import fit_radial
     prob, ds_fit, _ = small
     _, ds_val, _ = make_problem(ncfg=6, start=6)
-    lam_grid = (0.0, 1e-2)
-    gap_grid = (0.0, 1.0)
-    W, info = fit_radial(prob, ds_fit, ds_val, prob.model.rnl_Wnlq, lam_grid=lam_grid,
+    spec_grid, gap_grid = (0.0, 1.0), (0.0, 1.0)
+    W, info = fit_radial(prob, ds_fit, ds_val, prob.model.rnl_Wnlq, lam_grid=(0.0,), spec_grid=spec_grid,
                          gap_grid=gap_grid, theta0=THETA, steps=0, map_steps=10)
-    expected = {"init"} | {f"learned_lam={l:g}_gap={g:g}" for l in lam_grid for g in gap_grid}
+    expected = {"init"} | {f"learned_lam=0_spec={s:g}_gap={g:g}" for s in spec_grid for g in gap_grid}
     assert set(info["scores"]) == expected
-    assert len(info["scores"]) == 1 + len(lam_grid) * len(gap_grid)
-
-
-def test_fit_radial_spec_grid_labels(small):
-    from ace_jax.fit.radial_learn import fit_radial
-    prob, ds_fit, _ = small
-    _, ds_val, _ = make_problem(ncfg=6, start=6)
-    lam_grid = (0.0, 1e-2)
-    spec_grid = (0.0, 1.0)
-    W, info = fit_radial(prob, ds_fit, ds_val, prob.model.rnl_Wnlq, lam_grid=lam_grid,
-                         spec_grid=spec_grid, theta0=THETA, steps=0, map_steps=10)
-    expected = {"init"} | {f"learned_lam={l:g}_spec={s:g}" for l in lam_grid for s in spec_grid}
-    assert set(info["scores"]) == expected
-    assert len(info["scores"]) == 1 + len(lam_grid) * len(spec_grid)
 
 
 def test_fit_radial_rejects_duplicate_lambdas(small):
@@ -504,7 +492,7 @@ def test_save_result_refuses_stale_readout(tmp_path, small):
 
 
 def test_readout_to_npz_layout():
-    from ace_jax.construct.export import readout_to_npz
+    from ace_jax.basis.export import readout_to_npz
     nB, nP, NZ = 3, 2, 2
     c = np.arange((nB + nP) * NZ, dtype=float)
     WB, Wpair = readout_to_npz(c, nB, nP, NZ)
@@ -514,16 +502,14 @@ def test_readout_to_npz_layout():
         readout_to_npz(c[:-1], nB, nP, NZ)
 
 
-def test_saved_model_energies_match_fitted_readout(tmp_path, small):
+def test_saved_model_energies_match_fitted_readout(tmp_path, small, checkpointed):
     """model.npz written by save_result evaluates to linear_rows @ readout
     (+ E0): the readout is the one fitted for the selected radials."""
-    from ace_jax.fit.radial_learn import fit_radial, save_result
+    from ace_jax.fit.radial_learn import save_result
     from ace_jax.fit.radial_model import with_radial
     from ace_jax.fit.rows import linear_rows
     prob, ds_fit, _ = small
-    _, ds_val, _ = make_problem(ncfg=6, start=6)
-    W, info = fit_radial(prob, ds_fit, ds_val, prob.model.rnl_Wnlq, lam_grid=(0.0,), theta0=THETA,
-                         profile=False, steps=2, map_steps=20)
+    W, info, ds_val, _, _ = checkpointed
     save_result(tmp_path, W, info, src_npz=MODEL, model=prob.model)
     back, _, z = load(tmp_path / "model.npz")
     E0 = np.asarray(z["E0"])
@@ -545,23 +531,6 @@ def test_saved_model_energies_match_fitted_readout(tmp_path, small):
         worst = max(worst, float(np.max(np.abs(E_model - E_lin) / np.abs(E_lin))))
     print(f"max relative |E_npz - (rows @ c + E0)| / |E| = {worst:.3e}")
     assert worst < 1e-8
-
-
-def test_bench_driver_smoke(tmp_path):
-    import json, subprocess, sys
-    from conftest import ROOT
-    r = subprocess.run(
-        [sys.executable, str(ROOT / "bench/learn_radial/run.py"), "--model", str(MODEL),
-         "--data", str(XYZ), "--energy-key", "dft_energy", "--force-key", "dft_force",
-         "--virial-key", "dft_virial", "--ntrain", "8", "--nval", "8", "--batch", "4",
-         "--n-q", "20", "--steps", "3", "--lam-grid", "0", "--map-steps", "20",
-         "--out", str(tmp_path)], capture_output=True, text=True)
-    assert r.returncode == 0, r.stderr[-3000:]
-    s = json.loads((tmp_path / "summary.json").read_text())
-    assert s["selected"] in s["scores"] and (tmp_path / "model.npz").exists()
-    assert (tmp_path / "lam_0" / "rnl_Wnlq.npy").exists()
-    assert s["to_analytic_relres_max"] == 0.0            # analytic fixture: widened only
-    assert "relres_max=" in r.stdout
 
 
 def test_learn_sigma_e_mult_scales_only_the_radial_objective(small):

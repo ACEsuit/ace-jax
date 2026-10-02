@@ -26,7 +26,7 @@ jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 import numpy as np
 
-from ace_jax.construct.prior import prior_diagonal
+from ace_jax.basis.prior import prior_diagonal
 from ace_jax.eval import load
 from ace_jax.fit.data import build_dataset, load_configs
 from ace_jax.fit.hypers import default_prior
@@ -44,7 +44,7 @@ p.add_argument("--virial-key", default="virial")
 p.add_argument("--ntrain", type=int, default=200); p.add_argument("--nval", type=int, default=200)
 p.add_argument("--seed", type=int, default=0); p.add_argument("--batch", type=int, default=4)
 p.add_argument("--r0", type=float, default=2.35, help="hyperprior length scale (default_prior)")
-p.add_argument("--n-q", type=int, default=12, help="tensor-radial polynomial span after widening. 12 (a modest widening) optimises well and transfers to MD; 30 is ill-conditioned and learns only tiny high-frequency changes (docs/learn-radial-results.md)")
+p.add_argument("--n-q", type=int, default=12, help="tensor-radial polynomial span after widening. 12 (a modest widening) optimises well and transfers to MD; 30 is ill-conditioned and learns only tiny high-frequency changes (docs/dev/learn-radial-results.md)")
 p.add_argument("--steps", type=int, default=40); p.add_argument("--reprofile-every", type=int, default=20)
 p.add_argument("--lam-grid", default="0,1e-2", help="relative roughness weights")
 p.add_argument("--spec-grid", default="0", help="relative spectral-prior weights on the radial change; useful range ~1e-6..1e-4 at --spec-p 4 (see relative_lambda_spec)")

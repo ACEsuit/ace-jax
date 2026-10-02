@@ -1,5 +1,5 @@
 """Analytic (learned) radials to the spline branch: `to_spline`, and `lean` on
-analytic models (docs/learned-radial-splining.md).
+analytic models (docs/dev/learned-radial-splining.md).
 
 `to_spline` is an approximation, not a restructuring: it agrees with the
 analytic model to its tolerance, not to roundoff.  So the parity bounds here
@@ -473,7 +473,7 @@ def test_default_tol_is_1e_10():
 @pytest.mark.parametrize("layout", ["sparse", "dense"])
 def test_default_lean_forces_to_1e_8(layout):
     """At the default tol the lean form's forces agree with the full analytic
-    model to ~1e-8 of the largest force (docs/learned-radial-splining.md)."""
+    model to ~1e-8 of the largest force (docs/dev/learned-radial-splining.md)."""
     m, meta, _ = load(str(CANTOR))
     a = _perturbed(m)
     at = _structure(meta)
@@ -811,7 +811,7 @@ def test_learned_flag_round_trips(tmp_path):
     """patch_radial_npz (what save_result writes model.npz with) stores it in
     meta_json and load reads it; old files default to False, and
     mark_radial_learned marks one."""
-    from ace_jax.construct.export import mark_radial_learned, patch_radial_npz
+    from ace_jax.basis.export import mark_radial_learned, patch_radial_npz
     from ace_jax.fit.radial_learn import save_result
     from ace_jax.fit.radial_model import with_radial
     m, meta, _ = load(str(SIGE))
@@ -838,11 +838,11 @@ def test_learned_flag_round_trips(tmp_path):
 
 
 def test_save_npz_round_trips_the_flag(tmp_path, monkeypatch):
-    from test_python_authoring import _primed_cache
+    from test_basis_build import _primed_cache
 
-    from ace_jax.construct.export import save_npz
-    from ace_jax.construct.model import build_model
-    monkeypatch.setenv("ACEJAX_NO_JULIA", "1")
+    from ace_jax.basis.export import save_npz
+    from ace_jax.basis.model import build_model
+    monkeypatch.setenv("ACEJAX_COUPLING_CACHE_ONLY", "1")
     auth = build_model([14], 3, 10, coupling_cache_dir=_primed_cache(tmp_path))
     m, meta = auth.eval_pair()
     assert not m.radial_learned and meta["radial_learned"] is False

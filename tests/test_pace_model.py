@@ -26,31 +26,41 @@ def _atoms(ref, s):
                  cell=ref[f"cell_{s}"], pbc=ref[f"pbc_{s}"])
 
 
+_EVALUATED = {}
+
+
+def _evaluated(name):
+    """{structure: (n_atoms, E, F, S or None)} from one ACECalculator: the tight-grid and
+    shipped-grid parity tests compare the same evaluation against different references."""
+    if name not in _EVALUATED:
+        y, ref = _fixture(name)
+        calc, out = ACECalculator(str(y)), {}
+        for s in ref["struct_names"]:
+            at = _atoms(ref, s)
+            at.calc = calc
+            out[s] = (len(at), at.get_potential_energy(), at.get_forces(),
+                      at.get_stress() if at.pbc.all() else None)
+        _EVALUATED[name] = out
+    return _EVALUATED[name]
+
+
 @pytest.mark.parametrize("name", NAMES)
 def test_parity_tight(name):
     y, ref = _fixture(name)
-    calc = ACECalculator(str(y))
-    for s in ref["struct_names"]:
-        at = _atoms(ref, s)
-        at.calc = calc
-        n = len(at)
-        assert abs(at.get_potential_energy() - ref[f"E_tight_{s}"]) / n < 1e-9, s
-        np.testing.assert_allclose(at.get_forces(), ref[f"F_tight_{s}"], atol=1e-8, err_msg=s)
-        if at.pbc.all():
-            np.testing.assert_allclose(at.get_stress(), ref[f"S_tight_{s}"], atol=1e-9, err_msg=s)
+    for s, (n, E, F, S) in _evaluated(name).items():
+        assert abs(E - ref[f"E_tight_{s}"]) / n < 1e-9, s
+        np.testing.assert_allclose(F, ref[f"F_tight_{s}"], atol=1e-8, err_msg=s)
+        if S is not None:
+            np.testing.assert_allclose(S, ref[f"S_tight_{s}"], atol=1e-9, err_msg=s)
 
 
 @pytest.mark.parametrize("name", NAMES)
 def test_parity_shipped_grid(name):
     """Gap to the C++ at the file's own deltaSplineBins: measured, then pinned."""
     y, ref = _fixture(name)
-    calc = ACECalculator(str(y))
     worst = 0.0
-    for s in ref["struct_names"]:
-        at = _atoms(ref, s)
-        at.calc = calc
-        worst = max(worst, abs(at.get_potential_energy() - ref[f"E_ship_{s}"]) / len(at),
-                    float(np.abs(at.get_forces() - ref[f"F_ship_{s}"]).max()))
+    for s, (n, E, F, _) in _evaluated(name).items():
+        worst = max(worst, abs(E - ref[f"E_ship_{s}"]) / n, float(np.abs(F - ref[f"F_ship_{s}"]).max()))
     print(f"\n  {name}: worst |dE|/atom or |dF| vs shipped spline grid = {worst:.2e}")
     assert worst < SHIP_TOL
 

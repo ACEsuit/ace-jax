@@ -39,6 +39,15 @@ def setup():
     return model, meta, configs, ds, cfg, ind
 
 
+@pytest.fixture(scope="module")
+def batch4(setup):
+    """Batch 0 (the first 4 configs) built on its own: the autodiff and layout checks
+    need one batch, not one padded to the 53-config dataset's node and neighbour caps."""
+    model, meta, configs, ds, cfg, ind = setup
+    z = np.load(FIXTURE_DIR / "si_fitted.npz")
+    return jax.tree.map(lambda a: a[0], build_dataset(configs[:4], meta, np.asarray(z["E0"]), configs_per_batch=4))
+
+
 def test_linear_rows_match_acefit_design_matrix(setup):
     model, meta, configs, ds, cfg, ind = setup
     d = np.load(DESIGN)
@@ -73,10 +82,10 @@ def test_linear_rows_match_acefit_design_matrix(setup):
 # R18/R19 (RMS distance; rho as decay length) the bump was ~1e-13 at the
 # fixture's nearest-inducing distances and the check compared zeros to zeros.
 @pytest.mark.parametrize("kind, bump", [("matern32", True), ("cosine", False)])
-def test_residual_rows_match_autodiff_of_energy_rows(setup, kind, bump):
+def test_residual_rows_match_autodiff_of_energy_rows(setup, batch4, kind, bump):
     model, meta, configs, ds, cfg, ind = setup
     spec = KernelSpec(kind=kind, bump=bump, D=cfg.D)
-    batch = jax.tree.map(lambda a: a[0], ds)
+    batch = batch4
     M = ind.XM.shape[0]
 
     Ncap, K = batch.nbr.shape
@@ -112,7 +121,7 @@ def test_residual_rows_match_autodiff_of_energy_rows(setup, kind, bump):
     assert np.abs(np.asarray(res.V) - V[:cfg.C]).max() < 1e-9 * max(1.0, np.abs(V).max())
 
 
-def test_residual_rows_density_map_match_autodiff(setup):
+def test_residual_rows_density_map_match_autodiff(setup, batch4):
     """Density feature map (sqrt of the ACE pair-density channels, the FS/PACE
     embedding): the residual force/virial rows are still the exact derivative
     of the residual energy rows -- the JU contraction folds Pmap and the sqrt
@@ -125,7 +134,7 @@ def test_residual_rows_density_map_match_autodiff(setup):
     ind = select_inducing(X, S, ds.node_z, ds.node_mask, 6, scale, Pmap=Pmap, warp="sqrt")
     assert ind.XM.shape[1] == cfg.n_pair and ind.warp == "sqrt"
     spec = KernelSpec(kind="matern32", bump=True, D=cfg.D)
-    batch = jax.tree.map(lambda a: a[0], ds)
+    batch = batch4
     Ncap, K = batch.nbr.shape
     M = ind.XM.shape[0]
     with highest_precision():
@@ -152,20 +161,20 @@ def test_residual_rows_density_map_match_autodiff(setup):
     assert np.abs(np.asarray(res.F) + dEdr).max() < 1e-9 * max(1.0, np.abs(dEdr).max())
 
 
-def test_batch_rows_concatenates(setup):
+def test_batch_rows_concatenates(setup, batch4):
     model, meta, configs, ds, cfg, ind = setup
     spec = KernelSpec(kind="cosine", bump=False, D=cfg.D)
-    batch = jax.tree.map(lambda a: a[0], ds)
+    batch = batch4
     with highest_precision():
         rows = jax.jit(lambda th: batch_rows(th, spec, model, ind, cfg, batch))(THETA)
     assert rows.E.shape == (cfg.C, cfg.len_basis + ind.XM.shape[0])
     assert bool(jnp.all(jnp.isfinite(rows.F))) and bool(jnp.all(jnp.isfinite(rows.V)))
 
 
-def test_edge_jacobian_dense_matches_sparse(setup):
+def test_edge_jacobian_dense_matches_sparse(setup, batch4):
     """The dense per-node contraction equals the edge-gather form on a batch."""
     model, meta, configs, ds, cfg, ind = setup
-    batch = jax.tree.map(lambda a: a[0], ds)
+    batch = batch4
     Ncap, K = batch.nbr.shape
     rij, send, recv, mask = flat_edges(batch.rij, batch.nbr, batch.nbr_mask)
     with highest_precision():

@@ -1,9 +1,7 @@
 """Profiling on a Modal A100-80GB, reusing the benchmark image (bench/scaling/modal_app.py).
 
     uv run --with modal modal run bench/perf/modal_profile.py::probe
-    uv run --with modal modal run bench/perf/modal_profile.py::acejax --model Cantor_medium --n 8192
     uv run --with modal modal run bench/perf/modal_profile.py::mlpace --model Cantor_medium --n 8192
-    uv run --with modal modal run bench/perf/modal_profile.py::sweep_acejax
     uv run --with modal modal run bench/perf/modal_profile.py::sweep_mlpace
     uv run --with modal modal run bench/perf/modal_profile.py::ace      # ACEModel (npz), 6 models
 
@@ -57,54 +55,7 @@ def probe():
     return {c: (lambda p: (p.stdout + p.stderr)[-3000:])(_sh(c)) for c in cmds}
 
 
-def _acejax(model, system, n, dtype="float64", layout="dense", kind="gather",
-            variant="baseline", trace=True, stages=True, reps=20):
-    import os
-    import shutil
-    import tempfile
-    yace = f"/ace-jax/bench/scaling/models/pace_{model}.yace"
-    base = ["python", "/ace-jax/bench/perf/profile_acejax.py", yace, system, str(n),
-            "--dtype", dtype, "--layout", layout, "--kind", kind, "--variant", variant,
-            "--reps", str(reps)]
-    p = _sh(base + ([] if stages else ["--no-stages"]))
-    try:
-        out = json.loads(p.stdout.strip().splitlines()[-1])
-    except Exception:                                              # noqa: BLE001
-        return {"error": (p.stdout[-2000:] + p.stderr[-4000:])}
-    if trace:
-        td, dd = tempfile.mkdtemp(), tempfile.mkdtemp()
-        p2 = _sh(base + ["--no-stages", "--trace", td, "--reps", "3"],
-                 env={"XLA_FLAGS": f"--xla_dump_to={dd} --xla_dump_hlo_as_text"})
-        sys.path.insert(0, "/ace-jax/bench/perf")
-        import hlo_trace
-        try:
-            out["kernels"] = hlo_trace.kernel_table(td, dd, 5, top=45)
-        except Exception as ex:                                    # noqa: BLE001
-            files = [os.path.join(r, f) for r, _, fs in os.walk(td) for f in fs]
-            out["kernels"] = {"error": repr(ex), "stderr": p2.stderr[-3000:],
-                              "stdout": p2.stdout[-1000:], "files": files[:20]}
-        # keep the raw trace + optimised HLO on the volume for re-parsing
-        keep = f"/vol/{model}_{n}_{dtype}_{layout}_{variant}"
-        shutil.rmtree(keep, ignore_errors=True)
-        shutil.copytree(td, keep + "/trace")
-        os.makedirs(keep + "/hlo", exist_ok=True)
-        for f in os.listdir(dd):
-            if f.endswith("after_optimizations.txt") and os.path.getsize(os.path.join(dd, f)) > 20000:
-                shutil.copy(os.path.join(dd, f), keep + "/hlo/")
-        out["saved"] = keep
-        shutil.rmtree(td, ignore_errors=True)
-        shutil.rmtree(dd, ignore_errors=True)
-    return out
-
-
 vol = modal.Volume.from_name("ace-jax-perf-profile", create_if_missing=True)
-
-
-@app.function(gpu="A100-80GB", timeout=3600, volumes={"/vol": vol})
-def acejax_remote(cases: list):
-    out = [_acejax(**c) for c in cases]
-    vol.commit()
-    return out
 
 
 def _mlpace(model, system, n, steps=100, warmup=20, ktimer=True, style="product",
@@ -170,31 +121,10 @@ def _system(model):
 
 
 @app.local_entrypoint()
-def acejax(model: str = "Cantor_medium", n: int = 8192, dtype: str = "float64",
-           layout: str = "dense", kind: str = "gather", variant: str = "baseline",
-           trace: bool = True, stages: bool = True, tag: str = ""):
-    r = acejax_remote.remote([dict(model=model, system=_system(model), n=n, dtype=dtype,
-                                   layout=layout, kind=kind, variant=variant, trace=trace,
-                                   stages=stages)])
-    _save(f"acejax_{model}_{n}_{dtype}_{layout}_{variant}{tag}.json", r[0])
-
-
-@app.local_entrypoint()
 def mlpace(model: str = "Cantor_medium", n: int = 8192, steps: int = 100, tag: str = ""):
     r = mlpace_remote.remote([dict(model=model, system=_system(model), n=n, steps=steps)])
     _save(f"mlpace_{model}_{n}{tag}.json", r[0])
     print(r[0].get("kernel_timer", r[0].get("error", ""))[:4000])
-
-
-@app.local_entrypoint()
-def sweep_acejax(models: str = "SiGe_small,SiGe_medium,SiGe_large,Cantor_small,Cantor_medium,Cantor_large",
-                 ns: str = "1024,4096,8192,16384,32768", dtype: str = "float64",
-                 variant: str = "baseline", tag: str = ""):
-    groups = [[dict(model=m, system=_system(m), n=int(n), dtype=dtype, variant=variant,
-                    trace=False, stages=False, reps=10) for n in ns.split(",")]
-              for m in models.split(",")]
-    res = list(acejax_remote.map(groups))
-    _save(f"sweep_acejax_{dtype}_{variant}{tag}.json", [r for g in res for r in g])
 
 
 @app.local_entrypoint()
@@ -204,17 +134,6 @@ def sweep_mlpace(models: str = "SiGe_small,SiGe_medium,SiGe_large,Cantor_small,C
              for m in models.split(",") for n in ns.split(",")]
     res = mlpace_remote.remote(cases)
     _save(f"sweep_mlpace{tag}.json", res)
-
-
-@app.local_entrypoint()
-def variants(model: str = "Cantor_medium", n: int = 8192, dtype: str = "float64",
-             names: str = "baseline,rec,pool,rev,rec+pool+rev", trace: str = "rec+pool+rev",
-             tag: str = ""):
-    """Every variant on ONE container (same GPU), so the timings compare."""
-    cases = [dict(model=model, system=_system(model), n=n, dtype=dtype, variant=v,
-                  trace=(v in trace.split(",")), stages=False) for v in names.split(",")]
-    res = acejax_remote.remote(cases)
-    _save(f"variants_{model}_{n}_{dtype}{tag}.json", res)
 
 
 @app.function(gpu="A100-80GB", timeout=1800)
@@ -303,24 +222,6 @@ def bigsweep(models: str = "SiGe_small,SiGe_medium,SiGe_large,Cantor_small,Canto
     ex = [e.split(":") for e in extra.split(",") if e]
     rows = bigsweep_remote.remote(models.split(","), ns.split(","), variant, ex, tag)
     _save(f"bigsweep{tag}.json", rows)
-
-
-@app.local_entrypoint()
-def lammps_variants(model: str = "Cantor_medium", ns: str = "8192,32768",
-                    modes: str = "stock,owned,owned:rec+pool+fm", dtype: str = "float64",
-                    tag: str = ""):
-    argvs = []
-    for n in ns.split(","):
-        for mv in modes.split(","):
-            mode, _, var = mv.partition(":")
-            argvs.append(["bench/perf/lammps_variant.py", model, n, "--dtype", dtype, "--mode", mode,
-                          "--variant", var or "baseline", "--work", f"/tmp/lv_{n}_{mode}_{var}"])
-    res = script_remote.remote(argvs)
-    _save(f"lammps_variants_{model}_{dtype}{tag}.json", res)
-    for r in res:
-        print(json.dumps({k: r.get(k) for k in ("n_atoms", "mode", "variant", "layout", "rows",
-                                                 "k_dense", "status", "step_s", "atom_steps_per_s",
-                                                 "pe", "error")}))
 
 
 @app.local_entrypoint()

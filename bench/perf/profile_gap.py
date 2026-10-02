@@ -1,5 +1,5 @@
 """Per-stage GPU profile of the dense E/F/V call for an ACE (.npz) or PACE (.yace)
-model, with the SAME kernel-to-stage attribution for both (docs/ace-vs-pace-gap.md §2).
+model, with the SAME kernel-to-stage attribution for both (docs/dev/ace-vs-pace-gap.md §2).
 
     PYTHONPATH=bench:src python bench/perf/profile_gap.py <model file> <system> <n> \
         --trace DIR --dump DIR [--variant V]   (V: an ace_fast variant, ACE only)

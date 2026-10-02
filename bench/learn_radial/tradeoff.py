@@ -24,7 +24,7 @@ jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 import numpy as np
 
-from ace_jax.construct.prior import prior_diagonal
+from ace_jax.basis.prior import prior_diagonal
 from ace_jax.eval import load
 from ace_jax.fit.data import build_dataset, load_configs
 from ace_jax.fit.hypers import default_prior, from_array

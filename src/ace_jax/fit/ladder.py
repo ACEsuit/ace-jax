@@ -228,7 +228,10 @@ def run_pathfinder(lml, prior, theta_map, *, n_draws=100, seed=0,
     (measured).  num_samples only sets ELBO-estimation noise for path selection
     (NOT the posterior draw count -- that is n_draws, resampled below), so small
     values cost little; maxiter just caps the L-BFGS steps from a MAP start."""
-    import blackjax
+    try:
+        import blackjax
+    except ImportError as e:
+        raise ImportError("the pathfinder rung needs blackjax: pip install 'ace-jax[gp]'") from e
     from .hypers import log_prior
     logpost = jax.jit(lambda a: lml(a) + log_prior(from_array(a), prior))
     x0 = jnp.asarray(to_array(theta_map))

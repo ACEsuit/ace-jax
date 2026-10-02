@@ -120,7 +120,7 @@ def capacity(at, rcut, skin=1.0, tight=False, list_headroom=0.5):
     structures compress during the run (Cantor: the largest coordination within
     rcut climbs from 42 to 50 in 250 steps), and between list rebuilds no atom
     can gain more neighbours within rcut than its rcut + skin list holds -- so
-    that count is the safe bound (docs/perf-lammps-large-n.md).  The dense
+    that count is the safe bound (docs/dev/perf-lammps-large-n.md).  The dense
     energy function evaluates owned rows only (max_owned), and senders are
     always owned, so max_edges counts owned rows.  The neighbour-matrix list
     (max_neighbors) holds the rcut + skin list whatever the model slots.

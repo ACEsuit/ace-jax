@@ -12,7 +12,7 @@ radials W, so no design matrix is ever materialised.  Its W-gradient is the
 exact Golub-Pereyra/Kaufman gradient (envelope theorem), taken by autodiff
 through the checkpointed `linear_statistics` scan.  M = 0 throughout: the
 residual GP is fitted afterwards on the frozen learned model.
-See docs/specs/2026-09-26-learned-radial-varpro-design.md.
+See docs/dev/specs/2026-09-26-learned-radial-varpro-design.md.
 """
 import itertools
 import json
@@ -616,7 +616,7 @@ def save_result(out_dir, W, info, *, src_npz=None, model=None, readout=None):
     if readout is not None:
         np.save(out / "readout.npy", np.asarray(readout))
     if src_npz is not None:
-        from ..construct.export import patch_radial_npz
+        from ..basis.export import patch_radial_npz
         # the held-out gate may keep the initial radial: then nothing was learned
         learned = info.get("selected") != "init"
         patch_radial_npz(src_npz, out / "model.npz", with_radial(model, W, learned=learned),

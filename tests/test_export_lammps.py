@@ -31,6 +31,15 @@ class Graph:                                    # the lammps-jax graph fields
         self.senders, self.receivers, self.edge_mask = s, r, m
 
 
+def _e_and_grad(f, species, graph, pos):
+    """Per-row energies and the gradient of their sum from one jitted vjp (eager
+    evaluation dispatched op by op, 3-5x slower; separate e and G jits compiled twice)."""
+    def run(p):
+        e, vjp = jax.vjp(lambda q: f(q, species, graph), p)
+        return e, vjp(jnp.ones_like(e))[0]
+    return jax.jit(run)(pos)
+
+
 def _cluster(name="gesi_sbessel"):
     ref = np.load(pace_fixture(FIX / f"{name}_ref.npz"))
     at = Atoms(numbers=ref["Z_bulk"], positions=ref["pos_bulk"], cell=ref["cell_bulk"], pbc=False)
@@ -248,7 +257,7 @@ def test_owned_rows_bundle_matches_calculator(layout):
     K = int(np.bincount(g.senders, minlength=len(at)).max())
     f = make_energy_fn(model, len(meta["elements"]), layout, k_dense=K + 3,
                        n_rows=int(np.ceil(1.1 * len(at))))
-    E, G = jax.value_and_grad(lambda p: jnp.sum(f(p, species, graph)))(jnp.asarray(at.positions))
+    E, G = jax.jit(jax.value_and_grad(lambda p: jnp.sum(f(p, species, graph))))(jnp.asarray(at.positions))
     at.calc = ACECalculator(y, layout="sparse", skin=0.0)
     assert float(E) == pytest.approx(at.get_potential_energy(), abs=1e-10)
     np.testing.assert_allclose(-np.asarray(G), at.get_forces(), atol=1e-9)
@@ -283,10 +292,8 @@ def test_owned_rows_no_overflow_matches_unrestricted():
     f_all = make_energy_fn(model, len(meta["elements"]), "dense", k_dense=K + 3)
     f_owned = make_energy_fn(model, len(meta["elements"]), "dense", k_dense=K + 3, n_rows=nr)
 
-    _, g_all = jax.value_and_grad(lambda p: jnp.sum(f_all(p, species, filtered)))(pos)
-    _, g_owned = jax.value_and_grad(lambda p: jnp.sum(f_owned(p, species, filtered)))(pos)
-    e_all_arr = f_all(pos, species, filtered)
-    e_owned_arr = f_owned(pos, species, filtered)
+    e_all_arr, g_all = _e_and_grad(f_all, species, filtered, pos)
+    e_owned_arr, g_owned = _e_and_grad(f_owned, species, filtered, pos)
 
     np.testing.assert_allclose(np.asarray(e_owned_arr[:nr]), np.asarray(e_all_arr[:nr]),
                                rtol=1e-12, atol=1e-12)
@@ -304,7 +311,7 @@ def test_owned_rows_overflow_is_nan():
     n_rows = len(at) // 2
     species = jnp.zeros(len(at), jnp.int32)
     f = make_energy_fn(model, len(meta["elements"]), "dense", k_dense=64, n_rows=n_rows)
-    E, G = jax.value_and_grad(lambda p: jnp.sum(f(p, species, graph)))(jnp.asarray(at.positions))
+    E, G = jax.jit(jax.value_and_grad(lambda p: jnp.sum(f(p, species, graph))))(jnp.asarray(at.positions))
     assert np.isnan(float(E))
     assert np.isnan(np.asarray(G)).any()
 
@@ -312,7 +319,7 @@ def test_owned_rows_overflow_is_nan():
 # ------------------------------------------------------------------ row blocks
 # The dense bundle evaluates its rows in blocks of lammps.BUNDLE_BLOCK_ROWS
 # (lax.map + jax.checkpoint) once they exceed one block; at or below one block
-# the program is the unblocked one.  docs/perf-lammps-large-n.md.
+# the program is the unblocked one.  docs/dev/perf-lammps-large-n.md.
 
 def _big_cluster(kind):
     """213 atoms (3x3x3 diamond, 3 removed): with a 64-row block that is four
@@ -354,8 +361,7 @@ def test_dense_blocks_match_single_block(monkeypatch, kind, type_order, n_ghost)
         monkeypatch.setattr(lammps, "BUNDLE_BLOCK_ROWS", block)
         f = make_energy_fn(model, nsp, "dense", k_dense=k_dense, type_map=type_map,
                            n_rows=n_rows)
-        e = jax.jit(lambda p: f(p, species, graph))(pos)
-        G = jax.jit(jax.grad(lambda p: jnp.sum(f(p, species, graph))))(pos)
+        e, G = _e_and_grad(f, species, graph, pos)
         return np.asarray(e), np.asarray(G)
 
     e1, G1 = run(10 ** 9)
@@ -433,7 +439,7 @@ def test_lean_energy_fn_with_type_map(layout):
     out = []
     for m in (model, lean(model)):
         f = make_energy_fn(m, 2, layout, k_dense=K + 3, type_map=tm)
-        out.append(jax.value_and_grad(lambda p: jnp.sum(f(p, species, graph)))(pos))  # noqa: B023
+        out.append(jax.jit(jax.value_and_grad(lambda p: jnp.sum(f(p, species, graph))))(pos))  # noqa: B023
     assert float(out[1][0]) == pytest.approx(float(out[0][0]), rel=1e-12)
     np.testing.assert_allclose(np.asarray(out[1][1]), np.asarray(out[0][1]), rtol=0, atol=1e-12)
     at.calc = ACECalculator(MODELS["ace"](), layout="sparse", lean=False)
@@ -591,7 +597,7 @@ def test_matrix_compaction_overflow_is_nan():
     graph, pos, _ = _matrix_graph(at, meta["rcut"])
     species = jnp.zeros(pos.shape[0], jnp.int32)
     f = make_energy_fn(model, len(meta["elements"]), "matrix", k_dense=2, rcut=meta["rcut"])
-    E, G = jax.value_and_grad(lambda p: jnp.sum(f(p, species, graph)))(pos)
+    E, G = jax.jit(jax.value_and_grad(lambda p: jnp.sum(f(p, species, graph))))(pos)
     assert np.isnan(float(E)) and np.isnan(np.asarray(G)).any()
 
 
@@ -599,7 +605,7 @@ def test_matrix_compaction_overflow_is_nan():
 def test_matrix_nan_position_is_loud(k):
     """A NaN position gives NaN energies: the model itself zeroes a pair whose
     distance is NaN, so the energy function flags NaN pairs explicitly rather
-    than let the step run on with them dropped (docs/perf-lammps-large-n.md)."""
+    than let the step run on with them dropped (docs/dev/perf-lammps-large-n.md)."""
     y = str(pace_fixture(FIX / "gesi_sbessel.yace"))
     model, meta, _ = load(y)
     at = _cluster()
@@ -643,8 +649,7 @@ def test_matrix_blocks_match_single_block(monkeypatch, kind, k):
     def run(block):
         monkeypatch.setattr(lammps, "BUNDLE_BLOCK_ROWS", block)
         f = make_energy_fn(model, len(meta["elements"]), "matrix", k_dense=kd, rcut=meta["rcut"])
-        e = jax.jit(lambda p: f(p, species, graph))(pos)
-        G = jax.jit(jax.grad(lambda p: jnp.sum(f(p, species, graph))))(pos)
+        e, G = _e_and_grad(f, species, graph, pos)
         return np.asarray(e), np.asarray(G)
 
     e1, G1 = run(10 ** 9)
@@ -664,7 +669,7 @@ def test_matrix_lean_matches_full():
     out = []
     for m in (model, lean(model)):
         f = make_energy_fn(m, 2, "matrix", rcut=meta["rcut"])
-        out.append(jax.value_and_grad(lambda p: jnp.sum(f(p, species, graph)))(pos))  # noqa: B023
+        out.append(jax.jit(jax.value_and_grad(lambda p: jnp.sum(f(p, species, graph))))(pos))  # noqa: B023
     assert float(out[1][0]) == pytest.approx(float(out[0][0]), rel=1e-12)
     np.testing.assert_allclose(np.asarray(out[1][1]), np.asarray(out[0][1]), rtol=0, atol=1e-12)
 

@@ -21,7 +21,7 @@ jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 import numpy as np
 
-from ace_jax.construct.prior import prior_diagonal
+from ace_jax.basis.prior import prior_diagonal
 from ace_jax.eval import load
 from ace_jax.fit.data import build_dataset, load_configs
 from ace_jax.fit.hypers import default_prior, from_array
@@ -102,7 +102,7 @@ for cand in a.cand:
     m = with_radial(model, W)
     c, _ = posterior(from_array(a_fit), linear_statistics(m, cfg, ds_fit), prob)
     if a.save_models:
-        from ace_jax.construct.export import patch_radial_npz
+        from ace_jax.basis.export import patch_radial_npz
         pathlib.Path(a.save_models).mkdir(parents=True, exist_ok=True)
         patch_radial_npz(a.model, pathlib.Path(a.save_models) / f"{label}.npz", m, readout=np.asarray(c))
     out = {}

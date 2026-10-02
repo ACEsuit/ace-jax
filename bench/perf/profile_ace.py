@@ -272,7 +272,7 @@ def attribute(trace_dir, dump_dir, n_calls, top=40):
 
 # ------------------------------------------------------------------ widths
 def widths(model, K):
-    """The widths the pool-first rules compare (docs/perf-ace-profile.md)."""
+    """The widths the pool-first rules compare (docs/dev/perf-ace-profile.md)."""
     n_rnl, n_y = model.edge_a_widths()
     nz = int(model.E0.shape[0])
     kind = model.radial_kind

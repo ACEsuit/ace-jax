@@ -4,8 +4,8 @@ import math
 import numpy as np
 import pytest
 
-from ace_jax.construct.radial_init import tensor_radial_init
-from ace_jax.construct.spec import build_spec
+from ace_jax.basis.radial_init import tensor_radial_init
+from ace_jax.basis.spec import build_spec
 
 
 def _rnl():
@@ -31,19 +31,19 @@ def test_tensor_radial_init_n_q_factor_widens_and_keeps_onehot():
 
 
 def test_build_model_n_q_factor(tmp_path):
-    from test_python_authoring import _primed_cache
-    from ace_jax.construct.model import build_model
+    from test_basis_build import _primed_cache
+    from ace_jax.basis.model import build_model
     _, maxn = _rnl()
     auth = build_model([14], 3, 10, coupling_cache_dir=_primed_cache(tmp_path),
                        radial_mode="onehot", n_q_factor=3.0)
     assert auth.model.rnl_Wnlq.shape[-1] == math.ceil(3.0 * maxn)
     assert auth.model.polys_A.shape == (math.ceil(3.0 * maxn),)
-    assert auth.meta["authoring"]["n_q_factor"] == 3.0
+    assert auth.meta["basis"]["n_q_factor"] == 3.0
 
 
 @pytest.mark.parametrize("bad", [0.5, 0.0, -1.0, float("nan")])
 def test_n_q_factor_below_one_raises(bad):
-    from ace_jax.construct.model import build_model
+    from ace_jax.basis.model import build_model
     Rnl, _ = _rnl()
     with pytest.raises(ValueError, match="n_q_factor"):
         tensor_radial_init([14], Rnl, rcut=5.5, n_q_factor=bad)
@@ -67,7 +67,7 @@ def _analytic_fixture():
 
 def _sample(m, x):
     """env(x) P(x) W^T per pair, numpy, (NZ, NZ, n_x, n_rnl)."""
-    from ace_jax.construct.radial_init import envelope2sx_eval, poly_eval
+    from ace_jax.basis.radial_init import envelope2sx_eval, poly_eval
     W = np.asarray(m.rnl_Wnlq)
     P = poly_eval(x, np.asarray(m.polys_A), np.asarray(m.polys_B), np.asarray(m.polys_C))
     NZ = W.shape[0]
@@ -77,7 +77,7 @@ def _sample(m, x):
 
 
 def test_from_table_roundtrip_recovers_Wnlq():
-    from ace_jax.construct.radial_init import from_table
+    from ace_jax.basis.radial_init import from_table
     m = _analytic_fixture()
     x = np.linspace(-1, 1, 801)
     R = _sample(m, x)
@@ -89,7 +89,7 @@ def test_from_table_roundtrip_recovers_Wnlq():
 
 
 def test_from_table_zero_radial_has_zero_residual():
-    from ace_jax.construct.radial_init import from_table
+    from ace_jax.basis.radial_init import from_table
     m = _analytic_fixture()
     x = np.linspace(-1, 1, 201)
     R = _sample(m, x)

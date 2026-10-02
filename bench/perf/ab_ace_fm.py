@@ -28,7 +28,7 @@ from profile_ace import timeit  # noqa: E402
 
 def variant_classes():
     """The Task 9 candidates as ACEModel subclasses (the feature-major form was
-    measured and not adopted, so it lives only here; see docs/perf-ace-profile.md
+    measured and not adopted, so it lives only here; see docs/dev/perf-ace-profile.md
     section 5).  `node_major` is ACEModel as committed."""
     import jax
     import jax.numpy as jnp

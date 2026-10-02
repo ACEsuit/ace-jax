@@ -5,10 +5,11 @@ from dataclasses import dataclass
 class FitConfig:
     """Every option of the fitting pipeline.  Defaults are run.py's; the CLI
     overrides the ones where it differs (see cli.py)."""
-    model: str
+    model: object                        # str | os.PathLike | basis.model.Basis | basis.model.BasisSpec
     arm: str = "gp"                      # "linear" (M = 0) | "gp"
     # data
     energy_key: str = "energy"; force_key: str = "forces"; virial_key: str = "virial"
+    stress_key: str | None = None        # ASE/MACE stress label: virial = -stress * volume when no virial
     ntrain: int = 800; ntest: int = 200; test_start: int | None = None
     seed: int = 0; batch: int = 4
     weights: dict | None = None          # ACEfit weights dict (per config type)
@@ -27,7 +28,7 @@ class FitConfig:
     embedding: str | None = None         # MACE table JSON: frozen coregionalization
     delta_s_floor_q: float | None = None
     fix_rho: str | None = None           # "auto" or a number (L-BFGS only)
-    r0: float = 2.5
+    r0: float | None = 2.5              # None: the basis's own mean radial length (FitData.r0)
     # objective
     objective: str = "lml"               # "lml" | "loo"
     lml: str = "device"                  # "device" | "host-cache"
@@ -40,6 +41,7 @@ class FitConfig:
     init: dict | None = None             # Hypers field -> value
     # rungs
     rungs: tuple = ("map",)
+    solver: str = "evidence"             # "evidence" | "lstsq" (plain weighted least squares, no prior: teaching)
     laplace: str = "fd"                  # "fd" (run_laplace_fd) | "svi" (run_laplace)
     n_draws: int = 64
     vi_steps: int = 1000
@@ -61,6 +63,11 @@ class FitConfig:
                               1e-12, 1e-13, 1e-14)
     pops_val_frac: float = 0.2; pops_env_nf: int = 2000
     pops_rows: str = "auto"              # "auto" | "host" (rows cached in host RAM) | "device" (re-evaluated)
+    learn_radial: bool = False           # learn the tensor radials (radial_learn.fit_radial) before the fit
+    radial_n_q: int = 12                 # polynomial span after to_analytic widening
+    radial_steps: int = 40               # L-BFGS steps per roughness weight
+    radial_lam_grid: tuple = (0.0, 1e-2) # relative roughness weights; the gate picks among them and init
+    radial_val_frac: float = 0.2         # train hold-out for the gate
 
     def validate(self):
         if self.arm not in ("linear", "gp"):
@@ -94,6 +101,24 @@ class FitConfig:
             raise ValueError(f"pops_rows must be 'auto', 'host' or 'device', got {self.pops_rows!r}")
         if self.predict_stats not in ("cached", "recompute"):
             raise ValueError(f"predict_stats must be 'cached' or 'recompute', got {self.predict_stats!r}")
+        if self.solver not in ("evidence", "lstsq"):
+            raise ValueError(f"solver must be 'evidence' or 'lstsq', got {self.solver!r}")
+        if self.solver == "lstsq" and (self.arm != "linear" or self.uq != "blr" or self.learn_radial
+                                       or tuple(self.rungs) != ("map",)):
+            raise ValueError("solver lstsq is the plain linear least-squares fit: it needs arm linear, uq blr, "
+                             "rungs ('map',) and no learn_radial")
         if self.fix_rho is not None and self.opt != "lbfgs":
             raise ValueError("fix_rho is implemented for opt lbfgs only")
+        if self.learn_radial:
+            if self.baseline is not None or self.base_npz is not None:
+                raise ValueError("learn_radial with a baseline: the fit saves no model file, so the "
+                                 "learned radials would be lost")
+            if not 0.0 < self.radial_val_frac < 1.0:
+                raise ValueError(f"radial_val_frac must be in (0, 1), got {self.radial_val_frac}")
+            if self.radial_n_q < 1:
+                raise ValueError(f"radial_n_q must be >= 1, got {self.radial_n_q}")
+            if self.radial_steps < 0:
+                raise ValueError(f"radial_steps must be >= 0, got {self.radial_steps}")
+            if not len(self.radial_lam_grid):
+                raise ValueError("radial_lam_grid must hold at least one roughness weight")
         return self

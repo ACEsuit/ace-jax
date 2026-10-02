@@ -140,7 +140,7 @@ def test_capacity_slots_have_skin_headroom():
     """Slots cover the rcut + skin coordination: the random-weight benchmark
     structures compress during the run, and rcut-only slots overflowed (the
     bundle returns NaN; lammps-jax then reports the full list, 256 x 78, as
-    "edge capacity exceeded").  See docs/perf-lammps-large-n.md."""
+    "edge capacity exceeded").  See docs/dev/perf-lammps-large-n.md."""
     from ace_jax.eval import sparse_graph
     from scaling.run_lammps import capacity
     at = supercell("Cantor", 256)
@@ -1129,7 +1129,7 @@ def test_parity_gates_the_learned_lines():
     assert [g for g in got if g[0] == "acejax" and g[1] == "acejax-ace"][0][2] == "small"
     assert gate_checks(small, "Cantor") == [c for c in gate_checks(small, "Cantor", medium)
                                             if c[1]["code"] not in LEARNED_PAIR]
-    # splining accuracy, relative: ~1e-9 in E, ~3e-8 of max|F| (docs/learned-radial-splining.md)
+    # splining accuracy, relative: ~1e-9 in E, ~3e-8 of max|F| (docs/dev/learned-radial-splining.md)
     assert TOL["spline"] == (1e-9, 3e-8)
     F = np.array([[1.0, -2.0, 0.5], [0.0, 2.0, -1.0]])
     ok = compare_rel(-100.0, F, -100.0 + 5e-8, F + 4e-8, 2, TOL["spline"])

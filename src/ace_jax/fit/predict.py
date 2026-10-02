@@ -105,6 +105,9 @@ def _dtc_D(theta, prob, batch, deL, deR):
     return jnp.diag(seg(seg(R).T))[:C]
 
 
+DERIV_DTC_NODE_BATCH = 4    # nodes per vmapped chunk of the force double jvp: bounds its temp
+
+
 def _dtc_deriv_residual(theta, prob, batch, X=None, J=None, res=None):
     """Force and virial DTC prior residuals -- the position/strain derivative of
     the energy DTC residual, so F_var, V_var are consistent with E_var (Ruling
@@ -143,33 +146,51 @@ def _dtc_deriv_residual(theta, prob, batch, X=None, J=None, res=None):
     Jsd = Js.reshape(Ncap, K, 3)
     ar = jnp.arange(Ncap)
 
-    # feature/summary velocities of every site: dU_i/dr_n and dU_i/deps_v.
-    # rij = r_recv - r_send, so dU_i/dr_i = -sum_k JU[i,k], dU_i/dr_{nbr} = +JU[i,k].
+    # feature/summary velocities.  rij = r_recv - r_send, so moving node n moves
+    # n itself (dU_n/dr_n = -sum_k JU[n,k]) and every site that lists n as a
+    # neighbour, i.e. the sender of each edge into n (+JU of that edge).  The
+    # velocity vanishes elsewhere, so <o, o>_k needs only those K+1 slots per node,
+    # not the whole-batch Gram (3 Ncap velocities x Ncap^2 pairs was cubic in the
+    # batch).  A site repeated across slots (periodic images) is exact: the double
+    # jvp is bilinear in the slot velocities.  The cutoff list is symmetric and
+    # dense_graph raises rather than truncates, so a node has <= K in-edges (_batch
+    # asserts it).
     JU_e = JU.reshape(Ncap * K, d, 3); Js_e = Jsd.reshape(Ncap * K, 3)
-    AU = jnp.zeros((Ncap, 3, Ncap, d)).at[ar, :, ar, :].add(-jnp.swapaxes(JU.sum(1), 1, 2))
-    AS = jnp.zeros((Ncap, 3, Ncap)).at[ar, :, ar].add(-Jsd.sum(1))
-    AU = AU.at[recv, :, send, :].add(jnp.where(m[:, None, None], jnp.swapaxes(JU_e, 1, 2), 0.0))
-    AS = AS.at[recv, :, send].add(jnp.where(m[:, None], Js_e, 0.0))
-    aU, aS = AU.reshape(Ncap * 3, Ncap, d), AS.reshape(Ncap * 3, Ncap)
-    # strain generator W_v(rij) = 1/2 (e_a rij_b + e_b rij_a); dU_i/deps_v via i's edges
+    key = jnp.where(m, recv, Ncap)
+    order = jnp.argsort(key, stable=True)
+    slot = jnp.searchsorted(key[order], ar)[:, None] + jnp.arange(K)[None, :]      # (Ncap, K)
+    e_in = order[jnp.minimum(slot, Ncap * K - 1)]
+    ok = (slot < Ncap * K) & (key[e_in] == ar[:, None])
+    sites = jnp.concatenate([ar[:, None], jnp.where(ok, send[e_in], ar[:, None])], 1)          # (Ncap, K+1)
+    vU = jnp.concatenate([-JU.sum(1)[:, None], jnp.where(ok[..., None, None], JU_e[e_in], 0.0)], 1)
+    vS = jnp.concatenate([-Jsd.sum(1)[:, None], jnp.where(ok[..., None], Js_e[e_in], 0.0)], 1)
+    # strain generator W_v(rij) = 1/2 (e_a rij_b + e_b rij_a); dU_i/deps_v via i's edges.
+    # A config's strain moves only its own sites, so one velocity per Voigt component
+    # serves every config at once against a same-config-masked Gram.
     Wv = jnp.stack([(jnp.zeros((rij.shape[0], 3)).at[:, a].add(0.5 * rij[:, b])
                                                   .at[:, b].add(0.5 * rij[:, a])) for a, b in VOIGT], 1)  # (E,6,3)
-    ecfg = batch.node_cfg[send]
-    cbU = jnp.where(m[:, None, None], jnp.einsum("eqa,eva->evq", JU_e, Wv), 0.0)   # (E,6,d)
-    cbS = jnp.where(m[:, None], jnp.einsum("ea,eva->ev", Js_e, Wv), 0.0)           # (E,6)
-    bU = jnp.zeros((C, 6, Ncap, d)).at[ecfg, :, send, :].add(cbU).reshape(C * 6, Ncap, d)
-    bS = jnp.zeros((C, 6, Ncap)).at[ecfg, :, send].add(cbS).reshape(C * 6, Ncap)
+    cbU = jnp.where(m[None, :, None], jnp.einsum("eqa,eva->veq", JU_e, Wv), 0.0)   # (6,E,d)
+    cbS = jnp.where(m[None], jnp.einsum("ea,eva->ve", Js_e, Wv), 0.0)              # (6,E)
+    bU = jnp.zeros((6, Ncap, d)).at[:, send, :].add(cbU)
+    bS = jnp.zeros((6, Ncap)).at[:, send].add(cbS)
 
-    # <o, o>_k = d_beta d_gamma sum_{i,j in cfg} k(U_i+beta v_i, U_j+gamma v_j) along the
+    # <o, o>_k = d_beta d_gamma sum_{i,j} k(U_i+beta v_i, U_j+gamma v_j) along the
     # matched velocity v (in both the U and the summary s slots), via a double jvp.
-    live = batch.node_mask[:, None] & batch.node_mask[None, :]
-    def Ksum(Ux, sx, Uy, sy):
-        return jnp.sum(jnp.where(live, k_rows(theta, spec, Ux, sx, z, Uy, sy, z, ind.embed), 0.0))
-    def ffk(vU, vS):
-        gy = lambda Uy, sy: jax.jvp(lambda Ux, sx: Ksum(Ux, sx, Uy, sy), (U, s), (vU, vS))[1]
-        return jax.jvp(gy, (U, s), (vU, vS))[1]
-    FFk = jax.vmap(ffk)(aU, aS).reshape(Ncap, 3)
-    VVk = jax.vmap(ffk)(bU, bS).reshape(C, 6)
+    def ffk(Ksum, x, v):
+        gy = lambda y: jax.jvp(lambda x: Ksum(x, y), (x,), (v,))[1]
+        return jax.jvp(gy, (x,), (v,))[1]
+    def node(a):                                          # one node's 3 force components
+        site, vU_n, vS_n = a
+        x, zx = (U[site], s[site]), z[site]
+        Ksum = lambda x, y: jnp.sum(k_rows(theta, spec, *x, zx, *y, zx, ind.embed))
+        return jax.vmap(lambda vu, vs: ffk(Ksum, x, (vu, vs)))(jnp.moveaxis(vU_n, -1, 0), vS_n.T)
+    FFk = jax.lax.map(node, (sites, vU, vS), batch_size=DERIV_DTC_NODE_BATCH)   # (Ncap, 3)
+    same = (batch.node_mask[:, None] & batch.node_mask[None, :]
+            & (batch.node_cfg[:, None] == batch.node_cfg[None, :]))
+    def Kcfg(x, y):                                       # per-config sums of same-config pairs
+        G = jnp.where(same, k_rows(theta, spec, *x, z, *y, z, ind.embed), 0.0)
+        return jax.ops.segment_sum(G.sum(1), batch.node_cfg, num_segments=C + 1)[:C]
+    VVk = jax.lax.map(lambda v: ffk(Kcfg, (U, s), v), (bU, bS)).T                 # (C, 6)
 
     # Q-term K_oM K_MM^-1 K_Mo from the residual force/virial rows
     L_MM = jnp.linalg.cholesky(K_MM(theta, spec, ind.XM, ind.SM, ind.ZM, ind.embed))
@@ -553,6 +574,16 @@ def predict_fixed(theta, prob, ds_train, ds_test, dtc=True, deriv_dtc=True,
         return _run_predict_pops_paper(theta, prob, ds_train, ds_test, pops_form,
                                        pops_ridge, leverage_pct, path=pops_path, stats=stats)
     raise ValueError(f"uq must be 'blr' or 'pops', got {uq!r}")
+
+
+def predict_readout(prob, mu, ds_test):
+    """Predictions of a fixed readout mu (no posterior: zero variance), linear arm."""
+    def batch(mu, b):
+        r = linear_rows(prob.model, prob.cfg, b)[0]
+        Em, Fm, Vm = r.E @ mu, (r.F @ mu).reshape(-1, 3), (r.V @ mu).reshape(-1, 6)
+        return Em, jnp.zeros_like(Em), Fm, jnp.zeros_like(Fm), Vm, jnp.zeros_like(Vm)
+    f, mu = jax.jit(batch), jnp.asarray(mu)
+    return _pack([f(mu, jax.tree.map(lambda a: a[i], ds_test)) for i in range(ds_test.n_batches)], prob, ds_test)
 
 
 def predict_mixture(draws, prob, ds_train, ds_test, deriv_dtc=True, stats=None):

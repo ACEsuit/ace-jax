@@ -8,7 +8,7 @@ both layouts, and -- Review Focus 5 -- that crad stays trainable (W is built fro
 crad inside the trace, not frozen into a host table).
 
 ACEModel keeps its per-edge A and node-major product basis (pool-first and the
-feature-major form were measured and not adopted: docs/perf-ace-profile.md
+feature-major form were measured and not adopted: docs/dev/perf-ace-profile.md
 sections 3 and 5); its test here guards the readout weights' gradient.
 """
 import dataclasses

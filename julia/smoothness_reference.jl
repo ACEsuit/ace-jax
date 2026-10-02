@@ -1,5 +1,5 @@
 # Julia/ACEpotentials smoothness-prior ORACLE (CI-only; the Python port is
-# src/ace_jax/construct/prior.py).  Builds an ace1_model for a shape and dumps
+# src/ace_jax/basis/prior.py).  Builds an ace1_model for a shape and dumps
 # the algebraic smoothness prior diagonal plus the FULL per-column nnll basis
 # (tensor bodies + pair singletons, per species -- the layout _nnll_basis
 # feeds the prior), so the Python port can be validated against it.
