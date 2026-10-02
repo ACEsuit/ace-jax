@@ -12,8 +12,8 @@ the PNGs and snippets are committed, so re-render after new results land.
 Which hosts feed the page is USER_HOSTS, the one place to change.  Every code
 with rows on those hosts is drawn, except the learned-radial proxy lines
 (plot.LEARNED).  Colour and order follow plot.CODES (so the page matches
-docs/benchmarks.md); a code not in plot.CODES is drawn after them in a neutral
-ink.  Line style is the mode, as in docs/benchmarks.md: solid = standalone,
+docs/dev/benchmarks.md); a code not in plot.CODES is drawn after them in a neutral
+ink.  Line style is the mode, as in docs/dev/benchmarks.md: solid = standalone,
 dashed = LAMMPS.  Repeated cases use plot.aggregate's median.
 """
 import argparse
@@ -62,7 +62,7 @@ SYSTEMS = ("SiGe", "Cantor")
 SIZE = "medium"
 TABLE_N = 8192
 EXCLUDED = tuple(plot.LEARNED)
-MODE_STYLE = {"standalone": "-", "lammps": "--"}      # as docs/benchmarks.md: solid = standalone
+MODE_STYLE = {"standalone": "-", "lammps": "--"}      # as docs/dev/benchmarks.md: solid = standalone
 MODE_LABEL = {"lammps": "LAMMPS", "standalone": "standalone"}
 UNKNOWN_COLOUR = plot.INK2                            # never a generated hue
 

@@ -2,7 +2,7 @@
 of a benchmark ACE model in its stock spline form, converted to the analytic
 branch at several polynomial spans n_q (`to_analytic`) with Wnlq perturbed on the
 active rows to mimic learning, and the lean form of each, interleaved round by
-round on one device (docs/learned-radial-splining.md).
+round on one device (docs/dev/learned-radial-splining.md).
 
     PYTHONPATH=bench:src python bench/perf/learned_radial_bench.py <system>_<size> <n> \
         [--nqs 8,12,16,20] [--filled-nq 12] [--rounds 3] [--reps 10]

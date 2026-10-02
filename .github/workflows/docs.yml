@@ -16,6 +16,7 @@ on:
       - pyproject.toml
       - uv.lock
       - fixtures/si_tiny_train.xyz
+      - tests/test_tutorial_notebooks.py
       - .github/workflows/docs.yml
   pull_request:
     paths:
@@ -25,6 +26,7 @@ on:
       - pyproject.toml
       - uv.lock
       - fixtures/si_tiny_train.xyz
+      - tests/test_tutorial_notebooks.py
       - .github/workflows/docs.yml
   workflow_dispatch:
 
@@ -50,6 +52,8 @@ jobs:
         run: |
           uv sync --python 3.12 --frozen
           uv pip install -r docs/requirements.txt
+      - name: Tutorial notebook cell graphs (needs marimo, a docs dependency)
+        run: uv run --no-sync pytest -n 0 -q -p no:cacheprovider tests/test_tutorial_notebooks.py
       - name: Build the site (strict), rendering the tutorial notebooks
         env:
           JAX_PLATFORMS: cpu

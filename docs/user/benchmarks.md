@@ -47,11 +47,11 @@ setting or ran out of memory before that size.
 - ace-jax standalone reuses its neighbour list while atoms stay within the
   skin; MACE standalone rebuilds it on every call.
 - Throughput depends on the model size, the cutoff and the neighbour count;
-  the [full benchmarks](https://github.com/ACEsuit/ace-jax/blob/main/docs/benchmarks.md)
+  the [full benchmarks](https://github.com/ACEsuit/ace-jax/blob/main/docs/dev/benchmarks.md)
   cover small and large models, peak memory and the largest system that fits.
 
 ## More
 
-- [Full benchmark results](https://github.com/ACEsuit/ace-jax/blob/main/docs/benchmarks.md):
+- [Full benchmark results](https://github.com/ACEsuit/ace-jax/blob/main/docs/dev/benchmarks.md):
   every model size and host, memory, precision, parity checks and versions.
 - [How to rerun the benchmarks](https://github.com/ACEsuit/ace-jax/blob/main/bench/scaling/README.md).

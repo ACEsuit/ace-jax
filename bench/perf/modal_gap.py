@@ -1,4 +1,4 @@
-"""ACE vs PACE gap runs on a Modal A100 (docs/ace-vs-pace-gap.md), every case on
+"""ACE vs PACE gap runs on a Modal A100 (docs/dev/ace-vs-pace-gap.md), every case on
 ONE container so the models compare on one card.
 
     uv run --with modal modal run bench/perf/modal_gap.py::profile   # §2 stage profiles
@@ -106,7 +106,7 @@ def learned(models: str = "SiGe_medium,Cantor_medium", n: int = 8192, nqs: str =
             filled_nq: int = 12, rounds: int = 3, reps: int = 10,
             extra: str = "SiGe_large,Cantor_large", spline_tol: float = 1e-10, tag: str = ""):
     """Learned (analytic) radials vs splines and the lean form of each, with
-    to_spline (bench/perf/learned_radial_bench.py; docs/learned-radial-splining.md),
+    to_spline (bench/perf/learned_radial_bench.py; docs/dev/learned-radial-splining.md),
     every model on ONE container."""
     argvs = [["bench/perf/learned_radial_bench.py", m, str(n), "--nqs", nqs, "--filled-nq",
               str(filled_nq), "--rounds", str(rounds), "--reps", str(reps), "--oldgather",

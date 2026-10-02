@@ -7,7 +7,7 @@ from its inputs and writes only into caller-owned buffers; no Julia object
 outlives a call.  Two-phase: a call whose capacities (`sizes`) are too small
 returns BUFFERS_TOO_SMALL with the required sizes written back.  Inputs are
 validated first so no exception can unwind across the C boundary.
-ABI: docs/coupling-etshim-spec.md.
+ABI: docs/dev/coupling-etshim-spec.md.
 """
 module ETCouple
 

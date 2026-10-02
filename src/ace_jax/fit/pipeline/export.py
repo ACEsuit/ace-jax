@@ -76,7 +76,9 @@ def linear_model_arrays(res):
     """The ACE npz arrays with the posterior-mean readout at the MAP hyperparameters.
     Column layout of the linear block: species-major B blocks, then pair blocks
     (fit/rows.py `_place`), i.e. WB[b, z] = mu[z*n_B + b]."""
-    if res.ard is not None:
+    if res.readout is not None:
+        mu = res.readout                      # solver lstsq
+    elif res.ard is not None:
         mu = res.ard.posterior.mean           # ARD: the posterior mean the predictions use
     elif "mean" in res.preds.pops:
         mu = res.preds.pops["mean"]      # POPS: exactly the mean the predictions used

@@ -1,8 +1,7 @@
 # /// script
-# requires-python = ">=3.11,<3.14"
+# requires-python = ">=3.11"
 # dependencies = [
-#     # TODO(pypi): replace this git requirement with "ace-jax" once ace-jax is on PyPI.
-#     "ace-jax @ git+https://github.com/ACEsuit/ace-jax@main",
+#     "ace-jax>=0.1.0",
 #     "marimo>=0.25",
 #     "matplotlib>=3.8",
 # ]
@@ -423,7 +422,10 @@ def _(mo):
 
     On production-sized data the gain is larger and survives a good start:
     see the learned-radial results in the ace-jax repository
-    (`docs/learn-radial-results.md`).
+    (`docs/dev/learn-radial-results.md`).
+
+    Next: [Tutorial 3](https://acesuit.github.io/ace-jax/tutorials/multi-element/)
+    fits a five-element alloy and compares two ways of describing the elements.
     """)
     return
 

@@ -1,6 +1,6 @@
-"""Benchmark results (JSONL) -> docs/figs/scaling_*.png + docs/benchmarks.md.
+"""Benchmark results (JSONL) -> docs/dev/figs/scaling_*.png + docs/dev/benchmarks.md.
 
-    python bench/scaling/plot.py 'bench/scaling/results/*.jsonl' docs/figs
+    python bench/scaling/plot.py 'bench/scaling/results/*.jsonl' docs/dev/figs
 
 Every figure is generated here from committed results; none is edited by hand.
 The ace-jax rows from before the speed-ups are read from the `before-perf/`
@@ -778,7 +778,7 @@ CAPTIONS = {
                               "its learned-radial proxy splined as deployed (`spline_tol=\"auto\"`, "
                               "1e-10) and the same proxy kept analytic (`spline_tol=None`, exact). "
                               "Solid = standalone, dashed = LAMMPS; see "
-                              "`docs/learned-radial-splining.md`.",
+                              "`docs/dev/learned-radial-splining.md`.",
     "scaling_throughput_float64": "Throughput vs system size (float64, medium models): "
                                   "solid = standalone, dashed = LAMMPS. “fn”: basis functions per "
                                   "central element (linear ACE is 2–14× the PACE size).",
@@ -821,7 +821,7 @@ def basis_table():
     return "\n".join(lines) if BASIS else "(model_sizes.json absent)"
 
 
-def write_doc(pattern, figs, doc="docs/benchmarks.md"):
+def write_doc(pattern, figs, doc="docs/dev/benchmarks.md"):
     rows = load(pattern)
     versions = {}
     for r in rows:

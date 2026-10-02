@@ -40,7 +40,7 @@ def ylm_spec(lmax):
     return [(l, m) for l in range(lmax + 1) for m in range(-l, l + 1)]
 
 
-# NOTE (see docs/coupling-etshim-spec.md, "Known gap"): a complete from-scratch
+# NOTE (see docs/dev/coupling-etshim-spec.md, "Known gap"): a complete from-scratch
 # mb_spec that reproduces ACEpotentials' TotalDegree(NZ, 1/wL) enumeration AND its
 # exact tie-break ordering is the ~400-600 LOC row-2 work and is deliberately NOT
 # finished here -- this task is scoped to the *coupling bridge*. `spec_from_export`

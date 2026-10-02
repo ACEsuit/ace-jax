@@ -3,7 +3,7 @@ import pathlib
 import subprocess
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-HISTORICAL = ("docs/plans/", "docs/specs/", "docs/tier2-plan.md")
+HISTORICAL = ("docs/dev/plans/", "docs/dev/specs/", "docs/dev/tier2-plan.md")
 LEGACY = ["ace_jax.construct", "from .construct", "from ..construct", "from ...construct",
           "Authoring", '"authoring"', "ACEJAX_NO_JULIA", "python-authoring", "test_python_authoring",
           "[basis]", "--extra basis", "optional `basis` extra", "src/ace_jax/construct"]

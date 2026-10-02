@@ -1,5 +1,5 @@
 """Analytic (learned) radials to the spline branch: `to_spline`, and `lean` on
-analytic models (docs/learned-radial-splining.md).
+analytic models (docs/dev/learned-radial-splining.md).
 
 `to_spline` is an approximation, not a restructuring: it agrees with the
 analytic model to its tolerance, not to roundoff.  So the parity bounds here
@@ -473,7 +473,7 @@ def test_default_tol_is_1e_10():
 @pytest.mark.parametrize("layout", ["sparse", "dense"])
 def test_default_lean_forces_to_1e_8(layout):
     """At the default tol the lean form's forces agree with the full analytic
-    model to ~1e-8 of the largest force (docs/learned-radial-splining.md)."""
+    model to ~1e-8 of the largest force (docs/dev/learned-radial-splining.md)."""
     m, meta, _ = load(str(CANTOR))
     a = _perturbed(m)
     at = _structure(meta)

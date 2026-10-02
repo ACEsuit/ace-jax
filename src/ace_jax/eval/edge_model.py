@@ -116,7 +116,7 @@ class EdgeSiteModel(eqx.Module):
         never formed: pool b (x) Y per (node, neighbour-species channel), then
         apply W per node.  Feature-major output so the product-basis gathers read
         whole rows.  b (n, K, n_b), Y (n, K, n_Y), zj (n, K) neighbour channel.
-        docs/pace-performance-gap.md #4, #5."""
+        docs/dev/pace-performance-gap.md #4, #5."""
         n, K, nb = b.shape
         C = self.a_channels
         hi = jax.lax.Precision.HIGHEST

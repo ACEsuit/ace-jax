@@ -1,4 +1,4 @@
-"""Markdown tables for docs/pace-performance-gap.md from bench/perf/results/bigsweep.json.
+"""Markdown tables for docs/dev/pace-performance-gap.md from bench/perf/results/bigsweep.json.
 
     python bench/perf/tables.py bench/perf/results/bigsweep.json
 """

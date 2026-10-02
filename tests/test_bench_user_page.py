@@ -206,7 +206,7 @@ def test_page_images_and_snippets_exist():
     assert {user_page.TABLE_SNIPPET, user_page.NOTES_SNIPPET} <= set(snippets)
     for s in snippets:
         assert (ROOT / "docs" / "snippets" / s).exists(), s
-    assert "https://github.com/ACEsuit/ace-jax/blob/main/docs/benchmarks.md" in text
+    assert "https://github.com/ACEsuit/ace-jax/blob/main/docs/dev/benchmarks.md" in text
 
 
 def test_nav_has_performance_after_how_to_guides():

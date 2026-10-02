@@ -2,7 +2,7 @@
 (tests/fixtures/perf_ref, written by tests/perf_ref.py from the code before the
 speed-ups): 1e-12 relative in float64. float32 is gated on accuracy against
 the float64 reference: an absolute bound set by float32 precision, not
-agreement with the old float32 rounding (docs/perf-optimisation-spec.md).
+agreement with the old float32 rounding (docs/dev/perf-optimisation-spec.md).
 float32 noise moves with summation order (neighbour order: ASE vs
 matscipy-neighbours; numpy/XLA build: macOS arm64 vs Linux x86), so a gate
 relative to one sampled old-float32 error rejects a reordering, not a bug.

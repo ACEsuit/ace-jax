@@ -576,6 +576,16 @@ def predict_fixed(theta, prob, ds_train, ds_test, dtc=True, deriv_dtc=True,
     raise ValueError(f"uq must be 'blr' or 'pops', got {uq!r}")
 
 
+def predict_readout(prob, mu, ds_test):
+    """Predictions of a fixed readout mu (no posterior: zero variance), linear arm."""
+    def batch(mu, b):
+        r = linear_rows(prob.model, prob.cfg, b)[0]
+        Em, Fm, Vm = r.E @ mu, (r.F @ mu).reshape(-1, 3), (r.V @ mu).reshape(-1, 6)
+        return Em, jnp.zeros_like(Em), Fm, jnp.zeros_like(Fm), Vm, jnp.zeros_like(Vm)
+    f, mu = jax.jit(batch), jnp.asarray(mu)
+    return _pack([f(mu, jax.tree.map(lambda a: a[i], ds_test)) for i in range(ds_test.n_batches)], prob, ds_test)
+
+
 def predict_mixture(draws, prob, ds_train, ds_test, deriv_dtc=True, stats=None):
     f = _predict_fn(prob, True, deriv_dtc)   # compile ONCE, reuse across all draws
     preds = [_run_predict(f, from_array(jnp.asarray(d)), prob, ds_train, ds_test, stats=stats)
