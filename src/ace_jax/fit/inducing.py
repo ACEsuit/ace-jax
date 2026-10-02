@@ -23,9 +23,16 @@ class GPConfig:
     C: int                 # configs per batch
     p: int = 10            # power-mean exponent of the summary s
     node_chunk: int = 32   # Task 7 scan chunk
+    e0_cols: bool = False  # e0='lsq': one E0 column per species after the readout (joint E0)
 
     @property
     def len_basis(self):
+        """Linear columns: the readout (species-blocked B, then pair), then NZ E0 columns
+        when e0_cols (each species' atom count on the energy rows, zero on forces/virials)."""
+        return (self.n_B + self.n_pair) * self.NZ + (self.NZ if self.e0_cols else 0)
+
+    @property
+    def len_readout(self):
         return (self.n_B + self.n_pair) * self.NZ
 
     @property

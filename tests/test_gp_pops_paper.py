@@ -323,7 +323,7 @@ def test_blr_mean_is_accurate_not_the_eigh_formula():
     from ace_jax.fit.solve import solve_qr
     cfg = FitConfig(model=str(FIXTURE_DIR / "si_fitted.npz"), energy_key="dft_energy", force_key="dft_force",
                     virial_key="dft_virial", ntrain=16, ntest=6, batch=4, r0=2.35, arm="linear",
-                    opt="lbfgs", rungs=("map",), map_steps=5).validate()
+                    opt="lbfgs", rungs=("map",), map_steps=5, e0="prefit").validate()   # POPS: E0 fixed
     d = load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz"))
     b = build_problem(cfg, d)
     with highest_precision():

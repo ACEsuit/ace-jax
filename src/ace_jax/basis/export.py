@@ -121,7 +121,8 @@ def patch_radial_npz(src, dst, model, readout=None):
     blocked; see readout_to_npz), written into WB/Wpair.  readout=None copies
     WB/Wpair verbatim -- correct only when the radials are unchanged (e.g. an
     exact branch conversion), stale otherwise.  Coupling, pair basis and E0
-    are always copied verbatim.  This is how a learned radial is written back
+    are always copied verbatim (a readout with joint-E0 columns appended has them
+    dropped: they shift the fit's pre-fit E0, which this file does not hold).  This is how a learned radial is written back
     from a model that was loaded rather than authored (save_npz needs an
     Basis)."""
     model.require_full("patch_radial_npz")
@@ -139,6 +140,9 @@ def patch_radial_npz(src, dst, model, readout=None):
     out["polys_C"] = np.asarray(model.polys_C, np.float64)
     if readout is not None:
         (n_B, NZ), n_pair = out["WB"].shape, out["Wpair"].shape[0]
+        readout = np.asarray(readout)
+        if readout.size == (n_B + n_pair) * NZ + NZ:     # + joint-E0 columns (an e0='lsq' problem):
+            readout = readout[:(n_B + n_pair) * NZ]      # shifts of that fit's pre-fit E0, not of this file's
         out["WB"], out["Wpair"] = readout_to_npz(readout, n_B, n_pair, NZ)
     meta["radial_kind"] = "analytic"
     meta["rnl_spline"] = None

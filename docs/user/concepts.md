@@ -45,13 +45,20 @@ $E - \sum_i E_0(z_i)$, so $E_0$ decides what the basis has to represent.
 
 - A freshly built basis has $E_0 = 0$, and `aj fit --e0 model` (the default)
   uses the $E_0$ stored in the basis.
-- `aj fit --e0 lsq` fits $E_0$ by least squares on the training energies, so
-  the basis only has to represent energy differences. Use it for a freshly
-  built basis.
+- `aj fit --e0 lsq` fits $E_0$ together with the rest of the model: one
+  extra linear coefficient per species, with a wide prior (1 eV) around a
+  least-squares fit of the training energies to the composition. The basis
+  then only has to represent energy differences, and an energy offset that
+  the basis carries (a constant site energy it cannot avoid) is absorbed into
+  $E_0$ instead of being paid as an energy error. Use it for a freshly built
+  basis.
+- `aj fit --e0 prefit` is the older two-step version: $E_0$ is fixed at the
+  least-squares fit before the readout is fitted. (ARD and POPS fits use this
+  even with `--e0 lsq`.)
 - An **isolated-atom** configuration (one atom, no neighbour within the
-  cutoff) is predicted as $E_0$ alone. With `--e0 lsq`, a species that has one
-  in the training set takes its energy as $E_0$ exactly, and the remaining
-  species are fitted by least squares to the other configurations (see the
+  cutoff) is predicted as $E_0$ alone. With `--e0 lsq` or `prefit`, a species
+  that has one in the training set takes its energy as $E_0$ exactly, and the
+  remaining species are fitted (see the
   [FAQ](faq.md#how-do-i-use-isolated-atom-energies-as-e0)).
 
 ## The radial basis

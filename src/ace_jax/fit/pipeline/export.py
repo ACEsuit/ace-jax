@@ -44,6 +44,8 @@ def linear_arrays_from_mean(z, E0, pcfg, mu):
     Column layout: species-major B blocks, then pair blocks (fit/rows.py `_place`)."""
     nB, nP, NZ = pcfg.n_B, pcfg.n_pair, pcfg.NZ
     mu = np.asarray(mu)
+    if getattr(pcfg, "e0_cols", False):      # joint E0: the fitted shift of the pre-fit E0
+        E0 = np.asarray(E0, np.float64) + mu[pcfg.len_readout:pcfg.len_readout + NZ]
     out = _ace_arrays_from(z, E0)
     out["WB"] = mu[:NZ * nB].reshape(NZ, nB).T.copy()
     out["Wpair"] = mu[NZ * nB:NZ * (nB + nP)].reshape(NZ, nP).T.copy()
@@ -94,13 +96,17 @@ def gp_model_arrays(res, n_draws=1):
     for d in draws:
         mu, L = _posterior(res, from_array(jnp.asarray(d)))
         mus.append(np.asarray(mu)); Ls.append(np.asarray(L))
+    # joint E0 (gpcfg.e0_cols): the E0 columns stay in mu and L, so GPCalculator's mean and
+    # variance (its rows add the species counts too) are the fit's exactly; ace/E0 is the
+    # pre-fit E0 they shift
+    gpcfg = prob.cfg
     ind = prob.ind
     out = {f"ace/{k}": v for k, v in _ace_arrays(res).items()}
     out.update(ind_XM=np.asarray(ind.XM), ind_SM=np.asarray(ind.SM), ind_ZM=np.asarray(ind.ZM),
                ind_scale=np.asarray(ind.scale), ind_Pmap=np.asarray(ind.Pmap), ind_embed=np.asarray(ind.embed),
                draws=np.asarray(draws), mu=np.stack(mus), L=np.stack(Ls))
     out["gp_json"] = np.frombuffer(json.dumps({
-        "schema_version": GP_SCHEMA, "gpcfg": dataclasses.asdict(prob.cfg),
+        "schema_version": GP_SCHEMA, "gpcfg": dataclasses.asdict(gpcfg),
         "kernel": dataclasses.asdict(prob.spec), "warp": ind.warp}).encode(), np.uint8)
     return out
 
