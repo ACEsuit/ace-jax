@@ -36,7 +36,9 @@ from html.parser import HTMLParser
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 TUT = ROOT / "docs" / "user" / "tutorials"
-NOTEBOOKS = {"first_fit_si": "first-fit", "learned_radials_si": "learned-radials"}   # notebook -> page
+NOTEBOOKS = {"first_fit_si": "first-fit", "learned_radials_si": "learned-radials",
+             "school_dataset_si": "dataset-and-properties", "school_basis_si": "basis-and-evidence",
+             "school_truth_si": "truth-about-the-truth"}   # notebook -> page
 ADMONITION = {"success": "success", "warn": "warning", "danger": "danger", "info": "info", "neutral": "note"}
 
 

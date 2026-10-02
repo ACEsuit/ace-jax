@@ -4,7 +4,9 @@
 [![Tests](https://img.shields.io/github/actions/workflow/status/ACEsuit/ace-jax/test.yml?branch=main&label=tests)](https://github.com/ACEsuit/ace-jax/actions/workflows/test.yml)
 
 **Documentation: <https://acesuit.github.io/ace-jax/>** (installation, quickstart,
-tutorial notebooks, how-to guides, CLI and API reference).
+tutorial notebooks, how-to guides, CLI and API reference). The tutorials include
+notebooks adapted from the [MLIP school 2026](https://github.com/ACEsuit/MLIP-school-2026),
+which run locally with labels from MIT-licensed MACE foundation models.
 
 Fit and evaluate **Atomic Cluster Expansion (ACE)** interatomic potentials in
 pure **Python/JAX**: build a basis, fit it and run it, everything from

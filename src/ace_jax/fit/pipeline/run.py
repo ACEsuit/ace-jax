@@ -14,6 +14,7 @@ class FitResult(NamedTuple):
     map: object; rungs: object; preds: object; timings: dict
     ard: object = None                   # ARDResult when uq == "ard" (last: positional use unaffected)
     radial: object = None                # RadialResult when cfg.learn_radial (last: positional use unaffected)
+    readout: object = None               # the least-squares readout when cfg.solver == "lstsq"
 
 
 def fit(cfg, data, log=print, on_stage=None):
@@ -33,6 +34,14 @@ def fit(cfg, data, log=print, on_stage=None):
         data, radial = learn_radials(cfg, data, log=log)
         stage("radial", radial)
     b = build_problem(cfg, data)
+    if cfg.solver == "lstsq":       # no objective, no MAP: one weighted least-squares solve
+        from .lstsq import fit_lstsq
+        with highest_precision():
+            mf, rg, readout = fit_lstsq(cfg, data, b, log=log)
+            stage("map", mf)
+            pr = predict_splits(cfg, data, b, None, mf.theta, rg.draws, log=log, readout=readout)
+        tm = {**b.timings, **mf.timings, **pr.timings, "total": time.time() - T0}
+        return FitResult(cfg, data, b, mf.theta, mf, rg, pr, tm, None, radial, readout)
     with highest_precision():
         obj = make_objective(cfg, data, b)
         mf = fit_map(cfg, data, b, obj, log=log)

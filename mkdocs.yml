@@ -100,6 +100,9 @@ nav:
       - tutorials/index.md
       - "1. First fit: silicon": tutorials/first-fit.md
       - "2. Learned radials: silicon": tutorials/learned-radials.md
+      - "3. Your data, your property": tutorials/dataset-and-properties.md
+      - "4. Basis size and the evidence": tutorials/basis-and-evidence.md
+      - "7. The truth about the truth": tutorials/truth-about-the-truth.md
   - Concepts: concepts.md
   - How-to guides:
       - Run files (fit.yaml): howto/fit-yaml.md
@@ -108,6 +111,7 @@ nav:
       - LAMMPS export: howto/lammps.md
       - PACE .yace models: howto/pace.md
       - Learn the radial basis: howto/learned-radials.md
+      - Labels from a foundation model: howto/foundation-labels.md
       - Reproducibility: howto/reproducibility.md
   - Reference:
       - CLI: reference/cli.md

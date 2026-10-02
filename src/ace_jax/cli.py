@@ -29,6 +29,8 @@ def _add_fit_args(p):
     p.add_argument("--test-start", type=int, default=None)
     p.add_argument("--energy-key", default="energy")
     p.add_argument("--force-key", default="forces"); p.add_argument("--virial-key", default="virial")
+    p.add_argument("--stress-key", default=None,
+                   help="stress label (eV/A^3, 3x3 or Voigt-6) used as the virial, virial = -stress * volume, when a config has no virial label")
     p.add_argument("--weights", default=None,
                    help='JSON: an ACEfit weights dict {"default": {"E":..,"F":..,"V":..}, <config_type>: ..} '
                         'or a list of weight factors [{"Structural": {}}, {"ConfigType": {...}}]')
@@ -47,6 +49,8 @@ def _add_fit_args(p):
     p.add_argument("--lml", choices=["device", "host-cache"], default="device",
                    help="host-cache: cache the linear design rows in host RAM (GP, pair|pca, L-BFGS, map only)")
     p.add_argument("--opt", choices=["adam", "lbfgs"], default="adam")
+    p.add_argument("--solver", choices=["evidence", "lstsq"], default="evidence",
+                   help="lstsq: plain weighted least squares with no prior (teaching; overfits a large basis)")
     p.add_argument("--map-restarts", type=int, default=1, help="L-BFGS multi-start (best log-posterior)")
     p.add_argument("--init", default=None, help="theta_map.json to start the MAP from")
     p.add_argument("--rungs", default="map",
@@ -119,7 +123,7 @@ def _fit_config(a):
     cfg = FitConfig(
         model=a.model if a.model is not None else _basis_spec(a, embedding=a.basis_embedding),
         arm="gp" if a.m_per_species > 0 else "linear", energy_key=a.energy_key,
-        force_key=a.force_key, virial_key=a.virial_key, ntrain=a.ntrain, ntest=a.ntest,
+        force_key=a.force_key, virial_key=a.virial_key, stress_key=a.stress_key, ntrain=a.ntrain, ntest=a.ntest,
         test_start=a.test_start, seed=a.seed, batch=a.configs_per_batch, weights=weights, factors=factors,
         baseline=a.baseline, e0=a.e0, m_per_species=a.m_per_species, kernel=a.kernel, bump=not a.no_bump,
         density=a.density, pca_d=a.pca_d, embedding=a.embedding, r0=a.r0, objective=a.objective,
@@ -130,7 +134,7 @@ def _fit_config(a):
         learn_radial=a.learn_radial, radial_n_q=a.radial_n_q, radial_steps=a.radial_steps,
         radial_lam_grid=tuple(float(x) for x in str(a.radial_lam_grid).split(",") if x.strip()),
         radial_val_frac=a.radial_val_frac,
-        predict_train=False, pops_ridge=ridge,
+        solver=a.solver, predict_train=False, pops_ridge=ridge,
         predict_stats="recompute", pf_samples=16, pf_maxiter=15)
     return cfg.validate()
 
@@ -185,7 +189,7 @@ def cmd_eval(a):
     from ase.stress import voigt_6_to_full_3x3_stress
     from .fit.data import VOIGT
     from .fit.report import format_rmse_table, rmse_by_type
-    keys = dict(energy_key=a.energy_key, force_key=a.force_key, virial_key=a.virial_key)
+    keys = dict(energy_key=a.energy_key, force_key=a.force_key, virial_key=a.virial_key, stress_key=a.stress_key)
     configs = load_configs(a.data, **keys)
     frames = None
     if a.out:                 # passed through as ASE Atoms: create_calc=False keeps every label as written
@@ -303,6 +307,8 @@ def _parser():
     ev.add_argument("--model", required=True); ev.add_argument("--data", required=True)
     ev.add_argument("--energy-key", default="energy"); ev.add_argument("--force-key", default="forces")
     ev.add_argument("--virial-key", default="virial")
+    ev.add_argument("--stress-key", default=None,
+                    help="stress label (eV/A^3, 3x3 or Voigt-6) used as the virial, virial = -stress * volume, when a config has no virial label")
     ev.add_argument("--out", default=None,
                     help="extxyz to write: the input structures, every label kept, plus the predictions "
                          "(<prefix>energy, <prefix>forces, <prefix>stress, and *_std for UQ models)")
