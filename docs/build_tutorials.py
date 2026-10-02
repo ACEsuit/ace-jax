@@ -38,7 +38,8 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 TUT = ROOT / "docs" / "user" / "tutorials"
 NOTEBOOKS = {"first_fit_si": "first-fit", "learned_radials_si": "learned-radials",
              "multi_element": "multi-element", "school_dataset_si": "dataset-and-properties",
-             "school_basis_si": "basis-and-evidence", "school_truth_si": "truth-about-the-truth"}   # notebook -> page
+             "school_basis_si": "basis-and-evidence", "school_truth_si": "truth-about-the-truth",
+             "school_byod": "bring-your-own-data"}   # notebook -> page
 ADMONITION = {"success": "success", "warn": "warning", "danger": "danger", "info": "info", "neutral": "note"}
 
 

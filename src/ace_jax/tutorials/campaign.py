@@ -77,14 +77,15 @@ def _pairwise(a, b):
     return np.sqrt(np.maximum(d2, 0.0))
 
 
-def nn_ratio(train_rows, query_rows):
-    """Median distance from a query atom to its nearest training atom, over the median
-    nearest-neighbour spacing within the training atoms (clamped at 1e-12: symmetric atoms of
-    an unrattled crystal sit at zero spacing). Rows are per atom, (n, D)."""
+def nn_ratio(train_rows, query_rows, q=0.5):
+    """The q-quantile (default the median; 1.0 the most exposed atom) of the query atoms'
+    distances to their nearest training atom, over the median nearest-neighbour spacing within
+    the training atoms (clamped at 1e-12: symmetric atoms of an unrattled crystal sit at zero
+    spacing). Rows are per atom, (n, D)."""
     T = np.asarray(train_rows, float)
     dt = _pairwise(T, T); np.fill_diagonal(dt, np.inf)
     spacing = max(float(np.median(dt.min(1))), 1e-12)
-    return float(np.median(_pairwise(np.asarray(query_rows, float), T).min(1)) / spacing)
+    return float(np.quantile(_pairwise(np.asarray(query_rows, float), T).min(1), q) / spacing)
 
 
 def score_novelty(pool_rows, train_rows):

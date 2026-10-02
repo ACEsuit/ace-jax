@@ -17,6 +17,7 @@ no GPU or cloud account.
 | 4 | [Your data, your property](dataset-and-properties.md) | build and label a strain/rattle dataset, fit it, score it with R², and find what a vacancy reveals that the RMSE hides | ~1 min |
 | 5 | [Basis size and the evidence](basis-and-evidence.md) | sweep the basis size with plain least squares and with the evidence fit, watch least squares overfit, and let the log-evidence choose the basis | ~10 min |
 | 8 | [The truth about the truth](truth-about-the-truth.md) | compute a Si(111) surface energy with two foundation-model labellers, and see an ACE fit follow whichever one taught it | ~1 min |
+| 9 | [Bring your own data](bring-your-own-data.md) | declare a target property, label references, fit a two-element model, check coverage and repair the data, on GaAs or your own structure | ~2 min |
 
 Tutorials 4, 5 and 8 are adapted from the [MLIP school 2026](https://github.com/ACEsuit/MLIP-school-2026) notebooks; tutorials 6, 7 and 9 will follow. Their reference labels come from MIT-licensed MACE foundation models and ship with the tutorials, so the default settings need no labeller.
 
