@@ -92,9 +92,9 @@ def site_features(model, cfg, ds):
     over the rows' ROWS_EDGE_BUDGET is evaluated in node chunks (`rows.rows_node_chunk`): a site
     depends only on its own neighbour row, so chunking is exact and bounds the per-edge temporaries
     (E, width) independently of n_cap."""
-    from .rows import LINEAR_GRANULE, rows_node_chunk
+    from .rows import rows_node_chunk
     Ncap, K = ds.nbr.shape[1:]
-    nc = rows_node_chunk(model, cfg, Ncap, K, granule=LINEAR_GRANULE)
+    nc = rows_node_chunk(model, cfg, Ncap, K)
 
     def block(rij, nbr, nmask, node_z_all, z_c):
         n = nbr.shape[0]

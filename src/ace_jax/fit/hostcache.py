@@ -29,7 +29,7 @@ import numpy as np
 
 from .hypers import from_array
 from .objective import log_marginal_likelihood
-from .rows import LINEAR_GRANULE, _rows_scan, linear_rows, pair_feature_inputs, residual_rows_from_inputs, rows_node_chunk
+from .rows import _rows_scan, linear_rows, pair_feature_inputs, residual_rows_from_inputs, rows_node_chunk
 from .stats import ResidualStats, assemble_statistics, linear_stats_from_rows
 
 _Q = ("E", "F", "V")
@@ -95,7 +95,7 @@ class HostCachedLML:
             self.JU0 = np.zeros((self.nb, Ncap, K, d, 3))
         Pj = jnp.asarray(P)
 
-        nc = rows_node_chunk(prob.model, cfg, Ncap, K, granule=LINEAR_GRANULE)
+        nc = rows_node_chunk(prob.model, cfg, Ncap, K)
 
         def one_fn(b):
             if nc is None:

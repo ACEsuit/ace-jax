@@ -98,51 +98,73 @@ def _max_elems(jaxpr):
     return best
 
 
+def _model_key(model):
+    """A hashable structural key of a model: tree structure plus each leaf's shape/dtype (array)
+    or value (static) -- equal for the fresh models radial learning builds every call (whose leaves
+    may be tracers), so the per-node trace is shared and no model is kept alive."""
+    leaves, tdef = jax.tree.flatten(model)
+    key = [tdef]
+    for x in leaves:
+        if hasattr(x, "shape") and hasattr(x, "dtype"):
+            key.append((tuple(x.shape), str(x.dtype)))
+        else:
+            key.append(x)
+    key = tuple(key)
+    hash(key)
+    return key
+
+
 def _node_elems(model, cfg, K):
     """Peak temporary elements per centre node of `edge_jacobian_dense` with K neighbour slots:
     the larger of J's K*D*3 and the widest intermediate of one node's abstract trace (edge
-    features can be wider than J -- 10x on the si fixture).  Every temporary scales linearly with
-    the node count, so nc nodes cost nc times this.  Traced once per (model, K)."""
-    key = (id(model), K)
-    hit = _NODE_ELEMS.get(key)
-    if hit is not None and hit[0] is model:
-        return hit[1]
-    n = K * cfg.D * 3
+    features can be wider than J: 10x on the si fixture, 3x at the production Cantor basis).
+    Every temporary scales linearly with the node count, so nc nodes cost nc times this.
+    Traced on an abstract copy of the model (float leaves as ShapeDtypeStructs), once per
+    structural model key and K."""
+    import equinox as eqx
     try:
-        r = jax.ShapeDtypeStruct((1, K, 3), jnp.zeros(()).dtype)
-        i = jax.ShapeDtypeStruct((1, K), jnp.int32)
-        m = jax.ShapeDtypeStruct((1, K), bool)
-        n = max(n, _max_elems(jax.make_jaxpr(model.edge_jacobian_dense)(r, i, i, m).jaxpr))
-    except Exception:           # a model without a B-basis (PACE) never reaches the rows anyway
+        key = (_model_key(model), K)
+    except TypeError:               # an unhashable static leaf: no caching
+        key = None
+    if key is not None and key in _NODE_ELEMS:
+        return _NODE_ELEMS[key]
+    n = K * cfg.D * 3
+    dyn, static = eqx.partition(model, eqx.is_inexact_array)
+    abstract = jax.tree.map(lambda x: jax.ShapeDtypeStruct(x.shape, x.dtype), dyn)
+    r = jax.ShapeDtypeStruct((1, K, 3), jnp.zeros(()).dtype)
+    i = jax.ShapeDtypeStruct((1, K), jnp.int32)
+    m = jax.ShapeDtypeStruct((1, K), bool)
+    try:
+        jp = jax.make_jaxpr(lambda d, *a: eqx.combine(d, static).edge_jacobian_dense(*a))(abstract, r, i, i, m)
+        n = max(n, _max_elems(jp.jaxpr))
+    except NotImplementedError:     # a model without a B-basis (PACE): never reaches the rows
         pass
-    _NODE_ELEMS[key] = (model, n)
+    if key is not None:
+        _NODE_ELEMS[key] = n
     return n
 
 
-LINEAR_GRANULE = 8
-"""Node-chunk granule of the linear-only rows (no residual sub-scan to align with)."""
+ROW_GRANULE = 8
+"""Node-chunk granule of the bounded rows."""
 
 
-def rows_node_chunk(model, cfg, Ncap, K, granule=None):
+def rows_node_chunk(model, cfg, Ncap, K):
     """The node chunk the bounded rows use for an (Ncap, K) batch: None (unchunked) when the
     whole batch's peak temporary (Ncap * `_node_elems`) fits ROWS_EDGE_BUDGET, else the largest
-    multiple of `granule` that fits -- at least one granule.  granule None is cfg.node_chunk, the
-    residual block's scan granule (which build_dataset rounds n_cap to), so the residual
-    sub-scan can run inside each chunk (`_rows_scan`); linear-only callers pass LINEAR_GRANULE.
-    At the production Cantor basis with k_cap = 928 one node's temporaries are ~26M elements,
-    so the budget gives 8 nodes per linear chunk (one ~1.6 GB temporary) and 32 with a residual."""
+    multiple of ROW_GRANULE that fits -- at least one granule.  At the production Cantor basis
+    with k_cap = 928 one node's temporaries are ~26M elements, so the budget gives 8 nodes per
+    chunk (one ~1.6 GB temporary); the residual block sub-scans gcd(nc, cfg.node_chunk) nodes."""
     per = _node_elems(model, cfg, K)
     if Ncap * per <= ROWS_EDGE_BUDGET:
         return None
-    g = int(getattr(cfg, "node_chunk", 32)) if granule is None else int(granule)
-    return max(g, (ROWS_EDGE_BUDGET // per) // g * g)
+    return max(ROW_GRANULE, (ROWS_EDGE_BUDGET // per) // ROW_GRANULE * ROW_GRANULE)
 
 
 def linear_rows_bounded(model, cfg, batch, node_chunk=None):
     """`linear_rows(model, cfg, batch)[0]` with peak memory bounded independent of n_cap: the
     unchunked path when the batch fits ROWS_EDGE_BUDGET, `linear_rows_chunked` otherwise.
     node_chunk forces a chunk.  Every caller that only needs the rows (not X, J) uses this."""
-    nc = (rows_node_chunk(model, cfg, *batch.nbr.shape, granule=LINEAR_GRANULE) if node_chunk is None
+    nc = (rows_node_chunk(model, cfg, *batch.nbr.shape) if node_chunk is None
           else node_chunk)
     return linear_rows(model, cfg, batch)[0] if nc is None else linear_rows_chunked(model, cfg, batch, nc)
 
@@ -177,8 +199,8 @@ def _rows_scan(model, cfg, batch, node_chunk, with_X=False, proj=None, resid=Non
       JU0  (Ncap, K, d, 3) = proj^T J if proj (D, d) is given (else None) -- the projected
            Jacobian the residual inputs / derivative DTC / host cache need, d wide not D;
       res  Rows: `residual_rows(theta, spec, ind, cfg, batch, X, J)` if resid = (theta, spec, ind)
-           with M > 0 (else None), its own scan over cfg.node_chunk sub-chunks run inside each
-           chunk (node_chunk must then be a multiple of cfg.node_chunk).
+           with M > 0 (else None), its own scan over sub-chunks of gcd(node_chunk,
+           cfg.node_chunk) nodes run inside each chunk.
     Identical to the unchunked functions up to summation order (tests/test_rows_bounded.py)."""
     Ncap, K = batch.nbr.shape
     C = batch.y_E.shape[0]
@@ -201,38 +223,40 @@ def _rows_scan(model, cfg, batch, node_chunk, with_X=False, proj=None, resid=Non
     if resid is not None:
         from .feature import dwarp, warp_u
         theta, spec, ind = resid
-        M, c = ind.XM.shape[0], int(cfg.node_chunk)
-        if nc % c:
-            raise ValueError(f"_rows_scan: node_chunk {nc} is not a multiple of cfg.node_chunk {c}")
+        M = ind.XM.shape[0]
+        c = math.gcd(nc, int(cfg.node_chunk))       # residual sub-chunk: divides nc, <= node_chunk
         rf, sf, _, mf = flat_edges(rij, nbr, msk)
         s_all, Js_all = summary_edge_jacobian(rf, jnp.repeat(jnp.arange(Np), K), Np,
                                               cfg.r0, cfg.rcut, cfg.p, mf)
         Js_all = Js_all.reshape(Np, K, 3)
     Pres = None if resid is None else resid[2].Pmap
 
-    def body(i, acc):
+    def contrib(i):
+        """Chunk i's contributions, every one entering the accumulators linearly.  Checkpointed:
+        under reverse mode the loop then saves only i per chunk and rebuilds the chunk's J (and
+        residual sub-scan) in the backward pass, instead of stacking every chunk's J-sized
+        residuals -- O(Ncap*K*D) again (tests/test_rows_bounded.py, gradient variant)."""
         s0 = i * nc
         r_c, nb_c, m_c, z_c = sl(rij, s0), sl(nbr, s0), sl(msk, s0), sl(node_z, s0)
         X, J = model.edge_jacobian_dense(r_c, jnp.broadcast_to(z_c[:, None], (nc, K)), node_z[nb_c], m_c)
         recv = nb_c.reshape(-1)
         zi, r_flat, edge_cfg = z_c[local], r_c.reshape(-1, 3), node_cfg[s0 + local]
-        Enodes, F, V = acc["lin"]
         E_c = jnp.zeros((nc, L))
+        F = jnp.zeros((Np, 3, L))         # receive side: any node
         F_c = jnp.zeros((nc, 3, L))       # send side: the senders are this chunk's own centre nodes
+        V = jnp.zeros((C + 1, 6, L))
         for z in range(cfg.NZ):
             E_c = _place(E_c, jnp.where((z_c == z)[:, None], X, 0.0), z, cfg)
             Jz = jnp.where((zi == z)[:, None, None], J, 0.0)
-            F = _place(F, -jnp.swapaxes(seg(Jz, recv, Np), 1, 2), z, cfg)     # (Np, 3, L): any node
-            F_c = _place(F_c, jnp.swapaxes(seg(Jz, local, nc), 1, 2), z, cfg)  # (nc, 3, L)
+            F = _place(F, -jnp.swapaxes(seg(Jz, recv, Np), 1, 2), z, cfg)
+            F_c = _place(F_c, jnp.swapaxes(seg(Jz, local, nc), 1, 2), z, cfg)
             V = _place(V, jnp.swapaxes(seg(_voigt(Jz, r_flat), edge_cfg, C + 1), 1, 2), z, cfg)
-        F = jax.lax.dynamic_update_slice_in_dim(F, sl(F, s0) + F_c, s0, 0)
-        out = dict(acc, lin=(jax.lax.dynamic_update_slice_in_dim(Enodes, E_c, s0, 0), F, V))
+        out = {"lin": (E_c, F, F_c, V)}
         J4 = J.reshape(nc, K, D, 3)
         if with_X:
-            out["X"] = jax.lax.dynamic_update_slice_in_dim(acc["X"], X, s0, 0)
+            out["X"] = X
         if proj is not None:
-            out["JU0"] = jax.lax.dynamic_update_slice_in_dim(
-                acc["JU0"], jnp.einsum("nkDa,Dq->nkqa", J4, proj), s0, 0)
+            out["JU0"] = jnp.einsum("nkDa,Dq->nkqa", J4, proj)
         if resid is not None:
             U0 = X @ Pres
             JU = dwarp(U0, ind.warp)[:, None, :, None] * jnp.einsum("nkDa,Dq->nkqa", J4, Pres)
@@ -242,10 +266,30 @@ def _rows_scan(model, cfg, batch, node_chunk, with_X=False, proj=None, resid=Non
             sub = lambda a: a.reshape((nc // c, c) + a.shape[1:])
             chunks = (sub(U), sub(sc), sub(z_c), sub(JU), sub(Jsc), sub(r_c), sub(nb_c), sub(m_c),
                       sub(s0 + jnp.arange(nc)), sub(sl(node_cfg, s0)))
-            ER, FR, VR = acc["res"]
             (FR, VR), _ = jax.lax.scan(lambda cr, ch: (_residual_step(theta, spec, ind, cr, ch), None),
-                                       (FR, VR), chunks)
-            out["res"] = (jax.lax.dynamic_update_slice_in_dim(ER, Kx, s0, 0), FR, VR)
+                                       (jnp.zeros((Np, 3, M)), jnp.zeros((C + 1, 6, M))), chunks)
+            out["res"] = (Kx, FR, VR)
+        return out
+
+    contrib = jax.checkpoint(contrib)
+    upd = lambda a, x, s0: jax.lax.dynamic_update_slice_in_dim(a, x, s0, 0)
+
+    def body(i, acc):
+        s0 = i * nc
+        o = contrib(i)
+        Enodes, F, V = acc["lin"]
+        E_c, Fr, F_c, Vc = o["lin"]
+        F = F + Fr
+        F = upd(F, sl(F, s0) + F_c, s0)
+        out = dict(acc, lin=(upd(Enodes, E_c, s0), F, V + Vc))
+        if with_X:
+            out["X"] = upd(acc["X"], o["X"], s0)
+        if proj is not None:
+            out["JU0"] = upd(acc["JU0"], o["JU0"], s0)
+        if resid is not None:
+            ER, FR, VR = acc["res"]
+            Kx, FRc, VRc = o["res"]
+            out["res"] = (upd(ER, Kx, s0), FR + FRc, VR + VRc)
         return out
 
     init = {"lin": (jnp.zeros((Np, L)), jnp.zeros((Np, 3, L)), jnp.zeros((C + 1, 6, L)))}

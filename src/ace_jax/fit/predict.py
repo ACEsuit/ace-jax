@@ -133,6 +133,17 @@ def _dtc_deriv_residual(theta, prob, batch, X=None, J=None, res=None, JU0=None):
             f"Pass deriv_dtc=False for SoR-only force/virial variance.")
     if ind.XM.shape[0] == 0:
         return jnp.zeros((Ncap, 3)), jnp.zeros((C, 6))
+    from . import rows as _rows
+    d_feat = ind.Pmap.shape[1]
+    if Ncap * K * d_feat * 3 > _rows.ROWS_EDGE_BUDGET:
+        # vU / cbU / JU are whole-batch (Ncap, K, d, 3) objects (each node's velocity gathers the
+        # edges INTO it, which live in other nodes' chunks): not node-chunked, so refuse rather
+        # than OOM.  Within budget whenever the rows themselves are unchunked.
+        raise ValueError(
+            f"derivative-DTC on a batch of n_cap={Ncap}, k_cap={K} with a {d_feat}-wide feature map "
+            f"needs (n_cap, k_cap, d, 3) = {Ncap * K * d_feat * 3:.3g} elements per array, over "
+            f"rows.ROWS_EDGE_BUDGET = {_rows.ROWS_EDGE_BUDGET:.3g}: pass deriv_dtc=False (SoR-only "
+            f"force/virial variance), use a narrow feature map (--density pair / pca), or smaller batches")
     if X is None or (J is None and JU0 is None) or res is None:
         _, res, X, JU0 = batch_rows_parts(theta, spec, prob.model, ind, cfg, batch,
                                           with_X=True, with_JU0=True)

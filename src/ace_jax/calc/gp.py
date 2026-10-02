@@ -10,7 +10,7 @@ from ase.calculators.calculator import Calculator, all_changes
 from ..fit.data import Config, build_dataset
 from ..fit.hypers import from_array
 from ..fit.objective import posterior
-from ..fit.predict import _e0_offset, _predict_batch
+from ..fit.predict import _e0_offset, _predict_fn
 from ..fit.stats import sufficient_statistics
 
 
@@ -42,6 +42,9 @@ class GPCalculator(Calculator):
         super().__init__(**kw)
         self.fitted, self.meta = fitted, meta
         self._E0 = np.asarray(fitted.prob.model.E0)
+        # jitted once, theta/mu/L as arguments: one compile per cell shape serves every draw
+        # (eagerly, the node-chunked rows' fori_loop would recompile per draw and per call)
+        self._predict = _predict_fn(fitted.prob, True, True)
 
     def calculate(self, atoms=None, properties=("energy",), system_changes=all_changes):
         super().calculate(atoms, properties, system_changes)
@@ -55,7 +58,7 @@ class GPCalculator(Calculator):
         Es, Fs, Vs, Ev, Fv = [], [], [], [], []
         for d, (mu, L) in zip(self.fitted.draws, self.fitted.posteriors):
             theta = from_array(jnp.asarray(d))
-            Em, Ev_, Fm, Fv_, Vm, _ = _predict_batch(theta, prob, mu, L, batch)
+            Em, Ev_, Fm, Fv_, Vm, _ = self._predict(theta, mu, L, batch)
             Es.append(float(Em[0]) + float(_e0_offset(prob, ds)[0, 0]))
             Ev.append(float(Ev_[0])); Fs.append(np.asarray(Fm)[live]); Fv.append(np.asarray(Fv_)[live])
             Vs.append(np.asarray(Vm)[0])

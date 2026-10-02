@@ -371,8 +371,17 @@ def test_predict_ard_traces_the_chunked_rows_once(tiny_linear_problem, monkeypat
                          body_order_columns(meta, prob.cfg))
         post = ard_posterior(ev, ev.h0(theta), 2.0, meta)
         ref = predict_ard(post, prob, ds)
-        n = {"traces": 0}
+        # a low budget sends the tiny fixture through linear_rows_chunked's fori_loop
+        monkeypatch.setattr(rows, "ROWS_EDGE_BUDGET", 1)
+        n = {"traces": 0, "chunked": 0}
         orig = rows.linear_rows_bounded
+        orig_c = rows.linear_rows_chunked
+
+        def counting_c(*a, **k):
+            n["chunked"] += 1
+            return orig_c(*a, **k)
+
+        monkeypatch.setattr(rows, "linear_rows_chunked", counting_c)
 
         def counting(*a, **k):
             n["traces"] += 1
@@ -380,7 +389,7 @@ def test_predict_ard_traces_the_chunked_rows_once(tiny_linear_problem, monkeypat
 
         monkeypatch.setattr(rows, "linear_rows_bounded", counting)
         got = predict_ard(post, prob, ds)
-    assert n["traces"] == 1
+    assert n["traces"] == 1 and n["chunked"] == 1
     np.testing.assert_allclose(np.asarray(got.F_var), np.asarray(ref.F_var), rtol=1e-12)
 
 

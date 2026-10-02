@@ -113,8 +113,10 @@ def hybrid():
     return prob, ds, theta
 
 
-def test_hybrid_statistics_and_gradient_chunked_equal(hybrid, monkeypatch):
-    """sufficient_statistics (linear + residual block, fused per chunk) and its theta-gradient."""
+@pytest.mark.parametrize("nodes", [32, 8])
+def test_hybrid_statistics_and_gradient_chunked_equal(hybrid, monkeypatch, nodes):
+    """sufficient_statistics (linear + residual block, fused per chunk) and its theta-gradient;
+    nodes=8 runs the residual sub-scan below cfg.node_chunk (gcd sub-chunks)."""
     from ace_jax.fit.hypers import from_array, to_array
     from ace_jax.fit.stats import sufficient_statistics
     prob, ds, theta = hybrid
@@ -128,7 +130,7 @@ def test_hybrid_statistics_and_gradient_chunked_equal(hybrid, monkeypatch):
         return st, gr
 
     ref_st, ref_g = run()
-    _force_chunk(monkeypatch, prob.model, prob.cfg, ds, nodes=prob.cfg.node_chunk)
+    _force_chunk(monkeypatch, prob.model, prob.cfg, ds, nodes=nodes)
     st, gr = run()
     for k in ref_st._fields:
         _close(getattr(st, k), getattr(ref_st, k), k)
@@ -176,10 +178,60 @@ def test_statistics_memory_shape_bounded(packed, monkeypatch):
     peak = lambda n: rows._max_elems(
         jax.make_jaxpr(lambda d: linear_statistics(model, g, d))(_abstract_batch(ds, n, K)).jaxpr)
     nc = rows.rows_node_chunk(model, g, Ncap, K)
-    assert nc is not None and nc % g.node_chunk == 0
+    assert nc is not None and nc % rows.ROW_GRANULE == 0
     assert nc * rows._node_elems(model, g, K) <= rows.ROWS_EDGE_BUDGET
     p1, p2 = peak(Ncap), peak(2 * Ncap)
     assert p1 <= rows.ROWS_EDGE_BUDGET, p1
     assert p2 <= p1 + 2 * Ncap * 3 * g.len_basis * 6, (p1, p2)
     monkeypatch.setattr(rows, "ROWS_EDGE_BUDGET", 1 << 62)
     assert peak(Ncap) >= Ncap * K * g.D
+
+
+def test_derivative_dtc_over_budget_raises(hybrid, monkeypatch):
+    """The derivative DTC is not node-chunked: over budget with a wide map it refuses, not OOMs."""
+    from ace_jax.fit import rows
+    from ace_jax.fit.predict import _dtc_deriv_residual
+    prob, ds, theta = hybrid
+    monkeypatch.setattr(rows, "ROWS_EDGE_BUDGET", 1)
+    with pytest.raises(ValueError, match="deriv_dtc=False"):
+        _dtc_deriv_residual(theta, prob, jax.tree.map(lambda a: a[0], ds))
+
+
+def _grad_peak(f, args):
+    from ace_jax.fit import rows
+    return rows._max_elems(jax.make_jaxpr(jax.grad(f))(*args).jaxpr)
+
+
+def test_hybrid_theta_gradient_memory_bounded(hybrid, monkeypatch):
+    """Reverse mode through the chunk loop: the theta-gradient of the hybrid statistics (isotropic
+    map, d = D) saves only each chunk's index -- its peak does not grow with n_cap, where stacking
+    every chunk's residuals made it Ncap*K*d*3."""
+    from ace_jax.fit import rows
+    from ace_jax.fit.hypers import from_array, to_array
+    from ace_jax.fit.stats import sufficient_statistics
+    prob, ds, theta = hybrid
+    g, K = prob.cfg, ds.nbr.shape[2]
+    monkeypatch.setattr(rows, "ROWS_EDGE_BUDGET", g.node_chunk * rows._node_elems(prob.model, g, K))
+    f = lambda a, d: sufficient_statistics(from_array(a), prob.spec, prob.model, prob.ind, g, d).G_F.sum()
+    p1, p2, p4 = (_grad_peak(f, (to_array(theta), _abstract_batch(ds, n, K))) for n in (256, 512, 1024))
+    assert p4 <= p1 + 1024 * 3 * (g.len_basis + prob.ind.XM.shape[0]), (p1, p2, p4)
+    assert p4 < 1024 * K * prob.ind.XM.shape[1] * 3, (p1, p4)
+
+
+def test_radial_gradient_memory_bounded(monkeypatch):
+    """The radial-learning gradient (wrt the radial weights, through linear_statistics with a fresh
+    model per call) is bounded the same way: no stacked per-chunk J."""
+    from test_gp_learn_radial import THETA, make_problem
+    from ace_jax.fit import rows
+    from ace_jax.fit.radial_learn import projected_residual
+    prob, ds, _ = make_problem()
+    K = ds.nbr.shape[2]
+    monkeypatch.setattr(rows, "ROWS_EDGE_BUDGET", 8 * rows._node_elems(prob.model, prob.cfg, K))
+    W0 = prob.model.rnl_Wnlq
+    f = lambda W, d: projected_residual(W, THETA, prob, d)
+    p1, p4 = (_grad_peak(f, (W0, _abstract_batch(ds, n, K))) for n in (256, 1024))
+    assert p4 <= p1 + 1024 * 3 * prob.cfg.len_basis * 2, (p1, p4)
+    assert p4 < 1024 * K * prob.cfg.D * 3, (p1, p4)
+    n0 = len(rows._NODE_ELEMS)
+    _grad_peak(f, (W0, _abstract_batch(ds, 256, K)))
+    assert len(rows._NODE_ELEMS) == n0          # structural key: fresh models share the entry
