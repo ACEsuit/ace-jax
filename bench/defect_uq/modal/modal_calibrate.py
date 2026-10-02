@@ -25,7 +25,7 @@ def u_files(hold: str) -> list:
     return [f"/out/defects/big3_cracks_r{p}.xyz" for p in HOLDS if p != hold]
 
 
-@app.function(gpu="A100-40GB", image=image, volumes={"/out": vol}, timeout=4 * 3600)
+@app.function(gpu="A100-80GB", image=image, volumes={"/out": vol}, timeout=4 * 3600)
 def calibrate_loro(run: str, hold: str, mode: str = "per-group") -> str:
     import os
     import shutil
