@@ -195,7 +195,7 @@ model is saved as an npz (analytic branch) plus a JSON summary of `info`.
   batches of 4, `n_q=30`) confirms it at scale: `value(all batches) =
   1147.0 MB`, `grad(2 batches) = 1333.1 MB`, `grad(all batches) = 1333.6 MB`
   — a grad/value ratio of **1.16×**, within the spec's <3× bar and, as on
-  CPU, independent of batch count. See `docs/learn-radial-results.md`.
+  CPU, independent of batch count. See `docs/dev/learn-radial-results.md`.
 
 ### Entry points
 

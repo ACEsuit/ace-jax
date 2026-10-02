@@ -43,7 +43,7 @@ Two notes qualify these verdicts.
   - The exception is SiGe_large. Its order-4 adjoint scatters are node-major
     (`f64[8192,165]`), taking 8.6 ms of 15.0 ms.
   - In PACE, feature-major moved the same scatter only from 1.26 to 0.99 ms
-    (`docs/pace-performance-gap.md` §8.3).
+    (`docs/dev/pace-performance-gap.md` §8.3).
   - **Task 9 should measure it per model,** and not assume PACE's gain carries
     over.
   - The real remedy for the adjoint scatter is PACE's candidate #7: a custom

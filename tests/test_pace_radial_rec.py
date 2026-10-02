@@ -39,7 +39,7 @@ def test_sbessel_recurrence_is_exact_and_cheap():
 # g = (S @ M) / rc^1.5 with S[:, k] = sinc((k+1) x): one sin per entry and a
 # constant matrix instead of the stacked recurrence, which XLA fuses into one
 # kernel that re-evaluates the chain per column (~K^2 per edge).  Faster only
-# at large nradbase (docs/ace-vs-pace-gap.md 4.3), so load_yace picks it per
+# at large nradbase (docs/dev/ace-vs-pace-gap.md 4.3), so load_yace picks it per
 # model: nradbase >= SBESSEL_MATMUL_MIN_K.
 import dataclasses  # noqa: E402
 import pathlib  # noqa: E402

@@ -20,7 +20,7 @@ parity CI jobs. User docs: `README.md`. Agent-facing usage guide:
   - `data.py` reads extxyz into `Config`s and padded `Dataset` batches.
   - The core modules are `rows`, `stats`, `objective`, `ladder`, `predict`, `pops`, `solve`, `hostcache`.
   - `pipeline/` is the `aj fit` pipeline (`radials.py`: the `--learn-radial` stage).
-  - `radial_learn.py` and `varpro.py` learn radials.
+  - `radial_learn.py` learns radials. `varpro.py` (the FS-density VarPro driver), `density.py` and `block_lbfgs.py` are research tools kept from PR #22 and exercised only by their tests; no pipeline path uses them.
 - `src/ace_jax/basis/`: building an ACE basis (a frozen, zero-readout model).
   - `spec.py`, `coupling.py`: the EquivariantTensors shim via the compiled `ace-jax-coupling` library; `BasisUnavailable` when it cannot run.
   - `model.py`: `BasisSpec`, `build_basis` (the one entry point: `aj basis`, `aj fit`, Python), over `build_model` / `build_embedding_model`; `Basis` (NamedTuple), `basis_r0`.
@@ -38,10 +38,10 @@ parity CI jobs. User docs: `README.md`. Agent-facing usage guide:
 - `coupling/`: the `ace-jax-coupling` distribution.
   - `julia/src/ETCouple.jl`: the C ABI over EquivariantTensors (fork rev pinned in `julia/Project.toml` `[sources]`); `julia/build.jl` compiles it with JuliaC (`--trim=safe`, Julia 1.13); `julia/reference/` is the unpatched-upstream oracle.
   - `python/`: the ctypes package `ace_jax_coupling` and its wheel hook; `tools/`: bundle check, trace-based pruning, clean-env wheel test.
-  - Spec: `docs/coupling-etshim-spec.md`.
+  - Spec: `docs/dev/coupling-etshim-spec.md`.
 - `julia/`: ACEpotentials reference generators.
 - `pace_ref/`: ML-PACE and python-ace reference tooling.
-- `docs/`: specs, plans and results. `docs/benchmarks.md` has the performance numbers.
+- `docs/`: `docs/user/` is the site; `docs/dev/` holds specs, plans, benchmark reports and research results (`docs/dev/benchmarks.md` has the performance numbers). Removed research prototypes: tag `archive/research-prototypes` (`bench/ARCHIVED.md`).
   - `docs/user/`: the user documentation site (MkDocs Material, `mkdocs.yml`, toolchain pinned in `docs/requirements.txt`; build with `uv pip install -r docs/requirements.txt && uv run --no-sync mkdocs build --strict`). `docs/mkdocs_hooks.py` renders the CLI reference from `aj --help`; `docs/snippets/` holds shared fragments (the install line). Tutorials are marimo notebooks in `docs/user/tutorials/notebooks/` with PEP 723 headers; keep each a few CPU minutes (tutorial 4's basis sweep, ~10 min, is the exception). The MLIP-school-derived tutorials (`school_*.py`) read labels from `docs/user/tutorials/data/school/` (MIT, MACE-MPA-0 / MP-0b3; regenerate with its `make_labels.py` in a separate mace-torch environment), falling back to GitHub `main` when not run from a checkout; the docs build never needs torch. Their pages (`tutorials/<page>.md` + `<page>_files/`, gitignored) are rendered by `docs/build_tutorials.py`, run from the mkdocs hook: it runs each notebook (`marimo export ipynb --include-outputs`) only when its source changed, maps marimo callouts/accordions/controls to admonitions/details/notes, and fails the build if a cell raises; `ACEJAX_DOCS_NOTEBOOKS=skip` writes placeholders for a quick local build. The run command and molab link live in each notebook's first cell. `tests/test_no_backend_names.py` also covers `docs/user` (except `licence.md`).
 
 ## Setup and tests

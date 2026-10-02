@@ -14,7 +14,7 @@
 
 **Tech Stack:** Python 3.11+, JAX (fp64), numpyro/optax (ladder), pytest.
 
-**Spec:** `docs/specs/2026-09-22-hyper-routing-pops-weights-design.md` (read it alongside this plan).
+**Spec:** `docs/dev/specs/2026-09-22-hyper-routing-pops-weights-design.md` (read it alongside this plan).
 
 ## Global Constraints
 - **Backwards compatible:** with no new flags, `--arm linear`/`--arm gp` reproduce today's numbers; the existing suite stays green. Defaults: all blocks `route=LML`; weights `[Structural(), ConfigType(default={E:1,F:1,V:1})]`; `--uq blr`.
@@ -451,7 +451,7 @@ def test_perconfig_override():
 
 ### Task 14: `--route` override + docs
 
-**Files:** Modify `bench/acegp_cantor/run.py` (`--route <json>` maps block→route), `docs/specs/...` unchanged; add `docs/plans/...` note; `tests/test_gp_cli.py`.
+**Files:** Modify `bench/acegp_cantor/run.py` (`--route <json>` maps block→route), `docs/dev/specs/...` unchanged; add `docs/dev/plans/...` note; `tests/test_gp_cli.py`.
 - [ ] **Test:** `--route '{"sigma_type":"lml"}'` produces a `ParamSet` with that block LML-routed; `--route '{"embed":"fixed"}'` freezes the embedding (VarOpt skipped). Implement a small parser mapping names→routes onto `from_hypers`/block construction. Commit `feat(cli): per-block route override`.
 
 **Phase-4 gate:** full suite green; a default-flags run reproduces the pre-change numbers on the SiGe fixture.

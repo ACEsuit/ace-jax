@@ -8,7 +8,7 @@
 > Code references below (`learn_radial_density`, `FSModel`, …) refer to that commit. The spike scripts (`spike/fixed_fs*.py`, `spike/pace_*.py`, …) were never committed.
 
 
-This note tests the joint radial and density learning of `docs/specs/2026-09-28-radial-density-varpro-design.md` against the success criteria in that spec. The data, splits, MACE teacher and QoI protocol are the same as in `docs/learn-radial-pacemaker-comparison.md`. Raw numbers are under `docs/figures/learn-radial/density/`, and `qoi_table.py` there regenerates the QoI tables.
+This note tests the joint radial and density learning of `docs/dev/specs/2026-09-28-radial-density-varpro-design.md` against the success criteria in that spec. The data, splits, MACE teacher and QoI protocol are the same as in `docs/dev/learn-radial-pacemaker-comparison.md`. Raw numbers are under `docs/dev/figures/learn-radial/density/`, and `qoi_table.py` there regenerates the QoI tables.
 
 ## Verdict: is sqrt(ρ) worth pursuing?
 

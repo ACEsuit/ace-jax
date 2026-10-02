@@ -18,7 +18,7 @@
 - Python 3.11+, JAX (float64), ASE, marimo ≥ 0.25 and matplotlib.
 - Generating labels only (never an ace-jax dependency): mace-torch 0.3.16 on CPU torch.
 
-**Spec:** `docs/specs/2026-10-02-school-tutorials-design.md`.
+**Spec:** `docs/dev/specs/2026-10-02-school-tutorials-design.md`.
 
 **School source:**
 

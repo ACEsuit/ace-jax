@@ -13,7 +13,7 @@
 - An ace-jax → lammps-jax exporter (`ace_jax.export.lammps`) makes ace-jax runnable as `pair_style jax/kk`.
 - A harness in `bench/scaling/` covers structures, models, one-case runners (standalone and LAMMPS), parity gates, a resumable sweep, and plots.
 - Each case runs in its own process and appends one JSON row to `bench/scaling/results/<host>.jsonl`.
-- `plot.py` turns the JSONL into `docs/figs/` and `docs/benchmarks.md`.
+- `plot.py` turns the JSONL into `docs/dev/figs/` and `docs/dev/benchmarks.md`.
 
 **Tech stack:**
 - Python 3.12, JAX, ASE, matplotlib, pytest.
@@ -22,7 +22,7 @@
 - Julia `julia/export_model.jl` for ACE models.
 - Modal.
 
-**Spec:** `docs/benchmark-scaling-spec.md`. Read it first; this plan implements its Phase A.
+**Spec:** `docs/dev/benchmark-scaling-spec.md`. Read it first; this plan implements its Phase A.
 
 ## Global Constraints
 
@@ -56,7 +56,7 @@
 | `bench/scaling/run_lammps.py` | one LAMMPS case: data + input + run + parse → one JSON row |
 | `bench/scaling/parity.py` | the three parity gates |
 | `bench/scaling/sweep.py` | expand the matrix for a host, resume, handle OOM and failures, append JSONL |
-| `bench/scaling/plot.py` | JSONL → `docs/figs/scaling_*.png` + tables in `docs/benchmarks.md` |
+| `bench/scaling/plot.py` | JSONL → `docs/dev/figs/scaling_*.png` + tables in `docs/dev/benchmarks.md` |
 | `bench/scaling/envs/moriarty.sh`, `bench/scaling/modal_app.py`, `bench/scaling/README.md` | environments and how to reproduce |
 | `tests/test_bench_scaling.py` | unit tests for structures, sweep logic, LAMMPS input and log parsing, plotting |
 
@@ -66,7 +66,7 @@
 
 **Files:**
 - Create: `src/ace_jax/export/__init__.py`, `src/ace_jax/export/lammps.py`, `tests/test_export_lammps.py`
-- Modify: `pyproject.toml` (extra `lammps = ["lammps-jax"]`), `docs/benchmark-scaling-spec.md`
+- Modify: `pyproject.toml` (extra `lammps = ["lammps-jax"]`), `docs/dev/benchmark-scaling-spec.md`
 
 **Interfaces:**
 - Produces:
@@ -75,7 +75,7 @@
 
 - [ ] **Step 1: Amend the spec (standalone timing definition)**
 
-In `docs/benchmark-scaling-spec.md` → Metrics, replace the `force_s` bullet with:
+In `docs/dev/benchmark-scaling-spec.md` → Metrics, replace the `force_s` bullet with:
 ```
 - `call_s`: median ASE-calculator call (energy + forces + stress), including the
   neighbour list, for every code (MACE builds its graph inside the call, so this
@@ -287,7 +287,7 @@ Expected: all pass. `test_bundle_written` runs because lammps-jax is installed i
 - [ ] **Step 7: Commit**
 
 ```bash
-git add src/ace_jax/export tests/test_export_lammps.py pyproject.toml uv.lock docs/benchmark-scaling-spec.md
+git add src/ace_jax/export tests/test_export_lammps.py pyproject.toml uv.lock docs/dev/benchmark-scaling-spec.md
 git commit -m "feat(export): ace-jax -> lammps-jax bundle (sparse and dense layouts)
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
@@ -1098,7 +1098,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 Load the `dataviz` skill before writing `plot.py`. It sets the palette, marks and accessibility rules; follow it for all figures.
 
 **Interfaces:**
-- Produces: `make_figures(results_glob, outdir) -> list[path]`, the five figure kinds from the spec (throughput vs N; throughput vs model size; memory; f32 vs f64; a compile table as Markdown), plus `write_doc(figures, tables, "docs/benchmarks.md")`.
+- Produces: `make_figures(results_glob, outdir) -> list[path]`, the five figure kinds from the spec (throughput vs N; throughput vs model size; memory; f32 vs f64; a compile table as Markdown), plus `write_doc(figures, tables, "docs/dev/benchmarks.md")`.
 
 - [ ] **Step 1: Write the failing test** (synthetic JSONL → files exist)
 
@@ -1122,14 +1122,14 @@ def test_plots_from_synthetic_results(tmp_path):
 
 The first figure kind: one panel per (system × host), log-log atom-steps/s vs `n_atoms`. One colour per code family and one marker per model size; solid lines for standalone and dashed for LAMMPS; failed or OOM points marked at the last size that ran. The other figures follow the spec's list.
 
-`write_doc` writes `docs/benchmarks.md`: the figures, the compile-time table, the hardware and version table from the rows' `versions`, and the caveats (random-coefficient models; how `force_s` is defined).
+`write_doc` writes `docs/dev/benchmarks.md`: the figures, the compile-time table, the hardware and version table from the rows' `versions`, and the caveats (random-coefficient models; how `force_s` is defined).
 
 - [ ] **Step 3: Run the test and commit**
 
 Run: `uv run pytest tests/test_bench_scaling.py -q -k plots` → pass.
 ```bash
 git add bench/scaling/plot.py tests/test_bench_scaling.py
-git commit -m "bench(scaling): figures and docs/benchmarks.md from results
+git commit -m "bench(scaling): figures and docs/dev/benchmarks.md from results
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -1191,9 +1191,9 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ### Task 11: Figures and docs
 
-- [ ] **Step 1:** `python bench/scaling/plot.py 'bench/scaling/results/*.jsonl' docs/figs` → figures plus `docs/benchmarks.md`.
+- [ ] **Step 1:** `python bench/scaling/plot.py 'bench/scaling/results/*.jsonl' docs/dev/figs` → figures plus `docs/dev/benchmarks.md`.
 - [ ] **Step 2:** Read every figure and check it against the rows (spot-check three points per figure by hand). Fix plot bugs in `plot.py`, never in the data.
-- [ ] **Step 3:** Link `docs/benchmarks.md` from the README ("Performance"), and note that Phase B (the production ACE model) will add a line.
+- [ ] **Step 3:** Link `docs/dev/benchmarks.md` from the README ("Performance"), and note that Phase B (the production ACE model) will add a line.
 - [ ] **Step 4:** Commit, push `feat/bench-scaling`, and open the PR, stacked on #7 or on `main` if #7 has merged by then.
 
 ---

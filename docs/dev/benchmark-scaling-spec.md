@@ -125,8 +125,8 @@ A case that fails its gate is not timed, and the failure is recorded.
    - `sweep.py`: expands the matrix for a host, skips cases already in the
      results file, and appends JSONL to `bench/scaling/results/<host>.jsonl`.
      It stops increasing N for a code/model once a size runs out of memory.
-   - `plot.py`: results → `docs/figs/scaling_*.png` and the tables in
-     `docs/benchmarks.md`.
+   - `plot.py`: results → `docs/dev/figs/scaling_*.png` and the tables in
+     `docs/dev/benchmarks.md`.
 3. **Environments:**
    - **moriarty:** LAMMPS ≥ 10 Sep 2025 (required by lammps-jax) with KOKKOS
      (CUDA, `Kokkos_ARCH_AMPERE86`, plus OpenMP for CPU), ML-PACE, Python, and
@@ -151,7 +151,7 @@ with CUDA, so there are no CPU LAMMPS rows for ace-jax (the parity gate
 records them as `unsupported`).
 The threading actually used is recorded in each row.
 
-## Plots (`docs/benchmarks.md`)
+## Plots (`docs/dev/benchmarks.md`)
 
 1. **Throughput vs N** (log–log atom-steps/s): one panel per
    system × device, one line per code/model; solid = standalone, dashed =
@@ -173,7 +173,7 @@ are edited by hand.
 - structures, models (PACE `.yace`, ACE linear, MACE-MP-0b2 / MH-1), environments and
   parity;
 - full sweeps on moriarty CPU, moriarty A4500 and Modal A100;
-- the plots and a draft of `docs/benchmarks.md`.
+- the plots and a draft of `docs/dev/benchmarks.md`.
 
 **Phase B (after #2–#5 are merged and this branch is rebased on `main`):**
 - **Evaluation-side density embedding.** Density embedding (`fit/density.py`:
@@ -201,7 +201,7 @@ are edited by hand.
 - Accuracy comparisons between codes. This is about speed and memory; parity
   gates exist only to ensure like-for-like physics.
 - Exporting ACEpotentials models to ML-PACE (sub-project 2 of
-  `docs/pace-yace-spec.md`).
+  `docs/dev/pace-yace-spec.md`).
 
 ## Cost and effort
 

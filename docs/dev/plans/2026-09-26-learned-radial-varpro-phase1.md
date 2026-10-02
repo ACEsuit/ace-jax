@@ -8,7 +8,7 @@
 
 **Tech Stack:** JAX (float64), equinox, optax 0.2.8 (`optax.lbfgs`), numpyro (θ-MAP via `fit.ladder.run_map`), numpy, pytest via `uv run`.
 
-**Spec:** `docs/specs/2026-09-26-learned-radial-varpro-design.md`
+**Spec:** `docs/dev/specs/2026-09-26-learned-radial-varpro-design.md`
 
 ## Global Constraints
 
@@ -451,7 +451,7 @@ The analytic tensor radial is
 so for a fixed transform, envelope and polynomial set it is LINEAR in Wnlq.
 These helpers swap, widen and convert Wnlq, and build the fixed quadratic forms
 the learner needs: the empirical radial Gram Q (gauge normalisation) and the
-roughness matrix D2.  See docs/specs/2026-09-26-learned-radial-varpro-design.md.
+roughness matrix D2.  See docs/dev/specs/2026-09-26-learned-radial-varpro-design.md.
 """
 import dataclasses
 
@@ -923,7 +923,7 @@ radials W, so no design matrix is ever materialised.  Its W-gradient is the
 exact Golub-Pereyra/Kaufman gradient (envelope theorem), taken by autodiff
 through the checkpointed `linear_statistics` scan.  M = 0 throughout: the
 residual GP is fitted afterwards on the frozen learned model.
-See docs/specs/2026-09-26-learned-radial-varpro-design.md.
+See docs/dev/specs/2026-09-26-learned-radial-varpro-design.md.
 """
 import jax
 import jax.numpy as jnp
@@ -1498,8 +1498,8 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 **Files:**
 - Create: `bench/learn_radial/run.py`
-- Create: `docs/learn-radial-results.md`
-- Modify: `docs/specs/2026-09-26-learned-radial-varpro-design.md`
+- Create: `docs/dev/learn-radial-results.md`
+- Modify: `docs/dev/specs/2026-09-26-learned-radial-varpro-design.md`
 - Test: `tests/test_gp_learn_radial.py` (append a smoke test)
 
 **Interfaces:**
@@ -1631,7 +1631,7 @@ Expected: PASS.
 
 - [ ] **Step 5: Amend the spec to match what was built**
 
-In `docs/specs/2026-09-26-learned-radial-varpro-design.md`:
+In `docs/dev/specs/2026-09-26-learned-radial-varpro-design.md`:
 - "Components → `from_table`": the projector works in the transformed coordinate `x` (grid on [-1, 1]) with the envelope as part of the basis (`env·P_q`), not "divide out the envelope".
 - "Components → `normalise`": rows that are zero in `W0` (onehot for NZ > 1) are frozen at zero.
 - "`projected_residual`": no jitter-retry exists in `solve.py`; a failed Cholesky gives NaN and the loop keeps the best finite iterate.
@@ -1650,12 +1650,12 @@ uv run python bench/learn_radial/run.py --model <model.npz> --data <train.xyz> \
     --ntrain 800 --nval 200 --n-q 30 --steps 200 --out runs/learn_radial/<system>
 ```
 
-Also record the Task 6 Step 4 memory numbers. Write `docs/learn-radial-results.md` with one table row per system: `n_q`, selected label, the init and learned gate scores, wall time, peak memory, and a one-line verdict against the spec's success criterion (learned wins on ≥ 2 of 3 systems). Record what was actually run; if a system's data isn't available, say so in its row rather than leaving it out.
+Also record the Task 6 Step 4 memory numbers. Write `docs/dev/learn-radial-results.md` with one table row per system: `n_q`, selected label, the init and learned gate scores, wall time, peak memory, and a one-line verdict against the spec's success criterion (learned wins on ≥ 2 of 3 systems). Record what was actually run; if a system's data isn't available, say so in its row rather than leaving it out.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add bench/learn_radial/run.py tests/test_gp_learn_radial.py docs/specs/2026-09-26-learned-radial-varpro-design.md docs/learn-radial-results.md
+git add bench/learn_radial/run.py tests/test_gp_learn_radial.py docs/dev/specs/2026-09-26-learned-radial-varpro-design.md docs/dev/learn-radial-results.md
 git commit -m "feat(bench): learn_radial driver; spec amendments; benchmark results
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"

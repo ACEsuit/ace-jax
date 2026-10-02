@@ -15,7 +15,7 @@
 
 **Tech stack:** JAX (x64), NumPy, pytest, ruff; `uv run`.
 
-**Spec:** `docs/specs/2026-09-28-tempered-ard-uq-design.md`, section "Addendum (2026-09-28): cluster-sandwich force variance".
+**Spec:** `docs/dev/specs/2026-09-28-tempered-ard-uq-design.md`, section "Addendum (2026-09-28): cluster-sandwich force variance".
 
 ## Global Constraints
 

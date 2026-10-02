@@ -423,7 +423,7 @@ def _(mo):
 
     On production-sized data the gain is larger and survives a good start:
     see the learned-radial results in the ace-jax repository
-    (`docs/learn-radial-results.md`).
+    (`docs/dev/learn-radial-results.md`).
     """)
     return
 

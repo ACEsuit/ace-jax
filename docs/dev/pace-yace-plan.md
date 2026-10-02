@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.11+, JAX, Equinox, NumPy, PyYAML (new core dependency), pytest via `uv run`. Reference side: C++17 + CMake against `~/gits/lammps-user-pace` (@ `99aa6e6`), and python-ace built from source in a separate venv.
 
-**Spec:** `docs/pace-yace-spec.md` (branch `feat/pace-yace`). Read its sections "Representation" and "Radials, embedding, core terms" before any task. They cite the C++ source by file and line.
+**Spec:** `docs/dev/pace-yace-spec.md` (branch `feat/pace-yace`). Read its sections "Representation" and "Radials, embedding, core terms" before any task. They cite the C++ source by file and line.
 
 ## Global Constraints
 
@@ -1456,7 +1456,7 @@ Mirrors ML-PACE `ACECTildeEvaluator::compute_atom` (ace_evaluator.cpp:146-536,
 lammps-user-pace @ 99aa6e6) with analytic radials instead of its spline tables.
 Neighbour species enter PACE's A as an explicit channel; here edges stay narrow
 and are pooled by (node, neighbour species) -- segment id node*NZ + zj -- so per-
-edge work does not grow with the number of elements.  See docs/pace-yace-spec.md.
+edge work does not grow with the number of elements.  See docs/dev/pace-yace-spec.md.
 """
 import equinox as eqx
 import jax
@@ -1734,7 +1734,7 @@ def write_yace(model, spec, path):
     verbatim from `spec.tree` (function layout is never regenerated)."""
     from .pace_model import PACEModel
     if not isinstance(model, PACEModel):
-        raise TypeError("write_yace only writes PACEModel (PACE radials); see docs/pace-yace-spec.md")
+        raise TypeError("write_yace only writes PACEModel (PACE radials); see docs/dev/pace-yace-spec.md")
     f64 = lambda x: np.asarray(x, np.float64)
     t = copy.deepcopy(spec.tree)
     t["E0"] = f64(model.E0).tolist()
@@ -1889,7 +1889,7 @@ Add after "Quickstart":
 Supported: ChebExpCos / ChebPow / ChebLinear / SBessel radials, FinnisSinclair
 and FinnisSinclairShiftedScaled embeddings, `density` / `distance` / `zbl` inner
 cutoffs. `write_yace(model, spec, path)` writes a (possibly modified) model back.
-Checked against ML-PACE C++ and python-ace; see `docs/pace-yace-spec.md`.
+Checked against ML-PACE C++ and python-ace; see `docs/dev/pace-yace-spec.md`.
 ```
 
 - [ ] **Step 5: Full suite, then commit**
@@ -1908,12 +1908,12 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ### Task 9: Deployment check on real LAMMPS (manual, with the user)
 
-No code enters the repo except `docs/pace-yace-results.md`. It needs moriarty and the user's 2FA, so the agent prepares and the user runs. Follow the SSH rules in `~/.claude/CLAUDE.md`: plain `ssh moriarty`, one ControlMaster, and no BatchMode.
+No code enters the repo except `docs/dev/pace-yace-results.md`. It needs moriarty and the user's 2FA, so the agent prepares and the user runs. Follow the SSH rules in `~/.claude/CLAUDE.md`: plain `ssh moriarty`, one ControlMaster, and no BatchMode.
 
 - [ ] **Step 1:** Rebuild local LAMMPS with ML-PACE (CPU): `cmake -S ~/gits/lammps/cmake -B ~/gits/lammps/build -D PKG_ML-PACE=ON && cmake --build ~/gits/lammps/build -j`. Record which PACE library version it downloaded (the `PACELIB_URL` in the build).
 - [ ] **Step 2:** For `sige_zbl` and one real published `.yace`, run a 2-atom-type bulk snapshot through `pair_style pace` and `pair_coeff * * model.yace Si Ge`. Dump E/F and compare to `ACECalculator` (expect agreement at the shipped-grid tolerance). Repeat with a file written by `write_yace` to confirm LAMMPS reads exported files.
 - [ ] **Step 3:** On moriarty (already has ML-PACE): the same comparison with `pace/kk` on GPU, then a timing comparison (atoms·steps/s) of `pace/kk` against ace-jax's jitted `energy_forces_virial` on GPU for a ~4k-atom cell. Also record, for the real published model, how the number of AA products after real conversion compares with its number of PACE functions (the spec's AA-union assumption).
-- [ ] **Step 4:** Write `docs/pace-yace-results.md` with the numbers and versions. Commit it.
+- [ ] **Step 4:** Write `docs/dev/pace-yace-results.md` with the numbers and versions. Commit it.
 
 ---
 

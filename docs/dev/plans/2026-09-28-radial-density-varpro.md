@@ -14,7 +14,7 @@
 
 **Tech Stack:** Python 3.11+, JAX (float64), equinox, optax, pytest.
 
-**Spec:** `docs/specs/2026-09-28-radial-density-varpro-design.md`
+**Spec:** `docs/dev/specs/2026-09-28-radial-density-varpro-design.md`
 
 ## Global Constraints
 
@@ -556,7 +556,7 @@ the edge vectors, so there is no bespoke derivative code.  The linear part is
 evaluated through `base._readout` on the materialised B (not the folded
 readout), since the density needs B anyway.  Written by
 construct.export.patch_radial_npz(fs=...), loaded by eval.io.load.
-See docs/specs/2026-09-28-radial-density-varpro-design.md.
+See docs/dev/specs/2026-09-28-radial-density-varpro-design.md.
 """
 import dataclasses
 
@@ -902,7 +902,7 @@ evaluation), or alternating V / H blocks ("alternating", the fallback), both
 through radial_learn's single compiled `_lbfgs_step`.  theta is re-profiled on
 the widened LML after every round.  After learning, eta is frozen and the
 final fit is the ordinary Bayesian linear solve over [c | d].
-See docs/specs/2026-09-28-radial-density-varpro-design.md.
+See docs/dev/specs/2026-09-28-radial-density-varpro-design.md.
 """
 import math
 import time
@@ -1433,7 +1433,7 @@ def test_bench_driver_unwraps_density_model(tmp_path):
 ```python
 p.add_argument("--density", choices=["none", "pair", "full"], default="none",
                help="also learn sqrt-density features jointly with the radials over this span of the basis "
-                    "(docs/specs/2026-09-28-radial-density-varpro-design.md); the gate keeps them only if "
+                    "(docs/dev/specs/2026-09-28-radial-density-varpro-design.md); the gate keeps them only if "
                     "they win on the held-out split")
 p.add_argument("--P", type=int, default=1, help="number of density features (with --density)")
 p.add_argument("--density-mode", choices=["joint", "alternating"], default="joint")
@@ -1593,8 +1593,8 @@ git commit -m "feat(bench): --density flags, model-level RMSE, Modal pass-throug
 This task is run by the controller, not a subagent. It needs Modal credentials, lestrade and judgement on the results.
 
 **Files:**
-- Create: `docs/learn-radial-density-results.md`
-- Create: `docs/figures/learn-radial/density/` (JSON results)
+- Create: `docs/dev/learn-radial-density-results.md`
+- Create: `docs/dev/figures/learn-radial/density/` (JSON results)
 
 - [ ] **Step 1: Launch the Modal runs.** The data dir is the one PR #14 used. Launch SiGe and Cantor, each at `--steps 40,200`:
 
@@ -1604,11 +1604,11 @@ LEARN_RADIAL_DATA=<data dir> modal run bench/learn_radial/modal_run.py --system 
 LEARN_RADIAL_DATA=<data dir> modal run bench/learn_radial/modal_run.py --system sige --steps 40,200 --lam-grid 0.1 --density pair --P 1 --out runs/density
 ```
 
-Repeat for `--system cantor`. Radials-only baselines at 40/200 steps exist from PR #14 (`docs/figures/learn-radial/comparison/`). Reuse them, or rerun with `--density none` if the numbers aren't on the same split. `--lam-eta-grid` stays `0` for the first pass. Add `0,1e-2,1e-1` only if the learned η are visibly rough: plot `eta.npy` against basis degree.
+Repeat for `--system cantor`. Radials-only baselines at 40/200 steps exist from PR #14 (`docs/dev/figures/learn-radial/comparison/`). Reuse them, or rerun with `--density none` if the numbers aren't on the same split. `--lam-eta-grid` stays `0` for the first pass. Add `0,1e-2,1e-1` only if the learned η are visibly rough: plot `eta.npy` against basis degree.
 
 - [ ] **Step 2: Compute QoIs.** On lestrade, with the ace-jax env (not moriarty), run `qoi.py --calc ace:<run>/model.npz --system {sige,cantor}` for every run's selected model. Then run `qoi_compare.py --dir <qoi dir> --ref mace` against the existing MACE reference JSONs.
 
-- [ ] **Step 3: Write `docs/learn-radial-density-results.md`.** Include:
+- [ ] **Step 3: Write `docs/dev/learn-radial-density-results.md`.** Include:
 
   - a table with the RMSE (`rmse_npz.json`), the gate selection and scores, and the SiGe elastic mean deviation;
   - Si and Ge vacancy errors, and Cantor B, C44 and vacancy MAE, for each configuration against radials-only and pacemaker sqrt(ρ);
@@ -1621,6 +1621,6 @@ Repeat for `--system cantor`. Radials-only baselines at 40/200 steps exist from 
 - [ ] **Step 4: Commit.**
 
 ```bash
-git add docs/learn-radial-density-results.md docs/figures/learn-radial/density
+git add docs/dev/learn-radial-density-results.md docs/dev/figures/learn-radial/density
 git commit -m "docs(bench): radial + density learning results"
 ```

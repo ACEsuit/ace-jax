@@ -1,6 +1,6 @@
 # Learned radials vs pacemaker: RMSE, weighting and physical properties
 
-This note compares our learned radials with pacemaker (python-ace + TensorPotential), which learns radials jointly with the readout. It records what does and does not move the accuracy. Physical properties decide the comparison, not RMSE. Setup and earlier results are in `docs/learn-radial-results.md`. Raw numbers are under `docs/figures/learn-radial/comparison/`.
+This note compares our learned radials with pacemaker (python-ace + TensorPotential), which learns radials jointly with the readout. It records what does and does not move the accuracy. Physical properties decide the comparison, not RMSE. Setup and earlier results are in `docs/dev/learn-radial-results.md`. Raw numbers are under `docs/dev/figures/learn-radial/comparison/`.
 
 **Summary.** At equal basis size, our VarPro-learned radials give:
 

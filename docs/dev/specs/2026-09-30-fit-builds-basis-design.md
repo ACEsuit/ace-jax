@@ -178,7 +178,7 @@ format.
 - `ACEJAX_NO_JULIA` → `ACEJAX_COUPLING_CACHE_ONLY` (no alias): with it set, a
   coupling-cache miss raises instead of computing (tests use it).
 - No user-facing string (help, log, error, docs outside `coupling/` and
-  `docs/coupling-etshim-spec.md`) contains "Julia". `coupling/` (the library's
+  `docs/dev/coupling-etshim-spec.md`) contains "Julia". `coupling/` (the library's
   build) and the spec keep their Julia content: that is the backend itself.
 
 ## 5. Renames
@@ -189,13 +189,13 @@ format.
 | class `Authoring` | `Basis` |
 | model meta key `meta["authoring"]` (written by `build_model`, `build_embedding_model`; read by `fit/radial_model.py`) | `meta["basis"]` |
 | `tests/test_python_authoring.py` | `tests/test_basis_build.py` |
-| `docs/python-authoring.md` | `docs/basis.md` |
+| `docs/python-authoring.md` | `docs/user/howto/basis.md` |
 | `ACEJAX_NO_JULIA` | `ACEJAX_COUPLING_CACHE_ONLY` |
 | extra `basis` | removed (core dependency) |
 
 No committed fixture carries `meta["authoring"]` (checked), so no file needs
-regenerating. Historical plans/specs under `docs/plans/`, `docs/specs/` and
-`docs/tier2-plan.md` are not edited.
+regenerating. Historical plans/specs under `docs/dev/plans/`, `docs/dev/specs/` and
+`docs/dev/tier2-plan.md` are not edited.
 
 ## 6. Error handling
 
@@ -230,7 +230,7 @@ regenerating. Historical plans/specs under `docs/plans/`, `docs/specs/` and
 - **Backend hiding:** unsupported-platform message (monkeypatched import
   failure) raised after the configs are read, before any fitting; a test that `ace_jax` source (help strings,
   messages) and user docs (README, SKILL.md, CLAUDE.md user sections,
-  `docs/basis.md`) contain no "Julia" outside the allowed files.
+  `docs/user/howto/basis.md`) contain no "Julia" outside the allowed files.
 - **Renames:** the full suite passes after the move; `git grep` finds no
   `ace_jax.construct`, `Authoring`, `"authoring"` meta key or `ACEJAX_NO_JULIA`
   outside historical docs.

@@ -1,7 +1,7 @@
 """The lean evaluation form of an ACEModel (`ace_jax.eval.model.lean`) is exact.
 
 Each load-time transform removes per-edge work the energy never reads, and must
-leave E, forces and the virial unchanged to roundoff (docs/ace-vs-pace-gap.md):
+leave E, forces and the virial unchanged to roundoff (docs/dev/ace-vs-pace-gap.md):
 
   prune       R_nl columns no A entry reads, and Y_lm above the largest l used
   pairfold    the pair readout Wpair[:, z_i] folded into the pair radial table

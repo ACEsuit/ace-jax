@@ -1,4 +1,4 @@
-"""Benchmark sweep on a Modal A100-80GB (spec: docs/benchmark-scaling-spec.md).
+"""Benchmark sweep on a Modal A100-80GB (spec: docs/dev/benchmark-scaling-spec.md).
 
     modal run bench/scaling/modal_app.py --parity-only
     modal run bench/scaling/modal_app.py [--only acejax-pace]

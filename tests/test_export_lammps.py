@@ -319,7 +319,7 @@ def test_owned_rows_overflow_is_nan():
 # ------------------------------------------------------------------ row blocks
 # The dense bundle evaluates its rows in blocks of lammps.BUNDLE_BLOCK_ROWS
 # (lax.map + jax.checkpoint) once they exceed one block; at or below one block
-# the program is the unblocked one.  docs/perf-lammps-large-n.md.
+# the program is the unblocked one.  docs/dev/perf-lammps-large-n.md.
 
 def _big_cluster(kind):
     """213 atoms (3x3x3 diamond, 3 removed): with a 64-row block that is four
@@ -605,7 +605,7 @@ def test_matrix_compaction_overflow_is_nan():
 def test_matrix_nan_position_is_loud(k):
     """A NaN position gives NaN energies: the model itself zeroes a pair whose
     distance is NaN, so the energy function flags NaN pairs explicitly rather
-    than let the step run on with them dropped (docs/perf-lammps-large-n.md)."""
+    than let the step run on with them dropped (docs/dev/perf-lammps-large-n.md)."""
     y = str(pace_fixture(FIX / "gesi_sbessel.yace"))
     model, meta, _ = load(y)
     at = _cluster()

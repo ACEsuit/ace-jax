@@ -5,7 +5,7 @@
 > with `juliac --trim=safe` and shipped as a platform wheel (plan:
 > [plans/2026-09-30-trim-coupling-lib.md](plans/2026-09-30-trim-coupling-lib.md)).
 > Radials, pair basis and embedding are authored in Python
-> ([basis.md](basis.md)), with a per-shape coupling cache.
+> ([basis.md](../user/howto/basis.md)), with a per-shape coupling cache.
 
 **Goal.** Generate the SO(3) coupling artifacts (`A2B` map + `aa_spec`) — the one
 piece [EquivariantTensors.jl](https://github.com/ACEsuit/EquivariantTensors.jl)
@@ -188,5 +188,5 @@ row factor; descriptors by the factor).
 `A2B`/`aa_spec` depend only on the three integer specs. `couple_cached` stores
 one entry per shape (sha256 of the order-preserving spec JSON) stamped with
 `coupling.backend_id()` (`ace-jax-coupling==<version>`); a hit never imports the
-library, a backend change invalidates entries (see `docs/basis.md`,
+library, a backend change invalidates entries (see `docs/user/howto/basis.md`,
 "Coupling cache"). `couple()` remains the uncached parity oracle.

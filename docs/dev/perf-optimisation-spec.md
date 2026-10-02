@@ -1,7 +1,7 @@
 # ace-jax speed-ups (profiling tier 1 + chunking): spec
 
 Status: agreed 2026-09-27. Branch `perf/ace-jax-speedups`, stacked on
-`feat/bench-scaling`. Evidence: `docs/pace-performance-gap.md`, the profiling
+`feat/bench-scaling`. Evidence: `docs/dev/pace-performance-gap.md`, the profiling
 report whose prototypes (`bench/perf/`) this spec turns into library changes.
 
 ## Goal
@@ -146,7 +146,7 @@ coefficients inside the trace.
   during the run (the largest coordination within rcut climbs from 42 to 50
   on Cantor), so rcut-only slots overflowed. The rcut + skin list count bounds
   the within-rcut coordination between rebuilds. `max_edges` still counts
-  owned rows only. See `docs/perf-lammps-large-n.md`.
+  owned rows only. See `docs/dev/perf-lammps-large-n.md`.
 - **Model changes:** the bundle calls the same optimised model code
   (components 2–6).
 - **Unchanged:** `pair_style jax/kk`, the bundle contract, `layout="auto"` and
@@ -163,7 +163,7 @@ coefficients inside the trace.
 - **Scaling suite:** re-run the ace-jax rows on moriarty GPU and CPU and on the
   Modal A100, standalone and LAMMPS. The ML-PACE and MACE rows are unaffected
   and kept.
-- **Docs:** re-render `docs/benchmarks.md` with before and after, and link the
+- **Docs:** re-render `docs/dev/benchmarks.md` with before and after, and link the
   report.
 
 ## Parity (every change, float64 and float32)

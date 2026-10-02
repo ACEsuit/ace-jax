@@ -1,4 +1,4 @@
-"""Figures for the learned-radial benchmark (docs/figures/learn-radial/): gate
+"""Figures for the learned-radial benchmark (docs/dev/figures/learn-radial/): gate
 scores, objective traces, the radials that changed most (initial vs learned,
 and the change) over the pair-distance histogram, and the Legendre spectrum of
 the change.

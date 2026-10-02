@@ -4,7 +4,7 @@ Sub-project 1 of 2. Sub-project 2 (TRACE-style species embedding) gets its own s
 
 ## Motivation
 
-`docs/learn-radial-pacemaker-comparison.md` (PR #14) showed the following:
+`docs/dev/learn-radial-pacemaker-comparison.md` (PR #14) showed the following:
 
 - VarPro-learned radials give the best elastic constants of any model tested. SiGe comes out at 2.3–2.4% mean deviation from the MACE teacher, against 5.9–7.7% for pacemaker.
 - Every *linear* model misses SiGe vacancy formation energies by 0.2–1.8 eV.
@@ -136,7 +136,7 @@ The outer variables are block-scaled as `u = [vec(V) ; r_η · vec(H)]`, with `r
 - r is a traced argument, so the step function stays a single compiled `_lbfgs_step`. The objective does not depend on r.
 - If a joint line search fails, the rest of that round is spent on alternating V and H blocks instead of ending the run, and the next round tries joint mode again.
 
-The first implementation scaled by the ratio of gradient RMS instead. On Cantor that gave r_η ≈ 3×10⁻³, and the huge density steps broke the line search (docs/learn-radial-density-results.md).
+The first implementation scaled by the ratio of gradient RMS instead. On Cantor that gave r_η ≈ 3×10⁻³, and the huge density steps broke the line search (docs/dev/learn-radial-density-results.md).
 
 ### Modes
 
@@ -177,7 +177,7 @@ The existing gate picks the best candidate, with ties going to the earlier (simp
   - full P=2;
   - pair P=1.
 
-  Results are RMSE and QoI against MACE, written to `docs/learn-radial-density-results.md`. The step count needed for the joint problem is decided from these runs.
+  Results are RMSE and QoI against MACE, written to `docs/dev/learn-radial-density-results.md`. The step count needed for the joint problem is decided from these runs.
 - moriarty stays free for the user's benchmarks. Use lestrade and Modal.
 
 ## Tests

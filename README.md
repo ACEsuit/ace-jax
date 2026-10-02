@@ -112,7 +112,7 @@ cutoffs. `aj.load("model.yace")` returns `(PACEModel, meta, spec)`, and
 `write_yace(model, spec, path)` (`ace_jax.eval`) writes a (possibly modified)
 model back. `.yace` models are for evaluation and export: `aj fit` needs an
 `.npz` ACE model. Checked against the ML-PACE C++, python-ace and LAMMPS; see
-`docs/pace-yace-spec.md` and `docs/pace-yace-results.md`.
+`docs/dev/pace-yace-spec.md` and `docs/dev/pace-yace-results.md`.
 
 ### Speed options and LAMMPS
 
@@ -123,7 +123,7 @@ model back. `.yace` models are for evaluation and export: `aj fit` needs an
   `ace_jax.eval.lean(model)`, which is exact to roundoff. It drops the radial
   columns and harmonics the basis never reads, folds the pair weights into the
   pair radial, and pools the dense A per l-block. Forces are 1.1–3.3× faster on
-  an A100 (`docs/ace-vs-pace-gap.md` §8).
+  an A100 (`docs/dev/ace-vs-pace-gap.md` §8).
   - `calc.eval_model` is the lean form, and `calc.model` stays the model as
     given. Descriptors use `calc.model`.
   - A lean model is energy-only: never edit or fit it. Edit the full model and
@@ -144,7 +144,7 @@ model back. `.yace` models are for evaluation and export: `aj fit` needs an
       weights (`calc.model = ...`) does not redo it.
     - Its interval count is rounded up to a quarter-octave bucket, so a swapped
       radial usually reuses the compiled step. `spline_intervals` pins it.
-    - See `docs/learned-radial-splining.md`.
+    - See `docs/dev/learned-radial-splining.md`.
 
 - **Layout.** `"auto"` picks the dense layout (A per node by a batched outer
   product, several times faster forces on GPU) when the neighbour padding is
@@ -224,7 +224,7 @@ nothing was. The `"auto"` layout is still sized on the full model.
 
 ## Performance
 
-[`docs/benchmarks.md`](docs/benchmarks.md) has throughput-vs-size, model-size,
+[`docs/dev/benchmarks.md`](docs/dev/benchmarks.md) has throughput-vs-size, model-size,
 memory and precision scaling for ace-jax (standalone and in LAMMPS via
 lammps-jax), ML-PACE and MACE, on SiGe and Cantor, on CPU (moriarty) and GPU
 (RTX A4500, A100), each run behind a parity gate. The harness is in
@@ -247,7 +247,7 @@ ET 0.4.3) it has the same `nnll` blocks and the same per-block row spaces for
 orders 2–4, including the degenerate blocks, but each B function is normalised
 differently (row-norm ratio 0.225–1): the same function space, so fitted
 coefficients are not interchangeable with 0.10.1 exports.
-See `docs/coupling-etshim-spec.md` for the design and `tests/test_coupling_parity.py`
+See `docs/dev/coupling-etshim-spec.md` for the design and `tests/test_coupling_parity.py`
 for usage.
 
 ## Building a basis (CLI and Python)
@@ -265,7 +265,7 @@ injected via `dataclasses.replace` and round-trip through the loader. The
 bridge test verifies the whole chain against the committed Si fixture: `A2B`
 up to that per-row scale, then (with the fixture's coefficients rescaled)
 energies, forces, stress and descriptors to float noise.
-See `docs/basis.md`.
+See `docs/user/howto/basis.md`.
 
 ### Embedded (species-compressed) models: `ace-jax basis --embedding`
 

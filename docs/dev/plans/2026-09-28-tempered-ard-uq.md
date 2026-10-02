@@ -17,7 +17,7 @@
 
 **Tech Stack:** Python ≥ 3.11, JAX (float64), NumPy, SciPy (L-BFGS-B), ASE; pytest (+ xdist); ruff.
 
-**Spec:** `docs/specs/2026-09-28-tempered-ard-uq-design.md`. Evidence for the design: PR #12, `bench/defect_uq/README.md`.
+**Spec:** `docs/dev/specs/2026-09-28-tempered-ard-uq-design.md`. Evidence for the design: PR #12, `bench/defect_uq/README.md`.
 
 **Deviations from the spec (rulings):**
 - The spec routes the linear-arm training statistics through `linear_rows_chunked` as well. This
@@ -445,7 +445,7 @@ Expected: FAIL with `ModuleNotFoundError: No module named 'ace_jax.fit.ard'`
 ```python
 """Tempered ARD posterior: calibrated per-atom force uncertainty for linear ACE.
 
-Spec: docs/specs/2026-09-28-tempered-ard-uq-design.md.  For the linear model the weighted design
+Spec: docs/dev/specs/2026-09-28-tempered-ard-uq-design.md.  For the linear model the weighted design
 rows do not depend on the hyperparameters, so one statistics pass (G_q, b_q, y^T y_q, n_q per
 quantity) gives the exact evidence for any h = (log sigma_E, log sigma_F, log sigma_V, a_k):
 

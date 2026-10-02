@@ -1,7 +1,7 @@
 """ACE vs PACE on one GPU: the dense E/F/V model call (and optionally the whole
 ACECalculator call) of size-matched ACE (.npz) and PACE (.yace) models, plus the
 `ace_fast` prototype variants of the ACE model, interleaved round by round so
-container-to-container GPU variation cancels (docs/ace-vs-pace-gap.md).
+container-to-container GPU variation cancels (docs/dev/ace-vs-pace-gap.md).
 
     PYTHONPATH=bench:src python bench/perf/ace_gap_bench.py <system>_<size> <n> \
         [--variants prune,prune+lblock,...] [--pace-variants sbessel_mm] \

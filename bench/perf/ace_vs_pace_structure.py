@@ -1,5 +1,5 @@
 """Structural quantities of the benchmark ACE (.npz) and PACE (.yace) models, side
-by side, and the per-node / per-edge work they imply (docs/ace-vs-pace-gap.md §1).
+by side, and the per-node / per-edge work they imply (docs/dev/ace-vs-pace-gap.md §1).
 
     PYTHONPATH=bench:src uv run python bench/perf/ace_vs_pace_structure.py [--out JSON]
 

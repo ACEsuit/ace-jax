@@ -19,7 +19,7 @@ The CLI adds five flags, mapped to `FitConfig`; `fit.yaml` records them automati
 - argparse with the run-file layer (`ace_jax/runfile.py`);
 - pytest.
 
-**Spec:** `docs/specs/2026-10-01-fit-learned-radials-design.md`
+**Spec:** `docs/dev/specs/2026-10-01-fit-learned-radials-design.md`
 
 ## Global Constraints
 
@@ -75,7 +75,7 @@ Create `tests/test_fit_learn_radial.py`:
 
 ```python
 """aj fit --learn-radial: learned tensor radials as a fit-pipeline stage
-(docs/specs/2026-10-01-fit-learned-radials-design.md)."""
+(docs/dev/specs/2026-10-01-fit-learned-radials-design.md)."""
 import jax
 import numpy as np
 import pytest
@@ -274,7 +274,7 @@ Create `src/ace_jax/fit/pipeline/radials.py`:
 
 ```python
 """Learned tensor radials as a fit-pipeline stage (`aj fit --learn-radial`;
-docs/specs/2026-10-01-fit-learned-radials-design.md).
+docs/dev/specs/2026-10-01-fit-learned-radials-design.md).
 
 bench/learn_radial/run.py's recipe, run before the fit: a seeded hold-out of the
 training configs gates fit_radial's candidates (init + one learned per roughness

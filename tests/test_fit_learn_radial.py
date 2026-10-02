@@ -1,5 +1,5 @@
 """aj fit --learn-radial: learned tensor radials as a fit-pipeline stage
-(docs/specs/2026-10-01-fit-learned-radials-design.md)."""
+(docs/dev/specs/2026-10-01-fit-learned-radials-design.md)."""
 import jax
 import numpy as np
 import pytest

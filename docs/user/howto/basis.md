@@ -27,7 +27,7 @@ data (an explicit `elements` that misses a species in the data is an error);
 basis is handed to the fit as an in-memory npz, so a definition-built fit is
 bit-identical to a fit of the same basis saved to a file. The SO(3) coupling
 comes from EquivariantTensors' own construction, shipped precompiled in the
-`ace-jax-coupling` wheel ([maintainer notes](coupling-etshim-spec.md)); radial
+`ace-jax-coupling` wheel ([maintainer notes](https://github.com/ACEsuit/ace-jax/blob/main/docs/dev/coupling-etshim-spec.md)); radial
 init, pair basis, readout, packaging and evaluation are Python/NumPy/JAX.
 
 ## How a basis is built
@@ -169,7 +169,7 @@ team's cache dir.
 maxl, rcut, reduction, ...)` authors ACEpotentials' ace1-compatible
 `ace_embedding_model` the same way (`ace-jax basis --embedding <table.json |
 identity> [--d-max N]`); its design record is
-[plans/embedded-model-authoring.md](plans/embedded-model-authoring.md).
+[docs/dev/plans/embedded-model-authoring.md](https://github.com/ACEsuit/ace-jax/blob/main/docs/dev/plans/embedded-model-authoring.md).
 
 ## Known traps
 
@@ -186,10 +186,10 @@ identity> [--d-max N]`); its design record is
 
 - ~~Tier 2 point 1 — in-memory hand-off~~: done (`Basis.eval_pair`).
 - ~~Tier 2 point 2 — coupling cache~~: done (`couple_cached`, see
-  [tier2-plan.md](tier2-plan.md)) — a known shape builds from a populated
+  [tier2-plan.md](https://github.com/ACEsuit/ace-jax/blob/main/docs/dev/tier2-plan.md)) — a known shape builds from a populated
   cache dir.
 - ~~Precompiled coupling~~: done — `ace-jax-coupling` is a core dependency
-  (`coupling/`, [coupling-etshim-spec.md](coupling-etshim-spec.md)).
+  (`coupling/`, [coupling-etshim-spec.md](https://github.com/ACEsuit/ace-jax/blob/main/docs/dev/coupling-etshim-spec.md)).
 - ~~`aj fit` builds the basis~~: done (`FitConfig(model=BasisSpec|Basis)`,
   `fit.yaml`).
 - **Endgame — pure-JAX coupling**: reimplement ET's `SparseSymmProd`

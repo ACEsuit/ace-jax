@@ -295,7 +295,7 @@ def to_spline(model, n_intervals=None, tol=DEFAULT_SPLINE_TOL, deriv_tol=None,
     on d/dx and reported (`return_info`), and gated too when `deriv_tol` is
     given.  At 1e-10 the lean energies agree with the full model to
     up to ~1e-9 relative and forces to up to ~2.3e-8 of max|F| on the
-    benchmark models (docs/learned-radial-splining.md).
+    benchmark models (docs/dev/learned-radial-splining.md).
 
     tol must be in [TOL_FLOOR, inf); it is floored at 10 eps of the model's
     dtype (a float32 table cannot do better).  Returns (model, max_rel_err), or

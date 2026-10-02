@@ -11,7 +11,7 @@ Learning the tensor radials currently takes two steps:
 2. `aj fit --model DIR/model.npz` then does the actual fit.
 
 This change makes it **one `aj fit` run**, for the first PyPI release and its
-tutorial. Learned radials work reliably (`docs/learn-radial-results.md`); the
+tutorial. Learned radials work reliably (`docs/dev/learn-radial-results.md`); the
 CLI is what's missing.
 
 **Success criteria:**

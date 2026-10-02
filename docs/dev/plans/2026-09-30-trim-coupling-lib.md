@@ -8,7 +8,7 @@
 
 **Tech Stack:** Julia 1.13 + JuliaC 0.3.10 (`--trim=safe`), EquivariantTensors.jl (fork), Python 3.11–3.13, ctypes, numpy, hatchling (custom build hook), uv, GitHub Actions (manylinux_2_28 containers, macos-14).
 
-**Spec:** this document (the "Design" section below) + the feasibility probe recorded in memory note `et-trim-feasibility` (2026-09-30). `docs/coupling-etshim-spec.md` is the *old* design and is rewritten in Task 12.
+**Spec:** this document (the "Design" section below) + the feasibility probe recorded in memory note `et-trim-feasibility` (2026-09-30). `docs/dev/coupling-etshim-spec.md` is the *old* design and is rewritten in Task 12.
 
 ## Design (decisions already taken with the user)
 
@@ -70,7 +70,7 @@ ace-jax (branch feat/trim-coupling, worktree .worktrees/trim-coupling)
   tests/test_coupling_{parity,etshim,cache}.py, tests/test_python_authoring.py   updated
   .github/workflows/coupling-wheels.yml        NEW (build matrix, clean-env tests, ace-jax parity)
   .github/workflows/coupling-parity.yml        DELETED
-  README.md, CLAUDE.md, docs/coupling-etshim-spec.md (→ coupling-lib spec), docs/python-authoring.md
+  README.md, CLAUDE.md, docs/dev/coupling-etshim-spec.md (→ coupling-lib spec), docs/python-authoring.md
 ```
 
 ## Global Constraints
@@ -846,7 +846,7 @@ from its inputs and writes only into caller-owned buffers; no Julia object
 outlives a call.  Two-phase: a call whose capacities (`sizes`) are too small
 returns BUFFERS_TOO_SMALL with the required sizes written back.  Inputs are
 validated first so no exception can unwind across the C boundary.
-ABI: docs/coupling-etshim-spec.md.
+ABI: docs/dev/coupling-etshim-spec.md.
 """
 module ETCouple
 
@@ -2108,17 +2108,17 @@ Expected: all 7 jobs green. Record the three wheel sizes from the `test_wheel.sh
 
 **Files:**
 - Modify: `README.md`, `CLAUDE.md`, `docs/python-authoring.md`
-- Rewrite: `docs/coupling-etshim-spec.md` (keep the file name; title "Coupling generation via the compiled EquivariantTensors library")
+- Rewrite: `docs/dev/coupling-etshim-spec.md` (keep the file name; title "Coupling generation via the compiled EquivariantTensors library")
 - Modify: `skills/ace-jax/SKILL.md` only if it mentions juliacall/`authoring` (grep first)
 
 - [ ] **Step 1: Find every stale reference**
 
-Run: `grep -rn -i "juliacall\|juliapkg\|julia_env\|authoring extra\|coupling-parity" README.md CLAUDE.md docs/*.md skills/ | grep -v "docs/plans/"`
-Expected: a list of lines; each is rewritten below (historical plans under `docs/plans/` stay untouched).
+Run: `grep -rn -i "juliacall\|juliapkg\|julia_env\|authoring extra\|coupling-parity" README.md CLAUDE.md docs/*.md skills/ | grep -v "docs/dev/plans/"`
+Expected: a list of lines; each is rewritten below (historical plans under `docs/dev/plans/` stay untouched).
 
 - [ ] **Step 2: Rewrite**
 
-- `docs/coupling-etshim-spec.md`: the contract section stays (layout ace-jax consumes); replace the JuliaCall bridge, packaging and parity sections with: the three-layer architecture; the C ABI v1 block (copy from this plan's Design); build (`coupling/julia/build.jl`, Julia 1.13, JuliaC 0.3.10, generic CPU, `handle-signals=no`, privatize, macOS 11 floor, trace pruning); the ET-version note (fork `ET_REV` on ET main vs ACEpotentials 0.10.1 / ET 0.4.3: same blocks and spans, per-row scale); the test matrix (bit-exact vs upstream ET in `coupling/python/tests`; scale-aware vs ACEpotentials in `tests/test_coupling_parity.py`); cache stamp = `backend_id()`.
+- `docs/dev/coupling-etshim-spec.md`: the contract section stays (layout ace-jax consumes); replace the JuliaCall bridge, packaging and parity sections with: the three-layer architecture; the C ABI v1 block (copy from this plan's Design); build (`coupling/julia/build.jl`, Julia 1.13, JuliaC 0.3.10, generic CPU, `handle-signals=no`, privatize, macOS 11 floor, trace pruning); the ET-version note (fork `ET_REV` on ET main vs ACEpotentials 0.10.1 / ET 0.4.3: same blocks and spans, per-row scale); the test matrix (bit-exact vs upstream ET in `coupling/python/tests`; scale-aware vs ACEpotentials in `tests/test_coupling_parity.py`); cache stamp = `backend_id()`.
 - `README.md`: install line → `pip install ace-jax[authoring]  # + compiled EquivariantTensors coupling (no Julia needed; Linux x86_64/aarch64, macOS arm64)`; replace "juliacall/juliapkg auto-provision a pinned Julia" wording; state the per-row-scale caveat vs ACEpotentials 0.10.1 exports in one sentence where "bit-for-bit with ACEpotentials" is claimed for authoring.
 - `CLAUDE.md`: layout line for `construct/coupling.py` ("the EquivariantTensors shim via the compiled ace-jax-coupling library"); add `coupling/` to the layout list (julia shim, build, python package); Extras: `authoring` = `ace-jax-coupling` platform wheel; skip list: coupling tests skip without a working `ace_jax_coupling` (`conftest.require_coupling_lib`); CI list: `coupling-wheels` replaces `coupling-parity`; add the local build recipe (the `JULIA_DEPOT_PATH=$HOME/.julia-trim` note and the `uv sync --extra authoring --reinstall-package ace-jax-coupling` command).
 - `docs/python-authoring.md`: remove the "juliapkg scans sys.path" gotcha; the cache paragraph mentions `backend_id()` instead of the `juliapkg.json` pin hash.

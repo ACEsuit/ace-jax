@@ -27,8 +27,8 @@ round-off.
 optionally on the GPU via DLPack), lammps-jax, pytest, Modal A100 for
 profiling and micro-benchmarks, and the `bench/scaling/` suite.
 
-**Spec:** `docs/perf-optimisation-spec.md`. Evidence:
-`docs/pace-performance-gap.md`, with prototypes in `bench/perf/variants.py`,
+**Spec:** `docs/dev/perf-optimisation-spec.md`. Evidence:
+`docs/dev/pace-performance-gap.md`, with prototypes in `bench/perf/variants.py`,
 `bench/perf/fast_calc.py` and `bench/perf/lammps_variant.py`.
 
 ## Global Constraints
@@ -105,11 +105,11 @@ first. Each has a test in the owning task:
 | `src/ace_jax/calc/point.py` | `ACECalculator` uses `skin.py` | 6 |
 | `src/ace_jax/export/lammps.py` | owned-row bundle | 7 |
 | `bench/scaling/run_lammps.py` | `capacity` for `rcut`, `max_owned` | 7 |
-| `bench/perf/profile_ace.py`, `docs/perf-ace-profile.md` | `ACEModel` profile and decision | 8 |
+| `bench/perf/profile_ace.py`, `docs/dev/perf-ace-profile.md` | `ACEModel` profile and decision | 8 |
 | `src/ace_jax/eval/model.py` | `ACEModel` pool-first hooks and feature-major product basis (as decided) | 9 |
 | `bench/perf/microbench.py` | before and after per component on Modal | 10 |
 | `bench/scaling/run_standalone.py` | MD-like calls, rebuild count | 10 |
-| `docs/benchmarks.md`, `docs/perf-optimisation-results.md` | results | 11 |
+| `docs/dev/benchmarks.md`, `docs/dev/perf-optimisation-results.md` | results | 11 |
 
 ---
 
@@ -314,7 +314,7 @@ def _sbessel(r, rc, K):
     """PACE's SBessel basis.  sin(k x), k = 1..K+1, from one sin and one cos by
     sin((k+1)x) = 2 cos(x) sin(kx) - sin((k-1)x), and one reciprocal instead
     of a division per k: the per-edge transcendental cost no longer grows with K
-    (-20% of a PACE force call, docs/pace-performance-gap.md #3)."""
+    (-20% of a PACE force call, docs/dev/pace-performance-gap.md #3)."""
     x = r * PI / rc
     xs = jnp.where(x == 0, 1.0, x)
     s1, c2 = jnp.sin(xs), 2.0 * jnp.cos(xs)
@@ -640,7 +640,7 @@ The frozen references from Task 1 are the equality oracle for E, F and V, across
         spline or factorised table with its weights), so the per-edge R_nl is
         never formed: pool b (x) Y per (node, neighbour-species channel), then
         apply W per node.  Feature-major output so the product-basis gathers read
-        whole rows.  docs/pace-performance-gap.md #4, #5."""
+        whole rows.  docs/dev/pace-performance-gap.md #4, #5."""
         n, K, nb = b.shape
         C = self.a_channels
         hi = jax.lax.Precision.HIGHEST
@@ -990,17 +990,17 @@ git commit -m "perf(lammps): bundle evaluates owned rows only; slots sized for r
 ### Task 8: `ACEModel` profile and decision
 
 **Files:**
-- Create: `bench/perf/profile_ace.py`, `docs/perf-ace-profile.md`
+- Create: `bench/perf/profile_ace.py`, `docs/dev/perf-ace-profile.md`
 - Modify: `bench/perf/modal_profile.py` (an `ace` entrypoint)
 
 **Interfaces:**
 - Consumes: the Modal image (`bench/scaling/modal_app.py::base_image`, `with_sources`), and the benchmark's `bench/scaling/models/ace_{SiGe,Cantor}_{small,medium,large}.npz` (copy them from the main checkout).
-- Produces: `docs/perf-ace-profile.md` with a per-stage GPU time table for each model, and a **decision table**: for each candidate ACE change (pool-first for the `analytic` / `spline` / `spline_factorised` radials, and a feature-major `_aa`), apply or skip, with the reason.
+- Produces: `docs/dev/perf-ace-profile.md` with a per-stage GPU time table for each model, and a **decision table**: for each candidate ACE change (pool-first for the `analytic` / `spline` / `spline_factorised` radials, and a feature-major `_aa`), apply or skip, with the reason.
 
 - [ ] **Step 1:** Write `profile_ace.py` by adapting `bench/perf/profile_acejax.py` to `ACEModel`. Time `energy_forces_virial_dense` at 8192 atoms for each `ace_*` model, with a `jax.profiler` trace and HLO-fusion attribution (`hlo_trace.py` / `hlo_fusion.py`). Attribute time to: radial evaluation, `pool_a_dense`, `_aa` products (forward and adjoint), readout, and the force scatter.
 - [ ] **Step 2:** Run on Modal: `uv run --with modal modal run bench/perf/modal_profile.py::ace`.
       Expected: a JSON table per model in `bench/perf/results/ace_*.json`.
-- [ ] **Step 3:** Write `docs/perf-ace-profile.md`: the table plus the decision, using these rules:
+- [ ] **Step 3:** Write `docs/dev/perf-ace-profile.md`: the table plus the decision, using these rules:
   - **Pool-first is applied for a radial kind** when its fixed basis width `n_b`, times channels (1 for ACE), is at most the `R_nl` width it replaces, **and** the profile attributes at least 15% of the call to radial plus A assembly.
     - For `spline`, the basis is 4-sparse over `ncoef` columns, so `n_b = ncoef` is normally larger than `n_rnl`: expect **skip**.
     - For `analytic` and `spline_factorised`, expect **apply**.
@@ -1009,7 +1009,7 @@ git commit -m "perf(lammps): bundle evaluates owned rows only; slots sized for r
 - [ ] **Step 4:** Commit.
 
 ```bash
-git add bench/perf/profile_ace.py bench/perf/modal_profile.py bench/perf/results/ace_*.json docs/perf-ace-profile.md
+git add bench/perf/profile_ace.py bench/perf/modal_profile.py bench/perf/results/ace_*.json docs/dev/perf-ace-profile.md
 git commit -m "perf(ace): ACEModel GPU profile and the pool-first / feature-major decision"
 ```
 
@@ -1112,23 +1112,23 @@ git commit -m "bench: MD-like standalone timing (rebuild count); before/after mi
 ### Task 11: Re-run the ace-jax rows, docs, PR
 
 **Files:**
-- Modify: `bench/scaling/results/{moriarty-gpu,moriarty-cpu,modal-a100}.jsonl` (the ace-jax rows only), `docs/benchmarks.md`, `docs/figs/*`
-- Create: `docs/perf-optimisation-results.md`
+- Modify: `bench/scaling/results/{moriarty-gpu,moriarty-cpu,modal-a100}.jsonl` (the ace-jax rows only), `docs/dev/benchmarks.md`, `docs/dev/figs/*`
+- Create: `docs/dev/perf-optimisation-results.md`
 
 - [ ] **Step 1: Keep a copy of the current ace-jax rows** as the "before" series. Copy them to `bench/scaling/results/before-perf/*.jsonl`, then drop them from the live files, standalone and LAMMPS.
 - [ ] **Step 2: Modal.** Run `modal run bench/scaling/modal_app.py --only acejax-pace` and `--only acejax-ace`, in parallel, on the Volume-backed runner.
 - [ ] **Step 3: moriarty.** Once idle (`/proc/loadavg < 2`, `nvidia-smi` empty, `who`), run a queue script as in the benchmark branch: GPU `acejax-pace` and `acejax-ace`, then CPU `acejax-pace` and `acejax-ace`.
-- [ ] **Step 4: Re-render the figures,** and add a before/after figure (throughput vs N, ace-jax before and after, with ML-PACE for reference) to `docs/benchmarks.md`.
-- [ ] **Step 5: Write `docs/perf-optimisation-results.md`:**
+- [ ] **Step 4: Re-render the figures,** and add a before/after figure (throughput vs N, ace-jax before and after, with ML-PACE for reference) to `docs/dev/benchmarks.md`.
+- [ ] **Step 5: Write `docs/dev/perf-optimisation-results.md`:**
   - micro-benchmarks before and after (Task 10);
   - the scaling suite summary;
   - each success criterion, met or missed with the number;
-  - a link to `docs/pace-performance-gap.md` and `docs/perf-ace-profile.md`.
+  - a link to `docs/dev/pace-performance-gap.md` and `docs/dev/perf-ace-profile.md`.
 - [ ] **Step 6: Final review.** Run the full test suite, then the whole-branch review per the execution skill.
 - [ ] **Step 7: Open the PR.** Push `perf/ace-jax-speedups` and open a PR against `feat/bench-scaling`, or `main` if that has merged. Description: summary, results table, parity statement, and the ledger's rulings.
 
 ```bash
-git add bench/scaling/results docs/benchmarks.md docs/figs docs/perf-optimisation-results.md
+git add bench/scaling/results docs/dev/benchmarks.md docs/dev/figs docs/dev/perf-optimisation-results.md
 git commit -m "bench: ace-jax rows after the speed-ups; results doc"
 ```
 

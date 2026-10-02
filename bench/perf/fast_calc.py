@@ -1,4 +1,4 @@
-"""Prototype calculator path for MD-style repeated calls (docs/pace-performance-gap.md).
+"""Prototype calculator path for MD-style repeated calls (docs/dev/pace-performance-gap.md).
 
 `SkinDenseCalculator` is `ACECalculator(layout="dense")` with what LAMMPS does
 and the ASE calculator does not:

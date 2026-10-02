@@ -105,6 +105,7 @@ nav:
       - "7. The truth about the truth": tutorials/truth-about-the-truth.md
   - Concepts: concepts.md
   - How-to guides:
+      - Build a basis: howto/basis.md
       - Run files (fit.yaml): howto/fit-yaml.md
       - Multi-element fits: howto/multi-element.md
       - ASE calculators: howto/ase.md

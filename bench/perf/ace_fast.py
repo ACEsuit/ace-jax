@@ -1,5 +1,5 @@
 """Prototype: exact, static restructurings of a loaded (folded) `ACEModel` that cut
-its per-edge and A-assembly work (docs/ace-vs-pace-gap.md §4).  Not in src/.
+its per-edge and A-assembly work (docs/dev/ace-vs-pace-gap.md §4).  Not in src/.
 
     from ace_fast import make
     fast = make("prune+lblock+compact+pairfold", model)
