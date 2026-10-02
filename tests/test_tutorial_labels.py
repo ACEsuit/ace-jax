@@ -81,3 +81,17 @@ def test_cache_keys_are_the_written_structures_not_their_rounded_rereads(tmp_pat
     for k in range(40):
         a = bulk("Cu", "fcc", a=3.6, cubic=True); a.rattle(0.03, seed=k); rebuilt.append(a)
     assert all(cache.get(a, "mpa-0") is not None for a in rebuilt)
+
+
+def test_downloaded_caches_with_the_same_file_name_do_not_collide(tmp_path, monkeypatch):
+    # e1/labels-mpa-0.xyz and c/labels-mpa-0.xyz share a basename; each URL needs its own copy
+    srcs = {}
+    for name, s in (("e1", 0.97), ("c", 1.03)):
+        a = bulk("Cu", "fcc", a=3.6 * s, cubic=True)
+        p = tmp_path / name / "labels-mpa-0.xyz"; p.parent.mkdir()
+        L.write_cache(p, L.label([a], model="mpa-0", calculator=EMT()))
+        srcs[f"https://example.org/{name}/labels-mpa-0.xyz"] = (p, a)
+    monkeypatch.setattr(L.pathlib.Path, "home", lambda: tmp_path / "home")
+    monkeypatch.setattr(L.urllib.request, "urlretrieve", lambda url, dst: dst.write_bytes(srcs[url][0].read_bytes()))
+    for url, (_, a) in srcs.items():
+        assert L.LabelCache.from_file(url).get(a, "mpa-0") is not None

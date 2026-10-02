@@ -69,7 +69,9 @@ class LabelCache:
         from ..fit.xyz import read_extxyz
         src = str(path_or_url)
         if src.startswith(("http://", "https://")):
-            local = pathlib.Path.home() / ".cache" / "ace-jax" / "tutorial-labels" / src.rsplit("/", 1)[-1]
+            # keyed on the whole URL: e1/ and c/ ship files with the same name
+            tag = hashlib.sha256(src.encode()).hexdigest()[:16]
+            local = pathlib.Path.home() / ".cache" / "ace-jax" / "tutorial-labels" / f"{tag}-{src.rsplit('/', 1)[-1]}"
             local.parent.mkdir(parents=True, exist_ok=True)
             if not local.exists():
                 urllib.request.urlretrieve(src, local)
