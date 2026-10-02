@@ -305,6 +305,12 @@ def run_case(row, n_atoms, dtype, device, lmp, ranks, workdir, pjrt=None, prev=N
         return out
 
 
+def mpirun_args():
+    """The host's extra mpirun arguments (sweep.HOSTS `mpirun_args`, handed over
+    as BENCH_MPIRUN_ARGS, a JSON list: lestrade binds one rank per P-core)."""
+    return json.loads(os.environ.get("BENCH_MPIRUN_ARGS") or "[]")
+
+
 def _run_lammps(row, style, model, data, work, n_atoms, dtype, device, lmp, ranks, pjrt, steps,
                 warmup, extra, aceplugin=None):
     (work / "in.bench").write_text(lammps_input(style, model, row["elements"], data, device, steps,
@@ -313,11 +319,13 @@ def _run_lammps(row, style, model, data, work, n_atoms, dtype, device, lmp, rank
     if device == "gpu":
         cmd += ["-k", "on", "g", "1", "-sf", "kk", "-pk", "kokkos", *KOKKOS[style].split()]
     elif ranks > 1 and style != "acejax":
-        cmd = ["mpirun", "-np", str(ranks)] + cmd
+        cmd = ["mpirun", "-np", str(ranks), *mpirun_args()] + cmd
     cmd += lammps_vars(style, pjrt, aceplugin)
     out = {"code": row["code"], "mode": "lammps", "model": row["name"], "size": row["size"],
            "system": row["system"], "n_atoms": n_atoms, "device": device, "dtype": dtype,
            "ranks": ranks, "status": "ok", **extra}
+    if cmd[0] == "mpirun" and mpirun_args():
+        out["mpirun_args"] = mpirun_args()
     (work / "log.lammps").unlink(missing_ok=True)
     p = subprocess.run(cmd, cwd=work, capture_output=True, text=True, timeout=3600)
     log = (work / "log.lammps").read_text() if (work / "log.lammps").exists() else p.stdout

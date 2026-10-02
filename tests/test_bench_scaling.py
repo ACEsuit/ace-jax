@@ -1762,3 +1762,89 @@ def test_moriarty_env_json_has_the_acepotentials_keys():
     for k in keys:
         assert f'"{k}": "$' in sh, k
     assert "lmp-ace.sh" in sh and "ace_plugin()" in sh and "julia_env()" in sh
+
+
+# ---- lestrade-cpu: P-cores only ----------------------------------------------
+
+def test_lestrade_cpu_host_runs_on_the_p_cores():
+    """i9-14900K: P-cores are CPUs 0-15 (8 cores x 2 HT), E-cores 16-31.  The
+    sweep pins itself to the P-cores; LAMMPS runs one bound rank per P-core."""
+    from scaling.sweep import cpu_list
+    h = HOSTS["lestrade-cpu"]
+    assert (h["device"], h["n_max"], h["ranks"], h["rss_cap_gb"]) == ("cpu", 32768, 8, 48)
+    assert cpu_list(h["cpus"]) == set(range(16))
+    assert h["mpirun_args"] == ["--bind-to", "core", "--map-by", "core"]
+    codes = {c.code for c in cases("lestrade-cpu")}
+    assert {"acepotentials", "acepotentials-trim", "mlpace", "acejax-ace", "acejax-pace"} <= codes
+    assert all(c.ranks == 8 for c in cases("lestrade-cpu"))
+    assert max(c.n_atoms for c in cases("lestrade-cpu")) == 32768
+
+
+def test_cpu_list_and_label_roundtrip():
+    from scaling.sweep import cpu_label, cpu_list
+    assert cpu_list("0-3,8,10-11") == {0, 1, 2, 3, 8, 10, 11}
+    assert cpu_label({0, 1, 2, 3, 8, 10, 11}) == "0-3,8,10-11"
+    assert cpu_label(set(range(16))) == "0-15" and cpu_label({5}) == "5"
+
+
+def test_pin_affinity_sets_the_host_cpus(monkeypatch):
+    from scaling import sweep
+    got = {}
+    monkeypatch.setattr(sweep.os, "sched_setaffinity", lambda pid, cpus: got.update(cpus=set(cpus)),
+                        raising=False)
+    monkeypatch.setattr(sweep.os, "sched_getaffinity", lambda pid: got.get("cpus", {0, 1}),
+                        raising=False)
+    assert sweep.pin_affinity("lestrade-cpu") == "0-15" and got["cpus"] == set(range(16))
+    got.clear()
+    assert sweep.pin_affinity("moriarty-cpu") == "0-1" and not got     # no `cpus`: untouched
+
+
+def test_runner_hands_lammps_cases_the_host_mpirun_args(monkeypatch):
+    from scaling import sweep
+    seen = []
+    monkeypatch.setattr(sweep, "run_capped", lambda cmd, env, timeout, cap_bytes=None: (
+        seen.append((cmd, env)) or (0, '{"status": "ok"}', "", 0, False)))
+    env = {"lmp": "lmp", "lmp_ace": "/r/lmp-ace.sh", "ace_plugin": "/r/aceplugin.so"}
+    for host, want in (("lestrade-cpu", ["--bind-to", "core", "--map-by", "core"]),
+                       ("moriarty-cpu", None)):
+        run = sweep.subprocess_runner(host, env)
+        cs = sweep.cases(host)
+        run(next(c for c in cs if c.code == "mlpace"))
+        cmd, e = seen[-1]
+        assert cmd[7] == str(HOSTS[host]["ranks"])
+        assert (json.loads(e["BENCH_MPIRUN_ARGS"]) if want else e.get("BENCH_MPIRUN_ARGS")) == want
+        run(next(c for c in cs if c.code == "acepotentials"))
+        assert "BENCH_MPIRUN_ARGS" not in seen[-1][1]                  # standalone: no MPI
+
+
+def test_mpi_case_binds_ranks_with_the_host_mpirun_args(tmp_path, monkeypatch):
+    from scaling import run_lammps
+    seen = []
+    monkeypatch.setattr(run_lammps.subprocess, "run", _fake_lammps(seen))
+    monkeypatch.setenv("BENCH_MPIRUN_ARGS", json.dumps(["--bind-to", "core", "--map-by", "core"]))
+    lib = tmp_path / "libace_SiGe_small.so"
+    lib.write_bytes(b"\x7fELF")
+    row = {**_acepot_rows()["acepotentials-trim"], "trim_lib": str(lib)}
+    out = run_lammps.run_case(row, 256, "float64", "cpu", "/r/lmp-ace.sh", 8, tmp_path / "w",
+                              aceplugin="/r/aceplugin.so")
+    assert seen[-1][:8] == ["mpirun", "-np", "8", "--bind-to", "core", "--map-by", "core",
+                            "/r/lmp-ace.sh"]
+    assert out["mpirun_args"] == ["--bind-to", "core", "--map-by", "core"]
+    monkeypatch.delenv("BENCH_MPIRUN_ARGS")
+    out = run_lammps.run_case(row, 256, "float64", "cpu", "/r/lmp-ace.sh", 8, tmp_path / "w2",
+                              aceplugin="/r/aceplugin.so")
+    assert seen[-1][:4] == ["mpirun", "-np", "8", "/r/lmp-ace.sh"] and "mpirun_args" not in out
+
+
+def test_cpu_rows_record_their_affinity(tmp_path, monkeypatch):
+    from scaling import sweep
+    monkeypatch.setattr(sweep, "affinity", lambda: "0-15")
+    only = lambda c: c.code == "mlpace" and c.n_atoms == 256
+    sweep.run_sweep("lestrade-cpu", lambda c, prev: {"status": "ok"}, tmp_path / "r.jsonl", select=only)
+    rows = [json.loads(l) for l in (tmp_path / "r.jsonl").read_text().splitlines()]
+    assert rows and all(r["cpu_affinity"] == "0-15" and r["host"] == "lestrade-cpu" for r in rows)
+
+
+def test_perf_results_orders_lestrade_after_moriarty():
+    from scaling.perf_results import HOST_ORDER
+    assert HOST_ORDER.index("lestrade-cpu") > HOST_ORDER.index("moriarty-cpu")

@@ -19,6 +19,12 @@ HOSTS = {
     "moriarty-gpu": {"device": "gpu", "n_max": 1 << 20, "ranks": 1, "rss_cap_gb": 48},
     "modal-a100": {"device": "gpu", "n_max": 1 << 21, "ranks": 1},
     "local-cpu": {"device": "cpu", "n_max": 8192, "ranks": 8},
+    # i9-14900K (hybrid): P-cores = logical CPUs 0-15 (8 cores x 2 HT), E-cores 16-31.
+    # P-cores only: the sweep pins itself (and so every case) to `cpus`, so a
+    # standalone case gets 16 threads; LAMMPS runs one MPI rank per P-core,
+    # bound by `mpirun_args` (rank i -> core i = CPUs 2i, 2i+1; Open MPI 4.1)
+    "lestrade-cpu": {"device": "cpu", "n_max": 32768, "ranks": 8, "rss_cap_gb": 48,
+                     "cpus": "0-15", "mpirun_args": ["--bind-to", "core", "--map-by", "core"]},
 }
 MODES = {"acejax-pace": ("standalone", "lammps"), "acejax-ace": ("standalone", "lammps"),
          "mlpace": ("lammps",), "mace": ("standalone", "lammps")}
@@ -118,6 +124,46 @@ def _line(c):
     return (c.model, c.mode, c.dtype, c.device)
 
 
+def cpu_list(spec):
+    """{0, 1, ...} from a taskset-style list: "0-15", "0-3,8,10-11"."""
+    out = set()
+    for part in str(spec).split(","):
+        a, _, b = part.strip().partition("-")
+        out.update(range(int(a), int(b or a) + 1))
+    return out
+
+
+def cpu_label(cpus):
+    """The taskset-style list of a CPU set: {0, ..., 15} -> "0-15"."""
+    out, run = [], []
+    for c in sorted(cpus):
+        if run and c == run[-1] + 1:
+            run.append(c)
+            continue
+        if run:
+            out.append(f"{run[0]}-{run[-1]}" if len(run) > 1 else str(run[0]))
+        run = [c]
+    if run:
+        out.append(f"{run[0]}-{run[-1]}" if len(run) > 1 else str(run[0]))
+    return ",".join(out)
+
+
+def pin_affinity(host):
+    """Pin this process -- and so the gate and every case, which inherit it --
+    to the host's `cpus` (lestrade: the P-cores).  Returns the affinity now in
+    force, as a label, or None where the platform has no sched_setaffinity."""
+    want = HOSTS[host].get("cpus")
+    if not hasattr(os, "sched_setaffinity"):
+        return None
+    if want:
+        os.sched_setaffinity(0, cpu_list(want))
+    return cpu_label(os.sched_getaffinity(0))
+
+
+def affinity():
+    return cpu_label(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else None
+
+
 _DEVICE_NAMES = {}
 
 
@@ -171,6 +217,8 @@ def run_sweep(host, runner, results_path, select=lambda c: True):
             row["retried"], row["first_error"] = True, first
         row["_key"], row["_line"], row["host"] = list(c.key()), list(_line(c)), host
         row["device_name"] = device_name(c.device)
+        if c.device == "cpu":                   # which CPUs it could use (lestrade: P-cores)
+            row["cpu_affinity"] = affinity()
         with results_path.open("a") as f:
             f.write(json.dumps(row) + "\n")
         if row["status"] != "ok":
@@ -255,6 +303,8 @@ def subprocess_runner(host, env):
             e["BENCH_PREV"] = json.dumps({"step_s": prev["step_s"], "n_atoms": prev["n_atoms"],
                                           "layout": prev.get("layout"),
                                           "matrix_overflow": prev.get("matrix_overflow")})
+        if c.mode == "lammps" and HOSTS[host].get("mpirun_args"):    # run_lammps reads it
+            e["BENCH_MPIRUN_ARGS"] = json.dumps(HOSTS[host]["mpirun_args"])
         cap = HOSTS[host].get("rss_cap_gb")
         rc, out, err, peak, capped = run_capped(cmd, e, timeout=7200,
                                                 cap_bytes=cap and cap * 2**30)
@@ -352,6 +402,7 @@ def main(argv=None):
         return
     env = json.loads(_env_path(a.host).read_text())
     env.setdefault("pythonpath", str(here.parent))
+    pin_affinity(a.host)
     if a.gate_rows:                                    # child side of gate_in_subprocess
         from scaling import parity
         for r in parity.gate(a.host, env):
@@ -374,6 +425,8 @@ def main(argv=None):
                 [r["bundle_layout"]] if r.get("bundle_layout") else [])
             r["_line"] = ["parity"]
             r["device_name"] = device_name(r.get("device", "gpu"))
+            if r.get("device") == "cpu":
+                r["cpu_affinity"] = affinity()
         if top_up:
             new = [r for r in new if json.dumps(r["_key"]) not in have]
         with res.open("a") as f:
