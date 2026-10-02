@@ -352,21 +352,24 @@ def _(L, T, cache, calc, mo):
 @app.cell(hide_code=True)
 def _(mo, np, r2, ref_vacancy, vacancy_error):
     _ok = 2.5 < ref_vacancy < 5.0 and np.isfinite(vacancy_error)
-    mo.vstack([
-        mo.callout(
+    mo.callout(
             mo.md(f"**Checkpoint 4 passed:** the labeller's vacancy costs {ref_vacancy:.2f} eV: a few eV, "
                   "the right scale for breaking four bonds in silicon.")
             if _ok else mo.md(f"**Checkpoint 4:** E_vac = {ref_vacancy:.2f} eV is not a few eV: check "
                               "that the bulk energy is scaled by the atom count."),
             kind="success" if _ok else "danger",
-        ),
-        mo.callout(
-            mo.md(f"The bulk fit has **R² = {r2:.6f}**, yet its vacancy formation energy is off by "
-                  f"**{vacancy_error:+.2f} eV**.\n\n"
-                  "**The training RMSE measures interpolation; properties measure the dataset.**"),
-            kind="warn",
-        ),
-    ])
+    )
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo, r2, vacancy_error):
+    mo.callout(
+        mo.md(f"The bulk fit has **R² = {r2:.6f}**, yet its vacancy formation energy is off by "
+              f"**{vacancy_error:+.2f} eV**.\n\n"
+              "**The training RMSE measures interpolation; properties measure the dataset.**"),
+        kind="warn",
+    )
     return
 
 
