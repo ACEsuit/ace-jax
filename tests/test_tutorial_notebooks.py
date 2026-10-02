@@ -1,7 +1,12 @@
 """The school tutorials' cell graphs: each notebook, and the edits its exercises ask for, must
-form a DAG (marimo refuses to run a notebook with a cycle)."""
+form a DAG (marimo refuses to run a notebook with a cycle). marimo is a docs dependency
+(docs/requirements.txt), so the docs CI job runs this file; the test shards skip it."""
 import importlib.util
 import pathlib
+
+import pytest
+
+pytest.importorskip("marimo")
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 NB = ROOT / "docs" / "user" / "tutorials" / "notebooks"

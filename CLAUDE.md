@@ -66,6 +66,7 @@ uv run ruff check                     # lint; `uv run pre-commit run --all-files
   - `fast-neighbours` (matscipy-neighbours): `test_calc_jit`'s native `neighbour_matrix` test and `test_efv`'s dense-vs-neighbour_matrix check; without it the skin list and dense layout also take their fallback neighbour path.
   - `pyace` (python-ace, in its own venv under `pace_ref/`).
   - `sphericart`, `psutil`.
+  - `marimo` (a docs dependency): `test_tutorial_notebooks`, run by the `docs` CI job instead.
   - PACE fixtures.
 - **Test environment variables:**
   - `ACEJAX_REQUIRE_FIXTURES=1` turns a missing-fixture skip into a failure. CI parity jobs set it.
