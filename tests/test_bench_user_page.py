@@ -1,6 +1,8 @@
 """The user docs' Performance page (docs/user/benchmarks.md) and its generator,
-bench/scaling/user_page.py: figure selection, line styles and the 8192-atom table."""
+bench/scaling/user_page.py: figure selection, line styles, the 8192-atom table,
+and that the page's images, snippets and nav entry exist."""
 import pathlib
+import re
 import sys
 
 import pytest
@@ -8,6 +10,7 @@ import pytest
 ROOT = pathlib.Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT / "bench"))
 
+PAGE = ROOT / "docs" / "user" / "benchmarks.md"
 
 
 def _row(code, mode, n, *, host="modal-a100", dtype="float64", system="SiGe", size="medium",
@@ -183,6 +186,29 @@ def test_main_writes_the_figures_and_snippets(up, tmp_path):
         assert (tmp_path / "figs" / f"{name}.png").exists()
     assert "|" in (tmp_path / "snip" / up.TABLE_SNIPPET).read_text()
     assert (tmp_path / "snip" / up.NOTES_SNIPPET).read_text().strip()
+
+
+def test_page_images_and_snippets_exist():
+    text = PAGE.read_text()
+    images = re.findall(r"!\[([^\]]*)\]\(([^)]+)\)", text)
+    assert {pathlib.Path(p).name for _, p in images} >= {
+        "cpu_float64.png", "gpu_float64.png", "gpu_float32.png"}
+    for alt, p in images:
+        assert alt.strip(), p                                       # alt text on every image
+        assert (PAGE.parent / p).exists(), p
+    snippets = re.findall(r'--8<-- "([^"]+)"', text)
+    from scaling import user_page
+    assert {user_page.TABLE_SNIPPET, user_page.NOTES_SNIPPET} <= set(snippets)
+    for s in snippets:
+        assert (ROOT / "docs" / "snippets" / s).exists(), s
+    assert "https://github.com/ACEsuit/ace-jax/blob/main/docs/benchmarks.md" in text
+
+
+def test_nav_has_performance_after_how_to_guides():
+    nav = (ROOT / "mkdocs.yml").read_text().split("\nnav:\n", 1)[1]
+    top = [ln.strip()[2:].split(":")[0] for ln in nav.splitlines() if re.match(r"^  - ", ln)]
+    assert top[top.index("How-to guides") + 1] == "Performance"
+    assert "  - Performance: benchmarks.md" in nav.splitlines()
 
 
 def test_atom_ticks_are_compact(up):

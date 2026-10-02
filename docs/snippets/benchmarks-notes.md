@@ -1,0 +1,4 @@
+- **CPU:** `moriarty-cpu`, Intel(R) Xeon(R) Silver 4216 CPU @ 2.10GHz.
+- **GPU:** `modal-a100`, NVIDIA A100 80GB PCIe, NVIDIA A100-SXM4-80GB.
+- ML-PACE runs only in float64, so it is absent from the float32 figure.
+- MACE in LAMMPS (Symmetrix) evaluates in double whatever the input, so it is shown in float64 only. A MACE line that stops early ran out of memory.

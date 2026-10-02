@@ -109,6 +109,7 @@ nav:
       - PACE .yace models: howto/pace.md
       - Learn the radial basis: howto/learned-radials.md
       - Reproducibility: howto/reproducibility.md
+  - Performance: benchmarks.md
   - Reference:
       - CLI: reference/cli.md
       - Python API: reference/api.md
