@@ -61,10 +61,15 @@ def _atoms_frames(source):
     (what MACE and ASE leave behind) become info energy/stress and arrays forces."""
     from .xyz import Frame
     out = []
-    for a in source:
+    for i, a in enumerate(source):
         info = dict(a.info)
         arrays = {k: np.asarray(v) for k, v in a.arrays.items() if k not in ("numbers", "positions")}
         res = getattr(a.calc, "results", None) or {}
+        if res and hasattr(a.calc, "check_state") and a.calc.check_state(a):
+            # one live calculator attached to several structures holds only the last one's results
+            raise ValueError(f"structure {i}: its calculator's results belong to another structure "
+                             "(one calculator shared across structures?); label each structure with "
+                             "its own SinglePointCalculator or copy the results into info/arrays")
         if "energy" in res or "free_energy" in res:
             info.setdefault("energy", float(res.get("energy", res.get("free_energy"))))
         if "stress" in res:

@@ -71,3 +71,19 @@ def test_load_fit_data_accepts_atoms_lists():
     atoms = _atoms_from_file(12)
     d = load_fit_data(cfg, train=atoms[:8], test=atoms[8:], log=lambda *a: None)
     assert (len(d.train), len(d.test)) == (8, 4)
+
+
+def test_a_calculator_shared_across_structures_is_not_read_as_labels():
+    # `for a in s: a.calc = calc; a.get_forces()` leaves calc.results for the LAST structure
+    # on every one of them; reading those would label each structure with another's results
+    from ase.calculators.emt import EMT
+    calc = EMT()
+    s = [bulk("Cu", "fcc", a=3.6 * x, cubic=True) for x in (0.98, 1.02)]
+    for a in s:
+        a.calc = calc
+        a.get_forces()
+    with pytest.raises(ValueError, match="another structure"):
+        load_configs(s, energy_key="energy", force_key="forces", virial_key=None)
+    one = s[1]                                             # the structure calc last saw: still valid
+    assert load_configs([one], energy_key="energy", force_key="forces", virial_key=None)[0].energy \
+        == pytest.approx(one.get_potential_energy())
