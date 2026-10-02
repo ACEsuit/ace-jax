@@ -6,7 +6,7 @@
 #     "matplotlib>=3.8",
 # ]
 # ///
-"""Tutorial 7: the reference is itself a model choice.
+"""Tutorial 8: the reference is itself a model choice.
 
 Adapted from the MLIP-school-2026 notebook C (ACEsuit/MLIP-school-2026). Run it with
 `uvx marimo edit --sandbox school_truth_si.py`, or as a plain script
@@ -22,7 +22,7 @@ app = marimo.App(width="medium")
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    # Tutorial 7: the truth about the truth
+    # Tutorial 8: the truth about the truth
 
     A fitted potential is judged against its reference labels. But the
     labels came from somewhere: one functional, one code, one set of
@@ -40,7 +40,7 @@ def _(mo):
     3. Refit the same recipe to the other model's labels, and see the answer move.
 
     It uses the fitting steps of
-    [Tutorial 3](https://acesuit.github.io/ace-jax/tutorials/dataset-and-properties/),
+    [Tutorial 4](https://acesuit.github.io/ace-jax/tutorials/dataset-and-properties/),
     and is adapted from notebook C of the
     [MLIP school 2026](https://github.com/ACEsuit/MLIP-school-2026). The surface
     dataset is the recipe a later tutorial on surfaces builds step by step.
@@ -115,7 +115,7 @@ def _(L, T, mo, pathlib):
         _f = f"labels-{_m}.xyz"
         caches[_m] = L.LabelCache.from_file(_here / _f if _here is not None and (_here / _f).exists() else URL + _f)
     structures = T.c_structures()
-    work = pathlib.Path("ace_jax_tutorial_7")
+    work = pathlib.Path("ace_jax_tutorial_8")
     work.mkdir(exist_ok=True)
     return caches, structures, work
 

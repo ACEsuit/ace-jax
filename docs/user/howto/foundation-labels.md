@@ -2,7 +2,7 @@
 
 A foundation model such as [MACE-MPA-0](https://github.com/ACEsuit/mace-foundations)
 can stand in for DFT: label your structures with it, and fit ACE to those
-labels. Tutorials 3, 4 and 7 work this way. This page shows the pieces.
+labels. Tutorials 4, 5 and 8 work this way. This page shows the pieces.
 
 ## Fit labelled `Atoms` directly
 
@@ -86,7 +86,7 @@ the commands.
 
 ## Least squares and the evidence
 
-Two options help to compare fits across basis sizes, as tutorial 4 does:
+Two options help to compare fits across basis sizes, as tutorial 5 does:
 
 - `res.map.log_evidence` is the log marginal likelihood of the training data
   at the fitted hyperparameters. It is comparable across bases fitted to the

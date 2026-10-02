@@ -423,6 +423,9 @@ def _(mo):
     On production-sized data the gain is larger and survives a good start:
     see the learned-radial results in the ace-jax repository
     (`docs/dev/learn-radial-results.md`).
+
+    Next: [Tutorial 3](https://acesuit.github.io/ace-jax/tutorials/multi-element/)
+    fits a five-element alloy and compares two ways of describing the elements.
     """)
     return
 

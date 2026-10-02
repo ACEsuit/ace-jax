@@ -5,6 +5,8 @@ the basis for every species it finds in the training data. This page fits the
 five-component CrMnFeCoNi (Cantor) alloy from 40 small bulk cells labelled by
 the MACE-MH-1 foundation model, then tests it in and out of distribution. It
 takes about four minutes on a CPU.
+[Tutorial 3](../tutorials/multi-element.md) fits the same data in a notebook
+and compares the default categorical basis with species-embedding bases.
 
 ## The data
 

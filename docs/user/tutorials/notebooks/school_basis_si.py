@@ -6,7 +6,7 @@
 #     "matplotlib>=3.8",
 # ]
 # ///
-"""Tutorial 4: basis size, overfitting and the evidence.
+"""Tutorial 5: basis size, overfitting and the evidence.
 
 Adapted from the MLIP-school-2026 notebook E1x (ACEsuit/MLIP-school-2026). Run it with
 `uvx marimo edit --sandbox school_basis_si.py`, or as a plain script
@@ -22,9 +22,9 @@ app = marimo.App(width="medium")
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    # Tutorial 4: basis size, overfitting and the evidence
+    # Tutorial 5: basis size, overfitting and the evidence
 
-    In [Tutorial 3](https://acesuit.github.io/ace-jax/tutorials/dataset-and-properties/)
+    In [Tutorial 4](https://acesuit.github.io/ace-jax/tutorials/dataset-and-properties/)
     a near-perfect fit got a vacancy wrong because the data did not cover the
     question. This time the data covers the question, and the risk is the model:
     how large a basis can 200 silicon structures support?
@@ -79,7 +79,7 @@ def _(mo):
     ## Step 1: the data and a test set
 
     `reference.xyz` holds 250 rattled and strained bulk silicon cells (8 and
-    16 atoms) from the MLIP school, labelled with MACE-MPA-0 (see Tutorial 3)
+    16 atoms) from the MLIP school, labelled with MACE-MPA-0 (see Tutorial 4)
     under the keys `energy`, `forces` and `virial`. Nothing here labels
     anything new.
 
@@ -93,7 +93,7 @@ def _(mo):
 def _(mo, np, pathlib, read, urllib):
     URL = ("https://raw.githubusercontent.com/ACEsuit/ace-jax/main/"
            "docs/user/tutorials/data/school/e1x/reference.xyz")
-    work = pathlib.Path("ace_jax_tutorial_4")
+    work = pathlib.Path("ace_jax_tutorial_5")
     work.mkdir(exist_ok=True)
     _local = (mo.notebook_dir() / "../data/school/e1x/reference.xyz") if mo.notebook_dir() else None
     data_file = work / "reference.xyz"
@@ -124,7 +124,7 @@ def _(mo):
       error of energies, forces and virials, with weights 30, 1 and 1 (the
       ACEpotentials defaults) and nothing else. This is what the school's
       workbench did.
-    - **the evidence fit** (the default, as in Tutorials 1 and 3): Bayesian
+    - **the evidence fit** (the default, as in Tutorials 1 and 4): Bayesian
       linear regression with a smoothness prior on the coefficients, its noise
       levels and prior scale chosen by maximising the evidence $p(\text{data}
       \mid \text{basis})$.
@@ -319,7 +319,7 @@ def _(mo):
       bases fitted to the same data, and its maximum picks a basis size from
       the training data alone.
 
-    Next: [Tutorial 7](https://acesuit.github.io/ace-jax/tutorials/truth-about-the-truth/)
+    Next: [Tutorial 8](https://acesuit.github.io/ace-jax/tutorials/truth-about-the-truth/)
     asks where the reference labels themselves come from.
     """)
     return

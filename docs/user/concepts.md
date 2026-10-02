@@ -92,6 +92,7 @@ number of elements. `aj fit --basis-embedding <table.json>` (or
 basis, where the neighbour species enters through a frozen embedding vector
 (for example taken from a MACE model) and `--d-max` caps the channel widths.
 `identity` in place of a table uses a one-hot embedding.
+[Tutorial 3](tutorials/multi-element.md) compares the two on a five-element alloy.
 
 ## Fitting: Bayesian linear regression
 

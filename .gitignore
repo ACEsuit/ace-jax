@@ -19,6 +19,7 @@ site/
 # tutorial pages rendered from the notebooks by docs/build_tutorials.py
 docs/user/tutorials/first-fit.md
 docs/user/tutorials/learned-radials.md
+docs/user/tutorials/multi-element.md
 docs/user/tutorials/dataset-and-properties.md
 docs/user/tutorials/basis-and-evidence.md
 docs/user/tutorials/truth-about-the-truth.md
