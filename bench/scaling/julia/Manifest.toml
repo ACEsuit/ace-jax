@@ -33,8 +33,8 @@ version = "0.3.1"
 
 [[deps.ACEpotentials]]
 deps = ["ACEfit", "ArgParse", "AtomsBase", "AtomsBuilder", "AtomsCalculators", "AtomsCalculatorsUtilities", "BenchmarkTools", "Bumper", "ChainRulesCore", "ChunkSplitters", "ConcreteStructs", "DecoratedParticles", "DynamicPolynomials", "EmpiricalPotentials", "EquivariantTensors", "ExtXYZ", "Folds", "ForwardDiff", "Interpolations", "JSON", "LazyArtifacts", "LinearAlgebra", "Lux", "LuxCore", "NamedTupleTools", "NeighbourLists", "OffsetArrays", "Optim", "Optimisers", "OrderedCollections", "PackageCompiler", "Pkg", "Polynomials4ML", "PrettyTables", "Random", "Reexport", "Roots", "SparseArrays", "SpheriCart", "StaticArrays", "StaticPolynomials", "StrideArrays", "TOML", "Unitful", "WithAlloc", "YAML", "Zygote"]
-git-tree-sha1 = "84653a147a870ec3e196fe51ae5f321a1401c4d1"
-repo-rev = "b28a5a8c3c3c25fe9d3193e6ae06628103b992d1"
+git-tree-sha1 = "a3b814797abb8a4234bd72741459a997d7a8da86"
+repo-rev = "v0.10.2"
 repo-url = "https://github.com/ACEsuit/ACEpotentials.jl"
 uuid = "3b96b61c-0fcc-4693-95ed-1ef9f35fcc53"
 version = "0.10.2"

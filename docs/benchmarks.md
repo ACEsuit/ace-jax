@@ -82,7 +82,7 @@ same-container measurements are in `docs/learned-radial-splining.md`.
 
 **ACEpotentials.jl.** Both lines run the linear ACE models the ace-jax
 `acejax-ace` line runs, rebuilt in a pinned Julia 1.12 env
-(`bench/scaling/julia/`, ACEpotentials.jl PR 309): every run rebuilds the
+(`bench/scaling/julia/`, ACEpotentials.jl v0.10.2): every run rebuilds the
 `ace1_model` with the seed the `.npz` was built with and checks it identical
 to the `.npz` (bases, A2B map, spline tables, weights, and energy, forces and
 virial on the `.npz`'s test structure), failing rather than timing another

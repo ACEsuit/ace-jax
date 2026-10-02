@@ -89,7 +89,8 @@ ACEPOT_JULIA="$HOME/.juliaup/bin/julia +1.12.6" ACEPOT_JULIA_DEPOT=/storage/eng/
 ```
 
 - `julia_env` instantiates `bench/scaling/julia` (Julia 1.12.6, ACEpotentials.jl
-  PR 309 at b28a5a8) in its own depot, `/storage/eng/essswb/cache/julia-pr309`.
+  v0.10.2, the release that merged PR 309, from git until it reaches General)
+  in its own depot, `/storage/eng/essswb/cache/julia-pr309`.
   Never the default `~/.julia`: every Julia call passes `JULIA_DEPOT_PATH` and
   `--startup-file=no`.
 - `ace_plugin` builds the PR's `export/lammps/plugin` (from `pkgdir(ACEpotentials)`)
