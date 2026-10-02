@@ -337,7 +337,9 @@ The force uncertainty has a shape and two scales (mathematics:
   `--ard-coverage` (default 0.9): `|F_err| <= forces_q` with that probability for atoms
   exchangeable with the group's calibration configurations (with `--force-shape aniso` the score is
   Mahalanobis and `forces_q_mahal` is also available). Scores come from a stratified
-  hold-out (`--ard-val-frac`) scored with the hold-out posterior.
+  hold-out (`--ard-val-frac`) scored with the hold-out posterior, then carried to the served posterior
+  by (N/N_fit)^β, with β fitted per run from a second, smaller hold-out fit and clipped to [0, ½]
+  (`--ard-transfer exponent`, the default; `sqrt` fixes β = ½, `none` β = 0).
 - **Groups.** 8 Mondrian groups = 4 distortion bands x [coordination = modal]
   (`--ard-groups distortion|none`); groups with fewer than `--ard-n-min` (default 20)
   calibration configurations borrow from a neighbour (the threshold rises to ⌈(1−α)/α⌉, e.g. 99 at

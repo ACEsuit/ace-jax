@@ -31,9 +31,10 @@ def test_config_validates_ard():
     assert (c.ard_force_shape, c.ard_coverage, c.ard_groups, c.ard_cluster_size, c.ard_press, c.ard_n_min,
             c.ard_support, c._shape_variant, c._score_source) == ("iso", 0.9, "distortion", 3.0, "exact", 20,
                                                                   True, "press", "fit")
+    assert c.ard_transfer == "exponent"
     for field, bad in (("ard_force_shape", "x"), ("ard_groups", "x"), ("ard_press", "x"),
                        ("_shape_variant", "x"), ("_score_source", "x"), ("ard_coverage", 1.0),
-                       ("ard_n_min", 0), ("ard_cluster_size", 0.0)):
+                       ("ard_n_min", 0), ("ard_cluster_size", 0.0), ("ard_transfer", "x")):
         with pytest.raises(ValueError, match=field):
             _cfg(**{field: bad}).validate()
     with pytest.raises(ValueError, match="ard_shape_eps"):         # m4: eps 0 can make the Mahalanobis solve singular

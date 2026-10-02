@@ -61,6 +61,7 @@ class FitConfig:
     ard_cluster_size: float = 3.0        # sandwich block side, x r_cut (inf: whole configurations)
     ard_press: str = "exact"             # "exact" | "block" PRESS correction of the jackknife scores
     ard_shape_tau: float = 1.0           # fraction of sum sigma^2 kept in the shape factor R
+    ard_transfer: str = "exponent"       # hold-out -> served scale: "exponent" (per-fit beta) | "sqrt" | "none"
     ard_n_min: int = 20                  # groups with fewer T_val configurations borrow a neighbour's scales
     ard_support: bool = True             # covariate-shift support flag (diagnostic)
     ard_support_max_atoms: int = 50000
@@ -102,7 +103,8 @@ class FitConfig:
             if not 0.0 < self.ard_val_frac < 1.0:
                 raise ValueError(f"ard_val_frac must be in (0, 1), got {self.ard_val_frac}")
             for name, ok in (("ard_force_shape", ("iso", "aniso")), ("ard_groups", ("distortion", "none")),
-                             ("ard_press", ("exact", "block")), ("_shape_variant", ("press", "legacy")),
+                             ("ard_press", ("exact", "block")), ("ard_transfer", ("exponent", "sqrt", "none")),
+                             ("_shape_variant", ("press", "legacy")),
                              ("_score_source", ("fit", "mixed"))):
                 if getattr(self, name) not in ok:
                     raise ValueError(f"{name} must be one of {ok}, got {getattr(self, name)!r}")

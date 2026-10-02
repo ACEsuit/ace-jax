@@ -295,9 +295,27 @@ parameter variance, scaling roughly as $1/N$, whereas the error is dominated by 
 error ($\lambda^2\approx39$ on bench365). The ratio of squared error to shape is therefore
 unchanged only if the error is variance-dominated; if it is bias-dominated, $\lambda^2$ grows
 roughly in proportion to $N$, and the hold-out scale underestimates the served one by up to
-$(1-f)^{-1/2}$. This is an empirical assumption. It is checked by repeating the protocol at
-$f\in\{0.1,0.2,0.3\}$. If $\lambda_g$ trends with $N_{\mathrm{fit}}$ by more than a few per
-cent, fit $\log\lambda_g$ against $\log N_{\mathrm{fit}}$ and extrapolate to $N=|T|$.
+$(1-f)^{-1/2}$. Writing $\lambda\propto N^{\beta}$, the variance-dominated limit is $\beta=0$ and
+the bias-dominated one $\beta=\tfrac12$.
+
+\paragraph{Transfer exponent.} The served scale replaces the uncorrected hold-out scale by an
+extrapolation in $N$ estimated in every fit. $T_{\mathrm{fit}}$ is split again by the same
+stratified rule into $T_{\mathrm{fit2}}$, with $N_{\mathrm{fit2}}\approx(1-f)N_{\mathrm{fit}}$
+configurations. A second hold-out posterior $P_{\mathrm{fit2}}$ is fitted on it, with its own
+jackknife shape, and scores the same $T_{\mathrm{val}}$ atoms. Let $\lambda_1$ and $\lambda_2$ be
+the configuration-weighted rms scales of the $P_{\mathrm{fit}}$ and $P_{\mathrm{fit2}}$ scores,
+pooled over all groups with the weights of Section~\ref{sec:scale}. Then
+\[
+  \hat\beta=\frac{\log(\lambda_1/\lambda_2)}{\log(N_{\mathrm{fit}}/N_{\mathrm{fit2}})},\qquad
+  \beta=\min\bigl(\max(\hat\beta,0),\tfrac12\bigr),\qquad
+  t=(N/N_{\mathrm{fit}})^{\beta},
+\]
+and every calibration score is multiplied by $t$ before the per-group scales are formed. The clip
+keeps $\beta$ between the two limits above, and a clip is reported. One pooled $\beta$ serves
+all groups. On bench365 the $f$ sweep gives $\log\lambda\propto0.37\log N_{\mathrm{fit}}$, and
+$(3680/2944)^{0.37}=1.086$ matches the served rms-$z$ deficit of $1.087$. The cost is one more evidence fit and jackknife
+shape on about $(1-f)^2|T|$ configurations. It is still checked by repeating the protocol at
+$f\in\{0.1,0.2,0.3\}$.
 
 \prev{a test-set refit of the scale changed it by $\times0.968$, i.e.\ the served $\sigma$ was very
 slightly conservative, not the up-to-$\times1.12$ underestimate the bias-dominated limit allows at
@@ -533,8 +551,8 @@ Measure:
 \item \textbf{Exchangeability at configuration level, within a group.} The coverage statement is
 approximate, with error controlled by $\ncfg$. $\ncfg$ and the merges are reported.
 \item \textbf{Transfer} from the hold-out model to the served model (Section~\ref{sec:scores}). This is an
-empirical assumption, exact only if the error is variance-dominated. It is checked across $f$, and
-extrapolated in $N_{\mathrm{fit}}$ if it trends.
+empirical assumption. The per-fit exponent extrapolates the scale from two hold-out sizes to $|T|$,
+assuming a power law in $N$ with exponent in $[0,\tfrac12]$. It is checked across $f$.
 \item \textbf{The shape is a parameter variance used as a proxy for where approximation error is large.}
 $v(x)$ measures how much the prediction at $x$ depends on which clusters were in the fit, not the
 approximation error itself. The Spearman $\rho=0.30$--$0.37$ measures only how well the one ranks the

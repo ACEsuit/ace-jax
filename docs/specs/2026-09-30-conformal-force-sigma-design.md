@@ -111,10 +111,23 @@ other than the bench-only ablation switches (Decision 7).
    chosen `force_shape` mode.
 4. **Served posterior.** Refit on T to get P. Build its clusters, PRESS scores, centred Q̃ and stored
    factor R.
-5. **Scales.** Per-group λ_g^rms and q_g from the T_val scores. κ is still reported, and so is the
-   old scalar λ, computed from the new scores for comparison only.
-6. **Report:** `ard.json` gains `shape` (mode, ℓ, K, the rank of R, the leverage summary),
-   `groups` (the table), `split` (strata counts), and `transfer` (f, N_fit).
+5. **Transfer exponent** (`--ard-transfer exponent`, the default). Split T_fit again by the same
+   stratified rule (fraction f, seed + 1) into T_fit2 (N_fit2 ≈ (1−f)N_fit configurations) and an
+   unused rest. Fit P_fit2 on T_fit2 exactly as P_fit (evidence fit started from h_fit, its own
+   clusters and PRESS shape), score the same T_val atoms, and free it before the refit. From the
+   pooled configuration-weighted scales λ1 (P_fit scores) and λ2 (P_fit2 scores) over the T_val atoms
+   both inform, β_raw = log(λ1/λ2) / log(N_fit/N_fit2) and β = clip(β_raw, 0, ½); the clip is logged
+   as a WARNING, and an undefined β_raw falls back to ½. Every stored score is multiplied by
+   t = (N/N_fit)^β before step 6, so λ_g^rms, q_g, the stored `cal` scores (and so later
+   `aj calibrate` pooling with scores against P) are on the served posterior's scale. This replaces the
+   uncorrected hold-out scale (β = 0, `--ard-transfer none`); `sqrt` fixes β = ½ (the bias-dominated
+   bound of §7) without the second fit. The legacy `_score_source="mixed"` ablation already scores
+   against P and always uses `none`.
+6. **Scales.** Per-group λ_g^rms and q_g from the transferred T_val scores. κ is still reported, and
+   so is the old scalar λ, computed from the new (untransferred) scores for comparison only.
+7. **Report:** `ard.json` gains `shape` (mode, ℓ, K, the rank of R, the leverage summary),
+   `groups` (the table), `split` (strata counts), and `transfer` (f, N_fit, N, method, N_fit2, λ1,
+   λ2, β_raw, β, factor).
 
 ### 5. `ARDPosterior` schema 3 — `fit/ard.py`
 
@@ -243,8 +256,9 @@ Methods:
 
 ## Risks
 
-- **Transfer is empirical** (§7). If the error is bias-dominated, the hold-out scale is low by up to
-  (1−f)^−½. Validation item 3 measures this.
+- **Transfer is empirical** (§7). If the error is bias-dominated, the uncorrected hold-out scale is
+  low by up to (1−f)^−½. The per-fit exponent (§4 step 5) corrects for it, extrapolating λ in N from
+  two hold-out sizes; validation item 3 measures what remains (bench365: β ≈ 0.37 from the f sweep).
 - **Small n_cfg** in the extreme groups merges them away from the tip, so the tip quantile is shared
   with less extreme atoms. The per-group table makes this visible.
 - **The shape is a parameter-variance proxy** for approximation error (§14); ρ measures how well it

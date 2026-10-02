@@ -339,7 +339,8 @@ def test_ard_stage_reuses_cached_full_statistics(monkeypatch):
         v_got, g_got = ev_got.value_and_grad(ref.posterior.h)
         p_ref = ard.predict_ard(ref.posterior, b.prob, d.ds_test)
         p_got = ard.predict_ard(got.posterior, b.prob, d.ds_test)
-    assert n_recompute == 2 and len(calls) == 1          # the subset only: the full refit reused the cache
+    # the two hold-out subsets (P_fit and the transfer exponent's P_fit2) only: the full refit reused the cache
+    assert n_recompute == 3 and len(calls) == 2
     # the ~1e-15 summation-order difference, through cond(S) ~ 1e13, moves the evidence by ~1e-7 nats
     # and L-BFGS's stopping point along flat directions by ~1e-4: equal to the optimiser's resolution
     assert abs(v_got - v_ref) < 1e-6 and np.abs(g_got - g_ref).max() < 1e-5
@@ -718,6 +719,36 @@ def test_stage_legacy_ablation_variant():
     post = res.posterior
     assert post.R is None and post.Q is not None and res.report["transfer"]["score_source"] == "mixed"
     assert np.isfinite(post.group_table["q"]).all()
+    # the mixed scores are already against the served posterior: no transfer, whatever was asked for
+    tr = res.report["transfer"]
+    assert tr["method"] == "none" and tr["requested"] == "exponent" and tr["factor"] == 1.0
+
+
+def test_stage_transfer_exponent_scales_the_none_run():
+    """ard_transfer: every stored calibration score (so lam_rms, q, cal scores) is the "none" run's times
+    t = (N/N_fit)^beta -- the same seed gives the same T_val and P_fit; "sqrt" has beta = 1/2 exactly."""
+    from ace_jax.fit.conformal import json_safe
+    import json
+    runs = {m: _stage(ard_transfer=m, **_FINITE_Q)[1] for m in ("none", "exponent", "sqrt")}
+    t0 = runs["none"].report["transfer"]
+    N, N_fit = t0["N"], t0["N_fit"]
+    assert t0["method"] == "none" and t0["factor"] == 1.0 and t0["beta"] == 0.0 and t0["N_fit2"] is None
+    te, ts = runs["exponent"].report["transfer"], runs["sqrt"].report["transfer"]
+    assert set(te) >= {"method", "N_fit2", "lam1", "lam2", "beta_raw", "beta", "factor", "f", "N_fit", "N"}
+    assert te["method"] == "exponent" and 0 < te["N_fit2"] < N_fit
+    assert 0.0 <= te["beta"] <= 0.5 and te["factor"] > 1.0              # non-trivial on this fixture
+    assert te["factor"] == pytest.approx((N / N_fit) ** te["beta"], rel=1e-12)
+    assert te["lam1_all"] == pytest.approx(t0["lam1"], rel=1e-12)        # same T_val scores from P_fit
+    assert ts["factor"] == pytest.approx((N / N_fit) ** 0.5, rel=1e-15) and ts["beta"] == 0.5
+    tab0 = runs["none"].posterior.group_table
+    for m in ("exponent", "sqrt"):
+        f = runs[m].report["transfer"]["factor"]
+        tab, cal = runs[m].posterior.group_table, runs[m].posterior.cal
+        np.testing.assert_allclose(tab["lam_rms"], np.asarray(tab0["lam_rms"]) * f, rtol=1e-10)
+        np.testing.assert_allclose(tab["q"], np.asarray(tab0["q"]) * f, rtol=1e-6)
+        np.testing.assert_allclose(tab["r"], tab0["r"], rtol=1e-6)
+        np.testing.assert_allclose(cal["scores"], runs["none"].posterior.cal["scores"] * f, rtol=1e-6)
+        json.dumps(json_safe(runs[m].report), allow_nan=False)          # ard.json stays strict JSON
 
 
 def test_stage_groups_none_is_two_groups():

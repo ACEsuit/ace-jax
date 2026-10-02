@@ -87,6 +87,10 @@ def _add_fit_args(p):
                    help="ard: sandwich block side in units of r_cut ('inf': whole configurations)")
     p.add_argument("--ard-press", choices=["exact", "block"], default="exact",
                    help="ard: PRESS correction of the jackknife scores (exact: per-cluster solve; block: block approximation)")
+    p.add_argument("--ard-transfer", choices=["exponent", "sqrt", "none"], default="exponent",
+                   help="ard: carry the hold-out scales to the served posterior by (N/N_fit)^beta -- exponent: "
+                        "beta fitted per run from a second, smaller hold-out fit (clipped to [0, 1/2]); "
+                        "sqrt: beta = 1/2; none: beta = 0")
     p.add_argument("--ard-n-min", type=int, default=20,
                    help="ard: groups with fewer configurations borrow a neighbouring group's scales")
     p.add_argument("--no-ard-support", action="store_true",
@@ -139,7 +143,7 @@ def _fit_config(a):
         nuts_chains=a.nuts_chains, uq=a.uq, ard_mode=a.ard_mode, ard_variance=a.ard_variance, ard_val_frac=a.ard_val_frac,
         ard_force_shape=a.force_shape, ard_coverage=a.ard_coverage, ard_groups=a.ard_groups,
         ard_cluster_size=a.ard_cluster_size, ard_press=a.ard_press, ard_n_min=a.ard_n_min,
-        ard_support=not a.no_ard_support,
+        ard_transfer=a.ard_transfer, ard_support=not a.no_ard_support,
         predict_train=False, pops_ridge=ridge,
         predict_stats="recompute", pf_samples=16, pf_maxiter=15)
     return cfg.validate()

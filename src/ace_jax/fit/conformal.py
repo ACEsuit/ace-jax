@@ -155,6 +155,61 @@ class GroupTable:
                    [list(m) for m in d["merged"]], list(d.get("sources", [])))
 
 
+def config_weights(groups, cfg, G):
+    """Atom weights 1/n_{c,g}: each (configuration, group) cell weighs one in total."""
+    _, inv, cnt = np.unique(np.asarray(cfg) * G + np.asarray(groups), return_inverse=True, return_counts=True)
+    return 1.0 / cnt[inv]
+
+
+def _weighted_lam(s, w):
+    return float(np.sqrt(np.sum(w * s ** 2) / (3 * np.sum(w))))
+
+
+def pooled_lam_rms(scores, groups, cfg, G):
+    """The configuration-weighted rms scale pooled over every (c, g): sum w s^2 / (3 sum w), w = 1/n_{c,g}
+    -- group_scales' all-groups lam_rms."""
+    s = np.asarray(scores, float)
+    return _weighted_lam(s, config_weights(groups, cfg, G)) if len(s) else np.nan
+
+
+BETA_MAX = 0.5        # bias-dominated limit: lam^2 ~ N when e^2 is flat and v ~ 1/N (the (1 - f)^-1/2 bound)
+
+
+def transfer_fixed(method, lam1, N, N_fit):
+    """report["transfer"] entries of a fixed exponent: "sqrt" beta = 1/2, "none" beta = 0 (no second fit)."""
+    beta = {"sqrt": BETA_MAX, "none": 0.0}[method]
+    return {"method": method, "N_fit2": None, "lam1": float(lam1), "lam2": None, "beta_raw": None,
+            "beta": beta, "factor": float((N / N_fit) ** beta) if beta else 1.0}
+
+
+def transfer_exponent(lam1, lam2, N, N_fit, N_fit2, log=print):
+    """The per-fit transfer exponent from two hold-out posteriors scored on the same T_val: lam1 from P_fit
+    (N_fit configs), lam2 from P_fit2 (N_fit2 < N_fit): beta_raw = log(lam1/lam2) / log(N_fit/N_fit2),
+    beta = clip(beta_raw, 0, 1/2), factor t = (N/N_fit)^beta carries the hold-out scale to the served
+    posterior on all N.  An undefined beta_raw (N_fit2 = N_fit, a non-finite or non-positive scale) falls
+    back to the conservative (bias-dominated) bound beta = 1/2; a clip or that fallback is logged as a
+    WARNING.  beta = 0 is the variance-dominated limit (e^2 and v both ~ 1/N)."""
+    with np.errstate(divide="ignore", invalid="ignore"):
+        raw = float(np.log(lam1 / lam2) / np.log(N_fit / N_fit2)) if N_fit2 < N_fit else np.nan
+    if not np.isfinite(raw):
+        beta = BETA_MAX
+        log(f"WARNING: ARD transfer: exponent undefined (lam_fit {lam1:.4g} with N {N_fit}, lam_fit2 "
+            f"{lam2:.4g} with N {N_fit2}); using the bias-dominated bound beta = {BETA_MAX}")
+    else:
+        beta = float(np.clip(raw, 0.0, BETA_MAX))
+    factor = float((N / N_fit) ** beta)
+    log(f"ARD transfer: lam_fit {lam1:.4g} (N {N_fit}), lam_fit2 {lam2:.4g} (N {N_fit2}), "
+        f"beta_raw {raw:.3g} -> beta {beta:.3g}, factor {factor:.4g}")
+    if np.isfinite(raw) and raw != beta:
+        why = ""
+        if raw < 0 and lam2 >= lam1 * (1 + 1e-3):
+            why = (f": lam_fit2 {lam2:.4g} >= lam_fit {lam1:.4g}, the hold-out scale shrinks with more data "
+                   f"(expected to grow or stay flat: noise in the two estimates?)")
+        log(f"WARNING: ARD transfer: beta_raw {raw:.3g} outside [0, {BETA_MAX}], clipped to {beta:.3g}{why}")
+    return {"method": "exponent", "N_fit2": int(N_fit2), "lam1": float(lam1), "lam2": float(lam2),
+            "beta_raw": raw, "beta": beta, "factor": factor}
+
+
 def group_scales(scores, groups, cfg, G, alpha, n_min, src=None, log=None):
     """Configuration-weighted per-group lam_rms and pooled-CDF q (atom weights 1/n_{c,g}).  Groups below
     effective_n_min(n_min, alpha) configurations take the nearest qualifying band's values (same z-flag,
@@ -166,14 +221,13 @@ def group_scales(scores, groups, cfg, G, alpha, n_min, src=None, log=None):
     src per atom: 0 = T_val, >= 1 = a calibrate set (composition counts only)."""
     s, g, c = np.asarray(scores, float), np.asarray(groups), np.asarray(cfg)
     src = np.zeros(len(s), int) if src is None else np.asarray(src)
-    _, inv, cnt = np.unique(c * G + g, return_inverse=True, return_counts=True)
-    w = 1.0 / cnt[inv]
+    w = config_weights(g, c, G)
 
     def stats(m):
         nc = len(np.unique(c[m]))
         if nc == 0:
             return np.nan, np.inf, 0
-        return float(np.sqrt(np.sum(w[m] * s[m] ** 2) / (3 * np.sum(w[m])))), _pooled_q(s[m], w[m], alpha, nc), nc
+        return _weighted_lam(s[m], w[m]), _pooled_q(s[m], w[m], alpha, nc), nc
 
     lam, q, ncfg = np.full(G, np.nan), np.full(G, np.inf), np.zeros(G, int)
     nval, ncal, nat = np.zeros(G, int), np.zeros(G, int), np.zeros(G, int)

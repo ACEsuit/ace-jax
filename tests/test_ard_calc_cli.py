@@ -406,14 +406,17 @@ def test_fit_flags_map_to_config():
     a = _parser().parse_args(["fit", "--model", "m.npz", "--data", "d.xyz", "--r0", "2.3", "--out", "o",
                               "--uq", "ard", "--m-per-species", "0", "--force-shape", "aniso",
                               "--ard-coverage", "0.8", "--ard-groups", "none", "--ard-cluster-size", "inf",
-                              "--ard-press", "block", "--ard-n-min", "7", "--no-ard-support"])
+                              "--ard-press", "block", "--ard-n-min", "7", "--no-ard-support",
+                              "--ard-transfer", "sqrt"])
     c = _fit_config(a)
     assert (c.ard_force_shape, c.ard_coverage, c.ard_groups, c.ard_press, c.ard_n_min, c.ard_support) == \
         ("aniso", 0.8, "none", "block", 7, False)
+    assert c.ard_transfer == "sqrt"
     assert c.ard_cluster_size == float("inf")
     d = _fit_config(_parser().parse_args(["fit", "--model", "m.npz", "--data", "d.xyz", "--r0", "2.3", "--out", "o"]))
     assert (d.ard_force_shape, d.ard_coverage, d.ard_groups, d.ard_press, d.ard_n_min, d.ard_support) == \
         ("iso", 0.9, "distortion", "exact", 20, True)
+    assert d.ard_transfer == "exponent"
 
 
 def test_calibrate_per_group_keeps_support_consistent(fitted, calib_set, tmp_path):
@@ -487,7 +490,7 @@ def test_resolved_yaml_records_ard_flags_and_roundtrips(tmp_path):
     from ace_jax.cli import _fit_config, _parse, main
     out = tmp_path / "r"
     ard = ["--force-shape", "aniso", "--ard-coverage", "0.8", "--ard-groups", "none", "--ard-cluster-size",
-           "inf", "--ard-press", "block", "--ard-n-min", "5", "--no-ard-support"]
+           "inf", "--ard-press", "block", "--ard-n-min", "5", "--no-ard-support", "--ard-transfer", "none"]
     assert main(["fit", "--model", str(FIXTURE_DIR / "si_fitted.npz"), "--data", str(XYZ), "--ntrain", "30",
                  "--ntest", "8", "--energy-key", "dft_energy", "--force-key", "dft_force", "--virial-key",
                  "dft_virial", "--m-per-species", "0", "--uq", "ard", "--opt", "lbfgs", "--map-steps", "5",
@@ -495,12 +498,12 @@ def test_resolved_yaml_records_ard_flags_and_roundtrips(tmp_path):
     d = yaml.safe_load((out / "fit.yaml").read_text())
     assert (d["force_shape"], d["ard_coverage"], d["ard_groups"], d["ard_press"], d["ard_n_min"]) == \
         ("aniso", 0.8, "none", "block", 5)
-    assert d["ard_cluster_size"] == float("inf") and d["no_ard_support"] is True
+    assert d["ard_cluster_size"] == float("inf") and d["no_ard_support"] is True and d["ard_transfer"] == "none"
     a = _parse(["fit", "--config", str(out / "fit.yaml")])
     b = _parse(["fit", "--model", str(FIXTURE_DIR / "si_fitted.npz"), "--data", str(XYZ), "--r0", "2.35",
                 "--out", "x", "--uq", "ard", "--m-per-species", "0", *ard])
     keys = ("ard_force_shape", "ard_coverage", "ard_groups", "ard_cluster_size", "ard_press", "ard_n_min",
-            "ard_support")
+            "ard_support", "ard_transfer")
     ca, cb = _fit_config(a), _fit_config(b)
     assert all(getattr(ca, k) == getattr(cb, k) for k in keys) and ca.ard_support is False
     # default fit: the negative flag is written false, and reads back as support on
@@ -510,7 +513,7 @@ def test_resolved_yaml_records_ard_flags_and_roundtrips(tmp_path):
                  "dft_virial", "--m-per-species", "0", "--uq", "ard", "--opt", "lbfgs", "--map-steps", "5",
                  "--configs-per-batch", "4", "--r0", "2.35", "--out", str(out2)]) == 0
     d2 = yaml.safe_load((out2 / "fit.yaml").read_text())
-    assert d2["no_ard_support"] is False and d2["ard_cluster_size"] == 3.0
+    assert d2["no_ard_support"] is False and d2["ard_cluster_size"] == 3.0 and d2["ard_transfer"] == "exponent"
     assert _fit_config(_parse(["fit", "--config", str(out2 / "fit.yaml")])).ard_support is True
 
 

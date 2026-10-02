@@ -601,6 +601,35 @@ def _ard_fit_warnings(stage, info, names):
     return out
 
 
+def _holdout_posterior(cfg, data, prob, theta, configs, body_col, ell, h0=None, stage="fit-subset", log=print):
+    """A hold-out posterior on the training subset `configs` with its own shape (PRESS jackknife R, the
+    legacy sandwich Q, or none for ard_variance "kappa" / the "mixed" ablation).  h0: the evidence fit's
+    start (default the prior's).  Returns (post, h, logev, info, K, h_names)."""
+    from .clusters import row_clusters
+    from .data import build_dataset
+    from .jackknife import press_scores, shape_factor
+    mode = cfg.ard_mode
+    ds = build_dataset(configs, data.meta, data.E0, cfg.batch, pack=cfg.pack_mode, log=log)
+    ev = ARDEvidence(ard_statistics(theta, prob, ds, mode), np.asarray(prob.gamma), body_col)
+    names = (["log_sigma_E", "log_sigma_F", "log_sigma_V"] if ev.joint else []) + [f"a_{g}body" for g in ev.groups]
+    h, v, info = fit_ard(ev, ev.h0(theta) if h0 is None else h0, cfg.ard_cond_max)
+    for w in _ard_fit_warnings(stage, info, names):
+        log(w)
+    post = ard_posterior(ev, h, 1.0, data.meta)
+    K = 0
+    if cfg.ard_variance == "sandwich" and cfg._score_source == "fit":
+        if cfg._shape_variant == "press":
+            rc, K = row_clusters(ds, configs, ell)
+            Gs, _ = press_scores(post, prob, ds, rc, K, ev.sigmas(h), mode=cfg.ard_press)
+            post = post._replace(R=shape_factor(post, Gs, cfg.ard_shape_tau))
+        else:
+            Gs = sandwich_scores(post, prob, ds, ev.sigmas(h))
+            K = int(Gs.shape[1])
+            post = post._replace(Q=sandwich_factor(post, Gs))
+        del Gs
+    return post, h, v, info, K, names
+
+
 def run_ard_stage(cfg, data, built, theta, log=print, full_stats=None):
     """The schema-3 ARD stage (docs/specs/2026-09-30-conformal-force-sigma-design.md section 4):
 
@@ -610,8 +639,12 @@ def run_ard_stage(cfg, data, built, theta, log=print, full_stats=None):
        sandwich Q_fit, or A_fit^-1 for ard_variance "kappa");
     3. T_val scores from P_fit's errors and shape (or, for the legacy "mixed" ablation, from the
        served posterior's own-cluster-out sandwich);
+    3b. (ard_transfer "exponent") a second hold-out posterior P_fit2 on T_fit2, the same stratified split
+       of T_fit, scored on the same T_val atoms: the pooled scales lam1 (P_fit), lam2 (P_fit2) give the
+       transfer exponent beta = clip(log(lam1/lam2) / log(N_fit/N_fit2), 0, 1/2) ("sqrt": 1/2, "none": 0);
     4. the served posterior P on all of T (started from the subset optimum) and its stored shape;
-    5. per-group configuration-weighted lam_rms and q from the T_val scores, stored in the posterior.
+    5. per-group configuration-weighted lam_rms and q from the T_val scores times t = (N/N_fit)^beta (the
+       hold-out scale carried to P), stored in the posterior.
     kappa and the scalar lam of #18 are still reported for comparison.
 
     full_stats: the linear statistics of data.ds_train (`stats.linear_statistics`) the caller has
@@ -619,8 +652,8 @@ def run_ard_stage(cfg, data, built, theta, log=print, full_stats=None):
     instead of a second pass over the training set (spec 3); sequential mode ignores them."""
     import time
     from .clusters import row_clusters
-    from .conformal import (assign_groups, band_edges, config_strata, group_scales, n_groups,
-                            shell_reference, stratified_split)
+    from .conformal import (assign_groups, band_edges, config_strata, group_scales, n_groups, pooled_lam_rms,
+                            shell_reference, stratified_split, transfer_exponent, transfer_fixed)
     from .data import build_dataset
     from .jackknife import press_scores, shape_factor
     mode, val_frac, cond_max = cfg.ard_mode, cfg.ard_val_frac, cfg.ard_cond_max
@@ -658,30 +691,29 @@ def run_ard_stage(cfg, data, built, theta, log=print, full_stats=None):
     ell = cfg.ard_cluster_size * float(prob.cfg.rcut)
 
     # 2. P_fit and its own shape
-    ds_fit = build_dataset(fit_, data.meta, data.E0, cfg.batch, pack=cfg.pack_mode, log=log)
     ds_val = build_dataset(val, data.meta, data.E0, cfg.batch, pack=cfg.pack_mode, log=log)
-    ev = ARDEvidence(ard_statistics(theta, prob, ds_fit, mode), np.asarray(prob.gamma), body_col)
-    names = (["log_sigma_E", "log_sigma_F", "log_sigma_V"] if ev.joint else []) + [f"a_{g}body" for g in ev.groups]
-    h_fit, v_fit, info_fit = fit_ard(ev, ev.h0(theta), cond_max)
-    for w in _ard_fit_warnings("fit-subset", info_fit, names):
-        log(w)
-    post_fit = ard_posterior(ev, h_fit, 1.0, data.meta)
-    K_fit = 0
-    if variance == "sandwich" and source == "fit":
-        if variant == "press":
-            rc, K_fit = row_clusters(ds_fit, fit_, ell)
-            Gs, _ = press_scores(post_fit, prob, ds_fit, rc, K_fit, ev.sigmas(h_fit), mode=cfg.ard_press)
-            post_fit = post_fit._replace(R=shape_factor(post_fit, Gs, cfg.ard_shape_tau))
-        else:
-            Gs = sandwich_scores(post_fit, prob, ds_fit, ev.sigmas(h_fit))
-            K_fit = int(Gs.shape[1])
-            post_fit = post_fit._replace(Q=sandwich_factor(post_fit, Gs))
-        del Gs
-    del ev
+    post_fit, h_fit, v_fit, info_fit, K_fit, names = _holdout_posterior(
+        cfg, data, prob, theta, fit_, body_col, ell, log=log)
 
     # 3. T_val errors (and, unless "mixed", the scores' shape) from P_fit
     E = _val_atoms(post_fit, prob, ds_val, r1=r1, shape=(source == "fit"))
     del post_fit                           # free the subset fit's L x L Cholesky factor before the refit
+
+    # 3b. the transfer exponent's second hold-out fit: P_fit2 on T_fit2, the same stratified rule applied
+    # to T_fit, scored on the same T_val atoms ("mixed" scores already come from the served posterior)
+    transfer = cfg.ard_transfer if source == "fit" else "none"
+    if transfer != cfg.ard_transfer:
+        log(f"ARD transfer: _score_source='mixed' scores against the served posterior; "
+            f"ard_transfer={cfg.ard_transfer!r} ignored (none)")
+    E2, n_fit2 = None, None
+    if transfer == "exponent":
+        fit2_loc, _ = stratified_split(strata[fit_idx], val_frac, cfg.seed + 1)
+        fit2 = [fit_[i] for i in fit2_loc]
+        n_fit2 = len(fit2)
+        post_fit2, _, _, _, _, _ = _holdout_posterior(cfg, data, prob, theta, fit2, body_col, ell, h0=h_fit,
+                                                      stage="fit-subset-2", log=log)
+        E2 = _val_atoms(post_fit2, prob, ds_val, shape=True)
+        del post_fit2                      # as P_fit: freed before the refit
 
     # 4. the served posterior on all of T and its shape
     st = (joint_ard_stats(full_stats) if (full_stats is not None and mode == "joint")
@@ -730,10 +762,24 @@ def run_ard_stage(cfg, data, built, theta, log=print, full_stats=None):
         if source == "mixed":
             lam_incl_own = kappa_closed_form(e2, Ef.v_incl[ok])
 
-    # 5. per-group scales on T_val
+    # 5. per-group scales on T_val, carried to the served posterior by the transfer factor
     s = conformal_scores(e, V, cfg.ard_force_shape, cfg.ard_shape_eps)
     gv = assign_groups(E.z[ok], E.d[ok], z_star, edges)
     cv = np.asarray(val_idx)[E.cfg[ok]]            # training-set index of each calibration atom's config
+    lam1 = pooled_lam_rms(s, gv, cv, G)
+    if transfer == "exponent":
+        V2 = E2.V[ok]
+        m2 = np.trace(V2, axis1=1, axis2=2) > 0    # both scales on the atoms P_fit2 also informs
+        s2 = conformal_scores(E2.e[ok][m2], V2[m2], cfg.ard_force_shape, cfg.ard_shape_eps)
+        tr = transfer_exponent(pooled_lam_rms(s[m2], gv[m2], cv[m2], G), pooled_lam_rms(s2, gv[m2], cv[m2], G),
+                               N, len(fit_), n_fit2, log=log)
+        tr["lam1_all"] = lam1                      # lam1 is over the common atoms; lam1_all over every one
+        del E2, V2, s2
+    else:
+        tr = transfer_fixed(transfer, lam1, N, len(fit_))
+        log(f"ARD transfer: {transfer}, lam_fit {lam1:.4g} (N {len(fit_)}), factor {tr['factor']:.4g}")
+    tr["requested"] = cfg.ard_transfer
+    s = s * tr["factor"]
     tab = group_scales(s, gv, cv, G, 1 - cfg.ard_coverage, cfg.ard_n_min, log=log)
     post = post._replace(kappa=kappa, lam=lam, force_shape=cfg.ard_force_shape, eps=cfg.ard_shape_eps,
                          group_consts={"r1": float(r1), "z_star": z_star, "edges": edges.tolist()},
@@ -775,7 +821,7 @@ def run_ard_stage(cfg, data, built, theta, log=print, full_stats=None):
               "groups": tab.to_dict(),
               "split": {"n_fit": len(fit_), "n_val": len(val), "val_idx": np.asarray(val_idx).tolist(),
                         "strata": np.bincount(strata, minlength=G).tolist()},
-              "transfer": {"f": val_frac, "N_fit": len(fit_), "N": N, "score_source": source}}
+              "transfer": {"f": val_frac, "N_fit": len(fit_), "N": N, "score_source": source, **tr}}
     if variance == "sandwich":
         report["val_rms_z_sandwich"] = float(np.sqrt(np.mean(e2 / (lam ** 2 * vtr / 3)) / 3))
     if cfg.ard_laplace:

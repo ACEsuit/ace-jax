@@ -321,3 +321,57 @@ def test_per_group_pool_unchanged_by_test_point_weight():
                 assert t.q[k] == _old_pooled_q(s[m], w[m], alpha)
                 np.testing.assert_allclose(t.lam_rms[k], np.sqrt(np.sum(w[m] * s[m] ** 2) / (3 * w[m].sum())),
                                            rtol=0, atol=1e-15)
+
+
+def test_pooled_lam_rms_is_the_all_groups_fallback_scale():
+    """pooled_lam_rms is group_scales' all-groups lam (weights 1/n_{c,g} pooled over every (c, g))."""
+    from ace_jax.fit.conformal import group_scales, pooled_lam_rms
+    rng = np.random.default_rng(12)
+    cfg = np.repeat(np.arange(30), rng.integers(2, 20, 30))
+    g = rng.integers(0, 8, len(cfg))
+    s = np.sqrt(rng.chisquare(3, len(cfg))) * 1.7
+    w = 1.0 / np.bincount(cfg * 8 + g)[cfg * 8 + g]
+    lam = pooled_lam_rms(s, g, cfg, 8)
+    assert lam == pytest.approx(np.sqrt(np.sum(w * s ** 2) / (3 * w.sum())), rel=1e-12)
+    t = group_scales(s, g, cfg, G=8, alpha=0.1, n_min=1000)              # every group takes the fallback
+    np.testing.assert_allclose(t.lam_rms, lam, rtol=1e-12)
+    assert pooled_lam_rms(2 * s, g, cfg, 8) == pytest.approx(2 * lam, rel=1e-12)
+
+
+@pytest.mark.parametrize("ratio, beta_want, clipped", [(1.08, None, False), (0.95, 0.0, True), (3.0, 0.5, True)])
+def test_transfer_exponent_estimate_and_clip(ratio, beta_want, clipped):
+    """beta_raw = log(lam1/lam2) / log(N_fit/N_fit2), clipped to [0, 1/2]; t = (N/N_fit)^beta; a WARNING
+    when clipped (and the lam_fit2 >= lam_fit case named)."""
+    from ace_jax.fit.conformal import transfer_exponent
+    N, N_fit, N_fit2 = 3680, 2944, 2355
+    lines = []
+    tr = transfer_exponent(5.27 * ratio, 5.27, N, N_fit, N_fit2, log=lines.append)
+    raw = np.log(ratio) / np.log(N_fit / N_fit2)
+    assert tr["beta_raw"] == pytest.approx(raw, rel=1e-12)
+    beta = raw if beta_want is None else beta_want
+    assert tr["beta"] == pytest.approx(beta, rel=1e-12, abs=0)
+    assert tr["factor"] == pytest.approx((N / N_fit) ** beta, rel=1e-12)
+    assert (tr["lam1"], tr["lam2"], tr["N_fit2"], tr["method"]) == (5.27 * ratio, 5.27, N_fit2, "exponent")
+    assert any(ln.startswith("ARD transfer:") and "beta_raw" in ln for ln in lines)
+    warn = [ln for ln in lines if "WARNING" in ln]
+    assert bool(warn) == clipped
+    if ratio < 1:
+        assert any("lam_fit2" in ln for ln in warn)
+
+
+def test_transfer_exponent_degenerate_split_is_conservative():
+    """No smaller second fit (N_fit2 == N_fit) or a non-finite scale: beta_raw is undefined; beta falls back
+    to the variance-dominated bound 1/2, with a WARNING."""
+    from ace_jax.fit.conformal import transfer_exponent
+    for args in ((5.0, 4.0, 100, 50, 50), (np.nan, 4.0, 100, 80, 64)):
+        lines = []
+        tr = transfer_exponent(*args, log=lines.append)
+        assert tr["beta"] == 0.5 and tr["factor"] == pytest.approx((args[2] / args[3]) ** 0.5)
+        assert any("WARNING" in ln for ln in lines)
+
+
+def test_transfer_fixed_methods():
+    from ace_jax.fit.conformal import transfer_fixed
+    assert transfer_fixed("sqrt", 4.0, 100, 80)["factor"] == pytest.approx(1.25 ** 0.5, rel=1e-15)
+    t0 = transfer_fixed("none", 4.0, 100, 80)
+    assert t0["factor"] == 1.0 and t0["beta"] == 0.0 and t0["N_fit2"] is None and t0["lam2"] is None

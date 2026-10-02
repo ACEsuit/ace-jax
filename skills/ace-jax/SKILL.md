@@ -110,7 +110,10 @@ These constraints are validated up front. A bad combination raises a
     `aj eval --posterior out_ard/posterior.npz` add per-atom calibrated force
     uncertainty: `forces_std`, plus `forces_cov`, `forces_q`, `forces_group`, `forces_support`
     (see README, `--uq ard`). `--uq ard` also changes the mean: `model.npz` is the
-    ARD posterior mean, not the BLR/MAP mean.
+    ARD posterior mean, not the BLR/MAP mean. The hold-out scales are carried to the served
+    posterior by (N/N_fit)^β, β fitted per run from a second hold-out fit and clipped to [0, ½]
+    (`--ard-transfer exponent|sqrt|none`; it costs one more evidence fit + PRESS on ~(1−f)²N
+    configs; `ard.json` `transfer` records λ1, λ2, β and the factor).
   - `gp_model.npz` (GP): self-contained, loaded by `GPCalculator.from_file` and
     `aj eval`. Its size is about 8·Dt²·(model draws) bytes, where Dt = basis
     size + M. The default stores 1 draw (the MAP); `--model-draws N` stores N
