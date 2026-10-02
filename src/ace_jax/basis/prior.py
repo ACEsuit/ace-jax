@@ -130,14 +130,13 @@ def gamma_from_model(meta):
     return smoothness_prior(model_nnll(meta))
 
 
-def prior_diagonal(z, meta, source=""):
+def prior_diagonal(z, meta, source="", log=print):
     """The prior diagonal of a loaded export: ``z["gamma"]`` when the exporter
     stored it (authoritative, used verbatim), else rebuilt from ``meta`` with a
-    log line naming ``source`` (the model path).  The one fallback both
+    ``log`` line naming ``source`` (the model path).  The one fallback both
     ``cli.py`` and ``bench/acegp_cantor/run.py`` go through.  Returns float64
     numpy; callers convert to jax."""
     if "gamma" in z.files:
         return np.asarray(z["gamma"], np.float64)
-    print(f"gamma missing from {source} -- rebuilt via basis.prior "
-          "(algebraic smoothness prior)", flush=True)
+    log(f"gamma missing from {source} -- rebuilt via basis.prior (algebraic smoothness prior)")
     return gamma_from_model(meta)
