@@ -122,7 +122,9 @@ other than the bench-only ablation switches (Decision 7).
    `aj calibrate` pooling with scores against P) are on the served posterior's scale. This replaces the
    uncorrected hold-out scale (β = 0, `--ard-transfer none`); `sqrt` fixes β = ½ (the bias-dominated
    bound of §7) without the second fit. The legacy `_score_source="mixed"` ablation already scores
-   against P and always uses `none`.
+   against P and always uses `none`. β is a single-split estimate; because the extrapolation step
+   equals the baseline (N/N_fit ≈ N_fit/N_fit2), the factor's relative error ≈ that of λ1/λ2, and
+   the clip bounds it to ≤ (1−f)^−½.
 6. **Scales.** Per-group λ_g^rms and q_g from the transferred T_val scores. κ is still reported, and
    so is the old scalar λ, computed from the new (untransferred) scores for comparison only.
 7. **Report:** `ard.json` gains `shape` (mode, ℓ, K, the rank of R, the leverage summary),

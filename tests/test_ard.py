@@ -677,7 +677,7 @@ def _stage(**kw):
     from ace_jax.fit.pipeline.mapfit import fit_map
     from ace_jax.fit.pipeline.objective import make_objective
     from ace_jax.fit.pipeline.problem import build_problem
-    cfg = _pipe_cfg(ard_variance="sandwich", **kw).validate()
+    cfg = _pipe_cfg(**{"ard_variance": "sandwich", **kw}).validate()
     d = load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz"))
     b = build_problem(cfg, d)
     with highest_precision():
@@ -722,6 +722,11 @@ def test_stage_legacy_ablation_variant():
     # the mixed scores are already against the served posterior: no transfer, whatever was asked for
     tr = res.report["transfer"]
     assert tr["method"] == "none" and tr["requested"] == "exponent" and tr["factor"] == 1.0
+
+
+def test_stage_transfer_exponent_with_kappa_variance():
+    rep = _stage(ard_variance="kappa", ard_transfer="exponent", **_FINITE_Q)[1].report["transfer"]
+    assert rep["method"] == "exponent" and np.isfinite(rep["factor"]) and rep["factor"] >= 1.0
 
 
 def test_stage_transfer_exponent_scales_the_none_run():

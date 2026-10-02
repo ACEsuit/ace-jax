@@ -361,7 +361,7 @@ def test_transfer_exponent_estimate_and_clip(ratio, beta_want, clipped):
 
 def test_transfer_exponent_degenerate_split_is_conservative():
     """No smaller second fit (N_fit2 == N_fit) or a non-finite scale: beta_raw is undefined; beta falls back
-    to the variance-dominated bound 1/2, with a WARNING."""
+    to the bias-dominated bound 1/2, with a WARNING."""
     from ace_jax.fit.conformal import transfer_exponent
     for args in ((5.0, 4.0, 100, 50, 50), (np.nan, 4.0, 100, 80, 64)):
         lines = []

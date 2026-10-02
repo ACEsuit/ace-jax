@@ -148,8 +148,9 @@ def test_sweeps(tmp_path):
         a["groups"]["lam_rms"] = [1.0 * nfit ** -0.5, 2.0 * nfit ** -0.5]
         json.dump(a, open(d / "ard.json", "w"))
         runs.append(vs.load_run(d))
-    fs = vs.f_sweep(runs)
-    assert fs["group 0"] == pytest.approx(-0.5) and fs["group 1"] == pytest.approx(-0.5)
+    fs = vs.f_sweep(runs)                  # no transfer.factor (pre-transfer runs): raw == residual
+    for kind in ("raw", "residual"):
+        assert fs[kind]["group 0"] == pytest.approx(-0.5) and fs[kind]["group 1"] == pytest.approx(-0.5)
     es = vs.ell_sweep(runs)
     assert [e[0] for e in es] == [2.0, 4.0, 6.0] and es[0][1] is not None
 
@@ -253,3 +254,31 @@ def test_calibrate_u_files_and_concat(tmp_path):
     for i in range(2):
         write(tmp_path / f"a{i}.xyz", [Atoms("H", positions=[[0, 0, 0]], cell=[3, 3, 3], pbc=True)] * (i + 1))
     assert concat_xyz([tmp_path / "a0.xyz", tmp_path / "a1.xyz"], tmp_path / "U.xyz") == 3
+
+
+def test_f_sweep_separates_raw_exponent_from_residual_after_transfer(tmp_path):
+    """Stored lam_rms include each run's transfer factor t = (N/N_fit)^beta: the raw slope (lam / t) is the
+    exponent of the hold-out scale in N_fit, the residual (as stored) is what the transfer left; both are
+    printed with each run's beta, beta_raw and factor."""
+    runs, N, beta = [], 1000, 0.37
+    for k, nfit in enumerate([500, 700, 900]):
+        d = tmp_path / f"r{k}"
+        d.mkdir()
+        _synthetic_run(d)
+        a = json.load(open(d / "ard.json"))
+        t = (N / nfit) ** beta
+        # hold-out scale lam ~ N_fit^beta, served lam ~ N^beta for every run (a transfer that works)
+        a["groups"]["lam_rms"] = [1.0 * nfit ** beta * t, 2.0 * nfit ** beta * t]
+        a["transfer"] = {"f": 1 - nfit / N, "N_fit": nfit, "N": N, "method": "exponent", "N_fit2": nfit - 50,
+                         "lam1": 1.0, "lam2": 0.9, "beta_raw": "nan" if k == 0 else 0.4, "beta": beta, "factor": t}
+        json.dump(a, open(d / "ard.json", "w"))
+        runs.append(vs.load_run(d))
+    fs = vs.f_sweep(runs)
+    for g in ("pooled", "group 0", "group 1"):
+        assert fs["raw"][g] == pytest.approx(beta, abs=1e-9)
+        assert fs["residual"][g] == pytest.approx(0.0, abs=1e-9)
+    assert vs.lambda_rms(runs[0], raw=True) == pytest.approx(vs.lambda_rms(runs[0]) / (N / 500) ** beta)
+    md = vs.report(runs, B=20)
+    assert "raw slope of log lambda on log N_fit (exponent)" in md
+    assert "residual slope after transfer (~0 if the transfer works)" in md
+    assert "lambda_rms raw" in md and "| exponent |" in md and "0.370" in md and "0.400" in md

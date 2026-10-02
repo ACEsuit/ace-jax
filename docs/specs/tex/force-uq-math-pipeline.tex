@@ -304,15 +304,20 @@ stratified rule into $T_{\mathrm{fit2}}$, with $N_{\mathrm{fit2}}\approx(1-f)N_{
 configurations. A second hold-out posterior $P_{\mathrm{fit2}}$ is fitted on it, with its own
 jackknife shape, and scores the same $T_{\mathrm{val}}$ atoms. Let $\lambda_1$ and $\lambda_2$ be
 the configuration-weighted rms scales of the $P_{\mathrm{fit}}$ and $P_{\mathrm{fit2}}$ scores,
-pooled over all groups with the weights of Section~\ref{sec:scale}. Then
+pooled over all groups with the weights of Section~\ref{sec:scale}, over the $T_{\mathrm{val}}$ atoms
+at which both shapes are positive. Then
 \[
   \hat\beta=\frac{\log(\lambda_1/\lambda_2)}{\log(N_{\mathrm{fit}}/N_{\mathrm{fit2}})},\qquad
   \beta=\min\bigl(\max(\hat\beta,0),\tfrac12\bigr),\qquad
   t=(N/N_{\mathrm{fit}})^{\beta},
 \]
 and every calibration score is multiplied by $t$ before the per-group scales are formed. The clip
-keeps $\beta$ between the two limits above, and a clip is reported. One pooled $\beta$ serves
-all groups. On bench365 the $f$ sweep gives $\log\lambda\propto0.37\log N_{\mathrm{fit}}$, and
+keeps $\beta$ between the two limits above, and a clip is reported; if $\hat\beta$ is undefined
+($N_{\mathrm{fit2}}=N_{\mathrm{fit}}$, or a non-finite scale) $\beta=\tfrac12$, the conservative
+limit. One pooled $\beta$ serves all groups. $\beta$ is a single-split estimate; because the
+extrapolation step equals the baseline ($N/N_{\mathrm{fit}}\approx N_{\mathrm{fit}}/N_{\mathrm{fit2}}$),
+the factor's relative error is about that of $\lambda_1/\lambda_2$, and the clip bounds the factor
+to at most $(1-f)^{-1/2}$. On bench365 the $f$ sweep gives $\log\lambda\propto0.37\log N_{\mathrm{fit}}$, and
 $(3680/2944)^{0.37}=1.086$ matches the served rms-$z$ deficit of $1.087$. The cost is one more evidence fit and jackknife
 shape on about $(1-f)^2|T|$ configurations. It is still checked by repeating the protocol at
 $f\in\{0.1,0.2,0.3\}$.

@@ -160,12 +160,32 @@ def volumes(R):
     return float(vol.mean()), float(vol.mean() * c ** 3)
 
 
-def lambda_rms(R):
+def transfer(R):
+    """ard.json "transfer" with the transfer exponent's fields: factor t (1 when absent -- runs before the
+    per-fit exponent stored untransferred scales), beta, beta_raw (None when absent), method."""
+    t = R["ard"].get("transfer") or {}
+    num = lambda k: None if t.get(k) is None else float(t[k])         # "nan" strings (json_safe) -> nan
+    f = num("factor")
+    return {"factor": 1.0 if f is None else f, "beta": num("beta"), "beta_raw": num("beta_raw"),
+            "method": t.get("method", "none (pre-transfer)"), "N_fit": t.get("N_fit")}
+
+
+def lam_groups(R, raw=False):
+    """Per-group lam_rms as stored (residual: includes the run's transfer factor t) or raw = stored / t
+    (the hold-out posterior's own scale)."""
+    g = R["ard"].get("groups")
+    if not g:
+        return None
+    lam = np.asarray(g["lam_rms"], float)
+    return lam / transfer(R)["factor"] if raw else lam
+
+
+def lambda_rms(R, raw=False):
     g = R["ard"].get("groups")
     if not g or "n_cfg_val" not in g:
         return None
     w = np.asarray(g["n_cfg_val"], float)
-    return float(np.sqrt(np.sum(w * np.asarray(g["lam_rms"], float) ** 2) / w.sum()))
+    return float(np.sqrt(np.sum(w * lam_groups(R, raw) ** 2) / w.sum()))
 
 
 def scalar_lam(R):
@@ -198,17 +218,21 @@ def _ci(c):
 
 
 def f_sweep(runs):
-    """Per conformal group (and pooled): least-squares slope of log lambda_g on log N_fit across runs."""
-    pts = [(r["ard"]["transfer"]["N_fit"], r["ard"]["groups"]["lam_rms"], lambda_rms(r)) for r in runs
-           if r["ard"].get("transfer", {}).get("N_fit") and r["ard"].get("groups")]
-    if len({p[0] for p in pts}) < 2:
+    """Per conformal group (and pooled): least-squares slope of log lambda_g on log N_fit across runs, for
+    {"raw": lam_rms / transfer.factor (the hold-out scale: its slope is the transfer exponent),
+     "residual": lam_rms as stored (after each run's transfer: ~0 if the transfer works)}."""
+    ok = [r for r in runs if (r["ard"].get("transfer") or {}).get("N_fit") and r["ard"].get("groups")]
+    if len({r["ard"]["transfer"]["N_fit"] for r in ok}) < 2:
         return None
-    x = np.log([p[0] for p in pts])
-    out = {"pooled": float(np.polyfit(x, np.log([p[2] for p in pts]), 1)[0])}
-    G = min(len(p[1]) for p in pts)
-    for g in range(G):
-        out[f"group {g}"] = float(np.polyfit(x, np.log([p[1][g] for p in pts]), 1)[0])
-    return out
+    x = np.log([r["ard"]["transfer"]["N_fit"] for r in ok])
+    res = {}
+    for kind, raw in (("raw", True), ("residual", False)):
+        out = {"pooled": float(np.polyfit(x, np.log([lambda_rms(r, raw) for r in ok]), 1)[0])}
+        lg = [lam_groups(r, raw) for r in ok]
+        for g in range(min(len(v) for v in lg)):
+            out[f"group {g}"] = float(np.polyfit(x, np.log([v[g] for v in lg]), 1)[0])
+        res[kind] = out
+    return res
 
 
 def ell_sweep(runs):
@@ -227,17 +251,22 @@ def ell_sweep(runs):
 def report(runs, B=1000):
     out = ["# Jackknife shape / conformal scale validation", ""]
     out += ["## Summary", "", "| run | variant | ell | K / K_fit | rank R | lev p50 / p99 / max | n lev~1 | lambda_rms | "
-            "lam (scalar) | vol | vol @ nominal |", "|---|---|---|---|---|---|---|---|---|---|---|"]
+            "lambda_rms raw | transfer | beta_raw | beta | factor | lam (scalar) | vol | vol @ nominal |",
+            "|" + "---|" * 16]
     for r in runs:
         s = r["ard"].get("shape") or {}
         v = volumes(r)
-        out.append("| {} | {} | {} | {} / {} | {} | {} / {} / {} | {} | {} | {} | {} | {} |".format(
+        t = transfer(r)
+        out.append("| {} | {} | {} | {} / {} | {} | {} / {} / {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |".format(
             r["name"], s.get("variant", NA), _f(s.get("ell"), "{:g}"), s.get("K", NA), s.get("K_fit", NA),
             s.get("rank_R", NA), _f(s.get("lev_p50")), _f(s.get("lev_p99")), _f(s.get("lev_max")),
-            s.get("n_lev_near1", NA), _f(lambda_rms(r), "{:.4f}"), _f(scalar_lam(r), "{:.4f}"),
-            _f(v and v[0], "{:.4g}"), _f(v and v[1], "{:.4g}")))
+            s.get("n_lev_near1", NA), _f(lambda_rms(r), "{:.4f}"), _f(lambda_rms(r, raw=True), "{:.4f}"),
+            t["method"], _f(t["beta_raw"]), _f(t["beta"]), _f(t["factor"], "{:.4f}"),
+            _f(scalar_lam(r), "{:.4f}"), _f(v and v[0], "{:.4g}"), _f(v and v[1], "{:.4g}")))
     out += ["", "lambda_rms: T_val pooled, configuration-weighted over the conformal groups "
-            "(sqrt(sum n_cfg_val lam_g^2 / sum n_cfg_val)).  lam (scalar): the #18 scalar lam of ard.json "
+            "(sqrt(sum n_cfg_val lam_g^2 / sum n_cfg_val)), as served (after the run's transfer factor); "
+            "lambda_rms raw = lambda_rms / factor, the hold-out posterior's own scale (factor 1 for runs "
+            "before the transfer exponent).  lam (scalar): the #18 scalar lam of ard.json "
             "(atom-weighted kappa_closed_form over T_val), the 30-Sep scalar-lambda comparison.", ""]
     out += ["## Spearman rho(sigma, |e|) per family", "", "| run | crack | edge | screw |", "|---|---|---|---|"]
     for r in runs:
@@ -254,7 +283,14 @@ def report(runs, B=1000):
     fs = f_sweep(runs)
     out += ["## f sweep: slope of log lambda_g on log N_fit", ""]
     if fs:
-        out += ["| quantity | slope |", "|---|---|"] + [f"| {k} | {v:.3f} |" for k, v in fs.items()]
+        out += ["| run | N_fit | transfer | beta_raw | beta | factor |", "|---|---|---|---|---|---|"]
+        for r in sorted(runs, key=lambda r: transfer(r)["N_fit"] or 0):
+            t = transfer(r)
+            out.append(f"| {r['name']} | {t['N_fit'] if t['N_fit'] is not None else NA} | {t['method']} | "
+                       f"{_f(t['beta_raw'])} | {_f(t['beta'])} | {_f(t['factor'], '{:.4f}')} |")
+        out += ["", "| quantity | raw slope of log lambda on log N_fit (exponent) | "
+                "residual slope after transfer (~0 if the transfer works) |", "|---|---|---|"]
+        out += [f"| {k} | {fs['raw'][k]:.3f} | {fs['residual'][k]:.3f} |" for k in fs["raw"]]
     else:
         out.append("n/a (needs >= 2 runs with different N_fit)")
     es = ell_sweep(runs)
