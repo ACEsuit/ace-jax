@@ -132,20 +132,25 @@ ACEPOT_JULIA="$HOME/.juliaup/bin/julia +1.12.6" ACEPOT_JULIA_DEPOT=/storage/eng/
 ### lestrade (i9-14900K, CPU only: `lestrade-cpu`)
 
 ```bash
-bash bench/scaling/envs/lestrade.sh          # plugin, lmp-ace.sh, envs/lestrade-cpu.json (git-ignored)
+bash bench/scaling/envs/lestrade.sh          # plugin, CPU Symmetrix tree, lmp-ace.sh, lmp-cpu.sh, envs/lestrade-cpu.json (git-ignored)
 ACEPOT_JULIA="$HOME/.juliaup/bin/julia +1.12.6" ACEPOT_JULIA_DEPOT=/storage/eng/essswb/cache/julia-pr309 \
   python bench/scaling/models.py acepotentials-trim      # built here: juliac targets this CPU
 taskset -c 0-15 python bench/scaling/sweep.py lestrade-cpu --only CODE
 ```
 
-- Reuses moriarty's venv, `lmp.sh` and lammps-dev headers read-only through the
-  shared home; the plugin and `lmp-ace.sh` go to `/storage/eng/essswb/bench-scaling-lestrade/`.
+- Reuses moriarty's venv and lammps-dev headers read-only through the shared
+  home; the plugin, `lmp-ace.sh`, `lmp-cpu.sh` and the CPU Symmetrix tree (`src/`,
+  copied from moriarty's pinned checkouts) go to `/storage/eng/essswb/bench-scaling-lestrade/`.
 - **P-cores only.** The 14900K's P-cores are CPUs 0-15 (8 cores x 2 HT) and its
   E-cores 16-31. `HOSTS["lestrade-cpu"]["cpus"]` pins the sweep (and so every
   case) to 0-15, giving standalone codes 16 threads; MPI codes run 8 ranks bound
   one per P-core (`mpirun_args`: `--bind-to core --map-by core`). Rows record
   `cpu_affinity` and `mpirun_args`.
-- MACE is not run here (it stays on moriarty-cpu).
+- MACE in LAMMPS runs `lmp-cpu.sh`: moriarty's Symmetrix tree is AVX-512
+  (`-march=native` on Cascade Lake) and gets SIGILL here, so `lammps_cpu` builds
+  a CPU-only one (no Kokkos, ML-PACE, FlexiBLAS). Launch long sweeps from an
+  agent in their own scope (`systemd-run --user --scope -p MemoryMax=52G`): an
+  agent's memory cap otherwise throttles the large cases.
 
 ### Modal (A100-80GB)
 

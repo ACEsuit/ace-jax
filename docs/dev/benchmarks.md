@@ -53,7 +53,7 @@ design is in `docs/dev/benchmark-scaling-spec.md`, and how to reproduce it is in
 | host | gate | code | passed | max abs dE / atom (eV) | max abs dF (eV/Å) |
 |---|---|---|---|---|---|
 | lestrade-cpu | acepot | ACEpotentials.jl (linear ACE, direct) | 2/2 | 2.2e-16 | 1.8e-14 |
-| lestrade-cpu | mace | MACE | 0/2 (2 error) | — | — |
+| lestrade-cpu | mace | MACE | 2/2 | 6.9e-07 | 9.7e-05 |
 | lestrade-cpu | mlpace | ML-PACE | 2/2 | 4.8e-14 | 4.1e-10 |
 | lestrade-cpu | spline | ace-jax (linear ACE, learned radial, splined) | 2/2 | 2.1e-12 | 3.1e-08 |
 | lestrade-cpu | trim | ACEpotentials.jl (linear ACE, trim library in LAMMPS) | 2/2 | 5.6e-17 | 4.4e-15 |
@@ -204,10 +204,12 @@ Largest system that ran standalone (float64, atoms), and the float32 / float64 t
   sized from the previous size's step time) after 3–50 warm-up steps. This
   is a deviation from the spec's fixed 200/50, made so the slow MACE CPU
   cases finish.
-- **No MACE in LAMMPS on lestrade.** The Symmetrix tree is moriarty's
-  build, compiled for its AVX-512 CPU; on the i9-14900K (no AVX-512) it dies
-  with an illegal instruction while loading the model, so lestrade's `mace`
-  gate is an error and only MACE standalone (PyTorch) runs there.
+- **lestrade has its own Symmetrix tree.** moriarty's build is compiled for
+  its AVX-512 CPU and dies with an illegal instruction on the i9-14900K, so
+  lestrade's MACE LAMMPS rows use a CPU-only build of the same pinned sources
+  (lammps patch_10Sep2025 + Symmetrix 0d86e1e, no Kokkos, ML-PACE on, libsymmetrix
+  at `-march=native` = AVX2) via `lmp-cpu.sh`. lestrade's ML-PACE rows were
+  recorded earlier with moriarty's binary (ML-PACE runs fine there).
 - **Out-of-memory markers.** On the CPU hosts, cases are killed at 48 GB of
   resident memory (the node has 62 GB); on GPUs they stop at the device
   limit. A dotted vertical line marks the first size that did not fit.
@@ -289,12 +291,14 @@ Hollow markers: ace-jax chose the sparse layout. Where a case was run more than 
 | lestrade-cpu | Cantor | ace-jax (PACE model) | standalone | 32768 | — |
 | lestrade-cpu | Cantor | ACEpotentials.jl (linear ACE, direct) | standalone | 32768 | — |
 | lestrade-cpu | Cantor | ACEpotentials.jl (linear ACE, trim library in LAMMPS) | lammps | 32768 | — |
+| lestrade-cpu | Cantor | MACE | lammps | 8192 | 16384 |
 | lestrade-cpu | Cantor | MACE | standalone | 4096 | 8192 |
 | lestrade-cpu | Cantor | ML-PACE | lammps | 32768 | — |
 | lestrade-cpu | SiGe | ace-jax (linear ACE) | standalone | 32768 | — |
 | lestrade-cpu | SiGe | ace-jax (PACE model) | standalone | 32768 | — |
 | lestrade-cpu | SiGe | ACEpotentials.jl (linear ACE, direct) | standalone | 32768 | — |
 | lestrade-cpu | SiGe | ACEpotentials.jl (linear ACE, trim library in LAMMPS) | lammps | 32768 | — |
+| lestrade-cpu | SiGe | MACE | lammps | 8192 | 16384 |
 | lestrade-cpu | SiGe | MACE | standalone | 8192 | 16384 |
 | lestrade-cpu | SiGe | ML-PACE | lammps | 32768 | — |
 | modal-a100 | Cantor | ace-jax (linear ACE) | lammps | 2097152 | — |
@@ -408,6 +412,12 @@ Hollow markers: ace-jax chose the sparse layout. Where a case was run more than 
 | lestrade-cpu | SiGe | ACEpotentials.jl (linear ACE, trim library in LAMMPS) | lammps | medium | float64 | 2048 | 1.04e+06 |
 | lestrade-cpu | Cantor | ACEpotentials.jl (linear ACE, trim library in LAMMPS) | lammps | small | float64 | 2048 | 1.37e+06 |
 | lestrade-cpu | SiGe | ACEpotentials.jl (linear ACE, trim library in LAMMPS) | lammps | small | float64 | 2048 | 2.12e+06 |
+| lestrade-cpu | Cantor | MACE | lammps | large | float64 | 2048 | 946 |
+| lestrade-cpu | SiGe | MACE | lammps | large | float64 | 2048 | 1.13e+03 |
+| lestrade-cpu | Cantor | MACE | lammps | medium | float64 | 2048 | 2.91e+03 |
+| lestrade-cpu | SiGe | MACE | lammps | medium | float64 | 2048 | 3.91e+03 |
+| lestrade-cpu | Cantor | MACE | lammps | small | float64 | 2048 | 8.55e+03 |
+| lestrade-cpu | SiGe | MACE | lammps | small | float64 | 2048 | 1.09e+04 |
 | lestrade-cpu | Cantor | MACE | standalone | large | float64 | 2048 | 125 |
 | lestrade-cpu | SiGe | MACE | standalone | large | float64 | 2048 | 154 |
 | lestrade-cpu | Cantor | MACE | standalone | medium | float64 | 2048 | 266 |
