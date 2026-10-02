@@ -10,17 +10,6 @@ from conftest import FIXTURE_DIR
 XYZ = FIXTURE_DIR / "si_tiny_train.xyz"
 
 
-@pytest.fixture(scope="module")
-def fitted(tmp_path_factory):
-    from ace_jax.cli import main
-    out = tmp_path_factory.mktemp("ard")
-    assert main(["fit", "--model", str(FIXTURE_DIR / "si_fitted.npz"), "--data", str(XYZ), "--ntrain", "30",
-                 "--ntest", "8", "--energy-key", "dft_energy", "--force-key", "dft_force", "--virial-key",
-                 "dft_virial", "--m-per-species", "0", "--uq", "ard", "--opt", "lbfgs", "--map-steps", "5",
-                 "--configs-per-batch", "4", "--r0", "2.35", "--out", str(out)]) == 0
-    return out
-
-
 def test_cli_fit_ard_variance_default_sandwich_and_kappa_flag(fitted, tmp_path):
     """--ard-variance: default sandwich (the fixture fit, the PRESS shape factor R in posterior.npz); `kappa` once."""
     import json
@@ -465,16 +454,11 @@ def test_keep_for_mode_two_groups():
                                np.arange(10), np.zeros(10, int)) is None
 
 
-def test_aniso_fit_eval_and_calibrate(tmp_path_factory, calib_set):
+def test_aniso_fit_eval_and_calibrate(aniso_fit, calib_set):
     from ase.io import read
     from ace_jax.cli import main
     from ace_jax.fit.ard import ARDPosterior
-    out = tmp_path_factory.mktemp("aniso")
-    assert main(["fit", "--model", str(FIXTURE_DIR / "si_fitted.npz"), "--data", str(XYZ), "--ntrain", "30",
-                 "--ntest", "8", "--energy-key", "dft_energy", "--force-key", "dft_force", "--virial-key",
-                 "dft_virial", "--m-per-species", "0", "--uq", "ard", "--force-shape", "aniso", "--opt",
-                 "lbfgs", "--map-steps", "5", "--configs-per-batch", "4", "--r0", "2.35",
-                 "--out", str(out)]) == 0
+    out = aniso_fit
     assert ARDPosterior.load(out / "posterior.npz").force_shape == "aniso"
     assert main(["eval", "--model", str(out / "model.npz"), "--posterior", str(out / "posterior.npz"),
                  "--data", str(XYZ), "--energy-key", "dft_energy", "--force-key", "dft_force",
