@@ -43,4 +43,6 @@ def format_rmse_table(stats, title):
     line = lambda r: "  ".join(r[0].ljust(w[0]) if i == 0 else r[i].rjust(w[i]) for i in range(len(r)))
     rule = "-" * len(line(head))
     body = [line(r) for r in rows]
+    if len(body) == 2:                    # one config type: its row would repeat "all"
+        return "\n".join([f"RMSE, {title}", rule, line(head), rule, body[-1]])
     return "\n".join([f"RMSE, {title}", rule, line(head), rule, *body[:-1], rule, body[-1]])

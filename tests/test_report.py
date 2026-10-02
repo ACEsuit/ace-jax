@@ -58,3 +58,11 @@ def test_fit_logs_an_rmse_table_per_split():
     assert "RMSE, test (map)" in text
     table = text[text.index("RMSE, test (map)"):]
     assert "config type" in table and "\nall " in table and ("dia" in table or "bt" in table)
+
+
+def test_one_config_type_prints_only_the_all_row():
+    from ace_jax.fit.report import format_rmse_table, rmse_by_type
+    types, nat, E, Em, F, Fm, V, Vm = _toy()
+    t = format_rmse_table(rmse_by_type([None] * 3, nat, E, Em, F, Fm, V, Vm), "test")
+    rows = [l.split()[0] for l in t.splitlines()[3:] if l and not l.startswith("-")]
+    assert rows == ["all"]
