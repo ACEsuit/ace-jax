@@ -1,7 +1,8 @@
 """One LAMMPS benchmark case -> one JSON row.
 
 Writes the data file with species in the model's element order (lammps-jax
-maps type t -> species t-1; ML-PACE / Symmetrix map by pair_coeff names), runs a
+maps type t -> species t-1; ML-PACE / Symmetrix / the PR 309 `pair_style ace`
+map by pair_coeff names), runs a
 50-step warm-up and a timed segment, and parses the timed "Loop time".  Runs
 that lose atoms or produce NaN are failures, never timings.
 """
@@ -30,7 +31,24 @@ def _pair(style, model_path, elements, device):
                f"pair_coeff * * {model_path} {els}\n"
     if style == "mace":                     # Symmetrix: element-specific .json
         return f"pair_style symmetrix/mace\npair_coeff * * {model_path} {els}\n"
+    if style == TRIM:                       # PR 309 plugin, then the juliac --trim library
+        return f"plugin load ${{aceplugin}}\npair_style ace\npair_coeff * * {model_path} {els}\n"
     raise ValueError(style)
+
+
+TRIM = "acepotentials-trim"
+
+
+def lammps_vars(style, pjrt=None, aceplugin=None):
+    """`-var` arguments the input reads: ${pjrt} (lammps-jax), ${aceplugin} (the
+    PR 309 plugin, from the host env json's `ace_plugin` via ACE_PLUGIN)."""
+    out = ["-var", "pjrt", pjrt] if pjrt else []
+    if style == TRIM:
+        if not aceplugin:
+            raise ValueError("acepotentials-trim needs the PR 309 LAMMPS plugin: the host env json's "
+                             "`ace_plugin` (ACE_PLUGIN)")
+        out += ["-var", "aceplugin", aceplugin]
+    return out
 
 
 def failure_status(text):
@@ -202,8 +220,35 @@ def bundle_layout(prev):
     return "dense" if prev.get("matrix_overflow") else "auto"
 
 
+def _trim_status(row):
+    """None when the row's trim library exists, else (status, why): `unsupported`
+    when the builder recorded a refused export, `error` when it was never built."""
+    lib = row.get("trim_lib") or ""
+    if pathlib.Path(lib).exists():
+        return None
+    from scaling import models
+    try:
+        entry = models.load_manifest().get(lib, {})
+    except (OSError, ValueError):
+        entry = {}
+    if entry.get("unsupported"):
+        return "unsupported", f"trim export failed for {lib}: {entry['unsupported']}"
+    return "error", f"no trim library {lib}: run `python bench/scaling/models.py acepotentials-trim`"
+
+
+def _trim_build(row):
+    """The manifest's record of the row's trim library (provenance for the row)."""
+    from scaling import models
+    try:
+        e = models.load_manifest().get(row["trim_lib"], {})
+    except (OSError, ValueError):
+        return None
+    return {k: e[k] for k in ("build_id", "sha256", "build_cpu", "cpu_target", "versions", "identity")
+            if k in e} or None
+
+
 def run_case(row, n_atoms, dtype, device, lmp, ranks, workdir, pjrt=None, prev=None,
-             slots="skin", list_headroom=0.5):
+             slots="skin", list_headroom=0.5, aceplugin=None):
     work = pathlib.Path(workdir); work.mkdir(parents=True, exist_ok=True)
     at = supercell(row["system"], n_atoms)
     data = work / "x.data"
@@ -213,7 +258,17 @@ def run_case(row, n_atoms, dtype, device, lmp, ranks, workdir, pjrt=None, prev=N
         return {"code": row["code"], "mode": "lammps", "model": row["name"], "size": row["size"],
                 "system": row["system"], "n_atoms": n_atoms, "device": device, "dtype": dtype,
                 "status": "unsupported", "error": f"no Symmetrix model {row.get('symmetrix')}"}
+    if style == TRIM and _trim_status(row):
+        st, why = _trim_status(row)
+        return {"code": row["code"], "mode": "lammps", "model": row["name"], "size": row["size"],
+                "system": row["system"], "n_atoms": n_atoms, "device": device, "dtype": dtype,
+                "status": st, "error": why}
     steps, warmup = choose_steps((prev or {}).get("step_s"), (prev or {}).get("n_atoms"), n_atoms)
+    if style == TRIM:
+        return _run_lammps(row, style, row["trim_lib"], data, work, n_atoms, dtype, device, lmp,
+                           ranks, pjrt, steps, warmup,
+                           {"trim_lib": row["trim_lib"], "trim_build": _trim_build(row)},
+                           aceplugin=aceplugin)
     if style != "acejax":
         model = row.get("symmetrix") if style == "mace" else row["path"]
         return _run_lammps(row, style, model, data, work, n_atoms, dtype, device, lmp, ranks,
@@ -251,20 +306,27 @@ def run_case(row, n_atoms, dtype, device, lmp, ranks, workdir, pjrt=None, prev=N
         return out
 
 
+def mpirun_args():
+    """The host's extra mpirun arguments (sweep.HOSTS `mpirun_args`, handed over
+    as BENCH_MPIRUN_ARGS, a JSON list: lestrade binds one rank per P-core)."""
+    return json.loads(os.environ.get("BENCH_MPIRUN_ARGS") or "[]")
+
+
 def _run_lammps(row, style, model, data, work, n_atoms, dtype, device, lmp, ranks, pjrt, steps,
-                warmup, extra):
+                warmup, extra, aceplugin=None):
     (work / "in.bench").write_text(lammps_input(style, model, row["elements"], data, device, steps,
                                                 warmup=warmup))
     cmd = [lmp, "-in", "in.bench", "-log", "log.lammps", "-nocite"]
     if device == "gpu":
         cmd += ["-k", "on", "g", "1", "-sf", "kk", "-pk", "kokkos", *KOKKOS[style].split()]
     elif ranks > 1 and style != "acejax":
-        cmd = ["mpirun", "-np", str(ranks)] + cmd
-    if pjrt:
-        cmd += ["-var", "pjrt", pjrt]
+        cmd = ["mpirun", "-np", str(ranks), *mpirun_args()] + cmd
+    cmd += lammps_vars(style, pjrt, aceplugin)
     out = {"code": row["code"], "mode": "lammps", "model": row["name"], "size": row["size"],
            "system": row["system"], "n_atoms": n_atoms, "device": device, "dtype": dtype,
            "ranks": ranks, "status": "ok", **extra}
+    if cmd[0] == "mpirun" and mpirun_args():
+        out["mpirun_args"] = mpirun_args()
     (work / "log.lammps").unlink(missing_ok=True)
     p = subprocess.run(cmd, cwd=work, capture_output=True, text=True, timeout=3600)
     log = (work / "log.lammps").read_text() if (work / "log.lammps").exists() else p.stdout
@@ -306,4 +368,5 @@ elif __name__ == "__main__":
     prev = json.loads(os.environ["BENCH_PREV"]) if os.environ.get("BENCH_PREV") else None
     print(json.dumps(run_case(row, int(n), dtype, device, lmp, int(ranks), workdir,
                               os.environ.get("PJRT_PLUGIN"), prev,
-                              slots="cutoff" if tight else "skin", list_headroom=head)))
+                              slots="cutoff" if tight else "skin", list_headroom=head,
+                              aceplugin=os.environ.get("ACE_PLUGIN"))))

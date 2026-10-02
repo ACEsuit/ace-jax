@@ -179,12 +179,22 @@ These are the gates the scaling suite ran on each host before any timing:
 - **`acejax`:** ace-jax standalone against ace-jax in LAMMPS, in both bundle
   layouts;
 - **`mlpace`:** ace-jax against ML-PACE;
-- **`mace`:** MACE against Symmetrix.
+- **`mace`:** MACE against Symmetrix;
+- **`acepot`, `trim`, `trim-ace`:** the ACEpotentials.jl lines (CPU hosts):
+  direct ACEpotentials.jl against ace-jax, the trim library in LAMMPS against
+  Julia ETACE on its exact twin, and the trim library against ace-jax (the
+  spline error).
 
 Each row gives the checks passed out of those run, and the largest differences:
 
 | host | gate | code | passed | max abs dE / atom (eV) | max abs dF (eV/Å) |
 |---|---|---|---|---|---|
+| lestrade-cpu | acepot | ACEpotentials.jl (linear ACE, direct) | 2/2 | 2.2e-16 | 1.8e-14 |
+| lestrade-cpu | mace | MACE | 0/2 (2 error) | — | — |
+| lestrade-cpu | mlpace | ML-PACE | 2/2 | 4.8e-14 | 4.1e-10 |
+| lestrade-cpu | spline | ace-jax (linear ACE, learned radial, splined) | 2/2 | 2.1e-12 | 3.1e-08 |
+| lestrade-cpu | trim | ACEpotentials.jl (linear ACE, trim library in LAMMPS) | 2/2 | 5.6e-17 | 4.4e-15 |
+| lestrade-cpu | trim-ace | ACEpotentials.jl (linear ACE, trim library in LAMMPS) | 2/2 | 3.0e-08 | 1.9e-06 |
 | modal-a100 | acejax | ace-jax (linear ACE) | 8/8 | 2.7e-15 | 2.5e-14 |
 | modal-a100 | acejax | ace-jax (linear ACE, learned radial, analytic) | 6/6 | 1.7e-16 | 2.0e-14 |
 | modal-a100 | acejax | ace-jax (linear ACE, learned radial, splined) | 6/6 | 2.2e-16 | 7.5e-13 |

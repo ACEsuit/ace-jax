@@ -12,6 +12,18 @@
            accuracy, not roundoff: docs/dev/learned-radial-splining.md measured up
            to 9.4e-10 and 2.3e-8 over 20 learned-radial cases at 1e-10 (on
            the medium n_q=12 models 3.5e-11 and 9.6e-9, with 20% weight noise).
+- acepot:   ACEpotentials.jl direct (the npz's splined ace1_model, rebuilt and
+           asserted identical) vs ace-jax standalone on the npz, f64
+           (|dE|/atom <= 1e-10, |dF| <= 1e-9): the same model, two codes
+- trim:     the PR 309 trim library in LAMMPS vs Julia ETACE on the exact twin
+           it compiles (|dE|/atom <= 1e-10, |dF| <= 1e-9)
+- trim-ace: the trim library in LAMMPS vs ace-jax standalone: a sanity check at
+           the spline error (|dE|/atom <= 1e-5, |dF| <= 1e-3; measured 2.8e-6 ..
+           5.5e-4 eV/A): the library evaluates the exact polynomial radials,
+           ace-jax and ACEpotentials.jl direct the npz's spline tables
+The ACEpotentials.jl checks evaluate the extxyz-roundtripped structure on every
+side (extxyz rounds positions to 1e-8 A), and are CPU only (`unsupported` on a
+GPU host).  A failed acepot gate blocks the acepotentials (standalone) line.
 The acejax gate also runs both learned-radial lines on the medium models: for
 -learned both sides are splined identically, for -analytic both are exact.
 Each LAMMPS side is `run 0` with a sorted force dump.  A failed gate blocks
@@ -24,12 +36,16 @@ import subprocess
 import numpy as np
 from ase.io import write
 
-from scaling.models import LEARNED_CODES, planned_models
-from scaling.run_lammps import KOKKOS, export_bundle, finished, lammps_input, read_dump_forces, read_pe
+from scaling.models import ACEPOT_CODES, LEARNED_CODES, planned_models
+from scaling.run_lammps import (KOKKOS, export_bundle, finished, lammps_input, lammps_vars,
+                                read_dump_forces, read_pe)
 from scaling.structures import supercell
 
 TOL = {"mlpace": (1e-6, 1e-5), "acejax": (1e-10, 1e-9), "mace": (1e-6, None),
-       "spline": (1e-9, 3e-8)}                      # relative: |dE|/|E|, max|dF| / max|F|
+       "spline": (1e-9, 3e-8),                      # relative: |dE|/|E|, max|dF| / max|F|
+       "acepot": (1e-10, 1e-9), "trim": (1e-10, 1e-9), "trim-ace": (1e-5, 1e-3)}
+# gates that check a standalone line: a failure blocks its standalone rows
+STANDALONE_GATES = ("spline", "acepot")
 LEARNED, ANALYTIC = LEARNED_CODES                     # "acejax-ace-learned", "acejax-ace-analytic"
 N_ATOMS = 256
 
@@ -63,13 +79,14 @@ def blocked(rows):
     """(code, mode) lines a failed or erroring gate rules out.  'unsupported'
     (e.g. a MACE model Symmetrix cannot export) is per model, not per code.
     The spline gate checks the model itself (splined against exact), so it
-    rules out the standalone line as well."""
+    rules out the standalone line as well; the acepot gate checks the
+    acepotentials line, which is standalone only."""
     bad = [r for r in rows if r["status"] in ("parity_fail", "error")]
-    return ({(r["code"], "lammps") for r in bad}
-            | {(r["code"], "standalone") for r in bad if r.get("gate") == "spline"})
+    return ({(r["code"], "lammps") for r in bad if r.get("gate") != "acepot"}
+            | {(r["code"], "standalone") for r in bad if r.get("gate") in STANDALONE_GATES})
 
 
-def _lammps_ef(style, model_path, els, at, device, lmp, work, pjrt=None):
+def _lammps_ef(style, model_path, els, at, device, lmp, work, pjrt=None, aceplugin=None):
     work = pathlib.Path(work)
     work.mkdir(parents=True, exist_ok=True)
     write(work / "x.data", at, format="lammps-data", specorder=els, masses=True)
@@ -78,8 +95,7 @@ def _lammps_ef(style, model_path, els, at, device, lmp, work, pjrt=None):
     cmd = [lmp, "-in", "in.parity", "-log", "log.lammps", "-nocite"]
     if device == "gpu":
         cmd += ["-k", "on", "g", "1", "-sf", "kk", "-pk", "kokkos", *KOKKOS[style].split()]
-    if pjrt:
-        cmd += ["-var", "pjrt", pjrt]
+    cmd += lammps_vars(style, pjrt, aceplugin)
     p = subprocess.run(cmd, cwd=work, capture_output=True, text=True, timeout=1800)
     log = (work / "log.lammps").read_text() if (work / "log.lammps").exists() else ""
     if not finished(p.returncode, log):
@@ -95,6 +111,15 @@ def _acejax_ef(path, at, **kw):
     a = at.copy()
     a.calc = ACECalculator(path, **kw)
     return a.get_potential_energy(), a.get_forces()
+
+
+def _julia_ef(env, m, at, work, which):
+    """E, F from the ACEpotentials.jl drivers (`which`: "splined" or "etace") on
+    `at` (already extxyz-roundtripped: written to work, re-read identically)."""
+    from scaling import acepot
+    xyz = pathlib.Path(work) / "x.extxyz"
+    acepot.roundtrip(at, xyz)
+    return acepot.julia_ef(acepot.julia_config(env), m["ace1"], xyz, which, pathlib.Path(work) / which)
 
 
 def _mace_ef(path, at, device, head=None):
@@ -128,6 +153,9 @@ def gate_checks(small, system, medium=None):
         checks += [("acejax", medium[(code, system)], lay) for lay in BUNDLE_LAYOUTS]
     if medium:
         checks.append(("spline", medium[(LEARNED, system)], None))
+    checks += [("acepot", small[("acepotentials", system)], None),
+               ("trim", small[("acepotentials-trim", system)], None),
+               ("trim-ace", small[("acepotentials-trim", system)], None)]
     return checks + [("mace", small[("mace", system)], None)]
 
 
@@ -146,8 +174,25 @@ def gate(host, env, workroot="/tmp"):
                    "model": m["name"], "n_atoms": N_ATOMS, "device": device, "host": host}
             if layout:
                 row["bundle_layout"] = layout
+            if m["code"] in ACEPOT_CODES and device != "cpu":     # CPU-only lines
+                rows.append({**row, "status": "unsupported"})
+                continue
             try:
-                if gate_name == "mlpace":
+                if gate_name in ("acepot", "trim", "trim-ace"):
+                    from scaling import acepot
+                    w = work / gate_name
+                    w.mkdir(parents=True, exist_ok=True)
+                    at_rt = acepot.roundtrip(at, w / "x.extxyz")       # what every side reads
+                    if gate_name == "acepot":
+                        E0, F0 = _acejax_ef(m["path"], at_rt)
+                        E1, F1 = _julia_ef(env, m, at_rt, w, "splined")
+                    else:
+                        E0, F0 = (_julia_ef(env, m, at_rt, w, "etace") if gate_name == "trim"
+                                  else _acejax_ef(m["path"], at_rt))
+                        E1, F1 = _lammps_ef("acepotentials-trim", m["trim_lib"], m["elements"], at_rt,
+                                            device, env.get("lmp_ace", lmp), w, aceplugin=env.get("ace_plugin"))
+                        row["trim_lib"] = m["trim_lib"]
+                elif gate_name == "mlpace":
                     E0, F0 = _acejax_ef(m["path"], at)
                     E1, F1 = _lammps_ef("mlpace", m["path"], m["elements"], at, device, lmp,
                                         work / "mlpace")

@@ -16,29 +16,48 @@ design is in `docs/dev/benchmark-scaling-spec.md`, and how to reproduce it is in
   - ML-PACE, which runs the same `.yace` files;
   - MACE: MP-0b2 small, medium and large, plus MH-1 on its `omat_pbe` head;
   - ace-jax on learned-radial proxies of the medium linear ACE models,
-    splined as deployed and kept analytic (below).
+    splined as deployed and kept analytic (below);
+  - ACEpotentials.jl on the same linear ACE models, CPU only: direct
+    evaluation (`acepotentials`), and the model compiled by ACEpotentials.jl
+    PR 309's `juliac --trim` export and run in LAMMPS (`acepotentials-trim`;
+    below).
 - **Modes:**
   - **standalone** is one ASE calculator call (energy, forces and stress,
     neighbour list included), timed as the median of repeated calls;
   - **LAMMPS** is the MD step time.
 
   ace-jax runs in LAMMPS through lammps-jax (`pair_style jax/kk`), ML-PACE as
-  `pace` / `pace/kk`, and MACE through Symmetrix.
+  `pace` / `pace/kk`, MACE through Symmetrix, and the ACEpotentials.jl trim
+  library through the PR's `pair_style ace` plugin (MPI ranks, as ML-PACE).
 - **Systems:** SiGe (a random alloy on diamond) and Cantor (a random
   equiatomic CrMnFeCoNi alloy on fcc).
 - **Hosts:** moriarty CPU (16-core Xeon Silver 4216; LAMMPS with 16 MPI
   ranks, standalone on all 32 hardware threads); moriarty GPU (RTX A4500,
-  20 GB); Modal A100-80GB.
+  20 GB); Modal A100-80GB; lestrade CPU (`lestrade-cpu`: an i9-14900K, on its
+  8 P-cores only, CPUs 0-15; LAMMPS with 8 MPI ranks bound one per P-core,
+  standalone on the 16 P-core hardware threads), the one CPU host that runs
+  the ACEpotentials.jl lines next to ace-jax, ML-PACE and MACE.
 - **Parity gate:** each host's parity checks passed before any timing ran:
   ace-jax against ML-PACE (gate `mlpace`), ace-jax standalone against
   ace-jax in LAMMPS in both bundle layouts (gate `acejax`), and MACE against
   Symmetrix (gate `mace`). The learned-radial lines are gated on the medium
   models: standalone against LAMMPS (gate `acejax`), and splined against
   analytic (gate `spline`: |dE|/|E| <= 1e-9, max|dF| / max|F| <= 3e-8, the
-  splining accuracy at 1e-10 rather than roundoff).
+  splining accuracy at 1e-10 rather than roundoff). The ACEpotentials.jl
+  lines are gated on the small models (CPU hosts): direct ACEpotentials.jl
+  against ace-jax on the npz (gate `acepot`, |dE|/atom <= 1e-10, |dF| <= 1e-9),
+  the trim library in LAMMPS against Julia's ETACE evaluation of the exact
+  model it compiles (gate `trim`, the same thresholds), and the trim library
+  against ace-jax (gate `trim-ace`, |dF| <= 1e-3: the spline error, below).
 
 | host | gate | code | passed | max abs dE / atom (eV) | max abs dF (eV/Å) |
 |---|---|---|---|---|---|
+| lestrade-cpu | acepot | ACEpotentials.jl (linear ACE, direct) | 2/2 | 2.2e-16 | 1.8e-14 |
+| lestrade-cpu | mace | MACE | 0/2 (2 error) | — | — |
+| lestrade-cpu | mlpace | ML-PACE | 2/2 | 4.8e-14 | 4.1e-10 |
+| lestrade-cpu | spline | ace-jax (linear ACE, learned radial, splined) | 2/2 | 2.1e-12 | 3.1e-08 |
+| lestrade-cpu | trim | ACEpotentials.jl (linear ACE, trim library in LAMMPS) | 2/2 | 5.6e-17 | 4.4e-15 |
+| lestrade-cpu | trim-ace | ACEpotentials.jl (linear ACE, trim library in LAMMPS) | 2/2 | 3.0e-08 | 1.9e-06 |
 | modal-a100 | acejax | ace-jax (linear ACE) | 8/8 | 2.7e-15 | 2.5e-14 |
 | modal-a100 | acejax | ace-jax (linear ACE, learned radial, analytic) | 6/6 | 1.7e-16 | 2.0e-14 |
 | modal-a100 | acejax | ace-jax (linear ACE, learned radial, splined) | 6/6 | 2.2e-16 | 7.5e-13 |
@@ -70,6 +89,28 @@ keeping the per-species zero pattern that learning preserves
 (`models.py ace-learned`). Medium models only. The method and the
 same-container measurements are in `docs/dev/learned-radial-splining.md`.
 
+**ACEpotentials.jl.** Both lines run the linear ACE models the ace-jax
+`acejax-ace` line runs, rebuilt in a pinned Julia 1.12 env
+(`bench/scaling/julia/`, ACEpotentials.jl v0.10.2): every run rebuilds the
+`ace1_model` with the seed the `.npz` was built with and checks it identical
+to the `.npz` (bases, A2B map, spline tables, weights, and energy, forces and
+virial on the `.npz`'s test structure), failing rather than timing another
+model. Everything is compared exactly except the A2B map, which is compared
+to roundoff: its coupling coefficients differ at the ULP level between Julia
+1.11, which wrote the `.npz` files, and the 1.12 env (SiGe large: 72 entries,
+at most 8.3e-16 relative). `acepotentials` times `AtomsCalculators.energy_forces_virial` (neighbour
+list included) on the same displaced structures as the other standalone
+lines, after a warm-up call, and records each call's garbage-collection
+share. `acepotentials-trim` exports the model's *exact twin* (the same basis
+and weights with the polynomial radials `ace1_model` tabulates, instead of its
+splines) to a `--trim=safe` shared library, run by LAMMPS in float64 on the
+CPU. **The two lines therefore differ by the spline error:** ace-jax and
+direct ACEpotentials.jl evaluate the `.npz`'s spline tables, the trim library
+the exact radials, which differ by 2.8e-6 to 5.5e-4 eV/Å in force on these
+random-weight models (rattled 256-atom structures, the PR 309 spike). The
+`trim-ace` gate checks that bound; the `trim` gate
+checks the library against the exact model to round-off.
+
 ## Findings
 
 The ace-jax rows were re-run after the speed-up branch
@@ -83,6 +124,7 @@ ML-PACE in LAMMPS against ace-jax PACE on the same `.yace` models (float64, atom
 
 | host | N | ML-PACE in LAMMPS | ace-jax standalone | ace-jax in LAMMPS | ML-PACE ÷ ace-jax standalone | ML-PACE ÷ ace-jax in LAMMPS |
 |---|---|---|---|---|---|---|
+| lestrade-cpu | 2048 | 417k–562k | 25k–40k | — | 14–17× | — |
 | modal-a100 | 8192 | 1.67M–2.22M | 714k–1.26M | 1.14M–1.40M | 1.8–2.3× | 1.5–1.6× |
 | moriarty-cpu | 2048 | 208k–275k | 16k–23k | — | 12–13× | — |
 | moriarty-gpu | 8192 | 684k–1.02M | 251k–416k | 209k–271k | 2.4–2.7× | 3.3–3.8× |
@@ -91,6 +133,7 @@ ace-jax against MACE, same mode (float64 throughput ratio; where MACE ran out of
 
 | host | mode | ace-jax PACE ÷ MACE | ace-jax ACE ÷ MACE |
 |---|---|---|---|
+| lestrade-cpu | standalone | 76–1.5e+02× | 1.1e+02–2e+02× |
 | modal-a100 | standalone | 23–59× | 48–73× |
 | modal-a100 | lammps | 18–26× | 16–36× |
 | moriarty-cpu | standalone | 65–1.1e+02× | 92–1.5e+02× |
@@ -101,6 +144,7 @@ Largest system that ran standalone (float64, atoms), and the float32 / float64 t
 
 | host | largest: ace-jax PACE | ace-jax ACE | MACE | f32 ÷ f64: ace-jax PACE | ace-jax ACE | MACE |
 |---|---|---|---|---|---|---|
+| lestrade-cpu | 32768 | 32768 | 4096–8192 | 1.9–2× | 1.6–1.7× | 2–2.1× |
 | modal-a100 | 2097152 | 2097152 | 32768 | 1.2–1.4× | 1.2–1.4× | 1.1× |
 | moriarty-cpu | 32768 | 32768 | 4096–8192 | 1.6–1.7× | 1.4× | 1.9–2× |
 | moriarty-gpu | 1048576 | 1048576 | 8192 | 3.5–3.8× | 2.7–3.4× | 5.8–6.4× |
@@ -149,12 +193,19 @@ Largest system that ran standalone (float64, atoms), and the float32 / float64 t
   sized from the previous size's step time) after 3–50 warm-up steps. This
   is a deviation from the spec's fixed 200/50, made so the slow MACE CPU
   cases finish.
-- **Out-of-memory markers.** On the CPU host, cases are killed at 48 GB of
+- **No MACE in LAMMPS on lestrade.** The Symmetrix tree is moriarty's
+  build, compiled for its AVX-512 CPU; on the i9-14900K (no AVX-512) it dies
+  with an illegal instruction while loading the model, so lestrade's `mace`
+  gate is an error and only MACE standalone (PyTorch) runs there.
+- **Out-of-memory markers.** On the CPU hosts, cases are killed at 48 GB of
   resident memory (the node has 62 GB); on GPUs they stop at the device
   limit. A dotted vertical line marks the first size that did not fit.
-- **Follow-ups:** ACEpotentials.jl rows (direct evaluation, and the `--trim`
-  LAMMPS export) and the production ace-jax model (linear + species +
-  density embedding) will be added later.
+- **ACEpotentials.jl lines are CPU only,** float64, and their trim libraries
+  are compiled for the CPU they are built on (`models.py acepotentials-trim`
+  rebuilds on another CPU model); the `.so` links the Julia runtime of the
+  build machine by absolute path.
+- **Follow-up:** the production ace-jax model (linear + species + density
+  embedding) will be added later.
 
 ## Figures
 
@@ -162,7 +213,7 @@ Hollow markers: ace-jax chose the sparse layout. Where a case was run more than 
 
 ![scaling_throughput_float64_medium](figs/scaling_throughput_float64_medium.png)
 
-*Throughput vs system size (float64, medium models): solid = standalone, dashed = LAMMPS. “fn”: basis functions per central element (linear ACE is 2–14× the PACE size).*
+*Throughput vs system size (float64, medium models): solid = standalone, dashed = LAMMPS. “fn”: basis functions per central element (linear ACE is 2–14× the PACE size). The ACEpotentials.jl lines (CPU only) evaluate the linear ACE model: direct (splined, as ace-jax) and its trim library (exact radials, a spline error apart).*
 
 ![scaling_throughput_float32_medium](figs/scaling_throughput_float32_medium.png)
 
@@ -219,6 +270,18 @@ Hollow markers: ace-jax chose the sparse layout. Where a case was run more than 
 
 | host | system | code | mode | largest that ran | first out of memory |
 |---|---|---|---|---|---|
+| lestrade-cpu | Cantor | ace-jax (linear ACE) | standalone | 32768 | — |
+| lestrade-cpu | Cantor | ace-jax (PACE model) | standalone | 32768 | — |
+| lestrade-cpu | Cantor | ACEpotentials.jl (linear ACE, direct) | standalone | 32768 | — |
+| lestrade-cpu | Cantor | ACEpotentials.jl (linear ACE, trim library in LAMMPS) | lammps | 32768 | — |
+| lestrade-cpu | Cantor | MACE | standalone | 4096 | 8192 |
+| lestrade-cpu | Cantor | ML-PACE | lammps | 32768 | — |
+| lestrade-cpu | SiGe | ace-jax (linear ACE) | standalone | 32768 | — |
+| lestrade-cpu | SiGe | ace-jax (PACE model) | standalone | 32768 | — |
+| lestrade-cpu | SiGe | ACEpotentials.jl (linear ACE, direct) | standalone | 32768 | — |
+| lestrade-cpu | SiGe | ACEpotentials.jl (linear ACE, trim library in LAMMPS) | lammps | 32768 | — |
+| lestrade-cpu | SiGe | MACE | standalone | 8192 | 16384 |
+| lestrade-cpu | SiGe | ML-PACE | lammps | 32768 | — |
 | modal-a100 | Cantor | ace-jax (linear ACE) | lammps | 2097152 | — |
 | modal-a100 | Cantor | ace-jax (linear ACE) | standalone | 2097152 | — |
 | modal-a100 | Cantor | ace-jax (linear ACE, learned radial, analytic) | lammps | 2097152 | — |
@@ -284,6 +347,44 @@ Hollow markers: ace-jax chose the sparse layout. Where a case was run more than 
 
 | host | system | code | mode | size | dtype | atoms | atom-steps/s |
 |---|---|---|---|---|---|---|---|
+| lestrade-cpu | Cantor | ace-jax (linear ACE) | standalone | large | float64 | 2048 | 1.51e+04 |
+| lestrade-cpu | SiGe | ace-jax (linear ACE) | standalone | large | float64 | 2048 | 7.68e+03 |
+| lestrade-cpu | Cantor | ace-jax (linear ACE) | standalone | medium | float64 | 2048 | 5.26e+04 |
+| lestrade-cpu | SiGe | ace-jax (linear ACE) | standalone | medium | float64 | 2048 | 3.5e+04 |
+| lestrade-cpu | Cantor | ace-jax (linear ACE) | standalone | small | float64 | 2048 | 1.21e+05 |
+| lestrade-cpu | SiGe | ace-jax (linear ACE) | standalone | small | float64 | 2048 | 1.77e+05 |
+| lestrade-cpu | Cantor | ace-jax (PACE model) | standalone | large | float64 | 2048 | 1.15e+04 |
+| lestrade-cpu | SiGe | ace-jax (PACE model) | standalone | large | float64 | 2048 | 5.91e+03 |
+| lestrade-cpu | Cantor | ace-jax (PACE model) | standalone | medium | float64 | 2048 | 4.03e+04 |
+| lestrade-cpu | SiGe | ace-jax (PACE model) | standalone | medium | float64 | 2048 | 2.52e+04 |
+| lestrade-cpu | Cantor | ace-jax (PACE model) | standalone | small | float64 | 2048 | 1.1e+05 |
+| lestrade-cpu | SiGe | ace-jax (PACE model) | standalone | small | float64 | 2048 | 9.78e+04 |
+| lestrade-cpu | Cantor | ACEpotentials.jl (linear ACE, direct) | standalone | large | float64 | 2048 | 4.6e+04 |
+| lestrade-cpu | SiGe | ACEpotentials.jl (linear ACE, direct) | standalone | large | float64 | 2048 | 5.21e+04 |
+| lestrade-cpu | Cantor | ACEpotentials.jl (linear ACE, direct) | standalone | medium | float64 | 2048 | 5.17e+04 |
+| lestrade-cpu | SiGe | ACEpotentials.jl (linear ACE, direct) | standalone | medium | float64 | 2048 | 8.45e+04 |
+| lestrade-cpu | Cantor | ACEpotentials.jl (linear ACE, direct) | standalone | small | float64 | 2048 | 6.84e+04 |
+| lestrade-cpu | SiGe | ACEpotentials.jl (linear ACE, direct) | standalone | small | float64 | 2048 | 7.91e+04 |
+| lestrade-cpu | Cantor | ACEpotentials.jl (linear ACE, trim library in LAMMPS) | lammps | large | float64 | 2048 | 6.22e+05 |
+| lestrade-cpu | SiGe | ACEpotentials.jl (linear ACE, trim library in LAMMPS) | lammps | large | float64 | 2048 | 4.52e+05 |
+| lestrade-cpu | Cantor | ACEpotentials.jl (linear ACE, trim library in LAMMPS) | lammps | medium | float64 | 2048 | 9.36e+05 |
+| lestrade-cpu | SiGe | ACEpotentials.jl (linear ACE, trim library in LAMMPS) | lammps | medium | float64 | 2048 | 1.04e+06 |
+| lestrade-cpu | Cantor | ACEpotentials.jl (linear ACE, trim library in LAMMPS) | lammps | small | float64 | 2048 | 1.37e+06 |
+| lestrade-cpu | SiGe | ACEpotentials.jl (linear ACE, trim library in LAMMPS) | lammps | small | float64 | 2048 | 2.12e+06 |
+| lestrade-cpu | Cantor | MACE | standalone | large | float64 | 2048 | 125 |
+| lestrade-cpu | SiGe | MACE | standalone | large | float64 | 2048 | 154 |
+| lestrade-cpu | Cantor | MACE | standalone | medium | float64 | 2048 | 266 |
+| lestrade-cpu | SiGe | MACE | standalone | medium | float64 | 2048 | 331 |
+| lestrade-cpu | Cantor | MACE | standalone | mh1 | float64 | 2048 | 118 |
+| lestrade-cpu | SiGe | MACE | standalone | mh1 | float64 | 2048 | 166 |
+| lestrade-cpu | Cantor | MACE | standalone | small | float64 | 2048 | 663 |
+| lestrade-cpu | SiGe | MACE | standalone | small | float64 | 2048 | 841 |
+| lestrade-cpu | Cantor | ML-PACE | lammps | large | float64 | 2048 | 2.17e+05 |
+| lestrade-cpu | SiGe | ML-PACE | lammps | large | float64 | 2048 | 1.75e+05 |
+| lestrade-cpu | Cantor | ML-PACE | lammps | medium | float64 | 2048 | 5.62e+05 |
+| lestrade-cpu | SiGe | ML-PACE | lammps | medium | float64 | 2048 | 4.17e+05 |
+| lestrade-cpu | Cantor | ML-PACE | lammps | small | float64 | 2048 | 1.4e+06 |
+| lestrade-cpu | SiGe | ML-PACE | lammps | small | float64 | 2048 | 7.69e+05 |
 | modal-a100 | Cantor | ace-jax (linear ACE) | lammps | large | float64 | 8192 | 1.27e+06 |
 | modal-a100 | SiGe | ace-jax (linear ACE) | lammps | large | float64 | 8192 | 1.39e+06 |
 | modal-a100 | Cantor | ace-jax (linear ACE) | lammps | medium | float64 | 8192 | 8.47e+05 |
@@ -427,6 +528,10 @@ Hollow markers: ace-jax chose the sparse layout. Where a case was run more than 
 
 | host | code | mode | median compile / export (s) |
 |---|---|---|---|
+| lestrade-cpu | ace-jax (linear ACE) | standalone | 0.5 |
+| lestrade-cpu | ace-jax (PACE model) | standalone | 0.7 |
+| lestrade-cpu | ACEpotentials.jl (linear ACE, direct) | standalone | 0.6 |
+| lestrade-cpu | MACE | standalone | 4.0 |
 | modal-a100 | ace-jax (linear ACE) | lammps | 2.1 |
 | modal-a100 | ace-jax (linear ACE) | standalone | 4.5 |
 | modal-a100 | ace-jax (linear ACE, learned radial, analytic) | lammps | 2.3 |
@@ -453,6 +558,7 @@ Hollow markers: ace-jax chose the sparse layout. Where a case was run more than 
 
 ## Versions
 
+- **lestrade-cpu**: ACEpotentials 0.10.2, ACEpotentials_rev v0.10.2, EquivariantTensors 0.4.3, JuliaC 0.3.10, Polynomials4ML 0.5.8, ace-jax 0.1.0, ase 3.29.0, jax 0.11.2, jaxlib 0.11.2, julia 1.12.6, mace-torch 0.3.16, matscipy 1.2.0, matscipy-neighbours 0.1.0, python 3.12.8, torch 2.14.0
 - **modal-a100**: ase 3.29.0, jax 0.11.2, jaxlib 0.11.2, mace-torch 0.3.16, matscipy 1.2.0, matscipy-neighbours 1.0.0, python 3.12.1, torch 2.14.0
 - **moriarty-cpu**: ace-jax 0.1.0, ase 3.29.0, jax 0.11.2, jaxlib 0.11.2, mace-torch 0.3.16, matscipy 1.2.0, matscipy-neighbours 0.1.0, python 3.12.8, torch 2.14.0
 - **moriarty-gpu**: ace-jax 0.1.0, ase 3.29.0, jax 0.11.2, jaxlib 0.11.2, mace-torch 0.3.16, matscipy 1.2.0, matscipy-neighbours 0.1.0, python 3.12.8, torch 2.14.0

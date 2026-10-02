@@ -8,6 +8,12 @@ neighbour-list backend and `rebuilds` (calls that built a neighbour list),
 and `spline_tol` (asked for: the row's, else "auto") with `splined`
 (`calc.splined`: what the lean form splined, None when exact).
 
+ACEpotentials.jl (`acepotentials`): julia/run_standalone.jl in a subprocess,
+given the structure as extxyz and the same displaced positions (`md_positions`);
+its call_s is the median AtomsCalculators.energy_forces_virial call (neighbour
+list included), compile_s the first call, peak_bytes Julia's Sys.maxrss(), with
+each call's GC share (`gc_frac`, median) and the npz identity checks.
+
 The timed calls are MD-like (`md_like: true`): each first displaces every atom
 by N(0, 1e-3 A), a random walk seeded at 0, as consecutive MD steps would, so
 ace-jax takes its skin-list reuse path (the default skin) and MACE sees moving
@@ -15,6 +21,7 @@ atoms too.  The first (compile) call, and `energy`, use the undisplaced
 structure.
 """
 import json
+import pathlib
 import platform
 import statistics
 import sys
@@ -65,6 +72,48 @@ def _threads():
         if os.environ.get(v):
             out[v] = os.environ[v]
     return out
+
+
+def md_positions(at, reps, seed=0):
+    """(reps, n, 3): the positions of each timed call, the random walk `run_case`
+    applies before every timed call (N(0, 1e-3 A) per step, default_rng(seed))."""
+    import numpy as np
+    rng, p, out = np.random.default_rng(seed), at.positions.copy(), []
+    for _ in range(reps):
+        p = p + rng.normal(0, 1e-3, p.shape)
+        out.append(p)
+    return np.array(out)
+
+
+def _acepotentials(row, at, dtype, reps, out):
+    """The direct ACEpotentials.jl case (one Julia subprocess, JULIA_NUM_THREADS as
+    sweep.child_env sets it)."""
+    import os
+    import tempfile
+
+    import numpy as np
+    from scaling import acepot
+    if dtype != "float64":
+        raise ValueError(f"acepotentials runs float64 only, not {dtype}")
+    cfg = acepot.julia_config()
+    with tempfile.TemporaryDirectory(prefix="acepot_") as work:
+        w = pathlib.Path(work)
+        acepot.roundtrip(at, w / "x.extxyz")
+        np.save(w / "pos.npy", md_positions(at, reps))
+        (w / "spec.json").write_text(json.dumps(row["ace1"]))
+        threads = int(os.environ.get("JULIA_NUM_THREADS") or out["threads"]["cpus"])
+        res = acepot.run_julia(cfg, "run_standalone.jl", [str(w / "spec.json"), str(w / "x.extxyz"),
+                                                          str(w / "pos.npy")], threads=threads)
+    out["platform"] = "cpu"
+    for k in ("call_s", "call_s_min", "call_s_max", "compile_s", "energy", "gc_frac", "gc_s",
+              "alloc_bytes", "model_build_s", "identity", "n_calls"):
+        if k in res:
+            out[k] = res[k]
+    out["threads"]["julia"] = res.get("julia_threads")
+    out["versions"].update(res.get("versions", {}))
+    out["rebuilds"], out["md_like"] = None, True          # the Julia calculator lists every call
+    out["nlist"] = "ACEpotentials (every call)"
+    return res.get("peak_bytes")
 
 
 def run_case(row, n_atoms, dtype, device, reps=10):
@@ -136,13 +185,17 @@ def run_case(row, n_atoms, dtype, device, reps=10):
             out["rebuilds"], out["md_like"] = None, True
             if device == "gpu":
                 torch.cuda.synchronize()
+        elif row["code"] == "acepotentials":
+            out["peak_bytes"] = _acepotentials(row, at, dtype, reps, out)
         else:
             raise ValueError(f"no standalone runner for {row['code']}")
     except Exception as ex:                                        # OOM etc. are data
         msg = repr(ex)
         out["status"] = "oom" if ("RESOURCE_EXHAUSTED" in msg or "out of memory" in msg.lower()) else "error"
         out["error"] = msg[:300]
-    out["peak_bytes"] = _peak(device, row["code"])
+    if row["code"] != "acepotentials":        # the Julia process's own Sys.maxrss()
+        out["peak_bytes"] = _peak(device, row["code"])
+    out.setdefault("peak_bytes", None)
     return out
 
 

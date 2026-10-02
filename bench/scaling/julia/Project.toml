@@ -1,0 +1,41 @@
+# Julia 1.12 env for the ACEpotentials.jl direct + PR 309 (juliac --trim LAMMPS export) benchmark lines.
+# ACEpotentials pinned to the released v0.10.2 (tag commit 1aa77313: PR 309 squash-merged, with the exporter
+# fixes for ace1_model-derived models and main's #326/#327), from git: v0.10.2 is not yet in the General
+# registry (only 0.10.1 is). TODO: once v0.10.2 is registered, drop the ACEpotentials [sources] entry and pin
+# it through [compat] (ACEpotentials = "=0.10.2") from the registry instead.
+# Polynomials4ML stays at v0.5.8 from git: v0.10.2's export/Project.toml still pins it that way.
+# Instantiate with: julia +1.12.6 --project=bench/scaling/julia -e "using Pkg; Pkg.instantiate()"
+[deps]
+ACEfit = "ad31a8ef-59f5-4a01-b543-a85c2f73e95c"
+ACEpotentials = "3b96b61c-0fcc-4693-95ed-1ef9f35fcc53"
+AtomsBase = "a963bdd2-2df7-4f54-a1ee-49d51e6be12a"
+AtomsBuilder = "f5cc8831-eeb7-4288-8d9f-d6c1ddb77004"
+AtomsCalculators = "a3e0e189-c65a-42c1-833c-339540406eb1"
+AtomsCalculatorsUtilities = "9855a07e-8816-4d1b-ac92-859c17475477"
+BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
+ConcreteStructs = "2569d6c7-a4a2-43d3-a901-331e8e4be471"
+DecoratedParticles = "023d0394-cb16-4d2d-a5c7-724bed42bbb6"
+DelimitedFiles = "8bb1440f-4735-579b-a4ab-409b98df4dab"
+EquivariantTensors = "5e107534-7145-4f8f-b06f-47a52840c895"
+ExtXYZ = "352459e4-ddd7-4360-8937-99dcb397b478"
+JSON = "682c06a0-de6a-54ab-a142-c8b1cf79cde6"
+JuliaC = "acedd4c2-ced6-4a15-accc-2607eb759ba2"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+Lux = "b2108857-7c20-44ae-9111-449ecde12c47"
+LuxCore = "bb33d45b-7691-41d6-9220-0943567d0623"
+NPZ = "15e1cf62-19b3-5cfa-8e77-841668bca605"
+Polynomials4ML = "03c4bcba-a943-47e9-bfa1-b1661fc2974f"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
+SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
+SpheriCart = "5caf2b29-02d9-47a3-9434-5931c85ba645"
+StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
+Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
+Unitful = "1986cc42-f94f-5a68-af5c-568840ba703d"
+YAML = "ddb6d928-2868-570f-bddf-ab3f9cf99eb6"
+
+[sources]
+ACEpotentials = {url = "https://github.com/ACEsuit/ACEpotentials.jl", rev = "v0.10.2"}
+Polynomials4ML = {url = "https://github.com/ACEsuit/Polynomials4ML.jl", rev = "v0.5.8"}
+
+[compat]
+julia = "1.12"
