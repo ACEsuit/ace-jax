@@ -107,7 +107,7 @@ def with_sources(img):
     return (img
     .add_local_dir(src_root / "src", "/ace-jax/src")
     .add_local_dir(ROOT / "bench", "/ace-jax/bench",
-                   ignore=["**/__pycache__", "pace_modal/*.json*", "scaling/results/*"])
+                   ignore=["**/__pycache__", "scaling/results/*"])
     .add_local_dir(ROOT / "julia", "/ace-jax/julia"))
 
 
