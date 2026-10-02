@@ -32,7 +32,10 @@ dependencies = [
   "pyyaml>=6",          # .yace (PACE) model files
   # training/eval data reader (libAtoms C parser, binary wheels): labels come back
   # as written, independent of ASE's calculator-key handling (see fit/xyz.py)
-  "extxyz>=0.4.5",
+  "extxyz>=0.4.6",
+  # aj eval writes its extxyz output through the ASE plugin (create_calc=False keeps every
+  # label under its own name); 0.1.2 / extxyz 0.4.6 fixed a transposed Lattice on write
+  "ase-extxyz>=0.1.2",
   # the fit pipeline: the theta-MAP (numpyro SVI) and the L-BFGS / Adam optimisers (optax)
   "numpyro>=0.16",
   "optax>=0.2",

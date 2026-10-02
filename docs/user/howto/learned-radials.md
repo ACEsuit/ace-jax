@@ -17,8 +17,11 @@ tens of minutes on a GPU for production datasets of a few hundred cells.
 ## On the command line
 
 ```bash
-aj fit --order 3 --max-degree 10 --train train.xyz --test test.xyz $K \
-    --e0 lsq --m-per-species 0 --opt lbfgs --learn-radial --out fit
+aj fit --order 3 --max-degree 10 \
+    --train train.xyz --test test.xyz \
+    --e0 lsq --m-per-species 0 --opt lbfgs \
+    --learn-radial \
+    --out fit
 ```
 
 `--learn-radial` learns the radials before the fit, on a seeded hold-out of
@@ -50,12 +53,11 @@ from ace_jax.fit.pipeline.problem import build_problem
 from ace_jax.fit.radial_learn import fit_radial, save_result
 from ace_jax.fit.radial_model import rnl_degrees, to_analytic
 
-keys = dict(energy_key="dft_energy", force_key="dft_force", virial_key="dft_virial")
 save_npz("basis.npz", build_basis(BasisSpec(order=3, max_degree=10, elements=("Si",))))
 
 # the linear problem on the fit split, with the validation split as its test set
 cfg = FitConfig(model="basis.npz", arm="linear", m_per_species=0, e0="lsq", opt="lbfgs",
-                r0=2.35, rungs=("map",), **keys).validate()
+                r0=2.35, rungs=("map",)).validate()
 d = load_fit_data(cfg, train="fit.xyz", test="val.xyz")
 model, _ = to_analytic(d.model, 12)                      # widen to n_q = 12 polynomials
 prob = build_problem(cfg, d).prob._replace(model=model)
@@ -72,8 +74,10 @@ Then refit the readout on the whole training set and use the model as any
 other:
 
 ```bash
-aj fit --model learned/model.npz --train train.xyz --test test.xyz $K \
-    --e0 lsq --m-per-species 0 --opt lbfgs --r0 2.35 --out fit_learned
+aj fit --model learned/model.npz --r0 2.35 \
+    --train train.xyz --test test.xyz \
+    --e0 lsq --m-per-species 0 --opt lbfgs \
+    --out fit_learned
 ```
 
 ### Options
@@ -97,7 +101,6 @@ split:
 
 ```bash
 python bench/learn_radial/run.py --model basis.npz --data train.xyz --out learned \
-    --energy-key dft_energy --force-key dft_force --virial-key dft_virial \
     --ntrain 26 --nval 13 --r0 2.35 --n-q 12 --steps 40 --lam-grid 0,1e-2
 ```
 

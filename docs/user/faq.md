@@ -100,7 +100,7 @@ basis does not store it; the message says so.
 
 ### `coverage` is far below 0.68 and `rms_z` far above 1
 
-The linear model's predictive σ comes from the Bayesian posterior alone,
+The linear model's predictive $\sigma$ comes from the Bayesian posterior alone,
 which does not account for the model being unable to fit the data exactly.
 On small datasets it is typically too small. See
 [Reading the metrics](concepts.md#reading-the-metrics).

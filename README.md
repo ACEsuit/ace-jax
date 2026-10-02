@@ -298,14 +298,14 @@ K="--energy-key dft_energy --force-key dft_force --virial-key dft_virial"
 # linear ACE (M = 0): Bayesian linear regression, fitted model -> out_linear/model.npz
 aj fit --model si.npz --train train.xyz --test test.xyz $K \
     --m-per-species 0 --rungs map --r0 2.35 --out out_linear
-aj eval --model out_linear/model.npz --data test.xyz $K --forces
+aj eval --model out_linear/model.npz --data test.xyz $K --out pred.xyz      # RMSE table; predictions as extxyz
 
 # hybrid ACE + GP: 6 inducing sites per species, best of 3 L-BFGS MAP starts
 # -> out_gp/gp_model.npz  (--rungs map,laplace adds hyperparameter draws)
 aj fit --model si.npz --train train.xyz --test test.xyz $K \
     --m-per-species 6 --opt lbfgs --map-restarts 3 --map-steps 40 \
     --rungs map --r0 2.35 --out out_gp
-aj eval --model out_gp/gp_model.npz --data test.xyz $K --forces --out pred.csv   # + energy_std
+aj eval --model out_gp/gp_model.npz --data test.xyz $K --out pred.xyz   # + ace_energy_std, ace_forces_std
 
 # large data: PCA density features, design rows cached in host RAM, an OOD set
 aj fit --model si.npz --train train.xyz --test test.xyz --ood ood.xyz $K \
@@ -320,7 +320,7 @@ aj fit --model si.npz --train train.xyz --test test.xyz $K \
 aj fit --model si.npz --train train.xyz --test test.xyz $K \
     --m-per-species 0 --uq ard --opt lbfgs --r0 2.35 --out out_ard
 aj eval --model out_ard/model.npz --posterior out_ard/posterior.npz --data big.xyz $K \
-    --forces --per-atom atoms_std.xyz          # per-atom forces_std, e.g. to colour a crack tip
+    --out atoms_std.xyz                        # per-atom ace_forces_std, e.g. to colour a crack tip
 
 # one file split by a seeded permutation, E0 by least squares
 aj fit --model si.npz --data all.xyz --ntrain 40 --ntest 10 --e0 lsq $K \

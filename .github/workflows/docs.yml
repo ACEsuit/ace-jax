@@ -1,8 +1,8 @@
 name: docs
 # The user documentation site (MkDocs Material, docs_dir docs/user) and the
 # tutorial notebooks.
-#  - pull requests: build the site with --strict and run every tutorial
-#    notebook headless on CPU (each must run top to bottom without an error);
+#  - pull requests: build the site with --strict; the build runs every tutorial
+#    notebook on CPU to render its page (each must run top to bottom without an error);
 #  - push to main: the same, then deploy the site to GitHub Pages.
 # Deploying needs the repository's Pages source set to "GitHub Actions"
 # (Settings -> Pages -> Build and deployment -> Source).
@@ -37,8 +37,10 @@ concurrency:
 
 jobs:
   build:
+    # The tutorial pages are rendered by running each notebook (docs/build_tutorials.py,
+    # from the mkdocs hook): a notebook whose cell raises fails the build.
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -48,9 +50,10 @@ jobs:
         run: |
           uv sync --python 3.12 --frozen
           uv pip install -r docs/requirements.txt
-      - name: Build the site (strict)
+      - name: Build the site (strict), rendering the tutorial notebooks
         env:
           JAX_PLATFORMS: cpu
+          XLA_PYTHON_CLIENT_PREALLOCATE: "false"
         run: uv run --no-sync mkdocs build --strict
       - name: Upload the Pages artifact
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -58,34 +61,9 @@ jobs:
         with:
           path: site
 
-  notebooks:
-    # Headless smoke run of each tutorial against this checkout (not the git
-    # URL in the notebooks' PEP 723 header): a marimo notebook run as a script
-    # executes every cell and exits non-zero if any cell raises.  Each takes a
-    # few minutes on CPU.
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        notebook: [first_fit_si, learned_radials_si]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
-      - name: Install ace-jax, marimo and matplotlib
-        run: |
-          uv sync --python 3.12 --frozen
-          uv pip install -r docs/requirements.txt matplotlib
-      - name: Run ${{ matrix.notebook }}
-        env:
-          JAX_PLATFORMS: cpu
-          XLA_PYTHON_CLIENT_PREALLOCATE: "false"
-        working-directory: ${{ runner.temp }}
-        run: uv run --no-sync --project "$GITHUB_WORKSPACE" python "$GITHUB_WORKSPACE/docs/user/tutorials/notebooks/${{ matrix.notebook }}.py"
-
   deploy:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [build, notebooks]
+    needs: [build]
     runs-on: ubuntu-latest
     permissions:
       pages: write

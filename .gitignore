@@ -16,3 +16,7 @@ dist-linux/
 # marimo session caches (written by `marimo export`/`edit`); also the docs build output
 __marimo__/
 site/
+# tutorial pages rendered from the notebooks by docs/build_tutorials.py
+docs/user/tutorials/first-fit.md
+docs/user/tutorials/learned-radials.md
+docs/user/tutorials/*_files/

@@ -51,9 +51,12 @@ aj fit --model si.npz --train train.xyz --test test.xyz $K \
     --r0 2.35 --out out_gp                                            # ACE + GP
 
 # 3. evaluate the fitted model on any extxyz
-aj eval --model out_linear/model.npz --data new.xyz $K --forces --out pred.csv
-aj eval --model out_gp/gp_model.npz  --data new.xyz $K --forces --out pred.csv  # adds energy_std
-aj eval --model model.yace --data new.xyz $K --forces                            # PACE works too
+#    prints an E/F/V RMSE table per config_type (labels present); --out writes the
+#    structures back as extxyz, every label kept, plus ace_energy, ace_forces, ace_stress
+#    (written by the ase-extxyz plugin; read it with ase.io.read(f, ':', format='cextxyz'))
+aj eval --model out_linear/model.npz --data new.xyz $K --out pred.xyz
+aj eval --model out_gp/gp_model.npz  --data new.xyz $K --out pred.xyz   # adds ace_energy_std, ace_forces_std
+aj eval --model model.yace --data new.xyz $K                            # PACE works too; --prefix renames ace_
 ```
 
 `aj fit` needs a basis — `--order/--max-degree` (built in the fit; `--elements`
@@ -105,6 +108,9 @@ These constraints are validated up front. A bad combination raises a
 
 ## Outputs (`--out DIR`)
 
+- **Log:** after the fit, an E/F/V RMSE table per `config_type` for each split
+  (E and V in meV/atom, F in eV/Å); `aj eval` prints the same table.
+
 - `metrics.csv`, `metrics_ood.csv`: one row per rung × quantity (E in meV/atom,
   F in eV/Å, V). Columns are `rmse`, `mae`, `crps`, `coverage` (fraction
   within ±1σ, ≈0.68 when calibrated), `rho` (error–sigma rank correlation), `rms_z` (≈1 when
@@ -119,7 +125,7 @@ These constraints are validated up front. A bad combination raises a
     (evidence, prior scales, κ, λ, held-out NLL and rms-z; `lam_incl_own` is the λ the
     held-out atoms' own training clusters would give, for comparison only).
     `ACECalculator(model, posterior="out_ard/posterior.npz")` and
-    `aj eval --posterior out_ard/posterior.npz` add a `forces_std` result: per-atom
+    `aj eval --posterior out_ard/posterior.npz` (per-atom `ace_forces_std` in its `--out` extxyz) add a `forces_std` result: per-atom
     calibrated force uncertainty. `--uq ard` also changes the mean: `model.npz` is the
     ARD posterior mean, not the BLR/MAP mean.
   - `gp_model.npz` (GP): self-contained, loaded by `GPCalculator.from_file` and

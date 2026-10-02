@@ -1,7 +1,10 @@
 # Tutorials
 
 The tutorials are [marimo](https://marimo.io) notebooks: plain Python files
-that run as interactive notebooks, as apps or as scripts. Each one lists its
+that run as interactive notebooks, as apps or as scripts. Each tutorial page on
+this site is the notebook itself, run on a CPU when the site was built, so it
+can be read without running anything; the top of each page has the one command
+that opens it interactively. Each one lists its
 own dependencies (PEP 723 script metadata), so a sandboxed run installs
 exactly what it needs. Each runs on a laptop CPU in a few minutes and needs
 no GPU or cloud account.
@@ -20,24 +23,26 @@ a **checkpoint** after each step that says whether it worked, and
 
 ## Running a notebook
 
-=== "molab (in the browser)"
+=== "One command (recommended)"
 
-    Click the **Open in molab** badge on a tutorial's page. It opens a
-    preview of the notebook on [molab](https://molab.marimo.io), marimo's
-    hosted service; from there you can run it in the cloud, which installs its
-    dependencies (molab asks you to sign in to run notebooks).
-
-=== "Locally, sandboxed"
-
-    With [uv](https://docs.astral.sh/uv/) installed:
+    With [uv](https://docs.astral.sh/uv/) installed (`curl -LsSf https://astral.sh/uv/install.sh | sh`
+    on Linux and macOS), run a tutorial straight from GitHub:
 
     ```bash
-    curl -LO https://raw.githubusercontent.com/ACEsuit/ace-jax/main/docs/user/tutorials/notebooks/first_fit_si.py
-    uvx marimo edit --sandbox first_fit_si.py
+    uvx marimo edit --sandbox https://raw.githubusercontent.com/ACEsuit/ace-jax/main/docs/user/tutorials/notebooks/first_fit_si.py
     ```
 
-    `--sandbox` creates a throwaway environment from the notebook's own
-    dependency list.
+    marimo downloads the notebook, `--sandbox` builds a throwaway environment
+    from the notebook's own dependency list (the first run takes a minute
+    or so), and the notebook opens in your browser. No account is needed.
+    Edits go to a temporary copy: to keep them, download the file first
+    (`curl -LO https://raw.githubusercontent.com/ACEsuit/ace-jax/main/docs/user/tutorials/notebooks/first_fit_si.py`) and run `uvx marimo edit --sandbox first_fit_si.py`.
+
+=== "molab (in the browser)"
+
+    Each tutorial page links to it on [molab](https://molab.marimo.io),
+    marimo's hosted service. The preview is free; running the notebook needs
+    a (free) molab sign-in, with a GitHub or Google account.
 
 === "Locally, in your environment"
 

@@ -15,6 +15,8 @@ validation:            # with strict, broken links and anchors fail the build
 
 theme:
   name: material
+  logo: assets/acesuit-logo.png     # the ACEsuit GitHub organisation's logo
+  favicon: assets/acesuit-logo.png
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default
@@ -63,6 +65,8 @@ markdown_extensions:
   - def_list
   - md_in_html
   - tables
+  - pymdownx.arithmatex:          # $...$ / $$...$$ rendered by MathJax (javascripts/mathjax.js)
+      generic: true
   - pymdownx.details
   - pymdownx.highlight:
       anchor_linenums: true
@@ -76,6 +80,13 @@ markdown_extensions:
       alternate_style: true
   - toc:
       permalink: true
+
+extra_css:
+  - stylesheets/extra.css
+
+extra_javascript:
+  - javascripts/mathjax.js
+  - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
 
 not_in_nav: |
   /tutorials/data/**
