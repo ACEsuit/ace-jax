@@ -49,14 +49,14 @@ def ard_statistics(theta, prob, ds, mode):
         return joint_ard_stats(linear_statistics(prob.model, prob.cfg, ds))
     if mode != "sequential":
         raise ValueError(f"ard mode must be 'joint' or 'sequential', got {mode!r}")
-    from .rows import linear_rows
+    from .rows import linear_rows_bounded
     ls = np.array([float(getattr(theta, f"log_sigma_{q}")) for q in "EFV"])
     inv = jnp.asarray(np.exp(-ls))
     L = prob.cfg.len_basis
 
     def body(acc, batch):
         M, bv = acc
-        r = linear_rows(prob.model, prob.cfg, batch)[0]
+        r = linear_rows_bounded(prob.model, prob.cfg, batch)
         for k, (Phi, y, w) in enumerate(((r.E, batch.y_E, batch.w_E),
                                          (r.F.reshape(-1, L), batch.y_F.reshape(-1), jnp.repeat(batch.w_F, 3)),
                                          (r.V.reshape(-1, L), batch.y_V.reshape(-1), jnp.repeat(batch.w_V, 6)))):
@@ -389,14 +389,14 @@ def sandwich_scores(post, prob, ds, sig):
     g~_c = D^-1 sum_{i in c} rho_i psi_i over every E/F/V row i of config c, psi_i = phi_i w_i/sigma_q,
     rho_i = (y_i - phi_i c) w_i/sigma_q.  Padded configs (cfg_mask) are dropped; padded nodes carry
     node_cfg == C and land in a discarded extra segment."""
-    from .rows import linear_rows
+    from .rows import linear_rows_bounded
     L = prob.cfg.len_basis
     c, dinv = jnp.asarray(post.mean), jnp.asarray(post.dinv)
     inv = jnp.asarray(1.0 / np.asarray(sig, float))
 
     @jax.jit
     def scores(bt):
-        r = linear_rows(prob.model, prob.cfg, bt)[0]
+        r = linear_rows_bounded(prob.model, prob.cfg, bt)
         C = r.E.shape[0]
         P = jnp.concatenate([r.E, r.F.reshape(-1, L), r.V.reshape(-1, L)])
         y = jnp.concatenate([bt.y_E, bt.y_F.reshape(-1), bt.y_V.reshape(-1)])
@@ -432,7 +432,7 @@ def _force_nll(e2, s2, kappa):
     return float(np.mean(e2 / (2 * v) + 1.5 * np.log(2 * np.pi * v)))
 
 
-def predict_ard(post, prob, ds, node_chunk=256):
+def predict_ard(post, prob, ds, node_chunk=None):
     """Posterior predictive on a Dataset: means from the ARD mean; F_var the served calibrated force
     variance, E_var/V_var the untempered posterior variances.  Schema 3 (post.group_table set):
     F_var = lam_rms[g]^2 diag V per atom (g = post.groups_of(batch)), so sum_a F_var = forces_std^2.

@@ -354,8 +354,9 @@ def test_ard_stage_reuses_cached_full_statistics(monkeypatch):
 
 
 def test_predict_ard_traces_the_chunked_rows_once(tiny_linear_problem, monkeypatch):
-    """predict_ard over a multi-batch Dataset traces linear_rows_chunked ONCE.  Called eagerly,
-    its fori_loop is retraced per batch with that batch's arrays baked in as constants: an XLA
+    """predict_ard over a multi-batch Dataset traces its rows (linear_rows_bounded: unchunked here,
+    linear_rows_chunked for a batch over rows.ROWS_EDGE_BUDGET) ONCE.  Called eagerly, the chunked
+    fori_loop is retraced per batch with that batch's arrays baked in as constants: an XLA
     compile per batch (hours at the Cantor basis: ~200 prediction batches)."""
     from ace_jax.fit import rows
     from ace_jax.fit.ard import ARDEvidence, ard_posterior, ard_statistics, body_order_columns, predict_ard
@@ -371,13 +372,13 @@ def test_predict_ard_traces_the_chunked_rows_once(tiny_linear_problem, monkeypat
         post = ard_posterior(ev, ev.h0(theta), 2.0, meta)
         ref = predict_ard(post, prob, ds)
         n = {"traces": 0}
-        orig = rows.linear_rows_chunked
+        orig = rows.linear_rows_bounded
 
         def counting(*a, **k):
             n["traces"] += 1
             return orig(*a, **k)
 
-        monkeypatch.setattr(rows, "linear_rows_chunked", counting)
+        monkeypatch.setattr(rows, "linear_rows_bounded", counting)
         got = predict_ard(post, prob, ds)
     assert n["traces"] == 1
     np.testing.assert_allclose(np.asarray(got.F_var), np.asarray(ref.F_var), rtol=1e-12)

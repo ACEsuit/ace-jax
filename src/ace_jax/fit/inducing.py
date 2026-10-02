@@ -88,12 +88,32 @@ def build_pmap(cfg, scale, density=None, d=None, X=None, mask=None):
 
 
 def site_features(model, cfg, ds):
-    def one(rij, nbr, nmask, node_z):
+    """Compact descriptors X (nb, Ncap, D) and summaries S (nb, Ncap) of every node of ds.  A batch
+    over the rows' ROWS_EDGE_BUDGET is evaluated in node chunks (`rows.rows_node_chunk`): a site
+    depends only on its own neighbour row, so chunking is exact and bounds the per-edge temporaries
+    (E, width) independently of n_cap."""
+    from .rows import LINEAR_GRANULE, rows_node_chunk
+    Ncap, K = ds.nbr.shape[1:]
+    nc = rows_node_chunk(model, cfg, Ncap, K, granule=LINEAR_GRANULE)
+
+    def block(rij, nbr, nmask, node_z_all, z_c):
         n = nbr.shape[0]
         r, send, recv, m = flat_edges(rij, nbr, nmask)
-        X = model.compact_basis(r, node_z[send], node_z[recv], send, n, m)
+        X = model.compact_basis(r, z_c[send], node_z_all[recv], send, n, m)
         S = site_summary(r, send, n, cfg.r0, cfg.rcut, cfg.p, m)
         return X, S
+
+    def one(rij, nbr, nmask, node_z):
+        if nc is None:
+            return block(rij, nbr, nmask, node_z, node_z)
+        n_chunks = -(-Ncap // nc)
+        pad = n_chunks * nc - Ncap
+        padz = lambda a, v: jnp.concatenate([a, jnp.full((pad,) + a.shape[1:], v, a.dtype)])
+        ch = lambda a: a.reshape((n_chunks, nc) + a.shape[1:])
+        rp = jnp.concatenate([rij, jnp.broadcast_to(rij[-1:], (pad,) + rij.shape[1:])])   # as _rows_scan
+        X, S = jax.lax.map(lambda t: block(*t[:3], node_z, t[3]),
+                           (ch(rp), ch(padz(nbr, 0)), ch(padz(nmask, False)), ch(padz(node_z, 0))))
+        return X.reshape(-1, X.shape[-1])[:Ncap], S.reshape(-1)[:Ncap]
     with highest_precision():
         # sequential over batches: vmap would materialise every batch's edge
         # features at once (hundreds of GB at 6890 descriptors per site)

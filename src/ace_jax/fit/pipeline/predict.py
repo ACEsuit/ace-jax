@@ -35,7 +35,7 @@ def _labels(cfgs):
 def _pops_setup(cfg, d, b, stats, theta, log):
     """Ridge (auto: selected on a train hold-out), the BLR-mean path, and the test
     envelope -- run.py's POPS block verbatim in behaviour."""
-    from ..rows import linear_rows
+    from ..rows import chunked_rows_fn
     prob, out = b.prob, {}
     if cfg.pops_ridge == "auto":
         nval = max(1, int(cfg.pops_val_frac * len(d.train)))
@@ -54,9 +54,10 @@ def _pops_setup(cfg, d, b, stats, theta, log):
     path.use_mean(POPS_MEAN)
     cst = np.asarray(path.c_star)
     rowsE, rowsF = ([], [], []), ([], [])
+    rows_fn = chunked_rows_fn(prob.model, prob.cfg)
     for i in range(d.ds_test.n_batches):
         bt = jax.tree.map(lambda x_: x_[i], d.ds_test)
-        lin, _, _ = linear_rows(prob.model, prob.cfg, bt)
+        lin = rows_fn(bt)
         Lb, C = lin.E.shape[-1], bt.y_E.shape[0]
         nat_b = np.zeros(C + 1); np.add.at(nat_b, np.asarray(bt.node_cfg), np.asarray(bt.node_mask, float))
         kE = np.asarray(bt.w_E) > 0

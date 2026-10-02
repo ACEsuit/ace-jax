@@ -47,14 +47,14 @@ def press_scores(post, prob, ds, clusters, K, sig, mode="exact"):
     (block-diagonal approximation of I - H_kk over E rows, per-atom F triples and per-config V sextets).
     Only the stored Cholesky factor is used (S is never formed).  Clusters are processed batch by batch,
     so memory scales with one batch's rows; a cluster must not span batches (row_clusters guarantees it)."""
-    from .rows import linear_rows
+    from .rows import chunked_rows_fn
     if mode not in ("exact", "pushthrough", "block"):
         raise ValueError(f"press_scores: unknown mode {mode!r}")
     Lj = jnp.asarray(post.chol, jnp.float64)
     dinv = np.asarray(post.dinv, np.float64)
     c = np.asarray(post.mean, np.float64)
     L = len(c)
-    rows = jax.jit(lambda bt: linear_rows(prob.model, prob.cfg, bt)[0])
+    rows = chunked_rows_fn(prob.model, prob.cfg)
     G, lev = np.zeros((L, K)), np.zeros(K)
     done = np.zeros(K, bool)
     for i in range(ds.n_batches):

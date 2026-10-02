@@ -20,7 +20,7 @@ from .objective import posterior
 from .data import VOIGT, flat_edges
 from .metrics import crps_gaussian
 from .pops import leverage_select, pops_var
-from .rows import Rows, linear_rows, residual_inputs, residual_rows
+from .rows import _cat_rows, batch_rows_parts, linear_rows_bounded, residual_inputs
 from .stats import (DeviceRows, HostRows, _stream_pops_pointwise, available_host_bytes, host_rows_bytes,
                     sufficient_statistics)
 
@@ -108,7 +108,7 @@ def _dtc_D(theta, prob, batch, deL, deR):
 DERIV_DTC_NODE_BATCH = 4    # nodes per vmapped chunk of the force double jvp: bounds its temp
 
 
-def _dtc_deriv_residual(theta, prob, batch, X=None, J=None, res=None):
+def _dtc_deriv_residual(theta, prob, batch, X=None, J=None, res=None, JU0=None):
     """Force and virial DTC prior residuals -- the position/strain derivative of
     the energy DTC residual, so F_var, V_var are consistent with E_var (Ruling
     R30).  For a linear functional o of the residual field,
@@ -119,6 +119,7 @@ def _dtc_deriv_residual(theta, prob, batch, X=None, J=None, res=None):
     the analytic feature/summary velocities dU_i/dr, dU_i/deps -- no autodiff
     through the ACE basis, so it is cheap in the low-d density feature and does
     not build a third-order tape (the naive jacfwd(jacrev) OOMs at scale).
+    JU0 = Pmap^T J (Ncap, K, d, 3) may stand in for J (the node-chunked rows path never forms J).
     Returns Fv (Ncap, 3) and Vv (C, 6).  M == 0 (BLR limit) -> zeros."""
     spec, ind, cfg = prob.spec, prob.ind, prob.cfg
     Ncap, K = batch.nbr.shape
@@ -132,17 +133,17 @@ def _dtc_deriv_residual(theta, prob, batch, X=None, J=None, res=None):
             f"Pass deriv_dtc=False for SoR-only force/virial variance.")
     if ind.XM.shape[0] == 0:
         return jnp.zeros((Ncap, 3)), jnp.zeros((C, 6))
-    if X is None or J is None:
-        _, X, J = linear_rows(prob.model, cfg, batch)
-    if res is None:
-        res = residual_rows(theta, spec, ind, cfg, batch, X, J)
+    if X is None or (J is None and JU0 is None) or res is None:
+        _, res, X, JU0 = batch_rows_parts(theta, spec, prob.model, ind, cfg, batch,
+                                          with_X=True, with_JU0=True)
+    if JU0 is None:
+        JU0 = jnp.einsum("nkDa,Dq->nkqa", J.reshape(Ncap, K, cfg.D, 3), ind.Pmap)
     d, M = ind.XM.shape[1], ind.XM.shape[0]
     rij, send, recv, m = flat_edges(batch.rij, batch.nbr, batch.nbr_mask)
     z = batch.node_z
     U, s, Js = residual_inputs(ind, cfg, batch, X)                        # U (Ncap,d), Js (E,3)
     dw = dwarp(X @ ind.Pmap, ind.warp)                                    # (Ncap, d)
-    JU = dw[:, None, :, None] * jnp.einsum("nkDa,Dq->nkqa",
-                                           J.reshape(Ncap, K, cfg.D, 3), ind.Pmap)  # (Ncap,K,d,3)
+    JU = dw[:, None, :, None] * JU0                                       # (Ncap,K,d,3)
     Jsd = Js.reshape(Ncap, K, 3)
     ar = jnp.arange(Ncap)
 
@@ -202,10 +203,10 @@ def _dtc_deriv_residual(theta, prob, batch, X=None, J=None, res=None):
 
 
 def _predict_batch(theta, prob, mu, L, batch, dtc=True, deriv_dtc=True):
-    lin, X, J = linear_rows(prob.model, prob.cfg, batch)        # as rows.batch_rows, keeping X
-    res = residual_rows(theta, prob.spec, prob.ind, prob.cfg, batch, X, J)
-    r = Rows(jnp.concatenate([lin.E, res.E], 1), jnp.concatenate([lin.F, res.F], 2),
-             jnp.concatenate([lin.V, res.V], 2))
+    want_ju = dtc and deriv_dtc and prob.ind.XM.shape[0] > 0
+    lin, res, X, JU0 = batch_rows_parts(theta, prob.spec, prob.model, prob.ind, prob.cfg, batch,
+                                        with_X=True, with_JU0=want_ju)   # as rows.batch_rows, keeping X
+    r = _cat_rows(lin, res)
     Dt = r.E.shape[-1]
     Em, Ev = _rows_mean_var(r.E, mu, L)
     if dtc:
@@ -214,7 +215,7 @@ def _predict_batch(theta, prob, mu, L, batch, dtc=True, deriv_dtc=True):
     Vm, Vv = _rows_mean_var(r.V.reshape(-1, Dt), mu, L)
     Fv, Vv = Fv.reshape(-1, 3), Vv.reshape(-1, 6)
     if dtc and deriv_dtc:                                    # F_var, V_var = d E_var (self-consistent)
-        dFv, dVv = _dtc_deriv_residual(theta, prob, batch, X, J, res)
+        dFv, dVv = _dtc_deriv_residual(theta, prob, batch, X, res=res, JU0=JU0)
         Fv, Vv = Fv + dFv, Vv + dVv
     return Em, Ev, Fm.reshape(-1, 3), Fv, Vm.reshape(-1, 6), Vv
 
@@ -432,7 +433,7 @@ class PopsRidgePath:
 
 def _pops_batch_phi(prob, batch):
     """The linear rows (phiE (C, L), phiF (3 Ncap, L), phiV (6 C, L)) of one batch."""
-    lin, _, _ = linear_rows(prob.model, prob.cfg, batch)
+    lin = linear_rows_bounded(prob.model, prob.cfg, batch)
     L = lin.E.shape[-1]
     return lin.E, lin.F.reshape(-1, L), lin.V.reshape(-1, L)
 
