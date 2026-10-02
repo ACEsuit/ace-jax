@@ -1,12 +1,12 @@
 """Users never meet the Julia backend: not in CLI help, messages or user docs.
-(Maintainer material -- coupling/, docs/coupling-etshim-spec.md, CLAUDE.md, the
+(Maintainer material -- coupling/, docs/dev/coupling-etshim-spec.md, CLAUDE.md, the
 julia/ reference generators -- may and does talk about Julia.)"""
 import pathlib
 import re
 import subprocess
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-USER_DOCS = ["README.md", "skills/ace-jax/SKILL.md", "docs/basis.md"]
+USER_DOCS = ["README.md", "skills/ace-jax/SKILL.md"]
 # the user documentation site (docs/user); the licence page credits the bundled runtime by name
 USER_DOCS += sorted(str(f.relative_to(ROOT)) for f in (ROOT / "docs/user").rglob("*.md") if f.name != "licence.md")
 JULIA = re.compile(r"julia", re.I)

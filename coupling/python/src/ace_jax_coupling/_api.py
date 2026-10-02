@@ -73,7 +73,7 @@ def couple_raw(mb_spec, Rnl_spec, Ylm_spec) -> RawCoupling:
     """L = 0 real-basis coupling of EquivariantTensors for the given specs.
     mb_spec: bodies of (n, l); Rnl_spec: (n, l); Ylm_spec: (l, m).  All
     returned indices are 0-based; layout documented on `RawCoupling`'s fields
-    (docs/coupling-etshim-spec.md)."""
+    (docs/dev/coupling-etshim-spec.md)."""
     mb = [_pairs(bb, "mb_spec") for bb in mb_spec]
     R, Y = _pairs(Rnl_spec, "Rnl_spec"), _pairs(Ylm_spec, "Ylm_spec")
     _validate(mb, R, Y)

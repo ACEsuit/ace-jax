@@ -7,7 +7,7 @@ The analytic tensor radial is
 so for a fixed transform, envelope and polynomial set it is LINEAR in Wnlq.
 These helpers swap, widen and convert Wnlq, and build the fixed quadratic forms
 the learner needs: the empirical radial Gram Q (gauge normalisation) and the
-roughness matrix D2.  See docs/specs/2026-09-26-learned-radial-varpro-design.md.
+roughness matrix D2.  See docs/dev/specs/2026-09-26-learned-radial-varpro-design.md.
 """
 import dataclasses
 

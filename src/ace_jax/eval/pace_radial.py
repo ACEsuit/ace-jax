@@ -67,7 +67,7 @@ def _sbessel(r, rc, K):
         cos((k+1)x) = cos(kx) cos(x) - sin(kx) sin(x)
     and one reciprocal instead of a division per k: the per-edge transcendental
     cost no longer grows with K (-20% of a PACE force call,
-    docs/pace-performance-gap.md #3). Advancing sin and cos together this way
+    docs/dev/pace-performance-gap.md #3). Advancing sin and cos together this way
     (rather than the three-term Chebyshev recurrence sin((k+1)x) =
     2 cos(x) sin(kx) - sin((k-1)x), which is otherwise algebraically
     equivalent) keeps float32 error growth close to O(k * eps) instead of the
@@ -129,7 +129,7 @@ def _sbessel_mm(r, rc, K):
     recurrence fuses into one kernel that re-evaluates its chain per column, so
     its cost grows ~K^2 per edge; this form is faster from nradbase ~12 and
     slower below (the (E, K+1) sin array and the matmul cost more), which is
-    why `load_yace` chooses it per model (docs/ace-vs-pace-gap.md 4.3)."""
+    why `load_yace` chooses it per model (docs/dev/ace-vs-pace-gap.md 4.3)."""
     x = r * PI / rc
     xs = jnp.where(x == 0, 1.0, x)
     k = jnp.arange(1, max(K, 1) + 2, dtype=r.dtype)

@@ -45,9 +45,8 @@ def main():
     at = supercell(args.system, args.n)
     pos0 = at.positions.copy()
     model, meta, _ = load_yace(args.yace, dtype=dt)
-    if args.variant != "baseline":
-        import variants
-        model = variants.make(args.variant, model)
+    if args.variant != "baseline":     # the prototype variants (variants.py) are in tag archive/research-prototypes
+        raise SystemExit(f"variant {args.variant!r}: only 'baseline' runs on this branch")
     rng = np.random.default_rng(1)
     out = {"yace": args.yace, "n": args.n, "dtype": args.dtype, "variant": args.variant,
            "device": str(jax.devices()[0].device_kind)}

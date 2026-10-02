@@ -53,7 +53,7 @@ MACE_SIZES = tuple(MACE)
 # multi-head models: the head both the standalone calculator and the Symmetrix
 # export evaluate (materials PBE -- the one that fits SiGe and Cantor)
 MACE_HEAD = {"mh1": "omat_pbe"}
-# Learned-radial proxy lines (docs/learned-radial-splining.md): the medium
+# Learned-radial proxy lines (docs/dev/learned-radial-splining.md): the medium
 # linear ACE model on the analytic radial branch with perturbed weights
 # (`build_ace_learned`), evaluated as deployed -- spline_tol="auto", which
 # splines a learned radial at 1e-10 -- and kept analytic (None, exact).  Medium

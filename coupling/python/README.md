@@ -15,5 +15,5 @@ needed**, and nothing is downloaded at runtime.
   at a locally built library (development).
 
 API: `couple_raw(mb_spec, Rnl_spec, Ylm_spec) -> RawCoupling` (0-based index
-arrays; see ace-jax `docs/coupling-etshim-spec.md`). Licences of the bundled
+arrays; see ace-jax `docs/dev/coupling-etshim-spec.md`). Licences of the bundled
 components: `THIRD_PARTY_NOTICES.md`.

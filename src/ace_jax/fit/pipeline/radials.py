@@ -1,5 +1,5 @@
 """Learned tensor radials as a fit-pipeline stage (`aj fit --learn-radial`;
-docs/specs/2026-10-01-fit-learned-radials-design.md).
+docs/dev/specs/2026-10-01-fit-learned-radials-design.md).
 
 bench/learn_radial/run.py's recipe, run before the fit: a seeded hold-out of the
 training configs gates fit_radial's candidates (init + one learned per roughness

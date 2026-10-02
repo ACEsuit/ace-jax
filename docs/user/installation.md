@@ -1,6 +1,6 @@
 # Installation
 
-ace-jax needs Python 3.11, 3.12 or 3.13. It is a pure-Python package; JAX
+ace-jax needs Python 3.11 or later (tested on 3.11 to 3.14). It is a pure-Python package; JAX
 provides the compiled numerics.
 
 ```bash
