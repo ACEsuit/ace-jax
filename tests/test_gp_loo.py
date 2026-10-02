@@ -43,7 +43,9 @@ def test_loo_matches_explicit_refits():
         ref = 0.0
         s2 = {t: np.exp(2 * getattr(theta, f"log_sigma_{t}")) for t in "EFV"}
         for a in range(4):
-            rest = build_dataset([c for i, c in enumerate(configs) if i != a], meta, E0, 3)
+            # the full dataset's batch size and caps: every refit reuses one compiled pass
+            rest = build_dataset([c for i, c in enumerate(configs) if i != a], meta, E0, 2,
+                                 n_cap=ds.node_mask.shape[-1], k_cap=ds.nbr.shape[-1])
             st_a = sufficient_statistics(theta, prob.spec, model, ind, cfg, rest)
             mu, L = posterior(theta, st_a, prob)
             # config 0 is an isolated atom: alone it has no neighbours, so k_cap would be

@@ -12,7 +12,8 @@ concurrency:
 jobs:
   pytest:
     # Full pip-only suite on ONE Python, split into single-process shards across
-    # separate runners (pytest-split). Single-process is what survives long runs
+    # separate runners, whole files per shard (ACEJAX_SHARD, conftest.shard_files, balanced on
+    # .test_durations; pytest-split only records the durations). Single-process is what survives long runs
     # here (like the ladder job); xdist workers get the runner killed mid-run.
     # `-n 0` overrides tests/conftest.py, which parallelises a bare local `pytest`.
     # Each shard has its own VM + JAX compile cache. NO Julia.
@@ -31,19 +32,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
+      # Restore all three groups' caches into one dir (entries are content-hashed files, so
+      # the union is safe): a test that moves between shards when .test_durations is
+      # refreshed then still finds its compiled programs, instead of compiling cold.
       - uses: actions/cache/restore@v4
         with:
           path: .jax_cache
-          key: jaxcache-${{ runner.os }}-g${{ matrix.group }}-${{ hashFiles('uv.lock') }}-${{ github.sha }}
-          restore-keys: jaxcache-${{ runner.os }}-g${{ matrix.group }}-${{ hashFiles('uv.lock') }}-
+          key: jaxcache-${{ runner.os }}-g1-${{ hashFiles('uv.lock') }}-${{ github.sha }}
+          restore-keys: jaxcache-${{ runner.os }}-g1-${{ hashFiles('uv.lock') }}-
+      - uses: actions/cache/restore@v4
+        with:
+          path: .jax_cache
+          key: jaxcache-${{ runner.os }}-g2-${{ hashFiles('uv.lock') }}-${{ github.sha }}
+          restore-keys: jaxcache-${{ runner.os }}-g2-${{ hashFiles('uv.lock') }}-
+      - uses: actions/cache/restore@v4
+        with:
+          path: .jax_cache
+          key: jaxcache-${{ runner.os }}-g3-${{ hashFiles('uv.lock') }}-${{ github.sha }}
+          restore-keys: jaxcache-${{ runner.os }}-g3-${{ hashFiles('uv.lock') }}-
       - name: Suite shard ${{ matrix.group }}/3 (CPU JAX)
         env:
           JAX_PLATFORM_NAME: cpu
           JAX_ENABLE_X64: "1"
+          ACEJAX_SHARD: "${{ matrix.group }}/3"      # whole files per shard (conftest.shard_files)
         run: |
           cp .test_durations durations-g${{ matrix.group }}.json
-          uv run --python 3.12 --extra gp pytest -n 0 -m "not slow" --splits 3 --group ${{ matrix.group }} \
-            --splitting-algorithm least_duration \
+          uv run --python 3.12 --extra gp pytest -n 0 -m "not slow" \
             --durations-path durations-g${{ matrix.group }}.json --store-durations --clean-durations
       - uses: actions/upload-artifact@v4
         if: success()

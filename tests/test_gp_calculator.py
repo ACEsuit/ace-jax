@@ -75,27 +75,35 @@ def test_calculator_compiles_its_predictor_once():
     assert calc._predict._cache_size() == 1
 
 
+def test_slot_buckets_are_quarter_octaves():
+    from ace_jax.calc.gp import slot_bucket
+    ks = range(1, 2000)
+    assert all(slot_bucket(k) >= k for k in ks)
+    assert max(slot_bucket(k) / k for k in ks if k >= 8) <= 2 ** 0.25 + 1e-9    # <= 19% padding
+    assert len({slot_bucket(k) for k in range(39, 77)}) <= 4                       # si_tiny's range
+
+
 def test_calculator_buckets_neighbour_slots():
-    """Neighbour slots are padded to a multiple of K_BUCKET, not the exact maximum
-    neighbour count: si_tiny's 53 configs had 27 distinct exact counts (39-76), so
-    nearly every structure (and every MD step) compiled the predictor again.
-    Structures with different counts in one bucket share one compiled predictor."""
+    """Neighbour slots are padded to a quarter-octave bucket (slot_bucket), not the exact
+    maximum neighbour count: si_tiny's 53 configs had 27 distinct exact counts (39-76), so
+    nearly every structure (and every MD step) compiled the predictor again; multiples of
+    8 still gave 7 compiles.  Every dimer evaluated: one compile per bucket."""
     from ase import Atoms
-    from ace_jax.calc.gp import K_BUCKET
+    from ace_jax.calc.gp import slot_bucket
     from ace_jax.fit.data import sparse_graph
     fitted, meta, E0, configs, prob, train, draws = _fitted_si()
     rcut = float(meta["rcut"])
-    k = [int(np.bincount(sparse_graph(c.positions, c.cell, c.pbc, rcut).senders, minlength=len(c.numbers)).max())
-         for c in configs]
-    by_bucket = {}
-    for i, ki in enumerate(k):
-        by_bucket.setdefault(-(-ki // K_BUCKET), {}).setdefault(ki, i)
-    pair = next(list(v.values())[:2] for v in by_bucket.values() if len(v) >= 2)
-    assert k[pair[0]] != k[pair[1]]
+    dimers = [c for c in configs if len(c.numbers) == 2]
+    k = [int(np.bincount(sparse_graph(c.positions, c.cell, c.pbc, rcut).senders, minlength=2).max())
+         for c in dimers]
+    picks = {}                                    # two dimers with different counts per bucket
+    for c, ki in zip(dimers, k):
+        picks.setdefault(slot_bucket(ki), {}).setdefault(ki, c)
+    picks = [c for v in picks.values() for c in list(v.values())[:2]]
     calc = GPCalculator(fitted, meta)
-    for i in pair:
-        c = configs[i]
+    for c in picks:
         atoms = Atoms(numbers=c.numbers, positions=c.positions, cell=c.cell, pbc=c.pbc)
         atoms.calc = calc
         atoms.get_potential_energy()
-    assert calc._predict._cache_size() == 1, (k[pair[0]], k[pair[1]])
+    assert len(picks) > len({slot_bucket(x) for x in k})                 # some bucket is shared
+    assert calc._predict._cache_size() == len({slot_bucket(x) for x in k}) <= 4, sorted(set(k))

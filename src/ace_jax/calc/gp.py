@@ -15,10 +15,17 @@ from ..fit.predict import _e0_offset, _predict_fn
 from ..fit.stats import sufficient_statistics
 
 
-# Neighbour slots are padded to a multiple of this, not the exact maximum count, so
-# structures (and MD steps) whose counts differ a little reuse one compiled predictor.
-# Padded slots sit at the cutoff, where the envelope vanishes: the result is unchanged.
-K_BUCKET = 8
+# Neighbour slots are padded to a quarter-octave bucket, round(2^(j/4)) (at least 8),
+# not the exact maximum count, so structures (and MD steps) whose counts differ a little
+# reuse one compiled predictor: <= 19% padding, ~4 buckets per doubling (multiples of 8
+# gave 7 compiles over si_tiny's 39-76).  Padded slots sit at the cutoff, where the
+# envelope vanishes: the result is unchanged.
+SLOT_BUCKETS = tuple(sorted({int(round(2 ** (j / 4))) for j in range(12, 61)}))   # 8 .. 32768
+
+
+def slot_bucket(k):
+    """The padded neighbour-slot count for a maximum of k neighbours."""
+    return next((b for b in SLOT_BUCKETS if b >= k), -(-k // SLOT_BUCKETS[-1]) * SLOT_BUCKETS[-1])
 
 
 class FittedGP(NamedTuple):
@@ -62,7 +69,7 @@ class GPCalculator(Calculator):
         k = int(np.bincount(sparse_graph(c.positions, c.cell, c.pbc, cfg.rcut).senders,
                             minlength=len(c.numbers)).max())
         ds = build_dataset([c], self.meta, self._E0, 1, rcut=cfg.rcut, node_chunk=cfg.node_chunk,
-                           k_cap=-(-max(k, 1) // K_BUCKET) * K_BUCKET)
+                           k_cap=slot_bucket(max(k, 1)))
         batch = jax.tree.map(lambda a: a[0], ds)
         live = np.asarray(batch.node_mask)
         Es, Fs, Vs, Ev, Fv = [], [], [], [], []

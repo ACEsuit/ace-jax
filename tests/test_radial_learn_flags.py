@@ -61,13 +61,18 @@ def _driver(tmp_path, *extra):
 
 
 def test_bench_driver_extra_train_tol_and_rmse_npz(tmp_path):
-    """--extra-train appends configs to the training split only; --tol reaches the learners;
+    """The driver end to end (summary, model.npz, per-lambda checkpoint, widening report);
+    --extra-train appends configs to the training split only; --tol reaches the learners;
     rmse_npz.py scores the written model.npz."""
     r = _driver(tmp_path, "--extra-train", str(XYZ), "--tol", "0")
     assert r.returncode == 0, r.stderr[-3000:]
     assert "extra training configs:" in r.stdout
     s = json.loads((tmp_path / "summary.json").read_text())
     assert s["extra_train"] == [str(XYZ)] and s["tol"] == 0.0 and s["nval"] == 8
+    assert s["selected"] in s["scores"] and (tmp_path / "model.npz").exists()
+    assert (tmp_path / "lam_0" / "rnl_Wnlq.npy").exists()
+    assert s["to_analytic_relres_max"] == 0.0            # analytic fixture: widened only
+    assert "relres_max=" in r.stdout
     r2 = subprocess.run([sys.executable, str(ROOT / "bench/learn_radial/rmse_npz.py"), "--model", str(MODEL),
                          "--data", str(XYZ), "--energy-key", "dft_energy", "--force-key", "dft_force",
                          "--virial-key", "dft_virial", "--ntrain", "8", "--nval", "8",
@@ -88,13 +93,14 @@ def test_bench_driver_init_radials(tmp_path):
     act = np.abs(W).sum(-1) > 0
     Wp = W + 0.3 * np.abs(W).mean() * np.random.default_rng(0).standard_normal(W.shape) * act[..., None]
     np.save(tmp_path / "W.npy", Wp)
-    r0 = _driver(tmp_path / "base", "--steps", "0")
     r = _driver(tmp_path / "init", "--init-radials", str(tmp_path / "W.npy"), "--steps", "0")
-    assert r0.returncode == 0 and r.returncode == 0, (r0.stderr + r.stderr)[-3000:]
+    assert r.returncode == 0, r.stderr[-3000:]
     assert "starting from radials" in r.stdout
     assert json.loads((tmp_path / "init" / "summary.json").read_text())["init_radials"] == str(tmp_path / "W.npy")
-    Wb, Wi = np.load(tmp_path / "base" / "rnl_Wnlq.npy"), np.load(tmp_path / "init" / "rnl_Wnlq.npy")
-    assert not np.allclose(Wb, Wi)
+    Wi = np.load(tmp_path / "init" / "rnl_Wnlq.npy")
+    # not the model's own start: with --steps 0 that would be W, row-parallel to it
+    cos_own = np.sum(Wi * W, -1)[act] / (np.linalg.norm(Wi, axis=-1)[act] * np.linalg.norm(W, axis=-1)[act])
+    assert np.abs(cos_own).min() < 0.999
     # same span per radial row up to the gauge scale: Wi is a positive rescaling of Wp row by row
     cos = np.sum(Wi * Wp, -1)[act] / (np.linalg.norm(Wi, axis=-1)[act] * np.linalg.norm(Wp, axis=-1)[act])
     np.testing.assert_allclose(cos, 1.0, atol=1e-10)

@@ -101,3 +101,22 @@ def test_unknown_element_is_rejected(case, npz):
     model, meta, z, atoms, ref = case
     with pytest.raises(ValueError, match="not in model elements"):
         site_descriptors(npz, np.zeros((2, 3)), [79, 79])
+
+
+def test_standalone_descriptors_compile_once_per_edge_bucket(case, npz):
+    """site_descriptors pads the edge list to a power-of-two bucket and jits the pass
+    (it ran eagerly: every op dispatched one by one, ~1 s a structure).  Two structures
+    in one bucket share the compile, and the padded result equals the exact eager pass."""
+    from ace_jax.eval import api, sparse_graph, species_indices
+    model, meta, z, atoms, ref = case
+    pos, Z, cell = np.asarray(z["test_pos"]).T, np.asarray(z["test_Z"]), np.asarray(z["test_cell"]).T
+    d0 = site_descriptors(npz, pos, Z, cell, True)
+    n0 = api._descriptors_padded._cache_size()
+    d1 = site_descriptors(npz, pos + 1e-3, Z, cell, True)       # same edge bucket: no new compile
+    assert api._descriptors_padded._cache_size() == n0
+    g = sparse_graph(pos + 1e-3, cell, np.ones(3, bool), float(meta["rcut"]))
+    nz = jnp.asarray(species_indices(meta, Z)); s, r = jnp.asarray(g.senders), jnp.asarray(g.receivers)
+    with highest_precision():
+        exact = np.asarray(model.site_descriptors(jnp.asarray(g.rij), nz[s], nz[r], s, g.n_nodes, nz))
+    np.testing.assert_allclose(d1, exact, rtol=0, atol=1e-12 * np.abs(exact).max())
+    assert np.max(np.abs(d0 - ref)) < TOL
