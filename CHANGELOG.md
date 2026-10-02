@@ -1,6 +1,11 @@
 # Changelog
 
-## 0.1.0 (unreleased)
+## Unreleased
+
+- Tutorial 3, multi-element fits: categorical against embedded species bases on a
+  five-element alloy. The school tutorials are renumbered 4, 5 and 8.
+
+## 0.1.0 (2026-10-02)
 
 First release on PyPI.
 
