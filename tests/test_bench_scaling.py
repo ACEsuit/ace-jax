@@ -1715,8 +1715,6 @@ def test_basis_sizes_count_the_acepotentials_lines(monkeypatch):
 def _julia_cfg_or_skip():
     import os
     import shutil
-    if os.environ.get("ACEJAX_NO_JULIA") == "1":
-        pytest.skip("ACEJAX_NO_JULIA=1")
     if not os.environ.get("ACEPOT_JULIA_DEPOT"):
         pytest.skip("ACEPOT_JULIA_DEPOT unset (the PR 309 Julia env; see bench/scaling/README.md)")
     from scaling.acepot import julia_config
