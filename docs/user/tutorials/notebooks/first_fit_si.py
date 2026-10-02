@@ -412,8 +412,9 @@ def _(mo):
        the radial polynomials with seeded random weights. Compare the test
        errors. Tutorial 2 shows how to *learn* the radial weights instead of
        keeping them frozen.
-    3. **E0 and the isolated atom.** In Step 1, keep the isolated atom in the
-       training set (edit the list comprehension). How do the fitted E0
+    3. **E0 and the isolated atom.** In Step 1, add the isolated atom (the
+       first frame) to the training set: append `+ frames[:1]` to the list
+       written to `train_file`. How do the fitted E0
        (`np.load(...)["E0"]` of the saved model) and the test errors change?
        (Hint: an isolated atom has no neighbours, so its predicted energy is
        E0 alone.)
@@ -431,14 +432,15 @@ def _(mo):
             "Degree 8 gives 54 functions, too few to fit energies and forces together: it "
             "cannot separate diamond from beta-tin. The evidence then treats the energies "
             "as noise (a large `log_sigma_E` in `theta_map.json`, about -1.2 against -3.7 "
-            "at degree 10) and fits the forces. Test E RMSE: about 239, 24 and 16 meV/atom "
+            "at degree 10) and fits the forces. Test E RMSE: about 230, 25 and 19 meV/atom "
             "at degrees 8, 10 and 12."),
         "Hint for exercise 3": mo.md(
-            "No coefficient can change the prediction for an atom with no neighbours, so "
-            "with `e0='lsq'` an isolated atom in the training set fixes its species' E0 "
-            "to its energy exactly (-158.545 eV here, against -162.505 eV fitted to the "
-            "bulk energies alone). The bulk is then fitted relative to the free atom; "
-            "the test errors barely move (about 25 meV/atom and 0.097 eV/A)."),
+            "An atom with no neighbours is predicted as E0 alone, so with `e0='lsq'` an "
+            "isolated atom in the training set pins its species' E0 to its energy exactly "
+            "(-158.545 eV here). Without one, E0 is fitted with the model, to -160.22 eV: it "
+            "is then only a reference level, not a free-atom energy. The bulk is fitted "
+            "relative to it either way, and the test errors barely move (about 25 meV/atom "
+            "and 0.097 eV/A)."),
     })
     return
 

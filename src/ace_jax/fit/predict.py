@@ -302,6 +302,9 @@ class PopsRidgePath:
         """rows: "device" (each pass re-evaluates the ACE rows), "host" (evaluate
         them once into host RAM: stats.HostRows), "auto" (host when it fits in
         half the memory limit), or a HostRows built with this path's qs."""
+        if getattr(prob.cfg, "e0_cols", False):
+            raise ValueError("POPS builds on the readout's smoothness prior: fit with the least-squares E0 "
+                             "fixed (e0='prefit'; the pipeline does this for uq='pops')")
         M_ind = prob.ind.XM.shape[0]
         if M_ind > 0:
             raise ValueError(f"paper-faithful POPS is the linear-arm (M=0) predictive only; "

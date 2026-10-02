@@ -38,8 +38,8 @@ aj fit --order 3 --max-degree 10 \
   onehot`, the default); it stays frozen, and only the readout is fitted
   (to learn it too, see [learned radials](howto/learned-radials.md)).
 - `--e0 lsq` sets the per-species reference energy $E_0$. The isolated atom
-  in the training set fixes it to that atom's energy; without one it would
-  be fitted by least squares (see [E0](concepts.md#e0-the-reference-energy)).
+  in the training set fixes it to that atom's energy; without one it is
+  fitted with the model (see [E0](concepts.md#e0-the-reference-energy)).
 - `--m-per-species 0` selects the linear model (no Gaussian-process arm).
 - `--opt lbfgs` maximises the evidence with L-BFGS, much faster than the
   default Adam on small data.

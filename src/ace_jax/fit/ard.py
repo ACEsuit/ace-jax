@@ -43,6 +43,9 @@ def ard_statistics(theta, prob, ds, mode):
     linear MAP noise scales, accumulated in one pass (1 L^2 matrix) -- the low-memory mode.
     Both are the linear (L-column) statistics only: a hybrid problem's inducing columns (M > 0)
     never enter the ARD posterior, and the joint Gram is hyperparameter-independent."""
+    if getattr(prob.cfg, "e0_cols", False):
+        raise ValueError("ARD builds its own per-column prior on the readout: fit with the least-squares "
+                         "E0 fixed (e0='prefit'; the pipeline does this for uq='ard')")
     from .stats import linear_statistics
     if mode == "joint":
         return joint_ard_stats(linear_statistics(prob.model, prob.cfg, ds))

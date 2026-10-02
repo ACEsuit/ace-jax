@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- `e0="lsq"` (`aj fit --e0 lsq`) now fits E0 jointly with the readout: one
+  column per species with a 1 eV prior around the least-squares E0, folded into
+  E0 on export (isolated training atoms still pin their species; otherwise E0
+  is a reference level that trades off against the basis). An energy
+  offset the basis carries is absorbed instead of being paid as an energy error;
+  on a five-element alloy with a one-channel embedding the test energy error
+  falls from 1188 to 9 meV/atom. Every `e0="lsq"` fit changes slightly. The old
+  behaviour is `e0="prefit"`, and ARD and POPS fits keep it.
 - Fixed: a built basis keeps its smoothness prior when saved, so fits from a
   `BasisSpec` or `Basis` no longer print "gamma missing ... rebuilt"; the
   notice for older exports goes through the caller's `log`.

@@ -90,7 +90,7 @@ over a file's `basis:`, `--train` over its `data:` (each logged as an override).
 | Calibrated per-atom force uncertainty (e.g. big-cell fracture) | `--m-per-species 0 --uq ard` (`posterior.npz`; `ACECalculator(model, posterior=...)`) |
 | Learn the tensor radials before the fit | `--learn-radial` (writes `radial_info.json`; not with embedding models) |
 | Per-config-type weights | `--weights '{"default":{"E":30,"F":1,"V":1},"bulk":{"E":100,"F":1,"V":1}}'` or a factor list |
-| E0 from data, not the model | `--e0 lsq` (default `model`) |
+| E0 from data, not the model | `--e0 lsq` (default `model`): fitted jointly with the readout (wide prior around a least-squares start; isolated atoms pin their species); `--e0 prefit` fixes the least-squares E0 first (ARD/POPS always do) |
 | Stress labels (MACE, ASE, DFT codes) | `--stress-key stress` (virial = −stress × volume for periodic configs without a virial label; also on `aj eval`) |
 | Plain least squares, no prior (teaching: shows overfitting) | `--m-per-species 0 --solver lstsq` (no evidence, no UQ: zero predictive variance; weights from `--weights`) |
 | Out-of-distribution check | `--ood ood.xyz` (writes `metrics_ood.csv`) |
