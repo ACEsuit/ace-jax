@@ -1,7 +1,8 @@
 """solver="lstsq": plain weighted least squares, for teaching (tutorial 5).
 
 The readout minimises sum_rows (w (y - Phi c))^2 with the configured per-config-type
-weights and unit noise, and no prior: the smoothness prior and sigma_c rows of
+weights and unit noise, and no prior on the readout (joint-E0 columns, with e0='lsq', keep
+their prior, so E0 stays anchored): the smoothness prior and sigma_c rows of
 fit/solve.py::stacked_design are dropped, and numpy's lstsq returns the minimum-norm
 solution when the basis outgrows the data. That is what ACEfit's QR solver does with
 ACEpotentials' weights, so a growing basis overfits; the evidence fit
@@ -31,8 +32,11 @@ def fit_lstsq(cfg, d, b, log=print):
     t = time.time()
     theta = lstsq_theta(b.prob)
     Phi, y = stacked_design(b.prob, d.ds_train, theta)
-    Dt = Phi.shape[1]
-    A, r = np.asarray(Phi)[:-Dt], np.asarray(y)[:-Dt]          # data rows only: no prior block
+    Dt, L0, n = Phi.shape[1], b.prob.cfg.len_readout, Phi.shape[0] - Phi.shape[1]
+    # the data rows, and only the joint-E0 columns' prior rows: the readout is unregularised,
+    # but E0 alone is weakly identified against it (with no prior it drifted by ~18 eV)
+    keep = np.r_[np.arange(n), n + np.arange(L0, Dt)]
+    A, r = np.asarray(Phi)[keep], np.asarray(y)[keep]
     c, _, rank, _ = np.linalg.lstsq(A, r, rcond=None)
     log(f"lstsq: {A.shape[0]} weighted rows x {Dt} basis functions, rank {rank}")
     tm = {"lstsq": time.time() - t}

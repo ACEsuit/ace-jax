@@ -57,6 +57,19 @@ def _metrics_csv(path, metrics, split):
             w = csv.DictWriter(fh, fieldnames=list(rows[0])); w.writeheader(); w.writerows(rows)
 
 
+def fitted_e0(res):
+    """The E0 the fit ended with: the pre-fit E0, plus the joint-E0 shift (e0='lsq') at the MAP."""
+    E0, pcfg = np.asarray(res.data.E0, float), res.built.prob.cfg
+    if not getattr(pcfg, "e0_cols", False):
+        return E0
+    if res.readout is not None:
+        mu = np.asarray(res.readout)
+    else:
+        from .export import _posterior
+        mu = np.asarray(_posterior(res, res.theta)[0])
+    return E0 + mu[pcfg.len_readout:pcfg.len_readout + pcfg.NZ]
+
+
 def write_outputs(res, out, layout=("run",), argv=None, save_model=True, model_draws=1, log=print):
     """Write the run artefacts; with save_model, also the fitted model file
     (model.npz for the linear arm, gp_model.npz for the GP arm; see export.py)."""
@@ -94,14 +107,14 @@ def write_outputs(res, out, layout=("run",), argv=None, save_model=True, model_d
         _dump(out / "timings.json", res.timings)
         els = [int(e) for e in d.meta["elements"]]
         _dump(out / "config.json", {**(argv or dataclasses.asdict(cfg)), "M": int(b.prob.ind.XM.shape[0]),
-                                    "len_basis": b.gpcfg.len_basis,
-                                    "E0": dict(zip(map(str, els), map(float, d.E0)))})
+                                    "len_basis": b.gpcfg.len_readout,
+                                    "E0": dict(zip(map(str, els), map(float, fitted_e0(res))))})
     if "cli" in layout:
         _metrics_csv(out / "metrics.csv", res.preds.metrics, "test")
         _metrics_csv(out / "metrics_ood.csv", res.preds.metrics, "ood")
         if "run" not in layout:
             _dump(out / "config.json", {**(argv or {}), "M": int(b.prob.ind.XM.shape[0]),
-                                        "len_basis": b.gpcfg.len_basis, "n_train": len(d.train),
+                                        "len_basis": b.gpcfg.len_readout, "n_train": len(d.train),
                                         "n_test": len(d.test)})
     if res.ard is not None:
         _write_ard(out, res.ard)

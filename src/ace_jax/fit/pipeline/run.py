@@ -26,6 +26,8 @@ def fit(cfg, data, log=print, on_stage=None):
     prediction running out of memory) can lose them."""
     T0 = time.time()
     cfg.validate()
+    if cfg.e0 == "lsq" and not cfg.joint_e0:
+        log("e0 lsq: ARD and POPS fit with the least-squares E0 fixed (as e0='prefit')")
     stage = on_stage or (lambda name, payload: None)
     stage("data", data)
     radial = None

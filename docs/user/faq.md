@@ -33,8 +33,7 @@ Check, in order:
    error that lists the keys the file does have. (Virials are the
    exception for files without a periodic cell, which have none.)
 2. **E0.** A freshly built basis has E0 = 0. Use `--e0 lsq` to fit the
-   reference energies to the training energies, or set them yourself (next
-   question).
+   reference energies with the model, or set them yourself (next question).
 3. **A basis too small for the data.** When the basis cannot fit energies
    and forces together, the evidence explains the energies as noise: look
    for a large `log_sigma_E` in `theta_map.json` (around -1, against -3 to
@@ -56,7 +55,7 @@ Check, in order:
 Keep the isolated atoms in the training set and fit with `--e0 lsq`. A
 single atom with no neighbour within the cutoff is recognised as isolated,
 and its species takes its energy as E0 exactly; species without one are
-fitted by least squares to the other configurations. The log names the
+fitted with the rest of the model. The log names the
 species it fixed (`E0: isolated-atom energies for Z=14 ...`).
 
 To set E0 by hand instead, set it on the basis model before fitting and

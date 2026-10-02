@@ -263,8 +263,9 @@ def _(mo):
       It does not chase the training set (its training error is higher than
       least squares'), because its noise levels are fitted too: it is told how
       much of the data is noise.
-    - Below the largest basis, least squares has the lower test error on this
-      data set, for forces as well as energies (exercise 2). With 200 smooth
+    - At the middle degrees, 12 and 14, least squares has the lower test
+      energy error on this data set; at degree 8 the evidence fit does
+      (exercise 2 compares the forces). With 200 smooth
       bulk structures there is little noise to guard against, and the
       evidence chooses an almost vanishing prior. What it adds here is not a
       better fit at a given basis but a test error that does not turn up as

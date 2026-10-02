@@ -21,13 +21,21 @@ class Problem(NamedTuple):
     cfg: object
     gamma: jnp.ndarray    # (len_basis,), or wider when extra linear columns are appended
     prior: object
+    e0_prec: object = None  # (NZ,) fixed prior precision of the joint-E0 columns (cfg.e0_cols)
+
+
+def linear_prior_diag(theta, prob):
+    """Prior precision of the linear columns: gamma^2 / sigma_c^2 for the readout, then
+    the fixed e0_prec for the joint-E0 columns (independent of sigma_c)."""
+    lin = prob.gamma ** 2 / jnp.exp(2.0 * theta.log_sigma_c)
+    e0p = getattr(prob, "e0_prec", None)
+    return lin if e0p is None else jnp.concatenate([lin, jnp.asarray(e0p, lin.dtype)])
 
 
 def prior_precision(theta, prob):
-    L = prob.gamma.shape[0]
+    lin = linear_prior_diag(theta, prob)
+    L = lin.shape[0]
     M = prob.ind.XM.shape[0]
-    sc2 = jnp.exp(2.0 * theta.log_sigma_c)
-    lin = prob.gamma ** 2 / sc2
     Kmm = K_MM(theta, prob.spec, prob.ind.XM, prob.ind.SM, prob.ind.ZM, prob.ind.embed)
     Lam = jnp.zeros((L + M, L + M)).at[jnp.arange(L), jnp.arange(L)].set(lin).at[L:, L:].set(Kmm)
     logdet = jnp.sum(jnp.log(lin)) + (2.0 * jnp.sum(jnp.log(jnp.diag(jnp.linalg.cholesky(Kmm))))

@@ -145,7 +145,7 @@ def _(files, keys, work):
                                                radial_mode="glorot_normal")))
 
     def config(model_file):
-        """The linear fit used throughout: evidence-maximised, E0 by least squares."""
+        """The linear fit used throughout: evidence-maximised, E0 fitted with the model."""
         return FitConfig(model=str(model_file), arm="linear", m_per_species=0, e0="lsq",
                          opt="lbfgs", r0=2.35, rungs=("map",), predict_stats="recompute",
                          predict_train=False, **keys).validate()
