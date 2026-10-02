@@ -142,7 +142,10 @@ def patch_radial_npz(src, dst, model, readout=None):
         (n_B, NZ), n_pair = out["WB"].shape, out["Wpair"].shape[0]
         readout = np.asarray(readout)
         if readout.size == (n_B + n_pair) * NZ + NZ:     # + joint-E0 columns (an e0='lsq' problem):
-            readout = readout[:(n_B + n_pair) * NZ]      # shifts of that fit's pre-fit E0, not of this file's
+            import warnings                              # shifts of that fit's pre-fit E0, not of this file's
+            warnings.warn("patch_radial_npz: dropping the readout's joint-E0 columns; the file keeps its own "
+                          "E0, so refit (or use e0='prefit') before using its energies", UserWarning, stacklevel=2)
+            readout = readout[:(n_B + n_pair) * NZ]
         out["WB"], out["Wpair"] = readout_to_npz(readout, n_B, n_pair, NZ)
     meta["radial_kind"] = "analytic"
     meta["rnl_spline"] = None

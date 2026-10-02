@@ -12,7 +12,10 @@ from ..inducing import GPConfig, build_pmap, descriptor_scale, select_inducing, 
 from ..kernels import KernelSpec
 
 # Joint E0 (e0='lsq'): the E0 columns' prior is N(pre-fit E0, E0_PRIOR_STD^2) per species, in eV --
-# wide against any fit error, so the data decide, but proper, so the evidence stays comparable
+# wide against fit errors, but E0 is only weakly identified against the readout (a constant site
+# energy trades off against near-constant basis functions), so the prior does set where it lands
+# (tutorial 1: -160.2 eV at 1 eV, -159.7 at 10 eV); without an isolated atom, E0 is a reference
+# level, not a free-atom energy
 E0_PRIOR_STD = 1.0
 E0_PINNED_STD = 1e-8     # a species with an isolated atom in training: its energy is E0 (see lsq_e0)
 

@@ -179,3 +179,44 @@ def test_patch_radial_npz_accepts_a_readout_with_joint_e0_columns(tmp_path):
     out = np.load(tmp_path / "m.npz")
     np.testing.assert_array_equal(out["E0"], z["E0"])
     assert out["WB"].size + out["Wpair"].size == L0
+
+
+def test_gp_json_omits_e0_cols_unless_set():
+    # older ace-jax reads gp_json with GPConfig(**gpcfg): an unknown key would break it
+    from ace_jax.fit.pipeline.export import _gpcfg_json
+    cfg = GPConfig(r0=2.35, rcut=5.0, n_B=3, n_pair=2, NZ=1, C=4)
+    assert "e0_cols" not in _gpcfg_json(cfg) and _gpcfg_json(dataclasses.replace(cfg, e0_cols=True))["e0_cols"]
+
+
+def test_run_config_records_the_fitted_e0(joint, tmp_path):
+    import json
+    from ace_jax.fit.pipeline import write_outputs
+    from ace_jax.fit.pipeline.export import linear_model_arrays
+    cfg, d, res = joint
+    write_outputs(res, tmp_path, layout=("run",), save_model=False, log=lambda *a: None)
+    c = json.loads((tmp_path / "config.json").read_text())
+    assert abs(c["E0"]["14"] - linear_model_arrays(res)["E0"][0]) < 1e-9
+    assert c["len_basis"] == res.built.prob.cfg.len_readout
+
+
+def test_patch_radial_npz_warns_when_it_drops_an_e0_shift(tmp_path):
+    from ace_jax.basis.export import patch_radial_npz
+    from ace_jax.fit.radial_model import to_analytic
+    src = FIXTURE_DIR / "si_fitted.npz"
+    model, meta, z = load(src)
+    m, _ = to_analytic(model, 8)
+    L0 = (meta["n_B"] + meta["n_pair"]) * len(meta["elements"])
+    with pytest.warns(UserWarning, match="E0"):
+        patch_radial_npz(str(src), tmp_path / "m.npz", m, readout=np.ones(L0 + 1))
+
+
+def test_ard_refuses_a_joint_e0_problem(m0):
+    from ace_jax.fit.ard import ard_statistics
+    model, meta, z, configs, ds, cfg = m0
+    cfg_e0 = dataclasses.replace(cfg, e0_cols=True)
+    X, S = site_features(model, cfg, ds)
+    ind = select_inducing(X, S, ds.node_z, ds.node_mask, 0, descriptor_scale(X, ds.node_mask))
+    prob = Problem(KernelSpec("cosine", True, cfg.D), model, ind, cfg_e0, jnp.asarray(z["gamma"]),
+                   default_prior(2.35), e0_prec=jnp.ones(cfg.NZ))
+    with pytest.raises(ValueError, match="prefit"):
+        ard_statistics(_theta(), prob, ds, "sequential")

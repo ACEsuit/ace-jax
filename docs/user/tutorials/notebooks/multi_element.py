@@ -365,7 +365,7 @@ def _(mo):
 
     The fit is the evidence fit of Tutorial 1, the same for every basis:
     energies, forces and virials, noise levels and prior chosen by maximising
-    the evidence, reference energies E0 by least squares. The test set holds
+    the evidence, reference energies E0 fitted with the model. The test set holds
     both config types, so the fit reports its errors per type.
 
     The command-line equivalents, with the files this notebook writes to

@@ -5,7 +5,7 @@ model file with the fitted readout (WB, Wpair) and E0 written in, so
 `ace_jax.load`, `ACECalculator` and `ace-jax eval` read it unchanged.
 
 A GP fit also needs the residual block, so `gp_model.npz` is self-contained:
-the ACE arrays (prefixed "ace/", E0 fitted), the GP and kernel configuration,
+the ACE arrays (prefixed "ace/", E0 fitted; with joint E0 the pre-fit E0, whose shift is in mu), the GP and kernel configuration,
 the inducing set, and per hyperparameter draw the posterior (mu, L) -- the
 same factorisation the pipeline's predictions use, so a reloaded
 `GPCalculator` reproduces them.  L is (Dt, Dt), Dt = len_basis + M, per draw:
@@ -89,6 +89,15 @@ def linear_model_arrays(res):
     return linear_arrays_from_mean(res.data.z, res.data.E0, res.built.prob.cfg, mu)
 
 
+def _gpcfg_json(gpcfg):
+    """GPConfig for gp_json; e0_cols only when set, so prefit and e0='model' files stay
+    readable by ace-jax releases that predate joint E0."""
+    d = dataclasses.asdict(gpcfg)
+    if not d.get("e0_cols"):
+        d.pop("e0_cols", None)
+    return d
+
+
 def gp_model_arrays(res, n_draws=1):
     prob = res.built.prob
     draws = _draws(res, n_draws)
@@ -106,7 +115,7 @@ def gp_model_arrays(res, n_draws=1):
                ind_scale=np.asarray(ind.scale), ind_Pmap=np.asarray(ind.Pmap), ind_embed=np.asarray(ind.embed),
                draws=np.asarray(draws), mu=np.stack(mus), L=np.stack(Ls))
     out["gp_json"] = np.frombuffer(json.dumps({
-        "schema_version": GP_SCHEMA, "gpcfg": dataclasses.asdict(gpcfg),
+        "schema_version": GP_SCHEMA, "gpcfg": _gpcfg_json(gpcfg),
         "kernel": dataclasses.asdict(prob.spec), "warp": ind.warp}).encode(), np.uint8)
     return out
 

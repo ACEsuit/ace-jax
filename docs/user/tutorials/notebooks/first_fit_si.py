@@ -435,11 +435,12 @@ def _(mo):
             "at degree 10) and fits the forces. Test E RMSE: about 230, 25 and 19 meV/atom "
             "at degrees 8, 10 and 12."),
         "Hint for exercise 3": mo.md(
-            "No coefficient can change the prediction for an atom with no neighbours, so "
-            "with `e0='lsq'` an isolated atom in the training set fixes its species' E0 "
-            "to its energy exactly (-158.545 eV here, against -162.505 eV fitted to the "
-            "bulk energies alone). The bulk is then fitted relative to the free atom; "
-            "the test errors barely move (about 25 meV/atom and 0.097 eV/A)."),
+            "An atom with no neighbours is predicted as E0 alone, so with `e0='lsq'` an "
+            "isolated atom in the training set pins its species' E0 to its energy exactly "
+            "(-158.545 eV here). Without one, E0 is fitted with the model, to -160.22 eV: it "
+            "is then only a reference level, not a free-atom energy. The bulk is fitted "
+            "relative to it either way, and the test errors barely move (about 25 meV/atom "
+            "and 0.097 eV/A)."),
     })
     return
 

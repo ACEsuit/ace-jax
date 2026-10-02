@@ -51,7 +51,10 @@ $E - \sum_i E_0(z_i)$, so $E_0$ decides what the basis has to represent.
   then only has to represent energy differences, and an energy offset that
   the basis carries (a constant site energy it cannot avoid) is absorbed into
   $E_0$ instead of being paid as an energy error. Use it for a freshly built
-  basis.
+  basis. Without an isolated atom in the training set, the fitted $E_0$ is a
+  reference level, not a free-atom energy: it trades off against the basis, and
+  the prior has a say in where it lands. The log-evidence of such fits compares
+  across bases fitted to the same data, not with `--e0 prefit` fits.
 - `aj fit --e0 prefit` is the older two-step version: $E_0$ is fixed at the
   least-squares fit before the readout is fitted. (ARD and POPS fits use this
   even with `--e0 lsq`.)

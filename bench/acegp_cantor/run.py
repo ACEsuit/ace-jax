@@ -130,7 +130,7 @@ cfg = FitConfig(
     model=a.model, arm=a.arm, energy_key=a.energy_key, force_key=a.force_key, virial_key=a.virial_key,
     ntrain=a.ntrain, ntest=a.ntest, test_start=a.test_start, seed=a.seed, batch=a.batch,
     factors=factors, sigma_type=a.sigma_type, route=parse_route(a.route), baseline=a.baseline,
-    base_npz=a.base_npz, e0="lsq", m_per_species=a.m_per_species, kernel=a.kernel, bump=not a.no_bump,
+    base_npz=a.base_npz, e0="prefit", m_per_species=a.m_per_species, kernel=a.kernel, bump=not a.no_bump,
     density=a.density, pca_d=a.pca_d, warp=a.warp, embedding=a.embedding,
     delta_s_floor_q=a.delta_s_floor_q, fix_rho=a.fix_rho, r0=a.r0, lml=a.lml, lml_chunk=a.lml_chunk,
     opt=a.opt, map_steps=a.map_steps, map_lr=a.map_lr, map_restarts=a.map_restarts,
