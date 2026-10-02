@@ -500,7 +500,9 @@ class ACECalculator(Calculator):
                 if getattr(self, "_rows_fn", None) is None:    # compiled once per cell shape (MD)
                     self._rows_fn = chunked_rows_fn(self._fit_model, self._fit_cfg)
                 # padding rows are zero; F[live] drops the padded nodes
-                F = self._rows_fn(b).F[live]
+                F = self._rows_fn(b).F
+                if not bool(np.all(live)):
+                    F = F[live]
         if post.group_table is not None:
             out.update({k: np.asarray(v) for k, v in
                         post.served(F, groups, shared - {"forces_group"}).items()})

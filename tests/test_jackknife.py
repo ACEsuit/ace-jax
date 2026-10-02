@@ -306,3 +306,27 @@ def test_solve_sym_guards_nonpositive_mu():
     x, lev = _solve_sym(np.diag([0.5, 1.0]), np.array([1.0, 1.0]))
     np.testing.assert_allclose(x, [2.0, 1.0])
     assert lev == 0.5
+
+
+def test_atom_shape_chunked(ard_setup, monkeypatch):
+    from ace_jax.fit import jackknife
+    from ace_jax.fit.clusters import row_clusters
+    from ace_jax.fit.jackknife import atom_shape, press_scores, shape_factor
+    from ace_jax.fit.rows import linear_rows
+    prob, ds, ev, h, post = ard_setup
+    rc, K = row_clusters(ds, None, float("inf"))
+    G, _ = press_scores(post, prob, ds, rc, K, ev.sigmas(h))
+    R = shape_factor(post, G)
+    Fr = jnp.asarray(linear_rows(prob.model, prob.cfg, jax.tree.map(lambda a: a[0], ds))[0].F)
+    N = Fr.shape[0]
+    assert N > 3
+    one = atom_shape(R, post.dinv, Fr, chunk=N)
+    seen = []
+    real = jnp.einsum
+    monkeypatch.setattr(jackknife.jnp, "einsum", lambda *a, **k: (seen.append(a[1].shape[0]), real(*a, **k))[1])
+    ch = atom_shape(R, post.dinv, Fr, chunk=3)
+    np.testing.assert_allclose(ch, one, rtol=1e-12, atol=1e-300)
+    assert max(seen) <= 3 and len(seen) == -(-N // 3)
+    # kappa branch (no R / Q) chunked too
+    post = post._replace(R=None, Q=None)
+    np.testing.assert_allclose(post.atom_shape(Fr, chunk=3), post.atom_shape(Fr, chunk=N), rtol=1e-12, atol=1e-300)

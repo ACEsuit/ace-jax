@@ -102,8 +102,26 @@ def shape_factor(post, G, tau=1.0):
     return U[:, :r] * s[None, :r]
 
 
-def atom_shape(R, dinv, Frows):
-    """V (N, 3, 3): V_ab = (R^T u_a) . (R^T u_b), u_a = D^-1 phi_a^T, from force rows (N, 3, L)."""
-    U = jnp.asarray(Frows, jnp.float64) * jnp.asarray(dinv, jnp.float64)[None, None, :]
-    Pr = U @ jnp.asarray(R, jnp.float64)
-    return np.asarray(jnp.einsum("nar,nbr->nab", Pr, Pr))
+ATOM_CHUNK = 256            # atoms per device pass in atom_shape (bounds the (chunk, 3, max(L, r)) temporaries)
+
+
+def atom_chunk(n_cols, chunk=None):
+    """Atoms per pass: `chunk` if given, else ATOM_CHUNK capped so a (chunk, 3, n_cols) float64 array is <= 1 GiB."""
+    if chunk is not None:
+        return max(1, int(chunk))
+    return max(1, min(ATOM_CHUNK, (1 << 30) // (3 * 8 * max(int(n_cols), 1))))
+
+
+def atom_shape(R, dinv, Frows, chunk=None):
+    """V (N, 3, 3): V_ab = (R^T u_a) . (R^T u_b), u_a = D^-1 phi_a^T, from force rows (N, 3, L).
+    Evaluated over chunks of atoms (device arrays stay on device) and concatenated on the host."""
+    R = jnp.asarray(R, jnp.float64)
+    dinv = jnp.asarray(dinv, jnp.float64)
+    N = Frows.shape[0]
+    c = atom_chunk(max(R.shape), chunk)
+    out = np.empty((N, 3, 3))
+    for i in range(0, N, c):
+        U = jnp.asarray(Frows[i:i + c], jnp.float64) * dinv[None, None, :]
+        Pr = U @ R
+        out[i:i + c] = np.asarray(jnp.einsum("nar,nbr->nab", Pr, Pr))
+    return out

@@ -222,17 +222,24 @@ class ARDPosterior(NamedTuple):
         z, d = shell_features(batch, gc["r1"])
         return assign_groups(z, d, gc["z_star"], np.asarray(gc["edges"], float))
 
-    def atom_shape(self, Frows):
-        """Unscaled per-atom shape V (N, 3, 3) from force rows (N, 3, L)."""
-        from .jackknife import atom_shape
+    def atom_shape(self, Frows, chunk=None):
+        """Unscaled per-atom shape V (N, 3, 3) from force rows (N, 3, L), in chunks of atoms."""
+        from .jackknife import atom_chunk, atom_shape
         if self.R is not None:
-            return atom_shape(self.R, self.dinv, Frows)
+            return atom_shape(self.R, self.dinv, Frows, chunk)
         if self.Q is not None:                                   # schema 2: uncentred sandwich factor
-            return atom_shape(self.Q, self.dinv, Frows)
-        U = np.asarray(Frows) * np.asarray(self.dinv)[None, None, :]          # kappa: V = u^T S^-1 u
-        W = np.asarray(solve_triangular(jnp.asarray(self.chol), jnp.asarray(U.reshape(-1, U.shape[-1]).T),
-                                        lower=True)).T.reshape(U.shape[0], 3, -1)
-        return np.einsum("nar,nbr->nab", W, W)
+            return atom_shape(self.Q, self.dinv, Frows, chunk)
+        N, L = Frows.shape[0], Frows.shape[-1]                   # kappa: V = u^T S^-1 u
+        c = atom_chunk(L, chunk)
+        dinv = jnp.asarray(self.dinv, jnp.float64)
+        chol = jnp.asarray(self.chol)
+        out = np.empty((N, 3, 3))
+        for i in range(0, N, c):
+            U = jnp.asarray(Frows[i:i + c], jnp.float64) * dinv[None, None, :]
+            n = U.shape[0]
+            W = jnp.swapaxes(solve_triangular(chol, U.reshape(-1, L).T, lower=True), 0, 1).reshape(n, 3, -1)
+            out[i:i + c] = np.asarray(jnp.einsum("nar,nbr->nab", W, W))
+        return out
 
     def forces_cov(self, Frows, groups):
         return self.served(Frows, groups, ("forces_cov",))["forces_cov"]
