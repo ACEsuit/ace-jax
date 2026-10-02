@@ -36,7 +36,7 @@ from scaling import plot
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 # the hosts behind the page: switch these (e.g. "lestrade-cpu", "sulis-a100") and re-render
-USER_HOSTS = {"cpu": "moriarty-cpu", "gpu": "modal-a100"}
+USER_HOSTS = {"cpu": "lestrade-cpu", "gpu": "sulis-a100"}
 
 # hardware per host, for the notes; rows recording `device_name` take precedence
 HARDWARE = {
@@ -212,13 +212,35 @@ def _hardware(rows, host):
     return ", ".join(names) or HARDWARE.get(host, host)
 
 
+def _placement(rows, host):
+    """', standalone with 16 threads, LAMMPS with 8 MPI ranks, on CPUs 0-15': how the
+    CPU rows were placed (most common value per mode), so a hybrid CPU's numbers read
+    correctly.  Empty when the rows carry none of it."""
+    from collections import Counter
+    mine = [r for r in rows if r.get("host") == host and r.get("status") == "ok"]
+    threads = Counter((r.get("threads") or {}).get("cpus") for r in mine if r.get("mode") == "standalone")
+    ranks = Counter(r.get("ranks") for r in mine if r.get("mode") == "lammps")
+    aff = Counter(r.get("cpu_affinity") for r in mine)
+    parts = []
+    t = max((k for k in threads if k), key=threads.get, default=None)
+    n = max((k for k in ranks if k), key=ranks.get, default=None)
+    a = max((k for k in aff if k), key=aff.get, default=None)
+    if t:
+        parts.append(f"standalone with {t} threads")
+    if n:
+        parts.append(f"LAMMPS with {n} MPI ranks")
+    if a:
+        parts.append(f"on CPUs {a}")
+    return (": " + ", ".join(parts)) if parts else ""
+
+
 def notes(rows, hosts=None):
     """Markdown bullets that depend on the data: the hosts, and footnotes for
     lines present only on some hosts."""
     hosts = hosts or USER_HOSTS
     present = [r for s in SETTINGS for r in select(rows, s, hosts)]
     codes = {r["code"] for r in present}
-    out = [f"- **CPU:** `{hosts['cpu']}`, {_hardware(rows, hosts['cpu'])}.",
+    out = [f"- **CPU:** `{hosts['cpu']}`, {_hardware(rows, hosts['cpu'])}{_placement(rows, hosts['cpu'])}.",
            f"- **GPU:** `{hosts['gpu']}`, {_hardware(rows, hosts['gpu'])}."]
     if "acepotentials" in codes:
         out.append("- ACEpotentials.jl standalone is one `energy_forces` call in Julia "

@@ -37,12 +37,22 @@ def _matrix(codes=(("acejax-pace", "standalone"), ("acejax-pace", "lammps"), ("m
     return rows
 
 
+FIXTURE_HOSTS = {"cpu": "moriarty-cpu", "gpu": "modal-a100"}   # the hosts _matrix writes
+
+
 @pytest.fixture
-def up():
+def up(monkeypatch):
     import matplotlib
     matplotlib.use("Agg")
     from scaling import user_page
+    monkeypatch.setattr(user_page, "USER_HOSTS", dict(FIXTURE_HOSTS))
     return user_page
+
+
+def test_the_page_is_rendered_from_lestrade_cpu_and_sulis_a100():
+    """The committed page: one CPU and one GPU type, every evaluator on each."""
+    from scaling import user_page
+    assert user_page.USER_HOSTS == {"cpu": "lestrade-cpu", "gpu": "sulis-a100"}
 
 
 def test_three_settings_map_to_the_configured_hosts(up):
@@ -235,3 +245,16 @@ def test_a_system_with_no_rows_gets_a_labelled_empty_panel(up, tmp_path, monkeyp
     _, fig = _figure(up, rows, "gpu_float64", tmp_path, monkeypatch)
     cantor = next(ax for ax in fig.axes if ax.get_title() == "Cantor")
     assert not cantor.lines and "no results" in " ".join(t.get_text() for t in cantor.texts)
+
+
+def test_notes_give_the_cpu_threads_ranks_and_affinity(up):
+    """A hybrid desktop CPU is only comparable with its placement: say how many threads
+    and ranks the CPU rows used, and on which CPUs."""
+    host = "lestrade-cpu"
+    rows = [dict(_row("acejax-ace", "standalone", 2048, host=host),
+                 threads={"cpus": 16, "OMP_NUM_THREADS": "16"}, cpu_affinity="0-15"),
+            dict(_row("mlpace", "lammps", 2048, host=host), ranks=8, cpu_affinity="0-15"),
+            _row("acejax-ace", "standalone", 2048)]
+    text = up.notes(rows, {"cpu": host, "gpu": "modal-a100"})
+    cpu = next(l for l in text.splitlines() if l.startswith("- **CPU:**"))
+    assert "16 threads" in cpu and "8 MPI ranks" in cpu and "CPUs 0-15" in cpu
