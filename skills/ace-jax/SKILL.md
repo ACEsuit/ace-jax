@@ -18,8 +18,8 @@ pip install "ace-jax[cuda]"      # + CUDA 12 JAX
 ```
 
 Building a new basis shape works on Linux x86_64/aarch64, macOS arm64 and
-Windows x64; elsewhere fit from an existing `.npz` with `--model`. Pre-release:
-ace-jax itself is not on PyPI yet, so install it from the repo (git URL).
+Windows x64; elsewhere fit from an existing `.npz` with `--model`.
+`aj --version` prints the installed version.
 
 `ace-jax` and `aj` are the same CLI. `aj <cmd> --help` lists every flag.
 
