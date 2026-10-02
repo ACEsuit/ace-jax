@@ -1,8 +1,7 @@
 # /// script
-# requires-python = ">=3.11,<3.14"
+# requires-python = ">=3.11"
 # dependencies = [
-#     # TODO(pypi): replace this git requirement with "ace-jax" once ace-jax is on PyPI.
-#     "ace-jax @ git+https://github.com/ACEsuit/ace-jax@main",
+#     "ace-jax>=0.1.0",
 #     "marimo>=0.25",
 #     "matplotlib>=3.8",
 # ]
