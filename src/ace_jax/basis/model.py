@@ -279,6 +279,10 @@ def build_embedding_model(elements, order, totaldegree, embedding=None, *, rows=
         if embedding is None:
             raise ValueError("pass an embedding (path, (Z, table) or 'identity') or explicit rows")
         if isinstance(embedding, str) and embedding == "identity":
+            if d < S:      # a PCA of the one-hot table has no preferred directions: some element gets nothing
+                raise ValueError(f"embedding='identity' is the one-hot element table, which needs one channel per "
+                                 f"element: d_max={d_max} gives {d} channels for {S} elements. Use d_max=None "
+                                 "(lossless), or compress a table of element properties instead")
             Z, table, provenance = zs, np.eye(S), {"checkpoint": "identity"}
         elif isinstance(embedding, (str, bytes)) or hasattr(embedding, "__fspath__"):
             Z, table, provenance = read_embedding(embedding)
