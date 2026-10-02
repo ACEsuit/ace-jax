@@ -19,7 +19,9 @@ under the name it was written with, and ace-jax owns the conventions:
 `read_extxyz` never falls back to ase.io: a file the C parser rejects is retried
 with extxyz's pure-Python parser, and if that fails too the error names the file.
 """
+import functools
 import json
+import pathlib
 from typing import Any, NamedTuple
 
 import numpy as np
@@ -83,20 +85,38 @@ def read_raw(path):
             raise ValueError(f"{path}: not a readable extxyz file ({type(e).__name__}: {e})") from e
 
 
+@functools.cache
+def _writer_transposes_cell():
+    """True when this extxyz's write_dicts transposes Frame.cell: extxyz <= 0.4.5 read
+    the lattice with the vectors as columns but wrote it back as rows, so a round trip
+    transposed every non-symmetric cell (fixed upstream). Probed once on a triclinic
+    cell rather than keyed on a version number."""
+    import tempfile
+
+    import extxyz
+    with tempfile.TemporaryDirectory() as d:
+        src, out = pathlib.Path(d) / "in.xyz", pathlib.Path(d) / "out.xyz"
+        src.write_text('1\nLattice="4 0 0 1 3 0 0.5 0.7 2" Properties=species:S:1:pos:R:3 pbc="T T T"\nSi 0 0 0\n')
+        f = read_raw(src)[0]
+        extxyz.write_dicts(str(out), [f])
+        return not np.allclose(read_raw(out)[0].cell, f.cell)
+
+
 def write_raw(path, frames):
-    """Write read_raw-style frames (libAtoms extxyz; floats at its %16.8f).  iread_dicts
-    returns the lattice column-major but write_dicts takes it row-major, so the cell is
-    transposed on the way out (unchanged, every non-symmetric cell came back transposed).
-    The frames passed in are left as they were."""
+    """Write read_raw-style frames (libAtoms extxyz; floats at its %16.8f), so that
+    reading them back gives the same cells (_writer_transposes_cell). The frames passed
+    in are left as they were."""
     import copy
 
     import extxyz
-    out = []
-    for f in frames:
-        g = copy.copy(f)
-        g.cell = np.asarray(f.cell).T
-        out.append(g)
-    extxyz.write_dicts(str(path), out)
+    if _writer_transposes_cell():
+        out = []
+        for f in frames:
+            g = copy.copy(f)
+            g.cell = np.asarray(f.cell).T
+            out.append(g)
+        frames = out
+    extxyz.write_dicts(str(path), frames)
 
 
 def read_extxyz(path):
