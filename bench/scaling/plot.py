@@ -494,12 +494,14 @@ def before_after_series(after, before, host, dtype="float64", size="medium"):
 
 
 def before_after_hosts(after, before):
-    """(hosts with re-run ace-jax rows, hosts whose re-run is pending)."""
+    """(hosts with re-run ace-jax rows, hosts whose re-run is pending).  Once
+    there are before rows, a host that has none (measured only after the
+    speed-ups, e.g. lestrade-cpu) has nothing to compare and is neither."""
     def hosts(rows):
         return {r["host"] for r in rows if r.get("code") in ACEJAX and r.get("mode") in MODES
                 and r.get("status") == "ok"}
-    done = hosts(after)
-    return sorted(done), sorted(hosts(before) - done)
+    done, had = hosts(after), hosts(before)
+    return sorted(done & had if had else done), sorted(had - done)
 
 
 def fig_before_after(after, before, out, host, dtype="float64", size="medium"):
@@ -757,7 +759,8 @@ def parity_table(rows):
     largest energy-per-atom and force differences. No rows: pending."""
     by = defaultdict(list)
     for r in rows:
-        if r.get("mode") == "parity" and str(r.get("status", "")).startswith("parity_"):
+        if r.get("mode") == "parity" and (str(r.get("status", "")).startswith("parity_")
+                                          or r.get("status") == "error"):   # e.g. a crashed reference
             by[(r["host"], r.get("gate", r["code"]), r["code"])].append(r)
     if not by:
         return "No parity rows yet (pending)."
@@ -765,9 +768,12 @@ def parity_table(rows):
            "|---|---|---|---|---|---|"]
     for (h, gate, code), rs in sorted(by.items()):
         ok = sum(r["status"] == "parity_ok" for r in rs)
-        de = max(abs(r.get("dE_per_atom") or 0.0) for r in rs)
-        df = max(abs(r.get("max_dF") or 0.0) for r in rs)
-        out.append(f"| {h} | {gate} | {CODES[code][0]} | {ok}/{len(rs)} | {de:.1e} | {df:.1e} |")
+        err = sum(r["status"] == "error" for r in rs)
+        cmp = [r for r in rs if r["status"] != "error"]
+        de = f"{max(abs(r.get('dE_per_atom') or 0.0) for r in cmp):.1e}" if cmp else "—"
+        df = f"{max(abs(r.get('max_dF') or 0.0) for r in cmp):.1e}" if cmp else "—"
+        n = f"{ok}/{len(rs)}" + (f" ({err} error)" if err else "")
+        out.append(f"| {h} | {gate} | {CODES[code][0]} | {n} | {de} | {df} |")
     timed = {r["host"] for r in rows if r.get("mode") in MODES}
     for h in sorted(timed - {k[0] for k in by}):
         out.append(f"| {h} | — | — | pending | | |")

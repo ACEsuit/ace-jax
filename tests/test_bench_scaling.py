@@ -792,6 +792,9 @@ def test_before_after_without_before_rows_or_host_rows(tmp_path, monkeypatch):
     assert plot.before_after_series(after, before, "moriarty-gpu") == {}
     assert plot.fig_before_after(after, before, tmp_path, "moriarty-gpu") is None
     assert plot.before_after_hosts(after, before) == (["modal-a100"], ["moriarty-gpu"])
+    # a host measured only after the speed-ups (no before rows): no figure, not pending
+    late = after + [{**r, "host": "lestrade-cpu"} for r in _ba_rows()]
+    assert plot.before_after_hosts(late, before) == (["modal-a100"], ["moriarty-gpu"])
     # CPU: ace-jax runs standalone only, so the figure has one mode column
     cpu = [r for r in _ba_rows(host="moriarty-cpu") if r["mode"] == "standalone"]
     assert {k[1] for k in plot.before_after_series(cpu, [], "moriarty-cpu")} == {"standalone"}
@@ -1884,3 +1887,16 @@ def test_a2b_compare_accepts_ulp_noise_only(tmp_path):
     assert got["noise"][0]
     assert not got["pattern"][0] and not got["shape"][0]
     assert not got["rel"][0] and got["rel"][2] == pytest.approx(1e-10, rel=1e-3)
+
+
+def test_parity_table_shows_an_erroring_gate():
+    """A gate whose reference crashed (lestrade: moriarty's Symmetrix build is
+    AVX-512, SIGILL on the i9) is listed as not passed, not silently dropped."""
+    from scaling.plot import parity_table
+    rows = [{"host": "lestrade-cpu", "mode": "parity", "gate": "mace", "code": "mace", "status": "error"},
+            {"host": "lestrade-cpu", "mode": "parity", "gate": "mace", "code": "mace", "status": "error"},
+            {"host": "lestrade-cpu", "mode": "parity", "gate": "mlpace", "code": "mlpace",
+             "status": "parity_ok", "dE_per_atom": 1e-14, "max_dF": 4e-10}]
+    t = parity_table(rows)
+    assert "| lestrade-cpu | mace | MACE | 0/2 (2 error) | — | — |" in t
+    assert "| lestrade-cpu | mlpace | ML-PACE | 1/1 | 1.0e-14 | 4.0e-10 |" in t
