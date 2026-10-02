@@ -1,6 +1,6 @@
-"""Tables for docs/perf-optimisation-results.md, from the committed rows.
+"""Tables for docs/dev/perf-optimisation-results.md, from the committed rows.
 
-    python bench/scaling/perf_results.py ['bench/scaling/results/*.jsonl'] [docs/perf-optimisation-results.md]
+    python bench/scaling/perf_results.py ['bench/scaling/results/*.jsonl'] [docs/dev/perf-optimisation-results.md]
 
 The prose lives in `perf_results_template.md`; its `{{name}}` placeholders are
 filled with tables computed here from:
@@ -24,7 +24,7 @@ MICRO = HERE.parent / "perf" / "results"
 HOST_ORDER = ("modal-a100", "sulis-a100", "moriarty-gpu", "moriarty-cpu")
 SYSTEMS, SIZES = ("SiGe", "Cantor"), ("small", "medium", "large")
 
-# the spec's success criteria (docs/perf-optimisation-spec.md): Cantor medium,
+# the spec's success criteria (docs/dev/perf-optimisation-spec.md): Cantor medium,
 # float64, A100, 8,192 atoms
 CRIT_HOST, CRIT_SYSTEM, CRIT_N = "modal-a100", "Cantor", 8192
 MODEL_MS_TARGET, E2E_TARGET, LAMMPS_TARGET, LAMMPS_SIZES = 4.5, 1.1e6, 1.0e6, (32768, 131072)
@@ -164,7 +164,7 @@ def criteria_table(after, before):
     return "\n".join(out)
 
 
-def render(pattern="bench/scaling/results/*.jsonl", doc="docs/perf-optimisation-results.md"):
+def render(pattern="bench/scaling/results/*.jsonl", doc="docs/dev/perf-optimisation-results.md"):
     after, before = load(pattern), load(before_pattern(pattern))
     text = (HERE / "perf_results_template.md").read_text()
     for name, fill in (("microbench", micro_table()), ("criteria", criteria_table(after, before)),

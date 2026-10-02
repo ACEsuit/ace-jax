@@ -9,7 +9,7 @@ from conftest import FIXTURE_DIR
 
 jax.config.update("jax_enable_x64", True)
 
-from ace_jax.construct.embedding import _fix_signs, principal_frame
+from ace_jax.basis.embedding import _fix_signs, principal_frame
 from ace_jax.fit.inducing import _frame_from_rows, build_pmap
 
 

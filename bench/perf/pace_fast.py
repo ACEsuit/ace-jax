@@ -1,5 +1,5 @@
 """Prototype: PACE's SBessel radial as one elementwise sin + a constant matrix
-(docs/ace-vs-pace-gap.md §4.3).  Not in src/.
+(docs/dev/ace-vs-pace-gap.md §4.3).  Not in src/.
 
 `pace_radial._sbessel` builds g_0..g_{K-1} by two chained recurrences (the
 sin/cos rotation for sin(kx), then PACE's orthogonalisation g_n = (f_n +

@@ -1,0 +1,25 @@
+{
+ "steps": 40,
+ "reasons": [
+  "linesearch+steps+steps"
+ ],
+ "round_lengths": [
+  7,
+  16,
+  16
+ ],
+ "r0": 78229.9898071289,
+ "precond": [
+  0.1
+ ],
+ "curvature": [
+  [
+   104579.38079670427,
+   -105.95215859114937
+  ]
+ ],
+ "fallbacks": 1,
+ "pen0": 18989802364.478924,
+ "P": 1,
+ "mode": "joint"
+}

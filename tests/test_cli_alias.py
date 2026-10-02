@@ -20,4 +20,4 @@ def test_installed_aj_runs():
     if exe is None:
         pytest.skip("aj not installed in this environment (re-sync after adding the script)")
     out = subprocess.run([exe, "--help"], capture_output=True, text=True, check=True).stdout
-    assert "fit" in out and "eval" in out and "construct" in out
+    assert "fit" in out and "eval" in out and "basis" in out and "construct" not in out

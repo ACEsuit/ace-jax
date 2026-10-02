@@ -14,7 +14,7 @@ ACEGP = pathlib.Path(os.environ.get("ACEGP_DATA", HOME / "acegp-data"))   # data
 image = (
     modal.Image.debian_slim(python_version="3.11")
     .pip_install("mace-torch==0.3.16", "ase==3.23.0", "matscipy==1.1.1")
-    .add_local_file(os.environ["MACE_MODEL"], "/data/mace-mh-1.model")
+    .add_local_file(os.environ.get("MACE_MODEL", str(pathlib.Path.home() / "gits/SimpleGPpotential/models/mace-mh-1.model")), "/data/mace-mh-1.model")
     .add_local_file(str(pathlib.Path(__file__).parents[1] / "gen" / "big2.py"), "/root/big2.py")
 )
 app = modal.App("acegp-big2")

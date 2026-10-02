@@ -84,6 +84,20 @@ def require_optional(module):
     return pytest.importorskip(module)
 
 
+def require_coupling_lib():
+    """Skip (or fail under ACEJAX_REQUIRE_OPTIONAL) unless ace_jax_coupling is
+    installed WITH its compiled library (the uv path source builds a lib-less
+    dev wheel when no bundle is given)."""
+    ajc = require_optional("ace_jax_coupling")
+    try:
+        ajc.build_info()
+    except ajc.CouplingLibError as e:
+        if os.environ.get("ACEJAX_REQUIRE_OPTIONAL"):
+            pytest.fail(f"ace_jax_coupling has no compiled library: {e}")
+        pytest.skip(f"ace_jax_coupling has no compiled library: {e}")
+    return ajc
+
+
 MODELS = {
     "ace1_spline_spherical": "si_fitted.npz",
     "ace_analytic_solid": "si_ace_model.npz",
@@ -215,9 +229,11 @@ def species_index(z):
 
 # Bound peak memory across the suite: JAX retains compiled executables and traced
 # artifacts in-process, which under xdist workers accumulates and can OOM a CI
-# runner mid-run. Release them after each test; the persistent on-disk cache
-# above keeps the next compile cheap, so this costs little.
-@pytest.fixture(autouse=True)
+# runner mid-run. Release them after each MODULE, not each test: the on-disk cache
+# saves XLA compiles but not tracing/lowering, and clearing per test re-traced every
+# model in every test (test_lean + test_to_spline: 279 s per test, 134 s per module,
+# 120 s never; peak 2.4 / 2.8 / 3.1 GB).
+@pytest.fixture(autouse=True, scope="module")
 def _release_jax_memory():
     yield
     try:
@@ -225,3 +241,74 @@ def _release_jax_memory():
         jax.clear_caches()
     except Exception:
         pass
+
+
+def small_si_xyz(path, n=12):
+    """The first n frames of si_tiny_train.xyz (the isolated atom first), byte for byte:
+    the CLI plumbing and reproduction tests need a fit, not 53 configurations."""
+    lines, out, i = (FIXTURE_DIR / "si_tiny_train.xyz").read_text().splitlines(keepends=True), [], 0
+    for _ in range(n):
+        k = int(lines[i]); out += lines[i:i + k + 2]; i += k + 2
+    path.write_text("".join(out))
+    return path
+
+
+CLI_FAST = ["--energy-key", "dft_energy", "--force-key", "dft_force", "--virial-key", "dft_virial",
+            "--m-per-species", "0", "--rungs", "map", "--map-steps", "5", "--opt", "adam",
+            "--configs-per-batch", "4"]
+
+
+@pytest.fixture(scope="session")
+def built_cli_run(tmp_path_factory):
+    """One `aj fit --order 3 --max-degree 10` (basis built inline, default r0) on a
+    12-config Si subset, shared by the CLI/run-file tests that only read its outputs:
+    a SimpleNamespace(out, xyz, cache, stdout)."""
+    import contextlib
+    import io
+    from types import SimpleNamespace
+    from test_basis_build import _primed_cache
+    from ace_jax.cli import main
+    root = tmp_path_factory.mktemp("built_cli_run")
+    xyz = small_si_xyz(root / "si12.xyz")
+    cache = _primed_cache(root / "cache")
+    buf = io.StringIO()
+    with pytest.MonkeyPatch.context() as mp, contextlib.redirect_stdout(buf):
+        mp.setenv("ACEJAX_COUPLING_CACHE_ONLY", "1")
+        main(["fit", "--order", "3", "--max-degree", "10", "--coupling-cache-dir", cache,
+              "--train", str(xyz), "--out", str(root / "a"), *CLI_FAST])
+    return SimpleNamespace(out=root / "a", xyz=xyz, cache=cache, stdout=buf.getvalue())
+
+
+def shard_files(files, durations, i, n):
+    """The files of shard i (1-based) of n: whole files, by longest-processing-time-first
+    over their summed recorded durations (a file not yet recorded weighs the median file).
+    Splitting per TEST scattered a module across shards, and each shard then repaid its
+    module fixtures and first compiles, so the shards came out far from the balance the
+    recorded per-test durations predicted (1238 / 773 / 900 s against 1030 each)."""
+    import statistics
+    w = {}
+    for k, v in durations.items():
+        f = k.split("::")[0]
+        if f in files:
+            w[f] = w.get(f, 0.0) + v
+    fill = statistics.median(w.values()) if w else 1.0
+    load, out = [0.0] * n, [[] for _ in range(n)]
+    for f in sorted(files, key=lambda f: (-w.get(f, fill), f)):
+        j = min(range(n), key=lambda j: (load[j], j))
+        load[j] += w.get(f, fill); out[j].append(f)
+    return sorted(out[i - 1])
+
+
+def pytest_collection_modifyitems(config, items):
+    """ACEJAX_SHARD=i/n keeps only shard i's files (shard_files over .test_durations)."""
+    shard = os.environ.get("ACEJAX_SHARD")
+    if not shard:
+        return
+    import json
+    i, n = (int(x) for x in shard.split("/"))
+    path = ROOT / ".test_durations"
+    durations = json.loads(path.read_text()) if path.exists() else {}
+    keep = set(shard_files(sorted({it.nodeid.split("::")[0] for it in items}), durations, i, n))
+    selected = [it for it in items if it.nodeid.split("::")[0] in keep]
+    config.hook.pytest_deselected(items=[it for it in items if it.nodeid.split("::")[0] not in keep])
+    items[:] = selected

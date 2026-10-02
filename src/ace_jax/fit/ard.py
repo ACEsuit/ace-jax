@@ -1,6 +1,6 @@
 """Tempered ARD posterior: calibrated per-atom force uncertainty for linear ACE.
 
-Spec: docs/specs/2026-09-28-tempered-ard-uq-design.md.  For the linear model the weighted design
+Spec: docs/dev/specs/2026-09-28-tempered-ard-uq-design.md.  For the linear model the weighted design
 rows do not depend on the hyperparameters, so one statistics pass (G_q, b_q, y^T y_q, n_q per
 quantity) gives the exact evidence for any h = (log sigma_E, log sigma_F, log sigma_V, a_k):
 

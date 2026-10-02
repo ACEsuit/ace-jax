@@ -1,5 +1,5 @@
 # Julia/ACEpotentials ORACLE for Python embedded-model authoring (CI-only; the port is
-# construct/model.py build_embedding_model).  Builds ace_embedding_model for a shape
+# basis/model.py build_embedding_model).  Builds ace_embedding_model for a shape
 # and dumps site descriptors on several random structures (enough sites per species
 # to pin the descriptor SUBSPACE, which is what makes the parity test immune to
 # basis ordering), the reduced embedding rows it used, and the smoothness prior with

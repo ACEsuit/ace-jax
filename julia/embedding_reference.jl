@@ -1,5 +1,5 @@
 # Julia/ACEpotentials element-embedding reduction ORACLE (CI-only; the Python port
-# is src/ace_jax/construct/embedding.py).  Dumps ACEpotentials' embedding_rows
+# is src/ace_jax/basis/embedding.py).  Dumps ACEpotentials' embedding_rows
 # (:pca and :truncate, normalised or not) for several widths d -- below, at and
 # above the rank, which exercises _pca_reduce's generic-frame branch -- plus
 # _generic_frame itself and embedding_widths, so the port can be checked

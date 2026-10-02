@@ -46,7 +46,7 @@ BUNDLE_LAYOUTS = LAYOUTS + ("matrix",)
 # unblocked.  Not the calculator's CHUNK_NODES = 16384: with
 # max_owned ~ 1.1 N a 16k-atom system would split into two blocks and pay the
 # checkpoint recompute, 1.5x slower; 32k rows keeps it one block and is as fast
-# as or faster than 64k at scale.  docs/perf-lammps-large-n.md.
+# as or faster than 64k at scale.  docs/dev/perf-lammps-large-n.md.
 BUNDLE_BLOCK_ROWS = 32768
 
 
@@ -104,14 +104,14 @@ def neighbour_capacity(atoms, rcut, skin=1.0, slots="skin", margin=8, owned=1.1,
     larger base.  list_headroom = 0.5 comes from ONE observed overflow: on the
     benchmark deck SiGe medium's widest list row grew from 34 to 45 by the
     first rebuild (k_list + 8 = 42 aborted), while its rcut slots never
-    overflowed (docs/perf-lammps-large-n.md).  It is a guess, not a bound;
+    overflowed (docs/dev/perf-lammps-large-n.md).  It is a guess, not a bound;
     for stable MD list_headroom=0 (with margin >= 8) is cheaper.
 
     slots="skin" (default, always safe between list rebuilds): k_dense =
     k_list + margin.  No atom can gain more neighbours within rcut than its
     rcut + skin list holds, so this covers structures that compress during the
     run (the benchmark's random-weight models push Cantor's coordination within
-    rcut from 42 to 50 in 250 steps; docs/perf-lammps-large-n.md).
+    rcut from 42 to 50 in 250 steps; docs/dev/perf-lammps-large-n.md).
 
     slots="cutoff": k_dense = k_cut + margin, 1.2-1.4x faster on Cantor (fewer
     model slots).  Safe for stable MD with a fitted model -- a thermalised
@@ -294,12 +294,12 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
 
     lean (default True): export `ace_jax.eval.model.lean(model, spline_tol,
     spline_intervals)`, the evaluation form with the dead per-edge work removed
-    (docs/ace-vs-pace-gap.md).  spline_tol="auto" (default) first splines a
+    (docs/dev/ace-vs-pace-gap.md).  spline_tol="auto" (default) first splines a
     learned analytic tensor radial (`radial_learned`) at 1e-10, which is not
     roundoff: energies agree with lean=False to up to ~1e-9 relative and forces
     to up to ~2.3e-8 of max|F| on the benchmark models
-    (docs/learned-radial-splining.md).  Other analytic models (Julia
-    `ace_model` exports, Python-authored) stay exact; a float spline_tol opts
+    (docs/dev/learned-radial-splining.md).  Other analytic models (ACEpotentials
+    `ace_model` exports, built bases) stay exact; a float spline_tol opts
     them in, None never splines.
     Recorded from what lean actually did (looking through a wrapper's `.base`):
     `ace_jax.lean` (False when lean returned the model as given, e.g. PACE or an

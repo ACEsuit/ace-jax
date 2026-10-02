@@ -164,7 +164,7 @@ def write_yace(model, spec, path):
     verbatim from `spec.tree` (function layout is never regenerated)."""
     from .pace_model import PACEModel
     if not isinstance(model, PACEModel):
-        raise TypeError("write_yace only writes PACEModel (PACE radials); see docs/pace-yace-spec.md")
+        raise TypeError("write_yace only writes PACEModel (PACE radials); see docs/dev/pace-yace-spec.md")
     if any(getattr(x, "dtype", np.float64) != np.float64 for x in
            (model.crad, model.ctilde_complex, model.fs_params, model.E0)):
         warnings.warn("write_yace: model leaves are float32, so coefficients are written at "

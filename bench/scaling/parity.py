@@ -9,7 +9,7 @@
 - spline:  the learned-radial proxy (medium ACE) splined, as deployed
            (spline_tol="auto", 1e-10), vs kept analytic (None), standalone:
            |dE|/|E| <= 1e-9, max|dF| / max|F| <= 3e-8.  That is splining
-           accuracy, not roundoff: docs/learned-radial-splining.md measured up
+           accuracy, not roundoff: docs/dev/learned-radial-splining.md measured up
            to 9.4e-10 and 2.3e-8 over 20 learned-radial cases at 1e-10 (on
            the medium n_q=12 models 3.5e-11 and 9.6e-9, with 20% weight noise).
 The acejax gate also runs both learned-radial lines on the medium models: for

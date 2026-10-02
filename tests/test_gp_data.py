@@ -135,3 +135,30 @@ def test_perconfig_factor_changes_only_that_configs_weight(tmp_path):
     assert abs(cfgs[0].w_E - 3.0 / np.sqrt(2)) < 1e-12
     assert abs(cfgs[1].w_E - 1.0 / np.sqrt(2)) < 1e-12
     assert cfgs[0].w_E != cfgs[1].w_E
+
+
+def test_a_named_label_key_missing_from_every_config_raises():
+    """A misspelt --energy-key/--force-key/--virial-key is an error naming what the file
+    has, not a label silently dropped from the fit."""
+    for kw, key in ((dict(energy_key="dft_enrgy"), "dft_enrgy"), (dict(force_key="dft_forcez"), "dft_forcez"),
+                    (dict(virial_key="dft_virials"), "dft_virials")):
+        with pytest.raises(ValueError, match=f"{key}.*dft_"):
+            load_configs(XYZ, **{"energy_key": "dft_energy", "force_key": "dft_force",
+                                 "virial_key": "dft_virial", **kw})
+
+
+def test_default_label_keys_absent_from_the_file_are_not_an_error():
+    cs = load_configs(XYZ)                     # the fixture names its labels dft_*: the defaults find nothing
+    assert all(c.energy is None and c.forces is None and c.virial is None for c in cs)
+
+
+def test_a_virial_key_is_not_required_of_non_periodic_configs(tmp_path):
+    from ase import Atoms
+    from ase.io import write
+    at = Atoms("Si2", positions=[[0, 0, 0], [0, 0, 2.3]], pbc=False)
+    at.info["dft_energy"] = -1.0
+    at.arrays["dft_force"] = np.zeros((2, 3))
+    write(tmp_path / "mol.xyz", [at], format="extxyz")
+    (c,) = load_configs(tmp_path / "mol.xyz", energy_key="dft_energy", force_key="dft_force",
+                        virial_key="dft_virial")
+    assert c.virial is None and c.energy == -1.0

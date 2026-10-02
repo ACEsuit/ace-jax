@@ -159,6 +159,39 @@ def test_force_virial_dtc_is_derivative_of_energy(fitted):
         for a in range(3):
             fd = (Dm(n, a, h, h) - Dm(n, a, h, -h) - Dm(n, a, -h, h) + Dm(n, a, -h, -h)) / (4 * h * h)
             assert abs(fd - float(Fv[n, a])) < 1e-4 + 1e-3 * abs(float(Fv[n, a]))
+    # virial: matched strain perturbations, edge displacement W_v(rij) = 1/2 (e_a rij_b + e_b rij_a)
+    from ace_jax.fit.data import VOIGT
+    def Wv(v, s):
+        a, b = VOIGT[v]
+        return jnp.where(m[:, None], s * (0.5 * (jnp.eye(3)[a][None] * rij[:, b:b + 1]
+                                                + jnp.eye(3)[b][None] * rij[:, a:a + 1])), 0.0)
+    for v in range(6):
+        Dv = lambda s, tt, v=v: np.asarray(_dtc_D(theta, prob, batch, Wv(v, s), Wv(v, tt)))
+        fd = (Dv(h, h) - Dv(h, -h) - Dv(-h, h) + Dv(-h, -h)) / (4 * h * h)
+        live = np.asarray(batch.cfg_mask)
+        assert np.all(np.abs(fd[live] - np.asarray(Vv)[live, v]) < 1e-4 + 1e-3 * np.abs(np.asarray(Vv)[live, v]))
+
+
+def test_deriv_dtc_memory_not_cubic(fitted):
+    """The derivative-DTC's compiled temp memory must not grow as Ncap^3 with the
+    configs per batch.  A force velocity is nonzero only on the moved atom and
+    the sites that list it as a neighbour, and a virial velocity only inside its
+    own config, so a double jvp over the whole-batch Gram per velocity
+    (3 Ncap velocities x Ncap^2 pairs x d) is waste -- it made an 8-config
+    si_tiny predict need hundreds of GB.  Same configs, 3x the batch: the temp
+    may grow like the energy DTC's own Ncap^2 Gram, not like Ncap^3."""
+    from ace_jax.fit.predict import _dtc_deriv_residual
+    prob, train, test, theta, configs, E0 = fitted
+    meta = load(FIXTURE_DIR / "si_fitted.npz")[1]
+    f = jax.jit(lambda th, b: _dtc_deriv_residual(th, prob, b))
+    def temp(cs):
+        b = jax.tree.map(lambda a: a[0], build_dataset(cs, meta, E0, len(cs)))
+        return f.lower(theta, b).compile().memory_analysis().temp_size_in_bytes, b.nbr.shape[0]
+    cs = configs[1:17]                                        # 16 two-atom Si cells: Ncap 32, unpadded
+    (t1, n1), (t3, n3) = temp(cs), temp(cs * 3)
+    assert (n1, n3) == (32, 96)
+    assert t3 / t1 < 1.4 * (n3 / n1) ** 2, (t1 / 1e6, t3 / 1e6, n1, n3)
+
 
 
 def test_pops_predict_finite_and_keeps_blr_mean(tiny_linear_problem):

@@ -1,9 +1,9 @@
 # Benchmark scaling harness
 
-Produces the timings behind `docs/benchmarks.md`: ace-jax (`PACEModel` on
+Produces the timings behind `docs/dev/benchmarks.md`: ace-jax (`PACEModel` on
 `.yace`, `ACEModel` on `.npz`), ML-PACE and MACE, standalone and inside
 LAMMPS, on SiGe and Cantor at three model sizes each. Design:
-`docs/benchmark-scaling-spec.md`; plan: `docs/benchmark-scaling-plan.md`.
+`docs/dev/benchmark-scaling-spec.md`; plan: `docs/dev/benchmark-scaling-plan.md`.
 
 | file | role |
 |---|---|
@@ -13,7 +13,7 @@ LAMMPS, on SiGe and Cantor at three model sizes each. Design:
 | `run_lammps.py` | one LAMMPS case: writes the input, runs, parses the timed segment |
 | `parity.py` | the per-host parity gates that must pass before any timing |
 | `sweep.py` | expands the case matrix for a host and runs it resumably |
-| `plot.py` | figures and tables for `docs/benchmarks.md` |
+| `plot.py` | figures and tables for `docs/dev/benchmarks.md` |
 | `envs/moriarty.sh`, `envs/sulis.sh`, `modal_app.py` | the environments |
 
 ## Models

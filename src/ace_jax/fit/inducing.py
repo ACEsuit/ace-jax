@@ -43,7 +43,7 @@ class Inducing(NamedTuple):
     embed: jnp.ndarray  # (NZ, de) unit-normalized species embedding (eye = block-diagonal)
 
 
-from ..construct.embedding import _fix_signs, _rank_tol, principal_frame  # noqa: E402,F401  (shared)
+from ..basis.embedding import _fix_signs, _rank_tol, principal_frame  # noqa: E402,F401  (shared)
 
 
 def _frame_from_rows(X, mask, scale, d, chunk=4096):

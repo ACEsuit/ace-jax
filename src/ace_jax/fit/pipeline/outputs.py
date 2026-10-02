@@ -63,6 +63,13 @@ def write_outputs(res, out, layout=("run",), argv=None, save_model=True, model_d
     out = pathlib.Path(out); out.mkdir(parents=True, exist_ok=True)
     cfg, d, b = res.config, res.data, res.built
     _dump(out / "theta_map.json", res.theta._asdict())
+    if res.radial is not None:
+        r, c = res.radial, res.config
+        _dump(out / "radial_info.json", {
+            "selected": r.info["selected"], "scores": r.info["scores"], "n_q": c.radial_n_q,
+            "lam_grid": list(c.radial_lam_grid), "val_frac": c.radial_val_frac,
+            "to_analytic_relres_max": r.relres_max, "n_fit": r.n_fit, "n_val": r.n_val,
+            "seconds": r.seconds})
     for rung, dr in res.rungs.draws.items():
         np.save(out / f"draws_{rung}.npy", dr)
     if "nuts" in res.rungs.info:

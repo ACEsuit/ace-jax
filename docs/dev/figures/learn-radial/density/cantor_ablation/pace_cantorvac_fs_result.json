@@ -1,0 +1,1 @@
+{"rc": 0, "eval": "/work/cantorvac_fs/output_potential.yaml {\"val\": {\"E_rmse_meV_atom\": 6.856503021252247, \"F_rmse_meV_A\": 85.02644479542238}, \"train\": {\"E_rmse_meV_atom\": 5.180433906668069, \"F_rmse_meV_A\": 72.62460240184332}}"}

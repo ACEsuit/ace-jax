@@ -53,7 +53,7 @@ MACE_SIZES = tuple(MACE)
 # multi-head models: the head both the standalone calculator and the Symmetrix
 # export evaluate (materials PBE -- the one that fits SiGe and Cantor)
 MACE_HEAD = {"mh1": "omat_pbe"}
-# Learned-radial proxy lines (docs/learned-radial-splining.md): the medium
+# Learned-radial proxy lines (docs/dev/learned-radial-splining.md): the medium
 # linear ACE model on the analytic radial branch with perturbed weights
 # (`build_ace_learned`), evaluated as deployed -- spline_tol="auto", which
 # splines a learned radial at 1e-10 -- and kept analytic (None, exact).  Medium
@@ -183,7 +183,7 @@ def learned_proxy(src, dst, n_q=12, scale=0.1, seed=0):
     import jax
     jax.config.update("jax_enable_x64", True)            # to_analytic's projection is f64
     import numpy as np
-    from ace_jax.construct.export import patch_radial_npz
+    from ace_jax.basis.export import patch_radial_npz
     from ace_jax.eval import load
     from ace_jax.fit.radial_model import row_active, to_analytic, with_radial
     model, _, _ = load(str(src))
