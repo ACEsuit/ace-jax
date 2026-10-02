@@ -31,7 +31,10 @@ design is in `docs/benchmark-scaling-spec.md`, and how to reproduce it is in
   equiatomic CrMnFeCoNi alloy on fcc).
 - **Hosts:** moriarty CPU (16-core Xeon Silver 4216; LAMMPS with 16 MPI
   ranks, standalone on all 32 hardware threads); moriarty GPU (RTX A4500,
-  20 GB); Modal A100-80GB.
+  20 GB); Modal A100-80GB; lestrade CPU (`lestrade-cpu`: an i9-14900K, on its
+  8 P-cores only, CPUs 0-15; LAMMPS with 8 MPI ranks bound one per P-core,
+  standalone on the 16 P-core hardware threads), the one CPU host that runs
+  the ACEpotentials.jl lines next to ace-jax, ML-PACE and MACE.
 - **Parity gate:** each host's parity checks passed before any timing ran:
   ace-jax against ML-PACE (gate `mlpace`), ace-jax standalone against
   ace-jax in LAMMPS in both bundle layouts (gate `acejax`), and MACE against
@@ -137,7 +140,11 @@ atoms on the GPUs and 2,048 on the CPU, as ranges over the two systems.
   sized from the previous size's step time) after 3–50 warm-up steps. This
   is a deviation from the spec's fixed 200/50, made so the slow MACE CPU
   cases finish.
-- **Out-of-memory markers.** On the CPU host, cases are killed at 48 GB of
+- **No MACE in LAMMPS on lestrade.** The Symmetrix tree is moriarty's
+  build, compiled for its AVX-512 CPU; on the i9-14900K (no AVX-512) it dies
+  with an illegal instruction while loading the model, so lestrade's `mace`
+  gate is an error and only MACE standalone (PyTorch) runs there.
+- **Out-of-memory markers.** On the CPU hosts, cases are killed at 48 GB of
   resident memory (the node has 62 GB); on GPUs they stop at the device
   limit. A dotted vertical line marks the first size that did not fit.
 - **ACEpotentials.jl lines are CPU only,** float64, and their trim libraries
