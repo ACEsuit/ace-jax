@@ -135,21 +135,19 @@ def test_mismatched_posterior_is_refused(fitted, tmp_path):
 
 
 def test_cli_eval_with_posterior_writes_per_atom_std(fitted, tmp_path):
-    import csv
     from ase.io import read, write
     from ace_jax.cli import main
+    from ace_jax.fit.xyz import read_raw
     data = tmp_path / "d.xyz"
     write(data, read(XYZ, ":3"))
     assert main(["eval", "--model", str(fitted / "model.npz"), "--posterior", str(fitted / "posterior.npz"),
-                 "--data", str(data), "--energy-key", "dft_energy", "--force-key", "dft_force", "--forces",
-                 "--out", str(tmp_path / "p.csv"), "--per-atom", str(tmp_path / "atoms.xyz")]) == 0
-    rows = list(csv.DictReader(open(tmp_path / "p.csv")))
-    assert len(rows) == 3
+                 "--data", str(data), "--energy-key", "dft_energy", "--force-key", "dft_force",
+                 "--out", str(tmp_path / "p.xyz")]) == 0
+    rows = read_raw(tmp_path / "p.xyz")
+    assert len(rows) == 3 and all(r.arrays["ace_forces_std"].shape == (r.natoms,) for r in rows)
     # config 0 of the fixture is an isolated Si atom: no neighbours, so its force std is exactly 0
-    assert int(rows[0]["natoms"]) == 1 and float(rows[0]["fmax_std"]) == 0.0
-    assert all(float(r["fmax_std"]) > 0 for r in rows[1:])
-    ats = read(tmp_path / "atoms.xyz", ":")
-    assert len(ats) == 3 and ats[0].arrays["forces_std"].shape == (len(ats[0]),)
+    assert rows[0].natoms == 1 and float(rows[0].arrays["ace_forces_std"].max()) == 0.0
+    assert all(float(r.arrays["ace_forces_std"].max()) > 0 for r in rows[1:])
 
 
 

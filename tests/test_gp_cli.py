@@ -57,20 +57,20 @@ def test_cli_map_laplace(tmp_path):
 
 
 def test_cli_eval(tmp_path, capsys):
-    """The eval subcommand evaluates a fitted model on a dataset and reports
-    E/F RMSE vs the labels (native E/F/V, no ASE calculator).  main() returns 0:
-    the console script passes its value to sys.exit, and returning the rows once
-    made every successful run exit 1."""
+    """The eval subcommand evaluates a fitted model on a dataset, prints the RMSE table
+    vs the labels and writes the predictions to extxyz.  main() returns 0: the console
+    script passes its value to sys.exit, and returning the rows once made every
+    successful run exit 1."""
     from ase.io import read, write
+    from ace_jax.fit.xyz import read_raw
     data = tmp_path / "d.xyz"
     write(data, read(XYZ, ":4"))                  # each config size compiles anew: keep it small
-    out = tmp_path / "pred.csv"
+    out = tmp_path / "pred.xyz"
     assert main(["eval", "--model", str(FIXTURE_DIR / "si_fitted.npz"), "--data", str(data),
                  "--energy-key", "dft_energy", "--force-key", "dft_force", "--out", str(out)]) == 0
-    with open(out) as fh:
-        rows = list(csv.DictReader(fh))
-    assert len(rows) > 0 and "energy_per_atom" in rows[0]
-    assert "E RMSE" in capsys.readouterr().out
+    frames = read_raw(out)
+    assert len(frames) == 4 and all("ace_energy" in f.info and "ace_forces" in f.arrays for f in frames)
+    assert "config type" in capsys.readouterr().out
 
 
 def test_cli_eval_matches_the_exact_model_per_config(tmp_path):
@@ -79,10 +79,11 @@ def test_cli_eval_matches_the_exact_model_per_config(tmp_path):
     import jax.numpy as jnp
     from ace_jax.eval import load, sparse_graph, species_indices
     from ace_jax.fit.data import load_configs
-    out = tmp_path / "p.csv"
+    from ace_jax.fit.xyz import read_raw
+    out = tmp_path / "p.xyz"
     assert main(["eval", "--model", str(FIXTURE_DIR / "si_fitted.npz"), "--data", str(XYZ),
-                 "--energy-key", "dft_energy", "--force-key", "dft_force", "--forces", "--out", str(out)]) == 0
-    rows = list(csv.DictReader(open(out)))
+                 "--energy-key", "dft_energy", "--force-key", "dft_force", "--out", str(out)]) == 0
+    rows = read_raw(out)
     model, meta, _ = load(FIXTURE_DIR / "si_fitted.npz")
     cs = load_configs(XYZ, energy_key="dft_energy", force_key="dft_force", virial_key="dft_virial")
     assert len(rows) == len(cs)
@@ -90,5 +91,5 @@ def test_cli_eval_matches_the_exact_model_per_config(tmp_path):
         g = sparse_graph(c.positions, c.cell, c.pbc, float(meta["rcut"]))
         nz = jnp.asarray(species_indices(meta, c.numbers)); s, v = jnp.asarray(g.senders), jnp.asarray(g.receivers)
         E, F, _ = model.energy_forces_virial(jnp.asarray(g.rij), nz[s], nz[v], s, v, g.n_nodes, nz)
-        assert abs(float(r["energy"]) - float(E)) <= 1e-9 * max(1.0, abs(float(E)))
-        assert abs(float(r["fmax"]) - float(np.abs(np.asarray(F)).max())) <= 1e-8
+        assert abs(float(r.info["ace_energy"]) - float(E)) <= 1e-8 * max(1.0, abs(float(E)))   # %16.8f
+        np.testing.assert_allclose(r.arrays["ace_forces"], np.asarray(F), rtol=0, atol=1e-8)

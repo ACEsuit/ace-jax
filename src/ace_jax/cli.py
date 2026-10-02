@@ -2,7 +2,6 @@
 ACE model, run the requested rungs of the ladder, write draws and the metrics
 table (per atom energies in meV/atom, forces in eV/A, virials in eV)."""
 import argparse
-import csv
 import json
 import pathlib
 
@@ -172,15 +171,23 @@ def run(a):
 
 
 def cmd_eval(a):
-    """Evaluate a fitted/exported model on a dataset: predicted energy (and,
-    with --forces, forces/virial) per configuration, and RMSE vs the labels
-    when present.  Every model goes through its jitted calculator: the edge list is
-    padded to power-of-two buckets, so configs of similar size share one compile (an
-    eager pass per config recompiled every op, ~3 s a config).  A linear model is
-    evaluated exactly (lean, never splined: spline_tol=None)."""
+    """Evaluate a fitted/exported model on a dataset.  Prints the per-config-type E/F/V
+    RMSE table (fit/report.py) for the labels present, and with --out writes the input
+    structures back as extxyz with every original label kept and the predictions added:
+    info <prefix>energy (eV) and <prefix>stress (3x3, eV/A^3, periodic cells only),
+    arrays <prefix>forces (eV/A); a gp_model.npz adds info <prefix>energy_std and arrays
+    <prefix>forces_std, --posterior (ARD) arrays <prefix>forces_std.
+    Every model goes through its jitted calculator: the edge list is padded to buckets,
+    so configs of similar size share one compile.  A linear model is evaluated exactly
+    (lean, never splined: spline_tol=None)."""
     from ase import Atoms
+    from ase.stress import voigt_6_to_full_3x3_stress
+    from .fit.data import VOIGT
+    from .fit.report import format_rmse_table, rmse_by_type
+    from .fit.xyz import read_raw, write_raw
     keys = dict(energy_key=a.energy_key, force_key=a.force_key, virial_key=a.virial_key)
     configs = load_configs(a.data, **keys)
+    frames = read_raw(a.data) if a.out else None
     gp = str(a.model).endswith(".npz") and "gp_json" in np.load(a.model).files   # gp_model.npz from `fit`
     ard = getattr(a, "posterior", None) is not None
     if gp and ard:
@@ -191,48 +198,40 @@ def cmd_eval(a):
     else:
         from .calc.point import ACECalculator
         calc = ACECalculator(a.model, posterior=a.posterior if ard else None, spline_tol=None)
-    esq = ecnt = fsq = fcnt = 0.0
-    rows, per_atom = [], []
+    p = a.prefix
+    Em, Fm, Vm = [], [], []
     with highest_precision():
         for i, c in enumerate(configs):
             at = Atoms(numbers=c.numbers, positions=c.positions, cell=c.cell, pbc=c.pbc)
             at.calc = calc
-            E, F = at.get_potential_energy(), at.get_forces()
-            E = float(E); F = np.asarray(F); nat = len(c.numbers)
-            rows.append({"config": i, "natoms": nat, "energy": E,
-                         "energy_per_atom": E / nat, "fmax": float(np.abs(F).max())})
-            if gp:
-                rows[-1]["energy_std"] = float(calc.results["energy_std"])
-            if ard:
-                s = np.asarray(calc.get_property("forces_std", at))   # on request: E/F reused
-                rows[-1]["fmax_std"] = float(s.max())
-                if getattr(a, "per_atom", None):
-                    out_at = Atoms(numbers=c.numbers, positions=c.positions, cell=c.cell, pbc=c.pbc)
-                    out_at.arrays["forces_pred"] = F
-                    out_at.arrays["forces_std"] = s
-                    per_atom.append(out_at)
-            if c.energy is not None:
-                esq += ((E - c.energy) / nat) ** 2; ecnt += 1
-            if c.forces is not None:
-                fsq += float(((F - c.forces) ** 2).sum()); fcnt += c.forces.size
-    if per_atom:
-        from ase.io import write as _write
-        _write(a.per_atom, per_atom)
-        print(f"wrote per-atom forces_std for {len(per_atom)} configs to {a.per_atom}")
-    if a.out:
-        with open(a.out, "w", newline="") as fh:
-            w = csv.DictWriter(fh, fieldnames=list(rows[0])); w.writeheader(); w.writerows(rows)
-        print(f"wrote {len(rows)} predictions to {a.out}")
-    else:
-        for r in rows[:10]:
-            print(r)
-        if len(rows) > 10:
-            print(f"... ({len(rows)} configs)")
-    if ecnt:
-        print(f"E RMSE {1e3 * np.sqrt(esq / ecnt):.3f} meV/atom  ({ecnt} configs)")
-    if fcnt:
-        print(f"F RMSE {np.sqrt(fsq / fcnt):.4f} eV/A  ({fcnt} components)")
-    return rows
+            E, F = float(at.get_potential_energy()), np.asarray(at.get_forces())
+            S = np.asarray(at.get_stress()) if at.pbc.all() else None          # Voigt xx yy zz yz xz xy
+            Em.append(E); Fm.append(F)
+            Vm.append(np.full(6, np.nan) if S is None else -S * at.get_volume())   # the virial, VOIGT order
+            if frames is not None:
+                f = frames[i]
+                f.info[f"{p}energy"] = E
+                f.arrays[f"{p}forces"] = F
+                if S is not None:
+                    f.info[f"{p}stress"] = voigt_6_to_full_3x3_stress(S)
+                if gp:
+                    f.info[f"{p}energy_std"] = float(calc.results["energy_std"])
+                    f.arrays[f"{p}forces_std"] = np.asarray(calc.results["forces_std"])
+                if ard:
+                    f.arrays[f"{p}forces_std"] = np.asarray(calc.get_property("forces_std", at))
+    nat = np.array([len(c.numbers) for c in configs])
+    E = np.array([np.nan if c.energy is None else c.energy for c in configs])
+    F = np.concatenate([np.full((len(c.numbers), 3), np.nan) if c.forces is None else c.forces for c in configs])
+    V = np.array([np.full(6, np.nan) if c.virial is None else [c.virial[i, j] for i, j in VOIGT] for c in configs])
+    print(format_rmse_table(rmse_by_type([c.config_type for c in configs], nat, E, np.array(Em),
+                                         F, np.concatenate(Fm), V, np.array(Vm)), f"{a.data} vs {a.model}"))
+    if frames is not None:
+        out = pathlib.Path(a.out).expanduser()
+        if out.parent and str(out.parent) != ".":
+            out.parent.mkdir(parents=True, exist_ok=True)
+        write_raw(out, frames)
+        print(f"wrote {len(frames)} configurations with predictions ({p}energy, {p}forces, ...) to {out}")
+    return 0
 
 
 def cmd_basis(a):
@@ -296,13 +295,15 @@ def _parser():
     fit_p = sub.add_parser("fit", help="fit the hybrid linear-ACE + residual GP (--m-per-species 0 = linear-only fit)")
     _add_fit_args(fit_p)
     add_basis_args(fit_p.add_argument_group("basis (built in memory; instead of --model)"), fit=True)
-    ev = sub.add_parser("eval", help="evaluate a model on a dataset (energy/forces, RMSE vs labels)")
+    ev = sub.add_parser("eval", help="evaluate a model on a dataset: RMSE table vs the labels, predictions to extxyz")
     ev.add_argument("--model", required=True); ev.add_argument("--data", required=True)
     ev.add_argument("--energy-key", default="energy"); ev.add_argument("--force-key", default="forces")
-    ev.add_argument("--virial-key", default="virial"); ev.add_argument("--forces", action="store_true")
-    ev.add_argument("--out", default=None, help="CSV of per-config predictions (default: print head)")
-    ev.add_argument("--posterior", default=None, help="posterior.npz from `fit --uq ard`: adds forces_std")
-    ev.add_argument("--per-atom", default=None, help="extxyz with per-atom forces and forces_std arrays")
+    ev.add_argument("--virial-key", default="virial")
+    ev.add_argument("--out", default=None,
+                    help="extxyz to write: the input structures, every label kept, plus the predictions "
+                         "(<prefix>energy, <prefix>forces, <prefix>stress, and *_std for UQ models)")
+    ev.add_argument("--prefix", default="ace_", help="name prefix of the predicted keys (default ace_)")
+    ev.add_argument("--posterior", default=None, help="posterior.npz from `fit --uq ard`: adds <prefix>forces_std")
     con = sub.add_parser("basis", help="author a new ACE basis: a frozen model (seeded radial init) saved as .npz")
     add_basis_args(con, fit=False)
     con.add_argument("--out", required=True)

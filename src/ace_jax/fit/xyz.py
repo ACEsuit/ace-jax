@@ -70,15 +70,25 @@ def _frame(f, where):
     return Frame(numbers, positions, cell, pbc, info, arrays)
 
 
-def read_extxyz(path):
-    """All frames of an extxyz file, as `Frame`s (see the module docstring)."""
+def read_raw(path):
+    """The extxyz library's own frames (info/arrays exactly as written), for writing back."""
     import extxyz
     path = str(path)
     try:
-        raw = list(extxyz.iread_dicts(path, use_cextxyz=True))
+        return list(extxyz.iread_dicts(path, use_cextxyz=True))
     except Exception:                       # C parser is strict; the Python grammar is the reference
         try:
-            raw = list(extxyz.iread_dicts(path, use_cextxyz=False))
+            return list(extxyz.iread_dicts(path, use_cextxyz=False))
         except Exception as e:
             raise ValueError(f"{path}: not a readable extxyz file ({type(e).__name__}: {e})") from e
-    return [_frame(f, f"{path} frame {i}") for i, f in enumerate(raw)]
+
+
+def write_raw(path, frames):
+    """Write read_raw-style frames (libAtoms extxyz; floats at its %16.8f)."""
+    import extxyz
+    extxyz.write_dicts(str(path), frames)
+
+
+def read_extxyz(path):
+    """All frames of an extxyz file, as `Frame`s (see the module docstring)."""
+    return [_frame(f, f"{path} frame {i}") for i, f in enumerate(read_raw(path))]
