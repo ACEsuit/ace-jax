@@ -463,7 +463,7 @@ def _(fits, mo):
               f"compressed basis is within {_c['E'] / _bestE - 1:.0%} of the best energy error and "
               f"{_c['F'] / _bestF - 1:.0%} of the best force error.")
         if _ok else mo.md("**Checkpoint 4:** the compressed basis is well behind the best fit, or a fit "
-                          "failed. With one channel that is the point of exercise 1."),
+                          "failed. With fewer channels or less data, that is the point of exercises 1 and 2."),
         kind="success" if _ok else "warn",
     )
     return
@@ -678,17 +678,18 @@ def _(mo):
 def _(mo):
     mo.accordion({
         "Hint for exercise 1": mo.md(
-            "Three channels (265 coefficients) fit about as well as two: bulk errors of about "
-            "10.9 meV/atom and 0.144 eV/Å. One channel (155 coefficients) keeps the forces "
-            "(0.143 eV/Å) but loses the energies: the bulk energy error is about 1190 meV/atom. "
-            "The evidence has given up on them: `log_sigma_E` is about +2.0 (an energy noise of "
-            "about 7 eV per cell) against -3.1 with two channels, so the fit treats the energies "
-            "as noise and fits the forces."),
+            "On 40 cells the number of channels barely matters: three (265 coefficients) and one "
+            "(155) give bulk errors of about 9.3 and 9.2 meV/atom and 0.141 and 0.143 eV/Å, against "
+            "8.5 meV/atom and 0.143 eV/Å with two. One channel only says which side of the circle an "
+            "element sits on, so it splits the five elements into two groups, {Cr, Mn} and "
+            "{Fe, Co, Ni}; the per-element reference energies E0, fitted with the model, carry the "
+            "rest. With less data the channels matter: on 10 cells one channel gives about "
+            "100 meV/atom, against 15 with two."),
         "Hint for exercise 2": mo.md(
-            "Bulk energy errors (meV/atom) for categorical, one-hot and compressed: 56, 63 and 72 "
-            "on 5 cells; 46, 30 and 14 on 10; 26, 16 and 10 on 20; 16, 9.6 and 10 on 40. On 5 cells "
-            "the compressed basis loses its lead in energy, though its force error is still the "
-            "smallest (0.21 eV/Å, against 0.23 and 0.34): five cells are too few to fit energies "
+            "Bulk energy errors (meV/atom) for categorical, one-hot and compressed: 52, 61 and 68 "
+            "on 5 cells; 43, 29 and 15 on 10; 21, 16 and 8.6 on 20; 12.6, 9.3 and 8.5 on 40. On 5 "
+            "cells the compressed basis loses its lead in energy, though its force error is still "
+            "the smallest (0.21 eV/Å, against 0.23 and 0.34): five cells are too few to fit energies "
             "with any of these bases."),
     })
     return
