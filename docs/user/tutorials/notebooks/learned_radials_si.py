@@ -36,13 +36,26 @@ def _(mo):
 
     **Goals**
 
-    1. Fit a baseline with the frozen, seeded radial basis that `aj basis` builds by default.
+    1. Fit a baseline with a frozen basis of seeded random radials (`radial_mode="glorot_normal"`).
     2. Learn the radial weights by variable projection, with a held-out gate.
     3. Refit with the learned basis and compare the test errors.
     4. Deploy the learned model: it is splined automatically and runs through `ACECalculator`.
 
     Work through [Tutorial 1](https://acesuit.github.io/ace-jax/tutorials/first-fit/)
-    first; this one reuses its data split.
+    first; this one reuses its data split. On the command line,
+    `aj fit --learn-radial` runs the same learning step in one fit.
+
+    **Run this notebook**: with [uv](https://docs.astral.sh/uv/) installed, one command
+    opens it in your browser (no account needed):
+
+    ```bash
+    uvx marimo edit --sandbox https://raw.githubusercontent.com/ACEsuit/ace-jax/main/docs/user/tutorials/notebooks/learned_radials_si.py
+    ```
+
+    or open it in [molab](https://molab.marimo.io/github/ACEsuit/ace-jax/blob/main/docs/user/tutorials/notebooks/learned_radials_si.py), marimo's hosted service (free to
+    preview; sign in to run). The documentation website shows a static copy,
+    run on a CPU when the site was built: there the interactive controls show
+    their default values. The notebook runs in about three minutes, two of them for learning.
     """)
     return
 
@@ -181,8 +194,8 @@ def _(mo):
     - `fit_radial` learns and gates; `save_result` writes the selected radials
       into a copy of the basis file.
 
-    These are Python API calls today; the research driver
-    `bench/learn_radial/run.py` in the repository wraps the same steps.
+    On the command line, `aj fit --learn-radial` runs these steps (the hold-out,
+    the gate and the final fit on the whole training set) in one fit.
     """)
     return
 

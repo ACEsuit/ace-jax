@@ -39,6 +39,18 @@ def _(mo):
     Each step ends with a **checkpoint** cell that tells you whether the step
     worked. The **exercises** at the end change one thing at a time; the
     notebook re-runs only what depends on the change.
+
+    **Run this notebook**: with [uv](https://docs.astral.sh/uv/) installed, one command
+    opens it in your browser (no account needed):
+
+    ```bash
+    uvx marimo edit --sandbox https://raw.githubusercontent.com/ACEsuit/ace-jax/main/docs/user/tutorials/notebooks/first_fit_si.py
+    ```
+
+    or open it in [molab](https://molab.marimo.io/github/ACEsuit/ace-jax/blob/main/docs/user/tutorials/notebooks/first_fit_si.py), marimo's hosted service (free to
+    preview; sign in to run). The documentation website shows a static copy,
+    run on a CPU when the site was built: there the interactive controls show
+    their default values. The whole notebook runs in about a minute, about 30 s of it the fit.
     """)
     return
 

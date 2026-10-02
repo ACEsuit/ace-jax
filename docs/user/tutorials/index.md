@@ -1,7 +1,10 @@
 # Tutorials
 
 The tutorials are [marimo](https://marimo.io) notebooks: plain Python files
-that run as interactive notebooks, as apps or as scripts. Each one lists its
+that run as interactive notebooks, as apps or as scripts. Each tutorial page on
+this site is the notebook itself, run on a CPU when the site was built, so it
+can be read without running anything; the top of each page has the one command
+that opens it interactively. Each one lists its
 own dependencies (PEP 723 script metadata), so a sandboxed run installs
 exactly what it needs. Each runs on a laptop CPU in a few minutes and needs
 no GPU or cloud account.
