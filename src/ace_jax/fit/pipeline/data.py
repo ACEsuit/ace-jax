@@ -1,5 +1,6 @@
 import dataclasses
 import io
+import os
 from typing import NamedTuple
 
 import equinox as eqx
@@ -127,11 +128,11 @@ def split_configs(configs, ntrain, ntest, test_start=None, seed=0):
 
 
 def _config_type_weights(path):
-    """sigma_type: a weight-neutral named-weights dict over the file's config_type
-    labels, so load_configs sets each config's type index (run.py behaviour)."""
+    """sigma_type: a weight-neutral named-weights dict over the file's (or Atoms list's)
+    config_type labels, so load_configs sets each config's type index (run.py behaviour)."""
     from ..xyz import read_extxyz
     cts = []
-    for at in read_extxyz(path):
+    for at in (read_extxyz(path) if isinstance(path, (str, os.PathLike)) else path):
         ct = str(at.info.get("config_type", ""))
         if ct and ct not in cts:
             cts.append(ct)
@@ -140,10 +141,12 @@ def _config_type_weights(path):
 
 def load_fit_data(cfg, *, data=None, train=None, test=None, ood=None, log=print):
     """Configs, baselines, E0 and datasets.  Either `data` (one file, split with
-    split_configs) or `train` (+ optional `test`; defaults to train) files."""
+    split_configs) or `train` (+ optional `test`; defaults to train) files.  Each may be
+    a path or a list of ase.Atoms (see fit.data.load_configs)."""
     if (data is None) == (train is None):
         raise ValueError("pass exactly one of data= (split) or train= (+ test=)")
-    keys = dict(energy_key=cfg.energy_key, force_key=cfg.force_key, virial_key=cfg.virial_key)
+    keys = dict(energy_key=cfg.energy_key, force_key=cfg.force_key, virial_key=cfg.virial_key,
+                stress_key=cfg.stress_key)
     if cfg.factors:
         keys["factors"] = cfg.factors
     if cfg.sigma_type:

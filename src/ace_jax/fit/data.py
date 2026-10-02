@@ -5,6 +5,7 @@ ACEfit conventions (src/atoms_data.jl): per configuration the observations are
 and the structural weights are 1/sqrt(n_atoms) on E and V rows, 1 on F rows,
 times the per-config-type (E, F, V) weight dict.  Padded or absent observations
 carry weight ZERO -- that is how masking reaches the sufficient statistics."""
+import os
 from typing import NamedTuple
 
 import numpy as np
@@ -55,7 +56,36 @@ def _label(value, key, shape, where):
     return a.reshape(shape)
 
 
-def load_configs(path, energy_key="energy", force_key="forces", virial_key="virial",
+def _atoms_frames(source):
+    """ase.Atoms -> fit.xyz.Frame records, keys as named; SinglePointCalculator results
+    (what MACE and ASE leave behind) become info energy/stress and arrays forces."""
+    from .xyz import Frame
+    out = []
+    for a in source:
+        info = dict(a.info)
+        arrays = {k: np.asarray(v) for k, v in a.arrays.items() if k not in ("numbers", "positions")}
+        res = getattr(a.calc, "results", None) or {}
+        if "energy" in res or "free_energy" in res:
+            info.setdefault("energy", float(res.get("energy", res.get("free_energy"))))
+        if "stress" in res:
+            info.setdefault("stress", np.asarray(res["stress"]))
+        if "forces" in res:
+            arrays.setdefault("forces", np.asarray(res["forces"]))
+        cell = np.asarray(a.cell.array, float)
+        out.append(Frame(np.asarray(a.numbers), np.asarray(a.positions, float), cell,
+                         np.asarray(a.pbc, bool) if cell.any() else np.zeros(3, bool), info, arrays))
+    return out
+
+
+def _stress_to_virial(s, cell):
+    """virial = -stress * volume; stress as 3x3, Voigt-6 (xx yy zz yz xz xy) or flat 9."""
+    from ase.stress import voigt_6_to_full_3x3_stress
+    s = np.asarray(s, float)
+    S = voigt_6_to_full_3x3_stress(s) if s.shape == (6,) else s.reshape(3, 3)
+    return -S * abs(np.linalg.det(np.asarray(cell, float)))
+
+
+def load_configs(source, energy_key="energy", force_key="forces", virial_key="virial", stress_key=None,
                  weights=None, weight_key="config_type", factors=None):
     """`factors`: an optional list of `weights.WeightFactor`s (see
     `ace_jax.fit.weights`), composed via `compose()` into a single
@@ -70,7 +100,9 @@ def load_configs(path, energy_key="energy", force_key="forces", virial_key="viri
 
     Read with libAtoms extxyz (`fit.xyz.read_extxyz`): every label comes back
     under the name it was written with, including `energy` / `forces`, which
-    ase.io hides in a calculator."""
+    ase.io hides in a calculator.  `source` may instead be a list of ase.Atoms
+    (labels in info / arrays, or a SinglePointCalculator's results).  `stress_key`:
+    a periodic config with no virial label takes virial = -stress * volume from it."""
     from .xyz import read_extxyz
     weights = weights or {"default": {"E": 1.0, "F": 1.0, "V": 1.0}}
     if "default" not in weights:
@@ -84,13 +116,18 @@ def load_configs(path, energy_key="energy", force_key="forces", virial_key="viri
         factors = [Structural(), ConfigType(named, key=weight_key, default=weights["default"])]
     weigh = compose(factors)
     out, found, seen, periodic = [], set(), {"info": set(), "arrays": set()}, False
-    for i, at in enumerate(read_extxyz(path)):
-        n, where = len(at.numbers), f"{path} config {i}"
+    is_path = isinstance(source, (str, os.PathLike))
+    for i, at in enumerate(read_extxyz(source) if is_path else _atoms_frames(source)):
+        n, where = len(at.numbers), (f"{source} config {i}" if is_path else f"structure {i}")
         ct = str(at.info.get(weight_key, ""))
         ti = next((idx for name, idx in type_index.items() if name.lower() == ct.lower()), 0)
         E = _get(at.info, energy_key)
         F = _get(at.arrays, force_key)
         V = _get(at.info, virial_key)
+        if V is None and stress_key is not None and np.any(at.pbc):
+            S = _get(at.info, stress_key)
+            if S is not None:
+                V = _stress_to_virial(S, at.cell); found.add(virial_key)
         found |= {k for k, v in ((energy_key, E), (force_key, F), (virial_key, V)) if v is not None}
         seen["info"] |= set(at.info); seen["arrays"] |= set(at.arrays)
         periodic = periodic or bool(np.any(at.pbc))
@@ -107,7 +144,7 @@ def load_configs(path, energy_key="energy", force_key="forces", virial_key="viri
                                           (force_key, "forces", "arrays", True),
                                           (virial_key, "virial", "info", periodic)):   # no virial without a cell
         if expected and key is not None and key != default and key not in found and out:
-            raise ValueError(f"{path}: no config has the label {key!r}; its per-config {where} keys are "
+            raise ValueError(f"{source if is_path else 'structures'}: no config has the label {key!r}; its per-config {where} keys are "
                              f"{sorted(seen[where] - {'config_type'})}")
     return out
 

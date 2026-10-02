@@ -9,6 +9,7 @@ class FitConfig:
     arm: str = "gp"                      # "linear" (M = 0) | "gp"
     # data
     energy_key: str = "energy"; force_key: str = "forces"; virial_key: str = "virial"
+    stress_key: str | None = None        # ASE/MACE stress label: virial = -stress * volume when no virial
     ntrain: int = 800; ntest: int = 200; test_start: int | None = None
     seed: int = 0; batch: int = 4
     weights: dict | None = None          # ACEfit weights dict (per config type)
