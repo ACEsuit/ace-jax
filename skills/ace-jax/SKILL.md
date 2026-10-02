@@ -91,6 +91,7 @@ over a file's `basis:`, `--train` over its `data:` (each logged as an override).
 | Learn the tensor radials before the fit | `--learn-radial` (writes `radial_info.json`; not with embedding models) |
 | Per-config-type weights | `--weights '{"default":{"E":30,"F":1,"V":1},"bulk":{"E":100,"F":1,"V":1}}'` or a factor list |
 | E0 from data, not the model | `--e0 lsq` (default `model`) |
+| Plain least squares, no prior (teaching: shows overfitting) | `--m-per-species 0 --solver lstsq` (no evidence, no UQ: zero predictive variance; weights from `--weights`) |
 | Out-of-distribution check | `--ood ood.xyz` (writes `metrics_ood.csv`) |
 
 - **Learned radials: `aj fit --learn-radial`.** Learns the tensor radials before

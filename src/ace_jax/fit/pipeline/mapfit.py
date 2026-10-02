@@ -50,7 +50,7 @@ def fit_map(cfg, d, b, obj, log=print):
     if cfg.opt == "adam":
         theta = run_map(obj.lik, prob.prior, steps=cfg.map_steps, lr=cfg.map_lr, seed=cfg.seed, init=init)
         return MapFit(theta, None, None, {"map": time.time() - t}, _log_evidence(obj, theta))
-    x0 = np.asarray(to_array(init or prob.prior.mu), float)
+    x0 = np.array(to_array(init or prob.prior.mu), float)       # a copy: fix_rho writes into it
     lo, hi = LBFGS_LO.copy(), LBFGS_HI.copy()
     if cfg.fix_rho is not None:
         lo[5] = hi[5] = x0[5] = np.log(_rho_fix(cfg, prob))

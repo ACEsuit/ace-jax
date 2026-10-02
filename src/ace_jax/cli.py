@@ -49,6 +49,8 @@ def _add_fit_args(p):
     p.add_argument("--lml", choices=["device", "host-cache"], default="device",
                    help="host-cache: cache the linear design rows in host RAM (GP, pair|pca, L-BFGS, map only)")
     p.add_argument("--opt", choices=["adam", "lbfgs"], default="adam")
+    p.add_argument("--solver", choices=["evidence", "lstsq"], default="evidence",
+                   help="lstsq: plain weighted least squares with no prior (teaching; overfits a large basis)")
     p.add_argument("--map-restarts", type=int, default=1, help="L-BFGS multi-start (best log-posterior)")
     p.add_argument("--init", default=None, help="theta_map.json to start the MAP from")
     p.add_argument("--rungs", default="map",
@@ -132,7 +134,7 @@ def _fit_config(a):
         learn_radial=a.learn_radial, radial_n_q=a.radial_n_q, radial_steps=a.radial_steps,
         radial_lam_grid=tuple(float(x) for x in str(a.radial_lam_grid).split(",") if x.strip()),
         radial_val_frac=a.radial_val_frac,
-        predict_train=False, pops_ridge=ridge,
+        solver=a.solver, predict_train=False, pops_ridge=ridge,
         predict_stats="recompute", pf_samples=16, pf_maxiter=15)
     return cfg.validate()
 

@@ -41,6 +41,7 @@ class FitConfig:
     init: dict | None = None             # Hypers field -> value
     # rungs
     rungs: tuple = ("map",)
+    solver: str = "evidence"             # "evidence" | "lstsq" (plain weighted least squares, no prior: teaching)
     laplace: str = "fd"                  # "fd" (run_laplace_fd) | "svi" (run_laplace)
     n_draws: int = 64
     vi_steps: int = 1000
@@ -100,6 +101,12 @@ class FitConfig:
             raise ValueError(f"pops_rows must be 'auto', 'host' or 'device', got {self.pops_rows!r}")
         if self.predict_stats not in ("cached", "recompute"):
             raise ValueError(f"predict_stats must be 'cached' or 'recompute', got {self.predict_stats!r}")
+        if self.solver not in ("evidence", "lstsq"):
+            raise ValueError(f"solver must be 'evidence' or 'lstsq', got {self.solver!r}")
+        if self.solver == "lstsq" and (self.arm != "linear" or self.uq != "blr" or self.learn_radial
+                                       or tuple(self.rungs) != ("map",)):
+            raise ValueError("solver lstsq is the plain linear least-squares fit: it needs arm linear, uq blr, "
+                             "rungs ('map',) and no learn_radial")
         if self.fix_rho is not None and self.opt != "lbfgs":
             raise ValueError("fix_rho is implemented for opt lbfgs only")
         if self.learn_radial:
