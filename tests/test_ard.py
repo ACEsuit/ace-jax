@@ -927,14 +927,15 @@ def test_ard_stage_warns_when_coverage_unattainable():
 
 
 class _QuadEvidence:
-    """log p = -1/2 (h - c)^T A (h - c): a stand-in evidence with a known bounded optimum."""
+    """log p = off - 1/2 (h - c)^T A (h - c): a stand-in evidence with a known bounded optimum (off: an
+    additive constant like the evidence's sum_q n_q log sigma_q, which no tolerance may depend on)."""
 
-    def __init__(self, A, c):
-        self.A, self.c = np.asarray(A, float), np.asarray(c, float)
+    def __init__(self, A, c, off=0.0):
+        self.A, self.c, self.off = np.asarray(A, float), np.asarray(c, float), float(off)
 
     def value_and_grad(self, h):
         r = np.asarray(h, float) - self.c
-        return float(-0.5 * r @ self.A @ r), -self.A @ r
+        return float(self.off - 0.5 * r @ self.A @ r), -self.A @ r
 
     def hessian(self, h):
         return -self.A
@@ -956,6 +957,76 @@ def test_newton_polish_converges_and_holds_bound_coordinates():
     want = c[fr] - np.linalg.solve(A[np.ix_(fr, fr)], A[fr, 0] * (x[0] - c[0]))
     np.testing.assert_allclose(x[fr], want, rtol=0, atol=1e-12)
     assert info["hessian_evals"] <= 5
+
+
+def _box_optimum(A, c, lo, hi):
+    """The exact box-constrained minimiser of 1/2 (x - c)^T A (x - c), by enumerating active sets."""
+    import itertools
+    P = len(c)
+    best = None
+    for pat in itertools.product((0, 1, 2), repeat=P):           # 0 free, 1 at lo, 2 at hi
+        pat = np.array(pat)
+        x = np.where(pat == 1, lo, np.where(pat == 2, hi, 0.0))
+        fr = pat == 0
+        if fr.any():
+            x[fr] = c[fr] - np.linalg.solve(A[np.ix_(fr, fr)], A[np.ix_(fr, ~fr)] @ (x[~fr] - c[~fr]))
+        if np.all(x >= lo - 1e-12) and np.all(x <= hi + 1e-12):
+            f = 0.5 * (x - c) @ A @ (x - c)
+            if best is None or f < best[0]:
+                best = (f, x)
+    return best[1]
+
+
+def test_newton_polish_tolerances_ignore_large_evidence_constants():
+    """Large |F| (an additive constant -1e4, as the evidence's sum_q n_q log sigma_q terms): no
+    tolerance scales with |F|, so 3000 starts 3e-3 from the box optimum (some on bounds) all converge
+    to it, none stop early."""
+    from ace_jax.fit.ard import newton_polish
+    rng = np.random.default_rng(1)
+    lo, hi = -np.ones(4), np.ones(4)
+    for _ in range(3000):
+        B = rng.standard_normal((4, 4))
+        A, c = B @ B.T + 0.05 * np.eye(4), rng.uniform(-2, 2, 4)
+        xs = _box_optimum(A, c, lo, hi)
+        x, info = newton_polish(_QuadEvidence(A, c, off=-1e4), np.clip(xs + rng.normal(0, 3e-3, 4), lo, hi), lo, hi)
+        assert info["converged"], info["message"]
+        np.testing.assert_allclose(x, xs, rtol=0, atol=1e-10)
+
+
+def test_newton_polish_step_crossing_a_bound_is_resolved_on_it():
+    """A free coordinate just inside its bound whose Newton step would cross it (strong coupling): the
+    projected step pins it ON the bound and re-optimises the rest, reaching the constrained optimum in
+    one step instead of a clipped, non-Newton direction."""
+    from ace_jax.fit.ard import newton_polish
+    A = np.array([[1.0, 0.95], [0.95, 1.0]])
+    c = np.array([1.5, -0.5])                       # unconstrained optimum: x0 above hi = 1
+    lo, hi = -np.ones(2), np.ones(2)
+    xs = _box_optimum(A, c, lo, hi)
+    assert xs[0] == 1.0
+    x, info = newton_polish(_QuadEvidence(A, c, off=-50.0), np.array([0.999, 0.3]), lo, hi)
+    assert info["converged"] and x[0] == 1.0 and info["steps"] == 1, info
+    np.testing.assert_allclose(x, xs, rtol=0, atol=1e-12)
+
+
+class _SaddleEvidence:
+    """log p = -(x0^2 - 1)^2 - x1^2 / 2: a double well in x0, Hessian indefinite at x0 = 0."""
+
+    def value_and_grad(self, h):
+        x0, x1 = h
+        return float(-(x0 ** 2 - 1) ** 2 - 0.5 * x1 ** 2), np.array([-4 * x0 * (x0 ** 2 - 1), -x1])
+
+    def hessian(self, h):
+        return np.diag([-(12 * h[0] ** 2 - 4), -1.0])
+
+
+def test_newton_polish_with_an_indefinite_free_hessian_still_descends():
+    """Started where the free Hessian is indefinite (x0 = 0.1, F'' = -3.9), the modified Newton step
+    descends (never uphill to the saddle at 0) and converges to the well at x0 = 1."""
+    from ace_jax.fit.ard import newton_polish
+    lo, hi = np.array([-2.0, -2.0]), np.array([2.0, 2.0])
+    x, info = newton_polish(_SaddleEvidence(), np.array([0.1, 0.5]), lo, hi)
+    assert info["converged"], info["message"]
+    np.testing.assert_allclose(x, [1.0, 0.0], rtol=0, atol=1e-10)
 
 
 @pytest.fixture(scope="module")
