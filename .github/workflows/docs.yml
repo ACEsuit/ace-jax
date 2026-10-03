@@ -42,7 +42,7 @@ jobs:
     # The tutorial pages are rendered by running each notebook (docs/build_tutorials.py,
     # from the mkdocs hook): a notebook whose cell raises fails the build.
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 60     # nine tutorials render in ~30 min on a local CPU
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
