@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Faster CPU evaluation. On the CPU, the product basis is now an explicit
+  feature-major chain of multiplies. Before, `jnp.prod`'s reverse mode
+  compiled to strided scalar copies. Other backends are unchanged, and
+  energies and forces agree with the old form to roundoff. Each model's
+  medium benchmark at 2,048 atoms, on an i9-14900K with 8 P-cores: linear
+  ACE 2.9× faster on SiGe and 1.2× on Cantor; PACE 1.3× on SiGe and 1.1×
+  on Cantor.
+
 ## 0.2.0 (2026-10-03)
 
 **Upgrading from 0.1.x.**
