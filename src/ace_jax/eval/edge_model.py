@@ -6,7 +6,8 @@ in `EdgeSiteModel`, so the two model families cannot drift apart:
 
 * the A-basis product in its two interchangeable forms (`edge_a`), and the
   helpers that switch and calibrate between them;
-* energy, forces and virial from one `value_and_grad` over the edge vectors;
+* energy, forces and virial from one `value_and_grad` over the edge vectors,
+  the total a compensated sum of the site energies (`total_energy`);
 * the lammps-jax positions entry point.
 
 A subclass provides `site_energies`, `site_energies_dense`, `pad_cutoff()`
@@ -32,6 +33,74 @@ import jax.numpy as jnp
 EDGE_A_KINDS = ("gather", "matmul")
 
 CHUNK_NODES = 16384   # dense rows per block: peak memory ~ block, not N (spec, component 2)
+
+
+def _two_sum(a, b):
+    """s, e with s = fl(a + b) and s + e == a + b exactly (Knuth's TwoSum)."""
+    s = a + b
+    bb = s - a
+    return s, (a - (s - bb)) + (b - bb)
+
+
+def _sum2(x):
+    """(hi, lo) in x.dtype with hi + lo ~ sum(x): a pairwise TwoSum tree carrying
+    each level's rounding error alongside (Ogita, Rump & Oishi's Sum2 in pairwise
+    order), as accurate as a pairwise sum in twice the working precision.
+    log2(n) unrolled levels, jit-compatible."""
+    s = x.reshape(-1)
+    n = s.shape[0]
+    if n == 0:
+        return jnp.zeros((), x.dtype), jnp.zeros((), x.dtype)
+    s = jnp.pad(s, (0, (1 << (n - 1).bit_length()) - n))
+    c = jnp.zeros_like(s)
+    while s.shape[0] > 1:
+        s, e = _two_sum(s[0::2], s[1::2])
+        c = c[0::2] + c[1::2] + e
+    return s[0], c[0]
+
+
+@jax.custom_jvp
+def compensated_sum(x):
+    """sum(x), the JAX analogue of `math.fsum` for an energy total: `_sum2`
+    rounded once, within ~1 ulp of the exact sum on realistic data.  The
+    derivative is jnp.sum's (custom_jvp): d/dx is exactly ones."""
+    hi, lo = _sum2(x)
+    return hi + lo
+
+
+@compensated_sum.defjvp
+def _compensated_sum_jvp(primals, tangents):
+    return compensated_sum(primals[0]), jnp.sum(tangents[0])
+
+
+def _acc_dtype(dtype):
+    return jnp.float64 if jax.config.jax_enable_x64 else dtype
+
+
+@jax.custom_jvp
+def total_energy(e):
+    """The total of site energies `e`: `compensated_sum`, returned in float64
+    where JAX has it.  float32 sites stay float32 arrays (the compensated pair is
+    formed in float32 and only the two scalars are widened: no float64 array in a
+    float32 graph, cf. test_pace_model), so a float32 model gets a float64 total
+    accurate to about float32^2.
+
+    Why (docs/dev/energy-sum-results.md): a float32 total is quantised at its own
+    ulp (0.03 eV at 2k Si atoms, 1 eV at 60k), which stalls an Armijo line search
+    at fmax 0.2-0.3 eV/A; with a float64 total the energy noise is the per-site
+    float32 rounding instead.  In float64 a plain XLA sum was already within 1 ulp
+    on CPU (up to ~12 ulp on a GPU); compensated, it is correctly rounded in
+    practice, so the total no longer depends on atom order or layout.  The
+    derivative is jnp.sum's, so forces are bitwise those of a plain sum."""
+    hi, lo = _sum2(e)
+    acc = _acc_dtype(e.dtype)
+    return hi.astype(acc) + lo.astype(acc)
+
+
+@total_energy.defjvp
+def _total_energy_jvp(primals, tangents):
+    (e,), (t,) = primals, tangents
+    return total_energy(e), jnp.sum(t).astype(_acc_dtype(e.dtype))
 
 
 def one_hot_selector(idx, width, dtype):
@@ -163,8 +232,8 @@ class EdgeSiteModel(eqx.Module):
         """
         def total(r, eps):
             sym = 0.5 * (eps + eps.T)
-            return jnp.sum(self.site_energies(r + r @ sym, zi, zj, senders,
-                                              n_nodes, node_z, mask))
+            return total_energy(self.site_energies(r + r @ sym, zi, zj, senders,
+                                                   n_nodes, node_z, mask))
 
         eps0 = jnp.zeros((3, 3), rij.dtype)
         E, (g_r, g_eps) = jax.value_and_grad(total, argnums=(0, 1))(rij, eps0)
@@ -223,8 +292,8 @@ class EdgeSiteModel(eqx.Module):
 
         def total(r, eps):
             sym = 0.5 * (eps + eps.T)
-            return jnp.sum(self.site_energies_dense_blocked(r + r @ sym, zi, zj, mask,
-                                                            node_z, chunk))
+            return total_energy(self.site_energies_dense_blocked(r + r @ sym, zi, zj, mask,
+                                                                 node_z, chunk))
 
         eps0 = jnp.zeros((3, 3), rij.dtype)
         E, (g_r, g_eps) = jax.value_and_grad(total, argnums=(0, 1))(rij, eps0)

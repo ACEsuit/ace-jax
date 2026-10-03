@@ -43,6 +43,14 @@
   the fitted E0. Force uncertainties are unaffected, and posteriors written
   before still load.
 - `run_ard_stage` compiles its programs once (no per-call recompilation).
+- The total energy is a compensated sum of the site energies (correctly rounded,
+  independent of atom order and layout), and a float32 model returns it in
+  float64 when x64 is enabled instead of a float32 total quantised at its own
+  ulp (1 eV at 60k atoms), which stalled ASE line searches. Forces are unchanged.
+- `ACECalculator(..., energy_reference="E0")` reports energies relative to the
+  isolated atoms (`results["e0_offset"]` holds the subtracted constant). The
+  large per-atom E0 otherwise limits the float64 resolution of the total and
+  stalls energy-based line searches in tight relaxations of large cells.
 
 ## 0.1.2 (2026-10-03)
 

@@ -6,6 +6,8 @@ beyond handing them to the neighbour list -- the strain derivative acts on edge
 vectors, so the same code path serves LAMMPS, where there is no cell at all.
 """
 
+import math
+
 import numpy as np
 from ase.calculators.calculator import Calculator, all_changes
 
@@ -17,6 +19,8 @@ from ..eval.splinify import AUTO
 from ..eval.nlist import backend as nlist_backend
 from ..eval.nlist import dense_from_sparse, dense_graph, have_matscipy_neighbours, sparse_graph
 from . import skin as skin_list
+
+ENERGY_REFERENCES = ("absolute", "E0")
 from .skin import round_k as _round_k
 
 # Below this many edges "auto" keeps the gather form: compile time dominates and
@@ -61,7 +65,8 @@ class ACECalculator(Calculator):
 
     def __init__(self, model, meta=None, cutoff=None, dtype=None, edge_a_kind="auto",
                  layout="auto", skin=1.0, lean=True, spline_tol=AUTO,
-                 spline_intervals=None, posterior=None, forces_std_every_call=False, **kw):
+                 spline_intervals=None, posterior=None, forces_std_every_call=False,
+                 energy_reference="absolute", **kw):
         """`ACECalculator("si_fitted.npz")` is the intended form: cutoff,
         species and dtype all come from the file.  A pre-loaded (model, meta)
         pair is still accepted, which is what the validation tests use.
@@ -121,6 +126,17 @@ class ACECalculator(Calculator):
         `forces_std_every_call=True` adds it to every calculation.  posterior= requires
         `jax.config.update("jax_enable_x64", True)` (RuntimeError otherwise).
 
+        `energy_reference` is "absolute" (default: the model's energy, isolated-atom
+        energies E0 included) or "E0": the energy relative to the isolated atoms,
+        sum_i (E_i - E0[z_i]).  With "E0" the per-atom constant (~-160 eV for Si) is
+        never added to the site energies, so the total of a large cell stays small and
+        keeps resolution: an energy-based line search (ASE PreconLBFGS's Armijo test)
+        otherwise stops resolving energy decreases once they fall below the ulp of
+        |E| ~ 160 eV x N, at fmax ~ 1e-4..1e-5 eV/A on 10^4-10^5 atoms
+        (docs/dev/energy-sum-results.md).  Forces and stress are unchanged.
+        `results["e0_offset"]` is sum_i E0[z_i] (math.fsum; 0.0 for "absolute"), so the
+        absolute energy is `energy + e0_offset`.
+
         Memory: forces_std builds the force design rows of the WHOLE cell, about N*3*L*8 bytes
         (N atoms padded, L = (n_B + n_pair) * NZ columns) -- 7 GB for N = 100k at L = 3k -- on
         the JAX device, besides the posterior's L^2 factor.  The edge Jacobian is node-chunked
@@ -140,7 +156,11 @@ class ACECalculator(Calculator):
             raise ValueError(f"layout must be 'auto' or one of {LAYOUTS}, got {layout!r}")
         if not skin >= 0:
             raise ValueError(f"skin must be >= 0, got {skin!r}")
+        if energy_reference not in ENERGY_REFERENCES:
+            raise ValueError(f"energy_reference must be one of {ENERGY_REFERENCES}, "
+                             f"got {energy_reference!r}")
         super().__init__(**kw)
+        self._energy_reference = energy_reference   # fixed: the evaluation model is built for it
         from ..eval.api import _resolve
         model, meta = _resolve(model, meta, dtype)
         self._skin_jit = None                 # (static model part, cutoff, compiled step)
@@ -223,6 +243,11 @@ class ACECalculator(Calculator):
                                      n_pair=meta["n_pair"], NZ=NZ, C=1)
 
     @property
+    def energy_reference(self):
+        """"absolute" or "E0", fixed at construction (see __init__)."""
+        return self._energy_reference
+
+    @property
     def model(self):
         return self._model
 
@@ -246,6 +271,12 @@ class ACECalculator(Calculator):
         self._model = model
         self._eval_model = (lean_form(model, self._spline_tol, self._spline_intervals)
                             if self._lean else model)
+        self._e0 = np.asarray(model.E0, np.float64)
+        if self._energy_reference == "E0":        # site energies without the isolated atoms
+            import equinox as eqx
+            import jax.numpy as jnp
+            self._eval_model = eqx.tree_at(lambda m: m.E0, self._eval_model,
+                                           jnp.zeros_like(self._eval_model.E0))
         self._splined = splining(model, self._eval_model, self._spline_tol)
         self._by_kind = {}                    # form -> model in that form
         self._by_bucket = {}                  # edge bucket -> calibrated form
@@ -318,6 +349,9 @@ class ACECalculator(Calculator):
         E = float(E)
         self.results["energy"] = E
         self.results["free_energy"] = E
+        self.results["e0_offset"] = (
+            math.fsum(self._e0[self._species_index(self.atoms.get_atomic_numbers())])
+            if self._energy_reference == "E0" else 0.0)
         self.results["forces"] = np.asarray(F)
         vol = self.atoms.get_volume()
         if vol > 0:
