@@ -312,8 +312,8 @@ def test_ard_stage_logs_warning_on_failed_or_bounded_fit(monkeypatch):
 def test_ard_stage_reuses_cached_full_statistics(monkeypatch, e0):
     """I1: the joint full refit reuses the objective's cached linear statistics (spec 3: "the cached
     M, b where available") -- same h, kappa and posterior as the recompute, one fewer statistics pass.
-    e0='lsq' (joint E0, the cache then carries the E0 columns) checks the cache and the evidence at
-    fixed h; the refit endpoints are compared under e0='prefit' only (below)."""
+    e0='lsq' (joint E0, the cache then carries the E0 columns) checks the cache, the evidence at fixed h
+    and the refit endpoints as e0='prefit' does."""
     from conftest import FIXTURE_DIR
     from ace_jax.fit import ard, stats
     from ace_jax.fit.pipeline import load_fit_data
@@ -360,18 +360,15 @@ def test_ard_stage_reuses_cached_full_statistics(monkeypatch, e0):
     assert n_recompute == 3 and len(stage_calls) == 2
     # the ~1e-15 summation-order difference, through cond(S) ~ 1e13, moves the evidence by ~1e-7 nats
     # (~1e-5 nats, 1e-8 relative, since the isolated-atom E0 rule of e0='lsq'/'prefit' changed the
-    # fixture's energy offsets) and L-BFGS's stopping point along flat directions by ~1e-4: equal to
-    # the optimiser's resolution
+    # fixture's energy offsets)
     assert abs(v_got - v_ref) < 3e-5 and np.abs(g_got - g_ref).max() < 3e-5
-    if e0 == "lsq":
-        # from the joint-E0 MAP one of the two L-BFGS refits stops on a line-search failure, so h, kappa
-        # and the means agree only to ~1e-3 (the refit's resolution along flat directions), which would
-        # hide a real mismatch: the endpoints are compared under e0='prefit'
-        return
+    # the refit endpoints, under joint E0 too: the Newton-polished evidence fits agree to the evidence's
+    # roundoff floor at cond(S) ~ 5e13 (observed dh ~3e-6, F_mean ~3e-6 relative, logev ~1e-5 for 'lsq',
+    # whose evidence differs by up to 3e-5 at a FIXED h above); L-BFGS-B alone stopped ~1e-3 apart
     assert got.report["kappa_subset"] == pytest.approx(ref.report["kappa_subset"], rel=1e-12)   # subset stage unchanged
-    assert got.posterior.kappa == pytest.approx(ref.posterior.kappa, rel=1e-4)   # full-posterior s^2: refit resolution
-    assert got.report["logev_full"] == pytest.approx(ref.report["logev_full"], abs=1e-5)
-    np.testing.assert_allclose(got.posterior.h, ref.posterior.h, atol=1e-3)
+    assert got.posterior.kappa == pytest.approx(ref.posterior.kappa, rel=1e-5)
+    assert got.report["logev_full"] == pytest.approx(ref.report["logev_full"], abs=1e-5 if e0 == "prefit" else 3e-5)
+    np.testing.assert_allclose(got.posterior.h, ref.posterior.h, atol=1e-4)
     np.testing.assert_allclose(np.asarray(p_got.F_var), np.asarray(p_ref.F_var), rtol=1e-4)
     Fm = np.asarray(p_ref.F_mean)
     np.testing.assert_allclose(np.asarray(p_got.F_mean), Fm, rtol=0, atol=1e-4 * np.abs(Fm).max())
@@ -927,3 +924,89 @@ def test_ard_stage_warns_when_coverage_unattainable():
     assert np.isinf(res.posterior.group_table["q"]).all()
     w = [s for s in lines if "WARNING" in s and "coverage" in s]
     assert len(w) == 1 and "99 configurations" in w[0]
+
+
+class _QuadEvidence:
+    """log p = -1/2 (h - c)^T A (h - c): a stand-in evidence with a known bounded optimum."""
+
+    def __init__(self, A, c):
+        self.A, self.c = np.asarray(A, float), np.asarray(c, float)
+
+    def value_and_grad(self, h):
+        r = np.asarray(h, float) - self.c
+        return float(-0.5 * r @ self.A @ r), -self.A @ r
+
+    def hessian(self, h):
+        return -self.A
+
+
+def test_newton_polish_converges_and_holds_bound_coordinates():
+    """Projected Newton: a coordinate whose unconstrained optimum lies outside the box ends exactly on
+    its bound, the others at the constrained optimum (to roundoff), in a few Newton steps."""
+    from ace_jax.fit.ard import newton_polish
+    rng = np.random.default_rng(0)
+    B = rng.standard_normal((5, 5))
+    A = B @ B.T + 0.1 * np.eye(5)
+    c = np.array([-3.0, 0.2, -0.1, 0.4, 0.3])                 # c[0] below lo[0] = -1
+    lo, hi = np.full(5, -1.0), np.full(5, 1.0)
+    x, info = newton_polish(_QuadEvidence(A, c), np.zeros(5), lo, hi)
+    assert info["converged"], info["message"]
+    assert x[0] == lo[0]
+    fr = np.arange(1, 5)                                       # free block: A_ff (x_f - c_f) = -A_f0 (x0 - c0)
+    want = c[fr] - np.linalg.solve(A[np.ix_(fr, fr)], A[fr, 0] * (x[0] - c[0]))
+    np.testing.assert_allclose(x[fr], want, rtol=0, atol=1e-12)
+    assert info["hessian_evals"] <= 5
+
+
+@pytest.fixture(scope="module")
+def stage_evidence():
+    """The joint ARD evidence of the stage tests' training set (30 si_tiny configs) at the default prior
+    (better resolved than the 6-config tiny_linear_problem, whose sigma_E -> 4e-4 eV makes log p a
+    residue of ~1e8 terms with a gradient resolved to only ~1e-4)."""
+    from conftest import FIXTURE_DIR
+    from ace_jax.fit import ard
+    from ace_jax.fit.hypers import default_prior
+    from ace_jax.fit.pipeline import load_fit_data
+    from ace_jax.fit.pipeline.problem import build_problem
+    cfg = _pipe_cfg().validate()
+    d = load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz"), log=lambda *a: None)
+    b = build_problem(cfg, d)
+    theta = default_prior(2.35).mu
+    with highest_precision():
+        ev = ard.ARDEvidence(ard.ard_statistics(theta, b.prob, d.ds_train, "joint"), ard.ard_gamma(b.prob),
+                             ard.body_order_columns(d.meta, b.prob.cfg))
+    return ev, theta, d.meta
+
+
+def test_fit_ard_converges_to_the_same_optimum_from_a_perturbed_start(stage_evidence):
+    """Convergence, not just determinism: a refit in the same box from a start 0.3 away in every
+    coordinate reaches the same h to ~1e-8 -- the Newton polish's endpoint is the optimum, not an
+    L-BFGS-B stopping point (L-BFGS-B alone stops ~3e-8 .. 3e-6 short of it here).  ard_cond_max 1e11
+    keeps cond(S) where the gradient is resolved to ~1e-9; at the default 1e14 the endpoint is
+    resolved only to the evidence's roundoff floor (~3e-8 on this problem, see fit_ard)."""
+    from ace_jax.fit.ard import fit_ard
+    ev, theta, _ = stage_evidence
+    h0 = ev.h0(theta)
+    with highest_precision():
+        h1, v1, info1 = fit_ard(ev, h0, cond_max=1e11)
+        start = np.clip(h1 + 0.3 * np.where(np.arange(len(h1)) % 2, 1.0, -1.0), ev.lower, ev.upper)
+        h2, v2, info2 = fit_ard(ev, h0, cond_max=1e11, start=start)
+    assert info1["success"] and info2["success"], (info1["message"], info2["message"])
+    assert info1["newton"]["pg"] <= 1e-9 * abs(v1) and info2["newton"]["pg"] <= 1e-9 * abs(v2)
+    np.testing.assert_allclose(h2, h1, rtol=0, atol=1e-8)
+    assert abs(v2 - v1) <= 1e-9 * max(1.0, abs(v1))
+
+
+def test_fit_ard_is_bitwise_deterministic(stage_evidence):
+    """Two evidence fits of the same statistics give bit-identical h, posterior mean and Cholesky factor
+    (no unseeded randomness, unordered iteration or run-dependent reduction anywhere in the fit)."""
+    from ace_jax.fit.ard import ard_posterior, fit_ard
+    ev, theta, meta = stage_evidence
+    with highest_precision():
+        runs = []
+        for _ in range(2):
+            h, v, info = fit_ard(ev, ev.h0(theta))
+            p = ard_posterior(ev, h, 1.0, meta)
+            runs.append((h, v, np.asarray(p.mean), np.asarray(p.chol)))
+    for a, b in zip(*runs):
+        assert np.array_equal(a, b)

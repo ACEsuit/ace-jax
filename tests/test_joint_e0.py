@@ -343,8 +343,8 @@ def test_ard_joint_e0_with_an_isolated_atom_matches_the_prefit_fit():
     assert any(len(c.numbers) == 1 for c in j.data.train), "the split keeps the isolated atom in training"
     assert abs(linear_model_arrays(j)["E0"][0] - np.mean(iso)) < 1e-6
     a, b = j.preds.arrays["test/map"], p.preds.arrays["test/map"]
-    # equal to the evidence optimiser's resolution along its flat directions (~3e-5 eV/atom, ~4e-4 eV/A;
-    # the test RMSEs are ~0.2 eV/atom and ~1.9 eV/A)
+    # two converged evidence optima of nearly the same problem: equal to the evidence's roundoff floor at
+    # cond(S) ~ 5e13 (observed ~2e-6 eV/atom, ~2e-5 eV/A; the test RMSEs are ~0.2 eV/atom and ~1.9 eV/A)
     np.testing.assert_allclose(a["E_mean"] / a["nat"], b["E_mean"] / b["nat"], rtol=0, atol=2e-4)
     np.testing.assert_allclose(a["F_mean"], b["F_mean"], rtol=0, atol=2e-3)
 

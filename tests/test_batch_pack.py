@@ -170,15 +170,15 @@ def test_ard_stage_with_a_big_cell_is_pack_invariant():
         assert any("size-aware packing" in s for s in lines) == (mode == "auto")
         res[mode] = (r.posterior, r.report, b, ds.n_batches, ds)
     (p0, r0, *_), (p1, r1, *_) = res["off"], res["auto"]
-    # the evidence statistics agree to summation order; the L-BFGS hyperparameter optimum (and so
-    # the mean) to the optimizer's tolerance
+    # the evidence statistics agree to summation order; the converged (Newton-polished) evidence optimum
+    # and so the mean to ~5e-9 (L-BFGS-B alone stopped up to ~1e-4 short of it, differently per layout)
     with highest_precision():
         s0 = ard.ard_statistics(default_prior(2.35).mu, res["off"][2].prob, res["off"][4], "joint")
         s1 = ard.ard_statistics(default_prior(2.35).mu, res["auto"][2].prob, res["auto"][4], "joint")
     for a, b in zip(jax.tree.leaves(s1), jax.tree.leaves(s0)):
         a, b = np.asarray(a, float), np.asarray(b, float)
         np.testing.assert_allclose(a, b, rtol=0, atol=1e-12 * max(1.0, np.abs(b).max()))
-    np.testing.assert_allclose(p1.h, p0.h, rtol=0, atol=1e-5)
+    np.testing.assert_allclose(p1.h, p0.h, rtol=0, atol=1e-7)
     np.testing.assert_allclose(p1.mean, p0.mean, rtol=0, atol=1e-6 * np.abs(p0.mean).max())
     for k in ("lam_rms", "q", "r", "n_cfg", "n_cfg_val", "n_atoms"):
         np.testing.assert_allclose(np.asarray(p1.group_table[k], float),

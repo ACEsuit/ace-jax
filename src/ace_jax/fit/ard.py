@@ -147,6 +147,17 @@ class ARDEvidence:
         v, g = _ev_value_and_grad(jnp.asarray(h, float), self._data, self.dinv, self._gidx, self.joint)
         return float(v), np.asarray(g)
 
+    def hessian(self, h):
+        """The exact Hessian (P, P) of log p(D|h): one forward-over-reverse column per hyperparameter
+        (a Python loop of one compiled jvp, so memory stays at one gradient's L^2 workspace)."""
+        h = jnp.asarray(h, float)
+        P = h.shape[0]
+        H = np.empty((P, P))
+        for i in range(P):
+            H[:, i] = np.asarray(_ev_hvp(h, jnp.zeros(P).at[i].set(1.0), self._data, self.dinv, self._gidx,
+                                         self.joint))
+        return 0.5 * (H + H.T)
+
     def bounds(self, h0, cond_max):
         """log sigma within h0 +- 3; a in [a_floor, 10] with a_floor = log(lambda_max(Ms(h0)) / cond_max):
         the prior never lets cond(S) exceed ~cond_max (at the unfloored Cantor ARD optimum cond(S) was
@@ -195,13 +206,24 @@ def _ev_logev(h, data, dinv, gidx, joint):
 _ev_value_and_grad = jax.jit(jax.value_and_grad(_ev_logev), static_argnames="joint")
 
 
-def fit_ard(ev, h0, cond_max=1e14, maxiter=500):
+def _ev_hvp_body(h, t, data, dinv, gidx, joint):
+    return jax.jvp(lambda x: jax.grad(_ev_logev)(x, data, dinv, gidx, joint), (h,), (t,))[1]
+
+
+_ev_hvp = jax.jit(_ev_hvp_body, static_argnames="joint")
+
+
+def fit_ard(ev, h0, cond_max=1e14, maxiter=500, polish=True, start=None):
     """Type-II ML by L-BFGS-B, bounded (ev.bounds), on the objective relative to its start and divided
     by the initial gradient norm: L-BFGS-B's first bounded step is the full gradient (~3e3 on the
-    Cantor problem), which lands on the box corner; a non-finite point is a rejected step."""
+    Cantor problem), which lands on the box corner; a non-finite point is a rejected step.  Then
+    (polish) `newton_polish` converges the endpoint with the exact Hessian: L-BFGS-B stops at a
+    roundoff-dependent point (a line-search failure on the noisy objective, or a loose scaled gtol),
+    which two runs on different BLAS / batch layouts reach differently.  The box comes from h0;
+    `start` (default h0) is where L-BFGS-B starts in it."""
     from scipy.optimize import minimize
     lo, hi = ev.bounds(h0, cond_max)
-    x0 = np.clip(np.asarray(h0, float), lo, hi)
+    x0 = np.clip(np.asarray(h0 if start is None else start, float), lo, hi)
     v0, g0 = ev.value_and_grad(x0)
     gs = max(1.0, float(np.linalg.norm(g0)))
 
@@ -213,9 +235,104 @@ def fit_ard(ev, h0, cond_max=1e14, maxiter=500):
 
     r = minimize(f, x0, jac=True, method="L-BFGS-B", bounds=list(zip(lo, hi)),
                  options={"maxiter": maxiter, "ftol": 1e-12, "gtol": 1e-6})
-    v, _ = ev.value_and_grad(r.x)
-    return r.x, v, {"success": bool(r.success), "message": str(r.message), "nit": int(r.nit), "gain": v - v0,
-                    "at_bound": ((np.isclose(r.x, lo)) | (np.isclose(r.x, hi))).tolist()}
+    x, success, message = np.clip(r.x, lo, hi), bool(r.success), str(r.message)
+    info = {"lbfgs_message": message, "lbfgs_success": success}
+    if polish:
+        x, pol = newton_polish(ev, x, lo, hi)
+        info["newton"] = pol
+        success = pol["converged"]
+        message = f"{message}; newton: {pol['message']}"
+    v, _ = ev.value_and_grad(x)
+    return x, v, {**info, "success": success, "message": message, "nit": int(r.nit), "gain": v - v0,
+                  "at_bound": ((np.isclose(x, lo)) | (np.isclose(x, hi))).tolist()}
+
+
+def _projected_gradient(x, g, lo, hi):
+    """x - P(x - g) for the minimisation gradient g: zero for a coordinate at a bound that g pushes out."""
+    return x - np.clip(x - g, lo, hi)
+
+
+def newton_polish(ev, x, lo, hi, gtol=1e-9, maxiter=50):
+    """Converge a bounded evidence maximum by projected Newton with the exact Hessian (ev.hessian).
+
+    Minimises F = -log p(D|h) over the box [lo, hi] from x (an L-BFGS-B endpoint).  Each iteration
+    fixes the active set -- coordinates exactly on a bound whose gradient pushes outward stay there --
+    and takes the Newton step on the free coordinates, the free Hessian made positive definite by
+    flooring |eigenvalues| at 1e-10 of the largest (a saddle or flat direction never gives an ascent
+    step).  The step is projected onto the box (a coordinate crossing a bound lands on it exactly).
+    While the predicted decrease is resolved (Newton decrement^2 > sqrt(eps) |F|) the step is
+    backtracked to an Armijo decrease of F.  Failing that -- and always below that resolution, where the
+    evidence's roundoff (cond(S) up to ard_cond_max: ~1e-5 nats at 5e13) can fake or hide any decrease
+    -- the full step is accepted if it halves ||pg||_inf, the projected gradient's norm (Newton's
+    quadratic convergence; the gradient stays resolved well below F's noise).  Stops converged when
+    ||pg||_inf <= gtol max(1, |F|), or at the roundoff floor: no step is accepted and the decrement^2 is
+    within 10x F's measured roundoff (the endpoint is then the optimum to that floor's ||pg|| /
+    curvature).  Not converged: no step accepted with a decrement^2 above the roundoff, or maxiter.  Deterministic: a fixed sequence of compiled evaluations and LAPACK
+    calls on P x P matrices, no randomness."""
+    lo, hi = np.asarray(lo, float), np.asarray(hi, float)
+    x = np.clip(np.asarray(x, float), lo, hi)
+
+    def evaluate(z):
+        v, g = ev.value_and_grad(z)
+        return -v, -g
+
+    F, g = evaluate(x)
+    if not (np.isfinite(F) and np.all(np.isfinite(g))):
+        return x, {"converged": False, "message": "non-finite evidence at the L-BFGS endpoint", "steps": 0,
+                   "hessian_evals": 0, "pg_start": float("nan"), "pg": float("nan"), "decrement": float("nan")}
+    pg = pg0 = np.abs(_projected_gradient(x, g, lo, hi)).max()
+    steps, n_hess, converged, dec = 0, 0, False, float("nan")
+    tol = gtol * max(1.0, abs(F))
+    message = f"maxiter {maxiter}"
+    for _ in range(maxiter):
+        if pg <= tol:
+            converged, message = True, f"converged (|pg| {pg:.2e} <= {tol:.2e})"
+            break
+        H = -ev.hessian(x)
+        n_hess += 1
+        fr = ~(((x == lo) & (g > 0)) | ((x == hi) & (g < 0)))
+        d = np.zeros_like(x)
+        if fr.any():
+            w, V = np.linalg.eigh(H[np.ix_(fr, fr)])
+            wm = np.maximum(np.abs(w), 1e-10 * max(np.abs(w).max(), 1e-300))
+            step = (V / wm) @ (V.T @ g[fr])
+            d[fr] = -step
+            dec = float(g[fr] @ step)                    # Newton decrement^2 (twice the predicted decrease)
+        if not np.any(d):
+            converged, message = True, "converged (every free coordinate stationary or held at a bound)"
+            break
+        res = np.sqrt(np.finfo(float).eps) * max(1.0, abs(F))
+        resolved = dec > res
+        accepted = False
+        if resolved:                                     # backtrack to an Armijo decrease of F
+            for t in 0.5 ** np.arange(40):
+                xn = np.clip(x + t * d, lo, hi)
+                if np.array_equal(xn, x):
+                    break
+                Fn, gn = evaluate(xn)
+                if np.isfinite(Fn) and np.all(np.isfinite(gn)) and Fn <= F + 1e-4 * float(g @ (xn - x)):
+                    accepted = True
+                    break
+        if not accepted:                                 # the full step, if it halves ||pg||
+            xn = np.clip(x + d, lo, hi)
+            Fn, gn = evaluate(xn)
+            if np.isfinite(Fn) and np.all(np.isfinite(gn)):
+                pgn = np.abs(_projected_gradient(xn, gn, lo, hi)).max()
+                accepted = bool(pgn <= 0.5 * pg)
+        if not accepted:
+            # F's own roundoff at x: its spread over four 1e-15 relative moves of h
+            noise = float(np.ptp([F] + [evaluate(x * (1 + k * 2.0 ** -50))[0] for k in (1, 2, 3, 4)]))
+            converged = dec <= max(res, 10 * noise)
+            message = (f"roundoff floor (|pg| {pg:.2e}, Newton decrement^2 {dec:.1e}, evidence roundoff {noise:.1e})"
+                       if converged else
+                       f"no decrease along the Newton direction (|pg| {pg:.2e}, decrement^2 {dec:.1e}, "
+                       f"evidence roundoff {noise:.1e})")
+            break
+        pgn = np.abs(_projected_gradient(xn, gn, lo, hi)).max()
+        x, F, g, pg = xn, Fn, gn, pgn
+        steps += 1
+    return x, {"converged": bool(converged), "message": message, "steps": steps, "hessian_evals": n_hess,
+               "pg_start": float(pg0), "pg": float(pg), "decrement": dec}
 
 
 def laplace_hypers(ev, h, eps=1e-3):
@@ -686,9 +803,15 @@ def conformal_scores(e, V, force_shape, eps):
 
 
 def _ard_fit_warnings(stage, info, names):
-    """Warning lines for an ARD evidence fit that did not converge or ended with a hyperparameter
-    on its bound (a scale at a_floor is the conditioning guard, not the evidence optimum)."""
+    """Log lines for an ARD evidence fit: its convergence record (L-BFGS-B, then the Newton polish), and
+    warnings when it did not converge or ended with a hyperparameter on its bound (a scale at a_floor
+    is the conditioning guard, not the evidence optimum)."""
     out = []
+    if "newton" in info:            # the convergence record of every evidence fit (a log line, not a warning)
+        n = info["newton"]
+        out.append(f"ARD {stage} evidence fit: L-BFGS-B {info.get('lbfgs_message', '?')} after {info.get('nit')} "
+                   f"iterations; Newton polish {n['steps']} steps, {n['hessian_evals']} Hessians, |pg| "
+                   f"{n['pg_start']:.2e} -> {n['pg']:.2e}")
     if not info.get("success", True):
         out.append(f"WARNING: ARD {stage} evidence fit did not converge: {info.get('message', '?')}")
     hit = [n for n, b in zip(names, info.get("at_bound", [])) if b]
