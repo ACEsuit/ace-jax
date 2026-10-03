@@ -1,8 +1,14 @@
 # Where ace-jax's CPU gap comes from
 
-Branch `perf/cpu-gap-profile` (from `origin/main` at `7ae532e`, ace-jax 0.1.2). An
-investigation only: `src/` is unchanged. Every number below was measured on
-moriarty for this report. The scripts are in `bench/perf/` (`cpu_*.py`), the raw
+Measured on ace-jax 0.1.2 (`7ae532e`). This is an investigation only: it changes
+nothing in `src/`. Every number below was measured on moriarty for this report.
+
+> **Status (2026-10-03).** Opportunity #2, the CPU form of the product basis,
+> shipped in #52. On lestrade (i9-14900K, medium models, 2,048 atoms) the
+> per-step speed-up is 2.04× on 1 P-core and 2.86× on 8 for ACE SiGe; 1.08× /
+> 1.18× for ACE Cantor; 1.11× / 1.26× for PACE SiGe; and 1.04× / 1.12× for PACE
+> Cantor. The large linear ACE models gain 3.2–4×. The numbers below are from
+> before that change. #1 is left to lammps-jax, and #3 is dropped. The scripts are in `bench/perf/` (`cpu_*.py`), the raw
 rows in `bench/perf/results/cpu_gap/`, and section 8 gives the commands.
 
 ## Summary
@@ -540,7 +546,7 @@ probe on this branch at force parity. "Estimated" means reasoned from the
 | # | change | speed-up | evidence | effort | risk |
 |---|---|---|---|---|---|
 | 1 | **Rank-parallel CPU evaluation.** The calculator's step under `shard_map` over host devices: dense rows split across D = cores devices, 1 thread each, E/V `psum`, the force gather after an all-gather of dE/drij. Alternatively the lammps-jax bundle on CPU with MPI ranks. **Decision: left to lammps-jax**, which is gaining CPU support with MPI domain decomposition; ace-jax will not add its own `shard_map` path | **1.5–2.6× at 16 cores (measured in-process); 2.3–4.0× as separate ranks (emulated)** | §3.3: shard_map 1.4–2.6× over threads (exact); 16 processes 2.3–4.0× over 16 threads, at 8.0–10.4× of one core | S–M (calculator: device mesh, row padding to D, the gather) | low; exact. The XLA device count must be set before JAX starts, so it is an opt-in env/config, and it fights other in-process JAX use |
-| 2 | **CPU product basis: feature-major explicit products** (no `jnp.prod`; At[g0]·At[g1]·…), backend-selected so the GPU keeps its layout | **1.65× per core** on ACE SiGe (order 3), 1.13× PACE SiGe, ~1× on order-2 Cantor | §6.2 measured; §4.3 AA kernels | S | low (exact to 4e-14); keep the GPU path |
+| 2 | **Done in #52.** **CPU product basis: feature-major explicit products** (no `jnp.prod`; At[g0]·At[g1]·…), backend-selected so the GPU keeps its layout | **1.65× per core** on ACE SiGe (order 3), 1.13× PACE SiGe, ~1× on order-2 Cantor | §6.2 measured; §4.3 AA kernels | S | low (exact to 4e-14); keep the GPU path |
 | (3) | ~~Analytic adjoint of the product basis~~ (`custom_vjp`). **Dropped:** hand-written gradients are not wanted, and most of the reverse-mode cost was `jnp.prod`'s lowering (pad/slice JVP, transposing copies), which #2's forward rewrite removes while keeping autodiff. The remaining serial `wrapped_scatter` (3% of 1-core time) can be addressed by the gather's formulation (sorted segment-sum or a one-hot matmul) if it still shows after #2, and matters less under one-thread MPI ranks | – | §4.2, §4.3 | – | – |
 | 4 | **No one-hot species expansion in A** (ACE `blk_compact`, PACE pool-first): contract per species with a static loop over NZ on masked or sorted-by-species slots, or pool per (node, z_j) by segment-sum into an (n, NZ, …) buffer | 1.2–1.4× per core on Cantor (NZ = 5), ~1.1× on SiGe | A stage 33–46% on PACE and ACE Cantor; the one-hot multiplies its flops and bytes by NZ (§4.3 `ynn_fusion.2`) | M | low–medium (fusion and layout changes again need GPU checks) |
 | 5 | **Replace per-edge transcendentals with tables** (ML-PACE's approach): PACE g_k(r) splines per pair; ACE: spline the radial in r including the Agnesi transform and envelope, not only in x | 1.1–1.3× per core (radial is 12–37%; PACE Cantor's SBessel fusion alone is 20 ms, 8%) | §4.2, §4.3 | M | parity becomes spline-tolerance (as `lean`'s learned-radial splines already are, ~1e-9) |
