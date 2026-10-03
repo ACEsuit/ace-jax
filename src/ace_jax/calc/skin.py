@@ -138,11 +138,14 @@ def valid(state, pos, cell, pbc, numbers, skin):
     return bool(d2 <= (0.5 * skin) ** 2)
 
 
-# packed output: ([E, F (3n), V (9)] in the model dtype, [drift, overflow, k_max,
-# n_edges] in int32 -- float32 holds integers exactly only to 2**24)
+# packed output: ([E, F (3n), V (9), E_lo] in the model dtype, [drift, overflow,
+# k_max, n_edges] in int32 -- float32 holds integers exactly only to 2**24).  E + E_lo
+# is the total energy: E_lo is nonzero only when it is accumulated wider than the
+# model dtype (float32 sites, float64 total: `edge_model.total_energy`).
 def unpack(out, n):
     values, counts = jax.device_get(out)
-    E, F, V = float(values[0]), values[1:1 + 3 * n].reshape(n, 3), values[1 + 3 * n:].reshape(3, 3)
+    E = float(values[0]) + float(values[10 + 3 * n])
+    F, V = values[1:1 + 3 * n].reshape(n, 3), values[1 + 3 * n:10 + 3 * n].reshape(3, 3)
     drift, overflow, k_max, n_edges = (int(c) for c in counts)
     return E, F, V, bool(drift), bool(overflow), k_max, n_edges
 
@@ -195,7 +198,9 @@ def step(model, u, arrays, rc, K):
     overflow = jnp.any(cnt > K)
     counts = jnp.stack([drift.astype(jnp.int32), overflow.astype(jnp.int32),
                         jnp.max(cnt, initial=0), jnp.sum(cnt)]).astype(jnp.int32)
-    return jnp.concatenate([E[None], F.ravel(), V.ravel()]), counts
+    hi = E.astype(F.dtype)
+    lo = (E - hi.astype(E.dtype)).astype(F.dtype)
+    return jnp.concatenate([hi[None], F.ravel(), V.ravel(), lo[None]]), counts
 
 
 def jitted_step(static, rc):

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- The total energy is a compensated sum of the site energies (correctly rounded,
+  independent of atom order and layout), and a float32 model returns it in
+  float64 when x64 is enabled instead of a float32 total quantised at its own
+  ulp (1 eV at 60k atoms), which stalled ASE line searches. Forces are unchanged.
+
 ## 0.1.2 (2026-10-03)
 
 - Tutorials link the public [MLIP School](https://mlipschool.uk/) pages.

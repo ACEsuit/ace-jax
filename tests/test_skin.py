@@ -349,5 +349,5 @@ def test_step_counts_are_integers_in_float32():
     _, _, _, drift, overflow, k_max, n_edges = skin_mod.unpack(out, len(at))
     assert (drift, overflow, k_max, n_edges) == (False, False, st.k_max, st.n_edges)
     n, big = 2, 2**24 + 1                                 # not representable in float32
-    got = skin_mod.unpack((np.zeros(10 + 3 * n, np.float32), np.array([0, 1, 7, big], np.int32)), n)
+    got = skin_mod.unpack((np.zeros(11 + 3 * n, np.float32), np.array([0, 1, 7, big], np.int32)), n)
     assert got[3:] == (False, True, 7, big)
