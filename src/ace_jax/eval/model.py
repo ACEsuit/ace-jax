@@ -35,6 +35,10 @@ from .harmonics import real_solid_harmonics, real_spherical_harmonics
 from .radial import (agnesi_normalized, env_ace1_poly1sr, env_poly1sr,
                      env_poly2sx, poly_recursion, spline_eval, spline_eval_pairs)
 
+# species count from which the CPU pools the species-compact blocked A by segment_sum
+# rather than a one-hot over z_j (`ACEModel._blocked_a_scatter`)
+BLK_SCATTER_MIN_NZ = 3
+
 
 @contextmanager
 def highest_precision():
@@ -467,8 +471,22 @@ class ACEModel(EdgeSiteModel):
             R, Rpair = self.radial(r3, zi_, zj_)
         R = jnp.where(mk[:, None], R, 0.0)
         Y = self.angular(r3)
+        if self.blk_compact and self.E0.shape[0] >= BLK_SCATTER_MIN_NZ:
+            A = jax.lax.platform_dependent(
+                R, Y, zj_, cpu=lambda R, Y, zj: self._blocked_a_scatter(R, Y, zj, n, K),
+                default=lambda R, Y, zj: self._blocked_a_onehot(R, Y, zj, n, K))
+        else:
+            A = self._blocked_a_onehot(R, Y, zj_, n, K)
+        return self._readout_folded(A, pool_dense(Rpair.reshape(n, K, -1), mask), node_z,
+                                    self.blk_aa_specs)
+
+    def _blocked_a_onehot(self, R, Y, zj, n, K):
+        """Node-major blocked A (n, n_A) from per-edge R (n*K, sum w_l) and Y: per
+        l-block a batched (w_l, K) @ (K, 2l+1) contraction; species-compact
+        blocks first expand R by a one-hot over z_j (NZ x the columns)."""
+        E = n * K
         nz = self.E0.shape[0]
-        oh = jax.nn.one_hot(zj_, nz, dtype=R.dtype) if self.blk_compact else None
+        oh = jax.nn.one_hot(zj, nz, dtype=R.dtype) if self.blk_compact else None
         hi = jax.lax.Precision.HIGHEST
         At = []
         for l, off, w in self.blk:
@@ -478,9 +496,23 @@ class ACEModel(EdgeSiteModel):
             Yl = Y[:, l * l:(l + 1) ** 2]
             At.append(jnp.einsum("nkr,nky->ryn", Rl.reshape(n, K, -1), Yl.reshape(n, K, -1),
                                  precision=hi).reshape(-1, n))
-        A = jnp.concatenate(At, axis=0).T
-        return self._readout_folded(A, pool_dense(Rpair.reshape(n, K, -1), mask), node_z,
-                                    self.blk_aa_specs)
+        return jnp.concatenate(At, axis=0).T
+
+    def _blocked_a_scatter(self, R, Y, zj, n, K):
+        """`_blocked_a_onehot` for species-compact blocks, without the one-hot:
+        each edge's own R_l (x) Y_l, segment-summed per (node, z_j).  NZ x less
+        arithmetic for a scatter-add.  On the CPU, with NZ >= BLK_SCATTER_MIN_NZ,
+        this wins (5 species: 1.10-1.41x the lean step); at NZ = 2 it is 0.91-1.14x,
+        and for PACE's pool-first A 0.56-1.19x (lestrade, i9-14900K, 1 and 8 P-cores)."""
+        E = n * K
+        nz = self.E0.shape[0]
+        seg = jnp.repeat(jnp.arange(n), K) * nz + zj
+        At = []
+        for l, off, w in self.blk:
+            P = (R[:, off:off + w, None] * Y[:, None, l * l:(l + 1) ** 2]).reshape(E, -1)   # (E, w (2l+1))
+            S = jax.ops.segment_sum(P, seg, num_segments=n * nz)                            # (n nz, w (2l+1))
+            At.append(S.reshape(n, -1))                                                     # columns (z, r, y)
+        return jnp.concatenate(At, axis=1)
 
 
 # ------------------------------------------------------------------ readout fold

@@ -410,3 +410,25 @@ def test_authored_model_through_the_calculator(tmp_path, monkeypatch):
     assert abs(E1 - E0) <= TOL * max(1.0, abs(E0))
     np.testing.assert_allclose(F1, F0, rtol=0, atol=TOL)
     np.testing.assert_allclose(S1, S0, rtol=0, atol=TOL)
+
+
+def test_blocked_a_forms_agree():
+    """The species-compact blocked A has two forms: the one-hot expansion over z_j
+    (GPU, and the CPU below `BLK_SCATTER_MIN_NZ` species) and a segment_sum per
+    (node, z_j) (the CPU otherwise).  Same A and same reverse-mode gradients."""
+    from ace_jax.eval import model as acemod
+    m, meta, _ = load(str(MODELS["Cantor_small"]))
+    m = lean_exact(m)
+    assert m.blk_compact and m.E0.shape[0] >= acemod.BLK_SCATTER_MIN_NZ
+    n, K = 7, 5
+    rng = np.random.default_rng(0)
+    w = sum(b[2] for b in m.blk)
+    R = jnp.asarray(rng.standard_normal((n * K, w)))
+    Y = jnp.asarray(rng.standard_normal((n * K, (max(b[0] for b in m.blk) + 1) ** 2)))
+    zj = jnp.asarray(rng.integers(0, m.E0.shape[0], n * K), jnp.int32)
+    one, sc = m._blocked_a_onehot(R, Y, zj, n, K), m._blocked_a_scatter(R, Y, zj, n, K)
+    np.testing.assert_allclose(sc, one, rtol=1e-13, atol=1e-14)
+    C = jnp.asarray(rng.standard_normal(one.shape))
+    g = lambda f: jax.grad(lambda R, Y: jnp.sum(C * f(R, Y, zj, n, K)), argnums=(0, 1))(R, Y)
+    for a, b in zip(g(m._blocked_a_scatter), g(m._blocked_a_onehot)):
+        np.testing.assert_allclose(a, b, rtol=1e-13, atol=1e-14)

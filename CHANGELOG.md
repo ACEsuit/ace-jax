@@ -9,6 +9,13 @@
   medium benchmark at 2,048 atoms, on an i9-14900K with 8 P-cores: linear
   ACE 2.9× faster on SiGe and 1.2× on Cantor; PACE 1.3× on SiGe and 1.1×
   on Cantor.
+- Faster CPU evaluation of linear ACE models with three or more species.
+  On the CPU, the lean evaluation form now pools A per neighbour species
+  with a segment sum. Before, it expanded every edge's radial values over
+  all species with a one-hot. Two-species models, PACE models and other
+  backends are unchanged. Cantor (5 species) at 2,048 atoms, on an
+  i9-14900K with 8 P-cores: 1.37× faster for the medium model, 1.31× for
+  the small and 1.12× for the large.
 
 ## 0.2.0 (2026-10-03)
 
