@@ -103,7 +103,10 @@ nav:
       - "3. Multi-element fits: categorical and embedded species": tutorials/multi-element.md
       - "4. Your data, your property": tutorials/dataset-and-properties.md
       - "5. Basis size and the evidence": tutorials/basis-and-evidence.md
+      - "6. Surfaces: coverage and repair": tutorials/surfaces.md
+      - "7. Automating curation": tutorials/curation.md
       - "8. The truth about the truth": tutorials/truth-about-the-truth.md
+      - "9. Bring your own data": tutorials/bring-your-own-data.md
   - Concepts: concepts.md
   - How-to guides:
       - Build a basis: howto/basis.md

@@ -124,3 +124,50 @@ def test_non_periodic_axis_is_not_wrapped():
     s = slab((1, 1, 1), 4)
     t = s.copy(); t.positions[0] += s.cell[2]
     assert L.structure_key(s) != L.structure_key(t)
+
+
+SCHOOL = __import__("pathlib").Path(__file__).resolve().parents[1] / "docs/user/tutorials/data/school"
+
+
+def _hits_all(files, structures):
+    caches = [L.LabelCache.from_file(SCHOOL / f) for f in files]
+    misses = [i for i, a in enumerate(structures) if not any(c.get(a, "mpa-0") is not None for c in caches)]
+    assert not misses, f"{len(misses)} of {len(structures)} structures have no shipped label (first: {misses[0]})"
+
+
+def test_every_tutorial_6_setting_hits_the_shipped_labels():
+    from ace_jax.tutorials import structures as T
+    grid = [x for L_ in T.E2_LAYERS for v in T.E2_VACUA if v >= 6.0 for x in T.e2_slabs(L_, v)]
+    rep = [x for L_ in T.E2_LAYERS for v in T.E2_VACUA if v >= 6.0
+           for x in T.e2_displaced(T.e2_slabs(T.e2_repair_layers(L_), v))]
+    _hits_all(["e1/labels-mpa-0.xyz", "e2/labels-mpa-0.xyz", "c/labels-mpa-0.xyz"],
+              [*T.e1_cells(0.08, 0.02), T.c_structures()["bulk"], *grid, *rep])
+    from ace_jax.fit.xyz import read_extxyz
+    relaxed = {str(f.info["from_key"]) for f in read_extxyz(str(SCHOOL / "e2/relaxed-mpa-0.xyz"))}
+    assert {L.structure_key(s) for s in grid} <= relaxed
+
+
+def test_every_tutorial_9_setting_hits_the_shipped_labels():
+    from ace_jax.tutorials import structures as T
+    s = T.d_system()
+    grid = [x for a in T.D_STRAINS for r in T.D_RATTLES for n in T.D_NTRAIN for x in T.d_training(s, a, r, n)]
+    _hits_all(["d/labels-mpa-0.xyz"], [*T.d_isolated(("As", "Ga")), *T.d_targets(s), *grid, *T.d_repair(s)])
+
+
+def test_tutorial_7_pools_are_labelled_and_hold_out_the_targets():
+    from ase import Atoms
+    from ace_jax.fit.xyz import read_extxyz
+    from ace_jax.tutorials import structures as T
+    pools = [Atoms(numbers=f.numbers, positions=f.positions, cell=f.cell, pbc=f.pbc)
+             for f in read_extxyz(str(SCHOOL / "e3/pools.xyz"))]
+    _hits_all(["e3/labels-mpa-0.xyz"], pools)
+    _hits_all(["c/labels-mpa-0.xyz", "e1/labels-mpa-0.xyz"],
+              [*T.e3_targets(), *T.e3_seed(), *T.e1_cells(0.08, 0.02)])
+    targets = {L.structure_key(a) for a in T.e3_targets()}
+    assert not targets & {L.structure_key(a) for a in pools}
+
+
+def test_every_tutorial_4_setting_hits_the_shipped_labels():
+    from ace_jax.tutorials import structures as T
+    _hits_all(["e1/labels-mpa-0.xyz"],
+              [x for s in T.E1_STRAINS for r in T.E1_RATTLES for x in T.e1_cells(s, r)] + list(T.e1_vacancy_pair()))
