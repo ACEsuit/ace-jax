@@ -8,7 +8,7 @@
 # ///
 """Tutorial 9: bring your own data.
 
-Adapted from the MLIP-school-2026 notebook D (ACEsuit/MLIP-school-2026). Run it with
+Adapted from the MLIP-school-2026 notebook D (https://mlipschool.uk/d/d_bring_your_own_data). Run it with
 `uvx marimo edit --sandbox school_byod.py`, or as a plain script
 (`python school_byod.py`), which is how CI smoke-tests it.
 """
@@ -42,7 +42,7 @@ def _(mo):
     It uses the steps of Tutorials
     [4](https://acesuit.github.io/ace-jax/tutorials/dataset-and-properties/) and
     [6](https://acesuit.github.io/ace-jax/tutorials/surfaces/), and is adapted from
-    notebook D of the [MLIP school 2026](https://github.com/ACEsuit/MLIP-school-2026).
+    notebook D of the [MLIP School 2026](https://mlipschool.uk/d/d_bring_your_own_data).
 
     **Run this notebook**: with [uv](https://docs.astral.sh/uv/) installed, one command
     opens it in your browser (no account needed):
