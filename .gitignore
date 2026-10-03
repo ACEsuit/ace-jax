@@ -10,6 +10,7 @@ build/
 pace_ref/build/
 pace_ref/.venv/
 bench/scaling/models/
+bench/scaling/envs/lestrade-cpu.json
 coupling/build/
 !coupling/julia/build/
 dist-linux/

@@ -1,2 +1,4 @@
 {"lmp": "/home/eng/essswb/bench-scaling/lmp.sh", "lmp_jax": "/home/eng/essswb/bench-scaling/lmp-jax.sh", "pjrt": "/home/eng/essswb/bench-scaling/venv/lib/python3.12/site-packages/jax_plugins/xla_cuda12/xla_cuda_plugin.so", "pythonpath": "/home/eng/essswb/bench-scaling/ace-jax/bench",
- "python": "/home/eng/essswb/bench-scaling/venv/bin/python", "root": "/home/eng/essswb/bench-scaling"}
+ "python": "/home/eng/essswb/bench-scaling/venv/bin/python", "root": "/home/eng/essswb/bench-scaling",
+ "lmp_ace": "/home/eng/essswb/bench-scaling/lmp-ace.sh", "ace_plugin": "/home/eng/essswb/bench-scaling/ace-plugin/aceplugin.so",
+ "julia": "/home/eng/essswb/.juliaup/bin/julia +1.12.6", "julia_depot": "/storage/eng/essswb/cache/julia-pr309", "julia_project": "/home/eng/essswb/bench-scaling/ace-jax/bench/scaling/julia"}
