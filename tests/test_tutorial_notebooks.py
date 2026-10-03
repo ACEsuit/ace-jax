@@ -32,3 +32,15 @@ def test_tutorial_3_exercise_3_drops_a_table_column_without_a_cycle(tmp_path):
     edit = "np.array([_valence, _pauling], float).T"
     assert edit in src
     _graph(src.replace(edit, "np.array([_valence], float).T"), tmp_path)
+
+
+@pytest.mark.parametrize("name", sorted(p.stem for p in NB.glob("*.py") if not p.stem.startswith("_")))
+def test_every_tutorial_is_a_dag(name, tmp_path):
+    _graph((NB / f"{name}.py").read_text(), tmp_path)
+
+
+def test_tutorial_7_exercise_1_scores_against_the_last_eight_without_a_cycle(tmp_path):
+    src = (NB / "school_curation_si.py").read_text()
+    edit = "T = np.concatenate([np.asarray(r, float) for r in training_descriptors])"
+    assert edit in src
+    _graph(src.replace(edit, "T = np.concatenate([np.asarray(r, float) for r in training_descriptors[-8:]])"), tmp_path)

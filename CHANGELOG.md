@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Tutorials 6, 7 and 9, adapted from the MLIP school's E2, E3 and D notebooks:
+  surfaces (coverage, repair and stable relaxations), automating curation
+  (random, novelty and ace-jax's ARD-uncertainty selection), and bring your own
+  data (GaAs demo). Their labels ship; `ace_jax.tutorials` gains the builders,
+  `campaign` (descriptors, MD pools, novelty) and `curation` (the campaign loop).
 - `e0="lsq"` (`aj fit --e0 lsq`) now fits E0 jointly with the readout: one
   column per species with a 1 eV prior around the least-squares E0, folded into
   E0 on export (isolated training atoms still pin their species; otherwise E0
