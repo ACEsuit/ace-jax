@@ -474,7 +474,7 @@ def _(mo):
     mo.md(r"""
     ## Reflection
 
-    Twelve structures turned a model that could not see a surface into one
+    Nine structures turned a model that could not see a surface into one
     that relaxes three of them correctly. Would this model now predict the
     Si(100) surface you would see in an experiment? What is still missing
     from the data? Think before you open the answer.

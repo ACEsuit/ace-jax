@@ -9,6 +9,9 @@ Needs mace-torch (and CPU torch) -- an environment of its own, not ace-jax's:
     PYTHONPATH=src mace-env/bin/python docs/user/tutorials/data/school/make_labels.py all \\
         --e1x-source <MLIP-school-2026>/notebooks/reference/e1x-bulk-reference.xyz
 
+The e3 mode also fits ace-jax models and runs MD with them, so the environment needs
+ace-jax's own dependencies too (`uv pip install --python mace-env/bin/python -e .`).
+
 `a0` prints MACE-MPA-0's diamond-Si lattice constant (set it as
 ace_jax.tutorials.structures.E1_A0 before labelling, since the vacancy pair is
 built at it). `all` writes, next to this script:
@@ -16,6 +19,9 @@ built at it). `all` writes, next to this script:
     e1/labels-mpa-0.xyz          E1's slider grid (30 settings x 10 cells) and vacancy pair
     e1x/reference.xyz            the school's 250 E1x frames, relabelled
     c/labels-mpa-0.xyz, c/labels-mp-0b3.xyz   C's reference pair and surface recipe
+    e2/labels-mpa-0.xyz, e2/relaxed-mpa-0.xyz tutorial 6: slab grid, repair/displaced slabs, relaxed truth
+    e3/pools.xyz, e3/labels-mpa-0.xyz         tutorial 7: the canonical campaign's MD pools, all labelled
+    d/labels-mpa-0.xyz                        tutorial 9: the GaAs demo
 
 Labels are float64 on CPU; see README.md for the models and their licence."""
 import argparse
@@ -23,10 +29,7 @@ import pathlib
 import tempfile
 import time
 
-import jax
 import numpy as np
-
-jax.config.update("jax_enable_x64", True)    # e3 fits models and drives MD with them: float64
 
 from ace_jax.tutorials import labels as L
 from ace_jax.tutorials import structures as T
@@ -95,17 +98,19 @@ def e3_labels(seed=0):
     """Tutorial 7: the canonical campaign (seed 0; drivers random, novelty, uncertainty; 2 rounds
     x 4 picks), run offline with live labels. Ships every round's MD pool (info driver, round)
     and the labels of every pool frame, so the notebook's selection always hits the cache."""
-    from ace_jax.tutorials import campaign as C
+    import jax
+    jax.config.update("jax_enable_x64", True)    # e3 fits models and drives MD with them: float64
     from ace_jax.tutorials.curation import CAMPAIGN, run_campaign
     calc = L._mace_calculator("mpa-0")
     pools, t = [], time.time()
     for driver in CAMPAIGN["drivers"]:
-        hist = run_campaign(driver, labeller=lambda xs: L.label(xs, model="mpa-0", calculator=calc),
-                            work=pathlib.Path(tempfile.mkdtemp()), seed=seed)
-        for r, pool in enumerate(hist["pools"]):
-            for i, f in enumerate(pool):
-                f = f.copy(); f.info.update(driver=driver, round=r, index=i); pools.append(f)
-        print(f"e3 {driver}: errors {[round(h['err'], 6) for h in hist['history']]}", flush=True)
+        with tempfile.TemporaryDirectory() as tmp:
+            hist = run_campaign(driver, labeller=lambda xs: L.label(xs, model="mpa-0", calculator=calc),
+                                work=pathlib.Path(tmp), seed=seed)
+            for r, pool in enumerate(hist["pools"]):
+                for i, f in enumerate(pool):
+                    f = f.copy(); f.info.update(driver=driver, round=r, index=i); pools.append(f)
+            print(f"e3 {driver}: errors {[round(h['err'], 6) for h in hist['history']]}", flush=True)
     from ase.io import write
     (HERE / "e3").mkdir(parents=True, exist_ok=True)
     write(str(HERE / "e3" / "pools.xyz"), pools, format="extxyz")

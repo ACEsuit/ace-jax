@@ -49,7 +49,7 @@ def _(mo):
 
     or open it in [molab](https://molab.marimo.io/github/ACEsuit/ace-jax/blob/main/docs/user/tutorials/notebooks/school_curation_si.py), marimo's hosted service (free to
     preview; sign in to run). The documentation website shows a static copy,
-    run on a CPU when the site was built. The three campaigns take about 6 minutes.
+    run on a CPU when the site was built. The three campaigns take about 5 minutes.
     """)
     return
 
@@ -82,12 +82,15 @@ def _(mo):
 
     - **Start:** the bulk model of Tutorial 6 (ten strained and rattled
       cells), and a separate seed set of eight bulk cells that every refit
-      starts from.
+      starts from. The uncertainty rule needs an ARD fit (Step 2), so its
+      start is the same data fitted with ARD, which predicts γ(111) a little
+      differently: the three curves do not start at the same point.
     - **Pool:** each round runs 60 steps of 400 K Langevin dynamics with the
       current model from three starting points, in this order: bulk, a (110)
       slab (a distractor: the target does not depend on it) and the target's
-      (111) slab, keeping every fourth frame. Frames with two atoms closer
-      than 1.7 Å are dropped.
+      (111) slab, keeping every fourth frame after the start (the starting
+      structures are the test structures, so they are never candidates).
+      Frames with two atoms closer than 1.7 Å are dropped.
     - **Selection:** each round picks 4 frames, labels them, and refits the
       seed set plus everything picked so far. Two rounds: 8 labels.
     - **Score:** the error of the model's γ(111) against the labeller's.
@@ -167,7 +170,7 @@ def _(np):
         T = np.concatenate([np.asarray(r, float) for r in training_descriptors])
         scores = [float(np.linalg.norm(np.asarray(r, float)[:, None, :] - T[None], axis=2).min(1).max())
                   for r in pool_descriptors]
-        return [int(i) for i in np.argsort(scores)[::-1][:count]]
+        return [int(i) for i in np.argsort(-np.asarray(scores), kind="stable")[:count]]
 
     return pick_novel, pick_random
 
@@ -244,8 +247,9 @@ def _(mo, runs):
           + "\n".join(f"| {d} | {r['history'][0]['err']:.2e} | {r['history'][1]['err']:.2e} | "
                       f"{r['history'][2]['err']:.2e} | {r['history'][1]['picks']}, {r['history'][2]['picks']} |"
                       for d, r in runs.items())
-          + "\n\n|γ(111) error| in eV/Å². Frames are numbered within each round's pool: 0-15 from the "
-          "bulk run, 16-31 from the (110) slab, 32-47 from the (111) slab.")
+          + "\n\n|γ(111) error| in eV/Å². Frames are numbered within each round's pool: 0-14 from the "
+          "bulk run, 15-29 from the (110) slab, 30-44 from the (111) slab (a live run may drop "
+          "unphysical frames and shift these).")
     return
 
 
@@ -273,8 +277,9 @@ def _(mo):
 
     - **Random** spreads its labels over all three runs; only some land on
       the target's surface.
-    - **Novelty** goes straight to the (111) slab: its surface atoms are the
-      farthest from the bulk-only training set in descriptor space.
+    - **Novelty** goes straight to the (111) slab's MD frames: their surface
+      atoms are the farthest from the bulk-only training set in descriptor
+      space.
     - **Uncertainty** spends its first round on the (110) distractor: that is
       where the model's forces are least certain, and it is right to be
       unsure there. But the target is (111), and the uncertainty rule does not
@@ -343,6 +348,9 @@ def _(mo):
     - Selection rules spend the same budget very differently; measure them on
       the property you need.
     - Novelty and uncertainty are blind to the target: aim the sampling.
+
+    Next: [Tutorial 8](https://acesuit.github.io/ace-jax/tutorials/truth-about-the-truth/)
+    asks where the labels themselves come from.
     """)
     return
 

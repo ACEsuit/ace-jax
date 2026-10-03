@@ -160,14 +160,15 @@ def _(T, io, mo, upload):
     else:
         system, demo = T.d_system(), True
     species = tuple(sorted(set(system.get_chemical_symbols())))
+    system_ok = (len(system) <= 64 and system.cell.rank == 3 and bool(system.pbc.all()) and 1 <= len(species) <= 2)
     mo.md(f"System: **{system.get_chemical_formula()}**, {len(system)} atoms, species {', '.join(species)}"
           + (" (the demo)." if demo else "."))
-    return demo, species, system
+    return demo, species, system, system_ok
 
 
 @app.cell(hide_code=True)
-def _(mo, species, system):
-    _ok = (len(system) <= 64 and system.cell.rank == 3 and system.pbc.all() and 1 <= len(species) <= 2)
+def _(mo, system_ok):
+    _ok = system_ok
     mo.callout(
         mo.md("**Checkpoint 2 passed:** a periodic cell with one or two elements and at most 64 atoms.")
         if _ok else mo.md("**Checkpoint 2:** this notebook takes a periodic cell (three cell vectors, "
@@ -193,7 +194,8 @@ def _(mo):
 
 
 @app.cell
-def _(L, T, demo, mo, pathlib, species, system, target):
+def _(L, T, demo, mo, pathlib, species, system, system_ok, target):
+    mo.stop(not system_ok, mo.md("Step 2's checkpoint must pass first."))
     URL = "https://raw.githubusercontent.com/ACEsuit/ace-jax/main/docs/user/tutorials/data/school/d/labels-mpa-0.xyz"
     _here = (mo.notebook_dir() / "../data/school/d/labels-mpa-0.xyz") if mo.notebook_dir() else None
     cache = L.LabelCache.from_file(_here if _here is not None and _here.exists() else URL) if demo else None
@@ -205,8 +207,11 @@ def _(L, T, demo, mo, pathlib, species, system, target):
         return L.label(xs, model="mpa-0", cache=cache)
 
 
-    isolated = label(T.d_isolated(species))
-    target_structures = label(T.d_targets(system))
+    try:
+        isolated = label(T.d_isolated(species))
+        target_structures = label(T.d_targets(system))
+    except L.LabelsUnavailable as _e:          # your own system without the labeller installed
+        mo.stop(True, mo.callout(mo.md(f"**Labels needed.** {_e}"), kind="warn"))
 
 
     def gamma(e_bulk, e_slab):
@@ -329,9 +334,11 @@ def _(mo):
 
     Compute every atom's descriptor in the model's own basis, for the
     training cells and for the target structures, and measure how far the
-    target's atoms sit from the nearest training atom, in units of the
-    training atoms' own spacing (Tutorial 6). A ratio near 1 means the target
-    is inside the data; silicon's surface atoms sat about 12× out.
+    slab's most exposed atom sits from the nearest training atom, in units of
+    the training atoms' own spacing. Tutorial 6 used the median atom instead
+    (silicon's slab atoms sat about 12× out); half of a thin slab's atoms are
+    bulk-like, so here the worst one tells more. A ratio near 1 means the
+    target is inside the data.
     """)
     return
 
@@ -368,13 +375,16 @@ def _(mo):
 
 
 @app.cell
-def _(C, L, T, fit_model, isolated, label, mo, model_gamma, np, system, target, target_structures, training, truth):
+def _(C, L, T, fit_model, isolated, label, mo, model_gamma, np, system, target, target_structures, training, truth,
+      work):
     repair = label(T.d_repair(system))
     model_v2 = fit_model([*isolated, *training, *repair], "fit_v2")
     gamma_v2 = model_gamma(model_v2)
     err_v2 = abs(gamma_v2 - truth)
     _Xt = np.concatenate(C.atom_descriptors([*training, *repair], model_v2))
     ratio_v2 = C.nn_ratio(_Xt, np.concatenate(C.atom_descriptors(target_structures[1:], model_v2)), q=1.0)
+    from ase.io import write as _write
+    _write(str(work / "train.xyz"), [*isolated, *training, *repair])
     mo.md(f"| model | training structures | γ error ({target['units']}) | coverage ratio |\n|---|---|---|---|\n"
           f"| v1 | {len(training) + len(isolated)} | see Step 5 | see Step 6 |\n"
           f"| v2 | {len(training) + len(isolated) + len(repair)} | {err_v2:.4f} | {ratio_v2:.1f} |\n\n"
@@ -387,8 +397,10 @@ def _(err_v1, err_v2, mo, ratio_v1, ratio_v2, target):
     _ok = err_v2 < target["tolerance"] and err_v2 < err_v1 and ratio_v2 < ratio_v1
     mo.callout(
         mo.md(f"**Checkpoint 4 passed:** with the repair set the error falls from {err_v1:.4f} to "
-              f"{err_v2:.4f} {target['units']}, within the tolerance, and the slab's atoms sit "
-              f"{ratio_v2:.1f}× out instead of {ratio_v1:.1f}×.")
+              f"{err_v2:.1e} {target['units']}, within the tolerance, and the slab's most exposed atom "
+              f"sits {ratio_v2:.2g}× out instead of {ratio_v1:.0f}×: the repair slabs, 3 and 5 layers "
+              "thick, contain the target's surface environments almost exactly, though not the "
+              "4-layer target itself.")
         if _ok else mo.md(f"**Checkpoint 4:** after the repair the error is {err_v2:.4f} {target['units']} "
                           f"(tolerance {target['tolerance']}), and the coverage ratio {ratio_v2:.1f}. For your "
                           "own system, look at which environments the target has that the data still lacks."),
@@ -402,9 +414,8 @@ def _(mo):
     mo.md(r"""
     ## Take it home
 
-    The labelled structures and both models are in `ace_jax_tutorial_9/`.
-    The same fits from the command line, with the labelled training set
-    written as extended XYZ (`ase.io.write("train.xyz", [*isolated, *training, *repair])`):
+    Both models, and the labelled training set (`train.xyz`, written in
+    Step 7), are in `ace_jax_tutorial_9/`. The same fit from the command line:
 
     ```bash
     aj fit --order 3 --max-degree 8 --rcut 5.5 --train train.xyz \

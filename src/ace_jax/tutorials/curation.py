@@ -66,7 +66,7 @@ def default_pick(driver):
             s = C.score_novelty(C.atom_descriptors(pool, B), C.atom_descriptors(train, B))
         else:
             s = max_force_std(pool, model_file, posterior)
-        return [int(i) for i in np.argsort(s)[::-1][:count]]
+        return [int(i) for i in np.argsort(-s, kind="stable")[:count]]        # ties: the earlier frame
     return pick
 
 
@@ -77,10 +77,13 @@ def run_campaign(driver, labeller, work, *, seed=0, pools=None, pick=None, round
     current model. pick(pool, train, count, rng, model_file, posterior) -> indices (default:
     the driver's built-in). Returns {"history": [{labels, err, picks}], "pools": [...]}."""
     cfgd = CAMPAIGN
-    rounds, per_round = rounds or cfgd["rounds"], per_round or cfgd["per_round"]
+    rounds = cfgd["rounds"] if rounds is None else rounds
+    per_round = cfgd["per_round"] if per_round is None else per_round
     work, uq = pathlib.Path(work), ("ard" if driver == "uncertainty" else "blr")
     pick = pick or default_pick(driver)
     targets = labeller(list(T.e3_targets()))
+    from .labels import structure_key
+    held_out = {structure_key(a) for a in targets}
     seed_set = labeller(T.e3_seed())
     start, post = fit_model(labeller(T.e1_cells(0.08, 0.02)), work / f"{driver}-start", uq=uq)
     history = [dict(labels=0, err=gamma_error(start, targets), picks=[])]
@@ -91,11 +94,14 @@ def run_campaign(driver, labeller, work, *, seed=0, pools=None, pick=None, round
             pool = list(pools[r])
         else:
             pool = [f for f in C.md_pool(model, T.e3_md_starts(), temperature=cfgd["temperature"],
-                                         n_steps=n_steps or cfgd["n_steps"], every=cfgd["every"],
+                                         n_steps=cfgd["n_steps"] if n_steps is None else n_steps,
+                                         every=cfgd["every"],
                                          seed=1000 * seed + r) if C.physical(f)]
         used_pools.append(pool)
         idx = pick(pool, train, min(per_round, len(pool)), rng, model, post)
-        train += labeller([pool[i] for i in idx])
+        picked = [pool[i] for i in idx]
+        assert not any(structure_key(a) in held_out for a in picked), "a picked frame is a target structure"
+        train += labeller(picked)
         model, post = fit_model(train, work / f"{driver}-r{r}", uq=uq)
         history.append(dict(labels=len(train) - len(seed_set), err=gamma_error(model, targets),
                             picks=[int(i) for i in idx]))

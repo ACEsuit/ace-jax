@@ -56,6 +56,15 @@ def test_md_pool_is_seeded_and_finite():
     kw = dict(temperature=400.0, n_steps=8, every=4, seed=3)
     a = C.md_pool(str(FIXTURE_DIR / "si_fitted.npz"), [start], **kw)
     b = C.md_pool(str(FIXTURE_DIR / "si_fitted.npz"), [start], **kw)
-    assert len(a) == 8 // 4 + 1
+    assert len(a) == 8 // 4                                   # observed after the dynamics, not the start
+    from ace_jax.tutorials.labels import structure_key
+    assert structure_key(start) not in {structure_key(f) for f in a}
     assert all(np.array_equal(x.positions, y.positions) for x, y in zip(a, b))
     assert all(np.isfinite(x.positions).all() for x in a) and not np.allclose(a[0].positions, a[-1].positions)
+
+
+def test_nn_ratio_ignores_duplicate_training_atoms():
+    # unrattled crystals: symmetric atoms share a descriptor, so the raw NN spacing is 0
+    X = np.repeat(np.arange(5.0)[:, None] * np.ones((1, 3)), 4, axis=0)     # 5 distinct rows, 4 copies each
+    r = C.nn_ratio(X, X[:1] + 10.0)
+    assert np.isfinite(r) and 1.0 < r < 100.0

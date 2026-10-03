@@ -35,8 +35,9 @@ def atom_descriptors(structures, basis_or_model):
 def md_pool(model_file, starts, *, temperature=400.0, dt_fs=1.0, n_steps=60, every=4, seed=0,
             friction=0.01):
     """Langevin MD (NVT) from each start with ACECalculator(model_file); the frames every
-    `every` steps, the starting frame included (n_steps // every + 1 per start), concatenated
-    in start order. Seeded: the same seed gives the same frames on one machine."""
+    `every` steps after the start (n_steps // every per start), concatenated in start order.
+    The starting structures themselves are never frames: a start may be a test structure.
+    Seeded: the same seed gives the same frames on one machine."""
     from ase import units
     from ase.md.langevin import Langevin
     from ase.md.velocitydistribution import MaxwellBoltzmannDistribution
@@ -50,7 +51,7 @@ def md_pool(model_file, starts, *, temperature=400.0, dt_fs=1.0, n_steps=60, eve
         MaxwellBoltzmannDistribution(a, temperature_K=temperature, rng=rng)
         dyn = Langevin(a, dt_fs * units.fs, temperature_K=temperature, friction=friction / units.fs,
                        rng=np.random.default_rng(seed + 1 + k))
-        dyn.attach(lambda: frames.append(_frame(a, start)), interval=every)   # noqa: B023  (ASE also calls it at step 0)
+        dyn.attach(lambda: dyn.nsteps and frames.append(_frame(a, start)), interval=every)   # noqa: B023  (skip step 0)
         dyn.run(n_steps)
     return frames
 
@@ -80,11 +81,13 @@ def _pairwise(a, b):
 def nn_ratio(train_rows, query_rows, q=0.5):
     """The q-quantile (default the median; 1.0 the most exposed atom) of the query atoms'
     distances to their nearest training atom, over the median nearest-neighbour spacing within
-    the training atoms (clamped at 1e-12: symmetric atoms of an unrattled crystal sit at zero
-    spacing). Rows are per atom, (n, D)."""
+    the training atoms, counting only atoms with a distinct descriptor (the symmetric atoms of
+    an unrattled crystal coincide). Rows are per atom, (n, D)."""
     T = np.asarray(train_rows, float)
     dt = _pairwise(T, T); np.fill_diagonal(dt, np.inf)
-    spacing = max(float(np.median(dt.min(1))), 1e-12)
+    nn = dt.min(1)
+    distinct = nn[nn > 1e-9 * max(float(np.abs(T).max()), 1.0)]     # symmetric atoms share a descriptor
+    spacing = float(np.median(distinct)) if distinct.size else 1.0
     return float(np.quantile(_pairwise(np.asarray(query_rows, float), T).min(1), q) / spacing)
 
 

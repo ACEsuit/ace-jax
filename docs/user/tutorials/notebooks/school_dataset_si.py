@@ -386,8 +386,8 @@ def _(mo):
     Would this bulk-only dataset give a good silicon *surface* energy? Write a
     couple of sentences, linking the environments of surface atoms to what the
     training set contained, before you open the answer below.
-    [Tutorial 8](https://acesuit.github.io/ace-jax/tutorials/truth-about-the-truth/)
-    computes a surface energy.
+    [Tutorial 6](https://acesuit.github.io/ace-jax/tutorials/surfaces/)
+    answers it with numbers.
     """)
     return
 

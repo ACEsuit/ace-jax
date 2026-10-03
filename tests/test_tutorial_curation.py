@@ -47,3 +47,13 @@ def test_fit_model_refuses_float32(tmp_path):
             K.fit_model([], tmp_path)
     finally:
         jax.config.update("jax_enable_x64", True)
+
+
+def test_campaign_refuses_to_train_on_its_targets(tmp_path):
+    import pytest
+    from ace_jax.tutorials import structures as T
+    lab = _labeller()
+    leaky = [[T.e3_targets()[1], *T.e3_seed()[:2]]]               # a pool holding the target slab itself
+    with pytest.raises(AssertionError, match="target"):
+        K.run_campaign("novelty", lab, tmp_path, rounds=1, per_round=1, pools=leaky,
+                       pick=lambda pool, train, k, rng, m, p: [0])

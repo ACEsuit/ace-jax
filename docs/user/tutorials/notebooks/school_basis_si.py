@@ -320,8 +320,8 @@ def _(mo):
       bases fitted to the same data, and its maximum picks a basis size from
       the training data alone.
 
-    Next: [Tutorial 8](https://acesuit.github.io/ace-jax/tutorials/truth-about-the-truth/)
-    asks where the reference labels themselves come from.
+    Next: [Tutorial 6](https://acesuit.github.io/ace-jax/tutorials/surfaces/)
+    finds what a bulk data set is missing for a surface, and repairs it.
     """)
     return
 
