@@ -3,7 +3,7 @@
 Each arm is a dict of FitConfig overrides on top of the common bench365 ARD settings.  Importable
 without fit_bench's side effects (the tests use it).
 """
-# Every arm except ard_aniso pins ard_force_shape="iso": the recorded rev-2 runs (2026-10-01..03) were iso
+# Every arm except ard_aniso and ard_default pins ard_force_shape="iso": the recorded rev-2 runs (2026-10-01..03) were iso
 # (the library default became aniso on 2026-10-03).
 ARD_ARMS = {
     "ard_legacy": {"_shape_variant": "legacy", "_score_source": "mixed", "ard_groups": "none", "ard_force_shape": "iso"},
@@ -11,6 +11,7 @@ ARD_ARMS = {
     "ard_AB":     {"ard_cluster_size": float("inf"), "ard_force_shape": "iso"},
     "ard_ABblk":  {"ard_force_shape": "iso"},                           # PRESS, ell = 3 r_cut, iso (the pre-2026-10-03 defaults, kept for the recorded ablation)
     "ard_aniso":  {"ard_force_shape": "aniso"},
+    "ard_default": {"ard_force_shape": "aniso", "e0": "lsq"},   # the library defaults (joint E0, aniso, transfer exponent)
     **{f"ard_ell{k}": {"ard_cluster_size": float(k), "ard_force_shape": "iso"} for k in (2, 4, 6)},
     **{f"ard_f{int(f * 10)}": {"ard_val_frac": f, "ard_force_shape": "iso"} for f in (0.1, 0.3)},
 }
