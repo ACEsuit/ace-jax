@@ -1,4 +1,4 @@
-"""Structures of the MLIP-school-derived tutorials (ACEsuit/MLIP-school-2026, E1 and C).
+"""Structures of the MLIP-school-derived tutorials (https://mlipschool.uk/, E1 and C).
 
 Every builder is deterministic (seeded rattles, fixed lattice constants), so a
 notebook rebuilds exactly the structures whose labels ship with it: the label

@@ -8,7 +8,7 @@
 # ///
 """Tutorial 4: build a dataset, fit it, and test a property it does not contain.
 
-Adapted from the MLIP-school-2026 notebook E1 (ACEsuit/MLIP-school-2026). Run it with
+Adapted from the MLIP-school-2026 notebook E1 (https://mlipschool.uk/e1/e1_oracle_and_first_fit). Run it with
 `uvx marimo edit --sandbox school_dataset_si.py`, or as a plain script
 (`python school_dataset_si.py`), which is how CI smoke-tests it.
 """
@@ -38,7 +38,7 @@ def _(mo):
 
     It builds on [Tutorial 1](https://acesuit.github.io/ace-jax/tutorials/first-fit/),
     which explains the basis and the fit in more detail. It is adapted from
-    notebook E1 of the [MLIP school 2026](https://github.com/ACEsuit/MLIP-school-2026).
+    notebook E1 of the [MLIP School 2026](https://mlipschool.uk/e1/e1_oracle_and_first_fit).
 
     **Run this notebook**: with [uv](https://docs.astral.sh/uv/) installed, one command
     opens it in your browser (no account needed):

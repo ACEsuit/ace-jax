@@ -8,7 +8,7 @@
 # ///
 """Tutorial 8: the reference is itself a model choice.
 
-Adapted from the MLIP-school-2026 notebook C (ACEsuit/MLIP-school-2026). Run it with
+Adapted from the MLIP-school-2026 notebook C (https://mlipschool.uk/c/c_truth_about_the_truth). Run it with
 `uvx marimo edit --sandbox school_truth_si.py`, or as a plain script
 (`python school_truth_si.py`), which is how CI smoke-tests it.
 """
@@ -42,7 +42,7 @@ def _(mo):
     It uses the fitting steps of
     [Tutorial 4](https://acesuit.github.io/ace-jax/tutorials/dataset-and-properties/),
     and is adapted from notebook C of the
-    [MLIP school 2026](https://github.com/ACEsuit/MLIP-school-2026). The surface
+    [MLIP School 2026](https://mlipschool.uk/c/c_truth_about_the_truth). The surface
     dataset is the recipe a later tutorial on surfaces builds step by step.
 
     **Run this notebook**: with [uv](https://docs.astral.sh/uv/) installed, one command

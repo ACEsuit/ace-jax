@@ -73,7 +73,7 @@ The [Quickstart](https://acesuit.github.io/ace-jax/quickstart/) runs this on a
 small silicon data set, and the
 [tutorials](https://acesuit.github.io/ace-jax/tutorials/) are notebooks that run
 on a laptop CPU, including ones adapted from the
-[MLIP school 2026](https://github.com/ACEsuit/MLIP-school-2026). For coding
+[MLIP School 2026](https://mlipschool.uk/). For coding
 agents, [`skills/ace-jax/SKILL.md`](https://github.com/ACEsuit/ace-jax/blob/main/skills/ace-jax/SKILL.md)
 is a compact usage guide.
 
