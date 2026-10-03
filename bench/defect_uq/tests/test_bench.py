@@ -27,7 +27,7 @@ te = _load("modal/train_extra.py", "train_extra")
 
 def test_arm_names():
     assert set(ard_arms.ARD_ARMS) == {"ard_legacy", "ard_A", "ard_AB", "ard_ABblk", "ard_aniso", "ard_ell2",
-                                      "ard_ell4", "ard_ell6", "ard_f1", "ard_f3"}
+                                      "ard_ell4", "ard_ell6", "ard_f1", "ard_f3", "ard_default"}
 
 
 @pytest.mark.parametrize("arm", sorted(ard_arms.ARD_ARMS))
