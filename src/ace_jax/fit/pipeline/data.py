@@ -1,5 +1,6 @@
 import dataclasses
 import io
+import os
 from typing import NamedTuple
 
 import equinox as eqx
@@ -72,6 +73,46 @@ def _model_source(cfg, train_o, test_o, ood_o, log):
     return m, str(m), None
 
 
+def _isolated(c, rcut):
+    """A single atom with no neighbour (periodic image) within rcut: its energy is E0 alone."""
+    if len(c.numbers) != 1 or c.energy is None:
+        return False
+    if not np.any(c.pbc):
+        return True
+    from ...eval import sparse_graph
+    return len(sparse_graph(c.positions, c.cell, c.pbc, rcut).senders) == 0
+
+
+def lsq_e0(configs, elements, rcut, log=print):
+    """E0 per element (in `elements` order) for e0='lsq'.  An isolated-atom config
+    is predicted as E0 alone, so a least-squares compromise between it and the bulk
+    shifts every energy: a species with isolated atoms takes E0 = their mean energy,
+    and the other species are fitted by least squares to the remaining configs'
+    energies with the fixed E0s subtracted.  With no isolated atoms this is plain
+    least squares on the composition counts, as before."""
+    iso = [_isolated(c, rcut) for c in configs]
+    fixed = {}
+    for e in elements:
+        Es = [c.energy for c, i in zip(configs, iso) if i and c.numbers[0] == e]
+        if Es:
+            fixed[e] = float(np.mean(Es))
+    if not fixed:
+        counts = np.array([[np.sum(c.numbers == e) for e in elements] for c in configs], float)
+        E0, *_ = np.linalg.lstsq(counts, np.array([c.energy for c in configs]), rcond=None)
+        return E0
+    log(f"E0: isolated-atom energies for {', '.join(f'Z={e} {v:.6f}' for e, v in fixed.items())}")
+    free = [e for e in elements if e not in fixed]
+    E0 = np.array([fixed.get(e, 0.0) for e in elements])
+    if free:
+        lab = [c for c, i in zip(configs, iso) if not i and c.energy is not None]
+        counts = np.array([[np.sum(c.numbers == e) for e in free] for c in lab], float)
+        r = np.array([c.energy - sum(np.sum(c.numbers == e) * v for e, v in fixed.items()) for c in lab])
+        sol, *_ = np.linalg.lstsq(counts, r, rcond=None)
+        for e, v in zip(free, sol):
+            E0[elements.index(e)] = v
+    return E0
+
+
 def split_configs(configs, ntrain, ntest, test_start=None, seed=0):
     """run.py's split: a seeded permutation; train = perm[:ntrain], test =
     perm[test_start : test_start + ntest] (test_start defaults to ntrain)."""
@@ -87,11 +128,11 @@ def split_configs(configs, ntrain, ntest, test_start=None, seed=0):
 
 
 def _config_type_weights(path):
-    """sigma_type: a weight-neutral named-weights dict over the file's config_type
-    labels, so load_configs sets each config's type index (run.py behaviour)."""
+    """sigma_type: a weight-neutral named-weights dict over the file's (or Atoms list's)
+    config_type labels, so load_configs sets each config's type index (run.py behaviour)."""
     from ..xyz import read_extxyz
     cts = []
-    for at in read_extxyz(path):
+    for at in (read_extxyz(path) if isinstance(path, (str, os.PathLike)) else path):
         ct = str(at.info.get("config_type", ""))
         if ct and ct not in cts:
             cts.append(ct)
@@ -100,10 +141,12 @@ def _config_type_weights(path):
 
 def load_fit_data(cfg, *, data=None, train=None, test=None, ood=None, log=print):
     """Configs, baselines, E0 and datasets.  Either `data` (one file, split with
-    split_configs) or `train` (+ optional `test`; defaults to train) files."""
+    split_configs) or `train` (+ optional `test`; defaults to train) files.  Each may be
+    a path or a list of ase.Atoms (see fit.data.load_configs)."""
     if (data is None) == (train is None):
         raise ValueError("pass exactly one of data= (split) or train= (+ test=)")
-    keys = dict(energy_key=cfg.energy_key, force_key=cfg.force_key, virial_key=cfg.virial_key)
+    keys = dict(energy_key=cfg.energy_key, force_key=cfg.force_key, virial_key=cfg.virial_key,
+                stress_key=cfg.stress_key)
     if cfg.factors:
         keys["factors"] = cfg.factors
     if cfg.sigma_type:
@@ -153,14 +196,13 @@ def load_fit_data(cfg, *, data=None, train=None, test=None, ood=None, log=print)
         base_ood = [_zero_base(c) for c in ood_o]
 
     els = [int(e) for e in meta["elements"]]
-    if cfg.e0 == "lsq":
-        counts = np.array([[np.sum(c.numbers == e) for e in els] for c in tr], float)
-        E0, *_ = np.linalg.lstsq(counts, np.array([c.energy for c in tr]), rcond=None)
+    if cfg.e0 in ("lsq", "prefit"):    # lsq refines it jointly in the fit (cfg.joint_e0)
+        E0 = lsq_e0(tr, els, float(meta["rcut"]), log=log)
         model = eqx.tree_at(lambda m: m.E0, model, jnp.asarray(E0))
     elif cfg.e0 == "model":
         E0 = np.asarray(z["E0"])
     else:
-        raise ValueError(f"e0 must be 'lsq' or 'model', got {cfg.e0!r}")
+        raise ValueError(f"e0 must be 'lsq', 'prefit' or 'model', got {cfg.e0!r}")
     pk = dict(pack=cfg.pack_mode, log=log)
     ds_train = build_dataset(tr, meta, E0, cfg.batch, **pk)
     ds_test = build_dataset(te, meta, E0, cfg.batch, **pk)

@@ -12,14 +12,14 @@ ACE potentials in pure Python/JAX. `aj fit` builds the basis from
 ## Install
 
 ```bash
-pip install ace-jax              # evaluate, linear fit, build new bases, ASE calculator
-pip install "ace-jax[gp]"        # + `aj fit` (all arms: MAP optimisers, GP, UQ ladder, POPS)
+pip install ace-jax              # build bases, `aj fit` (every arm), evaluate, ASE calculator
+pip install "ace-jax[gp]"        # + blackjax: the pathfinder rung of --rungs
 pip install "ace-jax[cuda]"      # + CUDA 12 JAX
 ```
 
-Building a new basis shape works on Linux x86_64/aarch64 and macOS arm64;
-elsewhere fit from an existing `.npz` with `--model`. Pre-release: ace-jax's
-`ace-jax-coupling` dependency is not on PyPI yet, so install from the repo.
+Building a new basis shape works on Linux x86_64/aarch64, macOS arm64 and
+Windows x64; elsewhere fit from an existing `.npz` with `--model`.
+`aj --version` prints the installed version.
 
 `ace-jax` and `aj` are the same CLI. `aj <cmd> --help` lists every flag.
 
@@ -51,9 +51,12 @@ aj fit --model si.npz --train train.xyz --test test.xyz $K \
     --r0 2.35 --out out_gp                                            # ACE + GP
 
 # 3. evaluate the fitted model on any extxyz
-aj eval --model out_linear/model.npz --data new.xyz $K --forces --out pred.csv
-aj eval --model out_gp/gp_model.npz  --data new.xyz $K --forces --out pred.csv  # adds energy_std
-aj eval --model model.yace --data new.xyz $K --forces                            # PACE works too
+#    prints an E/F/V RMSE table per config_type (labels present); --out writes the
+#    structures back as extxyz, every label kept, plus ace_energy, ace_forces, ace_stress
+#    (written by the ase-extxyz plugin; read it with ase.io.read(f, ':', format='cextxyz'))
+aj eval --model out_linear/model.npz --data new.xyz $K --out pred.xyz
+aj eval --model out_gp/gp_model.npz  --data new.xyz $K --out pred.xyz   # adds ace_energy_std, ace_forces_std
+aj eval --model model.yace --data new.xyz $K                            # PACE works too; --prefix renames ace_
 ```
 
 `aj fit` needs a basis — `--order/--max-degree` (built in the fit; `--elements`
@@ -85,14 +88,30 @@ over a file's `basis:`, `--train` over its `data:` (each logged as an override).
 | Big data on limited GPU memory | `--lml host-cache` (**GP arm, `--density pair` or `pca`, `--opt lbfgs`, `--rungs map` only, single device**) |
 | Misspecification UQ for linear ACE | `--uq pops` (**linear only: `--m-per-species 0`**) |
 | Calibrated per-atom force uncertainty (e.g. big-cell fracture) | `--m-per-species 0 --uq ard` (`posterior.npz`; `ACECalculator(model, posterior=...)`) |
+| Learn the tensor radials before the fit | `--learn-radial` (writes `radial_info.json`; not with embedding models) |
 | Per-config-type weights | `--weights '{"default":{"E":30,"F":1,"V":1},"bulk":{"E":100,"F":1,"V":1}}'` or a factor list |
-| E0 from data, not the model | `--e0 lsq` (default `model`) |
+| E0 from data, not the model | `--e0 lsq` (default `model`): fitted jointly with the readout (wide prior around a least-squares start; isolated atoms pin their species); `--e0 prefit` fixes the least-squares E0 first (ARD/POPS always do) |
+| Stress labels (MACE, ASE, DFT codes) | `--stress-key stress` (virial = −stress × volume for periodic configs without a virial label; also on `aj eval`) |
+| Plain least squares, no prior (teaching: shows overfitting) | `--m-per-species 0 --solver lstsq` (no evidence, no UQ: zero predictive variance; weights from `--weights`) |
 | Out-of-distribution check | `--ood ood.xyz` (writes `metrics_ood.csv`) |
+
+- **Learned radials: `aj fit --learn-radial`.** Learns the tensor radials before
+  the fit (VarPro over the training configs, gated on a seeded
+  `--radial-val-frac` hold-out, default 0.2), then fits as usual on the full
+  training set. Options: `--radial-n-q 12`, `--radial-steps 40`,
+  `--radial-lam-grid 0,1e-2`. Writes `out/radial_info.json` (the gate's
+  selection and scores). The saved model is marked `radial_learned`, so
+  `ACECalculator`/`export_lammps` spline it. Works with `--model` and with
+  `--order/--max-degree`; not with embedding models (issue #31). Advanced priors:
+  `ace_jax.fit.radial_learn.fit_radial`.
 
 These constraints are validated up front. A bad combination raises a
 `ValueError` that names the fix, so read it rather than retrying variants.
 
 ## Outputs (`--out DIR`)
+
+- **Log:** after the fit, an E/F/V RMSE table per `config_type` for each split
+  (E and V in meV/atom, F in eV/Å); `aj eval` prints the same table.
 
 - `metrics.csv`, `metrics_ood.csv`: one row per rung × quantity (E in meV/atom,
   F in eV/Å, V). Columns are `rmse`, `mae`, `crps`, `coverage` (fraction
@@ -109,7 +128,9 @@ These constraints are validated up front. A bad combination raises a
     `ACECalculator(model, posterior="out_ard/posterior.npz")` and
     `aj eval --posterior out_ard/posterior.npz` add per-atom calibrated force
     uncertainty: `forces_std`, plus `forces_cov`, `forces_q`, `forces_group`, `forces_support`
-    (see README, `--uq ard`). `--uq ard` also changes the mean: `model.npz` is the
+    (see `docs/dev/ard-force-uq.md`). `aj eval --out` writes `ace_forces_std` into its extxyz;
+    `aj eval --per-atom pa.xyz` writes the served arrays (`--support` adds `support_ok`/`support_q`).
+    `--uq ard` also changes the mean: `model.npz` is the
     ARD posterior mean, not the BLR/MAP mean. The hold-out scales are carried to the served
     posterior by (N/N_fit)^β, β fitted per run from a second hold-out fit and clipped to [0, ½]
     (`--ard-transfer exponent|sqrt|none`; it costs one more evidence fit + PRESS on ~(1−f)²N
@@ -140,7 +161,10 @@ cfg = FitConfig(model="si.npz", arm="gp", m_per_species=6, opt="lbfgs", r0=2.35,
                 rungs=("map",), energy_key="dft_energy", force_key="dft_force",
                 virial_key="dft_virial", predict_stats="recompute").validate()
 data = load_fit_data(cfg, train="train.xyz", test="test.xyz")   # or data="all.xyz" (split)
+# train=/test= also take lists of ase.Atoms: labels from info/arrays or the attached
+# calculator's results (a calculator shared by several Atoms raises: its results are the last one's)
 res = fit(cfg, data)             # res.preds.metrics, res.theta, res.rungs.draws
+res.map.log_evidence             # the LML at the MAP: compare bases fitted to the same data
 write_outputs(res, "out", layout=("cli",))                       # metrics + model file
 ```
 
@@ -181,7 +205,7 @@ load; faster only at large `nradbase`). Values are unchanged to roundoff.
 - `lean` (ACE `.npz` models): energies, forces and stress are evaluated with
   `ace_jax.eval.lean(model)`, exact to roundoff. It drops radial columns and
   harmonics the basis never reads, folds the pair weights into the pair
-  radial, and pools the dense A per l-block. Forces are 1.1–3.3× faster (A100, docs/ace-vs-pace-gap.md §8).
+  radial, and pools the dense A per l-block. Forces are 1.1–3.3× faster (A100, docs/dev/ace-vs-pace-gap.md §8).
   `calc.eval_model` is that form. `calc.model` stays the model as given, and
   descriptors use it. A lean model is energy-only: its `site_basis` and
   descriptor methods raise. Never fit from it or edit it (the radial helpers
@@ -305,7 +329,7 @@ Other entry points:
   `export_lammps` spline the learned radial through `lean` (see above);
   `ace_jax.eval.to_spline(model, n_intervals=None, tol=1e-10)` returns
   `(spline model, max_rel_err)` directly.
-- Benchmarks: `docs/benchmarks.md` (harness in `bench/scaling/`).
+- Benchmarks: `docs/dev/benchmarks.md` (harness in `bench/scaling/`).
 
 ## Gotchas
 

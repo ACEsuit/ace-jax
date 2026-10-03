@@ -1,6 +1,6 @@
-"""Benchmark results (JSONL) -> docs/figs/scaling_*.png + docs/benchmarks.md.
+"""Benchmark results (JSONL) -> docs/dev/figs/scaling_*.png + docs/dev/benchmarks.md.
 
-    python bench/scaling/plot.py 'bench/scaling/results/*.jsonl' docs/figs
+    python bench/scaling/plot.py 'bench/scaling/results/*.jsonl' docs/dev/figs
 
 Every figure is generated here from committed results; none is edited by hand.
 The ace-jax rows from before the speed-ups are read from the `before-perf/`
@@ -28,25 +28,34 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-# categorical slots 1-6, fixed order (never cycled; a new code takes the next
+# categorical slots 1-8, fixed order (never cycled; a new code takes the next
 # slot); ink and chrome tokens.  Slots 1-6 pass the dataviz validator on
 # adjacent pairs (light: CVD dE >= 9.1, normal >= 19.6).  Slots 2, 5 and 6
 # (stock ACE and the two learned-radial lines) are drawn together in the
 # learned-radial figure and do not clear the all-pairs floors (orange-magenta
 # normal-vision dE 12.9), so those lines also differ by marker (MARKERS) and
-# carry direct labels.
+# carry direct labels.  The ACEpotentials.jl lines take slots 8 (red) and 7
+# (violet), in that order and listed before the learned pair (whose last-two
+# position is fixed): in this order every adjacent pair passes (CVD >= 9.1,
+# normal >= 20.8), where slot 7 then 8 put red beside magenta (normal 13.2).
+# Red sits 7.1 (normal) from slot 2's orange, all-pairs: the ACEpotentials.jl
+# lines have their own markers and direct labels, and the trim line is dashed.
 CODES = {
     "acejax-pace": ("ace-jax (PACE model)", "#2a78d6"),
     "acejax-ace": ("ace-jax (linear ACE)", "#eb6834"),
     "mlpace": ("ML-PACE", "#1baf7a"),
     "mace": ("MACE", "#eda100"),
+    "acepotentials": ("ACEpotentials.jl (linear ACE, direct)", "#e34948"),
+    "acepotentials-trim": ("ACEpotentials.jl (linear ACE, trim library in LAMMPS)", "#4a3aa7"),
     "acejax-ace-learned": ("ace-jax (linear ACE, learned radial, splined)", "#e87ba4"),
     "acejax-ace-analytic": ("ace-jax (linear ACE, learned radial, analytic)", "#008300"),
 }
 SHORT = {"acejax-pace": "ace-jax PACE", "acejax-ace": "ace-jax ACE", "mlpace": "ML-PACE",
          "mace": "MACE", "acejax-ace-learned": "ace-jax ACE, learned (splined)",
-         "acejax-ace-analytic": "ace-jax ACE, learned (analytic)"}   # direct end-of-line labels
-MARKERS = {"acejax-ace-learned": "s", "acejax-ace-analytic": "^"}    # the rest: "o"
+         "acejax-ace-analytic": "ace-jax ACE, learned (analytic)",
+         "acepotentials": "ACEpotentials.jl", "acepotentials-trim": "ACEpotentials.jl trim"}  # end labels
+MARKERS = {"acejax-ace-learned": "s", "acejax-ace-analytic": "^",
+           "acepotentials": "D", "acepotentials-trim": "v"}         # the rest: "o"
 LEARNED = ("acejax-ace-learned", "acejax-ace-analytic")
 
 
@@ -485,12 +494,14 @@ def before_after_series(after, before, host, dtype="float64", size="medium"):
 
 
 def before_after_hosts(after, before):
-    """(hosts with re-run ace-jax rows, hosts whose re-run is pending)."""
+    """(hosts with re-run ace-jax rows, hosts whose re-run is pending).  Once
+    there are before rows, a host that has none (measured only after the
+    speed-ups, e.g. lestrade-cpu) has nothing to compare and is neither."""
     def hosts(rows):
         return {r["host"] for r in rows if r.get("code") in ACEJAX and r.get("mode") in MODES
                 and r.get("status") == "ok"}
-    done = hosts(after)
-    return sorted(done), sorted(hosts(before) - done)
+    done, had = hosts(after), hosts(before)
+    return sorted(done & had if had else done), sorted(had - done)
 
 
 def fig_before_after(after, before, out, host, dtype="float64", size="medium"):
@@ -748,7 +759,8 @@ def parity_table(rows):
     largest energy-per-atom and force differences. No rows: pending."""
     by = defaultdict(list)
     for r in rows:
-        if r.get("mode") == "parity" and str(r.get("status", "")).startswith("parity_"):
+        if r.get("mode") == "parity" and (str(r.get("status", "")).startswith("parity_")
+                                          or r.get("status") == "error"):   # e.g. a crashed reference
             by[(r["host"], r.get("gate", r["code"]), r["code"])].append(r)
     if not by:
         return "No parity rows yet (pending)."
@@ -756,9 +768,12 @@ def parity_table(rows):
            "|---|---|---|---|---|---|"]
     for (h, gate, code), rs in sorted(by.items()):
         ok = sum(r["status"] == "parity_ok" for r in rs)
-        de = max(abs(r.get("dE_per_atom") or 0.0) for r in rs)
-        df = max(abs(r.get("max_dF") or 0.0) for r in rs)
-        out.append(f"| {h} | {gate} | {CODES[code][0]} | {ok}/{len(rs)} | {de:.1e} | {df:.1e} |")
+        err = sum(r["status"] == "error" for r in rs)
+        cmp = [r for r in rs if r["status"] != "error"]
+        de = f"{max(abs(r.get('dE_per_atom') or 0.0) for r in cmp):.1e}" if cmp else "—"
+        df = f"{max(abs(r.get('max_dF') or 0.0) for r in cmp):.1e}" if cmp else "—"
+        n = f"{ok}/{len(rs)}" + (f" ({err} error)" if err else "")
+        out.append(f"| {h} | {gate} | {CODES[code][0]} | {n} | {de} | {df} |")
     timed = {r["host"] for r in rows if r.get("mode") in MODES}
     for h in sorted(timed - {k[0] for k in by}):
         out.append(f"| {h} | — | — | pending | | |")
@@ -778,10 +793,13 @@ CAPTIONS = {
                               "its learned-radial proxy splined as deployed (`spline_tol=\"auto\"`, "
                               "1e-10) and the same proxy kept analytic (`spline_tol=None`, exact). "
                               "Solid = standalone, dashed = LAMMPS; see "
-                              "`docs/learned-radial-splining.md`.",
+                              "`docs/dev/learned-radial-splining.md`.",
     "scaling_throughput_float64": "Throughput vs system size (float64, medium models): "
                                   "solid = standalone, dashed = LAMMPS. “fn”: basis functions per "
-                                  "central element (linear ACE is 2–14× the PACE size).",
+                                  "central element (linear ACE is 2–14× the PACE size). "
+                                  "The ACEpotentials.jl lines (CPU only) evaluate the linear ACE "
+                                  "model: direct (splined, as ace-jax) and its trim library (exact "
+                                  "radials, a spline error apart).",
     "scaling_throughput_float32": "The same in float32. ML-PACE and Symmetrix (MACE in "
                                   "LAMMPS) evaluate in double, so they are absent.",
     "scaling_model_size": "Throughput vs model size at exactly 8,192 atoms on GPU and "
@@ -821,12 +839,12 @@ def basis_table():
     return "\n".join(lines) if BASIS else "(model_sizes.json absent)"
 
 
-def write_doc(pattern, figs, doc="docs/benchmarks.md"):
+def write_doc(pattern, figs, doc="docs/dev/benchmarks.md"):
     rows = load(pattern)
     versions = {}
     for r in rows:
-        if r.get("versions"):
-            versions[r["host"]] = r["versions"]
+        if r.get("versions"):                 # union: the Julia lines add julia, ACEpotentials
+            versions.setdefault(r["host"], {}).update(r["versions"])
     intro = pathlib.Path(__file__).with_name("benchmarks_intro.md").read_text().strip()
     intro = intro.replace("{{findings}}", findings(rows)).replace("{{parity}}", parity_table(rows))
     body = ["# Benchmarks", "", intro, "", "## Figures", "",

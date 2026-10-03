@@ -8,6 +8,8 @@ import jax.numpy as jnp
 from ace_jax.eval import highest_precision
 from conftest import _orders
 
+RELEASE_JAX_PER_TEST = True     # many ARD stage variants per module: see conftest._release_jax_memory_per_test
+
 
 def _dense_rows(prob, ds):
     """Weighted live rows (w*phi, w*y) and the quantity index (0 E, 1 F, 2 V) of every observation."""
@@ -229,9 +231,11 @@ def _pipe_cfg(**kw):
     return FitConfig(**{**base, **kw})
 
 
-def test_ard_stage_fits_kappa_and_refits_on_all_training_data():
+@pytest.fixture(scope="module")
+def ard_map():
+    """load_fit_data + build_problem + fit_map for _pipe_cfg(): identical for every ARD stage
+    test (ard_variance / ard_mode only change the stage that follows), so done once."""
     from conftest import FIXTURE_DIR
-    from ace_jax.fit.ard import predict_ard, run_ard_stage
     from ace_jax.fit.pipeline import load_fit_data
     from ace_jax.fit.pipeline.mapfit import fit_map
     from ace_jax.fit.pipeline.objective import make_objective
@@ -241,6 +245,14 @@ def test_ard_stage_fits_kappa_and_refits_on_all_training_data():
     b = build_problem(cfg, d)
     with highest_precision():
         theta = fit_map(cfg, d, b, make_objective(cfg, d, b), log=lambda *a: None).theta
+    return d, b, theta
+
+
+def test_ard_stage_fits_kappa_and_refits_on_all_training_data(ard_map):
+    from ace_jax.fit.ard import predict_ard, run_ard_stage
+    cfg = _pipe_cfg().validate()
+    d, b, theta = ard_map                                  # the shared MAP (stage options differ)
+    with highest_precision():
         res = run_ard_stage(cfg, d, b, theta, log=lambda *a: None)
         pred = predict_ard(res.posterior, b.prob, d.ds_test)
         pred1 = predict_ard(res.posterior._replace(kappa=1.0), b.prob, d.ds_test)
@@ -342,8 +354,10 @@ def test_ard_stage_reuses_cached_full_statistics(monkeypatch):
     # the two hold-out subsets (P_fit and the transfer exponent's P_fit2) only: the full refit reused the cache
     assert n_recompute == 3 and len(calls) == 2
     # the ~1e-15 summation-order difference, through cond(S) ~ 1e13, moves the evidence by ~1e-7 nats
-    # and L-BFGS's stopping point along flat directions by ~1e-4: equal to the optimiser's resolution
-    assert abs(v_got - v_ref) < 1e-6 and np.abs(g_got - g_ref).max() < 1e-5
+    # (~1e-5 nats, 1e-8 relative, since the isolated-atom E0 rule of e0='lsq'/'prefit' changed the
+    # fixture's energy offsets) and L-BFGS's stopping point along flat directions by ~1e-4: equal to
+    # the optimiser's resolution
+    assert abs(v_got - v_ref) < 3e-5 and np.abs(g_got - g_ref).max() < 3e-5
     assert got.report["kappa_subset"] == pytest.approx(ref.report["kappa_subset"], rel=1e-12)   # subset stage unchanged
     assert got.posterior.kappa == pytest.approx(ref.posterior.kappa, rel=1e-4)   # full-posterior s^2: refit resolution
     assert got.report["logev_full"] == pytest.approx(ref.report["logev_full"], abs=1e-5)
@@ -393,17 +407,12 @@ def test_predict_ard_traces_the_chunked_rows_once(tiny_linear_problem, monkeypat
     np.testing.assert_allclose(np.asarray(got.F_var), np.asarray(ref.F_var), rtol=1e-12)
 
 
-def test_ard_stage_kappa_is_refit_for_the_full_posterior(monkeypatch):
+def test_ard_stage_kappa_is_refit_for_the_full_posterior(monkeypatch, ard_map):
     """kappa calibrates the FULL-refit posterior, not the subset one: the held-out atoms' errors
     come from the subset model (honest), their s^2 from the full posterior (the one served).  The
     misspecification that kappa absorbs does not shrink on the refit while s^2 does, so a subset
     kappa would be ~sqrt(n_train / n_fit) too small (bench365: measured 1.105, predicted 1.118)."""
-    from conftest import FIXTURE_DIR
     from ace_jax.fit import ard
-    from ace_jax.fit.pipeline import load_fit_data
-    from ace_jax.fit.pipeline.mapfit import fit_map
-    from ace_jax.fit.pipeline.objective import make_objective
-    from ace_jax.fit.pipeline.problem import build_problem
     calls = []
     orig = ard.kappa_closed_form
 
@@ -414,10 +423,8 @@ def test_ard_stage_kappa_is_refit_for_the_full_posterior(monkeypatch):
 
     monkeypatch.setattr(ard, "kappa_closed_form", spy)
     cfg = _pipe_cfg().validate()
-    d = load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz"))
-    b = build_problem(cfg, d)
+    d, b, theta = ard_map                                  # the shared MAP (stage options differ)
     with highest_precision():
-        theta = fit_map(cfg, d, b, make_objective(cfg, d, b), log=lambda *a: None).theta
         res = ard.run_ard_stage(cfg, d, b, theta, log=lambda *a: None)
     assert len(calls) == 2
     (e2_sub, s2_sub, k_sub), (e2_full, s2_full, k_full) = calls
@@ -485,24 +492,17 @@ def test_posterior_schema2_roundtrip_and_schema1_loads(ard_setup, tmp_path):
         assert np.all(post.forces_std(zero) == 0.0)                                  # no neighbours: 0, not NaN
 
 
-def test_ard_stage_sandwich_variance_and_lam_rule(monkeypatch):
+def test_ard_stage_sandwich_variance_and_lam_rule(monkeypatch, ard_map):
     """The legacy ("mixed") ablation arm of #18: Q from the full refit's training residuals, the scalar
     lam by the kappa refit rule (held-out subset errors against the served posterior's own-cluster-out
     sandwich variance).  Schema 3 serves lam_rms[g], so F_var no longer scales with the scalar lam."""
-    from conftest import FIXTURE_DIR
     from ace_jax.fit import ard
-    from ace_jax.fit.pipeline import load_fit_data
-    from ace_jax.fit.pipeline.mapfit import fit_map
-    from ace_jax.fit.pipeline.objective import make_objective
-    from ace_jax.fit.pipeline.problem import build_problem
     calls = []
     orig = ard.kappa_closed_form
     monkeypatch.setattr(ard, "kappa_closed_form", lambda e2, s2: calls.append((np.array(e2), np.array(s2))) or orig(e2, s2))
     cfg = _pipe_cfg(ard_variance="sandwich", _shape_variant="legacy", _score_source="mixed").validate()
-    d = load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz"))
-    b = build_problem(cfg, d)
+    d, b, theta = ard_map                                  # the shared MAP (stage options differ)
     with highest_precision():
-        theta = fit_map(cfg, d, b, make_objective(cfg, d, b), log=lambda *a: None).theta
         res = ard.run_ard_stage(cfg, d, b, theta, log=lambda *a: None)
         pred = ard.predict_ard(res.posterior, b.prob, d.ds_test)
         pred1 = ard.predict_ard(res.posterior._replace(lam=1.0), b.prob, d.ds_test)
@@ -517,19 +517,12 @@ def test_ard_stage_sandwich_variance_and_lam_rule(monkeypatch):
     np.testing.assert_allclose(pred.F_var, pred1.F_var, rtol=1e-12)
 
 
-def test_ard_stage_sandwich_in_sequential_mode():
-    from conftest import FIXTURE_DIR
+def test_ard_stage_sandwich_in_sequential_mode(ard_map):
     from ace_jax.fit import ard
-    from ace_jax.fit.pipeline import load_fit_data
-    from ace_jax.fit.pipeline.mapfit import fit_map
-    from ace_jax.fit.pipeline.objective import make_objective
-    from ace_jax.fit.pipeline.problem import build_problem
     theta_ls = lambda t: [float(getattr(t, f"log_sigma_{q}")) for q in "EFV"]
     cfg = _pipe_cfg(ard_variance="sandwich", ard_mode="sequential", _shape_variant="legacy").validate()
-    d = load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz"))
-    b = build_problem(cfg, d)
+    d, b, theta = ard_map                                  # the shared MAP (stage options differ)
     with highest_precision():
-        theta = fit_map(cfg, d, b, make_objective(cfg, d, b), log=lambda *a: None).theta
         res = ard.run_ard_stage(cfg, d, b, theta, log=lambda *a: None)
         post = res.posterior
         # rebuild the stage's full-refit evidence: its sequential sigmas are the fixed linear MAP ones
@@ -569,27 +562,20 @@ def test_sandwich_scores_columns_follow_config_order(ard_setup):
         np.testing.assert_allclose(G3[:, c], G1[:, c], rtol=1e-10, atol=1e-14 * np.abs(G1).max())
 
 
-def test_ard_stage_lam_leaves_out_each_held_out_atoms_own_cluster(monkeypatch):
+def test_ard_stage_lam_leaves_out_each_held_out_atoms_own_cluster(monkeypatch, ard_map):
     """Legacy "mixed" ablation: lam is fitted against m^2 WITHOUT the held-out atom's own configuration's cluster: a genuinely
     new configuration has no such term, so keeping it biases lam low.  Brute force: per held-out
     config, zero its own column of Q (column idx[j] of the train order), recompute m^2 from that
     config's force rows alone, and lam = kappa_closed_form(e2, m2)."""
-    from conftest import FIXTURE_DIR
     from ace_jax.fit import ard
     from ace_jax.fit.data import build_dataset
-    from ace_jax.fit.pipeline import load_fit_data
-    from ace_jax.fit.pipeline.mapfit import fit_map
-    from ace_jax.fit.pipeline.objective import make_objective
-    from ace_jax.fit.pipeline.problem import build_problem
     from ace_jax.fit.rows import linear_rows
     calls = []
     orig = ard.kappa_closed_form
     monkeypatch.setattr(ard, "kappa_closed_form", lambda e2, s2: calls.append(np.array(e2)) or orig(e2, s2))
     cfg = _pipe_cfg(ard_variance="sandwich", _shape_variant="legacy", _score_source="mixed").validate()
-    d = load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz"))
-    b = build_problem(cfg, d)
+    d, b, theta = ard_map                                  # the shared MAP (stage options differ)
     with highest_precision():
-        theta = fit_map(cfg, d, b, make_objective(cfg, d, b), log=lambda *a: None).theta
         res = ard.run_ard_stage(cfg, d, b, theta, log=lambda *a: None)
         post, rep = res.posterior, res.report
         L = b.prob.cfg.len_basis
@@ -597,8 +583,11 @@ def test_ard_stage_lam_leaves_out_each_held_out_atoms_own_cluster(monkeypatch):
         nval = len(idx)
         Q, dinv = np.asarray(post.Q), np.asarray(post.dinv)
         m2_loo, m2_all = [], []
-        for j in range(nval):                               # one config at a time: no batch bookkeeping
-            bt = jax.tree.map(lambda a: a[0], build_dataset([d.train[idx[j]]], d.meta, d.E0, 1))
+        # one config per batch, but ONE dataset: shared padding caps, so linear_rows compiles
+        # once (a dataset per config gave each its own n_cap/k_cap and a compile each)
+        dsv = build_dataset([d.train[idx[j]] for j in range(nval)], d.meta, d.E0, 1)
+        for j in range(nval):
+            bt = jax.tree.map(lambda a: a[j], dsv)
             F = np.asarray(linear_rows(b.prob.model, b.prob.cfg, bt)[0].F)[np.asarray(bt.w_F) > 0]
             F = F[np.abs(F).reshape(len(F), -1).max(1) > 0]                       # the stage's `ok` atoms
             Ft = F.reshape(-1, L) * dinv[None, :]

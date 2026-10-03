@@ -203,7 +203,7 @@ come from a block bootstrap over cells, with only 2 cells per dislocation family
 `--uq ard` now serves `forces_std` (lam_g x an exact centred jackknife shape), `forces_cov`, `forces_q`
 (conformal radius), `forces_group` and `forces_support`. `aj calibrate` re-scales the per-group scales on a
 labelled set. This programme measures them on the v3 big cells and ablates the ingredients. The acceptance
-targets are in `docs/specs/2026-09-30-conformal-force-sigma-design.md`.
+targets are in `docs/dev/specs/2026-09-30-conformal-force-sigma-design.md`.
 
 **Results: [`results/2026-10-03_rev2_acceptance.md`](results/2026-10-03_rev2_acceptance.md).** The default
 (aniso shape + transfer exponent) passes every target:

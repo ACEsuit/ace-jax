@@ -329,6 +329,9 @@ class PopsRidgePath:
         """rows: "device" (each pass re-evaluates the ACE rows), "host" (evaluate
         them once into host RAM: stats.HostRows), "auto" (host when it fits in
         half the memory limit), or a HostRows built with this path's qs."""
+        if getattr(prob.cfg, "e0_cols", False):
+            raise ValueError("POPS builds on the readout's smoothness prior: fit with the least-squares E0 "
+                             "fixed (e0='prefit'; the pipeline does this for uq='pops')")
         M_ind = prob.ind.XM.shape[0]
         if M_ind > 0:
             raise ValueError(f"paper-faithful POPS is the linear-arm (M=0) predictive only; "
@@ -601,6 +604,16 @@ def predict_fixed(theta, prob, ds_train, ds_test, dtc=True, deriv_dtc=True,
         return _run_predict_pops_paper(theta, prob, ds_train, ds_test, pops_form,
                                        pops_ridge, leverage_pct, path=pops_path, stats=stats)
     raise ValueError(f"uq must be 'blr' or 'pops', got {uq!r}")
+
+
+def predict_readout(prob, mu, ds_test):
+    """Predictions of a fixed readout mu (no posterior: zero variance), linear arm."""
+    def batch(mu, b):
+        r = linear_rows_bounded(prob.model, prob.cfg, b)       # peak memory bounded for big cells
+        Em, Fm, Vm = r.E @ mu, (r.F @ mu).reshape(-1, 3), (r.V @ mu).reshape(-1, 6)
+        return Em, jnp.zeros_like(Em), Fm, jnp.zeros_like(Fm), Vm, jnp.zeros_like(Vm)
+    f, mu = jax.jit(batch), jnp.asarray(mu)
+    return _pack([f(mu, jax.tree.map(lambda a: a[i], ds_test)) for i in range(ds_test.n_batches)], prob, ds_test)
 
 
 def predict_mixture(draws, prob, ds_train, ds_test, deriv_dtc=True, stats=None):

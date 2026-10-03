@@ -1,5 +1,5 @@
 # Exporter: fit a model in Julia, write it to npz for the JAX
-# evaluator.  See docs/plans/jax_ace_port_plan.md.
+# evaluator.  See docs/dev/plans/jax_ace_port_plan.md.
 #
 #   julia --project=julia julia/export_model.jl [output.npz] [ace1|ace]
 #

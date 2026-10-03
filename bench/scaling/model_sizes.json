@@ -2,6 +2,8 @@
  "Cantor/large": {
   "acejax-ace": 1651,
   "acejax-pace": 1998,
+  "acepotentials": 1651,
+  "acepotentials-trim": 1651,
   "mlpace": 1998
  },
  "Cantor/medium": {
@@ -9,16 +11,22 @@
   "acejax-ace-analytic": 447,
   "acejax-ace-learned": 447,
   "acejax-pace": 496,
+  "acepotentials": 447,
+  "acepotentials-trim": 447,
   "mlpace": 496
  },
  "Cantor/small": {
   "acejax-ace": 126,
   "acejax-pace": 96,
+  "acepotentials": 126,
+  "acepotentials-trim": 126,
   "mlpace": 96
  },
  "SiGe/large": {
   "acejax-ace": 1482,
   "acejax-pace": 1684,
+  "acepotentials": 1482,
+  "acepotentials-trim": 1482,
   "mlpace": 1684
  },
  "SiGe/medium": {
@@ -26,11 +34,15 @@
   "acejax-ace-analytic": 469,
   "acejax-ace-learned": 469,
   "acejax-pace": 499,
+  "acepotentials": 469,
+  "acepotentials-trim": 469,
   "mlpace": 499
  },
  "SiGe/small": {
   "acejax-ace": 101,
   "acejax-pace": 100,
+  "acepotentials": 101,
+  "acepotentials-trim": 101,
   "mlpace": 100
  }
 }

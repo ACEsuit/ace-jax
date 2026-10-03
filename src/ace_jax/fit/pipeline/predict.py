@@ -7,7 +7,8 @@ import numpy as np
 
 from ..data import build_dataset
 from ..metrics import summarise
-from ..predict import POPS_MEAN, PopsRidgePath, predict_fixed, predict_mixture, select_pops_ridge
+from ..report import format_rmse_table, rmse_by_type
+from ..predict import POPS_MEAN, PopsRidgePath, predict_fixed, predict_mixture, predict_readout, select_pops_ridge
 
 VOIGT = [(0, 0), (1, 1), (2, 2), (1, 2), (0, 2), (0, 1)]
 
@@ -83,7 +84,7 @@ def _pops_setup(cfg, d, b, stats, theta, log):
     return out
 
 
-def predict_splits(cfg, d, b, stats, theta, draws, log=print, ard=None):
+def predict_splits(cfg, d, b, stats, theta, draws, log=print, ard=None, readout=None):
     prob, arrays, metrics, tm = b.prob, {}, {}, {}
     pops = {}
     if cfg.uq == "pops":
@@ -102,6 +103,8 @@ def predict_splits(cfg, d, b, stats, theta, draws, log=print, ard=None):
             if cfg.uq == "ard":
                 from ..ard import predict_ard
                 pred = predict_ard(ard.posterior, prob, ds)
+            elif readout is not None:        # solver lstsq: the fixed readout, zero variance
+                pred = predict_readout(prob, readout, ds)
             elif cfg.uq == "pops":
                 pred = predict_fixed(theta, prob, d.ds_train, ds, deriv_dtc=cfg.deriv_dtc, uq="pops",
                                      pops_form=cfg.pops_posterior, leverage_pct=cfg.pops_leverage_pct,
@@ -135,6 +138,8 @@ def predict_splits(cfg, d, b, stats, theta, draws, log=print, ard=None):
             log(f"{split} {rung} " + str({q: {k: round(x, 4) for k, x in v.items()
                                               if k in ("rmse", "crps", "coverage", "rho", "rms_z")}
                                           for q, v in m.items()}))
+            log(format_rmse_table(rmse_by_type([c.config_type for c in cfgs], nat, E, Em, F, Fm, V, Vm),
+                                  f"{split} ({rung})"))
     if "path" in pops:           # the path holds L x L arrays; keep only the mean it predicted with
         pops["mean"] = np.asarray(pops.pop("path").c_star)
     return Preds(arrays, metrics, pops, tm)

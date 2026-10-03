@@ -3,7 +3,7 @@
 The bridge test needs a working `ace_jax_coupling` (the `basis` extra's
 compiled library; `conftest.require_coupling_lib`) and runs in-process; the
 spec port test is pure Python and always runs.  See basis/coupling.py and
-docs/coupling-etshim-spec.md.
+docs/dev/coupling-etshim-spec.md.
 """
 from conftest import require_coupling_lib
 

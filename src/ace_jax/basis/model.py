@@ -92,7 +92,7 @@ def nnll_from_coupling(A2B, aa_sig, tol=1e-12):
 
 
 def build_model(elements, order, totaldegree, *, wL=1.5, rcut=5.5, r0=None,
-                rin=0.0, radial_mode="glorot_normal", pair_mode="onehot",
+                rin=0.0, radial_mode="onehot", pair_mode="onehot",
                 seed=0, with_gamma=True, edge_a_kind="gather",
                 coupling_cache=True, coupling_cache_dir=None, n_q_factor=1.5):
     """Author a frozen `ace_model`-family model in memory.
@@ -279,6 +279,10 @@ def build_embedding_model(elements, order, totaldegree, embedding=None, *, rows=
         if embedding is None:
             raise ValueError("pass an embedding (path, (Z, table) or 'identity') or explicit rows")
         if isinstance(embedding, str) and embedding == "identity":
+            if d < S:      # a PCA of the one-hot table has no preferred directions: some element gets nothing
+                raise ValueError(f"embedding='identity' is the one-hot element table, which needs one channel per "
+                                 f"element: d_max={d_max} gives {d} channels for {S} elements. Use d_max=None "
+                                 "(lossless), or compress a table of element properties instead")
             Z, table, provenance = zs, np.eye(S), {"checkpoint": "identity"}
         elif isinstance(embedding, (str, bytes)) or hasattr(embedding, "__fspath__"):
             Z, table, provenance = read_embedding(embedding)
@@ -372,7 +376,7 @@ class BasisSpec:
     maxl: int | None = None
     d_max: int | None = None
     reduction: str = "pca"
-    radial_mode: str = "glorot_normal"
+    radial_mode: str = "onehot"
     pair_mode: str = "onehot"
     embedding: str | None = None
     no_gamma: bool = False

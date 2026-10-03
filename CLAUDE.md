@@ -19,13 +19,14 @@ parity CI jobs. User docs: `README.md`. Agent-facing usage guide:
 - `src/ace_jax/fit/`: linear and GP fitting.
   - `data.py` reads extxyz into `Config`s and padded `Dataset` batches.
   - The core modules are `rows`, `stats`, `objective`, `ladder`, `predict`, `pops`, `solve`, `hostcache`.
-  - `pipeline/` is the `aj fit` pipeline.
-  - `radial_learn.py` and `varpro.py` learn radials.
+  - `pipeline/` is the `aj fit` pipeline (`radials.py`: the `--learn-radial` stage).
+  - `radial_learn.py` learns radials. `varpro.py` (the FS-density VarPro driver), `density.py` and `block_lbfgs.py` are research tools kept from PR #22 and exercised only by their tests; no pipeline path uses them.
 - `src/ace_jax/basis/`: building an ACE basis (a frozen, zero-readout model).
   - `spec.py`, `coupling.py`: the EquivariantTensors shim via the compiled `ace-jax-coupling` library; `BasisUnavailable` when it cannot run.
   - `model.py`: `BasisSpec`, `build_basis` (the one entry point: `aj basis`, `aj fit`, Python), over `build_model` / `build_embedding_model`; `Basis` (NamedTuple), `basis_r0`.
   - `prior.py`: the smoothness prior. `export.py`: `save_npz`.
 - `src/ace_jax/export/lammps.py`: `export_lammps`, a lammps-jax bundle.
+- `src/ace_jax/tutorials/`: tutorial support, not stable API. `labels.py` serves shipped MACE labels from content-keyed extxyz caches (live MACE only on a miss, if mace-torch is installed); `structures.py` builds the school tutorials' structures deterministically; `campaign.py` (reference-basis descriptors, seeded Langevin MD pools, novelty scores) and `curation.py` (the MD-select-label-refit loop of tutorial 7, shared with `make_labels.py e3`).
 - `src/ace_jax/cli.py`: `ace-jax`/`aj` with `basis`, `fit` and `eval`. `aj fit` builds the basis from `--order/--max-degree` (flags shared with `aj basis` via `add_basis_args`) or takes `--model`; `_parse` layers a `--config fit.yaml` under the command line.
 - `src/ace_jax/runfile.py`: `fit.yaml` read/validate/merge (`defaults_for`, `explicit_dests`) and the resolved `out/fit.yaml` writer (`resolved`, `write`).
 - `tests/`: the pytest suite. `conftest.py` holds the shared fixtures and helpers.
@@ -37,11 +38,11 @@ parity CI jobs. User docs: `README.md`. Agent-facing usage guide:
 - `coupling/`: the `ace-jax-coupling` distribution.
   - `julia/src/ETCouple.jl`: the C ABI over EquivariantTensors (fork rev pinned in `julia/Project.toml` `[sources]`); `julia/build.jl` compiles it with JuliaC (`--trim=safe`, Julia 1.13); `julia/reference/` is the unpatched-upstream oracle.
   - `python/`: the ctypes package `ace_jax_coupling` and its wheel hook; `tools/`: bundle check, trace-based pruning, clean-env wheel test.
-  - Spec: `docs/coupling-etshim-spec.md`.
+  - Spec: `docs/dev/coupling-etshim-spec.md`.
 - `julia/`: ACEpotentials reference generators.
 - `pace_ref/`: ML-PACE and python-ace reference tooling.
-- `spike/`: throwaway experiments, not linted.
-- `docs/`: specs, plans and results. `docs/benchmarks.md` has the performance numbers.
+- `docs/`: `docs/user/` is the site; `docs/dev/` holds specs, plans, benchmark reports and research results (`docs/dev/benchmarks.md` has the performance numbers). Removed research prototypes: tag `archive/research-prototypes` (`bench/ARCHIVED.md`).
+  - `docs/user/`: the user documentation site (MkDocs Material, `mkdocs.yml`, toolchain pinned in `docs/requirements.txt`; build with `uv pip install -r docs/requirements.txt && uv run --no-sync mkdocs build --strict`). `docs/mkdocs_hooks.py` renders the CLI reference from `aj --help`; `docs/snippets/` holds shared fragments (the install line). Tutorials are marimo notebooks in `docs/user/tutorials/notebooks/` with PEP 723 headers; keep each a few CPU minutes (tutorial 5's basis sweep, ~10 min, and tutorial 7's three campaigns, ~5 min, are the exceptions). The MLIP-school-derived tutorials (`school_*.py`) read labels from `docs/user/tutorials/data/school/` (MIT, MACE-MPA-0 / MP-0b3; regenerate with its `make_labels.py` in a separate mace-torch environment), falling back to GitHub `main` when not run from a checkout; the docs build never needs torch. Their pages (`tutorials/<page>.md` + `<page>_files/`, gitignored) are rendered by `docs/build_tutorials.py`, run from the mkdocs hook: it runs each notebook (`marimo export ipynb --include-outputs`) only when its source changed, maps marimo callouts/accordions/controls to admonitions/details/notes, and fails the build if a cell raises; `ACEJAX_DOCS_NOTEBOOKS=skip` writes placeholders for a quick local build. The run command and molab link live in each notebook's first cell. `tests/test_no_backend_names.py` also covers `docs/user` (except `licence.md`).
 
 ## Setup and tests
 
@@ -54,7 +55,7 @@ uv run ruff check                     # lint; `uv run pre-commit run --all-files
 ```
 
 - **Extras:**
-  - `gp`: numpyro, optax, blackjax. The dev group mirrors it.
+  - `gp`: blackjax, for the pathfinder rung only (numpyro and optax are core: the MAP and the optimisers). The dev group includes it. `tests/test_core_deps.py` fails if a module-level import is not a core dependency: import optional packages inside the function that needs them.
   - (no extra for building bases: `ace-jax-coupling` from PyPI is a core dependency on Linux x86_64/aarch64, macOS arm64 and Windows x64; no Julia.) To try a locally built library without reinstalling, point the installed package at it with `ACEJAX_COUPLING_LIB=<bundle>/lib/libetcouple.<so|dylib>` (Windows: `<bundle>/bin/libetcouple.dll`), or `uv pip install` its wheel and use `uv run --no-sync`. Building the library: `coupling/RELEASING.md` and `coupling-wheels.yml` (JuliaC on Julia 1.13.1, then `coupling/tools/prune_bundle.py` and `check_bundle.py`).
   - `cuda`.
   - `fast-neighbours`: matscipy-neighbours, a C++ source build.
@@ -64,6 +65,7 @@ uv run ruff check                     # lint; `uv run pre-commit run --all-files
   - `fast-neighbours` (matscipy-neighbours): `test_calc_jit`'s native `neighbour_matrix` test and `test_efv`'s dense-vs-neighbour_matrix check; without it the skin list and dense layout also take their fallback neighbour path.
   - `pyace` (python-ace, in its own venv under `pace_ref/`).
   - `sphericart`, `psutil`.
+  - `marimo` (a docs dependency): `test_tutorial_notebooks`, run by the `docs` CI job instead.
   - PACE fixtures.
 - **Test environment variables:**
   - `ACEJAX_REQUIRE_FIXTURES=1` turns a missing-fixture skip into a failure. CI parity jobs set it.
@@ -73,10 +75,11 @@ uv run ruff check                     # lint; `uv run pre-commit run --all-files
   - `ACEJAX_CLI_FULL=1` runs the full CLI test.
 - `tests/conftest.py` sets `XLA_FLAGS=--xla_force_host_platform_device_count=2`, for the sharding tests, and a persistent compile cache in `.jax_cache/`. Both must be set before any jax import, so conftest must not import jax at the top level.
 - **CI** (`.github/workflows/`):
-  - `test.yml`: 3 pytest-split shards on Python 3.12, a smoke job on 3.11 and 3.13, the `slow` ladder, and `optional-deps` (matscipy-neighbours plus lammps-jax pinned to a commit, with `ACEJAX_REQUIRE_OPTIONAL=1`).
+  - `test.yml`: 3 shards on Python 3.12 (whole files each: `ACEJAX_SHARD=i/n`, `conftest.shard_files`), a smoke job on 3.11, 3.13 and 3.14, the `slow` ladder, and `optional-deps` (matscipy-neighbours plus lammps-jax pinned to a commit, with `ACEJAX_REQUIRE_OPTIONAL=1`).
   - `lint.yml`.
+  - `docs.yml`: strict site build and a headless run of each tutorial notebook (path-gated); on `main` it deploys to GitHub Pages.
   - Path-gated parity jobs: `julia-parity` (ACEfit rows/QR), `coupling-wheels` (builds + clean-env-tests the coupling wheels, then parity vs ACEpotentials), `prior-parity`, `pace-parity` (ML-PACE C++ + python-ace).
-  - pytest-split balances on `.test_durations`. Refresh it with `pytest --store-durations` when adding slow tests.
+  - The shards balance whole files on `.test_durations` (per-test splitting scattered modules, and each shard repaid their fixtures and first compiles). Refresh it from the `durations` artifact of a recent main run, or `pytest --store-durations`, when adding slow tests. Every shard restores all three groups' JAX caches, so a file moving between shards stays warm. The JAX caches are cleared per module (conftest `_release_jax_memory`), not per test: share expensive fits as module/session fixtures.
 
 ## Conventions
 

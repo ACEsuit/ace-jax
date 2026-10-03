@@ -13,19 +13,37 @@ class FitResult(NamedTuple):
     config: object; data: object; built: object; theta: object
     map: object; rungs: object; preds: object; timings: dict
     ard: object = None                   # ARDResult when uq == "ard" (last: positional use unaffected)
+    radial: object = None                # RadialResult when cfg.learn_radial (last: positional use unaffected)
+    readout: object = None               # the least-squares readout when cfg.solver == "lstsq"
 
 
 def fit(cfg, data, log=print, on_stage=None):
     """Run the pipeline.  on_stage(name, payload), if given, is called as each
-    expensive stage finishes ("data" -> FitData, "map" -> MapFit, "rungs" -> Rungs,
+    expensive stage finishes ("data" -> FitData, "radial" -> RadialResult when
+    cfg.learn_radial, "map" -> MapFit, "rungs" -> Rungs,
     "ard" -> ARDResult and "model" -> the ARD-mean model.npz arrays when uq == "ard"),
     so a driver can write those results before a later stage (e.g. POPS or
     prediction running out of memory) can lose them."""
     T0 = time.time()
     cfg.validate()
+    if cfg.e0 == "lsq" and not cfg.joint_e0:
+        log("e0 lsq: ARD and POPS fit with the least-squares E0 fixed (as e0='prefit')")
     stage = on_stage or (lambda name, payload: None)
     stage("data", data)
+    radial = None
+    if cfg.learn_radial:
+        from .radials import learn_radials
+        data, radial = learn_radials(cfg, data, log=log)
+        stage("radial", radial)
     b = build_problem(cfg, data)
+    if cfg.solver == "lstsq":       # no objective, no MAP: one weighted least-squares solve
+        from .lstsq import fit_lstsq
+        with highest_precision():
+            mf, rg, readout = fit_lstsq(cfg, data, b, log=log)
+            stage("map", mf)
+            pr = predict_splits(cfg, data, b, None, mf.theta, rg.draws, log=log, readout=readout)
+        tm = {**b.timings, **mf.timings, **pr.timings, "total": time.time() - T0}
+        return FitResult(cfg, data, b, mf.theta, mf, rg, pr, tm, None, radial, readout)
     with highest_precision():
         obj = make_objective(cfg, data, b)
         mf = fit_map(cfg, data, b, obj, log=log)
@@ -60,5 +78,7 @@ def fit(cfg, data, log=print, on_stage=None):
     tm = {**b.timings, **obj.timings, **mf.timings, **rg.timings, **pr.timings}
     if ard is not None:
         tm["ard"] = ard.report["seconds"]
+    if radial is not None:
+        tm["radial"] = radial.seconds
     tm["total"] = time.time() - T0
-    return FitResult(cfg, data, b, mf.theta, mf, rg, pr, tm, ard)
+    return FitResult(cfg, data, b, mf.theta, mf, rg, pr, tm, ard, radial)

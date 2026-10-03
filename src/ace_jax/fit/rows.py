@@ -43,6 +43,17 @@ def _voigt(T, rij):
     return jnp.stack(cols, axis=-1)
 
 
+def _e0_columns(E, node_z, node_mask, node_cfg, cfg):
+    """With cfg.e0_cols, the last NZ energy columns are the configs' atom counts per species
+    (an E0 shift is a constant site energy: it moves no force or virial row)."""
+    if not getattr(cfg, "e0_cols", False):
+        return E
+    C, L0 = E.shape[0], cfg.len_readout
+    onehot = jax.nn.one_hot(node_z, cfg.NZ) * node_mask[:, None]
+    counts = jax.ops.segment_sum(onehot, node_cfg, num_segments=C + 1)[:C]
+    return E.at[:, L0:].set(counts)
+
+
 def linear_rows(model, cfg, batch):
     Ncap, K = batch.nbr.shape
     C = batch.y_E.shape[0]          # configs per batch is a property of the batch, not of cfg
@@ -65,7 +76,7 @@ def linear_rows(model, cfg, batch):
         F = _place(F, -jnp.swapaxes(dEdr, 1, 2), z, cfg)
         Vz = seg(_voigt(Jz, rij), edge_cfg, C + 1)                   # (C+1, D, 6)
         V = _place(V, jnp.swapaxes(Vz, 1, 2), z, cfg)
-    E = seg(E, batch.node_cfg, C + 1)[:C]
+    E = _e0_columns(seg(E, batch.node_cfg, C + 1)[:C], batch.node_z, batch.node_mask, batch.node_cfg, cfg)
     return Rows(E, F, V[:C]), X, J
 
 
@@ -301,7 +312,8 @@ def _rows_scan(model, cfg, batch, node_chunk, with_X=False, proj=None, resid=Non
         init["res"] = (jnp.zeros((Np, M)), jnp.zeros((Np, 3, M)), jnp.zeros((C + 1, 6, M)))
     acc = jax.lax.fori_loop(0, n_chunks, body, init)
     Enodes, F, V = acc["lin"]
-    lin = Rows(seg(Enodes, node_cfg, C + 1)[:C], F[:Ncap], V[:C])
+    E = _e0_columns(seg(Enodes, node_cfg, C + 1)[:C], batch.node_z, batch.node_mask, batch.node_cfg, cfg)
+    lin = Rows(E, F[:Ncap], V[:C])
     res = None
     if resid is not None:
         ER, FR, VR = acc["res"]
@@ -423,4 +435,3 @@ def batch_rows_parts(theta, spec, model, ind, cfg, batch, with_X=False, with_JU0
 def batch_rows(theta, spec, model, ind, cfg, batch):
     lin, res, _, _ = batch_rows_parts(theta, spec, model, ind, cfg, batch)
     return _cat_rows(lin, res)
-

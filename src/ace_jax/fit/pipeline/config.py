@@ -9,6 +9,7 @@ class FitConfig:
     arm: str = "gp"                      # "linear" (M = 0) | "gp"
     # data
     energy_key: str = "energy"; force_key: str = "forces"; virial_key: str = "virial"
+    stress_key: str | None = None        # ASE/MACE stress label: virial = -stress * volume when no virial
     ntrain: int = 800; ntest: int = 200; test_start: int | None = None
     seed: int = 0; batch: int = 4
     batch_pack: str = "auto"             # "auto" | "on" | "off": size-aware batching (fit.data.build_dataset)
@@ -18,7 +19,8 @@ class FitConfig:
     route: dict | None = None            # ParamSet route overrides
     baseline: str | None = None          # dimer_mean.npz (mu_0 subtracted, added back)
     base_npz: str | None = None          # precomputed per-config mu_0 offsets
-    e0: str = "lsq"                      # "lsq" (fit on train energies) | "model" (z["E0"])
+    e0: str = "lsq"                      # "lsq" (fit jointly with the readout) | "prefit" (least squares on
+                                         # the composition, then fixed) | "model" (z["E0"])
     # GP
     m_per_species: int = 100
     kernel: str = "cosine"; bump: bool = True
@@ -41,6 +43,7 @@ class FitConfig:
     init: dict | None = None             # Hypers field -> value
     # rungs
     rungs: tuple = ("map",)
+    solver: str = "evidence"             # "evidence" | "lstsq" (plain weighted least squares, no prior: teaching)
     laplace: str = "fd"                  # "fd" (run_laplace_fd) | "svi" (run_laplace)
     n_draws: int = 64
     vi_steps: int = 1000
@@ -53,7 +56,7 @@ class FitConfig:
     ard_val_frac: float = 0.2            # train hold-out for the force-variance scale (lam, kappa)
     ard_cond_max: float = 1e14           # prior floor: cond(S) <= ard_cond_max
     ard_laplace: bool = False            # Laplace diagnostic of the hyperparameters (ard.json)
-    # schema-3 force sigma (docs/specs/2026-09-30-conformal-force-sigma-design.md, rev 2)
+    # schema-3 force sigma (docs/dev/specs/2026-09-30-conformal-force-sigma-design.md, rev 2)
     ard_force_shape: str = "aniso"       # "iso" | "aniso" (Mahalanobis scores, forces_q_mahal)
     ard_shape_eps: float = 1e-3          # aniso ridge: V + eps tr(V)/3 I
     ard_coverage: float = 0.9            # 1 - alpha of the per-group conformal quantile q_g
@@ -76,6 +79,18 @@ class FitConfig:
                               1e-12, 1e-13, 1e-14)
     pops_val_frac: float = 0.2; pops_env_nf: int = 2000
     pops_rows: str = "auto"              # "auto" | "host" (rows cached in host RAM) | "device" (re-evaluated)
+    learn_radial: bool = False           # learn the tensor radials (radial_learn.fit_radial) before the fit
+    radial_n_q: int = 12                 # polynomial span after to_analytic widening
+    radial_steps: int = 40               # L-BFGS steps per roughness weight
+    radial_lam_grid: tuple = (0.0, 1e-2) # relative roughness weights; the gate picks among them and init
+    radial_val_frac: float = 0.2         # train hold-out for the gate
+
+    @property
+    def joint_e0(self):
+        """e0='lsq' fits E0 jointly (E0 columns in the linear model, a wide prior around the
+        pre-fit value). ARD and POPS keep the pre-fit E0: they build their own readout prior.
+        (A learned-radial fit learns its radials with the pre-fit E0, then fits jointly.)"""
+        return self.e0 == "lsq" and self.uq == "blr"
 
     @property
     def pack_mode(self):
@@ -87,6 +102,8 @@ class FitConfig:
     def validate(self):
         if self.batch_pack not in ("auto", "on", "off"):
             raise ValueError(f"batch_pack must be 'auto', 'on' or 'off', got {self.batch_pack!r}")
+        if self.e0 not in ("lsq", "prefit", "model"):
+            raise ValueError(f"e0 must be 'lsq', 'prefit' or 'model', got {self.e0!r}")
         if self.arm not in ("linear", "gp"):
             raise ValueError(f"arm must be 'linear' or 'gp', got {self.arm!r}")
         if self.uq == "pops" and self.arm != "linear":
@@ -140,6 +157,24 @@ class FitConfig:
             raise ValueError(f"pops_rows must be 'auto', 'host' or 'device', got {self.pops_rows!r}")
         if self.predict_stats not in ("cached", "recompute"):
             raise ValueError(f"predict_stats must be 'cached' or 'recompute', got {self.predict_stats!r}")
+        if self.solver not in ("evidence", "lstsq"):
+            raise ValueError(f"solver must be 'evidence' or 'lstsq', got {self.solver!r}")
+        if self.solver == "lstsq" and (self.arm != "linear" or self.uq != "blr" or self.learn_radial
+                                       or tuple(self.rungs) != ("map",)):
+            raise ValueError("solver lstsq is the plain linear least-squares fit: it needs arm linear, uq blr, "
+                             "rungs ('map',) and no learn_radial")
         if self.fix_rho is not None and self.opt != "lbfgs":
             raise ValueError("fix_rho is implemented for opt lbfgs only")
+        if self.learn_radial:
+            if self.baseline is not None or self.base_npz is not None:
+                raise ValueError("learn_radial with a baseline: the fit saves no model file, so the "
+                                 "learned radials would be lost")
+            if not 0.0 < self.radial_val_frac < 1.0:
+                raise ValueError(f"radial_val_frac must be in (0, 1), got {self.radial_val_frac}")
+            if self.radial_n_q < 1:
+                raise ValueError(f"radial_n_q must be >= 1, got {self.radial_n_q}")
+            if self.radial_steps < 0:
+                raise ValueError(f"radial_steps must be >= 0, got {self.radial_steps}")
+            if not len(self.radial_lam_grid):
+                raise ValueError("radial_lam_grid must hold at least one roughness weight")
         return self

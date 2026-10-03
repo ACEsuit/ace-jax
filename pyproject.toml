@@ -4,12 +4,12 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ace-jax"
-version = "0.1.0"
+version = "0.1.1"
 description = "Fit and evaluate ACE interatomic potentials in Python/JAX"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
-requires-python = ">=3.11,<3.14"
+requires-python = ">=3.11"
 authors = [{ name = "ACEsuit contributors" }]
 keywords = ["ace", "interatomic-potential", "jax", "molecular-dynamics", "chemistry", "gaussian-process"]
 classifiers = [
@@ -19,6 +19,7 @@ classifiers = [
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "Topic :: Scientific/Engineering :: Chemistry",
   "Topic :: Scientific/Engineering :: Physics",
 ]
@@ -32,15 +33,22 @@ dependencies = [
   "pyyaml>=6",          # .yace (PACE) model files
   # training/eval data reader (libAtoms C parser, binary wheels): labels come back
   # as written, independent of ASE's calculator-key handling (see fit/xyz.py)
-  "extxyz>=0.4.5",
+  "extxyz>=0.4.6",
+  # aj eval writes its extxyz output through the ASE plugin (create_calc=False keeps every
+  # label under its own name); 0.1.2 / extxyz 0.4.6 fixed a transposed Lattice on write
+  "ase-extxyz>=0.1.2",
+  # the fit pipeline: the theta-MAP (numpyro SVI) and the L-BFGS / Adam optimisers (optax)
+  "numpyro>=0.16",
+  "optax>=0.2",
   # coupling tables for new basis shapes (a compiled library, nothing to install
   # besides the wheel); platform wheels only -- elsewhere fit from an existing .npz
   "ace-jax-coupling==0.2.0; (sys_platform == 'linux' and (platform_machine == 'x86_64' or platform_machine == 'aarch64')) or (sys_platform == 'darwin' and platform_machine == 'arm64') or (sys_platform == 'win32' and platform_machine == 'AMD64')",
 ]
 
 [project.optional-dependencies]
-# Hybrid ACE+GP fitting with the marginalised-hyperparameter UQ ladder.
-gp = ["numpyro>=0.16", "optax>=0.2", "blackjax>=1.6"]
+# The pathfinder rung of the hyperparameter UQ ladder (everything else in `aj fit`,
+# GP arm included, needs only the core dependencies).
+gp = ["blackjax>=1.6"]
 cuda = ["jax[cuda12]>=0.10.1"]
 # Fast neighbour lists; ace-jax uses them when present and falls back to ASE's
 # list otherwise, so they are intentionally NOT core deps.  matscipy-neighbours
@@ -57,7 +65,10 @@ aj = "ace_jax.cli:main"          # short alias
 
 [project.urls]
 Homepage = "https://github.com/ACEsuit/ace-jax"
+Documentation = "https://acesuit.github.io/ace-jax/"
+Source = "https://github.com/ACEsuit/ace-jax"
 Issues = "https://github.com/ACEsuit/ace-jax/issues"
+Changelog = "https://github.com/ACEsuit/ace-jax/blob/main/CHANGELOG.md"
 
 [dependency-groups]
 # mirrors the `gp` extra so a plain `uv run pytest` can run the GP ladder tests
@@ -88,7 +99,7 @@ markers = [
 line-length = 110
 target-version = "py311"                       # requires-python >= 3.11
 # Not linted: reference generators / experiments that are not part of the package.
-extend-exclude = ["spike", "pace_ref", "julia", "docs", "fixtures", ".worktrees"]
+extend-exclude = ["pace_ref", "julia", "docs", "fixtures", ".worktrees"]
 
 [tool.ruff.lint]
 # pycodestyle, pyflakes, bugbear, pyupgrade; NPY guards NumPy-2 removals.
@@ -119,8 +130,6 @@ ignore = [
 "bench/learn_radial/rmse.py" = ["B023"]
 "bench/learn_radial/rmse_npz.py" = ["B023"]
 "bench/learn_radial/tradeoff.py" = ["B023"]
-"bench/pace_modal/run.py" = ["B023"]
-"bench/pace_profile.py" = ["B023"]
 "src/ace_jax/fit/hostcache.py" = ["B023"]
 "src/ace_jax/fit/pipeline/predict.py" = ["B023"]
 "src/ace_jax/fit/predict.py" = ["B023"]

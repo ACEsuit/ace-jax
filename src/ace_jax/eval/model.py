@@ -331,7 +331,7 @@ class ACEModel(EdgeSiteModel):
         through the per-node map A -> AA -> B with one jacrev per node.  A
         naive vmap-VJP over basis rows is 6-8x slower on CPU and 7.5-13x (f64) /
         12-23x (f32) on GPU
-        (docs/plans/jax_ace_port_plan.md, decision gate 3).  Padded edges
+        (docs/dev/plans/jax_ace_port_plan.md, decision gate 3).  Padded edges
         (mask False) contribute zero rows.
         """
         self._check_basis()
@@ -452,7 +452,7 @@ class ACEModel(EdgeSiteModel):
         n_rnl x n_Y outer product of which only the l(R) = l(Y) diagonal blocks
         are read; no column select follows.  Pooled feature-major and handed to
         the product basis transposed: without that, XLA's layout for the
-        order-3/4 product adjoint regresses (docs/ace-vs-pace-gap.md 4.1)."""
+        order-3/4 product adjoint regresses (docs/dev/ace-vs-pace-gap.md 4.1)."""
         n, K = mask.shape
         E = n * K
         r3, zi_, zj_, mk = rij.reshape(E, 3), zi.reshape(E), zj.reshape(E), mask.reshape(E)
@@ -512,7 +512,7 @@ def fold_readout(model):
 
 # ------------------------------------------------------------------ lean evaluation form
 # Exact, static data transforms of a loaded (folded) model that drop per-edge work
-# the energy never reads (docs/ace-vs-pace-gap.md sections 1, 3.2 and 4.1).  They
+# the energy never reads (docs/dev/ace-vs-pace-gap.md sections 1, 3.2 and 4.1).  They
 # are for evaluation only -- ACECalculator and export_lammps apply `lean` -- and
 # never for fitting, which needs the full basis: `load` returns the full model.
 import dataclasses as _dc  # noqa: E402
@@ -738,13 +738,13 @@ def lean(model, spline_tol=AUTO, spline_intervals=None):
     """The evaluation form of a folded ACEModel: `prune_columns`, `fold_pair`
     and the l-blocked dense A (`block_dense`).  Exact to roundoff in E, F and the
     virial for a splined model; 1.1-3.3x faster forces on the benchmark models
-    (docs/ace-vs-pace-gap.md section 8).
+    (docs/dev/ace-vs-pace-gap.md section 8).
 
     Splining (`splinify.spline_plan`, the one decision point):
     spline_tol="auto" (default) splines an analytic tensor radial only when it
     was learned (`radial_learned`), at `DEFAULT_SPLINE_TOL` = 1e-10; the pair
-    radial is never learned and stays as is.  Julia `ace_model` exports and
-    Python-authored models are analytic but not learned, so they stay exact.
+    radial is never learned and stays as is.  ACEpotentials `ace_model` exports and
+    built bases are analytic but not learned, so they stay exact.
     A float spline_tol opts every analytic radial in (e.g. 1e-10 for an old
     learned-radial file without the flag); None never splines.  A splined
     radial gets the spline gather and, when each R_nl column belongs to one
@@ -752,7 +752,7 @@ def lean(model, spline_tol=AUTO, spline_intervals=None):
     species-compact blocks.  That step is an approximation, not roundoff: at
     1e-10 the lean energies agree with the full model to up to ~1e-9 relative
     and forces to up to ~2.3e-8 of max|F| on the benchmark models
-    (docs/learned-radial-splining.md).  spline_intervals pins the grid (default: the smallest `splinify.BUCKETS`
+    (docs/dev/learned-radial-splining.md).  spline_intervals pins the grid (default: the smallest `splinify.BUCKETS`
     bucket meeting tol, so radial swaps keep the compiled step).  The
     conversion is cached on the radial's content (`splinify`), so a re-lean
     after a readout-only change does not re-spline.  For evaluation and

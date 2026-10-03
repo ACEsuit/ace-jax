@@ -321,3 +321,132 @@ def test_fitting_a_yace_model_raises_a_clear_error():
     cfg = FitConfig(model=str(fix / "gesi_sbessel.yace"), arm="linear")
     with pytest.raises(ValueError, match=r"\.yace.*cannot be fitted"):
         load_fit_data(cfg, train=str(pathlib.Path(__file__).parent.parent / "fixtures" / "si_tiny_train.xyz"))
+
+
+def _cfgs(spec):
+    """Synthetic Configs: (numbers, energy, cell edge or None for non-periodic)."""
+    from ace_jax.fit.data import Config
+    out = []
+    for nums, E, a in spec:
+        n = len(nums)
+        pos = np.c_[np.arange(n) * 2.3, np.zeros(n), np.zeros(n)]
+        cell, pbc = (np.zeros((3, 3)), np.zeros(3, bool)) if a is None else (np.eye(3) * a, np.ones(3, bool))
+        out.append(Config(pos, np.asarray(nums), cell, pbc, E, None, None, 1.0, 1.0, 1.0))
+    return out
+
+
+def test_lsq_e0_takes_isolated_atom_energies_exactly():
+    """An isolated atom's energy is E0 alone: least squares must not compromise it
+    against the bulk.  Species without one are fitted to the rest, after subtracting."""
+    from ace_jax.fit.pipeline.data import lsq_e0
+    cs = _cfgs([([6], -5.0, None),                 # isolated C, non-periodic
+                ([14], -2.0, 12.0),                # isolated Si: periodic, but no image within rcut
+                ([14, 14], -11.0, 4.6), ([14, 6], -14.0, 4.6), ([14, 14, 6], -20.0, 6.9)])
+    E0 = lsq_e0(cs, [14, 6], rcut=5.5, log=lambda *a: None)
+    assert E0.tolist() == [-2.0, -5.0]
+    # one isolated species only: C fixed, Si by least squares on the residual
+    cs2 = [c for c in cs if not (len(c.numbers) == 1 and c.numbers[0] == 14)]
+    E0 = lsq_e0(cs2, [14, 6], rcut=5.5, log=lambda *a: None)
+    counts = np.array([[2.0], [1.0], [2.0]]); r = np.array([-11.0, -14.0 + 5.0, -20.0 + 5.0])
+    assert E0[1] == -5.0 and np.isclose(E0[0], np.linalg.lstsq(counts, r, rcond=None)[0][0])
+
+
+def test_lsq_e0_single_atom_with_close_images_is_not_isolated():
+    from ace_jax.fit.pipeline.data import lsq_e0
+    cs = _cfgs([([14], -4.0, 2.7), ([14, 14], -9.0, 4.6)])     # 2.7 A cell: images within rcut -> bulk
+    E0 = lsq_e0(cs, [14], rcut=5.5, log=lambda *a: None)
+    assert np.isclose(E0[0], np.linalg.lstsq([[1.0], [2.0]], [-4.0, -9.0], rcond=None)[0][0])
+
+
+def test_fit_reports_the_log_evidence_for_both_optimisers():
+    from conftest import FIXTURE_DIR
+    from ace_jax.fit.hypers import to_array
+    from ace_jax.fit.pipeline import FitConfig, fit, load_fit_data
+    from ace_jax.fit.pipeline.objective import make_objective
+    from ace_jax.fit.pipeline.problem import build_problem
+    base = dict(model=str(FIXTURE_DIR / "si_fitted.npz"), energy_key="dft_energy", force_key="dft_force",
+                virial_key="dft_virial", ntrain=16, ntest=6, batch=4, r0=2.35, arm="linear",
+                m_per_species=0, rungs=("map",), map_steps=5, predict_train=False)
+    for opt in ("adam", "lbfgs"):
+        cfg = FitConfig(opt=opt, **base)
+        d = load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz"), log=lambda *a: None)
+        res = fit(cfg, d, log=lambda *a: None)
+        b = build_problem(cfg, d)
+        ref = float(make_objective(cfg, d, b).lik(to_array(res.theta)))
+        assert np.isfinite(res.map.log_evidence) and abs(res.map.log_evidence - ref) <= 1e-8 * abs(ref), opt
+
+
+def test_fix_rho_pins_a_numeric_rho_under_lbfgs():
+    # fit_map once wrote the pin into a read-only view of the prior mean
+    from conftest import FIXTURE_DIR
+    from ace_jax.fit.pipeline import FitConfig, fit, load_fit_data
+    cfg = FitConfig(model=str(FIXTURE_DIR / "si_fitted.npz"), energy_key="dft_energy", force_key="dft_force",
+                    virial_key="dft_virial", ntrain=16, ntest=6, batch=4, r0=2.35, arm="linear",
+                    m_per_species=0, rungs=("map",), opt="lbfgs", map_steps=5, predict_train=False, fix_rho="0.5")
+    res = fit(cfg, load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz"), log=lambda *a: None),
+              log=lambda *a: None)
+    assert abs(np.exp(res.theta.log_rho) - 0.5) < 1e-12
+
+
+def _lstsq_fit(predict_train=False):
+    from conftest import FIXTURE_DIR
+    from ace_jax.fit.pipeline import FitConfig, fit, load_fit_data
+    cfg = FitConfig(model=str(FIXTURE_DIR / "si_fitted.npz"), energy_key="dft_energy", force_key="dft_force",
+                    virial_key="dft_virial", ntrain=16, ntest=6, batch=4, r0=2.35, arm="linear",
+                    m_per_species=0, rungs=("map",), predict_train=predict_train, solver="lstsq")
+    d = load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz"), log=lambda *a: None)
+    return cfg, d, fit(cfg, d, log=lambda *a: None)
+
+
+def test_lstsq_solver_is_plain_weighted_least_squares():
+    from ace_jax.eval import highest_precision
+    from ace_jax.fit.pipeline.export import linear_model_arrays
+    from ace_jax.fit.pipeline.lstsq import lstsq_theta
+    from ace_jax.fit.pipeline.problem import build_problem
+    from ace_jax.fit.solve import stacked_design
+    cfg, d, res = _lstsq_fit()
+    b = build_problem(cfg, d)
+    with highest_precision():
+        Phi, y = stacked_design(b.prob, d.ds_train, lstsq_theta(b.prob))
+    Dt, L0 = Phi.shape[1], b.prob.cfg.len_readout
+    keep = np.r_[np.arange(Phi.shape[0] - Dt), Phi.shape[0] - Dt + np.arange(L0, Dt)]   # data + the E0 prior rows
+    ref = np.linalg.lstsq(np.asarray(Phi)[keep], np.asarray(y)[keep], rcond=None)[0]    # no readout prior
+    np.testing.assert_allclose(res.readout, ref, rtol=1e-8, atol=1e-10 * np.abs(ref).max())
+    arr = linear_model_arrays(res)                       # the saved model carries that readout
+    n = b.prob.cfg.n_B
+    np.testing.assert_array_equal(arr["WB"][:, 0], np.asarray(res.readout)[:n])
+    assert res.map.log_evidence is None and set(res.rungs.draws) == {"lstsq"}
+    assert abs(arr["E0"][0] - d.E0[0]) < 3.0          # E0 keeps its 1 eV prior: no arbitrary offset
+
+
+def test_lstsq_predictions_use_the_readout_with_zero_variance():
+    from ace_jax.fit.rows import linear_rows
+    import jax
+    cfg, d, res = _lstsq_fit(predict_train=True)
+    a = res.preds.arrays["train/lstsq"]
+    assert np.all(a["E_var"] == 0) and np.all(a["F_var"] == 0)
+    # energies straight from the design rows and the readout (+ E0), per config
+    Em = []
+    for i in range(d.ds_train.n_batches):
+        bt = jax.tree.map(lambda x, i=i: x[i], d.ds_train)
+        r = linear_rows(res.built.prob.model, res.built.prob.cfg, bt)[0]
+        E0 = np.asarray(res.built.prob.model.E0)[np.asarray(bt.node_z)] * np.asarray(bt.node_mask)
+        e0c = np.array([E0[np.asarray(bt.node_cfg) == c].sum() for c in range(r.E.shape[0])])
+        Em.append((np.asarray(r.E @ res.readout) + e0c)[np.asarray(bt.cfg_mask) > 0])
+    np.testing.assert_allclose(a["E_mean"], np.concatenate(Em), rtol=1e-9, atol=1e-9)
+    assert np.isfinite(res.preds.metrics["test/lstsq"]["E"]["rmse"])
+
+
+def test_lstsq_solver_validation():
+    from ace_jax.fit.pipeline import FitConfig
+    with pytest.raises(ValueError, match="solver"):
+        FitConfig(model="m.npz", solver="qr").validate()
+    with pytest.raises(ValueError, match="lstsq"):
+        FitConfig(model="m.npz", solver="lstsq", arm="gp").validate()
+
+
+def test_summarise_without_any_uq_still_reports_the_error():
+    from ace_jax.fit.metrics import summarise
+    m = summarise([1.0, 2.0], [1.5, 2.0], [0.0, 0.0])     # a fixed readout: no predictive variance
+    assert abs(m["rmse"] - np.sqrt(0.125)) < 1e-15 and abs(m["mae"] - 0.25) < 1e-15
+    assert np.isnan(m["coverage"]) and m["n_dropped"] == 2

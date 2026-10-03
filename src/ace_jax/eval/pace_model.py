@@ -4,12 +4,12 @@ Mirrors ML-PACE `ACECTildeEvaluator::compute_atom` (ace_evaluator.cpp:146-536,
 lammps-user-pace @ 99aa6e6) with analytic radials instead of its spline tables.
 Neighbour species enter PACE's A as an explicit channel; here edges stay narrow
 and are pooled by (node, neighbour species) -- segment id node*NZ + zj -- so per-
-edge work does not grow with the number of elements.  See docs/pace-yace-spec.md.
+edge work does not grow with the number of elements.  See docs/dev/pace-yace-spec.md.
 
 A is built pool-first (`EdgeSiteModel.pool_first_dense` / `pool_first_sparse`):
 g_k (x) Y_lm is pooled per (node, neighbour species) and crad applied per node
 afterwards, so the per-edge R_nl is never formed; A comes out feature-major
-(C * n_a, n) for the product basis.  docs/pace-performance-gap.md sections 7-8.
+(C * n_a, n) for the product basis.  docs/dev/pace-performance-gap.md sections 7-8.
 """
 import equinox as eqx
 import jax
@@ -25,7 +25,7 @@ from .pace_radial import cutoff_func_poly, fexp, fexp_shifted_scaled, pace_zbl, 
 
 # SBessel g_k by one sin per k and a constant matrix (`pace_radial._sbessel_mm`)
 # from this nradbase up, else the rotation recurrence.  Measured on an A100 in
-# float64 (docs/ace-vs-pace-gap.md 4.3): -6% (8192 atoms) and -21% (131072) at
+# float64 (docs/dev/ace-vs-pace-gap.md 4.3): -6% (8192 atoms) and -21% (131072) at
 # nradbase 13, -6% at 15, -1% at 11, but +11-19% slower at 4-9.
 SBESSEL_MATMUL_MIN_K = 12
 

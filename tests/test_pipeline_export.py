@@ -95,18 +95,18 @@ def test_write_outputs_saves_the_model_by_default(linear_res, tmp_path):
 
 def test_cli_eval_reads_a_gp_model(gp_res, tmp_path):
     """`ace-jax eval` on a gp_model.npz goes through GPCalculator and adds the
-    predictive energy_std column."""
-    import csv
+    predictive ace_energy_std and ace_forces_std."""
     from ase.io import write
     from ace_jax.cli import main
     from ace_jax.fit.pipeline import save_model
+    from ace_jax.fit.xyz import read_extxyz
     path = save_model(gp_res, tmp_path)
     data = tmp_path / "te.xyz"
     write(data, [_atoms(c) for c in gp_res.data.test])
-    assert main(["eval", "--model", str(path), "--data", str(data), "--forces",
-                 "--out", str(tmp_path / "p.csv")]) == 0
-    rows = list(csv.DictReader(open(tmp_path / "p.csv")))
-    assert len(rows) == len(gp_res.data.test) and float(rows[0]["energy_std"]) > 0
+    assert main(["eval", "--model", str(path), "--data", str(data), "--out", str(tmp_path / "p.xyz")]) == 0
+    rows = read_extxyz(tmp_path / "p.xyz")
+    assert len(rows) == len(gp_res.data.test) and float(rows[0].info["ace_energy_std"]) > 0
+    assert rows[0].arrays["ace_forces_std"].shape == (len(rows[0].numbers), 3)
 
 
 def test_cli_eval_no_deriv_dtc_reaches_the_gp_calculator(gp_res, tmp_path, monkeypatch):
@@ -127,8 +127,8 @@ def test_cli_eval_no_deriv_dtc_reaches_the_gp_calculator(gp_res, tmp_path, monke
     data = tmp_path / "te.xyz"
     write(data, [_atoms(c) for c in gp_res.data.test])
     for flag, want in ((["--no-deriv-dtc"], False), ([], True)):
-        assert main(["eval", "--model", str(path), "--data", str(data), "--forces",
-                     "--out", str(tmp_path / "p.csv")] + flag) == 0
+        assert main(["eval", "--model", str(path), "--data", str(data),
+                     "--out", str(tmp_path / "p.xyz")] + flag) == 0
         assert seen[-1] is want
 
 
@@ -178,13 +178,13 @@ def test_gpcalculator_evaluates_an_isolated_atom(gp_res, tmp_path, monkeypatch):
 def test_cli_eval_gp_model_on_the_si_fixture(gp_res, tmp_path):
     """`aj eval` of a GP model over si_tiny_train.xyz, whose first frame is an
     isolated atom."""
-    import csv
     from ace_jax.cli import main
     from ace_jax.fit.pipeline import save_model
+    from ace_jax.fit.xyz import read_extxyz
     path = save_model(gp_res, tmp_path)
     assert main(["eval", "--model", str(path), "--data", str(XYZ), "--energy-key", "dft_energy",
-                 "--force-key", "dft_force", "--virial-key", "dft_virial", "--forces",
-                 "--out", str(tmp_path / "p.csv")]) == 0
-    rows = list(csv.DictReader(open(tmp_path / "p.csv")))
-    assert len(rows) == 53 and rows[0]["natoms"] == "1"
-    assert all(np.isfinite(float(r["energy"])) and np.isfinite(float(r["energy_std"])) for r in rows)
+                 "--force-key", "dft_force", "--virial-key", "dft_virial",
+                 "--out", str(tmp_path / "p.xyz")]) == 0
+    rows = read_extxyz(tmp_path / "p.xyz")
+    assert len(rows) == 53 and len(rows[0].numbers) == 1
+    assert all(np.isfinite(r.info["ace_energy"]) and np.isfinite(r.info["ace_energy_std"]) for r in rows)

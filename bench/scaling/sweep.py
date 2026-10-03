@@ -9,7 +9,7 @@ import pathlib
 import subprocess
 import sys
 
-from scaling.models import LEARNED_CODES, planned_models
+from scaling.models import ACEPOT_CODES, LEARNED_CODES, planned_models
 from scaling.structures import n_ladder
 
 HOSTS = {
@@ -18,7 +18,15 @@ HOSTS = {
     "moriarty-cpu": {"device": "cpu", "n_max": 32768, "ranks": 16, "rss_cap_gb": 48},
     "moriarty-gpu": {"device": "gpu", "n_max": 1 << 20, "ranks": 1, "rss_cap_gb": 48},
     "modal-a100": {"device": "gpu", "n_max": 1 << 21, "ranks": 1},
+    # Sulis A100 (envs/sulis.sh): one GPU of a shared node, --mem=120G per job
+    "sulis-a100": {"device": "gpu", "n_max": 1 << 21, "ranks": 1, "rss_cap_gb": 100},
     "local-cpu": {"device": "cpu", "n_max": 8192, "ranks": 8},
+    # i9-14900K (hybrid): P-cores = logical CPUs 0-15 (8 cores x 2 HT), E-cores 16-31.
+    # P-cores only: the sweep pins itself (and so every case) to `cpus`, so a
+    # standalone case gets 16 threads; LAMMPS runs one MPI rank per P-core,
+    # bound by `mpirun_args` (rank i -> core i = CPUs 2i, 2i+1; Open MPI 4.1)
+    "lestrade-cpu": {"device": "cpu", "n_max": 32768, "ranks": 8, "rss_cap_gb": 48,
+                     "cpus": "0-15", "mpirun_args": ["--bind-to", "core", "--map-by", "core"]},
 }
 MODES = {"acejax-pace": ("standalone", "lammps"), "acejax-ace": ("standalone", "lammps"),
          "mlpace": ("lammps",), "mace": ("standalone", "lammps")}
@@ -27,12 +35,35 @@ DTYPES = {"acejax-pace": ("float64", "float32"), "acejax-ace": ("float64", "floa
 # the learned-radial lines are linear ACE models: the ACE line's modes and dtypes
 for _code in LEARNED_CODES:
     MODES[_code], DTYPES[_code] = MODES["acejax-ace"], DTYPES["acejax-ace"]
+# the ACEpotentials.jl lines: direct Julia evaluation, and the PR 309 trim library
+# in LAMMPS (pair_style ace, MPI ranks like mlpace); float64 only
+MODES.update({"acepotentials": ("standalone",), "acepotentials-trim": ("lammps",)})
+DTYPES.update({"acepotentials": ("float64",), "acepotentials-trim": ("float64",)})
 # lammps-jax ships only pair_style jax/kk, which needs KOKKOS built with CUDA
 GPU_ONLY_LAMMPS = ("acejax-pace", "acejax-ace", *LEARNED_CODES)
+# CPU-only for now: no GPU path for either ACEpotentials.jl line
+CPU_ONLY = ACEPOT_CODES
 
 
 def lammps_supported(code, device):
     return device == "gpu" or code not in GPU_ONLY_LAMMPS
+
+
+def cpu_only(code):
+    return code in CPU_ONLY
+
+
+def lammps_binary(code, env):
+    """The LAMMPS wrapper a code runs in: lammps-jax's tree for ace-jax, the
+    PR 309 plugin's (`lmp_ace`) for the trim library, else the main tree."""
+    if code.startswith("acejax"):
+        return env.get("lmp_jax", env["lmp"])
+    if code == "acepotentials-trim":
+        if "lmp_ace" not in env:
+            raise KeyError("lmp_ace: the host env json has no LAMMPS wrapper for acepotentials-trim "
+                           "(envs/moriarty.sh env_json)")
+        return env["lmp_ace"]
+    return env["lmp"]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -57,6 +88,8 @@ def cases(host):
     h = HOSTS[host]
     out = []
     for m in planned_models():
+        if cpu_only(m["code"]) and h["device"] != "cpu":
+            continue
         for mode in MODES[m["code"]]:
             if mode == "lammps" and not lammps_supported(m["code"], h["device"]):
                 continue
@@ -91,6 +124,46 @@ def seed_for(results_text, snapshot_dir, code):
 
 def _line(c):
     return (c.model, c.mode, c.dtype, c.device)
+
+
+def cpu_list(spec):
+    """{0, 1, ...} from a taskset-style list: "0-15", "0-3,8,10-11"."""
+    out = set()
+    for part in str(spec).split(","):
+        a, _, b = part.strip().partition("-")
+        out.update(range(int(a), int(b or a) + 1))
+    return out
+
+
+def cpu_label(cpus):
+    """The taskset-style list of a CPU set: {0, ..., 15} -> "0-15"."""
+    out, run = [], []
+    for c in sorted(cpus):
+        if run and c == run[-1] + 1:
+            run.append(c)
+            continue
+        if run:
+            out.append(f"{run[0]}-{run[-1]}" if len(run) > 1 else str(run[0]))
+        run = [c]
+    if run:
+        out.append(f"{run[0]}-{run[-1]}" if len(run) > 1 else str(run[0]))
+    return ",".join(out)
+
+
+def pin_affinity(host):
+    """Pin this process -- and so the gate and every case, which inherit it --
+    to the host's `cpus` (lestrade: the P-cores).  Returns the affinity now in
+    force, as a label, or None where the platform has no sched_setaffinity."""
+    want = HOSTS[host].get("cpus")
+    if not hasattr(os, "sched_setaffinity"):
+        return None
+    if want:
+        os.sched_setaffinity(0, cpu_list(want))
+    return cpu_label(os.sched_getaffinity(0))
+
+
+def affinity():
+    return cpu_label(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else None
 
 
 _DEVICE_NAMES = {}
@@ -146,6 +219,8 @@ def run_sweep(host, runner, results_path, select=lambda c: True):
             row["retried"], row["first_error"] = True, first
         row["_key"], row["_line"], row["host"] = list(c.key()), list(_line(c)), host
         row["device_name"] = device_name(c.device)
+        if c.device == "cpu":                   # which CPUs it could use (lestrade: P-cores)
+            row["cpu_affinity"] = affinity()
         with results_path.open("a") as f:
             f.write(json.dumps(row) + "\n")
         if row["status"] != "ok":
@@ -162,13 +237,21 @@ def child_env(env, mode=None, cpus=None):
     here = pathlib.Path(__file__).parent
     out = {**os.environ, **env.get("os_env", {}),
            "PYTHONPATH": env.get("pythonpath", str(here.parent)),
-           **({"PJRT_PLUGIN": env["pjrt"]} if env.get("pjrt") else {})}   # run_lammps reads it
-    # torch reads MKL_NUM_THREADS as well (moriarty's login env pins both to 1)
+           **({"PJRT_PLUGIN": env["pjrt"]} if env.get("pjrt") else {}),   # run_lammps reads it
+           **({"ACE_PLUGIN": env["ace_plugin"]} if env.get("ace_plugin") else {})}
+    # the ACEpotentials.jl drivers (scaling/acepot.py) read these
+    for k, v in (("julia", "ACEPOT_JULIA"), ("julia_depot", "ACEPOT_JULIA_DEPOT"),
+                 ("julia_project", "ACEPOT_JULIA_PROJECT")):
+        if env.get(k):
+            out[v] = env[k]
+    # torch reads MKL_NUM_THREADS as well (moriarty's login env pins both to 1);
+    # Julia (the acepotentials line) JULIA_NUM_THREADS
+    threads = ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "JULIA_NUM_THREADS")
     if mode == "standalone" and cpus:
-        for v in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS"):
+        for v in threads:
             out[v] = str(cpus)
     elif mode == "lammps":
-        for v in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS"):
+        for v in threads:
             out[v] = "1"
     return out
 
@@ -213,7 +296,7 @@ def subprocess_runner(host, env):
             cmd = [sys.executable, str(here / "run_standalone.py"), c.model, str(c.n_atoms),
                    c.dtype, c.device]
         else:
-            lmp = env.get("lmp_jax", env["lmp"]) if c.code.startswith("acejax") else env["lmp"]
+            lmp = lammps_binary(c.code, env)
             cmd = [sys.executable, str(here / "run_lammps.py"), c.model, str(c.n_atoms), c.dtype,
                    c.device, lmp, str(c.ranks), f"/tmp/bench_{host}_{c.n_atoms}"]
         cpus = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else os.cpu_count()
@@ -222,6 +305,8 @@ def subprocess_runner(host, env):
             e["BENCH_PREV"] = json.dumps({"step_s": prev["step_s"], "n_atoms": prev["n_atoms"],
                                           "layout": prev.get("layout"),
                                           "matrix_overflow": prev.get("matrix_overflow")})
+        if c.mode == "lammps" and HOSTS[host].get("mpirun_args"):    # run_lammps reads it
+            e["BENCH_MPIRUN_ARGS"] = json.dumps(HOSTS[host]["mpirun_args"])
         cap = HOSTS[host].get("rss_cap_gb")
         rc, out, err, peak, capped = run_capped(cmd, e, timeout=7200,
                                                 cap_bytes=cap and cap * 2**30)
@@ -319,6 +404,7 @@ def main(argv=None):
         return
     env = json.loads(_env_path(a.host).read_text())
     env.setdefault("pythonpath", str(here.parent))
+    pin_affinity(a.host)
     if a.gate_rows:                                    # child side of gate_in_subprocess
         from scaling import parity
         for r in parity.gate(a.host, env):
@@ -341,6 +427,8 @@ def main(argv=None):
                 [r["bundle_layout"]] if r.get("bundle_layout") else [])
             r["_line"] = ["parity"]
             r["device_name"] = device_name(r.get("device", "gpu"))
+            if r.get("device") == "cpu":
+                r["cpu_affinity"] = affinity()
         if top_up:
             new = [r for r in new if json.dumps(r["_key"]) not in have]
         with res.open("a") as f:

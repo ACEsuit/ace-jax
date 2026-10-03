@@ -39,16 +39,18 @@ def rms_z(y, mu, sigma):
 
 
 def summarise(y, mu, sigma):
-    """All metrics over the observations with sigma > 0: an exact prediction
+    """All metrics over the observations with sigma > 0 (with none, rmse and mae over all): an exact prediction
     with zero predictive variance (e.g. an isolated-atom reference, whose
     feature rows are all zero) carries no UQ information and would give
     z = 0/0.  `n_dropped` reports how many were excluded."""
     y, mu, sigma = (np.asarray(a, float) for a in (y, mu, sigma))
     keep = np.isfinite(sigma) & (sigma > 0)
     n_total = keep.size
-    if not keep.any():
+    if not keep.any():           # no UQ at all (e.g. solver lstsq): the errors, no calibration
         nan = float("nan")
-        return {"rmse": nan, "mae": nan, "crps": nan, "coverage": nan, "rho": nan,
+        ok = np.isfinite(y) & np.isfinite(mu)
+        err = (rmse(y[ok], mu[ok]), mae(y[ok], mu[ok])) if ok.any() else (nan, nan)
+        return {"rmse": err[0], "mae": err[1], "crps": nan, "coverage": nan, "rho": nan,
                 "sigma_ratio": nan, "rms_z": nan, "median_sigma": nan, "n_dropped": int(n_total)}
     y, mu, sigma = y[keep], mu[keep], sigma[keep]
     err = np.abs(y - mu)

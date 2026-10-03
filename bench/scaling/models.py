@@ -4,6 +4,7 @@
     python bench/scaling/models.py ace    # Julia: linear ACE .npz x3 x2
     python bench/scaling/models.py mace   # MACE-MP-0b2 s/m/l + MH-1 + Symmetrix .json per system
     python bench/scaling/models.py ace-learned  # learned-radial proxies of ace_*_medium.npz (after `ace`)
+    python bench/scaling/models.py acepotentials-trim [SiGe/small ...]  # PR 309 trim .so per ace npz
     python bench/scaling/models.py sizes  # basis functions per central element -> model_sizes.json
 Model files live in bench/scaling/models/ (git-ignored); manifest.json records
 provenance (builder, parameters, n_params, sha256).
@@ -53,7 +54,7 @@ MACE_SIZES = tuple(MACE)
 # multi-head models: the head both the standalone calculator and the Symmetrix
 # export evaluate (materials PBE -- the one that fits SiGe and Cantor)
 MACE_HEAD = {"mh1": "omat_pbe"}
-# Learned-radial proxy lines (docs/learned-radial-splining.md): the medium
+# Learned-radial proxy lines (docs/dev/learned-radial-splining.md): the medium
 # linear ACE model on the analytic radial branch with perturbed weights
 # (`build_ace_learned`), evaluated as deployed -- spline_tol="auto", which
 # splines a learned radial at 1e-10 -- and kept analytic (None, exact).  Medium
@@ -61,6 +62,32 @@ MACE_HEAD = {"mh1": "omat_pbe"}
 LEARNED_CODES = {"acejax-ace-learned": "auto", "acejax-ace-analytic": None}   # code -> spline_tol
 LEARNED_SIZES = ("medium",)
 LEARNED_RECIPE = {"n_q": 12, "scale": 0.1, "seed": 0}
+
+
+# ACEpotentials.jl lines (CPU only): `acepotentials` evaluates the ace_*.npz model
+# directly in Julia, `acepotentials-trim` its PR 309 `juliac --trim` library in LAMMPS
+# (`pair_style ace`).  Both rebuild the npz model in bench/scaling/julia/ and assert it
+# identical to the npz; the trim library compiles its exact twin (unsplined radials,
+# same basis and weights), so it differs from acejax-ace by ace1_model's spline error.
+ACEPOT_CODES = ("acepotentials", "acepotentials-trim")
+TRIM_DIR = DIR / "trim"
+
+
+def ace1_spec(system, size):
+    """The ace1_model arguments of the ace_<system>_<size>.npz model (what
+    `build_ace` passes julia/export_model.jl), for the Julia drivers."""
+    order, deg = ACE_DEG_BY_SYSTEM[system][size]
+    return {"npz": str(DIR / f"ace_{system}_{size}.npz"), "elements": ELEMENTS[system],
+            "order": order, "totaldegree": deg, "rcut": 5.0, "r0": ACE_R0.get(system)}
+
+
+def trim_path(system, size):
+    return TRIM_DIR / f"libace_{system}_{size}.so"
+
+
+def is_linear_ace(code):
+    """The codes that evaluate a linear ACE .npz (n_B basis functions per element)."""
+    return code.startswith("acejax-ace") or code in ACEPOT_CODES
 
 
 def learned_path(system, size="medium"):
@@ -78,6 +105,13 @@ def planned_models():
                           size=size, path=str(yace), elements=els),
                      dict(name=f"acejax-ace/{system}/{size}", code="acejax-ace", system=system,
                           size=size, path=str(DIR / f"ace_{system}_{size}.npz"), elements=els),
+                     dict(name=f"acepotentials/{system}/{size}", code="acepotentials", system=system,
+                          size=size, path=str(DIR / f"ace_{system}_{size}.npz"), elements=els,
+                          ace1=ace1_spec(system, size)),
+                     dict(name=f"acepotentials-trim/{system}/{size}", code="acepotentials-trim",
+                          system=system, size=size, path=str(DIR / f"ace_{system}_{size}.npz"),
+                          elements=els, ace1=ace1_spec(system, size),
+                          trim_lib=str(trim_path(system, size))),
                      ]
             if size in LEARNED_SIZES:
                 rows += [dict(name=f"{code}/{system}/{size}", code=code, system=system, size=size,
@@ -216,6 +250,68 @@ def build_ace_learned():
                 "sha256": _sha(dst)}})
 
 
+def _cpu_model():
+    try:
+        return next((l.split(":", 1)[1].strip() for l in open("/proc/cpuinfo")
+                     if l.startswith("model name")), "")
+    except OSError:
+        import platform
+        return platform.processor() or platform.machine()
+
+
+def build_acepotentials_trim(only=None):
+    """The `acepotentials-trim` libraries: one `juliac --trim=safe` .so per ace npz
+    (`julia/build_trim.jl`: rebuild + identity, exact twin, ETACE and exported-module
+    gates, export, juliac), under models/trim/.  `only`: ["SiGe/small", ...].
+    Idempotent: a library is rebuilt only when it is missing, its npz changed, the
+    pinned Julia env changed, it was built on another CPU model (juliac targets the
+    build host's CPU unless JULIA_CPU_TARGET says otherwise), or FORCE=1.  An
+    export the exporter refuses is recorded `unsupported` (its rows then are too).
+    Julia comes from ACEPOT_JULIA / ACEPOT_JULIA_DEPOT / ACEPOT_JULIA_PROJECT."""
+    from scaling import acepot
+    from scaling.structures import supercell
+    cfg = acepot.julia_config()
+    env_sha = _sha(pathlib.Path(cfg["project"]) / "Manifest.toml") \
+        if (pathlib.Path(cfg["project"]) / "Manifest.toml").exists() else None
+    cpu, target = _cpu_model(), os.environ.get("JULIA_CPU_TARGET", "native")
+    cur = load_manifest() if (DIR / "manifest.json").exists() else {}
+    for r in planned_models():
+        if r["code"] != "acepotentials-trim" or (only and f"{r['system']}/{r['size']}" not in only):
+            continue
+        so, npz = pathlib.Path(r["trim_lib"]), pathlib.Path(r["path"])
+        if not npz.exists():
+            print(f"skip {so.name}: no {npz.name} (run `models.py ace`)", file=sys.stderr)
+            continue
+        old = cur.get(str(so), {})
+        fresh = (so.exists() and old.get("sha256") == _sha(so) and old.get("from_sha256") == _sha(npz)
+                 and old.get("env_sha256") == env_sha and old.get("build_cpu") == cpu
+                 and old.get("cpu_target") == target)
+        if fresh and not os.environ.get("FORCE"):
+            continue
+        so.parent.mkdir(parents=True, exist_ok=True)
+        spec = so.with_suffix(".spec.json")
+        spec.write_text(json.dumps({**r["ace1"], "npz": str(npz)}))
+        xyz = so.parent / f"gate_{r['system']}_256.extxyz"        # the build's in-process gates
+        acepot.roundtrip(supercell(r["system"], 256), xyz)
+        base = {"builder": "bench/scaling/julia/build_trim.jl", "from": str(npz), "from_sha256": _sha(npz),
+                "env_sha256": env_sha, "build_cpu": cpu, "cpu_target": target}
+        try:
+            out = acepot.run_julia(cfg, "build_trim.jl", [str(spec), str(xyz), str(so)],
+                                   threads=1, timeout=7200)
+        except RuntimeError as ex:
+            so.unlink(missing_ok=True)
+            _update_manifest({str(so): {**base, "unsupported": str(ex)[-500:]}})
+            cur = load_manifest()
+            print(f"{so.name}: export failed: {str(ex)[-300:]}", file=sys.stderr)
+            continue
+        keep = ("build_id", "gates", "spline_error", "versions", "export_s", "juliac_s", "so_bytes",
+                "identity")
+        _update_manifest({str(so): {**base, **{k: out[k] for k in keep if k in out},
+                                    "sha256": _sha(so)}})
+        cur = load_manifest()
+        print(f"{so.name}: built ({out.get('juliac_s', 0):.0f} s juliac)")
+
+
 def symmetrix_cmd(model, zs, head, out):
     cmd = [shutil.which("symmetrix_extract_mace") or "symmetrix_extract_mace", "--model", str(model),
            "--atomic-numbers", *map(str, zs), "--output", str(out)]
@@ -286,7 +382,7 @@ def basis_sizes():
         p = pathlib.Path(r["path"])
         if r["code"] == "mace" or not p.exists():
             continue
-        n = (ace_functions_per_element(p) if r["code"].startswith("acejax-ace")
+        n = (ace_functions_per_element(p) if is_linear_ace(r["code"])
              else pace_functions_per_element(p))
         out.setdefault(f"{r['system']}/{r['size']}", {})[r["code"]] = n
     return out
@@ -298,5 +394,9 @@ def write_sizes():
 
 
 if __name__ == "__main__":
-    {"pace": build_pace, "ace": build_ace, "ace-learned": build_ace_learned, "mace": build_mace,
-     "sizes": write_sizes}[sys.argv[1]]()
+    if sys.argv[1] == "acepotentials-trim":
+        sys.path.insert(0, str(ROOT / "bench"))
+        build_acepotentials_trim(sys.argv[2:] or None)
+    else:
+        {"pace": build_pace, "ace": build_ace, "ace-learned": build_ace_learned, "mace": build_mace,
+         "sizes": write_sizes}[sys.argv[1]]()

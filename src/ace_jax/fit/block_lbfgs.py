@@ -4,7 +4,7 @@ A VarPro outer objective f(blocks, *args, *statics) over parameter blocks of ver
 different scale (e.g. tensor radials and a second, nonlinear family such as density
 or species-embedding weights) defeats a plain L-BFGS: one step size cannot suit both
 blocks and the line search fails.  Two remedies, measured on the radial + sqrt-density
-problem (docs/learn-radial-density-results.md, "Optimiser"):
+problem (docs/dev/learn-radial-density-results.md, "Optimiser"):
 
 * curvature-matched block scaling -- optimise u = [r_0 x_0 ; r_1 x_1 ; ...] with
   r_0 = 1 and r_b = sqrt(|h_b| / |h_0|), h_b the curvature along one random probe per

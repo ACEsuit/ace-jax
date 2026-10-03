@@ -24,6 +24,16 @@ THETA = Hypers(log_ell=0.0, log_A=0.0, log_alpha=0.0, log_r0=np.log(2.35), log_e
                log_sigma_F=np.log(0.05), log_sigma_V=np.log(0.3))
 
 
+
+@pytest.fixture(autouse=True)
+def _clear_jax_caches_per_test():
+    """This module only: clear JAX's in-process caches after every test (conftest clears
+    per module). Keeping the host-row tests' compiled state across tests here aborted
+    XLA intermittently inside backend_compile (jaxlib 0.11.2, CPU, local runs; CI passed)."""
+    yield
+    import jax
+    jax.clear_caches()
+
 def _dense_structural(prob, ds, c, theta=THETA):
     """Loss-weighted member rows (w/sigma_q * phi) and residuals (w/sigma_q * r) of
     every non-padded observation, plus the raw energy rows -- a dense reference."""
@@ -313,7 +323,7 @@ def test_blr_mean_is_accurate_not_the_eigh_formula():
     from ace_jax.fit.solve import solve_qr
     cfg = FitConfig(model=str(FIXTURE_DIR / "si_fitted.npz"), energy_key="dft_energy", force_key="dft_force",
                     virial_key="dft_virial", ntrain=16, ntest=6, batch=4, r0=2.35, arm="linear",
-                    opt="lbfgs", rungs=("map",), map_steps=5).validate()
+                    opt="lbfgs", rungs=("map",), map_steps=5, e0="prefit").validate()   # POPS: E0 fixed
     d = load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz"))
     b = build_problem(cfg, d)
     with highest_precision():

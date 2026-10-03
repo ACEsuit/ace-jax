@@ -1,0 +1,12 @@
+/* Tutorial pages are rendered from the notebooks (docs/build_tutorials.py). Their
+   matplotlib figures have a white background: keep them on a white card, so they
+   read the same in the dark (slate) scheme, and centre them. */
+.md-typeset img[alt^="Figure"] {
+  display: block;
+  margin: 0.8em auto;
+  max-width: 100%;
+  background: #fff;
+  border-radius: 0.2rem;
+  padding: 0.4rem;
+  box-shadow: var(--md-shadow-z1);
+}

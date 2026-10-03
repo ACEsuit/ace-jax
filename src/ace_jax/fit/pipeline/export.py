@@ -5,7 +5,7 @@ model file with the fitted readout (WB, Wpair) and E0 written in, so
 `ace_jax.load`, `ACECalculator` and `ace-jax eval` read it unchanged.
 
 A GP fit also needs the residual block, so `gp_model.npz` is self-contained:
-the ACE arrays (prefixed "ace/", E0 fitted), the GP and kernel configuration,
+the ACE arrays (prefixed "ace/", E0 fitted; with joint E0 the pre-fit E0, whose shift is in mu), the GP and kernel configuration,
 the inducing set, and per hyperparameter draw the posterior (mu, L) -- the
 same factorisation the pipeline's predictions use, so a reloaded
 `GPCalculator` reproduces them.  L is (Dt, Dt), Dt = len_basis + M, per draw:
@@ -44,6 +44,8 @@ def linear_arrays_from_mean(z, E0, pcfg, mu):
     Column layout: species-major B blocks, then pair blocks (fit/rows.py `_place`)."""
     nB, nP, NZ = pcfg.n_B, pcfg.n_pair, pcfg.NZ
     mu = np.asarray(mu)
+    if getattr(pcfg, "e0_cols", False):      # joint E0: the fitted shift of the pre-fit E0
+        E0 = np.asarray(E0, np.float64) + mu[pcfg.len_readout:pcfg.len_readout + NZ]
     out = _ace_arrays_from(z, E0)
     out["WB"] = mu[:NZ * nB].reshape(NZ, nB).T.copy()
     out["Wpair"] = mu[NZ * nB:NZ * (nB + nP)].reshape(NZ, nP).T.copy()
@@ -76,13 +78,24 @@ def linear_model_arrays(res):
     """The ACE npz arrays with the posterior-mean readout at the MAP hyperparameters.
     Column layout of the linear block: species-major B blocks, then pair blocks
     (fit/rows.py `_place`), i.e. WB[b, z] = mu[z*n_B + b]."""
-    if res.ard is not None:
+    if res.readout is not None:
+        mu = res.readout                      # solver lstsq
+    elif res.ard is not None:
         mu = res.ard.posterior.mean           # ARD: the posterior mean the predictions use
     elif "mean" in res.preds.pops:
         mu = res.preds.pops["mean"]      # POPS: exactly the mean the predictions used
     else:
         mu, _ = _posterior(res, res.theta)
     return linear_arrays_from_mean(res.data.z, res.data.E0, res.built.prob.cfg, mu)
+
+
+def _gpcfg_json(gpcfg):
+    """GPConfig for gp_json; e0_cols only when set, so prefit and e0='model' files stay
+    readable by ace-jax releases that predate joint E0."""
+    d = dataclasses.asdict(gpcfg)
+    if not d.get("e0_cols"):
+        d.pop("e0_cols", None)
+    return d
 
 
 def gp_model_arrays(res, n_draws=1):
@@ -92,20 +105,26 @@ def gp_model_arrays(res, n_draws=1):
     for d in draws:
         mu, L = _posterior(res, from_array(jnp.asarray(d)))
         mus.append(np.asarray(mu)); Ls.append(np.asarray(L))
+    # joint E0 (gpcfg.e0_cols): the E0 columns stay in mu and L, so GPCalculator's mean and
+    # variance (its rows add the species counts too) are the fit's exactly; ace/E0 is the
+    # pre-fit E0 they shift
+    gpcfg = prob.cfg
     ind = prob.ind
     out = {f"ace/{k}": v for k, v in _ace_arrays(res).items()}
     out.update(ind_XM=np.asarray(ind.XM), ind_SM=np.asarray(ind.SM), ind_ZM=np.asarray(ind.ZM),
                ind_scale=np.asarray(ind.scale), ind_Pmap=np.asarray(ind.Pmap), ind_embed=np.asarray(ind.embed),
                draws=np.asarray(draws), mu=np.stack(mus), L=np.stack(Ls))
     out["gp_json"] = np.frombuffer(json.dumps({
-        "schema_version": GP_SCHEMA, "gpcfg": dataclasses.asdict(prob.cfg),
+        "schema_version": GP_SCHEMA, "gpcfg": _gpcfg_json(gpcfg),
         "kernel": dataclasses.asdict(prob.spec), "warp": ind.warp}).encode(), np.uint8)
     return out
 
 
 def save_model(res, out, n_draws=1, log=print):
     """Write the fitted model into directory `out`: model.npz (linear arm) or
-    gp_model.npz (GP arm).  Returns the path, or None when the fit cannot be
+    gp_model.npz (GP arm). Only the model: the fitted hyperparameters are
+    `res.theta` (and `res.map.log_evidence`), and `write_outputs(res, out)` also
+    writes them (theta_map.json) with the metrics.  Returns the path, or None when the fit cannot be
     represented as a model file (a dimer baseline is added back outside the model;
     a .yace input has no npz schema to write into)."""
     why = model_file_blocked(res.config)

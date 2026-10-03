@@ -87,13 +87,13 @@ class ACECalculator(Calculator):
 
         `lean` (default True) evaluates energies, forces and stress with
         `ace_jax.eval.model.lean(model)`: exact to roundoff, with the per-edge
-        work the energy never reads removed (docs/ace-vs-pace-gap.md).
+        work the energy never reads removed (docs/dev/ace-vs-pace-gap.md).
         spline_tol="auto" (default) first splines a learned analytic tensor
         radial (`radial_learned`, set by the radial learner) at 1e-10
         (`to_spline`).  That is not roundoff: energies agree with lean=False to
         up to ~1e-9 relative and forces to up to ~2.3e-8 of max|F| on the
-        benchmark models (docs/learned-radial-splining.md).  Other analytic
-        models -- Julia `ace_model` exports, Python-authored models -- stay
+        benchmark models (docs/dev/learned-radial-splining.md).  Other analytic
+        models -- ACEpotentials `ace_model` exports, built bases -- stay
         exact; a float spline_tol (e.g. 1e-10) opts them in, None never
         splines.  spline_intervals pins the grid.  `calc.splined` (and `last_timing["spline_tol"]`) says
         what was splined, None when nothing was.  The spline is cached on the

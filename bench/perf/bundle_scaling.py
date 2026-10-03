@@ -1,6 +1,6 @@
 """The lammps-jax bundle's energy+forces function, timed outside LAMMPS.
 
-Why LAMMPS throughput of ace-jax falls above ~16k atoms (docs/perf-lammps-large-n.md).
+Why LAMMPS throughput of ace-jax falls above ~16k atoms (docs/dev/perf-lammps-large-n.md).
 
 For one model and atom count this builds the inputs lammps-jax hands the
 bundle -- positions of owned atoms then ghosts (max_atoms rows), species,

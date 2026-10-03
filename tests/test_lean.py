@@ -1,7 +1,7 @@
 """The lean evaluation form of an ACEModel (`ace_jax.eval.model.lean`) is exact.
 
 Each load-time transform removes per-edge work the energy never reads, and must
-leave E, forces and the virial unchanged to roundoff (docs/ace-vs-pace-gap.md):
+leave E, forces and the virial unchanged to roundoff (docs/dev/ace-vs-pace-gap.md):
 
   prune       R_nl columns no A entry reads, and Y_lm above the largest l used
   pairfold    the pair readout Wpair[:, z_i] folded into the pair radial table
@@ -61,6 +61,12 @@ def _structure(meta, seed=0):
     return at
 
 
+# jitted, the model a pytree argument: each distinct model structure compiles once and
+# new weights reuse it (run eagerly, every op dispatched one by one, 3-5x slower)
+_efv_sparse = jax.jit(lambda m, *a: m.energy_forces_virial(*a), static_argnums=(6,))
+_efv_dense = jax.jit(lambda m, *a: m.energy_forces_virial_dense(*a))
+
+
 def _efv(model, meta, at, layout):
     z2i = {int(z): i for i, z in enumerate(meta["elements"])}
     nz = jnp.asarray([z2i[int(z)] for z in at.numbers], jnp.int32)
@@ -68,14 +74,12 @@ def _efv(model, meta, at, layout):
     with highest_precision():
         if layout == "sparse":
             s, r = jnp.asarray(g.senders), jnp.asarray(g.receivers)
-            out = model.energy_forces_virial(jnp.asarray(g.rij), nz[s], nz[r], s, r,
-                                             len(at), nz)
+            out = _efv_sparse(model, jnp.asarray(g.rij), nz[s], nz[r], s, r, len(at), nz)
         else:
             d = dense_from_sparse(g, meta["rcut"])
             idx = jnp.asarray(d.idx)
-            out = model.energy_forces_virial_dense(
-                jnp.asarray(d.rij), jnp.broadcast_to(nz[:, None], idx.shape), nz[idx], idx,
-                jnp.asarray(d.mask), nz)
+            out = _efv_dense(model, jnp.asarray(d.rij), jnp.broadcast_to(nz[:, None], idx.shape), nz[idx],
+                             idx, jnp.asarray(d.mask), nz)
     return tuple(np.asarray(x) for x in out)
 
 

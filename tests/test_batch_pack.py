@@ -179,7 +179,9 @@ def test_ard_stage_with_a_big_cell_is_pack_invariant():
         a, b = np.asarray(a, float), np.asarray(b, float)
         np.testing.assert_allclose(a, b, rtol=0, atol=1e-12 * max(1.0, np.abs(b).max()))
     np.testing.assert_allclose(p1.h, p0.h, rtol=0, atol=1e-5)
-    np.testing.assert_allclose(p1.mean, p0.mean, rtol=0, atol=1e-6 * np.abs(p0.mean).max())
+    # (1e-5, as h: since main's isolated-atom E0 rule (e0='lsq'/'prefit', 0.1.1) the fixture's
+    # optimum moves ~1.5e-6 of max|mean| between layouts, against ~1e-7 before)
+    np.testing.assert_allclose(p1.mean, p0.mean, rtol=0, atol=1e-5 * np.abs(p0.mean).max())
     for k in ("lam_rms", "q", "r", "n_cfg", "n_cfg_val", "n_atoms"):
         np.testing.assert_allclose(np.asarray(p1.group_table[k], float),
                                    np.asarray(p0.group_table[k], float), rtol=1e-6, atol=1e-12)

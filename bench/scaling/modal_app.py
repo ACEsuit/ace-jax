@@ -1,4 +1,4 @@
-"""Benchmark sweep on a Modal A100-80GB (spec: docs/benchmark-scaling-spec.md).
+"""Benchmark sweep on a Modal A100-80GB (spec: docs/dev/benchmark-scaling-spec.md).
 
     modal run bench/scaling/modal_app.py --parity-only
     modal run bench/scaling/modal_app.py [--only acejax-pace]
@@ -107,7 +107,7 @@ def with_sources(img):
     return (img
     .add_local_dir(src_root / "src", "/ace-jax/src")
     .add_local_dir(ROOT / "bench", "/ace-jax/bench",
-                   ignore=["**/__pycache__", "pace_modal/*.json*", "scaling/results/*"])
+                   ignore=["**/__pycache__", "scaling/results/*"])
     .add_local_dir(ROOT / "julia", "/ace-jax/julia"))
 
 

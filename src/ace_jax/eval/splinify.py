@@ -269,7 +269,7 @@ def to_spline(model, n_intervals=None, tol=DEFAULT_SPLINE_TOL, deriv_tol=None,
     """Convert an ACEModel's analytic radials to the spline branch.
 
     Converts every analytic radial named in `radials` ("rnl", "pair"), learned
-    or not (a Julia `ace_model` export or a Python-authored model too): this is
+    or not (an ACEpotentials `ace_model` export or a built basis too): this is
     the conversion itself.  Whether `lean` applies it is `spline_plan`'s call
     (by default only for learned radials).
 
@@ -295,7 +295,7 @@ def to_spline(model, n_intervals=None, tol=DEFAULT_SPLINE_TOL, deriv_tol=None,
     on d/dx and reported (`return_info`), and gated too when `deriv_tol` is
     given.  At 1e-10 the lean energies agree with the full model to
     up to ~1e-9 relative and forces to up to ~2.3e-8 of max|F| on the
-    benchmark models (docs/learned-radial-splining.md).
+    benchmark models (docs/dev/learned-radial-splining.md).
 
     tol must be in [TOL_FLOOR, inf); it is floored at 10 eps of the model's
     dtype (a float32 table cannot do better).  Returns (model, max_rel_err), or

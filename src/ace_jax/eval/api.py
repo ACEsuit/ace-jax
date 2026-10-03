@@ -5,6 +5,7 @@ should not pay per-structure calculator overhead or an ASE `Atoms` round-trip --
 hence `site_descriptors` takes positions/cell/species directly.
 """
 
+import functools
 import pathlib
 
 import jax
@@ -40,17 +41,22 @@ def species_indices(meta, numbers):
             f"element Z={e.args[0]} not in model elements {meta['elements']}") from e
 
 
+@functools.partial(jax.jit, static_argnums=(5,))
+def _descriptors_padded(model, rij, zi, zj, send, n_nodes, node_z, mask):
+    return model.site_descriptors(rij, zi, zj, send, n_nodes, node_z, mask)
+
+
 def site_descriptors(model, positions, numbers, cell=None, pbc=False,
                      meta=None, cutoff=None, dtype=None, domain=None):
     """Site descriptors, (n_atoms, (n_B + n_pair) * n_species).
 
     Parity target is `ACEpotentials.site_descriptors`, which is marked in the
-    Julia source as "RETIRING THIS FOR NOW BECAUSE IT IS HIGHLY INEFFICIENT"
+    ACEpotentials source as "RETIRING THIS FOR NOW BECAUSE IT IS HIGHLY INEFFICIENT"
     because it recomputes per site.  This takes the whole batch from one forward
     pass -- the same pass the energy uses -- so the port is genuinely faster
     here, not merely equivalent.
 
-    `domain` restricts the returned rows (as Julia's does); the forward pass
+    `domain` restricts the returned rows (as ACEpotentials does); the forward pass
     still covers the whole structure, since a site's descriptor needs its
     neighbours regardless.
     """
@@ -61,11 +67,16 @@ def site_descriptors(model, positions, numbers, cell=None, pbc=False,
         cell = np.eye(3) * (np.ptp(positions, axis=0).max() + 2 * rcut + 1.0)
         pbc = False
     g = sparse_graph(positions, cell, np.broadcast_to(pbc, 3), rcut)
-    node_z = jnp.asarray(species_indices(meta, numbers))
-    send, recv = jnp.asarray(g.senders), jnp.asarray(g.receivers)
-    rij = jnp.asarray(g.rij, dtype=dtype or _default_dtype())
+    node_z = np.asarray(species_indices(meta, numbers))
+    # pad the edge list to a power-of-two bucket (masked): structures of similar size
+    # share one compiled pass (run eagerly, every op dispatched one by one)
+    n_e = len(g.senders); cap = 1 << max(n_e - 1, 0).bit_length()
+    pad = lambda a, v: np.concatenate([np.asarray(a), np.full((cap - n_e,) + np.shape(a)[1:], v, np.asarray(a).dtype)])
+    rij = pad(np.asarray(g.rij, dtype=dtype or _default_dtype()).reshape(n_e, 3), 0.5 * rcut)
+    send, recv = pad(np.asarray(g.senders, np.int32), 0), pad(np.asarray(g.receivers, np.int32), 0)
+    mask = np.arange(cap) < n_e
     with highest_precision():
-        d = model.site_descriptors(rij, node_z[send], node_z[recv], send,
-                                   g.n_nodes, node_z)
+        d = _descriptors_padded(model, jnp.asarray(rij), jnp.asarray(node_z[send]), jnp.asarray(node_z[recv]),
+                                jnp.asarray(send), g.n_nodes, jnp.asarray(node_z), jnp.asarray(mask))
     d = np.asarray(d)
     return d if domain is None else d[np.asarray(domain)]

@@ -2,7 +2,6 @@
 ACE model, run the requested rungs of the ladder, write draws and the metrics
 table (per atom energies in meV/atom, forces in eV/A, virials in eV)."""
 import argparse
-import csv
 import json
 import pathlib
 
@@ -10,9 +9,8 @@ import jax
 import numpy as np
 
 jax.config.update("jax_enable_x64", True)
-import jax.numpy as jnp
 
-from .eval import highest_precision, load
+from .eval import highest_precision
 from .fit.data import load_configs
 from .fit.pipeline.objective import _pad_to_multiple  # noqa: F401  (moved to the pipeline; kept importable)
 
@@ -31,11 +29,15 @@ def _add_fit_args(p):
     p.add_argument("--test-start", type=int, default=None)
     p.add_argument("--energy-key", default="energy")
     p.add_argument("--force-key", default="forces"); p.add_argument("--virial-key", default="virial")
+    p.add_argument("--stress-key", default=None,
+                   help="stress label (eV/A^3, 3x3 or Voigt-6) used as the virial, virial = -stress * volume, when a config has no virial label")
     p.add_argument("--weights", default=None,
                    help='JSON: an ACEfit weights dict {"default": {"E":..,"F":..,"V":..}, <config_type>: ..} '
                         'or a list of weight factors [{"Structural": {}}, {"ConfigType": {...}}]')
-    p.add_argument("--e0", choices=["model", "lsq"], default="model",
-                   help="per-species E0: the model's (default) or least squares on the training energies")
+    p.add_argument("--e0", choices=["model", "lsq", "prefit"], default="model",
+                   help="per-species E0: the model's (default); lsq fits it jointly with the readout (a wide "
+                        "prior around a least-squares start); prefit fixes it at least squares on the training "
+                        "energies before the fit")
     p.add_argument("--baseline", default=None, help="dimer_mean.npz: fit the residual to this pair mean")
     p.add_argument("--configs-per-batch", type=int, default=8)
     p.add_argument("--batch-pack", choices=["auto", "on", "off"], default="auto",
@@ -53,6 +55,8 @@ def _add_fit_args(p):
     p.add_argument("--lml", choices=["device", "host-cache"], default="device",
                    help="host-cache: cache the linear design rows in host RAM (GP, pair|pca, L-BFGS, map only)")
     p.add_argument("--opt", choices=["adam", "lbfgs"], default="adam")
+    p.add_argument("--solver", choices=["evidence", "lstsq"], default="evidence",
+                   help="lstsq: plain weighted least squares with no prior (teaching; overfits a large basis)")
     p.add_argument("--map-restarts", type=int, default=1, help="L-BFGS multi-start (best log-posterior)")
     p.add_argument("--init", default=None, help="theta_map.json to start the MAP from")
     p.add_argument("--rungs", default="map",
@@ -95,6 +99,18 @@ def _add_fit_args(p):
                    help="ard: groups with fewer configurations borrow a neighbouring group's scales")
     p.add_argument("--no-ard-support", action="store_true",
                    help="ard: skip the covariate-shift support reference")
+    p.add_argument("--learn-radial", action="store_true",
+                   help="learn the tensor radials (VarPro, held-out gate) before the fit; the saved model "
+                        "is marked radial_learned and splined at deploy time")
+    p.add_argument("--radial-n-q", type=int, default=12,
+                   help="tensor-radial polynomial span after widening (with --learn-radial)")
+    p.add_argument("--radial-steps", type=int, default=40,
+                   help="L-BFGS steps per roughness weight (with --learn-radial)")
+    p.add_argument("--radial-lam-grid", default="0,1e-2",
+                   help="comma-separated relative roughness weights the gate picks among, "
+                        "alongside the initial radials (with --learn-radial)")
+    p.add_argument("--radial-val-frac", type=float, default=0.2,
+                   help="fraction of the training configs held out for the gate (with --learn-radial)")
     p.add_argument("--pops-ridge", default="auto")
     p.add_argument("--seed", type=int, default=0); p.add_argument("--out", default=None)
     p.add_argument("--model-draws", type=int, default=1,
@@ -132,7 +148,7 @@ def _fit_config(a):
     cfg = FitConfig(
         model=a.model if a.model is not None else _basis_spec(a, embedding=a.basis_embedding),
         arm="gp" if a.m_per_species > 0 else "linear", energy_key=a.energy_key,
-        force_key=a.force_key, virial_key=a.virial_key, ntrain=a.ntrain, ntest=a.ntest,
+        force_key=a.force_key, virial_key=a.virial_key, stress_key=a.stress_key, ntrain=a.ntrain, ntest=a.ntest,
         test_start=a.test_start, seed=a.seed, batch=a.configs_per_batch,
         batch_pack=a.batch_pack, weights=weights, factors=factors,
         baseline=a.baseline, e0=a.e0, m_per_species=a.m_per_species, kernel=a.kernel, bump=not a.no_bump,
@@ -144,7 +160,10 @@ def _fit_config(a):
         ard_force_shape=a.force_shape, ard_coverage=a.ard_coverage, ard_groups=a.ard_groups,
         ard_cluster_size=a.ard_cluster_size, ard_press=a.ard_press, ard_n_min=a.ard_n_min,
         ard_transfer=a.ard_transfer, ard_support=not a.no_ard_support,
-        predict_train=False, pops_ridge=ridge,
+        learn_radial=a.learn_radial, radial_n_q=a.radial_n_q, radial_steps=a.radial_steps,
+        radial_lam_grid=tuple(float(x) for x in str(a.radial_lam_grid).split(",") if x.strip()),
+        radial_val_frac=a.radial_val_frac,
+        solver=a.solver, predict_train=False, pops_ridge=ridge,
         predict_stats="recompute", pf_samples=16, pf_maxiter=15)
     return cfg.validate()
 
@@ -185,30 +204,39 @@ def run(a):
 
 
 def cmd_eval(a):
-    """Evaluate a fitted/exported model on a dataset: predicted energy (and,
-    with --forces, forces/virial) per configuration, and RMSE vs the labels
-    when present.  Native E/F/V (no ASE), one forward pass per config."""
-    from .eval import sparse_graph, species_indices
-    keys = dict(energy_key=a.energy_key, force_key=a.force_key, virial_key=a.virial_key)
+    """Evaluate a fitted/exported model on a dataset.  Prints the per-config-type E/F/V
+    RMSE table (fit/report.py) for the labels present, and with --out writes the input
+    structures back as extxyz with every original label kept and the predictions added:
+    info <prefix>energy (eV) and <prefix>stress (3x3, eV/A^3, periodic cells only),
+    arrays <prefix>forces (eV/A); a gp_model.npz adds info <prefix>energy_std and arrays
+    <prefix>forces_std, --posterior (ARD) arrays <prefix>forces_std.  The structures go
+    through the ase-extxyz plugin (create_calc=False: no label moves into a calculator).
+    Every model goes through its jitted calculator: the edge list is padded to buckets,
+    so configs of similar size share one compile.  A linear model is evaluated exactly
+    (lean, never splined: spline_tol=None)."""
+    from ase import Atoms
+    from ase.stress import voigt_6_to_full_3x3_stress
+    from .fit.data import VOIGT
+    from .fit.report import format_rmse_table, rmse_by_type
+    keys = dict(energy_key=a.energy_key, force_key=a.force_key, virial_key=a.virial_key, stress_key=a.stress_key)
     configs = load_configs(a.data, **keys)
+    frames = None
+    if a.out:                 # passed through as ASE Atoms: create_calc=False keeps every label as written
+        from ase_extxyz.io import read_cextxyz
+        frames = list(read_cextxyz(a.data, index=":", create_calc=False))
     gp = str(a.model).endswith(".npz") and "gp_json" in np.load(a.model).files   # gp_model.npz from `fit`
     ard = getattr(a, "posterior", None) is not None
     if gp and ard:
         raise ValueError("--posterior is for a linear model.npz from `fit --uq ard`, not a gp_model.npz")
-    if gp or ard:
-        from ase import Atoms
-        if gp:
-            from .calc.gp import GPCalculator
-            calc = GPCalculator.from_file(a.model, deriv_dtc=not getattr(a, "no_deriv_dtc", False))
-        else:
-            from .calc.point import ACECalculator
-            calc = ACECalculator(a.model, posterior=a.posterior)
+    if gp:
+        from .calc.gp import GPCalculator
+        calc = GPCalculator.from_file(a.model, deriv_dtc=not getattr(a, "no_deriv_dtc", False))
     else:
-        model, meta, z = load(a.model)
-        rcut = float(meta["rcut"])
-    esq = ecnt = fsq = fcnt = 0.0
-    rows, per_atom = [], []
-    served = {}
+        from .calc.point import ACECalculator
+        calc = ACECalculator(a.model, posterior=a.posterior if ard else None, spline_tol=None)
+    # --per-atom (ARD): a separate extxyz of the served per-atom arrays, unprefixed
+    # (forces_pred, forces_std, forces_q, forces_group, forces_cov, forces_q_mahal, support_*)
+    per_atom, served = [], {}
     if ard:
         post = calc.posterior
         want_pa = bool(getattr(a, "per_atom", None))
@@ -221,64 +249,63 @@ def cmd_eval(a):
         if served["support"] and post.support is None:
             print("note: this posterior has no support reference: support_ok/support_q are not written")
             served["support"] = False
+    p = a.prefix
+    Em, Fm, Vm = [], [], []
     with highest_precision():
         for i, c in enumerate(configs):
-            if gp or ard:
-                at = Atoms(numbers=c.numbers, positions=c.positions, cell=c.cell, pbc=c.pbc)
-                at.calc = calc
-                E, F = at.get_potential_energy(), at.get_forces()
-            else:
-                g = sparse_graph(c.positions, c.cell, c.pbc, rcut)
-                nz = jnp.asarray(species_indices(meta, c.numbers))
-                send, recv = jnp.asarray(g.senders), jnp.asarray(g.receivers)
-                E, F, V = model.energy_forces_virial(jnp.asarray(g.rij), nz[send], nz[recv],
-                                                     send, recv, g.n_nodes, nz)
-            E = float(E); F = np.asarray(F); nat = len(c.numbers)
-            rows.append({"config": i, "natoms": nat, "energy": E,
-                         "energy_per_atom": E / nat, "fmax": float(np.abs(F).max())})
-            if gp:
-                rows[-1]["energy_std"] = float(calc.results["energy_std"])
-            if ard:
-                s = np.asarray(calc.get_property("forces_std", at))   # on request: E/F reused
-                rows[-1]["fmax_std"] = float(s.max())
-                if getattr(a, "per_atom", None):
-                    out_at = Atoms(numbers=c.numbers, positions=c.positions, cell=c.cell, pbc=c.pbc)
-                    out_at.arrays["forces_pred"] = F
-                    out_at.arrays["forces_std"] = s
-                    if served["q"]:
-                        out_at.arrays["forces_q"] = np.asarray(calc.get_property("forces_q", at))
-                        out_at.arrays["forces_group"] = np.asarray(calc.get_property("forces_group", at))
-                        if served["mahal"]:
-                            out_at.arrays["forces_cov"] = np.asarray(
-                                calc.get_property("forces_cov", at)).reshape(len(at), 9)
-                            out_at.arrays["forces_q_mahal"] = np.asarray(calc.get_property("forces_q_mahal", at))
-                    if served["support"]:
-                        sup = calc.get_property("forces_support", at)
-                        out_at.arrays["support_ok"] = np.asarray(sup["support_ok"], bool)
-                        out_at.arrays["support_q"] = np.asarray(sup["support_q"], float)
-                    per_atom.append(out_at)
-            if c.energy is not None:
-                esq += ((E - c.energy) / nat) ** 2; ecnt += 1
-            if c.forces is not None:
-                fsq += float(((F - c.forces) ** 2).sum()); fcnt += c.forces.size
+            at = Atoms(numbers=c.numbers, positions=c.positions, cell=c.cell, pbc=c.pbc)
+            at.calc = calc
+            E, F = float(at.get_potential_energy()), np.asarray(at.get_forces())
+            S = np.asarray(at.get_stress()) if at.pbc.all() else None          # Voigt xx yy zz yz xz xy
+            Em.append(E); Fm.append(F)
+            Vm.append(np.full(6, np.nan) if S is None else -S * at.get_volume())   # the virial, VOIGT order
+            s_ard = (np.asarray(calc.get_property("forces_std", at))           # on request: E/F reused
+                     if ard and (frames is not None or getattr(a, "per_atom", None)) else None)
+            if frames is not None:
+                f = frames[i]
+                f.info[f"{p}energy"] = E
+                f.arrays[f"{p}forces"] = F
+                if S is not None:
+                    f.info[f"{p}stress"] = voigt_6_to_full_3x3_stress(S)
+                if gp:
+                    f.info[f"{p}energy_std"] = float(calc.results["energy_std"])
+                    f.arrays[f"{p}forces_std"] = np.asarray(calc.results["forces_std"])
+                if ard:
+                    f.arrays[f"{p}forces_std"] = s_ard
+            if ard and getattr(a, "per_atom", None):
+                out_at = Atoms(numbers=c.numbers, positions=c.positions, cell=c.cell, pbc=c.pbc)
+                out_at.arrays["forces_pred"] = F
+                out_at.arrays["forces_std"] = s_ard
+                if served["q"]:
+                    out_at.arrays["forces_q"] = np.asarray(calc.get_property("forces_q", at))
+                    out_at.arrays["forces_group"] = np.asarray(calc.get_property("forces_group", at))
+                    if served["mahal"]:
+                        out_at.arrays["forces_cov"] = np.asarray(
+                            calc.get_property("forces_cov", at)).reshape(len(at), 9)
+                        out_at.arrays["forces_q_mahal"] = np.asarray(calc.get_property("forces_q_mahal", at))
+                if served["support"]:
+                    sup = calc.get_property("forces_support", at)
+                    out_at.arrays["support_ok"] = np.asarray(sup["support_ok"], bool)
+                    out_at.arrays["support_q"] = np.asarray(sup["support_q"], float)
+                per_atom.append(out_at)
+    nat = np.array([len(c.numbers) for c in configs])
+    E = np.array([np.nan if c.energy is None else c.energy for c in configs])
+    F = np.concatenate([np.full((len(c.numbers), 3), np.nan) if c.forces is None else c.forces for c in configs])
+    V = np.array([np.full(6, np.nan) if c.virial is None else [c.virial[i, j] for i, j in VOIGT] for c in configs])
+    print(format_rmse_table(rmse_by_type([c.config_type for c in configs], nat, E, np.array(Em),
+                                         F, np.concatenate(Fm), V, np.array(Vm)), f"{a.data} vs {a.model}"))
+    if frames is not None:
+        out = pathlib.Path(a.out).expanduser()
+        if out.parent and str(out.parent) != ".":
+            out.parent.mkdir(parents=True, exist_ok=True)
+        from ase_extxyz.io import write_cextxyz
+        write_cextxyz(str(out), frames)
+        print(f"wrote {len(frames)} configurations with predictions ({p}energy, {p}forces, ...) to {out}")
     if per_atom:
         from ase.io import write as _write
         _write(a.per_atom, per_atom)
         print(f"wrote per-atom uncertainty arrays for {len(per_atom)} configs to {a.per_atom}")
-    if a.out:
-        with open(a.out, "w", newline="") as fh:
-            w = csv.DictWriter(fh, fieldnames=list(rows[0])); w.writeheader(); w.writerows(rows)
-        print(f"wrote {len(rows)} predictions to {a.out}")
-    else:
-        for r in rows[:10]:
-            print(r)
-        if len(rows) > 10:
-            print(f"... ({len(rows)} configs)")
-    if ecnt:
-        print(f"E RMSE {1e3 * np.sqrt(esq / ecnt):.3f} meV/atom  ({ecnt} configs)")
-    if fcnt:
-        print(f"F RMSE {np.sqrt(fsq / fcnt):.4f} eV/A  ({fcnt} components)")
-    return rows
+    return 0
 
 
 _NEED3 = "this posterior predates schema 3; refit with --uq ard"
@@ -415,7 +442,9 @@ def add_basis_args(p, *, fit):
     p.add_argument("--rcut", type=float, default=None,
                    help="cutoff (default 5.5; with an embedding, 2.5 x mean bond length)")
     p.add_argument("--rin", type=float, default=0.0)
-    p.add_argument("--radial-mode", default="glorot_normal")
+    p.add_argument("--radial-mode", default="onehot", choices=["onehot", "glorot_normal", "zero"],
+                   help="initial tensor radials: onehot (R_n = P_n, the frozen-fit default) or seeded "
+                        "glorot_normal mixtures (a random start, e.g. for learned radials)")
     p.add_argument("--pair-mode", default="onehot")
     p.add_argument("--no-gamma", action="store_true", help="skip the smoothness prior")
     p.add_argument("--no-coupling-cache", action="store_true",
@@ -443,17 +472,26 @@ def _basis_spec(a, *, embedding):
 def _parser():
     top = argparse.ArgumentParser(prog="ace-jax",
                                   description="Fit and evaluate ACE models in JAX (short alias: aj)")
+    from . import __version__
+    top.add_argument("--version", action="version", version=f"ace-jax {__version__}")
     sub = top.add_subparsers(dest="cmd", required=True)
     fit_p = sub.add_parser("fit", help="fit the hybrid linear-ACE + residual GP (--m-per-species 0 = linear-only fit)")
     _add_fit_args(fit_p)
     add_basis_args(fit_p.add_argument_group("basis (built in memory; instead of --model)"), fit=True)
-    ev = sub.add_parser("eval", help="evaluate a model on a dataset (energy/forces, RMSE vs labels)")
+    ev = sub.add_parser("eval", help="evaluate a model on a dataset: RMSE table vs the labels, predictions to extxyz")
     ev.add_argument("--model", required=True); ev.add_argument("--data", required=True)
     ev.add_argument("--energy-key", default="energy"); ev.add_argument("--force-key", default="forces")
-    ev.add_argument("--virial-key", default="virial"); ev.add_argument("--forces", action="store_true")
-    ev.add_argument("--out", default=None, help="CSV of per-config predictions (default: print head)")
-    ev.add_argument("--posterior", default=None, help="posterior.npz from `fit --uq ard`: adds forces_std")
-    ev.add_argument("--per-atom", default=None, help="extxyz with per-atom forces and forces_std arrays")
+    ev.add_argument("--virial-key", default="virial")
+    ev.add_argument("--stress-key", default=None,
+                    help="stress label (eV/A^3, 3x3 or Voigt-6) used as the virial, virial = -stress * volume, when a config has no virial label")
+    ev.add_argument("--out", default=None,
+                    help="extxyz to write: the input structures, every label kept, plus the predictions "
+                         "(<prefix>energy, <prefix>forces, <prefix>stress, and *_std for UQ models)")
+    ev.add_argument("--prefix", default="ace_", help="name prefix of the predicted keys (default ace_)")
+    ev.add_argument("--posterior", default=None, help="posterior.npz from `fit --uq ard`: adds <prefix>forces_std")
+    ev.add_argument("--per-atom", default=None,
+                    help="with --posterior: extxyz of the served per-atom arrays (forces_pred, forces_std, "
+                         "forces_q, forces_group; forces_cov, forces_q_mahal for an aniso posterior)")
     ev.add_argument("--support", action="store_true",
                     help="with --posterior --per-atom: add support_ok and support_q (covariate-shift support)")
     ev.add_argument("--no-deriv-dtc", action="store_true",
@@ -533,6 +571,12 @@ def _parse(argv=None):
                     print(f"override: {k} {defaults[k]} -> None (command line gives "
                           f"{'/'.join('--' + m.replace('_', '-') for m in sorted(mine & given))})")
                     setattr(a, k, None)
+    if a.cmd == "fit" and not a.learn_radial:   # typed options only: a fit.yaml records every default
+        from . import runfile
+        typed = runfile.explicit_dests(subs["fit"], argv[argv.index(cmd) + 1:])
+        stray = sorted(d for d in typed if d.startswith("radial_"))
+        if stray:
+            subs["fit"].error(f"--{stray[0].replace('_', '-')} needs --learn-radial")
     if a.cmd == "fit":
         _check_fit_args(subs["fit"], a)
     return a

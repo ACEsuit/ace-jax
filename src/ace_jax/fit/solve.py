@@ -23,13 +23,10 @@ matters more for M > 0.  Entry points:
                         streams the rows.  Stable AND O(L^2) memory (basis-, not
                         observation-limited) in one pass -- the big-data stable
                         solver.  ~n_batches x the flops of the Cholesky.
-  solve_lsqr  -- matrix-free LSQR; matvec/rmatvec stream the rows, nothing of
-                 size n_obs * L is ever formed.  O(L) memory -- the option for
-                 datasets too large for the design, but it needs O(rank)
-                 iterations, each a full streaming pass, so it converges quickly
-                 only when the prior conditions the system; for an
-                 ill-conditioned ACE Gram prefer solve_qr (design in memory) or
-                 the Cholesky fast path.
+  lsqr               -- the matrix-free LSQR primitive (with streamed_operators):
+                        O(L) memory, but each iteration is a full streaming pass and
+                        it needs many times L of them on an ill-conditioned ACE Gram,
+                        so no fit entry point uses it.
 """
 import jax
 import jax.numpy as jnp
@@ -66,9 +63,12 @@ def _prior_block(prob, theta):
     blockdiag(diag(gamma^2/sigma_c^2), K_MM), so R0 = blockdiag(diag(gamma/sigma_c),
     chol(K_MM)^T) -- upper triangular (both blocks are), so it also seeds the
     streaming QR.  M = 0 recovers diag(gamma/sigma_c)."""
-    L, M = prob.gamma.shape[0], prob.ind.XM.shape[0]
     sc = jnp.exp(theta.log_sigma_c)
-    R0 = jnp.zeros((L + M, L + M)).at[jnp.arange(L), jnp.arange(L)].set(prob.gamma / sc)
+    lin = prob.gamma / sc                               # gamma / sigma_c, as written (bit-stable)
+    if getattr(prob, "e0_prec", None) is not None:      # the joint-E0 columns' fixed precision
+        lin = jnp.concatenate([lin, jnp.sqrt(jnp.asarray(prob.e0_prec, lin.dtype))])
+    L, M = lin.shape[0], prob.ind.XM.shape[0]
+    R0 = jnp.zeros((L + M, L + M)).at[jnp.arange(L), jnp.arange(L)].set(lin)
     if M > 0:
         LMM = jnp.linalg.cholesky(K_MM(theta, prob.spec, prob.ind.XM, prob.ind.SM, prob.ind.ZM, prob.ind.embed))
         R0 = R0.at[L:, L:].set(LMM.T)                    # chol(K_MM)^T, upper triangular
@@ -197,13 +197,3 @@ def streamed_operators(prob, ds, theta):
 
     y = jnp.concatenate([_weighted_rows(prob, theta, b)[1] for b in batches] + [jnp.zeros(Dt)])
     return matvec, rmatvec, y
-
-
-def solve_lsqr(prob, ds, theta, maxiter=None):
-    """Matrix-free LSQR on the streamed joint design.  Nothing of size n_obs * Dt
-    is materialised.  Converges quickly only when the prior conditions the system
-    (see the module docstring); for an ill-conditioned Gram prefer solve_qr /
-    solve_qr_streaming or the Cholesky fast path.  Dt = len_basis + M."""
-    Dt = prob.cfg.len_basis + prob.ind.XM.shape[0]
-    matvec, rmatvec, y = streamed_operators(prob, ds, theta)
-    return lsqr(matvec, rmatvec, y, Dt, maxiter=maxiter if maxiter is not None else 2 * Dt)
