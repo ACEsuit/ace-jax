@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+## 0.1.2 (2026-10-03)
+
+- Tutorials link the public [MLIP School](https://mlipschool.uk/) pages.
 - `ace_jax.fit.pipeline.fit` refuses to run without float64 (`jax_enable_x64`),
   instead of fitting silently in float32. `aj fit` already enables it.
 
