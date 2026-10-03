@@ -266,7 +266,9 @@ def test_ard_stage_fits_kappa_and_refits_on_all_training_data(ard_map):
     assert res.posterior.kappa > 0 and np.isfinite(res.posterior.kappa)
     assert rep["n_val_atoms"] > 0 and rep["n_fit_configs"] + rep["n_val_configs"] == len(d.train)
     assert abs(rep["val_rms_z_tempered"] - 1.0) < 1e-6          # kappa closed form on the val set
-    assert rep["logev_full"] >= rep["logev_full_start"] - 10 * rep["logev_full_noise"]   # to its roundoff
+    # the polish never ends worse than its start by more than 10x the evidence roundoff (its own rule for
+    # keeping the start), and L-BFGS-B only ascends: the same bound here
+    assert rep["logev_full"] >= rep["logev_full_start"] - 10 * rep["logev_full_noise"]
     assert np.isfinite(rep["val_nll_tempered"]) and rep["val_nll_tempered"] <= rep["val_nll_untempered"] + 1e-9
     # schema 3: F_var = lam_rms[g]^2 diag V_kappa from the group table, so the reported kappa no longer
     # scales it; E_var / V_var untempered; means independent of kappa
@@ -367,12 +369,16 @@ def test_ard_stage_reuses_cached_full_statistics(monkeypatch, e0):
     # the two hold-out subsets (P_fit and the transfer exponent's P_fit2) only: the full refit reused the cache
     assert n_recompute == 3 and len(stage_calls) == 2
     # logev is resolved only to its roundoff at cond(S) ~ 5e13: each fit reports it (logev_full_noise, the
-    # spread of the evidence over 1e-15 moves of h, ~6e-6 .. 1.3e-5 nats here), and two evaluations --
-    # at the same h from summation-order-different statistics, or at the two endpoints -- agree to a few
-    # times it (observed 3e-6 .. 1.2e-5, CI 1.2e-5), so the bound is 10x the larger reported noise; the
-    # endpoints themselves differ by |dh| ~ 1e-6, a true evidence change of |g||dh| ~ 1e-11
-    tol = 10 * max(ref.report["logev_full_noise"], got.report["logev_full_noise"])
-    assert abs(v_got - v_ref) < tol and np.abs(g_got - g_ref).max() < 3e-5
+    # spread of the evidence over 1e-15 moves of h, ~6e-6 .. 1.3e-5 nats here; logev_full_gnoise per
+    # gradient component).  Cached vs recomputed statistics differ only in summation order, so two
+    # evaluations -- at the same h, or at the two endpoints (|dh| ~ 1e-6, a true change |g||dh| ~ 1e-11)
+    # -- agree to ~1x that roundoff (observed gap / (5 x noise) <= 0.31, CI's 1.16e-5 gap ~0.27): 5x is the
+    # bound, i.e. ~3x headroom over the worst observed and nothing more.  The gradient at the same h
+    # likewise, per component, against the larger of the two fits' measured gradient roundoff (observed
+    # <= 1.75x it): 5x.
+    tol = 5 * max(ref.report["logev_full_noise"], got.report["logev_full_noise"])
+    gtol = 5 * np.maximum(ref.report["logev_full_gnoise"], got.report["logev_full_gnoise"])
+    assert abs(v_got - v_ref) <= tol and np.all(np.abs(g_got - g_ref) <= gtol)
     # the refit endpoints, under joint E0 too: the Newton-polished evidence fits agree to the evidence's
     # roundoff floor (observed dh ~1e-6, F_mean ~3e-6 relative); L-BFGS-B alone stopped ~1e-3 apart
     assert got.report["kappa_subset"] == pytest.approx(ref.report["kappa_subset"], rel=1e-12)   # subset stage unchanged
@@ -1088,7 +1094,7 @@ def test_fit_ard_converges_to_the_same_optimum_from_a_perturbed_start(stage_evid
     L-BFGS-B stopping point (L-BFGS-B alone stops ~3e-8 .. 3e-6 short of it here).  ard_cond_max 1e11
     keeps cond(S) where the gradient is resolved to ~1e-9; at the default 1e14 the endpoint is
     resolved only to the evidence's roundoff floor (~3e-8 on this problem, see fit_ard)."""
-    from ace_jax.fit.ard import fit_ard
+    from ace_jax.fit.ard import _projected_gradient, fit_ard
     ev, theta, _ = stage_evidence
     h0 = ev.h0(theta)
     with highest_precision():
@@ -1097,7 +1103,12 @@ def test_fit_ard_converges_to_the_same_optimum_from_a_perturbed_start(stage_evid
         h2, v2, info2 = fit_ard(ev, h0, cond_max=1e11, start=start)
     assert info1["success"] and info2["success"], (info1["message"], info2["message"])
     np.testing.assert_allclose(h2, h1, rtol=0, atol=1e-8)
-    assert abs(v2 - v1) <= 10 * max(info1["newton"]["noise"], info2["newton"]["noise"])
+    # both endpoints are stationary to their measured gradient roundoff (the polish's criterion, checked
+    # here per component), and, being the same point to 1e-8, agree in v to ~1x its roundoff: 5x
+    for h, info in ((h1, info1), (h2, info2)):
+        g = -ev.value_and_grad(h)[1]
+        assert np.all(np.abs(_projected_gradient(h, g, ev.lower, ev.upper)) <= 10 * np.asarray(info["newton"]["gnoise"]))
+    assert abs(v2 - v1) <= 5 * max(info1["newton"]["noise"], info2["newton"]["noise"])
 
 
 def test_fit_ard_is_bitwise_deterministic(stage_evidence):

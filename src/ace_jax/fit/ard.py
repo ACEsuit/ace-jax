@@ -236,7 +236,8 @@ def fit_ard(ev, h0, cond_max=1e14, maxiter=500, polish=True, start=None):
     which two runs on different BLAS / batch layouts reach differently.  The box comes from h0;
     `start` (default h0) is where L-BFGS-B starts in it.  info["cond_S"]: cond(S) at the endpoint
     (ev.cond), with info["cond_max"] the floor's target (exceeded when sigma ran down, see ev.bounds);
-    info["newton"]["noise"]: the evidence's measured roundoff at the endpoint (the resolution of v)."""
+    info["newton"]["noise"] / ["gnoise"]: the measured roundoff of the evidence and of each gradient
+    component at the returned endpoint (the resolution of v and of its gradient)."""
     from scipy.optimize import minimize
     lo, hi = ev.bounds(h0, cond_max)
     x0 = np.clip(np.asarray(h0 if start is None else start, float), lo, hi)
@@ -355,7 +356,8 @@ def newton_polish(ev, x, lo, hi, maxiter=50):
       decrease is resolvable), else not; not converged after maxiter.
 
     If the endpoint's F is worse than the start's by more than 10x F's roundoff the start is kept
-    (not converged) and reported (pg, decrement).  Cost per iteration: one Hessian, four noise
+    (not converged) and reported (pg, decrement, and its roundoff `noise` / `gnoise`, re-measured
+    whenever the returned point is not where they were last measured).  Cost per iteration: one Hessian, four noise
     probes, one to a few evaluations.  Deterministic: a fixed sequence of compiled evaluations and LAPACK calls on
     P x P matrices, no randomness."""
     lo, hi = np.asarray(lo, float), np.asarray(hi, float)
@@ -369,16 +371,18 @@ def newton_polish(ev, x, lo, hi, maxiter=50):
     if not (np.isfinite(F) and np.all(np.isfinite(g))):
         return x, {"converged": False, "message": "non-finite evidence at the L-BFGS endpoint", "steps": 0,
                    "hessian_evals": 0, "pg_start": float("nan"), "pg": float("nan"), "decrement": float("nan"),
-                   "noise": float("nan")}
+                   "noise": float("nan"), "gnoise": [float("nan")] * len(x)}
     x_start, F_start = x, F
     pgv = _projected_gradient(x, g, lo, hi)
     pg = pg0 = float(np.abs(pgv).max())
     steps, n_hess, converged, dec, dec0, noise = 0, 0, False, float("nan"), float("nan"), 0.0
+    gnoise, noise_at = None, None
     message = f"maxiter {maxiter}"
     for _ in range(maxiter):
         H = -ev.hessian(x)
         n_hess += 1
         noise, gnoise = _evidence_noise(evaluate, x, F, g, H)
+        noise_at = x
         d, dec = _newton_step(H, g, x, lo, hi)
         if steps == 0 and n_hess == 1:
             dec0 = dec
@@ -419,8 +423,13 @@ def newton_polish(ev, x, lo, hi, maxiter=50):
     if F > F_start + 10 * noise:
         x, F, converged, pg, dec = x_start, F_start, False, pg0, dec0
         message += "; kept the L-BFGS endpoint (lower F)"
+    if gnoise is None or not np.array_equal(noise_at, x):   # the reported roundoff is the returned point's
+        Fx, gx = evaluate(x)
+        H = -ev.hessian(x)
+        n_hess += 1
+        noise, gnoise = _evidence_noise(evaluate, x, Fx, gx, H)
     return x, {"converged": bool(converged), "message": message, "steps": steps, "hessian_evals": n_hess,
-               "pg_start": pg0, "pg": pg, "decrement": dec, "noise": noise}
+               "pg_start": pg0, "pg": pg, "decrement": dec, "noise": noise, "gnoise": np.asarray(gnoise).tolist()}
 
 
 def laplace_hypers(ev, h, eps=1e-3):
@@ -1121,6 +1130,7 @@ def run_ard_stage(cfg, data, built, theta, log=print, full_stats=None):
               # the evidence's roundoff at the endpoint, as the polish measured it (its spread over 1e-15
               # moves of h): two fits of the same data agree in logev_full only to ~this, not to 1e-15
               "logev_full_noise": info.get("newton", {}).get("noise"),
+              "logev_full_gnoise": info.get("newton", {}).get("gnoise"),     # per hyperparameter, likewise
               "a_floor": ev.a_floor,
               "tempered_quantities": ["F"],        # F_var is lam_rms[g]^2 diag V; E_var / V_var untempered
               "kappa": kappa, "kappa_subset": kappa_subset, "n_val_atoms": int(len(e2)),
