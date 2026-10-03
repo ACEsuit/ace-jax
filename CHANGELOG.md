@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.2.0 (2026-10-03)
+
+**Upgrading from 0.1.x.**
+- **`aj fit --uq ard` gives new results.**
+  - `forces_std` now uses per-group scales with a transfer correction instead of one scalar λ.
+  - The default `--force-shape` is `aniso`.
+  - ARD fits E0 jointly under the default `--e0 lsq`, so refit ARD models change slightly (energies included).
+  - Pass `--force-shape iso` to get the spherical region.
+- **Posteriors are now schema 3.** Schema-1 and schema-2 `posterior.npz` files still load and serve `forces_std`. `forces_q`, `forces_cov`, `forces_group` and `forces_support` need a refit.
+- **Energy and virial variances under ARD are not calibrated.** Only forces are.
+
 - Calibrated per-atom force uncertainty, `aj fit --uq ard` revision 2. The
   uncertainty is a shape times per-group scales:
   - the shape is the per-atom 3×3 block of an exact, centred
@@ -43,6 +54,11 @@
   the fitted E0. Force uncertainties are unaffected, and posteriors written
   before still load.
 - `run_ard_stage` compiles its programs once (no per-call recompilation).
+- ARD evidence fits are fully converged and deterministic:
+  - L-BFGS is followed by a bounded projected-Newton polish with the exact Hessian;
+  - convergence is judged on measured roundoff;
+  - two runs give bit-identical results.
+  The fit reports its evidence and gradient roundoff and logs cond(S), warning above `ard_cond_max`.
 - The total energy is a compensated sum of the site energies (correctly rounded,
   independent of atom order and layout), and a float32 model returns it in
   float64 when x64 is enabled instead of a float32 total quantised at its own
