@@ -215,7 +215,7 @@ class PACEModel(EdgeSiteModel):
         raise NotImplementedError(
             "PACE models have no B-basis: site_basis / site_descriptors / edge_jacobian "
             "are only defined for ACEModel")
-    site_basis = site_descriptors = edge_jacobian = compact_basis = _no_b
+    site_basis = site_descriptors = edge_jacobian = edge_jacobian_dense = compact_basis = _no_b
 
 
 def load_yace(path, dtype=jnp.float64, edge_a_kind="gather"):

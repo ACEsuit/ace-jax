@@ -36,7 +36,8 @@ def _write_stage(out, name, payload):
 def _write_ard(out, ard):
     """posterior.npz + ard.json of an ARDResult (the checkpoint and write_outputs alike)."""
     ard.posterior.save(out / "posterior.npz")
-    _dump(out / "ard.json", ard.report)
+    from ..conformal import json_safe
+    _dump(out / "ard.json", json_safe(ard.report))      # strict JSON: an infinite q is written "inf"
 
 
 def checkpoint_writer(out):
@@ -64,6 +65,8 @@ def fitted_e0(res):
         return E0
     if res.readout is not None:
         mu = np.asarray(res.readout)
+    elif getattr(res, "ard", None) is not None:          # ARD: the posterior mean the model file holds
+        mu = np.asarray(res.ard.posterior.mean)
     else:
         from .export import _posterior
         mu = np.asarray(_posterior(res, res.theta)[0])

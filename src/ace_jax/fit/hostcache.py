@@ -29,8 +29,8 @@ import numpy as np
 
 from .hypers import from_array
 from .objective import log_marginal_likelihood
-from .rows import linear_rows, pair_feature_inputs, residual_rows_from_inputs
-from .stats import ResidualStats, assemble_statistics, batch_linear_stats
+from .rows import _rows_scan, linear_rows, pair_feature_inputs, residual_rows_from_inputs, rows_node_chunk
+from .stats import ResidualStats, assemble_statistics, linear_stats_from_rows
 
 _Q = ("E", "F", "V")
 
@@ -95,11 +95,18 @@ class HostCachedLML:
             self.JU0 = np.zeros((self.nb, Ncap, K, d, 3))
         Pj = jnp.asarray(P)
 
+        nc = rows_node_chunk(prob.model, cfg, Ncap, K)
+
         def one_fn(b):
-            R, X, J = linear_rows(prob.model, cfg, b)
+            if nc is None:
+                R, X, J = linear_rows(prob.model, cfg, b)
+                inp = () if self.pair_only else (X @ Pj, jnp.einsum("nkDa,Dq->nkqa", J.reshape(Ncap, K, -1, 3), Pj))
+            else:                       # node-chunked: J (Ncap*K, D, 3) never formed (rows._rows_scan)
+                R, X, JU0, _ = _rows_scan(prob.model, cfg, b, nc, with_X=not self.pair_only,
+                                          proj=None if self.pair_only else Pj)
+                inp = () if self.pair_only else (X @ Pj, JU0)
             Bw = tuple(Rq * wq[:, None] for Rq, wq in zip(_flat(R), _weights(b)))
-            inp = () if self.pair_only else (X @ Pj, jnp.einsum("nkDa,Dq->nkqa", J.reshape(Ncap, K, -1, 3), Pj))
-            return batch_linear_stats(prob.model, cfg, b), Bw, inp
+            return linear_stats_from_rows(R, b), Bw, inp
         one = jax.jit(one_fn)
         lin = None
         for b in range(self.nb):

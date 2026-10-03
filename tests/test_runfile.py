@@ -165,3 +165,40 @@ def test_basis_unavailable_is_a_clean_cli_error(monkeypatch, capsys):
     with pytest.raises(SystemExit) as e:
         main(["fit", "--order", "2", "--max-degree", "4", "--train", "t.xyz", "--out", "o"])
     assert e.value.code == 2 and "not available on this platform" in capsys.readouterr().err
+
+
+ARD_KEYS = {"force_shape": "aniso", "ard_coverage": 0.8, "ard_groups": "none", "ard_cluster_size": 4.5,
+            "ard_press": "block", "ard_n_min": 5, "no_ard_support": True, "ard_transfer": "sqrt"}
+
+
+def _ard_file(tmp_path, **over):
+    return _write(tmp_path / "fit.yaml", {"train": "t.xyz", "out": "o", "model": "m.npz", "r0": 2.4,
+                                          "uq": "ard", **{**ARD_KEYS, **over}})
+
+
+def test_ard_keys_accepted_and_cli_overrides(tmp_path):
+    a = _fit_ns(["--config", str(_ard_file(tmp_path))])
+    assert (a.force_shape, a.ard_coverage, a.ard_groups, a.ard_cluster_size, a.ard_press, a.ard_n_min,
+            a.no_ard_support, a.ard_transfer) == ("aniso", 0.8, "none", 4.5, "block", 5, True, "sqrt")
+    b = _fit_ns(["--config", str(_ard_file(tmp_path)), "--force-shape", "iso", "--ard-coverage", "0.95",
+                 "--ard-groups", "distortion", "--ard-cluster-size", "2", "--ard-press", "exact",
+                 "--ard-n-min", "9"])
+    assert (b.force_shape, b.ard_coverage, b.ard_groups, b.ard_cluster_size, b.ard_press, b.ard_n_min) == \
+        ("iso", 0.95, "distortion", 2.0, "exact", 9)
+
+
+def test_ard_cluster_size_yaml_inf(tmp_path):
+    f = tmp_path / "fit.yaml"
+    f.write_text("train: t.xyz\nout: o\nmodel: m.npz\nr0: 2.4\nard_cluster_size: .inf\n")
+    assert _fit_ns(["--config", str(f)]).ard_cluster_size == float("inf")
+
+
+@pytest.mark.parametrize("bad, key", [({"force_shape": "foo"}, "force_shape"), ({"ard_n_min": "x"}, "ard_n_min"),
+                                      ({"ard_n_min": 2.5}, "ard_n_min"), ({"ard_coverage": "high"}, "ard_coverage"),
+                                      ({"ard_press": "fast"}, "ard_press"), ({"ard_groups": "all"}, "ard_groups"),
+                                      ({"no_ard_support": "yes"}, "no_ard_support"),
+                                      ({"ard_transfer": "half"}, "ard_transfer")])
+def test_ard_bad_values_rejected(tmp_path, capsys, bad, key):
+    with pytest.raises(SystemExit):
+        _fit_ns(["--config", str(_ard_file(tmp_path, **bad))])
+    assert f"'{key}'" in capsys.readouterr().err

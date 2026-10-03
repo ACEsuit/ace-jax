@@ -31,7 +31,7 @@ def fit(cfg, data, log=print, on_stage=None):
                            "before importing anything that uses JAX (aj fit does this for you)")
     cfg.validate()
     if cfg.e0 == "lsq" and not cfg.joint_e0:
-        log("e0 lsq: ARD and POPS fit with the least-squares E0 fixed (as e0='prefit')")
+        log("e0 lsq: POPS fits with the least-squares E0 fixed (as e0='prefit')")
     stage = on_stage or (lambda name, payload: None)
     stage("data", data)
     radial = None

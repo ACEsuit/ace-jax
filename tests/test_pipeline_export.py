@@ -109,6 +109,29 @@ def test_cli_eval_reads_a_gp_model(gp_res, tmp_path):
     assert rows[0].arrays["ace_forces_std"].shape == (len(rows[0].numbers), 3)
 
 
+def test_cli_eval_no_deriv_dtc_reaches_the_gp_calculator(gp_res, tmp_path, monkeypatch):
+    """`aj eval --no-deriv-dtc` builds the GPCalculator with deriv_dtc=False."""
+    from ase.io import write
+    from ace_jax.calc import gp
+    from ace_jax.cli import main
+    from ace_jax.fit.pipeline import save_model
+    seen = []
+    orig = gp.GPCalculator.__init__
+
+    def spy(self, *a, **k):
+        orig(self, *a, **k)
+        seen.append(self.deriv_dtc)
+
+    monkeypatch.setattr(gp.GPCalculator, "__init__", spy)
+    path = save_model(gp_res, tmp_path)
+    data = tmp_path / "te.xyz"
+    write(data, [_atoms(c) for c in gp_res.data.test])
+    for flag, want in ((["--no-deriv-dtc"], False), ([], True)):
+        assert main(["eval", "--model", str(path), "--data", str(data),
+                     "--out", str(tmp_path / "p.xyz")] + flag) == 0
+        assert seen[-1] is want
+
+
 def test_pops_fit_saves_the_pops_mean_exactly(tmp_path):
     """A POPS run predicts with the ridge path's pinned mean c*; the saved model must
     hold exactly that vector.  A second, independent solve agreed only to the

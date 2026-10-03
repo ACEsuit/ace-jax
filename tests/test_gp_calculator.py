@@ -43,6 +43,24 @@ def _fitted_si():
     return fitted, meta, E0, configs, prob, train, draws
 
 
+def test_calculator_deriv_dtc_false_is_sor_forces_std():
+    """GPCalculator(deriv_dtc=False): forces_std from the SoR-only force variance, the mixture of
+    predict_mixture(deriv_dtc=False); the default keeps the (larger) derivative-DTC term."""
+    from ase import Atoms
+    fitted, meta, E0, configs, prob, train, draws = _fitted_si()
+    with highest_precision():
+        c = configs[7]
+        test = build_dataset([c], meta, E0, 1)
+        sd = {}
+        for flag in (True, False):
+            atoms = Atoms(numbers=c.numbers, positions=c.positions, cell=c.cell, pbc=c.pbc)
+            atoms.calc = GPCalculator(fitted, meta, deriv_dtc=flag)
+            sd[flag] = atoms.calc.get_property("forces_std", atoms)
+        p = predict_mixture(draws, prob, train, test, deriv_dtc=False)
+    assert np.allclose(sd[False] ** 2, p.F_var, rtol=1e-8, atol=1e-14)
+    assert np.all(sd[True] >= sd[False] - 1e-12) and not np.allclose(sd[True], sd[False])
+
+
 def test_calculator_agrees_with_predict_mixture():
     from ase import Atoms
     fitted, meta, E0, configs, prob, train, draws = _fitted_si()

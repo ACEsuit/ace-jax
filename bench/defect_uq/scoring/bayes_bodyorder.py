@@ -38,7 +38,7 @@ from ace_jax.fit.hypers import Hypers                                     # noqa
 from ace_jax.fit.inducing import site_features                            # noqa: E402
 from ace_jax.fit.pipeline import FitConfig, load_fit_data                 # noqa: E402
 from ace_jax.fit.pipeline.problem import build_problem                    # noqa: E402
-from ace_jax.fit.rows import linear_rows                                  # noqa: E402
+from ace_jax.fit.rows import chunked_rows_fn                              # noqa: E402
 from ace_jax.fit.stats import sufficient_statistics                       # noqa: E402
 
 data, theta_path, out_path = sys.argv[1], sys.argv[2], sys.argv[3]
@@ -127,6 +127,7 @@ def var_rows(c, R, cols=None):
 
 
 out = {}
+rows_fn = chunked_rows_fn(prob.model, gcfg)
 with highest_precision():
     for name, ds in (("test", d.ds_test), ("ood", d.ds_ood)):
         acc = {}
@@ -134,7 +135,7 @@ with highest_precision():
         for i in range(ds.n_batches):
             bt = jax.tree.map(lambda a, i=i: a[i], ds)
             live = np.asarray(bt.node_mask)
-            lin = linear_rows(prob.model, gcfg, bt)[0]
+            lin = rows_fn(bt)
             Fr = np.asarray(lin.F)[live].reshape(-1, L)                    # (3 n_live, L)
             Xs = np.asarray(X_all[i])[live]; zs = np.asarray(bt.node_z)[live]
             Er = place_sites(Xs, zs)

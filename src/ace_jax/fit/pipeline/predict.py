@@ -36,12 +36,12 @@ def _labels(cfgs):
 def _pops_setup(cfg, d, b, stats, theta, log):
     """Ridge (auto: selected on a train hold-out), the BLR-mean path, and the test
     envelope -- run.py's POPS block verbatim in behaviour."""
-    from ..rows import linear_rows
+    from ..rows import chunked_rows_fn
     prob, out = b.prob, {}
     if cfg.pops_ridge == "auto":
         nval = max(1, int(cfg.pops_val_frac * len(d.train)))
-        ds_fit = build_dataset(d.train[:-nval], d.meta, d.E0, cfg.batch)
-        ds_val = build_dataset(d.train[-nval:], d.meta, d.E0, cfg.batch)
+        ds_fit = build_dataset(d.train[:-nval], d.meta, d.E0, cfg.batch, pack=cfg.pack_mode, log=log)
+        ds_val = build_dataset(d.train[-nval:], d.meta, d.E0, cfg.batch, pack=cfg.pack_mode, log=log)
         ridge, scores = select_pops_ridge(theta, prob, ds_fit, ds_val, list(cfg.pops_ridge_grid),
                                           form=cfg.pops_posterior, leverage_pct=cfg.pops_leverage_pct, rows=cfg.pops_rows)
         out["ridge_scores"] = {"grid": list(cfg.pops_ridge_grid), "ridge": ridge, "n_val": nval,
@@ -55,9 +55,10 @@ def _pops_setup(cfg, d, b, stats, theta, log):
     path.use_mean(POPS_MEAN)
     cst = np.asarray(path.c_star)
     rowsE, rowsF = ([], [], []), ([], [])
+    rows_fn = chunked_rows_fn(prob.model, prob.cfg)
     for i in range(d.ds_test.n_batches):
         bt = jax.tree.map(lambda x_: x_[i], d.ds_test)
-        lin, _, _ = linear_rows(prob.model, prob.cfg, bt)
+        lin = rows_fn(bt)
         Lb, C = lin.E.shape[-1], bt.y_E.shape[0]
         nat_b = np.zeros(C + 1); np.add.at(nat_b, np.asarray(bt.node_cfg), np.asarray(bt.node_mask, float))
         kE = np.asarray(bt.w_E) > 0

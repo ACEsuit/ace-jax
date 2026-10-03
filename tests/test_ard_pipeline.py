@@ -27,6 +27,19 @@ def test_config_validates_ard():
         _cfg(ard_mode="both").validate()
     with pytest.raises(ValueError, match="ard_val_frac"):
         _cfg(ard_val_frac=1.0).validate()
+    c = _cfg().validate()
+    assert (c.ard_force_shape, c.ard_coverage, c.ard_groups, c.ard_cluster_size, c.ard_press, c.ard_n_min,
+            c.ard_support, c._shape_variant, c._score_source) == ("aniso", 0.9, "distortion", 3.0, "exact", 20,
+                                                                  True, "press", "fit")
+    assert c.ard_transfer == "exponent"
+    for field, bad in (("ard_force_shape", "x"), ("ard_groups", "x"), ("ard_press", "x"),
+                       ("_shape_variant", "x"), ("_score_source", "x"), ("ard_coverage", 1.0),
+                       ("ard_n_min", 0), ("ard_cluster_size", 0.0), ("ard_transfer", "x")):
+        with pytest.raises(ValueError, match=field):
+            _cfg(**{field: bad}).validate()
+    with pytest.raises(ValueError, match="ard_shape_eps"):         # m4: eps 0 can make the Mahalanobis solve singular
+        _cfg(ard_force_shape="aniso", ard_shape_eps=0.0).validate()
+    assert _cfg(ard_force_shape="iso", ard_shape_eps=0.0).validate().ard_shape_eps == 0.0
 
 
 @pytest.fixture(scope="module")
@@ -67,7 +80,7 @@ def test_sequential_mode_runs(tmp_path):
     from ace_jax.fit.pipeline import fit, load_fit_data
     cfg = _cfg(ard_mode="sequential").validate()
     res = fit(cfg, load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz")), log=lambda *a: None)
-    assert res.ard.report["mode"] == "sequential" and len(res.ard.report["h"]) == len(res.ard.report["groups"])
+    assert res.ard.report["mode"] == "sequential" and len(res.ard.report["h"]) == len(res.ard.report["body_groups"])
 
 
 def test_joint_ard_noise_comes_from_the_ard_refit(ard_fit):
@@ -135,4 +148,5 @@ def test_bench_run_driver_passes_the_ard_flags_through(tmp_path):
          "--ard-val-frac", "0.25", "--out", str(tmp_path)], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr[-3000:]
     rep = json.loads(next(tmp_path.rglob("ard.json")).read_text())
-    assert rep["variance"] == "kappa" and rep["mode"] == "sequential" and rep["n_val_configs"] == 4
+    assert rep["variance"] == "kappa" and rep["mode"] == "sequential" and rep["transfer"]["f"] == 0.25
+    assert rep["n_val_configs"] == rep["split"]["n_val"] >= 3               # stratified: ~0.25 of 16 configs

@@ -20,7 +20,7 @@ from .objective import posterior
 from .data import VOIGT, flat_edges
 from .metrics import crps_gaussian
 from .pops import leverage_select, pops_var
-from .rows import Rows, linear_rows, residual_inputs, residual_rows
+from .rows import _cat_rows, batch_rows_parts, linear_rows_bounded, residual_inputs
 from .stats import (DeviceRows, HostRows, _stream_pops_pointwise, available_host_bytes, host_rows_bytes,
                     sufficient_statistics)
 
@@ -105,10 +105,35 @@ def _dtc_D(theta, prob, batch, deL, deR):
     return jnp.diag(seg(seg(R).T))[:C]
 
 
+_DERIV_DTC_WARNED = False
+
+
+def _warn_deriv_dtc_size(Ncap, K, d):
+    """One-time warning when the derivative DTC's whole-batch (Ncap, K, d, 3) arrays (JU, the
+    slot velocities vU, the strain velocities cbU -- not node-chunked: a node's velocity gathers
+    the edges INTO it, which live in other nodes' chunks) exceed rows.ROWS_EDGE_BUDGET.  They are
+    built anyway, as before the rows were chunked; this only says why memory may run out."""
+    global _DERIV_DTC_WARNED
+    from . import rows as _rows
+    n = Ncap * K * d * 3
+    if _DERIV_DTC_WARNED or n <= _rows.ROWS_EDGE_BUDGET:
+        return
+    _DERIV_DTC_WARNED = True
+    import warnings
+    warnings.warn(
+        f"derivative-DTC force/virial variance on a batch of n_cap={Ncap}, k_cap={K} with a "
+        f"{d}-wide residual feature map builds whole-batch (n_cap, k_cap, d, 3) arrays of "
+        f"{n * 8 / 1e9:.3g} GB each (several are live at once); they are not node-chunked, so "
+        f"ACEJAX_ROWS_EDGE_BUDGET does not bound them.  If memory runs out: deriv_dtc=False "
+        f"(SoR-only F/V variance; GPCalculator(..., deriv_dtc=False), `aj eval --no-deriv-dtc`, "
+        f"predict_fixed/predict_mixture(deriv_dtc=False)), or fit with a narrow feature map "
+        f"(--density pair / pca).", stacklevel=3)
+
+
 DERIV_DTC_NODE_BATCH = 4    # nodes per vmapped chunk of the force double jvp: bounds its temp
 
 
-def _dtc_deriv_residual(theta, prob, batch, X=None, J=None, res=None):
+def _dtc_deriv_residual(theta, prob, batch, X=None, J=None, res=None, JU0=None):
     """Force and virial DTC prior residuals -- the position/strain derivative of
     the energy DTC residual, so F_var, V_var are consistent with E_var (Ruling
     R30).  For a linear functional o of the residual field,
@@ -119,6 +144,7 @@ def _dtc_deriv_residual(theta, prob, batch, X=None, J=None, res=None):
     the analytic feature/summary velocities dU_i/dr, dU_i/deps -- no autodiff
     through the ACE basis, so it is cheap in the low-d density feature and does
     not build a third-order tape (the naive jacfwd(jacrev) OOMs at scale).
+    JU0 = Pmap^T J (Ncap, K, d, 3) may stand in for J (the node-chunked rows path never forms J).
     Returns Fv (Ncap, 3) and Vv (C, 6).  M == 0 (BLR limit) -> zeros."""
     spec, ind, cfg = prob.spec, prob.ind, prob.cfg
     Ncap, K = batch.nbr.shape
@@ -132,17 +158,18 @@ def _dtc_deriv_residual(theta, prob, batch, X=None, J=None, res=None):
             f"Pass deriv_dtc=False for SoR-only force/virial variance.")
     if ind.XM.shape[0] == 0:
         return jnp.zeros((Ncap, 3)), jnp.zeros((C, 6))
-    if X is None or J is None:
-        _, X, J = linear_rows(prob.model, cfg, batch)
-    if res is None:
-        res = residual_rows(theta, spec, ind, cfg, batch, X, J)
+    _warn_deriv_dtc_size(Ncap, K, ind.Pmap.shape[1])
+    if X is None or (J is None and JU0 is None) or res is None:
+        _, res, X, JU0 = batch_rows_parts(theta, spec, prob.model, ind, cfg, batch,
+                                          with_X=True, with_JU0=True)
+    if JU0 is None:
+        JU0 = jnp.einsum("nkDa,Dq->nkqa", J.reshape(Ncap, K, cfg.D, 3), ind.Pmap)
     d, M = ind.XM.shape[1], ind.XM.shape[0]
     rij, send, recv, m = flat_edges(batch.rij, batch.nbr, batch.nbr_mask)
     z = batch.node_z
     U, s, Js = residual_inputs(ind, cfg, batch, X)                        # U (Ncap,d), Js (E,3)
     dw = dwarp(X @ ind.Pmap, ind.warp)                                    # (Ncap, d)
-    JU = dw[:, None, :, None] * jnp.einsum("nkDa,Dq->nkqa",
-                                           J.reshape(Ncap, K, cfg.D, 3), ind.Pmap)  # (Ncap,K,d,3)
+    JU = dw[:, None, :, None] * JU0                                       # (Ncap,K,d,3)
     Jsd = Js.reshape(Ncap, K, 3)
     ar = jnp.arange(Ncap)
 
@@ -202,10 +229,10 @@ def _dtc_deriv_residual(theta, prob, batch, X=None, J=None, res=None):
 
 
 def _predict_batch(theta, prob, mu, L, batch, dtc=True, deriv_dtc=True):
-    lin, X, J = linear_rows(prob.model, prob.cfg, batch)        # as rows.batch_rows, keeping X
-    res = residual_rows(theta, prob.spec, prob.ind, prob.cfg, batch, X, J)
-    r = Rows(jnp.concatenate([lin.E, res.E], 1), jnp.concatenate([lin.F, res.F], 2),
-             jnp.concatenate([lin.V, res.V], 2))
+    want_ju = dtc and deriv_dtc and prob.ind.XM.shape[0] > 0
+    lin, res, X, JU0 = batch_rows_parts(theta, prob.spec, prob.model, prob.ind, prob.cfg, batch,
+                                        with_X=True, with_JU0=want_ju)   # as rows.batch_rows, keeping X
+    r = _cat_rows(lin, res)
     Dt = r.E.shape[-1]
     Em, Ev = _rows_mean_var(r.E, mu, L)
     if dtc:
@@ -214,7 +241,7 @@ def _predict_batch(theta, prob, mu, L, batch, dtc=True, deriv_dtc=True):
     Vm, Vv = _rows_mean_var(r.V.reshape(-1, Dt), mu, L)
     Fv, Vv = Fv.reshape(-1, 3), Vv.reshape(-1, 6)
     if dtc and deriv_dtc:                                    # F_var, V_var = d E_var (self-consistent)
-        dFv, dVv = _dtc_deriv_residual(theta, prob, batch, X, J, res)
+        dFv, dVv = _dtc_deriv_residual(theta, prob, batch, X, res=res, JU0=JU0)
         Fv, Vv = Fv + dFv, Vv + dVv
     return Em, Ev, Fm.reshape(-1, 3), Fv, Vm.reshape(-1, 6), Vv
 
@@ -435,7 +462,7 @@ class PopsRidgePath:
 
 def _pops_batch_phi(prob, batch):
     """The linear rows (phiE (C, L), phiF (3 Ncap, L), phiV (6 C, L)) of one batch."""
-    lin, _, _ = linear_rows(prob.model, prob.cfg, batch)
+    lin = linear_rows_bounded(prob.model, prob.cfg, batch)
     L = lin.E.shape[-1]
     return lin.E, lin.F.reshape(-1, L), lin.V.reshape(-1, L)
 
@@ -582,7 +609,7 @@ def predict_fixed(theta, prob, ds_train, ds_test, dtc=True, deriv_dtc=True,
 def predict_readout(prob, mu, ds_test):
     """Predictions of a fixed readout mu (no posterior: zero variance), linear arm."""
     def batch(mu, b):
-        r = linear_rows(prob.model, prob.cfg, b)[0]
+        r = linear_rows_bounded(prob.model, prob.cfg, b)       # peak memory bounded for big cells
         Em, Fm, Vm = r.E @ mu, (r.F @ mu).reshape(-1, 3), (r.V @ mu).reshape(-1, 6)
         return Em, jnp.zeros_like(Em), Fm, jnp.zeros_like(Fm), Vm, jnp.zeros_like(Vm)
     f, mu = jax.jit(batch), jnp.asarray(mu)

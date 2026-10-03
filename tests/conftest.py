@@ -162,6 +162,33 @@ def tiny_linear_problem():
     return prob, ds
 
 
+def _orders(prob):
+    """Correlation order of each B column of the tiny problem's model (all body orders present)."""
+    import json
+    import numpy as np
+    z = np.load(FIXTURE_DIR / "si_fitted.npz")
+    return [len(x) for x in json.loads(bytes(z["meta_json"]).decode())["nnll"]]
+
+
+@pytest.fixture
+def ard_setup(tiny_linear_problem):
+    """(prob, ds, ev, h, post): the joint ARD evidence of the tiny problem and its posterior at h0."""
+    import numpy as np
+    from ace_jax.eval import highest_precision
+    from ace_jax.fit.ard import ARDEvidence, ard_posterior, ard_statistics, body_order_columns
+    from ace_jax.fit.hypers import default_prior
+    prob, ds = tiny_linear_problem
+    theta = default_prior(2.35).mu
+    meta = {"nnll": [[None] * o for o in _orders(prob)], "n_B": prob.cfg.n_B, "n_pair": prob.cfg.n_pair,
+            "NZ": prob.cfg.NZ, "rcut": prob.cfg.rcut, "elements": [14]}
+    with highest_precision():
+        ev = ARDEvidence(ard_statistics(theta, prob, ds, "joint"), np.asarray(prob.gamma),
+                         body_order_columns(meta, prob.cfg))
+        h = ev.h0(theta)
+        post = ard_posterior(ev, h, 2.0, meta)
+    return prob, ds, ev, h, post
+
+
 @pytest.fixture(scope="module")
 def two_type_synthetic():
     """M=0 (BLR-limit) Problem + Dataset with TWO config-types built from the 6
@@ -241,6 +268,62 @@ def _release_jax_memory():
         jax.clear_caches()
     except Exception:
         pass
+
+
+# A module that compiles many distinct programs per test (the ARD stage tests: every stage
+# variant builds its own scans) can instead exhaust the process's memory-map limit within one
+# module (vm.max_map_count; XLA's CPU JIT then aborts with "Failed to materialize symbols" /
+# "releaseMappedMemory failed").  Such a module sets RELEASE_JAX_PER_TEST = True to clear after
+# every test, as the whole suite did before per-module clearing.
+@pytest.fixture(autouse=True)
+def _release_jax_memory_per_test(request):
+    yield
+    if getattr(request.module, "RELEASE_JAX_PER_TEST", False):
+        try:
+            import jax
+            jax.clear_caches()
+        except Exception:
+            pass
+
+
+@pytest.fixture
+def one_config_batch():
+    """Factory: ASE Atoms -> the one-config Dataset batch (the calculator's construction)."""
+    import jax
+    import numpy as np
+    from ace_jax.fit.data import Config, build_dataset
+
+    def make(atoms, rcut=6.25):
+        meta = {"elements": sorted({int(z) for z in atoms.numbers}), "rcut": rcut}
+        c = Config(atoms.get_positions(), atoms.get_atomic_numbers(), atoms.get_cell().array, atoms.get_pbc(),
+                   None, None, None, 1.0, 1.0, 1.0)
+        return jax.tree.map(lambda a: a[0], build_dataset([c], meta, np.zeros(len(meta["elements"])), 1))
+    return make
+
+
+@pytest.fixture(scope="session")
+def aniso_fit(tmp_path_factory):
+    """A schema-3 ARD fit with --force-shape aniso (small, 5 MAP steps); shared by the CLI and equivariance tests."""
+    from ace_jax.cli import main
+    out = tmp_path_factory.mktemp("aniso")
+    assert main(["fit", "--model", str(FIXTURE_DIR / "si_fitted.npz"), "--data", str(FIXTURE_DIR / "si_tiny_train.xyz"),
+                 "--ntrain", "30", "--ntest", "8", "--energy-key", "dft_energy", "--force-key", "dft_force",
+                 "--virial-key", "dft_virial", "--m-per-species", "0", "--uq", "ard", "--force-shape", "aniso",
+                 "--opt", "lbfgs", "--map-steps", "5", "--configs-per-batch", "4", "--r0", "2.35",
+                 "--out", str(out)]) == 0
+    return out
+
+
+@pytest.fixture(scope="session")
+def fitted(tmp_path_factory):
+    """Iso (explicit --force-shape iso) schema-3 ARD fit, shared across the ARD test modules."""
+    from ace_jax.cli import main
+    out = tmp_path_factory.mktemp("ard")
+    assert main(["fit", "--model", str(FIXTURE_DIR / "si_fitted.npz"), "--data", str(FIXTURE_DIR / "si_tiny_train.xyz"), "--ntrain", "30",
+                 "--ntest", "8", "--energy-key", "dft_energy", "--force-key", "dft_force", "--virial-key",
+                 "dft_virial", "--m-per-species", "0", "--uq", "ard", "--force-shape", "iso", "--opt", "lbfgs", "--map-steps", "5",
+                 "--configs-per-batch", "4", "--r0", "2.35", "--out", str(out)]) == 0
+    return out
 
 
 def small_si_xyz(path, n=12):

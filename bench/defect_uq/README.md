@@ -150,6 +150,8 @@ per-atom output of ace-jax fits and calculators.
 ## Acceptance of the ace-jax implementation (`--uq ard`, PR #18; 2026-09-28/29)
 
 Fits: `modal/fit_bench.py` arms `ard`, `ard_<tag>` and `ard_c<k>` (the last sets `ard_cond_max = 10**k`).
+These arms, and `ard_ABblk` below, are pinned to `ard_force_shape="iso"`: the pre-2026-10-03 results are iso, while the library default is now aniso.
+Every ARD arm of `fit_bench.py` (and `modal/sandwich_spike.py`) is also pinned to `e0="prefit"`: all ARD runs before 2026-10-03, including the revision-2 acceptance tables, used the pre-fit E0, while the library now fits E0 jointly under `e0="lsq"` (as BLR).
 Big cells: `modal_bench365.py::big_errors`. Scoring:
 - `scoring/eval_ard.py`: rms-z, cov90, NLL, ρ and AUROC per family, with 95 % confidence intervals from
   a block bootstrap over configurations;
@@ -196,3 +198,130 @@ come from a block bootstrap over cells, with only 2 cells per dislocation family
 - Dislocations are calibrated and slightly conservative.
 - Crack tips are slightly overconfident: rms-z 1.08 and cov90 0.85 within 10 Å of the tip, across
   all 6 cells.
+
+## Validation of the jackknife shape and conformal scales (schema 3; run 2026-10-01..03)
+
+`--uq ard` now serves `forces_std` (lam_g x an exact centred jackknife shape), `forces_cov`, `forces_q`
+(conformal radius), `forces_group` and `forces_support`. `aj calibrate` re-scales the per-group scales on a
+labelled set. This programme measures them on the v3 big cells and ablates the ingredients. The acceptance
+targets are in `docs/dev/specs/2026-09-30-conformal-force-sigma-design.md`.
+
+**Results: [`results/2026-10-03_rev2_acceptance.md`](results/2026-10-03_rev2_acceptance.md).** The default
+(aniso shape + transfer exponent) passes every target:
+- in distribution: 0.898;
+- crack: 0.903;
+- tip: 0.885;
+- edge / screw: 0.937 / 0.941.
+
+`aj calibrate` on labelled crack cells gives the best tip coverage (0.897–0.903), but the calibrated posterior
+under-covers in distribution (0.87), so serve it only on cells like its calibration set. Block size ℓ has no
+effect. The tables, run names and commands follow.
+
+**Code**
+- `modal/ard_arms.py`: `ARD_ARMS`, the arm name -> `FitConfig` override table (`fit_bench.py` takes the name as its arm).
+
+  | arm | what it ablates |
+  |---|---|
+  | `ard_legacy` | #18 uncentred sandwich, own-cluster-out scores, 2 groups (see note) |
+  | `ard_A` | #18 shape with scores from the fit split, distortion groups |
+  | `ard_AB` | centred PRESS shape, whole-configuration clusters (ell = inf) |
+  | `ard_ABblk` | PRESS, ell = 3 r_cut, **iso** (explicitly `ard_force_shape="iso"`, since the library default became aniso on 2026-10-03; keeps the recorded ablation reproducible) |
+  | `ard_aniso` | Mahalanobis region (`forces_q_mahal`); now equal to the library defaults |
+  | `ard_ell{2,4,6}` | ell sweep (3 = `ard_ABblk`, inf = `ard_AB`) |
+  | `ard_f{1,3}` | `ard_val_frac` 0.1 / 0.3 (0.2 = `ard_ABblk`) |
+  Note: `ard_legacy` reproduces the 30-Sep *shape* and scores, but it still serves the revision-2
+  scales: per-group (G = 2, [z = z*]) configuration-weighted `lam_rms` / `q`, not the 30-Sep single
+  atom-weighted scalar lambda. The scalar is still computed and stored as `ard.json` `"lam"`;
+  `validate_shape.py` prints it as the `lam (scalar)` column beside `lambda_rms` for that comparison.
+- `fit_bench.py --train-extra A.xyz,B.xyz` appends those configurations to `train.xyz` (written to
+  `<out>/train_plus_extra.xyz`); the Modal `launch` takes `--train-extra` and `--tag` (output dir suffix).
+- `modal_bench365.py::big_errors` now saves `sd`, `forces_q`, `forces_group`, `forces_cov` (schema-3 posteriors)
+  and the error vector `dF` into `big<tag>_err.npz`. `modal/served_arrays.py` holds the concatenation helper.
+- `scoring/validate_shape.py --runs DIR... --out report.md`: leverage summary, lambda_rms, rho per family, coverage
+  per conformal group / family / tip band (cell- and atom-weighted, 90 % bootstrap over whole cells, B = 1000),
+  region volume (raw and at nominal coverage), f-sweep slope, ell-sweep table. Old runs (no `forces_q`) report n/a.
+- Tests: `uv run pytest bench/defect_uq/tests -q` (outside the repo's `testpaths`, so run it explicitly).
+
+**Commands** (from `bench/defect_uq/modal`, with `ACEGP_DATA`, `ACEJAX_SRC` set as for the existing runs;
+`/out` is the `acegp-prod-out` volume; the crack files must first be on the volume as `/out/defects/big3_*`,
+check with `modal volume ls acegp-prod-out defects`)
+
+```bash
+modal deploy modal_bench365.py
+
+# 1. ablation arms on bench365 (5 fits)
+modal run modal_bench365.py::launch --arms ard_legacy,ard_A,ard_AB,ard_ABblk,ard_aniso
+
+# 2. ell sweep: ell in {2,3,4,6,inf} = ard_ell2, ard_ABblk, ard_ell4, ard_ell6, ard_AB. First without tip data
+#    (calibration only: the runs of step 1 + ard_ell2/4/6), then with crack realisations NOT held out in T.
+#    A fold holds out one crack FILE (a realisation pair: r2-3, r4-5, r6-7 or r8-9) and trains on the other three
+#    via --train-extra; tag _fold_<pair>. Start with 3 folds (r2-3, r4-5, r8-9); extend to all 4 if the
+#    spread between folds is > 1 point.
+for ell in ard_ell2 ard_ABblk ard_ell4 ard_ell6 ard_AB; do
+  modal run modal_bench365.py::launch --arms $ell --tag _fold_r2-3 \
+      --train-extra /out/defects/big3_cracks_r4-5.xyz,/out/defects/big3_cracks_r6-7.xyz,/out/defects/big3_cracks_r8-9.xyz
+done
+# (repeat with --tag _fold_r4-5 and the extras r2-3,r6-7,r8-9, and so on for each fold)
+# --train-extra checks every frame for mace_energy and mace_force (error naming file, frame, key), allows a
+# missing mace_virial (no virial row, logged), and logs the counts of frames, virial-less frames and fixed
+# boundary atoms. Fixed atoms stay in the fit with their MACE force labels (the loader has one force weight per
+# configuration, no per-atom mask); see modal/train_extra.py.
+
+# 3. f sweep (0.2 = ard_ABblk)
+modal run modal_bench365.py::launch --arms ard_f1,ard_f3
+
+# per-atom errors + served arrays on the v3 cells (one call per file; the tag names the file).
+# Non-fold runs: all five files.
+for run in bench365_ard_legacy bench365_ard_A bench365_ard_AB bench365_ard_ABblk bench365_ard_aniso \
+           bench365_ard_ell2 bench365_ard_ell4 bench365_ard_ell6 bench365_ard_f1 bench365_ard_f3; do
+  modal run modal_bench365.py::launch_big --run $run --xyz /out/defects/big3_mh1.xyz --tag 3
+  for p in 2-3 4-5 6-7 8-9; do
+    modal run modal_bench365.py::launch_big --run $run --xyz /out/defects/big3_cracks_r$p.xyz --tag 3x_r$p
+  done
+done
+# Fold runs: only the held-out pair's file and the main file (r0-1 cracks + edge/screw, never in T); the
+# training cracks must not be scored. Example for fold r2-3:
+for ell in ard_ell2 ard_ABblk ard_ell4 ard_ell6 ard_AB; do
+  run=bench365_${ell}_fold_r2-3
+  modal run modal_bench365.py::launch_big --run $run --xyz /out/defects/big3_mh1.xyz --tag 3
+  modal run modal_bench365.py::launch_big --run $run --xyz /out/defects/big3_cracks_r2-3.xyz --tag 3x_r2-3
+done
+
+# 4. leave-one-realisation-out aj calibrate on the v3 crack cells, default arm (local, CPU is enough
+#    for the labels; GPU for the descriptor pass): for each held-out realisation r
+#      aj calibrate --model $RUN/model.npz --posterior $RUN/posterior.npz --data <v3 cracks of the others, +ID test> \
+#          --force-key mace_force --energy-key mace_energy --replace --out $RUN/posterior_cal_r$r.npz
+#    then big_errors against posterior_cal_r$r.npz on realisation r and score with validate_shape.py.
+
+# report (after fetching the runs: modal volume get acegp-prod-out <run> results/2026-10-xx/).
+# Non-fold arms, and the ell sweep with tip data (fold runs restricted to the files they did not train on
+# with DIR:PATTERN; patterns are fnmatch on the err-file basenames, comma-separated):
+R=results/2026-10-xx
+uv run python ../scoring/validate_shape.py --out validate_shape.md --runs \
+    $R/bench365_ard_legacy $R/bench365_ard_A $R/bench365_ard_AB $R/bench365_ard_ABblk $R/bench365_ard_aniso
+uv run python ../scoring/validate_shape.py --out validate_ell_tip_r2-3.md --runs \
+    $R/bench365_ard_ell2_fold_r2-3:big3_err.npz,big3x_r2-3_err.npz $R/bench365_ard_ABblk_fold_r2-3:big3_err.npz,big3x_r2-3_err.npz \
+    $R/bench365_ard_ell4_fold_r2-3:big3_err.npz,big3x_r2-3_err.npz $R/bench365_ard_ell6_fold_r2-3:big3_err.npz,big3x_r2-3_err.npz \
+    $R/bench365_ard_AB_fold_r2-3:big3_err.npz,big3x_r2-3_err.npz
+```
+
+Step 4 driver: `modal/modal_calibrate.py` (own app `acegp-calibrate`; `modal_bench365.py` untouched). Per
+held-out pair it runs `aj calibrate` (per-group by default; `--mode append|replace`) on the other three
+`big3_cracks_r*.xyz` files and writes `/out/<run>_cal[_<mode>]_r<pair>/{model.npz,posterior.npz,calibrate.log,
+big3x_r<pair>_err.npz,big3_err.npz}`:
+
+```
+cd bench/defect_uq/modal && modal deploy modal_calibrate.py
+modal run modal_calibrate.py::launch --run bench365_ard_ABblk      # 4 calls: holds 2-3,4-5,6-7,8-9
+for p in 2-3 4-5 6-7 8-9; do modal volume get acegp-prod-out bench365_ard_ABblk_cal_r$p $R/; done
+uv run python ../scoring/validate_shape.py --out validate_loro.md --runs $R/bench365_ard_ABblk_cal_r2-3 ...
+```
+
+**Estimated cost.** 25 fits: 5 ablation + 3 ell (no tip data) + 15 ell with tip data (5 ell x 3 folds) +
+2 f. A bench365 ARD fit was 19-31 min of solver time (`ard.json` `seconds`, 2026-09-28) plus loading and
+the new PRESS/support stages, taken as ~0.75 B200-h: about 19 B200-h. `big_errors` on the 5 v3 files per run
+(A100-80GB, ~0.2 h per run, 25 runs): ~5 A100-h. Calibration is minutes per fold.
+
+**Acceptance** (record results here and in `results/2026-10-xx/ACCEPTANCE.md`; a miss is reported as a miss
+with the per-group table): in-distribution held-out coverage 0.90 +- 0.01; crack whole cell >= 0.89, tip >= 0.88,
+edge/screw >= 0.90 (calibrate, leave-one-realisation-out).

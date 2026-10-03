@@ -28,7 +28,7 @@ from ase.io import read                                                         
 from jax.scipy.linalg import cho_solve, solve_triangular                          # noqa: E402
 
 from ace_jax.eval import highest_precision                                          # noqa: E402
-from ace_jax.fit.ard import (ARDEvidence, ard_posterior, body_order_columns,      # noqa: E402
+from ace_jax.fit.ard import (ARDEvidence, ard_gamma, ard_posterior, body_order_columns,      # noqa: E402
                              joint_ard_stats)
 from ace_jax.fit.data import Config, build_dataset                                  # noqa: E402
 from ace_jax.fit.pipeline import FitConfig, load_fit_data                           # noqa: E402
@@ -41,8 +41,10 @@ T0 = time.time()
 log = lambda *a: print(f"[{time.time() - T0:7.0f} s]", *a, flush=True)
 VARIANTS = ("hc0", "hc3", "pops", "atom", "cfg")
 
+# e0="prefit": the runs this spike reads (before 2026-10-03) used the pre-fit E0 under ARD, as the library
+# then did for e0="lsq"; it now fits E0 jointly (as BLR), which would add E0 columns these h do not match
 cfg = FitConfig(model=f"{data}/cantor_embed_d16_deg10.npz", energy_key="mace_energy", force_key="mace_force",
-                virial_key="mace_virial", r0=2.5, batch=4, rungs=("map",), predict_train=False, e0="lsq",
+                virial_key="mace_virial", r0=2.5, batch=4, rungs=("map",), predict_train=False, e0="prefit",
                 opt="lbfgs", map_steps=40, arm="linear", uq="ard", ard_mode="joint").validate()
 d = load_fit_data(cfg, train=f"{data}/train.xyz", test=f"{data}/test.xyz", ood=f"{data}/ood.xyz")
 b = build_problem(cfg, d)
@@ -56,7 +58,7 @@ log("data", len(d.train), "train configs; L =", L, "; sigma_q =", sig)
 with highest_precision():
     st = linear_statistics(prob.model, prob.cfg, d.ds_train)
     log("linear statistics")
-    ev = ARDEvidence(joint_ard_stats(st), np.asarray(prob.gamma), body_order_columns(d.meta, prob.cfg))
+    ev = ARDEvidence(joint_ard_stats(st), ard_gamma(prob), body_order_columns(d.meta, prob.cfg))
     del st
     post = ard_posterior(ev, h, 1.0, d.meta)
     del ev

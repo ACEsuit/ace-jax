@@ -56,8 +56,8 @@ $E - \sum_i E_0(z_i)$, so $E_0$ decides what the basis has to represent.
   the prior has a say in where it lands. The log-evidence of such fits compares
   across bases fitted to the same data, not with `--e0 prefit` fits.
 - `aj fit --e0 prefit` is the older two-step version: $E_0$ is fixed at the
-  least-squares fit before the readout is fitted. (ARD and POPS fits use this
-  even with `--e0 lsq`.)
+  least-squares fit before the readout is fitted. (POPS fits use this even
+  with `--e0 lsq`; ARD fits E0 jointly, as BLR does.)
 - An **isolated-atom** configuration (one atom, no neighbour within the
   cutoff) is predicted as $E_0$ alone. With `--e0 lsq` or `prefit`, a species
   that has one in the training set takes its energy as $E_0$ exactly, and the
@@ -133,9 +133,12 @@ do not use them.
   an estimate of misspecification uncertainty. It changes only the
   uncertainty; the mean is the Bayesian-regression mean.
 - **ARD** (`--uq ard`, linear model only): an automatic-relevance-determination
-  posterior with a per-atom force $\sigma$ calibrated on a held-out part of the
-  training set; writes `posterior.npz` next to `model.npz` and changes the
-  mean as well.
+  posterior with a calibrated per-atom force uncertainty: a jackknife shape
+  times per-group scales fitted on a held-out part of the training set, served
+  as a standard deviation, a 3×3 covariance and a conformal radius. It writes
+  `posterior.npz` next to `model.npz` and changes the mean as well. See
+  [Per-atom force uncertainty](howto/force-uncertainty.md) and
+  [the mathematics](concepts/force-uncertainty-maths.md).
 - **Hybrid ACE + GP** (`--m-per-species M`, $M > 0$, the CLI default 500): a
   Gaussian-process correction on $M$ inducing sites per species, fitted on the
   features $[\,B \mid k_\theta(B, B_M)\,]$. The fitted model is `gp_model.npz`, loaded by
@@ -173,7 +176,7 @@ error bar.
 | `model.npz` | `aj fit` (linear arm), the radial learner | `aj.load`, `ACECalculator`, `aj eval`, `export_lammps`, `aj fit --model` |
 | `fit.yaml` | every `aj fit` | `aj fit --config` |
 | `gp_model.npz` | `aj fit` (GP arm) | `GPCalculator.from_file`, `aj eval` |
-| `posterior.npz` | `aj fit --uq ard` | `ACECalculator(..., posterior=)`, `aj eval --posterior` |
+| `posterior.npz` | `aj fit --uq ard`, `aj calibrate` | `ACECalculator(..., posterior=)`, `aj eval --posterior`, `aj calibrate` |
 | `*.yace` | pacemaker, or `ace_jax.eval.write_yace` | `aj.load`, `ACECalculator`, `aj eval`, `export_lammps` |
 
 An ACE `.npz` holds the basis definition, the splined or analytic radials, the

@@ -21,7 +21,9 @@ quickstart, tutorials, how-to guides, and the CLI and API reference.
   energy, force and virial noise levels and the prior scale chosen by maximising
   the evidence: no hand-tuned weights. A hybrid ACE + Gaussian-process arm adds
   a calibrated uncertainty ladder (MAP, Laplace, Pathfinder, VI, NUTS), and the
-  linear model has POPS and ARD uncertainties. The radial basis can be learned
+  linear model has POPS and ARD uncertainties. ARD serves conformally calibrated
+  per-atom force uncertainty (`forces_std`, `forces_q`, a 3x3 `forces_cov`),
+  recalibrated on new labelled cells with `aj calibrate`. The radial basis can be learned
   as part of the fit (`--learn-radial`).
 - **Fast evaluation.** `ACECalculator` and `GPCalculator` are ASE calculators,
   fast enough for molecular dynamics, with predicted `energy_std` and

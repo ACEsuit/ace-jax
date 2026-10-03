@@ -75,8 +75,12 @@ def _linear_type_stats(Phi_B, y, w):
 
 
 def batch_linear_stats(model, cfg, batch):
-    from .rows import linear_rows
-    r, _, _ = linear_rows(model, cfg, batch)
+    from .rows import linear_rows_bounded
+    return linear_stats_from_rows(linear_rows_bounded(model, cfg, batch), batch)
+
+
+def linear_stats_from_rows(r, batch):
+    """batch_linear_stats from already-built linear rows r."""
     L = r.E.shape[-1]
     E = _linear_type_stats(r.E, batch.y_E, batch.w_E)
     F = _linear_type_stats(r.F.reshape(-1, L), batch.y_F.reshape(-1), jnp.repeat(batch.w_F, 3))
@@ -156,8 +160,8 @@ def _linear_type_stats_typed(Phi_B, y, w, tidx, n_types):
 
 
 def batch_linear_stats_typed(model, cfg, batch, n_types):
-    from .rows import linear_rows
-    r, _, _ = linear_rows(model, cfg, batch)
+    from .rows import linear_rows_bounded
+    r = linear_rows_bounded(model, cfg, batch)
     L = r.E.shape[-1]
     E = _linear_type_stats_typed(r.E, batch.y_E, batch.w_E, batch.cfg_type, n_types)
     F = _linear_type_stats_typed(r.F.reshape(-1, L), batch.y_F.reshape(-1),
@@ -235,8 +239,8 @@ def _batch_pops_pointwise(model, cfg, batch, c_star, Sigma0, sigma):
     """One batch's per-point corrections and leverages, quantities concatenated
     in E, F, V order.  `sigma` maps 'E'/'F'/'V' -> per-quantity noise scale."""
     from .pops import pointwise_corrections, whiten
-    from .rows import linear_rows
-    r, _, _ = linear_rows(model, cfg, batch)
+    from .rows import linear_rows_bounded
+    r = linear_rows_bounded(model, cfg, batch)
     L = r.E.shape[-1]
     ds_d, ds_h = [], []
     for phi, y, w, sq in (
@@ -300,8 +304,8 @@ def _pops_batch_rows(model, cfg, batch, qs=(1.0, 1.0, 1.0)):
     batch, quantities concatenated E, F, V (padded rows carry w = 0).  The weight
     is the structural weight times the per-quantity loss scale qs = (1/sigma_E,
     1/sigma_F, 1/sigma_V)."""
-    from .rows import linear_rows
-    r, _, _ = linear_rows(model, cfg, batch)
+    from .rows import linear_rows_bounded
+    r = linear_rows_bounded(model, cfg, batch)
     L = r.E.shape[-1]
     phi = jnp.concatenate([r.E, r.F.reshape(-1, L), r.V.reshape(-1, L)])
     y = jnp.concatenate([batch.y_E, batch.y_F.reshape(-1), batch.y_V.reshape(-1)])

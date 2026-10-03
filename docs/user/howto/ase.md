@@ -112,8 +112,10 @@ D = aj.site_descriptors(model, atoms.positions, atoms.numbers, atoms.cell.array,
 
 - A model fitted with `aj fit --uq ard` comes with `posterior.npz`.
   `ACECalculator("model.npz", posterior="posterior.npz")` then provides a
-  per-atom `forces_std`, computed on request with
-  `calc.get_property("forces_std", atoms)`.
+  calibrated per-atom `forces_std`, `forces_cov`, `forces_q` and
+  `forces_group`, computed on request, e.g. with
+  `calc.get_property("forces_std", atoms)`; see
+  [Per-atom force uncertainty](force-uncertainty.md).
 - A hybrid ACE + GP fit writes `gp_model.npz`, which loads with
   `GPCalculator.from_file("gp_model.npz")` and adds `energy_std` and
   `forces_std` to `calc.results`.

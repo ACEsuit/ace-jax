@@ -12,3 +12,5 @@ results behind ace-jax, kept as the record that code comments and tests cite:
   (figures in `figures/`). Some cite prototypes that are archived at the git tag
   `archive/research-prototypes` (see `bench/ARCHIVED.md`).
 - `coupling-etshim-spec.md`: the compiled coupling library.
+- `ard-force-uq.md`: usage notes for `--uq ard` revision 2 (conformal per-atom force
+  uncertainty, `aj calibrate`), the source for its user pages.

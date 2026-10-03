@@ -32,7 +32,7 @@ from ace_jax.eval import highest_precision                                # noqa
 from ace_jax.fit.hypers import Hypers                                     # noqa: E402
 from ace_jax.fit.pipeline import FitConfig, load_fit_data                 # noqa: E402
 from ace_jax.fit.pipeline.problem import build_problem                    # noqa: E402
-from ace_jax.fit.rows import linear_rows                                  # noqa: E402
+from ace_jax.fit.rows import chunked_rows_fn                              # noqa: E402
 from ace_jax.fit.stats import sufficient_statistics                       # noqa: E402
 
 data, theta_path, out_path = sys.argv[1], sys.argv[2], sys.argv[3]
@@ -197,13 +197,14 @@ draws = np.clip(rng.multivariate_normal(h_ardJ, cov_h, size=n_draws), LO, HI)   
 models = {"blr": posterior(h_blr), "ardG": posterior(h_ardG), "ardJ": posterior(h_ardJ)}
 dposts = [posterior(hd) for hd in draws]
 out = {}
+rows_fn = chunked_rows_fn(prob.model, gcfg)
 with highest_precision():
     for name, ds in (("test", d.ds_test), ("ood", d.ds_ood)):
         acc = {}
         for i in range(ds.n_batches):
             bt = jax.tree.map(lambda a, i=i: a[i], ds)
             live = np.asarray(bt.node_mask)
-            Fr = jnp.asarray(np.asarray(linear_rows(prob.model, gcfg, bt)[0].F)[live].reshape(-1, L))
+            Fr = jnp.asarray(np.asarray(rows_fn(bt).F)[live].reshape(-1, L))
             for m, (c, x) in models.items():
                 acc.setdefault(f"F_{m}", []).append(np.asarray(Fr @ x).reshape(-1, 3))
                 v = solve_triangular(c, (Fr * Dinv[None, :]).T, lower=True)

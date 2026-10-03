@@ -12,6 +12,7 @@ class FitConfig:
     stress_key: str | None = None        # ASE/MACE stress label: virial = -stress * volume when no virial
     ntrain: int = 800; ntest: int = 200; test_start: int | None = None
     seed: int = 0; batch: int = 4
+    batch_pack: str = "auto"             # "auto" | "on" | "off": size-aware batching (fit.data.build_dataset)
     weights: dict | None = None          # ACEfit weights dict (per config type)
     factors: list | None = None          # ace_jax.fit.weights factor instances
     sigma_type: bool = False             # per-config-type noise block (diagnostic)
@@ -55,6 +56,20 @@ class FitConfig:
     ard_val_frac: float = 0.2            # train hold-out for the force-variance scale (lam, kappa)
     ard_cond_max: float = 1e14           # prior floor: cond(S) <= ard_cond_max
     ard_laplace: bool = False            # Laplace diagnostic of the hyperparameters (ard.json)
+    # schema-3 force sigma (docs/dev/specs/2026-09-30-conformal-force-sigma-design.md, rev 2)
+    ard_force_shape: str = "aniso"       # "iso" | "aniso" (Mahalanobis scores, forces_q_mahal)
+    ard_shape_eps: float = 1e-3          # aniso ridge: V + eps tr(V)/3 I
+    ard_coverage: float = 0.9            # 1 - alpha of the per-group conformal quantile q_g
+    ard_groups: str = "distortion"       # "distortion" (8 groups: d bands x [z = z*]) | "none" (2)
+    ard_cluster_size: float = 3.0        # sandwich block side, x r_cut (inf: whole configurations)
+    ard_press: str = "exact"             # "exact" | "block" PRESS correction of the jackknife scores
+    ard_shape_tau: float = 1.0           # fraction of sum sigma^2 kept in the shape factor R
+    ard_transfer: str = "exponent"       # hold-out -> served scale: "exponent" (per-fit beta) | "sqrt" | "none"
+    ard_n_min: int = 20                  # groups with fewer T_val configurations borrow a neighbour's scales
+    ard_support: bool = True             # covariate-shift support flag (diagnostic)
+    ard_support_max_atoms: int = 50000
+    _shape_variant: str = "press"        # bench-only ablation: "press" | "legacy" (#18 uncentred sandwich)
+    _score_source: str = "fit"           # bench-only ablation: "fit" (P_fit) | "mixed" (#18 own-cluster-out)
     deriv_dtc: bool = True
     predict_stats: str = "cached"        # "cached" (linear stats once; run.py) | "recompute" (per draw; CLI)
     predict_train: bool = True
@@ -73,11 +88,21 @@ class FitConfig:
     @property
     def joint_e0(self):
         """e0='lsq' fits E0 jointly (E0 columns in the linear model, a wide prior around the
-        pre-fit value). ARD and POPS keep the pre-fit E0: they build their own readout prior.
+        pre-fit value) under BLR and ARD (whose evidence keeps the E0 columns' fixed prior, outside
+        the body-order groups). POPS keeps the pre-fit E0: it builds its own readout prior.
         (A learned-radial fit learns its radials with the pre-fit E0, then fits jointly.)"""
-        return self.e0 == "lsq" and self.uq == "blr"
+        return self.e0 == "lsq" and self.uq in ("blr", "ard")
+
+    @property
+    def pack_mode(self):
+        """The build_dataset `pack` the pipeline uses: batch_pack, except that "auto" is "off" under the
+        LOO objective, whose per-config (R, R) leverage blocks (R = 1 + 3 n_max + 6) are vmapped over a
+        batch's C slots, so the larger C_eff of a packed layout would multiply that memory."""
+        return "off" if (self.batch_pack == "auto" and self.objective == "loo") else self.batch_pack
 
     def validate(self):
+        if self.batch_pack not in ("auto", "on", "off"):
+            raise ValueError(f"batch_pack must be 'auto', 'on' or 'off', got {self.batch_pack!r}")
         if self.e0 not in ("lsq", "prefit", "model"):
             raise ValueError(f"e0 must be 'lsq', 'prefit' or 'model', got {self.e0!r}")
         if self.arm not in ("linear", "gp"):
@@ -95,6 +120,28 @@ class FitConfig:
                 raise ValueError(f"ard_variance must be 'sandwich' or 'kappa', got {self.ard_variance!r}")
             if not 0.0 < self.ard_val_frac < 1.0:
                 raise ValueError(f"ard_val_frac must be in (0, 1), got {self.ard_val_frac}")
+            for name, ok in (("ard_force_shape", ("iso", "aniso")), ("ard_groups", ("distortion", "none")),
+                             ("ard_press", ("exact", "block")), ("ard_transfer", ("exponent", "sqrt", "none")),
+                             ("_shape_variant", ("press", "legacy")),
+                             ("_score_source", ("fit", "mixed"))):
+                if getattr(self, name) not in ok:
+                    raise ValueError(f"{name} must be one of {ok}, got {getattr(self, name)!r}")
+            if self._score_source == "mixed" and (self._shape_variant != "legacy" or self.ard_variance != "sandwich"):
+                raise ValueError("_score_source='mixed' is the #18 own-cluster-out rule: it needs "
+                                 "_shape_variant='legacy' and ard_variance='sandwich'")
+            if not 0.0 < self.ard_coverage < 1.0:
+                raise ValueError(f"ard_coverage must be in (0, 1), got {self.ard_coverage}")
+            if self.ard_n_min < 1:
+                raise ValueError(f"ard_n_min must be >= 1, got {self.ard_n_min}")
+            if not self.ard_cluster_size > 0:
+                raise ValueError(f"ard_cluster_size must be > 0 (inf: whole configurations), got {self.ard_cluster_size}")
+            if not 0.0 < self.ard_shape_tau <= 1.0:
+                raise ValueError(f"ard_shape_tau must be in (0, 1], got {self.ard_shape_tau}")
+            if not self.ard_shape_eps >= 0:
+                raise ValueError(f"ard_shape_eps must be >= 0, got {self.ard_shape_eps}")
+            if self.ard_force_shape == "aniso" and not self.ard_shape_eps > 0:
+                raise ValueError(f"ard_shape_eps must be > 0 with ard_force_shape='aniso' (the Mahalanobis "
+                                 f"solve of V + eps tr(V)/3 I is singular for a rank-deficient V), got {self.ard_shape_eps}")
         if self.lml == "host-cache":
             if (self.arm != "gp" or self.density not in ("pair", "pca") or tuple(self.rungs) != ("map",)
                     or self.opt != "lbfgs"):

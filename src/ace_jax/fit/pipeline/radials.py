@@ -55,10 +55,11 @@ def learn_radials(cfg, data, log=print):
                          f"yet, see issue #31): {e}") from e
     relres_max = float(np.max(relres)) if np.size(relres) else 0.0
     meta = data.meta
-    ds_fit, ds_val = (build_dataset(cs, meta, data.E0, cfg.batch) for cs in (fit_, val))
+    ds_fit, ds_val = (build_dataset(cs, meta, data.E0, cfg.batch, pack=cfg.pack_mode, log=log)
+                      for cs in (fit_, val))
     r0 = cfg.r0 if cfg.r0 is not None else data.r0
     gc = GPConfig(r0=r0, rcut=float(meta["rcut"]), n_B=meta["n_B"], n_pair=meta["n_pair"],
-                  NZ=len(meta["elements"]), C=cfg.batch)
+                  NZ=len(meta["elements"]), C=int(ds_fit.y_E.shape[1]))   # the Dataset's C (packing)
     X, S = site_features(model, gc, ds_fit)
     ind = select_inducing(X, S, ds_fit.node_z, ds_fit.node_mask, 0, descriptor_scale(X, ds_fit.node_mask))
     prob = Problem(KernelSpec("cosine", True, gc.D), model, ind, gc,

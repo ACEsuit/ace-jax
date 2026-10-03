@@ -2,6 +2,47 @@
 
 ## Unreleased
 
+- Calibrated per-atom force uncertainty, `aj fit --uq ard` revision 2. The
+  uncertainty is a shape times per-group scales:
+  - the shape is the per-atom 3×3 block of an exact, centred
+    delete-one-cluster (PRESS) jackknife covariance, with large training cells
+    split into spatial blocks (`--ard-cluster-size`, default 3 r_cut;
+    `--ard-press exact|block`);
+  - the scales are fitted per Mondrian group (shell distortion band ×
+    coordination, `--ard-groups`, `--ard-n-min`) on a stratified hold-out
+    (`--ard-val-frac`): an rms scale for `forces_std`/`forces_cov` and a
+    configuration-weighted conformal quantile for `forces_q` at
+    `--ard-coverage` (default 0.9);
+  - the hold-out scale is carried to the served posterior by a transfer
+    exponent fitted per run from a second hold-out fit
+    (`--ard-transfer exponent|sqrt|none`);
+  - `--force-shape aniso` (the default) serves an ellipsoidal region and
+    `forces_q_mahal`; `iso` a spherical one.
+
+  `ACECalculator(model, posterior=...)` serves `forces_std`, `forces_cov`,
+  `forces_q`, `forces_q_mahal`, `forces_group` and the covariate-shift
+  support flag `forces_support` (`--no-ard-support` skips it); `aj eval
+  --posterior P --per-atom out.xyz [--support]` writes them per atom. The new
+  `aj calibrate` recomputes the scales on labelled target-regime cells
+  (per-group replace by default, `--append`, `--replace`). On the Cantor
+  benchmark the default meets every coverage target, in distribution and on
+  unseen crack and dislocation cells. Posteriors are schema 3; schema-2 files
+  serve only the scalar `forces_std`. User docs: a how-to page and a page on
+  the mathematics.
+- Size-aware batching (`aj fit --batch-pack auto|on|off`, `build_dataset(pack=)`):
+  configurations are packed by an atom budget when a training set mixes small
+  and large cells, instead of padding every batch to the largest.
+- Training-side design rows and statistics are node-chunked over a memory
+  budget, so fits with cells of thousands of atoms fit on one GPU; the served
+  uncertainty is chunked over atoms.
+- `GPCalculator(deriv_dtc=False)` (`aj eval --no-deriv-dtc`) gives an SoR-only
+  `forces_std` without the derivative-DTC term, whose whole-cell arrays may not
+  fit for a big cell; over budget the term now warns instead of raising.
+- ARD now fits E0 jointly under `--e0 lsq` (as BLR): one E0 column per species
+  with BLR's fixed prior, outside the ARD body-order groups; `model.npz` holds
+  the fitted E0. Force uncertainties are unaffected, and posteriors written
+  before still load.
+- `run_ard_stage` compiles its programs once (no per-call recompilation).
 - The total energy is a compensated sum of the site energies (correctly rounded,
   independent of atom order and layout), and a float32 model returns it in
   float64 when x64 is enabled instead of a float32 total quantised at its own
