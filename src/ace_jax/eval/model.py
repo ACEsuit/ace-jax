@@ -30,7 +30,7 @@ import jax
 import jax.numpy as jnp
 
 from .edge_model import (EdgeSiteModel, calibrate_edge_a, one_hot_selector,  # noqa: F401
-                         with_edge_a_kind)
+                         product_basis, product_basis_dot, with_edge_a_kind)
 from .harmonics import real_solid_harmonics, real_spherical_harmonics
 from .radial import (agnesi_normalized, env_ace1_poly1sr, env_poly1sr,
                      env_poly2sx, poly_recursion, spline_eval, spline_eval_pairs)
@@ -252,7 +252,7 @@ class ACEModel(EdgeSiteModel):
 
     def _aa(self, A, specs=None):
         specs = self.aa_specs if specs is None else specs
-        return jnp.concatenate([jnp.prod(A[:, g], axis=-1) for g in specs], axis=-1)
+        return product_basis(A, specs)
 
     def _from_pooled(self, A, Apair):
         AA = self._aa(A)
@@ -268,7 +268,7 @@ class ACEModel(EdgeSiteModel):
         return B, Apair
 
     def _readout_folded(self, A, Apair, node_z, specs=None):
-        e = jnp.einsum("ia,ai->i", self._aa(A, specs), self.ctilde[:, node_z])
+        e = product_basis_dot(A, self.aa_specs if specs is None else specs, self.ctilde[:, node_z])
         e = e + jnp.einsum("ip,pi->i", Apair, self.Wpair[:, node_z])
         return e + self.E0[node_z]
 

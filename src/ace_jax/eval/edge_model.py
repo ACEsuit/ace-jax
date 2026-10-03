@@ -24,6 +24,8 @@ A model whose A basis is built pool-first (`pool_first_dense` /
 inert and `ACECalculator` does not calibrate it.
 """
 import dataclasses
+import functools
+import operator
 import time
 
 import equinox as eqx
@@ -101,6 +103,66 @@ def total_energy(e):
 def _total_energy_jvp(primals, tangents):
     (e,), (t,) = primals, tangents
     return total_energy(e), jnp.sum(t).astype(_acc_dtype(e.dtype))
+
+
+def _mul_rows(At, s):
+    return functools.reduce(operator.mul, [At[s[:, k]] for k in range(s.shape[1])])
+
+
+def _product_basis_t_cpu(At, specs):
+    return jnp.concatenate([_mul_rows(At, s) for s in specs], axis=0)
+
+
+def _product_basis_t_default(At, specs):
+    return jnp.concatenate([jnp.prod(At[s.T], axis=0) for s in specs], axis=0)
+
+
+def _product_basis_cpu(A, specs):
+    return _product_basis_t_cpu(A.T, specs).T
+
+
+def _product_basis_default(A, specs):
+    return jnp.concatenate([jnp.prod(A[:, g], axis=-1) for g in specs], axis=-1)
+
+
+def product_basis_t(At, specs):
+    """AA (n_AA, n) = prod_k At[spec[:, k]] from feature-major A (n_A, n), one
+    (n_v, order) index array per correlation order in `specs`.
+
+    The form is chosen per backend at lowering (`lax.platform_dependent`, so an
+    exported bundle gets the form of the platform it is lowered for).  On the CPU,
+    an explicit chain of whole-row multiplies: `jnp.prod`'s reverse mode lowers to
+    pads, slices and transposing copies that XLA:CPU runs as strided scalar loops
+    (14-18x the forward; 1.65x on the order-3 ACE SiGe step,
+    docs/dev/cpu-gap-profile.md 6.2).  Elsewhere `jnp.prod`, the layout the GPU was
+    tuned for (ace-vs-pace-gap.md 4.1).  Same multiply order, so the values agree
+    bitwise; gradients to roundoff."""
+    return jax.lax.platform_dependent(At, cpu=lambda At: _product_basis_t_cpu(At, specs),
+                                      default=lambda At: _product_basis_t_default(At, specs))
+
+
+def product_basis(A, specs):
+    """`product_basis_t` for node-major A (n, n_A), returning (n, n_AA).  The CPU
+    form multiplies feature-major rows (A.T) and transposes back."""
+    return jax.lax.platform_dependent(A, cpu=lambda A: _product_basis_cpu(A, specs),
+                                      default=lambda A: _product_basis_default(A, specs))
+
+
+def _product_basis_dot_cpu(A, specs, C):
+    return jnp.einsum("ai,ai->i", _product_basis_t_cpu(A.T, specs), C)
+
+
+def _product_basis_dot_default(A, specs, C):
+    return jnp.einsum("ia,ai->i", _product_basis_default(A, specs), C)
+
+
+def product_basis_dot(A, specs, C):
+    """sum_a AA[i, a] C[a, i] per node i: the product basis of node-major A (n, n_A)
+    against per-node readout columns C (n_AA, n), without forming node-major AA on
+    the CPU (its transpose back cost 6% of the order-2 ACE Cantor step).  Forms as
+    `product_basis_t`."""
+    return jax.lax.platform_dependent(A, C, cpu=lambda A, C: _product_basis_dot_cpu(A, specs, C),
+                                      default=lambda A, C: _product_basis_dot_default(A, specs, C))
 
 
 def one_hot_selector(idx, width, dtype):

@@ -131,7 +131,7 @@ ML-PACE in LAMMPS against ace-jax PACE on the same `.yace` models (float64, atom
 
 | host | N | ML-PACE in LAMMPS | ace-jax standalone | ace-jax in LAMMPS | ML-PACE ÷ ace-jax standalone | ML-PACE ÷ ace-jax in LAMMPS |
 |---|---|---|---|---|---|---|
-| lestrade-cpu | 2048 | 417k–562k | 25k–40k | — | 14–17× | — |
+| lestrade-cpu | 2048 | 417k–562k | 29k–45k | — | 13–14× | — |
 | modal-a100 | 8192 | 1.67M–2.22M | 714k–1.26M | 1.14M–1.40M | 1.8–2.3× | 1.5–1.6× |
 | moriarty-cpu | 2048 | 208k–275k | 16k–23k | — | 12–13× | — |
 | moriarty-gpu | 8192 | 684k–1.02M | 251k–416k | 209k–271k | 2.4–2.7× | 3.3–3.8× |
@@ -141,7 +141,7 @@ ace-jax against MACE, same mode (float64 throughput ratio; where MACE ran out of
 
 | host | mode | ace-jax PACE ÷ MACE | ace-jax ACE ÷ MACE |
 |---|---|---|---|
-| lestrade-cpu | standalone | 76–1.5e+02× | 1.1e+02–2e+02× |
+| lestrade-cpu | standalone | 88–1.7e+02× | 2.2e+02–2.3e+02× |
 | modal-a100 | standalone | 23–59× | 48–73× |
 | modal-a100 | lammps | 18–26× | 16–36× |
 | moriarty-cpu | standalone | 65–1.1e+02× | 92–1.5e+02× |
@@ -154,7 +154,7 @@ Largest system that ran standalone (float64, atoms), and the float32 / float64 t
 
 | host | largest: ace-jax PACE | ace-jax ACE | MACE | f32 ÷ f64: ace-jax PACE | ace-jax ACE | MACE |
 |---|---|---|---|---|---|---|
-| lestrade-cpu | 32768 | 32768 | 4096–8192 | 1.9–2× | 1.6–1.7× | 2–2.1× |
+| lestrade-cpu | 32768 | 32768 | 4096–8192 | 1.9–2× | 1.7× | 2–2.1× |
 | modal-a100 | 2097152 | 2097152 | 32768 | 1.2–1.4× | 1.2–1.4× | 1.1× |
 | moriarty-cpu | 32768 | 32768 | 4096–8192 | 1.6–1.7× | 1.4× | 1.9–2× |
 | moriarty-gpu | 1048576 | 1048576 | 8192 | 3.5–3.8× | 2.7–3.4× | 5.8–6.4× |
@@ -388,18 +388,18 @@ Hollow markers: ace-jax chose the sparse layout. Where a case was run more than 
 
 | host | system | code | mode | size | dtype | atoms | atom-steps/s |
 |---|---|---|---|---|---|---|---|
-| lestrade-cpu | Cantor | ace-jax (linear ACE) | standalone | large | float64 | 2048 | 1.51e+04 |
-| lestrade-cpu | SiGe | ace-jax (linear ACE) | standalone | large | float64 | 2048 | 7.68e+03 |
-| lestrade-cpu | Cantor | ace-jax (linear ACE) | standalone | medium | float64 | 2048 | 5.26e+04 |
-| lestrade-cpu | SiGe | ace-jax (linear ACE) | standalone | medium | float64 | 2048 | 3.5e+04 |
-| lestrade-cpu | Cantor | ace-jax (linear ACE) | standalone | small | float64 | 2048 | 1.21e+05 |
-| lestrade-cpu | SiGe | ace-jax (linear ACE) | standalone | small | float64 | 2048 | 1.77e+05 |
-| lestrade-cpu | Cantor | ace-jax (PACE model) | standalone | large | float64 | 2048 | 1.15e+04 |
-| lestrade-cpu | SiGe | ace-jax (PACE model) | standalone | large | float64 | 2048 | 5.91e+03 |
-| lestrade-cpu | Cantor | ace-jax (PACE model) | standalone | medium | float64 | 2048 | 4.03e+04 |
-| lestrade-cpu | SiGe | ace-jax (PACE model) | standalone | medium | float64 | 2048 | 2.52e+04 |
-| lestrade-cpu | Cantor | ace-jax (PACE model) | standalone | small | float64 | 2048 | 1.1e+05 |
-| lestrade-cpu | SiGe | ace-jax (PACE model) | standalone | small | float64 | 2048 | 9.78e+04 |
+| lestrade-cpu | Cantor | ace-jax (linear ACE) | standalone | large | float64 | 2048 | 4.36e+04 |
+| lestrade-cpu | SiGe | ace-jax (linear ACE) | standalone | large | float64 | 2048 | 2.7e+04 |
+| lestrade-cpu | Cantor | ace-jax (linear ACE) | standalone | medium | float64 | 2048 | 6.08e+04 |
+| lestrade-cpu | SiGe | ace-jax (linear ACE) | standalone | medium | float64 | 2048 | 7.16e+04 |
+| lestrade-cpu | Cantor | ace-jax (linear ACE) | standalone | small | float64 | 2048 | 1.19e+05 |
+| lestrade-cpu | SiGe | ace-jax (linear ACE) | standalone | small | float64 | 2048 | 1.96e+05 |
+| lestrade-cpu | Cantor | ace-jax (PACE model) | standalone | large | float64 | 2048 | 1.3e+04 |
+| lestrade-cpu | SiGe | ace-jax (PACE model) | standalone | large | float64 | 2048 | 7.51e+03 |
+| lestrade-cpu | Cantor | ace-jax (PACE model) | standalone | medium | float64 | 2048 | 4.46e+04 |
+| lestrade-cpu | SiGe | ace-jax (PACE model) | standalone | medium | float64 | 2048 | 2.93e+04 |
+| lestrade-cpu | Cantor | ace-jax (PACE model) | standalone | small | float64 | 2048 | 1.13e+05 |
+| lestrade-cpu | SiGe | ace-jax (PACE model) | standalone | small | float64 | 2048 | 1.04e+05 |
 | lestrade-cpu | Cantor | ACEpotentials.jl (linear ACE, direct) | standalone | large | float64 | 2048 | 4.6e+04 |
 | lestrade-cpu | SiGe | ACEpotentials.jl (linear ACE, direct) | standalone | large | float64 | 2048 | 5.21e+04 |
 | lestrade-cpu | Cantor | ACEpotentials.jl (linear ACE, direct) | standalone | medium | float64 | 2048 | 5.17e+04 |
@@ -627,8 +627,8 @@ Hollow markers: ace-jax chose the sparse layout. Where a case was run more than 
 
 | host | code | mode | median compile / export (s) |
 |---|---|---|---|
-| lestrade-cpu | ace-jax (linear ACE) | standalone | 0.5 |
-| lestrade-cpu | ace-jax (PACE model) | standalone | 0.7 |
+| lestrade-cpu | ace-jax (linear ACE) | standalone | 0.6 |
+| lestrade-cpu | ace-jax (PACE model) | standalone | 0.8 |
 | lestrade-cpu | ACEpotentials.jl (linear ACE, direct) | standalone | 0.6 |
 | lestrade-cpu | MACE | standalone | 4.0 |
 | modal-a100 | ace-jax (linear ACE) | lammps | 2.1 |
