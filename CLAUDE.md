@@ -85,7 +85,7 @@ uv run ruff check                     # lint; `uv run pre-commit run --all-files
 
 - **float64:** the library never calls `jax.config.update`; the caller chooses precision. The exceptions are `cli.py` and `fit/baseline.py`, which enable x64 at import.
   - Tests and scripts put `jax.config.update("jax_enable_x64", True)` at the top of the module. CI also sets `JAX_ENABLE_X64=1`.
-  - Fitting and learned radials require float64: `radial_learn` raises without it.
+  - Fitting and learned radials require float64: the pipeline's `fit` and `radial_learn` raise without it.
   - Use `highest_precision()` (a matmul-precision context) around numerics that are compared to references.
 - **Model files:**
   - `.npz` models follow the export schema: `meta_json` with `schema_version: 1`. The writers are `julia/export_model.jl` and `basis.export.save_npz`.

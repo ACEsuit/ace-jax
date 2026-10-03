@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `ace_jax.fit.pipeline.fit` refuses to run without float64 (`jax_enable_x64`),
+  instead of fitting silently in float32. `aj fit` already enables it.
+
 ## 0.1.1 (2026-10-03)
 
 - User docs: a Performance page (CPU float64, GPU float64/float32; SiGe and

@@ -450,3 +450,19 @@ def test_summarise_without_any_uq_still_reports_the_error():
     m = summarise([1.0, 2.0], [1.5, 2.0], [0.0, 0.0])     # a fixed readout: no predictive variance
     assert abs(m["rmse"] - np.sqrt(0.125)) < 1e-15 and abs(m["mae"] - 0.25) < 1e-15
     assert np.isnan(m["coverage"]) and m["n_dropped"] == 2
+
+
+def test_fit_refuses_float32():
+    # a float32 fit is silently poor (and its MD crawls): the caller must enable float64
+    from conftest import FIXTURE_DIR
+    from ace_jax.fit.pipeline import FitConfig, fit, load_fit_data
+    cfg = FitConfig(model=str(FIXTURE_DIR / "si_fitted.npz"), energy_key="dft_energy", force_key="dft_force",
+                    virial_key="dft_virial", ntrain=8, ntest=4, batch=4, r0=2.35, arm="linear",
+                    m_per_species=0, rungs=("map",))
+    d = load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz"), log=lambda *a: None)
+    jax.config.update("jax_enable_x64", False)
+    try:
+        with pytest.raises(RuntimeError, match="float64"):
+            fit(cfg, d, log=lambda *a: None)
+    finally:
+        jax.config.update("jax_enable_x64", True)
