@@ -29,6 +29,24 @@ anything imports JAX, with `jax.config.update("jax_enable_x64", True)` or
 `JAX_ENABLE_X64=1`; otherwise the calculator runs in float32 (faster, with
 float32 round-off in energies and forces).
 
+### Tight geometry optimisation of large cells
+
+The energy includes each atom's isolated-atom energy E0 (about −160 eV for Si),
+so a cell of 10^5 atoms has |E| of order 10^7 eV and a float64 resolution of
+about 10^-9 eV. An energy-based line search, such as the Armijo test in ASE's
+`PreconLBFGS`, stops resolving the decreases it checks once forces fall to
+about 1e-4–1e-5 eV/Å, and the optimiser slows to a crawl. For tight
+relaxations, report energies relative to the isolated atoms:
+
+```python
+calc = ACECalculator("model.npz", energy_reference="E0")
+```
+
+`atoms.get_potential_energy()` is then the energy relative to the isolated atoms,
+and forces and stress are unchanged. The constant that was subtracted is in
+`calc.results["e0_offset"]`, so the absolute energy is
+`atoms.get_potential_energy() + calc.results["e0_offset"]`.
+
 ## Molecular dynamics
 
 The calculator is built for repeated calls on one structure:
