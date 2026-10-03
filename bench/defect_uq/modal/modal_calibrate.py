@@ -37,7 +37,7 @@ def calibrate_loro(run: str, hold: str, mode: str = "per-group") -> str:
     if mode not in ("per-group", "append", "replace"):
         raise ValueError(mode)
     t0 = time.time()
-    out = f"/out/{run}_cal_r{hold}"
+    out = f"/out/{run}_cal{'' if mode == 'per-group' else '_' + mode}_r{hold}"   # per-group keeps the old name
     os.makedirs(out, exist_ok=True)
     u = f"/tmp/U_{hold}.xyz"
     nfr = big_err_core.concat_xyz(u_files(hold), u)

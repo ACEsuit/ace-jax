@@ -306,7 +306,7 @@ uv run python ../scoring/validate_shape.py --out validate_ell_tip_r2-3.md --runs
 
 Step 4 driver: `modal/modal_calibrate.py` (own app `acegp-calibrate`; `modal_bench365.py` untouched). Per
 held-out pair it runs `aj calibrate` (per-group by default; `--mode append|replace`) on the other three
-`big3_cracks_r*.xyz` files and writes `/out/<run>_cal_r<pair>/{model.npz,posterior.npz,calibrate.log,
+`big3_cracks_r*.xyz` files and writes `/out/<run>_cal[_<mode>]_r<pair>/{model.npz,posterior.npz,calibrate.log,
 big3x_r<pair>_err.npz,big3_err.npz}`:
 
 ```
