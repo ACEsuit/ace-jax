@@ -198,12 +198,23 @@ come from a block bootstrap over cells, with only 2 cells per dislocation family
 - Crack tips are slightly overconfident: rms-z 1.08 and cov90 0.85 within 10 Å of the tip, across
   all 6 cells.
 
-## Validation of the jackknife shape and conformal scales (schema 3; **to run**, not yet run)
+## Validation of the jackknife shape and conformal scales (schema 3; run 2026-10-01..03)
 
 `--uq ard` now serves `forces_std` (lam_g x an exact centred jackknife shape), `forces_cov`, `forces_q`
-(conformal radius), `forces_group` and `forces_support`; `aj calibrate` re-scales the per-group scales on a
-labelled set. This programme measures them on the v3 big cells and ablates the ingredients. Nothing below
-has been run yet; the acceptance numbers are the targets in `docs/specs/2026-09-30-conformal-force-sigma-design.md`.
+(conformal radius), `forces_group` and `forces_support`. `aj calibrate` re-scales the per-group scales on a
+labelled set. This programme measures them on the v3 big cells and ablates the ingredients. The acceptance
+targets are in `docs/specs/2026-09-30-conformal-force-sigma-design.md`.
+
+**Results: [`results/2026-10-03_rev2_acceptance.md`](results/2026-10-03_rev2_acceptance.md).** The default
+(aniso shape + transfer exponent) passes every target:
+- in distribution: 0.898;
+- crack: 0.903;
+- tip: 0.885;
+- edge / screw: 0.937 / 0.941.
+
+`aj calibrate` on labelled crack cells gives the best tip coverage (0.897–0.903), but the calibrated posterior
+under-covers in distribution (0.87), so serve it only on cells like its calibration set. Block size ℓ has no
+effect. The tables, run names and commands follow.
 
 **Code**
 - `modal/ard_arms.py`: `ARD_ARMS`, the arm name -> `FitConfig` override table (`fit_bench.py` takes the name as its arm).
