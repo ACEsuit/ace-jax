@@ -19,7 +19,7 @@ equiatomic CrMnFeCoNi alloy on fcc.
 
 ## CPU, float64
 
-![Throughput against system size on CPU in float64, SiGe and Cantor panels: ML-PACE in LAMMPS is fastest, ace-jax standalone an order of magnitude slower, MACE slowest](assets/benchmarks/cpu_float64.png)
+![Throughput against system size on CPU in float64, SiGe and Cantor panels: ACEpotentials.jl trim library and ML-PACE in LAMMPS are fastest, ace-jax standalone 6–10× below ML-PACE and level with ACEpotentials.jl direct, MACE slowest](assets/benchmarks/cpu_float64.png)
 
 ace-jax runs in LAMMPS only on a GPU (lammps-jax is GPU-only), so on the CPU
 it appears standalone only.
