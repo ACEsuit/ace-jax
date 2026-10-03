@@ -98,10 +98,25 @@ Each fold calibrates on the other 3 crack pairs and is scored on the held-out pa
 - **PASS** on every big-cell target in every fold. This is the best tip coverage of any route, and it costs minutes against a refit of hours.
 - The cost is the in-distribution under-coverage in §2 (0.87). Serve the calibrated posterior only on cells like U.
 
+## 6. `aj calibrate` modes on the aniso default (and iso `--append`), leave one realisation out
+
+Big-cell scores use the held-out pair plus big3_mh1. In-distribution scores use a 300-config bench365 test sample. Each cell gives the range over the 4 folds.
+
+| posterior | ID cfg-weighted | ID bulk | tip | crack | edge / screw |
+|---|---|---|---|---|---|
+| aniso, uncalibrated (default) | 0.898 | 0.892 | 0.881–0.884 | 0.899–0.905 | 0.937 / 0.941 |
+| aniso + calibrate, per-group replace | **0.867–0.870 ✗** | 0.858–0.862 | **0.899–0.904** | 0.910–0.917 | 0.927–0.930 / 0.932–0.935 |
+| aniso + calibrate `--append` | **0.895** | 0.888–0.889 | 0.881–0.886 | 0.900–0.906 | 0.936 / 0.941 |
+| iso + calibrate `--append` | 0.895 | 0.888–0.889 | 0.869–0.878 | 0.895–0.903 | 0.934–0.935 / 0.937–0.939 |
+
+- **`--append` is safe in distribution (0.895) but does not help on the cracks here.** The 54 crack configs are diluted among hundreds of T_val configs per group, and every configuration counts once.
+- **Per-group replace is the only calibration that lifts the tip, to 0.90.** It makes a regime-specific posterior: in-distribution coverage drops to 0.87.
+- **Recommendation:** serve the default posterior generally. With labelled target-regime cells, build a separate per-group-replace posterior and use it only for that regime.
+
 ## Verdict
 
 - **The default (aniso + transfer exponent) passes every target**, both in distribution and on the uncalibrated v3 big cells.
-- **`aj calibrate` on labelled target-regime cells** gives the highest target coverage, but the calibrated posterior is regime-specific.
+- **`aj calibrate` on labelled target-regime cells** (per-group replace) gives the highest target coverage under both shapes, but the calibrated posterior is regime-specific (ID 0.87). `--append` keeps ID coverage at 0.895 but does not lift the tip (§6).
 - **iso + transfer** passes in distribution but misses at the crack tip (0.862) and is borderline on the whole crack (0.889).
 - **Crack cells in training** improve the tip but don't reach 0.88 in every fold. Block size is not a lever.
 
