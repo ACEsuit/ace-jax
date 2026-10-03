@@ -17,7 +17,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from .harmonics import real_spherical_harmonics
-from .edge_model import EdgeSiteModel, check_edge_a_kind, with_edge_a_kind
+from .edge_model import EdgeSiteModel, check_edge_a_kind, product_basis_t, with_edge_a_kind
 from .pace_build import build_basis
 from .pace_io import parse_yace
 from .pace_radial import cutoff_func_poly, fexp, fexp_shifted_scaled, pace_zbl, radbase, radcore
@@ -159,7 +159,7 @@ class PACEModel(EdgeSiteModel):
     def _node_energies_t(self, At, cr, d, dcin, segment_ids, n_nodes, node_z):
         """Site energies from feature-major A (NZ*n_a, n): the product gathers
         read whole rows and their adjoints add whole rows."""
-        AA = jnp.concatenate([jnp.prod(At[s.T], axis=0) for s in self.aa_specs], axis=0)
+        AA = product_basis_t(At, self.aa_specs)
         ct = self.ctilde_real().reshape(self.n_aa, -1)                      # (n_aa, NZ*P)
         rho_all = jnp.matmul(ct.T, AA, precision=jax.lax.Precision.HIGHEST)  # (NZ*P, n)
         rho = rho_all.reshape(self.nz, self.ndensity, n_nodes)[node_z, :, jnp.arange(n_nodes)]
