@@ -1,0 +1,701 @@
+{
+ "hlo_module": "/tmp/claude-13098/-home-eng-essswb-projects-ace-jax/ecf5784d-d669-462b-b3cf-9931182a7fd1/scratchpad/dump_ace_SiGe_medium/module_0118.jit_efv.cpu_after_optimizations.txt",
+ "n_thunk_kinds": 245,
+ "thunks_per_call": 279.8,
+ "thunk_ms_per_call": 243.793,
+ "wall_ms_per_call": 238.2146374,
+ "by_stage_ms": {
+  "AA": {
+   "fwd_ms": 60.519,
+   "bwd_ms": 85.835
+  },
+  "radial": {
+   "fwd_ms": 33.243,
+   "bwd_ms": 12.736
+  },
+  "A": {
+   "fwd_ms": 10.084,
+   "bwd_ms": 22.011
+  },
+  "readout": {
+   "fwd_ms": 5.106,
+   "bwd_ms": 4.517
+  },
+  "angular": {
+   "fwd_ms": 2.371,
+   "bwd_ms": 3.57
+  },
+  "strain": {
+   "fwd_ms": 0.673,
+   "bwd_ms": 1.16
+  },
+  "pair": {
+   "fwd_ms": 0.699,
+   "bwd_ms": 0.213
+  },
+  "other": {
+   "fwd_ms": 0.887,
+   "bwd_ms": 0.0
+  },
+  "force": {
+   "fwd_ms": 0.0,
+   "bwd_ms": 0.183
+  }
+ },
+ "fwd_ms": 113.5823692328,
+ "bwd_ms": 130.2252362,
+ "simd_instructions": {
+  "ymm": 417,
+  "scalar": 816,
+  "xmm": 14,
+  "zmm": 4
+ },
+ "time_by_simd": {
+  "scalar_dominant_ms": 153.73700000000002,
+  "no_fp_or_library_ms": 73.01700000000021,
+  "vector_dominant_ms": 17.038999999999994
+ },
+ "top": [
+  {
+   "thunk": "multiply_bitcast_fusion.1",
+   "ms_per_call": 40.498,
+   "calls": 1.0,
+   "stages": {
+    "AA": 1.0
+   },
+   "bwd": false,
+   "hlo_op": "fusion",
+   "out_shape": "f64[2048,739]{1,0}",
+   "MB": 72.6,
+   "GBps": 1.79,
+   "simd": {
+    "ymm": 3,
+    "scalar": 15
+   }
+  },
+  {
+   "thunk": "bitcast_copy_fusion.2",
+   "ms_per_call": 25.409,
+   "calls": 1.0,
+   "stages": {
+    "AA": 1.0
+   },
+   "bwd": true,
+   "hlo_op": "fusion",
+   "out_shape": "f64[2217,2048,1]{2,1,0}",
+   "MB": 145.3,
+   "GBps": 5.72,
+   "simd": {
+    "ymm": 2,
+    "scalar": 8
+   }
+  },
+  {
+   "thunk": "multiply_pad_fusion.1",
+   "ms_per_call": 23.933,
+   "calls": 1.0,
+   "stages": {
+    "AA": 0.92,
+    "readout": 0.08
+   },
+   "bwd": true,
+   "hlo_op": "fusion",
+   "out_shape": "f64[2,2048,739]{2,1,0}",
+   "MB": 101.0,
+   "GBps": 4.22,
+   "simd": {
+    "ymm": 2,
+    "scalar": 6
+   }
+  },
+  {
+   "thunk": "multiply_pad_fusion",
+   "ms_per_call": 23.368,
+   "calls": 1.0,
+   "stages": {
+    "AA": 0.92,
+    "readout": 0.08
+   },
+   "bwd": true,
+   "hlo_op": "fusion",
+   "out_shape": "f64[2,2048,739]{2,1,0}",
+   "MB": 101.0,
+   "GBps": 4.32,
+   "simd": {
+    "ymm": 2,
+    "scalar": 6
+   }
+  },
+  {
+   "thunk": "ynn_fusion.2",
+   "ms_per_call": 15.084,
+   "calls": 1.0,
+   "stages": {
+    "A": 1.0
+   },
+   "bwd": true,
+   "hlo_op": "fusion",
+   "out_shape": "f64[57344,18]{1,0}",
+   "MB": 29.8,
+   "GBps": 1.98,
+   "simd": null
+  },
+  {
+   "thunk": "slice_pad_fusion",
+   "ms_per_call": 11.903,
+   "calls": 1.0,
+   "stages": {
+    "AA": 1.0
+   },
+   "bwd": false,
+   "hlo_op": "fusion",
+   "out_shape": "f64[2,2048,739]{2,1,0}",
+   "MB": 60.5,
+   "GBps": 5.09,
+   "simd": {}
+  },
+  {
+   "thunk": "wrapped_scatter",
+   "ms_per_call": 7.265,
+   "calls": 1.0,
+   "stages": {
+    "AA": 1.0
+   },
+   "bwd": true,
+   "hlo_op": "fusion",
+   "out_shape": "f64[2048,84]{1,0}",
+   "MB": 39.1,
+   "GBps": 5.38,
+   "simd": {
+    "scalar": 1
+   }
+  },
+  {
+   "thunk": "multiply_bitcast_fusion.2",
+   "ms_per_call": 5.613,
+   "calls": 1.0,
+   "stages": {
+    "AA": 1.0
+   },
+   "bwd": false,
+   "hlo_op": "fusion",
+   "out_shape": "f64[2048,234]{1,0}",
+   "MB": 11.5,
+   "GBps": 2.05,
+   "simd": {
+    "scalar": 6
+   }
+  },
+  {
+   "thunk": "bitcast_gather_fusion.3",
+   "ms_per_call": 4.837,
+   "calls": 1.0,
+   "stages": {
+    "AA": 0.8,
+    "A": 0.2
+   },
+   "bwd": true,
+   "hlo_op": "fusion",
+   "out_shape": "f64[2217,2048,1]{2,1,0}",
+   "MB": 37.7,
+   "GBps": 7.8,
+   "simd": {}
+  },
+  {
+   "thunk": "gather_bitcast_fusion",
+   "ms_per_call": 4.631,
+   "calls": 1.0,
+   "stages": {
+    "radial": 1.0
+   },
+   "bwd": false,
+   "hlo_op": "fusion",
+   "out_shape": "f64[57344,4,18]{2,1,0}",
+   "MB": 34.0,
+   "GBps": 7.34,
+   "simd": {
+    "scalar": 6
+   }
+  },
+  {
+   "thunk": "select_divide_fusion.3",
+   "ms_per_call": 4.281,
+   "calls": 1.0,
+   "stages": {
+    "radial": 0.95,
+    "readout": 0.03,
+    "pair": 0.01,
+    "angular": 0.01
+   },
+   "bwd": true,
+   "hlo_op": "fusion",
+   "out_shape": "f64[57344]{0}",
+   "MB": 12.5,
+   "GBps": 2.91,
+   "simd": {
+    "scalar": 64
+   }
+  },
+  {
+   "thunk": "add_add_fusion",
+   "ms_per_call": 3.889,
+   "calls": 1.0,
+   "stages": {
+    "A": 0.04,
+    "angular": 0.9,
+    "radial": 0.03,
+    "pair": 0.03
+   },
+   "bwd": true,
+   "hlo_op": "fusion",
+   "out_shape": "f64[57344,3]{1,0}",
+   "MB": 13.8,
+   "GBps": 3.54,
+   "simd": {
+    "scalar": 194
+   }
+  },
+  {
+   "thunk": "select_divide_fusion",
+   "ms_per_call": 3.638,
+   "calls": 1.0,
+   "stages": {
+    "radial": 0.97,
+    "A": 0.01,
+    "angular": 0.01
+   },
+   "bwd": true,
+   "hlo_op": "fusion",
+   "out_shape": "f64[57344]{0}",
+   "MB": 12.0,
+   "GBps": 3.31,
+   "simd": {
+    "ymm": 30,
+    "scalar": 30
+   }
+  },
+  {
+   "thunk": "dot.19",
+   "ms_per_call": 3.348,
+   "calls": 1.0,
+   "stages": {
+    "radial": 1.0
+   },
+   "bwd": false,
+   "hlo_op": "dot",
+   "out_shape": "f64[57344,1,18]{2,1,0}",
+   "MB": 43.1,
+   "GBps": 12.88,
+   "simd": null
+  },
+  {
+   "thunk": "dot.21",
+   "ms_per_call": 3.239,
+   "calls": 1.0,
+   "stages": {
+    "radial": 0.67,
+    "A": 0.33
+   },
+   "bwd": false,
+   "hlo_op": "dot",
+   "out_shape": "f64[57344,1,4]{2,1,0}",
+   "MB": 43.1,
+   "GBps": 13.31,
+   "simd": null
+  },
+  {
+   "thunk": "ynn_fusion.7",
+   "ms_per_call": 3.137,
+   "calls": 1.0,
+   "stages": {
+    "readout": 1.0
+   },
+   "bwd": false,
+   "hlo_op": "fusion",
+   "out_shape": "f64[2048]{0}",
+   "MB": 32.5,
+   "GBps": 10.36,
+   "simd": null
+  },
+  {
+   "thunk": "bitcast_copy_fusion.1",
+   "ms_per_call": 3.038,
+   "calls": 1.0,
+   "stages": {
+    "AA": 0.94,
+    "readout": 0.06
+   },
+   "bwd": true,
+   "hlo_op": "fusion",
+   "out_shape": "f64[468,2048,1]{2,1,0}",
+   "MB": 31.6,
+   "GBps": 10.39,
+   "simd": {
+    "ymm": 2
+   }
+  },
+  {
+   "thunk": "concatenate.17",
+   "ms_per_call": 2.269,
+   "calls": 1.0,
+   "stages": {
+    "AA": 1.0
+   },
+   "bwd": false,
+   "hlo_op": "concatenate",
+   "out_shape": "f64[2048,991]{1,0}",
+   "MB": 32.5,
+   "GBps": 14.31,
+   "simd": null
+  },
+  {
+   "thunk": "ynn_fusion.1",
+   "ms_per_call": 2.135,
+   "calls": 1.0,
+   "stages": {
+    "radial": 1.0
+   },
+   "bwd": true,
+   "hlo_op": "fusion",
+   "out_shape": "f64[57344]{0}",
+   "MB": 17.0,
+   "GBps": 7.95,
+   "simd": null
+  },
+  {
+   "thunk": "bitcast_gather_fusion.2",
+   "ms_per_call": 1.832,
+   "calls": 1.0,
+   "stages": {
+    "readout": 1.0
+   },
+   "bwd": false,
+   "hlo_op": "fusion",
+   "out_shape": "f64[2048,991,1]{2,1,0}",
+   "MB": 16.3,
+   "GBps": 8.88,
+   "simd": {}
+  },
+  {
+   "thunk": "wrapped_scatter.1",
+   "ms_per_call": 1.786,
+   "calls": 1.0,
+   "stages": {
+    "AA": 1.0
+   },
+   "bwd": true,
+   "hlo_op": "fusion",
+   "out_shape": "f64[2048,84]{1,0}",
+   "MB": 10.4,
+   "GBps": 5.84,
+   "simd": {
+    "scalar": 1
+   }
+  },
+  {
+   "thunk": "dot_general.25",
+   "ms_per_call": 1.726,
+   "calls": 1.0,
+   "stages": {
+    "A": 1.0
+   },
+   "bwd": false,
+   "hlo_op": "dot",
+   "out_shape": "f64[2048,5,6]{2,1,0}",
+   "MB": 5.5,
+   "GBps": 3.21,
+   "simd": null
+  },
+  {
+   "thunk": "dot_general.24",
+   "ms_per_call": 1.599,
+   "calls": 1.0,
+   "stages": {
+    "A": 1.0
+   },
+   "bwd": false,
+   "hlo_op": "dot",
+   "out_shape": "f64[2048,3,12]{2,1,0}",
+   "MB": 7.5,
+   "GBps": 4.67,
+   "simd": null
+  },
+  {
+   "thunk": "select_divide_fusion.2",
+   "ms_per_call": 1.446,
+   "calls": 1.0,
+   "stages": {
+    "radial": 0.81,
+    "pair": 0.03,
+    "readout": 0.16
+   },
+   "bwd": true,
+   "hlo_op": "fusion",
+   "out_shape": "f64[57344]{0}",
+   "MB": 3.7,
+   "GBps": 2.59,
+   "simd": {
+    "ymm": 7
+   }
+  },
+  {
+   "thunk": "power_multiply_fusion",
+   "ms_per_call": 1.432,
+   "calls": 1.0,
+   "stages": {
+    "radial": 0.93,
+    "A": 0.07
+   },
+   "bwd": false,
+   "hlo_op": "fusion",
+   "out_shape": "f64[57344]{0}",
+   "MB": 3.3,
+   "GBps": 2.28,
+   "simd": {
+    "ymm": 5
+   }
+  },
+  {
+   "thunk": "add_power_fusion",
+   "ms_per_call": 1.422,
+   "calls": 1.0,
+   "stages": {
+    "radial": 1.0
+   },
+   "bwd": false,
+   "hlo_op": "fusion",
+   "out_shape": "f64[57344]{0}",
+   "MB": 4.1,
+   "GBps": 2.9,
+   "simd": {
+    "ymm": 2,
+    "scalar": 4
+   }
+  },
+  {
+   "thunk": "bitcast_power_fusion",
+   "ms_per_call": 1.421,
+   "calls": 1.0,
+   "stages": {
+    "radial": 1.0
+   },
+   "bwd": false,
+   "hlo_op": "fusion",
+   "out_shape": "f64[57344]{0}",
+   "MB": 4.1,
+   "GBps": 2.91,
+   "simd": {}
+  },
+  {
+   "thunk": "add_power_fusion.1",
+   "ms_per_call": 1.413,
+   "calls": 1.0,
+   "stages": {
+    "radial": 1.0
+   },
+   "bwd": false,
+   "hlo_op": "fusion",
+   "out_shape": "f64[57344]{0}",
+   "MB": 4.1,
+   "GBps": 2.92,
+   "simd": {
+    "ymm": 2,
+    "scalar": 8
+   }
+  },
+  {
+   "thunk": "bitcast_power_fusion.1",
+   "ms_per_call": 1.41,
+   "calls": 1.0,
+   "stages": {
+    "radial": 0.92,
+    "A": 0.08
+   },
+   "bwd": false,
+   "hlo_op": "fusion",
+   "out_shape": "f64[57344]{0}",
+   "MB": 3.3,
+   "GBps": 2.32,
+   "simd": {
+    "ymm": 4,
+    "scalar": 16
+   }
+  },
+  {
+   "thunk": "negate_power_fusion",
+   "ms_per_call": 1.406,
+   "calls": 1.0,
+   "stages": {
+    "radial": 0.83,
+    "pair": 0.17
+   },
+   "bwd": false,
+   "hlo_op": "fusion",
+   "out_shape": "f64[57344]{0}",
+   "MB": 2.3,
+   "GBps": 1.63,
+   "simd": {}
+  },
+  {
+   "thunk": "negate_power_fusion.1",
+   "ms_per_call": 1.37,
+   "calls": 1.0,
+   "stages": {
+    "radial": 0.92,
+    "pair": 0.08
+   },
+   "bwd": false,
+   "hlo_op": "fusion",
+   "out_shape": "f64[57344]{0}",
+   "MB": 2.8,
+   "GBps": 2.01,
+   "simd": {}
+  },
+  {
+   "thunk": "subtract_power_fusion",
+   "ms_per_call": 1.366,
+   "calls": 1.0,
+   "stages": {
+    "radial": 1.0
+   },
+   "bwd": false,
+   "hlo_op": "fusion",
+   "out_shape": "f64[57344]{0}",
+   "MB": 4.1,
+   "GBps": 3.02,
+   "simd": null
+  },
+  {
+   "thunk": "multiply_bitcast_fusion.5",
+   "ms_per_call": 1.366,
+   "calls": 1.0,
+   "stages": {
+    "A": 0.72,
+    "radial": 0.28
+   },
+   "bwd": false,
+   "hlo_op": "fusion",
+   "out_shape": "f64[2048,28,18]{2,1,0}",
+   "MB": 17.8,
+   "GBps": 13.02,
+   "simd": {
+    "scalar": 28
+   }
+  },
+  {
+   "thunk": "add_power_fusion.2",
+   "ms_per_call": 1.357,
+   "calls": 1.0,
+   "stages": {
+    "radial": 0.88,
+    "pair": 0.12
+   },
+   "bwd": false,
+   "hlo_op": "fusion",
+   "out_shape": "f64[57344]{0}",
+   "MB": 2.3,
+   "GBps": 1.69,
+   "simd": {
+    "ymm": 2,
+    "scalar": 4
+   }
+  },
+  {
+   "thunk": "subtract_power_fusion.1",
+   "ms_per_call": 1.344,
+   "calls": 1.0,
+   "stages": {
+    "radial": 1.0
+   },
+   "bwd": false,
+   "hlo_op": "fusion",
+   "out_shape": "f64[57344]{0}",
+   "MB": 4.1,
+   "GBps": 3.07,
+   "simd": {
+    "xmm": 3,
+    "scalar": 2
+   }
+  },
+  {
+   "thunk": "power_multiply_fusion.1",
+   "ms_per_call": 1.312,
+   "calls": 1.0,
+   "stages": {
+    "radial": 1.0
+   },
+   "bwd": false,
+   "hlo_op": "fusion",
+   "out_shape": "f64[57344]{0}",
+   "MB": 4.1,
+   "GBps": 3.15,
+   "simd": {
+    "xmm": 3,
+    "scalar": 2
+   }
+  },
+  {
+   "thunk": "broadcast_select_fusion.1",
+   "ms_per_call": 1.217,
+   "calls": 1.0,
+   "stages": {
+    "A": 1.0
+   },
+   "bwd": true,
+   "hlo_op": "fusion",
+   "out_shape": "f64[57344,18]{1,0}",
+   "MB": 16.6,
+   "GBps": 13.62,
+   "simd": {}
+  },
+  {
+   "thunk": "multiply_bitcast_fusion",
+   "ms_per_call": 1.203,
+   "calls": 1.0,
+   "stages": {
+    "radial": 0.67,
+    "A": 0.33
+   },
+   "bwd": true,
+   "hlo_op": "fusion",
+   "out_shape": "f64[57344,18,1]{2,1,0}",
+   "MB": 17.5,
+   "GBps": 14.59,
+   "simd": {
+    "scalar": 20
+   }
+  },
+  {
+   "thunk": "concatenate_bitcast_fusion",
+   "ms_per_call": 1.149,
+   "calls": 1.0,
+   "stages": {
+    "angular": 0.97,
+    "radial": 0.03
+   },
+   "bwd": false,
+   "hlo_op": "fusion",
+   "out_shape": "f64[2048,28,5]{2,1,0}",
+   "MB": 7.8,
+   "GBps": 6.79,
+   "simd": {
+    "ymm": 24,
+    "scalar": 56
+   }
+  },
+  {
+   "thunk": "ynn_fusion.3",
+   "ms_per_call": 1.072,
+   "calls": 1.0,
+   "stages": {
+    "A": 1.0
+   },
+   "bwd": true,
+   "hlo_op": "fusion",
+   "out_shape": "f64[2048,28,3]{2,1,0}",
+   "MB": 7.5,
+   "GBps": 6.97,
+   "simd": null
+  }
+ ]
+}
