@@ -2,7 +2,7 @@
 model methods in this process only (src/ is unchanged); docs/dev/cpu-gap-profile.md.
 
     PYTHONPATH=bench:src taskset -c 0 python bench/perf/cpu_probe.py <model> <system> <n> \
-        [--aa prod|explicit|fm] [--spline einsum|sum] [--dtype float64] [--reps 10]
+        [--aa prod|explicit|fm] [--spline einsum|sum] [--chunk N] [--dtype float64] [--reps 10]
 
 Times the calculator's compiled skin step (`step_s`, as `cpu_gap.py`) and
 reports its energy and forces against the unpatched step (max |dE|, max |dF|),
@@ -29,6 +29,15 @@ import os
 import statistics
 import sys
 import time
+
+
+def set_chunk(chunk):
+    """CHUNK_NODES for this process (the default of energy_forces_virial_dense)."""
+    from ace_jax.eval import edge_model
+    f = edge_model.EdgeSiteModel.energy_forces_virial_dense
+    d = list(f.__defaults__)
+    d[0] = chunk
+    f.__defaults__ = tuple(d)
 
 
 def patch(aa, spline):
@@ -103,6 +112,7 @@ def main():
     ap.add_argument("--dtype", default="float64")
     ap.add_argument("--reps", type=int, default=10)
     ap.add_argument("--threads", type=int, default=1)
+    ap.add_argument("--chunk", type=int, default=None, help="variant only: CHUNK_NODES")
     a = ap.parse_args()
     if a.threads == 1:
         os.environ["XLA_FLAGS"] = (os.environ.get("XLA_FLAGS", "") + " --xla_cpu_multi_thread_eigen=false").strip()
@@ -112,10 +122,12 @@ def main():
     import numpy as np
     E0, F0, t0 = run(a.model, a.system, a.n, a.dtype, a.reps)
     patch(a.aa, a.spline)
+    if a.chunk:
+        set_chunk(a.chunk)
     jax.clear_caches()
     E1, F1, t1 = run(a.model, a.system, a.n, a.dtype, a.reps)
     print(json.dumps({"model": os.path.basename(a.model), "system": a.system, "n": a.n,
-                      "dtype": a.dtype, "aa": a.aa, "spline": a.spline,
+                      "dtype": a.dtype, "aa": a.aa, "spline": a.spline, "chunk": a.chunk,
                       "cpus": sorted(os.sched_getaffinity(0)),
                       "step_s_base": t0, "step_s_variant": t1, "speedup": t0 / t1,
                       "dE": abs(E1 - E0), "dF_max": float(np.abs(F1 - F0).max()),

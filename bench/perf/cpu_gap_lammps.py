@@ -54,6 +54,8 @@ def main():
     ap.add_argument("--ace-plugin", default="/storage/eng/essswb/bench-scaling-lestrade/ace-plugin/aceplugin.so")
     ap.add_argument("--out", default=str(HERE / "results" / "cpu_gap" / "lammps.jsonl"))
     ap.add_argument("--keep", action="store_true")
+    ap.add_argument("--lmp", default=None, help="LAMMPS wrapper (moriarty has no lmp-ace.sh: "
+                    "/storage/eng/essswb/bench-scaling-lestrade/lmp-ace.sh runs moriarty's lammps-dev)")
     ap.add_argument("--no-bind", action="store_true", help="mpirun --bind-to none (the published rows)")
     a = ap.parse_args()
     from scaling import run_lammps
@@ -64,7 +66,7 @@ def main():
     row = next(r for r in planned_models() if r["code"] == code and r["system"] == a.system
                and r["size"] == a.size)
     model = row["path"] if a.code == "mlpace" else (a.trim_lib or row["trim_lib"])
-    lmp = env_json["lmp"] if a.code == "mlpace" else env_json["lmp_ace"]
+    lmp = a.lmp or (env_json["lmp"] if a.code == "mlpace" else env_json["lmp_ace"])
     style = "mlpace" if a.code == "mlpace" else run_lammps.TRIM
     os.environ["PATH"] = OMPI_BIN + ":" + os.environ["PATH"]
     pathlib.Path(a.out).parent.mkdir(parents=True, exist_ok=True)

@@ -1,6 +1,6 @@
 """Markdown tables for docs/dev/cpu-gap-profile.md from bench/perf/results/cpu_gap/.
 
-    python bench/perf/cpu_gap_tables.py [single|threads|procs|lammps|stages|trace|knobs|probes|all]
+    python bench/perf/cpu_gap_tables.py [single|threads|procs|lammps|shard|stages|trace|knobs|probes|all]
 """
 import collections
 import json
@@ -45,9 +45,11 @@ def procs():
     single_ = {r["model"]: r["us_per_atom"] for r in acejax("single")}
     print("| model | P | atom-steps/s | us/atom-step | speed-up vs 1 core | efficiency |")
     print("|---|--:|--:|--:|--:|--:|")
+    last = {}
     for r in rows("acejax.jsonl"):
-        if r.get("series") != "procs":
-            continue
+        if r.get("series") == "procs":
+            last[(r["model"], r["P"])] = r           # a repeat replaces the earlier run
+    for r in last.values():
         s1 = single_.get(r["model"])
         sp = s1 / r["us_per_atom_step"] if s1 else float("nan")
         print(f"| {r['model']} | {r['P']} | {r['atom_steps_per_s']:.0f} | {r['us_per_atom_step']:.2f} | {sp:.1f}x | {sp / r['P']:.0%} |")
@@ -56,10 +58,15 @@ def procs():
 def lammps():
     print("| code | system | ranks | us/atom-step | atom-steps/s | speed-up | efficiency | Pair % | Comm % |")
     print("|---|---|--:|--:|--:|--:|--:|--:|--:|")
-    one = {}
+    one, last, reps = {}, {}, collections.defaultdict(list)
     for r in rows("lammps.jsonl"):
-        if r.get("status") != "ok":
-            continue
+        if r.get("status") == "ok":
+            key = (r["code"], r["system"], r["ranks"], r.get("no_bind", False))
+            last[key] = r                            # a repeat replaces the earlier run
+            reps[key].append(r["atom_steps_per_s"])
+    for key, r in last.items():
+        if len(reps[key]) > 1:
+            print(f"<!-- {key}: repeats {[round(x) for x in reps[key]]} -->")
         k = (r["code"], r["system"], r.get("no_bind", False))
         if r["ranks"] == 1:
             one[(r["code"], r["system"])] = r["us_per_atom_step"]
@@ -128,16 +135,26 @@ def knobs():
         print(f"| {r['model']} | {r['tag']} ({r.get('layout')}) | {r['us_per_atom']:.1f} | {b / r['us_per_atom']:.2f}x |")
 
 
+def shard():
+    last = {}
+    for r in rows("shard.jsonl"):
+        last[(r["model"], r["devices"])] = r          # a repeat replaces the earlier run
+    print("| model | cores = devices | threads only, us/atom | sharded, us/atom | speed-up | max dE/drij diff | load before |")
+    print("|---|--:|--:|--:|--:|--:|---|")
+    for (m, d), r in last.items():
+        print(f"| {m} | {d} | {r['us_per_atom_1dev']:.1f} | {r['us_per_atom_sharded']:.1f} | {r['speedup']:.2f}x | {r['dg_max']:.0e} | {r['loadavg'][0]} |")
+
+
 def probes():
-    print("| model | aa | spline | step base ms | variant ms | speed-up | max dF |")
-    print("|---|---|---|--:|--:|--:|--:|")
+    print("| model | aa | spline | chunk | step base ms | variant ms | speed-up | max dF |")
+    print("|---|---|---|--:|--:|--:|--:|--:|")
     for r in rows("probes.jsonl"):
-        print(f"| {r['model']} | {r['aa']} | {r['spline']} | {r['step_s_base'] * 1e3:.1f} | {r['step_s_variant'] * 1e3:.1f} | {r['speedup']:.2f}x | {r['dF_max']:.1e} |")
+        print(f"| {r['model']} | {r['aa']} | {r['spline']} | {r.get('chunk') or ''} | {r['step_s_base'] * 1e3:.1f} | {r['step_s_variant'] * 1e3:.1f} | {r['speedup']:.2f}x | {r['dF_max']:.1e} |")
 
 
 if __name__ == "__main__":
     what = sys.argv[1] if len(sys.argv) > 1 else "all"
-    for f in (single, threads, procs, lammps, stages, trace, knobs, probes):
+    for f in (single, threads, procs, lammps, shard, stages, trace, knobs, probes):
         if what in ("all", f.__name__):
             print(f"\n### {f.__name__}\n")
             f()

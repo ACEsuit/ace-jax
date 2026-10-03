@@ -280,7 +280,6 @@ def main():
                        "ndensity": int(m.ndensity), "radbase": m.radbasename,
                        "sbessel_form": m.sbessel_form}
     stages = {}
-    key = jax.random.PRNGKey(0)
     for name, f, inp in stage_fns(m, kind):
         args = inp(cache)
         fj = jax.jit(f)

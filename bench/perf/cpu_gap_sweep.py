@@ -97,7 +97,7 @@ def series(name):
 
 def procs(a, env):
     """The `procs` series (see the module docstring)."""
-    for P in (2, 4, 8, 16):
+    for P in (a.procs_p or (2, 4, 8, 16)):
         for m, s in MED:
             if a.only and a.only not in m:
                 continue
@@ -164,6 +164,7 @@ def main():
     ap.add_argument("--reps", type=int, default=20)
     ap.add_argument("--max-load", type=float, default=2.0)
     ap.add_argument("--only", default="", help="substring filter on the model name")
+    ap.add_argument("--procs-p", type=int, nargs="*", default=None, help="procs: the P values")
     ap.add_argument("--scratch", default="/tmp", help="stages: where traces and HLO dumps go")
     a = ap.parse_args()
     pathlib.Path(a.out).parent.mkdir(parents=True, exist_ok=True)
