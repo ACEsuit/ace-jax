@@ -342,7 +342,9 @@ def newton_polish(ev, x, lo, hi, maxiter=50):
     the model.  Every tolerance is the measured roundoff at x (`_evidence_noise`), so none depends
     on F's additive constants (sum_q n_q log sigma_q, 1/2 sum_q yy_q / sigma_q^2):
 
-    - converged when every projected-gradient component is within 10x its own roundoff (the
+    - converged when every projected-gradient component is within 10x its own roundoff -- tested
+      only after a first step if the start's predicted decrease is resolvable (decrement^2 > 10x F's
+      roundoff), so a resolvably improvable L-BFGS endpoint is always polished -- (the
       gradient stays resolved far below F's noise: cond(S) ~ 5e13 leaves F to ~1e-5 nats, the
       gradient to ~1e-5 absolute but the step to ~1e-6);
     - a step is accepted on an Armijo decrease of F (backtracked) while the model's predicted
@@ -352,7 +354,8 @@ def newton_polish(ev, x, lo, hi, maxiter=50):
       decrease is resolvable), else not; not converged after maxiter.
 
     If the endpoint's F is worse than the start's by more than 10x F's roundoff the start is kept
-    (not converged).  Deterministic: a fixed sequence of compiled evaluations and LAPACK calls on
+    (not converged) and reported (pg, decrement).  Cost per iteration: one Hessian, four noise
+    probes, one to a few evaluations.  Deterministic: a fixed sequence of compiled evaluations and LAPACK calls on
     P x P matrices, no randomness."""
     lo, hi = np.asarray(lo, float), np.asarray(hi, float)
     x = np.clip(np.asarray(x, float), lo, hi)
@@ -369,14 +372,22 @@ def newton_polish(ev, x, lo, hi, maxiter=50):
     x_start, F_start = x, F
     pgv = _projected_gradient(x, g, lo, hi)
     pg = pg0 = float(np.abs(pgv).max())
-    steps, n_hess, converged, dec, noise = 0, 0, False, float("nan"), 0.0
+    steps, n_hess, converged, dec, dec0, noise = 0, 0, False, float("nan"), float("nan"), 0.0
     message = f"maxiter {maxiter}"
     for _ in range(maxiter):
         H = -ev.hessian(x)
         n_hess += 1
         noise, gnoise = _evidence_noise(evaluate, x, F, g, H)
         d, dec = _newton_step(H, g, x, lo, hi)
-        if np.all(np.abs(pgv) <= 10 * gnoise) or not np.any(d):
+        if steps == 0 and n_hess == 1:
+            dec0 = dec
+        if not np.any(d):
+            converged = True
+            message = f"converged (zero projected Newton step; |pg| {pg:.2e})"
+            break
+        # the gradient test only after a first step whenever that step's decrease is resolvable: the
+        # L-BFGS endpoint (BLAS/layout-dependent) is never returned unpolished if it can be improved
+        if (steps > 0 or dec <= 10 * noise) and np.all(np.abs(pgv) <= 10 * gnoise):
             converged = True
             message = f"converged (|pg| {pg:.2e} within 10x the gradient roundoff {gnoise.max():.1e})"
             break
@@ -405,7 +416,7 @@ def newton_polish(ev, x, lo, hi, maxiter=50):
         pg = float(np.abs(pgv).max())
         steps += 1
     if F > F_start + 10 * noise:
-        x, F, converged = x_start, F_start, False
+        x, F, converged, pg, dec = x_start, F_start, False, pg0, dec0
         message += "; kept the L-BFGS endpoint (lower F)"
     return x, {"converged": bool(converged), "message": message, "steps": steps, "hessian_evals": n_hess,
                "pg_start": pg0, "pg": pg, "decrement": dec, "noise": noise}
@@ -890,10 +901,11 @@ def _ard_fit_warnings(stage, info, names):
                    f"{n['pg_start']:.2e} -> {n['pg']:.2e}")
     if info.get("cond_S") is not None:
         out.append(f"ARD {stage} evidence fit: cond(S) {info['cond_S']:.1e} at the endpoint")
-        if info["cond_S"] > info.get("cond_max", np.inf):
-            out.append(f"WARNING: ARD {stage} evidence fit: cond(S) {info['cond_S']:.1e} exceeds ard_cond_max "
-                       f"{info['cond_max']:.0e} (a noise scale moved below its start: the a_floor guard is "
-                       f"set at the start); the evidence is resolved only to its roundoff there")
+        if not np.isfinite(info["cond_S"]) or info["cond_S"] > info.get("cond_max", np.inf):
+            why = "non-finite: S numerically singular" if not np.isfinite(info["cond_S"]) else "exceeds"
+            out.append(f"WARNING: ARD {stage} evidence fit: cond(S) {info['cond_S']:.1e} ({why} ard_cond_max "
+                       f"{info['cond_max']:.0e}; the a_floor guard is set at the start's noise scales, which may "
+                       f"have moved down); the evidence is resolved only to its roundoff there")
     if not info.get("success", True):
         out.append(f"WARNING: ARD {stage} evidence fit did not converge: {info.get('message', '?')}")
     hit = [n for n, b in zip(names, info.get("at_bound", [])) if b]

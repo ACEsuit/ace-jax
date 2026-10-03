@@ -186,6 +186,14 @@ def test_ard_fit_warnings_flag_failure_and_bounds():
     assert len(w) == 2 and "ABNORMAL" in w[0] and "b" in w[1]
 
 
+@pytest.mark.parametrize("cond, warn", [(1e10, False), (1e15, True), (float("nan"), True), (float("inf"), True)])
+def test_ard_fit_warnings_flag_cond_above_max_or_non_finite(cond, warn):
+    from ace_jax.fit.ard import _ard_fit_warnings
+    info = {"success": True, "message": "ok", "at_bound": [False], "cond_S": cond, "cond_max": 1e14}
+    w = [s for s in _ard_fit_warnings("full", info, ["a"]) if "WARNING" in s]
+    assert bool(w) == warn and all("cond(S)" in s for s in w)
+
+
 def test_joint_statistics_are_linear_only_with_inducing_points(tiny_linear_problem):
     """Joint ARD statistics are the (L, L) linear Gram even for a hybrid problem with inducing
     points (M > 0): the residual columns never enter the ARD posterior."""
@@ -1027,6 +1035,29 @@ def test_newton_polish_with_an_indefinite_free_hessian_still_descends():
     x, info = newton_polish(_SaddleEvidence(), np.array([0.1, 0.5]), lo, hi)
     assert info["converged"], info["message"]
     np.testing.assert_allclose(x, [1.0, 0.0], rtol=0, atol=1e-10)
+
+
+class _NoisyGradQuad(_QuadEvidence):
+    """An exact F with a gradient carrying 1e-3 of deterministic roundoff-like noise (it changes at
+    1e-15 moves of h): the gradient criterion holds at once, though the decrease is resolvable."""
+
+    def value_and_grad(self, h):
+        v, g = super().value_and_grad(h)
+        return v, g + 1e-3 * np.sin(1e17 * np.asarray(h, float) + np.arange(len(g)))
+
+
+def test_newton_polish_always_steps_from_a_resolvably_improvable_start():
+    """Determinism hardening: from a start whose predicted decrease is resolvable, the polish takes at
+    least one Newton step before testing the gradient criterion -- the (BLAS/layout-dependent) L-BFGS
+    endpoint is never returned as it was."""
+    from ace_jax.fit.ard import newton_polish
+    A, c = np.diag([2.0, 1.0, 0.5]), np.array([0.3, -0.2, 0.1])
+    ev = _NoisyGradQuad(A, c, off=-1e3)
+    x0 = c + np.array([4e-3, -4e-3, 8e-3])          # |pg| <= 8e-3 < 10x the measured gradient noise
+    lo, hi = -np.ones(3), np.ones(3)
+    x, info = newton_polish(ev, x0, lo, hi)
+    assert info["steps"] >= 1, info["message"]
+    assert ev.value_and_grad(x)[0] > ev.value_and_grad(x0)[0] + 1e-6
 
 
 @pytest.fixture(scope="module")
