@@ -235,7 +235,8 @@ def fit_ard(ev, h0, cond_max=1e14, maxiter=500, polish=True, start=None):
     roundoff-dependent point (a line-search failure on the noisy objective, or a loose scaled gtol),
     which two runs on different BLAS / batch layouts reach differently.  The box comes from h0;
     `start` (default h0) is where L-BFGS-B starts in it.  info["cond_S"]: cond(S) at the endpoint
-    (ev.cond), with info["cond_max"] the floor's target (exceeded when sigma ran down, see ev.bounds)."""
+    (ev.cond), with info["cond_max"] the floor's target (exceeded when sigma ran down, see ev.bounds);
+    info["newton"]["noise"]: the evidence's measured roundoff at the endpoint (the resolution of v)."""
     from scipy.optimize import minimize
     lo, hi = ev.bounds(h0, cond_max)
     x0 = np.clip(np.asarray(h0 if start is None else start, float), lo, hi)
@@ -1117,6 +1118,9 @@ def run_ard_stage(cfg, data, built, theta, log=print, full_stats=None):
     lq = (lambda f: float(f(lev))) if len(lev) else (lambda f: None)
     report = {"mode": mode, "body_groups": list(ev.groups), "h": h.tolist(), "h_names": names,
               "logev_full": v, "logev_full_start": v_start, "optimiser": info, "optimiser_fit": info_fit,
+              # the evidence's roundoff at the endpoint, as the polish measured it (its spread over 1e-15
+              # moves of h): two fits of the same data agree in logev_full only to ~this, not to 1e-15
+              "logev_full_noise": info.get("newton", {}).get("noise"),
               "a_floor": ev.a_floor,
               "tempered_quantities": ["F"],        # F_var is lam_rms[g]^2 diag V; E_var / V_var untempered
               "kappa": kappa, "kappa_subset": kappa_subset, "n_val_atoms": int(len(e2)),
