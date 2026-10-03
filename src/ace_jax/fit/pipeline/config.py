@@ -88,9 +88,10 @@ class FitConfig:
     @property
     def joint_e0(self):
         """e0='lsq' fits E0 jointly (E0 columns in the linear model, a wide prior around the
-        pre-fit value). ARD and POPS keep the pre-fit E0: they build their own readout prior.
+        pre-fit value) under BLR and ARD (whose evidence keeps the E0 columns' fixed prior, outside
+        the body-order groups). POPS keeps the pre-fit E0: it builds its own readout prior.
         (A learned-radial fit learns its radials with the pre-fit E0, then fits jointly.)"""
-        return self.e0 == "lsq" and self.uq == "blr"
+        return self.e0 == "lsq" and self.uq in ("blr", "ard")
 
     @property
     def pack_mode(self):

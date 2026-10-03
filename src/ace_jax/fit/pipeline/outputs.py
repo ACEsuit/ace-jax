@@ -65,6 +65,8 @@ def fitted_e0(res):
         return E0
     if res.readout is not None:
         mu = np.asarray(res.readout)
+    elif getattr(res, "ard", None) is not None:          # ARD: the posterior mean the model file holds
+        mu = np.asarray(res.ard.posterior.mean)
     else:
         from .export import _posterior
         mu = np.asarray(_posterior(res, res.theta)[0])

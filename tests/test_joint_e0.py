@@ -126,11 +126,13 @@ def test_joint_e0_absorbs_a_constant_energy_shift(tmp_path):
     np.testing.assert_allclose((pa["E_mean"] - pb["E_mean"]) / pa["nat"], 2.0, atol=1e-4)
 
 
-def test_ard_and_pops_keep_the_prefit_e0():
+def test_pops_keeps_the_prefit_e0_and_ard_fits_it_jointly():
     from ace_jax.fit.pipeline import FitConfig as _F
     assert _F(model="m.npz", e0="lsq", arm="linear", learn_radial=True).validate().joint_e0 is True
     from ace_jax.fit.pipeline import FitConfig
     assert FitConfig(model="m.npz", e0="lsq", uq="pops", arm="linear").validate().joint_e0 is False
+    assert FitConfig(model="m.npz", e0="lsq", uq="ard", arm="linear").validate().joint_e0 is True
+    assert FitConfig(model="m.npz", e0="prefit", uq="ard", arm="linear").validate().joint_e0 is False
     assert FitConfig(model="m.npz", e0="lsq", arm="linear").validate().joint_e0 is True
     assert FitConfig(model="m.npz", e0="prefit", arm="linear").validate().joint_e0 is False
 
@@ -210,13 +212,164 @@ def test_patch_radial_npz_warns_when_it_drops_an_e0_shift(tmp_path):
         patch_radial_npz(str(src), tmp_path / "m.npz", m, readout=np.ones(L0 + 1))
 
 
-def test_ard_refuses_a_joint_e0_problem(m0):
-    from ace_jax.fit.ard import ard_statistics
+def _ard_e0_problem(m0, e0_std=(0.7,)):
     model, meta, z, configs, ds, cfg = m0
     cfg_e0 = dataclasses.replace(cfg, e0_cols=True)
     X, S = site_features(model, cfg, ds)
     ind = select_inducing(X, S, ds.node_z, ds.node_mask, 0, descriptor_scale(X, ds.node_mask))
-    prob = Problem(KernelSpec("cosine", True, cfg.D), model, ind, cfg_e0, jnp.asarray(z["gamma"]),
-                   default_prior(2.35), e0_prec=jnp.ones(cfg.NZ))
-    with pytest.raises(ValueError, match="prefit"):
-        ard_statistics(_theta(), prob, ds, "sequential")
+    return Problem(KernelSpec("cosine", True, cfg.D), model, ind, cfg_e0, jnp.asarray(z["gamma"]),
+                   default_prior(2.35), e0_prec=jnp.asarray(e0_std, float) ** -2)
+
+
+@pytest.mark.parametrize("mode", ["joint", "sequential"])
+def test_ard_evidence_gives_the_e0_columns_their_fixed_prior(m0, mode):
+    """Joint E0 under ARD: the E0 columns are in the design with BLR's fixed precision e0_prec, outside
+    the body-order groups (no a_k).  Brute force: the dense evidence and posterior mean with
+    Lambda = diag(gamma^2 exp(a_body(j)), e0_prec)."""
+    from ace_jax.fit.ard import (E0_GROUP, ARDEvidence, ard_gamma, ard_posterior, ard_statistics,
+                                 body_order_columns)
+    from ace_jax.fit.rows import linear_rows
+    model, meta, z, configs, ds, cfg = m0
+    prob = _ard_e0_problem(m0)
+    L = prob.cfg.len_basis
+    bc = body_order_columns(meta, prob.cfg)
+    assert len(bc) == L and np.all(bc[prob.cfg.len_readout:] == E0_GROUP)
+    np.testing.assert_array_equal(bc[:prob.cfg.len_readout], body_order_columns(meta, cfg))
+    with pytest.raises(ValueError, match="ard_gamma"):
+        ARDEvidence(ard_statistics(_theta(), prob, ds, mode), np.asarray(prob.gamma), bc)
+    from ace_jax.eval import highest_precision
+    with highest_precision():
+        ev = ARDEvidence(ard_statistics(_theta(), prob, ds, mode), ard_gamma(prob), bc)
+        assert E0_GROUP not in ev.groups and len(ev.groups) == len(np.unique(body_order_columns(meta, cfg)))
+        h = ev.h0(_theta()) + 0.3 * np.arange(len(ev.h0(_theta())))
+        v = ev.value_and_grad(h)[0]
+        post = ard_posterior(ev, h, 1.0, meta)
+        # dense reference
+        sig = ev.sigmas(h)
+        P, y = [], []
+        for i in range(ds.n_batches):
+            b = jax.tree.map(lambda a, i=i: a[i], ds)
+            r = linear_rows(model, prob.cfg, b)[0]
+            for k, (Phi, yy, w) in enumerate(((r.E, b.y_E, b.w_E), (r.F.reshape(-1, L), b.y_F.reshape(-1),
+                                                                     jnp.repeat(b.w_F, 3)),
+                                               (r.V.reshape(-1, L), b.y_V.reshape(-1), jnp.repeat(b.w_V, 6)))):
+                P.append(np.asarray(Phi) * (np.asarray(w) / sig[k])[:, None]); y.append(np.asarray(yy) * np.asarray(w) / sig[k])
+        P, y = np.concatenate(P), np.concatenate(y)
+    nls = 3 if ev.joint else 0
+    a = dict(zip(ev.groups, h[nls:]))
+    gam = np.asarray(prob.gamma)
+    lam = np.r_[gam ** 2 * np.exp([a[int(g)] for g in bc[:prob.cfg.len_readout]]), np.asarray(prob.e0_prec)]
+    A = P.T @ P + np.diag(lam)
+    mu = np.linalg.solve(A, P.T @ y)
+    np.testing.assert_allclose(post.mean, mu, rtol=0, atol=1e-7 * np.abs(mu).max())
+    assert post.n_e0 == cfg.NZ and post.meta["e0_cols"] == cfg.NZ
+    if ev.joint:
+        n = len(y)    # Gaussian evidence up to the constant -n/2 log 2 pi
+        ref = (-0.5 * y @ y + 0.5 * (P.T @ y) @ mu - 0.5 * np.linalg.slogdet(A)[1] + 0.5 * np.sum(np.log(lam))
+               - np.sum(np.asarray(ev._data[3]) * h[:3]))
+        assert v == pytest.approx(ref, abs=1e-6 * max(1.0, abs(ref))), n
+
+
+def test_ard_force_quantities_ignore_the_e0_columns(m0):
+    """The E0 columns are zero on every force row: force rows WITHOUT them (the model file's, as
+    ACECalculator builds them) give the same shape V, forces_std and force variance as the full rows,
+    on the R (PRESS), Q (sandwich) and kappa (Cholesky) paths."""
+    from ace_jax.eval import highest_precision
+    from ace_jax.fit.ard import ARDEvidence, ard_gamma, ard_posterior, ard_statistics, body_order_columns
+    from ace_jax.fit.rows import linear_rows
+    model, meta, z, configs, ds, cfg = m0
+    prob = _ard_e0_problem(m0)
+    with highest_precision():
+        ev = ARDEvidence(ard_statistics(_theta(), prob, ds, "joint"), ard_gamma(prob),
+                         body_order_columns(meta, prob.cfg))
+        post = ard_posterior(ev, ev.h0(_theta()), 1.3, meta)
+        b = jax.tree.map(lambda a: a[0], ds)
+        F = np.asarray(linear_rows(model, prob.cfg, b)[0].F)
+        L0 = prob.cfg.len_readout
+        assert not np.any(F[..., L0:])
+        rng = np.random.default_rng(0)
+        G = rng.standard_normal((prob.cfg.len_basis, 5))
+        from ace_jax.fit.ard import sandwich_factor
+        for p in (post, post._replace(R=jnp.asarray(G)), post._replace(Q=sandwich_factor(post, G))):
+            np.testing.assert_allclose(p.atom_shape(F[:, :, :L0]), p.atom_shape(F), rtol=1e-12, atol=1e-300)
+            np.testing.assert_allclose(p.forces_std(F[:, :, :L0]), p.forces_std(F), rtol=1e-12, atol=1e-300)
+        with pytest.raises(ValueError, match="columns"):
+            post.atom_shape(F[:, :, :L0 - 1])
+
+
+def test_ard_posterior_without_e0_columns_loads_as_before(ard_setup, tmp_path):
+    """A schema-3 posterior written before joint E0 under ARD (no e0_cols in meta) has n_e0 = 0 and
+    serves from its full-width rows unchanged."""
+    prob, ds, ev, h, post = ard_setup
+    assert "e0_cols" not in post.meta and post.n_e0 == 0
+    post.save(tmp_path / "p.npz")
+    from ace_jax.fit.ard import ARDPosterior
+    p2 = ARDPosterior.load(tmp_path / "p.npz")
+    assert p2.n_e0 == 0
+    b = jax.tree.map(lambda a: a[0], ds)
+    F = np.asarray(linear_rows(prob.model, prob.cfg, b)[0].F)
+    np.testing.assert_allclose(p2.forces_std(F), post.forces_std(F), rtol=1e-5)
+
+
+def _ard_cfg(**kw):
+    from ace_jax.fit.pipeline import FitConfig
+    base = dict(model=str(FIXTURE_DIR / "si_fitted.npz"), ntrain=30, ntest=8, batch=4, r0=2.35, arm="linear",
+                uq="ard", opt="lbfgs", rungs=("map",), map_steps=5, predict_train=False, ard_n_min=1,
+                **KEYS)
+    return FitConfig(**{**base, **kw}).validate()
+
+
+def _ard_fit(cfg, **data):
+    from ace_jax.fit.pipeline import fit, load_fit_data
+    d = load_fit_data(cfg, log=lambda *a: None, **data)
+    return fit(cfg, d, log=lambda *a: None)
+
+
+def test_ard_joint_e0_with_an_isolated_atom_matches_the_prefit_fit():
+    """An isolated training atom pins its species' E0 column (as under BLR): the joint-E0 ARD fit is the
+    pre-fit one, and the exported E0 is the isolated-atom energy."""
+    from ace_jax.fit.pipeline.export import linear_model_arrays
+    cfgs = load_configs(str(XYZ), **KEYS)
+    iso = [c.energy for c in cfgs if len(c.numbers) == 1]
+    j = _ard_fit(_ard_cfg(), data=str(XYZ))
+    p = _ard_fit(_ard_cfg(e0="prefit"), data=str(XYZ))
+    assert j.built.prob.cfg.e0_cols and not p.built.prob.cfg.e0_cols
+    assert any(len(c.numbers) == 1 for c in j.data.train), "the split keeps the isolated atom in training"
+    assert abs(linear_model_arrays(j)["E0"][0] - np.mean(iso)) < 1e-6
+    a, b = j.preds.arrays["test/map"], p.preds.arrays["test/map"]
+    # equal to the evidence optimiser's resolution along its flat directions (~3e-5 eV/atom, ~4e-4 eV/A;
+    # the test RMSEs are ~0.2 eV/atom and ~1.9 eV/A)
+    np.testing.assert_allclose(a["E_mean"] / a["nat"], b["E_mean"] / b["nat"], rtol=0, atol=2e-4)
+    np.testing.assert_allclose(a["F_mean"], b["F_mean"], rtol=0, atol=2e-3)
+
+
+def test_ard_joint_e0_fit_exports_and_serves_the_e0_shift(tmp_path):
+    """Without an isolated atom the E0 column is free (prior N(pre-fit E0, 1 eV^2)): the model file folds
+    the fitted shift into E0, so ACECalculator's energy is the fit's prediction, and its forces_std (from
+    readout-only force rows) is the stage's served value."""
+    from ase import Atoms
+    from ase.io import read, write
+    from ace_jax import ACECalculator
+    from ace_jax.fit.pipeline import write_outputs
+    from ace_jax.fit.pipeline.export import linear_model_arrays
+    frames = [a for a in read(str(XYZ), ":") if len(a) > 1]
+    write(tmp_path / "bulk.xyz", frames)
+    cfg = _ard_cfg(ard_variance="sandwich")
+    res = _ard_fit(cfg, data=str(tmp_path / "bulk.xyz"))
+    pc = res.built.prob.cfg
+    shift = np.asarray(res.ard.posterior.mean)[pc.len_readout:]
+    assert pc.e0_cols and shift.shape == (pc.NZ,) and np.all(np.abs(shift) > 1e-6)
+    arr = linear_model_arrays(res)
+    np.testing.assert_allclose(arr["E0"], res.data.E0 + shift, rtol=0, atol=1e-12)
+    write_outputs(res, tmp_path / "run", log=lambda *a: None)
+    calc = ACECalculator(str(tmp_path / "run" / "model.npz"), posterior=str(tmp_path / "run" / "posterior.npz"))
+    assert calc.posterior.n_e0 == pc.NZ
+    pred = res.preds.arrays["test/map"]
+    off = np.r_[0, np.cumsum(pred["nat"])]
+    for k, c in enumerate(res.data.test_o[:3]):
+        at = Atoms(numbers=c.numbers, positions=c.positions, cell=c.cell, pbc=c.pbc)
+        at.calc = calc
+        assert abs(at.get_potential_energy() - pred["E_mean"][k]) < 1e-6 * max(1.0, abs(pred["E_mean"][k]))
+        sd = np.asarray(calc.get_property("forces_std", at))
+        # posterior.npz stores R in float32
+        np.testing.assert_allclose(sd ** 2, pred["F_var"][off[k]:off[k + 1]].sum(1), rtol=1e-4, atol=1e-14)

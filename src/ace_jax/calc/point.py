@@ -178,10 +178,12 @@ class ACECalculator(Calculator):
             post = ARDPosterior.load(posterior)
             NZ = len(meta["elements"])
             L = (meta["n_B"] + meta["n_pair"]) * NZ
-            if (len(post.mean) != L or post.meta.get("n_B") != meta["n_B"]
+            # a joint-E0 posterior (meta e0_cols) carries NZ E0 columns after the readout: the model
+            # file folds their shift into E0, and they are zero on every force row (ARDPosterior pads)
+            if (len(post.mean) - post.n_e0 != L or post.meta.get("n_B") != meta["n_B"]
                     or post.meta.get("NZ") != NZ):
                 raise ValueError(f"posterior {posterior} does not match the model: "
-                                 f"basis {len(post.mean)} vs {L}")
+                                 f"basis {len(post.mean) - post.n_e0} vs {L}")
             p_els = [int(e) for e in post.meta.get("elements", [])]
             m_els = [int(e) for e in meta["elements"]]
             if p_els != m_els:                           # order-sensitive: columns are per species index
@@ -195,7 +197,7 @@ class ACECalculator(Calculator):
                 raise ValueError(f"posterior= needs the model.npz written by the same fit; {model_path} "
                                  f"has no WB/Wpair readout")
             coef = np.concatenate([np.asarray(z["WB"]).T.ravel(), np.asarray(z["Wpair"]).T.ravel()])
-            mean = np.asarray(post.mean, np.float64)
+            mean = np.asarray(post.mean, np.float64)[:len(post.mean) - post.n_e0]
             if coef.shape != mean.shape or not np.allclose(
                     coef, mean, rtol=1e-10, atol=1e-14 * max(float(np.abs(mean).max(initial=0.0)), 1e-300)):
                 raise ValueError(f"posterior {posterior} does not match the model: its mean is not the "

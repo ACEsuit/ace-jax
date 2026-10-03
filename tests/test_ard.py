@@ -319,7 +319,10 @@ def test_ard_stage_reuses_cached_full_statistics(monkeypatch):
     from ace_jax.fit.pipeline.mapfit import fit_map
     from ace_jax.fit.pipeline.objective import make_objective
     from ace_jax.fit.pipeline.problem import build_problem
-    cfg = _pipe_cfg().validate()
+    # e0 prefit: the cache reuse does not depend on the E0 columns, and from the joint-E0 MAP one of the
+    # two L-BFGS refits stops on a line-search failure, so h, kappa and the means then agree only to
+    # ~1e-3 (the refit's resolution along flat directions), which would hide a real mismatch
+    cfg = _pipe_cfg(e0="prefit").validate()
     d = load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz"))
     b = build_problem(cfg, d)
     calls = []
@@ -345,8 +348,8 @@ def test_ard_stage_reuses_cached_full_statistics(monkeypatch):
         calls.clear()
         got = ard.run_ard_stage(cfg, d, b, theta, log=lambda *a: None, full_stats=obj.lin)
         bc = ard.body_order_columns(d.meta, b.prob.cfg)
-        ev_ref = ard.ARDEvidence(joint, np.asarray(b.prob.gamma), bc)
-        ev_got = ard.ARDEvidence(ard.joint_ard_stats(obj.lin), np.asarray(b.prob.gamma), bc)
+        ev_ref = ard.ARDEvidence(joint, ard.ard_gamma(b.prob), bc)
+        ev_got = ard.ARDEvidence(ard.joint_ard_stats(obj.lin), ard.ard_gamma(b.prob), bc)
         v_ref, g_ref = ev_ref.value_and_grad(ref.posterior.h)
         v_got, g_got = ev_got.value_and_grad(ref.posterior.h)
         p_ref = ard.predict_ard(ref.posterior, b.prob, d.ds_test)
@@ -527,7 +530,7 @@ def test_ard_stage_sandwich_in_sequential_mode(ard_map):
         post = res.posterior
         # rebuild the stage's full-refit evidence: its sequential sigmas are the fixed linear MAP ones
         ev = ard.ARDEvidence(ard.ard_statistics(theta, b.prob, d.ds_train, "sequential"),
-                             np.asarray(b.prob.gamma), ard.body_order_columns(d.meta, b.prob.cfg))
+                             ard.ard_gamma(b.prob), ard.body_order_columns(d.meta, b.prob.cfg))
         h = np.asarray(res.report["h"])
         Ms, _, lam_prior, _ = ev._parts(jnp.asarray(h, float))
         G = np.asarray((Ms + jnp.diag(lam_prior)) @ post.Q)          # G~ = S Q: the stage's own scores
