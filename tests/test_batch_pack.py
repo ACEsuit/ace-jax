@@ -179,7 +179,9 @@ def test_ard_stage_with_a_big_cell_is_pack_invariant():
         a, b = np.asarray(a, float), np.asarray(b, float)
         np.testing.assert_allclose(a, b, rtol=0, atol=1e-12 * max(1.0, np.abs(b).max()))
     np.testing.assert_allclose(p1.h, p0.h, rtol=0, atol=1e-5)
-    np.testing.assert_allclose(p1.mean, p0.mean, rtol=0, atol=1e-6 * np.abs(p0.mean).max())
+    # the statistics agree to 1e-12 and h to 1e-5 above; the means come from two optimizer runs whose endpoints
+    # drift by ~2e-6 relative across platforms (CI) -- a layout/index bug would be O(1)
+    np.testing.assert_allclose(p1.mean, p0.mean, rtol=0, atol=1e-5 * np.abs(p0.mean).max())
     for k in ("lam_rms", "q", "r", "n_cfg", "n_cfg_val", "n_atoms"):
         np.testing.assert_allclose(np.asarray(p1.group_table[k], float),
                                    np.asarray(p0.group_table[k], float), rtol=1e-6, atol=1e-12)
