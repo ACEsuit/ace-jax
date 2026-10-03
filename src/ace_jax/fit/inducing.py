@@ -4,6 +4,7 @@ sampling per species, GAP-style)."""
 from dataclasses import dataclass
 from typing import NamedTuple
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -94,14 +95,8 @@ def build_pmap(cfg, scale, density=None, d=None, X=None, mask=None):
     raise ValueError(f"unknown density {density!r}")
 
 
-def site_features(model, cfg, ds):
-    """Compact descriptors X (nb, Ncap, D) and summaries S (nb, Ncap) of every node of ds.  A batch
-    over the rows' ROWS_EDGE_BUDGET is evaluated in node chunks (`rows.rows_node_chunk`): a site
-    depends only on its own neighbour row, so chunking is exact and bounds the per-edge temporaries
-    (E, width) independently of n_cap."""
-    from .rows import rows_node_chunk
-    Ncap, K = ds.nbr.shape[1:]
-    nc = rows_node_chunk(model, cfg, Ncap, K)
+def _site_features_body(model, cfg, ds, nc):
+    Ncap = ds.nbr.shape[1]
 
     def block(rij, nbr, nmask, node_z_all, z_c):
         n = nbr.shape[0]
@@ -121,10 +116,26 @@ def site_features(model, cfg, ds):
         X, S = jax.lax.map(lambda t: block(*t[:3], node_z, t[3]),
                            (ch(rp), ch(padz(nbr, 0)), ch(padz(nmask, False)), ch(padz(node_z, 0))))
         return X.reshape(-1, X.shape[-1])[:Ncap], S.reshape(-1)[:Ncap]
+    # sequential over batches: vmap would materialise every batch's edge
+    # features at once (hundreds of GB at 6890 descriptors per site)
+    return jax.lax.map(lambda t: one(*t), (ds.rij, ds.nbr, ds.nbr_mask, ds.node_z))
+
+
+# one compiled program per (model structure, cfg, node chunk, dataset shape), shared by every call:
+# the model's arrays are arguments (an eager lax.map of a fresh closure compiled on every call)
+_site_features_jit = eqx.filter_jit(_site_features_body)
+
+
+def site_features(model, cfg, ds):
+    """Compact descriptors X (nb, Ncap, D) and summaries S (nb, Ncap) of every node of ds.  A batch
+    over the rows' ROWS_EDGE_BUDGET is evaluated in node chunks (`rows.rows_node_chunk`): a site
+    depends only on its own neighbour row, so chunking is exact and bounds the per-edge temporaries
+    (E, width) independently of n_cap."""
+    from .rows import rows_node_chunk
+    Ncap, K = ds.nbr.shape[1:]
+    nc = rows_node_chunk(model, cfg, Ncap, K)
     with highest_precision():
-        # sequential over batches: vmap would materialise every batch's edge
-        # features at once (hundreds of GB at 6890 descriptors per site)
-        return jax.lax.map(lambda t: one(*t), (ds.rij, ds.nbr, ds.nbr_mask, ds.node_z))
+        return _site_features_jit(model, cfg, ds, nc)
 
 
 def descriptor_scale(X, node_mask):

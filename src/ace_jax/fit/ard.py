@@ -14,6 +14,7 @@ import json
 import pathlib
 from typing import NamedTuple
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -59,19 +60,33 @@ def ard_statistics(theta, prob, ds, mode):
     linear MAP noise scales, accumulated in one pass (1 L^2 matrix) -- the low-memory mode.
     Both are the linear (L-column) statistics only: a hybrid problem's inducing columns (M > 0)
     never enter the ARD posterior, and the joint Gram is hyperparameter-independent."""
-    from .stats import linear_statistics
+    from .rows import ROWS_EDGE_BUDGET
     if mode == "joint":
-        return joint_ard_stats(linear_statistics(prob.model, prob.cfg, ds))
+        return joint_ard_stats(_linear_statistics_jit(prob.model, prob.cfg, ds, ROWS_EDGE_BUDGET))
     if mode != "sequential":
         raise ValueError(f"ard mode must be 'joint' or 'sequential', got {mode!r}")
-    from .rows import linear_rows_bounded
     ls = np.array([float(getattr(theta, f"log_sigma_{q}")) for q in "EFV"])
-    inv = jnp.asarray(np.exp(-ls))
-    L = prob.cfg.len_basis
+    M, bv = _sequential_stats_jit(prob.model, prob.cfg, ds, jnp.asarray(np.exp(-ls)), ROWS_EDGE_BUDGET)
+    return ARDStats((M,), (bv,), np.zeros(3), np.zeros(3), ls)
+
+
+# The stage's compiled programs are module-level eqx.filter_jit functions of (model, cfg, data, ...):
+# keyed on the model's structure, cfg and the shapes, with the arrays as arguments, so a repeated
+# stage (bench sweeps, tests) reuses them -- a fresh jit closure per call compiled again every time
+# and leaked its executable's memory maps (vm.max_map_count after ~17 stages).  `budget`
+# (rows.ROWS_EDGE_BUDGET, read while tracing) is a static cache key only.
+def _linear_statistics_body(model, cfg, ds, budget):
+    from .stats import linear_statistics
+    return linear_statistics(model, cfg, ds)
+
+
+def _sequential_stats_body(model, cfg, ds, inv, budget):
+    from .rows import linear_rows_bounded
+    L = cfg.len_basis
 
     def body(acc, batch):
         M, bv = acc
-        r = linear_rows_bounded(prob.model, prob.cfg, batch)
+        r = linear_rows_bounded(model, cfg, batch)
         for k, (Phi, y, w) in enumerate(((r.E, batch.y_E, batch.w_E),
                                          (r.F.reshape(-1, L), batch.y_F.reshape(-1), jnp.repeat(batch.w_F, 3)),
                                          (r.V.reshape(-1, L), batch.y_V.reshape(-1), jnp.repeat(batch.w_V, 6)))):
@@ -80,8 +95,11 @@ def ard_statistics(theta, prob, ds, mode):
             bv = bv + Pw.T @ (y * w * inv[k])
         return (M, bv), None
 
-    (M, bv), _ = jax.lax.scan(jax.checkpoint(body), (jnp.zeros((L, L)), jnp.zeros(L)), ds)
-    return ARDStats((M,), (bv,), np.zeros(3), np.zeros(3), ls)
+    return jax.lax.scan(jax.checkpoint(body), (jnp.zeros((L, L)), jnp.zeros(L)), ds)[0]
+
+
+_linear_statistics_jit = eqx.filter_jit(_linear_statistics_body)
+_sequential_stats_jit = eqx.filter_jit(_sequential_stats_body)
 
 
 def joint_ard_stats(st):
@@ -116,29 +134,9 @@ class ARDEvidence:
         # pipeline caller shares them with its cache); D^-1 (sum_q w_q G_q) D^-1 is formed per call.
         # They are jit ARGUMENTS, not closure constants, which XLA would copy into the executable.
         self._data = (tuple(stats.G), tuple(stats.b), jnp.asarray(stats.yy), jnp.asarray(stats.n))
-        nls = 3 if self.joint else 0
-
-        def parts(h, data):
-            G, b, yy, nq = data
-            if self.joint:
-                w = jnp.exp(-2 * h[:3])
-                M = w[0] * G[0] + w[1] * G[1] + w[2] * G[2]
-                bv = w[0] * b[0] + w[1] * b[1] + w[2] * b[2]
-                const = -0.5 * jnp.sum(yy * w) - jnp.sum(nq * h[:3])
-            else:
-                M, bv, const = G[0], b[0], 0.0
-            lam = jnp.concatenate([jnp.exp(h[nls:]), jnp.ones(1)])[gidx]
-            return dinv[:, None] * M * dinv[None, :], dinv * bv, lam, const
-
-        def logev(h, data):
-            Ms, bv, lam, const = parts(h, data)
-            c, low = cho_factor(Ms + jnp.diag(lam), lower=True)
-            x = cho_solve((c, low), bv)
-            return const + 0.5 * bv @ x - jnp.sum(jnp.log(jnp.diag(c))) + 0.5 * jnp.sum(jnp.log(lam))
-
-        self._parts = lambda h: parts(h, self._data)
-        self._vg = jax.jit(jax.value_and_grad(logev))
-        self._nls = nls
+        self._gidx = gidx
+        self._nls = 3 if self.joint else 0
+        self._parts = lambda h: _ev_parts(h, self._data, self.dinv, self._gidx, self.joint)
 
     def h0(self, theta):
         a_blr = float(-2 * theta.log_sigma_c)
@@ -146,7 +144,7 @@ class ARDEvidence:
         return np.array(ls + [a_blr] * len(self.groups))
 
     def value_and_grad(self, h):
-        v, g = self._vg(jnp.asarray(h, float), self._data)
+        v, g = _ev_value_and_grad(jnp.asarray(h, float), self._data, self.dinv, self._gidx, self.joint)
         return float(v), np.asarray(g)
 
     def bounds(self, h0, cond_max):
@@ -169,6 +167,32 @@ class ARDEvidence:
         """Noise scales (sigma_E, sigma_F, sigma_V) of hyperparameters h: fitted [joint] or the fixed
         linear MAP ones [sequential]."""
         return np.exp(np.asarray(h[:3], float)) if self.joint else np.exp(np.asarray(self.ls_fixed, float))
+
+
+def _ev_parts(h, data, dinv, gidx, joint):
+    """(S's data part D^-1 M D^-1, D^-1 b, the scaled prior precisions, the constant) at h."""
+    G, b, yy, nq = data
+    nls = 3 if joint else 0
+    if joint:
+        w = jnp.exp(-2 * h[:3])
+        M = w[0] * G[0] + w[1] * G[1] + w[2] * G[2]
+        bv = w[0] * b[0] + w[1] * b[1] + w[2] * b[2]
+        const = -0.5 * jnp.sum(yy * w) - jnp.sum(nq * h[:3])
+    else:
+        M, bv, const = G[0], b[0], 0.0
+    lam = jnp.concatenate([jnp.exp(h[nls:]), jnp.ones(1)])[gidx]
+    return dinv[:, None] * M * dinv[None, :], dinv * bv, lam, const
+
+
+def _ev_logev(h, data, dinv, gidx, joint):
+    Ms, bv, lam, const = _ev_parts(h, data, dinv, gidx, joint)
+    c, low = cho_factor(Ms + jnp.diag(lam), lower=True)
+    x = cho_solve((c, low), bv)
+    return const + 0.5 * bv @ x - jnp.sum(jnp.log(jnp.diag(c))) + 0.5 * jnp.sum(jnp.log(lam))
+
+
+# module-level: one executable per (joint, shapes) for every ARDEvidence, with G/b/dinv as arguments
+_ev_value_and_grad = jax.jit(jax.value_and_grad(_ev_logev), static_argnames="joint")
 
 
 def fit_ard(ev, h0, cond_max=1e14, maxiter=500):
@@ -450,27 +474,31 @@ def sandwich_scores(post, prob, ds, sig):
     g~_c = D^-1 sum_{i in c} rho_i psi_i over every E/F/V row i of config c, psi_i = phi_i w_i/sigma_q,
     rho_i = (y_i - phi_i c) w_i/sigma_q.  Padded configs (cfg_mask) are dropped; padded nodes carry
     node_cfg == C and land in a discarded extra segment."""
-    from .rows import linear_rows_bounded
-    L = prob.cfg.len_basis
+    from .rows import ROWS_EDGE_BUDGET
     c, dinv = jnp.asarray(post.mean), jnp.asarray(post.dinv)
     inv = jnp.asarray(1.0 / np.asarray(sig, float))
-
-    @jax.jit
-    def scores(bt):
-        r = linear_rows_bounded(prob.model, prob.cfg, bt)
-        C = r.E.shape[0]
-        P = jnp.concatenate([r.E, r.F.reshape(-1, L), r.V.reshape(-1, L)])
-        y = jnp.concatenate([bt.y_E, bt.y_F.reshape(-1), bt.y_V.reshape(-1)])
-        w = jnp.concatenate([bt.w_E * inv[0], jnp.repeat(bt.w_F, 3) * inv[1], jnp.repeat(bt.w_V, 6) * inv[2]])
-        cid = jnp.concatenate([jnp.arange(C), jnp.repeat(bt.node_cfg, 3), jnp.repeat(jnp.arange(C), 6)])
-        g = jax.ops.segment_sum(P * ((y - P @ c) * w * w)[:, None], cid, num_segments=C + 1)[:C]
-        return g * dinv[None, :]
-
     out = []
     for i in range(ds.n_batches):
         bt = jax.tree.map(lambda a, i=i: a[i], ds)
-        out.append(np.asarray(scores(bt))[np.asarray(bt.cfg_mask)])
+        g = _sandwich_scores_jit(prob.model, prob.cfg, bt, c, dinv, inv, ROWS_EDGE_BUDGET)
+        out.append(np.asarray(g)[np.asarray(bt.cfg_mask)])
     return np.concatenate(out).T
+
+
+def _sandwich_scores_body(model, cfg, bt, c, dinv, inv, budget):
+    from .rows import linear_rows_bounded
+    L = cfg.len_basis
+    r = linear_rows_bounded(model, cfg, bt)
+    C = r.E.shape[0]
+    P = jnp.concatenate([r.E, r.F.reshape(-1, L), r.V.reshape(-1, L)])
+    y = jnp.concatenate([bt.y_E, bt.y_F.reshape(-1), bt.y_V.reshape(-1)])
+    w = jnp.concatenate([bt.w_E * inv[0], jnp.repeat(bt.w_F, 3) * inv[1], jnp.repeat(bt.w_V, 6) * inv[2]])
+    cid = jnp.concatenate([jnp.arange(C), jnp.repeat(bt.node_cfg, 3), jnp.repeat(jnp.arange(C), 6)])
+    g = jax.ops.segment_sum(P * ((y - P @ c) * w * w)[:, None], cid, num_segments=C + 1)[:C]
+    return g * dinv[None, :]
+
+
+_sandwich_scores_jit = eqx.filter_jit(_sandwich_scores_body)
 
 
 def sandwich_factor(post, G):

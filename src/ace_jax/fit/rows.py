@@ -12,6 +12,7 @@ import math
 import os
 from typing import NamedTuple
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 
@@ -180,13 +181,25 @@ def linear_rows_bounded(model, cfg, batch, node_chunk=None):
     return linear_rows(model, cfg, batch)[0] if nc is None else linear_rows_chunked(model, cfg, batch, nc)
 
 
+def _rows_jit_body(model, cfg, batch, node_chunk, budget):
+    # budget: ROWS_EDGE_BUDGET at the call, a static cache key only -- the policy reads the global
+    # while tracing, so a changed budget must not reuse an executable traced under the old one
+    return linear_rows_bounded(model, cfg, batch, node_chunk=node_chunk)
+
+
+_rows_jit = eqx.filter_jit(_rows_jit_body)
+
+
 def chunked_rows_fn(model, cfg, node_chunk=None):
     """`batch -> linear_rows_bounded(model, cfg, batch, node_chunk)`, jitted: compiled once per
-    batch shape and reused.  Called eagerly, linear_rows_chunked's fori_loop is retraced on every
-    call with that batch's arrays baked into the body as constants -- an XLA compile per batch.
-    Build this once per (model, cfg) and loop batches through it.  node_chunk None: the
-    ROWS_EDGE_BUDGET policy (`rows_node_chunk`); an int always chunks."""
-    return jax.jit(lambda b: linear_rows_bounded(model, cfg, b, node_chunk=node_chunk))
+    (model structure, cfg, node_chunk, batch shape) and reused across calls of this function too --
+    one module-level eqx.filter_jit whose arguments are the model's arrays, not constants of a
+    fresh closure, so a repeated ARD stage or a second calculator of the same structure compiles
+    nothing and no executable holds the weights.  Called eagerly, linear_rows_chunked's fori_loop
+    is retraced on every call with that batch's arrays baked into the body as constants -- an XLA
+    compile per batch.  node_chunk None: the ROWS_EDGE_BUDGET policy (`rows_node_chunk`); an int
+    always chunks."""
+    return lambda b: _rows_jit(model, cfg, b, node_chunk, ROWS_EDGE_BUDGET)
 
 
 def linear_rows_chunked(model, cfg, batch, node_chunk=256):

@@ -8,8 +8,6 @@ import jax.numpy as jnp
 from ace_jax.eval import highest_precision
 from conftest import _orders
 
-RELEASE_JAX_PER_TEST = True     # many ARD stage variants per module: see conftest._release_jax_memory_per_test
-
 
 def _dense_rows(prob, ds):
     """Weighted live rows (w*phi, w*y) and the quantity index (0 E, 1 F, 2 V) of every observation."""
@@ -328,6 +326,10 @@ def test_ard_stage_reuses_cached_full_statistics(monkeypatch):
     calls = []
     real = stats.linear_statistics
     monkeypatch.setattr(stats, "linear_statistics", lambda *a, **k: (calls.append(1), real(*a, **k))[1])
+    # the stage's passes go through its cached jit (a cache hit never re-enters linear_statistics)
+    stage_calls = []
+    real_jit = ard._linear_statistics_jit
+    monkeypatch.setattr(ard, "_linear_statistics_jit", lambda *a, **k: (stage_calls.append(1), real_jit(*a, **k))[1])
     with highest_precision():
         obj = make_objective(cfg, d, b)
         theta = fit_map(cfg, d, b, obj, log=lambda *a: None).theta
@@ -342,10 +344,10 @@ def test_ard_stage_reuses_cached_full_statistics(monkeypatch):
                                        atol=1e-14 * np.abs(bv).max())
             assert float(getattr(obj.lin, f"yy_{'EFV'[q]}")) == pytest.approx(yy, rel=1e-13)
             assert float(getattr(obj.lin, f"n_{'EFV'[q]}")) == n
-        calls.clear()
+        stage_calls.clear()
         ref = ard.run_ard_stage(cfg, d, b, theta, log=lambda *a: None)
-        n_recompute = len(calls)
-        calls.clear()
+        n_recompute = len(stage_calls)
+        stage_calls.clear()
         got = ard.run_ard_stage(cfg, d, b, theta, log=lambda *a: None, full_stats=obj.lin)
         bc = ard.body_order_columns(d.meta, b.prob.cfg)
         ev_ref = ard.ARDEvidence(joint, ard.ard_gamma(b.prob), bc)
@@ -355,7 +357,7 @@ def test_ard_stage_reuses_cached_full_statistics(monkeypatch):
         p_ref = ard.predict_ard(ref.posterior, b.prob, d.ds_test)
         p_got = ard.predict_ard(got.posterior, b.prob, d.ds_test)
     # the two hold-out subsets (P_fit and the transfer exponent's P_fit2) only: the full refit reused the cache
-    assert n_recompute == 3 and len(calls) == 2
+    assert n_recompute == 3 and len(stage_calls) == 2
     # the ~1e-15 summation-order difference, through cond(S) ~ 1e13, moves the evidence by ~1e-7 nats
     # (~1e-5 nats, 1e-8 relative, since the isolated-atom E0 rule of e0='lsq'/'prefit' changed the
     # fixture's energy offsets) and L-BFGS's stopping point along flat directions by ~1e-4: equal to
@@ -408,6 +410,33 @@ def test_predict_ard_traces_the_chunked_rows_once(tiny_linear_problem, monkeypat
         got = predict_ard(post, prob, ds)
     assert n["traces"] == 1 and n["chunked"] == 1
     np.testing.assert_allclose(np.asarray(got.F_var), np.asarray(ref.F_var), rtol=1e-12)
+
+
+@pytest.mark.parametrize("kw", [dict(ard_variance="sandwich"),
+                                dict(ard_variance="sandwich", ard_mode="sequential", _shape_variant="legacy")])
+def test_a_repeated_ard_stage_compiles_nothing(ard_map, kw):
+    """The stage's programs are compiled once per (model structure, cfg, shapes) and reused: a second
+    identical run_ard_stage triggers no XLA compilation (each fresh jit closure compiled again, ~22
+    programs and ~3,600 memory maps per stage, hitting vm.max_map_count after ~17 stages)."""
+    import jax.monitoring
+    from ace_jax.fit.ard import run_ard_stage
+    cfg = _pipe_cfg(**kw).validate()
+    d, b, theta = ard_map
+    events = []
+
+    def listen(name, *a, **k):
+        if name == "/jax/core/compile/backend_compile_duration":
+            events.append(name)
+
+    with highest_precision():
+        r0 = run_ard_stage(cfg, d, b, theta, log=lambda *a: None)
+        jax.monitoring.register_event_duration_secs_listener(listen)
+        try:
+            r1 = run_ard_stage(cfg, d, b, theta, log=lambda *a: None)
+        finally:
+            jax.monitoring.unregister_event_duration_listener(listen)
+    assert len(events) == 0
+    np.testing.assert_array_equal(r1.posterior.mean, r0.posterior.mean)
 
 
 def test_ard_stage_kappa_is_refit_for_the_full_posterior(monkeypatch, ard_map):
