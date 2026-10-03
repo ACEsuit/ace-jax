@@ -107,6 +107,7 @@ def e3_labels(seed=0):
                 f = f.copy(); f.info.update(driver=driver, round=r, index=i); pools.append(f)
         print(f"e3 {driver}: errors {[round(h['err'], 6) for h in hist['history']]}", flush=True)
     from ase.io import write
+    (HERE / "e3").mkdir(parents=True, exist_ok=True)
     write(str(HERE / "e3" / "pools.xyz"), pools, format="extxyz")
     _write(HERE / "e3" / "labels-mpa-0.xyz", pools, "mpa-0")
     print(f"e3: {len(pools)} pool frames, {time.time() - t:.0f} s", flush=True)
