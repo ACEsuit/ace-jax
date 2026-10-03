@@ -687,7 +687,8 @@ def _stage(**kw):
     from ace_jax.fit.pipeline.mapfit import fit_map
     from ace_jax.fit.pipeline.objective import make_objective
     from ace_jax.fit.pipeline.problem import build_problem
-    cfg = _pipe_cfg(**{"ard_variance": "sandwich", **kw}).validate()
+    # iso unless a test asks otherwise: the stage tests below assert iso quantities; aniso has its own tests
+    cfg = _pipe_cfg(**{"ard_variance": "sandwich", "ard_force_shape": "iso", **kw}).validate()
     d = load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz"))
     b = build_problem(cfg, d)
     with highest_precision():
@@ -697,9 +698,10 @@ def _stage(**kw):
     return d, res, pred
 
 
-def test_stage_default_press_shape_and_group_scales():
+@pytest.mark.parametrize("shape", ["iso", "aniso"])
+def test_stage_default_press_shape_and_group_scales(shape):
     from ace_jax.fit.conformal import chi3_ppf
-    d, res, pred = _stage()
+    d, res, pred = _stage(ard_force_shape=shape)
     post, rep = res.posterior, res.report
     assert post.R is not None and post.group_table is not None and post.cal is not None
     assert set(rep) >= {"shape", "groups", "split", "transfer"}

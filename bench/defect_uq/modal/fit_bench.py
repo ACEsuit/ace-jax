@@ -34,7 +34,7 @@ elif arm.startswith("ard"):   # "ard", or "ard_<tag>" for a separate output dir 
     # "ard_c<k>": ard_cond_max = 10**k (the conditioning floor on the prior precisions); default 1e14
     cm = float(10 ** int(arm.split("_c")[1])) if "_c" in arm else 1e14
     cfg = FitConfig(**common, arm="linear", uq="ard", ard_mode="joint", ard_val_frac=0.2, ard_laplace=True,
-                    ard_cond_max=cm)
+                    ard_cond_max=cm, ard_force_shape="iso")   # recorded `ard` / `ard_c<k>` results are iso (library default became aniso 2026-10-03)
 else:
     cfg = FitConfig(**common, arm="gp", m_per_species=100, density="pca", pca_d=128, lml="host-cache",
                     map_restarts=1 if smoke else 4)

@@ -340,9 +340,9 @@ The force uncertainty has a shape and two scales (mathematics:
   Mahalanobis: `forces_q` is then the largest semi-axis q_g sqrt(lambda_max(M)) of the region and
   `forces_q_mahal` the Mahalanobis radius q_g; `--force-shape iso` gives the spherical radius).
   On the bench365 v3 validation aniso is the only uncalibrated variant meeting the targets, and
-  `aj calibrate` with labelled target cells remains the most reliable route when such data exist. Scores come from a stratified
-  hold-out (`--ard-val-frac`) scored with the hold-out posterior, then carried to the served posterior
-  by (N/N_fit)^β, with β fitted per run from a second, smaller hold-out fit and clipped to [0, ½]
+  `aj calibrate` with labelled target cells remains the most reliable route when such data exist.
+  Scores come from a stratified hold-out (`--ard-val-frac`) scored with the hold-out posterior, then
+  carried to the served posterior by (N/N_fit)^β, with β fitted per run from a second, smaller hold-out fit and clipped to [0, ½]
   (`--ard-transfer exponent`, the default; `sqrt` fixes β = ½, `none` β = 0).
 - **Groups.** 8 Mondrian groups = 4 distortion bands x [coordination = modal]
   (`--ard-groups distortion|none`); groups with fewer than `--ard-n-min` (default 20)

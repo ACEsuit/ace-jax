@@ -1,5 +1,7 @@
 # Jackknife shape + Mondrian conformal scale: implementation plan (revision 2)
 
+> **Note (2026-10-03):** the default force shape was changed to aniso after validation; the plan text below is historical and still says iso.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Serve per-atom force uncertainty with a stated coverage. The shape is an exact, centred, delete-one-cluster (PRESS/CR3) jackknife covariance, with spatial sub-clustering and an optional anisotropic 3×3 block. Two per-group, configuration-weighted scales sit on top: an rms factor for `forces_std`/`forces_cov` and a conformal quantile for `forces_q`. Calibration comes from a stratified hold-out posterior, plus `aj calibrate` and a support diagnostic.
