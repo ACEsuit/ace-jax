@@ -37,3 +37,13 @@ def test_campaign_replays_shipped_pools_and_picks_what_the_selector_asks(tmp_pat
                             pick=lambda pool, train, k, rng, m, p: seen.append(len(pool)) or [0, 1])
     assert seen == [len(live["pools"][0])] and replay["history"][1]["picks"] == [0, 1]
     assert replay["pools"][0] is not live["pools"][0] and len(replay["pools"][0]) == len(live["pools"][0])
+
+
+def test_fit_model_refuses_float32(tmp_path):
+    import pytest
+    jax.config.update("jax_enable_x64", False)
+    try:
+        with pytest.raises(RuntimeError, match="float64"):
+            K.fit_model([], tmp_path)
+    finally:
+        jax.config.update("jax_enable_x64", True)

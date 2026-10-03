@@ -19,6 +19,9 @@ CAMPAIGN = dict(drivers=("random", "novelty", "uncertainty"), rounds=2, per_roun
 def fit_model(train, out, uq="blr"):
     """The tutorials' evidence fit (order 3, degree 10, rcut 5.5, joint E0) of `train`;
     returns (model.npz, posterior.npz or None). uq='ard' adds the per-atom force std."""
+    import jax
+    if not jax.config.jax_enable_x64:          # a float32 fit is silently poor, and its MD crawls
+        raise RuntimeError("fitting needs float64: call jax.config.update('jax_enable_x64', True) first")
     from ..basis.model import BasisSpec
     from ..fit.pipeline import FitConfig, fit, load_fit_data, write_outputs
     cfg = FitConfig(model=BasisSpec(order=3, max_degree=10, rcut=5.5, elements=("Si",)), arm="linear",

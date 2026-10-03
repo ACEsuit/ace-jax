@@ -20,9 +20,13 @@ built at it). `all` writes, next to this script:
 Labels are float64 on CPU; see README.md for the models and their licence."""
 import argparse
 import pathlib
+import tempfile
 import time
 
+import jax
 import numpy as np
+
+jax.config.update("jax_enable_x64", True)    # e3 fits models and drives MD with them: float64
 
 from ace_jax.tutorials import labels as L
 from ace_jax.tutorials import structures as T
@@ -97,7 +101,7 @@ def e3_labels(seed=0):
     pools, t = [], time.time()
     for driver in CAMPAIGN["drivers"]:
         hist = run_campaign(driver, labeller=lambda xs: L.label(xs, model="mpa-0", calculator=calc),
-                            work=HERE / "_e3_work", seed=seed)
+                            work=pathlib.Path(tempfile.mkdtemp()), seed=seed)
         for r, pool in enumerate(hist["pools"]):
             for i, f in enumerate(pool):
                 f = f.copy(); f.info.update(driver=driver, round=r, index=i); pools.append(f)
