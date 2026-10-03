@@ -41,8 +41,10 @@ T0 = time.time()
 log = lambda *a: print(f"[{time.time() - T0:7.0f} s]", *a, flush=True)
 VARIANTS = ("hc0", "hc3", "pops", "atom", "cfg")
 
+# e0="prefit": the runs this spike reads (before 2026-10-03) used the pre-fit E0 under ARD, as the library
+# then did for e0="lsq"; it now fits E0 jointly (as BLR), which would add E0 columns these h do not match
 cfg = FitConfig(model=f"{data}/cantor_embed_d16_deg10.npz", energy_key="mace_energy", force_key="mace_force",
-                virial_key="mace_virial", r0=2.5, batch=4, rungs=("map",), predict_train=False, e0="lsq",
+                virial_key="mace_virial", r0=2.5, batch=4, rungs=("map",), predict_train=False, e0="prefit",
                 opt="lbfgs", map_steps=40, arm="linear", uq="ard", ard_mode="joint").validate()
 d = load_fit_data(cfg, train=f"{data}/train.xyz", test=f"{data}/test.xyz", ood=f"{data}/ood.xyz")
 b = build_problem(cfg, d)

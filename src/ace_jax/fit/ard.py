@@ -367,7 +367,7 @@ class ARDPosterior(NamedTuple):
         own: optional (n,) Q column of each row's own training configuration (-1: none); returns
         (all, without_own), where without_own drops that one cluster's term v_own^2 -- the variance a
         genuinely new configuration would get, used only to fit lam on held-out TRAINING configs."""
-        L0 = Phi.shape[-1]          # Q, dinv truncated to it: force rows may omit the (zero) E0 columns
+        L0 = self._force_width(Phi.shape[-1])    # Q, dinv truncated to it: rows may omit the (zero) E0 columns
         Q = jnp.asarray(self.Q, jnp.float64)[:L0]
         dinv = jnp.asarray(self.dinv)[:L0]
         out, loo = [], []

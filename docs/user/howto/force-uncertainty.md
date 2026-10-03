@@ -84,7 +84,7 @@ adds `ace_forces_std` to its predictions file.
 
 | Property | Shape | Units | Meaning |
 |---|---|---|---|
-| `forces_std` | (N,) | eV/Å | $\lambda_g\sqrt{\operatorname{tr}V}$: the rms of the force-error **vector** length $\lvert\Delta F\rvert$; the per-component std is about `forces_std`/$\sqrt3$ |
+| `forces_std` | (N,) | eV/Å | $\lambda_g\sqrt{\operatorname{tr}V}$: the rms of the force-error **vector** length $\lvert\Delta F\rvert$ (for `aniso`, where $\lambda_g$ is fitted on Mahalanobis scores, approximately); the per-component std is about `forces_std`/$\sqrt3$ |
 | `forces_cov` | (N, 3, 3) | eV²/Å² | $\lambda_g^2 V$: the error covariance; its trace is `forces_std`² |
 | `forces_q` | (N,) | eV/Å | the conformal radius at `--ard-coverage`: $\lvert\Delta F\rvert \le$ `forces_q` with that probability |
 | `forces_q_mahal` | (N,) | none | aniso only: the Mahalanobis radius $q_g$ of the ellipsoidal region |
@@ -126,7 +126,9 @@ heavy-tailed groups `forces_q` is larger.
 - **`iso`**: a sphere of radius `forces_q` $= q_g\sqrt{\operatorname{tr}V/3}$.
 
 The default is `aniso` because, on the validation below, it is the only
-variant without target-regime calibration that meets every coverage target,
+variant without target-regime calibration that meets every coverage target
+at the default hold-out fraction (`--ard-val-frac 0.2`; at 0.1 the
+isotropic variant also met them),
 the crack tip included; the isotropic region under-covers there (0.86
 against 0.88). `forces_cov` is served in both modes; in iso mode its trace is
 calibrated but its orientation is the uncalibrated shape.
@@ -198,12 +200,14 @@ aj eval --model fit_ard/model.npz --posterior crack_posterior.npz \
   coverage level is the one chosen at fit time.
 - `--energy-key`, `--force-key` and `--virial-key` name the labels as in
   `aj fit`; only forces are used.
+- `--ard-n-min` is a fit option, stored in the posterior; `aj calibrate`
+  uses the stored value.
 
 How the new scores join the stored hold-out scores, per group:
 
 | Mode | Pool of each group |
 |---|---|
-| default (per-group replace) | the new cells alone where they have at least `--ard-n-min` configurations in the group; elsewhere the stored scores and the new ones together |
+| default (per-group replace) | the new cells alone in groups where they have at least max(the fit's `--ard-n-min`, $\lceil(1-\alpha)/\alpha\rceil$) configurations; elsewhere the stored scores and the new ones together |
 | `--append` | the stored scores and the new ones together, in every group |
 | `--replace` | the new cells alone in every group (groups that end up too small borrow as above) |
 
@@ -211,16 +215,21 @@ The default calibrates a group against the target regime only when there is
 enough target data for it, since mixing in easier hold-out atoms dilutes
 the quantile.
 
-!!! warning "A calibrated posterior is specific to its regime"
+!!! warning "A per-group-replace posterior is specific to its regime"
     In the validation below, calibrating on crack cells with the default
     per-group replace lifted crack-tip coverage to 0.90, the best of any route.
     But 54 crack configurations populate all 8 groups, the bulk-like ones too,
     so they replace the hold-out scores everywhere, and the same posterior
-    then **under-covers in distribution** (0.87 against 0.90). Serve a
-    calibrated posterior only on structures like its calibration cells, and
-    keep the original `posterior.npz` for everything else. Results for
-    `--append`, which keeps the stored hold-out scores in every group, will
-    be added.
+    then **under-covers in distribution** (0.87 against 0.90). `--append`
+    keeps in-distribution coverage (0.895) but barely moves the tip, because
+    the new cells are diluted among hundreds of hold-out configurations per
+    group.
+
+**Which posterior to serve.** Serve the fit's own `posterior.npz` in
+general. With labelled cells from a target regime, build a separate
+per-group-replace posterior and serve it only on structures of that regime.
+`--append` is safe in distribution, but adds little when the new set is
+small next to the fit's hold-out set.
 
 ## The support flag
 
@@ -233,9 +242,10 @@ structure alone, without labels:
   the conformal quantile is recomputed with those weights;
 - `support_ok` is `False` where no finite quantile is reachable: the
   calibration data has too little weight near this atom to certify its
-  coverage. `support_q` is the weighted quantile, in the units of the scores
-  (compare with `forces_q_mahal`, or with `q` in the group table); `n_eff`
-  is the effective number of calibration atoms per species.
+  coverage. `support_q` is the weighted quantile, in the units of the
+  scores; its pool is all calibration atoms of the species, across groups,
+  so it is not comparable to the per-group `q`. `n_eff` is the effective
+  number of calibration atoms per species.
 
 Atoms with `support_ok = False` are candidates for labelling and for
 `aj calibrate`. The flag is a diagnostic only: it never changes `forces_std`
@@ -261,7 +271,12 @@ property then raises).
 | `--no-ard-support` | | skip the support reference |
 | `--batch-pack` | `auto` | size-aware batching: pack configurations by an atom budget when a set mixes small and large cells |
 
-With `--uq ard`, `--e0 lsq` behaves as `--e0 prefit` (E0 fixed by least squares before the fit).
+With `--uq ard`, `--e0 lsq` fits E0 jointly with the coefficients, as BLR
+does: one E0 column per species with BLR's fixed broad prior, outside the
+ARD body-order groups (a species with an isolated atom in training has its
+E0 pinned). `model.npz` holds the fitted E0. The E0 columns are zero on
+force rows, so force uncertainties are unaffected. Posteriors written before
+this change still load and serve.
 
 ## Cost and memory
 
@@ -297,7 +312,17 @@ none of them in training. Coverage of `forces_q` at nominal 0.90:
 |---|---|---|---|---|
 | default (`aniso`, transfer exponent) | 0.898 | 0.903 | 0.885 | 0.937, 0.941 |
 | `--force-shape iso` | 0.897 | 0.889 | 0.862 | 0.933, 0.937 |
-| `aj calibrate` on other crack cells (per-group replace) | 0.870–0.872 | 0.909–0.916 | 0.897–0.903 | 0.928–0.930, 0.933–0.935 |
+
+`aj calibrate` on crack cells, leaving one crack realisation out (ranges over
+the four folds; scored on the held-out crack pair and the dislocation cells,
+and in distribution on a 300-configuration test sample):
+
+| Posterior | In distribution | Crack | Crack tip | Edge, screw |
+|---|---|---|---|---|
+| `aniso`, uncalibrated (default) | 0.898 | 0.899–0.905 | 0.881–0.884 | 0.937, 0.941 |
+| `aniso` + calibrate, per-group replace | **0.867–0.870** | 0.910–0.917 | 0.899–0.904 | 0.927–0.930, 0.932–0.935 |
+| `aniso` + calibrate `--append` | 0.895 | 0.900–0.906 | 0.881–0.886 | 0.936, 0.941 |
+| `iso` + calibrate `--append` | 0.895 | 0.895–0.903 | 0.869–0.878 | 0.934–0.935, 0.937–0.939 |
 
 - The default meets every target without target data.
 - Without the transfer exponent the hold-out scale is too small (crack tip
@@ -314,7 +339,14 @@ tables, are in the
 
 ## Limits
 
-- **Only forces are calibrated.** Energy and virial variances are not served.
+- **Only forces are calibrated.** The calculator serves no energy (or
+  virial) uncertainty. The energy and virial variances in `aj fit`
+  prediction files under `--uq ard` are the untempered posterior variances,
+  neither tempered nor calibrated, and they can be overconfident on small
+  training sets: on the tiny Si test fixture, the actual energy errors are
+  1.1–2.8 times the predicted std, configuration by configuration (median
+  predicted std 8 meV/atom; test RMSE 215 meV/atom, dominated by one
+  64-atom cell).
 - **Coverage is marginal within a group**, for atoms exchangeable with its
   calibration configurations. A shift the groups do not resolve (a new
   phase, chemical order) is caught only by the support flag.
@@ -322,6 +354,6 @@ tables, are in the
   depends on which training clusters were in the fit, and is used as a proxy
   for where the approximation error is large; it ranks errors, it does not
   predict them.
-- **Posterior files from before revision 2** (schema 2) serve only the scalar
-  `forces_std`; the other properties raise and ask for a refit with
+- **Posterior files from before revision 2** (schemas 1 and 2) serve only the
+  scalar `forces_std`; the other properties raise and ask for a refit with
   `--uq ard`.

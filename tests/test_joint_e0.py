@@ -295,6 +295,12 @@ def test_ard_force_quantities_ignore_the_e0_columns(m0):
             np.testing.assert_allclose(p.forces_std(F[:, :, :L0]), p.forces_std(F), rtol=1e-12, atol=1e-300)
         with pytest.raises(ValueError, match="columns"):
             post.atom_shape(F[:, :, :L0 - 1])
+        # misspec_var_rows checks the width too (no silent truncation of Q/dinv to a wrong width)
+        pq = post._replace(Q=sandwich_factor(post, G))
+        Fr = F.reshape(-1, F.shape[-1])
+        np.testing.assert_allclose(pq.misspec_var_rows(Fr[:, :L0]), pq.misspec_var_rows(Fr), rtol=1e-12, atol=1e-300)
+        with pytest.raises(ValueError, match="columns"):
+            pq.misspec_var_rows(Fr[:, :L0 - 1])
 
 
 def test_ard_posterior_without_e0_columns_loads_as_before(ard_setup, tmp_path):

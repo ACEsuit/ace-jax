@@ -18,9 +18,18 @@ training-set size. Within a group, the ordering of atoms by $\sigma$ is the
 ordering given by the shape; across groups it changes only through ratios of
 the group scales.
 
-**Notation.** Atoms $i$; Cartesian components $\alpha\in\{x,y,z\}$; training
-configurations $c\in T$; jackknife (sandwich) clusters $k\in\mathcal{K}$;
-Mondrian groups $g$; $L$ basis functions. $\mathsf{T}$ is the transpose.
+**Notation.**
+
+| Symbol | Meaning |
+|---|---|
+| $i$, $\alpha\in\{x,y,z\}$ | atoms; Cartesian components |
+| $C\in T$ | training configurations ($T$ the training set) |
+| $c$, $\bar c$ | model coefficients; their posterior mean |
+| $L$ | number of columns of the design (basis functions, plus the E0 columns of [section 1](#1-model-and-data) when $E^0$ is fitted jointly) |
+| $B$ | Cholesky factor of the prior-scaled precision, $S=BB^\mathsf{T}$ |
+| $k\in\mathcal{K}$ | jackknife (sandwich) clusters |
+| $g$ | Mondrian groups |
+| $\mathsf{T}$ | transpose |
 
 ## 1. Model and data
 
@@ -31,6 +40,15 @@ plus pair blocks. The model is linear in the coefficients $c$:
 $$
 E(R) = \sum_i \phi(x_i)\cdot c + \sum_i E^0_{Z_i}.
 $$
+
+**Joint $E^0$.** With `--e0 lsq` (`e0='lsq'`, the `FitConfig` default),
+$E^0$ is fitted jointly with $c$, as in BLR. The pre-fit least-squares
+$E^0$ is the baseline subtracted from the labels, and its per-species shifts
+are $N_Z$ extra columns of the design after the basis, one per species. On
+an energy row the column of species $Z$ is the number of atoms of that
+species; on force and virial rows it is zero. Below, $\phi$, $c$ and $L$
+include these columns. With `--e0 prefit` (and `--e0 model`) there are no
+E0 columns and $E^0$ stays fixed.
 
 A training configuration contributes energy, force and virial observations,
 each linear in $c$:
@@ -54,7 +72,12 @@ $\Lambda=\operatorname{diag}\big(\Gamma_j^2 e^{a_{k(j)}}\big)$. Here
 $\Gamma_j$ is the smoothness prior of column $j$, and $a_k$ is the
 **automatic relevance determination (ARD)** log-precision of body order
 $k(j)\in\{2,3,4\}$; pair columns and correlation-order-1 columns both count as
-2-body. The posterior is Gaussian:
+2-body. The E0 columns are outside the ARD groups: they have no $a_k$ and
+keep the fixed broad prior of the BLR fit (`e0_prec`, standard deviation
+1 eV): there $\Gamma_j^2$ is that precision and $\Lambda_{jj}=\Gamma_j^2$. A species with an isolated atom in
+the training set has its $E^0$ pinned instead (prior standard deviation
+$10^{-8}$ eV), because that atom's energy is $E^0$ alone. The posterior is
+Gaussian:
 
 $$
 A=\sum_{\text{rows}}\psi\psi^\mathsf{T}+\Lambda,\qquad
@@ -63,9 +86,12 @@ A=\sum_{\text{rows}}\psi\psi^\mathsf{T}+\Lambda,\qquad
 $$
 
 The computation works in the prior-scaled system
-$S=D^{-1}AD^{-1}=LL^\mathsf{T}$ with $D=\operatorname{diag}\Gamma$ (here $L$
-is the Cholesky factor), and floors $a_k\ge a_{\mathrm{floor}}$ so that
-$\operatorname{cond}(S)\le10^{14}$. The served `model.npz` holds $\bar c$.
+$S=D^{-1}AD^{-1}=BB^\mathsf{T}$ with $D=\operatorname{diag}\Gamma$ and $B$
+the Cholesky factor, and floors $a_k\ge a_{\mathrm{floor}}$ so that
+$\operatorname{cond}(S)\le10^{14}$. The served `model.npz` holds $\bar c$:
+the basis coefficients, with the fitted E0 shift of $\bar c$ folded into
+its $E^0$. The E0 columns are zero on every force row, so they leave the
+force shape and every force uncertainty below unchanged.
 
 ## 3. Hyperparameters: the evidence
 
@@ -88,7 +114,7 @@ $a_k$, which needs a single Gram matrix and less memory.
 
 1. **Stratified split by configuration.** Compute the Mondrian group of every
    training atom ([section 9](#9-the-groups)), with the band edges computed
-   from all of $T$. Give each configuration $c$ the stratum $\varsigma(c)$,
+   from all of $T$. Give each configuration $C$ the stratum $\varsigma(C)$,
    the *most extreme* group it populates: the highest distortion band, with
    ties broken in favour of $z\ne z^\star$. Within each stratum, randomly
    assign a fraction $f$ (`--ard-val-frac`, default 0.2) of configurations to
@@ -99,7 +125,7 @@ $a_k$, which needs a single Gram matrix and less memory.
    though most of its atoms are bulk-like.
 2. **Hold-out posterior.** Fit $h$ on $T_{\mathrm{fit}}$, giving
    $P_{\mathrm{fit}}$ with mean $\bar c_{\mathrm{fit}}$, factor
-   $L_{\mathrm{fit}}$ and shape factor $\tilde Q_{\mathrm{fit}}$
+   $B_{\mathrm{fit}}$ and shape factor $\tilde Q_{\mathrm{fit}}$
    ([section 6](#6-the-shape-exact-centred-jackknife-covariance), built over
    the clusters of $T_{\mathrm{fit}}$ only). For each held-out atom
    $i\in T_{\mathrm{val}}$, record the error
@@ -107,7 +133,7 @@ $a_k$, which needs a single Gram matrix and less memory.
    $V_{\mathrm{fit}}(x_i)$. Both are out of sample, because no row of the
    atom's configuration is in $T_{\mathrm{fit}}$.
 3. **Served posterior.** Refit on all of $T$, starting from
-   $h_{\mathrm{fit}}$. This gives $P$ with mean $\bar c$, factor $L$ and shape
+   $h_{\mathrm{fit}}$. This gives $P$ with mean $\bar c$, factor $B$ and shape
    factor $\tilde Q$.
 
 $P_{\mathrm{fit}}$ is needed only to produce the scores; $\tilde
@@ -159,7 +185,7 @@ leverage-corrected (PRESS) score
 
 $$
 H_{kk}=\Psi_kA^{-1}\Psi_k^\mathsf{T} = W_k^\mathsf{T} W_k,\quad
-W_k=L^{-1}D^{-1}\Psi_k^\mathsf{T},\qquad
+W_k=B^{-1}D^{-1}\Psi_k^\mathsf{T},\qquad
 \tilde g_k=\Psi_k^\mathsf{T}(I-H_{kk})^{-1}\rho_k .
 $$
 
@@ -181,16 +207,29 @@ every eigenvalue of $H_{kk}$ lies in $[0,1)$ and $I-H_{kk}$ is always
 invertible. Unlike unregularised least squares, no single cluster can
 saturate the fit.
 
-**Computation.** If $n_k\le L$, form $W_k$ and solve the $n_k\times n_k$
-system above. If $n_k>L$, use the push-through identity
+**Computation.** Only the stored factor $B$ is used; $S$ is never formed.
+If $n_k\le L$, form $W_k$ and solve the $n_k\times n_k$ system above. If
+$n_k>L$, use the push-through identity
 
 $$
 A^{-1}\tilde g_k = A_{(-k)}^{-1}\Psi_k^\mathsf{T}\rho_k,\qquad
-A_{(-k)}=A-\Psi_k^\mathsf{T}\Psi_k ,
+A_{(-k)}=A-\Psi_k^\mathsf{T}\Psi_k .
 $$
 
-with a rank-$n_k$ Cholesky downdate of $S$. Clusters are independent and are
-batched. Sub-clustering keeps most $n_k$ to $3N_k\lesssim10^3$.
+In the prior-scaled coordinates
+$S_{(-k)}=D^{-1}A_{(-k)}D^{-1}=B\,(I-W_kW_k^\mathsf{T})\,B^\mathsf{T}$, so the
+score follows from one $L\times L$ system,
+
+$$
+(I-W_kW_k^\mathsf{T})\,z_k=W_k\rho_k,\qquad \tilde g_k=D\,B\,z_k .
+$$
+
+Both systems are solved by a symmetric eigendecomposition, with the
+eigenvalues of $I-H_{kk}$ (equivalently $1-\lambda$ for the eigenvalues
+$\lambda$ of $W_kW_k^\mathsf{T}$) floored at $10^{-12}$; clusters at that
+floor are counted and reported. Clusters are processed batch by batch, so
+memory scales with one batch's rows. Sub-clustering keeps most $n_k$ to
+$3N_k\lesssim10^3$.
 
 **Block approximation** (`--ard-press block`). Apply the correction per row
 block instead: $(1-h)^{-1}$ for the energy row, the $3\times3$ force block of
@@ -236,8 +275,8 @@ $$
 
 $V(x)$ is the full anisotropic block, and costs nothing extra because the
 projections $\tilde Q^\mathsf{T} u_\alpha$ are already needed for $v$. Since
-$\phi_\alpha A^{-1}(\bar c-\bar c_{(-k)})$ is the change in the prediction at
-$x$ when cluster $k$ is deleted, $v(x)$ is the spread of the prediction over
+$\phi_\alpha(\bar c-\bar c_{(-k)})=\phi_\alpha A^{-1}\tilde g_k$ is the
+change in the prediction at $x$ when cluster $k$ is deleted, $v(x)$ is the spread of the prediction over
 cluster deletions. It is large where the prediction leans on clusters the
 model fits badly.
 
@@ -307,8 +346,9 @@ $e\sim\mathcal{N}(0,\lambda^2\,\tfrac{v}{3}I_3)$ (isotropic) or
 $e\sim\mathcal{N}(0,\lambda^2V)$ (anisotropic), $s/\lambda\sim\chi_3$. The
 conformal step does not rely on this model; only the reading of `forces_std`
 as a Gaussian does. The mode is chosen at fit time
-(`--force-shape iso|aniso`, default `aniso`: on the validation it is the only
-variant without target-regime calibration that meets the coverage targets),
+(`--force-shape iso|aniso`, default `aniso`: on the validation, at the
+default hold-out fraction, it is the only variant without target-regime
+calibration that meets the coverage targets),
 and every scale below is computed in that mode.
 
 ### The transfer assumption
@@ -316,8 +356,8 @@ and every scale below is computed in that mode.
 The scores come from a model trained on about $(1-f)|T|$ configurations, but
 the scale is applied to the shape of the model trained on $T$. The shape is a
 parameter variance, scaling roughly as $1/N$, whereas the error is dominated
-by approximation error (the squared rms scale is about 39 on the validation
-benchmark). The ratio of squared error to shape is therefore unchanged only
+by approximation error (with the shape of the previous revision, the squared
+rms scale was about 39 on the validation benchmark). The ratio of squared error to shape is therefore unchanged only
 if the error is variance-dominated. If it is bias-dominated, $\lambda^2$
 grows roughly in proportion to $N$, and the hold-out scale underestimates the
 served one by up to $(1-f)^{-1/2}$. Writing $\lambda\propto N^{\beta}$, the
@@ -371,15 +411,15 @@ are formed.
 
 For group $g$, let $\mathcal{C}_g$ be the set of calibration configurations
 with at least one atom in $g$, $n_{\mathrm{cfg},g}=|\mathcal{C}_g|$, and
-$n_{c,g}$ the number of atoms of $c$ in $g$. Each calibration atom
-$i\in c\cap g$ carries the weight $1/n_{c,g}$, so every configuration has
+$n_{C,g}$ the number of atoms of $C$ in $g$. Each calibration atom
+$i\in C\cap g$ carries the weight $1/n_{C,g}$, so every configuration has
 total weight 1 in every group it populates. A crack cell is one unit in the
 tip group, whether it has 3 tip atoms or 30.
 
 ### `forces_std`: the per-group rms scale
 
 $$
-(\lambda_g^{\mathrm{rms}})^2=\frac{1}{3\,n_{\mathrm{cfg},g}}\sum_{c\in\mathcal{C}_g}\frac{1}{n_{c,g}}\sum_{i\in c\cap g}s_i^2,
+(\lambda_g^{\mathrm{rms}})^2=\frac{1}{3\,n_{\mathrm{cfg},g}}\sum_{C\in\mathcal{C}_g}\frac{1}{n_{C,g}}\sum_{i\in C\cap g}s_i^2,
 $$
 
 $$
@@ -400,7 +440,7 @@ The configuration-weighted (pooled-CDF) score distribution of group $g$,
 with a test point at $+\infty$, is
 
 $$
-\hat F_g(t)=\frac{1}{n_{\mathrm{cfg},g}+1}\Bigg[\sum_{c\in\mathcal{C}_g}\frac{1}{n_{c,g}}\sum_{i\in c\cap g}
+\hat F_g(t)=\frac{1}{n_{\mathrm{cfg},g}+1}\Bigg[\sum_{C\in\mathcal{C}_g}\frac{1}{n_{C,g}}\sum_{i\in C\cap g}
 \mathbf{1}\{s_i\le t\}\;+\;\mathbf{1}\{+\infty\le t\}\Bigg],
 \qquad q_g=\inf\{t:\hat F_g(t)\ge1-\alpha\},
 $$
@@ -422,7 +462,7 @@ together with $V(x)$, and the scalar `forces_q` is the largest semi-axis,
 $q_{g(x)}\sqrt{\lambda_{\max}(V+\epsilon I)}$, for convenience.
 
 **The all-groups fallback.** When no neighbouring group qualifies (below),
-the pool is all atoms with the same weights $w_i=1/n_{c,g}$, so a
+the pool is all atoms with the same weights $w_i=1/n_{C,g}$, so a
 configuration spanning $k$ groups has total weight $k$. The $+\infty$ test
 point then carries the weight $W/n_{\mathrm{cfg}}$ of one configuration's
 mean total weight, $W=\sum_i w_i$:
@@ -477,8 +517,9 @@ radius by $q_g/q_{g'}$.
 ## 9. The groups
 
 Three sets of constants are fixed at fit time and stored with the posterior:
-$r_1$, the first minimum of the training radial distribution function;
-$z^\star$, the modal training coordination; and the band edges. For each
+$r_1$, the first minimum of the training radial distribution function
+(1.25 times its first peak if there is no minimum; $r_{\mathrm{cut}}$ if the
+training set has no neighbour pairs); $z^\star$, the modal training coordination; and the band edges. For each
 atom,
 
 $$
@@ -542,17 +583,22 @@ this is that a posterior calibrated on $U$ is specific to the regime of $U$
    configuration. This gives
    $w(x)\propto P(\mathrm{target}\mid x)/P(\mathrm{cal}\mid x)$.
 3. **Weighted quantile** (Tibshirani, Barber, Candès and Ramdas 2019).
-   Calibration atom $i$ has mass $w(x_i)/n_{c(i)}$, which combines the shift
-   weight with the configuration weight; the test atom has mass $w(x)$. With
-   $W$ the total mass,
+   The pool is per species, across all groups: the calibration atoms of
+   that species, subsampled by whole configurations. Calibration atom $i$,
+   in configuration $C(i)$, has mass $w(x_i)/n_{C(i)}$, where $n_{C(i)}$ is
+   the number of atoms of $i$'s species in $C(i)$ in the pool. This combines
+   the shift weight with a per-species configuration weight; the test atom
+   has mass $w(x)$. With $W$ the total mass,
 
     $$
-    q_w(x)=Q_{1-\alpha}\Big(\sum_{i\in\mathrm{cal}}\frac{w(x_i)}{n_{c(i)}W}\,\delta_{s_i}+\frac{w(x)}{W}\,\delta_{+\infty}\Big).
+    q_w(x)=Q_{1-\alpha}\Big(\sum_{i\in\mathrm{cal}}\frac{w(x_i)}{n_{C(i)}W}\,\delta_{s_i}+\frac{w(x)}{W}\,\delta_{+\infty}\Big).
     $$
 
 4. **Report** `support_q` $=q_w(x)$ and `support_ok` $=[q_w<\infty]$ per
    atom, and $n_{\mathrm{eff}}=(\sum_i p_i)^2/\sum_i p_i^2$ per species, over
-   the calibration masses $p_i=w(x_i)/n_{c(i)}$.
+   the calibration masses $p_i=w(x_i)/n_{C(i)}$. Because the pool spans all
+   groups of a species rather than one conformal group, `support_q` is not
+   comparable to the per-group $q_g$.
 
 **Caveats.** Richer features give more extreme ratios and so a smaller
 $n_{\mathrm{eff}}$; this is the honest outcome. The diagnostic assumes that

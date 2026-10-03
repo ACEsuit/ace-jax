@@ -38,6 +38,11 @@
 - `GPCalculator(deriv_dtc=False)` (`aj eval --no-deriv-dtc`) gives an SoR-only
   `forces_std` without the derivative-DTC term, whose whole-cell arrays may not
   fit for a big cell; over budget the term now warns instead of raising.
+- ARD now fits E0 jointly under `--e0 lsq` (as BLR): one E0 column per species
+  with BLR's fixed prior, outside the ARD body-order groups; `model.npz` holds
+  the fitted E0. Force uncertainties are unaffected, and posteriors written
+  before still load.
+- `run_ard_stage` compiles its programs once (no per-call recompilation).
 
 ## 0.1.1 (2026-10-03)
 

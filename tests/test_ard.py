@@ -308,19 +308,19 @@ def test_ard_stage_logs_warning_on_failed_or_bounded_fit(monkeypatch):
     assert any("ABNORMAL" in s for s in warns) and any("log_sigma_E" in s for s in warns)
 
 
-def test_ard_stage_reuses_cached_full_statistics(monkeypatch):
+@pytest.mark.parametrize("e0", ["prefit", "lsq"])
+def test_ard_stage_reuses_cached_full_statistics(monkeypatch, e0):
     """I1: the joint full refit reuses the objective's cached linear statistics (spec 3: "the cached
-    M, b where available") -- same h, kappa and posterior as the recompute, one fewer statistics pass."""
+    M, b where available") -- same h, kappa and posterior as the recompute, one fewer statistics pass.
+    e0='lsq' (joint E0, the cache then carries the E0 columns) checks the cache and the evidence at
+    fixed h; the refit endpoints are compared under e0='prefit' only (below)."""
     from conftest import FIXTURE_DIR
     from ace_jax.fit import ard, stats
     from ace_jax.fit.pipeline import load_fit_data
     from ace_jax.fit.pipeline.mapfit import fit_map
     from ace_jax.fit.pipeline.objective import make_objective
     from ace_jax.fit.pipeline.problem import build_problem
-    # e0 prefit: the cache reuse does not depend on the E0 columns, and from the joint-E0 MAP one of the
-    # two L-BFGS refits stops on a line-search failure, so h, kappa and the means then agree only to
-    # ~1e-3 (the refit's resolution along flat directions), which would hide a real mismatch
-    cfg = _pipe_cfg(e0="prefit").validate()
+    cfg = _pipe_cfg(e0=e0).validate()
     d = load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz"))
     b = build_problem(cfg, d)
     calls = []
@@ -363,6 +363,11 @@ def test_ard_stage_reuses_cached_full_statistics(monkeypatch):
     # fixture's energy offsets) and L-BFGS's stopping point along flat directions by ~1e-4: equal to
     # the optimiser's resolution
     assert abs(v_got - v_ref) < 3e-5 and np.abs(g_got - g_ref).max() < 3e-5
+    if e0 == "lsq":
+        # from the joint-E0 MAP one of the two L-BFGS refits stops on a line-search failure, so h, kappa
+        # and the means agree only to ~1e-3 (the refit's resolution along flat directions), which would
+        # hide a real mismatch: the endpoints are compared under e0='prefit'
+        return
     assert got.report["kappa_subset"] == pytest.approx(ref.report["kappa_subset"], rel=1e-12)   # subset stage unchanged
     assert got.posterior.kappa == pytest.approx(ref.posterior.kappa, rel=1e-4)   # full-posterior s^2: refit resolution
     assert got.report["logev_full"] == pytest.approx(ref.report["logev_full"], abs=1e-5)

@@ -151,6 +151,7 @@ per-atom output of ace-jax fits and calculators.
 
 Fits: `modal/fit_bench.py` arms `ard`, `ard_<tag>` and `ard_c<k>` (the last sets `ard_cond_max = 10**k`).
 These arms, and `ard_ABblk` below, are pinned to `ard_force_shape="iso"`: the pre-2026-10-03 results are iso, while the library default is now aniso.
+Every ARD arm of `fit_bench.py` (and `modal/sandwich_spike.py`) is also pinned to `e0="prefit"`: all ARD runs before 2026-10-03, including the revision-2 acceptance tables, used the pre-fit E0, while the library now fits E0 jointly under `e0="lsq"` (as BLR).
 Big cells: `modal_bench365.py::big_errors`. Scoring:
 - `scoring/eval_ard.py`: rms-z, cov90, NLL, ρ and AUROC per family, with 95 % confidence intervals from
   a block bootstrap over configurations;

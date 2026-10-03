@@ -26,14 +26,17 @@ common = dict(model="/data/cantor_embed_d16_deg10.npz" if data.startswith("/data
               opt="lbfgs", map_steps=3 if smoke else 40, predict_stats="recompute")
 from ard_arms import make_config   # noqa: E402
 
-if (arm_cfg := make_config(arm, common)) is not None:
+# ARD arms pin e0="prefit": every recorded ARD run (before 2026-10-03, incl. the rev-2 acceptance tables)
+# fitted with the pre-fit E0; since 2026-10-03 the library fits E0 jointly under e0="lsq" (as BLR)
+ard_common = dict(common, e0="prefit")
+if (arm_cfg := make_config(arm, ard_common)) is not None:
     cfg = arm_cfg
 elif arm == "pops":
     cfg = FitConfig(**common, arm="linear", uq="pops", pops_ridge="auto")
 elif arm.startswith("ard"):   # "ard", or "ard_<tag>" for a separate output dir      # tempered ARD posterior (feat/ard-uq): joint type-II ML, kappa from a 20 % train hold-out
     # "ard_c<k>": ard_cond_max = 10**k (the conditioning floor on the prior precisions); default 1e14
     cm = float(10 ** int(arm.split("_c")[1])) if "_c" in arm else 1e14
-    cfg = FitConfig(**common, arm="linear", uq="ard", ard_mode="joint", ard_val_frac=0.2, ard_laplace=True,
+    cfg = FitConfig(**ard_common, arm="linear", uq="ard", ard_mode="joint", ard_val_frac=0.2, ard_laplace=True,
                     ard_cond_max=cm, ard_force_shape="iso")   # recorded `ard` / `ard_c<k>` results are iso (library default became aniso 2026-10-03)
 else:
     cfg = FitConfig(**common, arm="gp", m_per_species=100, density="pca", pca_d=128, lml="host-cache",

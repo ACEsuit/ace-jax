@@ -106,12 +106,17 @@ class ACECalculator(Calculator):
         model is swapped every step.
 
         `posterior` (a `posterior.npz` from `fit --uq ard`, with `model` the matching
-        `model.npz` FILE) adds `results["forces_std"]`: the per-atom force std, shape (N,).
-        By default (posteriors fitted with `--ard-variance sandwich`) it is lambda times the
-        configuration-clustered sandwich std, lambda * sqrt(sum_c phi_c A^-1 M A^-1 phi_c^T);
-        for `--ard-variance kappa` or a schema-1 posterior.npz it is the tempered epistemic
-        std, kappa * sqrt(sum_c phi_c A^-1 phi_c^T).  By default it is computed only
-        when requested (`calc.get_property("forces_std", atoms)`, which reuses the cached
+        `model.npz` FILE) adds the per-atom force uncertainty.  For a revision-2 (schema-3)
+        posterior, each atom has a 3x3 shape V -- the centred delete-one-cluster (PRESS)
+        jackknife covariance of its force (`--ard-variance kappa`: phi A^-1 phi^T) -- and a
+        Mondrian group g that selects the calibrated scales: `forces_std` = lam_rms[g] sqrt(tr V),
+        (N,); `forces_cov` = lam_rms[g]^2 V, (N, 3, 3); `forces_q`, the conformal radius at the
+        fit's coverage (q[g] sqrt(tr V / 3) iso, the ellipsoid's largest semi-axis aniso);
+        `forces_q_mahal` = q[g] (aniso); `forces_group` = g; and `forces_support` (on request).
+        Schema-1/2 posteriors serve only the scalar `forces_std` (kappa times the epistemic std,
+        or lambda times an uncentred configuration-clustered sandwich std).  Energy and stress
+        carry no uncertainty.  By default the uncertainty is computed only when requested
+        (`calc.get_property("forces_std", atoms)` or any of the above, which reuses the cached
         E/F/stress): a design-row rebuild plus an L^2 solve per step is not a silent MD cost.
         `forces_std_every_call=True` adds it to every calculation.  posterior= requires
         `jax.config.update("jax_enable_x64", True)` (RuntimeError otherwise).

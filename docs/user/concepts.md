@@ -56,8 +56,8 @@ $E - \sum_i E_0(z_i)$, so $E_0$ decides what the basis has to represent.
   the prior has a say in where it lands. The log-evidence of such fits compares
   across bases fitted to the same data, not with `--e0 prefit` fits.
 - `aj fit --e0 prefit` is the older two-step version: $E_0$ is fixed at the
-  least-squares fit before the readout is fitted. (ARD and POPS fits use this
-  even with `--e0 lsq`.)
+  least-squares fit before the readout is fitted. (POPS fits use this even
+  with `--e0 lsq`; ARD fits E0 jointly, as BLR does.)
 - An **isolated-atom** configuration (one atom, no neighbour within the
   cutoff) is predicted as $E_0$ alone. With `--e0 lsq` or `prefit`, a species
   that has one in the training set takes its energy as $E_0$ exactly, and the

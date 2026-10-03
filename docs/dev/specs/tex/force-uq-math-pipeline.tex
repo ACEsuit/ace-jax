@@ -212,8 +212,16 @@ cluster can saturate the fit.
 \begin{equation}
 A^{-1}\gt_k = A_{(-k)}^{-1}\Psi_k^\T\rho_k,\qquad A_{(-k)}=A-\Psi_k^\T\Psi_k,
 \end{equation}
-with a rank-$n_k$ Cholesky downdate of $S$. Clusters are independent and can be batched (\code{vmap}
-over padded $n_k$ buckets). Sub-clustering keeps most $n_k$ to $3N_k\lesssim10^3$.
+In the prior-scaled coordinates $S_{(-k)}=D^{-1}A_{(-k)}D^{-1}=L\,(I-W_kW_k^\T)\,L^\T$, so the score
+follows from one $L\times L$ system (here $L$ is both the basis size and the Cholesky factor, as above):
+\begin{equation}
+(I-W_kW_k^\T)\,z_k=W_k\rho_k,\qquad \gt_k=D\,L\,z_k .
+\end{equation}
+Only the stored factor is used; $S$ is never formed. Both systems are solved by a symmetric
+eigendecomposition, with the eigenvalues of $I-H_{kk}$ (equivalently $1-\lambda$ for the eigenvalues
+$\lambda$ of $W_kW_k^\T$) floored at $10^{-12}$; clusters at the floor are counted and reported.
+Clusters are processed batch by batch, so memory scales with one batch's rows. Sub-clustering keeps
+most $n_k$ to $3N_k\lesssim10^3$.
 
 \paragraph{Fallback for very large clusters.} Optionally, apply the correction per row block
 instead: $(1-h)^{-1}$ for the energy row, the $3\times3$ force block of each atom, and the $6\times6$
@@ -249,8 +257,8 @@ V(x)_{\alpha\beta}=u_\alpha^\T\Qt\Qt^\T u_\beta,\qquad v(x)=\operatorname{tr}V(x
 \end{equation}
 $v(x)$ replaces $m^2(x)$. $V(x)$ is the full anisotropic block, and comes at no extra cost because the
 projections $\Qt^\T u_\alpha$ are already computed for $v$. Since
-$\phi_\alpha A^{-1}(\cbar-\cbar_{(-k)})$ is the change in the prediction at $x$ when cluster $k$ is
-deleted, $v(x)$ is the spread of the prediction over cluster deletions. It is large where the
+$\phi_\alpha(\cbar-\cbar_{(-k)})=\phi_\alpha A^{-1}\gt_k$ is the change in the prediction at $x$ when
+cluster $k$ is deleted, $v(x)$ is the spread of the prediction over cluster deletions. It is large where the
 prediction leans on clusters the model fits badly.
 
 \prev{the uncentred, uncorrected configuration-clustered sandwich $m^2$ ranked within-family errors
@@ -286,13 +294,13 @@ rank-deficient. Under the working model
 $e\sim\mathcal{N}(0,\lambda^2\,\tfrac{v}{3}I_3)$ (isotropic) or $e\sim\mathcal{N}(0,\lambda^2V)$
 (anisotropic), $s/\lambda\sim\chi_3$. The conformal step does not rely on this model; only the
 reading of \code{forces\_std} does. The mode is chosen at fit time (\code{-{}-force-shape iso|aniso};
-default \code{aniso}: on the bench365 v3 validation the anisotropic region is the only uncalibrated variant meeting the targets, Section~\ref{sec:validation}), and every scale in
+default \code{aniso}: on the bench365 v3 validation, at the default hold-out fraction, the anisotropic region is the only uncalibrated variant meeting the targets, Section~\ref{sec:validation}), and every scale in
 Section~\ref{sec:scale} is computed in that mode.
 
 \paragraph{Transfer assumption.} The scores come from a model trained on about $(1-f)|T|$
 configurations; the scale is applied to the shape of the model trained on $T$. The shape is a
 parameter variance, scaling roughly as $1/N$, whereas the error is dominated by approximation
-error ($\lambda^2\approx39$ on bench365). The ratio of squared error to shape is therefore
+error ($\lambda^2\approx39$ on bench365 with the previous, revision-1 shape). The ratio of squared error to shape is therefore
 unchanged only if the error is variance-dominated; if it is bias-dominated, $\lambda^2$ grows
 roughly in proportion to $N$, and the hold-out scale underestimates the served one by up to
 $(1-f)^{-1/2}$. Writing $\lambda\propto N^{\beta}$, the variance-dominated limit is $\beta=0$ and
@@ -409,7 +417,7 @@ $\lambda^{\mathrm{rms}}_g/\lambda^{\mathrm{rms}}_{g'}$ and the relative radius b
 \section{The group feature (Mondrian; band edges revised)}\label{sec:groups}
 
 Three sets of constants are fixed at fit time and stored with the model: $r_1$, the first minimum of
-the training radial distribution function; $z^\star$, the modal training coordination; and the band
+the training radial distribution function ($1.25$ times its first peak if there is no minimum); $z^\star$, the modal training coordination; and the band
 edges. For each atom,
 \begin{equation}
 z_i=\#\{j:r_{ij}<r_1\},\qquad
@@ -472,8 +480,10 @@ $\Qt^\T u_\alpha$ are not used as features, because they rotate with the structu
 calibration $=0$, class-balanced) on these features. Choose the L2 strength by 5-fold cross-validation
 grouped by configuration. This gives $w(x)\propto P(t\mid x)/P(\mathrm{cal}\mid x)$.
 
-\item \textbf{Weighted quantile} \cite{tibshirani2019}. Calibration atom $i$ has mass $w(x_i)/n_{c(i)}$,
-which combines the shift weight with the configuration weight. The test atom has mass $w(x)$. With
+\item \textbf{Weighted quantile} \cite{tibshirani2019}. The pool is per species, across all groups.
+Calibration atom $i$ has mass $w(x_i)/n_{c(i)}$, with $n_{c(i)}$ the number of atoms of $i$'s species
+in its configuration $c(i)$, which combines the shift weight with the configuration weight. (So
+\code{support\_q} is not comparable to the per-group $q_g$.) The test atom has mass $w(x)$. With
 $W$ the total mass,
 \begin{equation}
 q_w(x)=Q_{1-\alpha}\Big(\sum_{i\in\mathrm{cal}}\frac{w(x_i)}{n_{c(i)}W}\delta_{s_i}+\frac{w(x)}{W}\delta_{+\infty}\Big).
