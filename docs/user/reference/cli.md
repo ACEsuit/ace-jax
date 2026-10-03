@@ -11,6 +11,8 @@ The commands, in the order of a typical workflow:
   writes the fitted model, metrics and a `fit.yaml` run file to `--out`.
 - [`aj eval`](#aj-eval) evaluates a fitted model (ACE `.npz`, `gp_model.npz`
   or PACE `.yace`) on an extxyz file.
+- [`aj calibrate`](#aj-calibrate) recalibrates the per-atom force
+  uncertainty of a `--uq ard` fit on labelled target-regime data.
 - [`aj basis`](#aj-basis) builds a basis and saves it on its own.
 
 Every command exits with status 0 on success. Label keys default to
@@ -35,6 +37,8 @@ The options fall into groups:
   `--rungs` beyond `map` adds hyperparameter-posterior approximations, at a
   much higher cost;
 - **uncertainty**: `--uq blr` (default), `pops` or `ard` for the linear model;
+  the `--ard-*` and `--force-shape` options configure `ard`
+  ([Per-atom force uncertainty](../howto/force-uncertainty.md));
 - **run file**: `--config fit.yaml`, with command-line flags taking
   precedence ([Run files](../howto/fit-yaml.md)).
 
@@ -42,7 +46,20 @@ The options fall into groups:
 
 ## aj eval
 
+With `--posterior` (a `posterior.npz` from `aj fit --uq ard`), `--per-atom`
+writes the per-atom force uncertainty and `--support` adds the support flag
+([Per-atom force uncertainty](../howto/force-uncertainty.md)).
+
 <!-- aj-help eval -->
+
+## aj calibrate
+
+Recomputes the per-group scales of an ARD posterior on labelled
+configurations that were not in training, and writes a new posterior; the
+model is unchanged. See
+[Recalibrate on target data](../howto/force-uncertainty.md#recalibrate-on-target-data-aj-calibrate).
+
+<!-- aj-help calibrate -->
 
 ## aj basis
 

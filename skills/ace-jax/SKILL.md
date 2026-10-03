@@ -392,8 +392,11 @@ Other entry points:
 - **`support_ok = False` marks candidates for labelling** (`forces_support`; `aj eval --posterior P
   --per-atom out.xyz --support`; `--no-ard-support` at fit time skips it).
 - **Schema-2 posteriors serve only the old scalar `forces_std`.** The new properties raise and ask
-  you to refit with `--uq ard`. The validation programme for the new scales is in
-  `bench/defect_uq/README.md` and has not been run yet.
+  you to refit with `--uq ard`. The validation of the new scales has been run
+  (`bench/defect_uq/results/2026-10-03_rev2_acceptance.md`): the default (aniso + transfer
+  exponent) meets every coverage target; a posterior from `aj calibrate` is specific to the
+  regime it was calibrated on (crack-calibrated: tip 0.90, in distribution 0.87). User docs:
+  <https://acesuit.github.io/ace-jax/howto/force-uncertainty/>.
 - **First `aj basis` of a new basis shape** calls the compiled coupling
   library (`ace-jax-coupling`, milliseconds) to build the coupling table, then
   caches it in `~/.cache/ace-jax/coupling`. Later runs do not need the library.

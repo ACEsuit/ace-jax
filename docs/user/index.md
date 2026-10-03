@@ -45,6 +45,7 @@ run locally or open in molab.
 | use a model in ASE or LAMMPS, or load a `.yace` | How-to guides: [ASE](howto/ase.md), [LAMMPS](howto/lammps.md), [PACE](howto/pace.md) |
 | reproduce or vary a fit from its `fit.yaml` | [Run files](howto/fit-yaml.md) |
 | learn the radial basis | [Learn the radial basis](howto/learned-radials.md) |
+| put calibrated error bars on forces | [Per-atom force uncertainty](howto/force-uncertainty.md) |
 | look up every CLI flag | [CLI reference](reference/cli.md) |
 | look up a Python function | [Python API](reference/api.md) |
 | fix something that went wrong | [FAQ and troubleshooting](faq.md) |

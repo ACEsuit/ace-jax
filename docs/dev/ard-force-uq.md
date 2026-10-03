@@ -1,9 +1,11 @@
 # Calibrated per-atom force uncertainty (`--uq ard`, revision 2): usage notes
 
 This is the user-facing description of `--uq ard` revision 2 (PR #34) as it stood in
-the top-level README before the README became a landing page (release 0.1.0). It is
-kept here as the source for the MkDocs user pages on ARD uncertainty, which are still
-to be written; until then this file and `skills/ace-jax/SKILL.md` are the reference.
+the top-level README before the README became a landing page (release 0.1.0). The user
+documentation is now the MkDocs pages
+[`docs/user/howto/force-uncertainty.md`](../user/howto/force-uncertainty.md) (usage) and
+[`docs/user/concepts/force-uncertainty-maths.md`](../user/concepts/force-uncertainty-maths.md)
+(mathematics); this file is kept as a compact developer summary.
 Design: `specs/2026-09-30-conformal-force-sigma-design.md`; mathematics:
 `specs/tex/force-uq-math-pipeline.tex`.
 
@@ -69,8 +71,10 @@ larger) configurations use them alone; every other group pools the stored hold-o
 group; `--replace` uses the new cells alone in every group. Posteriors are schema 3;
 older schema-2 posteriors serve only the old scalar `forces_std` (the new properties raise and ask
 you to refit with `--uq ard`). The validation programme for this revision is described in
-[`bench/defect_uq/README.md`](../../bench/defect_uq/README.md); it has not been run yet, so treat the
-coverage as nominal until it is. Only the force uncertainty is calibrated
+[`bench/defect_uq/README.md`](../../bench/defect_uq/README.md) and has been run: the default
+(aniso + transfer exponent) meets every coverage target, in distribution and on the uncalibrated
+crack and dislocation cells; results in
+[`bench/defect_uq/results/2026-10-03_rev2_acceptance.md`](../../bench/defect_uq/results/2026-10-03_rev2_acceptance.md). Only the force uncertainty is calibrated
 (`ard.json` `tempered_quantities: ["F"]`); energy and virial variances are the uncalibrated
 posterior ones. `--uq ard` changes the mean as well as the uncertainty: `model.npz` holds the ARD
 posterior mean, not the BLR/MAP mean. `posterior.npz` stores the float32 posterior factor, ~0.9 GB
