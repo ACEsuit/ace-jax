@@ -343,10 +343,9 @@ tables, are in the
   virial) uncertainty. The energy and virial variances in `aj fit`
   prediction files under `--uq ard` are the untempered posterior variances,
   neither tempered nor calibrated, and they can be overconfident on small
-  training sets: on the tiny Si test fixture, the actual energy errors are
-  1.1–2.8 times the predicted std, configuration by configuration (median
-  predicted std 8 meV/atom; test RMSE 215 meV/atom, dominated by one
-  64-atom cell).
+  training sets: on the tiny Si test fixtures the test energy errors run at
+  roughly 1–3 times the predicted std (rms z-score ≈ 2.5). Check the
+  energy `rms_z` in `metrics.json` before relying on energy variances.
 - **Coverage is marginal within a group**, for atoms exchangeable with its
   calibration configurations. A shift the groups do not resolve (a new
   phase, chemical order) is caught only by the support flag.
