@@ -71,6 +71,21 @@ def _labelled_copy(atoms, energy, forces, stress, model):
     return a
 
 
+def fetch(path_or_url):
+    """A local path for a shipped data file: a path is returned as is; a URL is downloaded once
+    into ~/.cache/ace-jax/tutorial-labels (keyed on the whole URL)."""
+    src = str(path_or_url)
+    if src.startswith(("http://", "https://")):
+        # keyed on the whole URL: e1/ and c/ ship files with the same name
+        tag = hashlib.sha256(src.encode()).hexdigest()[:16]
+        local = pathlib.Path.home() / ".cache" / "ace-jax" / "tutorial-labels" / f"{tag}-{src.rsplit('/', 1)[-1]}"
+        local.parent.mkdir(parents=True, exist_ok=True)
+        if not local.exists():
+            urllib.request.urlretrieve(src, local)
+        return local
+    return pathlib.Path(src)
+
+
 class LabelCache:
     def __init__(self, entries):
         self._d = entries                                    # (model, key) -> labelled Atoms
@@ -100,15 +115,7 @@ class LabelCache:
     def from_file(cls, path_or_url):
         from ase import Atoms
         from ..fit.xyz import read_extxyz
-        src = str(path_or_url)
-        if src.startswith(("http://", "https://")):
-            # keyed on the whole URL: e1/ and c/ ship files with the same name
-            tag = hashlib.sha256(src.encode()).hexdigest()[:16]
-            local = pathlib.Path.home() / ".cache" / "ace-jax" / "tutorial-labels" / f"{tag}-{src.rsplit('/', 1)[-1]}"
-            local.parent.mkdir(parents=True, exist_ok=True)
-            if not local.exists():
-                urllib.request.urlretrieve(src, local)
-            src = local
+        src = fetch(path_or_url)
         d = {}
         for f in read_extxyz(src):
             a = Atoms(numbers=f.numbers, positions=f.positions, cell=f.cell, pbc=f.pbc)
