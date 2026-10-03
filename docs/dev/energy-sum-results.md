@@ -66,6 +66,19 @@ total as hi + lo in the model dtype (`calc.skin.unpack`).
 - **What it buys in float32 (x64 on):** a 20-40x lower stalling fmax.
 - **What it cannot fix:** float32 with x64 off. Its total is still a float32.
 
-A reduced |E| would lower the float64 floor. Options are reporting energies
-relative to E0, or a reference-subtracted objective in the optimiser. That
-changes the energy convention, so it is not done here.
+A reduced |E| lowers the float64 floor. `ACECalculator(energy_reference="E0")`
+does that as an opt-in: the evaluation model's E0 is zeroed, so the per-atom
+constant never enters the summed values, and `results["e0_offset"]` carries it.
+The default energy convention is unchanged.
+
+Measured on the (110) crack clusters, same seed-0 start and protocol as above
+(PreconLBFGS, Armijo, float64). Energy/force calls in the 1e-5 -> 1e-6 stage:
+
+| Atoms | naive | comp | shift (E - E_bulk) | E0-relative, naive | E0-relative, comp |
+|---|---|---|---|---|---|
+| 1952 | 201 | 41 | 10 | 20 | 10 |
+| 10024 | 276 | 36 | 10 | 7 | 9 |
+
+E0-relative energies (|E| about 4.6 eV x N instead of 163 eV x N) recover the
+shift control's behaviour. These are single runs; trajectories are chaotic at
+the 1-ulp level.
