@@ -113,6 +113,24 @@ Big-cell scores use the held-out pair plus big3_mh1. In-distribution scores use 
 - **Per-group replace is the only calibration that lifts the tip, to 0.90.** It makes a regime-specific posterior: in-distribution coverage drops to 0.87.
 - **Recommendation:** serve the default posterior generally. With labelled target-regime cells, build a separate per-group-replace posterior and use it only for that regime.
 
+## 7. Rerun with the converged evidence fits and joint E0 (2026-10-03, head 80e24d8)
+
+| run | ID cfg-weighted | crack | tip | edge / screw | ID force rms-z |
+|---|---|---|---|---|---|
+| aniso + transfer (recorded, L-BFGS only) | 0.898 | 0.903 | 0.885 | 0.937 / 0.941 | 0.981 |
+| + projected-Newton polish | 0.898 | 0.903 | 0.885 | 0.937 / 0.941 | 0.981 |
+| **+ polish + joint E0 (library defaults, `ard_default`)** | **0.898** | **0.908** | **0.893** | **0.937 / 0.942** | 0.980 |
+
+- **Polish.** Every evidence fit converges, to within 10× its measured gradient roundoff, after 1 Newton step and 2 Hessians. That includes the fits where L-BFGS stopped ABNORMAL. The acceptance numbers are unchanged.
+- **Joint E0.** Tip and crack coverage rise slightly. Test energy RMSE falls from 3.054 to 3.028.
+- **Wall time.** About 95 min becomes about 61 min, from the per-call compile caching.
+
+**Conditioning.**
+- cond(S) at the evidence endpoints is 9.8e13 (P_fit), 9.6e13 (P_fit2) and 1.0e14 (full fit), against `ard_cond_max` = 1e14.
+- a₂ (and a₃ in the full fit) sit on `a_floor`, so the floor binds.
+- The leak of the h0-based floor is about 1 % on bench365. It can reach e⁶ only on tiny sets whose σ falls far.
+- **Decision: leave `a_floor`/`ard_cond_max` as is.** The fit logs cond(S) and warns above `ard_cond_max`.
+
 ## Verdict
 
 - **The default (aniso + transfer exponent) passes every target**, both in distribution and on the uncalibrated v3 big cells.
