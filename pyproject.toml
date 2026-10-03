@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ace-jax"
-version = "0.1.0"
+version = "0.1.1"
 description = "Fit and evaluate ACE interatomic potentials in Python/JAX"
 readme = "README.md"
 license = "MIT"

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.1.1 (2026-10-03)
+
+- User docs: a Performance page (CPU float64, GPU float64/float32; SiGe and
+  Cantor; every evaluator).
 - Tutorials 6, 7 and 9, adapted from the MLIP school's E2, E3 and D notebooks:
   surfaces (coverage, repair and stable relaxations), automating curation
   (random, novelty and ace-jax's ARD-uncertainty selection), and bring your own
