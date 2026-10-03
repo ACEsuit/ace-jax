@@ -345,9 +345,7 @@ def test_ard_joint_e0_with_an_isolated_atom_matches_the_prefit_fit():
     a, b = j.preds.arrays["test/map"], p.preds.arrays["test/map"]
     # equal to the evidence optimiser's resolution along its flat directions (~3e-5 eV/atom, ~4e-4 eV/A;
     # the test RMSEs are ~0.2 eV/atom and ~1.9 eV/A)
-    # two separate evidence fits: their L-BFGS endpoints drift by ~0.4 meV/atom across BLAS/CPU platforms (CI);
-    # 2 meV/atom still separates "same fit" from any real joint-vs-prefit difference (~100 meV/atom)
-    np.testing.assert_allclose(a["E_mean"] / a["nat"], b["E_mean"] / b["nat"], rtol=0, atol=2e-3)
+    np.testing.assert_allclose(a["E_mean"] / a["nat"], b["E_mean"] / b["nat"], rtol=0, atol=2e-4)
     np.testing.assert_allclose(a["F_mean"], b["F_mean"], rtol=0, atol=2e-3)
 
 
