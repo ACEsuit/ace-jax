@@ -1,7 +1,7 @@
 # Labels for the MLIP-school-derived tutorials
 
 These files hold the precomputed labels for the tutorials adapted from the
-[MLIP-school-2026](https://github.com/ACEsuit/MLIP-school-2026) workshop
+[MLIP School 2026](https://mlipschool.uk/) workshop
 notebooks (E1, E1x, E2, E3, C and D). With them, a tutorial's default settings run without
 a labeller. `ace_jax.tutorials.labels.label()` serves them, keyed on structure
 content, and labels a structure live only when it is not here.
@@ -49,7 +49,7 @@ mace-torch, as described in the docstring of `make_labels.py`:
 ```bash
 PYTHONPATH=src <mace-env>/bin/python docs/user/tutorials/data/school/make_labels.py a0
 PYTHONPATH=src <mace-env>/bin/python docs/user/tutorials/data/school/make_labels.py all \
-    --e1x-source <MLIP-school-2026>/notebooks/reference/e1x-bulk-reference.xyz
+    --e1x-source <school sources>/notebooks/reference/e1x-bulk-reference.xyz
 ```
 
 `all` also writes the `e2`, `e3` and `d` files; each has its own mode. `e2`

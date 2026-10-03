@@ -146,7 +146,7 @@ These constraints are validated up front. A bad combination raises a
 ## Python API
 
 ```python
-import jax; jax.config.update("jax_enable_x64", True)   # fitting needs float64
+import jax; jax.config.update("jax_enable_x64", True)   # fitting needs float64 (fit raises without it)
 import ace_jax as aj
 from ace_jax import ACECalculator, GPCalculator
 

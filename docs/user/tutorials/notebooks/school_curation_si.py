@@ -8,7 +8,7 @@
 # ///
 """Tutorial 7: automating curation -- sampling against selection.
 
-Adapted from the MLIP-school-2026 notebook E3 (ACEsuit/MLIP-school-2026). Run it with
+Adapted from the MLIP-school-2026 notebook E3 (https://mlipschool.uk/e3/e3_automating_curation). Run it with
 `uvx marimo edit --sandbox school_curation_si.py`, or as a plain script
 (`python school_curation_si.py`), which is how CI smoke-tests it.
 """
@@ -38,7 +38,7 @@ def _(mo):
     3. Read where each rule spent its labels.
 
     It builds on Tutorials 4 and 6 and is adapted from notebook E3 of the
-    [MLIP school 2026](https://github.com/ACEsuit/MLIP-school-2026).
+    [MLIP School 2026](https://mlipschool.uk/e3/e3_automating_curation).
 
     **Run this notebook**: with [uv](https://docs.astral.sh/uv/) installed, one command
     opens it in your browser (no account needed):

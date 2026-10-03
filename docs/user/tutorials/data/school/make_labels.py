@@ -7,7 +7,7 @@ Needs mace-torch (and CPU torch) -- an environment of its own, not ace-jax's:
     uv pip install --python mace-env/bin/python mace-torch ase
     PYTHONPATH=src mace-env/bin/python docs/user/tutorials/data/school/make_labels.py a0
     PYTHONPATH=src mace-env/bin/python docs/user/tutorials/data/school/make_labels.py all \\
-        --e1x-source <MLIP-school-2026>/notebooks/reference/e1x-bulk-reference.xyz
+        --e1x-source <school sources>/notebooks/reference/e1x-bulk-reference.xyz
 
 The e3 mode also fits ace-jax models and runs MD with them, so the environment needs
 ace-jax's own dependencies too (`uv pip install --python mace-env/bin/python -e .`).

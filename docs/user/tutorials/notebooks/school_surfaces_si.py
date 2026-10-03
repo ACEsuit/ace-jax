@@ -8,7 +8,7 @@
 # ///
 """Tutorial 6: surfaces -- coverage, repair, and letting the atoms move.
 
-Adapted from the MLIP-school-2026 notebook E2 (ACEsuit/MLIP-school-2026). Run it with
+Adapted from the MLIP-school-2026 notebook E2 (https://mlipschool.uk/e2/e2_surfaces). Run it with
 `uvx marimo edit --sandbox school_surfaces_si.py`, or as a plain script
 (`python school_surfaces_si.py`), which is how CI smoke-tests it.
 """
@@ -40,7 +40,7 @@ def _(mo):
        fix that too.
 
     It is adapted from notebook E2 of the
-    [MLIP school 2026](https://github.com/ACEsuit/MLIP-school-2026).
+    [MLIP School 2026](https://mlipschool.uk/e2/e2_surfaces).
 
     **Run this notebook**: with [uv](https://docs.astral.sh/uv/) installed, one command
     opens it in your browser (no account needed):

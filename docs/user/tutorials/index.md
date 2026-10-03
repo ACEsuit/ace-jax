@@ -21,7 +21,7 @@ no GPU or cloud account.
 | 8 | [The truth about the truth](truth-about-the-truth.md) | compute a Si(111) surface energy with two foundation-model labellers, and see an ACE fit follow whichever one taught it | ~1 min |
 | 9 | [Bring your own data](bring-your-own-data.md) | declare a target property, label references, fit a two-element model, check coverage and repair the data, on GaAs or your own structure | ~2 min |
 
-Tutorials 4 to 9 are adapted from the [MLIP school 2026](https://github.com/ACEsuit/MLIP-school-2026) notebooks. Their reference labels come from MIT-licensed MACE foundation models and ship with the tutorials, so the default settings need no labeller.
+Tutorials 4 to 9 are adapted from the [MLIP School 2026](https://mlipschool.uk/) notebooks. Their reference labels come from MIT-licensed MACE foundation models and ship with the tutorials, so the default settings need no labeller.
 
 Every tutorial has the same shape: **goals** at the top, numbered **steps**,
 a **checkpoint** after each step that says whether it worked, and

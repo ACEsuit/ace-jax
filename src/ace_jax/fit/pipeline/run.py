@@ -25,6 +25,10 @@ def fit(cfg, data, log=print, on_stage=None):
     so a driver can write those results before a later stage (e.g. POPS or
     prediction running out of memory) can lose them."""
     T0 = time.time()
+    import jax
+    if not jax.config.jax_enable_x64:     # a float32 fit is silently poor: the caller chooses precision
+        raise RuntimeError("fitting needs float64: call jax.config.update('jax_enable_x64', True) "
+                           "before importing anything that uses JAX (aj fit does this for you)")
     cfg.validate()
     if cfg.e0 == "lsq" and not cfg.joint_e0:
         log("e0 lsq: POPS fits with the least-squares E0 fixed (as e0='prefit')")
