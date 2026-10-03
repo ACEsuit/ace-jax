@@ -88,9 +88,10 @@ already the fastest. float32 gives 1.35–1.86× but breaks parity.
    threading loss (16 ranks run near the DRAM roof, §3.3).
 2. **A CPU form of the product basis:** feature-major explicit products,
    measured at 1.65× per core on ACE SiGe and 1.13× on PACE SiGe.
-3. **An analytic product-basis adjoint, no one-hot species expansion in A,
-   and spline tables for the per-edge transcendentals:** 1.1–1.4× each,
-   estimated.
+3. **No one-hot species expansion in A, and spline tables for the per-edge
+   transcendentals:** 1.1–1.4× each, estimated. (A hand-written product-basis
+   adjoint was considered and dropped: #2's forward rewrite removes most of
+   the reverse-mode cost while keeping autodiff, see §7.)
 4. **A fused per-atom kernel with an analytic adjoint:** needed to close the
    last ~2× per core, as ML-PACE does.
 
@@ -540,7 +541,7 @@ probe on this branch at force parity. "Estimated" means reasoned from the
 |---|---|---|---|---|---|
 | 1 | **Rank-parallel CPU evaluation.** The calculator's step under `shard_map` over host devices: dense rows split across D = cores devices, 1 thread each, E/V `psum`, the force gather after an all-gather of dE/drij. Alternatively the lammps-jax bundle on CPU with MPI ranks. **Decision: left to lammps-jax**, which is gaining CPU support with MPI domain decomposition; ace-jax will not add its own `shard_map` path | **1.5–2.6× at 16 cores (measured in-process); 2.3–4.0× as separate ranks (emulated)** | §3.3: shard_map 1.4–2.6× over threads (exact); 16 processes 2.3–4.0× over 16 threads, at 8.0–10.4× of one core | S–M (calculator: device mesh, row padding to D, the gather) | low; exact. The XLA device count must be set before JAX starts, so it is an opt-in env/config, and it fights other in-process JAX use |
 | 2 | **CPU product basis: feature-major explicit products** (no `jnp.prod`; At[g0]·At[g1]·…), backend-selected so the GPU keeps its layout | **1.65× per core** on ACE SiGe (order 3), 1.13× PACE SiGe, ~1× on order-2 Cantor | §6.2 measured; §4.3 AA kernels | S | low (exact to 4e-14); keep the GPU path |
-| 3 | **Analytic adjoint of the product basis** (`custom_vjp`): the backward from the same products and "product of others" without scatter (feature-major whole-row adds, or a one-hot matmul), which removes the serial `wrapped_scatter` and the pad/slice JVP | 1.2–1.4× per core on order ≥ 3 models, on top of #2; also removes a serial thunk (+ parallel efficiency) | AA bwd 86–109 ms (§4.2), VJP/fwd 14–18× vs ≈1–2 for an analytic adjoint; the serial scatters are 6–11% of 16-thread time | M | medium (GPU must not regress: the pace-performance-gap §8.3 XLA formulations all cost ~1 ms on the A100) |
+| (3) | ~~Analytic adjoint of the product basis~~ (`custom_vjp`). **Dropped:** hand-written gradients are not wanted, and most of the reverse-mode cost was `jnp.prod`'s lowering (pad/slice JVP, transposing copies), which #2's forward rewrite removes while keeping autodiff. The remaining serial `wrapped_scatter` (3% of 1-core time) can be addressed by the gather's formulation (sorted segment-sum or a one-hot matmul) if it still shows after #2, and matters less under one-thread MPI ranks | – | §4.2, §4.3 | – | – |
 | 4 | **No one-hot species expansion in A** (ACE `blk_compact`, PACE pool-first): contract per species with a static loop over NZ on masked or sorted-by-species slots, or pool per (node, z_j) by segment-sum into an (n, NZ, …) buffer | 1.2–1.4× per core on Cantor (NZ = 5), ~1.1× on SiGe | A stage 33–46% on PACE and ACE Cantor; the one-hot multiplies its flops and bytes by NZ (§4.3 `ynn_fusion.2`) | M | low–medium (fusion and layout changes again need GPU checks) |
 | 5 | **Replace per-edge transcendentals with tables** (ML-PACE's approach): PACE g_k(r) splines per pair; ACE: spline the radial in r including the Agnesi transform and envelope, not only in x | 1.1–1.3× per core (radial is 12–37%; PACE Cantor's SBessel fusion alone is 20 ms, 8%) | §4.2, §4.3 | M | parity becomes spline-tolerance (as `lean`'s learned-radial splines already are, ~1e-9) |
 | 6 | **Fewer, larger kernels for the per-edge chain and A** (avoid the tiny batched dots: write the per-l outer products as broadcast-multiply-reduce fusions, so XLA emits loops it partitions) | 1.1–1.3×, mostly through thread scaling: library dots are 21–22% of 16-thread time at a 1.9–2.9× speed-up, and the smallest are serial (0.8–0.9×) | §3.2 dot rows | S–M | low; must be checked against the GPU's GEMM path |
@@ -551,7 +552,7 @@ probe on this branch at force parity. "Estimated" means reasoned from the
 
 #1 and #2–#6 compose: one is parallel efficiency (to come from lammps-jax's CPU
 MPI ranks), the others per-core work (ace-jax's part).
-Taking the low ends (2× × 1.65 × 1.2 × 1.1) gives about 4–5× on ACE SiGe
+Taking the low ends (2× × 1.65 × 1.2 × 1.1, the 1.2 now from #4 rather than #3) gives about 4–5× on ACE SiGe
 at 16 cores. That is about 100k atom-steps/s, against ML-PACE's 188–205k and the
 trim library's 392k. Rank parallelism then runs into the DRAM roof (§3.3),
 which #2–#6 lower by cutting bytes per atom. The rest needs #7.
