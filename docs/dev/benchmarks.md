@@ -31,12 +31,13 @@ design is in `docs/dev/benchmark-scaling-spec.md`, and how to reproduce it is in
   library through the PR's `pair_style ace` plugin (MPI ranks, as ML-PACE).
 - **Systems:** SiGe (a random alloy on diamond) and Cantor (a random
   equiatomic CrMnFeCoNi alloy on fcc).
-- **Hosts:** moriarty CPU (16-core Xeon Silver 4216; LAMMPS with 16 MPI
-  ranks, standalone on all 32 hardware threads); moriarty GPU (RTX A4500,
-  20 GB); Modal A100-80GB; lestrade CPU (`lestrade-cpu`: an i9-14900K, on its
-  8 P-cores only, CPUs 0-15; LAMMPS with 8 MPI ranks bound one per P-core,
-  standalone on the 16 P-core hardware threads), the one CPU host that runs
-  the ACEpotentials.jl lines next to ace-jax, ML-PACE and MACE.
+- **Hosts:** moriarty GPU (RTX A4500, 20 GB); Modal A100-80GB; lestrade CPU
+  (`lestrade-cpu`: an i9-14900K, on its 8 P-cores only, CPUs 0-15; LAMMPS
+  with 8 MPI ranks bound one per P-core, standalone on the 16 P-core
+  hardware threads), the CPU host, which runs the ACEpotentials.jl lines
+  next to ace-jax, ML-PACE and MACE. The moriarty CPU rows (16-core Xeon
+  Silver 4216) were dropped after the CPU speed-ups of #52 and #54 made
+  their ace-jax lines stale; they are in the git history.
 - **Parity gate:** each host's parity checks passed before any timing ran:
   ace-jax against ML-PACE (gate `mlpace`), ace-jax standalone against
   ace-jax in LAMMPS in both bundle layouts (gate `acejax`), and MACE against
@@ -65,9 +66,6 @@ design is in `docs/dev/benchmark-scaling-spec.md`, and how to reproduce it is in
 | modal-a100 | mace | MACE | 2/2 | 6.9e-07 | 9.7e-05 |
 | modal-a100 | mlpace | ML-PACE | 2/2 | 4.9e-14 | 4.1e-10 |
 | modal-a100 | spline | ace-jax (linear ACE, learned radial, splined) | 2/2 | 2.1e-12 | 3.1e-08 |
-| moriarty-cpu | mace | MACE | 2/2 | 6.9e-07 | 9.7e-05 |
-| moriarty-cpu | mlpace | ML-PACE | 2/2 | 4.8e-14 | 4.1e-10 |
-| moriarty-cpu | spline | ace-jax (linear ACE, learned radial, splined) | 2/2 | 2.1e-12 | 3.1e-08 |
 | moriarty-gpu | acejax | ace-jax (linear ACE) | 6/6 | 3.9e-16 | 2.4e-14 |
 | moriarty-gpu | acejax | ace-jax (linear ACE, learned radial, analytic) | 6/6 | 1.1e-16 | 2.0e-14 |
 | moriarty-gpu | acejax | ace-jax (linear ACE, learned radial, splined) | 6/6 | 5.6e-17 | 1.2e-12 |
@@ -131,9 +129,8 @@ ML-PACE in LAMMPS against ace-jax PACE on the same `.yace` models (float64, atom
 
 | host | N | ML-PACE in LAMMPS | ace-jax standalone | ace-jax in LAMMPS | ML-PACE ÷ ace-jax standalone | ML-PACE ÷ ace-jax in LAMMPS |
 |---|---|---|---|---|---|---|
-| lestrade-cpu | 2048 | 417k–562k | 29k–45k | — | 13–14× | — |
+| lestrade-cpu | 2048 | 417k–562k | 29k–45k | — | 12–14× | — |
 | modal-a100 | 8192 | 1.67M–2.22M | 714k–1.26M | 1.14M–1.40M | 1.8–2.3× | 1.5–1.6× |
-| moriarty-cpu | 2048 | 208k–275k | 16k–23k | — | 12–13× | — |
 | moriarty-gpu | 8192 | 684k–1.02M | 251k–416k | 209k–271k | 2.4–2.7× | 3.3–3.8× |
 | sulis-a100 | 8192 | 2.91M–3.30M | 892k–961k | 1.09M–1.33M | 3.3–3.4× | 2.5–2.7× |
 
@@ -141,10 +138,9 @@ ace-jax against MACE, same mode (float64 throughput ratio; where MACE ran out of
 
 | host | mode | ace-jax PACE ÷ MACE | ace-jax ACE ÷ MACE |
 |---|---|---|---|
-| lestrade-cpu | standalone | 88–1.7e+02× | 2.2e+02–2.3e+02× |
+| lestrade-cpu | standalone | 89–1.7e+02× | 2.2e+02–3.1e+02× |
 | modal-a100 | standalone | 23–59× | 48–73× |
 | modal-a100 | lammps | 18–26× | 16–36× |
-| moriarty-cpu | standalone | 65–1.1e+02× | 92–1.5e+02× |
 | moriarty-gpu | standalone | 49–1e+02× | 1.3e+02–1.4e+02× |
 | moriarty-gpu | lammps | 17–29× (at 4096) | 32–48× (at 4096) |
 | sulis-a100 | standalone | 37–50× | 60–78× |
@@ -154,9 +150,8 @@ Largest system that ran standalone (float64, atoms), and the float32 / float64 t
 
 | host | largest: ace-jax PACE | ace-jax ACE | MACE | f32 ÷ f64: ace-jax PACE | ace-jax ACE | MACE |
 |---|---|---|---|---|---|---|
-| lestrade-cpu | 32768 | 32768 | 4096–8192 | 1.9–2× | 1.7× | 2–2.1× |
+| lestrade-cpu | 32768 | 32768 | 4096–8192 | 1.9–2× | 1.7–1.8× | 2–2.1× |
 | modal-a100 | 2097152 | 2097152 | 32768 | 1.2–1.4× | 1.2–1.4× | 1.1× |
-| moriarty-cpu | 32768 | 32768 | 4096–8192 | 1.6–1.7× | 1.4× | 1.9–2× |
 | moriarty-gpu | 1048576 | 1048576 | 8192 | 3.5–3.8× | 2.7–3.4× | 5.8–6.4× |
 | sulis-a100 | 2097152 | 2097152 | 16384 | 1–1.5× | 1.4× | 1–1.1× |
 
@@ -248,19 +243,11 @@ Hollow markers: ace-jax chose the sparse layout. Where a case was run more than 
 
 *ace-jax throughput before (dashed) and after (solid) the speed-ups, float64, medium models; ML-PACE in LAMMPS for reference. Before rows: `bench/scaling/results/before-perf/`. “fn”: basis functions per central element.*
 
-![scaling_before_after_float64_medium_moriarty-cpu](figs/scaling_before_after_float64_medium_moriarty-cpu.png)
-
-*ace-jax throughput before (dashed) and after (solid) the speed-ups, float64, medium models; ML-PACE in LAMMPS for reference. Before rows: `bench/scaling/results/before-perf/`. “fn”: basis functions per central element.*
-
 ![scaling_before_after_float64_medium_moriarty-gpu](figs/scaling_before_after_float64_medium_moriarty-gpu.png)
 
 *ace-jax throughput before (dashed) and after (solid) the speed-ups, float64, medium models; ML-PACE in LAMMPS for reference. Before rows: `bench/scaling/results/before-perf/`. “fn”: basis functions per central element.*
 
 ![scaling_learned_radial_float64_medium_modal-a100](figs/scaling_learned_radial_float64_medium_modal-a100.png)
-
-*The cost of a learned radial, and what splining recovers (float64, medium linear ACE): the stock model (spline radial), its learned-radial proxy splined as deployed (`spline_tol="auto"`, 1e-10) and the same proxy kept analytic (`spline_tol=None`, exact). Solid = standalone, dashed = LAMMPS; see `docs/dev/learned-radial-splining.md`.*
-
-![scaling_learned_radial_float64_medium_moriarty-cpu](figs/scaling_learned_radial_float64_medium_moriarty-cpu.png)
 
 *The cost of a learned radial, and what splining recovers (float64, medium linear ACE): the stock model (spline radial), its learned-radial proxy splined as deployed (`spline_tol="auto"`, 1e-10) and the same proxy kept analytic (`spline_tol=None`, exact). Solid = standalone, dashed = LAMMPS; see `docs/dev/learned-radial-splining.md`.*
 
@@ -323,20 +310,6 @@ Hollow markers: ace-jax chose the sparse layout. Where a case was run more than 
 | modal-a100 | SiGe | MACE | lammps | 16384 | 32768 |
 | modal-a100 | SiGe | MACE | standalone | 32768 | 65536 |
 | modal-a100 | SiGe | ML-PACE | lammps | 2097152 | — |
-| moriarty-cpu | Cantor | ace-jax (linear ACE) | standalone | 32768 | — |
-| moriarty-cpu | Cantor | ace-jax (linear ACE, learned radial, analytic) | standalone | 32768 | — |
-| moriarty-cpu | Cantor | ace-jax (linear ACE, learned radial, splined) | standalone | 32768 | — |
-| moriarty-cpu | Cantor | ace-jax (PACE model) | standalone | 32768 | — |
-| moriarty-cpu | Cantor | MACE | lammps | 16384 | 32768 |
-| moriarty-cpu | Cantor | MACE | standalone | 4096 | 8192 |
-| moriarty-cpu | Cantor | ML-PACE | lammps | 32768 | — |
-| moriarty-cpu | SiGe | ace-jax (linear ACE) | standalone | 32768 | — |
-| moriarty-cpu | SiGe | ace-jax (linear ACE, learned radial, analytic) | standalone | 32768 | — |
-| moriarty-cpu | SiGe | ace-jax (linear ACE, learned radial, splined) | standalone | 32768 | — |
-| moriarty-cpu | SiGe | ace-jax (PACE model) | standalone | 32768 | — |
-| moriarty-cpu | SiGe | MACE | lammps | 8192 | 16384 |
-| moriarty-cpu | SiGe | MACE | standalone | 8192 | 16384 |
-| moriarty-cpu | SiGe | ML-PACE | lammps | 32768 | — |
 | moriarty-gpu | Cantor | ace-jax (linear ACE) | lammps | 1048576 | — |
 | moriarty-gpu | Cantor | ace-jax (linear ACE) | standalone | 1048576 | — |
 | moriarty-gpu | Cantor | ace-jax (linear ACE, learned radial, analytic) | lammps | 1048576 | — |
@@ -388,18 +361,18 @@ Hollow markers: ace-jax chose the sparse layout. Where a case was run more than 
 
 | host | system | code | mode | size | dtype | atoms | atom-steps/s |
 |---|---|---|---|---|---|---|---|
-| lestrade-cpu | Cantor | ace-jax (linear ACE) | standalone | large | float64 | 2048 | 4.36e+04 |
-| lestrade-cpu | SiGe | ace-jax (linear ACE) | standalone | large | float64 | 2048 | 2.7e+04 |
-| lestrade-cpu | Cantor | ace-jax (linear ACE) | standalone | medium | float64 | 2048 | 6.08e+04 |
-| lestrade-cpu | SiGe | ace-jax (linear ACE) | standalone | medium | float64 | 2048 | 7.16e+04 |
-| lestrade-cpu | Cantor | ace-jax (linear ACE) | standalone | small | float64 | 2048 | 1.19e+05 |
-| lestrade-cpu | SiGe | ace-jax (linear ACE) | standalone | small | float64 | 2048 | 1.96e+05 |
-| lestrade-cpu | Cantor | ace-jax (PACE model) | standalone | large | float64 | 2048 | 1.3e+04 |
-| lestrade-cpu | SiGe | ace-jax (PACE model) | standalone | large | float64 | 2048 | 7.51e+03 |
-| lestrade-cpu | Cantor | ace-jax (PACE model) | standalone | medium | float64 | 2048 | 4.46e+04 |
+| lestrade-cpu | Cantor | ace-jax (linear ACE) | standalone | large | float64 | 2048 | 4.88e+04 |
+| lestrade-cpu | SiGe | ace-jax (linear ACE) | standalone | large | float64 | 2048 | 2.74e+04 |
+| lestrade-cpu | Cantor | ace-jax (linear ACE) | standalone | medium | float64 | 2048 | 8.32e+04 |
+| lestrade-cpu | SiGe | ace-jax (linear ACE) | standalone | medium | float64 | 2048 | 7.13e+04 |
+| lestrade-cpu | Cantor | ace-jax (linear ACE) | standalone | small | float64 | 2048 | 1.72e+05 |
+| lestrade-cpu | SiGe | ace-jax (linear ACE) | standalone | small | float64 | 2048 | 1.97e+05 |
+| lestrade-cpu | Cantor | ace-jax (PACE model) | standalone | large | float64 | 2048 | 1.29e+04 |
+| lestrade-cpu | SiGe | ace-jax (PACE model) | standalone | large | float64 | 2048 | 7.46e+03 |
+| lestrade-cpu | Cantor | ace-jax (PACE model) | standalone | medium | float64 | 2048 | 4.55e+04 |
 | lestrade-cpu | SiGe | ace-jax (PACE model) | standalone | medium | float64 | 2048 | 2.93e+04 |
-| lestrade-cpu | Cantor | ace-jax (PACE model) | standalone | small | float64 | 2048 | 1.13e+05 |
-| lestrade-cpu | SiGe | ace-jax (PACE model) | standalone | small | float64 | 2048 | 1.04e+05 |
+| lestrade-cpu | Cantor | ace-jax (PACE model) | standalone | small | float64 | 2048 | 1.11e+05 |
+| lestrade-cpu | SiGe | ace-jax (PACE model) | standalone | small | float64 | 2048 | 1.03e+05 |
 | lestrade-cpu | Cantor | ACEpotentials.jl (linear ACE, direct) | standalone | large | float64 | 2048 | 4.6e+04 |
 | lestrade-cpu | SiGe | ACEpotentials.jl (linear ACE, direct) | standalone | large | float64 | 2048 | 5.21e+04 |
 | lestrade-cpu | Cantor | ACEpotentials.jl (linear ACE, direct) | standalone | medium | float64 | 2048 | 5.17e+04 |
@@ -484,42 +457,6 @@ Hollow markers: ace-jax chose the sparse layout. Where a case was run more than 
 | modal-a100 | SiGe | ML-PACE | lammps | medium | float64 | 8192 | 1.67e+06 |
 | modal-a100 | Cantor | ML-PACE | lammps | small | float64 | 8192 | 5.14e+06 |
 | modal-a100 | SiGe | ML-PACE | lammps | small | float64 | 8192 | 3.47e+06 |
-| moriarty-cpu | Cantor | ace-jax (linear ACE) | standalone | large | float64 | 2048 | 1.13e+04 |
-| moriarty-cpu | SiGe | ace-jax (linear ACE) | standalone | large | float64 | 2048 | 6.34e+03 |
-| moriarty-cpu | Cantor | ace-jax (linear ACE) | standalone | medium | float64 | 2048 | 3.1e+04 |
-| moriarty-cpu | SiGe | ace-jax (linear ACE) | standalone | medium | float64 | 2048 | 2.24e+04 |
-| moriarty-cpu | Cantor | ace-jax (linear ACE) | standalone | small | float64 | 2048 | 6.22e+04 |
-| moriarty-cpu | SiGe | ace-jax (linear ACE) | standalone | small | float64 | 2048 | 7.91e+04 |
-| moriarty-cpu | Cantor | ace-jax (linear ACE, learned radial, analytic) | standalone | medium | float64 | 2048 | 1.21e+04 |
-| moriarty-cpu | SiGe | ace-jax (linear ACE, learned radial, analytic) | standalone | medium | float64 | 2048 | 1.7e+04 |
-| moriarty-cpu | Cantor | ace-jax (linear ACE, learned radial, splined) | standalone | medium | float64 | 2048 | 3.11e+04 |
-| moriarty-cpu | SiGe | ace-jax (linear ACE, learned radial, splined) | standalone | medium | float64 | 2048 | 2.21e+04 |
-| moriarty-cpu | Cantor | ace-jax (PACE model) | standalone | large | float64 | 2048 | 7.51e+03 |
-| moriarty-cpu | SiGe | ace-jax (PACE model) | standalone | large | float64 | 2048 | 4.39e+03 |
-| moriarty-cpu | Cantor | ace-jax (PACE model) | standalone | medium | float64 | 2048 | 2.29e+04 |
-| moriarty-cpu | SiGe | ace-jax (PACE model) | standalone | medium | float64 | 2048 | 1.58e+04 |
-| moriarty-cpu | Cantor | ace-jax (PACE model) | standalone | small | float64 | 2048 | 4.99e+04 |
-| moriarty-cpu | SiGe | ace-jax (PACE model) | standalone | small | float64 | 2048 | 4.54e+04 |
-| moriarty-cpu | Cantor | MACE | lammps | large | float64 | 2048 | 731 |
-| moriarty-cpu | SiGe | MACE | lammps | large | float64 | 2048 | 866 |
-| moriarty-cpu | Cantor | MACE | lammps | medium | float64 | 2048 | 1.77e+03 |
-| moriarty-cpu | SiGe | MACE | lammps | medium | float64 | 2048 | 2.23e+03 |
-| moriarty-cpu | Cantor | MACE | lammps | small | float64 | 2048 | 4.91e+03 |
-| moriarty-cpu | SiGe | MACE | lammps | small | float64 | 2048 | 6.18e+03 |
-| moriarty-cpu | Cantor | MACE | standalone | large | float64 | 2048 | 96.1 |
-| moriarty-cpu | SiGe | MACE | standalone | large | float64 | 2048 | 115 |
-| moriarty-cpu | Cantor | MACE | standalone | medium | float64 | 2048 | 201 |
-| moriarty-cpu | SiGe | MACE | standalone | medium | float64 | 2048 | 243 |
-| moriarty-cpu | Cantor | MACE | standalone | mh1 | float64 | 2048 | 93.2 |
-| moriarty-cpu | SiGe | MACE | standalone | mh1 | float64 | 2048 | 130 |
-| moriarty-cpu | Cantor | MACE | standalone | small | float64 | 2048 | 517 |
-| moriarty-cpu | SiGe | MACE | standalone | small | float64 | 2048 | 637 |
-| moriarty-cpu | Cantor | ML-PACE | lammps | large | float64 | 2048 | 1.09e+05 |
-| moriarty-cpu | SiGe | ML-PACE | lammps | large | float64 | 2048 | 8.85e+04 |
-| moriarty-cpu | Cantor | ML-PACE | lammps | medium | float64 | 2048 | 2.75e+05 |
-| moriarty-cpu | SiGe | ML-PACE | lammps | medium | float64 | 2048 | 2.08e+05 |
-| moriarty-cpu | Cantor | ML-PACE | lammps | small | float64 | 2048 | 7.45e+05 |
-| moriarty-cpu | SiGe | ML-PACE | lammps | small | float64 | 2048 | 4.13e+05 |
 | moriarty-gpu | Cantor | ace-jax (linear ACE) | lammps | large | float64 | 8192 | 3.89e+05 |
 | moriarty-gpu | SiGe | ace-jax (linear ACE) | lammps | large | float64 | 8192 | 3.33e+05 |
 | moriarty-gpu | Cantor | ace-jax (linear ACE) | lammps | medium | float64 | 8192 | 3.14e+05 |
@@ -640,11 +577,6 @@ Hollow markers: ace-jax chose the sparse layout. Where a case was run more than 
 | modal-a100 | ace-jax (PACE model) | lammps | 1.6 |
 | modal-a100 | ace-jax (PACE model) | standalone | 10.2 |
 | modal-a100 | MACE | standalone | 9.8 |
-| moriarty-cpu | ace-jax (linear ACE) | standalone | 1.3 |
-| moriarty-cpu | ace-jax (linear ACE, learned radial, analytic) | standalone | 1.3 |
-| moriarty-cpu | ace-jax (linear ACE, learned radial, splined) | standalone | 1.2 |
-| moriarty-cpu | ace-jax (PACE model) | standalone | 1.7 |
-| moriarty-cpu | MACE | standalone | 5.6 |
 | moriarty-gpu | ace-jax (linear ACE) | lammps | 1.2 |
 | moriarty-gpu | ace-jax (linear ACE) | standalone | 3.3 |
 | moriarty-gpu | ace-jax (linear ACE, learned radial, analytic) | lammps | 1.4 |
@@ -668,6 +600,5 @@ Hollow markers: ace-jax chose the sparse layout. Where a case was run more than 
 
 - **lestrade-cpu**: ACEpotentials 0.10.2, ACEpotentials_rev v0.10.2, EquivariantTensors 0.4.3, JuliaC 0.3.10, Polynomials4ML 0.5.8, ace-jax 0.1.0, ase 3.29.0, jax 0.11.2, jaxlib 0.11.2, julia 1.12.6, mace-torch 0.3.16, matscipy 1.2.0, matscipy-neighbours 0.1.0, python 3.12.8, torch 2.14.0
 - **modal-a100**: ase 3.29.0, jax 0.11.2, jaxlib 0.11.2, mace-torch 0.3.16, matscipy 1.2.0, matscipy-neighbours 1.0.0, python 3.12.1, torch 2.14.0
-- **moriarty-cpu**: ace-jax 0.1.0, ase 3.29.0, jax 0.11.2, jaxlib 0.11.2, mace-torch 0.3.16, matscipy 1.2.0, matscipy-neighbours 0.1.0, python 3.12.8, torch 2.14.0
 - **moriarty-gpu**: ace-jax 0.1.0, ase 3.29.0, jax 0.11.2, jaxlib 0.11.2, mace-torch 0.3.16, matscipy 1.2.0, matscipy-neighbours 0.1.0, python 3.12.8, torch 2.14.0
 - **sulis-a100**: ace-jax 0.1.0, ase 3.29.0, jax 0.11.2, jaxlib 0.11.2, mace-torch 0.3.16, matscipy 1.3.0, matscipy-neighbours 1.0.0, python 3.12.13, torch 2.14.0+cu126

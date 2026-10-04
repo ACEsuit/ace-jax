@@ -29,12 +29,13 @@ design is in `docs/dev/benchmark-scaling-spec.md`, and how to reproduce it is in
   library through the PR's `pair_style ace` plugin (MPI ranks, as ML-PACE).
 - **Systems:** SiGe (a random alloy on diamond) and Cantor (a random
   equiatomic CrMnFeCoNi alloy on fcc).
-- **Hosts:** moriarty CPU (16-core Xeon Silver 4216; LAMMPS with 16 MPI
-  ranks, standalone on all 32 hardware threads); moriarty GPU (RTX A4500,
-  20 GB); Modal A100-80GB; lestrade CPU (`lestrade-cpu`: an i9-14900K, on its
-  8 P-cores only, CPUs 0-15; LAMMPS with 8 MPI ranks bound one per P-core,
-  standalone on the 16 P-core hardware threads), the one CPU host that runs
-  the ACEpotentials.jl lines next to ace-jax, ML-PACE and MACE.
+- **Hosts:** moriarty GPU (RTX A4500, 20 GB); Modal A100-80GB; lestrade CPU
+  (`lestrade-cpu`: an i9-14900K, on its 8 P-cores only, CPUs 0-15; LAMMPS
+  with 8 MPI ranks bound one per P-core, standalone on the 16 P-core
+  hardware threads), the CPU host, which runs the ACEpotentials.jl lines
+  next to ace-jax, ML-PACE and MACE. The moriarty CPU rows (16-core Xeon
+  Silver 4216) were dropped after the CPU speed-ups of #52 and #54 made
+  their ace-jax lines stale; they are in the git history.
 - **Parity gate:** each host's parity checks passed before any timing ran:
   ace-jax against ML-PACE (gate `mlpace`), ace-jax standalone against
   ace-jax in LAMMPS in both bundle layouts (gate `acejax`), and MACE against
