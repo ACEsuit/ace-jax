@@ -11,6 +11,8 @@ g_k (x) Y_lm is pooled per (node, neighbour species) and crad applied per node
 afterwards, so the per-edge R_nl is never formed; A comes out feature-major
 (C * n_a, n) for the product basis.  docs/dev/pace-performance-gap.md sections 7-8.
 """
+import dataclasses
+
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -20,6 +22,7 @@ from .harmonics import real_spherical_harmonics
 from .edge_model import EdgeSiteModel, check_edge_a_kind, product_basis_t, with_edge_a_kind
 from .pace_build import build_basis
 from .pace_io import parse_yace
+from .radial import spline_eval_pairs
 from .pace_radial import cutoff_func_poly, fexp, fexp_shifted_scaled, pace_zbl, radbase, radcore
 
 
@@ -68,6 +71,10 @@ class PACEModel(EdgeSiteModel):
     pf_sel_y: jax.Array = None   # (n_Y, n_a) one-hot: Y columns -> A entries
     # SBessel evaluation form, fixed per model by load_yace (SBESSEL_MATMUL_MIN_K)
     sbessel_form: str = eqx.field(static=True, default="rotation")
+    # g_k tabulated in r (`splinify.radial_table`, opt-in), () = off; the core
+    # repulsion stays analytic
+    rtab_grid: tuple = eqx.field(static=True, default=())    # (r_min, h, n) in r
+    rtab_coefs: jax.Array = None                     # (NZ, NZ, ncoef, nradbase)
 
     uses_edge_a = False
 
@@ -95,11 +102,16 @@ class PACEModel(EdgeSiteModel):
         return bp, valid, r, rij_s
 
     def edge_basis_factors(self, rij, zi, zj, mask=None):
-        """(g_k, Y_lm) per edge: the fixed radial basis only, zero on invalid edges."""
+        """(g_k, Y_lm) per edge: the fixed radial basis only, zero on invalid edges
+        (r >= the bond rcut, or masked).  From the radial table when there is one."""
         bp, valid, r, rij_s = self._geometry(rij, zi, zj, mask)
-        lam, rc, dcut, cin, dcin = (bp[:, k] for k in range(5))
-        g = radbase(r, self.radbasename, self.inner_cutoff_type, lam, rc, dcut,
-                    cin, dcin, self.nradbase, self.sbessel_form)          # (E, K)
+        if self.rtab_grid:
+            x0, h, n = self.rtab_grid
+            g = spline_eval_pairs(r, self.rtab_coefs, zi, zj, x0, h, n)
+        else:
+            lam, rc, dcut, cin, dcin = (bp[:, k] for k in range(5))
+            g = radbase(r, self.radbasename, self.inner_cutoff_type, lam, rc, dcut,
+                        cin, dcin, self.nradbase, self.sbessel_form)      # (E, K)
         return jnp.where(valid[:, None], g, 0.0), real_spherical_harmonics(rij_s, self.lmax)
 
     @property
@@ -130,6 +142,26 @@ class PACEModel(EdgeSiteModel):
         cr = jnp.where(valid, cr, 0.0)
         d = jnp.where(valid, r - (cin - dcin), jnp.inf)                   # zbl switch coordinate
         return cr, d, dcin
+
+    # ------------------------------------------------------------ radial table hooks
+    def without_radial_table(self):
+        return dataclasses.replace(self, rtab_grid=(), rtab_coefs=None) if self.rtab_grid else self
+
+    def table_cutoffs(self):
+        """(NZ, NZ) bond cutoffs: `_geometry` zeroes g_k from rc on."""
+        return self.radparams[..., 1]
+
+    def radial_table_targets(self):
+        return (("g", "rtab_coefs"),)
+
+    def radial_table_values(self, which, r, zi, zj):
+        """The exact g_k (`edge_basis_factors`) at r (E,)."""
+        return self.edge_basis_factors(jnp.stack([r, 0 * r, 0 * r], -1), zi, zj)[0]
+
+    def radial_table_key(self):
+        """What g_k reads (radparams; never crad, the readout or the core)."""
+        return (self.radparams, repr((self.radbasename, self.inner_cutoff_type, self.nradbase,
+                                      self.sbessel_form)))
 
     # ------------------------------------------------------------ per node
     def _embedding(self, rho, node_z):

@@ -182,6 +182,43 @@ def test_lean_energy_fn_matches_full(layout):
     np.testing.assert_allclose(np.asarray(out[1][1]), np.asarray(out[0][1]), rtol=0, atol=1e-12)
 
 
+@pytest.mark.parametrize("kind", sorted(MODELS))
+@pytest.mark.parametrize("layout", ["sparse", "dense", "matrix"])
+def test_bundle_radial_table(tmp_path, monkeypatch, layout, kind):
+    """radial_table= tabulates the exported model for every layout (after lean),
+    is recorded as ace_jax.radial_table, and the energy function agrees with the
+    untabulated bundle's to the table's accuracy."""
+    require_optional("lammps_jax")
+    from ace_jax.export import lammps as lx
+    if layout == "matrix" and not lx.matrix_supported():
+        pytest.skip("installed lammps-jax has no neighbour-matrix layout")
+    model, meta, _ = load(MODELS[kind]())
+    at = _cluster()
+    graph, g = _lammps_graph(at, meta["rcut"])
+    z2i = {z: i for i, z in enumerate(meta["elements"])}
+    species = jnp.asarray([z2i[int(z)] for z in at.numbers], jnp.int32)
+    pos = jnp.asarray(at.positions)
+    seen = []
+    real = lx.make_energy_fn
+
+    def spy(m, *a, **k):
+        seen.append(m)
+        return real(m, *a, **k)
+
+    monkeypatch.setattr(lx, "make_energy_fn", spy)
+    out = []
+    for rt in (None, True):
+        b = lx.export_lammps(model, meta, tmp_path / "m.json", max_atoms=256, max_edges=256 * 64,
+                             k_dense=64, max_neighbors=64, layout=layout, radial_table=rt)
+        info = b["ace_jax"]["radial_table"]
+        assert (info is None) == (rt is None) and (seen[-1].rtab_coefs is None) == (rt is None)
+        out.append(_e_and_grad(real(seen[-1], len(meta["elements"]), "sparse"), species, graph, pos))
+    assert info["n_intervals"] == 4000 and not set(info) & LAMMPS_JAX_KEYS
+    (e0, G0), (e1, G1) = out
+    assert abs(float(e1.sum() - e0.sum())) <= 1e-10 * abs(float(e0.sum()))
+    assert np.abs(np.asarray(G1 - G0)).max() <= 1e-7 * np.abs(np.asarray(G0)).max()
+
+
 def test_bundle_records_owned_rows_even_for_sparse(tmp_path):
     """The sparse layout has no row concept, but max_owned is still recorded
     (the value the caller sized the bundle's neighbour slots for)."""
@@ -217,7 +254,8 @@ def test_bundle_metadata_keys_do_not_shadow_the_contract(tmp_path, layout):
     # every ace_jax key either side added (owned rows, lean / splining provenance,
     # the exporting lammps-jax) is written for every layout, and none is a contract key
     assert set(b["ace_jax"]) == {"layout", "elements", "type_elements", "k_dense", "owned_rows",
-                                 "lean", "spline_tol", "spline_intervals", "lammps_jax"}
+                                 "lean", "spline_tol", "spline_intervals", "radial_table",
+                                 "lammps_jax"}
     assert not set(b["ace_jax"]) & LAMMPS_JAX_KEYS
 
 
