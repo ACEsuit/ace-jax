@@ -259,7 +259,8 @@ def make_energy_fn(model, n_species, layout, k_dense=None, type_map=None, n_rows
 
 def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
                   dtype="float64", layout="auto", type_elements=None, max_owned=None,
-                  lean=True, spline_tol=AUTO, spline_intervals=None, max_neighbors=None):
+                  lean=True, spline_tol=AUTO, spline_intervals=None, max_neighbors=None,
+                  radial_table=None):
     """Write a lammps-jax JSON bundle for `model`; returns the bundle dict.
 
     Capacities: max_atoms (owned + ghost positions); max_edges (sparse / dense:
@@ -305,11 +306,21 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
     `ace_jax.lean` (False when lean returned the model as given, e.g. PACE or an
     unfolded model), `ace_jax.spline_tol` and `ace_jax.spline_intervals`
     ({radial: n}), both None when nothing was splined.
+
+    radial_table (None, the default: off; True: 4000 intervals; an int: that
+    many): tabulate the exported model's radial stage in r after `lean`
+    (`eval.model.with_radial_table`; ACE R_nl and the pair radial, PACE g_k),
+    for every layout.  A CPU speed-up and an approximation (at 4000 intervals
+    energies to ~1e-11 relative, forces to ~1e-8 of max|F|); exactly zero
+    beyond each pair's cutoff, so the matrix layout's skin pairs still drop
+    out.  Recorded as `ace_jax.radial_table` (n_intervals, r_min, r_max,
+    max_rel_err, max_rel_deriv_err; None when off), next to
+    `ace_jax.spline_tol`.
     """
     from lammps_jax.export import export_model
 
     from ..eval.model import lean as _lean
-    from ..eval.model import splining
+    from ..eval.model import splining, with_radial_table
     from ..calc.point import dense_budget_bytes
     model_z = [int(z) for z in meta["elements"]]
     type_elements = model_z if type_elements is None else [int(z) for z in type_elements]
@@ -357,6 +368,7 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
         model = _lean(full, spline_tol, spline_intervals)
         splined = splining(full, model, spline_tol)
         leaned = model is not full or bool(getattr(model, "energy_only", False))
+    model, rtab = with_radial_table(model, radial_table)
     rcut = float(meta["rcut"])
     energy_fn = make_energy_fn(model, n_species, layout, k_dense,
                                None if type_map == list(range(len(model_z))) else type_map,
@@ -374,6 +386,8 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
                          # what the analytic radials were splined to (None: not splined)
                          "spline_tol": splined["spline_tol"] if splined else None,
                          "spline_intervals": splined["n_intervals"] if splined else None,
+                         # the radial stage tabulated in r (None: analytic / as lean left it)
+                         "radial_table": rtab,
                          "lammps_jax": lammps_jax_version()}
     Path(path).write_text(json.dumps(bundle, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return bundle

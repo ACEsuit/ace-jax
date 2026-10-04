@@ -201,7 +201,7 @@ load; faster only at large `nradbase`). Values are unchanged to roundoff.
 
 ### Calculator performance options
 
-`ACECalculator(path, dtype=None, layout="auto", edge_a_kind="auto", skin=1.0, lean=True, spline_tol="auto", spline_intervals=None)`:
+`ACECalculator(path, dtype=None, layout="auto", edge_a_kind="auto", skin=1.0, lean=True, spline_tol="auto", spline_intervals=None, radial_table=None)`:
 - `lean` (ACE `.npz` models): energies, forces and stress are evaluated with
   `ace_jax.eval.lean(model)`, exact to roundoff. It drops radial columns and
   harmonics the basis never reads, folds the pair weights into the pair
@@ -237,6 +237,16 @@ load; faster only at large `nradbase`). Values are unchanged to roundoff.
     `FSModel(base, ...)`) gets `model.with_base(lean_keep_basis(model.base))`:
     `to_spline` and `prune_columns` only, which keep `site_basis` and the
     unfolded readout valid.
+- `radial_table` (ACE and PACE; default None = off): `True` (4000 intervals) or
+  an int tabulates the per-edge radial stage in r after `lean`: ACE R_nl
+  (transform and envelope included) and the pair radial, PACE g_k. One cubic
+  B-spline per species pair on [0.5 Å, rcut], exactly zero beyond each pair's
+  cutoff; below 0.5 Å the end cubic extrapolates. A CPU speed-up (see
+  CHANGELOG), not roundoff: at 4000 intervals energies agree to ~1e-12
+  relative, forces to ~1e-8 of max|F|. `calc.radial_table` (n_intervals,
+  r_min, r_max, max_rel_err, max_rel_deriv_err) and
+  `calc.last_timing["radial_table"]` report it; `lean(model,
+  radial_table=True)` gives the same model. Wrapper models refuse it.
 - `layout`: `"sparse"` (edge list) or `"dense"` (padded per-node blocks, A by a
   batched outer product, several times faster forces on GPU). `"auto"` picks
   dense when the padding fill, edges / (atoms × max neighbours), is at least
@@ -313,7 +323,10 @@ This writes a lammps-jax bundle for `pair_style jax/kk` (GPU only).
   - `ace_jax.lean`: False when `lean` returned the model as given, e.g. a PACE
     or unfolded model.
   - `ace_jax.spline_tol` and `ace_jax.spline_intervals`: both None when nothing
-    was splined. `layout="auto"` is
+    was splined.
+  - `radial_table=None` (as on `ACECalculator`; applied after `lean`, to every
+    layout, PACE included) is recorded as `ace_jax.radial_table`: the table's
+    info, None when off. `layout="auto"` is
   sized on the full model, so it chooses the same layout either way.
 
 Other entry points:
