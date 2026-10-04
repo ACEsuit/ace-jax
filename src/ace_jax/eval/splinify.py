@@ -488,7 +488,7 @@ def radial_table(model, n_intervals=DEFAULT_RADIAL_TABLE, r_min=DEFAULT_TABLE_R_
     repulsion stays analytic (tabulating it gained nothing).  `radial()`,
     `pair_radial()`, `_blocked_radial()` and `edge_basis_factors()` then read
     the table: a 4-row gather per edge instead of transcendentals (1.1-1.4x on
-    one CPU core; docs/dev/benchmarks.md, CHANGELOG).
+    one CPU core; CHANGELOG, bench/perf/radial_table.py).
 
     One uniform grid in r, (x0, h, n) = (r_min, (r_max - r_min) / n_intervals,
     n_intervals + 1), r_max the largest per-pair cutoff (ACE: the pair
