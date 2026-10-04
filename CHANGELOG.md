@@ -16,6 +16,18 @@
   backends are unchanged. Cantor (5 species) at 2,048 atoms, on an
   i9-14900K with 8 P-cores: 1.37× faster for the medium model, 1.31× for
   the small and 1.12× for the large.
+- Opt-in radial tables for faster CPU evaluation: `radial_table=True` on
+  `ACECalculator`, `export_lammps` and `lean` (or an interval count; the
+  default is off). Each species pair's radial functions are tabulated as a
+  cubic spline in r on [0.5 Å, rcut] with 4,000 intervals, so an edge reads a
+  table instead of evaluating transcendentals: for ACE, R_nl (transform and
+  envelope included) and the pair radial; for PACE, the radial basis g_k.
+  Beyond each pair's cutoff the tables are exactly zero. This is an
+  approximation, not roundoff: on the medium benchmark models, energies agree
+  to at most 1.8e-11 relative (≤ 1e-12 eV/atom) and forces to at most 1.7e-8
+  of max|F|. Compiled skin step at 2,048 atoms, on an i9-14900K, one core /
+  8 P-cores: ACE 1.24× / 1.08× faster on SiGe and 1.39× / 1.14× on Cantor;
+  PACE 1.09× / 1.02× on SiGe and 1.22× / 1.08× on Cantor.
 
 ## 0.2.0 (2026-10-03)
 
