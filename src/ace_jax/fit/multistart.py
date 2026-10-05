@@ -18,8 +18,9 @@ _PENALTY = 1e12
 
 def lbfgs_map(vg, x0, lo, hi, maxiter, maxfun=None, log=None):
     """One bounded L-BFGS-B ascent of vg from x0 (clipped to [lo, hi]).
-    Returns {x, value, message, nfev, trace} with value = the log-posterior at x
-    (-inf if it was never finite)."""
+    Returns {x, value, message, nfev, trace, grad, hess_inv} with value = the log-posterior at x
+    (-inf if it was never finite), grad its gradient there (None if not finite) and hess_inv
+    L-BFGS-B's dense estimate of the inverse Hessian of -vg (P x P)."""
     from scipy.optimize import minimize
     trace = []
 
@@ -37,8 +38,12 @@ def lbfgs_map(vg, x0, lo, hi, maxiter, maxfun=None, log=None):
     res = minimize(fg, x0, jac=True, method="L-BFGS-B", bounds=list(zip(lo, hi)),
                    options={"maxiter": int(maxiter), "maxfun": int(maxfun or 4 * maxiter)})
     value = -float(res.fun) if float(res.fun) < _PENALTY else -np.inf
+    # the final gradient of vg (maximised) and L-BFGS-B's inverse-Hessian estimate of -vg, kept so
+    # the caller can judge stationarity without another (on the GP arm, minute-long) evaluation
+    grad = -np.asarray(res.jac, float) if np.isfinite(value) else None
+    hess_inv = np.asarray(res.hess_inv.todense(), float) if hasattr(res.hess_inv, "todense") else None
     return {"x": np.asarray(res.x, float), "value": value, "message": str(res.message),
-            "nfev": int(res.nfev), "trace": trace}
+            "nfev": int(res.nfev), "trace": trace, "grad": grad, "hess_inv": hess_inv}
 
 
 def prior_starts(prior, n, lo, hi, x0, seed=0):

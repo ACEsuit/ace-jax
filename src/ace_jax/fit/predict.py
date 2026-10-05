@@ -16,7 +16,7 @@ from .hypers import from_array
 from .kernels import K_MM, k_rows
 from .summary import site_summary
 from .feature import apply as _feat, dwarp
-from .objective import posterior
+from .objective import posterior, posterior_from_qr, uses_qr
 from .data import VOIGT, flat_edges
 from .metrics import crps_gaussian
 from .pops import leverage_select, pops_var
@@ -273,14 +273,40 @@ def _pack(outs, prob, ds_test):
 
 def _train_stats(theta, prob, ds_train, stats):
     """The training sufficient statistics: stats(theta) if the caller supplies them
-    (e.g. cached linear statistics), else computed on ds_train."""
-    return (stats(theta) if stats is not None
-            else sufficient_statistics(theta, prob.spec, prob.model, prob.ind, prob.cfg, ds_train))
+    (e.g. cached linear statistics), else computed on ds_train -- in QR form (QRStats,
+    whose G and b are properties) when prob's LML takes it (objective.uses_qr)."""
+    if stats is not None:
+        return stats(theta)
+    if uses_qr(prob):
+        from .stats import linear_qr_statistics
+        return linear_qr_statistics(prob.model, prob.cfg, ds_train)
+    return sufficient_statistics(theta, prob.spec, prob.model, prob.ind, prob.cfg, ds_train)
+
+
+def fit_posterior(theta, st, prob, ds_train):
+    """The posterior (mu, L) from training statistics st, by the factorisation the LML used:
+    QR for QRStats, else the Cholesky (stable_posterior's QR fallback when it fails)."""
+    from .stats import QRStats
+    if isinstance(st, QRStats):
+        return posterior_from_qr(theta, st, prob)
+    return stable_posterior(theta, st, prob, ds_train)
+
+
+def stable_posterior(theta, st, prob, ds_train):
+    """objective.posterior, or posterior_qr on ds_train when the normal-equations Cholesky
+    fails: an evidence fit that nearly interpolates its data (noise at its floor, prior
+    near flat) leaves G + Lambda too ill-conditioned to factor (kappa ~ 1e16), while the
+    design itself, which QR factors, is not.  A Cholesky that succeeds is kept as is."""
+    mu, L = posterior(theta, st, prob)
+    if bool(jnp.all(jnp.isfinite(L))) and bool(jnp.all(jnp.isfinite(mu))):
+        return mu, L
+    from .solve import posterior_qr
+    return posterior_qr(prob, ds_train, theta)
 
 
 def _run_predict(f, theta, prob, ds_train, ds_test, stats=None):
     st = _train_stats(theta, prob, ds_train, stats)
-    mu, L = posterior(theta, st, prob)
+    mu, L = fit_posterior(theta, st, prob, ds_train)
     outs = [f(theta, mu, L, jax.tree.map(lambda a: a[i], ds_test)) for i in range(ds_test.n_batches)]
     return _pack(outs, prob, ds_test)
 

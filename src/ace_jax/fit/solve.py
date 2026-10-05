@@ -23,6 +23,9 @@ matters more for M > 0.  Entry points:
                         streams the rows.  Stable AND O(L^2) memory (basis-, not
                         observation-limited) in one pass -- the big-data stable
                         solver.  ~n_batches x the flops of the Cholesky.
+  posterior_qr       -- solve_qr_streaming's mean with the factor of G + Lambda:
+                        objective.posterior's (mu, L), stably.  predict.stable_posterior
+                        falls back to it when the Cholesky fails.
   lsqr               -- the matrix-free LSQR primitive (with streamed_operators):
                         O(L) memory, but each iteration is a full streaming pass and
                         it needs many times L of them on an ill-conditioned ACE Gram,
@@ -107,7 +110,17 @@ def solve_qr_streaming(prob, ds, theta):
     Per batch it re-triangularises [R ; A_k] (a Dt^3-scale QR), so it is
     ~n_batches times the flops of the Cholesky's single factorisation -- the price
     of the kappa (not kappa^2) conditioning at O(Dt^2) memory."""
+    R, d = _qr_factor(prob, ds, theta)
+    return solve_triangular(R, d, lower=False)                # back-substitution R theta = d
+
+
+def _qr_factor(prob, ds, theta):
+    """The streaming QR: R (Dt, Dt) upper triangular with R^T R = G + Lambda, and d = Q^T y_tilde."""
     R0, d0 = _prior_block(prob, theta)                       # (Dt, Dt) upper tri, zeros(Dt)
+    if jax.default_backend() == "cpu":                       # stats.host_qr_stream: not in a scan on the CPU
+        from .stats import host_qr_stream
+        rows = jax.jit(lambda b: [_weighted_rows(prob, theta, b)])
+        return host_qr_stream(rows, ds, [(R0, d0)])[0]
 
     def body(carry, batch):
         R, d = carry
@@ -117,7 +130,19 @@ def solve_qr_streaming(prob, ds, theta):
         return (R2, d2), None
 
     (R, d), _ = jax.lax.scan(body, (R0, d0), ds)
-    return solve_triangular(R, d, lower=False)                # back-substitution R theta = d
+    return R, d
+
+
+def posterior_qr(prob, ds, theta):
+    """objective.posterior's (mu, L), from the streaming QR: mu the posterior mean and L the
+    lower Cholesky factor of G + Lambda (R^T, rows signed so its diagonal is positive).  The
+    stable route when G + Lambda is too ill-conditioned to factor directly (kappa^2 > 1/eps):
+    an evidence fit that nearly interpolates its data drives the noise to its floor and the
+    prior towards flat, and there the normal-equations Cholesky returns NaN."""
+    R, d = _qr_factor(prob, ds, theta)
+    s = jnp.where(jnp.diag(R) < 0, -1.0, 1.0)
+    R, d = R * s[:, None], d * s                              # Q -> Q diag(s): the same factorisation
+    return solve_triangular(R, d, lower=False), R.T
 
 
 # ---------------------------------------------------------------------------

@@ -33,7 +33,8 @@ The options fall into groups:
 - **model**: `--m-per-species 0` is linear ACE; a positive value adds a
   Gaussian-process arm on that many inducing sites per species (the default,
   500, is the GP arm);
-- **hyperparameters**: `--opt`, `--map-steps`, `--map-restarts`, `--init`;
+- **hyperparameters**: `--opt`, `--map-steps`, `--map-restarts`, `--map-polish`,
+  `--strict`, `--init`;
   `--rungs` beyond `map` adds hyperparameter-posterior approximations, at a
   much higher cost;
 - **uncertainty**: `--uq blr` (default), `pops` or `ard` for the linear model;

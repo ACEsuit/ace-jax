@@ -98,6 +98,106 @@ def linear_statistics(model, cfg, ds):
     return jax.lax.scan(lambda c, b: (jax.tree.map(jnp.add, c, f(b)), None), zero, ds)[0]
 
 
+class QRStats(NamedTuple):
+    """The linear statistics in QR form: per quantity q, R_q (L, L) upper triangular and
+    c_q = Q_q^T (w y_q) from a QR of its weighted rows w Phi_q = Q_q R_q, so R_q^T R_q = G_q
+    and R_q^T c_q = b_q without ever forming G_q (whose condition number is kappa(Phi_q)^2).
+    yy, n and logw are as in Stats.  objective.log_marginal_likelihood_qr reads it; the Gram
+    form (G_q, b_q) is derived on demand for the consumers that need it (POPS, ARD)."""
+    R_E: jnp.ndarray; R_F: jnp.ndarray; R_V: jnp.ndarray
+    c_E: jnp.ndarray; c_F: jnp.ndarray; c_V: jnp.ndarray
+    yy_E: jnp.ndarray; yy_F: jnp.ndarray; yy_V: jnp.ndarray
+    n_E: jnp.ndarray; n_F: jnp.ndarray; n_V: jnp.ndarray
+    logw_E: jnp.ndarray; logw_F: jnp.ndarray; logw_V: jnp.ndarray
+
+    G_E = property(lambda s: s.R_E.T @ s.R_E)
+    G_F = property(lambda s: s.R_F.T @ s.R_F)
+    G_V = property(lambda s: s.R_V.T @ s.R_V)
+    b_E = property(lambda s: s.R_E.T @ s.c_E)
+    b_F = property(lambda s: s.R_F.T @ s.c_F)
+    b_V = property(lambda s: s.R_V.T @ s.c_V)
+
+    def gram(self):
+        """The equivalent Stats (Gram form), for consumers that need G and b."""
+        return Stats(self.G_E, self.G_F, self.G_V, self.b_E, self.b_F, self.b_V,
+                     self.yy_E, self.yy_F, self.yy_V, self.n_E, self.n_F, self.n_V,
+                     self.logw_E, self.logw_F, self.logw_V)
+
+
+def _qr_merge(R, c, Pw, yw):
+    """Fold weighted rows into a triangular factor: QR of [R ; Pw] (an updating QR)."""
+    Q, R2 = jnp.linalg.qr(jnp.concatenate([R, Pw], 0), mode="reduced")
+    return R2, Q.T @ jnp.concatenate([c, yw])
+
+
+def host_qr_stream(batch_rows_fn, ds, init):
+    """The updating QR of streamed rows, its merges on the host (SciPy, the calling thread).
+    batch_rows_fn(batch) -> [(Pw, yw), ...] (jitted by the caller), one pair per factor;
+    init = [(R0, c0), ...].  Returns [(R, c), ...] as jax arrays.
+
+    Why not a lax.scan of jnp.linalg.qr on the CPU: XLA:CPU calls LAPACK (scipy's OpenBLAS)
+    from its own worker threads, and OpenBLAS's multithreaded geqrf, called that way from
+    inside a compiled loop, returned NaN on finite input -- deterministically, with 4 or 8
+    OpenBLAS threads (a GitHub runner's default: 4 vCPUs) on a ~650-column basis, never with
+    1-2 threads nor on the same matrices called directly.  Merges run here never did (tutorial 3,
+    #61).  A device (GPU) backend keeps the scan: its QR is not OpenBLAS."""
+    import scipy.linalg
+    acc = [(np.asarray(R, np.float64), np.asarray(c, np.float64)) for R, c in init]
+    for i in range(ds.n_batches):
+        parts = batch_rows_fn(jax.tree.map(lambda a: a[i], ds))
+        for k, (Pw, yw) in enumerate(parts):
+            R, c = acc[k]
+            Q, R2 = scipy.linalg.qr(np.vstack([R, np.asarray(Pw)]), mode="economic")
+            acc[k] = (R2, Q.T @ np.concatenate([c, np.asarray(yw)]))
+    return [(jnp.asarray(R), jnp.asarray(c)) for R, c in acc]
+
+
+def _qr_rows(model, cfg, batch):
+    """One batch's weighted linear rows per quantity, and their yy, n, logw increments."""
+    from .rows import linear_rows_bounded
+    r = linear_rows_bounded(model, cfg, batch)
+    L = cfg.len_basis
+    out = []
+    for P, y, w in ((r.E, batch.y_E, batch.w_E),
+                    (r.F.reshape(-1, L), batch.y_F.reshape(-1), jnp.repeat(batch.w_F, 3)),
+                    (r.V.reshape(-1, L), batch.y_V.reshape(-1), jnp.repeat(batch.w_V, 6))):
+        yw, live = y * w, w > 0
+        out.append((P * w[:, None], yw, yw @ yw, live.sum(),
+                    jnp.sum(jnp.where(live, 2.0 * jnp.log(jnp.where(live, w, 1.0)), 0.0))))
+    return out
+
+
+def linear_qr_statistics(model, cfg, ds):
+    """linear_statistics in QR form (QRStats): one streaming pass over the same linear rows,
+    each batch folded into the per-quantity factors by an updating QR -- on the host on the
+    CPU backend (host_qr_stream says why), as a lax.scan on a device."""
+    L = cfg.len_basis
+    if jax.default_backend() == "cpu":
+        rows = jax.jit(lambda b: _qr_rows(model, cfg, b))
+        scal = {f"{k}_{q}": 0.0 for k in ("yy", "n", "logw") for q in "EFV"}
+
+        def parts(batch):
+            out = rows(batch)
+            for q, (_, _, yy, n, lw) in zip("EFV", out):
+                scal[f"yy_{q}"] += float(yy); scal[f"n_{q}"] += float(n); scal[f"logw_{q}"] += float(lw)
+            return [(Pw, yw) for Pw, yw, *_ in out]
+        (RE, cE), (RF, cF), (RV, cV) = host_qr_stream(parts, ds, [(np.zeros((L, L)), np.zeros(L))] * 3)
+        return QRStats(RE, RF, RV, cE, cF, cV,
+                       *(jnp.asarray(scal[f"{k}_{q}"]) for k in ("yy", "n", "logw") for q in "EFV"))
+    z2, z1, z0 = jnp.zeros((L, L)), jnp.zeros(L), jnp.zeros(())
+    zero = QRStats(z2, z2, z2, z1, z1, z1, z0, z0, z0, z0, z0, z0, z0, z0, z0)
+
+    def body(s, batch):
+        out = {}
+        for q, (Pw, yw, yy, n, lw) in zip("EFV", _qr_rows(model, cfg, batch)):
+            out[f"R_{q}"], out[f"c_{q}"] = _qr_merge(getattr(s, f"R_{q}"), getattr(s, f"c_{q}"), Pw, yw)
+            out[f"yy_{q}"] = getattr(s, f"yy_{q}") + yy
+            out[f"n_{q}"] = getattr(s, f"n_{q}") + n
+            out[f"logw_{q}"] = getattr(s, f"logw_{q}") + lw
+        return QRStats(**out), None
+    return jax.lax.scan(body, zero, ds)[0]
+
+
 def _residual_type_stats(Phi_B, Phi_M, y, w):
     """G_BM, G_MM, b_M for one type; the cross block reuses the (theta-indep)
     linear rows but is theta-dependent through Phi_M."""

@@ -1,0 +1,69 @@
+# resolved run file written by `aj fit`: `aj fit --config <this file>` reproduces it
+ard_cluster_size: 3.0
+ard_coverage: 0.9
+ard_groups: distortion
+ard_mode: joint
+ard_n_min: 20
+ard_press: exact
+ard_transfer: exponent
+ard_val_frac: 0.2
+ard_variance: sandwich
+baseline: null
+batch_pack: auto
+configs_per_batch: 4
+data: null
+density: none
+devices: 1
+e0: model
+embedding: null
+energy_key: dft_energy
+force_key: dft_force
+force_shape: aniso
+init: null
+kernel: cosine
+laplace: svi
+learn_radial: false
+lml: device
+m_per_species: 6
+map_restarts: 1
+map_steps: 150
+model_draws: 1
+n_draws: 5
+no_ard_support: false
+no_bump: false
+no_save_model: false
+ntest: 200
+ntrain: 800
+nuts_chains: 4
+nuts_samples: 500
+nuts_warmup: 500
+objective: lml
+ood: null
+opt: adam
+out: /home/eng/essswb/projects/ace-jax/.worktrees/goldens-on-lestrade/fixtures/pipeline_golden/cli_map_laplace
+pca_d: 128
+pops_ridge: auto
+r0: 2.35
+radial_lam_grid: 0,1e-2
+radial_n_q: 12
+radial_steps: 40
+radial_val_frac: 0.2
+rungs: [map, laplace]
+seed: 0
+solver: evidence
+stress_key: null
+test: /home/eng/essswb/projects/ace-jax/.worktrees/goldens-on-lestrade/fixtures/pipeline_golden/cli_map_laplace/_test.xyz
+test_start: null
+train: /home/eng/essswb/projects/ace-jax/.worktrees/goldens-on-lestrade/fixtures/pipeline_golden/cli_map_laplace/_train.xyz
+uq: blr
+vi_steps: 2000
+virial_key: dft_virial
+weights: null
+model: /home/eng/essswb/projects/ace-jax/.worktrees/goldens-on-lestrade/fixtures/si_fitted.npz
+provenance: {ace_jax: 0.2.1, coupling: null, command: 'aj fit --model /home/eng/essswb/projects/ace-jax/.worktrees/goldens-on-lestrade/fixtures/si_fitted.npz
+    --train /home/eng/essswb/projects/ace-jax/.worktrees/goldens-on-lestrade/fixtures/pipeline_golden/cli_map_laplace/_train.xyz
+    --test /home/eng/essswb/projects/ace-jax/.worktrees/goldens-on-lestrade/fixtures/pipeline_golden/cli_map_laplace/_test.xyz
+    --energy-key dft_energy --force-key dft_force --virial-key dft_virial --configs-per-batch
+    4 --m-per-species 6 --rungs map,laplace --n-draws 5 --map-steps 150 --r0 2.35
+    --out /home/eng/essswb/projects/ace-jax/.worktrees/goldens-on-lestrade/fixtures/pipeline_golden/cli_map_laplace',
+  created: '2026-10-05T13:10:44Z'}

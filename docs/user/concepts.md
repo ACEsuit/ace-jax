@@ -116,8 +116,11 @@ weights and a hand-tuned regulariser.
   The posterior mean gives the coefficients, written to `model.npz`, an
   ordinary ACE model file. The posterior covariance gives a predictive $\sigma$
   (`--uq blr`, the default).
-- `--opt lbfgs` maximises the evidence with L-BFGS, `--opt adam` (the
-  default, 500 steps) with Adam. L-BFGS is much faster on small data.
+- The evidence is maximised with bounded L-BFGS (`--opt lbfgs`, the
+  default). For the linear model a few Newton steps then polish the result
+  to a stationary point (`--map-polish`); every fit warns if it ends away
+  from one, and `--strict` makes that an error. `--opt adam` uses Adam for
+  `--map-steps` steps instead, which can stop far from the optimum.
 - The design rows are streamed into sufficient statistics, so memory scales
   with the number of basis functions squared, not with the number of
   configurations.

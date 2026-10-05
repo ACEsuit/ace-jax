@@ -54,7 +54,23 @@ def _add_fit_args(p):
     p.add_argument("--objective", default="lml", choices=["lml", "loo"])
     p.add_argument("--lml", choices=["device", "host-cache"], default="device",
                    help="host-cache: cache the linear design rows in host RAM (GP, pair|pca, L-BFGS, map only)")
-    p.add_argument("--opt", choices=["adam", "lbfgs"], default="adam")
+    p.add_argument("--lml-solver", choices=["qr", "cholesky"], default="qr",
+                   help="linear arm: the evidence and posterior by QR (stable; default) or by a Cholesky "
+                        "of the Gram (faster at large basis, but loses accuracy when the fit nearly "
+                        "interpolates its data). The GP arm always uses the Cholesky")
+    p.add_argument("--opt", choices=["adam", "lbfgs"], default="lbfgs",
+                   help="hyperparameter MAP optimiser: lbfgs (default) = bounded L-BFGS-B, then (linear arm, "
+                        "see --map-polish) a Newton polish to a stationary point; adam = numpyro SVI for "
+                        "--map-steps steps, which can stop far from the optimum on large data")
+    p.add_argument("--map-polish", choices=["auto", "on", "off"], default="auto",
+                   help="Newton polish of the L-BFGS MAP to a stationary point, with the exact Hessian built "
+                        "one Hessian-vector product per free hyperparameter (~2.3x the gradient's memory). "
+                        "auto (default): on for the linear arm, off for the GP arm, where each HVP is a "
+                        "forward-over-reverse pass through the streamed objective (one gradient can take a "
+                        "minute, a polish hours at large scale)")
+    p.add_argument("--strict", action="store_true",
+                   help="fail, instead of warning, when the MAP ends away from a stationary point (a "
+                        "predicted Newton gain above 1e-3 nats)")
     p.add_argument("--solver", choices=["evidence", "lstsq"], default="evidence",
                    help="lstsq: plain weighted least squares with no prior (teaching; overfits a large basis)")
     p.add_argument("--map-restarts", type=int, default=1, help="L-BFGS multi-start (best log-posterior)")
@@ -64,7 +80,9 @@ def _add_fit_args(p):
                         "hyperparameter draws and cost far more than the MAP)")
     p.add_argument("--n-draws", type=int, default=100)
     p.add_argument("--laplace", choices=["svi", "fd"], default="svi")
-    p.add_argument("--map-steps", type=int, default=500); p.add_argument("--vi-steps", type=int, default=2000)
+    p.add_argument("--map-steps", type=int, default=500,
+                   help="MAP iterations: L-BFGS-B iterations (at most 4x as many evaluations), or Adam steps")
+    p.add_argument("--vi-steps", type=int, default=2000)
     p.add_argument("--nuts-warmup", type=int, default=500); p.add_argument("--nuts-samples", type=int, default=500)
     p.add_argument("--nuts-chains", type=int, default=4); p.add_argument("--r0", type=float, default=None,
                    help="typical nearest-neighbour distance (A); centres the GP hyperprior "
@@ -156,7 +174,8 @@ def _fit_config(a):
         batch_pack=a.batch_pack, weights=weights, factors=factors,
         baseline=a.baseline, e0=a.e0, m_per_species=a.m_per_species, kernel=a.kernel, bump=not a.no_bump,
         density=a.density, pca_d=a.pca_d, embedding=a.embedding, r0=a.r0, objective=a.objective,
-        lml=a.lml, devices=a.devices, opt=a.opt, map_steps=a.map_steps, map_restarts=a.map_restarts,
+        lml=a.lml, lml_solver=a.lml_solver, devices=a.devices, opt=a.opt, map_steps=a.map_steps, map_restarts=a.map_restarts,
+        map_polish=a.map_polish, strict=a.strict,
         init=json.load(open(a.init)) if a.init else None, rungs=rungs, laplace=a.laplace,
         n_draws=a.n_draws, vi_steps=a.vi_steps, nuts_warmup=a.nuts_warmup, nuts_samples=a.nuts_samples,
         nuts_chains=a.nuts_chains, uq=a.uq, ard_mode=a.ard_mode, ard_variance=a.ard_variance, ard_val_frac=a.ard_val_frac,

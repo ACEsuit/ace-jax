@@ -148,7 +148,10 @@ def theta_map_linear(prob, ds, W, *, steps=300, seed=0, init=None, return_stats=
     `diag` a MAP convergence diagnostic computed on the cached `lin` (no extra
     pass): the final LML, the change in the SVI loss (-log posterior) over the
     last min(10, steps) steps, and the norm of the log-posterior gradient at
-    the returned theta."""
+    the returned theta.
+
+    Not checked like the pipeline MAP (`pipeline.mapfit.judge`): this inner Adam MAP is a step of the
+    radial search, and only `diag` reports how stationary it is."""
     if lin is None:
         lin = linear_statistics(with_radial(prob.model, W), prob.cfg, ds)
     lml = jax.jit(lambda a: log_marginal_likelihood(from_array(a), lin, prob))

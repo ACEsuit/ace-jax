@@ -47,8 +47,14 @@ Check, in order:
    silicon tutorial data, 470 against 24 meV/atom in energy and 0.20
    against 0.10 eV/Å in forces). It is a starting point for
    [learned radials](howto/learned-radials.md), not for a frozen fit.
-5. **The optimiser.** The default `--opt adam` runs 500 steps and can stop
-   short on small data; `--opt lbfgs` converges in tens of evaluations.
+5. **The optimiser.** The default `--opt lbfgs` maximises the evidence (for
+   the linear model, polished to a stationary point), and the fit warns
+   (`MAP did not converge`) when one more Newton step would still gain more
+   than 10⁻³ nats; `--strict` makes that an error. For a GP fit, try
+   `--map-polish on` or `--map-restarts`. `--opt adam` runs
+   `--map-steps` steps and can stop far from the optimum: on GAP-18 silicon,
+   500 Adam steps left the log-posterior about 10⁷ nats short and doubled the
+   force error.
 
 ### How do I use isolated-atom energies as E0?
 
@@ -76,7 +82,8 @@ save_npz("si_e0.npz", b)        # then: aj fit --model si_e0.npz --r0 2.4 ...
 
 ### The fit is slow, or seems to hang
 
-- `--opt lbfgs` is much faster than the default Adam on small data.
+- `--opt adam` (500 steps by default) is slower than the default L-BFGS and
+  usually stops short of the optimum.
 - `--rungs` beyond `map` adds hyperparameter-posterior approximations, which
   cost far more than the fit itself. The `laplace` rung differentiates the
   evidence twice and can take tens of minutes just to compile: a silent

@@ -1,0 +1,27 @@
+{
+ "optimiser": "lbfgs",
+ "nfev": 21,
+ "lbfgs_message": "STOP: TOTAL NO. OF ITERATIONS REACHED LIMIT",
+ "restart": null,
+ "polish": {
+  "converged": true,
+  "message": "converged (|pg| 6.02e-10 within 10x the gradient roundoff 4.7e-10)",
+  "steps": 2,
+  "hessian_evals": 3,
+  "pg_start": 0.004285566009871733,
+  "pg": 6.018261444751261e-10,
+  "decrement": 1.7311173504775927e-19,
+  "noise": 5.819629222969525e-10,
+  "hvps": 30,
+  "evals": 16
+ },
+ "logpost": 192.4502894440417,
+ "pgrad_inf": 6.018261444751261e-10,
+ "pgrad_worst": "log_sigma_E",
+ "gnoise_max": 4.657917083009466e-10,
+ "gain": 8.655586752387963e-20,
+ "gain_tol": 0.001,
+ "noise_floor": 4.8667283367028456e-18,
+ "resolution_limited": false,
+ "converged": true
+}

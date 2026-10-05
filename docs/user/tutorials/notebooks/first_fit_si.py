@@ -429,18 +429,18 @@ def _(mo):
 def _(mo):
     mo.accordion({
         "Hint for exercise 1": mo.md(
-            "Degree 8 gives 54 functions, too few to fit energies and forces together: it "
+            "Degree 8 gives 62 functions, too few to fit energies and forces together: it "
             "cannot separate diamond from beta-tin. The evidence then treats the energies "
-            "as noise (a large `log_sigma_E` in `theta_map.json`, about -1.2 against -3.7 "
-            "at degree 10) and fits the forces. Test E RMSE: about 230, 25 and 19 meV/atom "
+            "as noise (a large `result.theta.log_sigma_E`, about -1.5 against -4.1 "
+            "at degree 10) and fits the forces. Test E RMSE: about 180, 22 and 14 meV/atom "
             "at degrees 8, 10 and 12."),
         "Hint for exercise 3": mo.md(
             "An atom with no neighbours is predicted as E0 alone, so with `e0='lsq'` an "
             "isolated atom in the training set pins its species' E0 to its energy exactly "
-            "(-158.545 eV here). Without one, E0 is fitted with the model, to -160.22 eV: it "
+            "(-158.545 eV here). Without one, E0 is fitted with the model, to -161.90 eV: it "
             "is then only a reference level, not a free-atom energy. The bulk is fitted "
-            "relative to it either way, and the test errors barely move (about 25 meV/atom "
-            "and 0.097 eV/A)."),
+            "relative to it either way, and the test errors barely move (22 to 24 meV/atom "
+            "and 0.10 eV/A)."),
     })
     return
 

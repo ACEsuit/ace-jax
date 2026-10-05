@@ -2,8 +2,9 @@
 """Record the outputs of the UNCHANGED drivers (run.py and `ace-jax fit`) on the
 fixtures, so the pipeline refactor can be checked for exact equivalence.
     uv run --extra gp python tests/pipeline_golden/make_golden.py [scenario ...]
-Re-run only if a behaviour change is intended (and say so in the commit)."""
-import os, pathlib, platform, shutil, subprocess, sys
+Re-run only if a behaviour change is intended (and say so in the commit).
+The goldens are recorded and checked on lestrade (see platform_tag)."""
+import os, pathlib, platform, shutil, socket, subprocess, sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 FIX = ROOT / "fixtures"
@@ -51,17 +52,21 @@ def cli_argv(out):
     return [sys.executable, "-m", "ace_jax.cli", "fit", "--model", str(FIX / "si_fitted.npz"),
             "--train", str(tr), "--test", str(te), *KEYS, "--configs-per-batch", "4",
             "--m-per-species", "6", "--rungs", "map,laplace", "--n-draws", "5",
+            "--opt", "adam",       # recorded under the CLI's old default optimiser (now lbfgs)
             "--map-steps", "150", "--r0", "2.35", "--out", str(out)]
 
 
 def platform_tag():
-    """Where goldens were recorded: bit-level parity only holds on the same
-    platform (BLAS/LAPACK round-off feeds the optimiser trajectories)."""
-    return f"{platform.system()}-{platform.machine()}"
+    """Where goldens were recorded: lestrade (Linux-x86_64-lestrade). Bit-level
+    parity only holds on the same CPU/BLAS (round-off feeds the optimiser
+    trajectories), so the tag names the host: GitHub's Linux-x86_64 runners skip."""
+    return f"{platform.system()}-{platform.machine()}-{socket.gethostname().split('.')[0]}"
 
 
 def main():
-    env = dict(os.environ, JAX_ENABLE_X64="1", PYTHONPATH=str(ROOT))
+    # ASE's neighbour list, as the parity test runs them: another backend's pair order
+    # changes summation order, which the MAP optimisers amplify
+    env = dict(os.environ, JAX_ENABLE_X64="1", PYTHONPATH=str(ROOT), ACEJAX_NLIST="ase")
     OUT.mkdir(parents=True, exist_ok=True)
     (OUT / "PLATFORM").write_text(platform_tag() + "\n")
     only = set(sys.argv[1:])                      # optional: regenerate just these scenarios

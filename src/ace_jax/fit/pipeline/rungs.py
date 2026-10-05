@@ -12,7 +12,9 @@ class Rungs(NamedTuple):
     draws: dict; info: dict; timings: dict
 
 
-def run_rungs(cfg, b, obj, theta, log=print):
+def run_rungs(cfg, b, obj, theta, log=print, fixed=None):
+    """fixed (10,) bool, from MapFit.fixed: hyperparameters on a bound at the MAP, held fixed by the
+    Laplace rung (there the log-posterior has no interior mode; its Hessian is singular)."""
     bad = [r for r in cfg.rungs if r not in KNOWN]
     if bad:
         raise ValueError(f"unknown rung(s) {bad}; known: {list(KNOWN)}")
@@ -23,10 +25,13 @@ def run_rungs(cfg, b, obj, theta, log=print):
         t = time.time()
         if cfg.laplace == "fd":
             draws["laplace"], info["laplace"] = run_laplace_fd(obj.lik, prior, theta, n_draws=cfg.n_draws,
-                                                               seed=cfg.seed)
+                                                               seed=cfg.seed, fixed=fixed)
         else:
             draws["laplace"], _ = run_laplace(obj.lik, prior, n_draws=cfg.n_draws, steps=cfg.map_steps,
-                                              seed=cfg.seed, init=theta)
+                                              seed=cfg.seed, init=theta, fixed=fixed)
+        if fixed is not None and np.any(fixed):
+            from ..hypers import Hypers
+            log(f"laplace: held at their bound: {[Hypers._fields[i] for i in np.flatnonzero(fixed)]}")
         tm["laplace"] = time.time() - t
     if "pathfinder" in cfg.rungs:
         t = time.time()

@@ -314,15 +314,22 @@ def _(mo, model_gamma, model_v1, target, truth):
 
 
 @app.cell(hide_code=True)
-def _(err_v1, mo, target):
+def _(err_v1, gamma_v1, mo, target):
+    import math as _math
+
     _ok = err_v1 > target["tolerance"]
+    _neg = (" Its surface energy is even negative: the model has the slab more stable than the bulk, "
+            "which no real surface is, a sure sign it is extrapolating." if gamma_v1 < 0 else "")
     mo.callout(
+        mo.md("**Checkpoint 3 failed:** the first fit's surface energy is not finite, so the fit "
+              "failed numerically. Its numbers below are meaningless.")
+        if not _math.isfinite(err_v1) else
         mo.md(f"**Checkpoint 3 passed:** the bulk-only model misses the target by {err_v1:.3f} "
-              f"{target['units']}, beyond the tolerance. The next step asks why.")
+              f"{target['units']}, beyond the tolerance.{_neg} The next step asks why.")
         if _ok else mo.md(f"**Checkpoint 3:** the first fit already meets the tolerance ({err_v1:.3f}). "
                           "With your own system and target that can happen: the coverage check below "
                           "still says how far the target sits from the data."),
-        kind="success" if _ok else "info",
+        kind="danger" if not _math.isfinite(err_v1) else "success" if _ok else "info",
     )
     return
 
@@ -336,7 +343,7 @@ def _(mo):
     training cells and for the target structures, and measure how far the
     slab's most exposed atom sits from the nearest training atom, in units of
     the training atoms' own spacing. Tutorial 6 used the median atom instead
-    (silicon's slab atoms sat about 12× out); half of a thin slab's atoms are
+    (silicon's slab atoms sat well over 10× out); half of a thin slab's atoms are
     bulk-like, so here the worst one tells more. A ratio near 1 means the
     target is inside the data.
     """)
@@ -394,8 +401,14 @@ def _(C, L, T, fit_model, isolated, label, mo, model_gamma, np, system, target, 
 
 @app.cell(hide_code=True)
 def _(err_v1, err_v2, mo, ratio_v1, ratio_v2, target):
-    _ok = err_v2 < target["tolerance"] and err_v2 < err_v1 and ratio_v2 < ratio_v1
+    import math as _math
+
+    _finite = all(_math.isfinite(x) for x in (err_v1, err_v2, ratio_v1, ratio_v2))
+    _ok = _finite and err_v2 < target["tolerance"] and err_v2 < err_v1 and ratio_v2 < ratio_v1
     mo.callout(
+        mo.md("**Checkpoint 4 failed:** a fit returned a non-finite surface energy or coverage ratio, "
+              "so the comparison cannot be made.")
+        if not _finite else
         mo.md(f"**Checkpoint 4 passed:** with the repair set the error falls from {err_v1:.4f} to "
               f"{err_v2:.1e} {target['units']}, within the tolerance, and the slab's most exposed atom "
               f"sits {ratio_v2:.2g}× out instead of {ratio_v1:.0f}×: the repair slabs, 3 and 5 layers "
