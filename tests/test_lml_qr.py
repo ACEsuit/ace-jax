@@ -218,3 +218,23 @@ def test_pipeline_fixture_map_already_needs_qr(pipeline_fits):
     assert 1e-14 * sc < abs(v_c - ref) < 1e-11 * sc                     # Cholesky: finite, worse
     assert np.abs(mu_q - mu_s).max() < 1e-6 * np.abs(mu_s).max()        # QR mean: the full-design QR's
     assert np.abs(mu_c - mu_s).max() > 1e-4 * np.abs(mu_s).max()        # Cholesky mean: off
+
+
+def test_qr_merge_leaves_no_near_underflow_residue(m0):
+    """A rank-deficient updating QR (the energy block: a few rows per batch against L columns)
+    must not leave rounding residue near underflow in the rows it has not filled: XLA's
+    flush-to-zero LAPACK returned NaN on such a factor on AVX-512 runners.  Every entry of each
+    merged factor is zero or above QR_DUST of its largest, and the Gram is unchanged."""
+    from ace_jax.fit.rows import linear_rows_bounded
+    from ace_jax.fit.stats import QR_DUST, _qr_merge
+    prob, ds, lin, qs = m0
+    L = prob.cfg.len_basis
+    R, c = jnp.zeros((L, L)), jnp.zeros(L)
+    for i in range(ds.n_batches):
+        bt = jax.tree.map(lambda a: a[i], ds)
+        r = linear_rows_bounded(prob.model, prob.cfg, bt)
+        R, c = _qr_merge(R, c, r.E * bt.w_E[:, None], bt.y_E * bt.w_E)
+        a = np.abs(np.asarray(R))
+        assert ((a == 0) | (a >= QR_DUST * a.max())).all(), i
+    G = np.asarray(lin.G_E)
+    assert np.abs(np.asarray(R).T @ np.asarray(R) - G).max() < 1e-12 * np.abs(G).max()

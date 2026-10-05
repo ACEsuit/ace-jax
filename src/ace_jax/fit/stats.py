@@ -124,10 +124,25 @@ class QRStats(NamedTuple):
                      self.logw_E, self.logw_F, self.logw_V)
 
 
+QR_DUST = 1e-150   # relative to the largest entry: below this a factor entry is rounding residue
+
+
+def flush_dust(x):
+    """Zero the entries of x below QR_DUST of its largest.  A rank-deficient updating QR (few rows
+    seen, e.g. the energy block: one row per config against L columns) leaves the rows it has
+    not filled holding rounding residue that decays, merge by merge, to ~1e-308.  XLA:CPU runs
+    LAPACK with denormals flushed, and its Householder step (dlarfg, which rescales by the safe
+    minimum) then returns NaN on such input: on GitHub's AVX-512 runners (EPYC 9V74, Xeon 8573C),
+    whose kernels leave the residue there, the energy factor went NaN.  Zeroing it perturbs
+    R^T R by ~1e-16 relative (roundoff), and keeps every factor out of the underflow range."""
+    return jnp.where(jnp.abs(x) < QR_DUST * jnp.max(jnp.abs(x)), 0.0, x)
+
+
 def _qr_merge(R, c, Pw, yw):
-    """Fold weighted rows into a triangular factor: QR of [R ; Pw] (an updating QR)."""
+    """Fold weighted rows into a triangular factor: QR of [R ; Pw] (an updating QR), its
+    rounding residue flushed (flush_dust) so the next merge's LAPACK sees none near underflow."""
     Q, R2 = jnp.linalg.qr(jnp.concatenate([R, Pw], 0), mode="reduced")
-    return R2, Q.T @ jnp.concatenate([c, yw])
+    return flush_dust(R2), flush_dust(Q.T @ jnp.concatenate([c, yw]))
 
 
 def linear_qr_statistics(model, cfg, ds):
