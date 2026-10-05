@@ -259,6 +259,17 @@ def test_calculator_forces_support(fitted):
     ok = sup["support_ok"]
     assert ok.shape == (len(at),) and ok.dtype == bool and all(v > 0 for v in sup["n_eff"].values())
     assert np.isfinite(sup["support_q"][ok]).all() and np.isinf(sup["support_q"][~ok]).all()
+    # the level: the (1 - alpha) weighted quantile with alpha the posterior's miscoverage (0.1), not alpha itself
+    from ace_jax.fit.support import support_check
+    post = calc.posterior
+    alpha = float(np.asarray(post.group_table["alpha"]))
+    assert alpha < 0.5
+    X, Z = calc.support_descriptors(at)
+    ref = support_check(post.support, X, Z, alpha)
+    np.testing.assert_array_equal(sup["support_ok"], ref["support_ok"])
+    np.testing.assert_array_equal(sup["support_q"], ref["support_q"])
+    lo = support_check(post.support, X, Z, 1 - alpha)["support_q"]
+    assert np.all(sup["support_q"] >= lo) and np.any(sup["support_q"] > lo)
 
 
 def test_calculator_schema2_new_properties_raise(fitted, tmp_path):

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Fixed: `forces_support` used the wrong quantile.** Since 0.2.0,
+  `ACECalculator` (and so `aj eval --support`) computed `support_q` as the
+  weighted α quantile of the calibration scores instead of the 1 − α
+  quantile the documentation defines (α = 1 − `--ard-coverage`, 0.1 by
+  default). `support_ok` was therefore `False` only when an atom's own weight
+  exceeded 90 % of the pool, so the flag almost never fired. It now flags
+  atoms at the documented level. No refit is needed: the posterior is
+  unchanged. Force uncertainties (`forces_std`, `forces_q`, `forces_cov`)
+  were not affected.
 - **Fixed: built bases were not rotation invariant.** Since the compiled
   coupling library arrived (0.2.0), `aj basis`, `aj fit --order/--max-degree`
   and `build_basis` paired the coupling's columns with the wrong products of

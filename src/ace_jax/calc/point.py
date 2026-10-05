@@ -582,7 +582,8 @@ class ACECalculator(Calculator):
         from ..fit.support import support_check
         post = self.posterior
         alpha = float(np.asarray(post.group_table["alpha"]))
-        return support_check(post.support, self._site_X(ds, b), np.asarray(b.node_z)[live], 1 - alpha)
+        # alpha is the miscoverage (group_table); support_check takes it as such: q = Q_{1-alpha}
+        return support_check(post.support, self._site_X(ds, b), np.asarray(b.node_z)[live], alpha)
 
     def _one_config_dataset(self, at):
         """(ds, b, live): the one-config dataset of atoms, its batch, and the live-node mask."""
