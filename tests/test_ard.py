@@ -782,7 +782,13 @@ def test_stage_transfer_exponent_with_kappa_variance():
 
 def test_stage_transfer_exponent_scales_the_none_run():
     """ard_transfer: every stored calibration score (so lam_rms, q, cal scores) is the "none" run's times
-    t = (N/N_fit)^beta -- the same seed gives the same T_val and P_fit; "sqrt" has beta = 1/2 exactly."""
+    t = (N/N_fit)^beta -- the same seed gives the same T_val and P_fit; "sqrt" has beta = 1/2 exactly.
+    The exponent run is held to the stage's wiring (beta from its own lam1, lam2, N_fit, N_fit2), not to a
+    value: at the converged MAP this fixture's beta_raw is ~0 within the noise of the two hold-out scales
+    (+0.038 on an i9-14900K, -0.032 -- clipped to 0, factor 1 -- on a Xeon Gold 6130 and on CI), since the
+    N_fit2 = 10 evidence fit sits past ard_cond_max and its lam2 moves ~4% with the machine's roundoff.
+    transfer_exponent's interior, clipped and degenerate cases are test_conformal's; "sqrt" is the
+    factor > 1 scaling check."""
     from ace_jax.fit.conformal import json_safe
     import json
     runs = {m: _stage(ard_transfer=m, **_FINITE_Q)[1] for m in ("none", "exponent", "sqrt")}
@@ -792,7 +798,11 @@ def test_stage_transfer_exponent_scales_the_none_run():
     te, ts = runs["exponent"].report["transfer"], runs["sqrt"].report["transfer"]
     assert set(te) >= {"method", "N_fit2", "lam1", "lam2", "beta_raw", "beta", "factor", "f", "N_fit", "N"}
     assert te["method"] == "exponent" and 0 < te["N_fit2"] < N_fit
-    assert 0.0 <= te["beta"] <= 0.5 and te["factor"] > 1.0              # non-trivial on this fixture
+    # a real estimate (finite, positive scales), not the undefined-exponent fallback to beta = 1/2
+    assert np.isfinite(te["beta_raw"]) and te["lam1"] > 0 and te["lam2"] > 0
+    assert te["beta_raw"] == pytest.approx(np.log(te["lam1"] / te["lam2"]) / np.log(N_fit / te["N_fit2"]),
+                                           rel=1e-12)
+    assert te["beta"] == float(np.clip(te["beta_raw"], 0.0, 0.5))
     assert te["factor"] == pytest.approx((N / N_fit) ** te["beta"], rel=1e-12)
     assert te["lam1_all"] == pytest.approx(t0["lam1"], rel=1e-12)        # same T_val scores from P_fit
     assert ts["factor"] == pytest.approx((N / N_fit) ** 0.5, rel=1e-15) and ts["beta"] == 0.5
