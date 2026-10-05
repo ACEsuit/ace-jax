@@ -74,10 +74,12 @@ def build(a):
         for z in np.unique(Z):
             pool.setdefault(int(z), []).append(X[Z == z])
     pool = {z: np.concatenate(v)[:a.pca_atoms] for z, v in pool.items()}
-    meta = calc.meta
-    body = support_body({"nnll": meta["nnll"], "n_pair": meta["n_pair"]})
+    body = support_body({"nnll": calc.meta["nnll"], "n_pair": calc.meta["n_pair"]})
     out = pathlib.Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
+    # raw descriptors of the calibration atoms (cal order) and of the training pool, for novelty_groups.py
+    np.savez(out / "descriptors.npz", X_cal=Xv.astype(np.float32), Z_cal=Zv,
+             **{f"X_pool_{z}": v.astype(np.float32) for z, v in pool.items()}, body=body)
     for kind in a.features.split(","):
         feat = {"kind": kind, "body": body}
         F = {z: support_features(v, feat) for z, v in pool.items()}
