@@ -407,10 +407,12 @@ Other entry points:
   normalised` builds the reference on the unit-norm descriptor plus log-norm channels per body order
   (default `raw`). In 0.2.0 the calculator computed `support_q` at the wrong level (the α, not the
   1 − α, quantile), so its `support_ok` flags almost never fired.
-- **Big cells: `--shape-path committee`** (`aj eval`, `aj calibrate`; `ACECalculator(...,
+- **Very big cells: `--shape-path committee`** (`aj eval`, `aj calibrate`; `ACECalculator(...,
   shape_path="committee")`) gives the same `forces_std`/`forces_q`/`forces_cov` without the whole
-  cell's design rows (memory ~N·3·r·8 bytes, r the shape factor's rank, instead of N·3·L·8).
-  `shape_tau=`/`shape_rank=` (Python) truncate the shape factor: an approximation.
+  cell's design rows (arrays ~N·3·r·8 bytes, r the shape factor's rank, instead of N·3·L·8). At 3–4k
+  atoms the default rows path is better (6.4 GB, ~20 s on an A100-40GB at L = 15k).
+  `shape_tau=`/`shape_rank=` (Python) truncate the shape factor: rankings survive, coverage does not
+  (the scales are fitted at full rank), so use a truncated shape for ranking only.
 - **Schema-2 posteriors serve only the old scalar `forces_std`.** The new properties raise and ask
   you to refit with `--uq ard`. The validation of the new scales has been run
   (`bench/defect_uq/results/2026-10-03_rev2_acceptance.md`): the default (aniso + transfer

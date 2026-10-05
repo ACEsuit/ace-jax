@@ -304,19 +304,22 @@ this change still load and serve.
 - **Evaluation.** The uncertainty needs the force design rows of the whole
   cell, about $N\cdot3\cdot L\cdot 8$ bytes on the device (7 GB for 100k atoms
   at $L$ = 3k), plus the posterior factors; the rows are built node by node
-  and the shape atom by atom, but the rows themselves must fit. For cells of
-  3–4k atoms at production basis sizes, `aj eval --posterior` and
-  `aj calibrate` need an **A100-80GB-class GPU**; 40 GB runs out of memory.
+  and the shape atom by atom, but the rows themselves must fit. On the
+  Cantor benchmark (15k basis functions), a 3.9k-atom cell peaks at about
+  6.4 GB on the GPU and takes about 20 s on an A100-40GB.
 
   `--shape-path committee` (on `aj eval` and `aj calibrate`;
   `ACECalculator(..., shape_path="committee")`) computes the same shape
   without the design rows. The shape is a sum of squared forces of a linear
   ACE model with $r$ coefficient vectors, one per column of the shape factor,
-  so it can be evaluated from one basis evaluation with memory about
-  $N\cdot3\cdot r\cdot 8$ bytes instead of $N\cdot3\cdot L\cdot 8$. The
-  values are the same to roundoff. In Python, `shape_tau` (a fraction of the
-  shape factor's squared singular values) and `shape_rank` truncate the factor
-  to a lower rank: an approximation, faster for small $r$.
+  so its stored arrays scale as $N\cdot3\cdot r\cdot 8$ bytes instead of
+  $N\cdot3\cdot L\cdot 8$. The values are the same to roundoff. It is
+  meant for cells far larger than the benchmark's: at 3–4k atoms it is no
+  faster and peaks higher (about 13 GB). In Python, `shape_tau` and
+  `shape_rank` truncate the shape factor to a lower rank. The served scales
+  are fitted for the full rank, so a truncated shape keeps the ranking of
+  atoms (Spearman 0.99 at rank 200 of 3680) but under-covers badly (0.54
+  instead of 0.90); use it for ranking only.
   (`aj eval --no-deriv-dtc` is the corresponding switch for big cells with a
   GP model, not for `--uq ard`.)
 
