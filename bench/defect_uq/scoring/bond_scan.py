@@ -22,11 +22,13 @@ Writes DIR/<proto>.npz, DIR/bond_scan.md (table) and DIR/bond_scan.png.
 import argparse
 import pathlib
 import re
+import sys
 import time
 
 import jax
 
 jax.config.update("jax_enable_x64", True)
+sys.path.insert(0, str(pathlib.Path(__file__).parent))
 
 import numpy as np  # noqa: E402
 
@@ -61,37 +63,43 @@ def scaled(at0, s, u, rattle, d_eq):
     return at
 
 
-def evaluate(calc, at, post, support=True):
-    from ace_jax.fit.support import _proj
+def evaluate(calc, at, post, refs=None):
+    """Per-atom served quantities; for each support reference `name` in refs: support_q@name,
+    support_bad@name and xc@name (|whitened projection| in that reference's feature space)."""
+    from ace_jax.fit.support import _proj, support_check, support_features
     std = calc.get_property("forces_std", at)
     out = {"forces_std": std}
     if post.group_table is not None:
         g = np.asarray(calc.get_property("forces_group", at))
         lam = np.asarray(post.group_table["lam_rms"], float)[g]
         out.update(v=(std / lam) ** 2, forces_q=calc.get_property("forces_q", at), group=g)
-    if support and post.support is not None:
-        sup = calc.get_property("forces_support", at)
+    if refs:
         X, Z = calc.support_descriptors(at)
-        xc = np.zeros(len(Z))
-        for z in np.unique(Z):
-            if int(z) in post.support["pca"]:
-                xc[Z == z] = np.linalg.norm(_proj(post.support["pca"], z, X[Z == z]), axis=1)
-        out.update(support_q=np.asarray(sup["support_q"]), support_bad=~np.asarray(sup["support_ok"]),
-                   xc=xc, phinorm=np.linalg.norm(X, axis=1))
+        out["phinorm"] = np.linalg.norm(X, axis=1)
+        alpha = float(np.asarray(post.group_table["alpha"]))
+        for name, ref in refs.items():
+            sup = support_check(ref, X, Z, alpha)
+            F = support_features(X, ref.get("features"))
+            xc = np.zeros(len(Z))
+            for z in np.unique(Z):
+                if int(z) in ref["pca"]:
+                    xc[Z == z] = np.linalg.norm(_proj(ref["pca"], z, F[Z == z]), axis=1)
+            out.update({f"support_q@{name}": np.asarray(sup["support_q"]),
+                        f"support_bad@{name}": ~np.asarray(sup["support_ok"]), f"xc@{name}": xc})
     return out
 
 
-def scan(calc, post, spec, rcut, n, rattle, support=True, seed=0, log=print):
+def scan(calc, post, spec, rcut, n, rattle, refs=None, seed=0, log=print):
     at0, d_eq = prototype(spec, rcut, seed)
     u = np.random.default_rng(seed + 1).standard_normal((len(at0), 3))
-    v0 = evaluate(calc, scaled(at0, 1.0, u, 0.0, d_eq), post, support=False)
+    v0 = evaluate(calc, scaled(at0, 1.0, u, 0.0, d_eq), post)
     if "v" in v0:
         log(f"{spec}: {len(at0)} atoms, d_eq {d_eq:.4f} A; unrattled max v = {np.max(v0['v']):.2e} (0 by symmetry for one element)")
     s = np.unique(np.r_[np.linspace(0.5, rcut / d_eq, n), 1.0])
     rows = []
     for k, sk in enumerate(s):
         t = time.time()
-        r = evaluate(calc, scaled(at0, sk, u, rattle, d_eq), post, support)
+        r = evaluate(calc, scaled(at0, sk, u, rattle, d_eq), post, refs)
         rows.append(r)
         if k % 20 == 0:
             log(f"  {k + 1}/{len(s)} d/d_eq {sk:.3f}: max forces_std {np.max(r['forces_std']):.3g} "
@@ -99,7 +107,7 @@ def scan(calc, post, spec, rcut, n, rattle, support=True, seed=0, log=print):
     agg = {"d_rel": s, "d_eq": d_eq, "rcut": rcut, "n_atoms": len(at0)}
     for key in rows[0]:
         A = np.stack([r[key] for r in rows])
-        agg[key] = A.mean(1) if key == "support_bad" else np.median(A, 1) if key == "group" else A.max(1)
+        agg[key] = A.mean(1) if key.startswith("support_bad") else np.median(A, 1) if key == "group" else A.max(1)
         if key == "group":
             agg["group_max"] = A.max(1)
     return agg
@@ -112,13 +120,13 @@ def detection(agg, factors=FACTORS):
     win = {"comp": s < COMP, "stretch": (s > STRETCH) & (s < rmax)}
     i_eq = int(np.argmin(np.abs(s - 1.0)))
     out = {}
-    for key in ("v", "forces_std", "forces_q", "support_q", "xc"):
-        if key in agg:
-            y = agg[key]
-            out[key] = {w: [float(np.mean(y[m] > f * y[i_eq])) for f in factors] for w, m in win.items()}
-    if "support_bad" in agg:
-        out["support_ok=False"] = {w: [float(np.mean(agg["support_bad"][m] > 0))] for w, m in win.items()}
-        out["support_ok=False"]["eq"] = float(agg["support_bad"][i_eq])
+    for key in [k for k in agg if k in ("v", "forces_std", "forces_q") or k.split("@")[0] in ("support_q", "xc")]:
+        y = agg[key]
+        out[key] = {w: [float(np.mean(y[m] > f * y[i_eq])) for f in factors] for w, m in win.items()}
+    for key in [k for k in agg if k.split("@")[0] == "support_bad"]:
+        name = "support_ok=False" + key[len("support_bad"):]
+        out[name] = {w: [float(np.mean(agg[key][m] > 0))] for w, m in win.items()}
+        out[name]["eq"] = float(agg[key][i_eq])
     return out
 
 
@@ -133,15 +141,15 @@ def report(results, factors=FACTORS):
                 vals = d[w] + [None] * (len(factors) - len(d[w]))
                 lines.append(f"| {spec} | {key} | {w} | " + " | ".join("" if x is None else f"{x:.2f}" for x in vals)
                              + " |")
-    lines += ["", "| prototype | atoms | d_eq (A) | support flagged at d_eq | groups (median atom) over the scan |",
+    lines += ["", "| prototype | atoms | d_eq (A) | fraction flagged at d_eq | groups (median atom) over the scan |",
               "|---|---|---|---|---|"]
     for spec, agg in results.items():
         g = agg.get("group")
         gs = "" if g is None else ", ".join(f"{int(a)}: {agg['d_rel'][g == a].min():.2f}-{agg['d_rel'][g == a].max():.2f}"
                                            for a in np.unique(g))
-        eq = detection(agg).get("support_ok=False", {}).get("eq")
-        lines.append(f"| {spec} | {agg['n_atoms']} | {agg['d_eq']:.3f} | "
-                     f"{'' if eq is None else f'{eq:.2f}'} | {gs} |")
+        eq = ", ".join(f"{k.split('@')[-1] if '@' in k else 'support'} {d['eq']:.2f}"
+                       for k, d in detection(agg).items() if "eq" in d)
+        lines.append(f"| {spec} | {agg['n_atoms']} | {agg['d_eq']:.3f} | {eq} | {gs} |")
     return "\n".join(lines) + "\n"
 
 
@@ -149,7 +157,8 @@ def plot(results, path):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    keys = [k for k in ("v", "forces_std", "forces_q", "xc") if any(k in a for a in results.values())]
+    keys = [k for k in ("v", "forces_std", "forces_q") if any(k in a for a in results.values())]
+    keys += sorted({k for a in results.values() for k in a if k.startswith("xc")})
     fig, axs = plt.subplots(len(keys) + 1, 1, figsize=(7, 2.2 * (len(keys) + 1)), sharex=True)
     for spec, agg in results.items():
         s = agg["d_rel"]
@@ -158,8 +167,8 @@ def plot(results, path):
             if k in agg:
                 ax.semilogy(s, np.maximum(agg[k] / agg[k][i_eq], 1e-6), label=spec)
                 ax.set_ylabel(f"{k} / eq")
-        if "support_bad" in agg:
-            axs[-1].plot(s, agg["support_bad"], label=spec)
+        for k in [k for k in agg if k.startswith("support_bad")]:
+            axs[-1].plot(s, agg[k], label=f"{spec} {k.split('@')[-1]}")
     axs[-1].set_ylabel("frac. support_ok=False")
     axs[-1].set_xlabel("d / d_eq")
     for ax in axs:
@@ -181,16 +190,21 @@ def main(argv=None):
     p.add_argument("--out", required=True)
     p.add_argument("--n", type=int, default=121)
     p.add_argument("--rattle", type=float, default=0.01, help="rattle std as a fraction of d")
-    p.add_argument("--no-support", action="store_true")
+    p.add_argument("--no-support", action="store_true", help="skip the posterior's own support reference")
+    p.add_argument("--support-ref", action="append", default=[],
+                   help="NAME=support_<kind>.npz (support_rebuild.py build); scored besides the stored one")
     a = p.parse_args(argv)
     out = pathlib.Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     calc = ACECalculator(a.model, posterior=a.posterior)
     post = ARDPosterior.load(a.posterior)
     rcut = float(calc.cutoff)
+    from support_rebuild import load_ref
+    refs = {} if a.no_support or post.support is None else {"stored": post.support}
+    refs.update({r.split("=", 1)[0]: load_ref(r.split("=", 1)[1]) for r in a.support_ref})
     results = {}
     for spec in a.proto:
-        results[spec] = scan(calc, post, spec, rcut, a.n, a.rattle, support=not a.no_support)
+        results[spec] = scan(calc, post, spec, rcut, a.n, a.rattle, refs)
         np.savez(out / f"{spec.replace(':', '_')}.npz", **results[spec])
     md = report(results)
     (out / "bond_scan.md").write_text(md)
