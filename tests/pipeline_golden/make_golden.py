@@ -2,8 +2,9 @@
 """Record the outputs of the UNCHANGED drivers (run.py and `ace-jax fit`) on the
 fixtures, so the pipeline refactor can be checked for exact equivalence.
     uv run --extra gp python tests/pipeline_golden/make_golden.py [scenario ...]
-Re-run only if a behaviour change is intended (and say so in the commit)."""
-import os, pathlib, platform, shutil, subprocess, sys
+Re-run only if a behaviour change is intended (and say so in the commit).
+The goldens are recorded and checked on lestrade (see platform_tag)."""
+import os, pathlib, platform, shutil, socket, subprocess, sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 FIX = ROOT / "fixtures"
@@ -55,9 +56,10 @@ def cli_argv(out):
 
 
 def platform_tag():
-    """Where goldens were recorded: bit-level parity only holds on the same
-    platform (BLAS/LAPACK round-off feeds the optimiser trajectories)."""
-    return f"{platform.system()}-{platform.machine()}"
+    """Where goldens were recorded: lestrade (Linux-x86_64-lestrade). Bit-level
+    parity only holds on the same CPU/BLAS (round-off feeds the optimiser
+    trajectories), so the tag names the host: GitHub's Linux-x86_64 runners skip."""
+    return f"{platform.system()}-{platform.machine()}-{socket.gethostname().split('.')[0]}"
 
 
 def main():
