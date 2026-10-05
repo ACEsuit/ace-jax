@@ -148,6 +148,19 @@ regulariser by hand.
       `--strict` makes this an error.
     - `--opt adam` uses Adam for `--map-steps` steps. Adam can stop far from
       the optimum.
+- **Noise for each quantity, or one shared noise** (`--noise`).
+    - The default is `per-quantity`. The fit learns $\sigma_E$, $\sigma_F$
+      and $\sigma_V$ separately. Each $\sigma$ cancels the `--weights` of
+      its quantity, so the E:F:V weights have no effect.
+    - There are many more force rows than energy rows. Thus the evidence
+      gives a large $\sigma_E$, and the energies get too little weight.
+    - `--noise shared` learns one $\sigma$ for all weighted rows. This is
+      the Bayesian linear regression (BLR) of ACEpotentials. The weights set
+      the balance, and the evidence sets only the noise level and the prior.
+    - Use `shared` when your weights must set the balance, for example the
+      ACEpotentials weights E 30 / F 1 / V 1. On the Si_tiny example, the
+      shared-noise fit gives the same coefficients as the BLR fit of
+      ACEpotentials.
 - The fit adds the design rows to sufficient statistics in batches. Thus
   the memory increases with the square of the number of basis functions,
   not with the number of configurations.
