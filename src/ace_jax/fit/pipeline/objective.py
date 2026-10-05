@@ -14,6 +14,7 @@ from ..stats import assemble_statistics, linear_statistics, residual_statistics
 class Objective(NamedTuple):
     lik: object; vg: object; stats: object; host_cache: object; prior_mu: object; timings: dict
     lin: object = None           # the cached theta-independent linear Stats (shared with `stats`)
+    tied: object = None          # (10,) bool: hyperparameters tied to the shared noise (cfg.noise "shared"), else None
 
 
 def _pad_to_multiple(ds, n):
@@ -35,16 +36,24 @@ def _pad_to_multiple(ds, n):
 
 
 def make_objective(cfg, d, b):
+    """The MAP objective.  cfg.noise 'shared' ties log_sigma_E and log_sigma_V to log_sigma_F
+    (paramset.tied_likelihood) and leaves their hyperpriors out, so lik, vg and every rung see one
+    noise scale; `tied` records which coordinates are tied (mapfit pins them, the rungs hold them)."""
+    from ..paramset import noise_tie, tied_likelihood
     prob, t = b.prob, time.time()
+    tied = noise_tie(getattr(cfg, "noise", "per-quantity"))
+    tied, free = (tied, ~tied) if tied.any() else (None, None)
+    tie = tied_likelihood if tied is not None else (lambda f: f)
     if cfg.lml == "host-cache":
         from ..hostcache import HostCachedLML
-        lik = HostCachedLML(prob, d.ds_train, chunk=cfg.lml_chunk)
-        prior_vg = jax.jit(jax.value_and_grad(lambda a: log_prior(from_array(a), prob.prior)))
+        host = HostCachedLML(prob, d.ds_train, chunk=cfg.lml_chunk)
+        lik = tie(host)
+        prior_vg = jax.jit(jax.value_and_grad(lambda a: log_prior(from_array(a), prob.prior, free)))
         def vg(a):
             v, g = lik.value_and_grad(a); pv, pg = prior_vg(a)
             return v + pv, g + pg
-        stats = lambda th: assemble_statistics(lik.lin, lik._residual_stats(to_array(th)))
-        host, lin = lik, lik.lin
+        stats = lambda th: assemble_statistics(host.lin, host._residual_stats(to_array(th)))
+        lin = host.lin
     else:
         mesh = None
         if cfg.devices > 1:
@@ -53,12 +62,12 @@ def make_objective(cfg, d, b):
                 raise ValueError(f"devices={cfg.devices} requested, only {len(devs)} available")
             mesh = Mesh(np.array(devs), ("data",))
         if mesh is None and cfg.objective == "lml":
-            lik = make_lml(prob, d.ds_train, cache_linear=True)
+            lik = tie(make_lml(prob, d.ds_train, cache_linear=True))
         else:
             ds_fit = _pad_to_multiple(d.ds_train, cfg.devices) if mesh is not None else d.ds_train
-            lik = make_log_density(prob, ds_fit, cfg.objective, mesh=mesh).likelihood
+            lik = tie(make_log_density(prob, ds_fit, cfg.objective, mesh=mesh).likelihood)
         jax.block_until_ready(lik(to_array(prob.prior.mu)))
-        logpost = jax.jit(lambda a: lik(a) + log_prior(from_array(a), prob.prior))
+        logpost = jax.jit(lambda a: lik(a) + log_prior(from_array(a), prob.prior, free))
         vg = jax.jit(jax.value_and_grad(logpost))
         qs = getattr(lik, "qr_stats", None)
         if qs is not None:         # QR form: predictions share the LML's statistics; no second pass
@@ -69,7 +78,7 @@ def make_objective(cfg, d, b):
             stats = lambda th: assemble_statistics(lin, residual_statistics(th, prob.spec, prob.model,
                                                                             prob.ind, prob.cfg, d.ds_train))
         host = None
-    return Objective(lik, vg, stats, host, prob.prior.mu, {"stats_once": time.time() - t}, lin)
+    return Objective(lik, vg, stats, host, prob.prior.mu, {"stats_once": time.time() - t}, lin, tied)
 
 
 def release():

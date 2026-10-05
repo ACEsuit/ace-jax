@@ -4,8 +4,75 @@ Both optimisers see a flat vector of their route's blocks; `materialise` turns
 the whole set back into the concrete objects stats/kernels/predict consume."""
 from typing import NamedTuple
 import jax.numpy as jnp
+import numpy as np
 
 ROUTES = ("fixed", "lml")
+
+# Noise routing.  "per-quantity": sigma_E, sigma_F and sigma_V are three free hyperparameters.
+# "shared" (ACEfit's BLR): ONE noise scale for every weighted row, so the E:F:V weights set the
+# balance -- with three free scales each cancels its quantity's weight at the MAP.  The shared
+# scale lives in log_sigma_F's slot (with its hyperprior); log_sigma_E and log_sigma_V are TIED to
+# it: the objective reads tie_noise(a), so they carry no likelihood, no hyperprior (log_prior's
+# `free`) and are pinned in the MAP, so every optimiser, Hessian and rung counts the scale once.
+NOISE_MODES = ("per-quantity", "shared")
+SHARED_NOISE = "log_sigma_F"
+TIED_NOISE = ("log_sigma_E", "log_sigma_V")
+
+
+def _hyper_index(name):
+    from .hypers import Hypers
+    return Hypers._fields.index(name)
+
+
+def noise_tie(noise):
+    """(10,) bool: the hyperparameters `noise` ties to SHARED_NOISE (none for 'per-quantity')."""
+    from .hypers import Hypers
+    if noise not in NOISE_MODES:
+        raise ValueError(f"noise must be one of {NOISE_MODES}, got {noise!r}")
+    m = np.zeros(len(Hypers._fields), bool)
+    if noise == "shared":
+        m[[_hyper_index(n) for n in TIED_NOISE]] = True
+    return m
+
+
+def tie_noise(a):
+    """The hyperparameter vector(s) a (..., 10) with the tied noise coordinates set to the shared
+    one.  A jax array stays traceable; a numpy array (rung draws) comes back as a numpy copy."""
+    s, tied = _hyper_index(SHARED_NOISE), [_hyper_index(n) for n in TIED_NOISE]
+    if isinstance(a, np.ndarray):
+        a = a.copy()
+        a[..., tied] = a[..., [s] * len(tied)]
+        return a
+    for i in tied:
+        a = a.at[..., i].set(a[..., s])
+    return a
+
+
+def untie_grad(g):
+    """The vector-Jacobian product of tie_noise: the gradient in the tied coordinates moves onto
+    the shared one, which drives them (a host-side value_and_grad chained through the tie)."""
+    s, tied = _hyper_index(SHARED_NOISE), [_hyper_index(n) for n in TIED_NOISE]
+    if isinstance(g, np.ndarray):
+        g = g.copy()
+        g[s] += g[tied].sum()
+        g[tied] = 0.0
+        return g
+    return g.at[s].add(g[jnp.asarray(tied)].sum()).at[jnp.asarray(tied)].set(0.0)
+
+
+def tied_likelihood(lik):
+    """lik(tie_noise(a)): the shared-noise likelihood over the full 10-vector.  Attributes that
+    callers read from a likelihood (qr_stats, and a host cache's value_and_grad) carry over."""
+    def f(a):
+        return lik(tie_noise(a))
+    if hasattr(lik, "qr_stats"):
+        f.qr_stats = lik.qr_stats
+    if hasattr(lik, "value_and_grad"):
+        def vg(a):
+            v, g = lik.value_and_grad(tie_noise(a))
+            return v, untie_grad(g)
+        f.value_and_grad = vg
+    return f
 
 class ParamBlock(NamedTuple):
     name: str

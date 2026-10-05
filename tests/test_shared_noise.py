@@ -58,10 +58,10 @@ def test_noise_flag_default_and_choices():
 def test_noise_from_fit_yaml(tmp_path, capsys):
     from ace_jax.cli import _parse
     f = tmp_path / "fit.yaml"
-    f.write_text(yaml.safe_dump({"train": str(XYZ), "out": "o", "model": str(MODEL), "noise": "shared"}))
+    f.write_text(yaml.safe_dump({"train": str(XYZ), "out": "o", "model": str(MODEL), "r0": 2.35, "noise": "shared"}))
     assert _parse(["fit", "--config", str(f)]).noise == "shared"
     assert _parse(["fit", "--config", str(f), "--noise", "per-quantity"]).noise == "per-quantity"
-    f.write_text(yaml.safe_dump({"train": str(XYZ), "out": "o", "model": str(MODEL), "noise": "tied"}))
+    f.write_text(yaml.safe_dump({"train": str(XYZ), "out": "o", "model": str(MODEL), "r0": 2.35, "noise": "tied"}))
     with pytest.raises(SystemExit):
         _parse(["fit", "--config", str(f)])
     assert "'noise' must be one of" in capsys.readouterr().err
@@ -202,22 +202,41 @@ def test_shared_posterior_mean_is_the_blr_ridge_solve(shared40):
 def test_matches_the_acefit_blr_reference():
     """fixtures/si_fitted.npz was fitted by acefit!(Si_tiny, BLR) (julia/export_model.jl) with
     ACEpotentials' defaults: weights E 30 / F 1 / V 1, smoothness prior p = 4, the model's E0, and
-    ONE noise variance.  A shared-noise evidence fit with the same basis, data and weights is the
-    same posterior mean, up to the weak hyperprior and ACEfit's optimiser tolerance."""
+    ONE noise variance, at the evidence optimum (no hyperprior).  With the same basis, data and
+    weights, the shared-noise evidence optimum is that posterior mean to ACEfit's tolerance; the
+    shared MAP differs only by the weak hyperprior; per-quantity noise is a different fit."""
+    from scipy.optimize import minimize
     from ace_jax.eval import highest_precision
-    from ace_jax.fit.pipeline.export import linear_model_arrays
+    from ace_jax.fit.hypers import from_array, to_array
     from ace_jax.fit.pipeline import fit
+    from ace_jax.fit.pipeline.export import linear_arrays_from_mean, linear_model_arrays
+    from ace_jax.fit.predict import fit_posterior
+    ref = np.load(MODEL)
+
+    def rel(got):
+        return max(np.linalg.norm(got[k] - ref[k]) / np.linalg.norm(ref[k]) for k in ("WB", "Wpair"))
     with highest_precision():
         cfg, d, b, obj = _setup("--noise", "shared", "--weights", ACEFIT_WEIGHTS, train=XYZ)
         res = fit(cfg, d, **QUIET)
-    got, ref = linear_model_arrays(res), np.load(MODEL)
-    for k in ("WB", "Wpair"):
-        rel = np.linalg.norm(got[k] - ref[k]) / np.linalg.norm(ref[k])
-        print(f"{k}: |ace-jax - ACEfit BLR| / |ACEfit BLR| = {rel:.2e}")
-        assert rel <= BLR_RTOL, k
+        x0 = np.asarray(to_array(res.theta), float)
+        lik = jax.jit(jax.value_and_grad(lambda z: obj.lik(jnp.asarray(x0).at[6].set(z[0]).at[8].set(z[1]))))
 
-
-BLR_RTOL = 1e-2
+        def f(z):                                                  # -evidence over (log sigma_c, log sigma)
+            v, g = lik(jnp.asarray(z))
+            return -float(v), -np.asarray(g, float)
+        r = minimize(f, x0[[6, 8]], jac=True, method="L-BFGS-B", options={"ftol": 1e-15, "gtol": 1e-10})
+        x = x0.copy(); x[6], x[7:10] = r.x[0], r.x[1]
+        th = from_array(jnp.asarray(x))
+        mu, _ = fit_posterior(th, obj.stats(th), b.prob, d.ds_train)
+        evidence = linear_arrays_from_mean(d.z, d.E0, b.prob.cfg, np.asarray(mu))
+        cfg2, d2, *_ = _setup("--weights", ACEFIT_WEIGHTS, train=XYZ)
+        per_quantity = linear_model_arrays(fit(cfg2, d2, **QUIET))
+    r_ev, r_map, r_pq = rel(evidence), rel(linear_model_arrays(res)), rel(per_quantity)
+    print(f"|ace-jax - ACEfit BLR| / |ACEfit BLR|: shared evidence optimum {r_ev:.1e}, shared MAP {r_map:.1e}, "
+          f"per-quantity MAP {r_pq:.1e}")
+    assert r_ev <= 1e-5                    # measured 4e-7
+    assert r_map <= 1e-2                   # the hyperprior on log sigma, log sigma_c: measured 5.6e-3
+    assert r_pq >= 0.1                     # measured 0.55: per-quantity noise undoes the weights
 
 
 # ---------------------------------------------------------------- rungs and the GP arm

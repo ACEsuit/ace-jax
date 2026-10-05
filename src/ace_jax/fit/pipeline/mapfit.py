@@ -10,6 +10,7 @@ from ..hypers import Hypers, from_array, log_prior, to_array
 from ..ladder import run_map
 from ..multistart import lbfgs_map, multistart_map, prior_starts
 from ..newton import _newton_step, newton_polish
+from ..paramset import SHARED_NOISE, tie_noise
 
 # log-space boxes: generous, but keep the Cholesky away from sigma -> 0; A up to
 # 1e3 (the full/PCA-descriptor GP sat at the old bound of 10, Cantor-1k)
@@ -176,6 +177,14 @@ def judge(v, g, x, lo, hi, *, H=None, gnoise=None, strict=False, log=print, what
     return rec
 
 
+def _noise_record(tied):
+    """map_convergence.json's noise entries: only for shared noise (the per-quantity record, part of
+    the bit-exact pipeline goldens, is unchanged)."""
+    if tied is None:
+        return {}
+    return {"noise": "shared", "tied": {Hypers._fields[i]: SHARED_NOISE for i in np.flatnonzero(tied)}}
+
+
 def _rho_fix(cfg, prob):
     if cfg.fix_rho == "auto":
         XM = np.asarray(prob.ind.XM)
@@ -206,17 +215,27 @@ def fit_map(cfg, d, b, obj, log=print):
         v, g = obj.vg(jnp.asarray(x)); g.block_until_ready()
         return float(v), np.asarray(g, float)
     polish = polish_wanted(cfg)
-    logpost = lambda a: obj.lik(a) + log_prior(from_array(a), prob.prior)       # noqa: E731
+    tied = getattr(obj, "tied", None)               # shared noise: log_sigma_E/V copy log_sigma_F
+    free = None if tied is None else ~tied
+    logpost = lambda a: obj.lik(a) + log_prior(from_array(a), prob.prior, free)       # noqa: E731
     if cfg.opt == "adam":
         theta = run_map(obj.lik, prob.prior, steps=cfg.map_steps, lr=cfg.map_lr, seed=cfg.seed, init=init)
         x = np.array(to_array(theta), float)
+        lo = hi = None
+        if tied is not None:      # tie, then pin the tied coordinates: they are not free hyperparameters
+            x = tie_noise(x)
+            lo, hi = np.where(tied, x, -np.inf), np.where(tied, x, np.inf)
+            theta = Hypers(*[float(val) for val in x])
         v, g = vg_host(x)                               # one evaluation; a Hessian only where it is cheap
-        H = _HVPLogPosterior(vg_host, None, None, logpost).hessian(x) if polish else None
-        conv = judge(v, g, x, None, None, H=H, strict=cfg.strict, log=log)
+        H = _HVPLogPosterior(vg_host, lo, hi, logpost).hessian(x) if polish else None
+        conv = judge(v, g, x, lo, hi, H=H, strict=cfg.strict, log=log)
         return MapFit(theta, None, None, {"map": time.time() - t}, _log_evidence(obj, theta),
-                      {"optimiser": "adam", "restart": None, "polish": None, **conv})
+                      {"optimiser": "adam", "restart": None, "polish": None, **conv, **_noise_record(tied)})
     x0 = np.array(to_array(init or prob.prior.mu), float)       # a copy: fix_rho writes into it
     lo, hi = LBFGS_LO.copy(), LBFGS_HI.copy()
+    if tied is not None:          # the tied coordinates are pinned (lo == hi): only log_sigma_F moves
+        x0 = tie_noise(x0)
+        lo[tied] = hi[tied] = x0[tied]
     if cfg.fix_rho is not None:
         lo[5] = hi[5] = x0[5] = np.log(_rho_fix(cfg, prob))
         log(f"fix-rho: rho pinned at {float(np.exp(lo[5])):.4f}")
@@ -260,8 +279,12 @@ def fit_map(cfg, d, b, obj, log=print):
     if g is None:                               # never finite: nothing to judge with
         g = np.full(x.size, np.nan)
     conv = judge(v, g, x, lo, hi, H=H, gnoise=gnoise, strict=cfg.strict, log=log)
+    fixed = _bound_active(x, lo, hi)
+    if tied is not None:          # the objective reads only the shared coordinate: copy it out
+        x, fixed = tie_noise(x), fixed & ~tied
+        log(f"shared noise: sigma_E = sigma_F = sigma_V = {float(np.exp(x[8])):.6g}")
     theta = Hypers(*[float(val) for val in x])
     return MapFit(theta, restarts, None, {"map": time.time() - t}, _log_evidence(obj, theta),
                   {"optimiser": "lbfgs", "nfev": int(sum(r["nfev"] for r in runs)), "lbfgs_message": best["message"],
-                   "restart": restart, "polish": pol, **conv},
-                  _bound_active(x, lo, hi))
+                   "restart": restart, "polish": pol, **conv, **_noise_record(tied)},
+                  fixed)
