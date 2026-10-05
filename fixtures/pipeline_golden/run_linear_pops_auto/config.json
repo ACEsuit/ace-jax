@@ -1,7 +1,7 @@
 {
- "model": "/home/eng/essswb/projects/ace-jax/.worktrees/map-convergence/fixtures/si_fitted.npz",
- "data": "/home/eng/essswb/projects/ace-jax/.worktrees/map-convergence/fixtures/si_tiny_train.xyz",
- "out": "/home/eng/essswb/projects/ace-jax/.worktrees/map-convergence/fixtures/pipeline_golden/run_linear_pops_auto",
+ "model": "/home/eng/essswb/projects/ace-jax/.worktrees/docs-build-time/fixtures/si_fitted.npz",
+ "data": "/home/eng/essswb/projects/ace-jax/.worktrees/docs-build-time/fixtures/si_tiny_train.xyz",
+ "out": "/home/eng/essswb/projects/ace-jax/.worktrees/docs-build-time/fixtures/pipeline_golden/run_linear_pops_auto",
  "arm": "linear",
  "ntrain": 16,
  "ntest": 6,
