@@ -72,9 +72,9 @@ def test_fitconfig_validates_noise():
     assert FitConfig(model="m").noise == "per-quantity"
     FitConfig(model="m", noise="shared").validate()
     FitConfig(model="m", arm="linear", uq="ard", ard_mode="sequential", noise="shared").validate()
+    FitConfig(model="m", arm="linear", noise="shared", learn_radial=True).validate()
     for bad in (dict(noise="tied"), dict(noise="shared", sigma_type=True),
                 dict(noise="shared", arm="linear", uq="ard"),                 # joint ARD refits sigma_q itself
-                dict(noise="shared", learn_radial=True),
                 dict(noise="shared", arm="linear", solver="lstsq")):
         with pytest.raises(ValueError, match="noise"):
             FitConfig(model="m", **bad).validate()
@@ -92,6 +92,7 @@ def test_cli_records_shared_noise(tmp_path):
     conv = json.loads((out / "map_convergence.json").read_text())
     assert conv["noise"] == "shared"
     assert conv["tied"] == {"log_sigma_E": "log_sigma_F", "log_sigma_V": "log_sigma_F"}
+    assert np.isfinite(conv["log_evidence"])                    # comparable across modes; logpost is not
     th = json.loads((out / "theta_map.json").read_text())
     assert th["log_sigma_E"] == th["log_sigma_F"] == th["log_sigma_V"]
 
@@ -107,6 +108,7 @@ def test_per_quantity_records_nothing_new(tmp_path):
               "--rungs", "map", "--configs-per-batch", "4", "--out", str(out)])
     conv = json.loads((out / "map_convergence.json").read_text())
     assert "noise" not in conv and "tied" not in conv
+    assert np.isfinite(conv["log_evidence"])
     assert yaml.safe_load((out / "fit.yaml").read_text())["noise"] == "per-quantity"
 
 
@@ -145,6 +147,10 @@ def test_shared_objective_ignores_the_tied_coordinates():
         assert float(g[7]) == 0.0 and float(g[9]) == 0.0 and float(g[8]) != 0.0
         xt = x.at[7].set(x[8]).at[9].set(x[8])
         assert np.isclose(float(obj.lik(x)), float(obj_pq.lik(xt)), rtol=1e-13)
+        # chain rule through the real objective: d/dlog sigma (shared) = sum_q d/dlog sigma_q (per quantity)
+        gs, gq = np.asarray(jax.grad(obj.lik)(x)), np.asarray(jax.grad(obj_pq.lik)(xt))
+        assert np.isclose(gs[8], gq[7] + gq[8] + gq[9], rtol=1e-10) and gs[7] == gs[9] == 0.0
+        assert np.allclose(gs[:7], gq[:7], rtol=1e-10, atol=1e-10)
 
 
 @pytest.fixture(scope="module")
@@ -273,3 +279,63 @@ def test_gp_arm_shared_smoke(tmp_path):
     assert sE == sF == sV and np.isfinite(sF) and np.isfinite(mf.log_evidence)
     assert float(g[7]) == 0.0 and float(g[9]) == 0.0
     assert mf.convergence["noise"] == "shared"
+
+
+def test_host_cache_shared_matches_the_device_objective(tmp_path):
+    """The host-cached GP LML (its own value_and_grad, chained through untie_grad) gives the same shared
+    log-posterior and gradient as the device LML, and its MAP is tied."""
+    from ace_jax.eval import highest_precision
+    from ace_jax.fit.hypers import to_array
+    from ace_jax.fit.pipeline.mapfit import fit_map
+    xyz = small_si_xyz(tmp_path / "si12.xyz")
+    gp = ("--noise", "shared", "--m-per-species", "3", "--density", "pair", "--map-steps", "5")
+    with highest_precision(), warnings.catch_warnings():
+        warnings.simplefilter("ignore")                             # 5 L-BFGS steps: not converged
+        cfg, d, b, host = _setup(*gp, "--lml", "host-cache", train=xyz)
+        *_, dev = _setup(*gp, train=xyz)
+        x = to_array(b.prob.prior.mu).at[8].set(np.log(0.03))
+        (vh, gh), (vd, gd) = host.vg(x), dev.vg(x)
+        assert np.isclose(float(vh), float(vd), rtol=1e-9)
+        assert np.allclose(np.asarray(gh), np.asarray(gd), rtol=1e-7, atol=1e-7)
+        assert float(gh[7]) == float(gh[9]) == 0.0
+        mf = fit_map(cfg, d, b, host, **QUIET)
+    assert _sigmas(mf.theta)[0] == _sigmas(mf.theta)[1] == _sigmas(mf.theta)[2]
+
+
+@pytest.mark.parametrize("rung", ["vi", "nuts"])
+def test_vi_and_nuts_hold_the_tied_coordinates(shared40, rung):
+    import dataclasses
+    from ace_jax.eval import highest_precision
+    from ace_jax.fit.pipeline.rungs import run_rungs
+    cfg, d, b, obj, mf = shared40
+    cfg = dataclasses.replace(cfg, rungs=(rung,), n_draws=8, vi_steps=20, nuts_warmup=10, nuts_samples=8,
+                              nuts_chains=1)
+    with highest_precision():
+        rg = run_rungs(cfg, b, obj, mf.theta, fixed=mf.fixed, **QUIET)
+    dr = rg.draws[rung]
+    assert np.array_equal(dr[:, 7], dr[:, 8]) and np.array_equal(dr[:, 9], dr[:, 8]) and np.std(dr[:, 8]) > 0
+    if rung == "nuts":
+        assert not {"log_sigma_E", "log_sigma_V"} & set(rg.info["nuts"]["ess"])   # not sampled
+
+
+def test_learned_radials_honour_shared_noise(monkeypatch):
+    """--learn-radial --noise shared: the radial stage's inner MAPs and the final fit are both tied."""
+    import ace_jax.fit.pipeline.radials as R
+    from ace_jax.eval import highest_precision
+    from ace_jax.fit.pipeline import FitConfig, fit, load_fit_data
+    monkeypatch.setattr(R, "RADIAL_MAP_STEPS", 20)
+    cfg = FitConfig(model=str(FIXTURE_DIR / "si_ace_model.npz"), arm="linear", m_per_species=0, rungs=("map",),
+                    batch=4, r0=2.35, e0="model", predict_train=False, ntrain=30, ntest=8, noise="shared",
+                    learn_radial=True, radial_steps=2, radial_lam_grid=(0.0,), energy_key="dft_energy",
+                    force_key="dft_force", virial_key="dft_virial").validate()
+    with highest_precision(), warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        res = fit(cfg, load_fit_data(cfg, data=str(XYZ), **QUIET), **QUIET)
+    info = res.radial.info
+    thetas = [info["theta_init"], *info["theta_fit"].values()]
+    assert len(thetas) >= 3                                       # the init MAP and both gate candidates
+    for a in thetas:
+        a = np.asarray(a)
+        assert a[7] == a[8] == a[9]
+    sE, sF, sV = _sigmas(res.theta)
+    assert sE == sF == sV and res.map.convergence["noise"] == "shared"
