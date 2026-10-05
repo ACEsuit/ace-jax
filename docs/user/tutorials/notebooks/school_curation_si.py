@@ -83,7 +83,7 @@ def _(mo):
     - **Start:** the bulk model of Tutorial 6 (ten strained and rattled
       cells), and a separate seed set of eight bulk cells that every refit
       starts from. The uncertainty rule needs an ARD fit (Step 2), so its
-      start is the same data fitted with ARD, which predicts γ(111) a little
+      start is the same data fitted with ARD, which predicts γ(111)
       differently: the three curves do not start at the same point.
     - **Pool:** each round runs 60 steps of 400 K Langevin dynamics with the
       current model from three starting points, in this order: bulk, a (110)
@@ -256,7 +256,7 @@ def _(mo, runs):
 @app.cell(hide_code=True)
 def _(mo, runs):
     _e = {d: r["history"][1]["err"] for d, r in runs.items()}
-    _ok = _e["novelty"] < 0.1 * _e["random"]
+    _ok = _e["novelty"] < 0.1 * _e["random"]                # False if either is NaN: a failed fit
     mo.callout(
         mo.md(f"**Checkpoint 2 passed:** after 4 labels, novelty selection is {_e['random'] / _e['novelty']:.0f}× "
               "closer to the target than random sampling.")
@@ -272,25 +272,46 @@ def _(mo):
     mo.md(r"""
     ## Step 3: where did the labels go?
 
-    The pool is ordered: bulk frames first, then the (110) distractor, then
-    the (111) target. So the picks say what each rule looked at.
-
-    - **Random** spreads its labels over all three runs; only some land on
-      the target's surface.
-    - **Novelty** goes straight to the (111) slab's MD frames: their surface
-      atoms are the farthest from the bulk-only training set in descriptor
-      space.
-    - **Uncertainty** spends its first round on the (110) distractor: that is
-      where the model's forces are least certain, and it is right to be
-      unsure there. But the target is (111), and the uncertainty rule does not
-      know what the labels are for.
-
-    On this problem novelty wins, by luck as much as by design: the target's
-    surface happens to be the most novel thing in the pool. Neither
-    novelty nor uncertainty knows the target. Point the rule at what matters
-    (for example, only MD from the target's own structures), or label more
-    per round, and the difference closes.
+    Each pool frame records the MD run it came from, so the picks say what
+    each rule looked at.
     """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo, runs):
+    def _where(frame):
+        return "bulk" if frame.info["config_type"] == "bulk" else f"({frame.info['miller']}) slab"
+
+    def _round(run, r):
+        _n = {}
+        for _i in run["history"][r + 1]["picks"]:
+            _w = _where(run["pools"][r][_i])
+            _n[_w] = _n.get(_w, 0) + 1
+        return ", ".join(f"{c} on the {w}" for w, c in sorted(_n.items(), key=lambda kv: -kv[1]))
+
+    import math as _math
+
+    _final = {d: r["history"][-1]["err"] for d, r in runs.items()}
+    _failed = [d for d, e in _final.items() if not _math.isfinite(e)]
+    _ok = {d: e for d, e in _final.items() if d not in _failed}
+    _best = min(_ok, key=_ok.get) if _ok else None
+    mo.md("\n".join(f"- **{d.capitalize()}**: round 1 picks {_round(r, 0)}; round 2 {_round(r, 1)}."
+                     for d, r in runs.items())
+          + f"""
+
+The target is the (111) slab; the (110) slab is a distractor. Random spreads its
+labels wherever the pool has frames. Novelty goes where atoms are farthest from the
+training set in descriptor space, and uncertainty where the model's forces are least
+certain. Neither knows what the labels are for: whether they land on the target is a
+property of this pool, not of the rule.
+
+{"" if _best is None else f"After 8 labels **{_best}** is closest to the target here ("
+   + ", ".join(f"{d} {e:.1e}" for d, e in _ok.items()) + " eV/Å²). "}{
+   f"The {', '.join(_failed)} campaign's fit failed numerically (a non-finite surface energy), "
+   "so this run cannot rank it. " if _failed else ""}Point the rule at what
+matters (for example, only MD from the target's own structures), or label more per round,
+and the differences close.""")
     return
 
 
