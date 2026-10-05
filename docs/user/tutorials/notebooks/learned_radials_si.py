@@ -30,13 +30,13 @@ def _(mo):
     $$R_{nl}(r) = \mathrm{env}(x)\sum_q W_{nq}\,P_q(x), \qquad x = x(r),$$
 
     and `aj fit` keeps the mixing weights W frozen at whatever the basis was
-    built with. This notebook **learns W from the data** and shows what that
-    buys on a small silicon dataset. It runs on a CPU in a few minutes.
+    built with. This notebook **learns W from the data** and shows the
+    improvement on a small silicon dataset. It runs on a CPU in a few minutes.
 
     **Goals**
 
     1. Fit a baseline with a frozen basis of seeded random radials (`radial_mode="glorot_normal"`).
-    2. Learn the radial weights by variable projection, with a held-out gate.
+    2. Learn the radial weights by variable projection, with a validation gate.
     3. Refit with the learned basis and compare the test errors.
     4. Deploy the learned model: it is splined automatically and runs through `ACECalculator`.
 
@@ -44,17 +44,19 @@ def _(mo):
     first; this one reuses its data split. On the command line,
     `aj fit --learn-radial` runs the same learning step in one fit.
 
-    **Run this notebook**: with [uv](https://docs.astral.sh/uv/) installed, one command
-    opens it in your browser (no account needed):
+    **Run this notebook.** Install [uv](https://docs.astral.sh/uv/). Then run this command:
 
     ```bash
     uvx marimo edit --sandbox https://raw.githubusercontent.com/ACEsuit/ace-jax/main/docs/user/tutorials/notebooks/learned_radials_si.py
     ```
 
-    or open it in [molab](https://molab.marimo.io/github/ACEsuit/ace-jax/blob/main/docs/user/tutorials/notebooks/learned_radials_si.py), marimo's hosted service (free to
-    preview; sign in to run). The documentation website shows a static copy,
-    run on a CPU when the site was built: there the interactive controls show
-    their default values. The notebook runs in about three minutes, two of them for learning.
+    The notebook opens in your browser. You do not need an account.
+    You can also open the notebook in [molab](https://molab.marimo.io/github/ACEsuit/ace-jax/blob/main/docs/user/tutorials/notebooks/learned_radials_si.py),
+    the marimo hosted service. You must sign in to run it there.
+
+    This website shows a static copy of the notebook, run on a CPU when the
+    site was built. The interactive controls show their default values.
+    Run time: approximately 3 minutes (learning takes approximately 2 minutes).
     """)
     return
 
@@ -182,7 +184,7 @@ def _(mo):
     Then the **gate** fits a readout for each candidate, the initial W and
     the learned W, on the fit split and scores it on the validation split. It
     keeps the better one, and keeps the initial radials on a tie, so learning
-    can never make the selected model worse on held-out data.
+    can never make the selected model worse on validation data.
 
     The steps are:
 
@@ -193,7 +195,7 @@ def _(mo):
     - `fit_radial` learns and gates; `save_result` writes the selected radials
       into a copy of the basis file.
 
-    On the command line, `aj fit --learn-radial` runs these steps (the hold-out,
+    On the command line, `aj fit --learn-radial` runs these steps (the validation split,
     the gate and the final fit on the whole training set) in one fit.
     """)
     return
@@ -396,12 +398,12 @@ def _(mo):
     2. **A better start.** In Step 2, build the basis with
        the default `radial_mode="onehot"` (Tutorial 1's basis). Does learning still help,
        and in which of energy, forces and virials? The gate keeps the starting
-       radials whenever learning does not improve the held-out score.
+       radials whenever learning does not improve the validation score.
     3. **Smoothness.** Pass `lam_grid=(0.0, 1e-2)` to `fit_radial`. A positive
        weight penalises rough radials; the gate picks the best of all
        candidates. When might a smoother radial generalise better?
     4. **Command line.** `aj fit ... --learn-radial` runs the same steps in one
-       fit (the hold-out split, the gate and the final fit on the whole training
+       fit (the validation split, the gate and the final fit on the whole training
        set); see the [how-to guide](https://acesuit.github.io/ace-jax/howto/learned-radials/).
     """)
     return
@@ -414,7 +416,7 @@ def _(mo):
 
     - The radial basis of a frozen ACE model is a choice made when the basis
       is built. Learning it by VarPro optimises that choice on the data,
-      with a held-out gate that keeps the initial radials unless the learned
+      with a validation gate that keeps the initial radials unless the learned
       ones predict better.
     - The learned model is an ordinary `model.npz`: fit it, evaluate it and
       export it like any other. At deployment it is splined to 10⁻¹⁰, so it

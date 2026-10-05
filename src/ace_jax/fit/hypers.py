@@ -34,10 +34,14 @@ class Prior(NamedTuple):
     sigma: Hypers
 
 
-def log_prior(theta, prior):
+def log_prior(theta, prior, free=None):
+    """free (10,) bool: only those coordinates' hyperpriors (None: all).  Shared noise
+    (paramset.noise_tie) leaves out log_sigma_E and log_sigma_V, which then only copy log_sigma_F,
+    so the shared scale's hyperprior counts once."""
     lp = 0.0
-    for x, m, s in zip(theta, prior.mu, prior.sigma):
-        lp = lp - 0.5 * ((x - m) / s) ** 2 - 0.5 * jnp.log(2 * jnp.pi * s * s)
+    for i, (x, m, s) in enumerate(zip(theta, prior.mu, prior.sigma)):
+        if free is None or free[i]:
+            lp = lp - 0.5 * ((x - m) / s) ** 2 - 0.5 * jnp.log(2 * jnp.pi * s * s)
     return lp
 
 

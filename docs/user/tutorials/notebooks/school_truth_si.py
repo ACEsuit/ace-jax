@@ -45,16 +45,19 @@ def _(mo):
     [MLIP School 2026](https://mlipschool.uk/c/c_truth_about_the_truth). The surface
     dataset is the recipe a later tutorial on surfaces builds step by step.
 
-    **Run this notebook**: with [uv](https://docs.astral.sh/uv/) installed, one command
-    opens it in your browser (no account needed):
+    **Run this notebook.** Install [uv](https://docs.astral.sh/uv/). Then run this command:
 
     ```bash
     uvx marimo edit --sandbox https://raw.githubusercontent.com/ACEsuit/ace-jax/main/docs/user/tutorials/notebooks/school_truth_si.py
     ```
 
-    or open it in [molab](https://molab.marimo.io/github/ACEsuit/ace-jax/blob/main/docs/user/tutorials/notebooks/school_truth_si.py), marimo's hosted service (free to
-    preview; sign in to run). The documentation website shows a static copy,
-    run on a CPU when the site was built. The whole notebook runs in about a minute.
+    The notebook opens in your browser. You do not need an account.
+    You can also open the notebook in [molab](https://molab.marimo.io/github/ACEsuit/ace-jax/blob/main/docs/user/tutorials/notebooks/school_truth_si.py),
+    the marimo hosted service. You must sign in to run it there.
+
+    This website shows a static copy of the notebook, run on a CPU when the
+    site was built.
+    Run time: approximately 1 minute.
     """)
     return
 
@@ -94,14 +97,15 @@ def _(mo):
 
     They share a functional family but differ in training data and model
     details, so they are two different "truths". Their labels for every
-    structure in this notebook ship with the tutorial.
+    structure in this notebook are included with the tutorial.
 
     The surface energy of a slab with $N$ atoms and two faces of area $A$ is
 
     $$\gamma = \frac{E_\text{slab} - N\,E_\text{bulk}/N_\text{bulk}}{2A}.$$
 
-    The slab is cut on silicon's wide "shuffle" (111) plane, with one broken
-    bond per surface atom, 6 layers thick with 8 Å of vacuum, and is not relaxed.
+    The slab is cut on the wide "shuffle" (111) plane of silicon, with one
+    broken bond for each surface atom. It has 6 layers and 8 Å of vacuum. It
+    is not relaxed.
     """)
     return
 

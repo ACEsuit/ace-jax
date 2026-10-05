@@ -138,7 +138,8 @@ def lbfgs_loop(f, x0, *, steps, args=(), statics=(), tol=1e-6, patience=3, memor
     return x_best, f_best, trace, "steps"
 
 
-def theta_map_linear(prob, ds, W, *, steps=300, seed=0, init=None, return_stats=False, lin=None):
+def theta_map_linear(prob, ds, W, *, steps=300, seed=0, init=None, return_stats=False, lin=None,
+                     noise="per-quantity"):
     """theta-MAP of the M = 0 LML for the model with radials W (one streaming
     pass for the statistics, then run_map on the cached Gram).  init: optional
     theta array to warm-start from.  `lin`: the statistics of ds if the caller
@@ -151,16 +152,27 @@ def theta_map_linear(prob, ds, W, *, steps=300, seed=0, init=None, return_stats=
     the returned theta.
 
     Not checked like the pipeline MAP (`pipeline.mapfit.judge`): this inner Adam MAP is a step of the
-    radial search, and only `diag` reports how stationary it is."""
+    radial search, and only `diag` reports how stationary it is.
+
+    noise "shared" (pipeline `--noise shared`): sigma_E and sigma_V tied to sigma_F
+    (paramset.tied_likelihood), as in the pipeline MAP; the returned theta is tied, and the
+    diagnostic's log-posterior leaves the tied coordinates' hyperpriors out."""
+    from .paramset import noise_tie, tie_noise, tied_likelihood
+    tied = noise_tie(noise)
+    free = ~tied if tied.any() else None
     if lin is None:
         lin = linear_statistics(with_radial(prob.model, W), prob.cfg, ds)
     lml = jax.jit(lambda a: log_marginal_likelihood(from_array(a), lin, prob))
+    if free is not None:
+        lml = tied_likelihood(lml)
     h, losses = run_map(lml, prob.prior, steps=steps, seed=seed, return_losses=True,
                         init=None if init is None else from_array(jnp.asarray(init)))
     a = to_array(h)
+    if free is not None:          # the tied coordinates only drifted on their own hyperpriors: copy F
+        a = tie_noise(a)
     if not return_stats:
         return a
-    logpost = lambda x: lml(x) + log_prior(from_array(x), prob.prior)
+    logpost = lambda x: lml(x) + log_prior(from_array(x), prob.prior, free)
     k = min(10, len(losses) - 1)
     diag = {"lml": float(lml(a)), "map_steps": int(steps),
             "dloss_last": float(losses[-1] - losses[-1 - k]) if k > 0 else float("nan"),
@@ -268,7 +280,7 @@ def _learn_theta(a, mult):
 def learn_radial(prob, ds, W0, *, theta0=None, profile=True, lam_rough=0.0, rough_weights=None,
                  lam_spec=0.0, spec_p=4.0, lam_gap=0.0, steps=200, reprofile_every=10, tol=1e-6,
                  patience=3, map_steps=300, n_prior=None, seed=0, log=None, Q=None, D2=None,
-                 r0=None, U=None, learn_sigma_e_mult=1.0):
+                 r0=None, U=None, learn_sigma_e_mult=1.0, noise="per-quantity"):
     """VarPro-learn the tensor radials of prob.model (analytic branch, M = 0).
 
     learn_sigma_e_mult scales sigma_E inside the radial objective only (after
@@ -338,7 +350,7 @@ def learn_radial(prob, ds, W0, *, theta0=None, profile=True, lam_rough=0.0, roug
     if theta0 is not None:
         a = to_array(theta0)
     elif profile:
-        a, lin0, _ = theta_map_linear(prob, ds, V, steps=map_steps, seed=seed, return_stats=True)
+        a, lin0, _ = theta_map_linear(prob, ds, V, steps=map_steps, seed=seed, return_stats=True, noise=noise)
     else:
         raise ValueError("learn_radial: profile=False needs theta0")
     if learn_sigma_e_mult <= 0:
@@ -395,7 +407,7 @@ def learn_radial(prob, ds, W0, *, theta0=None, profile=True, lam_rough=0.0, roug
         profile_dt = 0.0
         if profile:
             t_profile = time.perf_counter()
-            a = theta_map_linear(prob, ds, V, steps=map_steps, seed=seed, init=a)
+            a = theta_map_linear(prob, ds, V, steps=map_steps, seed=seed, init=a, noise=noise)
             profile_dt = time.perf_counter() - t_profile
             info["theta"].append(np.asarray(a))
         # round_dt is measured after the (optional) re-profile above, so it
@@ -471,7 +483,8 @@ def gate(candidates, score):
 
 
 def fit_radial(prob, ds_fit, ds_val, W0, *, lam_grid=(0.0, 1e-3, 1e-2, 1e-1), spec_grid=(0.0,),
-               gap_grid=(0.0,), theta0=None, map_steps=300, log=None, checkpoint=None, **learn_kw):
+               gap_grid=(0.0,), theta0=None, map_steps=300, log=None, checkpoint=None, noise="per-quantity",
+               **learn_kw):
     """learn_radial on ds_fit once per (roughness, spectral, data-gap weight)
     triple in lam_grid x spec_grid x gap_grid, then keep the best of {init,
     learned per triple} on the disjoint ds_val (ties -> init).
@@ -549,7 +562,7 @@ def fit_radial(prob, ds_fit, ds_val, W0, *, lam_grid=(0.0, 1e-3, 1e-2, 1e-1), sp
         a0 = to_array(theta0)
         lin0 = linear_statistics(with_radial(prob.model, W_init), prob.cfg, ds_fit)
     else:
-        a0, lin0, _ = theta_map_linear(prob, ds_fit, W_init, steps=map_steps, return_stats=True)
+        a0, lin0, _ = theta_map_linear(prob, ds_fit, W_init, steps=map_steps, return_stats=True, noise=noise)
     r0 = float(projected_residual_from_stats(from_array(a0), lin0, _prior(prob)))
     rw = learn_kw.get("rough_weights")
     rough0 = float(roughness(W_init, D2, jnp.ones(W0.shape[2]) if rw is None
@@ -563,7 +576,7 @@ def fit_radial(prob, ds_fit, ds_val, W0, *, lam_grid=(0.0, 1e-3, 1e-2, 1e-1), sp
             log(f"fit_radial: lam={lam:g} spec={spec:g} gap={gap:g} starting")
         W, info = learn_radial(prob, ds_fit, W0, theta0=from_array(a0), lam_rough=lam,
                                lam_spec=spec, lam_gap=gap, map_steps=map_steps, log=log, Q=Q,
-                               D2=D2, r0=r0, U=U, **learn_kw)
+                               D2=D2, r0=r0, U=U, noise=noise, **learn_kw)
         cands[label] = W
         runs[key] = info
         if checkpoint is not None:
@@ -573,7 +586,7 @@ def fit_radial(prob, ds_fit, ds_val, W0, *, lam_grid=(0.0, 1e-3, 1e-2, 1e-1), sp
 
     def score(label, W):
         a_fit, lin_fit, diag = theta_map_linear(prob, ds_fit, W, steps=map_steps, init=a0,
-                                                return_stats=True)
+                                                return_stats=True, noise=noise)
         lin_val = linear_statistics(with_radial(prob.model, W), prob.cfg, ds_val)
         s, c = holdout_score(W, a_fit, a0, prob, ds_fit, ds_val, lin_fit=lin_fit,
                              lin_val=lin_val, return_readout=True)

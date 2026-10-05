@@ -45,6 +45,8 @@ class FitConfig:
                                          # "auto" (linear arm, cached-Gram LML) | "on" (any arm) | "off"
     strict: bool = False                 # raise MapNotConverged (not a warning) when the MAP is not stationary
     init: dict | None = None             # Hypers field -> value
+    noise: str = "per-quantity"          # "per-quantity" (sigma_E, sigma_F, sigma_V free) | "shared" (one
+                                         # sigma for every weighted row, ACEfit's BLR: the weights set the balance)
     # rungs
     rungs: tuple = ("map",)
     solver: str = "evidence"             # "evidence" | "lstsq" (plain weighted least squares, no prior: teaching)
@@ -169,6 +171,16 @@ class FitConfig:
         if self.map_restarts > 1 and (self.opt != "lbfgs" or self.sigma_type):
             raise ValueError("map_restarts > 1 is the L-BFGS multi-start: set opt lbfgs "
                              "(and not sigma_type)")
+        from ..paramset import NOISE_MODES
+        if self.noise not in NOISE_MODES:
+            raise ValueError(f"noise must be one of {NOISE_MODES}, got {self.noise!r}")
+        if self.noise == "shared":
+            why = ("sigma_type (per-config-type noise ratios on per-quantity scales)" if self.sigma_type else
+                   "uq ard with ard_mode joint (it refits sigma_E/F/V by its own evidence; use ard_mode "
+                   "sequential)" if self.uq == "ard" and self.ard_mode == "joint" else
+                   "solver lstsq (no noise hyperparameters)" if self.solver == "lstsq" else None)
+            if why is not None:
+                raise ValueError(f"noise 'shared' is not available with {why}")
         if self.pops_rows not in ("auto", "host", "device"):
             raise ValueError(f"pops_rows must be 'auto', 'host' or 'device', got {self.pops_rows!r}")
         if self.predict_stats not in ("cached", "recompute"):

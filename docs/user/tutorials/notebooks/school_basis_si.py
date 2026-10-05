@@ -40,17 +40,19 @@ def _(mo):
     It is adapted from notebook E1x of the
     [MLIP School 2026](https://mlipschool.uk/e1x/e1x_basis_and_overfitting).
 
-    **Run this notebook**: with [uv](https://docs.astral.sh/uv/) installed, one command
-    opens it in your browser (no account needed):
+    **Run this notebook.** Install [uv](https://docs.astral.sh/uv/). Then run this command:
 
     ```bash
     uvx marimo edit --sandbox https://raw.githubusercontent.com/ACEsuit/ace-jax/main/docs/user/tutorials/notebooks/school_basis_si.py
     ```
 
-    or open it in [molab](https://molab.marimo.io/github/ACEsuit/ace-jax/blob/main/docs/user/tutorials/notebooks/school_basis_si.py), marimo's hosted service (free to
-    preview; sign in to run). The documentation website shows a static copy,
-    run on a CPU when the site was built. The sweep in Step 2 fits eight models
-    and takes about 4 minutes on a CPU.
+    The notebook opens in your browser. You do not need an account.
+    You can also open the notebook in [molab](https://molab.marimo.io/github/ACEsuit/ace-jax/blob/main/docs/user/tutorials/notebooks/school_basis_si.py),
+    the marimo hosted service. You must sign in to run it there.
+
+    This website shows a static copy of the notebook, run on a CPU when the
+    site was built.
+    Run time: approximately 4 minutes on a CPU. Most of this time is for the eight fits in Step 2.
     """)
     return
 
@@ -258,13 +260,15 @@ def _(mo):
     ## What the evidence is doing
 
     The log-evidence $\log p(\text{data} \mid \text{basis})$ is the
-    probability of the training data under the model, averaged over every
-    coefficient vector the prior allows rather than taken at the best one. A
-    larger basis can always fit the data better, but it spreads its prior
-    over many more coefficient vectors that fit badly, and the average pays
-    for that (the "Occam factor"). So the evidence rises while extra
-    functions explain real structure, and falls once they only explain
-    noise.
+    probability of the training data under the model. It is an average over
+    all coefficient vectors that the prior allows, not the value at the best
+    vector.
+
+    A larger basis can always fit the data better. But its prior also covers
+    many more coefficient vectors that fit badly, and these decrease the
+    average (the "Occam factor"). Thus the evidence increases while new
+    functions explain real structure. It decreases when new functions
+    explain only noise.
     """)
     return
 
@@ -335,7 +339,7 @@ def _(mo):
       the training data alone.
 
     Next: [Tutorial 6](https://acesuit.github.io/ace-jax/tutorials/surfaces/)
-    finds what a bulk data set is missing for a surface, and repairs it.
+    finds what a bulk dataset is missing for a surface, and repairs it.
     """)
     return
 

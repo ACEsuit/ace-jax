@@ -1,18 +1,22 @@
 # Learn the radial basis
 
-A built basis keeps its radial functions frozen: `aj fit` only fits the
-linear readout. The radial learner optimises the radial mixing weights too,
-by variable projection (VarPro), and a held-out gate keeps the result only
-if it predicts better than the starting radials. The output is an ordinary
-`model.npz`, so everything downstream (`aj fit --model`, `ACECalculator`,
-LAMMPS export) works unchanged. [Concepts](../concepts.md#the-radial-basis)
-explains the method and [Tutorial 2](../tutorials/learned-radials.md) runs it
-end to end.
+In a built basis, the radial functions are frozen: `aj fit` fits only the
+linear coefficients. The radial learner also optimises the radial mixing
+weights, by variable projection (VarPro). A validation gate then keeps the
+learned radials only if they predict better than the initial radials.
 
-Learning the radials needs float64 (the `aj` command enables it). It costs one streamed
-pass over the fit split per L-BFGS step, so it is far more expensive than a
-linear fit: about two minutes for 26 two-atom silicon cells on a CPU, and
-tens of minutes on a GPU for production datasets of a few hundred cells.
+The output is a usual `model.npz` file. Thus all later steps
+(`aj fit --model`, `ACECalculator`, LAMMPS export) work without changes.
+[Concepts](../concepts.md#the-radial-basis) explains the method.
+[Tutorial 2](../tutorials/learned-radials.md) shows all the steps.
+
+Radial learning needs float64. The `aj` command enables float64 itself.
+
+Radial learning costs much more than a linear fit. Each L-BFGS step does one
+pass over the fit split, in batches. For example:
+
+- 26 two-atom silicon cells: approximately 2 minutes on a CPU;
+- production datasets of a few hundred cells: tens of minutes on a GPU.
 
 ## On the command line
 
@@ -24,21 +28,34 @@ aj fit --order 3 --max-degree 10 \
     --out fit
 ```
 
-`--learn-radial` learns the radials before the fit, on a seeded hold-out of
-the training configurations (`--radial-val-frac`, default 0.2) that gates the
-result, then fits the readout as usual on the **whole** training set. It works
-with `--model` too, and with any final arm or UQ option. The options are
-`--radial-n-q 12` (polynomials per radial), `--radial-steps 40` (L-BFGS steps
-per roughness weight) and `--radial-lam-grid 0,1e-2` (the roughness weights the
-gate chooses among, alongside the starting radials).
+`--learn-radial` does these steps:
 
-- `fit/radial_info.json` records what the gate selected and every
-  candidate's held-out score.
-- `fit/model.npz` holds the learned radials and is marked as learned, so it
-  is splined at deployment (below). When the gate keeps the starting radials,
-  the model is not marked.
-- `fit/fit.yaml` reproduces the run, radial options included.
-- Species-embedded bases (`--basis-embedding`) are not supported yet.
+1. It keeps a seeded validation set of the training configurations
+   (`--radial-val-frac`, default 0.2).
+2. It learns the radials on the remaining configurations, and the
+   validation set gates the result.
+3. It fits the coefficients on the **full** training set, as usual.
+
+`--learn-radial` also works with `--model`, and with all final arms and UQ
+options. Its options are:
+
+- `--radial-n-q 12`: the number of polynomials for each radial;
+- `--radial-steps 40`: the number of L-BFGS steps for each roughness weight;
+- `--radial-lam-grid 0,1e-2`: the roughness weights. The gate selects from
+  these weights and the initial radials.
+
+The fit writes these files:
+
+- `fit/radial_info.json`: the selection of the gate, and the validation
+  score of each candidate.
+- `fit/model.npz`: the learned radials. The file has a "learned" mark, so
+  ace-jax changes the radials to splines at deployment (see
+  [below](#deployment-spline-speed)). If the gate keeps the initial radials,
+  the file has no mark.
+- `fit/fit.yaml`: all settings of the run, including the radial options.
+
+`--learn-radial` does not support species-embedded bases
+(`--basis-embedding`) at this time.
 
 ## In Python
 
@@ -70,8 +87,8 @@ print(info["selected"], info["scores"])                  # the gate's choice and
 save_result("learned", W, info, src_npz="basis.npz", model=model)   # learned/model.npz
 ```
 
-Then refit the readout on the whole training set and use the model as any
-other:
+Then fit the coefficients again on the full training set, and use the model
+as usual:
 
 ```bash
 aj fit --model learned/model.npz --r0 2.35 \
@@ -84,38 +101,43 @@ aj fit --model learned/model.npz --r0 2.35 \
 
 | Argument | Meaning |
 |---|---|
-| `to_analytic(model, n_q)` | the polynomial span of each radial. 12 is a modest widening that optimises well; 30 is ill-conditioned and learns only small high-frequency changes |
-| `steps`, `reprofile_every` | the L-BFGS step budget, and how often the evidence hyperparameters are re-fitted at the current radials |
-| `lam_grid` | relative weights of a roughness penalty on the radials; each value is a gate candidate (`learned_lam=<value>`) |
-| `spec_grid`, `gap_grid` | optional relative weights of a spectral prior and a data-gap prior on the change of the radials, also gated |
+| `to_analytic(model, n_q)` | the polynomial span of each radial. 12 is a small increase that optimises well. 30 is ill-conditioned and learns only small high-frequency changes |
+| `steps`, `reprofile_every` | the maximum number of L-BFGS steps, and the interval at which the evidence hyperparameters are fitted again at the current radials |
+| `lam_grid` | relative weights of a roughness penalty on the radials. Each value is a gate candidate (`learned_lam=<value>`) |
+| `spec_grid`, `gap_grid` | optional relative weights of a spectral prior and a data-gap prior on the change of the radials. The gate also selects from these |
 
-`info["selected"]` is `"init"` when no learned candidate beats the starting
-radials on the validation split; the saved model then has the starting
-radials, a readout fitted for them, and is not marked as learned.
+If no learned candidate is better than the initial radials on the
+validation split, `info["selected"]` is `"init"`. The saved model then has
+the initial radials and coefficients fitted for them, and it has no
+"learned" mark.
 
 ## With the research driver
 
-The repository's `bench/learn_radial/run.py` (not part of the installed
-package) runs the same steps on one extxyz file, with a seeded fit/validation
-split:
+`bench/learn_radial/run.py` in the repository does the same steps on one
+extxyz file, with a seeded fit/validation split. It is not part of the
+installed package.
 
 ```bash
 python bench/learn_radial/run.py --model basis.npz --data train.xyz --out learned \
     --ntrain 26 --nval 13 --r0 2.35 --n-q 12 --steps 40 --lam-grid 0,1e-2
 ```
 
-It writes `learned/model.npz`, the radial weights, the readout and a
-`summary.json` with the gate scores. Note that it uses the E0 stored in the
-basis file rather than fitting it.
+It writes `learned/model.npz`, the radial weights, the coefficients and a
+`summary.json` file with the gate scores.
+
+!!! note
+    The research driver uses the E0 in the basis file. It does not fit E0.
 
 ## Deployment: spline speed
 
-A learned radial is a polynomial mixture, slower to evaluate than the cubic
-splines of a stock model. The learner marks its output as learned
-(`radial_learned` in the file's metadata), and with the default
-`spline_tol="auto"`, `ACECalculator` and `export_lammps` then convert the
-learned radials to cubic splines at a relative tolerance of 1e-10 before
-evaluating.
+A learned radial is a polynomial mixture. Its evaluation is slower than the
+cubic splines of a stock model. Thus:
+
+1. The learner marks its output as learned (`radial_learned` in the
+   metadata of the file).
+2. With the default `spline_tol="auto"`, `ACECalculator` and
+   `export_lammps` change the learned radials to cubic splines before
+   evaluation, at a relative tolerance of 1e-10.
 
 ```python
 from ace_jax import ACECalculator
@@ -124,16 +146,18 @@ calc = ACECalculator("fit_learned/model.npz")
 calc.splined        # {'spline_tol': 1e-10, 'radials': ['rnl'], 'n_intervals': {'rnl': ...}}
 ```
 
-- The splined model agrees with the exact one to about the tolerance, not to
-  round-off: energies to about 1e-9 relative, forces to about 2e-8 of the
-  largest force on the benchmark models.
-- `spline_tol=None` never splines; a float (e.g. `1e-10`) splines any
-  analytic radial, learned or not.
-- Bases built by ace-jax are analytic but not learned, so by default they
-  stay exact.
-- The conversion is cached on the radial's content, so replacing only the
-  readout (`calc.model = ...`) does not redo it.
-- A learned-radial file written before the metadata flag existed loads as
-  not learned; mark it with
-  `ace_jax.basis.export.mark_radial_learned("model.npz")`, or pass a float
+- The splined model agrees with the exact model to approximately the
+  tolerance, not to round-off. On the benchmark models, energies agree to
+  approximately 1e-9 (relative), and forces to approximately 2e-8 of the
+  largest force.
+- `spline_tol=None` never makes splines. A float (for example `1e-10`)
+  makes splines of all analytic radials, learned or not.
+- Bases built by ace-jax are analytic but not learned. Thus, by default,
+  they stay exact.
+- The calculator keeps the splines in a cache, keyed on the content of the
+  radials. Thus, if you replace only the coefficients (`calc.model = ...`),
+  it does not make the splines again.
+- A learned-radial file written before the "learned" mark existed loads as
+  not learned. To correct this, mark it with
+  `ace_jax.basis.export.mark_radial_learned("model.npz")`, or give a float
   `spline_tol`.

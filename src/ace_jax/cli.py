@@ -71,6 +71,13 @@ def _add_fit_args(p):
     p.add_argument("--strict", action="store_true",
                    help="fail, instead of warning, when the MAP ends away from a stationary point (a "
                         "predicted Newton gain above 1e-3 nats)")
+    p.add_argument("--noise", choices=["per-quantity", "shared"], default="per-quantity",
+                   help="noise hyperparameters: per-quantity (default) learns sigma_E, sigma_F and sigma_V "
+                        "separately, and at the optimum each cancels its quantity's --weights; shared learns "
+                        "ONE sigma for every weighted row (ACEpotentials' BLR), so the E:F:V weights set "
+                        "the balance. Use shared whenever the weights are meant to set it (an ACEpotentials "
+                        "weights dict, e.g. E 30 / F 1 / V 1): per-quantity lets the many force rows push "
+                        "sigma_E up and underweight the energies")
     p.add_argument("--solver", choices=["evidence", "lstsq"], default="evidence",
                    help="lstsq: plain weighted least squares with no prior (teaching; overfits a large basis)")
     p.add_argument("--map-restarts", type=int, default=1, help="L-BFGS multi-start (best log-posterior)")
@@ -175,7 +182,7 @@ def _fit_config(a):
         baseline=a.baseline, e0=a.e0, m_per_species=a.m_per_species, kernel=a.kernel, bump=not a.no_bump,
         density=a.density, pca_d=a.pca_d, embedding=a.embedding, r0=a.r0, objective=a.objective,
         lml=a.lml, lml_solver=a.lml_solver, devices=a.devices, opt=a.opt, map_steps=a.map_steps, map_restarts=a.map_restarts,
-        map_polish=a.map_polish, strict=a.strict,
+        map_polish=a.map_polish, strict=a.strict, noise=a.noise,
         init=json.load(open(a.init)) if a.init else None, rungs=rungs, laplace=a.laplace,
         n_draws=a.n_draws, vi_steps=a.vi_steps, nuts_warmup=a.nuts_warmup, nuts_samples=a.nuts_samples,
         nuts_chains=a.nuts_chains, uq=a.uq, ard_mode=a.ard_mode, ard_variance=a.ard_variance, ard_val_frac=a.ard_val_frac,

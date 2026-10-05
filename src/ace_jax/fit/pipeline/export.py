@@ -117,9 +117,11 @@ def gp_model_arrays(res, n_draws=1):
     out.update(ind_XM=np.asarray(ind.XM), ind_SM=np.asarray(ind.SM), ind_ZM=np.asarray(ind.ZM),
                ind_scale=np.asarray(ind.scale), ind_Pmap=np.asarray(ind.Pmap), ind_embed=np.asarray(ind.embed),
                draws=np.asarray(draws), mu=np.stack(mus), L=np.stack(Ls))
-    out["gp_json"] = np.frombuffer(json.dumps({
-        "schema_version": GP_SCHEMA, "gpcfg": _gpcfg_json(gpcfg),
-        "kernel": dataclasses.asdict(prob.spec), "warp": ind.warp}).encode(), np.uint8)
+    info = {"schema_version": GP_SCHEMA, "gpcfg": _gpcfg_json(gpcfg),
+            "kernel": dataclasses.asdict(prob.spec), "warp": ind.warp}
+    if getattr(res.config, "noise", "per-quantity") != "per-quantity":   # only then: per-quantity files unchanged
+        info["noise"] = res.config.noise
+    out["gp_json"] = np.frombuffer(json.dumps(info).encode(), np.uint8)
     return out
 
 

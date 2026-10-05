@@ -40,17 +40,19 @@ def _(mo):
     which explains the basis and the fit in more detail. It is adapted from
     notebook E1 of the [MLIP School 2026](https://mlipschool.uk/e1/e1_oracle_and_first_fit).
 
-    **Run this notebook**: with [uv](https://docs.astral.sh/uv/) installed, one command
-    opens it in your browser (no account needed):
+    **Run this notebook.** Install [uv](https://docs.astral.sh/uv/). Then run this command:
 
     ```bash
     uvx marimo edit --sandbox https://raw.githubusercontent.com/ACEsuit/ace-jax/main/docs/user/tutorials/notebooks/school_dataset_si.py
     ```
 
-    or open it in [molab](https://molab.marimo.io/github/ACEsuit/ace-jax/blob/main/docs/user/tutorials/notebooks/school_dataset_si.py), marimo's hosted service (free to
-    preview; sign in to run). The documentation website shows a static copy,
-    run on a CPU when the site was built: there the interactive controls show
-    their default values. The whole notebook runs in under a minute, about 30 s of it the fit.
+    The notebook opens in your browser. You do not need an account.
+    You can also open the notebook in [molab](https://molab.marimo.io/github/ACEsuit/ace-jax/blob/main/docs/user/tutorials/notebooks/school_dataset_si.py),
+    the marimo hosted service. You must sign in to run it there.
+
+    This website shows a static copy of the notebook, run on a CPU when the
+    site was built. The interactive controls show their default values.
+    Run time: less than 1 minute (the fit takes approximately 30 s).
     """)
     return
 
@@ -85,10 +87,11 @@ def _(mo):
     [MACE-MPA-0](https://github.com/ACEsuit/mace-foundations), an MIT-licensed
     model trained on PBE(+U) data. Treat it as the "truth" this notebook fits.
 
-    Labelling costs time, so the labels for every setting of this notebook's
-    sliders ship with the tutorial. `label()` looks each structure up by its
-    content and returns the stored labels; it runs MACE only for a structure it
-    does not hold, which needs one extra install (see the exercises). The
+    Labelling takes time, so the labels for all slider settings of this
+    notebook are included with the tutorial. `label()` finds each structure
+    by its content and returns the stored labels. It runs MACE only for a
+    structure that it does not have. For this, you must install one more
+    package (see the exercises). The
     counter after each labelling step counts the structures you have labelled,
     the budget that a real DFT project spends.
     """)
@@ -166,10 +169,10 @@ def _(mo):
 
     Before fitting anything, look at the labels. A Birch–Murnaghan fit to the
     energy per atom against volume gives the labeller's lattice constant and
-    bulk modulus. Its minimum lies between the sampled points, so the answer
-    does not depend on how coarsely the strain range is sampled, as long as the
-    range stays near the minimum: the Birch–Murnaghan form describes a narrow
-    window, and a wide range of volumes pulls $v_0$ away.
+    bulk modulus. Its minimum is between the sampled points. Thus the result
+    does not depend on the spacing of the samples, if the strain range stays
+    near the minimum. The Birch–Murnaghan form describes only a narrow range
+    of volumes. A wide range of volumes moves $v_0$ away from the minimum.
     """)
     return
 
@@ -217,12 +220,14 @@ def _(mo):
     mo.md(r"""
     ## Step 4: fit
 
-    Fit a linear ACE model with correlation order 3 and maximum total degree 8,
-    cutoff 5.5 Å, as in Tutorial 1: the energy, force and virial noise levels
-    and the coefficient prior are chosen by maximising the evidence.
-    `load_fit_data` takes the labelled `Atoms` directly; the labels are under
-    the keys `energy`, `forces` and `virial`. With no test set given, the test set is the training set; this step
-    only asks how well the fit reproduces its own data.
+    Fit a linear ACE model with correlation order 3, maximum total degree 8
+    and cutoff 5.5 Å, as in Tutorial 1. The fit selects the energy, force and
+    virial noise levels and the coefficient prior by maximising the evidence.
+
+    - `load_fit_data` accepts the labelled `Atoms` directly. The labels are
+      under the keys `energy`, `forces` and `virial`.
+    - There is no test set, so the test set is the training set. This step
+      only measures how well the fit agrees with its own data.
 
     The command-line equivalent, with the labelled cells written to `train.xyz`, is
 
@@ -315,11 +320,12 @@ def _(mo):
 
     $$E_\text{vac} = E_\text{defect} - N_\text{defect}\,\frac{E_\text{bulk}}{N_\text{bulk}}.$$
 
-    The perfect supercell supplies the energy of one bulk atom,
-    $E_\text{bulk}/N_\text{bulk}$; subtracting it once for each of the 63
-    atoms left leaves the cost of the one that is gone. Both cells are built at
-    the labeller's own lattice constant (5.467 Å), so the reference cell is
-    unstrained and its labels ship with the tutorial. The structures are not
+    The perfect supercell gives the energy of one bulk atom,
+    $E_\text{bulk}/N_\text{bulk}$. Subtract it one time for each of the 63
+    remaining atoms. The result is the energy cost of the missing atom. Both
+    cells use the lattice constant of the labeller (5.467 Å). Thus the
+    reference cell has no strain, and its labels are included with the
+    tutorial. The structures are not
     relaxed.
     """)
     return
@@ -416,7 +422,7 @@ def _(mo):
     3. **Add the defect.** Append `labelled_probe[1]` (the vacancy cell) to the
        training set in Step 4 (`train=labelled_bulk + [labelled_probe[1]]`), and refit. What happens to the vacancy error now,
        and why is that not a fair test any more?
-    4. **Off the grid.** The sliders snap to the settings whose labels ship.
+    4. **Off the grid.** The sliders move only to the settings that have labels in the tutorial.
        To label any other structure, install the labeller into the notebook's
        environment and re-run. In a marimo sandbox, add `mace-torch` to the
        packages panel; elsewhere,
@@ -452,7 +458,7 @@ def _(mo):
     ## Summary
 
     - `ace_jax.tutorials.labels.label()` labels structures with an MIT
-      foundation model, from shipped labels where it has them.
+      foundation model, from the labels in the tutorial where it has them.
     - `load_fit_data(cfg, train=[atoms, ...])` fits labelled `Atoms`
       directly; no files are needed.
     - A near-perfect $R^2$ on the training set says the model interpolates

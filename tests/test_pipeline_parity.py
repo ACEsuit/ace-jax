@@ -69,6 +69,7 @@ def test_driver_reproduces_golden(name, tmp_path):
     cmd = cli_argv(out) if driver == "cli" else run_argv(argv, out)
     # the goldens were recorded with ASE's neighbour list; another backend's
     # order changes summation order, which the MAP optimisers amplify
-    env = dict(os.environ, JAX_ENABLE_X64="1", PYTHONPATH=str(ROOT), ACEJAX_NLIST="ase")
+    # JAX_PLATFORMS=cpu: the goldens are CPU recordings; a CUDA venv would otherwise pick the GPU
+    env = dict(os.environ, JAX_ENABLE_X64="1", PYTHONPATH=str(ROOT), ACEJAX_NLIST="ase", JAX_PLATFORMS="cpu")
     subprocess.run(cmd, check=True, env=env, cwd=ROOT, capture_output=True)
     _compare(out, GOLD / name)

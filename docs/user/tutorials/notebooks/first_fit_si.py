@@ -24,7 +24,7 @@ def _(mo):
     # Tutorial 1: a first ACE fit for silicon
 
     In this notebook you build an ACE basis, fit a linear ACE model to a small
-    silicon dataset, check it on held-out data, and then use it as an ASE
+    silicon dataset, check it on test data, and then use it as an ASE
     calculator for an equation of state and a short molecular-dynamics run.
     Everything runs on a CPU in a few minutes.
 
@@ -39,17 +39,19 @@ def _(mo):
     worked. The **exercises** at the end change one thing at a time; the
     notebook re-runs only what depends on the change.
 
-    **Run this notebook**: with [uv](https://docs.astral.sh/uv/) installed, one command
-    opens it in your browser (no account needed):
+    **Run this notebook.** Install [uv](https://docs.astral.sh/uv/). Then run this command:
 
     ```bash
     uvx marimo edit --sandbox https://raw.githubusercontent.com/ACEsuit/ace-jax/main/docs/user/tutorials/notebooks/first_fit_si.py
     ```
 
-    or open it in [molab](https://molab.marimo.io/github/ACEsuit/ace-jax/blob/main/docs/user/tutorials/notebooks/first_fit_si.py), marimo's hosted service (free to
-    preview; sign in to run). The documentation website shows a static copy,
-    run on a CPU when the site was built: there the interactive controls show
-    their default values. The whole notebook runs in about a minute, about 30 s of it the fit.
+    The notebook opens in your browser. You do not need an account.
+    You can also open the notebook in [molab](https://molab.marimo.io/github/ACEsuit/ace-jax/blob/main/docs/user/tutorials/notebooks/first_fit_si.py),
+    the marimo hosted service. You must sign in to run it there.
+
+    This website shows a static copy of the notebook, run on a CPU when the
+    site was built. The interactive controls show their default values.
+    Run time: approximately 1 minute (the fit takes approximately 30 s).
     """)
     return
 
@@ -436,8 +438,8 @@ def _(mo):
             "at degrees 8, 10 and 12."),
         "Hint for exercise 3": mo.md(
             "An atom with no neighbours is predicted as E0 alone, so with `e0='lsq'` an "
-            "isolated atom in the training set pins its species' E0 to its energy exactly "
-            "(-158.545 eV here). Without one, E0 is fitted with the model, to -161.90 eV: it "
+            "isolated atom in the training set sets the E0 of its species to its energy "
+            "exactly (-158.545 eV here). Without one, E0 is fitted with the model, to -161.90 eV: it "
             "is then only a reference level, not a free-atom energy. The bulk is fitted "
             "relative to it either way, and the test errors barely move (22 to 24 meV/atom "
             "and 0.10 eV/A)."),

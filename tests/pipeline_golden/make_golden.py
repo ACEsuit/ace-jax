@@ -66,7 +66,8 @@ def platform_tag():
 def main():
     # ASE's neighbour list, as the parity test runs them: another backend's pair order
     # changes summation order, which the MAP optimisers amplify
-    env = dict(os.environ, JAX_ENABLE_X64="1", PYTHONPATH=str(ROOT), ACEJAX_NLIST="ase")
+    # JAX_PLATFORMS=cpu: record on the CPU always (bit-level parity; a CUDA venv would pick the GPU)
+    env = dict(os.environ, JAX_ENABLE_X64="1", PYTHONPATH=str(ROOT), ACEJAX_NLIST="ase", JAX_PLATFORMS="cpu")
     OUT.mkdir(parents=True, exist_ok=True)
     (OUT / "PLATFORM").write_text(platform_tag() + "\n")
     only = set(sys.argv[1:])                      # optional: regenerate just these scenarios

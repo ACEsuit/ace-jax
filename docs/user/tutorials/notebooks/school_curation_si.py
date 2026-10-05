@@ -40,16 +40,19 @@ def _(mo):
     It builds on Tutorials 4 and 6 and is adapted from notebook E3 of the
     [MLIP School 2026](https://mlipschool.uk/e3/e3_automating_curation).
 
-    **Run this notebook**: with [uv](https://docs.astral.sh/uv/) installed, one command
-    opens it in your browser (no account needed):
+    **Run this notebook.** Install [uv](https://docs.astral.sh/uv/). Then run this command:
 
     ```bash
     uvx marimo edit --sandbox https://raw.githubusercontent.com/ACEsuit/ace-jax/main/docs/user/tutorials/notebooks/school_curation_si.py
     ```
 
-    or open it in [molab](https://molab.marimo.io/github/ACEsuit/ace-jax/blob/main/docs/user/tutorials/notebooks/school_curation_si.py), marimo's hosted service (free to
-    preview; sign in to run). The documentation website shows a static copy,
-    run on a CPU when the site was built. The three campaigns take about 5 minutes.
+    The notebook opens in your browser. You do not need an account.
+    You can also open the notebook in [molab](https://molab.marimo.io/github/ACEsuit/ace-jax/blob/main/docs/user/tutorials/notebooks/school_curation_si.py),
+    the marimo hosted service. You must sign in to run it there.
+
+    This website shows a static copy of the notebook, run on a CPU when the
+    site was built.
+    Run time: approximately 5 minutes for the three campaigns.
     """)
     return
 
@@ -95,10 +98,10 @@ def _(mo):
       seed set plus everything picked so far. Two rounds: 8 labels.
     - **Score:** the error of the model's γ(111) against the labeller's.
 
-    The MD pools of the run on this page, and labels for every frame in them,
-    ship with the tutorial, so the loop replays them instead of rerunning MD
-    (which differs from machine to machine). Running MD live needs the
-    labeller (exercise 3).
+    The MD pools of the run on this page, and the labels for all their
+    frames, are included with the tutorial. Thus the loop uses these pools
+    again and does not run MD again, because MD results are different on
+    different machines. To run MD live, you need the labeller (exercise 3).
     """)
     return
 
@@ -350,7 +353,7 @@ def _(mo):
        set. Score against only the last eight training structures (the
        school's version): do the picks change?
     2. **Budget.** Run one round of 8 picks instead of two of 4
-       (`K.run_campaign(..., rounds=1, per_round=8)`: it replays the shipped
+       (`K.run_campaign(..., rounds=1, per_round=8)`: it uses the included
        first-round pool, every frame of which is labelled). Is one large round
        better or worse than two small ones?
     3. **Live MD.** With the labeller installed (`pip install mace-torch

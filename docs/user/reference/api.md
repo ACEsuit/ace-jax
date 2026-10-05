@@ -1,9 +1,9 @@
 # Python API
 
-The public Python interface, grouped by task. Everything else under
-`ace_jax` is internal and may change between releases. Fitting and radial
-learning need float64: call `jax.config.update("jax_enable_x64", True)`
-before anything else imports JAX.
+This page gives the public Python interface, in groups by task. All other
+parts of `ace_jax` are internal. They can change between releases.
+
+--8<-- "float64.md"
 
 ```python
 import ace_jax as aj
@@ -46,10 +46,14 @@ model, meta, arrays = aj.load("model.npz")      # an ACE model, its metadata, th
 
 ## Fitting
 
-The pipeline behind `aj fit`. `FitConfig`'s defaults are those of the research
-driver and differ from the command line's in places (for example `arm="gp"`,
-`e0="lsq"`, `map_steps=150`); set the fields you rely on explicitly, and
-`predict_stats="recompute"` to match the command line exactly.
+The pipeline that `aj fit` uses.
+
+!!! warning "`FitConfig` defaults are different from the command line"
+    The `FitConfig` defaults are those of the research driver. Some are
+    different from the command-line defaults (for example `arm="gp"`,
+    `e0="lsq"`, `map_steps=150`). Set each field that you need explicitly.
+    To get exactly the command-line result, also set
+    `predict_stats="recompute"`.
 
 ::: ace_jax.fit.pipeline.FitConfig
     options:

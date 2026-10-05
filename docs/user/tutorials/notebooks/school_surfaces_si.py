@@ -27,7 +27,7 @@ def _(mo):
     [Tutorial 4](https://acesuit.github.io/ace-jax/tutorials/dataset-and-properties/)
     ended with a question: would a bulk-only silicon model get a surface
     energy right? This tutorial answers it, measures why not in descriptor
-    space, repairs the data set, and then lets the surface atoms move, which
+    space, repairs the dataset, and then lets the surface atoms move, which
     exposes the next gap.
 
     **Goals**
@@ -35,23 +35,26 @@ def _(mo):
     1. Build silicon slabs for three faces and compute their surface energies
        with the labeller and with the bulk-only model.
     2. See in descriptor space how far the surface atoms sit from the data.
-    3. Repair the data set with a few slabs, and check the surface energies.
+    3. Repair the dataset with a few slabs, and check the surface energies.
     4. Relax the slabs with the repaired model, find what still breaks, and
        fix that too.
 
     It is adapted from notebook E2 of the
     [MLIP School 2026](https://mlipschool.uk/e2/e2_surfaces).
 
-    **Run this notebook**: with [uv](https://docs.astral.sh/uv/) installed, one command
-    opens it in your browser (no account needed):
+    **Run this notebook.** Install [uv](https://docs.astral.sh/uv/). Then run this command:
 
     ```bash
     uvx marimo edit --sandbox https://raw.githubusercontent.com/ACEsuit/ace-jax/main/docs/user/tutorials/notebooks/school_surfaces_si.py
     ```
 
-    or open it in [molab](https://molab.marimo.io/github/ACEsuit/ace-jax/blob/main/docs/user/tutorials/notebooks/school_surfaces_si.py), marimo's hosted service (free to
-    preview; sign in to run). The documentation website shows a static copy,
-    run on a CPU when the site was built. The whole notebook runs in about 2 minutes.
+    The notebook opens in your browser. You do not need an account.
+    You can also open the notebook in [molab](https://molab.marimo.io/github/ACEsuit/ace-jax/blob/main/docs/user/tutorials/notebooks/school_surfaces_si.py),
+    the marimo hosted service. You must sign in to run it there.
+
+    This website shows a static copy of the notebook, run on a CPU when the
+    site was built. The interactive controls show their default values.
+    Run time: approximately 2 minutes.
     """)
     return
 
@@ -114,7 +117,7 @@ def _(mo):
     mo.md(r"""
     ## Step 1: the bulk model
 
-    The starting point is Tutorial 4's data set at its defaults: ten strained
+    The starting point is Tutorial 4's dataset at its defaults: ten strained
     and rattled 8-atom diamond cells (strain range 0.08, rattle 0.02 Å),
     labelled by MACE-MPA-0. Fit it with the evidence fit at the size used
     throughout this tutorial: correlation order 3, total degree 10, cutoff 5.5 Å.
@@ -158,17 +161,18 @@ def _(mo):
     above and below so that it does not see its own periodic image. Build the
     (100), (110) and (111) faces with `ase.build.surface`. Two details matter:
 
-    - **Vacuum.** The labeller sees about 6 Å, and its message passing twice
-      that; the gap between a slab and its image must be at least 12 Å. The
-      vacuum slider sets the vacuum on each side.
-    - **Which (111).** Diamond has two (111) cleavage planes: the wide
-      "shuffle" plane, which breaks one bond per surface atom, and the
-      narrow "glide" pair, which breaks three. `surface` takes the glide pair
-      by default; `T.slab` shifts the crystal by a quarter of the cubic
-      diagonal first, so the cut is on the shuffle plane. A surface atom with
-      a single neighbour is the sign of a glide cut.
+    - **Vacuum.** The labeller sees approximately 6 Å, and its message
+      passing sees two times that distance. Thus the gap between a slab and
+      its image must be a minimum of 12 Å. The vacuum slider sets the vacuum
+      on each side.
+    - **Which (111).** Diamond has two (111) cleavage planes. The wide
+      "shuffle" plane breaks one bond for each surface atom. The narrow
+      "glide" pair breaks three. By default, `surface` uses the glide pair.
+      `T.slab` first moves the crystal by a quarter of the cubic diagonal,
+      so the cut is on the shuffle plane. A surface atom with only one
+      neighbour shows a glide cut.
 
-    The sliders snap to the settings whose labels ship.
+    The sliders move only to the settings that have labels in the tutorial.
     """)
     return
 
@@ -275,10 +279,12 @@ def _(mo):
 
     Describe every atom by its ACE descriptor in a fixed reference basis
     (order 3, degree 10: 120 numbers per atom), and compare the slab atoms
-    with the bulk training atoms. A principal-component plot shows the gap;
-    one number measures it: the median distance from a slab atom to its
-    nearest training atom, divided by the training atoms' own typical
-    spacing (the median distance from each to its nearest neighbour).
+    with the bulk training atoms. A principal-component plot shows the gap.
+    One number measures it:
+
+    - the median distance from a slab atom to its nearest training atom,
+    - divided by the typical spacing of the training atoms (the median
+      distance from each training atom to its nearest neighbour).
     """)
     return
 
@@ -318,11 +324,12 @@ def _(mo, novelty):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## Step 5: repair the data set
+    ## Step 5: repair the dataset
 
-    Add slabs of the same three faces to the training set, at a thickness the
-    test slabs do not have (4 layers, or 6 when the test slabs are 4): the
-    test slabs stay held out. Three structures, three labels.
+    Add slabs of the same three faces to the training set. Use a thickness
+    that the test slabs do not have: 4 layers, or 6 if the test slabs have 4.
+    Thus the test slabs stay out of the training set. This adds three
+    structures and three labels.
     """)
     return
 
@@ -449,9 +456,9 @@ def _(mo):
     ## Step 7: displaced slabs, and a basis to hold them
 
     A relaxation follows one downhill path. Molecular dynamics at a finite
-    temperature moves the surface atoms in every direction, and the repair
-    slabs, with zero forces by symmetry, say nothing about the forces away
-    from the ideal cleave. Teach the model what a surface does when its
+    temperature moves the surface atoms in all directions. The repair slabs
+    have zero forces because of their symmetry. Thus they give no data about
+    the forces away from the ideal cleave. Teach the model what a surface does when its
     atoms move: two rattled copies of each repair slab
     (0.05 and 0.12 Å), six more labels. Refit with the same basis, relax
     again, and compare the relaxed surface energies with the labeller's

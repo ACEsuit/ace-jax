@@ -1,22 +1,28 @@
 # Force uncertainty: the mathematics
 
-This page writes out the pipeline behind `aj fit --uq ard` (revision 2): how
-the per-atom force uncertainty is built, calibrated and served. For how to use
-it, see [Per-atom force uncertainty](../howto/force-uncertainty.md).
+This page gives the method of `aj fit --uq ard` (revision 2): how ace-jax
+builds, calibrates and evaluates the per-atom force uncertainty. For how to
+use it, see [Per-atom force uncertainty](../howto/force-uncertainty.md).
 
-**In one paragraph.** The served force uncertainty is a **shape** times a
-per-group **scale**. The shape is the per-atom $3\times3$ block $V(x)$ of an
-exact, centred, delete-one-cluster jackknife covariance of the fitted
-coefficients, with clusters given by spatial blocks within large cells; its
-trace $v(x)=\operatorname{tr}V(x)$ is the isotropic shape. The scale comes in
-two forms: `forces_std` uses a per-group rms factor $\lambda_g^{\mathrm{rms}}$,
-and `forces_q` a per-group conformal quantile $q_g$ computed with each
-configuration weighted equally. Both are fitted on scores whose numerator
-(the error) and denominator (the shape) come from the same hold-out
-posterior, then carried to the served posterior by a fitted power of the
-training-set size. Within a group, the ordering of atoms by $\sigma$ is the
-ordering given by the shape; across groups it changes only through ratios of
-the group scales.
+**Summary.**
+
+- The force uncertainty is an uncertainty **shape** multiplied by a group
+  **scale**.
+- The shape is the per-atom $3\times3$ block $V(x)$ of a jackknife
+  covariance of the fitted coefficients. The jackknife is exact, centred and
+  delete-one-cluster. The clusters are spatial blocks in large cells.
+- The trace $v(x)=\operatorname{tr}V(x)$ is the isotropic shape.
+- The scale has two forms. `forces_std` uses a group rms factor
+  $\lambda_g^{\mathrm{rms}}$. `forces_q` uses a group conformal quantile
+  $q_g$, with equal weight for each configuration.
+- The fit calculates both scales from scores. The numerator of a score (the
+  error) and its denominator (the shape) come from the same validation
+  posterior.
+- A fitted power of the training-set size then applies the scales to the
+  final posterior.
+- In a group, the order of atoms by $\sigma$ is the order by the shape.
+  Between groups, the order changes only through the ratios of the group
+  scales.
 
 **Notation.**
 
@@ -75,7 +81,7 @@ $k(j)\in\{2,3,4\}$; pair columns and correlation-order-1 columns both count as
 2-body. The E0 columns are outside the ARD groups: they have no $a_k$ and
 keep the fixed broad prior of the BLR fit (`e0_prec`, standard deviation
 1 eV): there $\Gamma_j^2$ is that precision and $\Lambda_{jj}=\Gamma_j^2$. A species with an isolated atom in
-the training set has its $E^0$ pinned instead (prior standard deviation
+the training set has its $E^0$ fixed instead (prior standard deviation
 $10^{-8}$ eV), because that atom's energy is $E^0$ alone. The posterior is
 Gaussian:
 
@@ -88,7 +94,7 @@ $$
 The computation works in the prior-scaled system
 $S=D^{-1}AD^{-1}=BB^\mathsf{T}$ with $D=\operatorname{diag}\Gamma$ and $B$
 the Cholesky factor, and floors $a_k\ge a_{\mathrm{floor}}$ so that
-$\operatorname{cond}(S)\le10^{14}$. The served `model.npz` holds $\bar c$:
+$\operatorname{cond}(S)\le10^{14}$. The final `model.npz` holds $\bar c$:
 the basis coefficients, with the fitted E0 shift of $\bar c$ folded into
 its $E^0$. The E0 columns are zero on every force row, so they leave the
 force shape and every force uncertainty below unchanged.
@@ -110,7 +116,7 @@ components of $h$, with L-BFGS-B on the gradient-normalised objective. The
 **sequential** mode fixes $\sigma_q$ at the linear MAP and fits only the
 $a_k$, which needs a single Gram matrix and less memory.
 
-## 4. The hold-out protocol
+## 4. The validation protocol
 
 1. **Stratified split by configuration.** Compute the Mondrian group of every
    training atom ([section 9](#9-the-groups)), with the band edges computed
@@ -127,12 +133,12 @@ $a_k$, which needs a single Gram matrix and less memory.
    $P_{\mathrm{fit}}$ with mean $\bar c_{\mathrm{fit}}$, factor
    $B_{\mathrm{fit}}$ and shape factor $\tilde Q_{\mathrm{fit}}$
    ([section 6](#6-the-shape-exact-centred-jackknife-covariance), built over
-   the clusters of $T_{\mathrm{fit}}$ only). For each held-out atom
+   the clusters of $T_{\mathrm{fit}}$ only). For each validation atom
    $i\in T_{\mathrm{val}}$, record the error
-   $e_i=F_i-\hat F_i(\bar c_{\mathrm{fit}})$ and the hold-out shape
+   $e_i=F_i-\hat F_i(\bar c_{\mathrm{fit}})$ and the validation shape
    $V_{\mathrm{fit}}(x_i)$. Both are out of sample, because no row of the
    atom's configuration is in $T_{\mathrm{fit}}$.
-3. **Served posterior.** Refit on all of $T$, starting from
+3. **Final posterior.** Refit on all of $T$, starting from
    $h_{\mathrm{fit}}$. This gives $P$ with mean $\bar c$, factor $B$ and shape
    factor $\tilde Q$.
 
@@ -171,7 +177,7 @@ $\ell/r_{\mathrm{cut}}\in\{2,3,4,6,\infty\}$ changed tip coverage by at most
 large cells that appear only in a calibration set never enter it.
 
 **Two kinds of unit.** Jackknife clusters are an ingredient of the shape
-only. The hold-out split, the conformal quantiles and the weights all
+only. The validation split, the conformal quantiles and the weights all
 operate on whole configurations.
 
 ## 6. The shape: exact centred jackknife covariance
@@ -179,7 +185,7 @@ operate on whole configurations.
 ### Leverage-corrected cluster scores
 
 For cluster $k$ with stacked whitened rows
-$\Psi_k\in\mathbb{R}^{n_k\times L}$ and residuals at the served mean
+$\Psi_k\in\mathbb{R}^{n_k\times L}$ and residuals at the final mean
 $\rho_k=\tilde y_k-\Psi_k\bar c$, define the cluster hat block and the
 leverage-corrected (PRESS) score
 
@@ -266,7 +272,7 @@ $$
 $$
 
 where $\phi_\alpha(x)$ are the raw, unweighted force rows of a target atom.
-The served shape is
+The final shape is
 
 $$
 V(x)_{\alpha\beta}=u_\alpha^\mathsf{T}\tilde Q\tilde Q^\mathsf{T} u_\beta,\qquad
@@ -325,7 +331,7 @@ $$
 since $\epsilon$ depends on $\operatorname{tr}V$ only. The groups and the
 support features are built from distances and invariant descriptors, so
 `forces_std`, `forces_q`, `forces_q_mahal`, `forces_group` and the support
-flag are invariant, and every served quantity is permutation-equivariant.
+flag are invariant, and every output quantity is permutation-equivariant.
 The test suite checks all of this for random rotations and reflections.
 
 ## 7. Calibration scores
@@ -347,7 +353,7 @@ $e\sim\mathcal{N}(0,\lambda^2V)$ (anisotropic), $s/\lambda\sim\chi_3$. The
 conformal step does not rely on this model; only the reading of `forces_std`
 as a Gaussian does. The mode is chosen at fit time
 (`--force-shape iso|aniso`, default `aniso`: on the validation, at the
-default hold-out fraction, it is the only variant without target-regime
+default validation fraction, it is the only variant without target-regime
 calibration that meets the coverage targets),
 and every scale below is computed in that mode.
 
@@ -359,18 +365,18 @@ parameter variance, scaling roughly as $1/N$, whereas the error is dominated
 by approximation error (with the shape of the previous revision, the squared
 rms scale was about 39 on the validation benchmark). The ratio of squared error to shape is therefore unchanged only
 if the error is variance-dominated. If it is bias-dominated, $\lambda^2$
-grows roughly in proportion to $N$, and the hold-out scale underestimates the
-served one by up to $(1-f)^{-1/2}$. Writing $\lambda\propto N^{\beta}$, the
+grows roughly in proportion to $N$, and the validation scale underestimates the
+final one by up to $(1-f)^{-1/2}$. Writing $\lambda\propto N^{\beta}$, the
 variance-dominated limit is $\beta=0$ and the bias-dominated one
 $\beta=\tfrac12$.
 
 ### The transfer exponent
 
-The served scale replaces the uncorrected hold-out scale by an extrapolation
+The final scale replaces the uncorrected validation scale by an extrapolation
 in $N$ estimated in every fit (`--ard-transfer exponent`, the default).
 $T_{\mathrm{fit}}$ is split again by the same stratified rule into
 $T_{\mathrm{fit2}}$, with $N_{\mathrm{fit2}}\approx(1-f)N_{\mathrm{fit}}$
-configurations. A second hold-out posterior $P_{\mathrm{fit2}}$ is fitted on
+configurations. A second validation posterior $P_{\mathrm{fit2}}$ is fitted on
 it, with its own jackknife shape, and scores the same $T_{\mathrm{val}}$
 atoms. Let $\lambda_1$ and $\lambda_2$ be the configuration-weighted rms
 scales of the $P_{\mathrm{fit}}$ and $P_{\mathrm{fit2}}$ scores, pooled over
@@ -389,7 +395,7 @@ are formed.
 - The clip keeps $\beta$ between the two limits above, and a clip is logged
   as a warning. If $\hat\beta$ is undefined ($N_{\mathrm{fit2}}=N_{\mathrm{fit}}$,
   or a non-finite scale), $\beta=\tfrac12$, the conservative limit.
-- One pooled $\beta$ serves all groups. `--ard-transfer sqrt` fixes
+- One pooled $\beta$ applies to all groups. `--ard-transfer sqrt` fixes
   $\beta=\tfrac12$ and `none` fixes $\beta=0$, without the second fit.
 - **Precision.** $\beta$ is a single-split estimate. Because the extrapolation
   step equals the baseline ($N/N_{\mathrm{fit}}\approx N_{\mathrm{fit}}/N_{\mathrm{fit2}}$),
@@ -397,7 +403,7 @@ are formed.
   clip bounds the factor to at most $(1-f)^{-1/2}$.
 - On the validation benchmark, a sweep of $f$ gives
   $\log\lambda\propto0.37\log N_{\mathrm{fit}}$, and
-  $(3680/2944)^{0.37}=1.086$ matches the served rms-$z$ deficit of $1.087$;
+  $(3680/2944)^{0.37}=1.086$ matches the final rms-$z$ deficit of $1.087$;
   the per-fit estimates were $\beta=0.36$–$0.38$ at $f\in\{0.1,0.2,0.3\}$.
 - The cost is one more evidence fit and jackknife shape, on about
   $(1-f)^2|T|$ configurations.
@@ -430,7 +436,7 @@ $$
 This is the configuration-weighted Gaussian maximum-likelihood scale within
 each group. It does not depend on $\alpha$ and makes no coverage claim; it is
 the scale to use when propagating uncertainty or when a Gaussian is wanted.
-`forces_cov` is served in both modes. In isotropic mode it uses the isotropic
+`forces_cov` is given in both modes. In isotropic mode it uses the isotropic
 $\lambda_g^{\mathrm{rms}}$, so its trace, $\mathtt{forces\_std}^2$, is
 calibrated but its orientation is the uncalibrated shape of $V(x)$.
 
@@ -445,7 +451,7 @@ $$
 \qquad q_g=\inf\{t:\hat F_g(t)\ge1-\alpha\},
 $$
 
-with $1-\alpha$ = `--ard-coverage`. The served regions are
+with $1-\alpha$ = `--ard-coverage`. The final regions are
 
 $$
 \text{isotropic:}\quad \{\Delta F: |\Delta F|\le \mathtt{forces\_q}(x)\},\qquad
@@ -457,7 +463,7 @@ $$
 $$
 
 with $\epsilon(x)=\epsilon\,\tfrac13\operatorname{tr}V(x)$ as for the scores.
-In anisotropic mode, $q_{g(x)}$ is served per atom (`forces_q_mahal`)
+In anisotropic mode, $q_{g(x)}$ is given for each atom (`forces_q_mahal`)
 together with $V(x)$, and the scalar `forces_q` is the largest semi-axis,
 $q_{g(x)}\sqrt{\lambda_{\max}(V+\epsilon I)}$, for convenience.
 
@@ -491,7 +497,7 @@ the scales of the nearest qualifying distortion band with the same
 $[z=z^\star]$ flag, then across the flag, then of the all-groups pool. The
 merges are reported.
 
-**Reported per group.** Each atom is served its group id, `forces_group`. The
+**Reported per group.** Each atom gets its group id, `forces_group`. The
 per-group table stored with the posterior holds $n_{\mathrm{cfg},g}$ (split
 into configurations from $T_{\mathrm{val}}$ and from calibration sets $U$),
 total atoms, $\lambda_g^{\mathrm{rms}}$, $q_g$, the merges, and the
@@ -505,7 +511,7 @@ $r_g\approx1$ means that reading `forces_std` as a Gaussian reproduces the
 conformal coverage in that group. $r_g>1$ means the score distribution has
 heavier tails than $\chi_3$; within the group, `forces_q` is then $r_g$ times
 the radius implied by `forces_std` read as a Gaussian. $r_g$ is constant
-within a group, so it is not served per atom: `forces_group` joins each atom
+within a group, so it is not given for each atom: `forces_group` joins each atom
 to it.
 
 **What is invariant.** The mean $\bar c$; the energy and virial predictions;
@@ -533,7 +539,7 @@ of $T$, and an atom with undefined $d$ goes in the top band. The group is
 $g=\operatorname{band}(d)\times[z\ne z^\star]$, numbered
 $2\,\operatorname{band}(d)+[z\ne z^\star]$, so $G=8$ before merging
 (`--ard-groups none` drops the bands, $G=2$; tied percentiles collapse
-bands). The same edges stratify the hold-out split. They depend only on
+bands). The same edges stratify the validation split. They depend only on
 geometry, never on labels or scores, so letting $T_{\mathrm{val}}$'s geometry
 into three quantiles over thousands of atoms has a negligible effect on
 exchangeability. What matters is that the edges are frozen at fit time:
@@ -545,11 +551,11 @@ exchangeability. What matters is that the edges are frozen at fit time:
 [section 7](#7-calibration-scores).
 
 **`aj calibrate`** takes a set $U$ of labelled configurations from the target
-regime, disjoint from $T$. The errors are those of the served model,
-$e_u=F_u-\hat F_u(\bar c)$, and the shape is the served $V(x_u)$, which is
+regime, disjoint from $T$. The errors are those of the final model,
+$e_u=F_u-\hat F_u(\bar c)$, and the shape is the final $V(x_u)$, which is
 out of sample because $U\cap T=\emptyset$. The scores follow section 7 with
 $V$ in place of $V_{\mathrm{fit}}$ (and no transfer factor, since they already
-come from the served model). Then, for each group $g$:
+come from the final model). Then, for each group $g$:
 
 - if $U$ has at least $n_{\min}$ configurations in $g$, the pool for $g$ is
   $U$ alone (**per-group replace**, the default);
@@ -561,11 +567,11 @@ forces $U$ alone in every group (merging as needed).
 $\lambda_g^{\mathrm{rms}}$ and $q_g$ are recomputed, and each group reports
 its pool composition. Mixed groups are where the transfer assumption matters
 most, since $T_{\mathrm{val}}$ scores come from $P_{\mathrm{fit}}$ and $U$
-scores from the served model.
+scores from the final model.
 
 **Rationale.** A target atom resembling $U$ should be calibrated against $U$.
-Mixing in $T_{\mathrm{val}}$ scores from easier atoms of the same group
-dilutes the quantile and gives the coverage of a mixture. The other side of
+$T_{\mathrm{val}}$ scores from easier atoms of the same group
+make the quantile too small and gives the coverage of a mixture. The other side of
 this is that a posterior calibrated on $U$ is specific to the regime of $U$
 (see the [validation](../howto/force-uncertainty.md#validation)).
 
@@ -631,11 +637,11 @@ fit
     merged below $n_{\min}$).
 
 calibrate
-:   labelled target set $U$ → scores with the served model and shape →
+:   labelled target set $U$ → scores with the final model and shape →
     per-group replace (or append, or replace) → recompute
     $\lambda^{\mathrm{rms}}_g$ and $q_g$.
 
-serve
+evaluate
 :   shape $V(x)$ from the projections $R^\mathsf{T}u_\alpha(x)$ →
     `forces_std`, `forces_cov`, `forces_q` (and `forces_q_mahal` in
     anisotropic mode) and `forces_group`.
@@ -649,9 +655,9 @@ diagnose
 1. **Exchangeability at configuration level, within a group.** The coverage
    statement is approximate, with error controlled by $n_{\mathrm{cfg},g}$,
    which is reported with the merges.
-2. **Transfer** from the hold-out model to the served model. This is an
+2. **Transfer** from the validation model to the final model. This is an
    empirical assumption: the per-fit exponent extrapolates the scale from two
-   hold-out sizes to $|T|$, assuming a power law in $N$ with exponent in
+   validation sizes to $|T|$, assuming a power law in $N$ with exponent in
    $[0,\tfrac12]$. On out-of-distribution cells some dependence on $f$
    remains (crack-tip coverage 0.896 at $f=0.1$, 0.851 at $f=0.3$), although
    the in-distribution scale is independent of $f$.
