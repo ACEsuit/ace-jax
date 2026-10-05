@@ -28,12 +28,10 @@ from typing import NamedTuple
 class Coupling(NamedTuple):
     """Everything the ET call returns, in ace-jax's export layout.
 
-    A2B: dense (n_B, n_AA) float64 coupling, one nonzero per column.
+    A2B: dense (n_B, n_AA) float64 coupling, one nonzero per column, its
+        columns in the AA evaluation order of `aa_specs` (`align_columns`).
     aa_sig: per-column (n, l, m) tuples in A2B column order -- the column
-        *identity*, from meta `𝔸spec` in raw row order (NOT aabasis.specs:
-        SparseSymmProd re-sorts its input, so the evaluation order is a
-        different permutation; see the build_spec/couple docstrings in earlier
-        findings).
+        *identity*, from meta `𝔸spec`, permuted with the A2B columns.
     aspec: 0-based (Rnl_idx, Ylm_idx) per A function, in abasis.spec order --
         the index space A2B columns and aa_specs entries share.
     aa_specs: per-order (n_v, order) 0-based A-column index arrays, aabasis
@@ -115,12 +113,12 @@ def couple(mb_spec, Rnl_spec, Ylm_spec):
 
     `aa_sig[j]` is the identity of A2B COLUMN j.  It is taken from the tensor's
     meta `𝔸spec` (the readable spec returned *alongside* the symmetrisation
-    matrix), NOT from `aabasis.specs`: `SparseSymmProd` re-sorts its input, so the
-    aabasis EVALUATION order (`specs`/`reconstruct_spec`) is a different
-    permutation from the A2B column order.  Under `𝔸spec` order A2B is exactly
-    block-diagonal in nnll; under `specs` order it is not.  This distinction is
-    what makes end-to-end parity work for an arbitrary (Python-generated) mb_spec
-    rather than only for the oracle's ordering."""
+    matrix), whose order is the library's A2B column order.  `SparseSymmProd`
+    re-sorts its input by body length, so for an mb_spec that interleaves body
+    orders (`build_spec`'s) the aabasis EVALUATION order (`aa_specs`) is a
+    different permutation; `align_columns` permutes A2B and aa_sig into the
+    evaluation order before returning, so column j of A2B multiplies AA
+    product j."""
     import numpy as np
     raw = _lib().couple_raw(mb_spec, Rnl_spec, Ylm_spec)
     A2B = np.zeros(raw.A2B_shape, np.float64)
@@ -137,7 +135,44 @@ def couple(mb_spec, Rnl_spec, Ylm_spec):
     no = raw.nnll_off
     nnll_spec = tuple(tuple((int(n), int(l)) for n, l in raw.nnll[no[i]:no[i + 1]])
                       for i in range(len(no) - 1))
-    return Coupling(A2B=A2B, aa_sig=aa_sig, aspec=aspec, aa_specs=aa_specs, nnll_spec=nnll_spec)
+    return align_columns(Coupling(A2B=A2B, aa_sig=aa_sig, aspec=aspec, aa_specs=aa_specs,
+                                  nnll_spec=nnll_spec), Rnl_spec, Ylm_spec)
+
+
+def align_columns(cpl, Rnl_spec, Ylm_spec):
+    """`cpl` with its A2B columns (and `aa_sig`) permuted into the AA
+    evaluation order, the concatenated `aa_specs` rows that eval multiplies
+    A2B against.  Idempotent.
+
+    The library returns the A2B columns in ET's `𝔸spec` order (the body order
+    of `mb_spec`, each body expanded into its m-realisations) but `aa_specs` in
+    `SparseSymmProd` order, which stable-sorts the bodies by length.  Upstream
+    ET multiplies its A2B against that sorted AA as is, so the two orders agree
+    only for an `mb_spec` already grouped by body order (as ACEpotentials and
+    `build_embedding_spec` pass).  `build_spec`'s DFS interleaves orders, and
+    pairing the unpermuted columns with the AA products gave a model whose
+    B functions were not rotation invariant.
+
+    The permutation is found by identity, not assumed: each evaluation column's
+    (n, l, m) signature, read through aspec -> (Rnl_spec, Ylm_spec), is looked up
+    in `aa_sig`.  That lookup is unambiguous because the columns are the
+    deduplicated A products, one per (n, l, m) multiset; the different coupling
+    paths of one body are B rows, not columns.  `couple` and `couple_cached`
+    (on a hit) both apply it, so an entry written before this fix is corrected
+    on use."""
+    import numpy as np
+    key = lambda s: tuple(sorted(tuple(int(v) for v in t) for t in s))
+    col = {key(s): j for j, s in enumerate(cpl.aa_sig)}
+    rows = [r for g in cpl.aa_specs for r in np.asarray(g)]
+    ev = [key((*Rnl_spec[cpl.aspec[a][0]], Ylm_spec[cpl.aspec[a][1]][1]) for a in r) for r in rows]
+    if len(col) != len(cpl.aa_sig) or len(ev) != len(col) or set(ev) != set(col):
+        raise ValueError("coupling: the AA evaluation columns (aa_specs) and the A2B column "
+                         "signatures (aa_sig) are not the same set of products")
+    perm = np.array([col[s] for s in ev], dtype=np.int64)
+    if (perm == np.arange(len(perm))).all():
+        return cpl
+    A2B = np.asarray(cpl.A2B)[:, perm]
+    return cpl._replace(A2B=A2B, aa_sig=tuple(cpl.aa_sig[j] for j in perm))
 
 
 # --------------------------------------------------------------------- cache
@@ -265,7 +300,7 @@ def couple_cached(mb_spec, Rnl_spec, Ylm_spec, cache_dir=None):
     if path.exists():
         cpl, ok = _read_entry(path, key)
         if ok:
-            return cpl
+            return align_columns(cpl, Rnl_spec, Ylm_spec)   # an entry written before the fix is unaligned
     cpl = couple(mb_spec, Rnl_spec, Ylm_spec)
     try:
         _write_entry(path, cpl, key, mb_spec, Rnl_spec, Ylm_spec)
