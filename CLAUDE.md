@@ -78,7 +78,6 @@ uv run ruff check                     # lint; `uv run pre-commit run --all-files
   - `test.yml`: 3 shards on Python 3.12 (whole files each: `ACEJAX_SHARD=i/n`, `conftest.shard_files`), a smoke job on 3.11, 3.13 and 3.14, the `slow` ladder, and `optional-deps` (matscipy-neighbours plus lammps-jax pinned to a commit, with `ACEJAX_REQUIRE_OPTIONAL=1`).
   - `lint.yml`.
   - `docs.yml`: strict site build and a headless run of each tutorial notebook (path-gated); on `main` it deploys to GitHub Pages.
-  - The driver goldens (`fixtures/pipeline_golden`, `tests/test_pipeline_parity.py`, `slow`) are bit-level and recorded on **lestrade** (`make_golden.platform_tag()` includes the host name), so they run there and skip elsewhere, CI included. Re-record them there with `uv run --extra gp python tests/pipeline_golden/make_golden.py` when a change to fit numerics is intended, and say so in the commit.
   - Path-gated parity jobs: `julia-parity` (ACEfit rows/QR), `coupling-wheels` (builds + clean-env-tests the coupling wheels, then parity vs ACEpotentials), `prior-parity`, `pace-parity` (ML-PACE C++ + python-ace).
   - The shards balance whole files on `.test_durations` (per-test splitting scattered modules, and each shard repaid their fixtures and first compiles). Refresh it from the `durations` artifact of a recent main run, or `pytest --store-durations`, when adding slow tests. Every shard restores all three groups' JAX caches, so a file moving between shards stays warm. The JAX caches are cleared per module (conftest `_release_jax_memory`), not per test: share expensive fits as module/session fixtures.
 
@@ -130,6 +129,7 @@ uv run ruff check                     # lint; `uv run pre-commit run --all-files
   - Finite-difference and autodiff cross-checks.
   - Import shared helpers with `from conftest import FIXTURE_DIR, pace_fixture`.
   - Mark heavy tests `@pytest.mark.slow`.
+  - Bit-exact pipeline goldens (`fixtures/pipeline_golden/`) are recorded and checked on lestrade (`tests/pipeline_golden/make_golden.py`; `PLATFORM` is `Linux-x86_64-lestrade`). `tests/test_pipeline_parity.py` skips on any other host, CI runners included. Re-record them on lestrade (`uv run --extra gp python tests/pipeline_golden/make_golden.py`, which uses ASE's neighbour list as the test does) when a change to fit numerics is intended, and say so in the commit.
 - **Commits:** conventional-commit prefixes with a scope on branch commits, for example `feat(bench):`, `fix(nlist):`, `refactor(gp)!:`, `test(ladder):`, `docs(...)`, `ci:`, `chore:`. PRs are squash-merged under a plain title with `(#N)`.
 
 ## Pitfalls

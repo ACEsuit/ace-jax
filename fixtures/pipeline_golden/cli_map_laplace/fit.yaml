@@ -24,7 +24,6 @@ kernel: cosine
 laplace: svi
 learn_radial: false
 lml: device
-lml_solver: qr
 m_per_species: 6
 map_restarts: 1
 map_steps: 150
@@ -41,7 +40,7 @@ nuts_warmup: 500
 objective: lml
 ood: null
 opt: adam
-out: /home/eng/essswb/projects/ace-jax/.worktrees/docs-build-time/fixtures/pipeline_golden/cli_map_laplace
+out: /home/eng/essswb/projects/ace-jax/.worktrees/goldens-on-lestrade/fixtures/pipeline_golden/cli_map_laplace
 pca_d: 128
 pops_ridge: auto
 r0: 2.35
@@ -53,18 +52,18 @@ rungs: [map, laplace]
 seed: 0
 solver: evidence
 stress_key: null
-test: /home/eng/essswb/projects/ace-jax/.worktrees/docs-build-time/fixtures/pipeline_golden/cli_map_laplace/_test.xyz
+test: /home/eng/essswb/projects/ace-jax/.worktrees/goldens-on-lestrade/fixtures/pipeline_golden/cli_map_laplace/_test.xyz
 test_start: null
-train: /home/eng/essswb/projects/ace-jax/.worktrees/docs-build-time/fixtures/pipeline_golden/cli_map_laplace/_train.xyz
+train: /home/eng/essswb/projects/ace-jax/.worktrees/goldens-on-lestrade/fixtures/pipeline_golden/cli_map_laplace/_train.xyz
 uq: blr
 vi_steps: 2000
 virial_key: dft_virial
 weights: null
-model: /home/eng/essswb/projects/ace-jax/.worktrees/docs-build-time/fixtures/si_fitted.npz
-provenance: {ace_jax: 0.2.1, coupling: null, command: 'aj fit --model /home/eng/essswb/projects/ace-jax/.worktrees/docs-build-time/fixtures/si_fitted.npz
-    --train /home/eng/essswb/projects/ace-jax/.worktrees/docs-build-time/fixtures/pipeline_golden/cli_map_laplace/_train.xyz
-    --test /home/eng/essswb/projects/ace-jax/.worktrees/docs-build-time/fixtures/pipeline_golden/cli_map_laplace/_test.xyz
+model: /home/eng/essswb/projects/ace-jax/.worktrees/goldens-on-lestrade/fixtures/si_fitted.npz
+provenance: {ace_jax: 0.2.1, coupling: null, command: 'aj fit --model /home/eng/essswb/projects/ace-jax/.worktrees/goldens-on-lestrade/fixtures/si_fitted.npz
+    --train /home/eng/essswb/projects/ace-jax/.worktrees/goldens-on-lestrade/fixtures/pipeline_golden/cli_map_laplace/_train.xyz
+    --test /home/eng/essswb/projects/ace-jax/.worktrees/goldens-on-lestrade/fixtures/pipeline_golden/cli_map_laplace/_test.xyz
     --energy-key dft_energy --force-key dft_force --virial-key dft_virial --configs-per-batch
     4 --m-per-species 6 --rungs map,laplace --n-draws 5 --map-steps 150 --r0 2.35
-    --out /home/eng/essswb/projects/ace-jax/.worktrees/docs-build-time/fixtures/pipeline_golden/cli_map_laplace',
-  created: '2026-10-05T12:47:52Z'}
+    --out /home/eng/essswb/projects/ace-jax/.worktrees/goldens-on-lestrade/fixtures/pipeline_golden/cli_map_laplace',
+  created: '2026-10-05T13:10:44Z'}
