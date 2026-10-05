@@ -56,12 +56,16 @@ def cli_argv(out):
 
 def platform_tag():
     """Where goldens were recorded: bit-level parity only holds on the same
-    platform (BLAS/LAPACK round-off feeds the optimiser trajectories)."""
-    return f"{platform.system()}-{platform.machine()}"
+    machine (BLAS/LAPACK round-off feeds the optimiser trajectories), so the tag
+    names the host: GitHub's Linux-x86_64 runners and other nodes differ from it.
+    The goldens are recorded on lestrade (an SCRTP node; see CLAUDE.md)."""
+    return f"{platform.system()}-{platform.machine()}-{platform.node().split('.')[0]}"
 
 
 def main():
-    env = dict(os.environ, JAX_ENABLE_X64="1", PYTHONPATH=str(ROOT))
+    # ASE's neighbour list, as the parity test runs them: another backend's pair order
+    # changes summation order, which the MAP optimisers amplify
+    env = dict(os.environ, JAX_ENABLE_X64="1", PYTHONPATH=str(ROOT), ACEJAX_NLIST="ase")
     OUT.mkdir(parents=True, exist_ok=True)
     (OUT / "PLATFORM").write_text(platform_tag() + "\n")
     only = set(sys.argv[1:])                      # optional: regenerate just these scenarios
