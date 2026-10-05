@@ -139,7 +139,10 @@ path to ≤ 5e-14, tests). Timed on Modal (`modal/modal_shape_eval.py`) on three
 | committee | 200 | 15 s | 8.8 GB | 0.539 | 0.987 |
 | committee | 50 | 15 s | 8.7 GB | 0.263 | 0.956 |
 
-A100-80GB gives the same numbers.
+A100-80GB gives the same numbers. On GAP-18 Si (60 test frames of 1–217 atoms, CPU, rank 336) the committee path
+matches the rows to 2.5e-12 and truncation is gentler (rank 20: ρ 0.979, coverage 0.913), but there the full-rank
+coverage is already 0.983, well above nominal: the truncation eats into an over-cover. That over-cover on the
+GAP-18 test split (the transfer exponent was clipped from 0.54 to 0.5 in this fit) is not investigated here.
 
 - **The default path already fits a 40 GB GPU at 3–4k atoms.** The how-to's "A100-80GB-class GPU needed"
   predated the node-chunked rows; corrected on this branch.

@@ -97,7 +97,8 @@ def main(argv=None):
         t = np.asarray(d["t"])
         diff = rho = ""
         if ref is not None:
-            diff = f"{np.max(np.abs(d['std'] / ref['std'] - 1)):.1e}"
+            nz = ref["std"] > 1e-12 * ref["std"].max()        # zero-sigma atoms (isolated, symmetric): 0 vs ~1e-17
+            diff = f"{np.max(np.abs(d['std'][nz] / ref['std'][nz] - 1)):.1e}"
             rho = f"{spearmanr(sig_round(d['std']), sig_round(ref['std']))[0]:.4f}"
         lines.append(f"| {v} | {int(d['rank'])} | {t[0]:.1f} | {t[1:].mean() if len(t) > 1 else float('nan'):.1f} | "
                      f"{float(d['maxrss_gb']):.1f} | {diff} | {rho} | {np.mean(d['err'] <= d['q']):.4f} | "
