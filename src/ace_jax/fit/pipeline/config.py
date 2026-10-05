@@ -40,6 +40,9 @@ class FitConfig:
     opt: str = "lbfgs"                   # "lbfgs" | "adam"
     map_steps: int = 150; map_lr: float = 0.02
     map_restarts: int = 1
+    map_polish: str = "auto"             # Newton polish (exact Hessian, column-wise HVPs) of the L-BFGS MAP:
+                                         # "auto" (linear arm, cached-Gram LML) | "on" (any arm) | "off"
+    strict: bool = False                 # raise MapNotConverged (not a warning) when the MAP is not stationary
     init: dict | None = None             # Hypers field -> value
     # rungs
     rungs: tuple = ("map",)
@@ -149,6 +152,15 @@ class FitConfig:
                                  "opt lbfgs (the cached LML exposes value_and_grad for L-BFGS)")
             if self.devices > 1:
                 raise ValueError("lml='host-cache' is single-device: set devices=1")
+        if self.opt not in ("lbfgs", "adam"):
+            raise ValueError(f"opt must be 'lbfgs' or 'adam', got {self.opt!r}")
+        if self.map_polish not in ("auto", "on", "off"):
+            raise ValueError(f"map_polish must be 'auto', 'on' or 'off', got {self.map_polish!r}")
+        if self.map_polish == "on" and self.opt != "lbfgs":
+            raise ValueError("map_polish 'on' polishes the L-BFGS MAP: set opt lbfgs")
+        if self.map_polish == "on" and self.lml == "host-cache":
+            raise ValueError("map_polish 'on' differentiates the LML twice (Hessian-vector products): "
+                             "not with lml 'host-cache'")
         if self.map_restarts < 1:
             raise ValueError(f"map_restarts must be >= 1, got {self.map_restarts}")
         if self.map_restarts > 1 and (self.opt != "lbfgs" or self.sigma_type):

@@ -48,7 +48,7 @@ model, meta, arrays = aj.load("model.npz")      # an ACE model, its metadata, th
 
 The pipeline behind `aj fit`. `FitConfig`'s defaults are those of the research
 driver and differ from the command line's in places (for example `arm="gp"`,
-`e0="lsq"`, `opt="lbfgs"`); set the fields you rely on explicitly, and
+`e0="lsq"`, `map_steps=150`); set the fields you rely on explicitly, and
 `predict_stats="recompute"` to match the command line exactly.
 
 ::: ace_jax.fit.pipeline.FitConfig

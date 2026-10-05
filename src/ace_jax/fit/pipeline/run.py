@@ -52,7 +52,7 @@ def fit(cfg, data, log=print, on_stage=None):
         obj = make_objective(cfg, data, b)
         mf = fit_map(cfg, data, b, obj, log=log)
         stage("map", mf)
-        rg = run_rungs(cfg, b, obj, mf.theta, log=log)
+        rg = run_rungs(cfg, b, obj, mf.theta, log=log, fixed=mf.fixed)
         stage("rungs", rg)
         ard = None
         if cfg.uq == "ard":

@@ -77,7 +77,7 @@ over a file's `basis:`, `--train` over its `data:` (each logged as an override).
 |---|---|
 | Plain linear ACE (fast baseline) | `--m-per-species 0 --rungs map` |
 | Hybrid GP with uncertainty | `--m-per-species M` (default 500; start small, e.g. 6–100) |
-| Faster, more reliable MAP | `--opt lbfgs` (default is adam with 500 steps, which is slow) |
+| Converged MAP | the default `--opt lbfgs` (bounded L-BFGS-B, one restart after a line-search stop; linear arm: + exact-Hessian Newton polish by HVP columns, `--map-polish auto/on/off`; GP: `on` is opt-in, a GP gradient can take a minute). Writes `map_convergence.json`; warns `MAP did not converge`, or fails with `--strict`. `--opt adam` (`--map-steps` steps) often stops short |
 | Multimodal hyperparameter posterior | `--map-restarts N` (**requires `--opt lbfgs`**) |
 | Hyperparameter uncertainty | `--rungs map,laplace` (`--laplace svi` default, or `fd`); also `pathfinder`, `vi`, `nuts`. **Slow**: see Gotchas |
 | Useful OOD sigma for the GP | `--density pca --pca-d 128` (pair-only features give anti-informative OOD sigma) |
@@ -170,8 +170,8 @@ write_outputs(res, "out", layout=("cli",))                       # metrics + mod
 
 In Python, `FitConfig`'s defaults are the research driver's
 (`bench/acegp_cantor/run.py`). They differ from the CLI's: the arm is set
-explicitly (`arm="linear"|"gp"`, default `"gp"`), `e0="lsq"`, `opt="lbfgs"`
-(150 steps), `m_per_species=100`, `batch=4`, `laplace="fd"`, and
+explicitly (`arm="linear"|"gp"`, default `"gp"`), `e0="lsq"`, `map_steps=150`
+(both use `opt="lbfgs"`, `map_polish="auto"`), `m_per_species=100`, `batch=4`, `laplace="fd"`, and
 `predict_stats="cached"`. Use `"recompute"` to match the CLI and the saved
 model file exactly. Python-only options:
 - `factors=[...]`: composable weights from `ace_jax.fit.weights`
@@ -351,8 +351,15 @@ Other entry points:
   included (ASE would move those into a calculator). ASE's `_JSON` 2-D info
   values are decoded. A label that is present but not numeric raises a
   `ValueError` naming the file, config and key.
-- **Run time.** The default Adam MAP is 500 steps. On small data use
-  `--opt lbfgs --map-steps 40–150`.
+- **MAP convergence.** The default `--opt lbfgs` converges in tens of
+  evaluations; the linear arm then takes a Newton polish with the exact
+  Hessian, built one Hessian-vector product per free hyperparameter
+  (~2.3x the gradient's memory; seconds on 2,000 Si configs).
+  `map_convergence.json` records the predicted gain of another Newton step
+  (converged: <= 1e-3 nats) and the final |gradient|; an unconverged
+  MAP logs `WARNING: MAP did not converge` (`--strict`: an error). Adam
+  (`--opt adam`, the CLI default in ace-jax <= 0.2.1) left GAP-18 Si about 10⁷ nats
+  short of the optimum at 500 steps.
 - **`--rungs` defaults to `map`.** Adding `laplace` (or `pathfinder`, `vi`,
   `nuts`) gives hyperparameter draws but costs far more than the MAP. The Laplace
   rung differentiates the LML twice (a Hessian): on a laptop CPU, 40 Si configs

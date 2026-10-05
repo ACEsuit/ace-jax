@@ -16,6 +16,8 @@ def _write_stage(out, name, payload):
         np.save(out / "split_perm.npy", payload.perm)
     elif name == "map":
         _dump(out / "theta_map.json", payload.theta._asdict())
+        if payload.convergence is not None:
+            _dump(out / "map_convergence.json", payload.convergence)
         if payload.restarts is not None:
             _dump(out / "map_restarts.json", payload.restarts)
         if payload.sigma_type_ratios is not None:
@@ -41,7 +43,7 @@ def _write_ard(out, ard):
 
 
 def checkpoint_writer(out):
-    """An on_stage callback for fit(): writes split_perm.npy, theta_map.json,
+    """An on_stage callback for fit(): writes split_perm.npy, theta_map.json, map_convergence.json,
     map_restarts.json, draws_*.npy, laplace_info.json, and (uq "ard") posterior.npz,
     ard.json and the ARD-mean model.npz as each stage finishes (the run.py layout), so they survive a failure in a
     later stage."""
@@ -79,6 +81,8 @@ def write_outputs(res, out, layout=("run",), argv=None, save_model=True, model_d
     out = pathlib.Path(out); out.mkdir(parents=True, exist_ok=True)
     cfg, d, b = res.config, res.data, res.built
     _dump(out / "theta_map.json", res.theta._asdict())
+    if res.map.convergence is not None:         # optimiser, polish record, final |grad|, converged
+        _dump(out / "map_convergence.json", res.map.convergence)
     if res.radial is not None:
         r, c = res.radial, res.config
         _dump(out / "radial_info.json", {
