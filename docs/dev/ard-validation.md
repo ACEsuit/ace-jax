@@ -37,4 +37,3 @@ and in distribution on a 300-configuration test sample):
 The full results, with confidence intervals and per-configuration-type
 tables, are in the
 [acceptance report](https://github.com/ACEsuit/ace-jax/blob/main/bench/defect_uq/results/2026-10-03_rev2_acceptance.md).
-
