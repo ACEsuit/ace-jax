@@ -253,8 +253,8 @@ def fit_map(cfg, d, b, obj, log=print):
         log(f"Newton polish (exact Hessian, column-wise HVPs): {pol['message']}; {pol['steps']} step(s), "
             f"{pol['hessian_evals']} Hessian(s), {ev.n_hvp} HVPs, {ev.n_eval} gradient evaluations, "
             f"{time.time() - tp:.1f} s")
-        pol = {**{k: val for k, val in pol.items() if k != "gnoise"}, "hvps": ev.n_hvp, "evals": ev.n_eval,
-               "seconds": time.time() - tp}
+        # no wall time in the record: map_convergence.json is part of the bit-exact pipeline goldens
+        pol = {**{k: val for k, val in pol.items() if k != "gnoise"}, "hvps": ev.n_hvp, "evals": ev.n_eval}
     elif best.get("hess_inv") is not None and g is not None:
         H = -np.linalg.inv(0.5 * (best["hess_inv"] + best["hess_inv"].T))   # L-BFGS-B's estimate, no evaluation
     if g is None:                               # never finite: nothing to judge with
