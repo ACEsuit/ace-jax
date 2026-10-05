@@ -1,22 +1,23 @@
 # Export a model to LAMMPS
 
-ace-jax models run in LAMMPS through
-[lammps-jax](https://github.com/abhijeetgangan/lammps-jax), which provides
-`pair_style jax/kk`: a KOKKOS pair style that executes a compiled JAX
-program on the GPU. ace-jax writes the program and its metadata into one JSON
+ace-jax models run in LAMMPS with
+[lammps-jax](https://github.com/abhijeetgangan/lammps-jax). lammps-jax gives
+`pair_style jax/kk`, a KOKKOS pair style that runs a compiled JAX program on
+the GPU. ace-jax writes the program and its metadata into one JSON
 *bundle*.
 
 !!! note "lammps-jax is not on PyPI"
-    Install it from a clone or a pinned commit, for example
-    `pip install "lammps-jax @ git+https://github.com/abhijeetgangan/lammps-jax"`,
-    and build its LAMMPS plugin following the lammps-jax instructions. ace-jax's
-    CI tests the export against lammps-jax commit `4a7f4fb`. The pair style is
-    GPU-only (KOKKOS with CUDA).
+    1. Install lammps-jax from a clone or a fixed commit, for example
+       `pip install "lammps-jax @ git+https://github.com/abhijeetgangan/lammps-jax"`.
+    2. Build its LAMMPS plugin. Use the lammps-jax instructions.
+
+    The ace-jax CI tests the export with lammps-jax commit `4a7f4fb`. The pair
+    style runs only on a GPU (KOKKOS with CUDA).
 
 ## Export
 
-The bundle's buffers have fixed sizes, so they are sized from the structure
-the run starts from:
+The buffers of the bundle have fixed sizes. Calculate these sizes from the
+initial structure of the run:
 
 ```python
 import jax
@@ -35,10 +36,11 @@ export_lammps(model, meta, "si_bundle.json",
               type_elements=[14])                          # Z of LAMMPS types 1, 2, ...
 ```
 
-`type_elements` maps LAMMPS atom types to elements: type 1 is the first
-entry. The returned dictionary, also stored in the bundle, records what was
-exported under its `ace_jax` key (layout, capacities, whether the lean form
-and splining were applied, and the lammps-jax version).
+`type_elements` maps LAMMPS atom types to elements. Type 1 is the first
+entry. `export_lammps` returns a dictionary, and also writes it in the
+bundle. Its `ace_jax` key records what was exported: the layout, the
+capacities, the use of the lean form and of splines, and the lammps-jax
+version.
 
 In the LAMMPS input:
 
@@ -47,30 +49,33 @@ pair_style jax/kk <path to the PJRT GPU plugin>    # see the lammps-jax document
 pair_coeff * * si_bundle.json
 ```
 
-Run LAMMPS with KOKKOS on the GPU, for example
+Run LAMMPS with KOKKOS on the GPU. For example:
 `lmp -k on g 1 -sf kk -pk kokkos newton on neigh half -in in.lammps`.
 
 ## Capacities
 
 `neighbour_capacity(atoms, rcut, skin=1.0, slots="skin", margin=8, list_headroom=0.5)`
-returns every buffer size for a structure:
+returns all buffer sizes for a structure:
 
 | Key | Meaning |
 |---|---|
-| `max_atoms` | owned plus ghost atoms (the ghost shell is sized on the cell's face spacings, so triclinic cells are covered) |
-| `max_owned` | owned atoms (with 10% headroom); rows past it are never evaluated |
+| `max_atoms` | owned plus ghost atoms (the ghost shell size comes from the face spacings of the cell, so it is also correct for triclinic cells) |
+| `max_owned` | owned atoms (with 10% headroom); rows after it are never evaluated |
 | `k_dense` | model neighbour slots per atom |
-| `max_neighbors` | LAMMPS neighbour-list slots per atom (with 50% headroom: the list grows fastest when a structure compresses) |
+| `max_neighbors` | LAMMPS neighbour-list slots per atom (with 50% headroom: the list increases most when a structure is compressed) |
 | `max_edges` | the packed edge buffer of the sparse and dense layouts |
 
-A structure that outgrows a buffer never gives silently truncated forces: the
-energy and forces become NaN, or LAMMPS aborts the run. Re-export with sizes
-for the larger structure.
+If a structure becomes too large for a buffer, the forces are never
+truncated without a message. The energy and forces become NaN, or LAMMPS
+stops the run. If this occurs, export again with sizes for the larger
+structure.
 
-`slots="cutoff"` sizes the model slots for pairs within the cutoff only,
-1.2 to 1.4 times faster on a five-component alloy, but it is only safe for
-stable MD of a fitted model whose coordination stays close to the starting
-structure's.
+`slots="cutoff"` sizes the model slots only for pairs in the cutoff. On a
+five-component alloy, this is 1.2 to 1.4 times faster.
+
+!!! warning
+    Use `slots="cutoff"` only for stable MD of a fitted model, where the
+    coordination stays near the coordination of the initial structure.
 
 ## Layouts
 
@@ -80,13 +85,13 @@ structure's.
 | `dense` | packs the edge buffer into per-atom slots every step | `k_dense` given and `matrix` not chosen |
 | `sparse` | an edge list | no `k_dense`, or one dense block does not fit in memory |
 
-A LAMMPS plugin older than the lammps-jax Python package rejects a `matrix`
-bundle. Rebuild the plugin at the Python package's version, or export with
-`layout="dense"`.
+A LAMMPS plugin that is older than the lammps-jax Python package does not
+accept a `matrix` bundle. To correct this, build the plugin again at the
+version of the Python package, or export with `layout="dense"`.
 
 ## Learned radials and precision
 
 - `lean=True` (the default) exports the lean evaluation form, as the ASE
-  calculator does. With `spline_tol="auto"` a learned radial is splined at
-  1e-10 first; see [Learn the radial basis](learned-radials.md#deployment-spline-speed).
-- `dtype="float64"` is the default; `"float32"` is faster and less accurate.
+  calculator does. With `spline_tol="auto"`, `export_lammps` first changes a
+  learned radial to a spline at 1e-10; see [Learn the radial basis](learned-radials.md#deployment-spline-speed).
+- `dtype="float64"` is the default. `"float32"` is faster and less accurate.

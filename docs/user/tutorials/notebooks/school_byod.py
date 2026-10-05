@@ -24,12 +24,17 @@ def _(mo):
     mo.md(r"""
     # Tutorial 9: bring your own data
 
-    The earlier tutorials worked on silicon. This one is a template for your
-    own system: declare the property you need, build a training set aimed at
-    it, fit, measure the property, check where the property's structures sit
-    in descriptor space, and repair the data set once. It runs as is on a
-    demo, zincblende GaAs and its (100) surface energy, and takes your own
-    structure in Step 2.
+    The earlier tutorials used silicon. This tutorial is a template for your
+    own system. You do these steps:
+
+    1. State the property that you need.
+    2. Build a training set for that property, and fit.
+    3. Measure the property.
+    4. Find where the structures of the property are in descriptor space.
+    5. Repair the dataset one time.
+
+    Without changes, the notebook runs on a demo: zincblende GaAs and its
+    (100) surface energy. You can give your own structure in Step 2.
 
     **Goals**
 
@@ -44,16 +49,19 @@ def _(mo):
     [6](https://acesuit.github.io/ace-jax/tutorials/surfaces/), and is adapted from
     notebook D of the [MLIP School 2026](https://mlipschool.uk/d/d_bring_your_own_data).
 
-    **Run this notebook**: with [uv](https://docs.astral.sh/uv/) installed, one command
-    opens it in your browser (no account needed):
+    **Run this notebook.** Install [uv](https://docs.astral.sh/uv/). Then run this command:
 
     ```bash
     uvx marimo edit --sandbox https://raw.githubusercontent.com/ACEsuit/ace-jax/main/docs/user/tutorials/notebooks/school_byod.py
     ```
 
-    or open it in [molab](https://molab.marimo.io/github/ACEsuit/ace-jax/blob/main/docs/user/tutorials/notebooks/school_byod.py), marimo's hosted service (free to
-    preview; sign in to run). The documentation website shows a static copy,
-    run on a CPU when the site was built. The whole notebook runs in about 2 minutes.
+    The notebook opens in your browser. You do not need an account.
+    You can also open the notebook in [molab](https://molab.marimo.io/github/ACEsuit/ace-jax/blob/main/docs/user/tutorials/notebooks/school_byod.py),
+    the marimo hosted service. You must sign in to run it there.
+
+    This website shows a static copy of the notebook, run on a CPU when the
+    site was built. The interactive controls show their default values.
+    Run time: approximately 2 minutes.
     """)
     return
 
@@ -85,10 +93,10 @@ def _(mo):
     mo.md(r"""
     ## Step 1: declare the target
 
-    A potential is fitted for a purpose. Write down what you will compute
-    with it, how, and how accurately, before choosing any data: the target
-    decides the data set, and the tolerance decides when the work is done.
-    For the demo the target is the unrelaxed (100) surface energy of GaAs,
+    You fit a potential for a purpose. Before you select data, write down
+    what you will calculate with the potential, how, and to what accuracy.
+    The target sets the dataset. The tolerance tells you when the work is
+    complete. For the demo, the target is the unrelaxed (100) surface energy of GaAs,
 
     $$\gamma = \frac{E_\text{slab} - N_\text{slab}\,E_\text{bulk}/N_\text{bulk}}{2A},$$
 
@@ -127,16 +135,19 @@ def _(mo):
     at most 64 atoms. Without an upload the notebook uses the demo: an 8-atom
     cubic cell of zincblende GaAs.
 
-    The labels for the demo ship with the tutorial. Your own system needs the
-    labeller installed: in a marimo sandbox add `mace-torch` to the packages
-    panel; elsewhere,
+    The labels for the demo are included with the tutorial. For your own
+    system, install the labeller:
+
+    - in a marimo sandbox, add `mace-torch` to the packages panel;
+    - in other environments, use this command:
 
     ```bash
     pip install mace-torch --extra-index-url https://download.pytorch.org/whl/cpu
     ```
 
-    MACE-MPA-0 covers most of the periodic table, but it is a foundation
-    model: check its answer for your system against the literature in Step 3.
+    MACE-MPA-0 covers most of the periodic table. But it is a foundation
+    model, so in Step 3, compare its result for your system with the
+    literature.
     """)
     return
 
@@ -183,12 +194,16 @@ def _(mo):
     mo.md(r"""
     ## Step 3: references and the truth
 
-    Two kinds of reference: an **isolated atom** of each element, a single
-    atom in a 15 Å box, whose energy is the element's reference energy $E_0$
-    (an isolated atom in the training set pins it, Tutorial 1); and the
-    **target structures**, the bulk cell and a 4-layer (100) slab with 8 Å
-    of vacuum, whose labelled energies give the true value of the target.
-    The target structures are never trained on.
+    There are two types of reference:
+
+    - an **isolated atom** of each element: one atom in a 15 Å box. Its
+      energy is the reference energy $E_0$ of the element. If the training
+      set has an isolated atom, it sets $E_0$ (Tutorial 1).
+    - the **target structures**: the bulk cell, and a 4-layer (100) slab
+      with 8 Å of vacuum. Their labelled energies give the true value of
+      the target.
+
+    The fit never uses the target structures for training.
     """)
     return
 
@@ -234,13 +249,13 @@ def _(mo):
 
     The recipe of Tutorial 4, applied to your cell: copies with the cell
     scaled over $1 \pm s$ and the atoms rattled, plus the isolated atoms.
-    The sliders snap to the settings whose demo labels ship.
+    The sliders move only to the settings that have demo labels in the tutorial.
 
     The basis is categorical in the elements (Tutorial 3), order 3 and total
-    degree 8. The school's version of this notebook needed more observations
-    than basis functions, because its least-squares fit has no prior; the
-    evidence fit's prior regularises an underdetermined basis, so no such
-    rule is needed here, though more data still helps.
+    degree 8. The school version of this notebook needed more observations
+    than basis functions, because its least-squares fit has no prior. The
+    prior of the evidence fit regularises an underdetermined basis, so this
+    rule is not necessary here. But more data still helps.
     """)
     return
 

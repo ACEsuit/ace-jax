@@ -1,8 +1,8 @@
 # Load and write PACE `.yace` models
 
-ace-jax reads pacemaker's `.yace` potential files and evaluates them in JAX,
-through the same calculator, CLI and LAMMPS export as its own models. It
-checks against the ML-PACE C++ code, python-ace and LAMMPS.
+ace-jax reads pacemaker `.yace` potential files and evaluates them in JAX.
+It uses the same calculator, CLI and LAMMPS export as for its own models.
+The results agree with the ML-PACE C++ code, python-ace and LAMMPS.
 
 ## Evaluate a `.yace`
 
@@ -29,15 +29,15 @@ aj eval --model model.yace --data test.xyz --out predictions.xyz
 | embedding | FinnisSinclair, FinnisSinclairShiftedScaled |
 | inner cutoff | `density`, `distance`, `zbl` |
 
-A file using anything else raises an error at load time rather than
-evaluating differently.
+If a file uses a different feature, ace-jax gives an error when it loads
+the file. It does not evaluate the file incorrectly.
 
 ## Load, modify and write back
 
 `ace_jax.load` returns a `PACEModel`, its metadata and the parsed file. The
-model is a JAX pytree of arrays, so it can be modified with
-[equinox](https://docs.kidger.site/equinox/) tools, and `write_yace` writes it
-back:
+model is a JAX pytree of arrays. Thus you can change it with
+[equinox](https://docs.kidger.site/equinox/) tools. `write_yace` writes it
+to a file:
 
 ```python
 import ace_jax as aj
@@ -47,17 +47,18 @@ pm, meta, spec = aj.load("model.yace")       # PACEModel, meta dict, parsed spec
 write_yace(pm, spec, "copy.yace")            # numbers from pm, layout from spec
 ```
 
-`write_yace` takes the numeric values from the model and everything else
-(the function layout, the element names, the file structure) from `spec`, so the
-basis layout is never regenerated. A model written back unmodified evaluates
-identically to the original.
+`write_yace` takes the numeric values from the model. It takes all other
+data (the function layout, the element names, the file structure) from
+`spec`. Thus it never makes the basis layout again. If you write a model
+without changes, it gives the same results as the original.
 
 ## Limits
 
-- `.yace` models are for evaluation and export. `aj fit` and the radial
-  learner need an ACE `.npz` model.
-- `aj.load(path)` dispatches on the extension: `.yace` returns
-  `(PACEModel, meta, spec)`, `.npz` returns `(ACEModel, meta, arrays)`.
-- An SBessel radial with `nradbase >= 12` is evaluated in a matrix form
-  (`PACEModel.sbessel_form == "matmul"`), chosen at load; values agree with
+- Use `.yace` models only for evaluation and export. `aj fit` and the
+  radial learner need an ACE `.npz` model.
+- The return value of `aj.load(path)` depends on the file extension:
+  `.yace` gives `(PACEModel, meta, spec)`, `.npz` gives
+  `(ACEModel, meta, arrays)`.
+- For an SBessel radial with `nradbase >= 12`, ace-jax selects a matrix form
+  at load time (`PACEModel.sbessel_form == "matmul"`). The values agree with
   the recurrence to round-off.

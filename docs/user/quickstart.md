@@ -1,10 +1,12 @@
 # Quickstart
 
-This page runs the command-line workflow once: fit a linear ACE model
-straight from labelled data, evaluate it, and use it from Python. The data
-is a small silicon set (DFT labels; diamond and β-tin cells, a liquid
-snapshot and an isolated atom), already split into 40 training and 13 test
-configurations. It takes about a minute on a CPU.
+On this page, you fit a linear ACE model to labelled data. Then you evaluate
+the model and use it from Python.
+
+The data is a small silicon dataset with DFT labels. It contains diamond and
+β-tin cells, liquid snapshots and an isolated atom. It is already divided
+into 40 training configurations and 13 test configurations. The procedure
+takes approximately 1 minute on a CPU.
 
 ```bash
 --8<-- "install.txt"
@@ -17,9 +19,10 @@ curl -LO https://raw.githubusercontent.com/ACEsuit/ace-jax/main/docs/user/tutori
 curl -LO https://raw.githubusercontent.com/ACEsuit/ace-jax/main/docs/user/tutorials/data/si/test.xyz
 ```
 
-Both are extended XYZ files with the labels stored as `energy`, `forces` and
-`virial`, the names `aj` reads by default. If your own data uses other names,
-pass them with `--energy-key`, `--force-key` and `--virial-key`.
+The two files are extended XYZ files. Their labels are `energy`, `forces`
+and `virial`, the names that `aj` reads by default. If your data uses
+different names, give them with `--energy-key`, `--force-key` and
+`--virial-key`.
 
 ## 2. Fit
 
@@ -30,23 +33,27 @@ aj fit --order 3 --max-degree 10 \
     --out fit
 ```
 
-- `--order 3 --max-degree 10` builds the basis inside the fit, for the
-  species found in the data. `--order` is the correlation order (how many
-  neighbours a basis function couples; 3 gives four-body terms) and
-  `--max-degree` bounds the polynomial degree, which sets the basis size.
-- The radial basis is the radial polynomials themselves (`--radial-mode
-  onehot`, the default); it stays frozen, and only the readout is fitted
-  (to learn it too, see [learned radials](howto/learned-radials.md)).
-- `--e0 lsq` sets the per-species reference energy $E_0$. The isolated atom
-  in the training set fixes it to that atom's energy; without one it is
-  fitted with the model (see [E0](concepts.md#e0-the-reference-energy)).
+- `--order 3 --max-degree 10` builds the basis in the fit, for the species
+  in the data.
+    - `--order` is the correlation order: the number of neighbours that a
+      basis function couples. Order 3 gives four-body terms.
+    - `--max-degree` sets the maximum polynomial degree. This sets the basis
+      size.
+- The radial basis is the radial polynomials (`--radial-mode onehot`, the
+  default). The radial basis stays frozen, and the fit changes only the
+  coefficients. To learn the radial basis also, see
+  [learned radials](howto/learned-radials.md).
+- `--e0 lsq` sets the reference energy $E_0$ of each species. The training
+  set has an isolated atom, so $E_0$ is set to the energy of that atom. If
+  there is no isolated atom, the fit calculates $E_0$ with the model (see
+  [E0](concepts.md#e0-the-reference-energy)).
 - `--m-per-species 0` selects the linear model (no Gaussian-process arm).
-- `--opt lbfgs` (the default, given here for clarity) maximises the evidence
-  with L-BFGS, then (for this linear model) polishes it to a stationary point
-  with a few Newton steps.
+- `--opt lbfgs` maximises the evidence with L-BFGS. For the linear model, a
+  small number of Newton steps then refine the result to a stationary point.
+  `--opt lbfgs` is the default; this example gives it only to show it.
 
-The fit logs the basis it built, then a table of test errors per
-configuration type:
+The fit logs the basis that it built. Then it prints a table of test errors
+for each configuration type:
 
 ```text
 basis Si order 3 max-degree 10 -> 110 B functions (elements from the data)
@@ -65,18 +72,19 @@ all               13     26         25.25    0.0969        156.23
 fitted model: fit/model.npz
 ```
 
-The `gamma missing` line is expected: the smoothness prior is rebuilt from the
-basis. The last digits may differ with the platform.
+The `gamma missing` line is normal: the fit builds the smoothness prior
+again from the basis. The last digits can be different on a different
+platform.
 
-`fit/` holds:
+The fit writes these files in `fit/`:
 
 | File | Contents |
 |---|---|
-| `model.npz` | the fitted model: the basis and its coefficients, one ordinary ACE model file |
-| `fit.yaml` | the whole resolved run; `aj fit --config fit/fit.yaml` reproduces it ([Run files](howto/fit-yaml.md)) |
-| `metrics.csv` | test RMSE, MAE and the uncertainty calibration columns, per quantity ([Reading the metrics](concepts.md#reading-the-metrics)) |
-| `theta_map.json` | the hyperparameters chosen by the evidence (noise and prior scales) |
-| `config.json` | the configuration of the run, as the fitting pipeline saw it |
+| `model.npz` | the fitted model: the basis and its coefficients, in one usual ACE model file |
+| `fit.yaml` | all settings of the run; `aj fit --config fit/fit.yaml` runs it again ([Run files](howto/fit-yaml.md)) |
+| `metrics.csv` | test RMSE, MAE and the uncertainty calibration columns, for each quantity ([Reading the metrics](concepts.md#reading-the-metrics)) |
+| `theta_map.json` | the hyperparameters that the evidence selected (noise and prior scales) |
+| `config.json` | the configuration of the run, as the fitting pipeline used it |
 
 ## 3. Evaluate
 
@@ -84,8 +92,8 @@ basis. The last digits may differ with the platform.
 aj eval --model fit/model.npz --data test.xyz --out predictions.xyz
 ```
 
-`aj eval` prints the same table for any labelled file, then writes the
-structures back with the predictions added:
+`aj eval` prints the same table for each labelled file. Then it writes the
+structures again, with the predictions added:
 
 ```text
 ...
@@ -93,11 +101,17 @@ all               13     26         25.25    0.0969        156.23
 wrote 13 configurations with predictions (ace_energy, ace_forces, ...) to predictions.xyz
 ```
 
-`predictions.xyz` keeps every original label and adds `ace_energy` (eV),
-`ace_forces` (eV/Å, per atom) and, for periodic cells, `ace_stress`
-(eV/Å³). Without `--out`, `aj eval` only prints the table. To make parity
-plots, read it in Python with the `cextxyz` format (the ase-extxyz plugin,
-installed with ace-jax), which keeps every label under its own name:
+`predictions.xyz` keeps all original labels and adds:
+
+- `ace_energy` (eV);
+- `ace_forces` (eV/Å, for each atom);
+- `ace_stress` (eV/Å³), for periodic cells only.
+
+Without `--out`, `aj eval` only prints the table.
+
+To make parity plots, read the file in Python with the `cextxyz` format.
+This format comes from the ase-extxyz plugin, which ace-jax installs. It
+keeps each label under its own name:
 
 ```python
 from ase.io import read
@@ -107,8 +121,10 @@ dft = [a.info["energy"] / len(a) for a in frames]
 ace = [a.info["ace_energy"] / len(a) for a in frames]
 ```
 
-ASE's built-in `extxyz` reader moves `energy` and `forces` into a calculator and
-rejects 3×3 values such as `virial` written as nested lists, so use `cextxyz`.
+!!! note
+    Do not use the built-in ASE `extxyz` reader for this file. It moves
+    `energy` and `forces` into a calculator, and it does not accept 3×3
+    values (for example `virial`) written as nested lists.
 
 ## 4. Use the model from Python
 
@@ -125,9 +141,11 @@ print(atoms.get_potential_energy(), atoms.get_forces().shape, atoms.get_stress()
 
 ## Saving a basis on its own
 
-`aj fit --order ...` stores the basis inside `model.npz`. To keep an
-unfitted basis, for example to fit it to several datasets or share it, build
-it with `aj basis` and pass it to the fit with `--model`:
+`aj fit --order ...` keeps the basis in `model.npz`. To use the same unfitted
+basis for more than one fit, or to share it:
+
+1. Build the basis with `aj basis`.
+2. Give the basis file to `aj fit --model`.
 
 ```bash
 aj basis --elements Si --order 3 --max-degree 10 --out si.npz
@@ -137,13 +155,14 @@ aj fit --model si.npz --r0 2.4 \
     --out fit_from_file
 ```
 
-With `--model`, `--r0` (the typical nearest-neighbour distance in Å, which
-centres the hyperprior) is required. The two fits are identical.
+With `--model`, you must give `--r0`. `--r0` is the typical
+nearest-neighbour distance in Å, and it is the centre of the hyperprior.
+The two fits are identical.
 
 ## Next steps
 
-- [Tutorial 1](tutorials/first-fit.md) does the same fit in a notebook, with
-  a parity plot, an equation of state and a short MD run.
-- [Concepts](concepts.md) explains what `--order`, `--max-degree`, $E_0$ and the
-  evidence fit mean.
-- The [CLI reference](reference/cli.md) lists every flag.
+- [Tutorial 1](tutorials/first-fit.md) does the same fit in a notebook. It
+  adds a parity plot, an equation of state and a short MD run.
+- [Concepts](concepts.md) explains `--order`, `--max-degree`, $E_0$ and the
+  evidence fit.
+- The [CLI reference](reference/cli.md) lists all flags.

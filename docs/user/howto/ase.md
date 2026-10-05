@@ -1,8 +1,8 @@
 # Use a model as an ASE calculator
 
-`ACECalculator` evaluates any ace-jax model file, an ACE `.npz` or a PACE
-`.yace`, as an [ASE](https://wiki.fysik.dtu.dk/ase/) calculator: energy,
-forces and stress.
+`ACECalculator` evaluates an ace-jax model file (an ACE `.npz` or a PACE
+`.yace`) as an [ASE](https://wiki.fysik.dtu.dk/ase/) calculator. It gives
+the energy, the forces and the stress.
 
 ```python
 import jax
@@ -18,46 +18,53 @@ F = atoms.get_forces()                # eV/Å, shape (n_atoms, 3)
 S = atoms.get_stress()                # eV/Å³, Voigt order
 ```
 
-The cutoff, the species and the precision all come from the model file, so
-the path is usually the only argument. Species in `atoms` that the model does
-not know raise an error.
+The cutoff, the species and the precision come from the model file. Thus,
+usually, the path is the only argument. If `atoms` contains a species that
+the model does not know, the calculator gives an error.
 
 ## Precision
 
-The library never changes JAX's precision setting. Enable float64 before
-anything imports JAX, with `jax.config.update("jax_enable_x64", True)` or
-`JAX_ENABLE_X64=1`; otherwise the calculator runs in float32 (faster, with
-float32 round-off in energies and forces).
+--8<-- "float64.md"
+
+If float64 is not enabled, the calculator uses float32. float32 is faster,
+but it adds float32 round-off to energies and forces.
 
 ### Tight geometry optimisation of large cells
 
-The energy includes each atom's isolated-atom energy E0 (about −160 eV for Si),
-so a cell of 10^5 atoms has |E| of order 10^7 eV and a float64 resolution of
-about 10^-9 eV. An energy-based line search, such as the Armijo test in ASE's
-`PreconLBFGS`, stops resolving the decreases it checks once forces fall to
-about 1e-4–1e-5 eV/Å, and the optimiser slows to a crawl. For tight
-relaxations, report energies relative to the isolated atoms:
+The energy includes the isolated-atom energy E0 of each atom (approximately
+−160 eV for Si). This causes a problem for large cells:
+
+- For a cell of 10^5 atoms, |E| is approximately 10^7 eV. The float64
+  resolution is then approximately 10^-9 eV.
+- An energy-based line search (for example, the Armijo test in the ASE
+  `PreconLBFGS`) checks that the energy decreases. When the forces are less
+  than approximately 1e-4 to 1e-5 eV/Å, it cannot resolve the decrease.
+- The optimiser then becomes very slow.
+
+For tight relaxations, use energies relative to the isolated atoms:
 
 ```python
 calc = ACECalculator("model.npz", energy_reference="E0")
 ```
 
-`atoms.get_potential_energy()` is then the energy relative to the isolated atoms,
-and forces and stress are unchanged. The constant that was subtracted is in
-`calc.results["e0_offset"]`, so the absolute energy is
+`atoms.get_potential_energy()` then gives the energy relative to the
+isolated atoms. The forces and the stress do not change.
+`calc.results["e0_offset"]` contains the constant that the calculator
+subtracted. Thus the absolute energy is
 `atoms.get_potential_energy() + calc.results["e0_offset"]`.
 
 ## Molecular dynamics
 
-The calculator is built for repeated calls on one structure:
+The calculator is designed for repeated calls on one structure:
 
-- The default `skin=1.0` (Å) keeps a Verlet neighbour list for cutoff + skin
-  and reuses it until an atom has moved more than skin / 2, or the cell,
-  periodicity, species or atom count change. Each call is then one compiled
-  step.
-- Edge lists are padded to power-of-two sizes, so a growing neighbour count
-  rarely triggers a recompile.
-- `calc.last_timing` reports the time of the last call; its `rebuilds` entry
+- With the default `skin=1.0` (Å), the calculator keeps a Verlet neighbour
+  list for the distance cutoff + skin. Thus each call is one compiled step.
+  The calculator uses the list again until one of these occurs:
+    - an atom moves more than skin / 2;
+    - the cell, the periodicity, the species or the number of atoms changes.
+- The edge lists are padded to sizes that are powers of two. Thus, when the
+  number of neighbours increases, a recompilation is rare.
+- `calc.last_timing` gives the time of the last call. Its `rebuilds` entry
   counts the calls that built a neighbour list.
 
 ```python
@@ -73,30 +80,31 @@ dyn.run(200)
 print(atoms.calc.last_timing["rebuilds"])
 ```
 
-For one-shot evaluation of many unrelated structures (a test set, a
-screening loop), pass `skin=0`, which builds the list for the cutoff alone on
-every call.
+To evaluate many unrelated structures one time each (for example a test set
+or a screening loop), use `skin=0`. The calculator then builds the list for
+the cutoff alone at each call.
 
-The first call on a new structure size compiles the model, which takes
-seconds; later calls take milliseconds.
+The first call on a new structure size compiles the model. This takes
+seconds. Later calls take milliseconds.
 
 ## Speed options
 
 | Option | Default | Effect |
 |---|---|---|
 | `layout` | `"auto"` | `"dense"` (padded per-atom blocks, fastest on GPU) when the neighbour padding is efficient, else `"sparse"` (an edge list) |
-| `lean` | `True` | evaluate the lean form of an ACE model: unused radial columns and harmonics dropped, pair weights folded in. Exact to round-off |
-| `spline_tol` | `"auto"` | spline a *learned* radial at 1e-10 before evaluating (see [learned radials](learned-radials.md#deployment-spline-speed)); a float splines any analytic radial, `None` never splines |
-| `edge_a_kind` | `"auto"` | the A-basis kernel, `"gather"` or `"matmul"`; `"auto"` times both once per edge bucket |
-| `skin` | `1.0` | the Verlet skin in Å; `0` rebuilds every call |
+| `lean` | `True` | evaluate the lean form of an ACE model: unused radial columns and harmonics removed, pair weights folded in. Exact to round-off |
+| `spline_tol` | `"auto"` | change a *learned* radial to a spline at 1e-10 before evaluation (see [learned radials](learned-radials.md#deployment-spline-speed)); a float changes any analytic radial to a spline; `None` never makes splines |
+| `edge_a_kind` | `"auto"` | the A-basis kernel, `"gather"` or `"matmul"`; `"auto"` measures the time of both, one time for each edge bucket |
+| `skin` | `1.0` | the Verlet skin in Å; `0` builds the list again at each call |
 
-`calc.model` is the model as loaded; `calc.eval_model` is the form actually
-evaluated. Installing the `fast-neighbours` extra (matscipy-neighbours) gives
-faster neighbour lists; ASE's list is the fallback.
+`calc.model` is the model as loaded. `calc.eval_model` is the form that the
+calculator evaluates. If you install the `fast-neighbours` extra
+(matscipy-neighbours), the neighbour lists are faster. If not, the
+calculator uses the ASE neighbour list.
 
 ## Site descriptors
 
-The per-atom ACE descriptors (one row per atom) are available from the
+You can get the per-atom ACE descriptors (one row for each atom) from the
 calculator, or directly from a loaded model:
 
 ```python
@@ -110,12 +118,12 @@ D = aj.site_descriptors(model, atoms.positions, atoms.numbers, atoms.cell.array,
 
 ## Uncertainty
 
-- A model fitted with `aj fit --uq ard` comes with `posterior.npz`.
-  `ACECalculator("model.npz", posterior="posterior.npz")` then provides a
+- A model fitted with `aj fit --uq ard` has a `posterior.npz` file.
+  `ACECalculator("model.npz", posterior="posterior.npz")` then gives a
   calibrated per-atom `forces_std`, `forces_cov`, `forces_q` and
-  `forces_group`, computed on request, e.g. with
-  `calc.get_property("forces_std", atoms)`; see
+  `forces_group`. The calculator calculates them only when you ask, for
+  example with `calc.get_property("forces_std", atoms)`. See
   [Per-atom force uncertainty](force-uncertainty.md).
-- A hybrid ACE + GP fit writes `gp_model.npz`, which loads with
-  `GPCalculator.from_file("gp_model.npz")` and adds `energy_std` and
-  `forces_std` to `calc.results`.
+- A hybrid ACE + GP fit writes `gp_model.npz`. Load it with
+  `GPCalculator.from_file("gp_model.npz")`. This calculator adds
+  `energy_std` and `forces_std` to `calc.results`.
