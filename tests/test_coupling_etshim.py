@@ -31,3 +31,19 @@ def test_bridge_wellformed():
     assert all(0 <= l <= 1 for s in aa_sig for (n, l, m) in s)
     assert len(set(aa_sig)) == len(aa_sig)                 # each AA column is a distinct function
     assert all(0 <= r < 3 and 0 <= y < 4 for r, y in aspec)
+
+
+def test_couple_columns_share_aa_specs_order():
+    """A2B column j multiplies the j-th AA product of the evaluation order (the
+    concatenated aa_specs rows), so aa_sig[j] must be that product's (n, l, m)
+    signature.  build_spec interleaves body orders, which ET's SparseSymmProd
+    regroups by length while the A2B columns stay in 𝔸spec order."""
+    require_coupling_lib()
+    from ace_jax.basis.coupling import couple
+    from ace_jax.basis.spec import build_spec
+    mb, Rnl, Ylm = build_spec(1, 3, 6)
+    assert [len(b) for b in mb] != sorted(len(b) for b in mb)     # the interleaved case
+    cpl = couple(mb, Rnl, Ylm)
+    rows = [r for g in cpl.aa_specs for r in g]
+    ev = [tuple(sorted((*Rnl[cpl.aspec[a][0]], Ylm[cpl.aspec[a][1]][1]) for a in r)) for r in rows]
+    assert ev == [tuple(sorted(s)) for s in cpl.aa_sig]

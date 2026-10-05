@@ -1,0 +1,667 @@
+{
+ "hlo_module": "/tmp/claude-13098/-home-eng-essswb-projects-ace-jax/ecf5784d-d669-462b-b3cf-9931182a7fd1/scratchpad/dump_pace_Cantor_medium/module_0086.jit_efv.cpu_after_optimizations.txt",
+ "n_thunk_kinds": 355,
+ "thunks_per_call": 407.8,
+ "thunk_ms_per_call": 249.889,
+ "wall_ms_per_call": 250.05676460000004,
+ "by_stage_ms": {
+  "A": {
+   "fwd_ms": 44.629,
+   "bwd_ms": 38.972
+  },
+  "radial": {
+   "fwd_ms": 65.271,
+   "bwd_ms": 17.041
+  },
+  "AA+rho": {
+   "fwd_ms": 17.847,
+   "bwd_ms": 47.392
+  },
+  "angular": {
+   "fwd_ms": 5.251,
+   "bwd_ms": 5.65
+  },
+  "strain": {
+   "fwd_ms": 1.135,
+   "bwd_ms": 1.743
+  },
+  "tail": {
+   "fwd_ms": 0.835,
+   "bwd_ms": 1.579
+  },
+  "other": {
+   "fwd_ms": 1.5,
+   "bwd_ms": 0.0
+  },
+  "core": {
+   "fwd_ms": 0.303,
+   "bwd_ms": 0.429
+  },
+  "force": {
+   "fwd_ms": 0.0,
+   "bwd_ms": 0.339
+  }
+ },
+ "fwd_ms": 136.77180385079998,
+ "bwd_ms": 113.14387319999999,
+ "simd_instructions": {
+  "ymm": 1054,
+  "scalar": 787,
+  "zmm": 26
+ },
+ "time_by_simd": {
+  "vector_dominant_ms": 89.93700000000001,
+  "no_fp_or_library_ms": 132.1240000000002,
+  "scalar_dominant_ms": 27.828000000000003
+ },
+ "top": [
+  {
+   "thunk": "bitcast_concatenate_fusion.3",
+   "ms_per_call": 20.206,
+   "calls": 1.0,
+   "stages": {
+    "radial": 1.0
+   },
+   "bwd": false,
+   "hlo_op": "fusion",
+   "out_shape": "f64[90112,8]{1,0}",
+   "MB": 13.0,
+   "GBps": 0.64,
+   "simd": {
+    "ymm": 238
+   }
+  },
+  {
+   "thunk": "ynn_fusion.2",
+   "ms_per_call": 19.626,
+   "calls": 1.0,
+   "stages": {
+    "A": 1.0
+   },
+   "bwd": true,
+   "hlo_op": "fusion",
+   "out_shape": "f64[90112,8]{1,0}",
+   "MB": 47.0,
+   "GBps": 2.39,
+   "simd": null
+  },
+  {
+   "thunk": "dot_general.13",
+   "ms_per_call": 8.739,
+   "calls": 1.0,
+   "stages": {
+    "A": 1.0
+   },
+   "bwd": false,
+   "hlo_op": "dot",
+   "out_shape": "f64[2048,40,9]{2,1,0}",
+   "MB": 41.2,
+   "GBps": 4.72,
+   "simd": null
+  },
+  {
+   "thunk": "transpose_copy_fusion",
+   "ms_per_call": 8.618,
+   "calls": 1.0,
+   "stages": {
+    "A": 1.0
+   },
+   "bwd": false,
+   "hlo_op": "fusion",
+   "out_shape": "f64[5,36,2048,8]{3,2,1,0}",
+   "MB": 47.2,
+   "GBps": 5.48,
+   "simd": null
+  },
+  {
+   "thunk": "dot_general.16",
+   "ms_per_call": 8.39,
+   "calls": 1.0,
+   "stages": {
+    "AA+rho": 1.0
+   },
+   "bwd": false,
+   "hlo_op": "dot",
+   "out_shape": "f64[10,2048]{1,0}",
+   "MB": 24.6,
+   "GBps": 2.94,
+   "simd": null
+  },
+  {
+   "thunk": "bitcast_copy_fusion.2",
+   "ms_per_call": 8.272,
+   "calls": 1.0,
+   "stages": {
+    "AA+rho": 1.0
+   },
+   "bwd": true,
+   "hlo_op": "fusion",
+   "out_shape": "f64[1815,1,2048]{2,1,0}",
+   "MB": 118.9,
+   "GBps": 14.38,
+   "simd": {
+    "ymm": 16
+   }
+  },
+  {
+   "thunk": "copy_bitcast_fusion.1",
+   "ms_per_call": 7.986,
+   "calls": 1.0,
+   "stages": {
+    "A": 0.9,
+    "AA+rho": 0.1
+   },
+   "bwd": true,
+   "hlo_op": "fusion",
+   "out_shape": "f64[81920,36]{1,0}",
+   "MB": 50.1,
+   "GBps": 6.28,
+   "simd": {
+    "scalar": 36
+   }
+  },
+  {
+   "thunk": "transpose_copy_fusion.1",
+   "ms_per_call": 7.862,
+   "calls": 1.0,
+   "stages": {
+    "A": 1.0
+   },
+   "bwd": false,
+   "hlo_op": "fusion",
+   "out_shape": "f64[5,36,2048,8]{3,2,1,0}",
+   "MB": 47.2,
+   "GBps": 6.0,
+   "simd": null
+  },
+  {
+   "thunk": "ynn_fusion.3",
+   "ms_per_call": 7.501,
+   "calls": 1.0,
+   "stages": {
+    "A": 1.0
+   },
+   "bwd": true,
+   "hlo_op": "fusion",
+   "out_shape": "f64[2048,44,9]{2,1,0}",
+   "MB": 41.2,
+   "GBps": 5.5,
+   "simd": null
+  },
+  {
+   "thunk": "ynn_fusion.7",
+   "ms_per_call": 7.169,
+   "calls": 1.0,
+   "stages": {
+    "A": 1.0
+   },
+   "bwd": false,
+   "hlo_op": "fusion",
+   "out_shape": "f64[180,2048]{1,0}",
+   "MB": 50.1,
+   "GBps": 6.99,
+   "simd": null
+  },
+  {
+   "thunk": "bitcast_concatenate_fusion.1",
+   "ms_per_call": 6.969,
+   "calls": 1.0,
+   "stages": {
+    "AA+rho": 1.0
+   },
+   "bwd": false,
+   "hlo_op": "fusion",
+   "out_shape": "f64[1486,2048]{1,0}",
+   "MB": 116.2,
+   "GBps": 16.67,
+   "simd": {
+    "ymm": 42,
+    "scalar": 34
+   }
+  },
+  {
+   "thunk": "select_divide_fusion",
+   "ms_per_call": 6.05,
+   "calls": 1.0,
+   "stages": {
+    "radial": 1.0
+   },
+   "bwd": true,
+   "hlo_op": "fusion",
+   "out_shape": "f64[90112]{0}",
+   "MB": 22.3,
+   "GBps": 3.69,
+   "simd": {
+    "ymm": 135,
+    "scalar": 135
+   }
+  },
+  {
+   "thunk": "add_add_fusion",
+   "ms_per_call": 5.847,
+   "calls": 1.0,
+   "stages": {
+    "radial": 0.84,
+    "tail": 0.11,
+    "core": 0.03,
+    "angular": 0.03
+   },
+   "bwd": true,
+   "hlo_op": "fusion",
+   "out_shape": "f64[90112,3]{1,0}",
+   "MB": 26.2,
+   "GBps": 4.48,
+   "simd": {
+    "scalar": 65
+   }
+  },
+  {
+   "thunk": "ynn_fusion.8",
+   "ms_per_call": 4.967,
+   "calls": 1.0,
+   "stages": {
+    "A": 1.0
+   },
+   "bwd": false,
+   "hlo_op": "fusion",
+   "out_shape": "f64[81920,36]{1,0}",
+   "MB": 29.5,
+   "GBps": 5.94,
+   "simd": null
+  },
+  {
+   "thunk": "bitcast_copy_fusion.3",
+   "ms_per_call": 4.904,
+   "calls": 1.0,
+   "stages": {
+    "AA+rho": 1.0
+   },
+   "bwd": true,
+   "hlo_op": "fusion",
+   "out_shape": "f64[1100,1,2048]{2,1,0}",
+   "MB": 54.1,
+   "GBps": 11.02,
+   "simd": {
+    "ymm": 16
+   }
+  },
+  {
+   "thunk": "ynn_fusion.4",
+   "ms_per_call": 4.6,
+   "calls": 1.0,
+   "stages": {
+    "A": 1.0
+   },
+   "bwd": true,
+   "hlo_op": "fusion",
+   "out_shape": "f64[81920,9]{1,0}",
+   "MB": 29.5,
+   "GBps": 6.41,
+   "simd": null
+  },
+  {
+   "thunk": "multiply_bitcast_fusion.8",
+   "ms_per_call": 4.506,
+   "calls": 1.0,
+   "stages": {
+    "A": 0.26,
+    "radial": 0.74
+   },
+   "bwd": false,
+   "hlo_op": "fusion",
+   "out_shape": "f64[2048,44,40]{2,1,0}",
+   "MB": 36.0,
+   "GBps": 8.0,
+   "simd": {
+    "scalar": 19
+   }
+  },
+  {
+   "thunk": "bitcast_copy_fusion.1",
+   "ms_per_call": 4.164,
+   "calls": 1.0,
+   "stages": {
+    "AA+rho": 1.0
+   },
+   "bwd": true,
+   "hlo_op": "fusion",
+   "out_shape": "f64[1090,1,2048]{2,1,0}",
+   "MB": 60.1,
+   "GBps": 14.42,
+   "simd": {
+    "ymm": 12
+   }
+  },
+  {
+   "thunk": "multiply_pad_fusion.1",
+   "ms_per_call": 3.8,
+   "calls": 1.0,
+   "stages": {
+    "AA+rho": 1.0
+   },
+   "bwd": true,
+   "hlo_op": "fusion",
+   "out_shape": "f64[2,605,2048]{2,1,0}",
+   "MB": 93.7,
+   "GBps": 24.67,
+   "simd": {
+    "ymm": 8
+   }
+  },
+  {
+   "thunk": "convert_broadcast_fusion",
+   "ms_per_call": 3.354,
+   "calls": 1.0,
+   "stages": {
+    "A": 1.0
+   },
+   "bwd": false,
+   "hlo_op": "fusion",
+   "out_shape": "f64[2048,44,5,8]{3,2,1,0}",
+   "MB": 29.2,
+   "GBps": 8.7,
+   "simd": {}
+  },
+  {
+   "thunk": "multiply_pad_fusion",
+   "ms_per_call": 3.288,
+   "calls": 1.0,
+   "stages": {
+    "AA+rho": 1.0
+   },
+   "bwd": true,
+   "hlo_op": "fusion",
+   "out_shape": "f64[2,605,2048]{2,1,0}",
+   "MB": 93.7,
+   "GBps": 28.51,
+   "simd": {
+    "ymm": 8
+   }
+  },
+  {
+   "thunk": "copy_gather_fusion",
+   "ms_per_call": 3.014,
+   "calls": 1.0,
+   "stages": {
+    "A": 0.92,
+    "tail": 0.08
+   },
+   "bwd": false,
+   "hlo_op": "fusion",
+   "out_shape": "f64[2048,1,5,36,8]{4,3,2,1,0}",
+   "MB": 23.6,
+   "GBps": 7.84,
+   "simd": {}
+  },
+  {
+   "thunk": "ynn_fusion.5",
+   "ms_per_call": 2.655,
+   "calls": 1.0,
+   "stages": {
+    "AA+rho": 1.0
+   },
+   "bwd": true,
+   "hlo_op": "fusion",
+   "out_shape": "f64[1486,2048]{1,0}",
+   "MB": 24.6,
+   "GBps": 9.28,
+   "simd": null
+  },
+  {
+   "thunk": "wrapped_scatter.5",
+   "ms_per_call": 2.595,
+   "calls": 1.0,
+   "stages": {
+    "AA+rho": 1.0
+   },
+   "bwd": true,
+   "hlo_op": "fusion",
+   "out_shape": "f64[180,2048]{1,0}",
+   "MB": 35.6,
+   "GBps": 13.73,
+   "simd": {
+    "ymm": 1
+   }
+  },
+  {
+   "thunk": "multiply_add_fusion.3",
+   "ms_per_call": 2.394,
+   "calls": 1.0,
+   "stages": {
+    "radial": 1.0
+   },
+   "bwd": false,
+   "hlo_op": "fusion",
+   "out_shape": "f64[90112]{0}",
+   "MB": 2.9,
+   "GBps": 1.2,
+   "simd": null
+  },
+  {
+   "thunk": "multiply_add_fusion.5",
+   "ms_per_call": 2.376,
+   "calls": 1.0,
+   "stages": {
+    "radial": 1.0
+   },
+   "bwd": false,
+   "hlo_op": "fusion",
+   "out_shape": "f64[90112]{0}",
+   "MB": 2.9,
+   "GBps": 1.21,
+   "simd": {
+    "ymm": 2
+   }
+  },
+  {
+   "thunk": "bitcast_gather_fusion.2",
+   "ms_per_call": 2.344,
+   "calls": 1.0,
+   "stages": {
+    "AA+rho": 1.0
+   },
+   "bwd": true,
+   "hlo_op": "fusion",
+   "out_shape": "f64[1815,1,2048]{2,1,0}",
+   "MB": 32.7,
+   "GBps": 13.95,
+   "simd": {}
+  },
+  {
+   "thunk": "multiply_add_fusion.6",
+   "ms_per_call": 2.314,
+   "calls": 1.0,
+   "stages": {
+    "radial": 1.0
+   },
+   "bwd": false,
+   "hlo_op": "fusion",
+   "out_shape": "f64[90112]{0}",
+   "MB": 2.2,
+   "GBps": 0.93,
+   "simd": {
+    "ymm": 4
+   }
+  },
+  {
+   "thunk": "bitcast_gather_fusion.3",
+   "ms_per_call": 2.278,
+   "calls": 1.0,
+   "stages": {
+    "AA+rho": 1.0
+   },
+   "bwd": true,
+   "hlo_op": "fusion",
+   "out_shape": "f64[1090,1,2048]{2,1,0}",
+   "MB": 20.8,
+   "GBps": 9.14,
+   "simd": {}
+  },
+  {
+   "thunk": "multiply_subtract_fusion.7",
+   "ms_per_call": 2.271,
+   "calls": 1.0,
+   "stages": {
+    "radial": 1.0
+   },
+   "bwd": false,
+   "hlo_op": "fusion",
+   "out_shape": "f64[90112]{0}",
+   "MB": 1.4,
+   "GBps": 0.63,
+   "simd": {
+    "ymm": 4
+   }
+  },
+  {
+   "thunk": "broadcast_power_fusion.1",
+   "ms_per_call": 2.21,
+   "calls": 1.0,
+   "stages": {
+    "radial": 1.0
+   },
+   "bwd": false,
+   "hlo_op": "fusion",
+   "out_shape": "f64[90112]{0}",
+   "MB": 4.3,
+   "GBps": 1.96,
+   "simd": {}
+  },
+  {
+   "thunk": "multiply_add_fusion.1",
+   "ms_per_call": 2.204,
+   "calls": 1.0,
+   "stages": {
+    "radial": 1.0
+   },
+   "bwd": false,
+   "hlo_op": "fusion",
+   "out_shape": "f64[90112]{0}",
+   "MB": 2.9,
+   "GBps": 1.31,
+   "simd": null
+  },
+  {
+   "thunk": "multiply_add_fusion.4",
+   "ms_per_call": 2.172,
+   "calls": 1.0,
+   "stages": {
+    "radial": 1.0
+   },
+   "bwd": false,
+   "hlo_op": "fusion",
+   "out_shape": "f64[90112]{0}",
+   "MB": 2.9,
+   "GBps": 1.33,
+   "simd": null
+  },
+  {
+   "thunk": "multiply_subtract_fusion.6",
+   "ms_per_call": 2.162,
+   "calls": 1.0,
+   "stages": {
+    "radial": 1.0
+   },
+   "bwd": false,
+   "hlo_op": "fusion",
+   "out_shape": "f64[90112]{0}",
+   "MB": 2.2,
+   "GBps": 1.0,
+   "simd": {
+    "ymm": 4
+   }
+  },
+  {
+   "thunk": "ynn_fusion.1",
+   "ms_per_call": 2.143,
+   "calls": 1.0,
+   "stages": {
+    "radial": 1.0
+   },
+   "bwd": true,
+   "hlo_op": "fusion",
+   "out_shape": "f64[90112]{0}",
+   "MB": 12.3,
+   "GBps": 5.72,
+   "simd": null
+  },
+  {
+   "thunk": "multiply_pad_fusion.3",
+   "ms_per_call": 2.122,
+   "calls": 1.0,
+   "stages": {
+    "AA+rho": 1.0
+   },
+   "bwd": true,
+   "hlo_op": "fusion",
+   "out_shape": "f64[2,275,2048]{2,1,0}",
+   "MB": 51.4,
+   "GBps": 24.21,
+   "simd": {
+    "ymm": 8
+   }
+  },
+  {
+   "thunk": "bitcast_pad_fusion.2",
+   "ms_per_call": 2.103,
+   "calls": 1.0,
+   "stages": {
+    "angular": 0.96,
+    "radial": 0.02,
+    "A": 0.01
+   },
+   "bwd": true,
+   "hlo_op": "fusion",
+   "out_shape": "f64[90112,3]{1,0}",
+   "MB": 21.7,
+   "GBps": 10.33,
+   "simd": {
+    "scalar": 45
+   }
+  },
+  {
+   "thunk": "multiply_subtract_fusion.5",
+   "ms_per_call": 2.094,
+   "calls": 1.0,
+   "stages": {
+    "radial": 1.0
+   },
+   "bwd": false,
+   "hlo_op": "fusion",
+   "out_shape": "f64[90112]{0}",
+   "MB": 2.9,
+   "GBps": 1.38,
+   "simd": {
+    "ymm": 2
+   }
+  },
+  {
+   "thunk": "multiply_add_fusion.2",
+   "ms_per_call": 2.082,
+   "calls": 1.0,
+   "stages": {
+    "radial": 1.0
+   },
+   "bwd": false,
+   "hlo_op": "fusion",
+   "out_shape": "f64[90112]{0}",
+   "MB": 2.9,
+   "GBps": 1.39,
+   "simd": null
+  },
+  {
+   "thunk": "multiply_subtract_fusion.4",
+   "ms_per_call": 2.076,
+   "calls": 1.0,
+   "stages": {
+    "radial": 1.0
+   },
+   "bwd": false,
+   "hlo_op": "fusion",
+   "out_shape": "f64[90112]{0}",
+   "MB": 2.9,
+   "GBps": 1.39,
+   "simd": null
+  }
+ ]
+}

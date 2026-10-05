@@ -30,10 +30,14 @@ import jax
 import jax.numpy as jnp
 
 from .edge_model import (EdgeSiteModel, calibrate_edge_a, one_hot_selector,  # noqa: F401
-                         with_edge_a_kind)
+                         product_basis, product_basis_dot, with_edge_a_kind)
 from .harmonics import real_solid_harmonics, real_spherical_harmonics
 from .radial import (agnesi_normalized, env_ace1_poly1sr, env_poly1sr,
                      env_poly2sx, poly_recursion, spline_eval, spline_eval_pairs)
+
+# species count from which the CPU pools the species-compact blocked A by segment_sum
+# rather than a one-hot over z_j (`ACEModel._blocked_a_scatter`)
+BLK_SCATTER_MIN_NZ = 3
 
 
 @contextmanager
@@ -142,6 +146,13 @@ class ACEModel(EdgeSiteModel):
     blk_compact: bool = eqx.field(static=True, default=False)
     blk_aa_specs: tuple = None
     blk_rnl_coefs: jax.Array = None                  # (NZ, NZ, ncoef, sum_l w_l)
+    # The radial stage tabulated in r (`splinify.radial_table`, opt-in, applied
+    # last by `lean`), () = off: `radial`/`pair_radial` read rtab_coefs, columns
+    # [R_nl | R_pair], and the compact blocked path (`_blocked_radial`)
+    # blk_rtab_coefs, [compact R | R_pair]; exact zeros from the pair cutoff on.
+    rtab_grid: tuple = eqx.field(static=True, default=())    # (r_min, h, n) in r
+    rtab_coefs: jax.Array = None                     # (NZ, NZ, ncoef, n_rnl + n_pair)
+    blk_rtab_coefs: jax.Array = None                 # (NZ, NZ, ncoef, sum_l w_l + n_pair)
 
     # -------------------------------------------------- edge embeddings
     def _radial_one(self, r, zi, zj, kind, trans, coefs, grid, Wnlq, ABC, env):
@@ -158,9 +169,24 @@ class ACEModel(EdgeSiteModel):
             raise ValueError(f"unknown radial_kind {kind!r}")
         return val * env[:, None]
 
+    def _table(self, r, zi, zj, coefs):
+        """A radial table (`splinify.radial_table`) at r (E,): exact zeros from
+        each pair's cutoff (the pair envelope's rcut) on."""
+        x0, h, n = self.rtab_grid
+        v = spline_eval_pairs(r, coefs, zi, zj, x0, h, n)
+        return jnp.where((r < self.pair_envelope[zi, zj, 0])[:, None], v, 0.0)
+
+    def _split_pair(self, V):
+        k = V.shape[1] - self.Wpair.shape[0]               # the last n_pair columns are R_pair
+        return V[:, :k], V[:, k:]
+
     def radial(self, rij, zi, zj):
-        """Rnl and the pair radial for each edge.  rij (E,3), zi/zj (E,) species indices."""
+        """Rnl and the pair radial for each edge.  rij (E,3), zi/zj (E,) species indices.
+        The one entry point of the radial stage (with `pair_radial` and
+        `_blocked_radial`): with a radial table (`rtab_grid`) it reads that."""
         r = jnp.linalg.norm(rij, axis=-1)
+        if self.rtab_grid:
+            return self._split_pair(self._table(r, zi, zj, self.rtab_coefs))
         # many-body envelope is applied in transformed coordinates
         env = env_poly2sx(agnesi_normalized(r, self.rnl_transform[zi, zj]),
                           self.rnl_envelope[zi, zj])
@@ -252,7 +278,7 @@ class ACEModel(EdgeSiteModel):
 
     def _aa(self, A, specs=None):
         specs = self.aa_specs if specs is None else specs
-        return jnp.concatenate([jnp.prod(A[:, g], axis=-1) for g in specs], axis=-1)
+        return product_basis(A, specs)
 
     def _from_pooled(self, A, Apair):
         AA = self._aa(A)
@@ -268,7 +294,7 @@ class ACEModel(EdgeSiteModel):
         return B, Apair
 
     def _readout_folded(self, A, Apair, node_z, specs=None):
-        e = jnp.einsum("ia,ai->i", self._aa(A, specs), self.ctilde[:, node_z])
+        e = product_basis_dot(A, self.aa_specs if specs is None else specs, self.ctilde[:, node_z])
         e = e + jnp.einsum("ip,pi->i", Apair, self.Wpair[:, node_z])
         return e + self.E0[node_z]
 
@@ -396,6 +422,9 @@ class ACEModel(EdgeSiteModel):
         """The pair radial alone, (E, n_pair): the second output of `radial`
         without the many-body Rnl."""
         r = jnp.linalg.norm(rij, axis=-1)
+        if self.rtab_grid:
+            F = self.rtab_coefs.shape[-1]
+            return self._table(r, zi, zj, self.rtab_coefs[..., F - self.Wpair.shape[0]:])
         pe = self.pair_envelope[zi, zj]
         envp = (env_ace1_poly1sr(r, pe) if self.pair_envelope_kind == "ace1_poly1sr"
                 else env_poly1sr(r, pe))
@@ -456,19 +485,74 @@ class ACEModel(EdgeSiteModel):
         n, K = mask.shape
         E = n * K
         r3, zi_, zj_, mk = rij.reshape(E, 3), zi.reshape(E), zj.reshape(E), mask.reshape(E)
-        if self.blk_compact:
-            r = jnp.linalg.norm(r3, axis=-1)
-            env = env_poly2sx(agnesi_normalized(r, self.rnl_transform[zi_, zj_]),
-                              self.rnl_envelope[zi_, zj_])
-            R = self._radial_one(r, zi_, zj_, "spline", self.rnl_transform, self.blk_rnl_coefs,
-                                 self.rnl_grid, None, None, env)
-            Rpair = self.pair_radial(r3, zi_, zj_)
-        else:
-            R, Rpair = self.radial(r3, zi_, zj_)
+        R, Rpair = self._blocked_radial(r3, zi_, zj_)
         R = jnp.where(mk[:, None], R, 0.0)
         Y = self.angular(r3)
+        if self.blk_compact and self.E0.shape[0] >= BLK_SCATTER_MIN_NZ:
+            A = jax.lax.platform_dependent(
+                R, Y, zj_, cpu=lambda R, Y, zj: self._blocked_a_scatter(R, Y, zj, n, K),
+                default=lambda R, Y, zj: self._blocked_a_onehot(R, Y, zj, n, K))
+        else:
+            A = self._blocked_a_onehot(R, Y, zj_, n, K)
+        return self._readout_folded(A, pool_dense(Rpair.reshape(n, K, -1), mask), node_z,
+                                    self.blk_aa_specs)
+
+    def _blocked_radial(self, rij, zi, zj):
+        """(R, Rpair) per edge for the blocked dense path: with species-compact
+        blocks R is each edge's own z_j columns (`blk_rnl_coefs` widths), else
+        `radial`'s.  Reads `blk_rtab_coefs` when tabulated."""
+        if not self.blk_compact:
+            return self.radial(rij, zi, zj)
+        r = jnp.linalg.norm(rij, axis=-1)
+        if self.rtab_grid:
+            return self._split_pair(self._table(r, zi, zj, self.blk_rtab_coefs))
+        env = env_poly2sx(agnesi_normalized(r, self.rnl_transform[zi, zj]),
+                          self.rnl_envelope[zi, zj])
+        R = self._radial_one(r, zi, zj, "spline", self.rnl_transform, self.blk_rnl_coefs,
+                             self.rnl_grid, None, None, env)
+        return R, self.pair_radial(rij, zi, zj)
+
+    # -------------------------------------------------- radial table hooks (`splinify.radial_table`)
+    def without_radial_table(self):
+        return (_dc.replace(self, rtab_grid=(), rtab_coefs=None, blk_rtab_coefs=None)
+                if self.rtab_grid else self)
+
+    def table_cutoffs(self):
+        """(NZ, NZ) per-pair cutoff the table masks at: the pair envelope's rcut
+        (`pad_cutoff`); `radial_table` checks R_nl vanishes there too."""
+        return self.pair_envelope[..., 0]
+
+    def radial_table_targets(self):
+        """(which, field) pairs `radial_table` fills."""
+        return (("full", "rtab_coefs"),) + ((("blk", "blk_rtab_coefs"),) if self.blk_compact else ())
+
+    def radial_table_values(self, which, r, zi, zj):
+        """The exact radial a table holds, at r (E,): "full" [R_nl | R_pair]
+        (`radial`), "blk" [compact R | R_pair] (`_blocked_radial`)."""
+        rij = jnp.stack([r, 0 * r, 0 * r], -1)
+        return jnp.concatenate((self.radial if which == "full" else self._blocked_radial)(rij, zi, zj),
+                               axis=1)
+
+    def radial_table_key(self):
+        """What the tabulated radials read (the cache key's content): never the
+        many-body readout (ctilde, WB, E0), so a readout-only swap reuses the
+        table.  Wpair is in it via `fold_pair`'s pair coefficients."""
+        arrs = (self.rnl_coefs, self.pair_coefs, self.rnl_Wnlq, self.pair_Wnlq, self.polys_A,
+                self.polys_B, self.polys_C, self.pair_polys_A, self.pair_polys_B,
+                self.pair_polys_C, self.rnl_transform, self.pair_transform, self.rnl_envelope,
+                self.pair_envelope, self.rnl_coefs_single, self.rnl_embedding,
+                self.rnl_emb_nidx, self.rnl_emb_kidx, self.blk_rnl_coefs)
+        return arrs + (repr((self.radial_kind, self.pair_radial_kind, self.pair_envelope_kind,
+                             self.rnl_grid, self.pair_grid, self.blk, self.blk_compact,
+                             self.Wpair.shape[0])),)
+
+    def _blocked_a_onehot(self, R, Y, zj, n, K):
+        """Node-major blocked A (n, n_A) from per-edge R (n*K, sum w_l) and Y: per
+        l-block a batched (w_l, K) @ (K, 2l+1) contraction; species-compact
+        blocks first expand R by a one-hot over z_j (NZ x the columns)."""
+        E = n * K
         nz = self.E0.shape[0]
-        oh = jax.nn.one_hot(zj_, nz, dtype=R.dtype) if self.blk_compact else None
+        oh = jax.nn.one_hot(zj, nz, dtype=R.dtype) if self.blk_compact else None
         hi = jax.lax.Precision.HIGHEST
         At = []
         for l, off, w in self.blk:
@@ -478,9 +562,23 @@ class ACEModel(EdgeSiteModel):
             Yl = Y[:, l * l:(l + 1) ** 2]
             At.append(jnp.einsum("nkr,nky->ryn", Rl.reshape(n, K, -1), Yl.reshape(n, K, -1),
                                  precision=hi).reshape(-1, n))
-        A = jnp.concatenate(At, axis=0).T
-        return self._readout_folded(A, pool_dense(Rpair.reshape(n, K, -1), mask), node_z,
-                                    self.blk_aa_specs)
+        return jnp.concatenate(At, axis=0).T
+
+    def _blocked_a_scatter(self, R, Y, zj, n, K):
+        """`_blocked_a_onehot` for species-compact blocks, without the one-hot:
+        each edge's own R_l (x) Y_l, segment-summed per (node, z_j).  NZ x less
+        arithmetic for a scatter-add.  On the CPU, with NZ >= BLK_SCATTER_MIN_NZ,
+        this wins (5 species: 1.10-1.41x the lean step); at NZ = 2 it is 0.91-1.14x,
+        and for PACE's pool-first A 0.56-1.19x (lestrade, i9-14900K, 1 and 8 P-cores)."""
+        E = n * K
+        nz = self.E0.shape[0]
+        seg = jnp.repeat(jnp.arange(n), K) * nz + zj
+        At = []
+        for l, off, w in self.blk:
+            P = (R[:, off:off + w, None] * Y[:, None, l * l:(l + 1) ** 2]).reshape(E, -1)   # (E, w (2l+1))
+            S = jax.ops.segment_sum(P, seg, num_segments=n * nz)                            # (n nz, w (2l+1))
+            At.append(S.reshape(n, -1))                                                     # columns (z, r, y)
+        return jnp.concatenate(At, axis=1)
 
 
 # ------------------------------------------------------------------ readout fold
@@ -681,7 +779,7 @@ def block_dense(model):
                                       if compact else None))
 
 
-from .splinify import AUTO, spline_plan  # noqa: E402
+from .splinify import AUTO, spline_plan, table_intervals  # noqa: E402
 
 
 def _splined(model, spline_tol, spline_intervals=None):
@@ -700,6 +798,23 @@ def _wraps(model):
     """A wrapper model (e.g. an FSModel(base, ...)) that evaluates through an
     ACEModel's basis: it has `.base` and `with_base(new_base)`."""
     return hasattr(model, "base") and callable(getattr(model, "with_base", None))
+
+
+def with_radial_table(model, radial_table=None):
+    """(model, info): `splinify.radial_table` as the `radial_table=` option asks,
+    the one place `lean`, ACECalculator and export_lammps apply it.  None / False
+    (default): `model` itself and None.  True: DEFAULT_RADIAL_TABLE (4000)
+    intervals; an int: that many.  ACEModel and PACEModel only: a wrapper model
+    (`.base`, `with_base`) reads its base's basis, which a table does not keep
+    exact, so it is refused."""
+    n = table_intervals(radial_table)
+    if n is None:
+        return model, None
+    if _wraps(model):
+        raise ValueError("radial_table: a wrapper model reads its base model's basis, which "
+                         "must stay exact; tabulate only an ACEModel or a PACEModel")
+    from .splinify import radial_table as _radial_table
+    return _radial_table(model, n, return_info=True)
 
 
 def splining(before, after, spline_tol):
@@ -734,7 +849,7 @@ def lean_keep_basis(model, spline_tol=AUTO, spline_intervals=None):
     return prune_columns(_splined(model, spline_tol, spline_intervals))
 
 
-def lean(model, spline_tol=AUTO, spline_intervals=None):
+def lean(model, spline_tol=AUTO, spline_intervals=None, radial_table=None):
     """The evaluation form of a folded ACEModel: `prune_columns`, `fold_pair`
     and the l-blocked dense A (`block_dense`).  Exact to roundoff in E, F and the
     virial for a splined model; 1.1-3.3x faster forces on the benchmark models
@@ -764,6 +879,17 @@ def lean(model, spline_tol=AUTO, spline_intervals=None):
     `model.with_base(lean_keep_basis(model.base, spline_tol, spline_intervals))`:
     the wrapper reads the basis, so only the basis-preserving transforms apply.
 
+    radial_table (None, the default: off; True: `splinify.DEFAULT_RADIAL_TABLE`
+    = 4000 intervals; an int: that many) applies `splinify.radial_table` last,
+    via `with_radial_table`: the whole radial stage -- R_nl with its transform
+    and envelope, and the folded pair radial -- as one cubic B-spline table per
+    species pair in r on [0.5 A, rcut], masked to exact zeros beyond each
+    pair's cutoff (the end cubic extrapolates below 0.5 A).  A CPU speed-up
+    (1.1-1.4x on one core), and an approximation: at 4000 intervals energies
+    agree to ~1e-11 relative and forces to ~1e-8 of max|F|.  A PACEModel gets
+    its g_k tabulated (and is otherwise returned as given); a wrapper model
+    refuses it.
+
     Energy only (see `fold_pair`): keep the original for descriptors and
     fitting.  Anything that is not a folded ACEModel (a PACEModel, an unfolded
     model) is returned as given, as is a model that is already lean.
@@ -772,7 +898,9 @@ def lean(model, spline_tol=AUTO, spline_intervals=None):
     WB or ctilde on it changes one layout and not the other (`require_full`
     guards the radial helpers).  Change the full model and re-apply `lean`."""
     if _wraps(model):
+        if table_intervals(radial_table) is not None:
+            with_radial_table(model, radial_table)           # raises: wrappers need the basis
         return model.with_base(lean_keep_basis(model.base, spline_tol, spline_intervals))
-    if not isinstance(model, ACEModel) or not model.folded or model.energy_only:
-        return model
-    return block_dense(fold_pair(prune_columns(_splined(model, spline_tol, spline_intervals))))
+    if isinstance(model, ACEModel) and model.folded and not model.energy_only:
+        model = block_dense(fold_pair(prune_columns(_splined(model, spline_tol, spline_intervals))))
+    return with_radial_table(model, radial_table)[0]

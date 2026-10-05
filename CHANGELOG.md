@@ -2,6 +2,58 @@
 
 ## Unreleased
 
+- **Fixed: built bases were not rotation invariant.** Since the compiled
+  coupling library arrived (0.2.0), `aj basis`, `aj fit --order/--max-degree`
+  and `build_basis` paired the coupling's columns with the wrong products of
+  the A basis. The B functions were therefore not rotation invariant: at
+  order 2, degree 6 for Si, 5 of 17 changed under a rotation, and at
+  order 4, degree 12, 272 of 338. The smoothness prior also applied to the
+  wrong columns. Fits from these bases lost accuracy: on GAP-18 Si at
+  order 4, degree 12, the force RMSE floor was about 0.19 eV/Å, against 0.13
+  for ACEpotentials. Built bases are now invariant to roundoff, and the
+  invariance and parity with ACEpotentials are tested. A saved `.npz` or
+  `gp_model.npz` keeps its bad coupling, and loading cannot detect it:
+  **rebuild the basis and refit**. Stale entries in the coupling cache are
+  corrected on use. Embedding bases (`--embedding`) and models exported from
+  Julia are unaffected.
+- Faster CPU evaluation. On the CPU, the product basis is now an explicit
+  feature-major chain of multiplies. Before, `jnp.prod`'s reverse mode
+  compiled to strided scalar copies. Other backends are unchanged, and
+  energies and forces agree with the old form to roundoff. Each model's
+  medium benchmark at 2,048 atoms, on an i9-14900K with 8 P-cores: linear
+  ACE 2.9× faster on SiGe and 1.2× on Cantor; PACE 1.3× on SiGe and 1.1×
+  on Cantor.
+- Faster CPU evaluation of linear ACE models with three or more species.
+  On the CPU, the lean evaluation form now pools A per neighbour species
+  with a segment sum. Before, it expanded every edge's radial values over
+  all species with a one-hot. Two-species models, PACE models and other
+  backends are unchanged. Cantor (5 species) at 2,048 atoms, on an
+  i9-14900K with 8 P-cores: 1.37× faster for the medium model, 1.31× for
+  the small and 1.12× for the large.
+- Opt-in radial tables for faster CPU evaluation: `radial_table=True` on
+  `ACECalculator`, `export_lammps` and `lean` (or an interval count; the
+  default is off). Each species pair's radial functions are tabulated as a
+  cubic spline in r on [0.5 Å, rcut] with 4,000 intervals, so an edge reads a
+  table instead of evaluating transcendentals: for ACE, R_nl (transform and
+  envelope included) and the pair radial; for PACE, the radial basis g_k.
+  Beyond each pair's cutoff the tables are exactly zero. This is an
+  approximation, not roundoff: on the medium benchmark models, energies agree
+  to at most 1.8e-11 relative (≤ 1e-12 eV/atom) and forces to at most 1.7e-8
+  of max|F|. Compiled skin step at 2,048 atoms, on an i9-14900K, one core /
+  8 P-cores: ACE 1.24× / 1.08× faster on SiGe and 1.39× / 1.14× on Cantor;
+  PACE 1.09× / 1.02× on SiGe and 1.22× / 1.08× on Cantor.
+
+## 0.2.0 (2026-10-03)
+
+**Upgrading from 0.1.x.**
+- **`aj fit --uq ard` gives new results.**
+  - `forces_std` now uses per-group scales with a transfer correction instead of one scalar λ.
+  - The default `--force-shape` is `aniso`.
+  - ARD fits E0 jointly under the default `--e0 lsq`, so refit ARD models change slightly (energies included).
+  - Pass `--force-shape iso` to get the spherical region.
+- **Posteriors are now schema 3.** Schema-1 and schema-2 `posterior.npz` files still load and serve `forces_std`. `forces_q`, `forces_cov`, `forces_group` and `forces_support` need a refit.
+- **Energy and virial variances under ARD are not calibrated.** Only forces are.
+
 - Calibrated per-atom force uncertainty, `aj fit --uq ard` revision 2. The
   uncertainty is a shape times per-group scales:
   - the shape is the per-atom 3×3 block of an exact, centred
@@ -43,6 +95,11 @@
   the fitted E0. Force uncertainties are unaffected, and posteriors written
   before still load.
 - `run_ard_stage` compiles its programs once (no per-call recompilation).
+- ARD evidence fits are fully converged and deterministic:
+  - L-BFGS is followed by a bounded projected-Newton polish with the exact Hessian;
+  - convergence is judged on measured roundoff;
+  - two runs give bit-identical results.
+  The fit reports its evidence and gradient roundoff and logs cond(S), warning above `ard_cond_max`.
 - The total energy is a compensated sum of the site energies (correctly rounded,
   independent of atom order and layout), and a float32 model returns it in
   float64 when x64 is enabled instead of a float32 total quantised at its own

@@ -14,7 +14,7 @@ from ase.calculators.calculator import Calculator, all_changes
 from ..eval.edge_model import LAYOUTS, calibrate_edge_a, check_edge_a_kind, with_edge_a_kind
 from ..eval.model import highest_precision
 from ..eval.model import lean as lean_form
-from ..eval.model import splining
+from ..eval.model import splining, with_radial_table
 from ..eval.splinify import AUTO
 from ..eval.nlist import backend as nlist_backend
 from ..eval.nlist import dense_from_sparse, dense_graph, have_matscipy_neighbours, sparse_graph
@@ -65,8 +65,8 @@ class ACECalculator(Calculator):
 
     def __init__(self, model, meta=None, cutoff=None, dtype=None, edge_a_kind="auto",
                  layout="auto", skin=1.0, lean=True, spline_tol=AUTO,
-                 spline_intervals=None, posterior=None, forces_std_every_call=False,
-                 energy_reference="absolute", **kw):
+                 spline_intervals=None, radial_table=None, posterior=None,
+                 forces_std_every_call=False, energy_reference="absolute", **kw):
         """`ACECalculator("si_fitted.npz")` is the intended form: cutoff,
         species and dtype all come from the file.  A pre-loaded (model, meta)
         pair is still accepted, which is what the validation tests use.
@@ -109,6 +109,20 @@ class ACECalculator(Calculator):
         `calc.model` recomputes the lean form on the host (a device-to-host copy
         of the model's arrays): negligible for MD, but a per-step cost if the
         model is swapped every step.
+
+        `radial_table` (None, the default: off; True: 4000 intervals; an int:
+        that many) tabulates the evaluation model's radial stage in r
+        (`eval.model.with_radial_table`, after `lean`; ACE: R_nl with its
+        transform and envelope, and the pair radial; PACE: g_k), one cubic
+        B-spline per species pair on [0.5 A, rcut], exactly zero beyond each
+        pair's cutoff.  A CPU speed-up (1.1-1.4x on one core), and an
+        approximation: at 4000 intervals energies agree to ~1e-11 relative and
+        forces to ~1e-8 of max|F| (tests/test_radial_table.py).  Applies with
+        lean=False too (to the model as given).  `calc.radial_table` is the
+        table's info (n_intervals, r_min, r_max, max_rel_err,
+        max_rel_deriv_err), None when off; `last_timing["radial_table"]` its
+        n_intervals.  Cached on the radial's content, so a readout-only
+        `calc.model` swap does not rebuild it.
 
         `posterior` (a `posterior.npz` from `fit --uq ard`, with `model` the matching
         `model.npz` FILE) adds the per-atom force uncertainty.  For a revision-2 (schema-3)
@@ -167,6 +181,7 @@ class ACECalculator(Calculator):
         self._lean = bool(lean)
         self._spline_tol = spline_tol
         self._spline_intervals = spline_intervals
+        self._radial_table_opt = radial_table
         self.model = model                    # (the setter resets what derives from it)
         self.meta = meta
         self.edge_a_kind = edge_a_kind
@@ -271,13 +286,15 @@ class ACECalculator(Calculator):
         self._model = model
         self._eval_model = (lean_form(model, self._spline_tol, self._spline_intervals)
                             if self._lean else model)
+        self._splined = splining(model, self._eval_model, self._spline_tol)
+        self._eval_model, self._radial_table = with_radial_table(self._eval_model,
+                                                                 self._radial_table_opt)
         self._e0 = np.asarray(model.E0, np.float64)
         if self._energy_reference == "E0":        # site energies without the isolated atoms
             import equinox as eqx
             import jax.numpy as jnp
             self._eval_model = eqx.tree_at(lambda m: m.E0, self._eval_model,
                                            jnp.zeros_like(self._eval_model.E0))
-        self._splined = splining(model, self._eval_model, self._spline_tol)
         self._by_kind = {}                    # form -> model in that form
         self._by_bucket = {}                  # edge bucket -> calibrated form
         self._skin_state = None               # the skin list in use (calc.skin.SkinState)
@@ -288,6 +305,11 @@ class ACECalculator(Calculator):
         """What the lean form splined, None when nothing: {"spline_tol",
         "radials", "n_intervals"} (`eval.model.splining`)."""
         return self._splined
+
+    @property
+    def radial_table(self):
+        """The radial table's info (`splinify.radial_table`), None when off."""
+        return self._radial_table
 
     @property
     def eval_model(self):
@@ -345,7 +367,9 @@ class ACECalculator(Calculator):
             out = self._rebuild_calculate(pos, cell, pbc, dtype)
         E, F, V, timing = out
         self.last_timing = {**timing, "rebuilds": self._rebuilds,
-                            "spline_tol": self._splined["spline_tol"] if self._splined else None}
+                            "spline_tol": self._splined["spline_tol"] if self._splined else None,
+                            "radial_table": (self._radial_table["n_intervals"]
+                                             if self._radial_table else None)}
         E = float(E)
         self.results["energy"] = E
         self.results["free_energy"] = E

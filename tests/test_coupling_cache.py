@@ -17,13 +17,19 @@ from ace_jax.basis import coupling as C
 
 
 def _fake_coupling(mb, rnl, ylm):
-    """Deterministic stand-in shaped like the real return."""
-    n_AA = sum(len(bb) for bb in mb)
+    """Deterministic stand-in shaped like the real return, and self-consistent
+    (a cache hit is realigned by `align_columns`): one m = 0 AA column per body,
+    columns in the evaluation order (bodies stable-sorted by length)."""
+    chans = sorted({tuple(b) for bb in mb for b in bb})
+    aspec = tuple((rnl.index(c), ylm.index((c[1], 0))) for c in chans)
+    bodies = sorted(mb, key=len)
+    rows = [sorted(chans.index(tuple(b)) for b in bb) for bb in bodies]
     return C.Coupling(
-        A2B=np.eye(len(mb), n_AA),
-        aa_sig=tuple(tuple((n, l, 0) for n, l in bb) for bb in mb),
-        aspec=tuple((i % len(rnl), i % len(ylm)) for i in range(n_AA)),
-        aa_specs=tuple(np.arange(n_AA).reshape(1, -1) for _ in mb),
+        A2B=np.eye(len(mb), len(bodies)),
+        aa_sig=tuple(tuple(sorted((n, l, 0) for n, l in bb)) for bb in bodies),
+        aspec=aspec,
+        aa_specs=tuple(np.asarray([r for r in rows if len(r) == k], np.int64).reshape(-1, k)
+                       for k in range(1, max(map(len, rows)) + 1)),
         nnll_spec=tuple(tuple(bb) for bb in mb))
 
 
