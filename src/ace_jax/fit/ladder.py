@@ -152,35 +152,42 @@ def run_laplace(lml, prior, *, n_draws=100, steps=500, lr=0.02, seed=0, init=Non
                                          for i, f in enumerate(FIELDS)])
 
 
-def run_vi(lml, prior, *, n_draws=100, steps=2000, lr=0.01, seed=0, init=None):
-    model = numpyro_model(lml, prior)
-    guide = AutoMultivariateNormal(model, init_loc_fn=init_to_value(values=_init(prior, init)))
+def run_vi(lml, prior, *, n_draws=100, steps=2000, lr=0.01, seed=0, init=None, fixed=None):
+    """fixed (10,) bool: hyperparameters held at `init` (needs init), not sampled."""
+    if fixed is not None and not np.any(fixed):
+        fixed = None
+    model = numpyro_model(lml, prior, fixed, init)
+    guide = AutoMultivariateNormal(model, init_loc_fn=init_to_value(values=_init(prior, init, fixed)))
     params = _svi(model, guide, steps, lr, seed)
     draws = guide.sample_posterior(jax.random.PRNGKey(seed + 1), params, sample_shape=(n_draws,))
-    return _stack(draws), params
+    return _stack(draws, init), params
 
 
 def run_nuts(lml, prior, *, num_warmup=500, num_samples=500, num_chains=4, seed=0, init=None,
-             max_tree_depth=None, target_accept_prob=None):
-    model = numpyro_model(lml, prior)
+             max_tree_depth=None, target_accept_prob=None, fixed=None):
+    """fixed (10,) bool: hyperparameters held at `init` (needs init), not sampled (and not summarised)."""
+    if fixed is not None and not np.any(fixed):
+        fixed = None
+    model = numpyro_model(lml, prior, fixed, init)
     kw = {}
     if max_tree_depth is not None:
         kw["max_tree_depth"] = max_tree_depth
     if target_accept_prob is not None:
         kw["target_accept_prob"] = target_accept_prob
-    kernel = NUTS(model, init_strategy=init_to_value(values=_init(prior, init)), **kw)
+    kernel = NUTS(model, init_strategy=init_to_value(values=_init(prior, init, fixed)), **kw)
     mcmc = MCMC(kernel, num_warmup=num_warmup, num_samples=num_samples, num_chains=num_chains,
                 chain_method="sequential", progress_bar=False)
     mcmc.run(jax.random.PRNGKey(seed), extra_fields=("diverging",))
     samples = mcmc.get_samples(group_by_chain=True)
     from numpyro.diagnostics import effective_sample_size, gelman_rubin
     # R-hat (Gelman-Rubin) is undefined for a single chain; report NaN then.
+    sampled = [f for f in FIELDS if f in samples]
     r_hat = {f: (float(gelman_rubin(np.asarray(samples[f]))) if num_chains >= 2 else float("nan"))
-             for f in FIELDS}
+             for f in sampled}
     summary = {"r_hat": r_hat,
-               "ess": {f: float(effective_sample_size(np.asarray(samples[f]))) for f in FIELDS},
+               "ess": {f: float(effective_sample_size(np.asarray(samples[f]))) for f in sampled},
                "divergences": int(np.sum(np.asarray(mcmc.get_extra_fields()["diverging"])))}
-    return _stack(mcmc.get_samples()), summary
+    return _stack(mcmc.get_samples(), init), summary
 
 
 def run_laplace_fd(lml, prior, theta_map, *, n_draws=100, eps=1e-3, seed=0, floor=1e-6, fixed=None):

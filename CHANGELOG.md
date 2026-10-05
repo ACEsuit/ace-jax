@@ -2,6 +2,39 @@
 
 ## Unreleased
 
+- **`aj fit --noise shared`: one noise scale for the energy, force and
+  virial rows, as in ACEpotentials' BLR, so the E:F:V weights set the
+  balance.** The default stays `--noise per-quantity` (σ_E, σ_F and σ_V
+  learned separately). `FitConfig(noise="shared")` and the `fit.yaml` key
+  `noise` set it too.
+  - Why: with three free noise scales, each cancels its quantity's weight
+    at a converged MAP, so weights such as ACEpotentials' E 30 / F 1 / V 1
+    stop mattering. Force rows far outnumber energy rows, so the evidence
+    then pushes σ_E up and underweights the energies. On GAP-18 silicon
+    (linear, order 4, degree 12, ACEpotentials' weights) per-quantity noise
+    learns σ_E = 2.7 against σ_F = 0.10 and gives 28.2 meV/atom and
+    0.125 eV/Å on the test set; shared noise (σ = 0.137) gives 10.6 meV/atom
+    and 0.144 eV/Å. ACEpotentials' BLR on a like-for-like basis (an
+    `ace_model` configured as ace-jax builds it) gives 10.2 meV/atom,
+    0.135 eV/Å and 70 meV/atom in the virial (9.9 meV/atom and 0.132 eV/Å
+    on its `ace1` basis).
+  - Use it whenever the weights are meant to set the balance, as in
+    ACEpotentials. On Si_tiny the shared-noise evidence optimum reproduces
+    ACEpotentials' own BLR fit (`acefit!`, default weights) to 4×10⁻⁷ in the
+    coefficients; per-quantity noise ends 55% away.
+  - It is a tie, not a second objective: σ_E and σ_V copy σ_F (which keeps
+    its hyperprior), so the L-BFGS MAP, the Newton polish, the convergence
+    check and the Laplace, VI and NUTS rungs see one noise coordinate.
+    `--learn-radial` ties the radial stage's inner MAPs too.
+    `map_convergence.json` records `noise` and `tied`, and the resolved
+    `fit.yaml` records `noise`. It is not available with `sigma_type`,
+    joint ARD (`--uq ard --ard-mode joint` refits the noise itself; use
+    `sequential`) or `--solver lstsq`.
+  - `map_convergence.json` now also records `log_evidence`, the log
+    marginal likelihood at the MAP (every mode). Compare fits across noise
+    modes by it, not by `logpost`: shared noise leaves out the hyperpriors
+    of the two tied scales, so its `logpost` is not on the same footing.
+
 - **Linear `aj fit` now converges the hyperparameter MAP by default, and
   every fit is checked, so refits give different (better) results.** The
   default `--opt` is now `lbfgs` (bounded L-BFGS-B) instead of `adam`.

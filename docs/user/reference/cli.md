@@ -35,7 +35,9 @@ The options fall into groups:
   Gaussian-process arm, with that number of inducing sites for each
   species. The default (500) is the GP arm.
 - **hyperparameters**: `--opt`, `--map-steps`, `--map-restarts`, `--map-polish`,
-  `--strict`, `--init`. `--rungs` other than `map` adds approximations of
+  `--strict`, `--init`, `--noise`. `--noise shared` learns one noise scale
+  for all weighted rows, so `--weights` sets the balance of E, F and V (as
+  in ACEpotentials). `--rungs` other than `map` adds approximations of
   the hyperparameter posterior, at a much higher cost.
 - **uncertainty**: `--uq blr` (default), `pops` or `ard` for the linear
   model. The `--ard-*` and `--force-shape` options configure `ard`
