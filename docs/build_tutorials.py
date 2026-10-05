@@ -109,6 +109,9 @@ def _controls(fragment):
             continue
         label = _text(_attr(attrs["data-label"]) or "") or kind
         value = _attr(attrs["data-initial-value"]) if "data-initial-value" in attrs else None
+        steps = _attr(attrs["data-steps"]) if "data-steps" in attrs else None
+        if steps and isinstance(value, int):          # slider(steps=...): the value is an index into them
+            value = steps[value]
         if isinstance(value, list) and len(value) == 1:
             value = value[0]
         out.append((kind, label, value))
