@@ -47,7 +47,11 @@ def worker(a):
         out["t"].append(time.perf_counter() - t)
         out["std"].append(std[free]); out["q"].append(np.asarray(calc.get_property("forces_q", at))[free])
         out["err"].append(np.linalg.norm(lab - F, axis=1)[free])
-    np.savez(a.save, t=out["t"], std=np.concatenate(out["std"]), q=np.concatenate(out["q"]),
+    try:                                      # device peak (GPU); None on CPU backends without memory stats
+        dev_gb = jax.devices()[0].memory_stats()["peak_bytes_in_use"] / 2 ** 30
+    except Exception:
+        dev_gb = float("nan")
+    np.savez(a.save, dev_peak_gb=dev_gb, device=str(jax.devices()[0].device_kind), t=out["t"], std=np.concatenate(out["std"]), q=np.concatenate(out["q"]),
              err=np.concatenate(out["err"]), rank=out["rank"],
              maxrss_gb=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 2 ** 20, n_atoms=[len(f) for f in frames])
 
@@ -81,9 +85,11 @@ def main(argv=None):
         res[v] = dict(np.load(f))
         print(f"{v}: done ({np.sum(res[v]['t']):.1f} s)")
     ref = res.get("rows")
-    lines = [f"Cells {a.cells}: {', '.join(map(str, next(iter(res.values()))['n_atoms']))} atoms.", "",
+    dev = str(next(iter(res.values())).get("device", "")) if res else ""
+    lines = [f"Device {dev}. Cells {a.cells}: {', '.join(map(str, next(iter(res.values()))['n_atoms']))} atoms.", "",
              "| variant | rank | first cell (s) | later cells, mean (s) | peak RSS (GB) | max rel diff vs rows | "
-             "rho(std, std_rows) | coverage P(dF <= forces_q) | median forces_q |", "|---|---|---|---|---|---|---|---|---|"]
+             "rho(std, std_rows) | coverage P(dF <= forces_q) | median forces_q | device peak (GB) |",
+             "|---|---|---|---|---|---|---|---|---|---|"]
     for v, d in res.items():
         t = np.asarray(d["t"])
         diff = rho = ""
@@ -92,7 +98,7 @@ def main(argv=None):
             rho = f"{spearmanr(sig_round(d['std']), sig_round(ref['std']))[0]:.4f}"
         lines.append(f"| {v} | {int(d['rank'])} | {t[0]:.1f} | {t[1:].mean() if len(t) > 1 else float('nan'):.1f} | "
                      f"{float(d['maxrss_gb']):.1f} | {diff} | {rho} | {np.mean(d['err'] <= d['q']):.4f} | "
-                     f"{np.median(d['q']):.3f} |")
+                     f"{np.median(d['q']):.3f} | {float(d.get('dev_peak_gb', np.nan)):.1f} |")
     md = "\n".join(lines) + "\n"
     pathlib.Path(a.out).write_text(md)
     (wd / "summary.json").write_text(json.dumps({v: {"t": list(map(float, d["t"]))} for v, d in res.items()}))

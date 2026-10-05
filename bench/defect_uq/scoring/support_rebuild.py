@@ -112,6 +112,7 @@ def evaluate(ref, sets, alpha, calc=None):
             bad[m] = ~r["support_ok"]
             ne.append(np.median(list(r["n_eff"].values())))
         res[name] = {f: (float(bad[fams == f].mean()), int((fams == f).sum())) for f in np.unique(fams)}
+        res[name]["_bad"] = bad
         res[name]["all"] = (float(bad.mean()), len(bad))
         res[name]["_neff"] = float(np.median(ne))
     return res
@@ -160,6 +161,7 @@ def main(argv=None):
     e.add_argument("--set", action="append", required=True)
     e.add_argument("--max-cfg", type=int, default=None)
     e.add_argument("--out", required=True)
+    e.add_argument("--save", help="npz of per-atom flags, keys <reference>@<set>")
     a = p.parse_args(argv)
     if a.cmd == "build":
         build(a)
@@ -174,8 +176,10 @@ def main(argv=None):
         refs = {"stored (fit)": post.support, **refs}
     sets = dict(load_set(s, calc, a.max_cfg) for s in a.set)
     lines = ["| reference | set | family | atoms | flagged (support_ok=False) |", "|---|---|---|---|---|"]
+    flags = {}
     for rn, ref in refs.items():
         res = evaluate(ref, sets, alpha)
+        flags.update({f"{rn}@{sn}": d["_bad"] for sn, d in res.items()})
         for sn, d in res.items():
             for f, v in d.items():
                 if not f.startswith("_"):
@@ -183,6 +187,8 @@ def main(argv=None):
             lines.append(f"| {rn} | {sn} | median n_eff | | {d['_neff']:.0f} |")
     md = "\n".join(lines) + "\n"
     pathlib.Path(a.out).write_text(md)
+    if a.save:
+        np.savez(a.save, **flags)
     print(md)
 
 
