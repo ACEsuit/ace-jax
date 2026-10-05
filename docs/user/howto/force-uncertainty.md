@@ -254,6 +254,15 @@ or `forces_q`. `aj eval --per-atom ... --support` writes it;
 is built at fit time and costs a little; `--no-ard-support` skips it (the
 property then raises).
 
+The classifier works in a whitened principal-component space of the site
+descriptors. `--ard-support-features normalised` builds that space from the
+unit-norm descriptor instead, and adds the logarithm of the descriptor's
+norm and of each body order's block norm as separate channels. An atom that
+is losing its neighbours has a descriptor that shrinks towards zero; the
+log-norm channels keep that visible to the classifier, where the raw
+descriptor may still fall inside the training cloud. The default stays
+`raw`.
+
 ## Fit options
 
 | Option | Default | Effect |
@@ -269,6 +278,7 @@ property then raises).
 | `--ard-variance` | `sandwich` | the shape: the jackknife (`sandwich`), or the posterior covariance (`kappa`) |
 | `--ard-mode` | `joint` | evidence fit of noise and prior scales together, or `sequential` (prior scales only; lower memory) |
 | `--no-ard-support` | | skip the support reference |
+| `--ard-support-features` | `raw` | features of the support reference: `raw` descriptors, or `normalised` (unit-norm descriptor plus log-norm channels per body order) |
 | `--batch-pack` | `auto` | size-aware batching: pack configurations by an atom budget when a set mixes small and large cells |
 
 With `--uq ard`, `--e0 lsq` fits E0 jointly with the coefficients, as BLR
@@ -297,6 +307,16 @@ this change still load and serve.
   and the shape atom by atom, but the rows themselves must fit. For cells of
   3–4k atoms at production basis sizes, `aj eval --posterior` and
   `aj calibrate` need an **A100-80GB-class GPU**; 40 GB runs out of memory.
+
+  `--shape-path committee` (on `aj eval` and `aj calibrate`;
+  `ACECalculator(..., shape_path="committee")`) computes the same shape
+  without the design rows. The shape is a sum of squared forces of a linear
+  ACE model with $r$ coefficient vectors, one per column of the shape factor,
+  so it can be evaluated from one basis evaluation with memory about
+  $N\cdot3\cdot r\cdot 8$ bytes instead of $N\cdot3\cdot L\cdot 8$. The
+  values are the same to roundoff. In Python, `shape_tau` (a fraction of the
+  shape factor's squared singular values) and `shape_rank` truncate the factor
+  to a lower rank: an approximation, faster for small $r$.
   (`aj eval --no-deriv-dtc` is the corresponding switch for big cells with a
   GP model, not for `--uq ard`.)
 

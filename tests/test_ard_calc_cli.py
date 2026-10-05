@@ -621,3 +621,27 @@ def test_calculator_shape_path_validated(fitted):
         ACECalculator(str(fitted / "model.npz"), posterior=str(fitted / "posterior.npz"), shape_path="fast")
     with pytest.raises(ValueError, match="shape_tau"):
         ACECalculator(str(fitted / "model.npz"), posterior=str(fitted / "posterior.npz"), shape_tau=1.5)
+
+
+def test_cli_eval_and_calibrate_shape_path_committee(fitted, calib_set, tmp_path):
+    """--shape-path committee serves and recalibrates exactly what the design-row path does."""
+    from ase.io import read, write
+    from ace_jax.cli import main
+    from ace_jax.fit.ard import ARDPosterior
+    from ace_jax.fit.xyz import read_extxyz
+    data = tmp_path / "d.xyz"
+    write(data, read(XYZ, ":4"))
+    std = {}
+    for path in ("rows", "committee"):
+        out = tmp_path / f"p_{path}.xyz"
+        assert main(["eval", "--model", str(fitted / "model.npz"), "--posterior", str(fitted / "posterior.npz"),
+                     "--data", str(data), "--energy-key", "dft_energy", "--force-key", "dft_force",
+                     "--out", str(out), "--shape-path", path]) == 0
+        std[path] = np.concatenate([r.arrays["ace_forces_std"] for r in read_extxyz(out)])
+        assert main(_calib_args(fitted, calib_set, ["--out", str(tmp_path / f"c_{path}.npz"),
+                                                    "--shape-path", path])) == 0
+    np.testing.assert_allclose(std["committee"], std["rows"], rtol=1e-10, atol=1e-14)
+    assert std["rows"][0] == 0.0 and std["committee"][0] == 0.0          # the isolated atom
+    a, b = (ARDPosterior.load(tmp_path / f"c_{p}.npz").group_table for p in ("rows", "committee"))
+    np.testing.assert_allclose(b["q"], a["q"], rtol=1e-6)
+    np.testing.assert_allclose(b["lam_rms"], a["lam_rms"], rtol=1e-6)

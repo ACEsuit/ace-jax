@@ -237,7 +237,8 @@ def cmd_eval(a):
         calc = GPCalculator.from_file(a.model, deriv_dtc=not getattr(a, "no_deriv_dtc", False))
     else:
         from .calc.point import ACECalculator
-        calc = ACECalculator(a.model, posterior=a.posterior if ard else None, spline_tol=None)
+        calc = ACECalculator(a.model, posterior=a.posterior if ard else None, spline_tol=None,
+                             **({"shape_path": a.shape_path} if ard else {}))
     # --per-atom (ARD): a separate extxyz of the served per-atom arrays, unprefixed
     # (forces_pred, forces_std, forces_q, forces_group, forces_cov, forces_q_mahal, support_*)
     per_atom, served = [], {}
@@ -348,7 +349,7 @@ def cmd_calibrate(a):
     configs = load_configs(a.data, energy_key=a.energy_key, force_key=a.force_key, virial_key=a.virial_key)
     if not any(c.forces is not None for c in configs):
         raise ValueError(f"calibrate: no forces under --force-key {a.force_key!r} in {a.data}")
-    calc = ACECalculator(a.model, posterior=a.posterior)
+    calc = ACECalculator(a.model, posterior=a.posterior, shape_path=a.shape_path)
     t0 = post.group_table
     lam_g = np.asarray(t0["lam_rms"], float)
     G, n_min = len(t0["q"]), int(t0["n_min"])
@@ -498,6 +499,9 @@ def _parser():
                          "forces_q, forces_group; forces_cov, forces_q_mahal for an aniso posterior)")
     ev.add_argument("--support", action="store_true",
                     help="with --posterior --per-atom: add support_ok and support_q (covariate-shift support)")
+    ev.add_argument("--shape-path", choices=["rows", "committee"], default="rows",
+                    help="ard: evaluate the uncertainty shape from the whole cell's force design rows (rows) or as "
+                         "the forces of an r-output linear ACE (committee: same values, memory O(N r) not O(N L))")
     ev.add_argument("--no-deriv-dtc", action="store_true",
                     help="gp_model.npz only: SoR-only forces_std, without the derivative-DTC term "
                          "(whose whole-cell (n, K, d, 3) arrays may not fit for a big cell)")
@@ -507,6 +511,9 @@ def _parser():
     cal.add_argument("--data", required=True, help="labelled extxyz U (needs forces under --force-key)")
     cal.add_argument("--energy-key", default="energy"); cal.add_argument("--force-key", default="forces")
     cal.add_argument("--virial-key", default="virial")
+    cal.add_argument("--shape-path", choices=["rows", "committee"], default="rows",
+                    help="ard: evaluate the uncertainty shape from the whole cell's force design rows (rows) or as "
+                         "the forces of an r-output linear ACE (committee: same values, memory O(N r) not O(N L))")
     mode = cal.add_mutually_exclusive_group()
     mode.add_argument("--append", action="store_true", help="pool U with the stored T_val scores in every group")
     mode.add_argument("--replace", action="store_true", help="use U only in every group")

@@ -11,6 +11,17 @@
   atoms at the documented level. No refit is needed: the posterior is
   unchanged. Force uncertainties (`forces_std`, `forces_q`, `forces_cov`)
   were not affected.
+- `--shape-path committee` on `aj eval` and `aj calibrate`
+  (`ACECalculator(..., shape_path="committee")`): the `--uq ard` force
+  uncertainty without the whole cell's force design rows. The shape is
+  evaluated as the forces of a linear ACE model with one coefficient vector
+  per column of the shape factor, so memory scales with that factor's rank
+  instead of the basis size. Values equal the default path to roundoff.
+  `shape_tau=` and `shape_rank=` truncate the factor (an approximation).
+- `aj fit --uq ard --ard-support-features normalised`: the support
+  reference on the unit-norm site descriptor plus log-norm channels per body
+  order, so atoms losing neighbours (a descriptor shrinking towards zero)
+  stay visible to the support classifier. The default stays `raw`.
 - **Fixed: built bases were not rotation invariant.** Since the compiled
   coupling library arrived (0.2.0), `aj basis`, `aj fit --order/--max-degree`
   and `build_basis` paired the coupling's columns with the wrong products of
