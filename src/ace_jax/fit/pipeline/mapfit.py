@@ -103,7 +103,7 @@ class _HVPLogPosterior:
 
 
 def polish_wanted(cfg):
-    """'auto' polishes only the linear arm on the cached-Gram LML (objective lml, one device, device
+    """'auto' polishes only the linear arm on its cached LML (QR or Gram; objective lml, one device, device
     engine), where a gradient costs milliseconds; a GP gradient costs ~70 s on GAP-18 Si (o3d12,
     M = 100), so there 'on' is opt-in."""
     if cfg.map_polish in ("on", "off"):

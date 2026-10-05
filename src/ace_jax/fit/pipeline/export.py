@@ -21,8 +21,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from ..hypers import from_array, to_array
-from ..objective import posterior
-from ..predict import _train_stats
+from ..predict import _train_stats, fit_posterior
 
 GP_SCHEMA = 1
 
@@ -44,6 +43,9 @@ def linear_arrays_from_mean(z, E0, pcfg, mu):
     Column layout: species-major B blocks, then pair blocks (fit/rows.py `_place`)."""
     nB, nP, NZ = pcfg.n_B, pcfg.n_pair, pcfg.NZ
     mu = np.asarray(mu)
+    if not np.isfinite(mu).all():           # a NaN model file would only fail far from its cause
+        raise ValueError(f"the fitted readout has {int((~np.isfinite(mu)).sum())} non-finite "
+                         "coefficients: the solve failed, so no model file is written")
     if getattr(pcfg, "e0_cols", False):      # joint E0: the fitted shift of the pre-fit E0
         E0 = np.asarray(E0, np.float64) + mu[pcfg.len_readout:pcfg.len_readout + NZ]
     out = _ace_arrays_from(z, E0)
@@ -62,7 +64,8 @@ def model_file_blocked(cfg):
 
 
 def _posterior(res, theta):
-    return posterior(theta, _train_stats(theta, res.built.prob, res.data.ds_train, None), res.built.prob)
+    return fit_posterior(theta, _train_stats(theta, res.built.prob, res.data.ds_train, None),
+                         res.built.prob, res.data.ds_train)
 
 
 def _draws(res, n_draws):

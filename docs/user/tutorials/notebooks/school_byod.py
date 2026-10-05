@@ -314,16 +314,18 @@ def _(mo, model_gamma, model_v1, target, truth):
 
 
 @app.cell(hide_code=True)
-def _(err_v1, mo, target):
+def _(err_v1, gamma_v1, mo, target):
     import math as _math
 
     _ok = err_v1 > target["tolerance"]
+    _neg = (" Its surface energy is even negative: the model has the slab more stable than the bulk, "
+            "which no real surface is, a sure sign it is extrapolating." if gamma_v1 < 0 else "")
     mo.callout(
         mo.md("**Checkpoint 3 failed:** the first fit's surface energy is not finite, so the fit "
               "failed numerically. Its numbers below are meaningless.")
         if not _math.isfinite(err_v1) else
         mo.md(f"**Checkpoint 3 passed:** the bulk-only model misses the target by {err_v1:.3f} "
-              f"{target['units']}, beyond the tolerance. The next step asks why.")
+              f"{target['units']}, beyond the tolerance.{_neg} The next step asks why.")
         if _ok else mo.md(f"**Checkpoint 3:** the first fit already meets the tolerance ({err_v1:.3f}). "
                           "With your own system and target that can happen: the coverage check below "
                           "still says how far the target sits from the data."),

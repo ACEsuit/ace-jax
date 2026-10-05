@@ -191,6 +191,21 @@ def convert(nb, page, files_dir):
     return "\n\n".join(p for p in parts if p) + "\n"
 
 
+def _cell_errors(ipynb):
+    """The failing cells of an exported notebook, source and error: marimo itself reports only
+    that some cells failed, which leaves a CI failure undiagnosable."""
+    out = []
+    for cell in json.loads(ipynb.read_text())["cells"]:
+        for o in cell.get("outputs", []):
+            text = json.dumps(o)
+            if o.get("output_type") == "error" or "marimo-error" in text or "Traceback" in text:
+                src = _join(cell.get("source", "")).strip().splitlines()
+                tb = re.sub(r"\x1b\[[0-9;]*m", "", "\n".join(o.get("traceback", [])))
+                out.append(f"--- cell: {src[0] if src else '?'} ...\n"
+                           f"{o.get('ename', '')}: {o.get('evalue', '')}\n{tb[-2000:] or text[:2000]}")
+    return "\n\nfailing cells:\n" + "\n".join(out) if out else "\n(no error output found in the export)"
+
+
 def source_hash(nb_path):
     """The notebook and this converter: a change to either re-renders the page."""
     return hashlib.sha256(nb_path.read_bytes() + pathlib.Path(__file__).read_bytes()).hexdigest()[:16]
@@ -218,7 +233,8 @@ def build(name, force=False):
         r = subprocess.run([sys.executable, "-m", "marimo", "export", "ipynb", "--include-outputs",
                             str(nb_path), "-o", str(ipynb)], cwd=d, capture_output=True, text=True)
         if r.returncode != 0 or not ipynb.exists():
-            raise RuntimeError(f"marimo export of {name} failed:\n{r.stdout[-3000:]}\n{r.stderr[-3000:]}")
+            raise RuntimeError(f"marimo export of {name} failed:\n{r.stdout[-3000:]}\n{r.stderr[-3000:]}"
+                               + (_cell_errors(ipynb) if ipynb.exists() else ""))
         nb = json.loads(ipynb.read_text())
     for f in files_dir.glob("fig-*.png"):
         f.unlink()

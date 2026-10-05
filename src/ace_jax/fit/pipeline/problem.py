@@ -60,5 +60,5 @@ def build_problem(cfg, d):
             s_floor = float(np.quantile(s_live, cfg.delta_s_floor_q))
         prob = Problem(KernelSpec(cfg.kernel, cfg.bump, gpcfg.D, s_floor=s_floor), d.model, ind, gpcfg,
                        jnp.asarray(prior_diagonal(d.z, meta, d.source)), default_prior(r0),
-                       e0_prec=_e0_prec(d, els) if cfg.joint_e0 else None)
+                       e0_prec=_e0_prec(d, els) if cfg.joint_e0 else None, lml_solver=cfg.lml_solver)
     return Built(prob, gpcfg, X, S, s_floor, {"inducing": time.time() - t})

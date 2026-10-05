@@ -118,6 +118,7 @@ uv run ruff check                     # lint; `uv run pre-commit run --all-files
 - **GP fit:**
   - At fixed hyperparameters θ the model is Bayesian linear regression over `[B | k_θ(B, B_M)]`, with streamed sufficient statistics (`fit/stats`, `fit/objective`).
   - The LML is maximised by Adam or L-BFGS (multi-start is `map_restarts`).
+  - **The linear arm's LML and posterior are QR** (`FitConfig.lml_solver="qr"`, the default; `Problem.lml_solver`, whose own default stays `"cholesky"` so directly built problems and old tests are unchanged). `stats.linear_qr_statistics` compresses each quantity's weighted rows once to `QRStats` (on the CPU backend the updating-QR merges run on the host via SciPy, `stats.host_qr_stream`: OpenBLAS's threaded `geqrf` called by XLA from inside a compiled loop returned NaN with 4-8 OpenBLAS threads, a GitHub runner's default; `tests/test_lml_qr.py::test_qr_statistics_finite_with_threaded_openblas`) (R_q, c_q; `G_q`/`b_q` are derived properties, so POPS and ARD read it as a Gram); `objective.log_marginal_likelihood_qr` / `posterior_from_qr` QR-factor [diag(sqrt(prior)); R_q / sigma_q] per evaluation, at kappa(Phi), not kappa(Phi)^2. `make_lml` takes it when `objective.uses_qr(prob)`, and predictions and the saved readout use the same statistics (`predict.fit_posterior`). Why: fits that nearly interpolate (MACE labels; sigma_E at its 1e-4 floor, sigma_c large) leave kappa(G + Lambda) ~ 1e16, where the Cholesky is NaN or silently wrong; even the Si fixture's default MAP is there (`tests/test_lml_qr.py`). Cost: ~6x the Cholesky per evaluation. The GP arm (M > 0), `sigma_type`, `loo` and radial learning keep the Cholesky; `predict.stable_posterior` falls back to `solve.posterior_qr` when it is non-finite. `export.linear_arrays_from_mean` refuses non-finite weights.
   - Ladder rungs: MAP, Laplace, Pathfinder, VI, NUTS. They mix numpyro and blackjax on purpose; see the `fit/ladder.py` docstring.
   - POPS is available for linear-arm misspecification UQ.
   - Hyperparameter blocks are routed fixed or LML via `fit/paramset.py`.
@@ -128,7 +129,7 @@ uv run ruff check                     # lint; `uv run pre-commit run --all-files
   - Finite-difference and autodiff cross-checks.
   - Import shared helpers with `from conftest import FIXTURE_DIR, pace_fixture`.
   - Mark heavy tests `@pytest.mark.slow`.
-  - Bit-exact pipeline goldens (`fixtures/pipeline_golden/`) are recorded and checked on lestrade (`tests/pipeline_golden/make_golden.py`; `PLATFORM` is `Linux-x86_64-lestrade`). `tests/test_pipeline_parity.py` skips on any other host, CI runners included.
+  - Bit-exact pipeline goldens (`fixtures/pipeline_golden/`) are recorded and checked on lestrade (`tests/pipeline_golden/make_golden.py`; `PLATFORM` is `Linux-x86_64-lestrade`). `tests/test_pipeline_parity.py` skips on any other host, CI runners included. Re-record them on lestrade (`uv run --extra gp python tests/pipeline_golden/make_golden.py`, which uses ASE's neighbour list as the test does) when a change to fit numerics is intended, and say so in the commit.
 - **Commits:** conventional-commit prefixes with a scope on branch commits, for example `feat(bench):`, `fix(nlist):`, `refactor(gp)!:`, `test(ladder):`, `docs(...)`, `ci:`, `chore:`. PRs are squash-merged under a plain title with `(#N)`.
 
 ## Pitfalls

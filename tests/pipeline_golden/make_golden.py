@@ -64,7 +64,9 @@ def platform_tag():
 
 
 def main():
-    env = dict(os.environ, JAX_ENABLE_X64="1", PYTHONPATH=str(ROOT))
+    # ASE's neighbour list, as the parity test runs them: another backend's pair order
+    # changes summation order, which the MAP optimisers amplify
+    env = dict(os.environ, JAX_ENABLE_X64="1", PYTHONPATH=str(ROOT), ACEJAX_NLIST="ase")
     OUT.mkdir(parents=True, exist_ok=True)
     (OUT / "PLATFORM").write_text(platform_tag() + "\n")
     only = set(sys.argv[1:])                      # optional: regenerate just these scenarios
