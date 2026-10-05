@@ -392,6 +392,22 @@ class ACEModel(EdgeSiteModel):
         (E, n_B, n_A) -- 14 GB at 1348 basis functions x 72 A-functions on
         an 18k-edge batch -- while this needs only (n, n_B, n_A) + the output.
         """
+        n, K = mask.shape
+        flat = lambda a: a.reshape(n * K, *a.shape[2:])
+        A, J_BA, dA, Rpair, dRp = self._dense_jacobian_parts(rij, zi, zj, mask)
+        J_B = jnp.einsum("nbm,nkmc->nkbc", J_BA, dA.reshape(n, K, -1, 3))       # (n, K, n_B, 3)
+        J = jnp.concatenate([J_B.reshape(n * K, -1, 3), dRp], axis=1)          # (nK, D, 3)
+        J = jnp.where(flat(mask)[:, None, None], J, 0.0)
+        X = jnp.concatenate([jax.vmap(self._node_B)(A), pool_dense(Rpair.reshape(n, K, -1), mask)], axis=1)
+        return X, J
+
+    def _node_B(self, A_i):
+        AA = jnp.concatenate([jnp.prod(A_i[g], axis=-1) for g in self.aa_specs])
+        return AA @ self.A2B.T
+
+    def _dense_jacobian_parts(self, rij, zi, zj, mask):
+        """(A (n, n_A), J_BA = dB/dA (n, n_B, n_A), dA (nK, n_A, 3), Rpair (nK, n_pair), dRp (nK, n_pair, 3)):
+        the factors `edge_jacobian_dense` and `committee_edge_grad_dense` contract."""
         self._check_basis()
         n, K = mask.shape
         flat = lambda a: a.reshape(n * K, *a.shape[2:])
@@ -403,20 +419,24 @@ class ACEModel(EdgeSiteModel):
         edge_A, Rpair = jax.vmap(feats)(flat(rij), flat(zi), flat(zj))
         dA, dRp = jax.vmap(jax.jacfwd(feats))(flat(rij), flat(zi), flat(zj))   # (nK, n_A, 3), (nK, n_pair, 3)
         A = pool_dense(edge_A.reshape(n, K, -1), mask)                          # (n, n_A)
-
-        def node_B(A_i):
-            AA = jnp.concatenate([jnp.prod(A_i[g], axis=-1) for g in self.aa_specs])
-            return AA @ self.A2B.T
-
         # forward mode: n_A tangents (72 at the Cantor basis) instead of n_B
         # cotangents (1348) pulled back through n_AA products -- jacrev here
         # materialises (n, n_B, n_AA) intermediates, 11 GB per batch
-        J_BA = jax.vmap(jax.jacfwd(node_B))(A)                                  # (n, n_B, n_A)
-        J_B = jnp.einsum("nbm,nkmc->nkbc", J_BA, dA.reshape(n, K, -1, 3))       # (n, K, n_B, 3)
-        J = jnp.concatenate([J_B.reshape(n * K, -1, 3), dRp], axis=1)          # (nK, D, 3)
-        J = jnp.where(flat(mask)[:, None, None], J, 0.0)
-        X = jnp.concatenate([jax.vmap(node_B)(A), pool_dense(Rpair.reshape(n, K, -1), mask)], axis=1)
-        return X, J
+        J_BA = jax.vmap(jax.jacfwd(self._node_B))(A)                            # (n, n_B, n_A)
+        return A, J_BA, dA, Rpair, dRp
+
+    def committee_edge_grad_dense(self, rij, zi, zj, mask, node_z, CB, CP):
+        """Per-edge derivatives T (n, K, r, 3) = dE_i^(k)/d rij of the r-output linear model
+        E_i^(k) = B_i . CB[z_i, :, k] + Apair_i . CP[z_i, :, k] (CB (NZ, n_B, r), CP (NZ, n_pair, r)): the
+        `edge_jacobian_dense` J contracted with the centre's coefficients, in the other order -- (dB/dA)^T C
+        per node (n, n_A, r), then dA -- so J (nK, D, 3) never exists.  The model's own readout is unused.
+        Padded edges (mask False) give zero."""
+        n, K = mask.shape
+        A, J_BA, dA, Rpair, dRp = self._dense_jacobian_parts(rij, zi, zj, mask)
+        M = jnp.einsum("nbm,nbr->nmr", J_BA, CB[node_z])                         # (n, n_A, r)
+        T = jnp.einsum("nmr,nkmc->nkrc", M, dA.reshape(n, K, -1, 3))
+        T = T + jnp.einsum("nkpc,npr->nkrc", dRp.reshape(n, K, -1, 3), CP[node_z])
+        return jnp.where(mask[:, :, None, None], T, 0.0)
 
     def pair_radial(self, rij, zi, zj):
         """The pair radial alone, (E, n_pair): the second output of `radial`
