@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+- **Changed: the linear fit's evidence and posterior are computed by QR.** The
+  evidence fit factored the normal equations G + Λ by Cholesky, which squares the
+  condition number of the design. Fits that nearly interpolate their data (smooth
+  labels from a reference model, a well-matched basis) drive the noise level to its
+  floor and the prior towards flat, and there the Cholesky lost accuracy without
+  failing: on the repository's own Si fixture the saved weights were off by about
+  0.1%, and on a 685-function Si basis the evidence was off by 7%. In the worst
+  cases it returned NaN and wrote a model of NaN weights (the GaAs fit of the
+  bring-your-own-data tutorial). The linear arm (`--m-per-species 0`) now
+  compresses each quantity's design rows by QR once and evaluates the evidence,
+  its gradient, the predictions and the saved readout from one QR factorisation,
+  at the condition number of the design rather than its square. Where the
+  Cholesky was accurate the results agree to roundoff. An evidence evaluation costs
+  about 6× the Cholesky's (a few seconds per fit at a few hundred functions, more
+  at several thousand); `--lml-solver cholesky` (`FitConfig(lml_solver=...)`)
+  restores the old path. The GP arm still uses the Cholesky, now falling back to
+  QR when it fails.
+- **Fixed: a model with non-finite weights is never written.** A failed solve now
+  raises instead of saving NaN weights.
+
 ## 0.2.1 (2026-10-05)
 
 **Upgrading from 0.2.0.**

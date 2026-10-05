@@ -83,6 +83,7 @@ over a file's `basis:`, `--train` over its `data:` (each logged as an override).
 | Useful OOD sigma for the GP | `--density pca --pca-d 128` (pair-only features give anti-informative OOD sigma) |
 | Multi-element GP sharing across species | `--embedding mace_embedding.json` (frozen species coregionalization in the GP kernel) |
 | GP kernel / objective | `--kernel cosine` (default) or `matern32`, `--no-bump`; `--objective lml` (default) or `loo` |
+| Linear-arm evidence solver | `--lml-solver qr` (default: stable when the fit nearly interpolates) or `cholesky` (faster at several thousand functions; can lose accuracy silently) |
 | Warm-start the MAP | `--init out_old/theta_map.json` |
 | Fit a residual over a pair baseline | `--baseline dimer_mean.npz` (then no model file is saved) |
 | Big data on limited GPU memory | `--lml host-cache` (**GP arm, `--density pair` or `pca`, `--opt lbfgs`, `--rungs map` only, single device**) |

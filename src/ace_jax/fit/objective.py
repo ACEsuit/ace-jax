@@ -22,6 +22,7 @@ class Problem(NamedTuple):
     gamma: jnp.ndarray    # (len_basis,), or wider when extra linear columns are appended
     prior: object
     e0_prec: object = None  # (NZ,) fixed prior precision of the joint-E0 columns (cfg.e0_cols)
+    lml_solver: str = "cholesky"  # "qr": the linear arm's LML and posterior from QRStats (make_lml)
 
 
 def linear_prior_diag(theta, prob):
@@ -100,6 +101,51 @@ def posterior(theta, st, prob, log_ratios=None):
     return cho_solve((L, True), b), L
 
 
+# ---------------------------------------------------------------------------
+# QR form (linear arm, M = 0).  G + Lambda = A^T A with
+#     A = [ diag(sqrt(lin)) ; R_E / sigma_E ; R_F / sigma_F ; R_V / sigma_V ]   (4L x L)
+# (R_q from QRStats; lin = linear_prior_diag), and b = A^T [0 ; c_q / sigma_q], so a QR of
+# A, A = Q R, gives the Cholesky factor R^T and v = L^-1 b = Q^T [0 ; c_q / sigma_q] at
+# kappa(A) = kappa(Phi), not kappa(Phi)^2.  An evidence fit that nearly interpolates its data
+# (noise at its floor, prior near flat) drives kappa(G + Lambda) past 1/eps: there the
+# Cholesky LML is NaN, or finite but wrong by percent, and this form is not.  The prior rows
+# go first: Householder QR is accurate for rows of widely varying norm when the large ones
+# lead (Powell & Reid), and the pinned joint-E0 precision is 1e16.
+
+def _qr_S(theta, qs, prob):
+    lin = linear_prior_diag(theta, prob)
+    s = {q: jnp.exp(getattr(theta, f"log_sigma_{q}")) for q in "EFV"}
+    A = jnp.concatenate([jnp.diag(jnp.sqrt(lin))] + [getattr(qs, f"R_{q}") / s[q] for q in "EFV"], 0)
+    y = jnp.concatenate([jnp.zeros_like(lin)] + [getattr(qs, f"c_{q}") / s[q] for q in "EFV"])
+    Q, R = jnp.linalg.qr(A, mode="reduced")
+    sg = jnp.where(jnp.diag(R) < 0, -1.0, 1.0)              # Q -> Q diag(sg): a positive diagonal
+    return R * sg[:, None], (Q.T @ y) * sg, lin
+
+
+def log_marginal_likelihood_qr(theta, qs, prob):
+    """log_marginal_likelihood of the linear arm (M = 0) from QRStats, by QR (see above)."""
+    R, v, lin = _qr_S(theta, qs, prob)
+    s2 = {q: jnp.exp(2.0 * getattr(theta, f"log_sigma_{q}")) for q in "EFV"}
+    yy = sum(getattr(qs, f"yy_{q}") / s2[q] for q in "EFV")
+    logtau = sum(getattr(qs, f"logw_{q}") - getattr(qs, f"n_{q}") * jnp.log(s2[q]) for q in "EFV")
+    N = sum(getattr(qs, f"n_{q}") for q in "EFV")
+    logdet_S = 2.0 * jnp.sum(jnp.log(jnp.diag(R)))
+    return (-0.5 * (yy - v @ v) - 0.5 * (logdet_S - jnp.sum(jnp.log(lin)) - logtau)
+            - 0.5 * N * jnp.log(2.0 * jnp.pi))
+
+
+def posterior_from_qr(theta, qs, prob):
+    """posterior's (mu, L) from the same QR as log_marginal_likelihood_qr: L = R^T, lower
+    with a positive diagonal, L L^T = G + Lambda."""
+    R, v, _ = _qr_S(theta, qs, prob)
+    return solve_triangular(R, v, lower=False), R.T
+
+
+def uses_qr(prob):
+    """Whether prob's LML and posterior take the QR form: lml_solver 'qr' on the linear arm."""
+    return getattr(prob, "lml_solver", "cholesky") == "qr" and prob.ind.XM.shape[0] == 0
+
+
 def _stats_fn(mesh):
     """sufficient_statistics, or its shard_map'd multi-device counterpart when
     a mesh is given (Task 15)."""
@@ -146,6 +192,17 @@ def make_lml(prob, ds, mesh=None, cache_linear=True, n_types=1, n_free_ratios=0)
                                             prob.cfg, ds, n_types)
             st = assemble_statistics_typed(lin, res)
             return log_marginal_likelihood(theta, st, prob, log_ratios)
+        return f
+    if uses_qr(prob) and mesh is None:
+        from .stats import linear_qr_statistics
+        qs = jax.jit(lambda: linear_qr_statistics(prob.model, prob.cfg, ds))()
+        jax.block_until_ready(qs)
+
+        lml = jax.jit(lambda a: log_marginal_likelihood_qr(from_array(a), qs, prob))
+
+        def f(a):                  # a plain closure: a jitted PjitFunction cannot carry attributes
+            return lml(a)
+        f.qr_stats = qs            # the statistics the posterior must share with the LML
         return f
     if cache_linear and mesh is None:
         from .stats import assemble_statistics, linear_statistics, residual_statistics

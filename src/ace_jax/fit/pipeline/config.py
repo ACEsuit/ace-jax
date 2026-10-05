@@ -35,6 +35,7 @@ class FitConfig:
     objective: str = "lml"               # "lml" | "loo"
     lml: str = "device"                  # "device" | "host-cache"
     lml_chunk: int = 64
+    lml_solver: str = "qr"               # "qr" | "cholesky": the linear arm's LML and posterior (GP arm: cholesky)
     devices: int = 1
     # MAP
     opt: str = "lbfgs"                   # "lbfgs" | "adam"
@@ -158,6 +159,8 @@ class FitConfig:
             raise ValueError(f"pops_rows must be 'auto', 'host' or 'device', got {self.pops_rows!r}")
         if self.predict_stats not in ("cached", "recompute"):
             raise ValueError(f"predict_stats must be 'cached' or 'recompute', got {self.predict_stats!r}")
+        if self.lml_solver not in ("qr", "cholesky"):
+            raise ValueError(f"lml_solver must be 'qr' or 'cholesky', got {self.lml_solver!r}")
         if self.solver not in ("evidence", "lstsq"):
             raise ValueError(f"solver must be 'evidence' or 'lstsq', got {self.solver!r}")
         if self.solver == "lstsq" and (self.arm != "linear" or self.uq != "blr" or self.learn_radial

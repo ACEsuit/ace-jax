@@ -98,6 +98,63 @@ def linear_statistics(model, cfg, ds):
     return jax.lax.scan(lambda c, b: (jax.tree.map(jnp.add, c, f(b)), None), zero, ds)[0]
 
 
+class QRStats(NamedTuple):
+    """The linear statistics in QR form: per quantity q, R_q (L, L) upper triangular and
+    c_q = Q_q^T (w y_q) from a QR of its weighted rows w Phi_q = Q_q R_q, so R_q^T R_q = G_q
+    and R_q^T c_q = b_q without ever forming G_q (whose condition number is kappa(Phi_q)^2).
+    yy, n and logw are as in Stats.  objective.log_marginal_likelihood_qr reads it; the Gram
+    form (G_q, b_q) is derived on demand for the consumers that need it (POPS, ARD)."""
+    R_E: jnp.ndarray; R_F: jnp.ndarray; R_V: jnp.ndarray
+    c_E: jnp.ndarray; c_F: jnp.ndarray; c_V: jnp.ndarray
+    yy_E: jnp.ndarray; yy_F: jnp.ndarray; yy_V: jnp.ndarray
+    n_E: jnp.ndarray; n_F: jnp.ndarray; n_V: jnp.ndarray
+    logw_E: jnp.ndarray; logw_F: jnp.ndarray; logw_V: jnp.ndarray
+
+    G_E = property(lambda s: s.R_E.T @ s.R_E)
+    G_F = property(lambda s: s.R_F.T @ s.R_F)
+    G_V = property(lambda s: s.R_V.T @ s.R_V)
+    b_E = property(lambda s: s.R_E.T @ s.c_E)
+    b_F = property(lambda s: s.R_F.T @ s.c_F)
+    b_V = property(lambda s: s.R_V.T @ s.c_V)
+
+    def gram(self):
+        """The equivalent Stats (Gram form), for consumers that need G and b."""
+        return Stats(self.G_E, self.G_F, self.G_V, self.b_E, self.b_F, self.b_V,
+                     self.yy_E, self.yy_F, self.yy_V, self.n_E, self.n_F, self.n_V,
+                     self.logw_E, self.logw_F, self.logw_V)
+
+
+def _qr_merge(R, c, Pw, yw):
+    """Fold weighted rows into a triangular factor: QR of [R ; Pw] (an updating QR)."""
+    Q, R2 = jnp.linalg.qr(jnp.concatenate([R, Pw], 0), mode="reduced")
+    return R2, Q.T @ jnp.concatenate([c, yw])
+
+
+def linear_qr_statistics(model, cfg, ds):
+    """linear_statistics in QR form (QRStats): one streaming pass over the same linear rows,
+    each batch folded into the per-quantity factors by an updating QR."""
+    from .rows import linear_rows_bounded
+    L = cfg.len_basis
+    z2, z1, z0 = jnp.zeros((L, L)), jnp.zeros(L), jnp.zeros(())
+    zero = QRStats(z2, z2, z2, z1, z1, z1, z0, z0, z0, z0, z0, z0, z0, z0, z0)
+
+    def body(s, batch):
+        r = linear_rows_bounded(model, cfg, batch)
+        out = {}
+        for q, P, y, w in (("E", r.E, batch.y_E, batch.w_E),
+                           ("F", r.F.reshape(-1, L), batch.y_F.reshape(-1), jnp.repeat(batch.w_F, 3)),
+                           ("V", r.V.reshape(-1, L), batch.y_V.reshape(-1), jnp.repeat(batch.w_V, 6))):
+            yw, live = y * w, w > 0
+            out[f"R_{q}"], out[f"c_{q}"] = _qr_merge(getattr(s, f"R_{q}"), getattr(s, f"c_{q}"),
+                                                      P * w[:, None], yw)
+            out[f"yy_{q}"] = getattr(s, f"yy_{q}") + yw @ yw
+            out[f"n_{q}"] = getattr(s, f"n_{q}") + live.sum()
+            out[f"logw_{q}"] = getattr(s, f"logw_{q}") + jnp.sum(
+                jnp.where(live, 2.0 * jnp.log(jnp.where(live, w, 1.0)), 0.0))
+        return QRStats(**out), None
+    return jax.lax.scan(body, zero, ds)[0]
+
+
 def _residual_type_stats(Phi_B, Phi_M, y, w):
     """G_BM, G_MM, b_M for one type; the cross block reuses the (theta-indep)
     linear rows but is theta-dependent through Phi_M."""

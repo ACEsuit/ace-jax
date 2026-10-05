@@ -200,3 +200,66 @@ def test_matches_acefit_qr_reference():
     ystk = np.concatenate([yw, np.zeros(A.shape[1])])
     c_py = np.linalg.lstsq(Astk, ystk, rcond=None)[0]
     assert np.abs(c_py - C_acefit).max() < 1e-9 * max(1.0, np.abs(C_acefit).max())
+
+
+# the regime of an evidence fit that nearly interpolates: noise at its floor, prior almost flat.
+# G + Lambda then has kappa ~ 1e16 and its Cholesky fails; the design itself (kappa ~ 1e8) does not.
+STIFF = dict(log_sigma_c=np.log(1e4), log_sigma_E=np.log(1e-4), log_sigma_F=np.log(1e-4),
+             log_sigma_V=np.log(1e-4))
+
+
+def test_posterior_qr_matches_cholesky(m0):
+    """posterior_qr's (mu, L) is the Cholesky posterior's where that one is well conditioned:
+    the same mean, and L L^T = G + Lambda."""
+    from ace_jax.fit.solve import posterior_qr
+    prob, ds = m0
+    theta = _theta()
+    with highest_precision():
+        st = sufficient_statistics(theta, prob.spec, prob.model, prob.ind, prob.cfg, ds)
+        mu, L = posterior(theta, st, prob)
+        mu_q, L_q = posterior_qr(prob, ds, theta)
+    mu, L, mu_q, L_q = map(np.asarray, (mu, L, mu_q, L_q))
+    assert np.abs(mu_q - mu).max() < 1e-8 * np.abs(mu).max()
+    assert np.allclose(np.triu(L_q, 1), 0.0) and (np.diag(L_q) > 0).all()     # lower, positive diagonal
+    assert np.abs(L_q - L).max() < 1e-8 * np.abs(L).max()                       # so the same factor
+
+
+def test_stable_posterior_falls_back_to_qr(m0):
+    """When the normal-equations Cholesky fails (non-finite), stable_posterior takes the QR
+    route: a finite mean that solves (G + Lambda) mu = b, and a factor of G + Lambda."""
+    from ace_jax.fit.predict import stable_posterior
+    prob, ds = m0
+    theta = _theta(**STIFF)
+    with highest_precision():
+        st = sufficient_statistics(theta, prob.spec, prob.model, prob.ind, prob.cfg, ds)
+        assert not np.isfinite(np.asarray(posterior(theta, st, prob)[0])).all()   # the failure, reproduced
+        mu, L = stable_posterior(theta, st, prob, ds)
+        G, b, *_ = combine(theta, st)
+        Lam, _ = prior_precision(theta, prob)
+    mu, L, A, b = map(np.asarray, (mu, L, G + Lam, b))
+    assert np.isfinite(mu).all() and np.isfinite(L).all()
+    assert np.linalg.norm(A @ mu - b) < 1e-8 * np.linalg.norm(b)
+    assert np.abs(L @ L.T - A).max() < 1e-10 * np.abs(A).max()
+
+
+def test_stable_posterior_keeps_cholesky(m0):
+    """A well-conditioned problem keeps the Cholesky posterior, bit for bit (the goldens)."""
+    from ace_jax.fit.predict import stable_posterior
+    prob, ds = m0
+    theta = _theta()
+    st = sufficient_statistics(theta, prob.spec, prob.model, prob.ind, prob.cfg, ds)
+    for a, b in zip(stable_posterior(theta, st, prob, ds), posterior(theta, st, prob)):
+        assert np.array_equal(np.asarray(a), np.asarray(b))
+
+
+def test_model_arrays_refuse_non_finite_readout(m0):
+    """A non-finite readout is an error, never a saved model file: a NaN model loads, evaluates
+    to NaN everywhere and fails far from its cause."""
+    from ace_jax.fit.pipeline.export import linear_arrays_from_mean
+    prob, _ = m0
+    _, _, z = load(FIXTURE_DIR / "si_fitted.npz")
+    mu = np.zeros(prob.cfg.len_basis)
+    linear_arrays_from_mean(z, np.asarray(z["E0"]), prob.cfg, mu)       # finite: fine
+    mu[3] = np.nan
+    with pytest.raises(ValueError, match="non-finite"):
+        linear_arrays_from_mean(z, np.asarray(z["E0"]), prob.cfg, mu)

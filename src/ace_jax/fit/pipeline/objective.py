@@ -60,9 +60,14 @@ def make_objective(cfg, d, b):
         jax.block_until_ready(lik(to_array(prob.prior.mu)))
         logpost = jax.jit(lambda a: lik(a) + log_prior(from_array(a), prob.prior))
         vg = jax.jit(jax.value_and_grad(logpost))
-        lin = jax.jit(lambda: linear_statistics(prob.model, prob.cfg, d.ds_train))()
-        stats = lambda th: assemble_statistics(lin, residual_statistics(th, prob.spec, prob.model,
-                                                                        prob.ind, prob.cfg, d.ds_train))
+        qs = getattr(lik, "qr_stats", None)
+        if qs is not None:         # QR form: predictions share the LML's statistics; no second pass
+            lin = qs.gram()        # ARD's joint refit takes the Gram form
+            stats = lambda th: qs
+        else:
+            lin = jax.jit(lambda: linear_statistics(prob.model, prob.cfg, d.ds_train))()
+            stats = lambda th: assemble_statistics(lin, residual_statistics(th, prob.spec, prob.model,
+                                                                            prob.ind, prob.cfg, d.ds_train))
         host = None
     return Objective(lik, vg, stats, host, prob.prior.mu, {"stats_once": time.time() - t}, lin)
 
