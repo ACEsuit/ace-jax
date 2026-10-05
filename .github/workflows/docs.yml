@@ -1,9 +1,12 @@
 name: docs
 # The user documentation site (MkDocs Material, docs_dir docs/user) and the
 # tutorial notebooks.
-#  - pull requests: build the site with --strict; the build runs every tutorial
-#    notebook on CPU to render its page (each must run top to bottom without an error);
+#  - pull requests: render each tutorial notebook on CPU in its own job (each must
+#    run top to bottom without an error), then build the site with --strict from
+#    those pages;
 #  - push to main: the same, then deploy the site to GitHub Pages.
+# The notebooks are most of the time (~30 min run serially), so they run in
+# parallel, and a page whose inputs are unchanged comes from the actions cache.
 # Deploying needs the repository's Pages source set to "GitHub Actions"
 # (Settings -> Pages -> Build and deployment -> Source).
 on:
@@ -38,11 +41,66 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
-    # The tutorial pages are rendered by running each notebook (docs/build_tutorials.py,
-    # from the mkdocs hook): a notebook whose cell raises fails the build.
+  tutorials-matrix:
+    # the notebook -> page list, from docs/build_tutorials.py, so the matrix cannot drift
     runs-on: ubuntu-latest
-    timeout-minutes: 60     # nine tutorials render in ~30 min on a local CPU
+    outputs:
+      matrix: ${{ steps.list.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: list
+        run: echo "matrix=$(python3 docs/build_tutorials.py --matrix)" >> "$GITHUB_OUTPUT"
+
+  tutorial:
+    # One notebook per job: run it and convert it to its page (a cell that raises
+    # fails the job).  The cache key is every input the page depends on (the
+    # notebook, the converter, the library and its lock, the tutorial data); only
+    # an exact hit is used, so a stale page is never restored.
+    needs: tutorials-matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.tutorials-matrix.outputs.matrix) }}
+    name: tutorial (${{ matrix.notebook }})
+    steps:
+      - uses: actions/checkout@v4
+      - id: cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            docs/user/tutorials/${{ matrix.page }}.md
+            docs/user/tutorials/${{ matrix.page }}_files
+          key: tutorial-${{ matrix.notebook }}-${{ hashFiles(format('docs/user/tutorials/notebooks/{0}.py', matrix.notebook), 'docs/build_tutorials.py', 'docs/requirements.txt', 'docs/user/tutorials/data/**', 'fixtures/si_tiny_train.xyz', 'src/**', 'pyproject.toml', 'uv.lock') }}
+      - uses: astral-sh/setup-uv@v5
+        if: steps.cache.outputs.cache-hit != 'true'
+      - name: Install ace-jax and the docs toolchain
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          uv sync --python 3.12 --frozen
+          uv pip install -r docs/requirements.txt
+      - name: Render ${{ matrix.notebook }}
+        if: steps.cache.outputs.cache-hit != 'true'
+        env:
+          JAX_PLATFORMS: cpu
+          XLA_PYTHON_CLIENT_PREALLOCATE: "false"
+        run: uv run --no-sync python docs/build_tutorials.py ${{ matrix.notebook }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tutorial-${{ matrix.page }}
+          path: |
+            docs/user/tutorials/${{ matrix.page }}.md
+            docs/user/tutorials/${{ matrix.page }}_files
+          if-no-files-found: error
+          retention-days: 3
+
+  build:
+    # The site, from the rendered pages: their stamps match the notebooks, so the
+    # mkdocs hook re-runs none (ACEJAX_DOCS_NOTEBOOKS=require makes a mismatch an
+    # error rather than a silent serial re-run).
+    needs: tutorial
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -54,10 +112,14 @@ jobs:
           uv pip install -r docs/requirements.txt
       - name: Tutorial notebook cell graphs (needs marimo, a docs dependency)
         run: uv run --no-sync pytest -n 0 -q -p no:cacheprovider tests/test_tutorial_notebooks.py
-      - name: Build the site (strict), rendering the tutorial notebooks
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: tutorial-*
+          path: docs/user/tutorials
+          merge-multiple: true
+      - name: Build the site (strict)
         env:
-          JAX_PLATFORMS: cpu
-          XLA_PYTHON_CLIENT_PREALLOCATE: "false"
+          ACEJAX_DOCS_NOTEBOOKS: require
         run: uv run --no-sync mkdocs build --strict
       - name: Upload the Pages artifact
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
