@@ -68,7 +68,7 @@ def learn_radials(cfg, data, log=print):
         f"(to_analytic relres_max={relres_max:.2e})")
     W, info = fit_radial(prob, ds_fit, ds_val, model.rnl_Wnlq, lam_grid=tuple(cfg.radial_lam_grid),
                          steps=cfg.radial_steps, map_steps=RADIAL_MAP_STEPS,
-                         rough_weights=1.0 / (1.0 + rnl_degrees(meta)) ** 2, log=log)
+                         rough_weights=1.0 / (1.0 + rnl_degrees(meta)) ** 2, noise=cfg.noise, log=log)
     # patch the source arrays in memory: same file-shaped hand-off as a built basis
     src, dst = io.BytesIO(), io.BytesIO()
     np.savez(src, **{k: data.z[k] for k in data.z.files})

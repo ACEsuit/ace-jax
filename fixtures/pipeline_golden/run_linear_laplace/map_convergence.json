@@ -23,5 +23,6 @@
  "gain_tol": 0.001,
  "noise_floor": 4.8667283367028456e-18,
  "resolution_limited": false,
- "converged": true
+ "converged": true,
+ "log_evidence": 204.66705063416083
 }

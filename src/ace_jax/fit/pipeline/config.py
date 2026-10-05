@@ -169,13 +169,13 @@ class FitConfig:
         if self.map_restarts > 1 and (self.opt != "lbfgs" or self.sigma_type):
             raise ValueError("map_restarts > 1 is the L-BFGS multi-start: set opt lbfgs "
                              "(and not sigma_type)")
-        if self.noise not in ("per-quantity", "shared"):
-            raise ValueError(f"noise must be 'per-quantity' or 'shared', got {self.noise!r}")
+        from ..paramset import NOISE_MODES
+        if self.noise not in NOISE_MODES:
+            raise ValueError(f"noise must be one of {NOISE_MODES}, got {self.noise!r}")
         if self.noise == "shared":
             why = ("sigma_type (per-config-type noise ratios on per-quantity scales)" if self.sigma_type else
                    "uq ard with ard_mode joint (it refits sigma_E/F/V by its own evidence; use ard_mode "
                    "sequential)" if self.uq == "ard" and self.ard_mode == "joint" else
-                   "learn_radial (its inner hyperparameter MAP keeps per-quantity noise)" if self.learn_radial else
                    "solver lstsq (no noise hyperparameters)" if self.solver == "lstsq" else None)
             if why is not None:
                 raise ValueError(f"noise 'shared' is not available with {why}")
