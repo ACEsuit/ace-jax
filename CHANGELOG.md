@@ -23,7 +23,9 @@
     They are checked and warned. A line-search stop of L-BFGS-B
     (`ABNORMAL`) now restarts it once, for at most 50 evaluations.
     `--map-polish on` polishes a GP fit, at one Hessian-vector product per
-    free hyperparameter per Newton step.
+    free hyperparameter per Newton step. On the GP arm each product is a
+    forward-over-reverse pass through the streamed objective, so a polish
+    can take hours at large scale.
   - **The check.** The fit estimates what one more Newton step would gain
     in log-posterior. If that exceeds 10⁻³ nats, it logs
     `WARNING: MAP did not converge` and warns; `--strict` makes that an

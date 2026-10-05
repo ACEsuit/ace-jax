@@ -165,7 +165,9 @@ def judge(v, g, x, lo, hi, *, H=None, gnoise=None, strict=False, log=print, what
         return rec
     msg = (f"{what} did not converge: {bad}, logpost {float(v):.10g}, largest gradient at {worst}. The "
            f"hyperparameters, and every prediction made with them, are not at the optimum. Try "
-           f"--map-polish on (a Newton polish: ~2 x 10 gradient evaluations per step), --map-restarts N, "
+           f"--map-polish on (a Newton polish: one Hessian-vector product per free hyperparameter per step; "
+           f"on the GP arm each is a forward-over-reverse pass through the streamed objective, which can "
+           f"take hours at large scale), --map-restarts N, "
            f"or more --map-steps; --strict makes this an error")
     if strict:
         raise MapNotConverged(msg)
