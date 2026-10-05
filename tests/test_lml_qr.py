@@ -104,13 +104,14 @@ def _dense_reference(prob, ds, theta):
 
 
 def test_qr_lml_stays_exact_where_cholesky_fails(m0):
+    """At STIFF the Cholesky LML is NaN on lestrade (on other machines it may instead be finite
+    and wrong, so it is not asserted on); the QR LML and its gradient are finite and at
+    roundoff of the dense full-design QR."""
     prob, ds, lin, qs = m0
     theta = _theta(**STIFF)
     with highest_precision():
-        chol = float(log_marginal_likelihood(theta, lin, prob))
         v, g = jax.value_and_grad(lambda t: log_marginal_likelihood_qr(t, qs, prob))(theta)
         ref = _dense_reference(prob, ds, theta)
-    assert not np.isfinite(chol)                                    # the failure, reproduced
     assert np.isfinite(float(v)) and np.isfinite(np.asarray(to_array(g))).all()
     assert abs(float(v) - ref) < 1e-13 * _scale(theta, lin)
 
@@ -147,9 +148,7 @@ def test_make_lml_follows_the_problem_solver(m0):
         v_q = float(make_lml(prob._replace(lml_solver="qr"), ds)(a))
         assert abs(v_c - float(log_marginal_likelihood(_theta(), lin, prob))) < tol
         assert abs(v_q - float(log_marginal_likelihood_qr(_theta(), qs, prob))) < tol
-        stiff = to_array(_theta(**STIFF))
-        assert not np.isfinite(float(make_lml(prob, ds)(stiff)))            # Cholesky: NaN
-        assert np.isfinite(float(make_lml(prob._replace(lml_solver="qr"), ds)(stiff)))
+        assert np.isfinite(float(make_lml(prob._replace(lml_solver="qr"), ds)(to_array(_theta(**STIFF)))))
 
 
 @pytest.fixture(scope="module")
@@ -195,29 +194,26 @@ def test_pipeline_defaults_to_qr_and_is_consistent(pipeline_fits):
 
 
 def test_pipeline_fixture_map_already_needs_qr(pipeline_fits):
-    """The default fit of this fixture already sits where the Cholesky is inaccurate without
-    failing: its MAP noise is near the floor (sigma_E ~ 1.2e-4), and there the Cholesky LML is
-    ~250x further from a dense QR of the full design than the QR form (~1e-13 against ~1e-15 of
-    the cancelled terms) and its posterior mean -- the saved readout -- is off by ~1e-3, while
-    the QR mean matches the full-design QR.  A fall back to QR only when the Cholesky fails
-    would never trigger here.  The two MAP runs still reach the same evidence to L-BFGS
-    stopping tolerance."""
+    """The default fit of this fixture already sits where only the QR form is reliable: its MAP
+    noise is near the floor (sigma_E ~ 1.2e-4).  There the QR LML is at roundoff of a dense QR of
+    the full design and its posterior mean matches the full-design QR's, on every machine.
+
+    The Cholesky form is not asserted on, because its error there depends on the machine: its
+    evidence at this point is ~250x further from the reference than the QR's on lestrade, its
+    posterior mean off by ~1e-3, and the Cholesky MAP run ends at a machine-dependent, too-high
+    evidence (573.3014 on lestrade, 573.3091 on a GitHub runner, against 573.2992 from QR on both)."""
     q, c = pipeline_fits["qr"], pipeline_fits["cholesky"]
-    assert c.built.prob.lml_solver == "cholesky"
-    assert np.isclose(q.map.log_evidence, c.map.log_evidence, rtol=1e-5)
+    assert c.built.prob.lml_solver == "cholesky" and np.isfinite(c.map.log_evidence)
     prob, ds, th = q.built.prob, q.data.ds_train, q.theta
     assert float(th.log_sigma_E) < np.log(2e-4)
     with highest_precision():
         qs, lin = linear_qr_statistics(prob.model, prob.cfg, ds), linear_statistics(prob.model, prob.cfg, ds)
-        v_q, v_c = float(log_marginal_likelihood_qr(th, qs, prob)), float(log_marginal_likelihood(th, lin, prob))
-        mu_q, mu_c = (np.asarray(m) for m in (posterior_from_qr(th, qs, prob)[0], posterior(th, lin, prob)[0]))
+        v_q = float(log_marginal_likelihood_qr(th, qs, prob))
+        mu_q = np.asarray(posterior_from_qr(th, qs, prob)[0])
         mu_s = np.asarray(posterior_qr(prob, ds, th)[0])
         ref = _dense_reference(prob, ds, th)
-    sc = _scale(th, lin)
-    assert abs(v_q - ref) < 1e-14 * sc                                  # QR: at roundoff
-    assert 1e-14 * sc < abs(v_c - ref) < 1e-11 * sc                     # Cholesky: finite, worse
+    assert abs(v_q - ref) < 1e-14 * _scale(th, lin)                     # QR: at roundoff
     assert np.abs(mu_q - mu_s).max() < 1e-6 * np.abs(mu_s).max()        # QR mean: the full-design QR's
-    assert np.abs(mu_c - mu_s).max() > 1e-4 * np.abs(mu_s).max()        # Cholesky mean: off
 
 
 _THREADED_QR = r"""

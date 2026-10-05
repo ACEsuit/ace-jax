@@ -224,16 +224,19 @@ def test_posterior_qr_matches_cholesky(m0):
     assert np.abs(L_q - L).max() < 1e-8 * np.abs(L).max()                       # so the same factor
 
 
-def test_stable_posterior_falls_back_to_qr(m0):
+def test_stable_posterior_falls_back_to_qr(m0, monkeypatch):
     """When the normal-equations Cholesky fails (non-finite), stable_posterior takes the QR
-    route: a finite mean that solves (G + Lambda) mu = b, and a factor of G + Lambda."""
-    from ace_jax.fit.predict import stable_posterior
+    route: a finite mean that solves (G + Lambda) mu = b, and a factor of G + Lambda.  The
+    Cholesky is made to fail outright: at STIFF it is NaN on some machines and finite but wrong
+    on others, so relying on it would leave the fallback untested on the latter."""
+    import ace_jax.fit.predict as P
     prob, ds = m0
     theta = _theta(**STIFF)
+    monkeypatch.setattr(P, "posterior", lambda th, st, pr, *a: (jnp.full(pr.cfg.len_basis, jnp.nan),
+                                                                 jnp.full((pr.cfg.len_basis,) * 2, jnp.nan)))
     with highest_precision():
         st = sufficient_statistics(theta, prob.spec, prob.model, prob.ind, prob.cfg, ds)
-        assert not np.isfinite(np.asarray(posterior(theta, st, prob)[0])).all()   # the failure, reproduced
-        mu, L = stable_posterior(theta, st, prob, ds)
+        mu, L = P.stable_posterior(theta, st, prob, ds)
         G, b, *_ = combine(theta, st)
         Lam, _ = prior_precision(theta, prob)
     mu, L, A, b = map(np.asarray, (mu, L, G + Lam, b))
