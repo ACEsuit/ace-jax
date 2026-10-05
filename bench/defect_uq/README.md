@@ -325,3 +325,11 @@ the new PRESS/support stages, taken as ~0.75 B200-h: about 19 B200-h. `big_error
 **Acceptance** (record results here and in `results/2026-10-xx/ACCEPTANCE.md`; a miss is reported as a miss
 with the per-group table): in-distribution held-out coverage 0.90 +- 0.01; crack whole cell >= 0.89, tip >= 0.88,
 edge/screw >= 0.90 (calibrate, leave-one-realisation-out).
+
+## Comparison with CALM (arXiv:2609.40060; 2026-10-05)
+
+Bond scans, normalised support features, novelty groups, a precision audit and the shape as an r-output
+linear ACE: [`results/2026-10-05_calm_comparison.md`](results/2026-10-05_calm_comparison.md) (plan:
+`docs/dev/force-uq-vs-calm.md`). Scripts: `scoring/bond_scan.py`, `scoring/support_rebuild.py`,
+`scoring/novelty_groups.py`, `scoring/precision_audit.py`, `scoring/shape_eval.py` (+ `modal/modal_shape_eval.py`),
+`scoring/calm_metrics.py`.

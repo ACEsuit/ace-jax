@@ -259,6 +259,17 @@ def test_calculator_forces_support(fitted):
     ok = sup["support_ok"]
     assert ok.shape == (len(at),) and ok.dtype == bool and all(v > 0 for v in sup["n_eff"].values())
     assert np.isfinite(sup["support_q"][ok]).all() and np.isinf(sup["support_q"][~ok]).all()
+    # the level: the (1 - alpha) weighted quantile with alpha the posterior's miscoverage (0.1), not alpha itself
+    from ace_jax.fit.support import support_check
+    post = calc.posterior
+    alpha = float(np.asarray(post.group_table["alpha"]))
+    assert alpha < 0.5
+    X, Z = calc.support_descriptors(at)
+    ref = support_check(post.support, X, Z, alpha)
+    np.testing.assert_array_equal(sup["support_ok"], ref["support_ok"])
+    np.testing.assert_array_equal(sup["support_q"], ref["support_q"])
+    lo = support_check(post.support, X, Z, 1 - alpha)["support_q"]
+    assert np.all(sup["support_q"] >= lo) and np.any(sup["support_q"] > lo)
 
 
 def test_calculator_schema2_new_properties_raise(fitted, tmp_path):
@@ -568,3 +579,69 @@ def test_forces_q_mahal_on_schema2_raises_need3(fitted, tmp_path):
     at.calc = ACECalculator(str(fitted / "model.npz"), posterior=str(tmp_path / "p2.npz"))
     with pytest.raises(ValueError, match="refit with --uq ard"):
         at.calc.get_property("forces_q_mahal", at)
+
+
+def _rattled_si(n=2, seed=0):
+    from ase.build import bulk
+    at = bulk("Si", "diamond", a=5.43, cubic=True).repeat((n, n, n))
+    at.rattle(0.05, seed=seed)
+    return at
+
+
+@pytest.mark.parametrize("tau", [1.0, 0.9])
+def test_calculator_committee_shape_path_matches_rows(fitted, tau):
+    """shape_path='committee' (the r-output linear ACE) serves what the design rows serve, to roundoff,
+    for the exact R and for a truncated one (shape_tau applies to both paths)."""
+    from ace_jax import ACECalculator
+    kw = dict(posterior=str(fitted / "posterior.npz"), shape_tau=tau)
+    at = _rattled_si()
+    props = ("forces_std", "forces_cov", "forces_q", "forces_group")
+    rows = ACECalculator(str(fitted / "model.npz"), **kw)
+    com = ACECalculator(str(fitted / "model.npz"), shape_path="committee", **kw)
+    assert com.posterior.R.shape == rows.posterior.R.shape
+    for p in props:
+        a, b = np.asarray(rows.get_property(p, at)), np.asarray(com.get_property(p, at))
+        np.testing.assert_allclose(b, a, rtol=1e-10, atol=1e-13 * max(np.abs(a).max(), 1.0), err_msg=p)
+
+
+def test_calculator_shape_tau_truncates_rank(fitted):
+    from ace_jax import ACECalculator
+    full = ACECalculator(str(fitted / "model.npz"), posterior=str(fitted / "posterior.npz"))
+    r = full.posterior.R.shape[1]
+    half = ACECalculator(str(fitted / "model.npz"), posterior=str(fitted / "posterior.npz"), shape_tau=0.5)
+    one = ACECalculator(str(fitted / "model.npz"), posterior=str(fitted / "posterior.npz"), shape_rank=1)
+    assert 1 <= half.posterior.R.shape[1] < r and one.posterior.R.shape[1] == 1
+    at = _rattled_si(seed=1)
+    assert np.all(half.get_property("forces_std", at) <= full.get_property("forces_std", at) * (1 + 1e-12))
+
+
+def test_calculator_shape_path_validated(fitted):
+    from ace_jax import ACECalculator
+    with pytest.raises(ValueError, match="shape_path"):
+        ACECalculator(str(fitted / "model.npz"), posterior=str(fitted / "posterior.npz"), shape_path="fast")
+    with pytest.raises(ValueError, match="shape_tau"):
+        ACECalculator(str(fitted / "model.npz"), posterior=str(fitted / "posterior.npz"), shape_tau=1.5)
+
+
+def test_cli_eval_and_calibrate_shape_path_committee(fitted, calib_set, tmp_path):
+    """--shape-path committee serves and recalibrates exactly what the design-row path does."""
+    from ase.io import read, write
+    from ace_jax.cli import main
+    from ace_jax.fit.ard import ARDPosterior
+    from ace_jax.fit.xyz import read_extxyz
+    data = tmp_path / "d.xyz"
+    write(data, read(XYZ, ":4"))
+    std = {}
+    for path in ("rows", "committee"):
+        out = tmp_path / f"p_{path}.xyz"
+        assert main(["eval", "--model", str(fitted / "model.npz"), "--posterior", str(fitted / "posterior.npz"),
+                     "--data", str(data), "--energy-key", "dft_energy", "--force-key", "dft_force",
+                     "--out", str(out), "--shape-path", path]) == 0
+        std[path] = np.concatenate([r.arrays["ace_forces_std"] for r in read_extxyz(out)])
+        assert main(_calib_args(fitted, calib_set, ["--out", str(tmp_path / f"c_{path}.npz"),
+                                                    "--shape-path", path])) == 0
+    np.testing.assert_allclose(std["committee"], std["rows"], rtol=1e-10, atol=1e-14)
+    assert std["rows"][0] == 0.0 and std["committee"][0] == 0.0          # the isolated atom
+    a, b = (ARDPosterior.load(tmp_path / f"c_{p}.npz").group_table for p in ("rows", "committee"))
+    np.testing.assert_allclose(b["q"], a["q"], rtol=1e-6)
+    np.testing.assert_allclose(b["lam_rms"], a["lam_rms"], rtol=1e-6)

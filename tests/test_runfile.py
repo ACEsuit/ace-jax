@@ -168,7 +168,8 @@ def test_basis_unavailable_is_a_clean_cli_error(monkeypatch, capsys):
 
 
 ARD_KEYS = {"force_shape": "aniso", "ard_coverage": 0.8, "ard_groups": "none", "ard_cluster_size": 4.5,
-            "ard_press": "block", "ard_n_min": 5, "no_ard_support": True, "ard_transfer": "sqrt"}
+            "ard_press": "block", "ard_n_min": 5, "no_ard_support": True, "ard_transfer": "sqrt",
+            "ard_support_features": "normalised"}
 
 
 def _ard_file(tmp_path, **over):
@@ -179,7 +180,8 @@ def _ard_file(tmp_path, **over):
 def test_ard_keys_accepted_and_cli_overrides(tmp_path):
     a = _fit_ns(["--config", str(_ard_file(tmp_path))])
     assert (a.force_shape, a.ard_coverage, a.ard_groups, a.ard_cluster_size, a.ard_press, a.ard_n_min,
-            a.no_ard_support, a.ard_transfer) == ("aniso", 0.8, "none", 4.5, "block", 5, True, "sqrt")
+            a.no_ard_support, a.ard_transfer, a.ard_support_features) == \
+        ("aniso", 0.8, "none", 4.5, "block", 5, True, "sqrt", "normalised")
     b = _fit_ns(["--config", str(_ard_file(tmp_path)), "--force-shape", "iso", "--ard-coverage", "0.95",
                  "--ard-groups", "distortion", "--ard-cluster-size", "2", "--ard-press", "exact",
                  "--ard-n-min", "9"])
@@ -197,7 +199,8 @@ def test_ard_cluster_size_yaml_inf(tmp_path):
                                       ({"ard_n_min": 2.5}, "ard_n_min"), ({"ard_coverage": "high"}, "ard_coverage"),
                                       ({"ard_press": "fast"}, "ard_press"), ({"ard_groups": "all"}, "ard_groups"),
                                       ({"no_ard_support": "yes"}, "no_ard_support"),
-                                      ({"ard_transfer": "half"}, "ard_transfer")])
+                                      ({"ard_transfer": "half"}, "ard_transfer"),
+                                      ({"ard_support_features": "unit"}, "ard_support_features")])
 def test_ard_bad_values_rejected(tmp_path, capsys, bad, key):
     with pytest.raises(SystemExit):
         _fit_ns(["--config", str(_ard_file(tmp_path, **bad))])

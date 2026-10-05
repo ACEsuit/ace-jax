@@ -73,6 +73,7 @@ class FitConfig:
     ard_transfer: str = "exponent"       # hold-out -> served scale: "exponent" (per-fit beta) | "sqrt" | "none"
     ard_n_min: int = 20                  # groups with fewer T_val configurations borrow a neighbour's scales
     ard_support: bool = True             # covariate-shift support flag (diagnostic)
+    ard_support_features: str = "raw"    # "raw" phi | "normalised" phi/|phi| + log-norm channels (fit/support.py)
     ard_support_max_atoms: int = 50000
     _shape_variant: str = "press"        # bench-only ablation: "press" | "legacy" (#18 uncentred sandwich)
     _score_source: str = "fit"           # bench-only ablation: "fit" (P_fit) | "mixed" (#18 own-cluster-out)
@@ -127,6 +128,7 @@ class FitConfig:
             if not 0.0 < self.ard_val_frac < 1.0:
                 raise ValueError(f"ard_val_frac must be in (0, 1), got {self.ard_val_frac}")
             for name, ok in (("ard_force_shape", ("iso", "aniso")), ("ard_groups", ("distortion", "none")),
+                             ("ard_support_features", ("raw", "normalised")),
                              ("ard_press", ("exact", "block")), ("ard_transfer", ("exponent", "sqrt", "none")),
                              ("_shape_variant", ("press", "legacy")),
                              ("_score_source", ("fit", "mixed"))):

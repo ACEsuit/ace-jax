@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+- **Fixed: `forces_support` used the wrong quantile.** In 0.2.0 and 0.2.1,
+  `ACECalculator` (and so `aj eval --support`) computed `support_q` as the
+  weighted α quantile of the calibration scores instead of the 1 − α
+  quantile the documentation defines (α = 1 − `--ard-coverage`, 0.1 by
+  default). `support_ok` was therefore `False` only when an atom's own weight
+  exceeded 90 % of the pool, so the flag almost never fired. It now flags
+  atoms at the documented level. No refit is needed: the posterior is
+  unchanged. Force uncertainties (`forces_std`, `forces_q`, `forces_cov`)
+  were not affected.
+- `--shape-path committee` on `aj eval` and `aj calibrate`
+  (`ACECalculator(..., shape_path="committee")`): the `--uq ard` force
+  uncertainty without the whole cell's force design rows. The shape is
+  evaluated as the forces of a linear ACE model with one coefficient vector
+  per column of the shape factor, so memory scales with that factor's rank
+  instead of the basis size. Values equal the default path to roundoff. It
+  is for cells much larger than 3–4k atoms, where the default path is better.
+  `shape_tau=` and `shape_rank=` truncate the factor: the ranking of atoms
+  survives but coverage does not, since the scales are fitted at full rank.
+- `aj fit --uq ard --ard-support-features normalised`: the support
+  reference on the unit-norm site descriptor plus log-norm channels per body
+  order, so atoms losing neighbours (a descriptor shrinking towards zero)
+  stay visible to the support classifier. The default stays `raw`.
 - **`aj fit --noise shared`: one noise scale for the energy, force and
   virial rows, as in ACEpotentials' BLR, so the E:F:V weights set the
   balance.** The default stays `--noise per-quantity` (σ_E, σ_F and σ_V

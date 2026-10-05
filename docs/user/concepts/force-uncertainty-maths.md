@@ -582,7 +582,15 @@ this is that a posterior calibrated on $U$ is specific to the regime of $U$
    up to 99 % explained variance, at most 64. The site descriptor is
    rotation-invariant and includes all body orders. The force-row projections
    $\tilde Q^\mathsf{T}u_\alpha$ are not used as features, because they rotate
-   with the structure.
+   with the structure. With `--ard-support-features normalised` the PCA is
+   fitted to $\phi/\lVert\phi\rVert$ instead, and $\log\lVert\phi\rVert$
+   and $\log\lVert\phi_b\rVert$ for each body order $b$ are appended as
+   standardised coordinates outside the PCA, so the cap cannot drop them
+   (the feature construction of Lysogorskiy, Bochkarev and Drautz 2026). On
+   the Cantor benchmark the 64-component cap keeps only about 80 % of the
+   variance, and these features flag fewer in-distribution atoms and more
+   atoms in the crack and dislocation cells than the raw descriptor does;
+   the default stays raw.
 2. **Density ratio.** For each species, fit an L2-regularised logistic
    classifier (target = 1, calibration = 0, class-balanced) on these
    features, with the L2 strength chosen by 5-fold cross-validation grouped by
@@ -672,6 +680,15 @@ diagnose
    electronic contributions act as noise relative to the model. The scale
    absorbs its size; nothing models where it is larger. This is a candidate
    explanation for the remaining gap at crack tips.
+9. **Dissociation.** The shape grows strongly under compression. Under
+   stretching it depends on the training data: with dimers and decohesion
+   in training (Si GAP-18) it stays far above its equilibrium value up to
+   $r_{\mathrm{cut}}$, but with bulk-only training it peaks near
+   $1.4\,d_{\mathrm{eq}}$ and falls back towards its equilibrium value as the
+   neighbours leave the cutoff (Cantor: about twice the equilibrium value
+   near $r_{\mathrm{cut}}$). The groups barely compensate. In every bond
+   scan tested, the support diagnostic flags these atoms, so check
+   `support_ok` where atoms may be losing neighbours.
 
 ## References
 
@@ -692,3 +709,6 @@ diagnose
 - R. J. Tibshirani, R. F. Barber, E. J. Candès and A. Ramdas, Conformal
   prediction under covariate shift, *NeurIPS* (2019),
   [arXiv:1904.06019](https://arxiv.org/abs/1904.06019).
+- Y. Lysogorskiy, A. Bochkarev and R. Drautz, A latent-space extrapolation
+  grade built into graph atomic cluster expansion foundation potentials
+  (2026), [arXiv:2609.40060](https://arxiv.org/abs/2609.40060).

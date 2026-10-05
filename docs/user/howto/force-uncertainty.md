@@ -306,6 +306,14 @@ Atoms with `support_ok = False` are candidates for labelling and for
 - The fit builds the support reference. This takes a small amount of time.
   `--no-ard-support` skips it; the property then gives an error.
 
+The classifier works in a whitened principal-component space of the site
+descriptors. `--ard-support-features normalised` builds that space from the
+unit-norm descriptor. It also adds the logarithm of the descriptor norm and
+of the block norm of each body order, as separate channels. When an atom
+loses its neighbours, its descriptor becomes smaller. The raw descriptor can
+then stay inside the training data, but the log-norm channels do not. The
+default is `raw`.
+
 ## Fit options
 
 | Option | Default | Effect |
@@ -321,6 +329,7 @@ Atoms with `support_ok = False` are candidates for labelling and for
 | `--ard-variance` | `sandwich` | the uncertainty shape: the jackknife (`sandwich`), or the posterior covariance (`kappa`) |
 | `--ard-mode` | `joint` | evidence fit of the noise and prior scales together, or `sequential` (prior scales only; less memory) |
 | `--no-ard-support` | | skip the support reference |
+| `--ard-support-features` | `raw` | features of the support reference: `raw` descriptors, or `normalised` (unit-norm descriptor plus log-norm channels per body order) |
 | `--batch-pack` | `auto` | batches configurations by an atom budget when a set has small and large cells |
 
 With `--uq ard`, `--e0 lsq` fits E0 together with the coefficients, as the
@@ -351,14 +360,28 @@ Posteriors written before this change load and work.
   (approximately 0.9 GB at $L$ = 15k basis functions). It also contains the
   shape factor, $L\times\min(K, L)$ for $K$ jackknife clusters (0.22 GB at
   $L$ = 15k, $K$ = 3.7k).
-- **Evaluation.** The uncertainty needs the force design rows of the full
-  cell on the device: approximately $N\cdot3\cdot L\cdot 8$ bytes (7 GB for
-  100k atoms at $L$ = 3k), plus the posterior factors. The rows are built
-  node by node and the uncertainty shape atom by atom, but all rows must fit
-  in memory. For cells of 3–4k atoms with production basis sizes,
-  `aj eval --posterior` and `aj calibrate` need an **A100-80GB-class GPU**.
-  A 40 GB GPU runs out of memory. (`aj eval --no-deriv-dtc` is a different
-  switch: it is for large cells with a GP model, not for `--uq ard`.)
+- **Evaluation.** The default method needs the force design rows of the
+  full cell on the device: approximately $N\cdot3\cdot L\cdot 8$ bytes
+  (7 GB for 100k atoms at $L$ = 3k), plus the posterior factors. The rows are
+  built node by node and the uncertainty shape atom by atom, but all rows
+  must fit in memory. On the Cantor benchmark (15k basis functions), a cell
+  of 3.9k atoms needs approximately 6.4 GB on the GPU and 20 s on an
+  A100-40GB. (`aj eval --no-deriv-dtc` is a different switch: it is for large
+  cells with a GP model, not for `--uq ard`.)
+
+  `--shape-path committee` (on `aj eval` and `aj calibrate`;
+  `ACECalculator(..., shape_path="committee")`) calculates the same shape
+  without the design rows. The shape is a sum of squared forces of a linear
+  ACE model with $r$ coefficient vectors, one for each column of the shape
+  factor. Thus the arrays are approximately $N\cdot3\cdot r\cdot 8$ bytes,
+  not $N\cdot3\cdot L\cdot 8$. The values are the same to roundoff. Use it
+  only for cells much larger than 3–4k atoms: at that size it is not faster
+  and it needs more memory (approximately 13 GB).
+
+  In Python, `shape_tau` and `shape_rank` truncate the shape factor to a
+  lower rank. The scales are fitted for the full rank. Thus a truncated shape
+  keeps the ranking of atoms (Spearman 0.99 at rank 200 of 3680), but its
+  coverage is much too low (0.54, not 0.90). Use it only to rank atoms.
 
 ## Validation
 

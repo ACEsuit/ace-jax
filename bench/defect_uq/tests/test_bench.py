@@ -282,3 +282,69 @@ def test_f_sweep_separates_raw_exponent_from_residual_after_transfer(tmp_path):
     assert "raw slope of log lambda on log N_fit (exponent)" in md
     assert "residual slope after transfer (~0 if the transfer works)" in md
     assert "lambda_rms raw" in md and "| exponent |" in md and "0.370" in md and "0.400" in md
+
+
+bs = _load("scoring/bond_scan.py", "bond_scan")
+
+
+@pytest.mark.parametrize("spec,n_el,d_eq", [("Si:diamond:5.431", 1, 5.431 * np.sqrt(3) / 4),
+                                            ("CrMnFeCoNi:fcc:3.6502", 5, 3.6502 / np.sqrt(2)),
+                                            ("Fe:bcc:2.8971", 1, 2.8971 * np.sqrt(3) / 2)])
+def test_bond_scan_prototype(spec, n_el, d_eq):
+    at, d = bs.prototype(spec, rcut=5.5)
+    assert d == pytest.approx(d_eq)
+    assert at.cell.lengths().min() >= 2 * 5.5                       # wider than r_cut down to 0.5 d_eq
+    from ase.neighborlist import neighbor_list
+    assert neighbor_list("d", at, 1.01 * d).min() == pytest.approx(d)
+    _, cnt = np.unique(at.numbers, return_counts=True)
+    assert len(cnt) == n_el and cnt.max() - cnt.min() <= 1          # equiatomic
+
+
+def test_bond_scan_prototype_rejects_bad_symbols():
+    with pytest.raises(ValueError):
+        bs.prototype("Xx:fcc:3.6", 5.0)
+
+
+def test_bond_scan_detection_windows_and_factors():
+    s = np.linspace(0.5, 2.5, 41)
+    y = np.where(s <= 1, 1 / s ** 4, np.where(s < 1.8, 4.0, 0.5))      # 1 at d_eq; stretching half 4x, half 0.5x
+    agg = {"d_rel": s, "d_eq": 2.0, "rcut": 5.0, "v": y, "support_bad": (s > 1.2).astype(float)}
+    d = bs.detection(agg, factors=(2.0, 5.0))
+    comp, st = s < bs.COMP, (s > bs.STRETCH) & (s < 2.5)
+    assert d["v"]["comp"] == [np.mean(y[comp] > 2), np.mean(y[comp] > 5)]
+    assert d["v"]["stretch"][0] == pytest.approx(np.mean(s[st] < 1.8)) and d["v"]["stretch"][1] == 0
+    assert d["support_ok=False"] == {"comp": [0.0], "stretch": [1.0], "eq": 0.0}
+    md = bs.report({"X:fcc:1": dict(agg, n_atoms=4, group=np.zeros(len(s)))}, factors=(2.0, 5.0))
+    assert "| X:fcc:1 | v | stretch |" in md and "0: 0.50-2.50" in md
+
+
+cm = _load("scoring/calm_metrics.py", "calm_metrics")
+
+
+def test_calm_auroc_matches_pairwise_count():
+    rng = np.random.default_rng(0)
+    s, pos = rng.integers(0, 5, 200).astype(float), rng.random(200) < 0.3      # ties on purpose
+    P, N = s[pos], s[~pos]
+    ref = (np.sum(P[:, None] > N[None, :]) + 0.5 * np.sum(P[:, None] == N[None, :])) / (len(P) * len(N))
+    assert cm.auroc(s, pos) == pytest.approx(ref)
+    assert np.isnan(cm.auroc(s, np.zeros(200, bool)))
+
+
+def test_calm_contamination_keeps_lowest_scores():
+    s = np.arange(10.0)
+    e = np.r_[np.zeros(8), 1.0, 1.0]
+    assert cm.contamination(s, e, 0.8) == 0.0 and cm.contamination(s, e, 1.0) == 0.2
+    assert cm.contamination(s[::-1], e, 0.2) == 1.0
+
+
+def test_calm_report_on_synthetic_run(tmp_path):
+    rng = np.random.default_rng(1)
+    n = 400
+    sd = rng.random(n) + 0.1
+    dF = rng.normal(size=(n, 3)) * sd[:, None]
+    np.savez(tmp_path / "big3_err.npz", dF=dF, sd=sd, forces_q=3 * sd, family=np.array(["crack"] * 300 + ["edge"] * 100),
+             r_core=rng.random(n) * 30, fixed=np.zeros(n, bool), err=np.linalg.norm(dF, axis=1))
+    md = cm.report([str(tmp_path)])
+    assert "| crack tip (<= 10 A) |" in md and "| all big cells | 400 |" in md
+    rho = float(md.split("| | | sd | ")[1].split(" |")[0])
+    assert rho > 0.3

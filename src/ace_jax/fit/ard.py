@@ -372,13 +372,19 @@ class ARDPosterior(NamedTuple):
         from ONE shape evaluation V of the force rows (N, 3, L).  forces_q = q_g x the region's radius
         (sqrt(v/3) iso, sqrt(lambda_max(V + eps v/3 I)) aniso): inf wherever q_g = inf (the coverage is
         not attainable from the calibration set -- even at v = 0, never 0 x inf = NaN), 0 where v = 0."""
+        need = set(which) & {"forces_std", "forces_cov", "forces_q"}
+        return self.served_from_V(self.atom_shape(Frows) if need else None, groups, which)
+
+    def served_from_V(self, V, groups, which=("forces_std", "forces_cov", "forces_q")):
+        """`served` from a precomputed unscaled shape V (N, 3, 3) -- the rows' `atom_shape` or the
+        committee path (`jackknife.committee_shape`); V may be None when only forces_q_mahal is wanted."""
         t = self._tab(groups)
         lam = np.asarray(t["lam_rms"], float)[groups]
         q = np.asarray(t["q"], float)[groups]
         which = set(which)
         out = {}
         if which & {"forces_std", "forces_cov", "forces_q"}:
-            V = self.atom_shape(Frows)
+            V = np.asarray(V)
             v = np.trace(V, axis1=1, axis2=2)
             if "forces_std" in which:
                 out["forces_std"] = lam * np.sqrt(np.maximum(v, 0.0))
@@ -692,8 +698,10 @@ def _support_reference(cfg, data, built, ds_val, bn, scores, cfg_ids, grp, log=p
     training batches (<= ard_support_max_atoms atoms per species), and the T_val atoms (batch, node) = bn
     with their conformal scores and configuration ids.  Site descriptors are evaluated only on those."""
     from .inducing import site_features
-    from .support import build_support, fit_pca
+    from .support import build_support, explained_variance, fit_pca, n_pass, support_body, support_features
     prob = built.prob
+    feat = {"kind": cfg.ard_support_features, "body": support_body({"nnll": data.meta["nnll"],
+                                                                     "n_pair": prob.cfg.n_pair})}
     ds = data.ds_train
     rng = np.random.default_rng(cfg.seed)
     cap = int(cfg.ard_support_max_atoms)
@@ -712,7 +720,12 @@ def _support_reference(cfg, data, built, ds_val, bn, scores, cfg_ids, grp, log=p
     for z, v in pool.items():
         v = np.concatenate(v)
         Xp[z] = v[rng.permutation(len(v))[:cap]]
-    pca = fit_pca(Xp)
+    Fp = {z: support_features(v, feat) for z, v in Xp.items()}
+    pca = fit_pca(Fp, n_pass=n_pass(feat))
+    ev = explained_variance(Fp, pca, n_pass(feat))
+    log(f"ARD support ({feat['kind']} features): PCA components per species "
+        + ", ".join(f"{z}: {pca[z][2].shape[1] - n_pass(feat)} ({ev[z]:.3f} var)" for z in sorted(pca))
+        + (f", plus {n_pass(feat)} log-norm channels" if n_pass(feat) else ""))
     Xc = np.zeros((len(bn), 0))
     for i in np.unique(bn[:, 0]):                    # only the live T_val atoms are kept
         Xi = np.asarray(site_features(prob.model, built.gpcfg, one(ds_val, int(i)))[0])[0]
@@ -723,7 +736,7 @@ def _support_reference(cfg, data, built, ds_val, bn, scores, cfg_ids, grp, log=p
     Zc = np.asarray(ds_val.node_z)[bn[:, 0], bn[:, 1]]
     k = np.isin(Zc, list(pca))
     return build_support(pca, Xc[k], Zc[k], np.asarray(scores, float)[k], np.asarray(cfg_ids)[k],
-                         cap, cfg.seed, grp=np.asarray(grp)[k])
+                         cap, cfg.seed, grp=np.asarray(grp)[k], features=None if feat["kind"] == "raw" else feat)
 
 
 def conformal_scores(e, V, force_shape, eps):

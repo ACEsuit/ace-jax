@@ -4,6 +4,7 @@ Coordinates: S = D^-1 A D^-1 = L L^T (post.chol), D^-1 = diag(post.dinv).  For a
 rows Psi_k (n_k, L) and residuals rho_k = y~_k - Psi_k c, the PRESS score is
 g~_k = Psi_k^T (I - H_kk)^-1 rho_k with H_kk = Psi_k A^-1 Psi_k^T = W^T W, W = L^-1 (Psi_k D^-1)^T, so that
 A^-1 g~_k = c - c_(-k) exactly (h fixed)."""
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -125,3 +126,72 @@ def atom_shape(R, dinv, Frows, chunk=None):
         Pr = U @ R
         out[i:i + c] = np.asarray(jnp.einsum("nar,nbr->nab", Pr, Pr))
     return out
+
+
+def truncate_shape_factor(R, tau):
+    """R (L, r) -> U_k Sigma_k of its thin SVD, the same R R^T to rank k: the smallest k holding >= tau of
+    sum sigma^2 (tau a float <= 1), or k = tau (an int).  tau = 1.0 returns R unchanged."""
+    if not isinstance(tau, (int, np.integer)) and tau >= 1.0:
+        return R
+    U, s, _ = np.linalg.svd(np.asarray(R, np.float64), full_matrices=False)
+    if isinstance(tau, (int, np.integer)):
+        k = int(min(max(tau, 1), len(s)))
+    else:
+        e = np.cumsum(s ** 2)
+        k = 1 if e[-1] == 0 else int(np.searchsorted(e / e[-1], tau - 1e-12) + 1)
+    return U[:, :k] * s[None, :k]
+
+
+def committee_coefs(R, dinv, cfg):
+    """C = D^-1 R split into the compact per-species blocks of the design layout (`rows._place`):
+    (CB (NZ, n_B, r), CP (NZ, n_pair, r)).  Rows of R past the readout (joint-E0 columns) are dropped:
+    they are zero on every force row."""
+    NZ, nB, nP = cfg.NZ, cfg.n_B, cfg.n_pair
+    L0 = (nB + nP) * NZ
+    C = jnp.asarray(dinv, jnp.float64)[:L0, None] * jnp.asarray(R, jnp.float64)[:L0]
+    return C[:NZ * nB].reshape(NZ, nB, -1), C[NZ * nB:].reshape(NZ, nP, -1)
+
+
+COMMITTEE_NODE_CHUNK = 64     # centre nodes per pass of committee_forces (bounds (nc, n_B, n_A) and (nc, n_B, r))
+
+
+def _committee_body(model, batch, CB, CP, nc):
+    Ncap, K = batch.nbr.shape
+    r = CB.shape[-1]
+    n_chunks = -(-Ncap // nc)
+    pad = n_chunks * nc - Ncap
+    Np = Ncap + pad
+    rij = jnp.concatenate([batch.rij, jnp.broadcast_to(batch.rij[-1:], (pad, K, 3))])
+    nbr = jnp.concatenate([batch.nbr, jnp.zeros((pad, K), batch.nbr.dtype)])
+    msk = jnp.concatenate([batch.nbr_mask, jnp.zeros((pad, K), bool)])
+    node_z = jnp.concatenate([batch.node_z, jnp.zeros(pad, batch.node_z.dtype)])
+    sl = lambda a, s0: jax.lax.dynamic_slice_in_dim(a, s0, nc)
+
+    def body(i, P):
+        s0 = i * nc
+        r_c, nb_c, m_c, z_c = sl(rij, s0), sl(nbr, s0), sl(msk, s0), sl(node_z, s0)
+        T = model.committee_edge_grad_dense(r_c, jnp.broadcast_to(z_c[:, None], (nc, K)), node_z[nb_c], m_c,
+                                            z_c, CB, CP)                              # (nc, K, r, 3)
+        P = P - jax.ops.segment_sum(T.reshape(nc * K, r, 3), nb_c.reshape(-1), num_segments=Np)   # receivers
+        return jax.lax.dynamic_update_slice_in_dim(P, sl(P, s0) + T.sum(1), s0, 0)               # senders
+
+    P = jax.lax.fori_loop(0, n_chunks, body, jnp.zeros((Np, r, 3)))
+    return jnp.swapaxes(P[:Ncap], 1, 2)
+
+
+_committee_jit = eqx.filter_jit(_committee_body)
+
+
+def committee_forces(model, cfg, batch, CB, CP, node_chunk=None):
+    """P (Ncap, 3, r): the forces of the r-output linear model (CB, CP) on every node of one batch, i.e.
+    phi_a^T C per atom without the design rows phi (Ncap, 3, L) or the edge Jacobian (E, D, 3)."""
+    nc = int(min(node_chunk or COMMITTEE_NODE_CHUNK, batch.nbr.shape[0]))
+    return _committee_jit(model, batch, jnp.asarray(CB), jnp.asarray(CP), nc)
+
+
+def committee_shape(model, cfg, batch, R, dinv, node_chunk=None):
+    """The shape V (Ncap, 3, 3) = P P^T of `atom_shape(R, dinv, rows.F)` from `committee_forces` with
+    C = D^-1 R: equal to roundoff (tests/test_shape_committee.py), with memory O(Ncap r) not O(Ncap L)."""
+    CB, CP = committee_coefs(R, dinv, cfg)
+    P = committee_forces(model, cfg, batch, CB, CP, node_chunk)
+    return np.asarray(jnp.einsum("nar,nbr->nab", P, P))
