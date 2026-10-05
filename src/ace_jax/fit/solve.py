@@ -117,6 +117,10 @@ def solve_qr_streaming(prob, ds, theta):
 def _qr_factor(prob, ds, theta):
     """The streaming QR: R (Dt, Dt) upper triangular with R^T R = G + Lambda, and d = Q^T y_tilde."""
     R0, d0 = _prior_block(prob, theta)                       # (Dt, Dt) upper tri, zeros(Dt)
+    if jax.default_backend() == "cpu":                       # stats.host_qr_stream: not in a scan on the CPU
+        from .stats import host_qr_stream
+        rows = jax.jit(lambda b: [_weighted_rows(prob, theta, b)])
+        return host_qr_stream(rows, ds, [(R0, d0)])[0]
 
     def body(carry, batch):
         R, d = carry

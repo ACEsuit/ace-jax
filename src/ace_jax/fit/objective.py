@@ -195,7 +195,7 @@ def make_lml(prob, ds, mesh=None, cache_linear=True, n_types=1, n_free_ratios=0)
         return f
     if uses_qr(prob) and mesh is None:
         from .stats import linear_qr_statistics
-        qs = jax.jit(lambda: linear_qr_statistics(prob.model, prob.cfg, ds))()
+        qs = linear_qr_statistics(prob.model, prob.cfg, ds)      # a host loop on the CPU: not jitted
         jax.block_until_ready(qs)
 
         lml = jax.jit(lambda a: log_marginal_likelihood_qr(from_array(a), qs, prob))

@@ -218,3 +218,39 @@ def test_pipeline_fixture_map_already_needs_qr(pipeline_fits):
     assert 1e-14 * sc < abs(v_c - ref) < 1e-11 * sc                     # Cholesky: finite, worse
     assert np.abs(mu_q - mu_s).max() < 1e-6 * np.abs(mu_s).max()        # QR mean: the full-design QR's
     assert np.abs(mu_c - mu_s).max() > 1e-4 * np.abs(mu_s).max()        # Cholesky mean: off
+
+
+_THREADED_QR = r"""
+import jax; jax.config.update("jax_enable_x64", True)
+import numpy as np, pathlib, sys
+from ase.io import read, write
+from ace_jax.basis.model import BasisSpec, build_basis
+from ace_jax.fit.pipeline import FitConfig, load_fit_data
+from ace_jax.fit.pipeline.problem import build_problem
+from ace_jax.fit.stats import linear_qr_statistics
+data, work = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+write(work / "train.xyz", read(data / "cantor_train.xyz", ":"))
+b = build_basis(BasisSpec(order=2, max_degree=4, elements=("Cr", "Mn", "Fe", "Co", "Ni"), rcut=5.5))
+cfg = FitConfig(model=b, arm="linear", m_per_species=0, e0="lsq", opt="lbfgs", r0=None, rungs=("map",),
+                energy_key="mace_energy", force_key="mace_force", virial_key="mace_virial").validate()
+d = load_fit_data(cfg, train=str(work / "train.xyz"), log=lambda *a: None)
+prob = build_problem(cfg, d).prob
+qs = linear_qr_statistics(prob.model, prob.cfg, d.ds_train)
+print("NONFINITE", sum(int((~np.isfinite(np.asarray(v))).sum()) for v in qs._asdict().values()))
+"""
+
+
+@pytest.mark.parametrize("threads", ["4", "8"])
+def test_qr_statistics_finite_with_threaded_openblas(tmp_path, threads):
+    """Regression (#61): built as a lax.scan of jnp.linalg.qr on the CPU, the energy factor of
+    tutorial 3's 655-function categorical basis came out NaN whenever OpenBLAS ran 4 or 8
+    threads -- a GitHub runner's default -- because XLA calls LAPACK from its worker threads.
+    The CPU path merges on the host (stats.host_qr_stream).  OPENBLAS_NUM_THREADS must be set
+    before OpenBLAS loads, so this runs in a fresh process."""
+    import os, pathlib, subprocess, sys
+    data = pathlib.Path(__file__).resolve().parents[1] / "docs" / "user" / "tutorials" / "data" / "cantor"
+    env = dict(os.environ, OPENBLAS_NUM_THREADS=threads, JAX_PLATFORMS="cpu", JAX_ENABLE_X64="1")
+    r = subprocess.run([sys.executable, "-c", _THREADED_QR, str(data), str(tmp_path)], env=env,
+                       capture_output=True, text=True, timeout=900)
+    assert r.returncode == 0, r.stderr[-2000:]
+    assert "NONFINITE 0" in r.stdout, r.stdout[-500:]
