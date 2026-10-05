@@ -128,6 +128,7 @@ uv run ruff check                     # lint; `uv run pre-commit run --all-files
   - Finite-difference and autodiff cross-checks.
   - Import shared helpers with `from conftest import FIXTURE_DIR, pace_fixture`.
   - Mark heavy tests `@pytest.mark.slow`.
+  - Bit-exact pipeline goldens (`fixtures/pipeline_golden/`) are recorded and checked on lestrade (`tests/pipeline_golden/make_golden.py`; `PLATFORM` is `Linux-x86_64-lestrade`). `tests/test_pipeline_parity.py` skips on any other host, CI runners included.
 - **Commits:** conventional-commit prefixes with a scope on branch commits, for example `feat(bench):`, `fix(nlist):`, `refactor(gp)!:`, `test(ladder):`, `docs(...)`, `ci:`, `chore:`. PRs are squash-merged under a plain title with `(#N)`.
 
 ## Pitfalls

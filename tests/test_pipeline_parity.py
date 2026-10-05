@@ -1,8 +1,9 @@
 # tests/test_pipeline_parity.py
 """The drivers must reproduce their pre-refactor outputs exactly (Task 0 goldens).
 
-Exact (rtol 1e-12) parity holds only on the platform the goldens were recorded on
-(fixtures/pipeline_golden/PLATFORM): elsewhere BLAS/LAPACK round-off differs and
+The goldens are lestrade's (fixtures/pipeline_golden/PLATFORM, recorded by
+make_golden.py). Exact (rtol 1e-12) parity holds only on the host they were
+recorded on: elsewhere (CI runners included) BLAS/LAPACK round-off differs and
 the MAP optimisers amplify it, so the comparison is skipped there.  Behaviour on
 every platform is covered by test_pipeline_units / test_pipeline_export."""
 import csv, json, os, pathlib, subprocess, sys
