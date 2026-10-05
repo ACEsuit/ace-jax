@@ -99,6 +99,9 @@ def _add_fit_args(p):
                    help="ard: groups with fewer configurations borrow a neighbouring group's scales")
     p.add_argument("--no-ard-support", action="store_true",
                    help="ard: skip the covariate-shift support reference")
+    p.add_argument("--ard-support-features", choices=["raw", "normalised"], default="raw",
+                   help="ard: support-reference features -- raw descriptors, or normalised (unit-norm descriptor "
+                        "plus log-norm channels per body order, which flag atoms losing neighbours)")
     p.add_argument("--learn-radial", action="store_true",
                    help="learn the tensor radials (VarPro, held-out gate) before the fit; the saved model "
                         "is marked radial_learned and splined at deploy time")
@@ -160,6 +163,7 @@ def _fit_config(a):
         ard_force_shape=a.force_shape, ard_coverage=a.ard_coverage, ard_groups=a.ard_groups,
         ard_cluster_size=a.ard_cluster_size, ard_press=a.ard_press, ard_n_min=a.ard_n_min,
         ard_transfer=a.ard_transfer, ard_support=not a.no_ard_support,
+        ard_support_features=a.ard_support_features,
         learn_radial=a.learn_radial, radial_n_q=a.radial_n_q, radial_steps=a.radial_steps,
         radial_lam_grid=tuple(float(x) for x in str(a.radial_lam_grid).split(",") if x.strip()),
         radial_val_frac=a.radial_val_frac,

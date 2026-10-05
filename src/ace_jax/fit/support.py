@@ -1,19 +1,78 @@
 """Covariate-shift support diagnostic (math rev. 2): per species, PCA of the site descriptor,
-a grouped-CV L2 logistic density ratio (target vs calibration), weighted conformal quantile."""
+a grouped-CV L2 logistic density ratio (target vs calibration), weighted conformal quantile.
+
+Features (`ard_support_features`): "raw" is the compact descriptor phi = [B | A_pair] itself; "normalised"
+is phi_hat = phi/(|phi| + eps) plus log(|phi| + eps) and log(|phi_b| + eps) per body order b, the log-norm
+channels bypassing the PCA (standardised, one coordinate each).  An atom losing its neighbours has phi -> 0,
+which sits inside a raw training cloud reaching towards 0 (the CALM stretching test, arXiv:2609.40060);
+its log-norms leave the training range instead.  The reference records its features as ref["features"]
+({"kind", "body"}); a reference without it (written before) is raw."""
 import warnings
 
 import numpy as np
 
+FEATURE_KINDS = ("raw", "normalised")
+_EPS = 1e-12
 
-def fit_pca(X_by_species, var=0.99, cap=64):
+
+def support_body(meta):
+    """Body order of each compact-descriptor column [B | A_pair]: nu + 1 for B (len(nnll) = nu), 2 for pair."""
+    return np.r_[[len(x) + 1 for x in meta["nnll"]], np.full(int(meta["n_pair"]), 2)].astype(np.int64)
+
+
+def n_pass(features):
+    """Trailing feature columns that bypass the PCA (the log-norm channels): 0 for raw."""
+    if features is None or features["kind"] == "raw":
+        return 0
+    return 1 + len(np.unique(features["body"]))
+
+
+def support_features(X, features):
+    """Support features of raw descriptors X (n, D) under `features` (None = raw)."""
+    X = np.asarray(X, float)
+    if features is None or features["kind"] == "raw":
+        return X
+    if features["kind"] != "normalised":
+        raise ValueError(f"unknown support features {features['kind']!r}; expected one of {FEATURE_KINDS}")
+    body = np.asarray(features["body"])
+    if len(body) != X.shape[1]:
+        raise ValueError(f"support features: {X.shape[1]} descriptor columns but {len(body)} body orders")
+    nrm = np.linalg.norm(X, axis=1)
+    blk = [np.linalg.norm(X[:, body == b], axis=1) for b in np.unique(body)]
+    return np.column_stack([X / (nrm + _EPS)[:, None], np.log(np.column_stack([nrm] + blk) + _EPS)])
+
+
+def _species(ref):
+    return [k for k in ref if isinstance(k, int)]
+
+
+def fit_pca(X_by_species, var=0.99, cap=64, n_pass=0):
+    """Per species (mu, sd, W): standardise, then whitened principal components (var explained, <= cap) of
+    all but the last n_pass columns; those pass through standardised (identity block of W)."""
     out = {}
     for z, X in X_by_species.items():
         X = np.asarray(X, float)
         mu, sd = X.mean(0), X.std(0) + 1e-12
-        _, s, Vt = np.linalg.svd((X - mu) / sd, full_matrices=False)
+        D = X.shape[1] - n_pass
+        _, s, Vt = np.linalg.svd(((X - mu) / sd)[:, :D], full_matrices=False)
         e = np.cumsum(s ** 2) / np.sum(s ** 2)
         k = min(int(np.searchsorted(e, var) + 1), cap, len(s))
-        out[int(z)] = (mu, sd, Vt[:k].T / (s[:k] / np.sqrt(len(X))))       # whitened components
+        W = np.zeros((D + n_pass, k + n_pass))
+        W[:D, :k] = Vt[:k].T / (s[:k] / np.sqrt(len(X)))                # whitened components
+        W[D:, k:] = np.eye(n_pass)
+        out[int(z)] = (mu, sd, W)
+    return out
+
+
+def explained_variance(X_by_species, pca, n_pass=0):
+    """Fraction of the standardised PCA-block variance the kept components explain, per species."""
+    out = {}
+    for z, X in X_by_species.items():
+        mu, sd, W = pca[int(z)]
+        Y = ((np.asarray(X, float) - mu) / sd)[:, :W.shape[0] - n_pass]
+        k = W.shape[1] - n_pass
+        _, s, _ = np.linalg.svd(Y, full_matrices=False)
+        out[int(z)] = float(np.sum(s[:k] ** 2) / np.sum(s ** 2))
     return out
 
 
@@ -35,9 +94,14 @@ def _fit_subset(g, cap, rng):
     return np.sort(np.concatenate(keep))
 
 
-def build_support(pca, X, Z, scores, cfg, max_atoms, seed, fit_max=10000, grp=None):
+def build_support(pca, X, Z, scores, cfg, max_atoms, seed, fit_max=10000, grp=None, features=None):
+    """X: RAW descriptors (n, D); `features` ({"kind", "body"}, None = raw) maps them to the space pca was
+    fitted in, and is stored as ref["features"] for support_check / extend_support."""
     rng = np.random.default_rng(seed)
     ref = {"pca": pca}
+    if features is not None:
+        ref["features"] = features
+    X = support_features(X, features)
     for z in np.unique(Z):
         m = np.flatnonzero(Z == z)
         cs = rng.permutation(np.unique(cfg[m]))
@@ -128,7 +192,7 @@ def support_check(ref, X_t, Z_t, alpha, seed=0):
         if r is None:
             neff[int(z)] = 0.0
             continue
-        Xt = _proj(ref["pca"], z, X_t[mt])
+        Xt = _proj(ref["pca"], z, support_features(X_t[mt], ref.get("features")))
         lc, lt, conv = _ratio(r["Xc"], r["g"], Xt, seed, r.get("f"))
         if not conv:
             warnings.warn(f"support_check: density-ratio classifier did not converge for species {int(z)}; "
@@ -153,14 +217,17 @@ def support_check(ref, X_t, Z_t, alpha, seed=0):
 
 
 def flatten_support(ref, dtype=np.float32):
-    """The nested reference as a flat dict of arrays: support_pca_{z}_{mu,sd,W}, support_{z}_{Xc,s,m,g}."""
+    """The nested reference as a flat dict of arrays: support_pca_{z}_{mu,sd,W}, support_{z}_{Xc,s,m,g},
+    support_feat_{kind,body}."""
     out = {}
     for z, (mu, sd, W) in ref["pca"].items():
         for k, v in (("mu", mu), ("sd", sd), ("W", W)):
             out[f"support_pca_{z}_{k}"] = np.asarray(v, dtype)
-    for z, r in ref.items():
-        if z == "pca":
-            continue
+    if "features" in ref:
+        out["support_feat_kind"] = np.array(str(ref["features"]["kind"]))
+        out["support_feat_body"] = np.asarray(ref["features"]["body"], np.int64)
+    for z in _species(ref):
+        r = ref[z]
         for k in ("Xc", "s", "m"):
             out[f"support_{z}_{k}"] = np.asarray(r[k], dtype)
         out[f"support_{z}_g"] = np.asarray(r["g"], np.int64)
@@ -178,6 +245,8 @@ def unflatten_support(flat):
         p = k.split("_")
         if p[0] == "pca":
             ref["pca"].setdefault(int(p[1]), {})[p[2]] = np.asarray(v, np.float64)
+        elif p[0] == "feat":
+            ref.setdefault("features", {})[p[1]] = str(v) if p[1] == "kind" else np.asarray(v, np.int64)
         else:
             ref.setdefault(int(p[0]), {})[p[1]] = np.asarray(v) if p[1] in ("g", "f", "grp") else np.asarray(v, np.float64)
     ref["pca"] = {z: (d["mu"], d["sd"], d["W"]) for z, d in ref["pca"].items()}
@@ -196,16 +265,19 @@ def extend_support(ref, keep, X, Z, scores, cfg, max_atoms, seed, grp, fit_max=1
     dropped; both are noted through log."""
     rng = np.random.default_rng(seed)
     out = {"pca": ref["pca"]}
+    if "features" in ref:
+        out["features"] = ref["features"]
+    X = support_features(X, ref.get("features"))
     Z, cfg, grp = np.asarray(Z), np.asarray(cfg), np.asarray(grp)
-    stored = {k for k in ref if k != "pca"}
+    stored = set(_species(ref))
     for z in sorted(set(np.unique(Z).tolist()) - stored):
         log(f"note: support: species index {z} ({int(np.sum(Z == z))} atoms in the calibration set) has no "
             f"stored support reference; its atoms are not added and stay out of support")
-    for z in sorted(k for k in ref if k != "pca"):
+    for z in sorted(stored):
         r = ref[z]
         k = np.ones(len(r["s"]), bool) if keep.get(z) is None else np.asarray(keep[z], bool)
         m = np.flatnonzero(Z == z)
-        Xc = np.r_[r["Xc"][k], _proj(ref["pca"], z, np.asarray(X)[m])]
+        Xc = np.r_[r["Xc"][k], _proj(ref["pca"], z, X[m])]
         s = np.r_[r["s"][k], np.asarray(scores, np.float32).astype(float)[m]]
         gr = np.r_[np.asarray(r["grp"])[k], grp[m]].astype(np.int64)
         g_old = np.asarray(r["g"])[k]
@@ -234,13 +306,13 @@ def keep_for_mode(ref, mode, u_cfg, n_min):
     return {z: (np.zeros(len(r["s"]), bool) if mode == "replace" else
                 np.ones(len(r["s"]), bool) if mode == "append" else
                 np.asarray(u_cfg)[np.asarray(r["grp"])] < n_min)
-            for z, r in ref.items() if z != "pca"}
+            for z, r in ((z, ref[z]) for z in _species(ref))}
 
 
 def recalibrate_support(ref, mode, u_cfg, n_min, X, Z, scores, cfg, grp, max_atoms=50000, seed=0):
     """The support reference on the pooled calibration atoms (stored points kept per `keep_for_mode`, plus
     U); None, with a notice, when the stored reference has no per-point group labels."""
-    if any("grp" not in r for z, r in ref.items() if z != "pca"):
+    if any("grp" not in ref[z] for z in _species(ref)):
         print("note: support reference dropped: it stores no per-point conformal groups (refit with --uq ard)")
         return None
     return extend_support(ref, keep_for_mode(ref, mode, u_cfg, n_min), X, Z, scores, cfg, max_atoms, seed, grp)
