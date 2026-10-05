@@ -2,6 +2,51 @@
 
 ## Unreleased
 
+- **Linear `aj fit` now converges the hyperparameter MAP by default, and
+  every fit is checked, so refits give different (better) results.** The
+  default `--opt` is now `lbfgs` (bounded L-BFGS-B) instead of `adam`.
+  - The old default, 500 Adam steps, moved each log-hyperparameter at most
+    about 5 units from the prior mean, so fits on large data were **not
+    converged**, and nothing said so. On GAP-18 silicon (linear o4d12,
+    measured on a 0.2.0 basis) its log-posterior was −1.04×10⁷ against
+    +1.92×10⁵ at the optimum, σ_E was 100× too small, and the test force
+    RMSE was 0.345 eV/Å against 0.163 at the converged MAP. L-BFGS took
+    63 evaluations (0.2 s on an RTX 4000 Ada) to reach it.
+  - Linear fits on the cached-Gram LML then take a Newton polish to a
+    stationary point (`--map-polish`, default `auto`). Its Hessian is
+    exact. It is built one column at a time, one Hessian-vector product per
+    free hyperparameter, which needs about 2.3× the gradient's memory
+    (515 MB against 225 MB at 2,053 basis functions). `jax.hessian` would
+    need about 10× (2.2 GB).
+  - GP fits (`--m-per-species` > 0) are not polished by default, since one
+    GP gradient took about 70 s on GAP-18 Si (o3d12, 100 inducing sites).
+    They are checked and warned. A line-search stop of L-BFGS-B
+    (`ABNORMAL`) now restarts it once, for at most 50 evaluations.
+    `--map-polish on` polishes a GP fit, at one Hessian-vector product per
+    free hyperparameter per Newton step. On the GP arm each product is a
+    forward-over-reverse pass through the streamed objective, so a polish
+    can take hours at large scale.
+  - **The check.** The fit estimates what one more Newton step would gain
+    in log-posterior. If that exceeds 10⁻³ nats, it logs
+    `WARNING: MAP did not converge` and warns; `--strict` makes that an
+    error (`MapNotConverged`). The estimate costs no extra evaluation: it
+    uses the polish Hessian, or else L-BFGS-B's own limited-memory
+    inverse-Hessian estimate. That estimate is approximate, so on a GP fit
+    the gain is too. A polished fit whose log-posterior is too noisy to
+    resolve the last 10⁻³ nats can pass on a roundoff floor of at most
+    0.1 nats, and only when every gradient component is within 10× its
+    measured roundoff; it is then recorded as `resolution_limited`. The
+    record is written to `map_convergence.json`.
+  - **Laplace rung.** It now holds hyperparameters that sit on their box
+    bound at the MAP fixed. A converged MAP can run a noise scale to its
+    bound, where the Hessian is singular.
+  - **Old run files.** `--opt adam` is still available. `FitConfig`
+    (Python) already defaulted to `opt="lbfgs"`, and it now polishes linear
+    fits too; `map_polish="off"` restores the old endpoint. A resolved
+    `fit.yaml` from an earlier run that says `opt: lbfgs` also polishes
+    when rerun.
+  - `sigma_type` fits (Python) still use Adam, unchecked: the fit warns
+    that `map_polish` and `strict` do not apply.
 - **Changed: the linear fit's evidence and posterior are computed by QR.** The
   evidence fit factored the normal equations G + Λ by Cholesky, which squares the
   condition number of the design. Fits that nearly interpolate their data (smooth

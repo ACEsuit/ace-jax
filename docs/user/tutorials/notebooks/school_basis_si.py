@@ -27,7 +27,7 @@ def _(mo):
     In [Tutorial 4](https://acesuit.github.io/ace-jax/tutorials/dataset-and-properties/)
     a near-perfect fit got a vacancy wrong because the data did not cover the
     question. This time the data covers the question, and the risk is the model:
-    how large a basis can 200 silicon structures support?
+    how large a basis can 40 silicon structures support?
 
     **Goals**
 
@@ -50,7 +50,7 @@ def _(mo):
     or open it in [molab](https://molab.marimo.io/github/ACEsuit/ace-jax/blob/main/docs/user/tutorials/notebooks/school_basis_si.py), marimo's hosted service (free to
     preview; sign in to run). The documentation website shows a static copy,
     run on a CPU when the site was built. The sweep in Step 2 fits eight models
-    and takes about 10 minutes on a CPU, half of it the largest basis.
+    and takes about 4 minutes on a CPU.
     """)
     return
 
@@ -84,7 +84,9 @@ def _(mo):
     anything new.
 
     A test set is the structures the fit never sees. Shuffle before splitting,
-    since the file is ordered by cell size, and keep 80% for training.
+    since the file is ordered by cell size, and hold out 20%. Of the other 200,
+    the fits below train on only `N_TRAIN = 40`: few enough data that a large
+    basis can overfit them (exercise 3 trains on all 200).
     """)
     return
 
@@ -104,9 +106,10 @@ def _(mo, np, pathlib, read, urllib):
     frames = read(data_file, ":")
     _order = np.random.default_rng(11).permutation(len(frames))
     _cut = int(0.8 * len(frames))
-    train_frames = [frames[i] for i in _order[:_cut]]
+    N_TRAIN = 40                                       # of the 200; exercise 3 sets it to 200
+    train_frames = [frames[i] for i in _order[:_cut]][:N_TRAIN]
     test_frames = [frames[i] for i in _order[_cut:]]
-    mo.md(f"**{len(frames)}** structures: **{len(train_frames)}** for training, "
+    mo.md(f"**{len(frames)}** structures: **{len(train_frames)}** for training (of {_cut}), "
           f"**{len(test_frames)}** held out.")
     return test_frames, train_frames, work
 
@@ -200,6 +203,7 @@ def _(np, plt, sweep):
     log_ev = np.array([r["log_evidence"] for r in sweep])
     by_evidence = int(np.argmax(log_ev))                   # the training data's choice
     by_test = int(np.nanargmin(ls_test))                   # what the held-out set says, for least squares
+    by_test_ev = int(np.nanargmin(ev_test))                # ... and for the evidence fit, the basis it chooses for
     _fig, (_a1, _a2) = plt.subplots(1, 2, figsize=(10, 4))
     _a1.loglog(n, ls_train, "o--", c="C0", label="least squares, train")
     _a1.loglog(n, ls_test, "o-", c="C0", label="least squares, test")
@@ -211,19 +215,19 @@ def _(np, plt, sweep):
     _a2.set_xscale("log"); _a2.set_xlabel("basis size"); _a2.set_ylabel("log-evidence"); _a2.legend(frameon=False)
     _fig.tight_layout()
     _fig
-    return by_evidence, by_test, ev_test, ls_test, ls_train, n
+    return by_evidence, by_test, by_test_ev, ev_test, ls_test, ls_train, n
 
 
 @app.cell(hide_code=True)
 def _(by_test, ls_test, ls_train, mo, n, np):
     _ratio = ls_test[-1] / ls_train[-1]
     _falls = bool(np.all(np.diff(ls_train) < 0))
-    _ok1 = _falls and _ratio > 3
+    _ok1 = _falls and _ratio > 3 and by_test < len(n) - 1
     mo.callout(
         mo.md(f"**Checkpoint 1 passed:** least squares fits its training set better with every basis "
-              f"(down to {ls_train[-1]:.2f} meV/atom), but at {n[-1]} functions its test error is "
-              f"{_ratio:.1f}× its training error, and the test error is lowest at {n[by_test]} functions: "
-              "the largest basis has started fitting noise.")
+              f"(down to {ls_train[-1]:.2f} meV/atom), but its test error is lowest at {n[by_test]} "
+              f"functions and rises beyond; at {n[-1]} functions it is {_ratio:.1f}× the training error: "
+              "the larger bases fit noise.")
         if _ok1 else mo.md(f"**Checkpoint 1:** least squares does not overfit here (test/train ratio "
                            f"{_ratio:.1f} at the largest basis)."),
         kind="success" if _ok1 else "warn")
@@ -231,14 +235,19 @@ def _(by_test, ls_test, ls_train, mo, n, np):
 
 
 @app.cell(hide_code=True)
-def _(by_evidence, by_test, ls_test, mo, n, sweep):
-    _ok2 = by_evidence < len(sweep) - 1 and abs(ls_test[by_evidence] - ls_test[by_test]) <= 0.1 * ls_test[by_test]
+def _(by_evidence, by_test_ev, ev_test, mo, n, sweep):
+    # the evidence picks a basis for the evidence fit, so it is judged by that fit's test error
+    _ok2 = abs(ev_test[by_evidence] - ev_test[by_test_ev]) <= 0.1 * ev_test[by_test_ev]
     mo.callout(
         mo.md(f"**Checkpoint 2 passed:** the log-evidence is largest at {n[by_evidence]} functions "
-              f"(degree {sweep[by_evidence]['degree']}), the basis the held-out test set also prefers, "
-              "found without looking at the test set.")
-        if _ok2 else mo.md(f"**Checkpoint 2:** the evidence chose {n[by_evidence]} functions and the test "
-                           f"set {n[by_test]}."),
+              f"(degree {sweep[by_evidence]['degree']}), "
+              + (f"where the evidence fit also tests best ({ev_test[by_evidence]:.2f} meV/atom)"
+                 if by_evidence == by_test_ev else
+                 f"where the evidence fit tests at {ev_test[by_evidence]:.2f} meV/atom, against its "
+                 f"best of {ev_test[by_test_ev]:.2f}")
+              + ": a basis chosen without looking at the test set.")
+        if _ok2 else mo.md(f"**Checkpoint 2:** the evidence chose {n[by_evidence]} functions; the evidence "
+                           f"fit tests best at {n[by_test_ev]}."),
         kind="success" if _ok2 else "warn")
     return
 
@@ -256,20 +265,24 @@ def _(mo):
     for that (the "Occam factor"). So the evidence rises while extra
     functions explain real structure, and falls once they only explain
     noise.
+    """)
+    return
 
+
+@app.cell(hide_code=True)
+def _(by_evidence, by_test, ev_test, ls_test, mo, n):
+    mo.md(f"""
     Two things to notice in the table:
 
-    - The evidence fit's own test error stays nearly flat as the basis grows.
-      It does not chase the training set (its training error is higher than
-      least squares'), because its noise levels are fitted too: it is told how
-      much of the data is noise.
-    - At the middle degrees, 12 and 14, least squares has the lower test
-      energy error on this data set; at degree 8 the evidence fit does
-      (exercise 2 compares the forces). With 200 smooth
-      bulk structures there is little noise to guard against, and the
-      evidence chooses an almost vanishing prior. What it adds here is not a
-      better fit at a given basis but a test error that does not turn up as
-      the basis grows, and a way to choose the basis.
+    - **Tuned on the test set, least squares does best:** {ls_test[by_test]:.2f} meV/atom at
+      {n[by_test]} functions. But that choice spent the test set. The evidence picks
+      {n[by_evidence]} functions from the training data alone, where the evidence fit tests at
+      {ev_test[by_evidence]:.2f} meV/atom.
+    - **Past the best size, the evidence fit degrades more gently.** At {n[-1]} functions
+      least squares tests at {ls_test[-1]:.2f} meV/atom, {ls_test[-1] / ls_test[by_test]:.1f}× its
+      best; the evidence fit at {ev_test[-1]:.2f}, {ev_test[-1] / ev_test.min():.1f}× its best. Its
+      noise levels are fitted too, so it is told how much of the data is noise and does not chase
+      it (exercise 2 compares the forces).
 
     The test set is still the final judge; the evidence lets you choose
     without spending one.
@@ -290,9 +303,9 @@ def _(mo):
     2. **Forces.** Add the test force RMSE (`metrics["test/map"]["F"]["rmse"]`,
        and `"test/lstsq"` for least squares) to the table. Which fit is better on
        forces?
-    3. **Less data.** Train on the first 40 of `train_frames`. Where does least
-       squares start to overfit now? How noisy are the test errors on so small
-       a set, and does the evidence still pick a sensible basis?
+    3. **More data.** Set `N_TRAIN = 200` in Step 1, five times the data. Does
+       least squares still overfit within this sweep? Where does the
+       log-evidence peak now?
     """)
     return
 
@@ -301,10 +314,11 @@ def _(mo):
 def _(mo):
     mo.accordion({
         "Hint for exercise 3": mo.md(
-            "With 40 frames the least-squares test error is no longer smooth in the basis size: "
-            "it can fall again at a larger basis by chance, because 50 test frames and 40 training "
-            "frames give noisy estimates. The log-evidence still peaks at a moderate basis (degree "
-            "12 in our run) and the evidence fit's test error stays smoother."),
+            "With 200 frames least squares no longer overfits in this sweep: its test error falls "
+            "with every basis, to about 0.9 meV/atom at 684 functions, and the log-evidence rises "
+            "all the way to the largest basis too. Five times the data supports every basis here; "
+            "to see the evidence turn over you would need a larger one (degree 18 has over 1,000 "
+            "functions)."),
     })
     return
 
@@ -315,7 +329,7 @@ def _(mo):
     ## Summary
 
     - `FitConfig(solver="lstsq")` (`aj fit --solver lstsq`) is plain weighted
-      least squares: no prior, no uncertainty. A large enough basis overfits.
+      least squares: no prior, no uncertainty. A basis too large for the data overfits.
     - The evidence fit reports `res.map.log_evidence`. It is comparable across
       bases fitted to the same data, and its maximum picks a basis size from
       the training data alone.

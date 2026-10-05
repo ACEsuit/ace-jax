@@ -35,22 +35,29 @@ from .hypers import Hypers, from_array, to_array
 FIELDS = Hypers._fields
 
 
-def numpyro_model(lml, prior):
+def numpyro_model(lml, prior, fixed=None, at=None):
+    """fixed (10,) bool with `at` (Hypers): those hyperparameters are held at their `at` value, not
+    sampled (the Laplace rung's bound-active coordinates, whose posterior is not a Gaussian)."""
     def model():
-        th = [numpyro.sample(f, dist.Normal(float(m), float(s)))
-              for f, m, s in zip(FIELDS, prior.mu, prior.sigma)]
+        th = [jnp.asarray(at[i], jnp.float64) if fixed is not None and fixed[i]
+              else numpyro.sample(f, dist.Normal(float(m), float(s)))
+              for i, (f, m, s) in enumerate(zip(FIELDS, prior.mu, prior.sigma))]
         numpyro.factor("loglik", lml(jnp.stack(th)))
     return model
 
 
-def _init(prior, init):
+def _init(prior, init, fixed=None):
     h = prior.mu if init is None else init
-    return {f: jnp.asarray(v, jnp.float64) for f, v in zip(FIELDS, h)}
+    return {f: jnp.asarray(v, jnp.float64) for i, (f, v) in enumerate(zip(FIELDS, h))
+            if fixed is None or not fixed[i]}
 
 
-def _stack(samples):
-    a = np.stack([np.asarray(samples[f]) for f in FIELDS], axis=-1)
-    return a.reshape(-1, len(FIELDS))
+def _stack(samples, at=None):
+    """(n, 10) from per-field samples; a field not sampled (fixed) is its `at` value."""
+    n = next(np.asarray(v).size for v in samples.values()) if samples else 1
+    cols = [np.asarray(samples[f]).reshape(-1) if f in samples else np.full(n, float(at[i]))
+            for i, f in enumerate(FIELDS)]
+    return np.stack(cols, axis=-1).reshape(-1, len(FIELDS))
 
 
 def _svi(model, guide, steps, lr, seed, return_losses=False):
@@ -131,13 +138,18 @@ def run_map_ps(ps, prob, ds, *, steps=500, lr=0.02, seed=0):
     return ps.set_lml_vector(x_star)
 
 
-def run_laplace(lml, prior, *, n_draws=100, steps=500, lr=0.02, seed=0, init=None):
-    model = numpyro_model(lml, prior)
-    guide = AutoLaplaceApproximation(model, init_loc_fn=init_to_value(values=_init(prior, init)))
+def run_laplace(lml, prior, *, n_draws=100, steps=500, lr=0.02, seed=0, init=None, fixed=None):
+    """fixed (10,) bool: hyperparameters held at `init` (needs init) -- the MAP's bound-active
+    coordinates, where the log-posterior has no interior mode and the Hessian is singular."""
+    if fixed is not None and not np.any(fixed):
+        fixed = None
+    model = numpyro_model(lml, prior, fixed, init)
+    guide = AutoLaplaceApproximation(model, init_loc_fn=init_to_value(values=_init(prior, init, fixed)))
     params = _svi(model, guide, steps, lr, seed)
     draws = guide.sample_posterior(jax.random.PRNGKey(seed + 1), params, sample_shape=(n_draws,))
     med = guide.median(params)
-    return _stack(draws), Hypers(*[float(med[f]) for f in FIELDS])
+    return _stack(draws, init), Hypers(*[float(med[f]) if f in med else float(init[i])
+                                         for i, f in enumerate(FIELDS)])
 
 
 def run_vi(lml, prior, *, n_draws=100, steps=2000, lr=0.01, seed=0, init=None):
@@ -171,7 +183,7 @@ def run_nuts(lml, prior, *, num_warmup=500, num_samples=500, num_chains=4, seed=
     return _stack(mcmc.get_samples()), summary
 
 
-def run_laplace_fd(lml, prior, theta_map, *, n_draws=100, eps=1e-3, seed=0, floor=1e-6):
+def run_laplace_fd(lml, prior, theta_map, *, n_draws=100, eps=1e-3, seed=0, floor=1e-6, fixed=None):
     """Laplace approximation with the Hessian from central finite differences
     of the exact gradient of the log posterior (2 x 10 gradient evaluations).
 
@@ -184,6 +196,9 @@ def run_laplace_fd(lml, prior, theta_map, *, n_draws=100, eps=1e-3, seed=0, floo
     (unidentified hyperparameters) are floored at `floor` x the largest
     eigenvalue and reported in `info`.
 
+    fixed (10,) bool: hyperparameters held at theta_map (bound-active at the MAP): excluded from the
+    Hessian, constant in the draws.
+
     Returns (draws (n_draws, 10) in log space, info dict).
     """
     from .hypers import log_prior
@@ -191,19 +206,26 @@ def run_laplace_fd(lml, prior, theta_map, *, n_draws=100, eps=1e-3, seed=0, floo
     grad = jax.jit(jax.grad(logpost))
     x0 = np.asarray(to_array(theta_map), float)
     n = x0.size
-    H = np.zeros((n, n))
-    for i in range(n):
+    free = np.ones(n, bool) if fixed is None else ~np.asarray(fixed, bool)
+    idx = np.flatnonzero(free)
+    H = np.zeros((n, idx.size))
+    for k, i in enumerate(idx):
         e = np.zeros(n); e[i] = eps
-        H[:, i] = (np.asarray(grad(jnp.asarray(x0 + e))) - np.asarray(grad(jnp.asarray(x0 - e)))) / (2 * eps)
+        H[:, k] = (np.asarray(grad(jnp.asarray(x0 + e))) - np.asarray(grad(jnp.asarray(x0 - e)))) / (2 * eps)
+    H = H[idx]
     H = -0.5 * (H + H.T)                                   # precision of the Gaussian approximation
     w, V = np.linalg.eigh(H)
     n_floored = int(np.sum(w < floor * w.max()))
     w = np.maximum(w, floor * w.max())
-    cov = (V / w) @ V.T
+    cov = np.zeros((n, n))
+    cov[np.ix_(idx, idx)] = (V / w) @ V.T
     rng = np.random.default_rng(seed + 1)
-    draws = rng.multivariate_normal(x0, cov, size=n_draws)
+    draws = np.tile(x0, (n_draws, 1))
+    draws[:, idx] = rng.multivariate_normal(x0[idx], cov[np.ix_(idx, idx)], size=n_draws)
     info = {"eigenvalues": w.tolist(), "n_floored": n_floored, "std": np.sqrt(np.diag(cov)).tolist(),
             "fields": list(FIELDS)}
+    if not free.all():
+        info["fixed"] = [FIELDS[i] for i in np.flatnonzero(~free)]
     return draws, info
 
 

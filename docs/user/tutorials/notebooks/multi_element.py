@@ -460,8 +460,10 @@ def _(fits, mo):
            and _c["E"] < 1.5 * _bestE and _c["F"] < 1.25 * _bestF)
     mo.callout(
         mo.md(f"**Checkpoint 4 passed:** every fit has a bulk force error below 0.25 eV/Å, and the "
-              f"compressed basis is within {_c['E'] / _bestE - 1:.0%} of the best energy error and "
-              f"{_c['F'] / _bestF - 1:.0%} of the best force error.")
+              "compressed basis "
+              + " and ".join(f"has the best {q} error" if r <= 1 else f"is within {r - 1:.0%} of the best {q} error"
+                             for q, r in (("energy", _c["E"] / _bestE), ("force", _c["F"] / _bestF)))
+              + ".")
         if _ok else mo.md("**Checkpoint 4:** the compressed basis is well behind the best fit, or a fit "
                           "failed. With fewer channels or less data, that is the point of exercises 1 and 2."),
         kind="success" if _ok else "warn",
@@ -576,9 +578,10 @@ def _(fits, mo, small_fits):
     _ok = (_E(small_fits, _c) < 0.7 * _E(small_fits, _o) and _E(small_fits, _c) < _E(small_fits, "categorical")
            and _E(small_fits, _c) / _E(fits, _c) < _E(small_fits, _o) / _E(fits, _o))
     mo.callout(
-        mo.md(f"**Checkpoint 6 passed:** with less data the compressed basis keeps its energy error "
-              f"({_E(fits, _c):.1f} to {_E(small_fits, _c):.1f} meV/atom), while the one-hot embedding's "
-              f"grows from {_E(fits, _o):.1f} to {_E(small_fits, _o):.1f} meV/atom.")
+        mo.md(f"**Checkpoint 6 passed:** with less data the compressed basis's energy error grows "
+              f"{_E(small_fits, _c) / _E(fits, _c):.1f}× ({_E(fits, _c):.1f} to {_E(small_fits, _c):.1f} "
+              f"meV/atom), the one-hot embedding's {_E(small_fits, _o) / _E(fits, _o):.1f}× "
+              f"({_E(fits, _o):.1f} to {_E(small_fits, _o):.1f} meV/atom).")
         if _ok else mo.md("**Checkpoint 6:** the compressed basis did not hold its energy error better "
                           "than the one-hot embedding with less data."),
         kind="success" if _ok else "warn",
@@ -604,7 +607,7 @@ def _(fits, growth, mo, n_small, small_fits):
     _cat, _one, _cmp = "categorical", "one-hot embedding", "compressed embedding"
     _vac = {k: _r(fits, k, "vacancy") for k in fits}
     mo.md(f"""
-- **The construction matters as much as the species.** The one-hot embedding
+- **The construction matters too.** The one-hot embedding
   has the species information of the categorical basis and a similar size
   ({fits[_one]['n']} against {fits[_cat]['n']} coefficients), yet its bulk energy error
   is {_r(fits, _one)['E']:.1f} against {_r(fits, _cat)['E']:.1f} meV/atom, and its force error
@@ -619,16 +622,20 @@ def _(fits, growth, mo, n_small, small_fits):
 - **With little data per element, compression wins in energy.** On
   {n_small.value} cells the compressed basis has a bulk energy error of
   {_r(small_fits, _cmp)['E']:.1f} meV/atom, against {_r(small_fits, _one)['E']:.1f} (one-hot embedding)
-  and {_r(small_fits, _cat)['E']:.1f} (categorical). The forces, 96 labels per cell against
-  one energy, are closer: {_r(small_fits, _cmp)['F']:.3f}, {_r(small_fits, _one)['F']:.3f} and
-  {_r(small_fits, _cat)['F']:.3f} eV/Å. Exercise 2 finds where this stops.
-- **Around a vacancy no basis is clearly ahead.** The vacancy cells, absent
-  from the training set, have energy errors of {_vac[_cat]['E']:.1f}, {_vac[_one]['E']:.1f} and
+  and {_r(small_fits, _cat)['E']:.1f} (categorical). In forces, 96 labels per cell against
+  one energy, the two embeddings are close, {_r(small_fits, _cmp)['F']:.3f} and
+  {_r(small_fits, _one)['F']:.3f} eV/Å, while the categorical basis, with no channels shared
+  between elements, reaches only {_r(small_fits, _cat)['F']:.3f} eV/Å. Exercise 2 finds where
+  this stops.
+- **Around a vacancy the categorical basis does best in energy.** The vacancy
+  cells, absent from the training set, have energy errors of {_vac[_cat]['E']:.1f}, {_vac[_one]['E']:.1f} and
   {_vac[_cmp]['E']:.1f} meV/atom (categorical, one-hot, compressed) and force errors of
   {_vac[_cat]['F']:.3f}, {_vac[_one]['F']:.3f} and {_vac[_cmp]['F']:.3f} eV/Å, all larger than in bulk.
   The parity plots show the two embedding fits placing the vacancy cells too
-  low in energy. The training set has no vacancies; adding some is the remedy,
-  whichever the basis.
+  low in energy, while the categorical fit keeps them on the diagonal; in
+  forces it is the least accurate of the three. No basis was trained on a
+  vacancy, so none of this is guaranteed: adding vacancies to the training set
+  is the remedy, whichever the basis.
 - **More elements favour embeddings.** From one to five elements the
   categorical basis grows {growth[2, 5] / growth[2, 1]:.0f} times at order 2 and
   {growth[3, 5] / growth[3, 1]:.0f} times at order 3. A compressed embedding grows with its
@@ -686,11 +693,11 @@ def _(mo):
             "rest. With less data the channels matter: on 10 cells one channel gives about "
             "100 meV/atom, against 15 with two."),
         "Hint for exercise 2": mo.md(
-            "Bulk energy errors (meV/atom) for categorical, one-hot and compressed: 52, 61 and 68 "
-            "on 5 cells; 43, 29 and 15 on 10; 21, 16 and 8.6 on 20; 12.6, 9.3 and 8.5 on 40. On 5 "
+            "Bulk energy errors (meV/atom) for categorical, one-hot and compressed: 68, 61 and 68 "
+            "on 5 cells; 58, 29 and 15 on 10; 21, 16 and 8.6 on 20; 10.8, 9.3 and 8.5 on 40. On 5 "
             "cells the compressed basis loses its lead in energy, though its force error is still "
-            "the smallest (0.21 eV/Å, against 0.23 and 0.34): five cells are too few to fit energies "
-            "with any of these bases."),
+            "the smallest (0.21 eV/Å, against 0.23 for the one-hot embedding and 0.63 for the "
+            "categorical basis): five cells are too few to fit energies with any of these bases."),
     })
     return
 

@@ -123,18 +123,22 @@ def _(mo):
 
 
 @app.cell
-def _(T, label, mo, time, work):
+def _(T, label, mo, np, time, work):
     from ace_jax.basis.model import BasisSpec
     from ace_jax.fit.pipeline import FitConfig, fit, load_fit_data, save_model
 
 
-    def fit_model(train, out):
-        """The evidence fit of every step here: order 3, degree 10, rcut 5.5, E0 fitted."""
-        _cfg = FitConfig(model=BasisSpec(order=3, max_degree=10, rcut=5.5, elements=("Si",)), arm="linear",
+    noise = {}              # each fit's evidence noise levels (sigma_E, sigma_F), by `out`
+
+
+    def fit_model(train, out, degree=10):
+        """The evidence fit of every step here: order 3, degree 10 (unless given), rcut 5.5, E0 fitted."""
+        _cfg = FitConfig(model=BasisSpec(order=3, max_degree=degree, rcut=5.5, elements=("Si",)), arm="linear",
                          m_per_species=0, e0="lsq", opt="lbfgs", r0=None, rungs=("map",),
                          predict_stats="recompute", predict_train=False,
                          energy_key="energy", force_key="forces", virial_key="virial").validate()
         _res = fit(_cfg, load_fit_data(_cfg, train=list(train), log=lambda *a: None), log=lambda *a: None)
+        noise[out] = (float(np.exp(_res.theta.log_sigma_E)), float(np.exp(_res.theta.log_sigma_F)))
         return str(save_model(_res, work / out, log=lambda *a: None))
 
 
@@ -142,7 +146,7 @@ def _(T, label, mo, time, work):
     _t = time.time()
     bulk_model = fit_model(bulk_training, "fit_bulk")
     mo.md(f"Fitted the bulk model on {len(bulk_training)} cells in {time.time() - _t:.0f} s.")
-    return bulk_model, bulk_training, fit_model
+    return bulk_model, bulk_training, fit_model, noise
 
 
 @app.cell(hide_code=True)
@@ -383,35 +387,57 @@ def _(ACECalculator, np, slabs):
             _e0 = _a.get_potential_energy()
             _conv = BFGS(_a, logfile=None).run(fmax=0.03, steps=200)
             _out.append(dict(converged=bool(_conv), dE=_a.get_potential_energy() - _e0,
-                             fmax=float(np.abs(_a.get_forces()).max()), atoms=_a))
+                             fmax=float(np.abs(_a.get_forces()).max()), atoms=_a,
+                             moved=float(np.linalg.norm(_a.positions - _s.positions, axis=1).max())))
         return _out
 
 
-    def relax_table(results):
-        return ("| face | converged | energy change (eV) | largest force (eV/Å) |\n|---|---|---|---|\n"
-                + "\n".join(f"| ({s.info['miller']}) | {r['converged']} | {r['dE']:+.2f} | {r['fmax']:.3f} |"
-                            for s, r in zip(slabs, results)))
+    def relax_table(results, gamma=None, truth=None):
+        """The relaxations, and with gamma/truth the relaxed surface energies against the labeller's."""
+        _t = ("| face | converged | energy change (eV) | largest force (eV/Å) |\n|---|---|---|---|\n"
+              + "\n".join(f"| ({s.info['miller']}) | {r['converged']} | {r['dE']:+.2f} | {r['fmax']:.3f} |"
+                          for s, r in zip(slabs, results)))
+        if gamma is not None:
+            _t += ("\n\n| face | relaxed γ, ACE | relaxed γ, MACE-MPA-0 | error |\n|---|---|---|---|\n"
+                   + "\n".join(f"| ({s.info['miller']}) | {a:.4f} | {b:.4f} | {abs(a - b):.4f} |"
+                               for s, a, b in zip(slabs, gamma, truth)))
+        return _t
 
     return relax, relax_table
 
 
 @app.cell
-def _(mo, relax, relax_table, repaired_model, slabs):
+def _(L, gammas, mo, model_energies, ref_bulk, relax, relax_table, repaired_model, shipped, slabs):
+    from ace_jax.fit.xyz import read_extxyz
+    from ace_jax.tutorials.labels import structure_key as _key
+
+    # the labeller's own relaxations of the same slabs, same protocol (shipped)
+    _truth_E = {str(f.info["from_key"]): float(f.info["energy"])
+                for f in read_extxyz(str(L.fetch(shipped("e2/relaxed-mpa-0.xyz"))))}
+    gamma_relaxed_truth = gammas(ref_bulk.info["energy"], [_truth_E[_key(s)] for s in slabs])
     relaxed_repaired = relax(repaired_model, slabs)
-    mo.md(relax_table(relaxed_repaired))
-    return (relaxed_repaired,)
+    _eb = model_energies(repaired_model, [ref_bulk])[0]
+    gamma_relaxed_repaired = gammas(_eb, [r["atoms"].get_potential_energy() for r in relaxed_repaired])
+    relaxed_repaired_errors = [abs(a - b) for a, b in zip(gamma_relaxed_repaired, gamma_relaxed_truth)]
+    mo.md(relax_table(relaxed_repaired, gamma_relaxed_repaired, gamma_relaxed_truth))
+    return gamma_relaxed_truth, relaxed_repaired, relaxed_repaired_errors
 
 
 @app.cell(hide_code=True)
-def _(mo, relaxed_repaired):
+def _(mo, relaxed_repaired, relaxed_repaired_errors):
     _bad = [r for r in relaxed_repaired if not r["converged"] or abs(r["dE"]) > 50]
+    _dE = [abs(r["dE"]) for r in relaxed_repaired]
     mo.callout(
         mo.md(f"**The repaired model falls apart when the atoms move**: {len(_bad)} of 3 relaxations "
               "release tens to hundreds of eV, or never converge. The model was taught surface energies "
               "at the ideal cleave and nothing else about surfaces: three structures, each with zero "
               "forces by symmetry. Away from that one geometry it has no information, and the evidence "
               "fit's prior is not enough to stop a relaxation from finding a spurious minimum.")
-        if _bad else mo.md("The repaired model relaxes these slabs without collapsing."),
+        if _bad else mo.md(
+            f"The repaired model relaxes all three slabs, releasing {min(_dE):.2f} to {max(_dE):.2f} eV, "
+            f"and its relaxed surface energies agree with the labeller's own relaxations to "
+            f"{max(relaxed_repaired_errors):.4f} eV/Å², with atoms moving up to "
+            f"{max(r['moved'] for r in relaxed_repaired):.2f} Å from the ideal cleave."),
         kind="warn" if _bad else "info",
     )
     return
@@ -420,39 +446,76 @@ def _(mo, relaxed_repaired):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## Step 7: displaced slabs
+    ## Step 7: displaced slabs, and a basis to hold them
 
-    Teach the model what a surface does when its atoms move: two rattled
-    copies of each repair slab (0.05 and 0.12 Å), six more labels. Refit,
-    relax again, and compare the relaxed surface energies with the
-    labeller's own: the same slabs relaxed by MACE-MPA-0 with the same
-    protocol (those energies ship with the tutorial).
+    A relaxation follows one downhill path. Molecular dynamics at a finite
+    temperature moves the surface atoms in every direction, and the repair
+    slabs, with zero forces by symmetry, say nothing about the forces away
+    from the ideal cleave. Teach the model what a surface does when its
+    atoms move: two rattled copies of each repair slab
+    (0.05 and 0.12 Å), six more labels. Refit with the same basis, relax
+    again, and compare the relaxed surface energies with the labeller's
+    relaxations, as in Step 6.
     """)
     return
 
 
 @app.cell
-def _(L, T, bulk_training, fit_model, label, repair, shipped):
-    displaced = label(T.e2_displaced(repair))
-    stable_model = fit_model([*bulk_training, *repair, *displaced], "fit_displaced")
-    from ace_jax.fit.xyz import read_extxyz
-    relaxed_truth_energy = {str(f.info["from_key"]): float(f.info["energy"])
-                            for f in read_extxyz(str(L.fetch(shipped("e2/relaxed-mpa-0.xyz"))))}
-    return relaxed_truth_energy, stable_model
+def _(gamma_relaxed_truth, gammas, model_energies, ref_bulk, relax, slabs):
+    def relaxed_gammas(model_file):
+        """Relax the test slabs with a model; the relaxations, their surface energies and errors."""
+        _rel = relax(model_file, slabs)
+        _eb = model_energies(model_file, [ref_bulk])[0]
+        _g = gammas(_eb, [r["atoms"].get_potential_energy() for r in _rel])
+        return _rel, _g, [abs(a - b) for a, b in zip(_g, gamma_relaxed_truth)]
+
+    return (relaxed_gammas,)
 
 
 @app.cell
-def _(gammas, mo, model_energies, ref_bulk, relax, relax_table, relaxed_truth_energy, slabs, stable_model):
-    from ace_jax.tutorials.labels import structure_key as _key
+def _(T, bulk_training, fit_model, gamma_relaxed_truth, label, mo, relax_table, relaxed_gammas, repair):
+    displaced = label(T.e2_displaced(repair))
+    displaced_model = fit_model([*bulk_training, *repair, *displaced], "fit_displaced")
+    _rel, _g, displaced_errors = relaxed_gammas(displaced_model)
+    mo.md(relax_table(_rel, _g, gamma_relaxed_truth))
+    return displaced, displaced_errors
 
-    relaxed_stable = relax(stable_model, slabs)
-    _eb = model_energies(stable_model, [ref_bulk])[0]
-    gamma_relaxed = gammas(_eb, [r["atoms"].get_potential_energy() for r in relaxed_stable])
-    gamma_relaxed_truth = gammas(ref_bulk.info["energy"], [relaxed_truth_energy[_key(s)] for s in slabs])
-    relaxed_errors = [abs(a - b) for a, b in zip(gamma_relaxed, gamma_relaxed_truth)]
-    mo.md(relax_table(relaxed_stable) + "\n\n| face | relaxed γ, ACE | relaxed γ, MACE-MPA-0 | error |\n|---|---|---|---|\n"
-          + "\n".join(f"| ({s.info['miller']}) | {a:.4f} | {b:.4f} | {abs(a - b):.4f} |"
-                      for s, a, b in zip(slabs, gamma_relaxed, gamma_relaxed_truth)))
+
+@app.cell(hide_code=True)
+def _(displaced_errors, mo, noise, relaxed_repaired_errors):
+    _worse = max(displaced_errors) > 2 * max(relaxed_repaired_errors)
+    (_sE0, _sF0), (_sE1, _sF1) = noise["fit_repaired"], noise["fit_displaced"]
+    mo.callout(
+        mo.md(f"**Worse, not better:** the relaxed surface energies are now off by up to "
+              f"{max(displaced_errors):.4f} eV/Å², against {max(relaxed_repaired_errors):.4f} before. "
+              f"The evidence fit has one noise level per quantity, for all the data. A degree-10 basis "
+              f"cannot fit the 0.12 Å slabs, so the evidence explains their misfit as noise: the energy "
+              f"noise level rises from {1e3 * _sE0:.1f} to {1e3 * _sE1:.0f} meV and the force noise from "
+              f"{1e3 * _sF0:.1f} to {1e3 * _sF1:.0f} meV/Å. That loosens the fit everywhere, the ideal "
+              "surfaces included.")
+        if _worse else mo.md(f"The displaced slabs leave the relaxed surface energies within "
+                             f"{max(displaced_errors):.4f} eV/Å² of the labeller's."),
+        kind="warn" if _worse else "info",
+    )
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    The data now hold more than the basis can describe. Tutorial 5's lesson
+    runs the other way here: a basis must grow with the data it is asked to
+    fit. Refit the same 19 structures (10 bulk cells, 3 repair slabs, 6 displaced) at
+    total degree 12, and relax once more.
+    """)
+    return
+
+
+@app.cell
+def _(bulk_training, displaced, fit_model, gamma_relaxed_truth, mo, relax_table, relaxed_gammas, repair):
+    stable_model = fit_model([*bulk_training, *repair, *displaced], "fit_displaced_d12", degree=12)
+    relaxed_stable, _g, relaxed_errors = relaxed_gammas(stable_model)
+    mo.md(relax_table(relaxed_stable, _g, gamma_relaxed_truth))
     return relaxed_errors, relaxed_stable
 
 
@@ -460,8 +523,9 @@ def _(gammas, mo, model_energies, ref_bulk, relax, relax_table, relaxed_truth_en
 def _(mo, relaxed_errors, relaxed_stable):
     _ok = (all(r["converged"] and abs(r["dE"]) < 5 for r in relaxed_stable) and max(relaxed_errors) < 0.01)
     mo.callout(
-        mo.md(f"**Checkpoint 4 passed:** every relaxation converges gently, and the relaxed surface "
-              f"energies agree with the labeller's own relaxed values to {max(relaxed_errors):.4f} eV/Å².")
+        mo.md(f"**Checkpoint 4 passed:** at degree 12 every relaxation converges gently, and the relaxed "
+              f"surface energies agree with the labeller's own relaxed values to {max(relaxed_errors):.4f} "
+              "eV/Å², with displaced slabs in the data.")
         if _ok else mo.md(f"**Checkpoint 4:** a relaxation still misbehaves, or the relaxed surface energies "
                           f"differ from the labeller's by up to {max(relaxed_errors):.4f} eV/Å²."),
         kind="success" if _ok else "warn",
@@ -474,8 +538,9 @@ def _(mo):
     mo.md(r"""
     ## Reflection
 
-    Nine structures turned a model that could not see a surface into one
-    that relaxes three of them correctly. Would this model now predict the
+    Nine structures and a larger basis turned a model that could not see a
+    surface into one that relaxes three of them correctly, trained on
+    displaced surfaces as well as ideal ones. Would this model now predict the
     Si(100) surface you would see in an experiment? What is still missing
     from the data? Think before you open the answer.
     """)
@@ -515,8 +580,10 @@ def _(mo):
 
     - A bulk-only model extrapolates on surfaces, and a descriptor-space
       distance shows it before any label is spent on the test.
-    - A few targeted structures repair a property; a property measured at one
-      geometry says nothing about the forces around it.
+    - A few targeted structures repair a property.
+    - The evidence fit sets one noise level for all the data: structures the
+      basis cannot describe loosen the fit everywhere. Grow the basis with the
+      data.
     - Train on what the simulation will do: displaced, relaxed and moving
       configurations, not only the ideal one.
 
