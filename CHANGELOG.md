@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **Fixed: built bases were not rotation invariant.** Since the compiled
+  coupling library arrived (0.2.0), `aj basis`, `aj fit --order/--max-degree`
+  and `build_basis` paired the coupling's columns with the wrong products of
+  the A basis. The B functions were therefore not rotation invariant: at
+  order 2, degree 6 for Si, 5 of 17 changed under a rotation, and at
+  order 4, degree 12, 272 of 338. The smoothness prior also applied to the
+  wrong columns. Fits from these bases lost accuracy: on GAP-18 Si at
+  order 4, degree 12, the force RMSE floor was about 0.19 eV/Å, against 0.13
+  for ACEpotentials. Built bases are now invariant to roundoff, and the
+  invariance and parity with ACEpotentials are tested. A saved `.npz` or
+  `gp_model.npz` keeps its bad coupling, and loading cannot detect it:
+  **rebuild the basis and refit**. Stale entries in the coupling cache are
+  corrected on use. Embedding bases (`--embedding`) and models exported from
+  Julia are unaffected.
 - Faster CPU evaluation. On the CPU, the product basis is now an explicit
   feature-major chain of multiplies. Before, `jnp.prod`'s reverse mode
   compiled to strided scalar copies. Other backends are unchanged, and
