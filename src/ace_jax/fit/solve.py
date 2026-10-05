@@ -37,7 +37,6 @@ import lineax as lx
 from jax.scipy.linalg import solve_triangular
 
 from .rows import batch_rows
-from .stats import flush_dust
 from .kernels import K_MM
 
 
@@ -124,7 +123,7 @@ def _qr_factor(prob, ds, theta):
         Aw, yw = _weighted_rows(prob, theta, batch)          # (nb, Dt), (nb,)
         Q, R2 = jnp.linalg.qr(jnp.concatenate([R, Aw], 0), mode="reduced")   # (Dt+nb, Dt), (Dt, Dt)
         d2 = Q.T @ jnp.concatenate([d, yw])
-        return (flush_dust(R2), flush_dust(d2)), None            # stats.flush_dust: no near-underflow residue
+        return (R2, d2), None
 
     (R, d), _ = jax.lax.scan(body, (R0, d0), ds)
     return R, d
