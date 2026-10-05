@@ -2,24 +2,28 @@
 
 ## ace-jax
 
-ace-jax is released under the
+ace-jax has the
 [MIT licence](https://github.com/ACEsuit/ace-jax/blob/main/LICENSE).
 
 ## ace-jax-coupling
 
-ace-jax depends on [`ace-jax-coupling`](https://pypi.org/project/ace-jax-coupling/),
-the compiled library that computes the symmetry-adapted coupling coefficients
-when a basis is built. Its own code and the library it compiles,
-[EquivariantTensors.jl](https://github.com/ACEsuit/EquivariantTensors.jl),
-are MIT-licensed.
+ace-jax needs [`ace-jax-coupling`](https://pypi.org/project/ace-jax-coupling/).
+This compiled library calculates the symmetry-adapted coupling coefficients
+when ace-jax builds a basis. Its code, and the library that it compiles
+([EquivariantTensors.jl](https://github.com/ACEsuit/EquivariantTensors.jl)),
+have the MIT licence.
 
-The binary wheels are compiled with Julia's ahead-of-time compiler and also
-bundle the Julia runtime and the shared libraries it loads, each under its
-own licence: MIT, BSD-2-Clause, BSD-3-Clause, ISC, Zlib, LGPL-2.1-or-later and
-LGPL-3.0-or-later (each LGPL library is a separate, replaceable shared library),
-and the GCC runtime under GPL-3.0-or-later with the GCC Runtime Library
-Exception. No GPL-only code is bundled. Every component, its version and its
-licence are listed in
+The Julia ahead-of-time compiler compiles the binary wheels. The wheels
+also contain the Julia runtime and the shared libraries that it loads. Each
+of these has its own licence:
+
+- MIT, BSD-2-Clause, BSD-3-Clause, ISC, Zlib;
+- LGPL-2.1-or-later and LGPL-3.0-or-later. Each LGPL library is a separate
+  shared library that you can replace.
+- the GCC runtime: GPL-3.0-or-later with the GCC Runtime Library Exception.
+
+The wheels contain no GPL-only code. All components, with their versions and
+licences, are listed in
 [`THIRD_PARTY_NOTICES.md`](https://github.com/ACEsuit/ace-jax/blob/main/coupling/python/THIRD_PARTY_NOTICES.md),
 and the summary is in the wheel's
 [`LICENSE`](https://github.com/ACEsuit/ace-jax/blob/main/coupling/python/LICENSE).
@@ -27,25 +31,26 @@ and the summary is in the wheel's
 ## Tutorial data
 
 - `si_tiny_train.xyz` is part of the ace-jax test fixtures.
-- The CrMnFeCoNi subsets under `docs/user/tutorials/data/cantor/` are
-  labelled with the MACE-MH-1 foundation model. The data are MIT-licensed;
-  the MACE-MH-1 weights, which are not included, are under the Academic
-  Software License. Provenance: the `README.md` next to them.
+- The CrMnFeCoNi subsets in `docs/user/tutorials/data/cantor/` have labels
+  from the MACE-MH-1 foundation model. The data have the MIT licence. The
+  MACE-MH-1 weights are not included; they have the Academic Software
+  License. The `README.md` in the same directory gives the provenance.
 
 ## Credits
 
-ace-jax builds on the ACE ecosystem of [ACEsuit](https://github.com/ACEsuit):
-its models follow [ACEpotentials.jl](https://github.com/ACEsuit/ACEpotentials.jl),
-its fits reproduce ACEfit, and its coupling coefficients come from
-EquivariantTensors.jl. The PACE evaluator follows
-[pacemaker](https://github.com/ICAMS/python-ace) and ML-PACE. LAMMPS
-deployment goes through [lammps-jax](https://github.com/abhijeetgangan/lammps-jax).
+ace-jax uses the ACE software of [ACEsuit](https://github.com/ACEsuit):
+
+- its models follow [ACEpotentials.jl](https://github.com/ACEsuit/ACEpotentials.jl);
+- its fits give the same results as ACEfit;
+- its coupling coefficients come from EquivariantTensors.jl.
+
+The PACE evaluator follows [pacemaker](https://github.com/ICAMS/python-ace)
+and ML-PACE. LAMMPS deployment uses [lammps-jax](https://github.com/abhijeetgangan/lammps-jax).
 
 ## Citing
 
-If you use ace-jax in published work, please cite the atomic cluster
-expansion and its ACEpotentials implementation, whose models and fits ace-jax
-reproduces:
+If you use ace-jax in published work, cite the atomic cluster expansion
+and its ACEpotentials implementation. ace-jax uses the same models and fits:
 
 - R. Drautz, "Atomic cluster expansion for accurate and transferable
   interatomic potentials", *Phys. Rev. B* **99**, 014104 (2019).
@@ -55,4 +60,4 @@ reproduces:
 If you use POPS uncertainty (`--uq pops`), also cite T. D. Swinburne and
 D. Perez, [arXiv:2402.01810](https://arxiv.org/abs/2402.01810).
 
-A citation for ace-jax itself will be added here when one is available.
+When a citation for ace-jax is available, it will be on this page.

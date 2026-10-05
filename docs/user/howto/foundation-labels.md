@@ -1,13 +1,14 @@
 # Fit labels from a foundation model
 
-A foundation model such as [MACE-MPA-0](https://github.com/ACEsuit/mace-foundations)
-can stand in for DFT: label your structures with it, and fit ACE to those
-labels. Tutorials 4, 5 and 8 work this way. This page shows the pieces.
+You can use a foundation model such as
+[MACE-MPA-0](https://github.com/ACEsuit/mace-foundations) in place of DFT.
+Label your structures with it, and fit ACE to these labels. Tutorials 4, 5
+and 8 use this method. This page shows each part.
 
 ## Fit labelled `Atoms` directly
 
-`load_fit_data` takes lists of `ase.Atoms` as well as file paths, so labels
-computed in Python need no file:
+`load_fit_data` accepts lists of `ase.Atoms` and also file paths. Thus
+labels that you calculate in Python do not need a file:
 
 ```python
 import jax
@@ -24,31 +25,38 @@ res = fit(cfg, data)
 save_model(res, "fit")
 ```
 
-Each label is looked up under its key in `atoms.info` (energy, virial,
-stress) or `atoms.arrays` (forces), and, when it is not there, in the
-`energy`, `forces` and `stress` results of the attached calculator, such as
-the `SinglePointCalculator` that ASE's own extxyz reader attaches. A
-calculator whose results belong to a different structure (one calculator
-object attached to several structures keeps only the last one's results) is
-an error, not a label.
+ace-jax looks for each label in this order:
+
+1. under its key in `atoms.info` (energy, virial, stress) or `atoms.arrays`
+   (forces);
+2. in the `energy`, `forces` and `stress` results of the attached
+   calculator. An example is the `SinglePointCalculator` that the ASE extxyz
+   reader attaches.
+
+If the results of the calculator are for a different structure, ace-jax
+gives an error. This occurs when you attach one calculator object to more
+than one structure: the calculator keeps only the results of the last
+structure.
 
 ## Stress or virial
 
-ace-jax fits the virial. Calculators and DFT codes usually report the
-stress, so give its key and the reader converts it: for a periodic cell,
-virial = −stress × volume. A configuration that has a virial label keeps it;
-a non-periodic one gets no virial.
+ace-jax fits the virial. Calculators and DFT codes usually give the
+stress. Thus give the stress key, and the reader converts the stress: for a
+periodic cell, virial = −stress × volume.
+
+- If a configuration has a virial label, ace-jax uses that label.
+- A non-periodic configuration has no virial.
 
 - Python: `FitConfig(stress_key="stress")`.
 - Command line: `aj fit ... --stress-key stress`, and the same on `aj eval`.
 
-The stress may be stored as a 3 × 3 matrix, a flat 9-vector or a Voigt
-6-vector (xx, yy, zz, yz, xz, xy, ASE's order), in eV/Å³.
+The stress can be a 3 × 3 matrix, a flat 9-vector or a Voigt 6-vector
+(xx, yy, zz, yz, xz, xy, the ASE order), in eV/Å³.
 
 ## Labelling with a foundation model
 
-Any ASE calculator can label structures. For MACE, install it into the same
-environment, with CPU torch unless you have a GPU:
+All ASE calculators can label structures. For MACE, install it in the same
+environment. If you do not have a GPU, use the CPU version of torch:
 
 ```bash
 pip install mace-torch --extra-index-url https://download.pytorch.org/whl/cpu
@@ -68,30 +76,34 @@ for a in structures:
     labelled.append(a)
 ```
 
-MACE-MPA-0 and MACE-MP-0b3 are MIT-licensed. Check the licence of any other
-model before you redistribute labels made with it.
+MACE-MPA-0 and MACE-MP-0b3 have the MIT licence. Before you distribute
+labels from a different model, check the licence of that model.
 
 ## The tutorials' labels
 
-The tutorials ship their labels, so their default settings need no labeller.
-`ace_jax.tutorials.labels.label(structures, model="mpa-0", cache=...)` looks
-each structure up in a shipped cache file, keyed on its content (numbers,
-cell, periodicity and wrapped positions, to 10⁻⁶), and runs MACE only for a
-structure the cache does not hold. This module supports the tutorials and is
-not a stable API.
+The tutorials include their labels. Thus, with their default settings,
+they do not need a labeller.
 
-The cache files are under `docs/user/tutorials/data/school/` in the
-repository, and `make_labels.py` there regenerates them; its docstring has
-the commands.
+`ace_jax.tutorials.labels.label(structures, model="mpa-0", cache=...)` looks
+for each structure in a cache file that is part of the tutorials. The key
+is the content of the structure: numbers, cell, periodicity and wrapped
+positions, to 10⁻⁶. It runs MACE only for a structure that is not in the
+cache. This module is for the tutorials. It is not a stable API.
+
+The cache files are in `docs/user/tutorials/data/school/` in the
+repository. `make_labels.py` in that directory makes them again. Its
+docstring gives the commands.
 
 ## Least squares and the evidence
 
-Two options help to compare fits across basis sizes, as tutorial 5 does:
+Two options help you compare fits with different basis sizes, as
+tutorial 5 does:
 
-- `res.map.log_evidence` is the log marginal likelihood of the training data
-  at the fitted hyperparameters. It is comparable across bases fitted to the
-  same data; a larger value is a better-supported basis.
-- `FitConfig(solver="lstsq")` (`aj fit --solver lstsq`) is plain weighted
-  least squares, with no prior, no evidence and no uncertainty (predicted
-  variances are zero). Its weights come from `weights=` (`--weights`).
-  It is meant for teaching: a large basis overfits.
+- `res.map.log_evidence` is the log marginal likelihood of the training
+  data at the fitted hyperparameters. You can compare it between bases
+  fitted to the same data. A larger value shows that the data gives more
+  support to the basis.
+- `FitConfig(solver="lstsq")` (`aj fit --solver lstsq`) is a weighted least
+  squares fit. It has no prior, no evidence and no uncertainty (the
+  predicted variances are zero). Its weights come from `weights=`
+  (`--weights`). Use it only for teaching: a large basis overfits.

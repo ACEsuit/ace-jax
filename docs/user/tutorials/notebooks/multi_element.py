@@ -45,18 +45,19 @@ def _(mo):
     Work through [Tutorial 1](https://acesuit.github.io/ace-jax/tutorials/first-fit/)
     first; this one uses the same fit and explains only what is new for several elements.
 
-    **Run this notebook**: with [uv](https://docs.astral.sh/uv/) installed, one command
-    opens it in your browser (no account needed):
+    **Run this notebook.** Install [uv](https://docs.astral.sh/uv/). Then run this command:
 
     ```bash
     uvx marimo edit --sandbox https://raw.githubusercontent.com/ACEsuit/ace-jax/main/docs/user/tutorials/notebooks/multi_element.py
     ```
 
-    or open it in [molab](https://molab.marimo.io/github/ACEsuit/ace-jax/blob/main/docs/user/tutorials/notebooks/multi_element.py), marimo's hosted service (free to
-    preview; sign in to run). The documentation website shows a static copy,
-    run on a CPU when the site was built: there the interactive controls show
-    their default values. The notebook fits six models and runs in about
-    three minutes on a CPU, most of it the fits.
+    The notebook opens in your browser. You do not need an account.
+    You can also open the notebook in [molab](https://molab.marimo.io/github/ACEsuit/ace-jax/blob/main/docs/user/tutorials/notebooks/multi_element.py),
+    the marimo hosted service. You must sign in to run it there.
+
+    This website shows a static copy of the notebook, run on a CPU when the
+    site was built. The interactive controls show their default values.
+    Run time: approximately 3 minutes on a CPU. Most of this time is for the six fits.
     """)
     return
 
@@ -91,7 +92,7 @@ def _(mo):
     ## Step 1: the data
 
     The Cantor alloy is a random face-centred-cubic solid solution of Cr, Mn,
-    Fe, Co and Ni. The data are small subsets shipped with ace-jax
+    Fe, Co and Ni. The data are small subsets included with ace-jax
     ([data README](https://github.com/ACEsuit/ace-jax/blob/main/docs/user/tutorials/data/cantor/README.md)),
     labelled by the MACE-MH-1 foundation model and stored under `mace_energy`,
     `mace_force` and `mace_virial`:
@@ -607,46 +608,48 @@ def _(fits, growth, mo, n_small, small_fits):
     _cat, _one, _cmp = "categorical", "one-hot embedding", "compressed embedding"
     _vac = {k: _r(fits, k, "vacancy") for k in fits}
     mo.md(f"""
-- **The construction matters too.** The one-hot embedding
-  has the species information of the categorical basis and a similar size
-  ({fits[_one]['n']} against {fits[_cat]['n']} coefficients), yet its bulk energy error
-  is {_r(fits, _one)['E']:.1f} against {_r(fits, _cat)['E']:.1f} meV/atom, and its force error
-  {_r(fits, _one)['F']:.3f} against {_r(fits, _cat)['F']:.3f} eV/Å. That gap comes from the rest
-  of the construction (the radial basis and the species-resolved pair
-  potential), not from how the species are treated. Compare bases that differ
-  in one thing before you credit a result to it.
-- **With enough data, compression costs little.** On 40 cells the compressed
-  basis, with {fits[_cmp]['n'] / fits[_one]['n']:.0%} of the one-hot embedding's coefficients, has
-  errors of {_r(fits, _cmp)['E']:.1f} meV/atom and {_r(fits, _cmp)['F']:.3f} eV/Å, and fits in
-  {fits[_cmp]['seconds']:.0f} s against {fits[_one]['seconds']:.0f} s.
-- **With little data per element, compression wins in energy.** On
-  {n_small.value} cells the compressed basis has a bulk energy error of
-  {_r(small_fits, _cmp)['E']:.1f} meV/atom, against {_r(small_fits, _one)['E']:.1f} (one-hot embedding)
-  and {_r(small_fits, _cat)['E']:.1f} (categorical). In forces, 96 labels per cell against
-  one energy, the two embeddings are close, {_r(small_fits, _cmp)['F']:.3f} and
-  {_r(small_fits, _one)['F']:.3f} eV/Å, while the categorical basis, with no channels shared
-  between elements, reaches only {_r(small_fits, _cat)['F']:.3f} eV/Å. Exercise 2 finds where
-  this stops.
-- **Around a vacancy the categorical basis does best in energy.** The vacancy
-  cells, absent from the training set, have energy errors of {_vac[_cat]['E']:.1f}, {_vac[_one]['E']:.1f} and
-  {_vac[_cmp]['E']:.1f} meV/atom (categorical, one-hot, compressed) and force errors of
-  {_vac[_cat]['F']:.3f}, {_vac[_one]['F']:.3f} and {_vac[_cmp]['F']:.3f} eV/Å, all larger than in bulk.
-  The parity plots show the two embedding fits placing the vacancy cells too
-  low in energy, while the categorical fit keeps them on the diagonal; in
+- **The construction also has an effect.** The one-hot embedding has the
+  species information of the categorical basis, and a similar size
+  ({fits[_one]['n']} against {fits[_cat]['n']} coefficients). But its bulk energy error is
+  {_r(fits, _one)['E']:.1f} against {_r(fits, _cat)['E']:.1f} meV/atom, and its force error is
+  {_r(fits, _one)['F']:.3f} against {_r(fits, _cat)['F']:.3f} eV/Å. This difference comes from the
+  other parts of the construction: the radial basis and the species-resolved
+  pair potential. It does not come from the treatment of the species. Before
+  you explain a result by one difference, compare bases that have only that
+  difference.
+- **With sufficient data, compression has a small cost.** On 40 cells, the
+  compressed basis has {fits[_cmp]['n'] / fits[_one]['n']:.0%} of the coefficients of the one-hot
+  embedding. Its errors are {_r(fits, _cmp)['E']:.1f} meV/atom and {_r(fits, _cmp)['F']:.3f} eV/Å. Its fit
+  takes {fits[_cmp]['seconds']:.0f} s, against {fits[_one]['seconds']:.0f} s.
+- **With little data for each element, compression is better in energy.**
+  On {n_small.value} cells, the bulk energy errors are
+  {_r(small_fits, _cmp)['E']:.1f} meV/atom (compressed), {_r(small_fits, _one)['E']:.1f} meV/atom (one-hot
+  embedding) and {_r(small_fits, _cat)['E']:.1f} meV/atom (categorical). Forces give 96 labels for each cell, against one energy. In forces, the
+  two embeddings are similar, {_r(small_fits, _cmp)['F']:.3f} and {_r(small_fits, _one)['F']:.3f} eV/Å.
+  The categorical basis shares no channels between elements, and gets only
+  {_r(small_fits, _cat)['F']:.3f} eV/Å. Exercise 2 finds where this effect stops.
+- **Near a vacancy, the categorical basis is best in energy.** The training
+  set has no vacancy cells. On the vacancy cells, the errors are larger than
+  in bulk for all three bases. The energy errors are {_vac[_cat]['E']:.1f}, {_vac[_one]['E']:.1f}
+  and {_vac[_cmp]['E']:.1f} meV/atom (categorical, one-hot, compressed). The force errors
+  are {_vac[_cat]['F']:.3f}, {_vac[_one]['F']:.3f} and {_vac[_cmp]['F']:.3f} eV/Å. The parity plots show that the two embedding fits put the vacancy cells
+  too low in energy. The categorical fit keeps them on the diagonal, but in
   forces it is the least accurate of the three. No basis was trained on a
-  vacancy, so none of this is guaranteed: adding vacancies to the training set
-  is the remedy, whichever the basis.
-- **More elements favour embeddings.** From one to five elements the
-  categorical basis grows {growth[2, 5] / growth[2, 1]:.0f} times at order 2 and
-  {growth[3, 5] / growth[3, 1]:.0f} times at order 3. A compressed embedding grows with its
-  channels, not with the element combinations, and needs data in proportion.
-- **Unseen compositions: not tested here.** Every cell is close to
-  equiatomic, so these data cannot say how either basis transfers to, say, a
-  Ni-rich alloy or a binary. What is certain is structural: a categorical
-  coefficient for an element combination that never occurs in the training
-  data is set by the prior alone, while an embedded basis shares its channels
-  between elements. Whether that sharing predicts well depends on the table,
-  and only a test on held-out compositions can say.
+  vacancy, so these results are not guaranteed. For all bases, the
+  correction is to add vacancies to the training set.
+- **More elements are better for embeddings.** From one to five elements,
+  the categorical basis becomes {growth[2, 5] / growth[2, 1]:.0f} times larger at order 2, and
+  {growth[3, 5] / growth[3, 1]:.0f} times larger at order 3. The size of a compressed embedding
+  increases with its channels, not with the element combinations. The data
+  that it needs increases in proportion.
+- **New compositions: not tested here.** All cells are near equiatomic.
+  Thus these data cannot show how a basis transfers to other compositions,
+  for example a Ni-rich alloy or a binary. One fact is structural. In a
+  categorical basis, if an element combination is not in the training data,
+  only the prior sets its coefficient. An embedded basis shares its
+  channels between elements. The quality of the predictions from this sharing depends on the table.
+  Only a test on compositions that are not in the training data can show
+  this.
 """)
     return
 

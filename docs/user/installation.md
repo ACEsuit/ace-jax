@@ -1,15 +1,15 @@
 # Installation
 
-ace-jax needs Python 3.11 or later (tested on 3.11 to 3.14). It is a pure-Python package; JAX
-provides the compiled numerics.
+ace-jax needs Python 3.11 or later. It is tested on Python 3.11 to 3.14. It
+is a pure-Python package; JAX gives the compiled numerics.
 
 ```bash
 --8<-- "install.txt"
 ```
 
-That is what most users want. With [uv](https://docs.astral.sh/uv/), put
-`uv` in front (`uv pip install ...`), or use `uv add` with the same
-requirement in a project.
+Most users need only this command. With [uv](https://docs.astral.sh/uv/),
+use `uv pip install ...`, or `uv add` with the same requirement in a
+project.
 
 ## What gets installed
 
@@ -20,74 +20,77 @@ requirement in a project.
 | `ace-jax[cuda]` | `jax[cuda12]` | running on an NVIDIA GPU |
 | `ace-jax[fast-neighbours]` | matscipy-neighbours | faster neighbour lists (ASE's list is the fallback) |
 
-Extras combine, for example `ace-jax[gp,cuda]`.
+You can combine extras, for example `ace-jax[gp,cuda]`.
 
 ### Building a basis: supported platforms
 
-Building a new basis (`aj fit --order ...`, `aj basis`, or `build_basis` in
-Python) uses `ace-jax-coupling`, a compiled library for the symmetry-adapted
-coupling coefficients. It is installed automatically, with nothing else to set
-up and nothing downloaded at run time, on:
+To build a new basis (`aj fit --order ...`, `aj basis`, or `build_basis` in
+Python), ace-jax uses `ace-jax-coupling`. This compiled library calculates
+the symmetry-adapted coupling coefficients. pip installs it automatically on
+these platforms:
 
 - Linux x86_64 and aarch64 (manylinux_2_28, so glibc 2.28 or newer)
 - macOS arm64
 - Windows x64
 
-On any other platform ace-jax installs without it. Everything except building
-a new basis shape still works: a basis file built elsewhere fits and
-evaluates normally (`aj fit --model basis.npz`), and building one raises
-`BasisUnavailable` with that hint.
+You do not need to set up anything else, and nothing is downloaded at run
+time.
 
-The first build of a new basis shape computes its coupling coefficients (it
-takes milliseconds) and caches them in `~/.cache/ace-jax/coupling` (or
-`$ACEJAX_COUPLING_CACHE`). Later builds of the same shape read the cache.
+On other platforms, ace-jax installs without this library. All functions
+work, except the build of a new basis:
+
+- A basis file built on a different machine fits and evaluates normally
+  (`aj fit --model basis.npz`).
+- If you try to build a basis, ace-jax gives the error `BasisUnavailable`,
+  with this instruction.
+
+The first build of a new basis specification calculates its coupling
+coefficients. This takes milliseconds. ace-jax keeps the result in
+`~/.cache/ace-jax/coupling` (or `$ACEJAX_COUPLING_CACHE`). Later builds of
+the same specification read the cache.
 
 ### `fast-neighbours`
 
-matscipy-neighbours is published as a source distribution, so installing it
-compiles C++ (it needs CMake and a C++17 compiler). ace-jax uses it when it
-is importable and otherwise falls back to ASE's neighbour list.
+matscipy-neighbours is a source distribution. Thus its installation compiles
+C++, and needs CMake and a C++17 compiler. ace-jax uses matscipy-neighbours
+when it can import it. If not, ace-jax uses the ASE neighbour list.
 
 ## GPU
 
-Add `cuda` to the extras you install, then check that JAX sees the GPU:
+1. Add `cuda` to the extras that you install.
+2. Make sure that JAX finds the GPU:
 
-```bash
-python -c "import jax; print(jax.devices())"    # should list a CUDA device
-```
+    ```bash
+    python -c "import jax; print(jax.devices())"    # the output must show a CUDA device
+    ```
 
-The `cuda` extra installs JAX's CUDA 12 wheels. For other CUDA versions or
-platforms, install JAX first by following the
-[JAX installation guide](https://docs.jax.dev/en/latest/installation.html),
-then install ace-jax. To force the CPU on a GPU machine, set
-`JAX_PLATFORMS=cpu`.
+The `cuda` extra installs the JAX CUDA 12 wheels. For other CUDA versions or
+platforms:
+
+1. Install JAX with the
+   [JAX installation guide](https://docs.jax.dev/en/latest/installation.html).
+2. Install ace-jax.
+
+To use the CPU on a GPU machine, set `JAX_PLATFORMS=cpu`.
 
 ## Precision (float64)
 
-The ace-jax library never changes JAX's precision setting, so the caller
-chooses it. JAX defaults to float32.
+--8<-- "float64.md"
 
-- The `aj` command line enables float64 itself.
-- In Python, fitting and radial learning require float64. Enable it before
-  anything else imports JAX:
-
-    ```python
-    import jax
-    jax.config.update("jax_enable_x64", True)
-    ```
-
-    or set `JAX_ENABLE_X64=1` in the environment.
-
-- Evaluation works in either precision. `ACECalculator` (with its default
-  `dtype=None`) computes in JAX's default dtype, so without float64 enabled
-  it runs in float32. Enable float64 for evaluation too unless you want
-  float32 speed and accept its error.
+Evaluation works in float32 and float64. By default (`dtype=None`),
+`ACECalculator` uses the JAX default precision. Thus, if float64 is not
+enabled, it uses float32. Enable float64 also for evaluation, unless you
+need the float32 speed and accept its error.
 
 ## LAMMPS
 
-LAMMPS export needs [lammps-jax](https://github.com/abhijeetgangan/lammps-jax),
-which is not on PyPI. Install it from a clone (`pip install -e <lammps-jax>`)
-and build its LAMMPS plugin; see [LAMMPS export](howto/lammps.md).
+LAMMPS export needs [lammps-jax](https://github.com/abhijeetgangan/lammps-jax).
+lammps-jax is not on PyPI.
+
+1. Install lammps-jax from a clone (`pip install -e <lammps-jax>`).
+2. Build its LAMMPS plugin.
+
+See [LAMMPS export](howto/lammps.md).
 
 ## Development install
 

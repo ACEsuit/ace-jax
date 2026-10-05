@@ -14,3 +14,7 @@ results behind ace-jax, kept as the record that code comments and tests cite:
 - `coupling-etshim-spec.md`: the compiled coupling library.
 - `ard-force-uq.md`: usage notes for `--uq ard` revision 2 (conformal per-atom force
   uncertainty, `aj calibrate`), the source for its user pages.
+- `basis-build-internals.md`: how `build_model` builds a basis, how `save_npz`
+  derives its metadata, the bridge parity test and the coupling cache.
+- `ard-validation.md`: the validation tables of `--uq ard` revision 2, moved
+  out of the user page on force uncertainty.
