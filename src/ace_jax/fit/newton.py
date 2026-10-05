@@ -77,7 +77,7 @@ def _newton_step(H, g, x, lo, hi):
     return d, max(0.0, -2.0 * float(g @ d + 0.5 * d @ Hm @ d))
 
 
-def newton_polish(ev, x, lo, hi, maxiter=50):
+def newton_polish(ev, x, lo, hi, maxiter=50, gradient_floor=False):
     """Converge a bounded evidence maximum by projected Newton with the exact Hessian (ev.hessian).
 
     Minimises F = -log p(D|h) over the box [lo, hi] from x (an L-BFGS-B endpoint).  Each step is the
@@ -102,7 +102,15 @@ def newton_polish(ev, x, lo, hi, maxiter=50):
     (not converged) and reported (pg, decrement, and its roundoff `noise` / `gnoise`, re-measured
     whenever the returned point is not where they were last measured, so info["hessian"], ev.hessian
     at the returned point, comes with them).  Cost per iteration: one Hessian, four noise
-    probes, one to a few evaluations.  Deterministic: a fixed sequence of compiled evaluations and LAPACK calls on
+    probes, one to a few evaluations.
+
+    gradient_floor (the MAP polish; False keeps the ARD evidence fit bit-identical): F's roundoff
+    does not end the polish while a projected-gradient component exceeds its own roundoff gnoise.
+    Then an improving Newton step is always tried (Armijo, else the longest of t = 1, 1/2, ... that
+    lowers ||pg||_inf without raising F past its roundoff), and a stop counts as converged only
+    when every component is within 10x its gnoise.  On a weakly curved direction (12 Si configs:
+    log sigma_c, |pg| 14.8 against gnoise 0.15) the decrement can sit below F's roundoff while the
+    gradient is resolvably nonzero; without this the polish stopped there, 2.9 nats short.  Deterministic: a fixed sequence of compiled evaluations and LAPACK calls on
     P x P matrices, no randomness."""
     lo, hi = np.asarray(lo, float), np.asarray(hi, float)
     x = np.clip(np.asarray(x, float), lo, hi)
@@ -141,7 +149,8 @@ def newton_polish(ev, x, lo, hi, maxiter=50):
             message = f"converged (|pg| {pg:.2e} within 10x the gradient roundoff {gnoise.max():.1e})"
             break
         accepted = False
-        if dec > 10 * noise:                             # a resolved decrease: backtrack to Armijo
+        g_resolved = gradient_floor and bool(np.any(np.abs(pgv) > gnoise))
+        if dec > 10 * noise or g_resolved:               # a resolved decrease: backtrack to Armijo
             for t in 0.5 ** np.arange(40):
                 xn = np.clip(x + t * d, lo, hi)
                 if np.array_equal(xn, x):
@@ -155,8 +164,16 @@ def newton_polish(ev, x, lo, hi, maxiter=50):
             Fn, gn = evaluate(xn)
             accepted = bool(np.isfinite(Fn) and np.all(np.isfinite(gn)) and Fn <= F + 10 * noise
                             and np.abs(_projected_gradient(xn, gn, lo, hi)).max() <= 0.5 * pg)
+        if not accepted and g_resolved:                  # the gradient is resolved: any step that lowers it
+            for t in 0.5 ** np.arange(20):
+                xn = np.clip(x + t * d, lo, hi)
+                Fn, gn = evaluate(xn)
+                if (np.isfinite(Fn) and np.all(np.isfinite(gn)) and Fn <= F + 10 * noise
+                        and np.abs(_projected_gradient(xn, gn, lo, hi)).max() < pg):
+                    accepted = True
+                    break
         if not accepted:
-            converged = dec <= 10 * noise
+            converged = dec <= 10 * noise and (not gradient_floor or bool(np.all(np.abs(pgv) <= 10 * gnoise)))
             message = (f"{'roundoff floor' if converged else 'no acceptable Newton step'} (|pg| {pg:.2e}, gradient "
                        f"roundoff {gnoise.max():.1e}, decrement^2 {dec:.1e}, F roundoff {noise:.1e})")
             break

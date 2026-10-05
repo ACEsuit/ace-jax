@@ -14,23 +14,27 @@
     63 evaluations (0.2 s on an RTX 4000 Ada) to reach it.
   - Linear fits on the cached-Gram LML then take a Newton polish to a
     stationary point (`--map-polish`, default `auto`). Its Hessian is
-    central differences of the compiled gradient over the free
-    hyperparameters, so it needs no more memory than the gradient.
-    `--map-polish exact` uses `jax.hessian` instead: about 10× the
-    gradient's temporaries (2.2 GB at 2,053 basis functions), and used only
-    if it fits in free memory.
+    exact. It is built one column at a time, one Hessian-vector product per
+    free hyperparameter, which needs about 2.3× the gradient's memory
+    (515 MB against 225 MB at 2,053 basis functions). `jax.hessian` would
+    need about 10× (2.2 GB).
   - GP fits (`--m-per-species` > 0) are not polished by default, since one
     GP gradient took about 70 s on GAP-18 Si (o3d12, 100 inducing sites).
     They are checked and warned. A line-search stop of L-BFGS-B
-    (`ABNORMAL`) now restarts it once, for at most 50 iterations.
-    `--map-polish on` polishes a GP fit (2 gradient evaluations per free
-    hyperparameter per Newton step).
+    (`ABNORMAL`) now restarts it once, for at most 50 evaluations.
+    `--map-polish on` polishes a GP fit, at one Hessian-vector product per
+    free hyperparameter per Newton step.
   - **The check.** The fit estimates what one more Newton step would gain
     in log-posterior. If that exceeds 10⁻³ nats, it logs
     `WARNING: MAP did not converge` and warns; `--strict` makes that an
     error (`MapNotConverged`). The estimate costs no extra evaluation: it
-    uses the polish Hessian, or else L-BFGS-B's own inverse-Hessian
-    estimate. The record is written to `map_convergence.json`.
+    uses the polish Hessian, or else L-BFGS-B's own limited-memory
+    inverse-Hessian estimate. That estimate is approximate, so on a GP fit
+    the gain is too. A polished fit whose log-posterior is too noisy to
+    resolve the last 10⁻³ nats can pass on a roundoff floor of at most
+    0.1 nats, and only when every gradient component is within 10× its
+    measured roundoff; it is then recorded as `resolution_limited`. The
+    record is written to `map_convergence.json`.
   - **Laplace rung.** It now holds hyperparameters that sit on their box
     bound at the MAP fixed. A converged MAP can run a noise scale to its
     bound, where the Hessian is singular.

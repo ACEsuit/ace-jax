@@ -1,4 +1,3 @@
-import os
 import time
 import warnings
 from typing import NamedTuple
@@ -20,15 +19,16 @@ LBFGS_HI = np.log([50.0, 1e3, 50.0, 4.0, 50.0, 100.0, 1e4, 10.0, 10.0, 10.0])
 # Stationarity of the MAP is judged by the PREDICTED GAIN of one more (box-constrained) Newton step,
 # 1/2 g^T B^-1 g in nats over the free coordinates -- scale-free, unlike a gradient norm (a gradient
 # of 3 nats per log-unit was a 1e-5-nat gain at 4.6e5 force rows, GAP-18 Si).  B is the polish
-# Hessian when there is one, else L-BFGS-B's inverse-Hessian estimate.  The MAP counts as stationary
-# when the gain is <= MAP_GAIN_TOL, or <= 10x the log-posterior's measured roundoff (a polished MAP
-# only): that secondary floor passes a point the objective cannot resolve, and the record says so
-# (`resolution_limited`).
+# Hessian when there is one (exact), else L-BFGS-B's limited-memory inverse-Hessian estimate (an
+# ESTIMATE: on the GP arm the gain is approximate).  The MAP counts as stationary when the gain is
+# <= MAP_GAIN_TOL.  A polished MAP may also pass on the roundoff floor -- only when every free
+# gradient component is within 10x its own measured roundoff gnoise_i, and with the gain within the
+# gain that gradient noise alone explains, 1/2 (10 gnoise)^T |H|^-1 (10 gnoise), capped at
+# MAP_FLOOR_CAP -- recorded as `resolution_limited`.
 MAP_GAIN_TOL = 1e-3
+MAP_FLOOR_CAP = 0.1      # nats: the most the roundoff floor may excuse
 ADAM_GTOL = 1e-2         # Adam on a path with no cheap Hessian: |grad|_inf, nats per log-unit
-FD_EPS = 1e-4            # central-difference step of the polish Hessian (log units)
-RESTART_ITERS = 50       # extra L-BFGS-B iterations after a line-search ('ABNORMAL') stop
-EXACT_HEADROOM = 0.5     # map_polish 'exact': the Hessian's temporaries must fit in this share of free memory
+RESTART_EVALS = 50       # L-BFGS-B evaluations (and iterations) after a line-search ('ABNORMAL') stop
 
 
 class MapNotConverged(RuntimeError):
@@ -61,17 +61,20 @@ def _bound_active(x, lo, hi):
     return (lo >= hi) | np.isclose(x, lo, rtol=0, atol=1e-10) | np.isclose(x, hi, rtol=0, atol=1e-10)
 
 
-class _FDLogPosterior:
-    """The `newton.newton_polish` interface over the MAP objective, at gradient-level memory: the
-    Hessian is central differences (step FD_EPS) of the compiled value-and-grad over the FREE
-    coordinates only (2k evaluations; the others are decoupled with a unit curvature, so the
-    box-constrained Newton step leaves them on their bounds).  `jax.hessian` through the Cholesky
-    LML needs ~10x the gradient's temporaries (69 against 7 P^2 doubles, P the readout length:
-    2.2 GB at P = 2,053, ~14 GB at 5,000), so it is the gated opt-in 'exact'; on the linear arm
-    (GAP-18 Si, o4d12) the two Hessians agree to 1e-5 relative."""
+class _HVPLogPosterior:
+    """The `newton.newton_polish` interface over the MAP objective: value_and_grad is the compiled
+    log-posterior gradient; the Hessian is EXACT, built one column at a time over the free
+    coordinates by a compiled Hessian-vector product (forward-over-reverse, `jax.jvp` of `jax.grad`,
+    one compile reused per column).  One column needs ~2.3x the gradient's temporaries (16 against
+    7 P^2 doubles at readout length P = 2,053), where `jax.hessian` pushes all 10 tangents at once
+    (69 P^2, ~10x).  Pinned and bound-active coordinates are not differentiated: decoupled with unit
+    curvature, the box-constrained Newton step leaves them on their bounds.  A finite-difference
+    Hessian (step 1e-4) was tried first: its error ~gnoise/step swamped the weakly curved directions
+    and the polish stopped 2.9 nats short (12 Si configs)."""
 
-    def __init__(self, vg_host, lo, hi):
-        self.vg, self.lo, self.hi, self.n_eval = vg_host, lo, hi, 0
+    def __init__(self, vg_host, lo, hi, logpost):
+        self.vg, self.lo, self.hi, self.n_eval, self.n_hvp = vg_host, lo, hi, 0, 0
+        self._hvp = jax.jit(lambda a, v: jax.jvp(jax.grad(logpost), (a,), (v,))[1])
         self._last = (None, None)
 
     def value_and_grad(self, x):
@@ -88,10 +91,10 @@ class _FDLogPosterior:
         _, g = self.value_and_grad(x)
         free = _free(x, g, self.lo, self.hi)
         H = np.zeros((x.size, x.size))
+        xj = jnp.asarray(x)
         for i in np.flatnonzero(free):
-            e = np.zeros(x.size); e[i] = FD_EPS
-            self.n_eval += 2
-            H[:, i] = (self.vg(x + e)[1] - self.vg(x - e)[1]) / (2 * FD_EPS)
+            self.n_hvp += 1
+            H[:, i] = np.asarray(self._hvp(xj, jnp.zeros_like(xj).at[i].set(1.0)), float)
         Hf = H[np.ix_(free, free)]
         H = np.zeros_like(H)
         H[np.ix_(free, free)] = 0.5 * (Hf + Hf.T)
@@ -99,58 +102,13 @@ class _FDLogPosterior:
         return H
 
 
-class _ExactLogPosterior(_FDLogPosterior):
-    """map_polish 'exact': the compiled `jax.hessian` of the log-posterior (the caller has checked
-    that its temporaries fit, `_exact_hessian`)."""
-
-    def __init__(self, vg_host, lo, hi, hess):
-        super().__init__(vg_host, lo, hi)
-        self._hess = hess
-
-    def hessian(self, x):
-        H = np.asarray(self._hess(jnp.asarray(x)), float)
-        return 0.5 * (H + H.T)
-
-
-def _free_bytes():
-    """Free memory of the default device: the allocator's limit minus its use (GPU), else the
-    host's available physical memory (Linux), else None."""
-    try:
-        st = jax.devices()[0].memory_stats() or {}
-        if "bytes_limit" in st:
-            return int(st["bytes_limit"]) - int(st.get("bytes_in_use", 0))
-    except Exception:                                # noqa: BLE001  (backends without memory_stats)
-        pass
-    try:
-        return os.sysconf("SC_AVPHYS_PAGES") * os.sysconf("SC_PAGE_SIZE")
-    except (ValueError, OSError, AttributeError):
-        return None
-
-
-def _exact_hessian(logpost, x, log):
-    """The compiled exact Hessian if its temporaries (XLA's memory analysis) fit in EXACT_HEADROOM of
-    the free memory, else None (the caller falls back to finite differences).  Compiling it costs
-    seconds on the linear arm, far more through the GP arm's streamed scan."""
-    comp = jax.jit(jax.hessian(logpost)).lower(jnp.asarray(x)).compile()
-    ma = comp.memory_analysis()
-    need, free = getattr(ma, "temp_size_in_bytes", None), _free_bytes()
-    if need is None or free is None or need > EXACT_HEADROOM * free:
-        log(f"map-polish exact: Hessian temporaries {need} B vs {free} B free: using the finite-difference Hessian")
-        return None
-    log(f"map-polish exact: Hessian temporaries {need / 2**20:.0f} MiB ({free / 2**20:.0f} MiB free)")
-    return comp
-
-
-def polish_mode(cfg):
-    """None | 'fd' | 'exact'.  'auto' polishes only the linear arm on the cached-Gram LML (objective
-    lml, one device, device engine), where a gradient costs milliseconds; a GP gradient costs ~70 s
-    on GAP-18 Si (o3d12, M = 100), so there 'on' is opt-in."""
-    if cfg.map_polish == "off":
-        return None
-    if cfg.map_polish in ("on", "exact"):
-        return "fd" if cfg.map_polish == "on" else "exact"
-    cheap = cfg.arm == "linear" and cfg.objective == "lml" and cfg.devices == 1 and cfg.lml == "device"
-    return "fd" if cheap else None
+def polish_wanted(cfg):
+    """'auto' polishes only the linear arm on the cached-Gram LML (objective lml, one device, device
+    engine), where a gradient costs milliseconds; a GP gradient costs ~70 s on GAP-18 Si (o3d12,
+    M = 100), so there 'on' is opt-in."""
+    if cfg.map_polish in ("on", "off"):
+        return cfg.map_polish == "on"
+    return cfg.arm == "linear" and cfg.objective == "lml" and cfg.devices == 1 and cfg.lml == "device"
 
 
 def _gain(g, H, x, lo, hi):
@@ -162,23 +120,41 @@ def _gain(g, H, x, lo, hi):
     return 0.5 * dec
 
 
-def judge(v, g, x, lo, hi, *, H=None, noise=0.0, strict=False, log=print, what="MAP"):
+def _noise_gain(gnoise, H, free):
+    """The Newton gain a gradient of 10x its roundoff explains: 1/2 (10 gnoise)^T |H_ff|^-1 (10 gnoise)
+    over the free block (|H|: eigenvalues by magnitude, floored like _newton_step), capped."""
+    if not free.any():
+        return 0.0
+    w, V = np.linalg.eigh(-H[np.ix_(free, free)])
+    w = np.maximum(np.abs(w), 1e-10 * max(np.abs(w).max(), 1e-300))
+    u = V.T @ (10 * np.asarray(gnoise, float)[free])
+    return min(MAP_FLOOR_CAP, 0.5 * float(u @ (u / w)))
+
+
+def judge(v, g, x, lo, hi, *, H=None, gnoise=None, strict=False, log=print, what="MAP"):
     """Say whether the MAP is stationary: the predicted Newton gain (`_gain`, needs H) is within
-    MAP_GAIN_TOL, or within 10x the measured log-posterior roundoff `noise` (resolution-limited);
-    with no Hessian, |grad|_inf (bound-projected) within ADAM_GTOL.  Warns, or raises
-    MapNotConverged when strict.  Costs no evaluation: the caller passes v, g (and H)."""
+    MAP_GAIN_TOL; or (gnoise given: a polished MAP) every free gradient component is within 10x its
+    roundoff gnoise_i and the gain within `_noise_gain` (resolution-limited); with no Hessian,
+    |grad|_inf (bound-projected) within ADAM_GTOL.  Warns, or raises MapNotConverged when strict.
+    Costs no evaluation: the caller passes v, g (and H, gnoise)."""
     pg = np.where(_free(x, g, lo, hi), g, 0.0) if lo is not None else g
     pgi = float(np.abs(pg).max()) if np.all(np.isfinite(pg)) else float("inf")
     worst = Hypers._fields[int(np.argmax(np.abs(np.nan_to_num(pg, nan=np.inf))))]
-    rec = {"logpost": float(v), "pgrad_inf": pgi, "pgrad_worst": worst, "noise": float(noise)}
+    rec = {"logpost": float(v), "pgrad_inf": pgi, "pgrad_worst": worst,
+           "gnoise_max": None if gnoise is None else float(np.max(gnoise))}
     if H is not None and np.isfinite(v) and np.all(np.isfinite(g)):
         gain = _gain(g, H, x, lo, hi)
-        ok = gain <= max(MAP_GAIN_TOL, 10 * noise)
-        rec.update(gain=gain, gain_tol=MAP_GAIN_TOL, resolution_limited=bool(ok and gain > MAP_GAIN_TOL),
-                   converged=bool(ok))
-        crit = f"predicted gain {gain:.2g} nats" + (f" (within 10x the roundoff {noise:.1g})"
+        floor = 0.0
+        if gnoise is not None:
+            free = _free(x, g, lo, hi) if lo is not None else np.ones(x.size, bool)
+            if np.all(np.abs(pg)[free] <= 10 * np.asarray(gnoise, float)[free]):
+                floor = _noise_gain(gnoise, H, free)
+        ok = gain <= max(MAP_GAIN_TOL, floor)
+        rec.update(gain=gain, gain_tol=MAP_GAIN_TOL, noise_floor=floor,
+                   resolution_limited=bool(ok and gain > MAP_GAIN_TOL), converged=bool(ok))
+        crit = f"predicted gain {gain:.2g} nats" + (f" (within the gradient-roundoff floor {floor:.1g})"
                                                      if rec["resolution_limited"] else "")
-        bad = f"predicted gain of another Newton step {gain:.3g} nats > {max(MAP_GAIN_TOL, 10 * noise):.2g}"
+        bad = f"predicted gain of another Newton step {gain:.3g} nats > {max(MAP_GAIN_TOL, floor):.2g}"
     else:
         ok = bool(np.isfinite(v) and pgi <= ADAM_GTOL)
         rec.update(gain=None, gtol=ADAM_GTOL, resolution_limited=False, converged=ok)
@@ -227,12 +203,13 @@ def fit_map(cfg, d, b, obj, log=print):
     def vg_host(x):
         v, g = obj.vg(jnp.asarray(x)); g.block_until_ready()
         return float(v), np.asarray(g, float)
-    mode = polish_mode(cfg)
+    polish = polish_wanted(cfg)
+    logpost = lambda a: obj.lik(a) + log_prior(from_array(a), prob.prior)       # noqa: E731
     if cfg.opt == "adam":
         theta = run_map(obj.lik, prob.prior, steps=cfg.map_steps, lr=cfg.map_lr, seed=cfg.seed, init=init)
         x = np.array(to_array(theta), float)
         v, g = vg_host(x)                               # one evaluation; a Hessian only where it is cheap
-        H = _FDLogPosterior(vg_host, None, None).hessian(x) if mode is not None else None
+        H = _HVPLogPosterior(vg_host, None, None, logpost).hessian(x) if polish else None
         conv = judge(v, g, x, None, None, H=H, strict=cfg.strict, log=log)
         return MapFit(theta, None, None, {"map": time.time() - t}, _log_evidence(obj, theta),
                       {"optimiser": "adam", "restart": None, "polish": None, **conv})
@@ -254,34 +231,33 @@ def fit_map(cfg, d, b, obj, log=print):
     log(f"L-BFGS: best of {len(runs)} start(s) = start {best['start']}, logpost {best['value']:.6g}")
     restart = None
     if "ABNORMAL" in best["message"]:        # a line-search stop, not convergence: once more from there
-        n = min(cfg.map_steps, RESTART_ITERS)
-        r = lbfgs_map(vg_host, best["x"], lo, hi, n, log=lambda i, v: log_eval("restart", i, v))
+        n = min(cfg.map_steps, RESTART_EVALS)       # evaluations, not iterations: ~1 min each on GP
+        r = lbfgs_map(vg_host, best["x"], lo, hi, n, maxfun=n, log=lambda i, v: log_eval("restart", i, v))
         restart = {"iters": n, "nfev": r["nfev"], "message": r["message"], "logpost_before": best["value"],
                    "logpost": r["value"]}
         log(f"L-BFGS restart (line-search stop): logpost {best['value']:.6g} -> {r['value']:.6g}  "
             f"nfev {r['nfev']}  {r['message']}")
         if r["value"] >= best["value"]:
             best = r
-    x, v, g, pol, H, noise = np.asarray(best["x"], float), best["value"], best["grad"], None, None, 0.0
-    if mode is not None:
+    x, v, g, pol, H, gnoise = np.asarray(best["x"], float), best["value"], best["grad"], None, None, None
+    if polish:
         tp = time.time()
-        hess = None
-        if mode == "exact":
-            hess = _exact_hessian(lambda a: obj.lik(a) + log_prior(from_array(a), prob.prior), x, log)
-        ev = _FDLogPosterior(vg_host, lo, hi) if hess is None else _ExactLogPosterior(vg_host, lo, hi, hess)
-        x, pol = newton_polish(ev, x, lo, hi)
+        ev = _HVPLogPosterior(vg_host, lo, hi, logpost)
+        x, pol = newton_polish(ev, x, lo, hi, gradient_floor=True)
         v, g = ev.value_and_grad(x)
-        H, noise = pol.pop("hessian"), float(pol["noise"])        # the polish's own Hessian, at x
-        noise = noise if np.isfinite(noise) else 0.0
-        log(f"Newton polish ({'exact' if hess is not None else 'finite-difference'} Hessian): {pol['message']}; "
-            f"{pol['steps']} step(s), {pol['hessian_evals']} Hessian(s), {ev.n_eval} gradient evaluations, "
+        H, gnoise = pol.pop("hessian"), np.asarray(pol["gnoise"], float)    # the polish's own, at x
+        if H is None or not np.all(np.isfinite(gnoise)):
+            gnoise = None
+        log(f"Newton polish (exact Hessian, column-wise HVPs): {pol['message']}; {pol['steps']} step(s), "
+            f"{pol['hessian_evals']} Hessian(s), {ev.n_hvp} HVPs, {ev.n_eval} gradient evaluations, "
             f"{time.time() - tp:.1f} s")
-        pol = {**{k: val for k, val in pol.items() if k != "gnoise"}, "hessian": "exact" if hess is not None else "fd"}
+        pol = {**{k: val for k, val in pol.items() if k != "gnoise"}, "hvps": ev.n_hvp, "evals": ev.n_eval,
+               "seconds": time.time() - tp}
     elif best.get("hess_inv") is not None and g is not None:
         H = -np.linalg.inv(0.5 * (best["hess_inv"] + best["hess_inv"].T))   # L-BFGS-B's estimate, no evaluation
     if g is None:                               # never finite: nothing to judge with
         g = np.full(x.size, np.nan)
-    conv = judge(v, g, x, lo, hi, H=H, noise=noise, strict=cfg.strict, log=log)
+    conv = judge(v, g, x, lo, hi, H=H, gnoise=gnoise, strict=cfg.strict, log=log)
     theta = Hypers(*[float(val) for val in x])
     return MapFit(theta, restarts, None, {"map": time.time() - t}, _log_evidence(obj, theta),
                   {"optimiser": "lbfgs", "nfev": int(sum(r["nfev"] for r in runs)), "lbfgs_message": best["message"],

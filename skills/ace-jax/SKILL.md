@@ -77,7 +77,7 @@ over a file's `basis:`, `--train` over its `data:` (each logged as an override).
 |---|---|
 | Plain linear ACE (fast baseline) | `--m-per-species 0 --rungs map` |
 | Hybrid GP with uncertainty | `--m-per-species M` (default 500; start small, e.g. 6–100) |
-| Converged MAP | the default `--opt lbfgs` (bounded L-BFGS-B, one restart after a line-search stop; linear arm: + FD-Hessian Newton polish, `--map-polish auto/on/exact/off`; GP: `on` is opt-in, a GP gradient can take a minute). Writes `map_convergence.json`; warns `MAP did not converge`, or fails with `--strict`. `--opt adam` (`--map-steps` steps) often stops short |
+| Converged MAP | the default `--opt lbfgs` (bounded L-BFGS-B, one restart after a line-search stop; linear arm: + exact-Hessian Newton polish by HVP columns, `--map-polish auto/on/off`; GP: `on` is opt-in, a GP gradient can take a minute). Writes `map_convergence.json`; warns `MAP did not converge`, or fails with `--strict`. `--opt adam` (`--map-steps` steps) often stops short |
 | Multimodal hyperparameter posterior | `--map-restarts N` (**requires `--opt lbfgs`**) |
 | Hyperparameter uncertainty | `--rungs map,laplace` (`--laplace svi` default, or `fd`); also `pathfinder`, `vi`, `nuts`. **Slow**: see Gotchas |
 | Useful OOD sigma for the GP | `--density pca --pca-d 128` (pair-only features give anti-informative OOD sigma) |
@@ -352,9 +352,9 @@ Other entry points:
   values are decoded. A label that is present but not numeric raises a
   `ValueError` naming the file, config and key.
 - **MAP convergence.** The default `--opt lbfgs` converges in tens of
-  evaluations; the linear arm then takes a Newton polish with a
-  finite-difference Hessian (gradient-level memory; ~0.2 s on 2,000 Si
-  configs; `--map-polish exact` = `jax.hessian`, ~10x the memory, gated).
+  evaluations; the linear arm then takes a Newton polish with the exact
+  Hessian, built one Hessian-vector product per free hyperparameter
+  (~2.3x the gradient's memory; seconds on 2,000 Si configs).
   `map_convergence.json` records the predicted gain of another Newton step
   (converged: <= 1e-3 nats) and the final |gradient|; an unconverged
   MAP logs `WARNING: MAP did not converge` (`--strict`: an error). Adam

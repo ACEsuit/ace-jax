@@ -58,12 +58,11 @@ def _add_fit_args(p):
                    help="hyperparameter MAP optimiser: lbfgs (default) = bounded L-BFGS-B, then (linear arm, "
                         "see --map-polish) a Newton polish to a stationary point; adam = numpyro SVI for "
                         "--map-steps steps, which can stop far from the optimum on large data")
-    p.add_argument("--map-polish", choices=["auto", "on", "exact", "off"], default="auto",
-                   help="Newton polish of the L-BFGS MAP to a stationary point. on: a finite-difference Hessian "
-                        "of the compiled gradient (2 evaluations per free hyperparameter per step, gradient-level "
-                        "memory); exact: jax.hessian (~14x the gradient's memory; used only if it fits, else "
-                        "on); auto (default): on for the linear arm, off for the GP arm, where one gradient "
-                        "can take a minute")
+    p.add_argument("--map-polish", choices=["auto", "on", "off"], default="auto",
+                   help="Newton polish of the L-BFGS MAP to a stationary point, with the exact Hessian built "
+                        "one Hessian-vector product per free hyperparameter (~2.3x the gradient's memory). "
+                        "auto (default): on for the linear arm, off for the GP arm, where one gradient can "
+                        "take a minute")
     p.add_argument("--strict", action="store_true",
                    help="fail, instead of warning, when the MAP ends away from a stationary point (a "
                         "predicted Newton gain above 1e-3 nats)")
