@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.2.1 (2026-10-05)
+
+**Upgrading from 0.2.0.**
+- **Rebuild built bases and refit.** A basis built by `aj basis`, `aj fit --order/--max-degree` or `build_basis` in 0.2.0 was not rotation invariant (see the first entry below). Saved `.npz` and `gp_model.npz` files keep the bad coupling and loading cannot detect it, so rebuild the basis and refit. Embedding bases (`--embedding`) and models exported from Julia are unaffected.
+
 - **Fixed: built bases were not rotation invariant.** Since the compiled
   coupling library arrived (0.2.0), `aj basis`, `aj fit --order/--max-degree`
   and `build_basis` paired the coupling's columns with the wrong products of
