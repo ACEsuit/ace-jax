@@ -49,19 +49,22 @@ def build(a):
     calc = ACECalculator(a.model, posterior=a.posterior)
     split = json.load(open(a.ard_json))["split"]
     train = read_atoms(a.train)
-    val_idx = np.asarray(split["val_idx"])
-    fit_idx = np.setdiff1d(np.arange(len(train)), val_idx)
     cal = post.cal
-    # T_val atoms: cal cfg ids index the val configurations; atoms of one config keep their node order
-    cnt = np.bincount(cal["cfg"], minlength=len(val_idx))
-    nat = np.array([len(train[i]) for i in val_idx])
+    # cal["cfg"] is the training-set index of each T_val atom's configuration (ard.py run_ard_stage); the
+    # atoms of one configuration are stored in node order
+    u = np.unique(cal["cfg"])
+    if not set(u.tolist()) <= set(split["val_idx"]):
+        raise ValueError("the posterior's calibration configurations are not in ard.json's val_idx")
+    cnt = np.array([np.sum(cal["cfg"] == c) for c in u])
+    nat = np.array([len(train[c]) for c in u])
     if not np.array_equal(cnt, nat):
         bad = np.flatnonzero(cnt != nat)
-        raise ValueError(f"cal atoms per T_val config do not match the split's configs at {len(bad)} configs "
-                         f"(first {bad[:5]}: {cnt[bad[:5]]} vs {nat[bad[:5]]}); is --train the fit's training file?")
-    Xv, Zv, cv = descriptors(calc, [train[i] for i in val_idx])
-    o = np.argsort(cal["cfg"], kind="stable")                  # cal order -> per-config blocks in node order
-    Xv, Zv = Xv[np.argsort(o)], Zv[np.argsort(o)]           # the descriptors in cal order
+        raise ValueError(f"cal atoms per T_val config do not match {a.train} at {len(bad)} configs "
+                         f"(first {u[bad[:5]]}: {cnt[bad[:5]]} vs {nat[bad[:5]]}); is it the fit's training file?")
+    fit_idx = np.setdiff1d(np.arange(len(train)), split["val_idx"])
+    Xv, Zv, _ = descriptors(calc, [train[c] for c in u])        # config order u, node order within
+    o = np.argsort(cal["cfg"], kind="stable")                   # cal order -> the same blocks
+    Xv, Zv = Xv[np.argsort(o)], Zv[np.argsort(o)]               # the descriptors in cal order
     rng = np.random.default_rng(0)
     pool = {}
     for i in rng.permutation(fit_idx):
