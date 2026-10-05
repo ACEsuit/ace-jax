@@ -7,6 +7,11 @@
 - Our docs: `docs/howto/force-uncertainty` and `docs/concepts/force-uncertainty-maths` (published at https://acesuit.github.io/ace-jax/)
 - Current acceptance report: `bench/defect_uq/results/2026-10-03_rev2_acceptance.md`
 
+**Results (2026-10-05).** Steps 1–5 and 7 have been run:
+[`bench/defect_uq/results/2026-10-05_calm_comparison.md`](../../bench/defect_uq/results/2026-10-05_calm_comparison.md).
+In short: H1 holds partially (bulk-only training); H2, H3 (on the held-out cells) and H4 are not borne out;
+H5 was not tested. The shape-as-committee path is exact but gives no gain at 3–4k atoms.
+
 **Status of claims below.** Statements about CALM come from the paper. Statements about how CALM's findings *transfer to ace-jax* are hypotheses until the tests in each step have been run. Do not write them into docs as findings before then.
 
 ---

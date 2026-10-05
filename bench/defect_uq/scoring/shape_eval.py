@@ -2,7 +2,8 @@
 
 Variants, each in its own subprocess (peak RSS is per process): `rows` (the whole cell's force design rows,
 the default path), `committee` (ACECalculator(shape_path="committee"): the r-output linear ACE), and
-`committee:k` (R truncated to rank k).  On labelled cells (free atoms only): wall time per cell (the first
+`committee:k` (R truncated to rank k).  On labelled cells (free atoms only; frames without the force key are
+skipped): wall time per cell (the first
 cell, which compiles, reported apart), peak RSS, max relative difference of forces_std from `rows`, Spearman
 rho(forces_std, forces_std of rows) (5 significant figures: ties kept), and coverage P(|dF| <= forces_q) with dF = label - model force.
 
@@ -33,7 +34,7 @@ def worker(a):
         kw["shape_rank"] = int(v.split(":")[1])
     calc = ACECalculator(a.model, posterior=a.posterior, **kw)
     path, n = (a.cells.split(":") + [None])[:2]
-    frames = read_atoms(path)
+    frames = [f for f in read_atoms(path) if a.force_key in f.arrays]     # unlabelled frames cannot be scored
     if n:
         frames = frames[::max(1, len(frames) // int(n))][:int(n)]
     out = {"t": [], "std": [], "q": [], "err": [], "rank": int(calc.posterior.R.shape[1])}
@@ -84,6 +85,8 @@ def main(argv=None):
             continue
         res[v] = dict(np.load(f))
         print(f"{v}: done ({np.sum(res[v]['t']):.1f} s)")
+    if not res:
+        raise SystemExit("every variant failed")
     ref = res.get("rows")
     dev = str(next(iter(res.values())).get("device", "")) if res else ""
     lines = [f"Device {dev}. Cells {a.cells}: {', '.join(map(str, next(iter(res.values()))['n_atoms']))} atoms.", "",

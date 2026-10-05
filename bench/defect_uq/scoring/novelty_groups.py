@@ -191,7 +191,7 @@ def main(argv=None):
     for spec in a.big:
         s, g, X, Z, fam, cell = load_big(spec, post)
         sets[pathlib.Path(spec.split(":")[0]).stem] = (s, g, X, Z, fam, cell, gamma_of(nov, ref, X, Z))
-    lines += ["| set | family | gamma bin | atoms | cells | coverage: served groups | novelty | "
+    lines += ["| set | family | gamma bin | atoms | configs | coverage: served groups | novelty | "
               "distortion+novelty |", "|---|---|---|---|---|---|---|---|"]
     for name, (s, g, _, _, fam, cell, gm) in sets.items():
         b = binned(gm)
