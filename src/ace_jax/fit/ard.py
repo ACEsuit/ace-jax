@@ -258,6 +258,7 @@ def fit_ard(ev, h0, cond_max=1e14, maxiter=500, polish=True, start=None):
     info = {"lbfgs_message": message, "lbfgs_success": success}
     if polish:
         x, pol = newton_polish(ev, x, lo, hi)
+        pol.pop("hessian", None)                     # an array; info is written as JSON
         info["newton"] = pol
         success = pol["converged"]
         message = f"{message}; newton: {pol['message']}"

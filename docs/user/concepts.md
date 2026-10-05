@@ -118,7 +118,7 @@ weights and a hand-tuned regulariser.
   (`--uq blr`, the default).
 - The evidence is maximised with bounded L-BFGS (`--opt lbfgs`, the
   default). For the linear model a few Newton steps then polish the result
-  to a stationary point (`--map-polish`); the fit warns if it ends away
+  to a stationary point (`--map-polish`); every fit warns if it ends away
   from one, and `--strict` makes that an error. `--opt adam` uses Adam for
   `--map-steps` steps instead, which can stop far from the optimum.
 - The design rows are streamed into sufficient statistics, so memory scales

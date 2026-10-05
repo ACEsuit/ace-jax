@@ -42,7 +42,8 @@ aj fit --order 3 --max-degree 10 \
   fitted with the model (see [E0](concepts.md#e0-the-reference-energy)).
 - `--m-per-species 0` selects the linear model (no Gaussian-process arm).
 - `--opt lbfgs` (the default, given here for clarity) maximises the evidence
-  with L-BFGS, then polishes it to a stationary point with a few Newton steps.
+  with L-BFGS, then (for this linear model) polishes it to a stationary point
+  with a few Newton steps.
 
 The fit logs the basis it built, then a table of test errors per
 configuration type:

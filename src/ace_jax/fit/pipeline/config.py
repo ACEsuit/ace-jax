@@ -40,7 +40,9 @@ class FitConfig:
     opt: str = "lbfgs"                   # "lbfgs" | "adam"
     map_steps: int = 150; map_lr: float = 0.02
     map_restarts: int = 1
-    map_polish: str = "auto"             # "auto" (linear arm only) | "on" | "off": Newton polish of the L-BFGS MAP
+    map_polish: str = "auto"             # Newton polish of the L-BFGS MAP: "auto" (linear arm, cached-Gram LML) |
+                                         # "on" (finite-difference Hessian, any arm) | "exact" (jax.hessian,
+                                         # memory-gated, else "on") | "off"
     strict: bool = False                 # raise MapNotConverged (not a warning) when the MAP is not stationary
     init: dict | None = None             # Hypers field -> value
     # rungs
@@ -153,12 +155,13 @@ class FitConfig:
                 raise ValueError("lml='host-cache' is single-device: set devices=1")
         if self.opt not in ("lbfgs", "adam"):
             raise ValueError(f"opt must be 'lbfgs' or 'adam', got {self.opt!r}")
-        if self.map_polish not in ("auto", "on", "off"):
-            raise ValueError(f"map_polish must be 'auto', 'on' or 'off', got {self.map_polish!r}")
-        if self.map_polish == "on" and self.opt != "lbfgs":
-            raise ValueError("map_polish 'on' polishes the L-BFGS MAP: set opt lbfgs")
-        if self.map_polish == "on" and self.lml == "host-cache":
-            raise ValueError("map_polish 'on' needs a traceable LML for its Hessian: not lml 'host-cache'")
+        if self.map_polish not in ("auto", "on", "exact", "off"):
+            raise ValueError(f"map_polish must be 'auto', 'on', 'exact' or 'off', got {self.map_polish!r}")
+        if self.map_polish in ("on", "exact") and self.opt != "lbfgs":
+            raise ValueError(f"map_polish {self.map_polish!r} polishes the L-BFGS MAP: set opt lbfgs")
+        if self.map_polish == "exact" and self.lml == "host-cache":
+            raise ValueError("map_polish 'exact' needs a traceable LML for jax.hessian: not lml 'host-cache' "
+                             "(map_polish 'on' works there)")
         if self.map_restarts < 1:
             raise ValueError(f"map_restarts must be >= 1, got {self.map_restarts}")
         if self.map_restarts > 1 and (self.opt != "lbfgs" or self.sigma_type):

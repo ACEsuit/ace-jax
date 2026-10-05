@@ -69,8 +69,9 @@ p.add_argument("--no-predict-train", action="store_true", help="skip train-set U
 p.add_argument("--rungs", default="map,laplace"); p.add_argument("--n-draws", type=int, default=64)
 p.add_argument("--map-steps", type=int, default=150); p.add_argument("--map-lr", type=float, default=0.02)
 p.add_argument("--opt", choices=["lbfgs", "adam"], default="lbfgs")
-p.add_argument("--map-polish", choices=["auto", "on", "off"], default="auto",
-               help="Newton polish of the L-BFGS MAP (auto: linear arm only)")
+p.add_argument("--map-polish", choices=["auto", "on", "exact", "off"], default="auto",
+               help="Newton polish of the L-BFGS MAP (auto: linear arm on the cached-Gram LML; on: FD Hessian; "
+                    "exact: jax.hessian, memory-gated)")
 p.add_argument("--strict", action="store_true", help="fail when the MAP is not stationary")
 p.add_argument("--map-restarts", type=int, default=1,
                help="L-BFGS MAP from this many starts (the --init/prior-mean point plus seeded "

@@ -2,31 +2,45 @@
 
 ## Unreleased
 
-- **`aj fit` now converges the hyperparameter MAP by default, so refits
-  give different (better) results.** The default `--opt` is now `lbfgs`
-  (bounded L-BFGS-B) instead of `adam`. On the linear arm a few Newton
-  steps with the exact Hessian then polish the result to a stationary
-  point (`--map-polish`, default `auto`: linear arm only). The old default, 500 Adam steps, moved
-  each log-hyperparameter at most about 5 units from the prior mean, so
-  fits on large data were **not converged**, and nothing said so. On
-  GAP-18 silicon (linear o4d12, measured on a 0.2.0 basis) its log-posterior was −1.04×10⁷ against
-  +1.92×10⁵ at the optimum, σ_E was 100× too small, and the test force
-  RMSE was 0.345 eV/Å against 0.163 at the converged MAP. There L-BFGS
-  takes 63 evaluations (0.2 s on an RTX 4000 Ada) and the polish 0.1 s
-  after a 4 s Hessian compile; test errors are unchanged by the polish.
-  - Every fit now checks that the MAP is stationary. If the largest
-    hyperparameter gradient exceeds max(0.01, 10× its measured roundoff)
-    nats per log-unit, it logs `WARNING: MAP did not converge` and warns;
-    `--strict` makes that an error (`MapNotConverged`). The record is
-    written to `map_convergence.json`.
-  - `--opt adam` is still available, and `FitConfig` (Python) already
-    defaulted to `opt="lbfgs"`; it now polishes linear fits too
-    (`map_polish="off"` restores the old endpoint).
-  - GP fits (`--m-per-species` > 0) now use plain L-BFGS, with the same
-    stationarity warning, and are not polished by default: one GP
-    log-posterior gradient takes ~70 s on GAP-18 Si (o3d12, 100 inducing
-    sites), so a Hessian is costly there. `--map-polish on` polishes them
-    anyway.
+- **Linear `aj fit` now converges the hyperparameter MAP by default, and
+  every fit is checked, so refits give different (better) results.** The
+  default `--opt` is now `lbfgs` (bounded L-BFGS-B) instead of `adam`.
+  - The old default, 500 Adam steps, moved each log-hyperparameter at most
+    about 5 units from the prior mean, so fits on large data were **not
+    converged**, and nothing said so. On GAP-18 silicon (linear o4d12,
+    measured on a 0.2.0 basis) its log-posterior was −1.04×10⁷ against
+    +1.92×10⁵ at the optimum, σ_E was 100× too small, and the test force
+    RMSE was 0.345 eV/Å against 0.163 at the converged MAP. L-BFGS took
+    63 evaluations (0.2 s on an RTX 4000 Ada) to reach it.
+  - Linear fits on the cached-Gram LML then take a Newton polish to a
+    stationary point (`--map-polish`, default `auto`). Its Hessian is
+    central differences of the compiled gradient over the free
+    hyperparameters, so it needs no more memory than the gradient.
+    `--map-polish exact` uses `jax.hessian` instead: about 10× the
+    gradient's temporaries (2.2 GB at 2,053 basis functions), and used only
+    if it fits in free memory.
+  - GP fits (`--m-per-species` > 0) are not polished by default, since one
+    GP gradient took about 70 s on GAP-18 Si (o3d12, 100 inducing sites).
+    They are checked and warned. A line-search stop of L-BFGS-B
+    (`ABNORMAL`) now restarts it once, for at most 50 iterations.
+    `--map-polish on` polishes a GP fit (2 gradient evaluations per free
+    hyperparameter per Newton step).
+  - **The check.** The fit estimates what one more Newton step would gain
+    in log-posterior. If that exceeds 10⁻³ nats, it logs
+    `WARNING: MAP did not converge` and warns; `--strict` makes that an
+    error (`MapNotConverged`). The estimate costs no extra evaluation: it
+    uses the polish Hessian, or else L-BFGS-B's own inverse-Hessian
+    estimate. The record is written to `map_convergence.json`.
+  - **Laplace rung.** It now holds hyperparameters that sit on their box
+    bound at the MAP fixed. A converged MAP can run a noise scale to its
+    bound, where the Hessian is singular.
+  - **Old run files.** `--opt adam` is still available. `FitConfig`
+    (Python) already defaulted to `opt="lbfgs"`, and it now polishes linear
+    fits too; `map_polish="off"` restores the old endpoint. A resolved
+    `fit.yaml` from an earlier run that says `opt: lbfgs` also polishes
+    when rerun.
+  - `sigma_type` fits (Python) still use Adam, unchecked: the fit warns
+    that `map_polish` and `strict` do not apply.
 
 ## 0.2.1 (2026-10-05)
 
@@ -47,7 +61,6 @@
   **rebuild the basis and refit**. Stale entries in the coupling cache are
   corrected on use. Embedding bases (`--embedding`) and models exported from
   Julia are unaffected.
-
 - Faster CPU evaluation. On the CPU, the product basis is now an explicit
   feature-major chain of multiplies. Before, `jnp.prod`'s reverse mode
   compiled to strided scalar copies. Other backends are unchanged, and

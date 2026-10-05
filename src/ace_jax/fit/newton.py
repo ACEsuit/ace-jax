@@ -100,7 +100,8 @@ def newton_polish(ev, x, lo, hi, maxiter=50):
 
     If the endpoint's F is worse than the start's by more than 10x F's roundoff the start is kept
     (not converged) and reported (pg, decrement, and its roundoff `noise` / `gnoise`, re-measured
-    whenever the returned point is not where they were last measured).  Cost per iteration: one Hessian, four noise
+    whenever the returned point is not where they were last measured, so info["hessian"], ev.hessian
+    at the returned point, comes with them).  Cost per iteration: one Hessian, four noise
     probes, one to a few evaluations.  Deterministic: a fixed sequence of compiled evaluations and LAPACK calls on
     P x P matrices, no randomness."""
     lo, hi = np.asarray(lo, float), np.asarray(hi, float)
@@ -114,7 +115,7 @@ def newton_polish(ev, x, lo, hi, maxiter=50):
     if not (np.isfinite(F) and np.all(np.isfinite(g))):
         return x, {"converged": False, "message": "non-finite evidence at the L-BFGS endpoint", "steps": 0,
                    "hessian_evals": 0, "pg_start": float("nan"), "pg": float("nan"), "decrement": float("nan"),
-                   "noise": float("nan"), "gnoise": [float("nan")] * len(x)}
+                   "noise": float("nan"), "gnoise": [float("nan")] * len(x), "hessian": None}
     x_start, F_start = x, F
     pgv = _projected_gradient(x, g, lo, hi)
     pg = pg0 = float(np.abs(pgv).max())
@@ -172,4 +173,5 @@ def newton_polish(ev, x, lo, hi, maxiter=50):
         n_hess += 1
         noise, gnoise = _evidence_noise(evaluate, x, Fx, gx, H)
     return x, {"converged": bool(converged), "message": message, "steps": steps, "hessian_evals": n_hess,
-               "pg_start": pg0, "pg": pg, "decrement": dec, "noise": noise, "gnoise": np.asarray(gnoise).tolist()}
+               "pg_start": pg0, "pg": pg, "decrement": dec, "noise": noise, "gnoise": np.asarray(gnoise).tolist(),
+               "hessian": -H}       # ev.hessian at the returned x (an array: callers drop it before JSON)
