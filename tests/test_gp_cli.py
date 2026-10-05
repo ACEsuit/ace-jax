@@ -33,9 +33,11 @@ def _cli_fit_args(tmp_path):
             # linear arm: the Laplace plumbing and R32 are the point; the GP residual
             # path is covered by the pipeline/export tests at a third of the cost
             "--configs-per-batch", "4", "--m-per-species", "0", "--rungs", "map,laplace",
-            # 150 MAP steps: at 30 the MAP is far from the mode and the Laplace Hessian is
-            # indefinite (singular-Hessian warning, constant draws) -- Ruling R32.
-            "--n-draws", "5", "--map-steps", "150", "--r0", "2.35", "--out", str(tmp_path / "out")]
+            # 150 Adam MAP steps: at 30 the MAP is far from the mode and the Laplace Hessian is
+            # indefinite (singular-Hessian warning, constant draws) -- Ruling R32.  Adam, not the
+            # default L-BFGS: on this 12-config subset the converged MAP runs sigma_F to its lower
+            # bound (the basis interpolates the forces), where the SVI Laplace Hessian is singular
+            "--n-draws", "5", "--opt", "adam", "--map-steps", "150", "--r0", "2.35", "--out", str(tmp_path / "out")]
 
 
 def test_cli_map_laplace(tmp_path):

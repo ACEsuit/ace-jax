@@ -295,7 +295,11 @@ def test_pops_fit_with_host_rows_matches_device_rows():
     base = dict(model=str(FIXTURE_DIR / "si_fitted.npz"), energy_key="dft_energy", force_key="dft_force",
                 virial_key="dft_virial", ntrain=16, ntest=6, batch=4, r0=2.35, arm="linear", uq="pops",
                 opt="lbfgs", rungs=("map",), map_steps=5, predict_train=False,
-                pops_ridge_grid=(1e-3, 1e-5, 1e-7))
+                pops_ridge_grid=(1e-3, 1e-5, 1e-7),
+                # unpolished: the converged MAP has a smaller sigma_E, so its ridge-1e-7 POPS solve is
+                # ill-conditioned enough that host vs device summation order moves F_mean ~2x past
+                # this test's tolerance; the rows paths, not the MAP, are under test
+                map_polish="off")
     out = {}
     for rows in ("device", "host"):
         cfg = FitConfig(**base, pops_rows=rows).validate()

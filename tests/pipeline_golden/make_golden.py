@@ -52,6 +52,7 @@ def cli_argv(out):
     return [sys.executable, "-m", "ace_jax.cli", "fit", "--model", str(FIX / "si_fitted.npz"),
             "--train", str(tr), "--test", str(te), *KEYS, "--configs-per-batch", "4",
             "--m-per-species", "6", "--rungs", "map,laplace", "--n-draws", "5",
+            "--opt", "adam",       # recorded under the CLI's old default optimiser (now lbfgs)
             "--map-steps", "150", "--r0", "2.35", "--out", str(out)]
 
 

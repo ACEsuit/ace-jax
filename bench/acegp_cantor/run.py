@@ -69,6 +69,9 @@ p.add_argument("--no-predict-train", action="store_true", help="skip train-set U
 p.add_argument("--rungs", default="map,laplace"); p.add_argument("--n-draws", type=int, default=64)
 p.add_argument("--map-steps", type=int, default=150); p.add_argument("--map-lr", type=float, default=0.02)
 p.add_argument("--opt", choices=["lbfgs", "adam"], default="lbfgs")
+p.add_argument("--map-polish", choices=["auto", "on", "off"], default="auto",
+               help="Newton polish of the L-BFGS MAP (auto: linear arm only)")
+p.add_argument("--strict", action="store_true", help="fail when the MAP is not stationary")
 p.add_argument("--map-restarts", type=int, default=1,
                help="L-BFGS MAP from this many starts (the --init/prior-mean point plus seeded "
                     "hyperprior draws, clipped to the box); the best log-posterior wins.  The joint "
@@ -134,6 +137,7 @@ cfg = FitConfig(
     density=a.density, pca_d=a.pca_d, warp=a.warp, embedding=a.embedding,
     delta_s_floor_q=a.delta_s_floor_q, fix_rho=a.fix_rho, r0=a.r0, lml=a.lml, lml_chunk=a.lml_chunk,
     opt=a.opt, map_steps=a.map_steps, map_lr=a.map_lr, map_restarts=a.map_restarts,
+    map_polish=a.map_polish, strict=a.strict,
     init=json.load(open(a.init)) if a.init else None,
     rungs=tuple(dict.fromkeys(["map", *[r.strip() for r in a.rungs.split(",")]])),
     laplace="fd", n_draws=a.n_draws, vi_steps=a.vi_steps, nuts_warmup=a.nuts_warmup,
