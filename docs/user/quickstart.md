@@ -41,8 +41,8 @@ aj fit --order 3 --max-degree 10 \
   in the training set fixes it to that atom's energy; without one it is
   fitted with the model (see [E0](concepts.md#e0-the-reference-energy)).
 - `--m-per-species 0` selects the linear model (no Gaussian-process arm).
-- `--opt lbfgs` maximises the evidence with L-BFGS, much faster than the
-  default Adam on small data.
+- `--opt lbfgs` (the default, given here for clarity) maximises the evidence
+  with L-BFGS, then polishes it to a stationary point with a few Newton steps.
 
 The fit logs the basis it built, then a table of test errors per
 configuration type:

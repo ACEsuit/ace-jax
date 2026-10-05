@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+- **`aj fit` now converges the hyperparameter MAP by default, so refits
+  give different (better) results.** The default `--opt` is now `lbfgs`
+  (bounded L-BFGS-B) instead of `adam`. On the linear arm a few Newton
+  steps with the exact Hessian then polish the result to a stationary
+  point (`--map-polish`, default `auto`: linear arm only). The old default, 500 Adam steps, moved
+  each log-hyperparameter at most about 5 units from the prior mean, so
+  fits on large data were **not converged**, and nothing said so. On
+  GAP-18 silicon (linear o4d12, measured on a 0.2.0 basis) its log-posterior was −1.04×10⁷ against
+  +1.92×10⁵ at the optimum, σ_E was 100× too small, and the test force
+  RMSE was 0.345 eV/Å against 0.163 at the converged MAP. There L-BFGS
+  takes 63 evaluations (0.2 s on an RTX 4000 Ada) and the polish 0.1 s
+  after a 4 s Hessian compile; test errors are unchanged by the polish.
+  - Every fit now checks that the MAP is stationary. If the largest
+    hyperparameter gradient exceeds max(0.01, 10× its measured roundoff)
+    nats per log-unit, it logs `WARNING: MAP did not converge` and warns;
+    `--strict` makes that an error (`MapNotConverged`). The record is
+    written to `map_convergence.json`.
+  - `--opt adam` is still available, and `FitConfig` (Python) already
+    defaulted to `opt="lbfgs"`; it now polishes linear fits too
+    (`map_polish="off"` restores the old endpoint).
+  - GP fits (`--m-per-species` > 0) now use plain L-BFGS, with the same
+    stationarity warning, and are not polished by default: one GP
+    log-posterior gradient takes ~70 s on GAP-18 Si (o3d12, 100 inducing
+    sites), so a Hessian is costly there. `--map-polish on` polishes them
+    anyway.
+
 ## 0.2.1 (2026-10-05)
 
 **Upgrading from 0.2.0.**
@@ -21,6 +47,7 @@
   **rebuild the basis and refit**. Stale entries in the coupling cache are
   corrected on use. Embedding bases (`--embedding`) and models exported from
   Julia are unaffected.
+
 - Faster CPU evaluation. On the CPU, the product basis is now an explicit
   feature-major chain of multiplies. Before, `jnp.prod`'s reverse mode
   compiled to strided scalar copies. Other backends are unchanged, and
