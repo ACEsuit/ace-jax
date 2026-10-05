@@ -26,7 +26,7 @@ jax.config.update("jax_enable_x64", True)
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
 
 import numpy as np  # noqa: E402
-from _frames import read_atoms  # noqa: E402
+from _frames import read_atoms, sig_round  # noqa: E402
 from scipy.stats import spearmanr  # noqa: E402
 
 TAUS = (1e-14, 1e-12, 1e-10, 1e-8)
@@ -54,18 +54,10 @@ def rounding(R, seed):
     return R * (1.0 + d)
 
 
-def _sig(x, digits=5):
-    """x rounded to `digits` significant figures: symmetry-equivalent atoms (equal v up to roundoff) stay tied,
-    so a 1e-6 perturbation cannot reorder them and pull rho below 1."""
-    x = np.asarray(x, float)
-    e = np.floor(np.log10(np.where(x > 0, x, 1.0)))
-    return np.round(x / 10 ** e, digits - 1) * 10 ** e
-
-
 def compare(v, w):
     rel = np.abs(w / np.where(v > 0, v, np.nan) - 1.0)
     rel = rel[np.isfinite(rel)]
-    return {"rho": float(spearmanr(_sig(v), _sig(w))[0]), "max": float(rel.max()), "p99": float(np.quantile(rel, 0.99)),
+    return {"rho": float(spearmanr(sig_round(v), sig_round(w))[0]), "max": float(rel.max()), "p99": float(np.quantile(rel, 0.99)),
             "frac>1%": float(np.mean(rel > 0.01))}
 
 
