@@ -19,7 +19,7 @@ import numpy as np
 
 from ..eval.model import ACEModel, fold_readout, with_edge_a_kind
 from . import radial_init as ri
-from .coupling import align_columns, couple
+from .coupling import couple
 from .prior import smoothness_prior
 from .spec import build_spec
 
@@ -124,7 +124,6 @@ def build_model(elements, order, totaldegree, *, wL=1.5, rcut=5.5, r0=None,
         cpl = couple_cached(mb, Rnl, Ylm, cache_dir=coupling_cache_dir)
     else:
         cpl = couple(mb, Rnl, Ylm)
-    cpl = align_columns(cpl, Rnl, Ylm)           # a cache entry written before the fix may be unaligned
 
     nnll = nnll_from_coupling(cpl.A2B, cpl.aa_sig)
     # within a row, channel order differs (signature-sorted vs original body
@@ -297,7 +296,6 @@ def build_embedding_model(elements, order, totaldegree, embedding=None, *, rows=
         cpl = couple_cached(sp.mb, sp.rspec, sp.Ylm, cache_dir=coupling_cache_dir)
     else:
         cpl = couple(sp.mb, sp.rspec, sp.Ylm)
-    cpl = align_columns(cpl, sp.rspec, sp.Ylm)
     nnll = nnll_from_coupling(cpl.A2B, cpl.aa_sig)
     norm = lambda rws: sorted(sorted(bb) for bb in rws)
     if norm(nnll) != norm(cpl.nnll_spec):

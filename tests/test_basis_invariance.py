@@ -157,3 +157,23 @@ def test_built_basis_descriptors_match_acepotentials():
         assert s != 0.0
         worst = max(worst, float(np.abs(d - s * j).max() / np.abs(d).max()))
     assert worst < 1e-10, worst
+
+
+def test_couple_cached_realigns_a_stale_entry(tmp_path, monkeypatch):
+    """A cache entry written before the fix (columns in the library's 𝔸spec
+    order) is returned aligned by `couple_cached` itself, from the default
+    cache dir and without calling the library."""
+    require_coupling_lib()
+    from ace_jax.basis import coupling as C
+    from ace_jax.basis.spec import build_spec
+    mb, Rnl, Ylm = build_spec(1, 3, 8)
+    cpl = C.couple(mb, Rnl, Ylm)
+    p = np.random.default_rng(1).permutation(cpl.A2B.shape[1])
+    stale = cpl._replace(A2B=cpl.A2B[:, p], aa_sig=tuple(cpl.aa_sig[j] for j in p))
+    key = C.coupling_key(mb, Rnl, Ylm)
+    C._write_entry(C._entry_path(tmp_path, key), stale, key, mb, Rnl, Ylm)
+    monkeypatch.setenv("ACEJAX_COUPLING_CACHE", str(tmp_path))
+    monkeypatch.setenv("ACEJAX_COUPLING_CACHE_ONLY", "1")      # a miss would raise
+    got = C.couple_cached(mb, Rnl, Ylm)
+    np.testing.assert_array_equal(got.A2B, cpl.A2B)
+    assert got.aa_sig == cpl.aa_sig

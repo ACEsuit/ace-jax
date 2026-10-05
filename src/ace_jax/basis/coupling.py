@@ -155,8 +155,11 @@ def align_columns(cpl, Rnl_spec, Ylm_spec):
 
     The permutation is found by identity, not assumed: each evaluation column's
     (n, l, m) signature, read through aspec -> (Rnl_spec, Ylm_spec), is looked up
-    in `aa_sig` (unique per column).  Also applied to cache hits, so an entry
-    written before this fix is corrected on use."""
+    in `aa_sig`.  That lookup is unambiguous because the columns are the
+    deduplicated A products, one per (n, l, m) multiset; the different coupling
+    paths of one body are B rows, not columns.  `couple` and `couple_cached`
+    (on a hit) both apply it, so an entry written before this fix is corrected
+    on use."""
     import numpy as np
     key = lambda s: tuple(sorted(tuple(int(v) for v in t) for t in s))
     col = {key(s): j for j, s in enumerate(cpl.aa_sig)}
@@ -297,7 +300,7 @@ def couple_cached(mb_spec, Rnl_spec, Ylm_spec, cache_dir=None):
     if path.exists():
         cpl, ok = _read_entry(path, key)
         if ok:
-            return cpl
+            return align_columns(cpl, Rnl_spec, Ylm_spec)   # an entry written before the fix is unaligned
     cpl = couple(mb_spec, Rnl_spec, Ylm_spec)
     try:
         _write_entry(path, cpl, key, mb_spec, Rnl_spec, Ylm_spec)
