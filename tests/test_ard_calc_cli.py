@@ -579,3 +579,45 @@ def test_forces_q_mahal_on_schema2_raises_need3(fitted, tmp_path):
     at.calc = ACECalculator(str(fitted / "model.npz"), posterior=str(tmp_path / "p2.npz"))
     with pytest.raises(ValueError, match="refit with --uq ard"):
         at.calc.get_property("forces_q_mahal", at)
+
+
+def _rattled_si(n=2, seed=0):
+    from ase.build import bulk
+    at = bulk("Si", "diamond", a=5.43, cubic=True).repeat((n, n, n))
+    at.rattle(0.05, seed=seed)
+    return at
+
+
+@pytest.mark.parametrize("tau", [1.0, 0.9])
+def test_calculator_committee_shape_path_matches_rows(fitted, tau):
+    """shape_path='committee' (the r-output linear ACE) serves what the design rows serve, to roundoff,
+    for the exact R and for a truncated one (shape_tau applies to both paths)."""
+    from ace_jax import ACECalculator
+    kw = dict(posterior=str(fitted / "posterior.npz"), shape_tau=tau)
+    at = _rattled_si()
+    props = ("forces_std", "forces_cov", "forces_q", "forces_group")
+    rows = ACECalculator(str(fitted / "model.npz"), **kw)
+    com = ACECalculator(str(fitted / "model.npz"), shape_path="committee", **kw)
+    assert com.posterior.R.shape == rows.posterior.R.shape
+    for p in props:
+        a, b = np.asarray(rows.get_property(p, at)), np.asarray(com.get_property(p, at))
+        np.testing.assert_allclose(b, a, rtol=1e-10, atol=1e-13 * max(np.abs(a).max(), 1.0), err_msg=p)
+
+
+def test_calculator_shape_tau_truncates_rank(fitted):
+    from ace_jax import ACECalculator
+    full = ACECalculator(str(fitted / "model.npz"), posterior=str(fitted / "posterior.npz"))
+    r = full.posterior.R.shape[1]
+    half = ACECalculator(str(fitted / "model.npz"), posterior=str(fitted / "posterior.npz"), shape_tau=0.5)
+    one = ACECalculator(str(fitted / "model.npz"), posterior=str(fitted / "posterior.npz"), shape_rank=1)
+    assert 1 <= half.posterior.R.shape[1] < r and one.posterior.R.shape[1] == 1
+    at = _rattled_si(seed=1)
+    assert np.all(half.get_property("forces_std", at) <= full.get_property("forces_std", at) * (1 + 1e-12))
+
+
+def test_calculator_shape_path_validated(fitted):
+    from ace_jax import ACECalculator
+    with pytest.raises(ValueError, match="shape_path"):
+        ACECalculator(str(fitted / "model.npz"), posterior=str(fitted / "posterior.npz"), shape_path="fast")
+    with pytest.raises(ValueError, match="shape_tau"):
+        ACECalculator(str(fitted / "model.npz"), posterior=str(fitted / "posterior.npz"), shape_tau=1.5)

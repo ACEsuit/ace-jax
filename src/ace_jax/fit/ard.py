@@ -536,13 +536,19 @@ class ARDPosterior(NamedTuple):
         from ONE shape evaluation V of the force rows (N, 3, L).  forces_q = q_g x the region's radius
         (sqrt(v/3) iso, sqrt(lambda_max(V + eps v/3 I)) aniso): inf wherever q_g = inf (the coverage is
         not attainable from the calibration set -- even at v = 0, never 0 x inf = NaN), 0 where v = 0."""
+        need = set(which) & {"forces_std", "forces_cov", "forces_q"}
+        return self.served_from_V(self.atom_shape(Frows) if need else None, groups, which)
+
+    def served_from_V(self, V, groups, which=("forces_std", "forces_cov", "forces_q")):
+        """`served` from a precomputed unscaled shape V (N, 3, 3) -- the rows' `atom_shape` or the
+        committee path (`jackknife.committee_shape`); V may be None when only forces_q_mahal is wanted."""
         t = self._tab(groups)
         lam = np.asarray(t["lam_rms"], float)[groups]
         q = np.asarray(t["q"], float)[groups]
         which = set(which)
         out = {}
         if which & {"forces_std", "forces_cov", "forces_q"}:
-            V = self.atom_shape(Frows)
+            V = np.asarray(V)
             v = np.trace(V, axis1=1, axis2=2)
             if "forces_std" in which:
                 out["forces_std"] = lam * np.sqrt(np.maximum(v, 0.0))
