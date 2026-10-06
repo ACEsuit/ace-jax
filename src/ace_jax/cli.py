@@ -223,8 +223,8 @@ def run(a):
             else load_fit_data(cfg, train=a.train, test=a.test, ood=a.ood))
     if a.r0 is None:
         print(f"r0 {data.r0:.3f} A (mean bond length of the basis; pass --r0 to override)")
-    # hand the only reference to fit: --learn-radial swaps the model, and the pre-radial one
-    # (its arrays, datasets and npz) must not stay alive here for the rest of the run
+    # hand the only reference to fit: --learn-radial swaps the model (and FitData.basis's), so the
+    # pre-radial FitData -- its model, datasets and npz -- is not kept alive here for the whole run
     held = [data]
     del data
     res = fit(cfg, held.pop())

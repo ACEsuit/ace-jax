@@ -80,5 +80,6 @@ def learn_radials(cfg, data, log=print):
     rr = RadialResult(np.asarray(W), {k: v for k, v in info.items() if k != "readout"}, len(fit_), nval,
                       relres_max, time.time() - t0)
     log(f"learn radials: selected {info['selected']} in {rr.seconds:.1f}s")
-    return data._replace(model=new_model, meta=new_meta, z=new_z,
+    basis = None if data.basis is None else data.basis._replace(model=new_model)   # not the pre-radial model
+    return data._replace(model=new_model, meta=new_meta, z=new_z, basis=basis,
                          source=(data.source or "model") + " + learned radials"), rr
