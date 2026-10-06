@@ -19,7 +19,7 @@ from ace_jax.fit.pipeline import FitConfig, fit, load_fit_data
 
 spec = BasisSpec(order=3, max_degree=10)             # elements=None: the species in the data
 b = build_basis(BasisSpec(order=3, max_degree=10, elements=("Si",)), seed=0)
-b.meta["n_B"], b.model.A2B.shape                     # inspect; modify with b._replace(model=...)
+b.meta["n_B"], b.model.a2b_shape                      # inspect; modify with b._replace(model=...)
 cfg = FitConfig(model=b, arm="linear", m_per_species=0, r0=None)   # a Basis, a BasisSpec or a path
 res = fit(cfg, load_fit_data(cfg, train="train.xyz"))
 ```

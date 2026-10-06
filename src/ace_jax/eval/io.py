@@ -26,13 +26,13 @@ from .model import ACEModel, a2b_sparse_auto, with_a2b_sparse
 
 
 def _a2b(z, dtype):
-    """A2B, from sparse triplets when present.
+    """The dense A2B, from sparse triplets when present: only for a model loaded with
+    a2b_sparse=False (or a dense-enough coupling), the old dense-matmul path.
 
-    It is extremely sparse -- one nonzero per column -- so at a few thousand
-    basis functions the dense form is hundreds of MB while the triplets are a
-    fraction of one.  It is densified here because the contraction is a single
-    matmul and dense is faster at these sizes; if it ever stops fitting, this is
-    the place to switch to `jax.experimental.sparse.BCOO`.
+    A2B is extremely sparse -- 1.1-1.4 nonzeros per column -- so the default
+    (`a2b_sparse="auto"`) never builds this: the model holds the triplets only and
+    contracts them by sorted segment_sums (`with_a2b_sparse`).  Dense, it is 2.6 GB
+    at 5456 basis functions.
     """
     if "A2B" in z.files:
         return jnp.asarray(z["A2B"], dtype=dtype)      # older exports
