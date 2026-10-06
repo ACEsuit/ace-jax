@@ -124,16 +124,60 @@ class QRStats(NamedTuple):
                      self.logw_E, self.logw_F, self.logw_V)
 
 
+# Batched merges.  A merge QR-factors the stacked [R c ; Pw yw], (L + r) x (L + 1): ~(4/3) L^3
+# whatever r is, plus 2 r L^2 for the new rows (LAPACK geqrf does not exploit R's triangle).
+# One merge per batch made that L^3 the whole cost at a large basis: Si o4d20 (L = 5477) has
+# 788 packed 224-atom batches of E 117 / F 672 / V 702 rows, 3 merges each, 1.2e15 flops per
+# pass with the old explicit Q (5e13 now).  So each quantity's live rows (padding and absent
+# virials are zero rows, QR-neutral, and are dropped: E and V are ~2% live there) are buffered
+# across batches and merged once at least merge_target (QR_MERGE_ROWS_PER_L x L) have
+# accumulated, plus a final flush: per row, (4/3) L^3 / buffer + 2 L^2.  The target column
+# rides along as an extra column, so only geqrf's R is formed (its last column is
+# Q^T [c ; yw]): no Householder product, which used to double the flops.
+QR_MERGE_ROWS_PER_L = 1
+
+
+def merge_target(L, merge_rows=None):
+    """Live rows that trigger a merge: merge_rows, default QR_MERGE_ROWS_PER_L * L; 0 merges
+    every batch (that has live rows)."""
+    return int(QR_MERGE_ROWS_PER_L * L if merge_rows is None else merge_rows)
+
+
+def _live(Pw, yw):
+    return jnp.any(Pw != 0, axis=1) | (yw != 0)
+
+
 def _qr_merge(R, c, Pw, yw):
-    """Fold weighted rows into a triangular factor: QR of [R ; Pw] (an updating QR)."""
-    Q, R2 = jnp.linalg.qr(jnp.concatenate([R, Pw], 0), mode="reduced")
-    return R2, Q.T @ jnp.concatenate([c, yw])
+    """Fold weighted rows into a triangular factor: the updating QR of [R ; Pw], with c
+    carried as an extra column so that only R is formed (no Q).  mode="raw" is geqrf, which JAX
+    cannot differentiate: these statistics are not differentiable (the CPU host path never was)."""
+    n = R.shape[1]
+    A = jnp.concatenate([jnp.concatenate([R, c[:, None]], 1), jnp.concatenate([Pw, yw[:, None]], 1)], 0)
+    Ra = jnp.triu(jnp.linalg.qr(A, mode="raw")[0].mT[:n])    # geqrf alone: no Householder product
+    return Ra[:, :n], Ra[:, n]
 
 
-def host_qr_stream(batch_rows_fn, ds, init):
+def _host_merge(R, c, Pw, yw):
+    """_qr_merge on the host: LAPACK geqrf (blocked: its workspace is queried) of the stacked
+    Fortran-ordered matrix, in place; only R is read back."""
+    import scipy.linalg.lapack as la
+    n = R.shape[1]
+    A = np.empty((n + Pw.shape[0], n + 1), order="F")
+    A[:n, :n], A[:n, n], A[n:, :n], A[n:, n] = R, c, Pw, yw
+    lwork = int(la.dgeqrf_lwork(*A.shape)[0])
+    a, _, _, info = la.dgeqrf(A, lwork=max(lwork, n + 1), overwrite_a=1)
+    if info != 0:
+        raise np.linalg.LinAlgError(f"dgeqrf info={info}")
+    Ra = np.triu(a[:n])
+    return Ra[:, :n].copy(), Ra[:, n].copy()
+
+
+def host_qr_stream(batch_rows_fn, ds, init, merge_rows=None):
     """The updating QR of streamed rows, its merges on the host (SciPy, the calling thread).
     batch_rows_fn(batch) -> [(Pw, yw), ...] (jitted by the caller), one pair per factor;
-    init = [(R0, c0), ...].  Returns [(R, c), ...] as jax arrays.
+    init = [(R0, c0), ...].  Returns [(R, c), ...] as jax arrays.  Each factor's live rows are
+    buffered and merged once merge_target(L, merge_rows) have accumulated, then flushed at the
+    end ('Batched merges' above); device_qr_stream merges at the same rows.
 
     Why not a lax.scan of jnp.linalg.qr on the CPU: XLA:CPU calls LAPACK (scipy's OpenBLAS)
     from its own worker threads, and OpenBLAS's multithreaded geqrf, called that way from
@@ -141,15 +185,78 @@ def host_qr_stream(batch_rows_fn, ds, init):
     OpenBLAS threads (a GitHub runner's default: 4 vCPUs) on a ~650-column basis, never with
     1-2 threads nor on the same matrices called directly.  Merges run here never did (tutorial 3,
     #61).  A device (GPU) backend keeps the scan: its QR is not OpenBLAS."""
-    import scipy.linalg
     acc = [(np.asarray(R, np.float64), np.asarray(c, np.float64)) for R, c in init]
+    buf, fill = [[] for _ in acc], [0] * len(acc)
+    target = [max(merge_target(R.shape[1], merge_rows), 1) for R, _ in acc]
+
+    def flush(k):
+        if fill[k]:
+            acc[k] = _host_merge(*acc[k], np.concatenate([p for p, _ in buf[k]]),
+                                 np.concatenate([v for _, v in buf[k]]))
+        buf[k], fill[k] = [], 0
     for i in range(ds.n_batches):
         parts = batch_rows_fn(jax.tree.map(lambda a: a[i], ds))
         for k, (Pw, yw) in enumerate(parts):
-            R, c = acc[k]
-            Q, R2 = scipy.linalg.qr(np.vstack([R, np.asarray(Pw)]), mode="economic")
-            acc[k] = (R2, Q.T @ np.concatenate([c, np.asarray(yw)]))
+            Pw, yw = np.asarray(Pw, np.float64), np.asarray(yw, np.float64)
+            keep = np.any(Pw != 0, axis=1) | (yw != 0)
+            if not keep.all():
+                Pw, yw = Pw[keep], yw[keep]
+            buf[k].append((Pw, yw)); fill[k] += len(yw)
+            if fill[k] >= target[k]:
+                flush(k)
+    for k in range(len(acc)):
+        flush(k)
     return [(jnp.asarray(R), jnp.asarray(c)) for R, c in acc]
+
+
+CPU_SCAN_MAX_L = 512     # above this, device_qr_stream on the CPU backend warns (#61, host_qr_stream)
+
+
+def device_qr_stream(rows_fn, ds, init, extra0, merge_rows=None):
+    """host_qr_stream as one lax.scan over the batches, for a device backend.  rows_fn(batch)
+    -> ([(Pw, yw), ...], extra); extra (a pytree like extra0) is summed.  Shapes are static, so
+    each factor carries a (target + r, L) row buffer and a fill count: a batch's r rows are
+    compacted live-first (a stable sort) and written at the fill, which then advances by the
+    live count only; a lax.cond merges the buffer (rows past the fill masked to zero) once the
+    fill reaches the target, so at most target + r rows are ever pending.  The same merge
+    points as host_qr_stream.  Returns ([(R, c), ...], extra).
+
+    Not for the CPU backend beyond small L: XLA:CPU's geqrf inside the scan can return NaN with
+    multithreaded OpenBLAS (#61; host_qr_stream says why), so callers route the CPU to the host
+    and this warns when L > CPU_SCAN_MAX_L there."""
+    if jax.default_backend() == "cpu" and max(jnp.shape(R)[1] for R, _ in init) > CPU_SCAN_MAX_L:
+        import warnings
+        warnings.warn("device_qr_stream on the CPU backend: XLA:CPU's geqrf in a scan can return NaN "
+                      "with multithreaded OpenBLAS at this basis size (#61); use host_qr_stream", stacklevel=2)
+    shapes = jax.eval_shape(rows_fn, jax.tree.map(lambda a: a[0], ds))[0]
+    init = [(jnp.asarray(R), jnp.asarray(c)) for R, c in init]
+    plan = [(max(merge_target(R.shape[1], merge_rows), 1), P.shape[0]) for (R, _), (P, _) in zip(init, shapes)]
+    bufs0 = [(jnp.zeros((t + r, R.shape[1]), R.dtype), jnp.zeros(t + r, R.dtype), jnp.zeros((), jnp.int32))
+             for (t, r), (R, _) in zip(plan, init)]
+
+    def merge(R, c, BP, By, n):
+        m = jnp.arange(BP.shape[0]) < n                         # rows past the fill: stale, masked
+        return _qr_merge(R, c, jnp.where(m[:, None], BP, 0.0), jnp.where(m, By, 0.0))
+
+    def body(carry, batch):
+        fac, bufs, extra = carry
+        parts, ex = rows_fn(batch)
+        fac2, bufs2 = [], []
+        for (t, _), (R, c), (BP, By, n), (Pw, yw) in zip(plan, fac, bufs, parts):
+            live = _live(Pw, yw)
+            o = jnp.argsort(~live, stable=True)                  # live rows first, in order
+            BP = jax.lax.dynamic_update_slice(BP, Pw[o].astype(BP.dtype), (n, jnp.zeros((), jnp.int32)))
+            By = jax.lax.dynamic_update_slice(By, yw[o].astype(By.dtype), (n,))
+            n = n + live.sum(dtype=jnp.int32)
+            R, c, n = jax.lax.cond(n >= t, lambda a: (*merge(*a), jnp.zeros((), jnp.int32)),
+                                   lambda a: (a[0], a[1], a[4]), (R, c, BP, By, n))
+            fac2.append((R, c)); bufs2.append((BP, By, n))
+        return (fac2, bufs2, jax.tree.map(jnp.add, extra, ex)), None
+
+    (fac, bufs, extra), _ = jax.lax.scan(body, (init, bufs0, extra0), ds)
+    out = [jax.lax.cond(n > 0, lambda a: merge(*a), lambda a: (a[0], a[1]), (R, c, BP, By, n))
+           for (R, c), (BP, By, n) in zip(fac, bufs)]                # the final flush
+    return out, extra
 
 
 def _qr_rows(model, cfg, batch):
@@ -167,12 +274,17 @@ def _qr_rows(model, cfg, batch):
     return out
 
 
-def linear_qr_statistics(model, cfg, ds):
+def linear_qr_statistics(model, cfg, ds, merge_rows=None, host=None):
     """linear_statistics in QR form (QRStats): one streaming pass over the same linear rows,
-    each batch folded into the per-quantity factors by an updating QR -- on the host on the
-    CPU backend (host_qr_stream says why), as a lax.scan on a device."""
+    folded into the per-quantity factors by batched updating QRs (QR_MERGE_ROWS_PER_L) -- on
+    the host on the CPU backend (host_qr_stream says why), as a lax.scan on a device
+    (device_qr_stream).  host: None picks by backend; merge_rows: see host_qr_stream (0 merges
+    every batch)."""
     L = cfg.len_basis
-    if jax.default_backend() == "cpu":
+    zeros = [(np.zeros((L, L)), np.zeros(L))] * 3
+    if host is None:
+        host = jax.default_backend() == "cpu"
+    if host:
         rows = jax.jit(lambda b: _qr_rows(model, cfg, b))
         scal = {f"{k}_{q}": 0.0 for k in ("yy", "n", "logw") for q in "EFV"}
 
@@ -181,21 +293,17 @@ def linear_qr_statistics(model, cfg, ds):
             for q, (_, _, yy, n, lw) in zip("EFV", out):
                 scal[f"yy_{q}"] += float(yy); scal[f"n_{q}"] += float(n); scal[f"logw_{q}"] += float(lw)
             return [(Pw, yw) for Pw, yw, *_ in out]
-        (RE, cE), (RF, cF), (RV, cV) = host_qr_stream(parts, ds, [(np.zeros((L, L)), np.zeros(L))] * 3)
+        (RE, cE), (RF, cF), (RV, cV) = host_qr_stream(parts, ds, zeros, merge_rows)
         return QRStats(RE, RF, RV, cE, cF, cV,
                        *(jnp.asarray(scal[f"{k}_{q}"]) for k in ("yy", "n", "logw") for q in "EFV"))
-    z2, z1, z0 = jnp.zeros((L, L)), jnp.zeros(L), jnp.zeros(())
-    zero = QRStats(z2, z2, z2, z1, z1, z1, z0, z0, z0, z0, z0, z0, z0, z0, z0)
 
-    def body(s, batch):
-        out = {}
-        for q, (Pw, yw, yy, n, lw) in zip("EFV", _qr_rows(model, cfg, batch)):
-            out[f"R_{q}"], out[f"c_{q}"] = _qr_merge(getattr(s, f"R_{q}"), getattr(s, f"c_{q}"), Pw, yw)
-            out[f"yy_{q}"] = getattr(s, f"yy_{q}") + yy
-            out[f"n_{q}"] = getattr(s, f"n_{q}") + n
-            out[f"logw_{q}"] = getattr(s, f"logw_{q}") + lw
-        return QRStats(**out), None
-    return jax.lax.scan(body, zero, ds)[0]
+    def rows_fn(batch):
+        out = _qr_rows(model, cfg, batch)
+        return [(Pw, yw) for Pw, yw, *_ in out], [o[2:] for o in out]
+    z0 = jnp.zeros(())
+    run = jax.jit(lambda d: device_qr_stream(rows_fn, d, zeros, [(z0, z0, z0)] * 3, merge_rows))
+    ((RE, cE), (RF, cF), (RV, cV)), ex = run(ds)
+    return QRStats(RE, RF, RV, cE, cF, cV, *(ex[i][k] for k in range(3) for i in range(3)))
 
 
 def _residual_type_stats(Phi_B, Phi_M, y, w):
