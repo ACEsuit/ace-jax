@@ -76,6 +76,45 @@ def test_node_B_and_jacobian_match_dense(built):
     assert Jst.shape == Jd.shape and _rel(Jst, Jd) < TOL
 
 
+REPEATED = {(3, 8): (39, 3), (4, 12): (446, 4)}     # AA columns with a repeated A factor, max multiplicity
+
+
+def test_bases_have_repeated_factors(built):
+    """The leave-one-out dB/dA sums one entry per factor position, so a repeated factor (A_m^k)
+    must come out as k A_m^(k-1) -- these bases exercise that: 39 / 446 such columns, up to A_m^3 / A_m^4."""
+    n, mx = 0, 1
+    for g in built.model.aa_specs:
+        for row in np.asarray(g):
+            c = int(np.bincount(row).max())
+            n, mx = n + (c > 1), max(mx, c)
+    o, d = built.meta["order"], built.meta["totaldegree"]
+    assert (n, mx) == REPEATED[(o, d)]
+
+
+def test_jacobian_with_exact_zeros_in_A(built):
+    """Exact zeros in A (a radial or Y_lm channel that vanishes, a node with no neighbour): the
+    leave-one-out products need no division, so dB/dA stays exact -- including d(A_m^k)/dA_m at A_m = 0."""
+    ms = built.model
+    md = with_a2b_sparse(ms, False)
+    A, _ = _nodes(ms)
+    A = np.array(A)
+    A[0] = 0.0                                    # a node with no neighbours
+    A[1, ::3] = 0.0                               # every third channel of another
+    for g in ms.aa_specs:                         # zero a factor that is repeated in some AA column
+        rows = [r for r in np.asarray(g) if np.bincount(r).max() > 1]
+        if rows:
+            A[2, rows[0][np.argmax([list(rows[0]).count(x) for x in rows[0]])]] = 0.0
+            break
+    A = jnp.asarray(A)
+    with highest_precision():
+        Jd = jax.vmap(jax.jacfwd(md._node_B))(A)
+        Js = ms._b_jacobian(A)
+        Bd, Bs = jax.vmap(md._node_B)(A), ms._b_from_a(A)
+    assert np.isfinite(np.asarray(Js)).all()
+    assert _rel(Js, Jd) < TOL and _rel(Bs, Bd) < TOL
+    np.testing.assert_array_equal(np.asarray(Js[0]), np.asarray(Jd[0]))   # all-zero node: exactly what jacfwd gives
+
+
 def test_dense_jacobian_parts_match_dense(built):
     ms = built.model
     md = with_a2b_sparse(ms, False)
