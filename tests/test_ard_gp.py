@@ -398,11 +398,61 @@ def test_gp_calculator_served_rows_are_chunked(gp_fit_dir, monkeypatch):
     at.calc = ref
     a = ref.get_property("forces_cov", at)
     monkeypatch.setattr(rows, "ROWS_EDGE_BUDGET", 1000)
+    # the served joint rows must actually take the node-chunked path under the small budget: record the
+    # chunk sizes rows_node_chunk returns while ard's joint rows are traced
+    import inspect
+    seen, orig = [], rows.rows_node_chunk
+
+    def spy(*args, **kw):
+        nc = orig(*args, **kw)
+        if any(f.function == "_joint_rows_body" for f in inspect.stack()):
+            seen.append(nc)
+        return nc
+    monkeypatch.setattr(rows, "rows_node_chunk", spy)
     small = GPCalculator.from_file(out / "gp_model.npz", posterior=out / "posterior.npz")
     at = _atoms0()
     at.calc = small
     b = small.get_property("forces_cov", at)
+    assert seen and all(nc is not None for nc in seen), seen      # traced afresh, and chunked
     np.testing.assert_allclose(b, a, rtol=1e-10, atol=1e-14 * np.abs(a).max())
+
+
+def test_gp_calculator_with_a_sandwich_posterior_skips_the_derivative_dtc(gp_fit_dir, monkeypatch):
+    """Review fix: with a posterior attached the mixture forces_std is replaced, so the calculator must not
+    build the derivative-DTC (n, K, d, 3) arrays it would discard (the big-cell memory hog)."""
+    from ace_jax.calc.gp import GPCalculator
+    from ace_jax.fit import predict
+    out, _, _ = gp_fit_dir
+    calls, orig = [], predict._dtc_deriv_residual
+    monkeypatch.setattr(predict, "_dtc_deriv_residual", lambda *a, **k: calls.append(1) or orig(*a, **k))
+    calc = GPCalculator.from_file(out / "gp_model.npz", posterior=out / "posterior.npz")
+    at = _atoms0()
+    at.calc = calc
+    assert np.isfinite(calc.get_property("forces_std", at)).all()
+    assert calls == []
+
+
+def test_dtc_term_carries_the_fitted_gp_prior_scale(gp_fit_dir):
+    """Review fix: the ARD prior on the GP block is exp(a_GP) K_MM, so the residual GP consistent with it has
+    DTC variance exp(-a_GP) (k_F - q_F); dtc_shape must scale the DTC diagonal by that factor."""
+    from ace_jax.fit.ard import GP_GROUP, dtc_shape, rows_fn_for
+    from ace_jax.fit.hypers import from_array
+    from ace_jax.fit.predict import _dtc_deriv_residual
+    out, d, res = gp_fit_dir
+    post, prob = res.ard.posterior, res.built.prob
+    nls = len(post.h) - len(post.groups)
+    h = np.asarray(post.h, float).copy()
+    h[nls + list(post.groups).index(GP_GROUP)] = 1.0                   # a_GP = 1
+    post = post._replace(variance="dtc", R=None, h=h)
+    theta = from_array(np.asarray(post.gp_theta))
+    b = jax.tree.map(lambda a: a[0], d.ds_test)
+    with highest_precision():
+        V = dtc_shape(post, prob, theta, b)
+        Fv, _ = _dtc_deriv_residual(theta, prob, b)
+        Vk = post._replace(variance="kappa").atom_shape(np.asarray(rows_fn_for(prob, theta)(b).F))
+    live = np.asarray(b.node_mask)
+    want = Vk[live] + np.exp(-1.0) * np.einsum("na,ab->nab", np.asarray(Fv)[live], np.eye(3))
+    np.testing.assert_allclose(V[live], want, rtol=1e-10, atol=1e-14 * np.abs(Vk).max())
 
 
 def test_dtc_shape_is_kappa_shape_plus_dtc_diagonal(gp_fit_dir):
@@ -418,7 +468,10 @@ def test_dtc_shape_is_kappa_shape_plus_dtc_diagonal(gp_fit_dir):
         Fv, _ = _dtc_deriv_residual(theta, prob, b)
         Vk = post._replace(variance="kappa", R=None).atom_shape(np.asarray(rows_fn_for(prob, theta)(b).F))
     live = np.asarray(b.node_mask)
-    np.testing.assert_allclose(V[live], Vk[live] + np.einsum("na,ab->nab", np.asarray(Fv)[live], np.eye(3)),
+    from ace_jax.fit.ard import GP_GROUP
+    a_gp = float(post.h[len(post.h) - len(post.groups) + list(post.groups).index(GP_GROUP)])   # DTC scale exp(-a_GP)
+    np.testing.assert_allclose(V[live], Vk[live] + np.exp(-a_gp) * np.einsum("na,ab->nab", np.asarray(Fv)[live],
+                                                                              np.eye(3)),
                                rtol=1e-10, atol=1e-14 * np.abs(Vk).max())
 
 
@@ -465,3 +518,24 @@ def test_gp_calculator_serves_a_dtc_posterior(tmp_path):
     sd, cov = calc.get_property("forces_std", at), calc.get_property("forces_cov", at)
     np.testing.assert_allclose(sd ** 2, np.trace(cov, axis1=1, axis2=2), rtol=1e-6)
     assert np.isfinite(calc.get_property("forces_q", at)).all() and np.all(sd > 0)
+
+
+def test_evidence_with_near_duplicate_inducing_points(tiny_gp_problem):
+    """Review Focus 2: two inducing points 1e-9 apart (K_MM singular up to its jitter).  The scaled-system
+    evidence still matches the observation-space reference, to a tolerance set by cond(K_MM)."""
+    from ace_jax.fit.ard import ARDEvidence, ard_gamma, ard_statistics, body_order_columns, gp_body_columns
+    from ace_jax.fit.prior_root import prior_root
+    prob, ds, theta = tiny_gp_problem
+    ind = prob.ind
+    prob = prob._replace(ind=ind._replace(XM=ind.XM.at[1].set(ind.XM[0] + 1e-9), SM=ind.SM.at[1].set(ind.SM[0]),
+                                          ZM=ind.ZM.at[1].set(ind.ZM[0])))
+    with highest_precision():
+        st = ard_statistics(theta, prob, ds, "joint", columns="joint")
+        ev = ARDEvidence(st, ard_gamma(prob), gp_body_columns(body_order_columns(_meta(prob), prob.cfg), 8),
+                         root=prior_root(prob, theta))
+        v, g = ev.value_and_grad(ev.h0(theta))
+        lml, _, st2 = _obs_space_reference(prob, ds, theta)
+    N = sum(float(getattr(st2, f"n_{q}")) for q in "EFV")
+    logw = sum(float(getattr(st2, f"logw_{q}")) for q in "EFV")
+    assert np.isfinite(g).all()
+    assert v + 0.5 * logw - 0.5 * N * np.log(2 * np.pi) == pytest.approx(lml, rel=1e-6)

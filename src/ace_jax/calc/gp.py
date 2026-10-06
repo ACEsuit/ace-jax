@@ -71,7 +71,9 @@ class GPCalculator(Calculator):
         # one jitted predictor per calculator, reused across draws and calls (theta/mu/L
         # are arguments): run eagerly, the derivative-DTC dispatches op by op (~5x slower)
         # and the node-chunked rows' fori_loop would recompile per draw and per call
-        self._predict = _predict_fn(fitted.prob, True, self.deriv_dtc)
+        # with a posterior the calibrated force UQ replaces the mixture forces_std: skip the derivative DTC
+        # (its (n, K, d, 3) arrays are the big-cell memory cost); energy_std does not depend on it
+        self._predict = _predict_fn(fitted.prob, True, self.deriv_dtc and self.posterior is None)
 
     def _attach_posterior(self, fitted, path):
         from ..fit.ard import ARDPosterior, rows_fn_for

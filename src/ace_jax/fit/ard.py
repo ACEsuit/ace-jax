@@ -72,7 +72,7 @@ def ard_statistics(theta, prob, ds, mode, columns="linear"):
     mode then combines its per-quantity Grams at theta's noise scales (3 Dt^2 transiently)."""
     from .rows import ROWS_EDGE_BUDGET
     if columns == "joint":
-        st = _joint_statistics_jit(theta, prob.spec, prob.model, prob.ind, prob.cfg, ds)
+        st = _joint_statistics_jit(theta, prob.spec, prob.model, prob.ind, prob.cfg, ds, ROWS_EDGE_BUDGET)
         if mode == "joint":
             return joint_ard_stats(st)
         if mode != "sequential":
@@ -124,7 +124,7 @@ def _sequential_stats_body(model, cfg, ds, inv, budget):
 _linear_statistics_jit = eqx.filter_jit(_linear_statistics_body)
 
 
-def _joint_statistics_body(theta, spec, model, ind, cfg, ds):
+def _joint_statistics_body(theta, spec, model, ind, cfg, ds, budget):
     from .stats import sufficient_statistics
     return sufficient_statistics(theta, spec, model, ind, cfg, ds)
 
@@ -676,13 +676,14 @@ def rows_fn_for(prob, theta, node_chunk=None):
     """The ARD stage's design-row function of one batch: the linear arm's node-chunked rows (M = 0; theta
     unused), or the joint rows [B | k_theta(B, B_M)] at theta (uq "ard-gp"), whose residual block
     rows.batch_rows bounds by ROWS_EDGE_BUDGET as in training."""
-    from .rows import chunked_rows_fn
+    from . import rows as _rows
     if prob.ind.XM.shape[0] == 0:
-        return chunked_rows_fn(prob.model, prob.cfg, node_chunk)
-    return lambda b: _joint_rows_jit(theta, prob.spec, prob.model, prob.ind, prob.cfg, b)
+        return _rows.chunked_rows_fn(prob.model, prob.cfg, node_chunk)
+    # ROWS_EDGE_BUDGET is read while tracing: pass it as the cache key, read at call time (as rows._rows_jit)
+    return lambda b: _joint_rows_jit(theta, prob.spec, prob.model, prob.ind, prob.cfg, b, _rows.ROWS_EDGE_BUDGET)
 
 
-def _joint_rows_body(theta, spec, model, ind, cfg, batch):
+def _joint_rows_body(theta, spec, model, ind, cfg, batch, budget):
     from .rows import batch_rows
     return batch_rows(theta, spec, model, ind, cfg, batch)
 
@@ -705,7 +706,11 @@ def dtc_shape(post, prob, theta, batch):
     F = np.asarray(_cat_rows(lin, res).F)
     Vk = post._replace(variance="kappa", R=None, Q=None).atom_shape(F)
     Fv, _ = _dtc_deriv_residual(theta, prob, batch, X, res=res, JU0=JU0)
-    return Vk + np.asarray(Fv)[:, :, None] * np.eye(3)[None]
+    # the ARD prior on the GP block is exp(a_GP) K_MM: the residual GP consistent with it has DTC variance
+    # exp(-a_GP) (k_F - q_F), the same scale the kappa part's GP block carries
+    nls = len(post.h) - len(post.groups)
+    scale = float(np.exp(-np.asarray(post.h, float)[nls + list(post.groups).index(GP_GROUP)]))
+    return Vk + scale * np.asarray(Fv)[:, :, None] * np.eye(3)[None]
 
 
 def predict_ard(post, prob, ds, node_chunk=None, rows_fn=None):
