@@ -306,3 +306,26 @@ def test_ard_gp_with_no_inducing_columns_is_the_linear_stage(ard_map):
 def test_ard_gp_config_refusals(kw, msg):
     with pytest.raises(ValueError, match=msg):
         _gp_pipe_cfg(**kw).validate()
+
+
+def test_ard_gp_fit_writes_ard_mean_gp_model(tmp_path):
+    """An ard-gp fit writes gp_model.npz whose one posterior is the ARD posterior (mean, chol(A) with
+    A = R0^T S R0), so GPCalculator's mean is the served posterior's, and posterior.npz beside it."""
+    from conftest import FIXTURE_DIR
+    from ace_jax.fit.pipeline import fit, load_fit_data, write_outputs
+    from ace_jax.fit.pipeline.export import load_gp_model
+    cfg = _gp_pipe_cfg().validate()
+    d = load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz"))
+    res = fit(cfg, d, log=lambda *a: None)
+    write_outputs(res, tmp_path, layout=("run", "cli"), log=lambda *a: None)
+    fg, _ = load_gp_model(tmp_path / "gp_model.npz")
+    mu, L = fg.posteriors[0]
+    np.testing.assert_array_equal(np.asarray(mu), res.ard.posterior.mean)
+    root = res.ard.posterior.prior_root
+    R0 = np.linalg.inv(np.asarray(root.rows(np.eye(root.width))))
+    S = np.asarray(res.ard.posterior.chol) @ np.asarray(res.ard.posterior.chol).T
+    A = R0.T @ S @ R0
+    np.testing.assert_allclose(np.asarray(L) @ np.asarray(L).T, A, rtol=1e-8, atol=1e-10 * np.abs(A).max())
+    assert np.allclose(np.triu(np.asarray(L), 1), 0.0)
+    assert (tmp_path / "posterior.npz").exists()
+    np.testing.assert_array_equal(np.asarray(fg.draws[0]), res.ard.posterior.gp_theta)

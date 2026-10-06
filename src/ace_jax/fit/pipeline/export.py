@@ -101,13 +101,27 @@ def _gpcfg_json(gpcfg):
     return d
 
 
+def _ard_gp_posterior(post):
+    """([theta], [mean], [L_A]) of an ard-gp ARDPosterior: L_A = R0^T L_S is the lower Cholesky factor of
+    A = R0^T S R0 (R0^T lower, block diagonal: diag(Gamma) on the linear rows, chol(K_MM) on the inducing
+    rows), so GPCalculator predicts the served posterior's mean and untempered variance."""
+    root = post.prior_root
+    Lc = np.asarray(post.chol, np.float64)
+    nl = len(root.dinv)
+    LA = np.concatenate([Lc[:nl] / np.asarray(root.dinv)[:, None], np.asarray(root.U).T @ Lc[nl:]], 0)
+    return np.asarray(post.gp_theta)[None], [np.asarray(post.mean)], [LA]
+
+
 def gp_model_arrays(res, n_draws=1):
     prob = res.built.prob
-    draws = _draws(res, n_draws)
-    mus, Ls = [], []
-    for d in draws:
-        mu, L = _posterior(res, from_array(jnp.asarray(d)))
-        mus.append(np.asarray(mu)); Ls.append(np.asarray(L))
+    if getattr(res, "ard", None) is not None:        # uq ard-gp: the ARD posterior is the model
+        draws, mus, Ls = _ard_gp_posterior(res.ard.posterior)
+    else:
+        draws = _draws(res, n_draws)
+        mus, Ls = [], []
+        for d in draws:
+            mu, L = _posterior(res, from_array(jnp.asarray(d)))
+            mus.append(np.asarray(mu)); Ls.append(np.asarray(L))
     # joint E0 (gpcfg.e0_cols): the E0 columns stay in mu and L, so GPCalculator's mean and
     # variance (its rows add the species counts too) are the fit's exactly; ace/E0 is the
     # pre-fit E0 they shift

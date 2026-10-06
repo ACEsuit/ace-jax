@@ -100,9 +100,10 @@ def predict_splits(cfg, d, b, stats, theta, draws, log=print, ard=None, readout=
         sub = dr if len(dr) <= cfg.n_draws else dr[np.linspace(0, len(dr) - 1, cfg.n_draws).astype(int)]
         for split, cfgs, ds, base in splits:
             t = time.time()
-            if cfg.uq == "ard":
-                from ..ard import predict_ard
-                pred = predict_ard(ard.posterior, prob, ds)
+            if cfg.uq in ("ard", "ard-gp"):
+                from ..ard import predict_ard, rows_fn_for
+                pred = predict_ard(ard.posterior, prob, ds,
+                                   rows_fn=rows_fn_for(prob, theta) if cfg.uq == "ard-gp" else None)
             elif readout is not None:        # solver lstsq: the fixed readout, zero variance
                 pred = predict_readout(prob, readout, ds)
             elif cfg.uq == "pops":
