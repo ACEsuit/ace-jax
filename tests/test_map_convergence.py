@@ -204,3 +204,26 @@ def test_converged_default_map_does_not_warn():
         warnings.simplefilter("error", UserWarning)
         cfg, d, b, obj = _setup("--strict")
         fit_map(cfg, d, b, obj, **QUIET)
+
+
+def test_linear_kernel_columns_are_the_hyperprior_alone():
+    """On the linear arm the LML never reads the kernel hyperparameters: their Hessian columns from the
+    hyperprior alone equal full HVP columns bitwise, and only the data-read columns cost an HVP."""
+    from ace_jax.eval import highest_precision
+    from ace_jax.fit.hypers import from_array, log_prior, to_array
+    from ace_jax.fit.pipeline.mapfit import KERNEL, LBFGS_HI, LBFGS_LO, _HVPLogPosterior
+    with highest_precision():
+        cfg, d, b, obj = _setup()
+        prior = b.prob.prior
+        logprior = lambda a: log_prior(from_array(a), prior)                 # noqa: E731
+        logpost = lambda a: obj.lik(a) + logprior(a)                         # noqa: E731
+        def vg(z):
+            v, g = obj.vg(jnp.asarray(z))
+            return float(v), np.asarray(g, float)
+        x = np.asarray(to_array(prior.mu), float) + 0.1                      # off the prior mean
+        full = _HVPLogPosterior(vg, LBFGS_LO, LBFGS_HI, logpost)
+        cheap = _HVPLogPosterior(vg, LBFGS_LO, LBFGS_HI, logpost, KERNEL, logprior)
+        H, Hc = full.hessian(x), cheap.hessian(x)
+    assert np.array_equal(H, Hc)
+    assert full.n_hvp == 10 and cheap.n_hvp == 4
+    assert np.all(H[KERNEL][:, ~KERNEL] == 0) and np.all(np.diag(H)[KERNEL] < 0)

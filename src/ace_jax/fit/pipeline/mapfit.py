@@ -30,6 +30,8 @@ MAP_GAIN_TOL = 1e-3
 MAP_FLOOR_CAP = 0.1      # nats: the most the roundoff floor may excuse
 ADAM_GTOL = 1e-2         # Adam on a path with no cheap Hessian: |grad|_inf, nats per log-unit
 RESTART_EVALS = 50       # L-BFGS-B evaluations (and iterations) after a line-search ('ABNORMAL') stop
+# the kernel hyperparameters: on the linear arm the LML never reads them, only their hyperprior does
+KERNEL = np.isin(Hypers._fields, ("log_ell", "log_A", "log_alpha", "log_r0", "log_eps", "log_rho"))
 
 
 class MapNotConverged(RuntimeError):
@@ -72,11 +74,20 @@ class _HVPLogPosterior:
     (69 P^2, ~10x).  Pinned and bound-active coordinates are not differentiated: decoupled with unit
     curvature, the box-constrained Newton step leaves them on their bounds.  A finite-difference
     Hessian (step 1e-4) was tried first: its error ~gnoise/step swamped the weakly curved directions
-    and the polish stopped 2.9 nats short (12 Si configs)."""
+    and the polish stopped 2.9 nats short (12 Si configs).
 
-    def __init__(self, vg_host, lo, hi, logpost):
+    prior_only (10,) bool, with logprior: coordinates the likelihood never reads (the kernel
+    hyperparameters on the linear arm).  Their columns are the hyperprior's alone, from a compiled HVP
+    of `logprior` (microseconds): the likelihood's part of those columns is exactly zero, and a full
+    column costs ~4 gradients (~56 s at o4d20 on an RTX 4000 Ada, against 16 s for a gradient).
+    n_hvp counts the full columns only."""
+
+    def __init__(self, vg_host, lo, hi, logpost, prior_only=None, logprior=None):
         self.vg, self.lo, self.hi, self.n_eval, self.n_hvp = vg_host, lo, hi, 0, 0
         self._hvp = jax.jit(lambda a, v: jax.jvp(jax.grad(logpost), (a,), (v,))[1])
+        self.prior_only = None if prior_only is None or logprior is None else np.asarray(prior_only, bool)
+        self._phvp = None if self.prior_only is None else \
+            jax.jit(lambda a, v: jax.jvp(jax.grad(logprior), (a,), (v,))[1])
         self._last = (None, None)
 
     def value_and_grad(self, x):
@@ -95,8 +106,12 @@ class _HVPLogPosterior:
         H = np.zeros((x.size, x.size))
         xj = jnp.asarray(x)
         for i in np.flatnonzero(free):
+            e = jnp.zeros_like(xj).at[i].set(1.0)
+            if self.prior_only is not None and self.prior_only[i]:
+                H[:, i] = np.asarray(self._phvp(xj, e), float)
+                continue
             self.n_hvp += 1
-            H[:, i] = np.asarray(self._hvp(xj, jnp.zeros_like(xj).at[i].set(1.0)), float)
+            H[:, i] = np.asarray(self._hvp(xj, e), float)
         Hf = H[np.ix_(free, free)]
         H = np.zeros_like(H)
         H[np.ix_(free, free)] = 0.5 * (Hf + Hf.T)
@@ -218,7 +233,10 @@ def fit_map(cfg, d, b, obj, log=print):
     polish = polish_wanted(cfg)
     tied = getattr(obj, "tied", None)               # shared noise: log_sigma_E/V copy log_sigma_F
     free = None if tied is None else ~tied
-    logpost = lambda a: obj.lik(a) + log_prior(from_array(a), prob.prior, free)       # noqa: E731
+    logprior = lambda a: log_prior(from_array(a), prob.prior, free)                  # noqa: E731
+    logpost = lambda a: obj.lik(a) + logprior(a)                                     # noqa: E731
+    prior_only = KERNEL if cfg.arm != "gp" else None
+    hvp_ev = lambda: _HVPLogPosterior(vg_host, lo, hi, logpost, prior_only, logprior)  # noqa: E731
     if cfg.opt == "adam":
         theta = run_map(obj.lik, prob.prior, steps=cfg.map_steps, lr=cfg.map_lr, seed=cfg.seed, init=init)
         x = np.array(to_array(theta), float)
@@ -228,7 +246,7 @@ def fit_map(cfg, d, b, obj, log=print):
             lo, hi = np.where(tied, x, -np.inf), np.where(tied, x, np.inf)
             theta = Hypers(*[float(val) for val in x])
         v, g = vg_host(x)                               # one evaluation; a Hessian only where it is cheap
-        H = _HVPLogPosterior(vg_host, lo, hi, logpost).hessian(x) if polish else None
+        H = hvp_ev().hessian(x) if polish else None
         conv = judge(v, g, x, lo, hi, H=H, strict=cfg.strict, log=log)
         ev = _log_evidence(obj, theta)
         return MapFit(theta, None, None, {"map": time.time() - t}, ev,
@@ -266,7 +284,7 @@ def fit_map(cfg, d, b, obj, log=print):
     x, v, g, pol, H, gnoise = np.asarray(best["x"], float), best["value"], best["grad"], None, None, None
     if polish:
         tp = time.time()
-        ev = _HVPLogPosterior(vg_host, lo, hi, logpost)
+        ev = hvp_ev()
         x, pol = newton_polish(ev, x, lo, hi, gradient_floor=True)
         v, g = ev.value_and_grad(x)
         H, gnoise = pol.pop("hessian"), np.asarray(pol["gnoise"], float)    # the polish's own, at x
