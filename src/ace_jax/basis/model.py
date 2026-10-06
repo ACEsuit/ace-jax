@@ -17,7 +17,7 @@ from typing import ClassVar, NamedTuple
 import jax.numpy as jnp
 import numpy as np
 
-from ..eval.model import ACEModel, fold_readout, with_edge_a_kind
+from ..eval.model import ACEModel, a2b_sparse_auto, fold_readout, with_a2b_sparse, with_edge_a_kind
 from . import radial_init as ri
 from .coupling import couple
 from .prior import smoothness_prior
@@ -64,8 +64,8 @@ class Basis(NamedTuple):
                                else "real_sphericalharmonics")
         checks = (
             ("elements vs WB", len(meta["elements"]), model.WB.shape[1]),
-            ("n_B vs A2B", meta["n_B"], model.A2B.shape[0]),
-            ("n_AA vs A2B", meta["n_AA"], model.A2B.shape[1]),
+            ("n_B vs A2B", meta["n_B"], model.a2b_shape[0]),
+            ("n_AA vs A2B", meta["n_AA"], model.a2b_shape[1]),
             ("aa_lens vs aa_specs", meta["aa_lens"], [int(g.shape[0]) for g in model.aa_specs]),
             ("lmax", meta["lmax"], int(model.lmax)),
         )
@@ -94,7 +94,7 @@ def nnll_from_coupling(A2B, aa_sig, tol=1e-12):
 def build_model(elements, order, totaldegree, *, wL=1.5, rcut=5.5, r0=None,
                 rin=0.0, radial_mode="onehot", pair_mode="onehot",
                 seed=0, with_gamma=True, edge_a_kind="gather",
-                coupling_cache=True, coupling_cache_dir=None, n_q_factor=1.5):
+                coupling_cache=True, coupling_cache_dir=None, n_q_factor=1.5, a2b_sparse="auto"):
     """Author a frozen `ace_model`-family model in memory.
 
     elements: atomic numbers or symbols (order kept, no duplicates); order:
@@ -109,6 +109,9 @@ def build_model(elements, order, totaldegree, *, wL=1.5, rcut=5.5, r0=None,
     `coupling_cache=False` to always call the shim.
 
     n_q_factor: tensor-radial polynomial span, n_q = ceil(n_q_factor * max n).
+
+    a2b_sparse: "auto" (default) holds A2B as sparse triplets only when it is
+    sparse enough (`eval.model.a2b_sparse_auto`: every ACE coupling is); True/False force it.
 
     Returns a `Basis`.  Needs the compiled coupling library
     (a core dependency on supported platforms) on a coupling-cache miss; evaluate in float64 with x64 enabled."""
@@ -157,6 +160,7 @@ def build_model(elements, order, totaldegree, *, wL=1.5, rcut=5.5, r0=None,
     a2b_rows = rr[order_].astype(np.int32)
     a2b_cols = cc[order_].astype(np.int32)
     a2b_vals = cpl.A2B[rr[order_], cc[order_]]
+    sparse = (a2b_sparse_auto(len(a2b_vals), n_B, n_AA) if a2b_sparse == "auto" else bool(a2b_sparse))
 
     ar = np.array([a[0] for a in cpl.aspec], np.int32)
     ay = np.array([a[1] for a in cpl.aspec], np.int32)
@@ -175,10 +179,10 @@ def build_model(elements, order, totaldegree, *, wL=1.5, rcut=5.5, r0=None,
         pair_transform=jnp.asarray(pinit["pair_transform"]),
         rnl_envelope=jnp.asarray(tinit["rnl_envelope"]),
         pair_envelope=jnp.asarray(pinit["pair_envelope"]),
-        A2B=jnp.asarray(cpl.A2B),
+        A2B=None if sparse else jnp.asarray(cpl.A2B),
         a2b_rows=jnp.asarray(a2b_rows), a2b_cols=jnp.asarray(a2b_cols),
         a2b_vals=jnp.asarray(a2b_vals, jnp.float64),
-        a2b_sparse=False,
+        a2b_sparse=sparse,
         WB=jnp.asarray(WB), Wpair=jnp.asarray(Wpair), E0=jnp.asarray(E0),
         aspec_r=jnp.asarray(ar), aspec_y=jnp.asarray(ay),
         aa_specs=tuple(jnp.asarray(g, jnp.int32) for g in cpl.aa_specs),
@@ -190,6 +194,8 @@ def build_model(elements, order, totaldegree, *, wL=1.5, rcut=5.5, r0=None,
     )
     # "matmul" needs the one-hot selectors (a_sel_r/a_sel_y) the loader builds;
     # with_edge_a_kind is the single place that derives them from aspec
+    if sparse:
+        model = with_a2b_sparse(model)
     model = fold_readout(with_edge_a_kind(model, edge_a_kind))
 
     tensor_nnll = list(nnll)

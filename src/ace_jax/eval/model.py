@@ -30,10 +30,22 @@ import jax
 import jax.numpy as jnp
 
 from .edge_model import (EdgeSiteModel, calibrate_edge_a, one_hot_selector,  # noqa: F401
-                         product_basis, product_basis_dot, with_edge_a_kind)
+                         product_basis, product_basis_dot, product_basis_t, with_edge_a_kind)
 from .harmonics import real_solid_harmonics, real_spherical_harmonics
 from .radial import (agnesi_normalized, env_ace1_poly1sr, env_poly1sr,
                      env_poly2sx, poly_recursion, spline_eval, spline_eval_pairs)
+
+# `load` / `build_model` hold A2B as sparse triplets only (`with_a2b_sparse`) when at most
+# this fraction of it is nonzero.  Every ACE coupling is far below it (0.025-1.9%: about
+# 1.1-1.4 nonzeros per column), so in practice every model is sparse; the dense form stays
+# reachable with a2b_sparse=False.
+A2B_SPARSE_MAX_DENSITY = 0.05
+
+
+def a2b_sparse_auto(nnz, n_B, n_AA):
+    """True when an (n_B, n_AA) A2B with nnz nonzeros should be held sparse."""
+    return nnz <= A2B_SPARSE_MAX_DENSITY * n_B * n_AA
+
 
 # species count from which the CPU pools the species-compact blocked A by segment_sum
 # rather than a one-hot over z_j (`ACEModel._blocked_a_scatter`)
@@ -82,11 +94,12 @@ class ACEModel(EdgeSiteModel):
     pair_transform: jax.Array     # (NZ, NZ, 7)
     rnl_envelope: jax.Array       # (NZ, NZ, 5)
     pair_envelope: jax.Array      # (NZ, NZ, 3)
-    A2B: jax.Array                # (n_B, n_AA) dense
-    # A2B is extremely sparse -- typically one nonzero per column, 0.07%
-    # occupied at 1429 basis functions -- so the dense contraction does
+    A2B: jax.Array | None         # (n_B, n_AA) dense, or None when `a2b_sparse`
+    # A2B is extremely sparse -- 1.1-1.4 nonzeros per column, 0.025% occupied
+    # at 5456 basis functions (2.6 GB dense) -- so the dense contraction does
     # n_B * n_AA multiply-adds per node where nnz would do.  These triplets
-    # drive the sparse path; see `a2b_sparse`.
+    # (in file order, never reordered: `save_npz` writes them back) are the
+    # coupling's one source of truth on a sparse model; see `with_a2b_sparse`.
     a2b_rows: jax.Array
     a2b_cols: jax.Array
     a2b_vals: jax.Array
@@ -153,6 +166,12 @@ class ACEModel(EdgeSiteModel):
     rtab_grid: tuple = eqx.field(static=True, default=())    # (r_min, h, n) in r
     rtab_coefs: jax.Array = None                     # (NZ, NZ, ncoef, n_rnl + n_pair)
     blk_rtab_coefs: jax.Array = None                 # (NZ, NZ, ncoef, sum_l w_l + n_pair)
+    # The sparse A2B plan (`with_a2b_sparse`), int32 index arrays, None on a dense model.
+    # a2b_srt (rows, cols, vidx): the triplets in (row, col) order, vidx indexing
+    # a2b_vals, so B is one sorted segment_sum.  a2b_jac (src, vidx, ids): dB/dA as a
+    # sorted scatter of leave-one-out A products (`_b_jacobian`), sorted by ids.
+    a2b_srt: tuple = None
+    a2b_jac: tuple = None
 
     # -------------------------------------------------- edge embeddings
     def _radial_one(self, r, zi, zj, kind, trans, coefs, grid, Wnlq, ABC, env):
@@ -280,18 +299,82 @@ class ACEModel(EdgeSiteModel):
         specs = self.aa_specs if specs is None else specs
         return product_basis(A, specs)
 
-    def _from_pooled(self, A, Apair):
-        AA = self._aa(A)
+    # -------------------------------------------------- A2B coupling
+    @property
+    def a2b_shape(self):
+        """(n_B, n_AA), dense or sparse."""
+        if self.A2B is not None:
+            return tuple(int(d) for d in self.A2B.shape)
+        return int(self.WB.shape[0]), sum(int(g.shape[0]) for g in self.aa_specs)
+
+    def a2b_matrix(self):
+        """The dense (n_B, n_AA) A2B: the stored one, or materialised from the triplets
+        (n_B * n_AA elements -- 2.6 GB at 5456 basis functions; for inspection only)."""
+        if self.A2B is not None:
+            return self.A2B
+        return jnp.zeros(self.a2b_shape, self.a2b_vals.dtype).at[self.a2b_rows, self.a2b_cols].add(self.a2b_vals)
+
+    def _sparse_ready(self):
+        if self.a2b_srt is None or self.a2b_jac is None:
+            raise ValueError("a2b_sparse model without its sparse plan: build it with "
+                             "with_a2b_sparse(model) (load and build_model do)")
+        return self.a2b_srt
+
+    def _b_from_aa_t(self, AAt):
+        """B^T (n_B, n) = A2B AA^T from feature-major AAt (n_AA, n): gather the nnz
+        contributing AA rows (contiguous n-wide rows), one sorted segment_sum."""
+        r, c, v = self._sparse_ready()
+        return jax.ops.segment_sum(AAt[c] * self.a2b_vals[v][:, None], r,
+                                   num_segments=self.a2b_shape[0], indices_are_sorted=True)
+
+    def _b_from_a(self, A):
+        """B (n, n_B) from node-major A (n, n_A)."""
+        if not self.a2b_sparse:
+            return self._aa(A) @ self.A2B.T
+        return self._b_from_aa_t(product_basis_t(A.T, self.aa_specs)).T
+
+    def _node_B(self, A_i):
+        """One node's B (n_B,) from its A (n_A,): the per-node map the Jacobians differentiate."""
+        AA = jnp.concatenate([jnp.prod(A_i[g], axis=-1) for g in self.aa_specs])
         if self.a2b_sparse:
-            # gather the nnz contributing columns and scatter into basis rows.
-            # There is usually exactly one nonzero per column, so this replaces
-            # an (n_B x n_AA) matmul with an nnz-length gather.
-            contrib = AA[:, self.a2b_cols] * self.a2b_vals          # (n_nodes, nnz)
-            B = jax.ops.segment_sum(contrib.T, self.a2b_rows,
-                                    num_segments=self.A2B.shape[0]).T
-        else:
-            B = AA @ self.A2B.T
-        return B, Apair
+            r, c, v = self._sparse_ready()
+            return jax.ops.segment_sum(AA[c] * self.a2b_vals[v], r, num_segments=self.a2b_shape[0],
+                                       indices_are_sorted=True)
+        return AA @ self.A2B.T
+
+    def _b_jacobian(self, A):
+        """dB/dA (n, n_B, n_A) per node, from node-major A (n, n_A).
+
+        Dense: `vmap(jacfwd(_node_B))`, forward mode over n_A tangents.  Sparse: the same
+        derivative assembled directly.  B_b = sum_t v_t prod_p A[s_t,p] over the triplets t of
+        row b (s_t = aa_specs row of column c_t), so dB_b/dA_m = sum_{t,p: s_t,p = m} v_t
+        prod_{q != p} A[s_t,q]: one leave-one-out product per (triplet, factor) pair --
+        sum_t order(c_t) entries, 346k at 5456 basis functions -- scattered by a sorted
+        segment_sum into n_B * n_A.  jacfwd instead pushes an (n_AA, n_A) tangent per node
+        through the products (20.7M elements there) and then through A2B; this never forms
+        it.  Agrees with jacfwd to roundoff (the leave-one-out products associate
+        differently); tests/test_sparse_a2b.py."""
+        if not self.a2b_sparse:
+            return jax.vmap(jax.jacfwd(self._node_B))(A)
+        self._sparse_ready()
+        src, v, ids = self.a2b_jac
+        n_B, n_A, n = self.a2b_shape[0], A.shape[1], A.shape[0]
+        At = A.T
+        L = []
+        for g in self.aa_specs:                       # (n_v, k): leave-one-out products, (n_v * k, n)
+            F = At[g]                                 # (n_v, k, n)
+            k = g.shape[1]
+            pre, suf = [jnp.ones_like(F[:, 0])], [jnp.ones_like(F[:, 0])]
+            for p in range(1, k):
+                pre.append(pre[-1] * F[:, p - 1])
+                suf.append(suf[-1] * F[:, k - p])
+            L.append(jnp.stack([pre[p] * suf[k - 1 - p] for p in range(k)], axis=1).reshape(-1, n))
+        U = jnp.concatenate(L)[src] * self.a2b_vals[v][:, None]                    # (n_e, n)
+        J = jax.ops.segment_sum(U, ids, num_segments=n_B * n_A, indices_are_sorted=True)
+        return J.T.reshape(n, n_B, n_A)
+
+    def _from_pooled(self, A, Apair):
+        return self._b_from_a(A), Apair
 
     def _readout_folded(self, A, Apair, node_z, specs=None):
         e = product_basis_dot(A, self.aa_specs if specs is None else specs, self.ctilde[:, node_z])
@@ -369,16 +452,14 @@ class ACEModel(EdgeSiteModel):
         dA, dRp = jax.vmap(jax.jacfwd(feats))(rij, zi, zj)     # (E, n_A, 3), (E, n_pair, 3)
         A = pool_sparse(edge_A, segment_ids, n_nodes, mask)
 
-        def node_B(A_i):
-            AA = jnp.concatenate([jnp.prod(A_i[g], axis=-1) for g in self.aa_specs])
-            return AA @ self.A2B.T
-
-        J_BA = jax.vmap(jax.jacrev(node_B))(A)                  # (n_nodes, n_B, n_A)
+        node_B = self._node_B
+        J_BA = (self._b_jacobian(A) if self.a2b_sparse
+                else jax.vmap(jax.jacrev(node_B))(A))           # (n_nodes, n_B, n_A)
         J_B = jnp.einsum("ebm,emc->ebc", J_BA[segment_ids], dA) # (E, n_B, 3)
         J = jnp.concatenate([J_B, dRp], axis=1)                 # (E, D, 3)
         if mask is not None:
             J = jnp.where(mask[:, None, None], J, 0.0)
-        X = jnp.concatenate([jax.vmap(node_B)(A),
+        X = jnp.concatenate([self._b_from_a(A) if self.a2b_sparse else jax.vmap(node_B)(A),
                              pool_sparse(Rpair, segment_ids, n_nodes, mask)], axis=1)
         return X, J
 
@@ -398,12 +479,9 @@ class ACEModel(EdgeSiteModel):
         J_B = jnp.einsum("nbm,nkmc->nkbc", J_BA, dA.reshape(n, K, -1, 3))       # (n, K, n_B, 3)
         J = jnp.concatenate([J_B.reshape(n * K, -1, 3), dRp], axis=1)          # (nK, D, 3)
         J = jnp.where(flat(mask)[:, None, None], J, 0.0)
-        X = jnp.concatenate([jax.vmap(self._node_B)(A), pool_dense(Rpair.reshape(n, K, -1), mask)], axis=1)
+        B = self._b_from_a(A) if self.a2b_sparse else jax.vmap(self._node_B)(A)
+        X = jnp.concatenate([B, pool_dense(Rpair.reshape(n, K, -1), mask)], axis=1)
         return X, J
-
-    def _node_B(self, A_i):
-        AA = jnp.concatenate([jnp.prod(A_i[g], axis=-1) for g in self.aa_specs])
-        return AA @ self.A2B.T
 
     def _dense_jacobian_parts(self, rij, zi, zj, mask):
         """(A (n, n_A), J_BA = dB/dA (n, n_B, n_A), dA (nK, n_A, 3), Rpair (nK, n_pair), dRp (nK, n_pair, 3)):
@@ -419,10 +497,11 @@ class ACEModel(EdgeSiteModel):
         edge_A, Rpair = jax.vmap(feats)(flat(rij), flat(zi), flat(zj))
         dA, dRp = jax.vmap(jax.jacfwd(feats))(flat(rij), flat(zi), flat(zj))   # (nK, n_A, 3), (nK, n_pair, 3)
         A = pool_dense(edge_A.reshape(n, K, -1), mask)                          # (n, n_A)
-        # forward mode: n_A tangents (72 at the Cantor basis) instead of n_B
+        # dense: forward mode, n_A tangents (72 at the Cantor basis) instead of n_B
         # cotangents (1348) pulled back through n_AA products -- jacrev here
-        # materialises (n, n_B, n_AA) intermediates, 11 GB per batch
-        J_BA = jax.vmap(jax.jacfwd(self._node_B))(A)                            # (n, n_B, n_A)
+        # materialises (n, n_B, n_AA) intermediates, 11 GB per batch; sparse: assembled
+        # from the triplets, no tangent through AA at all (`_b_jacobian`)
+        J_BA = self._b_jacobian(A)                                              # (n, n_B, n_A)
         return A, J_BA, dA, Rpair, dRp
 
     def committee_edge_grad_dense(self, rij, zi, zj, mask, node_z, CB, CP):
@@ -623,9 +702,59 @@ def fold_readout(model):
     import dataclasses
     if model.folded:
         return model
+    if model.A2B is None:                     # sparse: ctilde[c] = sum_t v_t WB[r_t], c_t = c
+        ctilde = jnp.zeros((model.a2b_shape[1], model.WB.shape[1]), model.WB.dtype).at[model.a2b_cols].add(
+            model.a2b_vals[:, None] * model.WB[model.a2b_rows])
+        return dataclasses.replace(model, ctilde=ctilde, folded=True)
     with highest_precision():                 # TF32 would corrupt ctilde on Ampere+
         ctilde = model.A2B.T @ model.WB       # (n_AA, NZ)
     return dataclasses.replace(model, ctilde=ctilde, folded=True)
+
+
+def with_a2b_sparse(model, sparse=True):
+    """`model` with A2B held sparse (True: the dense A2B dropped, the index plan of
+    `_b_from_aa_t` / `_b_jacobian` attached) or dense (False: A2B materialised from the
+    triplets).  Exact either way: the triplets are the same numbers.  Host-side (numpy)
+    preprocessing on concrete arrays: call it on a loaded or built model, not under a trace.
+
+    The plan, all int32 and O(nnz):
+      a2b_srt (rows, cols, vidx)  the triplets sorted by (row, col), vidx into a2b_vals;
+      a2b_jac (src, vidx, ids)    one entry per (triplet, factor p): src indexes the
+          concatenated leave-one-out products (group offset + local column * k + p),
+          ids = row * n_A + aa_specs[column, p], sorted by ids."""
+    import dataclasses
+    import numpy as np
+    if not sparse:
+        if not model.a2b_sparse and model.A2B is not None:
+            return model
+        return dataclasses.replace(model, A2B=model.a2b_matrix(), a2b_sparse=False, a2b_srt=None, a2b_jac=None)
+    rows, cols = np.asarray(model.a2b_rows, np.int64), np.asarray(model.a2b_cols, np.int64)
+    o = np.lexsort((cols, rows))
+    r, c = rows[o], cols[o]
+    n_A = int(model.aspec_r.shape[0])
+    src, vid, ids = [], [], []
+    col0 = loo0 = 0
+    for g in model.aa_specs:
+        g = np.asarray(g, np.int64)
+        n_v, k = g.shape
+        sel = (c >= col0) & (c < col0 + n_v)
+        lc = c[sel] - col0
+        p = np.arange(k)
+        src.append((loo0 + lc[:, None] * k + p).ravel())
+        vid.append(np.repeat(o[sel], k))
+        ids.append((r[sel][:, None] * n_A + g[lc]).ravel())
+        col0 += n_v
+        loo0 += n_v * k
+    src, vid, ids = (np.concatenate(x) for x in (src, vid, ids))
+    if col0 != model.a2b_shape[1] or (cols.size and cols.max() >= col0):
+        raise ValueError(f"A2B columns ({model.a2b_shape[1]}) do not match aa_specs ({col0})")
+    if model.a2b_shape[0] * n_A >= 2 ** 31:
+        raise ValueError("n_B * n_A overflows the int32 dB/dA scatter ids")
+    s = np.argsort(ids, kind="stable")
+    i32 = lambda a: jnp.asarray(a, jnp.int32)
+    return dataclasses.replace(model, A2B=None, a2b_sparse=True,
+                               a2b_srt=(i32(r), i32(c), i32(o)),
+                               a2b_jac=(i32(src[s]), i32(vid[s]), i32(ids[s])))
 
 
 # ------------------------------------------------------------------ lean evaluation form

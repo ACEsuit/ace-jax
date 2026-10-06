@@ -201,7 +201,7 @@ def test_sparse_a2b_matches_dense(case, npz):
         es = model_s.site_energies(rij, nz[send], nz[recv], send, n, nz)
     err = float(np.max(np.abs(np.asarray(ed) - np.asarray(es))))
     nnz = int(model_d.a2b_vals.shape[0])
-    dense = int(model_d.A2B.shape[0]) * int(model_d.A2B.shape[1])
+    dense = int(model_d.a2b_shape[0]) * int(model_d.a2b_shape[1])
     print(f"\n  {npz.stem}: A2B {model_d.A2B.shape} nnz={nnz} "
           f"({100*nnz/dense:.3f}% occupied)  sparse-vs-dense max|d| = {err:.3e}")
     assert err < 1e-10

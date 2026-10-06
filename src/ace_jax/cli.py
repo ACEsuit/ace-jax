@@ -223,7 +223,12 @@ def run(a):
             else load_fit_data(cfg, train=a.train, test=a.test, ood=a.ood))
     if a.r0 is None:
         print(f"r0 {data.r0:.3f} A (mean bond length of the basis; pass --r0 to override)")
-    res = fit(cfg, data)
+    # hand the only reference to fit: --learn-radial swaps the model (and FitData.basis's), so the
+    # pre-radial FitData -- its model, datasets and npz -- is not kept alive here for the whole run
+    held = [data]
+    del data
+    res = fit(cfg, held.pop())
+    data = res.data
     write_outputs(res, a.out, layout=("cli",), argv=vars(a), save_model=not a.no_save_model,
                   model_draws=a.model_draws)
     from . import runfile
@@ -455,7 +460,7 @@ def cmd_basis(a):
         out.parent.mkdir(parents=True, exist_ok=True)
     save_npz(out, auth)
     m, meta = auth.model, auth.meta
-    print(f"basis: {m.A2B.shape[0]} B functions ({meta['n_AA']} AA), "
+    print(f"basis: {m.a2b_shape[0]} B functions ({meta['n_AA']} AA), "
           f"{meta['n_pair']} pair, {meta['len_basis']} basis entries, "
           f"lmax {meta['lmax']}, rcut {meta['rcut']} -> {a.out}")
     return auth

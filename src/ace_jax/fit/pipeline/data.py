@@ -22,7 +22,8 @@ class FitData(NamedTuple):
     perm: object
     r0: float | None = None             # mean radial length of the basis, when it records one
     source: str = ""                    # log label: the model path, or "basis Si order 3 ..."
-    basis: object = None                # the Basis when built/passed in memory, else None
+    basis: object = None                # the Basis when built/passed in memory, else None; its
+                                        # .model is `model` before E0 (one copy of the arrays)
 
 
 def _zero_base(c):
@@ -164,6 +165,8 @@ def load_fit_data(cfg, *, data=None, train=None, test=None, ood=None, log=print)
     # the model after the configs: a basis built here takes its species from them
     src, label, basis = _model_source(cfg, train_o, test_o, ood_o, log)
     model, meta, z = load(src)
+    if basis is not None:               # drop the built model's own arrays: the loaded one replaces it
+        basis = basis._replace(model=model)
     from ...eval.pace_model import PACEModel
     if isinstance(model, PACEModel):
         raise ValueError(f"{label}: a PACE .yace model is evaluate-only and cannot be fitted; "

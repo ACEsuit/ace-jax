@@ -82,9 +82,9 @@ def linear_rows(model, cfg, batch):
 
 
 ROWS_EDGE_BUDGET = int(os.environ.get("ACEJAX_ROWS_EDGE_BUDGET", 1 << 28))
-"""Elements of the largest per-chunk temporary the training-side rows may build at once (2 GiB in
-f64): the edge Jacobian J (nc*K, D, 3) or, if wider, the edge-feature intermediates of
-`edge_jacobian_dense` (`_node_elems`).  A batch that fits takes the unchunked `linear_rows` path
+"""Elements of per-chunk temporaries the training-side rows may build at once (2 GiB in f64): at
+least the edge Jacobian J (nc*K, D, 3), and the summed per-node values of `edge_jacobian_dense`
+(`_node_elems`), which also bounds a chunk's backward under radial learning.  A batch that fits takes the unchunked `linear_rows` path
 (compiled shapes unchanged); a larger one -- size-aware packing gives n_cap ~ 3.3k nodes with
 k_cap ~ 900 slots, a 220 GB J -- is node-chunked (`rows_node_chunk`).  Read at trace time, so a
 test can lower it (or ACEJAX_ROWS_EDGE_BUDGET, to run a whole suite chunked) to force chunking."""
@@ -92,22 +92,27 @@ test can lower it (or ACEJAX_ROWS_EDGE_BUDGET, to run a whole suite chunked) to 
 _NODE_ELEMS = {}
 
 
-def _max_elems(jaxpr):
-    """Largest element count of any value of a jaxpr, sub-jaxprs included."""
+def _elems(jaxpr, out=None):
+    """Element count of every value of a jaxpr in equation order, sub-jaxprs included."""
     from jax.extend import core as jcore
-    best = 0
+    out = [] if out is None else out
     for eqn in jaxpr.eqns:
         for v in eqn.outvars:
             shape = getattr(v.aval, "shape", None)
             if shape is not None:
-                best = max(best, math.prod(shape))
+                out.append(math.prod(shape))
         for p in eqn.params.values():
             for sub in (p if isinstance(p, (tuple, list)) else (p,)):
                 if isinstance(sub, jcore.ClosedJaxpr):
-                    best = max(best, _max_elems(sub.jaxpr))
+                    _elems(sub.jaxpr, out)
                 elif isinstance(sub, jcore.Jaxpr):
-                    best = max(best, _max_elems(sub))
-    return best
+                    _elems(sub, out)
+    return out
+
+
+def _max_elems(jaxpr):
+    """Largest element count of any value of a jaxpr, sub-jaxprs included."""
+    return max(_elems(jaxpr), default=0)
 
 
 def _model_key(model):
@@ -127,12 +132,19 @@ def _model_key(model):
 
 
 def _node_elems(model, cfg, K):
-    """Peak temporary elements per centre node of `edge_jacobian_dense` with K neighbour slots:
-    the larger of J's K*D*3 and the widest intermediate of one node's abstract trace (edge
-    features can be wider than J: 10x on the si fixture, 3x at the production Cantor basis).
-    Every temporary scales linearly with the node count, so nc nodes cost nc times this.
-    Traced on an abstract copy of the model (float leaves as ShapeDtypeStructs), once per
-    structural model key and K."""
+    """Temporary elements per centre node of `edge_jacobian_dense` with K neighbour slots: the
+    larger of J's K*D*3 and the summed per-node growth of every value of its trace, from a
+    1-node to a 2-node trace.
+
+    Growth, not size: a model-sized value (the dense A2B's transpose, n_B * n_AA -- 350M
+    elements at 5456 basis functions, which collapsed every chunk to the granule) does not
+    grow with the node count and is not counted.  Summed, not the widest value: the rows are
+    differentiated (radial learning) through a checkpointed chunk, whose backward holds about
+    the chunk's whole forward set -- measured 0.76-0.8x this sum per node at Si o4d16/o4d20,
+    against 9x the widest value -- so the budget bounds the reverse pass too.  The rows' time
+    per batch is flat in the chunk size (o4d20, CPU: 8 to 152 nodes within 20%).  Traced on an
+    abstract copy of the model (float leaves as ShapeDtypeStructs), once per structural model
+    key and K."""
     import equinox as eqx
     try:
         key = (_model_key(model), K)
@@ -143,12 +155,16 @@ def _node_elems(model, cfg, K):
     n = K * cfg.D * 3
     dyn, static = eqx.partition(model, eqx.is_inexact_array)
     abstract = jax.tree.map(lambda x: jax.ShapeDtypeStruct(x.shape, x.dtype), dyn)
-    r = jax.ShapeDtypeStruct((1, K, 3), jnp.zeros(()).dtype)
-    i = jax.ShapeDtypeStruct((1, K), jnp.int32)
-    m = jax.ShapeDtypeStruct((1, K), bool)
+    def trace(nn):
+        r = jax.ShapeDtypeStruct((nn, K, 3), jnp.zeros(()).dtype)
+        i = jax.ShapeDtypeStruct((nn, K), jnp.int32)
+        m = jax.ShapeDtypeStruct((nn, K), bool)
+        return _elems(jax.make_jaxpr(lambda d, *a: eqx.combine(d, static).edge_jacobian_dense(*a))(
+            abstract, r, i, i, m).jaxpr)
     try:
-        jp = jax.make_jaxpr(lambda d, *a: eqx.combine(d, static).edge_jacobian_dense(*a))(abstract, r, i, i, m)
-        n = max(n, _max_elems(jp.jaxpr))
+        e1, e2 = trace(1), trace(2)
+        n = max(n, sum(max(b - a, 0) for a, b in zip(e1, e2)) if len(e1) == len(e2)
+                else sum(e1))               # structures differ: the 1-node figure, conservative
     except NotImplementedError:     # a model without a B-basis (PACE): never reaches the rows
         pass
     if key is not None:
@@ -162,14 +178,18 @@ ROW_GRANULE = 8
 
 def rows_node_chunk(model, cfg, Ncap, K):
     """The node chunk the bounded rows use for an (Ncap, K) batch: None (unchunked) when the
-    whole batch's peak temporary (Ncap * `_node_elems`) fits ROWS_EDGE_BUDGET, else the largest
-    multiple of ROW_GRANULE that fits -- at least one granule.  At the production Cantor basis
+    whole batch's peak temporary (Ncap * `_node_elems`) fits ROWS_EDGE_BUDGET, else a multiple of
+    ROW_GRANULE that fits -- at least one granule -- balanced over the fewest chunks that fit.  At the production Cantor basis
     with k_cap = 928 one node's temporaries are ~26M elements, so the budget gives 8 nodes per
     chunk (one ~1.6 GB temporary); the residual block sub-scans gcd(nc, cfg.node_chunk) nodes."""
     per = _node_elems(model, cfg, K)
     if Ncap * per <= ROWS_EDGE_BUDGET:
         return None
-    return max(ROW_GRANULE, (ROWS_EDGE_BUDGET // per) // ROW_GRANULE * ROW_GRANULE)
+    nc = max(ROW_GRANULE, (ROWS_EDGE_BUDGET // per) // ROW_GRANULE * ROW_GRANULE)
+    # balanced: as many chunks, each the least granule multiple covering Ncap (<= nc), so the
+    # padding is under a granule per chunk (224 nodes: 2 x 112, not 2 x 200 padded to 400)
+    per_chunk = -(-Ncap // -(-Ncap // nc))
+    return -(-per_chunk // ROW_GRANULE) * ROW_GRANULE
 
 
 def linear_rows_bounded(model, cfg, batch, node_chunk=None):

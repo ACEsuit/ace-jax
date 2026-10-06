@@ -46,7 +46,7 @@ def save_npz(path, auth):
         "A2B_rows": np.asarray(model.a2b_rows, np.int32),
         "A2B_cols": np.asarray(model.a2b_cols, np.int32),
         "A2B_vals": np.asarray(model.a2b_vals, np.float64),
-        "A2B_shape": np.asarray(model.A2B.shape, np.int64),
+        "A2B_shape": np.asarray(model.a2b_shape, np.int64),
         "aspec_r": np.asarray(model.aspec_r, np.int32),
         "aspec_y": np.asarray(model.aspec_y, np.int32),
         "elements": np.asarray(meta["elements"], np.int64),

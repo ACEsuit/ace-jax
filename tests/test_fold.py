@@ -41,7 +41,7 @@ def test_fold_matches_unfolded(npz, kind, sparse):
     m0, meta, z = load(npz, a2b_sparse=sparse, edge_a_kind=kind, fold=False)
     m1 = fold_readout(m0)
     assert not m0.folded and m1.folded
-    assert m1.ctilde.shape == (m0.A2B.shape[1], m0.WB.shape[1])
+    assert m1.ctilde.shape == (m0.a2b_shape[1], m0.WB.shape[1])
     E0, F0, V0 = _efv(m0, z)
     E1, F1, V1 = _efv(m1, z)
     print(f"\n  |dE| {abs(E0-E1):.2e}  |dF| {np.abs(F0-F1).max():.2e}  |dV| {np.abs(V0-V1).max():.2e}")

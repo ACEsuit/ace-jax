@@ -13,7 +13,7 @@ def test_build_basis_equals_build_model(tmp_path, monkeypatch):
     cache = _primed_cache(tmp_path)
     a = build_basis(BasisSpec(order=3, max_degree=10, elements=(14,), coupling_cache_dir=cache), seed=0)
     b = build_model([14], 3, 10, coupling_cache_dir=cache, seed=0)
-    assert np.array_equal(np.asarray(a.model.A2B), np.asarray(b.model.A2B))
+    assert np.array_equal(np.asarray(a.model.a2b_matrix()), np.asarray(b.model.a2b_matrix()))
     assert np.array_equal(np.asarray(a.model.rnl_Wnlq), np.asarray(b.model.rnl_Wnlq))
     assert a.meta == b.meta
 
