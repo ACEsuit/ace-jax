@@ -12,7 +12,7 @@ import jax.numpy as jnp
 import numpy as np
 from jax.scipy.linalg import solve_triangular
 
-from .hypers import from_array
+from .hypers import Hypers, from_array, to_array
 from .kernels import K_MM, k_rows
 from .summary import site_summary
 from .feature import apply as _feat, dwarp
@@ -304,9 +304,28 @@ def stable_posterior(theta, st, prob, ds_train):
     return posterior_qr(prob, ds_train, theta)
 
 
-def _run_predict(f, theta, prob, ds_train, ds_test, stats=None):
-    st = _train_stats(theta, prob, ds_train, stats)
-    mu, L = fit_posterior(theta, st, prob, ds_train)
+def theta_key(theta):
+    """A hashable key of a Hypers (or its array): its float64 bytes."""
+    a = theta if not isinstance(theta, Hypers) else to_array(theta)
+    return np.asarray(a, np.float64).tobytes()
+
+
+def train_posterior(theta, prob, ds_train, stats=None, posts=None):
+    """fit_posterior on the training statistics (_train_stats).  posts: an optional dict
+    theta_key -> (mu, L) | None; a key present is a posterior worth keeping (the pipeline
+    asks for the MAP's, which the model file needs again): a stored one is returned, a None
+    is filled in.  Only the requested keys are kept, since each L is (Dt, Dt)."""
+    k = theta_key(theta) if posts else None
+    if k is not None and posts.get(k) is not None:
+        return posts[k]
+    post = fit_posterior(theta, _train_stats(theta, prob, ds_train, stats), prob, ds_train)
+    if k is not None and k in posts:
+        posts[k] = post
+    return post
+
+
+def _run_predict(f, theta, prob, ds_train, ds_test, stats=None, posts=None):
+    mu, L = train_posterior(theta, prob, ds_train, stats, posts)
     outs = [f(theta, mu, L, jax.tree.map(lambda a: a[i], ds_test)) for i in range(ds_test.n_batches)]
     return _pack(outs, prob, ds_test)
 
@@ -606,7 +625,7 @@ def select_pops_ridge(theta, prob, ds_fit, ds_val, grid, form="hypercube", lever
 
 def predict_fixed(theta, prob, ds_train, ds_test, dtc=True, deriv_dtc=True,
                   uq="blr", pops_form="hypercube", leverage_pct=0.0, pops_ridge="blr", pops_path=None,
-                  stats=None):
+                  stats=None, posts=None):
     """dtc=False drops the DTC prior residual from E_var (SoR only; for tests).
     deriv_dtc=False keeps the energy DTC residual but drops its force/virial
     derivative (F_var, V_var stay SoR-only).
@@ -622,10 +641,11 @@ def predict_fixed(theta, prob, ds_train, ds_test, dtc=True, deriv_dtc=True,
     leverage_pct the leverage percentile.  pops_path: a PopsRidgePath already built
     on (theta, ds_train) to reuse -- one factorisation and its memoised posteriors
     serve every test split.  stats: optional theta -> training Stats (e.g. from
-    cached linear statistics); default computes them on ds_train.  See
-    PopsRidgePath / select_pops_ridge."""
+    cached linear statistics); default computes them on ds_train.  posts: see
+    train_posterior (uq 'blr' only).  See PopsRidgePath / select_pops_ridge."""
     if uq == "blr":
-        return _run_predict(_predict_fn(prob, dtc, deriv_dtc), theta, prob, ds_train, ds_test, stats=stats)
+        return _run_predict(_predict_fn(prob, dtc, deriv_dtc), theta, prob, ds_train, ds_test, stats=stats,
+                            posts=posts)
     if uq == "pops":
         return _run_predict_pops_paper(theta, prob, ds_train, ds_test, pops_form,
                                        pops_ridge, leverage_pct, path=pops_path, stats=stats)
@@ -642,9 +662,9 @@ def predict_readout(prob, mu, ds_test):
     return _pack([f(mu, jax.tree.map(lambda a: a[i], ds_test)) for i in range(ds_test.n_batches)], prob, ds_test)
 
 
-def predict_mixture(draws, prob, ds_train, ds_test, deriv_dtc=True, stats=None):
+def predict_mixture(draws, prob, ds_train, ds_test, deriv_dtc=True, stats=None, posts=None):
     f = _predict_fn(prob, True, deriv_dtc)   # compile ONCE, reuse across all draws
-    preds = [_run_predict(f, from_array(jnp.asarray(d)), prob, ds_train, ds_test, stats=stats)
+    preds = [_run_predict(f, from_array(jnp.asarray(d)), prob, ds_train, ds_test, stats=stats, posts=posts)
              for d in np.asarray(draws)]
     out = []
     for k in range(0, 6, 2):

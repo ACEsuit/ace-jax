@@ -183,7 +183,7 @@ def sparse_graph(positions, cell, pbc, cutoff, pad_to=None, pad_vector=None):
         mask=np.concatenate([np.ones(len(i), bool), np.zeros(npad, bool)]))
 
 
-def dense_graph(positions, cell, pbc, cutoff, max_neighbours, pad_vector=None, device=None):
+def dense_graph(positions, cell, pbc, cutoff, max_neighbours, pad_vector=None, device=None, edges=None):
     """Build a DenseGraph via `neighbour_matrix` -- no scatter needed downstream.
 
     `neighbour_matrix` leaves unused slots as ZERO vectors.  Feeding those to the
@@ -196,6 +196,10 @@ def dense_graph(positions, cell, pbc, cutoff, max_neighbours, pad_vector=None, d
     device="cuda" (matscipy_neighbours built with CUDA): the graph is built on
     the GPU and handed to JAX zero-copy through DLPack; the fields are then JAX
     device arrays.  Raises ValueError when an atom has more than max_neighbours.
+
+    edges: the (i, j, D) `_neighbour_list` already returned for this structure and
+    cutoff (fit.data.build_dataset sizes K from it), so the fallback path does not
+    build the list again; ignored when `neighbour_matrix` builds the graph.
     """
     xp = np
     if have_matscipy_neighbours():
@@ -211,7 +215,7 @@ def dense_graph(positions, cell, pbc, cutoff, max_neighbours, pad_vector=None, d
             pbc=tuple(bool(b) for b in np.broadcast_to(pbc, 3)), cutoff=float(cutoff),
             max_neighbours=int(max_neighbours), **kw)
     else:
-        i, j, D, _ = _neighbour_list(positions, cell, pbc, cutoff)
+        i, j, D = _neighbour_list(positions, cell, pbc, cutoff)[:3] if edges is None else edges
         idx, dist, count = _dense_from_sparse(i, j, D, len(positions),
                                               int(max_neighbours))
     if pad_vector is None:

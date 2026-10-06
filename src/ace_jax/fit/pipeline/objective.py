@@ -74,7 +74,9 @@ def make_objective(cfg, d, b):
             lin = qs.gram()        # ARD's joint refit takes the Gram form
             stats = lambda th: qs
         else:
-            lin = jax.jit(lambda: linear_statistics(prob.model, prob.cfg, d.ds_train))()
+            lin = getattr(lik, "lin_stats", None)      # make_lml's cached Gram, else one pass here
+            if lin is None:
+                lin = jax.jit(lambda: linear_statistics(prob.model, prob.cfg, d.ds_train))()
             stats = lambda th: assemble_statistics(lin, residual_statistics(th, prob.spec, prob.model,
                                                                             prob.ind, prob.cfg, d.ds_train))
         host = None

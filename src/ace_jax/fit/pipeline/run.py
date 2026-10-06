@@ -3,6 +3,7 @@ from typing import NamedTuple
 
 from ...eval import highest_precision
 from .mapfit import fit_map
+from ..predict import theta_key
 from .objective import make_objective, release
 from .predict import predict_splits
 from .problem import build_problem
@@ -15,6 +16,9 @@ class FitResult(NamedTuple):
     ard: object = None                   # ARDResult when uq == "ard" (last: positional use unaffected)
     radial: object = None                # RadialResult when cfg.learn_radial (last: positional use unaffected)
     readout: object = None               # the least-squares readout when cfg.solver == "lstsq"
+    stats: object = None                 # theta -> training statistics the model file may use, when they are
+                                         # bitwise a recompute's (the QR objective's); None: recompute
+    posteriors: object = None            # {theta_key: (mu, L)}: the MAP posterior the predictions factored
 
 
 def fit(cfg, data, log=print, on_stage=None):
@@ -69,20 +73,32 @@ def fit(cfg, data, log=print, on_stage=None):
             from .export import linear_arrays_from_mean, model_file_blocked
             if model_file_blocked(cfg) is None:      # the ARD-mean model.npz, before prediction
                 stage("model", linear_arrays_from_mean(data.z, data.E0, b.prob.cfg, ard.posterior.mean))
-        # cached linear statistics (run.py) or a full recompute per draw (the CLI's
-        # historical path): equal in exact arithmetic, not in summation order
-        stats = obj.stats if cfg.predict_stats == "cached" else None
+        # the objective's statistics ("cached", run.py), a full recompute per draw ("recompute"),
+        # or ("auto", the CLI's) the objective's where they are bitwise a recompute's -- the QR
+        # form, whose qs is linear_qr_statistics of ds_train -- and a recompute elsewhere: the GP and
+        # Cholesky objectives cache a split Gram, equal in exact arithmetic, not in summation order.
+        # Keyed on the objective's own QR statistics, not uses_qr(prob): a QR problem fitted by
+        # objective="loo" or devices > 1 takes make_log_density, whose statistics are the Gram form
+        exact = (getattr(obj.lik, "qr_stats", None) is not None and obj.stats is not None
+                 and cfg.predict_stats != "recompute")
+        stats = obj.stats if cfg.predict_stats == "cached" or exact else None
+        out_stats = obj.stats if exact else None         # the model file's: a recompute unless exact
+        # the MAP posterior the predictions factor, kept for the model file (and fitted E0) when
+        # both come from the same statistics -- otherwise each keeps its own
+        posts = {theta_key(mf.theta): None} if stats is out_stats else None
         if cfg.uq == "pops":
             # POPS needs only the linear statistics, which obj.stats already holds
             # (the device path caches them; host-cache is GP-only, never POPS):
             # drop the LML and its jitted objective, then free their buffers
             obj = obj._replace(lik=None, vg=None, host_cache=None)
             release()
-        pr = predict_splits(cfg, data, b, stats, mf.theta, rg.draws, log=log, ard=ard)
+        pr = predict_splits(cfg, data, b, stats, mf.theta, rg.draws, log=log, ard=ard, posts=posts)
+        if posts is not None:
+            posts = {k: v for k, v in posts.items() if v is not None} or None
     tm = {**b.timings, **obj.timings, **mf.timings, **rg.timings, **pr.timings}
     if ard is not None:
         tm["ard"] = ard.report["seconds"]
     if radial is not None:
         tm["radial"] = radial.seconds
     tm["total"] = time.time() - T0
-    return FitResult(cfg, data, b, mf.theta, mf, rg, pr, tm, ard, radial)
+    return FitResult(cfg, data, b, mf.theta, mf, rg, pr, tm, ard, radial, None, out_stats, posts)

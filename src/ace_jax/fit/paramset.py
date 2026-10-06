@@ -62,11 +62,12 @@ def untie_grad(g):
 
 def tied_likelihood(lik):
     """lik(tie_noise(a)): the shared-noise likelihood over the full 10-vector.  Attributes that
-    callers read from a likelihood (qr_stats, and a host cache's value_and_grad) carry over."""
+    callers read from a likelihood (qr_stats, lin_stats, and a host cache's value_and_grad) carry over."""
     def f(a):
         return lik(tie_noise(a))
-    if hasattr(lik, "qr_stats"):
-        f.qr_stats = lik.qr_stats
+    for k in ("qr_stats", "lin_stats"):
+        if hasattr(lik, k):
+            setattr(f, k, getattr(lik, k))
     if hasattr(lik, "value_and_grad"):
         def vg(a):
             v, g = lik.value_and_grad(tie_noise(a))

@@ -122,7 +122,9 @@ def write_outputs(res, out, layout=("run",), argv=None, save_model=True, model_d
         if "run" not in layout:
             _dump(out / "config.json", {**(argv or {}), "M": int(b.prob.ind.XM.shape[0]),
                                         "len_basis": b.gpcfg.len_readout, "n_train": len(d.train),
-                                        "n_test": len(d.test)})
+                                        "n_test": len(d.test),
+                                        # metrics.csv then scores the training set
+                                        **({"test_is_train": True} if d.ds_test is d.ds_train else {})})
     if res.ard is not None:
         _write_ard(out, res.ard)
     if save_model:

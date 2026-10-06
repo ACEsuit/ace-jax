@@ -25,7 +25,7 @@ def fit_model(train, out, uq="blr"):
     from ..basis.model import BasisSpec
     from ..fit.pipeline import FitConfig, fit, load_fit_data, write_outputs
     cfg = FitConfig(model=BasisSpec(order=3, max_degree=10, rcut=5.5, elements=("Si",)), arm="linear",
-                    m_per_species=0, e0="lsq", opt="lbfgs", r0=None, rungs=("map",), predict_stats="recompute",
+                    m_per_species=0, e0="lsq", opt="lbfgs", r0=None, rungs=("map",), predict_stats="auto",
                     predict_train=False, uq=uq, energy_key="energy", force_key="forces", virial_key="virial")
     res = fit(cfg.validate(), load_fit_data(cfg, train=train, log=lambda *a: None), log=lambda *a: None)
     out = pathlib.Path(out)
