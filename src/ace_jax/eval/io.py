@@ -22,7 +22,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from .edge_model import check_edge_a_kind, with_edge_a_kind
-from .model import ACEModel
+from .model import ACEModel, a2b_sparse_auto, with_a2b_sparse
 
 
 def _a2b(z, dtype):
@@ -51,14 +51,16 @@ def _a2b_triplets(z, n_B, n_AA):
             np.asarray(z["A2B_vals"]))
 
 
-def load(path, dtype=jnp.float64, a2b_sparse=False, edge_a_kind="gather", fold=True):
+def load(path, dtype=jnp.float64, a2b_sparse="auto", edge_a_kind="gather", fold=True):
     """Load a model.  Caller controls dtype; nothing here touches jax.config, so
     f64 requires the caller to have enabled x64 first.
 
-    `a2b_sparse` selects a gather/segment-sum contraction instead of a dense
-    matmul against A2B.  A2B is ~0.07% occupied at 1429 basis functions, so the
-    dense form does far more arithmetic than needed at large basis; it is
-    retained as the default because it is faster at small basis.
+    `a2b_sparse` selects how A2B is held and contracted.  "auto" (default): sparse
+    triplets only, no dense A2B, when at most `A2B_SPARSE_MAX_DENSITY` of it is
+    nonzero (every ACE coupling: 0.025-1.9% occupied), with B and dB/dA by sorted
+    segment_sums (`with_a2b_sparse`).  A file that stores a dense A2B is converted.
+    True / False force the sparse / dense form.  The dense form at 5456 basis
+    functions is 2.6 GB, and its Jacobian costs 2 n_B n_AA n_A flops per node.
 
     `edge_a_kind` selects how the A-basis product is formed: "gather" (default,
     today's behaviour) or "matmul", an algebraically identical one-hot form whose
@@ -98,6 +100,8 @@ def load(path, dtype=jnp.float64, a2b_sparse=False, edge_a_kind="gather", fold=T
             raise NotImplementedError(f"unknown radial_kind {k!r}")
 
     _tr = _a2b_triplets(z, meta["n_B"], meta["n_AA"])
+    sparse = (a2b_sparse_auto(len(_tr[2]), meta["n_B"], meta["n_AA"]) if a2b_sparse == "auto"
+              else bool(a2b_sparse))
     rs = meta.get("rnl_spline") or {"x0": 0.0, "h": 1.0, "n": 2}
     ps_ = meta.get("pair_spline") or {"x0": 0.0, "h": 1.0, "n": 2}
     n_orders = len(meta["aa_lens"])
@@ -128,10 +132,10 @@ def load(path, dtype=jnp.float64, a2b_sparse=False, edge_a_kind="gather", fold=T
         pair_transform=A("pair_transform"),
         rnl_envelope=A("rnl_envelope"),
         pair_envelope=A("pair_envelope"),
-        A2B=_a2b(z, dtype),
+        A2B=None if sparse else _a2b(z, dtype),
         a2b_rows=jnp.asarray(_tr[0]), a2b_cols=jnp.asarray(_tr[1]),
         a2b_vals=jnp.asarray(_tr[2], dtype=dtype),
-        a2b_sparse=bool(a2b_sparse),
+        a2b_sparse=sparse,
         WB=A("WB"), Wpair=A("Wpair"), E0=A("E0"),
         aspec_r=_ar,
         aspec_y=_ay,
@@ -150,6 +154,8 @@ def load(path, dtype=jnp.float64, a2b_sparse=False, edge_a_kind="gather", fold=T
         elements=tuple(int(e) for e in meta["elements"]),
         radial_learned=bool(meta.get("radial_learned", False)),    # absent in old files
     )
+    if sparse:
+        model = with_a2b_sparse(model)             # the sorted index plan
     model = with_edge_a_kind(model, edge_a_kind)   # one-hot selectors if "matmul"
     if fold:
         from .model import fold_readout

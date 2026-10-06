@@ -325,7 +325,7 @@ from ace_jax.basis.spec import build_spec
 from ace_jax.basis.coupling import couple
 from ace_jax.basis.export import save_npz
 from ace_jax.eval import io as eio
-from ace_jax.eval.model import fold_readout
+from ace_jax.eval.model import fold_readout, with_a2b_sparse
 
 auth = build_model([14], 3, 10)
 m, meta = auth.model, auth.meta
@@ -355,7 +355,7 @@ res["scale_range"] = [float(np.abs(s).min()), float(np.abs(s).max())]
 desc_ref = zf["test_desc"].T * np.concatenate([s, np.ones(zf["test_desc"].shape[0] - len(s))])[None, :]
 res["aspec_tuple"] = isinstance(cpl.aspec, tuple)     # same type as a cache hit
 res["shapes"] = {
-    "A2B": list(m.A2B.shape), "WB": list(m.WB.shape), "Wpair": list(m.Wpair.shape),
+    "A2B": list(m.a2b_shape), "WB": list(m.WB.shape), "Wpair": list(m.Wpair.shape),
     "rnl_Wnlq": list(m.rnl_Wnlq.shape), "pair_Wnlq": list(m.pair_Wnlq.shape),
 }
 res["meta"] = {k: meta[k] for k in
@@ -367,7 +367,7 @@ A2B = np.asarray(cpl.A2B)
 rr, cc = np.nonzero(A2B)
 psp = fmeta["pair_spline"]
 m2 = dataclasses.replace(m,
-    A2B=jnp.asarray(A2B), a2b_rows=jnp.asarray(rr, jnp.int32),
+    A2B=None, a2b_srt=None, a2b_jac=None, a2b_rows=jnp.asarray(rr, jnp.int32),
     a2b_cols=jnp.asarray(cc, jnp.int32), a2b_vals=jnp.asarray(A2B[rr, cc]),
     rnl_Wnlq=jnp.asarray(zf["rnl_Wnlq"]),
     polys_A=jnp.asarray(zf["polys_A"]), polys_B=jnp.asarray(zf["polys_B"]),
@@ -386,7 +386,7 @@ m2 = dataclasses.replace(m,
 # trap fold_readout's docstring warns about -- the round-trip below hid it,
 # because load() rebuilds with folded=False, but the in-memory hand-off
 # evaluates the tree as-is)
-m2 = fold_readout(m2)
+m2 = fold_readout(with_a2b_sparse(m2))     # new triplets: rebuild the sparse plan
 meta2 = dict(meta)
 meta2["nnll"] = [[list(b) for b in bb] for bb in cpl.nnll_spec]
 auth2 = auth._replace(model=m2, meta=meta2)
@@ -396,7 +396,7 @@ model, rmeta, rz = eio.load(out)
 
 res["arrays"] = {}
 for name, got, ref in (
-        ("A2B", model.A2B, s[:, None] * A2B_f), ("WB", model.WB, np.asarray(zf["WB"]) / s[:, None]),
+        ("A2B", model.a2b_matrix(), s[:, None] * A2B_f), ("WB", model.WB, np.asarray(zf["WB"]) / s[:, None]),
         ("Wpair", model.Wpair, zf["Wpair"]), ("E0", model.E0, zf["E0"]),
         ("rnl_Wnlq", model.rnl_Wnlq, zf["rnl_Wnlq"]),
         ("pair_spline_coefs", model.pair_coefs, zf["pair_spline_coefs"]),
@@ -479,7 +479,7 @@ jax.config.update("jax_enable_x64", True)
 from ace_jax.basis.model import build_model
 
 auth = build_model([14], 2, 5, coupling_cache=True, coupling_cache_dir=sys.argv[1])
-print("RESULT", float(np.asarray(auth.model.A2B).sum()), len(auth.meta["nnll"]))
+print("RESULT", float(np.asarray(auth.model.a2b_matrix()).sum()), len(auth.meta["nnll"]))
 """
 
 

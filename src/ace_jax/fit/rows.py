@@ -92,22 +92,27 @@ test can lower it (or ACEJAX_ROWS_EDGE_BUDGET, to run a whole suite chunked) to 
 _NODE_ELEMS = {}
 
 
-def _max_elems(jaxpr):
-    """Largest element count of any value of a jaxpr, sub-jaxprs included."""
+def _elems(jaxpr, out=None):
+    """Element count of every value of a jaxpr in equation order, sub-jaxprs included."""
     from jax.extend import core as jcore
-    best = 0
+    out = [] if out is None else out
     for eqn in jaxpr.eqns:
         for v in eqn.outvars:
             shape = getattr(v.aval, "shape", None)
             if shape is not None:
-                best = max(best, math.prod(shape))
+                out.append(math.prod(shape))
         for p in eqn.params.values():
             for sub in (p if isinstance(p, (tuple, list)) else (p,)):
                 if isinstance(sub, jcore.ClosedJaxpr):
-                    best = max(best, _max_elems(sub.jaxpr))
+                    _elems(sub.jaxpr, out)
                 elif isinstance(sub, jcore.Jaxpr):
-                    best = max(best, _max_elems(sub))
-    return best
+                    _elems(sub, out)
+    return out
+
+
+def _max_elems(jaxpr):
+    """Largest element count of any value of a jaxpr, sub-jaxprs included."""
+    return max(_elems(jaxpr), default=0)
 
 
 def _model_key(model):
@@ -128,11 +133,13 @@ def _model_key(model):
 
 def _node_elems(model, cfg, K):
     """Peak temporary elements per centre node of `edge_jacobian_dense` with K neighbour slots:
-    the larger of J's K*D*3 and the widest intermediate of one node's abstract trace (edge
-    features can be wider than J: 10x on the si fixture, 3x at the production Cantor basis).
-    Every temporary scales linearly with the node count, so nc nodes cost nc times this.
-    Traced on an abstract copy of the model (float leaves as ShapeDtypeStructs), once per
-    structural model key and K."""
+    the larger of J's K*D*3 and the widest per-node intermediate (edge features can be wider
+    than J: 10x on the si fixture, 3x at the production Cantor basis).  Per node means the
+    growth of each value from a 1-node to a 2-node trace: a model-sized value (the dense A2B's
+    transpose, n_B * n_AA -- 350M elements at 5456 basis functions, which collapsed every chunk
+    to the granule) does not grow with the node count and is not counted.  Traced on an
+    abstract copy of the model (float leaves as ShapeDtypeStructs), once per structural model
+    key and K."""
     import equinox as eqx
     try:
         key = (_model_key(model), K)
@@ -143,12 +150,16 @@ def _node_elems(model, cfg, K):
     n = K * cfg.D * 3
     dyn, static = eqx.partition(model, eqx.is_inexact_array)
     abstract = jax.tree.map(lambda x: jax.ShapeDtypeStruct(x.shape, x.dtype), dyn)
-    r = jax.ShapeDtypeStruct((1, K, 3), jnp.zeros(()).dtype)
-    i = jax.ShapeDtypeStruct((1, K), jnp.int32)
-    m = jax.ShapeDtypeStruct((1, K), bool)
+    def trace(nn):
+        r = jax.ShapeDtypeStruct((nn, K, 3), jnp.zeros(()).dtype)
+        i = jax.ShapeDtypeStruct((nn, K), jnp.int32)
+        m = jax.ShapeDtypeStruct((nn, K), bool)
+        return _elems(jax.make_jaxpr(lambda d, *a: eqx.combine(d, static).edge_jacobian_dense(*a))(
+            abstract, r, i, i, m).jaxpr)
     try:
-        jp = jax.make_jaxpr(lambda d, *a: eqx.combine(d, static).edge_jacobian_dense(*a))(abstract, r, i, i, m)
-        n = max(n, _max_elems(jp.jaxpr))
+        e1, e2 = trace(1), trace(2)
+        n = max(n, max((b - a for a, b in zip(e1, e2)), default=0) if len(e1) == len(e2)
+                else max(e1, default=0))    # structures differ: the 1-node figure, conservative
     except NotImplementedError:     # a model without a B-basis (PACE): never reaches the rows
         pass
     if key is not None:

@@ -23,7 +23,7 @@ def test_orientation(loaded):
     NZ = len(meta["elements"])
     assert model.WB.shape == (meta["n_B"], NZ)
     assert model.Wpair.shape == (meta["n_pair"], NZ)
-    assert model.A2B.shape == (meta["n_B"], meta["n_AA"])
+    assert model.a2b_shape == (meta["n_B"], meta["n_AA"])
     # the radial branch is per-basis, so check whichever one this model populated
     if model.radial_kind == "spline_factorised":
         # stored once, not per species pair: (ncoef, n1) + (NZ, d)

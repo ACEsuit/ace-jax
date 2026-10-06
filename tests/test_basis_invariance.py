@@ -88,7 +88,7 @@ def test_built_basis_gamma_matches_evaluated_columns(case):
     b = _build(*case)
     rows = [r for g in b.aa_specs for r in np.asarray(g)]          # eval AA column order
     body = lambda j: tuple(sorted(b.Rnl_spec[b.aspec[a][0]] for a in rows[j]))
-    A2B = np.asarray(b.model.A2B)
+    A2B = np.asarray(b.model.a2b_matrix())
     n_B = A2B.shape[0]
     for r in range(n_B):
         cols = np.flatnonzero(np.abs(A2B[r]) > 1e-12)
