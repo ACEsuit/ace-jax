@@ -884,6 +884,22 @@ def _ard_fit_warnings(stage, info, names):
     return out
 
 
+def _gp_parts(cfg, prob, theta, body_col):
+    """The uq-dependent pieces of the stage: the linear arm's (linear statistics, body_col, D, linear rows),
+    or ard-gp's joint design at theta (joint statistics, GP_GROUP columns, the prior root with chol(K_MM)^T,
+    the joint rows; theta stored with the posterior)."""
+    if cfg.uq != "ard-gp":
+        return {"columns": "linear", "body": body_col, "root": None, "rows_fn": None, "theta": None}
+    from .prior_root import prior_root
+    return {"columns": "joint", "body": gp_body_columns(body_col, prob.ind.XM.shape[0]),
+            "root": prior_root(prob, theta), "rows_fn": rows_fn_for(prob, theta), "theta": theta}
+
+
+def _h_names(ev):
+    return ((["log_sigma_E", "log_sigma_F", "log_sigma_V"] if ev.joint else [])
+            + ["a_GP" if g == GP_GROUP else f"a_{g}body" for g in ev.groups])
+
+
 def _holdout_posterior(cfg, data, prob, theta, configs, body_col, ell, h0=None, stage="fit-subset", log=print):
     """A hold-out posterior on the training subset `configs` with its own shape (PRESS jackknife R, the
     legacy sandwich Q, or none for ard_variance "kappa" / the "mixed" ablation).  h0: the evidence fit's
@@ -892,18 +908,20 @@ def _holdout_posterior(cfg, data, prob, theta, configs, body_col, ell, h0=None, 
     from .data import build_dataset
     from .jackknife import press_scores, shape_factor
     mode = cfg.ard_mode
+    gp = _gp_parts(cfg, prob, theta, body_col)
     ds = build_dataset(configs, data.meta, data.E0, cfg.batch, pack=cfg.pack_mode, log=log)
-    ev = ARDEvidence(ard_statistics(theta, prob, ds, mode), ard_gamma(prob), body_col)
-    names = (["log_sigma_E", "log_sigma_F", "log_sigma_V"] if ev.joint else []) + [f"a_{g}body" for g in ev.groups]
+    ev = ARDEvidence(ard_statistics(theta, prob, ds, mode, columns=gp["columns"]), ard_gamma(prob), gp["body"],
+                     root=gp["root"])
+    names = _h_names(ev)
     h, v, info = fit_ard(ev, ev.h0(theta) if h0 is None else h0, cfg.ard_cond_max)
     for w in _ard_fit_warnings(stage, info, names):
         log(w)
-    post = ard_posterior(ev, h, 1.0, data.meta)
+    post = ard_posterior(ev, h, 1.0, data.meta, theta=gp["theta"])
     K = 0
     if cfg.ard_variance == "sandwich" and cfg._score_source == "fit":
         if cfg._shape_variant == "press":
             rc, K = row_clusters(ds, configs, ell)
-            Gs, _ = press_scores(post, prob, ds, rc, K, ev.sigmas(h), mode=cfg.ard_press)
+            Gs, _ = press_scores(post, prob, ds, rc, K, ev.sigmas(h), mode=cfg.ard_press, rows_fn=gp["rows_fn"])
             post = post._replace(R=shape_factor(post, Gs, cfg.ard_shape_tau))
         else:
             Gs = sandwich_scores(post, prob, ds, ev.sigmas(h))
@@ -944,6 +962,7 @@ def run_ard_stage(cfg, data, built, theta, log=print, full_stats=None):
     t0 = time.time()
     prob = built.prob
     body_col = body_order_columns(data.meta, prob.cfg)
+    gp = _gp_parts(cfg, prob, theta, body_col)          # ard-gp: joint design at theta; else the linear arm
     N = len(data.train)
 
     # 1. groups and strata from T (all live training atoms), then the stratified split
@@ -979,7 +998,7 @@ def run_ard_stage(cfg, data, built, theta, log=print, full_stats=None):
         cfg, data, prob, theta, fit_, body_col, ell, log=log)
 
     # 3. T_val errors (and, unless "mixed", the scores' shape) from P_fit
-    E = _val_atoms(post_fit, prob, ds_val, r1=r1, shape=(source == "fit"))
+    E = _val_atoms(post_fit, prob, ds_val, r1=r1, shape=(source == "fit"), rows_fn=gp["rows_fn"])
     del post_fit                           # free the subset fit's L x L Cholesky factor before the refit
 
     # 3b. the transfer exponent's second hold-out fit: P_fit2 on T_fit2, the same stratified rule applied
@@ -995,24 +1014,25 @@ def run_ard_stage(cfg, data, built, theta, log=print, full_stats=None):
         n_fit2 = len(fit2)
         post_fit2, _, _, _, _, _ = _holdout_posterior(cfg, data, prob, theta, fit2, body_col, ell, h0=h_fit,
                                                       stage="fit-subset-2", log=log)
-        E2 = _val_atoms(post_fit2, prob, ds_val, shape=True)
+        E2 = _val_atoms(post_fit2, prob, ds_val, shape=True, rows_fn=gp["rows_fn"])
         del post_fit2                      # as P_fit: freed before the refit
 
     # 4. the served posterior on all of T and its shape
     st = (joint_ard_stats(full_stats) if (full_stats is not None and mode == "joint")
-          else ard_statistics(theta, prob, data.ds_train, mode))
-    ev = ARDEvidence(st, ard_gamma(prob), body_col)
+          else ard_statistics(theta, prob, data.ds_train, mode, columns=gp["columns"]))
+    ev = ARDEvidence(st, ard_gamma(prob), gp["body"], root=gp["root"])
     del st
     v_start = ev.value_and_grad(np.clip(h_fit, *ev.bounds(h_fit, cond_max)))[0]   # refit's start
     h, v, info = fit_ard(ev, h_fit, cond_max)
     for w in _ard_fit_warnings("full", info, names):
         log(w)
-    post = ard_posterior(ev, h, 1.0, data.meta)
+    post = ard_posterior(ev, h, 1.0, data.meta, theta=gp["theta"])
     K, lev = 0, np.zeros(0)
     if variance == "sandwich":
         if variant == "press":
             rc, K = row_clusters(data.ds_train, data.train, ell)
-            Gf, lev = press_scores(post, prob, data.ds_train, rc, K, ev.sigmas(h), mode=cfg.ard_press)
+            Gf, lev = press_scores(post, prob, data.ds_train, rc, K, ev.sigmas(h), mode=cfg.ard_press,
+                                   rows_fn=gp["rows_fn"])
             post = post._replace(R=shape_factor(post, Gf, cfg.ard_shape_tau))
         else:
             # Q is a float64 device array (sandwich_factor): its per-batch consumers call jnp.asarray on
@@ -1022,7 +1042,8 @@ def run_ard_stage(cfg, data, built, theta, log=print, full_stats=None):
             post = post._replace(Q=sandwich_factor(post, Gf))
         del Gf
     # held-out rows against the served posterior: its s^2 (kappa) and, for "mixed", the #18 shape
-    Ef = _val_atoms(post, prob, ds_val, shape=False, own_col=val_idx if source == "mixed" else None)
+    Ef = _val_atoms(post, prob, ds_val, shape=False, own_col=val_idx if source == "mixed" else None,
+                    rows_fn=gp["rows_fn"])
     V = E.V if source == "fit" else Ef.V
     vtr = np.trace(V, axis1=1, axis2=2)
     ok = (E.s2 > 0) & (vtr > 0)            # atoms with zero force rows (isolated, 1-atom configs): no information
@@ -1085,7 +1106,7 @@ def run_ard_stage(cfg, data, built, theta, log=print, full_stats=None):
             + (f"; {n_clamp} at leverage 1 within roundoff had 1 - lambda clamped to {_MU_FLOOR:g}" if n_clamp else ""))
     shp = post.R if post.R is not None else post.Q
     lq = (lambda f: float(f(lev))) if len(lev) else (lambda f: None)
-    report = {"mode": mode, "body_groups": list(ev.groups), "h": h.tolist(), "h_names": names,
+    report = {"mode": mode, "body_groups": list(ev.groups), "gp_cols": ev.root.M, "h": h.tolist(), "h_names": names,
               "logev_full": v, "logev_full_start": v_start, "optimiser": info, "optimiser_fit": info_fit,
               # the evidence's roundoff at the endpoint, as the polish measured it (its spread over 1e-15
               # moves of h): two fits of the same data agree in logev_full only to ~this, not to 1e-15

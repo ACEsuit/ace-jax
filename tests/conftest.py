@@ -194,6 +194,32 @@ def tiny_gp_problem():
     return prob, ds, theta
 
 
+def ard_pipe_cfg(**kw):
+    """A uq='ard' linear-arm FitConfig for the ARD stage tests."""
+    from ace_jax.fit.pipeline import FitConfig
+    base = dict(model=str(FIXTURE_DIR / "si_fitted.npz"), energy_key="dft_energy", force_key="dft_force",
+                virial_key="dft_virial", ntrain=30, ntest=8, batch=4, r0=2.35, arm="linear", uq="ard",
+                opt="lbfgs", rungs=("map",), map_steps=5, predict_train=False, ard_variance="kappa", ard_n_min=1)
+    return FitConfig(**{**base, **kw})
+
+
+@pytest.fixture(scope="module")
+def ard_map():
+    """load_fit_data + build_problem + fit_map for ard_pipe_cfg(): identical for every ARD stage
+    test (ard_variance / ard_mode only change the stage that follows), so done once."""
+    from ace_jax.eval import highest_precision
+    from ace_jax.fit.pipeline import load_fit_data
+    from ace_jax.fit.pipeline.mapfit import fit_map
+    from ace_jax.fit.pipeline.objective import make_objective
+    from ace_jax.fit.pipeline.problem import build_problem
+    cfg = ard_pipe_cfg().validate()
+    d = load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz"))
+    b = build_problem(cfg, d)
+    with highest_precision():
+        theta = fit_map(cfg, d, b, make_objective(cfg, d, b), log=lambda *a: None).theta
+    return d, b, theta
+
+
 def _orders(prob):
     """Correlation order of each B column of the tiny problem's model (all body orders present)."""
     import json

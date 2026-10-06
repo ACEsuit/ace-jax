@@ -232,3 +232,77 @@ def test_ard_gp_shape_is_rotation_equivariant(gp_post):
     live = np.asarray(b.node_mask)
     np.testing.assert_allclose(V1[live], np.einsum("ab,nbc,dc->nad", Rm, V0[live], Rm), rtol=1e-8,
                                atol=1e-10 * np.abs(V0).max())
+
+
+def _gp_pipe_cfg(**kw):
+    from conftest import FIXTURE_DIR
+    from ace_jax.fit.pipeline import FitConfig
+    base = dict(model=str(FIXTURE_DIR / "si_fitted.npz"), energy_key="dft_energy", force_key="dft_force",
+                virial_key="dft_virial", ntrain=30, ntest=8, batch=4, r0=2.35, arm="gp", m_per_species=8,
+                uq="ard-gp", opt="lbfgs", rungs=("map",), map_steps=5, predict_train=False,
+                ard_val_frac=0.4, ard_n_min=50, ard_force_shape="aniso")
+    return FitConfig(**{**base, **kw})
+
+
+def _gp_stage(**kw):
+    from conftest import FIXTURE_DIR
+    from ace_jax.fit import ard
+    from ace_jax.fit.pipeline import load_fit_data
+    from ace_jax.fit.pipeline.mapfit import fit_map
+    from ace_jax.fit.pipeline.objective import make_objective
+    from ace_jax.fit.pipeline.problem import build_problem
+    cfg = _gp_pipe_cfg(**kw).validate()
+    d = load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz"))
+    b = build_problem(cfg, d)
+    with highest_precision():
+        theta = fit_map(cfg, d, b, make_objective(cfg, d, b), log=lambda *a: None).theta
+        res = ard.run_ard_stage(cfg, d, b, theta, log=lambda *a: None)
+        pred = ard.predict_ard(res.posterior, b.prob, d.ds_test, rows_fn=ard.rows_fn_for(b.prob, theta))
+    return d, b, theta, res, pred
+
+
+def test_stage_ard_gp_press_shape_and_group_scales():
+    d, b, theta, res, pred = _gp_stage()
+    post, rep = res.posterior, res.report
+    M = b.prob.ind.XM.shape[0]
+    assert post.prior_root.M == M and post.R.shape[0] == b.prob.cfg.len_basis + M
+    assert "a_GP" in rep["h_names"] and rep["gp_cols"] == M
+    assert np.isfinite(post.group_table["q"]).all()
+    assert np.isfinite(pred.F_var).all() and np.all(pred.F_var >= 0)
+
+
+def test_stage_ard_gp_sequential_shared_noise():
+    """Review Focus 3: shared noise forces sequential ARD; the GP-arm stage runs end to end."""
+    _, _, _, res, pred = _gp_stage(noise="shared", ard_mode="sequential")
+    assert res.report["mode"] == "sequential" and np.isfinite(pred.F_var).all()
+
+
+def test_ard_gp_with_no_inducing_columns_is_the_linear_stage(ard_map):
+    """M = 0 reduces to the linear-arm result: the ard-gp stage (joint statistics via
+    sufficient_statistics, the PriorRoot path, rows_fn_for) on a problem with no inducing columns gives the
+    --uq ard posterior.  The two stream the statistics through different code (sufficient_statistics against
+    the bounded linear statistics), so equality is to summation-order roundoff, not bitwise."""
+    from ace_jax.fit import ard
+    from conftest import ard_pipe_cfg
+    d, b, theta = ard_map
+    kw = dict(ard_variance="sandwich", ard_val_frac=0.4, ard_n_min=50)
+    with highest_precision():
+        lin = ard.run_ard_stage(ard_pipe_cfg(**kw).validate(), d, b, theta, log=lambda *a: None)
+        gp_cfg = ard_pipe_cfg(**kw)
+        gp_cfg.uq = "ard-gp"                    # the stage's ard-gp branch, bypassing validate()'s arm check
+        gp = ard.run_ard_stage(gp_cfg, d, b, theta, log=lambda *a: None)
+    P, Q = lin.posterior, gp.posterior
+    np.testing.assert_allclose(Q.mean, P.mean, rtol=1e-9, atol=1e-12 * np.abs(P.mean).max())
+    S = lambda p: np.asarray(p.R) @ np.asarray(p.R).T
+    np.testing.assert_allclose(S(Q), S(P), rtol=1e-7, atol=1e-10 * np.abs(S(P)).max())
+    for k in ("lam_rms", "q"):
+        np.testing.assert_allclose(Q.group_table[k], P.group_table[k], rtol=1e-7)
+
+
+@pytest.mark.parametrize("kw, msg", [(dict(arm="linear", m_per_species=0), "ard-gp"),
+                                     (dict(_shape_variant="legacy", _score_source="mixed"), "legacy"),
+                                     (dict(ard_variance="dtc", kernel="matern32"), "cosine"),
+                                     (dict(uq="ard", arm="linear", m_per_species=0, ard_variance="dtc"), "ard-gp")])
+def test_ard_gp_config_refusals(kw, msg):
+    with pytest.raises(ValueError, match=msg):
+        _gp_pipe_cfg(**kw).validate()
