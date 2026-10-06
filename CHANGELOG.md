@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **`aj fit` no longer repeats its statistics pass.** A linear fit streamed
+  the training set three times: once for the evidence, again for the
+  predictions, and again to write `model.npz`. Prediction and the model file
+  now reuse the fit's QR statistics and its MAP posterior, which are bit for
+  bit what the extra passes computed. The GP and Cholesky fits reuse their
+  cached linear Gram and the MAP posterior. Each configuration's neighbour list
+  is built once, not twice. Without `--test`, the test dataset is the training
+  dataset, not a second copy of it (`config.json` then has
+  `"test_is_train": true`). Results are unchanged, bit for bit.
+  `FitConfig(predict_stats="auto")` gives the command-line behaviour.
+
 - **Faster QR statistics on large bases.** The linear fit's QR evidence
   merged every batch into its triangular factors, about L^3 work per batch
   and quantity. It now buffers the nonzero rows of many batches and merges
