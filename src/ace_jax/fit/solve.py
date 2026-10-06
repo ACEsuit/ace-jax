@@ -107,30 +107,26 @@ def solve_qr_streaming(prob, ds, theta):
     (upper triangular), so the prior enters exactly once.  Dt = len_basis + M, so
     this covers the GP (M > 0): the residual weights w couple through K_MM.
 
-    Per batch it re-triangularises [R ; A_k] (a Dt^3-scale QR), so it is
-    ~n_batches times the flops of the Cholesky's single factorisation -- the price
-    of the kappa (not kappa^2) conditioning at O(Dt^2) memory."""
+    Per ~Dt buffered rows it re-triangularises [R ; A_k] (a Dt^3-scale QR; stats.py
+    'Batched merges'), so it is ~n_obs / Dt times the flops of the Cholesky's single
+    factorisation -- the price of the kappa (not kappa^2) conditioning at O(Dt^2) memory."""
     R, d = _qr_factor(prob, ds, theta)
     return solve_triangular(R, d, lower=False)                # back-substitution R theta = d
 
 
-def _qr_factor(prob, ds, theta):
-    """The streaming QR: R (Dt, Dt) upper triangular with R^T R = G + Lambda, and d = Q^T y_tilde."""
+def _qr_factor(prob, ds, theta, host=None):
+    """The streaming QR: R (Dt, Dt) upper triangular with R^T R = G + Lambda, and d = Q^T y_tilde.
+    Batched merges (stats.host_qr_stream / device_qr_stream); host: None picks by backend."""
+    from .stats import device_qr_stream, host_qr_stream
     R0, d0 = _prior_block(prob, theta)                       # (Dt, Dt) upper tri, zeros(Dt)
-    if jax.default_backend() == "cpu":                       # stats.host_qr_stream: not in a scan on the CPU
-        from .stats import host_qr_stream
+    if host is None:
+        host = jax.default_backend() == "cpu"                # stats.host_qr_stream: not in a scan on the CPU
+    if host:
         rows = jax.jit(lambda b: [_weighted_rows(prob, theta, b)])
         return host_qr_stream(rows, ds, [(R0, d0)])[0]
-
-    def body(carry, batch):
-        R, d = carry
-        Aw, yw = _weighted_rows(prob, theta, batch)          # (nb, Dt), (nb,)
-        Q, R2 = jnp.linalg.qr(jnp.concatenate([R, Aw], 0), mode="reduced")   # (Dt+nb, Dt), (Dt, Dt)
-        d2 = Q.T @ jnp.concatenate([d, yw])
-        return (R2, d2), None
-
-    (R, d), _ = jax.lax.scan(body, (R0, d0), ds)
-    return R, d
+    fac, _ = jax.jit(lambda d: device_qr_stream(lambda b: ([_weighted_rows(prob, theta, b)], ()), d,
+                                                [(R0, d0)], ()))(ds)
+    return fac[0]
 
 
 def posterior_qr(prob, ds, theta):
