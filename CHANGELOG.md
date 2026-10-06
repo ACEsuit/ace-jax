@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Fixed: linear fits ran out of memory on large bases.** `aj fit
+  --m-per-species 0` (and `--learn-radial`) no longer computes the
+  site-feature tensor of the whole training set, which only the GP arm reads.
+  At basis size 5456 on 154k atoms that tensor alone was 7.2 GiB of GPU
+  memory. Linear fit results are unchanged, bit for bit.
 - **Fixed: `forces_support` used the wrong quantile.** In 0.2.0 and 0.2.1,
   `ACECalculator` (and so `aj eval --support`) computed `support_q` as the
   weighted α quantile of the calibration scores instead of the 1 − α
