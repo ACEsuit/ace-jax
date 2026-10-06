@@ -135,7 +135,7 @@ jobs:
         run: |
           uv sync --python 3.12 --extra gp
           uv pip install --reinstall dist/*.whl
-          uv run --no-sync pytest -n 0 -v tests/test_coupling_parity.py tests/test_coupling_etshim.py tests/test_coupling_cache.py tests/test_basis_build.py tests/test_fit_basis_pipeline.py tests/test_cli_fit_basis.py
+          uv run --no-sync pytest -n 0 -v tests/test_coupling_parity.py tests/test_coupling_etshim.py tests/test_coupling_cache.py tests/test_basis_build.py tests/test_fit_basis_pipeline.py tests/test_cli_fit_basis.py tests/test_built_basis_parity.py
 
   publish:
     # only after every platform's wheel built, passed its clean-environment tests,
