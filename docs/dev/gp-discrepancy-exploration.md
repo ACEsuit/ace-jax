@@ -43,11 +43,10 @@ Mahalanobis), which that bug does not touch.
 - **D4:**
   - Si, shared noise against per-quantity: E 10.6 vs 28.2 meV/atom (Phase 1 acceptance met); F 0.144 vs
     0.125 eV/Å (**−15 %, acceptance "no worse" missed**); V 95.8 vs 110.3.
-  - Cantor ARD under tied noise: arms prepared, **not run** (~2.5 GPU-h, needs approval).
-- **Runs that need approval** (Modal, each ≲ 3 GPU-h):
-  - D4 Cantor: `ard_seq_pq`, `ard_seq_shared` + `big_errors`;
-  - a converged bench365 GP refit that saves `gp_model.npz`, ideally with `--density pca --pca-d 16
-    --lml host-cache` (the #60 fast path), to see whether the environment-blind kernel survives convergence.
+  - Cantor ARD under tied noise: every coverage cell within +0.003 of per-quantity (Phase 1 Cantor
+    acceptance met). Test energy RMSE +79 % without explicit weights (3.03 → 5.42 meV/atom).
+- **Follow-up runs (approved 2026-10-06, done):** D4 Cantor (below) and a converged bench365 GP refit (D3
+  addendum).
 
 ## Artefacts: what exists and what is missing
 
@@ -60,7 +59,7 @@ Mahalanobis), which that bug does not touch.
 | D3 | Cantor GP fit | **partly missing.** No `gp_model.npz` was ever written for any Cantor GP run (`2026-09-26/cantor_gp_pca128_ms4`, `2026-09-27/..._s100`, `2026-09-28/bench365_gp` hold `theta_map.json`, `map_restarts.json`, predictions). θ_MAP is present; the inducing set and feature map were **rebuilt** from the `fit_bench.py` GP arm (FPS, deterministic; PCA up to column signs, which the cosine kernel does not see). The posterior (training statistics) was not rebuilt: that is a GPU pass. |
 | D3 | MACE-MH-1 teacher | **present**: `~/.cache/mace/mace-mh-1.model` (torch), `/storage/.../macejax-gpu/bundles/mace-mh-1.json` |
 | D4 Si | GAP-18 Si o4d12 linear fits, shared vs per-quantity noise | **present**: `/storage/eng/essswb/projects/ace-jax/runs/shared_noise_o4d12/{shared,per-quantity}` (run on `feat/shared-noise`, PR #67) |
-| D4 Cantor | bench365 ARD refits under tied noise | **missing; not run** (Modal, ~2.5 GPU-h; see D4). |
+| D4 Cantor | bench365 ARD refits under tied noise | **run 2026-10-06** (Modal, 4.0 B200-h + `big_errors`): `acegp-data/results/2026-10-06-gp-discrepancy-d4/bench365_ard_seq_{pq,shared}` |
 
 ## 0.1 Code map
 
@@ -304,30 +303,36 @@ target's rows. The SoR *posterior* variance is not computed: it needs the traini
 - Per config type, shared improves energies almost everywhere and costs forces most on liquid, amorphous and
   surfaces.
 
-**Cantor (bench365, `--uq ard`): not run.**
-- Prepared arms in `bench/defect_uq/modal/ard_arms.py`:
-  - `ard_seq_pq`: per-quantity, `ard_mode="sequential"`, the control;
-  - `ard_seq_shared`: shared, sequential.
-- Sequential mode is needed because `noise="shared"` refuses joint ARD (joint mode would refit σ_q by its
-  own evidence). Both arms need the `feat/shared-noise` source (`ACEJAX_SRC`).
-- Cost estimate:
-  - 2 fits at ~1 B200-h each (`ard_default` took 61 min);
-  - `big_errors` on 5 files per run, ~0.2 A100-h each run;
-  - **≈ 2.5 GPU-h total**, at the "few GPU-hours" line of the working rules, so it waits for approval.
+**Cantor (bench365, `--uq ard`, run 2026-10-06 on Modal).**
+- Arms `ard_seq_pq` and `ard_seq_shared` (`D4_ARMS`), source `feat/shared-noise` @ 2936506. Both are
+  sequential: shared noise refuses joint ARD.
+- Fits took 1.9 and 2.1 B200-h; `big_errors` on all 34 v3 cells.
+- Scored by `bench/defect_uq/scoring/d4_score.py`:
+  - the 300-config ID sample of the rev2 tables, through `ACECalculator(posterior=)`;
+  - `validate_shape` coverage on the big cells, cell-weighted, with 90 % cell-bootstrap CIs.
+- Table: `bench/defect_uq/results/2026-10-05_gp_discrepancy/d4_cantor.md`; run files:
+  `acegp-data/results/2026-10-06-gp-discrepancy-d4/`.
 
-```bash
-cd bench/defect_uq/modal && ACEJAX_SRC=<shared-noise worktree> modal deploy modal_bench365.py
-modal run modal_bench365.py::launch --arms ard_seq_pq,ard_seq_shared
-for run in bench365_ard_seq_pq bench365_ard_seq_shared; do
-  modal run modal_bench365.py::launch_big --run $run --xyz /out/defects/big3_mh1.xyz --tag 3
-  for p in 2-3 4-5 6-7 8-9; do modal run modal_bench365.py::launch_big --run $run --xyz /out/defects/big3_cracks_r$p.xyz --tag 3x_r$p; done
-done
-```
+| run | MAP σ_E / σ_F / σ_V | ID cfg (atom) | all | crack | tip | edge | screw | ρ crack / edge / screw | test E (meV/atom) / F (eV/Å) / V |
+|---|---|---|---|---|---|---|---|---|---|
+| `ard_default` (joint, per-quantity; rev2 §7) | – | 0.898 (0.903) | 0.911 | 0.908 | 0.893 | 0.937 | 0.942 | 0.37 / 0.30 / 0.32 | 3.03 / 0.0687 / 0.734 |
+| `ard_seq_pq` (sequential, per-quantity) | 0.0171 / 0.0661 / 0.102 | 0.898 (0.903) | 0.911 | 0.908 | 0.893 | 0.937 | 0.942 | 0.37 / 0.30 / 0.32 | 3.03 / 0.0687 / 0.734 |
+| `ard_seq_shared` (sequential, shared) | 0.0675 (tied) | 0.898 (0.904) | 0.913 | 0.909 | 0.894 | 0.940 | 0.944 | 0.37 / 0.28 / 0.30 | **5.42** / 0.0689 / 0.691 |
 
-**Expectation, from D1/D2 and the ARD design.** The conformal per-group scales are re-fitted on T_val under
-either noise model, so in-distribution coverage is preserved by construction. The question the run answers is
-whether the big-cell coverages move (> 0.01 in any cell of the rev2 table) when the posterior shape is built
-at tied σ.
+- **The baseline reproduces rev2 §7 exactly.** Sequential and joint ARD give identical tables at three
+  decimals, so the switch to sequential that shared noise forces costs nothing.
+- **Calibrated force UQ is insensitive to the noise model.** Every coverage cell under shared noise is
+  within +0.003 of per-quantity (90 % CIs about ±0.004). This is Phase 1's Cantor acceptance (within 0.01),
+  **met**.
+  - The conformal per-group scales absorb the change, as expected.
+  - Rank correlation drops by 0.02 on edge and screw.
+- **The mean fit is not insensitive.** With `fit_bench`'s default weights (E:F:V = 1:1:1, no `--weights`),
+  shared noise:
+  - raises the test energy RMSE by **79 %** (3.03 → 5.42 meV/atom);
+  - leaves forces unchanged (0.0687 → 0.0689 eV/Å) and improves the virial by 6 %.
+  
+  With no explicit weights, a tied σ hands the E:F:V balance to an arbitrary default. That is the case for
+  open question 1's answer: `shared` only when `--weights` is given.
 
 ## Gate decisions
 
@@ -366,7 +371,8 @@ kernel family (the ψ/κ factorisation, or the bound itself), not the likelihood
 stands on the weight-cancellation argument alone. D4-Si shows its price: −62 % energy RMSE, +15 % force RMSE
 at ACEpotentials' weights.
 
-**D4 (Cantor):** not run; ≈ 2.5 GPU-h, awaiting approval (commands in D4).
+**D4 (Cantor):** calibrated force UQ unchanged under shared noise (all cells within +0.003); the energy
+RMSE is not (+79 % at default weights). Phase 1 should ship `shared` only with explicit weights.
 
 ## Open questions: proposed answers
 
