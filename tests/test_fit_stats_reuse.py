@@ -99,6 +99,7 @@ CASES = {
     "pops": dict(arm="linear", uq="pops", e0="prefit", pops_ridge=1e-6),
     "ard": dict(arm="linear", uq="ard", m_per_species=0),
     "gp": dict(arm="gp", m_per_species=6, density="pair"),
+    "linear_loo": dict(arm="linear", objective="loo"),     # a QR problem, a Gram-form objective
 }
 
 

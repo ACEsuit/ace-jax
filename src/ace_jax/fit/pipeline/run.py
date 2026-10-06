@@ -3,7 +3,6 @@ from typing import NamedTuple
 
 from ...eval import highest_precision
 from .mapfit import fit_map
-from ..objective import uses_qr
 from ..predict import theta_key
 from .objective import make_objective, release
 from .predict import predict_splits
@@ -77,8 +76,11 @@ def fit(cfg, data, log=print, on_stage=None):
         # the objective's statistics ("cached", run.py), a full recompute per draw ("recompute"),
         # or ("auto", the CLI's) the objective's where they are bitwise a recompute's -- the QR
         # form, whose qs is linear_qr_statistics of ds_train -- and a recompute elsewhere: the GP and
-        # Cholesky objectives cache a split Gram, equal in exact arithmetic, not in summation order
-        exact = uses_qr(b.prob) and obj.stats is not None and cfg.predict_stats != "recompute"
+        # Cholesky objectives cache a split Gram, equal in exact arithmetic, not in summation order.
+        # Keyed on the objective's own QR statistics, not uses_qr(prob): a QR problem fitted by
+        # objective="loo" or devices > 1 takes make_log_density, whose statistics are the Gram form
+        exact = (getattr(obj.lik, "qr_stats", None) is not None and obj.stats is not None
+                 and cfg.predict_stats != "recompute")
         stats = obj.stats if cfg.predict_stats == "cached" or exact else None
         out_stats = obj.stats if exact else None         # the model file's: a recompute unless exact
         # the MAP posterior the predictions factor, kept for the model file (and fitted E0) when
