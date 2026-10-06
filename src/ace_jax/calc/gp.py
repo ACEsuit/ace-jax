@@ -98,8 +98,12 @@ class GPCalculator(Calculator):
         groups = np.asarray(post.groups_of(batch))[live].astype(np.int64)
         which = {"forces_std", "forces_cov", "forces_q"} | ({"forces_q_mahal"} if post.force_shape == "aniso" else set())
         with highest_precision():
-            F = np.asarray(self._post_rows(batch).F)[live]
-        out = {k: np.asarray(v) for k, v in post.served(F, groups, which).items()}
+            if post.variance == "dtc":          # the kappa shape + the derivative-DTC diagonal (ard.dtc_shape)
+                from ..fit.ard import dtc_shape
+                V = dtc_shape(post, self.fitted.prob, self._post_theta, batch)[live]
+            else:
+                V = post.atom_shape(np.asarray(self._post_rows(batch).F)[live])
+        out = {k: np.asarray(v) for k, v in post.served_from_V(V, groups, which).items()}
         out["forces_group"] = groups
         return out
 

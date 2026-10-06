@@ -347,7 +347,7 @@ def _atoms0():
     from ase import Atoms
     from conftest import FIXTURE_DIR
     from ace_jax.fit.xyz import read_extxyz
-    f = read_extxyz(FIXTURE_DIR / "si_tiny_train.xyz")[0]
+    f = next(f for f in read_extxyz(FIXTURE_DIR / "si_tiny_train.xyz") if len(f.numbers) > 1)  # [0] is an isolated atom
     return Atoms(numbers=f.numbers, positions=f.positions, cell=f.cell, pbc=f.pbc)
 
 
@@ -403,3 +403,65 @@ def test_gp_calculator_served_rows_are_chunked(gp_fit_dir, monkeypatch):
     at.calc = small
     b = small.get_property("forces_cov", at)
     np.testing.assert_allclose(b, a, rtol=1e-10, atol=1e-14 * np.abs(a).max())
+
+
+def test_dtc_shape_is_kappa_shape_plus_dtc_diagonal(gp_fit_dir):
+    from ace_jax.fit.ard import dtc_shape, rows_fn_for
+    from ace_jax.fit.hypers import from_array
+    from ace_jax.fit.predict import _dtc_deriv_residual
+    out, d, res = gp_fit_dir
+    post, prob = res.ard.posterior, res.built.prob
+    theta = from_array(np.asarray(post.gp_theta))
+    b = jax.tree.map(lambda a: a[0], d.ds_test)
+    with highest_precision():
+        V = dtc_shape(post._replace(variance="dtc", R=None), prob, theta, b)
+        Fv, _ = _dtc_deriv_residual(theta, prob, b)
+        Vk = post._replace(variance="kappa", R=None).atom_shape(np.asarray(rows_fn_for(prob, theta)(b).F))
+    live = np.asarray(b.node_mask)
+    np.testing.assert_allclose(V[live], Vk[live] + np.einsum("na,ab->nab", np.asarray(Fv)[live], np.eye(3)),
+                               rtol=1e-10, atol=1e-14 * np.abs(Vk).max())
+
+
+def test_dtc_shape_is_rotation_equivariant(gp_fit_dir):
+    """Review Focus 5 for the dtc shape: the DTC term is a per-axis diagonal (the derivative DTC gives
+    per-component variances, not the 3 x 3 block), so only its trace -- forces_std -- is rotation invariant;
+    the test holds that."""
+    from scipy.spatial.transform import Rotation
+    from ace_jax.fit.ard import dtc_shape
+    from ace_jax.fit.hypers import from_array
+    out, d, res = gp_fit_dir
+    post, prob = res.ard.posterior._replace(variance="dtc", R=None), res.built.prob
+    theta = from_array(np.asarray(post.gp_theta))
+    b = jax.tree.map(lambda a: a[0], d.ds_test)
+    Rm = Rotation.from_euler("zyx", [0.4, 0.2, -0.9]).as_matrix()
+    with highest_precision():
+        V0 = dtc_shape(post, prob, theta, b)
+        V1 = dtc_shape(post, prob, theta, b._replace(rij=b.rij @ Rm.T))
+    live = np.asarray(b.node_mask)
+    np.testing.assert_allclose(np.trace(V1[live], axis1=1, axis2=2), np.trace(V0[live], axis1=1, axis2=2),
+                               rtol=1e-8)
+
+
+def test_stage_ard_gp_dtc_runs():
+    _, _, _, res, pred = _gp_stage(ard_variance="dtc")
+    assert res.posterior.variance == "dtc" and res.posterior.R is None
+    assert np.isfinite(pred.F_var).all() and np.all(pred.F_var >= 0)
+    assert np.isfinite(res.posterior.group_table["q"]).all()
+
+
+def test_gp_calculator_serves_a_dtc_posterior(tmp_path):
+    """The calculator's dtc branch: served forces_std^2 = tr forces_cov, and forces_cov = lam^2 dtc_shape."""
+    from conftest import FIXTURE_DIR
+    from ace_jax.calc.gp import GPCalculator
+    from ace_jax.fit.pipeline import fit, load_fit_data, write_outputs
+    cfg = _gp_pipe_cfg(ard_variance="dtc").validate()
+    d = load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz"))
+    res = fit(cfg, d, log=lambda *a: None)
+    write_outputs(res, tmp_path, layout=("run", "cli"), log=lambda *a: None)
+    calc = GPCalculator.from_file(tmp_path / "gp_model.npz", posterior=tmp_path / "posterior.npz")
+    assert calc.posterior.variance == "dtc"
+    at = _atoms0()
+    at.calc = calc
+    sd, cov = calc.get_property("forces_std", at), calc.get_property("forces_cov", at)
+    np.testing.assert_allclose(sd ** 2, np.trace(cov, axis1=1, axis2=2), rtol=1e-6)
+    assert np.isfinite(calc.get_property("forces_q", at)).all() and np.all(sd > 0)
