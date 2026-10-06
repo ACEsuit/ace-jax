@@ -2,13 +2,19 @@ name: julia-parity
 # Guards that the JAX design matrix + linear solve still equal ACEpotentials.jl.
 # CI-only: regenerates the committed fixtures with Julia and re-runs the parity
 # tests (design rows to 1e-8, ACEfit solve(QR) to 1e-9). Not required for pip users.
+# Two parities: the EVALUATOR on a model ACEpotentials built (si_fitted.npz), and
+# the BUILDER -- a basis from build_basis and the live coupling library, holding
+# only the radials from Julia (built_basis_ref_*.npz).  The first alone missed #57.
 on:
   push:
     paths:
       - "src/ace_jax/eval/model.py"
       - "src/ace_jax/fit/rows.py"
       - "src/ace_jax/fit/solve.py"
+      - "src/ace_jax/basis/**"
       - "julia/export_model.jl"
+      - "julia/export_arrays.jl"
+      - "julia/built_basis_reference.jl"
       - "julia/acefit_qr_reference.jl"
       - "julia/Project.toml"
   schedule:
@@ -30,10 +36,12 @@ jobs:
             Pkg.Registry.add("General")
             Pkg.add(["ACEpotentials", "ACEfit", "NPZ"])   # or pin a version for reproducibility
             Pkg.instantiate()'
-      - name: Regenerate fixtures (design matrix + ACEfit QR reference)
+      - name: Regenerate fixtures (design matrices + ACEfit QR reference)
         run: |
           ACE_GP_FIXTURES=1 julia --project=julia julia/export_model.jl fixtures/si_fitted.npz ace1
           julia --project=julia julia/acefit_qr_reference.jl
+          julia --project=julia julia/built_basis_reference.jl fixtures
       - name: Re-run parity tests against regenerated fixtures
-        env: { JAX_PLATFORM_NAME: cpu, JAX_ENABLE_X64: "1" }
-        run: uv run --extra gp pytest -q tests/test_gp_rows.py tests/test_gp_solve.py tests/test_gp_objective.py
+        # REQUIRE_*: a missing fixture or coupling library fails rather than skips
+        env: { JAX_PLATFORM_NAME: cpu, JAX_ENABLE_X64: "1", ACEJAX_REQUIRE_FIXTURES: "1", ACEJAX_REQUIRE_OPTIONAL: "1" }
+        run: uv run --extra gp pytest -q tests/test_gp_rows.py tests/test_gp_solve.py tests/test_gp_objective.py tests/test_built_basis_parity.py
