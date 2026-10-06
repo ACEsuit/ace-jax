@@ -8,7 +8,7 @@ from ...basis.prior import prior_diagonal
 from ...eval import highest_precision
 from ..embedding import load_mace_embedding
 from ..hypers import default_prior
-from ..inducing import GPConfig, build_pmap, descriptor_scale, select_inducing, site_features
+from ..inducing import GPConfig, blr_inducing, build_pmap, descriptor_scale, select_inducing, site_features
 from ..kernels import KernelSpec
 
 # Joint E0 (e0='lsq'): the E0 columns' prior is N(pre-fit E0, E0_PRIOR_STD^2) per species, in eV --
@@ -44,20 +44,26 @@ def build_problem(cfg, d):
                      NZ=len(els), C=int(d.ds_train.y_E.shape[1]),   # the Dataset's C (packing can change it)
                      e0_cols=cfg.joint_e0)
     with highest_precision():
-        X, S = site_features(d.model, gpcfg, d.ds_train)
-        scale = descriptor_scale(X, d.ds_train.node_mask)
-        m = cfg.m_per_species if cfg.arm == "gp" else 0
-        Pmap = build_pmap(gpcfg, scale, density=None if cfg.density == "none" else cfg.density,
-                          d=cfg.pca_d, X=np.asarray(X), mask=np.asarray(d.ds_train.node_mask))
         raw = None if cfg.embedding is None else np.asarray(load_mace_embedding(cfg.embedding, els))
         embed = None if raw is None else jnp.asarray(raw)
-        ind = select_inducing(X, S, d.ds_train.node_z, d.ds_train.node_mask, m, scale,
-                              Pmap=Pmap, warp=cfg.warp, embed=embed, nz=len(els),
-                              de=(int(embed.shape[1]) if embed is not None else None))
-        s_floor = None
-        if cfg.delta_s_floor_q is not None:
-            s_live = np.asarray(S)[np.asarray(d.ds_train.node_mask)]
-            s_floor = float(np.quantile(s_live, cfg.delta_s_floor_q))
+        de = int(embed.shape[1]) if embed is not None else None
+        if cfg.arm != "gp":
+            # linear arm (M = 0): nothing reads X, S, the scale, Pmap or s_floor (blr_inducing), so
+            # never form the (nb, Ncap, D) site features -- 7 GB at n_B 5456 over 154k atoms
+            X = S = s_floor = None
+            ind = blr_inducing(gpcfg, d.ds_train.node_z, d.ds_train.node_mask, warp=cfg.warp,
+                               embed=embed, nz=len(els), de=de)
+        else:
+            X, S = site_features(d.model, gpcfg, d.ds_train)
+            scale = descriptor_scale(X, d.ds_train.node_mask)
+            Pmap = build_pmap(gpcfg, scale, density=None if cfg.density == "none" else cfg.density,
+                              d=cfg.pca_d, X=np.asarray(X), mask=np.asarray(d.ds_train.node_mask))
+            ind = select_inducing(X, S, d.ds_train.node_z, d.ds_train.node_mask, cfg.m_per_species, scale,
+                                  Pmap=Pmap, warp=cfg.warp, embed=embed, nz=len(els), de=de)
+            s_floor = None
+            if cfg.delta_s_floor_q is not None:
+                s_live = np.asarray(S)[np.asarray(d.ds_train.node_mask)]
+                s_floor = float(np.quantile(s_live, cfg.delta_s_floor_q))
         prob = Problem(KernelSpec(cfg.kernel, cfg.bump, gpcfg.D, s_floor=s_floor), d.model, ind, gpcfg,
                        jnp.asarray(prior_diagonal(d.z, meta, d.source)), default_prior(r0),
                        e0_prec=_e0_prec(d, els) if cfg.joint_e0 else None, lml_solver=cfg.lml_solver)

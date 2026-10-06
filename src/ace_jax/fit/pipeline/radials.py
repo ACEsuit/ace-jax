@@ -20,7 +20,7 @@ from ...basis.prior import prior_diagonal
 from ...eval import load
 from ..data import build_dataset
 from ..hypers import default_prior
-from ..inducing import GPConfig, descriptor_scale, select_inducing, site_features
+from ..inducing import GPConfig, blr_inducing
 from ..kernels import KernelSpec
 from ..objective import Problem
 from ..radial_learn import fit_radial
@@ -60,8 +60,7 @@ def learn_radials(cfg, data, log=print):
     r0 = cfg.r0 if cfg.r0 is not None else data.r0
     gc = GPConfig(r0=r0, rcut=float(meta["rcut"]), n_B=meta["n_B"], n_pair=meta["n_pair"],
                   NZ=len(meta["elements"]), C=int(ds_fit.y_E.shape[1]))   # the Dataset's C (packing)
-    X, S = site_features(model, gc, ds_fit)
-    ind = select_inducing(X, S, ds_fit.node_z, ds_fit.node_mask, 0, descriptor_scale(X, ds_fit.node_mask))
+    ind = blr_inducing(gc, ds_fit.node_z, ds_fit.node_mask)    # linear only: no site features (problem.py)
     prob = Problem(KernelSpec("cosine", True, gc.D), model, ind, gc,
                    jnp.asarray(prior_diagonal(data.z, meta, data.source)), default_prior(r0))
     log(f"learn radials: n_q={cfg.radial_n_q} on {len(fit_)} configs, gate on {nval} "
