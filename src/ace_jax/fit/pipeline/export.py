@@ -21,7 +21,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from ..hypers import from_array, to_array
-from ..predict import _train_stats, fit_posterior
+from ..predict import _train_stats, fit_posterior, theta_key
 
 GP_SCHEMA = 1
 
@@ -64,7 +64,13 @@ def model_file_blocked(cfg):
 
 
 def _posterior(res, theta):
-    return fit_posterior(theta, _train_stats(theta, res.built.prob, res.data.ds_train, None),
+    """The training posterior at theta: the one the predictions factored when the fit kept it
+    (res.posteriors, the MAP's), else from res.stats (the objective's, where they are bitwise a
+    recompute's), else from a statistics pass over the training set."""
+    hit = (getattr(res, "posteriors", None) or {}).get(theta_key(theta))
+    if hit is not None:
+        return hit
+    return fit_posterior(theta, _train_stats(theta, res.built.prob, res.data.ds_train, getattr(res, "stats", None)),
                          res.built.prob, res.data.ds_train)
 
 

@@ -167,8 +167,9 @@ def _parse_weights(s):
 
 def _fit_config(a):
     """FitConfig for `ace-jax fit` arguments, keeping the CLI's historical defaults
-    (model E0, per-draw statistics recompute, run_pathfinder's own 16 samples /
-    15 iterations)."""
+    (model E0, run_pathfinder's own 16 samples / 15 iterations) and its statistics
+    rule ("auto": the fit's QR statistics are reused, being bitwise a recompute's; the
+    GP and Cholesky objectives' split statistics are not, so those recompute per draw)."""
     from .fit.pipeline import FitConfig
     weights, factors = _parse_weights(a.weights)
     rungs = tuple(r.strip() for r in a.rungs.split(","))
@@ -194,7 +195,7 @@ def _fit_config(a):
         radial_lam_grid=tuple(float(x) for x in str(a.radial_lam_grid).split(",") if x.strip()),
         radial_val_frac=a.radial_val_frac,
         solver=a.solver, predict_train=False, pops_ridge=ridge,
-        predict_stats="recompute", pf_samples=16, pf_maxiter=15)
+        predict_stats="auto", pf_samples=16, pf_maxiter=15)
     return cfg.validate()
 
 
