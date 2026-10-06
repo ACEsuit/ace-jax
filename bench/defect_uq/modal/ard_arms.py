@@ -16,13 +16,23 @@ ARD_ARMS = {
     **{f"ard_f{int(f * 10)}": {"ard_val_frac": f, "ard_force_shape": "iso"} for f in (0.1, 0.3)},
 }
 
+# D4 of docs/dev/specs/2026-10-05-gp-discrepancy-design.md: noise-model sensitivity.  "noise" needs the
+# feat/shared-noise source (ACEJAX_SRC), so these arms are kept out of ARD_ARMS (whose FitConfigs the bench tests
+# build on main).  noise "shared" refuses ard_mode "joint" (that refits sigma_q by its own evidence), so both arms
+# are sequential: the ARD posterior keeps the MAP's sigma_q.
+D4_ARMS = {
+    "ard_seq_pq":     {"ard_force_shape": "aniso", "e0": "lsq", "ard_mode": "sequential", "noise": "per-quantity"},
+    "ard_seq_shared": {"ard_force_shape": "aniso", "e0": "lsq", "ard_mode": "sequential", "noise": "shared"},
+}
+
 
 def make_config(arm, common, cfg_cls=None):
-    """FitConfig for a named ablation arm (None if `arm` is not in ARD_ARMS).  `common` are the shared
+    """FitConfig for a named arm of ARD_ARMS or D4_ARMS (None otherwise).  `common` are the shared
     FitConfig kwargs; the arm's overrides win (ard_val_frac 0.2 is the default of the f sweep's middle)."""
-    if arm not in ARD_ARMS:
+    arms = {**ARD_ARMS, **D4_ARMS}
+    if arm not in arms:
         return None
     if cfg_cls is None:
         from ace_jax.fit.pipeline import FitConfig as cfg_cls
     base = dict(common, arm="linear", uq="ard", ard_mode="joint", ard_val_frac=0.2, ard_laplace=True)
-    return cfg_cls(**{**base, **ARD_ARMS[arm]})
+    return cfg_cls(**{**base, **arms[arm]})
