@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Faster QR statistics on large bases.** The linear fit's QR evidence
+  merged every batch into its triangular factors, about L^3 work per batch
+  and quantity. It now buffers the nonzero rows of many batches and merges
+  once per approximately L rows, without forming Q. At basis size 5477
+  (Si order 4, degree 20) one pass needs 5e13 instead of 1.2e15
+  floating-point operations: on a 32-core CPU the merges take approximately
+  13 min instead of 5 h. Results agree with per-batch merging to roundoff,
+  not bit for bit.
 - **Faster, smaller fits on large bases: the A2B coupling is sparse on the
   fitting path.** Models now hold A2B as its nonzeros only (it is 0.025-2%
   occupied), and the fit's design rows and their Jacobian use them directly.
