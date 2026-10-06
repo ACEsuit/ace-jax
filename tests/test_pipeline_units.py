@@ -78,6 +78,32 @@ def test_build_problem_linear_has_no_inducing_and_gp_has_m():
         assert b.prob.ind.XM.shape[0] == m
 
 
+def test_linear_build_problem_does_not_materialise_site_features(monkeypatch):
+    """The linear arm (M = 0) reads none of X, S, scale, Pmap or s_floor, so build_problem must not
+    form the (nb, Ncap, D) site-feature tensor: at n_B 5456 / 154k atoms it is 7 GB and OOMed a GPU.
+    The GP arm still builds it (inducing selection needs it)."""
+    from conftest import FIXTURE_DIR
+    from ace_jax.fit.pipeline import FitConfig, load_fit_data
+    from ace_jax.fit.pipeline import problem as P
+    calls = []
+    real = P.site_features
+
+    def spy(*a, **k):
+        calls.append(1)
+        return real(*a, **k)
+    monkeypatch.setattr(P, "site_features", spy)
+    base = dict(model=str(FIXTURE_DIR / "si_fitted.npz"), energy_key="dft_energy",
+                force_key="dft_force", virial_key="dft_virial", ntrain=12, ntest=4, batch=4, r0=2.35)
+    for density in ("none", "pair", "pca"):
+        cfg = FitConfig(**base, arm="linear", density=density, pca_d=4, delta_s_floor_q=0.1)
+        b = P.build_problem(cfg, load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz")))
+        assert not calls and b.X is None and b.S is None and b.prob.ind.XM.shape[0] == 0
+        assert b.prob.ind.embed.shape == (1, 1)          # the one-hot species embedding, as before
+    cfg = FitConfig(**base, arm="gp", m_per_species=6, density="pair")
+    b = P.build_problem(cfg, load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz")))
+    assert len(calls) == 1 and b.X is not None and b.prob.ind.XM.shape[0] == 6
+
+
 def test_objective_device_and_hostcache_agree_on_the_fixture():
     from conftest import FIXTURE_DIR
     from ace_jax.fit.hypers import to_array
