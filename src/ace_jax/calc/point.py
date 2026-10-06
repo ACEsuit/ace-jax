@@ -225,6 +225,9 @@ class ACECalculator(Calculator):
             if not isinstance(model_path, (str, bytes)) and not hasattr(model_path, "__fspath__"):
                 raise ValueError("posterior= needs the model FILE path (the design rows use the fit model)")
             post = ARDPosterior.load(posterior)
+            if post.prior_root.M:
+                raise ValueError(f"posterior {posterior} is from --uq ard-gp (a GP fit): serve it with "
+                                 "GPCalculator.from_file(gp_model.npz, posterior=...)")
             NZ = len(meta["elements"])
             L = (meta["n_B"] + meta["n_pair"]) * NZ
             # a joint-E0 posterior (meta e0_cols) carries NZ E0 columns after the readout: the model

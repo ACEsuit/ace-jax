@@ -262,10 +262,17 @@ def cmd_eval(a):
     gp = str(a.model).endswith(".npz") and "gp_json" in np.load(a.model).files   # gp_model.npz from `fit`
     ard = getattr(a, "posterior", None) is not None
     if gp and ard:
-        raise ValueError("--posterior is for a linear model.npz from `fit --uq ard`, not a gp_model.npz")
+        from .fit.ard import ARDPosterior
+        if ARDPosterior.load(a.posterior).prior_root.M == 0:
+            raise ValueError("--posterior is a linear `fit --uq ard` posterior: it belongs with its model.npz, "
+                             "not a gp_model.npz (a GP model takes the posterior.npz of `fit --uq ard-gp`)")
+    if gp and ard and getattr(a, "shape_path", "rows") == "committee":
+        raise ValueError("--shape-path committee is the linear --uq ard path; a gp_model.npz (--uq ard-gp) "
+                         "uses the design rows")
     if gp:
-        from .calc.gp import GPCalculator
-        calc = GPCalculator.from_file(a.model, deriv_dtc=not getattr(a, "no_deriv_dtc", False))
+        from .calc.gp import GPCalculator          # --posterior: the posterior.npz of `fit --uq ard-gp`
+        calc = GPCalculator.from_file(a.model, deriv_dtc=not getattr(a, "no_deriv_dtc", False),
+                                      posterior=a.posterior if ard else None)
     else:
         from .calc.point import ACECalculator
         calc = ACECalculator(a.model, posterior=a.posterior if ard else None, spline_tol=None,
@@ -282,6 +289,10 @@ def cmd_eval(a):
         served = {"q": want_pa and post.group_table is not None,
                   "mahal": want_pa and post.group_table is not None and post.force_shape == "aniso",
                   "support": want_pa and getattr(a, "support", False)}
+        if served["support"] and gp:
+            print("note: the support diagnostic is served for a linear model.npz only: support_ok/support_q "
+                  "are not written")
+            served["support"] = False
         if served["support"] and post.support is None:
             print("note: this posterior has no support reference: support_ok/support_q are not written")
             served["support"] = False
@@ -524,7 +535,7 @@ def _parser():
                     help="extxyz to write: the input structures, every label kept, plus the predictions "
                          "(<prefix>energy, <prefix>forces, <prefix>stress, and *_std for UQ models)")
     ev.add_argument("--prefix", default="ace_", help="name prefix of the predicted keys (default ace_)")
-    ev.add_argument("--posterior", default=None, help="posterior.npz from `fit --uq ard`: adds <prefix>forces_std")
+    ev.add_argument("--posterior", default=None, help="posterior.npz from `fit --uq ard` (with its model.npz) or `fit --uq ard-gp` (with its gp_model.npz): adds <prefix>forces_std")
     ev.add_argument("--per-atom", default=None,
                     help="with --posterior: extxyz of the served per-atom arrays (forces_pred, forces_std, "
                          "forces_q, forces_group; forces_cov, forces_q_mahal for an aniso posterior)")

@@ -329,3 +329,77 @@ def test_ard_gp_fit_writes_ard_mean_gp_model(tmp_path):
     assert np.allclose(np.triu(np.asarray(L), 1), 0.0)
     assert (tmp_path / "posterior.npz").exists()
     np.testing.assert_array_equal(np.asarray(fg.draws[0]), res.ard.posterior.gp_theta)
+
+
+@pytest.fixture(scope="module")
+def gp_fit_dir(tmp_path_factory):
+    from conftest import FIXTURE_DIR
+    from ace_jax.fit.pipeline import fit, load_fit_data, write_outputs
+    out = tmp_path_factory.mktemp("ardgp")
+    cfg = _gp_pipe_cfg().validate()
+    d = load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz"))
+    res = fit(cfg, d, log=lambda *a: None)
+    write_outputs(res, out, layout=("run", "cli"), log=lambda *a: None)
+    return out, d, res
+
+
+def _atoms0():
+    from ase import Atoms
+    from conftest import FIXTURE_DIR
+    from ace_jax.fit.xyz import read_extxyz
+    f = read_extxyz(FIXTURE_DIR / "si_tiny_train.xyz")[0]
+    return Atoms(numbers=f.numbers, positions=f.positions, cell=f.cell, pbc=f.pbc)
+
+
+def test_gp_calculator_serves_the_ard_posterior(gp_fit_dir):
+    from ace_jax.calc.gp import GPCalculator
+    out, d, res = gp_fit_dir
+    calc = GPCalculator.from_file(out / "gp_model.npz", posterior=out / "posterior.npz")
+    at = _atoms0()
+    at.calc = calc
+    sd = calc.get_property("forces_std", at)
+    cov = calc.get_property("forces_cov", at)
+    assert sd.shape == (len(at),) and cov.shape == (len(at), 3, 3)
+    np.testing.assert_allclose(sd ** 2, np.trace(cov, axis1=1, axis2=2), rtol=1e-6)
+    assert np.isfinite(calc.get_property("forces_q", at)).all()
+    assert calc.get_property("forces_group", at).dtype.kind == "i"
+    assert calc.get_property("forces_q_mahal", at).shape == (len(at),)       # the fixture's posterior is aniso
+
+
+def test_gp_calculator_refuses_mismatched_posteriors(gp_fit_dir, tmp_path):
+    """Review Focus 1: an ard-gp posterior given to ACECalculator, a linear one to GPCalculator, or one
+    from a different fit is refused with a message naming the fix."""
+    from conftest import FIXTURE_DIR
+    from ace_jax import ACECalculator
+    from ace_jax.calc.gp import GPCalculator
+    from test_ard import _stage           # tests/ is on sys.path under pytest
+    out, _, _ = gp_fit_dir
+    with pytest.raises(ValueError, match="ard-gp"):
+        ACECalculator(str(FIXTURE_DIR / "si_fitted.npz"), posterior=str(out / "posterior.npz"))
+    lin = tmp_path / "lin_post.npz"
+    _stage(ard_force_shape="aniso", ard_val_frac=0.4, ard_n_min=50)[1].posterior.save(lin)
+    with pytest.raises(ValueError, match="linear"):
+        GPCalculator.from_file(out / "gp_model.npz", posterior=lin)
+    other = tmp_path / "other.npz"
+    z = dict(np.load(out / "posterior.npz"))
+    z["mean"] = z["mean"] * 1.01
+    np.savez(other, **z)
+    with pytest.raises(ValueError, match="same fit"):
+        GPCalculator.from_file(out / "gp_model.npz", posterior=other)
+
+
+def test_gp_calculator_served_rows_are_chunked(gp_fit_dir, monkeypatch):
+    """Review Focus 4: a tiny ROWS_EDGE_BUDGET forces the node-chunked rows; served values are unchanged."""
+    from ace_jax.calc.gp import GPCalculator
+    from ace_jax.fit import rows
+    out, _, _ = gp_fit_dir
+    at = _atoms0()
+    ref = GPCalculator.from_file(out / "gp_model.npz", posterior=out / "posterior.npz")
+    at.calc = ref
+    a = ref.get_property("forces_cov", at)
+    monkeypatch.setattr(rows, "ROWS_EDGE_BUDGET", 1000)
+    small = GPCalculator.from_file(out / "gp_model.npz", posterior=out / "posterior.npz")
+    at = _atoms0()
+    at.calc = small
+    b = small.get_property("forces_cov", at)
+    np.testing.assert_allclose(b, a, rtol=1e-10, atol=1e-14 * np.abs(a).max())
