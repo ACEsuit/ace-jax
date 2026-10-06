@@ -149,7 +149,8 @@ def _live(Pw, yw):
 
 def _qr_merge(R, c, Pw, yw):
     """Fold weighted rows into a triangular factor: the updating QR of [R ; Pw], with c
-    carried as an extra column so that only R is formed (no Q)."""
+    carried as an extra column so that only R is formed (no Q).  mode="raw" is geqrf, which JAX
+    cannot differentiate: these statistics are not differentiable (the CPU host path never was)."""
     n = R.shape[1]
     A = jnp.concatenate([jnp.concatenate([R, c[:, None]], 1), jnp.concatenate([Pw, yw[:, None]], 1)], 0)
     Ra = jnp.triu(jnp.linalg.qr(A, mode="raw")[0].mT[:n])    # geqrf alone: no Householder product
