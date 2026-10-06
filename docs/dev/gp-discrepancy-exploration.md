@@ -36,10 +36,13 @@ Mahalanobis), which that bug does not touch.
   - **Force rows are ≈ 96 % independent**, so #64's over-counting argument does not hold. Weight cancellation
     stands alone as Phase 1's motivation.
 - **D3:**
-  - k − q is ≤ 0.7 % of the force prior at the tip and everywhere else. **Phase 4 is not motivated.**
-  - The bench365 GP's kernel has collapsed to an environment-blind δ(s)·species form (ρ on its bound,
-    ℓ ≈ 20), on an unconverged MAP.
-  - A converged Cantor GP refit, saving the model, should precede Phases 3–5.
+  - On the first, unconverged bench365 GP, the kernel had collapsed to an environment-blind δ(s)·species
+    form (ρ on its bound, ℓ ≈ 20).
+  - **A converged refit (PCA-16) undoes the collapse:** ℓ = 1.96, +432 nats, two starts agreeing.
+  - On that fit, k − q is ≤ 0.8 % of the force prior but 14–34 % of the *predictive* force variance. It is
+    flat across categories and its share is lowest at the tip (0.14 against 0.34 ID).
+  - **Phase 4 is not motivated:** PITC would add a near-constant noise, not tip structure.
+  - Phase 3 remains a live experiment.
 - **D4:**
   - Si, shared noise against per-quantity: E 10.6 vs 28.2 meV/atom (Phase 1 acceptance met); F 0.144 vs
     0.125 eV/Å (**−15 %, acceptance "no worse" missed**); V 95.8 vs 110.3.
@@ -266,7 +269,7 @@ target's rows. The SoR *posterior* variance is not computed: it needs the traini
 | big-cell bulk, r 18–26 Å | 6 | 3.4e-2 | 0.001 | 0.17 | 0.002 [0.001, 0.003] | 0.004 |
 | bench365 test (in distribution) | 10 | 3.2e-2 | 0.001 | 0.21 | 0.002 [0.002, 0.003] | 0.003 |
 
-**Reading.**
+**Reading (first pass; reasons 2–4 are superseded by the addendum below).**
 1. **There is no k − q excess at the tip.** At most 0.1 % of the site prior and 0.7 % of the force prior lies
    outside the inducing span, in every category, tip and in-distribution alike.
 2. **Why: the fitted kernel is environment-blind.** θ_MAP has:
@@ -282,6 +285,56 @@ target's rows. The SoR *posterior* variance is not computed: it needs the traini
    (`map_restarts.json`: "TOTAL NO. OF ITERATIONS REACHED LIMIT"; the run predates the converged MAP of #63).
    Restart 1 also ran to ρ ≈ 99; restart 0 to ρ = 47, ℓ = 27. So the collapse is the direction the evidence
    pulls, not an artefact of one start. Whether a *converged* MAP stays there is open.
+
+#### D3 addendum: the converged GP refit (2026-10-06)
+
+**Refit.** `fit_bench.py` arm `gp_conv`: the GP arm with PCA-16 + host-cache (the #60 fast path), 4 L-BFGS
+starts of up to 300 iterations; Modal B200, 3.5 h. It saves `gp_model.npz`
+(`acegp-data/results/2026-10-06-gp-discrepancy-d4/bench365_gp_conv/`).
+
+| fit | starts: logpost (evaluations) | best ℓ | best ρ | min κ over pairs | test E (meV/atom) / F (eV/Å) |
+|---|---|---|---|---|---|
+| `bench365_gp` (PCA-128, `map_steps` 40) | 540 424 / 539 246 / 536 478 / – (all at the iteration limit) | 19.7 | 100 (bound) | 0.995 | 3.06 / 0.0687 |
+| `gp_conv` (PCA-16, converged L-BFGS) | **540 856** (111) / 540 855 (63) / 537 823 (92) / 540 412 (178) | **1.96** | 76 | **0.59** | 2.98 / 0.0687 |
+
+- **The environment-blind kernel was an artefact of the unconverged MAP.** Two independent starts reach the
+  same optimum (ℓ ≈ 1.9–2.0, within 1 nat), 432 nats above the old fit.
+  - There κ spans 0.59–1 over site pairs: the kernel resolves the environment.
+  - ρ = 76 is off its bound, but ψ is still ≈ 1, so the bump factor is inactive.
+  - Start 3 settled in the old basin (ℓ = 9.5, 540 412). That is the local mode the 40-iteration fit was
+    heading for.
+- The convergence check still reports `converged: False` (predicted Newton gain 46.6 nats, in `log_sigma_F`).
+  Host-cache has no polish, so this is as converged as this path gets.
+- Test errors are unchanged. Two things differ from the old fit (PCA-16 against PCA-128, converged against
+  not), so the change in θ is not attributed to convergence alone.
+
+**D3 on the converged fit** (`d3_gp_span.py --gp-model`, same 48 targets; tables
+`bench/defect_uq/results/2026-10-05_gp_discrepancy/d3_converged.md`). The posterior is now available, so the
+predictive force variance splits into the SoR posterior part and the derivative-DTC part:
+
+| atoms | n | median (k_F − q_F)/k_F (prior) | median SoR posterior var (eV²/Å²) | median DTC var | median DTC / predictive [p10, p90] |
+|---|---|---|---|---|---|
+| crack tip, r < 5 Å | 6 | 0.005 | 6.5e-4 | 1.2e-4 | **0.14** [0.11, 0.24] |
+| crack, 10–20 Å | 6 | 0.004 | 4.8e-4 | 1.5e-4 | 0.21 [0.16, 0.30] |
+| edge core | 10 | 0.005 | 5.2e-4 | 1.5e-4 | 0.21 [0.16, 0.27] |
+| screw core | 10 | 0.004 | 5.0e-4 | 1.7e-4 | 0.24 [0.16, 0.37] |
+| big-cell bulk | 6 | 0.004 | 5.6e-4 | 1.5e-4 | 0.18 [0.12, 0.24] |
+| bench365 test (ID) | 10 | 0.005 | 2.3e-4 | 1.3e-4 | 0.34 [0.25, 0.52] |
+
+**Reading (supersedes D3's reasons 2–3; reason 1 stands).**
+1. The prior is still ≥ 99.2 % inside the inducing span everywhere. The posterior then shrinks the SoR part
+   to ~2 % of the prior, so the near-constant k − q becomes 14–34 % of the *predictive* force variance.
+   **It is not negligible in the served variance.**
+2. **The DTC term carries no tip signal.** It is flat across categories (1.2–1.7e-4 eV²/Å²) and its share is
+   *lowest* at the tip. What grows away from the training data is the SoR posterior variance (tip 2.8× ID).
+3. PITC/FITC would put that flat k − q into the training likelihood as an almost homoscedastic extra force
+   noise. It cannot carry the structured tip error Phase 4 was meant to capture. **Phase 4 is still not
+   motivated, now on a converged fit.**
+4. **Phase 3 (GP-arm sandwich) is back to plausible.** The converged GP's kernel does resolve local
+   structure, so the GP arm is not a priori blind. `--ard-variance dtc` would add an almost constant term; the
+   SoR/sandwich part is where any gain must come from. Its acceptance test (match or beat linear-arm rev2 on
+   tip coverage and ρ) is the experiment.
+5. Peak RSS for D3 on a saved model: 10.9 GB (the 15 540² posterior factor), against 17.8 GB for the rebuild.
 
 ### D4 — noise-model sensitivity
 
@@ -360,12 +413,12 @@ is in-locality.** The literal point-estimate rule would have opened it; the reas
 - If review prefers the literal rule, the cheapest test is Phase 2 itself: one fit plus `big_errors`, ~1.5
   GPU-h. Its outcome is predictable from D1: tip coverage moves by ≤ 0.01.
 
-**D3 → Phase 4 motivation (no formal gate):** **Phase 4 (PITC) is not motivated.** The DTC residual k − q is ≤ 0.7 % of
-the prior force variance at the tip, as everywhere else, so FITC/PITC would change the training likelihood by
-almost nothing for this fit. More importantly, the fitted GP discrepancy is environment-blind (ρ on its upper
-bound, ℓ ≈ 20). Phases 3–5 all assume a GP that resolves local structure. **Before any GP-arm phase, refit
-the Cantor GP with the converged MAP (#63) and save `gp_model.npz`.** If ρ again runs to its bound, the
-kernel family (the ψ/κ factorisation, or the bound itself), not the likelihood, is what limits the GP arm.
+**D3 → Phase 4 motivation (no formal gate): not motivated.** On the converged GP refit the derivative-DTC
+term is 14–34 % of the predictive force variance but flat across categories, with its smallest share at the
+tip (D3 addendum). PITC would add a near-homoscedastic noise, not the structured tip error. The first D3
+pass's reason (an environment-blind kernel) was an artefact of an unconverged MAP and is withdrawn. **Phase 3
+is the GP-arm experiment worth running.** Use the converged `gp_conv` fit as its base, and note that it still
+reports a 46.6-nat predicted gain.
 
 **D2 → Phase 1 rationale:** the force-row over-counting argument is not supported (n_pr ≈ 0.96 × 3N). Phase 1
 stands on the weight-cancellation argument alone. D4-Si shows its price: −62 % energy RMSE, +15 % force RMSE
@@ -399,10 +452,12 @@ RMSE is not (+79 % at default weights). Phase 1 should ship `shared` only with e
    - On the GP arm the prior is not ARD (one scale on the K_MM block at most; 0.1).
    - The served quantities, groups and conformal scales are the same, so one name for the UQ family is
      clearer.
-   - But see 5: D3 suggests the GP arm's DTC shape has little to add.
+   - D3 (converged) suggests `--ard-variance dtc` adds a near-constant term; the sandwich over
+     [B | k(B, B_M)] is the part to test.
 5. **PITC blocks = jackknife clusters.** Acceptable in principle: both are "rows whose misspecification is
    correlated". D2 measures that correlation as confined to < 5.5 Å, so any block of ≥ 3 r_cut holds it.
-   **But D3 argues against Phase 4 as specified** (k − q ≤ 0.7 % of the force prior at the tip: PITC would have nothing to carry. Defer Phase 4 until a converged Cantor GP refit shows a non-trivial k − q share).
+   **But D3 argues against Phase 4 as specified**: on the converged GP the k − q term is flat across
+   categories and smallest, as a share, at the tip, so PITC would add a near-constant noise. Defer Phase 4.
 6. **Non-local R.** Always explicit (`--nl-radius`), with the teacher's receptive field *reported* in the fit
    log when the labels' provenance is known.
    - ace-jax cannot see a foundation model's identity in an extxyz.

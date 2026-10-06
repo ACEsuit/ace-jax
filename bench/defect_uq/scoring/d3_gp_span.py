@@ -163,7 +163,8 @@ def main():
     json.dump(rows, open(os.path.splitext(a.out)[0] + ".json", "w"), indent=1)
     labs = list(dict.fromkeys(r["label"] for r in rows))
     lines = ["# D3 residual-GP prior inside / outside the inducing span\n",
-             f"theta `{a.theta}`; inducing set rebuilt (fit_bench.py GP arm); clusters 2 r_cut + 0.5 A.\n",
+             (f"gp_model `{a.gp_model}` (theta, inducing set and posterior as saved)" if a.gp_model else
+              f"theta `{a.theta}`; inducing set rebuilt (fit_bench.py GP arm)") + "; clusters 2 r_cut + 0.5 A.\n",
              "| atoms | n | median k (eV^2) | median (k-q)/k | median k_F (eV^2/A^2) | median (k_F-q_F)/k_F [p10, p90] | median s (A) |",
              "|---|---|---|---|---|---|---|"]
     post_cols = []
