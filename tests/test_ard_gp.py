@@ -131,3 +131,104 @@ def test_gp_posterior_save_load_roundtrip(gp_ev, tmp_path):
     assert back.prior_root.M == prob.ind.XM.shape[0]
     np.testing.assert_array_equal(np.asarray(back.prior_root.U), np.asarray(post.prior_root.U))
     np.testing.assert_array_equal(back.gp_theta, post.gp_theta)
+
+
+def _A_gp(post):
+    """A = R0^T S R0 from the posterior's factor and prior root (R0 recovered from R0^-1 = rows(I))."""
+    root = post.prior_root
+    R0 = np.linalg.inv(np.asarray(root.rows(np.eye(root.width))))
+    S = np.asarray(post.chol) @ np.asarray(post.chol).T
+    return R0.T @ S @ R0
+
+
+def _row_cluster_labels(ds, rc, sig):
+    """The cluster id of each row of _gp_dense_rows (same order, zero-weight rows dropped)."""
+    out = []
+    for i in range(ds.n_batches):
+        b = jax.tree.map(lambda a, i=i: a[i], ds)
+        for c in np.flatnonzero(np.asarray(b.cfg_mask)):
+            if float(b.w_E[c]) > 0:
+                out.append(rc[i]["E"][c])
+            for n in np.flatnonzero(np.asarray(b.node_cfg) == c):
+                if float(b.w_F[n]) > 0:
+                    out += [rc[i]["F"][n]] * 3
+            if float(b.w_V[c]) > 0:
+                out += [rc[i]["V"][c]] * 6
+    return np.array(out)
+
+
+@pytest.fixture
+def gp_post(gp_ev):
+    from ace_jax.fit.ard import ard_posterior
+    prob, ds, theta, ev = gp_ev
+    h = ev.h0(theta)
+    with highest_precision():
+        post = ard_posterior(ev, h, 1.0, _meta(prob), theta=theta)
+    return prob, ds, theta, ev, h, post
+
+
+@pytest.mark.parametrize("ell", [float("inf"), 6.0])
+def test_gp_press_equals_exact_deletion(gp_post, ell):
+    """c - c_(-k) = A^-1 g~_k for every cluster (whole configurations, and spatial blocks), h fixed, over
+    the joint design: the spec's PRESS/DFBETA identity, compared through the fitted values Psi (c - c_(-k))
+    (the inducing weights alone are only as determined as cond(K_MM) allows; see the mean test)."""
+    from ace_jax.fit.ard import rows_fn_for
+    from ace_jax.fit.clusters import row_clusters
+    from ace_jax.fit.jackknife import press_scores
+    prob, ds, theta, ev, h, post = gp_post
+    sig = ev.sigmas(h)
+    Psi, y, _ = _gp_dense_rows(prob, ds, theta, sig)
+    A = _A_gp(post)
+    c = np.asarray(post.mean)
+    configs = None
+    if np.isfinite(ell):              # spatial blocks need the configurations: the fixture's first 6
+        from conftest import FIXTURE_DIR
+        from ace_jax.fit.data import load_configs
+        configs = load_configs(FIXTURE_DIR / "si_tiny_train.xyz", "dft_energy", "dft_force", "dft_virial")[:6]
+    rc, K = row_clusters(ds, configs, ell)
+    assert K > 6 if np.isfinite(ell) else K == 6       # spatial blocks split some configuration
+    with highest_precision():
+        G, _ = press_scores(post, prob, ds, rc, K, sig, rows_fn=rows_fn_for(prob, theta))
+    labels = _row_cluster_labels(ds, rc, sig)
+    ref, got = [], []
+    for k in range(K):
+        m = labels == k
+        ck = np.linalg.solve(A - Psi[m].T @ Psi[m], Psi[~m].T @ y[~m])
+        ref.append(Psi @ (c - ck)); got.append(Psi @ np.linalg.solve(A, G[:, k]))
+    ref, got = np.array(ref), np.array(got)
+    # one scale for every cluster: a cluster with no rows of weight has c - c_(-k) = 0 to roundoff
+    np.testing.assert_allclose(got, ref, rtol=1e-5, atol=1e-6 * np.abs(ref).max())
+
+
+def test_gp_push_through_matches_exact(gp_post):
+    from ace_jax.fit.ard import rows_fn_for
+    from ace_jax.fit.clusters import row_clusters
+    from ace_jax.fit.jackknife import press_scores
+    prob, ds, theta, ev, h, post = gp_post
+    rc, K = row_clusters(ds, None, float("inf"))
+    f = rows_fn_for(prob, theta)
+    with highest_precision():
+        Ge, _ = press_scores(post, prob, ds, rc, K, ev.sigmas(h), mode="exact", rows_fn=f)
+        Gp, _ = press_scores(post, prob, ds, rc, K, ev.sigmas(h), mode="pushthrough", rows_fn=f)
+    np.testing.assert_allclose(Gp, Ge, rtol=1e-7, atol=1e-9 * np.abs(Ge).max())
+
+
+def test_ard_gp_shape_is_rotation_equivariant(gp_post):
+    """V(R x) = R V(x) R^T for the PRESS shape over the joint rows (Review Focus 5)."""
+    from scipy.spatial.transform import Rotation
+    from ace_jax.fit.ard import rows_fn_for
+    from ace_jax.fit.clusters import row_clusters
+    from ace_jax.fit.jackknife import press_scores, shape_factor
+    prob, ds, theta, ev, h, post = gp_post
+    rc, K = row_clusters(ds, None, float("inf"))
+    f = rows_fn_for(prob, theta)
+    with highest_precision():
+        G, _ = press_scores(post, prob, ds, rc, K, ev.sigmas(h), rows_fn=f)
+        post = post._replace(R=shape_factor(post, G))
+        b = jax.tree.map(lambda a: a[0], ds)
+        Rm = Rotation.from_euler("zyx", [0.3, -0.7, 1.1]).as_matrix()
+        V0 = post.atom_shape(np.asarray(f(b).F))
+        V1 = post.atom_shape(np.asarray(f(b._replace(rij=b.rij @ Rm.T)).F))
+    live = np.asarray(b.node_mask)
+    np.testing.assert_allclose(V1[live], np.einsum("ab,nbc,dc->nad", Rm, V0[live], Rm), rtol=1e-8,
+                               atol=1e-10 * np.abs(V0).max())

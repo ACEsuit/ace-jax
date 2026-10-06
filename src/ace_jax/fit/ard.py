@@ -375,7 +375,13 @@ class ARDPosterior(NamedTuple):
 
     def _force_width(self, n_cols):
         """Width check of force rows: the full design (len(dinv)) or the readout alone -- the model
-        file's rows (ACECalculator), whose E0 columns would be zero on a force row anyway."""
+        file's rows (ACECalculator), whose E0 columns would be zero on a force row anyway.  An ard-gp
+        posterior takes the full joint rows only (the E0 columns sit before the inducing columns)."""
+        if self.root is not None and self.root.M:
+            if n_cols != self.root.width:
+                raise ValueError(f"force rows have {n_cols} columns; this ard-gp posterior takes the joint rows "
+                                 f"[B | k(B, B_M)] of width {self.root.width} (GPCalculator builds them)")
+            return n_cols
         full = len(np.asarray(self.dinv))
         if n_cols not in (full, full - self.n_e0):
             raise ValueError(f"force rows have {n_cols} columns; the posterior has {full}"
@@ -388,6 +394,8 @@ class ARDPosterior(NamedTuple):
         the kappa path pads each chunk with zeros), with identical results."""
         from .jackknife import atom_chunk, atom_shape
         L0 = self._force_width(Frows.shape[-1])
+        if self.root is not None and self.root.M:                # ard-gp: u = R0^-T phi^T, full joint rows
+            return self._atom_shape_gp(Frows, chunk)
         if self.R is not None:
             return atom_shape(self.R[:L0], np.asarray(self.dinv)[:L0], Frows, chunk)
         if self.Q is not None:                                   # schema 2: uncentred sandwich factor
@@ -399,6 +407,23 @@ class ARDPosterior(NamedTuple):
         out = np.empty((N, 3, 3))
         for i in range(0, N, c):
             U = _pad_cols(jnp.asarray(Frows[i:i + c], jnp.float64), L) * dinv[None, None, :]
+            n = U.shape[0]
+            W = jnp.swapaxes(solve_triangular(chol, U.reshape(-1, L).T, lower=True), 0, 1).reshape(n, 3, -1)
+            out[i:i + c] = np.asarray(jnp.einsum("nar,nbr->nab", W, W))
+        return out
+
+    def _atom_shape_gp(self, Frows, chunk=None):
+        from .jackknife import atom_chunk, atom_shape
+        if self.R is not None:
+            return atom_shape(self.R, self.root, Frows, chunk)
+        if self.Q is not None:
+            raise ValueError("an ard-gp posterior has no legacy sandwich factor Q")
+        N, L = Frows.shape[0], self.root.width                   # kappa: V = u^T S^-1 u
+        c = atom_chunk(L, chunk)
+        chol = jnp.asarray(self.chol)
+        out = np.empty((N, 3, 3))
+        for i in range(0, N, c):
+            U = self.root.rows(jnp.asarray(Frows[i:i + c], jnp.float64))
             n = U.shape[0]
             W = jnp.swapaxes(solve_triangular(chol, U.reshape(-1, L).T, lower=True), 0, 1).reshape(n, 3, -1)
             out[i:i + c] = np.asarray(jnp.einsum("nar,nbr->nab", W, W))
@@ -452,14 +477,17 @@ class ARDPosterior(NamedTuple):
         """Untempered posterior variance phi A^-1 phi^T of each row of Phi (n, L).  force_rows: Phi may
         omit the joint-E0 columns (zero on a force row; padded per chunk)."""
         c = jnp.asarray(self.chol, jnp.float64)
-        L = len(np.asarray(self.dinv))
+        L = self.prior_root.width
         if force_rows:
             self._force_width(Phi.shape[-1])
         out = []
         for i in range(0, len(Phi), chunk):
             P = jnp.asarray(Phi[i:i + chunk])
             P = _pad_cols(P, L) if force_rows else P
-            v = solve_triangular(c, (P * jnp.asarray(self.dinv)[None, :]).T, lower=True)
+            if self.root is not None and self.root.M:            # ard-gp: phi R0^-1 (L = dinv's width + M)
+                v = solve_triangular(c, self.root.rows(P).T, lower=True)
+            else:
+                v = solve_triangular(c, (P * jnp.asarray(self.dinv)[None, :]).T, lower=True)
             out.append(np.asarray(jnp.sum(v * v, axis=0)))
         return np.concatenate(out) if out else np.zeros(0)
 
@@ -640,7 +668,25 @@ def _force_nll(e2, s2, kappa):
     return float(np.mean(e2 / (2 * v) + 1.5 * np.log(2 * np.pi * v)))
 
 
-def predict_ard(post, prob, ds, node_chunk=None):
+def rows_fn_for(prob, theta, node_chunk=None):
+    """The ARD stage's design-row function of one batch: the linear arm's node-chunked rows (M = 0; theta
+    unused), or the joint rows [B | k_theta(B, B_M)] at theta (uq "ard-gp"), whose residual block
+    rows.batch_rows bounds by ROWS_EDGE_BUDGET as in training."""
+    from .rows import chunked_rows_fn
+    if prob.ind.XM.shape[0] == 0:
+        return chunked_rows_fn(prob.model, prob.cfg, node_chunk)
+    return lambda b: _joint_rows_jit(theta, prob.spec, prob.model, prob.ind, prob.cfg, b)
+
+
+def _joint_rows_body(theta, spec, model, ind, cfg, batch):
+    from .rows import batch_rows
+    return batch_rows(theta, spec, model, ind, cfg, batch)
+
+
+_joint_rows_jit = eqx.filter_jit(_joint_rows_body)
+
+
+def predict_ard(post, prob, ds, node_chunk=None, rows_fn=None):
     """Posterior predictive on a Dataset: means from the ARD mean; F_var the served calibrated force
     variance, E_var/V_var the untempered posterior variances.  Schema 3 (post.group_table set):
     F_var = lam_rms[g]^2 diag V per atom (g = post.groups_of(batch)), so sum_a F_var = forces_std^2.
@@ -648,14 +694,15 @@ def predict_ard(post, prob, ds, node_chunk=None):
     posterior variance)."""
     from .predict import _pack
     from .rows import chunked_rows_fn
-    L = prob.cfg.len_basis
-    rows_fn = chunked_rows_fn(prob.model, prob.cfg, node_chunk)
+    if rows_fn is None:
+        rows_fn = chunked_rows_fn(prob.model, prob.cfg, node_chunk)
     lam_rms = None if post.group_table is None else np.asarray(post.group_table["lam_rms"], float)
     outs = []
     for i in range(ds.n_batches):
         b = jax.tree.map(lambda a, i=i: a[i], ds)
         r = rows_fn(b)
-        Fn = np.asarray(r.F)                                                   # (Ncap, 3, L)
+        Fn = np.asarray(r.F)                                                   # (Ncap, 3, L) or (.., L + M)
+        L = Fn.shape[-1]
         E, F, V = np.asarray(r.E), Fn.reshape(-1, L), np.asarray(r.V).reshape(-1, L)
         if lam_rms is not None:
             g = post.groups_of(b)
@@ -709,7 +756,7 @@ class _ValAtoms(NamedTuple):
     bn: np.ndarray | None = None    # (n, 2) (batch, node) index of each atom in ds
 
 
-def _val_atoms(post, prob, ds, r1=None, shape=True, own_col=None):
+def _val_atoms(post, prob, ds, r1=None, shape=True, own_col=None, rows_fn=None):
     """Per live force-labelled atom (w_F > 0) of ds, in one pass over its rows: the force error at
     post.mean, the untempered s^2, (shape) the unscaled shape V = post.atom_shape, and (r1) the shell
     features z, d.  own_col: (n_cfg(ds),) the Q column of each config of ds -- the #18 own-cluster-out
@@ -717,8 +764,9 @@ def _val_atoms(post, prob, ds, r1=None, shape=True, own_col=None):
     then drops that one cluster's column of Q, and v_incl = tr V with it."""
     from .conformal import shell_features
     from .rows import chunked_rows_fn
-    L = prob.cfg.len_basis
-    rows_fn = chunked_rows_fn(prob.model, prob.cfg)
+    L = post.prior_root.width
+    if rows_fn is None:
+        rows_fn = chunked_rows_fn(prob.model, prob.cfg)
     acc = {k: [] for k in _ValAtoms._fields}
     dinv = jnp.asarray(post.dinv, jnp.float64)
     off = 0                                          # configs of ds before this batch (padded ones excluded)
