@@ -164,8 +164,9 @@ def tiny_linear_problem():
 
 @pytest.fixture(scope="module")
 def tiny_gp_problem():
-    """M > 0 twin of tiny_linear_problem: 8 inducing sites (FPS), theta = the default prior mean.
-    Returns (prob, ds, theta)."""
+    """M > 0 twin of tiny_linear_problem: 8 inducing sites (FPS).  Returns (prob, ds, theta), theta the
+    default prior mean with noise scales (0.1, 0.3, 0.3): at the prior mean's sigma_E = 1e-3 the unscaled
+    Gram G + Lambda has cond ~1e23 here, past what any reference solve can check against."""
     import numpy as np
     import jax
     jax.config.update("jax_enable_x64", True)
@@ -189,7 +190,8 @@ def tiny_gp_problem():
     ind = select_inducing(X, S, ds.node_z, ds.node_mask, 8, descriptor_scale(X, ds.node_mask))
     prior = default_prior(2.35)
     prob = Problem(KernelSpec("cosine", True, cfg.D), model, ind, cfg, jnp.asarray(z["gamma"]), prior)
-    return prob, ds, prior.mu
+    theta = prior.mu._replace(log_sigma_E=np.log(0.1), log_sigma_F=np.log(0.3), log_sigma_V=np.log(0.3))
+    return prob, ds, theta
 
 
 def _orders(prob):

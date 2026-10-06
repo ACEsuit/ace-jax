@@ -27,6 +27,12 @@ _NEED3 = "this posterior predates schema 3; refit with --uq ard to get forces_q/
 
 
 E0_GROUP = 0      # body_col marker of a joint-E0 column: a fixed prior, no ARD scale
+GP_GROUP = -1     # body_col marker of an inducing column (uq "ard-gp"): one shared scale a_GP, start 0
+
+
+def gp_body_columns(body_col, M):
+    """body_col of the joint design [B | k(B, B_M)]: the linear columns' groups, then M GP_GROUP columns."""
+    return np.concatenate([np.asarray(body_col, int), np.full(int(M), GP_GROUP)])
 
 
 def body_order_columns(meta, cfg):
@@ -57,12 +63,27 @@ class ARDStats(NamedTuple):
     ls_fixed: np.ndarray | None
 
 
-def ard_statistics(theta, prob, ds, mode):
+def ard_statistics(theta, prob, ds, mode, columns="linear"):
     """joint: per-quantity statistics (3 L^2 matrices).  sequential: the combined Gram at the
     linear MAP noise scales, accumulated in one pass (1 L^2 matrix) -- the low-memory mode.
-    Both are the linear (L-column) statistics only: a hybrid problem's inducing columns (M > 0)
-    never enter the ARD posterior, and the joint Gram is hyperparameter-independent."""
+    columns "linear" (uq "ard"): the L linear columns only -- a hybrid problem's inducing columns never
+    enter, and the joint Gram is hyperparameter-independent.  columns "joint" (uq "ard-gp"): the joint
+    design [B | k_theta(B, B_M)] at theta (Dt = L + M), streamed by stats.sufficient_statistics; sequential
+    mode then combines its per-quantity Grams at theta's noise scales (3 Dt^2 transiently)."""
     from .rows import ROWS_EDGE_BUDGET
+    if columns == "joint":
+        st = _joint_statistics_jit(theta, prob.spec, prob.model, prob.ind, prob.cfg, ds)
+        if mode == "joint":
+            return joint_ard_stats(st)
+        if mode != "sequential":
+            raise ValueError(f"ard mode must be 'joint' or 'sequential', got {mode!r}")
+        ls = np.array([float(getattr(theta, f"log_sigma_{q}")) for q in "EFV"])
+        w = np.exp(-2 * ls)
+        M = sum(w[i] * getattr(st, f"G_{q}") for i, q in enumerate("EFV"))
+        bv = sum(w[i] * getattr(st, f"b_{q}") for i, q in enumerate("EFV"))
+        return ARDStats((M,), (bv,), np.zeros(3), np.zeros(3), ls)
+    if columns != "linear":
+        raise ValueError(f"ard statistics columns must be 'linear' or 'joint', got {columns!r}")
     if mode == "joint":
         return joint_ard_stats(_linear_statistics_jit(prob.model, prob.cfg, ds, ROWS_EDGE_BUDGET))
     if mode != "sequential":
@@ -101,6 +122,14 @@ def _sequential_stats_body(model, cfg, ds, inv, budget):
 
 
 _linear_statistics_jit = eqx.filter_jit(_linear_statistics_body)
+
+
+def _joint_statistics_body(theta, spec, model, ind, cfg, ds):
+    from .stats import sufficient_statistics
+    return sufficient_statistics(theta, spec, model, ind, cfg, ds)
+
+
+_joint_statistics_jit = eqx.filter_jit(_joint_statistics_body)
 _sequential_stats_jit = eqx.filter_jit(_sequential_stats_body)
 
 
@@ -116,37 +145,45 @@ class ARDEvidence:
     """log p(D|h) and its gradient in the prior-scaled system.  h = (log sigma_q [joint only], a_k).
 
     Columns with body_col == E0_GROUP (joint E0) have the fixed prior Lambda = Gamma^2 (scaled
-    precision 1): no a_k, no group, and a constant 0 in 1/2 log|Lambda~|."""
+    precision 1): no a_k, no group, and a constant 0 in 1/2 log|Lambda~|.
 
-    def __init__(self, stats, gamma, body_col):
+    root (uq "ard-gp"): the prior root R0 = blockdiag(diag Gamma, chol(K_MM)^T) of the joint design
+    (prior_root.PriorRoot); S = R0^-T A R0^-1, and the GP_GROUP columns share one scale a_GP, so their
+    prior is exp(a_GP) K_MM.  None: PriorRoot.diag(1 / gamma), the linear arm's D, evaluated verbatim."""
+
+    def __init__(self, stats, gamma, body_col, root=None):
+        from .prior_root import PriorRoot
         self.joint = stats.ls_fixed is None
         self.ls_fixed = stats.ls_fixed
         self.body_col = np.asarray(body_col)
-        if len(np.asarray(gamma)) != len(self.body_col):
-            raise ValueError(f"ARDEvidence: gamma has {len(np.asarray(gamma))} columns, body_col "
-                             f"{len(self.body_col)} (a joint-E0 problem: pass ard_gamma(prob))")
+        self.root = PriorRoot.diag(1.0 / np.asarray(gamma)) if root is None else root
+        if len(np.asarray(gamma)) + self.root.M != len(self.body_col):
+            raise ValueError(f"ARDEvidence: gamma has {len(np.asarray(gamma))} columns (+ {self.root.M} "
+                             f"inducing), body_col {len(self.body_col)} (a joint-E0 problem: pass ard_gamma(prob); "
+                             f"a GP-arm problem: gp_body_columns and prior_root)")
         fixed = self.body_col == E0_GROUP
         self.groups = tuple(int(g) for g in np.unique(self.body_col[~fixed]))
         # E0 columns index a trailing 1 (log 0 = 0) appended to exp(a)
         gidx = jnp.asarray(np.where(fixed, len(self.groups),
                                     np.searchsorted(np.asarray(self.groups), self.body_col)))
-        dinv = jnp.asarray(1.0 / np.asarray(gamma))
-        self.dinv = dinv
+        self.dinv = jnp.asarray(self.root.dinv)
         # the unscaled G/b are held as given (no scaled copies: the Gram is L^2 per quantity, and a
         # pipeline caller shares them with its cache); D^-1 (sum_q w_q G_q) D^-1 is formed per call.
         # They are jit ARGUMENTS, not closure constants, which XLA would copy into the executable.
         self._data = (tuple(stats.G), tuple(stats.b), jnp.asarray(stats.yy), jnp.asarray(stats.n))
         self._gidx = gidx
         self._nls = 3 if self.joint else 0
-        self._parts = lambda h: _ev_parts(h, self._data, self.dinv, self._gidx, self.joint)
+        self._parts = lambda h: _ev_parts(h, self._data, self.root, self._gidx, self.joint)
 
     def h0(self, theta):
+        """The MAP's own prior: a_k = -2 log sigma_c on the body orders (Lambda = Gamma^2 / sigma_c^2),
+        a_GP = 0 on the inducing columns (Lambda = K_MM), and theta's noise scales [joint]."""
         a_blr = float(-2 * theta.log_sigma_c)
         ls = [float(getattr(theta, f"log_sigma_{q}")) for q in "EFV"] if self.joint else []
-        return np.array(ls + [a_blr] * len(self.groups))
+        return np.array(ls + [0.0 if g == GP_GROUP else a_blr for g in self.groups])
 
     def value_and_grad(self, h):
-        v, g = _ev_value_and_grad(jnp.asarray(h, float), self._data, self.dinv, self._gidx, self.joint)
+        v, g = _ev_value_and_grad(jnp.asarray(h, float), self._data, self.root, self._gidx, self.joint)
         return float(v), np.asarray(g)
 
     def hessian(self, h):
@@ -156,7 +193,7 @@ class ARDEvidence:
         P = h.shape[0]
         H = np.empty((P, P))
         for i in range(P):
-            H[:, i] = np.asarray(_ev_hvp(h, jnp.zeros(P).at[i].set(1.0), self._data, self.dinv, self._gidx,
+            H[:, i] = np.asarray(_ev_hvp(h, jnp.zeros(P).at[i].set(1.0), self._data, self.root, self._gidx,
                                          self.joint))
         return 0.5 * (H + H.T)
 
@@ -196,8 +233,9 @@ class ARDEvidence:
         return np.exp(np.asarray(h[:3], float)) if self.joint else np.exp(np.asarray(self.ls_fixed, float))
 
 
-def _ev_parts(h, data, dinv, gidx, joint):
-    """(S's data part D^-1 M D^-1, D^-1 b, the scaled prior precisions, the constant) at h."""
+def _ev_parts(h, data, root, gidx, joint):
+    """(S's data part R0^-T M R0^-1, R0^-T b, the scaled prior precisions, the constant) at h; root a
+    prior_root.PriorRoot (M = 0: D^-1 M D^-1 and D^-1 b, as written before the GP arm)."""
     G, b, yy, nq = data
     nls = 3 if joint else 0
     if joint:
@@ -208,22 +246,22 @@ def _ev_parts(h, data, dinv, gidx, joint):
     else:
         M, bv, const = G[0], b[0], 0.0
     lam = jnp.concatenate([jnp.exp(h[nls:]), jnp.ones(1)])[gidx]
-    return dinv[:, None] * M * dinv[None, :], dinv * bv, lam, const
+    return root.gram(M), root.dual(bv), lam, const
 
 
-def _ev_logev(h, data, dinv, gidx, joint):
-    Ms, bv, lam, const = _ev_parts(h, data, dinv, gidx, joint)
+def _ev_logev(h, data, root, gidx, joint):
+    Ms, bv, lam, const = _ev_parts(h, data, root, gidx, joint)
     c, low = cho_factor(Ms + jnp.diag(lam), lower=True)
     x = cho_solve((c, low), bv)
     return const + 0.5 * bv @ x - jnp.sum(jnp.log(jnp.diag(c))) + 0.5 * jnp.sum(jnp.log(lam))
 
 
-# module-level: one executable per (joint, shapes) for every ARDEvidence, with G/b/dinv as arguments
+# module-level: one executable per (joint, shapes) for every ARDEvidence, with G/b/root as arguments
 _ev_value_and_grad = jax.jit(jax.value_and_grad(_ev_logev), static_argnames="joint")
 
 
-def _ev_hvp_body(h, t, data, dinv, gidx, joint):
-    return jax.jvp(lambda x: jax.grad(_ev_logev)(x, data, dinv, gidx, joint), (h,), (t,))[1]
+def _ev_hvp_body(h, t, data, root, gidx, joint):
+    return jax.jvp(lambda x: jax.grad(_ev_logev)(x, data, root, gidx, joint), (h,), (t,))[1]
 
 
 _ev_hvp = jax.jit(_ev_hvp_body, static_argnames="joint")
@@ -304,6 +342,14 @@ class ARDPosterior(NamedTuple):
     group_table: dict | None = None     # GroupTable.to_dict()
     cal: dict | None = None             # arrays scores f32, groups i8, cfg i64, src i8
     support: dict | None = None
+    root: object = None                 # prior_root.PriorRoot with the GP block (uq "ard-gp"); None: diag(dinv)
+    gp_theta: np.ndarray | None = None  # (10,) the theta the GP block's rows and K_MM are evaluated at
+
+    @property
+    def prior_root(self):
+        """The prior root R0 of this posterior: the stored GP-arm root, else the linear arm's diag(dinv)."""
+        from .prior_root import PriorRoot
+        return self.root if self.root is not None else PriorRoot.diag(self.dinv)
 
     def _tab(self, groups=None, need_groups=True):
         if self.group_table is None:
@@ -465,6 +511,10 @@ class ARDPosterior(NamedTuple):
     def _extra_arrays(self, dtype):
         js = lambda d: np.frombuffer(json.dumps(d).encode(), np.uint8)
         out = {"force_shape": np.array(self.force_shape), "eps": self.eps}
+        if self.root is not None and self.root.M:
+            # always float64: M x M is small, and a float32 chol(K_MM)^T loses the jitter's scale in the solves
+            out["gp_U"] = np.asarray(self.root.U, np.float64)
+            out["gp_theta"] = np.asarray(self.gp_theta, np.float64)
         if self.R is not None:
             out["R"] = np.asarray(self.R, dtype)
         if self.group_consts is not None:
@@ -484,6 +534,7 @@ class ARDPosterior(NamedTuple):
     def load(path):
         z = np.load(pathlib.Path(path))
         from .conformal import restore_table
+        from .prior_root import PriorRoot
         from .support import unflatten_support
         js = lambda k: json.loads(bytes(z[k]).decode()) if k in z.files else None
         if int(z["schema"]) not in (1, 2, 3):
@@ -500,7 +551,9 @@ class ARDPosterior(NamedTuple):
                             cal={k: z[f"cal_{k}"] for k in ("scores", "groups", "cfg", "src")}
                             if "cal_scores" in z.files else None,
                             support=unflatten_support({k[8:]: z[k] for k in z.files if k.startswith("support_")})
-                            if any(k.startswith("support_") for k in z.files) else None)
+                            if any(k.startswith("support_") for k in z.files) else None,
+                            root=PriorRoot(z["dinv"], jnp.asarray(z["gp_U"])) if "gp_U" in z.files else None,
+                            gp_theta=np.asarray(z["gp_theta"]) if "gp_theta" in z.files else None)
 
 
 def _pad_cols(X, width):
@@ -509,7 +562,9 @@ def _pad_cols(X, width):
     return X if k == 0 else jnp.concatenate([X, jnp.zeros(X.shape[:-1] + (k,), X.dtype)], -1)
 
 
-def ard_posterior(ev, h, kappa, meta):
+def ard_posterior(ev, h, kappa, meta, theta=None):
+    """The ARD posterior at h.  A GP-arm evidence (ev.root.M > 0, uq "ard-gp") also stores its prior root
+    and theta (the kernel hyperparameters the inducing columns were built at); pass theta then."""
     Ms, bv, lam, _ = ev._parts(jnp.asarray(h, float))
     c, low = cho_factor(Ms + jnp.diag(lam), lower=True)
     x = cho_solve((c, low), bv)
@@ -519,10 +574,18 @@ def ard_posterior(ev, h, kappa, meta):
     n_e0 = int(np.sum(ev.body_col == E0_GROUP))
     if n_e0:                                             # absent (0) on prefit-E0 posteriors, as before
         keep["e0_cols"] = n_e0
+    gp = {}
+    if ev.root.M:
+        if theta is None:
+            raise ValueError("ard_posterior: a GP-arm (ard-gp) posterior needs theta, the hyperparameters "
+                             "of its inducing columns")
+        from .hypers import to_array
+        keep["gp_cols"] = ev.root.M
+        gp = {"root": ev.root, "gp_theta": np.asarray(to_array(theta), np.float64)}
     # chol stays a float64 device array: var_rows runs once per batch (predict_ard, _val_errors), and
     # jnp.asarray of a numpy factor would re-upload the L x L matrix (1.8 GB at L = 15k) on every call
-    return ARDPosterior(np.asarray(ev.dinv * x), jnp.asarray(c, jnp.float64), np.asarray(ev.dinv), float(kappa),
-                        np.asarray(h, float), ev.groups, ev.body_col, keep)
+    return ARDPosterior(np.asarray(ev.root.primal(x)), jnp.asarray(c, jnp.float64), np.asarray(ev.dinv),
+                        float(kappa), np.asarray(h, float), ev.groups, ev.body_col, keep, **gp)
 
 
 def sandwich_scores(post, prob, ds, sig):
