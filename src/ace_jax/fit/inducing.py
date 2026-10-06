@@ -161,6 +161,38 @@ def farthest_point(X, m, start=0):
     return np.asarray(idx)
 
 
+def species_embedding(Z, node_mask, embed=None, nz=None, de=None):
+    """The kernel's species embedding (NZ, de): `embed` (a frozen table, checked against de) or,
+    by default, the one-hot embedding.  Size it to the full model species count `nz`
+    (e.g. len(meta["elements"])) when given: the kernel gathers embed[z] by centre
+    species at PREDICTION too, and a test-only species with index >= width would be
+    silently clamped by JAX's gather to the last row (spurious cross-covariance). Any
+    width >= the species actually present reproduces (z==zm) bit-for-bit. Falls back to
+    the present-species count when nz is None (correct only if prediction sees no unseen
+    species); guards an all-masked batch."""
+    from .embedding import species_onehot
+    if embed is None:
+        zlive = np.asarray(Z).reshape(-1)[np.asarray(node_mask).reshape(-1)]
+        present = int(zlive.max()) + 1 if zlive.size else 1
+        NZ = present if nz is None else max(int(nz), present)
+        return species_onehot(NZ)
+    embed = jnp.asarray(embed, jnp.float64)
+    if de is not None and embed.shape[1] != int(de):
+        raise ValueError(f"embed width {embed.shape[1]} != de {de}")
+    return embed
+
+
+def blr_inducing(cfg, Z, node_mask, warp="none", embed=None, nz=None, de=None):
+    """The M = 0 (BLR limit, linear arm) Inducing, built without the site descriptors.  With no
+    inducing points nothing reads the feature map: every residual/DTC path short-circuits on
+    XM.shape[0] == 0, and save_model writes ind only for M > 0.  So no (nb, Ncap, D) X (7 GB at
+    n_B 5456 over 154k atoms), no descriptor scale and no (D, D) diag Pmap: scale is ones and
+    the map is zero-width (Pmap (D, 0), XM (0, 0)).  The embedding is select_inducing's."""
+    D = cfg.D
+    return Inducing(jnp.zeros((0, 0)), jnp.zeros(0), jnp.zeros(0, jnp.int32), jnp.ones(D),
+                    jnp.zeros((D, 0)), warp, embed=species_embedding(Z, node_mask, embed=embed, nz=nz, de=de))
+
+
 def select_inducing(X, S, Z, node_mask, m_per_species, scale, Pmap=None, warp="none", embed=None, nz=None, de=None):
     X = np.asarray(X).reshape(-1, X.shape[-1]); S = np.asarray(S).reshape(-1)
     Z = np.asarray(Z).reshape(-1); live = np.asarray(node_mask).reshape(-1)
@@ -175,26 +207,10 @@ def select_inducing(X, S, Z, node_mask, m_per_species, scale, Pmap=None, warp="n
         m = m_per_species if isinstance(m_per_species, int) else m_per_species[int(z)]
         pick = pool[farthest_point(X[pool] * scale, m)]     # FPS in scaled B-space
         xs.append(X[pick]); ss.append(S[pick]); zs.append(Z[pick])
-    from .embedding import species_onehot
     from .feature import apply as _apply
     Xpick = np.concatenate(xs) if xs else np.zeros((0, X.shape[-1]))
     UM = np.asarray(_apply(jnp.asarray(Xpick), jnp.asarray(Pmap), warp))
-    if embed is None:
-        # Default one-hot species embedding. Size it to the full model species count `nz`
-        # (e.g. len(meta["elements"])) when given: the kernel gathers embed[z] by centre
-        # species at PREDICTION too, and a test-only species with index >= width would be
-        # silently clamped by JAX's gather to the last row (spurious cross-covariance). Any
-        # width >= the species actually present reproduces (z==zm) bit-for-bit. Falls back to
-        # the present-species count when nz is None (correct only if prediction sees no unseen
-        # species); guards an all-masked batch.
-        zlive = np.asarray(Z).reshape(-1)[np.asarray(node_mask).reshape(-1)]
-        present = int(zlive.max()) + 1 if zlive.size else 1
-        NZ = present if nz is None else max(int(nz), present)
-        embed = species_onehot(NZ)
-    else:
-        embed = jnp.asarray(embed, jnp.float64)
-        if de is not None and embed.shape[1] != int(de):
-            raise ValueError(f"embed width {embed.shape[1]} != de {de}")
+    embed = species_embedding(Z, node_mask, embed=embed, nz=nz, de=de)
     return Inducing(jnp.asarray(UM), jnp.asarray(np.concatenate(ss) if ss else np.zeros(0)),
                     jnp.asarray(np.concatenate(zs) if zs else np.zeros(0), jnp.int32),
                     jnp.asarray(scale), jnp.asarray(Pmap), warp, embed=embed)
