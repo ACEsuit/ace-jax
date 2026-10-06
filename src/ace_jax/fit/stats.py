@@ -209,6 +209,9 @@ def host_qr_stream(batch_rows_fn, ds, init, merge_rows=None):
     return [(jnp.asarray(R), jnp.asarray(c)) for R, c in acc]
 
 
+CPU_SCAN_MAX_L = 512     # above this, device_qr_stream on the CPU backend warns (#61, host_qr_stream)
+
+
 def device_qr_stream(rows_fn, ds, init, extra0, merge_rows=None):
     """host_qr_stream as one lax.scan over the batches, for a device backend.  rows_fn(batch)
     -> ([(Pw, yw), ...], extra); extra (a pytree like extra0) is summed.  Shapes are static, so
@@ -216,7 +219,15 @@ def device_qr_stream(rows_fn, ds, init, extra0, merge_rows=None):
     compacted live-first (a stable sort) and written at the fill, which then advances by the
     live count only; a lax.cond merges the buffer (rows past the fill masked to zero) once the
     fill reaches the target, so at most target + r rows are ever pending.  The same merge
-    points as host_qr_stream.  Returns ([(R, c), ...], extra)."""
+    points as host_qr_stream.  Returns ([(R, c), ...], extra).
+
+    Not for the CPU backend beyond small L: XLA:CPU's geqrf inside the scan can return NaN with
+    multithreaded OpenBLAS (#61; host_qr_stream says why), so callers route the CPU to the host
+    and this warns when L > CPU_SCAN_MAX_L there."""
+    if jax.default_backend() == "cpu" and max(jnp.shape(R)[1] for R, _ in init) > CPU_SCAN_MAX_L:
+        import warnings
+        warnings.warn("device_qr_stream on the CPU backend: XLA:CPU's geqrf in a scan can return NaN "
+                      "with multithreaded OpenBLAS at this basis size (#61); use host_qr_stream", stacklevel=2)
     shapes = jax.eval_shape(rows_fn, jax.tree.map(lambda a: a[0], ds))[0]
     init = [(jnp.asarray(R), jnp.asarray(c)) for R, c in init]
     plan = [(max(merge_target(R.shape[1], merge_rows), 1), P.shape[0]) for (R, _), (P, _) in zip(init, shapes)]

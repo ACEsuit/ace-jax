@@ -88,12 +88,25 @@ def _assert_equivalent(qs, ref, lin, prob):
     assert abs(ld - ld0) < 1e-12 * abs(ld0)
 
 
+def _skip_cpu_scan(prob):
+    """The scan path on the CPU backend only at small L.  XLA:CPU calls LAPACK (OpenBLAS) from its
+    own worker threads, and OpenBLAS's multithreaded geqrf, called that way from inside a compiled
+    loop, returns NaN on finite input -- with 4 vCPUs (a GitHub runner) at L ~ 1448, per-batch
+    merges included.  That is why the CPU production path merges on the host (#61,
+    stats.host_qr_stream); the scan runs only on a device, so si_1429 checks it on the host only."""
+    from ace_jax.fit.stats import CPU_SCAN_MAX_L
+    if jax.default_backend() == "cpu" and prob.cfg.len_basis > CPU_SCAN_MAX_L:
+        pytest.skip("scan geqrf on the CPU backend is unreliable at this L (#61)")
+
+
 @pytest.mark.parametrize("host", [True, False], ids=["host", "scan"])
 @pytest.mark.parametrize("merge_rows", [None, 37], ids=["default", "ragged"])
 def test_batched_merges_equal_per_batch_merges(case, host, merge_rows):
     """The default buffer (~L rows per quantity) and a small ragged one (37 rows: merges land
     mid-stream, the tail is flushed) give the per-batch QRStats, on the host loop and the scan."""
     prob, ds, ref, lin = case
+    if not host:
+        _skip_cpu_scan(prob)
     with highest_precision():
         qs = linear_qr_statistics(prob.model, prob.cfg, ds, merge_rows=merge_rows, host=host)
     assert isinstance(qs, QRStats)
@@ -103,6 +116,7 @@ def test_batched_merges_equal_per_batch_merges(case, host, merge_rows):
 def test_scan_per_batch_merge_matches_host(case):
     """merge_rows=0 on the scan is the old per-batch scan: the same statistics as the host loop."""
     prob, ds, ref, lin = case
+    _skip_cpu_scan(prob)
     with highest_precision():
         qs = linear_qr_statistics(prob.model, prob.cfg, ds, merge_rows=0, host=False)
     _assert_equivalent(qs, ref, lin, prob)
