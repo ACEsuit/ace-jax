@@ -94,15 +94,19 @@ def _add_fit_args(p):
     p.add_argument("--nuts-chains", type=int, default=4); p.add_argument("--r0", type=float, default=None,
                    help="typical nearest-neighbour distance (A); centres the GP hyperprior "
                         "(default when building the basis: its mean bond length)")
-    p.add_argument("--uq", choices=["blr", "pops", "ard"], default="blr",
+    p.add_argument("--uq", choices=["blr", "pops", "ard", "ard-gp"], default="blr",
                    help="pops/ard: linear arm (--m-per-species 0); ard = ARD posterior with a "
-                        "calibrated per-atom forces_std (see --ard-variance), writes posterior.npz")
+                        "calibrated per-atom forces_std (see --ard-variance), writes posterior.npz; "
+                        "ard-gp: the same calibrated force UQ on the GP arm (--m-per-species > 0), from the "
+                        "jackknife-sandwich posterior over [B | k(B, B_M)] at the MAP hyperparameters; "
+                        "writes gp_model.npz (the ARD mean) and posterior.npz")
     p.add_argument("--ard-mode", choices=["joint", "sequential"], default="joint",
                    help="joint: noise + ARD scales by evidence; sequential: ARD only, one Gram (low memory)")
-    p.add_argument("--ard-variance", choices=["sandwich", "kappa"], default="sandwich",
+    p.add_argument("--ard-variance", choices=["sandwich", "kappa", "dtc"], default="sandwich",
                    help="ARD force-uncertainty shape: sandwich (default) = delete-one-cluster PRESS jackknife "
-                        "(misspecification-robust); kappa = the posterior A^-1 shape. Both get the "
-                        "per-group scales")
+                        "(misspecification-robust); kappa = the posterior A^-1 shape; dtc (ard-gp, cosine "
+                        "kernel) = kappa plus the GP's derivative-DTC variance, per Cartesian component. All "
+                        "get the per-group scales")
     p.add_argument("--ard-val-frac", type=float, default=0.2,
                    help="stratified train fraction held out to score the per-group force scales "
                         "(rms factor and conformal quantile) with the hold-out posterior")

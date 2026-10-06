@@ -645,3 +645,25 @@ def test_cli_eval_and_calibrate_shape_path_committee(fitted, calib_set, tmp_path
     a, b = (ARDPosterior.load(tmp_path / f"c_{p}.npz").group_table for p in ("rows", "committee"))
     np.testing.assert_allclose(b["q"], a["q"], rtol=1e-6)
     np.testing.assert_allclose(b["lam_rms"], a["lam_rms"], rtol=1e-6)
+
+
+def test_cli_fit_and_eval_ard_gp(tmp_path):
+    """aj fit --uq ard-gp writes gp_model.npz + posterior.npz; aj eval serves it with --posterior."""
+    from ase.io import read, write
+    from ace_jax.cli import main
+    from ace_jax.fit.xyz import read_extxyz
+    out = tmp_path / "fit"
+    assert main(["fit", "--model", str(FIXTURE_DIR / "si_fitted.npz"), "--data", str(XYZ), "--ntrain", "30",
+                 "--ntest", "8", "--energy-key", "dft_energy", "--force-key", "dft_force", "--virial-key",
+                 "dft_virial", "--m-per-species", "8", "--uq", "ard-gp", "--ard-val-frac", "0.4", "--ard-n-min",
+                 "50", "--opt", "lbfgs", "--map-steps", "5", "--configs-per-batch", "4", "--r0", "2.35",
+                 "--out", str(out)]) == 0
+    assert (out / "gp_model.npz").exists() and (out / "posterior.npz").exists()
+    data = tmp_path / "d.xyz"
+    write(data, read(XYZ, ":3"))
+    assert main(["eval", "--model", str(out / "gp_model.npz"), "--posterior", str(out / "posterior.npz"),
+                 "--data", str(data), "--energy-key", "dft_energy", "--force-key", "dft_force",
+                 "--out", str(tmp_path / "p.xyz")]) == 0
+    rows = read_extxyz(tmp_path / "p.xyz")
+    assert len(rows) == 3 and all(r.arrays["ace_forces_std"].shape == (len(r.numbers),) for r in rows)
+    assert all(float(r.arrays["ace_forces_std"].max()) > 0 for r in rows[1:])

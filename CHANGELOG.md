@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **Calibrated force uncertainty on the GP arm: `aj fit --uq ard-gp`
+  (experimental).** The `--uq ard` stage (evidence fit, PRESS jackknife
+  shape, per-group rms and conformal scales) now also runs on the hybrid
+  ACE + GP model, over the joint design [B | k(B, B_M)] at the MAP
+  hyperparameters. The GP block gets one ARD scale on its prior K_MM. The
+  fit writes `gp_model.npz` with the ARD posterior mean and `posterior.npz`;
+  `GPCalculator.from_file(gp_model, posterior=...)` and
+  `aj eval --posterior` serve `forces_std`, `forces_cov`, `forces_q`,
+  `forces_q_mahal` and `forces_group`. `--ard-variance dtc` adds the GP's
+  derivative-DTC variance (per Cartesian component, cosine kernel). The
+  support flag and `aj calibrate` remain linear-only. `--uq ard` on the
+  linear model is unchanged. Experimental until its Cantor acceptance run
+  (docs/dev/gp-discrepancy-exploration.md).
+
 - **Faster QR statistics on large bases.** The linear fit's QR evidence
   merged every batch into its triangular factors, about L^3 work per batch
   and quantity. It now buffers the nonzero rows of many batches and merges

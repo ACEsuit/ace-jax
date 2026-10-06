@@ -89,6 +89,7 @@ over a file's `basis:`, `--train` over its `data:` (each logged as an override).
 | Big data on limited GPU memory | `--lml host-cache` (**GP arm, `--density pair` or `pca`, `--opt lbfgs`, `--rungs map` only, single device**) |
 | Misspecification UQ for linear ACE | `--uq pops` (**linear only: `--m-per-species 0`**) |
 | Calibrated per-atom force uncertainty (e.g. big-cell fracture) | `--m-per-species 0 --uq ard` (`posterior.npz`; `ACECalculator(model, posterior=...)`) |
+| The same on the hybrid ACE + GP model (experimental) | `--m-per-species 100 --uq ard-gp` (`gp_model.npz` + `posterior.npz`; `GPCalculator.from_file(gp_model, posterior=...)`) |
 | Learn the tensor radials before the fit | `--learn-radial` (writes `radial_info.json`; not with embedding models) |
 | Per-config-type weights | `--weights '{"default":{"E":30,"F":1,"V":1},"bulk":{"E":100,"F":1,"V":1}}'` or a factor list |
 | Make the weights set the E:F:V balance (ACEpotentials BLR) | `--noise shared`: one noise σ for every weighted row (σ_E = σ_F = σ_V, a tie in the MAP; recorded in `map_convergence.json`). The default `per-quantity` learns three σ's, each cancelling its weight, so energies end up underweighted. Not with `sigma_type`, joint ARD (use `--ard-mode sequential`) or `--solver lstsq`. Compare fits across modes by `log_evidence`, not `logpost` |
@@ -137,6 +138,13 @@ These constraints are validated up front. A bad combination raises a
     posterior by (N/N_fit)^β, β fitted per run from a second hold-out fit and clipped to [0, ½]
     (`--ard-transfer exponent|sqrt|none`; it costs one more evidence fit + PRESS on ~(1−f)²N
     configs; `ard.json` `transfer` records λ1, λ2, β and the factor).
+  - `--uq ard-gp` (GP arm, experimental): the same stage over the joint design [B | k(B, B_M)] at the
+    MAP theta (one ARD scale on the GP block, prior root blockdiag(diag Γ, chol(K_MM)ᵀ)). It writes
+    `gp_model.npz` holding the ARD mean and `posterior.npz` (with `gp_U`, `gp_theta`); serve with
+    `GPCalculator.from_file("gp_model.npz", posterior="posterior.npz")` or
+    `aj eval --model gp_model.npz --posterior posterior.npz`. `--ard-variance dtc` adds the
+    derivative-DTC variance per Cartesian component (cosine kernel only). The support flag and
+    `aj calibrate` stay linear-only; a calculator refuses a posterior of the other arm.
   - `gp_model.npz` (GP): self-contained, loaded by `GPCalculator.from_file` and
     `aj eval`. Its size is about 8·Dt²·(model draws) bytes, where Dt = basis
     size + M. The default stores 1 draw (the MAP); `--model-draws N` stores N

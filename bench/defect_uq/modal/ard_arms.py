@@ -25,14 +25,30 @@ D4_ARMS = {
     "ard_seq_shared": {"ard_force_shape": "aniso", "e0": "lsq", "ard_mode": "sequential", "noise": "shared"},
 }
 
+# Phase 3 of the GP-discrepancy spec: --uq ard-gp on the gp_conv fit's settings (PCA-16, host-cache).  L-BFGS
+# starts from gp_conv's converged theta (2026-10-06, logpost 540 855.5) with one start, so the arm costs a short
+# MAP plus the ARD stage instead of gp_conv's 4-start search.
+GP_CONV_THETA = {"log_ell": 0.6739701731311936, "log_A": 0.8986633725132979, "log_alpha": 2.3431424837222012,
+                 "log_r0": 0.5522582965038343, "log_eps": -3.029046798886507, "log_rho": 4.332080370526107,
+                 "log_sigma_c": 3.3429767866884825, "log_sigma_E": -4.0794906538949425,
+                 "log_sigma_F": -2.720674755295538, "log_sigma_V": -2.28467628617451}
+_GP_BASE = {"arm": "gp", "uq": "ard-gp", "m_per_species": 100, "density": "pca", "pca_d": 16, "lml": "host-cache",
+            "map_restarts": 1, "map_steps": 300, "init": GP_CONV_THETA, "e0": "lsq", "ard_force_shape": "aniso"}
+GP_ARMS = {
+    "ard_gp_sw":  {**_GP_BASE, "ard_variance": "sandwich"},
+    "ard_gp_dtc": {**_GP_BASE, "ard_variance": "dtc"},
+}
+
 
 def make_config(arm, common, cfg_cls=None):
-    """FitConfig for a named arm of ARD_ARMS or D4_ARMS (None otherwise).  `common` are the shared
+    """FitConfig for a named arm of ARD_ARMS, D4_ARMS or GP_ARMS (None otherwise).  `common` are the shared
     FitConfig kwargs; the arm's overrides win (ard_val_frac 0.2 is the default of the f sweep's middle)."""
-    arms = {**ARD_ARMS, **D4_ARMS}
+    arms = {**ARD_ARMS, **D4_ARMS, **GP_ARMS}
     if arm not in arms:
         return None
     if cfg_cls is None:
         from ace_jax.fit.pipeline import FitConfig as cfg_cls
     base = dict(common, arm="linear", uq="ard", ard_mode="joint", ard_val_frac=0.2, ard_laplace=True)
+    if arm in GP_ARMS:                     # the arm's overrides set arm gp and uq ard-gp
+        base["ard_laplace"] = False        # a finite-difference Laplace of the GP-block evidence adds nothing here
     return cfg_cls(**{**base, **arms[arm]})

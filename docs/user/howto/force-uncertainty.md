@@ -23,8 +23,10 @@ ranking. For example:
 Limits of use:
 
 - Only forces are calibrated.
-- `--uq ard` applies only to the linear model (`--m-per-species 0`). The
-  hybrid ACE + GP model has its own uncertainty.
+- `--uq ard` applies only to the linear model (`--m-per-species 0`). For the
+  hybrid ACE + GP model, use `--uq ard-gp`
+  ([From a GP fit](#from-a-gp-fit-uq-ard-gp)). `--uq ard-gp` is
+  experimental.
 
 [Force uncertainty: the mathematics](../concepts/force-uncertainty-maths.md)
 gives the full method.
@@ -97,6 +99,72 @@ these per-atom arrays:
 
 To colour atoms by one of these arrays, load the file in OVITO or ASE. With
 `--out`, `aj eval` also adds `ace_forces_std` to its predictions file.
+
+## From a GP fit: `--uq ard-gp`
+
+`--uq ard-gp` gives the same calibrated force uncertainty for the hybrid
+ACE + GP model. The method is the same as `--uq ard`. The design has the
+ACE columns and the GP columns $k(B, B_M)$, at the fitted GP
+hyperparameters.
+
+1. Fit the hybrid model with `--uq ard-gp`:
+
+    ```bash
+    aj fit --order 3 --max-degree 10 \
+        --train train.xyz --test test.xyz \
+        --e0 lsq --m-per-species 100 --opt lbfgs --uq ard-gp \
+        --out fit_gp
+    ```
+
+2. Make the calculator from `gp_model.npz` and `posterior.npz` of the same
+   fit:
+
+    ```python
+    import jax
+    jax.config.update("jax_enable_x64", True)
+
+    from ace_jax.calc.gp import GPCalculator
+
+    calc = GPCalculator.from_file("fit_gp/gp_model.npz",
+                                  posterior="fit_gp/posterior.npz")
+    atoms.calc = calc
+    std = calc.get_property("forces_std", atoms)        # eV/Å, (N,)
+    ```
+
+3. On the command line, give `--posterior` with the GP model:
+
+    ```bash
+    aj eval --model fit_gp/gp_model.npz --posterior fit_gp/posterior.npz \
+        --data crack.xyz --per-atom crack_uq.xyz
+    ```
+
+The fit writes these files:
+
+- `fit_gp/gp_model.npz`: the model. Its mean is the **ARD posterior mean**,
+  as for `--uq ard`.
+- `fit_gp/posterior.npz`: the posterior. It also contains the GP
+  hyperparameters that the GP columns use.
+
+The calculator gives `forces_std`, `forces_cov`, `forces_q`,
+`forces_q_mahal` and `forces_group`, as for `--uq ard`.
+
+`--ard-variance dtc` adds the GP variance that the inducing points do not
+cover (the derivative DTC term) to the posterior shape. It needs the cosine
+kernel.
+
+!!! warning "`dtc` and the 3×3 covariance"
+    The DTC term has one variance for each Cartesian component. It has no
+    covariance between components. Thus `forces_std` does not change when
+    you rotate the structure, but `forces_cov` and the anisotropic
+    `forces_q` change a small amount.
+
+These functions are for the linear model only:
+
+- the support flag (`forces_support`, `aj eval --support`);
+- `aj calibrate`.
+
+A calculator refuses a posterior from the other model type. The error
+message gives the correct calculator.
 
 ## What each quantity means
 
@@ -326,7 +394,7 @@ default is `raw`.
 | `--ard-transfer` | `exponent` | how the scale from the validation fit is applied to the model fitted on all data: `exponent` estimates the exponent $\beta$ for each fit, `sqrt` sets $\beta=\frac12$, `none` sets $\beta=0$ |
 | `--ard-cluster-size` | 3 | the side of the spatial blocks that large training cells are divided into, in units of $r_\text{cut}$ (`inf`: whole configurations) |
 | `--ard-press` | `exact` | `exact` leave-one-cluster-out correction, or the faster `block` approximation |
-| `--ard-variance` | `sandwich` | the uncertainty shape: the jackknife (`sandwich`), or the posterior covariance (`kappa`) |
+| `--ard-variance` | `sandwich` | the uncertainty shape: the jackknife (`sandwich`), the posterior covariance (`kappa`), or (`--uq ard-gp` only) the posterior covariance plus the GP's DTC variance (`dtc`) |
 | `--ard-mode` | `joint` | evidence fit of the noise and prior scales together, or `sequential` (prior scales only; less memory) |
 | `--no-ard-support` | | skip the support reference |
 | `--ard-support-features` | `raw` | features of the support reference: `raw` descriptors, or `normalised` (unit-norm descriptor plus log-norm channels per body order) |

@@ -618,7 +618,7 @@ this is that a posterior calibrated on $U$ is specific to the regime of $U$
 $n_{\mathrm{eff}}$; this is the honest outcome. The diagnostic assumes that
 the score distribution given the classifier features is unchanged from
 calibration to target. The labels are deterministic in the full structure but
-not in the local environment ([limitations](#13-assumptions-and-limitations)),
+not in the local environment ([limitations](#14-assumptions-and-limitations)),
 so this is an approximation even with full features. The diagnostic is not
 used to scale $\sigma$. `aj calibrate` updates the reference with the same
 replace or append rule as the scores.
@@ -650,7 +650,42 @@ diagnose
 :   unlabelled target → descriptor PCA → $w(x)$ → weighted quantile →
     `support_ok`, `support_q`, $n_{\mathrm{eff}}$.
 
-## 13. Assumptions and limitations
+## 13. The GP arm: `--uq ard-gp`
+
+The hybrid model adds $M$ GP columns to the design: $\Phi=[B\mid k_\theta(B,B_M)]$,
+at the fitted hyperparameters $\theta$. At fixed $\theta$ the model is linear
+in the coefficients $[c;w]$, with the prior precision
+
+$$
+\Lambda=\operatorname{blockdiag}\big(\operatorname{diag}(\Gamma_j^2e^{a_{k(j)}}),\;e^{a_\text{GP}}K_{MM}\big).
+$$
+
+Each section above applies with one change: the diagonal $D=\operatorname{diag}\Gamma$
+becomes the prior root
+
+$$
+R_0=\operatorname{blockdiag}\big(\operatorname{diag}\Gamma,\;\operatorname{chol}(K_{MM})^\mathsf{T}\big),
+\qquad \Lambda=R_0^\mathsf{T}\operatorname{diag}(\lambda)R_0 .
+$$
+
+- The scaled system is $S=R_0^{-\mathsf{T}}AR_0^{-1}$. The terms of
+  $\log|R_0|$ in $\log|A|$ and $\log|\Lambda|$ cancel for any invertible
+  $R_0$, so the evidence of section 3 is unchanged.
+- The GP columns have one scale $a_\text{GP}$. Its start value is 0, which is
+  the prior of the GP fit. $R_0^\mathsf{T}\operatorname{diag}(\lambda)R_0$ is a
+  scaling of $K_{MM}$ only if $\lambda$ is constant on the GP block.
+- The leverage-corrected scores of section 6 use $W=L^{-1}R_0^{-\mathsf{T}}\Psi_k^\mathsf{T}$.
+  The identity $A^{-1}\tilde g_k=c-c_{(-k)}$ holds for any invertible $R_0$,
+  because the change from $D$ to $R_0$ is a change of basis.
+- The shape is $\tilde Q=S^{-1}R_0^{-\mathsf{T}}(G-\bar g)$, with
+  $u_\alpha=R_0^{-\mathsf{T}}\phi_\alpha^\mathsf{T}$.
+- With `--ard-variance dtc`, the shape is $V=W W^\mathsf{T}+\operatorname{diag}(d_x,d_y,d_z)$.
+  Here $W W^\mathsf{T}$ is the posterior covariance of the force, and $d_a$ is
+  the derivative-DTC variance $k_F-q_F$ of component $a$.
+
+$\theta$ is fixed. The uncertainty of $\theta$ does not enter the shape.
+
+## 14. Assumptions and limitations
 
 1. **Exchangeability at configuration level, within a group.** The coverage
    statement is approximate, with error controlled by $n_{\mathrm{cfg},g}$,
