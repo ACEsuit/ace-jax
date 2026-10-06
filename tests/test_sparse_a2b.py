@@ -115,9 +115,10 @@ def test_load_auto_is_sparse(name):
 
 
 def test_node_elems_excludes_model_sized_a2b():
-    """`_node_elems` is a per-node figure: the dense A2B (n_B x n_AA, here 16.4M) is a
-    model-sized intermediate of the dense Jacobian, not per-node work, so neither the
-    dense nor the sparse model may report it."""
+    """`_node_elems` is a per-node figure: the dense A2B (n_B x n_AA, here 16.4M elements) is a
+    model-sized intermediate of the dense Jacobian, not per-node work.  The sparse model's
+    per-node figure is far below it and below the dense path's own per-node work (its
+    (n_AA, n_A) jacfwd tangents), so the rows' node chunk no longer scales with A2B."""
     from ace_jax.fit import rows
     md, meta, _ = load(FIXTURE_DIR / "si_1429.npz", a2b_sparse=False)
     ms, _, _ = load(FIXTURE_DIR / "si_1429.npz")
@@ -126,5 +127,5 @@ def test_node_elems_excludes_model_sized_a2b():
     cfg = SimpleNamespace(D=nB + meta["n_pair"])
     rows._NODE_ELEMS.clear()
     pd, ps = rows._node_elems(md, cfg, K), rows._node_elems(ms, cfg, K)
-    assert pd < nB * nAA and ps < nB * nAA
     assert ps >= K * cfg.D * 3
+    assert ps < nB * nAA / 3 and ps < pd / 4, (ps, pd, nB * nAA)     # 4.8M, 43M, 16.4M

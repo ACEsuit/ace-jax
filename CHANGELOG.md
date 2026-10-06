@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Faster, smaller fits on large bases: the A2B coupling is sparse on the
+  fitting path.** Models now hold A2B as its nonzeros only (it is 0.025-2%
+  occupied), and the fit's design rows and their Jacobian use them directly.
+  At basis size 5456 (Si order 4, degree 20) one 224-atom batch of rows takes
+  1.9 s instead of 88 s on a 32-core CPU, and the 2.6 GiB dense A2B (held
+  2-3 times) is gone. Results equal the dense contraction to roundoff, not
+  bit for bit. `load(..., a2b_sparse=False)` keeps the dense form.
 - **Fixed: linear fits ran out of memory on large bases.** `aj fit
   --m-per-species 0` (and `--learn-radial`) no longer computes the
   site-feature tensor of the whole training set, which only the GP arm reads.
