@@ -162,6 +162,36 @@ def tiny_linear_problem():
     return prob, ds
 
 
+@pytest.fixture(scope="module")
+def tiny_gp_problem():
+    """M > 0 twin of tiny_linear_problem: 8 inducing sites (FPS), theta = the default prior mean.
+    Returns (prob, ds, theta)."""
+    import numpy as np
+    import jax
+    jax.config.update("jax_enable_x64", True)
+    import jax.numpy as jnp
+    from ace_jax.eval import load
+    from ace_jax.fit.data import build_dataset, load_configs
+    from ace_jax.fit.hypers import default_prior
+    from ace_jax.fit.inducing import GPConfig, descriptor_scale, select_inducing, site_features
+    from ace_jax.fit.kernels import KernelSpec
+    from ace_jax.fit.objective import Problem
+
+    xyz, fitted = FIXTURE_DIR / "si_tiny_train.xyz", FIXTURE_DIR / "si_fitted.npz"
+    if not (xyz.exists() and fitted.exists()):
+        pytest.skip("missing GP fixtures")
+    model, meta, z = load(fitted)
+    configs = load_configs(xyz, "dft_energy", "dft_force", "dft_virial")[:6]
+    ds = build_dataset(configs, meta, np.asarray(z["E0"]), configs_per_batch=3)
+    cfg = GPConfig(r0=2.35, rcut=float(meta["rcut"]), n_B=meta["n_B"], n_pair=meta["n_pair"],
+                   NZ=len(meta["elements"]), C=3)
+    X, S = site_features(model, cfg, ds)
+    ind = select_inducing(X, S, ds.node_z, ds.node_mask, 8, descriptor_scale(X, ds.node_mask))
+    prior = default_prior(2.35)
+    prob = Problem(KernelSpec("cosine", True, cfg.D), model, ind, cfg, jnp.asarray(z["gamma"]), prior)
+    return prob, ds, prior.mu
+
+
 def _orders(prob):
     """Correlation order of each B column of the tiny problem's model (all body orders present)."""
     import json
