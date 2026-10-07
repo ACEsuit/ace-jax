@@ -99,7 +99,7 @@ class FitConfig:
         pre-fit value) under BLR and ARD (whose evidence keeps the E0 columns' fixed prior, outside
         the body-order groups). POPS keeps the pre-fit E0: it builds its own readout prior.
         (A learned-radial fit learns its radials with the pre-fit E0, then fits jointly.)"""
-        return self.e0 == "lsq" and self.uq in ("blr", "ard")
+        return self.e0 == "lsq" and self.uq in ("blr", "ard", "ard-gp")
 
     @property
     def pack_mode(self):
@@ -117,15 +117,20 @@ class FitConfig:
             raise ValueError(f"arm must be 'linear' or 'gp', got {self.arm!r}")
         if self.uq == "pops" and self.arm != "linear":
             raise ValueError("uq='pops' is the linear-arm misspecification predictive: use arm linear")
-        if self.uq not in ("blr", "pops", "ard"):
-            raise ValueError(f"uq must be 'blr', 'pops' or 'ard', got {self.uq!r}")
-        if self.uq == "ard":
-            if self.arm != "linear":
+        if self.uq not in ("blr", "pops", "ard", "ard-gp"):
+            raise ValueError(f"uq must be 'blr', 'pops', 'ard' or 'ard-gp', got {self.uq!r}")
+        if self.uq in ("ard", "ard-gp"):
+            if self.uq == "ard" and self.arm != "linear":
                 raise ValueError("uq='ard' is the linear-arm ARD posterior: use arm linear (m_per_species 0)")
+            if self.uq == "ard-gp" and self.arm != "gp":
+                raise ValueError("uq='ard-gp' is the GP-arm sandwich posterior: use arm gp (m_per_species > 0)")
             if self.ard_mode not in ("joint", "sequential"):
                 raise ValueError(f"ard_mode must be 'joint' or 'sequential', got {self.ard_mode!r}")
             if self.ard_variance not in ("sandwich", "kappa"):
                 raise ValueError(f"ard_variance must be 'sandwich' or 'kappa', got {self.ard_variance!r}")
+            if self.uq == "ard-gp" and (self._shape_variant != "press" or self._score_source != "fit"):
+                raise ValueError("uq='ard-gp' has the PRESS shape only: the legacy #18 ablation "
+                                 "(_shape_variant='legacy', _score_source='mixed') is linear-arm only")
             if not 0.0 < self.ard_val_frac < 1.0:
                 raise ValueError(f"ard_val_frac must be in (0, 1), got {self.ard_val_frac}")
             for name, ok in (("ard_force_shape", ("iso", "aniso")), ("ard_groups", ("distortion", "none")),
@@ -178,7 +183,7 @@ class FitConfig:
         if self.noise == "shared":
             why = ("sigma_type (per-config-type noise ratios on per-quantity scales)" if self.sigma_type else
                    "uq ard with ard_mode joint (it refits sigma_E/F/V by its own evidence; use ard_mode "
-                   "sequential)" if self.uq == "ard" and self.ard_mode == "joint" else
+                   "sequential)" if self.uq in ("ard", "ard-gp") and self.ard_mode == "joint" else
                    "solver lstsq (no noise hyperparameters)" if self.solver == "lstsq" else None)
             if why is not None:
                 raise ValueError(f"noise 'shared' is not available with {why}")

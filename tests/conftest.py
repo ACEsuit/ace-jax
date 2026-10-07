@@ -162,6 +162,64 @@ def tiny_linear_problem():
     return prob, ds
 
 
+@pytest.fixture(scope="module")
+def tiny_gp_problem():
+    """M > 0 twin of tiny_linear_problem: 8 inducing sites (FPS).  Returns (prob, ds, theta), theta the
+    default prior mean with noise scales (0.1, 0.3, 0.3): at the prior mean's sigma_E = 1e-3 the unscaled
+    Gram G + Lambda has cond ~1e23 here, past what any reference solve can check against."""
+    import numpy as np
+    import jax
+    jax.config.update("jax_enable_x64", True)
+    import jax.numpy as jnp
+    from ace_jax.eval import load
+    from ace_jax.fit.data import build_dataset, load_configs
+    from ace_jax.fit.hypers import default_prior
+    from ace_jax.fit.inducing import GPConfig, descriptor_scale, select_inducing, site_features
+    from ace_jax.fit.kernels import KernelSpec
+    from ace_jax.fit.objective import Problem
+
+    xyz, fitted = FIXTURE_DIR / "si_tiny_train.xyz", FIXTURE_DIR / "si_fitted.npz"
+    if not (xyz.exists() and fitted.exists()):
+        pytest.skip("missing GP fixtures")
+    model, meta, z = load(fitted)
+    configs = load_configs(xyz, "dft_energy", "dft_force", "dft_virial")[:6]
+    ds = build_dataset(configs, meta, np.asarray(z["E0"]), configs_per_batch=3)
+    cfg = GPConfig(r0=2.35, rcut=float(meta["rcut"]), n_B=meta["n_B"], n_pair=meta["n_pair"],
+                   NZ=len(meta["elements"]), C=3)
+    X, S = site_features(model, cfg, ds)
+    ind = select_inducing(X, S, ds.node_z, ds.node_mask, 8, descriptor_scale(X, ds.node_mask))
+    prior = default_prior(2.35)
+    prob = Problem(KernelSpec("cosine", True, cfg.D), model, ind, cfg, jnp.asarray(z["gamma"]), prior)
+    theta = prior.mu._replace(log_sigma_E=np.log(0.1), log_sigma_F=np.log(0.3), log_sigma_V=np.log(0.3))
+    return prob, ds, theta
+
+
+def ard_pipe_cfg(**kw):
+    """A uq='ard' linear-arm FitConfig for the ARD stage tests."""
+    from ace_jax.fit.pipeline import FitConfig
+    base = dict(model=str(FIXTURE_DIR / "si_fitted.npz"), energy_key="dft_energy", force_key="dft_force",
+                virial_key="dft_virial", ntrain=30, ntest=8, batch=4, r0=2.35, arm="linear", uq="ard",
+                opt="lbfgs", rungs=("map",), map_steps=5, predict_train=False, ard_variance="kappa", ard_n_min=1)
+    return FitConfig(**{**base, **kw})
+
+
+@pytest.fixture(scope="module")
+def ard_map():
+    """load_fit_data + build_problem + fit_map for ard_pipe_cfg(): identical for every ARD stage
+    test (ard_variance / ard_mode only change the stage that follows), so done once."""
+    from ace_jax.eval import highest_precision
+    from ace_jax.fit.pipeline import load_fit_data
+    from ace_jax.fit.pipeline.mapfit import fit_map
+    from ace_jax.fit.pipeline.objective import make_objective
+    from ace_jax.fit.pipeline.problem import build_problem
+    cfg = ard_pipe_cfg().validate()
+    d = load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz"))
+    b = build_problem(cfg, d)
+    with highest_precision():
+        theta = fit_map(cfg, d, b, make_objective(cfg, d, b), log=lambda *a: None).theta
+    return d, b, theta
+
+
 def _orders(prob):
     """Correlation order of each B column of the tiny problem's model (all body orders present)."""
     import json

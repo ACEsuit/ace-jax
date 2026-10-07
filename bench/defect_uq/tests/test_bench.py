@@ -38,6 +38,14 @@ def test_every_arm_is_a_valid_fitconfig(arm):
         assert getattr(cfg, k) == v
 
 
+@pytest.mark.parametrize("arm", sorted(ard_arms.GP_ARMS))
+def test_every_gp_arm_is_a_valid_fitconfig(arm):
+    cfg = ard_arms.make_config(arm, dict(model="x.npz", r0=2.5, rungs=("map",), opt="lbfgs", e0="prefit"))
+    cfg.validate()
+    assert cfg.arm == "gp" and cfg.uq == "ard-gp" and cfg.init == ard_arms.GP_CONV_THETA
+    assert cfg.ard_variance == ard_arms.GP_ARMS[arm]["ard_variance"]
+
+
 def test_unknown_arm_is_none():
     assert ard_arms.make_config("ard", {}) is None and ard_arms.make_config("ard_c15", {}) is None
 

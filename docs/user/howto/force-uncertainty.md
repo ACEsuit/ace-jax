@@ -23,8 +23,10 @@ ranking. For example:
 Limits of use:
 
 - Only forces are calibrated.
-- `--uq ard` applies only to the linear model (`--m-per-species 0`). The
-  hybrid ACE + GP model has its own uncertainty.
+- `--uq ard` applies only to the linear model (`--m-per-species 0`). For the
+  hybrid ACE + GP model, use `--uq ard-gp`
+  ([From a GP fit](#from-a-gp-fit-uq-ard-gp)). `--uq ard-gp` is
+  experimental.
 
 [Force uncertainty: the mathematics](../concepts/force-uncertainty-maths.md)
 gives the full method.
@@ -97,6 +99,67 @@ these per-atom arrays:
 
 To colour atoms by one of these arrays, load the file in OVITO or ASE. With
 `--out`, `aj eval` also adds `ace_forces_std` to its predictions file.
+
+## From a GP fit: `--uq ard-gp`
+
+`--uq ard-gp` gives the same calibrated force uncertainty for the hybrid
+ACE + GP model. The method is the same as `--uq ard`. The design has the
+ACE columns and the GP columns $k(B, B_M)$, at the fitted GP
+hyperparameters.
+
+1. Fit the hybrid model with `--uq ard-gp`:
+
+    ```bash
+    aj fit --order 3 --max-degree 10 \
+        --train train.xyz --test test.xyz \
+        --e0 lsq --m-per-species 100 --opt lbfgs --uq ard-gp \
+        --out fit_gp
+    ```
+
+2. Make the calculator from `gp_model.npz` and `posterior.npz` of the same
+   fit:
+
+    ```python
+    import jax
+    jax.config.update("jax_enable_x64", True)
+
+    from ace_jax.calc.gp import GPCalculator
+
+    calc = GPCalculator.from_file("fit_gp/gp_model.npz",
+                                  posterior="fit_gp/posterior.npz")
+    atoms.calc = calc
+    std = calc.get_property("forces_std", atoms)        # eV/Å, (N,)
+    ```
+
+3. On the command line, give `--posterior` with the GP model:
+
+    ```bash
+    aj eval --model fit_gp/gp_model.npz --posterior fit_gp/posterior.npz \
+        --data crack.xyz --per-atom crack_uq.xyz
+    ```
+
+The fit writes these files:
+
+- `fit_gp/gp_model.npz`: the model. Its mean is the **ARD posterior mean**,
+  as for `--uq ard`.
+- `fit_gp/posterior.npz`: the posterior. It also contains the GP
+  hyperparameters that the GP columns use.
+
+The calculator gives `forces_std`, `forces_cov`, `forces_q`,
+`forces_q_mahal` and `forces_group`, as for `--uq ard`.
+
+On the Cantor benchmark, `--uq ard-gp` gives a slightly higher coverage at
+crack tips than `--uq ard` (0.902 and 0.893). It ranks the atoms by error
+slightly less well. It is experimental. Use `--uq ard` unless you need the
+GP model.
+
+These functions are for the linear model only:
+
+- the support flag (`forces_support`, `aj eval --support`);
+- `aj calibrate`.
+
+A calculator refuses a posterior from the other model type. The error
+message gives the correct calculator.
 
 ## What each quantity means
 

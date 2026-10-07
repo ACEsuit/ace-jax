@@ -94,9 +94,12 @@ def _add_fit_args(p):
     p.add_argument("--nuts-chains", type=int, default=4); p.add_argument("--r0", type=float, default=None,
                    help="typical nearest-neighbour distance (A); centres the GP hyperprior "
                         "(default when building the basis: its mean bond length)")
-    p.add_argument("--uq", choices=["blr", "pops", "ard"], default="blr",
+    p.add_argument("--uq", choices=["blr", "pops", "ard", "ard-gp"], default="blr",
                    help="pops/ard: linear arm (--m-per-species 0); ard = ARD posterior with a "
-                        "calibrated per-atom forces_std (see --ard-variance), writes posterior.npz")
+                        "calibrated per-atom forces_std (see --ard-variance), writes posterior.npz; "
+                        "ard-gp: the same calibrated force UQ on the GP arm (--m-per-species > 0), from the "
+                        "jackknife-sandwich posterior over [B | k(B, B_M)] at the MAP hyperparameters; "
+                        "writes gp_model.npz (the ARD mean) and posterior.npz")
     p.add_argument("--ard-mode", choices=["joint", "sequential"], default="joint",
                    help="joint: noise + ARD scales by evidence; sequential: ARD only, one Gram (low memory)")
     p.add_argument("--ard-variance", choices=["sandwich", "kappa"], default="sandwich",
@@ -283,10 +286,17 @@ def cmd_eval(a):
     gp = str(a.model).endswith(".npz") and "gp_json" in np.load(a.model).files   # gp_model.npz from `fit`
     ard = getattr(a, "posterior", None) is not None
     if gp and ard:
-        raise ValueError("--posterior is for a linear model.npz from `fit --uq ard`, not a gp_model.npz")
+        from .fit.ard import ARDPosterior
+        if ARDPosterior.load(a.posterior).prior_root.M == 0:
+            raise ValueError("--posterior is a linear `fit --uq ard` posterior: it belongs with its model.npz, "
+                             "not a gp_model.npz (a GP model takes the posterior.npz of `fit --uq ard-gp`)")
+    if gp and ard and getattr(a, "shape_path", "rows") == "committee":
+        raise ValueError("--shape-path committee is the linear --uq ard path; a gp_model.npz (--uq ard-gp) "
+                         "uses the design rows")
     if gp:
-        from .calc.gp import GPCalculator
-        calc = GPCalculator.from_file(a.model, deriv_dtc=not getattr(a, "no_deriv_dtc", False))
+        from .calc.gp import GPCalculator          # --posterior: the posterior.npz of `fit --uq ard-gp`
+        calc = GPCalculator.from_file(a.model, deriv_dtc=not getattr(a, "no_deriv_dtc", False),
+                                      posterior=a.posterior if ard else None)
     else:
         from .calc.point import ACECalculator
         calc = ACECalculator(a.model, posterior=a.posterior if ard else None, spline_tol=None,
@@ -303,6 +313,10 @@ def cmd_eval(a):
         served = {"q": want_pa and post.group_table is not None,
                   "mahal": want_pa and post.group_table is not None and post.force_shape == "aniso",
                   "support": want_pa and getattr(a, "support", False)}
+        if served["support"] and gp:
+            print("note: the support diagnostic is served for a linear model.npz only: support_ok/support_q "
+                  "are not written")
+            served["support"] = False
         if served["support"] and post.support is None:
             print("note: this posterior has no support reference: support_ok/support_q are not written")
             served["support"] = False
@@ -324,8 +338,9 @@ def cmd_eval(a):
                 f.arrays[f"{p}forces"] = F
                 if S is not None:
                     f.info[f"{p}stress"] = voigt_6_to_full_3x3_stress(S)
-                if gp:
+                if gp and "energy_std" in calc.results:      # not for an ard-gp model (no posterior factor)
                     f.info[f"{p}energy_std"] = float(calc.results["energy_std"])
+                if gp and "forces_std" in calc.results:
                     f.arrays[f"{p}forces_std"] = np.asarray(calc.results["forces_std"])
                 if ard:
                     f.arrays[f"{p}forces_std"] = s_ard
@@ -545,7 +560,7 @@ def _parser():
                     help="extxyz to write: the input structures, every label kept, plus the predictions "
                          "(<prefix>energy, <prefix>forces, <prefix>stress, and *_std for UQ models)")
     ev.add_argument("--prefix", default="ace_", help="name prefix of the predicted keys (default ace_)")
-    ev.add_argument("--posterior", default=None, help="posterior.npz from `fit --uq ard`: adds <prefix>forces_std")
+    ev.add_argument("--posterior", default=None, help="posterior.npz from `fit --uq ard` (with its model.npz) or `fit --uq ard-gp` (with its gp_model.npz): adds <prefix>forces_std")
     ev.add_argument("--per-atom", default=None,
                     help="with --posterior: extxyz of the served per-atom arrays (forces_pred, forces_std, "
                          "forces_q, forces_group; forces_cov, forces_q_mahal for an aniso posterior)")

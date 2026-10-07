@@ -79,8 +79,13 @@ def big_errors(run: str = "bench365_pops", xyz: str = "/data/big.xyz", tag: str 
     from ase.io import read
     from ace_jax import ACECalculator
     post = f"/out/{run}/posterior.npz"
-    calc = ACECalculator(f"/out/{run}/model.npz", posterior=post) if os.path.exists(post) \
-        else ACECalculator(f"/out/{run}/model.npz")
+    if os.path.exists(f"/out/{run}/gp_model.npz"):     # --uq ard-gp: the GP model with its ARD posterior
+        from ace_jax.calc.gp import GPCalculator
+        calc = GPCalculator.from_file(f"/out/{run}/gp_model.npz", posterior=post if os.path.exists(post) else None)
+    elif os.path.exists(post):
+        calc = ACECalculator(f"/out/{run}/model.npz", posterior=post)
+    else:
+        calc = ACECalculator(f"/out/{run}/model.npz")
     sys.path.insert(0, "/root")
     import served_arrays
     # served properties of a schema-3 posterior; older posteriors serve forces_std only
@@ -89,6 +94,7 @@ def big_errors(run: str = "bench365_pops", xyz: str = "/data/big.xyz", tag: str 
         if "group_table_json" in np.load(post).files:      # schema 3
             props += ["forces_q", "forces_group", "forces_cov"]
     err, dfv, srv, fam, rc, fx, cid, t0 = [], [], [], [], [], [], [], time.time()
+    peak = []                  # the spec's memory report: peak device bytes per configuration (3-4k-atom cells)
     for k, a in enumerate(read(xyz, ":")):
         fam.append(np.full(len(a), a.info.get("family", "?")))
         rc.append(a.arrays.get("r_core", np.full(len(a), np.nan)))
@@ -100,8 +106,11 @@ def big_errors(run: str = "bench365_pops", xyz: str = "/data/big.xyz", tag: str 
         err.append(np.linalg.norm(d, axis=1))
         if os.path.exists(post):      # E/F reused from the get_forces call above
             srv.append(served_arrays.collect(calc, [a], props))
+        st = jax.devices()[0].memory_stats() or {}
+        peak.append(np.full(len(a), st.get("peak_bytes_in_use", -1), np.int64))
     out = dict(err=np.concatenate(err), dF=np.concatenate(dfv), family=np.concatenate(fam),
-               r_core=np.concatenate(rc), fixed=np.concatenate(fx), cfg=np.concatenate(cid))
+               r_core=np.concatenate(rc), fixed=np.concatenate(fx), cfg=np.concatenate(cid),
+               peak_bytes=np.concatenate(peak))
     if srv:
         out.update({k: np.concatenate([x[k] for x in srv]) for k in srv[0]})
     sd = out.get("sd", [])

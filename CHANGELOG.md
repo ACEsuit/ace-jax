@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+- **Calibrated force uncertainty on the GP arm: `aj fit --uq ard-gp`
+  (experimental).** The `--uq ard` stage (evidence fit, PRESS jackknife
+  shape, per-group rms and conformal scales) now also runs on the hybrid
+  ACE + GP model, over the joint design [B | k(B, B_M)] at the MAP
+  hyperparameters. The GP block gets one ARD scale on its prior K_MM. The
+  fit writes `gp_model.npz` with the ARD posterior mean and `posterior.npz`;
+  `GPCalculator.from_file(gp_model, posterior=...)` and
+  `aj eval --posterior` serve `forces_std`, `forces_cov`, `forces_q`,
+  `forces_q_mahal` and `forces_group`. The support flag and `aj calibrate`
+  remain linear-only. `--uq ard` on the linear model is unchanged.
+  Experimental: on the Cantor benchmark it lifts crack-tip coverage (0.902
+  against 0.893 for `--uq ard`) but ranks errors slightly less well
+  (Spearman ρ 0.006–0.009 lower), so `--uq ard` stays the recommended option
+  (bench/defect_uq/results/2026-10-07_ard_gp_acceptance.md).
+
+- **Smaller `--uq ard` and `--uq ard-gp` files.** `posterior.npz` stores the
+  L x L Cholesky factor only for `--ard-variance kappa`, which reads it, and
+  then packed (its lower triangle). The default sandwich shape serves forces
+  from its shape factor alone. On the Cantor basis (L = 15 035) a
+  `posterior.npz` shrinks from 1.14 GB to 0.24 GB, and `ACECalculator` no
+  longer holds an unused 1.8 GB float64 copy on the device. An `--uq ard-gp`
+  `gp_model.npz` no longer carries the full-posterior factor (1.9 GB to
+  10 MB): its force uncertainty comes from `posterior.npz`, and on its own
+  the model gives energies and forces without `energy_std`. Old posterior
+  files load unchanged. `predict_ard` on a saved sandwich posterior reports
+  NaN for the uncalibrated energy and virial variances.
+
 - **Follow a running fit.** `aj fit` writes `out/progress.jsonl` as it runs:
   one JSON line per stage, L-BFGS evaluation, Newton refinement and
   radial-learning round, with timings, so a script or `tail -f` can track a

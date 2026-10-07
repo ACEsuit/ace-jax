@@ -7,6 +7,7 @@ import jax.numpy as jnp
 
 from ace_jax.eval import highest_precision
 from conftest import _orders
+from conftest import ard_pipe_cfg as _pipe_cfg  # noqa: F401  (ard_map is a conftest fixture)
 
 
 def _dense_rows(prob, ds):
@@ -225,33 +226,6 @@ def test_kappa_closed_form_minimises_nll():
     nll = lambda lk: np.mean(e2 / (2 * np.exp(2 * lk) * s2 / 3) + 1.5 * np.log(np.exp(2 * lk) * s2 / 3))
     k_bf = float(np.exp(minimize_scalar(nll, bounds=(-5, 5), method="bounded").x))
     assert abs(k - k_bf) < 1e-4 * k_bf and 2.9 < k < 3.5
-
-
-def _pipe_cfg(**kw):
-    """A uq='ard' linear-arm FitConfig for the ARD stage tests."""
-    from conftest import FIXTURE_DIR
-    from ace_jax.fit.pipeline import FitConfig
-    base = dict(model=str(FIXTURE_DIR / "si_fitted.npz"), energy_key="dft_energy", force_key="dft_force",
-                virial_key="dft_virial", ntrain=30, ntest=8, batch=4, r0=2.35, arm="linear", uq="ard",
-                opt="lbfgs", rungs=("map",), map_steps=5, predict_train=False, ard_variance="kappa", ard_n_min=1)
-    return FitConfig(**{**base, **kw})
-
-
-@pytest.fixture(scope="module")
-def ard_map():
-    """load_fit_data + build_problem + fit_map for _pipe_cfg(): identical for every ARD stage
-    test (ard_variance / ard_mode only change the stage that follows), so done once."""
-    from conftest import FIXTURE_DIR
-    from ace_jax.fit.pipeline import load_fit_data
-    from ace_jax.fit.pipeline.mapfit import fit_map
-    from ace_jax.fit.pipeline.objective import make_objective
-    from ace_jax.fit.pipeline.problem import build_problem
-    cfg = _pipe_cfg().validate()
-    d = load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz"))
-    b = build_problem(cfg, d)
-    with highest_precision():
-        theta = fit_map(cfg, d, b, make_objective(cfg, d, b), log=lambda *a: None).theta
-    return d, b, theta
 
 
 def test_ard_stage_fits_kappa_and_refits_on_all_training_data(ard_map):
@@ -533,6 +507,7 @@ def test_posterior_schema2_roundtrip_and_schema1_loads(ard_setup, tmp_path):
         # a schema-1 file (no Q / lam) still loads and serves kappa variance
         z = dict(np.load(tmp_path / "p.npz"))
         z.pop("Q"); z.pop("lam"); z["schema"] = np.array(1)
+        z["chol"] = np.asarray(post.chol, np.float32)       # schema-1 files carried the dense factor
         np.savez(tmp_path / "p1.npz", **z)
         old = ARDPosterior.load(tmp_path / "p1.npz")
         assert old.Q is None and old.lam == 1.0

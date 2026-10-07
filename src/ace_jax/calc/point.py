@@ -225,6 +225,9 @@ class ACECalculator(Calculator):
             if not isinstance(model_path, (str, bytes)) and not hasattr(model_path, "__fspath__"):
                 raise ValueError("posterior= needs the model FILE path (the design rows use the fit model)")
             post = ARDPosterior.load(posterior)
+            if post.prior_root.M:
+                raise ValueError(f"posterior {posterior} is from --uq ard-gp (a GP fit): serve it with "
+                                 "GPCalculator.from_file(gp_model.npz, posterior=...)")
             NZ = len(meta["elements"])
             L = (meta["n_B"] + meta["n_pair"]) * NZ
             # a joint-E0 posterior (meta e0_cols) carries NZ E0 columns after the readout: the model
@@ -253,7 +256,8 @@ class ACECalculator(Calculator):
                                  f"model's coefficients (a posterior from a different fit?)")
             # the L x L Cholesky factor and the sandwich factor: host->device once, not on every call
             import jax.numpy as jnp
-            post = post._replace(chol=jnp.asarray(post.chol, jnp.float64))
+            if post.chol is not None:          # only kappa posteriors carry it (the sandwich shape serves from R)
+                post = post._replace(chol=jnp.asarray(post.chol, jnp.float64))
             if post.Q is not None:
                 post = post._replace(Q=jnp.asarray(post.Q, jnp.float64))
             if shape_path not in ("rows", "committee"):

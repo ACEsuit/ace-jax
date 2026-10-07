@@ -35,7 +35,10 @@ class Prediction(NamedTuple):
 
 
 def _rows_mean_var(Phi, mu, L):
-    """Phi (n, Dt) -> mean Phi mu, var diag(Phi S^-1 Phi^T) with L L^T = S."""
+    """Phi (n, Dt) -> mean Phi mu, var diag(Phi S^-1 Phi^T) with L L^T = S.  L None (an ard-gp gp_model.npz,
+    whose UQ is its posterior.npz): the mean, and a NaN variance."""
+    if L is None:
+        return Phi @ mu, jnp.full(Phi.shape[0], jnp.nan)
     v = solve_triangular(L, Phi.T, lower=True)            # (Dt, n)
     return Phi @ mu, jnp.sum(v * v, axis=0)
 
@@ -235,6 +238,7 @@ def _predict_batch(theta, prob, mu, L, batch, dtc=True, deriv_dtc=True):
     r = _cat_rows(lin, res)
     Dt = r.E.shape[-1]
     Em, Ev = _rows_mean_var(r.E, mu, L)
+    dtc = dtc and L is not None                              # no posterior factor: the mean only
     if dtc:
         Ev = Ev + _dtc_energy_residual(theta, prob, batch, X)
     Fm, Fv = _rows_mean_var(r.F.reshape(-1, Dt), mu, L)
