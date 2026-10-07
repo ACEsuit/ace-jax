@@ -14,7 +14,7 @@ ROUTES = ("fixed", "lml")
 # scale lives in log_sigma_F's slot (with its hyperprior); log_sigma_E and log_sigma_V are TIED to
 # it: the objective reads tie_noise(a), so they carry no likelihood, no hyperprior (log_prior's
 # `free`) and are pinned in the MAP, so every optimiser, Hessian and rung counts the scale once.
-NOISE_MODES = ("per-quantity", "shared")
+NOISE_MODES = ("per-quantity", "shared")    # what a fit runs; FitConfig also takes "auto" (validate resolves it)
 SHARED_NOISE = "log_sigma_F"
 TIED_NOISE = ("log_sigma_E", "log_sigma_V")
 

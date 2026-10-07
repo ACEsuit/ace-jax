@@ -429,6 +429,10 @@ RMSE is not (+79 % at default weights). Phase 1 should ship `shared` only with e
 
 ## Open questions: proposed answers
 
+**Decided (2026-10-07).** Q1: implemented as `--noise auto` (the default): shared with explicit weights,
+per-quantity otherwise, and per-quantity where shared is unavailable (`sigma_type`, joint ARD, lstsq).
+Q2: `hier` is not built (D2 removed its motivation). Q4: the GP-arm option is `--uq ard-gp` (PR #77).
+
 1. **Default for `--noise`.** Proposed: **`shared` only when `--weights` is given explicitly; keep
    `per-quantity` otherwise.**
    - With explicit weights the user has stated the E:F:V balance, and per-quantity noise silently undoes it

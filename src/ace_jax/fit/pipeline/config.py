@@ -45,8 +45,10 @@ class FitConfig:
                                          # "auto" (linear arm, cached-Gram LML) | "on" (any arm) | "off"
     strict: bool = False                 # raise MapNotConverged (not a warning) when the MAP is not stationary
     init: dict | None = None             # Hypers field -> value
-    noise: str = "per-quantity"          # "per-quantity" (sigma_E, sigma_F, sigma_V free) | "shared" (one
+    noise: str = "auto"                  # "per-quantity" (sigma_E, sigma_F, sigma_V free) | "shared" (one
                                          # sigma for every weighted row, ACEfit's BLR: the weights set the balance)
+                                         # | "auto": validate() resolves it -- shared when weights/factors are given
+                                         # and shared noise is available, else per-quantity
     # rungs
     rungs: tuple = ("map",)
     solver: str = "evidence"             # "evidence" | "lstsq" (plain weighted least squares, no prior: teaching)
@@ -107,6 +109,17 @@ class FitConfig:
         LOO objective, whose per-config (R, R) leverage blocks (R = 1 + 3 n_max + 6) are vmapped over a
         batch's C slots, so the larger C_eff of a packed layout would multiply that memory."""
         return "off" if (self.batch_pack == "auto" and self.objective == "loo") else self.batch_pack
+
+    def _auto_noise(self):
+        """noise "auto": shared when the user gave weights (with per-quantity noise each sigma_q cancels its
+        quantity's weight at a converged MAP, #64, so the weights would have no effect), per-quantity when they
+        did not (no stated E:F:V balance: the evidence sets it).  Per-quantity also wherever shared noise is
+        not available -- sigma_type, joint ARD (it refits sigma_q by its own evidence), solver lstsq -- so
+        weights never turn a working configuration into an error."""
+        weighted = self.weights is not None or self.factors is not None
+        unavailable = (self.sigma_type or self.solver == "lstsq"
+                       or (self.uq in ("ard", "ard-gp") and self.ard_mode == "joint"))
+        return "shared" if weighted and not unavailable else "per-quantity"
 
     def validate(self):
         if self.batch_pack not in ("auto", "on", "off"):
@@ -178,8 +191,10 @@ class FitConfig:
             raise ValueError("map_restarts > 1 is the L-BFGS multi-start: set opt lbfgs "
                              "(and not sigma_type)")
         from ..paramset import NOISE_MODES
+        if self.noise == "auto":
+            self.noise = self._auto_noise()
         if self.noise not in NOISE_MODES:
-            raise ValueError(f"noise must be one of {NOISE_MODES}, got {self.noise!r}")
+            raise ValueError(f"noise must be 'auto' or one of {NOISE_MODES}, got {self.noise!r}")
         if self.noise == "shared":
             why = ("sigma_type (per-config-type noise ratios on per-quantity scales)" if self.sigma_type else
                    "uq ard with ard_mode joint (it refits sigma_E/F/V by its own evidence; use ard_mode "

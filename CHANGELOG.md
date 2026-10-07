@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **`--weights` now sets the E:F:V balance by default.** `aj fit --noise`
+  takes a new default, `auto`: shared noise (one σ for every weighted row,
+  as ACEpotentials' BLR) when you give `--weights` (or weight factors), and
+  per-quantity noise otherwise. Before, the default was always per-quantity,
+  where each learned σ cancels its quantity's weight at a converged MAP, so
+  explicit weights had no effect (#64). **Fits that pass `--weights` without
+  `--noise` change**: use `--noise per-quantity` to keep the old behaviour.
+  Fits without weights are unchanged. `auto` uses per-quantity where shared
+  noise is not available (`--sigma-type`, joint `--uq ard`, `--solver
+  lstsq`). `config.json` and `fit.yaml` record the resolved mode.
+
 - **Calibrated force uncertainty on the GP arm: `aj fit --uq ard-gp`
   (experimental).** The `--uq ard` stage (evidence fit, PRESS jackknife
   shape, per-group rms and conformal scales) now also runs on the hybrid

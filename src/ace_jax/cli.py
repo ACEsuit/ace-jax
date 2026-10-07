@@ -71,13 +71,12 @@ def _add_fit_args(p):
     p.add_argument("--strict", action="store_true",
                    help="fail, instead of warning, when the MAP ends away from a stationary point (a "
                         "predicted Newton gain above 1e-3 nats)")
-    p.add_argument("--noise", choices=["per-quantity", "shared"], default="per-quantity",
-                   help="noise hyperparameters: per-quantity (default) learns sigma_E, sigma_F and sigma_V "
-                        "separately, and at the optimum each cancels its quantity's --weights; shared learns "
-                        "ONE sigma for every weighted row (ACEpotentials' BLR), so the E:F:V weights set "
-                        "the balance. Use shared whenever the weights are meant to set it (an ACEpotentials "
-                        "weights dict, e.g. E 30 / F 1 / V 1): per-quantity lets the many force rows push "
-                        "sigma_E up and underweight the energies")
+    p.add_argument("--noise", choices=["auto", "per-quantity", "shared"], default="auto",
+                   help="noise hyperparameters: per-quantity learns sigma_E, sigma_F and sigma_V separately, and at "
+                        "the optimum each cancels its quantity's --weights; shared learns ONE sigma for every "
+                        "weighted row (ACEpotentials' BLR), so the E:F:V weights set the balance. auto (default): "
+                        "shared when --weights is given, per-quantity otherwise (and per-quantity where shared is "
+                        "not available: --sigma-type, joint ARD, --solver lstsq)")
     p.add_argument("--solver", choices=["evidence", "lstsq"], default="evidence",
                    help="lstsq: plain weighted least squares with no prior (teaching; overfits a large basis)")
     p.add_argument("--map-restarts", type=int, default=1, help="L-BFGS multi-start (best log-posterior)")
@@ -252,6 +251,7 @@ def _run_fit(a):
     del data
     res = fit(cfg, held.pop())
     data = res.data
+    a.noise = res.config.noise         # --noise auto as validate() resolved it: config.json and fit.yaml record that
     with stage("outputs"):
         write_outputs(res, a.out, layout=("cli",), argv=vars(a), save_model=not a.no_save_model,
                       model_draws=a.model_draws)

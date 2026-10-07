@@ -55,10 +55,10 @@ Do these checks in this order:
       phases, and gives 239 meV/atom.
     - `--max-degree 10` (110 functions) gives 24 meV/atom.
    If the forces are good but the energies are bad, the evidence can give
-   accuracy in the forces at the cost of the energies. The default
-   `--noise per-quantity` learns a separate σ_E, and σ_E cancels your energy
-   weight. Use `--noise shared` to learn one σ for all rows, as
-   ACEpotentials does. Then `--weights` sets the balance.
+   accuracy in the forces at the cost of the energies. Without `--weights`,
+   the fit learns a separate σ_E (`--noise per-quantity`). Give `--weights`
+   to set the balance: the default `--noise auto` then learns one σ for all
+   rows (`shared`), as ACEpotentials does.
 4. **The radial basis.** The default `--radial-mode onehot` uses the radial
    polynomials. `--radial-mode glorot_normal` mixes them with seeded random
    weights. If these weights stay frozen, the fit is several times worse. On
