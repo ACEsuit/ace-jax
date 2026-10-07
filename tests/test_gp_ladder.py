@@ -2,12 +2,17 @@
 known mode and width.  No ACE here; the ACE smoke test is in test_gp_cli.py."""
 import jax
 import numpy as np
+import pytest
 
 jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 
 from ace_jax.fit.hypers import Hypers, Prior, to_array
 from ace_jax.fit.ladder import run_laplace, run_map, run_nuts, run_vi
+
+# The GP ladder is experimental: ~10 min of compiles (Laplace, NUTS) that held up every PR's
+# shards, so the whole module runs in the `slow` job (pytest -m slow), not the default suite.
+pytestmark = pytest.mark.slow
 
 STAR = jnp.linspace(-1.0, 1.0, 10)
 WIDTH = 0.2
@@ -67,7 +72,6 @@ def test_laplace_fd_matches_exact_width():
     assert np.abs(np.array(info["std"]) - WIDTH).max() < 1e-3      # quadratic target: FD Hessian is exact
 
 
-import pytest
 
 
 def _tiny_embed_problem(mps=4, ncfg=3):

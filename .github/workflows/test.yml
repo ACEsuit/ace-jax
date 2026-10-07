@@ -24,7 +24,7 @@ jobs:
     # writes only those; the split reads the committed .test_durations first); the
     # `durations` job merges them into one refreshed .test_durations artifact.
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45                  # shards ran 16-30 min on identical code (runner variance)
     strategy:
       fail-fast: false
       matrix:
@@ -39,17 +39,26 @@ jobs:
         with:
           path: .jax_cache
           key: jaxcache-${{ runner.os }}-g1-${{ hashFiles('uv.lock') }}-${{ github.sha }}
-          restore-keys: jaxcache-${{ runner.os }}-g1-${{ hashFiles('uv.lock') }}-
+          # then any lock: a version bump changes uv.lock; stale entries just miss
+          restore-keys: |
+            jaxcache-${{ runner.os }}-g1-${{ hashFiles('uv.lock') }}-
+            jaxcache-${{ runner.os }}-g1-
       - uses: actions/cache/restore@v4
         with:
           path: .jax_cache
           key: jaxcache-${{ runner.os }}-g2-${{ hashFiles('uv.lock') }}-${{ github.sha }}
-          restore-keys: jaxcache-${{ runner.os }}-g2-${{ hashFiles('uv.lock') }}-
+          # then any lock: a version bump changes uv.lock; stale entries just miss
+          restore-keys: |
+            jaxcache-${{ runner.os }}-g2-${{ hashFiles('uv.lock') }}-
+            jaxcache-${{ runner.os }}-g2-
       - uses: actions/cache/restore@v4
         with:
           path: .jax_cache
           key: jaxcache-${{ runner.os }}-g3-${{ hashFiles('uv.lock') }}-${{ github.sha }}
-          restore-keys: jaxcache-${{ runner.os }}-g3-${{ hashFiles('uv.lock') }}-
+          # then any lock: a version bump changes uv.lock; stale entries just miss
+          restore-keys: |
+            jaxcache-${{ runner.os }}-g3-${{ hashFiles('uv.lock') }}-
+            jaxcache-${{ runner.os }}-g3-
       - name: Suite shard ${{ matrix.group }}/3 (CPU JAX)
         env:
           JAX_PLATFORM_NAME: cpu
@@ -107,7 +116,10 @@ jobs:
         with:
           path: .jax_cache
           key: jaxcache-${{ runner.os }}-optional-${{ hashFiles('uv.lock') }}-${{ github.sha }}
-          restore-keys: jaxcache-${{ runner.os }}-optional-${{ hashFiles('uv.lock') }}-
+          # then any lock: a version bump changes uv.lock; stale entries just miss
+          restore-keys: |
+            jaxcache-${{ runner.os }}-optional-${{ hashFiles('uv.lock') }}-
+            jaxcache-${{ runner.os }}-optional-
       - name: Install matscipy-neighbours (C++ source build) and lammps-jax
         run: |
           uv sync --python 3.12 --extra gp --extra fast-neighbours
@@ -141,7 +153,10 @@ jobs:
         with:
           path: .jax_cache
           key: jaxsmoke-${{ runner.os }}-py${{ matrix.python }}-${{ hashFiles('uv.lock') }}-${{ github.sha }}
-          restore-keys: jaxsmoke-${{ runner.os }}-py${{ matrix.python }}-${{ hashFiles('uv.lock') }}-
+          # then any lock: a version bump changes uv.lock; stale entries just miss
+          restore-keys: |
+            jaxsmoke-${{ runner.os }}-py${{ matrix.python }}-${{ hashFiles('uv.lock') }}-
+            jaxsmoke-${{ runner.os }}-py${{ matrix.python }}-
       - name: Import + smoke
         env:
           JAX_PLATFORM_NAME: cpu
@@ -158,9 +173,10 @@ jobs:
   ladder:
     # Heavy integration run ONCE (not per-Python): the real-model MCMC ladder
     # (MAP/Laplace/Pathfinder/NUTS, fast mode) and any other `slow` test.
-    # Isolated so it can't slow the suite.
+    # Isolated so it can't slow the suite.  Includes the experimental GP ladder plumbing
+    # (tests/test_gp_ladder.py, ~10 min).
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
