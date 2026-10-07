@@ -40,7 +40,11 @@ def id300(D, run, log=print):
     pick = np.sort(np.random.default_rng(0).choice(len(frames), 300, replace=False))
     if LIMIT:
         pick = pick[:LIMIT]
-    calc = ACECalculator(f"{run}/model.npz", posterior=f"{run}/posterior.npz")
+    if os.path.exists(f"{run}/gp_model.npz"):         # --uq ard-gp: the GP model with its ARD posterior
+        from ace_jax.calc.gp import GPCalculator
+        calc = GPCalculator.from_file(f"{run}/gp_model.npz", posterior=f"{run}/posterior.npz")
+    else:
+        calc = ACECalculator(f"{run}/model.npz", posterior=f"{run}/posterior.npz")
     out = {k: [] for k in ("s", "g", "cfg")}
     for n, i in enumerate(pick):
         a0 = frames[i]

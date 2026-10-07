@@ -463,3 +463,24 @@ RMSE is not (+79 % at default weights). Phase 1 should ship `shared` only with e
    - ace-jax cannot see a foundation model's identity in an extxyz.
    - D1 found no R in 8–12 Å better than another; the effects saturate by 8 Å.
    - Moot while Phase 5 is closed.
+
+## Phase 3 result: `--uq ard-gp` (2026-10-07)
+
+Implemented on `feat/gp-sandwich` (plan `docs/dev/plans/2026-10-06-gp-sandwich.md`). Acceptance on bench365 and
+the 34 v3 big cells: `bench/defect_uq/results/2026-10-07_ard_gp_acceptance.md`.
+
+| arm | ID | tip | crack | ρ crack / edge / screw |
+|---|---|---|---|---|
+| linear `ard_default` | 0.898 | 0.893 | 0.908 | 0.370 / 0.296 / 0.318 |
+| GP sandwich (`ard_gp_sw`) | 0.900 | **0.902** | 0.912 | 0.362 / 0.286 / 0.312 |
+| GP `dtc` (`ard_gp_dtc`) | n/a | 0.827 | 0.838 | 0.282 / 0.136 / 0.163 |
+
+- **Sandwich: better tip coverage, worse ranking.** Tip coverage improves (+0.009, paired interval excludes 0)
+  and in-distribution coverage is on target. But ρ is lower by 0.006–0.009 in every family (intervals exclude
+  0). It does not "match or beat" on both, so **`ard-gp` stays experimental**, as the spec rules.
+- **`dtc` fails clearly:** under-coverage off distribution, and ρ lower by 0.09–0.16. This is what D3
+  predicted: the DTC term is near-constant across environments. Recommendation: remove `--ard-variance dtc`.
+- **Phase 4 (PITC)** was already unmotivated (D3). This result does not change that: the GP block's fitted
+  ARD scale is a_GP = −0.04, so the evidence keeps the MAP prior, and the structured tip error is not in the
+  span the GP misses.
+
