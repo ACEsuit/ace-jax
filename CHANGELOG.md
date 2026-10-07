@@ -29,6 +29,16 @@
   files load unchanged. `predict_ard` on a saved sandwich posterior reports
   NaN for the uncalibrated energy and virial variances.
 
+- **Follow a running fit.** `aj fit` writes `out/progress.jsonl` as it runs:
+  one JSON line per stage, L-BFGS evaluation, Newton refinement and
+  radial-learning round, with timings, so a script or `tail -f` can track a
+  long fit. Its standard output is now line-buffered, so a log written to a
+  file is current, not empty until the fit ends. The `--learn-radial` round
+  line now gives the objective's change within the round and the evidence
+  (LML) after the hyperparameters are re-fitted. The objective alone could
+  rise from one round to the next while the radials improved, because each
+  round re-weights it with the re-fitted noise.
+
 - **`aj fit` no longer repeats its statistics pass.** A linear fit streamed
   the training set three times: once for the evidence, again for the
   predictions, and again to write `model.npz`. Prediction and the model file

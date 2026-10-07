@@ -2,6 +2,7 @@ import time
 from typing import NamedTuple
 
 from ...eval import highest_precision
+from ..progress import emit, stage as progress_stage
 from .mapfit import fit_map
 from ..predict import theta_key
 from .objective import make_objective, release
@@ -41,9 +42,11 @@ def fit(cfg, data, log=print, on_stage=None):
     radial = None
     if cfg.learn_radial:
         from .radials import learn_radials
-        data, radial = learn_radials(cfg, data, log=log)
+        with progress_stage("radial"):
+            data, radial = learn_radials(cfg, data, log=log)
         stage("radial", radial)
-    b = build_problem(cfg, data)
+    with progress_stage("problem"):
+        b = build_problem(cfg, data)
     if cfg.solver == "lstsq":       # no objective, no MAP: one weighted least-squares solve
         from .lstsq import fit_lstsq
         with highest_precision():
@@ -53,10 +56,16 @@ def fit(cfg, data, log=print, on_stage=None):
         tm = {**b.timings, **mf.timings, **pr.timings, "total": time.time() - T0}
         return FitResult(cfg, data, b, mf.theta, mf, rg, pr, tm, None, radial, readout)
     with highest_precision():
-        obj = make_objective(cfg, data, b)
-        mf = fit_map(cfg, data, b, obj, log=log)
+        with progress_stage("objective"):            # the training statistics pass
+            obj = make_objective(cfg, data, b)
+        with progress_stage("map"):
+            mf = fit_map(cfg, data, b, obj, log=log)
+        c = mf.convergence or {}
+        emit("map_result", theta=dict(zip(type(mf.theta)._fields, mf.theta)), log_evidence=mf.log_evidence,
+             converged=c.get("converged"), gain=c.get("gain"), pgrad_inf=c.get("pgrad_inf"))
         stage("map", mf)
-        rg = run_rungs(cfg, b, obj, mf.theta, log=log, fixed=mf.fixed)
+        with progress_stage("rungs", rungs=list(cfg.rungs)):
+            rg = run_rungs(cfg, b, obj, mf.theta, log=log, fixed=mf.fixed)
         stage("rungs", rg)
         ard = None
         if cfg.uq in ("ard", "ard-gp"):
@@ -71,7 +80,8 @@ def fit(cfg, data, log=print, on_stage=None):
                 full = obj.lin if cfg.uq == "ard" else obj.stats(mf.theta)
             obj = obj._replace(lik=None, vg=None, host_cache=None, stats=None, lin=None)
             release()
-            ard = run_ard_stage(cfg, data, b, mf.theta, log=log, full_stats=full)
+            with progress_stage("ard"):
+                ard = run_ard_stage(cfg, data, b, mf.theta, log=log, full_stats=full)
             del full
             stage("ard", ard)
             from .export import linear_arrays_from_mean, model_file_blocked
@@ -96,7 +106,8 @@ def fit(cfg, data, log=print, on_stage=None):
             # drop the LML and its jitted objective, then free their buffers
             obj = obj._replace(lik=None, vg=None, host_cache=None)
             release()
-        pr = predict_splits(cfg, data, b, stats, mf.theta, rg.draws, log=log, ard=ard, posts=posts)
+        with progress_stage("predict"):
+            pr = predict_splits(cfg, data, b, stats, mf.theta, rg.draws, log=log, ard=ard, posts=posts)
         if posts is not None:
             posts = {k: v for k, v in posts.items() if v is not None} or None
     tm = {**b.timings, **obj.timings, **mf.timings, **rg.timings, **pr.timings}

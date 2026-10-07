@@ -114,7 +114,18 @@ These constraints are validated up front. A bad combination raises a
 ## Outputs (`--out DIR`)
 
 - **Log:** after the fit, an E/F/V RMSE table per `config_type` for each split
-  (E and V in meV/atom, F in eV/Å); `aj eval` prints the same table.
+  (E and V in meV/atom, F in eV/Å); `aj eval` prints the same table. stdout is
+  line-buffered, so a log redirected to a file follows a running fit.
+- `progress.jsonl`, written live: one JSON object per event (`time`, `elapsed_s`,
+  `event`, fields), for following or parsing a running fit (`tail -f`, or
+  `jq 'select(.event=="stage")'`). Events: `fit` (start; done with the test
+  metrics), `stage` (`data`, `radial`, `problem`, `objective` = the statistics pass,
+  `map`, `rungs`, `ard`, `predict`, `outputs`; start/done/failed with `seconds`),
+  `map_eval` (each L-BFGS evaluation), `map_polish`, `map_result` (theta,
+  `log_evidence`), and with `--learn-radial` `radial_candidate`, `radial_round`
+  and `radial_gate`/`radial_selected`. A `radial_round`'s `obj_start`/`obj_end` are at that
+  round's fixed theta (not comparable across rounds); `lml`, after the re-fit of theta,
+  is the progress measure across rounds.
 
 - `metrics.csv`, `metrics_ood.csv`: one row per rung × quantity (E in meV/atom,
   F in eV/Å, V). Columns are `rmse`, `mae`, `crps`, `coverage` (fraction

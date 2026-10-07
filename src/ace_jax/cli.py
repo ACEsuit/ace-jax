@@ -221,10 +221,29 @@ def _check_fit_args(p, a):
 
 
 def run(a):
+    """aj fit.  While it runs, stdout is line-buffered (a log redirected to a file follows the fit
+    line by line, not only at exit) and <out>/progress.jsonl receives one JSON event per stage,
+    MAP evaluation and radial-learning round (`fit.progress`)."""
+    import sys
+    from .fit.progress import emit, progress_file
+    out = pathlib.Path(a.out)
+    out.mkdir(parents=True, exist_ok=True)
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(line_buffering=True)
+    with progress_file(out / "progress.jsonl"):
+        emit("fit", status="start", argv=getattr(a, "_argv", None))
+        metrics = _run_fit(a)
+        emit("fit", status="done", test=metrics)          # {rung: {quantity: {rmse, mae, ...}}}
+    return metrics
+
+
+def _run_fit(a):
     from .fit.pipeline import fit, load_fit_data, write_outputs
+    from .fit.progress import stage
     cfg = _fit_config(a)
-    data = (load_fit_data(cfg, data=a.data, ood=a.ood) if a.data
-            else load_fit_data(cfg, train=a.train, test=a.test, ood=a.ood))
+    with stage("data"):
+        data = (load_fit_data(cfg, data=a.data, ood=a.ood) if a.data
+                else load_fit_data(cfg, train=a.train, test=a.test, ood=a.ood))
     if a.r0 is None:
         print(f"r0 {data.r0:.3f} A (mean bond length of the basis; pass --r0 to override)")
     # hand the only reference to fit: --learn-radial swaps the model (and FitData.basis's), so the
@@ -233,8 +252,9 @@ def run(a):
     del data
     res = fit(cfg, held.pop())
     data = res.data
-    write_outputs(res, a.out, layout=("cli",), argv=vars(a), save_model=not a.no_save_model,
-                  model_draws=a.model_draws)
+    with stage("outputs"):
+        write_outputs(res, a.out, layout=("cli",), argv=vars(a), save_model=not a.no_save_model,
+                      model_draws=a.model_draws)
     from . import runfile
     fit_p = _parser()._subparsers._group_actions[0].choices["fit"]
     runfile.write(pathlib.Path(a.out) / "fit.yaml",

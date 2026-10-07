@@ -219,7 +219,9 @@ def test_learn_radial_profiles_theta_and_logs_per_round(small):
     assert len(info["theta"]) >= 2 and all(np.all(np.isfinite(t)) for t in info["theta"])
     round_lines = [l for l in lines if "round" in l]
     assert len(round_lines) >= 2
-    assert "eta=" in round_lines[0] and "eta=" not in round_lines[-1]
+    assert "eta " in round_lines[0] and "eta " not in round_lines[-1]
+    assert "LML" in round_lines[0] and ("(+" in round_lines[-1] or "(-" in round_lines[-1])   # change since the last round
+    assert len(info["lml"]) == len(info["theta"]) - 1
 
 
 def test_gate_ties_go_to_first():

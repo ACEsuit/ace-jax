@@ -29,6 +29,7 @@ from jax.scipy.linalg import solve_triangular
 from .hypers import from_array, log_prior, to_array
 from .ladder import run_map
 from .objective import combine, log_marginal_likelihood, posterior
+from .progress import emit
 from .radial_model import (data_r_range, gap_penalty, normalise, radial_gram, require_analytic,
                            roughness, roughness_matrix, row_active, spectral_penalty,
                            spectral_weights, uniform_gram, with_radial)
@@ -85,7 +86,7 @@ def _lbfgs_step(x, state, args, *, f, statics, memory_size):
     return optax.apply_updates(x, updates), state, value, grad
 
 
-def lbfgs_loop(f, x0, *, steps, args=(), statics=(), tol=1e-6, patience=3, memory_size=10):
+def lbfgs_loop(f, x0, *, steps, args=(), statics=(), tol=1e-6, patience=3, memory_size=10, info=None):
     """Minimise f(x, *args, *statics) -> scalar by optax L-BFGS with zoom line
     search, via the single compiled `_lbfgs_step` (no per-call closure is
     jitted here, so calling this repeatedly with the same `f`/`statics` and
@@ -100,7 +101,8 @@ def lbfgs_loop(f, x0, *, steps, args=(), statics=(), tol=1e-6, patience=3, memor
     iteration fails to decrease f ("linesearch"); or when f, its gradient or
     the iterate go non-finite ("nonfinite").  Always returns the best finite
     iterate seen: (x_best, f_best, trace, reason), trace = f after each
-    accepted step (strictly decreasing)."""
+    accepted step (strictly decreasing).  `info`, a dict if given, receives "f0" = f(x0) (for a
+    progress report: the decrease over this call, at fixed `args`)."""
     if int(steps) <= 0:
         return x0, float(f(x0, *args, *statics)), [], "steps"
     opt = optax.lbfgs(memory_size=memory_size)
@@ -121,6 +123,8 @@ def lbfgs_loop(f, x0, *, steps, args=(), statics=(), tol=1e-6, patience=3, memor
         value = float(value)               # f(x) at the pre-step x (f(x0) when i == 0)
         if i == 0:
             f_best = prev = value
+            if info is not None:
+                info["f0"] = value
         if not (np.isfinite(value) and bool(jnp.all(jnp.isfinite(grad)))):
             return x_best, f_best, trace, "nonfinite"
         fx = float(optax.tree_utils.tree_get(state, "value"))
@@ -388,8 +392,9 @@ def learn_radial(prob, ds, W0, *, theta0=None, profile=True, lam_rough=0.0, roug
         # `f`/static pair every round, so `_lbfgs_step` compiles once across
         # the whole learn_radial call and every round below just reuses it;
         # `args` change VALUE each round (a is re-profiled) but not shape/dtype.
+        loop_info = {}
         V, f_best, trace, reason = lbfgs_loop(
-            _objective, V, steps=n, tol=tol, patience=patience,
+            _objective, V, steps=n, tol=tol, patience=patience, info=loop_info,
             args=(_learn_theta(a, learn_sigma_e_mult), prob.model, ds, _prior(prob), Q, active, D2, wn, lam,
                   W_ref, sw, lam_spec_abs,
                   U, lam_gap_abs),
@@ -404,31 +409,43 @@ def learn_radial(prob, ds, W0, *, theta0=None, profile=True, lam_rough=0.0, roug
         # (rsqrt(1 + eps) != 1 bit-for-bit) and break exact-equality recovery
         # of normalise(W0) against an independently-computed reference.
         V = normalise(V, Q, active)
-        profile_dt = 0.0
+        profile_dt, lml = 0.0, None
         if profile:
             t_profile = time.perf_counter()
-            a = theta_map_linear(prob, ds, V, steps=map_steps, seed=seed, init=a, noise=noise)
+            # the re-fit theta's LML (the evidence of these radials, maximised over theta) is the
+            # progress measure comparable across rounds: the objective is not, since each round
+            # minimises it at that round's theta and the next round re-weights it (1 / sigma^2)
+            a, _, diag = theta_map_linear(prob, ds, V, steps=map_steps, seed=seed, init=a, noise=noise,
+                                          return_stats=True)
+            lml = diag["lml"]
             profile_dt = time.perf_counter() - t_profile
             info["theta"].append(np.asarray(a))
+            info.setdefault("lml", []).append(lml)
         # round_dt is measured after the (optional) re-profile above, so it
         # covers the whole round -- theta_map_linear does its own full
         # streaming pass and must not be left out of the wall time.
         round_dt = time.perf_counter() - t_round
+        f0 = loop_info.get("f0", f_best)
+        eta = round_dt * (int(steps) - done) / n      # this lam's remaining rounds at this round's pace
+        th = from_array(a)
+        emit("radial_round", lam_rough=float(lam_rough), lam_spec=float(lam_spec), lam_gap=float(lam_gap),
+             round=round_idx, steps=done, steps_total=int(steps), accepted=len(trace), reason=reason,
+             obj_start=f0, obj_end=f_best, lml=lml, log_sigma_c=float(th.log_sigma_c),
+             log_sigma_E=float(th.log_sigma_E), log_sigma_F=float(th.log_sigma_F),
+             log_sigma_V=float(th.log_sigma_V), seconds=round(round_dt, 3), profile_seconds=round(profile_dt, 3),
+             eta_s=round(eta, 1))
         if log is not None:
-            theta_msg = ""
+            fit_msg = ""
             if profile:
-                th = from_array(a)
-                theta_msg = (f" log_sigma_c={float(th.log_sigma_c):.4f} "
-                             f"log_sigma_E={float(th.log_sigma_E):.4f} "
-                             f"log_sigma_F={float(th.log_sigma_F):.4f}")
-            eta_msg = ""
-            if round_idx == 1 and done < int(steps):
-                # projected from round 1 (includes compile, so conservative)
-                eta = round_dt * (int(steps) - done) / n
-                eta_msg = f" eta={eta:.0f}s (this lam, from round 1)"
-            log(f"learn_radial: round {round_idx} steps={done}/{int(steps)} "
-                f"accepted={len(trace)} obj={f_best:.6e} reason={reason} "
-                f"time={round_dt:.1f}s profile_time={profile_dt:.1f}s" + theta_msg + eta_msg)
+                prev = info["lml"][-2] if len(info["lml"]) > 1 else None
+                fit_msg = (f"; re-fit theta: LML {lml:.6e}" + ("" if prev is None else f" ({lml - prev:+.4g})")
+                           + f", log sigma_c {float(th.log_sigma_c):.4f}, log sigma_E/F "
+                           f"{float(th.log_sigma_E):.4f}/{float(th.log_sigma_F):.4f}")
+            rel = (f_best - f0) / abs(f0) if f0 else 0.0
+            log(f"learn_radial: round {round_idx} ({done}/{int(steps)} steps, {len(trace)} accepted, {reason}): "
+                f"objective {f0:.6e} -> {f_best:.6e} ({100 * rel:+.2f}%, at this round's theta)" + fit_msg
+                + f"; {round_dt:.0f} s (profile {profile_dt:.0f} s)"
+                + (f", eta {eta:.0f} s for this lam" if done < int(steps) else ""))
         if reason != "steps":
             break
     info["steps"] = done
@@ -572,6 +589,7 @@ def fit_radial(prob, ds_fit, ds_val, W0, *, lam_grid=(0.0, 1e-3, 1e-2, 1e-1), sp
     cands, runs = {"init": W_init}, {}
     for lam, spec, gap in combos:
         label, key = cand_label(lam, spec, gap), run_key(lam, spec, gap)
+        emit("radial_candidate", label=label, lam_rough=float(lam), lam_spec=float(spec), lam_gap=float(gap))
         if log is not None:
             log(f"fit_radial: lam={lam:g} spec={spec:g} gap={gap:g} starting")
         W, info = learn_radial(prob, ds_fit, W0, theta0=from_array(a0), lam_rough=lam,
@@ -593,12 +611,14 @@ def fit_radial(prob, ds_fit, ds_val, W0, *, lam_grid=(0.0, 1e-3, 1e-2, 1e-1), sp
         at_a0[label] = holdout_score(W, a0, a0, prob, ds_fit, ds_val, lin_fit=lin_fit,
                                      lin_val=lin_val)
         theta_fit[label], map_diag[label], readouts[label] = np.asarray(a_fit), diag, np.asarray(c)
+        emit("radial_gate", label=label, score=float(s), score_at_theta0=float(at_a0[label]), lml=diag["lml"])
         if log is not None:
             log(f"fit_radial: gate {label} score={s:.6e} score_at_a0={at_a0[label]:.6e} "
                 f"map_dloss_last={diag['dloss_last']:.3e} map_grad_norm={diag['grad_norm']:.3e}")
         return s
 
     label, scores = gate(cands, score)
+    emit("radial_selected", label=label, scores=scores)
     if log is not None:
         log(f"fit_radial: selected {label}")
     return cands[label], {"selected": label, "scores": scores, "scores_at_a0": at_a0,
