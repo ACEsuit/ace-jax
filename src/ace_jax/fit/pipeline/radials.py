@@ -25,6 +25,7 @@ from ..kernels import KernelSpec
 from ..objective import Problem
 from ..radial_learn import fit_radial
 from ..radial_model import rnl_degrees, to_analytic, with_radial
+from .config import resolved_noise
 
 RADIAL_MAP_STEPS = 300               # per-candidate theta-MAP steps in fit_radial (the driver's)
 
@@ -67,7 +68,7 @@ def learn_radials(cfg, data, log=print):
         f"(to_analytic relres_max={relres_max:.2e})")
     W, info = fit_radial(prob, ds_fit, ds_val, model.rnl_Wnlq, lam_grid=tuple(cfg.radial_lam_grid),
                          steps=cfg.radial_steps, map_steps=RADIAL_MAP_STEPS,
-                         rough_weights=1.0 / (1.0 + rnl_degrees(meta)) ** 2, noise=cfg.noise, log=log)
+                         rough_weights=1.0 / (1.0 + rnl_degrees(meta)) ** 2, noise=resolved_noise(cfg), log=log)
     # patch the source arrays in memory: same file-shaped hand-off as a built basis
     src, dst = io.BytesIO(), io.BytesIO()
     np.savez(src, **{k: data.z[k] for k in data.z.files})

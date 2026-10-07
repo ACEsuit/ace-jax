@@ -138,8 +138,9 @@ def gp_model_arrays(res, n_draws=1):
         out["L"] = np.stack(Ls)
     info = {"schema_version": GP_SCHEMA, "gpcfg": _gpcfg_json(gpcfg),
             "kernel": dataclasses.asdict(prob.spec), "warp": ind.warp}
-    if getattr(res.config, "noise", "per-quantity") != "per-quantity":   # only then: per-quantity files unchanged
-        info["noise"] = res.config.noise
+    from .config import resolved_noise
+    if resolved_noise(res.config) != "per-quantity":   # only then: per-quantity files unchanged
+        info["noise"] = resolved_noise(res.config)
     out["gp_json"] = np.frombuffer(json.dumps(info).encode(), np.uint8)
     return out
 

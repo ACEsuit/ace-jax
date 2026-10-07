@@ -37,7 +37,8 @@ The options fall into groups:
 - **hyperparameters**: `--opt`, `--map-steps`, `--map-restarts`, `--map-polish`,
   `--strict`, `--init`, `--noise`. `--noise shared` learns one noise scale
   for all weighted rows, so `--weights` sets the balance of E, F and V (as
-  in ACEpotentials). `--rungs` other than `map` adds approximations of
+  in ACEpotentials). The default `--noise auto` uses `shared` when you give
+  `--weights`, and `per-quantity` when you do not. `--rungs` other than `map` adds approximations of
   the hyperparameter posterior, at a much higher cost.
 - **uncertainty**: `--uq blr` (default), `pops` or `ard` for the linear
   model. The `--ard-*` and `--force-shape` options configure `ard`

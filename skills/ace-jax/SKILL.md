@@ -92,7 +92,7 @@ over a file's `basis:`, `--train` over its `data:` (each logged as an override).
 | The same on the hybrid ACE + GP model (experimental) | `--m-per-species 100 --uq ard-gp` (`gp_model.npz` + `posterior.npz`; `GPCalculator.from_file(gp_model, posterior=...)`) |
 | Learn the tensor radials before the fit | `--learn-radial` (writes `radial_info.json`; not with embedding models) |
 | Per-config-type weights | `--weights '{"default":{"E":30,"F":1,"V":1},"bulk":{"E":100,"F":1,"V":1}}'` or a factor list |
-| Make the weights set the E:F:V balance (ACEpotentials BLR) | `--noise shared`: one noise σ for every weighted row (σ_E = σ_F = σ_V, a tie in the MAP; recorded in `map_convergence.json`). The default `per-quantity` learns three σ's, each cancelling its weight, so energies end up underweighted. Not with `sigma_type`, joint ARD (use `--ard-mode sequential`) or `--solver lstsq`. Compare fits across modes by `log_evidence`, not `logpost` |
+| Make the weights set the E:F:V balance (ACEpotentials BLR) | Give `--weights`: the default `--noise auto` then resolves to `shared`, one noise σ for every weighted row (σ_E = σ_F = σ_V, a tie in the MAP; recorded in `map_convergence.json`; `fit.yaml` records the resolved mode). Without weights `auto` is `per-quantity` (three σ's, each cancelling its weight; at 1:1:1 weights shared noise cost +79 % energy RMSE on Cantor). `auto` also falls back to `per-quantity` with `sigma_type`, joint ARD or `--solver lstsq`; an explicit `--noise shared` there is refused. Not with `sigma_type`, joint ARD (use `--ard-mode sequential`) or `--solver lstsq`. Compare fits across modes by `log_evidence`, not `logpost` |
 | E0 from data, not the model | `--e0 lsq` (default `model`): fitted jointly with the readout (wide prior around a least-squares start; isolated atoms pin their species); `--e0 prefit` fixes the least-squares E0 first (POPS always does; ARD fits E0 jointly under `--e0 lsq`, as BLR) |
 | Stress labels (MACE, ASE, DFT codes) | `--stress-key stress` (virial = −stress × volume for periodic configs without a virial label; also on `aj eval`) |
 | Plain least squares, no prior (teaching: shows overfitting) | `--m-per-species 0 --solver lstsq` (no evidence, no UQ: zero predictive variance; weights from `--weights`) |
@@ -200,7 +200,8 @@ recomputes per draw elsewhere; `"recompute"` gives the same numbers with extra p
   (`Structural()`, `Quantity({"E":..,"F":..,"V":..})`,
   `ConfigType({type: {"E":..,"F":..,"V":..}})`, `PerConfig(key="weight")`).
   The CLI's `--weights '[{"Structural": {}}, ...]'` builds the same list.
-- `noise="shared"` (CLI `--noise shared`): one noise scale for the E, F and V rows.
+- `noise="auto"` (default): `validate()` resolves it to `"shared"` (one noise scale for the E, F and V rows)
+  when `weights`/`factors` are given and shared noise is available, else `"per-quantity"`.
 - `sigma_type=True`: a per-config-type noise block. `route={"sigma_type": "lml"}`
   routes hyperparameter blocks `fixed` or `lml` (`ace_jax.fit.paramset`).
 - `pops_rows="auto"|"host"|"device"`: where POPS keeps its design rows

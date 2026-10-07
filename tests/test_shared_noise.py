@@ -69,7 +69,8 @@ def test_noise_from_fit_yaml(tmp_path, capsys):
 
 def test_fitconfig_validates_noise():
     from ace_jax.fit.pipeline import FitConfig
-    assert FitConfig(model="m").noise == "per-quantity"
+    assert FitConfig(model="m").noise == "auto"                                  # resolved by validate()
+    assert FitConfig(model="m").validate().noise == "per-quantity"              # no weights
     FitConfig(model="m", noise="shared").validate()
     FitConfig(model="m", arm="linear", uq="ard", ard_mode="sequential", noise="shared").validate()
     FitConfig(model="m", arm="linear", noise="shared", learn_radial=True).validate()
@@ -235,7 +236,7 @@ def test_matches_the_acefit_blr_reference():
         th = from_array(jnp.asarray(x))
         mu, _ = fit_posterior(th, obj.stats(th), b.prob, d.ds_train)
         evidence = linear_arrays_from_mean(d.z, d.E0, b.prob.cfg, np.asarray(mu))
-        cfg2, d2, *_ = _setup("--weights", ACEFIT_WEIGHTS, train=XYZ)
+        cfg2, d2, *_ = _setup("--noise", "per-quantity", "--weights", ACEFIT_WEIGHTS, train=XYZ)   # auto would be shared
         per_quantity = linear_model_arrays(fit(cfg2, d2, **QUIET))
     r_ev, r_map, r_pq = rel(evidence), rel(linear_model_arrays(res)), rel(per_quantity)
     print(f"|ace-jax - ACEfit BLR| / |ACEfit BLR|: shared evidence optimum {r_ev:.1e}, shared MAP {r_map:.1e}, "
