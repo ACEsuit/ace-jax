@@ -188,7 +188,7 @@ def test_cli_learn_radial_writes_info_and_reproduces(fast, tmp_path):
     assert done == ["data", "radial", "problem", "objective", "map", "rungs", "predict", "outputs"]
     rounds = [e for e in ev if e["event"] == "radial_round"]
     assert rounds and all(np.isfinite(e["lml"]) and e["obj_end"] <= e["obj_start"] for e in rounds)
-    assert [e["event"] for e in ev].count("radial_gate") == 2 and any(e["event"] == "map_eval" for e in ev)
+    assert [e["event"] for e in ev].count("radial_gate") == 2 and any(e["event"] == "map_result" for e in ev)
     y = yaml.safe_load((a / "fit.yaml").read_text())
     assert y["learn_radial"] is True and y["radial_steps"] == 3 and y["radial_lam_grid"] in ("0", [0.0], "0.0")
     b = tmp_path / "b"
