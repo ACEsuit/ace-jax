@@ -84,7 +84,8 @@ def _pops_setup(cfg, d, b, stats, theta, log):
     return out
 
 
-def predict_splits(cfg, d, b, stats, theta, draws, log=print, ard=None, readout=None):
+def predict_splits(cfg, d, b, stats, theta, draws, log=print, ard=None, readout=None, posts=None):
+    """posts: predict.train_posterior's keep-dict (the MAP posterior, for the model file)."""
     prob, arrays, metrics, tm = b.prob, {}, {}, {}
     pops = {}
     if cfg.uq == "pops":
@@ -111,7 +112,7 @@ def predict_splits(cfg, d, b, stats, theta, draws, log=print, ard=None, readout=
                                      pops_form=cfg.pops_posterior, leverage_pct=cfg.pops_leverage_pct,
                                      pops_ridge=pops["ridge"], pops_path=pops["path"], stats=stats)
             else:
-                pred = predict_mixture(sub, prob, d.ds_train, ds, deriv_dtc=cfg.deriv_dtc, stats=stats)
+                pred = predict_mixture(sub, prob, d.ds_train, ds, deriv_dtc=cfg.deriv_dtc, stats=stats, posts=posts)
             tm[f"predict_{split}_{rung}"] = time.time() - t
             nat = np.array([len(c.numbers) for c in cfgs])
             bE = np.array([x[0] for x in base])

@@ -53,7 +53,7 @@ The pipeline that `aj fit` uses.
     different from the command-line defaults (for example `arm="gp"`,
     `e0="lsq"`, `map_steps=150`). Set each field that you need explicitly.
     To get exactly the command-line result, also set
-    `predict_stats="recompute"`.
+    `predict_stats="auto"`.
 
 ::: ace_jax.fit.pipeline.FitConfig
     options:

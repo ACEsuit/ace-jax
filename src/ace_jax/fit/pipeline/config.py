@@ -78,7 +78,8 @@ class FitConfig:
     _shape_variant: str = "press"        # bench-only ablation: "press" | "legacy" (#18 uncentred sandwich)
     _score_source: str = "fit"           # bench-only ablation: "fit" (P_fit) | "mixed" (#18 own-cluster-out)
     deriv_dtc: bool = True
-    predict_stats: str = "cached"        # "cached" (linear stats once; run.py) | "recompute" (per draw; CLI)
+    predict_stats: str = "cached"        # "cached" (the objective's; run.py) | "recompute" (per draw) |
+                                         # "auto" (CLI: the objective's where bitwise a recompute's, the QR form)
     predict_train: bool = True
     pops_posterior: str = "hypercube"; pops_leverage_pct: float = 0.0
     pops_ridge: object = "auto"          # "auto" | "blr" | float | {"E":..,"F":..,"V":..}
@@ -188,8 +189,8 @@ class FitConfig:
                 raise ValueError(f"noise 'shared' is not available with {why}")
         if self.pops_rows not in ("auto", "host", "device"):
             raise ValueError(f"pops_rows must be 'auto', 'host' or 'device', got {self.pops_rows!r}")
-        if self.predict_stats not in ("cached", "recompute"):
-            raise ValueError(f"predict_stats must be 'cached' or 'recompute', got {self.predict_stats!r}")
+        if self.predict_stats not in ("cached", "recompute", "auto"):
+            raise ValueError(f"predict_stats must be 'cached', 'recompute' or 'auto', got {self.predict_stats!r}")
         if self.lml_solver not in ("qr", "cholesky"):
             raise ValueError(f"lml_solver must be 'qr' or 'cholesky', got {self.lml_solver!r}")
         if self.solver not in ("evidence", "lstsq"):

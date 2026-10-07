@@ -143,7 +143,8 @@ def _config_type_weights(path):
 def load_fit_data(cfg, *, data=None, train=None, test=None, ood=None, log=print):
     """Configs, baselines, E0 and datasets.  Either `data` (one file, split with
     split_configs) or `train` (+ optional `test`; defaults to train) files.  Each may be
-    a path or a list of ase.Atoms (see fit.data.load_configs)."""
+    a path or a list of ase.Atoms (see fit.data.load_configs).  With no test file the
+    test Dataset is the training one (ds_test is ds_train), not a second build."""
     if (data is None) == (train is None):
         raise ValueError("pass exactly one of data= (split) or train= (+ test=)")
     keys = dict(energy_key=cfg.energy_key, force_key=cfg.force_key, virial_key=cfg.virial_key,
@@ -208,7 +209,11 @@ def load_fit_data(cfg, *, data=None, train=None, test=None, ood=None, log=print)
         raise ValueError(f"e0 must be 'lsq', 'prefit' or 'model', got {cfg.e0!r}")
     pk = dict(pack=cfg.pack_mode, log=log)
     ds_train = build_dataset(tr, meta, E0, cfg.batch, **pk)
-    ds_test = build_dataset(te, meta, E0, cfg.batch, **pk)
+    if data is None and not test:     # no test file: the "test" split is the training set, as built
+        log("no test set: test metrics are on the training set")
+        ds_test = ds_train
+    else:
+        ds_test = build_dataset(te, meta, E0, cfg.batch, **pk)
     ds_ood = build_dataset(od, meta, E0, cfg.batch, **pk) if od else None
     return FitData(tr, te, od, train_o, test_o, ood_o, base_train, base_test, base_ood,
                    np.asarray(E0), ds_train, ds_test, ds_ood, model, meta, z, perm,

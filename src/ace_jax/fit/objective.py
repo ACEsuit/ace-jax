@@ -210,10 +210,14 @@ def make_lml(prob, ds, mesh=None, cache_linear=True, n_types=1, n_free_ratios=0)
         jax.block_until_ready(lin)
 
         @jax.jit
-        def f(a):
+        def lml(a):
             theta = from_array(a)
             res = residual_statistics(theta, prob.spec, prob.model, prob.ind, prob.cfg, ds)
             return log_marginal_likelihood(theta, assemble_statistics(lin, res), prob)
+
+        def f(a):                  # a plain closure, as above, to carry the cached Gram
+            return lml(a)
+        f.lin_stats = lin          # the predictions' linear statistics: no second linear pass
         return f
     stats = _stats_fn(mesh)
 

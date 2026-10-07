@@ -12,6 +12,7 @@ import numpy as np
 import jax.numpy as jnp
 
 from ..eval import dense_graph, species_indices, sparse_graph
+from ..eval import nlist as _nl
 from .weights import ConfigType, Structural, compose
 
 VOIGT = ((0, 0), (1, 1), (2, 2), (2, 1), (2, 0), (1, 0))
@@ -202,8 +203,9 @@ def flat_edges(rij, nbr, nbr_mask):
     return rij.reshape(n * K, 3), senders, nbr.reshape(n * K), nbr_mask.reshape(n * K)
 
 
-def _batch(configs, meta, E0, rcut, C, n_cap, k_cap):
-    """One padded batch from up to C configs."""
+def _batch(configs, meta, E0, rcut, C, n_cap, k_cap, edges=None):
+    """One padded batch from up to C configs.  edges: {id(config): (i, j, D)}, the
+    neighbour lists build_dataset already built (dense_graph's `edges`)."""
     rij, nbr, nmask, node_z, node_cfg, node_ty = [], [], [], [], [], []
     yE, wE, yV, wV, nat, cm = np.zeros(C), np.zeros(C), np.zeros((C, 6)), np.zeros(C), np.zeros(C), np.zeros(C, bool)
     ctype = np.zeros(C, np.int32)
@@ -211,7 +213,8 @@ def _batch(configs, meta, E0, rcut, C, n_cap, k_cap):
     off = 0
     for c, cfg in enumerate(configs):
         n = len(cfg.numbers)
-        g = dense_graph(cfg.positions, cfg.cell, cfg.pbc, rcut, k_cap)   # padded slots at the cutoff
+        g = dense_graph(cfg.positions, cfg.cell, cfg.pbc, rcut, k_cap,   # padded slots at the cutoff
+                        edges=None if edges is None else edges[id(cfg)])
         m = g.mask
         rij.append(g.rij); nbr.append(np.where(m, g.idx + off, 0)); nmask.append(m)
         zi = species_indices(meta, cfg.numbers)
@@ -316,14 +319,20 @@ def build_dataset(configs, meta, E0, configs_per_batch, rcut=None, n_cap=None, k
     if n_cap is None:
         n_cap = max(sum(len(c.numbers) for c in g) for g in groups)
     n_cap = -(-n_cap // node_chunk) * node_chunk          # Task 7 scans node chunks
+    edges = None
     if k_cap is None:
-        k_cap = max(int(np.bincount(sparse_graph(c.positions, c.cell, c.pbc, rcut).senders,
-                                    minlength=len(c.numbers)).max())
-                    for c in configs)
+        if _nl.have_matscipy_neighbours():      # dense_graph's neighbour_matrix builds its own list
+            k_cap = max(int(np.bincount(sparse_graph(c.positions, c.cell, c.pbc, rcut).senders,
+                                        minlength=len(c.numbers)).max())
+                        for c in configs)
+        else:     # one list per config: K from it, and the batches' dense rows regrouped from it
+            edges = {id(c): _nl._neighbour_list(c.positions, c.cell, c.pbc, rcut)[:3] for c in configs}
+            k_cap = max((int(np.bincount(edges[id(c)][0], minlength=len(c.numbers)).max())
+                         for c in configs), default=0)
     # at least one (masked) neighbour slot: a batch of edgeless structures (an
     # isolated atom) still needs an (n, K, 3) edge array, and the masked slot is
     # parked at the cutoff, so it adds nothing -- E0 + the empty-environment term
     k_cap = max(int(k_cap), 1)
-    batches = [_batch(g, meta, E0, rcut, C, n_cap, k_cap) for g in groups]
+    batches = [_batch(g, meta, E0, rcut, C, n_cap, k_cap, edges) for g in groups]
     stack = lambda k: jnp.asarray(np.stack([b[k] for b in batches]))
     return Dataset(**{k: stack(k) for k in Dataset._fields})

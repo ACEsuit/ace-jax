@@ -169,7 +169,7 @@ atoms.get_forces(); atoms.calc.results["forces_std"]      # also energy_std
 from ace_jax.fit.pipeline import FitConfig, load_fit_data, fit, write_outputs, save_model
 cfg = FitConfig(model="si.npz", arm="gp", m_per_species=6, opt="lbfgs", r0=2.35,
                 rungs=("map",), energy_key="dft_energy", force_key="dft_force",
-                virial_key="dft_virial", predict_stats="recompute").validate()
+                virial_key="dft_virial", predict_stats="auto").validate()
 data = load_fit_data(cfg, train="train.xyz", test="test.xyz")   # or data="all.xyz" (split)
 # train=/test= also take lists of ase.Atoms: labels from info/arrays or the attached
 # calculator's results (a calculator shared by several Atoms raises: its results are the last one's)
@@ -182,8 +182,9 @@ In Python, `FitConfig`'s defaults are the research driver's
 (`bench/acegp_cantor/run.py`). They differ from the CLI's: the arm is set
 explicitly (`arm="linear"|"gp"`, default `"gp"`), `e0="lsq"`, `map_steps=150`
 (both use `opt="lbfgs"`, `map_polish="auto"`), `m_per_species=100`, `batch=4`, `laplace="fd"`, and
-`predict_stats="cached"`. Use `"recompute"` to match the CLI and the saved
-model file exactly. Python-only options:
+`predict_stats="cached"`. Use `"auto"` (the CLI's) to match the CLI and the saved
+model file exactly: it reuses the fit's QR statistics (bitwise a recompute's) and
+recomputes per draw elsewhere; `"recompute"` gives the same numbers with extra passes. Python-only options:
 - `factors=[...]`: composable weights from `ace_jax.fit.weights`
   (`Structural()`, `Quantity({"E":..,"F":..,"V":..})`,
   `ConfigType({type: {"E":..,"F":..,"V":..}})`, `PerConfig(key="weight")`).
