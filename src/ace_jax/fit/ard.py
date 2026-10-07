@@ -582,7 +582,8 @@ class ARDPosterior(NamedTuple):
             raise ValueError(f"{path} is an --ard-variance dtc posterior: that shape failed its acceptance and was "
                              "removed; refit with --uq ard-gp (sandwich)")
         if "chol_packed" in z.files:            # the lower triangle, row-major (np.tril_indices)
-            n = len(z["dinv"])
+            k = len(z["chol_packed"])
+            n = int(round((np.sqrt(8 * k + 1) - 1) / 2))    # n(n+1)/2 = k: L, or L + M for an ard-gp posterior
             chol = np.zeros((n, n))
             chol[np.tril_indices(n)] = z["chol_packed"]
         else:                                   # a dense factor (files before the packed form), or none

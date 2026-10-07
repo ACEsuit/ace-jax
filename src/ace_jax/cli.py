@@ -318,8 +318,9 @@ def cmd_eval(a):
                 f.arrays[f"{p}forces"] = F
                 if S is not None:
                     f.info[f"{p}stress"] = voigt_6_to_full_3x3_stress(S)
-                if gp:
+                if gp and "energy_std" in calc.results:      # not for an ard-gp model (no posterior factor)
                     f.info[f"{p}energy_std"] = float(calc.results["energy_std"])
+                if gp and "forces_std" in calc.results:
                     f.arrays[f"{p}forces_std"] = np.asarray(calc.results["forces_std"])
                 if ard:
                     f.arrays[f"{p}forces_std"] = s_ard

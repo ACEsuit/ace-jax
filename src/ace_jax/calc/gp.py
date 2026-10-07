@@ -128,7 +128,8 @@ class GPCalculator(Calculator):
         self.results["energy"] = float(Es.mean())
         self.results["forces"] = Fs.mean(0)
         self.results["stress"] = -Vs.mean(0) / atoms.get_volume()
-        self.results["energy_std"] = float(np.sqrt(Ev.mean() + Es.var()))
-        self.results["forces_std"] = np.sqrt(Fv.mean(0) + Fs.var(0))
+        if all(L is not None for _, L in self.fitted.posteriors):   # an ard-gp gp_model.npz has no L
+            self.results["energy_std"] = float(np.sqrt(Ev.mean() + Es.var()))
+            self.results["forces_std"] = np.sqrt(Fv.mean(0) + Fs.var(0))
         if self.posterior is not None:       # the calibrated --uq ard-gp force UQ replaces the mixture std
             self.results.update(self._served(batch, live))

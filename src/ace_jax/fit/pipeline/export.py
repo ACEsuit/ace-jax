@@ -108,14 +108,11 @@ def _gpcfg_json(gpcfg):
 
 
 def _ard_gp_posterior(post):
-    """([theta], [mean], [L_A]) of an ard-gp ARDPosterior: L_A = R0^T L_S is the lower Cholesky factor of
-    A = R0^T S R0 (R0^T lower, block diagonal: diag(Gamma) on the linear rows, chol(K_MM) on the inducing
-    rows), so GPCalculator predicts the served posterior's mean and untempered variance."""
-    root = post.prior_root
-    Lc = np.asarray(post.chol, np.float64)
-    nl = len(root.dinv)
-    LA = np.concatenate([Lc[:nl] / np.asarray(root.dinv)[:, None], np.asarray(root.U).T @ Lc[nl:]], 0)
-    return np.asarray(post.gp_theta)[None], [np.asarray(post.mean)], [LA]
+    """([theta], [mean], None) of an ard-gp ARDPosterior: the ARD mean is the model's, so GPCalculator
+    predicts the served posterior's mean.  No full-posterior factor: the calibrated force UQ is served from
+    posterior.npz, and the Dt x Dt factor (1.9 GB on the Cantor basis) would serve only an untempered
+    energy_std."""
+    return np.asarray(post.gp_theta)[None], [np.asarray(post.mean)], None
 
 
 def gp_model_arrays(res, n_draws=1):
@@ -136,7 +133,9 @@ def gp_model_arrays(res, n_draws=1):
     out = {f"ace/{k}": v for k, v in _ace_arrays(res).items()}
     out.update(ind_XM=np.asarray(ind.XM), ind_SM=np.asarray(ind.SM), ind_ZM=np.asarray(ind.ZM),
                ind_scale=np.asarray(ind.scale), ind_Pmap=np.asarray(ind.Pmap), ind_embed=np.asarray(ind.embed),
-               draws=np.asarray(draws), mu=np.stack(mus), L=np.stack(Ls))
+               draws=np.asarray(draws), mu=np.stack(mus))
+    if Ls is not None:      # ard-gp: none -- the force UQ is posterior.npz's; L would serve only energy_std
+        out["L"] = np.stack(Ls)
     info = {"schema_version": GP_SCHEMA, "gpcfg": _gpcfg_json(gpcfg),
             "kernel": dataclasses.asdict(prob.spec), "warp": ind.warp}
     if getattr(res.config, "noise", "per-quantity") != "per-quantity":   # only then: per-quantity files unchanged
@@ -185,5 +184,7 @@ def load_gp_model(path):
                    jnp.asarray(z["ind_scale"]), jnp.asarray(z["ind_Pmap"]), info["warp"],
                    jnp.asarray(z["ind_embed"]))
     prob = Problem(KernelSpec(**info["kernel"]), model, ind, GPConfig(**info["gpcfg"]), None, None)
-    posts = [(jnp.asarray(m), jnp.asarray(L)) for m, L in zip(z["mu"], z["L"])]
+    # an ard-gp gp_model.npz has no L (its UQ is the posterior.npz): the posterior is then (mean, None)
+    Ls = z["L"] if "L" in z.files else [None] * len(z["mu"])
+    posts = [(jnp.asarray(m), None if L is None else jnp.asarray(L)) for m, L in zip(z["mu"], Ls)]
     return FittedGP(prob, np.asarray(z["draws"]), posts), meta
