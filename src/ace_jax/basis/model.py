@@ -94,7 +94,8 @@ def nnll_from_coupling(A2B, aa_sig, tol=1e-12):
 def build_model(elements, order, totaldegree, *, wL=1.5, rcut=5.5, r0=None,
                 rin=0.0, radial_mode="onehot", pair_mode="onehot",
                 seed=0, with_gamma=True, edge_a_kind="gather",
-                coupling_cache=True, coupling_cache_dir=None, n_q_factor=1.5, a2b_sparse="auto"):
+                coupling_cache=True, coupling_cache_dir=None, n_q_factor=1.5, a2b_sparse="auto",
+                nmax_by_order=None, lmax_by_order=None):
     """Author a frozen `ace_model`-family model in memory.
 
     elements: atomic numbers or symbols (order kept, no duplicates); order:
@@ -110,6 +111,10 @@ def build_model(elements, order, totaldegree, *, wL=1.5, rcut=5.5, r0=None,
 
     n_q_factor: tensor-radial polynomial span, n_q = ceil(n_q_factor * max n).
 
+    nmax_by_order / lmax_by_order: per-correlation-order caps on the bodies' radial degree and l
+    (spec.build_spec `caps`; pacemaker's nradmax_by_orders / lmax_by_orders), recorded in
+    meta["basis"].  None: the ACEpotentials selection.
+
     a2b_sparse: "auto" (default) holds A2B as sparse triplets only when it is
     sparse enough (`eval.model.a2b_sparse_auto`: every ACE coupling is); True/False force it.
 
@@ -121,7 +126,8 @@ def build_model(elements, order, totaldegree, *, wL=1.5, rcut=5.5, r0=None,
         raise ValueError(f"n_q_factor must be >= 1 (n_q >= max n), got {n_q_factor!r}")
     zs = ri.resolve_elements(elements)
     NZ = len(zs)
-    mb, Rnl, Ylm = build_spec(NZ, order, totaldegree, wL)
+    caps = None if nmax_by_order is None and lmax_by_order is None else (nmax_by_order, lmax_by_order)
+    mb, Rnl, Ylm = build_spec(NZ, order, totaldegree, wL, caps=caps)
     if coupling_cache:
         from .coupling import couple_cached
         cpl = couple_cached(mb, Rnl, Ylm, cache_dir=coupling_cache_dir)
@@ -229,6 +235,8 @@ def build_model(elements, order, totaldegree, *, wL=1.5, rcut=5.5, r0=None,
             "pair_mode": pair_mode, "seed": int(seed),
             "n_q_factor": float(n_q_factor),
             "pair_maxn": int(pair_maxn), "with_gamma": bool(with_gamma),
+            **({} if caps is None else {"nmax_by_order": None if nmax_by_order is None else list(nmax_by_order),
+                                        "lmax_by_order": None if lmax_by_order is None else list(lmax_by_order)}),
         },
     }
     return Basis(model=model, meta=meta, nnll_spec=cpl.nnll_spec, Rnl_spec=tuple(Rnl),
@@ -380,6 +388,8 @@ class BasisSpec:
     rcut: float | None = None
     rin: float = 0.0
     maxl: int | None = None
+    nmax_by_order: tuple | None = None     # categorical only: per-order caps (spec.build_spec)
+    lmax_by_order: tuple | None = None
     d_max: int | None = None
     reduction: str = "pca"
     radial_mode: str = "onehot"
@@ -412,10 +422,13 @@ def build_basis(spec, *, seed=0):
     common = dict(with_gamma=not spec.no_gamma, coupling_cache=not spec.no_coupling_cache,
                   coupling_cache_dir=spec.coupling_cache_dir)
     if spec.embedding:
+        if spec.nmax_by_order is not None or spec.lmax_by_order is not None:
+            raise ValueError("--nmax-by-order / --lmax-by-order apply to the categorical basis, not an embedding")
         return build_embedding_model(els, spec.order, spec.max_degree, embedding=spec.embedding,
                                      d_max=spec.d_max, wL=spec.wL, maxl=spec.maxl, rcut=spec.rcut,
                                      reduction=spec.reduction, **common)
     return build_model(els, spec.order, spec.max_degree, wL=spec.wL,
+                       nmax_by_order=spec.nmax_by_order, lmax_by_order=spec.lmax_by_order,
                        rcut=5.5 if spec.rcut is None else spec.rcut, rin=spec.rin,
                        radial_mode=spec.radial_mode, pair_mode=spec.pair_mode, seed=seed, **common)
 

@@ -239,8 +239,10 @@ def rnl_degrees(meta, wL=1.5):
     meta["n_rnl"] (e.g. a Julia export with a different wL)."""
     from ..basis.spec import build_spec
     NZ = len(meta["elements"])
-    wL = meta.get("basis", {}).get("wL", wL)
-    _, Rnl, _ = build_spec(NZ, meta["order"], meta["totaldegree"], wL)
+    b = meta.get("basis", {})
+    wL = b.get("wL", wL)
+    caps = (b["nmax_by_order"], b["lmax_by_order"]) if "nmax_by_order" in b or "lmax_by_order" in b else None
+    _, Rnl, _ = build_spec(NZ, meta["order"], meta["totaldegree"], wL, caps=caps)
     if len(Rnl) != meta["n_rnl"]:
         raise ValueError(f"rnl_degrees: rebuilt spec has {len(Rnl)} radials, meta n_rnl={meta['n_rnl']}")
     return np.array([(n - 1) // NZ for n, _ in Rnl], dtype=int)
