@@ -1,6 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.2.2 (2026-10-07)
+
+**Upgrading from 0.2.1.**
+- **Refits give different results; refit to get them.** The linear hyperparameter MAP is now converged by default (L-BFGS and a Newton refinement, checked), and the linear evidence and posterior are computed by QR. A fit that passes `--weights` without `--noise` now uses one shared noise scale, so the weights set the E:F:V balance; use `--noise per-quantity` for the old behaviour. Saved models still load and evaluate unchanged.
+- **`--learn-radial` results change.** Radial learning now uses the QR statistics and a different optimiser, so learned radials differ from 0.2.1.
+- **`support_ok` now flags atoms.** `forces_support` used the wrong quantile in 0.2.0 and 0.2.1. No refit is needed.
 
 - **`--weights` now sets the E:F:V balance by default.** `aj fit --noise`
   takes a new default, `auto`: shared noise (one σ for every weighted row,
