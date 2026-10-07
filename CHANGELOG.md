@@ -17,6 +17,18 @@
   (Spearman ρ 0.006–0.009 lower), so `--uq ard` stays the recommended option
   (bench/defect_uq/results/2026-10-07_ard_gp_acceptance.md).
 
+- **Smaller `--uq ard` and `--uq ard-gp` files.** `posterior.npz` stores the
+  L x L Cholesky factor only for `--ard-variance kappa`, which reads it, and
+  then packed (its lower triangle). The default sandwich shape serves forces
+  from its shape factor alone. On the Cantor basis (L = 15 035) a
+  `posterior.npz` shrinks from 1.14 GB to 0.24 GB, and `ACECalculator` no
+  longer holds an unused 1.8 GB float64 copy on the device. An `--uq ard-gp`
+  `gp_model.npz` no longer carries the full-posterior factor (1.9 GB to
+  10 MB): its force uncertainty comes from `posterior.npz`, and on its own
+  the model gives energies and forces without `energy_std`. Old posterior
+  files load unchanged. `predict_ard` on a saved sandwich posterior reports
+  NaN for the uncalibrated energy and virial variances.
+
 - **`aj fit` no longer repeats its statistics pass.** A linear fit streamed
   the training set three times: once for the evidence, again for the
   predictions, and again to write `model.npz`. Prediction and the model file

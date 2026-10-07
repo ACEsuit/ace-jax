@@ -125,7 +125,7 @@ These constraints are validated up front. A bad combination raises a
 - **Fitted model:**
   - `model.npz` (linear): an ordinary ACE file, loaded by `ace_jax.load`,
     `ACECalculator` and `aj eval`.
-  - `--uq ard` (linear only) also writes `posterior.npz` (float32 Cholesky factor of
+  - `--uq ard` (linear only) also writes `posterior.npz` (for --ard-variance kappa only, a packed float32 Cholesky factor of
     the ARD posterior, the jackknife cluster factors and the per-group conformal table) and
     `ard.json` (evidence, prior scales, per-group scales, held-out NLL and rms-z).
     `ACECalculator(model, posterior="out_ard/posterior.npz")` and
