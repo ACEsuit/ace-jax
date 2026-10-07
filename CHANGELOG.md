@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **`--learn-radial` works on large bases.** Radial learning computed its
+  objective, the hyperparameter re-fit and the candidate scores from the Gram
+  matrix, whose condition number is the square of the design's. On Si order
+  4, degree 16, that Gram had negative computed eigenvalues: the objective was
+  NaN once σ_c passed e^5, and the fit failed after six hours. All three now
+  use the QR statistics, as the main fit does. The objective is summed
+  directly as the residual at a QR-solved readout, and its gradient is exact
+  at that readout. On o4d16 at the fit's hyperparameters (where the Gram form
+  is NaN) the gradient agrees with finite differences to 5e-5. Each round is
+  now a SciPy L-BFGS-B run, because the QR pass runs on the host on CPUs.
+
 - **Calibrated force uncertainty on the GP arm: `aj fit --uq ard-gp`
   (experimental).** The `--uq ard` stage (evidence fit, PRESS jackknife
   shape, per-group rms and conformal scales) now also runs on the hybrid
