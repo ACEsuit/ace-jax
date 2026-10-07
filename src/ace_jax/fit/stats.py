@@ -4,6 +4,8 @@ reverse pass recomputes each batch under jax.checkpoint, which is the two-pass
 gradient algorithm of the spec with no hand-written VJP."""
 from typing import NamedTuple
 
+from functools import partial
+
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -274,12 +276,33 @@ def _qr_rows(model, cfg, batch):
     return out
 
 
+@partial(jax.jit, static_argnames=("cfg", "merge_rows"))
+def _device_qr(model, cfg, ds, merge_rows):
+    L = cfg.len_basis
+    zeros = [(np.zeros((L, L)), np.zeros(L))] * 3
+
+    def rows_fn(batch):
+        out = _qr_rows(model, cfg, batch)
+        return [(Pw, yw) for Pw, yw, *_ in out], [o[2:] for o in out]
+    z0 = jnp.zeros(())
+    return device_qr_stream(rows_fn, ds, zeros, [(z0, z0, z0)] * 3, merge_rows)
+
+
 def linear_qr_statistics(model, cfg, ds, merge_rows=None, host=None):
     """linear_statistics in QR form (QRStats): one streaming pass over the same linear rows,
     folded into the per-quantity factors by batched updating QRs (QR_MERGE_ROWS_PER_L) -- on
     the host on the CPU backend (host_qr_stream says why), as a lax.scan on a device
     (device_qr_stream).  host: None picks by backend; merge_rows: see host_qr_stream (0 merges
-    every batch)."""
+    every batch).
+
+    On a device the pass is `_device_qr`, module-level with the model as an argument, so one
+    compile serves every call with the same shapes.  A jit of a fresh closure over the model,
+    built per call, recompiled the whole streaming scan every time: harmless for a fit's single
+    pass, but radial learning calls this at every evaluation with new radials, and on Si o4d16
+    the GPU spent its rounds compiling.  The host (CPU) path still jits its row function per
+    call: taking the model as an argument there moves the bit-exact pipeline goldens (roundoff,
+    amplified by the MAP: 3e-4 in run_linear_pops_auto's coefficients), so it is left for a
+    change that re-records them."""
     L = cfg.len_basis
     zeros = [(np.zeros((L, L)), np.zeros(L))] * 3
     if host is None:
@@ -296,13 +319,7 @@ def linear_qr_statistics(model, cfg, ds, merge_rows=None, host=None):
         (RE, cE), (RF, cF), (RV, cV) = host_qr_stream(parts, ds, zeros, merge_rows)
         return QRStats(RE, RF, RV, cE, cF, cV,
                        *(jnp.asarray(scal[f"{k}_{q}"]) for k in ("yy", "n", "logw") for q in "EFV"))
-
-    def rows_fn(batch):
-        out = _qr_rows(model, cfg, batch)
-        return [(Pw, yw) for Pw, yw, *_ in out], [o[2:] for o in out]
-    z0 = jnp.zeros(())
-    run = jax.jit(lambda d: device_qr_stream(rows_fn, d, zeros, [(z0, z0, z0)] * 3, merge_rows))
-    ((RE, cE), (RF, cF), (RV, cV)), ex = run(ds)
+    ((RE, cE), (RF, cF), (RV, cV)), ex = _device_qr(model, cfg, ds, merge_rows)
     return QRStats(RE, RF, RV, cE, cF, cV, *(ex[i][k] for k in range(3) for i in range(3)))
 
 

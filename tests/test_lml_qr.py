@@ -250,3 +250,20 @@ def test_qr_statistics_finite_with_threaded_openblas(tmp_path, threads):
                        capture_output=True, text=True, timeout=900)
     assert r.returncode == 0, r.stderr[-2000:]
     assert "NONFINITE 0" in r.stdout, r.stdout[-500:]
+
+
+def test_qr_statistics_compile_once_across_models(m0):
+    """Radial learning streams QR statistics at every evaluation, each with new radials: the
+    compiled pass must be reused (a per-call jit of a closure over the model recompiled it every
+    time).  Different radial weights, same shapes: one cache entry; the statistics still differ."""
+    from ace_jax.fit import stats
+    from ace_jax.fit.radial_model import to_analytic, with_radial
+    prob, ds, _, _ = m0
+    model, _ = to_analytic(prob.model, 12)
+    f = stats._device_qr                       # the device path (the host path still jits per call)
+    f.clear_cache()
+    host = False
+    a = linear_qr_statistics(with_radial(model, model.rnl_Wnlq), prob.cfg, ds, host=host)    # as the learner
+    b = linear_qr_statistics(with_radial(model, 1.1 * model.rnl_Wnlq), prob.cfg, ds, host=host)
+    assert f._cache_size() == 1
+    assert not np.allclose(np.asarray(a.R_F), np.asarray(b.R_F))
