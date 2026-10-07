@@ -180,6 +180,15 @@ def test_cli_learn_radial_writes_info_and_reproduces(fast, tmp_path):
           "--out", str(a)])
     info = json.loads((a / "radial_info.json").read_text())
     assert info["lam_grid"] == [0.0] and info["n_q"] == 12
+    # progress.jsonl, written as the fit ran: the stages in order, each radial round with its LML
+    ev = [json.loads(line) for line in (a / "progress.jsonl").read_text().splitlines()]
+    assert ev[0]["event"] == "fit" and ev[0]["status"] == "start"
+    assert ev[-1]["event"] == "fit" and ev[-1]["status"] == "done" and "map" in ev[-1]["test"]
+    done = [e["name"] for e in ev if e["event"] == "stage" and e["status"] == "done"]
+    assert done == ["data", "radial", "problem", "objective", "map", "rungs", "predict", "outputs"]
+    rounds = [e for e in ev if e["event"] == "radial_round"]
+    assert rounds and all(np.isfinite(e["lml"]) and e["obj_end"] <= e["obj_start"] for e in rounds)
+    assert [e["event"] for e in ev].count("radial_gate") == 2 and any(e["event"] == "map_eval" for e in ev)
     y = yaml.safe_load((a / "fit.yaml").read_text())
     assert y["learn_radial"] is True and y["radial_steps"] == 3 and y["radial_lam_grid"] in ("0", [0.0], "0.0")
     b = tmp_path / "b"
