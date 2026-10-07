@@ -1,6 +1,13 @@
 from dataclasses import dataclass
 
 
+def resolved_noise(cfg):
+    """The noise mode a fit runs with: cfg.noise, with "auto" resolved (FitConfig._auto_noise) -- also for a
+    config that was never validate()d (stages called directly), and for duck-typed configs without the field."""
+    noise = getattr(cfg, "noise", "per-quantity")
+    return cfg._auto_noise() if noise == "auto" else noise
+
+
 @dataclass
 class FitConfig:
     """Every option of the fitting pipeline.  Defaults are run.py's; the CLI

@@ -42,3 +42,11 @@ def test_cli_weights_select_shared_noise():
     assert _fit_config(a).validate().noise == "shared"
     a = _parse(["fit", "--model", "x.npz", "--train", "t.xyz", "--m-per-species", "0", "--r0", "2.35", "--out", "o"])
     assert _fit_config(a).validate().noise == "per-quantity"
+
+
+def test_stages_resolve_auto_without_validate():
+    """Stages called directly (no validate()) see auto resolved: the MAP objective ties the noise when
+    weights are given, and not otherwise."""
+    from ace_jax.fit.pipeline.config import resolved_noise
+    assert resolved_noise(_cfg(weights=W)) == "shared" and resolved_noise(_cfg()) == "per-quantity"
+    assert resolved_noise(_cfg(weights=W, uq="ard")) == "per-quantity"

@@ -41,7 +41,8 @@ def make_objective(cfg, d, b):
     noise scale; `tied` records which coordinates are tied (mapfit pins them, the rungs hold them)."""
     from ..paramset import noise_tie, tied_likelihood
     prob, t = b.prob, time.time()
-    tied = noise_tie(getattr(cfg, "noise", "per-quantity"))
+    from .config import resolved_noise
+    tied = noise_tie(resolved_noise(cfg))
     tied, free = (tied, ~tied) if tied.any() else (None, None)
     tie = tied_likelihood if tied is not None else (lambda f: f)
     if cfg.lml == "host-cache":
