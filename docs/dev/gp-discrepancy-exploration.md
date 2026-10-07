@@ -275,7 +275,7 @@ target's rows. The SoR *posterior* variance is not computed: it needs the traini
 2. **Why: the fitted kernel is environment-blind.** θ_MAP has:
    - ℓ = e^2.98 = 19.7 on the unit sphere, so κ ≥ e^(−4/2ℓ²) = 0.995 for every pair of sites;
    - ρ = 100.0, **on its L-BFGS upper bound** (`fit/pipeline/mapfit.py:17`), so ψ ≈ 1.
-   
+
    The kernel is then δ(s)δ(s′)(e_z·e_z′) to within 0.5 %: a function of the nearest-neighbour summary s and
    the species only. Its prior is nearly rank-NZ in descriptor space, which 500 inducing points span
    trivially.
@@ -383,7 +383,7 @@ predictive force variance splits into the SoR posterior part and the derivative-
   shared noise:
   - raises the test energy RMSE by **79 %** (3.03 → 5.42 meV/atom);
   - leaves forces unchanged (0.0687 → 0.0689 eV/Å) and improves the virial by 6 %.
-  
+
   With no explicit weights, a tied σ hands the E:F:V balance to an arbitrary default. That is the case for
   open question 1's answer: `shared` only when `--weights` is given.
 
@@ -483,4 +483,3 @@ the 34 v3 big cells: `bench/defect_uq/results/2026-10-07_ard_gp_acceptance.md`.
 - **Phase 4 (PITC)** was already unmotivated (D3). This result does not change that: the GP block's fitted
   ARD scale is a_GP = −0.04, so the evidence keeps the MAP prior, and the structured tip error is not in the
   span the GP misses.
-
