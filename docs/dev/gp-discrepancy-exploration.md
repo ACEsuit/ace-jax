@@ -479,7 +479,7 @@ the 34 v3 big cells: `bench/defect_uq/results/2026-10-07_ard_gp_acceptance.md`.
   and in-distribution coverage is on target. But ρ is lower by 0.006–0.009 in every family (intervals exclude
   0). It does not "match or beat" on both, so **`ard-gp` stays experimental**, as the spec rules.
 - **`dtc` fails clearly:** under-coverage off distribution, and ρ lower by 0.09–0.16. This is what D3
-  predicted: the DTC term is near-constant across environments. Recommendation: remove `--ard-variance dtc`.
+  predicted: the DTC term is near-constant across environments. `--ard-variance dtc` was removed at review.
 - **Phase 4 (PITC)** was already unmotivated (D3). This result does not change that: the GP block's fitted
   ARD scale is a_GP = −0.04, so the evidence keeps the MAP prior, and the structured tip error is not in the
   span the GP misses.

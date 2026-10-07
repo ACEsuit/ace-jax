@@ -344,7 +344,6 @@ class ARDPosterior(NamedTuple):
     support: dict | None = None
     root: object = None                 # prior_root.PriorRoot with the GP block (uq "ard-gp"); None: diag(dinv)
     gp_theta: np.ndarray | None = None  # (10,) the theta the GP block's rows and K_MM are evaluated at
-    variance: str = "sandwich"          # "dtc" (ard-gp): the kappa shape plus the derivative-DTC diagonal (dtc_shape)
 
     @property
     def prior_root(self):
@@ -544,8 +543,6 @@ class ARDPosterior(NamedTuple):
             # always float64: M x M is small, and a float32 chol(K_MM)^T loses the jitter's scale in the solves
             out["gp_U"] = np.asarray(self.root.U, np.float64)
             out["gp_theta"] = np.asarray(self.gp_theta, np.float64)
-        if self.variance == "dtc":             # only then: every other posterior file is unchanged
-            out["variance"] = np.array(self.variance)
         if self.R is not None:
             out["R"] = np.asarray(self.R, dtype)
         if self.group_consts is not None:
@@ -570,6 +567,9 @@ class ARDPosterior(NamedTuple):
         js = lambda k: json.loads(bytes(z[k]).decode()) if k in z.files else None
         if int(z["schema"]) not in (1, 2, 3):
             raise ValueError(f"unsupported posterior schema {int(z['schema'])}")
+        if "variance" in z.files and str(z["variance"]) == "dtc":
+            raise ValueError(f"{path} is an --ard-variance dtc posterior: that shape failed its acceptance and was "
+                             "removed; refit with --uq ard-gp (sandwich)")
         return ARDPosterior(z["mean"], z["chol"].astype(np.float64), z["dinv"], float(z["kappa"]), z["h"],
                             tuple(int(g) for g in z["groups"]), z["body_col"],
                             json.loads(bytes(z["meta_json"]).decode()),
@@ -584,8 +584,7 @@ class ARDPosterior(NamedTuple):
                             support=unflatten_support({k[8:]: z[k] for k in z.files if k.startswith("support_")})
                             if any(k.startswith("support_") for k in z.files) else None,
                             root=PriorRoot(z["dinv"], jnp.asarray(z["gp_U"])) if "gp_U" in z.files else None,
-                            gp_theta=np.asarray(z["gp_theta"]) if "gp_theta" in z.files else None,
-                            variance=str(z["variance"]) if "variance" in z.files else "sandwich")
+                            gp_theta=np.asarray(z["gp_theta"]) if "gp_theta" in z.files else None)
 
 
 def _pad_cols(X, width):
@@ -691,35 +690,12 @@ def _joint_rows_body(theta, spec, model, ind, cfg, batch, budget):
 _joint_rows_jit = eqx.filter_jit(_joint_rows_body)
 
 
-def dtc_shape(post, prob, theta, batch):
-    """The --ard-variance dtc shape V (Ncap, 3, 3) of one batch: the kappa shape W W^T over the joint rows
-    (W = L^-1 R0^-T phi^T, the untempered SoR posterior covariance of each atom's force) plus diag(dtc), the
-    derivative-DTC variances k_F - q_F of the residual GP (predict._dtc_deriv_residual, cosine kernel).
-
-    The DTC part is per Cartesian component: _dtc_deriv_residual gives each component's variance, not the
-    3 x 3 cross-covariance, so V's DTC term is diagonal in the lab frame.  tr V (forces_std) is rotation
-    invariant; forces_cov and the aniso forces_q depend on the axes at the level of the DTC term's anisotropy."""
-    from .predict import _dtc_deriv_residual
-    from .rows import _cat_rows, batch_rows_parts
-    lin, res, X, JU0 = batch_rows_parts(theta, prob.spec, prob.model, prob.ind, prob.cfg, batch,
-                                        with_X=True, with_JU0=True)
-    F = np.asarray(_cat_rows(lin, res).F)
-    Vk = post._replace(variance="kappa", R=None, Q=None).atom_shape(F)
-    Fv, _ = _dtc_deriv_residual(theta, prob, batch, X, res=res, JU0=JU0)
-    # the ARD prior on the GP block is exp(a_GP) K_MM: the residual GP consistent with it has DTC variance
-    # exp(-a_GP) (k_F - q_F), the same scale the kappa part's GP block carries
-    nls = len(post.h) - len(post.groups)
-    scale = float(np.exp(-np.asarray(post.h, float)[nls + list(post.groups).index(GP_GROUP)]))
-    return Vk + scale * np.asarray(Fv)[:, :, None] * np.eye(3)[None]
-
-
 def predict_ard(post, prob, ds, node_chunk=None, rows_fn=None):
     """Posterior predictive on a Dataset: means from the ARD mean; F_var the served calibrated force
     variance, E_var/V_var the untempered posterior variances.  Schema 3 (post.group_table set):
     F_var = lam_rms[g]^2 diag V per atom (g = post.groups_of(batch)), so sum_a F_var = forces_std^2.
     Schema 1/2: `force_var_rows` (lam^2 x cluster sandwich when post.Q is set, else kappa^2 x the
     posterior variance)."""
-    from .hypers import from_array
     from .predict import _pack
     from .rows import chunked_rows_fn
     if rows_fn is None:
@@ -734,8 +710,7 @@ def predict_ard(post, prob, ds, node_chunk=None, rows_fn=None):
         E, F, V = np.asarray(r.E), Fn.reshape(-1, L), np.asarray(r.V).reshape(-1, L)
         if lam_rms is not None:
             g = post.groups_of(b)
-            Vs = (dtc_shape(post, prob, from_array(jnp.asarray(post.gp_theta)), b) if post.variance == "dtc"
-                  else post.atom_shape(Fn))
+            Vs = post.atom_shape(Fn)
             Fv = lam_rms[g][:, None] ** 2 * np.diagonal(Vs, axis1=1, axis2=2)
             Fv = np.where(np.asarray(b.node_mask)[:, None], Fv, 0.0)
         else:
@@ -818,9 +793,6 @@ def _val_atoms(post, prob, ds, r1=None, shape=True, own_col=None, rows_fn=None):
                 # drop the own column before squaring (no tot - v_own^2 cancellation; >= 0 by construction)
                 Pr = jnp.where(jnp.arange(Pr.shape[2])[None, None, :] == own[:, None, None], 0.0, Pr)
                 acc["V"].append(np.asarray(jnp.einsum("nar,nbr->nab", Pr, Pr)))
-            elif shape and post.variance == "dtc":         # ard-gp dtc: kappa shape + the DTC diagonal
-                from .hypers import from_array
-                acc["V"].append(dtc_shape(post, prob, from_array(jnp.asarray(post.gp_theta)), b)[live])
             elif shape:
                 acc["V"].append(post.atom_shape(F))
             if r1 is not None:
@@ -950,8 +922,6 @@ def _holdout_posterior(cfg, data, prob, theta, configs, body_col, ell, h0=None, 
     for w in _ard_fit_warnings(stage, info, names):
         log(w)
     post = ard_posterior(ev, h, 1.0, data.meta, theta=gp["theta"])
-    if cfg.ard_variance == "dtc":
-        post = post._replace(variance="dtc")
     K = 0
     if cfg.ard_variance == "sandwich" and cfg._score_source == "fit":
         if cfg._shape_variant == "press":
@@ -1062,8 +1032,6 @@ def run_ard_stage(cfg, data, built, theta, log=print, full_stats=None):
     for w in _ard_fit_warnings("full", info, names):
         log(w)
     post = ard_posterior(ev, h, 1.0, data.meta, theta=gp["theta"])
-    if variance == "dtc":
-        post = post._replace(variance="dtc")
     K, lev = 0, np.zeros(0)
     if variance == "sandwich":
         if variant == "press":

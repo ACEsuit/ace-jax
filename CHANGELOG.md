@@ -10,11 +10,12 @@
   fit writes `gp_model.npz` with the ARD posterior mean and `posterior.npz`;
   `GPCalculator.from_file(gp_model, posterior=...)` and
   `aj eval --posterior` serve `forces_std`, `forces_cov`, `forces_q`,
-  `forces_q_mahal` and `forces_group`. `--ard-variance dtc` adds the GP's
-  derivative-DTC variance (per Cartesian component, cosine kernel). The
-  support flag and `aj calibrate` remain linear-only. `--uq ard` on the
-  linear model is unchanged. Experimental until its Cantor acceptance run
-  (docs/dev/gp-discrepancy-exploration.md).
+  `forces_q_mahal` and `forces_group`. The support flag and `aj calibrate`
+  remain linear-only. `--uq ard` on the linear model is unchanged.
+  Experimental: on the Cantor benchmark it lifts crack-tip coverage (0.902
+  against 0.893 for `--uq ard`) but ranks errors slightly less well
+  (Spearman ρ 0.006–0.009 lower), so `--uq ard` stays the recommended option
+  (bench/defect_uq/results/2026-10-07_ard_gp_acceptance.md).
 
 - **Faster QR statistics on large bases.** The linear fit's QR evidence
   merged every batch into its triangular factors, about L^3 work per batch

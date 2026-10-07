@@ -63,7 +63,8 @@ Other quantities:
   - This is what D3 predicted. The derivative-DTC term is near-constant across environments, and the κ
     (posterior) shape it is added to does not grow away from the data the way the jackknife shape does. So
     the in-distribution calibration does not transfer.
-  - Recommend removing `--ard-variance dtc`, or keeping it only as a documented negative result.
+  - **`--ard-variance dtc` was removed** (2026-10-07, at review) with its code, tests and docs. Its arm and
+    implementation are at commit 097bed5; an old dtc `posterior.npz` now refuses to load.
   - **Known defect (dtc only).** Its in-distribution pass (300 small cells, `GPCalculator(posterior=)` on CPU,
     mnf148) crashed after 50+ configurations with `JaxRuntimeError: Failed to materialize symbols`.
     - Where: in `dtc_shape` → `rows.batch_rows_parts` → `_rows_scan`.

@@ -142,8 +142,8 @@ These constraints are validated up front. A bad combination raises a
     MAP theta (one ARD scale on the GP block, prior root blockdiag(diag Γ, chol(K_MM)ᵀ)). It writes
     `gp_model.npz` holding the ARD mean and `posterior.npz` (with `gp_U`, `gp_theta`); serve with
     `GPCalculator.from_file("gp_model.npz", posterior="posterior.npz")` or
-    `aj eval --model gp_model.npz --posterior posterior.npz`. `--ard-variance dtc` adds the
-    derivative-DTC variance per Cartesian component (cosine kernel only). The support flag and
+    `aj eval --model gp_model.npz --posterior posterior.npz`. Cantor acceptance: tip coverage 0.902 vs 0.893
+    for `--uq ard`, Spearman ρ 0.006-0.009 lower, so it stays experimental. The support flag and
     `aj calibrate` stay linear-only; a calculator refuses a posterior of the other arm.
   - `gp_model.npz` (GP): self-contained, loaded by `GPCalculator.from_file` and
     `aj eval`. Its size is about 8·Dt²·(model draws) bytes, where Dt = basis

@@ -125,13 +125,8 @@ class FitConfig:
                 raise ValueError("uq='ard-gp' is the GP-arm sandwich posterior: use arm gp (m_per_species > 0)")
             if self.ard_mode not in ("joint", "sequential"):
                 raise ValueError(f"ard_mode must be 'joint' or 'sequential', got {self.ard_mode!r}")
-            if self.ard_variance not in ("sandwich", "kappa", "dtc"):
-                raise ValueError(f"ard_variance must be 'sandwich', 'kappa' or 'dtc', got {self.ard_variance!r}")
-            if self.ard_variance == "dtc" and self.uq != "ard-gp":
-                raise ValueError("ard_variance='dtc' is the GP's derivative-DTC variance: it needs uq='ard-gp'")
-            if self.ard_variance == "dtc" and self.kernel != "cosine":
-                raise ValueError("ard_variance='dtc' needs the cosine kernel (the derivative DTC is defined only "
-                                 f"for it), got kernel {self.kernel!r}")
+            if self.ard_variance not in ("sandwich", "kappa"):
+                raise ValueError(f"ard_variance must be 'sandwich' or 'kappa', got {self.ard_variance!r}")
             if self.uq == "ard-gp" and (self._shape_variant != "press" or self._score_source != "fit"):
                 raise ValueError("uq='ard-gp' has the PRESS shape only: the legacy #18 ablation "
                                  "(_shape_variant='legacy', _score_source='mixed') is linear-arm only")

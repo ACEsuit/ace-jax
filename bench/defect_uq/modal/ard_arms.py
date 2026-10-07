@@ -36,7 +36,8 @@ _GP_BASE = {"arm": "gp", "uq": "ard-gp", "m_per_species": 100, "density": "pca",
             "map_restarts": 1, "map_steps": 300, "init": GP_CONV_THETA, "e0": "lsq", "ard_force_shape": "aniso"}
 GP_ARMS = {
     "ard_gp_sw":  {**_GP_BASE, "ard_variance": "sandwich"},
-    "ard_gp_dtc": {**_GP_BASE, "ard_variance": "dtc"},
+    # ard_gp_dtc (--ard-variance dtc) ran 2026-10-06 and failed its acceptance; the option was removed (the arm
+    # is at commit 097bed5; results/2026-10-07_ard_gp_acceptance.md)
 }
 
 

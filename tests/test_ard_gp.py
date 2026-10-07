@@ -301,8 +301,8 @@ def test_ard_gp_with_no_inducing_columns_is_the_linear_stage(ard_map):
 
 @pytest.mark.parametrize("kw, msg", [(dict(arm="linear", m_per_species=0), "ard-gp"),
                                      (dict(_shape_variant="legacy", _score_source="mixed"), "legacy"),
-                                     (dict(ard_variance="dtc", kernel="matern32"), "cosine"),
-                                     (dict(uq="ard", arm="linear", m_per_species=0, ard_variance="dtc"), "ard-gp")])
+                                     (dict(ard_variance="dtc"), "ard_variance"),     # dropped: it failed acceptance
+                                     (dict(uq="ard", arm="linear", m_per_species=0, ard_variance="dtc"), "ard_variance")])
 def test_ard_gp_config_refusals(kw, msg):
     with pytest.raises(ValueError, match=msg):
         _gp_pipe_cfg(**kw).validate()
@@ -432,94 +432,6 @@ def test_gp_calculator_with_a_sandwich_posterior_skips_the_derivative_dtc(gp_fit
     assert calls == []
 
 
-def test_dtc_term_carries_the_fitted_gp_prior_scale(gp_fit_dir):
-    """Review fix: the ARD prior on the GP block is exp(a_GP) K_MM, so the residual GP consistent with it has
-    DTC variance exp(-a_GP) (k_F - q_F); dtc_shape must scale the DTC diagonal by that factor."""
-    from ace_jax.fit.ard import GP_GROUP, dtc_shape, rows_fn_for
-    from ace_jax.fit.hypers import from_array
-    from ace_jax.fit.predict import _dtc_deriv_residual
-    out, d, res = gp_fit_dir
-    post, prob = res.ard.posterior, res.built.prob
-    nls = len(post.h) - len(post.groups)
-    h = np.asarray(post.h, float).copy()
-    h[nls + list(post.groups).index(GP_GROUP)] = 1.0                   # a_GP = 1
-    post = post._replace(variance="dtc", R=None, h=h)
-    theta = from_array(np.asarray(post.gp_theta))
-    b = jax.tree.map(lambda a: a[0], d.ds_test)
-    with highest_precision():
-        V = dtc_shape(post, prob, theta, b)
-        Fv, _ = _dtc_deriv_residual(theta, prob, b)
-        Vk = post._replace(variance="kappa").atom_shape(np.asarray(rows_fn_for(prob, theta)(b).F))
-    live = np.asarray(b.node_mask)
-    want = Vk[live] + np.exp(-1.0) * np.einsum("na,ab->nab", np.asarray(Fv)[live], np.eye(3))
-    np.testing.assert_allclose(V[live], want, rtol=1e-10, atol=1e-14 * np.abs(Vk).max())
-
-
-def test_dtc_shape_is_kappa_shape_plus_dtc_diagonal(gp_fit_dir):
-    from ace_jax.fit.ard import dtc_shape, rows_fn_for
-    from ace_jax.fit.hypers import from_array
-    from ace_jax.fit.predict import _dtc_deriv_residual
-    out, d, res = gp_fit_dir
-    post, prob = res.ard.posterior, res.built.prob
-    theta = from_array(np.asarray(post.gp_theta))
-    b = jax.tree.map(lambda a: a[0], d.ds_test)
-    with highest_precision():
-        V = dtc_shape(post._replace(variance="dtc", R=None), prob, theta, b)
-        Fv, _ = _dtc_deriv_residual(theta, prob, b)
-        Vk = post._replace(variance="kappa", R=None).atom_shape(np.asarray(rows_fn_for(prob, theta)(b).F))
-    live = np.asarray(b.node_mask)
-    from ace_jax.fit.ard import GP_GROUP
-    a_gp = float(post.h[len(post.h) - len(post.groups) + list(post.groups).index(GP_GROUP)])   # DTC scale exp(-a_GP)
-    np.testing.assert_allclose(V[live], Vk[live] + np.exp(-a_gp) * np.einsum("na,ab->nab", np.asarray(Fv)[live],
-                                                                              np.eye(3)),
-                               rtol=1e-10, atol=1e-14 * np.abs(Vk).max())
-
-
-def test_dtc_shape_is_rotation_equivariant(gp_fit_dir):
-    """Review Focus 5 for the dtc shape: the DTC term is a per-axis diagonal (the derivative DTC gives
-    per-component variances, not the 3 x 3 block), so only its trace -- forces_std -- is rotation invariant;
-    the test holds that."""
-    from scipy.spatial.transform import Rotation
-    from ace_jax.fit.ard import dtc_shape
-    from ace_jax.fit.hypers import from_array
-    out, d, res = gp_fit_dir
-    post, prob = res.ard.posterior._replace(variance="dtc", R=None), res.built.prob
-    theta = from_array(np.asarray(post.gp_theta))
-    b = jax.tree.map(lambda a: a[0], d.ds_test)
-    Rm = Rotation.from_euler("zyx", [0.4, 0.2, -0.9]).as_matrix()
-    with highest_precision():
-        V0 = dtc_shape(post, prob, theta, b)
-        V1 = dtc_shape(post, prob, theta, b._replace(rij=b.rij @ Rm.T))
-    live = np.asarray(b.node_mask)
-    np.testing.assert_allclose(np.trace(V1[live], axis1=1, axis2=2), np.trace(V0[live], axis1=1, axis2=2),
-                               rtol=1e-8)
-
-
-def test_stage_ard_gp_dtc_runs():
-    _, _, _, res, pred = _gp_stage(ard_variance="dtc")
-    assert res.posterior.variance == "dtc" and res.posterior.R is None
-    assert np.isfinite(pred.F_var).all() and np.all(pred.F_var >= 0)
-    assert np.isfinite(res.posterior.group_table["q"]).all()
-
-
-def test_gp_calculator_serves_a_dtc_posterior(tmp_path):
-    """The calculator's dtc branch: served forces_std^2 = tr forces_cov, and forces_cov = lam^2 dtc_shape."""
-    from conftest import FIXTURE_DIR
-    from ace_jax.calc.gp import GPCalculator
-    from ace_jax.fit.pipeline import fit, load_fit_data, write_outputs
-    cfg = _gp_pipe_cfg(ard_variance="dtc").validate()
-    d = load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz"))
-    res = fit(cfg, d, log=lambda *a: None)
-    write_outputs(res, tmp_path, layout=("run", "cli"), log=lambda *a: None)
-    calc = GPCalculator.from_file(tmp_path / "gp_model.npz", posterior=tmp_path / "posterior.npz")
-    assert calc.posterior.variance == "dtc"
-    at = _atoms0()
-    at.calc = calc
-    sd, cov = calc.get_property("forces_std", at), calc.get_property("forces_cov", at)
-    np.testing.assert_allclose(sd ** 2, np.trace(cov, axis1=1, axis2=2), rtol=1e-6)
-    assert np.isfinite(calc.get_property("forces_q", at)).all() and np.all(sd > 0)
-
-
 def test_evidence_with_near_duplicate_inducing_points(tiny_gp_problem):
     """Review Focus 2: two inducing points 1e-9 apart (K_MM singular up to its jitter).  The scaled-system
     evidence still matches the observation-space reference, to a tolerance set by cond(K_MM)."""
@@ -539,3 +451,15 @@ def test_evidence_with_near_duplicate_inducing_points(tiny_gp_problem):
     logw = sum(float(getattr(st2, f"logw_{q}")) for q in "EFV")
     assert np.isfinite(g).all()
     assert v + 0.5 * logw - 0.5 * N * np.log(2 * np.pi) == pytest.approx(lml, rel=1e-6)
+
+
+def test_a_removed_dtc_posterior_is_refused(gp_fit_dir, tmp_path):
+    """--ard-variance dtc failed its acceptance and was removed: an old dtc posterior file must not load and
+    silently serve the kappa shape."""
+    from ace_jax.fit.ard import ARDPosterior
+    out, _, _ = gp_fit_dir
+    z = dict(np.load(out / "posterior.npz"))
+    z["variance"] = np.array("dtc")
+    np.savez(tmp_path / "dtc.npz", **z)
+    with pytest.raises(ValueError, match="removed"):
+        ARDPosterior.load(tmp_path / "dtc.npz")

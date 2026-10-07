@@ -679,9 +679,6 @@ $$
   because the change from $D$ to $R_0$ is a change of basis.
 - The shape is $\tilde Q=S^{-1}R_0^{-\mathsf{T}}(G-\bar g)$, with
   $u_\alpha=R_0^{-\mathsf{T}}\phi_\alpha^\mathsf{T}$.
-- With `--ard-variance dtc`, the shape is $V=W W^\mathsf{T}+\operatorname{diag}(d_x,d_y,d_z)$.
-  Here $W W^\mathsf{T}$ is the posterior covariance of the force, and $d_a$ is
-  the derivative-DTC variance $k_F-q_F$ of component $a$.
 
 $\theta$ is fixed. The uncertainty of $\theta$ does not enter the shape.
 

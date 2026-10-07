@@ -102,11 +102,10 @@ def _add_fit_args(p):
                         "writes gp_model.npz (the ARD mean) and posterior.npz")
     p.add_argument("--ard-mode", choices=["joint", "sequential"], default="joint",
                    help="joint: noise + ARD scales by evidence; sequential: ARD only, one Gram (low memory)")
-    p.add_argument("--ard-variance", choices=["sandwich", "kappa", "dtc"], default="sandwich",
+    p.add_argument("--ard-variance", choices=["sandwich", "kappa"], default="sandwich",
                    help="ARD force-uncertainty shape: sandwich (default) = delete-one-cluster PRESS jackknife "
-                        "(misspecification-robust); kappa = the posterior A^-1 shape; dtc (ard-gp, cosine "
-                        "kernel) = kappa plus the GP's derivative-DTC variance, per Cartesian component. All "
-                        "get the per-group scales")
+                        "(misspecification-robust); kappa = the posterior A^-1 shape. Both get the "
+                        "per-group scales")
     p.add_argument("--ard-val-frac", type=float, default=0.2,
                    help="stratified train fraction held out to score the per-group force scales "
                         "(rms factor and conformal quantile) with the hold-out posterior")

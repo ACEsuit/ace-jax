@@ -148,15 +148,10 @@ The fit writes these files:
 The calculator gives `forces_std`, `forces_cov`, `forces_q`,
 `forces_q_mahal` and `forces_group`, as for `--uq ard`.
 
-`--ard-variance dtc` adds the GP variance that the inducing points do not
-cover (the derivative DTC term) to the posterior shape. It needs the cosine
-kernel.
-
-!!! warning "`dtc` and the 3×3 covariance"
-    The DTC term has one variance for each Cartesian component. It has no
-    covariance between components. Thus `forces_std` does not change when
-    you rotate the structure, but `forces_cov` and the anisotropic
-    `forces_q` change a small amount.
+On the Cantor benchmark, `--uq ard-gp` gives a slightly higher coverage at
+crack tips than `--uq ard` (0.902 and 0.893). It ranks the atoms by error
+slightly less well. It is experimental. Use `--uq ard` unless you need the
+GP model.
 
 These functions are for the linear model only:
 
@@ -394,7 +389,7 @@ default is `raw`.
 | `--ard-transfer` | `exponent` | how the scale from the validation fit is applied to the model fitted on all data: `exponent` estimates the exponent $\beta$ for each fit, `sqrt` sets $\beta=\frac12$, `none` sets $\beta=0$ |
 | `--ard-cluster-size` | 3 | the side of the spatial blocks that large training cells are divided into, in units of $r_\text{cut}$ (`inf`: whole configurations) |
 | `--ard-press` | `exact` | `exact` leave-one-cluster-out correction, or the faster `block` approximation |
-| `--ard-variance` | `sandwich` | the uncertainty shape: the jackknife (`sandwich`), the posterior covariance (`kappa`), or (`--uq ard-gp` only) the posterior covariance plus the GP's DTC variance (`dtc`) |
+| `--ard-variance` | `sandwich` | the uncertainty shape: the jackknife (`sandwich`), or the posterior covariance (`kappa`) |
 | `--ard-mode` | `joint` | evidence fit of the noise and prior scales together, or `sequential` (prior scales only; less memory) |
 | `--no-ard-support` | | skip the support reference |
 | `--ard-support-features` | `raw` | features of the support reference: `raw` descriptors, or `normalised` (unit-norm descriptor plus log-norm channels per body order) |
