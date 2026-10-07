@@ -27,6 +27,12 @@ def test_cli_fit_ard_variance_default_sandwich_and_kappa_flag(fitted, tmp_path):
     assert json.load(open(out / "ard.json"))["variance"] == "kappa"
     pk = ARDPosterior.load(out / "posterior.npz")
     assert pk.Q is None and pk.R is None and pk.group_table is not None
+    # the kappa shape reads chol: stored packed, and moved to the device once at construction (var_rows would
+    # otherwise re-upload the L x L factor on every call)
+    from ace_jax import ACECalculator
+    assert isinstance(pk.chol, np.ndarray) and "chol_packed" in np.load(out / "posterior.npz").files
+    calc = ACECalculator(str(out / "model.npz"), posterior=str(out / "posterior.npz"))
+    assert isinstance(calc.posterior.chol, jax.Array) and calc.posterior.chol.dtype == np.float64
 
 
 def test_calculator_caches_shape_factor_on_device(fitted):
@@ -37,14 +43,14 @@ def test_calculator_caches_shape_factor_on_device(fitted):
     assert calc.posterior.R.dtype == np.float64
 
 
-def test_calculator_caches_chol_on_device(fitted):
-    """The L x L Cholesky factor (numpy from posterior.npz) is moved to the device once at
-    construction: the kappa path's var_rows would otherwise re-upload it on every call."""
+def test_sandwich_posterior_carries_no_chol(fitted):
+    """A sandwich posterior serves forces from R alone: its file has no L x L Cholesky factor, and the
+    calculator holds none (the kappa posterior's device copy is checked in the --ard-variance kappa test)."""
     from ace_jax import ACECalculator
     from ace_jax.fit.ard import ARDPosterior
-    assert isinstance(ARDPosterior.load(fitted / "posterior.npz").chol, np.ndarray)   # load stays numpy
+    assert ARDPosterior.load(fitted / "posterior.npz").chol is None
     calc = ACECalculator(str(fitted / "model.npz"), posterior=str(fitted / "posterior.npz"))
-    assert isinstance(calc.posterior.chol, jax.Array) and calc.posterior.chol.dtype == np.float64
+    assert calc.posterior.chol is None
 
 
 # How far lean=True may drift from lean=False.  The lean form (#16) is exact to roundoff today.  Once
@@ -119,7 +125,7 @@ def test_mismatched_posterior_is_refused(fitted, tmp_path):
     from ace_jax import ACECalculator
     from ace_jax.fit.ard import ARDPosterior
     p = ARDPosterior.load(fitted / "posterior.npz")
-    bad = p._replace(mean=p.mean[:-1], dinv=p.dinv[:-1], chol=p.chol[:-1, :-1], body_col=p.body_col[:-1])
+    bad = p._replace(mean=p.mean[:-1], dinv=p.dinv[:-1], R=p.R[:-1], body_col=p.body_col[:-1])
     bad.save(tmp_path / "bad.npz")
     with pytest.raises(ValueError, match="posterior"):
         ACECalculator(str(fitted / "model.npz"), posterior=str(tmp_path / "bad.npz"))
@@ -279,6 +285,7 @@ def test_calculator_schema2_new_properties_raise(fitted, tmp_path):
     z["schema"] = np.array(2)
     for k in [k for k in z if k.startswith(("R", "group_", "cal_", "support", "force_shape", "eps"))]:
         z.pop(k)
+    z["chol"] = np.eye(len(z["dinv"]), dtype=np.float32)   # schema-2 files carried a dense chol (the kappa path reads it)
     np.savez(tmp_path / "p2.npz", **z)
     at = read(XYZ, "0")
     calc = ACECalculator(str(fitted / "model.npz"), posterior=str(tmp_path / "p2.npz"))
@@ -366,6 +373,7 @@ def test_calibrate_refuses_schema2(fitted, calib_set, tmp_path, capsys):
     z["schema"] = np.array(2)
     for k in [k for k in z if k.startswith(("R", "group_", "cal_", "support", "force_shape", "eps"))]:
         z.pop(k)
+    z["chol"] = np.eye(len(z["dinv"]), dtype=np.float32)   # schema-2 files carried a dense chol (the kappa path reads it)
     np.savez(tmp_path / "p2.npz", **z)
     args = _calib_args(fitted, calib_set, ["--out", str(tmp_path / "o.npz")])
     args[args.index("--posterior") + 1] = str(tmp_path / "p2.npz")
@@ -574,6 +582,7 @@ def test_forces_q_mahal_on_schema2_raises_need3(fitted, tmp_path):
     z["schema"] = np.array(2)
     for k in [k for k in z if k.startswith(("R", "group_", "cal_", "support", "force_shape", "eps"))]:
         z.pop(k)
+    z["chol"] = np.eye(len(z["dinv"]), dtype=np.float32)   # schema-2 files carried a dense chol (the kappa path reads it)
     np.savez(tmp_path / "p2.npz", **z)
     at = read(XYZ, "1")
     at.calc = ACECalculator(str(fitted / "model.npz"), posterior=str(tmp_path / "p2.npz"))

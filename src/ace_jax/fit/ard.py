@@ -476,6 +476,10 @@ class ARDPosterior(NamedTuple):
     def var_rows(self, Phi, chunk=4096, force_rows=False):
         """Untempered posterior variance phi A^-1 phi^T of each row of Phi (n, L).  force_rows: Phi may
         omit the joint-E0 columns (zero on a force row; padded per chunk)."""
+        if self.chol is None:
+            raise ValueError("this posterior was saved without its Cholesky factor (a sandwich-shape posterior "
+                             "serves forces from R alone): the untempered posterior variances need the fit's "
+                             "in-memory posterior")
         c = jnp.asarray(self.chol, jnp.float64)
         L = self.prior_root.width
         if force_rows:
@@ -530,7 +534,14 @@ class ARDPosterior(NamedTuple):
         return np.sqrt(np.maximum(v.sum(1), 0.0))
 
     def save(self, path, dtype=np.float32):
-        np.savez(path, mean=self.mean, chol=np.asarray(self.chol, dtype), dinv=self.dinv, kappa=self.kappa,
+        """The Cholesky factor of S (L^2) is written only when a served path reads it: the kappa shape (no R,
+        no Q), and then packed (its lower triangle, half the bytes).  The sandwich shapes serve from R or Q
+        alone, so their files leave it out (1.14 GB -> 0.24 GB on the Cantor basis); load gives chol None."""
+        chol = {}
+        if self.R is None and self.Q is None and self.chol is not None:
+            c = np.asarray(self.chol, dtype)
+            chol = {"chol_packed": c[np.tril_indices(c.shape[0])]}
+        np.savez(path, mean=self.mean, **chol, dinv=self.dinv, kappa=self.kappa,
                  h=self.h, groups=np.asarray(self.groups), body_col=self.body_col, schema=SCHEMA,
                  meta_json=np.frombuffer(json.dumps(self.meta).encode(), np.uint8),
                  lam=self.lam, **({} if self.Q is None else {"Q": np.asarray(self.Q, dtype)}),
@@ -570,7 +581,13 @@ class ARDPosterior(NamedTuple):
         if "variance" in z.files and str(z["variance"]) == "dtc":
             raise ValueError(f"{path} is an --ard-variance dtc posterior: that shape failed its acceptance and was "
                              "removed; refit with --uq ard-gp (sandwich)")
-        return ARDPosterior(z["mean"], z["chol"].astype(np.float64), z["dinv"], float(z["kappa"]), z["h"],
+        if "chol_packed" in z.files:            # the lower triangle, row-major (np.tril_indices)
+            n = len(z["dinv"])
+            chol = np.zeros((n, n))
+            chol[np.tril_indices(n)] = z["chol_packed"]
+        else:                                   # a dense factor (files before the packed form), or none
+            chol = z["chol"].astype(np.float64) if "chol" in z.files else None
+        return ARDPosterior(z["mean"], chol, z["dinv"], float(z["kappa"]), z["h"],
                             tuple(int(g) for g in z["groups"]), z["body_col"],
                             json.loads(bytes(z["meta_json"]).decode()),
                             Q=z["Q"].astype(np.float64) if "Q" in z.files else None,
@@ -715,8 +732,11 @@ def predict_ard(post, prob, ds, node_chunk=None, rows_fn=None):
             Fv = np.where(np.asarray(b.node_mask)[:, None], Fv, 0.0)
         else:
             Fv = post.force_var_rows(F).reshape(-1, 3)
-        outs.append((E @ post.mean, post.var_rows(E), (F @ post.mean).reshape(-1, 3), Fv,
-                     (V @ post.mean).reshape(-1, 6), post.var_rows(V).reshape(-1, 6)))
+        # the untempered E/V variances need chol, which a saved sandwich posterior leaves out: NaN then
+        # (only F_var is calibrated and served; E/V variances are reported by the fit itself)
+        var = post.var_rows if post.chol is not None else (lambda P: np.full(len(P), np.nan))
+        outs.append((E @ post.mean, var(E), (F @ post.mean).reshape(-1, 3), Fv,
+                     (V @ post.mean).reshape(-1, 6), var(V).reshape(-1, 6)))
     return _pack(outs, prob, ds)
 
 

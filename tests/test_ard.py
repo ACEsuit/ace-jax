@@ -507,6 +507,7 @@ def test_posterior_schema2_roundtrip_and_schema1_loads(ard_setup, tmp_path):
         # a schema-1 file (no Q / lam) still loads and serves kappa variance
         z = dict(np.load(tmp_path / "p.npz"))
         z.pop("Q"); z.pop("lam"); z["schema"] = np.array(1)
+        z["chol"] = np.asarray(post.chol, np.float32)       # schema-1 files carried the dense factor
         np.savez(tmp_path / "p1.npz", **z)
         old = ARDPosterior.load(tmp_path / "p1.npz")
         assert old.Q is None and old.lam == 1.0
