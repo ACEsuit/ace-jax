@@ -240,17 +240,17 @@ def test_holdout_score_energy_only_split(small):
     from ace_jax.fit.radial_learn import holdout_score
     prob, ds_fit, _ = small
     _, ds_val, _ = make_problem(ncfg=6, start=6, force_key=None)            # no force labels
-    from ace_jax.fit.objective import posterior
-    from ace_jax.fit.stats import linear_statistics
+    from ace_jax.fit.objective import posterior_from_qr
+    from ace_jax.fit.stats import linear_qr_statistics, linear_statistics
     a = to_array(THETA)
     W = prob.model.rnl_Wnlq
     s = holdout_score(W, a, a, prob, ds_fit, ds_val)
     val = linear_statistics(prob.model, prob.cfg, ds_val)
     assert float(val.n_F) == 0 and float(val.n_E) > 0
-    c, _ = posterior(THETA, linear_statistics(prob.model, prob.cfg, ds_fit), prob)
+    c, _ = posterior_from_qr(THETA, linear_qr_statistics(prob.model, prob.cfg, ds_fit), prob)
     e_term = float(val.yy_E - 2.0 * c @ val.b_E + c @ val.G_E @ c) / (float(val.n_E) * 0.01 ** 2)
     assert np.isfinite(s) and s > 0.0
-    np.testing.assert_allclose(s, e_term, rtol=1e-10)
+    np.testing.assert_allclose(s, e_term, rtol=1e-8)      # the Gram reference cancels: ~1e-9 here
 
 
 def test_fit_radial_gate_prefers_learned_on_recoverable_problem():
@@ -358,12 +358,12 @@ def test_fit_radial_checkpoints_each_lambda(checkpointed):
 
 def test_learn_radial_precomputed_pieces_match(small):
     """Q/D2/r0 passed in (as fit_radial does) give the same run as computed."""
-    from ace_jax.fit.radial_learn import learn_radial, projected_residual
+    from ace_jax.fit.radial_learn import learn_radial, projected_residual_qr
     from ace_jax.fit.radial_model import normalise, radial_gram, roughness_matrix, row_active
     prob, ds, _ = small
     W0 = prob.model.rnl_Wnlq
     Q, D2 = radial_gram(prob.model, ds), roughness_matrix(prob.model)
-    r0 = float(projected_residual(normalise(W0, Q, row_active(W0)), THETA, prob, ds))
+    r0 = projected_residual_qr(normalise(W0, Q, row_active(W0)), THETA, prob, ds)
     kw = dict(theta0=THETA, profile=False, lam_rough=1e-2, steps=2)
     Wa, ia = learn_radial(prob, ds, W0, **kw)
     Wb, ib = learn_radial(prob, ds, W0, Q=Q, D2=D2, r0=r0, **kw)
@@ -550,3 +550,84 @@ def test_learn_sigma_e_mult_scales_only_the_radial_objective(small):
     with pytest.raises(ValueError, match="learn_sigma_e_mult"):
         learn_radial(prob, ds, prob.model.rnl_Wnlq, theta0=THETA, profile=False, steps=1,
                      learn_sigma_e_mult=0.0)
+
+
+# --- the stable (QR) form the learner uses: c* by QR, residuals summed directly -------------
+
+STIFF = THETA._replace(log_sigma_c=np.log(1e4), log_sigma_E=np.log(1e-4), log_sigma_F=np.log(1e-4),
+                       log_sigma_V=np.log(1e-4))      # noise at its floor, prior nearly flat
+
+
+def _in_memory_residual_direct(W, prob, ds, theta):
+    """The dense reference summed directly, ||y - Phi~ c||^2 at the QR least-squares c (Phi~ holds
+    the prior rows): y.y - v.v cancels where the fit nearly interpolates."""
+    from ace_jax.fit.radial_model import with_radial
+    from ace_jax.fit.solve import stacked_design
+    Phi, y = stacked_design(prob._replace(model=with_radial(prob.model, W)), ds, theta)
+    Qm, Rm = np.linalg.qr(np.asarray(Phi))
+    c = np.linalg.solve(Rm, Qm.T @ np.asarray(y))
+    e = np.asarray(y) - np.asarray(Phi) @ c
+    return float(e @ e)
+
+
+def test_projected_residual_qr_matches_lstsq_and_the_gram_form(small):
+    from ace_jax.fit.radial_learn import projected_residual, projected_residual_qr
+    prob, ds, _ = small
+    W = prob.model.rnl_Wnlq
+    got = projected_residual_qr(W, THETA, prob, ds)
+    ref = float(_in_memory_residual(W, prob, ds, THETA))
+    assert abs(got - ref) < 1e-10 * abs(ref)
+    assert abs(got - float(projected_residual(W, THETA, prob, ds))) < 1e-7 * abs(ref)
+
+
+def test_learner_gradient_is_the_envelope_gradient(small):
+    """At fixed c* = c*(W) the learner's objective equals r(W), and its V-gradient is r's (envelope
+    theorem): checked against central differences of r itself, which re-solve c* at each point."""
+    from ace_jax.fit.radial_learn import _prior, _vp_value_and_grad, projected_residual_qr, qr_readout
+    from ace_jax.fit.hypers import to_array
+    from ace_jax.fit.radial_model import normalise, radial_gram, roughness_matrix, row_active, with_radial
+    prob, ds, _ = small
+    W0 = prob.model.rnl_Wnlq
+    Q, active, D2 = radial_gram(prob.model, ds), row_active(W0), roughness_matrix(prob.model)
+    V = normalise(W0, Q, active)
+    c, _ = qr_readout(THETA, prob, with_radial(prob.model, V), ds)
+    z, zU = jnp.zeros(()), jnp.zeros((W0.shape[0], W0.shape[0], W0.shape[-1], W0.shape[-1]))
+    f, g = _vp_value_and_grad(V, c, to_array(THETA), prob.model, ds, _prior(prob), Q, active, D2,
+                              jnp.ones(W0.shape[2]), z, V, jnp.ones(W0.shape[-1]), z, zU, z, cfg=prob.cfg)
+    r = lambda X: projected_residual_qr(normalise(X, Q, active), THETA, prob, ds)       # noqa: E731
+    assert abs(float(f) - r(V)) < 1e-12 * abs(float(f))
+    D = jnp.asarray(np.random.default_rng(1).standard_normal(V.shape))
+    D = D * active.reshape(active.shape + (1,) * (V.ndim - active.ndim))     # zero rows stay zero
+    h = 1e-5
+    fd = (r(V + h * D) - r(V - h * D)) / (2 * h)
+    assert abs(float(jnp.vdot(g, D)) - fd) < 1e-5 * abs(fd)
+
+
+def test_learner_works_where_the_gram_form_fails():
+    """Noise-free labels at STIFF theta: kappa(G + Lambda) is far past 1/eps, where the Gram
+    form's Cholesky is NaN or wrong.  The QR objective stays at the dense value (summed
+    directly), and a learning run is finite and never ends above its start.  The gradient is not
+    asserted: here c is fixed only by the near-flat prior along A's weak directions, and the
+    W-gradient through them is not resolvable in double precision (qr_readout)."""
+    from ace_jax.fit.radial_learn import learn_radial, projected_residual, projected_residual_qr
+    prob, ds, _ = make_problem(ncfg=12, per_batch=3)
+    Wt, W0, c = _perturbed_truth(prob)
+    ds = relabel(prob, ds, Wt, c)
+    got, ref = projected_residual_qr(W0, STIFF, prob, ds), _in_memory_residual_direct(W0, prob, ds, STIFF)
+    print(f"stiff: qr {got:.10e}  dense {ref:.10e}  gram {float(projected_residual(W0, STIFF, prob, ds)):.10e}")
+    assert np.isfinite(got) and abs(got - ref) < 1e-8 * abs(ref)
+    W, info = learn_radial(prob, ds, W0, theta0=STIFF, profile=False, steps=10)
+    assert np.all(np.isfinite(np.asarray(W))) and info["reasons"][-1] != "nonfinite"
+    assert all(b <= a for a, b in zip(info["trace"], info["trace"][1:]))
+    assert projected_residual_qr(W, STIFF, prob, ds) <= info["r0"]       # the best point is kept
+
+
+def test_residual_gradient_memory_does_not_scale_with_batches():
+    from ace_jax.fit.radial_learn import residual_sums
+    from ace_jax.fit.radial_model import with_radial
+    prob, ds6, _ = make_problem(ncfg=12, per_batch=2)
+    ds2 = jax.tree.map(lambda a: a[:2], ds6)
+    W, c = prob.model.rnl_Wnlq, jnp.ones(prob.cfg.len_basis)
+    grad = lambda X, d: jax.grad(lambda Y: residual_sums(with_radial(prob.model, Y), prob.cfg, d, c)[0].sum())(X)  # noqa: E731
+    t2, t6 = _temp_bytes(grad, W, ds2), _temp_bytes(grad, W, ds6)
+    assert t6 <= 1.25 * t2 + 1_000_000

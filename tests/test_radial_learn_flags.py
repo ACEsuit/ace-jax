@@ -37,19 +37,21 @@ def test_prior_precision_sizes_from_gamma(small):
 def test_theta_map_and_holdout_take_precomputed_stats(small):
     from ace_jax.fit.hypers import to_array
     from ace_jax.fit.radial_learn import holdout_score, theta_map_linear
-    from ace_jax.fit.stats import linear_statistics
+    from ace_jax.fit.stats import linear_qr_statistics, linear_statistics
     prob, ds, _ = small
     _, ds_val, _ = make_problem(ncfg=6, start=6)
     W = prob.model.rnl_Wnlq
-    lin = linear_statistics(prob.model, prob.cfg, ds)
+    qs = linear_qr_statistics(prob.model, prob.cfg, ds)
     a1 = theta_map_linear(prob, ds, W, steps=20)
-    a2 = theta_map_linear(prob, ds, None, steps=20, lin=lin)
+    a2 = theta_map_linear(prob, ds, None, steps=20, lin=qs)
     np.testing.assert_array_equal(np.asarray(a1), np.asarray(a2))
     a = to_array(THETA)
-    lv = linear_statistics(prob.model, prob.cfg, ds_val)
     s1 = holdout_score(W, a, a, prob, ds, ds_val)
-    s2 = holdout_score(None, a, a, prob, ds, ds_val, lin_fit=lin, lin_val=lv)
-    np.testing.assert_allclose(s1, s2, rtol=1e-12)
+    s2 = holdout_score(W, a, a, prob, ds, ds_val, lin_fit=qs)
+    np.testing.assert_array_equal(s1, s2)
+    # validation scored from Gram statistics instead: yy - 2 c.b + c.G.c, to its cancellation
+    lv = linear_statistics(prob.model, prob.cfg, ds_val)
+    np.testing.assert_allclose(holdout_score(None, a, a, prob, ds, ds_val, lin_fit=qs, lin_val=lv), s1, rtol=1e-8)
 
 
 def _driver(tmp_path, *extra):
