@@ -478,3 +478,24 @@ def test_a_removed_dtc_posterior_is_refused(gp_fit_dir, tmp_path):
     np.savez(tmp_path / "dtc.npz", **z)
     with pytest.raises(ValueError, match="removed"):
         ARDPosterior.load(tmp_path / "dtc.npz")
+
+
+def test_ard_gp_fit_skips_the_support_reference(gp_fit_dir):
+    """Only ACECalculator serves the support flag, and it refuses an ard-gp posterior: building it is wasted work."""
+    _, _, res = gp_fit_dir
+    assert res.ard.posterior.support is None
+
+
+@pytest.mark.parametrize("which", ["posterior.npz", "gp_model.npz"])
+def test_calibrate_refuses_an_ard_gp_posterior(gp_fit_dir, which, capsys):
+    from conftest import FIXTURE_DIR
+    from ace_jax.cli import main
+    out, _, _ = gp_fit_dir
+    args = ["calibrate", "--model", str(out / "model.npz"), "--posterior", str(out / which),
+            "--data", str(FIXTURE_DIR / "si_tiny_train.xyz"), "--energy-key", "dft_energy",
+            "--force-key", "dft_force", "--virial-key", "dft_virial", "--out", str(out / "recal.npz")]
+    with pytest.raises(SystemExit) as ex:
+        main(args)
+    assert ex.value.code == 2
+    err = capsys.readouterr().err
+    assert err.startswith("aj calibrate: error:") and "--uq ard posteriors only" in err

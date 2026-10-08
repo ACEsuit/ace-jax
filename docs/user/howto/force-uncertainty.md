@@ -390,7 +390,7 @@ default is `raw`.
 | `--ard-cluster-size` | 3 | the side of the spatial blocks that large training cells are divided into, in units of $r_\text{cut}$ (`inf`: whole configurations) |
 | `--ard-press` | `exact` | `exact` leave-one-cluster-out correction, or the faster `block` approximation |
 | `--ard-variance` | `sandwich` | the uncertainty shape: the jackknife (`sandwich`), or the posterior covariance (`kappa`) |
-| `--ard-mode` | `joint` | evidence fit of the noise and prior scales together, or `sequential` (prior scales only; less memory) |
+| `--ard-mode` | `joint` | evidence fit of the noise and prior scales together, or `sequential` (prior scales only; less memory with `--uq ard`, but not with `--uq ard-gp`) |
 | `--no-ard-support` | | skip the support reference |
 | `--ard-support-features` | `raw` | features of the support reference: `raw` descriptors, or `normalised` (unit-norm descriptor plus log-norm channels per body order) |
 | `--batch-pack` | `auto` | batches configurations by an atom budget when a set has small and large cells |

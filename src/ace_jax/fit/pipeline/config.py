@@ -66,7 +66,7 @@ class FitConfig:
     pf_samples: int = 4; pf_maxiter: int = 10
     # prediction / UQ
     uq: str = "blr"                      # "blr" | "pops" | "ard"
-    ard_mode: str = "joint"              # "joint" (sigma_q + ARD scales) | "sequential" (low memory)
+    ard_mode: str = "joint"              # "joint" (sigma_q + ARD scales) | "sequential" (low memory for "ard" only: "ard-gp" holds ~4 Dt^2)
     ard_variance: str = "sandwich"       # "sandwich" (configuration-clustered, spec addendum) | "kappa"
     ard_val_frac: float = 0.2            # train hold-out for the force-variance scale (lam, kappa)
     ard_cond_max: float = 1e14           # prior floor: cond(S) <= ard_cond_max

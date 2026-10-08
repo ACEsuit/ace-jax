@@ -164,7 +164,7 @@ Do these roughly in order. Each step lists what to build, how to test it, and wh
 
 - Maths page, section 11 (support diagnostic): feature normalisation and its rationale.
 - Maths page, section 9 (groups): the novelty axis, if adopted.
-- Maths page, section 13 (limitations): stretching behaviour, from the Step 1 results.
+- Maths page, section 14 (limitations): stretching behaviour, from the Step 1 results.
 - How-to page, *Validation*: bond-scan results and the precision audit.
 - How-to page, *Cost and memory*: the r-output evaluation path, once Step 5 lands.
 - Add CALM (arXiv:2609.40060) to the references where its findings motivated a change.
