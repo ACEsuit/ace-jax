@@ -100,7 +100,8 @@ def _add_fit_args(p):
                         "jackknife-sandwich posterior over [B | k(B, B_M)] at the MAP hyperparameters; "
                         "writes gp_model.npz (the ARD mean) and posterior.npz")
     p.add_argument("--ard-mode", choices=["joint", "sequential"], default="joint",
-                   help="joint: noise + ARD scales by evidence; sequential: ARD only, one Gram (low memory)")
+                   help="joint: noise + ARD scales by evidence; sequential: ARD only, one Gram (low memory "
+                        "with --uq ard; --uq ard-gp still holds ~4 Dt^2 joint arrays)")
     p.add_argument("--ard-variance", choices=["sandwich", "kappa"], default="sandwich",
                    help="ARD force-uncertainty shape: sandwich (default) = delete-one-cluster PRESS jackknife "
                         "(misspecification-robust); kappa = the posterior A^-1 shape. Both get the "
@@ -381,6 +382,7 @@ def cmd_eval(a):
 
 
 _NEED3 = "this posterior predates schema 3; refit with --uq ard"
+_ARD_ONLY = "aj calibrate supports --uq ard posteriors only, not --uq ard-gp"
 
 
 class UsageError(ValueError):
@@ -410,7 +412,11 @@ def cmd_calibrate(a):
     from .calc.point import ACECalculator
     from .fit.ard import ARDPosterior, conformal_scores
     from .fit.conformal import effective_n_min, group_scales
+    if "gp_json" in np.load(a.posterior).files:           # a gp_model.npz passed as the posterior
+        raise UsageError(f"{a.posterior}: {_ARD_ONLY}")
     post = ARDPosterior.load(a.posterior)
+    if post.prior_root.M > 0:                               # ard-gp: ACECalculator cannot serve the GP columns
+        raise UsageError(f"{a.posterior}: {_ARD_ONLY}")
     if post.group_table is None or post.cal is None:
         raise UsageError(f"{a.posterior}: {_NEED3}")
     configs = load_configs(a.data, energy_key=a.energy_key, force_key=a.force_key, virial_key=a.virial_key)

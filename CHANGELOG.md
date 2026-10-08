@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- **`aj calibrate` refuses an `--uq ard-gp` posterior** (or a `gp_model.npz`)
+  with a clear message. Before, it failed later with a missing `model.npz` or
+  a `KeyError`.
+- **`--uq ard-gp` fits no longer build the support reference.** Only the
+  linear calculator serves the support flag, so the reference was not used.
+- `--ard-mode sequential` saves memory with `--uq ard` only. The help text and
+  the force-uncertainty guide now say so.
+
 ## 0.2.2 (2026-10-07)
 
 **Upgrading from 0.2.1.**

@@ -1116,7 +1116,7 @@ def run_ard_stage(cfg, data, built, theta, log=print, full_stats=None):
                          group_table=tab.to_dict(),
                          cal={"scores": s.astype(np.float32), "groups": gv.astype(np.int8),
                               "cfg": cv.astype(np.int64), "src": np.zeros(len(s), np.int16)})
-    if cfg.ard_support:
+    if cfg.ard_support and ev.root.M == 0:      # only ACECalculator serves the flag, and it refuses ard-gp
         post = post._replace(support=_support_reference(cfg, data, built, ds_val, E.bn[ok], s, cv, gv, log))
     log(f"ARD: {G} groups over {len(np.unique(cv))} held-out configs ({len(s)} atoms); lam_rms "
         f"{np.array2string(tab.lam_rms, precision=3)}, q {np.array2string(tab.q, precision=3)}"
