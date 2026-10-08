@@ -94,7 +94,8 @@ def nnll_from_coupling(A2B, aa_sig, tol=1e-12):
 def build_model(elements, order, totaldegree, *, wL=1.5, rcut=5.5, r0=None,
                 rin=0.0, radial_mode="onehot", pair_mode="onehot",
                 seed=0, with_gamma=True, edge_a_kind="gather",
-                coupling_cache=True, coupling_cache_dir=None, n_q_factor=1.5, a2b_sparse="auto"):
+                coupling_cache=True, coupling_cache_dir=None, n_q_factor=1.5, a2b_sparse="auto",
+                rnl_basis="poly"):
     """Author a frozen `ace_model`-family model in memory.
 
     elements: atomic numbers or symbols (order kept, no duplicates); order:
@@ -110,6 +111,10 @@ def build_model(elements, order, totaldegree, *, wL=1.5, rcut=5.5, r0=None,
 
     n_q_factor: tensor-radial polynomial span, n_q = ceil(n_q_factor * max n).
 
+    rnl_basis: "poly" (ACEpotentials' env(x) P_q(x)) or "sbessel" (PACE's g_k(r), ACEModel.
+    rnl_basis_values): the same n_q and `radial_mode` start, so onehot is R_n = g_n, pacemaker's
+    initial crad.
+
     a2b_sparse: "auto" (default) holds A2B as sparse triplets only when it is
     sparse enough (`eval.model.a2b_sparse_auto`: every ACE coupling is); True/False force it.
 
@@ -117,6 +122,8 @@ def build_model(elements, order, totaldegree, *, wL=1.5, rcut=5.5, r0=None,
     (a core dependency on supported platforms) on a coupling-cache miss; evaluate in float64 with x64 enabled."""
     if edge_a_kind not in ("gather", "matmul"):
         raise ValueError(f'edge_a_kind must be "gather" or "matmul", got {edge_a_kind!r}')
+    if rnl_basis not in ("poly", "sbessel"):
+        raise ValueError(f'rnl_basis must be "poly" or "sbessel", got {rnl_basis!r}')
     if not n_q_factor >= 1:          # checked before the (possibly Julia) coupling step
         raise ValueError(f"n_q_factor must be >= 1 (n_q >= max n), got {n_q_factor!r}")
     zs = ri.resolve_elements(elements)
@@ -191,6 +198,7 @@ def build_model(elements, order, totaldegree, *, wL=1.5, rcut=5.5, r0=None,
         pair_envelope_kind="poly1sr",
         rnl_grid=(0.0, 1.0, 2), pair_grid=(0.0, 1.0, 2),
         elements=tuple(int(e) for e in zs),
+        rnl_basis=rnl_basis,
     )
     # "matmul" needs the one-hot selectors (a_sel_r/a_sel_y) the loader builds;
     # with_edge_a_kind is the single place that derives them from aspec
@@ -225,7 +233,7 @@ def build_model(elements, order, totaldegree, *, wL=1.5, rcut=5.5, r0=None,
         "basis": {
             "wL": float(wL), "rcut": float(rcut),
             "r0": tinit["rnl_transform"][:, :, 4].tolist(),      # (NZ, NZ) per pair
-            "rin": float(rin), "radial_mode": radial_mode,
+            "rin": float(rin), "radial_mode": radial_mode, "rnl_basis": rnl_basis,
             "pair_mode": pair_mode, "seed": int(seed),
             "n_q_factor": float(n_q_factor),
             "pair_maxn": int(pair_maxn), "with_gamma": bool(with_gamma),
@@ -383,6 +391,7 @@ class BasisSpec:
     d_max: int | None = None
     reduction: str = "pca"
     radial_mode: str = "onehot"
+    radial_basis: str = "poly"          # categorical only: "poly" or "sbessel" (build_model rnl_basis)
     pair_mode: str = "onehot"
     embedding: str | None = None
     no_gamma: bool = False
@@ -417,7 +426,8 @@ def build_basis(spec, *, seed=0):
                                      reduction=spec.reduction, **common)
     return build_model(els, spec.order, spec.max_degree, wL=spec.wL,
                        rcut=5.5 if spec.rcut is None else spec.rcut, rin=spec.rin,
-                       radial_mode=spec.radial_mode, pair_mode=spec.pair_mode, seed=seed, **common)
+                       radial_mode=spec.radial_mode, pair_mode=spec.pair_mode, seed=seed,
+                       rnl_basis=spec.radial_basis, **common)
 
 
 def basis_r0(meta):

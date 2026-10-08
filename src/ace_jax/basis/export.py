@@ -150,6 +150,7 @@ def patch_radial_npz(src, dst, model, readout=None):
     meta["radial_kind"] = "analytic"
     meta["rnl_spline"] = None
     meta["radial_learned"] = bool(model.radial_learned)
+    meta["rnl_basis"] = model.rnl_basis
     out["meta_json"] = np.frombuffer(json.dumps(meta).encode(), dtype=np.uint8)
     np.savez(dst, **out)
 

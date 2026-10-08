@@ -153,6 +153,7 @@ def load(path, dtype=jnp.float64, a2b_sparse="auto", edge_a_kind="gather", fold=
         pair_grid=(float(ps_["x0"]), float(ps_["h"]), int(ps_["n"])),
         elements=tuple(int(e) for e in meta["elements"]),
         radial_learned=bool(meta.get("radial_learned", False)),    # absent in old files
+        rnl_basis=str(meta.get("rnl_basis", meta.get("basis", {}).get("rnl_basis", "poly"))),   # absent: poly
     )
     if sparse:
         model = with_a2b_sparse(model)             # the sorted index plan
