@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **`aj fit --learn-radial --radial-opt newton`: a Newton optimiser for the
+  radials.** It is a trust-region Newton method. Each iteration takes up to
+  `--radial-cg-iters` (default 20) exact Hessian-vector products of the
+  objective with the coefficients projected out, each about two gradients.
+  The learned-radial objective is badly conditioned, and L-BFGS makes slow
+  progress on it. In a test with recoverable radials, 8 Newton iterations
+  reached 20.6 from 7295, against 77.9 for 8 L-BFGS-B iterations. The default
+  stays `lbfgs`.
 - **`aj export`** writes a model for LAMMPS. An `--out` that ends in `.json`
   gives a lammps-jax bundle. A bundle needs `--structure`, the initial
   structure of the run. `--platform cpu` and `--procs px,py,pz` give a CPU

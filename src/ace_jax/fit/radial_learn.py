@@ -194,6 +194,90 @@ def _vp_objective(V, c, a, model, ds, gamma, Q, active, D2, wn, lam, W_ref, sw, 
 _vp_value_and_grad = jax.jit(jax.value_and_grad(_vp_objective), static_argnames=("cfg",))
 
 
+@partial(jax.jit, static_argnames=("cfg",))
+def _vp_hvp(V, c, Lc, v, a, model, ds, gamma, Q, active, D2, wn, lam, W_ref, sw, lam_spec, U, lam_gap, cfg):
+    """The exact Hessian-vector product of the REDUCED objective r(V) = F(V, c*(V)) at c = c*(V):
+    H_r v = F_VV v + F_Vc w with w = dc*/dV v = -F_cc^-1 F_cV v (implicit function theorem on
+    F_c = 0), F_cc = 2 A^T A = 2 Lc Lc^T (Lc from posterior_from_qr).  Two forward-over-reverse
+    passes over ds (F_cV v, then (F_VV, F_Vc) along (v, w)) and two triangular solves; at fixed c
+    alone (w = 0) it would be the Hessian of a different function, whose minimiser is not r's."""
+    args = (a, model, ds, gamma, Q, active, D2, wn, lam, W_ref, sw, lam_spec, U, lam_gap, cfg)
+    gc = lambda X: jax.grad(_vp_objective, argnums=1)(X, c, *args)                   # noqa: E731
+    Fcv = jax.jvp(gc, (V,), (v,))[1]
+    w = -0.5 * solve_triangular(Lc.T, solve_triangular(Lc, Fcv, lower=True), lower=False)
+    gV = lambda X, C: jax.grad(_vp_objective, argnums=0)(X, C, *args)               # noqa: E731
+    return jax.jvp(gV, (V, c), (v, w))[1]
+
+
+def _steihaug(hv, g, delta, iters, rtol):
+    """Truncated CG on the Newton model g.p + 1/2 p.H p inside |p| <= delta (Steihaug-Toint):
+    stops at `iters` products, on the boundary, at negative curvature (to the boundary along it)
+    or once |r| <= rtol |g|.  Returns (p, H p, products used)."""
+    p, Hp, r = np.zeros_like(g), np.zeros_like(g), g.copy()
+    d, rr, gn = -r, float(r @ r), float(np.sqrt(g @ g))
+
+    def to_boundary(p, Hp, d, Hd):
+        pd, dd, pp = float(p @ d), float(d @ d), float(p @ p)
+        tau = (-pd + np.sqrt(max(pd * pd + dd * (delta * delta - pp), 0.0))) / dd
+        return p + tau * d, Hp + tau * Hd
+    for k in range(int(iters)):
+        Hd = hv(d)
+        dHd = float(d @ Hd)
+        if dHd <= 0.0:
+            pb, Hpb = to_boundary(p, Hp, d, Hd)
+            return pb, Hpb, k + 1
+        alpha = rr / dHd
+        pn = p + alpha * d
+        if np.sqrt(pn @ pn) >= delta:
+            pb, Hpb = to_boundary(p, Hp, d, Hd)
+            return pb, Hpb, k + 1
+        p, Hp, r = pn, Hp + alpha * Hd, r + alpha * Hd
+        rr_new = float(r @ r)
+        if np.sqrt(rr_new) <= rtol * gn:
+            return p, Hp, k + 1
+        d, rr = -r + (rr_new / rr) * d, rr_new
+    return p, Hp, int(iters)
+
+
+def _newton_round(fg, hvp, x0, steps, tol, patience=3, cg_iters=20, delta0=None):
+    """`steps` trust-region Newton iterations (Steihaug CG, at most `cg_iters` exact Hessian-vector
+    products each) from x0: fg(x) -> (f, g, aux), hvp(x, aux, v) -> H v at x.  A step is accepted when
+    the actual decrease is at least 0.1 of the model's; the radius shrinks x4 below a ratio of 0.25 and
+    doubles above 0.75 on the boundary.  Same returns and reasons as _lbfgs_round ("linesearch": the
+    radius collapsed with no acceptable step)."""
+    x = np.array(x0, float)
+    f, g, aux = fg(x)
+    if not (np.isfinite(f) and np.all(np.isfinite(g))):
+        return x, float("nan"), float("nan"), [], "nonfinite", None
+    f0, trace, small, reason = f, [], 0, "steps"
+    delta = float(delta0) if delta0 else 0.1 * max(float(np.sqrt(x @ x)), 1e-12)
+    g0n = max(float(np.sqrt(g @ g)), 1e-300)
+    for _ in range(int(steps)):
+        # forcing term relative to the round's first gradient (the objective's scale is ~1e5 here)
+        eta = min(0.5, float(np.sqrt(np.sqrt(g @ g) / g0n)))
+        p, Hp, _ = _steihaug(lambda v, x=x, aux=aux: hvp(x, aux, v), g, delta, cg_iters, rtol=eta)
+        pred = -float(g @ p + 0.5 * p @ Hp)
+        if not pred > 0.0:
+            reason = "converged"
+            break
+        fn, gn, auxn = fg(x + p)
+        ok = np.isfinite(fn) and np.all(np.isfinite(gn))
+        ratio = (f - fn) / pred if ok else -np.inf
+        pn = float(np.sqrt(p @ p))
+        delta = 0.25 * pn if ratio < 0.25 else (2.0 * delta if ratio > 0.75 and pn >= 0.99 * delta else delta)
+        if ratio > 0.1:
+            small = small + 1 if f - fn <= tol * max(abs(f), 1e-300) else 0
+            x, f, g, aux = x + p, fn, gn, auxn
+            trace.append(f)
+            if small >= patience:
+                reason = "converged"
+                break
+        elif delta < 1e-12 * max(float(np.sqrt(x @ x)), 1.0):
+            reason = "linesearch"
+            break
+    return x, f0, f, trace, reason, aux
+
+
 class _NonFinite(Exception):
     pass
 
@@ -440,8 +524,12 @@ def _learn_theta(a, mult):
 def learn_radial(prob, ds, W0, *, theta0=None, profile=True, lam_rough=0.0, rough_weights=None,
                  lam_spec=0.0, spec_p=4.0, lam_gap=0.0, steps=200, reprofile_every=10, tol=1e-6,
                  patience=3, map_steps=300, n_prior=None, seed=0, log=None, Q=None, D2=None,
-                 r0=None, U=None, learn_sigma_e_mult=1.0, noise="per-quantity"):
+                 r0=None, U=None, learn_sigma_e_mult=1.0, noise="per-quantity", opt="lbfgs", cg_iters=20):
     """VarPro-learn the tensor radials of prob.model (analytic branch, M = 0).
+
+    opt "lbfgs" (SciPy L-BFGS-B, `steps` iterations) or "newton" (`_newton_round`: trust-region
+    Newton with exact Hessian-vector products of the reduced objective, `_vp_hvp`, at most
+    `cg_iters` per iteration; `steps` counts Newton iterations).
 
     learn_sigma_e_mult scales sigma_E inside the radial objective only (after
     every theta re-MAP): > 1 learns the radials under a force-heavier weighting
@@ -554,8 +642,23 @@ def learn_radial(prob, ds, W0, *, theta0=None, profile=True, lam_rough=0.0, roug
             c, qs = qr_readout(th_obj, prob, with_radial(prob.model, normalise(Vx, Q, active)), ds)
             f, g = _vp_value_and_grad(Vx, c, a_obj, prob.model, ds, _prior(prob), Q, active, D2, wn, lam,
                                       W_ref, sw, lam_spec_abs, U, lam_gap_abs, cfg=prob.cfg)
-            return float(f), np.asarray(g, float).ravel(), qs
-        x, f0, f_best, trace, reason, qs_best = _lbfgs_round(fg, np.asarray(V, float).ravel(), n, tol, patience)
+            return float(f), np.asarray(g, float).ravel(), (qs, c)
+
+        def hvp(x, aux, v, a_obj=a_obj, shape=shape, th_obj=th_obj):
+            qs, c = aux
+            Lc = posterior_from_qr(th_obj, qs, prob)[1]
+            hv = _vp_hvp(jnp.asarray(x.reshape(shape)), c, Lc, jnp.asarray(v.reshape(shape)), a_obj, prob.model,
+                         ds, _prior(prob), Q, active, D2, wn, lam, W_ref, sw, lam_spec_abs, U, lam_gap_abs,
+                         cfg=prob.cfg)
+            return np.asarray(hv, float).ravel()
+        if opt == "newton":
+            x, f0, f_best, trace, reason, aux = _newton_round(fg, hvp, np.asarray(V, float).ravel(), n, tol,
+                                                              patience, cg_iters=cg_iters)
+        elif opt == "lbfgs":
+            x, f0, f_best, trace, reason, aux = _lbfgs_round(fg, np.asarray(V, float).ravel(), n, tol, patience)
+        else:
+            raise ValueError(f"learn_radial: opt must be 'lbfgs' or 'newton', got {opt!r}")
+        qs_best = None if aux is None else aux[0]
         V = jnp.asarray(x.reshape(shape))
         info["trace"].extend(trace)
         info["reasons"].append(reason)

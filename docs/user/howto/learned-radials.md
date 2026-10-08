@@ -40,7 +40,13 @@ aj fit --order 3 --max-degree 10 \
 options. Its options are:
 
 - `--radial-n-q 12`: the number of polynomials for each radial;
-- `--radial-steps 40`: the number of L-BFGS steps for each roughness weight;
+- `--radial-steps 40`: the number of optimiser iterations for each roughness
+  weight;
+- `--radial-opt lbfgs`: the optimiser. `newton` uses a trust-region Newton
+  method with exact Hessian-vector products. One Newton iteration costs more
+  than an L-BFGS iteration, but it usually makes more progress;
+- `--radial-cg-iters 20`: the maximum number of Hessian-vector products in one
+  Newton iteration;
 - `--radial-lam-grid 0,1e-2`: the roughness weights. The gate selects from
   these weights and the initial radials.
 

@@ -98,7 +98,9 @@ class FitConfig:
     pops_rows: str = "auto"              # "auto" | "host" (rows cached in host RAM) | "device" (re-evaluated)
     learn_radial: bool = False           # learn the tensor radials (radial_learn.fit_radial) before the fit
     radial_n_q: int = 12                 # polynomial span after to_analytic widening
-    radial_steps: int = 40               # L-BFGS steps per roughness weight
+    radial_steps: int = 40               # optimiser iterations per roughness weight
+    radial_opt: str = "lbfgs"            # "lbfgs" or "newton" (radial_learn._newton_round)
+    radial_cg_iters: int = 20            # Hessian-vector products per Newton iteration, at most
     radial_lam_grid: tuple = (0.0, 1e-2) # relative roughness weights; the gate picks among them and init
     radial_val_frac: float = 0.2         # train hold-out for the gate
 
@@ -233,6 +235,10 @@ class FitConfig:
                 raise ValueError(f"radial_n_q must be >= 1, got {self.radial_n_q}")
             if self.radial_steps < 0:
                 raise ValueError(f"radial_steps must be >= 0, got {self.radial_steps}")
+            if self.radial_opt not in ("lbfgs", "newton"):
+                raise ValueError(f"radial_opt must be 'lbfgs' or 'newton', got {self.radial_opt!r}")
+            if self.radial_cg_iters < 1:
+                raise ValueError(f"radial_cg_iters must be >= 1, got {self.radial_cg_iters}")
             if not len(self.radial_lam_grid):
                 raise ValueError("radial_lam_grid must hold at least one roughness weight")
         return self
