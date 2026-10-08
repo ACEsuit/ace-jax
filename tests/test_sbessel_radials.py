@@ -140,3 +140,13 @@ def test_poly_basis_is_unchanged(tmp_path, monkeypatch):
     with pytest.raises(ValueError, match="rnl_basis"):
         from ace_jax.basis.model import build_model
         build_model([14], 3, 10, rnl_basis="bessel")
+
+
+def test_radial_basis_is_a_basis_flag_not_a_learner_option():
+    """--radial-basis (like --radial-mode) defines the basis: it needs no --learn-radial."""
+    from ace_jax.cli import _parse
+    a = _parse(["fit", "--train", "x.xyz", "--order", "2", "--max-degree", "6", "--radial-basis", "sbessel",
+                "--radial-mode", "onehot", "--out", "o"])
+    assert a.radial_basis == "sbessel" and not a.learn_radial
+    with pytest.raises(SystemExit):
+        _parse(["fit", "--train", "x.xyz", "--order", "2", "--max-degree", "6", "--radial-steps", "5", "--out", "o"])

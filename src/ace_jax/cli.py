@@ -661,7 +661,8 @@ def _parse(argv=None):
     if a.cmd == "fit" and not a.learn_radial:   # typed options only: a fit.yaml records every default
         from . import runfile
         typed = runfile.explicit_dests(subs["fit"], argv[argv.index(cmd) + 1:])
-        stray = sorted(d for d in typed if d.startswith("radial_"))
+        from .basis.model import BasisSpec       # basis flags (--radial-mode, --radial-basis) are not the learner's
+        stray = sorted(d for d in typed if d.startswith("radial_") and d not in BasisSpec.FIELDS)
         if stray:
             subs["fit"].error(f"--{stray[0].replace('_', '-')} needs --learn-radial")
     if a.cmd == "fit":
