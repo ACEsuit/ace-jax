@@ -46,12 +46,18 @@ def _edge_bucket(n_edges, floor=64):
     return max(floor, 1 << max(0, int(n_edges) - 1).bit_length())
 
 
+def device_memory_bytes():
+    """Bytes XLA may allocate on this process's first device (its `bytes_limit`),
+    or None where the backend reports none (CPU)."""
+    import jax
+    stats = jax.devices()[0].memory_stats() or {}
+    return stats.get("bytes_limit")
+
+
 def dense_budget_bytes():
     """Bytes the dense layout may use: a fraction of the accelerator's limit, or
     CPU_DENSE_BUDGET_BYTES where the backend reports none."""
-    import jax
-    stats = jax.devices()[0].memory_stats() or {}
-    limit = stats.get("bytes_limit")
+    limit = device_memory_bytes()
     return DENSE_BUDGET_FRACTION * limit if limit else CPU_DENSE_BUDGET_BYTES
 
 

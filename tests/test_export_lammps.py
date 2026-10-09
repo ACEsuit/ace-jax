@@ -103,6 +103,9 @@ def test_bundle_written(tmp_path):
     assert on_disk["contract"]["n_species"] == 2
     lj = on_disk["ace_jax"].pop("lammps_jax")
     assert lj.startswith(importlib.metadata.version("lammps_jax"))
+    budget = on_disk["ace_jax"].pop("dense_budget")               # the exporting device's
+    assert budget > 0 and on_disk["ace_jax"].pop("device_memory") in (None, budget * 2)
+    assert on_disk["ace_jax"].pop("block_rows") == 32768          # explicit layout, no device_memory
     assert on_disk["ace_jax"] == {"layout": "dense", "elements": [32, 14],
                                   "type_elements": [32, 14], "k_dense": 64, "owned_rows": None,
                                   "lean": False,           # PACE: no lean form
@@ -255,7 +258,7 @@ def test_bundle_metadata_keys_do_not_shadow_the_contract(tmp_path, layout):
     # every ace_jax key either side added (owned rows, lean / splining provenance,
     # the exporting lammps-jax) is written for every layout, and none is a contract key
     assert set(b["ace_jax"]) == {"layout", "elements", "type_elements", "k_dense", "owned_rows",
-                                 "lean", "spline_tol", "spline_intervals", "radial_table",
+                                 "lean", "spline_tol", "spline_intervals", "radial_table", "block_rows", "device_memory", "dense_budget",
                                  "lammps_jax"}
     assert not set(b["ace_jax"]) & LAMMPS_JAX_KEYS
 
@@ -789,6 +792,7 @@ def test_auto_matrix_prep_counts_toward_memory(tmp_path, monkeypatch):
     monkeypatch.setattr(lx, "matrix_supported", lambda: True)
     model, meta, _ = load(str(pace_fixture(FIX / "gesi_sbessel.yace")))
     n, k, K = 4096, 64, 96
+    monkeypatch.setattr(lx, "MIN_BLOCK_ROWS", n)                  # one candidate block: no halving
     block = estimate_a_bytes(model, "dense", n, n * k, k, 8)
     prep = lx.matrix_prep_bytes(n, K, k, 8)
     assert prep > 0
@@ -798,6 +802,70 @@ def test_auto_matrix_prep_counts_toward_memory(tmp_path, monkeypatch):
                              max_edges=n * k, k_dense=k, max_neighbors=K, max_owned=n,
                              layout="auto", lean=False)
         assert b["ace_jax"]["layout"] == want, budget
+
+
+def test_auto_halves_the_block_before_falling_back_to_sparse(tmp_path, monkeypatch):
+    """When a full block does not fit, auto halves it (down to MIN_BLOCK_ROWS) and
+    keeps the dense family: blocked dense at a few thousand rows is still far
+    faster than the sparse edge list.  Below MIN_BLOCK_ROWS it gives up for sparse."""
+    require_optional("lammps_jax")
+    from ace_jax.calc import point
+    from ace_jax.eval.edge_model import estimate_a_bytes
+    from ace_jax.export import lammps as lx
+    monkeypatch.setattr(lx, "matrix_supported", lambda: False)
+    monkeypatch.setattr(lx, "BUNDLE_BLOCK_ROWS", 4096)
+    monkeypatch.setattr(lx, "MIN_BLOCK_ROWS", 512)
+    model, meta, _ = load(MODELS["ace"]())
+    n, k = 4096, 64
+    est = lambda b: estimate_a_bytes(model, "dense", b, b * k, k, 8)
+    assert est(1024) < est(2048) < est(n)
+    for budget, want in ((est(n), ("dense", 4096)), (est(1024), ("dense", 1024)),
+                         (est(512), ("dense", 512)), (est(512) - 1, ("sparse", None))):
+        monkeypatch.setattr(point, "dense_budget_bytes", lambda b=budget: b)
+        b = lx.export_lammps(model, meta, tmp_path / "m.json", max_atoms=n + 100, max_edges=n * k,
+                             k_dense=k, max_owned=n, layout="auto", lean=False)
+        assert (b["ace_jax"]["layout"], b["ace_jax"]["block_rows"]) == want, budget
+
+
+def test_device_memory_is_a_bundle_setting(tmp_path, monkeypatch):
+    """device_memory sizes the bundle for the device LAMMPS runs on, not the
+    exporting process's: the local query is never made, and the budget is
+    DENSE_BUDGET_FRACTION of it.  It also sizes an explicit dense layout's blocks."""
+    require_optional("lammps_jax")
+    from ace_jax.calc import point
+    from ace_jax.eval.edge_model import estimate_a_bytes
+    from ace_jax.export import lammps as lx
+
+    def no_query():
+        raise AssertionError("queried the exporting device")
+    monkeypatch.setattr(point, "dense_budget_bytes", no_query)
+    monkeypatch.setattr(lx, "matrix_supported", lambda: False)
+    monkeypatch.setattr(lx, "BUNDLE_BLOCK_ROWS", 4096)
+    monkeypatch.setattr(lx, "MIN_BLOCK_ROWS", 512)
+    model, meta, _ = load(MODELS["ace"]())
+    n, k = 4096, 64
+    mem = int(estimate_a_bytes(model, "dense", 2048, 2048 * k, k, 8) / point.DENSE_BUDGET_FRACTION) + 1
+    for layout in ("auto", "dense"):
+        b = lx.export_lammps(model, meta, tmp_path / "m.json", max_atoms=n + 100, max_edges=n * k,
+                             k_dense=k, max_owned=n, layout=layout, lean=False, device_memory=mem)
+        a = b["ace_jax"]
+        assert (a["layout"], a["block_rows"], a["device_memory"]) == ("dense", 2048, mem), layout
+        assert a["dense_budget"] == int(point.DENSE_BUDGET_FRACTION * mem)
+    b = lx.export_lammps(model, meta, tmp_path / "m.json", max_atoms=n + 100, max_edges=n * k,
+                         k_dense=k, max_owned=n, layout="dense", lean=False, device_memory=mem, block_rows=256)
+    assert b["ace_jax"]["block_rows"] == 256                       # explicit block_rows wins
+
+
+def test_block_rows_argument_matches_the_module_default(monkeypatch):
+    """make_energy_fn(block_rows=B) blocks exactly as BUNDLE_BLOCK_ROWS = B does."""
+    from ace_jax.export import lammps
+    model, nsp, k_dense, type_map, species, pos, graph, _ = _blocked_inputs("ace", "model")
+    f = make_energy_fn(model, nsp, "dense", k_dense=k_dense, block_rows=64)
+    e, G = _e_and_grad(f, species, graph, pos)
+    monkeypatch.setattr(lammps, "BUNDLE_BLOCK_ROWS", 10 ** 9)
+    e1, G1 = _e_and_grad(make_energy_fn(model, nsp, "dense", k_dense=k_dense), species, graph, pos)
+    np.testing.assert_allclose(np.asarray(e), np.asarray(e1), rtol=1e-12, atol=0)
+    np.testing.assert_allclose(np.asarray(G), np.asarray(G1), rtol=1e-12, atol=1e-12 * np.abs(np.asarray(G1)).max())
 
 
 def test_matrix_supported_by_the_pinned_lammps_jax():

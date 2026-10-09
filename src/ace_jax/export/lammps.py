@@ -48,6 +48,10 @@ BUNDLE_LAYOUTS = LAYOUTS + ("matrix",)
 # checkpoint recompute, 1.5x slower; 32k rows keeps it one block and is as fast
 # as or faster than 64k at scale.  docs/dev/perf-lammps-large-n.md.
 BUNDLE_BLOCK_ROWS = 32768
+# The smallest block layout="auto" halves down to before it gives up on the dense
+# family for sparse: blocked dense at a few thousand rows still beats the sparse
+# edge list many times over (o4d16 Si on an A100: sparse 15x slower than dense).
+MIN_BLOCK_ROWS = 1024
 
 
 def matrix_supported():
@@ -84,6 +88,25 @@ def matrix_prep_bytes(rows, max_neighbors, k_dense, itemsize):
     per model slot the compacted vector and its cotangent, indices and mask."""
     return int(rows) * (int(max_neighbors) * (6 * itemsize + 14)
                         + int(k_dense) * (6 * itemsize + 13))
+
+
+def block_rows_for(model, rows, k_dense, budget, itemsize, max_edges=None, prep=0, block_rows=None):
+    """Rows per dense block for a bundle of `rows` rows and `k_dense` slots: the
+    largest of BUNDLE_BLOCK_ROWS, halved down to MIN_BLOCK_ROWS (each capped at
+    `rows`), whose estimate_a_bytes plus `prep` (bytes not run in blocks, e.g.
+    matrix_prep_bytes) fits `budget`; None when none does.  An explicit
+    `block_rows` is the only candidate."""
+    cands, b = [], min(int(rows), BUNDLE_BLOCK_ROWS)
+    while True:
+        cands.append(b)
+        if b <= MIN_BLOCK_ROWS:
+            break
+        b = max(MIN_BLOCK_ROWS, b // 2)
+    for b in ([int(block_rows)] if block_rows else cands):
+        edges = b * k_dense if max_edges is None else min(max_edges, b * k_dense)
+        if estimate_a_bytes(model, "dense", b, edges, k_dense, itemsize) + prep <= budget:
+            return b
+    return None
 
 
 def neighbour_capacity(atoms, rcut, skin=1.0, slots="skin", margin=8, owned=1.1,
@@ -140,7 +163,7 @@ def neighbour_capacity(atoms, rcut, skin=1.0, slots="skin", margin=8, owned=1.1,
             "k_dense": k_dense, "max_edges": max_owned * k_dense}
 
 
-def _matrix_energy_fn(model, n_species, k_dense, type_map, rcut):
+def _matrix_energy_fn(model, n_species, k_dense, type_map, rcut, block_rows):
     """Energy function over lammps-jax's neighbour matrix (module docstring)."""
     rc2 = float(rcut) ** 2
 
@@ -178,7 +201,7 @@ def _matrix_energy_fn(model, n_species, k_dense, type_map, rcut):
             overflow = jnp.any(cnt > k_dense) | broken
         zr = node_z[:rows]
         e = model.site_energies_dense_blocked(rd, jnp.broadcast_to(zr[:, None], idx.shape),
-                                              node_z[idx], md, zr, BUNDLE_BLOCK_ROWS)
+                                              node_z[idx], md, zr, block_rows or BUNDLE_BLOCK_ROWS)
         if rows < n:
             e = jnp.concatenate([e, jnp.zeros((n - rows,), e.dtype)])
         # multiply, not where: a where would leave the forces finite (make_energy_fn)
@@ -188,7 +211,7 @@ def _matrix_energy_fn(model, n_species, k_dense, type_map, rcut):
 
 
 def make_energy_fn(model, n_species, layout, k_dense=None, type_map=None, n_rows=None,
-                   rcut=None):
+                   rcut=None, block_rows=None):
     """type_map[t] is the model species of LAMMPS type t+1 (default: identity).
 
     layout="matrix" takes lammps-jax's neighbour matrix as the graph (module
@@ -203,8 +226,9 @@ def make_energy_fn(model, n_species, layout, k_dense=None, type_map=None, n_rows
     sender is >= n_rows or a slot overflows k_dense.  Capped at the actual
     row count, so n_rows >= the buffer's row count is a no-op.
 
-    Dense rows are evaluated in blocks of BUNDLE_BLOCK_ROWS (read at trace
-    time) when there are more than that; see `site_energies_dense_blocked`.
+    Dense rows are evaluated in blocks of block_rows (default BUNDLE_BLOCK_ROWS,
+    read at trace time) when there are more than that; see
+    `site_energies_dense_blocked`.
     """
     if layout not in BUNDLE_LAYOUTS:
         raise ValueError(f"layout must be one of {BUNDLE_LAYOUTS}, got {layout!r}")
@@ -213,7 +237,7 @@ def make_energy_fn(model, n_species, layout, k_dense=None, type_map=None, n_rows
     if layout == "matrix":
         if rcut is None:
             raise ValueError("the matrix layout needs rcut: the list holds skin pairs")
-        return _matrix_energy_fn(model, n_species, k_dense, type_map, rcut)
+        return _matrix_energy_fn(model, n_species, k_dense, type_map, rcut, block_rows)
 
     def energy_fn(positions, species, graph):
         n = positions.shape[0]
@@ -246,7 +270,7 @@ def make_energy_fn(model, n_species, layout, k_dense=None, type_map=None, n_rows
         md = jnp.zeros((nr, k_dense), bool).at[row, col].set(True, mode="drop")
         zr = node_z[:nr]
         e = model.site_energies_dense_blocked(rd, jnp.broadcast_to(zr[:, None], idx.shape),
-                                              node_z[idx], md, zr, BUNDLE_BLOCK_ROWS)
+                                              node_z[idx], md, zr, block_rows or BUNDLE_BLOCK_ROWS)
         overflow = jnp.any(m & ((s >= nr) | (slot >= k_dense)))
         if nr < n:
             e = jnp.concatenate([e, jnp.zeros((n - nr,), e.dtype)])
@@ -260,7 +284,7 @@ def make_energy_fn(model, n_species, layout, k_dense=None, type_map=None, n_rows
 def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
                   dtype="float64", layout="auto", type_elements=None, max_owned=None,
                   lean=True, spline_tol=AUTO, spline_intervals=None, max_neighbors=None,
-                  radial_table=None):
+                  radial_table=None, device_memory=None, block_rows=None):
     """Write a lammps-jax JSON bundle for `model`; returns the bundle dict.
 
     Capacities: max_atoms (owned + ghost positions); max_edges (sparse / dense:
@@ -282,13 +306,25 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
     max_owned); always recorded in the bundle, including for the sparse layout,
     which has no row concept and ignores it otherwise.
 
-    layout="auto" picks a dense-family layout when k_dense is given and
-    estimate_a_bytes for one dense block (the row capacity -- max_owned if
-    given, else max_atoms -- capped at BUNDLE_BLOCK_ROWS) fits
-    ace_jax.calc.point.dense_budget_bytes(), else sparse.  The dense-family
-    layout is "matrix" when max_neighbors is given, the installed lammps-jax
-    supports it (`matrix_supported`) and the block plus the matrix's unblocked
-    pre-processing (`matrix_prep_bytes`) fits; else "dense".  A LAMMPS plugin
+    device_memory: bytes XLA can allocate on the device LAMMPS will run on (with
+    XLA's default preallocation, 75% of the GPU's memory).  The export need not
+    run there, so this is a setting of the bundle; None queries the exporting
+    process's device (`calc.point.dense_budget_bytes`: CPU_DENSE_BUDGET_BYTES
+    where it reports none).  The dense-family budget is DENSE_BUDGET_FRACTION of it.
+
+    Dense and matrix rows run in blocks of `block_rows` rows (lax.map +
+    jax.checkpoint), so one block's temporaries bound memory.  Default:
+    BUNDLE_BLOCK_ROWS for an explicit layout without device_memory, else
+    `block_rows_for`: the largest of BUNDLE_BLOCK_ROWS halved down to
+    MIN_BLOCK_ROWS whose estimate fits the budget.
+
+    layout="auto" picks a dense-family layout when k_dense is given and some
+    block fits (estimate_a_bytes for that many rows, of the row capacity --
+    max_owned if given, else max_atoms), else sparse.  The dense-family layout
+    is "matrix" when max_neighbors is given, the installed lammps-jax supports it
+    (`matrix_supported`) and a block plus the matrix's unblocked pre-processing
+    (`matrix_prep_bytes`) fits; else "dense".  Recorded as `ace_jax.block_rows`,
+    `ace_jax.device_memory` and `ace_jax.dense_budget`.  A LAMMPS plugin
     older than the Python package rejects a matrix bundle: rebuild the plugin,
     or export layout="dense".  The bundle records the exporting lammps-jax as
     `ace_jax.lammps_jax`.
@@ -321,7 +357,7 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
 
     from ..eval.model import lean as _lean
     from ..eval.model import splining, with_radial_table
-    from ..calc.point import dense_budget_bytes
+    from ..calc.point import DENSE_BUDGET_FRACTION, dense_budget_bytes
     model_z = [int(z) for z in meta["elements"]]
     type_elements = model_z if type_elements is None else [int(z) for z in type_elements]
     missing = sorted(set(type_elements) - set(model_z))
@@ -336,25 +372,35 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
                          "the rcut + skin list; see neighbour_capacity)")
     if layout in ("sparse", "dense") and max_edges is None:
         raise ValueError(f"the {layout} layout needs max_edges (the packed edge buffer)")
+    from ..calc.point import device_memory_bytes
+    itemsize = np.dtype(dtype).itemsize
+    if device_memory is None:
+        budget, device_memory = dense_budget_bytes(), device_memory_bytes()
+    else:
+        budget = DENSE_BUDGET_FRACTION * float(device_memory)
+    rows = max_owned if max_owned is not None else max_atoms
+    sized = layout == "auto" or (layout in ("dense", "matrix") and (device_memory is not None or block_rows))
     if layout == "auto":
-        itemsize = np.dtype(dtype).itemsize
-        # rows run in BUNDLE_BLOCK_ROWS blocks, so one block's temporaries bound memory
-        n_rows = min(max_owned if max_owned is not None else max_atoms, BUNDLE_BLOCK_ROWS)
         k = min(k_dense, max_neighbors or k_dense) if k_dense else 0
-        edges = n_rows * k if max_edges is None else min(max_edges, n_rows * k)
-        block = estimate_a_bytes(model, "dense", n_rows, edges, k, itemsize) if k else None
-        budget = dense_budget_bytes()
-        rows = max_owned if max_owned is not None else max_atoms
-        if (k and max_neighbors and matrix_supported() and block
-                + matrix_prep_bytes(rows, max_neighbors, k, itemsize) <= budget):
-            layout = "matrix"
-        elif k and max_edges is not None and block <= budget:
-            layout = "dense"
+        b_mat = (block_rows_for(model, rows, k, budget, itemsize, max_edges,
+                                matrix_prep_bytes(rows, max_neighbors, k, itemsize), block_rows)
+                 if k and max_neighbors and matrix_supported() else None)
+        b_den = (block_rows_for(model, rows, k, budget, itemsize, max_edges, 0, block_rows)
+                 if k and max_edges is not None and not b_mat else None)
+        if b_mat:
+            layout, block_rows = "matrix", b_mat
+        elif b_den:
+            layout, block_rows = "dense", b_den
         elif max_edges is not None:
-            layout = "sparse"
+            layout, block_rows = "sparse", None
         else:
             raise ValueError("layout='auto' needs max_edges unless the matrix layout is "
                              "chosen (max_neighbors given, supported, and fitting)")
+    elif layout in ("dense", "matrix") and not block_rows:
+        k = min(k_dense or max_neighbors, max_neighbors or k_dense or 0)
+        block_rows = ((block_rows_for(model, rows, k, budget, itemsize, max_edges if layout == "dense" else None,
+                                      matrix_prep_bytes(rows, max_neighbors, k, itemsize) if layout == "matrix" else 0)
+                       or MIN_BLOCK_ROWS) if sized else BUNDLE_BLOCK_ROWS)
     if layout == "matrix":
         max_neighbors = int(max_neighbors)
         k_dense = min(int(k_dense or max_neighbors), max_neighbors)
@@ -372,7 +418,8 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
     rcut = float(meta["rcut"])
     energy_fn = make_energy_fn(model, n_species, layout, k_dense,
                                None if type_map == list(range(len(model_z))) else type_map,
-                               n_rows=max_owned if layout == "dense" else None, rcut=rcut)
+                               n_rows=max_owned if layout == "dense" else None, rcut=rcut,
+                               block_rows=block_rows if layout in ("dense", "matrix") else None)
     graph = ({"max_neighbors": max_neighbors, "max_owned": max_owned} if layout == "matrix"
              else {"max_edges": max_edges})
     bundle = export_model(energy_fn=energy_fn, path=path, max_atoms=max_atoms, cutoff=rcut,
@@ -388,6 +435,10 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
                          "spline_intervals": splined["n_intervals"] if splined else None,
                          # the radial stage tabulated in r (None: analytic / as lean left it)
                          "radial_table": rtab,
+                         # dense / matrix rows per block, and the memory they were sized for
+                         "block_rows": int(block_rows) if layout in ("dense", "matrix") else None,
+                         "device_memory": int(device_memory) if device_memory else None,
+                         "dense_budget": int(budget),
                          "lammps_jax": lammps_jax_version()}
     Path(path).write_text(json.dumps(bundle, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return bundle

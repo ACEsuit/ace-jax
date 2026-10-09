@@ -310,10 +310,17 @@ This writes a lammps-jax bundle for `pair_style jax/kk` (GPU only).
   model drops skin pairs at rcut, and compacts in-cutoff pairs when
   `k_dense < max_neighbors`). No per-step packing.
 - `layout="auto"` chooses a dense-family layout only when `k_dense` (max
-  neighbours per atom) is given and one dense block's `estimate_a_bytes` fits
-  `dense_budget_bytes()`. It is `"matrix"` only if `max_neighbors` is passed,
+  neighbours per atom) is given and a dense block's `estimate_a_bytes` fits the
+  budget. It is `"matrix"` only if `max_neighbors` is passed,
   `matrix_supported()`, and the block plus `matrix_prep_bytes` (the unblocked
-  list pre-processing) fits; otherwise `"dense"`. The old signature, without
+  list pre-processing) fits; otherwise `"dense"`.
+- Memory: dense and matrix rows run in blocks (`block_rows_for`): the largest of
+  `BUNDLE_BLOCK_ROWS` (32768) halved down to `MIN_BLOCK_ROWS` (1024) that fits
+  `DENSE_BUDGET_FRACTION` (0.5) of `device_memory`, the bytes XLA can allocate
+  on the GPU LAMMPS runs on (default: the exporting process's device; with
+  XLA's default preallocation, 75% of the GPU, so ~30e9 on a 40 GB A100).
+  Pass `device_memory=` when exporting on another machine; `block_rows=`
+  overrides. Recorded as `ace_jax.block_rows`, `device_memory`, `dense_budget`. The old signature, without
   `max_neighbors`, stays packed dense. `layout="matrix"` requires
   `max_neighbors`: the list holds rcut + skin pairs, so a `k_dense` sized for
   rcut is too small. `max_edges` is needed by sparse and dense only.
