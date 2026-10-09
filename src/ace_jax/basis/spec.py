@@ -99,7 +99,19 @@ def _couples_to_zero(ll):
     return s % 2 == 0 and max(ll) <= s - max(ll)
 
 
-def build_spec(NZ, order, totaldegree, wL=1.5, tol=1e-9):
+def _caps(caps, order):
+    """(nmax, lmax) per correlation order 1..order from caps = (nmax_by_order, lmax_by_order),
+    each a sequence indexed from order 1 (a shorter one repeats its last entry; None: no cap)."""
+    if caps is None:
+        return None
+    def pad(v):
+        v = [int(x) for x in v]
+        return (v + [v[-1]] * order)[:order]
+    nm, lm = (pad(v) if v is not None else [10 ** 9] * order for v in caps)
+    return nm, lm
+
+
+def build_spec(NZ, order, totaldegree, wL=1.5, tol=1e-9, caps=None):
     """From-scratch reproduction of ACEpotentials' ace1_model basis selection
     (Models.oneparticle_spec + sparse_AA_spec, src/models/{smoothness_priors,utils}.jl):
     the many-body mb_spec (list of (n,l) bodies), the one-particle Rnl_spec (n,l),
@@ -107,7 +119,14 @@ def build_spec(NZ, order, totaldegree, wL=1.5, tol=1e-9):
 
     Returns (mb_spec, Rnl_spec, Ylm_spec).  Ordering need not match ACEpotentials'
     (the parity aligns basis functions by their invariant signatures); the SET is
-    what must agree.  order = correlation order (body order - 1)."""
+    what must agree.  order = correlation order (body order - 1).
+
+    caps = (nmax_by_order, lmax_by_order), optional (`_caps`): a body of correlation order nu is
+    kept only if each of its (n, l) has radial degree (n - 1) // NZ + 1 <= nmax[nu] and l <= lmax[nu]
+    -- pacemaker's nradmax_by_orders / lmax_by_orders.  With wL = 1 the TotalDegree level of a
+    single-species body, sum(n + l), is pacemaker's power order, so caps plus a level bound give a
+    PACE-shaped basis.  With caps the one-particle spec is only the (n, l) the bodies use.  No caps:
+    the ACEpotentials selection, unchanged."""
     import math
     md = totaldegree
     maxn1 = math.ceil(md * NZ)                                    # oneparticle_spec bounds
@@ -122,9 +141,18 @@ def build_spec(NZ, order, totaldegree, wL=1.5, tol=1e-9):
     # AA/mb: non-decreasing A-index bodies up to `order`, pruned by level (DFS,
     # matching Polynomials4ML.gensparse), then rpe + couples-to-L=0 admissible.
     seen, mb = set(), []
+    cp = _caps(caps, order)
+    deg = lambda b: (b[0] - 1) // NZ + 1                                 # noqa: E731
+
+    def capped(bb, nu):
+        return cp is None or all(deg(b) <= cp[0][nu - 1] and b[1] <= cp[1][nu - 1] for b in bb)
+
+    def extendable(bb):            # some final order >= len(bb) still admits every body element
+        return cp is None or any(capped(bb, nu) for nu in range(len(bb), order + 1))
 
     def emit(bb):
-        if len(bb) == 0 or not rpe_admissible(bb) or not _couples_to_zero([b[1] for b in bb]):
+        if len(bb) == 0 or not capped(bb, len(bb)) or not rpe_admissible(bb) \
+                or not _couples_to_zero([b[1] for b in bb]):
             return
         nl = tuple((b[0], b[1]) for b in bb)
         if nl not in seen:
@@ -138,10 +166,17 @@ def build_spec(NZ, order, totaldegree, wL=1.5, tol=1e-9):
         for i in range(start, len(A)):
             if lvl + Alev[i] > md + tol:                         # A sorted ascending -> prune tail
                 break
-            bb.append(A[i]); dfs(i, bb, lvl + Alev[i]); bb.pop()
+            bb.append(A[i])
+            if extendable(bb):
+                dfs(i, bb, lvl + Alev[i])
+            bb.pop()
 
     dfs(0, [], 0.0)
-    return mb, Rnl, ylm_spec(maxl1)
+    if cp is None:
+        return mb, Rnl, ylm_spec(maxl1)
+    used = {tuple(b) for bb in mb for b in bb}
+    Rnl = [nl for nl in Rnl if nl in used]
+    return mb, Rnl, ylm_spec(max(l for _, l in Rnl))
 
 
 class EmbeddingSpec(NamedTuple):

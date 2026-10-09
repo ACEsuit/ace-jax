@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **`--nmax-by-order` and `--lmax-by-order`** (`aj fit`, `aj basis`) set a
+  maximum radial and angular degree for each correlation order, as
+  pacemaker's `nradmax_by_orders` and `lmax_by_orders` do. Without them, the
+  basis is unchanged.
 - **`export_lammps` keeps the fast layouts for large models.** Before, if one
   32768-row block did not fit in GPU memory, `layout="auto"` used `sparse`.
   That was 15 times slower for a 1461-function silicon model on an A100. Now

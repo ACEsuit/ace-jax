@@ -508,6 +508,10 @@ def cmd_basis(a):
     return auth
 
 
+def _int_list(s):
+    return tuple(int(x) for x in str(s).replace(" ", "").strip("[]()").split(","))
+
+
 def add_basis_args(p, *, fit):
     """The basis-definition flags, shared by `aj basis` and `aj fit`.  On `aj fit`
     the embedding flag is --basis-embedding (--embedding is the GP species
@@ -532,6 +536,12 @@ def add_basis_args(p, *, fit):
     p.add_argument("--basis-embedding" if fit else "--embedding", default=None,
                    help="frozen element embedding of the basis: a JSON table {Z, emb} or 'identity' "
                         "(builds ace_embedding_model: ace1-compatible, factorised radial)")
+    p.add_argument("--nmax-by-order", type=_int_list, default=None,
+                   help="comma-separated cap on the radial degree n of each many-body term, per correlation order "
+                        "from 1 (pacemaker's nradmax_by_orders; the last entry repeats)")
+    p.add_argument("--lmax-by-order", type=_int_list, default=None,
+                   help="comma-separated cap on l per correlation order (pacemaker's lmax_by_orders); with "
+                        "--wL 1 the TotalDegree level is pacemaker's power order")
     p.add_argument("--d-max", type=int, default=None, help="cap on per-order channel widths (default lossless)")
     p.add_argument("--maxl", type=int, default=None)
     p.add_argument("--reduction", choices=["pca", "truncate"], default="pca")

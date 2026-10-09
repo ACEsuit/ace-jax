@@ -25,6 +25,12 @@ $$
   with radial degree $n$ and angular degree $l$. `--wL` is 1.5 by default,
   so angular degree costs more than radial degree. This follows
   `TotalDegree` in ACEpotentials.
+- `--nmax-by-order` and `--lmax-by-order` set a maximum $n$ and $l$ for
+  each correlation order, in a comma-separated list that starts at order 1.
+  If the list is shorter than `--order`, its last value applies to the
+  higher orders. They are the `nradmax_by_orders` and `lmax_by_orders`
+  settings of pacemaker. With `--wL 1`, `--max-degree` then gives the power
+  order of pacemaker.
 - The **coupling coefficients** turn products of radial functions and
   spherical harmonics into invariant B functions. The `ace-jax-coupling`
   library calculates them at the first build of a basis specification.
