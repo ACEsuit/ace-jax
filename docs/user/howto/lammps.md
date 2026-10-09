@@ -81,9 +81,31 @@ five-component alloy, this is 1.2 to 1.4 times faster.
 
 | Layout | What it does | When `"auto"` picks it |
 |---|---|---|
-| `matrix` | reads the LAMMPS neighbour list directly, copied only when LAMMPS rebuilds it; no per-step packing | `k_dense` and `max_neighbors` given, the installed lammps-jax supports it, and one block fits in memory |
+| `matrix` | reads the LAMMPS neighbour list directly, copied only when LAMMPS rebuilds it; no per-step packing | `k_dense` and `max_neighbors` given, the installed lammps-jax supports it, and a block fits in memory |
 | `dense` | packs the edge buffer into per-atom slots every step | `k_dense` given and `matrix` not chosen |
-| `sparse` | an edge list | no `k_dense`, or one dense block does not fit in memory |
+| `sparse` | an edge list | no `k_dense`, or no dense block fits in memory |
+
+## GPU memory
+
+The `matrix` and `dense` layouts evaluate the atoms in blocks of rows. One
+block sets the peak memory. `export_lammps` uses the largest block that fits
+in half of the GPU memory. It starts at 32768 rows and halves the block down to
+1024 rows. If no block fits, `layout="auto"` uses `sparse`.
+
+By default, `export_lammps` reads the memory of the GPU that does the export.
+If LAMMPS runs on a different GPU, give its memory:
+
+```python
+export_lammps(model, meta, "si_bundle.json", ...,
+              device_memory=30e9)                          # bytes JAX can use on the LAMMPS GPU
+```
+
+`device_memory` is the memory that JAX can use, not the total memory of the
+GPU. By default, JAX uses 75% of the GPU memory. For a 40 GB A100, use
+approximately 30e9. `block_rows` sets the block size directly.
+
+The bundle records the block size as `ace_jax.block_rows`. It also records
+`ace_jax.device_memory` and `ace_jax.dense_budget`.
 
 A LAMMPS plugin that is older than the lammps-jax Python package does not
 accept a `matrix` bundle. To correct this, build the plugin again at the

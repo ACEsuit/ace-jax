@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **`export_lammps` keeps the fast layouts for large models.** Before, if one
+  32768-row block did not fit in GPU memory, `layout="auto"` used `sparse`.
+  That was 15 times slower for a 1461-function silicon model on an A100. Now
+  it makes the block smaller, down to 1024 rows, and uses `sparse` only if no
+  block fits.
+- **`export_lammps(device_memory=...)`** sets the memory of the GPU that runs
+  LAMMPS, in bytes that JAX can use. Use it when you export on a different
+  machine. `block_rows=` sets the block size. The bundle records both.
 - **`aj calibrate` refuses an `--uq ard-gp` posterior** (or a `gp_model.npz`)
   with a clear message. Before, it failed later with a missing `model.npz` or
   a `KeyError`.
