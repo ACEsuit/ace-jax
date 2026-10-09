@@ -59,6 +59,12 @@ aj eval --model out_gp/gp_model.npz  --data new.xyz $K --out pred.xyz   # adds a
 aj eval --model model.yace --data new.xyz $K                            # PACE works too; --prefix renames ace_
 ```
 
+Per-order caps: `--nmax-by-order 15,6,4,3,2,2 --lmax-by-order 0,4,3,2,1,0` (pacemaker's
+`nradmax_by_orders`/`lmax_by_orders`, from correlation order 1, the last entry repeating;
+`BasisSpec.nmax_by_order`/`lmax_by_order`, `build_model(nmax_by_order=, lmax_by_order=)`) prune
+the TotalDegree basis per order (categorical bases only, not `--basis-embedding`); with `--wL 1`
+the degree is pacemaker's power order.
+
 `aj fit` needs a basis — `--order/--max-degree` (built in the fit; `--elements`
 defaults to the species in the data, `--basis-embedding` adds a frozen element
 embedding) or `--model <file.npz>` — plus `--out` and either `--train` [+ `--test`]
