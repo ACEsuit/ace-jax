@@ -68,8 +68,7 @@ The fit writes these files:
 
 `--radial-basis` is a basis option. It does not need `--learn-radial`. With
 `--learn-radial`, the learner changes the coefficients of the functions in
-the same way for the two bases. To make a basis with the shape of a
-pacemaker basis, use `--radial-basis sbessel` with `--wL 1`.
+the same way for the two bases.
 
 !!! note
     ace-jax does not change `sbessel` radials to splines at deployment. They
