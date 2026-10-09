@@ -17,7 +17,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from ..basis.radial_init import from_table, legendre_3term
-from ..eval.radial import agnesi_normalized, env_poly2sx, poly_recursion, spline_eval
+from ..eval.radial import env_poly2sx, poly_recursion, spline_eval
 from ..eval.splinify import to_spline  # noqa: F401  (to_analytic's inverse, for deployment)
 from .data import flat_edges
 
@@ -54,6 +54,9 @@ def widen_radial(model, n_q):
     old = model.rnl_Wnlq.shape[-1]
     if n_q < old:
         raise ValueError(f"widen_radial: n_q={n_q} < current n_q={old}")
+    if model.rnl_basis == "sbessel":          # g_k for k < old are unchanged by asking for more
+        W = jnp.pad(model.rnl_Wnlq, ((0, 0), (0, 0), (0, 0), (0, n_q - old)))
+        return dataclasses.replace(model, rnl_Wnlq=W)
     A, B, C = _legendre(n_q)
     for name, ref in (("polys_A", A), ("polys_B", B), ("polys_C", C)):
         if not np.allclose(np.asarray(getattr(model, name)), np.asarray(ref[:old]),
@@ -64,11 +67,10 @@ def widen_radial(model, n_q):
 
 
 def poly_env(model, r, zi, zj):
-    """(E, n_q): env(x) P_q(x) per edge; the tensor radials are
+    """(E, n_q): the tensor radials' basis per edge (env(x) P_q(x), or g_k(r) for rnl_basis
+    "sbessel": `ACEModel.rnl_basis_values`); the radials are
     einsum('eq,enq->en', poly_env, Wnlq[zi, zj])."""
-    x = agnesi_normalized(r, model.rnl_transform[zi, zj])
-    env = env_poly2sx(x, model.rnl_envelope[zi, zj])
-    return env[:, None] * poly_recursion(x, model.polys_A, model.polys_B, model.polys_C)
+    return model.rnl_basis_values(r, zi, zj)
 
 
 def to_analytic(model, n_q, n_x=2001):
@@ -100,8 +102,21 @@ def to_analytic(model, n_q, n_x=2001):
     return out, rel
 
 
-def _uniform_moment(model, n_uniform):
-    """(NZ, NZ, n_q, n_q): mean over a uniform x-grid of p p^T, p = env(x) P(x)."""
+def _uniform_moment(model, n_uniform, r_min=0.5):
+    """(NZ, NZ, n_q, n_q): mean over a uniform x-grid of p p^T, p = env(x) P(x); for rnl_basis
+    "sbessel", over a uniform r-grid on [r_min, rc) of the basis g_k(r)."""
+    if model.rnl_basis == "sbessel":
+        NZ = model.rnl_Wnlq.shape[0]
+        rc = np.asarray(model.pair_envelope[..., 0])
+        out = []
+        for i in range(NZ):
+            row = []
+            for j in range(NZ):
+                r = jnp.linspace(r_min, rc[i, j], n_uniform + 1)[:-1]
+                p = model.rnl_basis_values(r, jnp.full(r.shape, i), jnp.full(r.shape, j))
+                row.append(p.T @ p / n_uniform)
+            out.append(jnp.stack(row))
+        return jnp.stack(out)
     x = jnp.linspace(-1.0, 1.0, n_uniform)
     P = poly_recursion(x, model.polys_A, model.polys_B, model.polys_C)          # (n_x, n_q)
     env = env_poly2sx(x[None, None, :], model.rnl_envelope[:, :, None, :])     # (NZ, NZ, n_x)
@@ -153,7 +168,19 @@ def normalise(V, Q, active):
 
 def roughness_matrix(model):
     """D2 (n_q, n_q) = int_{-1}^{1} P_q''(x) P_p''(x) dx by Gauss-Legendre with
-    n_q + 2 nodes or more (exact for these polynomial degrees)."""
+    n_q + 2 nodes or more (exact for these polynomial degrees).  For rnl_basis "sbessel",
+    int_0^rc g_q''(r) g_p''(r) dr over the first pair's cutoff (all pairs share it in a built
+    basis), by Gauss-Legendre with 4 n_q + 64 nodes."""
+    if model.rnl_basis == "sbessel":
+        n_q = model.rnl_Wnlq.shape[-1]
+        rc = float(model.pair_envelope[0, 0, 0])
+        xg, wg = np.polynomial.legendre.leggauss(4 * n_q + 64)
+        rg, wr = 0.5 * rc * (xg + 1.0), 0.5 * rc * wg
+        z = jnp.zeros((), jnp.int32)
+        g = lambda r: model.rnl_basis_values(r[None], z[None], z[None])[0]        # noqa: E731
+        d2 = jax.vmap(jax.jacfwd(jax.jacfwd(g)))(jnp.asarray(rg))
+        D2 = (d2 * jnp.asarray(wr)[:, None]).T @ d2
+        return (D2 + D2.T) / 2
     n_q = model.polys_A.shape[0]
     xg, wg = np.polynomial.legendre.leggauss(max(64, n_q + 2))
     p = lambda x: poly_recursion(x, model.polys_A, model.polys_B, model.polys_C)

@@ -107,6 +107,13 @@ over a file's `basis:`, `--train` over its `data:` (each logged as an override).
   `ACECalculator`/`export_lammps` spline it. Works with `--model` and with
   `--order/--max-degree`; not with embedding models (issue #31). Advanced priors:
   `ace_jax.fit.radial_learn.fit_radial`.
+- **Radial basis: `--radial-basis poly|sbessel`** (a basis flag, no
+  `--learn-radial` needed; `BasisSpec.radial_basis`, `build_model(rnl_basis=)`,
+  `ACEModel.rnl_basis`). `sbessel` is pacemaker's simplified spherical Bessel
+  basis g_k(r) on [0, rc), zero from rc, no transform or envelope:
+  R_nl = sum_k W_nlk g_k. The radial learner works on either. `lean`'s
+  `spline_tol="auto"` never splines an sbessel radial (`to_spline` refuses it;
+  `radial_table` tabulates it instead). Saved in meta_json as `rnl_basis`.
 
 These constraints are validated up front. A bad combination raises a
 `ValueError` that names the fix, so read it rather than retrying variants.
