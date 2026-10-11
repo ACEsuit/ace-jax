@@ -14,6 +14,10 @@ def _dump(path, obj):
 def _write_stage(out, name, payload):
     if name == "data" and payload.perm is not None:
         np.save(out / "split_perm.npy", payload.perm)
+    elif name == "radial_candidate":           # hours of learning: kept even if the gate then fails
+        key, W, info = payload
+        np.savez(out / f"radial_lam={key}.npz", rnl_Wnlq=np.asarray(W), steps=info["steps"],
+                 theta_final=info["theta_final"])
     elif name == "map":
         _dump(out / "theta_map.json", payload.theta._asdict())
         if payload.convergence is not None:
@@ -42,13 +46,14 @@ def _write_ard(out, ard):
     _dump(out / "ard.json", json_safe(ard.report))      # strict JSON: an infinite q is written "inf"
 
 
-def checkpoint_writer(out):
+def checkpoint_writer(out, names=None):
     """An on_stage callback for fit(): writes split_perm.npy, theta_map.json, map_convergence.json,
     map_restarts.json, draws_*.npy, laplace_info.json, and (uq "ard") posterior.npz,
     ard.json and the ARD-mean model.npz as each stage finishes (the run.py layout), so they survive a failure in a
-    later stage."""
+    later stage.  Learned radial candidates go to radial_lam=<key>.npz (rnl_Wnlq, steps, theta_final).
+    names: write only these stages (None: all)."""
     out = pathlib.Path(out); out.mkdir(parents=True, exist_ok=True)
-    return lambda name, payload: _write_stage(out, name, payload)
+    return lambda name, payload: (names is None or name in names) and _write_stage(out, name, payload)
 
 
 def _metrics_csv(path, metrics, split):

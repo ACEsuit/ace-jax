@@ -53,6 +53,9 @@ The fit writes these files:
   [below](#deployment-spline-speed)). If the gate keeps the initial radials,
   the file has no mark.
 - `fit/fit.yaml`: all settings of the run, including the radial options.
+- `fit/radial_lam=<weight>.npz`: the learned radials of each roughness weight
+  (`rnl_Wnlq`). The fit writes each file when the learning for that weight
+  stops, before the gate. These files stay if a later stage fails.
 
 `--learn-radial` does not support species-embedded bases
 (`--basis-embedding`) at this time.

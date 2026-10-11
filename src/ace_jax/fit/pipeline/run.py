@@ -24,7 +24,8 @@ class FitResult(NamedTuple):
 
 def fit(cfg, data, log=print, on_stage=None):
     """Run the pipeline.  on_stage(name, payload), if given, is called as each
-    expensive stage finishes ("data" -> FitData, "radial" -> RadialResult when
+    expensive stage finishes ("data" -> FitData, "radial_candidate" -> (key, W, info) as each
+    learned radial candidate finishes, before the gate, and "radial" -> RadialResult when
     cfg.learn_radial, "map" -> MapFit, "rungs" -> Rungs,
     "ard" -> ARDResult and "model" -> the ARD-mean model.npz arrays when uq == "ard"),
     so a driver can write those results before a later stage (e.g. POPS or
@@ -43,7 +44,8 @@ def fit(cfg, data, log=print, on_stage=None):
     if cfg.learn_radial:
         from .radials import learn_radials
         with progress_stage("radial"):
-            data, radial = learn_radials(cfg, data, log=log)
+            data, radial = learn_radials(cfg, data, log=log,
+                                         checkpoint=lambda *a: stage("radial_candidate", a))
         stage("radial", radial)
     with progress_stage("problem"):
         b = build_problem(cfg, data)

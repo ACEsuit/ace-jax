@@ -239,6 +239,7 @@ def run(a):
 
 def _run_fit(a):
     from .fit.pipeline import fit, load_fit_data, write_outputs
+    from .fit.pipeline.outputs import checkpoint_writer
     from .fit.progress import stage
     cfg = _fit_config(a)
     with stage("data"):
@@ -250,7 +251,8 @@ def _run_fit(a):
     # pre-radial FitData -- its model, datasets and npz -- is not kept alive here for the whole run
     held = [data]
     del data
-    res = fit(cfg, held.pop())
+    # write_outputs writes the rest at the end; learned radials are hours of work, so keep them as they finish
+    res = fit(cfg, held.pop(), on_stage=checkpoint_writer(a.out, names=("radial_candidate",)))
     data = res.data
     a.noise = res.config.noise         # --noise auto as validate() resolved it: config.json and fit.yaml record that
     with stage("outputs"):
