@@ -1,0 +1,16 @@
+{"model": "ace/o4d16", "mode": "none", "n_atoms": 1000, "K": 28, "device": "cpu", "host": "moriarty", "temp_MB": 720.6}
+{"model": "ace/o4d16", "mode": "greedy", "n_atoms": 1000, "K": 28, "device": "cpu", "host": "moriarty", "temp_MB": 332.3}
+{"model": "ace/o4d20", "mode": "none", "n_atoms": 1000, "K": 28, "device": "cpu", "host": "moriarty", "temp_MB": 3935.9}
+{"model": "ace/o4d20", "mode": "greedy", "n_atoms": 1000, "K": 28, "device": "cpu", "host": "moriarty", "temp_MB": 636.1}
+{"model": "pace/f800", "mode": "none", "n_atoms": 1000, "K": 28, "device": "cpu", "host": "moriarty", "temp_MB": 435.2}
+{"model": "pace/f800", "mode": "greedy", "n_atoms": 1000, "K": 28, "device": "cpu", "host": "moriarty", "temp_MB": 74.6}
+{"model": "pace/f3200", "mode": "none", "n_atoms": 1000, "K": 28, "device": "cpu", "host": "moriarty", "temp_MB": 3151.3}
+{"model": "pace/f3200", "mode": "greedy", "n_atoms": 1000, "K": 28, "device": "cpu", "host": "moriarty", "temp_MB": 113.9}
+{"model": "ace/o4d16", "mode": "none", "n_atoms": 4096, "K": 28, "device": "gpu", "host": "lestrade", "temp_MB": 198.0}
+{"model": "ace/o4d16", "mode": "greedy", "n_atoms": 4096, "K": 28, "device": "gpu", "host": "lestrade", "temp_MB": 326.4}
+{"model": "ace/o4d20", "mode": "none", "n_atoms": 4096, "K": 28, "device": "gpu", "host": "lestrade", "temp_MB": 360.8}
+{"model": "ace/o4d20", "mode": "greedy", "n_atoms": 4096, "K": 28, "device": "gpu", "host": "lestrade", "temp_MB": 913.8}
+{"model": "pace/f800", "mode": "none", "n_atoms": 4096, "K": 28, "device": "gpu", "host": "lestrade", "temp_MB": 374.1}
+{"model": "pace/f800", "mode": "greedy", "n_atoms": 4096, "K": 28, "device": "gpu", "host": "lestrade", "temp_MB": 544.6}
+{"model": "pace/f3200", "mode": "none", "n_atoms": 4096, "K": 28, "device": "gpu", "host": "lestrade", "temp_MB": 2202.6}
+{"model": "pace/f3200", "mode": "greedy", "n_atoms": 4096, "K": 28, "device": "gpu", "host": "lestrade", "temp_MB": 1840.8}
