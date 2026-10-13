@@ -110,7 +110,7 @@ def block_rows_for(model, rows, k_dense, budget, itemsize, max_edges=None, prep=
 
 
 def neighbour_capacity(atoms, rcut, skin=1.0, slots="skin", margin=8, owned=1.1,
-                       list_headroom=0.5):
+                       list_headroom=0.5, procs=None):
     """lammps-jax buffer sizes for `atoms` (a periodic ase.Atoms, the structure
     the run starts from).  Returns max_atoms (owned + ghost shell rcut + skin
     deep perpendicular to each face -- the face spacings, 1/|reciprocal row|,
@@ -141,21 +141,33 @@ def neighbour_capacity(atoms, rcut, skin=1.0, slots="skin", margin=8, owned=1.1,
     crystal or liquid whose coordination within rcut stays within `margin` of
     the starting structure's.  If it does not, an atom overflows its slots and
     the step's energy and forces are NaN (the run fails loudly; never a
-    truncation)."""
+    truncation).
+
+    procs=(px, py, pz): one MPI rank's capacities on that processor grid (run
+    LAMMPS with `processors px py pz` to match): the subdomain's face spacings
+    are the cell's / p, so max_owned is the rank's share of the atoms (plus
+    3 sqrt(n) + 4: small subdomains fluctuate) and
+    max_atoms its own owned + ghost shell, which dominates small subdomains.  A
+    rank over capacity is a collective LAMMPS error, never a truncation."""
     if slots not in ("skin", "cutoff"):
         raise ValueError(f"slots must be 'skin' or 'cutoff', got {slots!r}")
     from ..eval import sparse_graph
     h = 1.0 / np.linalg.norm(atoms.cell.reciprocal(), axis=1)   # face spacings
+    p = np.ones(3) if procs is None else np.asarray(procs, float)
+    h = h / p                                                     # one rank's subdomain
     ghost = float(np.prod((h + 2 * (rcut + skin)) / h))
-    n = len(atoms)
+    n_all = len(atoms)
+    n = n_all / float(np.prod(p))
 
     def k_max(c):
         g = sparse_graph(atoms.positions, atoms.cell.array, atoms.pbc, c)
-        return int(np.bincount(g.senders, minlength=n).max())
+        return int(np.bincount(g.senders, minlength=n_all).max())
 
     k_list = k_max(rcut + skin)
     k_cut = k_max(rcut)
-    max_owned = int(np.ceil(owned * n))
+    # a rank's count fluctuates as atoms cross subdomain faces: at 32 atoms per rank one held 40 against
+    # owned x n = 36, so per-rank capacities add about 3 sigma of a Poisson count
+    max_owned = int(np.ceil(owned * n + (0 if procs is None else 3 * np.sqrt(n) + 4)))
     k_dense = (k_list if slots == "skin" else k_cut) + margin
     max_neighbors = max(k_list + margin, int(np.ceil((1 + list_headroom) * k_list)))
     return {"max_atoms": int(np.ceil(n * ghost * 1.1)), "max_owned": max_owned,
@@ -284,7 +296,7 @@ def make_energy_fn(model, n_species, layout, k_dense=None, type_map=None, n_rows
 def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
                   dtype="float64", layout="auto", type_elements=None, max_owned=None,
                   lean=True, spline_tol=AUTO, spline_intervals=None, max_neighbors=None,
-                  radial_table=None, device_memory=None, block_rows=None):
+                  radial_table=None, device_memory=None, block_rows=None, platform=None):
     """Write a lammps-jax JSON bundle for `model`; returns the bundle dict.
 
     Capacities: max_atoms (owned + ghost positions); max_edges (sparse / dense:
@@ -317,6 +329,12 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
     BUNDLE_BLOCK_ROWS for an explicit layout without device_memory, else
     `block_rows_for`: the largest of BUNDLE_BLOCK_ROWS halved down to
     MIN_BLOCK_ROWS whose estimate fits the budget.
+
+    platform: the PJRT plugin the bundle runs on, "cuda" or "cpu" (lammps-jax's
+    export_model(platform=), after its CPU backend; None keeps its default, cuda).
+    Lowering is per platform: the dense family's cumsum lowered for cuda aborts
+    XLA's CPU compiler.  For a CPU run, pass device_memory too (a rank's share of
+    host RAM): the default queries the exporting process's device.
 
     layout="auto" picks a dense-family layout when k_dense is given and some
     block fits (estimate_a_bytes for that many rows, of the row capacity --
@@ -423,8 +441,10 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
     graph = ({"max_neighbors": max_neighbors, "max_owned": max_owned} if layout == "matrix"
              else {"max_edges": max_edges})
     bundle = export_model(energy_fn=energy_fn, path=path, max_atoms=max_atoms, cutoff=rcut,
-                          unit_style="metal", precision=dtype, n_species=n_species, **graph)
+                          unit_style="metal", precision=dtype, n_species=n_species, **graph,
+                          **({"platform": platform} if platform else {}))
     bundle["ace_jax"] = {"layout": layout, "elements": model_z, "type_elements": type_elements,
+                         "platform": platform or "cuda",
                          "k_dense": int(k_dense) if layout in ("dense", "matrix") else None,
                          # not "max_owned": lammps-jax reads that key from anywhere in
                          # the file and would take it as its own contract's

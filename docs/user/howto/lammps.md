@@ -11,8 +11,9 @@ the GPU. ace-jax writes the program and its metadata into one JSON
        `pip install "lammps-jax @ git+https://github.com/abhijeetgangan/lammps-jax"`.
     2. Build its LAMMPS plugin. Use the lammps-jax instructions.
 
-    The ace-jax CI tests the export with lammps-jax commit `4a7f4fb`. The pair
-    style runs only on a GPU (KOKKOS with CUDA).
+    The ace-jax CI tests the export with lammps-jax commit `96ccc72`. The pair
+    style runs on a GPU (KOKKOS with CUDA). It also runs on CPUs (KOKKOS with
+    OpenMP) if you export with `platform="cpu"`.
 
 ## Export
 

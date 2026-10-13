@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **`export_lammps(platform="cpu")`** writes a bundle for the lammps-jax CPU
+  backend. This needs a lammps-jax version with `export_model(platform=)`.
+  Also set `device_memory` to the host memory of one MPI rank.
+- **`neighbour_capacity(procs=(px, py, pz))`** gives the capacities of one MPI
+  rank on that processor grid. Run LAMMPS with `processors px py pz` to match.
 - **`--nmax-by-order` and `--lmax-by-order`** (`aj fit`, `aj basis`) set a
   maximum radial and angular degree for each correlation order, as
   pacemaker's `nradmax_by_orders` and `lmax_by_orders` do. Without them, the
