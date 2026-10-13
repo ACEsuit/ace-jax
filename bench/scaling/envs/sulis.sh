@@ -27,11 +27,13 @@
 # plugin against it (CUDA_DEV=nvcc129 bash sulis.sh nvcc129 lammps_dev plugin env_json).
 #
 # Steps: sources venv torch_cu126 neighbours lammps lmp_python symmetrix_py lammps_dev plugin env_json
+# (lammps_cpu, the CPU-only tree with ML-QUIP for the CPU timing rows, runs on its own: sulis-build-cpu.sbatch)
 set -euo pipefail
 ROOT=${BENCH_ROOT:-$HOME/bench-scaling}
 ACEJAX=${ACEJAX_SRC:-$ROOT/ace-jax}          # rsynced from a checkout (src bench fixtures julia pyproject.toml)
 LAMMPS=$ROOT/lammps
 BUILD=$LAMMPS/build-kk
+BUILD_CPU=$LAMMPS/build-cpu                    # lammps_cpu: no CUDA (the compute nodes have no GPU)
 LAMMPS_DEV=$ROOT/lammps-dev
 BUILD_DEV=$LAMMPS_DEV/build-kk
 VENV=$ROOT/venv
@@ -137,6 +139,28 @@ lammps() {
     -D PKG_ML-PACE=ON -D PKG_PYTHON=ON -D Python_EXECUTABLE="$VENV/bin/python" \
     -D SYMMETRIX_KOKKOS=ON -D SYMMETRIX_SPHERICART_CUDA=ON
   cmake --build "$BUILD" -j "$JOBS"
+}
+
+lammps_cpu() {           # CPU-only tree for the CPU timing rows: ML-PACE, ML-QUIP (GAP's pair quip) and Symmetrix
+  # on Kokkos OpenMP, no CUDA, so it runs on Sulis's GPU-less compute nodes.  Same source tree as `lammps`
+  # (patch_10Sep2025 + Symmetrix).  ML-QUIP downloads and builds QUIP; LAMMPS's ML-QUIP.cmake sets F95FLAGS but
+  # QUIP (2026) reads F90FLAGS, and libAtoms/System.F90 needs -ffree-line-length-none (as envs/lestrade.sh).
+  [ -x "$BUILD_CPU/lmp" ] && return 0
+  cmake327
+  set +u; module unload CUDA 2>/dev/null || true; set -u
+  export F90FLAGS="-x f95-cpp-input -ffree-line-length-none -ffree-form -fno-second-underscore -fPIC"
+  rm -rf "$BUILD_CPU"
+  cmake -S "$LAMMPS/cmake" -B "$BUILD_CPU" \
+    -D CMAKE_BUILD_TYPE=Release -D CMAKE_CXX_STANDARD=20 -D CMAKE_CXX_STANDARD_REQUIRED=ON \
+    -D CMAKE_CXX_COMPILER=g++ -D BUILD_SHARED_LIBS=ON -D BUILD_MPI=ON -D BUILD_OMP=ON \
+    -D PKG_KOKKOS=ON -D Kokkos_ENABLE_OPENMP=ON -D Kokkos_ENABLE_SERIAL=ON -D Kokkos_ARCH_ZEN2=ON \
+    -D PKG_ML-PACE=ON -D PKG_ML-QUIP=ON -D DOWNLOAD_QUIP=ON \
+    -D SYMMETRIX_KOKKOS=ON -D SYMMETRIX_SPHERICART_CUDA=OFF
+  cmake --build "$BUILD_CPU" -j "$JOBS"
+  printf '%s\n' '#!/usr/bin/env bash' 'source /etc/profile.d/modules.sh 2>/dev/null || true' \
+    "module purge; module load ${MODS/ CUDA\/12.8.0/}" "export LD_LIBRARY_PATH=$BUILD_CPU:\${LD_LIBRARY_PATH:-}" \
+    "exec $BUILD_CPU/lmp \"\$@\"" > "$ROOT/lmp-cpu.sh"
+  chmod +x "$ROOT/lmp-cpu.sh"
 }
 
 lmp_python() {

@@ -1,0 +1,5 @@
+[project]
+name = "ac-mace"
+version = "0"
+requires-python = ">=3.10,<3.13"
+dependencies = ["mace-torch", "torch", "pyyaml", "extxyz", "matscipy"]

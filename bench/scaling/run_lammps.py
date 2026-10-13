@@ -19,10 +19,14 @@ from ase.io import write
 from scaling.structures import supercell
 
 KOKKOS = {"acejax": "newton on neigh half", "mlpace": "newton on neigh half",
-          "mace": "newton on neigh half"}
+          "mace": "newton on neigh half",                      # gap: CPU only, no KOKKOS
+          "mace-xl": "newton on neigh half", "mace-xl-f32": "newton on neigh half"}
+# Symmetrix-XL (bench/scaling/envs/sulis-xl.sh): its fast path is pair_style symmetrix/mace[/float32]/kk with
+# a JIT-compiled R1 artifact, so it runs Kokkos on the CPU too (the non-kk style is the old evaluator)
+XL = {"mace-xl": ("symmetrix/mace/kk", "float64"), "mace-xl-f32": ("symmetrix/mace/float32/kk", "float32")}
 
 
-def _pair(style, model_path, elements, device):
+def _pair(style, model_path, elements, device, extra=None):
     els = " ".join(elements)
     if style == "acejax":
         return f"pair_style jax/kk ${{pjrt}}\npair_coeff * * {model_path}\n"
@@ -31,12 +35,39 @@ def _pair(style, model_path, elements, device):
                f"pair_coeff * * {model_path} {els}\n"
     if style == "mace":                     # Symmetrix: element-specific .json
         return f"pair_style symmetrix/mace\npair_coeff * * {model_path} {els}\n"
+    if style in XL:                         # extra: the R1 artifact fragment (xl_pair_args); GPU one rank
+        dd = "no_domain_decomposition" if device == "gpu" else "mpi_message_passing"
+        return (f"pair_style {XL[style][0]} {dd} streamed_edges direct profile speed {extra}\n"
+                f"pair_coeff * * {model_path} {els}\n")
     if style == TRIM:                       # PR 309 plugin, then the juliac --trim library
         return f"plugin load ${{aceplugin}}\npair_style ace\npair_coeff * * {model_path} {els}\n"
+    if style == "gap":                       # QUIP takes atomic numbers, and the xml label picks the Potential
+        if not extra:                        # "xml_label=None" would load nothing QUIP can name
+            raise ValueError("pair quip needs the GAP xml_label (row['quip_label'])")
+        from ase.data import atomic_numbers
+        zs = " ".join(str(atomic_numbers[e]) for e in elements)
+        return f'pair_style quip\npair_coeff * * {model_path} "Potential xml_label={extra}" {zs}\n'
     raise ValueError(style)
 
 
 TRIM = "acepotentials-trim"
+
+
+def xl_pair_args(model_json, device, style):
+    """(pair_style fragment naming the R1 JIT artifact, None) for a Symmetrix-XL model on this device at the
+    style's precision, else (None, why): sulis-xl.sh's model-xl.jit-{cpu,cuda}.json next to model-xl.json."""
+    m = pathlib.Path(model_json)
+    side = m.with_name(m.stem + (".jit-cuda.json" if device == "gpu" else ".jit-cpu.json"))
+    if not m.is_file() or not side.exists():
+        return None, f"no Symmetrix-XL model/R1 artifact: {side if m.is_file() else m}"
+    e = json.loads(side.read_text()).get(XL[style][1], {})
+    if not e.get("args"):
+        return None, f"R1 JIT refused: {e.get('error', 'no entry')}"[:1500]
+    t = e["args"].split()        # R1 only: M0/R0 operator modules are capacity-profile accelerators (`profile speed`)
+    return " ".join(f"{k} {v}" for k, v in zip(t[::2], t[1::2]) if k in XL_R1_KEYS), None
+
+
+XL_R1_KEYS = ("jit_host_artifact", "jit_device_artifact", "jit_device_blocks_per_compute_unit")
 
 
 def lammps_vars(style, pjrt=None, aceplugin=None):
@@ -75,9 +106,10 @@ def finished(returncode, log):
 
 
 def lammps_input(style, model_path, elements, data_path, device, run_steps, dump=None,
-                 warmup=50):
+                 warmup=50, pair_extra=None, procs=None):
     txt = ("units metal\natom_style atomic\nboundary p p p\natom_modify map yes\n"
-           f"read_data {data_path}\n" + _pair(style, model_path, elements, device) +
+           + (f"processors {' '.join(map(str, procs))}\n" if procs else "") +
+           f"read_data {data_path}\n" + _pair(style, model_path, elements, device, pair_extra) +
            "neighbor 1.0 bin\nneigh_modify every 1 delay 0 check yes\n"
            "timestep 0.0001\nfix 1 all nve\nthermo_style custom step pe atoms\nthermo 50\n"
            "thermo_modify format float %.17g\n")       # full precision: parity reads pe
@@ -111,7 +143,7 @@ def read_dump_forces(path):
     return rows[np.argsort(rows[:, 0]), 1:4]
 
 
-def capacity(at, rcut, skin=1.0, tight=False, list_headroom=0.5):
+def capacity(at, rcut, skin=1.0, tight=False, list_headroom=0.5, procs=None):
     """lammps-jax buffer sizes for this structure (ace_jax.export.lammps.
     neighbour_capacity, margin 8): owned + ghost atoms (the periodic shell
     within rcut + skin of each face) size the LAMMPS position buffer
@@ -130,10 +162,12 @@ def capacity(at, rcut, skin=1.0, tight=False, list_headroom=0.5):
     stays within 8 of the start (stable MD); an overflow is a NaN step.
 
     list_headroom (bench --list-headroom): the matrix list's headroom over
-    k(rcut + skin); 0.5 from one observed overflow (neighbour_capacity)."""
+    k(rcut + skin); 0.5 from one observed overflow (neighbour_capacity).
+
+    procs: one MPI rank's capacities on that `processors` grid (a CPU run)."""
     from ace_jax.export.lammps import neighbour_capacity
     c = neighbour_capacity(at, rcut, skin=skin, slots="cutoff" if tight else "skin", margin=8,
-                           list_headroom=list_headroom)
+                           list_headroom=list_headroom, **({"procs": procs} if procs else {}))
     return {"max_atoms": c["max_atoms"], "k_max": c["k_list"], "k_dense": c["k_dense"],
             "max_edges": c["max_edges"], "max_owned": c["max_owned"],
             "max_neighbors": c["max_neighbors"]}
@@ -149,14 +183,18 @@ def _export_inprocess(row, at, dtype, workdir, layout="auto", slots="skin", list
     from ace_jax.eval import load
     from ace_jax.export.lammps import export_lammps
     model, meta, _ = load(row["path"])
-    cap = capacity(at, float(meta["rcut"]), tight=slots == "cutoff", list_headroom=list_headroom)
+    procs = row.get("procs")                         # a CPU run: one rank's subdomain, lowered for XLA:CPU
+    cap = capacity(at, float(meta["rcut"]), tight=slots == "cutoff", list_headroom=list_headroom, procs=procs)
     pathlib.Path(workdir).mkdir(parents=True, exist_ok=True)
     t0 = time.perf_counter()
     b = export_lammps(model, meta, pathlib.Path(workdir) / "bundle.json", max_atoms=cap["max_atoms"],
                       max_edges=cap["max_edges"], k_dense=cap["k_dense"], dtype=dtype, layout=layout,
                       type_elements=[atomic_numbers[e] for e in row["elements"]],  # data-file order
                       max_owned=cap["max_owned"], max_neighbors=cap["max_neighbors"],
-                      **({"spline_tol": row["spline_tol"]} if "spline_tol" in row else {}))
+                      **({"spline_tol": row["spline_tol"]} if "spline_tol" in row else {}),
+                      **({"platform": "cpu", "device_memory": row["device_memory"]} if procs else {}),
+                      # opt-in recursive product basis (ace_jax.eval.aa_dag; "greedy" | "prefix"), an ace-jax with it
+                      **({"aa_dag": os.environ["ACEJAX_EXPORT_AA_DAG"]} if os.environ.get("ACEJAX_EXPORT_AA_DAG") else {}))
     return (str(pathlib.Path(workdir) / "bundle.json"), b["ace_jax"]["layout"], time.perf_counter() - t0,
             splined_meta(b["ace_jax"]))
 
@@ -177,12 +215,15 @@ def export_bundle(row, at, dtype, workdir, layout="auto", slots="skin", list_hea
     a quarter of it.  Returns (bundle path, layout used, export seconds); a
     row's `spline_tol` is passed to export_lammps, and `info` (a dict), when
     given, gets "splined" (`splined_meta` of the bundle)."""
-    keep = {k: row[k] for k in ("name", "system", "path", "elements", "spline_tol") if k in row}
+    keep = {k: row[k] for k in ("name", "system", "path", "elements", "spline_tol", "procs", "device_memory")
+            if k in row}
     cmd = [sys.executable, str(pathlib.Path(__file__).resolve()), "--export", json.dumps(keep),
            str(len(at)), dtype, str(workdir), layout, slots, str(list_headroom)]
     bench = str(pathlib.Path(__file__).resolve().parents[1])     # so the child imports scaling
     env = {**os.environ, "PYTHONPATH": os.pathsep.join(
-        [bench] + [x for x in os.environ.get("PYTHONPATH", "").split(os.pathsep) if x])}
+        [bench] + [x for x in os.environ.get("PYTHONPATH", "").split(os.pathsep) if x]),
+           # the child is in the timed process tree, so its 75% pool was the GPU peak (30.04 GiB for every bundle)
+           "XLA_PYTHON_CLIENT_PREALLOCATE": "false"}
     p = subprocess.run(cmd, capture_output=True, text=True, timeout=3600, env=env)
     lines = [l for l in p.stdout.splitlines() if l.startswith("{")]
     if p.returncode != 0 or not lines:
@@ -248,12 +289,29 @@ def _trim_build(row):
 
 
 def run_case(row, n_atoms, dtype, device, lmp, ranks, workdir, pjrt=None, prev=None,
-             slots="skin", list_headroom=0.5, aceplugin=None):
+             slots="skin", list_headroom=0.5, aceplugin=None, threads=1):
+    """One LAMMPS case.  CPU: `ranks` MPI ranks of `threads` cores each on the
+    proc_grid(ranks) `processors` grid, every code alike; ace-jax runs lammps-jax's
+    host backend with a bundle lowered for XLA:CPU and sized for one rank's
+    subdomain, its dense budget a rank's share of the node's RAM."""
     work = pathlib.Path(workdir); work.mkdir(parents=True, exist_ok=True)
-    at = supercell(row["system"], n_atoms)
+    procs = proc_grid(ranks) if device == "cpu" and ranks > 1 else None
+    if device == "cpu" and row["code"].startswith("acejax"):
+        procs = procs or (1, 1, 1)
+        row = {**row, "procs": list(procs),
+               "device_memory": os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") // ranks}
+    kw = {"threads": threads, "procs": procs}
+    at = supercell(row["system"], n_atoms, rattle=row.get("rattle", 0.0))
     data = work / "x.data"
     write(data, at, format="lammps-data", specorder=row["elements"], masses=True)
-    style = "acejax" if row["code"].startswith("acejax") else row["code"]    # mlpace, mace
+    style = "acejax" if row["code"].startswith("acejax") else row["code"]    # mlpace, mace, mace-xl
+    if style in XL:
+        args, why = xl_pair_args(row.get("symmetrix_xl") or "", device, style)
+        if why:
+            return {"code": row["code"], "mode": "lammps", "model": row["name"], "size": row["size"],
+                    "system": row["system"], "n_atoms": n_atoms, "device": device, "dtype": dtype,
+                    "status": "unsupported", "error": why}
+        row = {**row, "pair_extra": args}
     if style == "mace" and not pathlib.Path(row.get("symmetrix") or "").exists():  # e.g. MH-1
         return {"code": row["code"], "mode": "lammps", "model": row["name"], "size": row["size"],
                 "system": row["system"], "n_atoms": n_atoms, "device": device, "dtype": dtype,
@@ -268,11 +326,11 @@ def run_case(row, n_atoms, dtype, device, lmp, ranks, workdir, pjrt=None, prev=N
         return _run_lammps(row, style, row["trim_lib"], data, work, n_atoms, dtype, device, lmp,
                            ranks, pjrt, steps, warmup,
                            {"trim_lib": row["trim_lib"], "trim_build": _trim_build(row)},
-                           aceplugin=aceplugin)
+                           aceplugin=aceplugin, **kw)
     if style != "acejax":
-        model = row.get("symmetrix") if style == "mace" else row["path"]
+        model = row.get("symmetrix") if style == "mace" else row.get("symmetrix_xl") if style in XL else row["path"]
         return _run_lammps(row, style, model, data, work, n_atoms, dtype, device, lmp, ranks,
-                           pjrt, steps, warmup, {})
+                           pjrt, steps, warmup, {}, **kw)
     # ace-jax: the export's auto layout judges dense against the exporting
     # process's budget, not LAMMPS's (PJRT pool + Kokkos + ghosts): a dense
     # bundle that runs out of memory is retried sparse
@@ -288,7 +346,7 @@ def run_case(row, n_atoms, dtype, device, lmp, ranks, workdir, pjrt=None, prev=N
         if list_headroom != 0.5:
             extra["list_headroom"] = list_headroom
         out = _run_lammps(row, style, bundle, data, work, n_atoms, dtype, device, lmp, ranks, pjrt,
-                          steps, warmup, extra)
+                          steps, warmup, extra, **kw)
         if out["status"] == "oom" and used in ("dense", "matrix"):
             layout = "sparse"
             continue
@@ -306,29 +364,84 @@ def run_case(row, n_atoms, dtype, device, lmp, ranks, workdir, pjrt=None, prev=N
         return out
 
 
+def proc_grid(ranks):
+    """LAMMPS `processors` grid for `ranks` on a cubic cell: the most nearly equal
+    three factors, larger first.  Every CPU LAMMPS code runs the same grid, and an
+    ace-jax bundle is sized for one rank's subdomain of it
+    (neighbour_capacity(procs=))."""
+    best = None
+    for a in range(1, ranks + 1):
+        for b in range(1, ranks // a + 1):
+            if ranks % (a * b) == 0:
+                g = tuple(sorted((a, b, ranks // (a * b)), reverse=True))
+                if best is None or g[0] / g[2] < best[0] / best[2]:
+                    best = g
+    return best
+
+
+def cpu_mpirun(ranks, threads, style):
+    """mpirun for a CPU run.  One thread per rank: the host's mpirun_args (sweep.HOSTS;
+    lestrade binds one rank per P-core), else one core per rank for every style.
+    Unbound ranks are wrong twice over: XLA sizes its thread pool from the affinity
+    mask (every rank starts a pool for the whole node), and under OMP_PROC_BIND the
+    OpenMP runtime in a Kokkos-OpenMP LAMMPS pins each rank's thread to place 0 of
+    the full mask, the same hardware thread for all of them (ML-PACE at 128 ranks on
+    Sulis: 1268 s for 50 steps, against 0.07 s bound).  threads > 1: each rank bound
+    to that many cores of its own, which Kokkos OpenMP and XLA's pool then use."""
+    if threads > 1:
+        bind = ["--bind-to", "core", "--map-by", f"slot:PE={threads}"]
+    elif mpirun_args():
+        bind = mpirun_args()
+    else:
+        bind = ["--bind-to", "core", "--map-by", "core"]
+    return ["mpirun", "-np", str(ranks), *bind]
+
+
 def mpirun_args():
     """The host's extra mpirun arguments (sweep.HOSTS `mpirun_args`, handed over
     as BENCH_MPIRUN_ARGS, a JSON list: lestrade binds one rank per P-core)."""
     return json.loads(os.environ.get("BENCH_MPIRUN_ARGS") or "[]")
 
 
+def kokkos_args(style, device, threads=1):
+    """The KOKKOS command-line switches.  GPU: every style but gap (pair quip
+    has no /kk variant, so it is CPU only).  CPU: host Kokkos (OpenMP) for
+    lammps-jax, whose pair style is jax/kk only, and for a KOKKOS style run with
+    threads > 1 (ML-PACE's pace/kk); plain MPI otherwise."""
+    if device != "gpu":
+        if style == "acejax" or style in XL or (threads > 1 and style in KOKKOS):
+            return ["-k", "on", "t", str(threads), "-sf", "kk", "-pk", "kokkos", *KOKKOS[style].split()]
+        return []
+    if style not in KOKKOS:
+        raise ValueError(f"pair style {style!r} is CPU only: no KOKKOS settings")
+    return ["-k", "on", "g", "1", "-sf", "kk", "-pk", "kokkos", *KOKKOS[style].split()]
+
+
 def _run_lammps(row, style, model, data, work, n_atoms, dtype, device, lmp, ranks, pjrt, steps,
-                warmup, extra, aceplugin=None):
+                warmup, extra, aceplugin=None, threads=1, procs=None):
+    kk = kokkos_args(style, device, threads)        # before any file is written
     (work / "in.bench").write_text(lammps_input(style, model, row["elements"], data, device, steps,
-                                                warmup=warmup))
-    cmd = [lmp, "-in", "in.bench", "-log", "log.lammps", "-nocite"]
-    if device == "gpu":
-        cmd += ["-k", "on", "g", "1", "-sf", "kk", "-pk", "kokkos", *KOKKOS[style].split()]
-    elif ranks > 1 and style != "acejax":
-        cmd = ["mpirun", "-np", str(ranks), *mpirun_args()] + cmd
+                                                warmup=warmup, pair_extra=row.get("pair_extra") or row.get("quip_label"),
+                                                procs=procs))
+    cmd = [lmp, "-in", "in.bench", "-log", "log.lammps", "-nocite", *kk]
+    env = None
+    if device == "cpu" and (ranks > 1 or threads > 1 or style == "acejax"):
+        cmd = cpu_mpirun(ranks, threads, style) + cmd
+        env = {**os.environ, "OMP_NUM_THREADS": str(threads), "OMP_PROC_BIND": "spread", "OMP_PLACES": "threads"}
     cmd += lammps_vars(style, pjrt, aceplugin)
     out = {"code": row["code"], "mode": "lammps", "model": row["name"], "size": row["size"],
            "system": row["system"], "n_atoms": n_atoms, "device": device, "dtype": dtype,
            "ranks": ranks, "status": "ok", **extra}
+    if style in XL:
+        out["xl_pair_style"] = XL[style][0] + " " + row["pair_extra"]   # names the artifact (content-addressed)
+    if device == "cpu":
+        out.update(threads=threads, proc_grid=list(procs) if procs else None, kokkos=bool(kk))   # parse_log owns "procs"
+    if style == "acejax" and os.environ.get("ACEJAX_EXPORT_AA_DAG"):
+        out["aa_dag"] = os.environ["ACEJAX_EXPORT_AA_DAG"]
     if cmd[0] == "mpirun" and mpirun_args():
         out["mpirun_args"] = mpirun_args()
     (work / "log.lammps").unlink(missing_ok=True)
-    p = subprocess.run(cmd, cwd=work, capture_output=True, text=True, timeout=3600)
+    p = subprocess.run(cmd, cwd=work, capture_output=True, text=True, timeout=3600, env=env)
     log = (work / "log.lammps").read_text() if (work / "log.lammps").exists() else p.stdout
     if not finished(p.returncode, log) or "Loop time" not in log:
         tail = error_text((p.stderr or "") + (p.stdout or "") + log)

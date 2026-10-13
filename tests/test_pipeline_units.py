@@ -517,3 +517,15 @@ def test_fit_refuses_float32():
             fit(cfg, d, log=lambda *a: None)
     finally:
         jax.config.update("jax_enable_x64", True)
+
+
+def test_cli_weights_accepts_a_json_file(tmp_path):
+    from ace_jax.cli import _parse_weights
+    p = tmp_path / "w.json"; p.write_text('{"default": {"E": 30, "F": 1, "V": 1}}')
+    assert _parse_weights(str(p)) == ({"default": {"E": 30, "F": 1, "V": 1}}, None)
+
+
+def test_cli_weights_missing_file_is_a_clear_error(tmp_path):
+    from ace_jax.cli import _parse_weights
+    with pytest.raises(ValueError, match="existing file"):
+        _parse_weights(str(tmp_path / "nope.json"))

@@ -1113,7 +1113,7 @@ def test_lammps_rows_pass_and_record_spline_tol(tmp_path, monkeypatch):
     extra = {}
     monkeypatch.setattr(run_lammps, "export_bundle", lambda r, at, dt, w, info=None, **kw: (
         info.update(splined={"spline_tol": 1e-10, "n_intervals": {"rnl": 2048}}), ("b", "dense", 1.0))[1])
-    monkeypatch.setattr(run_lammps, "_run_lammps", lambda *a: extra.update(a[-1]) or {"status": "ok"})
+    monkeypatch.setattr(run_lammps, "_run_lammps", lambda *a, **k: extra.update(a[-1]) or {"status": "ok"})
     run_lammps.run_case(_learned_row("acejax-ace-learned", "m.npz"), 256, "float64", "gpu", "lmp", 1,
                         tmp_path)
     assert extra["spline_tol"] == "auto" and extra["splined"]["spline_tol"] == 1e-10
@@ -1440,7 +1440,7 @@ def test_trim_lammps_case_runs_mpi_ranks_with_the_plugin(tmp_path, monkeypatch):
     out = run_lammps.run_case(row, 256, "float64", "cpu", "/r/lmp-ace.sh", 8, tmp_path / "w",
                               aceplugin="/r/aceplugin.so")
     cmd = seen[-1]
-    assert cmd[:3] == ["mpirun", "-np", "8"] and cmd[3] == "/r/lmp-ace.sh"
+    assert cmd[:7] == ["mpirun", "-np", "8", "--bind-to", "core", "--map-by", "core"] and cmd[7] == "/r/lmp-ace.sh"
     assert cmd[-2:] == ["aceplugin", "/r/aceplugin.so"] and "-k" not in cmd
     assert out["status"] == "ok" and out["step_s"] == pytest.approx(0.01) and out["ranks"] == 8
     assert out["trim_lib"] == str(lib)
@@ -1848,7 +1848,8 @@ def test_mpi_case_binds_ranks_with_the_host_mpirun_args(tmp_path, monkeypatch):
     monkeypatch.delenv("BENCH_MPIRUN_ARGS")
     out = run_lammps.run_case(row, 256, "float64", "cpu", "/r/lmp-ace.sh", 8, tmp_path / "w2",
                               aceplugin="/r/aceplugin.so")
-    assert seen[-1][:4] == ["mpirun", "-np", "8", "/r/lmp-ace.sh"] and "mpirun_args" not in out
+    assert seen[-1][:8] == ["mpirun", "-np", "8", "--bind-to", "core", "--map-by", "core",   # the default
+                            "/r/lmp-ace.sh"] and "mpirun_args" not in out
 
 
 def test_cpu_rows_record_their_affinity(tmp_path, monkeypatch):
@@ -1912,3 +1913,142 @@ def test_parity_table_shows_an_erroring_gate():
     t = parity_table(rows)
     assert "| lestrade-cpu | mace | MACE | 0/2 (2 error) | — | — |" in t
     assert "| lestrade-cpu | mlpace | ML-PACE | 1/1 | 1.0e-14 | 4.0e-10 |" in t
+
+
+def test_si_supercell_and_rattle_are_deterministic():
+    a = supercell("Si", 512)
+    b, c = supercell("Si", 512, rattle=0.05), supercell("Si", 512, rattle=0.05)
+    assert set(a.get_chemical_symbols()) == {"Si"} and np.array_equal(b.positions, c.positions)
+    d = np.linalg.norm(b.positions - a.positions, axis=1)
+    assert 0.03 < d.mean() < 0.12 and np.array_equal(a.numbers, b.numbers)
+
+
+def test_unrattled_supercell_is_unchanged():
+    assert np.array_equal(supercell("SiGe", 256).positions, supercell("SiGe", 256, rattle=0.0).positions)
+
+
+def test_lammps_input_quip_pair_line():
+    txt = lammps_input("gap", "/m/gap.xml", ["Si"], "/d/x.data", "cpu", 200, pair_extra="GAP_2017_6_17_60_4_3_56_165")
+    assert "pair_style quip\n" in txt
+    assert 'pair_coeff * * /m/gap.xml "Potential xml_label=GAP_2017_6_17_60_4_3_56_165" 14\n' in txt
+
+
+@pytest.fixture(scope="session")
+def tiny_gp(tmp_path_factory):       # no committed Si GP model: fit a tiny one (never committed)
+    import subprocess
+    out = tmp_path_factory.mktemp("tiny_gp")
+    train = pathlib.Path(__file__).parent.parent / "fixtures" / "si_tiny_train.xyz"
+    subprocess.run([sys.executable, "-m", "ace_jax.cli", "fit", "--train", str(train), "--energy-key", "dft_energy",
+                    "--force-key", "dft_force", "--order", "2", "--max-degree", "4", "--m-per-species", "8",
+                    "--rungs", "map", "--e0", "lsq", "--out", str(out)], check=True, capture_output=True)
+    return next(out.rglob("gp_model.npz"))
+
+
+@pytest.mark.slow
+def test_standalone_row_for_acejax_gp(tiny_gp):
+    from scaling.run_standalone import run_case
+    row = {"code": "acejax-gp", "system": "Si", "size": "t", "path": str(tiny_gp), "elements": ["Si"],
+           "name": "acejax-gp/Si/t", "rattle": 0.05}
+    out = run_case(row, 64, "float64", "cpu", reps=2)
+    assert out["status"] == "ok" and out["call_s"] > 0 and out["md_like"] is True
+
+
+def test_gap_pair_line_requires_a_label():
+    from scaling.run_lammps import _pair
+    with pytest.raises(ValueError, match="xml_label"):
+        _pair("gap", "/m/gap.xml", ["Si"], "cpu", extra=None)
+
+
+def test_gap_is_never_a_gpu_lammps_row(tmp_path):
+    """No KOKKOS settings for pair quip: the GPU path refuses before running anything."""
+    from scaling.run_lammps import KOKKOS, _run_lammps
+    from scaling.sweep import lammps_supported
+    assert "gap" not in KOKKOS and not lammps_supported("gap", "gpu") and lammps_supported("gap", "cpu")
+    row = {"code": "gap", "name": "gap/Si/s1", "size": "s1", "system": "Si", "elements": ["Si"],
+           "quip_label": "L"}
+    with pytest.raises(ValueError, match="CPU only"):
+        _run_lammps(row, "gap", "/m/gap.xml", tmp_path / "x.data", tmp_path, 64, "float64", "gpu",
+                    "/bin/false", 1, None, 10, 0, {})
+
+
+def test_parity_lammps_ef_passes_the_quip_label(tmp_path, monkeypatch):
+    from scaling import parity
+    seen = {}
+
+    def fake(*a, **kw):
+        seen.update(kw)
+        raise RuntimeError("stop")
+    monkeypatch.setattr(parity, "lammps_input", fake)
+    with pytest.raises(RuntimeError, match="stop"):
+        parity._lammps_ef("gap", "/m/gap.xml", ["Si"], supercell("Si", 64), "cpu", "/bin/false", tmp_path,
+                          pair_extra="GAP_X")
+    assert seen["pair_extra"] == "GAP_X"
+
+
+def test_gap_parity_tolerance_is_absolute_and_spline_level():
+    from scaling.parity import TOL, compare
+    assert TOL["gap"] == (1e-6, 1e-5)                     # quippy wheel vs source-built ML-QUIP
+    F = np.ones((2, 3))
+    assert compare(-300.0, F, -300.0 + 1e-6, F + 5e-6, 2, TOL["gap"])["status"] == "parity_ok"
+    assert compare(-300.0, F, -300.0, F + 2e-5, 2, TOL["gap"])["status"] == "parity_fail"
+
+
+def test_cpu_lammps_layout(monkeypatch):
+    """CPU LAMMPS: one processors grid for every code, host Kokkos for lammps-jax
+    (jax/kk only) and for a threaded KOKKOS style, ranks bound to their cores."""
+    from scaling import run_lammps, sweep
+    assert run_lammps.proc_grid(128) == (8, 4, 4) and run_lammps.proc_grid(32) == (4, 4, 2)
+    assert run_lammps.proc_grid(1) == (1, 1, 1) and run_lammps.proc_grid(64) == (4, 4, 4)
+    assert run_lammps.kokkos_args("acejax", "cpu") == ["-k", "on", "t", "1", "-sf", "kk", "-pk", "kokkos",
+                                                       "newton", "on", "neigh", "half"]
+    assert run_lammps.kokkos_args("mlpace", "cpu") == [] and run_lammps.kokkos_args("gap", "cpu", 4) == []
+    assert run_lammps.kokkos_args("mlpace", "cpu", 4)[:4] == ["-k", "on", "t", "4"]
+    monkeypatch.delenv("BENCH_MPIRUN_ARGS", raising=False)
+    for style in ("mlpace", "acejax"):          # unbound ranks all land on one hardware thread under OMP_PROC_BIND
+        assert run_lammps.cpu_mpirun(128, 1, style) == ["mpirun", "-np", "128", "--bind-to", "core", "--map-by", "core"]
+    assert run_lammps.cpu_mpirun(32, 4, "mlpace")[3:] == ["--bind-to", "core", "--map-by", "slot:PE=4"]
+    txt = run_lammps.lammps_input("mlpace", "m.yace", ["Si"], "x.data", "cpu", 10, procs=(8, 4, 4))
+    assert "processors 8 4 4\nread_data" in txt
+    monkeypatch.delenv("BENCH_LAMMPS_JAX_CPU", raising=False)
+    assert not sweep.lammps_supported("acejax-ace", "cpu")
+    monkeypatch.setenv("BENCH_LAMMPS_JAX_CPU", "1")
+    assert sweep.lammps_supported("acejax-ace", "cpu") and sweep.lammps_supported("gap", "cpu")
+
+
+def test_mace_xl_runs_the_kokkos_style_with_its_r1_artifact(tmp_path, monkeypatch):
+    """Symmetrix-XL's fast path is symmetrix/mace[/float32]/kk + a JIT R1 artifact (sulis-xl.sh's
+    model-xl.jit-{cpu,cuda}.json): Kokkos on the CPU too, ranks bound as every code; MPI message passing on the
+    CPU, one rank per GPU without decomposition.  No artifact (or a refused one) is unsupported, never a fallback."""
+    import json as _json
+    from scaling import run_lammps
+    from scaling.parity import TOL
+    kk = ["-sf", "kk", "-pk", "kokkos", "newton", "on", "neigh", "half"]
+    assert run_lammps.kokkos_args("mace-xl", "cpu") == ["-k", "on", "t", "1", *kk]
+    assert run_lammps.kokkos_args("mace-xl-f32", "gpu") == ["-k", "on", "g", "1", *kk]
+    assert run_lammps.kokkos_args("mace", "cpu") == []                               # the original stays plain MPI
+    monkeypatch.delenv("BENCH_MPIRUN_ARGS", raising=False)
+    assert run_lammps.cpu_mpirun(128, 1, "mace-xl")[3:] == ["--bind-to", "core", "--map-by", "core"]
+    cpu = run_lammps.lammps_input("mace-xl", "m.json", ["Si"], "x.data", "cpu", 10, pair_extra="jit_host_artifact /a.so")
+    assert ("pair_style symmetrix/mace/kk mpi_message_passing streamed_edges direct profile speed "
+            "jit_host_artifact /a.so\npair_coeff * * m.json Si\n") in cpu
+    gpu = run_lammps._pair("mace-xl-f32", "m.json", ["Si"], "gpu", "jit_device_artifact /a.cubin")
+    assert gpu.startswith("pair_style symmetrix/mace/float32/kk no_domain_decomposition streamed_edges direct")
+    m = tmp_path / "model-xl.json"
+    assert "no Symmetrix-XL model" in run_lammps.xl_pair_args(m, "cpu", "mace-xl")[1]
+    m.write_text("{}")
+    assert "model-xl.jit-cpu.json" in run_lammps.xl_pair_args(m, "cpu", "mace-xl")[1]
+    (tmp_path / "model-xl.jit-cpu.json").write_text(_json.dumps({"float64": {"args": "jit_host_artifact /a.so"},
+                                                                 "float32": {"error": "R1 path uvw unsupported"}}))
+    assert run_lammps.xl_pair_args(m, "cpu", "mace-xl") == ("jit_host_artifact /a.so", None)
+    assert "uvw unsupported" in run_lammps.xl_pair_args(m, "cpu", "mace-xl-f32")[1]
+    assert "jit-cuda" in run_lammps.xl_pair_args(m, "gpu", "mace-xl")[1]
+    (tmp_path / "model-xl.jit-cuda.json").write_text(_json.dumps({"float64": {"args": (
+        "jit_device_artifact /r1.cubin jit_device_blocks_per_compute_unit 8 jit_m0_device_artifact /m0.cubin "
+        "jit_m0_device_schedule table jit_r0_device_artifact /r0.cubin")}}))
+    assert run_lammps.xl_pair_args(m, "gpu", "mace-xl") == (                       # R1 only under profile speed
+        "jit_device_artifact /r1.cubin jit_device_blocks_per_compute_unit 8", None)
+    row = {"code": "mace-xl-f32", "name": "mace/c16L0n1/mace-xl-f32", "size": "c16L0n1", "system": "Si",
+           "elements": ["Si"], "symmetrix_xl": str(m)}
+    out = run_lammps.run_case(row, 64, "float32", "cpu", "/bin/false", 128, tmp_path / "w")
+    assert out["status"] == "unsupported" and "uvw" in out["error"]
+    assert TOL["mace-xl"][0] == TOL["mace"][0] and TOL["mace-xl-f32"] > TOL["mace-xl"]

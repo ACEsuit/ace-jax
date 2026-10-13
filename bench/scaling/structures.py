@@ -1,9 +1,10 @@
-"""Deterministic benchmark cells: SiGe (random 50/50 diamond) and Cantor
+"""Deterministic benchmark cells: Si (diamond), SiGe (random 50/50 diamond) and Cantor
 (random equiatomic CrMnFeCoNi fcc), at any power-of-two atom count."""
 import numpy as np
 from ase.build import bulk
 
 SYSTEMS = {
+    "Si": {"lattice": "diamond", "a": 5.461, "elements": ("Si",), "per_cell": 8},   # GAP-18 PW91 a0
     "SiGe": {"lattice": "diamond", "a": 5.54, "elements": ("Si", "Ge"), "per_cell": 8},
     "Cantor": {"lattice": "fcc", "a": 3.59, "elements": ("Cr", "Mn", "Fe", "Co", "Ni"),
                "per_cell": 4},
@@ -34,7 +35,7 @@ def _reps(m):
     return best[1]
 
 
-def supercell(system, n_atoms, seed=0):
+def supercell(system, n_atoms, seed=0, rattle=0.0):
     sp = SYSTEMS[system]
     if n_atoms % sp["per_cell"]:
         raise ValueError(f"{system}: n_atoms must be a multiple of {sp['per_cell']}")
@@ -44,4 +45,6 @@ def supercell(system, n_atoms, seed=0):
     symbols = [sp["elements"][i % k] for i in range(n_atoms)]
     np.random.default_rng(seed).shuffle(symbols)
     at.set_chemical_symbols(symbols)
+    if rattle:                                    # a thermal-like cell: no zero-force symmetric start
+        at.positions += np.random.default_rng(seed + 1).normal(0, rattle, at.positions.shape)
     return at
