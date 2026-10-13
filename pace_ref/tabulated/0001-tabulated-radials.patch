@@ -1,0 +1,361 @@
+From 73860325e3d5770bc4a1eac9874430d8b00a2572 Mon Sep 17 00:00:00 2001
+From: James Kermode <james.kermode@gmail.com>
+Date: Tue, 13 Oct 2026 08:49:36 +0100
+Subject: [PATCH] Tabulated radial functions (radbasename: Tabulated)
+
+---
+ ML-PACE/ace-evaluator/ace_abstract_basis.h | 89 ++++++++++++++++++++--
+ ML-PACE/ace-evaluator/ace_c_basis.cpp      | 20 +++++
+ ML-PACE/ace-evaluator/ace_radial.cpp       | 82 +++++++++++++++++++-
+ ML-PACE/ace-evaluator/ace_radial.h         | 28 +++++++
+ 4 files changed, 211 insertions(+), 8 deletions(-)
+
+diff --git a/ML-PACE/ace-evaluator/ace_abstract_basis.h b/ML-PACE/ace-evaluator/ace_abstract_basis.h
+index 60e02ba..6de2d71 100644
+--- a/ML-PACE/ace-evaluator/ace_abstract_basis.h
++++ b/ML-PACE/ace-evaluator/ace_abstract_basis.h
+@@ -99,13 +99,22 @@ struct ACEBondSpecification {
+     DOUBLE_TYPE dcut_in = 0;
+     string inner_cutoff_type = "distance"; // new behaviour is default
+ 
++    // radbasename "Tabulated" (TabulatedRadial): no radparameters / radcoefficients; instead
++    //   radtable: {nbins: N, gk: [{k, f, df}, ...], rnl: [{n, l, f, df}, ...]}
++    // with k, n 1-based (as in `functions`) and f, df the values and r-derivatives at r_i = i * rcut / N,
++    // i = 0..N.  rnl index here is (n - 1) * (lmax + 1) + l; absent entries are zero.
++    int radtable_nbins = 0;
++    vector<vector<DOUBLE_TYPE>> radtable_gk, radtable_dgk, radtable_rnl, radtable_drnl;
++
+     bool operator==(const ACEBondSpecification &another) const {
+         return (nradbasemax == another.nradbasemax) && (lmax == another.lmax) &&
+                (nradbasemax == another.nradbasemax) && (radbasename == another.radbasename) &&
+                (radparameters == another.radparameters) && (radcoefficients == another.radcoefficients) &&
+                (prehc == another.prehc) && (lambdahc == another.lambdahc) && (rcut == another.rcut) &&
+                (dcut == another.dcut) && (rcut_in == another.rcut_in) && (dcut_in == another.dcut_in) &&
+-               (inner_cutoff_type == another.inner_cutoff_type);
++               (inner_cutoff_type == another.inner_cutoff_type) && (radtable_nbins == another.radtable_nbins) &&
++               (radtable_gk == another.radtable_gk) && (radtable_dgk == another.radtable_dgk) &&
++               (radtable_rnl == another.radtable_rnl) && (radtable_drnl == another.radtable_drnl);
+     }
+ 
+     bool operator!=(const ACEBondSpecification &another) const {
+@@ -116,7 +125,11 @@ struct ACEBondSpecification {
+         stringstream ss;
+         ss << "ACEBondSpecification(nradmax=" << nradmax << ", lmax=" << lmax << ", nradbasemax=" << nradbasemax
+            << ", radbasename=" <<
+-           radbasename << ", crad=(" << radcoefficients.at(0).at(0).at(0) << "...), ";
++           radbasename;
++        if (radbasename == "Tabulated")
++            ss << ", radtable(nbins=" << radtable_nbins << "), ";
++        else
++            ss << ", crad=(" << radcoefficients.at(0).at(0).at(0) << "...), ";
+         ss << "rcut=" << rcut << ", dcut=" << dcut;
+         ss << ", rcut_in=" << rcut_in << ", dcut_in=" << dcut_in;
+         ss << ", inner_cutoff_type=" << inner_cutoff_type;
+@@ -135,8 +148,15 @@ struct ACEBondSpecification {
+             nradmax = bond_yaml["nradmax"].as<NS_TYPE>();
+             lmax = bond_yaml["lmax"].as<LS_TYPE>();
+             nradbasemax = bond_yaml["nradbasemax"].as<NS_TYPE>();
+-            radparameters = bond_yaml["radparameters"].as<vector<DOUBLE_TYPE>>();
+-            radcoefficients = bond_yaml["radcoefficients"].as<vector<vector<vector<DOUBLE_TYPE>>>>();
++            bool tabulated = radbasename == "Tabulated";
++            if (!tabulated || bond_yaml["radparameters"])
++                radparameters = bond_yaml["radparameters"].as<vector<DOUBLE_TYPE>>();
++            else
++                radparameters = {1.0};   // lambda: unused by a table
++            if (!tabulated || bond_yaml["radcoefficients"])
++                radcoefficients = bond_yaml["radcoefficients"].as<vector<vector<vector<DOUBLE_TYPE>>>>();
++            if (tabulated)
++                radtable_from_YAML(bond_yaml["radtable"]);
+             prehc = bond_yaml["prehc"].as<DOUBLE_TYPE>();
+             lambdahc = bond_yaml["lambdahc"].as<DOUBLE_TYPE>();
+             rcut = bond_yaml["rcut"].as<DOUBLE_TYPE>();
+@@ -151,6 +171,62 @@ struct ACEBondSpecification {
+         }
+     }
+ 
++    void radtable_from_YAML(YAML_PACE::Node t) {
++        if (!t)
++            throw invalid_argument("radbasename `Tabulated` needs a `radtable`");
++        radtable_nbins = t["nbins"].as<int>();
++        if (radtable_nbins < 1)
++            throw invalid_argument("radtable::nbins must be positive");
++        size_t nnodes = radtable_nbins + 1;
++        radtable_gk.assign(nradbasemax, {});
++        radtable_dgk.assign(nradbasemax, {});
++        radtable_rnl.assign(nradmax * (lmax + 1), {});
++        radtable_drnl.assign(nradmax * (lmax + 1), {});
++        auto read = [nnodes](const YAML_PACE::Node &e, vector<DOUBLE_TYPE> &f, vector<DOUBLE_TYPE> &df) {
++            f = e["f"].as<vector<DOUBLE_TYPE>>();
++            df = e["df"].as<vector<DOUBLE_TYPE>>();
++            if (f.size() != nnodes || df.size() != nnodes)
++                throw invalid_argument("radtable entry must have nbins + 1 values `f` and derivatives `df`");
++        };
++        if (t["gk"])
++            for (const auto &e: t["gk"]) {
++                int k = e["k"].as<int>();
++                if (k < 1 || k > nradbasemax)
++                    throw invalid_argument("radtable::gk::k outside 1..nradbasemax");
++                read(e, radtable_gk.at(k - 1), radtable_dgk.at(k - 1));
++            }
++        if (t["rnl"])
++            for (const auto &e: t["rnl"]) {
++                int n = e["n"].as<int>(), l = e["l"].as<int>();
++                if (n < 1 || n > nradmax || l < 0 || l > lmax)
++                    throw invalid_argument("radtable::rnl (n, l) outside 1..nradmax, 0..lmax");
++                read(e, radtable_rnl.at((n - 1) * (lmax + 1) + l), radtable_drnl.at((n - 1) * (lmax + 1) + l));
++            }
++    }
++
++    YAML_PACE::Node radtable_to_YAML() const {
++        YAML_PACE::Node t;
++        t["nbins"] = radtable_nbins;
++        for (size_t k = 0; k < radtable_gk.size(); k++)
++            if (!radtable_gk[k].empty()) {
++                YAML_PACE::Node e;
++                e["k"] = (int) k + 1;
++                e["f"] = radtable_gk[k];
++                e["df"] = radtable_dgk[k];
++                t["gk"].push_back(e);
++            }
++        for (size_t i = 0; i < radtable_rnl.size(); i++)
++            if (!radtable_rnl[i].empty()) {
++                YAML_PACE::Node e;
++                e["n"] = (int) (i / (lmax + 1)) + 1;
++                e["l"] = (int) (i % (lmax + 1));
++                e["f"] = radtable_rnl[i];
++                e["df"] = radtable_drnl[i];
++                t["rnl"].push_back(e);
++            }
++        return t;
++    }
++
+     YAML_PACE::Node to_YAML() const {
+         YAML_PACE::Node bond_yaml;
+         bond_yaml.SetStyle(YAML_PACE::EmitterStyle::Flow);
+@@ -160,7 +236,10 @@ struct ACEBondSpecification {
+ 
+         bond_yaml["radbasename"] = this->radbasename;
+         bond_yaml["radparameters"] = this->radparameters;
+-        bond_yaml["radcoefficients"] = this->radcoefficients;
++        if (radbasename == "Tabulated")
++            bond_yaml["radtable"] = radtable_to_YAML();
++        else
++            bond_yaml["radcoefficients"] = this->radcoefficients;
+ 
+         bond_yaml["prehc"] = this->prehc;
+         bond_yaml["lambdahc"] = this->lambdahc;
+diff --git a/ML-PACE/ace-evaluator/ace_c_basis.cpp b/ML-PACE/ace-evaluator/ace_c_basis.cpp
+index f91fc34..401083b 100644
+--- a/ML-PACE/ace-evaluator/ace_c_basis.cpp
++++ b/ML-PACE/ace-evaluator/ace_c_basis.cpp
+@@ -1317,6 +1317,26 @@ void ACECTildeBasisSet::load_yaml(const string &yaml_file_name) {
+                 radial_functions->dcut_in(mu_i, mu_j) = bondSpec.dcut_in;
+                 radial_functions->inner_cutoff_type = bondSpec.inner_cutoff_type;
+ 
++                if (bondSpec.radbasename == "Tabulated") {
++                    // the tables replace crad . g_k (TabulatedRadial); stored in the global
++                    // (nradmax, lmax) layout, which may be wider than this bond's
++                    auto *rf = dynamic_cast<ACERadialFunctions *>(radial_functions);
++                    if (rf == nullptr)
++                        throw invalid_argument("radbasename `Tabulated` needs ACERadialFunctions");
++                    TabulatedRadial &tab = rf->tables.at(mu_i * nelements + mu_j);
++                    tab.nbins = bondSpec.radtable_nbins;
++                    tab.rcut = bondSpec.rcut;
++                    tab.gk = bondSpec.radtable_gk;
++                    tab.dgk = bondSpec.radtable_dgk;
++                    tab.rnl.assign(nradmax * (lmax + 1), {});
++                    tab.drnl.assign(nradmax * (lmax + 1), {});
++                    for (NS_TYPE n = 0; n < bondSpec.nradmax; n++)
++                        for (LS_TYPE l = 0; l <= bondSpec.lmax; l++) {
++                            tab.rnl.at(n * (lmax + 1) + l) = bondSpec.radtable_rnl.at(n * (bondSpec.lmax + 1) + l);
++                            tab.drnl.at(n * (lmax + 1) + l) = bondSpec.radtable_drnl.at(n * (bondSpec.lmax + 1) + l);
++                        }
++                    continue;
++                }
+                 //setup crad
+                 for (NS_TYPE n = 0; n < bondSpec.nradmax; n++)
+                     for (LS_TYPE l = 0; l <= bondSpec.lmax; l++)
+diff --git a/ML-PACE/ace-evaluator/ace_radial.cpp b/ML-PACE/ace-evaluator/ace_radial.cpp
+index 4d10912..0002241 100644
+--- a/ML-PACE/ace-evaluator/ace_radial.cpp
++++ b/ML-PACE/ace-evaluator/ace_radial.cpp
+@@ -140,6 +140,8 @@ void ACERadialFunctions::init(NS_TYPE nradb, LS_TYPE lmax, NS_TYPE nradial, DOUB
+     cheb2.init(nradbase + 1, "cheb2");
+ 
+ 
++    tables.assign(nelements * nelements, TabulatedRadial());
++
+     splines_gk.init(nelements, nelements, "splines_gk");
+     splines_rnl.init(nelements, nelements, "splines_rnl");
+     splines_hc.init(nelements, nelements, "splines_hc");
+@@ -257,6 +259,8 @@ ACERadialFunctions::radbase(DOUBLE_TYPE lam, DOUBLE_TYPE cut, DOUBLE_TYPE dcut,
+             chebLinear(lam, cut, dcut, r);
+         } else if (radbasename == "TEST_SBessel" || radbasename == "SBessel") {
+             simplified_bessel(cut, r);
++        } else if (radbasename == "Tabulated") {
++            throw invalid_argument("radbasename `Tabulated` is per bond: use tabulated_gk(mu_i, mu_j, r)");
+         } else if (radbasename.rfind("TEST_", 0) == 0) {
+             test_zero_func(lam, cut, dcut, r);
+         } else {
+@@ -487,12 +491,82 @@ void ACERadialFunctions::all_radfunc(SPECIES_TYPE mu_i, SPECIES_TYPE mu_j, DOUBL
+     DOUBLE_TYPE r_in = cut_in(mu_i, mu_j);
+     DOUBLE_TYPE dr_in = dcut_in(mu_i, mu_j);
+ 
++    if (radbasenameij(mu_i, mu_j) == "Tabulated") {
++        tabulated_rnl(mu_i, mu_j, r); // update fr(nr, l),  dfr(nr, l) directly
++        return;
++    }
+     // set up radial functions
+     radbase(lam, r_cut, dr_cut, radbasenameij(mu_i, mu_j), r, r_in, dr_in); //update gr, dgr
+     radfunc(mu_i, mu_j); // update fr(nr, l),  dfr(nr, l)
+ }
+ 
+ 
++void TabulatedRadial::interpolate(const vector<vector<DOUBLE_TYPE>> &f, const vector<vector<DOUBLE_TYPE>> &df,
++                                  DOUBLE_TYPE r, DOUBLE_TYPE *values, DOUBLE_TYPE *dvalues, size_t count) const {
++    DOUBLE_TYPE h = rcut / nbins;
++    DOUBLE_TYPE x = r / h;
++    int i = static_cast<int>(x);
++    if (i >= nbins) i = nbins - 1;
++    if (i < 0) i = 0;
++    DOUBLE_TYPE t = x - i, t2 = t * t, u = 1 - t;
++    // cubic Hermite basis and its t-derivative
++    DOUBLE_TYPE h00 = (1 + 2 * t) * u * u, h10 = t * u * u, h01 = t2 * (3 - 2 * t), h11 = t2 * (t - 1);
++    DOUBLE_TYPE d00 = 6 * t2 - 6 * t, d10 = 3 * t2 - 4 * t + 1, d01 = -d00, d11 = 3 * t2 - 2 * t;
++    for (size_t k = 0; k < count; k++) {
++        if (k >= f.size() || f[k].empty()) {
++            values[k] = 0;
++            dvalues[k] = 0;
++            continue;
++        }
++        const auto &v = f[k];
++        const auto &dv = df[k];
++        values[k] = h00 * v[i] + h10 * h * dv[i] + h01 * v[i + 1] + h11 * h * dv[i + 1];
++        dvalues[k] = (d00 * v[i] + d10 * h * dv[i] + d01 * v[i + 1] + d11 * h * dv[i + 1]) / h;
++    }
++}
++
++
++/** zero outside (cut_in - dcut_in, cut), the table inside; then radbase's inner cutoff */
++static void tabulated_eval(const TabulatedRadial &tab, bool rnl, DOUBLE_TYPE r, DOUBLE_TYPE cut,
++                           DOUBLE_TYPE cut_in, DOUBLE_TYPE dcut_in, const string &inner_cutoff_type,
++                           DOUBLE_TYPE *values, DOUBLE_TYPE *dvalues, size_t count) {
++    if (inner_cutoff_type == "zbl")
++        cut_in = dcut_in == 0;   // as radbase
++    if (r <= cut_in - dcut_in || r >= cut) {
++        for (size_t k = 0; k < count; k++) values[k] = dvalues[k] = 0;
++        return;
++    }
++    if (rnl)
++        tab.interpolate(tab.rnl, tab.drnl, r, values, dvalues, count);
++    else
++        tab.interpolate(tab.gk, tab.dgk, r, values, dvalues, count);
++    if (inner_cutoff_type == "distance" || inner_cutoff_type == "zbl") {
++        DOUBLE_TYPE fc, dfc;
++        cutoff_func_poly(r, cut_in, dcut_in, fc, dfc);
++        fc = 1 - fc;
++        dfc = -dfc;
++        for (size_t k = 0; k < count; k++) {
++            DOUBLE_TYPE v = values[k];
++            values[k] = v * fc;
++            dvalues[k] = dvalues[k] * fc + v * dfc;
++        }
++    }
++}
++
++
++void ACERadialFunctions::tabulated_gk(SPECIES_TYPE mu_i, SPECIES_TYPE mu_j, DOUBLE_TYPE r) {
++    tabulated_eval(tables.at(mu_i * nelements + mu_j), false, r, cut(mu_i, mu_j), cut_in(mu_i, mu_j),
++                   dcut_in(mu_i, mu_j), inner_cutoff_type, gr.get_data(), dgr.get_data(), gr.get_size());
++}
++
++
++void ACERadialFunctions::tabulated_rnl(SPECIES_TYPE mu_i, SPECIES_TYPE mu_j, DOUBLE_TYPE r) {
++    // fr is [nradial][lmax + 1], contiguous: index n * (lmax + 1) + l, as TabulatedRadial::rnl
++    tabulated_eval(tables.at(mu_i * nelements + mu_j), true, r, cut(mu_i, mu_j), cut_in(mu_i, mu_j),
++                   dcut_in(mu_i, mu_j), inner_cutoff_type, fr.get_data(), dfr.get_data(), fr.get_size());
++}
++
++
+ void ACERadialFunctions::setuplookupRadspline() {
+     using namespace std::placeholders;
+     DOUBLE_TYPE lam, r_cut, dr_cut, r_in, delta_in;
+@@ -510,10 +584,12 @@ void ACERadialFunctions::setuplookupRadspline() {
+             delta_in = dcut_in(elei, elej);
+             radbasename = radbasenameij(elei, elej);
+ 
++            RadialFunctions gk_func = (radbasename == "Tabulated")
++                    ? RadialFunctions(std::bind(&ACERadialFunctions::tabulated_gk, this, elei, elej, _1))
++                    : RadialFunctions(std::bind(&ACERadialFunctions::radbase, this, lam, r_cut, dr_cut,
++                                                radbasename, _1, r_in, delta_in));
+             splines_gk(elei, elej).setupSplines(gr.get_size(),
+-                                                std::bind(&ACERadialFunctions::radbase, this, lam, r_cut, dr_cut,
+-                                                          radbasename,
+-                                                          _1, r_in, delta_in),//update gr, dgr
++                                                gk_func,//update gr, dgr
+                                                 gr.get_data(),
+                                                 dgr.get_data(), deltaSplineBins, r_cut);
+ 
+diff --git a/ML-PACE/ace-evaluator/ace_radial.h b/ML-PACE/ace-evaluator/ace_radial.h
+index feed27d..6e611be 100644
+--- a/ML-PACE/ace-evaluator/ace_radial.h
++++ b/ML-PACE/ace-evaluator/ace_radial.h
+@@ -31,6 +31,7 @@
+ #include "ace-evaluator/ace_arraynd.h"
+ #include "ace-evaluator/ace_types.h"
+ #include <functional>
++#include <vector>
+ 
+ 
+ using namespace std;
+@@ -95,6 +96,23 @@ public:
+     void calcSplines(DOUBLE_TYPE r, SHORT_INT_TYPE func_ind);
+ };
+ 
++/**
++ * Radial functions given as tables (radbasename "Tabulated"): values and r-derivatives on the
++ * uniform grid r_i = i * rcut / nbins, i = 0..nbins, interpolated by cubic Hermite -- the scheme of
++ * the look-up tables (SplineInterpolator), so a table on the look-up grid (nbins = rcut /
++ * deltaSplineBins) is reproduced exactly.  gk[k] are the g_k read by rank-1 functions,
++ * rnl[n * (lmax + 1) + l] the R_nl read by rank > 1; an empty entry is the zero function.
++ */
++struct TabulatedRadial {
++    int nbins = 0;
++    DOUBLE_TYPE rcut = 0;
++    vector<vector<DOUBLE_TYPE>> gk, dgk, rnl, drnl;
++
++    /** values[f], dvalues[f] for f < count at r (0 <= r <= rcut) from tables f, df */
++    void interpolate(const vector<vector<DOUBLE_TYPE>> &f, const vector<vector<DOUBLE_TYPE>> &df,
++                     DOUBLE_TYPE r, DOUBLE_TYPE *values, DOUBLE_TYPE *dvalues, size_t count) const;
++};
++
+ /**
+  * Interface class for radial basis functions with rank=1 (g_k), R_nl (rank>1) and hard-core repulsion radial functions
+  */
+@@ -192,6 +210,8 @@ public:
+ 
+     //--------------------------------------------------------------------------
+ 
++    std::vector<TabulatedRadial> tables; ///< radbasename "Tabulated" only, [mu_i * nelements + mu_j]
++
+     Array2D<DOUBLE_TYPE> gr_vec;
+     Array2D<DOUBLE_TYPE> dgr_vec;
+     Array2D<DOUBLE_TYPE> d2gr_vec;
+@@ -324,6 +344,14 @@ public:
+ 
+     void test_zero_func(DOUBLE_TYPE lam, DOUBLE_TYPE cut, DOUBLE_TYPE dcut, DOUBLE_TYPE r);
+ 
++    /**
++     * radbasename "Tabulated": g_k (gr, dgr) or R_nl (fr, dfr) of bond mu_i-mu_j at r from `tables`,
++     * zero outside (cut_in - dcut_in, cut) and with the inner cutoff applied as `radbase` applies it
++     */
++    void tabulated_gk(SPECIES_TYPE mu_i, SPECIES_TYPE mu_j, DOUBLE_TYPE r);
++
++    void tabulated_rnl(SPECIES_TYPE mu_i, SPECIES_TYPE mu_j, DOUBLE_TYPE r);
++
+     /**
+      * Setup all radial functions for element pair mu_i-mu_j and distance r
+      * @param mu_i first specie type
+-- 
+2.52.0
+
