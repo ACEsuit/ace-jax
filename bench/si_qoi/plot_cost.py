@@ -245,6 +245,8 @@ def main():
                     help='"LABEL|COST.json[|CODES.json]", repeatable, top to bottom (GPU, then CPU); the '
                          "fitted-parameter row always comes last.  CODES is make_cost.py's sidecar.")
     ap.add_argument("--out", default=str(ROOT / "bench/si_qoi/results/rmse_qoi_cost.png"))
+    ap.add_argument("--no-note", action="store_true",
+                    help="no footnote (the docs page states the method in its text)")
     ap.add_argument("--wl", action="store_true", help="the wL-ladder figure (WL_FAMILIES, recoloured) instead of the main one")
     a = ap.parse_args()
     if a.wl:
@@ -272,17 +274,18 @@ def main():
     order = [FAM[f][0] for f in FAM if FAM[f][0] in handles]
     fig.legend([handles[l] for l in order], order, loc="upper center", ncol=-(-len(order) // 3), frameon=False,
                fontsize=9, bbox_to_anchor=(0.5, 1.0))
-    cpu_note = ("CPU row: a 128-core EPYC 7742 node, all cores, ranks bound to cores; each model's fastest layout timed so far\n"
-                "(128x1 or 64x2 MPI ranks x threads; GAP not yet re-timed: 32 ranks).\n"
-                "ace-jax runs in LAMMPS (lammps-jax host backend; ACE o4d16 and o4d20 with the unmerged recursive (DAG) product basis); MACE runs in LAMMPS via Symmetrix and, separately, Symmetrix-XL.\n"
-                "Linear ACE run by ML-PACE: the o4 fits exported exactly to .yace with tabulated radials (a local ML-PACE patch; pace and pace/kk).  "
+    cpu_note = ("CPU row: a 128-core EPYC 7742 node, all cores, ranks bound to cores; each model's fastest layout\n"
+                "(128x1 or 64x2 MPI ranks x threads; GAP: 32 ranks).\n"
+                "ace-jax runs in LAMMPS (lammps-jax CPU backend; ACE o4d16 and o4d20 with the recursive (DAG) product basis, aa_dag='greedy'); MACE runs in LAMMPS via Symmetrix and, separately, Symmetrix-XL.\n"
+                "Linear ACE run by ML-PACE: the o4 fits exported exactly to .yace with tabulated radials (ML-PACE with the tabulated-radial patch, ICAMS/lammps-user-pace#31; pace and pace/kk).  "
                 "GPU ML-PACE: LAMMPS develop ec02ed0 (with the 2026-08 pace/kk GPU rewrite).\n"
                 if any("CPU" in r[0] for r in rows) else "")
-    fig.text(0.5, 0.003, cpu_note + "QoI error clips each QoI to [0.05, 10] x tolerance; compressed hcp is left out (extrapolation, "
-             "outside the training data); only models with every QoI computed.\n"
-             "Cost: the fastest parity-checked code per model, float64 only (one-layer MACE and, on the GPU, Symmetrix MACE c64L1 have "
-             "float32 timings only and are left out of the cost rows). Single fits per point.", ha="center", fontsize=8.5, color=MUTED)
-    fig.tight_layout(rect=(0, 0.055, 1, 1 - 1.0 / fig.get_figheight()))
+    if not a.no_note:
+        fig.text(0.5, 0.003, cpu_note + "QoI error clips each QoI to [0.05, 10] x tolerance; compressed hcp is left out (extrapolation, "
+                 "outside the training data); only models with every QoI computed.\n"
+                 "Cost: the fastest parity-checked code per model, float64 only (one-layer MACE and, on the GPU, Symmetrix MACE c64L1 have "
+                 "float32 timings only and are left out of the cost rows). Single fits per point.", ha="center", fontsize=8.5, color=MUTED)
+    fig.tight_layout(rect=(0, 0 if a.no_note else 0.055, 1, 1 - 1.0 / fig.get_figheight()))
     pathlib.Path(a.out).parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(a.out, dpi=150); print("wrote", a.out)
 

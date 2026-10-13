@@ -1,7 +1,98 @@
 # Performance
 
-This page compares the speed of ace-jax with ML-PACE and MACE, on one CPU
-and one GPU, for energies and forces.
+This page gives two benchmarks:
+
+1. **Accuracy and cost on silicon.** Fitted models of each family are
+   compared at the same accuracy. The cost is the time per atom and MD step
+   in LAMMPS.
+2. **Speed on SiGe and Cantor.** Models with random weights are compared at
+   the same size. These figures compare speed only, not accuracy.
+
+## Accuracy and cost: silicon
+
+All models are fitted to the same training set and tested on the same test
+set. The data is the GAP-18 silicon dataset (2,475 configurations: 2,227 for
+training and 248 for testing).
+
+- **Model families.** Linear ACE (ace-jax), ACE with learned radials,
+  PACE-shaped ACE, PACE (pacemaker), MACE with L = 0 and L = 1, and GAP
+  refits. Each family has a ladder of model sizes. Each point is one fit.
+- **Force error.** The root-mean-square force error on the test set.
+- **QoI error.** 21 silicon properties are calculated with each model and
+  compared with DFT: elastic constants, energies of other phases, point
+  defects, surface and stacking-fault energies, decohesion stress and
+  phonons. Each error is divided by a tolerance. The QoI error is the
+  geometric mean of these values (lower is better).
+- **Target.** A model reaches the target if its force error is not more than
+  the force error of GAP-18, and its QoI error is not more than 0.5.
+- **Cost.** Microseconds per atom per MD step, in LAMMPS, in float64. Each
+  model uses the fastest code that agrees with the reference evaluation.
+
+![Accuracy against cost on silicon. Rows: A100 GPU, 128-core CPU node, number of fitted parameters. Columns: test force error, QoI error against DFT, and the cheapest model of each family that reaches the target](assets/benchmarks/si_accuracy_cost.png)
+
+The panels on the right (C, F, I) show the cheapest model of each family
+that reaches the target. Panels G to I compare the number of fitted
+parameters, not the cost.
+
+At the target, in microseconds per atom-step:
+
+| model | A100 GPU | CPU node (128 cores) |
+|---|---|---|
+| linear ACE o4d20, ace-jax with lammps-jax | 5.65 | 50.0 |
+| linear ACE o4d20, ML-PACE | 4.12 | 5.39 |
+| MACE c16L0, Symmetrix | 1.93 | 2.36 |
+| MACE c16L0, Symmetrix-XL | 1.23 | 2.19 |
+| MACE c16L1, Symmetrix | 5.36 | 8.58 |
+| MACE c16L1, Symmetrix-XL | 1.47 | 2.87 |
+
+In these ladders, PACE (pacemaker), ACE with learned radials, PACE-shaped
+ACE and the GAP refits do not reach the target. PACE reaches the force error
+of GAP-18 with fewer parameters than linear ACE, but not the QoI target.
+
+### How the cost was measured
+
+- **GPU.** One NVIDIA A100, 32,768 atoms.
+- **CPU.** One node with two 64-core AMD EPYC 7742 CPUs, 4,096 atoms. All
+  cores are used, with each MPI rank bound to a core. Each model uses its
+  faster layout: 128 MPI ranks, or 64 MPI ranks with 2 threads. GAP uses 32
+  MPI ranks.
+- **ace-jax** runs in LAMMPS with lammps-jax, on the GPU and on the CPU. On
+  the CPU, ACE o4d16 and o4d20 use the recursive product basis
+  (`aa_dag="greedy"`).
+- **Linear ACE, run by ML-PACE.** The same linear ACE fits are written as
+  `.yace` files with tabulated radial functions
+  ([Write an ACE model as a .yace file](howto/pace.md)). They run in
+  `pair_style pace` (CPU) and `pair_style pace/kk` (GPU).
+- **ML-PACE** on the GPU is the LAMMPS development version with the 2026
+  `pace/kk` GPU update.
+- **MACE** runs in LAMMPS with Symmetrix and, separately, with
+  Symmetrix-XL.
+- **GAP** runs in LAMMPS with QUIP, on the CPU only.
+- **Before each timing**, a short check compares the energies and forces
+  in LAMMPS with the reference evaluation of the same model.
+
+!!! note
+    ML-PACE reads tabulated radial functions only with an addition that is
+    not yet in its releases
+    ([ML-PACE pull request 31](https://github.com/ICAMS/lammps-user-pace/pull/31)).
+    The "linear ACE, run by ML-PACE" results use a build of ML-PACE with
+    that addition.
+
+### How the QoI error was calculated
+
+- The reference is DFT (CASTEP), as for the training data.
+- Each normalised error is limited to the range 0.05 to 10 before the
+  geometric mean. Thus one very large or very small error does not control
+  the result.
+- The energy of compressed hcp silicon is not included. These structures
+  are outside the training data, so the error measures extrapolation.
+- Only models with all 21 QoIs calculated are shown.
+- MACE with one layer, and Symmetrix MACE c64L1 on the GPU, have float32
+  timings only. They are not in the cost rows.
+- The GAP parameter count includes only the sparse-point coefficients. The
+  GAP kernel also keeps the sparse descriptors.
+
+## Speed: SiGe and Cantor
 
 Each figure shows the throughput against the system size. The throughput is
 in **atom-steps per second** (atoms × evaluations per second; higher is
@@ -27,22 +118,23 @@ better).
 - **Systems.** SiGe, a random alloy on diamond, and Cantor, the equiatomic
   CrMnFeCoNi alloy on fcc.
 
-## CPU, float64
+### CPU, float64
 
 ![Throughput against system size on CPU in float64, SiGe and Cantor panels: ACEpotentials.jl trim library and ML-PACE in LAMMPS are fastest, ace-jax standalone 6–10× below ML-PACE and level with ACEpotentials.jl direct, MACE slowest](assets/benchmarks/cpu_float64.png)
 
-ace-jax runs in LAMMPS only on a GPU, because lammps-jax supports only
-GPUs. Thus the CPU figure shows ace-jax standalone only.
+When these figures were made, lammps-jax supported only GPUs. Thus the CPU
+figure shows ace-jax standalone only. The silicon benchmark above includes
+ace-jax in LAMMPS on the CPU.
 
-## GPU, float64
+### GPU, float64
 
 ![Throughput against system size on GPU in float64, SiGe and Cantor panels, for ace-jax PACE and linear ACE, ML-PACE and MACE, in LAMMPS and standalone](assets/benchmarks/gpu_float64.png)
 
-## GPU, float32
+### GPU, float32
 
 ![Throughput against system size on GPU in float32, SiGe and Cantor panels, for ace-jax PACE and linear ACE and MACE standalone](assets/benchmarks/gpu_float32.png)
 
-## At 8,192 atoms
+### At 8,192 atoms
 
 Atom-steps per second at 8,192 atoms. "—" shows that a code does not run
 in that setting, or ran out of memory at a smaller size.

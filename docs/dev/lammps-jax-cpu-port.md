@@ -1,6 +1,8 @@
 # lammps-jax on CPU: MPI domain-decomposed ace-jax in LAMMPS
 
-Status: investigation and plan, 2026-10-12. Nothing here is implemented or committed.
+Status: the investigation and plan of 2026-10-12, since implemented: abhijeetgangan/lammps-jax#1 (the CPU
+backend's client options, `export_model(platform=)`) and ace-jax #89 (`export_lammps(platform=)`,
+`neighbour_capacity(procs=)`). The CPU rows of `accuracy-cost-results.md` use them.
 
 ## TL;DR
 
