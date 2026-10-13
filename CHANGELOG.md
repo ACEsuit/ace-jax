@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **`--nmax-by-order` and `--lmax-by-order`** (`aj fit`, `aj basis`) set a
+  maximum radial and angular degree for each correlation order, as
+  pacemaker's `nradmax_by_orders` and `lmax_by_orders` do. Without them, the
+  basis is unchanged.
 - **`aj fit --radial-basis sbessel`** builds the tensor radials from the
   spherical Bessel functions that pacemaker uses. The default, `poly`, is
   unchanged. The radial learner works with the two bases. Saved models
