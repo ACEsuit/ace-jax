@@ -8,11 +8,9 @@ invariants give real coefficients (the imaginary residue is reported).  Each rad
 reads, R_nl(r) r^l (solid harmonics put r^l in the radial), becomes a PACE R_nl, and the pair radial plus
 the order-1 terms become one rank-1 function h(r).  Two radial forms:
 
-- `tabulated` (default): `radbasename: Tabulated`, the values and r-derivatives (autodiff) of every R_nl
-  and of h on ML-PACE's own look-up grid (nbins = rcut / deltaSplineBins), which its cubic-Hermite tables
-  then reproduce exactly.  Needs the ML-PACE `Tabulated` radial patch (docs/dev/ml-pace-tabulated-radials.md);
-  upstream rejects the name.  Below r_min (0.5 Å) the tables continue linearly (the ACE pair envelope is
-  singular at r -> 0).
+- `tabulated` (default): exact, `radbasename: Tabulated` -- ace-jax's `write_yace` (src/ace_jax/export/yace.py),
+  which this script's own tabulated form became; it writes the same files the ace_tab rows timed.  Needs
+  ML-PACE's tabulated-radial patch (ICAMS/lammps-user-pace#31; docs/dev/ml-pace-tabulated-radials.md).
 - `sbessel`: upstream ML-PACE as is: least-squares combinations of PACE's SBessel g_k on [r_fit, rcut]
   (an approximation: 2.3 meV/Å force rms on o4d20 at --nradbase 80).
 
@@ -84,7 +82,7 @@ def products(m, cols, lmax):
     return acc, order1
 
 
-def convert(path, radial="tabulated", K=80, r_fit=1.6, delta=0.001):
+def convert(path, radial="sbessel", K=80, r_fit=1.6, delta=0.001):
     m, meta, _ = aj.load(path)
     if m.E0.shape[0] != 1:
         raise NotImplementedError("single species only")
@@ -116,28 +114,7 @@ def convert(path, radial="tabulated", K=80, r_fit=1.6, delta=0.001):
     bond = {"nradmax": int(nradmax), "lmax": lmax, "prehc": 0, "lambdahc": 0, "rcut": rc, "dcut": 0.01,
             "rcut_in": 0, "dcut_in": 0, "inner_cutoff_type": "distance"}
     info = {"radial": radial}
-    if radial == "tabulated":
-        N = int(round(rc / delta))
-        delta = rc / N
-        if int(rc / delta) != N:                 # ML-PACE: ntot = int(cutoff / deltaSplineBins)
-            raise ValueError(f"rcut {rc} / deltaSplineBins {delta} does not land on {N} bins")
-        r = np.arange(N + 1) * delta
-        rs = np.maximum(r, R_MIN)
-        Rnl, Rp, dRnl, dRp = radials(m, rs)
-        lin = lambda f, df: np.where(r < R_MIN, f + df * (r - R_MIN), f)  # linear below R_MIN
-        tab = lambda f, df: (np.where(r >= rc, 0.0, lin(f, df)), np.where(r >= rc, 0.0, df))
-        rnl = []
-        for c, (n, l) in sorted(cols.items(), key=lambda t: t[1]):
-            f, df = Rnl[:, c] * rs ** l, dRnl[:, c] * rs ** l + (l * Rnl[:, c] * rs ** (l - 1) if l else 0)
-            f, df = tab(f, df)
-            rnl.append({"n": int(n), "l": int(l), "f": f.tolist(), "df": df.tolist()})
-        f1, df1 = tab(h(Rnl, Rp), h(dRnl, dRp))
-        bond |= {"nradbasemax": 1, "radbasename": "Tabulated",
-                 "radtable": {"nbins": N, "gk": [{"k": 1, "f": f1.tolist(), "df": df1.tolist()}], "rnl": rnl}}
-        rank1 = [{"mu0": 0, "rank": 1, "ndensity": 1, "num_ms_combs": 1, "mus": [0], "ns": [1], "ls": [0],
-                  "ms_combs": [0], "ctildes": [1.0]}]
-        info |= {"nbins": N, "deltaSplineBins": delta}
-    elif radial == "sbessel":
+    if radial == "sbessel":
         r = np.linspace(r_fit, rc, 4000)[:-1]
         Rnl, Rp, _, _ = radials(m, r)
         G = gbasis(r, rc, K)
@@ -156,7 +133,7 @@ def convert(path, radial="tabulated", K=80, r_fit=1.6, delta=0.001):
                  "rank1_fit_max_rel": float(relerr(h(Rnl, Rp), w1))}
         delta = 0.001
     else:
-        raise ValueError(f"radial must be tabulated or sbessel, got {radial!r}")
+        raise ValueError(f"convert writes the sbessel form; tabulated is write_yace's, got {radial!r}")
 
     # half basis, as pacemaker writes it: an invariant has sum(m) = 0, so P(-m) = conj(P(m)) and the
     # m-tuple and its negation contribute the same Re(c P); keep one of each pair with the summed
@@ -197,6 +174,11 @@ def main():
     ap.add_argument("--nradbase", type=int, default=80, help="sbessel: number of g_k")
     ap.add_argument("--r-fit", type=float, default=1.6, help="sbessel: radials are fitted on [r_fit, rcut] (Å)")
     a = ap.parse_args()
+    if a.radial == "tabulated":                  # exact: ace-jax's write_yace (identical files to this script's
+        from ace_jax.eval import write_yace       # former tabulated form, which timed the ace_tab rows)
+        m, _, _ = aj.load(a.model)
+        print(write_yace(m, a.out, delta=a.delta))
+        return
     tree, info = convert(a.model, a.radial, a.nradbase, a.r_fit, a.delta)
     dump_tree(tree, a.out)
     print(info)

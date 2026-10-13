@@ -31,7 +31,7 @@ TARGET_QOI = 0.5                  # geometric-mean |error|/tolerance: the typica
 FAM = {  # family: (label, colour, marker, linestyle, filled, qoi model name pattern)
     "ace":        ("linear ACE",               "#2a78d6", "o", "-",  True,  "ACE_{s}"),
     "ace_E10":    ("linear ACE, pacemaker's E:F balance", "#2a78d6", "o", "--", False, "ACEE10_{s}"),
-    # the same linear ACE fits run by ML-PACE (ace_to_yace.py, Tabulated radials: exact): linear ACE's colour
+    # the same linear ACE fits run by ML-PACE (write_yace, Tabulated radials: exact): linear ACE's colour
     # (same models), the code told apart by marker and line; its accuracy is ACE's, its cost its own (COST_NAME)
     "ace_tab":    ("linear ACE, run by ML-PACE", "#2a78d6", "*", ":",  True,  "ACE_{s}"),
     "ace_lr":     ("ACE, learned radials",     "#e34948", "s", "-",  True,  "ACElr_{s}"),

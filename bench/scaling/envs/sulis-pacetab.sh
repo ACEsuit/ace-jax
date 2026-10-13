@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # LAMMPS (the lammps-dev tree, develop ec02ed0) with ML-PACE built from a local lammps-user-pace carrying the
 # tabulated-radial patch (`radbasename: Tabulated`, docs/dev/ml-pace-tabulated-radials.md), for timing ace-jax
-# ACE models exported exactly by bench/accuracy_cost/ace_to_yace.py.  Configured as lammps-dev's build-kk-cpu
+# ACE models exported exactly by write_yace (ace_to_yace.py --radial tabulated).  Configured as lammps-dev's build-kk-cpu
 # (Kokkos OpenMP, Zen 2) and build-kk (Kokkos CUDA, A100) are, only LOCAL_ML-PACE differs; the patch is on
 # top of the release that tree pins (v.2025.12.4.p1), so stock ML-PACE rows time the same code otherwise.
 #

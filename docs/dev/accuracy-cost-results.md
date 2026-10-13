@@ -97,6 +97,4 @@ Fits, QoIs and timings themselves: `bench/accuracy_cost/` (`sweep.yaml`, `timing
 ## Open
 
 - ACE + GP was dropped from the families pending the GP LML cost study (issue #60).
-- The `ace_tab` rows use `bench/accuracy_cost/ace_to_yace.py`, the converter `write_yace` grew from; switch
-  them to `write_yace` once it is on `main`.
 - GAP has a CPU row at 32 ranks only.

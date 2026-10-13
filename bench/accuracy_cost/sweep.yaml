@@ -81,7 +81,7 @@ ace_yace:      # the ace ladder's o4 models as upstream ML-PACE .yace, radials r
   - {size: o4d14}
   - {size: o4d16}
   - {size: o4d20}
-ace_tab:       # the same, exactly: Tabulated radials (ace_to_yace.py), for ML-PACE with the tabulated-radial patch
+ace_tab:       # the same, exactly: Tabulated radials (write_yace), for ML-PACE with the tabulated-radial patch
   - {size: o4d12}
   - {size: o4d14}
   - {size: o4d16}

@@ -50,7 +50,7 @@ PLAN = {"ace": [("acejax-ace", {"cpu": "standalone", "gpu": "lammps"}, ("float64
         # the ACE model run by ML-PACE; ace-jax on the same file on the GPU only (CPU: too slow for devel)
         "ace_yace": [("acejax-pace", {"gpu": "lammps"}, ("float64",)),
                      ("mlpace", {"cpu": "lammps", "gpu": "lammps"}, ("float64",))],
-        # the same models exactly: `Tabulated` radials (ace_to_yace.py default), which need ML-PACE with the
+        # the same models exactly: `Tabulated` radials (write_yace; ace_to_yace.py's default), which need ML-PACE with the
         # tabulated-radial patch (env json `lmp`: envs/sulis-pacetab.sh); gated against the source .npz
         "ace_tab": [("mlpace", {"cpu": "lammps", "gpu": "lammps"}, ("float64",))],
         "mace": [("mace", {"cpu": "lammps", "gpu": "lammps"}, ("float64",)),
