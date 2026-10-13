@@ -136,7 +136,12 @@ def _add_fit_args(p):
     p.add_argument("--radial-n-q", type=int, default=12,
                    help="tensor-radial polynomial span after widening (with --learn-radial)")
     p.add_argument("--radial-steps", type=int, default=40,
-                   help="L-BFGS steps per roughness weight (with --learn-radial)")
+                   help="optimiser iterations per roughness weight (with --learn-radial)")
+    p.add_argument("--radial-opt", choices=["lbfgs", "newton"], default="lbfgs",
+                   help="radial optimiser: L-BFGS-B, or trust-region Newton with exact Hessian-vector "
+                        "products (each costs about two gradients; capped by --radial-cg-iters per iteration)")
+    p.add_argument("--radial-cg-iters", type=int, default=20,
+                   help="Hessian-vector products per Newton iteration, at most (with --radial-opt newton)")
     p.add_argument("--radial-lam-grid", default="0,1e-2",
                    help="comma-separated relative roughness weights the gate picks among, "
                         "alongside the initial radials (with --learn-radial)")
@@ -195,6 +200,7 @@ def _fit_config(a):
         ard_transfer=a.ard_transfer, ard_support=not a.no_ard_support,
         ard_support_features=a.ard_support_features,
         learn_radial=a.learn_radial, radial_n_q=a.radial_n_q, radial_steps=a.radial_steps,
+        radial_opt=a.radial_opt, radial_cg_iters=a.radial_cg_iters,
         radial_lam_grid=tuple(float(x) for x in str(a.radial_lam_grid).split(",") if x.strip()),
         radial_val_frac=a.radial_val_frac,
         solver=a.solver, predict_train=False, pops_ridge=ridge,

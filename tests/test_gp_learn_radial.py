@@ -631,3 +631,90 @@ def test_residual_gradient_memory_does_not_scale_with_batches():
     grad = lambda X, d: jax.grad(lambda Y: residual_sums(with_radial(prob.model, Y), prob.cfg, d, c)[0].sum())(X)  # noqa: E731
     t2, t6 = _temp_bytes(grad, W, ds2), _temp_bytes(grad, W, ds6)
     assert t6 <= 1.25 * t2 + 1_000_000
+
+
+def _reduced(prob, ds, theta):
+    """fg and hvp as learn_radial builds them for one round (lam = spec = gap = 0)."""
+    from ace_jax.fit.hypers import to_array
+    from ace_jax.fit.objective import posterior_from_qr
+    from ace_jax.fit.radial_learn import _prior, _vp_hvp, _vp_value_and_grad, qr_readout
+    from ace_jax.fit.radial_model import normalise, radial_gram, roughness_matrix, row_active, with_radial
+    W0 = prob.model.rnl_Wnlq
+    Q, active, D2 = radial_gram(prob.model, ds), row_active(W0), roughness_matrix(prob.model)
+    V0 = normalise(W0, Q, active)
+    a, shape = to_array(theta), V0.shape
+    z, zU = jnp.zeros(()), jnp.zeros((W0.shape[0], W0.shape[0], W0.shape[-1], W0.shape[-1]))
+    rest = (Q, active, D2, jnp.ones(W0.shape[2]), z, V0, jnp.ones(W0.shape[-1]), z, zU, z)
+
+    def fg(x):
+        V = jnp.asarray(x.reshape(shape))
+        c, qs = qr_readout(theta, prob, with_radial(prob.model, normalise(V, Q, active)), ds)
+        f, g = _vp_value_and_grad(V, c, a, prob.model, ds, _prior(prob), *rest, cfg=prob.cfg)
+        return float(f), np.asarray(g, float).ravel(), (qs, c)
+
+    def hvp(x, aux, v):
+        qs, c = aux
+        Lc = posterior_from_qr(theta, qs, prob)[1]
+        return np.asarray(_vp_hvp(jnp.asarray(x.reshape(shape)), c, Lc, jnp.asarray(v.reshape(shape)), a,
+                                  prob.model, ds, _prior(prob), *rest, cfg=prob.cfg), float).ravel()
+    return fg, hvp, np.asarray(V0, float).ravel(), np.asarray(active)
+
+
+def test_reduced_hvp_matches_differences_of_the_reduced_gradient(small):
+    """H_r v (with the implicit dc*/dV term) against central differences of the envelope gradient,
+    whose c* is re-solved at each point; the fixed-c Hessian alone (w = 0) would not match."""
+    prob, ds, _ = small
+    fg, hvp, x, active = _reduced(prob, ds, THETA)
+    _, _, aux = fg(x)
+    v = np.random.default_rng(3).standard_normal(x.shape)
+    v *= np.broadcast_to(active.reshape(active.shape + (1,) * (len(prob.model.rnl_Wnlq.shape) - active.ndim)),
+                         prob.model.rnl_Wnlq.shape).ravel()
+    hv = hvp(x, aux, v)
+    # h at the bottom of the FD error's V: truncation ~h^2 above (4e-3 at h = 1e-2), the re-solved
+    # c*'s roundoff / h below (3e-4 at h = 1e-5); 2e-5 of max|fd| at h = 3e-4
+    h = 3e-4
+    fd = (fg(x + h * v)[1] - fg(x - h * v)[1]) / (2 * h)
+    assert np.abs(hv - fd).max() < 1e-4 * np.abs(fd).max()
+
+
+def test_newton_round_beats_lbfgs_per_iteration_on_recoverable_radials():
+    """The same budget of iterations: trust-region Newton with exact reduced HVPs gets further than
+    L-BFGS-B, and its accepted objective never rises."""
+    from ace_jax.fit.radial_learn import _lbfgs_round, _newton_round
+    prob, ds, _ = make_problem(ncfg=12, per_batch=3)
+    Wt, W0, c = _perturbed_truth(prob)
+    ds = relabel(prob, ds, Wt, c)
+    fg, hvp, x0, _ = _reduced(_with_W(prob, W0), ds, THETA)
+    _, f0, fl, tl, _, _ = _lbfgs_round(fg, x0, 8, 1e-12)
+    _, f0n, fn, tn, reason, _ = _newton_round(fg, hvp, x0, 8, 1e-12, cg_iters=30)
+    print(f"f0 {f0:.6e}  lbfgs(8) {fl:.6e}  newton(8) {fn:.6e}  reason {reason}  accepted {len(tn)}")
+    assert f0n == pytest.approx(f0, rel=1e-12) and fn < fl and all(b <= a for a, b in zip(tn, tn[1:]))
+
+
+def _with_W(prob, W):
+    from ace_jax.fit.radial_model import with_radial
+    return prob._replace(model=with_radial(prob.model, W))
+
+
+def test_learn_radial_newton_runs_rounds_with_refits(small):
+    """opt="newton" through learn_radial: rounds, theta re-fits and the LML record, all finite."""
+    from ace_jax.fit.radial_learn import learn_radial
+    prob, ds, _ = small
+    W, info = learn_radial(prob, ds, prob.model.rnl_Wnlq, steps=4, reprofile_every=2, map_steps=20,
+                           opt="newton", cg_iters=5)
+    assert np.all(np.isfinite(np.asarray(W))) and len(info["lml"]) == len(info["reasons"]) >= 1
+    assert all(np.isfinite(info["lml"])) and set(info["reasons"]) <= {"steps", "converged", "linesearch"}
+    # a rejected trial shrinks the trust region and is not recorded: the accepted objective never rises
+    assert all(b <= a for a, b in zip(info["trace"], info["trace"][1:]))
+    with pytest.raises(ValueError, match="opt"):
+        learn_radial(prob, ds, prob.model.rnl_Wnlq, theta0=THETA, profile=False, steps=1, opt="adam")
+
+
+def test_fit_config_checks_the_radial_optimiser():
+    from ace_jax.fit.pipeline import FitConfig
+    base = dict(model=str(MODEL), arm="linear", m_per_species=0, learn_radial=True)
+    FitConfig(**base, radial_opt="newton").validate()
+    with pytest.raises(ValueError, match="radial_opt"):
+        FitConfig(**base, radial_opt="adam").validate()
+    with pytest.raises(ValueError, match="radial_cg_iters"):
+        FitConfig(**base, radial_opt="newton", radial_cg_iters=0).validate()
