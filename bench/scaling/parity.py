@@ -51,6 +51,8 @@ TOL = {"mlpace": (1e-6, 1e-5), "acejax": (1e-10, 1e-9), "mace": (1e-6, None),
        "acepot": (1e-10, 1e-9), "trim": (1e-10, 1e-9), "trim-ace": (1e-5, 1e-3),
        "acepotentials-trim": (1e-10, 1e-9),       # accuracy_cost: the trim library vs the ace-jax fit (exact radials)
        "gap": (1e-6, 1e-5),
+       # pair nep (NEP_CPU in LAMMPS) vs calorine's CPUNEP: NEP_CPU both sides, float64 (copies may differ in version)
+       "nep": (1e-8, 1e-6),
        # Symmetrix-XL vs MACE in PyTorch (float64), as "mace" plus a force bound; FP32 looser (labelled -f32)
        "mace-xl": (1e-6, 1e-4), "mace-xl-f32": (1e-5, 1e-3)}
 # gates that check a standalone line: a failure blocks its standalone rows
@@ -63,6 +65,12 @@ def _quip_ef(path, at, label=None):       # quippy is optional: imported here on
     import quippy
     p = quippy.potential.Potential(param_filename=str(path), **({"args_str": f"Potential xml_label={label}"} if label else {}))
     a = at.copy(); a.calc = p
+    return a.get_potential_energy(), a.get_forces()
+
+
+def _nep_ef(path, at):                   # calorine is optional: imported here only.  The raw NEP energy (no E0 shift)
+    from calorine.calculators import CPUNEP
+    a = at.copy(); a.calc = CPUNEP(str(path))
     return a.get_potential_energy(), a.get_forces()
 
 

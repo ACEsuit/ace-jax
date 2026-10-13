@@ -72,6 +72,9 @@ def load_calc(family, path, device="cpu"):
             path = str(cpu_copy(pathlib.Path(path).parent))
         return MACECalculator(model_paths=path, device="cuda" if device == "gpu" else "cpu",
                               default_dtype="float64")
+    if family == "nep":                          # NEP_CPU via calorine, float64, E0 added back (fit_nep)
+        from .fit_nep import calculator
+        return calculator(path)
     if family in ("gap", "gap_noglue", "gap_E30"):  # noglue: the same loader, the XML just has no Glue term; E30: other sigmas
         import quippy
         return quippy.potential.Potential(param_filename=path)

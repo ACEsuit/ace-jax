@@ -186,13 +186,30 @@ def test_evaluate_refuses_mismatched_split(tmp_path, monkeypatch):
 def test_sweep_is_complete_and_measured():
     from accuracy_cost.common import load_sweep
     s = load_sweep()
-    assert set(s) == {"ace", "ace_lr", "ace_gp", "pace", "mace", "gap", "ace_pshape", "ace_pshape_lr", "ace_wl", "gap_noglue", "gap_E30", "ace_yace", "ace_tab"}
+    assert set(s) == {"ace", "ace_lr", "ace_gp", "pace", "mace", "gap", "ace_pshape", "ace_pshape_lr", "ace_wl", "gap_noglue", "gap_E30", "ace_yace", "ace_tab", "nep"}
     assert len(s["ace"]) == 7 and all(e["n_B"] > 0 for e in s["ace"])
     assert [(e["order"], e["max_degree"]) for e in s["ace_lr"]] == [(e["order"], e["max_degree"]) for e in s["ace"]]
     nB = [e["n_B"] for e in s["ace"]]
     assert nB == sorted(nB) and nB[0] <= 80 and nB[-1] >= 1000
     for fam, es in s.items():
         assert len({e["size"] for e in es}) == len(es), fam
+
+
+def test_fit_nep_inputs(tmp_path):
+    """nep.in carries the shared cutoff (radial and angular) and the entry's sizes; the GPUMD xyz has energies
+    relative to E0_SI per atom (NEP trains in float32), the config type's weight and the virial."""
+    from ase import Atoms
+    from accuracy_cost.common import E0_SI, RCUT
+    from accuracy_cost.fit_nep import n_params, nep_in, write_gpumd_xyz
+    txt = nep_in({"n_max": "6 4", "basis_size": "6 6", "l_max": "4 1", "neuron": 30})
+    assert f"cutoff {RCUT:g} {RCUT:g}" in txt and "n_max 6 4" in txt and "neuron 30" in txt and "type 1 Si" in txt
+    at = Atoms("Si2", positions=[[0, 0, 0], [1.3, 1.3, 1.3]], cell=5.43 * np.eye(3), pbc=True)
+    at.info.update(energy=2 * E0_SI - 9.0, config_type="liq", virial=np.diag([1.0, 2.0, 3.0]))
+    at.arrays["forces"] = np.array([[0.1, 0, 0], [-0.1, 0, 0]])
+    write_gpumd_xyz(tmp_path / "t.xyz", [at], {"Default": 1.0, "liq": 0.25})
+    head = (tmp_path / "t.xyz").read_text().splitlines()[1]
+    assert "energy=-9.0000000000" in head and "weight=0.25" in head and 'virial="1.0' in head
+    assert n_params("    total number of parameters to be optimized = 1234.\n") == 1234
 
 
 def test_fit_ace_commands_share_cutoff_weights_and_e0(tmp_path):

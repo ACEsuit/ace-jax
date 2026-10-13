@@ -86,3 +86,10 @@ ace_tab:       # the same, exactly: Tabulated radials (write_yace), for ML-PACE 
   - {size: o4d14}
   - {size: o4d16}
   - {size: o4d20}
+nep:           # NEP4 trained by GPUMD's nep on a Sulis A100 (fit_nep.py; envs/sulis-nep.sbatch): cutoff 5 A radial and
+               # angular; n_max "R A", basis_size "R A", l_max "<3-body l> <q_222 4-body on/off>", neuron = hidden-layer width
+  - {size: n10,  n_max: "4 4",  basis_size: "4 4", l_max: "4 0",   neuron: 10}
+  - {size: n30,  n_max: "6 4",  basis_size: "6 6", l_max: "4 1",   neuron: 30}
+  - {size: n50,  n_max: "8 6",  basis_size: "8 8", l_max: "4 1",   neuron: 50}
+  - {size: n80,  n_max: "10 8", basis_size: "8 8", l_max: "6 1",   neuron: 80}
+  - {size: n120, n_max: "12 8", basis_size: "8 8", l_max: "6 1",   neuron: 120}

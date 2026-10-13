@@ -47,6 +47,9 @@ FAM = {  # family: (label, colour, marker, linestyle, filled, qoi model name pat
     # validated (dataviz --pairs all, light): only a contrast WARN, as the yellow and teal
     "mace_xl_L0": ("MACE, L=0, Symmetrix-XL",  "#a197ea", "p", "--", False, "MACE_{s}"),
     "mace_xl_L1": ("MACE, L=1, Symmetrix-XL",  "#a197ea", "p", "-",  True,  "MACE_{s}"),
+    # NEP (GPUMD-trained NEP4; float64 NEP_CPU for accuracy and the CPU cost row): validated (dataviz --pairs
+    # all, light): CVD WARN 6.4 against linear ACE's blue, so its own marker shape too
+    "nep":        ("NEP (GPUMD)",              "#c13ec9", "X", "-",  True,  "NEP_{s}"),
     "gap":        ("GAP refit",                "#008300", "v", "-",  True,  "GAP_{s}"),
     "gap_noglue": ("GAP refit, no glue",       "#008300", "v", "--", False, "GAPnoglue_{s}"),
     "gap_E30":    ("GAP refit, ACE's E:F balance", "#008300", "v", ":", True, "GAPE30_{s}"),

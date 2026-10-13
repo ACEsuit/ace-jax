@@ -63,10 +63,13 @@ PLAN = {"ace": [("acejax-ace", {"cpu": "standalone", "gpu": "lammps"}, ("float64
                  # only where the env json names its LAMMPS (`lmp_xl`, main drops it otherwise)
                  ("mace-xl", {"cpu": "lammps", "gpu": "lammps"}, ("float64",)),
                  ("mace-xl-f32", {"cpu": "lammps", "gpu": "lammps"}, ("float32",))],
+        # NEP: pair_style nep (NEP_CPU, float64, MPI), CPU only -- GPUMD's GPU inference is mixed precision,
+        # outside the float64 cost rows (docs/dev/accuracy-cost-results.md)
+        "nep": [("nep", {"cpu": "lammps"}, ("float64",))],
         "gap": [("gap", {"cpu": "lammps"}, ("float64",))],         # pair quip: no KOKKOS, CPU only
         "gap_noglue": [("gap", {"cpu": "lammps"}, ("float64",))],  # the XML has no Glue term; same pair style
         "gap_E30": [("gap", {"cpu": "lammps"}, ("float64",))]}     # GAP-18's command, energy sigmas x10/3
-STYLE = {"acejax-ace": "acejax", "acejax-pace": "acejax", "mlpace": "mlpace", "mace": "mace", "gap": "gap",
+STYLE = {"acejax-ace": "acejax", "acejax-pace": "acejax", "mlpace": "mlpace", "mace": "mace", "gap": "gap", "nep": "nep",
          "mace-xl": "mace-xl", "mace-xl-f32": "mace-xl-f32", "acepotentials-trim": "acepotentials-trim"}
 TRIM = "acepotentials-trim"
 XL_CODES = ("mace-xl", "mace-xl-f32")
@@ -264,6 +267,9 @@ def gate_model(row, device, env, work):
                     E0, F0 = parity._mace_ef(row["path"], at, device)
                     E1, F1 = parity._lammps_ef(style, row["symmetrix_xl"], row["elements"], at, device,
                                                env["lmp_xl"], w, pair_extra=xl_args)
+                elif style == "nep":                                   # NEP_CPU both sides, unshifted energies
+                    E0, F0 = parity._nep_ef(row["path"], at)
+                    E1, F1 = parity._lammps_ef("nep", row["path"], row["elements"], at, device, lmp, w)
                 else:                                              # gap: the label picks the Potential
                     E0, F0 = parity._quip_ef(row["path"], at, row["quip_label"])
                     E1, F1 = parity._lammps_ef("gap", row["path"], row["elements"], at, device, lmp, w,
