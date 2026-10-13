@@ -24,7 +24,7 @@ from .edge_model import EdgeSiteModel, check_edge_a_kind, product_basis_t, with_
 from .pace_build import build_basis
 from .pace_io import parse_yace
 from .radial import spline_eval_pairs
-from .pace_radial import cutoff_func_poly, fexp, fexp_shifted_scaled, pace_zbl, radbase, radcore
+from .pace_radial import cutoff_func_poly, fexp, fexp_shifted_scaled, hermite_table, pace_zbl, radbase, radcore
 
 
 # SBessel g_k by one sin per k and a constant matrix (`pace_radial._sbessel_mm`)
@@ -78,6 +78,11 @@ class PACEModel(EdgeSiteModel):
     rtab_coefs: jax.Array = None                     # (NZ, NZ, ncoef, nradbase)
     # recursive (DAG) product-basis plan (`aa_dag.with_aa_dag`, opt-in), None = chain form
     aa_dag: tuple = None
+    # radbasename "Tabulated" (pace_io._radtables): the radial basis is the bond's tables, values and
+    # r-derivatives on r_i = i tab_h, cubic Hermite in between; crad reads each R_nl column one-to-one
+    tab_f: jax.Array = None                          # (NZ, NZ, N+1, nradbase)
+    tab_df: jax.Array = None
+    tab_h: jax.Array = None                          # (NZ, NZ)
 
     uses_edge_a = False
 
@@ -113,8 +118,10 @@ class PACEModel(EdgeSiteModel):
             g = spline_eval_pairs(r, self.rtab_coefs, zi, zj, x0, h, n)
         else:
             lam, rc, dcut, cin, dcin = (bp[:, k] for k in range(5))
+            table = (None if self.tab_f is None else
+                     lambda rs: hermite_table(rs, self.tab_f, self.tab_df, self.tab_h, zi, zj))
             g = radbase(r, self.radbasename, self.inner_cutoff_type, lam, rc, dcut,
-                        cin, dcin, self.nradbase, self.sbessel_form)      # (E, K)
+                        cin, dcin, self.nradbase, self.sbessel_form, table)      # (E, K)
         return jnp.where(valid[:, None], g, 0.0), real_spherical_harmonics(rij_s, self.lmax)
 
     @property
@@ -162,9 +169,10 @@ class PACEModel(EdgeSiteModel):
         return self.edge_basis_factors(jnp.stack([r, 0 * r, 0 * r], -1), zi, zj)[0]
 
     def radial_table_key(self):
-        """What g_k reads (radparams; never crad, the readout or the core)."""
-        return (self.radparams, repr((self.radbasename, self.inner_cutoff_type, self.nradbase,
-                                      self.sbessel_form)))
+        """What g_k reads (radparams, and a Tabulated file's tables; never crad, the readout or the core)."""
+        tables = () if self.tab_f is None else (self.tab_f, self.tab_df, self.tab_h)   # Tabulated: the tables
+        return (self.radparams, *tables, repr((self.radbasename, self.inner_cutoff_type, self.nradbase,
+                                               self.sbessel_form)))
 
     # ------------------------------------------------------------ per node
     def _embedding(self, rho, node_z):
@@ -276,7 +284,8 @@ def load_yace(path, dtype=jnp.float64, edge_a_kind="gather"):
         lmax=int(a["lmax"]), n_a_local=int(b["n_a_local"]), n_aa=int(b["n_aa"]),
         pf_col=I(b["a_rad"]), pf_sel_y=A(sel),
         sbessel_form=("matmul" if a["radbasename"] == "SBessel"
-                      and int(a["nradbase"]) >= SBESSEL_MATMUL_MIN_K else "rotation"))
+                      and int(a["nradbase"]) >= SBESSEL_MATMUL_MIN_K else "rotation"),
+        **({k: A(a[k]) for k in ("tab_f", "tab_df", "tab_h")} if "tab_f" in a else {}))
     model = with_edge_a_kind(model, edge_a_kind)
     meta = {"elements": [int(z) for z in a["Z"]], "rcut": float(a["radparams"][..., 1].max()),
             "format": "yace"}

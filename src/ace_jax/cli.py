@@ -537,13 +537,21 @@ def cmd_export(a):
     if fmt == "yace":
         if a.structure:
             raise UsageError("--structure sizes a lammps-jax bundle; a .yace needs none")
-        if not isinstance(model, PACEModel):
-            raise UsageError(f"{a.model}: a .yace export needs a .yace model; ML-PACE cannot yet read "
-                             "the radials of a linear ACE model (use a lammps-jax .json bundle)")
         from .eval import write_yace
-        write_yace(model, out, spec=extra)
-        print(f"yace: {a.model} written back -> {out}")
-        return None
+        if isinstance(model, PACEModel):
+            if a.delta is not None:
+                raise UsageError("--delta sets the radial tables of an ACE model; a .yace model is written as read")
+            write_yace(model, out, spec=extra)
+            print(f"yace: {a.model} written back -> {out}")
+            return None
+        info = write_yace(model, out, **({"delta": a.delta} if a.delta is not None else {}))
+        print(f"yace: {info['functions']} functions, {info['terms']} terms, lmax {info['lmax']}, "
+              f"nradmax {info['nradmax']}, tabulated radials -> {out}")
+        print("note: ML-PACE reads tabulated radials only with its tabulated-radial addition, "
+              "not yet in its releases; ace-jax reads the file as is")
+        return info
+    if a.delta is not None:
+        raise UsageError("--delta is for a .yace export")
     if not a.structure:
         raise UsageError("a lammps-jax bundle needs --structure: the extxyz LAMMPS starts from, "
                          "which sizes its atom and neighbour buffers")
@@ -670,11 +678,14 @@ def _parser():
     cal.add_argument("--out", required=True)
     exp = sub.add_parser("export", help="write a model for LAMMPS: an ML-PACE .yace (pair_style pace) or a "
                                         "lammps-jax bundle (.json, pair_style jax)")
-    exp.add_argument("--model", required=True, help="a model .npz (linear ACE) or .yace (PACE)")
+    exp.add_argument("--model", required=True, help="a model .npz (linear ACE) or .yace")
     exp.add_argument("--out", required=True, help="the file to write: .yace or .json (else give --format)")
     exp.add_argument("--format", choices=["yace", "lammps"], default=None,
-                     help="yace: ML-PACE C-tilde (from a .yace model); lammps: a lammps-jax bundle "
+                     help="yace: ML-PACE C-tilde (exact, tabulated radials); lammps: a lammps-jax bundle "
                           "(default: from the --out extension)")
+    exp.add_argument("--delta", type=float, default=None,
+                     help="yace: radial table spacing and ML-PACE deltaSplineBins in Å (default 0.001; "
+                          "the cutoff must be a whole number of it)")
     exp.add_argument("--structure", default=None,
                      help="lammps: the extxyz LAMMPS starts from (first configuration); it sizes the buffers")
     exp.add_argument("--skin", type=float, default=1.0, help="lammps: the LAMMPS neighbour skin (Å)")

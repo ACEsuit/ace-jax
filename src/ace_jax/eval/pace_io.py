@@ -65,7 +65,7 @@ class PACESpec:
 # ACEBondSpecification::from_YAML (ace_abstract_basis.h): these are the values
 # used when a key is absent; prehc / lambdahc are required there, and here.
 _BOND_DEFAULTS = {"rcut_in": 0.0, "dcut_in": 0.0, "inner_cutoff_type": "density"}
-_RADBASES = ("ChebExpCos", "ChebPow", "ChebLinear", "SBessel")
+_RADBASES = ("ChebExpCos", "ChebPow", "ChebLinear", "SBessel", "Tabulated")
 _INNER = ("density", "distance", "zbl")
 
 
@@ -105,13 +105,21 @@ def parse_yace(path):
     nradmax = max(int(b["nradmax"]) for b in bonds.values())
     lmax = max(int(b["lmax"]) for b in bonds.values())
     K = max(int(b["nradbasemax"]) for b in bonds.values())
-    crad = np.zeros((NZ, NZ, nradmax, lmax + 1, K))
+    tabulated = kinds == {"Tabulated"}
+    tables = _radtables(path, bonds, K, nradmax, lmax) if tabulated else None
+    K_basis = K + len(tables["rnl_cols"]) if tabulated else K
+    crad = np.zeros((NZ, NZ, nradmax, lmax + 1, K_basis))
     radparams = np.zeros((NZ, NZ, 5))
     core = np.zeros((NZ, NZ, 2))
     for (i, j), b in bonds.items():
-        c = np.asarray(b["radcoefficients"], float)          # [n][l][k]
-        crad[i, j, :c.shape[0], :c.shape[1], :c.shape[2]] = c
-        radparams[i, j] = [b["radparameters"][0], b["rcut"], b["dcut"], b["rcut_in"], b["dcut_in"]]
+        if tabulated:            # each tabulated R_nl is one more radial-basis column, read one-to-one
+            for (n, l), col in tables["rnl_cols"].items():
+                crad[i, j, n - 1, l, col] = 1.0
+        else:
+            c = np.asarray(b["radcoefficients"], float)          # [n][l][k]
+            crad[i, j, :c.shape[0], :c.shape[1], :c.shape[2]] = c
+        lam = b["radparameters"][0] if "radparameters" in b else 1.0   # optional for Tabulated (unused)
+        radparams[i, j] = [lam, b["rcut"], b["dcut"], b["rcut_in"], b["dcut_in"]]
         core[i, j] = [b["prehc"], b["lambdahc"]]
 
     embs = tree["embeddings"]
@@ -154,26 +162,70 @@ def parse_yace(path):
         "ctilde_complex": np.concatenate(ctil) if ctil else np.zeros((0, P)),
         "radbasename": kinds.pop(), "inner_cutoff_type": inner.pop(),
         "npoti": tuple(npoti), "ndensity": P, "nradmax": nradmax, "lmax": lmax,
-        "nradbase": K, "funcs": funcs,
+        "nradbase": K_basis, "funcs": funcs,
+        **({"tab_f": tables["f"], "tab_df": tables["df"], "tab_h": tables["h"]} if tabulated else {}),
     }
     return PACESpec(tree=tree, element_names=names, functions=spec_funcs), arrays
 
 
-def write_yace(model, path, spec=None):
-    """Write a PACEModel (`aj.load` of a `.yace`) as an ML-PACE C-tilde potential at `path`: numeric
-    fields from its leaves, everything else verbatim from the `spec` load returned (function layout is
-    never regenerated).
+def _radtables(path, bonds, K, nradmax, lmax):
+    """`radbasename: Tabulated` bonds (the ML-PACE tabulated-radial addition; docs/dev/ml-pace-tabulated-
+    radials.md): values f and r-derivatives df on r_i = i rcut / nbins, cubic Hermite in between.  As one
+    radial basis per bond: columns 0..K-1 the rank-1 g_k, then one column per (n, l) any bond tabulates
+    (`rnl_cols`; absent in a bond = zero there).  f, df: (NZ, NZ, max nbins + 1, columns); h: (NZ, NZ)."""
+    nl = sorted({(int(e["n"]), int(e["l"])) for b in bonds.values() for e in b["radtable"].get("rnl", [])},
+                key=lambda t: (t[1], t[0]))
+    cols = {k: K + i for i, k in enumerate(nl)}
+    NZ = 1 + max(i for i, _ in bonds)
+    N = max(int(b["radtable"]["nbins"]) for b in bonds.values())
+    f = np.zeros((NZ, NZ, N + 1, K + len(nl)))
+    df = np.zeros_like(f)
+    h = np.ones((NZ, NZ))
+    for (i, j), b in bonds.items():
+        t, n_b = b["radtable"], int(b["radtable"]["nbins"])
+        h[i, j] = float(b["rcut"]) / n_b
+        entries = [(int(e["k"]) - 1, e) for e in t.get("gk", [])] + \
+                  [(cols[int(e["n"]), int(e["l"])], e) for e in t.get("rnl", [])]
+        for col, e in entries:
+            if not (0 <= col < K + len(nl)) or len(e["f"]) != n_b + 1 or len(e["df"]) != n_b + 1:
+                raise ValueError(f"{path}: bond {[i, j]} radtable entry {e.get('k', (e.get('n'), e.get('l')))} "
+                                 f"is outside the basis or not nbins + 1 = {n_b + 1} long")
+            f[i, j, :n_b + 1, col] = e["f"]
+            df[i, j, :n_b + 1, col] = e["df"]
+        if int(b["nradmax"]) > nradmax or int(b["lmax"]) > lmax:
+            raise ValueError(f"{path}: bond {[i, j]} exceeds nradmax / lmax")
+    return {"f": f, "df": df, "h": h, "rnl_cols": cols}
+
+
+def write_yace(model, path, spec=None, **options):
+    """Write `model` as an ML-PACE C-tilde potential (`.yace`) at `path`.
+
+    - A PACEModel (`aj.load` of a `.yace`) needs the `spec` that load returned: numeric fields come from
+      its leaves, everything else verbatim from `spec.tree` (function layout is never regenerated).
+    - A linear ACEModel is converted exactly (`export.yace.ace_ctilde_tree`; `options`: `delta`, `r_min`):
+      tabulated radials, which ML-PACE reads with its tabulated-radial addition
+      (docs/dev/ml-pace-tabulated-radials.md).  Returns the export's sizes (functions, terms, lmax, ...).
 
     The old order `write_yace(model, spec, path)` still works, with a DeprecationWarning."""
+    from .model import ACEModel
     from .pace_model import PACEModel
-    if isinstance(path, PACESpec):                      # write_yace(model, spec, path)
+    if isinstance(path, PACESpec):                      # write_yace(model, spec, path), before ACEModel export
         warnings.warn("write_yace(model, spec, path) is deprecated: use write_yace(model, path, spec=spec)",
                       DeprecationWarning, stacklevel=2)
         path, spec = spec, path
+    if type(model) is ACEModel:
+        if spec is not None:
+            raise TypeError("an ACEModel is converted from scratch: write_yace takes no spec for it")
+        from ..export.yace import ace_ctilde_tree
+        info = {}
+        dump_tree(ace_ctilde_tree(model, info=info, **options), path)
+        return info
     if not isinstance(model, PACEModel):
-        raise TypeError("write_yace only writes PACEModel (PACE radials); see docs/dev/pace-yace-spec.md")
+        raise TypeError(f"write_yace writes a PACEModel or a linear ACEModel, not {type(model).__name__}")
     if spec is None:
         raise TypeError("write_yace of a PACEModel needs the spec aj.load returned: write_yace(model, path, spec=spec)")
+    if options:
+        raise TypeError(f"write_yace of a PACEModel takes no options, got {sorted(options)}")
     if any(getattr(x, "dtype", np.float64) != np.float64 for x in
            (model.crad, model.ctilde_complex, model.fs_params, model.E0)):
         warnings.warn("write_yace: model leaves are float32, so coefficients are written at "
@@ -189,6 +241,10 @@ def write_yace(model, path, spec=None):
         em["rho_core_cutoff"], em["drho_core_cutoff"] = rcc[e].tolist()
     crad, rp, core = f64(model.crad), f64(model.radparams), f64(model.core)
     for (i, j), b in t["bonds"].items():
+        if b["radbasename"] == "Tabulated":      # the tables stay as read (crad is their one-hot reader)
+            b["rcut"], b["dcut"] = float(rp[i, j, 1]), float(rp[i, j, 2])
+            b["prehc"], b["lambdahc"] = float(core[i, j, 0]), float(core[i, j, 1])
+            continue
         n, l, k = int(b["nradmax"]), int(b["lmax"]), int(b["nradbasemax"])
         # padded entries (beyond this bond's own sizes, up to the global ones) are
         # live -- g_k runs to the global nradbase on every bond -- so if they were

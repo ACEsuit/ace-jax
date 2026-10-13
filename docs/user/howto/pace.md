@@ -58,6 +58,39 @@ The `aj export` command writes the same file:
 aj export --model model.yace --out copy.yace
 ```
 
+## Write an ACE model as a .yace file
+
+`write_yace` also writes a linear ACE model (an `.npz` model) as a `.yace` file.
+The file gives the same energies, forces and stresses as the `.npz` model.
+
+```python
+import ace_jax as aj
+from ace_jax.eval import write_yace
+
+model, meta, _ = aj.load("model.npz")         # a linear ACE model
+info = write_yace(model, "model.yace")        # returns the sizes of the file
+pm, meta, spec = aj.load("model.yace")        # ace-jax reads the file back
+```
+
+The `aj export` command writes the same file:
+
+```bash
+aj export --model model.npz --out model.yace
+```
+
+The file keeps the radial functions as tables of values. The table spacing is
+0.001 Å. Set a different spacing with `delta=`. The cutoff must be a whole
+number of table spacings.
+
+!!! warning
+    ML-PACE reads these tables only with its tabulated-radial addition. That
+    addition is not yet in ML-PACE releases. Without it, LAMMPS refuses the
+    file. ace-jax reads the file without it.
+
+!!! note
+    A model with more than one element gives a larger file. Each product of
+    the model becomes one product for each combination of neighbour elements.
+
 ## Limits
 
 - Use `.yace` models only for evaluation and export. `aj fit` and the
