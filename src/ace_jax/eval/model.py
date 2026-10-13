@@ -31,6 +31,7 @@ import jax.numpy as jnp
 
 from .edge_model import (EdgeSiteModel, calibrate_edge_a, one_hot_selector,  # noqa: F401
                          product_basis, product_basis_dot, product_basis_t, with_edge_a_kind)
+from .aa_dag import dag_contract
 from .harmonics import real_solid_harmonics, real_spherical_harmonics
 from .radial import (agnesi_normalized, env_ace1_poly1sr, env_poly1sr,
                      env_poly2sx, poly_recursion, spline_eval, spline_eval_pairs)
@@ -176,6 +177,10 @@ class ACEModel(EdgeSiteModel):
     # sorted scatter of leave-one-out A products (`_b_jacobian`), sorted by ids.
     a2b_srt: tuple = None
     a2b_jac: tuple = None
+    # Recursive (DAG) product-basis plans (`aa_dag.with_aa_dag`, opt-in), None = the
+    # chain form: for `aa_specs` and `blk_aa_specs`; read by the folded readout only.
+    aa_dag: tuple = None
+    blk_aa_dag: tuple = None
 
     # -------------------------------------------------- edge embeddings
     def _radial_one(self, r, zi, zj, kind, trans, coefs, grid, Wnlq, ABC, env):
@@ -400,8 +405,11 @@ class ACEModel(EdgeSiteModel):
     def _from_pooled(self, A, Apair):
         return self._b_from_a(A), Apair
 
-    def _readout_folded(self, A, Apair, node_z, specs=None):
-        e = product_basis_dot(A, self.aa_specs if specs is None else specs, self.ctilde[:, node_z])
+    def _readout_folded(self, A, Apair, node_z, specs=None, dag=None):
+        if dag is not None:                       # recursive product basis (`aa_dag`)
+            e = dag_contract(A.T, dag, self.ctilde, node_z)
+        else:
+            e = product_basis_dot(A, self.aa_specs if specs is None else specs, self.ctilde[:, node_z])
         e = e + jnp.einsum("ip,pi->i", Apair, self.Wpair[:, node_z])
         return e + self.E0[node_z]
 
@@ -580,7 +588,7 @@ class ACEModel(EdgeSiteModel):
             Rnl, Y, Rpair = self._edge_factors_and_pair(rij, zi, zj, mask)
             A = self.pool_a_sparse(Rnl, Y, segment_ids, 0, n_nodes)
             return self._readout_folded(A, pool_sparse(Rpair, segment_ids, n_nodes, mask),
-                                        node_z)
+                                        node_z, dag=self.aa_dag)
         return self._readout(*self.site_basis(rij, zi, zj, segment_ids, n_nodes, mask), node_z)
 
     def site_energies_dense(self, rij, zi, zj, mask, node_z):
@@ -595,7 +603,7 @@ class ACEModel(EdgeSiteModel):
                                                         flat(mask))
             un = lambda a: a.reshape(n, K, -1)
             A = self.pool_a_dense(un(Rnl), un(Y), None)
-            return self._readout_folded(A, pool_dense(un(Rpair), mask), node_z)
+            return self._readout_folded(A, pool_dense(un(Rpair), mask), node_z, dag=self.aa_dag)
         return self._readout(*self.site_basis_dense(rij, zi, zj, mask), node_z)
 
     def _site_energies_blocked(self, rij, zi, zj, mask, node_z):
@@ -618,7 +626,7 @@ class ACEModel(EdgeSiteModel):
         else:
             A = self._blocked_a_onehot(R, Y, zj_, n, K)
         return self._readout_folded(A, pool_dense(Rpair.reshape(n, K, -1), mask), node_z,
-                                    self.blk_aa_specs)
+                                    self.blk_aa_specs, self.blk_aa_dag)
 
     def _blocked_radial(self, rij, zi, zj):
         """(R, Rpair) per edge for the blocked dense path: with species-compact

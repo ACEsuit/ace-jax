@@ -18,6 +18,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
+from .aa_dag import dag_contract
 from .harmonics import real_spherical_harmonics
 from .edge_model import EdgeSiteModel, check_edge_a_kind, product_basis_t, with_edge_a_kind
 from .pace_build import build_basis
@@ -75,6 +76,8 @@ class PACEModel(EdgeSiteModel):
     # repulsion stays analytic
     rtab_grid: tuple = eqx.field(static=True, default=())    # (r_min, h, n) in r
     rtab_coefs: jax.Array = None                     # (NZ, NZ, ncoef, nradbase)
+    # recursive (DAG) product-basis plan (`aa_dag.with_aa_dag`, opt-in), None = chain form
+    aa_dag: tuple = None
 
     uses_edge_a = False
 
@@ -191,9 +194,12 @@ class PACEModel(EdgeSiteModel):
     def _node_energies_t(self, At, cr, d, dcin, segment_ids, n_nodes, node_z):
         """Site energies from feature-major A (NZ*n_a, n): the product gathers
         read whole rows and their adjoints add whole rows."""
-        AA = product_basis_t(At, self.aa_specs)
         ct = self.ctilde_real().reshape(self.n_aa, -1)                      # (n_aa, NZ*P)
-        rho_all = jnp.matmul(ct.T, AA, precision=jax.lax.Precision.HIGHEST)  # (NZ*P, n)
+        if self.aa_dag is not None:
+            rho_all = dag_contract(At, self.aa_dag, ct)                     # (NZ*P, n)
+        else:
+            AA = product_basis_t(At, self.aa_specs)
+            rho_all = jnp.matmul(ct.T, AA, precision=jax.lax.Precision.HIGHEST)  # (NZ*P, n)
         rho = rho_all.reshape(self.nz, self.ndensity, n_nodes)[node_z, :, jnp.arange(n_nodes)]
         return self._energy_tail(rho, cr, d, dcin, segment_ids, n_nodes, node_z)
 
