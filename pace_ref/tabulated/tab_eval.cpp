@@ -1,6 +1,7 @@
-// E and F of single-species configurations from a .yace with ML-PACE's C-tilde evaluator (brute-force
-// periodic neighbour list; forces as LAMMPS pair_pace accumulates them).
-// stdin: nconf, then per configuration: N; 3x3 cell (rows); pbc (3 ints); N lines x y z.
+// E and F of configurations from a .yace with ML-PACE's C-tilde evaluator (brute-force periodic
+// neighbour list; forces as LAMMPS pair_pace accumulates them).
+// stdin: nconf, then per configuration: N; 3x3 cell (rows); pbc (3 ints); N lines t x y z, with t the
+// atom's element index in the .yace `elements` list.
 // stdout: per configuration: E, then N lines fx fy fz.
 #include <cmath>
 #include <cstdio>
@@ -14,8 +15,8 @@ int main(int argc, char **argv) {
     basis.load_yaml(argv[1]);
     ACECTildeEvaluator ev;
     ev.set_basis(basis);
-    ev.element_type_mapping.init(1);
-    ev.element_type_mapping(0) = 0;
+    ev.element_type_mapping.init(basis.nelements);
+    for (int t = 0; t < basis.nelements; t++) ev.element_type_mapping(t) = t;
     const double rc = basis.cutoffmax;
     int nconf;
     std::cin >> nconf;
@@ -28,7 +29,8 @@ int main(int argc, char **argv) {
         for (auto &row: cell) for (double &v: row) std::cin >> v;
         for (int &p: pbc) std::cin >> p;
         std::vector<double> pos(3 * N);
-        for (double &v: pos) std::cin >> v;
+        std::vector<SPECIES_TYPE> t0(N);
+        for (int i = 0; i < N; i++) std::cin >> t0[i] >> pos[3 * i] >> pos[3 * i + 1] >> pos[3 * i + 2];
         // image range per direction: rc over the plane spacing
         double vol = 0, cr[3][3];
         for (int k = 0; k < 3; k++) {
@@ -59,7 +61,8 @@ int main(int argc, char **argv) {
         int M = owner.size();
         std::vector<double *> x(M);
         for (int j = 0; j < M; j++) x[j] = &all[3 * j];
-        std::vector<SPECIES_TYPE> type(M, 0);
+        std::vector<SPECIES_TYPE> type(M);
+        for (int j = 0; j < M; j++) type[j] = t0[owner[j]];
         std::vector<double> F(3 * N, 0);
         double E = 0;
         for (int i = 0; i < N; i++) {

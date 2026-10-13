@@ -75,8 +75,11 @@ Sizes: o4d12 2.7 MB, o4d20 17 MB (97 radials x 5001 nodes x 2). ML-PACE loads o4
 
 `pace_ref/tabulated/` holds the local check (build against a patched lammps-user-pace with its CMakeLists.txt, `-DPACE_SRC=...`):
 
-- `tab_eval.cpp` is a 85-line driver over `ACECTildeEvaluator`, with a brute-force periodic neighbour list
-  and forces accumulated as `pair_pace` accumulates them.
+- `tab_eval.cpp` is a short driver over `ACECTildeEvaluator`, with a brute-force periodic neighbour list
+  and forces accumulated as `pair_pace` accumulates them. Each atom line carries its element index.
+- `compare.py <tab_eval> <model.npz>` exports the model with `write_yace`, evaluates rattled, strained,
+  mixed-species diamond cells (64 atoms) with ML-PACE and compares with `ACECalculator` on the `.npz` (the
+  whole export) and on the `.yace` (the two evaluators on the same tables).
 - `tab_time.cpp` times ML-PACE's recursive or product evaluator per atom on a rattled diamond cell.
 
 | model | test configurations | max dE/atom | max dF | rms dF |
@@ -86,6 +89,18 @@ Sizes: o4d12 2.7 MB, o4d20 17 MB (97 radials x 5001 nodes x 2). ML-PACE loads o4
 | ACE o4d20, tabulated | 10 | 6.5e-13 eV | 4.3e-9 eV/Å | 1.2e-9 |
 
 The residual is ML-PACE's own look-up-table interpolation, at the level stock files already show.
+
+Multi-species (`compare.py`, `delta` 0.001 Å, the patch on master `99aa6e6`):
+
+| fixture | elements | file | vs `.npz`: max dE/atom, max dF | vs `.yace`: max dE/atom, max dF |
+|---|---|---|---|---|
+| `si_ace_model` | Si | 4.4 MB | 2.8e-11 eV, 7.4e-6 eV/Å (max \|F\| 166) | 8.5e-14 eV, 6.1e-11 eV/Å |
+| `sige_nofit` | Si, Ge | 9.5 MB | 7.1e-14 eV, 6.6e-9 eV/Å | 1.8e-15 eV, 2.3e-12 eV/Å |
+| `ace_cantor5_small` | Cr, Mn, Fe, Co, Ni | 30 MB | 1.1e-14 eV, 1.1e-10 eV/Å | 1.2e-17 eV, 1.4e-13 eV/Å |
+
+Against the `.yace`, ML-PACE and ace-jax agree to roundoff, species pair by species pair. Against the
+`.npz`, the difference is the cubic Hermite tables' O(h^4) error (4e-8 of max |F| on the Si fixture's
+strongly compressed cells). Kokkos (`pace/kk`) was run on single-species files only (A100, the benchmark).
 
 The accuracy-cost benchmark (branch `feat/accuracy-cost-bench`) times these exports in LAMMPS against a build of the patched library (`LOCAL_ML-PACE`).
 
@@ -131,12 +146,9 @@ per-neighbour loops, branch `skip-radials`, not proposed) gave identical E/F and
 rectangle was trimmed: 439 -> 483 us/atom on o4d20 (noise), f3200 unchanged. The remaining cost is the
 product basis, as for pacemaker models, so the patch stays radial-only.
 
-## Open points before proposing it upstream
+## Open points
 
-- Multi-species: the code is per bond, but only single-species models have been converted and tested.
 - python-ace (pyace) and `ace_b_basis` (B-basis `.yaml`) do not know `Tabulated`. Only C-tilde `.yace` is
   covered.
-- ace-jax's own `.yace` reader (`eval/pace_io.py`) still refuses `Tabulated`. It would need a Hermite
-  table form of `radbase`.
 - File size: a coarser `nbins` than the look-up grid is allowed (the look-up table then re-samples the
   Hermite interpolant). A binary sidecar would be smaller than YAML.
