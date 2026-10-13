@@ -123,7 +123,7 @@ jobs:
       - name: Install matscipy-neighbours (C++ source build) and lammps-jax
         run: |
           uv sync --python 3.12 --extra gp --extra fast-neighbours
-          uv pip install "lammps-jax @ git+https://github.com/abhijeetgangan/lammps-jax@4a7f4fb27ecc689abd35c2a91833590e613edb51"
+          uv pip install "lammps-jax @ git+https://github.com/abhijeetgangan/lammps-jax@96ccc7298c6f0ff4c9d094226019904f5a72bf06"
       - name: Optional-dependency tests (CPU JAX)
         env:
           JAX_PLATFORM_NAME: cpu
