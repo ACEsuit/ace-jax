@@ -4,8 +4,9 @@
 #
 # Fixtures, recorded benchmark results and generated figure data are data
 # (bit-exact goldens, parity references), never rewritten by a hook; upstream
-# licence texts stay verbatim.
-exclude: ^(fixtures/|coupling/python/licenses/|coupling/python/tests/data/|docs/dev/figures/|docs/dev/figs/|bench/scaling/results/|\.test_durations$)
+# licence texts and patch files (whose blank context lines are a single space)
+# stay verbatim.
+exclude: ^(fixtures/|coupling/python/licenses/|coupling/python/tests/data/|docs/dev/figures/|docs/dev/figs/|bench/scaling/results/|\.test_durations$|.*\.patch$)
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0

@@ -57,6 +57,7 @@ aj fit --model si.npz --train train.xyz --test test.xyz $K \
 aj eval --model out_linear/model.npz --data new.xyz $K --out pred.xyz
 aj eval --model out_gp/gp_model.npz  --data new.xyz $K --out pred.xyz   # adds ace_energy_std, ace_forces_std
 aj eval --model model.yace --data new.xyz $K                            # PACE works too; --prefix renames ace_
+aj export --model out_linear/model.npz --out model.yace                # ML-PACE .yace (exact; tabulated radials)
 aj export --model out_linear/model.npz --out bundle.json --structure start.xyz   # lammps-jax bundle
 ```
 
@@ -230,6 +231,9 @@ pm, pmeta, spec = aj.load("model.yace")                  # PACEModel, meta, pars
 atoms.calc = ACECalculator("model.yace")
 from ace_jax.eval import write_yace
 write_yace(pm, "copy.yace", spec=spec)                   # numeric leaves from pm, layout from spec
+model, meta, _ = aj.load("model.npz")
+info = write_yace(model, "ace.yace")                     # a linear ACE model, exactly (Tabulated radials:
+                                                         # ML-PACE needs its tabulated-radial addition)
 ```
 
 Supported: ChebExpCos, ChebPow, ChebLinear and SBessel radials,

@@ -25,9 +25,9 @@ parity CI jobs. User docs: `README.md`. Agent-facing usage guide:
   - `spec.py`, `coupling.py`: the EquivariantTensors shim via the compiled `ace-jax-coupling` library; `BasisUnavailable` when it cannot run.
   - `model.py`: `BasisSpec`, `build_basis` (the one entry point: `aj basis`, `aj fit`, Python), over `build_model` / `build_embedding_model`; `Basis` (NamedTuple), `basis_r0`.
   - `prior.py`: the smoothness prior. `export.py`: `save_npz`.
-- `src/ace_jax/export/lammps.py`: `export_lammps`, a lammps-jax bundle.
+- `src/ace_jax/export/lammps.py`: `export_lammps`, a lammps-jax bundle. `export/yace.py`: a linear ACEModel as an ML-PACE `.yace` (`write_yace`).
 - `src/ace_jax/tutorials/`: tutorial support, not stable API. `labels.py` serves shipped MACE labels from content-keyed extxyz caches (live MACE only on a miss, if mace-torch is installed); `structures.py` builds the school tutorials' structures deterministically; `campaign.py` (reference-basis descriptors, seeded Langevin MD pools, novelty scores) and `curation.py` (the MD-select-label-refit loop of tutorial 7, shared with `make_labels.py e3`).
-- `src/ace_jax/cli.py`: `ace-jax`/`aj` with `basis`, `fit`, `eval`, `calibrate` and `export` (`cmd_export`: a lammps-jax `.json` bundle sized by `neighbour_capacity` on `--structure`, or a `.yace` model written back via `write_yace`; format from the `--out` extension). `aj fit` builds the basis from `--order/--max-degree` (flags shared with `aj basis` via `add_basis_args`) or takes `--model`; `_parse` layers a `--config fit.yaml` under the command line.
+- `src/ace_jax/cli.py`: `ace-jax`/`aj` with `basis`, `fit`, `eval`, `calibrate` and `export` (`cmd_export`: `.yace` via `write_yace`, or a lammps-jax `.json` bundle sized by `neighbour_capacity` on `--structure`; format from the `--out` extension). `aj fit` builds the basis from `--order/--max-degree` (flags shared with `aj basis` via `add_basis_args`) or takes `--model`; `_parse` layers a `--config fit.yaml` under the command line.
 - `src/ace_jax/runfile.py`: `fit.yaml` read/validate/merge (`defaults_for`, `explicit_dests`) and the resolved `out/fit.yaml` writer (`resolved`, `write`).
 - `tests/`: the pytest suite. `conftest.py` holds the shared fixtures and helpers.
 - `fixtures/`: committed reference data. These are bit-exact goldens: never hand-edit or reformat them.
@@ -97,6 +97,7 @@ uv run ruff check                     # lint; `uv run pre-commit run --all-files
 - **Model files:**
   - `.npz` models follow the export schema: `meta_json` with `schema_version: 1`. The writers are `julia/export_model.jl` and `basis.export.save_npz`.
   - `aj.load(path)` returns `(model, meta, z)`. For a `.yace` it returns a `PACEModel` with `(model, meta, spec)`, and `write_yace(model, path, spec=spec)` writes it back (the old `(model, spec, path)` order warns).
+  - `write_yace(ace_model, path)` converts a linear `ACEModel` exactly (`export/yace.py::ace_ctilde_tree`): `radbasename: Tabulated` radials (values plus autodiff derivatives on ML-PACE's look-up grid, `delta`), real-Y products expanded into PACE's complex Y and halved as pacemaker writes them, each factor summed over the neighbour species its radial column is live for, lmax/nradmax trimmed to what the products read. `parse_yace` reads `Tabulated` (tables as extra radial-basis columns, `crad` one-hot; `pace_radial.hermite_table`). ML-PACE reads it only with its tabulated-radial patch (ICAMS/lammps-user-pace#31, open; docs/dev/ml-pace-tabulated-radials.md); `tests/test_ace_yace.py`.
   - A fitted GP is `gp_model.npz`, identified by its `gp_json` key. Load it with `GPCalculator.from_file`.
   - Large models are release assets, not commits.
 - **Architecture:**

@@ -30,12 +30,20 @@ def test_export_yace_writes_a_yace_model_back(tmp_path, capsys):
     assert _energy(tmp_path / "copy.yace") == _energy(src)
 
 
+def test_export_yace_converts_an_ace_model(tmp_path, capsys):
+    main(["export", "--model", str(MODEL), "--out", str(tmp_path / "m.yace"), "--delta", "0.01"])
+    assert "tabulated radials" in capsys.readouterr().out
+    assert abs(_energy(tmp_path / "m.yace") - _energy(MODEL)) / 64 < 1e-6    # 0.01 A tables: O(h^4)
+    main(["export", "--model", str(tmp_path / "m.yace"), "--out", str(tmp_path / "copy.yace")])  # a .yace back
+    assert _energy(tmp_path / "copy.yace") == _energy(tmp_path / "m.yace")
+
+
 @pytest.mark.parametrize("args,msg", [
     (["--out", "m.txt"], "--format yace|lammps"),
     (["--out", "m.json"], "needs --structure"),
     (["--out", "m.yace", "--structure", "s.xyz"], "needs none"),
-    (["--out", "m.yace"], "needs a .yace model"),
     (["--out", "m.json", "--structure", "s.xyz", "--procs", "2,2"], "three integers"),
+    (["--out", "m.json", "--delta", "0.01"], "--delta is for a .yace"),
 ])
 def test_export_usage_errors(tmp_path, capsys, args, msg):
     args = [a if not a.startswith("m.") and a != "s.xyz" else str(tmp_path / a) for a in args]

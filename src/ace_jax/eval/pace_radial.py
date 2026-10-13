@@ -143,9 +143,26 @@ def _sbessel_mm(r, rc, K):
 SBESSEL_FORMS = ("rotation", "matmul")
 
 
-def radbase(r, name, inner, lam, rc, dcut, cut_in, dcut_in, K, sbessel_form="rotation"):
+def hermite_table(r, f, df, h, zi, zj):
+    """Cubic-Hermite interpolation of the bond tables, as ML-PACE's look-up tables (`SplineInterpolator`)
+    and its `Tabulated` radials (`TabulatedRadial::interpolate`) do it.  r, zi, zj (E,); f, df
+    (NZ, NZ, N+1, K) values and r-derivatives on r_i = i h, h (NZ, NZ).  Gathers the two grid rows each
+    edge needs, never an edge's whole table.  Returns (E, K)."""
+    hh = h[zi, zj]
+    x = r / hh
+    N = f.shape[-2] - 1
+    i = jnp.clip(jnp.floor(x).astype(jnp.int32), 0, N - 1)
+    t = (x - i)[:, None]
+    u = 1.0 - t
+    hh = hh[:, None]
+    return ((1 + 2 * t) * u * u * f[zi, zj, i] + t * u * u * hh * df[zi, zj, i]
+            + t * t * (3 - 2 * t) * f[zi, zj, i + 1] + t * t * (t - 1) * hh * df[zi, zj, i + 1])
+
+
+def radbase(r, name, inner, lam, rc, dcut, cut_in, dcut_in, K, sbessel_form="rotation", table=None):
     """g_k(r), k < K, zero outside (cut_in - dcut_in, rc).  `sbessel_form`
-    picks `_sbessel` ("rotation") or `_sbessel_mm` ("matmul") for SBessel."""
+    picks `_sbessel` ("rotation") or `_sbessel_mm` ("matmul") for SBessel.
+    "Tabulated": `table(rs)` gives the (E, K) values (`PACEModel` gathers the bond's tables)."""
     if inner == "zbl":                       # ace_radial.cpp:246, ported as-is
         one = jnp.ones_like(dcut_in)              # typed operands: no f64 buffer
         cut_in = jnp.where(dcut_in == 0, one, 0 * one)
@@ -157,6 +174,8 @@ def radbase(r, name, inner, lam, rc, dcut, cut_in, dcut_in, K, sbessel_form="rot
         g = _cheb_pow(rs, lam, rc, K)
     elif name == "ChebLinear":
         g = _cheb_linear(rs, rc, K)
+    elif name == "Tabulated":
+        g = table(rs)
     elif name == "SBessel":
         if sbessel_form not in SBESSEL_FORMS:
             raise ValueError(f"sbessel_form must be one of {SBESSEL_FORMS}, got {sbessel_form!r}")
