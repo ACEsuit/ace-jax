@@ -5,7 +5,7 @@
 - **`write_yace` writes a linear ACE model as a `.yace` file.** The file gives
   the same energies, forces and stresses as the `.npz` model. It keeps the
   radial functions as tables. ML-PACE reads these tables only with its
-  tabulated-radial addition, which is not yet in ML-PACE releases. ace-jax
+  tabulated-radial addition (ICAMS/lammps-user-pace#31), which is not yet in ML-PACE releases. ace-jax
   reads the file without it. `aj export --model model.npz --out model.yace`
   does the same.
 - **`aj fit --learn-radial --radial-opt newton`: a Newton optimiser for the

@@ -85,7 +85,8 @@ number of table spacings.
 !!! warning
     ML-PACE reads these tables only with its tabulated-radial addition. That
     addition is not yet in ML-PACE releases. Without it, LAMMPS refuses the
-    file. ace-jax reads the file without it.
+    file. ace-jax reads the file without it. For the status of the addition,
+    see [ML-PACE pull request 31](https://github.com/ICAMS/lammps-user-pace/pull/31).
 
 !!! note
     A model with more than one element gives a larger file. Each product of

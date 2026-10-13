@@ -6,8 +6,8 @@ models (ACEpotentials-style radials: transform, polynomials, envelope; or learne
 **exactly**, and then run in `pair_style pace` and `pace/kk` (CPU and GPU) unchanged.
 
 Patch: `pace_ref/tabulated/0001-tabulated-radials.patch`, on `v.2025.12.4.p1` (the release LAMMPS
-develop pins). It also applies cleanly to master `99aa6e6`. The patch is local only and has not been
-proposed upstream.
+develop pins). It also applies cleanly to main `99aa6e6`, the base of the upstream pull request
+[ICAMS/lammps-user-pace#31](https://github.com/ICAMS/lammps-user-pace/pull/31) (open).
 
 ## Why the patch is needed
 
