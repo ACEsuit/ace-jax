@@ -109,7 +109,9 @@ over a file's `basis:`, `--train` over its `data:` (each logged as an override).
   `--radial-val-frac` hold-out, default 0.2), then fits as usual on the full
   training set. Options: `--radial-n-q 12`, `--radial-steps 40`,
   `--radial-lam-grid 0,1e-2`. Writes `out/radial_info.json` (the gate's
-  selection and scores). The saved model is marked `radial_learned`, so
+  selection and scores) and, as each roughness weight finishes and before the gate,
+  `out/radial_lam=<w>.npz` (`rnl_Wnlq`, `steps`, `theta_final`): hours of learning
+  survive a later failure. The saved model is marked `radial_learned`, so
   `ACECalculator`/`export_lammps` spline it. Works with `--model` and with
   `--order/--max-degree`; not with embedding models (issue #31). Advanced priors:
   `ace_jax.fit.radial_learn.fit_radial`.

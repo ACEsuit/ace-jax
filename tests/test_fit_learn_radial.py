@@ -129,6 +129,9 @@ def test_fit_learn_radial_end_to_end(fast, tmp_path):
     staged = {}
     res = fit(cfg, d, log=QUIET, on_stage=lambda k, v: staged.__setitem__(k, v))
     assert res.radial is staged["radial"]
+    key, W, run = staged["radial_candidate"]       # handed out before the gate: kept if the gate fails
+    assert key == "0" and run["steps"] == 4
+    np.testing.assert_array_equal(W, res.radial.W)   # the gate kept it, and the stage passed it on unchanged
     assert len(res.data.ds_train.y_E.reshape(-1)) >= len(d.train)            # full train, not the fit split
     write_outputs(res, tmp_path, layout=("cli",), log=QUIET)
     info = json.loads((tmp_path / "radial_info.json").read_text())
@@ -180,6 +183,8 @@ def test_cli_learn_radial_writes_info_and_reproduces(fast, tmp_path):
           "--out", str(a)])
     info = json.loads((a / "radial_info.json").read_text())
     assert info["lam_grid"] == [0.0] and info["n_q"] == 12
+    cand = np.load(a / "radial_lam=0.npz")          # the candidate checkpoint, written before the gate
+    assert cand["rnl_Wnlq"].shape == np.load(a / "model.npz")["rnl_Wnlq"].shape and int(cand["steps"]) == 3
     # progress.jsonl, written as the fit ran: the stages in order, each radial round with its LML
     ev = [json.loads(line) for line in (a / "progress.jsonl").read_text().splitlines()]
     assert ev[0]["event"] == "fit" and ev[0]["status"] == "start"

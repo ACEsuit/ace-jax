@@ -33,6 +33,7 @@ Each evaluation is then a forward QR pass (not differentiated) plus a differenti
 residual pass; the QR pass runs on the host on the CPU backend, so each L-BFGS round
 is a host loop (SciPy L-BFGS-B, `_lbfgs_round`), not one compiled optax step.
 """
+import gc
 import itertools
 import json
 import pathlib
@@ -656,6 +657,14 @@ def holdout_score(W, a_fit, a_norm, prob, ds_fit, ds_val, *, lin_fit=None, lin_v
     return (score, c) if return_readout else score
 
 
+def _device_bytes_in_use():
+    """bytes_in_use of the default device's allocator, or None where it reports none (CPU)."""
+    try:
+        return (jax.devices()[0].memory_stats() or {}).get("bytes_in_use")
+    except Exception:                                  # noqa: BLE001 -- a diagnostic only
+        return None
+
+
 def gate(candidates, score):
     """Score every candidate (lower is better) as score(label, W); ties resolve
     to insertion order, so put the conservative choice ("init") first.
@@ -766,6 +775,12 @@ def fit_radial(prob, ds_fit, ds_val, W0, *, lam_grid=(0.0, 1e-3, 1e-2, 1e-1), sp
         if checkpoint is not None:
             checkpoint(key, W, info)
 
+    # Hours of learning leave its compiled executables (and the CUDA modules they hold) cached; at o4d20
+    # on a 40 GB A100 the gate then could not load even a one-op kernel (CUDA_ERROR_OUT_OF_MEMORY loading
+    # a CUBIN) and the learned candidates were lost.  The gate compiles its own functions anyway.
+    jax.clear_caches(); gc.collect()
+    if log is not None and (mem := _device_bytes_in_use()) is not None:
+        log(f"fit_radial: gate starting, device memory in use {mem / 2**30:.2f} GiB")
     at_a0, theta_fit, map_diag, readouts = {}, {}, {}, {}
 
     def score(label, W):
