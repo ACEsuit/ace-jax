@@ -5,7 +5,7 @@
   atom): NEP trains in single precision and warns below -100 eV/atom (CASTEP Si is ~ -158).  `calculator`
   adds E0_SI back.
 - Weights: GAP-18's per-config-type force sigmas as a per-structure `weight`, as fit_mace does
-  (weights.mace); NEP's own lambda_e / lambda_f / lambda_v otherwise (1, 1, 0.1).
+  (DATA/weights_mace.json, weights.mace); NEP's own lambda_e / lambda_f / lambda_v otherwise (1, 1, 0.1).
 - Cutoff: 5 A radial and angular (RCUT, every family); the sweep entry sets n_max, basis_size, l_max,
   neuron (and optionally generation, batch).
 
@@ -56,9 +56,7 @@ def write_gpumd_xyz(path, atoms, weights):
 
 def prepare(d, e):
     from .split import read_atoms
-    from .weights import command_line, gap_sigmas, mace
-    from .split import XML
-    w = mace(*gap_sigmas(command_line(DATA / XML)))
+    w = json.loads((DATA / "weights_mace.json").read_text())     # weights.mace: per config type, as fit_mace
     d.mkdir(parents=True, exist_ok=True)
     write_gpumd_xyz(d / "train.xyz", read_atoms(DATA / "train.xyz"), w)
     write_gpumd_xyz(d / "test.xyz", read_atoms(DATA / "test.xyz"), w)
