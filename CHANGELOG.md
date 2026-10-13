@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **`aj fit --radial-basis sbessel`** builds the tensor radials from the
+  spherical Bessel functions that pacemaker uses. The default, `poly`, is
+  unchanged. The radial learner works with the two bases. Saved models
+  record the basis, and older models load as `poly`.
 - **`export_lammps` keeps the fast layouts for large models.** Before, if one
   32768-row block did not fit in GPU memory, `layout="auto"` used `sparse`.
   That was 15 times slower for a 1461-function silicon model on an A100. Now

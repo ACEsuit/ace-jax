@@ -524,6 +524,9 @@ def add_basis_args(p, *, fit):
                    help="initial tensor radials: onehot (R_n = P_n, the frozen-fit default) or seeded "
                         "glorot_normal mixtures (a random start, e.g. for learned radials)")
     p.add_argument("--pair-mode", default="onehot")
+    p.add_argument("--radial-basis", choices=["poly", "sbessel"], default="poly",
+                   help="tensor-radial basis: poly (ACEpotentials, polynomials of a transformed distance) or "
+                        "sbessel (PACE's simplified spherical Bessel functions of r, as pacemaker's radials)")
     p.add_argument("--no-gamma", action="store_true", help="skip the smoothness prior")
     p.add_argument("--no-coupling-cache", action="store_true",
                    help="always compute the coupling instead of using the per-shape cache")
@@ -658,7 +661,8 @@ def _parse(argv=None):
     if a.cmd == "fit" and not a.learn_radial:   # typed options only: a fit.yaml records every default
         from . import runfile
         typed = runfile.explicit_dests(subs["fit"], argv[argv.index(cmd) + 1:])
-        stray = sorted(d for d in typed if d.startswith("radial_"))
+        from .basis.model import BasisSpec       # basis flags (--radial-mode, --radial-basis) are not the learner's
+        stray = sorted(d for d in typed if d.startswith("radial_") and d not in BasisSpec.FIELDS)
         if stray:
             subs["fit"].error(f"--{stray[0].replace('_', '-')} needs --learn-radial")
     if a.cmd == "fit":

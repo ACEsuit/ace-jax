@@ -48,7 +48,8 @@ def spline_plan(model, spline_tol=AUTO):
     if isinstance(spline_tol, str):
         if spline_tol != AUTO:
             raise ValueError(f"spline_tol must be 'auto', a float or None, got {spline_tol!r}")
-        if rk == "analytic" and getattr(model, "radial_learned", False):
+        if (rk == "analytic" and getattr(model, "radial_learned", False)
+                and getattr(model, "rnl_basis", "poly") == "poly"):      # to_spline tabulates P_q(x) only
             return DEFAULT_SPLINE_TOL, ("rnl",)
         return None
     radials = tuple(r for r, k in (("rnl", rk), ("pair", pk)) if k == "analytic")
@@ -340,6 +341,10 @@ def to_spline(model, n_intervals=None, tol=DEFAULT_SPLINE_TOL, deriv_tol=None,
         return None if t is None else max(float(t), 10.0 * float(np.finfo(dt).eps))
 
     teff = None
+    if model.radial_kind == "analytic" and "rnl" in radials and getattr(model, "rnl_basis", "poly") != "poly":
+        raise NotImplementedError(
+            f"to_spline: rnl_basis {model.rnl_basis!r} is not a polynomial in x; evaluate it analytically "
+            f"(spline_tol=None) or tabulate the radial stage in r (radial_table=True)")
     if model.radial_kind == "analytic" and "rnl" in radials:
         W = np.asarray(model.rnl_Wnlq, np.float64)
         polys = tuple(np.asarray(v, np.float64) for v in (model.polys_A, model.polys_B, model.polys_C))

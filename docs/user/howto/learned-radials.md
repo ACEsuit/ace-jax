@@ -57,6 +57,23 @@ The fit writes these files:
 `--learn-radial` does not support species-embedded bases
 (`--basis-embedding`) at this time.
 
+### Radial basis
+
+`--radial-basis` sets the functions that make the tensor radials:
+
+- `poly` (the default): polynomials of a transformed distance, with an
+  envelope, as in ACEpotentials.
+- `sbessel`: the simplified spherical Bessel functions of pacemaker (PACE),
+  as functions of the distance. They are zero at the cutoff and after it.
+
+`--radial-basis` is a basis option. It does not need `--learn-radial`. With
+`--learn-radial`, the learner changes the coefficients of the functions in
+the same way for the two bases.
+
+!!! note
+    ace-jax does not change `sbessel` radials to splines at deployment. They
+    stay exact, learned or not.
+
 ## In Python
 
 ```python
