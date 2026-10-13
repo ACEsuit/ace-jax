@@ -110,8 +110,37 @@ def test_bundle_written(tmp_path):
                                   "type_elements": [32, 14], "k_dense": 64, "owned_rows": None,
                                   "lean": False,           # PACE: no lean form
                                   "spline_tol": None, "spline_intervals": None,
-                                  "radial_table": None}
+                                  "radial_table": None, "platform": "cuda"}
     assert b["ace_jax"]["layout"] == "dense"
+
+
+@pytest.mark.parametrize("layout", ["dense", "matrix"])
+def test_cpu_bundle_compiles_on_xla_cpu(tmp_path, layout):
+    """platform="cpu" lowers the programs for XLA's CPU compiler.  Lowered for
+    cuda, the dense family's cumsum becomes a composite scan that aborts it
+    (computation_partitioner.cc: operand_maps.size() == 1), process and all, so
+    only the cpu lowering is compiled here."""
+    require_optional("lammps_jax")
+    import base64
+    import inspect
+    from jax._src import xla_bridge
+    from jaxlib import xla_client
+    from lammps_jax.export import export_model
+    from ace_jax.export.lammps import export_lammps, neighbour_capacity
+    if "platform" not in inspect.signature(export_model).parameters:
+        pytest.skip("lammps-jax without export_model(platform=)")
+    model, meta, _ = load(FIX.parent / "si_ace_model.npz")
+    at = bulk("Si", "diamond", 5.43, cubic=True).repeat((2, 2, 2))
+    cap = neighbour_capacity(at, float(meta["rcut"]))
+    graph = ({"max_neighbors": cap["max_neighbors"]} if layout == "matrix" else {"max_edges": cap["max_edges"]})
+    b = export_lammps(model, meta, tmp_path / "m.json", layout=layout, max_atoms=cap["max_atoms"],
+                      max_owned=cap["max_owned"], k_dense=cap["k_dense"], platform="cpu",
+                      device_memory=2**30, **graph)
+    assert b["ace_jax"]["platform"] == "cpu" and b["export_info"]["platform"] == "cpu"
+    be = xla_bridge.get_backend("cpu")
+    opts = xla_client.CompileOptions.ParseFromString(base64.b64decode(b["compile_options_b64"]))
+    be.compile_and_load(base64.b64decode(b["programs"]["energy_and_forces_mlir_b64"]),
+                        xla_client.DeviceList(tuple(be.local_devices()[:1])), opts)
 
 
 @pytest.mark.parametrize("layout", ["sparse", "dense"])
@@ -259,7 +288,7 @@ def test_bundle_metadata_keys_do_not_shadow_the_contract(tmp_path, layout):
     # the exporting lammps-jax) is written for every layout, and none is a contract key
     assert set(b["ace_jax"]) == {"layout", "elements", "type_elements", "k_dense", "owned_rows",
                                  "lean", "spline_tol", "spline_intervals", "radial_table", "block_rows", "device_memory", "dense_budget",
-                                 "lammps_jax"}
+                                 "lammps_jax", "platform"}
     assert not set(b["ace_jax"]) & LAMMPS_JAX_KEYS
 
 
