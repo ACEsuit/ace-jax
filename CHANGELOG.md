@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **`aa_dag="greedy"` or `"prefix"`** on `ACECalculator` and `export_lammps`
+  evaluates the product basis recursively. Each product of order k is one
+  product of order k - 1 times one A entry. This is the scheme that ML-PACE
+  uses. The results agree with the default to roundoff. `"prefix"` gives the
+  same products bit for bit. The default (`None`) does not change.
 - **`export_lammps(platform="cpu")`** writes a bundle for the lammps-jax CPU
   backend. This needs a lammps-jax version with `export_model(platform=)`.
   Also set `device_memory` to the host memory of one MPI rank.
