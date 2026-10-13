@@ -44,13 +44,19 @@ import ace_jax as aj
 from ace_jax.eval import write_yace
 
 pm, meta, spec = aj.load("model.yace")       # PACEModel, meta dict, parsed spec
-write_yace(pm, spec, "copy.yace")            # numbers from pm, layout from spec
+write_yace(pm, "copy.yace", spec=spec)       # numbers from pm, layout from spec
 ```
 
 `write_yace` takes the numeric values from the model. It takes all other
 data (the function layout, the element names, the file structure) from
 `spec`. Thus it never makes the basis layout again. If you write a model
 without changes, it gives the same results as the original.
+
+The `aj export` command writes the same file:
+
+```bash
+aj export --model model.yace --out copy.yace
+```
 
 ## Limits
 

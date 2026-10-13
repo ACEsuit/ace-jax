@@ -27,7 +27,7 @@ parity CI jobs. User docs: `README.md`. Agent-facing usage guide:
   - `prior.py`: the smoothness prior. `export.py`: `save_npz`.
 - `src/ace_jax/export/lammps.py`: `export_lammps`, a lammps-jax bundle.
 - `src/ace_jax/tutorials/`: tutorial support, not stable API. `labels.py` serves shipped MACE labels from content-keyed extxyz caches (live MACE only on a miss, if mace-torch is installed); `structures.py` builds the school tutorials' structures deterministically; `campaign.py` (reference-basis descriptors, seeded Langevin MD pools, novelty scores) and `curation.py` (the MD-select-label-refit loop of tutorial 7, shared with `make_labels.py e3`).
-- `src/ace_jax/cli.py`: `ace-jax`/`aj` with `basis`, `fit` and `eval`. `aj fit` builds the basis from `--order/--max-degree` (flags shared with `aj basis` via `add_basis_args`) or takes `--model`; `_parse` layers a `--config fit.yaml` under the command line.
+- `src/ace_jax/cli.py`: `ace-jax`/`aj` with `basis`, `fit`, `eval`, `calibrate` and `export` (`cmd_export`: a lammps-jax `.json` bundle sized by `neighbour_capacity` on `--structure`, or a `.yace` model written back via `write_yace`; format from the `--out` extension). `aj fit` builds the basis from `--order/--max-degree` (flags shared with `aj basis` via `add_basis_args`) or takes `--model`; `_parse` layers a `--config fit.yaml` under the command line.
 - `src/ace_jax/runfile.py`: `fit.yaml` read/validate/merge (`defaults_for`, `explicit_dests`) and the resolved `out/fit.yaml` writer (`resolved`, `write`).
 - `tests/`: the pytest suite. `conftest.py` holds the shared fixtures and helpers.
 - `fixtures/`: committed reference data. These are bit-exact goldens: never hand-edit or reformat them.
@@ -96,7 +96,7 @@ uv run ruff check                     # lint; `uv run pre-commit run --all-files
   - Python-Markdown (and marimo) drops a paragraph that follows a nested list out of its list item. Put the paragraph before the nested list, or inline the list.
 - **Model files:**
   - `.npz` models follow the export schema: `meta_json` with `schema_version: 1`. The writers are `julia/export_model.jl` and `basis.export.save_npz`.
-  - `aj.load(path)` returns `(model, meta, z)`. For a `.yace` it returns a `PACEModel` with `(model, meta, spec)`, and `write_yace(model, spec, path)` writes it back.
+  - `aj.load(path)` returns `(model, meta, z)`. For a `.yace` it returns a `PACEModel` with `(model, meta, spec)`, and `write_yace(model, path, spec=spec)` writes it back (the old `(model, spec, path)` order warns).
   - A fitted GP is `gp_model.npz`, identified by its `gp_json` key. Load it with `GPCalculator.from_file`.
   - Large models are release assets, not commits.
 - **Architecture:**

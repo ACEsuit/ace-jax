@@ -159,12 +159,21 @@ def parse_yace(path):
     return PACESpec(tree=tree, element_names=names, functions=spec_funcs), arrays
 
 
-def write_yace(model, spec, path):
-    """Serialise a PACEModel: numeric fields from its leaves, everything else
-    verbatim from `spec.tree` (function layout is never regenerated)."""
+def write_yace(model, path, spec=None):
+    """Write a PACEModel (`aj.load` of a `.yace`) as an ML-PACE C-tilde potential at `path`: numeric
+    fields from its leaves, everything else verbatim from the `spec` load returned (function layout is
+    never regenerated).
+
+    The old order `write_yace(model, spec, path)` still works, with a DeprecationWarning."""
     from .pace_model import PACEModel
+    if isinstance(path, PACESpec):                      # write_yace(model, spec, path)
+        warnings.warn("write_yace(model, spec, path) is deprecated: use write_yace(model, path, spec=spec)",
+                      DeprecationWarning, stacklevel=2)
+        path, spec = spec, path
     if not isinstance(model, PACEModel):
         raise TypeError("write_yace only writes PACEModel (PACE radials); see docs/dev/pace-yace-spec.md")
+    if spec is None:
+        raise TypeError("write_yace of a PACEModel needs the spec aj.load returned: write_yace(model, path, spec=spec)")
     if any(getattr(x, "dtype", np.float64) != np.float64 for x in
            (model.crad, model.ctilde_complex, model.fs_params, model.E0)):
         warnings.warn("write_yace: model leaves are float32, so coefficients are written at "

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **`aj export`** writes a model for LAMMPS. An `--out` that ends in `.json`
+  gives a lammps-jax bundle. A bundle needs `--structure`, the initial
+  structure of the run. `--platform cpu` and `--procs px,py,pz` give a CPU
+  bundle sized for one MPI rank. An `--out` that ends in `.yace` writes a
+  `.yace` model again.
+- **`write_yace(model, path, spec=spec)`** is the new argument order. The old
+  order `write_yace(model, spec, path)` still works and gives a warning.
 - **`aa_dag="greedy"` or `"prefix"`** on `ACECalculator` and `export_lammps`
   evaluates the product basis recursively. Each product of order k is one
   product of order k - 1 times one A entry. This is the scheme that ML-PACE
