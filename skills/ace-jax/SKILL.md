@@ -57,6 +57,7 @@ aj fit --model si.npz --train train.xyz --test test.xyz $K \
 aj eval --model out_linear/model.npz --data new.xyz $K --out pred.xyz
 aj eval --model out_gp/gp_model.npz  --data new.xyz $K --out pred.xyz   # adds ace_energy_std, ace_forces_std
 aj eval --model model.yace --data new.xyz $K                            # PACE works too; --prefix renames ace_
+aj export --model out_linear/model.npz --out bundle.json --structure start.xyz   # lammps-jax bundle
 ```
 
 Per-order caps: `--nmax-by-order 15,6,4,3,2,2 --lmax-by-order 0,4,3,2,1,0` (pacemaker's
@@ -228,7 +229,7 @@ recomputes per draw elsewhere; `"recompute"` gives the same numbers with extra p
 pm, pmeta, spec = aj.load("model.yace")                  # PACEModel, meta, parsed spec
 atoms.calc = ACECalculator("model.yace")
 from ace_jax.eval import write_yace
-write_yace(pm, spec, "copy.yace")                        # numeric leaves from pm, layout from spec
+write_yace(pm, "copy.yace", spec=spec)                   # numeric leaves from pm, layout from spec
 ```
 
 Supported: ChebExpCos, ChebPow, ChebLinear and SBessel radials,

@@ -26,7 +26,7 @@ def test_roundtrip_tree_equal(name, tmp_path):
     p = _need(name)
     model, _, spec = load(str(p))
     out = tmp_path / "rt.yace"
-    write_yace(model, spec, out)
+    write_yace(model, out, spec=spec)
     assert load_tree(out) == load_tree(p)
 
 
@@ -37,7 +37,7 @@ def test_modified_model_roundtrips(name, tmp_path):
     m2 = eqx.tree_at(lambda m: m.ctilde_complex, model, 2.0 * model.ctilde_complex)
     m2 = eqx.tree_at(lambda m: m.crad, m2, 0.9 * m2.crad)
     out = tmp_path / "mod.yace"
-    write_yace(m2, spec, out)
+    write_yace(m2, out, spec=spec)
     ref = np.load(FIX / f"{name}_ref.npz")
     at = Atoms(numbers=ref["Z_bulk"], positions=ref["pos_bulk"], cell=ref["cell_bulk"], pbc=True)
     at.calc = ACECalculator(m2, meta=meta)
@@ -55,7 +55,7 @@ def test_modified_model_matches_pyace(tmp_path):
     model, meta, spec = load(str(p))
     m2 = eqx.tree_at(lambda m: m.ctilde_complex, model, 1.5 * model.ctilde_complex)
     out = tmp_path / "mod.yace"
-    write_yace(m2, spec, out)
+    write_yace(m2, out, spec=spec)
     ref = np.load(FIX / "sige_zbl_ref.npz")
     at = Atoms(numbers=ref["Z_bulk"], positions=ref["pos_bulk"], cell=ref["cell_bulk"], pbc=True)
     at.calc = pyace.PyACECalculator(str(out))
@@ -71,7 +71,7 @@ def test_padded_crad_entries_survive_export(tmp_path):
     model, meta, spec = load(str(p))
     m2 = eqx.tree_at(lambda m: m.crad, model, model.crad.at[0, 0, :, :, 6:].add(0.01))
     out = tmp_path / "pad.yace"
-    write_yace(m2, spec, out)
+    write_yace(m2, out, spec=spec)
     ref = np.load(FIX / "gesi_sbessel_ref.npz")
     at = Atoms(numbers=ref["Z_bulk"], positions=ref["pos_bulk"], cell=ref["cell_bulk"], pbc=True)
     at.calc = ACECalculator(m2, meta=meta)
@@ -85,4 +85,14 @@ def test_write_yace_warns_when_leaves_are_not_float64(tmp_path):
     p = _need("si_chebpow_fs")
     model, _, spec = load(str(p), dtype=jnp.float32)
     with pytest.warns(UserWarning, match="float32"):
-        write_yace(model, spec, tmp_path / "f32.yace")
+        write_yace(model, tmp_path / "f32.yace", spec=spec)
+
+
+def test_write_yace_arguments(tmp_path):
+    p = _need("si_chebpow_fs")
+    model, _, spec = load(str(p))
+    with pytest.raises(TypeError, match="needs the spec"):
+        write_yace(model, tmp_path / "m.yace")
+    with pytest.warns(DeprecationWarning, match="deprecated"):
+        write_yace(model, spec, tmp_path / "old-order.yace")
+    assert load_tree(tmp_path / "old-order.yace") == load_tree(p)

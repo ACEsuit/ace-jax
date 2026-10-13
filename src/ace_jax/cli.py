@@ -514,6 +514,62 @@ def _int_list(s):
     return tuple(int(x) for x in str(s).replace(" ", "").strip("[]()").split(","))
 
 
+_EXPORT_FORMATS = {".yace": "yace", ".json": "lammps"}
+
+
+def cmd_export(a):
+    """`aj export`: a model as an ML-PACE .yace (`write_yace`) or a lammps-jax bundle (`export_lammps`)."""
+    from .eval import load
+    from .eval.pace_model import PACEModel
+    out = pathlib.Path(a.out).expanduser()
+    fmt = a.format or _EXPORT_FORMATS.get(out.suffix)
+    if fmt is None:
+        raise UsageError(f"{a.out}: give --format yace|lammps, or an --out ending in .yace or .json")
+    model, meta, extra = load(a.model)
+    if out.parent and str(out.parent) != ".":
+        out.parent.mkdir(parents=True, exist_ok=True)
+    if fmt == "yace":
+        if a.structure:
+            raise UsageError("--structure sizes a lammps-jax bundle; a .yace needs none")
+        if not isinstance(model, PACEModel):
+            raise UsageError(f"{a.model}: a .yace export needs a .yace model; ML-PACE cannot yet read "
+                             "the radials of a linear ACE model (use a lammps-jax .json bundle)")
+        from .eval import write_yace
+        write_yace(model, out, spec=extra)
+        print(f"yace: {a.model} written back -> {out}")
+        return None
+    if not a.structure:
+        raise UsageError("a lammps-jax bundle needs --structure: the extxyz LAMMPS starts from, "
+                         "which sizes its atom and neighbour buffers")
+    try:
+        procs = None if a.procs is None else _int_list(a.procs)
+    except ValueError:
+        procs = ()
+    if procs is not None and (len(procs) != 3 or min(procs) < 1):
+        raise UsageError("--procs takes the LAMMPS processor grid: three integers px,py,pz")
+    try:
+        import lammps_jax  # noqa: F401
+    except ImportError:
+        raise UsageError("a lammps-jax bundle needs lammps-jax installed (pip install lammps-jax)") from None
+    from ase import Atoms
+
+    from .export.lammps import export_lammps, neighbour_capacity
+    from .fit.xyz import read_extxyz
+    c = read_extxyz(a.structure)[0]
+    at = Atoms(numbers=c.numbers, positions=c.positions, cell=c.cell, pbc=c.pbc)
+    cap = neighbour_capacity(at, float(meta["rcut"]), skin=a.skin, slots=a.slots, procs=procs)
+    from ase.data import atomic_numbers
+    els = None if a.type_elements is None else [
+        int(e) if e.strip().isdigit() else atomic_numbers[e.strip()] for e in a.type_elements.split(",")]
+    b = export_lammps(model, meta, out, max_atoms=cap["max_atoms"], max_edges=cap["max_edges"],
+                      k_dense=cap["k_dense"], max_owned=cap["max_owned"], max_neighbors=cap["max_neighbors"],
+                      dtype=a.dtype, layout=a.layout, type_elements=els, platform=a.platform)
+    per = "" if procs is None else f", per MPI rank of {'x'.join(map(str, procs))}"
+    print(f"lammps-jax: layout {b['ace_jax']['layout']}, {a.dtype}, {a.platform or 'cuda'}, sized for {len(at)} "
+          f"atoms of {a.structure}{per} (max_atoms {cap['max_atoms']}, neighbour slots {cap['k_dense']}) -> {out}")
+    return b
+
+
 def add_basis_args(p, *, fit):
     """The basis-definition flags, shared by `aj basis` and `aj fit`.  On `aj fit`
     the embedding flag is --basis-embedding (--embedding is the GP species
@@ -606,6 +662,29 @@ def _parser():
     mode.add_argument("--append", action="store_true", help="pool U with the stored T_val scores in every group")
     mode.add_argument("--replace", action="store_true", help="use U only in every group")
     cal.add_argument("--out", required=True)
+    exp = sub.add_parser("export", help="write a model for LAMMPS: an ML-PACE .yace (pair_style pace) or a "
+                                        "lammps-jax bundle (.json, pair_style jax)")
+    exp.add_argument("--model", required=True, help="a model .npz (linear ACE) or .yace (PACE)")
+    exp.add_argument("--out", required=True, help="the file to write: .yace or .json (else give --format)")
+    exp.add_argument("--format", choices=["yace", "lammps"], default=None,
+                     help="yace: ML-PACE C-tilde (from a .yace model); lammps: a lammps-jax bundle "
+                          "(default: from the --out extension)")
+    exp.add_argument("--structure", default=None,
+                     help="lammps: the extxyz LAMMPS starts from (first configuration); it sizes the buffers")
+    exp.add_argument("--skin", type=float, default=1.0, help="lammps: the LAMMPS neighbour skin (Å)")
+    exp.add_argument("--slots", choices=["skin", "cutoff"], default="skin",
+                     help="lammps: neighbour slots for rcut + skin (safe) or rcut (tighter; stable MD only)")
+    exp.add_argument("--layout", default="auto", choices=["auto", "sparse", "dense", "matrix"],
+                     help="lammps: bundle layout")
+    exp.add_argument("--dtype", default="float64", choices=["float64", "float32"], help="lammps: precision")
+    exp.add_argument("--platform", default=None, choices=["cuda", "cpu"],
+                     help="lammps: the lammps-jax backend the bundle runs on (default cuda)")
+    exp.add_argument("--procs", default=None,
+                     help="lammps: the LAMMPS processor grid px,py,pz; sizes one MPI rank's buffers "
+                          "(run LAMMPS with `processors px py pz`)")
+    exp.add_argument("--type-elements", default=None,
+                     help="lammps: comma-separated element of each LAMMPS atom type, in type order "
+                          "(default: the model's element order)")
     con = sub.add_parser("basis", help="author a new ACE basis: a frozen model (seeded radial init) saved as .npz")
     add_basis_args(con, fit=False)
     con.add_argument("--out", required=True)
@@ -690,7 +769,7 @@ def main(argv=None):
     from .basis.coupling import BasisUnavailable
     a = _parse(argv)
     try:
-        {"eval": cmd_eval, "basis": cmd_basis, "calibrate": cmd_calibrate}.get(a.cmd, run)(a)
+        {"eval": cmd_eval, "basis": cmd_basis, "calibrate": cmd_calibrate, "export": cmd_export}.get(a.cmd, run)(a)
     except (BasisUnavailable, UsageError) as e:       # a user-facing condition, not a crash
         print(f"aj {a.cmd}: error: {e}", file=sys.stderr)
         raise SystemExit(2) from None

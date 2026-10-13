@@ -38,7 +38,20 @@ export_lammps(model, meta, "si_bundle.json",
 ```
 
 `type_elements` maps LAMMPS atom types to elements. Type 1 is the first
-entry. `export_lammps` returns a dictionary, and also writes it in the
+entry.
+
+The `aj export` command does the same steps. It reads the initial structure
+from the first configuration of an extxyz file:
+
+```bash
+aj export --model fit/model.npz --out si_bundle.json --structure start.xyz \
+    --skin 1.0 --type-elements Si
+```
+
+For the CPU backend, add `--platform cpu`. Add `--procs px,py,pz` to size the
+buffers for one MPI rank. Use the same grid in LAMMPS (`processors px py pz`).
+
+ `export_lammps` returns a dictionary, and also writes it in the
 bundle. Its `ace_jax` key records what was exported: the layout, the
 capacities, the use of the lean form and of splines, and the lammps-jax
 version.
