@@ -4,8 +4,12 @@
 
 ### LAMMPS export
 
-- lammps-jax is on PyPI. Install it with `pip install lammps-jax`. The CI
-  tests the export with lammps-jax 0.2.0.
+- lammps-jax is on PyPI. Install it with the new `lammps` extra:
+  `pip install "ace-jax[lammps]"`. The CI tests the export with lammps-jax
+  0.2.0.
+- lammps-jax excludes jaxlib 0.10.2, because its GPU scatter-add is
+  approximately 4x slower. With the `lammps` extra, Python 3.11 gets jax
+  0.10.1.
 - The bundle no longer writes `ace_jax.platform`. lammps-jax 0.2.0 reads the
   `platform` key from anywhere in the bundle. Read the platform from
   `export_info.platform`.

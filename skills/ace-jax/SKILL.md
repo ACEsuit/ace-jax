@@ -313,7 +313,7 @@ load; faster only at large `nradbase`). Values are unchanged to roundoff.
 ### LAMMPS
 
 ```python
-from ace_jax.export.lammps import export_lammps, neighbour_capacity  # needs `pip install lammps-jax`
+from ace_jax.export.lammps import export_lammps, neighbour_capacity  # needs `pip install "ace-jax[lammps]"`
 model, meta, _ = aj.load("model.npz")                     # or a .yace
 cap = neighbour_capacity(atoms, meta["rcut"], skin=1.0)   # slots="cutoff": tight, opt-in
 export_lammps(model, meta, "bundle", max_atoms=cap["max_atoms"], max_edges=cap["max_edges"],

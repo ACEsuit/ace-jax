@@ -58,6 +58,11 @@ cuda = ["jax[cuda12]>=0.10.1"]
 #   pip install -C cmake.define.ENABLE_CUDA=ON \
 #       -C cmake.define.CMAKE_CUDA_ARCHITECTURES=<sm> matscipy-neighbours
 fast-neighbours = ["matscipy-neighbours>=1.0"]
+# LAMMPS export (ace_jax.export.lammps, `aj export --out bundle.json`).  The pair
+# style is lammps-jax's LAMMPS plugin, built separately at the same version.
+# lammps-jax excludes jaxlib 0.10.2 (slow GPU scatter-add), so on Python 3.11
+# this extra resolves jax 0.10.1, the core floor.
+lammps = ["lammps-jax>=0.2.0"]
 
 [project.scripts]
 ace-jax = "ace_jax.cli:main"
