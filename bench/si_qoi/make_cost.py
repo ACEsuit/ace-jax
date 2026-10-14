@@ -35,8 +35,8 @@ def main():
         us = 1e6 / r["atom_steps_per_s"]
         if us < best.get(name, float("inf")):
             best[name], code[name] = us, f'{r["code"]} {r["dtype"]} {r["mode"]} [{r["_file"]}]'
-    pathlib.Path(a.out).write_text(json.dumps(best, indent=1, sort_keys=True))
-    pathlib.Path(a.out).with_suffix(".codes.json").write_text(json.dumps(code, indent=1, sort_keys=True))
+    pathlib.Path(a.out).write_text(json.dumps(best, indent=1, sort_keys=True) + "\n")
+    pathlib.Path(a.out).with_suffix(".codes.json").write_text(json.dumps(code, indent=1, sort_keys=True) + "\n")
     for n in sorted(best):
         print(f"{n:22s} {best[n]:8.3f} us/atom-step  ({code[n]})")
     print("wrote", a.out)
