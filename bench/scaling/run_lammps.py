@@ -267,23 +267,28 @@ def _trim_status(row):
     lib = row.get("trim_lib") or ""
     if pathlib.Path(lib).exists():
         return None
-    from scaling import models
-    try:
-        entry = models.load_manifest().get(lib, {})
-    except (OSError, ValueError):
-        entry = {}
+    entry = _trim_record(lib)
     if entry.get("unsupported"):
         return "unsupported", f"trim export failed for {lib}: {entry['unsupported']}"
     return "error", f"no trim library {lib}: run `python bench/scaling/models.py acepotentials-trim`"
 
 
-def _trim_build(row):
-    """The manifest's record of the row's trim library (provenance for the row)."""
-    from scaling import models
+def _trim_record(lib):
+    """The build record of a trim library: its `<lib>.build.json` sidecar (accuracy_cost/build_trim.py),
+    else its entry in models/manifest.json (models.py acepotentials-trim), else {}."""
+    side = pathlib.Path(lib).with_suffix(".build.json")
     try:
-        e = models.load_manifest().get(row["trim_lib"], {})
+        if side.exists():
+            return json.loads(side.read_text())
+        from scaling import models
+        return models.load_manifest().get(lib, {})
     except (OSError, ValueError):
-        return None
+        return {}
+
+
+def _trim_build(row):
+    """The build record of the row's trim library (provenance for the row)."""
+    e = _trim_record(row["trim_lib"])
     return {k: e[k] for k in ("build_id", "sha256", "build_cpu", "cpu_target", "versions", "identity")
             if k in e} or None
 

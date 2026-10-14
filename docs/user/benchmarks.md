@@ -40,6 +40,7 @@ At the target, in microseconds per atom-step:
 |---|---|---|
 | linear ACE o4d20, ace-jax with lammps-jax | 5.65 | 50.0 |
 | linear ACE o4d20, ML-PACE | 4.12 | 5.39 |
+| linear ACE o4d20, ACEpotentials.jl | – | 10.8 |
 | MACE c16L0, Symmetrix | 1.93 | 2.36 |
 | MACE c16L0, Symmetrix-XL | 1.23 | 2.19 |
 | MACE c16L1, Symmetrix | 5.36 | 8.58 |
@@ -48,6 +49,10 @@ At the target, in microseconds per atom-step:
 In these ladders, PACE (pacemaker), ACE with learned radials, PACE-shaped
 ACE and the GAP refits do not reach the target. PACE reaches the force error
 of GAP-18 with fewer parameters than linear ACE, but not the QoI target.
+
+On the CPU, the ACEpotentials.jl compiled library is the fastest code for
+linear ACE up to o4d14. It has the same speed as ML-PACE at o4d16. At
+o4d20 it is 2 times slower than ML-PACE.
 
 ### How the cost was measured
 
@@ -63,6 +68,11 @@ of GAP-18 with fewer parameters than linear ACE, but not the QoI target.
   `.yace` files with tabulated radial functions
   ([Write an ACE model as a .yace file](howto/pace.md)). They run in
   `pair_style pace` (CPU) and `pair_style pace/kk` (GPU).
+- **Linear ACE, run by ACEpotentials.jl.** The same linear ACE fits are
+  converted to ACEpotentials.jl models. Each model is compiled to a shared
+  library with `juliac --trim` and runs in LAMMPS with the ACEpotentials.jl
+  `pair_style ace` plugin. These results are for the CPU only, with 128 MPI
+  ranks.
 - **ML-PACE** on the GPU is the LAMMPS development version with the 2026
   `pace/kk` GPU update.
 - **MACE** runs in LAMMPS with Symmetrix and, separately, with

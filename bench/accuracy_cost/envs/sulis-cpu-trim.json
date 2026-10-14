@@ -1,0 +1,6 @@
+{"lmp": "/home/e/essswb/bench-scaling/lmp-ace-cpu.sh", "lmp_ace": "/home/e/essswb/bench-scaling/lmp-ace-cpu.sh",
+ "ace_plugin": "/home/e/essswb/bench-scaling/ace-plugin-cpu/aceplugin.so",
+ "julia": "/home/e/essswb/bench-scaling/julia-1.12.6/bin/julia", "julia_depot": "/home/e/essswb/bench-scaling/julia-pr309",
+ "julia_project": "/home/e/essswb/bench-scaling/ace-jax-trim/bench/scaling/julia",
+ "pythonpath": "/home/e/essswb/bench-scaling/ace-jax-trim/bench:/home/e/essswb/bench-scaling/ace-jax-trim/src",
+ "python": "/home/e/essswb/bench-scaling/venv/bin/python", "root": "/home/e/essswb/bench-scaling"}

@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Benchmarks
+
+- The silicon accuracy-cost benchmark adds linear ACE run by ACEpotentials.jl
+  on the CPU: each `aj fit` model rebuilt as an ACEpotentials `ace_model`
+  (`bench/scaling/julia/build_trim_acejax.jl`, gated to 1e-10 against ace-jax),
+  compiled with `juliac --trim` (ACEpotentials PR 309) and run in LAMMPS. It is
+  the fastest CPU code for linear ACE up to o4d14, ties ML-PACE at o4d16 and is
+  2x slower than ML-PACE at o4d20 (`bench/accuracy_cost/build_trim.py`,
+  `envs/sulis-cpu-trim.sbatch`).
+
 ## 0.3.0 (2026-10-14)
 
 **Highlights.** Linear ACE models export to ML-PACE as `.yace` files with
