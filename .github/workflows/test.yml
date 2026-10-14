@@ -106,8 +106,7 @@ jobs:
     # skin list's production neighbour path).  ACEJAX_REQUIRE_OPTIONAL turns
     # those skips into failures (tests/conftest.py `require_optional`), so a
     # broken install cannot pass as all-skipped.  lammps-jax's export is pure
-    # Python + JAX (no compiled LAMMPS); pinned to a PyPI release.  Not an extra:
-    # it excludes jaxlib 0.10.2, and an extra would move the core lock's jax.
+    # Python + JAX (no compiled LAMMPS); the `lammps` extra, at the lock's version.
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -122,9 +121,7 @@ jobs:
             jaxcache-${{ runner.os }}-optional-${{ hashFiles('uv.lock') }}-
             jaxcache-${{ runner.os }}-optional-
       - name: Install matscipy-neighbours (C++ source build) and lammps-jax
-        run: |
-          uv sync --python 3.12 --extra gp --extra fast-neighbours
-          uv pip install "lammps-jax==0.2.0"
+        run: uv sync --python 3.12 --extra gp --extra fast-neighbours --extra lammps
       - name: Optional-dependency tests (CPU JAX)
         env:
           JAX_PLATFORM_NAME: cpu

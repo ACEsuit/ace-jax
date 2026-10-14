@@ -19,6 +19,7 @@ project.
 | `ace-jax[gp]` | blackjax | the `pathfinder` rung of `--rungs` |
 | `ace-jax[cuda]` | `jax[cuda12]` | running on an NVIDIA GPU |
 | `ace-jax[fast-neighbours]` | matscipy-neighbours | faster neighbour lists (ASE's list is the fallback) |
+| `ace-jax[lammps]` | lammps-jax | LAMMPS export |
 
 You can combine extras, for example `ace-jax[gp,cuda]`.
 
@@ -85,10 +86,9 @@ need the float32 speed and accept its error.
 ## LAMMPS
 
 LAMMPS export needs [lammps-jax](https://github.com/abhijeetgangan/lammps-jax).
-lammps-jax is not on PyPI.
 
-1. Install lammps-jax from a clone (`pip install -e <lammps-jax>`).
-2. Build its LAMMPS plugin.
+1. Add `lammps` to the extras that you install.
+2. Build the lammps-jax LAMMPS plugin at the same version as the Python package.
 
 See [LAMMPS export](howto/lammps.md).
 

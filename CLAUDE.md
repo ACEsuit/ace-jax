@@ -59,9 +59,10 @@ uv run ruff check                     # lint; `uv run pre-commit run --all-files
   - (no extra for building bases: `ace-jax-coupling` from PyPI is a core dependency on Linux x86_64/aarch64, macOS arm64 and Windows x64; no Julia.) To try a locally built library without reinstalling, point the installed package at it with `ACEJAX_COUPLING_LIB=<bundle>/lib/libetcouple.<so|dylib>` (Windows: `<bundle>/bin/libetcouple.dll`), or `uv pip install` its wheel and use `uv run --no-sync`. Building the library: `coupling/RELEASING.md` and `coupling-wheels.yml` (JuliaC on Julia 1.13.1, then `coupling/tools/prune_bundle.py` and `check_bundle.py`).
   - `cuda`.
   - `fast-neighbours`: matscipy-neighbours, a C++ source build.
+  - `lammps`: lammps-jax, for `export_lammps`. It excludes jaxlib 0.10.2 (slow GPU scatter-add), so the lock's Python 3.11 jax is 0.10.1, the core floor.
 - **Tests that silently skip** when an optional dependency is missing:
   - compiled coupling library: `test_coupling_etshim`, `test_coupling_parity` and the basis bridge tests skip unless a compiled `ace_jax_coupling` is installed (`conftest.require_coupling_lib`). The coupling cache tests still run: they use `ACEJAX_COUPLING_CACHE_ONLY=1` and the committed cache.
-  - lammps-jax: `test_export_lammps` and `test_bench_scaling`'s export test. Install it with `uv pip install lammps-jax` (PyPI; not an extra, because it excludes jaxlib 0.10.2, which the lock uses on Python 3.11), or `uv pip install -e <lammps-jax>` for a checkout.
+  - lammps-jax: `test_export_lammps` and `test_bench_scaling`'s export test. `uv sync --extra lammps`, or `uv pip install -e <lammps-jax>` for a checkout.
   - `fast-neighbours` (matscipy-neighbours): `test_calc_jit`'s native `neighbour_matrix` test and `test_efv`'s dense-vs-neighbour_matrix check; without it the skin list and dense layout also take their fallback neighbour path.
   - `pyace` (python-ace, in its own venv under `pace_ref/`).
   - `sphericart`, `psutil`.
@@ -75,7 +76,7 @@ uv run ruff check                     # lint; `uv run pre-commit run --all-files
   - `ACEJAX_CLI_FULL=1` runs the full CLI test.
 - `tests/conftest.py` sets `XLA_FLAGS=--xla_force_host_platform_device_count=2`, for the sharding tests, and a persistent compile cache in `.jax_cache/`. Both must be set before any jax import, so conftest must not import jax at the top level.
 - **CI** (`.github/workflows/`):
-  - `test.yml`: 3 shards on Python 3.12 (whole files each: `ACEJAX_SHARD=i/n`, `conftest.shard_files`), a smoke job on 3.11, 3.13 and 3.14, the `slow` ladder, and `optional-deps` (matscipy-neighbours plus lammps-jax pinned to a PyPI release, with `ACEJAX_REQUIRE_OPTIONAL=1`).
+  - `test.yml`: 3 shards on Python 3.12 (whole files each: `ACEJAX_SHARD=i/n`, `conftest.shard_files`), a smoke job on 3.11, 3.13 and 3.14, the `slow` ladder, and `optional-deps` (matscipy-neighbours plus the `lammps` extra, with `ACEJAX_REQUIRE_OPTIONAL=1`).
   - `lint.yml`.
   - `docs.yml`: each tutorial notebook rendered in its own matrix job (`build_tutorials.py --matrix`; the page is cached on a hash of the notebook, converter, `src/`, lock and tutorial data), then the strict site build from those pages (`ACEJAX_DOCS_NOTEBOOKS=require`: a page not current fails rather than re-renders); path-gated; on `main` it deploys to GitHub Pages.
   - Path-gated parity jobs: `julia-parity` (ACEfit rows/QR on an ACEpotentials-built model, and design rows of a basis built by `build_model` with the live coupling library and only the radials from Julia; it also runs on `src/ace_jax/basis/**`), `coupling-wheels` (builds + clean-env-tests the coupling wheels, then parity vs ACEpotentials), `prior-parity`, `pace-parity` (ML-PACE C++ + python-ace).

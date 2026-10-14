@@ -7,9 +7,9 @@ the GPU. ace-jax writes the program and its metadata into one JSON
 *bundle*.
 
 !!! note "Install lammps-jax"
-    1. Install the lammps-jax Python package: `pip install lammps-jax`.
-       For a CPU run, use `pip install "lammps-jax[cpu]"`. This also installs
-       the XLA CPU PJRT plugin (Linux x86_64 only).
+    1. Install ace-jax with the `lammps` extra: `pip install "ace-jax[lammps]"`.
+       For a CPU run, also install `"lammps-jax[cpu]"`. This gives the XLA
+       CPU PJRT plugin (Linux x86_64 only).
     2. Build its LAMMPS plugin at the same version. Use the lammps-jax instructions.
 
     The ace-jax CI tests the export with lammps-jax 0.2.0. The pair style runs
