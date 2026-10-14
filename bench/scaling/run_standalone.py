@@ -119,7 +119,7 @@ def _acepotentials(row, at, dtype, reps, out):
 def run_case(row, n_atoms, dtype, device, reps=10):
     from ase.calculators.calculator import all_changes
     import numpy as np
-    at = supercell(row["system"], n_atoms)
+    at = supercell(row["system"], n_atoms, rattle=row.get("rattle", 0.0))
     rng = np.random.default_rng(0)
 
     def displace():                       # one MD-like step before each timed call (untimed)
@@ -129,7 +129,7 @@ def run_case(row, n_atoms, dtype, device, reps=10):
            "system": row["system"], "n_atoms": n_atoms, "device": device, "dtype": dtype,
            "versions": _versions(), "status": "ok", "threads": _threads()}
     try:
-        if row["code"].startswith("acejax"):
+        if row["code"].startswith("acejax") and row["code"] != "acejax-gp":
             import jax
             if device == "cpu":                   # jax[cuda12] would pick the GPU
                 jax.config.update("jax_platforms", "cpu")
@@ -167,6 +167,20 @@ def run_case(row, n_atoms, dtype, device, reps=10):
             out["n_edges"] = n_edges
             out["rebuilds"] = splits[-1]["rebuilds"]     # of all calls, the first included
             out["md_like"] = True
+        elif row["code"] == "acejax-gp":
+            import jax
+            if device == "cpu":
+                jax.config.update("jax_platforms", "cpu")
+            jax.config.update("jax_enable_x64", dtype == "float64")
+            out["platform"] = jax.default_backend()
+            from ace_jax.calc.gp import GPCalculator
+            calc = GPCalculator.from_file(row["path"])
+            call = lambda: calc.calculate(at, ["energy", "forces"], all_changes)
+            t0 = time.perf_counter(); call(); out["compile_s"] = time.perf_counter() - t0
+            out["energy"] = calc.results["energy"]
+            call()
+            out["call_s"] = _median_time(call, reps, setup=displace)
+            out["rebuilds"], out["md_like"] = None, True
         elif row["code"] == "mace":
             import torch
             from mace.calculators import mace_mp

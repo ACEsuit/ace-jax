@@ -1,0 +1,88 @@
+# family -> size entries; `size` names the run directory runs/<family>/<size>
+ace:          # linear: aj fit --m-per-species 0; n_B from `aj basis` (Si, rcut 5.0)
+  - {size: o3d8, order: 3, max_degree: 8, n_B: 54}
+  - {size: o3d10, order: 3, max_degree: 10, n_B: 110}
+  - {size: o3d12, order: 3, max_degree: 12, n_B: 211}
+  - {size: o4d12, order: 4, max_degree: 12, n_B: 338}
+  - {size: o4d14, order: 4, max_degree: 14, n_B: 710}
+  - {size: o4d16, order: 4, max_degree: 16, n_B: 1445, configs_per_batch: 2}
+  - {size: o4d20, order: 4, max_degree: 20, n_B: 5456, configs_per_batch: 1}
+ace_lr:       # linear + aj fit --learn-radial; the same (order, max_degree) pairs and n_B as ace
+  - {size: o3d8, order: 3, max_degree: 8, n_B: 54}
+  - {size: o3d10, order: 3, max_degree: 10, n_B: 110}
+  - {size: o3d12, order: 3, max_degree: 12, n_B: 211}
+  - {size: o4d12, order: 4, max_degree: 12, n_B: 338}
+  - {size: o4d14, order: 4, max_degree: 14, n_B: 710}
+  - {size: o4d16, order: 4, max_degree: 16, n_B: 1445, configs_per_batch: 2}
+  - {size: o4d20, order: 4, max_degree: 20, n_B: 5456, configs_per_batch: 1}
+ace_gp:       # aj fit --m-per-species m; base pairs are the smallest, middle and largest-but-one ace pairs
+  - {size: o3d8-m100, order: 3, max_degree: 8, m: 100}
+  - {size: o3d8-m500, order: 3, max_degree: 8, m: 500}
+  - {size: o3d12-m100, order: 3, max_degree: 12, m: 100}
+  - {size: o3d12-m500, order: 3, max_degree: 12, m: 500}
+  - {size: o4d14-m100, order: 4, max_degree: 14, m: 100}
+pace:         # one ladder fit; sizes are checkpoints (functions per element)
+  - {size: ladder, max_functions: 800, ladder_step: 50, take: [50, 100, 200, 400, 800]}
+  # the ladder continued from f800 on Sulis on a larger target spec (nradmax 15,8,6,4,3,2 / lmax
+  # 0,5,4,3,2,1: 5857 functions) in max(100, 30%) steps: envs/sulis-pace-ladder.*; sizes are the
+  # checkpoints' function counts, converted by hand (fit_pace's take/convert reads `ladder` only)
+  - {size: ladder_ext, max_functions: 3200, ladder_step: [100, 0.3], take: [1040, 1352, 1758, 2285, 2971, 3200]}
+mace:         # mace_run_train from scratch, 2 layers, max_ell 3, correlation 3
+  - {size: c8L0,  channels: 8,  max_L: 0}
+  - {size: c16L0, channels: 16, max_L: 0}
+  - {size: c32L0, channels: 32, max_L: 0}
+  - {size: c16L1, channels: 16, max_L: 1}
+  - {size: c32L1, channels: 32, max_L: 1}
+  - {size: c64L1, channels: 64, max_L: 1}
+  # one interaction layer (receptive field = the 5 A cutoff, as ACE and GAP): separates message passing from
+  # MACE's many-channel nonlinear model.  Trained on a Sulis A100 (envs/sulis-mace.sbatch)
+  - {size: c16L0n1, channels: 16, max_L: 0, interactions: 1}
+  - {size: c32L0n1, channels: 32, max_L: 0, interactions: 1}
+gap:          # GAP-18's gap_fit command line, only n_sparse changed
+  - {size: s1000, n_sparse: 1000}
+  - {size: s3000, n_sparse: 3000}
+  - {size: s9000, n_sparse: 9000}
+ace_pshape:    # PACE-shaped ACE, fixed SBessel radials (runs/accuracy_cost/pace_shape/md<N>_sb_fixed): order 6, wL 1,
+               # --nmax-by-order 15,6,4,3,2,2 --lmax-by-order 0,4,3,2,1,0 --radial-basis sbessel; md18 ~ pacemaker's f800 spec
+  - {size: md10}
+  - {size: md12}
+  - {size: md14}
+  - {size: md18}
+ace_pshape_lr: # the same, radials learned (pace_shape/md<N>_sb_lr200: 200 steps, lam 0)
+  - {size: md10}
+  - {size: md12}
+  - {size: md14}
+  - {size: md18}
+ace_wl:        # linear ACE at other angular weights wL (wl_ladder/PLAN.md: the 12-fit subset, fitted on Sulis)
+  - {size: o4d13_wL2}
+  - {size: o5d14_wL2}
+  - {size: o4d12_wL1}
+  - {size: o4d15_wL2}
+  - {size: o4d16_wL2.5}
+  - {size: o4d15_wL1.75}
+  - {size: o4d17_wL1.75}
+  - {size: o4d19_wL2.5}
+  - {size: o4d14_wL1}
+  - {size: o4d18_wL2}
+  - {size: o5d17_wL2}
+  - {size: o4d21_wL2}
+  - {size: o4d22_wL2}
+  - {size: o4d24_wL2}
+gap_noglue:    # GAP-18's command without the glue core (runs/accuracy_cost/gap/s<N>_noglue, registered as gap_noglue/s<N>)
+  - {size: s1000, n_sparse: 1000}
+  - {size: s3000, n_sparse: 3000}
+  - {size: s9000, n_sparse: 9000}
+gap_E30:       # GAP-18's command with energy sigmas x10/3: ace-jax's E30:F1 balance (Sulis gap-runs/gap_s<N>_E30.sbatch)
+  - {size: s1000, n_sparse: 1000}
+  - {size: s3000, n_sparse: 3000}
+  - {size: s9000, n_sparse: 9000}
+ace_yace:      # the ace ladder's o4 models as upstream ML-PACE .yace, radials refitted (ace_to_yace.py --radial sbessel --nradbase 80): timing only
+  - {size: o4d12}
+  - {size: o4d14}
+  - {size: o4d16}
+  - {size: o4d20}
+ace_tab:       # the same, exactly: Tabulated radials (write_yace), for ML-PACE with the tabulated-radial patch
+  - {size: o4d12}
+  - {size: o4d14}
+  - {size: o4d16}
+  - {size: o4d20}

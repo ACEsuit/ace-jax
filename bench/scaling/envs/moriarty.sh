@@ -35,6 +35,11 @@ JULIA=${ACEPOT_JULIA:-$HOME/.juliaup/bin/julia +1.12.6}
 JULIA_DEPOT=${ACEPOT_JULIA_DEPOT:-/storage/eng/essswb/cache/julia-pr309}
 JULIA_PROJECT_DIR=$ACEJAX/bench/scaling/julia
 ACE_PLUGIN_BUILD=${ACE_PLUGIN_BUILD:-$ROOT/ace-plugin}
+EXTRA_PKGS=${EXTRA_PKGS:-}
+EXTRA_PIP=${EXTRA_PIP:-}                  # extra venv packages (lestrade: quippy-ase)
+CUDA_ARCH=${CUDA_ARCH:-86}                # matscipy-neighbours CUDA arch
+ENV_HOSTS=${ENV_HOSTS:-"moriarty-gpu moriarty-cpu"}   # host JSON names
+ENV_JSON_DIR=${ENV_JSON_DIR:-$ACEJAX/bench/scaling/envs}
 mkdir -p "$ROOT"
 source /etc/profile.d/modules.sh 2>/dev/null || true
 module purge
@@ -51,7 +56,8 @@ sources() {
   [ -d lammps-jax ] || git clone https://github.com/abhijeetgangan/lammps-jax.git
   [ -d lammps-dev ] || git clone --depth 1 -b develop https://github.com/lammps/lammps.git lammps-dev
   # patch LAMMPS with pair_symmetrix (copies sources into src/)
-  (cd symmetrix/pair_symmetrix && ./install.sh "$LAMMPS")
+  # install.sh appends to cmake/CMakeLists.txt on every run: only patch once
+  grep -q symmetrix "$LAMMPS/cmake/CMakeLists.txt" || (cd symmetrix/pair_symmetrix && ./install.sh "$LAMMPS")
   git -C "$LAMMPS" log -1 --format='lammps %h %cd' > "$ROOT/VERSIONS"
   git -C symmetrix log -1 --format='symmetrix %h %cd' >> "$ROOT/VERSIONS"
   git -C lammps-jax log -1 --format='lammps-jax %h %cd' >> "$ROOT/VERSIONS"
@@ -63,7 +69,7 @@ venv() {
   # pip too: LAMMPS's install-python target calls `python -m pip`
   uv pip install --python "$VENV/bin/python" -q pip "jax[cuda12]" matscipy ase matplotlib pyyaml psutil \
     mace-torch cuequivariance-torch cuequivariance-ops-torch-cu12 \
-    -e "$ACEJAX" -e "$ROOT/lammps-jax"
+    -e "$ACEJAX" -e "$ROOT/lammps-jax" $EXTRA_PIP
 }
 
 lammps() {
@@ -73,9 +79,9 @@ lammps() {
     -D CMAKE_CXX_COMPILER="$LAMMPS/lib/kokkos/bin/nvcc_wrapper" \
     -D BUILD_SHARED_LIBS=ON -D BUILD_MPI=ON -D BUILD_OMP=ON \
     -D PKG_KOKKOS=ON -D Kokkos_ENABLE_CUDA=ON -D Kokkos_ENABLE_OPENMP=ON \
-    -D Kokkos_ENABLE_SERIAL=ON -D Kokkos_ARCH_AMPERE86=ON \
+    -D Kokkos_ENABLE_SERIAL=ON -D Kokkos_ARCH_${KOKKOS_ARCH:-AMPERE86}=ON \
     -D PKG_ML-PACE=ON -D PKG_PYTHON=ON -D Python_EXECUTABLE="$VENV/bin/python" \
-    -D SYMMETRIX_KOKKOS=ON -D SYMMETRIX_SPHERICART_CUDA=ON
+    -D SYMMETRIX_KOKKOS=ON -D SYMMETRIX_SPHERICART_CUDA=ON $EXTRA_PKGS
   cmake --build "$BUILD" -j "$JOBS"
 }
 
@@ -94,7 +100,7 @@ lammps_dev() {          # develop + ML-PACE + PLUGIN, host for the lammps-jax pl
     -D CMAKE_BUILD_TYPE=Release -D CMAKE_CXX_COMPILER="$LAMMPS_DEV/lib/kokkos/bin/nvcc_wrapper" \
     -D BUILD_SHARED_LIBS=ON -D BUILD_MPI=ON -D BUILD_OMP=ON \
     -D PKG_KOKKOS=ON -D Kokkos_ENABLE_CUDA=ON -D Kokkos_ENABLE_OPENMP=ON \
-    -D Kokkos_ENABLE_SERIAL=ON -D Kokkos_ARCH_AMPERE86=ON -D PKG_ML-PACE=ON -D PKG_PLUGIN=ON
+    -D Kokkos_ENABLE_SERIAL=ON -D Kokkos_ARCH_${KOKKOS_ARCH:-AMPERE86}=ON -D PKG_ML-PACE=ON -D PKG_PLUGIN=ON
   cmake --build "$BUILD_DEV" -j "$JOBS"
   echo "$stamp" > "$BUILD_DEV/.cuda"
 }
@@ -103,7 +109,7 @@ neighbours() {        # matscipy-neighbours with CUDA: the calculator's dense gr
   [ "$("$VENV/bin/python" -c "import importlib.metadata as m; print(m.version('matscipy-neighbours'))" 2>/dev/null)" = "1.0.0" ] && return 0
   module swap CUDA/12.4.0 "$CUDA_DEV" 2>/dev/null || true
   CC=gcc CXX=g++ uv pip install --python "$VENV/bin/python" \
-    -C cmake.define.ENABLE_CUDA=ON -C cmake.define.CMAKE_CUDA_ARCHITECTURES=86 \
+    -C cmake.define.ENABLE_CUDA=ON -C cmake.define.CMAKE_CUDA_ARCHITECTURES=$CUDA_ARCH \
     "matscipy-neighbours==1.0.0"
 }
 
@@ -151,8 +157,8 @@ ace_plugin() {         # PR 309's export/lammps/plugin -> $ACE_PLUGIN_BUILD/acep
 env_json() {
   local pjrt
   pjrt=$("$VENV/bin/python" -c "import jax_plugins.xla_cuda12 as p, os; print(os.path.join(os.path.dirname(p.__file__), 'xla_cuda_plugin.so'))")
-  for host in moriarty-gpu moriarty-cpu; do
-    cat > "$ACEJAX/bench/scaling/envs/$host.json" <<EOF
+  for host in $ENV_HOSTS; do
+    cat > "$ENV_JSON_DIR/$host.json" <<EOF
 {"lmp": "$ROOT/lmp.sh", "lmp_jax": "$ROOT/lmp-jax.sh", "pjrt": "$pjrt", "pythonpath": "$ACEJAX/bench",
  "python": "$VENV/bin/python", "root": "$ROOT",
  "lmp_ace": "$ROOT/lmp-ace.sh", "ace_plugin": "$ACE_PLUGIN_BUILD/aceplugin.so",

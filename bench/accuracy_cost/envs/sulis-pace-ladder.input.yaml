@@ -1,0 +1,61 @@
+backend:
+  batch_size: 50
+  display_step: 50
+  evaluator: tensorpot
+cutoff: 5.0
+data:
+  filename: train.pckl.gzip
+fit:
+  ladder_step:
+  - 100
+  - 0.3
+  ladder_type: power_order
+  loss:
+    L1_coeffs: 1.0e-08
+    L2_coeffs: 1.0e-08
+    kappa: auto
+  maxiter: 1500
+  optimizer: BFGS
+  weighting:
+    filename: weights.pckl.gzip
+    type: ExternalWeightingPolicy
+potential:
+  bonds:
+    ALL:
+      NameOfCutoffFunction: cos
+      dcut: 0.01
+      radbase: SBessel
+      radparameters:
+      - 5.25
+      rcut: 5.0
+  deltaSplineBins: 0.001
+  elements:
+  - Si
+  embeddings:
+    ALL:
+      fs_parameters:
+      - 1
+      - 1
+      - 1
+      - 0.5
+      ndensity: 2
+      npot: FinnisSinclairShiftedScaled
+  functions:
+    ALL:
+      lmax_by_orders:
+      - 0
+      - 5
+      - 4
+      - 3
+      - 2
+      - 1
+      nradmax_by_orders:
+      - 15
+      - 8
+      - 6
+      - 4
+      - 3
+      - 2
+    number_of_functions_per_element: 3200
+  initial_potential: output_potential.yaml
+seed: 0

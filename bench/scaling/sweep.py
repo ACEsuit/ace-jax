@@ -43,10 +43,16 @@ DTYPES.update({"acepotentials": ("float64",), "acepotentials-trim": ("float64",)
 GPU_ONLY_LAMMPS = ("acejax-pace", "acejax-ace", *LEARNED_CODES)
 # CPU-only for now: no GPU path for either ACEpotentials.jl line
 CPU_ONLY = ACEPOT_CODES
+# pair quip has no KOKKOS variant (run_lammps.KOKKOS has no "gap" key)
+CPU_ONLY_LAMMPS = ("gap",)
 
 
 def lammps_supported(code, device):
-    return device == "gpu" or code not in GPU_ONLY_LAMMPS
+    """BENCH_LAMMPS_JAX_CPU=1: a host this suite has a CPU lammps-jax for (upstream's host
+    backend with the XLA CPU plugin; docs/dev/lammps-jax-cpu-port.md), so ace-jax runs there too."""
+    if device != "gpu" and code in GPU_ONLY_LAMMPS and os.environ.get("BENCH_LAMMPS_JAX_CPU"):
+        return True
+    return code not in (CPU_ONLY_LAMMPS if device == "gpu" else GPU_ONLY_LAMMPS)
 
 
 def cpu_only(code):
@@ -330,19 +336,30 @@ def row_from_process(c, returncode, stdout, stderr, capped=False, peak_rss=None)
     return row
 
 
-def run_capped(cmd, env, timeout, cap_bytes=None, poll=0.5):
+def run_capped(cmd, env, timeout, cap_bytes=None, poll=0.5, gpu=None):
     """Run cmd in its own session; kill the whole process tree (MPI ranks too)
     if its summed resident memory passes cap_bytes, so the case -- not the
     kernel OOM killer, which on moriarty took systemd and dbus first -- pays.
     Returns (returncode, stdout, stderr, peak_rss, capped); returncode None
-    means it was killed for running past `timeout`."""
+    means it was killed for running past `timeout`.
+
+    `gpu` (a dict): also sample GPU memory every `poll` s through NVML and fill in
+    "peak_process_bytes" (the process tree's own GPU memory, summed over devices: what
+    the case holds, CUDA context included) and "peak_device_delta_bytes" (the devices'
+    used memory over its value at launch; on an exclusive node, the same thing seen
+    from the driver), or "error" when NVML is unavailable.  The XLA (lammps-jax:
+    preallocate=false) and Kokkos allocators keep what they grow, so the samples see
+    the case's high-water mark."""
     import signal
     import tempfile
     import time
+    nv = _nvml_open(gpu) if gpu is not None else None
     with tempfile.TemporaryFile("w+") as fo, tempfile.TemporaryFile("w+") as fe:
         p = subprocess.Popen(cmd, stdout=fo, stderr=fe, text=True, env=env, start_new_session=True)
         t0, peak, capped = time.monotonic(), 0, False
         while p.poll() is None:
+            if nv:
+                _nvml_sample(nv, p.pid, gpu)
             if cap_bytes:
                 rss = _tree_rss(p.pid)
                 peak = max(peak, rss)
@@ -359,6 +376,40 @@ def run_capped(cmd, env, timeout, cap_bytes=None, poll=0.5):
         rc = p.wait()
         fo.seek(0); fe.seek(0)
         return rc, fo.read(), fe.read(), peak, capped
+
+
+def _nvml_open(gpu):
+    """NVML handles and each device's used memory at launch, or None (gpu["error"] says why)."""
+    try:
+        import pynvml
+        pynvml.nvmlInit()
+        hs = [pynvml.nvmlDeviceGetHandleByIndex(i) for i in range(pynvml.nvmlDeviceGetCount())]
+        gpu.update(peak_process_bytes=0, peak_device_delta_bytes=0)
+        return {"nvml": pynvml, "handles": hs, "base": [pynvml.nvmlDeviceGetMemoryInfo(h).used for h in hs]}
+    except Exception as e:                      # no pynvml, no driver: a CPU host
+        gpu["error"] = f"{type(e).__name__}: {e}"
+        return None
+
+
+def _tree_pids(pid):
+    import psutil
+    try:
+        root = psutil.Process(pid)
+        return {root.pid} | {q.pid for q in root.children(recursive=True)}
+    except psutil.NoSuchProcess:
+        return set()
+
+
+def _nvml_sample(nv, pid, gpu):
+    nvml, pids = nv["nvml"], _tree_pids(pid)
+    try:
+        own = sum(q.usedGpuMemory or 0 for h in nv["handles"]
+                  for q in nvml.nvmlDeviceGetComputeRunningProcesses(h) if q.pid in pids)
+        delta = sum(nvml.nvmlDeviceGetMemoryInfo(h).used - b for h, b in zip(nv["handles"], nv["base"]))
+    except Exception:                          # a process exiting mid-query
+        return
+    gpu["peak_process_bytes"] = max(gpu["peak_process_bytes"], int(own))
+    gpu["peak_device_delta_bytes"] = max(gpu["peak_device_delta_bytes"], int(delta))
 
 
 def _tree_rss(pid):

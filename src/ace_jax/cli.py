@@ -33,7 +33,8 @@ def _add_fit_args(p):
                    help="stress label (eV/A^3, 3x3 or Voigt-6) used as the virial, virial = -stress * volume, when a config has no virial label")
     p.add_argument("--weights", default=None,
                    help='JSON: an ACEfit weights dict {"default": {"E":..,"F":..,"V":..}, <config_type>: ..} '
-                        'or a list of weight factors [{"Structural": {}}, {"ConfigType": {...}}]')
+                        'or a list of weight factors [{"Structural": {}}, {"ConfigType": {...}}]; '
+                        'or the path of a .json file holding either')
     p.add_argument("--e0", choices=["model", "lsq", "prefit"], default="model",
                    help="per-species E0: the model's (default); lsq fits it jointly with the readout (a wide "
                         "prior around a least-squares start); prefit fixes it at least squares on the training "
@@ -164,6 +165,9 @@ def _parse_weights(s):
     from .fit.weights import ConfigType, PerConfig, Quantity, Structural
     if not s:
         return None, None
+    if not s.lstrip().startswith(('{', '[', '"')):
+        if not pathlib.Path(s).is_file(): raise ValueError(f"--weights {s!r} is neither JSON nor an existing file")
+        s = pathlib.Path(s).read_text()  # a path to a JSON file works as well as the string
     v = json.loads(s)
     if isinstance(v, dict):
         return v, None

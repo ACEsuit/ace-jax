@@ -1,0 +1,3 @@
+{"lmp": "/home/e/essswb/bench-scaling/lmp.sh", "lmp_xl": "/home/e/essswb/bench-scaling/lmp-xl.sh",
+ "pythonpath": "/home/e/essswb/bench-scaling/ace-jax-ac/bench:/home/e/essswb/bench-scaling/ace-jax-ac/src",
+ "python": "/home/e/essswb/bench-scaling/venv/bin/python", "root": "/home/e/essswb/bench-scaling"}

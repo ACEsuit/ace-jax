@@ -1,0 +1,5 @@
+[project]
+name = "ac-pacemaker"
+version = "0"
+requires-python = ">=3.9,<3.10"      # python-ace 0.2.8 ships cp39 wheels only
+dependencies = ["python-ace", "tensorflow[and-cuda]>=2.8,<2.16", "pandas", "pyyaml", "setuptools<81", "ruamel.yaml<0.18", "pytest"]

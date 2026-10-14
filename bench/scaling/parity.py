@@ -37,17 +37,32 @@ import numpy as np
 from ase.io import write
 
 from scaling.models import ACEPOT_CODES, LEARNED_CODES, planned_models
-from scaling.run_lammps import (KOKKOS, export_bundle, finished, lammps_input, lammps_vars,
+from scaling.run_lammps import (export_bundle, finished, kokkos_args, lammps_input, lammps_vars,
                                 read_dump_forces, read_pe)
 from scaling.structures import supercell
 
+# compare (every gate but spline) is absolute: |dE|/atom (eV), max|dF| (eV/A);
+# compare_rel (spline) is relative: |dE|/|E|, max|dF| / max|F|.  gap: quippy's
+# pip wheel and LAMMPS's source-built ML-QUIP are different QUIP builds (and may
+# be different QUIP revisions), so the bound is mlpace's, not roundoff; a
+# mis-wired pair quip (wrong label, species, units) is off by far more.
 TOL = {"mlpace": (1e-6, 1e-5), "acejax": (1e-10, 1e-9), "mace": (1e-6, None),
-       "spline": (1e-9, 3e-8),                      # relative: |dE|/|E|, max|dF| / max|F|
-       "acepot": (1e-10, 1e-9), "trim": (1e-10, 1e-9), "trim-ace": (1e-5, 1e-3)}
+       "spline": (1e-9, 3e-8),
+       "acepot": (1e-10, 1e-9), "trim": (1e-10, 1e-9), "trim-ace": (1e-5, 1e-3),
+       "gap": (1e-6, 1e-5),
+       # Symmetrix-XL vs MACE in PyTorch (float64), as "mace" plus a force bound; FP32 looser (labelled -f32)
+       "mace-xl": (1e-6, 1e-4), "mace-xl-f32": (1e-5, 1e-3)}
 # gates that check a standalone line: a failure blocks its standalone rows
 STANDALONE_GATES = ("spline", "acepot")
 LEARNED, ANALYTIC = LEARNED_CODES                     # "acejax-ace-learned", "acejax-ace-analytic"
 N_ATOMS = 256
+
+
+def _quip_ef(path, at, label=None):       # quippy is optional: imported here only
+    import quippy
+    p = quippy.potential.Potential(param_filename=str(path), **({"args_str": f"Potential xml_label={label}"} if label else {}))
+    a = at.copy(); a.calc = p
+    return a.get_potential_energy(), a.get_forces()
 
 
 def error_summary(ex, head=200, tail=500):
@@ -86,15 +101,17 @@ def blocked(rows):
             | {(r["code"], "standalone") for r in bad if r.get("gate") in STANDALONE_GATES})
 
 
-def _lammps_ef(style, model_path, els, at, device, lmp, work, pjrt=None, aceplugin=None):
+def _lammps_ef(style, model_path, els, at, device, lmp, work, pjrt=None, aceplugin=None, pair_extra=None):
+    """E, F from LAMMPS `run 0`; pair_extra as lammps_input takes it (gap: the xml_label)."""
+    kk = kokkos_args(style, device)
     work = pathlib.Path(work)
     work.mkdir(parents=True, exist_ok=True)
     write(work / "x.data", at, format="lammps-data", specorder=els, masses=True)
     (work / "in.parity").write_text(lammps_input(style, model_path, els, work / "x.data", device,
-                                                 0, dump=str(work / "f.dump"), warmup=0))
+                                                 0, dump=str(work / "f.dump"), warmup=0,
+                                                 pair_extra=pair_extra))
     cmd = [lmp, "-in", "in.parity", "-log", "log.lammps", "-nocite"]
-    if device == "gpu":
-        cmd += ["-k", "on", "g", "1", "-sf", "kk", "-pk", "kokkos", *KOKKOS[style].split()]
+    cmd += kk
     cmd += lammps_vars(style, pjrt, aceplugin)
     p = subprocess.run(cmd, cwd=work, capture_output=True, text=True, timeout=1800)
     log = (work / "log.lammps").read_text() if (work / "log.lammps").exists() else ""

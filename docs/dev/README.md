@@ -12,6 +12,10 @@ results behind ace-jax, kept as the record that code comments and tests cite:
   (figures in `figures/`). Some cite prototypes that are archived at the git tag
   `archive/research-prototypes` (see `bench/ARCHIVED.md`).
 - `coupling-etshim-spec.md`: the compiled coupling library.
+- `accuracy-cost-spec.md`, `accuracy-cost-plan.md`: the accuracy-matched speed
+  benchmark on Si (`bench/accuracy_cost/`); `accuracy-cost-results.md`: its results
+  and how to redraw the figures.
+- `lammps-jax-cpu-port.md`: the plan for lammps-jax bundles on the CPU backend (#89).
 - `ard-force-uq.md`: usage notes for `--uq ard` revision 2 (conformal per-atom force
   uncertainty, `aj calibrate`), the source for its user pages.
 - `basis-build-internals.md`: how `build_model` builds a basis, how `save_npz`

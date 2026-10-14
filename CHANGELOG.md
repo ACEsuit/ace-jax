@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **The Performance page compares accuracy and cost on silicon.** Fitted
+  models of each family (linear ACE, PACE, MACE, GAP) are compared at the
+  same accuracy, timed in LAMMPS on an A100 and on a 128-core CPU node.
+- **`aj fit --weights`** also takes the path of a `.json` file.
 - **`write_yace` writes a linear ACE model as a `.yace` file.** The file gives
   the same energies, forces and stresses as the `.npz` model. It keeps the
   radial functions as tables. ML-PACE reads these tables only with its
