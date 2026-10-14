@@ -87,9 +87,13 @@ ace_tab:       # the same, exactly: Tabulated radials (write_yace), for ML-PACE 
   - {size: o4d16}
   - {size: o4d20}
 nep:           # NEP4 trained by GPUMD's nep on a Sulis A100 (fit_nep.py; envs/sulis-nep.sbatch): cutoff 5 A radial and
-               # angular; n_max "R A", basis_size "R A", l_max "<3-body l> <q_222 4-body on/off>", neuron = hidden-layer width
-  - {size: n10,  n_max: "4 4",  basis_size: "4 4", l_max: "4 0",   neuron: 10}
-  - {size: n30,  n_max: "6 4",  basis_size: "6 6", l_max: "4 1",   neuron: 30}
-  - {size: n50,  n_max: "8 6",  basis_size: "8 8", l_max: "4 1",   neuron: 50}
-  - {size: n80,  n_max: "10 8", basis_size: "8 8", l_max: "6 1",   neuron: 80}
-  - {size: n120, n_max: "12 8", basis_size: "8 8", l_max: "6 1",   neuron: 120}
+               # angular; n_max "R A", basis_size "R A", l_max "<3-body l> <q_222 4-body> [<q_1111 5-body>]" (on/off),
+               # neuron = hidden-layer width.  generation: total (default 100k; n50 is flat from 70k, n80/n120 were
+               # still improving at 100k), trained in jobs of `chunk` generations that resume from nep.restart
+  - {size: n10,  n_max: "4 4",   basis_size: "4 4",   l_max: "4 0",   neuron: 10}
+  - {size: n30,  n_max: "6 4",   basis_size: "6 6",   l_max: "4 1",   neuron: 30}
+  - {size: n50,  n_max: "8 6",   basis_size: "8 8",   l_max: "4 1",   neuron: 50}
+  - {size: n80,  n_max: "10 8",  basis_size: "8 8",   l_max: "6 1",   neuron: 80,  generation: 300000, chunk: 100000}
+  - {size: n120, n_max: "12 8",  basis_size: "8 8",   l_max: "6 1",   neuron: 120, generation: 300000, chunk: 100000}
+  - {size: n160, n_max: "14 10", basis_size: "10 10", l_max: "6 1",   neuron: 160, generation: 300000, chunk: 100000}
+  - {size: n240, n_max: "16 12", basis_size: "12 12", l_max: "6 1 1", neuron: 240, generation: 300000, chunk: 100000}

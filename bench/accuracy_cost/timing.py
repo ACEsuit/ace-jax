@@ -63,13 +63,14 @@ PLAN = {"ace": [("acejax-ace", {"cpu": "standalone", "gpu": "lammps"}, ("float64
                  # only where the env json names its LAMMPS (`lmp_xl`, main drops it otherwise)
                  ("mace-xl", {"cpu": "lammps", "gpu": "lammps"}, ("float64",)),
                  ("mace-xl-f32", {"cpu": "lammps", "gpu": "lammps"}, ("float32",))],
-        # NEP: pair_style nep (NEP_CPU, float64, MPI), CPU only -- GPUMD's GPU inference is mixed precision,
-        # outside the float64 cost rows (docs/dev/accuracy-cost-results.md)
-        "nep": [("nep", {"cpu": "lammps"}, ("float64",))],
+        # NEP: pair_style nep (NEP_CPU, float64, MPI) on the CPU; on the GPU GPUMD's own MD code, whose NEP is
+        # mixed precision (dtype "mixed": float descriptors/network, double accumulation; scaling/run_gpumd.py)
+        "nep": [("nep", {"cpu": "lammps"}, ("float64",)),
+                ("nep-gpumd", {"gpu": "gpumd"}, ("mixed",))],
         "gap": [("gap", {"cpu": "lammps"}, ("float64",))],         # pair quip: no KOKKOS, CPU only
         "gap_noglue": [("gap", {"cpu": "lammps"}, ("float64",))],  # the XML has no Glue term; same pair style
         "gap_E30": [("gap", {"cpu": "lammps"}, ("float64",))]}     # GAP-18's command, energy sigmas x10/3
-STYLE = {"acejax-ace": "acejax", "acejax-pace": "acejax", "mlpace": "mlpace", "mace": "mace", "gap": "gap", "nep": "nep",
+STYLE = {"acejax-ace": "acejax", "acejax-pace": "acejax", "mlpace": "mlpace", "mace": "mace", "gap": "gap", "nep": "nep", "nep-gpumd": "nep-gpumd",
          "mace-xl": "mace-xl", "mace-xl-f32": "mace-xl-f32", "acepotentials-trim": "acepotentials-trim"}
 TRIM = "acepotentials-trim"
 XL_CODES = ("mace-xl", "mace-xl-f32")
@@ -230,6 +231,8 @@ def gate_model(row, device, env, work):
     from scaling.sweep import lammps_supported
     code, style, work = row["code"], STYLE[row["code"]], pathlib.Path(work)
     out = {"gate": style, "n_atoms": GATE_N, "cells": GATE_CELLS}
+    if style == "nep-gpumd":
+        return gate_gpumd(row, env, work, out)
     if not lammps_supported(code, device):
         return {**out, "status": "unsupported", "error": f"no LAMMPS {code} on {device}"}
     if style == "mace" and not pathlib.Path(row["symmetrix"]).exists():
@@ -286,12 +289,35 @@ def gate_model(row, device, env, work):
             "max_dF": max(dF, default=None)}
 
 
+def gate_gpumd(row, env, work, out):
+    """GPUMD (mixed precision) against calorine's CPUNEP (float64) on the gate cells, at parity.TOL["nep-gpumd"]."""
+    from scaling import parity
+    from scaling.run_gpumd import gpumd_ef
+    checks = []
+    for k, at in enumerate(gate_cells()):
+        chk = {"cell": k}
+        try:
+            E0, F0 = parity._nep_ef(row["path"], at)
+            E1, F1 = gpumd_ef(row["path"], at, env["gpumd"], work / f"cell{k}")
+            chk.update(parity.compare(E0, F0, E1, F1, len(at), parity.TOL["nep-gpumd"]))
+        except Exception as ex:
+            chk.update({"status": "error", "error": parity.error_summary(ex)})
+        checks.append(chk)
+    st = {c["status"] for c in checks}
+    status = "parity_ok" if st == {"parity_ok"} else "parity_fail" if "parity_fail" in st else "error"
+    return {**out, "status": status, "checks": checks,
+            "max_dE_per_atom": max((c["dE_per_atom"] for c in checks if "dE_per_atom" in c), default=None),
+            "max_dF": max((c["max_dF"] for c in checks if "max_dF" in c), default=None)}
+
+
 def time_case(c, device, n, env, work, prev=None):
-    """One timed run: run_standalone.run_case or run_lammps.run_case."""
-    from scaling import run_lammps, run_standalone
+    """One timed run: run_standalone.run_case, run_gpumd.run_case or run_lammps.run_case."""
+    from scaling import run_gpumd, run_lammps, run_standalone
     row = c["row"]
     if c["mode"] == "standalone":
         return run_standalone.run_case(row, n, c["dtype"], device)
+    if c["mode"] == "gpumd":
+        return run_gpumd.run_case(row, n, device, env["gpumd"], work, prev)
     lmp, pjrt = lammps_for(row["code"], device, env)
     ranks, threads = (CPU_RANKS, CPU_THREADS) if device == "cpu" else (1, 1)
     return run_lammps.run_case(row, n, c["dtype"], device, lmp, ranks, work, pjrt=pjrt, prev=prev,
@@ -396,7 +422,7 @@ def run_cases(device, cs, runner, gate, results, n, repeats, work, meta, redo=Fa
         if done.get(key, {}).get("status") in keep:
             continue
         base = {**ident, "mode": c["mode"], "n_params": r0.get("n_params"), "host": host, **meta}
-        if c["mode"] == "lammps":
+        if c["mode"] in ("lammps", "gpumd"):        # gated: LAMMPS, and GPUMD against CPUNEP
             gkey = tuple({**ident, "dtype": "float64", "mode": "parity"}.get(f) for f in KEY)
             g = done.get(gkey) if done.get(gkey, {}).get("status") in ("parity_ok", "unsupported") else None
             if g is None:
@@ -422,7 +448,7 @@ def run_cases(device, cs, runner, gate, results, n, repeats, work, meta, redo=Fa
                     **{f: check[f] for f in ("layout", "matrix_overflow") if f in check}}
         mains = [runner(c, n_main, d / str(n_main) / str(k), prev) for k in range(repeats)]
         main = _median_row(mains)
-        row = {**main, **base, **s, "parity": "parity_ok" if c["mode"] == "lammps" else "not_applicable",
+        row = {**main, **base, **s, "parity": "parity_ok" if c["mode"] in ("lammps", "gpumd") else "not_applicable",
                "n_atoms": n_main, "check_n_atoms": n_check, "check_status": check.get("status"),
                "check_step_s": check.get("step_s"), "check_layout": check.get("layout"),
                # GPU memory (NVML) and host RSS: the largest over the repeats (scaling.sweep.run_capped)
@@ -464,7 +490,8 @@ def main(argv=None):
             "device_name": device_name(a.device), "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES")}
     runner, gate = subprocess_runner(env, a.device)
     cs = [c for c in cases(a.device, only=a.only) if (c["row"]["code"] not in XL_CODES or env.get("lmp_xl"))
-          and (c["row"]["code"] != TRIM or env.get("lmp_ace"))]
+          and (c["row"]["code"] != TRIM or env.get("lmp_ace"))
+          and (c["mode"] != "gpumd" or env.get("gpumd"))]    # optional codes: only where the env json names them
     if a.codes:
         cs = [c for c in cs if c["row"]["code"] in a.codes]
     run_cases(a.device, cs, runner, gate,

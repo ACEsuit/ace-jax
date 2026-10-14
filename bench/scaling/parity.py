@@ -53,6 +53,8 @@ TOL = {"mlpace": (1e-6, 1e-5), "acejax": (1e-10, 1e-9), "mace": (1e-6, None),
        "gap": (1e-6, 1e-5),
        # pair nep (NEP_CPU in LAMMPS) vs calorine's CPUNEP: NEP_CPU both sides, float64 (copies may differ in version)
        "nep": (1e-8, 1e-6),
+       # GPUMD's NEP (float descriptors and network, double accumulation) vs CPUNEP: float32-level (n120: 9e-7, 6e-6)
+       "nep-gpumd": (1e-5, 1e-4),
        # Symmetrix-XL vs MACE in PyTorch (float64), as "mace" plus a force bound; FP32 looser (labelled -f32)
        "mace-xl": (1e-6, 1e-4), "mace-xl-f32": (1e-5, 1e-3)}
 # gates that check a standalone line: a failure blocks its standalone rows

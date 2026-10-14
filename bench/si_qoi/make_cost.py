@@ -17,8 +17,12 @@ from plot_cost import FAM, ROOT, cost_name, family_of  # noqa: E402
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("timings", nargs="+")
     ap.add_argument("--dtype", help="only rows at this precision (float64: like-for-like, e.g. MACE without float32)")
+    ap.add_argument("--allow", action="append", default=[], metavar="CODE:DTYPE",
+                    help="also keep this code at this precision past --dtype (nep-gpumd:mixed: GPUMD's NEP is mixed "
+                         "precision only; plot_cost marks it)")
     ap.add_argument("--out", default=str(ROOT / "bench/si_qoi/results/cost_sulis_gpu.json"))
     a = ap.parse_args()
+    allow = {tuple(s.split(":", 1)) for s in a.allow}
     rows, gates = [], set()
     for f in a.timings:
         rs = [json.loads(l) | {"_file": pathlib.Path(f).stem} for l in open(f)]
@@ -27,9 +31,10 @@ def main():
     best, code = {}, {}
     for r in rows:
         fam = family_of(r)                                       # plot_cost's split families (MACE by L, wL)
-        if r.get("mode") == "parity" or r.get("status") != "ok" or fam not in FAM or (a.dtype and r["dtype"] != a.dtype):
+        if r.get("mode") == "parity" or r.get("status") != "ok" or fam not in FAM or (
+                a.dtype and r["dtype"] != a.dtype and (r["code"], r["dtype"]) not in allow):
             continue
-        if r.get("mode") == "lammps" and (r["_path"], r["code"], r["family"], r["size"]) not in gates:   # standalone: no gate
+        if r.get("mode") in ("lammps", "gpumd") and (r["_path"], r["code"], r["family"], r["size"]) not in gates:   # standalone: no gate
             continue
         name = cost_name(fam, r["size"])                      # Symmetrix-XL under its own name (MACExl_)
         us = 1e6 / r["atom_steps_per_s"]

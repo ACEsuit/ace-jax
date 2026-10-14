@@ -20,11 +20,13 @@ gpumd() {
   set +u; module purge; module load $MODS_GPU; set -u
   cd "$ROOT/GPUMD/src"
   make clean >/dev/null 2>&1 || true
-  make -j "$JOBS" CUDA_ARCH=-arch=sm_80 nep
+  make -j "$JOBS" CUDA_ARCH=-arch=sm_80 nep gpumd   # nep trains; gpumd is the MD code timed on the GPU
   ./nep --help >/dev/null 2>&1 || true          # nep reads nep.in from cwd; this only checks it loads
-  printf '%s\n' '#!/usr/bin/env bash' 'source /etc/profile.d/modules.sh 2>/dev/null || true' \
-    "module purge; module load $MODS_GPU" "exec $ROOT/GPUMD/src/nep \"\$@\"" > "$ROOT/nep.sh"
-  chmod +x "$ROOT/nep.sh"
+  for x in nep gpumd; do
+    printf '%s\n' '#!/usr/bin/env bash' 'source /etc/profile.d/modules.sh 2>/dev/null || true' \
+      "module purge; module load $MODS_GPU" "exec $ROOT/GPUMD/src/$x \"\$@\"" > "$ROOT/$x.sh"
+    chmod +x "$ROOT/$x.sh"
+  done
 }
 
 cpu() {

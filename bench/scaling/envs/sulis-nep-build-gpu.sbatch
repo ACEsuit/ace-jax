@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# GPUMD's nep trainer (sm_80) for the accuracy-cost NEP fits (sulis-nep.sh gpumd).
+# GPUMD's nep trainer and gpumd MD code (sm_80) for the accuracy-cost NEP fits and GPU timing (sulis-nep.sh gpumd).
 # Submit from bench/scaling/envs:  sbatch sulis-nep-build-gpu.sbatch
 #SBATCH --job-name=nep-build-gpu
 #SBATCH --account=su007-jrk

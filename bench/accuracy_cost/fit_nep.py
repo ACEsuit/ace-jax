@@ -70,14 +70,27 @@ def n_params(log):
 
 
 def fit(size):
+    """Train to the entry's `generation` (total) in jobs of at most `chunk` generations: a run short of its total
+    resumes from nep.restart (GPUMD reads it when present; SNES's step sizes are fixed, so a resumed run continues
+    the same search).  status.json counts `generations`; fits from before it was recorded ran NEP_DEFAULTS'."""
     from .split import ensure_split
     h = ensure_split()
     e, d = common.entry("nep", size), common.run_dir("nep", size)
-    if not (d / "nep.txt").exists():
+    total = int(e.get("generation", NEP_DEFAULTS["generation"]))
+    prev = common.read_status(d) or {}
+    done = prev.get("generations", NEP_DEFAULTS["generation"]) if prev.get("status") == "ok" else 0
+    if prev.get("status") == "ok" and done >= total:
+        return prev
+    if not done:
         prepare(d, e)
+    run = min(int(e.get("chunk", total)), total - done)
+    (d / "nep.in").write_text(nep_in({**e, "generation": run}))
+    if done:
+        (d / "status.json").unlink()                              # fit_once runs only without an ok status
     st = common.fit_once("nep", size, "nep.txt", [os.environ.get("ACEJAX_AC_NEP", "nep")], split_hash=h)
-    if st["status"] == "ok" and not st.get("n_params"):
-        st.update(n_params=n_params((d / "fit.log").read_text()), e0_per_atom=E0_SI)
+    if st["status"] == "ok":
+        st.update(generations=done + run, fit_wall_s=st["fit_wall_s"] + prev.get("fit_wall_s", 0.0) * bool(done),
+                  n_params=prev.get("n_params") or n_params((d / "fit.log").read_text()), e0_per_atom=E0_SI)
         common.write_status(d, **{k: v for k, v in st.items() if k != "host"})
     return st
 

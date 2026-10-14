@@ -172,17 +172,24 @@ def series(ax, data, key):
 
 
 def flag(ax, data, codes, key):
-    """Label points whose cost is not a LAMMPS timing (make_cost.py fell back to a standalone run)."""
-    for pts in data.values():               # one label per family and reason: neighbouring points share it
+    """Label points whose cost is not a float64 LAMMPS timing: make_cost.py fell back to a standalone run, or
+    the code is mixed precision only (NEP in GPUMD; make_cost --allow nep-gpumd:mixed)."""
+    for fam, pts in data.items():           # one label per family and reason: neighbouring points share it
         why = {}
         for q in pts:
-            if "standalone" in codes.get(q["name"], "") and q["x"] is not None and q[key] is not None:
+            c = codes.get(q["name"], "")
+            if q["x"] is None or q[key] is None:
+                continue
+            if " mixed " in c:
+                why.setdefault((f"{FAM[fam][0]}: mixed precision", None), []).append(q)
+            elif "standalone" in c:
                 r = ("Symmetrix exports no one-layer MACE" if q["size"].endswith("n1")
                      else "LAMMPS out of memory")
-                why.setdefault(r, []).append(q)
-        for r, qs in why.items():
+                why.setdefault((None, r), []).append(q)
+        for (head, r), qs in why.items():
             q = max(qs, key=lambda q: q[key])      # above the highest: the label sits clear of the data
-            ax.annotate(f"{', '.join(p['size'] for p in qs)}: standalone\n({r})", (q["x"], q[key]),
+            head = head or f"{', '.join(p['size'] for p in qs)}: standalone"
+            ax.annotate(head + (f"\n({r})" if r else ""), (q["x"], q[key]),
                         xytext=(-6, 10), textcoords="offset points", ha="right", fontsize=7, color=MUTED)
 
 
@@ -289,12 +296,12 @@ def main():
                 "GPU ML-PACE: LAMMPS develop ec02ed0 (with the 2026-08 pace/kk GPU rewrite).\n"
                 "Linear ACE run by ACEpotentials.jl (CPU only): each fit as an ACEpotentials model, exported and compiled "
                 "with juliac --trim (ACEpotentials PR 309, v0.10.2), in LAMMPS via its pair_style ace plugin.\n"
-                "NEP: trained by GPUMD, run in LAMMPS pair_style nep (NEP_CPU, float64); no GPU row (GPUMD's GPU inference is mixed precision).\n"
+                "NEP: trained by GPUMD; on the CPU LAMMPS pair_style nep (NEP_CPU, float64); on the GPU GPUMD's own MD code, mixed precision (labelled).\n"
                 if any("CPU" in r[0] for r in rows) else "")
     if not a.no_note:
         fig.text(0.5, 0.003, cpu_note + "QoI error clips each QoI to [0.05, 10] x tolerance; compressed hcp is left out (extrapolation, "
                  "outside the training data); only models with every QoI computed.\n"
-                 "Cost: the fastest parity-checked code per model, float64 only (one-layer MACE and, on the GPU, Symmetrix MACE c64L1 have "
+                 "Cost: the fastest parity-checked code per model, float64 only except NEP on the GPU (one-layer MACE and, on the GPU, Symmetrix MACE c64L1 have "
                  "float32 timings only and are left out of the cost rows). Single fits per point.", ha="center", fontsize=8.5, color=MUTED)
     fig.tight_layout(rect=(0, 0 if a.no_note else 0.065, 1, 1 - 1.0 / fig.get_figheight()))
     pathlib.Path(a.out).parent.mkdir(parents=True, exist_ok=True)

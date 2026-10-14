@@ -212,6 +212,44 @@ def test_fit_nep_inputs(tmp_path):
     assert n_params("    total number of parameters to be optimized = 1234.\n") == 1234
 
 
+def test_fit_nep_resumes_in_chunks(tmp_path, monkeypatch):
+    """A fit short of its entry's total runs at most `chunk` more generations from the existing files (no new
+    training set), and counts them; a fit from before `generations` was recorded counts as the default 100k."""
+    import json
+    from accuracy_cost import common, fit_nep, split
+    d = tmp_path / "nep" / "n80"; d.mkdir(parents=True)
+    (d / "nep.txt").write_text("x"); (d / "status.json").write_text(json.dumps(
+        {"status": "ok", "model": str(d / "nep.txt"), "fit_wall_s": 10.0, "n_params": 6261}))
+    monkeypatch.setattr(common, "run_dir", lambda f, s: d)
+    monkeypatch.setattr(common, "entry", lambda f, s: {"size": s, "n_max": "10 8", "basis_size": "8 8",
+                                                        "l_max": "6 1", "neuron": 80, "generation": 300000,
+                                                        "chunk": 100000})
+    monkeypatch.setattr(split, "ensure_split", lambda: "h")
+    monkeypatch.setattr(fit_nep, "prepare", lambda *a: pytest.fail("a resumed fit rewrote its training set"))
+    def fake_fit_once(family, size, model, cmd, split_hash=None):
+        assert not (d / "status.json").exists()
+        common.write_status(d, status="ok", model=str(d / model), fit_wall_s=5.0)
+        return common.read_status(d)
+    monkeypatch.setattr(common, "fit_once", fake_fit_once)
+    st = fit_nep.fit("n80")
+    assert "generation 100000" in (d / "nep.in").read_text()
+    assert st["generations"] == 200000 and st["fit_wall_s"] == 15.0 and st["n_params"] == 6261
+    fit_nep.fit("n80")
+    assert common.read_status(d)["generations"] == 300000
+    monkeypatch.setattr(common, "fit_once", lambda *a, **k: pytest.fail("refitted a fit at its total"))
+    assert fit_nep.fit("n80")["generations"] == 300000
+
+
+def test_gpumd_inputs(tmp_path):
+    """GPUMD's model.xyz starts at rest (zero velocities), as the LAMMPS runs do."""
+    from ase.build import bulk
+    from scaling.run_gpumd import write_model_xyz
+    write_model_xyz(tmp_path / "model.xyz", bulk("Si", "diamond", 5.43, cubic=True))
+    lines = (tmp_path / "model.xyz").read_text().splitlines()
+    assert lines[0] == "8" and "properties=species:S:1:pos:R:3:vel:R:3" in lines[1] and 'pbc="T T T"' in lines[1]
+    assert all(l.split()[4:] == ["0", "0", "0"] for l in lines[2:])
+
+
 def test_fit_ace_commands_share_cutoff_weights_and_e0(tmp_path):
     from accuracy_cost.fit_ace import command
     lin = command("ace", {"order": 3, "max_degree": 8}, tmp_path)
