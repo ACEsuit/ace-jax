@@ -11,8 +11,8 @@ diff -ru -x .git -x '*.orig' pace-exp/ML-PACE/ace-evaluator/ace_abstract_basis.c
      map_embedding_specifications = src.map_embedding_specifications;
 diff -ru -x .git -x '*.orig' pace-exp/ML-PACE/ace-evaluator/ace_abstract_basis.h pace-sumA/ML-PACE/ace-evaluator/ace_abstract_basis.h
 --- a/ML-PACE/ace-evaluator/ace_abstract_basis.h	2026-10-14 18:43:44.414779137 +0100
-+++ b/ML-PACE/ace-evaluator/ace_abstract_basis.h	2026-10-14 20:22:52.128429471 +0100
-@@ -277,6 +277,10 @@
++++ b/ML-PACE/ace-evaluator/ace_abstract_basis.h	2026-10-14 20:39:22.197355385 +0100
+@@ -277,6 +277,11 @@
      ACECartesianSphericalHarmonics spherical_harmonics; ///< object to work with spherical harmonics in Cartesian representation
  
      bool is_sort_functions = true; ///< flag to specify, whether to sort the basis functions or preserve the order
@@ -20,6 +20,7 @@ diff -ru -x .git -x '*.orig' pace-exp/ML-PACE/ace-evaluator/ace_abstract_basis.h
 +    /// species enter only through the per-bond radials (e.g. a species-embedded / tensor-reduced ACE, whose
 +    /// channels are folded into n).  The functions then use mu = 0 for every factor.  yace key `summed_neighbour_A`.
 +    bool summed_neighbour_A = false;
++#define ACE_HAS_SUMMED_NEIGHBOUR_A 1   // lets pace/kk compile against this basis with or without the field
      //for multispecies
  
      map<SPECIES_TYPE, ACEEmbeddingSpecification> map_embedding_specifications;

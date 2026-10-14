@@ -1,0 +1,106 @@
+diff -ru a/src/KOKKOS/pair_pace_kokkos.cpp b/src/KOKKOS/pair_pace_kokkos.cpp
+--- a/src/KOKKOS/pair_pace_kokkos.cpp	2026-10-14 21:01:42.919365303 +0100
++++ b/src/KOKKOS/pair_pace_kokkos.cpp	2026-10-14 21:01:42.930365359 +0100
+@@ -800,6 +800,12 @@
+   MemKK::realloc_kokkos(cl, "pace:cl", lmax + 1);
+   MemKK::realloc_kokkos(dl, "pace:dl", lmax + 1);
+ 
++#ifdef ACE_HAS_SUMMED_NEIGHBOUR_A
++  summed_A = basis_set->summed_neighbour_A ? 1 : 0;
++#else
++  summed_A = 0;
++#endif
++
+   pre_compute_harmonics(lmax);
+   copy_pertype();
+   copy_splines();
+@@ -1665,6 +1671,7 @@
+ void PairPACEKokkos<DeviceType>::compute_ai_one(const int ii, const int jj) const
+ {
+   const int mu_j = d_mu(ii, jj);
++  const int mu_a = summed_A ? 0 : mu_j;     // A index; the radial below stays per bond
+ 
+   if constexpr (NEED_ATOMICS) {
+     // Device: the radial evaluation is fused in here rather than run as its
+@@ -1683,7 +1690,7 @@
+   // layout, so it is a strength reduction rather than a layout assumption.
+   const KK_FLOAT * const fr_ij = &fr(ii, jj, 0);
+   const KK_FLOAT * const gr_ij = &gr(ii, jj, 0);
+-  KK_FLOAT * const A_rank1_i = &A_rank1(ii, mu_j, 0);
++  KK_FLOAT * const A_rank1_i = &A_rank1(ii, mu_a, 0);
+   const int fr_sl = 1;              // fr is flat (n*(lmax+1)+l): l-stride
+   const int fr_sn = lmax + 1;       // ... and n-stride
+   const int gr_sn = (int) gr.stride(2);
+@@ -1696,7 +1703,7 @@
+   complex *A_sph_i = nullptr;
+   int sph_ss = 0, sph_sn = 0;
+   if constexpr (!NEED_ATOMICS) {
+-    A_sph_i = &A_sph(ii, mu_j, 0, 0);
++    A_sph_i = &A_sph(ii, mu_a, 0, 0);
+     sph_ss = (int) A_sph.stride(2);
+     sph_sn = (int) A_sph.stride(3);
+   }
+@@ -1759,8 +1766,8 @@
+     for (int n = 0; n < nradmax; n++) {
+       if constexpr (NEED_ATOMICS) {
+         // device: split re/im arrays, several teams share the atom
+-        Kokkos::atomic_add(&A_sph_re(ii, mu_j, idx_sph, n), fr(ii, jj, n * (lmax + 1) + l) * ylm.re);
+-        Kokkos::atomic_add(&A_sph_im(ii, mu_j, idx_sph, n), fr(ii, jj, n * (lmax + 1) + l) * ylm.im);
++        Kokkos::atomic_add(&A_sph_re(ii, mu_a, idx_sph, n), fr(ii, jj, n * (lmax + 1) + l) * ylm.re);
++        Kokkos::atomic_add(&A_sph_im(ii, mu_a, idx_sph, n), fr(ii, jj, n * (lmax + 1) + l) * ylm.im);
+       } else {
+         // host: interleaved A_sph through hoisted pointers, no atomics
+         a_sph[n * sph_sn].re += r_nl[n * fr_sn] * ylm.re;
+@@ -1797,8 +1804,8 @@
+     for (int n = 0; n < nradmax; n++) {
+       if constexpr (NEED_ATOMICS) {
+         // device: split re/im arrays, several teams share the atom
+-        Kokkos::atomic_add(&A_sph_re(ii, mu_j, idx_sph, n), fr(ii, jj, n * (lmax + 1) + l) * ylm.re);
+-        Kokkos::atomic_add(&A_sph_im(ii, mu_j, idx_sph, n), fr(ii, jj, n * (lmax + 1) + l) * ylm.im);
++        Kokkos::atomic_add(&A_sph_re(ii, mu_a, idx_sph, n), fr(ii, jj, n * (lmax + 1) + l) * ylm.re);
++        Kokkos::atomic_add(&A_sph_im(ii, mu_a, idx_sph, n), fr(ii, jj, n * (lmax + 1) + l) * ylm.im);
+       } else {
+         // host: interleaved A_sph through hoisted pointers, no atomics
+         a_sph[n * sph_sn].re += r_nl[n * fr_sn] * ylm.re;
+@@ -1845,8 +1852,8 @@
+       for (int n = 0; n < nradmax; n++) {
+         if constexpr (NEED_ATOMICS) {
+           // device: split re/im arrays, several teams share the atom
+-          Kokkos::atomic_add(&A_sph_re(ii, mu_j, idx_sph, n), fr(ii, jj, n * (lmax + 1) + l) * ylm.re);
+-          Kokkos::atomic_add(&A_sph_im(ii, mu_j, idx_sph, n), fr(ii, jj, n * (lmax + 1) + l) * ylm.im);
++          Kokkos::atomic_add(&A_sph_re(ii, mu_a, idx_sph, n), fr(ii, jj, n * (lmax + 1) + l) * ylm.re);
++          Kokkos::atomic_add(&A_sph_im(ii, mu_a, idx_sph, n), fr(ii, jj, n * (lmax + 1) + l) * ylm.im);
+         } else {
+           // host: interleaved A_sph through hoisted pointers, no atomics
+           a_sph[n * sph_sn].re += r_nl[n * fr_sn] * ylm.re;
+@@ -2755,7 +2762,7 @@
+ 
+       int nb = 0;
+       for (int jj = 0; jj < ncount; jj++) {
+-        if ((int) d_mu(ii, jj) != mu) continue;
++        if ((summed_A ? 0 : (int) d_mu(ii, jj)) != mu) continue;
+ 
+         rxb[nb] = d_rhats(ii, jj, 0);
+         ryb[nb] = d_rhats(ii, jj, 1);
+@@ -2842,7 +2849,7 @@
+   const int itype = type(i);
+   const KK_FLOAT scale = d_scale(itype,itype);
+ 
+-  const int mu_j = d_mu(ii, jj);
++  const int mu_j = summed_A ? 0 : (int) d_mu(ii, jj);   // weights index (radials are per neighbour: fr(ii,jj))
+ 
+   // same strength reduction as in compute_ai_one: the (atom, neighbor) and
+   // (atom, element) parts of the subscripts are loop invariant here
+diff -ru a/src/KOKKOS/pair_pace_kokkos.h b/src/KOKKOS/pair_pace_kokkos.h
+--- a/src/KOKKOS/pair_pace_kokkos.h	2026-10-14 21:01:42.925365334 +0100
++++ b/src/KOKKOS/pair_pace_kokkos.h	2026-10-14 21:01:42.932365370 +0100
+@@ -186,6 +186,9 @@
+   static constexpr int PACE_TEAM_NDMAX = 8;
+   static constexpr int PACE_TEAM_RMAX = 8;
+   int use_team_rhow;
++  // basis flag summed_neighbour_A (ML-PACE pace_ref/fast/0004): every neighbour accumulates into the
++  // element-0 A and reads the element-0 weights; the radial splines stay per bond (mu_i, mu_j)
++  int summed_A = 0;
+   // team-kernel term tables, (idx_ms_combs, t, mu_i) with the term index fastest so a warp's loads coalesce:
+   // d_tm_A = (scratch offset of the A entry << 2) | (m < 0) | (m odd) << 1 (rank 1: mu * nradbase + n - 1);
+   // d_tm_W / d_tm_Wm = scratch offsets of the (l, m) / (l, -m) weights (-1: outside the packed triangle),
