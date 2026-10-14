@@ -77,5 +77,5 @@ def test_export_lammps_cpu_bundle_per_rank(tmp_path):
     main([*base, "--out", str(tmp_path / "all.json"), "--platform", "cpu"])
     main([*base, "--out", str(tmp_path / "rank.json"), "--platform", "cpu", "--procs", "1,1,2"])
     full, rank = (json.loads((tmp_path / f).read_text()) for f in ("all.json", "rank.json"))
-    assert full["ace_jax"]["platform"] == rank["ace_jax"]["platform"] == "cpu"
+    assert full["export_info"]["platform"] == rank["export_info"]["platform"] == "cpu"
     assert rank["contract"]["max_atoms"] < full["contract"]["max_atoms"]   # one rank's subdomain + ghosts

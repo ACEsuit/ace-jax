@@ -451,8 +451,8 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
     bundle = export_model(energy_fn=energy_fn, path=path, max_atoms=max_atoms, cutoff=rcut,
                           unit_style="metal", precision=dtype, n_species=n_species, **graph,
                           **({"platform": platform} if platform else {}))
+    # no "platform": lammps-jax's export_info.platform is a contract key its plugin checks
     bundle["ace_jax"] = {"layout": layout, "elements": model_z, "type_elements": type_elements,
-                         "platform": platform or "cuda",
                          "k_dense": int(k_dense) if layout in ("dense", "matrix") else None,
                          # not "max_owned": lammps-jax reads that key from anywhere in
                          # the file and would take it as its own contract's

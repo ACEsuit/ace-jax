@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### LAMMPS export
+
+- lammps-jax is on PyPI. Install it with `pip install lammps-jax`. The CI
+  tests the export with lammps-jax 0.2.0.
+- The bundle no longer writes `ace_jax.platform`. lammps-jax 0.2.0 reads the
+  `platform` key from anywhere in the bundle. Read the platform from
+  `export_info.platform`.
+
 ### Benchmarks
 
 - The silicon accuracy-cost benchmark adds linear ACE run by ACEpotentials.jl

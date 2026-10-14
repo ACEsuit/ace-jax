@@ -313,7 +313,7 @@ load; faster only at large `nradbase`). Values are unchanged to roundoff.
 ### LAMMPS
 
 ```python
-from ace_jax.export.lammps import export_lammps, neighbour_capacity  # needs lammps-jax
+from ace_jax.export.lammps import export_lammps, neighbour_capacity  # needs `pip install lammps-jax`
 model, meta, _ = aj.load("model.npz")                     # or a .yace
 cap = neighbour_capacity(atoms, meta["rcut"], skin=1.0)   # slots="cutoff": tight, opt-in
 export_lammps(model, meta, "bundle", max_atoms=cap["max_atoms"], max_edges=cap["max_edges"],
@@ -322,7 +322,8 @@ export_lammps(model, meta, "bundle", max_atoms=cap["max_atoms"], max_edges=cap["
               type_elements=[14, 32])                     # Z in LAMMPS type order
 ```
 
-This writes a lammps-jax bundle for `pair_style jax/kk` (GPU only).
+This writes a lammps-jax bundle for `pair_style jax/kk` (GPU; `platform="cpu"`
+for its CPU build, which refuses a cuda bundle and vice versa).
 - Layouts: `"sparse"`, `"dense"` (lammps-jax's edge buffer, packed into
   `k_dense` slots by an argsort every step) and `"matrix"` (lammps-jax's
   neighbour-matrix input, `matrix_supported()`: the LAMMPS full list itself,
