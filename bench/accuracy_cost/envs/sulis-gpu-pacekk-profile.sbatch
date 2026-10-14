@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# pace/kk on one A100, profiled (bench/mlpace-fast; build: scaling/envs/sulis-pacetab.sh gputeamsum):
-#   1. nsys per-kernel split, stock kernels (PACE_KK_RHOW=0) and the fused team kernel (=1), Si o4d12 / o4d20
+# pace/kk on one A100, profiled (bench/mlpace-fast; build: scaling/envs/sulis-pacetab.sh gputeamsum), for each
+# PACE_KK_RHOW in $RHOW_MODES (default "0 1 2": stock ComputeRho/Weights, the fused team kernel, flat offsets):
+#   0. plain timings (no profiler), Si o4d12-o4d20, 32,768 atoms
+#   1. nsys per-kernel split, Si o4d12 / o4d20
 #   2. ncu on the product-basis and per-neighbour kernels (Si o4d20, 4096 atoms, 1 step), if the node allows
 #      GPU counters (desktop GPUs here do not: RmProfilingAdminOnly)
 #   3. summed_neighbour_A vs the expanded .yace, a 3-element embedded model at order 3 and 4 (13,824 atoms)
@@ -30,9 +32,18 @@ echo "job $SLURM_JOB_ID on $(hostname) $(date -Is)"; nvidia-smi --query-gpu=name
 echo "nsys=${NSYS:-none} ncu=${NCU:-none} RmProfilingAdminOnly=$(grep -h RmProfilingAdminOnly /proc/driver/nvidia/params 2>/dev/null)"
 M=$ROOT/ac/runs/accuracy_cost/ace_tab
 loop() { grep "Loop time" $1 | tail -1 | awk '{printf "%.4f us/atom-step\n", 1e6*$4/($9*$12)}'; }
+MODES=${RHOW_MODES:-0 1 2}
+
+echo "== 0. timings (no profiler)"
+for s in o4d12 o4d14 o4d16 o4d20; do for r in $MODES; do
+  st=20; [ $s = o4d20 ] && st=10
+  PACE_KK_RHOW=$r $LMP $K -in $P/in.si -var nc 16 -var steps $st -var warm 5 -var model $M/$s/model.yace -var pstyle product \
+      -log tlog_si_${s}_r$r -echo none -screen none -nocite >/dev/null 2>&1
+  echo "-- $s rhow$r $(loop tlog_si_${s}_r$r)"
+done; done
 
 echo "== 1. nsys kernel split"
-for s in o4d12 o4d20; do for r in 0 1; do
+for s in o4d12 o4d20; do for r in $MODES; do
   st=20; [ $s = o4d20 ] && st=10
   if [ -n "$NSYS" ]; then
     PACE_KK_RHOW=$r $NSYS profile -o nsys_${s}_r$r -t cuda --force-overwrite true $LMP $K -in $P/in.si -var nc 16 -var steps $st \
@@ -49,9 +60,9 @@ done; done
 
 echo "== 2. ncu (o4d20, 4096 atoms, 1 step)"
 if [ -n "$NCU" ]; then
-  for r in 0 1; do
-    PACE_KK_RHOW=$r timeout 1500 $NCU --target-processes all --kernel-name-base demangled \
-        -k regex:"ComputeWeights|ComputeRho|RhoWeightsTeam|ComputeAi|ComputeDerivative" -c 6 \
+  for r in $MODES; do
+    PACE_KK_RHOW=$r timeout 900 $NCU --target-processes all --kernel-name-base demangled \
+        -k regex:"ComputeWeights|ComputeRho|RhoWeightsTeam|ComputeAi|ComputeDerivative" -c 4 \
         --section SpeedOfLight --section MemoryWorkloadAnalysis --section Occupancy --section LaunchStats \
         --section ComputeWorkloadAnalysis -o ncu_o4d20_r$r -f \
         $LMP $K -in $P/in.si -var nc 8 -var steps 1 -var warm 0 -var model $M/o4d20/model.yace -var pstyle product \
@@ -62,7 +73,7 @@ if [ -n "$NCU" ]; then
 fi
 
 echo "== 3. summed vs expanded (3-element embedded, 13,824 atoms)"
-for m in o3d8 o4d10; do for y in summed expanded; do for r in 0 1; do
+for m in o3d8 o4d10; do for y in summed expanded; do for r in $MODES; do
   PACE_KK_RHOW=$r $LMP $K -in $P/in.time -var cell $P/cell_gpu.data -var model $P/emb_${m}_$y.yace -var pstyle product \
       -var steps 20 -log tlog_${m}_${y}_r$r -echo none -screen none -nocite >/dev/null 2>&1
   echo "-- $m $y rhow$r $(loop tlog_${m}_${y}_r$r)"

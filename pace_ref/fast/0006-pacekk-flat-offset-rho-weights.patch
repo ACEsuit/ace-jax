@@ -1,0 +1,275 @@
+diff -ru a/src/KOKKOS/pair_pace_kokkos.cpp b/src/KOKKOS/pair_pace_kokkos.cpp
+--- a/src/KOKKOS/pair_pace_kokkos.cpp	2026-10-14 22:59:01.559552857 +0100
++++ b/src/KOKKOS/pair_pace_kokkos.cpp	2026-10-14 22:59:01.568552898 +0100
+@@ -839,6 +839,14 @@
+   auto h_W = Kokkos::create_mirror_view(d_tm_W);
+   auto h_Wm = Kokkos::create_mirror_view(d_tm_Wm);
+   auto h_rk = Kokkos::create_mirror_view(d_tm_rank);
++  d_fo_A = decltype(d_fo_A)("pace:fo_A", idx_ms_combs_max, rankmax, nelements);
++  d_fo_W = decltype(d_fo_W)("pace:fo_W", idx_ms_combs_max, rankmax, nelements);
++  d_fo_Wm = decltype(d_fo_Wm)("pace:fo_Wm", idx_ms_combs_max, rankmax, nelements);
++  auto h_fA = Kokkos::create_mirror_view(d_fo_A);
++  auto h_fW = Kokkos::create_mirror_view(d_fo_W);
++  auto h_fWm = Kokkos::create_mirror_view(d_fo_Wm);
++  // offset of (mu, idx, n) in units of stride(1) of a LayoutLeft (atom, mu, idx, n) view; (mu, n) of a 3-d one
++  auto fo4 = [&](int mu, int idx, int n) { return mu + nelements * (idx + idx_sph_max * n); };
+   auto h_idx_funcs = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), d_idx_funcs);
+   auto h_rank = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), d_rank);
+   auto h_mus = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), d_mus);
+@@ -854,6 +862,7 @@
+       h_rk(idx, mu_i) = rank;
+       if (rank == 1) {
+         h_A(idx, 0, mu_i) = h_mus(mu_i, idx_func, 0) * nradbase + h_ns(mu_i, idx_func, 0) - 1;
++        h_fA(idx, 0, mu_i) = h_mus(mu_i, idx_func, 0) + nelements * (h_ns(mu_i, idx_func, 0) - 1);
+         continue;
+       }
+       for (int t = 0; t < rank; t++) {
+@@ -865,12 +874,18 @@
+         const int ip = (int) h_isph(lbase + m), im = (int) h_isph(lbase - m);
+         h_W(idx, t, mu_i) = ip >= 0 ? (mu * idx_sph_max + ip) * nn + n : -1;
+         h_Wm(idx, t, mu_i) = im >= 0 ? ((((mu * idx_sph_max + im) * nn + n) << 1) | (p & 1)) : -1;
++        h_fA(idx, t, mu_i) = (fo4(mu, (int) h_isph(lbase + p), n) << 2) | (m < 0 ? 1 : 0) | ((p & 1) << 1);
++        h_fW(idx, t, mu_i) = ip >= 0 ? fo4(mu, ip, n) : -1;
++        h_fWm(idx, t, mu_i) = im >= 0 ? ((fo4(mu, im, n) << 1) | (p & 1)) : -1;
+       }
+     }
+   Kokkos::deep_copy(d_tm_A, h_A);
+   Kokkos::deep_copy(d_tm_W, h_W);
+   Kokkos::deep_copy(d_tm_Wm, h_Wm);
+   Kokkos::deep_copy(d_tm_rank, h_rk);
++  Kokkos::deep_copy(d_fo_A, h_fA);
++  Kokkos::deep_copy(d_fo_W, h_fW);
++  Kokkos::deep_copy(d_fo_Wm, h_fWm);
+ 
+   // backward records: (target, flags, term, other factors), sorted by target
+   struct Rec { int w, flags, c, nf; int f[PACE_TEAM_RMAX]; };
+@@ -1202,11 +1217,24 @@
+   grow(chunk_size, maxneigh);
+ 
+   use_team_rhow = 0;
++  use_flat_rhow = 0;
+   if constexpr (!host_flag) {
++    // PACE_KK_RHOW: 0 stock ComputeRho/Weights (the default), 1 the fused team kernel, 2 flat offsets
+     const char *env = getenv("PACE_KK_RHOW");
++    const int mode = env ? atoi(env) : 0;
+     const int nA = nelements * idx_sph_max * (nradmax + 1);
++    // the flat offsets assume the LayoutLeft packing of the four views (no padding)
++    const bool packed = A_sph_re.stride(0) == 1 && A_sph_re.stride(2) == A_sph_re.stride(1) * nelements
++        && A_sph_re.stride(3) == A_sph_re.stride(2) * idx_sph_max && A_sph_im.stride(1) == A_sph_re.stride(1)
++        && weights_re.stride(0) == 1 && weights_re.stride(2) == weights_re.stride(1) * nelements
++        && weights_re.stride(3) == weights_re.stride(2) * idx_sph_max && weights_im.stride(1) == weights_re.stride(1)
++        && A_rank1.stride(0) == 1 && A_rank1.stride(2) == A_rank1.stride(1) * nelements
++        && weights_rank1.stride(0) == 1 && weights_rank1.stride(2) == weights_rank1.stride(1) * nelements;
++    use_flat_rhow = mode == 2 && packed && aceimpl->basis_set->rankmax <= 4;
++    fo_sA = (int) A_sph_re.stride(1); fo_sW = (int) weights_re.stride(1);
++    fo_sA1 = (int) A_rank1.stride(1); fo_sW1 = (int) weights_rank1.stride(1);
+     typename Kokkos::TeamPolicy<DeviceType, TagPairPACEComputeRhoWeightsTeam> probe(1, team_size_rhow);
+-    use_team_rhow = !(env && env[0] == '0') && aceimpl->basis_set->ndensitymax <= PACE_TEAM_NDMAX
++    use_team_rhow = mode == 1 && aceimpl->basis_set->ndensitymax <= PACE_TEAM_NDMAX
+                     && aceimpl->basis_set->rankmax <= PACE_TEAM_RMAX
+                     && (int)((4 * nA + PACE_TEAM_NDMAX) * sizeof(KK_FLOAT)) <= (int)probe.scratch_size_max(0);
+   }
+@@ -1297,6 +1325,10 @@
+       typename Kokkos::TeamPolicy<DeviceType, TagPairPACEComputeRhoWeightsTeam> policy_rhow(chunk_size, team_size_rhow);
+       policy_rhow = policy_rhow.set_scratch_size(0, Kokkos::PerTeam((4 * nA + PACE_TEAM_NDMAX) * sizeof(KK_FLOAT)));
+       Kokkos::parallel_for("ComputeRhoWeightsTeam", policy_rhow, *this);
++    } else if (use_flat_rhow) {
++      const int nb = (chunk_size + team_size_fo - 1) / team_size_fo;
++      Kokkos::parallel_for("ComputeRhoFO",
++          typename Kokkos::TeamPolicy<DeviceType, TagPairPACEComputeRhoFO>(idx_ms_combs_max * nb, team_size_fo), *this);
+     } else {
+       typename Kokkos::RangePolicy<DeviceType,TagPairPACEComputeRho> policy_rho(0,chunk_size*idx_ms_combs_max);
+       Kokkos::parallel_for("ComputeRho",policy_rho,*this);
+@@ -1309,7 +1341,11 @@
+     }
+ 
+     //ComputeWeights (fused into ComputeRho on the host)
+-    if (!host_flag && !use_team_rhow) {
++    if (!host_flag && use_flat_rhow) {
++      const int nb = (chunk_size + team_size_fo - 1) / team_size_fo;
++      Kokkos::parallel_for("ComputeWeightsFO",
++          typename Kokkos::TeamPolicy<DeviceType, TagPairPACEComputeWeightsFO>(idx_ms_combs_max * nb, team_size_fo), *this);
++    } else if (!host_flag && !use_team_rhow) {
+       typename Kokkos::RangePolicy<DeviceType,TagPairPACEComputeWeights> policy_weights(0,chunk_size * idx_ms_combs_max);
+       Kokkos::parallel_for("ComputeWeights",policy_weights,*this);
+     }
+@@ -2599,6 +2635,128 @@
+ }
+ 
+ /* ----------------------------------------------------------------------
++   Device, PACE_KK_RHOW=2: ComputeRho and ComputeWeights in the stock thread layout (a team = one
++   ms-combination over team_size_fo consecutive atoms, so the per-term table reads are uniform across a
++   warp and the A / weight accesses coalesce over atoms), with every subscript a precomputed flat offset
++   (d_fo_*) instead of mus / ns / ls / ms_combs lookups and 4-d index arithmetic, and no division by
++   chunk_size per thread.  Ranks 2-4 are unrolled (the factors stay in registers); the leave-one-out
++   products come from prefix / suffix products.
++------------------------------------------------------------------------- */
++
++template<class DeviceType>
++// NOLINTNEXTLINE
++KOKKOS_INLINE_FUNCTION
++typename PairPACEKokkos<DeviceType>::complex
++PairPACEKokkos<DeviceType>::fo_read(const int ii, const int code) const
++{
++  const int o = ii + fo_sA * (code >> 2);
++  complex a;
++  a.re = A_sph_re.data()[o];
++  a.im = A_sph_im.data()[o];
++  if (code & 1) {               // m < 0: conjugate symmetry, as read_A
++    const KK_FLOAT factor = (code & 2) ? -1.0 : 1.0;
++    a.re = a.re * factor;
++    a.im = -a.im * factor;
++  }
++  return a;
++}
++
++template<class DeviceType>
++template<int R>
++// NOLINTNEXTLINE
++KOKKOS_INLINE_FUNCTION
++typename PairPACEKokkos<DeviceType>::complex
++PairPACEKokkos<DeviceType>::fo_product(const int ii, const int c, const int mu_i) const
++{
++  complex B = fo_read(ii, d_fo_A(c, 0, mu_i));
++  #pragma unroll
++  for (int t = 1; t < R; t++) B = B * fo_read(ii, d_fo_A(c, t, mu_i));
++  return B;
++}
++
++template<class DeviceType>
++template<int R>
++// NOLINTNEXTLINE
++KOKKOS_INLINE_FUNCTION
++void PairPACEKokkos<DeviceType>::fo_weights(const int ii, const int c, const int mu_i, const KK_FLOAT theta) const
++{
++  complex v[R], pre[R];
++  #pragma unroll
++  for (int t = 0; t < R; t++) v[t] = fo_read(ii, d_fo_A(c, t, mu_i));
++  pre[0] = complex::one();
++  #pragma unroll
++  for (int t = 1; t < R; t++) pre[t] = pre[t - 1] * v[t - 1];
++  complex suf = complex::one();
++  #pragma unroll
++  for (int t = R - 1; t >= 0; t--) {
++    const complex dB = pre[t] * suf;
++    suf = suf * v[t];
++    const int w = d_fo_W(c, t, mu_i);
++    if (w >= 0) {
++      const complex value = theta * dB;
++      Kokkos::atomic_add(&weights_re.data()[ii + fo_sW * w], value.re);
++      Kokkos::atomic_add(&weights_im.data()[ii + fo_sW * w], value.im);
++    }
++    const int wm = d_fo_Wm(c, t, mu_i);
++    if (wm >= 0) {
++      const complex valuem = theta * dB.conj() * (KK_FLOAT)((wm & 1) ? -1 : 1);
++      Kokkos::atomic_add(&weights_re.data()[ii + fo_sW * (wm >> 1)], valuem.re);
++      Kokkos::atomic_add(&weights_im.data()[ii + fo_sW * (wm >> 1)], valuem.im);
++    }
++  }
++}
++
++template<class DeviceType>
++// NOLINTNEXTLINE
++KOKKOS_INLINE_FUNCTION
++void PairPACEKokkos<DeviceType>::operator() (TagPairPACEComputeRhoFO,
++    const typename Kokkos::TeamPolicy<DeviceType, TagPairPACEComputeRhoFO>::member_type& team) const
++{
++  const int nb = (chunk_size + team.team_size() - 1) / team.team_size();
++  const int c = team.league_rank() / nb;
++  const int ii = (team.league_rank() - c * nb) * team.team_size() + team.team_rank();
++  if (ii >= chunk_size) return;
++  const int mu_i = d_map(type(d_ilist[ii + chunk_offset]));
++  if (c >= d_idx_ms_combs_count(mu_i)) return;
++  const int ndensity = d_ndensity(mu_i);
++  const int rank = d_tm_rank(c, mu_i);
++  if (rank == 1) {
++    const KK_FLOAT A_cur = A_rank1.data()[ii + fo_sA1 * d_fo_A(c, 0, mu_i)];
++    for (int p = 0; p < ndensity; ++p) Kokkos::atomic_add(&rhos(ii, p), d_ctildes(mu_i, c, p) * A_cur);
++    return;
++  }
++  const complex B = rank == 2 ? fo_product<2>(ii, c, mu_i) : rank == 3 ? fo_product<3>(ii, c, mu_i)
++                                                                      : fo_product<4>(ii, c, mu_i);
++  for (int p = 0; p < ndensity; ++p) Kokkos::atomic_add(&rhos(ii, p), B.real_part_product(d_ctildes(mu_i, c, p)));
++}
++
++template<class DeviceType>
++// NOLINTNEXTLINE
++KOKKOS_INLINE_FUNCTION
++void PairPACEKokkos<DeviceType>::operator() (TagPairPACEComputeWeightsFO,
++    const typename Kokkos::TeamPolicy<DeviceType, TagPairPACEComputeWeightsFO>::member_type& team) const
++{
++  const int nb = (chunk_size + team.team_size() - 1) / team.team_size();
++  const int c = team.league_rank() / nb;
++  const int ii = (team.league_rank() - c * nb) * team.team_size() + team.team_rank();
++  if (ii >= chunk_size) return;
++  const int mu_i = d_map(type(d_ilist[ii + chunk_offset]));
++  if (c >= d_idx_ms_combs_count(mu_i)) return;
++  const int ndensity = d_ndensity(mu_i);
++  const int rank = d_tm_rank(c, mu_i);
++  KK_FLOAT theta = 0.0;
++  for (int p = 0; p < ndensity; ++p) theta += dF_drho(ii, p) * d_ctildes(mu_i, c, p);
++  if (rank == 1) {
++    Kokkos::atomic_add(&weights_rank1.data()[ii + fo_sW1 * d_fo_A(c, 0, mu_i)], theta);
++    return;
++  }
++  theta *= 0.5;   // as ComputeWeights
++  if (rank == 2) fo_weights<2>(ii, c, mu_i, theta);
++  else if (rank == 3) fo_weights<3>(ii, c, mu_i, theta);
++  else fo_weights<4>(ii, c, mu_i, theta);
++}
++
++/* ----------------------------------------------------------------------
+    CPU backend: one thread owns atom ii, so the weights scatter is a plain
+    accumulation into that atom's own block instead of four atomics per
+    (ms-combination, rank) step
+diff -ru a/src/KOKKOS/pair_pace_kokkos.h b/src/KOKKOS/pair_pace_kokkos.h
+--- a/src/KOKKOS/pair_pace_kokkos.h	2026-10-14 22:59:01.564552880 +0100
++++ b/src/KOKKOS/pair_pace_kokkos.h	2026-10-14 22:59:01.570552907 +0100
+@@ -44,6 +44,8 @@
+   struct TagPairPACEComputeFS{};
+   struct TagPairPACEComputeWeights{};
+   struct TagPairPACEComputeRhoWeightsTeam{};   // device: Rho + FS + Weights fused, one team per atom
++  struct TagPairPACEComputeRhoFO{};             // device: ComputeRho / ComputeWeights on flat offset tables
++  struct TagPairPACEComputeWeightsFO{};
+   struct TagPairPACEComputeDerivative{};
+ 
+   // CPU backend variants: one atom per thread, neighbours and basis functions
+@@ -95,6 +97,23 @@
+   KOKKOS_INLINE_FUNCTION
+   void operator() (TagPairPACEComputeRhoWeightsTeam,const typename Kokkos::TeamPolicy<DeviceType, TagPairPACEComputeRhoWeightsTeam>::member_type& team) const;
+ 
++  KOKKOS_INLINE_FUNCTION
++  void operator() (TagPairPACEComputeRhoFO,const typename Kokkos::TeamPolicy<DeviceType, TagPairPACEComputeRhoFO>::member_type& team) const;
++
++  KOKKOS_INLINE_FUNCTION
++  void operator() (TagPairPACEComputeWeightsFO,const typename Kokkos::TeamPolicy<DeviceType, TagPairPACEComputeWeightsFO>::member_type& team) const;
++
++  template<int R>
++  KOKKOS_INLINE_FUNCTION
++  complex fo_product(const int ii, const int c, const int mu_i) const;
++
++  template<int R>
++  KOKKOS_INLINE_FUNCTION
++  void fo_weights(const int ii, const int c, const int mu_i, const KK_FLOAT theta) const;
++
++  KOKKOS_INLINE_FUNCTION
++  complex fo_read(const int ii, const int code) const;
++
+ // NOLINTNEXTLINE
+   KOKKOS_INLINE_FUNCTION
+   void operator() (TagPairPACEComputeAiCPU,const int& ii) const;
+@@ -186,6 +205,14 @@
+   static constexpr int PACE_TEAM_NDMAX = 8;
+   static constexpr int PACE_TEAM_RMAX = 8;
+   int use_team_rhow;
++  // flat-offset ComputeRho / ComputeWeights (PACE_KK_RHOW=2): the stock thread layout (a warp = one term over
++  // consecutive atoms) with each factor's A entry and weight target read from d_fo_* tables of offsets in units
++  // of stride(1) (A_sph_re(ii, mu, idx, n) = data[ii + stride(1) * (mu + nel * (idx + idx_sph_max * n))]);
++  // codes as d_tm_*; fo_s* are the views' stride(1), checked each step against that packing
++  int use_flat_rhow = 0;
++  int fo_sA = 0, fo_sW = 0, fo_sA1 = 0, fo_sW1 = 0;
++  static constexpr int team_size_fo = host_flag ? 1 : 128;
++  Kokkos::View<int***, Kokkos::LayoutLeft, DeviceType> d_fo_A, d_fo_W, d_fo_Wm;
+   // basis flag summed_neighbour_A (ML-PACE pace_ref/fast/0004): every neighbour accumulates into the
+   // element-0 A and reads the element-0 weights; the radial splines stay per bond (mu_i, mu_j)
+   int summed_A = 0;
