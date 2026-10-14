@@ -27,6 +27,7 @@ Cheapest model reaching the target, µs/atom-step, float64, LAMMPS:
 |---|---|---|---|---|---|
 | linear ACE o4d20, ace-jax (lammps-jax) | 5,476 | 0.0816 | 0.41 | 5.65 | 50.0 |
 | linear ACE o4d20, ML-PACE (tabulated radials) | 5,476 | 0.0816 | 0.41 | 4.12 | 5.39 |
+| linear ACE o4d20, ACEpotentials.jl (trim library) | 5,476 | 0.0816 | 0.41 | – | 10.8 |
 | MACE c16L0, Symmetrix | 31,152 | 0.0699 | < 0.5 | 1.93 | 2.36 |
 | MACE c16L0, Symmetrix-XL | 31,152 | 0.0699 | < 0.5 | 1.23 | 2.19 |
 | MACE c16L1, Symmetrix | 40,272 | 0.0579 | < 0.5 | 5.36 | 8.58 |
@@ -51,6 +52,11 @@ parameters than linear ACE (f800: 761 parameters, 0.081 eV/Å) but not the QoI t
   `ml-pace-tabulated-radials.md`), o4d20 runs at 5.39 µs/atom-step on 128 ranks against 50.0 through the
   lammps-jax CPU backend with the DAG product basis, and 3.98 for PACE f3200. On the A100 the gap is smaller
   (4.12 vs 5.65).
+- **ACEpotentials.jl's compiled export** (the same fits as ACEpotentials models, `juliac --trim` libraries in
+  LAMMPS, ACEpotentials PR 309) is the fastest CPU code for linear ACE up to o4d14: 0.10 µs/atom-step at o3d8
+  and 0.59 at o4d14, against 0.85 for ML-PACE (o4d14) and 3.4-7.9 for lammps-jax. It ties ML-PACE at o4d16
+  (1.42 vs 1.41) and is 2x slower at o4d20 (10.8 vs 5.39), still 4.6x faster than lammps-jax there. Parity
+  against ace-jax on the npz: |dE|/atom <= 6.5e-12 eV, |dF| <= 1.2e-11 eV/Å over the ladder. CPU only.
 - **Symmetrix-XL** is 1.1-3.6x faster than Symmetrix for the same MACE models, most at L = 1 on the GPU.
 - **The DAG product basis** (`aa_dag="greedy"`, #90) gives ace-jax's fastest CPU rows at o4d16 and o4d20; it
   also cuts the compiled temporary memory (o4d20: 3.9 GB to 0.64 GB on one core).
@@ -68,6 +74,11 @@ parameters than linear ACE (f800: 761 parameters, 0.081 eV/Å) but not the QoI t
   o4d20 with `aa_dag="greedy"`). ML-PACE on the GPU: LAMMPS develop ec02ed0 (Stan Moore's 2026-08 `pace/kk`
   rewrite; about 2x faster than the 10Sep2025 patch release). Linear ACE run by ML-PACE: that tree with
   `LOCAL_ML-PACE` = v.2025.12.4.p1 + the tabulated-radial patch (`bench/scaling/envs/sulis-pacetab.sh`).
+  Linear ACE run by ACEpotentials.jl: each `aj fit` model rebuilt as an ACEpotentials v0.10.2 `ace_model`
+  (`bench/scaling/julia/build_trim_acejax.jl`: coefficients mapped through the AA basis, gated to 1e-10 against
+  ace-jax before compiling), exported with `for_library=true` and compiled by `juliac --trim=safe` on a compute
+  node (Julia 1.12.6; `accuracy_cost/build_trim.py`, `envs/sulis-cpu-trim.sbatch`), run by the PR 309
+  `pair_style ace` plugin in the same LAMMPS (`bench/scaling/envs/sulis-acepot.sh`); 128 x 1 ranks only.
 - QoIs: compressed ("short and fat") hcp is left out of the score (outside the training data; it measures
   extrapolation); only models with every QoI computed are plotted. Single fits per point.
 - GAP's parameter count is its sparse-point coefficients; the kernel also stores the sparse descriptors.

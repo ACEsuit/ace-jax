@@ -284,6 +284,8 @@ def main():
                 "ace-jax runs in LAMMPS (lammps-jax CPU backend; ACE o4d16 and o4d20 with the recursive (DAG) product basis, aa_dag='greedy'); MACE runs in LAMMPS via Symmetrix and, separately, Symmetrix-XL.\n"
                 "Linear ACE run by ML-PACE: the o4 fits exported exactly to .yace with tabulated radials (ML-PACE with the tabulated-radial patch, ICAMS/lammps-user-pace#31; pace and pace/kk).  "
                 "GPU ML-PACE: LAMMPS develop ec02ed0 (with the 2026-08 pace/kk GPU rewrite).\n"
+                "Linear ACE run by ACEpotentials.jl (CPU only): each fit as an ACEpotentials model, exported and compiled "
+                "with juliac --trim (ACEpotentials PR 309, v0.10.2), in LAMMPS via its pair_style ace plugin.\n"
                 if any("CPU" in r[0] for r in rows) else "")
     if not a.no_note:
         fig.text(0.5, 0.003, cpu_note + "QoI error clips each QoI to [0.05, 10] x tolerance; compressed hcp is left out (extrapolation, "
