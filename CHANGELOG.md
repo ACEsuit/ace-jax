@@ -1,17 +1,63 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 (2026-10-14)
 
-- **The Performance page compares accuracy and cost on silicon.** Fitted
-  models of each family (linear ACE, PACE, MACE, GAP) are compared at the
-  same accuracy, timed in LAMMPS on an A100 and on a 128-core CPU node.
-- **`aj fit --weights`** also takes the path of a `.json` file.
+**Highlights.** Linear ACE models export to ML-PACE as `.yace` files with
+exact tabulated radials, and `aj export` writes LAMMPS models from the command
+line. lammps-jax bundles run on CPUs. New PACE-style radial and basis options
+(`--radial-basis sbessel`, `--nmax-by-order`, `--lmax-by-order`) and a Newton
+optimiser for learned radials. The Performance page compares accuracy and cost
+on silicon.
+
+**Upgrading from 0.2.2.** Fits and saved models are unchanged. The
+`write_yace(model, spec, path)` argument order gives a deprecation warning: use
+`write_yace(model, path, spec=spec)`. `export_lammps(layout="auto")` can now
+choose a smaller row block where 0.2.2 chose `sparse`; the bundle records it.
+
+### LAMMPS and ML-PACE export
+
+- **`aj export`** writes a model for LAMMPS. An `--out` that ends in `.json`
+  gives a lammps-jax bundle. A bundle needs `--structure`, the initial
+  structure of the run. `--platform cpu` and `--procs px,py,pz` give a CPU
+  bundle sized for one MPI rank. An `--out` that ends in `.yace` writes a
+  `.yace` model again.
 - **`write_yace` writes a linear ACE model as a `.yace` file.** The file gives
   the same energies, forces and stresses as the `.npz` model. It keeps the
   radial functions as tables. ML-PACE reads these tables only with its
   tabulated-radial addition (ICAMS/lammps-user-pace#31), which is not yet in ML-PACE releases. ace-jax
   reads the file without it. `aj export --model model.npz --out model.yace`
   does the same.
+- **`write_yace(model, path, spec=spec)`** is the new argument order. The old
+  order `write_yace(model, spec, path)` still works and gives a warning.
+- **`export_lammps(platform="cpu")`** writes a bundle for the lammps-jax CPU
+  backend. This needs a lammps-jax version with `export_model(platform=)`.
+  Also set `device_memory` to the host memory of one MPI rank.
+- **`neighbour_capacity(procs=(px, py, pz))`** gives the capacities of one MPI
+  rank on that processor grid. Run LAMMPS with `processors px py pz` to match.
+- **`export_lammps(device_memory=...)`** sets the memory of the GPU that runs
+  LAMMPS, in bytes that JAX can use. Use it when you export on a different
+  machine. `block_rows=` sets the block size. The bundle records both.
+- **`export_lammps` keeps the fast layouts for large models.** Before, if one
+  32768-row block did not fit in GPU memory, `layout="auto"` used `sparse`.
+  That was 15 times slower for a 1461-function silicon model on an A100. Now
+  it makes the block smaller, down to 1024 rows, and uses `sparse` only if no
+  block fits.
+- **`aa_dag="greedy"` or `"prefix"`** on `ACECalculator` and `export_lammps`
+  evaluates the product basis recursively. Each product of order k is one
+  product of order k - 1 times one A entry. This is the scheme that ML-PACE
+  uses. The results agree with the default to roundoff. `"prefix"` gives the
+  same products bit for bit. The default (`None`) does not change.
+
+### Basis and fitting
+
+- **`aj fit --radial-basis sbessel`** builds the tensor radials from the
+  spherical Bessel functions that pacemaker uses. The default, `poly`, is
+  unchanged. The radial learner works with the two bases. Saved models
+  record the basis, and older models load as `poly`.
+- **`--nmax-by-order` and `--lmax-by-order`** (`aj fit`, `aj basis`) set a
+  maximum radial and angular degree for each correlation order, as
+  pacemaker's `nradmax_by_orders` and `lmax_by_orders` do. Without them, the
+  basis is unchanged.
 - **`aj fit --learn-radial --radial-opt newton`: a Newton optimiser for the
   radials.** It is a trust-region Newton method. Each iteration takes up to
   `--radial-cg-iters` (default 20) exact Hessian-vector products of the
@@ -20,39 +66,21 @@
   progress on it. In a test with recoverable radials, 8 Newton iterations
   reached 20.6 from 7295, against 77.9 for 8 L-BFGS-B iterations. The default
   stays `lbfgs`.
-- **`aj export`** writes a model for LAMMPS. An `--out` that ends in `.json`
-  gives a lammps-jax bundle. A bundle needs `--structure`, the initial
-  structure of the run. `--platform cpu` and `--procs px,py,pz` give a CPU
-  bundle sized for one MPI rank. An `--out` that ends in `.yace` writes a
-  `.yace` model again.
-- **`write_yace(model, path, spec=spec)`** is the new argument order. The old
-  order `write_yace(model, spec, path)` still works and gives a warning.
-- **`aa_dag="greedy"` or `"prefix"`** on `ACECalculator` and `export_lammps`
-  evaluates the product basis recursively. Each product of order k is one
-  product of order k - 1 times one A entry. This is the scheme that ML-PACE
-  uses. The results agree with the default to roundoff. `"prefix"` gives the
-  same products bit for bit. The default (`None`) does not change.
-- **`export_lammps(platform="cpu")`** writes a bundle for the lammps-jax CPU
-  backend. This needs a lammps-jax version with `export_model(platform=)`.
-  Also set `device_memory` to the host memory of one MPI rank.
-- **`neighbour_capacity(procs=(px, py, pz))`** gives the capacities of one MPI
-  rank on that processor grid. Run LAMMPS with `processors px py pz` to match.
-- **`--nmax-by-order` and `--lmax-by-order`** (`aj fit`, `aj basis`) set a
-  maximum radial and angular degree for each correlation order, as
-  pacemaker's `nradmax_by_orders` and `lmax_by_orders` do. Without them, the
-  basis is unchanged.
-- **`aj fit --radial-basis sbessel`** builds the tensor radials from the
-  spherical Bessel functions that pacemaker uses. The default, `poly`, is
-  unchanged. The radial learner works with the two bases. Saved models
-  record the basis, and older models load as `poly`.
-- **`export_lammps` keeps the fast layouts for large models.** Before, if one
-  32768-row block did not fit in GPU memory, `layout="auto"` used `sparse`.
-  That was 15 times slower for a 1461-function silicon model on an A100. Now
-  it makes the block smaller, down to 1024 rows, and uses `sparse` only if no
-  block fits.
-- **`export_lammps(device_memory=...)`** sets the memory of the GPU that runs
-  LAMMPS, in bytes that JAX can use. Use it when you export on a different
-  machine. `block_rows=` sets the block size. The bundle records both.
+- **`aj fit --weights`** also takes the path of a `.json` file.
+
+### Benchmarks
+
+- **The Performance page compares accuracy and cost on silicon.** Fitted
+  models of each family (linear ACE, PACE, MACE, GAP) are compared at the
+  same accuracy, timed in LAMMPS on an A100 and on a 128-core CPU node.
+
+### Fixes
+
+- **`aj fit --learn-radial` keeps the learned radials if a later stage
+  fails.** The fit writes `fit/radial_lam=<weight>.npz` for each roughness
+  weight when its learning stops, before the gate. Before, a failure in the
+  gate lost all the learning. The fit also frees the JAX caches before the
+  gate, which caused that failure on GPUs.
 - **`aj calibrate` refuses an `--uq ard-gp` posterior** (or a `gp_model.npz`)
   with a clear message. Before, it failed later with a missing `model.npz` or
   a `KeyError`.
