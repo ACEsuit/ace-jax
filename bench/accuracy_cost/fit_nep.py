@@ -6,8 +6,8 @@
   adds E0_SI back.
 - Weights: GAP-18's per-config-type force sigmas as a per-structure `weight`, as fit_mace does
   (DATA/weights_mace.json, weights.mace); NEP's own lambda_e / lambda_f / lambda_v otherwise (1, 1, 0.1).
-- Cutoff: 5 A radial and angular (RCUT, every family); the sweep entry sets n_max, basis_size, l_max,
-  neuron (and optionally generation, batch).
+- Cutoff: 5 A radial and angular (RCUT, every family) unless the entry sets `cutoff`; the sweep entry sets
+  n_max, basis_size, l_max, neuron (and optionally generation, batch, cutoff, lambda_1, lambda_2).
 
 Evaluation (test errors, QoIs) and LAMMPS (`pair_style nep`, NEP_CPU's USER-NEP) both run NEP_CPU in
 float64; GPUMD's own GPU inference is mixed precision and is not timed here (docs/dev/accuracy-cost-results.md).
@@ -25,10 +25,13 @@ NEP_DEFAULTS = {"version": 4, "generation": 100000, "batch": 1000}
 
 
 def nep_in(e):
-    """nep.in for a sweep entry: n_max "R A", basis_size "R A", l_max "3b [4b [5b]]", neuron N."""
-    return "\n".join([f"version {e.get('version', NEP_DEFAULTS['version'])}", "type 1 Si", f"cutoff {RCUT:g} {RCUT:g}",
+    """nep.in for a sweep entry: n_max "R A", basis_size "R A", l_max "3b [4b [5b]]", neuron N; optionally
+    cutoff "R A" (default RCUT both) and lambda_1 / lambda_2 (GPUMD's default scales with the parameter count)."""
+    reg = [f"{k} {e[k]:g}" for k in ("lambda_1", "lambda_2") if k in e]
+    return "\n".join([f"version {e.get('version', NEP_DEFAULTS['version'])}", "type 1 Si",
+                      f"cutoff {e.get('cutoff', f'{RCUT:g} {RCUT:g}')}",
                       f"n_max {e['n_max']}", f"basis_size {e['basis_size']}", f"l_max {e['l_max']}",
-                      f"neuron {e['neuron']}", f"batch {e.get('batch', NEP_DEFAULTS['batch'])}",
+                      f"neuron {e['neuron']}", *reg, f"batch {e.get('batch', NEP_DEFAULTS['batch'])}",
                       f"generation {e.get('generation', NEP_DEFAULTS['generation'])}", "prediction 0"]) + "\n"
 
 

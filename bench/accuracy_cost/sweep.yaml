@@ -100,3 +100,9 @@ nep:           # NEP4 trained by GPUMD's nep on a Sulis A100 (fit_nep.py; envs/s
   # width caps, so the larger models widen the basis and add the 4- and 5-body terms
   - {size: n120b, n_max: "12 8", basis_size: "12 12", l_max: "6 1 1", neuron: 120, generation: 300000, chunk: 100000}
   - {size: n120c, n_max: "12 8", basis_size: "16 12", l_max: "8 1 1", neuron: 120, generation: 300000, chunk: 100000}
+  # 30k-generation screens on n120b's descriptor (compare test force RMSE with n120b's own curve at 30k): a longer
+  # radial / shorter angular cutoff, and weaker L1 / L2 regularisation (GPUMD's default ~0.10 here dominates the loss)
+  - {size: n120b-c64,    n_max: "12 8", basis_size: "12 12", l_max: "6 1 1", neuron: 120, generation: 30000, cutoff: "6 4"}
+  - {size: n120b-c65,    n_max: "12 8", basis_size: "12 12", l_max: "6 1 1", neuron: 120, generation: 30000, cutoff: "6 5"}
+  - {size: n120b-reg,    n_max: "12 8", basis_size: "12 12", l_max: "6 1 1", neuron: 120, generation: 30000, lambda_1: 0.01, lambda_2: 0.01}
+  - {size: n120b-c64reg, n_max: "12 8", basis_size: "12 12", l_max: "6 1 1", neuron: 120, generation: 30000, cutoff: "6 4", lambda_1: 0.01, lambda_2: 0.01}
