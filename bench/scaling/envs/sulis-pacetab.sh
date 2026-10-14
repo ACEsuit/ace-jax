@@ -11,7 +11,13 @@
 #   (from bench/scaling/envs) sbatch sulis-pacetab-build-cpu.sbatch; sbatch sulis-pacetab-build-gpu.sbatch
 #
 # Wrappers: $ROOT/lmp-pacetab-cpu.sh, $ROOT/lmp-pacetab.sh (the env jsons' `lmp`).
+#
+# `cpufast`: the same CPU build from a copy of that tree carrying pace_ref/fast/0002-recursive-evaluator-fast.patch
+# with -DNO_DB_FILL -DFAST_DAG -DFAST_AF (the recursive evaluator only: no dB_flatten clear the recursive path never
+# reads, register-carried DAG accumulation, Y / dY cached once per neighbour; same E/F to ~1e-13).  pace/kk is
+# untouched.  Wrapper $ROOT/lmp-pacefast-cpu.sh (accuracy_cost/envs/sulis-cpu-pacefast.json).
 set -euo pipefail
+HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ROOT=${BENCH_ROOT:-$HOME/bench-scaling}
 SRC=$ROOT/lammps-dev
 PACE=$ROOT/lammps-user-pace-tab
@@ -37,6 +43,21 @@ cpu() {
     -D PKG_ML-PACE=ON -D LOCAL_ML-PACE="$PACE"
   cmake --build "$B" -j "$JOBS"
   wrapper lmp-pacetab-cpu.sh "$MODS_CPU" "$B"
+}
+
+cpufast() {
+  local B=$SRC/build-kk-cpu-pacefast F=$ROOT/lammps-user-pace-fast
+  rm -rf "$F"; cp -a "$PACE" "$F"
+  patch -d "$F" -p1 < "$HERE/../../../pace_ref/fast/0002-recursive-evaluator-fast.patch"
+  set +u; module purge; module load $MODS_CPU; set -u
+  rm -rf "$B"
+  cmake -S "$SRC/cmake" -B "$B" -D CMAKE_BUILD_TYPE=Release -D CMAKE_CXX_COMPILER=g++ \
+    -D CMAKE_CXX_FLAGS="-DNO_DB_FILL -DFAST_DAG -DFAST_AF" \
+    -D BUILD_SHARED_LIBS=ON -D BUILD_MPI=ON -D BUILD_OMP=ON \
+    -D PKG_KOKKOS=ON -D Kokkos_ENABLE_OPENMP=ON -D Kokkos_ENABLE_SERIAL=ON -D Kokkos_ARCH_ZEN2=ON \
+    -D PKG_ML-PACE=ON -D LOCAL_ML-PACE="$F"
+  cmake --build "$B" -j "$JOBS"
+  wrapper lmp-pacefast-cpu.sh "$MODS_CPU" "$B"
 }
 
 gpu() {
