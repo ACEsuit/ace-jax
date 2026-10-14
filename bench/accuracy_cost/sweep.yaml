@@ -95,5 +95,8 @@ nep:           # NEP4 trained by GPUMD's nep on a Sulis A100 (fit_nep.py; envs/s
   - {size: n50,  n_max: "8 6",   basis_size: "8 8",   l_max: "4 1",   neuron: 50}
   - {size: n80,  n_max: "10 8",  basis_size: "8 8",   l_max: "6 1",   neuron: 80,  generation: 300000, chunk: 100000}
   - {size: n120, n_max: "12 8",  basis_size: "8 8",   l_max: "6 1",   neuron: 120, generation: 300000, chunk: 100000}
-  - {size: n160, n_max: "14 10", basis_size: "10 10", l_max: "6 1",   neuron: 160, generation: 300000, chunk: 100000}
-  - {size: n240, n_max: "16 12", basis_size: "12 12", l_max: "6 1 1", neuron: 240, generation: 300000, chunk: 100000}
+  # GPUMD's caps (main_nep/parameters.cu): n_max <= "12 8", basis_size <= "16 12", 3-body l_max <= 8, <= 120
+  # neurons a layer, and NEP_CPU / GPUMD's MD evaluate one hidden layer only: n120 is already at the n_max and
+  # width caps, so the larger models widen the basis and add the 4- and 5-body terms
+  - {size: n120b, n_max: "12 8", basis_size: "12 12", l_max: "6 1 1", neuron: 120, generation: 300000, chunk: 100000}
+  - {size: n120c, n_max: "12 8", basis_size: "16 12", l_max: "8 1 1", neuron: 120, generation: 300000, chunk: 100000}
