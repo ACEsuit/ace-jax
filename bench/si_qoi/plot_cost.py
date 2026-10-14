@@ -34,6 +34,8 @@ FAM = {  # family: (label, colour, marker, linestyle, filled, qoi model name pat
     # the same linear ACE fits run by ML-PACE (write_yace, Tabulated radials: exact): linear ACE's colour
     # (same models), the code told apart by marker and line; its accuracy is ACE's, its cost its own (COST_NAME)
     "ace_tab":    ("linear ACE, run by ML-PACE", "#2a78d6", "*", ":",  True,  "ACE_{s}"),
+    # and by ACEpotentials.jl's LAMMPS export (bench/accuracy_cost/build_trim.py: the juliac --trim library, exact)
+    "ace_trim":   ("linear ACE, run by ACEpotentials.jl", "#2a78d6", "X", "-.", True, "ACE_{s}"),
     "ace_lr":     ("ACE, learned radials",     "#e34948", "s", "-",  True,  "ACElr_{s}"),
     "pace":       ("PACE (pacemaker)",         "#eda100", "^", "-",  True,  "PACE_{s}"),
     # MACE is two ladders: L=1 (equivariant messages) costs ~3x an L=0 model of similar size, so one
@@ -70,6 +72,8 @@ def family_of(r):
     fam, size = r["family"], r["size"]
     if fam == "mace":
         return ("mace_xl_" if r.get("code", "").startswith("mace-xl") else "mace_") + size[-2:]
+    if fam == "ace" and r.get("code") == "acepotentials-trim":
+        return "ace_trim"
     if fam == "ace_wl":
         return "ace_wl_o5" if size.startswith("o5") else "ace_wl_" + size.split("_wL")[1]
     return fam
@@ -77,7 +81,7 @@ INK, MUTED, GRID = "#0b0b0b", "#52514e", "#e6e5e1"
 # refits of a timed basis with other loss weights: the same model form, so the same cost
 COST_AS = {"ace_E10": "ace"}
 # a second code for the same fits: its cost under its own name (make_cost.py writes it there)
-COST_NAME = {"mace_xl_L0": "MACExl_{s}", "mace_xl_L1": "MACExl_{s}", "ace_tab": "ACEtab_{s}"}
+COST_NAME = {"mace_xl_L0": "MACExl_{s}", "mace_xl_L1": "MACExl_{s}", "ace_tab": "ACEtab_{s}", "ace_trim": "ACEtrim_{s}"}
 TAB_SIZES = ("o4d12", "o4d14", "o4d16", "o4d20")    # the ace sizes converted (sweep.yaml ace_tab)
 
 
@@ -114,9 +118,10 @@ def load_rows():
         r["n_params"] = trainable(r["family"], r["size"], r.get("n_params"), r.get("model"))
         r["family"] = family_of(r)
     # the Symmetrix-XL series are the MACE fits again (no own metrics row)
-    # and linear ACE run by ML-PACE is the ace fits again
+    # and linear ACE run by ML-PACE or ACEpotentials.jl is the ace fits again
     return (rows + [r | {"family": "mace_xl_" + r["family"][-2:]} for r in rows if r["family"] in ("mace_L0", "mace_L1")]
-            + [r | {"family": "ace_tab"} for r in rows if r["family"] == "ace" and r["size"] in TAB_SIZES])
+            + [r | {"family": "ace_tab"} for r in rows if r["family"] == "ace" and r["size"] in TAB_SIZES]
+            + [r | {"family": "ace_trim"} for r in rows if r["family"] == "ace"])
 
 
 def collect(cost):

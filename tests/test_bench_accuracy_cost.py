@@ -371,6 +371,7 @@ def test_cases_follow_the_code_table(tmp_path, monkeypatch):
                    ("pace", "mlpace", "lammps", "float64"), ("mace", "mace", "lammps", "float64"),
                    ("mace", "mace", "standalone", "float32"), *XL}                   # no gap on the GPU
     assert cpu == {("ace", "acejax-ace", "standalone", "float64"), ("ace_lr", "acejax-ace", "standalone", "float64"),
+                   ("ace", "acepotentials-trim", "lammps", "float64"),               # CPU only
                    ("ace_gp", "acejax-gp", "standalone", "float64"),
                    ("pace", "acejax-pace", "standalone", "float64"), ("pace", "mlpace", "lammps", "float64"),
                    ("mace", "mace", "lammps", "float64"), ("mace", "mace", "standalone", "float32"),
@@ -381,7 +382,7 @@ def test_cases_follow_the_code_table(tmp_path, monkeypatch):
     assert by[("mace", "lammps", "float64")]["symmetrix"].endswith("c8L0/model.json")
     assert all(c["row"]["size"] != "o3d10" for c in cases("cpu"))                      # failed fits are skipped
     assert all(c["row"]["family"] != "gap18_published" for c in cases("cpu"))
-    assert [c["row"]["family"] for c in cases("cpu", only="ace/o3d8")] == ["ace"]
+    assert [c["row"]["family"] for c in cases("cpu", only="ace/o3d8")] == ["ace", "ace"]       # ace-jax, trim
 
 
 def test_mace_xl_rows_name_the_xl_model_its_lammps_and_a_cpu_reference(tmp_path, monkeypatch):
@@ -417,6 +418,37 @@ def test_main_drops_mace_xl_without_its_lammps(tmp_path, monkeypatch):
     timing.main(["gpu", "--only", "mace", "--env", str(tmp_path / "env.json"), "--results", str(tmp_path / "r.jsonl"),
                  "--codes", "mace-xl"])
     assert got == [{"mace"}, {"mace", "mace-xl", "mace-xl-f32"}, {"mace-xl"}]
+
+
+def test_trim_rows_name_their_library_lammps_and_plugin(tmp_path, monkeypatch):
+    """acepotentials-trim: <run dir>/trim/libace.so in the PR 309 LAMMPS (`lmp_ace`, `ace_plugin`), gated
+    against the ace-jax fit; main drops the rows on a host whose env json has no `lmp_ace`."""
+    import json as _json
+    from accuracy_cost import timing
+    from accuracy_cost.common import run_dir
+    _fake_runs(tmp_path, monkeypatch)
+    row = next(c["row"] for c in timing.cases("cpu", only="ace/o3d8") if c["row"]["code"] == timing.TRIM)
+    assert row["trim_lib"] == str(run_dir("ace", "o3d8") / "trim" / "libace.so")
+    env = {"lmp": "/l", "lmp_ace": "/ace/lmp", "ace_plugin": "/p/aceplugin.so"}
+    assert timing.lammps_for(timing.TRIM, "cpu", env) == ("/ace/lmp", None)
+    got = []
+    monkeypatch.setattr(timing, "run_cases", lambda dev, cs, *a, **k: got.append({c["row"]["code"] for c in cs}))
+    monkeypatch.setattr(timing, "subprocess_runner", lambda env, dev: (None, None))
+    monkeypatch.setattr(timing, "wait_idle", lambda **k: {})
+    for e in ({"lmp": "/l"}, env):
+        (tmp_path / "env.json").write_text(_json.dumps(e))
+        timing.main(["cpu", "--only", "ace/o3d8", "--env", str(tmp_path / "env.json"), "--results", str(tmp_path / "r.jsonl")])
+    assert got == [{"acejax-ace"}, {"acejax-ace", timing.TRIM}]
+
+
+def test_trim_record_reads_the_build_sidecar(tmp_path):
+    from scaling.run_lammps import _trim_build, _trim_status
+    so = tmp_path / "libace.so"
+    assert _trim_status({"trim_lib": str(so)})[0] == "error"                         # never built
+    so.with_suffix(".build.json").write_text('{"status": "unsupported", "unsupported": "refused"}')
+    assert _trim_status({"trim_lib": str(so)}) == ("unsupported", f"trim export failed for {so}: refused")
+    so.write_bytes(b""); so.with_suffix(".build.json").write_text('{"build_id": "ab", "sha256": "cd", "gates": {}}')
+    assert _trim_status({"trim_lib": str(so)}) is None and _trim_build({"trim_lib": str(so)}) == {"build_id": "ab", "sha256": "cd"}
 
 
 def test_cases_refuse_gap_on_the_gpu(monkeypatch):

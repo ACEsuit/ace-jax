@@ -49,6 +49,7 @@ from scaling.structures import supercell
 TOL = {"mlpace": (1e-6, 1e-5), "acejax": (1e-10, 1e-9), "mace": (1e-6, None),
        "spline": (1e-9, 3e-8),
        "acepot": (1e-10, 1e-9), "trim": (1e-10, 1e-9), "trim-ace": (1e-5, 1e-3),
+       "acepotentials-trim": (1e-10, 1e-9),       # accuracy_cost: the trim library vs the ace-jax fit (exact radials)
        "gap": (1e-6, 1e-5),
        # Symmetrix-XL vs MACE in PyTorch (float64), as "mace" plus a force bound; FP32 looser (labelled -f32)
        "mace-xl": (1e-6, 1e-4), "mace-xl-f32": (1e-5, 1e-3)}

@@ -22,6 +22,7 @@ import sys
 
 from . import common
 from .common import RESULTS
+from .build_trim import trim_lib
 
 sys.path.insert(0, str(common.HERE.parent))
 N = {"gpu": (32768, 4096), "cpu": (4096, 512)}
@@ -36,7 +37,10 @@ KEY = ("code", "family", "size", "dtype", "mode", "device")
 # family -> [(code, {device: mode}, dtypes)]: the spec's code table.  ace_lr is
 # timed as deployed (ACECalculator / export_lammps default: lean, spline_tol="auto").
 # gap18_published is a reference line (metrics.jsonl), not a swept family.
-PLAN = {"ace": [("acejax-ace", {"cpu": "standalone", "gpu": "lammps"}, ("float64",))],
+PLAN = {"ace": [("acejax-ace", {"cpu": "standalone", "gpu": "lammps"}, ("float64",)),
+                # ACEpotentials.jl's PR 309 LAMMPS export of the same fit (accuracy_cost/build_trim.py: the
+                # juliac --trim library, pair_style ace; CPU only); only where the env json names `lmp_ace`
+                ("acepotentials-trim", {"cpu": "lammps"}, ("float64",))],
         "ace_lr": [("acejax-ace", {"cpu": "standalone", "gpu": "lammps"}, ("float64",))],
         # PACE-shaped ACE (pacemaker's per-order caps, SBessel radials; feat/sbessel-radials + basis caps):
         # timed as deployed, like ace / ace_lr (lean; an SBessel radial is never splined, learned or not)
@@ -63,7 +67,8 @@ PLAN = {"ace": [("acejax-ace", {"cpu": "standalone", "gpu": "lammps"}, ("float64
         "gap_noglue": [("gap", {"cpu": "lammps"}, ("float64",))],  # the XML has no Glue term; same pair style
         "gap_E30": [("gap", {"cpu": "lammps"}, ("float64",))]}     # GAP-18's command, energy sigmas x10/3
 STYLE = {"acejax-ace": "acejax", "acejax-pace": "acejax", "mlpace": "mlpace", "mace": "mace", "gap": "gap",
-         "mace-xl": "mace-xl", "mace-xl-f32": "mace-xl-f32"}
+         "mace-xl": "mace-xl", "mace-xl-f32": "mace-xl-f32", "acepotentials-trim": "acepotentials-trim"}
+TRIM = "acepotentials-trim"
 XL_CODES = ("mace-xl", "mace-xl-f32")
 GATE_N, GATE_CELLS = 64, 3                        # three rattled 64-atom Si cells
 
@@ -194,6 +199,8 @@ def cases(device, only=None):
                                "quip_label": st.get("quip_label"),
                                "ref": _local(st["source"]) if st.get("source") else None,   # gate reference
                                "n_params": st.get("n_params")}
+                        if code == TRIM:
+                            row["trim_lib"] = str(trim_lib(d))
                         if fam in ("ace", "ace_wl") and os.environ.get("ACEJAX_AC_ACE_SPLINE_TOL"):   # analytic radials splined
                             row["spline_tol"] = float(os.environ["ACEJAX_AC_ACE_SPLINE_TOL"])  # like ace_lr's (opt-in)
                         out.append({"row": row, "mode": mode, "dtype": dt})
@@ -246,6 +253,10 @@ def gate_model(row, device, env, work):
                 elif style == "mlpace":                                # a converted model: its source
                     E0, F0 = parity._acejax_ef(row.get("ref") or row["path"], at)
                     E1, F1 = parity._lammps_ef("mlpace", row["path"], row["elements"], at, device, lmp, w)
+                elif style == TRIM:                                  # vs the fit itself, unsplined
+                    E0, F0 = parity._acejax_ef(row["path"], at)
+                    E1, F1 = parity._lammps_ef(TRIM, row["trim_lib"], row["elements"], at, device,
+                                               env["lmp_ace"], w, aceplugin=env["ace_plugin"])
                 elif style == "mace":
                     E0, F0 = parity._mace_ef(row["path"], at, device)
                     E1, F1 = parity._lammps_ef("mace", row["symmetrix"], row["elements"], at, device, lmp, w)
@@ -278,7 +289,7 @@ def time_case(c, device, n, env, work, prev=None):
     lmp, pjrt = lammps_for(row["code"], device, env)
     ranks, threads = (CPU_RANKS, CPU_THREADS) if device == "cpu" else (1, 1)
     return run_lammps.run_case(row, n, c["dtype"], device, lmp, ranks, work, pjrt=pjrt, prev=prev,
-                               threads=threads)
+                               threads=threads, aceplugin=env.get("ace_plugin"))
 
 
 def lammps_for(code, device, env):
@@ -286,6 +297,8 @@ def lammps_for(code, device, env):
     lammps-jax build with XLA's CPU plugin (env `lmp_jax_cpu`, `pjrt_cpu`)."""
     if code in XL_CODES:
         return env["lmp_xl"], None
+    if code == TRIM:
+        return env["lmp_ace"], None
     if not code.startswith("acejax"):
         return env["lmp"], env.get("pjrt")
     if device == "cpu":
@@ -444,7 +457,8 @@ def main(argv=None):
     meta = {"forced_busy": a.force_busy,
             "device_name": device_name(a.device), "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES")}
     runner, gate = subprocess_runner(env, a.device)
-    cs = [c for c in cases(a.device, only=a.only) if c["row"]["code"] not in XL_CODES or env.get("lmp_xl")]
+    cs = [c for c in cases(a.device, only=a.only) if (c["row"]["code"] not in XL_CODES or env.get("lmp_xl"))
+          and (c["row"]["code"] != TRIM or env.get("lmp_ace"))]
     if a.codes:
         cs = [c for c in cs if c["row"]["code"] in a.codes]
     run_cases(a.device, cs, runner, gate,
