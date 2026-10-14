@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # CPU LAMMPS with the tabulated-radial ML-PACE (sulis-pacetab.sh cpu).  Submit from bench/scaling/envs:
-#   sbatch sulis-pacetab-build-cpu.sbatch [cpu|cpufast]          (default cpu)
+#   sbatch sulis-pacetab-build-cpu.sbatch [cpu|cpufast|cpufork]          (default cpu)
 #SBATCH --job-name=pacetab-build-cpu
 #SBATCH --account=su007-jrk
 #SBATCH --partition=compute

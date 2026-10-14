@@ -23,9 +23,10 @@ export ACEJAX_AC_ROOT=$ROOT/ac ACEJAX_AC_MAX_LOAD1=16 JAX_PLATFORMS=cpu
 export ACEJAX_AC_CPU_RANKS=128 ACEJAX_AC_CPU_THREADS=1
 echo "job $SLURM_JOB_ID on $(hostname) $(date -Is) $(grep -m1 'model name' /proc/cpuinfo)"
 R=accuracy_cost/results                    # results/sulis/ in the repository
+V=${PACE_VARIANT:-fast}                    # fast: release + 0002 (pace_ref/fast); fork: jameskermode tabulated-summed-fast
 for s in ${@:-o4d12 o4d14 o4d16 o4d20}; do
   "$ROOT/venv/bin/python" -m accuracy_cost.timing cpu --only ace_tab/$s --codes mlpace \
-      --env accuracy_cost/envs/sulis-cpu-pacefast.json --results $R/sulis-cpu-128x1-ace_tabfast.jsonl || true
+      --env accuracy_cost/envs/sulis-cpu-pace$V.json --results $R/sulis-cpu-128x1-ace_tab$V.jsonl || true
   "$ROOT/venv/bin/python" -m accuracy_cost.timing cpu --only ace_tab/$s --codes mlpace \
       --env accuracy_cost/envs/sulis-cpu-pacetab.json --results $R/sulis-cpu-128x1-ace_tab4.jsonl || true
 done

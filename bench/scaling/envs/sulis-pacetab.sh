@@ -78,20 +78,42 @@ gpu() {
   wrapper lmp-pacetab.sh "$MODS_GPU" "$B"
 }
 
-gputeam() {
-  local T=$ROOT/lammps-pacekk-team B
+# `cpufork`: the CPU build from jameskermode/lammps-user-pace tabulated-summed-fast (upstream main + tabulated radials,
+# the recursive-evaluator speed-ups and summed_neighbour_A; rsync a checkout to $ROOT/lammps-user-pace-fork first).
+# Wrapper $ROOT/lmp-pacefork-cpu.sh (accuracy_cost/envs/sulis-cpu-pacefork.json).
+cpufork() {
+  local B=$SRC/build-kk-cpu-pacefork F=$ROOT/lammps-user-pace-fork
+  set +u; module purge; module load $MODS_CPU; set -u
+  rm -rf "$B"
+  cmake -S "$SRC/cmake" -B "$B" -D CMAKE_BUILD_TYPE=Release -D CMAKE_CXX_COMPILER=g++ \
+    -D BUILD_SHARED_LIBS=ON -D BUILD_MPI=ON -D BUILD_OMP=ON \
+    -D PKG_KOKKOS=ON -D Kokkos_ENABLE_OPENMP=ON -D Kokkos_ENABLE_SERIAL=ON -D Kokkos_ARCH_ZEN2=ON \
+    -D PKG_ML-PACE=ON -D LOCAL_ML-PACE="$F"
+  cmake --build "$B" -j "$JOBS"
+  wrapper lmp-pacefork-cpu.sh "$MODS_CPU" "$B"
+}
+
+gputeam() { _gputeam lammps-pacekk-team "$PACE" lmp-pacetab-team.sh 0003-pacekk-team-rho-weights.patch; }
+
+# `gputeamsum`: gputeam + 0005 (pace/kk summed_neighbour_A) against an ML-PACE carrying summed_neighbour_A
+# ($ROOT/lammps-user-pace-sumA: v.2025.12.4.p1 + 0001 + 0002 + 0004).  Wrapper $ROOT/lmp-pacetab-teamsum.sh.
+gputeamsum() { _gputeam lammps-pacekk-teamsum "$ROOT/lammps-user-pace-sumA" lmp-pacetab-teamsum.sh \
+                        0003-pacekk-team-rho-weights.patch 0005-pacekk-summed-neighbour-A.patch; }
+
+_gputeam() {   # <tree name> <ML-PACE> <wrapper> <patch...>
+  local T=$ROOT/$1 P=$2 W=$3 B; shift 3
   rm -rf "$T"; mkdir -p "$T"
   (cd "$SRC" && tar --exclude='./build*' --exclude=./.git --exclude=./doc --exclude=./examples -cf - .) | tar -xf - -C "$T"
-  patch -d "$T" -p1 < "$HERE/../../../pace_ref/fast/0003-pacekk-team-rho-weights.patch"
-  B=$T/build-kk-pacetab-team
+  for p in "$@"; do patch -d "$T" -p1 < "$HERE/../../../pace_ref/fast/$p"; done
+  B=$T/build-kk
   set +u; module purge; module load $MODS_GPU; set -u
   export NVCC_WRAPPER_DEFAULT_COMPILER=g++
   cmake -S "$T/cmake" -B "$B" -D CMAKE_BUILD_TYPE=Release -D CMAKE_CXX_COMPILER="$T/lib/kokkos/bin/nvcc_wrapper" \
-    -D BUILD_SHARED_LIBS=ON -D BUILD_MPI=ON -D BUILD_OMP=ON \
+    -D CMAKE_CXX_FLAGS="-lineinfo" -D BUILD_SHARED_LIBS=ON -D BUILD_MPI=ON -D BUILD_OMP=ON \
     -D PKG_KOKKOS=ON -D Kokkos_ENABLE_CUDA=ON -D Kokkos_ENABLE_OPENMP=ON -D Kokkos_ENABLE_SERIAL=ON \
-    -D Kokkos_ARCH_AMPERE80=ON -D PKG_ML-PACE=ON -D LOCAL_ML-PACE="$PACE"
+    -D Kokkos_ARCH_AMPERE80=ON -D PKG_ML-PACE=ON -D LOCAL_ML-PACE="$P"
   cmake --build "$B" -j "$JOBS"
-  wrapper lmp-pacetab-team.sh "$MODS_GPU" "$B"
+  wrapper "$W" "$MODS_GPU" "$B"
 }
 
 git -C "$PACE" log -1 --format="lammps-user-pace-tab %h %s" 2>/dev/null || cat "$PACE/REV"

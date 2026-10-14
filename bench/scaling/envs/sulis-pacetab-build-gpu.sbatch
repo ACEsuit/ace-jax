@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # CUDA (A100) LAMMPS with the tabulated-radial ML-PACE (sulis-pacetab.sh gpu).  Submit from bench/scaling/envs:
-#   sbatch sulis-pacetab-build-gpu.sbatch [gpu|gputeam]          (default gpu)
+#   sbatch sulis-pacetab-build-gpu.sbatch [gpu|gputeam|gputeamsum]          (default gpu)
 #SBATCH --job-name=pacetab-build-gpu
 #SBATCH --account=su007-jrk-gpu
 #SBATCH --partition=gpu
