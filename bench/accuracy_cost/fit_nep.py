@@ -87,11 +87,14 @@ def calculator(path):
     from calorine.calculators import CPUNEP
 
     class _NEP(CPUNEP):
+        def __init__(self, *a, **k):
+            super().__init__(*a, **k)
+            self.implemented_properties.append("free_energy")   # CPUNEP.__init__ sets the list per instance
+
         def calculate(self, atoms=None, properties=None, system_changes=None):
             super().calculate(atoms, properties, system_changes)
-            for k in ("energy", "free_energy"):
-                if k in self.results:
-                    self.results[k] = self.results[k] + len(self.atoms) * E0_SI
+            self.results["energy"] = self.results["energy"] + len(self.atoms) * E0_SI
+            self.results["free_energy"] = self.results["energy"]   # CPUNEP has none; ASE's cell filters ask for it
             if "energies" in self.results:
                 self.results["energies"] = self.results["energies"] + E0_SI
     return _NEP(str(path))

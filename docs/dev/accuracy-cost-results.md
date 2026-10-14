@@ -42,6 +42,7 @@ Not reached in their ladders (best QoI error, at that model's force RMSE):
 | PACE-shaped ACE (fixed / learned radials) | 0.66 / 0.73 | md18 / md12 | 0.107 / 0.110 |
 | GAP refit (glue / no glue / ACE's E:F balance) | 0.35 / 0.36 / 0.40 | s9000 | 0.088 / 0.088 / 0.085 |
 | MACE, one layer | 1.38 | c32L0n1 | 0.102 |
+| NEP (GPUMD) | 0.79 | n120 | 0.108 |
 
 The GAP refits meet the QoI target but not GAP-18's force error; PACE meets the force target with fewer
 parameters than linear ACE (f800: 761 parameters, 0.081 eV/Å) but not the QoI target.
@@ -57,6 +58,10 @@ parameters than linear ACE (f800: 761 parameters, 0.081 eV/Å) but not the QoI t
   and 0.59 at o4d14, against 0.85 for ML-PACE (o4d14) and 3.4-7.9 for lammps-jax. It ties ML-PACE at o4d16
   (1.42 vs 1.41) and is 2x slower at o4d20 (10.8 vs 5.39), still 4.6x faster than lammps-jax there. Parity
   against ace-jax on the npz: |dE|/atom <= 6.5e-12 eV, |dF| <= 1.2e-11 eV/Å over the ladder. CPU only.
+- **NEP** is the cheapest family on the CPU (0.55-1.9 µs/atom-step, n10-n120) but plateaus at 0.107 eV/Å
+  (n80; n120 is no better) and QoI error 0.79: n120's point-defect energies are 19-31% low. Trained with GPUMD
+  v5.9.1 (NEP4, 5 Å radial and angular cutoffs, 100k generations, weights.mace per-config weights); one fit per
+  size, no cutoff or loss-weight search.
 - **Symmetrix-XL** is 1.1-3.6x faster than Symmetrix for the same MACE models, most at L = 1 on the GPU.
 - **The DAG product basis** (`aa_dag="greedy"`, #90) gives ace-jax's fastest CPU rows at o4d16 and o4d20; it
   also cuts the compiled temporary memory (o4d20: 3.9 GB to 0.64 GB on one core).
@@ -79,6 +84,10 @@ parameters than linear ACE (f800: 761 parameters, 0.081 eV/Å) but not the QoI t
   ace-jax before compiling), exported with `for_library=true` and compiled by `juliac --trim=safe` on a compute
   node (Julia 1.12.6; `accuracy_cost/build_trim.py`, `envs/sulis-cpu-trim.sbatch`), run by the PR 309
   `pair_style ace` plugin in the same LAMMPS (`bench/scaling/envs/sulis-acepot.sh`); 128 x 1 ranks only.
+- NEP: LAMMPS develop ec02ed0 + NEP_CPU af615ce's USER-NEP (`pair_style nep`, float64, 128 x 1 ranks;
+  `bench/scaling/envs/sulis-nep.sh`, `envs/sulis-cpu-nep.sbatch`), gated against calorine's CPUNEP (same
+  code, < 2e-14 eV/Å). No GPU row: GPUMD's GPU inference is mixed precision (float descriptors and network).
+  Test errors and QoIs also use CPUNEP, in float64.
 - QoIs: compressed ("short and fat") hcp is left out of the score (outside the training data; it measures
   extrapolation); only models with every QoI computed are plotted. Single fits per point.
 - GAP's parameter count is its sparse-point coefficients; the kernel also stores the sparse descriptors.

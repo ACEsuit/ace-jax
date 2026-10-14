@@ -289,13 +289,14 @@ def main():
                 "GPU ML-PACE: LAMMPS develop ec02ed0 (with the 2026-08 pace/kk GPU rewrite).\n"
                 "Linear ACE run by ACEpotentials.jl (CPU only): each fit as an ACEpotentials model, exported and compiled "
                 "with juliac --trim (ACEpotentials PR 309, v0.10.2), in LAMMPS via its pair_style ace plugin.\n"
+                "NEP: trained by GPUMD, run in LAMMPS pair_style nep (NEP_CPU, float64); no GPU row (GPUMD's GPU inference is mixed precision).\n"
                 if any("CPU" in r[0] for r in rows) else "")
     if not a.no_note:
         fig.text(0.5, 0.003, cpu_note + "QoI error clips each QoI to [0.05, 10] x tolerance; compressed hcp is left out (extrapolation, "
                  "outside the training data); only models with every QoI computed.\n"
                  "Cost: the fastest parity-checked code per model, float64 only (one-layer MACE and, on the GPU, Symmetrix MACE c64L1 have "
                  "float32 timings only and are left out of the cost rows). Single fits per point.", ha="center", fontsize=8.5, color=MUTED)
-    fig.tight_layout(rect=(0, 0 if a.no_note else 0.055, 1, 1 - 1.0 / fig.get_figheight()))
+    fig.tight_layout(rect=(0, 0 if a.no_note else 0.065, 1, 1 - 1.0 / fig.get_figheight()))
     pathlib.Path(a.out).parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(a.out, dpi=150); print("wrote", a.out)
 
