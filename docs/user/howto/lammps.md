@@ -6,14 +6,16 @@ ace-jax models run in LAMMPS with
 the GPU. ace-jax writes the program and its metadata into one JSON
 *bundle*.
 
-!!! note "lammps-jax is not on PyPI"
-    1. Install lammps-jax from a clone or a fixed commit, for example
-       `pip install "lammps-jax @ git+https://github.com/abhijeetgangan/lammps-jax"`.
-    2. Build its LAMMPS plugin. Use the lammps-jax instructions.
+!!! note "Install lammps-jax"
+    1. Install the lammps-jax Python package: `pip install lammps-jax`.
+       For a CPU run, use `pip install "lammps-jax[cpu]"`. This also installs
+       the XLA CPU PJRT plugin (Linux x86_64 only).
+    2. Build its LAMMPS plugin at the same version. Use the lammps-jax instructions.
 
-    The ace-jax CI tests the export with lammps-jax commit `96ccc72`. The pair
-    style runs on a GPU (KOKKOS with CUDA). It also runs on CPUs (KOKKOS with
-    OpenMP) if you export with `platform="cpu"`.
+    The ace-jax CI tests the export with lammps-jax 0.2.0. The pair style runs
+    on a GPU (KOKKOS with CUDA). It also runs on CPUs (KOKKOS with OpenMP) if
+    you export with `platform="cpu"`. The plugin refuses a bundle that was
+    exported for the other platform.
 
 ## Export
 

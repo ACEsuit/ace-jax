@@ -110,7 +110,8 @@ def test_bundle_written(tmp_path):
                                   "type_elements": [32, 14], "k_dense": 64, "owned_rows": None,
                                   "lean": False,           # PACE: no lean form
                                   "spline_tol": None, "spline_intervals": None,
-                                  "radial_table": None, "platform": "cuda", "aa_dag": None}
+                                  "radial_table": None, "aa_dag": None}
+    assert on_disk["export_info"]["platform"] == "cuda"
     assert b["ace_jax"]["layout"] == "dense"
 
 
@@ -136,7 +137,7 @@ def test_cpu_bundle_compiles_on_xla_cpu(tmp_path, layout):
     b = export_lammps(model, meta, tmp_path / "m.json", layout=layout, max_atoms=cap["max_atoms"],
                       max_owned=cap["max_owned"], k_dense=cap["k_dense"], platform="cpu",
                       device_memory=2**30, **graph)
-    assert b["ace_jax"]["platform"] == "cpu" and b["export_info"]["platform"] == "cpu"
+    assert b["export_info"]["platform"] == "cpu"
     be = xla_bridge.get_backend("cpu")
     opts = xla_client.CompileOptions.ParseFromString(base64.b64decode(b["compile_options_b64"]))
     be.compile_and_load(base64.b64decode(b["programs"]["energy_and_forces_mlir_b64"]),
@@ -272,7 +273,7 @@ LAMMPS_JAX_KEYS = {"comm_sites", "comm_widths", "compile_options_b64", "custom_c
                    "cutoff", "edge_pairing",
                    "energy_and_forces_mlir", "energy_mlir", "force_mlir", "force_output",
                    "format", "input_layout", "max_atoms", "max_edges", "max_neighbors",
-                   "max_owned", "n_hops", "n_species", "newton", "pair_sum", "precision",
+                   "max_owned", "n_hops", "n_species", "newton", "pair_sum", "platform", "precision",
                    "unit_style", "uses_box"}
 
 
@@ -288,7 +289,7 @@ def test_bundle_metadata_keys_do_not_shadow_the_contract(tmp_path, layout):
     # the exporting lammps-jax) is written for every layout, and none is a contract key
     assert set(b["ace_jax"]) == {"layout", "elements", "type_elements", "k_dense", "owned_rows",
                                  "lean", "spline_tol", "spline_intervals", "radial_table", "block_rows", "device_memory", "dense_budget",
-                                 "lammps_jax", "platform", "aa_dag"}
+                                 "lammps_jax", "aa_dag"}
     assert not set(b["ace_jax"]) & LAMMPS_JAX_KEYS
 
 
