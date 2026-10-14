@@ -27,6 +27,7 @@ Cheapest model reaching the target, µs/atom-step, float64, LAMMPS:
 |---|---|---|---|---|---|
 | linear ACE o4d20, ace-jax (lammps-jax) | 5,476 | 0.0816 | 0.41 | 5.65 | 50.0 |
 | linear ACE o4d20, ML-PACE (tabulated radials) | 5,476 | 0.0816 | 0.41 | 4.12 | 5.39 |
+| linear ACE o4d20, patched ML-PACE (proposed upstream) | 5,476 | 0.0816 | 0.41 | – | 3.50 |
 | linear ACE o4d20, ACEpotentials.jl (trim library) | 5,476 | 0.0816 | 0.41 | – | 10.8 |
 | MACE c16L0, Symmetrix | 31,152 | 0.0699 | < 0.5 | 1.93 | 2.36 |
 | MACE c16L0, Symmetrix-XL | 31,152 | 0.0699 | < 0.5 | 1.23 | 2.19 |
@@ -53,6 +54,12 @@ parameters than linear ACE (f800: 761 parameters, 0.081 eV/Å) but not the QoI t
   `ml-pace-tabulated-radials.md`), o4d20 runs at 5.39 µs/atom-step on 128 ranks against 50.0 through the
   lammps-jax CPU backend with the DAG product basis, and 3.98 for PACE f3200. On the A100 the gap is smaller
   (4.12 vs 5.65).
+- **Patched ML-PACE** (the recursive-evaluator speed-ups on jameskermode/lammps-user-pace
+  `tabulated-summed-fast`, proposed upstream: no unused dB_flatten clear, register-carried DAG passes, the
+  force pass summed over n first) is 1.4-1.5x faster on 128 ranks from o4d14 up (o4d20 3.50 vs 5.39
+  µs/atom-step, o4d16 1.02 vs 1.41, o4d14 0.59 vs 0.85) and no faster at o4d12 (0.47 vs 0.45); one core:
+  2.3x at o4d20.  CPU only: pace/kk is unchanged (on the A100 a fused one-team-per-atom Rho/Weights kernel
+  gained nothing; ncu shows the stock kernels issue-bound on integer index arithmetic, not memory or atomics).
 - **ACEpotentials.jl's compiled export** (the same fits as ACEpotentials models, `juliac --trim` libraries in
   LAMMPS, ACEpotentials PR 309) is the fastest CPU code for linear ACE up to o4d14: 0.10 µs/atom-step at o3d8
   and 0.59 at o4d14, against 0.85 for ML-PACE (o4d14) and 3.4-7.9 for lammps-jax. It ties ML-PACE at o4d16
@@ -96,6 +103,12 @@ parameters than linear ACE (f800: 761 parameters, 0.081 eV/Å) but not the QoI t
   o4d20 with `aa_dag="greedy"`). ML-PACE on the GPU: LAMMPS develop ec02ed0 (Stan Moore's 2026-08 `pace/kk`
   rewrite; about 2x faster than the 10Sep2025 patch release). Linear ACE run by ML-PACE: that tree with
   `LOCAL_ML-PACE` = v.2025.12.4.p1 + the tabulated-radial patch (`bench/scaling/envs/sulis-pacetab.sh`).
+  Patched ML-PACE: the same LAMMPS tree with `LOCAL_ML-PACE` = jameskermode/lammps-user-pace
+  tabulated-summed-fast e9862a7 (upstream main 99aa6e6 + tabulated radials + the speed-ups + summed_neighbour_A;
+  `sulis-pacetab.sh cpufork`, `envs/sulis-cpu-pacefast.sbatch` with `PACE_VARIANT=fork`); rows
+  `sulis-cpu-128x1-ace_tabfork.jsonl`, plotted as their own line (`plot_cost.PATCHED_MLPACE`).  `ace_tabfast`
+  (the release-based prototype) and `ace_tab4` (stock re-timed on a loaded node) are kept for the record and
+  left out of the cost table.
   Linear ACE run by ACEpotentials.jl: each `aj fit` model rebuilt as an ACEpotentials v0.10.2 `ace_model`
   (`bench/scaling/julia/build_trim_acejax.jl`: coefficients mapped through the AA basis, gated to 1e-10 against
   ace-jax before compiling), exported with `for_library=true` and compiled by `juliac --trim=safe` on a compute
@@ -119,7 +132,8 @@ Cost files from the timing rows (float64 only), then the figures:
 ```bash
 R=bench/accuracy_cost/results/sulis; RR=bench/si_qoi/results
 python bench/si_qoi/make_cost.py --dtype float64 --out $RR/cost_sulis_cpu.json \
-    $(ls $R/sulis-cpu*.jsonl | grep -v -e smoke -e ace_yace -e pacetab-check -e "ace_tab\.jsonl" -e ace_tab2)
+    $(ls $R/sulis-cpu*.jsonl | grep -v -e smoke -e ace_yace -e pacetab-check -e "ace_tab\.jsonl" -e ace_tab2 \
+      -e ace_tabfast -e ace_tab4)
 python bench/si_qoi/make_cost.py --dtype float64 --out $RR/cost_sulis_gpu.json \
     bench/accuracy_cost/results/sulis-gpu.jsonl bench/accuracy_cost/results/sulis-gpu-ace-splined.jsonl \
     $R/sulis-gpu-ace-splined-v2.jsonl $R/sulis-gpu-v2.jsonl $R/sulis-gpu-mace_xl.jsonl \

@@ -42,6 +42,11 @@
 
 ### Benchmarks
 
+- The silicon accuracy-cost figure adds linear ACE run by ML-PACE with the
+  recursive-evaluator speed-ups proposed upstream (jameskermode/lammps-user-pace
+  `tabulated-summed-fast`), on the CPU: 1.4-1.5x faster than stock ML-PACE from
+  o4d14 up (o4d20: 3.50 against 5.39 µs/atom-step on 128 cores).
+
 - The silicon accuracy-cost benchmark adds linear ACE run by ACEpotentials.jl
   on the CPU: each `aj fit` model rebuilt as an ACEpotentials `ace_model`
   (`bench/scaling/julia/build_trim_acejax.jl`, gated to 1e-10 against ace-jax),

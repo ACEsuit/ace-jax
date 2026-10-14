@@ -34,6 +34,9 @@ FAM = {  # family: (label, colour, marker, linestyle, filled, qoi model name pat
     # the same linear ACE fits run by ML-PACE (write_yace, Tabulated radials: exact): linear ACE's colour
     # (same models), the code told apart by marker and line; its accuracy is ACE's, its cost its own (COST_NAME)
     "ace_tab":    ("linear ACE, run by ML-PACE", "#2a78d6", "*", ":",  True,  "ACE_{s}"),
+    # and by ML-PACE with the additions proposed upstream (jameskermode/lammps-user-pace tabulated-summed-fast:
+    # recursive-evaluator speed-ups; CPU only, pace/kk is unchanged): the same files, the open star
+    "ace_tabfork": ("linear ACE, run by patched ML-PACE", "#2a78d6", "*", "--", False, "ACE_{s}"),
     # and by ACEpotentials.jl's LAMMPS export (bench/accuracy_cost/build_trim.py: the juliac --trim library, exact)
     "ace_trim":   ("linear ACE, run by ACEpotentials.jl", "#2a78d6", "X", "-.", True, "ACE_{s}"),
     "ace_lr":     ("ACE, learned radials",     "#e34948", "s", "-",  True,  "ACElr_{s}"),
@@ -82,6 +85,8 @@ def family_of(r):
         return "ace_trim"
     if fam == "nep" and size.startswith("nlit"):
         return "nep_lit"
+    if fam == "ace_tab" and any(t in r.get("_file", "") for t in PATCHED_MLPACE):   # make_cost's per-row file stem
+        return "ace_tabfork"
     if fam == "ace_wl":
         return "ace_wl_o5" if size.startswith("o5") else "ace_wl_" + size.split("_wL")[1]
     return fam
@@ -89,7 +94,11 @@ INK, MUTED, GRID = "#0b0b0b", "#52514e", "#e6e5e1"
 # refits of a timed basis with other loss weights: the same model form, so the same cost
 COST_AS = {"ace_E10": "ace"}
 # a second code for the same fits: its cost under its own name (make_cost.py writes it there)
-COST_NAME = {"mace_xl_L0": "MACExl_{s}", "mace_xl_L1": "MACExl_{s}", "ace_tab": "ACEtab_{s}", "ace_trim": "ACEtrim_{s}"}
+COST_NAME = {"mace_xl_L0": "MACExl_{s}", "mace_xl_L1": "MACExl_{s}", "ace_tab": "ACEtab_{s}", "ace_trim": "ACEtrim_{s}",
+             "ace_tabfork": "ACEtabfork_{s}"}
+# timing files of ML-PACE with the proposed additions (sulis-cpu-pacefast.sbatch, PACE_VARIANT=fork): their
+# mlpace rows are the ace_tabfork line, not stock ML-PACE's
+PATCHED_MLPACE = ("ace_tabfork",)
 TAB_SIZES = ("o4d12", "o4d14", "o4d16", "o4d20")    # the ace sizes converted (sweep.yaml ace_tab)
 
 
@@ -129,6 +138,7 @@ def load_rows():
     # and linear ACE run by ML-PACE or ACEpotentials.jl is the ace fits again
     return (rows + [r | {"family": "mace_xl_" + r["family"][-2:]} for r in rows if r["family"] in ("mace_L0", "mace_L1")]
             + [r | {"family": "ace_tab"} for r in rows if r["family"] == "ace" and r["size"] in TAB_SIZES]
+            + [r | {"family": "ace_tabfork"} for r in rows if r["family"] == "ace" and r["size"] in TAB_SIZES]
             + [r | {"family": "ace_trim"} for r in rows if r["family"] == "ace"])
 
 
@@ -305,16 +315,22 @@ def main():
                 "ace-jax runs in LAMMPS (lammps-jax CPU backend; ACE o4d16 and o4d20 with the recursive (DAG) product basis, aa_dag='greedy'); MACE runs in LAMMPS via Symmetrix and, separately, Symmetrix-XL.\n"
                 "Linear ACE run by ML-PACE: the o4 fits exported exactly to .yace with tabulated radials (ML-PACE with the tabulated-radial patch, ICAMS/lammps-user-pace#31; pace and pace/kk).  "
                 "GPU ML-PACE: LAMMPS develop ec02ed0 (with the 2026-08 pace/kk GPU rewrite).\n"
+                "Patched ML-PACE (CPU only): its recursive evaluator with the speed-ups proposed upstream "
+                "(jameskermode/lammps-user-pace tabulated-summed-fast).\n"
                 "Linear ACE run by ACEpotentials.jl (CPU only): each fit as an ACEpotentials model, exported and compiled "
                 "with juliac --trim (ACEpotentials PR 309, v0.10.2), in LAMMPS via its pair_style ace plugin.\n"
                 "NEP: trained by GPUMD; on the CPU LAMMPS pair_style nep (NEP_CPU, float64); on the GPU GPUMD's own MD code, mixed precision (labelled).\n"
                 if any("CPU" in r[0] for r in rows) else "")
+    bottom = 0
     if not a.no_note:
-        fig.text(0.5, 0.003, cpu_note + "QoI error clips each QoI to [0.05, 10] x tolerance; compressed hcp is left out (extrapolation, "
-                 "outside the training data); only models with every QoI computed.\n"
-                 "Cost: the fastest parity-checked code per model, float64 only except NEP on the GPU (one-layer MACE and, on the GPU, Symmetrix MACE c64L1 have "
-                 "float32 timings only and are left out of the cost rows). Single fits per point.", ha="center", fontsize=8.5, color=MUTED)
-    fig.tight_layout(rect=(0, 0 if a.no_note else 0.065, 1, 1 - (0.2 * legend_rows + 0.15) / fig.get_figheight()))
+        note = (cpu_note + "QoI error clips each QoI to [0.05, 10] x tolerance; compressed hcp is left out (extrapolation, "
+                "outside the training data); only models with every QoI computed.\n"
+                "Cost: the fastest parity-checked code per model, float64 only except NEP on the GPU (one-layer MACE and, on the GPU, Symmetrix MACE c64L1 have "
+                "float32 timings only and are left out of the cost rows). Single fits per point.")
+        fig.text(0.5, 0.003, note, ha="center", fontsize=8.5, color=MUTED)
+        # the axes start above the note: its lines (8.5 pt, 1.2 spacing) plus room for the bottom row's axis label
+        bottom = ((note.count("\n") + 1) * 8.5 * 1.2 / 72 + 0.2) / fig.get_figheight()
+    fig.tight_layout(rect=(0, bottom, 1, 1 - (0.2 * legend_rows + 0.15) / fig.get_figheight()))
     pathlib.Path(a.out).parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(a.out, dpi=150); print("wrote", a.out)
 
