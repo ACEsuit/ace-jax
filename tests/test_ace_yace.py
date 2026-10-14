@@ -102,3 +102,24 @@ def test_write_yace_arguments(tmp_path):
     from ace_jax.eval.model import lean
     with pytest.raises(Exception, match="lean|full"):
         write_yace(lean(model), tmp_path / "lean.yace")
+
+
+def test_yace_export_summed_pools_neighbour_species(tmp_path):
+    """summed=True keeps ACE's pooled A: every factor is element 0, one rank-1 g_1, each bond's tables hold
+    every column, and the tree flags summed_neighbour_A (an ML-PACE addition this package's reader refuses);
+    the default expands each factor over the live neighbour species instead."""
+    model, _, _ = aj.load(FIXTURE_DIR / "sige_nofit.npz")
+    info_s = write_yace(model, tmp_path / "s.yace", delta=5e-3, summed=True)
+    info_e = write_yace(model, tmp_path / "e.yace", delta=5e-3)
+    t = load_tree(tmp_path / "s.yace")
+    assert t["summed_neighbour_A"] is True and "summed_neighbour_A" not in load_tree(tmp_path / "e.yace")
+    for fl in t["functions"].values():
+        assert all(mu == 0 for f in fl for mu in f["mus"])
+        assert sum(f["rank"] == 1 for f in fl) == 1
+    ns = {(b["radtable"]["rnl"][k]["n"], b["radtable"]["rnl"][k]["l"])
+          for b in t["bonds"].values() for k in range(len(b["radtable"]["rnl"]))}
+    for b in t["bonds"].values():                            # the same (n, l) set on every bond
+        assert {(e["n"], e["l"]) for e in b["radtable"]["rnl"]} == ns
+    assert info_s["terms"] < info_e["terms"]
+    with pytest.raises(NotImplementedError, match="summed_neighbour_A"):
+        aj.load(tmp_path / "s.yace")

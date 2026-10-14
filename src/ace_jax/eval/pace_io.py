@@ -122,6 +122,9 @@ def parse_yace(path):
         radparams[i, j] = [lam, b["rcut"], b["dcut"], b["rcut_in"], b["dcut_in"]]
         core[i, j] = [b["prehc"], b["lambdahc"]]
 
+    if tree.get("summed_neighbour_A"):
+        raise NotImplementedError(f"{path}: summed_neighbour_A (one pooled A for every neighbour species) is an "
+                                  "ML-PACE addition this reader does not implement")
     embs = tree["embeddings"]
     P = max(int(embs[e]["ndensity"]) for e in range(NZ))
     fs = np.zeros((NZ, 2 * P))
@@ -202,7 +205,7 @@ def write_yace(model, path, spec=None, **options):
 
     - A PACEModel (`aj.load` of a `.yace`) needs the `spec` that load returned: numeric fields come from
       its leaves, everything else verbatim from `spec.tree` (function layout is never regenerated).
-    - A linear ACEModel is converted exactly (`export.yace.ace_ctilde_tree`; `options`: `delta`, `r_min`):
+    - A linear ACEModel is converted exactly (`export.yace.ace_ctilde_tree`; `options`: `delta`, `r_min`, `summed`):
       tabulated radials, which ML-PACE reads with its tabulated-radial addition
       (docs/dev/ml-pace-tabulated-radials.md).  Returns the export's sizes (functions, terms, lmax, ...).
 
