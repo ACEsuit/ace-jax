@@ -19,7 +19,7 @@ ROOT=${BENCH_ROOT:-$HOME/bench-scaling}
 cd "$ROOT/ace-jax-ac/bench"
 source /etc/profile.d/modules.sh; module purge; module load GCC/12.3.0 OpenMPI/4.1.5
 export PYTHONPATH=$ROOT/ace-jax-ac/bench:$ROOT/ace-jax-cpu/src
-export ACEJAX_AC_ROOT=$ROOT/ac ACEJAX_AC_MAX_LOAD1=16 JAX_PLATFORMS=cpu
+export ACEJAX_AC_ROOT=$ROOT/ac ACEJAX_AC_MAX_LOAD1=16 ACEJAX_AC_RSS_CAP_GB=400 JAX_PLATFORMS=cpu   # 128 ML-PACE ranks: o4d20 ~79 GB
 export ACEJAX_AC_CPU_RANKS=128 ACEJAX_AC_CPU_THREADS=1
 echo "job $SLURM_JOB_ID on $(hostname) $(date -Is) $(grep -m1 'model name' /proc/cpuinfo)"
 R=accuracy_cost/results                    # results/sulis/ in the repository
