@@ -7,7 +7,11 @@
 # Steps:
 #   julia       the official Julia $JV tarball, checked against julialang's sha256 list -> $ROOT/julia-$JV
 #   julia_env   instantiate the pinned PR 309 env (bench/scaling/julia, ACEpotentials v0.10.2) into its
-#               own depot, $ROOT/julia-pr309 (never ~/.julia); precompiling is left to the build job
+#               own depot, $ROOT/julia-pr309 (never ~/.julia); precompiling is left to the build job.
+#               The login node killed a cold instantiate (exit 137, at the registry clone, 2026-10-14):
+#               rsync a desktop depot instead (minus compiled/, which is per CPU), then run this step
+#               with JULIA_PKG_OFFLINE=true:
+#                 rsync -a --exclude compiled --exclude logs /storage/eng/essswb/cache/julia-pr309/ sulis:bench-scaling/julia-pr309/
 #   ace_plugin  PR 309's export/lammps/plugin built with mpicxx against the lammps-dev tree that
 #               build-kk-cpu was built from (scaling/envs/sulis-lammps-cpu-build.sbatch) -> $ROOT/ace-plugin-cpu
 #   wrapper     $ROOT/lmp-ace-cpu.sh: build-kk-cpu's lmp with its modules (the input `plugin load`s the plugin)
