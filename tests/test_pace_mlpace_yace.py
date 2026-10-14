@@ -1,13 +1,14 @@
-"""Multi-element linear ACE written by write_yace and evaluated by ML-PACE itself (its C-tilde evaluator, via
-pace_ref/tabulated/tab_eval) against ace-jax: two ACE1 models (SiGe, the 5-element Cantor) and two
+"""Multi-element linear ACE written by write_yace and evaluated by ML-PACE itself (its product and recursive C-tilde
+evaluators, `pair_style pace product|recursive`, via pace_ref/tabulated/tab_eval) against ace-jax: two ACE1 models (SiGe, the 5-element Cantor) and two
 species-embedded (tensor-reduced) models (SiGe, CrMnFe at d_max 4), each in the default form (every factor
 expanded over the neighbour species its radial column is live for) and in the pooled form (`summed=True`,
 `summed_neighbour_A`).
 
-ML-PACE needs two additions for these files: `radbasename: Tabulated` (ICAMS/lammps-user-pace#31,
-pace_ref/tabulated/0001) for every case, and `summed_neighbour_A` for the pooled ones, which a reader without
-it ignores and silently mis-evaluates (pace_ref/fast/0004 in bench/mlpace-fast).  Against the pinned upstream
-ML-PACE of the pace-parity job every case fails: the expanded ones at load, the pooled ones on the values.
+ML-PACE needs two additions for these files: `radbasename: Tabulated` (ICAMS/lammps-user-pace#31) for every
+case, and `summed_neighbour_A` for the pooled ones, which a reader without it ignores and silently
+mis-evaluates.  Both are on jameskermode/lammps-user-pace `tabulated-summed-fast`, the ML-PACE the pace-parity
+job builds.  Against upstream main 99aa6e6 every case fails (the expanded ones at load, the pooled ones on the
+values); with the tabulated commit alone the pooled ones fail.
 
 ACEJAX_PACE_TAB_EVAL names the tab_eval binary (pace-parity builds it from pace_ref/CMakeLists.txt); without
 it the tests skip, unless ACEJAX_REQUIRE_FIXTURES is set."""
@@ -59,7 +60,7 @@ def _cells(z, n=3, seed=0):
     return out
 
 
-def _run(exe, yace, ats):
+def _run(exe, yace, ats, evaluator):
     """tab_eval's protocol (pace_ref/tabulated/tab_eval.cpp): (E, F) per configuration."""
     idx = {e: i for i, e in enumerate(load_tree(yace)["elements"])}
     inp = [str(len(ats))]
@@ -67,7 +68,7 @@ def _run(exe, yace, ats):
         inp += [str(len(a)), " ".join(map("{:.17g}".format, np.asarray(a.cell).ravel())),
                 " ".join(str(int(p)) for p in a.pbc)]
         inp += [f"{idx[s]} " + " ".join(map("{:.17g}".format, p)) for s, p in zip(a.get_chemical_symbols(), a.positions)]
-    r = subprocess.run([exe, str(yace)], input="\n".join(inp), capture_output=True, text=True, timeout=1800)
+    r = subprocess.run([exe, str(yace), evaluator], input="\n".join(inp), capture_output=True, text=True, timeout=1800)
     assert r.returncode == 0, f"ML-PACE could not evaluate {yace.name}:\n{r.stderr[-2000:]}"
     lines, k, res = r.stdout.split("\n"), 0, []
     for a in ats:
@@ -76,9 +77,10 @@ def _run(exe, yace, ats):
     return res
 
 
+@pytest.mark.parametrize("evaluator", ["product", "recursive"])
 @pytest.mark.parametrize("summed", [False, True], ids=["expanded", "summed"])
 @pytest.mark.parametrize("name,delta", MODELS, ids=[m[0].split(".")[0] for m in MODELS])
-def test_mlpace_evaluates_multi_element_export(tmp_path, name, delta, summed):
+def test_mlpace_evaluates_multi_element_export(tmp_path, name, delta, summed, evaluator):
     exe = _tab_eval()
     src = FIXTURE_DIR / name
     model, meta, _ = aj.load(src)
@@ -87,7 +89,7 @@ def test_mlpace_evaluates_multi_element_export(tmp_path, name, delta, summed):
     ats = _cells([atomic_numbers[e] for e in load_tree(yace)["elements"]])
     calc = ACECalculator(model, meta=meta, skin=0)
     ftol = FTOL[delta]
-    for (E1, F1), a in zip(_run(exe, yace, ats), ats):
+    for (E1, F1), a in zip(_run(exe, yace, ats, evaluator), ats):
         b = a.copy()
         b.calc = calc
         E0, F0 = b.get_potential_energy(), b.get_forces()
