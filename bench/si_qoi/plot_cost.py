@@ -189,8 +189,9 @@ def flag(ax, data, codes, key):
         for (head, r), qs in why.items():
             q = max(qs, key=lambda q: q[key])      # above the highest: the label sits clear of the data
             head = head or f"{', '.join(p['size'] for p in qs)}: standalone"
-            ax.annotate(head + (f"\n({r})" if r else ""), (q["x"], q[key]),
-                        xytext=(-6, 10), textcoords="offset points", ha="right", fontsize=7, color=MUTED)
+            left = ax.transAxes.inverted().transform(ax.transData.transform((q["x"], q[key])))[0] < 0.5   # a right-aligned label off a cheap point runs off the axes
+            ax.annotate(head + (f"\n({r})" if r else ""), (q["x"], q[key]), xytext=(6 if left else -6, 10),
+                        textcoords="offset points", ha="left" if left else "right", fontsize=7, color=MUTED)
 
 
 def draw_row(axes, data, ref, xlabel, codes, letters, what):
