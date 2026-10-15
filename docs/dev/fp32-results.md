@@ -149,14 +149,77 @@ fp64 dgeqrf merge, amortised per batch over ~L buffered rows:
 | 62 | 4.5 ms | 1.8 ms | 1.1 ms |
 | 223 | 17 ms | 3.6 ms | 7 ms |
 | 350 | 22 ms | 4.7 ms | 13 ms |
-| 1461 | 125 ms | 14 ms | 45–160 ms (see note) |
+| 1461 | 125 ms | 14 ms | 35 ms |
 
 - fp32 cuts row assembly 2.5–9× (o4d16: 125 → 14 ms).
 - **At L ≳ 200 the host fp64 merge, not the GPU, becomes the bottleneck.** A
   GPU fp32 → host fp64 pipeline is merge-bound at production basis sizes.
-- **Note:** the o4d16 merge times were taken with the ML-PACE build sharing the
-  CPU (45 ms with 8 threads, 160 ms with all of them). They are not yet clean.
-  `merge_timing.py` will re-time them on an idle box.
+- **The merge depends on the thread count.** For o4d16, one merge of L rows
+  (2922 × 1461 dgeqrf) takes 574, 212, 152, 121 and 154 ms with 1, 4, 8, 16
+  and 32 OpenBLAS threads. The best, 16 threads, is about 86 GFLOP/s. The
+  table uses it.
+- **Set the thread count explicitly.** The session's default ran one thread.
+  `nproc` reports 1 in a login shell, so OpenBLAS sized itself to one core.
+
+### 6. ML-PACE (KOKKOS) in reduced precision, against ace-jax on the same `.yace`
+
+**Setup.**
+- LAMMPS develop (lestrade's `lammps-dev` source, 2 Oct 2026) with ML-PACE
+  v.2025.12.4.p1, built for the A4500 at `KOKKOS_PREC=double|mixed|single`
+  (`bench/fp32/build_mlpace.sh`).
+- `pair_style pace product`, one GPU, `newton on neigh half`.
+- ace-jax: `ACECalculator(dtype=...)` standalone on the same file
+  (`bench/fp32/mlpace_prec.py`).
+- Cells: 4096-atom diamond Si, rattled 0.05 Å (timed: NVE steps after a
+  warm-up) and rattled 0.25 Å (strongly distorted, minimum bond 0.81 Å; step 0
+  only, because NVE at 1 fs loses atoms from there).
+- Errors are against ML-PACE double. ace-jax fp64 matches it to 2e-8–6e-8
+  relative in force, which shows both codes evaluate the same model.
+
+Step time (ms), cell rattled 0.05 Å:
+
+| model | ML-PACE double | mixed | single | ace-jax fp64 | ace-jax fp32 |
+|---|---|---|---|---|---|
+| pacemaker f400 | 5.45 | 1.92 | 1.71 | 12.9 | 4.03 |
+| pacemaker f1352 | 20.0 | 6.72 | 6.43 | 36.0 | 8.69 |
+| `ace_yace/o4d16` | 33.2 | 13.9 | 13.3 | 193 | 15.9 |
+
+The ML-PACE times are MD steps inside LAMMPS. The ace-jax times are standalone
+calculator calls, so the comparison between codes is indicative only. The fair
+comparison is the fp32 lammps-jax bundle (step 2).
+
+Error against ML-PACE double, as ΔE (meV/atom) / ΔF rms / ΔF max (meV/Å):
+
+| model, cell | ML-PACE mixed | ML-PACE single | ace-jax fp32 |
+|---|---|---|---|
+| f400, r0.05 | 0.001 / 0.019 / 0.08 | 0.006 / 0.019 / 0.08 | 0.006 / 0.016 / 0.06 |
+| f400, r0.25 | 0.003 / 0.67 / **35** | 0.004 / 0.66 / 34 | 0.004 / 0.027 / **1.2** |
+| f1352, r0.05 | 0.009 / 0.052 / 0.21 | 0.006 / 0.053 / 0.20 | 0.006 / 0.049 / 0.21 |
+| f1352, r0.25 | 0.006 / 0.73 / **24** | 0.008 / 0.70 / 24 | 0.008 / 0.13 / **4.5** |
+
+- **On these models, KOKKOS ML-PACE gains 2.7–3.2× from reduced precision on
+  the A4500.** mixed and single give the same accuracy. single is about 5%
+  faster.
+- **Near equilibrium, ML-PACE in float and ace-jax in fp32 are equally
+  accurate:** ΔF about 2–6e-5 relative and ΔE under 0.01 meV/atom. These
+  pacemaker models have small coefficients (|c̃| ≤ 4.8, |crad| ≤ 5.3), so
+  §4's cancellation does not arise.
+- **On the distorted cell, ace-jax fp32 is 5–25× more accurate than ML-PACE in
+  float** (max ΔF 1.2–4.5 against 24–35 meV/Å). ML-PACE's single and mixed
+  errors are the same, so the loss is in its float evaluation (spline tables,
+  radial functions), not in its accumulation.
+- **The fp64 gap is wide.** ML-PACE double is 1.8–6× faster than ace-jax fp64
+  standalone, but in fp32 the gap closes to 1.3–2.1× (and 1.1× on
+  `ace_yace/o4d16`).
+- **`ace_yace/o4d16` is unusable in reduced precision in both codes.**
+  - Errors: ML-PACE mixed ΔF/F = 3.8, ace-jax fp32 2e4.
+  - Cause: `ace_to_yace.py` refits the ACE radials onto 80 SBessel functions,
+    giving |crad| up to 3.7e8 (median 8e5, against at most 5.3 for pacemaker's
+    fit) and |c̃| up to 6e5. Those coefficients cancel far beyond fp32.
+  - On the distorted cell it diverges even in double (ΔE about 1e17–1e20
+    meV/atom): the refit radial is wrong outside its fitted range.
+  - So for ACE fits in fp32, use the native `.npz` or the `Tabulated` `.yace`
+    (`write_yace`), never the SBessel refit.
 
 ## Conclusions so far
 
@@ -176,4 +239,11 @@ fp64 dgeqrf merge, amortised per batch over ~L buffered rows:
    - accumulate the readout in fp64 (this helps the well-conditioned model);
    - use better-regularised fits (smaller |c|);
    - record the cancellation ratio at export.
-5. ML-PACE comparison (step 1.6): pending.
+5. **KOKKOS ML-PACE's reduced precision is the GPU baseline to beat.** It is
+   2.7–3.2× faster than its double build at the same near-equilibrium
+   accuracy as ace-jax fp32. ace-jax fp32 is clearly more accurate on strongly
+   distorted structures. Step 2 must benchmark the fp32 lammps-jax bundle
+   against ML-PACE `KOKKOS_PREC=single`/`mixed`.
+6. **Model conditioning decides fp32 usability more than the evaluator does.**
+   It shows in the readout cancellation (§4) and in `ace_yace` (§6). Record a
+   cancellation measure at export, and keep coefficients small in fitting.

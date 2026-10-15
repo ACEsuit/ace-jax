@@ -30,8 +30,8 @@ def cells():
     at.rattle(0.05, seed=1)
     out["diamond4096_r0.05"] = at
     hot = bulk("Si", "diamond", a=5.43, cubic=True).repeat((8, 8, 8))
-    hot.rattle(0.25, seed=2)                         # strongly distorted: short bonds, large forces
-    out["diamond4096_r0.25"] = hot
+    hot.rattle(0.25, seed=2)                         # strongly distorted: short bonds (0.81 A), large forces;
+    out["diamond4096_r0.25"] = hot                   # accuracy only: NVE at 1 fs loses atoms from here
     return out
 
 
@@ -50,29 +50,31 @@ dump f all custom 1 forces.dump id fx fy fz
 dump_modify f format float %.17g sort id
 run 0
 undump f
-velocity all create 300 1 loop geom
+{md}"""
+MD = """velocity all create 300 1 loop geom
 fix nve all nve
 run 50
 run {steps}
 """
 
 
-def run_lammps(prec, model, at):
+def run_lammps(prec, model, at, timed=True):
     lmp = BUILDS / f"build-{prec}" / "lmp"
     with tempfile.TemporaryDirectory() as d:
         d = Path(d)
         write(d / "data.lmp", at, format="lammps-data", specorder=["Si"])
-        (d / "in.bench").write_text(INPUT.format(model=model, steps=STEPS))
+        md = MD.format(steps=STEPS) if timed else ""
+        (d / "in.bench").write_text(INPUT.format(model=model, md=md))
         cmd = (ENV + f"cd {d} && {lmp} -in in.bench -log log.lammps -nocite -k on g 1 -sf kk "
                "-pk kokkos newton on neigh half")
         p = subprocess.run(["bash", "-c", cmd], capture_output=True, text=True)
         log = (d / "log.lammps").read_text() if (d / "log.lammps").exists() else p.stdout
         if p.returncode != 0:
-            return dict(error=(p.stdout + p.stderr)[-1500:])
+            return dict(error="\n".join(ln for ln in (p.stdout + log).splitlines() if "ERROR" in ln)[-1500:])
         pe = float(re.findall(r"^\s+0\s+(\S+)\s*$", log, re.M)[0])
         loops = [float(x) for x in re.findall(r"Loop time of (\S+)", log)]
         F = np.loadtxt(d / "forces.dump", skiprows=9)[:, 1:]
-        return dict(E=pe, F=F, t_step=loops[-1] / STEPS)
+        return dict(E=pe, F=F) | (dict(t_step=loops[-1] / STEPS) if timed else {})
 
 
 def run_acejax(dtype, model, at):
@@ -112,7 +114,8 @@ def compare(r, ref, n):
 out = []
 for model in sys.argv[1:]:
     for name, at in cells().items():
-        rows = {f"mlpace_{p}": run_lammps(p, model, at) for p in ("double", "mixed", "single")}
+        rows = {f"mlpace_{p}": run_lammps(p, model, at, timed="r0.25" not in name)
+                for p in ("double", "mixed", "single")}
         rows |= {f"acejax_{d}": run_acejax(d, model, at) for d in ("float64", "float32")}
         ref = rows["mlpace_double"]
         out.append(dict(model=model, cell=name, n=len(at),
