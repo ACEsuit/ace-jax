@@ -17,6 +17,7 @@ Status: research and scoping only. No code yet. Revision 3 (2026-10-15). Revisio
 - **UQ.** `--uq ard` revision 2 serves a calibrated per-atom 3×3 force covariance: a delete-one-cluster jackknife shape (`fit/jackknife.py`) times Mondrian conformal scales (`fit/conformal.py`, `aj calibrate`). That is the template for equivariant block UQ (§7).
 - **Evaluation performance.** The lean form (`eval/model.py::lean`: pruning, pair folding, l-blocked dense A), spline radials and radial tables in r (`eval/splinify.py`), skin neighbour lists (`calc/skin.py`) and dense row-blocked layouts exist now. Phase 3 reuses them (§10).
 - Quoll.jl has not changed since 2026-07-26 (still 0.1.0, unregistered). ACEpotentials 0.10.2 still requires ET 0.4.3.
+- **New §2.1:** a first probe of compiling Quoll with `juliac --trim`. It does not work with Quoll as it is (949 verifier errors; 147 without ASEconvert, a lower bound). The section gives the reasons and what would be needed.
 
 Sources read:
 - ACEhamiltonians.jl `main` @ 9ff1572;
@@ -110,6 +111,41 @@ Sources read:
   - a documented canonical on-disk writer (there is none; DeepH is the de facto exchange);
   - registration;
   - a small Python reader shipped with it, or blessed by it.
+
+### 2.1 Investigation: Quoll compiled with `juliac --trim` (option (d))
+
+**Why.** A trim-compiled Quoll would do for ingestion what `ace-jax-coupling` does for couplings: a platform wheel exposing a C ABI (`ingest(fhi_dir | deeph_dir, out_shconv, …) → block buffers`), called by ctypes. Users could then turn FHI-aims or DeepH output into training data with no Julia install, and the path-gated Julia ingestion job would become an ordinary wheel test. Option (c) stays the plan until this is shown to work.
+
+**Initial probe (2026-10-15), result: not feasible with Quoll as it is.**
+- Setup: Quoll `main` @ f26de28, Julia 1.13.1, JuliaC (`--output-exe --trim=safe --experimental`, as `coupling/julia/build.jl`), on moriarty. The entry point is the narrowest useful path, DeepH → canonical → DeepH, which avoids FHI-aims and k-grids:
+  ```julia
+  using Quoll
+  function quoll_roundtrip(indir::String, outdir::String)::Cint
+      kind = Quoll.Hamiltonian(; source = :ref)
+      H  = Quoll.load_operator(Quoll.Operator, Quoll.DeepHBlockNoSpinRealMetadata, indir, kind)
+      Hc = Quoll.convert_operator(Quoll.KeyedOperator, Quoll.CanonicalBlockRealMetadata, H; hermitian = true)
+      Hd = Quoll.convert_operator(Quoll.Operator, Quoll.DeepHBlockNoSpinRealMetadata, Hc; hermitian = false)
+      Quoll.write_operators(Quoll.DeepHBlockNoSpinRealMetadata, outdir, [Hd])
+      return Cint(0)
+  end
+  (@main)(args::Vector{String})::Cint = quoll_roundtrip(args[1], args[2])
+  ```
+- In ordinary Julia 1.13.1 the round trip works and is bit-identical on Quoll's SiC DeepH test data (2532 blocks, max |Δ| = 0). So Quoll runs on 1.13.
+- **Compile 1, Quoll unchanged: 949 trim verifier errors** (34 s; 1.2 GB peak RSS). About 800 of them come from loading PythonCall and CondaPkg, whose `__init__` runs although the DeepH path never calls Python. Quoll loads them unconditionally through `using ASEconvert`, which it needs only to read FHI-aims `geometry.in` (`operators/fhiaims.jl:187`, `ase.io.read`). Building also installs a conda Python with ASE at precompile time.
+- **Compile 2, ASEconvert removed** (`using` dropped, the FHI-aims geometry read stubbed): **147 errors.** Of these, 54+8+2 come from HDF5's and 8 from MPI's own code (init and generic `read`), 20 from untyped `readdlm`, and 44 from Quoll's load path at 16 sites:
+  - the metadata types passed in are `UnionAll`s (`DeepHBlockNoSpinRealMetadata` is `RealMetadata{O,X,S} where …`), so `load_metadata`, `build_operator`, `convert_operator` and `write_operators` dispatch on abstract types;
+  - values are lifted into types at run time: `statictuple(kind)` builds `Pair{Val{tag},Val{value}}` from the operator's tags (`core/components/operatorkind.jl:115`); `SHConvention{lmax}` and `make_static(order, Val(l))` come from vector lengths (`shconvention.jl:31-36`); the element type is read from the file, `V = typeof(read(first(io)))` (`deeph.jl:135`);
+  - `@memoize` caches keep results in `IdDict{Any,Any}` (`load_atoms`, `BlockRealSparsity`, `BasisSetMetadata`);
+  - atoms are built through Unitful `periodic_system` from untyped `readdlm` output (`deeph.jl:160-168`).
+- **147 is a lower bound.** The verifier stops at an unresolved call, and the two `convert_operator` calls and `write_operators` in the entry are themselves unresolved. So the conversion internals (sparsity, SH-convention permutation, Hermitian folding), which are the reason to use Quoll, were never analysed.
+
+**What it would take.** This is not a set of local trim fixes, as ET's L = 0 path was. Quoll's design carries metadata in types and decides those types from data, so trimming it means changing its API:
+1. Move ASEconvert (and with it PythonCall/CondaPkg) and MPI into package extensions (weak dependencies), and add a pure-Julia `geometry.in` reader so FHI-aims input does not need ASE. This is small, useful to Quoll anyway (load time, no conda at precompile), and a reasonable upstream request.
+2. A type-stable ingestion entry point for a closed set of cases (FHI-aims CSC or DeepH in, no spin, real; canonical out in a fixed SH convention): concrete metadata types, no `Val` lifting of data, no `IdDict{Any,Any}` caches, typed `readdlm`/HDF5 reads. Either a refactor of Quoll's load and convert path, or a separate trim-safe function set in Quoll that the general API calls into.
+3. Trim-safe HDF5 (its `generic_read` and init are flagged here), or reading the HDF5 datasets through the HDF5 C library directly.
+4. The C ABI, the wheel build and pruning (reusing `coupling/tools/`), and parity against ordinary Quoll on its regression data.
+
+Item 1 takes days. Items 2–3 depend on Quoll's maintainers accepting the change and are estimated in weeks, with the conversion-path errors still unknown. **Recommendation:** keep (c) for phase 0. Make item 1 a request to Quoll now, since it costs Quoll little and removes Python from the ingestion environment. Repeat the probe when Quoll is registered or its API settles: the probe is the script above plus `JuliaC.main(["--output-exe", "quollprobe", "--project=.", "--trim=safe", "--experimental", "--bundle", "bundle", "probe.jl"])`; count `^Verifier error` in the log and group by the first non-Base frame.
 
 ## 3. EquivariantTensors: L>0 couplings in the compiled library
 
@@ -286,6 +322,7 @@ The sizes are rough, for one developer who knows ace-jax.
 | **2a. Stage-A fitting and UQ** | Generic rows. Per-(sub-model, L) QR statistics and QR evidence, vmapped over equal-width problems. Block-covariance UQ, the jackknife shape and Mondrian conformal scales (§7), POPS. Accuracy benchmarks on Quoll data against MACE-H/DeepH-E3. DeepH-format prediction output for consumers. | 4–5 wk |
 | **2b. Observable fitting** | Degeneracy-safe spectral `custom_vjp`. Generalised eigenproblem. k-batching and bucketing. Combined loss with L-BFGS/Adam warm-started from 2a. Conformal calibration on eigenvalues. | 4–6 wk |
 | **3. Performance and deployment** | Dense (bond, K) layouts, reusing `lean` pruning, spline radials and radial tables, and the row-blocked dense evaluation. Batching sub-models by (ℓ₁,ℓ₂) to bound jit variants. Sparse operator output. GPU k-point batches. A `jax.export` artifact. | 3–4 wk |
+| **(side) Trim-compiled Quoll** | Investigation only (§2.1): ask Quoll to make ASEconvert and MPI package extensions; repeat the probe when Quoll's API settles; if the conversion path can be made trim-safe, ship ingestion as a wheel, like `ace-jax-coupling`. Not on the critical path. | probe done; open |
 | **4. Learned orbitals (research)** | Reference-basis data through Quoll. Differentiable contraction C. VarPro outer loop. Orbital-invariant objectives. | open |
 
 **Total to a usable, UQ-carrying, observable-trained model: about 5–6 months.** Phases 0–2a, about 3 months, give a working block-fitted model with UQ that consumers can use.
@@ -300,6 +337,7 @@ The sizes are rough, for one developer who knows ace-jax.
 4. **Spectral gradients.** Degeneracies; ill-conditioned S(k) in large or diffuse bases (Cholesky); cost of eigh at scale; and a non-convex loss that loses the closed-form evidence.
 5. **Bond-environment edge cases.** Periodic self-images, atoms near the midpoint, long bonds; plus the number of jit variants across sub-models × L.
 6. **Physics constraints.** S(k) is not guaranteed positive definite, and on-site S = I holds only for orthonormal-on-site bases.
+7. **Ingestion keeps a Julia install.** Until a trim-compiled Quoll exists (§2.1, not feasible today), users who ingest raw FHI-aims output need Julia ≥ 1.12 and Quoll. Users who start from DeepH files or a released npz cache do not.
 
 ## 12. Open questions remaining
 
@@ -311,6 +349,7 @@ The sizes are rough, for one developer who knows ace-jax.
 6. **Split timing.** Is "in-tree with a lint-enforced boundary, no package rename until the split" acceptable?
 7. **ET upstreaming.** Send the `refl_sym` forward and the L>0 trim fixes to ACEsuit together with the pending trim-coupling PR, or as a follow-up PR?
 8. **CLI.** An `aj ham` subcommand group (fit, eval, calibrate, export to DeepH) with its own run-file schema, or Python API only until phase 2a?
+9. **Quoll and trim.** Is a trim-compiled ingestion wheel worth asking Quoll's maintainers for (§2.1, items 1–2)? Item 1 alone (ASEconvert and MPI as extensions, a pure-Julia `geometry.in` reader) is the low-cost request.
 
 ## Appendix A. Route comparison: JAX port (A) against a new Julia ACEhamiltonians on ET (B)
 
