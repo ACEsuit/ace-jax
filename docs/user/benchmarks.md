@@ -49,8 +49,8 @@ At the target, in microseconds per atom-step:
 In these ladders, PACE (pacemaker), ACE with learned radials, PACE-shaped
 ACE, NEP and the GAP refits do not reach the target. PACE reaches the force
 error of GAP-18 with fewer parameters than linear ACE, but not the QoI target.
-NEP has the lowest CPU cost (0.55 to 1.9 µs/atom-step). Its smallest force
-error is 0.104 eV/Å and its smallest QoI error is 0.67. <!-- NEP-FINAL -->
+NEP has the lowest CPU cost (0.55 to 3.0 µs/atom-step). Its smallest force
+error is 0.103 eV/Å and its smallest QoI error is 0.66.
 These force errors agree with the published NEP results for this dataset
 (approximately 0.1 eV/Å).
 

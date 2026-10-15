@@ -28,7 +28,7 @@
   precision, and the figure labels these points. NEP is the cheapest family on
   the CPU. Its force error stops at approximately 0.10 eV/Å, the published NEP
   result for this dataset, and it does not reach the QoI target
-  (`bench/accuracy_cost/fit_nep.py`). <!-- NEP-FINAL -->
+  (`bench/accuracy_cost/fit_nep.py`).
 
 ## 0.3.0 (2026-10-14)
 

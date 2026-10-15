@@ -293,7 +293,9 @@ def main():
                              "not counted)", (1, 1), xycoords="axes fraction", xytext=(-4, -4),
                              textcoords="offset points", ha="right", va="top", fontsize=7.5, color=MUTED)
     order = [FAM[f][0] for f in FAM if FAM[f][0] in handles]
-    fig.legend([handles[l] for l in order], order, loc="upper center", ncol=-(-len(order) // 3), frameon=False,
+    ncol = min(6, -(-len(order) // 3))                    # at most 6 columns fit the width; more rows instead
+    legend_rows = -(-len(order) // ncol)
+    fig.legend([handles[l] for l in order], order, loc="upper center", ncol=ncol, frameon=False,
                fontsize=9, bbox_to_anchor=(0.5, 1.0))
     cpu_note = ("CPU row: a 128-core EPYC 7742 node, all cores, ranks bound to cores; each model's fastest layout\n"
                 "(128x1 or 64x2 MPI ranks x threads; GAP: 32 ranks).\n"
@@ -309,7 +311,7 @@ def main():
                  "outside the training data); only models with every QoI computed.\n"
                  "Cost: the fastest parity-checked code per model, float64 only except NEP on the GPU (one-layer MACE and, on the GPU, Symmetrix MACE c64L1 have "
                  "float32 timings only and are left out of the cost rows). Single fits per point.", ha="center", fontsize=8.5, color=MUTED)
-    fig.tight_layout(rect=(0, 0 if a.no_note else 0.065, 1, 1 - 1.0 / fig.get_figheight()))
+    fig.tight_layout(rect=(0, 0 if a.no_note else 0.065, 1, 1 - (0.2 * legend_rows + 0.15) / fig.get_figheight()))
     pathlib.Path(a.out).parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(a.out, dpi=150); print("wrote", a.out)
 

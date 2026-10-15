@@ -111,5 +111,5 @@ nep:           # NEP4 trained by GPUMD's nep on a Sulis A100 (fit_nep.py; envs/s
   # population 50, 300k generations; without weights (as published) and with the GAP-18 force-sigma weights.
   # That shipped model, trained on all of GAP-18, scores 0.0998 eV/A on this test split (an optimistic bound:
   # the test configs are in its training set)
-  - {size: nlit,  n_max: "10 8", basis_size: "10 10", l_max: "4 2 1", neuron: 50, lambda_1: 0.05, lambda_2: 0.05, population: 50, batch: 100000, weights: none, generation: 300000, chunk: 100000}
+  - {size: nlit,  n_max: "10 8", basis_size: "10 10", l_max: "4 2 1", neuron: 50, lambda_1: 0.05, lambda_2: 0.05, population: 50, batch: 100000, weights: none, generation: 100000, chunk: 100000}   # stopped at 100k: not below n120b
   - {size: nlitw, n_max: "10 8", basis_size: "10 10", l_max: "4 2 1", neuron: 50, lambda_1: 0.05, lambda_2: 0.05, population: 50, batch: 100000, generation: 100000, chunk: 100000}   # stopped at 100k: tracks nlit ~0.002 eV/A behind
