@@ -306,10 +306,63 @@ Force error, relative to the float64 reference (ΔF max in meV/Å in brackets):
   whatever N is. lammps-jax casts the bundle's energy to the contract dtype.
 - **A model with large coefficients stays at its own float32 error.** o3d8 is at 1.1e-3
   (4 meV/Å max) everywhere, as `precision_check` predicts.
-- **Open:**
-  - o4d16 at 262144 atoms is 2.5× slower than linear scaling from 4096 in float32 (1385
-    against about 545 ms). It needs a profile: block sizing or memory pressure.
-  - The float64 bundle ran out of memory on f1352 at 32768 atoms.
+- **Two issues, resolved below:** o4d16 scaled superlinearly at 262144 atoms, and the
+  float64 bundle ran out of memory on f1352 at 32768 atoms.
+
+### Resolved: block size, and the out-of-memory error
+
+**Cause of the o4d16 superlinearity.** The bundle runs dense and matrix rows in blocks
+(`lax.map` + `jax.checkpoint`). `block_rows_for` took the largest halving of 32768 rows
+that fits the memory budget, a policy tuned on an A100 with Cantor (fp64, dense layout,
+`perf-lammps-large-n.md`). On the A4500 bigger blocks are slower (`bench/fp32/diag_blocks.py`,
+LAMMPS step ms, 32768 atoms, matrix layout):
+
+| model, dtype | 1024 | 2048 | 4096 | 8192 | largest that fits (rows) |
+|---|---|---|---|---|---|
+| Si ACE o4d16, f32 | **58.2** | 74.8 | 75.0 | — | 129 (16384) |
+| Si ACE o4d16, f64 | **183** | 284 | 288 | — | 324 (8192) |
+| Si ACE o3d8, f32 | 11.6 | 10.1 | 9.4 | — | 9.5 (32768) |
+| Si PACE f1352, f32 | 67.7 | 70.6 | 69.4 | — | 78.9 (32768) |
+| Si PACE f1352, f64 | 325 | 313 | 320 | — | 300 (32768) |
+| Si PACE f400, f32 | 27.1 | 27.8 | 26.7 | — | 26.2 (32768) |
+| Cantor ACE medium, f64 | 119 | 115 | 110 | 107 | 108 (16384) |
+| Cantor ACE medium, f32 | 23.5 | 21.6 | 21.9 | 21.5 | 25.4 (32768) |
+| Cantor PACE medium, f64 | 131 | 125 | 121 | 121 | 128 (32768) |
+| Cantor ACE large, f32 | 21.3 | 21.3 | 20.0 | 19.4 | 23.6 (32768) |
+
+- The best block size tracks the per-row size of the blocked program, measured in
+  *elements*: the same rows are best in float32 and float64 (o4d16: 1024 in both).
+- The rule: target about 2^26 elements per block (`estimate_a_bytes` / itemsize). Take
+  the largest halving at or under it, at least 1024 rows. That picks 1024 rows for o4d16
+  (65k elements/row), 2048 for f1352 and Cantor ACE medium, and 4096 for o3d8, f400,
+  Cantor PACE medium and Cantor ACE large.
+- Against the best measured size, it is within 7% everywhere. Against the old policy it
+  is 1.15–2.65× faster on 7 of 10 cases, and up to 7% slower on 3: Cantor ACE medium
+  fp64 (115 against 108 ms), f1352 fp64 (313 against 300) and o3d8 fp32 (9.6 against 9.5).
+- The memory budget still caps the block.
+
+With the change (`export.lammps.BUNDLE_BLOCK_TARGET_ELEMS`), default exports:
+
+| case | before | after |
+|---|---|---|
+| o4d16 f32, 4096 atoms | 8.53 ms (one block of 4506) | 7.5 ms (1024) |
+| o4d16 f32, 32768 | 129 ms (16384) | 57.7 ms (1024) |
+| o4d16 f64, 32768 | 324 ms (8192) | 181 ms (1024) |
+| o4d16 f32, 262144 | 1385 ms (16384) | 520 ms (1024) |
+
+o4d16 now scales linearly: 7.5 → 57.7 → 520 ms for 4k → 32k → 262k atoms.
+
+**Caveat.** This was measured on the A4500 only. The earlier A100 finding was that
+splitting a 16k-atom system into two blocks cost 1.5× through the checkpoint recompute.
+That contradicts this result at 4096 atoms (5 blocks of 1024 beat one block). It predates
+the lean and matrix code, and should be rechecked on an A100 (Sulis).
+
+**The out-of-memory error did not reproduce.** The same f1352 float64 bundle (one
+32768-row block, sized against 15.8 GB) ran at 300 ms when repeated. The o4d16 reference
+calculator's out-of-memory error at 32768 atoms did not repeat either, and 262144 atoms
+ran. Both look like transient GPU memory pressure. The new rule cuts that bundle's block
+from about 7 GB to 0.44 GB (2048 rows), so the export's budget, which ignores what
+LAMMPS holds on the GPU, matters much less now.
 
 **For lammps-jax (upstream):**
 - Pass a float32 bundle positions relative to a nearby origin, formed in double before
@@ -340,6 +393,7 @@ Force error, relative to the float64 reference (ΔF max in meV/Å in brackets):
    - float32 bundles and calculators are now float32 programs;
    - a per-model precision check is recorded at export;
    - the float32 bundle is 3.6–5.3× faster than float64 and beats ML-PACE double;
+   - a block-size rule fixes the o4d16 slowdown (up to 2.65× faster in both dtypes);
    - ML-PACE mixed/single stays 1.3–1.9× ahead, about its float64 margin.
    Closing that gap is the existing performance work (`docs/dev/pace-performance-gap.md`),
    not a precision question.

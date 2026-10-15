@@ -36,7 +36,6 @@ atom_style atomic
 boundary p p p
 atom_modify map yes
 read_data data.lmp
-mass 1 28.0855
 {pair}
 neighbor 1.0 bin
 neigh_modify every 1 delay 0 check yes
@@ -54,17 +53,21 @@ run {steps}
 """
 
 
-def cell(n):
+def cell(n, system="Si"):
+    if system != "Si":                                 # the scaling suite's structures (Cantor, SiGe)
+        sys.path.insert(0, str(HERE.parent))
+        from scaling.structures import supercell
+        return supercell(system, n, rattle=0.05)
     reps = round((n / 8) ** (1 / 3))
     at = bulk("Si", "diamond", a=5.43, cubic=True).repeat((reps,) * 3)
     at.rattle(0.05, seed=1)
     return at
 
 
-def lammps(cmd_prefix, pair, at, kk="-k on g 1 -sf kk -pk kokkos newton on neigh half", extra=""):
+def lammps(cmd_prefix, pair, at, kk="-k on g 1 -sf kk -pk kokkos newton on neigh half", extra="", elements=("Si",)):
     with tempfile.TemporaryDirectory(dir=os.environ.get("BUNDLE_TMP")) as d:
         d = Path(d)
-        write(d / "data.lmp", at, format="lammps-data", specorder=["Si"])
+        write(d / "data.lmp", at, format="lammps-data", specorder=list(elements), masses=True)
         (d / "in.bench").write_text(INPUT.format(pair=pair, steps=STEPS))
         p = subprocess.run(["bash", "-c", f"cd {d} && {cmd_prefix} -in in.bench -log log.lammps -nocite {kk} {extra}"],
                            capture_output=True, text=True, timeout=7200)

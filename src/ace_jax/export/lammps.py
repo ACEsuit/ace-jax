@@ -48,6 +48,16 @@ BUNDLE_LAYOUTS = LAYOUTS + ("matrix",)
 # checkpoint recompute, 1.5x slower; 32k rows keeps it one block and is as fast
 # as or faster than 64k at scale.  docs/dev/perf-lammps-large-n.md.
 BUNDLE_BLOCK_ROWS = 32768
+# Elements (estimate_a_bytes / itemsize) one block aims for: the largest halving of
+# BUNDLE_BLOCK_ROWS at or under it, at least MIN_BLOCK_ROWS.  Above it the per-row cost
+# of the blocked program grows with the block (the gather-adjoint scatter above), and
+# the checkpoint recompute of more, smaller blocks costs less: in LAMMPS on an RTX
+# A4500 at 32k atoms, ACE o4d16 Si (65k elements/row -> 1024 rows) ran 2.2x (float32)
+# and 1.8x (float64) faster than in 16k / 8k-row blocks, and 2.65x at 262k; across Si
+# and Cantor ACE / PACE models this target is within 7% of the best block size measured
+# and up to 18% faster than the largest that fits (docs/dev/fp32-results.md, step 2).
+# Measured on the A4500 only; the A100 numbers above predate it.
+BUNDLE_BLOCK_TARGET_ELEMS = 1 << 26
 # The smallest block layout="auto" halves down to before it gives up on the dense
 # family for sparse: blocked dense at a few thousand rows still beats the sparse
 # edge list many times over (o4d16 Si on an A100: sparse 15x slower than dense).
@@ -93,18 +103,22 @@ def matrix_prep_bytes(rows, max_neighbors, k_dense, itemsize):
 def block_rows_for(model, rows, k_dense, budget, itemsize, max_edges=None, prep=0, block_rows=None):
     """Rows per dense block for a bundle of `rows` rows and `k_dense` slots: the
     largest of BUNDLE_BLOCK_ROWS, halved down to MIN_BLOCK_ROWS (each capped at
-    `rows`), whose estimate_a_bytes plus `prep` (bytes not run in blocks, e.g.
-    matrix_prep_bytes) fits `budget`; None when none does.  An explicit
-    `block_rows` is the only candidate."""
+    `rows`), that is within BUNDLE_BLOCK_TARGET_ELEMS (the speed target; MIN_BLOCK_ROWS
+    is always a candidate) and whose estimate_a_bytes plus `prep` (bytes not run in
+    blocks, e.g. matrix_prep_bytes) fits `budget`; None when none fits.  An explicit
+    `block_rows` is the only candidate (no target)."""
+    def est(b, size):
+        edges = b * k_dense if max_edges is None else min(max_edges, b * k_dense)
+        return estimate_a_bytes(model, "dense", b, edges, k_dense, size)
     cands, b = [], min(int(rows), BUNDLE_BLOCK_ROWS)
     while True:
-        cands.append(b)
+        if b <= MIN_BLOCK_ROWS or est(b, 1) <= BUNDLE_BLOCK_TARGET_ELEMS:
+            cands.append(b)
         if b <= MIN_BLOCK_ROWS:
             break
         b = max(MIN_BLOCK_ROWS, b // 2)
     for b in ([int(block_rows)] if block_rows else cands):
-        edges = b * k_dense if max_edges is None else min(max_edges, b * k_dense)
-        if estimate_a_bytes(model, "dense", b, edges, k_dense, itemsize) + prep <= budget:
+        if est(b, itemsize) + prep <= budget:
             return b
     return None
 
@@ -327,9 +341,9 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
 
     Dense and matrix rows run in blocks of `block_rows` rows (lax.map +
     jax.checkpoint), so one block's temporaries bound memory.  Default:
-    BUNDLE_BLOCK_ROWS for an explicit layout without device_memory, else
     `block_rows_for`: the largest of BUNDLE_BLOCK_ROWS halved down to
-    MIN_BLOCK_ROWS whose estimate fits the budget.
+    MIN_BLOCK_ROWS within BUNDLE_BLOCK_TARGET_ELEMS (speed) whose estimate fits the
+    budget (an explicit layout without device_memory: the target alone).
 
     platform: the PJRT plugin the bundle runs on, "cuda" or "cpu" (lammps-jax's
     export_model(platform=), after its CPU backend; None keeps its default, cuda).
@@ -433,7 +447,8 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
         k = min(k_dense or max_neighbors, max_neighbors or k_dense or 0)
         block_rows = ((block_rows_for(model, rows, k, budget, itemsize, max_edges if layout == "dense" else None,
                                       matrix_prep_bytes(rows, max_neighbors, k, itemsize) if layout == "matrix" else 0)
-                       or MIN_BLOCK_ROWS) if sized else BUNDLE_BLOCK_ROWS)
+                       or MIN_BLOCK_ROWS) if sized
+                      else block_rows_for(model, rows, k, float("inf"), itemsize))    # the speed target alone
     if layout == "matrix":
         max_neighbors = int(max_neighbors)
         k_dense = min(int(k_dense or max_neighbors), max_neighbors)
