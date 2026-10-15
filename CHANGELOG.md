@@ -26,7 +26,8 @@
 - The benchmark adds NEP (NEP4, trained with GPUMD). On the CPU it runs in
   LAMMPS with `pair_style nep` in float64. On the A100 it runs in GPUMD in mixed
   precision, and the figure labels these points. NEP is the cheapest family on
-  the CPU. Its force error stops at approximately 0.10 eV/Å, the published NEP
+  the A100. On the CPU, PACE reaches the same force error at a lower cost. Its
+  force error stops at approximately 0.10 eV/Å, the published NEP
   result for this dataset, and it does not reach the QoI target
   (`bench/accuracy_cost/fit_nep.py`).
 
