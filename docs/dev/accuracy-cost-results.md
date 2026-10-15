@@ -58,8 +58,8 @@ parameters than linear ACE (f800: 761 parameters, 0.081 eV/Å) but not the QoI t
   and 0.59 at o4d14, against 0.85 for ML-PACE (o4d14) and 3.4-7.9 for lammps-jax. It ties ML-PACE at o4d16
   (1.42 vs 1.41) and is 2x slower at o4d20 (10.8 vs 5.39), still 4.6x faster than lammps-jax there. Parity
   against ace-jax on the npz: |dE|/atom <= 6.5e-12 eV, |dF| <= 1.2e-11 eV/Å over the ladder. CPU only.
-- **NEP** is the cheapest family on the CPU (0.55-3.0 µs/atom-step, n10-n120c; n120b 2.0)
-  but plateaus near 0.10 eV/Å: 0.106 (n80), 0.104 (n120) and 0.103 (n120b) after 300k generations, best QoI
+- **NEP** is the cheapest family on the CPU (0.55-3.0 µs/atom-step, n10-n120c; n120b 2.0) and on the A100
+  (0.04-0.22 µs/atom-step in GPUMD, mixed precision; n120b 0.16), but plateaus near 0.10 eV/Å: 0.106 (n80), 0.104 (n120) and 0.103 (n120b) after 300k generations, best QoI
   error 0.66 (n120b), with the point-defect energies 19-31% low. That is NEP's published accuracy on this
   dataset, not a fitting shortfall: Fan et al. report 0.107 eV/Å (NEP1, arXiv:2107.08119) and 0.093 (the NEP4
   retrain, arXiv:2206.07605), and GPUMD's shipped `Si_2022_NEP4_5body.txt` scores 0.0998 eV/Å on our test

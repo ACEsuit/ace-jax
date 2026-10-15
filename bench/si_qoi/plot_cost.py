@@ -179,6 +179,7 @@ def series(ax, data, key):
 def flag(ax, data, codes, key):
     """Label points whose cost is not a float64 LAMMPS timing: make_cost.py fell back to a standalone run, or
     the code is mixed precision only (NEP in GPUMD; make_cost --allow nep-gpumd:mixed)."""
+    said = set()                            # one mixed-precision label per code: both NEP series run in GPUMD
     for fam, pts in data.items():           # one label per family and reason: neighbouring points share it
         why = {}
         for q in pts:
@@ -186,7 +187,9 @@ def flag(ax, data, codes, key):
             if q["x"] is None or q[key] is None:
                 continue
             if " mixed " in c:
-                why.setdefault((f"{FAM[fam][0]}: mixed precision", None), []).append(q)
+                head = "NEP (GPUMD): mixed precision" if fam.startswith("nep") else f"{FAM[fam][0]}: mixed precision"
+                if head not in said or (head, None) in why:
+                    said.add(head); why.setdefault((head, None), []).append(q)
             elif "standalone" in c:
                 r = ("Symmetrix exports no one-layer MACE" if q["size"].endswith("n1")
                      else "LAMMPS out of memory")
