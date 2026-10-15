@@ -10,7 +10,6 @@ float64 and cast on transfer, so rij is formed in fp64 and then rounded (the pla
 """
 import argparse
 import json
-import os
 import sys
 import time
 
@@ -53,7 +52,7 @@ fdt = np.float64 if a.prec == "64" else np.float32
 E, F, V, X, yE, yF, yV, wE, wF, wV, nat, Xcfg = ([] for _ in range(12))
 times = []
 for i in range(ds.n_batches):
-    b = jax.tree.map(lambda x: x[i], ds)
+    b = jax.tree.map(lambda x: x[i], ds)  # noqa: B023 (consumed this iteration)
     t = time.perf_counter()
     r, Xi = rows(model, b)
     jax.block_until_ready((r, Xi))

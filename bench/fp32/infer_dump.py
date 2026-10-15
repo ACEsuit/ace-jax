@@ -47,7 +47,7 @@ calc_big = ACECalculator(a.model, dtype=dt)
 at.calc = calc_big
 rng = np.random.default_rng(0)
 ts, Es = [], []
-for i in range(25):                                   # small moves: the skin list is reused
+for _ in range(25):                                   # small moves: the skin list is reused
     at.positions += 1e-3 * rng.standard_normal(at.positions.shape)
     t = time.perf_counter()
     Es.append(at.get_potential_energy()); at.get_forces()
