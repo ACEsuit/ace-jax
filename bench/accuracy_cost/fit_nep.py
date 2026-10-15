@@ -4,8 +4,11 @@
   `weight`, `species:S:1:pos:R:3:force:R:3`).  Energies are relative to the isolated atom (E0_SI per
   atom): NEP trains in single precision and warns below -100 eV/atom (CASTEP Si is ~ -158).  `calculator`
   adds E0_SI back.
-- Weights: GAP-18's per-config-type force sigmas as a per-structure `weight`, as fit_mace does
-  (DATA/weights_mace.json, weights.mace); NEP's own lambda_e / lambda_f / lambda_v otherwise (1, 1, 0.1).
+- Weights: GAP-18's per-config-type force sigmas as a per-structure `weight` = sigma_F,default / sigma_F, the
+  square root of DATA/weights_mace.json (MACE multiplies the squared error by its weight, GPUMD by weight^2:
+  main_nep/dataset.cu get_rmse_force).  Fits before this fix (n10-n120c and the n120b screens) wrote the MACE
+  weight itself, i.e. (sigma_F,default / sigma_F)^4 on the squared error.  An entry with `weights: none`
+  writes weight 1.  NEP's own lambda_e / lambda_f / lambda_v otherwise (1, 1, 0.1).
 - Cutoff: 5 A radial and angular (RCUT, every family) unless the entry sets `cutoff`; the sweep entry sets
   n_max, basis_size, l_max, neuron (and optionally generation, batch, cutoff, lambda_1, lambda_2).
 
@@ -26,8 +29,9 @@ NEP_DEFAULTS = {"version": 4, "generation": 100000, "batch": 1000}
 
 def nep_in(e):
     """nep.in for a sweep entry: n_max "R A", basis_size "R A", l_max "3b [4b [5b]]", neuron N; optionally
-    cutoff "R A" (default RCUT both) and lambda_1 / lambda_2 (GPUMD's default scales with the parameter count)."""
-    reg = [f"{k} {e[k]:g}" for k in ("lambda_1", "lambda_2") if k in e]
+    cutoff "R A" (default RCUT both), lambda_1 / lambda_2 (GPUMD's default scales with the parameter count) and
+    population (SNES; default 50).  A batch at least the training-set size is full batch."""
+    reg = [f"{k} {e[k]:g}" for k in ("lambda_1", "lambda_2", "population") if k in e]
     return "\n".join([f"version {e.get('version', NEP_DEFAULTS['version'])}", "type 1 Si",
                       f"cutoff {e.get('cutoff', f'{RCUT:g} {RCUT:g}')}",
                       f"n_max {e['n_max']}", f"basis_size {e['basis_size']}", f"l_max {e['l_max']}",
@@ -59,7 +63,9 @@ def write_gpumd_xyz(path, atoms, weights):
 
 def prepare(d, e):
     from .split import read_atoms
-    w = json.loads((DATA / "weights_mace.json").read_text())     # weights.mace: per config type, as fit_mace
+    w = {k: float(np.sqrt(v)) for k, v in json.loads((DATA / "weights_mace.json").read_text()).items()}
+    if e.get("weights") == "none":
+        w = {"Default": 1.0}
     d.mkdir(parents=True, exist_ok=True)
     write_gpumd_xyz(d / "train.xyz", read_atoms(DATA / "train.xyz"), w)
     write_gpumd_xyz(d / "test.xyz", read_atoms(DATA / "test.xyz"), w)
