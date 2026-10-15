@@ -83,6 +83,10 @@ Evaluation works in float32 and float64. By default (`dtype=None`),
 enabled, it uses float32. Enable float64 also for evaluation, unless you
 need the float32 speed and accept its error.
 
+To measure the float32 error of a model, use
+`ace_jax.calc.precision.precision_check(model, meta, atoms)`. It returns the
+energy, force and stress differences from float64 on `atoms`.
+
 ## LAMMPS
 
 LAMMPS export needs [lammps-jax](https://github.com/abhijeetgangan/lammps-jax).

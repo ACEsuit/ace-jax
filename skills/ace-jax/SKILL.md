@@ -246,6 +246,9 @@ load; faster only at large `nradbase`). Values are unchanged to roundoff.
 ### Calculator performance options
 
 `ACECalculator(path, dtype=None, layout="auto", edge_a_kind="auto", skin=1.0, lean=True, spline_tol="auto", spline_intervals=None, radial_table=None)`:
+- `dtype` (e.g. `np.float32`): under x64 the model is read and made lean in float64 and only
+  `calc.eval_model` is cast (`eval.with_dtype`); a pre-loaded (model, meta) is cast too.
+  `calc.precision.precision_check(model, meta, atoms)` measures the float32 error of a model.
 - `lean` (ACE `.npz` models): energies, forces and stress are evaluated with
   `ace_jax.eval.lean(model)`, exact to roundoff. It drops radial columns and
   harmonics the basis never reads, folds the pair weights into the pair
@@ -321,6 +324,13 @@ export_lammps(model, meta, "bundle", max_atoms=cap["max_atoms"], max_edges=cap["
               max_neighbors=cap["max_neighbors"], max_owned=cap["max_owned"],
               type_elements=[14, 32])                     # Z in LAMMPS type order
 ```
+
+`dtype="float32"`: the traced model is cast to float32 (`ace_jax.eval.with_dtype`, after lean / splines in
+float64), so the bundle is a float32 program even under x64; ~5x faster than float64 on fp64-poor GPUs.
+`precision_structure=atoms` records `calc.precision.precision_check` (float32 vs float64 E/F/stress on
+`atoms`) as `ace_jax.precision_check` and warns above `PRECISION_WARN` (0.1 meV/atom, 1e-4 relative force);
+`aj export --dtype float32` checks on `--structure`.  The float32 error is the model's (readout cancellation),
+1e-5..1e-3 relative force; lammps-jax passes float32 absolute positions, adding ~ulp(|x|) that grows with the box.
 
 This writes a lammps-jax bundle for `pair_style jax/kk` (GPU; `platform="cpu"`
 for its CPU build, which refuses a cuda bundle and vice versa).

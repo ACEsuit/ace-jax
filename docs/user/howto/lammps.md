@@ -133,3 +133,9 @@ version of the Python package, or export with `layout="dense"`.
   calculator does. With `spline_tol="auto"`, `export_lammps` first changes a
   learned radial to a spline at 1e-10; see [Learn the radial basis](learned-radials.md#deployment-spline-speed).
 - `dtype="float64"` is the default. `"float32"` is faster and less accurate.
+  On a GPU with low float64 throughput, a float32 bundle is approximately 5 times faster.
+- The float32 error depends on the model. Large coefficients that cancel make it larger.
+- `precision_structure=atoms` compares float32 with float64 on `atoms`.
+  The bundle records the result as `ace_jax.precision_check`.
+- A warning occurs above 0.1 meV/atom of energy error or 1e-4 of relative force error.
+  `aj export --dtype float32` does this check on `--structure`.

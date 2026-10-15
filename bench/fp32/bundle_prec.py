@@ -134,9 +134,13 @@ def main():
             with tempfile.TemporaryDirectory(dir=os.environ.get("BUNDLE_TMP")) as d:
                 d = Path(d)
                 write(d / "at.extxyz", at)
-                for dt in ("float64", "float32"):
-                    r = child(CALC, d / "at.extxyz", model, dt, d / f"F_{dt}.npy")
-                    rows[f"calc_{dt}"] = {"E": r["E"], "F": np.load(d / f"F_{dt}.npy")}
+                try:
+                    for dt in ("float64", "float32"):
+                        r = child(CALC, d / "at.extxyz", model, dt, d / f"F_{dt}.npy")
+                        rows[f"calc_{dt}"] = {"E": r["E"], "F": np.load(d / f"F_{dt}.npy")}
+                except RuntimeError as e:          # e.g. the float64 reference out of GPU memory
+                    print(json.dumps({"model": model, "n": len(at), "error": str(e)[-300:]}), file=sys.stderr)
+                    continue
                 for dt in ("float64", "float32"):
                     try:
                         info = child(EXPORT, model, d / "at.extxyz", d / f"bundle_{dt}.json", dt)
