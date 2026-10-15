@@ -405,3 +405,80 @@ LAMMPS holds on the GPU, matters much less now.
 7. **Model conditioning decides fp32 usability more than the evaluator does.**
    It shows in the readout cancellation (§4) and in `ace_yace` (§6). Record a
    cancellation measure at export, and keep coefficients small in fitting.
+
+## Step 3, item 1: streamed statistics, full data, near-interpolating fits (2026-10-16)
+
+Scripts: `bench/fp32/stream_qr.py` (the fit's own `stats.device_qr_stream`, batched merges),
+`stream_analyse.py`, `stream_truncate.py`, `stream_stability.py`. Raw data:
+`runs/fp32_step3/`.
+
+**Setup.**
+- The target is carried as an extra column of the rows, so each quantity's factor is
+  `[[R, c], [0, ρ]]` and ρ, the residual norm, is carried through every merge.
+- Three precisions:
+  - f64, the reference;
+  - f32rows: float32 rows with float64 merges;
+  - f32: float32 throughout.
+- Each is analysed in float64: the LML in two forms, θ = (σ_c, σ_E, σ_F, σ_V) optimised
+  from the fit's θ_MAP, and the posterior-mean predictions. Prediction changes are RMS per
+  quantity in units of its σ, compared with the posterior std in the same units.
+- The LML forms:
+  - "library": `objective.log_marginal_likelihood_qr`, y'y − v'v;
+  - "ρ": the residual from the factors.
+- Data:
+  - the full GAP-18 Si training set (2227 configurations, 788 batches), bases o3d12, o4d12
+    and o4d16;
+  - E1x: 250 rattled 64-atom Si cells with MACE-MPA-0 labels, fitted with `aj fit` at o3d12
+    and o4d14. These nearly interpolate: σ_E is 1.6–2.8 meV and σ_c is 1.2e3–4.5e3.
+
+**Speed.** o4d16 on the full set, end to end with compile: f64 87 s, f32rows 45 s, f32 24 s
+(3.6×).
+
+**Results.** Max prediction change over E, F and V, divided by the posterior std, and the
+Δ log σ_c of θ_MAP against f64, both with the ρ form:
+
+| data, basis | f32rows | f32 | f32 with the library LML |
+|---|---|---|---|
+| GAP-18, o3d12 | 0.25, −0.000 | **1.15, +0.60** | same as ρ |
+| GAP-18, o4d12 | **1.51, −0.55** | **3.5, −0.37** | same as ρ |
+| GAP-18, o4d16 | 0.08, −0.000 | 0.25, −0.000 | LML −44 nats, log σ_E +0.009 |
+| E1x (MACE), o3d12 | 0.51, −0.020 | 0.24, −0.035 | **log σ_E +1.57** (σ_E ×4.8), LML −390 nats |
+| E1x (MACE), o4d14 | 0.09, −0.007 | 0.15, −0.013 | **log σ_E +1.42**, LML −330 nats |
+
+**Findings.**
+1. **Error growth over many merges is not an issue.** f32rows (float64 merges) and f32
+   (float32 merges) behave alike everywhere. Rounding the rows dominates, as step 1 found.
+2. **The float32 fit must carry the residual in the factor.** The library form y'y − v'v
+   cancels in float32 on near-interpolating fits and sends σ_E wrong by about 5×. With ρ
+   carried (y as an extra column), the MACE fits are fine. In float64 the two forms agree
+   to 1e-7.
+3. **Some fits are fragile in σ_c, and fp32 rows reveal it.** For o4d12 and o3d12 on
+   GAP-18, σ_c moves by e^±0.6, and the predictions by up to 3.5 posterior stds.
+   - **Mechanism.** The fp64 design has exactly singular directions: the radial-only ACE
+     functions and the pair basis are both Σ_j f(r_ij), and are redundant. Below them is
+     a continuum of weak directions down to 1e-17, column-scaled. Float32 rounding floors
+     them all at about 1e-8 to 2e-8, which feeds the evidence for σ_c fake data where the
+     prior is weak.
+   - **The fit itself is fragile.** Injecting noise at the 2e-6 row-error level into the
+     *float64* o4d12 factors moves log σ_c by 0.86.
+   - **Ruled out.** Per-quantity SVD truncation removes real information (a ~1σ shift even
+     in fp64). A threshold on the whitened spectrum does not separate the good cases from
+     the bad.
+4. **A stability test separates them.**
+   - **Method.** Append random rows of column norms 2e-6 × |Φ_j| to the float32 factors,
+     which is equivalent to another float32 rounding. Refit θ. Report the prediction
+     change against the posterior std.
+   - **Results.** It reads 0.25–0.33 on the fits that were fine (o4d16, E1x o4d14) and
+     0.42–0.6 on the E1x o3d12 cases. On the fragile ones it reads 0.67–2.8 (GAP-18 o3d12
+     with f32, o4d12).
+   - **Threshold.** 0.5 accepts every fit whose actual change was at most 0.25. It flags
+     o3d12 with fp32 rows on E1x (actual 0.51, so conservative) and every fragile case.
+   - **Cost.** One θ refit on L×L matrices.
+
+**Consequences for the implementation (step 3, item 3).**
+- The float32 fit carries ρ: QRStats grows `rho_q`, and the LML uses it.
+- Float64 merges are not needed. Float32 rows with float32 merges are as accurate as with
+  float64 merges.
+- After the fit, run the stability test. Above the threshold, warn and recommend a float64
+  fit.
+- Pin the matmul precision in the fit's row assembly, so TF32 can never apply.
