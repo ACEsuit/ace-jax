@@ -50,7 +50,9 @@ In these ladders, PACE (pacemaker), ACE with learned radials, PACE-shaped
 ACE, NEP and the GAP refits do not reach the target. PACE reaches the force
 error of GAP-18 with fewer parameters than linear ACE, but not the QoI target.
 NEP has the lowest CPU cost (0.55 to 1.9 µs/atom-step). Its smallest force
-error is 0.107 eV/Å and its smallest QoI error is 0.79.
+error is 0.104 eV/Å and its smallest QoI error is 0.67. <!-- NEP-FINAL -->
+These force errors agree with the published NEP results for this dataset
+(approximately 0.1 eV/Å).
 
 On the CPU, the ACEpotentials.jl compiled library is the fastest code for
 linear ACE up to o4d14. It has the same speed as ML-PACE at o4d16. At
@@ -80,9 +82,9 @@ o4d20 it is 2 times slower than ML-PACE.
 - **MACE** runs in LAMMPS with Symmetrix and, separately, with
   Symmetrix-XL.
 - **GAP** runs in LAMMPS with QUIP, on the CPU only.
-- **NEP** is trained with GPUMD. It runs in LAMMPS with `pair_style nep`
-  (NEP_CPU, float64), on the CPU only. GPUMD evaluates NEP on the GPU in
-  mixed precision, so NEP has no GPU result here.
+- **NEP** is trained with GPUMD. On the CPU, it runs in LAMMPS with
+  `pair_style nep` (NEP_CPU, float64). On the GPU, it runs in GPUMD. GPUMD
+  uses mixed precision, and the figure labels these points.
 - **Before each timing**, a short check compares the energies and forces
   in LAMMPS with the reference evaluation of the same model.
 

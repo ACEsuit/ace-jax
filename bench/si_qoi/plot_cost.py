@@ -50,6 +50,9 @@ FAM = {  # family: (label, colour, marker, linestyle, filled, qoi model name pat
     # NEP (GPUMD-trained NEP4; float64 NEP_CPU for accuracy and the CPU cost row): validated (dataviz --pairs
     # all, light): CVD WARN 6.4 against linear ACE's blue, so its own marker shape too
     "nep":        ("NEP (GPUMD)",              "#c13ec9", "X", "-",  True,  "NEP_{s}"),
+    # the published GAP-18 Si NEP4 recipe (sweep.yaml nlit: full batch, 50 neurons, lambda 0.05): NEP's colour,
+    # hollow, so it is not read as a rung of the ladder above
+    "nep_lit":    ("NEP, published recipe",    "#c13ec9", "X", ":",  False, "NEP_{s}"),
     "gap":        ("GAP refit",                "#008300", "v", "-",  True,  "GAP_{s}"),
     "gap_noglue": ("GAP refit, no glue",       "#008300", "v", "--", False, "GAPnoglue_{s}"),
     "gap_E30":    ("GAP refit, ACE's E:F balance", "#008300", "v", ":", True, "GAPE30_{s}"),
@@ -77,6 +80,8 @@ def family_of(r):
         return ("mace_xl_" if r.get("code", "").startswith("mace-xl") else "mace_") + size[-2:]
     if fam == "ace" and r.get("code") == "acepotentials-trim":
         return "ace_trim"
+    if fam == "nep" and size.startswith("nlit"):
+        return "nep_lit"
     if fam == "ace_wl":
         return "ace_wl_o5" if size.startswith("o5") else "ace_wl_" + size.split("_wL")[1]
     return fam

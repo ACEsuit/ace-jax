@@ -212,6 +212,24 @@ def test_fit_nep_inputs(tmp_path):
     assert n_params("    total number of parameters to be optimized = 1234.\n") == 1234
 
 
+def test_fit_nep_weights_are_sqrt_of_mace(tmp_path, monkeypatch):
+    """GPUMD multiplies a structure's squared error by weight^2 (main_nep/dataset.cu), MACE by its weight: the
+    NEP weight is the square root of weights_mace.json's; `weights: none` writes 1 everywhere."""
+    import json
+    from accuracy_cost import fit_nep, split
+    data = tmp_path / "data"; data.mkdir()
+    (data / "weights_mace.json").write_text(json.dumps({"Default": 1.0, "liq": 0.25}))
+    monkeypatch.setattr(fit_nep, "DATA", data)
+    seen = {}
+    monkeypatch.setattr(split, "read_atoms", lambda p: [p.name])
+    monkeypatch.setattr(fit_nep, "write_gpumd_xyz", lambda path, atoms, w: seen.setdefault(path.name, w))
+    e = {"n_max": "6 4", "basis_size": "6 6", "l_max": "4 1", "neuron": 30}
+    fit_nep.prepare(tmp_path / "a", e)
+    assert seen["train.xyz"] == {"Default": 1.0, "liq": 0.5}
+    seen.clear(); fit_nep.prepare(tmp_path / "b", {**e, "weights": "none", "population": 60})
+    assert seen["train.xyz"] == {"Default": 1.0} and "population 60" in (tmp_path / "b" / "nep.in").read_text()
+
+
 def test_fit_nep_resumes_in_chunks(tmp_path, monkeypatch):
     """A fit short of its entry's total runs at most `chunk` more generations from the existing files (no new
     training set), and counts them; a fit from before `generations` was recorded counts as the default 100k."""

@@ -23,6 +23,12 @@
   the fastest CPU code for linear ACE up to o4d14, ties ML-PACE at o4d16 and is
   2x slower than ML-PACE at o4d20 (`bench/accuracy_cost/build_trim.py`,
   `envs/sulis-cpu-trim.sbatch`).
+- The benchmark adds NEP (NEP4, trained with GPUMD). On the CPU it runs in
+  LAMMPS with `pair_style nep` in float64. On the A100 it runs in GPUMD in mixed
+  precision, and the figure labels these points. NEP is the cheapest family on
+  the CPU. Its force error stops at approximately 0.10 eV/Å, the published NEP
+  result for this dataset, and it does not reach the QoI target
+  (`bench/accuracy_cost/fit_nep.py`). <!-- NEP-FINAL -->
 
 ## 0.3.0 (2026-10-14)
 

@@ -99,7 +99,7 @@ nep:           # NEP4 trained by GPUMD's nep on a Sulis A100 (fit_nep.py; envs/s
   # neurons a layer, and NEP_CPU / GPUMD's MD evaluate one hidden layer only: n120 is already at the n_max and
   # width caps, so the larger models widen the basis and add the 4- and 5-body terms
   - {size: n120b, n_max: "12 8", basis_size: "12 12", l_max: "6 1 1", neuron: 120, generation: 300000, chunk: 100000}
-  - {size: n120c, n_max: "12 8", basis_size: "16 12", l_max: "8 1 1", neuron: 120, generation: 300000, chunk: 100000}
+  - {size: n120c, n_max: "12 8", basis_size: "16 12", l_max: "8 1 1", neuron: 120, generation: 200000, chunk: 100000}   # third chunk cancelled: no better than n120b
   # 30k-generation screens on n120b's descriptor (compare test force RMSE with n120b's own curve at 30k): a longer
   # radial / shorter angular cutoff, and weaker L1 / L2 regularisation (GPUMD's default ~0.10 here dominates the loss)
   - {size: n120b-c64,    n_max: "12 8", basis_size: "12 12", l_max: "6 1 1", neuron: 120, generation: 30000, cutoff: "6 4"}
@@ -112,4 +112,4 @@ nep:           # NEP4 trained by GPUMD's nep on a Sulis A100 (fit_nep.py; envs/s
   # That shipped model, trained on all of GAP-18, scores 0.0998 eV/A on this test split (an optimistic bound:
   # the test configs are in its training set)
   - {size: nlit,  n_max: "10 8", basis_size: "10 10", l_max: "4 2 1", neuron: 50, lambda_1: 0.05, lambda_2: 0.05, population: 50, batch: 100000, weights: none, generation: 300000, chunk: 100000}
-  - {size: nlitw, n_max: "10 8", basis_size: "10 10", l_max: "4 2 1", neuron: 50, lambda_1: 0.05, lambda_2: 0.05, population: 50, batch: 100000, generation: 300000, chunk: 100000}
+  - {size: nlitw, n_max: "10 8", basis_size: "10 10", l_max: "4 2 1", neuron: 50, lambda_1: 0.05, lambda_2: 0.05, population: 50, batch: 100000, generation: 100000, chunk: 100000}   # stopped at 100k: tracks nlit ~0.002 eV/A behind

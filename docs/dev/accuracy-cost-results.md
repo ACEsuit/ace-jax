@@ -42,7 +42,7 @@ Not reached in their ladders (best QoI error, at that model's force RMSE):
 | PACE-shaped ACE (fixed / learned radials) | 0.66 / 0.73 | md18 / md12 | 0.107 / 0.110 |
 | GAP refit (glue / no glue / ACE's E:F balance) | 0.35 / 0.36 / 0.40 | s9000 | 0.088 / 0.088 / 0.085 |
 | MACE, one layer | 1.38 | c32L0n1 | 0.102 |
-| NEP (GPUMD) | 0.79 | n120 | 0.108 |
+| NEP (GPUMD) | 0.67 | n80 | 0.106 |  <!-- NEP-FINAL: n120b, n120c, nlit -->
 
 The GAP refits meet the QoI target but not GAP-18's force error; PACE meets the force target with fewer
 parameters than linear ACE (f800: 761 parameters, 0.081 eV/Å) but not the QoI target.
@@ -58,10 +58,23 @@ parameters than linear ACE (f800: 761 parameters, 0.081 eV/Å) but not the QoI t
   and 0.59 at o4d14, against 0.85 for ML-PACE (o4d14) and 3.4-7.9 for lammps-jax. It ties ML-PACE at o4d16
   (1.42 vs 1.41) and is 2x slower at o4d20 (10.8 vs 5.39), still 4.6x faster than lammps-jax there. Parity
   against ace-jax on the npz: |dE|/atom <= 6.5e-12 eV, |dF| <= 1.2e-11 eV/Å over the ladder. CPU only.
-- **NEP** is the cheapest family on the CPU (0.55-1.9 µs/atom-step, n10-n120) but plateaus at 0.107 eV/Å
-  (n80; n120 is no better) and QoI error 0.79: n120's point-defect energies are 19-31% low. Trained with GPUMD
-  v5.9.1 (NEP4, 5 Å radial and angular cutoffs, 100k generations, weights.mace per-config weights); one fit per
-  size, no cutoff or loss-weight search.
+- **NEP** is the cheapest family on the CPU (0.55-1.9 µs/atom-step, n10-n120) but plateaus near 0.10 eV/Å:
+  0.106 (n80) and 0.104 (n120) after 300k generations, best QoI error 0.67 (n80), with the point-defect
+  energies 20-32% low and c44 7% low. That is NEP's published accuracy on this dataset, not a fitting
+  shortfall: Fan et al. report 0.107 eV/Å (NEP1, arXiv:2107.08119) and 0.093 (the NEP4 retrain,
+  arXiv:2206.07605), and GPUMD's shipped `Si_2022_NEP4_5body.txt` scores 0.0998 eV/Å on our test split (it
+  was trained on all of GAP-18, test configurations included, so that is optimistic). What did not help:
+  - the descriptor at GPUMD's caps with 4- and 5-body terms (n120b, n120c: <!-- NEP-FINAL --> eV/Å);
+  - cutoffs 6/4 and 6/5 Å and λ1 = λ2 = 0.01 (30k-generation screens on n120b: 0.118-0.130, against n120b's
+    own 0.118 at 30k);
+  - the published recipe (nlit: n_max 10 8, l_max 4 2 1, 50 neurons, λ = 0.05, full batch, population 50;
+    <!-- NEP-FINAL --> eV/Å at <!-- NEP-FINAL --> generations).
+
+  GPUMD squares the per-structure `weight`, so the n10-n120c fits weighted each config type by
+  (σ_default/σ)⁴ instead of the intended (σ_default/σ)² (fixed for nlitw; `fit_nep.py`). The unweighted and
+  correctly weighted published recipe differ by about 0.002 eV/Å (nlit vs nlitw at 100k:
+  <!-- NEP-FINAL -->), so the over-weighting does not explain the plateau. No paper we found distils MACE
+  into NEP with reported force errors; the favourable reports are on large, narrow MD datasets.
 - **Symmetrix-XL** is 1.1-3.6x faster than Symmetrix for the same MACE models, most at L = 1 on the GPU.
 - **The DAG product basis** (`aa_dag="greedy"`, #90) gives ace-jax's fastest CPU rows at o4d16 and o4d20; it
   also cuts the compiled temporary memory (o4d20: 3.9 GB to 0.64 GB on one core).
@@ -86,8 +99,11 @@ parameters than linear ACE (f800: 761 parameters, 0.081 eV/Å) but not the QoI t
   `pair_style ace` plugin in the same LAMMPS (`bench/scaling/envs/sulis-acepot.sh`); 128 x 1 ranks only.
 - NEP: LAMMPS develop ec02ed0 + NEP_CPU af615ce's USER-NEP (`pair_style nep`, float64, 128 x 1 ranks;
   `bench/scaling/envs/sulis-nep.sh`, `envs/sulis-cpu-nep.sbatch`), gated against calorine's CPUNEP (same
-  code, < 2e-14 eV/Å). No GPU row: GPUMD's GPU inference is mixed precision (float descriptors and network).
-  Test errors and QoIs also use CPUNEP, in float64.
+  code, < 2e-14 eV/Å). On the A100, GPUMD's own MD code (`envs/sulis-gpu-nep.sbatch`), which is mixed
+  precision only (float descriptors and network): the one non-float64 cost in the figure, labelled there
+  (`make_cost.py --allow nep-gpumd:mixed`). Test errors and QoIs use CPUNEP, in float64. Fits: GPUMD v5.9.1
+  `nep`, NEP4, one A100 each (`envs/sulis-nep.sbatch`, chunks of 100k generations resumed from
+  `nep.restart`); n80 and larger 300k generations (n120c and nlitw stopped at 200k and 100k).
 - QoIs: compressed ("short and fat") hcp is left out of the score (outside the training data; it measures
   extrapolation); only models with every QoI computed are plotted. Single fits per point.
 - GAP's parameter count is its sparse-point coefficients; the kernel also stores the sparse descriptors.
@@ -103,7 +119,7 @@ python bench/si_qoi/make_cost.py --dtype float64 --out $RR/cost_sulis_cpu.json \
 python bench/si_qoi/make_cost.py --dtype float64 --out $RR/cost_sulis_gpu.json \
     bench/accuracy_cost/results/sulis-gpu.jsonl bench/accuracy_cost/results/sulis-gpu-ace-splined.jsonl \
     $R/sulis-gpu-ace-splined-v2.jsonl $R/sulis-gpu-v2.jsonl $R/sulis-gpu-mace_xl.jsonl \
-    $R/sulis-gpu-ace_tab3.jsonl $R/sulis-gpu-pace-dev.jsonl
+    $R/sulis-gpu-ace_tab3.jsonl $R/sulis-gpu-pace-dev.jsonl $R/sulis-gpu-nep.jsonl --allow nep-gpumd:mixed
 ROWS=(--row "A100 GPU, µs/atom-step|$RR/cost_sulis_gpu.json|$RR/cost_sulis_gpu.codes.json"
       --row "CPU node (128 cores), µs/atom-step|$RR/cost_sulis_cpu.json|$RR/cost_sulis_cpu.codes.json")
 python bench/si_qoi/plot_cost.py "${ROWS[@]}"
