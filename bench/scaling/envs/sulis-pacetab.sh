@@ -96,11 +96,11 @@ cpufork() {
 gputeam() { _gputeam lammps-pacekk-team "$PACE" lmp-pacetab-team.sh 0003-pacekk-team-rho-weights.patch; }
 
 # `gputeamsum`: gputeam + 0005 (pace/kk summed_neighbour_A) + 0006 (flat-offset ComputeRho/Weights,
-# PACE_KK_RHOW=2) against an ML-PACE carrying summed_neighbour_A
+# PACE_KK_RHOW=2) + 0007 (segmented ComputeWeights, PACE_KK_RHOW=3) against an ML-PACE carrying summed_neighbour_A
 # ($ROOT/lammps-user-pace-sumA: v.2025.12.4.p1 + 0001 + 0002 + 0004).  Wrapper $ROOT/lmp-pacetab-teamsum.sh.
 gputeamsum() { _gputeam lammps-pacekk-teamsum "$ROOT/lammps-user-pace-sumA" lmp-pacetab-teamsum.sh \
                         0003-pacekk-team-rho-weights.patch 0005-pacekk-summed-neighbour-A.patch \
-                        0006-pacekk-flat-offset-rho-weights.patch; }
+                        0006-pacekk-flat-offset-rho-weights.patch 0007-pacekk-segmented-weights.patch; }
 
 _gputeam() {   # <tree name> <ML-PACE> <wrapper> <patch...>
   local T=$ROOT/$1 P=$2 W=$3 B; shift 3

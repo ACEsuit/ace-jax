@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # pace/kk on one A100, profiled (bench/mlpace-fast; build: scaling/envs/sulis-pacetab.sh gputeamsum), for each
-# PACE_KK_RHOW in $RHOW_MODES (default "0 1 2": stock ComputeRho/Weights, the fused team kernel, flat offsets):
+# PACE_KK_RHOW in $RHOW_MODES (default "0 2 3": stock ComputeRho/Weights, flat offsets, flat offsets + the
+# segmented backward; 1 is the fused team kernel):
 #   0. plain timings (no profiler), Si o4d12-o4d20, 32,768 atoms
 #   1. nsys per-kernel split, Si o4d12 / o4d20
 #   2. ncu on the product-basis and per-neighbour kernels (Si o4d20, 4096 atoms, 1 step), if the node allows
@@ -32,7 +33,7 @@ echo "job $SLURM_JOB_ID on $(hostname) $(date -Is)"; nvidia-smi --query-gpu=name
 echo "nsys=${NSYS:-none} ncu=${NCU:-none} RmProfilingAdminOnly=$(grep -h RmProfilingAdminOnly /proc/driver/nvidia/params 2>/dev/null)"
 M=$ROOT/ac/runs/accuracy_cost/ace_tab
 loop() { grep "Loop time" $1 | tail -1 | awk '{printf "%.4f us/atom-step\n", 1e6*$4/($9*$12)}'; }
-MODES=${RHOW_MODES:-0 1 2}
+MODES=${RHOW_MODES:-0 2 3}
 
 echo "== 0. timings (no profiler)"
 for s in o4d12 o4d14 o4d16 o4d20; do for r in $MODES; do
