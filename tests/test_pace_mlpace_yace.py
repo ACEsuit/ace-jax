@@ -6,8 +6,8 @@ expanded over the neighbour species its radial column is live for) and in the po
 
 ML-PACE needs two additions for these files: `radbasename: Tabulated` (ICAMS/lammps-user-pace#31) for every
 case, and `summed_neighbour_A` for the pooled ones, which a reader without it ignores and silently
-mis-evaluates.  Both are on jameskermode/lammps-user-pace `tabulated-summed-fast`, the ML-PACE the pace-parity
-job builds.  Against upstream main 99aa6e6 every case fails (the expanded ones at load, the pooled ones on the
+mis-evaluates.  Both are in ICAMS/lammps-user-pace#31 (jameskermode/lammps-user-pace `tabulated-radials`), the
+ML-PACE the pace-parity job builds.  Against upstream main 99aa6e6 every case fails (the expanded ones at load, the pooled ones on the
 values); with the tabulated commit alone the pooled ones fail.
 
 ACEJAX_PACE_TAB_EVAL names the tab_eval binary (pace-parity builds it from pace_ref/CMakeLists.txt); without

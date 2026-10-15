@@ -13,7 +13,7 @@ for every radial family and inner regime, the core repulsion, ZBL,
 - Sources: `lammps-user-pace` checked out at `~/gits/lammps-user-pace`
   (override with `-DPACE_SRC=...`). The committed references were made at
   ICAMS commit `99aa6e6`; CI builds `jameskermode/lammps-user-pace`
-  `tabulated-summed-fast` (`99aa6e6` plus the ML-PACE additions ace-jax's
+  `tabulated-radials` (ICAMS/lammps-user-pace#31: `v.2025.12.4.p1` plus the ML-PACE additions ace-jax's
   `.yace` export needs, see section 3). The commit is recorded in
   `unit_ref.npz` as `pace_commit`.
 

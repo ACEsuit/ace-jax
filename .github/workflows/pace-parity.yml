@@ -34,12 +34,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
       - name: ML-PACE sources (pinned)
-        # jameskermode/lammps-user-pace tabulated-summed-fast: upstream main 99aa6e6 + tabulated radials
-        # (ICAMS/lammps-user-pace#31), recursive-evaluator speed-ups and summed_neighbour_A, one commit each;
-        # tests/test_pace_mlpace_yace.py needs the first and last.  Back to ICAMS once they are merged there.
+        # jameskermode/lammps-user-pace tabulated-radials (ICAMS/lammps-user-pace#31): v.2025.12.4.p1 (the release
+        # LAMMPS downloads) + tabulated radials, recursive-evaluator speed-ups and summed_neighbour_A, one commit
+        # each; tests/test_pace_mlpace_yace.py needs the first and last.  Back to ICAMS once #31 is merged.
         run: |
           git clone https://github.com/jameskermode/lammps-user-pace.git $HOME/gits/lammps-user-pace
-          git -C $HOME/gits/lammps-user-pace checkout e9862a7
+          git -C $HOME/gits/lammps-user-pace checkout 97621a3
       - name: Unit reference
         run: |
           cmake -S pace_ref -B pace_ref/build -DCMAKE_BUILD_TYPE=Release
