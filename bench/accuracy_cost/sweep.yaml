@@ -107,8 +107,9 @@ nep:           # NEP4 trained by GPUMD's nep on a Sulis A100 (fit_nep.py; envs/s
   - {size: n120b-reg,    n_max: "12 8", basis_size: "12 12", l_max: "6 1 1", neuron: 120, generation: 30000, lambda_1: 0.01, lambda_2: 0.01}
   - {size: n120b-c64reg, n_max: "12 8", basis_size: "12 12", l_max: "6 1 1", neuron: 120, generation: 30000, cutoff: "6 4", lambda_1: 0.01, lambda_2: 0.01}
   # the published GAP-18 Si recipe (Fan et al., arXiv:2205.10046 Fig. 4, the 5-body NEP4 shipped as GPUMD's
-  # Si_2022_NEP4_5body.txt): full batch, lambda 0.05, population 50, 300k generations; without weights (as
-  # published) and with the GAP-18 force-sigma weights.  That shipped model, trained on all of GAP-18, scores
-  # 0.0998 eV/A on this test split (an optimistic bound: the test configs are in its training set)
-  - {size: nlit,  n_max: "10 10", basis_size: "10 10", l_max: "4 2 1", neuron: 50, lambda_1: 0.05, lambda_2: 0.05, population: 50, batch: 100000, weights: none, generation: 300000, chunk: 100000}
-  - {size: nlitw, n_max: "10 10", basis_size: "10 10", l_max: "4 2 1", neuron: 50, lambda_1: 0.05, lambda_2: 0.05, population: 50, batch: 100000, generation: 300000, chunk: 100000}
+  # Si_2022_NEP4_5body.txt, n_max "10 10"; GPUMD 5.9 caps the angular n_max at 8): full batch, lambda 0.05,
+  # population 50, 300k generations; without weights (as published) and with the GAP-18 force-sigma weights.
+  # That shipped model, trained on all of GAP-18, scores 0.0998 eV/A on this test split (an optimistic bound:
+  # the test configs are in its training set)
+  - {size: nlit,  n_max: "10 8", basis_size: "10 10", l_max: "4 2 1", neuron: 50, lambda_1: 0.05, lambda_2: 0.05, population: 50, batch: 100000, weights: none, generation: 300000, chunk: 100000}
+  - {size: nlitw, n_max: "10 8", basis_size: "10 10", l_max: "4 2 1", neuron: 50, lambda_1: 0.05, lambda_2: 0.05, population: 50, batch: 100000, generation: 300000, chunk: 100000}
