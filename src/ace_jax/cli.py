@@ -581,7 +581,8 @@ def cmd_export(a):
         int(e) if e.strip().isdigit() else atomic_numbers[e.strip()] for e in a.type_elements.split(",")]
     b = export_lammps(model, meta, out, max_atoms=cap["max_atoms"], max_edges=cap["max_edges"],
                       k_dense=cap["k_dense"], max_owned=cap["max_owned"], max_neighbors=cap["max_neighbors"],
-                      dtype=a.dtype, layout=a.layout, type_elements=els, platform=a.platform)
+                      dtype=a.dtype, layout=a.layout, type_elements=els, platform=a.platform,
+                      precision_structure=at if a.dtype != "float64" else None)
     per = "" if procs is None else f", per MPI rank of {'x'.join(map(str, procs))}"
     print(f"lammps-jax: layout {b['ace_jax']['layout']}, {a.dtype}, {a.platform or 'cuda'}, sized for {len(at)} "
           f"atoms of {a.structure}{per} (max_atoms {cap['max_atoms']}, neighbour slots {cap['k_dense']}) -> {out}")

@@ -195,8 +195,12 @@ class ACECalculator(Calculator):
                              f"got {energy_reference!r}")
         super().__init__(**kw)
         self._energy_reference = energy_reference   # fixed: the evaluation model is built for it
+        import jax
         from ..eval.api import _resolve
-        model, meta = _resolve(model, meta, dtype)
+        # under x64 the file is read in float64 and only the evaluation model is cast to dtype
+        # (the model setter), so lean's splines and tables are computed in float64
+        model, meta = _resolve(model, meta, None if jax.config.jax_enable_x64 else dtype)
+        self._eval_dtype = dtype              # before the model setter, which casts to it
         self._skin_jit = None                 # (static model part, cutoff, compiled step)
         self._lean = bool(lean)
         self._spline_tol = spline_tol
@@ -340,6 +344,9 @@ class ACECalculator(Calculator):
             import jax.numpy as jnp
             self._eval_model = eqx.tree_at(lambda m: m.E0, self._eval_model,
                                            jnp.zeros_like(self._eval_model.E0))
+        if self._eval_dtype is not None:         # a float64 model traced with float32 inputs promotes to f64
+            from ..eval.api import with_dtype
+            self._eval_model = with_dtype(self._eval_model, self._eval_dtype)
         self._by_kind = {}                    # form -> model in that form
         self._by_bucket = {}                  # edge bucket -> calibrated form
         self._skin_state = None               # the skin list in use (calc.skin.SkinState)

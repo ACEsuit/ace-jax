@@ -296,7 +296,8 @@ def make_energy_fn(model, n_species, layout, k_dense=None, type_map=None, n_rows
 def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
                   dtype="float64", layout="auto", type_elements=None, max_owned=None,
                   lean=True, spline_tol=AUTO, spline_intervals=None, max_neighbors=None,
-                  radial_table=None, device_memory=None, block_rows=None, platform=None, aa_dag=None):
+                  radial_table=None, device_memory=None, block_rows=None, platform=None, aa_dag=None,
+                  precision_structure=None):
     """Write a lammps-jax JSON bundle for `model`; returns the bundle dict.
 
     Capacities: max_atoms (owned + ghost positions); max_edges (sparse / dense:
@@ -335,6 +336,14 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
     Lowering is per platform: the dense family's cumsum lowered for cuda aborts
     XLA's CPU compiler.  For a CPU run, pass device_memory too (a rank's share of
     host RAM): the default queries the exporting process's device.
+
+    dtype: the bundle's precision (lammps-jax's contract: positions in, energy and forces out).
+    The traced model is cast to it after lean / splines / radial tables (computed in float64),
+    so a float32 bundle is a float32 program under x64 too.  precision_structure (ase.Atoms; a
+    non-float64 dtype only): run `calc.precision.precision_check` on it, record the result as
+    `ace_jax.precision_check` and warn above `PRECISION_WARN` (`aj export` passes --structure).
+    lammps-jax hands a float32 bundle float32 absolute positions, so rij carries ~ulp(|x|) of
+    rounding that grows with the box (docs/dev/fp32-results.md).
 
     layout="auto" picks a dense-family layout when k_dense is given and some
     block fits (estimate_a_bytes for that many rows, of the row capacity --
@@ -378,6 +387,7 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
     """
     from lammps_jax.export import export_model
 
+    given = model                             # precision_structure checks the model as given
     from ..eval.model import lean as _lean
     from ..eval.model import splining, with_radial_table
     from ..calc.point import DENSE_BUDGET_FRACTION, dense_budget_bytes
@@ -441,6 +451,10 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
     if aa_dag is not None:                    # recursive product basis (`eval.aa_dag`), opt-in
         from ..eval.aa_dag import with_aa_dag
         model = with_aa_dag(model, aa_dag)
+    # the traced model in the bundle dtype: a float64 model with float32 positions lowers to a
+    # float64 program with float32 I/O under x64 (`aj export` enables it), i.e. no fp32 speed
+    from ..eval.api import with_dtype
+    model = with_dtype(model, dtype)
     rcut = float(meta["rcut"])
     energy_fn = make_energy_fn(model, n_species, layout, k_dense,
                                None if type_map == list(range(len(model_z))) else type_map,
@@ -470,5 +484,11 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
                          "device_memory": int(device_memory) if device_memory else None,
                          "dense_budget": int(budget),
                          "lammps_jax": lammps_jax_version()}
+    if precision_structure is not None and np.dtype(dtype) != np.float64:
+        from ..calc.precision import precision_check, warn_precision
+        chk = precision_check(given, meta, precision_structure, dtype=dtype, lean=lean, spline_tol=spline_tol,
+                              spline_intervals=spline_intervals, radial_table=radial_table)
+        bundle["ace_jax"]["precision_check"] = chk
+        warn_precision(chk, f"this {dtype} bundle's model")
     Path(path).write_text(json.dumps(bundle, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return bundle

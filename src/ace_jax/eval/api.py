@@ -8,6 +8,7 @@ hence `site_descriptors` takes positions/cell/species directly.
 import functools
 import pathlib
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -25,6 +26,18 @@ def _resolve(model, meta=None, dtype=None):
     if meta is None:
         raise ValueError("pass a path, or both a model and its meta")
     return model, meta
+
+
+def with_dtype(model, dtype):
+    """`model` with every floating array leaf in `dtype` (models are equinox pytrees); integer
+    leaves and static fields are untouched.  The way to evaluate in float32 under x64: a float64
+    model traced with float32 inputs promotes back to float64 everywhere (an fp32 lammps-jax
+    bundle exported so lowers to ~400 f64 ops with f32 I/O only).  Cast after any transform
+    that tabulates or splines (lean, radial tables), so those are computed in float64."""
+    dt = jnp.dtype(dtype)
+    cast = lambda a: (a.astype(dt) if eqx.is_array(a) and jnp.issubdtype(a.dtype, jnp.floating)
+                      and a.dtype != dt else a)
+    return jax.tree.map(cast, model)
 
 
 def _default_dtype():
