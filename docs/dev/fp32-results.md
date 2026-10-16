@@ -601,3 +601,106 @@ o4d16 at 262144 atoms in float32: 1024 rows 368 ms, 16384 rows 404 ms.
 - **The 15 GB reference, not 16,** keeps o4d16 clear of a halving boundary on the A100.
 - **Open:** the larger-block preference is probably the A100's larger L2 and memory
   bandwidth. That is not established.
+
+## Step 3 follow-up: do float32 force errors change the silicon QoIs? (2026-10-16)
+
+The linear ACE order-4 ladder of the accuracy-cost plot (o4d12–o4d20, fitted in float64) was
+evaluated in float32 (`ACECalculator(dtype=float32)`) through the silicon testing framework
+(py3 port, mnf148, CPU). Comparison: `bench/fp32/qoi_compare.py`. Framework changes (local,
+`share/force_only_opt.py`): `$SI_TESTS_OPTIMIZER` selects the relaxation optimiser, and
+`$SI_TESTS_ELASTIC_FMAX` sets the elastic fit's internal-relaxation fmax. Defaults are the
+protocol's (PreconLBFGS with Armijo, fmax 0.05 in the elastic fit).
+
+### The protocol's line search does not run in float32
+
+| variant | runs OK / failed (4 sizes × 16 tests) |
+|---|---|
+| float32, PreconLBFGS + Armijo (protocol) | 41 / 23, all "Armijo linesearch failed" |
+| float32, energies referenced to E0 | 37 / 27 |
+| float32, `use_armijo=False` | fails the same way: PreconLBFGS falls back to a Wolfe line search, still on energies |
+| "float32 compute, float64 accumulation" (`bench/fp32/mixed_calc.py`, o4d16) | rescues bulk_diamond and bulk_st12 only |
+
+- The Armijo test compares energy changes of order fmax × step (about 1e-4 eV per 1e-3 Å near a
+  minimum). The float32 total energy of a 216-atom cell carries about 1 meV of noise. Along a
+  1e-3 Å line: fp64 noise 0, float32 0.99 meV, mixed 0.26 meV, signal 1.63 meV.
+- **The E0 reference does not help.** The noise is the rounding of the basis and readout
+  inside each site energy, not the size of the total.
+- **Float64 accumulation helps energies, not forces.** It cuts the line-search energy noise
+  about 4×. At the relaxed float64 vacancy it leaves the force error unchanged (o4d16:
+  max |ΔF| 2.0e-4 float32 against 1.8–1.9e-4 mixed; o4d12: 8.6e-4 against 9.4e-4). The force
+  error comes from B itself, before any sum.
+- The lammps-jax developer's OpenMM-style suggestion (state and integration in float64, model in
+  float32) is the right design for MD. For minimisation it moves the problem from the sum to the
+  basis, which is where these models lose their digits.
+
+### Force-only optimisers
+
+Trial on an o4d16 vacancy (63-atom cell, rattled 0.05 Å; `utilities.relax_atoms`, fmax 3e-3):
+
+| optimiser | float64 | float32 |
+|---|---|---|
+| PreconLBFGS + Armijo | 3 s | fails |
+| ODE12r (ASE; adaptive Euler/Heun on the preconditioned flow) | 4 s | 5 s, E within 2 meV |
+| RK45 (`solve_ivp` on the same flow, max-force event) | 13 s | 22 s |
+| DOP853 | timed out | |
+| Newton–Krylov (`scipy.optimize.root`) | 7 s, **76 meV higher**: a saddle | |
+
+Higher-order integrators of the gradient flow buy nothing: the flow need not be followed
+accurately, only to a stationary point. Newton–Krylov finds any stationary point, so it is
+ruled out for relaxations without a descent safeguard. ODE12r is the force-only choice. Its
+step control uses the residual, not the energy.
+
+ODE12r batch (all 16 tests, 4 sizes, float64 and float32; budget 10× the protocol's steps):
+
+- All float64 runs pass except bulk_bc8 at o4d14 (out of steps). (The surface-energy test
+  passed `use_armijo` straight to the optimiser; `make_optimizer` now drops it for ODE12r.)
+- Float32 fails the defect relaxations at the tests' fmax 1e-3 eV/Å: vacancy at every size,
+  interstitial at o4d12 and o4d14, stacking fault at o4d12, the relaxed (100) surface at o4d12
+  and o4d14, plus hcp_short_and_fat at o4d14.
+- **Two causes.** (1) The force noise floor. At the float64 minimum, float32 forces are
+  wrong by 9e-4 eV/Å (o4d12) and 2e-4 eV/Å (o4d16), so o4d12 cannot reach fmax 1e-3 reliably.
+  (2) ODE12r stalls above the floor. The o4d16 vacancy reaches fmax 2.6e-3 in about 500 steps.
+  It then wanders between 2.2e-3 and 2.6e-3 for 9500 steps, while the energy moves
+  ±2 meV. The step control shrinks the step until noise dominates the residual change.
+- So a fixed absolute fmax of 1e-3 eV/Å is about the limit of what float32 ACE forces support in
+  a 200-atom cell. A noise-aware stopping rule (stop when fmax stops decreasing at the measured
+  force-noise level) would be needed to run these tests in float32 unattended.
+
+### Effect on the QoIs
+
+ODE12r float64 against ODE12r float32 isolates the evaluation precision. Max |difference| in
+units of each QoI's score tolerance (`bench/si_qoi/score.py`), over the QoIs both computed:
+
+| model | precision effect, max |Δ|/tol | worst QoI | QoIs compared |
+|---|---|---|---|
+| o4d12 | 0.20 | dE_hcp | 14 |
+| o4d14 | 0.62 | dE_bcc | 16 |
+| o4d16 | 0.096 | dumbbell interstitial | 20 |
+| o4d20 | 0.031 | dumbbell interstitial | 20 |
+
+- **For the models that reach the QoI targets (o4d16, o4d20), float32 changes no QoI by more
+  than 0.1 tolerance.** The force errors are not significant for properties.
+- The small models are less well conditioned (larger readout cancellation, §4), and float32
+  moves their phase energy differences by up to 0.6 tolerance.
+
+### The elastic fit's internal relaxation is under-converged (a protocol finding)
+
+L-BFGS against ODE12r, both float64, moved diamond C44 by 0.59–1.17 tolerance. The cause is
+not the optimiser. matscipy's `fit_elastic_constants` relaxes the internal coordinates of each
+strained cell with the optimiser's default fmax, 0.05 eV/Å. Relaxed-ion C44 depends on the
+internal relaxation (Kleinman), and the two optimisers stop at different residuals.
+
+With `SI_TESTS_ELASTIC_FMAX=1e-3` (bulk_diamond only, all four sizes):
+
+| model | C44 default L-BFGS | C44 tight L-BFGS / ODE12r / ODE12r float32 | default → tight (tol) |
+|---|---|---|---|
+| o4d12 | 66.1 | 72.5 / 72.5 / 72.5 | +0.89 |
+| o4d14 | 68.9 | 73.1 / 73.1 / 73.1 | +0.57 |
+| o4d16 | 69.7 | 72.5 / 72.5 / 72.5 | +0.39 |
+| o4d20 | 67.8 | 70.6 / 70.6 / 70.6 | +0.39 |
+
+- Converged, the optimisers agree to 0.02 tolerance and float32 to 0.015 on all of B, C11, C12
+  and C44.
+- **The plotted QoIs underestimate C44 by 2.8–6.4 GPa** (0.4–0.9 tolerance). This affects every
+  model in the plot, not only ACE. Tightening the protocol's elastic fmax would need all models'
+  bulk_diamond reruns.
