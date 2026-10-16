@@ -83,7 +83,7 @@ def test_yaml_lists_and_bools_equal_cli_forms(tmp_path):
                                        "basis": {"order": 3, "max_degree": 10, "elements": ["Si", "Ge"],
                                                  "no_gamma": True, "embedding": "identity"}})
     a = _fit_ns(["--config", str(f)])
-    b = _fit_ns(["--train", str(tmp_path / "t.xyz"), "--out", "o", "--rungs", "map,laplace", "--no-bump",
+    b = _fit_ns(["--train", str(tmp_path / "t.xyz"), "--out", "o", "--rungs", "map,laplace", "--no-bump", "--m-per-species", "6",
                  "--order", "3", "--max-degree", "10", "--elements", "Si,Ge", "--no-gamma",
                  "--basis-embedding", "identity"])
     for k in ("rungs", "no_bump", "elements", "no_gamma", "order", "max_degree", "basis_embedding"):

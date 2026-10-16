@@ -45,7 +45,9 @@ def _add_fit_args(p):
                    help="size-aware batching: pack configs into batches by an atom budget (the largest "
                         "config) instead of fixed groups of --configs-per-batch; auto = only when the "
                         "fixed layout would pad badly (mixed bulk + big cells)")
-    p.add_argument("--m-per-species", type=int, default=500)
+    p.add_argument("--m-per-species", type=int, default=0,
+                   help="inducing points per species of the residual GP. 0 (default) = linear ACE; > 0 adds "
+                        "the GP arm (experimental, advanced: much slower and more memory; try 6-100)")
     p.add_argument("--kernel", default="cosine", choices=["cosine", "matern32"])
     p.add_argument("--no-bump", action="store_true")
     p.add_argument("--density", choices=["none", "pair", "pca"], default="none",
@@ -642,7 +644,7 @@ def _parser():
     from . import __version__
     top.add_argument("--version", action="version", version=f"ace-jax {__version__}")
     sub = top.add_subparsers(dest="cmd", required=True)
-    fit_p = sub.add_parser("fit", help="fit the hybrid linear-ACE + residual GP (--m-per-species 0 = linear-only fit)")
+    fit_p = sub.add_parser("fit", help="fit a linear ACE model (default), or with --m-per-species > 0 the experimental hybrid ACE + residual GP")
     _add_fit_args(fit_p)
     add_basis_args(fit_p.add_argument_group("basis (built in memory; instead of --model)"), fit=True)
     ev = sub.add_parser("eval", help="evaluate a model on a dataset: RMSE table vs the labels, predictions to extxyz")
@@ -745,6 +747,9 @@ def _apply_config(sub, cmd, path):
     return defaults
 
 
+GP_ONLY = ("kernel", "no_bump", "density", "pca_d", "embedding")   # `aj fit` dests read only by the GP arm
+
+
 def _parse(argv=None):
     """Parse the command line, layering a --config fit.yaml under it."""
     import sys
@@ -777,6 +782,12 @@ def _parse(argv=None):
         stray = sorted(d for d in typed if d.startswith("radial_") and d not in BasisSpec.FIELDS)
         if stray:
             subs["fit"].error(f"--{stray[0].replace('_', '-')} needs --learn-radial")
+    if a.cmd == "fit" and a.m_per_species == 0:  # GP-only options would be silently ignored on the linear arm
+        from . import runfile
+        typed = runfile.explicit_dests(subs["fit"], argv[argv.index(cmd) + 1:])
+        gp_only = sorted(typed & set(GP_ONLY))
+        if gp_only:
+            subs["fit"].error(f"--{gp_only[0].replace('_', '-')} needs --m-per-species > 0 (the GP arm)")
     if a.cmd == "fit":
         _check_fit_args(subs["fit"], a)
     return a

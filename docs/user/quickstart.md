@@ -29,7 +29,7 @@ different names, give them with `--energy-key`, `--force-key` and
 ```bash
 aj fit --order 3 --max-degree 10 \
     --train train.xyz --test test.xyz \
-    --e0 lsq --m-per-species 0 --opt lbfgs \
+    --e0 lsq --opt lbfgs \
     --out fit
 ```
 
@@ -47,7 +47,6 @@ aj fit --order 3 --max-degree 10 \
   set has an isolated atom, so $E_0$ is set to the energy of that atom. If
   there is no isolated atom, the fit calculates $E_0$ with the model (see
   [E0](concepts.md#e0-the-reference-energy)).
-- `--m-per-species 0` selects the linear model (no Gaussian-process arm).
 - `--opt lbfgs` maximises the evidence with L-BFGS. For the linear model, a
   small number of Newton steps then refine the result to a stationary point.
   `--opt lbfgs` is the default; this example gives it only to show it.
@@ -151,7 +150,7 @@ basis for more than one fit, or to share it:
 aj basis --elements Si --order 3 --max-degree 10 --out si.npz
 aj fit --model si.npz --r0 2.4 \
     --train train.xyz --test test.xyz \
-    --e0 lsq --m-per-species 0 --opt lbfgs \
+    --e0 lsq --opt lbfgs \
     --out fit_from_file
 ```
 

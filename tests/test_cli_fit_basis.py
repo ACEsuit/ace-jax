@@ -41,3 +41,16 @@ def test_cli_basis_source_errors(argv, msg, capsys):
     with pytest.raises(SystemExit):
         main(argv)
     assert msg in capsys.readouterr().err
+
+
+def test_cli_fit_defaults_to_linear(capsys):
+    """The GP arm is opt-in: the default is linear ACE, and a GP-only option typed
+    without --m-per-species > 0 is refused rather than silently ignored."""
+    from ace_jax.cli import _fit_config, _parse
+    base = ["fit", "--model", "m.npz", "--r0", "2", "--train", "x.xyz", "--out", "o"]
+    a = _parse(base)
+    assert a.m_per_species == 0 and _fit_config(a).arm == "linear"
+    assert _fit_config(_parse([*base, "--m-per-species", "6", "--density", "pair"])).arm == "gp"
+    with pytest.raises(SystemExit):
+        _parse([*base, "--density", "pair"])
+    assert "--density needs --m-per-species > 0" in capsys.readouterr().err

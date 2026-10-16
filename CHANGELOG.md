@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Changed
+
+- **`aj fit` fits linear ACE by default.** The default of `--m-per-species`
+  is now 0 (it was 500). The hybrid ACE + GP model is experimental. To use
+  it, give `--m-per-species` > 0. The GP options (`--kernel`, `--no-bump`,
+  `--density`, `--pca-d`, `--embedding`) without `--m-per-species` > 0 are
+  now an error. `FitConfig` in Python is not changed: set `arm` explicitly.
+
 ### Added
 
 - **`write_yace(model, path, summed=True)`** writes one A basis for all

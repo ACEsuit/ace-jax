@@ -22,8 +22,10 @@ reference.
 - **Bayesian fits.** Linear ACE uses Bayesian linear regression. The fit
   selects the energy, force and virial noise levels and the prior scale by
   maximising the evidence, so you do not set weights by hand.
-    - A hybrid ACE + Gaussian-process model adds a calibrated set of
-      uncertainty approximations (MAP, Laplace, Pathfinder, VI, NUTS).
+    - An experimental hybrid ACE + Gaussian-process model
+      (`--m-per-species` > 0) adds a calibrated set of uncertainty
+      approximations (MAP, Laplace, Pathfinder, VI, NUTS). Most fits use
+      the linear model, the default.
     - The linear model has POPS and ARD uncertainties.
     - ARD gives a conformally calibrated per-atom force uncertainty
       (`forces_std`, `forces_q`, a 3x3 `forces_cov`). `aj calibrate`
@@ -62,7 +64,7 @@ Fit a linear ACE model to labelled data, check it on a test set, and evaluate it
 
 ```bash
 aj fit --order 3 --max-degree 10 --train train.xyz --test test.xyz \
-    --e0 lsq --m-per-species 0 --opt lbfgs --out fit
+    --e0 lsq --opt lbfgs --out fit
 aj eval --model fit/model.npz --data test.xyz --out predictions.xyz
 ```
 

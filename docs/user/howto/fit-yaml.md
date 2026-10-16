@@ -43,7 +43,6 @@ the `aj fit` default.
 train: train.xyz
 test: test.xyz
 e0: lsq
-m_per_species: 0
 opt: lbfgs
 basis:
   order: 3
