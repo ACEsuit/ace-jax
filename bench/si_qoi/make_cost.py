@@ -11,12 +11,16 @@ at 1e-10, as learned radials are by default); each row's gate is looked up in it
 import argparse, json, pathlib, sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
-from plot_cost import FAM, ROOT, cost_name, family_of  # noqa: E402
+from plot_cost import FAM, REDUCED, ROOT, cost_name, family_of  # noqa: E402
 
 
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("timings", nargs="+")
-    ap.add_argument("--dtype", help="only rows at this precision (float64: like-for-like, e.g. MACE without float32)")
+    ap.add_argument("--dtype", help="only rows at this precision (float64: like-for-like, e.g. MACE without float32); "
+                                    "the reduced-precision lines (plot_cost.REDUCED) are kept, under their own names")
+    ap.add_argument("--prefer", action="append", default=[],
+                    help="a timings file whose rows supersede every other file's for the models it times "
+                         "(e.g. a re-timed ladder); repeatable")
     ap.add_argument("--out", default=str(ROOT / "bench/si_qoi/results/cost_sulis_gpu.json"))
     a = ap.parse_args()
     rows, gates = [], set()
@@ -25,9 +29,17 @@ def main():
         gates |= {(f, r["code"], r["family"], r["size"]) for r in rs if r.get("mode") == "parity" and r.get("status") == "parity_ok"}
         rows += [r | {"_path": f} for r in rs]
     best, code = {}, {}
+    prefer = [str(pathlib.Path(p)) for p in a.prefer]
+    preferred = {}                       # cost name -> the --prefer file that times it
+    for r in rows:
+        if str(pathlib.Path(r["_path"])) in prefer and r.get("mode") != "parity" and family_of(r) in FAM:
+            preferred.setdefault(cost_name(family_of(r), r["size"]), r["_path"])
     for r in rows:
         fam = family_of(r)                                       # plot_cost's split families (MACE by L, wL)
-        if r.get("mode") == "parity" or r.get("status") != "ok" or fam not in FAM or (a.dtype and r["dtype"] != a.dtype):
+        if (r.get("mode") == "parity" or r.get("status") != "ok" or fam not in FAM
+                or (a.dtype and r["dtype"] != a.dtype and fam not in REDUCED)):
+            continue
+        if preferred.get(cost_name(fam, r["size"]), r["_path"]) != r["_path"]:   # superseded by a --prefer file
             continue
         if r.get("mode") == "lammps" and (r["_path"], r["code"], r["family"], r["size"]) not in gates:   # standalone: no gate
             continue

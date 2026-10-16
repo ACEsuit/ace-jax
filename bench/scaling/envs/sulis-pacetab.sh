@@ -10,7 +10,8 @@
 #   rsync -a <that checkout>/ sulis:bench-scaling/lammps-user-pace-tab/
 #   (from bench/scaling/envs) sbatch sulis-pacetab-build-cpu.sbatch; sbatch sulis-pacetab-build-gpu.sbatch
 #
-# Wrappers: $ROOT/lmp-pacetab-cpu.sh, $ROOT/lmp-pacetab.sh (the env jsons' `lmp`).
+# Wrappers: $ROOT/lmp-pacetab-cpu.sh, $ROOT/lmp-pacetab.sh (the env jsons' `lmp`), and with the gpu_mixed
+# step $ROOT/lmp-pacetab-mixed.sh (KOKKOS_PREC=mixed; the env jsons' `lmp_mixed`).
 set -euo pipefail
 ROOT=${BENCH_ROOT:-$HOME/bench-scaling}
 SRC=$ROOT/lammps-dev
@@ -50,6 +51,19 @@ gpu() {
     -D Kokkos_ARCH_AMPERE80=ON -D PKG_ML-PACE=ON -D LOCAL_ML-PACE="$PACE"
   cmake --build "$B" -j "$JOBS"
   wrapper lmp-pacetab.sh "$MODS_GPU" "$B"
+}
+
+gpu_mixed() {   # the same with KOKKOS_PREC=mixed (float compute, double accumulation): the mixed-precision ML-PACE rows
+  local B=$SRC/build-kk-pacetab-mixed
+  set +u; module purge; module load $MODS_GPU; set -u
+  export NVCC_WRAPPER_DEFAULT_COMPILER=g++
+  rm -rf "$B"
+  cmake -S "$SRC/cmake" -B "$B" -D CMAKE_BUILD_TYPE=Release -D CMAKE_CXX_COMPILER="$SRC/lib/kokkos/bin/nvcc_wrapper" \
+    -D BUILD_SHARED_LIBS=ON -D BUILD_MPI=ON -D BUILD_OMP=ON \
+    -D PKG_KOKKOS=ON -D Kokkos_ENABLE_CUDA=ON -D Kokkos_ENABLE_OPENMP=ON -D Kokkos_ENABLE_SERIAL=ON \
+    -D Kokkos_ARCH_AMPERE80=ON -D PKG_ML-PACE=ON -D LOCAL_ML-PACE="$PACE" -D KOKKOS_PREC=mixed
+  cmake --build "$B" -j "$JOBS"
+  wrapper lmp-pacetab-mixed.sh "$MODS_GPU" "$B"
 }
 
 git -C "$PACE" log -1 --format="lammps-user-pace-tab %h %s" 2>/dev/null || cat "$PACE/REV"

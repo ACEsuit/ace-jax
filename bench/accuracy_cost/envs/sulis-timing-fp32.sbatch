@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# The linear ACE order-4 ladder on a Sulis A100 with its mixed-precision lines (docs/dev/fp32-results.md):
+# ace-jax (lammps-jax bundles, analytic radials splined at 1e-10 as the plotted rows) in float64 and float32,
+# and the same models as tabulated .yace in ML-PACE, KOKKOS_PREC double (lmp-pacetab.sh) and mixed
+# (lmp-pacetab-mixed.sh, sulis-pacetab.sh gpu_mixed).  Code from ~/bench-scaling/ace-jax-ac-fp32.
+#
+#   sbatch --exclusive envs/sulis-timing-fp32.sbatch            (from ace-jax-ac-fp32/bench/accuracy_cost)
+#SBATCH --job-name=ac-timing-fp32
+#SBATCH --account=su007-jrk-gpu
+#SBATCH --partition=gpu
+#SBATCH --gres=gpu:ampere_a100:1
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=32
+#SBATCH --mem=120G
+#SBATCH --time=06:00:00
+#SBATCH --output=%x-%j.out
+set -euo pipefail
+ROOT=${BENCH_ROOT:-$HOME/bench-scaling}
+CODE=$ROOT/ace-jax-ac-fp32
+cd "$CODE/bench"
+set +u; source /etc/profile.d/modules.sh 2>/dev/null || true; module purge 2>/dev/null || true; set -u
+export LD_LIBRARY_PATH=$ROOT/venv/lib/python3.12/site-packages/nvidia/cu13/lib:${LD_LIBRARY_PATH:-}
+export PYTHONPATH=$CODE/bench:$CODE/src
+export ACEJAX_AC_ROOT=$ROOT/ac
+export ACEJAX_AC_MAX_LOAD1=16
+export ACEJAX_AC_ACE_SPLINE_TOL=1e-10 ACEJAX_AC_ACE_DTYPES=float64,float32
+[ -n "${ACEJAX_AC_GPU:-}" ] && export CUDA_VISIBLE_DEVICES=$ACEJAX_AC_GPU
+echo "job $SLURM_JOB_ID on $(hostname) $(date -Is)"
+nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv || true
+"$ROOT/venv/bin/python" -c "import ace_jax; print(ace_jax.__file__)"
+for fam in ace ace_tab; do
+  for size in o4d12 o4d14 o4d16 o4d20; do
+    "$ROOT/venv/bin/python" -m accuracy_cost.timing gpu --only $fam/$size --env accuracy_cost/envs/sulis-gpu-fp32.json \
+        --results accuracy_cost/results/sulis-gpu-fp32.jsonl
+  done
+done

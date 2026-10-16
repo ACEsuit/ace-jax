@@ -52,7 +52,9 @@ TOL = {"mlpace": (1e-6, 1e-5), "acejax": (1e-10, 1e-9), "mace": (1e-6, None),
        "acepotentials-trim": (1e-10, 1e-9),       # accuracy_cost: the trim library vs the ace-jax fit (exact radials)
        "gap": (1e-6, 1e-5),
        # Symmetrix-XL vs MACE in PyTorch (float64), as "mace" plus a force bound; FP32 looser (labelled -f32)
-       "mace-xl": (1e-6, 1e-4), "mace-xl-f32": (1e-5, 1e-3)}
+       "mace-xl": (1e-6, 1e-4), "mace-xl-f32": (1e-5, 1e-3),
+       # ML-PACE in a KOKKOS_PREC=mixed LAMMPS (float compute) vs the float64 model, as mace-xl-f32
+       "mlpace-mixed": (1e-5, 1e-3)}
 # gates that check a standalone line: a failure blocks its standalone rows
 STANDALONE_GATES = ("spline", "acepot")
 LEARNED, ANALYTIC = LEARNED_CODES                     # "acejax-ace-learned", "acejax-ace-analytic"
