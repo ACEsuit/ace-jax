@@ -55,17 +55,18 @@ A fixed seed always gives the same basis and the same split.
 - `--row-precision float32` calculates the design rows in float32. On a GPU,
   it also calculates their QR factors in float32. The evidence, the
   hyperparameters and the coefficients stay in float64.
-  - This option is for the linear arm with the QR solver. It does not apply to
-    radial learning.
+  - This option is for the linear arm with the QR solver.
+  - The GP arm (`--m-per-species` more than 0) and radial learning
+    (`--learn-radial`) do not support float32 rows yet. With them, `aj fit`
+    gives an error.
   - On a GPU with low float64 throughput, the rows are approximately 3 times
     faster. A complete fit was approximately 1.6 times faster in our tests.
   - The RMSE changed by less than 1 % in our tests. The hyperparameters can
     change more than the predictions do. Thus, compare one float32 fit with a
     float64 fit before you use float32 for a new type of dataset.
   - `--row-check` refits the hyperparameters on statistics with added noise of
-    the float32 size, and records the change in `map_convergence.json`. This
-    diagnostic is conservative: it can report a fit as unstable when the RMSE
-    does not change.
+    the float32 size. It records the change of the training RMSE in
+    `map_convergence.json`. A change of more than 10 % gives a warning.
 - The coupling coefficients are bit-identical on Linux aarch64 and macOS
   arm64. On x86_64, they agree to a few units in the last place. Thus fits
   on different platforms agree to round-off, not bit for bit.

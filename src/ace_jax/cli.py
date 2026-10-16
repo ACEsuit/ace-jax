@@ -61,10 +61,11 @@ def _add_fit_args(p):
                         "interpolates its data). The GP arm always uses the Cholesky")
     p.add_argument("--row-precision", choices=["float64", "float32"], default="float64",
                    help="float32: compute the design rows (and, on a GPU, their QR) in float32, the bulk "
-                        "of a fit's work; the evidence and coefficients stay float64 (linear arm, QR)")
+                        "of a fit's work; the evidence and coefficients stay float64. Linear arm with the QR "
+                        "solver only: the GP arm and --learn-radial are not supported yet")
     p.add_argument("--row-check", action="store_true",
                    help="with --row-precision float32: after the MAP, refit on statistics perturbed at "
-                        "float32 rounding and report how far the predictions move (a diagnostic; "
+                        "float32 rounding and record how much the training RMSE changes (warns above 10%%; "
                         "it costs a second MAP)")
     p.add_argument("--opt", choices=["adam", "lbfgs"], default="lbfgs",
                    help="hyperparameter MAP optimiser: lbfgs (default) = bounded L-BFGS-B, then (linear arm, "

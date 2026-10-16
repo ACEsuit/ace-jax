@@ -233,7 +233,8 @@ class FitConfig:
                    "devices > 1" if self.devices > 1 else
                    "solver lstsq" if self.solver == "lstsq" else None)
             if why is not None:
-                raise ValueError(f"row_precision float32 is not available with {why}")
+                raise ValueError(f"row_precision float32 is not available with {why} (not supported yet; "
+                                 "use row_precision float64)")
         if self.row_check and self.row_precision != "float32":
             raise ValueError("row_check is the float32 rows' stability check: it needs row_precision float32")
         if self.solver not in ("evidence", "lstsq"):

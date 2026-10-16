@@ -539,3 +539,31 @@ The CPU data stage (no `fast-neighbours` here) now limits the gain at this size.
   therefore opt-in and documented as a diagnostic, not a gate.
 - **Open:** a calibrated yardstick (change relative to the RMSE, or a test-set metric) would
   make it useful as a gate.
+
+### The row check, measured against the RMSE (2026-10-16)
+
+`--row-check` now reports, per quantity, the relative change of the fit's own training RMSE
+(weighted) when θ is refitted on the perturbed statistics, and the perturbed mean is evaluated
+on the unperturbed ones (`rowcheck._rmse_change`). For reference it also gives the prediction
+change against the RMSE and against the posterior std. The verdict uses the largest |RMSE
+change|: stable at or below 5%, marginal up to 10%, unstable above 10% (a warning).
+
+Calibration (`bench/fp32/run_check_calib.sh`, the same four `aj fit` runs):
+
+| fit | check: max RMSE change (E / F / V) | actual float32-rows RMSE change vs float64 (E / F / V) | check: prediction change / posterior std (E / F / V) |
+|---|---|---|---|
+| GAP-18 o4d16 | 0.7% (+0.68 / +0.19 / +0.18) | +0.4% / −0.1% / +0.9% | 1.42 / 0.68 / 1.17 |
+| GAP-18 o4d12 | 0.9% (+0.76 / +0.31 / +0.86) | −0.8% / +0.1% / +0.3% | 3.54 / 2.95 / 4.06 |
+| E1x o3d12 | 1.8% (+1.83 / +0.64 / −0.29) | +0.2% / +0.1% / −0.1% | 0.43 / 0.42 / 0.38 |
+| E1x o4d14 | 3.3% (+3.26 / +1.46 / +2.12) | +0.8% / 0.0% / +0.2% | 0.56 / 0.31 / 0.32 |
+
+- The check overestimates the real float32 change by about 1.5–4×. Its noise is injected on
+  top of float32's own rounding, and random noise is a stronger perturbation than the
+  correlated rounding.
+- All four read as stable.
+- The posterior-std yardstick reads up to 4.1 (GAP-18 o4d12) on fits whose RMSE moved under
+  1%, and it does not order the fits by their real change. That is why it is no longer the
+  verdict.
+
+GP arm and radial learning: float32 rows are **not supported yet**. Validation refuses them,
+and the CLI help, `docs/user/howto/reproducibility.md` and the skill guide say so.

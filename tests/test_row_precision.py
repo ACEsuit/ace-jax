@@ -109,7 +109,9 @@ def test_pipeline_records_the_row_rounding_check():
     res = fit(cfg, load_fit_data(cfg, data=str(XYZ)), log=lambda *a, **k: None)
     chk = res.map.convergence["row_rounding_check"]
     assert chk["verdict"] in ("stable", "marginal", "unstable")
-    assert set(chk["quantities"]) <= set("EFV") and np.isfinite(chk["max_ratio"])
+    assert set(chk["quantities"]) <= set("EFV") and np.isfinite(chk["max_rmse_change"])
+    for v in chk["quantities"].values():
+        assert set(v) == {"rmse_change", "change_over_rmse", "change_over_posterior_std"}
 
 
 def test_float32_row_predictions_match_float64(problem, stats):

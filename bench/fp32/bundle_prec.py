@@ -84,7 +84,8 @@ def lammps(cmd_prefix, pair, at, kk="-k on g 1 -sf kk -pk kokkos newton on neigh
 def child(code, *args):
     """Run `code` in a fresh process of this venv (JAX state, and its GPU pool, end with it)."""
     env = os.environ | {"XLA_PYTHON_CLIENT_PREALLOCATE": "false"}
-    p = subprocess.run(["uv", "run", "--no-sync", "python", "-c", code, *map(str, args)],
+    py = os.environ["BUNDLE_PYTHON"].split() if os.environ.get("BUNDLE_PYTHON") else ["uv", "run", "--no-sync", "python"]
+    p = subprocess.run([*py, "-c", code, *map(str, args)],
                        capture_output=True, text=True, env=env, timeout=7200)
     if p.returncode != 0:
         raise RuntimeError(p.stderr[-2000:])
