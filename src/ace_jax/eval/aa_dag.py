@@ -39,6 +39,12 @@ import jax.numpy as jnp
 import numpy as np
 
 PLAN_MODES = ("prefix", "greedy")
+# aa_dag="auto" takes the DAG ("greedy") from this many chain-form multiplies per site (sum over orders of
+# n_monomials * (order - 1)) and keeps the chain form below.  Timed in LAMMPS (lammps-jax), one model at a time
+# in both forms on the same node (bench/accuracy_cost/envs/sulis-{cpu,gpu}-dagpair.sbatch, Si accuracy-cost
+# ladders): below ~2,200 the two tie within noise (0.98-1.06x, CPU node and A100); from ~6,200 the DAG wins
+# on both (CPU 1.24-2.55x, A100 1.12-1.84x at 7,095-175,021).  The chain form below keeps small models bitwise.
+AUTO_MIN_CHAIN_MUL = 4000
 
 
 def _parents_prefix(keys_k):
@@ -247,9 +253,24 @@ def _plan_for(specs, mode):
     return _PLANS[key]
 
 
+def chain_multiplies(specs):
+    """Per-site multiplies of the chain-form product basis: sum over orders of n_monomials * (order - 1)."""
+    return sum(int(np.shape(a)[0]) * max(int(np.shape(a)[1]) - 1, 0) for a in specs if np.size(a))
+
+
+def resolve_aa_dag(model, mode):
+    """The plan mode `mode` stands for on `model`: "auto" is "greedy" when the chain form's multiplies
+    (`chain_multiplies` of its aa_specs) reach AUTO_MIN_CHAIN_MUL, else None (the chain form); a model
+    without a product basis to plan (no `aa_dag` field) resolves to None; other modes as given."""
+    if mode != "auto":
+        return mode
+    specs = getattr(model, "aa_specs", None) if hasattr(model, "aa_dag") else None
+    return "greedy" if specs is not None and chain_multiplies(specs) >= AUTO_MIN_CHAIN_MUL else None
+
+
 def with_aa_dag(model, mode="greedy"):
     """`model` with DAG plans attached for its energy path's product basis (mode
-    None: plans removed).  ACEModel: `aa_dag` for `aa_specs` (the sparse layout and
+    None: plans removed; "auto": `resolve_aa_dag`).  ACEModel: `aa_dag` for `aa_specs` (the sparse layout and
     the unblocked dense one) and, on a lean model, `blk_aa_dag` for `blk_aa_specs`;
     read by the folded readout only (the basis methods keep the chain form), so
     apply it after `lean`.  PACEModel: `aa_dag`.  A model without the fields (a
@@ -258,11 +279,12 @@ def with_aa_dag(model, mode="greedy"):
     import dataclasses
     if not hasattr(model, "aa_dag"):
         return model
+    mode = resolve_aa_dag(model, mode)
     has_blk = hasattr(model, "blk_aa_dag")
     if mode is None:
         return dataclasses.replace(model, aa_dag=None, **({"blk_aa_dag": None} if has_blk else {}))
     if mode not in PLAN_MODES:
-        raise ValueError(f"aa_dag must be one of {PLAN_MODES} or None, got {mode!r}")
+        raise ValueError(f"aa_dag must be one of {PLAN_MODES}, 'auto' or None, got {mode!r}")
     kw = {"aa_dag": _plan_for(model.aa_specs, mode)}
     if has_blk:
         kw["blk_aa_dag"] = None if model.blk_aa_specs is None else _plan_for(model.blk_aa_specs, mode)

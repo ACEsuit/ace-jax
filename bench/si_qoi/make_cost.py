@@ -20,14 +20,20 @@ def main():
     ap.add_argument("--allow", action="append", default=[], metavar="CODE:DTYPE",
                     help="also keep this code at this precision past --dtype (nep-gpumd:mixed: GPUMD's NEP is mixed "
                          "precision only; plot_cost marks it)")
+    ap.add_argument("--source", action="append", default=[], metavar="CODE=STEM",
+                    help="for the models a timing file with stem STEM covers, take this code's rows only from it (acejax-ace=sulis-gpu-acejax-auto: "
+                         "each ace-jax model in the product-basis form aa_dag='auto' picks, not the fastest of every run)")
     ap.add_argument("--out", default=str(ROOT / "bench/si_qoi/results/cost_sulis_gpu.json"))
     a = ap.parse_args()
     allow = {tuple(s.split(":", 1)) for s in a.allow}
+    source = dict(s.split("=", 1) for s in a.source)
     rows, gates = [], set()
     for f in a.timings:
         rs = [json.loads(l) | {"_file": pathlib.Path(f).stem} for l in open(f)]
         gates |= {(f, r["code"], r["family"], r["size"]) for r in rs if r.get("mode") == "parity" and r.get("status") == "parity_ok"}
         rows += [r | {"_path": f} for r in rs]
+    # models a --source file covers: their rows of that code come from it alone (others, e.g. the wL ladder, as before)
+    sourced = {(r["code"], r["family"], r["size"]) for r in rows if source.get(r["code"]) == r["_file"]}
     best, code = {}, {}
     for r in rows:
         fam = family_of(r)                                       # plot_cost's split families (MACE by L, wL)
@@ -36,10 +42,13 @@ def main():
             continue
         if r.get("mode") in ("lammps", "gpumd") and (r["_path"], r["code"], r["family"], r["size"]) not in gates:   # standalone: no gate
             continue
+        if (r["code"], r["family"], r["size"]) in sourced and r["_file"] != source[r["code"]]:
+            continue
         name = cost_name(fam, r["size"])                      # Symmetrix-XL under its own name (MACExl_)
         us = 1e6 / r["atom_steps_per_s"]
         if us < best.get(name, float("inf")):
-            best[name], code[name] = us, f'{r["code"]} {r["dtype"]} {r["mode"]} [{r["_file"]}]'
+            best[name], code[name] = us, (f'{r["code"]} {r["dtype"]} {r["mode"]}' + (f' dag:{r["aa_dag"]}' if r.get("aa_dag") else "")
+                                          + f' [{r["_file"]}]')
     pathlib.Path(a.out).write_text(json.dumps(best, indent=1, sort_keys=True) + "\n")
     pathlib.Path(a.out).with_suffix(".codes.json").write_text(json.dumps(code, indent=1, sort_keys=True) + "\n")
     for n in sorted(best):

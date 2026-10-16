@@ -1,0 +1,23 @@
+{
+ "ace/o3d10": 359,
+ "ace/o3d12": 1013,
+ "ace/o3d8": 113,
+ "ace/o4d12": 2150,
+ "ace/o4d14": 7095,
+ "ace/o4d16": 21934,
+ "ace/o4d20": 175021,
+ "ace_lr/o3d10": 359,
+ "ace_lr/o3d12": 1013,
+ "ace_lr/o3d8": 113,
+ "ace_lr/o4d12": 2150,
+ "ace_lr/o4d14": 7095,
+ "ace_lr/o4d16": 21934,
+ "ace_pshape/md10": 2087,
+ "ace_pshape/md12": 6207,
+ "ace_pshape/md14": 12255,
+ "ace_pshape/md18": 19141,
+ "ace_pshape_lr/md10": 2087,
+ "ace_pshape_lr/md12": 6207,
+ "ace_pshape_lr/md14": 12255,
+ "ace_pshape_lr/md18": 19141
+}
