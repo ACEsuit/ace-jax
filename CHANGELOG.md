@@ -4,6 +4,13 @@
 
 ### Changed
 
+- **The recursive (DAG) product basis is automatic.** `ACECalculator` and
+  `export_lammps` default to `aa_dag="auto"`. It uses the DAG for models with
+  4,000 or more chain-form multiplications per atom, and the chain form for
+  smaller models. Results below the threshold are unchanged. Larger models run
+  1.2-2.7x faster on a CPU node and 1.1-1.8x faster on an A100 (linear ACE
+  o4d20: 2.7x and 1.8x). `calc.aa_dag` and the bundle's `ace_jax.aa_dag` give
+  the form used. Set `aa_dag=None` for the chain form.
 - **`aj fit` fits linear ACE by default.** The default of `--m-per-species`
   is now 0 (it was 500). The hybrid ACE + GP model is experimental. To use
   it, give `--m-per-species` > 0. The GP options (`--kernel`, `--no-bump`,

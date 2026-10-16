@@ -212,12 +212,30 @@ def flag(ax, data, codes, key):
                         textcoords="offset points", ha="left" if left else "right", fontsize=7, color=MUTED)
 
 
+DAG_LABEL = "centre dot: DAG product basis"
+
+
+def dag_dots(ax, data, codes, key):
+    """A centre dot on the ace-jax points whose timing used the DAG product basis (make_cost's codes note
+    "dag:<mode>"): white on filled markers, the family's colour on open ones.  Returns whether any was drawn."""
+    drawn = False
+    for fam, pts in data.items():
+        _, col, _, _, filled, _ = FAM[fam]
+        p = [q for q in pts if q["x"] is not None and q[key] is not None
+             and " dag:" in codes.get(cost_name(fam, q["size"]), "")]   # by cost name: refits (COST_AS) share the timing
+        if p:
+            ax.plot([q["x"] for q in p], [q[key] for q in p], ls="none", marker="o", ms=3.5,
+                    color="white" if filled else col, mec="none", zorder=4)
+            drawn = True
+    return drawn
+
+
 def draw_row(axes, data, ref, xlabel, codes, letters, what):
     """One row of the figure: force error, QoI error and the cheapest model reaching the target, all against
     one x (a cost, or the fitted-parameter count)."""
     a, b, c = letters
     ax = axes[0]; style(ax, xlabel, "test force RMSE (eV/Å)")
-    series(ax, data, "rmse_F")
+    series(ax, data, "rmse_F"); dag_dots(ax, data, codes, "rmse_F")
     if "A100" in xlabel or "GPU" in xlabel:                   # on the CPU every ace-jax row is standalone by design
         flag(ax, data, codes, "rmse_F")
     ax.axhline(ref["rmse_F"], color=MUTED, ls=":", lw=1.2)
@@ -226,7 +244,7 @@ def draw_row(axes, data, ref, xlabel, codes, letters, what):
     ax.set_title(f"{a}  force error", loc="left", color=INK, fontweight="bold")
 
     ax = axes[1]; style(ax, xlabel, f"QoI error: geometric mean of |error| / tolerance\nover {len(TOLERANCES)} QoIs (lower is better)")
-    series(ax, data, "qoi"); ax.set_yscale("log")             # (standalone points flagged in the force panel only)
+    series(ax, data, "qoi"); dag_dots(ax, data, codes, "qoi"); ax.set_yscale("log")             # (standalone points flagged in the force panel only)
     ax.axhline(ref["qoi"], color=MUTED, ls=":", lw=1.2)
     ax.annotate("GAP-18", (ax.get_xlim()[0], ref["qoi"]), xytext=(4, 4), textcoords="offset points", fontsize=8, color=MUTED)
     ax.axhline(TARGET_QOI, color=MUTED, ls="--", lw=1)
@@ -306,13 +324,19 @@ def main():
                              "not counted)", (1, 1), xycoords="axes fraction", xytext=(-4, -4),
                              textcoords="offset points", ha="right", va="top", fontsize=7.5, color=MUTED)
     order = [FAM[f][0] for f in FAM if FAM[f][0] in handles]
+    if any(" dag:" in v for _, _, codes, _ in rows for v in codes.values()):
+        from matplotlib.lines import Line2D
+        handles[DAG_LABEL] = (Line2D([], [], ls="none", marker="o", ms=8, color=MUTED),
+                              Line2D([], [], ls="none", marker="o", ms=3.5, color="white", mec="none"))
+        order.append(DAG_LABEL)
     ncol = min(6, -(-len(order) // 3))                    # at most 6 columns fit the width; more rows instead
     legend_rows = -(-len(order) // ncol)
+    from matplotlib.legend_handler import HandlerTuple
     fig.legend([handles[l] for l in order], order, loc="upper center", ncol=ncol, frameon=False,
-               fontsize=9, bbox_to_anchor=(0.5, 1.0))
+               fontsize=9, bbox_to_anchor=(0.5, 1.0), handler_map={tuple: HandlerTuple(ndivide=1)})
     cpu_note = ("CPU row: a 128-core EPYC 7742 node, all cores, ranks bound to cores; each model's fastest layout\n"
                 "(128x1 or 64x2 MPI ranks x threads; GAP: 32 ranks).\n"
-                "ace-jax runs in LAMMPS (lammps-jax CPU backend; ACE o4d16 and o4d20 with the recursive (DAG) product basis, aa_dag='greedy'); MACE runs in LAMMPS via Symmetrix and, separately, Symmetrix-XL.\n"
+                "ace-jax runs in LAMMPS (lammps-jax; aa_dag='auto': the DAG product basis, centre dot, from 4,000 chain-form multiplies per site; the chain form below); MACE runs in LAMMPS via Symmetrix and, separately, Symmetrix-XL.\n"
                 "Linear ACE run by ML-PACE: the o4 fits exported exactly to .yace with tabulated radials (ML-PACE with the tabulated-radial patch, ICAMS/lammps-user-pace#31; pace and pace/kk).  "
                 "GPU ML-PACE: LAMMPS develop ec02ed0 (with the 2026-08 pace/kk GPU rewrite).\n"
                 "Patched ML-PACE: the recursive-evaluator speed-ups proposed upstream (ICAMS/lammps-user-pace#31) on the CPU; "
