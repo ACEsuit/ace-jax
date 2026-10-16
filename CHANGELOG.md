@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### Added
+
+- **`write_yace(model, path, summed=True)`** writes one A basis for all
+  neighbour species, as ace-jax evaluates the model. The default writes each
+  product once for each neighbour species. The summed form has far fewer
+  products for multi-element models: 849 instead of 15,021 for a
+  three-element embedded model at order 3. ML-PACE reads it only with the
+  `summed_neighbour_A` addition. ace-jax does not read summed files.
+
+### Testing
+
+- The `pace-parity` CI job builds ML-PACE from
+  `jameskermode/lammps-user-pace` (ICAMS/lammps-user-pace#31): the
+  `v.2025.12.4.p1` release plus tabulated radials, recursive-evaluator
+  speed-ups and `summed_neighbour_A`.
+  `tests/test_pace_mlpace_yace.py` evaluates four multi-element exports with
+  ML-PACE, expanded and summed, and compares them with ace-jax.
+
 ### LAMMPS export
 
 - lammps-jax is on PyPI. Install it with the new `lammps` extra:

@@ -18,6 +18,11 @@ model's own values and derivatives, the products a re-expression of its coeffici
   radial column is live for (nonzero on some bond), and an order-nu product up to NZ^nu PACE products.
   ACE1's species-owned columns are live for one species each, so they add no products; PACE n is
   numbered per (neighbour species, l), so such columns share PACE R_nl slots.
+- **summed=True** keeps ACE's pooled A instead: every factor is element 0, each bond's tables hold that bond's
+  own values of every column, and the tree sets `summed_neighbour_A`, which tells ML-PACE to accumulate every
+  neighbour into the element-0 A (an ML-PACE addition, pace_ref/fast/0004).  No NZ^nu expansion: the right form
+  for species-embedded (tensor-reduced) models, whose columns are live for every species; for ACE1's
+  species-owned columns it widens nradmax NZ-fold instead.
 - **Shape**: lmax and nradmax are what the products read, not the model's (ML-PACE works on the whole
   nradmax x (lmax+1) rectangle per neighbour; o4d20 has lmax 14 but its products read l <= 6).
 
@@ -117,7 +122,7 @@ def _table(r, v, dv, rcut, r_min):
     return np.where(r >= rcut, 0.0, v).tolist(), np.where(r >= rcut, 0.0, dv).tolist()
 
 
-def ace_ctilde_tree(model, *, delta=DELTA, r_min=R_MIN, info=None):
+def ace_ctilde_tree(model, *, delta=DELTA, r_min=R_MIN, summed=False, info=None):
     """The `.yace` tree of a linear ACEModel (see the module docstring).  `delta` is deltaSplineBins and
     the table spacing; each bond's rcut must be a whole number of it (as ML-PACE sizes its tables:
     int(rcut / deltaSplineBins)).  `info`, a dict, receives the export's sizes."""
@@ -145,14 +150,18 @@ def ace_ctilde_tree(model, *, delta=DELTA, r_min=R_MIN, info=None):
     # PACE n per (neighbour species, l): a column live for neighbour species mu (nonzero on some bond
     # (z, mu)) takes the next n of its l there.  ACE1's species-owned columns then share PACE slots, and a
     # factor is summed only over the species its column is live for.
+    # summed: one numbering, for element 0, over the columns live on any bond; the other elements own none
     numbering = []
-    for mu in range(nz):
-        live = [c for c in sorted(col_l) if any(np.any(samples[z, mu][1][:, c] != 0) for z in range(nz))]
+    for mu in range(1 if summed else nz):
+        live = [c for c in sorted(col_l)
+                if any(np.any(samples[z, nu][1][:, c] != 0) for z in range(nz) for nu in (range(nz) if summed else (mu,)))]
         count = defaultdict(int)
         numbering.append({})
         for c in live:
             count[col_l[c]] += 1
             numbering[mu][c] = count[col_l[c]]
+    if summed:
+        numbering += [{} for _ in range(nz - 1)]
     lmax = max(col_l.values())
     nradmax = max((n for nm in numbering for n in nm.values()), default=1)
     half, order1, imag = _products(model, ctilde, numbering, ar, al, am, lmax)
@@ -164,7 +173,7 @@ def ace_ctilde_tree(model, *, delta=DELTA, r_min=R_MIN, info=None):
         dg = dRp @ wp + sum(w * dRnl[:, c] for c, w in order1[i].items())
         gf, gdf = _table(r, g, dg, rc, r_min)
         rnl = []
-        for c, n in sorted(numbering[j].items(), key=lambda t: (col_l[t[0]], t[1])):
+        for c, n in sorted(numbering[0 if summed else j].items(), key=lambda t: (col_l[t[0]], t[1])):
             l = col_l[c]
             p = l if model.ysolid else 0                  # solid harmonics: r^l Y_lm, r^l goes in the radial
             v = Rnl[:, c] * rs ** p
@@ -178,7 +187,7 @@ def ace_ctilde_tree(model, *, delta=DELTA, r_min=R_MIN, info=None):
     functions = {}
     for z in range(nz):
         fl = [{"mu0": z, "rank": 1, "ndensity": 1, "num_ms_combs": 1, "mus": [mu], "ns": [1], "ls": [0],
-               "ms_combs": [0], "ctildes": [1.0]} for mu in range(nz)]          # g_1 per neighbour species
+               "ms_combs": [0], "ctildes": [1.0]} for mu in range(1 if summed else nz)]   # g_1 per neighbour species
         groups = defaultdict(list)
         for key, c in half[z].items():
             groups[tuple((mu, n, l) for mu, n, l, _ in key)].append(([m for *_, m in key], c))
@@ -193,7 +202,7 @@ def ace_ctilde_tree(model, *, delta=DELTA, r_min=R_MIN, info=None):
             "E0": [float(e) for e in np.asarray(model.E0)], "deltaSplineBins": float(delta),
             "embeddings": {z: {"ndensity": 1, "FS_parameters": [1.0, 1.0], "npoti": "FinnisSinclairShiftedScaled",
                                "rho_core_cutoff": 100000, "drho_core_cutoff": 250} for z in range(nz)},
-            "bonds": bonds, "functions": functions}
+            "bonds": bonds, "functions": functions, **({"summed_neighbour_A": True} if summed else {})}
     if info is not None:
         info.update({"nradmax": int(nradmax), "lmax": int(lmax), "radials": len(col_l),
                      "functions": sum(len(f) for f in functions.values()),
