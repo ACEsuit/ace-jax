@@ -11,7 +11,15 @@
 #   (from bench/scaling/envs) sbatch sulis-pacetab-build-cpu.sbatch; sbatch sulis-pacetab-build-gpu.sbatch
 #
 # Wrappers: $ROOT/lmp-pacetab-cpu.sh, $ROOT/lmp-pacetab.sh (the env jsons' `lmp`).
+#
+# `cpufork` / `gpufork`: ML-PACE from ICAMS/lammps-user-pace#31 (jameskermode/lammps-user-pace tabulated-radials, 97621a3:
+# v.2025.12.4.p1 + tabulated radials, the recursive-evaluator speed-ups and summed_neighbour_A; rsync a checkout to
+# $ROOT/lammps-user-pace-fork first).  cpufork: the CPU build, wrapper $ROOT/lmp-pacefork-cpu.sh
+# (accuracy_cost/envs/sulis-cpu-pacefork.json).  gpufork: a copy of the lammps-dev tree carrying the pace/kk prototype
+# patches pace_ref/fast/0003, 0005, 0006 and 0007 (PACE_KK_RHOW at run time; pace_ref/fast/README.md), wrapper
+# $ROOT/lmp-pacekk-fork.sh (accuracy_cost/envs/sulis-gpu-pacefork.json).
 set -euo pipefail
+HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ROOT=${BENCH_ROOT:-$HOME/bench-scaling}
 SRC=$ROOT/lammps-dev
 PACE=$ROOT/lammps-user-pace-tab
@@ -50,6 +58,38 @@ gpu() {
     -D Kokkos_ARCH_AMPERE80=ON -D PKG_ML-PACE=ON -D LOCAL_ML-PACE="$PACE"
   cmake --build "$B" -j "$JOBS"
   wrapper lmp-pacetab.sh "$MODS_GPU" "$B"
+}
+
+cpufork() {
+  local B=$SRC/build-kk-cpu-pacefork F=$ROOT/lammps-user-pace-fork
+  set +u; module purge; module load $MODS_CPU; set -u
+  rm -rf "$B"
+  cmake -S "$SRC/cmake" -B "$B" -D CMAKE_BUILD_TYPE=Release -D CMAKE_CXX_COMPILER=g++ \
+    -D BUILD_SHARED_LIBS=ON -D BUILD_MPI=ON -D BUILD_OMP=ON \
+    -D PKG_KOKKOS=ON -D Kokkos_ENABLE_OPENMP=ON -D Kokkos_ENABLE_SERIAL=ON -D Kokkos_ARCH_ZEN2=ON \
+    -D PKG_ML-PACE=ON -D LOCAL_ML-PACE="$F"
+  cmake --build "$B" -j "$JOBS"
+  wrapper lmp-pacefork-cpu.sh "$MODS_CPU" "$B"
+}
+
+gpufork() { _gpupatched lammps-pacekk-fork "$ROOT/lammps-user-pace-fork" lmp-pacekk-fork.sh \
+                       0003-pacekk-team-rho-weights.patch 0005-pacekk-summed-neighbour-A.patch \
+                       0006-pacekk-flat-offset-rho-weights.patch 0007-pacekk-segmented-weights.patch; }
+
+_gpupatched() {   # <tree name> <ML-PACE> <wrapper> <patch...>
+  local T=$ROOT/$1 P=$2 W=$3 B; shift 3
+  rm -rf "$T"; mkdir -p "$T"
+  (cd "$SRC" && tar --exclude='./build*' --exclude=./.git --exclude=./doc --exclude=./examples -cf - .) | tar -xf - -C "$T"
+  for p in "$@"; do patch -d "$T" -p1 < "$HERE/../../../pace_ref/fast/$p"; done
+  B=$T/build-kk
+  set +u; module purge; module load $MODS_GPU; set -u
+  export NVCC_WRAPPER_DEFAULT_COMPILER=g++
+  cmake -S "$T/cmake" -B "$B" -D CMAKE_BUILD_TYPE=Release -D CMAKE_CXX_COMPILER="$T/lib/kokkos/bin/nvcc_wrapper" \
+    -D CMAKE_CXX_FLAGS="-lineinfo" -D BUILD_SHARED_LIBS=ON -D BUILD_MPI=ON -D BUILD_OMP=ON \
+    -D PKG_KOKKOS=ON -D Kokkos_ENABLE_CUDA=ON -D Kokkos_ENABLE_OPENMP=ON -D Kokkos_ENABLE_SERIAL=ON \
+    -D Kokkos_ARCH_AMPERE80=ON -D PKG_ML-PACE=ON -D LOCAL_ML-PACE="$P"
+  cmake --build "$B" -j "$JOBS"
+  wrapper "$W" "$MODS_GPU" "$B"
 }
 
 git -C "$PACE" log -1 --format="lammps-user-pace-tab %h %s" 2>/dev/null || cat "$PACE/REV"
