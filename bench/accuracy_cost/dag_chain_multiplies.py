@@ -34,4 +34,4 @@ for fam, s, p in cases:
 mul = {f"{r['family']}/{r['size']}": r["aa_specs"]["chain_mul"] for r in out}
 mul.setdefault("ace_lr/o4d16", mul["ace/o4d16"])
 dst = __import__("pathlib").Path(__file__).parent / "results" / "dag_chain_multiplies.json"
-json.dump(dict(sorted(mul.items())), open(dst, "w"), indent=1)
+dst.write_text(json.dumps(dict(sorted(mul.items())), indent=1) + "\n")   # end-of-file-fixer
