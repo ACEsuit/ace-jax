@@ -222,6 +222,8 @@ def draw_row(axes, data, ref, xlabel, codes, letters, what):
     allx = [q["x"] for pts in data.values() for q in pts if q["x"]]
     names, vals, cols, notes = [], [], [], []
     for fam, pts in data.items():
+        if fam in REDUCED and all(q["x"] is None for q in pts):
+            continue                                  # a reduced-precision line is a cost row only: no bar until timed
         ok = [q for q in pts if q["x"] is not None and q["qoi"] is not None and q["rmse_F"] <= ref["rmse_F"]
               and q["qoi"] <= TARGET_QOI]
         names.append(FAM[fam][0]); cols.append(FAM[fam][1])

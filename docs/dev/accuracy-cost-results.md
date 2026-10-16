@@ -79,6 +79,12 @@ parameters than linear ACE (f800: 761 parameters, 0.081 eV/Å) but not the QoI t
   ace-jax before compiling), exported with `for_library=true` and compiled by `juliac --trim=safe` on a compute
   node (Julia 1.12.6; `accuracy_cost/build_trim.py`, `envs/sulis-cpu-trim.sbatch`), run by the PR 309
   `pair_style ace` plugin in the same LAMMPS (`bench/scaling/envs/sulis-acepot.sh`); 128 x 1 ranks only.
+- Elastic constants: the bulk_diamond test runs with `SI_TESTS_ELASTIC_FMAX=1e-3` (silicon-testing-framework
+  branch `fp32-optimisers`, `test-runner/tight_elastic.sh`), since 2026-10-16. matscipy's `fit_elastic_constants`
+  otherwise relaxes each strained cell's internal coordinates only to ASE's default fmax 0.05 eV/Å, which left the
+  relaxed-ion C44 0.23–0.89 of its tolerance low for every model (DFT 72.2 GPa; e.g. linear ACE o4d20 67.8 -> 70.6,
+  GAP-18 66.7 -> 70.1). C11, C12 and B moved by at most 0.02 tolerance. QoI scores changed by -13% to +9%
+  (median -2.6%); which models reach the target did not change. docs/dev/fp32-results.md.
 - QoIs: compressed ("short and fat") hcp is left out of the score (outside the training data; it measures
   extrapolation); only models with every QoI computed are plotted. Single fits per point.
 - GAP's parameter count is its sparse-point coefficients; the kernel also stores the sparse descriptors.

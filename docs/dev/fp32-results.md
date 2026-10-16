@@ -702,5 +702,8 @@ With `SI_TESTS_ELASTIC_FMAX=1e-3` (bulk_diamond only, all four sizes):
 - Converged, the optimisers agree to 0.02 tolerance and float32 to 0.015 on all of B, C11, C12
   and C44.
 - **The plotted QoIs underestimate C44 by 2.8–6.4 GPa** (0.4–0.9 tolerance). This affects every
-  model in the plot, not only ACE. Tightening the protocol's elastic fmax would need all models'
-  bulk_diamond reruns.
+  model in the plot, not only ACE. **Fixed:** all 75 plotted models' bulk_diamond were rerun at
+  fmax 1e-3 (C44 up 0.23–0.89 tolerance for every model; QoI scores −13% to +9%, median −2.6%;
+  the models reaching the target are unchanged) and the figures rebuilt
+  (docs/dev/accuracy-cost-results.md). The fmax-0.05 results are kept in
+  `runs/fp32_step3/bulk_diamond_fmax0.05_backup/`.
