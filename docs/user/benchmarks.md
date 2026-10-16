@@ -38,7 +38,7 @@ At the target, in microseconds per atom-step:
 
 | model | A100 GPU | CPU node (128 cores) |
 |---|---|---|
-| linear ACE o4d20, ace-jax with lammps-jax | 5.65 | 50.0 |
+| linear ACE o4d20, ace-jax with lammps-jax | 3.12 | 50.5 |
 | linear ACE o4d20, ML-PACE | 4.13 | 5.31 |
 | linear ACE o4d20, ACEpotentials.jl | – | 10.8 |
 | MACE c16L0, Symmetrix | 1.93 | 2.36 |
@@ -60,6 +60,9 @@ On the CPU, the ACEpotentials.jl compiled library is the fastest code for
 linear ACE up to o4d14. It has the same speed as ML-PACE at o4d16. At
 o4d20 it is 2 times slower than ML-PACE.
 
+On the A100, ace-jax runs linear ACE o4d20 faster than ML-PACE (3.12
+against 4.13 µs/atom-step).
+
 ### How the cost was measured
 
 - **GPU.** One NVIDIA A100, 32,768 atoms.
@@ -67,9 +70,10 @@ o4d20 it is 2 times slower than ML-PACE.
   cores are used, with each MPI rank bound to a core. Each model uses its
   faster layout: 128 MPI ranks, or 64 MPI ranks with 2 threads. GAP uses 32
   MPI ranks.
-- **ace-jax** runs in LAMMPS with lammps-jax, on the GPU and on the CPU. On
-  the CPU, ACE o4d16 and o4d20 use the recursive product basis
-  (`aa_dag="greedy"`).
+- **ace-jax** runs in LAMMPS with lammps-jax, on the GPU and on the CPU.
+  ace-jax selects the form of the product basis for each model. Models with
+  4,000 or more chain-form multiplications per atom use the recursive (DAG)
+  form. The figure marks these points with a dot.
 - **Linear ACE, run by ML-PACE.** The same linear ACE fits are written as
   `.yace` files with tabulated radial functions
   ([Write an ACE model as a .yace file](howto/pace.md)). They run in

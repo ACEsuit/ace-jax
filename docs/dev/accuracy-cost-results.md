@@ -25,7 +25,7 @@ Cheapest model reaching the target, µs/atom-step, float64, LAMMPS:
 
 | model | parameters | force RMSE (eV/Å) | QoI error | A100 | CPU node |
 |---|---|---|---|---|---|
-| linear ACE o4d20, ace-jax (lammps-jax) | 5,476 | 0.0816 | 0.41 | 5.65 | 50.0 |
+| linear ACE o4d20, ace-jax (lammps-jax) | 5,476 | 0.0816 | 0.41 | 3.12 | 50.5 |
 | linear ACE o4d20, ML-PACE (tabulated radials) | 5,476 | 0.0816 | 0.41 | 4.13 | 5.31 |
 | linear ACE o4d20, patched ML-PACE (proposed upstream) | 5,476 | 0.0816 | 0.41 | 2.42 | 2.89 |
 | linear ACE o4d20, ACEpotentials.jl (trim library) | 5,476 | 0.0816 | 0.41 | – | 10.8 |
@@ -51,9 +51,9 @@ parameters than linear ACE (f800: 761 parameters, 0.081 eV/Å) but not the QoI t
 ## Observations
 
 - **ML-PACE runs ace-jax's linear ACE fastest on the CPU.** Exported exactly (`write_yace`, tabulated radials;
-  `ml-pace-tabulated-radials.md`), o4d20 runs at 5.31 µs/atom-step on 128 ranks against 50.0 through the
-  lammps-jax CPU backend with the DAG product basis, and 3.98 for PACE f3200. On the A100 the gap is smaller
-  (4.13 vs 5.65).
+  `ml-pace-tabulated-radials.md`), o4d20 runs at 5.31 µs/atom-step on 128 ranks against 50.5 through the
+  lammps-jax CPU backend with the DAG product basis, and 3.98 for PACE f3200. On the A100, ace-jax with the DAG
+  is faster than stock ML-PACE (3.12 vs 4.13) and behind patched ML-PACE (2.42).
 - **Patched ML-PACE** (ICAMS/lammps-user-pace#31: on the CPU the recursive-evaluator speed-ups, no unused
   dB_flatten clear, register-carried DAG passes, the force pass summed over n first; on the GPU the pace/kk
   prototype kernels of `pace_ref/fast`, flat-offset ComputeRho and a segmented ComputeWeights, `PACE_KK_RHOW=3`)
@@ -98,8 +98,26 @@ parameters than linear ACE (f800: 761 parameters, 0.081 eV/Å) but not the QoI t
   weights, so the weighting does not explain the plateau. No paper we found distils MACE into NEP with
   reported force errors; the favourable reports are on large, narrow MD datasets.
 - **Symmetrix-XL** is 1.1-3.6x faster than Symmetrix for the same MACE models, most at L = 1 on the GPU.
-- **The DAG product basis** (`aa_dag="greedy"`, #90) gives ace-jax's fastest CPU rows at o4d16 and o4d20; it
-  also cuts the compiled temporary memory (o4d20: 3.9 GB to 0.64 GB on one core).
+- **The DAG product basis** (`eval/aa_dag.py`) is never slower than the chain form and from ~6,000 chain-form
+  multiplies per site clearly faster, so `aa_dag="auto"` (the default of `ACECalculator` and `export_lammps`)
+  takes it from `AUTO_MIN_CHAIN_MUL` = 4,000. Every ace-jax model of the figure, timed in both forms one after
+  the other on the same node (µs/atom-step, chain / DAG; all parity-gated):
+
+  | model (chain multiplies) | CPU node | speed-up | A100 | speed-up |
+  |---|---|---|---|---|
+  | ace o3d8-o3d12 (113-1,013) | 2.09-3.41 / 2.05-3.35 | 0.99-1.02x | 0.31-0.52 / 0.31-0.51 | 0.99-1.01x |
+  | ace o4d12 (2,150) | 3.46 / 3.36 | 1.03x | 0.550 / 0.532 | 1.03x |
+  | PACE-shaped md10 (2,087) | 7.55 / 7.13 | 1.06x | 1.013 / 1.008 | 1.01x |
+  | PACE-shaped md12 (6,207) | 12.8 / 10.3 | 1.24x | 1.666 / 1.628 | 1.02x |
+  | ace o4d14 (7,095) | 8.00 / 5.19 | 1.54x | 0.664 / 0.591 | 1.12x |
+  | PACE-shaped md18 (19,141) | 32.1 / 15.5 | 2.07x | 2.744 / 2.552 | 1.08x |
+  | ace o4d16 (21,934) | 19.3 / 7.57 | 2.55x | 1.207 / 0.923 | 1.31x |
+  | ace o4d20 (175,021) | 136 / 50.5 | 2.70x | 5.73 / 3.12 | 1.84x |
+
+  Learned radials match linear ACE at each (order, degree), and PACE-shaped ACE with learned radials matches
+  the fixed-radial rows. The figure plots each ace-jax model in the form `auto` picks (centre dot: the DAG), so
+  the switch falls at o4d14 for linear ACE and learned radials and at md12 for PACE-shaped ACE. The DAG also cuts
+  the compiled temporary memory (o4d20: 3.9 GB to 0.64 GB on one core).
 - **Learned radials** do not reach the target in their ladder (to o4d16): best QoI error 0.66, against 0.41
   for linear ACE at o4d20.
 
@@ -110,8 +128,12 @@ parameters than linear ACE (f800: 761 parameters, 0.081 eV/Å) but not the QoI t
 - Every cost is a LAMMPS row that passed its parity gate (64 atoms against the model's reference evaluation)
   in the same job; `make_cost.py` takes each model's fastest such row, float64 only. One-layer MACE and, on
   the GPU, Symmetrix MACE c64L1 have float32 timings only and are left out of the cost rows.
-- ace-jax: lammps-jax bundles (`export_lammps`; CPU: `platform="cpu"`, `neighbour_capacity(procs=)`, o4d16 and
-  o4d20 with `aa_dag="greedy"`). ML-PACE on the GPU: LAMMPS develop ec02ed0 (Stan Moore's 2026-08 `pace/kk`
+- ace-jax: lammps-jax bundles (`export_lammps`; CPU: `platform="cpu"`, `neighbour_capacity(procs=)`), each model
+  timed in the chain form and with `aa_dag="greedy"` on the same node (`envs/sulis-{cpu,gpu}-dagpair.sbatch`,
+  ace-jax 6debdc9); `accuracy_cost/dag_auto.py` keeps, per model, the form `aa_dag="auto"` picks
+  (`results/dag_chain_multiplies.json`, from `dag_chain_multiplies.py`) in `sulis-{cpu-128x1,gpu}-acejax-auto.jsonl`,
+  and `make_cost.py --source` takes the ace-jax rows from those files alone.
+  ML-PACE on the GPU: LAMMPS develop ec02ed0 (Stan Moore's 2026-08 `pace/kk`
   rewrite; about 2x faster than the 10Sep2025 patch release). Linear ACE run by ML-PACE: that tree with
   `LOCAL_ML-PACE` = v.2025.12.4.p1 + the tabulated-radial patch (`bench/scaling/envs/sulis-pacetab.sh`).
   Stock rows: `sulis-cpu-128x1-ace_tab5.jsonl` / `sulis-gpu-ace_tab5.jsonl`, timed in the same jobs as the patched
@@ -143,13 +165,14 @@ Cost files from the timing rows (float64 only), then the figures:
 
 ```bash
 R=bench/accuracy_cost/results/sulis; RR=bench/si_qoi/results
-python bench/si_qoi/make_cost.py --dtype float64 --out $RR/cost_sulis_cpu.json \
+(cd bench && python -m accuracy_cost.dag_auto)
+python bench/si_qoi/make_cost.py --dtype float64 --source acejax-ace=sulis-cpu-128x1-acejax-auto --out $RR/cost_sulis_cpu.json \
     $(ls $R/sulis-cpu*.jsonl | grep -v -e smoke -e ace_yace -e pacetab-check -e "ace_tab\.jsonl" -e ace_tab2 \
-      -e ace_tab3)
-python bench/si_qoi/make_cost.py --dtype float64 --out $RR/cost_sulis_gpu.json \
+      -e ace_tab3 -e dagpair)
+python bench/si_qoi/make_cost.py --dtype float64 --source acejax-ace=sulis-gpu-acejax-auto --out $RR/cost_sulis_gpu.json \
     bench/accuracy_cost/results/sulis-gpu.jsonl bench/accuracy_cost/results/sulis-gpu-ace-splined.jsonl \
     $R/sulis-gpu-ace-splined-v2.jsonl $R/sulis-gpu-v2.jsonl $R/sulis-gpu-mace_xl.jsonl \
-    $R/sulis-gpu-ace_tab5.jsonl $R/sulis-gpu-ace_tabfork.jsonl $R/sulis-gpu-pace-dev.jsonl $R/sulis-gpu-nep.jsonl --allow nep-gpumd:mixed
+    $R/sulis-gpu-ace_tab5.jsonl $R/sulis-gpu-ace_tabfork.jsonl $R/sulis-gpu-pace-dev.jsonl $R/sulis-gpu-nep.jsonl $R/sulis-gpu-acejax-auto.jsonl --allow nep-gpumd:mixed
 ROWS=(--row "A100 GPU, µs/atom-step|$RR/cost_sulis_gpu.json|$RR/cost_sulis_gpu.codes.json"
       --row "CPU node (128 cores), µs/atom-step|$RR/cost_sulis_cpu.json|$RR/cost_sulis_cpu.codes.json")
 python bench/si_qoi/plot_cost.py "${ROWS[@]}"
