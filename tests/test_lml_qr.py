@@ -232,7 +232,7 @@ cfg = FitConfig(model=b, arm="linear", m_per_species=0, e0="lsq", opt="lbfgs", r
 d = load_fit_data(cfg, train=str(work / "train.xyz"), log=lambda *a: None)
 prob = build_problem(cfg, d).prob
 qs = linear_qr_statistics(prob.model, prob.cfg, d.ds_train)
-print("NONFINITE", sum(int((~np.isfinite(np.asarray(v))).sum()) for v in qs._asdict().values()))
+print("NONFINITE", sum(int((~np.isfinite(np.asarray(v))).sum()) for v in qs._asdict().values() if v is not None))
 """
 
 

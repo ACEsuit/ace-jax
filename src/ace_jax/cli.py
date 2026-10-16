@@ -59,6 +59,13 @@ def _add_fit_args(p):
                    help="linear arm: the evidence and posterior by QR (stable; default) or by a Cholesky "
                         "of the Gram (faster at large basis, but loses accuracy when the fit nearly "
                         "interpolates its data). The GP arm always uses the Cholesky")
+    p.add_argument("--row-precision", choices=["float64", "float32"], default="float64",
+                   help="float32: compute the design rows (and, on a GPU, their QR) in float32, the bulk "
+                        "of a fit's work; the evidence and coefficients stay float64 (linear arm, QR)")
+    p.add_argument("--row-check", action="store_true",
+                   help="with --row-precision float32: after the MAP, refit on statistics perturbed at "
+                        "float32 rounding and report how far the predictions move (a diagnostic; "
+                        "it costs a second MAP)")
     p.add_argument("--opt", choices=["adam", "lbfgs"], default="lbfgs",
                    help="hyperparameter MAP optimiser: lbfgs (default) = bounded L-BFGS-B, then (linear arm, "
                         "see --map-polish) a Newton polish to a stationary point; adam = numpyro SVI for "
@@ -194,7 +201,7 @@ def _fit_config(a):
         batch_pack=a.batch_pack, weights=weights, factors=factors,
         baseline=a.baseline, e0=a.e0, m_per_species=a.m_per_species, kernel=a.kernel, bump=not a.no_bump,
         density=a.density, pca_d=a.pca_d, embedding=a.embedding, r0=a.r0, objective=a.objective,
-        lml=a.lml, lml_solver=a.lml_solver, devices=a.devices, opt=a.opt, map_steps=a.map_steps, map_restarts=a.map_restarts,
+        lml=a.lml, lml_solver=a.lml_solver, row_precision=a.row_precision, row_check=a.row_check, devices=a.devices, opt=a.opt, map_steps=a.map_steps, map_restarts=a.map_restarts,
         map_polish=a.map_polish, strict=a.strict, noise=a.noise,
         init=json.load(open(a.init)) if a.init else None, rungs=rungs, laplace=a.laplace,
         n_draws=a.n_draws, vi_steps=a.vi_steps, nuts_warmup=a.nuts_warmup, nuts_samples=a.nuts_samples,

@@ -336,7 +336,8 @@ def _rows_scan(model, cfg, batch, node_chunk, with_X=False, proj=None, resid=Non
         return out
 
     contrib = jax.checkpoint(contrib)
-    upd = lambda a, x, s0: jax.lax.dynamic_update_slice_in_dim(a, x, s0, 0)
+    # float32 rows (row_dtype "float32") write into the accumulators' dtype; a no-op in float64
+    upd = lambda a, x, s0: jax.lax.dynamic_update_slice_in_dim(a, x.astype(a.dtype), s0, 0)
 
     def body(i, acc):
         s0 = i * nc

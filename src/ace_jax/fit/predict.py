@@ -260,7 +260,15 @@ def _e0_offset(prob, ds):
 def _predict_fn(prob, dtc, deriv_dtc):
     """The jitted per-batch predictor with theta/mu/L as ARGUMENTS (not closures)
     so it compiles ONCE and is reused across posterior draws -- predict_mixture
-    otherwise recompiled the (expensive) derivative-DTC once per draw."""
+    otherwise recompiled the (expensive) derivative-DTC once per draw.
+
+    prob.row_dtype "float32": the batch's design rows in float32, as the training statistics
+    were (stats.float32_rows); the posterior products and the E0 offset (_pack) stay float64."""
+    if getattr(prob, "row_dtype", "float64") == "float32":
+        from .stats import float32_rows
+        rows_prob = prob._replace(model=float32_rows(prob.model, None)[0])
+        f32 = lambda b: b._replace(rij=b.rij.astype(jnp.float32))      # noqa: E731
+        return jax.jit(lambda th, mu, L, b: _predict_batch(th, rows_prob, mu, L, f32(b), dtc, deriv_dtc))
     return jax.jit(lambda th, mu, L, b: _predict_batch(th, prob, mu, L, b, dtc, deriv_dtc))
 
 
@@ -283,7 +291,7 @@ def _train_stats(theta, prob, ds_train, stats):
         return stats(theta)
     if uses_qr(prob):
         from .stats import linear_qr_statistics
-        return linear_qr_statistics(prob.model, prob.cfg, ds_train)
+        return linear_qr_statistics(prob.model, prob.cfg, ds_train, row_dtype=getattr(prob, "row_dtype", "float64"))
     return sufficient_statistics(theta, prob.spec, prob.model, prob.ind, prob.cfg, ds_train)
 
 

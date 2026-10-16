@@ -105,12 +105,18 @@ class QRStats(NamedTuple):
     c_q = Q_q^T (w y_q) from a QR of its weighted rows w Phi_q = Q_q R_q, so R_q^T R_q = G_q
     and R_q^T c_q = b_q without ever forming G_q (whose condition number is kappa(Phi_q)^2).
     yy, n and logw are as in Stats.  objective.log_marginal_likelihood_qr reads it; the Gram
-    form (G_q, b_q) is derived on demand for the consumers that need it (POPS, ARD)."""
+    form (G_q, b_q) is derived on demand for the consumers that need it (POPS, ARD).
+
+    rho_q (float32 rows, row_dtype="float32" on a device): the residual norm |w y_q - Phi_q x_q|
+    carried through the merges as the last diagonal of the (L+1) factor of [w Phi_q | w y_q], or
+    None.  With it the LML never forms y'y - v'v, which cancels in float32 when the fit nearly
+    interpolates (MACE labels: sigma_E 4.8x wrong; docs/dev/fp32-results.md, step 3)."""
     R_E: jnp.ndarray; R_F: jnp.ndarray; R_V: jnp.ndarray
     c_E: jnp.ndarray; c_F: jnp.ndarray; c_V: jnp.ndarray
     yy_E: jnp.ndarray; yy_F: jnp.ndarray; yy_V: jnp.ndarray
     n_E: jnp.ndarray; n_F: jnp.ndarray; n_V: jnp.ndarray
     logw_E: jnp.ndarray; logw_F: jnp.ndarray; logw_V: jnp.ndarray
+    rho_E: object = None; rho_F: object = None; rho_V: object = None
 
     G_E = property(lambda s: s.R_E.T @ s.R_E)
     G_F = property(lambda s: s.R_F.T @ s.R_F)
@@ -288,12 +294,37 @@ def _device_qr(model, cfg, ds, merge_rows):
     return device_qr_stream(rows_fn, ds, zeros, [(z0, z0, z0)] * 3, merge_rows)
 
 
-def linear_qr_statistics(model, cfg, ds, merge_rows=None, host=None):
+@partial(jax.jit, static_argnames=("cfg", "merge_rows"))
+def _device_qr32(model, cfg, ds, merge_rows):
+    """_device_qr with float32 rows and float32 merges: each quantity's target rides as column L
+    of the rows, so the (L+1) factor carries the residual norm too (QRStats.rho_q).  Targets,
+    weights and the y'y / n / logw sums stay float64."""
+    L = cfg.len_basis
+    f32 = jnp.float32
+    zeros = [(np.zeros((L + 1, L + 1), np.float32), np.zeros(L + 1, np.float32))] * 3
+
+    def rows_fn(batch):
+        out = _qr_rows(model, cfg, batch)
+        return ([(jnp.concatenate([Pw, yw[:, None]], 1).astype(f32), jnp.zeros(yw.shape[0], f32))
+                 for Pw, yw, *_ in out], [o[2:] for o in out])
+    z0 = jnp.zeros(())
+    return device_qr_stream(rows_fn, ds, zeros, [(z0, z0, z0)] * 3, merge_rows)
+
+
+def float32_rows(model, ds):
+    """The model and dataset of float32 design rows: floating model leaves and rij in float32
+    (cast after any float64 preparation of the model); targets and weights stay as they are."""
+    from ..eval.api import with_dtype
+    return (with_dtype(model, jnp.float32),
+            None if ds is None else ds._replace(rij=jnp.asarray(ds.rij, jnp.float32)))
+
+
+def linear_qr_statistics(model, cfg, ds, merge_rows=None, host=None, row_dtype="float64"):
     """linear_statistics in QR form (QRStats): one streaming pass over the same linear rows,
     folded into the per-quantity factors by batched updating QRs (QR_MERGE_ROWS_PER_L) -- on
     the host on the CPU backend (host_qr_stream says why), as a lax.scan on a device
     (device_qr_stream).  host: None picks by backend; merge_rows: see host_qr_stream (0 merges
-    every batch).
+    every batch).  row_dtype="float32": float32 design rows (`float32_rows`); see the branch below.
 
     On a device the pass is `_device_qr`, module-level with the model as an argument, so one
     compile serves every call with the same shapes.  A jit of a fresh closure over the model,
@@ -307,6 +338,19 @@ def linear_qr_statistics(model, cfg, ds, merge_rows=None, host=None):
     zeros = [(np.zeros((L, L)), np.zeros(L))] * 3
     if host is None:
         host = jax.default_backend() == "cpu"
+    if row_dtype not in ("float64", "float32"):
+        raise ValueError(f"row_dtype must be 'float64' or 'float32', got {row_dtype!r}")
+    if row_dtype == "float32":
+        # float32 rows (the bulk of a fit's flops); on a device the merges run in float32 too and
+        # carry the residual (QRStats.rho_q).  On the host the merges stay float64 (_host_merge),
+        # where y'y - v'v does not cancel, so no rho
+        model, ds = float32_rows(model, ds)
+        if not host:
+            out, ex = _device_qr32(model, cfg, ds, merge_rows)
+            fac = [(jnp.asarray(Rt[:L, :L], jnp.float64), jnp.asarray(Rt[:L, L], jnp.float64),
+                    jnp.abs(jnp.asarray(Rt[L, L], jnp.float64))) for Rt, _ in out]
+            return QRStats(*(f[0] for f in fac), *(f[1] for f in fac),
+                           *(ex[i][k] for k in range(3) for i in range(3)), *(f[2] for f in fac))
     if host:
         rows = jax.jit(lambda b: _qr_rows(model, cfg, b))
         scal = {f"{k}_{q}": 0.0 for k in ("yy", "n", "logw") for q in "EFV"}

@@ -482,3 +482,60 @@ Scripts: `bench/fp32/stream_qr.py` (the fit's own `stats.device_qr_stream`, batc
 - After the fit, run the stability test. Above the threshold, warn and recommend a float64
   fit.
 - Pin the matmul precision in the fit's row assembly, so TF32 can never apply.
+
+## Step 3, items 2 and 3: the float32-row fit (2026-10-16)
+
+**Item 2 (`57f5c4a`).** The fit's row entry points now trace under the highest matmul precision
+(`rows._highest`). Before this, TF32 applied to unpinned `dot_general`s in the rows and in the
+model's Jacobian. `tests/test_rows_precision.py` traces the rows under a `bfloat16` default and
+requires every `dot_general` to be `HIGHEST`. Without the change, all 7 are not.
+
+**Item 3.** The new fit option `FitConfig.row_precision="float32"` (`aj fit --row-precision
+float32`) works as follows:
+- `stats.linear_qr_statistics(row_dtype="float32")` casts the model and `rij` with
+  `stats.float32_rows`.
+- On a device (`_device_qr32`), each quantity's target rides as an extra column, so the
+  float32 merges carry ρ_q (`QRStats.rho_q`). On the host the merges stay in float64.
+- `objective.log_marginal_likelihood_qr` takes the residual from the factors when ρ is
+  present (`_qr_resid`). The float64 path is unchanged.
+- Predictions (`predict._predict_fn`) evaluate the test rows in float32 too. The posterior
+  products and the E0 offset stay in float64.
+- `_rows_scan` writes float32 rows into its accumulators' dtype.
+- `fit/rowcheck.py` (`--row-check`, opt-in) refits the MAP on statistics with
+  noise-injection perturbations and records the result in `map_convergence.json`.
+- The option is refused for the GP arm, the Cholesky solver, learned radials, `sigma_type`,
+  host-cache, LOO, multiple devices and the lstsq solver.
+- Tests: `tests/test_row_precision.py`.
+
+**End to end** (`aj fit`, GAP-18 Si, `--e0 lsq --rungs map --m-per-species 0`, RTX A4500):
+
+| fit | f64 wall | f32 rows wall | E / F / V RMSE, f64 | E / F / V RMSE, f32 rows | log σ_c f64 → f32 |
+|---|---|---|---|---|---|
+| o4d16 | 265 s | **169 s** | 3.795 / 0.1004 / 1.378 | 3.810 / 0.1003 / 1.391 | 7.38 → 7.69 |
+| o4d12 | 125 s | 116 s | 10.85 / 0.1435 / 2.867 | 10.76 / 0.1436 / 2.877 | 9.21 → 9.10 |
+| E1x o3d12 (MACE labels) | | | 0.856 / 0.0305 / 0.127 | 0.857 / 0.0305 / 0.127 | Δ −0.04 |
+| E1x o4d14 (MACE labels) | | | 0.483 / 0.0200 / 0.0828 | 0.487 / 0.0200 / 0.0830 | Δ −0.015 |
+
+The o4d16 stages, f64 → f32 rows:
+
+| stage | f64 | f32 rows |
+|---|---|---|
+| data (neighbour lists, CPU) | 49 s | 43 s |
+| statistics | 95 s | 32 s |
+| MAP | 33 s | 51 s |
+| predictions | 83 s | 37 s |
+
+The MAP took longer only because the ρ-form LML has a lower gradient roundoff (2.4e-7
+against 4.3e-4). The Newton polish then refines further: 79 gradient evaluations against 11.
+The CPU data stage (no `fast-neighbours` here) now limits the gain at this size.
+
+**Conclusions.**
+- **RMSE:** float32 rows change it by under 1% on every fit tested, including o4d12. Item 1
+  marked o4d12 as fragile in σ_c, but in the pipeline (with the hyperprior and joint E0)
+  its log σ_c moved by only 0.11.
+- **The check is conservative.** It called both GAP-18 fits "unstable" (o4d16 1.43, o4d12
+  4.0 posterior stds), although their RMSEs agree with float64. The posterior std of the
+  mean is tiny with about 500k rows, so the yardstick is too strict for accuracy. It is
+  therefore opt-in and documented as a diagnostic, not a gate.
+- **Open:** a calibrated yardstick (change relative to the RMSE, or a test-set metric) would
+  make it useful as a gate.
