@@ -44,7 +44,7 @@ GPU_ONLY_LAMMPS = ("acejax-pace", "acejax-ace", *LEARNED_CODES)
 # CPU-only for now: no GPU path for either ACEpotentials.jl line
 CPU_ONLY = ACEPOT_CODES
 # pair quip has no KOKKOS variant (run_lammps.KOKKOS has no "gap" key)
-CPU_ONLY_LAMMPS = ("gap",)
+CPU_ONLY_LAMMPS = ("gap", "nep")   # pair quip and pair nep: no KOKKOS variant
 
 
 def lammps_supported(code, device):

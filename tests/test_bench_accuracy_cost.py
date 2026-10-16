@@ -186,13 +186,86 @@ def test_evaluate_refuses_mismatched_split(tmp_path, monkeypatch):
 def test_sweep_is_complete_and_measured():
     from accuracy_cost.common import load_sweep
     s = load_sweep()
-    assert set(s) == {"ace", "ace_lr", "ace_gp", "pace", "mace", "gap", "ace_pshape", "ace_pshape_lr", "ace_wl", "gap_noglue", "gap_E30", "ace_yace", "ace_tab"}
+    assert set(s) == {"ace", "ace_lr", "ace_gp", "pace", "mace", "gap", "ace_pshape", "ace_pshape_lr", "ace_wl", "gap_noglue", "gap_E30", "ace_yace", "ace_tab", "nep"}
     assert len(s["ace"]) == 7 and all(e["n_B"] > 0 for e in s["ace"])
     assert [(e["order"], e["max_degree"]) for e in s["ace_lr"]] == [(e["order"], e["max_degree"]) for e in s["ace"]]
     nB = [e["n_B"] for e in s["ace"]]
     assert nB == sorted(nB) and nB[0] <= 80 and nB[-1] >= 1000
     for fam, es in s.items():
         assert len({e["size"] for e in es}) == len(es), fam
+
+
+def test_fit_nep_inputs(tmp_path):
+    """nep.in carries the shared cutoff (radial and angular) and the entry's sizes; the GPUMD xyz has energies
+    relative to E0_SI per atom (NEP trains in float32), the config type's weight and the virial."""
+    from ase import Atoms
+    from accuracy_cost.common import E0_SI, RCUT
+    from accuracy_cost.fit_nep import n_params, nep_in, write_gpumd_xyz
+    txt = nep_in({"n_max": "6 4", "basis_size": "6 6", "l_max": "4 1", "neuron": 30})
+    assert f"cutoff {RCUT:g} {RCUT:g}" in txt and "n_max 6 4" in txt and "neuron 30" in txt and "type 1 Si" in txt
+    at = Atoms("Si2", positions=[[0, 0, 0], [1.3, 1.3, 1.3]], cell=5.43 * np.eye(3), pbc=True)
+    at.info.update(energy=2 * E0_SI - 9.0, config_type="liq", virial=np.diag([1.0, 2.0, 3.0]))
+    at.arrays["forces"] = np.array([[0.1, 0, 0], [-0.1, 0, 0]])
+    write_gpumd_xyz(tmp_path / "t.xyz", [at], {"Default": 1.0, "liq": 0.25})
+    head = (tmp_path / "t.xyz").read_text().splitlines()[1]
+    assert "energy=-9.0000000000" in head and "weight=0.25" in head and 'virial="1.0' in head
+    assert n_params("    total number of parameters to be optimized = 1234.\n") == 1234
+
+
+def test_fit_nep_weights_are_sqrt_of_mace(tmp_path, monkeypatch):
+    """GPUMD multiplies a structure's squared error by weight^2 (main_nep/dataset.cu), MACE by its weight: the
+    NEP weight is the square root of weights_mace.json's; `weights: none` writes 1 everywhere."""
+    import json
+    from accuracy_cost import fit_nep, split
+    data = tmp_path / "data"; data.mkdir()
+    (data / "weights_mace.json").write_text(json.dumps({"Default": 1.0, "liq": 0.25}))
+    monkeypatch.setattr(fit_nep, "DATA", data)
+    seen = {}
+    monkeypatch.setattr(split, "read_atoms", lambda p: [p.name])
+    monkeypatch.setattr(fit_nep, "write_gpumd_xyz", lambda path, atoms, w: seen.setdefault(path.name, w))
+    e = {"n_max": "6 4", "basis_size": "6 6", "l_max": "4 1", "neuron": 30}
+    fit_nep.prepare(tmp_path / "a", e)
+    assert seen["train.xyz"] == {"Default": 1.0, "liq": 0.5}
+    seen.clear(); fit_nep.prepare(tmp_path / "b", {**e, "weights": "none", "population": 60})
+    assert seen["train.xyz"] == {"Default": 1.0} and "population 60" in (tmp_path / "b" / "nep.in").read_text()
+
+
+def test_fit_nep_resumes_in_chunks(tmp_path, monkeypatch):
+    """A fit short of its entry's total runs at most `chunk` more generations from the existing files (no new
+    training set), and counts them; a fit from before `generations` was recorded counts as the default 100k."""
+    import json
+    from accuracy_cost import common, fit_nep, split
+    d = tmp_path / "nep" / "n80"; d.mkdir(parents=True)
+    (d / "nep.txt").write_text("x"); (d / "status.json").write_text(json.dumps(
+        {"status": "ok", "model": str(d / "nep.txt"), "fit_wall_s": 10.0, "n_params": 6261}))
+    monkeypatch.setattr(common, "run_dir", lambda f, s: d)
+    monkeypatch.setattr(common, "entry", lambda f, s: {"size": s, "n_max": "10 8", "basis_size": "8 8",
+                                                        "l_max": "6 1", "neuron": 80, "generation": 300000,
+                                                        "chunk": 100000})
+    monkeypatch.setattr(split, "ensure_split", lambda: "h")
+    monkeypatch.setattr(fit_nep, "prepare", lambda *a: pytest.fail("a resumed fit rewrote its training set"))
+    def fake_fit_once(family, size, model, cmd, split_hash=None):
+        assert not (d / "status.json").exists()
+        common.write_status(d, status="ok", model=str(d / model), fit_wall_s=5.0)
+        return common.read_status(d)
+    monkeypatch.setattr(common, "fit_once", fake_fit_once)
+    st = fit_nep.fit("n80")
+    assert "generation 100000" in (d / "nep.in").read_text()
+    assert st["generations"] == 200000 and st["fit_wall_s"] == 15.0 and st["n_params"] == 6261
+    fit_nep.fit("n80")
+    assert common.read_status(d)["generations"] == 300000
+    monkeypatch.setattr(common, "fit_once", lambda *a, **k: pytest.fail("refitted a fit at its total"))
+    assert fit_nep.fit("n80")["generations"] == 300000
+
+
+def test_gpumd_inputs(tmp_path):
+    """GPUMD's model.xyz starts at rest (zero velocities), as the LAMMPS runs do."""
+    from ase.build import bulk
+    from scaling.run_gpumd import write_model_xyz
+    write_model_xyz(tmp_path / "model.xyz", bulk("Si", "diamond", 5.43, cubic=True))
+    lines = (tmp_path / "model.xyz").read_text().splitlines()
+    assert lines[0] == "8" and "properties=species:S:1:pos:R:3:vel:R:3" in lines[1] and 'pbc="T T T"' in lines[1]
+    assert all(l.split()[4:] == ["0", "0", "0"] for l in lines[2:])
 
 
 def test_fit_ace_commands_share_cutoff_weights_and_e0(tmp_path):

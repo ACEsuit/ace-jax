@@ -15,8 +15,8 @@ set. The data is the GAP-18 silicon dataset (2,475 configurations: 2,227 for
 training and 248 for testing).
 
 - **Model families.** Linear ACE (ace-jax), ACE with learned radials,
-  PACE-shaped ACE, PACE (pacemaker), MACE with L = 0 and L = 1, and GAP
-  refits. Each family has a ladder of model sizes. Each point is one fit.
+  PACE-shaped ACE, PACE (pacemaker), MACE with L = 0 and L = 1, NEP
+  (trained with GPUMD) and GAP refits. Each family has a ladder of model sizes. Each point is one fit.
 - **Force error.** The root-mean-square force error on the test set.
 - **QoI error.** 21 silicon properties are calculated with each model and
   compared with DFT: elastic constants, energies of other phases, point
@@ -47,8 +47,14 @@ At the target, in microseconds per atom-step:
 | MACE c16L1, Symmetrix-XL | 1.47 | 2.87 |
 
 In these ladders, PACE (pacemaker), ACE with learned radials, PACE-shaped
-ACE and the GAP refits do not reach the target. PACE reaches the force error
-of GAP-18 with fewer parameters than linear ACE, but not the QoI target.
+ACE, NEP and the GAP refits do not reach the target. PACE reaches the force
+error of GAP-18 with fewer parameters than linear ACE, but not the QoI target.
+NEP has the lowest cost on the A100 (0.04 to 0.22 µs/atom-step), in mixed
+precision. On the CPU, NEP costs 0.55 to 3.0 µs/atom-step. PACE reaches the
+same force error on the CPU at a lower cost. The smallest NEP force error is
+0.103 eV/Å, and its smallest QoI error is 0.66.
+These force errors agree with the published NEP results for this dataset
+(approximately 0.1 eV/Å).
 
 On the CPU, the ACEpotentials.jl compiled library is the fastest code for
 linear ACE up to o4d14. It has the same speed as ML-PACE at o4d16. At
@@ -78,6 +84,9 @@ o4d20 it is 2 times slower than ML-PACE.
 - **MACE** runs in LAMMPS with Symmetrix and, separately, with
   Symmetrix-XL.
 - **GAP** runs in LAMMPS with QUIP, on the CPU only.
+- **NEP** is trained with GPUMD. On the CPU, it runs in LAMMPS with
+  `pair_style nep` (NEP_CPU, float64). On the GPU, it runs in GPUMD. GPUMD
+  uses mixed precision, and the figure labels these points.
 - **Before each timing**, a short check compares the energies and forces
   in LAMMPS with the reference evaluation of the same model.
 

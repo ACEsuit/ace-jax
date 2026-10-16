@@ -39,6 +39,8 @@ def _pair(style, model_path, elements, device, extra=None):
         dd = "no_domain_decomposition" if device == "gpu" else "mpi_message_passing"
         return (f"pair_style {XL[style][0]} {dd} streamed_edges direct profile speed {extra}\n"
                 f"pair_coeff * * {model_path} {els}\n")
+    if style == "nep":                      # NEP_CPU's USER-NEP (float64, MPI): pair_style takes no arguments
+        return f"pair_style nep\npair_coeff * * {model_path} {els}\n"
     if style == TRIM:                       # PR 309 plugin, then the juliac --trim library
         return f"plugin load ${{aceplugin}}\npair_style ace\npair_coeff * * {model_path} {els}\n"
     if style == "gap":                       # QUIP takes atomic numbers, and the xml label picks the Potential
