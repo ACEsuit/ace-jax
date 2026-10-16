@@ -56,8 +56,23 @@ BUNDLE_BLOCK_ROWS = 32768
 # and 1.8x (float64) faster than in 16k / 8k-row blocks, and 2.65x at 262k; across Si
 # and Cantor ACE / PACE models this target is within 7% of the best block size measured
 # and up to 18% faster than the largest that fits (docs/dev/fp32-results.md, step 2).
-# Measured on the A4500 only; the A100 numbers above predate it.
+# A larger GPU wants larger blocks: on a Sulis A100-40GB the same models ran best at
+# ~2-4x the A4500's rows (o4d16 still 2x slower above 4096 rows), so the target scales
+# with the target device's memory (`block_target_elems`): over 11 cases on each GPU,
+# 2-6% above the best block in geometric mean (worst 8% / 14%), against 22% / 12%
+# (worst 2.2x / 2.1x) for the largest that fits.
 BUNDLE_BLOCK_TARGET_ELEMS = 1 << 26
+BLOCK_TARGET_REF_MEMORY = 15e9      # device_memory (XLA's bytes) at which the target is BUNDLE_BLOCK_TARGET_ELEMS;
+                                    # 15, not 16: keeps every measured model clear of a halving boundary
+
+
+def block_target_elems(device_memory=None):
+    """The per-block element target for a device with `device_memory` bytes for XLA:
+    BUNDLE_BLOCK_TARGET_ELEMS scaled by device_memory / BLOCK_TARGET_REF_MEMORY, never below
+    it (an A4500, 15.8 GB, ~2^26; an A100-40GB, ~31 GB, ~2^27)."""
+    if not device_memory:
+        return BUNDLE_BLOCK_TARGET_ELEMS
+    return int(BUNDLE_BLOCK_TARGET_ELEMS * max(1.0, float(device_memory) / BLOCK_TARGET_REF_MEMORY))
 # The smallest block layout="auto" halves down to before it gives up on the dense
 # family for sparse: blocked dense at a few thousand rows still beats the sparse
 # edge list many times over (o4d16 Si on an A100: sparse 15x slower than dense).
@@ -100,10 +115,12 @@ def matrix_prep_bytes(rows, max_neighbors, k_dense, itemsize):
                         + int(k_dense) * (6 * itemsize + 13))
 
 
-def block_rows_for(model, rows, k_dense, budget, itemsize, max_edges=None, prep=0, block_rows=None):
+def block_rows_for(model, rows, k_dense, budget, itemsize, max_edges=None, prep=0, block_rows=None,
+                   target=None):
     """Rows per dense block for a bundle of `rows` rows and `k_dense` slots: the
     largest of BUNDLE_BLOCK_ROWS, halved down to MIN_BLOCK_ROWS (each capped at
-    `rows`), that is within BUNDLE_BLOCK_TARGET_ELEMS (the speed target; MIN_BLOCK_ROWS
+    `rows`), that is within `target` elements (default BUNDLE_BLOCK_TARGET_ELEMS; export_lammps
+    passes block_target_elems(device_memory)) -- the speed target; MIN_BLOCK_ROWS
     is always a candidate) and whose estimate_a_bytes plus `prep` (bytes not run in
     blocks, e.g. matrix_prep_bytes) fits `budget`; None when none fits.  An explicit
     `block_rows` is the only candidate (no target)."""
@@ -112,7 +129,7 @@ def block_rows_for(model, rows, k_dense, budget, itemsize, max_edges=None, prep=
         return estimate_a_bytes(model, "dense", b, edges, k_dense, size)
     cands, b = [], min(int(rows), BUNDLE_BLOCK_ROWS)
     while True:
-        if b <= MIN_BLOCK_ROWS or est(b, 1) <= BUNDLE_BLOCK_TARGET_ELEMS:
+        if b <= MIN_BLOCK_ROWS or est(b, 1) <= (BUNDLE_BLOCK_TARGET_ELEMS if target is None else target):
             cands.append(b)
         if b <= MIN_BLOCK_ROWS:
             break
@@ -342,7 +359,7 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
     Dense and matrix rows run in blocks of `block_rows` rows (lax.map +
     jax.checkpoint), so one block's temporaries bound memory.  Default:
     `block_rows_for`: the largest of BUNDLE_BLOCK_ROWS halved down to
-    MIN_BLOCK_ROWS within BUNDLE_BLOCK_TARGET_ELEMS (speed) whose estimate fits the
+    MIN_BLOCK_ROWS within block_target_elems(device_memory) (speed) whose estimate fits the
     budget (an explicit layout without device_memory: the target alone).
 
     platform: the PJRT plugin the bundle runs on, "cuda" or "cpu" (lammps-jax's
@@ -429,10 +446,11 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
     sized = layout == "auto" or (layout in ("dense", "matrix") and (device_memory is not None or block_rows))
     if layout == "auto":
         k = min(k_dense, max_neighbors or k_dense) if k_dense else 0
+        tgt = block_target_elems(device_memory)
         b_mat = (block_rows_for(model, rows, k, budget, itemsize, max_edges,
-                                matrix_prep_bytes(rows, max_neighbors, k, itemsize), block_rows)
+                                matrix_prep_bytes(rows, max_neighbors, k, itemsize), block_rows, tgt)
                  if k and max_neighbors and matrix_supported() else None)
-        b_den = (block_rows_for(model, rows, k, budget, itemsize, max_edges, 0, block_rows)
+        b_den = (block_rows_for(model, rows, k, budget, itemsize, max_edges, 0, block_rows, tgt)
                  if k and max_edges is not None and not b_mat else None)
         if b_mat:
             layout, block_rows = "matrix", b_mat
@@ -446,9 +464,11 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
     elif layout in ("dense", "matrix") and not block_rows:
         k = min(k_dense or max_neighbors, max_neighbors or k_dense or 0)
         block_rows = ((block_rows_for(model, rows, k, budget, itemsize, max_edges if layout == "dense" else None,
-                                      matrix_prep_bytes(rows, max_neighbors, k, itemsize) if layout == "matrix" else 0)
+                                      matrix_prep_bytes(rows, max_neighbors, k, itemsize) if layout == "matrix" else 0,
+                                      target=block_target_elems(device_memory))
                        or MIN_BLOCK_ROWS) if sized
-                      else block_rows_for(model, rows, k, float("inf"), itemsize))    # the speed target alone
+                      else block_rows_for(model, rows, k, float("inf"), itemsize,       # the speed target alone
+                                          target=block_target_elems(device_memory)))
     if layout == "matrix":
         max_neighbors = int(max_neighbors)
         k_dense = min(int(k_dense or max_neighbors), max_neighbors)

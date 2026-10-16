@@ -352,10 +352,10 @@ With the change (`export.lammps.BUNDLE_BLOCK_TARGET_ELEMS`), default exports:
 
 o4d16 now scales linearly: 7.5 → 57.7 → 520 ms for 4k → 32k → 262k atoms.
 
-**Caveat.** This was measured on the A4500 only. The earlier A100 finding was that
-splitting a 16k-atom system into two blocks cost 1.5× through the checkpoint recompute.
-That contradicts this result at 4096 atoms (5 blocks of 1024 beat one block). It predates
-the lean and matrix code, and should be rechecked on an A100 (Sulis).
+**Caveat (resolved below).** This was first measured on the A4500 only. The earlier A100
+finding was that splitting a 16k-atom system into two blocks cost 1.5× through the checkpoint
+recompute. It predates the lean and matrix code. The A100 recheck below scales the target by
+device memory.
 
 **The out-of-memory error did not reproduce.** The same f1352 float64 bundle (one
 32768-row block, sized against 15.8 GB) ran at 300 ms when repeated. The o4d16 reference
@@ -567,3 +567,37 @@ Calibration (`bench/fp32/run_check_calib.sh`, the same four `aj fit` runs):
 
 GP arm and radial learning: float32 rows are **not supported yet**. Validation refuses them,
 and the CLI help, `docs/user/howto/reproducibility.md` and the skill guide say so.
+
+### Block size rechecked on an A100 (Sulis, 2026-10-16)
+
+`bench/fp32/sulis_blocks.sbatch` and `sulis_blocks_auto.sbatch` (A100-PCIE-40GB, LAMMPS develop
+ec02ed0 with the lammps-jax 4a7f4fb plugin, 32768 atoms, matrix layout). LAMMPS step time in ms,
+against `block_rows`:
+
+| model, dtype | 1024 | 2048 | 4096 | 8192 | 16384/32768 | auto (device-scaled) |
+|---|---|---|---|---|---|---|
+| Si ACE o4d16, f32 | 47.9 | 41.1 | **39.2** | 55.5 | 54.9 | 41.1 (2048) |
+| Si ACE o4d16, f64 | 56.7 | **53.7** | **53.7** | 111.6 | 111.4 | 53.7 (2048) |
+| Si ACE o3d8, f32 | 9.0 | | 7.3 | | **6.8** | 7.1 (8192) |
+| Si ACE o3d8, f64 | 12.5 | | 11.0 | | **10.4** | 10.6 (8192) |
+| Si PACE f1352, f32 | 52.1 | 42.1 | 39.5 | | **37.0** | 39.4 (4096) |
+| Si PACE f1352, f64 | 85.9 | 64.7 | 62.1 | | **55.9** | 61.9 (4096) |
+| Cantor ACE medium, f64 | 21.4 | **20.2** | 22.5 | 21.6 | 21.0 | 22.5 (4096) |
+| Cantor ACE medium, f32 | 15.6 | 14.6 | 14.7 | 14.5 | **12.9** | 14.7 (4096) |
+| Cantor PACE medium, f64 | 27.8 | 26.2 | 26.0 | 24.9 | **24.2** | 25.0 (8192) |
+| Cantor ACE large, f32 | 16.6 | 14.4 | 14.1 | 13.4 | **13.3** | 13.5 (8192) |
+
+o4d16 at 262144 atoms in float32: 1024 rows 368 ms, 16384 rows 404 ms.
+
+- **The A100 prefers blocks about 2–4× larger than the A4500.** It keeps o4d16's cliff
+  above 4096 rows: 2× slower at 8192 in float64.
+- **The fixed 2^26 target** was still better than the old largest-that-fits rule on the A100
+  (geometric mean 1.10 against 1.12 of the best time; worst 1.22 against 2.07×), but 6–16%
+  off on the narrow models.
+- **So the target now scales with the target device's memory.** `block_target_elems`:
+  2^26 × max(1, device_memory / 15 GB). The A100 reports 31.8 GB (target 1.42e8). The
+  A4500's picks are unchanged. The A100's auto picks are within 2–14% of the best measured
+  block (geometric mean about 1.06).
+- **The 15 GB reference, not 16,** keeps o4d16 clear of a halving boundary on the A100.
+- **Open:** the larger-block preference is probably the A100's larger L2 and memory
+  bandwidth. That is not established.

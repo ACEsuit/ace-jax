@@ -978,3 +978,13 @@ def test_block_rows_follow_the_element_target(monkeypatch):
     budget = estimate_a_bytes(model, "dense", 8192, 8192 * k, k, 8)
     assert lx.block_rows_for(model, rows, k, budget, 8) == 8192
     assert lx.block_rows_for(model, rows, k, inf, 8, block_rows=300) == 300  # explicit wins
+
+
+def test_block_target_scales_with_device_memory():
+    """A larger GPU wants larger blocks (Sulis A100 vs RTX A4500): the element target grows
+    with device_memory above BLOCK_TARGET_REF_MEMORY and never falls below the base."""
+    import ace_jax.export.lammps as lx
+    base, ref = lx.BUNDLE_BLOCK_TARGET_ELEMS, lx.BLOCK_TARGET_REF_MEMORY
+    assert lx.block_target_elems(None) == base
+    assert lx.block_target_elems(0.5 * ref) == base
+    assert lx.block_target_elems(2 * ref) == 2 * base
