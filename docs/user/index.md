@@ -26,7 +26,7 @@ interatomic potentials in Python with [JAX](https://docs.jax.dev). One
 --8<-- "install.txt"
 aj fit --order 3 --max-degree 10 \
     --train train.xyz --test test.xyz \
-    --e0 lsq --m-per-species 0 --opt lbfgs \
+    --e0 lsq --opt lbfgs \
     --out fit
 aj eval --model fit/model.npz --data test.xyz --out predictions.xyz
 ```

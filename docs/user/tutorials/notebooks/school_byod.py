@@ -447,7 +447,7 @@ def _(mo):
 
     ```bash
     aj fit --order 3 --max-degree 8 --rcut 5.5 --train train.xyz \
-        --e0 lsq --m-per-species 0 --opt lbfgs --out fit_v2
+        --e0 lsq --opt lbfgs --out fit_v2
     ```
 
     From here: Tutorial [7](https://acesuit.github.io/ace-jax/tutorials/curation/)

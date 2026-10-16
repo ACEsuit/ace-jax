@@ -375,17 +375,17 @@ def _(mo):
     ```bash
     aj fit --order 2 --max-degree 4 --rcut 5.5 --train train.xyz --test test.xyz \
         --energy-key mace_energy --force-key mace_force --virial-key mace_virial \
-        --e0 lsq --m-per-species 0 --opt lbfgs --out fit_categorical
+        --e0 lsq --opt lbfgs --out fit_categorical
 
     aj fit --order 2 --max-degree 4 --rcut 5.5 --basis-embedding identity \
         --train train.xyz --test test.xyz \
         --energy-key mace_energy --force-key mace_force --virial-key mace_virial \
-        --e0 lsq --m-per-species 0 --opt lbfgs --out fit_onehot
+        --e0 lsq --opt lbfgs --out fit_onehot
 
     aj fit --order 2 --max-degree 4 --rcut 5.5 --basis-embedding elements.json --d-max 2 \
         --train train.xyz --test test.xyz \
         --energy-key mace_energy --force-key mace_force --virial-key mace_virial \
-        --e0 lsq --m-per-species 0 --opt lbfgs --out fit_compressed
+        --e0 lsq --opt lbfgs --out fit_compressed
     ```
 
     and `aj basis` saves a basis on its own, for example the compressed one:

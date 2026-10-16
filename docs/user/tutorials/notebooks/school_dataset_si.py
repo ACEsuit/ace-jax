@@ -233,7 +233,7 @@ def _(mo):
 
     ```bash
     aj fit --order 3 --max-degree 8 --rcut 5.5 --train train.xyz \
-        --e0 lsq --m-per-species 0 --opt lbfgs --out fit
+        --e0 lsq --opt lbfgs --out fit
     ```
     """)
     return

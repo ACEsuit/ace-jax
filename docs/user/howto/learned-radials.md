@@ -23,7 +23,7 @@ pass over the fit split, in batches. For example:
 ```bash
 aj fit --order 3 --max-degree 10 \
     --train train.xyz --test test.xyz \
-    --e0 lsq --m-per-species 0 --opt lbfgs \
+    --e0 lsq --opt lbfgs \
     --learn-radial \
     --out fit
 ```
@@ -119,7 +119,7 @@ as usual:
 ```bash
 aj fit --model learned/model.npz --r0 2.35 \
     --train train.xyz --test test.xyz \
-    --e0 lsq --m-per-species 0 --opt lbfgs \
+    --e0 lsq --opt lbfgs \
     --out fit_learned
 ```
 

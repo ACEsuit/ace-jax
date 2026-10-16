@@ -186,7 +186,7 @@ def _(mo):
     ```bash
     aj fit --order 3 --max-degree 10 --train train.xyz --test test.xyz \
         --energy-key dft_energy --force-key dft_force --virial-key dft_virial \
-        --e0 lsq --m-per-species 0 --opt lbfgs --out fit
+        --e0 lsq --opt lbfgs --out fit
     ```
 
     `FitConfig(model=...)` takes the `Basis` built above, a `BasisSpec`

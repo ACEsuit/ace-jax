@@ -114,8 +114,8 @@ save_npz("si_e0.npz", b)        # then: aj fit --model si_e0.npz --r0 2.4 ...
   differentiates the evidence two times, and its compilation can take tens
   of minutes. If the process shows no output after the last
   `lbfgs ... logpost` line, it is compiling. It has not stopped.
-- The GP arm (`--m-per-species` > 0; the default is 500) costs much more
-  than the linear model. For linear ACE, use `--m-per-species 0`.
+- The GP arm (`--m-per-species` > 0) costs much more than the linear
+  model. The default, `--m-per-species 0`, is the linear model.
 
 ### The fit runs out of memory
 
