@@ -12,15 +12,12 @@
 #
 # Wrappers: $ROOT/lmp-pacetab-cpu.sh, $ROOT/lmp-pacetab.sh (the env jsons' `lmp`).
 #
-# `cpufast`: the same CPU build from a copy of that tree carrying pace_ref/fast/0002-recursive-evaluator-fast.patch
-# with -DNO_DB_FILL -DFAST_DAG -DFAST_AF (the recursive evaluator only: no dB_flatten clear the recursive path never
-# reads, register-carried DAG accumulation, Y / dY cached once per neighbour; same E/F to ~1e-13).  pace/kk is
-# untouched.  Wrapper $ROOT/lmp-pacefast-cpu.sh (accuracy_cost/envs/sulis-cpu-pacefast.json).
-#
-# `gputeam`: the `gpu` build from a copy of the lammps-dev tree carrying pace_ref/fast/0003-pacekk-team-rho-weights.patch
-# (pace/kk: ComputeRho + ComputeFS + ComputeWeights fused, one team per atom, A and the weights in shared memory,
-# target-sorted backward records; PACE_KK_RHOW=0 at run time selects the stock kernels in the same binary).
-# Wrapper $ROOT/lmp-pacetab-team.sh (accuracy_cost/envs/sulis-gpu-pacetab-team.json).
+# `cpufork` / `gpufork`: ML-PACE from ICAMS/lammps-user-pace#31 (jameskermode/lammps-user-pace tabulated-radials, 97621a3:
+# v.2025.12.4.p1 + tabulated radials, the recursive-evaluator speed-ups and summed_neighbour_A; rsync a checkout to
+# $ROOT/lammps-user-pace-fork first).  cpufork: the CPU build, wrapper $ROOT/lmp-pacefork-cpu.sh
+# (accuracy_cost/envs/sulis-cpu-pacefork.json).  gpufork: a copy of the lammps-dev tree carrying the pace/kk prototype
+# patches pace_ref/fast/0003, 0005, 0006 and 0007 (PACE_KK_RHOW at run time; pace_ref/fast/README.md), wrapper
+# $ROOT/lmp-pacekk-fork.sh (accuracy_cost/envs/sulis-gpu-pacefork.json).
 set -euo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ROOT=${BENCH_ROOT:-$HOME/bench-scaling}
@@ -50,21 +47,6 @@ cpu() {
   wrapper lmp-pacetab-cpu.sh "$MODS_CPU" "$B"
 }
 
-cpufast() {
-  local B=$SRC/build-kk-cpu-pacefast F=$ROOT/lammps-user-pace-fast
-  rm -rf "$F"; cp -a "$PACE" "$F"
-  patch -d "$F" -p1 < "$HERE/../../../pace_ref/fast/0002-recursive-evaluator-fast.patch"
-  set +u; module purge; module load $MODS_CPU; set -u
-  rm -rf "$B"
-  cmake -S "$SRC/cmake" -B "$B" -D CMAKE_BUILD_TYPE=Release -D CMAKE_CXX_COMPILER=g++ \
-    -D CMAKE_CXX_FLAGS="-DNO_DB_FILL -DFAST_DAG -DFAST_AF" \
-    -D BUILD_SHARED_LIBS=ON -D BUILD_MPI=ON -D BUILD_OMP=ON \
-    -D PKG_KOKKOS=ON -D Kokkos_ENABLE_OPENMP=ON -D Kokkos_ENABLE_SERIAL=ON -D Kokkos_ARCH_ZEN2=ON \
-    -D PKG_ML-PACE=ON -D LOCAL_ML-PACE="$F"
-  cmake --build "$B" -j "$JOBS"
-  wrapper lmp-pacefast-cpu.sh "$MODS_CPU" "$B"
-}
-
 gpu() {
   local B=$SRC/build-kk-pacetab
   set +u; module purge; module load $MODS_GPU; set -u
@@ -78,9 +60,6 @@ gpu() {
   wrapper lmp-pacetab.sh "$MODS_GPU" "$B"
 }
 
-# `cpufork`: the CPU build from jameskermode/lammps-user-pace tabulated-summed-fast (upstream main + tabulated radials,
-# the recursive-evaluator speed-ups and summed_neighbour_A; rsync a checkout to $ROOT/lammps-user-pace-fork first).
-# Wrapper $ROOT/lmp-pacefork-cpu.sh (accuracy_cost/envs/sulis-cpu-pacefork.json).
 cpufork() {
   local B=$SRC/build-kk-cpu-pacefork F=$ROOT/lammps-user-pace-fork
   set +u; module purge; module load $MODS_CPU; set -u
@@ -93,16 +72,11 @@ cpufork() {
   wrapper lmp-pacefork-cpu.sh "$MODS_CPU" "$B"
 }
 
-gputeam() { _gputeam lammps-pacekk-team "$PACE" lmp-pacetab-team.sh 0003-pacekk-team-rho-weights.patch; }
+gpufork() { _gpupatched lammps-pacekk-fork "$ROOT/lammps-user-pace-fork" lmp-pacekk-fork.sh \
+                       0003-pacekk-team-rho-weights.patch 0005-pacekk-summed-neighbour-A.patch \
+                       0006-pacekk-flat-offset-rho-weights.patch 0007-pacekk-segmented-weights.patch; }
 
-# `gputeamsum`: gputeam + 0005 (pace/kk summed_neighbour_A) + 0006 (flat-offset ComputeRho/Weights,
-# PACE_KK_RHOW=2) + 0007 (segmented ComputeWeights, PACE_KK_RHOW=3) against an ML-PACE carrying summed_neighbour_A
-# ($ROOT/lammps-user-pace-sumA: v.2025.12.4.p1 + 0001 + 0002 + 0004).  Wrapper $ROOT/lmp-pacetab-teamsum.sh.
-gputeamsum() { _gputeam lammps-pacekk-teamsum "$ROOT/lammps-user-pace-sumA" lmp-pacetab-teamsum.sh \
-                        0003-pacekk-team-rho-weights.patch 0005-pacekk-summed-neighbour-A.patch \
-                        0006-pacekk-flat-offset-rho-weights.patch 0007-pacekk-segmented-weights.patch; }
-
-_gputeam() {   # <tree name> <ML-PACE> <wrapper> <patch...>
+_gpupatched() {   # <tree name> <ML-PACE> <wrapper> <patch...>
   local T=$ROOT/$1 P=$2 W=$3 B; shift 3
   rm -rf "$T"; mkdir -p "$T"
   (cd "$SRC" && tar --exclude='./build*' --exclude=./.git --exclude=./doc --exclude=./examples -cf - .) | tar -xf - -C "$T"

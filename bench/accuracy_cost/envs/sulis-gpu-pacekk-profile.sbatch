@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# pace/kk on one A100, profiled (bench/mlpace-fast; build: scaling/envs/sulis-pacetab.sh gputeamsum), for each
+# pace/kk on one A100, profiled (build: scaling/envs/sulis-pacetab.sh gpufork), for each
 # PACE_KK_RHOW in $RHOW_MODES (default "0 2 3": stock ComputeRho/Weights, flat offsets, flat offsets + the
 # segmented backward; 1 is the fused team kernel):
 #   0. plain timings (no profiler), Si o4d12-o4d20, 32,768 atoms
@@ -24,8 +24,8 @@ set -uo pipefail
 ROOT=${BENCH_ROOT:-$HOME/bench-scaling}
 P=$ROOT/pacekk-profile; O=$P/out-$SLURM_JOB_ID; mkdir -p $O; cd $O
 source /etc/profile.d/modules.sh; module purge; module load GCC/12.3.0 OpenMPI/4.1.5 CUDA/12.8.0
-LMP=$ROOT/lammps-pacekk-teamsum/build-kk/lmp
-export LD_LIBRARY_PATH=$ROOT/lammps-pacekk-teamsum/build-kk:${LD_LIBRARY_PATH:-}
+LMP=$ROOT/lammps-pacekk-fork/build-kk/lmp
+export LD_LIBRARY_PATH=$ROOT/lammps-pacekk-fork/build-kk:${LD_LIBRARY_PATH:-}
 K="-k on g 1 -sf kk -pk kokkos newton on neigh half"
 NSYS=$(command -v nsys || ls -d $EBROOTCUDA/bin/nsys $EBROOTCUDA/nsight-systems*/bin/nsys 2>/dev/null | head -1)
 NCU=$(command -v ncu || ls -d $EBROOTCUDA/bin/ncu $EBROOTCUDA/nsight-compute*/ncu 2>/dev/null | head -1)

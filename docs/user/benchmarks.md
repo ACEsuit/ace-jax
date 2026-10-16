@@ -39,7 +39,7 @@ At the target, in microseconds per atom-step:
 | model | A100 GPU | CPU node (128 cores) |
 |---|---|---|
 | linear ACE o4d20, ace-jax with lammps-jax | 5.65 | 50.0 |
-| linear ACE o4d20, ML-PACE | 4.12 | 5.39 |
+| linear ACE o4d20, ML-PACE | 4.13 | 5.31 |
 | linear ACE o4d20, ACEpotentials.jl | – | 10.8 |
 | MACE c16L0, Symmetrix | 1.93 | 2.36 |
 | MACE c16L0, Symmetrix-XL | 1.23 | 2.19 |

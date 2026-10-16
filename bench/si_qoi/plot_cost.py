@@ -34,8 +34,8 @@ FAM = {  # family: (label, colour, marker, linestyle, filled, qoi model name pat
     # the same linear ACE fits run by ML-PACE (write_yace, Tabulated radials: exact): linear ACE's colour
     # (same models), the code told apart by marker and line; its accuracy is ACE's, its cost its own (COST_NAME)
     "ace_tab":    ("linear ACE, run by ML-PACE", "#2a78d6", "*", ":",  True,  "ACE_{s}"),
-    # and by ML-PACE with the additions proposed upstream (jameskermode/lammps-user-pace tabulated-summed-fast:
-    # recursive-evaluator speed-ups; CPU only, pace/kk is unchanged): the same files, the open star
+    # and by ML-PACE with the additions proposed upstream (ICAMS/lammps-user-pace#31: the recursive-evaluator
+    # speed-ups on the CPU; pace/kk with the prototype kernels of pace_ref/fast on the GPU): the same files, the open star
     "ace_tabfork": ("linear ACE, run by patched ML-PACE", "#2a78d6", "*", "--", False, "ACE_{s}"),
     # and by ACEpotentials.jl's LAMMPS export (bench/accuracy_cost/build_trim.py: the juliac --trim library, exact)
     "ace_trim":   ("linear ACE, run by ACEpotentials.jl", "#2a78d6", "X", "-.", True, "ACE_{s}"),
@@ -96,7 +96,7 @@ COST_AS = {"ace_E10": "ace"}
 # a second code for the same fits: its cost under its own name (make_cost.py writes it there)
 COST_NAME = {"mace_xl_L0": "MACExl_{s}", "mace_xl_L1": "MACExl_{s}", "ace_tab": "ACEtab_{s}", "ace_trim": "ACEtrim_{s}",
              "ace_tabfork": "ACEtabfork_{s}"}
-# timing files of ML-PACE with the proposed additions (sulis-cpu-pacefast.sbatch, PACE_VARIANT=fork): their
+# timing files of ML-PACE with the proposed additions (sulis-{cpu,gpu}-pacefork.sbatch): their
 # mlpace rows are the ace_tabfork line, not stock ML-PACE's
 PATCHED_MLPACE = ("ace_tabfork",)
 TAB_SIZES = ("o4d12", "o4d14", "o4d16", "o4d20")    # the ace sizes converted (sweep.yaml ace_tab)
@@ -315,8 +315,8 @@ def main():
                 "ace-jax runs in LAMMPS (lammps-jax CPU backend; ACE o4d16 and o4d20 with the recursive (DAG) product basis, aa_dag='greedy'); MACE runs in LAMMPS via Symmetrix and, separately, Symmetrix-XL.\n"
                 "Linear ACE run by ML-PACE: the o4 fits exported exactly to .yace with tabulated radials (ML-PACE with the tabulated-radial patch, ICAMS/lammps-user-pace#31; pace and pace/kk).  "
                 "GPU ML-PACE: LAMMPS develop ec02ed0 (with the 2026-08 pace/kk GPU rewrite).\n"
-                "Patched ML-PACE (CPU only): its recursive evaluator with the speed-ups proposed upstream "
-                "(jameskermode/lammps-user-pace tabulated-summed-fast).\n"
+                "Patched ML-PACE: the recursive-evaluator speed-ups proposed upstream (ICAMS/lammps-user-pace#31) on the CPU; "
+                "pace/kk with prototype ComputeRho/ComputeWeights kernels (pace_ref/fast) on the GPU.\n"
                 "Linear ACE run by ACEpotentials.jl (CPU only): each fit as an ACEpotentials model, exported and compiled "
                 "with juliac --trim (ACEpotentials PR 309, v0.10.2), in LAMMPS via its pair_style ace plugin.\n"
                 "NEP: trained by GPUMD; on the CPU LAMMPS pair_style nep (NEP_CPU, float64); on the GPU GPUMD's own MD code, mixed precision (labelled).\n"
