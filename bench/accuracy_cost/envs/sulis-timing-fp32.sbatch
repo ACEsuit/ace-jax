@@ -4,7 +4,11 @@
 # and the same models as tabulated .yace in ML-PACE, KOKKOS_PREC double (lmp-pacetab.sh) and mixed
 # (lmp-pacetab-mixed.sh, sulis-pacetab.sh gpu_mixed).  Code from ~/bench-scaling/ace-jax-ac-fp32.
 #
-#   sbatch --exclusive envs/sulis-timing-fp32.sbatch            (from ace-jax-ac-fp32/bench/accuracy_cost)
+#   sbatch --exclusive envs/sulis-timing-fp32.sbatch [size ...]     (from ace-jax-ac-fp32/bench/accuracy_cost)
+#
+# One job per size backfills far sooner than the whole ladder (2026-10-16: the 4-size job waited >24 h):
+#   for s in o4d12 o4d14 o4d16 o4d20; do sbatch --exclusive envs/sulis-timing-fp32.sbatch $s; done
+# Each job writes results/sulis-gpu-fp32-<sizes>.jsonl, so concurrent jobs never append to one file.
 #SBATCH --job-name=ac-timing-fp32
 #SBATCH --account=su007-jrk-gpu
 #SBATCH --partition=gpu
@@ -13,7 +17,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=32
 #SBATCH --mem=120G
-#SBATCH --time=06:00:00
+#SBATCH --time=01:00:00
 #SBATCH --output=%x-%j.out
 set -euo pipefail
 ROOT=${BENCH_ROOT:-$HOME/bench-scaling}
@@ -29,9 +33,11 @@ export ACEJAX_AC_ACE_SPLINE_TOL=1e-10 ACEJAX_AC_ACE_DTYPES=float64,float32
 echo "job $SLURM_JOB_ID on $(hostname) $(date -Is)"
 nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv || true
 "$ROOT/venv/bin/python" -c "import ace_jax; print(ace_jax.__file__)"
+SIZES=${*:-o4d12 o4d14 o4d16 o4d20}
+OUT=accuracy_cost/results/sulis-gpu-fp32-${SIZES// /-}.jsonl
 for fam in ace ace_tab; do
-  for size in o4d12 o4d14 o4d16 o4d20; do
+  for size in $SIZES; do
     "$ROOT/venv/bin/python" -m accuracy_cost.timing gpu --only $fam/$size --env accuracy_cost/envs/sulis-gpu-fp32.json \
-        --results accuracy_cost/results/sulis-gpu-fp32.jsonl
+        --results $OUT
   done
 done
