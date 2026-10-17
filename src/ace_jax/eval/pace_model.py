@@ -23,7 +23,7 @@ from .harmonics import real_spherical_harmonics
 from .edge_model import EdgeSiteModel, check_edge_a_kind, product_basis_t, with_edge_a_kind
 from .pace_build import build_basis
 from .pace_io import parse_yace
-from .radial import spline_eval_pairs
+from .radial import spline_eval_pairs, spline_local
 from .pace_radial import cutoff_func_poly, fexp, fexp_shifted_scaled, hermite_table, pace_zbl, radbase, radcore
 
 
@@ -152,6 +152,12 @@ class PACEModel(EdgeSiteModel):
         cr = jnp.where(valid, cr, 0.0)
         d = jnp.where(valid, r - (cin - dcin), jnp.inf)                   # zbl switch coordinate
         return cr, d, dcin
+
+    def spline_local(self):
+        """The radial table in `radial.spline_local`'s form (`with_dtype`, below float64)."""
+        if self.rtab_grid and self.rtab_coefs.ndim == 4:
+            return dataclasses.replace(self, rtab_coefs=spline_local(self.rtab_coefs))
+        return self
 
     # ------------------------------------------------------------ radial table hooks
     def without_radial_table(self):

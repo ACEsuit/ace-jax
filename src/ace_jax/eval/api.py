@@ -33,11 +33,22 @@ def with_dtype(model, dtype):
     leaves and static fields are untouched.  The way to evaluate in float32 under x64: a float64
     model traced with float32 inputs promotes back to float64 everywhere (an fp32 lammps-jax
     bundle exported so lowers to ~400 f64 ops with f32 I/O only).  Cast after any transform
-    that tabulates or splines (lean, radial tables), so those are computed in float64."""
+    that tabulates or splines (lean, radial tables), so those are computed in float64.  Below
+    float64 the spline tables go to `radial.spline_local`'s form first (formed at the model's own
+    precision): float32 B-spline coefficients cost the forces ~eps |c| / h (tests/test_spline_float32.py)."""
     dt = jnp.dtype(dtype)
+    if dt != jnp.float64:
+        model = _spline_local(model)
     cast = lambda a: (a.astype(dt) if eqx.is_array(a) and jnp.issubdtype(a.dtype, jnp.floating)
                       and a.dtype != dt else a)
     return jax.tree.map(cast, model)
+
+
+def _spline_local(model):
+    """`model.spline_local()`, through wrappers (`.base` / `with_base`)."""
+    if hasattr(model, "base") and hasattr(model, "with_base"):
+        model = model.with_base(_spline_local(model.base))
+    return model.spline_local() if hasattr(model, "spline_local") else model
 
 
 def _default_dtype():

@@ -34,7 +34,7 @@ from .edge_model import (EdgeSiteModel, calibrate_edge_a, one_hot_selector,  # n
 from .aa_dag import dag_contract
 from .harmonics import real_solid_harmonics, real_spherical_harmonics
 from .radial import (agnesi_normalized, env_ace1_poly1sr, env_poly1sr,
-                     env_poly2sx, poly_recursion, spline_eval, spline_eval_pairs)
+                     env_poly2sx, poly_recursion, spline_eval, spline_eval_pairs, spline_local)
 
 # `load` / `build_model` hold A2B as sparse triplets only (`with_a2b_sparse`) when at most
 # this fraction of it is nonzero.  Every ACE coupling is far below it (0.025-1.9%: about
@@ -642,6 +642,22 @@ class ACEModel(EdgeSiteModel):
         R = self._radial_one(r, zi, zj, "spline", self.rnl_transform, self.blk_rnl_coefs,
                              self.rnl_grid, None, None, env)
         return R, self.pair_radial(rij, zi, zj)
+
+    def spline_local(self):
+        """Every spline table in `radial.spline_local`'s form, which `with_dtype` applies (in
+        float64) before a cast below float64: float32 B-spline coefficients cost the
+        derivatives ~eps |c| / h each (74 meV/A on o4d12 at 2048 intervals).  Idempotent."""
+        def loc(a, ndim):
+            return spline_local(a) if a is not None and a.ndim == ndim else a
+        spl = self.radial_kind == "spline"
+        return _dc.replace(
+            self, rnl_coefs=loc(self.rnl_coefs, 4) if spl else self.rnl_coefs,
+            pair_coefs=loc(self.pair_coefs, 4) if self.pair_radial_kind == "spline" else self.pair_coefs,
+            rnl_coefs_single=(loc(self.rnl_coefs_single, 2) if self.radial_kind == "spline_factorised"
+                              else self.rnl_coefs_single),
+            blk_rnl_coefs=loc(self.blk_rnl_coefs, 4),          # set only for a compact spline R_nl
+            rtab_coefs=loc(self.rtab_coefs, 4) if self.rtab_grid else self.rtab_coefs,
+            blk_rtab_coefs=loc(self.blk_rtab_coefs, 4) if self.rtab_grid else self.blk_rtab_coefs)
 
     # -------------------------------------------------- radial table hooks (`splinify.radial_table`)
     def without_radial_table(self):
