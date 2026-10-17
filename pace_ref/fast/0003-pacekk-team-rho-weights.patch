@@ -1,0 +1,403 @@
+diff -ru a/src/KOKKOS/pair_pace_kokkos.cpp b/src/KOKKOS/pair_pace_kokkos.cpp
+--- a/src/KOKKOS/pair_pace_kokkos.cpp	2026-10-14 20:16:57.099542375 +0100
++++ b/src/KOKKOS/pair_pace_kokkos.cpp	2026-10-14 20:16:57.104542399 +0100
+@@ -18,6 +18,10 @@
+ 
+ #include "pair_pace_kokkos.h"
+ 
++#include <cstdlib>
++#include <vector>
++#include <algorithm>
++
+ #include "atom_kokkos.h"
+ #include "atom_masks.h"
+ #include "comm.h"
+@@ -801,6 +805,8 @@
+   copy_splines();
+   copy_tilde();
+ 
++  if constexpr (!host_flag) build_team_tables();
++
+   if constexpr (host_flag) {
+     build_cpu_offset_tables();
+     use_batched_cpu = (((lmax + 1) * nradmax <= PACE_BATCH_NRL_MAX) &&
+@@ -810,6 +816,109 @@
+ }
+ 
+ /* ----------------------------------------------------------------------
++   device only: term tables for the fused team kernel (offsets into the
++   per-atom scratch block (mu, idx_sph, n), see d_tm_A)
++------------------------------------------------------------------------- */
++
++template<class DeviceType>
++void PairPACEKokkos<DeviceType>::build_team_tables()
++{
++  const int rankmax = (int) d_ms_combs.extent(2);
++  const int nn = nradmax + 1;
++  d_tm_A = decltype(d_tm_A)("pace:tm_A", idx_ms_combs_max, rankmax, nelements);
++  d_tm_W = decltype(d_tm_W)("pace:tm_W", idx_ms_combs_max, rankmax, nelements);
++  d_tm_Wm = decltype(d_tm_Wm)("pace:tm_Wm", idx_ms_combs_max, rankmax, nelements);
++  d_tm_rank = decltype(d_tm_rank)("pace:tm_rank", idx_ms_combs_max, nelements);
++  auto h_A = Kokkos::create_mirror_view(d_tm_A);
++  auto h_W = Kokkos::create_mirror_view(d_tm_W);
++  auto h_Wm = Kokkos::create_mirror_view(d_tm_Wm);
++  auto h_rk = Kokkos::create_mirror_view(d_tm_rank);
++  auto h_idx_funcs = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), d_idx_funcs);
++  auto h_rank = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), d_rank);
++  auto h_mus = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), d_mus);
++  auto h_ns = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), d_ns);
++  auto h_ls = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), d_ls);
++  auto h_ms = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), d_ms_combs);
++  auto h_isph = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), d_idx_sph);
++  auto h_count = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), d_idx_ms_combs_count);
++  for (int mu_i = 0; mu_i < nelements; mu_i++)
++    for (int idx = 0; idx < h_count(mu_i); idx++) {
++      const int idx_func = h_idx_funcs(mu_i, idx);
++      const int rank = h_rank(mu_i, idx_func);
++      h_rk(idx, mu_i) = rank;
++      if (rank == 1) {
++        h_A(idx, 0, mu_i) = h_mus(mu_i, idx_func, 0) * nradbase + h_ns(mu_i, idx_func, 0) - 1;
++        continue;
++      }
++      for (int t = 0; t < rank; t++) {
++        const int mu = h_mus(mu_i, idx_func, t), n = h_ns(mu_i, idx_func, t) - 1;
++        const int l = h_ls(mu_i, idx_func, t), m = h_ms(mu_i, idx, t), p = m >= 0 ? m : -m;
++        const int lbase = l * (l + 1);
++        const int e = (mu * idx_sph_max + (int) h_isph(lbase + p)) * nn + n;
++        h_A(idx, t, mu_i) = (e << 2) | (m < 0 ? 1 : 0) | ((p & 1) << 1);
++        const int ip = (int) h_isph(lbase + m), im = (int) h_isph(lbase - m);
++        h_W(idx, t, mu_i) = ip >= 0 ? (mu * idx_sph_max + ip) * nn + n : -1;
++        h_Wm(idx, t, mu_i) = im >= 0 ? ((((mu * idx_sph_max + im) * nn + n) << 1) | (p & 1)) : -1;
++      }
++    }
++  Kokkos::deep_copy(d_tm_A, h_A);
++  Kokkos::deep_copy(d_tm_W, h_W);
++  Kokkos::deep_copy(d_tm_Wm, h_Wm);
++  Kokkos::deep_copy(d_tm_rank, h_rk);
++
++  // backward records: (target, flags, term, other factors), sorted by target
++  struct Rec { int w, flags, c, nf; int f[PACE_TEAM_RMAX]; };
++  std::vector<std::vector<Rec>> recs(nelements);
++  int npad_max = 0;
++  for (int mu_i = 0; mu_i < nelements; mu_i++) {
++    auto &R = recs[mu_i];
++    for (int idx = 0; idx < h_count(mu_i); idx++) {
++      const int rank = h_rk(idx, mu_i);
++      if (rank == 1) continue;
++      for (int t = 0; t < rank; t++) {
++        Rec r{}; r.c = idx; r.nf = 0;
++        for (int s = 0; s < rank; s++) if (s != t) r.f[r.nf++] = h_A(idx, s, mu_i);
++        const int w = h_W(idx, t, mu_i), wm = h_Wm(idx, t, mu_i);
++        if (w >= 0 && wm >= 0 && (wm >> 1) != w)
++          error->all(FLERR, "pace/kk team kernel: (l,m) and (l,-m) weights differ for one factor");
++        if (w < 0 && wm < 0) continue;
++        r.w = w >= 0 ? w : (wm >> 1);
++        r.flags = (w >= 0 ? 1 : 0) | (wm >= 0 ? 2 : 0) | ((wm >= 0 && (wm & 1)) ? 4 : 0);
++        R.push_back(r);
++      }
++    }
++    std::stable_sort(R.begin(), R.end(), [](const Rec &a, const Rec &b) { return a.w < b.w; });
++    const int nchunk = ((int) R.size() + PACE_TEAM_CH - 1) / PACE_TEAM_CH;
++    npad_max = MAX(npad_max, nchunk * PACE_TEAM_CH);
++  }
++  d_rc_tgt = decltype(d_rc_tgt)("pace:rc_tgt", MAX(npad_max, 1), nelements);
++  d_rc_term = decltype(d_rc_term)("pace:rc_term", MAX(npad_max, 1), nelements);
++  d_rc_f = decltype(d_rc_f)("pace:rc_f", MAX(npad_max, 1), PACE_TEAM_RMAX, nelements);
++  d_rc_nchunk = decltype(d_rc_nchunk)("pace:rc_nchunk", nelements);
++  auto h_tgt = Kokkos::create_mirror_view(d_rc_tgt);
++  auto h_term = Kokkos::create_mirror_view(d_rc_term);
++  auto h_f = Kokkos::create_mirror_view(d_rc_f);
++  auto h_nch = Kokkos::create_mirror_view(d_rc_nchunk);
++  Kokkos::deep_copy(h_tgt, -1);
++  Kokkos::deep_copy(h_term, 0);
++  for (int mu_i = 0; mu_i < nelements; mu_i++) {
++    const auto &R = recs[mu_i];
++    const int nchunk = ((int) R.size() + PACE_TEAM_CH - 1) / PACE_TEAM_CH;
++    h_nch(mu_i) = nchunk;
++    for (int k = 0; k < (int) R.size(); k++) {
++      const int ch = k / PACE_TEAM_CH, q = k % PACE_TEAM_CH, row = q * nchunk + ch;
++      h_tgt(row, mu_i) = (R[k].w << 6) | (R[k].nf << 3) | R[k].flags;
++      h_term(row, mu_i) = R[k].c;
++      for (int s = 0; s < R[k].nf; s++) h_f(row, s, mu_i) = R[k].f[s];
++    }
++  }
++  Kokkos::deep_copy(d_rc_tgt, h_tgt);
++  Kokkos::deep_copy(d_rc_term, h_term);
++  Kokkos::deep_copy(d_rc_f, h_f);
++  Kokkos::deep_copy(d_rc_nchunk, h_nch);
++}
++
++/* ----------------------------------------------------------------------
+    CPU only: precompute, for every (ms-combination, rank) term, the flat
+    offset of the A entry it gathers and of the two weights entries it
+    scatters into.  The inner loops of the density and weights passes then do
+@@ -1086,6 +1195,16 @@
+ 
+   grow(chunk_size, maxneigh);
+ 
++  use_team_rhow = 0;
++  if constexpr (!host_flag) {
++    const char *env = getenv("PACE_KK_RHOW");
++    const int nA = nelements * idx_sph_max * (nradmax + 1);
++    typename Kokkos::TeamPolicy<DeviceType, TagPairPACEComputeRhoWeightsTeam> probe(1, team_size_rhow);
++    use_team_rhow = !(env && env[0] == '0') && aceimpl->basis_set->ndensitymax <= PACE_TEAM_NDMAX
++                    && aceimpl->basis_set->rankmax <= PACE_TEAM_RMAX
++                    && (int)((4 * nA + PACE_TEAM_NDMAX) * sizeof(KK_FLOAT)) <= (int)probe.scratch_size_max(0);
++  }
++
+   EV_FLOAT ev;
+ 
+   while (chunk_offset < inum) { // chunk up loop to prevent running out of memory
+@@ -1165,19 +1284,26 @@
+       Kokkos::parallel_for("ComputeRhoFSWeights",
+           Kokkos::RangePolicy<DeviceType, Kokkos::Schedule<Kokkos::Dynamic>,
+                               TagPairPACEComputeRhoBatchCPU>(0, nbatch), *this);
++    } else if (use_team_rhow) {
++      // one team per atom: its A block and weight accumulators in level-0 scratch, densities reduced in the
++      // team, FS once, then the weights scattered with shared-memory atomics and written back once
++      const int nA = nelements * idx_sph_max * (nradmax + 1);
++      typename Kokkos::TeamPolicy<DeviceType, TagPairPACEComputeRhoWeightsTeam> policy_rhow(chunk_size, team_size_rhow);
++      policy_rhow = policy_rhow.set_scratch_size(0, Kokkos::PerTeam((4 * nA + PACE_TEAM_NDMAX) * sizeof(KK_FLOAT)));
++      Kokkos::parallel_for("ComputeRhoWeightsTeam", policy_rhow, *this);
+     } else {
+       typename Kokkos::RangePolicy<DeviceType,TagPairPACEComputeRho> policy_rho(0,chunk_size*idx_ms_combs_max);
+       Kokkos::parallel_for("ComputeRho",policy_rho,*this);
+     }
+ 
+     //ComputeFS
+-    if constexpr (!host_flag) {
++    if (!host_flag && !use_team_rhow) {
+       typename Kokkos::RangePolicy<DeviceType,TagPairPACEComputeFS> policy_fs(0,chunk_size);
+       Kokkos::parallel_for("ComputeFS",policy_fs,*this);
+     }
+ 
+     //ComputeWeights (fused into ComputeRho on the host)
+-    if constexpr (!host_flag) {
++    if (!host_flag && !use_team_rhow) {
+       typename Kokkos::RangePolicy<DeviceType,TagPairPACEComputeWeights> policy_weights(0,chunk_size * idx_ms_combs_max);
+       Kokkos::parallel_for("ComputeWeights",policy_weights,*this);
+     }
+@@ -2183,7 +2309,7 @@
+ template<class DeviceType>
+ // NOLINTNEXTLINE
+ KOKKOS_INLINE_FUNCTION
+-void PairPACEKokkos<DeviceType>::compute_fs_one(const int ii) const
++void PairPACEKokkos<DeviceType>::compute_fs_one(const int ii, const bool zero_weights) const
+ {
+   const int i = d_ilist[ii + chunk_offset];
+   const int mu_i = d_map(type(i));
+@@ -2196,7 +2322,7 @@
+   // large weight arrays need no separate per-chunk deep_copy pass. On the
+   // host this loses: a bulk deep_copy (issued in compute()) is much faster
+   // than per-atom scalar stores, so the host path skips this.
+-  if constexpr (!host_flag) {
++  if (!host_flag && zero_weights) {
+     for (int mu = 0; mu < nelements; mu++) {
+       for (int n = 0; n < nradbase; n++)
+         weights_rank1(ii, mu, n) = 0.0;
+@@ -2326,6 +2452,146 @@
+ }
+ 
+ /* ----------------------------------------------------------------------
++   Device: ComputeRho + ComputeFS + ComputeWeights for one atom per team.
++   The atom's A_sph block (all mu, packed (l, m >= 0), n) is staged in
++   level-0 scratch, so the products and the leave-one-out products read
++   shared memory instead of global; the densities are summed in registers
++   and reduced in the team; FS runs once; the weights accumulate with
++   shared-memory atomics and are written back once (no global atomics, no
++   separate zeroing pass).  Same arithmetic per term as ComputeRho and
++   ComputeWeights; only the summation order of rho and the weights changes.
++------------------------------------------------------------------------- */
++
++template<class DeviceType>
++// NOLINTNEXTLINE
++KOKKOS_INLINE_FUNCTION
++void PairPACEKokkos<DeviceType>::operator() (TagPairPACEComputeRhoWeightsTeam,
++    const typename Kokkos::TeamPolicy<DeviceType, TagPairPACEComputeRhoWeightsTeam>::member_type& team) const
++{
++  const int ii = team.league_rank();
++  const int i = d_ilist[ii + chunk_offset];
++  const int mu_i = d_map(type(i));
++  const int ndensity = d_ndensity(mu_i);
++  const int nterms = d_idx_ms_combs_count(mu_i);
++  const int nn = nradmax + 1;
++  const int nA = nelements * idx_sph_max * nn;
++
++  KK_FLOAT *sAre = (KK_FLOAT *) team.team_shmem().get_shmem(nA * sizeof(KK_FLOAT));
++  KK_FLOAT *sAim = (KK_FLOAT *) team.team_shmem().get_shmem(nA * sizeof(KK_FLOAT));
++  KK_FLOAT *sWre = (KK_FLOAT *) team.team_shmem().get_shmem(nA * sizeof(KK_FLOAT));
++  KK_FLOAT *sWim = (KK_FLOAT *) team.team_shmem().get_shmem(nA * sizeof(KK_FLOAT));
++  KK_FLOAT *srho = (KK_FLOAT *) team.team_shmem().get_shmem(PACE_TEAM_NDMAX * sizeof(KK_FLOAT));
++
++  Kokkos::parallel_for(Kokkos::TeamThreadRange(team, nA), [&](const int e) {
++    const int n = e % nn, rest = e / nn, idx = rest % idx_sph_max, mu = rest / idx_sph_max;
++    sAre[e] = A_sph_re(ii, mu, idx, n);
++    sAim[e] = A_sph_im(ii, mu, idx, n);
++    sWre[e] = 0.0;
++    sWim[e] = 0.0;
++  });
++  Kokkos::parallel_for(Kokkos::TeamThreadRange(team, nelements * nradbase), [&](const int e) {
++    weights_rank1(ii, e / nradbase, e % nradbase) = 0.0;
++  });
++  Kokkos::parallel_for(Kokkos::TeamThreadRange(team, PACE_TEAM_NDMAX), [&](const int p) { srho[p] = 0.0; });
++  team.team_barrier();
++
++  // A entry from scratch: m < 0 through the conjugate symmetry, as read_A
++  auto sread = [&](const int code) {
++    const int e = code >> 2;
++    complex a;
++    a.re = sAre[e];
++    a.im = sAim[e];
++    if (code & 1) {
++      const KK_FLOAT factor = (code & 2) ? -1.0 : 1.0;
++      a.re = a.re * factor;
++      a.im = -a.im * factor;
++    }
++    return a;
++  };
++
++  // forward: densities
++  KK_FLOAT rho[PACE_TEAM_NDMAX];
++  for (int p = 0; p < PACE_TEAM_NDMAX; ++p) rho[p] = 0.0;
++  for (int c = team.team_rank(); c < nterms; c += team.team_size()) {
++    const int rank = d_tm_rank(c, mu_i);
++    if (rank == 1) {
++      const int o = d_tm_A(c, 0, mu_i);
++      const KK_FLOAT A_cur = A_rank1(ii, o / nradbase, o % nradbase);
++      for (int p = 0; p < ndensity; ++p) rho[p] += d_ctildes(mu_i, c, p) * A_cur;
++    } else {
++      complex B = sread(d_tm_A(c, 0, mu_i));
++      for (int t = 1; t < rank; t++) B = B * sread(d_tm_A(c, t, mu_i));
++      for (int p = 0; p < ndensity; ++p) rho[p] += B.real_part_product(d_ctildes(mu_i, c, p));
++    }
++  }
++  for (int p = 0; p < ndensity; ++p) Kokkos::atomic_add(&srho[p], rho[p]);
++  team.team_barrier();
++
++  // FS once per atom (rhos -> dF_drho, energy); the weights need no zeroing here
++  Kokkos::single(Kokkos::PerTeam(team), [&]() {
++    for (int p = 0; p < ndensity; ++p) rhos(ii, p) += srho[p];
++    compute_fs_one(ii, false);
++  });
++  team.team_barrier();
++
++  KK_FLOAT dF[PACE_TEAM_NDMAX];
++  for (int p = 0; p < ndensity; ++p) dF[p] = dF_drho(ii, p);
++
++  // backward, rank 1: straight into weights_rank1 (few terms)
++  for (int c = team.team_rank(); c < nterms; c += team.team_size()) {
++    if (d_tm_rank(c, mu_i) != 1) continue;
++    KK_FLOAT theta = 0.0;
++    for (int p = 0; p < ndensity; ++p) theta += dF[p] * d_ctildes(mu_i, c, p);
++    const int o = d_tm_A(c, 0, mu_i);
++    Kokkos::atomic_add(&weights_rank1(ii, o / nradbase, o % nradbase), theta);
++  }
++
++  // backward, rank > 1: each thread sums a chunk of target-sorted records in registers and adds to the
++  // scratch weights only when the target changes (few shared atomics)
++  const int nchunk = d_rc_nchunk(mu_i);
++  for (int ch = team.team_rank(); ch < nchunk; ch += team.team_size()) {
++    int cur = -1;
++    KK_FLOAT acc_re = 0.0, acc_im = 0.0;
++    for (int q = 0; q < PACE_TEAM_CH; q++) {
++      const int row = q * nchunk + ch;
++      const int code = d_rc_tgt(row, mu_i);
++      if (code < 0) break;
++      const int w = code >> 6;
++      if (w != cur) {
++        if (cur >= 0) {
++          Kokkos::atomic_add(&sWre[cur], acc_re);
++          Kokkos::atomic_add(&sWim[cur], acc_im);
++        }
++        cur = w; acc_re = 0.0; acc_im = 0.0;
++      }
++      const int c = d_rc_term(row, mu_i);
++      KK_FLOAT theta = 0.0;
++      for (int p = 0; p < ndensity; ++p) theta += dF[p] * d_ctildes(mu_i, c, p);
++      theta *= 0.5;
++      const int nf = (code >> 3) & 7;
++      complex dB = sread(d_rc_f(row, 0, mu_i));
++      for (int s = 1; s < nf; s++) dB = dB * sread(d_rc_f(row, s, mu_i));
++      if (code & 1) { acc_re += theta * dB.re; acc_im += theta * dB.im; }
++      if (code & 2) {
++        const KK_FLOAT sg = (code & 4) ? -theta : theta;
++        acc_re += sg * dB.re; acc_im -= sg * dB.im;
++      }
++    }
++    if (cur >= 0) {
++      Kokkos::atomic_add(&sWre[cur], acc_re);
++      Kokkos::atomic_add(&sWim[cur], acc_im);
++    }
++  }
++  team.team_barrier();
++
++  Kokkos::parallel_for(Kokkos::TeamThreadRange(team, nA), [&](const int e) {
++    const int n = e % nn, rest = e / nn, idx = rest % idx_sph_max, mu = rest / idx_sph_max;
++    weights_re(ii, mu, idx, n) = sWre[e];
++    weights_im(ii, mu, idx, n) = sWim[e];
++  });
++}
++
++/* ----------------------------------------------------------------------
+    CPU backend: one thread owns atom ii, so the weights scatter is a plain
+    accumulation into that atom's own block instead of four atomics per
+    (ms-combination, rank) step
+diff -ru a/src/KOKKOS/pair_pace_kokkos.h b/src/KOKKOS/pair_pace_kokkos.h
+--- a/src/KOKKOS/pair_pace_kokkos.h	2026-10-14 20:16:57.100542380 +0100
++++ b/src/KOKKOS/pair_pace_kokkos.h	2026-10-14 20:16:57.105542403 +0100
+@@ -43,6 +43,7 @@
+   struct TagPairPACEComputeRho{};
+   struct TagPairPACEComputeFS{};
+   struct TagPairPACEComputeWeights{};
++  struct TagPairPACEComputeRhoWeightsTeam{};   // device: Rho + FS + Weights fused, one team per atom
+   struct TagPairPACEComputeDerivative{};
+ 
+   // CPU backend variants: one atom per thread, neighbours and basis functions
+@@ -91,6 +92,9 @@
+   KOKKOS_INLINE_FUNCTION
+   void operator() (TagPairPACEComputeWeights,const int& iter) const;
+ 
++  KOKKOS_INLINE_FUNCTION
++  void operator() (TagPairPACEComputeRhoWeightsTeam,const typename Kokkos::TeamPolicy<DeviceType, TagPairPACEComputeRhoWeightsTeam>::member_type& team) const;
++
+ // NOLINTNEXTLINE
+   KOKKOS_INLINE_FUNCTION
+   void operator() (TagPairPACEComputeAiCPU,const int& ii) const;
+@@ -175,6 +179,28 @@
+   static constexpr int team_size_compute_neigh = host_flag ? 1 : 32;
+   static constexpr int team_size_compute_ai = host_flag ? 1 : 32;
+   static constexpr int team_size_compute_derivative = host_flag ? 1 : 32;
++  // fused Rho/FS/Weights team kernel (device): threads per atom, the most densities it carries in registers,
++  // and whether it is used (off: PACE_KK_RHOW=0, ndensitymax > PACE_TEAM_NDMAX, or the A + weights block of one
++  // atom does not fit in level-0 scratch)
++  static constexpr int team_size_rhow = host_flag ? 1 : 128;
++  static constexpr int PACE_TEAM_NDMAX = 8;
++  static constexpr int PACE_TEAM_RMAX = 8;
++  int use_team_rhow;
++  // team-kernel term tables, (idx_ms_combs, t, mu_i) with the term index fastest so a warp's loads coalesce:
++  // d_tm_A = (scratch offset of the A entry << 2) | (m < 0) | (m odd) << 1 (rank 1: mu * nradbase + n - 1);
++  // d_tm_W / d_tm_Wm = scratch offsets of the (l, m) / (l, -m) weights (-1: outside the packed triangle),
++  // d_tm_Wm with (-1)^m in its low bit; d_tm_rank(idx_ms_combs, mu_i)
++  Kokkos::View<int***, Kokkos::LayoutLeft, DeviceType> d_tm_A, d_tm_W, d_tm_Wm;
++  Kokkos::View<int**, Kokkos::LayoutLeft, DeviceType> d_tm_rank;
++  // backward records, one per (term, factor) of rank > 1, sorted by the weight entry they add to and cut into
++  // chunks of PACE_TEAM_CH; record q of chunk ch is row q * nchunk + ch (a warp reads consecutive rows):
++  // d_rc_tgt = (scratch offset << 6) | (other factors << 3) | (1: + theta dB) | (2: + theta conj(dB) s) | (4: s = -1),
++  // -1 for padding; d_rc_term = the term (for theta); d_rc_f = the other factors' d_tm_A codes
++  static constexpr int PACE_TEAM_CH = 16;
++  Kokkos::View<int**, Kokkos::LayoutLeft, DeviceType> d_rc_tgt, d_rc_term;
++  Kokkos::View<int***, Kokkos::LayoutLeft, DeviceType> d_rc_f;
++  Kokkos::View<int*, DeviceType> d_rc_nchunk;
++  void build_team_tables();
+ 
+   typename AT::t_neighbors_2d d_neighbors;
+   typename AT::t_int_1d_randomread d_ilist;
+@@ -326,7 +352,7 @@
+   void weights_one_rank1_cpu(const BasisPtrs &, const int, const int) const;
+ 
+   KOKKOS_INLINE_FUNCTION
+-  void compute_fs_one(const int) const;
++  void compute_fs_one(const int, const bool zero_weights = true) const;
+ 
+   KOKKOS_INLINE_FUNCTION
+   void compute_derivative_one(const int, const int) const;

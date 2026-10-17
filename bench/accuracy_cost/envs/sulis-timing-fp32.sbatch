@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # The linear ACE order-4 ladder on a Sulis A100 with its mixed-precision lines (docs/dev/fp32-results.md):
 # ace-jax (lammps-jax bundles, analytic radials splined at 1e-10 as the plotted rows) in float64 and float32,
-# and the same models as tabulated .yace in ML-PACE, KOKKOS_PREC double (lmp-pacetab.sh) and mixed
-# (lmp-pacetab-mixed.sh, sulis-pacetab.sh gpu_mixed).  Code from ~/bench-scaling/ace-jax-ac-fp32.
+# and the same models as tabulated .yace in ML-PACE's pace/kk with the pace_ref/fast prototype kernels (PR #102) in
+# their fastest mode, PACE_KK_RHOW=3: KOKKOS_PREC double (lmp-pacekk-fork.sh, sulis-pacetab.sh gpufork on main) and
+# mixed (lmp-pacekk-fork-mixed.sh, sulis-pacetab.sh gpufork_mixed).  Code from ~/bench-scaling/ace-jax-ac-fp32.
 #
 #   sbatch --exclusive envs/sulis-timing-fp32.sbatch [size ...]     (from ace-jax-ac-fp32/bench/accuracy_cost)
 #
@@ -28,9 +29,9 @@ export LD_LIBRARY_PATH=$ROOT/venv/lib/python3.12/site-packages/nvidia/cu13/lib:$
 export PYTHONPATH=$CODE/bench:$CODE/src
 export ACEJAX_AC_ROOT=$ROOT/ac
 export ACEJAX_AC_MAX_LOAD1=16
-export ACEJAX_AC_ACE_SPLINE_TOL=1e-10 ACEJAX_AC_ACE_DTYPES=float64,float32
+export ACEJAX_AC_ACE_SPLINE_TOL=1e-10 ACEJAX_AC_ACE_DTYPES=float64,float32 PACE_KK_RHOW=${PACE_KK_RHOW:-3}
 [ -n "${ACEJAX_AC_GPU:-}" ] && export CUDA_VISIBLE_DEVICES=$ACEJAX_AC_GPU
-echo "job $SLURM_JOB_ID on $(hostname) $(date -Is)"
+echo "job $SLURM_JOB_ID on $(hostname) $(date -Is) PACE_KK_RHOW=$PACE_KK_RHOW"
 nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv || true
 "$ROOT/venv/bin/python" -c "import ace_jax; print(ace_jax.__file__)"
 SIZES=${*:-o4d12 o4d14 o4d16 o4d20}
