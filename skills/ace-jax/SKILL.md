@@ -345,7 +345,8 @@ init, apply = simulate.nve(pot.force, shift, dt)    # pot.energy for NPT / quant
 - Calculator keywords (`spline_tol`, `lean`, `aa_dag`, `dtype`, ...) pass through
   `potential`: it evaluates exactly `ACECalculator`'s model.
 - JAX-MD's stress (`quantity.stress`) has the opposite sign to ASE's.
-- `jax-md` is not an ace-jax dependency: `pip install jax-md`.
+- Install with the `jaxmd` extra: `pip install "ace-jax[jaxmd]"`. `jaxmd.neighbor_list` also needs
+  matscipy-neighbours built with its XLA FFI (libAtoms/matscipy-neighbours#10, not yet released).
 
 ### LAMMPS
 

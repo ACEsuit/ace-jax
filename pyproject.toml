@@ -63,6 +63,10 @@ fast-neighbours = ["matscipy-neighbours>=1.0"]
 # lammps-jax excludes jaxlib 0.10.2 (slow GPU scatter-add), so on Python 3.11
 # this extra resolves jax 0.10.1, the core floor.
 lammps = ["lammps-jax>=0.2.0"]
+# JAX-MD integration (ace_jax.jaxmd: energy/force functions and neighbour lists for JAX-MD's
+# integrators).  jaxmd.neighbor_list (the on-device matscipy-neighbours list) also needs a
+# matscipy-neighbours build with its XLA FFI (libAtoms/matscipy-neighbours#10, not yet released).
+jaxmd = ["jax-md>=0.2.29"]
 
 [project.scripts]
 ace-jax = "ace_jax.cli:main"

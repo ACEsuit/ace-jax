@@ -7,9 +7,9 @@ import jax.numpy as jnp  # noqa: E402
 import numpy as np  # noqa: E402
 import pytest  # noqa: E402
 from ase.build import bulk  # noqa: E402
-from conftest import FIXTURE_DIR  # noqa: E402
+from conftest import FIXTURE_DIR, require_optional  # noqa: E402
 
-jax_md = pytest.importorskip("jax_md")
+jax_md = require_optional("jax_md")   # the `jaxmd` extra; ACEJAX_REQUIRE_OPTIONAL makes a missing one fail
 from jax_md import partition, quantity, simulate, space  # noqa: E402
 
 from ace_jax import jaxmd  # noqa: E402
