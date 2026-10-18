@@ -37,7 +37,10 @@ KEY = ("code", "family", "size", "dtype", "mode", "device")
 # family -> [(code, {device: mode}, dtypes)]: the spec's code table.  ace_lr is
 # timed as deployed (ACECalculator / export_lammps default: lean, spline_tol="auto").
 # gap18_published is a reference line (metrics.jsonl), not a swept family.
-PLAN = {"ace": [("acejax-ace", {"cpu": "standalone", "gpu": "lammps"}, ("float64",)),
+# ACEJAX_AC_ACE_DTYPES (e.g. "float64,float32"): the ace family's ace-jax precisions; float32 bundles are
+# exported as true float32 programs (export_lammps casts the traced model; docs/dev/fp32-results.md)
+ACE_DTYPES = tuple(os.environ.get("ACEJAX_AC_ACE_DTYPES", "float64").split(","))
+PLAN = {"ace": [("acejax-ace", {"cpu": "standalone", "gpu": "lammps"}, ACE_DTYPES),
                 # ACEpotentials.jl's PR 309 LAMMPS export of the same fit (accuracy_cost/build_trim.py: the
                 # juliac --trim library, pair_style ace; CPU only); only where the env json names `lmp_ace`
                 ("acepotentials-trim", {"cpu": "lammps"}, ("float64",))],
@@ -56,7 +59,9 @@ PLAN = {"ace": [("acejax-ace", {"cpu": "standalone", "gpu": "lammps"}, ("float64
                      ("mlpace", {"cpu": "lammps", "gpu": "lammps"}, ("float64",))],
         # the same models exactly: `Tabulated` radials (write_yace; ace_to_yace.py's default), which need ML-PACE with the
         # tabulated-radial patch (env json `lmp`: envs/sulis-pacetab.sh); gated against the source .npz
-        "ace_tab": [("mlpace", {"cpu": "lammps", "gpu": "lammps"}, ("float64",))],
+        "ace_tab": [("mlpace", {"cpu": "lammps", "gpu": "lammps"}, ("float64",)),
+                    # the same in a KOKKOS_PREC=mixed LAMMPS (env json `lmp_mixed`; main drops it otherwise)
+                    ("mlpace-mixed", {"gpu": "lammps"}, ("mixed",))],
         "mace": [("mace", {"cpu": "lammps", "gpu": "lammps"}, ("float64",)),
                  ("mace", {"cpu": "standalone", "gpu": "standalone"}, ("float32",)),
                  # Symmetrix-XL (pair_style symmetrix/mace[/float32]/kk + JIT R1 artifact; envs/sulis-xl.sh):
@@ -70,7 +75,8 @@ PLAN = {"ace": [("acejax-ace", {"cpu": "standalone", "gpu": "lammps"}, ("float64
         "gap": [("gap", {"cpu": "lammps"}, ("float64",))],         # pair quip: no KOKKOS, CPU only
         "gap_noglue": [("gap", {"cpu": "lammps"}, ("float64",))],  # the XML has no Glue term; same pair style
         "gap_E30": [("gap", {"cpu": "lammps"}, ("float64",))]}     # GAP-18's command, energy sigmas x10/3
-STYLE = {"acejax-ace": "acejax", "acejax-pace": "acejax", "mlpace": "mlpace", "mace": "mace", "gap": "gap", "nep": "nep", "nep-gpumd": "nep-gpumd",
+STYLE = {"acejax-ace": "acejax", "acejax-pace": "acejax", "mlpace": "mlpace", "mlpace-mixed": "mlpace",
+         "mace": "mace", "gap": "gap", "nep": "nep", "nep-gpumd": "nep-gpumd",
          "mace-xl": "mace-xl", "mace-xl-f32": "mace-xl-f32", "acepotentials-trim": "acepotentials-trim"}
 TRIM = "acepotentials-trim"
 XL_CODES = ("mace-xl", "mace-xl-f32")
@@ -258,7 +264,8 @@ def gate_model(row, device, env, work):
                     E1, F1 = parity._lammps_ef("acejax", bundle, row["elements"], at, device, lmp_aj, w, pjrt)
                 elif style == "mlpace":                                # a converted model: its source
                     E0, F0 = parity._acejax_ef(row.get("ref") or row["path"], at)
-                    E1, F1 = parity._lammps_ef("mlpace", row["path"], row["elements"], at, device, lmp, w)
+                    E1, F1 = parity._lammps_ef("mlpace", row["path"], row["elements"], at, device,
+                                               lammps_for(code, device, env)[0], w)
                 elif style == TRIM:                                  # vs the fit itself, unsplined
                     E0, F0 = parity._acejax_ef(row["path"], at)
                     E1, F1 = parity._lammps_ef(TRIM, row["trim_lib"], row["elements"], at, device,
@@ -277,7 +284,7 @@ def gate_model(row, device, env, work):
                     E0, F0 = parity._quip_ef(row["path"], at, row["quip_label"])
                     E1, F1 = parity._lammps_ef("gap", row["path"], row["elements"], at, device, lmp, w,
                                                pair_extra=row["quip_label"])
-                chk.update(parity.compare(E0, F0, E1, F1, len(at), parity.TOL[style]))
+                chk.update(parity.compare(E0, F0, E1, F1, len(at), parity.TOL.get(code, parity.TOL[style])))
             except Exception as ex:                                # a missing style is a failed gate
                 chk.update({"status": "error", "error": parity.error_summary(ex)})
             checks.append(chk)
@@ -331,6 +338,8 @@ def lammps_for(code, device, env):
         return env["lmp_xl"], None
     if code == TRIM:
         return env["lmp_ace"], None
+    if code == "mlpace-mixed":
+        return env["lmp_mixed"], None
     if not code.startswith("acejax"):
         return env["lmp"], env.get("pjrt")
     if device == "cpu":
@@ -491,6 +500,7 @@ def main(argv=None):
     runner, gate = subprocess_runner(env, a.device)
     cs = [c for c in cases(a.device, only=a.only) if (c["row"]["code"] not in XL_CODES or env.get("lmp_xl"))
           and (c["row"]["code"] != TRIM or env.get("lmp_ace"))
+          and (c["row"]["code"] != "mlpace-mixed" or env.get("lmp_mixed"))
           and (c["mode"] != "gpumd" or env.get("gpumd"))]    # optional codes: only where the env json names them
     if a.codes:
         cs = [c for c in cs if c["row"]["code"] in a.codes]

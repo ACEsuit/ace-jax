@@ -23,6 +23,7 @@ class Problem(NamedTuple):
     prior: object
     e0_prec: object = None  # (NZ,) fixed prior precision of the joint-E0 columns (cfg.e0_cols)
     lml_solver: str = "cholesky"  # "qr": the linear arm's LML and posterior from QRStats (make_lml)
+    row_dtype: str = "float64"    # "float32": QR statistics from float32 rows (stats.linear_qr_statistics)
 
 
 def linear_prior_diag(theta, prob):
@@ -122,10 +123,31 @@ def _qr_S(theta, qs, prob):
     return R * sg[:, None], (Q.T @ y) * sg, lin
 
 
+def _qr_resid(theta, qs, prob):
+    """(R_S, residual^2, lin) with the residual from the factors alone: the reduced system's QR
+    takes its target as an extra column (last diagonal = its residual norm), plus the carried
+    rho_q^2 / sigma_q^2.  No y'y - v'v, which cancels when QRStats came from float32 rows."""
+    lin = linear_prior_diag(theta, prob)
+    s = {q: jnp.exp(getattr(theta, f"log_sigma_{q}")) for q in "EFV"}
+    A = jnp.concatenate([jnp.diag(jnp.sqrt(lin))] + [getattr(qs, f"R_{q}") / s[q] for q in "EFV"], 0)
+    y = jnp.concatenate([jnp.zeros_like(lin)] + [getattr(qs, f"c_{q}") / s[q] for q in "EFV"])
+    Rt = jnp.linalg.qr(jnp.concatenate([A, y[:, None]], 1), mode="r")
+    L = lin.shape[0]
+    resid = Rt[L, L] ** 2 + sum(getattr(qs, f"rho_{q}") ** 2 / s[q] ** 2 for q in "EFV")
+    return Rt[:L, :L], resid, lin
+
+
 def log_marginal_likelihood_qr(theta, qs, prob):
-    """log_marginal_likelihood of the linear arm (M = 0) from QRStats, by QR (see above)."""
-    R, v, lin = _qr_S(theta, qs, prob)
+    """log_marginal_likelihood of the linear arm (M = 0) from QRStats, by QR (see above).  With
+    QRStats.rho_q (float32 rows) the residual comes from the factors (`_qr_resid`)."""
     s2 = {q: jnp.exp(2.0 * getattr(theta, f"log_sigma_{q}")) for q in "EFV"}
+    if getattr(qs, "rho_E", None) is not None:
+        R, resid, lin = _qr_resid(theta, qs, prob)
+        logtau = sum(getattr(qs, f"logw_{q}") - getattr(qs, f"n_{q}") * jnp.log(s2[q]) for q in "EFV")
+        N = sum(getattr(qs, f"n_{q}") for q in "EFV")
+        logdet_S = 2.0 * jnp.sum(jnp.log(jnp.abs(jnp.diag(R))))
+        return -0.5 * resid - 0.5 * (logdet_S - jnp.sum(jnp.log(lin)) - logtau) - 0.5 * N * jnp.log(2.0 * jnp.pi)
+    R, v, lin = _qr_S(theta, qs, prob)
     yy = sum(getattr(qs, f"yy_{q}") / s2[q] for q in "EFV")
     logtau = sum(getattr(qs, f"logw_{q}") - getattr(qs, f"n_{q}") * jnp.log(s2[q]) for q in "EFV")
     N = sum(getattr(qs, f"n_{q}") for q in "EFV")
@@ -195,7 +217,8 @@ def make_lml(prob, ds, mesh=None, cache_linear=True, n_types=1, n_free_ratios=0)
         return f
     if uses_qr(prob) and mesh is None:
         from .stats import linear_qr_statistics
-        qs = linear_qr_statistics(prob.model, prob.cfg, ds)      # a host loop on the CPU: not jitted
+        qs = linear_qr_statistics(prob.model, prob.cfg, ds,      # a host loop on the CPU: not jitted
+                                  row_dtype=getattr(prob, "row_dtype", "float64"))
         jax.block_until_ready(qs)
 
         lml = jax.jit(lambda a: log_marginal_likelihood_qr(from_array(a), qs, prob))

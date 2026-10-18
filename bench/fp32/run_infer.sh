@@ -1,0 +1,14 @@
+#!/bin/bash
+# Plan step 1.4/1.5: ACECalculator fp32 / fp32-TF32 / fp64 on the Si test set + a 4096-atom timing cell.
+set -e
+R=/storage/eng/essswb/projects/ace-jax/runs/accuracy_cost/ace_per_quantity_noise
+D=/storage/eng/essswb/projects/ace-jax/data/si_accuracy_cost
+O=${OUT:-/storage/eng/essswb/projects/ace-jax/runs/fp32_step1}
+export XLA_PYTHON_CLIENT_PREALLOCATE=false
+for m in ${MODELS:-o3d8 o3d12 o4d12 o4d16}; do
+  for v in "float32 highest f32" "float32 default tf32" "float64 highest f64"; do
+    set -- $v
+    uv run --no-sync python bench/fp32/infer_dump.py --dtype $1 --matmul $2 --model $R/$m/model.npz \
+      --test $D/test.xyz --out $O/infer_${m}_$3.npz 2>&1 | grep '^{'
+  done
+done

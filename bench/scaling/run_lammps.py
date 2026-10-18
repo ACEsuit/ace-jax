@@ -311,7 +311,8 @@ def run_case(row, n_atoms, dtype, device, lmp, ranks, workdir, pjrt=None, prev=N
     at = supercell(row["system"], n_atoms, rattle=row.get("rattle", 0.0))
     data = work / "x.data"
     write(data, at, format="lammps-data", specorder=row["elements"], masses=True)
-    style = "acejax" if row["code"].startswith("acejax") else row["code"]    # mlpace, mace, mace-xl
+    style = ("acejax" if row["code"].startswith("acejax")      # mlpace, mace, mace-xl
+             else "mlpace" if row["code"] == "mlpace-mixed" else row["code"])   # the same pair style, another LAMMPS
     if style in XL:
         args, why = xl_pair_args(row.get("symmetrix_xl") or "", device, style)
         if why:

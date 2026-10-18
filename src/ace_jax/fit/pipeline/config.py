@@ -43,6 +43,10 @@ class FitConfig:
     lml: str = "device"                  # "device" | "host-cache"
     lml_chunk: int = 64
     lml_solver: str = "qr"               # "qr" | "cholesky": the linear arm's LML and posterior (GP arm: cholesky)
+    # "float32": design rows (and, on a device, the QR merges) in float32; the evidence, MAP and posterior
+    # stay float64 (docs/dev/fp32-results.md)
+    row_precision: str = "float64"
+    row_check: bool = False              # float32 rows: the noise-injection stability check after the MAP (opt-in)
     devices: int = 1
     # MAP
     opt: str = "lbfgs"                   # "lbfgs" | "adam"
@@ -217,6 +221,22 @@ class FitConfig:
             raise ValueError(f"predict_stats must be 'cached', 'recompute' or 'auto', got {self.predict_stats!r}")
         if self.lml_solver not in ("qr", "cholesky"):
             raise ValueError(f"lml_solver must be 'qr' or 'cholesky', got {self.lml_solver!r}")
+        if self.row_precision not in ("float64", "float32"):
+            raise ValueError(f"row_precision must be 'float64' or 'float32', got {self.row_precision!r}")
+        if self.row_precision == "float32":
+            why = ("arm gp (the GP arm's statistics are the Gram form)" if self.arm == "gp" else
+                   "lml_solver cholesky (float32 rows need the QR statistics)" if self.lml_solver != "qr" else
+                   "learn_radial (learned radials need float64 rows)" if self.learn_radial else
+                   "sigma_type" if self.sigma_type else
+                   "lml host-cache" if self.lml == "host-cache" else
+                   f"objective {self.objective}" if self.objective != "lml" else
+                   "devices > 1" if self.devices > 1 else
+                   "solver lstsq" if self.solver == "lstsq" else None)
+            if why is not None:
+                raise ValueError(f"row_precision float32 is not available with {why} (not supported yet; "
+                                 "use row_precision float64)")
+        if self.row_check and self.row_precision != "float32":
+            raise ValueError("row_check is the float32 rows' stability check: it needs row_precision float32")
         if self.solver not in ("evidence", "lstsq"):
             raise ValueError(f"solver must be 'evidence' or 'lstsq', got {self.solver!r}")
         if self.solver == "lstsq" and (self.arm != "linear" or self.uq != "blr" or self.learn_radial

@@ -89,7 +89,7 @@ uv run ruff check                     # lint; `uv run pre-commit run --all-files
 
 - **float64:** the library never calls `jax.config.update`; the caller chooses precision. The exceptions are `cli.py` and `fit/baseline.py`, which enable x64 at import.
   - Tests and scripts put `jax.config.update("jax_enable_x64", True)` at the top of the module. CI also sets `JAX_ENABLE_X64=1`.
-  - Fitting and learned radials require float64: the pipeline's `fit` and `radial_learn` raise without it.
+  - Fitting and learned radials require float64: the pipeline's `fit` and `radial_learn` raise without it. The exception is the design rows: `FitConfig.row_precision="float32"` (`--row-precision`) computes them (and, on a device, the QR merges, carrying the residual as `QRStats.rho_q`) in float32 via `stats.float32_rows`; the LML then reads rho, never y'y - v'v (which cancels in float32). The rows trace under highest matmul precision (`rows._highest`): TF32 corrupted float32 force rows. `fit/rowcheck.py` is the opt-in stability diagnostic (`--row-check`). docs/dev/fp32-results.md.
   - Use `highest_precision()` (a matmul-precision context) around numerics that are compared to references.
 - **User docs style (ASD-STE100):** README, `docs/user/` and the tutorial notebook prose follow ASD-STE100 simplified technical English. Equations and code are exempt.
   - One fact per sentence: procedures at most 20 words, descriptions at most 25. Write procedures as numbered imperative steps ("Build the basis.", not "the basis can be built"). Put warnings and cautions in admonitions (`!!! warning`), not in body text.

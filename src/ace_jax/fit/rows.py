@@ -8,6 +8,7 @@ Residual block: energy row = sum_i k(x_i, x_m); force/virial rows from
 dk/dx . dX/dr + dk/ds . ds/dr, scanned over node chunks so the (chunk, M, D)
 kernel-gradient tensor -- 8 GB for a whole batch at target scale -- never
 exists at once."""
+import functools
 import math
 import os
 from typing import NamedTuple
@@ -19,6 +20,20 @@ import jax.numpy as jnp
 from .data import VOIGT, flat_edges
 from .kernels import grad_k_rows, k_rows
 from .summary import summary_edge_jacobian
+
+
+def _highest(fn):
+    """Trace fn under the highest matmul precision.  Unpinned dot_generals (here and in the
+    model's Jacobian beneath) take JAX's default at trace time, which on Ampere and later GPUs
+    is TF32: float32 force rows then err by ~5e-4 (2e-3 per column), not ~2e-6, and a float32
+    fit's energy RMSE rose from 13.7 to 20.6 meV/atom (docs/dev/fp32-results.md).  jit caches
+    key on the setting, so a function traced here never reuses a TF32 trace.  float64 on the
+    CPU has no reduced-precision matmul, so CPU float64 results are bitwise unchanged."""
+    @functools.wraps(fn)
+    def wrapped(*args, **kwargs):
+        with jax.default_matmul_precision("highest"):
+            return fn(*args, **kwargs)
+    return wrapped
 
 
 class Rows(NamedTuple):
@@ -55,6 +70,7 @@ def _e0_columns(E, node_z, node_mask, node_cfg, cfg):
     return E.at[:, L0:].set(counts)
 
 
+@_highest
 def linear_rows(model, cfg, batch):
     Ncap, K = batch.nbr.shape
     C = batch.y_E.shape[0]          # configs per batch is a property of the batch, not of cfg
@@ -192,6 +208,7 @@ def rows_node_chunk(model, cfg, Ncap, K):
     return -(-per_chunk // ROW_GRANULE) * ROW_GRANULE
 
 
+@_highest
 def linear_rows_bounded(model, cfg, batch, node_chunk=None):
     """`linear_rows(model, cfg, batch)[0]` with peak memory bounded independent of n_cap: the
     unchunked path when the batch fits ROWS_EDGE_BUDGET, `linear_rows_chunked` otherwise.
@@ -201,6 +218,7 @@ def linear_rows_bounded(model, cfg, batch, node_chunk=None):
     return linear_rows(model, cfg, batch)[0] if nc is None else linear_rows_chunked(model, cfg, batch, nc)
 
 
+@_highest
 def _rows_jit_body(model, cfg, batch, node_chunk, budget):
     # budget: ROWS_EDGE_BUDGET at the call, a static cache key only -- the policy reads the global
     # while tracing, so a changed budget must not reuse an executable traced under the old one
@@ -222,6 +240,7 @@ def chunked_rows_fn(model, cfg, node_chunk=None):
     return lambda b: _rows_jit(model, cfg, b, node_chunk, ROWS_EDGE_BUDGET)
 
 
+@_highest
 def linear_rows_chunked(model, cfg, batch, node_chunk=256):
     """`linear_rows(model, cfg, batch)[0]` computed a chunk of centre nodes at a time.
 
@@ -233,6 +252,7 @@ def linear_rows_chunked(model, cfg, batch, node_chunk=256):
     return _rows_scan(model, cfg, batch, node_chunk)[0]
 
 
+@_highest
 def _rows_scan(model, cfg, batch, node_chunk, with_X=False, proj=None, resid=None):
     """One fori_loop over chunks of `node_chunk` centre nodes building, per chunk, the edge
     Jacobian J (nc*K, D, 3) and everything derived from it, so nothing of size Ncap*K*D exists.
@@ -316,7 +336,8 @@ def _rows_scan(model, cfg, batch, node_chunk, with_X=False, proj=None, resid=Non
         return out
 
     contrib = jax.checkpoint(contrib)
-    upd = lambda a, x, s0: jax.lax.dynamic_update_slice_in_dim(a, x, s0, 0)
+    # float32 rows (row_dtype "float32") write into the accumulators' dtype; a no-op in float64
+    upd = lambda a, x, s0: jax.lax.dynamic_update_slice_in_dim(a, x.astype(a.dtype), s0, 0)
 
     def body(i, acc):
         s0 = i * nc
@@ -374,6 +395,7 @@ def _residual_step(theta, spec, ind, carry, ch):
     return F, V
 
 
+@_highest
 def residual_inputs(ind, cfg, batch, X):
     """The residual GP's site inputs for one batch: feature-mapped coordinates
     U = phi_res(X) (Ncap, d), summaries s (Ncap,) and the summary edge Jacobian
@@ -385,6 +407,7 @@ def residual_inputs(ind, cfg, batch, X):
     return apply(X, ind.Pmap, ind.warp), s, Js
 
 
+@_highest
 def residual_rows(theta, spec, ind, cfg, batch, X, J):
     """Residual rows from the full compact descriptors X (Ncap, D) and their
     edge Jacobian J (E, D, 3): projects onto the feature map and defers to
@@ -398,6 +421,7 @@ def residual_rows(theta, spec, ind, cfg, batch, X, J):
     return residual_rows_from_inputs(theta, spec, ind, cfg, batch, U0, JU0)
 
 
+@_highest
 def pair_feature_inputs(model, ind, cfg, batch):
     """(U0, JU0) for a pair-density feature map (Pmap zero outside the n_pair pair
     rows) from the pair radials alone -- no many-body basis.  Equals
@@ -409,6 +433,7 @@ def pair_feature_inputs(model, ind, cfg, batch):
     return Xp @ P, jnp.einsum("nkpa,pq->nkqa", dRp.reshape(Ncap, K, -1, 3), P)
 
 
+@_highest
 def residual_rows_from_inputs(theta, spec, ind, cfg, batch, U0, JU0):
     """Residual rows from the projected feature coordinates U0 = X @ Pmap
     (Ncap, d) and their edge Jacobian JU0 = Pmap^T J (Ncap, K, d, 3), pre-warp."""
@@ -448,6 +473,7 @@ def _no_res(batch):
     return Rows(jnp.zeros((C, 0)), jnp.zeros((Ncap, 3, 0)), jnp.zeros((C, 6, 0)))
 
 
+@_highest
 def batch_rows_parts(theta, spec, model, ind, cfg, batch, with_X=False, with_JU0=False):
     """(lin, res, X, JU0) of one batch with peak memory bounded by ROWS_EDGE_BUDGET:
     `linear_rows` + `residual_rows` when the batch fits, the fused node-chunked `_rows_scan`
@@ -465,6 +491,7 @@ def batch_rows_parts(theta, spec, model, ind, cfg, batch, with_X=False, with_JU0
     return lin, (_no_res(batch) if res is None else res), X, JU0
 
 
+@_highest
 def batch_rows(theta, spec, model, ind, cfg, batch):
     lin, res, _, _ = batch_rows_parts(theta, spec, model, ind, cfg, batch)
     return _cat_rows(lin, res)

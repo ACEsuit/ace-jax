@@ -155,16 +155,27 @@ parameters than linear ACE (f800: 761 parameters, 0.081 eV/Å) but not the QoI t
   (`make_cost.py --allow nep-gpumd:mixed`). Test errors and QoIs use CPUNEP, in float64. Fits: GPUMD v5.9.1
   `nep`, NEP4, one A100 each (`envs/sulis-nep.sbatch`, chunks of 100k generations resumed from
   `nep.restart`); n80 and larger 300k generations (n120c and nlitw stopped at 200k and 100k).
+- Elastic constants: the bulk_diamond test runs with `SI_TESTS_ELASTIC_FMAX=1e-3` (silicon-testing-framework
+  branch `fp32-optimisers`, `test-runner/tight_elastic.sh`), since 2026-10-16. matscipy's `fit_elastic_constants`
+  otherwise relaxes each strained cell's internal coordinates only to ASE's default fmax 0.05 eV/Å, which left the
+  relaxed-ion C44 0.23–0.89 of its tolerance low for every model (DFT 72.2 GPa; e.g. linear ACE o4d20 67.8 -> 70.6,
+  GAP-18 66.7 -> 70.1). C11, C12 and B moved by at most 0.02 tolerance. QoI scores changed by -13% to +9%
+  (median -2.6%); which models reach the target did not change. docs/dev/fp32-results.md.
 - QoIs: compressed ("short and fat") hcp is left out of the score (outside the training data; it measures
   extrapolation); only models with every QoI computed are plotted. Single fits per point.
 - GAP's parameter count is its sparse-point coefficients; the kernel also stores the sparse descriptors.
 
 ## Reproduce
 
-Cost files from the timing rows (float64 only), then the figures:
+Cost files from the timing rows (float64, plus the reduced-precision lines `plot_cost.REDUCED`, which keep their
+own names), then the figures. The light-blue mixed-precision line is patched pace/kk (`PACE_KK_RHOW=3`) built with
+`KOKKOS_PREC=mixed` (`sulis-pacetab.sh gpufork_mixed`, `envs/sulis-timing-fp32.sbatch`). The ace-jax float32 line
+is `envs/sulis-timing-fp32-dot.sbatch F32_F32_F32` (job 2251905, 2026-10-18, with `aa_dag="auto"`; the earlier
+chain-form rows are kept as `sulis-gpu-fp32-dot-F32_F32_F32.chain.jsonl`).
 
 ```bash
 R=bench/accuracy_cost/results/sulis; RR=bench/si_qoi/results
+grep -h '"code": "mlpace-mixed"' $R/sulis-gpu-fp32-o4d*.jsonl > $R/sulis-gpu-fp32-mixed.jsonl   # the mixed-precision line
 (cd bench && python -m accuracy_cost.dag_auto)
 python bench/si_qoi/make_cost.py --dtype float64 --source acejax-ace=sulis-cpu-128x1-acejax-auto --out $RR/cost_sulis_cpu.json \
     $(ls $R/sulis-cpu*.jsonl | grep -v -e smoke -e ace_yace -e pacetab-check -e "ace_tab\.jsonl" -e ace_tab2 \
@@ -172,7 +183,8 @@ python bench/si_qoi/make_cost.py --dtype float64 --source acejax-ace=sulis-cpu-1
 python bench/si_qoi/make_cost.py --dtype float64 --source acejax-ace=sulis-gpu-acejax-auto --out $RR/cost_sulis_gpu.json \
     bench/accuracy_cost/results/sulis-gpu.jsonl bench/accuracy_cost/results/sulis-gpu-ace-splined.jsonl \
     $R/sulis-gpu-ace-splined-v2.jsonl $R/sulis-gpu-v2.jsonl $R/sulis-gpu-mace_xl.jsonl \
-    $R/sulis-gpu-ace_tab5.jsonl $R/sulis-gpu-ace_tabfork.jsonl $R/sulis-gpu-pace-dev.jsonl $R/sulis-gpu-nep.jsonl $R/sulis-gpu-acejax-auto.jsonl --allow nep-gpumd:mixed
+    $R/sulis-gpu-ace_tab5.jsonl $R/sulis-gpu-ace_tabfork.jsonl $R/sulis-gpu-pace-dev.jsonl $R/sulis-gpu-nep.jsonl $R/sulis-gpu-acejax-auto.jsonl \
+    $R/sulis-gpu-fp32-mixed.jsonl $R/sulis-gpu-fp32-dot-F32_F32_F32.jsonl --allow nep-gpumd:mixed
 ROWS=(--row "A100 GPU, µs/atom-step|$RR/cost_sulis_gpu.json|$RR/cost_sulis_gpu.codes.json"
       --row "CPU node (128 cores), µs/atom-step|$RR/cost_sulis_cpu.json|$RR/cost_sulis_cpu.codes.json")
 python bench/si_qoi/plot_cost.py "${ROWS[@]}"

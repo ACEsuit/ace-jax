@@ -11,12 +11,16 @@ at 1e-10, as learned radials are by default); each row's gate is looked up in it
 import argparse, json, pathlib, sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
-from plot_cost import FAM, ROOT, cost_name, family_of  # noqa: E402
+from plot_cost import FAM, REDUCED, ROOT, cost_name, family_of  # noqa: E402
 
 
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("timings", nargs="+")
-    ap.add_argument("--dtype", help="only rows at this precision (float64: like-for-like, e.g. MACE without float32)")
+    ap.add_argument("--dtype", help="only rows at this precision (float64: like-for-like, e.g. MACE without float32); "
+                                    "the reduced-precision lines (plot_cost.REDUCED) are kept, under their own names")
+    ap.add_argument("--prefer", action="append", default=[],
+                    help="a timings file whose rows supersede every other file's for the models it times "
+                         "(e.g. a re-timed ladder); repeatable")
     ap.add_argument("--allow", action="append", default=[], metavar="CODE:DTYPE",
                     help="also keep this code at this precision past --dtype (nep-gpumd:mixed: GPUMD's NEP is mixed "
                          "precision only; plot_cost marks it)")
@@ -35,14 +39,21 @@ def main():
     # models a --source file covers: their rows of that code come from it alone (others, e.g. the wL ladder, as before)
     sourced = {(r["code"], r["family"], r["size"]) for r in rows if source.get(r["code"]) == r["_file"]}
     best, code = {}, {}
+    prefer = [str(pathlib.Path(p)) for p in a.prefer]
+    preferred = {}                       # cost name -> the --prefer file that times it
+    for r in rows:
+        if str(pathlib.Path(r["_path"])) in prefer and r.get("mode") != "parity" and family_of(r) in FAM:
+            preferred.setdefault(cost_name(family_of(r), r["size"]), r["_path"])
     for r in rows:
         fam = family_of(r)                                       # plot_cost's split families (MACE by L, wL)
         if r.get("mode") == "parity" or r.get("status") != "ok" or fam not in FAM or (
-                a.dtype and r["dtype"] != a.dtype and (r["code"], r["dtype"]) not in allow):
+                a.dtype and r["dtype"] != a.dtype and fam not in REDUCED and (r["code"], r["dtype"]) not in allow):
+            continue
+        if preferred.get(cost_name(fam, r["size"]), r["_path"]) != r["_path"]:   # superseded by a --prefer file
             continue
         if r.get("mode") in ("lammps", "gpumd") and (r["_path"], r["code"], r["family"], r["size"]) not in gates:   # standalone: no gate
             continue
-        if (r["code"], r["family"], r["size"]) in sourced and r["_file"] != source[r["code"]]:
+        if (r["code"], r["family"], r["size"]) in sourced and r["_file"] != source[r["code"]] and fam not in REDUCED:
             continue
         name = cost_name(fam, r["size"])                      # Symmetrix-XL under its own name (MACExl_)
         us = 1e6 / r["atom_steps_per_s"]

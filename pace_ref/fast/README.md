@@ -11,6 +11,7 @@ prototype for a LAMMPS PR, not yet proposed: the device path is chosen at run ti
 | 0005 | `summed_neighbour_A` in pace/kk (needs `ACE_HAS_SUMMED_NEIGHBOUR_A` from ML-PACE) | any |
 | 0006 | ComputeRho / ComputeWeights in the stock thread layout with precomputed flat offsets | 2 |
 | 0007 | 0006's ComputeRho plus a segmented ComputeWeights: target-sorted records, one atomic per run of 16 | 3 |
+| 0008 | the densities `rhos` (and the team kernel's partial sums) in `KK_ACC_FLOAT`: double under `KOKKOS_PREC=mixed`, unchanged otherwise; the terms stay `KK_FLOAT` | any |
 
 `PACE_KK_RHOW=0` (the default) runs the stock kernels. On an A100 (Si linear ACE, own input, µs/atom-step) mode 3
 is 1.21x faster than stock at o4d12/o4d14, 1.51x at o4d16 and 1.71x at o4d20 (6.55 -> 3.82); mode 1 gained nothing.

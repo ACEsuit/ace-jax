@@ -117,6 +117,7 @@ nav:
       - ASE calculators: howto/ase.md
       - LAMMPS export: howto/lammps.md
       - MD with JAX-MD: howto/jax-md.md
+      - Choose float64 or float32: howto/precision.md
       - PACE .yace models: howto/pace.md
       - Learn the radial basis: howto/learned-radials.md
       - Per-atom force uncertainty: howto/force-uncertainty.md

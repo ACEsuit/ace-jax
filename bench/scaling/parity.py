@@ -56,7 +56,11 @@ TOL = {"mlpace": (1e-6, 1e-5), "acejax": (1e-10, 1e-9), "mace": (1e-6, None),
        # GPUMD's NEP (float descriptors and network, double accumulation) vs CPUNEP: float32-level (n120: 9e-7, 6e-6)
        "nep-gpumd": (1e-5, 1e-4),
        # Symmetrix-XL vs MACE in PyTorch (float64), as "mace" plus a force bound; FP32 looser (labelled -f32)
-       "mace-xl": (1e-6, 1e-4), "mace-xl-f32": (1e-5, 1e-3)}
+       "mace-xl": (1e-6, 1e-4), "mace-xl-f32": (1e-5, 1e-3),
+       # ML-PACE in a KOKKOS_PREC=mixed LAMMPS (float compute) vs the float64 model: float site energies of the
+       # linear ACE ladder's .yace miss 1e-5 eV/atom (o4d12-o4d16 5e-5-1.8e-4, stock pace/kk too; densities summed
+       # in double still 3-4e-5), as ace-jax float32 does (1-2e-4), so the energy bound is float32's, not mace's
+       "mlpace-mixed": (2e-4, 1e-3)}
 # gates that check a standalone line: a failure blocks its standalone rows
 STANDALONE_GATES = ("spline", "acepot")
 LEARNED, ANALYTIC = LEARNED_CODES                     # "acejax-ace-learned", "acejax-ace-analytic"

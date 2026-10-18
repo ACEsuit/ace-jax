@@ -1,0 +1,66 @@
+--- a/src/KOKKOS/pair_pace_kokkos.cpp
++++ b/src/KOKKOS/pair_pace_kokkos.cpp
+@@ -1312,7 +1312,7 @@
+     typename Kokkos::TeamPolicy<DeviceType, TagPairPACEComputeRhoWeightsTeam> probe(1, team_size_rhow);
+     use_team_rhow = mode == 1 && aceimpl->basis_set->ndensitymax <= PACE_TEAM_NDMAX
+                     && aceimpl->basis_set->rankmax <= PACE_TEAM_RMAX
+-                    && (int)((4 * nA + PACE_TEAM_NDMAX) * sizeof(KK_FLOAT)) <= (int)probe.scratch_size_max(0);
++                    && (int)(4 * nA * sizeof(KK_FLOAT) + PACE_TEAM_NDMAX * sizeof(KK_ACC_FLOAT) + 16) <= (int)probe.scratch_size_max(0);
+   }
+ 
+   EV_FLOAT ev;
+@@ -1399,7 +1399,7 @@
+       // team, FS once, then the weights scattered with shared-memory atomics and written back once
+       const int nA = nelements * idx_sph_max * (nradmax + 1);
+       typename Kokkos::TeamPolicy<DeviceType, TagPairPACEComputeRhoWeightsTeam> policy_rhow(chunk_size, team_size_rhow);
+-      policy_rhow = policy_rhow.set_scratch_size(0, Kokkos::PerTeam((4 * nA + PACE_TEAM_NDMAX) * sizeof(KK_FLOAT)));
++      policy_rhow = policy_rhow.set_scratch_size(0, Kokkos::PerTeam(4 * nA * sizeof(KK_FLOAT) + PACE_TEAM_NDMAX * sizeof(KK_ACC_FLOAT) + 16));
+       Kokkos::parallel_for("ComputeRhoWeightsTeam", policy_rhow, *this);
+     } else if (use_flat_rhow) {
+       const int nb = (chunk_size + team_size_fo - 1) / team_size_fo;
+@@ -2603,7 +2603,7 @@
+   KK_FLOAT *sAim = (KK_FLOAT *) team.team_shmem().get_shmem(nA * sizeof(KK_FLOAT));
+   KK_FLOAT *sWre = (KK_FLOAT *) team.team_shmem().get_shmem(nA * sizeof(KK_FLOAT));
+   KK_FLOAT *sWim = (KK_FLOAT *) team.team_shmem().get_shmem(nA * sizeof(KK_FLOAT));
+-  KK_FLOAT *srho = (KK_FLOAT *) team.team_shmem().get_shmem(PACE_TEAM_NDMAX * sizeof(KK_FLOAT));
++  KK_ACC_FLOAT *srho = (KK_ACC_FLOAT *) team.team_shmem().get_shmem(PACE_TEAM_NDMAX * sizeof(KK_ACC_FLOAT));
+ 
+   Kokkos::parallel_for(Kokkos::TeamThreadRange(team, nA), [&](const int e) {
+     const int n = e % nn, rest = e / nn, idx = rest % idx_sph_max, mu = rest / idx_sph_max;
+@@ -2633,7 +2633,7 @@
+   };
+ 
+   // forward: densities
+-  KK_FLOAT rho[PACE_TEAM_NDMAX];
++  KK_ACC_FLOAT rho[PACE_TEAM_NDMAX];
+   for (int p = 0; p < PACE_TEAM_NDMAX; ++p) rho[p] = 0.0;
+   for (int c = team.team_rank(); c < nterms; c += team.team_size()) {
+     const int rank = d_tm_rank(c, mu_i);
+--- a/src/KOKKOS/pair_pace_kokkos.h
++++ b/src/KOKKOS/pair_pace_kokkos.h
+@@ -359,7 +359,7 @@
+     complex *dB;
+     complex *w;
+     KK_FLOAT *w_rank1;
+-    KK_FLOAT *rho;
++    KK_ACC_FLOAT *rho;
+     const KK_FLOAT *dF;
+     const int *mus, *ns, *ls, *ms, *idx_funcs, *rank, *idx_sph;
+     const int *A_off, *w_off, *wm_off, *r1_off, *dB_off;
+@@ -434,6 +434,7 @@
+   typedef Kokkos::View<int****, DeviceType> t_ace_4i;
+   typedef Kokkos::View<KK_FLOAT*, DeviceType> t_ace_1d;
+   typedef Kokkos::View<KK_FLOAT**, DeviceType> t_ace_2d;
++  typedef Kokkos::View<KK_ACC_FLOAT**, DeviceType> t_ace_acc_2d;   // densities: summed in KK_ACC_FLOAT
+   typedef Kokkos::View<KK_FLOAT**, Kokkos::LayoutRight, DeviceType> t_ace_2d_lr;
+   typedef Kokkos::View<KK_FLOAT*[3], DeviceType> t_ace_2d3;
+   typedef Kokkos::View<KK_FLOAT***, DeviceType> t_ace_3d;
+@@ -462,7 +463,7 @@
+   t_ace_4d weights_im;
+ 
+   t_ace_1d e_atom;
+-  t_ace_2d rhos;
++  t_ace_acc_2d rhos;
+   t_ace_2d dF_drho;
+ 
+ 
