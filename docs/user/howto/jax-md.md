@@ -41,27 +41,41 @@ rc = jaxmd.cutoff("fit/model.npz")
 neighbor_fn = partition.neighbor_list(displacement, box, rc, dr_threshold=1.0,
                                       format=partition.Dense, fractional_coordinates=True)
 nbrs = jaxmd.allocate(neighbor_fn, R)                   # not neighbor_fn.allocate
-K = jaxmd.capacity(R, nbrs, displacement, rc + 1.0)     # slots for the cutoff + skin
-pot = jaxmd.potential("fit/model.npz", displacement, atoms.numbers, K=K)
-
 dt = 1.0 / 10.18                                         # 1 fs; time unit 10.18 fs (eV, A, amu)
-init, apply = simulate.nve(pot.force, shift, dt)
+
+def make(K):
+    """The potential and a compiled chunk of 100 steps for K slots."""
+    pot = jaxmd.potential("fit/model.npz", displacement, atoms.numbers, K=K)
+    init, apply = simulate.nve(pot.force, shift, dt)
+
+    @jax.jit
+    def chunk(state, nbrs):
+        def step(i, carry):
+            state, nbrs = carry
+            nbrs = nbrs.update(state.position)
+            return apply(state, neighbor=nbrs), nbrs
+        return jax.lax.fori_loop(0, 100, step, (state, nbrs))
+    return pot, init, chunk
+
+K = jaxmd.capacity(R, nbrs, displacement, rc + 1.0)     # slots for the cutoff + skin
+pot, init, chunk = make(K)
 state = init(jax.random.PRNGKey(0), R, mass=28.0855, kT=8.617e-5 * 300, neighbor=nbrs)
 
-@jax.jit
-def chunk(state, nbrs):
-    def step(i, carry):
-        state, nbrs = carry
-        nbrs = nbrs.update(state.position)
-        return apply(state, neighbor=nbrs), nbrs
-    return jax.lax.fori_loop(0, 100, step, (state, nbrs))
-
-for _ in range(10):
+done, retries = 0, 0
+while done < 10:
     new_state, new_nbrs = chunk(state, nbrs)
-    if new_nbrs.did_buffer_overflow or pot.overflow(new_state.position, new_nbrs):
-        nbrs = jaxmd.allocate(neighbor_fn, state.position)      # larger list; run the chunk again
+    if new_nbrs.did_buffer_overflow:                     # the list is too small
+        nbrs = jaxmd.allocate(neighbor_fn, state.position)
+    elif pot.overflow(new_state.position, new_nbrs) or not jnp.isfinite(new_state.position).all():
+        K += 8                                           # an atom had more than K neighbours
+        pot, _, chunk = make(K)
+        state = state.set(force=pot.force(state.position, nbrs))   # the state keeps the last forces
+    else:
+        state, nbrs, done, retries = new_state, new_nbrs, done + 1, 0
         continue
-    state, nbrs = new_state, new_nbrs
+    retries += 1                                         # run the same chunk again
+    if retries > 3:
+        raise RuntimeError("the chunk overflows again after 3 retries")
 ```
 
 `jaxmd.allocate` replaces `neighbor_fn.allocate`. It avoids an error of
@@ -77,8 +91,8 @@ integrators of JAX-MD take `pot.energy`.
 !!! warning "Minimum image"
     The JAX-MD neighbour list uses the minimum image. Every width of the cell
     must be more than 2 × (cutoff + skin). For a smaller cell, JAX-MD misses
-    neighbours and does not give an error. Use `jaxmd.min_image_ok(cell,
-    rc + skin)` to check the cell.
+    neighbours and does not give an error. To check the cell, use
+    `jaxmd.min_image_ok(cell, rc + skin)`.
 
 ## Choose the slots
 
@@ -91,8 +105,15 @@ cost of the model.
   Atoms can then get more neighbours than `K` during the run.
 
 If an atom has more neighbours than `K`, the energy and forces are NaN. The
-model never ignores a neighbour. `pot.overflow(R, nbrs)` tells you when this
-occurs. Check it after each chunk of steps, as in the example above.
+model never ignores a neighbour. After each chunk of steps, do these checks,
+as in the example above:
+
+- `pot.overflow(R, nbrs)` is true for an overflow at the last positions.
+- Non-finite positions show an overflow earlier in the chunk.
+
+Then make the potential again with a larger `K`, and run the chunk again.
+The integrator state keeps the forces of the last step. Calculate them again
+with the new potential before you run the chunk, as in the example.
 
 ## Small cells, slabs and NPT (experimental)
 

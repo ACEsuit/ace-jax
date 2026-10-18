@@ -330,7 +330,9 @@ nbrs = jaxmd.allocate(nf, R)                        # not nf.allocate: JAX 0.11 
 pot = jaxmd.potential("model.npz", disp, atoms.numbers, K=jaxmd.capacity(R, nbrs, disp, rc + 1.0))
 init, apply = simulate.nve(pot.force, shift, 1.0 / 10.18)   # dt 1 fs (time unit 10.18 fs)
 # jitted lax.fori_loop body: nbrs = nbrs.update(state.position); state = apply(state, neighbor=nbrs)
-# after each chunk: if nbrs.did_buffer_overflow or pot.overflow(state.position, nbrs): allocate again, redo
+# after each chunk: did_buffer_overflow -> allocate the list again; pot.overflow(...) or non-finite
+#   positions (an overflow mid-chunk) -> make the potential with a larger K (and re-jit), then
+#   state = state.set(force=pot.force(state.position, nbrs)) (the state caches forces); redo the chunk
 ```
 
 - `pot.force` is `-grad(pot.energy)` (Cartesian, also with fractional positions);

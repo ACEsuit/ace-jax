@@ -13,6 +13,7 @@ jax_md = require_optional("jax_md")   # the `jaxmd` extra; ACEJAX_REQUIRE_OPTION
 from jax_md import partition, quantity, simulate, space  # noqa: E402
 
 from ace_jax import jaxmd  # noqa: E402
+from ace_jax import load as aj_load  # noqa: E402
 from ace_jax.calc.point import ACECalculator  # noqa: E402
 
 MODEL = FIXTURE_DIR / "si_fitted.npz"
@@ -126,6 +127,22 @@ def test_species_override_and_unknown_elements(cell):
     g = jax.jit(lambda R, z: pot.force(R, nb, species=z))
     assert np.isnan(float(f(R, jnp.asarray(carbon)))) and np.isnan(np.asarray(g(R, jnp.asarray(carbon)))).all()
     assert abs(float(f(R, jnp.asarray(at.numbers))) - E0) < 1e-10 * len(at)
+
+
+def test_overflow_flags_an_unknown_traced_species_and_cutoff_must_match(cell):
+    at, _, box, disp, _, R = cell
+    pot = jaxmd.potential(str(MODEL), disp, at.numbers)
+    _, nb = _list(disp, box, pot.cutoff, R)
+    carbon = np.array(at.numbers).copy()
+    carbon[0] = 6
+    f = jax.jit(lambda R, z: pot.overflow(R, nb, species=z))
+    assert bool(f(R, jnp.asarray(carbon))) and not bool(f(R, jnp.asarray(at.numbers)))
+    with pytest.raises(ValueError, match="cutoff"):
+        jaxmd.potential(str(MODEL), disp, at.numbers, cutoff=4.0)
+    model, meta, _ = aj_load(str(MODEL))
+    assert jaxmd.cutoff(model, meta) == pot.cutoff
+    with pytest.raises(ValueError, match="meta"):
+        jaxmd.cutoff(model)
 
 
 def _x64_off():

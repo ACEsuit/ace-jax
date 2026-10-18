@@ -88,8 +88,12 @@ def _xla():
 
 def cutoff(model, meta=None):
     """The model's cutoff rc (Angstrom), the `r_cutoff` for a neighbour list: from the
-    model file's metadata, without building the evaluation model."""
+    model file's metadata (`model` a path), or from `meta` (a loaded model), without
+    building the evaluation model.  It is `potential(...).cutoff`."""
     if meta is None:
+        import pathlib
+        if not isinstance(model, (str, pathlib.Path)):
+            raise ValueError("cutoff(model) reads a model file; for a loaded model pass its meta")
         from .eval.io import load
         meta = load(model)[1]
     return float(meta["rcut"])
@@ -417,6 +421,8 @@ def potential(model, displacement_fn, species, meta=None, K=None, chunk=CHUNK_NO
     and may be None); OrderedSparse, a half list, is refused.  An overflowed list
     makes energy and forces NaN, whatever its format.  Remaining keywords of a call (`box=` for `space.periodic_general`)
     are passed to `displacement_fn`, or to the ShiftList's edge vectors."""
+    if "cutoff" in calc_kw:   # the list is built with the model's rc (`cutoff`); a different one would not match
+        raise ValueError("potential() uses the model's cutoff (jaxmd.cutoff(model)); do not pass cutoff=")
     m, meta, rc = eval_model(model, meta, **calc_kw)
     lut = np.full(119, -1, np.int32)
     for i, z in enumerate(meta["elements"]):
@@ -451,15 +457,18 @@ def potential(model, displacement_fn, species, meta=None, K=None, chunk=CHUNK_NO
             bad0 = jnp.asarray(getattr(neighbor, "did_buffer_overflow", False), bool)
         return rij_s, j_s, live_s & (jnp.sum(rij_s * rij_s, axis=-1) < rc * rc), bad0
 
-    def overflow(R, neighbor, **kw):
+    def overflow(R, neighbor, species=None, **kw):
         """Whether energy and forces at R are invalid (NaN): the neighbour list
-        overflowed, or a row has more than K neighbours within rc.  A device
-        scalar: check it once per chunk of steps (as `did_buffer_overflow`) and
-        rebuild the potential with a larger K (`capacity`) and the list."""
+        overflowed, a row has more than K neighbours within rc, or a traced
+        `species` holds an element the model lacks.  A device scalar, for R itself:
+        an overflow earlier in a chunk of steps shows as non-finite positions
+        instead, so check both after each chunk, then rebuild the list
+        (`did_buffer_overflow`) or the potential with a larger K."""
+        bad_species = jnp.zeros((), bool) if species is None else node_z_of(species)[1]
         if not dense(neighbor):
-            return jnp.asarray(neighbor.did_buffer_overflow, bool)
+            return jnp.asarray(neighbor.did_buffer_overflow, bool) | bad_species
         _, _, valid_s, bad0 = rows(jax.lax.stop_gradient(R), neighbor, kw)
-        return bad0 | (False if K is None else jnp.any(jnp.sum(valid_s, axis=1) > K))
+        return bad0 | bad_species | (False if K is None else jnp.any(jnp.sum(valid_s, axis=1) > K))
 
     def graph(R, neighbor, kw, bad_species):
         """Dense or shift list -> (rij, j, mask) on the model's rows; NaN when the list
