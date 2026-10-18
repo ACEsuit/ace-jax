@@ -19,6 +19,19 @@
 
 ### Added
 
+- **MD with JAX-MD (`ace_jax.jaxmd`, the new `jaxmd` extra).**
+  `jaxmd.potential` gives the energy and forces of a model to the
+  integrators of JAX-MD. The neighbour list, the model and the integrator
+  then run on the device in one compiled program. The energy is the energy
+  of `ACECalculator` with the same options. `K` sets the slots for each
+  atom. If an atom has more neighbours than `K`, the energy and forces are
+  NaN, and `overflow` tells you. See [Run MD with JAX-MD](https://acesuit.github.io/ace-jax/howto/jax-md/).
+- **Experimental: `jaxmd.neighbor_list`**, a neighbour list that
+  matscipy-neighbours makes on the device. It works for cells smaller than
+  the cutoff, triclinic cells, slabs and NPT. It needs a matscipy-neighbours
+  build that is not released yet (libAtoms/matscipy-neighbours#10).
+- `ace_jax.calc.skin.compact`: the compaction of a neighbour row into its
+  slots in the cutoff, from the skin list's step (no change in results).
 - **`write_yace(model, path, summed=True)`** writes one A basis for all
   neighbour species, as ace-jax evaluates the model. The default writes each
   product once for each neighbour species. The summed form has far fewer

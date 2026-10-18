@@ -312,41 +312,46 @@ load; faster only at large `nradbase`). Values are unchanged to roundoff.
 
 ### JAX-MD (MD fully on the device)
 
+`pip install "ace-jax[jaxmd]"`. User page: `docs/user/howto/jax-md.md`.
+
 ```python
 import jax; jax.config.update("jax_enable_x64", True)
-from jax_md import space, partition, simulate
+import jax.numpy as jnp
+from jax_md import partition, simulate, space
 from ace_jax import jaxmd
 
 box = jnp.asarray(atoms.cell.array.T)              # JAX-MD: lattice vectors as columns
 disp, shift = space.periodic_general(box, fractional_coordinates=True)
 R = jnp.asarray(atoms.get_scaled_positions())
-rc = jaxmd.potential("model.npz", disp, atoms.numbers).cutoff
-# a) JAX-MD's own list (minimum image: every box width > 2 (rc + skin), check jaxmd.min_image_ok)
+rc = jaxmd.cutoff("model.npz")                      # from the file's metadata
 nf = partition.neighbor_list(disp, box, rc, dr_threshold=1.0, format=partition.Dense,
                              fractional_coordinates=True)
 nbrs = jaxmd.allocate(nf, R)                        # not nf.allocate: JAX 0.11 workaround
-# b) or matscipy-neighbours on the device (needs its XLA FFI build): any cell, NPT
-nf = jaxmd.neighbor_list(box, rc, skin=1.0, fractional_coordinates=True)
-nbrs = nf.allocate(R)
 pot = jaxmd.potential("model.npz", disp, atoms.numbers, K=jaxmd.capacity(R, nbrs, disp, rc + 1.0))
-init, apply = simulate.nve(pot.force, shift, dt)    # pot.energy for NPT / quantity.stress
-# JAX-MD's list: inside a jitted lax.fori_loop, nbrs = nbrs.update(state.position); state = apply(state, neighbor=nbrs)
-# the matscipy list on CUDA (planned build, the default where available): the same per-step update,
-#   with no host round trip; without the planned build (CPU) use
-#   state, nbrs, info = jax.jit(lambda s, b: jaxmd.run(apply, s, b, 1000, check_every=10))(state, nbrs)
-#   (one host round trip per 10-step block; exact: a block an atom outran is redone)
-# after each chunk: if nbrs.did_buffer_overflow, allocate again and redo the chunk
+init, apply = simulate.nve(pot.force, shift, 1.0 / 10.18)   # dt 1 fs (time unit 10.18 fs)
+# jitted lax.fori_loop body: nbrs = nbrs.update(state.position); state = apply(state, neighbor=nbrs)
+# after each chunk: if nbrs.did_buffer_overflow or pot.overflow(state.position, nbrs): allocate again, redo
 ```
 
-- `K` compacts each row to K in-cutoff slots.  Sized at rc + skin (as above) it
-  never overflows in MD; sized at rc it is about 2x tighter but can overflow as
-  atoms move.  Too small a K, or an overflowed list, makes energy and forces NaN,
-  never truncated.
+- `pot.force` is `-grad(pot.energy)` (Cartesian, also with fractional positions);
+  `quantity.stress` and NPT integrators take `pot.energy`. JAX-MD's stress sign is
+  the opposite of ASE's.
+- `K` slots per atom: `capacity(..., rc + skin)` never overflows between list
+  builds; `capacity(..., rc)` (tight) is ~1.5x faster but can overflow as atoms
+  move. Too small a K, or an overflowed list (Dense, Sparse or ShiftList), makes
+  energy and forces NaN, never truncated; `pot.overflow` is the explicit check.
+- Sparse JAX-MD lists work without `K` (K is refused for them).
 - Calculator keywords (`spline_tol`, `lean`, `aa_dag`, `dtype`, ...) pass through
   `potential`: it evaluates exactly `ACECalculator`'s model.
-- JAX-MD's stress (`quantity.stress`) has the opposite sign to ASE's.
-- Install with the `jaxmd` extra: `pip install "ace-jax[jaxmd]"`. `jaxmd.neighbor_list` also needs
-  matscipy-neighbours built with its XLA FFI (libAtoms/matscipy-neighbours#10, not yet released).
+- JAX-MD's own list is minimum-image: every box width must exceed 2 (rc + skin)
+  (`jaxmd.min_image_ok`), else it silently misses neighbours.
+- EXPERIMENTAL `jaxmd.neighbor_list(box, rc, skin=1.0, fractional_coordinates=True)`:
+  a matscipy-neighbours list built on the device with image shifts (small, triclinic,
+  slab cells; NPT). Needs matscipy-neighbours with its XLA FFI
+  (libAtoms/matscipy-neighbours#10, unreleased). Pass `None` as the potential's
+  displacement_fn. On CUDA (planned build) update it every step; otherwise (CPU, or
+  a "planned build is not available" warning) use
+  `jaxmd.run(apply, state, nbrs, n_steps, check_every=10[, box_of=simulate.npt_box])`.
 
 ### LAMMPS
 

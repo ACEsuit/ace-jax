@@ -107,3 +107,21 @@ together.
 ::: ace_jax.export.lammps.neighbour_capacity
 
 ::: ace_jax.export.lammps.matrix_supported
+
+## JAX-MD
+
+See [Run MD with JAX-MD](../howto/jax-md.md).
+
+::: ace_jax.jaxmd.potential
+
+::: ace_jax.jaxmd.cutoff
+
+::: ace_jax.jaxmd.capacity
+
+::: ace_jax.jaxmd.allocate
+
+::: ace_jax.jaxmd.min_image_ok
+
+::: ace_jax.jaxmd.neighbor_list
+
+::: ace_jax.jaxmd.run
