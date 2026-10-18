@@ -40,7 +40,7 @@ tells how the subsets were made.
 aj fit --order 2 --max-degree 5 \
     --train cantor_train.xyz --test cantor_test.xyz --ood cantor_vacancy.xyz \
     --energy-key mace_energy --force-key mace_force --virial-key mace_virial \
-    --e0 lsq --m-per-species 0 --opt lbfgs \
+    --e0 lsq --opt lbfgs \
     --out fit
 ```
 

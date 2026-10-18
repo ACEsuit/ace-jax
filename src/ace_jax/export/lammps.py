@@ -327,7 +327,7 @@ def make_energy_fn(model, n_species, layout, k_dense=None, type_map=None, n_rows
 def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
                   dtype="float64", layout="auto", type_elements=None, max_owned=None,
                   lean=True, spline_tol=AUTO, spline_intervals=None, max_neighbors=None,
-                  radial_table=None, device_memory=None, block_rows=None, platform=None, aa_dag=None,
+                  radial_table=None, device_memory=None, block_rows=None, platform=None, aa_dag="auto",
                   precision_structure=None):
     """Write a lammps-jax JSON bundle for `model`; returns the bundle dict.
 
@@ -411,10 +411,13 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
     max_rel_err, max_rel_deriv_err; None when off), next to
     `ace_jax.spline_tol`.
 
-    aa_dag (None, the default: the chain form; "greedy" or "prefix"): evaluate
-    the product basis as a DAG, one multiply per monomial (`eval.aa_dag`), after
-    `lean` and the radial table.  Exact to roundoff ("prefix": bitwise monomials).
-    Recorded as `ace_jax.aa_dag`.
+    aa_dag ("auto", the default; None: the chain form; "greedy" or "prefix"):
+    evaluate the product basis as a DAG, one multiply per monomial
+    (`eval.aa_dag`), after `lean` and the radial table.  Exact to roundoff
+    ("prefix": bitwise monomials).  "auto" is "greedy" from
+    `eval.aa_dag.AUTO_MIN_CHAIN_MUL` chain-form multiplies per site and the chain
+    form below (`eval.aa_dag.resolve_aa_dag`).  Recorded as `ace_jax.aa_dag`, the
+    mode used.
     """
     from lammps_jax.export import export_model
 
@@ -483,8 +486,9 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
         splined = splining(full, model, spline_tol)
         leaned = model is not full or bool(getattr(model, "energy_only", False))
     model, rtab = with_radial_table(model, radial_table)
-    if aa_dag is not None:                    # recursive product basis (`eval.aa_dag`), opt-in
-        from ..eval.aa_dag import with_aa_dag
+    from ..eval.aa_dag import resolve_aa_dag, with_aa_dag
+    aa_dag = resolve_aa_dag(model, aa_dag)    # recursive product basis (`eval.aa_dag`); "auto" picks per model
+    if aa_dag is not None:
         model = with_aa_dag(model, aa_dag)
     # the traced model in the bundle dtype: a float64 model with float32 positions lowers to a
     # float64 program with float32 I/O under x64 (`aj export` enables it), i.e. no fp32 speed
@@ -512,7 +516,7 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
                          "spline_intervals": splined["n_intervals"] if splined else None,
                          # the radial stage tabulated in r (None: analytic / as lean left it)
                          "radial_table": rtab,
-                         # the product basis's DAG plan mode (None: the chain form)
+                         # the product basis's DAG plan mode used (None: the chain form)
                          "aa_dag": aa_dag,
                          # dense / matrix rows per block, and the memory they were sized for
                          "block_rows": int(block_rows) if layout in ("dense", "matrix") else None,

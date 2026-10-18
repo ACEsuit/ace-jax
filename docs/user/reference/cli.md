@@ -31,9 +31,11 @@ The options fall into groups:
   second test set. `--weights` sets weights for each configuration type.
 - **basis**: the options under "basis" below build the basis in the fit.
   Alternatively, `--model` uses a saved basis; then `--r0` is necessary.
-- **model**: `--m-per-species 0` is linear ACE. A positive value adds a
-  Gaussian-process arm, with that number of inducing sites for each
-  species. The default (500) is the GP arm.
+- **model**: `--m-per-species 0` (the default) is linear ACE. A positive
+  value adds a Gaussian-process arm, with that number of inducing sites for
+  each species. The GP arm is experimental. The GP options (`--kernel`,
+  `--no-bump`, `--density`, `--pca-d`, `--embedding`) need
+  `--m-per-species` > 0.
 - **hyperparameters**: `--opt`, `--map-steps`, `--map-restarts`, `--map-polish`,
   `--strict`, `--init`, `--noise`. `--noise shared` learns one noise scale
   for all weighted rows, so `--weights` sets the balance of E, F and V (as

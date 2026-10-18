@@ -1,5 +1,6 @@
 // E and F of configurations from a .yace with ML-PACE's C-tilde evaluator (brute-force periodic
 // neighbour list; forces as LAMMPS pair_pace accumulates them).
+//   tab_eval <model.yace> [product|recursive]     (default product: pair_style pace product)
 // stdin: nconf, then per configuration: N; 3x3 cell (rows); pbc (3 ints); N lines t x y z, with t the
 // atom's element index in the .yace `elements` list.
 // stdout: per configuration: E, then N lines fx fy fz.
@@ -9,12 +10,11 @@
 #include <vector>
 #include "ace-evaluator/ace_c_basis.h"
 #include "ace-evaluator/ace_evaluator.h"
+#include "ace-evaluator/ace_recursive.h"
+#include <string>
 
-int main(int argc, char **argv) {
-    ACECTildeBasisSet basis;
-    basis.load_yaml(argv[1]);
-    ACECTildeEvaluator ev;
-    ev.set_basis(basis);
+template <class EV>
+int run(EV &ev, ACECTildeBasisSet &basis) {
     ev.element_type_mapping.init(basis.nelements);
     for (int t = 0; t < basis.nelements; t++) ev.element_type_mapping(t) = t;
     const double rc = basis.cutoffmax;
@@ -85,4 +85,20 @@ int main(int argc, char **argv) {
         std::cout << E << "\n";
         for (int i = 0; i < N; i++) std::cout << F[3 * i] << " " << F[3 * i + 1] << " " << F[3 * i + 2] << "\n";
     }
+    return 0;
+}
+
+int main(int argc, char **argv) {
+    ACECTildeBasisSet basis;
+    basis.load_yaml(argv[1]);
+    const std::string kind = argc > 2 ? argv[2] : "product";
+    if (kind == "recursive") {
+        ACERecursiveEvaluator ev;
+        ev.set_recursive(true);
+        ev.set_basis(basis);
+        return run(ev, basis);
+    }
+    ACECTildeEvaluator ev;
+    ev.set_basis(basis);
+    return run(ev, basis);
 }

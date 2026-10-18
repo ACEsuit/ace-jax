@@ -86,3 +86,30 @@ ace_tab:       # the same, exactly: Tabulated radials (write_yace), for ML-PACE 
   - {size: o4d14}
   - {size: o4d16}
   - {size: o4d20}
+nep:           # NEP4 trained by GPUMD's nep on a Sulis A100 (fit_nep.py; envs/sulis-nep.sbatch): cutoff 5 A radial and
+               # angular; n_max "R A", basis_size "R A", l_max "<3-body l> <q_222 4-body> [<q_1111 5-body>]" (on/off),
+               # neuron = hidden-layer width.  generation: total (default 100k; n50 is flat from 70k, n80/n120 were
+               # still improving at 100k), trained in jobs of `chunk` generations that resume from nep.restart
+  - {size: n10,  n_max: "4 4",   basis_size: "4 4",   l_max: "4 0",   neuron: 10}
+  - {size: n30,  n_max: "6 4",   basis_size: "6 6",   l_max: "4 1",   neuron: 30}
+  - {size: n50,  n_max: "8 6",   basis_size: "8 8",   l_max: "4 1",   neuron: 50}
+  - {size: n80,  n_max: "10 8",  basis_size: "8 8",   l_max: "6 1",   neuron: 80,  generation: 300000, chunk: 100000}
+  - {size: n120, n_max: "12 8",  basis_size: "8 8",   l_max: "6 1",   neuron: 120, generation: 300000, chunk: 100000}
+  # GPUMD's caps (main_nep/parameters.cu): n_max <= "12 8", basis_size <= "16 12", 3-body l_max <= 8, <= 120
+  # neurons a layer, and NEP_CPU / GPUMD's MD evaluate one hidden layer only: n120 is already at the n_max and
+  # width caps, so the larger models widen the basis and add the 4- and 5-body terms
+  - {size: n120b, n_max: "12 8", basis_size: "12 12", l_max: "6 1 1", neuron: 120, generation: 300000, chunk: 100000}
+  - {size: n120c, n_max: "12 8", basis_size: "16 12", l_max: "8 1 1", neuron: 120, generation: 200000, chunk: 100000}   # third chunk cancelled: no better than n120b
+  # 30k-generation screens on n120b's descriptor (compare test force RMSE with n120b's own curve at 30k): a longer
+  # radial / shorter angular cutoff, and weaker L1 / L2 regularisation (GPUMD's default ~0.10 here dominates the loss)
+  - {size: n120b-c64,    n_max: "12 8", basis_size: "12 12", l_max: "6 1 1", neuron: 120, generation: 30000, cutoff: "6 4"}
+  - {size: n120b-c65,    n_max: "12 8", basis_size: "12 12", l_max: "6 1 1", neuron: 120, generation: 30000, cutoff: "6 5"}
+  - {size: n120b-reg,    n_max: "12 8", basis_size: "12 12", l_max: "6 1 1", neuron: 120, generation: 30000, lambda_1: 0.01, lambda_2: 0.01}
+  - {size: n120b-c64reg, n_max: "12 8", basis_size: "12 12", l_max: "6 1 1", neuron: 120, generation: 30000, cutoff: "6 4", lambda_1: 0.01, lambda_2: 0.01}
+  # the published GAP-18 Si recipe (Fan et al., arXiv:2205.10046 Fig. 4, the 5-body NEP4 shipped as GPUMD's
+  # Si_2022_NEP4_5body.txt, n_max "10 10"; GPUMD 5.9 caps the angular n_max at 8): full batch, lambda 0.05,
+  # population 50, 300k generations; without weights (as published) and with the GAP-18 force-sigma weights.
+  # That shipped model, trained on all of GAP-18, scores 0.0998 eV/A on this test split (an optimistic bound:
+  # the test configs are in its training set)
+  - {size: nlit,  n_max: "10 8", basis_size: "10 10", l_max: "4 2 1", neuron: 50, lambda_1: 0.05, lambda_2: 0.05, population: 50, batch: 100000, weights: none, generation: 100000, chunk: 100000}   # stopped at 100k: not below n120b
+  - {size: nlitw, n_max: "10 8", basis_size: "10 10", l_max: "4 2 1", neuron: 50, lambda_1: 0.05, lambda_2: 0.05, population: 50, batch: 100000, generation: 100000, chunk: 100000}   # stopped at 100k: tracks nlit ~0.002 eV/A behind

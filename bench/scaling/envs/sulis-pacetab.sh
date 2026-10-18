@@ -12,6 +12,13 @@
 #
 # Wrappers: $ROOT/lmp-pacetab-cpu.sh, $ROOT/lmp-pacetab.sh (the env jsons' `lmp`), and with the gpu_mixed
 # step $ROOT/lmp-pacetab-mixed.sh (KOKKOS_PREC=mixed; the env jsons' `lmp_mixed`).
+#
+# `cpufork` / `gpufork`: ML-PACE from ICAMS/lammps-user-pace#31 (jameskermode/lammps-user-pace tabulated-radials, 97621a3:
+# v.2025.12.4.p1 + tabulated radials, the recursive-evaluator speed-ups and summed_neighbour_A; rsync a checkout to
+# $ROOT/lammps-user-pace-fork first).  cpufork: the CPU build, wrapper $ROOT/lmp-pacefork-cpu.sh
+# (accuracy_cost/envs/sulis-cpu-pacefork.json).  gpufork: a copy of the lammps-dev tree carrying the pace/kk prototype
+# patches pace_ref/fast/0003, 0005, 0006 and 0007 (PACE_KK_RHOW at run time; pace_ref/fast/README.md), wrapper
+# $ROOT/lmp-pacekk-fork.sh (accuracy_cost/envs/sulis-gpu-pacefork.json).
 set -euo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ROOT=${BENCH_ROOT:-$HOME/bench-scaling}
@@ -54,7 +61,23 @@ gpu() {
   wrapper lmp-pacetab.sh "$MODS_GPU" "$B"
 }
 
-gpu_mixed() {   # the same with KOKKOS_PREC=mixed (float compute, double accumulation): the mixed-precision ML-PACE rows
+cpufork() {
+  local B=$SRC/build-kk-cpu-pacefork F=$ROOT/lammps-user-pace-fork
+  set +u; module purge; module load $MODS_CPU; set -u
+  rm -rf "$B"
+  cmake -S "$SRC/cmake" -B "$B" -D CMAKE_BUILD_TYPE=Release -D CMAKE_CXX_COMPILER=g++ \
+    -D BUILD_SHARED_LIBS=ON -D BUILD_MPI=ON -D BUILD_OMP=ON \
+    -D PKG_KOKKOS=ON -D Kokkos_ENABLE_OPENMP=ON -D Kokkos_ENABLE_SERIAL=ON -D Kokkos_ARCH_ZEN2=ON \
+    -D PKG_ML-PACE=ON -D LOCAL_ML-PACE="$F"
+  cmake --build "$B" -j "$JOBS"
+  wrapper lmp-pacefork-cpu.sh "$MODS_CPU" "$B"
+}
+
+gpufork() { _gpupatched lammps-pacekk-fork "$ROOT/lammps-user-pace-fork" lmp-pacekk-fork.sh \
+                       0003-pacekk-team-rho-weights.patch 0005-pacekk-summed-neighbour-A.patch \
+                       0006-pacekk-flat-offset-rho-weights.patch 0007-pacekk-segmented-weights.patch; }
+
+gpu_mixed() {   # gpu() with KOKKOS_PREC=mixed (float compute, double accumulation): the mixed-precision ML-PACE rows
   local B=$SRC/build-kk-pacetab-mixed
   set +u; module purge; module load $MODS_GPU; set -u
   export NVCC_WRAPPER_DEFAULT_COMPILER=g++

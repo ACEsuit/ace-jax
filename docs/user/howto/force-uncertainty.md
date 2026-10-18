@@ -23,7 +23,7 @@ ranking. For example:
 Limits of use:
 
 - Only forces are calibrated.
-- `--uq ard` applies only to the linear model (`--m-per-species 0`). For the
+- `--uq ard` applies only to the linear model (the default). For the
   hybrid ACE + GP model, use `--uq ard-gp`
   ([From a GP fit](#from-a-gp-fit-uq-ard-gp)). `--uq ard-gp` is
   experimental.
@@ -36,7 +36,7 @@ gives the full method.
 ```bash
 aj fit --order 3 --max-degree 10 \
     --train train.xyz --test test.xyz \
-    --e0 lsq --m-per-species 0 --opt lbfgs --uq ard \
+    --e0 lsq --opt lbfgs --uq ard \
     --out fit_ard
 ```
 

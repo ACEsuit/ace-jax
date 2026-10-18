@@ -139,3 +139,24 @@ def test_calculator_option():
     assert abs(out[0][0] - out[1][0]) <= 1e-12 * abs(out[0][0])
     assert np.abs(out[0][1] - out[1][1]).max() < 1e-12
     assert np.abs(out[0][2] - out[1][2]).max() < 1e-12
+
+
+def test_auto_resolves_on_chain_multiplies(monkeypatch):
+    """aa_dag="auto" is "greedy" from AUTO_MIN_CHAIN_MUL chain-form multiplies per site and the chain form
+    below, for ACE and PACE models; the calculator (whose default it is) reports the mode it used."""
+    from ace_jax.calc.point import ACECalculator
+    from ace_jax.eval import aa_dag
+    m, meta, _ = load(str(MODELS["si_fitted"]))
+    n = aa_dag.chain_multiplies(m.aa_specs)
+    assert n == sum(len(s) * (np.shape(s)[1] - 1) for s in m.aa_specs if np.size(s)) > 0
+    p, _, _ = load(str(pace_fixture(PACE / "sige_zbl.yace")))
+    for thr, want in ((n + 1, None), (n, "greedy")):
+        monkeypatch.setattr(aa_dag, "AUTO_MIN_CHAIN_MUL", thr)
+        assert aa_dag.resolve_aa_dag(m, "auto") == want
+        assert (with_aa_dag(m, "auto").aa_dag is not None) == (want is not None)
+        calc = ACECalculator(m, meta)
+        assert calc.aa_dag == want and (calc.eval_model.blk_aa_dag is not None) == (want is not None)
+    monkeypatch.setattr(aa_dag, "AUTO_MIN_CHAIN_MUL", 0)
+    assert aa_dag.resolve_aa_dag(p, "auto") == "greedy"
+    assert ACECalculator(m, meta, aa_dag=None).aa_dag is None
+    assert aa_dag.resolve_aa_dag(object(), "auto") is None          # nothing to plan: the model as given

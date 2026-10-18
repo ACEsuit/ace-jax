@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # CUDA (A100) LAMMPS with the tabulated-radial ML-PACE (sulis-pacetab.sh gpu).  Submit from bench/scaling/envs:
-#   sbatch sulis-pacetab-build-gpu.sbatch            (gpu: KOKKOS_PREC double)
-#   sbatch sulis-pacetab-build-gpu.sbatch gpu_mixed  (KOKKOS_PREC=mixed)
+#   sbatch sulis-pacetab-build-gpu.sbatch [gpu|gpufork|gpu_mixed|gpufork_mixed|gpufork_mixed_rho64]   (default gpu)
 #SBATCH --job-name=pacetab-build-gpu
 #SBATCH --account=su007-jrk-gpu
 #SBATCH --partition=gpu

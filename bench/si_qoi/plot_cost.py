@@ -34,13 +34,16 @@ FAM = {  # family: (label, colour, marker, linestyle, filled, qoi model name pat
     # the same linear ACE fits run by ML-PACE (write_yace, Tabulated radials: exact): linear ACE's colour
     # (same models), the code told apart by marker and line; its accuracy is ACE's, its cost its own (COST_NAME)
     "ace_tab":    ("linear ACE, run by ML-PACE", "#2a78d6", "*", ":",  True,  "ACE_{s}"),
+    # and by ML-PACE with the additions proposed upstream (ICAMS/lammps-user-pace#31: the recursive-evaluator
+    # speed-ups on the CPU; pace/kk with the prototype kernels of pace_ref/fast on the GPU): the same files, the open star
+    "ace_tabfork": ("linear ACE, run by patched ML-PACE", "#2a78d6", "*", "--", False, "ACE_{s}"),
     # and by ACEpotentials.jl's LAMMPS export (bench/accuracy_cost/build_trim.py: the juliac --trim library, exact)
     "ace_trim":   ("linear ACE, run by ACEpotentials.jl", "#2a78d6", "X", "-.", True, "ACE_{s}"),
     # the order-4 ladder in reduced precision (docs/dev/fp32-results.md): the same fits, their own cost --
-    # ace-jax float32 bundles, and ML-PACE in a KOKKOS_PREC=mixed LAMMPS.  Each pairs with its float64 line:
+    # ace-jax float32 bundles, and patched pace/kk (PACE_KK_RHOW=3) in a KOKKOS_PREC=mixed LAMMPS.  Each pairs with its float64 line:
     # its marker and line style in a lighter blue (the wL ramp's light step; the wL ladder is not in this figure)
     "ace_f32":       ("linear ACE, float32",                         "#86b6ef", "o", "-", True, "ACE_{s}"),
-    "ace_tab_mixed": ("linear ACE, run by ML-PACE, mixed precision", "#86b6ef", "*", ":", True, "ACE_{s}"),
+    "ace_tab_mixed": ("linear ACE, run by patched ML-PACE, mixed precision", "#86b6ef", "*", "--", False, "ACE_{s}"),
     "ace_lr":     ("ACE, learned radials",     "#e34948", "s", "-",  True,  "ACElr_{s}"),
     "pace":       ("PACE (pacemaker)",         "#eda100", "^", "-",  True,  "PACE_{s}"),
     # MACE is two ladders: L=1 (equivariant messages) costs ~3x an L=0 model of similar size, so one
@@ -52,6 +55,12 @@ FAM = {  # family: (label, colour, marker, linestyle, filled, qoi model name pat
     # validated (dataviz --pairs all, light): only a contrast WARN, as the yellow and teal
     "mace_xl_L0": ("MACE, L=0, Symmetrix-XL",  "#a197ea", "p", "--", False, "MACE_{s}"),
     "mace_xl_L1": ("MACE, L=1, Symmetrix-XL",  "#a197ea", "p", "-",  True,  "MACE_{s}"),
+    # NEP (GPUMD-trained NEP4; float64 NEP_CPU for accuracy and the CPU cost row): validated (dataviz --pairs
+    # all, light): CVD WARN 6.4 against linear ACE's blue, so its own marker shape too
+    "nep":        ("NEP (GPUMD)",              "#c13ec9", "X", "-",  True,  "NEP_{s}"),
+    # the published GAP-18 Si NEP4 recipe (sweep.yaml nlit: full batch, 50 neurons, lambda 0.05): NEP's colour,
+    # hollow, so it is not read as a rung of the ladder above
+    "nep_lit":    ("NEP, published recipe",    "#c13ec9", "X", ":",  False, "NEP_{s}"),
     "gap":        ("GAP refit",                "#008300", "v", "-",  True,  "GAP_{s}"),
     "gap_noglue": ("GAP refit, no glue",       "#008300", "v", "--", False, "GAPnoglue_{s}"),
     "gap_E30":    ("GAP refit, ACE's E:F balance", "#008300", "v", ":", True, "GAPE30_{s}"),
@@ -83,6 +92,10 @@ def family_of(r):
         return "ace_f32"
     if fam == "ace_tab" and r.get("code") == "mlpace-mixed":
         return "ace_tab_mixed"
+    if fam == "nep" and size.startswith("nlit"):
+        return "nep_lit"
+    if fam == "ace_tab" and any(t in r.get("_file", "") for t in PATCHED_MLPACE):   # make_cost's per-row file stem
+        return "ace_tabfork"
     if fam == "ace_wl":
         return "ace_wl_o5" if size.startswith("o5") else "ace_wl_" + size.split("_wL")[1]
     return fam
@@ -91,8 +104,11 @@ INK, MUTED, GRID = "#0b0b0b", "#52514e", "#e6e5e1"
 COST_AS = {"ace_E10": "ace"}
 # a second code for the same fits: its cost under its own name (make_cost.py writes it there)
 COST_NAME = {"mace_xl_L0": "MACExl_{s}", "mace_xl_L1": "MACExl_{s}", "ace_tab": "ACEtab_{s}", "ace_trim": "ACEtrim_{s}",
-             "ace_f32": "ACEf32_{s}", "ace_tab_mixed": "ACEtabmixed_{s}"}
+             "ace_tabfork": "ACEtabfork_{s}", "ace_f32": "ACEf32_{s}", "ace_tab_mixed": "ACEtabmixed_{s}"}
 REDUCED = ("ace_f32", "ace_tab_mixed")              # reduced-precision lines: make_cost --dtype keeps them
+# timing files of ML-PACE with the proposed additions (sulis-{cpu,gpu}-pacefork.sbatch): their
+# mlpace rows are the ace_tabfork line, not stock ML-PACE's
+PATCHED_MLPACE = ("ace_tabfork",)
 TAB_SIZES = ("o4d12", "o4d14", "o4d16", "o4d20")    # the ace sizes converted (sweep.yaml ace_tab)
 
 
@@ -133,6 +149,7 @@ def load_rows():
     return (rows + [r | {"family": "mace_xl_" + r["family"][-2:]} for r in rows if r["family"] in ("mace_L0", "mace_L1")]
             + [r | {"family": "ace_tab"} for r in rows if r["family"] == "ace" and r["size"] in TAB_SIZES]
             + [r | {"family": f} for r in rows if r["family"] == "ace" and r["size"] in TAB_SIZES for f in REDUCED]
+            + [r | {"family": "ace_tabfork"} for r in rows if r["family"] == "ace" and r["size"] in TAB_SIZES]
             + [r | {"family": "ace_trim"} for r in rows if r["family"] == "ace"])
 
 
@@ -181,18 +198,47 @@ def series(ax, data, key):
 
 
 def flag(ax, data, codes, key):
-    """Label points whose cost is not a LAMMPS timing (make_cost.py fell back to a standalone run)."""
-    for pts in data.values():               # one label per family and reason: neighbouring points share it
+    """Label points whose cost is not a float64 LAMMPS timing: make_cost.py fell back to a standalone run, or
+    the code is mixed precision only (NEP in GPUMD; make_cost --allow nep-gpumd:mixed)."""
+    said = set()                            # one mixed-precision label per code: both NEP series run in GPUMD
+    for fam, pts in data.items():           # one label per family and reason: neighbouring points share it
         why = {}
         for q in pts:
-            if "standalone" in codes.get(q["name"], "") and q["x"] is not None and q[key] is not None:
+            c = codes.get(q["name"], "")
+            if q["x"] is None or q[key] is None:
+                continue
+            if " mixed " in c:
+                head = "NEP (GPUMD): mixed precision" if fam.startswith("nep") else f"{FAM[fam][0]}: mixed precision"
+                if head not in said or (head, None) in why:
+                    said.add(head); why.setdefault((head, None), []).append(q)
+            elif "standalone" in c:
                 r = ("Symmetrix exports no one-layer MACE" if q["size"].endswith("n1")
                      else "LAMMPS out of memory")
-                why.setdefault(r, []).append(q)
-        for r, qs in why.items():
+                why.setdefault((None, r), []).append(q)
+        for (head, r), qs in why.items():
             q = max(qs, key=lambda q: q[key])      # above the highest: the label sits clear of the data
-            ax.annotate(f"{', '.join(p['size'] for p in qs)}: standalone\n({r})", (q["x"], q[key]),
-                        xytext=(-6, 10), textcoords="offset points", ha="right", fontsize=7, color=MUTED)
+            head = head or f"{', '.join(p['size'] for p in qs)}: standalone"
+            left = ax.transAxes.inverted().transform(ax.transData.transform((q["x"], q[key])))[0] < 0.5   # a right-aligned label off a cheap point runs off the axes
+            ax.annotate(head + (f"\n({r})" if r else ""), (q["x"], q[key]), xytext=(6 if left else -6, 10),
+                        textcoords="offset points", ha="left" if left else "right", fontsize=7, color=MUTED)
+
+
+DAG_LABEL = "centre dot: DAG product basis"
+
+
+def dag_dots(ax, data, codes, key):
+    """A centre dot on the ace-jax points whose timing used the DAG product basis (make_cost's codes note
+    "dag:<mode>"): white on filled markers, the family's colour on open ones.  Returns whether any was drawn."""
+    drawn = False
+    for fam, pts in data.items():
+        _, col, _, _, filled, _ = FAM[fam]
+        p = [q for q in pts if q["x"] is not None and q[key] is not None
+             and " dag:" in codes.get(cost_name(fam, q["size"]), "")]   # by cost name: refits (COST_AS) share the timing
+        if p:
+            ax.plot([q["x"] for q in p], [q[key] for q in p], ls="none", marker="o", ms=3.5,
+                    color="white" if filled else col, mec="none", zorder=4)
+            drawn = True
+    return drawn
 
 
 def draw_row(axes, data, ref, xlabel, codes, letters, what):
@@ -200,7 +246,7 @@ def draw_row(axes, data, ref, xlabel, codes, letters, what):
     one x (a cost, or the fitted-parameter count)."""
     a, b, c = letters
     ax = axes[0]; style(ax, xlabel, "test force RMSE (eV/Å)")
-    series(ax, data, "rmse_F")
+    series(ax, data, "rmse_F"); dag_dots(ax, data, codes, "rmse_F")
     if "A100" in xlabel or "GPU" in xlabel:                   # on the CPU every ace-jax row is standalone by design
         flag(ax, data, codes, "rmse_F")
     ax.axhline(ref["rmse_F"], color=MUTED, ls=":", lw=1.2)
@@ -209,7 +255,7 @@ def draw_row(axes, data, ref, xlabel, codes, letters, what):
     ax.set_title(f"{a}  force error", loc="left", color=INK, fontweight="bold")
 
     ax = axes[1]; style(ax, xlabel, f"QoI error: geometric mean of |error| / tolerance\nover {len(TOLERANCES)} QoIs (lower is better)")
-    series(ax, data, "qoi"); ax.set_yscale("log")             # (standalone points flagged in the force panel only)
+    series(ax, data, "qoi"); dag_dots(ax, data, codes, "qoi"); ax.set_yscale("log")             # (standalone points flagged in the force panel only)
     ax.axhline(ref["qoi"], color=MUTED, ls=":", lw=1.2)
     ax.annotate("GAP-18", (ax.get_xlim()[0], ref["qoi"]), xytext=(4, 4), textcoords="offset points", fontsize=8, color=MUTED)
     ax.axhline(TARGET_QOI, color=MUTED, ls="--", lw=1)
@@ -291,24 +337,39 @@ def main():
                              "not counted)", (1, 1), xycoords="axes fraction", xytext=(-4, -4),
                              textcoords="offset points", ha="right", va="top", fontsize=7.5, color=MUTED)
     order = [FAM[f][0] for f in FAM if FAM[f][0] in handles]
-    fig.legend([handles[l] for l in order], order, loc="upper center", ncol=-(-len(order) // 3), frameon=False,
-               fontsize=9, bbox_to_anchor=(0.5, 1.0))
+    if any(" dag:" in v for _, _, codes, _ in rows for v in codes.values()):
+        from matplotlib.lines import Line2D
+        handles[DAG_LABEL] = (Line2D([], [], ls="none", marker="o", ms=8, color=MUTED),
+                              Line2D([], [], ls="none", marker="o", ms=3.5, color="white", mec="none"))
+        order.append(DAG_LABEL)
+    ncol = min(6, -(-len(order) // 3))                    # at most 6 columns fit the width; more rows instead
+    legend_rows = -(-len(order) // ncol)
+    from matplotlib.legend_handler import HandlerTuple
+    fig.legend([handles[l] for l in order], order, loc="upper center", ncol=ncol, frameon=False,
+               fontsize=9, bbox_to_anchor=(0.5, 1.0), handler_map={tuple: HandlerTuple(ndivide=1)})
     cpu_note = ("CPU row: a 128-core EPYC 7742 node, all cores, ranks bound to cores; each model's fastest layout\n"
                 "(128x1 or 64x2 MPI ranks x threads; GAP: 32 ranks).\n"
-                "ace-jax runs in LAMMPS (lammps-jax CPU backend; ACE o4d16 and o4d20 with the recursive (DAG) product basis, aa_dag='greedy'); MACE runs in LAMMPS via Symmetrix and, separately, Symmetrix-XL.\n"
+                "ace-jax runs in LAMMPS (lammps-jax; aa_dag='auto': the DAG product basis, centre dot, from 4,000 chain-form multiplies per site; the chain form below); MACE runs in LAMMPS via Symmetrix and, separately, Symmetrix-XL.\n"
                 "Linear ACE run by ML-PACE: the o4 fits exported exactly to .yace with tabulated radials (ML-PACE with the tabulated-radial patch, ICAMS/lammps-user-pace#31; pace and pace/kk).  "
                 "GPU ML-PACE: LAMMPS develop ec02ed0 (with the 2026-08 pace/kk GPU rewrite).\n"
+                "Patched ML-PACE: the recursive-evaluator speed-ups proposed upstream (ICAMS/lammps-user-pace#31) on the CPU; "
+                "pace/kk with prototype ComputeRho/ComputeWeights kernels (pace_ref/fast) on the GPU.\n"
                 "Linear ACE run by ACEpotentials.jl (CPU only): each fit as an ACEpotentials model, exported and compiled "
                 "with juliac --trim (ACEpotentials PR 309, v0.10.2), in LAMMPS via its pair_style ace plugin.\n"
+                "NEP: trained by GPUMD; on the CPU LAMMPS pair_style nep (NEP_CPU, float64); on the GPU GPUMD's own MD code, mixed precision (labelled).\n"
                 if any("CPU" in r[0] for r in rows) else "")
+    bottom = 0
     if not a.no_note:
-        fig.text(0.5, 0.003, cpu_note + "QoI error clips each QoI to [0.05, 10] x tolerance; compressed hcp is left out (extrapolation, "
-                 "outside the training data); only models with every QoI computed.\n"
-                 "Cost: the fastest parity-checked code per model, float64 only (one-layer MACE and, on the GPU, Symmetrix MACE c64L1 have "
-                 "float32 timings only and are left out of the cost rows). Single fits per point.\n"
-                 "Light blue: the same o4 linear ACE fits in reduced precision -- ace-jax float32 lammps-jax bundles, and "
-                 "ML-PACE in a KOKKOS_PREC=mixed LAMMPS (accuracy is the float64 fit's).", ha="center", fontsize=8.5, color=MUTED)
-    fig.tight_layout(rect=(0, 0 if a.no_note else 0.072, 1, 1 - 1.0 / fig.get_figheight()))
+        note = (cpu_note + "QoI error clips each QoI to [0.05, 10] x tolerance; compressed hcp is left out (extrapolation, "
+                "outside the training data); only models with every QoI computed.\n"
+                "Cost: the fastest parity-checked code per model, float64 only except NEP on the GPU (one-layer MACE and, on the GPU, Symmetrix MACE c64L1 have "
+                "float32 timings only and are left out of the cost rows). Single fits per point.\n"
+                "Light blue: the same o4 linear ACE fits in reduced precision -- ace-jax float32 lammps-jax bundles (where timed), and "
+                "patched ML-PACE pace/kk in a KOKKOS_PREC=mixed LAMMPS (accuracy is the float64 fit's).")
+        fig.text(0.5, 0.003, note, ha="center", fontsize=8.5, color=MUTED)
+        # the axes start above the note: its lines (8.5 pt, 1.2 spacing) plus room for the bottom row's axis label
+        bottom = ((note.count("\n") + 1) * 8.5 * 1.2 / 72 + 0.2) / fig.get_figheight()
+    fig.tight_layout(rect=(0, bottom, 1, 1 - (0.2 * legend_rows + 0.15) / fig.get_figheight()))
     pathlib.Path(a.out).parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(a.out, dpi=150); print("wrote", a.out)
 

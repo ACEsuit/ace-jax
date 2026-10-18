@@ -29,10 +29,10 @@ Windows x64; elsewhere fit from an existing `.npz` with `--model`.
 K="--energy-key dft_energy --force-key dft_force --virial-key dft_virial"
 # 1. fit straight from data: the basis (species from the data) is built in memory.
 aj fit --order 3 --max-degree 10 --train train.xyz --test test.xyz $K \
-    --m-per-species 0 --out out_linear                                 # linear ACE
+    --out out_linear                                                   # linear ACE (the default)
 #    every fit writes out_linear/fit.yaml: the whole resolved run. Reproduce or
 #    vary it (command-line flags override the file):
-aj fit --config out_linear/fit.yaml --m-per-species 6 --out out_gp     # same run, + GP
+aj fit --config out_linear/fit.yaml --m-per-species 6 --out out_gp     # same run, + GP (experimental)
 
 # Optional: save a basis on its own (to share it, or fit it several times).
 aj basis --elements Si --order 3 --max-degree 10 --out si.npz
@@ -45,10 +45,10 @@ aj basis --elements Cr,Mn,Fe,Co,Ni --order 3 --max-degree 10 \
 
 # 2. fit a saved basis. Label keys default to energy/forces/virial; pass yours explicitly.
 aj fit --model si.npz --train train.xyz --test test.xyz $K \
-    --m-per-species 0 --r0 2.35 --out out_linear                      # linear ACE
+    --r0 2.35 --out out_linear                                        # linear ACE
 aj fit --model si.npz --train train.xyz --test test.xyz $K \
     --m-per-species 6 --opt lbfgs --map-restarts 3 --map-steps 40 \
-    --r0 2.35 --out out_gp                                            # ACE + GP
+    --r0 2.35 --out out_gp                                            # ACE + GP (experimental)
 
 # 3. evaluate the fitted model on any extxyz
 #    prints an E/F/V RMSE table per config_type (labels present); --out writes the
@@ -83,8 +83,8 @@ over a file's `basis:`, `--train` over its `data:` (each logged as an override).
 
 | Goal | Flags |
 |---|---|
-| Plain linear ACE (fast baseline) | `--m-per-species 0 --rungs map` |
-| Hybrid GP with uncertainty | `--m-per-species M` (default 500; start small, e.g. 6–100) |
+| Plain linear ACE (the default; what most fits should use) | no flags (`--m-per-species 0 --rungs map`) |
+| Hybrid GP with uncertainty (experimental, advanced) | `--m-per-species M` (default 0 = linear; start small, e.g. 6–100). `--kernel`, `--no-bump`, `--density`, `--pca-d`, `--embedding` need `M > 0` (an error otherwise) |
 | Converged MAP | the default `--opt lbfgs` (bounded L-BFGS-B, one restart after a line-search stop; linear arm: + exact-Hessian Newton polish by HVP columns, `--map-polish auto/on/off`; GP: `on` is opt-in, a GP gradient can take a minute). Writes `map_convergence.json`; warns `MAP did not converge`, or fails with `--strict`. `--opt adam` (`--map-steps` steps) often stops short |
 | Multimodal hyperparameter posterior | `--map-restarts N` (**requires `--opt lbfgs`**) |
 | Hyperparameter uncertainty | `--rungs map,laplace` (`--laplace svi` default, or `fd`); also `pathfinder`, `vi`, `nuts`. **Slow**: see Gotchas |
@@ -96,15 +96,15 @@ over a file's `basis:`, `--train` over its `data:` (each logged as an override).
 | Warm-start the MAP | `--init out_old/theta_map.json` |
 | Fit a residual over a pair baseline | `--baseline dimer_mean.npz` (then no model file is saved) |
 | Big data on limited GPU memory | `--lml host-cache` (**GP arm, `--density pair` or `pca`, `--opt lbfgs`, `--rungs map` only, single device**) |
-| Misspecification UQ for linear ACE | `--uq pops` (**linear only: `--m-per-species 0`**) |
-| Calibrated per-atom force uncertainty (e.g. big-cell fracture) | `--m-per-species 0 --uq ard` (`posterior.npz`; `ACECalculator(model, posterior=...)`) |
+| Misspecification UQ for linear ACE | `--uq pops` (**linear only**, the default arm) |
+| Calibrated per-atom force uncertainty (e.g. big-cell fracture) | `--uq ard` (`posterior.npz`; `ACECalculator(model, posterior=...)`) |
 | The same on the hybrid ACE + GP model (experimental) | `--m-per-species 100 --uq ard-gp` (`gp_model.npz` + `posterior.npz`; `GPCalculator.from_file(gp_model, posterior=...)`) |
 | Learn the tensor radials before the fit | `--learn-radial` (writes `radial_info.json`; not with embedding models) |
 | Per-config-type weights | `--weights '{"default":{"E":30,"F":1,"V":1},"bulk":{"E":100,"F":1,"V":1}}'` or a factor list; also accepts the path of a `.json` file |
 | Make the weights set the E:F:V balance (ACEpotentials BLR) | Give `--weights`: the default `--noise auto` then resolves to `shared`, one noise σ for every weighted row (σ_E = σ_F = σ_V, a tie in the MAP; recorded in `map_convergence.json`; `fit.yaml` records the resolved mode). Without weights `auto` is `per-quantity` (three σ's, each cancelling its weight; at 1:1:1 weights shared noise cost +79 % energy RMSE on Cantor). `auto` also falls back to `per-quantity` with `sigma_type`, joint ARD or `--solver lstsq`; an explicit `--noise shared` there is refused. Not with `sigma_type`, joint ARD (use `--ard-mode sequential`) or `--solver lstsq`. Compare fits across modes by `log_evidence`, not `logpost` |
 | E0 from data, not the model | `--e0 lsq` (default `model`): fitted jointly with the readout (wide prior around a least-squares start; isolated atoms pin their species); `--e0 prefit` fixes the least-squares E0 first (POPS always does; ARD fits E0 jointly under `--e0 lsq`, as BLR) |
 | Stress labels (MACE, ASE, DFT codes) | `--stress-key stress` (virial = −stress × volume for periodic configs without a virial label; also on `aj eval`) |
-| Plain least squares, no prior (teaching: shows overfitting) | `--m-per-species 0 --solver lstsq` (no evidence, no UQ: zero predictive variance; weights from `--weights`) |
+| Plain least squares, no prior (teaching: shows overfitting) | `--solver lstsq` (no evidence, no UQ: zero predictive variance; weights from `--weights`) |
 | Out-of-distribution check | `--ood ood.xyz` (writes `metrics_ood.csv`) |
 
 - **Learned radials: `aj fit --learn-radial`.** Learns the tensor radials before
@@ -209,7 +209,7 @@ write_outputs(res, "out", layout=("cli",))                       # metrics + mod
 
 In Python, `FitConfig`'s defaults are the research driver's
 (`bench/acegp_cantor/run.py`). They differ from the CLI's: the arm is set
-explicitly (`arm="linear"|"gp"`, default `"gp"`), `e0="lsq"`, `map_steps=150`
+explicitly (`arm="linear"|"gp"`, default `"gp"`, whereas `aj fit` defaults to linear), `e0="lsq"`, `map_steps=150`
 (both use `opt="lbfgs"`, `map_polish="auto"`), `m_per_species=100`, `batch=4`, `laplace="fd"`, and
 `predict_stats="cached"`. Use `"auto"` (the CLI's) to match the CLI and the saved
 model file exactly: it reuses the fit's QR statistics (bitwise a recompute's) and
@@ -327,11 +327,15 @@ export_lammps(model, meta, "bundle", max_atoms=cap["max_atoms"], max_edges=cap["
 ```
 
 `dtype="float32"`: the traced model is cast to float32 (`ace_jax.eval.with_dtype`, after lean / splines in
-float64), so the bundle is a float32 program even under x64; ~5x faster than float64 on fp64-poor GPUs.
+float64; spline tables in a local, difference form so their derivatives keep float32 precision), so the bundle
+is a float32 program even under x64; 2-4.5x faster than float64 on fp64-poor GPUs (RTX A4500), only 1.1-1.5x on an
+A100 (not matmul-bound: TF32 gains nothing and costs 1-14% force error).
 `precision_structure=atoms` records `calc.precision.precision_check` (float32 vs float64 E/F/stress on
 `atoms`) as `ace_jax.precision_check` and warns above `PRECISION_WARN` (0.1 meV/atom, 1e-4 relative force);
 `aj export --dtype float32` checks on `--structure`.  The float32 error is the model's (readout cancellation),
 1e-5..1e-3 relative force; lammps-jax passes float32 absolute positions, adding ~ulp(|x|) that grows with the box.
+When float32 is safe for a workflow (force-only optimisers such as ODE12r, fmax >= ~3x the force error; NVE at
+<= 1 fs drifts no more than float64; energy line searches fail): docs/user/howto/precision.md.
 
 This writes a lammps-jax bundle for `pair_style jax/kk` (GPU; `platform="cpu"`
 for its CPU build, which refuses a cuda bundle and vice versa).

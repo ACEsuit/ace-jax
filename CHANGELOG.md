@@ -2,6 +2,39 @@
 
 ## Unreleased
 
+### Changed
+
+- **The recursive (DAG) product basis is automatic.** `ACECalculator` and
+  `export_lammps` default to `aa_dag="auto"`. It uses the DAG for models with
+  4,000 or more chain-form multiplications per atom, and the chain form for
+  smaller models. Results below the threshold are unchanged. Larger models run
+  1.2-2.7x faster on a CPU node and 1.1-1.8x faster on an A100 (linear ACE
+  o4d20: 2.7x and 1.8x). `calc.aa_dag` and the bundle's `ace_jax.aa_dag` give
+  the form used. Set `aa_dag=None` for the chain form.
+- **`aj fit` fits linear ACE by default.** The default of `--m-per-species`
+  is now 0 (it was 500). The hybrid ACE + GP model is experimental. To use
+  it, give `--m-per-species` > 0. The GP options (`--kernel`, `--no-bump`,
+  `--density`, `--pca-d`, `--embedding`) without `--m-per-species` > 0 are
+  now an error. `FitConfig` in Python is not changed: set `arm` explicitly.
+
+### Added
+
+- **`write_yace(model, path, summed=True)`** writes one A basis for all
+  neighbour species, as ace-jax evaluates the model. The default writes each
+  product once for each neighbour species. The summed form has far fewer
+  products for multi-element models: 849 instead of 15,021 for a
+  three-element embedded model at order 3. ML-PACE reads it only with the
+  `summed_neighbour_A` addition. ace-jax does not read summed files.
+
+### Testing
+
+- The `pace-parity` CI job builds ML-PACE from
+  `jameskermode/lammps-user-pace` (ICAMS/lammps-user-pace#31): the
+  `v.2025.12.4.p1` release plus tabulated radials, recursive-evaluator
+  speed-ups and `summed_neighbour_A`.
+  `tests/test_pace_mlpace_yace.py` evaluates four multi-element exports with
+  ML-PACE, expanded and summed, and compares them with ace-jax.
+
 ### LAMMPS export
 
 - lammps-jax is on PyPI. Install it with the new `lammps` extra:
@@ -16,6 +49,13 @@
 
 ### Benchmarks
 
+- The silicon accuracy-cost figure adds linear ACE run by ML-PACE with the
+  speed-ups proposed upstream (ICAMS/lammps-user-pace#31 on the CPU, and
+  prototype `pace/kk` kernels in `pace_ref/fast` on the A100). Against stock
+  ML-PACE on the same node it is 1.5-1.8x faster on the CPU and 1.1-1.7x
+  faster on the A100 (o4d20: 2.89 against 5.31 µs/atom-step on 128 cores,
+  2.42 against 4.13 on the A100).
+
 - The silicon accuracy-cost benchmark adds linear ACE run by ACEpotentials.jl
   on the CPU: each `aj fit` model rebuilt as an ACEpotentials `ace_model`
   (`bench/scaling/julia/build_trim_acejax.jl`, gated to 1e-10 against ace-jax),
@@ -23,6 +63,13 @@
   the fastest CPU code for linear ACE up to o4d14, ties ML-PACE at o4d16 and is
   2x slower than ML-PACE at o4d20 (`bench/accuracy_cost/build_trim.py`,
   `envs/sulis-cpu-trim.sbatch`).
+- The benchmark adds NEP (NEP4, trained with GPUMD). On the CPU it runs in
+  LAMMPS with `pair_style nep` in float64. On the A100 it runs in GPUMD in mixed
+  precision, and the figure labels these points. NEP is the cheapest family on
+  the A100. On the CPU, PACE reaches the same force error at a lower cost. Its
+  force error stops at approximately 0.10 eV/Å, the published NEP
+  result for this dataset, and it does not reach the QoI target
+  (`bench/accuracy_cost/fit_nep.py`).
 
 ## 0.3.0 (2026-10-14)
 

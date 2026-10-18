@@ -142,7 +142,8 @@ noise scales $\sigma_E, \sigma_F, \sigma_V$ and the prior scale of the
 coefficients. Thus you do not set energy, force and virial weights or a
 regulariser by hand.
 
-- **Linear ACE** (`--m-per-species 0`). The features are the ACE basis B.
+- **Linear ACE** (`--m-per-species 0`, the default). The features are the
+  ACE basis B. Use this model for most fits.
     - The posterior mean gives the coefficients. The fit writes them to
       `model.npz`, a usual ACE model file.
     - The posterior covariance gives a predictive $\sigma$ (`--uq blr`, the
@@ -201,9 +202,10 @@ options, and the tutorials do not use them.
     - It also changes the mean.
     - See [Per-atom force uncertainty](howto/force-uncertainty.md) and
       [the mathematics](concepts/force-uncertainty-maths.md).
-- **Hybrid ACE + GP** (`--m-per-species M`, $M > 0$; the CLI default is
-  500): a Gaussian-process correction on $M$ inducing sites for each
-  species.
+- **Hybrid ACE + GP** (`--m-per-species M`, $M > 0$): a Gaussian-process
+  correction on $M$ inducing sites for each species.
+    - This model is experimental. It is for advanced users. It costs much
+      more time and memory than the linear model.
     - It is fitted on the features $[\,B \mid k_\theta(B, B_M)\,]$.
     - The fitted model is `gp_model.npz`. Load it with
       `GPCalculator.from_file`.

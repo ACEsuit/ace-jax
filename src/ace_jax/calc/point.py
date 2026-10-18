@@ -71,7 +71,7 @@ class ACECalculator(Calculator):
 
     def __init__(self, model, meta=None, cutoff=None, dtype=None, edge_a_kind="auto",
                  layout="auto", skin=1.0, lean=True, spline_tol=AUTO,
-                 spline_intervals=None, radial_table=None, aa_dag=None, posterior=None,
+                 spline_intervals=None, radial_table=None, aa_dag="auto", posterior=None,
                  forces_std_every_call=False, energy_reference="absolute", shape_path="rows",
                  shape_tau=1.0, shape_rank=None, **kw):
         """`ACECalculator("si_fitted.npz")` is the intended form: cutoff,
@@ -131,10 +131,13 @@ class ACECalculator(Calculator):
         n_intervals.  Cached on the radial's content, so a readout-only
         `calc.model` swap does not rebuild it.
 
-        `aa_dag` (None, the default: the chain form; "greedy" or "prefix")
+        `aa_dag` ("auto", the default; None: the chain form; "greedy" or "prefix")
         evaluates the product basis as a DAG of one multiply per monomial
         (`eval.aa_dag.with_aa_dag`, applied to the evaluation model last).  Exact
-        to roundoff; "prefix" keeps every AA monomial bitwise.  Opt-in.
+        to roundoff; "prefix" keeps every AA monomial bitwise.  "auto" takes
+        "greedy" from `eval.aa_dag.AUTO_MIN_CHAIN_MUL` chain-form multiplies per
+        site, where it is faster on CPU and GPU, and the chain form below (a tie;
+        bitwise as before).  `calc.aa_dag` is the mode used.
 
         `posterior` (a `posterior.npz` from `fit --uq ard`, with `model` the matching
         `model.npz` FILE) adds the per-atom force uncertainty.  For a revision-2 (schema-3)
@@ -206,7 +209,7 @@ class ACECalculator(Calculator):
         self._spline_tol = spline_tol
         self._spline_intervals = spline_intervals
         self._radial_table_opt = radial_table
-        self._aa_dag = aa_dag                 # recursive product basis (`eval.aa_dag`), opt-in
+        self._aa_dag = aa_dag                 # recursive product basis (`eval.aa_dag`); "auto" picks per model
         self.model = model                    # (the setter resets what derives from it)
         self.meta = meta
         self.edge_a_kind = edge_a_kind
@@ -335,9 +338,10 @@ class ACECalculator(Calculator):
         self._splined = splining(model, self._eval_model, self._spline_tol)
         self._eval_model, self._radial_table = with_radial_table(self._eval_model,
                                                                  self._radial_table_opt)
-        if self._aa_dag is not None:
-            from ..eval.aa_dag import with_aa_dag
-            self._eval_model = with_aa_dag(self._eval_model, self._aa_dag)
+        from ..eval.aa_dag import resolve_aa_dag, with_aa_dag
+        self._aa_dag_used = resolve_aa_dag(self._eval_model, self._aa_dag)
+        if self._aa_dag_used is not None:
+            self._eval_model = with_aa_dag(self._eval_model, self._aa_dag_used)
         self._e0 = np.asarray(model.E0, np.float64)
         if self._energy_reference == "E0":        # site energies without the isolated atoms
             import equinox as eqx
@@ -357,6 +361,12 @@ class ACECalculator(Calculator):
         """What the lean form splined, None when nothing: {"spline_tol",
         "radials", "n_intervals"} (`eval.model.splining`)."""
         return self._splined
+
+    @property
+    def aa_dag(self):
+        """The product basis's DAG plan mode in use ("greedy" / "prefix"), None for the chain form
+        (what `aa_dag="auto"` resolved to on this model)."""
+        return self._aa_dag_used
 
     @property
     def radial_table(self):
