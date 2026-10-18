@@ -134,7 +134,7 @@ version of the Python package, or export with `layout="dense"`.
   learned radial to a spline at 1e-10; see [Learn the radial basis](learned-radials.md#deployment-spline-speed).
 - `dtype="float64"` is the default. `"float32"` is faster and less accurate.
   On a GPU with low float64 throughput, a float32 bundle is 2 to 4.5 times faster.
-  On an A100, it is 1.1 to 1.5 times faster.
+  On an A100, it is 1.3 to 1.5 times faster.
   See [Choose float64 or float32](precision.md).
 - The float32 error depends on the model. Large coefficients that cancel make it larger.
 - `precision_structure=atoms` compares float32 with float64 on `atoms`.

@@ -748,8 +748,17 @@ LAMMPS throughput, atom-steps/s (32768 atoms; Sulis A100 and the moriarty RTX A4
 | o4d16 | 0.819M | 1.04M | 1.27× | 0.234M | 0.722M | 3.1× | 1.81M | 2.36M |
 | o4d20 | 0.173M | 0.189M | 1.09× | 0.065M | 0.135M | 2.1× | 0.415M | 0.551M |
 
+These ace-jax rows are the chain product basis. Re-timed with main's `aa_dag="auto"` (job 2251905,
+2026-10-18; `sulis-gpu-fp32-dot-F32_F32_F32.jsonl`, the old rows kept as `.chain.jsonl`), float32 on
+the A100 is 3.54M, 2.44M, 1.52M and 0.402M (o4d12–o4d20; o4d12 stays in the chain form). Against
+the plotted float64 DAG rows (`sulis-gpu-acejax-auto.jsonl`: 1.69M, 1.08M, 0.320M at o4d14–o4d20)
+that is 1.44×, 1.40× and 1.26×: the DAG cuts the float32 step more than the float64 one, so the
+A100 gain is 1.3–1.5× at every size. The float64 rows come from a different job; at o4d12 two
+float64 jobs differ by 30% (2.37M here, 1.82M in the DAG pair job), so treat ±0.2 on these ratios
+as noise.
+
 - **The A100's FP64 tensor cores run DGEMM at about the FP32 SIMT rate (19.5 TF).** ace-jax traces
-  float32 matmuls at highest precision (no TF32), so float32 gains 1.1–1.5× there: only memory
+  float32 matmuls at highest precision (no TF32), so float32 gains 1.1–1.5× there (1.3–1.5× with `aa_dag="auto"`, above): only memory
   traffic halves. On a card with throttled fp64 (A4500: 1/32 rate) the gain is 2.1–4.5×.
 - **TF32 does not change this.** With a `dot_general` hook (`bench/fp32/dot_algorithm.py`),
   `TF32_TF32_F32_X3` gave the speed and accuracy of `F32_F32_F32`. Single-pass `TF32_TF32_F32`
@@ -810,7 +819,7 @@ per model and per workflow, not per method.
 4. Repeat a few end points in float64. For statistical outputs (free energies, rates), repeat a
    short trajectory in float64 and compare.
 5. Use float32 only where it is faster: on fp64-throttled GPUs (2–4.5×). On an A100 the gain is
-   1.1–1.5×, and float64 is the better default.
+   1.3–1.5×, and float64 is the better default.
 
 ### NVE energy conservation
 

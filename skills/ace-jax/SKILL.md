@@ -328,7 +328,7 @@ export_lammps(model, meta, "bundle", max_atoms=cap["max_atoms"], max_edges=cap["
 
 `dtype="float32"`: the traced model is cast to float32 (`ace_jax.eval.with_dtype`, after lean / splines in
 float64; spline tables in a local, difference form so their derivatives keep float32 precision), so the bundle
-is a float32 program even under x64; 2-4.5x faster than float64 on fp64-poor GPUs (RTX A4500), only 1.1-1.5x on an
+is a float32 program even under x64; 2-4.5x faster than float64 on fp64-poor GPUs (RTX A4500), only 1.3-1.5x on an
 A100 (not matmul-bound: TF32 gains nothing and costs 1-14% force error).
 `precision_structure=atoms` records `calc.precision.precision_check` (float32 vs float64 E/F/stress on
 `atoms`) as `ace_jax.precision_check` and warns above `PRECISION_WARN` (0.1 meV/atom, 1e-4 relative force);

@@ -16,7 +16,7 @@ The speed gain depends on the float64 throughput of the GPU.
 | GPU | float32 speed-up (silicon, LAMMPS, 32768 atoms) |
 |---|---|
 | RTX A4500 (low float64 throughput) | 2.1 to 4.5 times |
-| A100 (full float64 throughput) | 1.1 to 1.5 times |
+| A100 (full float64 throughput) | 1.3 to 1.5 times |
 
 Most workstation GPUs (RTX, L40) have low float64 throughput, as the RTX
 A4500 does. The gain is largest for small models and smallest for large

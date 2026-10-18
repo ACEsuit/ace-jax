@@ -170,8 +170,8 @@ parameters than linear ACE (f800: 761 parameters, 0.081 eV/Å) but not the QoI t
 Cost files from the timing rows (float64, plus the reduced-precision lines `plot_cost.REDUCED`, which keep their
 own names), then the figures. The light-blue mixed-precision line is patched pace/kk (`PACE_KK_RHOW=3`) built with
 `KOKKOS_PREC=mixed` (`sulis-pacetab.sh gpufork_mixed`, `envs/sulis-timing-fp32.sbatch`). The ace-jax float32 line
-(`envs/sulis-timing-fp32-dot.sbatch F32_F32_F32`) is left out until it is re-timed with `aa_dag="auto"`: its rows
-predate it, so they compare the chain form with the DAG float64 rows.
+is `envs/sulis-timing-fp32-dot.sbatch F32_F32_F32` (job 2251905, 2026-10-18, with `aa_dag="auto"`; the earlier
+chain-form rows are kept as `sulis-gpu-fp32-dot-F32_F32_F32.chain.jsonl`).
 
 ```bash
 R=bench/accuracy_cost/results/sulis; RR=bench/si_qoi/results
@@ -184,7 +184,7 @@ python bench/si_qoi/make_cost.py --dtype float64 --source acejax-ace=sulis-gpu-a
     bench/accuracy_cost/results/sulis-gpu.jsonl bench/accuracy_cost/results/sulis-gpu-ace-splined.jsonl \
     $R/sulis-gpu-ace-splined-v2.jsonl $R/sulis-gpu-v2.jsonl $R/sulis-gpu-mace_xl.jsonl \
     $R/sulis-gpu-ace_tab5.jsonl $R/sulis-gpu-ace_tabfork.jsonl $R/sulis-gpu-pace-dev.jsonl $R/sulis-gpu-nep.jsonl $R/sulis-gpu-acejax-auto.jsonl \
-    $R/sulis-gpu-fp32-mixed.jsonl --allow nep-gpumd:mixed
+    $R/sulis-gpu-fp32-mixed.jsonl $R/sulis-gpu-fp32-dot-F32_F32_F32.jsonl --allow nep-gpumd:mixed
 ROWS=(--row "A100 GPU, µs/atom-step|$RR/cost_sulis_gpu.json|$RR/cost_sulis_gpu.codes.json"
       --row "CPU node (128 cores), µs/atom-step|$RR/cost_sulis_cpu.json|$RR/cost_sulis_cpu.codes.json")
 python bench/si_qoi/plot_cost.py "${ROWS[@]}"
