@@ -310,6 +310,43 @@ load; faster only at large `nradbase`). Values are unchanged to roundoff.
   function. `pip install "ace-jax[fast-neighbours]"` (matscipy-neighbours,
   a C++ source build) gives faster neighbour lists; ASE's list is the fallback.
 
+### JAX-MD (MD fully on the device)
+
+```python
+import jax; jax.config.update("jax_enable_x64", True)
+from jax_md import space, partition, simulate
+from ace_jax import jaxmd
+
+box = jnp.asarray(atoms.cell.array.T)              # JAX-MD: lattice vectors as columns
+disp, shift = space.periodic_general(box, fractional_coordinates=True)
+R = jnp.asarray(atoms.get_scaled_positions())
+rc = jaxmd.potential("model.npz", disp, atoms.numbers).cutoff
+# a) JAX-MD's own list (minimum image: every box width > 2 (rc + skin), check jaxmd.min_image_ok)
+nf = partition.neighbor_list(disp, box, rc, dr_threshold=1.0, format=partition.Dense,
+                             fractional_coordinates=True)
+nbrs = jaxmd.allocate(nf, R)                        # not nf.allocate: JAX 0.11 workaround
+# b) or matscipy-neighbours on the device (needs its XLA FFI build): any cell, NPT
+nf = jaxmd.neighbor_list(box, rc, skin=1.0, fractional_coordinates=True)
+nbrs = nf.allocate(R)
+pot = jaxmd.potential("model.npz", disp, atoms.numbers, K=jaxmd.capacity(R, nbrs, disp, rc + 1.0))
+init, apply = simulate.nve(pot.force, shift, dt)    # pot.energy for NPT / quantity.stress
+# JAX-MD's list: inside a jitted lax.fori_loop, nbrs = nbrs.update(state.position); state = apply(state, neighbor=nbrs)
+# the matscipy list on CUDA (planned build, the default where available): the same per-step update,
+#   with no host round trip; without the planned build (CPU) use
+#   state, nbrs, info = jax.jit(lambda s, b: jaxmd.run(apply, s, b, 1000, check_every=10))(state, nbrs)
+#   (one host round trip per 10-step block; exact: a block an atom outran is redone)
+# after each chunk: if nbrs.did_buffer_overflow, allocate again and redo the chunk
+```
+
+- `K` compacts each row to K in-cutoff slots.  Sized at rc + skin (as above) it
+  never overflows in MD; sized at rc it is about 2x tighter but can overflow as
+  atoms move.  Too small a K, or an overflowed list, makes energy and forces NaN,
+  never truncated.
+- Calculator keywords (`spline_tol`, `lean`, `aa_dag`, `dtype`, ...) pass through
+  `potential`: it evaluates exactly `ACECalculator`'s model.
+- JAX-MD's stress (`quantity.stress`) has the opposite sign to ASE's.
+- `jax-md` is not an ace-jax dependency: `pip install jax-md`.
+
 ### LAMMPS
 
 ```python
