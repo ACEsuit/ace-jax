@@ -91,8 +91,8 @@ def cutoff(model, meta=None):
     model file's metadata (`model` a path), or from `meta` (a loaded model), without
     building the evaluation model.  It is `potential(...).cutoff`."""
     if meta is None:
-        import pathlib
-        if not isinstance(model, (str, pathlib.Path)):
+        import os
+        if not isinstance(model, (str, os.PathLike)):
             raise ValueError("cutoff(model) reads a model file; for a loaded model pass its meta")
         from .eval.io import load
         meta = load(model)[1]
