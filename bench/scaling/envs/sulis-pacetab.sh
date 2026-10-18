@@ -10,7 +10,8 @@
 #   rsync -a <that checkout>/ sulis:bench-scaling/lammps-user-pace-tab/
 #   (from bench/scaling/envs) sbatch sulis-pacetab-build-cpu.sbatch; sbatch sulis-pacetab-build-gpu.sbatch
 #
-# Wrappers: $ROOT/lmp-pacetab-cpu.sh, $ROOT/lmp-pacetab.sh (the env jsons' `lmp`).
+# Wrappers: $ROOT/lmp-pacetab-cpu.sh, $ROOT/lmp-pacetab.sh (the env jsons' `lmp`), and with the gpu_mixed
+# step $ROOT/lmp-pacetab-mixed.sh (KOKKOS_PREC=mixed; the env jsons' `lmp_mixed`).
 #
 # `cpufork` / `gpufork`: ML-PACE from ICAMS/lammps-user-pace#31 (jameskermode/lammps-user-pace tabulated-radials, 97621a3:
 # v.2025.12.4.p1 + tabulated radials, the recursive-evaluator speed-ups and summed_neighbour_A; rsync a checkout to
@@ -76,7 +77,33 @@ gpufork() { _gpupatched lammps-pacekk-fork "$ROOT/lammps-user-pace-fork" lmp-pac
                        0003-pacekk-team-rho-weights.patch 0005-pacekk-summed-neighbour-A.patch \
                        0006-pacekk-flat-offset-rho-weights.patch 0007-pacekk-segmented-weights.patch; }
 
-_gpupatched() {   # <tree name> <ML-PACE> <wrapper> <patch...>
+gpu_mixed() {   # gpu() with KOKKOS_PREC=mixed (float compute, double accumulation): the mixed-precision ML-PACE rows
+  local B=$SRC/build-kk-pacetab-mixed
+  set +u; module purge; module load $MODS_GPU; set -u
+  export NVCC_WRAPPER_DEFAULT_COMPILER=g++
+  rm -rf "$B"
+  cmake -S "$SRC/cmake" -B "$B" -D CMAKE_BUILD_TYPE=Release -D CMAKE_CXX_COMPILER="$SRC/lib/kokkos/bin/nvcc_wrapper" \
+    -D BUILD_SHARED_LIBS=ON -D BUILD_MPI=ON -D BUILD_OMP=ON \
+    -D PKG_KOKKOS=ON -D Kokkos_ENABLE_CUDA=ON -D Kokkos_ENABLE_OPENMP=ON -D Kokkos_ENABLE_SERIAL=ON \
+    -D Kokkos_ARCH_AMPERE80=ON -D PKG_ML-PACE=ON -D LOCAL_ML-PACE="$PACE" -D KOKKOS_PREC=mixed
+  cmake --build "$B" -j "$JOBS"
+  wrapper lmp-pacetab-mixed.sh "$MODS_GPU" "$B"
+}
+
+# gpufork_mixed: main's gpufork (pace_ref/fast 0003, 0005, 0006, 0007 on a copy of lammps-dev, ML-PACE from
+# ICAMS/lammps-user-pace#31 in $ROOT/lammps-user-pace-fork; PACE_KK_RHOW at run time) built with KOKKOS_PREC=mixed.
+# The patches keep A, rho and the weights in KK_FLOAT and accumulate forces in KK_ACC_FLOAT, as stock pace/kk does.
+# Wrapper $ROOT/lmp-pacekk-fork-mixed.sh (accuracy_cost/envs/sulis-gpu-fp32.json `lmp_mixed`).
+gpufork_mixed() { PREC=mixed _gpupatched lammps-pacekk-fork-mixed "$ROOT/lammps-user-pace-fork" lmp-pacekk-fork-mixed.sh \
+                       0003-pacekk-team-rho-weights.patch 0005-pacekk-summed-neighbour-A.patch \
+                       0006-pacekk-flat-offset-rho-weights.patch 0007-pacekk-segmented-weights.patch; }
+# gpufork_mixed_rho64: the same plus 0008 (densities summed in KK_ACC_FLOAT = double); $ROOT/lmp-pacekk-fork-mixed-rho64.sh
+gpufork_mixed_rho64() { PREC=mixed _gpupatched lammps-pacekk-fork-mixed-rho64 "$ROOT/lammps-user-pace-fork" lmp-pacekk-fork-mixed-rho64.sh \
+                       0003-pacekk-team-rho-weights.patch 0005-pacekk-summed-neighbour-A.patch \
+                       0006-pacekk-flat-offset-rho-weights.patch 0007-pacekk-segmented-weights.patch \
+                       0008-pacekk-double-densities.patch; }
+
+_gpupatched() {   # <tree name> <ML-PACE> <wrapper> <patch...>; $PREC: KOKKOS_PREC (default double)
   local T=$ROOT/$1 P=$2 W=$3 B; shift 3
   rm -rf "$T"; mkdir -p "$T"
   (cd "$SRC" && tar --exclude='./build*' --exclude=./.git --exclude=./doc --exclude=./examples -cf - .) | tar -xf - -C "$T"
@@ -87,7 +114,7 @@ _gpupatched() {   # <tree name> <ML-PACE> <wrapper> <patch...>
   cmake -S "$T/cmake" -B "$B" -D CMAKE_BUILD_TYPE=Release -D CMAKE_CXX_COMPILER="$T/lib/kokkos/bin/nvcc_wrapper" \
     -D CMAKE_CXX_FLAGS="-lineinfo" -D BUILD_SHARED_LIBS=ON -D BUILD_MPI=ON -D BUILD_OMP=ON \
     -D PKG_KOKKOS=ON -D Kokkos_ENABLE_CUDA=ON -D Kokkos_ENABLE_OPENMP=ON -D Kokkos_ENABLE_SERIAL=ON \
-    -D Kokkos_ARCH_AMPERE80=ON -D PKG_ML-PACE=ON -D LOCAL_ML-PACE="$P"
+    -D Kokkos_ARCH_AMPERE80=ON -D PKG_ML-PACE=ON -D LOCAL_ML-PACE="$P" -D KOKKOS_PREC="${PREC:-double}"
   cmake --build "$B" -j "$JOBS"
   wrapper "$W" "$MODS_GPU" "$B"
 }

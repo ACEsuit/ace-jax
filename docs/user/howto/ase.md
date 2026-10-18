@@ -27,7 +27,8 @@ the model does not know, the calculator gives an error.
 --8<-- "float64.md"
 
 If float64 is not enabled, the calculator uses float32. float32 is faster,
-but it adds float32 round-off to energies and forces.
+but it adds float32 round-off to energies and forces. To find if your task
+can use float32, see [Choose float64 or float32](precision.md).
 
 ### Tight geometry optimisation of large cells
 

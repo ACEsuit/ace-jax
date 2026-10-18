@@ -21,7 +21,7 @@ from ase.build import bulk
 from ace_jax.calc.point import ACECalculator
 from ace_jax.eval import load, sparse_graph
 from ace_jax.export.lammps import make_energy_fn
-from conftest import pace_fixture, require_optional
+from conftest import FIXTURE_DIR, pace_fixture, require_optional
 
 FIX = pathlib.Path(__file__).parent.parent / "fixtures" / "pace"
 
@@ -105,7 +105,9 @@ def test_bundle_written(tmp_path):
     assert lj.startswith(importlib.metadata.version("lammps_jax"))
     budget = on_disk["ace_jax"].pop("dense_budget")               # the exporting device's
     assert budget > 0 and on_disk["ace_jax"].pop("device_memory") in (None, budget * 2)
-    assert on_disk["ace_jax"].pop("block_rows") == 32768          # explicit layout, no device_memory
+    # explicit layout, no device_memory: the BUNDLE_BLOCK_TARGET_ELEMS speed target alone, which at
+    # 256 rows of this small model is one block of all of them
+    assert on_disk["ace_jax"].pop("block_rows") == 256
     assert on_disk["ace_jax"] == {"layout": "dense", "elements": [32, 14],
                                   "type_elements": [32, 14], "k_dense": 64, "owned_rows": None,
                                   "lean": False,           # PACE: no lean form
@@ -953,3 +955,36 @@ def test_neighbour_capacity_ghosts_use_face_spacings():
     assert c["max_atoms"] == int(np.ceil(n * np.prod((h + 2 * (rc + skin)) / h) * 1.1))
     pos, _, _, owner = _periodic_ghosts(at, rc + skin)
     assert c["max_atoms"] >= len(pos)
+
+
+def test_block_rows_follow_the_element_target(monkeypatch):
+    """block_rows_for takes the largest halving of BUNDLE_BLOCK_ROWS within
+    BUNDLE_BLOCK_TARGET_ELEMS (not the largest that fits memory: bigger blocks ran up to 2.65x
+    slower in LAMMPS), never below MIN_BLOCK_ROWS, and still within the memory budget."""
+    import ace_jax.export.lammps as lx
+    from ace_jax.eval.edge_model import estimate_a_bytes
+    model, _, _ = load(FIXTURE_DIR / "si_fitted.npz")
+    k, rows = 40, 40000
+    per = estimate_a_bytes(model, "dense", 1024, 1024 * k, k, 1) / 1024      # elements per row
+    elems = lambda b: estimate_a_bytes(model, "dense", b, b * k, k, 1)
+    inf = float("inf")
+    got = lx.block_rows_for(model, rows, k, inf, 8)
+    assert elems(got) <= lx.BUNDLE_BLOCK_TARGET_ELEMS and (got == lx.BUNDLE_BLOCK_ROWS or elems(2 * got) > lx.BUNDLE_BLOCK_TARGET_ELEMS)
+    monkeypatch.setattr(lx, "BUNDLE_BLOCK_TARGET_ELEMS", int(4096 * per))
+    assert lx.block_rows_for(model, rows, k, inf, 8) == 4096
+    monkeypatch.setattr(lx, "BUNDLE_BLOCK_TARGET_ELEMS", 1)                  # nothing meets it: the floor
+    assert lx.block_rows_for(model, rows, k, inf, 8) == lx.MIN_BLOCK_ROWS
+    monkeypatch.setattr(lx, "BUNDLE_BLOCK_TARGET_ELEMS", 1 << 60)            # target off: memory decides
+    budget = estimate_a_bytes(model, "dense", 8192, 8192 * k, k, 8)
+    assert lx.block_rows_for(model, rows, k, budget, 8) == 8192
+    assert lx.block_rows_for(model, rows, k, inf, 8, block_rows=300) == 300  # explicit wins
+
+
+def test_block_target_scales_with_device_memory():
+    """A larger GPU wants larger blocks (Sulis A100 vs RTX A4500): the element target grows
+    with device_memory above BLOCK_TARGET_REF_MEMORY and never falls below the base."""
+    import ace_jax.export.lammps as lx
+    base, ref = lx.BUNDLE_BLOCK_TARGET_ELEMS, lx.BLOCK_TARGET_REF_MEMORY
+    assert lx.block_target_elems(None) == base
+    assert lx.block_target_elems(0.5 * ref) == base
+    assert lx.block_target_elems(2 * ref) == 2 * base

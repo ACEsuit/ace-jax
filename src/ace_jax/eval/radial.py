@@ -75,10 +75,28 @@ def spline_eval(x, coefs, x0, h, n):
     `coefs` has shape (ncoef, F) with ncoef = n + 2: one pad coefficient at each
     end, laid out so that Julia's OffsetArray index 0..n+1 is row 0..n+1 here.
     Evaluation is a 4-coefficient gather and a cubic, as the plan anticipated.
+    Or `spline_local`'s (n - 1, 4, F), the float32 form (`with_dtype`).
     """
     idx, w = _bspline_rows(x, x0, h, n)
+    if coefs.ndim == 3:                           # local: c_ix + sum_k w_k (c_k - c_ix), sum_k w_k = 1
+        g = coefs[idx[..., 1] - 1]                # (..., 4, F): one row per x
+        return g[..., 1, :] + sum(w[..., k, None] * g[..., k, :] for k in (0, 2, 3))
     g = coefs[idx]                                # (..., 4, F)
     return jnp.einsum("...k,...kf->...f", w, g)
+
+
+def spline_local(coefs):
+    """A B-spline table (..., n + 2, F) in local form (..., n - 1, 4, F): row ix - 1 holds the
+    four coefficients interval ix reads (`_bspline_rows`, ix in 1..n-1) as [c_ix-1 - c_ix, c_ix,
+    c_ix+1 - c_ix, c_ix+2 - c_ix].  Form it in float64, then cast: S' = sum_k w'_k(t) c_k / h
+    then reads only the differences, at their own relative precision, where float32 c_k carry
+    ~6e-8 |c| each and S' ~6e-8 |c| / h of noise -- which grows with the grid and which a
+    cancelling readout amplifies (tests/test_spline_float32.py).  Same value, 4x the table."""
+    c = jnp.asarray(coefs)
+    rows = jnp.arange(c.shape[-2] - 3)[:, None] + jnp.arange(4)
+    g = c[..., rows, :]                           # (..., n - 1, 4, F)
+    base = g[..., 1:2, :]
+    return jnp.concatenate([g[..., :1, :] - base, base, g[..., 2:, :] - base], axis=-2)
 
 
 def _pairs(x, coefs, zi, zj, x0, h, n):

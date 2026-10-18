@@ -39,6 +39,11 @@ FAM = {  # family: (label, colour, marker, linestyle, filled, qoi model name pat
     "ace_tabfork": ("linear ACE, run by patched ML-PACE", "#2a78d6", "*", "--", False, "ACE_{s}"),
     # and by ACEpotentials.jl's LAMMPS export (bench/accuracy_cost/build_trim.py: the juliac --trim library, exact)
     "ace_trim":   ("linear ACE, run by ACEpotentials.jl", "#2a78d6", "X", "-.", True, "ACE_{s}"),
+    # the order-4 ladder in reduced precision (docs/dev/fp32-results.md): the same fits, their own cost --
+    # ace-jax float32 bundles, and patched pace/kk (PACE_KK_RHOW=3) in a KOKKOS_PREC=mixed LAMMPS.  Each pairs with its float64 line:
+    # its marker and line style in a lighter blue (the wL ramp's light step; the wL ladder is not in this figure)
+    "ace_f32":       ("linear ACE, float32",                         "#86b6ef", "o", "-", True, "ACE_{s}"),
+    "ace_tab_mixed": ("linear ACE, run by patched ML-PACE, mixed precision", "#86b6ef", "*", "--", False, "ACE_{s}"),
     "ace_lr":     ("ACE, learned radials",     "#e34948", "s", "-",  True,  "ACElr_{s}"),
     "pace":       ("PACE (pacemaker)",         "#eda100", "^", "-",  True,  "PACE_{s}"),
     # MACE is two ladders: L=1 (equivariant messages) costs ~3x an L=0 model of similar size, so one
@@ -83,6 +88,10 @@ def family_of(r):
         return ("mace_xl_" if r.get("code", "").startswith("mace-xl") else "mace_") + size[-2:]
     if fam == "ace" and r.get("code") == "acepotentials-trim":
         return "ace_trim"
+    if fam == "ace" and r.get("code") == "acejax-ace" and r.get("dtype") == "float32":
+        return "ace_f32"
+    if fam == "ace_tab" and r.get("code") == "mlpace-mixed":
+        return "ace_tab_mixed"
     if fam == "nep" and size.startswith("nlit"):
         return "nep_lit"
     if fam == "ace_tab" and any(t in r.get("_file", "") for t in PATCHED_MLPACE):   # make_cost's per-row file stem
@@ -95,7 +104,8 @@ INK, MUTED, GRID = "#0b0b0b", "#52514e", "#e6e5e1"
 COST_AS = {"ace_E10": "ace"}
 # a second code for the same fits: its cost under its own name (make_cost.py writes it there)
 COST_NAME = {"mace_xl_L0": "MACExl_{s}", "mace_xl_L1": "MACExl_{s}", "ace_tab": "ACEtab_{s}", "ace_trim": "ACEtrim_{s}",
-             "ace_tabfork": "ACEtabfork_{s}"}
+             "ace_tabfork": "ACEtabfork_{s}", "ace_f32": "ACEf32_{s}", "ace_tab_mixed": "ACEtabmixed_{s}"}
+REDUCED = ("ace_f32", "ace_tab_mixed")              # reduced-precision lines: make_cost --dtype keeps them
 # timing files of ML-PACE with the proposed additions (sulis-{cpu,gpu}-pacefork.sbatch): their
 # mlpace rows are the ace_tabfork line, not stock ML-PACE's
 PATCHED_MLPACE = ("ace_tabfork",)
@@ -138,6 +148,7 @@ def load_rows():
     # and linear ACE run by ML-PACE or ACEpotentials.jl is the ace fits again
     return (rows + [r | {"family": "mace_xl_" + r["family"][-2:]} for r in rows if r["family"] in ("mace_L0", "mace_L1")]
             + [r | {"family": "ace_tab"} for r in rows if r["family"] == "ace" and r["size"] in TAB_SIZES]
+            + [r | {"family": f} for r in rows if r["family"] == "ace" and r["size"] in TAB_SIZES for f in REDUCED]
             + [r | {"family": "ace_tabfork"} for r in rows if r["family"] == "ace" and r["size"] in TAB_SIZES]
             + [r | {"family": "ace_trim"} for r in rows if r["family"] == "ace"])
 
@@ -257,6 +268,8 @@ def draw_row(axes, data, ref, xlabel, codes, letters, what):
     allx = [q["x"] for pts in data.values() for q in pts if q["x"]]
     names, vals, cols, notes = [], [], [], []
     for fam, pts in data.items():
+        if fam in REDUCED and all(q["x"] is None for q in pts):
+            continue                                  # a reduced-precision line is a cost row only: no bar until timed
         ok = [q for q in pts if q["x"] is not None and q["qoi"] is not None and q["rmse_F"] <= ref["rmse_F"]
               and q["qoi"] <= TARGET_QOI]
         names.append(FAM[fam][0]); cols.append(FAM[fam][1])
@@ -350,7 +363,9 @@ def main():
         note = (cpu_note + "QoI error clips each QoI to [0.05, 10] x tolerance; compressed hcp is left out (extrapolation, "
                 "outside the training data); only models with every QoI computed.\n"
                 "Cost: the fastest parity-checked code per model, float64 only except NEP on the GPU (one-layer MACE and, on the GPU, Symmetrix MACE c64L1 have "
-                "float32 timings only and are left out of the cost rows). Single fits per point.")
+                "float32 timings only and are left out of the cost rows). Single fits per point.\n"
+                "Light blue: the same o4 linear ACE fits in reduced precision -- ace-jax float32 lammps-jax bundles (where timed), and "
+                "patched ML-PACE pace/kk in a KOKKOS_PREC=mixed LAMMPS (accuracy is the float64 fit's).")
         fig.text(0.5, 0.003, note, ha="center", fontsize=8.5, color=MUTED)
         # the axes start above the note: its lines (8.5 pt, 1.2 spacing) plus room for the bottom row's axis label
         bottom = ((note.count("\n") + 1) * 8.5 * 1.2 / 72 + 0.2) / fig.get_figheight()

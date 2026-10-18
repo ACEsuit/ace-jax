@@ -92,6 +92,7 @@ over a file's `basis:`, `--train` over its `data:` (each logged as an override).
 | Multi-element GP sharing across species | `--embedding mace_embedding.json` (frozen species coregionalization in the GP kernel) |
 | GP kernel / objective | `--kernel cosine` (default) or `matern32`, `--no-bump`; `--objective lml` (default) or `loo` |
 | Linear-arm evidence solver | `--lml-solver qr` (default: stable when the fit nearly interpolates) or `cholesky` (faster at several thousand functions; can lose accuracy silently) |
+| Fit faster on a float32 GPU | `--row-precision float32` (linear arm, QR only; **not yet supported**: the GP arm and `--learn-radial`, refused at validation): design rows and, on a GPU, their QR merges in float32 with the residual carried in the factor (`QRStats.rho_q`); evidence/MAP/posterior stay float64. RTX A4500: stats pass 3x, o4d16 Si fit 265 -> 169 s, RMSE within 1%. σ_c can move more than predictions do; `--row-check` (noise-injection MAP refit) records the relative training-RMSE change per quantity as `row_rounding_check` in `map_convergence.json` (stable <= 5%, unstable > 10%; it overestimates the real fp32 change ~1.5-4x) |
 | Warm-start the MAP | `--init out_old/theta_map.json` |
 | Fit a residual over a pair baseline | `--baseline dimer_mean.npz` (then no model file is saved) |
 | Big data on limited GPU memory | `--lml host-cache` (**GP arm, `--density pair` or `pca`, `--opt lbfgs`, `--rungs map` only, single device**) |
@@ -246,6 +247,9 @@ load; faster only at large `nradbase`). Values are unchanged to roundoff.
 ### Calculator performance options
 
 `ACECalculator(path, dtype=None, layout="auto", edge_a_kind="auto", skin=1.0, lean=True, spline_tol="auto", spline_intervals=None, radial_table=None)`:
+- `dtype` (e.g. `np.float32`): under x64 the model is read and made lean in float64 and only
+  `calc.eval_model` is cast (`eval.with_dtype`); a pre-loaded (model, meta) is cast too.
+  `calc.precision.precision_check(model, meta, atoms)` measures the float32 error of a model.
 - `lean` (ACE `.npz` models): energies, forces and stress are evaluated with
   `ace_jax.eval.lean(model)`, exact to roundoff. It drops radial columns and
   harmonics the basis never reads, folds the pair weights into the pair
@@ -321,6 +325,17 @@ export_lammps(model, meta, "bundle", max_atoms=cap["max_atoms"], max_edges=cap["
               max_neighbors=cap["max_neighbors"], max_owned=cap["max_owned"],
               type_elements=[14, 32])                     # Z in LAMMPS type order
 ```
+
+`dtype="float32"`: the traced model is cast to float32 (`ace_jax.eval.with_dtype`, after lean / splines in
+float64; spline tables in a local, difference form so their derivatives keep float32 precision), so the bundle
+is a float32 program even under x64; 2-4.5x faster than float64 on fp64-poor GPUs (RTX A4500), only 1.3-1.5x on an
+A100 (not matmul-bound: TF32 gains nothing and costs 1-14% force error).
+`precision_structure=atoms` records `calc.precision.precision_check` (float32 vs float64 E/F/stress on
+`atoms`) as `ace_jax.precision_check` and warns above `PRECISION_WARN` (0.1 meV/atom, 1e-4 relative force);
+`aj export --dtype float32` checks on `--structure`.  The float32 error is the model's (readout cancellation),
+1e-5..1e-3 relative force; lammps-jax passes float32 absolute positions, adding ~ulp(|x|) that grows with the box.
+When float32 is safe for a workflow (force-only optimisers such as ODE12r, fmax >= ~3x the force error; NVE at
+<= 1 fs drifts no more than float64; energy line searches fail): docs/user/howto/precision.md.
 
 This writes a lammps-jax bundle for `pair_style jax/kk` (GPU; `platform="cpu"`
 for its CPU build, which refuses a cuda bundle and vice versa).

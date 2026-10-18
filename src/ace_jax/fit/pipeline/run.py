@@ -62,6 +62,10 @@ def fit(cfg, data, log=print, on_stage=None):
             obj = make_objective(cfg, data, b)
         with progress_stage("map"):
             mf = fit_map(cfg, data, b, obj, log=log)
+            if cfg.row_check:                      # recorded in map_convergence.json
+                from ..rowcheck import row_rounding_check
+                chk = row_rounding_check(cfg, data, b, obj, mf, log=log)
+                mf = mf._replace(convergence={**(mf.convergence or {}), "row_rounding_check": chk})
         c = mf.convergence or {}
         emit("map_result", theta=dict(zip(type(mf.theta)._fields, mf.theta)), log_evidence=mf.log_evidence,
              converged=c.get("converged"), gain=c.get("gain"), pgrad_inf=c.get("pgrad_inf"))

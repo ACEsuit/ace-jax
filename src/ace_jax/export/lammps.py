@@ -48,6 +48,31 @@ BUNDLE_LAYOUTS = LAYOUTS + ("matrix",)
 # checkpoint recompute, 1.5x slower; 32k rows keeps it one block and is as fast
 # as or faster than 64k at scale.  docs/dev/perf-lammps-large-n.md.
 BUNDLE_BLOCK_ROWS = 32768
+# Elements (estimate_a_bytes / itemsize) one block aims for: the largest halving of
+# BUNDLE_BLOCK_ROWS at or under it, at least MIN_BLOCK_ROWS.  Above it the per-row cost
+# of the blocked program grows with the block (the gather-adjoint scatter above), and
+# the checkpoint recompute of more, smaller blocks costs less: in LAMMPS on an RTX
+# A4500 at 32k atoms, ACE o4d16 Si (65k elements/row -> 1024 rows) ran 2.2x (float32)
+# and 1.8x (float64) faster than in 16k / 8k-row blocks, and 2.65x at 262k; across Si
+# and Cantor ACE / PACE models this target is within 7% of the best block size measured
+# and up to 18% faster than the largest that fits (docs/dev/fp32-results.md, step 2).
+# A larger GPU wants larger blocks: on a Sulis A100-40GB the same models ran best at
+# ~2-4x the A4500's rows (o4d16 still 2x slower above 4096 rows), so the target scales
+# with the target device's memory (`block_target_elems`): over 11 cases on each GPU,
+# 2-6% above the best block in geometric mean (worst 8% / 14%), against 22% / 12%
+# (worst 2.2x / 2.1x) for the largest that fits.
+BUNDLE_BLOCK_TARGET_ELEMS = 1 << 26
+BLOCK_TARGET_REF_MEMORY = 15e9      # device_memory (XLA's bytes) at which the target is BUNDLE_BLOCK_TARGET_ELEMS;
+                                    # 15, not 16: keeps every measured model clear of a halving boundary
+
+
+def block_target_elems(device_memory=None):
+    """The per-block element target for a device with `device_memory` bytes for XLA:
+    BUNDLE_BLOCK_TARGET_ELEMS scaled by device_memory / BLOCK_TARGET_REF_MEMORY, never below
+    it (an A4500, 15.8 GB, ~2^26; an A100-40GB, ~31 GB, ~2^27)."""
+    if not device_memory:
+        return BUNDLE_BLOCK_TARGET_ELEMS
+    return int(BUNDLE_BLOCK_TARGET_ELEMS * max(1.0, float(device_memory) / BLOCK_TARGET_REF_MEMORY))
 # The smallest block layout="auto" halves down to before it gives up on the dense
 # family for sparse: blocked dense at a few thousand rows still beats the sparse
 # edge list many times over (o4d16 Si on an A100: sparse 15x slower than dense).
@@ -90,21 +115,27 @@ def matrix_prep_bytes(rows, max_neighbors, k_dense, itemsize):
                         + int(k_dense) * (6 * itemsize + 13))
 
 
-def block_rows_for(model, rows, k_dense, budget, itemsize, max_edges=None, prep=0, block_rows=None):
+def block_rows_for(model, rows, k_dense, budget, itemsize, max_edges=None, prep=0, block_rows=None,
+                   target=None):
     """Rows per dense block for a bundle of `rows` rows and `k_dense` slots: the
     largest of BUNDLE_BLOCK_ROWS, halved down to MIN_BLOCK_ROWS (each capped at
-    `rows`), whose estimate_a_bytes plus `prep` (bytes not run in blocks, e.g.
-    matrix_prep_bytes) fits `budget`; None when none does.  An explicit
-    `block_rows` is the only candidate."""
+    `rows`), that is within `target` elements (default BUNDLE_BLOCK_TARGET_ELEMS; export_lammps
+    passes block_target_elems(device_memory)) -- the speed target; MIN_BLOCK_ROWS
+    is always a candidate) and whose estimate_a_bytes plus `prep` (bytes not run in
+    blocks, e.g. matrix_prep_bytes) fits `budget`; None when none fits.  An explicit
+    `block_rows` is the only candidate (no target)."""
+    def est(b, size):
+        edges = b * k_dense if max_edges is None else min(max_edges, b * k_dense)
+        return estimate_a_bytes(model, "dense", b, edges, k_dense, size)
     cands, b = [], min(int(rows), BUNDLE_BLOCK_ROWS)
     while True:
-        cands.append(b)
+        if b <= MIN_BLOCK_ROWS or est(b, 1) <= (BUNDLE_BLOCK_TARGET_ELEMS if target is None else target):
+            cands.append(b)
         if b <= MIN_BLOCK_ROWS:
             break
         b = max(MIN_BLOCK_ROWS, b // 2)
     for b in ([int(block_rows)] if block_rows else cands):
-        edges = b * k_dense if max_edges is None else min(max_edges, b * k_dense)
-        if estimate_a_bytes(model, "dense", b, edges, k_dense, itemsize) + prep <= budget:
+        if est(b, itemsize) + prep <= budget:
             return b
     return None
 
@@ -296,7 +327,8 @@ def make_energy_fn(model, n_species, layout, k_dense=None, type_map=None, n_rows
 def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
                   dtype="float64", layout="auto", type_elements=None, max_owned=None,
                   lean=True, spline_tol=AUTO, spline_intervals=None, max_neighbors=None,
-                  radial_table=None, device_memory=None, block_rows=None, platform=None, aa_dag="auto"):
+                  radial_table=None, device_memory=None, block_rows=None, platform=None, aa_dag="auto",
+                  precision_structure=None):
     """Write a lammps-jax JSON bundle for `model`; returns the bundle dict.
 
     Capacities: max_atoms (owned + ghost positions); max_edges (sparse / dense:
@@ -326,15 +358,23 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
 
     Dense and matrix rows run in blocks of `block_rows` rows (lax.map +
     jax.checkpoint), so one block's temporaries bound memory.  Default:
-    BUNDLE_BLOCK_ROWS for an explicit layout without device_memory, else
     `block_rows_for`: the largest of BUNDLE_BLOCK_ROWS halved down to
-    MIN_BLOCK_ROWS whose estimate fits the budget.
+    MIN_BLOCK_ROWS within block_target_elems(device_memory) (speed) whose estimate fits the
+    budget (an explicit layout without device_memory: the target alone).
 
     platform: the PJRT plugin the bundle runs on, "cuda" or "cpu" (lammps-jax's
     export_model(platform=), after its CPU backend; None keeps its default, cuda).
     Lowering is per platform: the dense family's cumsum lowered for cuda aborts
     XLA's CPU compiler.  For a CPU run, pass device_memory too (a rank's share of
     host RAM): the default queries the exporting process's device.
+
+    dtype: the bundle's precision (lammps-jax's contract: positions in, energy and forces out).
+    The traced model is cast to it after lean / splines / radial tables (computed in float64),
+    so a float32 bundle is a float32 program under x64 too.  precision_structure (ase.Atoms; a
+    non-float64 dtype only): run `calc.precision.precision_check` on it, record the result as
+    `ace_jax.precision_check` and warn above `PRECISION_WARN` (`aj export` passes --structure).
+    lammps-jax hands a float32 bundle float32 absolute positions, so rij carries ~ulp(|x|) of
+    rounding that grows with the box (docs/dev/fp32-results.md).
 
     layout="auto" picks a dense-family layout when k_dense is given and some
     block fits (estimate_a_bytes for that many rows, of the row capacity --
@@ -381,6 +421,7 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
     """
     from lammps_jax.export import export_model
 
+    given = model                             # precision_structure checks the model as given
     from ..eval.model import lean as _lean
     from ..eval.model import splining, with_radial_table
     from ..calc.point import DENSE_BUDGET_FRACTION, dense_budget_bytes
@@ -408,10 +449,11 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
     sized = layout == "auto" or (layout in ("dense", "matrix") and (device_memory is not None or block_rows))
     if layout == "auto":
         k = min(k_dense, max_neighbors or k_dense) if k_dense else 0
+        tgt = block_target_elems(device_memory)
         b_mat = (block_rows_for(model, rows, k, budget, itemsize, max_edges,
-                                matrix_prep_bytes(rows, max_neighbors, k, itemsize), block_rows)
+                                matrix_prep_bytes(rows, max_neighbors, k, itemsize), block_rows, tgt)
                  if k and max_neighbors and matrix_supported() else None)
-        b_den = (block_rows_for(model, rows, k, budget, itemsize, max_edges, 0, block_rows)
+        b_den = (block_rows_for(model, rows, k, budget, itemsize, max_edges, 0, block_rows, tgt)
                  if k and max_edges is not None and not b_mat else None)
         if b_mat:
             layout, block_rows = "matrix", b_mat
@@ -425,8 +467,11 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
     elif layout in ("dense", "matrix") and not block_rows:
         k = min(k_dense or max_neighbors, max_neighbors or k_dense or 0)
         block_rows = ((block_rows_for(model, rows, k, budget, itemsize, max_edges if layout == "dense" else None,
-                                      matrix_prep_bytes(rows, max_neighbors, k, itemsize) if layout == "matrix" else 0)
-                       or MIN_BLOCK_ROWS) if sized else BUNDLE_BLOCK_ROWS)
+                                      matrix_prep_bytes(rows, max_neighbors, k, itemsize) if layout == "matrix" else 0,
+                                      target=block_target_elems(device_memory))
+                       or MIN_BLOCK_ROWS) if sized
+                      else block_rows_for(model, rows, k, float("inf"), itemsize,       # the speed target alone
+                                          target=block_target_elems(device_memory)))
     if layout == "matrix":
         max_neighbors = int(max_neighbors)
         k_dense = min(int(k_dense or max_neighbors), max_neighbors)
@@ -445,6 +490,10 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
     aa_dag = resolve_aa_dag(model, aa_dag)    # recursive product basis (`eval.aa_dag`); "auto" picks per model
     if aa_dag is not None:
         model = with_aa_dag(model, aa_dag)
+    # the traced model in the bundle dtype: a float64 model with float32 positions lowers to a
+    # float64 program with float32 I/O under x64 (`aj export` enables it), i.e. no fp32 speed
+    from ..eval.api import with_dtype
+    model = with_dtype(model, dtype)
     rcut = float(meta["rcut"])
     energy_fn = make_energy_fn(model, n_species, layout, k_dense,
                                None if type_map == list(range(len(model_z))) else type_map,
@@ -474,5 +523,11 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
                          "device_memory": int(device_memory) if device_memory else None,
                          "dense_budget": int(budget),
                          "lammps_jax": lammps_jax_version()}
+    if precision_structure is not None and np.dtype(dtype) != np.float64:
+        from ..calc.precision import precision_check, warn_precision
+        chk = precision_check(given, meta, precision_structure, dtype=dtype, lean=lean, spline_tol=spline_tol,
+                              spline_intervals=spline_intervals, radial_table=radial_table)
+        bundle["ace_jax"]["precision_check"] = chk
+        warn_precision(chk, f"this {dtype} bundle's model")
     Path(path).write_text(json.dumps(bundle, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return bundle
