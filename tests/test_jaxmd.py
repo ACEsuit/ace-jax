@@ -49,8 +49,7 @@ def test_energy_forces_stress_match_the_calculator(cell, fmt, compact):
     np.testing.assert_allclose(F, F0, atol=1e-10)
     # JAX-MD's stress is minus ASE's
     np.testing.assert_allclose(quantity.stress(pot.energy, R, box, neighbor=nb), -S0, atol=1e-12)
-    if fmt is partition.Dense:
-        np.testing.assert_allclose(jax.jit(pot.force)(R, nb), F0, atol=1e-10)
+    np.testing.assert_allclose(jax.jit(pot.force)(R, nb), F0, atol=1e-10)   # every format
 
 
 def test_overflow_is_nan_not_truncation(cell):

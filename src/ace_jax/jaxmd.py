@@ -19,8 +19,7 @@ times JAX-MD's capacity_multiplier).  With `K` the in-cutoff slots are compacted
 into (N, K) rows before the model (`calc.skin.compact`, as the skin list's step
 does); without it the model runs on the whole list, masked at rc.  A row with more
 than K in-cutoff neighbours makes the energy and forces NaN: never truncation.
-`capacity` sizes K from a structure; the force function skips the reverse
-pass through the list's gathers.
+`capacity` sizes K from a structure.
 
 With a JAX-MD list, edge vectors come from `displacement_fn`, so periodic images
 are JAX-MD's minimum image: every periodic box width must exceed 2 (rc +
@@ -349,13 +348,12 @@ def potential(model, displacement_fn, species, meta=None, K=None, chunk=CHUNK_NO
 
     `energy` is JAX-MD's energy-function contract: give it to any integrator,
     `quantity.force` or `quantity.stress` (stress is JAX-MD's sign, minus ASE's).
-    `force` returns -dE/dr directly: dE/drij from the model on the (compacted)
-    rows, assembled by one scatter-add, with no reverse pass through the list's
-    gathers (1.4x faster than `quantity.force(energy)` at 8k Si atoms on an
-    A4500).  It is Cartesian, which is also what `quantity.force` gives under
-    `space.periodic_general(fractional_coordinates=True)`, so the integrators
-    that take a force function (nve, nvt_*, brownian, FIRE) accept it as is.
-    Dense format only.
+    `force` is -grad(energy) with respect to the positions, as JAX-MD's
+    `quantity.force(energy)`: Cartesian, also under
+    `space.periodic_general(fractional_coordinates=True)` (JAX-MD's `transform`
+    passes the gradient through), for the integrators that take a force
+    function.  (An explicit assembly of dE/drij into forces measured no faster:
+    the full reverse pass was 5-6% faster on an A100.)
 
     Supports partition.Dense, (energy only) partition.Sparse, a full list, and a
     `ShiftList` (`neighbor_list`: matscipy-neighbours on the device, any cell; then
@@ -406,35 +404,27 @@ def potential(model, displacement_fn, species, meta=None, K=None, chunk=CHUNK_NO
         zi = jnp.broadcast_to(node_z[:, None], j.shape)
         return m.site_energies_dense_blocked(rij, zi, node_z[j], mask, node_z, chunk)
 
-    def dense_only(neighbor, what):
+    def dense(neighbor):
+        """True for a Dense JAX-MD list or a ShiftList, False for a (full) Sparse one."""
         if isinstance(neighbor, ShiftList):
             return True
         partition = _partition()
         if partition.is_sparse(neighbor.format):
             if neighbor.format is partition.OrderedSparse:
                 raise ValueError("OrderedSparse is a half list; use partition.Sparse or Dense")
-            if what == "force":
-                raise ValueError("force needs a partition.Dense list; use quantity.force(energy)")
             return False
         return True
 
     def energy(R, neighbor, species=None, **kw):
         node_z = node_z0 if species is None else node_z_of(species)
         with jax.default_matmul_precision("highest"):
-            if not dense_only(neighbor, "energy"):
+            if not dense(neighbor):
                 return energy_sparse(R, neighbor.idx, node_z, kw)
             rij, j, mask = graph(R, neighbor, kw)
             return total_energy(site_energies_dense(rij, j, mask, node_z))
 
     def force(R, neighbor, species=None, **kw):
-        node_z = node_z0 if species is None else node_z_of(species)
-        dense_only(neighbor, "force")
-        with jax.default_matmul_precision("highest"):
-            rij, j, mask = graph(jax.lax.stop_gradient(R), neighbor, kw)
-            g = jax.grad(lambda r: total_energy(site_energies_dense(r, j, mask, node_z)))(rij)
-            g = jnp.where(mask[..., None], g, 0.0)
-            # F_i = -dE/dr_i, rij = r_j - r_i: +g on the centre, -g on the neighbour
-            return g.sum(axis=1).at[j.reshape(-1)].add(-g.reshape(-1, 3))
+        return -jax.grad(energy)(R, neighbor, species=species, **kw)
 
     def energy_sparse(R, idx, node_z, kw):
         N = R.shape[0]
