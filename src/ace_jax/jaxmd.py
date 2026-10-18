@@ -1,7 +1,7 @@
 """JAX-MD adapter: an ace-jax model as a JAX-MD energy function.
 
     pot = jaxmd.potential("si.npz", displacement, species=numbers, K=K)
-    neighbor_fn = partition.neighbor_list(displacement, box, pot.cutoff, dr_threshold=1.0,
+    neighbor_fn = partition.neighbor_list(displacement, box, jaxmd.cutoff("si.npz"), dr_threshold=1.0,
                                           format=partition.Dense)
     nbrs = jaxmd.allocate(neighbor_fn, R)   # not neighbor_fn.allocate: see `allocate`
     init, apply = simulate.nve(pot.force, shift, dt)      # or pot.energy
@@ -19,17 +19,20 @@ times JAX-MD's capacity_multiplier).  With `K` the in-cutoff slots are compacted
 into (N, K) rows before the model (`calc.skin.compact`, as the skin list's step
 does); without it the model runs on the whole list, masked at rc.  A row with more
 than K in-cutoff neighbours makes the energy and forces NaN: never truncation.
-`capacity` sizes K from a structure.
+`capacity` sizes K from a structure; `overflow` is the explicit check.  Install
+with the `jaxmd` extra (`pip install "ace-jax[jaxmd]"`).
 
 With a JAX-MD list, edge vectors come from `displacement_fn`, so periodic images
 are JAX-MD's minimum image: every periodic box width must exceed 2 (rc +
 dr_threshold) (`min_image_ok`); below that JAX-MD misses images without an error.
 
-`neighbor_list` is the alternative: a `ShiftList` built by matscipy-neighbours'
-XLA FFI (CPU or CUDA, inside jit), carrying each pair's image shift, so any cell
-works (smaller than the cutoff, triclinic, slab), as does NPT:
+EXPERIMENTAL: `neighbor_list` is the alternative: a `ShiftList` built by
+matscipy-neighbours' XLA FFI (CPU or CUDA, inside jit), carrying each pair's image
+shift, so any cell works (smaller than the cutoff, triclinic, slab), as does NPT.
+It needs a matscipy-neighbours build with its XLA FFI (libAtoms/matscipy-neighbours#10,
+not yet released), and its API may change until that is released:
 
-    nf = jaxmd.neighbor_list(box, pot.cutoff, skin=1.0, fractional_coordinates=True)
+    nf = jaxmd.neighbor_list(box, jaxmd.cutoff(model), skin=1.0, fractional_coordinates=True)
     nbrs = nf.allocate(R)                    # host-sized capacity, then built on the device
     ... nbrs = nbrs.update(state.position) in the jitted loop (CUDA, planned build), or
     state, nbrs, info = jax.jit(lambda s, b: jaxmd.run(apply, s, b, 1000))(state, nbrs)
@@ -58,9 +61,38 @@ from .calc.skin import compact, round_k
 from .eval.edge_model import CHUNK_NODES, total_energy
 
 
+def _jax_md(module):
+    """A jax_md submodule, or an ImportError that says what to install."""
+    import importlib
+    try:
+        return importlib.import_module(f"jax_md.{module}")
+    except ImportError as e:
+        raise ImportError('ace_jax.jaxmd needs jax-md: pip install "ace-jax[jaxmd]"') from e
+
+
 def _partition():
-    from jax_md import partition
-    return partition
+    return _jax_md("partition")
+
+
+def _xla():
+    """matscipy_neighbours.xla (the XLA FFI build), or an ImportError that says what it needs."""
+    try:
+        from matscipy_neighbours import xla
+        xla._register()
+    except ImportError as e:
+        raise ImportError("jaxmd.neighbor_list needs matscipy-neighbours built with its XLA FFI "
+                          "(libAtoms/matscipy-neighbours#10, not yet released; CMake option "
+                          f"JAX_FFI_INCLUDE_DIR): {e}") from e
+    return xla
+
+
+def cutoff(model, meta=None):
+    """The model's cutoff rc (Angstrom), the `r_cutoff` for a neighbour list: from the
+    model file's metadata, without building the evaluation model."""
+    if meta is None:
+        from .eval.io import load
+        meta = load(model)[1]
+    return float(meta["rcut"])
 
 
 def eval_model(model, meta=None, **calc_kw):
@@ -99,7 +131,7 @@ def _inv3(a):
 
 
 class ShiftList(eqx.Module):
-    """A fixed-capacity neighbour list built by matscipy-neighbours on the device
+    """EXPERIMENTAL (needs matscipy-neighbours#10).  A fixed-capacity neighbour list built by matscipy-neighbours on the device
     (an XLA FFI call, inside jit) that carries each pair's periodic image shift S,
     so a cell may be smaller than 2 (rc + skin), triclinic or partly periodic --
     no minimum-image limit.  `update` rebuilds it under `lax.cond` when atoms or
@@ -115,7 +147,13 @@ class ShiftList(eqx.Module):
     unwrapped displacements since the build, the second term bounding how far a
     deformation of the cell (NPT) moves any listed pair.  Ks is the capacity per
     row; a row with more than Ks pairs within rc + skin sets `overflow`, which
-    stays set and makes the potential NaN (never truncation): allocate again."""
+    stays set and makes the potential NaN (never truncation): allocate again.
+
+    Non-periodic directions: wraps are ignored along them (an atom cannot cross a
+    boundary that is not periodic), so with `space.periodic_general`, which wraps
+    every direction, a slab is correct only while no atom crosses the box along the
+    non-periodic direction: give it enough vacuum, or use Cartesian positions and
+    `space.free()`'s shift."""
     idx: jax.Array            # (N, Ks) int32 neighbour index (unspecified past count)
     shift: jax.Array          # (N, Ks, 3) int32 image shift S of the slot
     count: jax.Array          # (N,) int32 pairs within rc + skin (may exceed Ks)
@@ -154,13 +192,11 @@ class ShiftList(eqx.Module):
         j = jnp.where(live, self.idx, 0)
         S = self.shift.astype(f.dtype) - w[j] + w[:, None, :]
         if self.fractional:                          # JAX-MD's transform: gradients stay Cartesian
-            from jax_md import space
-            rij = space.transform(box, f[j] - f[:, None, :] + S)
+            rij = _jax_md("space").transform(box, f[j] - f[:, None, :] + S)
         else:
             rij = R[j] - R[:, None, :] + S @ cell
         if perturbation is not None:                 # scalar (NPT, isotropic), vector or matrix
-            from jax_md import space
-            rij = space.raw_transform(perturbation, rij)
+            rij = _jax_md("space").raw_transform(perturbation, rij)
         return rij, j, live
 
     def usage(self, R, box=None):
@@ -176,9 +212,11 @@ class ShiftList(eqx.Module):
 
     def update(self, R, box=None, **kw):
         """The list for positions R (and box): itself, or rebuilt on the device.
-        Called every step this costs a host round trip per step (the conditional
-        holds the FFI call, so XLA reads its predicate on the host); `run` checks
-        once per block of steps instead."""
+        With the planned CUDA build (`plan` set) this belongs in every step: the
+        rebuild check stays inside the step's CUDA graph.  With the regular build
+        (CPU, or no plan) its conditional holds a foreign call that XLA does not put
+        in a graph, so it reads the predicate on the host each call: drive the list
+        with `run`, which checks once per block of steps."""
         box = self.box if box is None else box
         return jax.lax.cond(self.usage(R, box) > self.skin,
                             lambda: self._build(self.frac(R, _cell(box)), box), lambda: self)
@@ -193,7 +231,7 @@ class ShiftList(eqx.Module):
         planned build (enqueued on XLA's stream with no host synchronisation, and
         CUDA-graph compatible, so a rebuild inside `update`'s conditional stays on
         the device); otherwise the regular build (host round trips per build)."""
-        from matscipy_neighbours import xla
+        xla = _xla()
         cell = _cell(box)
         cart = f @ cell                              # float32 or float64: the search runs in float64
         c64, rcs, K = cell.astype(cart.dtype), self.cutoff + self.skin, self.idx.shape[1]
@@ -220,7 +258,8 @@ class RunInfo(NamedTuple):
 
 
 def run(apply_fn, state, neighbor, n_steps, check_every=10, box_of=None, **apply_kw):
-    """(state, neighbor, RunInfo): `n_steps` steps of `apply_fn(state, neighbor=nbrs,
+    """EXPERIMENTAL (a `ShiftList` needs matscipy-neighbours#10).
+    (state, neighbor, RunInfo): `n_steps` steps of `apply_fn(state, neighbor=nbrs,
     **apply_kw)` (a JAX-MD integrator's apply) with a `ShiftList`, checking the list
     once per block of `check_every` steps instead of every step.  Jittable;
     n_steps a multiple of check_every (both static).
@@ -265,11 +304,13 @@ def run(apply_fn, state, neighbor, n_steps, check_every=10, box_of=None, **apply
 
         def redo():
             nb2 = nb.rebuilt(s0.position, box(s0))
-            s2, w2 = inner(s0, nb2, nb2.usage(s0.position, box(s0)))
-            return s2, eqx.tree_at(lambda b: b.overflow, nb2, nb2.overflow | (w2 > nb2.skin)), w2
+            u2 = nb2.usage(s0.position, box(s0))
+            s2, w2 = inner(s0, nb2, u2)
+            return s2, eqx.tree_at(lambda b: b.overflow, nb2, nb2.overflow | (w2 > nb2.skin)), w2, u2
         bad = worst > nb.skin
-        s1, nb, worst = jax.lax.cond(bad, redo, lambda: (s1, nb, worst))
-        return (s1, nb, jnp.maximum(worst - used0, 0.0), builds + pre.astype(jnp.int32) + bad.astype(jnp.int32),
+        s1, nb, worst, start = jax.lax.cond(bad, redo, lambda: (s1, nb, worst, used0))
+        # the next block's growth estimate: this block's, from the list it ended with
+        return (s1, nb, jnp.maximum(worst - start, 0.0), builds + pre.astype(jnp.int32) + bad.astype(jnp.int32),
                 redos + bad.astype(jnp.int32)), None
 
     z = jnp.zeros((), jnp.int32)
@@ -285,7 +326,9 @@ class ShiftListFns(NamedTuple):
 
 def neighbor_list(box, cutoff, skin=1.0, pbc=True, fractional_coordinates=False, capacity_multiplier=1.25,
                   planned=None):
-    """`ShiftListFns` for a `ShiftList`: JAX-MD's `partition.neighbor_list` shape
+    """EXPERIMENTAL: needs matscipy-neighbours built with its XLA FFI
+    (libAtoms/matscipy-neighbours#10, not yet released); the API may change.
+    `ShiftListFns` for a `ShiftList`: JAX-MD's `partition.neighbor_list` shape
     (`allocate`, then `nbrs.update(R)` inside jit), built by matscipy-neighbours'
     XLA FFI (`matscipy_neighbours.xla`, a matscipy-neighbours build with
     JAX_FFI_INCLUDE_DIR; CPU and CUDA) instead of JAX-MD's cell list.
@@ -300,12 +343,15 @@ def neighbor_list(box, cutoff, skin=1.0, pbc=True, fractional_coordinates=False,
     experimental planned build (`xla.plan` at allocation fixes the cell grid and
     workspace): no host synchronisation, so `nbrs.update(R)` every step stays on
     the device (its conditional is part of the step's CUDA graph).  False: the
-    regular build.  True: require it.  CPU always uses the regular build."""
+    regular build.  True: require it.  CPU always uses the regular build.  If it is
+    not available on a GPU, the regular build is used and a RuntimeWarning says so
+    (`nbrs.plan is None`): drive that list with `run`."""
     pbc = tuple(bool(b) for b in np.broadcast_to(pbc, 3))
     cutoff, skin = float(cutoff), float(skin)
 
     def allocate(R, box=box, extra_capacity=0):
         from .eval.nlist import _neighbour_list
+        xla = _xla()                                 # fail early, with what to install
         cell = np.asarray(_cell(box), float)
         f = np.asarray(R, float) if fractional_coordinates else np.asarray(R, float) @ np.linalg.inv(cell)
         i = _neighbour_list(f @ cell, cell, pbc, cutoff + skin)[0]
@@ -314,12 +360,16 @@ def neighbor_list(box, cutoff, skin=1.0, pbc=True, fractional_coordinates=False,
         n = len(f)
         plan = None
         if planned is not False:
-            from matscipy_neighbours import xla
             try:
                 plan = xla.plan(n, cell, cutoff + skin, pbc, Ks, dtype=jnp.asarray(R).dtype)
-            except (ImportError, ValueError):
+            except (ImportError, ValueError, RuntimeError, OSError) as e:
                 if planned:                          # asked for explicitly: say why not
                     raise
+                if jax.default_backend() == "gpu":
+                    import warnings
+                    warnings.warn(f"matscipy-neighbours' planned build is not available ({e}); using the "
+                                  "regular build, which reads back to the host on each update: drive the "
+                                  "list with jaxmd.run", RuntimeWarning, stacklevel=2)
         dt = jnp.asarray(R).dtype                    # the positions' dtype throughout
         empty = ShiftList(jnp.zeros((n, Ks), jnp.int32), jnp.zeros((n, Ks, 3), jnp.int32),
                           jnp.zeros((n,), jnp.int32), jnp.asarray(f, dt), jnp.asarray(cell, dt), jnp.asarray(box, dt),
@@ -338,17 +388,19 @@ class Potential(NamedTuple):
 
 
 def potential(model, displacement_fn, species, meta=None, K=None, chunk=CHUNK_NODES, **calc_kw):
-    """`Potential(energy, force, cutoff, K)` for JAX-MD.
+    """`Potential(energy, force, cutoff, K, overflow)` for JAX-MD.
 
     `model` is a path or a loaded model (then pass `meta`).  `species` is the atomic
-    numbers (N,), fixed for the run (a `species=` keyword per call overrides it).
+    numbers (N,), fixed for the run (a `species=` keyword per call overrides it; a
+    traced one with an element the model lacks makes energy and forces NaN, a
+    concrete one raises).
     `cutoff` is the model's rc, the `r_cutoff` to build the JAX-MD list with.
     `K` (int) compacts the list to K in-cutoff slots per atom (Dense format only);
     None evaluates every list slot.  K sized for rc + skin (`capacity(..., rc +
     skin)`) cannot overflow between list rebuilds; sized for rc ("tight": fewer
     model slots, ~1.5x faster forces) it can, as atoms move, and `overflow` says
-    when (energy and forces are then NaN, never truncated).  Other keywords go to ACECalculator, which
-    builds the evaluation model.
+    when (energy and forces are then NaN, never truncated).  Other keywords go to
+    ACECalculator, which builds the evaluation model.
 
     `energy` is JAX-MD's energy-function contract: give it to any integrator,
     `quantity.force` or `quantity.stress` (stress is JAX-MD's sign, minus ASE's).
@@ -359,10 +411,11 @@ def potential(model, displacement_fn, species, meta=None, K=None, chunk=CHUNK_NO
     function.  (An explicit assembly of dE/drij into forces measured no faster:
     the full reverse pass was 5-6% faster on an A100.)
 
-    Supports partition.Dense, (energy only) partition.Sparse, a full list, and a
-    `ShiftList` (`neighbor_list`: matscipy-neighbours on the device, any cell; then
-    `displacement_fn` is unused and may be None); OrderedSparse, a half list, is
-    refused.  Remaining keywords of a call (`box=` for `space.periodic_general`)
+    Supports partition.Dense, partition.Sparse (a full list; without K: K is
+    refused for it), and a `ShiftList` (`neighbor_list`, experimental:
+    matscipy-neighbours on the device, any cell; then `displacement_fn` is unused
+    and may be None); OrderedSparse, a half list, is refused.  An overflowed list
+    makes energy and forces NaN, whatever its format.  Remaining keywords of a call (`box=` for `space.periodic_general`)
     are passed to `displacement_fn`, or to the ShiftList's edge vectors."""
     m, meta, rc = eval_model(model, meta, **calc_kw)
     lut = np.full(119, -1, np.int32)
@@ -371,16 +424,20 @@ def potential(model, displacement_fn, species, meta=None, K=None, chunk=CHUNK_NO
     lut_d = jnp.asarray(lut)
 
     def node_z_of(numbers):
-        if isinstance(numbers, jax.core.Tracer):     # traced: no check possible
-            return lut_d[numbers]
+        """(species indices, bad): bad (a device bool) poisons E and F when a traced
+        `numbers` holds an element the model lacks; a concrete one raises instead."""
+        if isinstance(numbers, jax.core.Tracer):
+            z = lut_d[jnp.clip(numbers, 0, 118)]
+            return jnp.maximum(z, 0), jnp.any(z < 0) | jnp.any((numbers < 0) | (numbers > 118))
         numbers = np.asarray(numbers)
         z = lut[numbers]
         if (z < 0).any():
             raise ValueError(f"elements {sorted({int(v) for v in numbers[z < 0]})} not in the model "
                              f"{meta['elements']}")
-        return jnp.asarray(z)
+        return jnp.asarray(z), jnp.zeros((), bool)
 
     node_z0 = node_z_of(species)
+    poison = lambda r, bad: r * jnp.where(bad, jnp.nan, 1.0).astype(r.dtype)
     park = jnp.asarray([1.0, 0.0, 0.0]) * m.pad_cutoff()
 
     def rows(R, neighbor, kw):
@@ -404,9 +461,11 @@ def potential(model, displacement_fn, species, meta=None, K=None, chunk=CHUNK_NO
         _, _, valid_s, bad0 = rows(jax.lax.stop_gradient(R), neighbor, kw)
         return bad0 | (False if K is None else jnp.any(jnp.sum(valid_s, axis=1) > K))
 
-    def graph(R, neighbor, kw):
-        """Dense or shift list -> (rij, j, mask) on the model's rows; overflowed rows NaN."""
+    def graph(R, neighbor, kw, bad_species):
+        """Dense or shift list -> (rij, j, mask) on the model's rows; NaN when the list
+        or a row overflowed, or the species are invalid."""
         rij_s, j_s, valid_s, bad0 = rows(R, neighbor, kw)
+        bad0 = bad0 | bad_species
         if K is None:
             rij, j, mask, bad = rij_s, j_s, valid_s, bad0
         else:
@@ -417,7 +476,7 @@ def potential(model, displacement_fn, species, meta=None, K=None, chunk=CHUNK_NO
         # parked slots: a constant vector where every radial vanishes, so their
         # gradient is zero and never NaN; an overflowed row poisons E and F
         rij = jnp.where(mask[..., None], rij, park.astype(rij.dtype))
-        return rij * jnp.where(bad, jnp.nan, 1.0).astype(rij.dtype), j, mask
+        return poison(rij, bad), j, mask
 
     def site_energies_dense(rij, j, mask, node_z):
         zi = jnp.broadcast_to(node_z[:, None], j.shape)
@@ -431,28 +490,32 @@ def potential(model, displacement_fn, species, meta=None, K=None, chunk=CHUNK_NO
         if partition.is_sparse(neighbor.format):
             if neighbor.format is partition.OrderedSparse:
                 raise ValueError("OrderedSparse is a half list; use partition.Sparse or Dense")
+            if K is not None:
+                raise ValueError("K compacts Dense rows; a partition.Sparse list is evaluated whole: "
+                                 "build the potential without K, or use partition.Dense")
             return False
         return True
 
     def energy(R, neighbor, species=None, **kw):
-        node_z = node_z0 if species is None else node_z_of(species)
+        node_z, bad_species = node_z0 if species is None else node_z_of(species)
         with jax.default_matmul_precision("highest"):
             if not dense(neighbor):
-                return energy_sparse(R, neighbor.idx, node_z, kw)
-            rij, j, mask = graph(R, neighbor, kw)
+                bad = bad_species | jnp.asarray(neighbor.did_buffer_overflow, bool)
+                return energy_sparse(R, neighbor.idx, node_z, bad, kw)
+            rij, j, mask = graph(R, neighbor, kw, bad_species)
             return total_energy(site_energies_dense(rij, j, mask, node_z))
 
     def force(R, neighbor, species=None, **kw):
         return -jax.grad(energy)(R, neighbor, species=species, **kw)
 
-    def energy_sparse(R, idx, node_z, kw):
+    def energy_sparse(R, idx, node_z, bad, kw):
         N = R.shape[0]
         i, j = idx[0], idx[1]                       # JAX-MD: idx[0] the centre, pad N
         live = i < N
         i, j = jnp.where(live, i, 0), jnp.where(live, j, 0)
         rij = jax.vmap(lambda a, b: displacement_fn(a, b, **kw))(R[j], R[i])
         mask = live & (jnp.sum(rij * rij, axis=-1) < rc * rc)
-        rij = jnp.where(mask[:, None], rij, park.astype(rij.dtype))
+        rij = poison(jnp.where(mask[:, None], rij, park.astype(rij.dtype)), bad)   # never truncation
         return total_energy(m.site_energies(rij, node_z[i], node_z[j], i, N, node_z, mask))
 
     return Potential(energy, force, rc, K, overflow)
@@ -488,6 +551,8 @@ def capacity(R, neighbor, displacement_fn, cutoff, step=4, **kw):
     if isinstance(neighbor, ShiftList):
         rij, _, live = neighbor.edges(R, kw.get("box"), kw.get("perturbation"))
     else:
+        if neighbor.idx.ndim != 2 or neighbor.idx.shape[0] != R.shape[0]:
+            raise ValueError("capacity needs a partition.Dense list (or a ShiftList): K compacts Dense rows")
         rij, _, live = _edges_dense(R, neighbor.idx, displacement_fn, kw)
     cnt = jnp.sum(live & (jnp.sum(rij * rij, axis=-1) < cutoff * cutoff), axis=1)
     return round_k(int(jnp.max(cnt)), step)

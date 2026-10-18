@@ -178,7 +178,7 @@ def step(model, u, arrays, rc, K):
     valid_s = live_s & (r2 < rc * rc)
     order, mask, csum = compact(valid_s, K)
     cnt = csum[:, -1]
-    idx =jnp.where(mask, jnp.take_along_axis(idx_s, order, axis=1), 0)
+    idx = jnp.where(mask, jnp.take_along_axis(idx_s, order, axis=1), 0)
     pad = jnp.asarray([1.0, 0.0, 0.0], u.dtype) * model.pad_cutoff()
     rij = jnp.where(mask[..., None], jnp.take_along_axis(rij_s, order[..., None], axis=1), pad)
     zi = jnp.broadcast_to(node_z[:, None], idx.shape)

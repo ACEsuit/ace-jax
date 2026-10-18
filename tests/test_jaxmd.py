@@ -84,6 +84,80 @@ def test_nve_conserves_energy_and_survives_reallocation(cell):
     assert np.ptp(E) / len(at) < 1e-4
 
 
+def test_cutoff_reads_the_model(cell):
+    at, *_ = cell
+    assert jaxmd.cutoff(str(MODEL)) == jaxmd.potential(str(MODEL), None, at.numbers).cutoff
+
+
+def test_sparse_overflow_is_nan_not_truncation(cell):
+    """An overflowed Sparse list is NaN, not a silently smaller energy."""
+    at, _, box, disp, _, R = cell
+    rc = jaxmd.cutoff(str(MODEL))
+    pot = jaxmd.potential(str(MODEL), disp, at.numbers)
+    nf = partition.neighbor_list(disp, box, rc, dr_threshold=1.0, format=partition.Sparse,
+                                 fractional_coordinates=True, capacity_multiplier=0.5)
+    nb = jaxmd.allocate(nf, R)
+    assert bool(nb.did_buffer_overflow) and bool(pot.overflow(R, nb))
+    assert np.isnan(float(pot.energy(R, nb))) and np.isnan(np.asarray(pot.force(R, nb))).all()
+
+
+def test_sparse_lists_refuse_K(cell):
+    at, _, box, disp, _, R = cell
+    rc = jaxmd.cutoff(str(MODEL))
+    _, nb = _list(disp, box, rc, R, partition.Sparse)
+    with pytest.raises(ValueError, match="Sparse"):
+        jaxmd.potential(str(MODEL), disp, at.numbers, K=48).energy(R, nb)
+    with pytest.raises(ValueError, match="Dense"):
+        jaxmd.capacity(R, nb, disp, rc)
+
+
+def test_species_override_and_unknown_elements(cell):
+    """species= per call: the same numbers give the same energy; a concrete unknown element
+    raises, a traced one (inside jit) makes energy and forces NaN instead of a wrong species."""
+    at, (E0, _, _), box, disp, _, R = cell
+    pot = jaxmd.potential(str(MODEL), disp, at.numbers)
+    _, nb = _list(disp, box, pot.cutoff, R)
+    assert abs(float(pot.energy(R, nb, species=at.numbers)) - E0) < 1e-10 * len(at)
+    carbon = np.array(at.numbers).copy()
+    carbon[0] = 6
+    with pytest.raises(ValueError, match="not in the model"):
+        pot.energy(R, nb, species=carbon)
+    f = jax.jit(lambda R, z: pot.energy(R, nb, species=z))
+    g = jax.jit(lambda R, z: pot.force(R, nb, species=z))
+    assert np.isnan(float(f(R, jnp.asarray(carbon)))) and np.isnan(np.asarray(g(R, jnp.asarray(carbon)))).all()
+    assert abs(float(f(R, jnp.asarray(at.numbers))) - E0) < 1e-10 * len(at)
+
+
+def _x64_off():
+    """A context in which JAX defaults to float32 (the module enables x64)."""
+    if hasattr(jax, "enable_x64"):
+        return jax.enable_x64(False)
+    from jax.experimental import disable_x64
+    return disable_x64()
+
+
+def test_float32_with_a_jax_md_list(cell):
+    """A float32 model and positions with JAX-MD's own list: forces to float32 precision."""
+    at, (_, F0, _), *_ = cell
+    with _x64_off():
+        box = jnp.asarray(at.cell.array.T, jnp.float32)
+        disp, _ = space.periodic_general(box, fractional_coordinates=True)
+        R = jnp.asarray(at.get_scaled_positions(), jnp.float32)
+        pot = jaxmd.potential(str(MODEL), disp, at.numbers, dtype=jnp.float32)
+        _, nb = _list(disp, box, pot.cutoff, R)
+        pot = jaxmd.potential(str(MODEL), disp, at.numbers, dtype=jnp.float32, K=jaxmd.capacity(R, nb, disp, pot.cutoff))
+        F = np.asarray(jax.jit(pot.force)(R, nb))
+    assert F.dtype == np.float32
+    np.testing.assert_allclose(F, F0, atol=2e-4 * np.abs(F0).max())
+
+
+def test_missing_ffi_says_what_is_needed(monkeypatch):
+    import sys
+    monkeypatch.setitem(sys.modules, "matscipy_neighbours.xla", None)      # import -> ImportError
+    with pytest.raises(ImportError, match="XLA FFI"):
+        jaxmd.neighbor_list(jnp.eye(3) * 20.0, 5.0).allocate(jnp.zeros((2, 3)))
+
+
 def test_min_image_ok():
     a = bulk("Si", "diamond", 5.43, cubic=True)
     assert not jaxmd.min_image_ok((a * (2, 2, 2)).cell.array, 6.0)     # 10.9 A < 12 A
@@ -200,6 +274,34 @@ def test_shift_list_follows_an_npt_cell():
                                -at.get_stress(voigt=False), atol=1e-12)
 
 
+def test_run_follows_an_npt_cell_through_box_of():
+    """jaxmd.run with box_of=simulate.npt_box: the list follows the barostat's cell; forces and
+    stress at the end are the calculator's."""
+    _require_ffi()
+    at = _cells()["small"]
+    at.set_cell(at.cell * 0.97, scale_atoms=True)
+    box0 = jnp.asarray(at.cell.array.T)
+    _, shift = space.periodic_general(box0, fractional_coordinates=True)
+    R = jnp.asarray(at.get_scaled_positions())
+    rc = jaxmd.cutoff(str(MODEL))
+    nb = jaxmd.neighbor_list(box0, rc, fractional_coordinates=True, capacity_multiplier=1.5).allocate(R)
+    pot = jaxmd.potential(str(MODEL), None, at.numbers, K=jaxmd.capacity(R, nb, None, rc + 1.0) + 8)
+    dt, kT = 1.0 / 10.18, 8.617e-5 * 300
+    init, apply = simulate.npt_nose_hoover(pot.energy, shift, dt, pressure=0.0, kT=kT, barostat_kwargs={"tau": 200 * dt})
+    st = init(jax.random.PRNGKey(0), R, box=box0, mass=28.0855, neighbor=nb)
+    st, nb, info = jax.jit(lambda s, b: jaxmd.run(apply, s, b, 200, check_every=10, box_of=simulate.npt_box,
+                                                  pressure=0.0, kT=kT))(st, nb)
+    box = simulate.npt_box(st)
+    assert float(jnp.linalg.det(box)) > 1.05 * float(jnp.linalg.det(box0)) and not bool(nb.overflow)
+    assert int(info.rebuilds) > 0
+    at.set_cell(np.asarray(box).T)
+    at.set_scaled_positions(np.asarray(st.position) % 1.0)
+    at.calc = ACECalculator(str(MODEL))
+    np.testing.assert_allclose(pot.force(st.position, nb, box=box), at.get_forces(), atol=1e-10)
+    np.testing.assert_allclose(quantity.stress(pot.energy, st.position, box, neighbor=nb),
+                               -at.get_stress(voigt=False), atol=1e-12)
+
+
 def test_shift_list_overflow_is_nan():
     _require_ffi()
     at = _cells()["small"]
@@ -252,14 +354,6 @@ def test_run_flags_a_block_too_long_for_the_skin():
     _, _, apply, st, nb = _hot_small(3000, 2.0)
     st, nb, info = jax.jit(lambda s, b: jaxmd.run(apply, s, b, 100, check_every=20))(st, nb)
     assert bool(nb.did_buffer_overflow) and int(info.redos) > 0
-
-
-def _x64_off():
-    """A context in which JAX defaults to float32 (the module enables x64)."""
-    if hasattr(jax, "enable_x64"):
-        return jax.enable_x64(False)
-    from jax.experimental import disable_x64
-    return disable_x64()
 
 
 @pytest.mark.parametrize("planned", [None, False])
