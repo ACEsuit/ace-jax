@@ -707,3 +707,150 @@ With `SI_TESTS_ELASTIC_FMAX=1e-3` (bulk_diamond only, all four sizes):
   the models reaching the target are unchanged) and the figures rebuilt
   (docs/dev/accuracy-cost-results.md). The fmax-0.05 results are kept in
   `runs/fp32_step3/bulk_diamond_fmax0.05_backup/`.
+
+## Step 3 follow-up: GPU timing, and a float32 spline bug (2026-10-17)
+
+### Float32 B-spline derivatives lost their precision (fixed, 0d22c7b)
+
+A cubic B-spline derivative is S'(x) = Σ_k w'_k c_k / h. Each float32 coefficient carries about
+6e-8 |c| of rounding, and the w'_k are O(1) with Σ w'_k = 0, so S' carries about 6e-8 |c| / h of
+noise. That noise grows with the interval count, and a cancelling readout then amplifies it. Splined
+radials (`to_spline`, learned radials) and radial tables (`radial_table`) were affected. Analytic
+radials, the default for fitted, non-learned models, were not: the QoI runs above used them.
+
+- **Fix:** `with_dtype` to a non-float64 dtype converts every spline table to a local form,
+  [c_{i-1} − c_i, c_i, c_{i+1} − c_i, c_{i+2} − c_i] per interval, built in float64
+  (`radial.spline_local`, `ACEModel.spline_local`, `PACEModel.spline_local`). The derivative then
+  reads only the differences, which are small and exact to float32 relative precision.
+- On a test table, the float32 S' error fell from 4.8e-2 to 8.2e-7 relative. A float32 splined
+  Cantor model now matches the analytic one (6.4e-7 relative force error; it was 2.2e-5).
+  `tests/test_spline_float32.py`.
+
+### A100 against A4500
+
+Float32 accuracy after the fix, `precision_check` against float64 (64 and 512 atoms, rattle 0.05 Å;
+the same on both GPUs):
+
+| model | max force error | force error, relative | energy error |
+|---|---|---|---|
+| o4d12 | 0.7–1.0 meV/Å | 3.4e-4 | 0.18–0.21 meV/atom |
+| o4d14 | 0.5–1.0 meV/Å | 1.9–3.2e-4 | 0.12–0.17 meV/atom |
+| o4d16 | 0.17–0.35 meV/Å | 0.6–1.2e-4 | 0.02 meV/atom |
+| o4d20 | 0.07–0.09 meV/Å | 2.4e-5 | ≤ 0.006 meV/atom |
+
+LAMMPS throughput, atom-steps/s (32768 atoms; Sulis A100 and the moriarty RTX A4500; spline_tol
+1e-10 as in the accuracy-cost plot):
+
+| model | A100 f64 | A100 f32 | gain | A4500 f64 | A4500 f32 | gain | A100 ML-PACE f64 | ML-PACE mixed |
+|---|---|---|---|---|---|---|---|---|
+| o4d12 | 2.37M | 3.54M | 1.50× | 0.529M | 2.30M | 4.3× | 3.89M | 6.20M |
+| o4d14 | 1.42M | 2.06M | 1.45× | 0.296M | 1.32M | 4.5× | 2.60M | 3.87M |
+| o4d16 | 0.819M | 1.04M | 1.27× | 0.234M | 0.722M | 3.1× | 1.81M | 2.36M |
+| o4d20 | 0.173M | 0.189M | 1.09× | 0.065M | 0.135M | 2.1× | 0.415M | 0.551M |
+
+- **The A100's FP64 tensor cores run DGEMM at about the FP32 SIMT rate (19.5 TF).** ace-jax traces
+  float32 matmuls at highest precision (no TF32), so float32 gains 1.1–1.5× there: only memory
+  traffic halves. On a card with throttled fp64 (A4500: 1/32 rate) the gain is 2.1–4.5×.
+- **TF32 does not change this.** With a `dot_general` hook (`bench/fp32/dot_algorithm.py`),
+  `TF32_TF32_F32_X3` gave the speed and accuracy of `F32_F32_F32`. Single-pass `TF32_TF32_F32`
+  was no faster either (3.52M against 3.54M at o4d12, within 1.5% at every size) and made the forces
+  wrong by 1.3–14% relative (35–400 meV/Å), so the hook did take effect. The matmuls are not the
+  bottleneck of the float32 step on the A100. ML-PACE columns: patched pace/kk, mode 3 (PR #102).
+- **ML-PACE mixed** (KOKKOS float, double accumulation) fails a 1e-5 per-atom energy parity at
+  o4d12–o4d16 (stock pace/kk 8.5e-5; patched modes 0 and 3: 1.8e-4, 1.2e-4). This is float
+  evaluation, not the patches. Double densities (`pace_ref/fast/0008`) reduce it to 3.3–3.9e-5,
+  which still fails, and cost speed (o4d20: 0.483M against 0.551M). The `mlpace-mixed` parity
+  tolerance is now 2e-4, the level of ace-jax float32. At 2e-4 all four sizes pass (job 2251382:
+  4.7e-5, 1.3e-4, 1.2e-4, 6.0e-6 eV/atom; max |ΔF| 0.51, 0.82, 0.11, 0.035 meV/Å, o4d12–o4d20).
+
+## When float32 is safe (2026-10-17)
+
+The tests above are examples. This section turns them into rules for other workflows. **Float32
+is safe when the quantity a workflow needs is large compared with the model's float32 noise, and
+when the workflow reads forces rather than small energy differences.** Both conditions are checked
+per model and per workflow, not per method.
+
+### The noise, and what sets it
+
+- **The model.** The noise is rounding inside each site energy, amplified by readout cancellation
+  (§4). It falls with model size and regularisation: 10× between o4d12 and o4d20 above. Less
+  regularised or larger-coefficient fits are worse. Record it per model: `precision_check`, or
+  `aj export --structure`, which warns above `PRECISION_WARN`.
+- **The structure.** Strongly distorted structures are worse: in step 1 (pacemaker models, 0.25 Å
+  rattle) the force errors were 5–25× those near equilibrium. Check the most distorted
+  structures the workflow visits (hot MD, defect cores, transition states), not only the
+  starting cell.
+- **The box (LAMMPS bundles only).** lammps-jax gives a float32 bundle float32 absolute positions,
+  so rij rounding grows with |x|: 2.3e-5 to 5.7e-5 relative force error from 43 Å to 174 Å boxes
+  (step 2). The ASE calculator forms displacements in float64. lammps-jax split positions (its PR #2, not yet adopted)
+  will remove this.
+- **Energy noise is per configuration, and it is deterministic.** The same structure gives the same
+  rounding, so the error is a bias in a static comparison, and a non-conservative force
+  component in dynamics. It does not average away like statistical noise.
+
+### Workflows, most to least tolerant
+
+| workflow | requirement | float32 status |
+|---|---|---|
+| MD sampling: NVT/NPT averages, RDFs, diffusion; NVE at 0.5–1 fs | thermal forces (~1 eV/Å) ≫ noise (≲1 meV/Å) | safe: no extra NVE drift over 40 ps (below) |
+| relaxation to fmax ≳ 3e-3 eV/Å | force-only optimiser (ODE12r) | shown on the silicon tests |
+| properties of relaxed states (elastic, defects, surfaces, phonons by finite differences of forces) | displacement × force constant ≫ force noise | ≤ 0.1 tolerance (o4d16, o4d20); 0.6 (o4d14) |
+| relaxation to fmax ≤ 1e-3 eV/Å; NEB/dimer to tight thresholds | threshold above the force noise floor | risky: ODE12r stalls near the floor; needs a noise-aware stop |
+| small energy differences of large cells | ΔE ≫ N × energy noise | risky: 216 atoms × 0.2 meV/atom ≈ 40 meV systematic, ~1 meV non-systematic |
+| energy line searches (L-BFGS/CG with Armijo or Wolfe), finite differences of energies | energy changes ≫ energy noise | fails |
+| free energy perturbation, thermodynamic integration; long NVE at 2 fs | unbiased energies; drift ≲ 1 meV/atom/ns | check against float64 |
+
+### Recipe for a new workflow
+
+1. Run `precision_check` on structures that represent the workflow, including its most
+   distorted ones.
+2. Compare the force error with the workflow's force tolerance (fmax, NEB tolerance, thermal
+   forces), and the energy error × cell size with the energy differences it needs.
+3. Use force-only optimisers. Do not set fmax below about 3× the measured force error.
+4. Repeat a few end points in float64. For statistical outputs (free energies, rates), repeat a
+   short trajectory in float64 and compare.
+5. Use float32 only where it is faster: on fp64-throttled GPUs (2–4.5×). On an A100 the gain is
+   1.1–1.5×, and float64 is the better default.
+
+### NVE energy conservation
+
+`bench/fp32/nve_drift.py` (`run_nve.sh`): LAMMPS NVE with lammps-jax bundles (matrix layout,
+default `spline_tol`), diamond Si rattled 0.05 Å, velocities at 1200 K (about 777 K after
+equipartition), velocity Verlet, RTX A4500 (shared with other GPU jobs, so the speeds are not
+timings). Etot per atom is relative to step 0. "Noise" is the RMS about the fitted line after 1 ps;
+"change" is the difference of the first and last 1 ps block means.
+
+| model | atoms | dt (fs) | ps | noise f64 / f32 (meV/atom) | drift f64 / f32 (meV/atom/ps) | change f64 / f32 (meV/atom) |
+|---|---|---|---|---|---|---|
+| o4d12 | 4096 | 0.5 | 20 | 0.0004 / 0.0108 | 5e-7 / −3e-5 | 0.0002 / −0.006 |
+| o4d12 | 4096 | 1 | 40 | 0.0014 / 0.0100 | 7e-5 / −4e-6 | 0.005 / 0.005 |
+| o4d12 | 4096 | 2 | 20 | 0.0059 / 0.0117 | 1.9e-4 / 1.05e-3 | 0.011 / 0.027 |
+| o4d16 | 4096 | 1 | 40 | 0.0013 / 0.0067 | 4e-5 / −3e-5 | 0.003 / −0.006 |
+| o4d20 | 4096 | 1 | 10 | 0.0012 / 0.0069 | 2.2e-4 / 3.3e-4 | 0.002 / 0.005 |
+| o4d12, hot (4000 K start, ~1570 K mean) | 4096 | 1 | 20 | 0.0030 / 0.0118 | 8.0e-4 / 7.1e-4 | 0.018 / 0.013 |
+| o4d12, 87 Å box | 32768 | 1 | 10 | 0.0006 / 0.0065 | 2.1e-4 / −5.3e-4 | 0.002 / −0.005 |
+
+- **Float32 adds energy noise, not drift.** At 0.5–1 fs, the float32 drift is no larger than
+  float64's, and its sign changes between runs and between the halves of a run. Over 10–40 ps no
+  float32 run changed Etot by more than 0.03 meV/atom.
+- **The float32 noise is a floor, independent of dt** (0.010–0.012 meV/atom at o4d12; 0.007 at
+  o4d16 and o4d20). The float64 noise is the integrator's O(dt²) oscillation. They are equal at
+  about 3 fs; at 2 fs the integrator already gives half the float32 floor.
+- **2 fs is the one possible exception.** Float32 drifted 1.05e-3 meV/atom/ps, with both halves
+  positive (2.3e-3, 1.1e-3), against 1.9e-4 in float64. That is at most about 1 meV/atom per ns
+  (about 4 K per ns), and only 2× the noise over 20 ps. A 100–200 ps pair would settle it.
+- **No box-size effect** at 87 Å: the 32768-atom run is as stable as the 4096-atom one. The
+  per-atom noise is smaller because the per-atom rounding partly averages over more atoms.
+- **The hot run** (large displacements) conserves energy as well in float32 as in float64.
+- **Speed in these runs:** float32 2.2–3.9× faster than float64 on the A4500.
+
+For MD this means: with a thermostat, float32 has no measurable effect on energy conservation. For
+long NVE runs at 1 fs, float32 is as good as float64 to within 0.03 meV/atom over 40 ps. At 2 fs,
+check the drift over the run length you need.
+
+### Not yet tested
+
+- NEB and dimer runs.
+- Multi-element models (Cantor, SiGe) and models far from their training data, where the
+  cancellation can be larger.
+- Free energy methods.

@@ -85,7 +85,8 @@ need the float32 speed and accept its error.
 
 To measure the float32 error of a model, use
 `ace_jax.calc.precision.precision_check(model, meta, atoms)`. It returns the
-energy, force and stress differences from float64 on `atoms`.
+energy, force and stress differences from float64 on `atoms`. See
+[Choose float64 or float32](howto/precision.md).
 
 ## LAMMPS
 
