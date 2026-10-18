@@ -74,6 +74,11 @@ gpu_mixed() {   # the same with KOKKOS_PREC=mixed (float compute, double accumul
 gpufork_mixed() { PREC=mixed _gpupatched lammps-pacekk-fork-mixed "$ROOT/lammps-user-pace-fork" lmp-pacekk-fork-mixed.sh \
                        0003-pacekk-team-rho-weights.patch 0005-pacekk-summed-neighbour-A.patch \
                        0006-pacekk-flat-offset-rho-weights.patch 0007-pacekk-segmented-weights.patch; }
+# gpufork_mixed_rho64: the same plus 0008 (densities summed in KK_ACC_FLOAT = double); $ROOT/lmp-pacekk-fork-mixed-rho64.sh
+gpufork_mixed_rho64() { PREC=mixed _gpupatched lammps-pacekk-fork-mixed-rho64 "$ROOT/lammps-user-pace-fork" lmp-pacekk-fork-mixed-rho64.sh \
+                       0003-pacekk-team-rho-weights.patch 0005-pacekk-summed-neighbour-A.patch \
+                       0006-pacekk-flat-offset-rho-weights.patch 0007-pacekk-segmented-weights.patch \
+                       0008-pacekk-double-densities.patch; }
 
 _gpupatched() {   # <tree name> <ML-PACE> <wrapper> <patch...>; $PREC: KOKKOS_PREC (default double)
   local T=$ROOT/$1 P=$2 W=$3 B; shift 3
