@@ -284,3 +284,27 @@ def test_shift_list_in_float32(planned):
         np.testing.assert_array_equal(np.asarray(nb2.count), np.asarray(nb.count))
     assert F.dtype == np.float32
     np.testing.assert_allclose(F, F0, atol=2e-4 * np.abs(F0).max())
+
+
+def test_overflow_flag_marks_a_tight_K_and_an_overflowed_list(cell):
+    """`overflow` is the explicit check behind the NaN: false with K >= the in-cutoff count,
+    true (and energy NaN) when a row has more in-cutoff neighbours than K."""
+    at, _, box, disp, _, R = cell
+    rc = jaxmd.potential(str(MODEL), disp, at.numbers).cutoff
+    _, nb = _list(disp, box, rc, R)
+    k = jaxmd.capacity(R, nb, disp, rc)
+    ok = jaxmd.potential(str(MODEL), disp, at.numbers, K=k)
+    tight = jaxmd.potential(str(MODEL), disp, at.numbers, K=k - 8)
+    assert not bool(jax.jit(ok.overflow)(R, nb)) and np.isfinite(float(ok.energy(R, nb)))
+    assert bool(jax.jit(tight.overflow)(R, nb)) and np.isnan(float(tight.energy(R, nb)))
+
+
+def test_overflow_flag_on_a_shift_list():
+    _require_ffi()
+    at = _cells()["small"]
+    box, R = jnp.asarray(at.cell.array.T), jnp.asarray(at.get_scaled_positions())
+    rc = jaxmd.potential(str(MODEL), None, at.numbers).cutoff
+    pot = jaxmd.potential(str(MODEL), None, at.numbers, K=96)
+    small = jaxmd.neighbor_list(box, rc, fractional_coordinates=True, capacity_multiplier=0.5).allocate(R)
+    big = jaxmd.neighbor_list(box, rc, fractional_coordinates=True).allocate(R)
+    assert bool(pot.overflow(R, small)) and not bool(pot.overflow(R, big))

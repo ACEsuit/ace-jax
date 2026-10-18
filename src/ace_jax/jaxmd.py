@@ -334,6 +334,7 @@ class Potential(NamedTuple):
     force: Callable       # force(R, neighbor, species=None, **kw) -> F (N, 3), Cartesian eV/A
     cutoff: float         # the model's rc: the r_cutoff of the JAX-MD list
     K: int | None         # compact slots per atom (None: the whole list)
+    overflow: Callable    # overflow(R, neighbor, **kw) -> () bool: list overflow or a row over K
 
 
 def potential(model, displacement_fn, species, meta=None, K=None, chunk=CHUNK_NODES, **calc_kw):
@@ -343,7 +344,10 @@ def potential(model, displacement_fn, species, meta=None, K=None, chunk=CHUNK_NO
     numbers (N,), fixed for the run (a `species=` keyword per call overrides it).
     `cutoff` is the model's rc, the `r_cutoff` to build the JAX-MD list with.
     `K` (int) compacts the list to K in-cutoff slots per atom (Dense format only);
-    None evaluates every list slot.  Other keywords go to ACECalculator, which
+    None evaluates every list slot.  K sized for rc + skin (`capacity(..., rc +
+    skin)`) cannot overflow between list rebuilds; sized for rc ("tight": fewer
+    model slots, ~1.5x faster forces) it can, as atoms move, and `overflow` says
+    when (energy and forces are then NaN, never truncated).  Other keywords go to ACECalculator, which
     builds the evaluation model.
 
     `energy` is JAX-MD's energy-function contract: give it to any integrator,
@@ -379,15 +383,30 @@ def potential(model, displacement_fn, species, meta=None, K=None, chunk=CHUNK_NO
     node_z0 = node_z_of(species)
     park = jnp.asarray([1.0, 0.0, 0.0]) * m.pad_cutoff()
 
-    def graph(R, neighbor, kw):
-        """Dense or shift list -> (rij, j, mask) on the model's rows; overflowed rows NaN."""
+    def rows(R, neighbor, kw):
+        """(rij_s, j_s, valid_s, bad0): the list's edges, which are within rc, and
+        whether the list itself overflowed."""
         if isinstance(neighbor, ShiftList):
             rij_s, j_s, live_s = neighbor.edges(R, kw.get("box"), kw.get("perturbation"))
             bad0 = neighbor.overflow | jnp.any(neighbor.count > neighbor.idx.shape[1])
         else:
             rij_s, j_s, live_s = _edges_dense(R, neighbor.idx, displacement_fn, kw)
-            bad0 = jnp.zeros((), bool)
-        valid_s = live_s & (jnp.sum(rij_s * rij_s, axis=-1) < rc * rc)
+            bad0 = jnp.asarray(getattr(neighbor, "did_buffer_overflow", False), bool)
+        return rij_s, j_s, live_s & (jnp.sum(rij_s * rij_s, axis=-1) < rc * rc), bad0
+
+    def overflow(R, neighbor, **kw):
+        """Whether energy and forces at R are invalid (NaN): the neighbour list
+        overflowed, or a row has more than K neighbours within rc.  A device
+        scalar: check it once per chunk of steps (as `did_buffer_overflow`) and
+        rebuild the potential with a larger K (`capacity`) and the list."""
+        if not dense(neighbor):
+            return jnp.asarray(neighbor.did_buffer_overflow, bool)
+        _, _, valid_s, bad0 = rows(jax.lax.stop_gradient(R), neighbor, kw)
+        return bad0 | (False if K is None else jnp.any(jnp.sum(valid_s, axis=1) > K))
+
+    def graph(R, neighbor, kw):
+        """Dense or shift list -> (rij, j, mask) on the model's rows; overflowed rows NaN."""
+        rij_s, j_s, valid_s, bad0 = rows(R, neighbor, kw)
         if K is None:
             rij, j, mask, bad = rij_s, j_s, valid_s, bad0
         else:
@@ -436,7 +455,7 @@ def potential(model, displacement_fn, species, meta=None, K=None, chunk=CHUNK_NO
         rij = jnp.where(mask[:, None], rij, park.astype(rij.dtype))
         return total_energy(m.site_energies(rij, node_z[i], node_z[j], i, N, node_z, mask))
 
-    return Potential(energy, force, rc, K)
+    return Potential(energy, force, rc, K, overflow)
 
 
 def min_image_ok(cell, cutoff):
