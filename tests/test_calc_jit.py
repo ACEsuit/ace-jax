@@ -47,7 +47,12 @@ def test_model_body_runs_once_per_shape(monkeypatch, layout, method):
         E.append(calc.results["energy"])
     assert calc.last_layout == layout
     assert len(calls) == 1                       # traced once, then the compiled call
-    assert E[0] == E[1] == E[2]
+    # the same structure three times: equal to summation-order roundoff, not bitwise.  On a GPU
+    # the sparse layout's segment sums are atomic scatter-adds, and matscipy-neighbours >= 1.1
+    # fills a GPU neighbour_matrix row in an unspecified order: 3-4 ulp spreads measured
+    # (gesi_sbessel, A4500, with ASE's list as well); 16 ulp of |E| keeps the check tight.
+    E = np.array(E)
+    assert np.all(np.abs(E - E[0]) <= 16 * np.spacing(abs(E[0]))), E - E[0]
 
 
 def test_last_timing_splits_neighbour_list_and_model():
