@@ -439,7 +439,8 @@ def test_cases_follow_the_code_table(tmp_path, monkeypatch):
     gpu = {(c["row"]["family"], c["row"]["code"], c["mode"], c["dtype"]) for c in cases("gpu")}
     cpu = {(c["row"]["family"], c["row"]["code"], c["mode"], c["dtype"]) for c in cases("cpu")}
     XL = {("mace", "mace-xl", "lammps", "float64"), ("mace", "mace-xl-f32", "lammps", "float32")}
-    assert gpu == {("ace", "acejax-ace", "lammps", "float64"), ("ace_lr", "acejax-ace", "lammps", "float64"),
+    JMD = {(f, "acejax-ace", m, "float64") for f in ("ace", "ace_lr") for m in ("jaxmd", "jaxmd-shift", "jaxmd-tight", "jaxmd-shift-tight", "lammps-tight")}
+    assert gpu == {("ace", "acejax-ace", "lammps", "float64"), ("ace_lr", "acejax-ace", "lammps", "float64"), *JMD,
                    ("ace_gp", "acejax-gp", "standalone", "float64"), ("pace", "acejax-pace", "lammps", "float64"),
                    ("pace", "mlpace", "lammps", "float64"), ("mace", "mace", "lammps", "float64"),
                    ("mace", "mace", "standalone", "float32"), *XL}                   # no gap on the GPU
@@ -456,6 +457,17 @@ def test_cases_follow_the_code_table(tmp_path, monkeypatch):
     assert all(c["row"]["size"] != "o3d10" for c in cases("cpu"))                      # failed fits are skipped
     assert all(c["row"]["family"] != "gap18_published" for c in cases("cpu"))
     assert [c["row"]["family"] for c in cases("cpu", only="ace/o3d8")] == ["ace", "ace"]       # ace-jax, trim
+
+
+def test_jaxmd_modes_are_opt_in(tmp_path, monkeypatch):
+    from accuracy_cost.timing import cases, select
+    _fake_runs(tmp_path, monkeypatch)
+    cs = cases("gpu")
+    modes = lambda sel: {c["mode"] for c in sel}
+    assert modes(select(cs)) == {"lammps", "standalone"}
+    assert modes(select(cs, modes=["jaxmd"])) == {"jaxmd"}
+    assert modes(select(cs, modes=["lammps-tight", "jaxmd-tight"])) == {"lammps-tight", "jaxmd-tight"}
+    assert {c["row"]["family"] for c in select(cs, modes=["jaxmd"])} == {"ace", "ace_lr"}
 
 
 def test_mace_xl_rows_name_the_xl_model_its_lammps_and_a_cpu_reference(tmp_path, monkeypatch):
