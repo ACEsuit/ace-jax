@@ -1,6 +1,36 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 (2026-10-19)
+
+**Highlights.** float32 is now a real float32 calculation in LAMMPS bundles
+and calculators, and a new page tells you when it is safe. The linear fit can
+calculate its design rows in float32 (`--row-precision float32`). MD runs on
+the device with JAX-MD (`ace_jax.jaxmd`). Larger models use the DAG product
+basis automatically. `aj fit` fits linear ACE by default.
+
+**Upgrading from 0.3.0.** Saved models are unchanged.
+- `aj fit` without `--m-per-species` now fits linear ACE (it was the hybrid
+  ACE + GP model). Give `--m-per-species` > 0 for the hybrid model.
+- A float32 bundle or calculator made with 0.3.0 from a model loaded under
+  x64 calculated in float64. Export it again for the float32 speed.
+- Models with 4,000 or more chain-form multiplications per atom use the DAG
+  product basis. Results agree with 0.3.0 to round-off. Set `aa_dag=None`
+  for the 0.3.0 form.
+
+### Fixed
+
+- **float32 export and calculators calculated in float64.** With x64 enabled,
+  `export_lammps(dtype="float32")`, `aj export --dtype float32` and
+  `ACECalculator(dtype=float32)` on a model already loaded traced a float64
+  program. Only the inputs and outputs were float32, so there was no speed-up.
+  The model is now converted to float32 after the lean form and the splines
+  are made in float64 (`ace_jax.eval.with_dtype`).
+- **float32 spline tables lost the precision of their derivatives.** Splined
+  and learned radials and radial tables in float32 had a relative derivative
+  error of up to 5e-2. The tables are now kept in a local difference form,
+  made in float64: 8e-7.
+- The design rows of a fit are calculated at the highest matmul precision.
+  TF32 on an A100 corrupted float32 force rows.
 
 ### Changed
 
@@ -19,6 +49,21 @@
 
 ### Added
 
+- **float32 design rows for the linear fit.** `aj fit --row-precision
+  float32` (`FitConfig.row_precision`) calculates the design rows, and on a GPU
+  the QR merges, in float32. The evidence, the MAP and the posterior stay in
+  float64. A silicon o4d16 fit took 169 s instead of 265 s on an RTX A4500,
+  with the RMSE within 1%. The GP arm and `--learn-radial` refuse it.
+  `--row-check` is an optional stability check of the result.
+- **The float32 error of a model.** `ace_jax.calc.precision.precision_check`
+  compares float32 with float64 on a structure. `export_lammps(...,
+  precision_structure=atoms)` and `aj export --dtype float32 --structure`
+  record it in the bundle and warn above 0.1 meV/atom or a relative force
+  error of 1e-4.
+- **A new page, "Choose float64 or float32"** (`howto/precision`), gives the
+  speed-up by GPU (2.1-4.5x on an RTX A4500, 1.3-1.5x on an A100), the errors,
+  and which tasks can use float32. Energy line searches fail in float32: use
+  a force-only optimiser, for example ASE `ODE12r`.
 - **MD with JAX-MD (`ace_jax.jaxmd`, the new `jaxmd` extra).**
   `jaxmd.potential` gives the energy and forces of a model to the
   integrators of JAX-MD. The neighbour list, the model and the integrator
@@ -46,6 +91,8 @@
 
 ### LAMMPS export
 
+- Bundle row blocks are sized to an element target scaled by the memory of
+  the target GPU. o4d16 runs up to 2.65x faster on an RTX A4500.
 - lammps-jax is on PyPI. Install it with the new `lammps` extra:
   `pip install "ace-jax[lammps]"`. The CI tests the export with lammps-jax
   0.2.0.
