@@ -83,10 +83,12 @@ def block_rows(model, n, k, itemsize):
     sizes it: estimate_a_bytes underestimates the lean widths), within this
     device's dense budget and block target; MIN_BLOCK_ROWS when none fits.  Above
     one block the rows run under lax.map + checkpoint, so memory follows the block,
-    not n.  Si, 32768 atoms, RTX 4000 Ada, float64 (jaxmd-shift): o4d20 10.2 -> 1.3
-    GB of GPU memory and 366 -> 309 ms/step against fixed 16384-row blocks; the
-    checkpoint recompute makes small models slower (o3d10 44 -> 49 ms, as the
-    bundles: lammps-jax 50 ms).  An int `chunk` to `potential` trades back."""
+    not n.  Si, 32768 atoms, RTX 4000 Ada, float64, against fixed 16384-row blocks:
+    o4d20 368 -> 308 ms/step, and the model's GPU memory 10.2 -> 1.3 GB (measured
+    with an O(N K) neighbour list: JAX-MD's own cell list adds ~4 GB of build
+    temporaries); the checkpoint recompute makes small models slower (o3d10 43 ->
+    48 ms, as the bundles: lammps-jax 50 ms).  An int `chunk` to `potential` trades
+    back.  docs/dev/jax-md-results.md."""
     from .calc.point import dense_budget_bytes, device_memory_bytes
     from .export.lammps import MIN_BLOCK_ROWS, block_rows_for, block_target_elems
     return (block_rows_for(model, n, k, dense_budget_bytes(), itemsize,
