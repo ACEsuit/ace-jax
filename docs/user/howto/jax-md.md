@@ -115,6 +115,16 @@ Then make the potential again with a larger `K`, and run the chunk again.
 The integrator state keeps the forces of the last step. Calculate them again
 with the new potential before you run the chunk, as in the example.
 
+## Memory
+
+The model calculates the atoms in blocks of rows. Only one block at a time
+is in the memory of the device. `potential` selects the block size as
+`export_lammps` does for LAMMPS. Thus the memory is approximately the same
+as for a LAMMPS bundle.
+
+To set the block size, give `chunk=` (rows) to `potential`. A larger block
+can be faster for a small model, but it uses more memory.
+
 ## Small cells, slabs and NPT (experimental)
 
 `jaxmd.neighbor_list` makes a neighbour list with matscipy-neighbours on the

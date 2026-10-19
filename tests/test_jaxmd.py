@@ -53,6 +53,22 @@ def test_energy_forces_stress_match_the_calculator(cell, fmt, compact):
     np.testing.assert_allclose(jax.jit(pot.force)(R, nb), F0, atol=1e-10)   # every format
 
 
+def test_row_blocks_are_exact_and_sized_as_the_bundles(cell):
+    """chunk="auto" (one block at 216 rows) and 64-row blocks under lax.map + checkpoint agree;
+    the auto size is the lammps-jax bundles' rule (block_rows_for on the full model)."""
+    from ace_jax.export.lammps import BUNDLE_BLOCK_ROWS, MIN_BLOCK_ROWS
+    at, _, box, disp, _, R = cell
+    pot = jaxmd.potential(str(MODEL), disp, at.numbers)
+    _, nb = _list(disp, box, pot.cutoff, R)
+    K = jaxmd.capacity(R, nb, disp, pot.cutoff)
+    a, b = (jaxmd.potential(str(MODEL), disp, at.numbers, K=K, chunk=c) for c in ("auto", 64))
+    assert abs(float(jax.jit(a.energy)(R, nb)) - float(jax.jit(b.energy)(R, nb))) < 1e-12 * len(at)
+    np.testing.assert_allclose(jax.jit(a.force)(R, nb), jax.jit(b.force)(R, nb), atol=1e-12)
+    m = aj_load(str(MODEL))[0]
+    assert jaxmd.block_rows(m, 216, K, 8) == 216
+    assert MIN_BLOCK_ROWS <= jaxmd.block_rows(m, 1 << 20, 54, 8) <= BUNDLE_BLOCK_ROWS
+
+
 def test_overflow_is_nan_not_truncation(cell):
     at, _, box, disp, _, R = cell
     pot = jaxmd.potential(str(MODEL), disp, at.numbers)

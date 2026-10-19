@@ -347,6 +347,10 @@ init, apply = simulate.nve(pot.force, shift, 1.0 / 10.18)   # dt 1 fs (time unit
   move. Too small a K, or an overflowed list (Dense, Sparse or ShiftList), makes
   energy and forces NaN, never truncated; `pot.overflow` is the explicit check.
 - Sparse JAX-MD lists work without `K` (K is refused for them).
+- Memory: rows run in blocks (`chunk="auto"`: `jaxmd.block_rows`, the lammps-jax
+  bundles' `block_rows_for` rule, lax.map + checkpoint above one block). An int
+  `chunk` fixes it: one large block avoids the checkpoint recompute (faster for
+  small float64 models) at several times the memory.
 - Calculator keywords (`spline_tol`, `lean`, `aa_dag`, `dtype`, ...) pass through
   `potential`: it evaluates exactly `ACECalculator`'s model.
 - JAX-MD's own list is minimum-image: every box width must exceed 2 (rc + skin)

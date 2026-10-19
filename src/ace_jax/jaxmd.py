@@ -58,7 +58,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from .calc.skin import compact, round_k
-from .eval.edge_model import CHUNK_NODES, total_energy
+from .eval.edge_model import total_energy
 
 
 def _jax_md(module):
@@ -103,9 +103,29 @@ def eval_model(model, meta=None, **calc_kw):
     """(eval_model, meta, cutoff): the model `ACECalculator(model, meta, **calc_kw)`
     evaluates, so the adapter takes every calculator option (lean, spline_tol,
     radial_table, aa_dag, energy_reference, dtype)."""
-    from .calc.point import ACECalculator
-    calc = ACECalculator(model, meta, **calc_kw)
+    calc = _calc(model, meta, **calc_kw)
     return calc.eval_model, calc.meta, calc.cutoff
+
+
+def _calc(model, meta=None, **calc_kw):
+    from .calc.point import ACECalculator
+    return ACECalculator(model, meta, **calc_kw)
+
+
+def block_rows(model, n, k, itemsize):
+    """Rows per dense block for n atoms and k slots: the rule of the lammps-jax
+    bundles (`export.lammps.block_rows_for` on the full `model`, as export_lammps
+    sizes it: estimate_a_bytes underestimates the lean widths), within this
+    device's dense budget and block target; MIN_BLOCK_ROWS when none fits.  Above
+    one block the rows run under lax.map + checkpoint, so memory follows the block,
+    not n.  Si, 32768 atoms, RTX 4000 Ada, float64 (jaxmd-shift): o4d20 10.2 -> 1.3
+    GB of GPU memory and 366 -> 309 ms/step against fixed 16384-row blocks; the
+    checkpoint recompute makes small models slower (o3d10 44 -> 49 ms, as the
+    bundles: lammps-jax 50 ms).  An int `chunk` to `potential` trades back."""
+    from .calc.point import dense_budget_bytes, device_memory_bytes
+    from .export.lammps import MIN_BLOCK_ROWS, block_rows_for, block_target_elems
+    return (block_rows_for(model, n, k, dense_budget_bytes(), itemsize,
+                           target=block_target_elems(device_memory_bytes())) or MIN_BLOCK_ROWS)
 
 
 def _edges_dense(R, idx, displacement_fn, kw):
@@ -391,7 +411,7 @@ class Potential(NamedTuple):
     overflow: Callable    # overflow(R, neighbor, **kw) -> () bool: list overflow or a row over K
 
 
-def potential(model, displacement_fn, species, meta=None, K=None, chunk=CHUNK_NODES, **calc_kw):
+def potential(model, displacement_fn, species, meta=None, K=None, chunk="auto", **calc_kw):
     """`Potential(energy, force, cutoff, K, overflow)` for JAX-MD.
 
     `model` is a path or a loaded model (then pass `meta`).  `species` is the atomic
@@ -403,7 +423,9 @@ def potential(model, displacement_fn, species, meta=None, K=None, chunk=CHUNK_NO
     None evaluates every list slot.  K sized for rc + skin (`capacity(..., rc +
     skin)`) cannot overflow between list rebuilds; sized for rc ("tight": fewer
     model slots, ~1.5x faster forces) it can, as atoms move, and `overflow` says
-    when (energy and forces are then NaN, never truncated).  Other keywords go to
+    when (energy and forces are then NaN, never truncated).  `chunk` is the rows
+    per dense block: "auto" sizes it at trace time from N and the slots as the
+    lammps-jax bundles do (`block_rows`); an int fixes it.  Other keywords go to
     ACECalculator, which builds the evaluation model.
 
     `energy` is JAX-MD's energy-function contract: give it to any integrator,
@@ -423,7 +445,8 @@ def potential(model, displacement_fn, species, meta=None, K=None, chunk=CHUNK_NO
     are passed to `displacement_fn`, or to the ShiftList's edge vectors."""
     if "cutoff" in calc_kw:   # the list is built with the model's rc (`cutoff`); a different one would not match
         raise ValueError("potential() uses the model's cutoff (jaxmd.cutoff(model)); do not pass cutoff=")
-    m, meta, rc = eval_model(model, meta, **calc_kw)
+    calc = _calc(model, meta, **calc_kw)
+    m, meta, rc, full = calc.eval_model, calc.meta, calc.cutoff, calc.model
     lut = np.full(119, -1, np.int32)
     for i, z in enumerate(meta["elements"]):
         lut[int(z)] = i
@@ -489,7 +512,9 @@ def potential(model, displacement_fn, species, meta=None, K=None, chunk=CHUNK_NO
 
     def site_energies_dense(rij, j, mask, node_z):
         zi = jnp.broadcast_to(node_z[:, None], j.shape)
-        return m.site_energies_dense_blocked(rij, zi, node_z[j], mask, node_z, chunk)
+        b = (block_rows(full, j.shape[0], j.shape[1], jnp.dtype(rij.dtype).itemsize)
+             if chunk == "auto" else int(chunk))
+        return m.site_energies_dense_blocked(rij, zi, node_z[j], mask, node_z, b)
 
     def dense(neighbor):
         """True for a Dense JAX-MD list or a ShiftList, False for a (full) Sparse one."""
