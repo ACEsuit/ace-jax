@@ -150,6 +150,22 @@ def unpack(out, n):
     return E, F, V, bool(drift), bool(overflow), k_max, n_edges
 
 
+def compact(valid_s, K):
+    """Slot map from a skin row to the K slots inside the cutoff: (order, mask,
+    csum).  Compact slot k of row i reads skin slot order[i, k]; mask marks the
+    live compact slots; csum is the row's running count of valid slots (cnt =
+    csum[:, -1], overflow where cnt > K).  In-cutoff slots keep their skin order:
+    compact slot k takes the (k+1)-th valid entry, found by a search in the row's
+    running count (gathers only; a per-row argsort was ~1 ms at 8k atoms on an
+    A100)."""
+    csum = jnp.cumsum(valid_s.astype(jnp.int32), axis=1)
+    want = jnp.arange(1, K + 1, dtype=jnp.int32)
+    order = jax.vmap(lambda c: jnp.searchsorted(c, want, side="left"))(csum)
+    order = jnp.minimum(order, valid_s.shape[1] - 1)
+    # slots past the row's count are padding, whatever `order` clipped to
+    return order, want[None, :] <= csum[:, -1:], csum
+
+
 def step(model, u, arrays, rc, K):
     """Skin list -> compact (n, K) graph -> packed ((E, F, V), (drift, overflow,
     k_max, n_edges)); see `unpack`.  u (n, 3): displacements since the build
@@ -157,20 +173,11 @@ def step(model, u, arrays, rc, K):
     an atom has moved more than skin / 2; overflow: a row has more than K
     neighbours inside the cutoff.  Either means the result is not to be used."""
     idx_s, rij0_s, live_s, rev_s, node_z, half_skin = arrays
-    Ks = idx_s.shape[1]
     rij_s = rij0_s + (u[idx_s] - u[:, None, :])
     r2 = jnp.sum(rij_s * rij_s, axis=-1)
     valid_s = live_s & (r2 < rc * rc)
-    # in-cutoff slots first, in their skin order: compact slot k takes the
-    # (k+1)-th valid entry, found by a search in the row's running count (gathers
-    # only; a per-row argsort was ~1 ms at 8k atoms on an A100)
-    csum = jnp.cumsum(valid_s.astype(jnp.int32), axis=1)
+    order, mask, csum = compact(valid_s, K)
     cnt = csum[:, -1]
-    want = jnp.arange(1, K + 1, dtype=jnp.int32)
-    order = jax.vmap(lambda c: jnp.searchsorted(c, want, side="left"))(csum)
-    order = jnp.minimum(order, Ks - 1)
-    # slots past the row's count are padding, whatever `order` clipped to
-    mask = want[None, :] <= cnt[:, None]
     idx = jnp.where(mask, jnp.take_along_axis(idx_s, order, axis=1), 0)
     pad = jnp.asarray([1.0, 0.0, 0.0], u.dtype) * model.pad_cutoff()
     rij = jnp.where(mask[..., None], jnp.take_along_axis(rij_s, order[..., None], axis=1), pad)

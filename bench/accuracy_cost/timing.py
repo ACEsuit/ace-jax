@@ -5,7 +5,7 @@ stops (--force-busy skips the wait; rows record it and their own load sample); g
 LAMMPS model on LAMMPS-vs-own-evaluator parity first.
 
     python -m accuracy_cost.timing {gpu,cpu} [--only fam[/size]] [--n MAIN CHECK]
-        [--repeats K] [--results PATH] [--work DIR] [--force-busy] [--redo]
+        [--codes C ...] [--modes M ...] [--repeats K] [--results PATH] [--work DIR] [--force-busy] [--redo]
 
 Run from bench/ (or with it on PYTHONPATH).  Each case and each gate runs in a
 fresh child process (`--child`, the env JSON's `python`) so no JAX/torch state
@@ -40,11 +40,20 @@ KEY = ("code", "family", "size", "dtype", "mode", "device")
 # ACEJAX_AC_ACE_DTYPES (e.g. "float64,float32"): the ace family's ace-jax precisions; float32 bundles are
 # exported as true float32 programs (export_lammps casts the traced model; docs/dev/fp32-results.md)
 ACE_DTYPES = tuple(os.environ.get("ACEJAX_AC_ACE_DTYPES", "float64").split(","))
-PLAN = {"ace": [("acejax-ace", {"cpu": "standalone", "gpu": "lammps"}, ACE_DTYPES),
+# JAX-MD (scaling/run_jaxmd.py): the whole MD step in one jit on the device, against the same
+# models' LAMMPS rows; opt-in (--modes jaxmd jaxmd-tight lammps-tight), GPU only, in the ace family's precisions.
+# A further spec of the same code: rows are keyed on mode
+# JAX-MD's cell list; "-tight": model slots for rc pairs ("cutoff" slots)
+JAXMD_MODES = ("jaxmd", "jaxmd-tight")
+LAMMPS_TIGHT = "lammps-tight"   # lammps-jax with run_lammps' "cutoff" slots (opt-in, as the JAX-MD modes)
+OPT_IN_MODES = (*JAXMD_MODES, LAMMPS_TIGHT)
+JAXMD = [("acejax-ace", {"gpu": m}, ACE_DTYPES) for m in OPT_IN_MODES]
+PLAN = {"ace": [("acejax-ace", {"cpu": "standalone", "gpu": "lammps"}, ACE_DTYPES), *JAXMD,
                 # ACEpotentials.jl's PR 309 LAMMPS export of the same fit (accuracy_cost/build_trim.py: the
                 # juliac --trim library, pair_style ace; CPU only); only where the env json names `lmp_ace`
                 ("acepotentials-trim", {"cpu": "lammps"}, ("float64",))],
-        "ace_lr": [("acejax-ace", {"cpu": "standalone", "gpu": "lammps"}, ("float64",))],
+        "ace_lr": [("acejax-ace", {"cpu": "standalone", "gpu": "lammps"}, ("float64",)),
+                   *[("acejax-ace", {"gpu": m}, ("float64",)) for m in OPT_IN_MODES]],
         # PACE-shaped ACE (pacemaker's per-order caps, SBessel radials; feat/sbessel-radials + basis caps):
         # timed as deployed, like ace / ace_lr (lean; an SBessel radial is never splined, learned or not)
         "ace_wl": [("acejax-ace", {"cpu": "standalone", "gpu": "lammps"}, ("float64",))],   # wl_ladder/PLAN.md
@@ -284,7 +293,9 @@ def gate_model(row, device, env, work):
                     E0, F0 = parity._quip_ef(row["path"], at, row["quip_label"])
                     E1, F1 = parity._lammps_ef("gap", row["path"], row["elements"], at, device, lmp, w,
                                                pair_extra=row["quip_label"])
-                chk.update(parity.compare(E0, F0, E1, F1, len(at), parity.TOL.get(code, parity.TOL[style])))
+                tol = parity.TOL["acejax-splined" if style == "acejax" and "spline_tol" in row
+                                 else code if code in parity.TOL else style]
+                chk.update(parity.compare(E0, F0, E1, F1, len(at), tol), tol=list(tol))
             except Exception as ex:                                # a missing style is a failed gate
                 chk.update({"status": "error", "error": parity.error_summary(ex)})
             checks.append(chk)
@@ -321,14 +332,18 @@ def time_case(c, device, n, env, work, prev=None):
     """One timed run: run_standalone.run_case, run_gpumd.run_case or run_lammps.run_case."""
     from scaling import run_gpumd, run_lammps, run_standalone
     row = c["row"]
+    if c["mode"] in JAXMD_MODES:
+        from scaling import run_jaxmd
+        return run_jaxmd.run_case(row, n, c["dtype"], device, prev=prev, mode=c["mode"])
     if c["mode"] == "standalone":
         return run_standalone.run_case(row, n, c["dtype"], device)
+    slots = "cutoff" if c["mode"] == LAMMPS_TIGHT else "skin"
     if c["mode"] == "gpumd":
         return run_gpumd.run_case(row, n, device, env["gpumd"], work, prev)
     lmp, pjrt = lammps_for(row["code"], device, env)
     ranks, threads = (CPU_RANKS, CPU_THREADS) if device == "cpu" else (1, 1)
     return run_lammps.run_case(row, n, c["dtype"], device, lmp, ranks, work, pjrt=pjrt, prev=prev,
-                               threads=threads, aceplugin=env.get("ace_plugin"))
+                               threads=threads, slots=slots, aceplugin=env.get("ace_plugin"))
 
 
 def lammps_for(code, device, env):
@@ -349,7 +364,10 @@ def lammps_for(code, device, env):
 
 def _child_main(kind, payload):
     p = json.loads(payload)
-    if kind == "gate":
+    if kind == "gate" and p.get("mode") in JAXMD_MODES:
+        from scaling import run_jaxmd
+        r = run_jaxmd.gate(p["row"], p["mode"])
+    elif kind == "gate":
         r = gate_model(p["row"], p["device"], p["env"], p["work"])
     else:
         r = time_case(p["case"], p["device"], p["n"], p["env"], p["work"], p.get("prev"))
@@ -390,7 +408,8 @@ def subprocess_runner(env, device):
 
     def gate(c):
         work = pathlib.Path(env["_work"]) / "parity" / c["row"]["name"]
-        return child("gate", {"row": c["row"], "device": device, "env": env, "work": str(work)}, None)
+        return child("gate", {"row": c["row"], "device": device, "env": env, "work": str(work),
+                              "mode": c["mode"]}, None)
     return runner, gate
 
 
@@ -431,12 +450,13 @@ def run_cases(device, cs, runner, gate, results, n, repeats, work, meta, redo=Fa
         if done.get(key, {}).get("status") in keep:
             continue
         base = {**ident, "mode": c["mode"], "n_params": r0.get("n_params"), "host": host, **meta}
-        if c["mode"] in ("lammps", "gpumd"):        # gated: LAMMPS, and GPUMD against CPUNEP
-            gkey = tuple({**ident, "dtype": "float64", "mode": "parity"}.get(f) for f in KEY)
+        if c["mode"] in ("lammps", LAMMPS_TIGHT, "gpumd", *JAXMD_MODES):   # gated: LAMMPS, GPUMD against CPUNEP, JAX-MD
+            gmode = f"parity-{c['mode']}" if c["mode"] in JAXMD_MODES else "parity"   # one gate per JAX-MD line
+            gkey = tuple({**ident, "dtype": "float64", "mode": gmode}.get(f) for f in KEY)
             g = done.get(gkey) if done.get(gkey, {}).get("status") in ("parity_ok", "unsupported") else None
             if g is None:
                 s = ready()
-                g = {**ident, "dtype": "float64", "mode": "parity", "host": host, **meta, **s, **gate(c)}
+                g = {**ident, "dtype": "float64", "mode": gmode, "host": host, **meta, **s, **gate(c)}
                 common.upsert_jsonl(results, g, KEY); done[gkey] = g
             if g["status"] != "parity_ok":
                 st = "unsupported" if g["status"] == "unsupported" else "parity_failed"
@@ -457,7 +477,7 @@ def run_cases(device, cs, runner, gate, results, n, repeats, work, meta, redo=Fa
                     **{f: check[f] for f in ("layout", "matrix_overflow") if f in check}}
         mains = [runner(c, n_main, d / str(n_main) / str(k), prev) for k in range(repeats)]
         main = _median_row(mains)
-        row = {**main, **base, **s, "parity": "parity_ok" if c["mode"] in ("lammps", "gpumd") else "not_applicable",
+        row = {**main, **base, **s, "parity": "parity_ok" if c["mode"] in ("lammps", LAMMPS_TIGHT, "gpumd", *JAXMD_MODES) else "not_applicable",
                "n_atoms": n_main, "check_n_atoms": n_check, "check_status": check.get("status"),
                "check_step_s": check.get("step_s"), "check_layout": check.get("layout"),
                # GPU memory (NVML) and host RSS: the largest over the repeats (scaling.sweep.run_capped)
@@ -472,6 +492,12 @@ def run_cases(device, cs, runner, gate, results, n, repeats, work, meta, redo=Fa
               row.get("atom_steps_per_s"), flush=True)
 
 
+def select(cs, codes=None, modes=None):
+    """The cases of these codes and modes; without `modes`, every mode but JAX-MD's (opt-in)."""
+    return [c for c in cs if (not codes or c["row"]["code"] in codes)
+            and (c["mode"] in modes if modes else c["mode"] not in OPT_IN_MODES)]
+
+
 def main(argv=None):
     import argparse
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -479,6 +505,8 @@ def main(argv=None):
     ap.add_argument("--only", help="family or family/size")
     ap.add_argument("--n", nargs=2, type=int, metavar=("MAIN", "CHECK"), help="override N (multiples of 8)")
     ap.add_argument("--codes", nargs="+", help="only these codes (e.g. mace-xl mace-xl-f32)")
+    ap.add_argument("--modes", nargs="+", help="only these modes; the opt-in modes (JAX-MD's and lammps-tight) "
+                    "run only when named here")
     ap.add_argument("--repeats", type=int, default=REPEATS)
     ap.add_argument("--results", help="default results/lestrade-<device>.jsonl")
     ap.add_argument("--work", help="default $ACEJAX_AC_ROOT/runs/accuracy_cost/timing/<results stem>")
@@ -502,8 +530,7 @@ def main(argv=None):
           and (c["row"]["code"] != TRIM or env.get("lmp_ace"))
           and (c["row"]["code"] != "mlpace-mixed" or env.get("lmp_mixed"))
           and (c["mode"] != "gpumd" or env.get("gpumd"))]    # optional codes: only where the env json names them
-    if a.codes:
-        cs = [c for c in cs if c["row"]["code"] in a.codes]
+    cs = select(cs, a.codes, a.modes)
     run_cases(a.device, cs, runner, gate,
               pathlib.Path(a.results or RESULTS / f"lestrade-{a.device}.jsonl"),
               n=tuple(a.n) if a.n else N[a.device], repeats=a.repeats, work=work, meta=meta, redo=a.redo,

@@ -20,6 +20,7 @@ project.
 | `ace-jax[cuda]` | `jax[cuda12]` | running on an NVIDIA GPU |
 | `ace-jax[fast-neighbours]` | matscipy-neighbours | faster neighbour lists (ASE's list is the fallback) |
 | `ace-jax[lammps]` | lammps-jax | LAMMPS export |
+| `ace-jax[jaxmd]` | jax-md (and approximately 40 dependencies, for example flax and pymatgen) | [MD with JAX-MD](howto/jax-md.md) |
 
 You can combine extras, for example `ace-jax[gp,cuda]`.
 

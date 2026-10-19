@@ -72,7 +72,7 @@ def pace_fixture(path):
 
 def require_optional(module):
     """`pytest.importorskip(module)`, except under ACEJAX_REQUIRE_OPTIONAL (the CI
-    job that installs lammps-jax and matscipy-neighbours) a missing module fails
+    job that installs lammps-jax, matscipy-neighbours and jax-md) a missing module fails
     the test, so a broken install cannot pass as all-skipped.  Reads the env at
     call time."""
     if os.environ.get("ACEJAX_REQUIRE_OPTIONAL"):

@@ -48,9 +48,9 @@ reference.
 pip install ace-jax
 ```
 
-Extras: `"ace-jax[cuda]"` (CUDA 12 JAX), `"ace-jax[gp]"` (the Pathfinder rung)
-`"ace-jax[fast-neighbours]"` (a C++ neighbour list) and `"ace-jax[lammps]"`
-(LAMMPS export with lammps-jax).
+Extras: `"ace-jax[cuda]"` (CUDA 12 JAX), `"ace-jax[gp]"` (the Pathfinder rung),
+`"ace-jax[fast-neighbours]"` (a C++ neighbour list), `"ace-jax[lammps]"`
+(LAMMPS export with lammps-jax) and `"ace-jax[jaxmd]"` (MD with JAX-MD).
 
 To build a new basis, ace-jax needs the `ace-jax-coupling` wheel. This core
 dependency is available for Linux x86_64 and aarch64, macOS arm64 and

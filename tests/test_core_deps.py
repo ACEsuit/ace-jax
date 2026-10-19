@@ -31,6 +31,15 @@ def test_module_level_imports_are_core_dependencies():
     assert not missing, f"module-level imports outside the core dependencies: {missing}"
 
 
+def test_jaxmd_without_jax_md_says_what_to_install(monkeypatch):
+    import pytest
+    from ace_jax import jaxmd                                      # importable without jax-md
+    monkeypatch.setitem(sys.modules, "jax_md", None)
+    monkeypatch.setitem(sys.modules, "jax_md.partition", None)    # import jax_md.partition -> ImportError
+    with pytest.raises(ImportError, match=r"ace-jax\[jaxmd\]"):
+        jaxmd._partition()
+
+
 def test_pathfinder_without_blackjax_says_what_to_install(monkeypatch):
     import pytest
     from ace_jax.fit.ladder import run_pathfinder

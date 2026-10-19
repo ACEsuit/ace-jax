@@ -314,6 +314,48 @@ load; faster only at large `nradbase`). Values are unchanged to roundoff.
   function. `pip install "ace-jax[fast-neighbours]"` (matscipy-neighbours,
   a C++ source build) gives faster neighbour lists; ASE's list is the fallback.
 
+### JAX-MD (MD fully on the device)
+
+`pip install "ace-jax[jaxmd]"`. User page: `docs/user/howto/jax-md.md`.
+
+```python
+import jax; jax.config.update("jax_enable_x64", True)
+import jax.numpy as jnp
+from jax_md import partition, simulate, space
+from ace_jax import jaxmd
+
+box = jnp.asarray(atoms.cell.array.T)              # JAX-MD: lattice vectors as columns
+disp, shift = space.periodic_general(box, fractional_coordinates=True)
+R = jnp.asarray(atoms.get_scaled_positions())
+rc = jaxmd.cutoff("model.npz")                      # from the file's metadata
+nf = partition.neighbor_list(disp, box, rc, dr_threshold=1.0, format=partition.Dense,
+                             fractional_coordinates=True)
+nbrs = jaxmd.allocate(nf, R)                        # not nf.allocate: JAX 0.11 workaround
+pot = jaxmd.potential("model.npz", disp, atoms.numbers, K=jaxmd.capacity(R, nbrs, disp, rc + 1.0))
+init, apply = simulate.nve(pot.force, shift, 1.0 / 10.18)   # dt 1 fs (time unit 10.18 fs)
+# jitted lax.fori_loop body: nbrs = nbrs.update(state.position); state = apply(state, neighbor=nbrs)
+# after each chunk: did_buffer_overflow -> allocate the list again; pot.overflow(...) or non-finite
+#   positions (an overflow mid-chunk) -> make the potential with a larger K (and re-jit), then
+#   state = state.set(force=pot.force(state.position, nbrs)) (the state caches forces); redo the chunk
+```
+
+- `pot.force` is `-grad(pot.energy)` (Cartesian, also with fractional positions);
+  `quantity.stress` and NPT integrators take `pot.energy`. JAX-MD's stress sign is
+  the opposite of ASE's.
+- `K` slots per atom: `capacity(..., rc + skin)` never overflows between list
+  builds; `capacity(..., rc)` (tight) is ~1.5x faster but can overflow as atoms
+  move. Too small a K, or an overflowed list (Dense or Sparse), makes
+  energy and forces NaN, never truncated; `pot.overflow` is the explicit check.
+- Sparse JAX-MD lists work without `K` (K is refused for them).
+- Memory: rows run in blocks (`chunk="auto"`: `jaxmd.block_rows`, the lammps-jax
+  bundles' `block_rows_for` rule, lax.map + checkpoint above one block). An int
+  `chunk` fixes it: one large block avoids the checkpoint recompute (faster for
+  small float64 models) at several times the memory.
+- Calculator keywords (`spline_tol`, `lean`, `aa_dag`, `dtype`, ...) pass through
+  `potential`: it evaluates exactly `ACECalculator`'s model.
+- JAX-MD's own list is minimum-image: every box width must exceed 2 (rc + skin)
+  (`jaxmd.min_image_ok`), else it silently misses neighbours.
+
 ### LAMMPS
 
 ```python

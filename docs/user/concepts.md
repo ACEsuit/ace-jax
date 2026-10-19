@@ -283,4 +283,5 @@ These pages use the words below with one meaning only.
 | arm | the model type that a fit uses: the linear model (`--m-per-species 0`) or the hybrid ACE + GP model |
 | evidence | the log marginal likelihood of the training data |
 | rung | one approximation of the hyperparameter posterior: `map` (the default), `laplace`, `pathfinder`, `vi`, `nuts` |
+| slot | one place in the fixed-size neighbour row of an atom. `K` slots for each atom set the cost of the model in JAX-MD and LAMMPS |
 | uncertainty shape | the per-atom 3×3 matrix $V$ of `--uq ard`, which shows where the model is not certain and in which direction |

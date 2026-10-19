@@ -126,8 +126,10 @@ _LOOP = re.compile(r"Loop time of ([\d.eE+-]+) on (\d+) procs for (\d+) steps wi
 def parse_log(text):
     loops = _LOOP.findall(text)
     loop_s, procs, steps, natoms = loops[-1]
+    builds = re.findall(r"Neighbor list builds = (\d+)", text)   # one per run: the last is the timed one
     return {"loop_s": float(loop_s), "step_s": float(loop_s) / int(steps), "procs": int(procs),
-            "n_atoms_end": int(natoms), "nan": bool(re.search(r"\bnan\b", text, re.I))}
+            "n_atoms_end": int(natoms), "nan": bool(re.search(r"\bnan\b", text, re.I)),
+            **({"neighbor_builds": int(builds[-1])} if builds else {})}
 
 
 def read_pe(text):

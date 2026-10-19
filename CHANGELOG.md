@@ -19,6 +19,15 @@
 
 ### Added
 
+- **MD with JAX-MD (`ace_jax.jaxmd`, the new `jaxmd` extra).**
+  `jaxmd.potential` gives the energy and forces of a model to the
+  integrators of JAX-MD. The neighbour list, the model and the integrator
+  then run on the device in one compiled program. The energy is the energy
+  of `ACECalculator` with the same options. `K` sets the slots for each
+  atom. If an atom has more neighbours than `K`, the energy and forces are
+  NaN, and `overflow` tells you. The model runs in blocks of atoms of the
+  size that `export_lammps` selects, so the memory is approximately that of a
+  LAMMPS bundle. See [Run MD with JAX-MD](https://acesuit.github.io/ace-jax/howto/jax-md/).
 - **`write_yace(model, path, summed=True)`** writes one A basis for all
   neighbour species, as ace-jax evaluates the model. The default writes each
   product once for each neighbour species. The summed form has far fewer
