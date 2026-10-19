@@ -344,7 +344,7 @@ init, apply = simulate.nve(pot.force, shift, 1.0 / 10.18)   # dt 1 fs (time unit
   the opposite of ASE's.
 - `K` slots per atom: `capacity(..., rc + skin)` never overflows between list
   builds; `capacity(..., rc)` (tight) is ~1.5x faster but can overflow as atoms
-  move. Too small a K, or an overflowed list (Dense, Sparse or ShiftList), makes
+  move. Too small a K, or an overflowed list (Dense or Sparse), makes
   energy and forces NaN, never truncated; `pot.overflow` is the explicit check.
 - Sparse JAX-MD lists work without `K` (K is refused for them).
 - Memory: rows run in blocks (`chunk="auto"`: `jaxmd.block_rows`, the lammps-jax
@@ -355,13 +355,6 @@ init, apply = simulate.nve(pot.force, shift, 1.0 / 10.18)   # dt 1 fs (time unit
   `potential`: it evaluates exactly `ACECalculator`'s model.
 - JAX-MD's own list is minimum-image: every box width must exceed 2 (rc + skin)
   (`jaxmd.min_image_ok`), else it silently misses neighbours.
-- EXPERIMENTAL `jaxmd.neighbor_list(box, rc, skin=1.0, fractional_coordinates=True)`:
-  a matscipy-neighbours list built on the device with image shifts (small, triclinic,
-  slab cells; NPT). Needs matscipy-neighbours with its XLA FFI
-  (libAtoms/matscipy-neighbours#10, unreleased). Pass `None` as the potential's
-  displacement_fn. On CUDA (planned build) update it every step; otherwise (CPU, or
-  a "planned build is not available" warning) use
-  `jaxmd.run(apply, state, nbrs, n_steps, check_every=10[, box_of=simulate.npt_box])`.
 
 ### LAMMPS
 

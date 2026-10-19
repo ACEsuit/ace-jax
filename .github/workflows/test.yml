@@ -107,8 +107,7 @@ jobs:
     # those skips into failures (tests/conftest.py `require_optional`), so a
     # broken install cannot pass as all-skipped.  lammps-jax's export is pure
     # Python + JAX (no compiled LAMMPS); the `lammps` extra, at the lock's version.
-    # The `jaxmd` extra runs tests/test_jaxmd.py (its matscipy-neighbours XLA FFI
-    # tests skip: that build is not released).
+    # The `jaxmd` extra runs tests/test_jaxmd.py.
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:

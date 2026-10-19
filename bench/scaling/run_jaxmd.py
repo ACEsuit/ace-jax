@@ -9,9 +9,8 @@ jitted `lax.fori_loop` over the steps -- neighbour-list update, model, NVE
 update -- so step_s includes everything LAMMPS's Loop time does, and nothing
 crosses to the host.
 
-mode "jaxmd": JAX-MD's own cell list; "jaxmd-shift": ace_jax.jaxmd.neighbor_list, a
-matscipy-neighbours list built on the device (its planned CUDA build: no host sync,
-O(N K) memory, any cell), updated every step the same way.  The force is JAX-MD's own autodiff, `quantity.force` of `ace_jax.jaxmd`'s
+mode "jaxmd": JAX-MD's own cell list, updated every step.  (The "jaxmd-shift" rows in
+results/ were run with the matscipy-neighbours list of branch feat/jaxmd-shiftlist.)  The force is JAX-MD's own autodiff, `quantity.force` of `ace_jax.jaxmd`'s
 energy (what `potential(...).force` is).  K, the model's slots per atom, is the LAMMPS bundles' exactly
 (neighbour_capacity, margin 8): "skin" slots for rc + skin pairs, so no MD-time
 overflow; the "-tight" modes ("cutoff" slots, as lammps-tight) for rc pairs, which
@@ -54,14 +53,10 @@ def _setup(row, at, dtype, mode, K=None):
     R = jnp.asarray(at.get_scaled_positions(), dt)
     kw = {"spline_tol": row["spline_tol"]} if "spline_tol" in row else {}
     rc = jaxmd.potential(row["path"], disp, at.numbers, dtype=dt, **kw).cutoff
-    shift_list, tight = mode.startswith("jaxmd-shift"), mode.endswith("-tight")
-    if shift_list:                                         # matscipy-neighbours on the device (ShiftList)
-        nf = jaxmd.neighbor_list(box, rc, skin=SKIN, fractional_coordinates=True)
-        nb, disp_k = nf.allocate(R), None
-    else:                                                  # JAX-MD's own cell list
-        nf = partition.neighbor_list(disp, box, rc, dr_threshold=SKIN, format=partition.Dense,
-                                     fractional_coordinates=True)
-        nb, disp_k = jaxmd.allocate(nf, R), disp
+    tight = mode.endswith("-tight")
+    nf = partition.neighbor_list(disp, box, rc, dr_threshold=SKIN, format=partition.Dense,
+                                 fractional_coordinates=True)
+    nb, disp_k = jaxmd.allocate(nf, R), disp
     if not K:   # the LAMMPS bundles' model slots exactly (run_lammps.capacity -> neighbour_capacity, margin 8):
         from ace_jax.export.lammps import neighbour_capacity   # "skin" (rc + skin pairs + 8: never overflows in MD)
         K = neighbour_capacity(at, rc, skin=SKIN, slots="cutoff" if tight else "skin", margin=8)["k_dense"]
@@ -83,7 +78,7 @@ def run_case(row, n_atoms, dtype, device, prev=None, mode="jaxmd"):
     at = supercell(row["system"], n_atoms, rattle=row.get("rattle", 0.0))
     from ace_jax import jaxmd
     rc = float(jaxmd.eval_model(row["path"])[2])
-    if not mode.startswith("jaxmd-shift") and not jaxmd.min_image_ok(at.cell.array, rc + SKIN):   # JAX-MD misses images
+    if not jaxmd.min_image_ok(at.cell.array, rc + SKIN):   # JAX-MD misses images
         return {**out, "status": "unsupported", "error": f"cell narrower than 2 (rcut + skin) = {2 * (rc + SKIN):.2f} A"}
     t0 = time.perf_counter()
     jax_, jnp, pot, force, nf, nb, R, shift, K = _setup(row, at, dtype, mode)
@@ -96,8 +91,7 @@ def run_case(row, n_atoms, dtype, device, prev=None, mode="jaxmd"):
         def body(i, c):                                    # k: steps whose update rebuilt the list
             s, b, k = c
             b2 = b.update(s.position)
-            ref = (lambda x: x.ref_frac) if mode.startswith("jaxmd-shift") else (lambda x: x.reference_position)
-            k = k + jnp.any(ref(b2) != ref(b)).astype(jnp.int32)
+            k = k + jnp.any(b2.reference_position != b.reference_position).astype(jnp.int32)
             return apply(s, neighbor=b2), b2, k
         return jax.lax.fori_loop(0, n, body, (st, nb, jnp.zeros((), jnp.int32)))
     # One static chunk of CHUNK steps, compiled by the warm-up and called repeatedly: a static trip count
@@ -129,7 +123,7 @@ def run_case(row, n_atoms, dtype, device, prev=None, mode="jaxmd"):
                 return out
             retries += 1
             from ace_jax import jaxmd
-            nb = nf.allocate(st.position) if mode.startswith("jaxmd-shift") else jaxmd.allocate(nf, st.position)
+            nb = jaxmd.allocate(nf, st.position)
             jax.block_until_ready(run(st, nb, CHUNK)[0].position)   # compile outside the timing
         st, nb = s2, nb2
         if not timed:

@@ -439,7 +439,7 @@ def test_cases_follow_the_code_table(tmp_path, monkeypatch):
     gpu = {(c["row"]["family"], c["row"]["code"], c["mode"], c["dtype"]) for c in cases("gpu")}
     cpu = {(c["row"]["family"], c["row"]["code"], c["mode"], c["dtype"]) for c in cases("cpu")}
     XL = {("mace", "mace-xl", "lammps", "float64"), ("mace", "mace-xl-f32", "lammps", "float32")}
-    JMD = {(f, "acejax-ace", m, "float64") for f in ("ace", "ace_lr") for m in ("jaxmd", "jaxmd-shift", "jaxmd-tight", "jaxmd-shift-tight", "lammps-tight")}
+    JMD = {(f, "acejax-ace", m, "float64") for f in ("ace", "ace_lr") for m in ("jaxmd", "jaxmd-tight", "lammps-tight")}
     assert gpu == {("ace", "acejax-ace", "lammps", "float64"), ("ace_lr", "acejax-ace", "lammps", "float64"), *JMD,
                    ("ace_gp", "acejax-gp", "standalone", "float64"), ("pace", "acejax-pace", "lammps", "float64"),
                    ("pace", "mlpace", "lammps", "float64"), ("mace", "mace", "lammps", "float64"),

@@ -41,10 +41,10 @@ KEY = ("code", "family", "size", "dtype", "mode", "device")
 # exported as true float32 programs (export_lammps casts the traced model; docs/dev/fp32-results.md)
 ACE_DTYPES = tuple(os.environ.get("ACEJAX_AC_ACE_DTYPES", "float64").split(","))
 # JAX-MD (scaling/run_jaxmd.py): the whole MD step in one jit on the device, against the same
-# models' LAMMPS rows; opt-in (--modes jaxmd jaxmd-shift jaxmd-tight jaxmd-shift-tight lammps-tight), GPU only, in the ace family's precisions.
+# models' LAMMPS rows; opt-in (--modes jaxmd jaxmd-tight lammps-tight), GPU only, in the ace family's precisions.
 # A further spec of the same code: rows are keyed on mode
-# JAX-MD's cell list, the matscipy-neighbours ShiftList; "-tight": model slots for rc pairs ("cutoff" slots)
-JAXMD_MODES = ("jaxmd", "jaxmd-shift", "jaxmd-tight", "jaxmd-shift-tight")
+# JAX-MD's cell list; "-tight": model slots for rc pairs ("cutoff" slots)
+JAXMD_MODES = ("jaxmd", "jaxmd-tight")
 LAMMPS_TIGHT = "lammps-tight"   # lammps-jax with run_lammps' "cutoff" slots (opt-in, as the JAX-MD modes)
 OPT_IN_MODES = (*JAXMD_MODES, LAMMPS_TIGHT)
 JAXMD = [("acejax-ace", {"gpu": m}, ACE_DTYPES) for m in OPT_IN_MODES]

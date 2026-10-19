@@ -92,7 +92,8 @@ integrators of JAX-MD take `pot.energy`.
     The JAX-MD neighbour list uses the minimum image. Every width of the cell
     must be more than 2 × (cutoff + skin). For a smaller cell, JAX-MD misses
     neighbours and does not give an error. To check the cell, use
-    `jaxmd.min_image_ok(cell, rc + skin)`.
+    `jaxmd.min_image_ok(cell, rc + skin)`. For a smaller cell, use
+    `ACECalculator` with ASE, or LAMMPS.
 
 ## Choose the slots
 
@@ -124,40 +125,3 @@ as for a LAMMPS bundle.
 
 To set the block size, give `chunk=` (rows) to `potential`. A larger block
 can be faster for a small model, but it uses more memory.
-
-## Small cells, slabs and NPT (experimental)
-
-`jaxmd.neighbor_list` makes a neighbour list with matscipy-neighbours on the
-device. The list keeps the periodic image of each pair. Thus it works for
-cells smaller than 2 × (cutoff + skin), triclinic cells, slabs and NPT.
-
-!!! warning "Experimental"
-    This list needs matscipy-neighbours built with its XLA FFI
-    ([libAtoms/matscipy-neighbours#10](https://github.com/libAtoms/matscipy-neighbours/pull/10)).
-    This build is not released yet. The API can change before the release.
-
-1. Make the list with the box, the cutoff and the skin.
-2. Give `None` as the displacement function of the potential.
-3. Update the list in the loop, as above.
-
-```python
-nf = jaxmd.neighbor_list(box, rc, skin=1.0, fractional_coordinates=True)
-nbrs = nf.allocate(R)
-pot = jaxmd.potential("fit/model.npz", None, atoms.numbers,
-                      K=jaxmd.capacity(R, nbrs, None, rc + 1.0))
-```
-
-On an NVIDIA GPU, the list builds again on the device without a step on the
-host. On a CPU, or when a warning says that the planned build is not
-available, use `jaxmd.run`. It examines the list once for each block of steps:
-
-```python
-state, nbrs, info = jax.jit(lambda s, n: jaxmd.run(apply, s, n, 1000, check_every=10))(state, nbrs)
-```
-
-For NPT, give the box of the barostat: `jaxmd.run(..., box_of=simulate.npt_box)`.
-
-!!! warning "Slabs"
-    `space.periodic_general` moves atoms back into the cell in all
-    directions. For a slab, use sufficient vacuum so that no atom goes
-    through the non-periodic boundary.

@@ -123,7 +123,3 @@ See [Run MD with JAX-MD](../howto/jax-md.md).
 ::: ace_jax.jaxmd.allocate
 
 ::: ace_jax.jaxmd.min_image_ok
-
-::: ace_jax.jaxmd.neighbor_list
-
-::: ace_jax.jaxmd.run
