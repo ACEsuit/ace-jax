@@ -202,4 +202,3 @@ def test_overflow_flag_marks_a_tight_K_and_an_overflowed_list(cell):
     tight = jaxmd.potential(str(MODEL), disp, at.numbers, K=k - 8)
     assert not bool(jax.jit(ok.overflow)(R, nb)) and np.isfinite(float(ok.energy(R, nb)))
     assert bool(jax.jit(tight.overflow)(R, nb)) and np.isnan(float(tight.energy(R, nb)))
-
