@@ -436,12 +436,19 @@ def theta_map_linear(prob, ds, W, *, steps=300, seed=0, init=None, return_stats=
     if free is not None:          # the tied coordinates only drifted on their own hyperpriors: copy F
         a = tie_noise(a)
     if not return_stats:
+        # lml, its gradient and numpyro's SVI step close over `lin`, so each compiles the QR statistics in as
+        # constants (3 P x P doubles: ~0.7 GB at o4d20), which JAX's trace and lowering caches keep alive after
+        # this returns.  On a GPU they sit outside the allocator pool, and one copy per radial round ran an
+        # A100 out of memory in round 3 (CUBIN load).  Clearing the caches frees them; the caller's
+        # module-level jits recompile once per call.
+        jax.clear_caches()
         return a
     logpost = lambda x: lml(x) + log_prior(from_array(x), prob.prior, free)
     k = min(10, len(losses) - 1)
     diag = {"lml": float(lml(a)), "map_steps": int(steps),
             "dloss_last": float(losses[-1] - losses[-1 - k]) if k > 0 else float("nan"),
             "grad_norm": float(jnp.linalg.norm(jax.grad(logpost)(a)))}
+    jax.clear_caches()           # the compiled QR constants (see above)
     return a, lin, diag
 
 
