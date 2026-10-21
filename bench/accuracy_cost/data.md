@@ -130,3 +130,35 @@ on every frame, test included, so it is a reference line, not a held-out score. 
   per eval over the 154k training atoms; at 1500 BFGS iterations per rung the ladder is ~22-26 h, past Modal's 24 h,
   so `fit_pace` resumes an interrupted ladder from its last checkpoint (`ladder/resume<k>/`, `initial_potential`);
   `fit_wall_s` sums the segments (cmd.txt to fit.log's last write).
+
+## GRACE (gracemaker, from scratch) environment and fit
+
+- Venv `/storage/eng/essswb/venvs/ac-grace` (Sulis: `$ROOT/venv-grace`), built from `envs/grace/pyproject.toml`
+  (`UV_PROJECT_ENVIRONMENT=... uv sync -p 3.12`): Python 3.12, **tensorpotential (gracemaker) 0.6.2.1**, tensorflow
+  2.20.0 with pip CUDA 12.5 / cuDNN 9 (`tensorflow[and-cuda]`), keras 3.15.1 (tf-keras 2.20.1), ase 3.29.0, numpy 2.5.4,
+  phonopy 4.8.3 (the QoI tests run in this venv: `SI_PY=/storage/eng/essswb/venvs/ac-grace/bin/python`). No ace-jax
+  there: `split.read_atoms` uses `_read_plain`.
+- `fit_grace.py` writes gracemaker's input as the `gracemaker -t` from-scratch answers (`DEFAULT_FIT`), plus cutoff 5,
+  `reference_energy: {Si: E0_SI}`, `param_dtype: float64` (float32 is gracemaker's default; float64 matches MACE's
+  `--default_dtype=float64` and the float64 evaluation and timing), and 5% of train as gracemaker's "test" set, which
+  picks the best checkpoint (the benchmark's test split never reaches the fit).
+- **Weights.** GAP-18 sigmas as type ratios to the default sigma, squared (gracemaker weights squared or Huber
+  residuals), per structure: energy, force (times gracemaker's default 1/(3N) per atom) and virial (0 without a DFT
+  virial). Stress is fitted (`stress` = -virial/volume, Huber, weight 128: the template's stress weight).
+- **NaN with stress.** gracemaker divides the stress term by the batch's summed virial weights: a batch with no
+  virial frames (its buckets group surfaces, `amorph`, `sp`...) gives 0/0 and every loss is NaN from epoch 1.
+  `fit_grace` sets the stress loss's `normalize_by_samples: False` and divides each virial weight by 6 x the mean
+  batch sum instead. Also: a frame whose `stress` is None crashes the data builder (it multiplies `np.array(None)`),
+  so frames without a virial carry zeros at weight 0; the isolated atom (no neighbours) also gives NaN and is dropped,
+  as for PACE.
+- **E0.** The model predicts E - N E0; `fit_grace.calculator` (and the QoI `model.py`s) add N E0 back. LAMMPS runs
+  the model as trained (parity compares unshifted energies).
+- **LAMMPS.** yury-lysogorskiy/lammps `grace` branch b1f4a6c + lammps-user-pace v.2025.12.4.p1, no TensorFlow
+  (`-D NO_GRACE_TF=ON`; `scaling/envs/sulis-grace.sh`). GRACE-1L: `grace_utils export_kokkos` .npz, `pair_style
+  grace/1l/kk` (GPU) / `grace/1l/cpu/kk` (CPU), full float64 by default. GRACE-FS: `grace_utils export -sf` YAML,
+  `grace/fs/kk` / `grace/fs`. The Kokkos 1L kernel caps n_rad_max at 32 and MLP widths at 64, and reads an order-4 (AA2)
+  block unconditionally: an order-3 model exports but dies of SIGFPE in `copy_weights_to_device`, so the ladder keeps
+  max_order 4 and the o3 ablation is accuracy only. Linear readout (`LinearOut2Target`) is outside the 1L exporter.
+- A serial Kokkos-OpenMP build for parity checks on the desktops: `/storage/eng/essswb/projects/ace-jax/grace-lammps/build-cpu-local/lmp`
+  (`build-cpu-local.sh`, mnf148). `python -m accuracy_cost.fit_grace FAMILY SIZE --seed K --parity LMP` runs the
+  timing gate's check (three rattled 64-atom cells) and writes `parity-cpu/parity.json` in the run directory.

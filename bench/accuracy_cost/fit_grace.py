@@ -110,13 +110,20 @@ def model_dir(d, seed):
     return pathlib.Path(d) / "seed" / str(seed)
 
 
+N_PARAMS = """import sys, numpy as np, tensorflow as tf
+from tensorpotential.instructions.base import load_instructions
+from tensorpotential.tpmodel import TPModel
+tp = TPModel(load_instructions(sys.argv[1])); tp.build(tf.float64)
+print(int(sum(int(np.prod(v.shape)) for v in tp.trainable_variables)))
+"""
+
+
 def n_params(path_yaml):
-    """(total, trainable-by-default) parameter counts of a gracemaker model.yaml, built in float64."""
-    import tensorflow as tf
-    from tensorpotential.instructions.base import load_instructions
-    from tensorpotential.tpmodel import TPModel
-    tp = TPModel(load_instructions(str(path_yaml))); tp.build(tf.float64)
-    return int(sum(int(np.prod(v.shape)) for v in tp.trainable_variables))
+    """Parameter count of a gracemaker model.yaml, built in float64, in a CPU-only child: TensorFlow imported
+    in this (driver) process would hold the GPU for every later fit of the run (A100 probe: 888 MB left)."""
+    r = subprocess.run([sys.executable, "-c", N_PARAMS, str(path_yaml)], capture_output=True, text=True, check=True,
+                       env={**os.environ, "CUDA_VISIBLE_DEVICES": "", "TF_CPP_MIN_LOG_LEVEL": "3"})
+    return int(r.stdout.split()[-1])
 
 
 def export(d, seed, e):
@@ -184,7 +191,7 @@ def finish(d, seed, e, st):
     return common.read_status(d)
 
 
-PARITY_TOL = (1e-10, 1e-9)     # |dE|/atom (eV), max|dF| (eV/A): both sides float64 (scaling.parity's acejax bound)
+PARITY_TOL = {"grace": (1e-10, 1e-9), "grace-fs": (1e-6, 1e-5)}   # |dE|/atom (eV), max|dF| (eV/A): scaling.parity.TOL
 
 
 def lammps_model(st):
@@ -224,23 +231,59 @@ def lammps_parity(family, name, lmp, device="cpu", cells=3, n_atoms=64, rattle=0
         E1, F1 = read_pe(log), read_dump_forces(w / "f.dump")
         dE, dF = abs(E1 - E0) / len(at), float(np.abs(F1 - F0).max())
         rows.append({"cell": k, "E_ase": E0, "E_lammps": E1, "dE_per_atom": dE, "max_dF": dF, "max_F": float(np.abs(F0).max()),
-                     "ok": dE <= PARITY_TOL[0] and dF <= PARITY_TOL[1]})
+                     "ok": dE <= PARITY_TOL[style][0] and dF <= PARITY_TOL[style][1]})
     out = {"family": family, "size": name, "style": style, "model": model, "device": device, "lmp": str(lmp),
-           "tol": PARITY_TOL, "status": "parity_ok" if all(r["ok"] for r in rows) else "parity_fail", "cells": rows}
+           "tol": PARITY_TOL[style], "status": "parity_ok" if all(r["ok"] for r in rows) else "parity_fail", "cells": rows}
     (work / "parity.json").write_text(json.dumps(out, indent=1))
     return out
+
+
+def log_timing(log):
+    """(s per epoch: mean gap between gracemaker's per-epoch lines from the second on (1 s timestamps); s from the parameter count
+    line to epoch 1, mostly XLA compilation; epochs logged; maxiter) from a gracemaker fit.log."""
+    import datetime
+    import re
+    ts = lambda l: datetime.datetime.strptime(l[:19], "%Y/%m/%d %H:%M:%S").timestamp()
+    it, start, n = [], None, None
+    for l in pathlib.Path(log).read_text(errors="replace").splitlines():
+        if "Number of trainable parameters" in l:
+            start = ts(l)
+        m = re.search(r"Iteration #(\d+)/(\d+)", l)
+        if m and l[:4].isdigit():
+            it.append(ts(l)); n = int(m.group(2))
+    spe = (it[-1] - it[1]) / (len(it) - 2) if len(it) > 2 else None
+    return (spe, (it[0] - start) if it and start else None, len(it), n)
+
+
+def probe_summary(root):
+    """One line per probe run under `root` (runs/<family>/<size>_s<seed>): s/epoch on this GPU and the projected
+    wall time of the default 50k-update fit (gracemaker rounds up to whole epochs: 376 at batch 16)."""
+    epochs = int(np.ceil(DEFAULT_FIT["target_total_updates"] / np.ceil(0.95 * 2226 / DEFAULT_FIT["batch_size"])))
+    out = []
+    for log in sorted(pathlib.Path(root).glob("*/*/fit.log")):
+        st = common.read_status(log.parent) or {}
+        spe, comp, k, n = log_timing(log)
+        full = None if spe is None else (comp or 0) + spe * epochs
+        out.append(f"{log.parent.parent.name}/{log.parent.name}: n_params {st.get('n_params')}  s/epoch "
+                   f"{spe if spe is None else round(spe, 2)}  compile {comp if comp is None else round(comp)} s  "
+                   f"epochs logged {k}/{n}  projected {epochs}-epoch fit "
+                   f"{'?' if full is None else f'{full / 3600:.2f} h'}  gpu {st.get('gpu')}  status {st.get('status')}")
+    return "\n".join(out)
 
 
 if __name__ == "__main__":
     import argparse
     ap = argparse.ArgumentParser()
     ap.add_argument("family", choices=FAMILIES)
-    ap.add_argument("size", nargs="+")
+    ap.add_argument("size", nargs="*")
     ap.add_argument("--seed", type=int, nargs="+", default=[0])
     ap.add_argument("--overrides", default="", help="JSON sweep-entry overrides (smoke: n_train, target_total_updates)")
     ap.add_argument("--parity", metavar="LMP", help="instead of fitting: the 64-atom LAMMPS parity check of finished fits")
     ap.add_argument("--device", default="cpu", choices=("cpu", "gpu"))
+    ap.add_argument("--probe-summary", metavar="RUNS", help="instead of fitting: s/epoch of the probe runs under RUNS")
     a = ap.parse_args()
+    if a.probe_summary:
+        print(probe_summary(a.probe_summary)); sys.exit(0)
     os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "1")
     if a.parity:
         for s in a.size:

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # GRACE fits on one Sulis A100 (fit_grace.py in the grace venv, $ROOT/venv-grace: bench/scaling/envs/sulis-grace.sh
 # venv), one after another: FAMILY SIZE [SEED ...] (default seeds 0 1 2), runs under $ACEJAX_AC_ROOT/runs/accuracy_cost.
-# Wall time per fit: docs/dev/grace-1l-plan.md (pilot); pass --time to sbatch for the large sizes.
+# Wall time per fit: the A100 probe (sulis-grace-probe.sbatch); pass --time to sbatch for the large sizes.
 #   sbatch accuracy_cost/envs/sulis-grace-fit.sbatch grace c16l4 0 1 2
 #SBATCH --job-name=ac-grace
 #SBATCH --account=su007-jrk-gpu

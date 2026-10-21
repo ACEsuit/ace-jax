@@ -66,8 +66,9 @@ TOL = {"mlpace": (1e-6, 1e-5), "acejax": (1e-10, 1e-9), "mace": (1e-6, None),
        # in double still 3-4e-5), as ace-jax float32 does (1-2e-4), so the energy bound is float32's, not mace's
        "mlpace-mixed": (2e-4, 1e-3),
        # GRACE in LAMMPS (grace/1l/kk .npz, grace/fs C++ YAML; float64) vs gracemaker's TPCalculator on the float64
-       # SavedModel: different code, same arithmetic (1L on mnf148: 2e-11 eV/atom, 1.7e-10 eV/A)
-       "grace": (1e-10, 1e-9), "grace-fs": (1e-10, 1e-9)}
+       # SavedModel: 1L is the same arithmetic (mnf148 smoke: 2e-11 eV/atom, 1.7e-10 eV/A); the C++ FS evaluator
+       # differs at the force level (smoke fs_small / fs_medium: <= 6e-12 eV/atom, 7e-9-1.3e-8 eV/A), so mlpace's bound
+       "grace": (1e-10, 1e-9), "grace-fs": (1e-6, 1e-5)}
 # gates that check a standalone line: a failure blocks its standalone rows
 STANDALONE_GATES = ("spline", "acepot")
 LEARNED, ANALYTIC = LEARNED_CODES                     # "acejax-ace-learned", "acejax-ace-analytic"
