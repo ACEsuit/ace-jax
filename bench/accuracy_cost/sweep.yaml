@@ -142,3 +142,9 @@ grace_abl:     # one change each to the `grace` size nearest the target (`base`;
   - {size: c16l4_frozenR, base: c16l4, freeze_radial: true,
      trainable: ["A_ChemIndTransf/", "A1/w_", "AA1/w_", "AA2/w_", "LinMLPOut2ScalarTarget_MLP", "tr_atomic_shift", "Z/ChemicalEmbedding", "rho/reducing_"]}
   - {size: c16l4_o3,      base: c16l4, max_order: 3}
+  # the base chosen after the ladder (seed means): c64l4, the smallest size reaching the target (F 0.0764, QoI 0.464);
+  # c32l4 misses by 0.001 (QoI 0.501).  The c16l4_* entries above stay as the Phase-1 probe's configurations
+  - {size: c64l4_linro,   base: c64l4, readout: linear}
+  - {size: c64l4_frozenR, base: c64l4, freeze_radial: true,
+     trainable: ["A_ChemIndTransf/", "A1/w_", "AA1/w_", "AA2/w_", "LinMLPOut2ScalarTarget_MLP", "tr_atomic_shift", "Z/ChemicalEmbedding", "rho/reducing_"]}
+  - {size: c64l4_o3,      base: c64l4, max_order: 3}
