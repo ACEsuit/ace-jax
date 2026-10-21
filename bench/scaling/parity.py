@@ -30,6 +30,7 @@ Each LAMMPS side is `run 0` with a sorted force dump.  A failed gate blocks
 the LAMMPS rows of that code on this host (`blocked`), and a failed spline gate
 both modes of the -learned line; timing never runs on an unverified path.
 """
+import os
 import pathlib
 import subprocess
 
@@ -194,7 +195,10 @@ def _mace_ef(path, at, device, head=None):
 
 
 def _tol_kw(m):
-    return {"spline_tol": m["spline_tol"]} if "spline_tol" in m else {}
+    """The reference's lean options as the bundle's: the row's spline_tol; under ACEJAX_EXPORT_FFI (the FFI
+    kernel bundles) the radial table those turn on, so the gate holds the kernel to roundoff."""
+    return ({"spline_tol": m["spline_tol"]} if "spline_tol" in m else {}) | (
+        {"radial_table": True} if os.environ.get("ACEJAX_EXPORT_FFI") else {})
 
 
 BUNDLE_LAYOUTS = ("matrix", "dense", "sparse")

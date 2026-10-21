@@ -11,7 +11,7 @@ at 1e-10, as learned radials are by default); each row's gate is looked up in it
 import argparse, json, pathlib, sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
-from plot_cost import FAM, REDUCED, ROOT, SEEDED, cost_name, family_of, seed_split  # noqa: E402
+from plot_cost import COST_NAME, FAM, REDUCED, ROOT, SEEDED, cost_name, family_of, seed_split  # noqa: E402
 
 
 def main():
@@ -53,7 +53,8 @@ def main():
             continue
         if r.get("mode") in ("lammps", "gpumd") and (r["_path"], r["code"], r["family"], r["size"]) not in gates:   # standalone: no gate
             continue
-        if (r["code"], r["family"], r["size"]) in sourced and r["_file"] != source[r["code"]] and fam not in REDUCED:
+        # a line under its own cost name (float32, the FFI kernel) is not the sourced line: kept from any file
+        if (r["code"], r["family"], r["size"]) in sourced and r["_file"] != source[r["code"]] and fam not in COST_NAME:
             continue
         name = cost_name(fam, r["size"])                      # Symmetrix-XL under its own name (MACExl_)
         us = 1e6 / r["atom_steps_per_s"]

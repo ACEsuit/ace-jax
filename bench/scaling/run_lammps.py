@@ -210,7 +210,10 @@ def _export_inprocess(row, at, dtype, workdir, layout="auto", slots="skin", list
                       **({"spline_tol": row["spline_tol"]} if "spline_tol" in row else {}),
                       **({"platform": "cpu", "device_memory": row["device_memory"]} if procs else {}),
                       # opt-in recursive product basis (ace_jax.eval.aa_dag; "greedy" | "prefix"), an ace-jax with it
-                      **({"aa_dag": os.environ["ACEJAX_EXPORT_AA_DAG"]} if os.environ.get("ACEJAX_EXPORT_AA_DAG") else {}))
+                      **({"aa_dag": os.environ["ACEJAX_EXPORT_AA_DAG"]} if os.environ.get("ACEJAX_EXPORT_AA_DAG") else {}),
+                      # opt-in C++ FFI kernel (ace_jax.eval.ffi; CPU matrix bundles, radial table on): LAMMPS needs
+                      # LAMMPS_JAX_FFI_HANDLERS naming its library, set with this in the env json's os_env
+                      **({"ffi": True} if os.environ.get("ACEJAX_EXPORT_FFI") else {}))
     return (str(pathlib.Path(workdir) / "bundle.json"), b["ace_jax"]["layout"], time.perf_counter() - t0,
             splined_meta(b["ace_jax"]))
 
@@ -460,6 +463,8 @@ def _run_lammps(row, style, model, data, work, n_atoms, dtype, device, lmp, rank
         out.update(threads=threads, proc_grid=list(procs) if procs else None, kokkos=bool(kk))   # parse_log owns "procs"
     if style == "acejax" and os.environ.get("ACEJAX_EXPORT_AA_DAG"):
         out["aa_dag"] = os.environ["ACEJAX_EXPORT_AA_DAG"]
+    if style == "acejax" and os.environ.get("ACEJAX_EXPORT_FFI"):
+        out["ffi"] = True
     if cmd[0] == "mpirun" and mpirun_args():
         out["mpirun_args"] = mpirun_args()
     (work / "log.lammps").unlink(missing_ok=True)

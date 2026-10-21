@@ -272,6 +272,8 @@ def gate_model(row, device, env, work):
     lmp, checks = env["lmp"], []
     for k, at in enumerate(gate_cells()):
         layouts = (parity.BUNDLE_LAYOUTS if k == 0 else ("auto",)) if style == "acejax" else (None,)
+        if style == "acejax" and os.environ.get("ACEJAX_EXPORT_FFI"):
+            layouts = ("matrix",)                              # the FFI kernel: the matrix layout only
         for lay in layouts:
             w = work / f"cell{k}" / (lay or style)
             chk = {"cell": k, **({"layout": lay} if lay else {})}
