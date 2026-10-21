@@ -121,6 +121,15 @@ jobs:
         env:
           ACEJAX_DOCS_NOTEBOOKS: require
         run: uv run --no-sync mkdocs build --strict
+      - name: Upload the site for preview (pull requests)
+        # download the `site-preview` artifact from the run's summary page, unzip it and serve it over HTTP
+        # (`python -m http.server -d site-preview`): interactive figures fetch their JSON, which file:// blocks
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: site-preview
+          path: site
+          retention-days: 7
       - name: Upload the Pages artifact
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/upload-pages-artifact@v3
