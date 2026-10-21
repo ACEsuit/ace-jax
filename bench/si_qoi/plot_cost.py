@@ -286,6 +286,26 @@ def dag_dots(ax, data, codes, key):
     return drawn
 
 
+def cheapest(data, ref):
+    """Per family (in data's order): (family, x of its cheapest point reaching the target or nan, note) -- the
+    note is that point's size, or why there is none.  Shared by the PNG's panel C and the web figure."""
+    out = []
+    for fam, pts in data.items():
+        if fam in REDUCED and all(q["x"] is None for q in pts):
+            continue                                  # a reduced-precision line is a cost row only: no bar until timed
+        ok = [q for q in pts if q["x"] is not None and q["qoi"] is not None and q["rmse_F"] <= ref["rmse_F"]
+              and q["qoi"] <= TARGET_QOI]
+        if ok:
+            best = min(ok, key=lambda q: q["x"]); out.append((fam, best["x"], best["size"]))
+        elif all(q["x"] is None for q in pts):
+            out.append((fam, np.nan, "not timed here"))
+        elif any(q["qoi"] is None for q in pts):
+            out.append((fam, np.nan, "QoIs pending"))
+        else:
+            out.append((fam, np.nan, "not reached in its ladder"))
+    return out
+
+
 def draw_row(axes, data, ref, xlabel, codes, letters, what):
     """One row of the figure: force error, QoI error and the cheapest model reaching the target, all against
     one x (a cost, or the fitted-parameter count)."""
@@ -311,21 +331,9 @@ def draw_row(axes, data, ref, xlabel, codes, letters, what):
 
     ax = axes[2]
     allx = [q["x"] for pts in data.values() for q in pts if q["x"]]
-    names, vals, cols, notes = [], [], [], []
-    for fam, pts in data.items():
-        if fam in REDUCED and all(q["x"] is None for q in pts):
-            continue                                  # a reduced-precision line is a cost row only: no bar until timed
-        ok = [q for q in pts if q["x"] is not None and q["qoi"] is not None and q["rmse_F"] <= ref["rmse_F"]
-              and q["qoi"] <= TARGET_QOI]
-        names.append(FAM[fam][0]); cols.append(FAM[fam][1])
-        if ok:
-            best = min(ok, key=lambda q: q["x"]); vals.append(best["x"]); notes.append(best["size"])
-        elif all(q["x"] is None for q in pts):
-            vals.append(np.nan); notes.append("not timed here")
-        elif any(q["qoi"] is None for q in pts):
-            vals.append(np.nan); notes.append("QoIs pending")
-        else:
-            vals.append(np.nan); notes.append("not reached in its ladder")
+    bars = cheapest(data, ref)
+    names, vals, notes = [FAM[f][0] for f, _, _ in bars], [v for _, v, _ in bars], [n for _, _, n in bars]
+    cols = [FAM[f][1] for f, _, _ in bars]
     y = np.arange(len(names))
     lo, hi = min(allx) / 2, max(allx) * 2
     style(ax, xlabel.split("  (")[0], ""); ax.grid(False, axis="y"); ax.set_xlim(lo, hi)

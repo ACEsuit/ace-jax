@@ -16,7 +16,10 @@ training and 248 for testing).
 
 - **Model families.** Linear ACE (ace-jax), ACE with learned radials,
   PACE-shaped ACE, PACE (pacemaker), MACE with L = 0 and L = 1, NEP
-  (trained with GPUMD) and GAP refits. Each family has a ladder of model sizes. Each point is one fit.
+  (trained with GPUMD), GAP refits, and GRACE-1L and GRACE-FS (trained
+  with gracemaker). Each family has a ladder of model sizes. Each point is
+  one fit. For GRACE, each point is the mean of three fits, and the bars
+  show the range.
 - **Force error.** The root-mean-square force error on the test set.
 - **QoI error.** 21 silicon properties are calculated with each model and
   compared with DFT: elastic constants, energies of other phases, point
@@ -28,11 +31,25 @@ training and 248 for testing).
 - **Cost.** Microseconds per atom per MD step, in LAMMPS, in float64. Each
   model uses the fastest code that agrees with the reference evaluation.
 
+<div class="plotly-figure" markdown>
+
 ![Accuracy against cost on silicon. Rows: A100 GPU, 128-core CPU node, number of fitted parameters. Columns: test force error, QoI error against DFT, and the cheapest model of each family that reaches the target](assets/benchmarks/si_accuracy_cost.png)
 
-The panels on the right (C, F, I) show the cheapest model of each family
-that reaches the target. Panels G to I compare the number of fitted
-parameters, not the cost.
+</div>
+
+The figure shows the force error and the QoI error of each family. The
+lowest row compares the number of fitted parameters, not the cost. At
+first, the figure shows only the main families. To change the families
+that the figure shows:
+
+1. Click a family in the legend to show or hide it in all panels.
+2. Double-click a family to show only that family.
+3. Click a button above the legend to show a group of families.
+4. Put the pointer on a point to show its model, its values and the code
+   that was timed.
+
+The table gives the cheapest model of each family that reaches the
+target.
 
 At the target, in microseconds per atom-step:
 
@@ -45,9 +62,13 @@ At the target, in microseconds per atom-step:
 | MACE c16L0, Symmetrix-XL | 1.23 | 2.19 |
 | MACE c16L1, Symmetrix | 5.36 | 8.58 |
 | MACE c16L1, Symmetrix-XL | 1.47 | 2.87 |
+| GRACE-1L c64l4, `grace/1l/kk` | 11.65 | 59.1 |
 
 In these ladders, PACE (pacemaker), ACE with learned radials, PACE-shaped
-ACE, NEP and the GAP refits do not reach the target. PACE reaches the force
+ACE, NEP, the GAP refits and GRACE-FS do not reach the target. GRACE-1L
+reaches the target only at its largest size (c64l4, 445,793 parameters).
+At that size, its cost is approximately 4 to 27 times the cost of linear
+ACE o4d20 or MACE c16L0 in their fastest codes. PACE reaches the force
 error of GAP-18 with fewer parameters than linear ACE, but not the QoI target.
 NEP has the lowest cost on the A100 (0.04 to 0.22 µs/atom-step), in mixed
 precision. On the CPU, NEP costs 0.55 to 3.0 µs/atom-step. PACE reaches the
@@ -73,7 +94,8 @@ against 4.13 µs/atom-step).
 - **ace-jax** runs in LAMMPS with lammps-jax, on the GPU and on the CPU.
   ace-jax selects the form of the product basis for each model. Models with
   4,000 or more chain-form multiplications per atom use the recursive (DAG)
-  form. The figure marks these points with a dot.
+  form. The printed figure marks these points with a dot. In the
+  interactive figure, the code line of these points shows `dag:greedy`.
 - **Linear ACE, run by ML-PACE.** The same linear ACE fits are written as
   `.yace` files with tabulated radial functions
   ([Write an ACE model as a .yace file](howto/pace.md)). They run in
@@ -88,6 +110,10 @@ against 4.13 µs/atom-step).
 - **MACE** runs in LAMMPS with Symmetrix and, separately, with
   Symmetrix-XL.
 - **GAP** runs in LAMMPS with QUIP, on the CPU only.
+- **GRACE** runs in LAMMPS with the native Kokkos styles of gracemaker's
+  LAMMPS version: `grace/1l/kk` (GPU) and `grace/1l/cpu/kk` (CPU) for
+  GRACE-1L, `grace/fs/kk` and `grace/fs` for GRACE-FS, in float64. On the
+  CPU, GRACE uses 128 MPI ranks.
 - **NEP** is trained with GPUMD. On the CPU, it runs in LAMMPS with
   `pair_style nep` (NEP_CPU, float64). On the GPU, it runs in GPUMD. GPUMD
   uses mixed precision, and the figure labels these points.
