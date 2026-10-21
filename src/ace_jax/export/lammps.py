@@ -328,7 +328,7 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
                   dtype="float64", layout="auto", type_elements=None, max_owned=None,
                   lean=True, spline_tol=AUTO, spline_intervals=None, max_neighbors=None,
                   radial_table=None, device_memory=None, block_rows=None, platform=None, aa_dag="auto",
-                  precision_structure=None):
+                  precision_structure=None, ffi=False):
     """Write a lammps-jax JSON bundle for `model`; returns the bundle dict.
 
     Capacities: max_atoms (owned + ghost positions); max_edges (sparse / dense:
@@ -418,6 +418,11 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
     `eval.aa_dag.AUTO_MIN_CHAIN_MUL` chain-form multiplies per site and the chain
     form below (`eval.aa_dag.resolve_aa_dag`).  Recorded as `ace_jax.aa_dag`, the
     mode used.
+
+    ffi: True runs the model as the C++ FFI kernel of `eval.ffi` on the neighbour matrix, positions
+    in and atom energies and forces out; it needs platform="cpu", the matrix layout, float64 and a
+    radial table.  LAMMPS loads the kernel with LAMMPS_JAX_FFI_HANDLERS.  Recorded as `ace_jax.ffi`,
+    the custom-call target.
     """
     from lammps_jax.export import export_model
 
@@ -432,6 +437,10 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
         raise ValueError(f"LAMMPS types {missing} are not in the model's elements {model_z}")
     type_map = [model_z.index(z) for z in type_elements]
     n_species = len(type_elements)
+    if ffi:                                       # a CPU custom call on the neighbour matrix
+        if platform != "cpu" or layout not in ("auto", "matrix"):
+            raise ValueError("ffi=True needs platform='cpu' and layout='matrix'")
+        layout = "matrix"
     if layout not in BUNDLE_LAYOUTS + ("auto",):
         raise ValueError(f"layout must be 'auto' or one of {BUNDLE_LAYOUTS}, got {layout!r}")
     if layout == "matrix" and not max_neighbors:
@@ -499,11 +508,16 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
                                None if type_map == list(range(len(model_z))) else type_map,
                                n_rows=max_owned if layout == "dense" else None, rcut=rcut,
                                block_rows=block_rows if layout in ("dense", "matrix") else None)
+    if ffi:                                       # positions and the list straight to the kernel
+        from ..eval import ffi as kernel
+        energy_fn, force_fn = kernel.lammps_fns(model, n_species, type_map, rcut)
     graph = ({"max_neighbors": max_neighbors, "max_owned": max_owned} if layout == "matrix"
              else {"max_edges": max_edges})
     bundle = export_model(energy_fn=energy_fn, path=path, max_atoms=max_atoms, cutoff=rcut,
                           unit_style="metal", precision=dtype, n_species=n_species, **graph,
-                          **({"platform": platform} if platform else {}))
+                          **({"platform": platform} if platform else {}),
+                          **({"force_fn": force_fn, "newton": "on",
+                              "custom_call_targets": (kernel.TARGET,)} if ffi else {}))
     # no "platform": lammps-jax's export_info.platform is a contract key its plugin checks
     bundle["ace_jax"] = {"layout": layout, "elements": model_z, "type_elements": type_elements,
                          "k_dense": int(k_dense) if layout in ("dense", "matrix") else None,
@@ -518,6 +532,8 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
                          "radial_table": rtab,
                          # the product basis's DAG plan mode used (None: the chain form)
                          "aa_dag": aa_dag,
+                         # the C++ FFI kernel's custom-call target, None for the XLA program
+                         "ffi": kernel.TARGET if ffi else None,
                          # dense / matrix rows per block, and the memory they were sized for
                          "block_rows": int(block_rows) if layout in ("dense", "matrix") else None,
                          "device_memory": int(device_memory) if device_memory else None,
