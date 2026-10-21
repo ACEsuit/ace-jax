@@ -173,7 +173,7 @@ def plateau_flag(main, check, tol=0.2):
 
 def _sizes(fam, e):
     if fam in ("grace", "grace_fs"):
-        return [f"{e['size']}_s0"]                     # fit_grace's run name: <size>_s<seed>
+        return [f"{e['size']}_s0"] if e.get("timing", True) else []   # c32l4_long: c32l4's architecture                     # fit_grace's run name: <size>_s<seed>
     return [f"f{n}" for n in e["take"]] if fam == "pace" else [e["size"]]
 
 

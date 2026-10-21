@@ -124,6 +124,9 @@ grace:         # GRACE-1L from scratch (fit_grace.py, gracemaker 0.6.2.1, float6
   - {size: c16l4, lmax: 4, n_rad_max: 16, prod_func_n_max: 16, max_order: 4, n_mlp_dens: 8,  n_rad_base: 8, n_params: 55505}
   - {size: c32l4, lmax: 4, n_rad_max: 32, prod_func_n_max: 32, max_order: 4, n_mlp_dens: 10, n_rad_base: 8, n_params: 171937}
   - {size: c64l4, lmax: 4, n_rad_max: 32, prod_func_n_max: 64, max_order: 4, n_mlp_dens: 12, n_rad_base: 8, n_params: 445793}
+  # training-length check: c32l4 at 3x the updates (150k), seed 0 only; accuracy only (same architecture as c32l4)
+  - {size: c32l4_long, lmax: 4, n_rad_max: 32, prod_func_n_max: 32, max_order: 4, n_mlp_dens: 10, n_rad_base: 8, n_params: 171937,
+     target_total_updates: 150000, timing: false}
 grace_fs:      # GRACE-FS (gracemaker preset FS: linear radials, SBessel, Finnis-Sinclair readout), its small / medium
                # settings at cutoff 5 A; LAMMPS: pair_style grace/fs (C++ YAML export)
   - {size: fs_small,  preset: FS, max_order: 3, lmax: [5, 5, 4],    n_rad_max: [20, 15, 10],    embedding_size: 32,
