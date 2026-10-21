@@ -7,6 +7,9 @@ the objective's own roundoff.  `ev` is any object with `value_and_grad(h) -> (v,
 `hessian(h)`, of the quantity being MAXIMISED, as host arrays."""
 import numpy as np
 
+# gradient_floor: this many accepted steps in a row, each gaining less than F's roundoff, end the polish
+STALL_STEPS = 3
+
 
 def _projected_gradient(x, g, lo, hi):
     """x - P(x - g) for the minimisation gradient g: zero for a coordinate at a bound that g pushes out."""
@@ -110,8 +113,13 @@ def newton_polish(ev, x, lo, hi, maxiter=50, gradient_floor=False):
     lowers ||pg||_inf without raising F past its roundoff), and a stop counts as converged only
     when every component is within 10x its gnoise.  On a weakly curved direction (12 Si configs:
     log sigma_c, |pg| 14.8 against gnoise 0.15) the decrement can sit below F's roundoff while the
-    gradient is resolvably nonzero; without this the polish stopped there, 2.9 nats short.  Deterministic: a fixed sequence of compiled evaluations and LAPACK calls on
-    P x P matrices, no randomness."""
+    gradient is resolvably nonzero; without this the polish stopped there, 2.9 nats short.  But
+    STALL_STEPS accepted steps in a row that each gain less than F's roundoff end it ("stalled";
+    converged on the same test as above): a resolved gradient that steps cannot turn into resolvable
+    evidence is not worth a Hessian per step (o4d20 at n <= 8: 17 steps in 10 h for 5e-5 nats, F
+    roundoff 6e-5; the MAP's own `judge` still decides stationarity from the predicted gain).
+    Deterministic: a fixed sequence of compiled evaluations and LAPACK calls on P x P matrices, no
+    randomness."""
     lo, hi = np.asarray(lo, float), np.asarray(hi, float)
     x = np.clip(np.asarray(x, float), lo, hi)
 
@@ -128,6 +136,7 @@ def newton_polish(ev, x, lo, hi, maxiter=50, gradient_floor=False):
     pgv = _projected_gradient(x, g, lo, hi)
     pg = pg0 = float(np.abs(pgv).max())
     steps, n_hess, converged, dec, dec0, noise = 0, 0, False, float("nan"), float("nan"), 0.0
+    stall = 0
     gnoise, noise_at = None, None
     message = f"maxiter {maxiter}"
     for _ in range(maxiter):
@@ -177,10 +186,16 @@ def newton_polish(ev, x, lo, hi, maxiter=50, gradient_floor=False):
             message = (f"{'roundoff floor' if converged else 'no acceptable Newton step'} (|pg| {pg:.2e}, gradient "
                        f"roundoff {gnoise.max():.1e}, decrement^2 {dec:.1e}, F roundoff {noise:.1e})")
             break
+        stall = stall + 1 if F - Fn < noise else 0
         x, F, g = xn, Fn, gn
         pgv = _projected_gradient(x, g, lo, hi)
         pg = float(np.abs(pgv).max())
         steps += 1
+        if gradient_floor and stall >= STALL_STEPS:
+            converged = dec <= 10 * noise and bool(np.all(np.abs(pgv) <= 10 * gnoise))
+            message = (f"stalled ({stall} steps in a row each gained less than F's roundoff {noise:.1e}; "
+                       f"|pg| {pg:.2e}, gradient roundoff {gnoise.max():.1e}, decrement^2 {dec:.1e})")
+            break
     if F > F_start + 10 * noise:
         x, F, converged, pg, dec = x_start, F_start, False, pg0, dec0
         message += "; kept the L-BFGS endpoint (lower F)"

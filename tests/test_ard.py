@@ -1053,6 +1053,40 @@ def test_newton_polish_always_steps_from_a_resolvably_improvable_start():
     assert ev.value_and_grad(x)[0] > ev.value_and_grad(x0)[0] + 1e-6
 
 
+class _StallingQuad(_QuadEvidence):
+    """A quadratic evidence whose F carries roundoff `amp` its gradient does not (crc32 of x: deterministic,
+    and different at the noise probes' 2^-50 spacing), with a Hessian 10x the true curvature: each Newton
+    step goes a tenth of the way, so ||pg|| falls by only 0.9 per step while F gains far below its
+    roundoff -- the MAP polishes that stalled for hours (o4d20 capped at n <= 8: 17 steps in 10 h for
+    5e-5 nats, F roundoff 6e-5)."""
+
+    def __init__(self, A, c, off=0.0, amp=1e-6):
+        super().__init__(A, c, off)
+        self.amp = amp
+
+    def value_and_grad(self, h):
+        import zlib
+        v, g = super().value_and_grad(h)
+        return v + self.amp * zlib.crc32(np.asarray(h, float).tobytes()) / 2.0 ** 32, g
+
+    def hessian(self, h):
+        return -10.0 * self.A
+
+
+def test_newton_polish_stops_when_steps_gain_less_than_the_roundoff():
+    """The gradient floor keeps the polish stepping while a gradient component is resolved, but a run of
+    steps that each gain less than F's roundoff is a stall, not progress: stop after STALL_STEPS of them
+    rather than run to maxiter (each step is a Hessian and a line search: tens of minutes at scale)."""
+    from ace_jax.fit.newton import STALL_STEPS, newton_polish
+    A, c = np.diag([1.0, 2.0]), np.array([0.1, -0.2])
+    ev = _StallingQuad(A, c, off=-1e3)
+    x0 = c + np.array([1e-3, 0.0])                  # |pg| 1e-3; the whole remaining gain is 5e-7 < amp
+    x, info = newton_polish(ev, x0, -np.ones(2), np.ones(2), gradient_floor=True)
+    assert info["steps"] <= STALL_STEPS + 1 and "stalled" in info["message"], info["message"]
+    assert info["noise"] > 1e-7                     # the roundoff the stall test compares against
+    assert np.abs(x - c).max() < np.abs(x0 - c).max()     # it still moved towards the optimum
+
+
 @pytest.fixture(scope="module")
 def stage_evidence():
     """The joint ARD evidence of the stage tests' training set (30 si_tiny configs) at the default prior
