@@ -113,3 +113,27 @@ nep:           # NEP4 trained by GPUMD's nep on a Sulis A100 (fit_nep.py; envs/s
   # the test configs are in its training set)
   - {size: nlit,  n_max: "10 8", basis_size: "10 10", l_max: "4 2 1", neuron: 50, lambda_1: 0.05, lambda_2: 0.05, population: 50, batch: 100000, weights: none, generation: 100000, chunk: 100000}   # stopped at 100k: not below n120b
   - {size: nlitw, n_max: "10 8", basis_size: "10 10", l_max: "4 2 1", neuron: 50, lambda_1: 0.05, lambda_2: 0.05, population: 50, batch: 100000, generation: 100000, chunk: 100000}   # stopped at 100k: tracks nlit ~0.002 eV/A behind
+grace:         # GRACE-1L from scratch (fit_grace.py, gracemaker 0.6.2.1, float64 parameters): GRACE_1LAYER_latest's
+               # architecture (grace_custom.grace_1l, readout "mlp"), cutoff 5 A; channels = prod_func_n_max, oN = max_order.
+               # n_rad_max <= 32 and MLP widths <= 64 keep every size inside pair_style grace/1l/kk's caps.
+               # c32o4 / c64o4 are the preset's "small" / "medium" settings; n_params from fit_grace.n_params.
+               # Runs: runs/grace/<size>_s<seed>, seeds 0 1 2
+  - {size: c8o3,  lmax: 3, n_rad_max: 8,  prod_func_n_max: 8,  max_order: 3, n_mlp_dens: 4,  n_rad_base: 8, n_params: 11081}
+  - {size: c16o3, lmax: 3, n_rad_max: 16, prod_func_n_max: 16, max_order: 3, n_mlp_dens: 8,  n_rad_base: 8, n_params: 23057}
+  - {size: c16o4, lmax: 4, n_rad_max: 16, prod_func_n_max: 16, max_order: 4, n_mlp_dens: 8,  n_rad_base: 8, n_params: 55505}
+  - {size: c32o4, lmax: 4, n_rad_max: 32, prod_func_n_max: 32, max_order: 4, n_mlp_dens: 10, n_rad_base: 8, n_params: 171937}
+  - {size: c64o4, lmax: 4, n_rad_max: 32, prod_func_n_max: 64, max_order: 4, n_mlp_dens: 12, n_rad_base: 8, n_params: 445793}
+grace_fs:      # GRACE-FS (gracemaker preset FS: linear radials, SBessel, Finnis-Sinclair readout), its small / medium
+               # settings at cutoff 5 A; LAMMPS: pair_style grace/fs (C++ YAML export)
+  - {size: fs_small,  preset: FS, max_order: 3, lmax: [5, 5, 4],    n_rad_max: [20, 15, 10],    embedding_size: 32,
+     fs_parameters: [[1.0, 1.0], [1.0, 0.5]], n_params: 3432}
+  - {size: fs_medium, preset: FS, max_order: 4, lmax: [5, 5, 4, 3], n_rad_max: [20, 15, 10, 5], embedding_size: 64,
+     fs_parameters: [[1.0, 1.0], [1.0, 0.5], [1.0, 2], [1.0, 0.75]], n_params: 4564}
+grace_abl:     # one change each to the `grace` size nearest the target (`base`; c16o4 is a placeholder until the ladder
+               # is scored).  linro: one linear density, no MLP (LinearOut2Target).  frozenR: the radial MLP (R_Linear_*)
+               # left at its random initialisation, every other variable trained (fit::trainable_variable_names).
+               # o3: max_order 3
+  - {size: c16o4_linro,   base: c16o4, readout: linear}
+  - {size: c16o4_frozenR, base: c16o4, freeze_radial: true,
+     trainable: ["A_ChemIndTransf/", "A1/w_", "AA1/w_", "AA2/w_", "LinMLPOut2ScalarTarget_MLP", "tr_atomic_shift", "Z/ChemicalEmbedding", "rho/reducing_"]}
+  - {size: c16o4_o3,      base: c16o4, max_order: 3}

@@ -1,0 +1,6 @@
+[project]
+name = "ac-grace"
+version = "0"
+requires-python = ">=3.11,<3.13"
+# gracemaker (tensorpotential >= 0.5: GRACE-1L/2L/FS) on TensorFlow with pip CUDA; extxyz for split.read_atoms
+dependencies = ["tensorpotential", "tensorflow[and-cuda]", "pyyaml", "extxyz", "pandas"]
