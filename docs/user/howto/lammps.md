@@ -93,6 +93,44 @@ five-component alloy, this is 1.2 to 1.4 times faster.
     Use `slots="cutoff"` only for stable MD of a fitted model, where the
     coordination stays near the coordination of the initial structure.
 
+## CPU kernel
+
+On CPUs, a C++ kernel can replace the compiled JAX program. It is for
+linear ACE models. It runs one MPI rank per core, with one thread per rank.
+
+!!! warning "lammps-jax version"
+    The kernel needs a lammps-jax LAMMPS plugin that registers custom calls
+    for the CPU. lammps-jax 0.2.0 registers them for CUDA only.
+
+1. Compile the kernel. Use the same machine type as the LAMMPS run:
+
+    ```python
+    from ace_jax.eval import ffi
+    ffi.build("libace_jax_ffi.so", flags=("-O3", "-march=native"))
+    ```
+
+2. Export with `ffi=True`, `platform="cpu"` and `max_neighbors`:
+
+    ```python
+    export_lammps(model, meta, "si_bundle.json", max_atoms=cap["max_atoms"],
+                  max_owned=cap["max_owned"], max_neighbors=cap["max_neighbors"],
+                  platform="cpu", ffi=True)
+    ```
+
+3. Give LAMMPS the kernel library, and run with `newton on`:
+
+    ```bash
+    export LAMMPS_JAX_FFI_HANDLERS="ace_jax_direct=$PWD/libace_jax_ffi.so:AceDirect"
+    mpirun -np 128 lmp -k on t 1 -sf kk -pk kokkos newton on neigh half -in in.lammps
+    ```
+
+The kernel needs a linear ACE model, float64 and the `matrix` layout. It
+tabulates the radial basis in r (`radial_table=True`). Energies agree with
+the calculator to approximately 1e-12 relative, and forces to 1.5e-8 of the
+largest force. The bundle records the kernel as `ace_jax.ffi`.
+
+Compile the kernel with the same jax version as the lammps-jax CPU plugin.
+
 ## Layouts
 
 | Layout | What it does | When `"auto"` picks it |

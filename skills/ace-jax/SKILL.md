@@ -402,6 +402,11 @@ for its CPU build, which refuses a cuda bundle and vice versa).
   `max_neighbors`, stays packed dense. `layout="matrix"` requires
   `max_neighbors`: the list holds rcut + skin pairs, so a `k_dense` sized for
   rcut is too small. `max_edges` is needed by sparse and dense only.
+- `ffi=True` (CPU, linear ACE, float64): the C++ XLA FFI kernel `ace_jax.eval.ffi` replaces the XLA
+  program on the matrix layout (positions in, energies and forces out, `newton on`; radial table on).
+  Compile it with `ffi.build(path, flags=("-O3", "-march=native"))` and run LAMMPS with
+  `LAMMPS_JAX_FFI_HANDLERS="ace_jax_direct=<lib>:AceDirect"`, one MPI rank per core. Needs a lammps-jax
+  plugin that registers FFI handlers for the CPU (0.2.0 registers them for CUDA only).
 - An older lammps-jax LAMMPS plugin rejects a matrix bundle ("re-export"). To
   fix it, rebuild the plugin, or export `layout="dense"`. The bundle records
   the exporting lammps-jax as `ace_jax.lammps_jax`.
