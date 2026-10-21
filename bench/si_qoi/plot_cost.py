@@ -75,7 +75,15 @@ FAM = {  # family: (label, colour, marker, linestyle, filled, qoi model name pat
     "ace_wl_2":    ("linear ACE, wL 2.0",          "#184f95", "o", "-", False, "ACEwl_{s}"),
     "ace_wl_2.5":  ("linear ACE, wL 2.5",          "#0d366b", "o", "-", False, "ACEwl_{s}"),
     "ace_wl_o5":   ("linear ACE, order 5, wL 2.0", "#184f95", "h", ":", False, "ACEwl_{s}"),
+    # GRACE trained from scratch by gracemaker (bench/accuracy_cost/fit_grace.py): three seeds per size, plotted as
+    # the seed mean with a min-max bar (SEEDED); sienna, its own marker; FS open and dashed
+    "grace":      ("GRACE-1L (gracemaker)",    "#a0522d", "h", "-",  True,  "GRACE_{s}"),
+    "grace_fs":   ("GRACE-FS (gracemaker)",    "#a0522d", "h", "--", False, "GRACE_{s}"),
 }
+# families fitted with several seeds (sizes "<size>_s<k>"): one point per size, the mean over seeds, with the
+# min-max spread as an error bar; the per-seed rows stay in metrics.jsonl.  SEED_EXCLUDE: checks, not ladder points
+SEEDED = ("grace", "grace_fs")
+SEED_EXCLUDE = ("c32l4_long",)               # the 150k-update training-length check
 WL_FAMILIES = ("ace", "ace_wl_1", "ace_wl_1.75", "ace_wl_2", "ace_wl_2.5", "ace_wl_o5", "ace_lr", "pace")
 WL_RECOLOUR = {"ace": "#3987e5"}                 # the ramp's wL 1.5 step (the categorical blue is too near 1.75)
 
@@ -115,6 +123,37 @@ TAB_SIZES = ("o4d12", "o4d14", "o4d16", "o4d20")    # the ace sizes converted (s
 def cost_name(fam, size):
     fam = COST_AS.get(fam, fam)
     return COST_NAME.get(fam, FAM[fam][5]).format(s=size)
+
+
+def seed_split(size):
+    """("c16l3", 0) for "c16l3_s0"; (size, None) without a seed suffix."""
+    import re
+    m = re.fullmatch(r"(.+)_s(\d+)", size)
+    return (m.group(1), int(m.group(2))) if m else (size, None)
+
+
+def seed_average(pts):
+    """Per-seed points of one family -> one point per size: mean rmse_F / rmse_E / qoi (qoi only when every seed
+    has every QoI) and their min-max (`*_lo`, `*_hi`), n_seeds; x is the seed-0 cost (all seeds share the
+    architecture, so the cost) or the parameter count."""
+    groups = {}
+    for q in pts:
+        base, k = seed_split(q["size"])
+        if base in SEED_EXCLUDE:
+            continue
+        groups.setdefault(base, []).append(q)
+    out = []
+    for base, qs in groups.items():
+        p = {"name": qs[0]["name"].replace(qs[0]["size"], base), "size": base, "n": qs[0]["n"], "n_seeds": len(qs),
+             "x": next((q["x"] for q in qs if q["x"] is not None), None), "n_qoi": min(q["n_qoi"] for q in qs)}
+        for key in ("rmse_F", "rmse_E", "qoi"):
+            v = [q[key] for q in qs]
+            if any(x is None for x in v):
+                p[key] = None
+                continue
+            p[key], p[key + "_lo"], p[key + "_hi"] = float(np.mean(v)), float(min(v)), float(max(v))
+        out.append(p)
+    return out
 SKIP = set()                                     # families left out of this figure (main: the wL ladder)
 
 
@@ -168,6 +207,9 @@ def collect(cost):
         out.setdefault(fam, []).append({"name": name, "size": r["size"], "x": x, "n": r.get("n_params") or 0, "rmse_F": r["rmse_F"],
                                         "rmse_E": r["rmse_E"], "qoi": sc["gm_norm"] if sc["n_qoi"] == sc["n_total"] else None,
                                         "n_qoi": sc["n_qoi"]})
+    for fam in SEEDED:
+        if fam in out:
+            out[fam] = seed_average(out[fam])
     for fam in out:
         out[fam].sort(key=lambda p: p["n"])           # ladder order: a line through sizes, even where cost is not monotone
     out = {f: out[f] for f in FAM if f in out}          # fixed family order: legend and colours never reorder
@@ -195,6 +237,9 @@ def series(ax, data, key):
         x, y = [q["x"] for q in p], [q[key] for q in p]
         ax.plot(x, y, ls=ls, lw=2, color=col, marker=mk, ms=8, mfc=col if filled else "white", mec=col,
                 mew=1.5, label=lab, zorder=3)
+        if all(key + "_lo" in q for q in p):           # SEEDED: the min-max over seeds
+            ax.errorbar(x, y, yerr=[[q[key] - q[key + "_lo"] for q in p], [q[key + "_hi"] - q[key] for q in p]],
+                        fmt="none", ecolor=col, elinewidth=1.2, capsize=3, zorder=3)
 
 
 def flag(ax, data, codes, key):
@@ -313,7 +358,17 @@ def main():
     ap.add_argument("--no-note", action="store_true",
                     help="no footnote (the docs page states the method in its text)")
     ap.add_argument("--wl", action="store_true", help="the wL-ladder figure (WL_FAMILIES, recoloured) instead of the main one")
+    ap.add_argument("--seed-table", action="store_true", help="print the SEEDED families' per-size mean and min-max, then exit")
     a = ap.parse_args()
+    if a.seed_table:
+        data, ref = collect(None)
+        print(f"GAP-18: rmse_F {ref['rmse_F']:.4f}  QoI {ref['qoi']:.2f}")
+        for fam in SEEDED:
+            for q in data.get(fam, []):
+                f = lambda k, fmt: "-" if q.get(k) is None else f"{q[k]:{fmt}} [{q[k + '_lo']:{fmt}}, {q[k + '_hi']:{fmt}}]"
+                print(f"{fam}/{q['size']:10s} n {q['n']:7d} seeds {q['n_seeds']}  F {f('rmse_F', '.4f')}  "
+                      f"E {f('rmse_E', '.4f')}  QoI {f('qoi', '.2f')}")
+        return
     if a.wl:
         SKIP.update(f for f in FAM if f not in WL_FAMILIES)
         for f, c in WL_RECOLOUR.items():
@@ -363,7 +418,7 @@ def main():
         note = (cpu_note + "QoI error clips each QoI to [0.05, 10] x tolerance; compressed hcp is left out (extrapolation, "
                 "outside the training data); only models with every QoI computed.\n"
                 "Cost: the fastest parity-checked code per model, float64 only except NEP on the GPU (one-layer MACE and, on the GPU, Symmetrix MACE c64L1 have "
-                "float32 timings only and are left out of the cost rows). Single fits per point.\n"
+                "float32 timings only and are left out of the cost rows). Single fits per point, except GRACE: the mean of three seeds, bars min-max.\n"
                 "Light blue: the same o4 linear ACE fits in reduced precision -- ace-jax float32 lammps-jax bundles (where timed), and "
                 "patched ML-PACE pace/kk in a KOKKOS_PREC=mixed LAMMPS (accuracy is the float64 fit's).")
         fig.text(0.5, 0.003, note, ha="center", fontsize=8.5, color=MUTED)
