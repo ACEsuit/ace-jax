@@ -11,7 +11,7 @@ at 1e-10, as learned radials are by default); each row's gate is looked up in it
 import argparse, json, pathlib, sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
-from plot_cost import FAM, REDUCED, ROOT, cost_name, family_of  # noqa: E402
+from plot_cost import FAM, REDUCED, ROOT, cost_name, family_of, seed_split  # noqa: E402
 
 
 def main():
@@ -60,6 +60,10 @@ def main():
         if us < best.get(name, float("inf")):
             best[name], code[name] = us, (f'{r["code"]} {r["dtype"]} {r["mode"]}' + (f' dag:{r["aa_dag"]}' if r.get("aa_dag") else "")
                                           + f' [{r["_file"]}]')
+    for n in list(best):                    # seeded families (plot_cost.SEEDED): seed 0 is timed for its size
+        base, k = seed_split(n)
+        if k is not None and base not in best:
+            best[base], code[base] = best[n], code[n]
     pathlib.Path(a.out).write_text(json.dumps(best, indent=1, sort_keys=True) + "\n")
     pathlib.Path(a.out).with_suffix(".codes.json").write_text(json.dumps(code, indent=1, sort_keys=True) + "\n")
     for n in sorted(best):

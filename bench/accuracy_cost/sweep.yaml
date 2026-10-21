@@ -113,3 +113,38 @@ nep:           # NEP4 trained by GPUMD's nep on a Sulis A100 (fit_nep.py; envs/s
   # the test configs are in its training set)
   - {size: nlit,  n_max: "10 8", basis_size: "10 10", l_max: "4 2 1", neuron: 50, lambda_1: 0.05, lambda_2: 0.05, population: 50, batch: 100000, weights: none, generation: 100000, chunk: 100000}   # stopped at 100k: not below n120b
   - {size: nlitw, n_max: "10 8", basis_size: "10 10", l_max: "4 2 1", neuron: 50, lambda_1: 0.05, lambda_2: 0.05, population: 50, batch: 100000, generation: 100000, chunk: 100000}   # stopped at 100k: tracks nlit ~0.002 eV/A behind
+grace:         # GRACE-1L from scratch (fit_grace.py, gracemaker 0.6.2.1, float64 parameters): GRACE_1LAYER_latest's
+               # architecture (grace_custom.grace_1l, readout "mlp"), cutoff 5 A; cN = n_rad_max = prod_func_n_max
+               # channels, lN = lmax.  Every size keeps max_order 4 and n_rad_max <= 32: pair_style grace/1l/kk reads
+               # an AA2 (order-4) block unconditionally (an order-3 .npz exports, then dies of SIGFPE at load) and caps
+               # nradmax at 32.  c32l4 / c64l4 are the preset's "small" / "medium".  n_params: fit_grace.n_params.
+               # Runs: runs/grace/<size>_s<seed>, seeds 0 1 2
+  - {size: c8l3,  lmax: 3, n_rad_max: 8,  prod_func_n_max: 8,  max_order: 4, n_mlp_dens: 4,  n_rad_base: 8, n_params: 14121}
+  - {size: c16l3, lmax: 3, n_rad_max: 16, prod_func_n_max: 16, max_order: 4, n_mlp_dens: 8,  n_rad_base: 8, n_params: 34769}
+  - {size: c16l4, lmax: 4, n_rad_max: 16, prod_func_n_max: 16, max_order: 4, n_mlp_dens: 8,  n_rad_base: 8, n_params: 55505}
+  - {size: c32l4, lmax: 4, n_rad_max: 32, prod_func_n_max: 32, max_order: 4, n_mlp_dens: 10, n_rad_base: 8, n_params: 171937}
+  - {size: c64l4, lmax: 4, n_rad_max: 32, prod_func_n_max: 64, max_order: 4, n_mlp_dens: 12, n_rad_base: 8, n_params: 445793}
+  # training-length check: c32l4 at 3x the updates (150k), seed 0 only; accuracy only (same architecture as c32l4)
+  - {size: c32l4_long, lmax: 4, n_rad_max: 32, prod_func_n_max: 32, max_order: 4, n_mlp_dens: 10, n_rad_base: 8, n_params: 171937,
+     target_total_updates: 150000, timing: false}
+grace_fs:      # GRACE-FS (gracemaker preset FS: linear radials, SBessel, Finnis-Sinclair readout), its small / medium
+               # settings at cutoff 5 A; LAMMPS: pair_style grace/fs (C++ YAML export)
+  - {size: fs_small,  preset: FS, max_order: 3, lmax: [5, 5, 4],    n_rad_max: [20, 15, 10],    embedding_size: 32,
+     fs_parameters: [[1.0, 1.0], [1.0, 0.5]], n_params: 3432}
+  - {size: fs_medium, preset: FS, max_order: 4, lmax: [5, 5, 4, 3], n_rad_max: [20, 15, 10, 5], embedding_size: 64,
+     fs_parameters: [[1.0, 1.0], [1.0, 0.5], [1.0, 2], [1.0, 0.75]], n_params: 4564}
+grace_abl:     # one change each to the `grace` size nearest the target (`base`; c16l4 is a placeholder until the ladder
+               # is scored).  linro: one linear density, no MLP (LinearOut2Target; 43,537 parameters at c16l4).
+               # frozenR: the radial MLP (R_Linear_*, 9,728 at c16l4) left at its random initialisation, every other
+               # variable trained (fit::trainable_variable_names).  o3: max_order 3 (31,745).  Accuracy only: linro
+               # and o3 are outside grace/1l/kk's export (o3 would need the TensorFlow pair_style grace)
+  - {size: c16l4_linro,   base: c16l4, readout: linear}
+  - {size: c16l4_frozenR, base: c16l4, freeze_radial: true,
+     trainable: ["A_ChemIndTransf/", "A1/w_", "AA1/w_", "AA2/w_", "LinMLPOut2ScalarTarget_MLP", "tr_atomic_shift", "Z/ChemicalEmbedding", "rho/reducing_"]}
+  - {size: c16l4_o3,      base: c16l4, max_order: 3}
+  # the base chosen after the ladder (seed means): c64l4, the smallest size reaching the target (F 0.0764, QoI 0.464);
+  # c32l4 misses by 0.001 (QoI 0.501).  The c16l4_* entries above stay as the Phase-1 probe's configurations
+  - {size: c64l4_linro,   base: c64l4, readout: linear}
+  - {size: c64l4_frozenR, base: c64l4, freeze_radial: true,
+     trainable: ["A_ChemIndTransf/", "A1/w_", "AA1/w_", "AA2/w_", "LinMLPOut2ScalarTarget_MLP", "tr_atomic_shift", "Z/ChemicalEmbedding", "rho/reducing_"]}
+  - {size: c64l4_o3,      base: c64l4, max_order: 3}

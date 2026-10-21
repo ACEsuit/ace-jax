@@ -1,0 +1,1 @@
+{"lmp": "/home/e/essswb/bench-scaling/lmp-grace.sh", "grace_python": "/home/e/essswb/bench-scaling/venv-grace/bin/python", "pythonpath": "/home/e/essswb/bench-scaling/ace-jax-grace/bench:/home/e/essswb/bench-scaling/ace-jax-ac/src", "python": "/home/e/essswb/bench-scaling/venv/bin/python", "root": "/home/e/essswb/bench-scaling"}
