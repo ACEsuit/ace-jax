@@ -8,7 +8,7 @@
   square root of DATA/weights_mace.json (MACE multiplies the squared error by its weight, GPUMD by weight^2:
   main_nep/dataset.cu get_rmse_force).  Fits before this fix (n10-n120c and the n120b screens) wrote the MACE
   weight itself, i.e. (sigma_F,default / sigma_F)^4 on the squared error.  An entry with `weights: none`
-  writes weight 1.  NEP's own lambda_e / lambda_f / lambda_v otherwise (1, 1, 0.1).
+  writes weight 1.  NEP's own lambda_e / lambda_f / lambda_v (1, 1, 0.1) unless the entry sets them.
 - Cutoff: 5 A radial and angular (RCUT, every family) unless the entry sets `cutoff`; the sweep entry sets
   n_max, basis_size, l_max, neuron (and optionally generation, batch, cutoff, lambda_1, lambda_2).
 
@@ -18,6 +18,7 @@ $ACEJAX_AC_NEP names the nep executable (default `nep` on PATH)."""
 import json
 import os
 import re
+import shutil
 
 import numpy as np
 
@@ -29,9 +30,12 @@ NEP_DEFAULTS = {"version": 4, "generation": 100000, "batch": 1000}
 
 def nep_in(e):
     """nep.in for a sweep entry: n_max "R A", basis_size "R A", l_max "3b [4b [5b]]", neuron N; optionally
-    cutoff "R A" (default RCUT both), lambda_1 / lambda_2 (GPUMD's default scales with the parameter count) and
-    population (SNES; default 50).  A batch at least the training-set size is full batch."""
-    reg = [f"{k} {e[k]:g}" for k in ("lambda_1", "lambda_2", "population") if k in e]
+    cutoff "R A" (default RCUT both), lambda_1 / lambda_2 (GPUMD's default scales with the parameter count),
+    population (SNES; default 50), the loss weights lambda_e / lambda_f / lambda_v (default 1, 1, 0.1) and
+    import_q_scaler (1: keep nep.txt's descriptor scaling instead of recomputing it from the training set at
+    generation 0; main_nep/fitness.cu).  A batch at least the training-set size is full batch."""
+    reg = [f"{k} {e[k]:g}" for k in ("lambda_1", "lambda_2", "population", "lambda_e", "lambda_f", "lambda_v",
+                                     "import_q_scaler") if k in e]
     return "\n".join([f"version {e.get('version', NEP_DEFAULTS['version'])}", "type 1 Si",
                       f"cutoff {e.get('cutoff', f'{RCUT:g} {RCUT:g}')}",
                       f"n_max {e['n_max']}", f"basis_size {e['basis_size']}", f"l_max {e['l_max']}",
@@ -81,7 +85,10 @@ def n_params(log):
 def fit(size):
     """Train to the entry's `generation` (total) in jobs of at most `chunk` generations: a run short of its total
     resumes from nep.restart (GPUMD reads it when present; SNES's step sizes are fixed, so a resumed run continues
-    the same search).  status.json counts `generations`; fits from before it was recorded ran NEP_DEFAULTS'."""
+    the same search).  status.json counts `generations`; fits from before it was recorded ran NEP_DEFAULTS'.
+    An entry with `init: <size>` is a later stage of a multi-stage fit (the GPUMD developers' two-stage recipe:
+    force-weighted, then balanced): its first job starts from that fit's nep.restart and nep.txt, and its
+    `generations` and `fit_wall_s` count this stage only."""
     from .split import ensure_split
     h = ensure_split()
     e, d = common.entry("nep", size), common.run_dir("nep", size)
@@ -92,6 +99,12 @@ def fit(size):
         return prev
     if not done:
         prepare(d, e)
+        if "init" in e:                                           # a later stage: resume the SNES search of `init`
+            src = common.run_dir("nep", e["init"])
+            if (common.read_status(src) or {}).get("status") != "ok":
+                raise RuntimeError(f"nep/{size} starts from nep/{e['init']}, which has no finished fit")
+            for f in ("nep.restart", "nep.txt"):
+                shutil.copy2(src / f, d / f)
     run = min(int(e.get("chunk", total)), total - done)
     (d / "nep.in").write_text(nep_in({**e, "generation": run}))
     if done:
@@ -99,7 +112,8 @@ def fit(size):
     st = common.fit_once("nep", size, "nep.txt", [os.environ.get("ACEJAX_AC_NEP", "nep")], split_hash=h)
     if st["status"] == "ok":
         st.update(generations=done + run, fit_wall_s=st["fit_wall_s"] + prev.get("fit_wall_s", 0.0) * bool(done),
-                  n_params=prev.get("n_params") or n_params((d / "fit.log").read_text()), e0_per_atom=E0_SI)
+                  n_params=prev.get("n_params") or n_params((d / "fit.log").read_text()), e0_per_atom=E0_SI,
+                  **({"init": e["init"]} if "init" in e else {}))
         common.write_status(d, **{k: v for k, v in st.items() if k != "host"})
     return st
 

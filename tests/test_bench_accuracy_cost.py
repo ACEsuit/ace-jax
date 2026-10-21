@@ -258,6 +258,40 @@ def test_fit_nep_resumes_in_chunks(tmp_path, monkeypatch):
     assert fit_nep.fit("n80")["generations"] == 300000
 
 
+def test_fit_nep_two_stage(tmp_path, monkeypatch):
+    """Loss weights and import_q_scaler reach nep.in only when the entry sets them (older entries' nep.in is
+    unchanged); a stage with `init` starts from that fit's nep.restart + nep.txt and counts its own generations."""
+    import json
+    from accuracy_cost import common, fit_nep, split
+    e = {"n_max": "8 6", "basis_size": "8 8", "l_max": "4 1", "neuron": 50}
+    assert "lambda" not in fit_nep.nep_in(e) and "import_q_scaler" not in fit_nep.nep_in(e)
+    txt = fit_nep.nep_in({**e, "lambda_e": 5, "lambda_f": 5, "import_q_scaler": 1})
+    assert "lambda_e 5\nlambda_f 5\nimport_q_scaler 1\n" in txt
+    s1, s2 = tmp_path / "nep" / "s1", tmp_path / "nep" / "s2"; s1.mkdir(parents=True)
+    (s1 / "nep.restart").write_text("restart"); (s1 / "nep.txt").write_text("model")
+    entries = {"s1": {"size": "s1", **e, "lambda_f": 10}, "s2": {"size": "s2", **e, "lambda_e": 5, "lambda_f": 5,
+                                                                 "import_q_scaler": 1, "init": "s1", "generation": 500000, "chunk": 250000}}
+    monkeypatch.setattr(common, "run_dir", lambda f, s: tmp_path / f / s)
+    monkeypatch.setattr(common, "entry", lambda f, s: entries[s])
+    monkeypatch.setattr(split, "ensure_split", lambda: "h")
+    monkeypatch.setattr(fit_nep, "prepare", lambda d, e: d.mkdir(parents=True, exist_ok=True))
+    with pytest.raises(RuntimeError, match="no finished fit"):
+        fit_nep.fit("s2")
+    (s1 / "status.json").write_text(json.dumps({"status": "ok"}))
+    def fake_fit_once(family, size, model, cmd, split_hash=None):
+        assert (s2 / "nep.restart").read_text() == "restart" and (s2 / "nep.txt").read_text() == "model"
+        common.write_status(s2, status="ok", model=str(s2 / model), fit_wall_s=5.0)
+        return common.read_status(s2)
+    monkeypatch.setattr(common, "fit_once", fake_fit_once)
+    monkeypatch.setattr(fit_nep, "n_params", lambda log: 2445); (s2 / "fit.log").write_text("")
+    st = fit_nep.fit("s2")
+    assert "generation 250000" in (s2 / "nep.in").read_text() and st["generations"] == 250000 and st["init"] == "s1"
+    (s2 / "nep.restart").write_text("own")                       # the second job resumes its own search
+    monkeypatch.setattr(common, "fit_once", lambda *a, **k: (common.write_status(s2, status="ok", fit_wall_s=1.0),
+                                                             common.read_status(s2))[1])
+    assert fit_nep.fit("s2")["generations"] == 500000 and (s2 / "nep.restart").read_text() == "own"
+
+
 def test_gpumd_inputs(tmp_path):
     """GPUMD's model.xyz starts at rest (zero velocities), as the LAMMPS runs do."""
     from ase.build import bulk
