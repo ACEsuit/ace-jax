@@ -150,7 +150,8 @@ on every frame, test included, so it is a reference line, not a held-out score. 
   `fit_grace` sets the stress loss's `normalize_by_samples: False` and divides each virial weight by 6 x the mean
   batch sum instead. Also: a frame whose `stress` is None crashes the data builder (it multiplies `np.array(None)`),
   so frames without a virial carry zeros at weight 0; the isolated atom (no neighbours) also gives NaN and is dropped,
-  as for PACE.
+  as for PACE. This departure from gracemaker's defaults was reviewed and accepted (2026-10-21): every family that
+  can fit virials does (pacemaker's tensorpot loss cannot), and dropping the stress term was the alternative.
 - **E0.** The model predicts E - N E0; `fit_grace.calculator` (and the QoI `model.py`s) add N E0 back. LAMMPS runs
   the model as trained (parity compares unshifted energies).
 - **LAMMPS.** yury-lysogorskiy/lammps `grace` branch b1f4a6c + lammps-user-pace v.2025.12.4.p1, no TensorFlow

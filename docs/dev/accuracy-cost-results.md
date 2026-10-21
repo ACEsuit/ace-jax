@@ -199,3 +199,59 @@ Fits, QoIs and timings themselves: `bench/accuracy_cost/` (`sweep.yaml`, `timing
 
 - ACE + GP was dropped from the families pending the GP LML cost study (issue #60).
 - GAP has a CPU row at 32 ranks only.
+
+## GRACE-1L and GRACE-FS (2026-10-21)
+
+gracemaker 0.6.2.1 from scratch (`bench/accuracy_cost/fit_grace.py`, sweep families `grace`, `grace_fs`, `grace_abl`):
+cutoff 5 Å, float64 parameters, the `gracemaker -t` from-scratch defaults (Adam, 50k updates = 376 epochs, Huber
+E16/F32/stress 128, batch 16) and GAP-18's per-type weights. Three seeds per size, on Sulis A100s; one departure from
+gracemaker's defaults: the stress term is not normalised per batch (a batch without virials gives 0/0 = NaN); the
+virial weights are pre-divided by their expected batch sum instead (`bench/accuracy_cost/data.md`). Timed in LAMMPS
+from the yury-lysogorskiy/lammps `grace` branch: `grace/1l/kk` (A100) and `grace/1l/cpu/kk` (CPU node, 128 x 1),
+`grace/fs/kk` / `grace/fs`, float64, seed 0 of each size, each gated at 64 atoms against gracemaker's TPCalculator
+(1L ≤ 2.9e-10 eV/Å; FS ≤ 6.3e-9). Every GRACE-1L size keeps max_order 4: the Kokkos 1L kernel cannot load order 3.
+
+Mean over seeds (forces: half the min-max range); µs/atom-step:
+
+| model | parameters | force RMSE (eV/Å) | liquid force RMSE | QoI error [min, max] | A100 | CPU node |
+|---|---|---|---|---|---|---|
+| GRACE-1L c8l3 | 14,121 | 0.0933 ± 0.0018 | 0.162 | 0.84 [0.79, 0.90] | 2.47 | 5.87 |
+| GRACE-1L c16l3 | 34,769 | 0.0870 ± 0.0009 | 0.153 | 0.75 [0.67, 0.83] | 3.25 | 9.05 |
+| GRACE-1L c16l4 | 55,505 | 0.0808 ± 0.0008 | 0.140 | 0.54 [0.50, 0.57] | 3.81 | 12.5 |
+| GRACE-1L c32l4 | 171,937 | 0.0779 ± 0.0005 | 0.138 | 0.50 [0.43, 0.57] | 6.95 | 27.0 |
+| GRACE-1L c64l4 | 445,793 | 0.0764 ± 0.0004 | 0.138 | 0.46 [0.45, 0.47] | 11.65 | 59.1 |
+| GRACE-FS small | 3,432 | 0.122 ± 0.006 | 0.246 | 0.91 [0.79, 1.11] | 1.30 | 2.51 |
+| GRACE-FS medium | 4,564 | 0.121 ± 0.004 | 0.240 | 0.99 [0.97, 1.02] | 1.75 | 2.93 |
+
+For comparison (single fits): linear ACE o4d20 0.0816 eV/Å, liquid 0.180, QoI 0.39 (A100 3.12 ace-jax / 2.42 patched
+ML-PACE, CPU 2.89 patched ML-PACE); MACE c16L0 0.0699, liquid 0.123, QoI 0.41 (A100 1.93 / 1.23 Symmetrix-XL, CPU 2.36).
+
+**Outcome (the plan's table).** GRACE-1L reaches the target at c64l4 (the smallest size whose seed mean does; c32l4
+misses by 0.001), and a lower liquid force error than linear ACE o4d20 (0.138 against 0.180),
+but at 3.7-4.8x linear ACE's A100 cost and 20x its CPU cost (patched ML-PACE), and 6-9.5x MACE c16L0's (GPU) / 25x
+(CPU). So: GRACE reaches the target at a higher cost than linear ACE, and small MACE is cheaper still: ace-jax's
+linear ACE stays competitive, and MACE c16L0 is the benchmark to beat. GRACE-FS does not reach either target.
+
+**Ablations** (one change each to c64l4, three seeds, accuracy only):
+
+| ablation | force RMSE | liquid | QoI [min, max] | point-defect error / tolerance |
+|---|---|---|---|---|
+| c64l4 (base) | 0.0764 | 0.138 | 0.46 [0.45, 0.47] | 6.9 |
+| linear readout | 0.0844 (+10%) | 0.161 (+17%) | 0.55 [0.51, 0.59] | 9.7 |
+| max_order 3 | 0.0846 (+11%) | 0.148 (+7%) | 0.55 [0.49, 0.61] | 8.7 |
+| radial MLP frozen at its initialisation | 0.0786 (+3%) | 0.147 (+7%) | 0.53 [0.51, 0.56] | 7.9 |
+
+Each ablation loses the QoI target. The nonlinear readout carries most of the liquid gain (its loss gives back about
+half of the gap to linear ACE's 0.180) and, with body order 4, the force gain; radial learning is worth 3% on forces,
+in line with ace-jax's learned radials (5-7%). A linear-readout GRACE-1L (377k parameters) is less accurate than
+linear ACE o4d20 (5,476): GRACE's learned basis does not substitute for the readout.
+
+**Training length.** One c32l4 fit at 3x the updates (150k; `grace/c32l4_long_s0`) scores 0.0680 eV/Å (50k seeds:
+0.0779 ± 0.0005), energy 2.57 meV/atom (3.93), QoI 0.45 (seeds 0.43-0.57), liquid unchanged (0.139). The 50k-update
+default under-trains at least c32l4, so the ladder's force errors are upper bounds; the QoI and liquid conclusions
+are within seed noise of the longer fit. The ladder was not refitted.
+
+Costs: 21.3 A100-hours of fits (ladder 10.5, FS 1.2, ablations 9.7), plus about 4 for probes, the LAMMPS build and the
+two timing jobs. Rows: `results/metrics.jsonl` (`grace*`, one per seed), QoI scores `results/grace_qoi.json`, timings
+`results/sulis/sulis-{gpu,cpu-128x1}-grace.jsonl`, figure `bench/si_qoi/results/rmse_qoi_cost_grace.png` (cost files
+`cost_sulis_{gpu,cpu}_grace.json`; the published figure and cost files are unchanged).
