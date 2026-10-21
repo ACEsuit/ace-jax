@@ -210,6 +210,15 @@ virial weights are pre-divided by their expected batch sum instead (`bench/accur
 from the yury-lysogorskiy/lammps `grace` branch: `grace/1l/kk` (A100) and `grace/1l/cpu/kk` (CPU node, 128 x 1),
 `grace/fs/kk` / `grace/fs`, float64, seed 0 of each size, each gated at 64 atoms against gracemaker's TPCalculator
 (1L ≤ 2.9e-10 eV/Å; FS ≤ 6.3e-9). Every GRACE-1L size keeps max_order 4: the Kokkos 1L kernel cannot load order 3.
+The A100 build was checked (Release `-O3`, CUDA 12.8, `Kokkos_ARCH_AMPERE80`, device code `-arch=sm_80`), and
+`grace/1l/kk`'s atom batch was swept (`chunksize`, job 2257996, `envs/sulis-gpu-grace-chunk.sbatch`, rows
+`results/sulis/sulis-gpu-grace-chunk<N>.jsonl`, each parity-gated): the default 4096 is the best or within 3%,
+and larger batches are slower for c64l4 (µs/atom-step, 32,768 atoms):
+
+| chunksize | 4096 (default) | 8192 | 16384 | 32768 |
+|---|---|---|---|---|
+| c16l4 | 3.81 | 3.70 | 3.79 | 3.98 |
+| c64l4 | 11.76 | 12.49 | 15.61 | 17.23 |
 
 Mean over seeds (forces: half the min-max range); µs/atom-step:
 
