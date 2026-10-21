@@ -97,6 +97,26 @@ parameters than linear ACE (f800: 761 parameters, 0.081 eV/Å) but not the QoI t
   the intended weights (nlitw) scores 0.108 eV/Å and QoI error 1.22 at 100k, against 0.106 and 1.25 without
   weights, so the weighting does not explain the plateau. No paper we found distils MACE into NEP with
   reported force errors; the favourable reports are on large, narrow MD datasets.
+
+  **Two-stage training (2026-10-22).** The GPUMD developers suggest a force-weighted stage (λe 1, λf 10,
+  100k generations), then a balanced one from its `nep.restart` (λe 5, λf 5, 500k, `import_q_scaler 1`).
+  Tested on n50's descriptor (sweep `n50-2s1`, `n50-2s`; `fit_nep.py` `init`), against n50-w, n50 refitted
+  with the corrected weights at the default λ (n50 itself predates the weight fix). Test RMSE E (meV/atom) /
+  F (eV/Å) / liquid F, then the QoI score:
+
+  | model | stage | E | F | liquid F | QoI |
+  |---|---|---|---|---|---|
+  | n50 (old weights) | 100k, λ 1/1 | 11.0 | 0.117 | 0.213 | 1.29 |
+  | n50-w | 100k, λ 1/1 | 10.5 | 0.113 | 0.207 | 1.24 |
+  | n50-2s1 | 100k, λ 1/10 | 12.7 | 0.099 | 0.177 | 1.58 |
+  | n50-2s | + 500k, λ 5/5 | 8.4 | 0.100 | 0.186 | 1.12 |
+  | n120b | 300k, λ 1/1 | 7.4 | 0.103 | 0.188 | 0.66 |
+
+  The recipe helps the small model: n50-2s beats n50-w on force (-11%), energy (-20%) and QoI (1.12 vs
+  1.24), and passes n120b on force with a quarter of its parameters. It does not reach n120b's QoI, and the
+  point defects stay 0.7-1.3 eV low in every NEP here. Stage 2 is flat after its first 50k generations (test F
+  0.1004 from 50k to 500k), so most of its 10.9 A100-hours bought nothing. The n120b version is not run: it
+  would cost ~52 A100-hours as specified (8.7 h per 100k generations), or ~17 with a 100k-generation stage 2.
 - **Symmetrix-XL** is 1.1-3.6x faster than Symmetrix for the same MACE models, most at L = 1 on the GPU.
 - **The DAG product basis** (`eval/aa_dag.py`) is never slower than the chain form and from ~6,000 chain-form
   multiplies per site clearly faster, so `aa_dag="auto"` (the default of `ACECalculator` and `export_lammps`)
