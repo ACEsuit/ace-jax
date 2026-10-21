@@ -404,9 +404,13 @@ for its CPU build, which refuses a cuda bundle and vice versa).
   rcut is too small. `max_edges` is needed by sparse and dense only.
 - `ffi=True` (CPU, linear ACE, float64): the C++ XLA FFI kernel `ace_jax.eval.ffi` replaces the XLA
   program on the matrix layout (positions in, energies and forces out, `newton on`; radial table on).
-  Compile it with `ffi.build(path, flags=("-O3", "-march=native"))` and run LAMMPS with
-  `LAMMPS_JAX_FFI_HANDLERS="ace_jax_direct=<lib>:AceDirect"`, one MPI rank per core. Needs a lammps-jax
-  plugin that registers FFI handlers for the CPU (0.2.0 registers them for CUDA only).
+  The export compiles it on first use (`ffi.library()`: `$CXX`/c++/g++/clang++, `-O3 -march=native` or
+  `ACEJAX_FFI_FLAGS`, cached in `~/.cache/ace-jax/ffi` or `$ACEJAX_FFI_CACHE`; `ffi.FFIUnavailable` without a
+  compiler); `ffi=<path>` uses a prebuilt one. CLI: `aj export --platform cpu --ffi [--ffi-flags="..."]`, which
+  prints the line to set. Run LAMMPS with `LAMMPS_JAX_FFI_HANDLERS` = `bundle["ace_jax"]["ffi"]["handlers"]`,
+  newton on, one MPI rank per core. `-march=native` on a login node may not run on compute nodes of another CPU:
+  export there, or pass generic flags. Needs a lammps-jax plugin that registers FFI handlers for the CPU
+  (0.2.0 registers them for CUDA only).
 - An older lammps-jax LAMMPS plugin rejects a matrix bundle ("re-export"). To
   fix it, rebuild the plugin, or export `layout="dense"`. The bundle records
   the exporting lammps-jax as `ace_jax.lammps_jax`.

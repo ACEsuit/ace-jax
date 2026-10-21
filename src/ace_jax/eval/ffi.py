@@ -2,11 +2,21 @@
 
 `lammps_fns` gives lammps-jax's direct force path for a lean float64 ACEModel with a radial table:
 positions in, atom energies and forces out. LAMMPS loads the kernel with
-LAMMPS_JAX_FFI_HANDLERS="ace_jax_direct=<lib>:AceDirect".
+LAMMPS_JAX_FFI_HANDLERS="ace_jax_direct=<lib>:AceDirect" (`handlers`).
+
+Distribution: the kernel ships as source in the (pure Python) wheel and `library` compiles it on first
+use with the user's C++17 compiler against the installed jaxlib's FFI headers, into a content-keyed cache;
+no compiler raises `FFIUnavailable`.  Anyone running it already builds LAMMPS and the lammps-jax plugin
+from source, so a compiler is there; a prebuilt wheel would trade -march=native for a generic baseline.
 """
 import ctypes
+import hashlib
+import os
 import pathlib
+import platform
+import shutil
 import subprocess
+import tempfile
 
 import jax
 import jax.numpy as jnp
@@ -15,8 +25,14 @@ import numpy as np
 from .aa_dag import build_plan
 
 TARGET = "ace_jax_direct"
+SYMBOL = "AceDirect"
 SOURCE = pathlib.Path(__file__).with_name("ace_ffi.cc")
+DEFAULT_FLAGS = ("-O3", "-march=native")
 REGISTERED = set()
+
+
+class FFIUnavailable(RuntimeError):
+    """The kernel cannot be compiled here: no C++17 compiler, or the compile failed."""
 
 
 def build(path, cxx="c++", flags=("-O3",)):
@@ -27,10 +43,77 @@ def build(path, cxx="c++", flags=("-O3",)):
     return path
 
 
+def compiler(env=None):
+    """The C++ compiler: $CXX, else the first of c++, g++, clang++ on PATH; None if there is none."""
+    env = os.environ if env is None else env
+    for c in ([env["CXX"]] if env.get("CXX") else []) + ["c++", "g++", "clang++"]:
+        if (w := shutil.which(c)):
+            return w
+    return None
+
+
+def cache_dir(env=None):
+    """`ACEJAX_FFI_CACHE`, else `$XDG_CACHE_HOME/ace-jax/ffi` (default `~/.cache/...`), as the coupling cache."""
+    env = os.environ if env is None else env
+    if env.get("ACEJAX_FFI_CACHE"):
+        return pathlib.Path(env["ACEJAX_FFI_CACHE"]).expanduser()
+    return pathlib.Path(env.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache")) / "ace-jax" / "ffi"
+
+
+def _cpu():
+    """This host's CPU model: part of the key when the flags tune for it (-march=native), since a cache in a
+    shared home is read from login and compute nodes of other CPU types."""
+    try:
+        for ln in pathlib.Path("/proc/cpuinfo").read_text().splitlines():
+            if ln.startswith("model name"):
+                return ln.split(":", 1)[1].strip()
+    except OSError:
+        pass
+    return platform.processor() or platform.machine()
+
+
+def library(flags=None, cxx=None, cache=None):
+    """The compiled kernel's path, built on first use: keyed on the source, the jaxlib version (its FFI headers),
+    the compiler and its version, the flags, the machine and, under -march=native, the CPU model.  flags:
+    `ACEJAX_FFI_FLAGS` (space-separated), else DEFAULT_FLAGS; pass e.g. ("-O3", "-march=x86-64-v3") to build on a
+    login node for compute nodes of another CPU type."""
+    import jaxlib
+    flags = tuple(flags if flags is not None else os.environ.get("ACEJAX_FFI_FLAGS", "").split() or DEFAULT_FLAGS)
+    cxx = cxx or compiler()
+    if cxx is None:
+        raise FFIUnavailable("the ace-jax CPU kernel (ffi=True) is compiled on first use and needs a C++17 compiler; "
+                             "none found (set CXX, or install g++ or clang++), or export without ffi")
+    ver = subprocess.run([cxx, "--version"], capture_output=True, text=True).stdout.splitlines()[:1]
+    native = any("native" in f for f in flags)
+    key = hashlib.sha256("\0".join([SOURCE.read_text(), jaxlib.__version__, cxx, *ver, *flags, platform.machine(),
+                                     _cpu() if native else ""]).encode()).hexdigest()[:16]
+    d = pathlib.Path(cache) if cache else cache_dir()
+    out = d / f"libace_jax_ffi-{key}.so"
+    if out.exists():
+        return out
+    d.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=d, suffix=".so.tmp")      # same dir: os.replace is atomic, so concurrent
+    os.close(fd)                                             # ranks or jobs never load a half-written library
+    try:
+        build(tmp, cxx, flags)
+        os.replace(tmp, out)
+    except subprocess.CalledProcessError as e:
+        raise FFIUnavailable(f"compiling the ace-jax CPU kernel with {cxx} {' '.join(flags)} failed "
+                             f"(exit {e.returncode}); see the compiler output above") from None
+    finally:
+        pathlib.Path(tmp).unlink(missing_ok=True)
+    return out
+
+
+def handlers(path):
+    """The LAMMPS_JAX_FFI_HANDLERS value that lets LAMMPS load the kernel at `path`."""
+    return f"{TARGET}={pathlib.Path(path).resolve()}:{SYMBOL}"
+
+
 def register(path):
     """Register the compiled kernel for in-process CPU programs."""
     if TARGET not in REGISTERED:
-        jax.ffi.register_ffi_target(TARGET, jax.ffi.pycapsule(ctypes.cdll.LoadLibrary(str(path)).AceDirect),
+        jax.ffi.register_ffi_target(TARGET, jax.ffi.pycapsule(getattr(ctypes.cdll.LoadLibrary(str(path)), SYMBOL)),
                                     platform="cpu")
         REGISTERED.add(TARGET)
 

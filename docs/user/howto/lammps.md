@@ -52,6 +52,8 @@ aj export --model fit/model.npz --out si_bundle.json --structure start.xyz \
 
 For the CPU backend, add `--platform cpu`. Add `--procs px,py,pz` to size the
 buffers for one MPI rank. Use the same grid in LAMMPS (`processors px py pz`).
+For a linear ACE model on CPUs, also add `--ffi`. This uses a C++ kernel
+in place of the XLA program. See [CPU kernel](#cpu-kernel).
 
  `export_lammps` returns a dictionary, and also writes it in the
 bundle. Its `ace_jax` key records what was exported: the layout, the
@@ -97,39 +99,55 @@ five-component alloy, this is 1.2 to 1.4 times faster.
 
 On CPUs, a C++ kernel can replace the compiled JAX program. It is for
 linear ACE models. It runs one MPI rank per core, with one thread per rank.
+The export compiles the kernel the first time, and keeps it in a cache.
 
 !!! warning "lammps-jax version"
     The kernel needs a lammps-jax LAMMPS plugin that registers custom calls
     for the CPU. lammps-jax 0.2.0 registers them for CUDA only.
 
-1. Compile the kernel. Use the same machine type as the LAMMPS run:
+!!! note "C++ compiler"
+    The kernel needs a C++17 compiler (`$CXX`, `c++`, `g++` or `clang++`).
+    The LAMMPS plugin build also needs one. Without a compiler, the export
+    stops with an error. The XLA program does not need a compiler.
 
-    ```python
-    from ace_jax.eval import ffi
-    ffi.build("libace_jax_ffi.so", flags=("-O3", "-march=native"))
-    ```
-
-2. Export with `ffi=True`, `platform="cpu"` and `max_neighbors`:
-
-    ```python
-    export_lammps(model, meta, "si_bundle.json", max_atoms=cap["max_atoms"],
-                  max_owned=cap["max_owned"], max_neighbors=cap["max_neighbors"],
-                  platform="cpu", ffi=True)
-    ```
-
-3. Give LAMMPS the kernel library, and run with `newton on`:
+1. Export with `--ffi` and `--platform cpu`:
 
     ```bash
-    export LAMMPS_JAX_FFI_HANDLERS="ace_jax_direct=$PWD/libace_jax_ffi.so:AceDirect"
+    aj export --model fit/model.npz --out si_bundle.json --structure start.xyz \
+        --platform cpu --procs 8,4,4 --ffi
+    ```
+
+    In Python, use `export_lammps(..., platform="cpu", ffi=True)`.
+
+2. Set the variable that the command prints. It gives LAMMPS the kernel library:
+
+    ```bash
+    export LAMMPS_JAX_FFI_HANDLERS="ace_jax_direct=<library>:AceDirect"
+    ```
+
+3. Run LAMMPS with `newton on`:
+
+    ```bash
     mpirun -np 128 lmp -k on t 1 -sf kk -pk kokkos newton on neigh half -in in.lammps
     ```
 
 The kernel needs a linear ACE model, float64 and the `matrix` layout. It
 tabulates the radial basis in r (`radial_table=True`). Energies agree with
-the calculator to approximately 1e-12 relative, and forces to 1.5e-8 of the
-largest force. The bundle records the kernel as `ace_jax.ffi`.
+the calculator to approximately 1e-12 relative. Forces agree to 1.5e-8 of the
+largest force. The bundle records the kernel in `ace_jax.ffi`: the custom-call
+target, the library and the `LAMMPS_JAX_FFI_HANDLERS` value.
 
-Compile the kernel with the same jax version as the lammps-jax CPU plugin.
+The compiler flags are `-O3 -march=native` by default. They tune the kernel
+for the CPU of the machine that exports.
+
+!!! warning "Login nodes and compute nodes"
+    A kernel compiled with `-march=native` can fail on a different CPU type.
+    Export on a node of the same type as the LAMMPS run. Or give generic
+    flags, for example `--ffi-flags="-O3 -march=x86-64-v3"`.
+
+- The cache is `~/.cache/ace-jax/ffi`. Set `ACEJAX_FFI_CACHE` to use a different directory.
+- Set `ACEJAX_FFI_FLAGS` to change the default flags.
+- Use the same jax version as the lammps-jax CPU plugin.
 
 ## Layouts
 

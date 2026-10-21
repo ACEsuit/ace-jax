@@ -3,6 +3,7 @@ with the same radial table: atom energies and forces to roundoff, since both rea
 only in summation order.  Fixtures cover spherical and solid harmonics, 1, 2 and 5 species, and
 correlation order 4; periodic cells with ghost atoms (newton on) against ACECalculator."""
 import os
+import pathlib
 import shutil
 from collections import namedtuple
 
@@ -29,7 +30,7 @@ Graph = namedtuple("Graph", "neighbors num_neighbors")
 def kernel(tmp_path_factory):
     if shutil.which("c++") is None:                    # ACEJAX_REQUIRE_OPTIONAL: a missing compiler fails
         (pytest.fail if os.environ.get("ACEJAX_REQUIRE_OPTIONAL") else pytest.skip)("no C++ compiler for the FFI kernel")
-    ffi.register(ffi.build(tmp_path_factory.mktemp("ffi") / "libace_jax_ffi.so"))
+    ffi.register(ffi.library(flags=("-O3",), cache=tmp_path_factory.mktemp("ffi")))
 
 
 def cluster(meta, seed=0):
@@ -124,16 +125,39 @@ def test_ffi_periodic_ghosts_match_calculator(kernel, name):
     assert np.all(e[rows:] == 0.0) and np.all(f[N:] == 0.0)
 
 
-def test_export_ffi_bundle(tmp_path):
+def test_library_is_cached_and_keyed(kernel, tmp_path, monkeypatch):
+    """library(): one build per key (source, jaxlib, compiler, flags, machine), atomically placed; the
+    second call reuses it; other flags are another entry; no compiler is FFIUnavailable, not a crash."""
+    calls = []
+    real = ffi.build
+    monkeypatch.setattr(ffi, "build", lambda *a: calls.append(a) or real(*a))
+    a = ffi.library(flags=("-O1",), cache=tmp_path)
+    assert ffi.library(flags=("-O1",), cache=tmp_path) == a and len(calls) == 1
+    b = ffi.library(flags=("-O0",), cache=tmp_path)
+    assert b != a and len(calls) == 2 and sorted(p.name for p in tmp_path.iterdir()) == sorted([a.name, b.name])
+    assert ffi.handlers(a) == f"ace_jax_direct={a.resolve()}:AceDirect"
+    monkeypatch.setenv("ACEJAX_FFI_FLAGS", "-O1")
+    assert ffi.library(cache=tmp_path) == a and len(calls) == 2
+    monkeypatch.setattr(ffi, "compiler", lambda: None)
+    with pytest.raises(ffi.FFIUnavailable, match="C\\+\\+17 compiler"):
+        ffi.library(flags=("-O2",), cache=tmp_path)
+
+
+def test_export_ffi_bundle(kernel, tmp_path, monkeypatch):
     """export_lammps(ffi=True): the kernel's custom call in a CPU matrix bundle, newton on, the radial
-    table turned on, the metadata the kernel applies; the other layouts and float32 are refused."""
+    table turned on, the metadata the kernel applies and the library it built; the other layouts and
+    float32 are refused."""
     require_optional("lammps_jax")
+    monkeypatch.setenv("ACEJAX_FFI_CACHE", str(tmp_path / "cache"))
+    monkeypatch.setenv("ACEJAX_FFI_FLAGS", "-O1")
     from ace_jax.export.lammps import export_lammps
     m, meta, _ = load(str(FIXTURES / "si_fitted.npz"))
     kw = dict(max_atoms=256, max_owned=64, k_dense=40, max_neighbors=48, platform="cpu", ffi=True)
     b = export_lammps(m, meta, tmp_path / "b.json", **kw)
     aj = b["ace_jax"]
-    assert aj["ffi"] == ffi.TARGET and aj["layout"] == "matrix" and aj["radial_table"]
+    lib = aj["ffi"]["library"]
+    assert aj["ffi"] == {"target": ffi.TARGET, "library": lib, "handlers": ffi.handlers(lib)}
+    assert pathlib.Path(lib).parent == tmp_path / "cache" and aj["layout"] == "matrix" and aj["radial_table"]
     assert aj["aa_dag"] == "greedy" and aj["k_dense"] is None and aj["block_rows"] is None
     assert ffi.TARGET in str(b)                       # the contract names the custom call
     for bad in (dict(layout="dense"), dict(dtype="float32"), dict(platform="cuda")):

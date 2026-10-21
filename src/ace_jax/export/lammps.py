@@ -419,13 +419,16 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
     form below (`eval.aa_dag.resolve_aa_dag`).  Recorded as `ace_jax.aa_dag`, the
     mode used.
 
-    ffi: True runs the model as the C++ FFI kernel of `eval.ffi` on the neighbour matrix, positions
-    in and atom energies and forces out; it needs platform="cpu", the matrix layout, float64 and a
-    lean linear ACEModel, and turns the radial table on (radial_table=None -> True).  The kernel lays
+    ffi: True (or the path of a library built by `eval.ffi.build`) runs the model as the C++ FFI kernel
+    of `eval.ffi` on the neighbour matrix, positions in and atom energies and forces out; it needs
+    platform="cpu", the matrix layout, float64 and a lean linear ACEModel, and turns the radial table
+    on (radial_table=None -> True).  True compiles the kernel on first use (`eval.ffi.library`: a
+    C++17 compiler, -march=native, cached; `eval.ffi.FFIUnavailable` without one).  The kernel lays
     out its own greedy DAG and reads every list slot, so `aa_dag`, `k_dense` and `block_rows` do not
-    apply (recorded as "greedy", None, None).  LAMMPS loads the kernel with LAMMPS_JAX_FFI_HANDLERS,
-    and a lammps-jax whose plugin registers handlers for the CPU platform.  Recorded as
-    `ace_jax.ffi`, the custom-call target.
+    apply (recorded as "greedy", None, None).  LAMMPS loads the kernel through
+    LAMMPS_JAX_FFI_HANDLERS, set to `ace_jax.ffi["handlers"]`, with a lammps-jax whose plugin
+    registers handlers for the CPU platform.  Recorded as `ace_jax.ffi`: {"target", "library",
+    "handlers"} (None for the XLA program).
     """
     from lammps_jax.export import export_model
 
@@ -511,6 +514,8 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
     if ffi:                                       # positions and the list straight to the kernel
         from ..eval import ffi as kernel
         energy_fn, force_fn = kernel.lammps_fns(model, n_species, type_map, rcut)
+        lib = Path(kernel.library() if ffi is True else ffi).resolve()   # before the export: fail early
+        ffi_meta = {"target": kernel.TARGET, "library": str(lib), "handlers": kernel.handlers(lib)}
     else:
         energy_fn = make_energy_fn(model, n_species, layout, k_dense,
                                    None if type_map == list(range(len(model_z))) else type_map,
@@ -537,8 +542,8 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
                          "radial_table": rtab,
                          # the product basis's DAG plan mode used (None: the chain form)
                          "aa_dag": aa_dag,
-                         # the C++ FFI kernel's custom-call target, None for the XLA program
-                         "ffi": kernel.TARGET if ffi else None,
+                         # the C++ FFI kernel: target, library, LAMMPS_JAX_FFI_HANDLERS value (None: the XLA program)
+                         "ffi": ffi_meta if ffi else None,
                          # dense / matrix rows per block, and the memory they were sized for
                          "block_rows": int(block_rows) if layout in ("dense", "matrix") and not ffi else None,
                          "device_memory": int(device_memory) if device_memory else None,

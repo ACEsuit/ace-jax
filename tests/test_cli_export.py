@@ -44,6 +44,8 @@ def test_export_yace_converts_an_ace_model(tmp_path, capsys):
     (["--out", "m.yace", "--structure", "s.xyz"], "needs none"),
     (["--out", "m.json", "--structure", "s.xyz", "--procs", "2,2"], "three integers"),
     (["--out", "m.json", "--delta", "0.01"], "--delta is for a .yace"),
+    (["--out", "m.json", "--structure", "s.xyz", "--ffi"], "needs --platform cpu"),
+    (["--out", "m.json", "--structure", "s.xyz", "--platform", "cpu", "--layout", "dense", "--ffi"], "matrix layout"),
 ])
 def test_export_usage_errors(tmp_path, capsys, args, msg):
     args = [a if not a.startswith("m.") and a != "s.xyz" else str(tmp_path / a) for a in args]
@@ -79,3 +81,21 @@ def test_export_lammps_cpu_bundle_per_rank(tmp_path):
     full, rank = (json.loads((tmp_path / f).read_text()) for f in ("all.json", "rank.json"))
     assert full["export_info"]["platform"] == rank["export_info"]["platform"] == "cpu"
     assert rank["contract"]["max_atoms"] < full["contract"]["max_atoms"]   # one rank's subdomain + ghosts
+
+
+def test_export_lammps_ffi_bundle(tmp_path, monkeypatch, capsys):
+    """--ffi: the kernel compiled into the cache (ACEJAX_FFI_CACHE), named in the bundle, and the
+    LAMMPS_JAX_FFI_HANDLERS line printed."""
+    require_optional("lammps_jax")
+    import json
+    import shutil
+    if shutil.which("c++") is None:
+        pytest.skip("no C++ compiler for the FFI kernel")
+    monkeypatch.setenv("ACEJAX_FFI_CACHE", str(tmp_path / "cache"))
+    at = bulk("Si", "diamond", 5.43, cubic=True).repeat(2)
+    write(tmp_path / "start.xyz", at, format="extxyz")
+    main(["export", "--model", str(MODEL), "--out", str(tmp_path / "m.json"), "--structure", str(tmp_path / "start.xyz"),
+          "--platform", "cpu", "--ffi-flags=-O1"])
+    f = json.loads((tmp_path / "m.json").read_text())["ace_jax"]["ffi"]
+    assert f["library"].startswith(str(tmp_path / "cache"))
+    assert f'LAMMPS_JAX_FFI_HANDLERS="{f["handlers"]}"' in capsys.readouterr().out
