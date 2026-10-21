@@ -56,6 +56,7 @@ At the target, in microseconds per atom-step:
 | model | A100 GPU | CPU node (128 cores) |
 |---|---|---|
 | linear ACE o4d20, ace-jax with lammps-jax | 3.12 | 50.5 |
+| linear ACE o4d20, ace-jax C++ kernel with lammps-jax | – | 3.29 |
 | linear ACE o4d20, ML-PACE | 4.13 | 5.31 |
 | linear ACE o4d20, ACEpotentials.jl | – | 10.8 |
 | MACE c16L0, Symmetrix | 1.93 | 2.36 |
@@ -80,6 +81,10 @@ These force errors agree with the published NEP results for this dataset
 On the CPU, the ACEpotentials.jl compiled library is the fastest code for
 linear ACE up to o4d14. It has the same speed as ML-PACE at o4d16. At
 o4d20 it is 2 times slower than ML-PACE.
+
+On the CPU, the ace-jax [C++ kernel](howto/lammps.md#cpu-kernel) is 10 to 23
+times faster than the compiled JAX program on the same node. At o4d20 it is
+1.6 times faster than ML-PACE (3.29 against 5.31 µs/atom-step).
 
 On the A100, ace-jax runs linear ACE o4d20 faster than ML-PACE (3.12
 against 4.13 µs/atom-step).
