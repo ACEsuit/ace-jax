@@ -365,7 +365,7 @@ def main():
         print(f"GAP-18: rmse_F {ref['rmse_F']:.4f}  QoI {ref['qoi']:.2f}")
         for fam in SEEDED:
             for q in data.get(fam, []):
-                f = lambda k, fmt: "-" if q.get(k) is None else f"{q[k]:{fmt}} [{q[k + '_lo']:{fmt}}, {q[k + '_hi']:{fmt}}]"
+                f = lambda k, fmt, q=q: "-" if q.get(k) is None else f"{q[k]:{fmt}} [{q[k + '_lo']:{fmt}}, {q[k + '_hi']:{fmt}}]"
                 print(f"{fam}/{q['size']:10s} n {q['n']:7d} seeds {q['n_seeds']}  F {f('rmse_F', '.4f')}  "
                       f"E {f('rmse_E', '.4f')}  QoI {f('qoi', '.2f')}")
         return

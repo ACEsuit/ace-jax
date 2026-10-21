@@ -276,7 +276,8 @@ def qoi_name(family, name):
     return f"GRACE_{name}"
 
 
-def register_qoi(family, name, framework=pathlib.Path.home() / "silicon-testing-framework"):
+def register_qoi(family, name, framework=None):
+    framework = pathlib.Path.home() / "silicon-testing-framework" if framework is None else framework
     st = common.read_status(common.run_dir(family, name))
     d = pathlib.Path(framework) / "models" / qoi_name(family, name); d.mkdir(parents=True, exist_ok=True)
     (d / "model.py").write_text(QOI_MODEL.format(family=family, name=name, e0=E0_SI, model=_local(st["model"]), qoi=qoi_name(family, name)))
