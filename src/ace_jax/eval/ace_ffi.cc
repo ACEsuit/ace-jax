@@ -221,14 +221,15 @@ struct Site {
 };
 
 ffi::Error AceDirectImpl(ffi::Buffer<ffi::F64> pos, ffi::Buffer<ffi::S32> species, ffi::Buffer<ffi::S32> nbr,
-                         ffi::Buffer<ffi::S32> num, ffi::Buffer<ffi::F64> rtab, ffi::Buffer<ffi::F64> rcut,
+                         ffi::Buffer<ffi::S32> num, ffi::Buffer<ffi::F64> weight, ffi::Buffer<ffi::F64> rtab,
+                         ffi::Buffer<ffi::F64> rcut,
                          ffi::Buffer<ffi::S32> runs, ffi::Buffer<ffi::S32> groups,
                          ffi::Buffer<ffi::S32> factor, ffi::Buffer<ffi::F64> ct, ffi::Buffer<ffi::F64> e0,
                          double x0, double h, int64_t n, int64_t n_rnl, int64_t lmax, int64_t solid,
                          int64_t n_leaf, double rc2, ffi::ResultBuffer<ffi::F64> e,
                          ffi::ResultBuffer<ffi::F64> f) {
   const int64_t atoms = pos.dimensions()[0], K = nbr.dimensions()[0], rows = nbr.dimensions()[1];
-  const double *x = pos.typed_data();
+  const double *x = pos.typed_data(), *wt = weight.typed_data();
   const int32_t *z = species.typed_data(), *nb = nbr.typed_data(), *cnt = num.typed_data();
   double *eo = e->typed_data(), *fo = f->typed_data();
   Site site(rtab, rcut, runs, groups, factor, ct, e0, x0, h, n, n_rnl, lmax, solid, n_leaf, K);
@@ -254,10 +255,11 @@ ffi::Error AceDirectImpl(ffi::Buffer<ffi::F64> pos, ffi::Buffer<ffi::S32> specie
       js[nl++] = j;
     }
     eo[i] = site.eval(z[i], nl, V.data(), zs.data(), G.data());
+    const double wi = wt[i];                              // G is d e_i / dv alone: -sum_i w_i grad e_i
     for (int64_t s = 0; s < nl; ++s)
       for (int c = 0; c < 3; ++c) {
-        fo[3 * i + c] += G[3 * s + c];
-        fo[3 * js[s] + c] -= G[3 * s + c];
+        fo[3 * i + c] += wi * G[3 * s + c];
+        fo[3 * js[s] + c] -= wi * G[3 * s + c];
       }
   }
   if (broken) {                                           // a NaN position: NaN out, not a dropped pair
@@ -275,6 +277,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(AceDirect, AceDirectImpl,
                                   .Arg<ffi::Buffer<ffi::S32>>()     // model species (atoms,)
                                   .Arg<ffi::Buffer<ffi::S32>>()     // neighbour matrix (K, rows)
                                   .Arg<ffi::Buffer<ffi::S32>>()     // neighbour counts (rows,)
+                                  .Arg<ffi::Buffer<ffi::F64>>()     // site weights (atoms,): f = -sum_i w_i grad e_i
                                   .Arg<ffi::Buffer<ffi::F64>>()     // radial table (NZ, NZ, ncoef, F)
                                   .Arg<ffi::Buffer<ffi::F64>>()     // pair cutoffs (NZ, NZ)
                                   .Arg<ffi::Buffer<ffi::S32>>()     // A runs (n_runs, 4): a0, r, y0, len
@@ -291,4 +294,4 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(AceDirect, AceDirectImpl,
                                   .Attr<int64_t>("n_leaf")
                                   .Attr<double>("rc2")
                                   .Ret<ffi::Buffer<ffi::F64>>()     // atom energies (atoms,)
-                                  .Ret<ffi::Buffer<ffi::F64>>());   // atom forces (atoms, 3)
+                                  .Ret<ffi::Buffer<ffi::F64>>());   // -sum_i w_i grad e_i (atoms, 3): forces at w = 1

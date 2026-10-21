@@ -163,3 +163,28 @@ def test_export_ffi_bundle(kernel, tmp_path, monkeypatch):
     for bad in (dict(layout="dense"), dict(dtype="float32"), dict(platform="cuda")):
         with pytest.raises(ValueError, match="ffi=True"):
             export_lammps(m, meta, tmp_path / "x.json", **{**kw, **bad})
+
+
+@pytest.mark.parametrize("name", ["si_fitted", "si_ace_model", "ace_cantor5_small"])
+def test_ffi_grad_and_vjp_match_matrix_program(kernel, name):
+    """jax.grad through the FFI energy (its custom VJP: a second kernel call with the cotangent as site
+    weights): grad of the summed energy is minus the kernel's forces and the XLA program's gradient, and
+    the VJP of a random per-atom cotangent is the XLA program's, under jit and value_and_grad."""
+    m, meta, _ = load(str(FIXTURES / f"{name}.npz"))
+    m1, rcut = lean(m, spline_tol=None, radial_table=True), float(meta["rcut"])
+    at = cluster(meta, seed=2)
+    z2i = {int(z): i for i, z in enumerate(meta["elements"])}
+    pos, z, graph = matrix_inputs(at, rcut + 1.0, [z2i[int(x)] for x in at.numbers])
+    ns = len(meta["elements"])
+    efx = make_energy_fn(m1, ns, "matrix", rcut=rcut)
+    efn, ffn = ffi.lammps_fns(m1, ns, list(range(ns)), rcut)
+    E1, G1 = jax.jit(jax.value_and_grad(lambda p: efn(p, z, graph).sum()))(pos)
+    E0, G0 = jax.jit(jax.value_and_grad(lambda p: efx(p, z, graph).sum()))(pos)
+    scale = np.abs(G0).max()
+    assert float(E1) == pytest.approx(float(E0), rel=1e-12)
+    np.testing.assert_allclose(G1, -ffn(pos, z, graph), atol=1e-13 * scale)
+    np.testing.assert_allclose(G1, G0, atol=1e-10 * scale)
+    ct = jnp.asarray(np.random.default_rng(0).normal(size=pos.shape[0]))
+    v1 = jax.jit(lambda p: jax.vjp(lambda q: efn(q, z, graph), p)[1](ct)[0])(pos)
+    v0 = jax.jit(lambda p: jax.vjp(lambda q: efx(q, z, graph), p)[1](ct)[0])(pos)
+    np.testing.assert_allclose(v1, v0, atol=1e-10 * np.abs(v0).max())

@@ -169,15 +169,30 @@ def kernel_inputs(model):
 
 def lammps_fns(model, n_species, type_map, rcut):
     """(energy_fn, force_fn) of lammps-jax's direct force path: one kernel call on the (K, rows) neighbour
-    matrix. type_map[t] is the model species of LAMMPS type t+1."""
+    matrix. type_map[t] is the model species of LAMMPS type t+1.  energy_fn has a custom VJP in positions
+    (a second kernel call with the cotangent as site weights), so jax.grad / jax.vjp of any function of the
+    atom energies is exact; nothing is differentiable in the model, and there is no second derivative."""
     attrs, consts = kernel_inputs(model)
     tmap = jnp.asarray(type_map, jnp.int32)
 
-    def call(positions, species, graph):
+    def call(positions, species, graph, weights=None):
         z = tmap[jnp.clip(species, 0, n_species - 1)]
+        w = jnp.ones(z.shape, positions.dtype) if weights is None else jnp.asarray(weights, positions.dtype)
         out = (jax.ShapeDtypeStruct(z.shape, positions.dtype),
                jax.ShapeDtypeStruct(positions.shape, positions.dtype))
-        return jax.ffi.ffi_call(TARGET, out)(positions, z, graph.neighbors, graph.num_neighbors, *consts,
+        return jax.ffi.ffi_call(TARGET, out)(positions, z, graph.neighbors, graph.num_neighbors, w, *consts,
                                              **attrs, rc2=np.float64(rcut * rcut))
 
-    return (lambda *a: call(*a)[0]), (lambda *a: call(*a)[1])
+    @jax.custom_vjp
+    def energy_fn(positions, species, graph):
+        return call(positions, species, graph)[0]
+
+    def fwd(positions, species, graph):
+        return energy_fn(positions, species, graph), (positions, species, graph)
+
+    def bwd(res, ct):                                      # sum_i ct_i grad e_i = -kernel force at w = ct
+        positions, species, graph = res
+        return -call(positions, species, graph, ct)[1], None, None
+
+    energy_fn.defvjp(fwd, bwd)
+    return energy_fn, (lambda *a: call(*a)[1])
