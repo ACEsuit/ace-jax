@@ -43,7 +43,11 @@ def _pair(style, model_path, elements, device, extra=None):
         return (f"pair_style {XL[style][0]} {dd} streamed_edges direct profile speed {extra}\n"
                 f"pair_coeff * * {model_path} {els}\n")
     if style == "grace":                    # GRACE-1L .npz: GPU kernel, or its CPU-tuned twin (Kokkos OpenMP)
-        return (f"pair_style {'grace/1l/kk' if device == 'gpu' else 'grace/1l/cpu/kk'}\n"
+        # the chunk-size sweep (envs/sulis-gpu-grace-chunk.sbatch): $GRACE_CHUNKSIZE (default 4096 atoms per kernel
+        # batch) and $GRACE_PRECISION ("" float64, "/mixed", "/fp32"); unset = the published rows' defaults
+        prec, chunk = os.environ.get("GRACE_PRECISION", ""), os.environ.get("GRACE_CHUNKSIZE")
+        return (f"pair_style {('grace/1l/kk' if device == 'gpu' else 'grace/1l/cpu/kk') + prec}"
+                f"{f' chunksize {int(chunk)}' if chunk else ''}\n"
                 f"pair_coeff * * {model_path} {els}\n")
     if style == "grace-fs":                 # GRACE-FS C++ YAML: Kokkos on the GPU, the plain MPI evaluator on the CPU
         return f"pair_style {'grace/fs/kk' if device == 'gpu' else 'grace/fs'}\npair_coeff * * {model_path} {els}\n"
