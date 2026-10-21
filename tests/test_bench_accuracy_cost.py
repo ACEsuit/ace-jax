@@ -186,7 +186,8 @@ def test_evaluate_refuses_mismatched_split(tmp_path, monkeypatch):
 def test_sweep_is_complete_and_measured():
     from accuracy_cost.common import load_sweep
     s = load_sweep()
-    assert set(s) == {"ace", "ace_lr", "ace_gp", "pace", "mace", "gap", "ace_pshape", "ace_pshape_lr", "ace_wl", "gap_noglue", "gap_E30", "ace_yace", "ace_tab", "nep"}
+    assert set(s) == {"ace", "ace_lr", "ace_gp", "pace", "mace", "gap", "ace_pshape", "ace_pshape_lr", "ace_wl", "gap_noglue", "gap_E30", "ace_yace", "ace_tab", "nep",
+                      "grace", "grace_fs", "grace_abl"}
     assert len(s["ace"]) == 7 and all(e["n_B"] > 0 for e in s["ace"])
     assert [(e["order"], e["max_degree"]) for e in s["ace_lr"]] == [(e["order"], e["max_degree"]) for e in s["ace"]]
     nB = [e["n_B"] for e in s["ace"]]
