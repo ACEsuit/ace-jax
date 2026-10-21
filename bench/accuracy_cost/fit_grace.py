@@ -194,12 +194,20 @@ def finish(d, seed, e, st):
 PARITY_TOL = {"grace": (1e-10, 1e-9), "grace-fs": (1e-6, 1e-5)}   # |dE|/atom (eV), max|dF| (eV/A): scaling.parity.TOL
 
 
+def _local(path):
+    """A status.json path written on the desktop, re-rooted under this host's RUNS (Sulis), as timing._local."""
+    p = pathlib.Path(path)
+    if p.exists() or "accuracy_cost" not in p.parts:
+        return str(p)
+    return str(common.RUNS.joinpath(*p.parts[p.parts.index("accuracy_cost") + 1:]))
+
+
 def lammps_model(st):
     """(run_lammps style, model file) of a finished fit: GRACE-FS's C++ YAML, else the 1L Kokkos .npz."""
     if st.get("fs_yaml"):
-        return "grace-fs", st["fs_yaml"]
+        return "grace-fs", _local(st["fs_yaml"])
     if st.get("kokkos_npz"):
-        return "grace", st["kokkos_npz"]
+        return "grace", _local(st["kokkos_npz"])
     raise ValueError(f"{st['family']}/{st['size']}: no LAMMPS export ({st.get('kokkos_export_error') or st.get('fs_export_error')})")
 
 
@@ -213,7 +221,7 @@ def lammps_parity(family, name, lmp, device="cpu", cells=3, n_atoms=64, rattle=0
     from tensorpotential.calculator import TPCalculator
     d = common.run_dir(family, name); st = common.read_status(d)
     style, model = lammps_model(st)
-    calc = TPCalculator(st["model"])
+    calc = TPCalculator(_local(st["model"]))
     work = pathlib.Path(work or d / f"parity-{device}"); rows = []
     for k in range(cells):
         at = supercell("Si", n_atoms, seed=k, rattle=rattle)

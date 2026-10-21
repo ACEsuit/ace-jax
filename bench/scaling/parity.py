@@ -88,22 +88,25 @@ def _nep_ef(path, at):                   # calorine is optional: imported here o
     return a.get_potential_energy(), a.get_forces()
 
 
-GRACE_EF = """import json, sys, numpy as np
-from ase.io import read
+GRACE_EF = """import json, sys, numpy as np, ase
 from tensorpotential.calculator import TPCalculator
-a = read(sys.argv[2]); a.calc = TPCalculator(sys.argv[1])
+z = np.load(sys.argv[2]); a = ase.Atoms(numbers=z["numbers"], positions=z["positions"], cell=z["cell"], pbc=z["pbc"])
+a.calc = TPCalculator(sys.argv[1])
 json.dump({"E": float(a.get_potential_energy()), "F": a.get_forces().tolist()}, open(sys.argv[3], "w"))
 """
 
 
 def _grace_ef(path, at, python, work):
     """E, F from gracemaker's TPCalculator (SavedModel, no E0: what LAMMPS evaluates) in the grace venv's
-    `python` (TensorFlow is not in the benchmark venv), on the CPU so no TF process holds the GPU."""
+    `python` (TensorFlow is not in the benchmark venv), on the CPU so no TF process holds the GPU.  The cell goes
+    over as an .npz: extxyz's 8 decimals moved forces by 1.5e-7 eV/A."""
+    import json
+    import os
     work = pathlib.Path(work); work.mkdir(parents=True, exist_ok=True)
-    write(work / "ref.extxyz", at, format="extxyz")
-    subprocess.run([python, "-c", GRACE_EF, str(path), str(work / "ref.extxyz"), str(work / "ref.json")], check=True,
-                   capture_output=True, env={**__import__("os").environ, "CUDA_VISIBLE_DEVICES": "", "TF_CPP_MIN_LOG_LEVEL": "2"})
-    r = __import__("json").loads((work / "ref.json").read_text())
+    np.savez(work / "ref.npz", numbers=at.numbers, positions=at.positions, cell=np.asarray(at.cell), pbc=at.pbc)
+    subprocess.run([python, "-c", GRACE_EF, str(path), str(work / "ref.npz"), str(work / "ref.json")], check=True,
+                   capture_output=True, env={**os.environ, "CUDA_VISIBLE_DEVICES": "", "TF_CPP_MIN_LOG_LEVEL": "2"})
+    r = json.loads((work / "ref.json").read_text())
     return r["E"], np.asarray(r["F"])
 
 
