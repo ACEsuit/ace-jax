@@ -123,7 +123,7 @@ def main():
     P.SKIP.update(f for f in P.FAM if f.startswith("ace_wl_"))      # as the main PNG: the wL ladder has its own
     rows = [(lab, json.load(open(c)), json.load(open(k[0])) if k else {}) for lab, c, *k in a.row] + [("fitted parameters", None, {})]
     fig = figure(rows)
-    pathlib.Path(a.out).write_text(json.dumps(fig, separators=(",", ":"), allow_nan=False, default=float))
+    pathlib.Path(a.out).write_text(json.dumps(fig, separators=(",", ":"), allow_nan=False, default=float) + "\n")   # newline: end-of-file-fixer
     print("wrote", a.out, f"({len(fig['data'])} traces)")
 
 
