@@ -117,6 +117,9 @@ nep:           # NEP4 trained by GPUMD's nep on a Sulis A100 (fit_nep.py; envs/s
   # for 100k generations; stage 2 (`init`: starts from stage 1's nep.restart + nep.txt) balances them (lambda_e 5,
   # lambda_f 5) for 500k more, keeping stage 1's descriptor scaling (import_q_scaler 1).  Descriptors as n50 / n120b;
   # the per-structure weights unchanged.  -2s1 is stage 1 alone, -2s the finished model
+  # n50-w: n50 refitted with the corrected weights at the default lambdas, the single-stage baseline for n50-2s1 / -2s
+  # (n10-n120c predate the weight fix)
+  - {size: n50-w,     n_max: "8 6",  basis_size: "8 8",   l_max: "4 1",   neuron: 50,  generation: 100000}
   - {size: n50-2s1,   n_max: "8 6",  basis_size: "8 8",   l_max: "4 1",   neuron: 50,  lambda_e: 1, lambda_f: 10, generation: 100000}
   - {size: n50-2s,    n_max: "8 6",  basis_size: "8 8",   l_max: "4 1",   neuron: 50,  lambda_e: 5, lambda_f: 5, import_q_scaler: 1, init: n50-2s1, generation: 500000, chunk: 250000}
   - {size: n120b-2s1, n_max: "12 8", basis_size: "12 12", l_max: "6 1 1", neuron: 120, lambda_e: 1, lambda_f: 10, generation: 100000}
