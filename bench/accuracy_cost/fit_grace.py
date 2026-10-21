@@ -124,13 +124,14 @@ def export(d, seed, e):
     model fits its caps.  final_model/ (the TF SavedModel, pair_style grace) is gracemaker's own output."""
     m = model_dir(d, seed); ck = str(m / "checkpoints" / "checkpoint.best_test_loss")
     base = [_tool("grace_utils"), "-p", str(m / "model.yaml"), "-c", ck]
+    env = {**os.environ, "CUDA_VISIBLE_DEVICES": ""}     # CPU: the GPU may be held by a running fit
     out = {}
     if e.get("preset") == "FS":
-        r = subprocess.run(base + ["export", "-sf", "-n", str(m / "FS_model.yaml")], capture_output=True, text=True)
+        r = subprocess.run(base + ["export", "-sf", "-n", str(m / "FS_model.yaml")], capture_output=True, text=True, env=env)
         out["fs_yaml"] = str(m / "FS_model.yaml") if r.returncode == 0 else None
         out["fs_export_error"] = None if r.returncode == 0 else r.stderr[-2000:]
     else:
-        r = subprocess.run(base + ["export_kokkos", "-o", str(m / "model_kk.npz")], capture_output=True, text=True)
+        r = subprocess.run(base + ["export_kokkos", "-o", str(m / "model_kk.npz")], capture_output=True, text=True, env=env)
         out["kokkos_npz"] = str(m / "model_kk.npz") if r.returncode == 0 else None
         out["kokkos_export_error"] = None if r.returncode == 0 else (r.stderr or r.stdout)[-2000:]
     return out
@@ -169,13 +170,65 @@ def fit(family, size, seed=0, overrides=None):
     (d / "input.yaml").write_text(yaml.safe_dump(input_yaml(e, seed), sort_keys=False))
     rel = f"seed/{seed}/final_model"
     st = common.fit_once(family, name, rel, [_tool("gracemaker"), "input.yaml"], split_hash=h)
-    if st["status"] == "ok" and not st.get("n_params"):
-        m = model_dir(d, seed)
-        common.write_status(d, **{**{k: v for k, v in st.items() if k != "host"}, "n_params": n_params(m / "model.yaml"),
-                                  "seed": seed, "sweep_entry": e, **export(d, seed, e),
-                                  **({"host": st["host"]} if st.get("host") else {})})
-        st = common.read_status(d)
+    if st["status"] == "ok" and not (st.get("n_params") and (st.get("kokkos_npz") or st.get("fs_yaml"))):
+        st = finish(d, seed, e, st)
     return st
+
+
+def finish(d, seed, e, st):
+    """n_params and the LAMMPS export, recorded in status.json (the fit's host kept); re-run when an export failed."""
+    m = model_dir(d, seed)
+    common.write_status(d, **{**{k: v for k, v in st.items() if k != "host"}, "n_params": n_params(m / "model.yaml"),
+                              "seed": seed, "sweep_entry": e, **export(d, seed, e),
+                              **({"host": st["host"]} if st.get("host") else {})})
+    return common.read_status(d)
+
+
+PARITY_TOL = (1e-10, 1e-9)     # |dE|/atom (eV), max|dF| (eV/A): both sides float64 (scaling.parity's acejax bound)
+
+
+def lammps_model(st):
+    """(run_lammps style, model file) of a finished fit: GRACE-FS's C++ YAML, else the 1L Kokkos .npz."""
+    if st.get("fs_yaml"):
+        return "grace-fs", st["fs_yaml"]
+    if st.get("kokkos_npz"):
+        return "grace", st["kokkos_npz"]
+    raise ValueError(f"{st['family']}/{st['size']}: no LAMMPS export ({st.get('kokkos_export_error') or st.get('fs_export_error')})")
+
+
+def lammps_parity(family, name, lmp, device="cpu", cells=3, n_atoms=64, rattle=0.05, work=None):
+    """The timing gate's check (timing.gate_cells: rattled 64-atom diamond cells) for one fit: LAMMPS `run 0`
+    against TPCalculator on the SavedModel, both without E0 (LAMMPS evaluates the model as trained)."""
+    sys.path.insert(0, str(common.HERE.parent))
+    from scaling.run_lammps import finished, kokkos_args, lammps_input, read_dump_forces, read_pe
+    from scaling.structures import supercell
+    from ase.io import write
+    from tensorpotential.calculator import TPCalculator
+    d = common.run_dir(family, name); st = common.read_status(d)
+    style, model = lammps_model(st)
+    calc = TPCalculator(st["model"])
+    work = pathlib.Path(work or d / f"parity-{device}"); rows = []
+    for k in range(cells):
+        at = supercell("Si", n_atoms, seed=k, rattle=rattle)
+        a = at.copy(); a.calc = calc
+        E0, F0 = a.get_potential_energy(), a.get_forces()
+        w = work / f"cell{k}"; w.mkdir(parents=True, exist_ok=True)
+        write(w / "x.data", at, format="lammps-data", specorder=["Si"], masses=True)
+        (w / "in.parity").write_text(lammps_input(style, model, ["Si"], w / "x.data", device, 0,
+                                                  dump=str(w / "f.dump"), warmup=0))
+        p = subprocess.run([lmp, "-in", "in.parity", "-log", "log.lammps", "-nocite", *kokkos_args(style, device)],
+                           cwd=w, capture_output=True, text=True, timeout=1800)
+        log = (w / "log.lammps").read_text() if (w / "log.lammps").exists() else ""
+        if not finished(p.returncode, log):
+            raise RuntimeError(f"lammps exit {p.returncode}: {(p.stderr or p.stdout)[-600:]}")
+        E1, F1 = read_pe(log), read_dump_forces(w / "f.dump")
+        dE, dF = abs(E1 - E0) / len(at), float(np.abs(F1 - F0).max())
+        rows.append({"cell": k, "E_ase": E0, "E_lammps": E1, "dE_per_atom": dE, "max_dF": dF, "max_F": float(np.abs(F0).max()),
+                     "ok": dE <= PARITY_TOL[0] and dF <= PARITY_TOL[1]})
+    out = {"family": family, "size": name, "style": style, "model": model, "device": device, "lmp": str(lmp),
+           "tol": PARITY_TOL, "status": "parity_ok" if all(r["ok"] for r in rows) else "parity_fail", "cells": rows}
+    (work / "parity.json").write_text(json.dumps(out, indent=1))
+    return out
 
 
 if __name__ == "__main__":
@@ -185,8 +238,16 @@ if __name__ == "__main__":
     ap.add_argument("size", nargs="+")
     ap.add_argument("--seed", type=int, nargs="+", default=[0])
     ap.add_argument("--overrides", default="", help="JSON sweep-entry overrides (smoke: n_train, target_total_updates)")
+    ap.add_argument("--parity", metavar="LMP", help="instead of fitting: the 64-atom LAMMPS parity check of finished fits")
+    ap.add_argument("--device", default="cpu", choices=("cpu", "gpu"))
     a = ap.parse_args()
     os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "1")
+    if a.parity:
+        for s in a.size:
+            for k in a.seed:
+                r = lammps_parity(a.family, f"{s}_s{k}", a.parity, a.device)
+                print(r["status"], *(f"cell{c['cell']}: dE/atom {c['dE_per_atom']:.2e} max|dF| {c['max_dF']:.2e}" for c in r["cells"]))
+        sys.exit(0)
     for s in a.size:
         for k in a.seed:
             print(a.family, s, k, fit(a.family, s, k, json.loads(a.overrides) if a.overrides else None)["status"], flush=True)
