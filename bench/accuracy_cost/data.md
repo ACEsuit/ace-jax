@@ -162,3 +162,9 @@ on every frame, test included, so it is a reference line, not a held-out score. 
 - A serial Kokkos-OpenMP build for parity checks on the desktops: `/storage/eng/essswb/projects/ace-jax/grace-lammps/build-cpu-local/lmp`
   (`build-cpu-local.sh`, mnf148). `python -m accuracy_cost.fit_grace FAMILY SIZE --seed K --parity LMP` runs the
   timing gate's check (three rattled 64-atom cells) and writes `parity-cpu/parity.json` in the run directory.
+- **Pilot** (c16l3 seed 0, moriarty RTX A4500, 2,490 s): test rmse_E 5.91 meV/atom, rmse_F 0.0878 eV/A, rmse_V
+  0.0291 eV/atom (liq 0.154 eV/A); QoI error 0.74 (21/21; point defects 0.6-1.0 eV low). Parity (64 atoms, three
+  cells) 1.4e-11 eV/atom, 2.7e-10 eV/A with grace/1l/cpu/kk (mnf148, Sulis CPU) and grace/1l/kk (Sulis A100).
+- **A100 probe** (`envs/sulis-grace-probe.sbatch`, job 2257046, A100-PCIE-40GB, 10 epochs each), s/epoch and the
+  projected 376-epoch fit: c8l3 1.62 (0.19 h), c16l3 2.12 (0.24 h), c16l4 3.0 (0.33 h), c32l4 5.0 (0.54 h), c64l4 8.25
+  (0.88 h), fs_small / fs_medium 1.38 (0.18 h), c16l4 linro / frozenR 2.88 (0.32 h), c16l4_o3 2.38 (0.27 h).
