@@ -76,8 +76,8 @@ def load_calc(family, path, device="cpu"):
         from .fit_nep import calculator
         return calculator(path)
     if family in ("grace", "grace_fs", "grace_abl"):   # gracemaker's SavedModel (float64), E0 added back (fit_grace)
-        from .fit_grace import calculator
-        return calculator(path)
+        from .fit_grace import _local, calculator
+        return calculator(_local(path))                # a Sulis fit's status.json names its Sulis path
     if family in ("gap", "gap_noglue", "gap_E30"):  # noglue: the same loader, the XML just has no Glue term; E30: other sigmas
         import quippy
         return quippy.potential.Potential(param_filename=path)
