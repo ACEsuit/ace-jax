@@ -127,6 +127,57 @@ A LAMMPS plugin that is older than the lammps-jax Python package does not
 accept a `matrix` bundle. To correct this, build the plugin again at the
 version of the Python package, or export with `layout="dense"`.
 
+## cuequivariance on the GPU
+
+On a CUDA GPU, the product basis can run as NVIDIA cuequivariance kernels.
+This is an option. `aa_dag="auto"` never selects it.
+
+!!! warning
+    - The export of an o4d20 model takes approximately 13 minutes.
+    - Without the shipped kernel cache, the first LAMMPS start compiles the kernels. A cold start takes tens of minutes.
+    - The cache works only on the same GPU architecture as the export GPU.
+    - Only models with one species can use this form.
+
+Do these steps:
+
+1. Install the extra on Linux with CUDA 12: `pip install "ace-jax[cueq]"`.
+2. Get a lammps-jax checkout. Build the replay shim in its `contrib/ffi-replay` directory.
+   Use the gcc command from the README of that directory. It needs libffi.
+3. If your system has `libffi.so.6`, replace `-l:libffi.so.8` with `-lffi` in the command.
+4. Set `LAMMPS_JAX_CONTRIB` to the `contrib/ffi-replay` directory.
+   Set it for the export, and again on the machine that runs LAMMPS.
+5. Export the bundle on a machine with a CUDA GPU:
+
+    ```bash
+    aj export --model fit/model.npz --out si_bundle.json --structure start.xyz \
+        --type-elements Si --aa-dag cueq
+    ```
+
+6. Copy `si_bundle.json`, `si_bundle.ffi-replay` and `si_bundle.cueq-cache/` together.
+   Keep them in one directory.
+7. On the LAMMPS machine, set the environment lines that `aj export` printed.
+8. Run LAMMPS as before.
+
+The bundle names the replay file and the cache directory relative to the bundle.
+The `aj export` command resolves them next to the bundle when it prints the lines.
+If `LAMMPS_JAX_CONTRIB` is not set on the LAMMPS machine, the bundle names the shim of the export machine.
+
+The printed lines set `LAMMPS_JAX_FFI_HANDLERS`, `FFI_REPLAY_FILE`, `FFI_REPLAY_LIB`
+and `CUEQUIVARIANCE_OPS_NVRTC_CACHE_DIR`. They also add the directories of the cuequivariance
+library and the pip CUDA libraries to `LD_LIBRARY_PATH`.
+The bundle records these items as `ace_jax.cueq`.
+
+The export refuses these cases:
+
+- cuequivariance or the recorder in `contrib/ffi-replay` is not available.
+- The model is a `.yace` model, or any model that is not a linear ACE model.
+- The model has more than one species (categorical).
+- The platform or the device is not CUDA.
+
+Export one cueq bundle for each Python process. A second export in the same process raises an error.
+To use the form in Python, pass `aa_dag="cueq"` to `ACECalculator` on a CUDA GPU.
+A change of `calc.model`, a readout change included, rebuilds the plan and compiles the kernels again.
+
 ## Learned radials and precision
 
 - `lean=True` (the default) exports the lean evaluation form, as the ASE
