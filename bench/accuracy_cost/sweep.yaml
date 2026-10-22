@@ -123,4 +123,4 @@ nep:           # NEP4 trained by GPUMD's nep on a Sulis A100 (fit_nep.py; envs/s
   - {size: n50-2s1,   n_max: "8 6",  basis_size: "8 8",   l_max: "4 1",   neuron: 50,  lambda_e: 1, lambda_f: 10, generation: 100000}
   - {size: n50-2s,    n_max: "8 6",  basis_size: "8 8",   l_max: "4 1",   neuron: 50,  lambda_e: 5, lambda_f: 5, import_q_scaler: 1, init: n50-2s1, generation: 500000, chunk: 250000}
   - {size: n120b-2s1, n_max: "12 8", basis_size: "12 12", l_max: "6 1 1", neuron: 120, lambda_e: 1, lambda_f: 10, generation: 100000}
-  - {size: n120b-2s,  n_max: "12 8", basis_size: "12 12", l_max: "6 1 1", neuron: 120, lambda_e: 5, lambda_f: 5, import_q_scaler: 1, init: n120b-2s1, generation: 500000, chunk: 100000}
+  - {size: n120b-2s,  n_max: "12 8", basis_size: "12 12", l_max: "6 1 1", neuron: 120, lambda_e: 5, lambda_f: 5, import_q_scaler: 1, init: n120b-2s1, generation: 100000}   # stage 2 shortened from 500k: n50-2s was flat after its first 50k
