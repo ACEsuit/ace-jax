@@ -59,3 +59,112 @@ def test_polynomial_chunks_cover_every_monomial_once():
     cols = np.concatenate([c for _, c in plans])
     assert sorted(cols.tolist()) == list(range(sum(np.shape(s)[0] for s in specs if np.size(s))))
     assert all(len(c) <= 7 for _, c in plans)
+
+
+def test_auto_never_picks_cueq():
+    from ace_jax.eval.aa_dag import resolve_aa_dag
+    assert resolve_aa_dag(_si(), "auto") != "cueq"
+
+
+def test_with_cueq_warns_once_without_an_nvrtc_cache(monkeypatch):
+    import numpy as np
+    from ace_jax.eval import cueq
+    monkeypatch.setattr(cueq, "require", lambda: None)
+    monkeypatch.setattr(cueq, "polynomial", lambda specs, coef: [(None, np.arange(1))])
+    monkeypatch.setattr(cueq, "_nvrtc_warned", False)
+    monkeypatch.delenv("CUEQUIVARIANCE_OPS_NVRTC_CACHE_DIR", raising=False)
+    with pytest.warns(UserWarning, match="CUEQUIVARIANCE_OPS_NVRTC_CACHE_DIR"):
+        m = cueq.with_cueq(_si())
+    assert m.cueq_plan is not None and m.aa_dag is None
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        cueq.with_cueq(_si())                                         # once per process
+
+
+def test_aa_dag_none_clears_the_cueq_plans(monkeypatch):
+    import numpy as np
+    from ace_jax.eval import cueq
+    from ace_jax.eval.aa_dag import with_aa_dag
+    monkeypatch.setattr(cueq, "require", lambda: None)
+    monkeypatch.setattr(cueq, "polynomial", lambda specs, coef: [(None, np.arange(1))])
+    monkeypatch.setenv("CUEQUIVARIANCE_OPS_NVRTC_CACHE_DIR", "/nonexistent")
+    m = with_aa_dag(_si(), "cueq")
+    assert m.cueq_plan is not None
+    m = with_aa_dag(m, None)
+    assert m.cueq_plan is None and m.blk_cueq_plan is None
+
+
+def _gpu():
+    pytest.importorskip("cuequivariance_jax")
+    if jax.default_backend() != "gpu":
+        pytest.skip("cueq evaluation needs a CUDA device")
+
+
+def _cell(n_atoms):
+    from ase.build import bulk
+    if n_atoms == 1:
+        return bulk("Si", "fcc", a=3.9)                               # one-atom periodic cell
+    return bulk("Si", "diamond", a=5.43, cubic=True).repeat(3)[:n_atoms]   # 216, or a periodic slice of it
+
+
+@pytest.mark.parametrize("n_atoms", [1, 31, 33, 216])
+def test_cueq_matches_the_full_model(n_atoms):
+    _gpu()
+    import numpy as np
+    from conftest import FIXTURE_DIR
+    from ace_jax import load
+    from ace_jax.calc.point import ACECalculator
+    full, meta, _ = load(str(FIXTURE_DIR / "si_fitted.npz"))
+    at = _cell(n_atoms)
+    at.rattle(0.05, seed=1)
+    ref = ACECalculator(full, meta, lean=False, aa_dag=None)
+    cq = ACECalculator(full, meta, aa_dag="cueq")
+    assert cq.aa_dag == "cueq"
+    at.calc = ref; e0, f0 = at.get_potential_energy(), at.get_forces()
+    at.calc = cq; e1, f1 = at.get_potential_energy(), at.get_forces()
+    assert abs(e1 - e0) <= 1e-12 * max(abs(e0), 1)
+    assert np.abs(f1 - f0).max() <= 1e-10 * max(np.abs(f0).max(), 1)
+
+
+@pytest.mark.parametrize("layout", ["sparse", "dense"])
+def test_cueq_matches_the_chain_form_per_layout(layout):
+    _gpu()
+    import numpy as np
+    from conftest import FIXTURE_DIR
+    from ace_jax import load
+    from ace_jax.calc.point import ACECalculator
+    full, meta, _ = load(str(FIXTURE_DIR / "si_fitted.npz"))
+    at = _cell(33)
+    at.rattle(0.05, seed=2)
+    out = []
+    for mode in (None, "cueq"):
+        at.calc = ACECalculator(full, meta, layout=layout, aa_dag=mode)
+        out.append((at.get_potential_energy(), at.get_forces(), at.get_stress()))
+    (e0, f0, s0), (e1, f1, s1) = out
+    assert abs(e1 - e0) <= 1e-12 * max(abs(e0), 1)
+    assert np.abs(f1 - f0).max() <= 1e-10 * max(np.abs(f0).max(), 1)
+    assert np.abs(s1 - s0).max() <= 1e-10 * max(np.abs(s0).max(), 1)
+
+
+def test_cueq_uses_the_blocked_dense_plan_too():
+    _gpu()
+    from ace_jax.eval import cueq
+    m = cueq.with_cueq(_si())
+    assert m.cueq_plan is not None and (m.blk_aa_specs is None or m.blk_cueq_plan is not None)
+    assert m.aa_dag is None and m.blk_aa_dag is None
+
+
+def test_product_energy_sums_the_chunks():
+    _gpu()
+    import numpy as np
+    import jax.numpy as jnp
+    from ace_jax.eval import cueq
+    from ace_jax.eval.edge_model import product_basis_dot
+    m = _si()
+    specs, coef = m.blk_aa_specs, np.asarray(m.ctilde[:, 0])
+    A = jnp.asarray(np.random.default_rng(0).normal(size=(45, cueq.n_A_of(specs))))   # 45: not a multiple of U
+    ref = product_basis_dot(A, specs, m.ctilde[:, np.zeros(45, int)])
+    plans = cueq.polynomial(specs, coef, chunk=50)
+    assert len(plans) > 1
+    np.testing.assert_allclose(cueq.product_energy(plans, A), ref, rtol=1e-12, atol=1e-12)

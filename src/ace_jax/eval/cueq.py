@@ -108,3 +108,46 @@ def polynomial(specs, coef, u=U, chunk=CHUNK):
         cols = np.asarray(cols)
         out.append((_build_poly(sp, n_A, coef[cols], u), cols))
     return out
+
+
+def product_energy(plans, A, u=U):
+    """sum_v c_v prod A_i[s_v] per atom, A node-major (n, n_A); `plans` is `polynomial`'s [(poly, cols)] built
+    with the same `u`, the chunks summed.  Atoms in the u mode: A zero-padded to G*U rows and laid out as
+    (G, n_A*U), every path applied to U atoms at once; the padding rows are dropped from the output."""
+    import cuequivariance_jax as cuex
+    import jax
+    import jax.numpy as jnp
+    A = A[:, :plans[0][0].inputs[-1].num_segments]       # columns past the last one a monomial reads are unused
+    n, n_A = A.shape
+    G = -(-n // u)
+    X = jnp.pad(A, ((0, G * u - n), (0, 0))).reshape(G, u, n_A).transpose(0, 2, 1).reshape(G, n_A * u)
+    out = 0.0
+    for p, _ in plans:
+        [e] = cuex.segmented_polynomial(p, [X], [jax.ShapeDtypeStruct((G, u), A.dtype)], method="uniform_1d",
+                                        name="ace_product_u")
+        out = out + e
+    return out.reshape(-1)[:n]
+
+
+_nvrtc_warned = False
+
+
+def with_cueq(model):
+    """`model` (a folded single-species ACEModel, after `lean`) with its product basis evaluated by cueq: plans for
+    `aa_specs` and, if blocked, `blk_aa_specs`, coefficients ctilde baked in (so a readout change needs a new plan);
+    the DAG plans are cleared.  `eval.aa_dag.with_aa_dag(model, "cueq")` calls this."""
+    global _nvrtc_warned
+    import dataclasses
+    import os
+    import warnings
+    import numpy as np
+    require()
+    check_supported(model)
+    if not os.environ.get("CUEQUIVARIANCE_OPS_NVRTC_CACHE_DIR") and not _nvrtc_warned:
+        _nvrtc_warned = True
+        warnings.warn("cueq kernels compile on first use (minutes for large models); "
+                      "set CUEQUIVARIANCE_OPS_NVRTC_CACHE_DIR to reuse them", stacklevel=2)
+    coef = np.asarray(model.ctilde[:, 0])
+    plan = lambda specs: _Static(polynomial(specs, coef))
+    return dataclasses.replace(model, aa_dag=None, blk_aa_dag=None, cueq_plan=plan(model.aa_specs),
+                               blk_cueq_plan=None if model.blk_aa_specs is None else plan(model.blk_aa_specs))

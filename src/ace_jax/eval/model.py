@@ -181,6 +181,10 @@ class ACEModel(EdgeSiteModel):
     # chain form: for `aa_specs` and `blk_aa_specs`; read by the folded readout only.
     aa_dag: tuple = None
     blk_aa_dag: tuple = None
+    # cuequivariance product-basis plans (`eval.cueq.with_cueq`, aa_dag="cueq"), None = ace-jax's own form; static
+    # holders of the chunked polynomials for aa_specs / blk_aa_specs, read by the folded readout only.
+    cueq_plan: object = eqx.field(static=True, default=None)
+    blk_cueq_plan: object = eqx.field(static=True, default=None)
 
     # -------------------------------------------------- edge embeddings
     def _radial_one(self, r, zi, zj, kind, trans, coefs, grid, Wnlq, ABC, env):
@@ -406,7 +410,11 @@ class ACEModel(EdgeSiteModel):
         return self._b_from_a(A), Apair
 
     def _readout_folded(self, A, Apair, node_z, specs=None, dag=None):
-        if dag is not None:                       # recursive product basis (`aa_dag`)
+        plan = self.blk_cueq_plan if specs is not None else self.cueq_plan
+        if plan is not None:                      # cuequivariance product basis (`eval.cueq`)
+            from .cueq import product_energy
+            e = product_energy(plan.v, A)
+        elif dag is not None:                     # recursive product basis (`aa_dag`)
             e = dag_contract(A.T, dag, self.ctilde, node_z)
         else:
             e = product_basis_dot(A, self.aa_specs if specs is None else specs, self.ctilde[:, node_z])
