@@ -188,3 +188,111 @@ def test_ffi_grad_and_vjp_match_matrix_program(kernel, name):
     v1 = jax.jit(lambda p: jax.vjp(lambda q: efn(q, z, graph), p)[1](ct)[0])(pos)
     v0 = jax.jit(lambda p: jax.vjp(lambda q: efx(q, z, graph), p)[1](ct)[0])(pos)
     np.testing.assert_allclose(v1, v0, atol=1e-10 * np.abs(v0).max())
+
+
+def cpu_capacity(meta):
+    from ace_jax.export.lammps import neighbour_capacity
+    at = bulk("Si", "diamond", a=5.43, cubic=True).repeat((2, 2, 2))
+    return neighbour_capacity(at, float(meta["rcut"]))
+
+
+def test_auto_takes_the_kernel_for_a_cpu_bundle(kernel, tmp_path, monkeypatch):
+    """export_lammps's default ffi="auto": a CPU bundle of a linear ACE model is the C++ kernel (no reason
+    recorded), and its program compiles on XLA's CPU backend once the handler is registered."""
+    require_optional("lammps_jax")
+    import base64
+    from jax._src import xla_bridge
+    from jaxlib import xla_client
+    from ace_jax.export.lammps import export_lammps
+    monkeypatch.setenv("ACEJAX_FFI_CACHE", str(tmp_path / "cache"))
+    monkeypatch.setenv("ACEJAX_FFI_FLAGS", "-O1")
+    m, meta, _ = load(str(FIXTURES / "si_ace_model.npz"))
+    cap = cpu_capacity(meta)
+    b = export_lammps(m, meta, tmp_path / "b.json", max_atoms=cap["max_atoms"], max_owned=cap["max_owned"],
+                      k_dense=cap["k_dense"], max_neighbors=cap["max_neighbors"], platform="cpu", device_memory=2**30)
+    aj = b["ace_jax"]
+    assert aj["ffi"]["target"] == ffi.TARGET and aj["ffi_reason"] is None and aj["layout"] == "matrix"
+    assert pathlib.Path(aj["ffi"]["library"]).parent == tmp_path / "cache" and aj["radial_table"]
+    be = xla_bridge.get_backend("cpu")
+    opts = xla_client.CompileOptions.ParseFromString(base64.b64decode(b["compile_options_b64"]))
+    be.compile_and_load(base64.b64decode(b["programs"]["energy_and_forces_mlir_b64"]),
+                        xla_client.DeviceList(tuple(be.local_devices()[:1])), opts)
+
+
+AUTO_KW = dict(platform="cpu", dtype="float64", layout="auto", lean=True, radial_table=None, max_neighbors=64,
+               aa_dag="auto")
+
+
+@pytest.mark.parametrize("change,why", [
+    ({"platform": "cuda"}, None),
+    ({"platform": None}, None),
+    ({"dtype": "float32"}, "dtype float32"),
+    ({"lean": False}, "lean=False"),
+    ({"layout": "dense"}, "layout 'dense'"),
+    ({"max_neighbors": None}, "no max_neighbors"),
+    ({"radial_table": False}, "radial_table switched off"),
+    ({"aa_dag": "cueq"}, "aa_dag='cueq'"),
+])
+def test_auto_falls_back_with_its_reason(change, why):
+    """choose_ffi("auto") takes the XLA program, and says why for a CPU bundle; a GPU bundle has no reason."""
+    from ace_jax.export.lammps import choose_ffi
+    m, _, _ = load(str(FIXTURES / "si_ace_model.npz"))
+    got, reason = choose_ffi("auto", m, **(AUTO_KW | change))
+    assert got is False and (reason is None if why is None else why in reason)
+
+
+def test_auto_falls_back_without_a_kernel_model_lammps_jax_or_compiler(monkeypatch):
+    """choose_ffi("auto"): a PACE model, a lammps-jax older than 0.2.1 and no compiler each take the XLA
+    program with their reason; an explicit ffi is returned as given (the export then checks it)."""
+    from ace_jax.export import lammps
+    from conftest import pace_fixture
+    m, _, _ = load(str(FIXTURES / "si_ace_model.npz"))
+    pace, _, _ = load(str(pace_fixture(FIXTURES / "pace" / "si_chebpow_fs.yace")))
+    assert "not a linear ACEModel" in lammps.choose_ffi("auto", pace, **AUTO_KW)[1]
+    monkeypatch.setattr(lammps, "lammps_jax_version", lambda: "0.2.0")
+    assert "lammps-jax 0.2.0" in lammps.choose_ffi("auto", m, **AUTO_KW)[1]
+    monkeypatch.setattr(lammps, "lammps_jax_version", lambda: "0.2.1+abc1234")
+    monkeypatch.setattr(ffi, "compiler", lambda env=None: None)
+    monkeypatch.setenv("ACEJAX_FFI_FLAGS", "-O0 -DACEJAX_UNCACHED_KEY")   # a key not yet built: library() compiles
+    assert "C++17 compiler" in lammps.choose_ffi("auto", m, **AUTO_KW)[1]
+    assert lammps.choose_ffi(True, m, **AUTO_KW) == (True, None)
+    assert lammps.choose_ffi(False, m, **AUTO_KW) == (False, None)
+
+
+def test_explicit_ffi_still_refuses_an_ineligible_export(tmp_path):
+    """ffi=True requires the kernel: a GPU bundle or float32 raises rather than falling back."""
+    require_optional("lammps_jax")
+    from ace_jax.export.lammps import export_lammps
+    m, meta, _ = load(str(FIXTURES / "si_ace_model.npz"))
+    cap = cpu_capacity(meta)
+    kw = dict(max_atoms=cap["max_atoms"], max_owned=cap["max_owned"], k_dense=cap["k_dense"],
+              max_neighbors=cap["max_neighbors"], ffi=True)
+    for bad in (dict(platform="cuda"), dict(platform="cpu", dtype="float32")):
+        with pytest.raises(ValueError, match="ffi=True"):
+            export_lammps(m, meta, tmp_path / "x.json", **kw, **bad)
+
+
+def test_ffi_matches_matrix_program_on_a_species_embedding_model(kernel):
+    """The kernel on a species-embedding model (`build_embedding_model`, the factorised radial), with random
+    coefficients: atom energies and forces equal the matrix-layout program's to roundoff, as for the
+    categorical fixtures (the radial table holds each species pair's embedded radial)."""
+    import dataclasses
+    from conftest import require_coupling_lib
+    require_coupling_lib()
+    from ace_jax.basis.model import build_embedding_model
+    from ace_jax.eval.model import fold_readout
+    els = [14, 32]
+    m, meta = build_embedding_model(els, 3, 6, embedding=(els, np.array([[1.0, 0.3], [0.6, -0.8]]))).eval_pair()
+    rng = np.random.default_rng(0)
+    m = fold_readout(dataclasses.replace(m, WB=jnp.asarray(rng.normal(size=m.WB.shape)),
+                                         Wpair=jnp.asarray(0.1 * rng.normal(size=m.Wpair.shape))))
+    assert m.radial_kind == "spline_factorised"
+    m1, rcut = lean(m, spline_tol=None, radial_table=True), float(meta["rcut"])
+    at = cluster({"elements": els}, seed=3)
+    pos, z, graph = matrix_inputs(at, rcut + 1.0, [els.index(int(x)) for x in at.numbers])
+    efx = make_energy_fn(m1, len(els), "matrix", rcut=rcut)
+    e0, f0 = jax.jit(lambda p: (efx(p, z, graph), -jax.grad(lambda q: efx(q, z, graph).sum())(p)))(pos)
+    efn, ffn = ffi.lammps_fns(m1, len(els), [0, 1], rcut)
+    e1, f1 = jax.jit(lambda p: (efn(p, z, graph), ffn(p, z, graph)))(pos)
+    assert np.abs(e1 - e0).max() <= 1e-12 * np.abs(e0).max()
+    assert np.abs(f1 - f0).max() <= 1e-10 * np.abs(f0).max()
