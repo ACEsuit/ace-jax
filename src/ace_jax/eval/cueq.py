@@ -220,6 +220,25 @@ def trace_plan(model, blocked):
     return gather, paths, np.stack([W[p] for p in paths]), st
 
 
+def trace_size(model):
+    """(n_paths, d) of an embedding model's cueq plan (`trace_plan`), from its spec alone: no readout, so the
+    full model before `lean` gives the lean plan's counts (the channel-free monomials are layout-independent)."""
+    import numpy as np
+    cmap = channel_map(model, False)
+    paths = {tuple(sorted(cmap[a][0] for a in row)) for s in model.aa_specs for row in np.asarray(s).tolist()}
+    return len(paths), 1 + max(k for _, k in cmap.values())
+
+
+def trace_weight_bytes_per_row(model, itemsize):
+    """Device bytes per row of a TrACE plan's per-atom weights (`trace_energy`: W[node_z] and its laid-out copy,
+    which the backward pass keeps as a residual of every chunk, so all chunks are live): 2 x n_paths x d x
+    itemsize; 0 for a model without an embedding.  `export.lammps.cueq_block_rows_for` adds it per block row."""
+    if getattr(model, "rnl_embedding", None) is None:
+        return 0
+    n_paths, d = trace_size(model)
+    return 2 * n_paths * d * itemsize
+
+
 def _build_trace_poly(paths, n_seg, u):
     """sum_p w[p] prod A'[s_p] -> out, every operand in mode u (channel-wise); w an input operand."""
     import cuequivariance as cue

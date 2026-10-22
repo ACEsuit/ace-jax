@@ -96,9 +96,9 @@ def test_aa_dag_none_clears_the_cueq_plans(monkeypatch):
 
 
 def _gpu():
-    pytest.importorskip("cuequivariance_jax")
-    if jax.default_backend() != "gpu":
+    if jax.default_backend() != "gpu":            # first: without its CUDA libraries the cueq import is an OSError
         pytest.skip("cueq evaluation needs a CUDA device")
+    pytest.importorskip("cuequivariance_jax")
 
 
 def _cell(n_atoms):
@@ -413,3 +413,21 @@ def test_cueq_trace_calculator_matches_the_full_model():
     (e0, f0), (e1, f1) = out
     assert abs(e1 - e0) <= 1e-12 * max(abs(e0), 1)
     assert np.abs(f1 - f0).max() <= 1e-10 * max(np.abs(f0).max(), 1)
+
+
+@pytest.mark.parametrize("name", list(TRACE))
+def test_trace_weights_count_in_the_cueq_block_rows(name, monkeypatch):
+    """A TrACE plan's per-atom weight operand (rows x paths x d, forward copy and its laid-out residual) counts
+    in the bundle's cueq row blocks: sized on the model as given (before lean), equal to the plan's own counts."""
+    from ace_jax.eval import cueq
+    from ace_jax.eval.model import lean
+    from ace_jax.export import lammps as lx
+    m, _ = _trace(name)
+    st = cueq.trace_plan(lean(m), True)[3]
+    assert cueq.trace_size(m) == (st["n_paths"], st["d"])
+    w = cueq.trace_weight_bytes_per_row(m, 8)
+    assert w == 2 * st["n_paths"] * st["d"] * 8 and cueq.trace_weight_bytes_per_row(_si(), 8) == 0
+    monkeypatch.setattr(lx, "estimate_a_bytes", lambda *a: 0)                  # the weights alone
+    assert lx.cueq_block_rows_for(m, 100000, 8, 1.01 * 8192 * w, 8) == 8192
+    assert lx.cueq_block_rows_for(m, 100000, 8, 0.99 * 8192 * w, 8) == 4096
+    assert lx.cueq_block_rows_for(m, 100000, 8, 0.99 * 8192 * w, 8, prep=0.5 * 8192 * w) == 2048

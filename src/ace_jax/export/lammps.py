@@ -330,15 +330,17 @@ def cueq_block_rows_for(model, rows, k_dense, budget, itemsize, max_edges=None, 
     at `rows`), then halvings of the last down to MIN_BLOCK_ROWS, whose estimate (`block_rows_for` with that
     `block_rows`) fits `budget`; None when none fits.  No per-block element target: cueq kernels want many
     U-atom groups per launch, and are no faster than the DAG at the DAG's target (docs/dev/specs/
-    2026-10-22-cueq-product-basis-design.md)."""
-    from ..eval.cueq import CUEQ_BLOCK_ROWS
+    2026-10-22-cueq-product-basis-design.md).  A species-embedding (TrACE) model's per-atom weights
+    (`eval.cueq.trace_weight_bytes_per_row`, linear in its paths) count per row, on top of the estimate."""
+    from ..eval.cueq import CUEQ_BLOCK_ROWS, trace_weight_bytes_per_row
+    w = trace_weight_bytes_per_row(model, itemsize)
     cands = [min(int(b), int(rows)) for b in CUEQ_BLOCK_ROWS]
     b = cands[-1]
     while b > MIN_BLOCK_ROWS:
         b = max(MIN_BLOCK_ROWS, b // 2)
         cands.append(b)
     for b in dict.fromkeys(cands):
-        if block_rows_for(model, rows, k_dense, budget, itemsize, max_edges, prep, block_rows=b):
+        if block_rows_for(model, rows, k_dense, budget, itemsize, max_edges, prep + b * w, block_rows=b):
             return b
     return None
 
