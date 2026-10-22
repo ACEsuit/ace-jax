@@ -27,7 +27,7 @@ Cheapest model reaching the target, µs/atom-step, float64, LAMMPS:
 
 | model | parameters | force RMSE (eV/Å) | QoI error | A100 | CPU node |
 |---|---|---|---|---|---|
-| linear ACE o4d20, ace-jax (lammps-jax) | 5,476 | 0.0816 | 0.41 | 3.12 | 50.5 |
+| linear ACE o4d20, ace-jax (lammps-jax, XLA program) | 5,476 | 0.0816 | 0.41 | 3.12 | 50.5 |
 | linear ACE o4d20, ML-PACE (tabulated radials) | 5,476 | 0.0816 | 0.41 | 4.13 | 5.31 |
 | linear ACE o4d20, patched ML-PACE (proposed upstream) | 5,476 | 0.0816 | 0.41 | 2.42 | 2.89 |
 | linear ACE o4d20, ACEpotentials.jl (trim library) | 5,476 | 0.0816 | 0.41 | – | 10.8 |

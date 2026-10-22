@@ -29,7 +29,7 @@ METRICS = ROOT / "bench/accuracy_cost/results/metrics.jsonl"
 TARGET_QOI = 0.5                  # geometric-mean |error|/tolerance: the typical QoI within half its tolerance
 # validated (dataviz validate_palette --pairs all, light): red/green CVD 7.2 -> marker shapes + direct labels
 FAM = {  # family: (label, colour, marker, linestyle, filled, qoi model name pattern)
-    "ace":        ("linear ACE",               "#2a78d6", "o", "-",  True,  "ACE_{s}"),
+    "ace":        ("linear ACE, ace-jax",      "#2a78d6", "o", "-",  True,  "ACE_{s}"),   # costs: the XLA bundle
     "ace_E10":    ("linear ACE, pacemaker's E:F balance", "#2a78d6", "o", "--", False, "ACEE10_{s}"),
     # the same linear ACE fits run by ML-PACE (write_yace, Tabulated radials: exact): linear ACE's colour
     # (same models), the code told apart by marker and line; its accuracy is ACE's, its cost its own (COST_NAME)
@@ -41,7 +41,7 @@ FAM = {  # family: (label, colour, marker, linestyle, filled, qoi model name pat
     "ace_trim":   ("linear ACE, run by ACEpotentials.jl", "#2a78d6", "X", "-.", True, "ACE_{s}"),
     # and by ace-jax's C++ FFI kernel in the lammps-jax bundle (ace_jax.eval.ffi; CPU only): the speed-up over the
     # XLA program of the linear ACE line itself
-    "ace_ffi":    ("linear ACE, ace-jax C++ kernel", "#2a78d6", "<", "--", True, "ACE_{s}"),
+    "ace_ffi":    ("linear ACE, ace-jax C++ kernel (FFI)", "#2a78d6", "<", "--", True, "ACE_{s}"),
     # the order-4 ladder in reduced precision (docs/dev/fp32-results.md): the same fits, their own cost --
     # ace-jax float32 bundles, and patched pace/kk (PACE_KK_RHOW=3) in a KOKKOS_PREC=mixed LAMMPS.  Each pairs with its float64 line:
     # its marker and line style in a lighter blue (the wL ramp's light step; the wL ladder is not in this figure)
@@ -387,7 +387,7 @@ def main():
     if a.wl:
         SKIP.update(f for f in FAM if f not in WL_FAMILIES)
         for f, c in WL_RECOLOUR.items():
-            FAM[f] = (FAM[f][0].replace("linear ACE", "linear ACE, wL 1.5"),) + (c,) + FAM[f][2:]
+            FAM[f] = (FAM[f][0].replace("linear ACE, ace-jax", "linear ACE, wL 1.5"),) + (c,) + FAM[f][2:]
     else:
         SKIP.update(f for f in FAM if f.startswith("ace_wl_"))
     rows = [(lab, json.load(open(c)), json.load(open(k[0])) if k else {}, "cost") for lab, c, *k in a.row]
