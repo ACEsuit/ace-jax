@@ -12,7 +12,7 @@ the GPU. ace-jax writes the program and its metadata into one JSON
        CPU PJRT plugin (Linux x86_64 only).
     2. Build its LAMMPS plugin at the same version. Use the lammps-jax instructions.
 
-    The ace-jax CI tests the export with lammps-jax 0.2.0. The pair style runs
+    The ace-jax CI tests the export with lammps-jax 0.2.1. The pair style runs
     on a GPU (KOKKOS with CUDA). It also runs on CPUs (KOKKOS with OpenMP) if
     you export with `platform="cpu"`. The plugin refuses a bundle that was
     exported for the other platform.
@@ -102,21 +102,9 @@ linear ACE models. It runs one MPI rank per core, with one thread per rank.
 The export compiles the kernel the first time, and keeps it in a cache.
 
 !!! warning "lammps-jax version"
-    The kernel needs a lammps-jax LAMMPS plugin that registers custom calls
-    for the CPU. lammps-jax 0.2.0 registers them for CUDA only. The fix is
-    [lammps-jax pull request 3](https://github.com/abhijeetgangan/lammps-jax/pull/3).
-    It is not yet in a lammps-jax release.
-
-    Until it is released, build the LAMMPS plugin from this commit. It is
-    lammps-jax 0.2.0 with the fix:
-
-    ```bash
-    git clone https://github.com/jameskermode/lammps-jax.git
-    git -C lammps-jax checkout 2c53fb4
-    ```
-
-    Use the lammps-jax instructions to build the plugin. Keep the lammps-jax
-    0.2.0 Python package.
+    The kernel needs the LAMMPS plugin of lammps-jax 0.2.1 or later. Earlier
+    plugins register custom calls for CUDA only, so LAMMPS cannot find the
+    kernel on the CPU. Build the plugin at the version of the Python package.
 
 !!! note "C++ compiler"
     The kernel needs a C++17 compiler (`$CXX`, `c++`, `g++` or `clang++`).

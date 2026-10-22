@@ -81,7 +81,7 @@ parameters than linear ACE (f800: 761 parameters, 0.081 eV/Å) but not the QoI t
   pair and many-body forces cancelling (each ~765 eV/Å, net max |F| 2.8; separately the kernel matches the XLA
   program to 1.7e-12 relative). The kernel is single-threaded per rank, so 128 x 1 is its best layout (64 x 2
   would leave half the cores idle). It needs lammps-jax's plugin to register FFI handlers for the CPU platform:
-  abhijeetgangan/lammps-jax#3, until its release `jameskermode/lammps-jax@2c53fb4` (0.2.0 registers them for CUDA only; #4 fixes that repository's unrelated `mace`
+  abhijeetgangan/lammps-jax#3, released in 0.2.1 (0.2.0 registers them for CUDA only; #4 fixes that repository's unrelated `mace`
   CI failure under jax 0.12).
 - **Patched ML-PACE** (ICAMS/lammps-user-pace#31: on the CPU the recursive-evaluator speed-ups, no unused
   dB_flatten clear, register-carried DAG passes, the force pass summed over n first; on the GPU the pace/kk
