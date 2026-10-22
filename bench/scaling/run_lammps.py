@@ -23,7 +23,8 @@ KOKKOS = {"acejax": "newton on neigh half", "mlpace": "newton on neigh half",
           "mace-xl": "newton on neigh half", "mace-xl-f32": "newton on neigh half",
           # GRACE (the yury-lysogorskiy/lammps `grace` branch, bench/scaling/envs/sulis-grace.sh): native Kokkos 1L
           # (gracemaker export_kokkos .npz; full float64 by default) and the C++ GRACE-FS evaluator; both need newton on
-          "grace": "newton on neigh half", "grace-fs": "newton on neigh half"}
+          "grace": "newton on neigh half", "grace-fs": "newton on neigh half",
+          "grace-2l": "newton on neigh half"}   # GRACE-2L: grace/2l/kk (GPU), grace/2l/cpu/kk (CPU)
 # Symmetrix-XL (bench/scaling/envs/sulis-xl.sh): its fast path is pair_style symmetrix/mace[/float32]/kk with
 # a JIT-compiled R1 artifact, so it runs Kokkos on the CPU too (the non-kk style is the old evaluator)
 XL = {"mace-xl": ("symmetrix/mace/kk", "float64"), "mace-xl-f32": ("symmetrix/mace/float32/kk", "float32")}
@@ -48,6 +49,9 @@ def _pair(style, model_path, elements, device, extra=None):
         prec, chunk = os.environ.get("GRACE_PRECISION", ""), os.environ.get("GRACE_CHUNKSIZE")
         return (f"pair_style {('grace/1l/kk' if device == 'gpu' else 'grace/1l/cpu/kk') + prec}"
                 f"{f' chunksize {int(chunk)}' if chunk else ''}\n"
+                f"pair_coeff * * {model_path} {els}\n")
+    if style == "grace-2l":                 # GRACE-2L .npz (export_kokkos): the same pair, two layers
+        return (f"pair_style {'grace/2l/kk' if device == 'gpu' else 'grace/2l/cpu/kk'}\n"
                 f"pair_coeff * * {model_path} {els}\n")
     if style == "grace-fs":                 # GRACE-FS C++ YAML: Kokkos on the GPU, the plain MPI evaluator on the CPU
         return f"pair_style {'grace/fs/kk' if device == 'gpu' else 'grace/fs'}\npair_coeff * * {model_path} {els}\n"
@@ -434,7 +438,7 @@ def kokkos_args(style, device, threads=1):
     lammps-jax, whose pair style is jax/kk only, and for a KOKKOS style run with
     threads > 1 (ML-PACE's pace/kk); plain MPI otherwise."""
     if device != "gpu":
-        if style in ("acejax", "grace") or style in XL or (threads > 1 and style in KOKKOS):   # grace: /kk only
+        if style in ("acejax", "grace", "grace-2l") or style in XL or (threads > 1 and style in KOKKOS):   # grace: /kk only
             return ["-k", "on", "t", str(threads), "-sf", "kk", "-pk", "kokkos", *KOKKOS[style].split()]
         return []
     if style not in KOKKOS:

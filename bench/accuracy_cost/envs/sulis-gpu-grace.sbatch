@@ -16,14 +16,15 @@
 #SBATCH --output=%x-%j.out
 set -euo pipefail
 ROOT=${BENCH_ROOT:-$HOME/bench-scaling}
-cd "$ROOT/ace-jax-grace/bench"
+T=${GRACE_TREE:-ace-jax-grace} ENVJ=${GRACE_ENV:-accuracy_cost/envs/sulis-gpu-grace.json}   # 2L: ace-jax-grace2l, sulis-gpu-grace2l.json
+cd "$ROOT/$T/bench"
 source /etc/profile.d/modules.sh; module purge; module load GCC/12.3.0
-export PYTHONPATH=$ROOT/ace-jax-grace/bench:$ROOT/ace-jax-ac/src ACEJAX_AC_ROOT=$ROOT/ac ACEJAX_AC_MAX_LOAD1=16
+export PYTHONPATH=$ROOT/$T/bench:$ROOT/ace-jax-ac/src ACEJAX_AC_ROOT=$ROOT/ac ACEJAX_AC_MAX_LOAD1=16
 [ -n "${ACEJAX_AC_GPU:-}" ] && export CUDA_VISIBLE_DEVICES=$ACEJAX_AC_GPU
 echo "job $SLURM_JOB_ID on $(hostname) $(date -Is) CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-}"
 nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv || true
 for c in ${@:-grace grace_fs}; do
   "$ROOT/venv/bin/python" -m accuracy_cost.timing gpu --only $c \
-      --env accuracy_cost/envs/sulis-gpu-grace.json --results accuracy_cost/results/sulis-gpu-grace.jsonl || true
+      --env $ENVJ --results accuracy_cost/results/sulis-gpu-${GRACE_RESULTS:-grace}.jsonl || true
 done
 echo "done $(date -Is)"

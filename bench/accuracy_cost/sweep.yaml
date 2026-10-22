@@ -148,3 +148,16 @@ grace_abl:     # one change each to the `grace` size nearest the target (`base`;
   - {size: c64l4_frozenR, base: c64l4, freeze_radial: true,
      trainable: ["A_ChemIndTransf/", "A1/w_", "AA1/w_", "AA2/w_", "LinMLPOut2ScalarTarget_MLP", "tr_atomic_shift", "Z/ChemicalEmbedding", "rho/reducing_"]}
   - {size: c64l4_o3,      base: c64l4, max_order: 3}
+grace_2l:      # GRACE-2L (two message-passing layers) from scratch: gracemaker's GRACE_2LAYER_latest preset, its small /
+               # medium / large settings, plus one smaller size (c16), at cutoff 5 A per layer (receptive field 10 A),
+               # with the 1L ladder's fit settings (fit_grace.py; 50k updates, float64).  pair_style grace/2l/kk caps
+               # (gracemaker _kokkos_export CAPS_2L): n_rad_max <= 42, lmax <= 4, MLP widths <= 210 (hidden <= 128),
+               # 16 I1 channels (the preset's 12); its kernel, like 1L's, reads an order-4 block, so max_order stays 4
+  - {size: 2l_c16,    preset: GRACE_2LAYER_latest, lmax: [3, 3], max_order: 4, indicator_lmax: 1, n_rad_max: [16, 16],
+     prod_func_n_max: [16, 16], n_mlp_dens: 8, n_rad_base: 8}
+  - {size: 2l_small,  preset: GRACE_2LAYER_latest, lmax: [4, 3], max_order: 4, indicator_lmax: 1, n_rad_max: [32, 32],
+     prod_func_n_max: [32, 32], n_mlp_dens: 12, n_rad_base: 8}
+  - {size: 2l_medium, preset: GRACE_2LAYER_latest, lmax: [4, 3], max_order: 4, indicator_lmax: 1, n_rad_max: [42, 32],
+     prod_func_n_max: [42, 64], n_mlp_dens: 16, n_rad_base: 10}
+  - {size: 2l_large,  preset: GRACE_2LAYER_latest, lmax: [4, 3], max_order: 4, indicator_lmax: 3, n_rad_max: [42, 32],
+     prod_func_n_max: [42, 64], n_mlp_dens: 16, n_rad_base: 10}

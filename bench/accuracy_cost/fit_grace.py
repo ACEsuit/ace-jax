@@ -29,7 +29,7 @@ import numpy as np
 from . import common
 from .common import DATA, E0_SI, RCUT
 
-FAMILIES = ("grace", "grace_fs", "grace_abl")
+FAMILIES = ("grace", "grace_fs", "grace_abl", "grace_2l")
 DEFAULT_FIT = {        # tensorpotential/cli/wizard.py's from-scratch answers (Adam), written out so the run records them
     "loss": {"energy": {"weight": 16, "type": "huber", "delta": 0.01},
              "forces": {"weight": 32, "type": "huber", "delta": 0.01},
@@ -46,7 +46,7 @@ DEFAULT_FIT = {        # tensorpotential/cli/wizard.py's from-scratch answers (A
     "checkpoint_freq": 10, "progressbar": False, "train_shuffle": True,
 }
 MODEL_KEYS = ("lmax", "n_rad_max", "prod_func_n_max", "max_order", "n_mlp_dens", "n_rad_base", "embedding_size",
-              "basis_type", "Lmax", "max_sum_l", "fs_parameters")
+              "basis_type", "Lmax", "max_sum_l", "fs_parameters", "indicator_lmax")
 
 
 def resolve(family, size, sweep=None):
@@ -85,8 +85,8 @@ def dataframe(atoms, d, per, batch_size=DEFAULT_FIT["batch_size"]):
 
 def input_yaml(e, seed):
     kw = {k: e[k] for k in MODEL_KEYS if k in e}
-    if e.get("preset") == "FS":
-        pot = {"preset": "FS", "kwargs": kw}
+    if e.get("preset"):                              # FS, GRACE_2LAYER_latest: gracemaker's own presets
+        pot = {"preset": e["preset"], "kwargs": kw}
     else:                                            # every GRACE-1L size goes through grace_custom (readout switch)
         pot = {"custom": "grace_custom.grace_1l", "kwargs": {**kw, "readout": e.get("readout", "mlp")}}
     fit = json.loads(json.dumps(DEFAULT_FIT))
@@ -191,7 +191,7 @@ def finish(d, seed, e, st):
     return common.read_status(d)
 
 
-PARITY_TOL = {"grace": (1e-10, 1e-9), "grace-fs": (1e-6, 1e-5)}   # |dE|/atom (eV), max|dF| (eV/A): scaling.parity.TOL
+PARITY_TOL = {"grace": (1e-10, 1e-9), "grace-fs": (1e-6, 1e-5), "grace-2l": (1e-6, 1e-5)}   # |dE|/atom (eV), max|dF| (eV/A): scaling.parity.TOL
 
 
 def _local(path):
@@ -206,8 +206,8 @@ def lammps_model(st):
     """(run_lammps style, model file) of a finished fit: GRACE-FS's C++ YAML, else the 1L Kokkos .npz."""
     if st.get("fs_yaml"):
         return "grace-fs", _local(st["fs_yaml"])
-    if st.get("kokkos_npz"):
-        return "grace", _local(st["kokkos_npz"])
+    if st.get("kokkos_npz"):                         # the .npz's architecture: 2L for grace_2l
+        return ("grace-2l" if st["family"] == "grace_2l" else "grace"), _local(st["kokkos_npz"])
     raise ValueError(f"{st['family']}/{st['size']}: no LAMMPS export ({st.get('kokkos_export_error') or st.get('fs_export_error')})")
 
 
