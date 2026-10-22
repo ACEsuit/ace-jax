@@ -284,3 +284,27 @@ def test_interactive_silicon_figure_is_wired_and_consistent():
     cfg = yaml.safe_load((ROOT / "mkdocs.yml").read_text().replace("!!python/name:", ""))
     assert "javascripts/plotly-figures.js" in cfg["extra_javascript"]
     assert (ROOT / "docs" / "user" / "javascripts" / "plotly-figures.js").exists()
+
+
+def test_make_cost_keeps_gap_sizes_and_aliases_seed_zero(tmp_path):
+    """make_cost.py: a seeded family's seed-0 cost is also its size's (GRACE_c16l3_s0 -> GRACE_c16l3); GAP's sizes
+    (s9000) only look like seed suffixes and get no sizeless alias (they once wrote GAP, GAPE30, GAPnoglue)."""
+    import json
+    import subprocess
+    rows = [{"code": "gap", "family": "gap", "size": "s9000", "dtype": "float64", "mode": "lammps"},
+            {"code": "grace", "family": "grace", "size": "c16l3_s0", "dtype": "float64", "mode": "lammps"}]
+    f = tmp_path / "t.jsonl"
+    f.write_text("".join(json.dumps(r | {"mode": "parity", "status": "parity_ok"}) + "\n"
+                         + json.dumps(r | {"status": "ok", "atom_steps_per_s": 1e6}) + "\n" for r in rows))
+    out = tmp_path / "cost.json"
+    subprocess.run([sys.executable, str(ROOT / "bench" / "si_qoi" / "make_cost.py"), str(f), "--out", str(out)],
+                   check=True, capture_output=True)
+    assert sorted(json.loads(out.read_text())) == ["GAP_s9000", "GRACE_c16l3", "GRACE_c16l3_s0"]
+
+
+def test_committed_cost_files_have_no_sizeless_aliases():
+    """The committed cost files: every name has its size (the seed-0 aliases are seeded families' sizes)."""
+    import json
+    for d in ("cpu", "gpu"):
+        names = json.loads((ROOT / "bench" / "si_qoi" / "results" / f"cost_sulis_{d}.json").read_text())
+        assert not {"GAP", "GAPE30", "GAPnoglue"} & set(names), d

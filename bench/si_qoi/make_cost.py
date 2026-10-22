@@ -11,7 +11,7 @@ at 1e-10, as learned radials are by default); each row's gate is looked up in it
 import argparse, json, pathlib, sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
-from plot_cost import FAM, REDUCED, ROOT, cost_name, family_of, seed_split  # noqa: E402
+from plot_cost import FAM, REDUCED, ROOT, SEEDED, cost_name, family_of, seed_split  # noqa: E402
 
 
 def main():
@@ -38,7 +38,7 @@ def main():
         rows += [r | {"_path": f} for r in rs]
     # models a --source file covers: their rows of that code come from it alone (others, e.g. the wL ladder, as before)
     sourced = {(r["code"], r["family"], r["size"]) for r in rows if source.get(r["code"]) == r["_file"]}
-    best, code = {}, {}
+    best, code, fam_of = {}, {}, {}
     prefer = [str(pathlib.Path(p)) for p in a.prefer]
     preferred = {}                       # cost name -> the --prefer file that times it
     for r in rows:
@@ -58,11 +58,11 @@ def main():
         name = cost_name(fam, r["size"])                      # Symmetrix-XL under its own name (MACExl_)
         us = 1e6 / r["atom_steps_per_s"]
         if us < best.get(name, float("inf")):
-            best[name], code[name] = us, (f'{r["code"]} {r["dtype"]} {r["mode"]}' + (f' dag:{r["aa_dag"]}' if r.get("aa_dag") else "")
+            best[name], fam_of[name], code[name] = us, fam, (f'{r["code"]} {r["dtype"]} {r["mode"]}' + (f' dag:{r["aa_dag"]}' if r.get("aa_dag") else "")
                                           + f' [{r["_file"]}]')
     for n in list(best):                    # seeded families (plot_cost.SEEDED): seed 0 is timed for its size
-        base, k = seed_split(n)
-        if k is not None and base not in best:
+        base, k = seed_split(n)             # only theirs: GAP's sizes (s9000, ...) read as seed suffixes too
+        if fam_of[n] in SEEDED and k is not None and base not in best:
             best[base], code[base] = best[n], code[n]
     pathlib.Path(a.out).write_text(json.dumps(best, indent=1, sort_keys=True) + "\n")
     pathlib.Path(a.out).with_suffix(".codes.json").write_text(json.dumps(code, indent=1, sort_keys=True) + "\n")

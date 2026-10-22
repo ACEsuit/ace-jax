@@ -405,11 +405,15 @@ def main():
         handles[DAG_LABEL] = (Line2D([], [], ls="none", marker="o", ms=8, color=MUTED),
                               Line2D([], [], ls="none", marker="o", ms=3.5, color="white", mec="none"))
         order.append(DAG_LABEL)
-    ncol = min(6, -(-len(order) // 3))                    # at most 6 columns fit the width; more rows instead
-    legend_rows = -(-len(order) // ncol)
     from matplotlib.legend_handler import HandlerTuple
-    fig.legend([handles[l] for l in order], order, loc="upper center", ncol=ncol, frameon=False,
-               fontsize=9, bbox_to_anchor=(0.5, 1.0), handler_map={tuple: HandlerTuple(ndivide=1)})
+    renderer = fig.canvas.get_renderer()
+    for ncol in range(min(6, -(-len(order) // 3)), 0, -1):   # the most columns whose legend fits the figure's width:
+        leg = fig.legend([handles[l] for l in order], order, loc="upper center", ncol=ncol, frameon=False,
+                         fontsize=9, bbox_to_anchor=(0.5, 1.0), handler_map={tuple: HandlerTuple(ndivide=1)})
+        if ncol == 1 or leg.get_window_extent(renderer).width <= 0.98 * fig.bbox.width:   # a fixed 6 clipped
+            break                                                                          # long labels
+        leg.remove()
+    legend_rows = -(-len(order) // ncol)
     cpu_note = ("CPU row: a 128-core EPYC 7742 node, all cores, ranks bound to cores; each model's fastest layout\n"
                 "(128x1 or 64x2 MPI ranks x threads; GAP: 32 ranks).\n"
                 "ace-jax runs in LAMMPS (lammps-jax; aa_dag='auto': the DAG product basis, centre dot, from 4,000 chain-form multiplies per site; the chain form below); MACE runs in LAMMPS via Symmetrix and, separately, Symmetrix-XL.\n"
