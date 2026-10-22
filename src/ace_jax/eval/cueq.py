@@ -335,12 +335,22 @@ def with_cueq(model):
 def check_export(model, platform=None, cueq=True):
     """The export-time refusals for aa_dag="cueq" (`export.lammps.export_lammps`, `aj export`), before any work:
     the model (`check_supported`, on the model as given: `lean` folds it later), a non-CUDA `platform`, then
-    (`cueq`) cueq itself.  The model check comes first so that it needs no cueq."""
+    (`cueq`) a host whose JAX backend is not a GPU (the export lowers on the default device) and cueq itself.
+    The model check comes first so that it needs no cueq; cueq=False imports neither jax nor cueq."""
     check_supported(model, folded=False)
     if platform not in (None, "cuda"):
         raise ValueError(f"aa_dag='cueq' runs cuequivariance's CUDA kernels: it needs platform='cuda', got {platform!r}")
     if cueq:
+        if (b := backend()) != "gpu":
+            raise ValueError("aa_dag='cueq' exports on a CUDA GPU (it lowers and compiles cuequivariance's kernels "
+                             f"there); the JAX backend here is {b!r}")
         require()
+
+
+def backend():
+    """jax.default_backend(): the export's GPU check (a seam, so CPU tests can stub it)."""
+    import jax
+    return jax.default_backend()
 
 
 def version():

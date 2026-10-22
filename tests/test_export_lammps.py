@@ -1013,6 +1013,7 @@ def _cueq_stubs(monkeypatch, tmp_path, records=(), compiles=True):
     import lammps_jax.export as lje
     rec = _Recorder(tmp_path / "contrib" / "ffi_replay_record.py", records, compiles)
     monkeypatch.setattr(cueq, "require", lambda: None)
+    monkeypatch.setattr(cueq, "backend", lambda: "gpu")
     monkeypatch.setattr(cueq, "with_cueq", lambda m: m)
     monkeypatch.setattr(cueq, "recorder", lambda: rec)
     monkeypatch.setattr(cueq, "_ops_library", lambda: "libcue_ops_jax")
@@ -1109,6 +1110,51 @@ def test_cueq_bundle_refusals(tmp_path, monkeypatch):
     with pytest.raises(ValueError, match="one species"):
         export_lammps(m2, meta2, tmp_path / "sige.json", **kw)
     assert not any(tmp_path.glob("*.json"))
+
+
+def test_cueq_bundle_refuses_lean_false_before_any_side_effect(tmp_path, monkeypatch):
+    """with_cueq needs the folded (lean) model: lean=False is refused before the cache directory or the
+    recorder, so a retry with lean=True still finds an empty recorder."""
+    require_optional("lammps_jax")
+    from ace_jax.export.lammps import export_lammps
+    rec, _ = _cueq_stubs(monkeypatch, tmp_path)
+    model, meta, _ = _si_fitted()
+    kw = dict(max_atoms=256, max_edges=256 * 64, k_dense=64, layout="dense", aa_dag="cueq")
+    with pytest.raises(ValueError, match="lean=True"):
+        export_lammps(model, meta, tmp_path / "si.json", lean=False, **kw)
+    assert rec.calls == [] and not (tmp_path / "si.cueq-cache").exists()
+    export_lammps(model, meta, tmp_path / "si.json", **kw)                    # the retry
+    assert rec.calls[0][0] == "install"
+
+
+def test_cueq_bundle_refuses_a_host_without_a_gpu(tmp_path, monkeypatch):
+    """platform=None (cuda) on a host whose JAX backend is the CPU: refused with a CUDA message, before
+    cueq is required (whose missing CUDA libraries would otherwise give a pip-install message)."""
+    require_optional("lammps_jax")
+    from ace_jax.eval import cueq
+    from ace_jax.export.lammps import export_lammps
+    rec, _ = _cueq_stubs(monkeypatch, tmp_path)
+    monkeypatch.setattr(cueq, "backend", lambda: "cpu")
+    def no_require():
+        raise AssertionError("cueq required before the GPU check")
+    monkeypatch.setattr(cueq, "require", no_require)
+    model, meta, _ = _si_fitted()
+    with pytest.raises(ValueError, match="CUDA GPU.*'cpu'"):
+        export_lammps(model, meta, tmp_path / "si.json", max_atoms=256, max_edges=256 * 64, k_dense=64,
+                      layout="dense", aa_dag="cueq")
+    assert rec.calls == [] and not (tmp_path / "si.json").exists()
+
+
+def test_check_export_gpu_check_only_with_cueq(monkeypatch):
+    """The CLI pre-check (cueq=False) imports neither jax's backend check nor cueq."""
+    from ace_jax.eval import cueq
+    def boom():
+        raise AssertionError("backend checked")
+    monkeypatch.setattr(cueq, "backend", boom)
+    model, _, _ = _si_fitted()
+    cueq.check_export(model, None, cueq=False)
+    with pytest.raises(AssertionError, match="backend checked"):
+        cueq.check_export(model, "cuda")
 
 
 def test_cueq_replay_needs_a_fresh_plan_registry():

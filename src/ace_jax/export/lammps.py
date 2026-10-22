@@ -478,11 +478,13 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
     if aa_dag == "cueq":                          # refusals first, then the cache and recorder before any lowering
         from ..eval import cueq
         cueq.check_export(model, platform, cueq=False)
+        if not lean:                              # with_cueq needs the folded model: refuse before any side effect
+            raise ValueError("aa_dag='cueq' evaluates the folded (lean) model: export with lean=True")
         cache = Path(path).absolute().with_suffix(".cueq-cache")
         cache.mkdir(parents=True, exist_ok=True)
         # libcue_ops reads it at each NVRTC compile (cueq 0.13.0), but set it before cueq is imported anyway
         os.environ["CUEQUIVARIANCE_OPS_NVRTC_CACHE_DIR"] = str(cache)
-        cueq.require()
+        cueq.check_export(model, platform)        # now the CUDA backend and cueq itself
         rec = cueq.install_recorder()
     from ..calc.point import device_memory_bytes
     itemsize = np.dtype(dtype).itemsize
