@@ -84,8 +84,9 @@ o4d20 it is 2 times slower than ML-PACE.
 
 On the A100, ace-jax runs linear ACE o4d20 faster than ML-PACE (3.12
 against 4.13 µs/atom-step). With the cuequivariance product basis, ace-jax
-runs the same model at 1.61 µs/atom-step. This is the fastest linear ACE
-code on the A100. From o3d12 to o4d20, cuequivariance is 1.2 to 1.9 times
+runs the same model at 1.61 µs/atom-step. For o4d20, this is the fastest
+linear ACE code on the A100. For o4d12 to o4d16, patched ML-PACE is faster.
+From o3d12 to o4d20, cuequivariance is 1.2 to 1.9 times
 faster than the default product basis. For o3d8 and o3d10, the two forms
 have approximately the same cost.
 

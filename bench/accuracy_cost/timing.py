@@ -48,7 +48,7 @@ JAXMD_MODES = ("jaxmd", "jaxmd-tight")
 LAMMPS_TIGHT = "lammps-tight"   # lammps-jax with run_lammps' "cutoff" slots (opt-in, as the JAX-MD modes)
 # lammps-jax bundles with NVIDIA cuequivariance as the product basis (export_lammps(aa_dag="cueq"); GPU, one species
 # only; opt-in).  Each model is exported once, sized for the main N: the export compiles every cueq kernel
-# (o4d20: ~13 min on an A100), so the gate cells and the timed repeats all run that bundle, and there is no N/8 check
+# (o4d20: 13-26 min on an A100), so the gate cells and the timed repeats all run that bundle, and there is no N/8 check
 LAMMPS_CUEQ = "lammps-cueq"
 OPT_IN_MODES = (*JAXMD_MODES, LAMMPS_TIGHT, LAMMPS_CUEQ)
 JAXMD = [("acejax-ace", {"gpu": m}, ACE_DTYPES) for m in (*JAXMD_MODES, LAMMPS_TIGHT)]

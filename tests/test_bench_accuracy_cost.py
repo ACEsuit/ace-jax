@@ -490,7 +490,7 @@ def test_cueq_variant_is_opt_in_gpu_only_and_single_species(tmp_path, monkeypatc
 
 
 def test_cueq_case_exports_once_and_reuses_the_bundle(tmp_path):
-    """One cueq export per model (o4d20: ~13 min on an A100), sized for the main N: the gate's three cells and
+    """One cueq export per model (o4d20: 13-26 min on an A100), sized for the main N: the gate's three cells and
     every timed repeat run that bundle; no N/8 check (a bundle sized for N); its own gate row; a resumed run
     reuses the bundle on disk."""
     import json as _json

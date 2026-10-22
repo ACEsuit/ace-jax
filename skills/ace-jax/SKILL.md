@@ -434,7 +434,7 @@ for its CPU build, which refuses a cuda bundle and vice versa).
   `ffi_replay_shim.so`; README gcc command, `-lffi` on libffi.so.6 systems). One cueq bundle per process.
   The bundle, `<stem>.ffi-replay` and `<stem>.cueq-cache/` go together (recorded by name, relative to the
   bundle, as `ace_jax.cueq`); `aj export` prints the environment lines (`eval.cueq.run_env(record, bundle_path)`).
-  Export of o4d20 ~13 min; without the cache the start compiles kernels (tens of minutes); the cache serves
+  Export of o4d20 13-26 min on an A100; without the cache the start compiles kernels (tens of minutes); the cache serves
   the same GPU architecture only. A `calc.model` swap rebuilds and recompiles.
 - `lean=True` (default) exports `lean(model, spline_tol, spline_intervals)` for
   an ACE model, as `ACECalculator` does. The bundle records what `lean` actually

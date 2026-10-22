@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The Si linear ACE ladder (o3d8-o4d20) with NVIDIA cuequivariance as the product basis (export_lammps(aa_dag="cueq"))
 # in lammps-jax bundles on one A100: 32,768 atoms, float64, each model exported once (timing.LAMMPS_CUEQ; o4d20
-# ~13 min), gated on the three 64-atom cells with that bundle, then timed 3x.  Radials as the plotted ace rows:
+# 13-26 min), gated on the three 64-atom cells with that bundle, then timed 3x.  Radials as the plotted ace rows:
 # analytic splined at 1e-10, o3d8 unsplined.  LAMMPS runs each bundle in its sidecar environment
 # (run_lammps.bundle_env: replay file, shipped NVRTC cache, the ffi-replay shim, cueq's libraries).
 # Tree $ROOT/ace-jax-cueqfeat: code/ (this branch), venv/ (uv sync --extra cuda --extra cueq, then lammps-jax

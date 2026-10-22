@@ -57,8 +57,10 @@ parameters than linear ACE (f800: 761 parameters, 0.081 eV/Å) but not the QoI t
   `ml-pace-tabulated-radials.md`), o4d20 runs at 5.31 µs/atom-step on 128 ranks against 50.5 through the
   lammps-jax CPU backend with the DAG product basis, and 3.98 for PACE f3200. On the A100, ace-jax with the DAG
   is faster than stock ML-PACE (3.12 vs 4.13) and behind patched ML-PACE (2.42).
-- **cuequivariance on the A100** (`aa_dag="cueq"`, job 2259228, gpu003, A100-PCIE-40GB): the fastest linear ACE
-  code on the A100 from o3d12 up. µs/atom-step, 32,768 atoms, float64, cueq row blocks 8192, every bundle gated
+- **cuequivariance on the A100** (`aa_dag="cueq"`, job 2259228, gpu003, A100-PCIE-40GB): the fastest ace-jax form
+  from o3d12 up, and the fastest linear ACE code on the A100 at o4d20 (every precision: float32 ace-jax 2.49, mixed
+  pace/kk 1.81). At o4d12-o4d16 patched ML-PACE is faster (0.257 / 0.385 / 0.558 against 0.369 / 0.497 / 0.670), and
+  stock ML-PACE too at o4d12-o4d14 (0.277 / 0.449). µs/atom-step, 32,768 atoms, float64, cueq row blocks 8192, every bundle gated
   (64-atom cells, dE/atom <= 4.3e-12, max dF <= 5.6e-10 eV/Å); the default form is the published
   `sulis-gpu-acejax-auto.jsonl` row (another node, gpu017/gpu001), so the ratios carry the ~2% node spread:
 
@@ -75,7 +77,8 @@ parameters than linear ACE (f800: 761 parameters, 0.081 eV/Å) but not the QoI t
   o4d16 and o4d20 match the spike's same-node runs (0.671 / 1.611 against the DAG's best row blocks 0.953 / 3.135;
   `bench/cueq_product/README.md` on exp/cueq-product). The o4d20 export took 26 min here against the spike's
   13 min (another node; the export compiles every kernel into the bundle's NVRTC cache). cueq beats patched
-  ML-PACE (2.42) at o4d20 by 1.5x. Headline preset: the cueq line, as the fastest linear ACE code on the A100.
+  ML-PACE (2.42) at o4d20 by 1.5x. Headline preset: the cueq line, as the fastest linear ACE code on the A100 at
+  o4d20.
 - **Patched ML-PACE** (ICAMS/lammps-user-pace#31: on the CPU the recursive-evaluator speed-ups, no unused
   dB_flatten clear, register-carried DAG passes, the force pass summed over n first; on the GPU the pace/kk
   prototype kernels of `pace_ref/fast`, flat-offset ComputeRho and a segmented ComputeWeights, `PACE_KK_RHOW=3`)
