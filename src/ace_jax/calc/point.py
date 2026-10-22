@@ -137,7 +137,13 @@ class ACECalculator(Calculator):
         to roundoff; "prefix" keeps every AA monomial bitwise.  "auto" takes
         "greedy" from `eval.aa_dag.AUTO_MIN_CHAIN_MUL` chain-form multiplies per
         site, where it is faster on CPU and GPU, and the chain form below (a tie;
-        bitwise as before).  `calc.aa_dag` is the mode used.
+        bitwise as before).  `calc.aa_dag` is the mode used.  "cueq" is an opt-in
+        GPU form (`eval.cueq`, the `cueq` extra; one species, folded linear ACE;
+        needs a CUDA backend, else ValueError): the product basis runs in NVIDIA
+        cuequivariance kernels, in float32 or float64.  Each `calc.model` swap
+        (a readout swap included) rebuilds the cueq plan and recompiles its
+        kernels -- minutes at o4d20 without the NVRTC cache
+        (CUEQUIVARIANCE_OPS_NVRTC_CACHE_DIR); plans are not cached.
 
         `posterior` (a `posterior.npz` from `fit --uq ard`, with `model` the matching
         `model.npz` FILE) adds the per-atom force uncertainty.  For a revision-2 (schema-3)
@@ -340,6 +346,11 @@ class ACECalculator(Calculator):
                                                                  self._radial_table_opt)
         from ..eval.aa_dag import resolve_aa_dag, with_aa_dag
         self._aa_dag_used = resolve_aa_dag(self._eval_model, self._aa_dag)
+        if self._aa_dag_used == "cueq":
+            import jax
+            if jax.default_backend() != "gpu":     # before any trace: cueq kernels are CUDA-only
+                raise ValueError("aa_dag='cueq' needs a CUDA GPU; the JAX backend here is "
+                                 f"{jax.default_backend()!r}.  Use aa_dag='auto', 'greedy' or None.")
         if self._aa_dag_used is not None:
             self._eval_model = with_aa_dag(self._eval_model, self._aa_dag_used)
         self._e0 = np.asarray(model.E0, np.float64)

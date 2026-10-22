@@ -168,3 +168,55 @@ def test_product_energy_sums_the_chunks():
     plans = cueq.polynomial(specs, coef, chunk=50)
     assert len(plans) > 1
     np.testing.assert_allclose(cueq.product_energy(plans, A), ref, rtol=1e-12, atol=1e-12)
+
+
+def test_calculator_refuses_cueq_without_a_cuda_backend():
+    if jax.default_backend() == "gpu":
+        pytest.skip("this test needs a non-GPU backend")
+    from conftest import FIXTURE_DIR
+    from ace_jax import load
+    from ace_jax.calc.point import ACECalculator
+    full, meta, _ = load(str(FIXTURE_DIR / "si_fitted.npz"))
+    with pytest.raises(ValueError, match=r"aa_dag='cueq'.*CUDA GPU"):
+        ACECalculator(full, meta, aa_dag="cueq")
+
+
+def test_readout_swap_replans():
+    _gpu()
+    import dataclasses
+    from ase.build import bulk
+    from conftest import FIXTURE_DIR
+    from ace_jax import load
+    from ace_jax.calc.point import ACECalculator
+    m, meta, _ = load(str(FIXTURE_DIR / "si_fitted.npz"))
+    calc = ACECalculator(m, meta, aa_dag="cueq")
+    at = bulk("Si", "diamond", a=5.43, cubic=True).repeat(2)
+    at.rattle(0.05, seed=2)
+    at.calc = calc
+    e_a = at.get_potential_energy()
+    from ace_jax.eval.model import fold_readout
+    m2 = fold_readout(dataclasses.replace(m, WB=2.0 * m.WB, folded=False, ctilde=None))   # a new readout, same basis
+    calc.model = m2
+    at.calc = calc
+    e_b = at.get_potential_energy()
+    at.calc = ACECalculator(m2, meta, lean=False, aa_dag=None)
+    assert calc.aa_dag == "cueq" and abs(e_b - at.get_potential_energy()) <= 1e-12 * abs(e_b) and e_b != e_a
+
+
+def test_cueq_float32_matches_the_float32_reference():
+    _gpu()
+    import numpy as np
+    import jax.numpy as jnp
+    from conftest import FIXTURE_DIR
+    from ace_jax import load
+    from ace_jax.calc.point import ACECalculator
+    full, meta, _ = load(str(FIXTURE_DIR / "si_fitted.npz"))
+    at = _cell(33)
+    at.rattle(0.05, seed=3)
+    out = []
+    for mode in (None, "cueq"):                                   # bounds as test_skin's float32 test
+        at.calc = ACECalculator(full, meta, aa_dag=mode, dtype=jnp.float32)
+        out.append((at.get_potential_energy(), at.get_forces()))
+    (e0, f0), (e1, f1) = out
+    assert abs(e1 - e0) < 1e-5 * abs(e0)
+    assert np.abs(f1 - f0).max() <= 1e-4
