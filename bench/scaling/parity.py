@@ -69,7 +69,8 @@ TOL = {"mlpace": (1e-6, 1e-5), "acejax": (1e-10, 1e-9), "mace": (1e-6, None),
        # GRACE in LAMMPS (grace/1l/kk .npz, grace/fs C++ YAML; float64) vs gracemaker's TPCalculator on the float64
        # SavedModel: 1L is the same arithmetic (mnf148 smoke: 2e-11 eV/atom, 1.7e-10 eV/A); the C++ FS evaluator
        # differs at the force level (smoke fs_small / fs_medium: <= 6e-12 eV/atom, 7e-9-1.3e-8 eV/A), so mlpace's bound
-       "grace": (1e-10, 1e-9), "grace-fs": (1e-6, 1e-5)}
+       # GRACE-2L (grace/2l/cpu/kk smoke, mnf148): 2.0e-7 eV/atom, 2.0e-7 eV/A: not roundoff, but far inside mlpace's bound
+       "grace": (1e-10, 1e-9), "grace-fs": (1e-6, 1e-5), "grace-2l": (1e-6, 1e-5)}
 # gates that check a standalone line: a failure blocks its standalone rows
 STANDALONE_GATES = ("spline", "acepot")
 LEARNED, ANALYTIC = LEARNED_CODES                     # "acejax-ace-learned", "acejax-ace-analytic"

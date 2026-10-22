@@ -91,14 +91,15 @@ PLAN = {"ace": [("acejax-ace", {"cpu": "standalone", "gpu": "lammps"}, ACE_DTYPE
         # Seed 0 of each size is timed (the seeds share the architecture); grace_abl is accuracy only
         "grace": [("grace", {"cpu": "lammps", "gpu": "lammps"}, ("float64",))],
         "grace_fs": [("grace-fs", {"cpu": "lammps", "gpu": "lammps"}, ("float64",))],
+        "grace_2l": [("grace-2l", {"cpu": "lammps", "gpu": "lammps"}, ("float64",))],   # grace/2l/kk, grace/2l/cpu/kk
         "gap": [("gap", {"cpu": "lammps"}, ("float64",))],         # pair quip: no KOKKOS, CPU only
         "gap_noglue": [("gap", {"cpu": "lammps"}, ("float64",))],  # the XML has no Glue term; same pair style
         "gap_E30": [("gap", {"cpu": "lammps"}, ("float64",))]}     # GAP-18's command, energy sigmas x10/3
 STYLE = {"acejax-ace": "acejax", "acejax-pace": "acejax", "mlpace": "mlpace", "mlpace-mixed": "mlpace",
          "mace": "mace", "gap": "gap", "nep": "nep", "nep-gpumd": "nep-gpumd",
          "mace-xl": "mace-xl", "mace-xl-f32": "mace-xl-f32", "acepotentials-trim": "acepotentials-trim",
-         "grace": "grace", "grace-fs": "grace-fs"}
-GRACE_CODES = ("grace", "grace-fs")
+         "grace": "grace", "grace-fs": "grace-fs", "grace-2l": "grace-2l"}
+GRACE_CODES = ("grace", "grace-fs", "grace-2l")
 TRIM = "acepotentials-trim"
 XL_CODES = ("mace-xl", "mace-xl-f32")
 GATE_N, GATE_CELLS = 64, 3                        # three rattled 64-atom Si cells
@@ -177,7 +178,7 @@ def plateau_flag(main, check, tol=0.2):
 
 
 def _sizes(fam, e):
-    if fam in ("grace", "grace_fs"):
+    if fam in ("grace", "grace_fs", "grace_2l"):
         return [f"{e['size']}_s0"] if e.get("timing", True) else []   # c32l4_long: c32l4's architecture                     # fit_grace's run name: <size>_s<seed>
     return [f"f{n}" for n in e["take"]] if fam == "pace" else [e["size"]]
 
@@ -242,7 +243,7 @@ def cases(device, only=None):
                         if code == TRIM:
                             row["trim_lib"] = str(trim_lib(d))
                         if code in GRACE_CODES:                # LAMMPS reads the export; the gate's reference is the SavedModel
-                            row["path"] = _local(st.get("kokkos_npz" if code == "grace" else "fs_yaml") or "")
+                            row["path"] = _local(st.get("fs_yaml" if code == "grace-fs" else "kokkos_npz") or "")
                             row["ref"] = path
                         if fam in ("ace", "ace_wl") and os.environ.get("ACEJAX_AC_ACE_SPLINE_TOL"):   # analytic radials splined
                             row["spline_tol"] = float(os.environ["ACEJAX_AC_ACE_SPLINE_TOL"])  # like ace_lr's (opt-in)

@@ -169,3 +169,7 @@ on every frame, test included, so it is a reference line, not a held-out score. 
 - **A100 probe** (`envs/sulis-grace-probe.sbatch`, job 2257046, A100-PCIE-40GB, 10 epochs each), s/epoch and the
   projected 376-epoch fit: c8l3 1.62 (0.19 h), c16l3 2.12 (0.24 h), c16l4 3.0 (0.33 h), c32l4 5.0 (0.54 h), c64l4 8.25
   (0.88 h), fs_small / fs_medium 1.38 (0.18 h), c16l4 linro / frozenR 2.88 (0.32 h), c16l4_o3 2.38 (0.27 h).
+- **GRACE-2L** (`grace_2l`, 2026-10-22): gracemaker's GRACE_2LAYER_latest preset through `fit_grace` (preset entries
+  pass their kwargs unchanged), the same data, weights and fit settings; LAMMPS `grace/2l/kk` / `grace/2l/cpu/kk`
+  from the same build. Parity: ≤ 9.7e-9 eV/atom, ≤ 1.5e-8 eV/Å on the timed models (bound 1e-6 / 1e-5). The timing
+  jobs take `GRACE_TREE`, `GRACE_ENV`, `GRACE_RESULTS` and (CPU) `LAYOUTS`; `GRACE_CHUNKSIZE` sets the Kokkos chunk.

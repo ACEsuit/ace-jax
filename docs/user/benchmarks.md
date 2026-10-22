@@ -16,10 +16,10 @@ training and 248 for testing).
 
 - **Model families.** Linear ACE (ace-jax), ACE with learned radials,
   PACE-shaped ACE, PACE (pacemaker), MACE with L = 0 and L = 1, NEP
-  (trained with GPUMD), GAP refits, and GRACE-1L and GRACE-FS (trained
-  with gracemaker). Each family has a ladder of model sizes. Each point is
-  one fit. For GRACE, each point is the mean of three fits, and the bars
-  show the range.
+  (trained with GPUMD), GAP refits, and GRACE-1L, GRACE-2L and GRACE-FS
+  (trained with gracemaker). Each family has a ladder of model sizes. Each
+  point is one fit. For GRACE, each point is the mean of three fits, and
+  the bars show the range.
 - **Force error.** The root-mean-square force error on the test set.
 - **QoI error.** 21 silicon properties are calculated with each model and
   compared with DFT: elastic constants, energies of other phases, point
@@ -65,12 +65,17 @@ At the target, in microseconds per atom-step:
 | MACE c16L1, Symmetrix | 5.36 | 8.58 |
 | MACE c16L1, Symmetrix-XL | 1.47 | 2.87 |
 | GRACE-1L c64l4, `grace/1l/kk` | 11.65 | 59.1 |
+| GRACE-2L 2l_c16, `grace/2l/kk` | 8.96 | 24.0 |
 
 In these ladders, PACE (pacemaker), ACE with learned radials, PACE-shaped
 ACE, NEP, the GAP refits and GRACE-FS do not reach the target. GRACE-1L
 reaches the target only at its largest size (c64l4, 445,793 parameters).
 At that size, its cost is approximately 4 to 27 times the cost of linear
-ACE o4d20 or MACE c16L0 in their fastest codes. PACE reaches the force
+ACE o4d20 or MACE c16L0 in their fastest codes. GRACE-2L has two
+message-passing layers. It reaches the target at all of its sizes. Its
+smallest size (2l_c16, 98,882 parameters) costs approximately 4 to 11 times
+the cost of linear ACE o4d20 or MACE c16L0 in their fastest codes. GRACE-2L
+2l_small has a QoI error of 0.31, the same as the largest MACE L = 1 models. PACE reaches the force
 error of GAP-18 with fewer parameters than linear ACE, but not the QoI target.
 NEP has the lowest cost on the A100 (0.04 to 0.22 µs/atom-step), in mixed
 precision. On the CPU, NEP costs 0.55 to 3.0 µs/atom-step. PACE reaches the
@@ -131,9 +136,13 @@ have approximately the same cost.
   Symmetrix-XL.
 - **GAP** runs in LAMMPS with QUIP, on the CPU only.
 - **GRACE** runs in LAMMPS with the native Kokkos styles of gracemaker's
-  LAMMPS version: `grace/1l/kk` (GPU) and `grace/1l/cpu/kk` (CPU) for
-  GRACE-1L, `grace/fs/kk` and `grace/fs` for GRACE-FS, in float64. On the
-  CPU, GRACE uses 128 MPI ranks.
+  LAMMPS version, in float64: `grace/1l/kk` (GPU) and `grace/1l/cpu/kk`
+  (CPU) for GRACE-1L, `grace/2l/kk` and `grace/2l/cpu/kk` for GRACE-2L,
+  and `grace/fs/kk` and `grace/fs` for GRACE-FS. On the CPU, each GRACE
+  model uses its faster layout: 128 MPI ranks, or 64 MPI ranks with 2
+  threads. On the GPU, GRACE-2L 2l_medium uses a chunk size of 1,024
+  atoms, because the default chunk size uses more than the 40 GB of the
+  A100.
 - **NEP** is trained with GPUMD. On the CPU, it runs in LAMMPS with
   `pair_style nep` (NEP_CPU, float64). On the GPU, it runs in GPUMD. GPUMD
   uses mixed precision, and the figure labels these points.
