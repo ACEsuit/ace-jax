@@ -310,3 +310,52 @@ Costs: 21.3 A100-hours of fits (ladder 10.5, FS 1.2, ablations 9.7), plus about 
 two timing jobs. Rows: `results/metrics.jsonl` (`grace*`, one per seed), QoI scores `results/grace_qoi.json`, timings
 `results/sulis/sulis-{gpu,cpu-128x1}-grace.jsonl`, in the main cost files and figures (the reproduce block above; the
 GRACE-only `cost_sulis_*_grace.json` and `rmse_qoi_cost_grace.png` of the first write-up are folded into them).
+
+### GRACE-2L (2026-10-22)
+
+gracemaker's GRACE_2LAYER_latest preset (two message-passing layers), from scratch with the 1L ladder's settings
+(cutoff 5 Å per layer, so a 10 Å receptive field; 50k updates; float64; the same stress-weight departure), three
+seeds per size, on Sulis A100s (`sweep.yaml` `grace_2l`). Sizes: the preset's "small" and "medium" and one smaller
+size (2l_c16: lmax 3/3, 16/16 channels). The preset's "large" is not fitted: it is "medium" with indicator_lmax 3
+and costs ~60% more to fit (A100 probe: 3.5 against 2.2 h), and the budget was 30 A100-hours. Timed as
+`grace/2l/kk` (A100) and `grace/2l/cpu/kk` (CPU node, the faster of 128 x 1 and 64 x 2: 64 x 2 for every 2L size);
+2l_medium on the A100 at `chunksize 1024` (the default 4096 filled the 40 GB card at 32,768 atoms). The Kokkos 2L
+kernel caps n_rad_max at 42, lmax at 4, MLP widths at 210 and the indicator channels at 16, and, as 1L's, reads an
+order-4 block: every size keeps max_order 4. Parity gate at ML-PACE's bound (1e-6 eV/atom, 1e-5 eV/Å): the
+timed models agree with gracemaker's TPCalculator to ≤ 9.7e-9 eV/atom and ≤ 1.5e-8 eV/Å (A100 and CPU), and a
+100-update smoke model to 2.0e-7 / 2.0e-7 on the CPU, far above 1L's 1e-11 (roundoff): not roundoff, but within the
+bound.
+
+| model | parameters | force RMSE (eV/Å) | liquid force RMSE | QoI error [min, max] | A100 | CPU node |
+|---|---|---|---|---|---|---|
+| GRACE-2L 2l_c16 | 98,882 | 0.0637 ± 0.0011 | 0.128 | 0.42 [0.36, 0.46] | 8.96 | 24.0 |
+| GRACE-2L 2l_small | 414,010 | 0.0564 ± 0.0009 | 0.118 | 0.31 [0.28, 0.33] | 26.4 | 72.7 |
+| GRACE-2L 2l_medium | 879,124 | 0.0545 ± 0.0006 | 0.123 | 0.32 [0.31, 0.34] | 53.9 | 120.5 |
+| GRACE-1L c64l4 | 445,793 | 0.0764 ± 0.0004 | 0.138 | 0.46 [0.45, 0.47] | 11.65 | 59.1 |
+| linear ACE o4d20 (1 fit) | 5,476 | 0.0816 | 0.180 | 0.39 | 2.42 patched ML-PACE | 2.89 patched ML-PACE |
+| MACE c16L0 (1 fit) | 31,152 | 0.0699 | 0.123 | 0.41 | 1.23 Symmetrix-XL | 2.19 Symmetrix-XL |
+| MACE c16L1 (1 fit) | 40,272 | 0.0579 | 0.114 | 0.34 | 1.47 Symmetrix-XL | 2.87 Symmetrix-XL |
+
+**Outcome.** GRACE-2L reaches the target at every size, the smallest (2l_c16) more accurately than GRACE-1L's
+largest at 77% of its A100 cost and 41% of its CPU cost; 2l_small's QoI error (0.31) equals the largest MACE L = 1
+fits' and is below GAP-18's (0.36): the second message-passing layer closes most of GRACE's accuracy gap. The
+cost conclusion is unchanged: at the target GRACE-2L costs 3.7x (A100) / 8.3x (CPU) linear ACE o4d20 in patched
+ML-PACE and 7.3x / 11x MACE c16L0 in Symmetrix-XL, and MACE c16L1 reaches 2l_small's accuracy class (0.0579 eV/Å,
+QoI 0.34) at 1.47 / 2.87 µs/atom-step. In the plan's terms: GRACE reaches the target at a higher cost than linear
+ACE, and small MACE is cheaper still.
+
+**Training length.** One 2l_small fit at 150k updates (`grace_2l/2l_small_long_s0`): force RMSE 0.0540 eV/Å (50k
+seeds 0.0564 ± 0.0009), energy 1.85 meV/atom (seeds 2.3-4.2), QoI 0.25 (seeds 0.28-0.33), liquid 0.139 (seeds
+0.116-0.120). The longer fit gains about 2.7x the seed spread on forces, less than 1L c32l4's 10x, and loses on the
+liquid; the 50k ladder stands.
+
+GRACE-1L, GRACE-FS: the CPU rows now take the faster of 128 x 1 and 64 x 2 (64 x 2 for c8l3-c32l4, by 4-19%;
+128 x 1 for c64l4 and FS); cost files and figures follow the reproduce block. GRACE-2L is drawn in GRACE-1L's sienna
+with an octagon marker and dash-dot line (no new hue passes `validate_palette --pairs all` against the families:
+every brown or orange tried is within CVD ΔE 2-5 of GAP's green or ACE-lr's red). GRACE-1L's sienna itself is ΔE 1.4
+from GAP's green for deuteranopes, told apart by marker; a recolour is a separate follow-up.
+
+Costs: 19.0 A100-hours of fits (2l_c16 2.0, 2l_small 5.2, 2l_medium 6.7, 2l_small_long 5.1), plus ~0.5 for the
+probe (job 2258379) and ~2 for timing (jobs 2258977, 2259084; CPU 2258978, 2258979). Rows: `results/metrics.jsonl`
+(`grace_2l`), QoI scores `results/grace_2l_qoi.json`, timings `results/sulis/sulis-{gpu,cpu-128x1,cpu-64x2}-grace2l.jsonl`
+and `sulis-cpu-64x2-grace.jsonl`.
