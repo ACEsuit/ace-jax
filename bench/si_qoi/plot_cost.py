@@ -82,10 +82,14 @@ FAM = {  # family: (label, colour, marker, linestyle, filled, qoi model name pat
     # the seed mean with a min-max bar (SEEDED); sienna, its own marker; FS open and dashed
     "grace":      ("GRACE-1L (gracemaker)",    "#a0522d", "h", "-",  True,  "GRACE_{s}"),
     "grace_fs":   ("GRACE-FS (gracemaker)",    "#a0522d", "h", "--", False, "GRACE_{s}"),
+    # GRACE-2L (two message-passing layers): GRACE-1L's sienna, as MACE's L=0 / L=1 share a colour -- no new hue
+    # passes (dataviz validate_palette --pairs all, light: every brown/orange tried is within CVD dE 2-5 of GAP's
+    # green or ACE-lr's red), so it is told apart by its octagon marker and dash-dot line
+    "grace_2l":   ("GRACE-2L (gracemaker)",    "#a0522d", "8", "-.", True,  "GRACE_{s}"),
 }
 # families fitted with several seeds (sizes "<size>_s<k>"): one point per size, the mean over seeds, with the
 # min-max spread as an error bar; the per-seed rows stay in metrics.jsonl.  SEED_EXCLUDE: checks, not ladder points
-SEEDED = ("grace", "grace_fs")
+SEEDED = ("grace", "grace_fs", "grace_2l")
 SEED_EXCLUDE = ("c32l4_long",)               # the 150k-update training-length check
 WL_FAMILIES = ("ace", "ace_wl_1", "ace_wl_1.75", "ace_wl_2", "ace_wl_2.5", "ace_wl_o5", "ace_lr", "pace")
 WL_RECOLOUR = {"ace": "#3987e5"}                 # the ramp's wL 1.5 step (the categorical blue is too near 1.75)
