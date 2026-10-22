@@ -36,6 +36,8 @@ Cheapest model reaching the target, µs/atom-step, float64, LAMMPS:
 | MACE c16L0, Symmetrix-XL | 31,152 | 0.0699 | < 0.5 | 1.23 | 2.19 |
 | MACE c16L1, Symmetrix | 40,272 | 0.0579 | < 0.5 | 5.36 | 8.58 |
 | MACE c16L1, Symmetrix-XL | 40,272 | 0.0579 | < 0.5 | 1.47 | 2.87 |
+| GRACE-1L c64l4, `grace/1l/kk` (3-seed mean) | 445,793 | 0.0764 | 0.46 | 11.65 | 59.1 |
+| GRACE-2L 2l_c16, `grace/2l/kk` (3-seed mean) | 98,882 | 0.0637 | 0.42 | 8.96 | 24.0 |
 
 Not reached in their ladders (best QoI error, at that model's force RMSE):
 
