@@ -10,3 +10,13 @@
   padding: 0.4rem;
   box-shadow: var(--md-shadow-z1);
 }
+
+/* Interactive figures (javascripts/plotly-figures.js): the live plot replaces the fallback image on screen;
+   print keeps the image. */
+.plotly-figure__plot { width: 100%; }
+.plotly-figure__presets .md-button { margin: 0 0.4em 0.4em 0; padding: 0.25em 0.9em; font-size: 0.7rem; }
+.plotly-figure--live img, .plotly-figure:not(.plotly-figure--live) .plotly-figure__presets { display: none; }
+@media print {
+  .plotly-figure--live img { display: block; }
+  .plotly-figure__plot, .plotly-figure__presets { display: none; }
+}

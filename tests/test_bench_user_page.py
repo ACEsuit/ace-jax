@@ -258,3 +258,29 @@ def test_notes_give_the_cpu_threads_ranks_and_affinity(up):
     text = up.notes(rows, {"cpu": host, "gpu": "modal-a100"})
     cpu = next(l for l in text.splitlines() if l.startswith("- **CPU:**"))
     assert "16 threads" in cpu and "8 MPI ranks" in cpu and "CPUs 0-15" in cpu
+
+
+def test_interactive_silicon_figure_is_wired_and_consistent():
+    """The silicon figure's Plotly spec (bench/si_qoi/plot_cost_web.py) sits next to its fallback PNG inside a
+    `plotly-figure` div, the page loads plotly-figures.js, every trace is a plotted family with one legend entry
+    per family, the presets name only those families, and the spec is strict JSON (no NaN)."""
+    import json
+    import yaml
+    sys.path.insert(0, str(ROOT / "bench" / "si_qoi"))
+    import plot_cost_web as W
+    text = PAGE.read_text()
+    m = re.search(r'<div class="plotly-figure" markdown>\s*!\[[^\]]+\]\((assets/benchmarks/[^)]+\.png)\)\s*</div>', text)
+    assert m, "the silicon figure is not wrapped for the interactive renderer"
+    spec = PAGE.parent / m.group(1).replace(".png", ".json")
+    fig = json.loads(spec.read_text(), parse_constant=lambda c: pytest.fail(f"non-JSON constant {c}"))
+    groups = [t["legendgroup"] for t in fig["data"]]
+    assert set(groups) <= set(W.P.FAM)
+    assert sorted(t["legendgroup"] for t in fig["data"] if t["showlegend"]) == sorted(set(groups))
+    presets = fig["layout"]["meta"]["presets"]
+    assert [p["label"] for p in presets] == list(W.PRESETS)
+    assert all(set(p["families"] or []) <= set(W.P.FAM) for p in presets)
+    first = set(presets[0]["families"])
+    assert all((t["visible"] is True) == (t["legendgroup"] in first) for t in fig["data"])
+    cfg = yaml.safe_load((ROOT / "mkdocs.yml").read_text().replace("!!python/name:", ""))
+    assert "javascripts/plotly-figures.js" in cfg["extra_javascript"]
+    assert (ROOT / "docs" / "user" / "javascripts" / "plotly-figures.js").exists()
