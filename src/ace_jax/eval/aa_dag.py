@@ -295,4 +295,6 @@ def with_aa_dag(model, mode="greedy"):
     kw = {"aa_dag": _plan_for(model.aa_specs, mode)}
     if has_blk:
         kw["blk_aa_dag"] = None if model.blk_aa_specs is None else _plan_for(model.blk_aa_specs, mode)
+    if hasattr(model, "cueq_plan"):               # the folded readout reads cueq plans first: drop them
+        kw.update(cueq_plan=None, blk_cueq_plan=None)
     return dataclasses.replace(model, **kw)

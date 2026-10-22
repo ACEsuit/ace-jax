@@ -95,6 +95,58 @@ def test_aa_dag_none_clears_the_cueq_plans(monkeypatch):
     assert m.cueq_plan is None and m.blk_cueq_plan is None
 
 
+def test_dag_mode_drops_the_cueq_plans(monkeypatch):
+    """The folded readout reads cueq plans first: a later "greedy" / "prefix" must clear them, or the DAG
+    would be silently ignored."""
+    import numpy as np
+    from ace_jax.eval import cueq
+    from ace_jax.eval.aa_dag import with_aa_dag
+    monkeypatch.setattr(cueq, "require", lambda: None)
+    monkeypatch.setattr(cueq, "polynomial", lambda specs, coef: [(None, np.arange(1))])
+    monkeypatch.setenv("CUEQUIVARIANCE_OPS_NVRTC_CACHE_DIR", "/nonexistent")
+    for mode in ("greedy", "prefix"):
+        m = with_aa_dag(with_aa_dag(_si(), "cueq"), mode)
+        assert m.cueq_plan is None and m.blk_cueq_plan is None and m.aa_dag is not None
+
+
+def test_refused_model_swap_leaves_the_calculator_unchanged(monkeypatch):
+    """A calc.model swap that raises (here in with_cueq) must leave the calculator exactly as it was: the
+    old model, its evaluation form and its caches, so a caller who catches the error still gets the old
+    model's energies and calc.model reports it."""
+    import dataclasses
+    import numpy as np
+    from ase.build import bulk
+    from conftest import FIXTURE_DIR
+    from ace_jax import load
+    from ace_jax.calc.point import ACECalculator
+    from ace_jax.eval import cueq
+    from ace_jax.eval.model import fold_readout
+    m, meta, _ = load(str(FIXTURE_DIR / "si_fitted.npz"))
+    with monkeypatch.context() as mp:             # a cueq calculator, its plan stubbed to the chain form
+        mp.setattr(jax, "default_backend", lambda: "gpu")
+        mp.setattr(cueq, "with_cueq", lambda model: model)
+        calc = ACECalculator(m, meta, aa_dag="cueq")
+    at = bulk("Si", "diamond", a=5.43, cubic=True).repeat(2)
+    at.rattle(0.05, seed=2)
+    at.calc = calc
+    e_a = at.get_potential_energy()
+    eval_a = calc.eval_model
+    m2 = fold_readout(dataclasses.replace(m, WB=2.0 * m.WB, folded=False, ctilde=None))
+    def refuse(model):
+        raise ValueError("refused")
+    for gpu in ((True,) if jax.default_backend() == "gpu" else (False, True)):   # at the backend check, in with_cueq
+        with monkeypatch.context() as mp:
+            if gpu:
+                mp.setattr(jax, "default_backend", lambda: "gpu")
+            mp.setattr(cueq, "with_cueq", refuse)
+            with pytest.raises(ValueError, match="CUDA GPU" if not gpu else "refused"):
+                calc.model = m2
+        assert calc.model is m and calc.eval_model is eval_a and calc.aa_dag == "cueq"
+        at2 = at.copy()
+        at2.calc = calc
+        np.testing.assert_allclose(at2.get_potential_energy(), e_a, rtol=1e-12)
+
+
 def _gpu():
     if jax.default_backend() != "gpu":            # first: without its CUDA libraries the cueq import is an OSError
         pytest.skip("cueq evaluation needs a CUDA device")

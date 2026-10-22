@@ -333,36 +333,36 @@ class ACECalculator(Calculator):
         Refused when a posterior is attached: the posterior, its design-row model and the device
         factors belong to the model FILE given at construction, so forces_std would silently
         describe the old model.  Build a new ACECalculator(model, posterior=...) instead."""
-        if hasattr(self, "_model"):
-            if getattr(self, "posterior", None) is not None:
-                raise ValueError("cannot swap calc.model on a calculator with posterior=: forces_std "
-                                 "would still describe the model it was built with; build a new "
-                                 "ACECalculator(model_file, posterior=posterior_file) instead")
-            self.reset()
-        self._model = model
-        self._eval_model = (lean_form(model, self._spline_tol, self._spline_intervals)
-                            if self._lean else model)
-        self._splined = splining(model, self._eval_model, self._spline_tol)
-        self._eval_model, self._radial_table = with_radial_table(self._eval_model,
-                                                                 self._radial_table_opt)
+        if hasattr(self, "_model") and getattr(self, "posterior", None) is not None:
+            raise ValueError("cannot swap calc.model on a calculator with posterior=: forces_std "
+                             "would still describe the model it was built with; build a new "
+                             "ACECalculator(model_file, posterior=posterior_file) instead")
+        # built into locals and assigned at the end: a refused model (e.g. aa_dag="cueq" off a GPU, or a model
+        # cueq cannot evaluate) leaves the calculator exactly as it was
+        eval_model = (lean_form(model, self._spline_tol, self._spline_intervals) if self._lean else model)
+        splined = splining(model, eval_model, self._spline_tol)
+        eval_model, radial_table = with_radial_table(eval_model, self._radial_table_opt)
         from ..eval.aa_dag import resolve_aa_dag, with_aa_dag
-        self._aa_dag_used = resolve_aa_dag(self._eval_model, self._aa_dag)
-        if self._aa_dag_used == "cueq":
+        aa_dag_used = resolve_aa_dag(eval_model, self._aa_dag)
+        if aa_dag_used == "cueq":
             import jax
             if jax.default_backend() != "gpu":     # before any trace: cueq kernels are CUDA-only
                 raise ValueError("aa_dag='cueq' needs a CUDA GPU; the JAX backend here is "
                                  f"{jax.default_backend()!r}.  Use aa_dag='auto', 'greedy' or None.")
-        if self._aa_dag_used is not None:
-            self._eval_model = with_aa_dag(self._eval_model, self._aa_dag_used)
-        self._e0 = np.asarray(model.E0, np.float64)
+        if aa_dag_used is not None:
+            eval_model = with_aa_dag(eval_model, aa_dag_used)
         if self._energy_reference == "E0":        # site energies without the isolated atoms
             import equinox as eqx
             import jax.numpy as jnp
-            self._eval_model = eqx.tree_at(lambda m: m.E0, self._eval_model,
-                                           jnp.zeros_like(self._eval_model.E0))
+            eval_model = eqx.tree_at(lambda m: m.E0, eval_model, jnp.zeros_like(eval_model.E0))
         if self._eval_dtype is not None:         # a float64 model traced with float32 inputs promotes to f64
             from ..eval.api import with_dtype
-            self._eval_model = with_dtype(self._eval_model, self._eval_dtype)
+            eval_model = with_dtype(eval_model, self._eval_dtype)
+        if hasattr(self, "_model"):
+            self.reset()
+        self._model, self._eval_model, self._splined = model, eval_model, splined
+        self._radial_table, self._aa_dag_used = radial_table, aa_dag_used
+        self._e0 = np.asarray(model.E0, np.float64)
         self._by_kind = {}                    # form -> model in that form
         self._by_bucket = {}                  # edge bucket -> calibrated form
         self._skin_state = None               # the skin list in use (calc.skin.SkinState)
@@ -376,8 +376,9 @@ class ACECalculator(Calculator):
 
     @property
     def aa_dag(self):
-        """The product basis's DAG plan mode in use ("greedy" / "prefix"), None for the chain form
-        (what `aa_dag="auto"` resolved to on this model)."""
+        """The product basis form in use: a DAG plan mode ("greedy" / "prefix"), "cueq" (the
+        cuequivariance kernels), or None for the chain form (what `aa_dag="auto"` resolved to on this
+        model)."""
         return self._aa_dag_used
 
     @property
