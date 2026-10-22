@@ -1049,8 +1049,9 @@ def test_cueq_bundle_records_the_replay_sidecar_and_cache(tmp_path, monkeypatch)
     on_disk = json.loads((tmp_path / "si.json").read_text())["ace_jax"]
     assert on_disk["aa_dag"] == b["ace_jax"]["aa_dag"] == "cueq"
     shim = tmp_path / "contrib" / "ffi_replay_shim.so"
-    assert on_disk["cueq"] == {"version": "0.13.0", "targets": ["uniform_1d_cuda"], "replay": str(replay),
-                               "cache": str(cache), "handlers": f"uniform_1d_cuda={shim}:ffi_replay_handler"}
+    assert on_disk["cueq"] == {"version": "0.13.0", "targets": ["uniform_1d_cuda"],   # relative: they travel together
+                               "replay": "si.ffi-replay", "cache": "si.cueq-cache",
+                               "handlers": f"uniform_1d_cuda={shim}:ffi_replay_handler"}
 
 
 @pytest.mark.parametrize("fits", [8192, 4096])

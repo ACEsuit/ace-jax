@@ -108,3 +108,22 @@ def test_export_aa_dag_is_for_a_bundle(tmp_path, capsys):
     with pytest.raises(SystemExit) as e:
         main(["export", "--model", str(MODEL), "--out", str(tmp_path / "m.yace"), "--aa-dag", "greedy"])
     assert e.value.code == 2 and "--aa-dag" in capsys.readouterr().err
+
+
+def test_export_aa_dag_cueq_leaves_the_cueq_import_to_the_export(tmp_path, monkeypatch, capsys):
+    """The CLI must not import cueq before export_lammps sets CUEQUIVARIANCE_OPS_NVRTC_CACHE_DIR; a cueq (or
+    recorder) missing in the export is a usage error."""
+    require_optional("lammps_jax")
+    from ace_jax.eval import cueq
+    from ace_jax.export import lammps as lx
+    def no_import():
+        raise AssertionError("aj export imported cueq before export_lammps")
+    def export(*a, **kw):
+        raise cueq.CueqUnavailable("set LAMMPS_JAX_CONTRIB")
+    monkeypatch.setattr(cueq, "require", no_import)
+    monkeypatch.setattr(lx, "export_lammps", export)
+    write(tmp_path / "start.xyz", bulk("Si", "diamond", 5.43, cubic=True), format="extxyz")
+    with pytest.raises(SystemExit) as e:
+        main(["export", "--model", str(MODEL), "--out", str(tmp_path / "m.json"), "--structure",
+              str(tmp_path / "start.xyz"), "--aa-dag", "cueq"])
+    assert e.value.code == 2 and "LAMMPS_JAX_CONTRIB" in capsys.readouterr().err

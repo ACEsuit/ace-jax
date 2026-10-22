@@ -448,8 +448,9 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
     is <path stem>.cueq-cache (CUEQUIVARIANCE_OPS_NVRTC_CACHE_DIR is set to it for the rest of this process),
     filled by the export's compiles and shipped with the bundle, so LAMMPS on a GPU of the same architecture
     skips the compile (minutes at o4d20).  Dense / matrix rows per block: `cueq_block_rows_for` unless
-    `block_rows` is given.  Recorded as `ace_jax.cueq`: {"version", "targets", "replay", "cache",
-    "handlers": the LAMMPS_JAX_FFI_HANDLERS value}; `eval.cueq.run_env` gives LAMMPS's environment.
+    `block_rows` is given.  Recorded as `ace_jax.cueq`: {"version", "targets", "replay" and "cache" (file
+    names relative to the bundle's directory), "handlers": the LAMMPS_JAX_FFI_HANDLERS value with the export
+    host's shim}; `eval.cueq.run_env(record, bundle_path)` gives LAMMPS's environment.
     """
     from lammps_jax.export import export_model
 
@@ -563,8 +564,10 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
             import warnings
             warnings.warn(f"{cache} is empty: this process had compiled the cueq kernels before the export, so "
                           "LAMMPS will compile them again; export in a fresh process to ship them", stacklevel=2)
-        cueq_meta = {"version": cueq.version(), "targets": [cueq.TARGET], "replay": str(replay),
-                     "cache": str(cache), "handlers": cueq.handlers(cueq.shim(rec))}
+        # replay and cache relative to the bundle's directory (they travel with it; `cueq.run_env` resolves
+        # them); the shim is the export host's (`cueq.run_env` prefers $LAMMPS_JAX_CONTRIB's at run time)
+        cueq_meta = {"version": cueq.version(), "targets": [cueq.TARGET], "replay": replay.name,
+                     "cache": cache.name, "handlers": cueq.handlers(cueq.shim(rec))}
     # no "platform": lammps-jax's export_info.platform is a contract key its plugin checks
     bundle["ace_jax"] = {"layout": layout, "elements": model_z, "type_elements": type_elements,
                          "k_dense": int(k_dense) if layout in ("dense", "matrix") else None,

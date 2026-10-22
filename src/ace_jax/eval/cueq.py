@@ -253,14 +253,22 @@ def handlers(shim_path):
     return f"{TARGET}={shim_path}:ffi_replay_handler"
 
 
-def run_env(record):
-    """The environment LAMMPS needs for a cueq bundle, from its `ace_jax.cueq` record: {name: value}, plus the
-    directories LD_LIBRARY_PATH needs (libcue_ops and the pip CUDA libraries nvrtc / cublas, which libcue_ops
-    finds by no rpath) under "LD_LIBRARY_PATH" (prepend them)."""
+def run_env(record, bundle_path):
+    """The environment LAMMPS needs for the cueq bundle at `bundle_path`, from its `ace_jax.cueq` record:
+    {name: value}, plus the directories LD_LIBRARY_PATH needs (libcue_ops and the pip CUDA libraries nvrtc /
+    cublas, which libcue_ops finds by no rpath) under "LD_LIBRARY_PATH" (prepend them).  The record's replay
+    and cache are relative to the bundle's directory (bundle, sidecar and cache travel together), resolved
+    here.  The shim is machine-specific: $LAMMPS_JAX_CONTRIB/ffi_replay_shim.so when that is set here, else
+    the record's `handlers`, which names the export host's shim."""
     import importlib.util
+    import os
     import pathlib
-    env = {"LAMMPS_JAX_FFI_HANDLERS": record["handlers"], "FFI_REPLAY_FILE": record["replay"],
-           "CUEQUIVARIANCE_OPS_NVRTC_CACHE_DIR": record["cache"]}
+    d = pathlib.Path(bundle_path).absolute().parent
+    h = record["handlers"]
+    if os.environ.get("LAMMPS_JAX_CONTRIB"):
+        h = handlers(pathlib.Path(os.environ["LAMMPS_JAX_CONTRIB"]).absolute() / SHIM)
+    env = {"LAMMPS_JAX_FFI_HANDLERS": h, "FFI_REPLAY_FILE": str(d / record["replay"]),
+           "CUEQUIVARIANCE_OPS_NVRTC_CACHE_DIR": str(d / record["cache"])}
     libs = []
     try:
         jl = pathlib.Path(importlib.util.find_spec("cuequivariance_ops_jax").origin).parent / "lib"

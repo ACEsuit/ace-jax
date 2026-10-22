@@ -256,16 +256,24 @@ def test_cueq_bundle_ships_its_replay_and_nvrtc_cache(tmp_path):
     assert p.returncode == 0, p.stderr[-3000:]
     rec = json.loads(path.read_text())["ace_jax"]
     assert rec["aa_dag"] == "cueq" and int(p.stdout.split()[-1]) == 200          # capped at the rows
-    assert rec["cueq"]["replay"] == str(tmp_path / "si.ffi-replay") and (tmp_path / "si.ffi-replay").is_file()
+    assert rec["cueq"]["replay"] == "si.ffi-replay" and (tmp_path / "si.ffi-replay").is_file()
     assert (tmp_path / "si.ffi-replay").read_bytes()[:8] == b"FFIRPLY1"
-    assert rec["cueq"]["cache"] == str(tmp_path / "si.cueq-cache") and any((tmp_path / "si.cueq-cache").iterdir())
+    assert rec["cueq"]["cache"] == "si.cueq-cache" and any((tmp_path / "si.cueq-cache").iterdir())
+    env = cueq.run_env(rec["cueq"], path)
+    assert env["FFI_REPLAY_FILE"] == str(tmp_path / "si.ffi-replay")
+    assert env["CUEQUIVARIANCE_OPS_NVRTC_CACHE_DIR"] == str(tmp_path / "si.cueq-cache")
 
 
-def test_run_env_names_what_lammps_needs():
+def test_run_env_resolves_the_sidecars_next_to_a_moved_bundle(monkeypatch):
     from ace_jax.eval import cueq
-    rec = {"handlers": "uniform_1d_cuda=/x/ffi_replay_shim.so:ffi_replay_handler", "replay": "/b/si.ffi-replay",
-           "cache": "/b/si.cueq-cache"}
-    env = cueq.run_env(rec)
-    assert env["LAMMPS_JAX_FFI_HANDLERS"] == rec["handlers"] and env["FFI_REPLAY_FILE"] == rec["replay"]
-    assert env["CUEQUIVARIANCE_OPS_NVRTC_CACHE_DIR"] == rec["cache"]
+    rec = {"handlers": "uniform_1d_cuda=/x/ffi_replay_shim.so:ffi_replay_handler", "replay": "si.ffi-replay",
+           "cache": "si.cueq-cache"}
+    monkeypatch.delenv("LAMMPS_JAX_CONTRIB", raising=False)
+    env = cueq.run_env(rec, "/moved/here/si.json")
+    assert env["LAMMPS_JAX_FFI_HANDLERS"] == rec["handlers"]                  # the export host's shim
+    assert env["FFI_REPLAY_FILE"] == "/moved/here/si.ffi-replay"
+    assert env["CUEQUIVARIANCE_OPS_NVRTC_CACHE_DIR"] == "/moved/here/si.cueq-cache"
     assert env["FFI_REPLAY_LIB"].endswith("libcue_ops_jax.so") and "LD_LIBRARY_PATH" in env
+    monkeypatch.setenv("LAMMPS_JAX_CONTRIB", "/here/contrib/ffi-replay")       # this host's shim
+    assert cueq.run_env(rec, "/moved/here/si.json")["LAMMPS_JAX_FFI_HANDLERS"] == \
+        "uniform_1d_cuda=/here/contrib/ffi-replay/ffi_replay_shim.so:ffi_replay_handler"

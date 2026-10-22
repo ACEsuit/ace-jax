@@ -552,8 +552,8 @@ def cmd_export(a):
     if aa_dag == "cueq" and fmt == "lammps":      # refuse before sizing anything
         from .eval import cueq
         try:
-            cueq.check_export(model, a.platform)
-        except (ValueError, cueq.CueqUnavailable) as e:
+            cueq.check_export(model, a.platform, cueq=False)   # no cueq import: export_lammps sets the cache first
+        except ValueError as e:
             raise UsageError(str(e)) from None
     if out.parent and str(out.parent) != ".":
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -598,16 +598,20 @@ def cmd_export(a):
     from ase.data import atomic_numbers
     els = None if a.type_elements is None else [
         int(e) if e.strip().isdigit() else atomic_numbers[e.strip()] for e in a.type_elements.split(",")]
-    b = export_lammps(model, meta, out, max_atoms=cap["max_atoms"], max_edges=cap["max_edges"],
-                      k_dense=cap["k_dense"], max_owned=cap["max_owned"], max_neighbors=cap["max_neighbors"],
-                      dtype=a.dtype, layout=a.layout, type_elements=els, platform=a.platform,
-                      precision_structure=at if a.dtype != "float64" else None, aa_dag=aa_dag)
+    from .eval.cueq import CueqUnavailable
+    try:
+        b = export_lammps(model, meta, out, max_atoms=cap["max_atoms"], max_edges=cap["max_edges"],
+                          k_dense=cap["k_dense"], max_owned=cap["max_owned"], max_neighbors=cap["max_neighbors"],
+                          dtype=a.dtype, layout=a.layout, type_elements=els, platform=a.platform,
+                          precision_structure=at if a.dtype != "float64" else None, aa_dag=aa_dag)
+    except CueqUnavailable as e:                  # cueq or the ffi-replay recorder missing (aa_dag="cueq")
+        raise UsageError(str(e)) from None
     per = "" if procs is None else f", per MPI rank of {'x'.join(map(str, procs))}"
     print(f"lammps-jax: layout {b['ace_jax']['layout']}, {a.dtype}, {a.platform or 'cuda'}, sized for {len(at)} "
           f"atoms of {a.structure}{per} (max_atoms {cap['max_atoms']}, neighbour slots {cap['k_dense']}) -> {out}")
     if b["ace_jax"].get("cueq"):
         from .eval import cueq
-        env = cueq.run_env(b["ace_jax"]["cueq"])
+        env = cueq.run_env(b["ace_jax"]["cueq"], out)
         ld = env.pop("LD_LIBRARY_PATH")
         print(f"cueq kernels: replay {env['FFI_REPLAY_FILE']}, NVRTC cache {env['CUEQUIVARIANCE_OPS_NVRTC_CACHE_DIR']} "
               "(same GPU architecture only); run LAMMPS with")
