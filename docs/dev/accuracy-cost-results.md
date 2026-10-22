@@ -28,6 +28,7 @@ Cheapest model reaching the target, µs/atom-step, float64, LAMMPS:
 | model | parameters | force RMSE (eV/Å) | QoI error | A100 | CPU node |
 |---|---|---|---|---|---|
 | linear ACE o4d20, ace-jax (lammps-jax) | 5,476 | 0.0816 | 0.41 | 3.12 | 50.5 |
+| linear ACE o4d20, ace-jax + cuequivariance (lammps-jax) | 5,476 | 0.0816 | 0.41 | 1.61 | – |
 | linear ACE o4d20, ML-PACE (tabulated radials) | 5,476 | 0.0816 | 0.41 | 4.13 | 5.31 |
 | linear ACE o4d20, patched ML-PACE (proposed upstream) | 5,476 | 0.0816 | 0.41 | 2.42 | 2.89 |
 | linear ACE o4d20, ACEpotentials.jl (trim library) | 5,476 | 0.0816 | 0.41 | – | 10.8 |
@@ -56,6 +57,25 @@ parameters than linear ACE (f800: 761 parameters, 0.081 eV/Å) but not the QoI t
   `ml-pace-tabulated-radials.md`), o4d20 runs at 5.31 µs/atom-step on 128 ranks against 50.5 through the
   lammps-jax CPU backend with the DAG product basis, and 3.98 for PACE f3200. On the A100, ace-jax with the DAG
   is faster than stock ML-PACE (3.12 vs 4.13) and behind patched ML-PACE (2.42).
+- **cuequivariance on the A100** (`aa_dag="cueq"`, job 2259228, gpu003, A100-PCIE-40GB): the fastest linear ACE
+  code on the A100 from o3d12 up. µs/atom-step, 32,768 atoms, float64, cueq row blocks 8192, every bundle gated
+  (64-atom cells, dE/atom <= 4.3e-12, max dF <= 5.6e-10 eV/Å); the default form is the published
+  `sulis-gpu-acejax-auto.jsonl` row (another node, gpu017/gpu001), so the ratios carry the ~2% node spread:
+
+  | model | default (aa_dag auto) | cueq | speed-up | cueq export (s) |
+  |---|---|---|---|---|
+  | ace o3d8 | 0.319 (chain) | 0.322 | 0.99x | 6 |
+  | ace o3d10 | 0.314 (chain) | 0.330 | 0.95x | 4 |
+  | ace o3d12 | 0.520 (chain) | 0.366 | 1.42x | 7 |
+  | ace o4d12 | 0.550 (chain) | 0.369 | 1.49x | 16 |
+  | ace o4d14 | 0.591 (DAG) | 0.497 | 1.19x | 46 |
+  | ace o4d16 | 0.923 (DAG) | 0.670 | 1.38x | 158 |
+  | ace o4d20 | 3.12 (DAG) | 1.609 | 1.94x | 1,552 |
+
+  o4d16 and o4d20 match the spike's same-node runs (0.671 / 1.611 against the DAG's best row blocks 0.953 / 3.135;
+  `bench/cueq_product/README.md` on exp/cueq-product). The o4d20 export took 26 min here against the spike's
+  13 min (another node; the export compiles every kernel into the bundle's NVRTC cache). cueq beats patched
+  ML-PACE (2.42) at o4d20 by 1.5x. Headline preset: the cueq line, as the fastest linear ACE code on the A100.
 - **Patched ML-PACE** (ICAMS/lammps-user-pace#31: on the CPU the recursive-evaluator speed-ups, no unused
   dB_flatten clear, register-carried DAG passes, the force pass summed over n first; on the GPU the pace/kk
   prototype kernels of `pace_ref/fast`, flat-offset ComputeRho and a segmented ComputeWeights, `PACE_KK_RHOW=3`)
@@ -145,6 +165,14 @@ parameters than linear ACE (f800: 761 parameters, 0.081 eV/Å) but not the QoI t
   `PACE_KK_RHOW=3` (`sulis-pacetab.sh cpufork` / `gpufork`; `envs/sulis-{cpu,gpu}-pacefork.sbatch` with
   `REDO=1 STOCK=1`); rows `sulis-{cpu-128x1,gpu}-ace_tabfork.jsonl`, plotted as their own line
   (`plot_cost.PATCHED_MLPACE`).
+  ace-jax with the cuequivariance product basis (`export_lammps(aa_dag="cueq")`, cueq 0.13.0;
+  `envs/sulis-gpu-cueq.sbatch`, `timing.py --modes lammps-cueq`): the same `ace` fits, radials as the plotted ace
+  rows (splined at 1e-10, o3d8 unsplined), A100 only. Each model is exported once, sized for 32,768 atoms (the
+  export compiles every cueq kernel into the bundle's NVRTC cache); the three 64-atom gate cells and the three
+  timed repeats run that bundle, with no N/8 plateau check. LAMMPS (the same lammps-jax 4a7f4fb plugin) replays
+  the plan compiles through lammps-jax's `contrib/ffi-replay` shim (`run_lammps.bundle_env`). Rows
+  `sulis-gpu-cueq.jsonl`, gate mode `parity-lammps-cueq`; plotted as their own line (`plot_cost.FAM["ace_cueq"]`,
+  cost names `ACEcueq_<size>`).
   Linear ACE run by ACEpotentials.jl: each `aj fit` model rebuilt as an ACEpotentials v0.10.2 `ace_model`
   (`bench/scaling/julia/build_trim_acejax.jl`: coefficients mapped through the AA basis, gated to 1e-10 against
   ace-jax before compiling), exported with `for_library=true` and compiled by `juliac --trim=safe` on a compute
@@ -186,7 +214,8 @@ python bench/si_qoi/make_cost.py --dtype float64 --source acejax-ace=sulis-gpu-a
     bench/accuracy_cost/results/sulis-gpu.jsonl bench/accuracy_cost/results/sulis-gpu-ace-splined.jsonl \
     $R/sulis-gpu-ace-splined-v2.jsonl $R/sulis-gpu-v2.jsonl $R/sulis-gpu-mace_xl.jsonl \
     $R/sulis-gpu-ace_tab5.jsonl $R/sulis-gpu-ace_tabfork.jsonl $R/sulis-gpu-pace-dev.jsonl $R/sulis-gpu-nep.jsonl $R/sulis-gpu-acejax-auto.jsonl \
-    $R/sulis-gpu-fp32-mixed.jsonl $R/sulis-gpu-fp32-dot-F32_F32_F32.jsonl $R/sulis-gpu-grace.jsonl --allow nep-gpumd:mixed
+    $R/sulis-gpu-fp32-mixed.jsonl $R/sulis-gpu-fp32-dot-F32_F32_F32.jsonl $R/sulis-gpu-grace.jsonl $R/sulis-gpu-cueq.jsonl \
+    --allow nep-gpumd:mixed
 ROWS=(--row "A100 GPU, µs/atom-step|$RR/cost_sulis_gpu.json|$RR/cost_sulis_gpu.codes.json"
       --row "CPU node (128 cores), µs/atom-step|$RR/cost_sulis_cpu.json|$RR/cost_sulis_cpu.codes.json")
 python bench/si_qoi/plot_cost.py "${ROWS[@]}"

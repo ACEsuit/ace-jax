@@ -308,3 +308,45 @@ def test_committed_cost_files_have_no_sizeless_aliases():
     for d in ("cpu", "gpu"):
         names = json.loads((ROOT / "bench" / "si_qoi" / "results" / f"cost_sulis_{d}.json").read_text())
         assert not {"GAP", "GAPE30", "GAPnoglue"} & set(names), d
+
+
+def test_make_cost_maps_cueq_rows_to_their_own_line(tmp_path):
+    """make_cost.py: an acejax-ace row with aa_dag "cueq" (mode lammps-cueq) is the cueq line, ACEcueq_<size>,
+    gated by its own parity row (a plain acejax gate does not cover it), and is kept past --source (which picks
+    the ace-jax DAG rows from another file); its codes note says cueq, not dag (no centre dot)."""
+    import json
+    import subprocess
+    base = {"code": "acejax-ace", "family": "ace", "size": "o4d20", "dtype": "float64"}
+    auto, cq = tmp_path / "auto.jsonl", tmp_path / "cq.jsonl"
+    auto.write_text(json.dumps(base | {"mode": "parity", "status": "parity_ok"}) + "\n"
+                    + json.dumps(base | {"mode": "lammps", "status": "ok", "atom_steps_per_s": 1e6 / 3.12,
+                                         "aa_dag": "greedy"}) + "\n")
+    row = base | {"mode": "lammps-cueq", "status": "ok", "atom_steps_per_s": 1e6 / 1.6, "aa_dag": "cueq"}
+    out = tmp_path / "cost.json"
+
+    def run(*lines):
+        cq.write_text("".join(json.dumps(r) + "\n" for r in lines))
+        subprocess.run([sys.executable, str(ROOT / "bench" / "si_qoi" / "make_cost.py"), str(auto), str(cq),
+                        "--source", "acejax-ace=auto", "--out", str(out)], check=True, capture_output=True)
+        return json.loads(out.read_text()), json.loads(out.with_suffix(".codes.json").read_text())
+    cost, _ = run(base | {"mode": "parity", "status": "parity_ok"}, row)       # only a plain gate: not covered
+    assert sorted(cost) == ["ACE_o4d20"]
+    cost, codes = run(base | {"mode": "parity-lammps-cueq", "status": "parity_ok"}, row)
+    assert cost == {"ACE_o4d20": pytest.approx(3.12), "ACEcueq_o4d20": pytest.approx(1.6)}
+    assert "lammps-cueq" in codes["ACEcueq_o4d20"] and " dag:" not in codes["ACEcueq_o4d20"]
+
+
+def test_cueq_line_is_a_same_model_other_code_family():
+    """The cueq line: linear ACE's colour, its own marker and line style among the GPU's linear ACE lines, in
+    the "Same model, other code" preset; a second code for the ace fits (its cost under ACEcueq_<size>)."""
+    sys.path.insert(0, str(ROOT / "bench" / "si_qoi"))
+    import plot_cost as P
+    import plot_cost_web as W
+    lab, col, mk, ls, _, pat = P.FAM["ace_cueq"]
+    assert col == P.FAM["ace"][1] and pat == P.FAM["ace"][5] and "cueq" in lab
+    gpu_ace = ("ace", "ace_tab", "ace_tabfork")                   # the blue lines of the A100 row
+    assert (mk, ls) not in {P.FAM[f][2:4] for f in gpu_ace} and mk in W.SYMBOL and ls in W.DASH
+    assert P.cost_name("ace_cueq", "o4d20") == "ACEcueq_o4d20"
+    assert P.family_of({"family": "ace", "size": "o4d20", "code": "acejax-ace", "aa_dag": "cueq"}) == "ace_cueq"
+    assert P.family_of({"family": "ace", "size": "o4d20", "code": "acejax-ace", "aa_dag": "greedy"}) == "ace"
+    assert "ace_cueq" in W.PRESETS["Same model, other code"]
