@@ -27,10 +27,11 @@ Cheapest model reaching the target, µs/atom-step, float64, LAMMPS:
 
 | model | parameters | force RMSE (eV/Å) | QoI error | A100 | CPU node |
 |---|---|---|---|---|---|
-| linear ACE o4d20, ace-jax (lammps-jax) | 5,476 | 0.0816 | 0.41 | 3.12 | 50.5 |
+| linear ACE o4d20, ace-jax (lammps-jax, XLA program) | 5,476 | 0.0816 | 0.41 | 3.12 | 50.5 |
 | linear ACE o4d20, ML-PACE (tabulated radials) | 5,476 | 0.0816 | 0.41 | 4.13 | 5.31 |
 | linear ACE o4d20, patched ML-PACE (proposed upstream) | 5,476 | 0.0816 | 0.41 | 2.42 | 2.89 |
 | linear ACE o4d20, ACEpotentials.jl (trim library) | 5,476 | 0.0816 | 0.41 | – | 10.8 |
+| linear ACE o4d20, ace-jax C++ kernel (lammps-jax FFI) | 5,476 | 0.0816 | 0.41 | – | 3.29 |
 | MACE c16L0, Symmetrix | 31,152 | 0.0699 | < 0.5 | 1.93 | 2.36 |
 | MACE c16L0, Symmetrix-XL | 31,152 | 0.0699 | < 0.5 | 1.23 | 2.19 |
 | MACE c16L1, Symmetrix | 40,272 | 0.0579 | < 0.5 | 5.36 | 8.58 |
@@ -52,10 +53,36 @@ parameters than linear ACE (f800: 761 parameters, 0.081 eV/Å) but not the QoI t
 
 ## Observations
 
-- **ML-PACE runs ace-jax's linear ACE fastest on the CPU.** Exported exactly (`write_yace`, tabulated radials;
+- **ML-PACE runs ace-jax's linear ACE fastest on the CPU at o4d20.** Exported exactly (`write_yace`, tabulated radials;
   `ml-pace-tabulated-radials.md`), o4d20 runs at 5.31 µs/atom-step on 128 ranks against 50.5 through the
-  lammps-jax CPU backend with the DAG product basis, and 3.98 for PACE f3200. On the A100, ace-jax with the DAG
+  lammps-jax CPU backend with the DAG product basis (3.29 with ace-jax's C++ kernel, next), and 3.98 for PACE f3200. On the A100, ace-jax with the DAG
   is faster than stock ML-PACE (3.12 vs 4.13) and behind patched ML-PACE (2.42).
+- **ace-jax's C++ kernel** (`ace_jax.eval.ffi`, `export_lammps(ffi=True)`: the lammps-jax CPU bundle with the XLA
+  program replaced by one XLA FFI call per step, radials tabulated in r) brings ace-jax to ML-PACE's speed on the
+  CPU: 10-23x faster than the XLA bundle, timed one after the other on the same node (job 2257991, node136;
+  µs/atom-step, 128 ranks):
+
+  | model | C++ kernel | XLA bundle | speed-up |
+  |---|---|---|---|
+  | o3d8 | 0.137 | 3.17 | 23x |
+  | o3d10 | 0.160 | 1.98 | 12x |
+  | o3d12 | 0.295 | 3.33 | 11x |
+  | o4d12 | 0.236 | 3.47 | 15x |
+  | o4d14 | 0.411 | 5.09 | 12x |
+  | o4d16 | 0.738 | 7.50 | 10x |
+  | o4d20 | 3.29 | 49.7 | 15x |
+
+  The XLA column reproduces the plotted ace-jax line (`acejax-auto` rows, other nodes) to within ~5%. Against
+  the other CPU codes (other nodes, so ~20% either way): at o4d20 the kernel (3.29) is between patched ML-PACE
+  (2.89) and stock ML-PACE (5.31) and 3.3x faster than ACEpotentials.jl (10.8); at o4d12-o4d16 it ties or beats
+  patched ML-PACE (0.236 / 0.411 / 0.738 against 0.305 / 0.578 / 0.791); below o4d14 ACEpotentials.jl stays
+  fastest (o3d8 0.104 against 0.137). Parity: every gate (LAMMPS against `ACECalculator` with the same radial
+  table, three rattled 64-atom cells) within 8.6e-10 eV/Å; the largest, o3d8, is roundoff amplified by that fit's
+  pair and many-body forces cancelling (each ~765 eV/Å, net max |F| 2.8; separately the kernel matches the XLA
+  program to 1.7e-12 relative). The kernel is single-threaded per rank, so 128 x 1 is its best layout (64 x 2
+  would leave half the cores idle). It needs lammps-jax's plugin to register FFI handlers for the CPU platform:
+  abhijeetgangan/lammps-jax#3, released in 0.2.1 (0.2.0 registers them for CUDA only; #4 fixes that repository's unrelated `mace`
+  CI failure under jax 0.12).
 - **Patched ML-PACE** (ICAMS/lammps-user-pace#31: on the CPU the recursive-evaluator speed-ups, no unused
   dB_flatten clear, register-carried DAG passes, the force pass summed over n first; on the GPU the pace/kk
   prototype kernels of `pace_ref/fast`, flat-offset ComputeRho and a segmented ComputeWeights, `PACE_KK_RHOW=3`)
@@ -150,6 +177,18 @@ parameters than linear ACE (f800: 761 parameters, 0.081 eV/Å) but not the QoI t
   ace-jax before compiling), exported with `for_library=true` and compiled by `juliac --trim=safe` on a compute
   node (Julia 1.12.6; `accuracy_cost/build_trim.py`, `envs/sulis-cpu-trim.sbatch`), run by the PR 309
   `pair_style ace` plugin in the same LAMMPS (`bench/scaling/envs/sulis-acepot.sh`); 128 x 1 ranks only.
+- ace-jax C++ kernel: the same LAMMPS, lammps-jax `cpu-fixes` + the FFI-platform fix (lammps-jax#3) built in its own
+  tree, the kernel compiled on a compute node with `-O3 -march=znver2` against jax 0.11.2's FFI headers
+  (`envs/sulis-cpu-ffi-build.sbatch`); ace-jax branch `jax-ffi`; `envs/sulis-cpu-ffi.sbatch` (env
+  `sulis-cpu-lj-ffi.json`: `ACEJAX_EXPORT_FFI`, `LAMMPS_JAX_FFI_HANDLERS`) times each size with the kernel, then the
+  XLA bundle on the same node (`sulis-cpu-lj-ffi-xla.json`). Rows: `sulis-cpu-128x1-ffi.jsonl` (the plotted
+  line, `plot_cost.family_of`: rows marked `ffi`) and `sulis-cpu-128x1-ffi-xla.jsonl` (the same-node control, not
+  plotted). Analytic radials splined at 1e-10 as the plotted ace rows (o3d8 unsplined), then tabulated.
+- The N/8 check size (512 atoms, 4 per rank) is overhead-bound for every fast CPU code: the C++ kernel,
+  patched ML-PACE and ACEpotentials.jl all cost 1.4-4.2x more per atom there than at 4,096 atoms, so their rows
+  carry `not_plateau`. Per-step costs that do not scale with atoms (communication, neighbour lists) are still
+  a visible share of their 4,096-atom times; a larger system would favour them further. The XLA bundle,
+  ~10x slower per atom, is mostly on its plateau (its o3d10 and o4d16 rows are flagged).
 - NEP: LAMMPS develop ec02ed0 + NEP_CPU af615ce's USER-NEP (`pair_style nep`, float64, 128 x 1 ranks;
   `bench/scaling/envs/sulis-nep.sh`, `envs/sulis-cpu-nep.sbatch`), gated against calorine's CPUNEP (same
   code, < 2e-14 eV/Å). On the A100, GPUMD's own MD code (`envs/sulis-gpu-nep.sbatch`), which is mixed
@@ -181,7 +220,7 @@ grep -h '"code": "mlpace-mixed"' $R/sulis-gpu-fp32-o4d*.jsonl > $R/sulis-gpu-fp3
 (cd bench && python -m accuracy_cost.dag_auto)
 python bench/si_qoi/make_cost.py --dtype float64 --source acejax-ace=sulis-cpu-128x1-acejax-auto --out $RR/cost_sulis_cpu.json \
     $(ls $R/sulis-cpu*.jsonl | grep -v -e smoke -e ace_yace -e pacetab-check -e "ace_tab\.jsonl" -e ace_tab2 \
-      -e ace_tab3 -e dagpair)
+      -e ace_tab3 -e dagpair -e ffi-xla)          # ffi-xla: the C++ kernel's same-node XLA control, not plotted
 python bench/si_qoi/make_cost.py --dtype float64 --source acejax-ace=sulis-gpu-acejax-auto --out $RR/cost_sulis_gpu.json \
     bench/accuracy_cost/results/sulis-gpu.jsonl bench/accuracy_cost/results/sulis-gpu-ace-splined.jsonl \
     $R/sulis-gpu-ace-splined-v2.jsonl $R/sulis-gpu-v2.jsonl $R/sulis-gpu-mace_xl.jsonl \
