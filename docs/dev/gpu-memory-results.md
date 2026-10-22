@@ -16,7 +16,10 @@ skin-step temporaries). The spec's premise (about 100k atoms, about 400 KB/atom)
 matches the LAMMPS bundles before they gained row blocks
 (`perf-lammps-large-n.md`: dense ACE out of memory at 131k), not the calculator.
 By the spec's stop rule (max atoms >= 1M with no speed regression) Phase 2 does
-not start; the measured headroom is below.
+not start; the measured headroom is below. One measured option is applied: on
+the GPU the dense rows now run in blocks of 4096, not 16384
+(`edge_model.default_chunk`, below), which cuts the fixed per-block memory from
+3.9 to 1.1 GB at the same step time.
 
 ## Harness
 
@@ -231,6 +234,27 @@ Against the spec's floor estimate (A basis plus pair list): the A basis is
 never held for all atoms (only per block), so the floor at large N is the pair
 list, 1.6 KB/atom; the baseline is at 3.3x that, the spec's 2x not met, but its
 other stop condition is: 4.4M atoms >= 1M with no change to speed.
+
+## Applied: GPU row blocks of 4096
+
+`energy_forces_virial_dense` with no `chunk` now takes `default_chunk()`:
+`GPU_CHUNK_NODES` = 4096 on the GPU backend, `CHUNK_NODES` = 16384 elsewhere
+(the CPU was not measured, so it is unchanged). The LAMMPS bundles and
+`ace_jax.jaxmd` size their own blocks (`block_rows_for`) and are unaffected.
+A100, float64, E+F (`default-4096` rows; step = `model_s`):
+
+| cell | atoms | program GB (was) | step ms (was) | us/atom-step (was) |
+|---|--:|--:|--:|--:|
+| bulk | 32768 | 1.12 (4.06) | 145.5 (155.1) | 4.44 (4.73) |
+| bulk | 97336 | 1.44 (4.28) | 434.3 (398.4) | 4.46 (4.09) |
+| crack | 32000 | 1.13 (3.92) | 141.9 | 4.43 |
+| crack | 95749 | 1.41 (4.24) | 385.7 | 4.03 |
+
+The step time moves within the spread over block sizes (6% faster at 32k, 9%
+slower at 97336 bulk, where the old default's 6 blocks of 16223 rows happened
+to be fast; the 95749-atom crack is at the old speed). Check against the old
+block size (`--chunk 16384`): parity 4.0e-14, FD 5.6e-9, NVE drift 2.29e-5
+eV/atom, as the baseline. Largest bulk cell at the default cap: bisection pending.
 
 ## Validation
 

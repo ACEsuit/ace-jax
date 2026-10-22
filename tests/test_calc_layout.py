@@ -4,7 +4,7 @@ Dense (batched outer product per node) was 3-13x faster for forces on
 A4500/A100/H100, and lighter for single-element models, but it pays for the
 (n, K) padding.  "auto" uses dense when the padding is efficient
 (MIN_DENSE_FILL), else sparse.  Memory is not a criterion: the dense model runs
-in blocks of CHUNK_NODES rows, so its peak is bounded per block (Task 6 ruling;
+in blocks of `default_chunk()` rows, so its peak is bounded per block (Task 6 ruling;
 export_lammps keeps a budget test, its bundles are not chunked).  The
 estimate_a_bytes tests stay: export_lammps uses it.
 """

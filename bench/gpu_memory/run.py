@@ -91,7 +91,7 @@ def _energy_step(static, rc, chunk):
 
 def _patch(chunk=None, aa_chunk=None):
     """Harness-only experiments, for this process: `chunk` the dense row-block size
-    (`energy_forces_virial_dense`'s default CHUNK_NODES); `aa_chunk` the DAG product
+    (`energy_forces_virial_dense`'s default, `default_chunk()`); `aa_chunk` the DAG product
     basis in checkpointed column chunks on every backend (`dag_contract`'s chunk=int;
     "auto" chunks on the CPU only).  A calculator compiled before the patch keeps the
     old code (its step is traced on first use)."""
@@ -112,7 +112,7 @@ def measure(case):
     import numpy as np
 
     from ace_jax.calc import ACECalculator
-    from ace_jax.eval.edge_model import CHUNK_NODES
+    from ace_jax.eval.edge_model import default_chunk
 
     _patch(case.get("chunk"), case.get("aa_chunk"))
     dev = jax.devices()[0]
@@ -144,7 +144,7 @@ def measure(case):
             at.get_forces()
     else:
         params, static = eqx.partition(calc.eval_model, eqx.is_array)
-        f = _energy_step(static, calc.cutoff, case.get("chunk") or CHUNK_NODES)
+        f = _energy_step(static, calc.cutoff, case.get("chunk") or default_chunk())
         t0 = time.perf_counter()
         jax.block_until_ready(f(params, u0, st.arrays, K=st.K))
         row["first_call_s"] = time.perf_counter() - t0
@@ -350,7 +350,7 @@ def main(argv=None):
     p.add_argument("--sizes", type=lambda s: [int(x) for x in s.split(",")], default=list(SIZES))
     p.add_argument("--modes", type=lambda s: s.split(","), default=["ef", "e"])
     p.add_argument("--reps", type=int, default=20)
-    p.add_argument("--chunk", type=int, help="experiment: dense row-block size (default CHUNK_NODES)")
+    p.add_argument("--chunk", type=int, help="experiment: dense row-block size (default: default_chunk())")
     p.add_argument("--aa-chunk", type=int, help="experiment: DAG product-basis column chunk on the GPU too")
     p.add_argument("--dump-dir", help="XLA dumps + attribution for --dump-sizes")
     p.add_argument("--dump-sizes", type=lambda s: [int(x) for x in s.split(",")], default=[32768])
