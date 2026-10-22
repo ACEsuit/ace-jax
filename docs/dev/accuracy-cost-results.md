@@ -9,8 +9,8 @@ summary is the Performance page (`docs/user/benchmarks.md`).
 
 - `bench/si_qoi/results/rmse_qoi_cost.png`: force error, QoI error and the cheapest model reaching the target,
   against A100 cost, CPU-node cost and fitted parameters. The docs copy
-  (`docs/user/assets/benchmarks/si_accuracy_cost.png`) is the same figure with `--no-note`, now with the GRACE
-  families; on the page it is the fallback for the interactive version (`si_accuracy_cost.json`,
+  (`docs/user/assets/benchmarks/si_accuracy_cost.png`) is the same figure with `--no-note`; on the page it is the
+  fallback for the interactive version (`si_accuracy_cost.json`,
   `bench/si_qoi/plot_cost_web.py`: the force and QoI panels, families toggled from the legend or by preset).
 - `rmse_qoi_cost_wl.png`: the same for the wL ladder (linear ACE at wL 1, 1.75, 2, 2.5 and order 5).
 - `qoi_heatmap.png`: the per-QoI normalised errors behind the QoI score (`qoi_heatmap.py`).
@@ -186,18 +186,14 @@ python bench/si_qoi/make_cost.py --dtype float64 --source acejax-ace=sulis-gpu-a
     bench/accuracy_cost/results/sulis-gpu.jsonl bench/accuracy_cost/results/sulis-gpu-ace-splined.jsonl \
     $R/sulis-gpu-ace-splined-v2.jsonl $R/sulis-gpu-v2.jsonl $R/sulis-gpu-mace_xl.jsonl \
     $R/sulis-gpu-ace_tab5.jsonl $R/sulis-gpu-ace_tabfork.jsonl $R/sulis-gpu-pace-dev.jsonl $R/sulis-gpu-nep.jsonl $R/sulis-gpu-acejax-auto.jsonl \
-    $R/sulis-gpu-fp32-mixed.jsonl $R/sulis-gpu-fp32-dot-F32_F32_F32.jsonl --allow nep-gpumd:mixed
+    $R/sulis-gpu-fp32-mixed.jsonl $R/sulis-gpu-fp32-dot-F32_F32_F32.jsonl $R/sulis-gpu-grace.jsonl --allow nep-gpumd:mixed
 ROWS=(--row "A100 GPU, µs/atom-step|$RR/cost_sulis_gpu.json|$RR/cost_sulis_gpu.codes.json"
       --row "CPU node (128 cores), µs/atom-step|$RR/cost_sulis_cpu.json|$RR/cost_sulis_cpu.codes.json")
 python bench/si_qoi/plot_cost.py "${ROWS[@]}"
 python bench/si_qoi/plot_cost.py "${ROWS[@]}" --wl --out $RR/rmse_qoi_cost_wl.png
 python bench/si_qoi/plot_cost.py "${ROWS[@]}" --no-note --out docs/user/assets/benchmarks/si_accuracy_cost.png
-# the docs page's figure: the GRACE cost files (cost_sulis_{gpu,cpu}_grace.json, a superset of the ones above) for the
-# static fallback and for its interactive Plotly spec (plot_cost_web.py; rendered by docs/user/javascripts/plotly-figures.js)
-GROWS=(--row "A100 GPU, µs/atom-step|$RR/cost_sulis_gpu_grace.json|$RR/cost_sulis_gpu_grace.codes.json"
-       --row "CPU node (128 cores), µs/atom-step|$RR/cost_sulis_cpu_grace.json|$RR/cost_sulis_cpu_grace.codes.json")
-python bench/si_qoi/plot_cost.py "${GROWS[@]}" --no-note --out docs/user/assets/benchmarks/si_accuracy_cost.png
-python bench/si_qoi/plot_cost_web.py "${GROWS[@]}"     # -> docs/user/assets/benchmarks/si_accuracy_cost.json
+# the docs page's interactive version of that figure (rendered by docs/user/javascripts/plotly-figures.js)
+python bench/si_qoi/plot_cost_web.py "${ROWS[@]}"     # -> docs/user/assets/benchmarks/si_accuracy_cost.json
 ```
 
 Fits, QoIs and timings themselves: `bench/accuracy_cost/` (`sweep.yaml`, `timing.py`, the Sulis job scripts in
@@ -270,5 +266,5 @@ are within seed noise of the longer fit. The ladder was not refitted.
 
 Costs: 21.3 A100-hours of fits (ladder 10.5, FS 1.2, ablations 9.7), plus about 4 for probes, the LAMMPS build and the
 two timing jobs. Rows: `results/metrics.jsonl` (`grace*`, one per seed), QoI scores `results/grace_qoi.json`, timings
-`results/sulis/sulis-{gpu,cpu-128x1}-grace.jsonl`, figure `bench/si_qoi/results/rmse_qoi_cost_grace.png` (cost files
-`cost_sulis_{gpu,cpu}_grace.json`; the published figure and cost files are unchanged).
+`results/sulis/sulis-{gpu,cpu-128x1}-grace.jsonl`, in the main cost files and figures (the reproduce block above; the
+GRACE-only `cost_sulis_*_grace.json` and `rmse_qoi_cost_grace.png` of the first write-up are folded into them).
