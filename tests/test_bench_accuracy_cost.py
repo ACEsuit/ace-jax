@@ -187,7 +187,7 @@ def test_sweep_is_complete_and_measured():
     from accuracy_cost.common import load_sweep
     s = load_sweep()
     assert set(s) == {"ace", "ace_lr", "ace_gp", "pace", "mace", "gap", "ace_pshape", "ace_pshape_lr", "ace_wl", "gap_noglue", "gap_E30", "ace_yace", "ace_tab", "nep",
-                      "grace", "grace_fs", "grace_abl"}
+                      "grace", "grace_fs", "grace_abl", "grace_2l"}
     assert len(s["ace"]) == 7 and all(e["n_B"] > 0 for e in s["ace"])
     assert [(e["order"], e["max_degree"]) for e in s["ace_lr"]] == [(e["order"], e["max_degree"]) for e in s["ace"]]
     nB = [e["n_B"] for e in s["ace"]]
@@ -976,3 +976,23 @@ def test_load_calc_scores_the_noglue_control_like_gap(monkeypatch):
     q = types.SimpleNamespace(potential=types.SimpleNamespace(Potential=lambda param_filename: ("quip", param_filename)))
     monkeypatch.setitem(sys.modules, "quippy", q)
     assert load_calc("gap_noglue", "x.xml") == load_calc("gap", "x.xml") == ("quip", "x.xml")
+
+
+def test_grace_2l_inputs_and_pair_styles(monkeypatch):
+    """A grace_2l entry trains gracemaker's own 2L preset (not grace_custom) at the shared cutoff, and its LAMMPS
+    export runs as grace/2l/kk on the GPU and grace/2l/cpu/kk (Kokkos, threads per rank) on the CPU."""
+    from accuracy_cost.common import RCUT
+    from accuracy_cost.fit_grace import input_yaml, lammps_model, resolve
+    from scaling.run_lammps import _pair, kokkos_args
+    e = resolve("grace_2l", "2l_small")
+    y = input_yaml(e, 1)
+    assert y["cutoff"] == RCUT and y["potential"]["preset"] == "GRACE_2LAYER_latest"
+    assert y["potential"]["kwargs"]["indicator_lmax"] == 1 and y["potential"]["param_dtype"] == "float64"
+    assert "custom" not in y["potential"]
+    assert lammps_model({"family": "grace_2l", "kokkos_npz": "/x/m.npz"}) == ("grace-2l", "/x/m.npz")
+    monkeypatch.delenv("GRACE_CHUNKSIZE", raising=False)
+    assert _pair("grace-2l", "m.npz", ["Si"], "gpu").startswith("pair_style grace/2l/kk\n")
+    assert _pair("grace-2l", "m.npz", ["Si"], "cpu").startswith("pair_style grace/2l/cpu/kk\n")
+    monkeypatch.setenv("GRACE_CHUNKSIZE", "1024")
+    assert _pair("grace-2l", "m.npz", ["Si"], "gpu").startswith("pair_style grace/2l/kk chunksize 1024\n")
+    assert kokkos_args("grace-2l", "cpu", 2)[:4] == ["-k", "on", "t", "2"]

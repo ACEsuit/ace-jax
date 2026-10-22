@@ -15,9 +15,9 @@
 #SBATCH --output=%x-%j.out
 set -euo pipefail
 ROOT=${BENCH_ROOT:-$HOME/bench-scaling}
-cd "$ROOT/ace-jax-grace/bench"
+cd "$ROOT/${GRACE_TREE:-ace-jax-grace}/bench"
 FAM=$1 SIZE=$2; shift 2
-export PYTHONPATH=$ROOT/ace-jax-grace/bench ACEJAX_AC_ROOT=$ROOT/ac TF_CPP_MIN_LOG_LEVEL=1
+export PYTHONPATH=$ROOT/${GRACE_TREE:-ace-jax-grace}/bench ACEJAX_AC_ROOT=$ROOT/ac TF_CPP_MIN_LOG_LEVEL=1
 export ACEJAX_AC_GPU="$(nvidia-smi --query-gpu=name --format=csv,noheader | head -1)"
 echo "job $SLURM_JOB_ID grace $FAM $SIZE seeds ${*:-0 1 2} on $(hostname) $(date -Is)"; nvidia-smi --query-gpu=name,memory.total --format=csv
 "$ROOT/venv-grace/bin/python" -m accuracy_cost.fit_grace "$FAM" "$SIZE" --seed ${@:-0 1 2}
