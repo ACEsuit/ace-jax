@@ -1,5 +1,76 @@
 # Changelog
 
+## 0.4.1 (2026-10-22)
+
+**Highlights.** Linear ACE runs in LAMMPS on CPUs with a C++ kernel, 10 to 23
+times faster than the compiled JAX program: `aj export --platform cpu --ffi`.
+The Performance page has an interactive accuracy-cost figure, and the
+benchmark adds GRACE. Long MAP fits and large `--learn-radial` fits on a GPU no
+longer stall or run out of memory.
+
+**Upgrading from 0.4.0.** Saved models and bundles are unchanged.
+- The `lammps` extra requires lammps-jax 0.2.1 or later. For the C++ kernel,
+  build the lammps-jax LAMMPS plugin at 0.2.1 or later as well.
+- A MAP fit can stop its Newton polish sooner (see Fixed). Its parameters agree
+  with 0.4.0 to approximately 1e-7.
+
+### Added
+
+- **A C++ kernel for linear ACE in CPU LAMMPS bundles.**
+  `export_lammps(..., platform="cpu", ffi=True)` and `aj export --platform cpu
+  --ffi` put one XLA FFI custom call in the bundle in place of the compiled JAX
+  program (`ace_jax.eval.ffi`). Positions and the LAMMPS neighbour list go in;
+  atom energies and forces come out.
+  - On a 128-core node (Sulis, 4,096 Si atoms, one MPI rank per core) it is 10 to 23
+    times faster than the XLA bundle; linear ACE o4d20 costs 3.29 µs/atom-step
+    (ML-PACE: 5.31).
+  - It needs a linear ACE model, float64 and the matrix layout. It tabulates
+    the radial basis in r: energies agree with the calculator to approximately
+    1e-12 relative, and forces to 1.5e-8 of the largest force.
+  - The export compiles the kernel on first use with your C++17 compiler
+    (`$CXX`, `c++`, `g++` or `clang++`; flags `-O3 -march=native`, or
+    `--ffi-flags` / `ACEJAX_FFI_FLAGS`) and keeps it in a cache
+    (`~/.cache/ace-jax/ffi`, or `ACEJAX_FFI_CACHE`). The bundle records it as
+    `ace_jax.ffi`, and `aj export` prints the `LAMMPS_JAX_FFI_HANDLERS` value
+    that lets LAMMPS load it. Run LAMMPS with `newton on`.
+  - `jax.grad` and `jax.vjp` with respect to positions work through the
+    kernel's energy function.
+  - See "CPU kernel" in [Export a model to LAMMPS](docs/user/howto/lammps.md).
+
+### Changed
+
+- **The `lammps` extra requires lammps-jax 0.2.1.** Its LAMMPS plugin
+  registers custom calls for the CPU, which the C++ kernel needs.
+- **Dense rows run in blocks of 4,096 on the GPU** (`energy_forces_virial_dense`
+  without `chunk`; 16,384 elsewhere, unchanged). Linear ACE o4d20 with 32,768
+  atoms on an A100 uses 1.12 GB for the program, against 4.06 GB before. LAMMPS
+  bundles and `ace_jax.jaxmd` size their own blocks and are unchanged.
+
+### Fixed
+
+- **The MAP Newton polish could step for hours.** With the gradient floor, it
+  kept stepping while each step gained less than the evidence's roundoff
+  (observed: 10 hours at o4d20). It now stops after three such steps in a row
+  and reports `stalled`. The ARD evidence polish is unchanged.
+- **`--learn-radial` ran out of GPU memory at large bases.** Each radial round
+  kept the compiled constants of its hyperparameter re-fit (about 0.7 GB at
+  o4d20), until an A100 ran out. They are now released after each round, at
+  approximately 11% more time per round.
+
+### Benchmarks
+
+- The Performance page has an interactive version of the accuracy-cost figure:
+  presets, a legend that shows and hides families, and the code of each timing
+  on hover.
+- GRACE-1L and GRACE-FS (gracemaker) are in the silicon benchmark. GRACE-1L
+  reaches the target only at its largest size, at 4 to 27 times the cost of
+  linear ACE or MACE c16L0.
+- The figure shows linear ACE with and without the C++ kernel. All figures
+  come from one CPU and one GPU cost file, built by the reproduce block of
+  `docs/dev/accuracy-cost-results.md`.
+- A GPU memory report (`docs/dev/gpu-memory-results.md`): linear ACE o4d20 runs
+  4.4 million atoms on one A100-40GB.
+
 ## 0.4.0 (2026-10-19)
 
 **Highlights.** float32 is now a real float32 calculation in LAMMPS bundles
