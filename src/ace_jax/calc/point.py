@@ -32,7 +32,7 @@ AUTO_MIN_EDGES = 20_000
 # layout="auto": the dense (n, K) layout -- A per node by a batched outer product,
 # 3-13x faster forces on A4500/A100/H100 -- when the neighbour padding is
 # efficient (edges / (n * K) >= MIN_DENSE_FILL); otherwise the sparse edge list.
-# Memory is not a criterion: the dense model runs in blocks of CHUNK_NODES rows,
+# Memory is not a criterion: the dense model runs in blocks of `default_chunk()` rows,
 # so its peak is bounded per block.  (dense_budget_bytes is for export_lammps,
 # whose layout="auto" sizes one bundle block against it.)
 MIN_DENSE_FILL = 0.5

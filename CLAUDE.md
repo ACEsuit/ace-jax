@@ -36,6 +36,7 @@ parity CI jobs. User docs: `README.md`. Agent-facing usage guide:
   - `acegp_cantor/run.py`: the research fit driver.
   - `scaling/`: the benchmark suite, tested by `tests/test_bench_scaling.py`.
   - `learn_radial/`.
+  - `gpu_memory/`: peak device memory of the force call by stage (XLA dump attribution), max system size by bisection, variant checks; `docs/dev/gpu-memory-results.md`, tested by `tests/test_bench_gpu_memory.py`.
 - `coupling/`: the `ace-jax-coupling` distribution.
   - `julia/src/ETCouple.jl`: the C ABI over EquivariantTensors (fork rev pinned in `julia/Project.toml` `[sources]`); `julia/build.jl` compiles it with JuliaC (`--trim=safe`, Julia 1.13); `julia/reference/` is the unpatched-upstream oracle.
   - `python/`: the ctypes package `ace_jax_coupling` and its wheel hook; `tools/`: bundle check, trace-based pruning, clean-env wheel test.

@@ -35,6 +35,18 @@ import jax.numpy as jnp
 EDGE_A_KINDS = ("gather", "matmul")
 
 CHUNK_NODES = 16384   # dense rows per block: peak memory ~ block, not N (spec, component 2)
+# On a GPU, 4096: the block's temp is ~120 KB/row at o4d20 (the DAG product basis's
+# order-2 cotangent and the per-pair radials), so 16384 rows held 4.1 GB, 4096 holds
+# 1.1 GB, at the same step time within the spread over block sizes (A100, float64:
+# 145 vs 154 ms at 32768 atoms, 432 vs 393 ms at 97336; docs/dev/gpu-memory-results.md).
+# Other backends keep CHUNK_NODES (not measured there).
+GPU_CHUNK_NODES = 4096
+
+
+def default_chunk():
+    """The dense row-block size `energy_forces_virial_dense` uses when given none:
+    GPU_CHUNK_NODES on the GPU backend, else CHUNK_NODES.  Resolved at trace time."""
+    return GPU_CHUNK_NODES if jax.default_backend() == "gpu" else CHUNK_NODES
 
 
 def _two_sum(a, b):
@@ -332,14 +344,14 @@ class EdgeSiteModel(eqx.Module):
         block = jax.checkpoint(lambda a: self.site_energies_dense(*a))
         return jax.lax.map(block, xs).reshape(-1)[:n]
 
-    def energy_forces_virial_dense(self, rij, zi, zj, idx, mask, node_z, chunk=CHUNK_NODES,
+    def energy_forces_virial_dense(self, rij, zi, zj, idx, mask, node_z, chunk=None,
                                    rev=None, return_edge_grad=False):
         """`energy_forces_virial` for the dense layout: rij (n, K, 3), zi / zj /
         idx (neighbour index) / mask (n, K).  Same strain trick for the virial.
 
-        Rows are evaluated in blocks of `chunk` (lax.map; jax.checkpoint so the
-        backward pass recomputes a block rather than storing all of them): peak
-        memory scales with the block.  A site energy depends only on its own row,
+        Rows are evaluated in blocks of `chunk` (None: `default_chunk()`; lax.map;
+        jax.checkpoint so the backward pass recomputes a block rather than storing
+        all of them): peak memory scales with the block.  A site energy depends only on its own row,
         so blocks are independent; padding rows are fully masked.
 
         `rev` (n, K), from `nlist.reverse_slots`, is optional and independent of
@@ -351,6 +363,7 @@ class EdgeSiteModel(eqx.Module):
         itself (the skin list's step, `calc.skin.step`, which gathers in its own
         slot space); `rev` is then ignored."""
         n = mask.shape[0]
+        chunk = default_chunk() if chunk is None else chunk
 
         def total(r, eps):
             sym = 0.5 * (eps + eps.T)

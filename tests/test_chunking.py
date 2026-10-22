@@ -45,3 +45,12 @@ def test_chunked_equals_unchunked(path, chunk):
     np.testing.assert_allclose(E1, E0, rtol=1e-13)
     np.testing.assert_allclose(F1, F0, rtol=1e-12, atol=1e-12)
     np.testing.assert_allclose(V1, V0, rtol=1e-12, atol=1e-12)
+
+
+def test_default_chunk_by_backend(monkeypatch):
+    """GPU: GPU_CHUNK_NODES rows per block (docs/dev/gpu-memory-results.md); other backends CHUNK_NODES."""
+    from ace_jax.eval import edge_model
+    monkeypatch.setattr(edge_model.jax, "default_backend", lambda: "gpu")
+    assert edge_model.default_chunk() == edge_model.GPU_CHUNK_NODES == 4096
+    monkeypatch.setattr(edge_model.jax, "default_backend", lambda: "cpu")
+    assert edge_model.default_chunk() == edge_model.CHUNK_NODES == 16384
