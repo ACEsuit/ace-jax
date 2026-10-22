@@ -19,7 +19,8 @@ By the spec's stop rule (max atoms >= 1M with no speed regression) Phase 2 does
 not start; the measured headroom is below. One measured option is applied: on
 the GPU the dense rows now run in blocks of 4096, not 16384
 (`edge_model.default_chunk`, below), which cuts the fixed per-block memory from
-3.9 to 1.1 GB at the same step time.
+3.9 to 1.1 GB at the same step time (the largest reliable system, 3.65M
+atoms at the default cap, is unchanged).
 
 ## Harness
 
@@ -254,7 +255,15 @@ The step time moves within the spread over block sizes (6% faster at 32k, 9%
 slower at 97336 bulk, where the old default's 6 blocks of 16223 rows happened
 to be fast; the 95749-atom crack is at the old speed). Check against the old
 block size (`--chunk 16384`): parity 4.0e-14, FD 5.6e-9, NVE drift 2.29e-5
-eV/atom, as the baseline. Largest bulk cell at the default cap: bisection pending.
+eV/atom, as the baseline.
+
+It does not raise the largest system. At the default cap, 3,652,264 atoms runs
+at 18.82 GB (19.55 GB with 16384-row blocks), but 3,944,312, 4,410,944,
+4,574,296 and 4,741,632 atoms are out of memory on one contiguous 14.2-14.7 GiB
+temp request (the old default ran 4,410,944 once and failed it once). At that
+scale the per-atom terms dominate and the failure point is set by allocator
+fragmentation, so 3.65M atoms is the reliable size for both block sizes;
+`XLA_PYTHON_CLIENT_MEM_FRACTION=0.95` is the lever there.
 
 ## Validation
 
