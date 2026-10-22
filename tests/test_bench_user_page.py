@@ -308,3 +308,23 @@ def test_committed_cost_files_have_no_sizeless_aliases():
     for d in ("cpu", "gpu"):
         names = json.loads((ROOT / "bench" / "si_qoi" / "results" / f"cost_sulis_{d}.json").read_text())
         assert not {"GAP", "GAPE30", "GAPnoglue"} & set(names), d
+
+
+def test_make_cost_ffi_rows_are_their_own_line(tmp_path):
+    """make_cost.py: a timing row of an FFI kernel bundle (`ffi`) is the ACEffi line, not linear ACE's, and its
+    code is labelled ffi, so the interactive figure's hover tells the kernel from the XLA bundle."""
+    import json
+    import subprocess
+    rows = [{"code": "acejax-ace", "family": "ace", "size": "o4d20", "dtype": "float64", "mode": "lammps", "ffi": True},
+            {"code": "acejax-ace", "family": "ace", "size": "o4d20", "dtype": "float64", "mode": "lammps"}]
+    f = tmp_path / "t.jsonl"
+    f.write_text("".join(json.dumps(r | {"mode": "parity", "status": "parity_ok"}) + "\n"
+                         + json.dumps(r | {"status": "ok", "atom_steps_per_s": 1e6 * (2 if r.get("ffi") else 1)}) + "\n"
+                         for r in rows))
+    out = tmp_path / "cost.json"
+    subprocess.run([sys.executable, str(ROOT / "bench" / "si_qoi" / "make_cost.py"), str(f), "--out", str(out)],
+                   check=True, capture_output=True)
+    cost, codes = json.loads(out.read_text()), json.loads(out.with_suffix(".codes.json").read_text())
+    assert cost == {"ACE_o4d20": 1.0, "ACEffi_o4d20": 0.5}
+    assert codes["ACEffi_o4d20"].startswith("acejax-ace float64 lammps ffi")
+    assert " ffi" not in codes["ACE_o4d20"]
