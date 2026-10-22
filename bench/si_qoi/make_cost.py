@@ -60,7 +60,7 @@ def main():
         us = 1e6 / r["atom_steps_per_s"]
         if us < best.get(name, float("inf")):
             best[name], fam_of[name], code[name] = us, fam, (f'{r["code"]} {r["dtype"]} {r["mode"]}' + (f' dag:{r["aa_dag"]}' if r.get("aa_dag") else "")
-                                          + f' [{r["_file"]}]')
+                                          + (" ffi" if r.get("ffi") else "") + f' [{r["_file"]}]')
     for n in list(best):                    # seeded families (plot_cost.SEEDED): seed 0 is timed for its size
         base, k = seed_split(n)             # only theirs: GAP's sizes (s9000, ...) read as seed suffixes too
         if fam_of[n] in SEEDED and k is not None and base not in best:

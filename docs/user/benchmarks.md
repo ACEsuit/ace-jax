@@ -110,6 +110,10 @@ against 4.13 µs/atom-step).
   library with `juliac --trim` and runs in LAMMPS with the ACEpotentials.jl
   `pair_style ace` plugin. These results are for the CPU only, with 128 MPI
   ranks.
+- **ace-jax C++ kernel.** The same ace-jax bundles, with the
+  [C++ kernel](howto/lammps.md#cpu-kernel) in place of the compiled JAX
+  program. These results are for the CPU only, with 128 MPI ranks. The
+  kernel uses one thread for each rank.
 - **ML-PACE** on the GPU is the LAMMPS development version with the 2026
   `pace/kk` GPU update.
 - **MACE** runs in LAMMPS with Symmetrix and, separately, with

@@ -218,9 +218,12 @@ chain-form rows are kept as `sulis-gpu-fp32-dot-F32_F32_F32.chain.jsonl`).
 R=bench/accuracy_cost/results/sulis; RR=bench/si_qoi/results
 grep -h '"code": "mlpace-mixed"' $R/sulis-gpu-fp32-o4d*.jsonl > $R/sulis-gpu-fp32-mixed.jsonl   # the mixed-precision line
 (cd bench && python -m accuracy_cost.dag_auto)
+CPU=$(ls $R/sulis-cpu*.jsonl | grep -v -e smoke -e ace_yace -e pacetab-check -e "ace_tab\.jsonl" -e ace_tab2 \
+      -e ace_tab3 -e dagpair -e ffi-xla)          # ffi-xla: the C++ kernel's same-node XLA control, not plotted
 python bench/si_qoi/make_cost.py --dtype float64 --source acejax-ace=sulis-cpu-128x1-acejax-auto --out $RR/cost_sulis_cpu.json \
-    $(ls $R/sulis-cpu*.jsonl | grep -v -e smoke -e ace_yace -e pacetab-check -e "ace_tab\.jsonl" -e ace_tab2 \
-      -e ace_tab3 -e dagpair -e ffi-xla)
+    $(echo "$CPU" | grep -v grace)
+python bench/si_qoi/make_cost.py --dtype float64 --source acejax-ace=sulis-cpu-128x1-acejax-auto \
+    --out $RR/cost_sulis_cpu_grace.json $CPU     # the docs page's CPU row: the same rows plus GRACE's
 python bench/si_qoi/make_cost.py --dtype float64 --source acejax-ace=sulis-gpu-acejax-auto --out $RR/cost_sulis_gpu.json \
     bench/accuracy_cost/results/sulis-gpu.jsonl bench/accuracy_cost/results/sulis-gpu-ace-splined.jsonl \
     $R/sulis-gpu-ace-splined-v2.jsonl $R/sulis-gpu-v2.jsonl $R/sulis-gpu-mace_xl.jsonl \
