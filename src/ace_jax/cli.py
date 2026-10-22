@@ -545,7 +545,16 @@ def cmd_export(a):
     fmt = a.format or _EXPORT_FORMATS.get(out.suffix)
     if fmt is None:
         raise UsageError(f"{a.out}: give --format yace|lammps, or an --out ending in .yace or .json")
+    if fmt == "yace" and a.aa_dag != "auto":
+        raise UsageError("--aa-dag sets a lammps-jax bundle's product basis; a .yace needs none")
     model, meta, extra = load(a.model)
+    aa_dag = None if a.aa_dag == "chain" else a.aa_dag
+    if aa_dag == "cueq" and fmt == "lammps":      # refuse before sizing anything
+        from .eval import cueq
+        try:
+            cueq.check_export(model, a.platform)
+        except (ValueError, cueq.CueqUnavailable) as e:
+            raise UsageError(str(e)) from None
     if out.parent and str(out.parent) != ".":
         out.parent.mkdir(parents=True, exist_ok=True)
     if fmt == "yace":
@@ -592,10 +601,23 @@ def cmd_export(a):
     b = export_lammps(model, meta, out, max_atoms=cap["max_atoms"], max_edges=cap["max_edges"],
                       k_dense=cap["k_dense"], max_owned=cap["max_owned"], max_neighbors=cap["max_neighbors"],
                       dtype=a.dtype, layout=a.layout, type_elements=els, platform=a.platform,
-                      precision_structure=at if a.dtype != "float64" else None)
+                      precision_structure=at if a.dtype != "float64" else None, aa_dag=aa_dag)
     per = "" if procs is None else f", per MPI rank of {'x'.join(map(str, procs))}"
     print(f"lammps-jax: layout {b['ace_jax']['layout']}, {a.dtype}, {a.platform or 'cuda'}, sized for {len(at)} "
           f"atoms of {a.structure}{per} (max_atoms {cap['max_atoms']}, neighbour slots {cap['k_dense']}) -> {out}")
+    if b["ace_jax"].get("cueq"):
+        from .eval import cueq
+        env = cueq.run_env(b["ace_jax"]["cueq"])
+        ld = env.pop("LD_LIBRARY_PATH")
+        print(f"cueq kernels: replay {env['FFI_REPLAY_FILE']}, NVRTC cache {env['CUEQUIVARIANCE_OPS_NVRTC_CACHE_DIR']} "
+              "(same GPU architecture only); run LAMMPS with")
+        for k, v in env.items():
+            print(f'  export {k}="{v}"')
+        print(f'  export LD_LIBRARY_PATH="{ld}:$LD_LIBRARY_PATH"   # libcue_ops and the pip CUDA libraries')
+        shim = env["LAMMPS_JAX_FFI_HANDLERS"].split("=", 1)[1].rsplit(":", 1)[0]
+        if not pathlib.Path(shim).is_file():
+            print(f"note: build the replay shim first: gcc -shared -fPIC -O2 -o {shim} "
+                  f"{pathlib.Path(shim).with_suffix('.c')} -ldl -lpthread -l:libffi.so.8")
     return b
 
 
@@ -714,6 +736,10 @@ def _parser():
     exp.add_argument("--procs", default=None,
                      help="lammps: the LAMMPS processor grid px,py,pz; sizes one MPI rank's buffers "
                           "(run LAMMPS with `processors px py pz`)")
+    exp.add_argument("--aa-dag", default="auto", choices=["auto", "chain", "greedy", "prefix", "cueq"],
+                     help="lammps: the product basis form: auto (greedy for large bases, else chain), chain, the "
+                          "DAG plans greedy / prefix, or cueq (NVIDIA cuequivariance kernels; CUDA, one species, "
+                          "the cueq extra and lammps-jax's contrib/ffi-replay via LAMMPS_JAX_CONTRIB)")
     exp.add_argument("--type-elements", default=None,
                      help="lammps: comma-separated element of each LAMMPS atom type, in type order "
                           "(default: the model's element order)")

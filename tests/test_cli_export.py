@@ -79,3 +79,32 @@ def test_export_lammps_cpu_bundle_per_rank(tmp_path):
     full, rank = (json.loads((tmp_path / f).read_text()) for f in ("all.json", "rank.json"))
     assert full["export_info"]["platform"] == rank["export_info"]["platform"] == "cpu"
     assert rank["contract"]["max_atoms"] < full["contract"]["max_atoms"]   # one rank's subdomain + ghosts
+
+
+def test_export_aa_dag_cueq_refuses_a_two_species_model(tmp_path, capsys):
+    at = bulk("Si", "diamond", 5.43, cubic=True)
+    write(tmp_path / "start.xyz", at, format="extxyz")
+    with pytest.raises(SystemExit) as e:
+        main(["export", "--model", str(FIXTURE_DIR / "sige_nofit.npz"), "--out", str(tmp_path / "m.json"),
+              "--structure", str(tmp_path / "start.xyz"), "--aa-dag", "cueq"])
+    assert e.value.code == 2 and "one species" in capsys.readouterr().err
+    assert not (tmp_path / "m.json").exists()
+
+
+@pytest.mark.parametrize("flag,mode", [(None, "auto"), ("chain", None), ("greedy", "greedy"), ("prefix", "prefix")])
+def test_export_aa_dag_flag(tmp_path, monkeypatch, flag, mode):
+    require_optional("lammps_jax")
+    from ace_jax.export import lammps as lx
+    seen = {}
+    monkeypatch.setattr(lx, "export_lammps", lambda *a, **kw: seen.update(kw) or {"ace_jax": {"layout": "sparse"}})
+    at = bulk("Si", "diamond", 5.43, cubic=True)
+    write(tmp_path / "start.xyz", at, format="extxyz")
+    main(["export", "--model", str(MODEL), "--out", str(tmp_path / "m.json"), "--structure",
+          str(tmp_path / "start.xyz"), *(["--aa-dag", flag] if flag else [])])
+    assert seen["aa_dag"] == mode
+
+
+def test_export_aa_dag_is_for_a_bundle(tmp_path, capsys):
+    with pytest.raises(SystemExit) as e:
+        main(["export", "--model", str(MODEL), "--out", str(tmp_path / "m.yace"), "--aa-dag", "greedy"])
+    assert e.value.code == 2 and "--aa-dag" in capsys.readouterr().err

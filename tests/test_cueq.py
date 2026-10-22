@@ -220,3 +220,52 @@ def test_cueq_float32_matches_the_float32_reference():
     (e0, f0), (e1, f1) = out
     assert abs(e1 - e0) < 1e-5 * abs(e0)
     assert np.abs(f1 - f0).max() <= 1e-4
+
+
+_EXPORT = """
+import sys, jax
+jax.config.update("jax_enable_x64", True)
+from ace_jax import load
+from ace_jax.export.lammps import export_lammps
+m, meta, _ = load(sys.argv[1])
+b = export_lammps(m, meta, sys.argv[2], max_atoms=256, max_edges=256 * 32, k_dense=32, max_owned=200,
+                  layout="dense", aa_dag="cueq")
+print(b["ace_jax"]["block_rows"])
+"""
+
+
+def test_cueq_bundle_ships_its_replay_and_nvrtc_cache(tmp_path):
+    """A cueq bundle on the GPU: the export (in a fresh process: plan handles are registry indices) writes
+    <bundle>.ffi-replay and fills <bundle>.cueq-cache, its own NVRTC cache (Review Focus 3)."""
+    _gpu()
+    pytest.importorskip("lammps_jax")
+    import json
+    import os
+    import subprocess
+    import sys
+    from conftest import FIXTURE_DIR
+    from ace_jax.eval import cueq
+    try:
+        cueq.recorder()
+    except cueq.CueqUnavailable as e:
+        pytest.skip(str(e))
+    path = tmp_path / "si.json"
+    env = {k: v for k, v in os.environ.items() if k != "CUEQUIVARIANCE_OPS_NVRTC_CACHE_DIR"}
+    p = subprocess.run([sys.executable, "-c", _EXPORT, str(FIXTURE_DIR / "si_fitted.npz"), str(path)],
+                       capture_output=True, text=True, env={**env, "XLA_PYTHON_CLIENT_PREALLOCATE": "false"})
+    assert p.returncode == 0, p.stderr[-3000:]
+    rec = json.loads(path.read_text())["ace_jax"]
+    assert rec["aa_dag"] == "cueq" and int(p.stdout.split()[-1]) == 200          # capped at the rows
+    assert rec["cueq"]["replay"] == str(tmp_path / "si.ffi-replay") and (tmp_path / "si.ffi-replay").is_file()
+    assert (tmp_path / "si.ffi-replay").read_bytes()[:8] == b"FFIRPLY1"
+    assert rec["cueq"]["cache"] == str(tmp_path / "si.cueq-cache") and any((tmp_path / "si.cueq-cache").iterdir())
+
+
+def test_run_env_names_what_lammps_needs():
+    from ace_jax.eval import cueq
+    rec = {"handlers": "uniform_1d_cuda=/x/ffi_replay_shim.so:ffi_replay_handler", "replay": "/b/si.ffi-replay",
+           "cache": "/b/si.cueq-cache"}
+    env = cueq.run_env(rec)
+    assert env["LAMMPS_JAX_FFI_HANDLERS"] == rec["handlers"] and env["FFI_REPLAY_FILE"] == rec["replay"]
+    assert env["CUEQUIVARIANCE_OPS_NVRTC_CACHE_DIR"] == rec["cache"]
+    assert env["FFI_REPLAY_LIB"].endswith("libcue_ops_jax.so") and "LD_LIBRARY_PATH" in env

@@ -9,6 +9,14 @@ nothing here imports it at module level."""
 CHUNK = 1000
 U = 32
 TARGET = "uniform_1d_cuda"
+# the bundle's dense / matrix rows per block (`export.lammps.cueq_block_rows_for`): the first that fits the memory
+# budget, then halvings to MIN_BLOCK_ROWS.  cueq wants large blocks: at the DAG's choice (1024 rows at o4d20) it is
+# no faster than the DAG, at 8192 1.95x the best DAG (Sulis A100); 8192 ran out of an RTX 4000 Ada's 20 GB at o4d20
+CUEQ_BLOCK_ROWS = (8192, 4096)
+# the uniform_1d plan compile (recorded at export) and execute symbols of libcue_ops_jax, as lammps-jax's
+# contrib/ffi-replay shim replays them
+COMPILE, EXECUTE = "compile_uniform_1d_ctypes", "execute_uniform_1d_cuda_handler"
+SHIM = "ffi_replay_shim.so"                   # built next to the recorder (contrib/ffi-replay/README.md)
 
 
 class CueqUnavailable(ImportError):
@@ -41,17 +49,20 @@ class _Static:
         return self is o
 
 
-def check_supported(model):
+def check_supported(model, folded=True):
+    """Refuse a model aa_dag="cueq" cannot evaluate.  folded=False: also accept the unfolded model (`lean` folds
+    it), counting its species from WB."""
     from .model import ACEModel
     if not isinstance(model, ACEModel):
         raise ValueError(f"aa_dag='cueq' needs a linear ACEModel, got {type(model).__name__}")
-    if not model.folded:
+    if folded and not model.folded:
         raise ValueError("aa_dag='cueq' needs the folded (lean) model: apply lean() first")
     if getattr(model, "rnl_embedding", None) is not None:  # TODO(Task 8): remove with TrACE support
         raise ValueError("aa_dag='cueq' does not support species-embedding (TrACE) models yet: TrACE support: not yet")
-    if model.ctilde.shape[1] != 1:
+    nz = (model.ctilde if model.folded else model.WB).shape[1]
+    if nz != 1:
         raise ValueError("aa_dag='cueq' supports one species, or species-embedding (TrACE) models; "
-                         f"this categorical model has {model.ctilde.shape[1]} species")
+                         f"this categorical model has {nz} species")
 
 
 def n_A_of(specs):
@@ -151,3 +162,113 @@ def with_cueq(model):
     plan = lambda specs: _Static(polynomial(specs, coef))
     return dataclasses.replace(model, aa_dag=None, blk_aa_dag=None, cueq_plan=plan(model.aa_specs),
                                blk_cueq_plan=None if model.blk_aa_specs is None else plan(model.blk_aa_specs))
+
+
+# ------------------------------------------------------------------ lammps-jax bundles (export.lammps)
+def check_export(model, platform=None, cueq=True):
+    """The export-time refusals for aa_dag="cueq" (`export.lammps.export_lammps`, `aj export`), before any work:
+    the model (`check_supported`, on the model as given: `lean` folds it later), a non-CUDA `platform`, then
+    (`cueq`) cueq itself.  The model check comes first so that it needs no cueq."""
+    check_supported(model, folded=False)
+    if platform not in (None, "cuda"):
+        raise ValueError(f"aa_dag='cueq' runs cuequivariance's CUDA kernels: it needs platform='cuda', got {platform!r}")
+    if cueq:
+        require()
+
+
+def version():
+    import cuequivariance
+    return cuequivariance.__version__
+
+
+def recorder():
+    """lammps-jax's contrib/ffi-replay recorder (`ffi_replay_record`, not part of the lammps-jax package): from
+    $LAMMPS_JAX_CONTRIB (that directory), else contrib/ffi-replay of the lammps-jax checkout the installed package
+    runs from (an editable install).  One module per process: its RECORDS are the process's plan compiles."""
+    import importlib.util
+    import os
+    import pathlib
+    import sys
+    if "ffi_replay_record" in sys.modules:
+        return sys.modules["ffi_replay_record"]
+    d = os.environ.get("LAMMPS_JAX_CONTRIB")
+    if d is None:
+        try:
+            import lammps_jax
+            d = pathlib.Path(lammps_jax.__file__).resolve().parents[2] / "contrib" / "ffi-replay"
+        except ImportError:
+            d = None
+    f = None if d is None else pathlib.Path(d) / "ffi_replay_record.py"
+    if f is None or not f.is_file():
+        raise CueqUnavailable("a cueq bundle records its plan compiles with lammps-jax's contrib/ffi-replay "
+                              "recorder, which is not in the lammps-jax package: set LAMMPS_JAX_CONTRIB to the "
+                              "contrib/ffi-replay directory of a lammps-jax checkout"
+                              + ("" if f is None else f" (no {f})"))
+    spec = importlib.util.spec_from_file_location("ffi_replay_record", f)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    sys.modules["ffi_replay_record"] = mod
+    return mod
+
+
+def _ops_library():
+    import cuequivariance_ops_jax._common as cc
+    return cc.library
+
+
+def install_recorder():
+    """Install the recorder on libcue_ops_jax's plan compile (before any cueq lowering in this process); returns
+    the recorder module.  One bundle per process: the recorded handles are plan-registry indices, which the
+    replay reproduces only from a fresh registry (`check_replayable`), so a recorder already holding plans (an
+    earlier export in this process) is refused."""
+    rec = recorder()
+    if rec.RECORDS:
+        raise RuntimeError(f"the ffi-replay recorder already holds {len(rec.RECORDS)} cueq plans from an earlier "
+                           "export: export one cueq bundle per process")
+    rec.install(_ops_library(), COMPILE)
+    return rec
+
+
+def check_replayable(records):
+    """Raise unless replaying `records` (the recorder's [(args, handle)]) from an empty plan registry reproduces
+    their handles: registry indices count from 0 and a recompiled identical plan returns its old handle, so a
+    handle must be one seen before or the next new one.  A first handle above 0 means this process compiled
+    cueq plans before the recorder was installed (e.g. a cueq ACECalculator)."""
+    top = -1
+    for _, h in records:
+        if h > top + 1:
+            raise RuntimeError(f"cueq plan handle {h} after {top + 1} recorded plans: this process compiled cueq "
+                               "plans before the export, which a LAMMPS replay cannot reproduce; export the "
+                               "bundle in a fresh process")
+        top = max(top, h)
+
+
+def shim(rec):
+    """The replay shim the bundle's LAMMPS_JAX_FFI_HANDLERS names: next to the recorder."""
+    import pathlib
+    return pathlib.Path(rec.__file__).resolve().parent / SHIM
+
+
+def handlers(shim_path):
+    return f"{TARGET}={shim_path}:ffi_replay_handler"
+
+
+def run_env(record):
+    """The environment LAMMPS needs for a cueq bundle, from its `ace_jax.cueq` record: {name: value}, plus the
+    directories LD_LIBRARY_PATH needs (libcue_ops and the pip CUDA libraries nvrtc / cublas, which libcue_ops
+    finds by no rpath) under "LD_LIBRARY_PATH" (prepend them)."""
+    import importlib.util
+    import pathlib
+    env = {"LAMMPS_JAX_FFI_HANDLERS": record["handlers"], "FFI_REPLAY_FILE": record["replay"],
+           "CUEQUIVARIANCE_OPS_NVRTC_CACHE_DIR": record["cache"]}
+    libs = []
+    try:
+        jl = pathlib.Path(importlib.util.find_spec("cuequivariance_ops_jax").origin).parent / "lib"
+        env["FFI_REPLAY_LIB"] = str(jl / "libcue_ops_jax.so")
+        site = jl.parent.parent
+        libs = [str(site / "cuequivariance_ops" / "lib")] + [str(site / "nvidia" / d / "lib")
+                                                             for d in ("cuda_nvrtc", "cublas")]
+    except (ImportError, AttributeError, TypeError):
+        env["FFI_REPLAY_LIB"] = "<site-packages>/cuequivariance_ops_jax/lib/libcue_ops_jax.so"
+    env["LD_LIBRARY_PATH"] = ":".join(libs)
+    return env

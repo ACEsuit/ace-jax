@@ -27,6 +27,7 @@ Needs lammps-jax (not on PyPI yet): `uv pip install -e path/to/lammps-jax`.
 Only `export_lammps` imports it; `make_energy_fn` is plain JAX.
 """
 import json
+import os
 from pathlib import Path
 
 import jax
@@ -324,6 +325,24 @@ def make_energy_fn(model, n_species, layout, k_dense=None, type_map=None, n_rows
     return energy_fn
 
 
+def cueq_block_rows_for(model, rows, k_dense, budget, itemsize, max_edges=None, prep=0):
+    """Rows per dense block of an aa_dag="cueq" bundle: the first of `eval.cueq.CUEQ_BLOCK_ROWS` (each capped
+    at `rows`), then halvings of the last down to MIN_BLOCK_ROWS, whose estimate (`block_rows_for` with that
+    `block_rows`) fits `budget`; None when none fits.  No per-block element target: cueq kernels want many
+    U-atom groups per launch, and are no faster than the DAG at the DAG's target (docs/dev/specs/
+    2026-10-22-cueq-product-basis-design.md)."""
+    from ..eval.cueq import CUEQ_BLOCK_ROWS
+    cands = [min(int(b), int(rows)) for b in CUEQ_BLOCK_ROWS]
+    b = cands[-1]
+    while b > MIN_BLOCK_ROWS:
+        b = max(MIN_BLOCK_ROWS, b // 2)
+        cands.append(b)
+    for b in dict.fromkeys(cands):
+        if block_rows_for(model, rows, k_dense, budget, itemsize, max_edges, prep, block_rows=b):
+            return b
+    return None
+
+
 def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
                   dtype="float64", layout="auto", type_elements=None, max_owned=None,
                   lean=True, spline_tol=AUTO, spline_intervals=None, max_neighbors=None,
@@ -418,6 +437,19 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
     `eval.aa_dag.AUTO_MIN_CHAIN_MUL` chain-form multiplies per site and the chain
     form below (`eval.aa_dag.resolve_aa_dag`).  Recorded as `ace_jax.aa_dag`, the
     mode used.
+
+    aa_dag="cueq" (opt-in, the `cueq` extra; a CUDA `platform` only; one species, a linear ACEModel with
+    lean=True): the product basis as NVIDIA cuequivariance kernels (`eval.cueq.with_cueq`).  The bundle keeps
+    their `uniform_1d_cuda` custom calls, whose lowering bakes a process-local plan handle (a plan-registry
+    index) into each.  So the export records every plan compile with lammps-jax's contrib/ffi-replay recorder
+    (`eval.cueq.recorder`: $LAMMPS_JAX_CONTRIB) to <path stem>.ffi-replay, which the replay shim reissues in the
+    LAMMPS process.  Export one cueq bundle per process, in a process that has compiled no cueq plan before
+    (e.g. no cueq ACECalculator): a second export, or plans compiled before, raise.  The NVRTC kernel cache
+    is <path stem>.cueq-cache (CUEQUIVARIANCE_OPS_NVRTC_CACHE_DIR is set to it for the rest of this process),
+    filled by the export's compiles and shipped with the bundle, so LAMMPS on a GPU of the same architecture
+    skips the compile (minutes at o4d20).  Dense / matrix rows per block: `cueq_block_rows_for` unless
+    `block_rows` is given.  Recorded as `ace_jax.cueq`: {"version", "targets", "replay", "cache",
+    "handlers": the LAMMPS_JAX_FFI_HANDLERS value}; `eval.cueq.run_env` gives LAMMPS's environment.
     """
     from lammps_jax.export import export_model
 
@@ -439,6 +471,16 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
                          "the rcut + skin list; see neighbour_capacity)")
     if layout in ("sparse", "dense") and max_edges is None:
         raise ValueError(f"the {layout} layout needs max_edges (the packed edge buffer)")
+    rec = None
+    if aa_dag == "cueq":                          # refusals first, then the cache and recorder before any lowering
+        from ..eval import cueq
+        cueq.check_export(model, platform, cueq=False)
+        cache = Path(path).absolute().with_suffix(".cueq-cache")
+        cache.mkdir(parents=True, exist_ok=True)
+        # libcue_ops reads it at each NVRTC compile (cueq 0.13.0), but set it before cueq is imported anyway
+        os.environ["CUEQUIVARIANCE_OPS_NVRTC_CACHE_DIR"] = str(cache)
+        cueq.require()
+        rec = cueq.install_recorder()
     from ..calc.point import device_memory_bytes
     itemsize = np.dtype(dtype).itemsize
     if device_memory is None:
@@ -447,14 +489,17 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
         budget = DENSE_BUDGET_FRACTION * float(device_memory)
     rows = max_owned if max_owned is not None else max_atoms
     sized = layout == "auto" or (layout in ("dense", "matrix") and (device_memory is not None or block_rows))
+
+    def rows_for(k, budget, max_edges=None, prep=0):         # the first block size that fits, or None
+        if rec is not None and not block_rows:
+            return cueq_block_rows_for(model, rows, k, budget, itemsize, max_edges, prep)
+        return block_rows_for(model, rows, k, budget, itemsize, max_edges, prep, block_rows,
+                              block_target_elems(device_memory))
     if layout == "auto":
         k = min(k_dense, max_neighbors or k_dense) if k_dense else 0
-        tgt = block_target_elems(device_memory)
-        b_mat = (block_rows_for(model, rows, k, budget, itemsize, max_edges,
-                                matrix_prep_bytes(rows, max_neighbors, k, itemsize), block_rows, tgt)
+        b_mat = (rows_for(k, budget, max_edges, matrix_prep_bytes(rows, max_neighbors, k, itemsize))
                  if k and max_neighbors and matrix_supported() else None)
-        b_den = (block_rows_for(model, rows, k, budget, itemsize, max_edges, 0, block_rows, tgt)
-                 if k and max_edges is not None and not b_mat else None)
+        b_den = rows_for(k, budget, max_edges) if k and max_edges is not None and not b_mat else None
         if b_mat:
             layout, block_rows = "matrix", b_mat
         elif b_den:
@@ -466,12 +511,10 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
                              "chosen (max_neighbors given, supported, and fitting)")
     elif layout in ("dense", "matrix") and not block_rows:
         k = min(k_dense or max_neighbors, max_neighbors or k_dense or 0)
-        block_rows = ((block_rows_for(model, rows, k, budget, itemsize, max_edges if layout == "dense" else None,
-                                      matrix_prep_bytes(rows, max_neighbors, k, itemsize) if layout == "matrix" else 0,
-                                      target=block_target_elems(device_memory))
+        block_rows = ((rows_for(k, budget, max_edges if layout == "dense" else None,
+                                matrix_prep_bytes(rows, max_neighbors, k, itemsize) if layout == "matrix" else 0)
                        or MIN_BLOCK_ROWS) if sized
-                      else block_rows_for(model, rows, k, float("inf"), itemsize,       # the speed target alone
-                                          target=block_target_elems(device_memory)))
+                      else rows_for(k, float("inf")))                    # the speed target (cueq: sizes) alone
     if layout == "matrix":
         max_neighbors = int(max_neighbors)
         k_dense = min(int(k_dense or max_neighbors), max_neighbors)
@@ -488,7 +531,9 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
     model, rtab = with_radial_table(model, radial_table)
     from ..eval.aa_dag import resolve_aa_dag, with_aa_dag
     aa_dag = resolve_aa_dag(model, aa_dag)    # recursive product basis (`eval.aa_dag`); "auto" picks per model
-    if aa_dag is not None:
+    if rec is not None:
+        model = cueq.with_cueq(model)         # the cuequivariance product basis (single species, folded by lean)
+    elif aa_dag is not None:
         model = with_aa_dag(model, aa_dag)
     # the traced model in the bundle dtype: a float64 model with float32 positions lowers to a
     # float64 program with float32 I/O under x64 (`aj export` enables it), i.e. no fp32 speed
@@ -503,7 +548,23 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
              else {"max_edges": max_edges})
     bundle = export_model(energy_fn=energy_fn, path=path, max_atoms=max_atoms, cutoff=rcut,
                           unit_style="metal", precision=dtype, n_species=n_species, **graph,
-                          **({"platform": platform} if platform else {}))
+                          **({"platform": platform} if platform else {}),
+                          **({"custom_call_targets": (cueq.TARGET,)} if rec is not None else {}))
+    cueq_meta = None
+    if rec is not None:                       # every plan this process compiled, for the LAMMPS-side replay
+        try:
+            cueq.check_replayable(rec.RECORDS)
+        except RuntimeError:
+            Path(path).unlink(missing_ok=True)    # its handles would not replay: no bundle
+            raise
+        replay = cache.with_suffix(".ffi-replay")
+        rec.dump(str(replay), cueq.COMPILE, cueq.EXECUTE)
+        if not any(cache.iterdir()):
+            import warnings
+            warnings.warn(f"{cache} is empty: this process had compiled the cueq kernels before the export, so "
+                          "LAMMPS will compile them again; export in a fresh process to ship them", stacklevel=2)
+        cueq_meta = {"version": cueq.version(), "targets": [cueq.TARGET], "replay": str(replay),
+                     "cache": str(cache), "handlers": cueq.handlers(cueq.shim(rec))}
     # no "platform": lammps-jax's export_info.platform is a contract key its plugin checks
     bundle["ace_jax"] = {"layout": layout, "elements": model_z, "type_elements": type_elements,
                          "k_dense": int(k_dense) if layout in ("dense", "matrix") else None,
@@ -518,6 +579,8 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
                          "radial_table": rtab,
                          # the product basis's DAG plan mode used (None: the chain form)
                          "aa_dag": aa_dag,
+                         # aa_dag="cueq": the replay sidecar, the shipped NVRTC cache, LAMMPS_JAX_FFI_HANDLERS
+                         **({"cueq": cueq_meta} if cueq_meta else {}),
                          # dense / matrix rows per block, and the memory they were sized for
                          "block_rows": int(block_rows) if layout in ("dense", "matrix") else None,
                          "device_memory": int(device_memory) if device_memory else None,
