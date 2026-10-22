@@ -103,7 +103,20 @@ The export compiles the kernel the first time, and keeps it in a cache.
 
 !!! warning "lammps-jax version"
     The kernel needs a lammps-jax LAMMPS plugin that registers custom calls
-    for the CPU. lammps-jax 0.2.0 registers them for CUDA only.
+    for the CPU. lammps-jax 0.2.0 registers them for CUDA only. The fix is
+    [lammps-jax pull request 3](https://github.com/abhijeetgangan/lammps-jax/pull/3).
+    It is not yet in a lammps-jax release.
+
+    Until it is released, build the LAMMPS plugin from this commit. It is
+    lammps-jax 0.2.0 with the fix:
+
+    ```bash
+    git clone https://github.com/jameskermode/lammps-jax.git
+    git -C lammps-jax checkout 2c53fb4
+    ```
+
+    Use the lammps-jax instructions to build the plugin. Keep the lammps-jax
+    0.2.0 Python package.
 
 !!! note "C++ compiler"
     The kernel needs a C++17 compiler (`$CXX`, `c++`, `g++` or `clang++`).

@@ -410,7 +410,8 @@ for its CPU build, which refuses a cuda bundle and vice versa).
   prints the line to set. Run LAMMPS with `LAMMPS_JAX_FFI_HANDLERS` = `bundle["ace_jax"]["ffi"]["handlers"]`,
   newton on, one MPI rank per core. `-march=native` on a login node may not run on compute nodes of another CPU:
   export there, or pass generic flags. Needs a lammps-jax plugin that registers FFI handlers for the CPU
-  (0.2.0 registers them for CUDA only).
+  (0.2.0 registers them for CUDA only; the fix, abhijeetgangan/lammps-jax#3, is not released yet: build the plugin
+  from `jameskermode/lammps-jax` commit `2c53fb4`, 0.2.0 + the fix, with the 0.2.0 Python package).
 - An older lammps-jax LAMMPS plugin rejects a matrix bundle ("re-export"). To
   fix it, rebuild the plugin, or export `layout="dense"`. The bundle records
   the exporting lammps-jax as `ace_jax.lammps_jax`.
