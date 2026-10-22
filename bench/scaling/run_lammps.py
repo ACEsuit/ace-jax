@@ -50,8 +50,10 @@ def _pair(style, model_path, elements, device, extra=None):
         return (f"pair_style {('grace/1l/kk' if device == 'gpu' else 'grace/1l/cpu/kk') + prec}"
                 f"{f' chunksize {int(chunk)}' if chunk else ''}\n"
                 f"pair_coeff * * {model_path} {els}\n")
-    if style == "grace-2l":                 # GRACE-2L .npz (export_kokkos): the same pair, two layers
-        return (f"pair_style {'grace/2l/kk' if device == 'gpu' else 'grace/2l/cpu/kk'}\n"
+    if style == "grace-2l":                 # GRACE-2L .npz (export_kokkos): the same pair, two layers; the same
+        prec, chunk = os.environ.get("GRACE_PRECISION", ""), os.environ.get("GRACE_CHUNKSIZE")   # overrides as 1L's
+        return (f"pair_style {('grace/2l/kk' if device == 'gpu' else 'grace/2l/cpu/kk') + prec}"
+                f"{f' chunksize {int(chunk)}' if chunk else ''}\n"
                 f"pair_coeff * * {model_path} {els}\n")
     if style == "grace-fs":                 # GRACE-FS C++ YAML: Kokkos on the GPU, the plain MPI evaluator on the CPU
         return f"pair_style {'grace/fs/kk' if device == 'gpu' else 'grace/fs'}\npair_coeff * * {model_path} {els}\n"
