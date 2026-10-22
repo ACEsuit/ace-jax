@@ -52,8 +52,8 @@ aj export --model fit/model.npz --out si_bundle.json --structure start.xyz \
 
 For the CPU backend, add `--platform cpu`. Add `--procs px,py,pz` to size the
 buffers for one MPI rank. Use the same grid in LAMMPS (`processors px py pz`).
-For a linear ACE model on CPUs, also add `--ffi`. This uses a C++ kernel
-in place of the XLA program. See [CPU kernel](#cpu-kernel).
+For a linear ACE model on CPUs, the export uses a C++ kernel in place of the
+XLA program. See [CPU kernel](#cpu-kernel).
 
  `export_lammps` returns a dictionary, and also writes it in the
 bundle. Its `ace_jax` key records what was exported: the layout, the
@@ -97,28 +97,39 @@ five-component alloy, this is 1.2 to 1.4 times faster.
 
 ## CPU kernel
 
-On CPUs, a C++ kernel can replace the compiled JAX program. It is for
-linear ACE models. It runs one MPI rank per core, with one thread per rank.
-The export compiles the kernel the first time, and keeps it in a cache.
+On CPUs, the export uses a C++ kernel for linear ACE models. The kernel
+replaces the compiled JAX program. It runs one MPI rank per core, with one
+thread per rank. The export compiles the kernel the first time, and keeps it
+in a cache.
+
+The export uses the kernel if all these conditions are true:
+
+- The model is a linear ACE model, in float64.
+- The bundle can use the `matrix` layout (`--layout` `auto` or `matrix`).
+- lammps-jax is version 0.2.1 or later.
+- A C++17 compiler is available (`$CXX`, `c++`, `g++` or `clang++`).
+
+If a condition is false, the export uses the XLA program. `aj export` prints
+the reason.
+
+!!! warning "Environment for LAMMPS"
+    A bundle with the kernel needs the variable `LAMMPS_JAX_FFI_HANDLERS` in
+    LAMMPS. Without it, LAMMPS stops with an error that gives the variable.
+    Export with `--no-ffi` to get a bundle that needs no variable.
 
 !!! warning "lammps-jax version"
     The kernel needs the LAMMPS plugin of lammps-jax 0.2.1 or later. Earlier
     plugins register custom calls for CUDA only, so LAMMPS cannot find the
     kernel on the CPU. Build the plugin at the version of the Python package.
 
-!!! note "C++ compiler"
-    The kernel needs a C++17 compiler (`$CXX`, `c++`, `g++` or `clang++`).
-    The LAMMPS plugin build also needs one. Without a compiler, the export
-    stops with an error. The XLA program does not need a compiler.
-
-1. Export with `--ffi` and `--platform cpu`:
+1. Export with `--platform cpu`:
 
     ```bash
     aj export --model fit/model.npz --out si_bundle.json --structure start.xyz \
-        --platform cpu --procs 8,4,4 --ffi
+        --platform cpu --procs 8,4,4
     ```
 
-    In Python, use `export_lammps(..., platform="cpu", ffi=True)`.
+    In Python, use `export_lammps(..., platform="cpu")`.
 
 2. Set the variable that the command prints. It gives LAMMPS the kernel library:
 
@@ -126,17 +137,28 @@ The export compiles the kernel the first time, and keeps it in a cache.
     export LAMMPS_JAX_FFI_HANDLERS="ace_jax_direct=<library>:AceDirect"
     ```
 
-3. Run LAMMPS with `newton on`:
+3. Run LAMMPS with `newton on` and one MPI rank per core:
 
     ```bash
     mpirun -np 128 lmp -k on t 1 -sf kk -pk kokkos newton on neigh half -in in.lammps
     ```
 
-The kernel needs a linear ACE model, float64 and the `matrix` layout. It
-tabulates the radial basis in r (`radial_table=True`). Energies agree with
-the calculator to approximately 1e-12 relative. Forces agree to 1.5e-8 of the
-largest force. The bundle records the kernel in `ace_jax.ffi`: the custom-call
-target, the library and the `LAMMPS_JAX_FFI_HANDLERS` value.
+To get the variable on the machine that runs LAMMPS, use
+`aj export --print-env si_bundle.json`. If the library is not on that machine,
+the command compiles the kernel there.
+
+| Option | Command line | Python |
+|---|---|---|
+| Use the kernel when possible (default) | (no option) | `ffi="auto"` |
+| Always use the kernel; stop with an error if it is not possible | `--ffi` | `ffi=True` |
+| Always use the XLA program | `--no-ffi` | `ffi=False` |
+
+The kernel tabulates the radial basis in r (`radial_table=True`). Energies
+agree with the XLA program to approximately 1e-12 relative. Forces agree to
+1.5e-8 of the largest force. The bundle records the kernel in `ace_jax.ffi`:
+the custom-call target, the library and the `LAMMPS_JAX_FFI_HANDLERS` value.
+If the export used the XLA program on a CPU, `ace_jax.ffi_reason` gives the
+reason.
 
 The compiler flags are `-O3 -march=native` by default. They tune the kernel
 for the CPU of the machine that exports.

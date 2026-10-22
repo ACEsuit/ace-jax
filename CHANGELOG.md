@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased
+
+**Upgrading.** A CPU bundle of a linear ACE model now uses the C++ kernel by
+default. LAMMPS then needs `LAMMPS_JAX_FFI_HANDLERS`, which `aj export` prints.
+Export with `--no-ffi` (`ffi=False`) for the previous bundle, which needs no
+variable.
+
+### Changed
+
+- **The C++ kernel is the default for CPU bundles.** `export_lammps` and
+  `aj export` take `ffi="auto"`: a CPU bundle of a linear ACE model (categorical
+  or species embedding) uses the kernel when it is float64, lean, has the
+  matrix layout, lammps-jax is 0.2.1 or later and a C++17 compiler compiles
+  the kernel. Otherwise the bundle uses the XLA program, `aj export` prints the
+  reason, and the bundle records it as `ace_jax.ffi_reason`. A missing compiler
+  no longer stops the export. `--ffi` (`ffi=True`) requires the kernel and
+  `--no-ffi` (`ffi=False`) turns it off. GPU bundles are unchanged.
+
+### Added
+
+- **`aj export --print-env BUNDLE` for kernel bundles.** It prints the
+  `LAMMPS_JAX_FFI_HANDLERS` line on the machine that runs LAMMPS. If the kernel
+  library is not on that machine, the command compiles it there.
+
 ## 0.4.1 (2026-10-22)
 
 **Highlights.** Linear ACE runs in LAMMPS on CPUs with a C++ kernel, 10 to 23
