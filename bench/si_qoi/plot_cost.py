@@ -90,7 +90,7 @@ FAM = {  # family: (label, colour, marker, linestyle, filled, qoi model name pat
 # families fitted with several seeds (sizes "<size>_s<k>"): one point per size, the mean over seeds, with the
 # min-max spread as an error bar; the per-seed rows stay in metrics.jsonl.  SEED_EXCLUDE: checks, not ladder points
 SEEDED = ("grace", "grace_fs", "grace_2l")
-SEED_EXCLUDE = ("c32l4_long",)               # the 150k-update training-length check
+SEED_EXCLUDE = ("c32l4_long", "2l_small_long")   # the 150k-update training-length checks
 WL_FAMILIES = ("ace", "ace_wl_1", "ace_wl_1.75", "ace_wl_2", "ace_wl_2.5", "ace_wl_o5", "ace_lr", "pace")
 WL_RECOLOUR = {"ace": "#3987e5"}                 # the ramp's wL 1.5 step (the categorical blue is too near 1.75)
 
