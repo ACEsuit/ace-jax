@@ -61,6 +61,28 @@ def test_polynomial_chunks_cover_every_monomial_once():
     assert all(len(c) <= 7 for _, c in plans)
 
 
+def test_plans_build_where_the_cuda_ops_cannot_load(monkeypatch):
+    """Building a plan is pure Python: it must work on a host whose cueq ops fail to load (no GPU driver:
+    importing cuequivariance_jax raises OSError for libcuda.so.1), as on a CPU-only node with the extra installed."""
+    pytest.importorskip("cuequivariance")
+    import builtins
+    import numpy as np
+    from ace_jax.eval import cueq
+    real = builtins.__import__
+
+    def no_ops(name, *a, **k):
+        if name.startswith("cuequivariance_jax") or name.startswith("cuequivariance_ops"):
+            raise OSError("libcuda.so.1: cannot open shared object file")
+        return real(name, *a, **k)
+    monkeypatch.setattr(builtins, "__import__", no_ops)
+    m = _si()
+    assert not cueq.available()
+    plans = cueq.polynomial(m.aa_specs, np.asarray(m.ctilde[:, 0]))
+    assert len(plans) >= 1
+    with pytest.raises(cueq.CueqUnavailable):          # evaluation still needs the ops
+        cueq.with_cueq(m)
+
+
 def test_auto_never_picks_cueq():
     from ace_jax.eval.aa_dag import resolve_aa_dag
     assert resolve_aa_dag(_si(), "auto") != "cueq"

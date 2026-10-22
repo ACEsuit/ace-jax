@@ -38,6 +38,15 @@ def require():
         raise CueqUnavailable("aa_dag='cueq' needs cuequivariance: pip install 'ace-jax[cueq]' (Linux, CUDA 12)")
 
 
+def require_descriptors():
+    """The pure-Python descriptor package only: building plans (`polynomial`, `trace_polynomial`) needs no GPU, so
+    it must work where cuequivariance_jax's CUDA ops cannot load (no driver: libcuda.so.1 missing raises OSError)."""
+    try:
+        import cuequivariance  # noqa: F401
+    except ImportError:
+        raise CueqUnavailable("aa_dag='cueq' needs cuequivariance: pip install 'ace-jax[cueq]' (Linux, CUDA 12)") from None
+
+
 class _Static:
     """Hash-by-identity wrapper so a polynomial can sit in a static eqx field."""
     def __init__(self, v):
@@ -101,7 +110,7 @@ def polynomial(specs, coef, u=U, chunk=CHUNK):
     indices of the piece's monomials in its path order.  Why: the NVRTC compile of one uniform_1d kernel grows
     superlinearly with its path count (o4d16 order 4, gradient: 1000 paths 5.9 s, 2000 paths 29.8 s, RTX 4000 Ada)."""
     import numpy as np
-    require()
+    require_descriptors()                          # building a plan needs no GPU (with_cueq requires the ops)
     specs = [np.asarray(s) for s in specs]
     n_A = n_A_of(specs)
     coef = np.asarray(coef)
@@ -266,7 +275,7 @@ def trace_polynomial(model, blocked, u=U, chunk=CHUNK):
     """`TracePlan` of a folded embedding model (`trace_plan`), in kernels of at most `chunk` paths, mode
     u = `u` atoms x d channels.  The weights are the readout (a readout change needs a new plan)."""
     import numpy as np
-    require()
+    require_descriptors()                          # building a plan needs no GPU (with_cueq requires the ops)
     gather, paths, W, st = trace_plan(model, blocked)
     uu = u * gather.shape[1]
     polys = [(_build_trace_poly(paths[c0:c0 + chunk], gather.shape[0], uu), np.arange(c0, min(c0 + chunk, len(paths))))
