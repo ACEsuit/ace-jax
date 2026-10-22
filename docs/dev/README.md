@@ -15,6 +15,8 @@ results behind ace-jax, kept as the record that code comments and tests cite:
 - `accuracy-cost-spec.md`, `accuracy-cost-plan.md`: the accuracy-matched speed
   benchmark on Si (`bench/accuracy_cost/`); `accuracy-cost-results.md`: its results
   and how to redraw the figures.
+- `gpu-memory-results.md`: where the GPU memory of the force call goes (o4d20 Si, A100),
+  the largest system that fits, and the measured headroom (`bench/gpu_memory/`).
 - `jax-md-results.md`: `ace_jax.jaxmd` (JAX-MD) against LAMMPS + lammps-jax: throughput
   on the ACE ladder (A100, RTX 4000 Ada), row blocks, and JAX-MD's neighbour-list memory.
 - `lammps-jax-cpu-port.md`: the plan for lammps-jax bundles on the CPU backend (#89).
