@@ -463,10 +463,13 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
     apply (recorded as "greedy", None, None).  LAMMPS loads the kernel through
     LAMMPS_JAX_FFI_HANDLERS, set to `ace_jax.ffi["handlers"]`, with a lammps-jax whose plugin
     registers handlers for the CPU platform.  Recorded as `ace_jax.ffi`: {"target", "library",
-    "handlers"} (None for the XLA program).
+    "handlers"} (None for the XLA program).  ffi with aa_dag="cueq" raises ValueError (CPU against CUDA).
     """
     from lammps_jax.export import export_model
 
+    if ffi and aa_dag == "cueq":                  # two product-basis engines, for different platforms: refuse first
+        raise ValueError("ffi and aa_dag='cueq' are exclusive: the C++ kernel runs on the CPU (platform='cpu'), "
+                         "cueq on a CUDA GPU; export with one or the other")
     given = model                             # precision_structure checks the model as given
     from ..eval.model import lean as _lean
     from ..eval.model import splining, with_radial_table

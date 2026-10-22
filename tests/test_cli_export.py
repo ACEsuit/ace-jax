@@ -198,3 +198,12 @@ def test_export_lammps_ffi_bundle(tmp_path, monkeypatch, capsys):
     f = json.loads((tmp_path / "m.json").read_text())["ace_jax"]["ffi"]
     assert f["library"].startswith(str(tmp_path / "cache"))
     assert f'LAMMPS_JAX_FFI_HANDLERS="{f["handlers"]}"' in capsys.readouterr().out
+
+
+def test_export_ffi_and_aa_dag_cueq_are_exclusive(tmp_path, capsys):
+    write(tmp_path / "start.xyz", bulk("Si", "diamond", 5.43, cubic=True), format="extxyz")
+    with pytest.raises(SystemExit) as e:
+        main(["export", "--model", str(MODEL), "--out", str(tmp_path / "out" / "m.json"), "--structure",
+              str(tmp_path / "start.xyz"), "--platform", "cpu", "--ffi", "--aa-dag", "cueq"])
+    assert e.value.code == 2 and "exclusive" in capsys.readouterr().err
+    assert not (tmp_path / "out").exists()

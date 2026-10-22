@@ -1177,3 +1177,15 @@ def test_cueq_bundle_with_unreplayable_handles_is_not_written(tmp_path, monkeypa
         export_lammps(model, meta, tmp_path / "si.json", max_atoms=256, max_edges=256 * 64, k_dense=64,
                       layout="dense", aa_dag="cueq")
     assert not (tmp_path / "si.json").exists() and not (tmp_path / "si.ffi-replay").exists()
+
+
+def test_ffi_and_cueq_are_exclusive(tmp_path, monkeypatch):
+    """ffi (the CPU C++ kernel) with aa_dag="cueq" (CUDA): refused before the cueq cache or recorder exist."""
+    require_optional("lammps_jax")
+    from ace_jax.export.lammps import export_lammps
+    rec, _ = _cueq_stubs(monkeypatch, tmp_path)
+    model, meta, _ = _si_fitted()
+    with pytest.raises(ValueError, match="exclusive"):
+        export_lammps(model, meta, tmp_path / "si.json", max_atoms=256, max_owned=64, k_dense=40, max_neighbors=48,
+                      platform="cpu", ffi=True, aa_dag="cueq")
+    assert not (tmp_path / "si.cueq-cache").exists() and not rec.calls and not (tmp_path / "si.json").exists()

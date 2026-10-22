@@ -551,6 +551,9 @@ def cmd_export(a):
         raise UsageError(f"{a.out}: give --format yace|lammps, or an --out ending in .yace or .json")
     if fmt == "yace" and a.aa_dag != "auto":
         raise UsageError("--aa-dag sets a lammps-jax bundle's product basis; a .yace needs none")
+    if (a.ffi or a.ffi_flags) and a.aa_dag == "cueq":
+        raise UsageError("--ffi and --aa-dag cueq are exclusive: the C++ kernel runs on the CPU (--platform cpu), "
+                         "cueq on a CUDA GPU")
     model, meta, extra = load(a.model)
     aa_dag = None if a.aa_dag == "chain" else a.aa_dag
     if aa_dag == "cueq" and fmt == "lammps":      # refuse before sizing anything
