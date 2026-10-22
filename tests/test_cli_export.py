@@ -121,9 +121,60 @@ def test_export_aa_dag_cueq_leaves_the_cueq_import_to_the_export(tmp_path, monke
     def export(*a, **kw):
         raise cueq.CueqUnavailable("set LAMMPS_JAX_CONTRIB")
     monkeypatch.setattr(cueq, "require", no_import)
+    monkeypatch.setattr(cueq, "backend", lambda: "gpu")
     monkeypatch.setattr(lx, "export_lammps", export)
     write(tmp_path / "start.xyz", bulk("Si", "diamond", 5.43, cubic=True), format="extxyz")
     with pytest.raises(SystemExit) as e:
         main(["export", "--model", str(MODEL), "--out", str(tmp_path / "m.json"), "--structure",
               str(tmp_path / "start.xyz"), "--aa-dag", "cueq"])
     assert e.value.code == 2 and "LAMMPS_JAX_CONTRIB" in capsys.readouterr().err
+
+
+def test_export_aa_dag_cueq_refuses_a_host_without_a_gpu(tmp_path, monkeypatch, capsys):
+    from ace_jax.eval import cueq
+    monkeypatch.setattr(cueq, "backend", lambda: "cpu")
+    write(tmp_path / "start.xyz", bulk("Si", "diamond", 5.43, cubic=True), format="extxyz")
+    with pytest.raises(SystemExit) as e:
+        main(["export", "--model", str(MODEL), "--out", str(tmp_path / "m.json"), "--structure",
+              str(tmp_path / "start.xyz"), "--aa-dag", "cueq"])
+    assert e.value.code == 2 and "CUDA GPU" in capsys.readouterr().err
+    assert not (tmp_path / "m.json").exists()
+
+
+def test_export_print_env_resolves_on_this_machine(tmp_path, monkeypatch, capsys):
+    """`aj export --print-env BUNDLE` on the LAMMPS machine: the sidecars next to the bundle where it is now,
+    this machine's shim ($LAMMPS_JAX_CONTRIB), never the export host's paths.  Runs on a CPU host: without
+    cuequivariance the library paths are placeholders, with a note to install the extra."""
+    import json
+    from ace_jax.eval import cueq
+    d = tmp_path / "moved"
+    d.mkdir()
+    rec = {"version": "0.13.0", "targets": ["uniform_1d_cuda"], "replay": "si.ffi-replay", "cache": "si.cueq-cache",
+           "handlers": "uniform_1d_cuda=/export/host/contrib/ffi-replay/ffi_replay_shim.so:ffi_replay_handler"}
+    (d / "si.json").write_text(json.dumps({"ace_jax": {"layout": "dense", "cueq": rec}}))
+    contrib = tmp_path / "contrib"
+    contrib.mkdir()
+    (contrib / "ffi_replay_shim.so").write_bytes(b"")
+    monkeypatch.setenv("LAMMPS_JAX_CONTRIB", str(contrib))
+    main(["export", "--print-env", str(d / "si.json")])
+    env = cueq.run_env(rec, d / "si.json")
+    out = capsys.readouterr().out
+    assert f'export FFI_REPLAY_FILE="{d / "si.ffi-replay"}"' in out
+    assert f'export CUEQUIVARIANCE_OPS_NVRTC_CACHE_DIR="{d / "si.cueq-cache"}"' in out
+    assert f"uniform_1d_cuda={contrib / 'ffi_replay_shim.so'}:ffi_replay_handler" in out
+    assert "/export/host" not in out and "build the replay shim" not in out
+    assert ("pip install" in out) == env["FFI_REPLAY_LIB"].startswith("<")
+
+
+@pytest.mark.parametrize("args,msg", [
+    (["--print-env", "b.json", "--model", "m.npz"], "without --model"),
+    (["--print-env", "missing.json"], "not a readable"),
+    (["--print-env", "plain.json"], "not a cueq bundle"),
+    (["--out", "m.json"], "needs --model and --out"),
+])
+def test_export_print_env_usage_errors(tmp_path, capsys, args, msg):
+    (tmp_path / "plain.json").write_text('{"ace_jax": {"layout": "dense"}}')
+    args = [str(tmp_path / x) if x.endswith((".json", ".npz")) else x for x in args]
+    with pytest.raises(SystemExit) as e:
+        main(["export", *args])
+    assert e.value.code == 2 and msg in capsys.readouterr().err

@@ -433,7 +433,10 @@ for its CPU build, which refuses a cuda bundle and vice versa).
   `contrib/ffi-replay` directory at export (the recorder is not in the package) and at run time (its built
   `ffi_replay_shim.so`; README gcc command, `-lffi` on libffi.so.6 systems). One cueq bundle per process.
   The bundle, `<stem>.ffi-replay` and `<stem>.cueq-cache/` go together (recorded by name, relative to the
-  bundle, as `ace_jax.cueq`); `aj export` prints the environment lines (`eval.cueq.run_env(record, bundle_path)`).
+  bundle, as `ace_jax.cueq`); `aj export` prints the environment lines (`eval.cueq.run_env(record, bundle_path)`)
+  resolved on the export host; on another LAMMPS machine (with `ace-jax[cueq]` installed, the shim built and
+  `LAMMPS_JAX_CONTRIB` set there) run `aj export --print-env BUNDLE.json` to print them for that machine.
+  `export_lammps(lean=False, aa_dag="cueq")` is refused.
   Export of o4d20 13-26 min on an A100; without the cache the start compiles kernels (tens of minutes); the cache serves
   the same GPU architecture only. A `calc.model` swap rebuilds and recompiles.
 - `lean=True` (default) exports `lean(model, spline_tol, spline_intervals)` for
