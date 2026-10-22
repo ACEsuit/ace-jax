@@ -15,6 +15,7 @@ parity CI jobs. User docs: `README.md`. Agent-facing usage guide:
   - `model.py`: `ACEModel`.
   - `pace_model.py`, `pace_io.py`, `pace_radial.py`, `pace_build.py`: `PACEModel`, `.yace` read/write.
   - `io.py`: `load`. `nlist.py`: neighbour lists. `harmonics.py`, `radial.py`.
+  - `ffi.py`, `ace_ffi.cc`: the C++ XLA FFI kernel (`AceDirect`) for CPU lammps-jax bundles: a lean linear float64 `ACEModel` with a radial table, on the neighbour matrix, positions in and atom energies and forces (newton on) out; single-threaded (MPI ranks give the parallelism). Distributed as source in the pure wheel, no extra: `library()` compiles it on first use (`compiler()`: `$CXX`, c++, g++, clang++; flags `-O3 -march=native` or `ACEJAX_FFI_FLAGS`) into a content-keyed cache (`$ACEJAX_FFI_CACHE` or `~/.cache/ace-jax/ffi`; key: source, jaxlib, compiler + version, flags, machine, and the CPU model under -march=native, since home is shared across node types), atomically; no compiler is `FFIUnavailable`. `build` is the bare compile, `plan` lays out its own greedy DAG, `handlers(lib)` the env value. The kernel takes per-atom site weights (forces = -sum_i w_i grad e_i), so `lammps_fns`' energy_fn has a custom VJP in positions (a second call with the cotangent as weights): jax.grad/vjp are exact; no model gradients, no second derivatives. `export_lammps(ffi=True | <lib path>)` (CPU, matrix layout; turns the radial table on; records `ace_jax.ffi` = {target, library, handlers}, and `aa_dag` "greedy", `k_dense`/`block_rows` None); `aj export --ffi [--ffi-flags=...]` prints the handlers line. LAMMPS loads it via `LAMMPS_JAX_FFI_HANDLERS`, which needs a lammps-jax plugin registering handlers for the CPU platform: lammps-jax >= 0.2.1 (abhijeetgangan/lammps-jax#3; 0.2.0 registered them for CUDA only), the `lammps` extra's floor.
 - `src/ace_jax/calc/`: ASE calculators. `point.py` has `ACECalculator`; `gp.py` has `GPCalculator`.
 - `src/ace_jax/fit/`: linear and GP fitting.
   - `data.py` reads extxyz into `Config`s and padded `Dataset` batches.
@@ -67,6 +68,7 @@ uv run ruff check                     # lint; `uv run pre-commit run --all-files
   - compiled coupling library: `test_coupling_etshim`, `test_coupling_parity` and the basis bridge tests skip unless a compiled `ace_jax_coupling` is installed (`conftest.require_coupling_lib`). The coupling cache tests still run: they use `ACEJAX_COUPLING_CACHE_ONLY=1` and the committed cache.
   - lammps-jax: `test_export_lammps` and `test_bench_scaling`'s export test. `uv sync --extra lammps`, or `uv pip install -e <lammps-jax>` for a checkout.
   - `jaxmd` (jax-md): `test_jaxmd`.
+  - a C++ compiler (`c++`): `test_ffi` (fails instead under ACEJAX_REQUIRE_OPTIONAL); its export test also needs lammps-jax.
   - `fast-neighbours` (matscipy-neighbours): `test_calc_jit`'s native `neighbour_matrix` test and `test_efv`'s dense-vs-neighbour_matrix check; without it the skin list and dense layout also take their fallback neighbour path.
   - `pyace` (python-ace, in its own venv under `pace_ref/`).
   - `sphericart`, `psutil`.

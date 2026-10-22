@@ -112,7 +112,7 @@ def test_bundle_written(tmp_path):
                                   "type_elements": [32, 14], "k_dense": 64, "owned_rows": None,
                                   "lean": False,           # PACE: no lean form
                                   "spline_tol": None, "spline_intervals": None,
-                                  "radial_table": None, "aa_dag": None}
+                                  "radial_table": None, "aa_dag": None, "ffi": None}
     assert on_disk["export_info"]["platform"] == "cuda"
     assert b["ace_jax"]["layout"] == "dense"
 
@@ -291,7 +291,7 @@ def test_bundle_metadata_keys_do_not_shadow_the_contract(tmp_path, layout):
     # the exporting lammps-jax) is written for every layout, and none is a contract key
     assert set(b["ace_jax"]) == {"layout", "elements", "type_elements", "k_dense", "owned_rows",
                                  "lean", "spline_tol", "spline_intervals", "radial_table", "block_rows", "device_memory", "dense_budget",
-                                 "lammps_jax", "aa_dag"}
+                                 "lammps_jax", "aa_dag", "ffi"}
     assert not set(b["ace_jax"]) & LAMMPS_JAX_KEYS
 
 

@@ -288,6 +288,8 @@ def gate_model(row, device, env, work):
         layouts = (parity.BUNDLE_LAYOUTS if k == 0 else ("auto",)) if style == "acejax" else (None,)
         if style == "acejax" and row.get("bundle"):          # a prebuilt bundle (cueq): the one timed, every cell
             layouts = ("auto",)
+        elif style == "acejax" and os.environ.get("ACEJAX_EXPORT_FFI"):
+            layouts = ("matrix",)                              # the FFI kernel: the matrix layout only
         for lay in layouts:
             w = work / f"cell{k}" / (lay or style)
             chk = {"cell": k, **({"layout": lay} if lay else {})}

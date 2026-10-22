@@ -92,7 +92,7 @@ requires-dist = [
     { name = "jax", specifier = ">=0.10.1" },
     { name = "jax", extras = ["cuda12"], marker = "extra == 'cuda'", specifier = ">=0.10.1" },
     { name = "jax-md", marker = "extra == 'jaxmd'", specifier = ">=0.2.29" },
-    { name = "lammps-jax", marker = "extra == 'lammps'", specifier = ">=0.2.0" },
+    { name = "lammps-jax", marker = "extra == 'lammps'", specifier = ">=0.2.1" },
     { name = "lineax", specifier = ">=0.1.1" },
     { name = "matscipy-neighbours", marker = "extra == 'fast-neighbours'", specifier = ">=1.0" },
     { name = "numpy", specifier = ">=1.24" },
@@ -1388,7 +1388,7 @@ wheels = [
 
 [[package]]
 name = "lammps-jax"
-version = "0.2.0"
+version = "0.2.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "jax", version = "0.10.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
@@ -1396,9 +1396,9 @@ dependencies = [
     { name = "jaxlib", version = "0.10.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "jaxlib", version = "0.11.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/93/14/9651d743349738162ee3fac5aba6fd5a4860f77fc8905de6aabaf256f904/lammps_jax-0.2.0.tar.gz", hash = "sha256:5fc061843b28fd37276948b9984f4228e5487343befb2d5c01ce060bbdea2984", size = 98546, upload-time = "2026-10-14T18:13:15.896Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/a0/95/9c30f655b7e2f71662da4fc6a07502220c956ba899cfe8b3d51cd55c2277/lammps_jax-0.2.1.tar.gz", hash = "sha256:699c5acdbce8fa451707584c39483ab1b1a4b4029d82e3f3b359a0ff503a7520", size = 98575, upload-time = "2026-10-22T15:40:07.43Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/28/30/cec3d8694cfce192f2c57794a98f5f21b0cb2dd7ed0074060636c9bcb1fd/lammps_jax-0.2.0-py3-none-any.whl", hash = "sha256:425d8b0eecbe3108a3d8bfb871718a72a5b63b1455d7bac43ecd6341ef31cf6f", size = 63627, upload-time = "2026-10-14T18:13:14.254Z" },
+    { url = "https://files.pythonhosted.org/packages/c6/e6/545784a0d6c56ac6e2ca7b9b62db4bbdd9c8c02d4c3b5581946e78e834f9/lammps_jax-0.2.1-py3-none-any.whl", hash = "sha256:db03ee2ed19b2f94011efeac23a645fb09c9785e2b4baeff01d0ee726ce36a11", size = 63627, upload-time = "2026-10-22T15:40:06.215Z" },
 ]
 
 [[package]]

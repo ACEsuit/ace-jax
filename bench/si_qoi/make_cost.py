@@ -13,7 +13,7 @@ covers the lammps and gpumd rows.
 import argparse, json, pathlib, sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
-from plot_cost import FAM, REDUCED, ROOT, SEEDED, cost_name, family_of, seed_split  # noqa: E402
+from plot_cost import COST_NAME, FAM, REDUCED, ROOT, SEEDED, cost_name, family_of, seed_split  # noqa: E402
 
 OWN_GATE = ("lammps-cueq",)          # timing modes gated by their own parity rows ("parity-<mode>")
 
@@ -60,14 +60,15 @@ def main():
         gmode = "parity" if r.get("mode") in ("lammps", "gpumd") else f"parity-{r['mode']}" if r.get("mode") in OWN_GATE else None
         if gmode and (r["_path"], r["code"], r["family"], r["size"], gmode) not in gates:   # standalone: no gate
             continue
-        if (r["code"], fam, r["size"]) in sourced and r["_file"] != source[r["code"]] and fam not in REDUCED:
+        # a line under its own cost name (float32, the FFI kernel, cueq) is not the sourced line: kept from any file
+        if (r["code"], fam, r["size"]) in sourced and r["_file"] != source[r["code"]] and fam not in COST_NAME:
             continue
         name = cost_name(fam, r["size"])                      # Symmetrix-XL under its own name (MACExl_)
         us = 1e6 / r["atom_steps_per_s"]
         if us < best.get(name, float("inf")):
             dag = r.get("aa_dag") if r.get("aa_dag") != "cueq" else None   # cueq: its mode names it (no DAG dot)
             best[name], fam_of[name], code[name] = us, fam, (f'{r["code"]} {r["dtype"]} {r["mode"]}' + (f' dag:{dag}' if dag else "")
-                                          + f' [{r["_file"]}]')
+                                          + (" ffi" if r.get("ffi") else "") + f' [{r["_file"]}]')
     for n in list(best):                    # seeded families (plot_cost.SEEDED): seed 0 is timed for its size
         base, k = seed_split(n)             # only theirs: GAP's sizes (s9000, ...) read as seed suffixes too
         if fam_of[n] in SEEDED and k is not None and base not in best:

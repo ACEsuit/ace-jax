@@ -212,7 +212,10 @@ def _export_inprocess(row, at, dtype, workdir, layout="auto", slots="skin", list
                       # opt-in recursive product basis (ace_jax.eval.aa_dag; "greedy" | "prefix"), an ace-jax with it;
                       # a row's own (accuracy_cost's lammps-cueq line: "cueq") takes precedence
                       **({"aa_dag": row.get("aa_dag") or os.environ["ACEJAX_EXPORT_AA_DAG"]}
-                         if row.get("aa_dag") or os.environ.get("ACEJAX_EXPORT_AA_DAG") else {}))
+                         if row.get("aa_dag") or os.environ.get("ACEJAX_EXPORT_AA_DAG") else {}),
+                      # opt-in C++ FFI kernel (ace_jax.eval.ffi; CPU matrix bundles, radial table on): LAMMPS needs
+                      # LAMMPS_JAX_FFI_HANDLERS naming its library, set with this in the env json's os_env
+                      **({"ffi": True} if os.environ.get("ACEJAX_EXPORT_FFI") else {}))
     return (str(pathlib.Path(workdir) / "bundle.json"), b["ace_jax"]["layout"], time.perf_counter() - t0,
             splined_meta(b["ace_jax"]))
 
@@ -488,6 +491,8 @@ def _run_lammps(row, style, model, data, work, n_atoms, dtype, device, lmp, rank
     cueq = bundle_env(model, env) if style == "acejax" else None
     if cueq:                                     # its replay sidecar, cache and libraries (not the env-var hooks)
         env, out["aa_dag"] = cueq, "cueq"
+    if style == "acejax" and os.environ.get("ACEJAX_EXPORT_FFI"):
+        out["ffi"] = True
     if cmd[0] == "mpirun" and mpirun_args():
         out["mpirun_args"] = mpirun_args()
     (work / "log.lammps").unlink(missing_ok=True)

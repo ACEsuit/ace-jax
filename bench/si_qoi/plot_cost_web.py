@@ -16,13 +16,14 @@ sys.path.insert(0, str(pathlib.Path(__file__).parent))
 import plot_cost as P  # noqa: E402
 
 SYMBOL = {"o": "circle", "D": "diamond", "d": "diamond-tall", "s": "square", "^": "triangle-up", "v": "triangle-down",
-          "*": "star", "X": "x", "P": "cross", "p": "pentagon", "h": "hexagon", ">": "triangle-right"}
+          "<": "triangle-left", "*": "star", "X": "x", "P": "cross", "p": "pentagon", "h": "hexagon", ">": "triangle-right"}
 DASH = {"-": "solid", "--": "dash", ":": "dot", "-.": "dashdot"}
 # presets: the families shown (the rest stay in the legend, hidden); the first is the page's initial view
 PRESETS = {
-    "Headline": ("ace", "ace_cueq", "ace_tabfork", "pace", "mace_L0", "mace_L1", "mace_xl_L0", "mace_xl_L1", "nep", "gap", "grace"),
+    "Headline": ("ace", "ace_cueq", "ace_tabfork", "ace_ffi", "pace", "mace_L0", "mace_L1", "mace_xl_L0", "mace_xl_L1", "nep",
+                 "gap", "grace"),
     "ACE variants": ("ace", "ace_E10", "ace_f32", "ace_lr", "ace_pshape", "ace_pshape_lr", "ace_pshape_E10"),
-    "Same model, other code": ("ace", "ace_tab", "ace_tabfork", "ace_trim", "ace_cueq", "ace_tab_mixed", "mace_L0",
+    "Same model, other code": ("ace", "ace_tab", "ace_tabfork", "ace_trim", "ace_ffi", "ace_cueq", "ace_tab_mixed", "mace_L0",
                                "mace_L1", "mace_xl_L0", "mace_xl_L1"),
     "All": None,
 }

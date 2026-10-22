@@ -349,7 +349,7 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
                   dtype="float64", layout="auto", type_elements=None, max_owned=None,
                   lean=True, spline_tol=AUTO, spline_intervals=None, max_neighbors=None,
                   radial_table=None, device_memory=None, block_rows=None, platform=None, aa_dag="auto",
-                  precision_structure=None):
+                  precision_structure=None, ffi=False):
     """Write a lammps-jax JSON bundle for `model`; returns the bundle dict.
 
     Capacities: max_atoms (owned + ghost positions); max_edges (sparse / dense:
@@ -453,6 +453,17 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
     `block_rows` is given.  Recorded as `ace_jax.cueq`: {"version", "targets", "replay" and "cache" (file
     names relative to the bundle's directory), "handlers": the LAMMPS_JAX_FFI_HANDLERS value with the export
     host's shim}; `eval.cueq.run_env(record, bundle_path)` gives LAMMPS's environment.
+
+    ffi: True (or the path of a library built by `eval.ffi.build`) runs the model as the C++ FFI kernel
+    of `eval.ffi` on the neighbour matrix, positions in and atom energies and forces out; it needs
+    platform="cpu", the matrix layout, float64 and a lean linear ACEModel, and turns the radial table
+    on (radial_table=None -> True).  True compiles the kernel on first use (`eval.ffi.library`: a
+    C++17 compiler, -march=native, cached; `eval.ffi.FFIUnavailable` without one).  The kernel lays
+    out its own greedy DAG and reads every list slot, so `aa_dag`, `k_dense` and `block_rows` do not
+    apply (recorded as "greedy", None, None).  LAMMPS loads the kernel through
+    LAMMPS_JAX_FFI_HANDLERS, set to `ace_jax.ffi["handlers"]`, with a lammps-jax whose plugin
+    registers handlers for the CPU platform.  Recorded as `ace_jax.ffi`: {"target", "library",
+    "handlers"} (None for the XLA program).
     """
     from lammps_jax.export import export_model
 
@@ -467,6 +478,11 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
         raise ValueError(f"LAMMPS types {missing} are not in the model's elements {model_z}")
     type_map = [model_z.index(z) for z in type_elements]
     n_species = len(type_elements)
+    if ffi:                                       # a CPU custom call on the neighbour matrix
+        if platform != "cpu" or layout not in ("auto", "matrix") or dtype != "float64" or not lean:
+            raise ValueError("ffi=True needs platform='cpu', layout='matrix', dtype='float64' and lean=True")
+        layout, k_dense, block_rows = "matrix", None, None
+        radial_table = True if radial_table is None else radial_table
     if layout not in BUNDLE_LAYOUTS + ("auto",):
         raise ValueError(f"layout must be 'auto' or one of {BUNDLE_LAYOUTS}, got {layout!r}")
     if layout == "matrix" and not max_neighbors:
@@ -514,7 +530,7 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
         else:
             raise ValueError("layout='auto' needs max_edges unless the matrix layout is "
                              "chosen (max_neighbors given, supported, and fitting)")
-    elif layout in ("dense", "matrix") and not block_rows:
+    elif layout in ("dense", "matrix") and not block_rows and not ffi:
         k = min(k_dense or max_neighbors, max_neighbors or k_dense or 0)
         block_rows = ((rows_for(k, budget, max_edges if layout == "dense" else None,
                                 matrix_prep_bytes(rows, max_neighbors, k, itemsize) if layout == "matrix" else 0)
@@ -535,26 +551,34 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
         leaned = model is not full or bool(getattr(model, "energy_only", False))
     model, rtab = with_radial_table(model, radial_table)
     from ..eval.aa_dag import resolve_aa_dag, with_aa_dag
-    aa_dag = resolve_aa_dag(model, aa_dag)    # recursive product basis (`eval.aa_dag`); "auto" picks per model
+    aa_dag = "greedy" if ffi else resolve_aa_dag(model, aa_dag)    # "auto" picks per model; the kernel: its own plan
     if rec is not None:
         model = cueq.with_cueq(model)         # the cuequivariance product basis (single species or TrACE, folded by lean)
-    elif aa_dag is not None:
+    elif aa_dag is not None and not ffi:
         model = with_aa_dag(model, aa_dag)
     # the traced model in the bundle dtype: a float64 model with float32 positions lowers to a
     # float64 program with float32 I/O under x64 (`aj export` enables it), i.e. no fp32 speed
     from ..eval.api import with_dtype
     model = with_dtype(model, dtype)
     rcut = float(meta["rcut"])
-    energy_fn = make_energy_fn(model, n_species, layout, k_dense,
-                               None if type_map == list(range(len(model_z))) else type_map,
-                               n_rows=max_owned if layout == "dense" else None, rcut=rcut,
-                               block_rows=block_rows if layout in ("dense", "matrix") else None)
+    if ffi:                                       # positions and the list straight to the kernel
+        from ..eval import ffi as kernel
+        energy_fn, force_fn = kernel.lammps_fns(model, n_species, type_map, rcut)
+        lib = Path(kernel.library() if ffi is True else ffi).resolve()   # before the export: fail early
+        ffi_meta = {"target": kernel.TARGET, "library": str(lib), "handlers": kernel.handlers(lib)}
+    else:
+        energy_fn = make_energy_fn(model, n_species, layout, k_dense,
+                                   None if type_map == list(range(len(model_z))) else type_map,
+                                   n_rows=max_owned if layout == "dense" else None, rcut=rcut,
+                                   block_rows=block_rows if layout in ("dense", "matrix") else None)
     graph = ({"max_neighbors": max_neighbors, "max_owned": max_owned} if layout == "matrix"
              else {"max_edges": max_edges})
     bundle = export_model(energy_fn=energy_fn, path=path, max_atoms=max_atoms, cutoff=rcut,
                           unit_style="metal", precision=dtype, n_species=n_species, **graph,
                           **({"platform": platform} if platform else {}),
-                          **({"custom_call_targets": (cueq.TARGET,)} if rec is not None else {}))
+                          **({"force_fn": force_fn, "newton": "on",
+                              "custom_call_targets": (kernel.TARGET,)} if ffi
+                             else {"custom_call_targets": (cueq.TARGET,)} if rec is not None else {}))
     cueq_meta = None
     if rec is not None:                       # every plan this process compiled, for the LAMMPS-side replay
         try:
@@ -574,7 +598,7 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
                      "cache": cache.name, "handlers": cueq.handlers(cueq.shim(rec))}
     # no "platform": lammps-jax's export_info.platform is a contract key its plugin checks
     bundle["ace_jax"] = {"layout": layout, "elements": model_z, "type_elements": type_elements,
-                         "k_dense": int(k_dense) if layout in ("dense", "matrix") else None,
+                         "k_dense": int(k_dense) if layout in ("dense", "matrix") and not ffi else None,
                          # not "max_owned": lammps-jax reads that key from anywhere in
                          # the file and would take it as its own contract's
                          "owned_rows": int(max_owned) if max_owned is not None else None,
@@ -586,10 +610,12 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
                          "radial_table": rtab,
                          # the product basis's DAG plan mode used (None: the chain form)
                          "aa_dag": aa_dag,
+                         # the C++ FFI kernel: target, library, LAMMPS_JAX_FFI_HANDLERS value (None: the XLA program)
+                         "ffi": ffi_meta if ffi else None,
                          # aa_dag="cueq": the replay sidecar, the shipped NVRTC cache, LAMMPS_JAX_FFI_HANDLERS
                          **({"cueq": cueq_meta} if cueq_meta else {}),
                          # dense / matrix rows per block, and the memory they were sized for
-                         "block_rows": int(block_rows) if layout in ("dense", "matrix") else None,
+                         "block_rows": int(block_rows) if layout in ("dense", "matrix") and not ffi else None,
                          "device_memory": int(device_memory) if device_memory else None,
                          "dense_budget": int(budget),
                          "lammps_jax": lammps_jax_version()}

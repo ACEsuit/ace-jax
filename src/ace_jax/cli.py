@@ -591,6 +591,8 @@ def cmd_export(a):
         procs = ()
     if procs is not None and (len(procs) != 3 or min(procs) < 1):
         raise UsageError("--procs takes the LAMMPS processor grid: three integers px,py,pz")
+    if (a.ffi or a.ffi_flags) and (a.platform != "cpu" or a.dtype != "float64" or a.layout not in ("auto", "matrix")):
+        raise UsageError("--ffi runs the C++ kernel on the CPU: it needs --platform cpu, float64 and the matrix layout")
     try:
         import lammps_jax  # noqa: F401
     except ImportError:
@@ -605,17 +607,27 @@ def cmd_export(a):
     from ase.data import atomic_numbers
     els = None if a.type_elements is None else [
         int(e) if e.strip().isdigit() else atomic_numbers[e.strip()] for e in a.type_elements.split(",")]
+    ffi = False
+    if a.ffi or a.ffi_flags:
+        from .eval import ffi as kernel
+        try:                                      # compile (or reuse) the kernel before the export
+            ffi = kernel.library(flags=a.ffi_flags.split() if a.ffi_flags else None)
+        except kernel.FFIUnavailable as e:
+            raise UsageError(str(e)) from None
     from .eval.cueq import CueqUnavailable
     try:
         b = export_lammps(model, meta, out, max_atoms=cap["max_atoms"], max_edges=cap["max_edges"],
                           k_dense=cap["k_dense"], max_owned=cap["max_owned"], max_neighbors=cap["max_neighbors"],
                           dtype=a.dtype, layout=a.layout, type_elements=els, platform=a.platform,
-                          precision_structure=at if a.dtype != "float64" else None, aa_dag=aa_dag)
+                          precision_structure=at if a.dtype != "float64" else None, aa_dag=aa_dag, ffi=ffi)
     except CueqUnavailable as e:                  # cueq or the ffi-replay recorder missing (aa_dag="cueq")
         raise UsageError(str(e)) from None
     per = "" if procs is None else f", per MPI rank of {'x'.join(map(str, procs))}"
     print(f"lammps-jax: layout {b['ace_jax']['layout']}, {a.dtype}, {a.platform or 'cuda'}, sized for {len(at)} "
           f"atoms of {a.structure}{per} (max_atoms {cap['max_atoms']}, neighbour slots {cap['k_dense']}) -> {out}")
+    if b["ace_jax"].get("ffi"):
+        print(f"C++ kernel: {b['ace_jax']['ffi']['library']}; run LAMMPS with newton on and\n"
+              f"  export LAMMPS_JAX_FFI_HANDLERS=\"{b['ace_jax']['ffi']['handlers']}\"")
     if b["ace_jax"].get("cueq"):
         _print_cueq_env(b["ace_jax"]["cueq"], out)
     return b
@@ -780,6 +792,12 @@ def _parser():
     exp.add_argument("--print-env", default=None, metavar="BUNDLE",
                      help="instead of an export: print the environment that runs LAMMPS on an exported cueq "
                           "bundle (--aa-dag cueq), resolved on this machine (run it where LAMMPS runs)")
+    exp.add_argument("--ffi", action="store_true",
+                     help="lammps, --platform cpu: run linear ACE as ace-jax's C++ kernel (one FFI call per step), "
+                          "compiled on first use with the C++ compiler ($CXX, c++, g++ or clang++) and cached")
+    exp.add_argument("--ffi-flags", default=None,
+                     help="lammps: the kernel's compiler flags (implies --ffi; default \"-O3 -march=native\"): "
+                          "on a login node for compute nodes of another CPU type, e.g. --ffi-flags=\"-O3 -march=x86-64-v3\" (with =)")
     exp.add_argument("--type-elements", default=None,
                      help="lammps: comma-separated element of each LAMMPS atom type, in type order "
                           "(default: the model's element order)")
