@@ -56,6 +56,7 @@ At the target, in microseconds per atom-step:
 | model | A100 GPU | CPU node (128 cores) |
 |---|---|---|
 | linear ACE o4d20, ace-jax with lammps-jax (XLA program) | 3.12 | 50.5 |
+| linear ACE o4d20, ace-jax with lammps-jax and cuequivariance | 1.61 | – |
 | linear ACE o4d20, ace-jax C++ kernel with lammps-jax | – | 3.29 |
 | linear ACE o4d20, ML-PACE | 4.13 | 5.31 |
 | linear ACE o4d20, ACEpotentials.jl | – | 10.8 |
@@ -92,7 +93,12 @@ times faster than the compiled JAX program on the same node. At o4d20 it is
 1.6 times faster than ML-PACE (3.29 against 5.31 µs/atom-step).
 
 On the A100, ace-jax runs linear ACE o4d20 faster than ML-PACE (3.12
-against 4.13 µs/atom-step).
+against 4.13 µs/atom-step). With the cuequivariance product basis, ace-jax
+runs the same model at 1.61 µs/atom-step. For o4d20, this is the fastest
+linear ACE code on the A100. For o4d12 to o4d16, patched ML-PACE is faster.
+From o3d12 to o4d20, cuequivariance is 1.2 to 1.9 times
+faster than the default product basis. For o3d8 and o3d10, the two forms
+have approximately the same cost.
 
 ### How the cost was measured
 
@@ -106,6 +112,11 @@ against 4.13 µs/atom-step).
   4,000 or more chain-form multiplications per atom use the recursive (DAG)
   form. The printed figure marks these points with a dot. In the
   interactive figure, the code line of these points shows `dag:greedy`.
+- **ace-jax with cuequivariance.** The same linear ACE fits run in
+  lammps-jax bundles with `aa_dag="cueq"`, on the A100 only
+  ([cuequivariance on the GPU](howto/lammps.md#cuequivariance-on-the-gpu)).
+  Each model is exported one time, for 32,768 atoms. The check and the
+  timed runs use that bundle.
 - **Linear ACE, run by ML-PACE.** The same linear ACE fits are written as
   `.yace` files with tabulated radial functions
   ([Write an ACE model as a .yace file](howto/pace.md)). They run in

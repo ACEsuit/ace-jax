@@ -94,6 +94,12 @@ keeping the per-species zero pattern that learning preserves
 (`models.py ace-learned`). Medium models only. The method and the
 same-container measurements are in `docs/dev/learned-radial-splining.md`.
 
+**cuequivariance product basis.** These random-weight lines use ace-jax's own product basis (`aa_dag="auto"`).
+The opt-in GPU form `aa_dag="cueq"` (NVIDIA cuequivariance kernels; single-species and species-embedding (TrACE)
+models) is timed on the fitted Si linear ACE ladder instead, on one A100 in LAMMPS: `docs/dev/accuracy-cost-results.md`
+and the user Performance page. Only that single-species ladder is timed: these SiGe and Cantor lines are categorical
+multi-species models, which cueq does not support, and no TrACE line is timed with it yet.
+
 **ACEpotentials.jl.** Both lines run the linear ACE models the ace-jax
 `acejax-ace` line runs, rebuilt in a pinned Julia 1.12 env
 (`bench/scaling/julia/`, ACEpotentials.jl v0.10.2): every run rebuilds the

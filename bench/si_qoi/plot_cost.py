@@ -42,6 +42,10 @@ FAM = {  # family: (label, colour, marker, linestyle, filled, qoi model name pat
     # and by ace-jax's C++ FFI kernel in the lammps-jax bundle (ace_jax.eval.ffi; CPU only): the speed-up over the
     # XLA program of the linear ACE line itself
     "ace_ffi":    ("linear ACE, ace-jax C++ kernel (FFI)", "#2a78d6", "<", "--", True, "ACE_{s}"),
+    # and by ace-jax with NVIDIA cuequivariance as the product basis (export_lammps(aa_dag="cueq"); A100 only): the
+    # same blue (no new colour to validate), a right triangle; its dash-dot is the CPU-only trim line's, never on
+    # the same axes, and no other blue line of the A100 row has it
+    "ace_cueq":   ("linear ACE, ace-jax + cueq", "#2a78d6", ">", "-.", True, "ACE_{s}"),
     # the order-4 ladder in reduced precision (docs/dev/fp32-results.md): the same fits, their own cost --
     # ace-jax float32 bundles, and patched pace/kk (PACE_KK_RHOW=3) in a KOKKOS_PREC=mixed LAMMPS.  Each pairs with its float64 line:
     # its marker and line style in a lighter blue (the wL ramp's light step; the wL ladder is not in this figure)
@@ -103,6 +107,8 @@ def family_of(r):
         return ("mace_xl_" if r.get("code", "").startswith("mace-xl") else "mace_") + size[-2:]
     if fam == "ace" and r.get("code") == "acepotentials-trim":
         return "ace_trim"
+    if fam == "ace" and r.get("code") == "acejax-ace" and r.get("aa_dag") == "cueq":
+        return "ace_cueq"
     if fam == "ace" and r.get("code") == "acejax-ace" and r.get("ffi"):     # a timing row of an FFI bundle
         return "ace_ffi"
     if fam == "ace" and r.get("code") == "acejax-ace" and r.get("dtype") == "float32":
@@ -122,7 +128,8 @@ COST_AS = {"ace_E10": "ace"}
 # a second code for the same fits: its cost under its own name (make_cost.py writes it there)
 COST_NAME = {"mace_xl_L0": "MACExl_{s}", "mace_xl_L1": "MACExl_{s}", "ace_tab": "ACEtab_{s}", "ace_trim": "ACEtrim_{s}",
              "ace_ffi": "ACEffi_{s}",
-             "ace_tabfork": "ACEtabfork_{s}", "ace_f32": "ACEf32_{s}", "ace_tab_mixed": "ACEtabmixed_{s}"}
+             "ace_tabfork": "ACEtabfork_{s}", "ace_f32": "ACEf32_{s}", "ace_tab_mixed": "ACEtabmixed_{s}",
+             "ace_cueq": "ACEcueq_{s}"}
 REDUCED = ("ace_f32", "ace_tab_mixed")              # reduced-precision lines: make_cost --dtype keeps them
 # timing files of ML-PACE with the proposed additions (sulis-{cpu,gpu}-pacefork.sbatch): their
 # mlpace rows are the ace_tabfork line, not stock ML-PACE's
@@ -200,7 +207,8 @@ def load_rows():
             + [r | {"family": f} for r in rows if r["family"] == "ace" and r["size"] in TAB_SIZES for f in REDUCED]
             + [r | {"family": "ace_tabfork"} for r in rows if r["family"] == "ace" and r["size"] in TAB_SIZES]
             + [r | {"family": "ace_trim"} for r in rows if r["family"] == "ace"]
-            + [r | {"family": "ace_ffi"} for r in rows if r["family"] == "ace"])
+            + [r | {"family": "ace_ffi"} for r in rows if r["family"] == "ace"]
+            + [r | {"family": "ace_cueq"} for r in rows if r["family"] == "ace"])
 
 
 def collect(cost):
@@ -437,6 +445,8 @@ def main():
                 "ace-jax C++ kernel (CPU only): the same bundles with the XLA program replaced by one XLA FFI call "
                 "(ace_jax.eval.ffi; radials tabulated in r), 128x1.\n"
                 "NEP: trained by GPUMD; on the CPU LAMMPS pair_style nep (NEP_CPU, float64); on the GPU GPUMD's own MD code, mixed precision (labelled).\n"
+                + ("ace-jax + cueq (A100 only): the same fits in lammps-jax bundles with NVIDIA cuequivariance as the product basis "
+                   "(aa_dag='cueq'; its kernels replayed in LAMMPS from the shipped NVRTC cache).\n" if "ace_cueq" not in SKIP else "")
                 if any("CPU" in r[0] for r in rows) else "")
     bottom = 0
     if not a.no_note:

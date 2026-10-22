@@ -261,7 +261,8 @@ def chain_multiplies(specs):
 def resolve_aa_dag(model, mode):
     """The plan mode `mode` stands for on `model`: "auto" is "greedy" when the chain form's multiplies
     (`chain_multiplies` of its aa_specs) reach AUTO_MIN_CHAIN_MUL, else None (the chain form); a model
-    without a product basis to plan (no `aa_dag` field) resolves to None; other modes as given."""
+    without a product basis to plan (no `aa_dag` field) resolves to None; other modes as given ("auto" never
+    resolves to "cueq", which is opt-in)."""
     if mode != "auto":
         return mode
     specs = getattr(model, "aa_specs", None) if hasattr(model, "aa_dag") else None
@@ -269,23 +270,31 @@ def resolve_aa_dag(model, mode):
 
 
 def with_aa_dag(model, mode="greedy"):
-    """`model` with DAG plans attached for its energy path's product basis (mode
-    None: plans removed; "auto": `resolve_aa_dag`).  ACEModel: `aa_dag` for `aa_specs` (the sparse layout and
-    the unblocked dense one) and, on a lean model, `blk_aa_dag` for `blk_aa_specs`;
-    read by the folded readout only (the basis methods keep the chain form), so
-    apply it after `lean`.  PACEModel: `aa_dag`.  A model without the fields (a
-    wrapper reading the basis) is returned as given.  Host-side, on concrete
-    index arrays."""
+    """`model` with DAG plans attached for its energy path's product basis (mode None: plans removed, cueq
+    plans included; "auto": `resolve_aa_dag`; "cueq": the folded readout's product basis through
+    cuequivariance instead, `eval.cueq.with_cueq`, a single-species or species-embedding lean ACEModel only).  ACEModel: `aa_dag`
+    for `aa_specs` (the sparse layout and the unblocked dense one) and, on a lean model, `blk_aa_dag` for
+    `blk_aa_specs`; read by the folded readout only (the basis methods keep the chain form), so apply it after
+    `lean`.  PACEModel: `aa_dag`.  A model without the fields (a wrapper reading the basis) is returned as
+    given.  Host-side, on concrete index arrays."""
     import dataclasses
     if not hasattr(model, "aa_dag"):
         return model
     mode = resolve_aa_dag(model, mode)
     has_blk = hasattr(model, "blk_aa_dag")
     if mode is None:
-        return dataclasses.replace(model, aa_dag=None, **({"blk_aa_dag": None} if has_blk else {}))
+        kw = {"blk_aa_dag": None} if has_blk else {}
+        if hasattr(model, "cueq_plan"):
+            kw.update(cueq_plan=None, blk_cueq_plan=None)
+        return dataclasses.replace(model, aa_dag=None, **kw)
+    if mode == "cueq":                            # cuequivariance (`eval.cueq`), opt-in, never "auto"
+        from .cueq import with_cueq
+        return with_cueq(model)
     if mode not in PLAN_MODES:
-        raise ValueError(f"aa_dag must be one of {PLAN_MODES}, 'auto' or None, got {mode!r}")
+        raise ValueError(f"aa_dag must be one of {PLAN_MODES}, 'cueq', 'auto' or None, got {mode!r}")
     kw = {"aa_dag": _plan_for(model.aa_specs, mode)}
     if has_blk:
         kw["blk_aa_dag"] = None if model.blk_aa_specs is None else _plan_for(model.blk_aa_specs, mode)
+    if hasattr(model, "cueq_plan"):               # the folded readout reads cueq plans first: drop them
+        kw.update(cueq_plan=None, blk_cueq_plan=None)
     return dataclasses.replace(model, **kw)

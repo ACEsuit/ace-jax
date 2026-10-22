@@ -50,6 +50,10 @@ dependencies = [
 # GP arm included, needs only the core dependencies).
 gp = ["blackjax>=1.6"]
 cuda = ["jax[cuda12]>=0.10.1"]
+# aa_dag="cueq": NVIDIA cuequivariance as the GPU product basis (single-species and species-embedding models;
+# docs/dev/specs/2026-10-22-cueq-product-basis-design.md).  Linux x86_64 + CUDA 12 only; tested at 0.13.x.
+cueq = ["cuequivariance>=0.13,<0.14", "cuequivariance-jax>=0.13,<0.14",
+        "cuequivariance-ops-jax-cu12>=0.13,<0.14; sys_platform == 'linux'"]
 # Fast neighbour lists; ace-jax uses them when present and falls back to ASE's
 # list otherwise, so they are intentionally NOT core deps.  matscipy-neighbours
 # (preferred: OpenMP CPU, native dense neighbour_matrix) ships as a source

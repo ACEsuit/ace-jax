@@ -184,6 +184,73 @@ A LAMMPS plugin that is older than the lammps-jax Python package does not
 accept a `matrix` bundle. To correct this, build the plugin again at the
 version of the Python package, or export with `layout="dense"`.
 
+## cuequivariance on the GPU
+
+On a CUDA GPU, the product basis can run as NVIDIA cuequivariance kernels.
+This is an option. `aa_dag="auto"` never selects it.
+
+!!! warning
+    - The export of an o4d20 model takes approximately 10 to 30 minutes on an A100.
+    - Without the shipped kernel cache, the first LAMMPS start compiles the kernels. A cold start takes tens of minutes.
+    - The cache works only on the same GPU architecture as the export GPU.
+    - This form supports models with one species.
+    - This form also supports species-embedded (TrACE) models.
+    - This form does not support categorical models with more than one species.
+
+Do these steps:
+
+1. Install the extra on Linux with CUDA 12: `pip install "ace-jax[cueq]"`.
+2. Get a lammps-jax checkout. Build the replay shim in its `contrib/ffi-replay` directory.
+   Use the gcc command from the README of that directory. It needs libffi.
+3. If your system has `libffi.so.6`, replace `-l:libffi.so.8` with `-lffi` in the command.
+4. Set `LAMMPS_JAX_CONTRIB` to the `contrib/ffi-replay` directory for the export.
+5. Export the bundle on a machine with a CUDA GPU:
+
+    ```bash
+    aj export --model fit/model.npz --out si_bundle.json --structure start.xyz \
+        --type-elements Si --aa-dag cueq
+    ```
+
+6. Copy `si_bundle.json`, `si_bundle.ffi-replay` and `si_bundle.cueq-cache/` to the LAMMPS machine.
+   Keep the three items in one directory.
+7. On the LAMMPS machine, install the extra: `pip install "ace-jax[cueq]"`.
+8. On the LAMMPS machine, build the replay shim as in steps 2 and 3.
+9. On the LAMMPS machine, set `LAMMPS_JAX_CONTRIB` to its `contrib/ffi-replay` directory.
+10. On the LAMMPS machine, print the run environment:
+
+    ```bash
+    aj export --print-env si_bundle.json
+    ```
+
+11. Set the printed lines in the shell that runs LAMMPS.
+12. Run LAMMPS as before.
+
+If LAMMPS runs on the export machine, use the lines that the export printed.
+Steps 6 to 10 are then not necessary.
+
+The bundle records the replay file and the cache directory relative to the bundle, as `ace_jax.cueq`.
+The `--print-env` option finds them next to the bundle on the machine where you run it.
+It also finds the cuequivariance libraries of the Python installation on that machine.
+It names the shim in `LAMMPS_JAX_CONTRIB` of that machine.
+If `LAMMPS_JAX_CONTRIB` is not set there, the lines name the shim of the export machine.
+
+The printed lines set `LAMMPS_JAX_FFI_HANDLERS`, `FFI_REPLAY_FILE`, `FFI_REPLAY_LIB`
+and `CUEQUIVARIANCE_OPS_NVRTC_CACHE_DIR`. They also add the directories of the cuequivariance
+library and the pip CUDA libraries to `LD_LIBRARY_PATH`.
+
+The export refuses these cases:
+
+- The model is a `.yace` model, or any model that is not a linear ACE model.
+- The model has more than one species (categorical).
+- The platform is not `cuda`.
+- The export machine has no CUDA GPU: the JAX backend is not `gpu`.
+- cuequivariance or the recorder in `contrib/ffi-replay` is not available.
+- The Python call `export_lammps` has `lean=False`.
+
+Export one cueq bundle for each Python process. A second export in the same process raises an error.
+To use the form in Python, pass `aa_dag="cueq"` to `ACECalculator` on a CUDA GPU.
+A change of `calc.model`, a readout change included, rebuilds the plan and compiles the kernels again.
+
 ## Learned radials and precision
 
 - `lean=True` (the default) exports the lean evaluation form, as the ASE
