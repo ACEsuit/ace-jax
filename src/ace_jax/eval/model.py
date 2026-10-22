@@ -413,7 +413,7 @@ class ACEModel(EdgeSiteModel):
         plan = self.blk_cueq_plan if specs is not None else self.cueq_plan
         if plan is not None:                      # cuequivariance product basis (`eval.cueq`)
             from .cueq import product_energy
-            e = product_energy(plan.v, A)
+            e = product_energy(plan.v, A, node_z=node_z)
         elif dag is not None:                     # recursive product basis (`aa_dag`)
             e = dag_contract(A.T, dag, self.ctilde, node_z)
         else:

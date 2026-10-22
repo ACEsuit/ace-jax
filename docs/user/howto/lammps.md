@@ -136,7 +136,9 @@ This is an option. `aa_dag="auto"` never selects it.
     - The export of an o4d20 model takes approximately 10 to 30 minutes on an A100.
     - Without the shipped kernel cache, the first LAMMPS start compiles the kernels. A cold start takes tens of minutes.
     - The cache works only on the same GPU architecture as the export GPU.
-    - Only models with one species can use this form.
+    - This form supports models with one species.
+    - This form also supports species-embedded (TrACE) models.
+    - This form does not support categorical models with more than one species.
 
 Do these steps:
 

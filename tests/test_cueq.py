@@ -277,3 +277,139 @@ def test_run_env_resolves_the_sidecars_next_to_a_moved_bundle(monkeypatch):
     monkeypatch.setenv("LAMMPS_JAX_CONTRIB", "/here/contrib/ffi-replay")       # this host's shim
     assert cueq.run_env(rec, "/moved/here/si.json")["LAMMPS_JAX_FFI_HANDLERS"] == \
         "uniform_1d_cuda=/here/contrib/ffi-replay/ffi_replay_shim.so:ffi_replay_handler"
+
+
+# ------------------------------------------------------------------ TrACE (species-embedding) models
+TRACE = {"SiGe": ([14, 32], 4, 8, None),            # elements, order, degree, d_max: MH-1 rows, fixtures/
+         "Cantor": ([24, 25, 26, 27, 28], 3, 6, 4)}  # embedding_ref_mh1_*.npz (as the spike's trace_* models)
+
+
+_trace_cache = {}
+
+
+def _trace(name):
+    """A small embedding (TrACE) model with a random readout: (full model, meta)."""
+    if name not in _trace_cache:
+        import dataclasses
+        import numpy as np
+        import jax.numpy as jnp
+        from conftest import FIXTURE_DIR
+        from ace_jax.basis.model import build_embedding_model
+        els, order, deg, d_max = TRACE[name]
+        tab = "SiGe" if len(els) == 2 else "CrMnFeCoNi"
+        t = np.load(FIXTURE_DIR / f"embedding_ref_mh1_{tab}.npz")
+        m, meta = build_embedding_model(els, order, deg, embedding=([int(z) for z in t["zlist"]], t["table"]),
+                                        d_max=d_max).eval_pair()
+        rng = np.random.default_rng(7)
+        m = dataclasses.replace(m, WB=jnp.asarray(rng.normal(size=m.WB.shape)),
+                                Wpair=jnp.asarray(0.1 * rng.normal(size=m.Wpair.shape)))
+        _trace_cache[name] = m, meta
+    return _trace_cache[name]
+
+
+def _alloy(meta, n_rep, seed):
+    import numpy as np
+    from ase.build import bulk
+    els = [int(z) for z in meta["elements"]]
+    at = (bulk("Ni", "fcc", a=3.6, cubic=True) if len(els) > 2
+          else bulk("Si", "diamond", a=5.43, cubic=True)).repeat(n_rep)
+    rng = np.random.default_rng(seed)
+    at.numbers = np.asarray(els)[np.arange(len(at)) % len(els)]
+    rng.shuffle(at.numbers)
+    at.rattle(0.05, seed=seed)
+    return at
+
+
+@pytest.mark.parametrize("name", list(TRACE))
+def test_check_supported_accepts_embedding_models(name):
+    from ace_jax.eval import cueq
+    from ace_jax.eval.model import lean
+    m, _ = _trace(name)
+    cueq.check_supported(m, folded=False)                             # as given (`check_export`)
+    L = lean(m)
+    assert L.ctilde.shape[1] == len(TRACE[name][0]) > 1
+    cueq.check_supported(L)
+
+
+@pytest.mark.parametrize("blocked", [False, True])
+@pytest.mark.parametrize("name", list(TRACE))
+def test_trace_plan_reproduces_the_folded_product_basis(name, blocked):
+    """The channel-free paths and weights W[path, k, z] give the folded product basis exactly (numpy, no cueq):
+    e_i = sum_p sum_k W[p, k, z_i] prod_t A'_i[s_pt, k], A' gathered from A."""
+    import numpy as np
+    from ace_jax.eval import cueq
+    from ace_jax.eval.edge_model import product_basis_dot
+    from ace_jax.eval.model import lean
+    m, _ = _trace(name)
+    L = lean(m)
+    assert bool(L.blk) and not L.blk_compact
+    specs = L.blk_aa_specs if blocked else L.aa_specs
+    gather, paths, W, st = cueq.trace_plan(L, blocked)
+    n_A, nz = cueq.n_A_of(specs), L.ctilde.shape[1]
+    assert st["n_paths"] == len(paths) < st["n_AA"] == sum(np.shape(s)[0] for s in specs)
+    rng = np.random.default_rng(1)
+    A = rng.normal(size=(23, n_A))
+    z = rng.integers(0, nz, 23)
+    Ap = np.concatenate([A, np.zeros((23, 1))], 1)[:, np.where(gather < 0, n_A, gather)]    # (n, n_seg, d)
+    e = sum((W[j][:, z].T * np.prod(Ap[:, list(p), :], axis=1)).sum(-1) for j, p in enumerate(paths))
+    ref = np.asarray(product_basis_dot(A, specs, L.ctilde[:, z]))
+    np.testing.assert_allclose(e, ref, rtol=1e-12, atol=1e-12 * np.abs(ref).max())
+
+
+def _site_and_efv(model, meta, at, layout):
+    import jax.numpy as jnp
+    import numpy as np
+    from ace_jax.eval.model import highest_precision
+    from ace_jax.eval.nlist import dense_from_sparse, sparse_graph
+    z2i = {int(z): i for i, z in enumerate(meta["elements"])}
+    nz = jnp.asarray([z2i[int(z)] for z in at.numbers], jnp.int32)
+    g = sparse_graph(at.positions, at.cell.array, at.pbc, meta["rcut"])
+    with highest_precision():
+        if layout == "sparse":
+            s, r = jnp.asarray(g.senders), jnp.asarray(g.receivers)
+            args = (jnp.asarray(g.rij), nz[s], nz[r])
+            site = model.site_energies(*args, s, len(at), nz)
+            E, F, V = model.energy_forces_virial(*args, s, r, len(at), nz)
+        else:
+            d = dense_from_sparse(g, meta["rcut"])
+            idx = jnp.asarray(d.idx)
+            args = (jnp.asarray(d.rij), jnp.broadcast_to(nz[:, None], idx.shape), nz[idx])
+            site = model.site_energies_dense(*args, jnp.asarray(d.mask), nz)
+            E, F, V = model.energy_forces_virial_dense(*args, idx, jnp.asarray(d.mask), nz)
+    return tuple(np.asarray(x) for x in (site, F, V))
+
+
+@pytest.mark.parametrize("layout", ["sparse", "dense"])
+@pytest.mark.parametrize("name", list(TRACE))
+def test_cueq_trace_matches_the_full_model(name, layout):
+    """aa_dag="cueq" on an embedding model (GPU, float64): site energies <= 1e-12, forces and virial <= 1e-10
+    relative to the full model.  sparse reads the aspec-layout plan, dense the l-blocked one."""
+    _gpu()
+    import numpy as np
+    from ace_jax.eval import cueq
+    from ace_jax.eval.model import lean
+    m, meta = _trace(name)
+    at = _alloy(meta, (3, 2, 1), seed=4)                             # 48 / 24 atoms: padded U-atom groups
+    cq = cueq.with_cueq(lean(m, spline_tol=None))
+    assert cq.cueq_plan is not None and cq.blk_cueq_plan is not None
+    e0, f0, v0 = _site_and_efv(m, meta, at, layout)
+    e1, f1, v1 = _site_and_efv(cq, meta, at, layout)
+    assert np.abs(e1 - e0).max() <= 1e-12 * max(np.abs(e0).max(), 1)
+    assert np.abs(f1 - f0).max() <= 1e-10 * max(np.abs(f0).max(), 1)
+    assert np.abs(v1 - v0).max() <= 1e-10 * max(np.abs(v0).max(), 1)
+
+
+def test_cueq_trace_calculator_matches_the_full_model():
+    _gpu()
+    import numpy as np
+    from ace_jax.calc.point import ACECalculator
+    m, meta = _trace("SiGe")
+    at = _alloy(meta, 2, seed=5)
+    out = []
+    for kw in ({"lean": False, "aa_dag": None}, {"aa_dag": "cueq"}):
+        at.calc = ACECalculator(m, meta, **kw)
+        out.append((at.get_potential_energy(), at.get_forces()))
+    assert at.calc.aa_dag == "cueq"
+    (e0, f0), (e1, f1) = out
+    assert abs(e1 - e0) <= 1e-12 * max(abs(e0), 1)
+    assert np.abs(f1 - f0).max() <= 1e-10 * max(np.abs(f0).max(), 1)

@@ -138,8 +138,9 @@ class ACECalculator(Calculator):
         "greedy" from `eval.aa_dag.AUTO_MIN_CHAIN_MUL` chain-form multiplies per
         site, where it is faster on CPU and GPU, and the chain form below (a tie;
         bitwise as before).  `calc.aa_dag` is the mode used.  "cueq" is an opt-in
-        GPU form (`eval.cueq`, the `cueq` extra; one species, folded linear ACE;
-        needs a CUDA backend, else ValueError): the product basis runs in NVIDIA
+        GPU form (`eval.cueq`, the `cueq` extra; one species or species-embedding
+        (TrACE), folded linear ACE; needs a CUDA backend, else ValueError): the
+        product basis runs in NVIDIA
         cuequivariance kernels, in float32 or float64.  Each `calc.model` swap
         (a readout swap included) rebuilds the cueq plan and recompiles its
         kernels -- minutes at o4d20 without the NVRTC cache

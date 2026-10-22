@@ -272,7 +272,7 @@ def resolve_aa_dag(model, mode):
 def with_aa_dag(model, mode="greedy"):
     """`model` with DAG plans attached for its energy path's product basis (mode None: plans removed, cueq
     plans included; "auto": `resolve_aa_dag`; "cueq": the folded readout's product basis through
-    cuequivariance instead, `eval.cueq.with_cueq`, a single-species lean ACEModel only).  ACEModel: `aa_dag`
+    cuequivariance instead, `eval.cueq.with_cueq`, a single-species or species-embedding lean ACEModel only).  ACEModel: `aa_dag`
     for `aa_specs` (the sparse layout and the unblocked dense one) and, on a lean model, `blk_aa_dag` for
     `blk_aa_specs`; read by the folded readout only (the basis methods keep the chain form), so apply it after
     `lean`.  PACEModel: `aa_dag`.  A model without the fields (a wrapper reading the basis) is returned as

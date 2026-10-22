@@ -742,7 +742,7 @@ def _parser():
                           "(run LAMMPS with `processors px py pz`)")
     exp.add_argument("--aa-dag", default="auto", choices=["auto", "chain", "greedy", "prefix", "cueq"],
                      help="lammps: the product basis form: auto (greedy for large bases, else chain), chain, the "
-                          "DAG plans greedy / prefix, or cueq (NVIDIA cuequivariance kernels; CUDA, one species, "
+                          "DAG plans greedy / prefix, or cueq (NVIDIA cuequivariance kernels; CUDA, one species or species-embedding, "
                           "the cueq extra and lammps-jax's contrib/ffi-replay via LAMMPS_JAX_CONTRIB)")
     exp.add_argument("--type-elements", default=None,
                      help="lammps: comma-separated element of each LAMMPS atom type, in type order "

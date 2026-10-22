@@ -438,7 +438,7 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
     form below (`eval.aa_dag.resolve_aa_dag`).  Recorded as `ace_jax.aa_dag`, the
     mode used.
 
-    aa_dag="cueq" (opt-in, the `cueq` extra; a CUDA `platform` only; one species, a linear ACEModel with
+    aa_dag="cueq" (opt-in, the `cueq` extra; a CUDA `platform` only; one species or species-embedding (TrACE), a linear ACEModel with
     lean=True): the product basis as NVIDIA cuequivariance kernels (`eval.cueq.with_cueq`).  The bundle keeps
     their `uniform_1d_cuda` custom calls, whose lowering bakes a process-local plan handle (a plan-registry
     index) into each.  So the export records every plan compile with lammps-jax's contrib/ffi-replay recorder
@@ -533,7 +533,7 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
     from ..eval.aa_dag import resolve_aa_dag, with_aa_dag
     aa_dag = resolve_aa_dag(model, aa_dag)    # recursive product basis (`eval.aa_dag`); "auto" picks per model
     if rec is not None:
-        model = cueq.with_cueq(model)         # the cuequivariance product basis (single species, folded by lean)
+        model = cueq.with_cueq(model)         # the cuequivariance product basis (single species or TrACE, folded by lean)
     elif aa_dag is not None:
         model = with_aa_dag(model, aa_dag)
     # the traced model in the bundle dtype: a float64 model with float32 positions lowers to a

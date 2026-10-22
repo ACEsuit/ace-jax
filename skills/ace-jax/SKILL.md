@@ -427,8 +427,8 @@ for its CPU build, which refuses a cuda bundle and vice versa).
 - The dense bundle runs in blocks of `BUNDLE_BLOCK_ROWS` (32,768) rows above
   one block, bounding memory at large N.
 - `aa_dag="cueq"` (opt-in; `auto` never picks it; `aj export --aa-dag cueq`): the product basis as NVIDIA
-  cuequivariance kernels (`eval/cueq.py`), CUDA only, `pip install "ace-jax[cueq]"`. One species (a linear
-  `ACEModel`) for now. Refused: cueq missing, PACE or non-ACE models, categorical multi-species, a non-CUDA
+  cuequivariance kernels (`eval/cueq.py`), CUDA only, `pip install "ace-jax[cueq]"`. One species, or species-embedding
+  (TrACE) models (a linear `ACEModel`). Refused: cueq missing, PACE or non-ACE models, categorical multi-species, a non-CUDA
   platform or device (`ACECalculator` also needs a CUDA backend). Needs `LAMMPS_JAX_CONTRIB` = lammps-jax's
   `contrib/ffi-replay` directory at export (the recorder is not in the package) and at run time (its built
   `ffi_replay_shim.so`; README gcc command, `-lffi` on libffi.so.6 systems). One cueq bundle per process.
