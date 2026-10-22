@@ -20,6 +20,8 @@ ASE/JAX evaluation and in lammps-jax GPU bundles.
 Success: a user of a single-species o4d16+ model on an A100 gets the gated speed-ups above from one documented
 option, in ASE and in LAMMPS; results agree with the reference evaluation to the bundle parity tolerances; nothing
 changes for users who do not opt in, and nothing imports cueq unless they do.
+The Si linear ACE ladder is re-benchmarked with cueq and shown on the docs Performance page as an extra code
+option beside the existing linear ACE lines.
 
 ## What the spike established (the design rests on these)
 
@@ -113,9 +115,17 @@ program runs from the bundle, the replay shim resolving `uniform_1d_cuda`.
   `with_cueq` against the full model (site energies ≤ 1e-12, forces ≤ 1e-10 relative, float64) on the Si fixture
   and an o4d12 model; float32 within ace-jax's float32 tolerances; a 64-atom LAMMPS bundle gate through ffi-replay;
   a readout swap; phase 2 the same on SiGe and Cantor TrACE fixtures.
-- **Benchmark:** the accuracy-cost GPU timing rows for o4d16/o4d20 with `aa_dag="cueq"` (one export per model, not
-  per gate cell: the spike's `export_one` pattern), plotted as their own line; `docs/dev/benchmarks.md` and the user
-  Performance page updated.
+- **Benchmark: re-time the whole Si linear ACE ladder with cueq** (the accuracy-cost `ace` sizes, o3d8-o4d20, the
+  same fits) on one Sulis A100 at 32,768 atoms, float64, each bundle through the 64-atom parity gate first, with
+  one export per model rather than per gate cell (the spike's `export_one` pattern; o4d20 exports in ~13 min). The
+  rows go to their own results file and through `make_cost.py` into the GPU cost file (the CPU row has none: cueq is
+  GPU-only), as a new family, "linear ACE, ace-jax + cueq", in `plot_cost.FAM` (linear ACE's blue, its own marker
+  and line style, like the other same-fits-other-code lines) and in `plot_cost_web.PRESETS` ("Same model, other
+  code", and "Headline" if it is the fastest linear ACE code on the A100). Regenerate every figure from the
+  reproduce block in `docs/dev/accuracy-cost-results.md`; add the line, its "How the cost was measured" bullet and,
+  at o4d20, its row in the "At the target" table to the user Performance page, ASD-STE style; update
+  `docs/dev/benchmarks.md`. Small sizes may not gain (the spike's o4d12 standalone gain was 1.06-1.4x); the line
+  shows them as measured.
 
 ## Documentation
 
