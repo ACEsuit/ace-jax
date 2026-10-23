@@ -89,8 +89,8 @@ the neighbour-list method.
 
 ## Speed
 
-The table gives the speed-up against `ACECalculator` with one structure in
-each call. The model is linear ACE for Si (correlation order 4, total degree
+The table gives the speed-up of `calculate` against `ACECalculator` with one
+structure in each call. The model is linear ACE for Si (correlation order 4, total degree
 12). Each call has 1024 structures (256 for 216 atoms on the CPU).
 
 | Atoms in each structure | GPU, float32 | GPU, float64 | CPU with the C++ kernel, float64 |
@@ -101,6 +101,89 @@ each call. The model is linear ACE for Si (correlation order 4, total degree
 | 216 | 2.2x | 1.5x | 1.5x |
 
 The GPU is an NVIDIA RTX 4000 Ada. The CPU has 32 cores.
+
+## Run MD or relax many structures with JAX-MD
+
+ace-jax does not contain integrators or optimisers. It gives what
+[JAX-MD](https://github.com/jax-md/jax-md) needs to run them on a batch with
+`jax.vmap`:
+
+- `bc.neighbour_lists(structures, skin)` puts all the structures into one
+  padded batch and makes their neighbour lists.
+- `bc.energy_fn()` gives the energy of one structure, in the JAX-MD form.
+- `ace_jax.batch` gives helpers for the padding atoms.
+
+!!! note "Install"
+    Install ace-jax with the `jaxmd` extra: `pip install "ace-jax[jaxmd]"`.
+
+The procedure for NVE MD:
+
+1. Make the neighbour lists and the energy function.
+2. Make the JAX-MD integrator with `space.free()`.
+3. Make the initial momenta with `batch.initial_momenta`.
+4. Initialise the integrator for each structure with `jax.vmap`.
+5. Run the steps in compiled chunks.
+6. After each chunk, update the neighbour lists.
+
+```python
+import jax
+jax.config.update("jax_enable_x64", True)
+from jax_md import simulate, space
+from ace_jax import batch
+from ace_jax.batch import BatchCalculator
+
+bc = BatchCalculator("fit/model.npz")
+nb = bc.neighbour_lists(structures, skin=1.0)
+nl = nb.allocate()
+energy = bc.energy_fn()
+
+_, shift = space.free()
+init, apply = simulate.nve(energy, shift, dt=1.0 / 10.18)    # 1 fs
+mass = 28.0855
+
+p0 = batch.initial_momenta(jax.random.PRNGKey(0), nb.live, kT=0.025, mass=mass)
+state = jax.vmap(lambda R, p, n: init(None, R, kT=0.0, mass=mass, momenta=p, neighbor=n))(
+    nb.positions, p0, nl)
+
+def chunk(state, n):
+    return jax.lax.fori_loop(0, 50, lambda i, s: apply(s, neighbor=n), state)
+step = jax.jit(jax.vmap(chunk))
+
+for _ in range(100):
+    state = step(state, nl)
+    nl, rebuilt = nb.update(state.position, nl)
+
+positions = nb.unpad(state.position)          # list of (n_atoms, 3) arrays
+kT = batch.temperature(state.momentum, mass, nb.live)
+```
+
+All structures go into one batch with the size of the largest structure.
+The other structures get padding atoms. The cell of each structure can be
+smaller than the cutoff.
+
+The neighbour lists are made for the cutoff plus `skin`. `nb.update` makes
+them again when an atom moves more than `skin / 2`. If a structure gets more
+neighbours than the lists hold, `nb.update` makes larger lists. The compiled
+step then compiles again.
+
+For a geometry optimisation, use `minimize.fire_descent` in the same way.
+Each structure keeps its own FIRE step size.
+
+!!! warning "Padding atoms"
+    JAX-MD gives momenta to all atoms, padding atoms included. This changes
+    the kinetic energy and moves the centre of mass of the real atoms.
+
+    - Give the initial momenta with `batch.initial_momenta`. Do not let
+      `init` make them.
+    - After Langevin steps, use `batch.zero_padding` before you read
+      temperatures.
+    - Calculate temperatures with `batch.temperature`, not with JAX-MD.
+    - Do not use the Nose-Hoover thermostat with padding atoms. It counts
+      the padding atoms as degrees of freedom. Give it structures of one
+      size only.
+
+!!! note "C++ kernel"
+    `energy_fn` needs the JAX model. It gives an error with `ffi=True`.
 
 ## `aj eval`
 
@@ -115,4 +198,5 @@ model. You do not have to change the command.
   [Per-atom force uncertainty](force-uncertainty.md)).
 - The forces are derivatives with respect to positions only. For
   derivatives with respect to the coefficients, use the JAX model directly.
-- `BatchCalculator` does not run MD or geometry optimisation.
+- MD and geometry optimisation use JAX-MD (see above). The cell is fixed:
+  NPT and cell relaxation are not available.

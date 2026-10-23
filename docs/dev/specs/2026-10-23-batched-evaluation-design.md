@@ -7,6 +7,11 @@ structure on the host for all but the smallest cells (`host_neighbours`), since 
 costs 10-40 µs per atom there; the JAX model on a CPU batches only structures up to 16 atoms (it gains
 nothing above); evaluation is one dense block of B x N rows rather than a vmap; and `ACECalculator`'s
 option resolution is reused by building one inside `BatchCalculator`, not by refactoring it out.
+Design 7 (JAX-MD under vmap) is implemented too, for a fixed cell: `BatchCalculator.energy_fn`,
+`neighbour_lists` -> `BatchNeighbours` (`allocate`, `update`, `needs_rebuild`, `unpad`) and the padding
+helpers `initial_momenta`, `zero_padding`, `temperature`. Checked: vmapped FIRE, NVE and Langevin equal
+the per-structure runs; padding found two leaks (JAX-MD's init gives padding atoms momenta and removes
+the centre of mass over every slot; Nose-Hoover counts padding as degrees of freedom).
 
 ## Goal and scope
 

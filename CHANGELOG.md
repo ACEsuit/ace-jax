@@ -32,6 +32,13 @@ variable.
   CPU it needs the C++ kernel (`ffi=True`): 19 to 52 times for 2 and 8
   atoms, 2.4 times for 64. `aj eval` uses it when no posterior or GP model is
   given. Guide: "Evaluate many structures".
+- **Batched MD and relaxation with JAX-MD.** JAX-MD's integrators and
+  optimisers run over a batch of structures with `jax.vmap`:
+  `BatchCalculator.neighbour_lists(structures, skin)` gives the padded batch
+  and its neighbour lists (any cell size, rebuilt by `update` when an atom
+  moves skin / 2), `BatchCalculator.energy_fn()` the energy of one structure,
+  and `ace_jax.batch.initial_momenta`, `zero_padding` and `temperature` keep
+  the padding atoms out of the dynamics and the temperatures.
 - **The C++ kernel in the ASE calculator.** `ACECalculator(..., ffi=True)`
   calculates energy, forces and stress of a linear ACE model with the C++
   kernel on CPUs, on all cores (XLA's thread pool; `ffi_threads` sets fewer).

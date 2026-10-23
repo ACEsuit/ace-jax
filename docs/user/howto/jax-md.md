@@ -17,6 +17,11 @@ agree to roundoff.
 
 --8<-- "float64.md"
 
+!!! note "Many small cells"
+    To run many small structures at the same time, see
+    [Evaluate many structures](batch.md). Its neighbour lists also accept
+    cells that are smaller than twice the cutoff.
+
 ## Run NVE
 
 1. Make a JAX-MD space for the cell.

@@ -341,6 +341,15 @@ User page: `docs/user/howto/batch.md`; numbers: `docs/dev/batched-evaluation-res
   `n_device` defaults to 16 (bigger structures go through `ACECalculator`).
 - `builder`: "msn" (matscipy-neighbours' batched XLA FFI, when installed), "jax" (all pairs over
   images, GPU), "host" (cell list per structure); "auto" picks.
+- Batched MD / relaxation = JAX-MD's own `simulate.*` / `minimize.*` under `jax.vmap` (ace-jax hosts no
+  integrators): `nb = bc.neighbour_lists(structures, skin)` (one padded batch; `nb.positions`, `nb.live`,
+  `nb.unpad`), `nl = nb.allocate()`, `energy = bc.energy_fn()` (`energy(R, neighbor=nl_slice)`, JAX model
+  only), `space.free()`; jit(vmap) a fori_loop chunk, then `nl, rebuilt = nb.update(state.position, nl)`
+  between chunks (skin/2 test, K grows on overflow -> recompile). Padding: pass
+  `momenta=batch.initial_momenta(key, nb.live, kT, mass)` to `init` (JAX-MD's own draw gives padding
+  momenta and removes the COM over all slots, drifting real atoms), `batch.zero_padding` after Langevin,
+  `batch.temperature(p, mass, live)`; Nose-Hoover counts padding as DOF -> only unpadded (one-size)
+  batches. Tests `tests/test_batch_md.py`.
 
 ### JAX-MD (MD fully on the device)
 
