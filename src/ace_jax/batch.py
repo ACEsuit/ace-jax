@@ -460,7 +460,7 @@ class BatchNeighbours:
             return neighbor, False
         return self.allocate(positions), True
 
-    def update_fn(self, builder=None):
+    def update_fn(self, builder=None, branchless=None):
         """A jittable `update(R, nl) -> (nl, rebuilt, overflow)` for use INSIDE a compiled loop: when any
         live atom has moved skin / 2 the whole batch's lists are rebuilt at R (lax.cond; one batched build
         call), else nl is returned unchanged.  The shapes are fixed, so a structure that now has more than K
@@ -468,7 +468,17 @@ class BatchNeighbours:
         overflow re-run from the last good state with `allocate` (which grows K).  `rebuilt`: a scalar
         bool.  builder: "msn" (matscipy-neighbours' batched XLA FFI, when installed) or "jax" (all pairs
         on the device); "host" cannot run inside a trace.  Loop at batch level and vmap only the step:
-        `nl, rebuilt, ov = update(state.position, nl); state = jax.vmap(apply)(state, neighbor=nl)`."""
+        `nl, rebuilt, ov = update(state.position, nl); state = jax.vmap(apply)(state, neighbor=nl)`.
+
+        On a GPU, XLA reads a lax.cond predicate back to the host: one small device-to-host copy and
+        a stream sync per call (measured with nsys; XLA's command-buffer conditionals did not remove it).
+        `branchless=True` avoids it: the batch is built on every call and kept per structure where an atom
+        moved (jnp.where), so the loop never leaves the device, at the cost of a build per call.  None (the
+        default): branch-free on a GPU, lax.cond on a CPU (no copy there; a build per step would cost
+        ~30%).  Cheapest on either: call `update` every n steps (an outer loop over inner fori_loops), one
+        check per n steps.  lestrade RTX 4000 Ada (shared), 5 small cells, 200 NVE steps: lists fixed 62
+        ms, cond every step 485 ms, branch-free 100-145 ms, cond every 10 steps 78 ms.  Branch-free
+        rebuilds only the structures that moved."""
         import jax
         import jax.numpy as jnp
         builder = builder or ("msn" if _msn_batched() is not None else "jax")
@@ -476,18 +486,32 @@ class BatchNeighbours:
             raise ValueError(f"update_fn needs a traceable builder, 'msn' or 'jax', got {builder!r}")
         if self.K is None:
             raise ValueError("call allocate() first: it fixes K")
+        if branchless is None:
+            branchless = jax.default_backend() != "cpu"
         b, K, rc, half = self.batch, self.K, self.cutoff + self.skin, self.skin / 2
         cell, pbc = self._cell, self._pbc
         images, image_mask = jnp.asarray(b.images), jnp.asarray(b.image_mask)
         park = float(self.calc.eval_model.pad_cutoff())
 
-        def update(R, nl):
-            def rebuild(_):
-                rij, idx, mask, count = neighbours(_wrap(R, cell, pbc), cell, images, image_mask, nl.live, rc, K,
-                                                   park, builder, pbc)
-                return nl._replace(position0=R, rij0=rij, idx=idx, mask=mask), count.max(-1) > K
+        def build(R, live):
+            rij, idx, mask, count = neighbours(_wrap(R, cell, pbc), cell, images, image_mask, live, rc, K, park,
+                                               builder, pbc)
+            return rij, idx, mask, count.max(-1) > K
 
-            rebuilt = (_moved(R, nl) > half).any()
+        def update(R, nl):
+            moved = _moved(R, nl) > half
+            if branchless:                    # build every call, keep it per structure where an atom moved
+                rij, idx, mask, over = build(R, nl.live)
+                sel = lambda new, old: jnp.where(moved.reshape(moved.shape + (1,) * (new.ndim - 1)), new, old)
+                nl = nl._replace(position0=sel(R, nl.position0), rij0=sel(rij, nl.rij0), idx=sel(idx, nl.idx),
+                                 mask=sel(mask, nl.mask))
+                return nl, moved.any(), moved & over
+
+            def rebuild(_):
+                rij, idx, mask, over = build(R, nl.live)
+                return nl._replace(position0=R, rij0=rij, idx=idx, mask=mask), over
+
+            rebuilt = moved.any()
             nl, overflow = jax.lax.cond(rebuilt, rebuild, lambda _: (nl, jnp.zeros(R.shape[0], bool)), None)
             return nl, rebuilt, overflow
         return update

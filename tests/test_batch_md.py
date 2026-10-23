@@ -230,8 +230,9 @@ def test_vmapped_md_with_the_kernel(jax_md):
     assert np.abs(finals[True] - finals[False]).max() < 1e-5      # radial table: forces ~1e-8 of max|F|
 
 
+@pytest.mark.parametrize("branchless", [False, True])
 @pytest.mark.parametrize("builder", ["jax", "msn"])
-def test_rebuild_inside_the_compiled_loop(jax_md, builder):
+def test_rebuild_inside_the_compiled_loop(jax_md, builder, branchless):
     """nb.update_fn(): the skin test and the batched rebuild inside one jitted loop (lax.cond), only the
     integrator step vmapped.  The run equals the host-checked one (to roundoff amplified by the dynamics)
     and its final lists still give ACECalculator's energies and forces."""
@@ -246,7 +247,7 @@ def test_rebuild_inside_the_compiled_loop(jax_md, builder):
     init, apply = simulate.nve(bc.energy_fn(), shift, dt=DT)
     nb = bc.neighbour_lists(ats, skin=0.3)
     nl = nb.allocate()
-    update = nb.update_fn(builder)
+    update = nb.update_fn(builder, branchless=branchless)
     p0 = batch.initial_momenta(jax.random.PRNGKey(0), nb.live, 0.05, MASS)
     state = jax.vmap(lambda R, p, n: init(None, R, kT=0.0, mass=MASS, momenta=p, neighbor=n))(nb.positions, p0, nl)
 
@@ -267,21 +268,22 @@ def test_rebuild_inside_the_compiled_loop(jax_md, builder):
     assert np.abs(np.asarray(st.position) - np.asarray(ref.position)).max() < 1e-4
 
 
-def test_in_loop_update_flags_overflow():
+@pytest.mark.parametrize("branchless", [False, True])
+def test_in_loop_update_flags_overflow(branchless):
     """A rebuild whose counts exceed the list's K is flagged per structure (exactly where count > K), and
     allocate() grows K again; with no atom past skin / 2 nothing is rebuilt."""
     ats = structures()
     bc = BatchCalculator(MODEL)
     nb = bc.neighbour_lists(ats, skin=0.3)
     nl = nb.allocate()
-    nl_same, rebuilt, overflow = jax.jit(nb.update_fn())(nb.positions, nl)
+    nl_same, rebuilt, overflow = jax.jit(nb.update_fn(branchless=branchless))(nb.positions, nl)
     assert not bool(rebuilt) and not np.asarray(overflow).any()
     kmax = bc._build_lists(nb.batch, nb.positions, nb.cutoff + nb.skin, None)[3]
     K = int(kmax[2]) - 1                                                      # too few slots for structure 2
     nb.K = K
     small = nl._replace(rij0=nl.rij0[:, :, :K], idx=nl.idx[:, :, :K], mask=nl.mask[:, :, :K])
     R = nb.positions + jnp.asarray([0.2, 0.0, 0.0])                           # past skin / 2, counts unchanged
-    _, rebuilt, overflow = jax.jit(nb.update_fn())(R, small)
+    _, rebuilt, overflow = jax.jit(nb.update_fn(branchless=branchless))(R, small)
     assert bool(rebuilt) and np.asarray(overflow).tolist() == (kmax > K).tolist() and bool(overflow[2])
     nb.allocate(R)
     assert nb.K >= int(kmax.max())
