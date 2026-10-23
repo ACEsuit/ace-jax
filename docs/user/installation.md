@@ -96,8 +96,8 @@ LAMMPS export needs [lammps-jax](https://github.com/abhijeetgangan/lammps-jax).
 1. Add `lammps` to the extras that you install.
 2. Build the lammps-jax LAMMPS plugin at the same version as the Python package.
 
-The CPU kernel for linear ACE (`aj export --ffi`) also needs a C++17 compiler.
-The export compiles the kernel the first time.
+The CPU kernel for linear ACE also needs a C++17 compiler. The export compiles
+the kernel the first time. Without a compiler, the export uses the XLA program.
 
 See [LAMMPS export](howto/lammps.md).
 

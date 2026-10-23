@@ -221,7 +221,9 @@ def _export_inprocess(row, at, dtype, workdir, layout="auto", slots="skin", list
                          if row.get("aa_dag") or os.environ.get("ACEJAX_EXPORT_AA_DAG") else {}),
                       # opt-in C++ FFI kernel (ace_jax.eval.ffi; CPU matrix bundles, radial table on): LAMMPS needs
                       # LAMMPS_JAX_FFI_HANDLERS naming its library, set with this in the env json's os_env
-                      **({"ffi": True} if os.environ.get("ACEJAX_EXPORT_FFI") else {}))
+                      # explicit either way: export_lammps's ffi="auto" would take the kernel for a CPU
+                      # bundle, and the XLA rows (the plotted ace-jax line) must stay the XLA program
+                      ffi=bool(os.environ.get("ACEJAX_EXPORT_FFI")))
     return (str(pathlib.Path(workdir) / "bundle.json"), b["ace_jax"]["layout"], time.perf_counter() - t0,
             splined_meta(b["ace_jax"]))
 

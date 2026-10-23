@@ -28,6 +28,7 @@ Only `export_lammps` imports it; `make_energy_fn` is plain JAX.
 """
 import json
 import os
+import re
 from pathlib import Path
 
 import jax
@@ -345,11 +346,48 @@ def cueq_block_rows_for(model, rows, k_dense, budget, itemsize, max_edges=None, 
     return None
 
 
+FFI_MIN_LAMMPS_JAX = (0, 2, 1)     # its LAMMPS plugin registers FFI handlers for the CPU (abhijeetgangan/lammps-jax#3)
+
+
+def choose_ffi(ffi, model, *, platform, dtype, layout, lean, radial_table, max_neighbors, aa_dag):
+    """(ffi, reason): what export_lammps runs, and why "auto" took the XLA program on a CPU bundle.
+
+    ffi True / a library path / False are kept as given (True and a path are checked by the export,
+    which raises on an ineligible model).  "auto" takes the C++ kernel (`eval.ffi`) on a CPU bundle
+    when the export can make it: float64, lean, the matrix layout (layout auto or matrix, and
+    max_neighbors), the radial table not switched off, a linear ACEModel (categorical or species
+    embedding), lammps-jax >= 0.2.1, and the kernel compiles here.  Then it returns the compiled
+    library's path, so a missing or broken compiler falls back instead of failing the export.
+    Otherwise (False, why); a GPU bundle is (False, None)."""
+    if ffi != "auto":
+        return ffi, None
+    if platform != "cpu":
+        return False, None
+    from ..eval.model import ACEModel
+    vers = re.match(r"(\d+)\.(\d+)\.(\d+)", lammps_jax_version() or "")
+    why = ("aa_dag='cueq' (a GPU product basis)" if aa_dag == "cueq"
+           else f"dtype {dtype} (the kernel is float64)" if dtype != "float64"
+           else "lean=False" if not lean
+           else f"layout {layout!r} (the kernel reads the matrix layout)" if layout not in ("auto", "matrix")
+           else "no max_neighbors (the matrix layout)" if not max_neighbors
+           else "radial_table switched off" if radial_table is not None and not radial_table
+           else f"{type(model).__name__} is not a linear ACEModel" if not isinstance(model, ACEModel)
+           else f"lammps-jax {lammps_jax_version()} (the kernel needs >= 0.2.1)"
+           if not vers or tuple(map(int, vers.groups())) < FFI_MIN_LAMMPS_JAX else None)
+    if why:
+        return False, why
+    from ..eval import ffi as kernel
+    try:
+        return kernel.library(), None
+    except kernel.FFIUnavailable as e:
+        return False, str(e)
+
+
 def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
                   dtype="float64", layout="auto", type_elements=None, max_owned=None,
                   lean=True, spline_tol=AUTO, spline_intervals=None, max_neighbors=None,
                   radial_table=None, device_memory=None, block_rows=None, platform=None, aa_dag="auto",
-                  precision_structure=None, ffi=False):
+                  precision_structure=None, ffi="auto"):
     """Write a lammps-jax JSON bundle for `model`; returns the bundle dict.
 
     Capacities: max_atoms (owned + ghost positions); max_edges (sparse / dense:
@@ -454,8 +492,10 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
     names relative to the bundle's directory), "handlers": the LAMMPS_JAX_FFI_HANDLERS value with the export
     host's shim}; `eval.cueq.run_env(record, bundle_path)` gives LAMMPS's environment.
 
-    ffi: True (or the path of a library built by `eval.ffi.build`) runs the model as the C++ FFI kernel
-    of `eval.ffi` on the neighbour matrix, positions in and atom energies and forces out; it needs
+    ffi ("auto", the default; True; the path of a library built by `eval.ffi.build`; False) runs the
+    model as the C++ FFI kernel of `eval.ffi` on the neighbour matrix, positions in and atom energies
+    and forces out.  "auto" takes it on a CPU bundle when it can (`choose_ffi`), else the XLA program,
+    recording why as `ace_jax.ffi_reason`; False is always the XLA program.  The kernel needs
     platform="cpu", the matrix layout, float64 and a lean linear ACEModel, and turns the radial table
     on (radial_table=None -> True).  True compiles the kernel on first use (`eval.ffi.library`: a
     C++17 compiler, -march=native, cached; `eval.ffi.FFIUnavailable` without one).  The kernel lays
@@ -463,10 +503,13 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
     apply (recorded as "greedy", None, None).  LAMMPS loads the kernel through
     LAMMPS_JAX_FFI_HANDLERS, set to `ace_jax.ffi["handlers"]`, with a lammps-jax whose plugin
     registers handlers for the CPU platform.  Recorded as `ace_jax.ffi`: {"target", "library",
-    "handlers"} (None for the XLA program).  ffi with aa_dag="cueq" raises ValueError (CPU against CUDA).
+    "handlers"} (None for the XLA program).  ffi=True or a path with aa_dag="cueq" raises ValueError
+    (CPU against CUDA); "auto" takes the XLA program there.
     """
     from lammps_jax.export import export_model
 
+    ffi, ffi_reason = choose_ffi(ffi, model, platform=platform, dtype=dtype, layout=layout, lean=lean,
+                                 radial_table=radial_table, max_neighbors=max_neighbors, aa_dag=aa_dag)
     if ffi and aa_dag == "cueq":                  # two product-basis engines, for different platforms: refuse first
         raise ValueError("ffi and aa_dag='cueq' are exclusive: the C++ kernel runs on the CPU (platform='cpu'), "
                          "cueq on a CUDA GPU; export with one or the other")
@@ -615,6 +658,8 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
                          "aa_dag": aa_dag,
                          # the C++ FFI kernel: target, library, LAMMPS_JAX_FFI_HANDLERS value (None: the XLA program)
                          "ffi": ffi_meta if ffi else None,
+                         # why ffi="auto" took the XLA program for a CPU bundle (None: the kernel, a GPU bundle, or ffi given)
+                         "ffi_reason": ffi_reason,
                          # aa_dag="cueq": the replay sidecar, the shipped NVRTC cache, LAMMPS_JAX_FFI_HANDLERS
                          **({"cueq": cueq_meta} if cueq_meta else {}),
                          # dense / matrix rows per block, and the memory they were sized for

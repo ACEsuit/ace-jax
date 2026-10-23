@@ -45,6 +45,7 @@ def test_export_yace_converts_an_ace_model(tmp_path, capsys):
     (["--out", "m.json", "--structure", "s.xyz", "--procs", "2,2"], "three integers"),
     (["--out", "m.json", "--delta", "0.01"], "--delta is for a .yace"),
     (["--out", "m.json", "--structure", "s.xyz", "--ffi"], "needs --platform cpu"),
+    (["--out", "m.json", "--structure", "s.xyz", "--platform", "cpu", "--ffi", "--no-ffi"], "--no-ffi exports the XLA"),
     (["--out", "m.json", "--structure", "s.xyz", "--platform", "cpu", "--layout", "dense", "--ffi"], "matrix layout"),
 ])
 def test_export_usage_errors(tmp_path, capsys, args, msg):
@@ -171,7 +172,7 @@ def test_export_print_env_resolves_on_this_machine(tmp_path, monkeypatch, capsys
 @pytest.mark.parametrize("args,msg", [
     (["--print-env", "b.json", "--model", "m.npz"], "without --model"),
     (["--print-env", "missing.json"], "not a readable"),
-    (["--print-env", "plain.json"], "not a cueq bundle"),
+    (["--print-env", "plain.json"], "neither a cueq nor a C++ kernel bundle"),
     (["--out", "m.json"], "needs --model and --out"),
 ])
 def test_export_print_env_usage_errors(tmp_path, capsys, args, msg):
@@ -207,3 +208,35 @@ def test_export_ffi_and_aa_dag_cueq_are_exclusive(tmp_path, capsys):
               str(tmp_path / "start.xyz"), "--platform", "cpu", "--ffi", "--aa-dag", "cueq"])
     assert e.value.code == 2 and "exclusive" in capsys.readouterr().err
     assert not (tmp_path / "out").exists()
+
+
+def test_export_lammps_cpu_default_takes_the_kernel(tmp_path, monkeypatch, capsys):
+    """`aj export --platform cpu`: the C++ kernel by default (ffi="auto"), with the line LAMMPS needs;
+    --no-ffi: the XLA program; --print-env on the kernel bundle: the same line, and the kernel compiled
+    here when the recorded library is not on this machine."""
+    require_optional("lammps_jax")
+    import json
+    import shutil
+    if shutil.which("c++") is None:
+        pytest.skip("no C++ compiler for the FFI kernel")
+    monkeypatch.setenv("ACEJAX_FFI_CACHE", str(tmp_path / "cache"))
+    monkeypatch.setenv("ACEJAX_FFI_FLAGS", "-O1")
+    at = bulk("Si", "diamond", 5.43, cubic=True).repeat(2)
+    write(tmp_path / "start.xyz", at, format="extxyz")
+    base = ["export", "--model", str(MODEL), "--structure", str(tmp_path / "start.xyz"), "--platform", "cpu"]
+    main([*base, "--out", str(tmp_path / "k.json")])
+    k = json.loads((tmp_path / "k.json").read_text())["ace_jax"]
+    out = capsys.readouterr().out
+    assert k["ffi"] and k["ffi_reason"] is None and f'LAMMPS_JAX_FFI_HANDLERS="{k["ffi"]["handlers"]}"' in out
+    main([*base, "--out", str(tmp_path / "x.json"), "--no-ffi"])
+    x = json.loads((tmp_path / "x.json").read_text())["ace_jax"]
+    assert x["ffi"] is None and x["ffi_reason"] is None and "C++ kernel" not in capsys.readouterr().out
+    main([*base, "--out", str(tmp_path / "d.json"), "--layout", "dense"])
+    assert "C++ kernel not used (layout 'dense'" in capsys.readouterr().out
+    main(["export", "--print-env", str(tmp_path / "k.json")])
+    assert f'LAMMPS_JAX_FFI_HANDLERS="{k["ffi"]["handlers"]}"' in capsys.readouterr().out
+    shutil.rmtree(tmp_path / "cache")                       # the library gone: --print-env compiles it here
+    main(["export", "--print-env", str(tmp_path / "k.json")])
+    out = capsys.readouterr().out
+    assert "compiled the kernel here" in out and "LAMMPS_JAX_FFI_HANDLERS=" in out
+    assert (tmp_path / "cache").exists()

@@ -594,6 +594,8 @@ def cmd_export(a):
         procs = ()
     if procs is not None and (len(procs) != 3 or min(procs) < 1):
         raise UsageError("--procs takes the LAMMPS processor grid: three integers px,py,pz")
+    if (a.ffi or a.ffi_flags) and a.no_ffi:
+        raise UsageError("--no-ffi exports the XLA program: give it without --ffi / --ffi-flags")
     if (a.ffi or a.ffi_flags) and (a.platform != "cpu" or a.dtype != "float64" or a.layout not in ("auto", "matrix")):
         raise UsageError("--ffi runs the C++ kernel on the CPU: it needs --platform cpu, float64 and the matrix layout")
     try:
@@ -610,10 +612,10 @@ def cmd_export(a):
     from ase.data import atomic_numbers
     els = None if a.type_elements is None else [
         int(e) if e.strip().isdigit() else atomic_numbers[e.strip()] for e in a.type_elements.split(",")]
-    ffi = False
-    if a.ffi or a.ffi_flags:
+    ffi = False if a.no_ffi else "auto"           # auto: the C++ kernel for a CPU bundle when it can (choose_ffi)
+    if a.ffi or a.ffi_flags:                      # required: compile (or reuse) it now, and refuse what it cannot run
         from .eval import ffi as kernel
-        try:                                      # compile (or reuse) the kernel before the export
+        try:
             ffi = kernel.library(flags=a.ffi_flags.split() if a.ffi_flags else None)
         except kernel.FFIUnavailable as e:
             raise UsageError(str(e)) from None
@@ -629,11 +631,19 @@ def cmd_export(a):
     print(f"lammps-jax: layout {b['ace_jax']['layout']}, {a.dtype}, {a.platform or 'cuda'}, sized for {len(at)} "
           f"atoms of {a.structure}{per} (max_atoms {cap['max_atoms']}, neighbour slots {cap['k_dense']}) -> {out}")
     if b["ace_jax"].get("ffi"):
-        print(f"C++ kernel: {b['ace_jax']['ffi']['library']}; run LAMMPS with newton on and\n"
-              f"  export LAMMPS_JAX_FFI_HANDLERS=\"{b['ace_jax']['ffi']['handlers']}\"")
+        _print_ffi_env(b["ace_jax"]["ffi"])
+    elif b["ace_jax"].get("ffi_reason"):
+        print(f"C++ kernel not used ({b['ace_jax']['ffi_reason']}): the bundle runs the XLA program")
     if b["ace_jax"].get("cueq"):
         _print_cueq_env(b["ace_jax"]["cueq"], out)
     return b
+
+
+def _print_ffi_env(record):
+    """The shell line that runs LAMMPS on a C++ kernel bundle, and how to run it."""
+    print(f"C++ kernel: {record['library']}\n"
+          "  run LAMMPS with `newton on`, one MPI rank per core (the kernel is single-threaded), and\n"
+          f"  export LAMMPS_JAX_FFI_HANDLERS=\"{record['handlers']}\"")
 
 
 def _print_cueq_env(record, bundle):
@@ -665,12 +675,29 @@ def _export_print_env(a):
         raise UsageError("--print-env reads an exported bundle: give it without --model and --out")
     path = pathlib.Path(a.print_env).expanduser()
     try:
-        rec = json.loads(path.read_text()).get("ace_jax", {}).get("cueq")
+        aj = json.loads(path.read_text()).get("ace_jax", {})
     except (OSError, ValueError) as e:
         raise UsageError(f"{path}: not a readable lammps-jax bundle ({e})") from None
-    if not rec:
-        raise UsageError(f"{path}: not a cueq bundle (no ace_jax.cueq record); it needs no extra environment")
-    return _print_cueq_env(rec, path)
+    if aj.get("ffi"):
+        return _print_ffi_env(_ffi_here(aj["ffi"]))
+    if not aj.get("cueq"):
+        raise UsageError(f"{path}: neither a cueq nor a C++ kernel bundle (no ace_jax.cueq / ace_jax.ffi record); "
+                         "it needs no extra environment")
+    return _print_cueq_env(aj["cueq"], path)
+
+
+def _ffi_here(record):
+    """A C++ kernel bundle's record with the library on THIS machine: the recorded one when it exists here
+    (a shared filesystem), else the kernel compiled here (`eval.ffi.library`, cached)."""
+    if pathlib.Path(record["library"]).exists():
+        return record
+    from .eval import ffi as kernel
+    try:
+        lib = kernel.library()
+    except kernel.FFIUnavailable as e:
+        raise UsageError(f"{record['library']} is not on this machine, and the kernel cannot be compiled here: {e}") from None
+    print(f"# {record['library']} is not on this machine: compiled the kernel here")
+    return {**record, "library": str(lib), "handlers": kernel.handlers(lib)}
 
 
 def add_basis_args(p, *, fit):
@@ -794,10 +821,14 @@ def _parser():
                           "the cueq extra and lammps-jax's contrib/ffi-replay via LAMMPS_JAX_CONTRIB)")
     exp.add_argument("--print-env", default=None, metavar="BUNDLE",
                      help="instead of an export: print the environment that runs LAMMPS on an exported cueq "
-                          "bundle (--aa-dag cueq), resolved on this machine (run it where LAMMPS runs)")
+                          "bundle (--aa-dag cueq) or C++ kernel bundle, resolved on this machine (run it where "
+                          "LAMMPS runs; a kernel library missing here is compiled here)")
     exp.add_argument("--ffi", action="store_true",
-                     help="lammps, --platform cpu: run linear ACE as ace-jax's C++ kernel (one FFI call per step), "
-                          "compiled on first use with the C++ compiler ($CXX, c++, g++ or clang++) and cached")
+                     help="lammps, --platform cpu: require ace-jax's C++ kernel for linear ACE (one FFI call per "
+                          "step; the default takes it when it can and says why not), compiled on first use with "
+                          "the C++ compiler ($CXX, c++, g++ or clang++) and cached")
+    exp.add_argument("--no-ffi", action="store_true",
+                     help="lammps, --platform cpu: the XLA program, not the C++ kernel")
     exp.add_argument("--ffi-flags", default=None,
                      help="lammps: the kernel's compiler flags (implies --ffi; default \"-O3 -march=native\"): "
                           "on a login node for compute nodes of another CPU type, e.g. --ffi-flags=\"-O3 -march=x86-64-v3\" (with =)")

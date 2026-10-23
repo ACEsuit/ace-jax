@@ -402,12 +402,18 @@ for its CPU build, which refuses a cuda bundle and vice versa).
   `max_neighbors`, stays packed dense. `layout="matrix"` requires
   `max_neighbors`: the list holds rcut + skin pairs, so a `k_dense` sized for
   rcut is too small. `max_edges` is needed by sparse and dense only.
-- `ffi=True` (CPU, linear ACE, float64): the C++ XLA FFI kernel `ace_jax.eval.ffi` replaces the XLA
-  program on the matrix layout (positions in, energies and forces out, `newton on`; radial table on).
+- `ffi` (default `"auto"`): on a CPU bundle the C++ XLA FFI kernel `ace_jax.eval.ffi` replaces the XLA
+  program on the matrix layout (positions in, energies and forces out, `newton on`; radial table on) when it
+  can: linear ACEModel (categorical or species embedding), float64, lean, layout auto/matrix with
+  `max_neighbors`, lammps-jax >= 0.2.1, and the kernel compiles. Otherwise the XLA program, with the reason in
+  `bundle["ace_jax"]["ffi_reason"]` (`export.lammps.choose_ffi`). `ffi=True` requires it (raises when it cannot),
+  `ffi=False` is always the XLA program, `ffi=<path>` uses a prebuilt library.
   The export compiles it on first use (`ffi.library()`: `$CXX`/c++/g++/clang++, `-O3 -march=native` or
-  `ACEJAX_FFI_FLAGS`, cached in `~/.cache/ace-jax/ffi` or `$ACEJAX_FFI_CACHE`; `ffi.FFIUnavailable` without a
-  compiler); `ffi=<path>` uses a prebuilt one. CLI: `aj export --platform cpu --ffi [--ffi-flags="..."]`, which
-  prints the line to set. Run LAMMPS with `LAMMPS_JAX_FFI_HANDLERS` = `bundle["ace_jax"]["ffi"]["handlers"]`,
+  `ACEJAX_FFI_FLAGS`, cached in `~/.cache/ace-jax/ffi` or `$ACEJAX_FFI_CACHE`; no compiler: "auto" falls back,
+  `ffi=True` raises `ffi.FFIUnavailable`). CLI: `aj export --platform cpu` (auto), `--ffi [--ffi-flags="..."]`
+  (required), `--no-ffi` (XLA); it prints the line to set, and `aj export --print-env BUNDLE` prints it on the
+  LAMMPS machine (compiling the kernel there if the recorded library is missing). A kernel bundle needs
+  `LAMMPS_JAX_FFI_HANDLERS` = `bundle["ace_jax"]["ffi"]["handlers"]` in LAMMPS (without it LAMMPS stops),
   newton on, one MPI rank per core. `-march=native` on a login node may not run on compute nodes of another CPU:
   export there, or pass generic flags. Needs a lammps-jax plugin that registers FFI handlers for the CPU
   (lammps-jax >= 0.2.1, the `lammps` extra's floor; 0.2.0 registers them for CUDA only). Build the plugin at the

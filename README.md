@@ -35,7 +35,7 @@ reference.
   calculators, fast enough for molecular dynamics. GP and ARD models also
   predict `energy_std` and `forces_std`. `export_lammps` deploys a model to
   LAMMPS with [lammps-jax](https://github.com/abhijeetgangan/lammps-jax).
-  On CPUs, linear ACE can run in LAMMPS as a C++ kernel (`aj export --ffi`).
+  On CPUs, linear ACE runs in LAMMPS as a C++ kernel (`aj export --platform cpu`).
 - **PACE potentials.** ace-jax loads, evaluates and writes pacemaker
   `.yace` files.
 - **Data in, data out.** Training data is extended XYZ or a list of

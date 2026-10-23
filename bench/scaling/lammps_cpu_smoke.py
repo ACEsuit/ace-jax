@@ -74,7 +74,7 @@ def main():
         t0 = time.time()
         b = export_lammps(model, meta, d / "bundle.json", layout=a.layout, max_atoms=cap["max_atoms"],
                           max_owned=cap["max_owned"], k_dense=cap["k_dense"], spline_tol=a.spline_tol,
-                          platform="cpu", device_memory=a.mem_per_rank * 2**30, **graph)
+                          platform="cpu", device_memory=a.mem_per_rank * 2**30, ffi=False, **graph)   # the XLA program
         t_export = time.time() - t0
         (d / "in.lmp").write_text(deck(data, d / "bundle.json", procs, d / "f.dump", a.warmup, a.steps))
         env = {**os.environ, "OMP_NUM_THREADS": "1", "LAMMPS_PLUGIN_PATH": a.plugin_dir}
