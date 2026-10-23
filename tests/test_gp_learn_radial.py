@@ -253,6 +253,27 @@ def test_holdout_score_energy_only_split(small):
     np.testing.assert_allclose(s, e_term, rtol=1e-8)      # the Gram reference cancels: ~1e-9 here
 
 
+def test_holdout_score_weights_quantities_as_the_objective():
+    """The gate sums each quantity's rows (SSE_t / sigma_t^2), as the learner's objective does, over the
+    validation configs: forces count by their rows, not as one per-row mean that each energy row
+    outweighs ~100x (the Si GAP-18 gate kept init radials that lowered the validation force error)."""
+    from ace_jax.fit.hypers import from_array, to_array
+    from ace_jax.fit.objective import posterior_from_qr
+    from ace_jax.fit.radial_learn import holdout_score
+    from ace_jax.fit.stats import linear_qr_statistics, linear_statistics
+    prob, ds_fit, _ = make_problem(ncfg=6)
+    _, ds_val, _ = make_problem(ncfg=6, start=6)
+    a = to_array(THETA)
+    s = holdout_score(prob.model.rnl_Wnlq, a, a, prob, ds_fit, ds_val)
+    val = linear_statistics(prob.model, prob.cfg, ds_val)
+    assert float(val.n_F) > float(val.n_E) > 0
+    c, _ = posterior_from_qr(THETA, linear_qr_statistics(prob.model, prob.cfg, ds_fit), prob)
+    th = from_array(a)
+    ref = sum(float(getattr(val, f"yy_{t}") - 2.0 * c @ getattr(val, f"b_{t}") + c @ getattr(val, f"G_{t}") @ c)
+              / float(np.exp(2.0 * float(getattr(th, f"log_sigma_{t}")))) for t in "EF") / float(val.n_E)
+    np.testing.assert_allclose(s, ref, rtol=1e-6)
+
+
 def test_fit_radial_gate_prefers_learned_on_recoverable_problem():
     from ace_jax.fit.radial_learn import fit_radial
     prob, ds_fit, _ = make_problem(ncfg=12, per_batch=3, start=0)

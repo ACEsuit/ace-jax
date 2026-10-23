@@ -39,9 +39,14 @@ aj fit --order 3 --max-degree 10 \
 `--learn-radial` also works with `--model`, and with all final arms and UQ
 options. Its options are:
 
-- `--radial-n-q 12`: the number of polynomials for each radial;
-- `--radial-steps 40`: the number of optimiser iterations for each roughness
+- `--radial-n-q 12`: the number of polynomials for each radial. This option
+  only increases the number. A model file that has more polynomials keeps them,
+  and the fit log gives the number that is used;
+- `--radial-steps 300`: the number of optimiser iterations for each roughness
   weight;
+- `--radial-reprofile-every 100`: the interval, in iterations, at which the
+  evidence hyperparameters are fitted again. Each new fit starts the optimiser
+  again;
 - `--radial-opt lbfgs`: the optimiser. `newton` uses a trust-region Newton
   method with exact Hessian-vector products. One Newton iteration costs more
   than an L-BFGS iteration, but it usually makes more progress;
@@ -49,6 +54,10 @@ options. Its options are:
   Newton iteration;
 - `--radial-lam-grid 0,1e-2`: the roughness weights. The gate selects from
   these weights and the initial radials.
+
+The gate score is the sum of the squared validation errors of the energies and
+the forces, each divided by its noise variance. The learning objective uses the
+same weights.
 
 The fit writes these files:
 

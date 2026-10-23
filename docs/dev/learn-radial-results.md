@@ -299,6 +299,37 @@ RMSE against MACE, averaged over all models' trajectories at that temperature, w
 - `--gap-grid` stays available and defaults to off (0);
 - the spectral prior likewise stays opt-in.
 
+## Si GAP-18: the gated nulls were the run settings (2026-10-23)
+
+The liquid-floor study (`bench/liquid_floor/`, branch `exp/range-vs-mp`) ran `aj fit --learn-radial` on o4d20
+and on o4d20 capped at n <= 8 and n <= 5 (Sulis A100). The gate kept the initial radials in all three. The
+diagnosis (`bench/liquid_floor/radial_diag.py`, `radial_long.py`) found no derivative bug:
+
+- **Gradient.** Central differences of r(W), with c* re-solved at each point, converge to the learner's
+  gradient as h falls: 6e-4 relative on a random direction at h = 1e-5 (o4d20). Readout refinement changes
+  the gradient by 3e-8. At h = 1e-4 the gradient direction was off 5x: the reduced objective is very stiff
+  there (curvature ~4e10 per unit step), not wrong.
+- **Objective.** It fell in every round, but by 0.7% in 40 steps (4 rounds of 10, each restarting L-BFGS).
+- **Training error.** The learned radials lowered the training force RMSE 0.4% (o4d20) and 0.65% (n <= 5),
+  and the VALIDATION force RMSE 0.3% and 0.4%. The validation energy RMSE rose 3-4%, and the gate
+  (per-quantity per-row means, so each of ~450 energy rows outweighed a force row ~100x) kept init.
+- **Run longer.** o4d12 (L = 350, n_q 18), one 300-step L-BFGS round at fixed theta:
+
+  | configs | radials | fit E (meV/atom) | fit F (eV/A) | val E | val F |
+  |---|---|---|---|---|---|
+  | 400 | init | 10.36 | 0.1436 | 10.29 | 0.1556 |
+  | 400 | VarPro, 300 steps | 6.03 | 0.1130 | 6.90 | 0.1228 |
+  | 400 | joint BFGS over (W, c), 300 iterations | 6.59 | 0.1321 | 8.46 | 0.1419 |
+  | 1500 | init | 10.83 | 0.1432 | 15.19 | 0.1555 |
+  | 1500 | VarPro, 300 steps | 6.90 | 0.1145 | 8.32 | 0.1249 |
+
+  The objective fell 39% at both sizes and the validation force error 20-21%. The joint BFGS row is
+  pacemaker's scheme (one optimiser over coefficients and radials); VarPro beats it per iteration and per
+  second (3,765 s against 5,374 s on an RTX A4500). Pacemaker itself runs 1,500 BFGS iterations at ~4 s
+  each on an A100; the o4d20 learner's steps cost ~200 s each (a QR pass over 376k rows per evaluation).
+
+Hence the defaults: 300 steps, theta re-fitted every 100, and a gate weighted as the objective.
+
 ## Caveats
 
 - **L-BFGS had not converged at 40 steps.** Every round in both systems ended

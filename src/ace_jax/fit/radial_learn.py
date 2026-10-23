@@ -721,33 +721,36 @@ def learn_radial(prob, ds, W0, *, theta0=None, profile=True, lam_rough=0.0, roug
 
 
 def _val_score(c, val, a_norm):
-    """sum_{t in E, F} SSE_t / (n_t sigma_t^2) of readout c on the validation
-    statistics `val`, sigma from a_norm; SSE_t = yy - 2 c.b + c.G.c.  A type
-    with no rows is skipped."""
+    """sum_{t in E, F} SSE_t / (n_val sigma_t^2) of readout c on the validation
+    statistics `val`, sigma from a_norm; SSE_t = yy - 2 c.b + c.G.c, n_val the validation configs.
+
+    The quantities are weighted as the learner's objective weights them (rows summed, 1 / sigma^2), not
+    per-row means: on Si GAP-18 a per-row mean weighted each of ~450 energy rows ~100x a force row, so the
+    gate was an energy test and kept the initial radials of fits whose learned radials lowered the
+    validation force error (o4d20, n <= 5: docs/dev/learn-radial-results.md).  n_val only rescales."""
     th = from_array(a_norm)
     score = 0.0
     for t in "EF":
-        n = float(getattr(val, f"n_{t}"))
-        if n == 0:
+        if float(getattr(val, f"n_{t}")) == 0:
             continue
         G, b, yy = getattr(val, f"G_{t}"), getattr(val, f"b_{t}"), getattr(val, f"yy_{t}")
         sse = float(yy - 2.0 * c @ b + c @ G @ c)
-        score += sse / (n * float(jnp.exp(2.0 * getattr(th, f"log_sigma_{t}"))))
-    return score
+        score += sse / float(jnp.exp(2.0 * getattr(th, f"log_sigma_{t}")))
+    return score / max(float(val.n_E), 1.0)
 
 
 def _val_score_residuals(sse, n, a_norm):
     """_val_score from summed residuals (residual_sums): E and F terms, an empty type skipped."""
     th = from_array(a_norm)
-    return sum(float(sse[i]) / (float(n[i]) * float(jnp.exp(2.0 * getattr(th, f"log_sigma_{t}"))))
-               for i, t in enumerate("EF") if float(n[i]) > 0)
+    return sum(float(sse[i]) / float(jnp.exp(2.0 * getattr(th, f"log_sigma_{t}")))
+               for i, t in enumerate("EF") if float(n[i]) > 0) / max(float(n[0]), 1.0)
 
 
 def holdout_score(W, a_fit, a_norm, prob, ds_fit, ds_val, *, lin_fit=None, lin_val=None,
                   return_readout=False):
     """Validation error of the M = 0 linear fit with radials W: the readout c is
     the posterior mean on ds_fit at theta a_fit; the score is
-    sum_{t in E, F} SSE_t / (n_t sigma_t^2) on ds_val with sigma from a_norm
+    sum_{t in E, F} SSE_t / sigma_t^2 on ds_val, over its configs (_val_score), with sigma from a_norm
     (fixed across candidates so scores are comparable), summed directly over ds_val
     (residual_sums) -- no design matrix.  A type with no rows in ds_val is skipped.
     lin_fit: the statistics of ds_fit at W if the caller has them (QRStats: the QR
