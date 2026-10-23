@@ -43,17 +43,24 @@ The card saturates at ~4k atoms per call; an A100 needs more cells in flight. (T
 probably the GPU default dense block of 4096 rows, #115: to check per bucket.) TorchSim reports the same shape for
 MACE: 102x over ASE at 16 atoms, 18x at 108, 3.9x at 864 (arXiv 2508.06628, Fig. 1).
 
-**Host neighbour lists would dominate.** One list per cell on the host, Si, rc 5 Å:
+**One neighbour-list call per structure would dominate, on either device.** Si, rc 5 Å, K 64, per cell:
 
-| cell | matscipy-neighbours | ASE's list |
-|---|--:|--:|
-| 2-atom primitive | 69 µs (35 µs/atom) | 2.0 ms |
-| 8-atom cubic | 71 µs (8.9 µs/atom) | 0.98 ms |
-| 64 atoms | 226 µs (3.5 µs/atom) | 2.3 ms |
-| 216 atoms | 646 µs (3.0 µs/atom) | 6.6 ms |
+| cell | matscipy-neighbours CPU (OpenMP), Python call | matscipy-neighbours CUDA, Python call (DLPack) | matscipy-neighbours XLA FFI under `jit(vmap)`, CUDA: regular / planned | ASE's list |
+|---|--:|--:|--:|--:|
+| 2-atom primitive | 69-79 µs | 1035 µs | 272 / 157 µs | 2.0 ms |
+| 8-atom cubic | 71-112 µs | 1039 µs | 250 / 135 µs | 0.98 ms |
+| 64 atoms | 226-256 µs | 1073 µs | 274 / 206 µs | 2.3 ms |
+| 216 atoms | 646-671 µs | 1169 µs | -- | 6.6 ms |
 
-matscipy-neighbours has a ~65 µs floor per call and costs 5-50x the batched evaluation per atom; ASE's list
-50-1500x. Phase 1 therefore builds the lists of small cells **on the device, batched** (Design 3).
+(lestrade; the FFI column is B = 1024 cells in one compiled call, per cell; it does not fall with B.) The
+cost is a floor per call, not the device: a CUDA call through Python pays ~1 ms of launch, hand-off and
+synchronisation however small the cell, and the experimental XLA FFI (`matscipy_neighbours.xla`, libAtoms/
+matscipy-neighbours#10; jittable, any-order periodic images, so cells smaller than the cutoff work) is declared
+`vmap_method="sequential"`, so a vmapped batch is B consecutive builds: 135-210 µs per cell planned. Per atom that
+is 3.2 µs at 64 atoms, 17 µs at 8 and 78 µs at 2 -- 5-120x the batched evaluation (0.66 µs/atom, float32).
+For MD the list is rebuilt every few tens of steps, so 64-atom cells are already about acceptable
+(~0.1 µs/atom per step); a single-point call rebuilds every time. Phase 1 therefore needs **one build for the whole
+batch** (Design 3).
 
 **Why not JAX-MD or lammps-jax.**
 - lammps-jax: one LAMMPS system per process; its multi-replica mode is separate processes, which share no GPU
@@ -67,7 +74,7 @@ matscipy-neighbours has a ~65 µs floor per call and costs 5-50x the batched eva
 ## What exists to build on
 
 - **The batched layout.** `fit.data.Dataset` packs configurations into dense per-atom slots with `node_cfg`, from
-  host lists with periodic images (`nlist.dense_graph`): any cell size, the layout benchmarked above.
+  per-configuration lists with periodic images (`nlist.dense_graph`): any cell size, the layout benchmarked above.
 - **The skin update.** `calc.skin.step` forms `rij = rij0 + u[j] - u[i]` with the image inside `rij0`, so moving
   atoms stay correct in any cell between rebuilds (no minimum image), and compacts skin slots to K in-cutoff slots
   on the device (`skin.compact`).
@@ -102,26 +109,27 @@ B·N rows of K slots plus the neighbour builder's scratch (Design 3), against `D
 `bench/gpu_memory` before relying on it; if the estimate is unreliable for some model family, fall back to a
 conservative fixed atoms-per-batch.
 
-### 3. Neighbour lists on the device, batched
+### 3. Neighbour lists: one build per batch
 
-For structures up to `N_DEVICE` atoms (to be fixed by benchmark; expect a few hundred): **all pairs over the
-periodic-image shifts**, vmapped over the batch.
+The list of a batch must be built in one launch (or a few), not one per structure.
 
-- Shifts per structure from its cell alone, on the host: `n_k = ceil((rc + skin) / w_k)` images per periodic axis
-  (`w_k` the perpendicular widths, as `jaxmd.min_image_ok` computes them), none on non-periodic axes; padded to the
-  bucket's largest shift count S. A 2-atom primitive Si cell at rc 5 Å needs up to ~7^3 shifts; a 64-atom cube 27.
-- On the device: `rij[b, i, j, s] = x[b, j] - x[b, i] + shift[b, s]` (float64 when available, then the model
-  dtype), valid where both atoms are live, the pair is not (i, i, zero shift) and r < rc (+ skin for MD); then
-  compacted to K slots per atom with `skin.compact`'s search (gathers only). Cost O(N^2 S) per structure:
-  110k distances for a 64-atom cube; it bounds `N_DEVICE`.
-- Output: the dense edge input (`rij (B, N, K, 3)`, neighbour index, mask), plus an overflow flag (more than K
+- **Preferred: a batched entry point in matscipy-neighbours' XLA FFI** (to request upstream, libAtoms/
+  matscipy-neighbours#10): positions `(B, N, 3)`, cells `(B, 3, 3)` and live counts in, the same `idx`, `shift`,
+  `count`, `overflow` per structure out, in one launch (or a `vmap_method` that batches rather than loops). It
+  already handles periodic images of any order, per-type cutoffs, float32/float64 and, planned, a host-free CUDA
+  build; ace-jax would add nothing but the call. Ask its maintainers before building more here.
+- **Until then: a brute-force builder in JAX for small cells**, which vmaps natively: all pairs over the
+  periodic-image shifts. Shifts per structure from its cell alone (host): `n_k = ceil((rc + skin) / w_k)` images
+  per periodic axis (`w_k` the perpendicular widths, as `jaxmd.min_image_ok` computes them), none on
+  non-periodic axes, padded to the bucket's largest count S (a 2-atom primitive Si cell at rc 5 Å needs up to
+  ~7^3 shifts, a 64-atom cube 27). On the device `rij[b, i, j, s] = x[b, j] - x[b, i] + shift[b, s]`, valid
+  where both atoms are live, not (i, i, zero shift), and r < rc (+ skin for MD), compacted to K slots per atom
+  with `skin.compact`'s search. Cost O(N^2 S) per structure (110k distances for a 64-atom cube), which bounds it
+  to `N_DEVICE` atoms (set by benchmark; expect a few hundred).
+- **Large cells** (above `N_DEVICE`): the per-structure FFI build under `jit`, or the existing list paths; large
+  cells are where a per-structure build is cheap per atom and where batching gains least.
+- Either way: the dense edge input (`rij (B, N, K, 3)`, neighbour index, mask) plus an overflow flag (more than K
   in-cutoff neighbours: the call is repeated with a larger K, which recompiles) -- never truncation.
-- Above `N_DEVICE` (large cells): the host lists (`nlist.dense_graph`, matscipy-neighbours when installed), one per
-  structure; large cells are where host lists are cheap per atom (3 µs/atom at 216 atoms) and where batching gains
-  least.
-
-An alternative to watch: a batched entry point in matscipy-neighbours (several cells per call on the GPU) would
-remove the per-call floor; ask its maintainers before building more than the brute-force builder.
 
 ### 4. Evaluation
 
@@ -169,12 +177,12 @@ batch.unpad(b, F)                                 # list of per-structure arrays
   to roundoff), same options: 2-atom primitive and 8-atom cubic Si, a sheared triclinic cell, a slab (mixed pbc),
   a non-periodic cluster (stress NaN), a single periodic atom, SiGe and Cantor5 (species), a species-embedding
   model, a PACE `.yace`, mixed sizes in one call (several buckets), input order preserved.
-- **Neighbour builder** against `nlist.sparse_graph` (same pair sets and edge vectors) on the same cells, and its
-  overflow retry.
+- **Neighbour builder** (the FFI or the brute-force one) against `nlist.sparse_graph` (same pair sets and edge
+  vectors) on the same cells, and its overflow retry.
 - **Kernel path** (`ffi=True`) against the JAX path on the CPU.
 - **Benchmarks** (results in `docs/dev/batched-evaluation-results.md`): µs/atom against batch size for 2-, 8-,
   64- and 216-atom Si, float32 / float64, on lestrade (RTX 4000 Ada) and a Sulis A100; the CPU kernel on 32 cores;
-  each against an `ACECalculator` loop; neighbour-builder time against host lists; compile counts.
+  each against an `ACECalculator` loop; neighbour-builder time against per-structure builds (CPU, CUDA, FFI); compile counts.
 
 ### 7. Phases 2-3 with JAX-MD (sketch; not built here)
 
@@ -206,8 +214,8 @@ cells.
 
 ## Risks and open questions
 
-- **`N_DEVICE` and the O(N^2 S) builder:** cheap for small cells, quadratic beyond; the threshold comes from the
-  benchmark. A device cell list would remove the limit but is more code; not planned.
+- **The batched list build:** depends on matscipy-neighbours adding a batched FFI entry point; until then the
+  brute-force builder's O(N^2 S) cost bounds it (`N_DEVICE`, from the benchmark).
 - **Recompiles:** one compile per (bucket, B, K, S); a wide mix of sizes or a K overflow recompiles. Bucketing and
   fixed B per bucket bound it; `res.timing` reports compiles.
 - **Memory estimate accuracy** for the batched shapes (Design 2): checked against `bench/gpu_memory` first.
