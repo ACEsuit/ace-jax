@@ -392,3 +392,31 @@ def test_aj_native_reports_and_builds(kernel, tmp_path, monkeypatch, capsys):
     with pytest.raises(SystemExit) as e:
         main(["native", "--build"])
     assert e.value.code == 1
+
+
+def test_edge_kernel_vmaps_by_flattening_rows(kernel):
+    """AceEdges under jax.vmap: the batch flattened into rows, one kernel call, results (and dE/drij
+    through the custom VJP) identical to calling it per batch element; unbatched row inputs broadcast;
+    batched model constants fall back to one call per element."""
+    from ace_jax.eval.ffi import KernelModel, edge_site_energies
+    m, meta, _ = load(str(FIXTURES / "ace_cantor5_small.npz"))
+    km = KernelModel.of(lean(m, spline_tol=None, radial_table=True))
+    rng = np.random.default_rng(0)
+    B, n, K = 3, 7, 12
+    rij = jnp.asarray(rng.normal(size=(B, n, K, 3)) * 1.5 + 0.5)
+    z = jnp.asarray(rng.integers(0, 5, (B, n)), jnp.int32)
+    zj = jnp.asarray(rng.integers(0, 5, (B, n, K)), jnp.int32)
+    mask = jnp.asarray(rng.random((B, n, K)) < 0.8)
+    f = lambda r, z_, zj_, m_: km.site_energies_dense(r, None, zj_, m_, z_)
+    one = lambda b: f(rij[b], z[b], zj[b], mask[b])
+    assert np.array_equal(jax.jit(jax.vmap(f))(rij, z, zj, mask), jnp.stack([one(b) for b in range(B)]))
+    g = jax.jit(jax.vmap(jax.grad(lambda *a: f(*a).sum())))(rij, z, zj, mask)
+    assert np.array_equal(g, jnp.stack([jax.grad(lambda r, b=b: f(r, z[b], zj[b], mask[b]).sum())(rij[b])
+                                        for b in range(B)]))
+    shared = jax.vmap(lambda r: f(r, z[0], zj[0], mask[0]))(rij)              # species not batched
+    assert np.array_equal(shared, jnp.stack([f(rij[b], z[0], zj[0], mask[0]) for b in range(B)]))
+    hlo = jax.jit(jax.vmap(f)).lower(rij, z, zj, mask).as_text()
+    assert hlo.count("ace_jax_edges") == 1
+    consts = tuple(jnp.stack([c] * B) for c in km.consts)                     # a model per element
+    e = jax.vmap(lambda r, c: edge_site_energies(km.attrs, r, z[0], zj[0], mask[0], *c))(rij, consts)
+    assert np.array_equal(e, shared)

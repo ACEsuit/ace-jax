@@ -46,9 +46,9 @@ def structures():
     return out
 
 
-def reference(ats, positions):
+def reference(ats, positions, **kw):
     """ACECalculator energies and forces of `ats` at `positions` (per-structure (n, 3))."""
-    calc = ACECalculator(MODEL)
+    calc = ACECalculator(MODEL, **kw)
     E, F = [], []
     for at, R in zip(ats, positions):
         at = at.copy()
@@ -59,10 +59,10 @@ def reference(ats, positions):
     return np.array(E), F
 
 
-def check_against_calculator(bc, nb, nl, ats, R):
+def check_against_calculator(bc, nb, nl, ats, R, **kw):
     energy = bc.energy_fn()
     E, G = jax.jit(jax.vmap(jax.value_and_grad(lambda r, n: energy(r, neighbor=n))))(R, nl)
-    Eref, Fref = reference(ats, nb.unpad(R))
+    Eref, Fref = reference(ats, nb.unpad(R), **kw)
     assert np.abs(np.asarray(E) - Eref).max() <= 1e-12 * np.abs(Eref).max()
     F = nb.unpad(-G)
     for f, fr in zip(F, Fref):
@@ -196,13 +196,35 @@ def test_needs_rebuild_per_structure():
     assert nb.update(nb.positions, nl)[1] is False and nb.update(R, nl)[1] is True
 
 
-def test_energy_fn_refuses_the_kernel():
+def test_vmapped_md_with_the_kernel(jax_md):
+    """ffi=True: the C++ kernel under jax.vmap (its rows flattened into one call).  Energies and forces equal
+    ACECalculator(ffi=True)'s to roundoff (both read one radial table); vmapped NVE equals the per-structure
+    runs and stays on the JAX model's trajectory to the table's accuracy."""
     import os
     import shutil
     if jax.default_backend() != "cpu" or shutil.which("c++") is None:
         if os.environ.get("ACEJAX_REQUIRE_OPTIONAL") and jax.default_backend() == "cpu":
             pytest.fail("no C++ compiler")
         pytest.skip("the C++ kernel needs a CPU and a compiler")
-    bc = BatchCalculator(MODEL, ffi=True)
-    with pytest.raises(ValueError, match="ffi=False"):
-        bc.energy_fn()
+    from jax_md import simulate, space
+    ats = structures()
+    _, shift = space.free()
+    finals = {}
+    for ffi in (True, False):
+        bc = BatchCalculator(MODEL, ffi=ffi)
+        assert (bc.ffi is not None) == ffi
+        nb = bc.neighbour_lists(ats, skin=1.0)
+        nl = nb.allocate()
+        if ffi:
+            check_against_calculator(bc, nb, nl, ats, nb.positions, ffi=True)
+        init, apply = simulate.nve(bc.energy_fn(), shift, dt=DT)
+        p0 = batch.initial_momenta(jax.random.PRNGKey(0), nb.live, 0.05, MASS)
+        run = lambda R, p, n: jax.lax.fori_loop(0, 50, lambda i, s: apply(s, neighbor=n),
+                                                init(None, R, kT=0.0, mass=MASS, momenta=p, neighbor=n))
+        vm = jax.jit(jax.vmap(run))(nb.positions, p0, nl)
+        if ffi:
+            for s in range(len(ats)):
+                one = jax.jit(run)(nb.positions[s], p0[s], jax.tree.map(lambda a: a[s], nl))
+                assert np.abs(np.asarray(one.position) - np.asarray(vm.position[s])).max() < 1e-12
+        finals[ffi] = np.asarray(vm.position)
+    assert np.abs(finals[True] - finals[False]).max() < 1e-5      # radial table: forces ~1e-8 of max|F|
