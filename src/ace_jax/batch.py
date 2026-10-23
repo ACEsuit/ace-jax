@@ -19,9 +19,11 @@ matscipy-neighbours has the batched XLA FFI build (libAtoms/matscipy-neighbours#
 either device (`builder="auto"`).
 """
 
+import dataclasses
 import math
 import time
 from dataclasses import dataclass
+from typing import NamedTuple
 
 import numpy as np
 
@@ -113,14 +115,19 @@ def _species_lut(elements):
     return lut
 
 
-def pack(atoms_list, cutoff, elements, max_batch_atoms=None, indices=None):
+def pack(atoms_list, cutoff, elements, max_batch_atoms=None, indices=None, one_batch=False):
     """Padded batches of `atoms_list` (ASE Atoms), grouped by `bucket_size` of the atom count: a list of
     `Batch`, every batch of a bucket with the same B (the last one padded with empty structures, so B does
     not recompile).  `elements`: the model's atomic numbers (the species index order).  `indices`: the
-    input positions recorded in `Batch.index` (default 0..len-1)."""
+    input positions recorded in `Batch.index` (default 0..len-1).  `cutoff`: the list cutoff the image
+    ranges are for (cutoff + skin for MD).  `one_batch=True`: a list of one Batch holding every structure,
+    padded to the largest one's bucket, B = len(atoms_list) (the layout for vmapped MD)."""
     cutoff, lut = float(cutoff), _species_lut(elements)
     cap = int(max_batch_atoms or MAX_BATCH_ATOMS)
     indices = list(range(len(atoms_list))) if indices is None else list(indices)
+    if one_batch:
+        N = bucket_size(max(len(at) for at in atoms_list))
+        return [_pack_one(list(zip(indices, atoms_list)), len(atoms_list), N, cutoff, lut)]
     groups = {}
     for i, at in zip(indices, atoms_list):
         groups.setdefault(bucket_size(len(at)), []).append((i, at))
@@ -308,6 +315,156 @@ def unpad(batch, x):
     return {int(i): x[b, :int(n)] for b, (i, n) in enumerate(zip(batch.index, batch.n_atoms)) if i >= 0}
 
 
+# ------------------------------------------------------------------ MD and relaxation with JAX-MD
+# ace-jax hosts no integrators or optimizers: JAX-MD's run under jax.vmap over a padded batch, with the
+# energy function, neighbour lists and padding helpers below (docs/user/howto/batch.md).
+
+class BatchList(NamedTuple):
+    """Neighbour lists of a padded batch for vmapped MD, built at cutoff + skin and reused while every atom
+    stays within skin / 2 of `position0`: an edge vector is rij0 + d_j - d_i with d = R - position0, so
+    the lists need no minimum image (any cell size) and positions may leave the cell.  Leading axis B;
+    under jax.vmap each structure sees its own slice."""
+    position0: object            # (B, N, 3) positions at the build, as the integrator holds them
+    rij0: object                 # (B, N, K, 3) edge vectors at the build (masked slots parked)
+    idx: object                  # (B, N, K) neighbour slot
+    mask: object                 # (B, N, K)
+    species: object              # (B, N)
+    live: object                 # (B, N)
+
+
+def energy_fn(model, cutoff):
+    """`energy(R, neighbor)`: the energy of ONE structure, R (N, 3), neighbor its `BatchList` slice -- the
+    form JAX-MD's `simulate.*` and `minimize.*` take (they pass `neighbor=` through), to jax.vmap over the
+    batch.  Pairs beyond `cutoff` (the skin pairs) are masked; padding atoms carry no energy and no force.
+    Positions-only derivatives of `model`'s dense site energies (the JAX model: not the C++ kernel, whose
+    FFI call has no batching rule)."""
+    import jax.numpy as jnp
+
+    from .eval.edge_model import total_energy
+    park = float(model.pad_cutoff())
+
+    def energy(R, neighbor, **kwargs):
+        nl = neighbor
+        d = R - nl.position0
+        rij = nl.rij0 + d[nl.idx] - d[:, None]
+        m = nl.mask & ((rij * rij).sum(-1) < cutoff * cutoff)
+        rij = jnp.where(m[..., None], rij, jnp.asarray([park, 0.0, 0.0], rij.dtype))
+        z = nl.species
+        e = model.site_energies_dense(rij, jnp.broadcast_to(z[:, None], nl.idx.shape), z[nl.idx], m, z)
+        return total_energy(jnp.where(nl.live, e, 0.0))
+    return energy
+
+
+def _mass_like(mass, live):
+    """mass -- a scalar, one per structure (B,) (a vmapped JAX-MD state's), per atom (..., N), or JAX-MD's
+    (..., N, 1) -- as (..., N, 1)."""
+    import jax.numpy as jnp
+    m = jnp.asarray(mass, jnp.result_type(float))
+    if m.ndim == live.ndim + 1:
+        m = m[..., 0]
+    elif m.ndim < live.ndim and m.shape == live.shape[:m.ndim]:      # leading axes: per structure
+        m = m.reshape(m.shape + (1,) * (live.ndim - m.ndim))
+    return jnp.broadcast_to(m, live.shape)[..., None]
+
+
+def initial_momenta(key, live, kT, mass=1.0):
+    """Maxwell-Boltzmann momenta (..., N, 3) at kT for the live atoms only, the centre-of-mass momentum
+    removed over the live atoms of each structure, zero on padding.  Pass as `momenta=` to a JAX-MD
+    `init_fn`: its own draw gives padding atoms momenta and removes the centre of mass over every slot,
+    which drifts the live atoms of a padded structure.  `mass`: a scalar or per atom (..., N)."""
+    import jax
+    import jax.numpy as jnp
+    live = jnp.asarray(live)
+    m = _mass_like(mass, live)
+    p = jnp.sqrt(m * kT) * jax.random.normal(key, live.shape + (3,), m.dtype)
+    lv = live[..., None]
+    P = jnp.where(lv, p, 0.0).sum(-2, keepdims=True)
+    M = jnp.where(lv, m, 0.0).sum(-2, keepdims=True)
+    return jnp.where(lv, p - m * P / jnp.maximum(M, 1e-300), 0.0)
+
+
+def zero_padding(state, live):
+    """A JAX-MD state with the padding atoms' momenta set to zero (e.g. after Langevin steps, whose noise
+    reaches every slot; padding atoms never interact, so this only cleans what temperatures read)."""
+    import jax.numpy as jnp
+    return state.set(momentum=jnp.where(jnp.asarray(live)[..., None], state.momentum, 0.0))
+
+
+def kinetic_energy(momentum, mass, live):
+    """Kinetic energy of the live atoms, per structure (sum over the last two axes)."""
+    import jax.numpy as jnp
+    live = jnp.asarray(live)
+    m = _mass_like(mass, live)
+    return jnp.where(live[..., None], momentum * momentum / (2 * m), 0.0).sum((-2, -1))
+
+
+def temperature(momentum, mass, live):
+    """kT of the live atoms per structure: 2 KE / (3 n_live), JAX-MD's convention (no centre-of-mass
+    correction), but without the padding slots that `jax_md.quantity.temperature` would count."""
+    import jax.numpy as jnp
+    return 2 * kinetic_energy(momentum, mass, live) / (3 * jnp.maximum(jnp.asarray(live).sum(-1), 1))
+
+
+def _wrap(positions, cell, pbc):
+    """Positions moved into the cell along periodic axes by integer lattice shifts (on the device)."""
+    import jax.numpy as jnp
+    f = jnp.linalg.solve(jnp.swapaxes(cell, 1, 2), jnp.swapaxes(positions, 1, 2))
+    w = jnp.where(pbc[:, :, None], jnp.floor(f), 0.0)
+    return positions - jnp.einsum("bkn,bkc->bnc", w, cell)
+
+
+def _moved(positions, neighbor):
+    """(B,) the largest displacement of a live atom since the build."""
+    import jax.numpy as jnp
+    d = jnp.linalg.norm(positions - neighbor.position0, axis=-1)
+    return jnp.where(neighbor.live, d, 0.0).max(-1)
+
+
+class BatchNeighbours:
+    """Neighbour lists for vmapped JAX-MD runs over one padded batch (`BatchCalculator.neighbour_lists`):
+    `allocate(R)` builds a `BatchList` at cutoff + skin, `update(R, nl)` rebuilds it when an atom has
+    moved skin / 2 (all structures at once: the build is one batched call) and grows K when a structure
+    outgrows it (a new shape, so the caller's jitted step recompiles).  Host-side: call between jitted
+    chunks of steps."""
+
+    def __init__(self, calc, batch, skin):
+        import jax
+        import jax.numpy as jnp
+        self.calc, self.batch, self.skin = calc, batch, float(skin)
+        self.cutoff = calc.cutoff
+        self.K = None
+        self.rebuilds = 0
+        dtype = calc._dtype()
+        self.positions = jnp.asarray(batch.positions, dtype)       # wrapped, padded: the initial R
+        self.live = jnp.asarray(batch.live)
+        self._cell, self._pbc = jnp.asarray(batch.cell, dtype), jnp.asarray(batch.pbc)
+        self._wrap, self._moved = jax.jit(_wrap), jax.jit(_moved)
+
+    def allocate(self, positions=None):
+        """A BatchList for positions (B, N, 3) (default: the packed ones)."""
+        import jax.numpy as jnp
+        R = self.positions if positions is None else jnp.asarray(positions, self.positions.dtype)
+        W = self._wrap(R, self._cell, self._pbc)
+        rij, idx, mask, _, self.K = self.calc._build_lists(self.batch, W, self.cutoff + self.skin, self.K)
+        self.rebuilds += 1
+        return BatchList(R, rij, idx, mask, jnp.asarray(self.batch.species), self.live)
+
+    def needs_rebuild(self, positions, neighbor):
+        """(B,) bool: a live atom has moved more than skin / 2 since the build."""
+        return np.asarray(self._moved(positions, neighbor)) > self.skin / 2
+
+    def update(self, positions, neighbor):
+        """(neighbor, rebuilt): the same lists while they hold, else lists built at `positions`."""
+        if not self.needs_rebuild(positions, neighbor).any():
+            return neighbor, False
+        return self.allocate(positions), True
+
+    def unpad(self, x):
+        """Per-structure arrays of a padded (B, N, ...) result, in input order (a list)."""
+        d = unpad(self.batch, x)
+        return [d[i] for i in sorted(d)]
+
+
 def _build(positions, cell, images, image_mask, live, pbc, cutoff, K, park, builder):
     rij, idx, mask, count = neighbours(positions, cell, images, image_mask, live, cutoff, K, park, builder, pbc)
     return rij, idx, mask, count.max(-1, initial=0)
@@ -408,11 +565,10 @@ class BatchCalculator:
         import jax.numpy as jnp
         return np.dtype(self.calc.dtype or jnp.zeros(()).dtype)
 
-    def _k_guess(self, batch):
+    def _k_guess(self, batch, rc):
         """Neighbour slots for a first call on a bucket: the densest periodic structure's expected count
-        with headroom (an overflow retries), capped at the candidates."""
+        within rc, with headroom (an overflow retries), capped at the candidates."""
         from .calc.skin import round_k
-        rc = self.cutoff
         est = []
         for b in np.flatnonzero(batch.index >= 0):
             n = int(batch.n_atoms[b])
@@ -422,6 +578,58 @@ class BatchCalculator:
                 est.append(n)
         N, S = batch.positions.shape[1], batch.images.shape[1]
         return round_k(min(max(est, default=1), N * S))
+
+    def _build_lists(self, b, positions, cutoff, K, builder=None):
+        """(rij, idx, mask, kmax, K): batch b's dense lists at `cutoff` for `positions` (B, N, 3, on the
+        device, wrapped into the cells), re-built at a larger K until no structure overflows (K None: a
+        guess from the density).  kmax (B,) host: each structure's largest count."""
+        import jax
+        from .calc.skin import round_k
+        builder = builder or self._builder_for(b)
+        stats = getattr(self, "_stats", None)
+        if stats is None:
+            stats = self._stats = {"compiles": 0, "k_retries": 0}
+        K = K or self._k_guess(b, cutoff)
+        park = float(self.eval_model.pad_cutoff())
+        (B, N), S = b.shape, b.images.shape[1]
+        while True:
+            key = ("build", builder, N, B, K, S if builder == "jax" else 0, cutoff)
+            stats["compiles"] += key not in self._shapes
+            self._shapes.add(key)
+            if builder == "host":
+                rij, idx, mask, count = host_neighbours(dataclasses.replace(b, positions=np.asarray(positions)),
+                                                        cutoff, K, park)
+                rij, kmax = jax.numpy.asarray(rij, positions.dtype), count.max(-1, initial=0)
+            else:
+                rij, idx, mask, kmax = self._jit_build(positions, jax.numpy.asarray(b.cell, positions.dtype),
+                                                       b.images, b.image_mask, b.live, b.pbc, cutoff, K, park,
+                                                       builder)
+                kmax = np.asarray(kmax)
+            if (kmax < 0).any():
+                bad = [int(i) for i in b.index[kmax < 0]]
+                raise ValueError(f"structures {bad}: invalid input (non-finite positions or a degenerate cell)")
+            if kmax.max(initial=0) <= K:
+                return rij, idx, mask, kmax, K
+            K = round_k(int(kmax.max()))
+            stats["k_retries"] += 1
+
+    def energy_fn(self):
+        """JAX-MD's energy function for one structure, `energy(R, neighbor=...)`, over this calculator's
+        evaluation model (`batch.energy_fn`); jax.vmap the integrator or optimizer over the batch.  The JAX
+        model only: ffi has no batching rule under vmap."""
+        if self.ffi is not None:
+            raise ValueError("energy_fn needs the JAX model (ffi=False): the C++ kernel's FFI call cannot "
+                             "run under jax.vmap")
+        return energy_fn(self.eval_model, self.cutoff)
+
+    def neighbour_lists(self, atoms_list, skin=1.0):
+        """`BatchNeighbours` for vmapped MD or relaxation of `atoms_list`: all structures in ONE padded batch
+        (B = len(atoms_list), N the largest one's bucket), lists at cutoff + skin.  Its `positions` are the
+        initial R (B, N, 3) and `live` the (B, N) mask; `unpad` returns per-structure arrays."""
+        if not skin > 0:
+            raise ValueError(f"skin must be > 0, got {skin!r}")
+        (b,) = pack(atoms_list, self.cutoff + skin, self.meta["elements"], one_batch=True)
+        return BatchNeighbours(self, b, skin)
 
     def calculate(self, atoms_list):
         """Energies, forces and stresses of `atoms_list` (ASE Atoms): a `BatchResults` in input order."""
@@ -440,40 +648,21 @@ class BatchCalculator:
         batches = pack([atoms_list[i] for i in small], self.cutoff, self.meta["elements"],
                        self.max_batch_atoms, indices=small)
         t_pack = time.perf_counter() - t0
-        dtype, model, compiles, retries = self._dtype(), self.eval_model, 0, 0
+        dtype, model = self._dtype(), self.eval_model
+        self._stats = {"compiles": 0, "k_retries": 0}
         buckets, builders = {}, {}
         t1 = time.perf_counter()
         with highest_precision():
             for b in batches:
                 N = b.positions.shape[1]
-                B, S = b.positions.shape[0], b.images.shape[1]
+                B = b.positions.shape[0]
                 buckets[N] = buckets.get(N, 0) + 1
-                K = self._K.get(N) or self._k_guess(b)
                 builder = self._builder_for(b)
                 builders[builder] = builders.get(builder, 0) + 1
-                args = (jax.numpy.asarray(b.positions, dtype), jax.numpy.asarray(b.cell, dtype), b.images,
-                        b.image_mask, b.live, b.pbc)
-                while True:
-                    key = ("build", builder, N, B, K, S if builder == "jax" else 0)
-                    compiles += key not in self._shapes
-                    self._shapes.add(key)
-                    if builder == "host":
-                        rij, idx, mask, count = host_neighbours(b, self.cutoff, K, float(model.pad_cutoff()))
-                        rij, kmax = jax.numpy.asarray(rij, dtype), count.max(-1, initial=0)
-                    else:
-                        rij, idx, mask, kmax = self._jit_build(*args, self.cutoff, K, float(model.pad_cutoff()),
-                                                               builder)
-                        kmax = np.asarray(kmax)
-                    if (kmax < 0).any():
-                        bad = [int(i) for i in b.index[kmax < 0]]
-                        raise ValueError(f"structures {bad}: invalid input (non-finite positions or a "
-                                         "degenerate cell)")
-                    if kmax.max(initial=0) <= K:
-                        break
-                    K, retries = round_k(int(kmax.max())), retries + 1
-                self._K[N] = K
-                Ke = min(K, round_k(int(kmax.max(initial=1))))           # evaluate the occupied slots only
-                compiles += ("efv", N, B, Ke) not in self._shapes
+                rij, idx, mask, kmax, self._K[N] = self._build_lists(
+                    b, jax.numpy.asarray(b.positions, dtype), self.cutoff, self._K.get(N), builder)
+                Ke = min(self._K[N], round_k(int(kmax.max(initial=1))))   # evaluate the occupied slots only
+                self._stats["compiles"] += ("efv", N, B, Ke) not in self._shapes
                 self._shapes.add(("efv", N, B, Ke))
                 E, F, V = jax.block_until_ready(self._jit_efv(model, rij, idx, mask, b.species, b.live, Ke))
                 E, V = np.asarray(E, np.float64), np.asarray(V, np.float64)
@@ -495,7 +684,7 @@ class BatchCalculator:
         s = -virial / np.where(ok, vol, np.nan)[:, None, None]
         stress = np.where(ok[:, None], s[:, [0, 1, 2, 1, 0, 0], [0, 1, 2, 2, 2, 1]], np.nan)   # ASE Voigt
         timing = {"pack_s": t_pack, "batched_s": t_eval, "single_s": time.perf_counter() - t2,
-                  "batches": len(batches), "buckets": buckets, "compiles": compiles, "k_retries": retries,
+                  "batches": len(batches), "buckets": buckets, **self._stats,
                   "single": len(large), "builder": builders}
         self.last_timing = timing
         return BatchResults(energy, forces, virial, stress, e0_offset, timing)
