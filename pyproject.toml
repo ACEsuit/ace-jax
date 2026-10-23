@@ -140,6 +140,7 @@ ignore = [
 # (`jax.tree.map(lambda a: a[i], ds)`, in-loop jit timing).  Listed per file so
 # the rule still guards new files.
 "bench/learn_radial/compare_plots.py" = ["B023"]
+"tests/test_batch_md.py" = ["B023"]
 "bench/learn_radial/plots.py" = ["B023"]
 "bench/learn_radial/rmse.py" = ["B023"]
 "bench/learn_radial/rmse_npz.py" = ["B023"]
