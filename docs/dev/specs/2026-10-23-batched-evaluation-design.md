@@ -60,7 +60,8 @@ matscipy-neighbours#10; jittable, any-order periodic images, so cells smaller th
 is 3.2 µs at 64 atoms, 17 µs at 8 and 78 µs at 2 -- 5-120x the batched evaluation (0.66 µs/atom, float32).
 For MD the list is rebuilt every few tens of steps, so 64-atom cells are already about acceptable
 (~0.1 µs/atom per step); a single-point call rebuilds every time. Phase 1 therefore needs **one build for the whole
-batch** (Design 3).
+batch** (Design 3), now contributed upstream as libAtoms/matscipy-neighbours#11: 3.9 µs per 64-atom cell and
+0.09 µs per 2-atom cell at B = 1024 on the same GPU.
 
 **Why not JAX-MD or lammps-jax.**
 - lammps-jax: one LAMMPS system per process; its multi-replica mode is separate processes, which share no GPU
@@ -113,12 +114,17 @@ conservative fixed atoms-per-batch.
 
 The list of a batch must be built in one launch (or a few), not one per structure.
 
-- **Preferred: a batched entry point in matscipy-neighbours' XLA FFI** (to request upstream, libAtoms/
-  matscipy-neighbours#10): positions `(B, N, 3)`, cells `(B, 3, 3)` and live counts in, the same `idx`, `shift`,
-  `count`, `overflow` per structure out, in one launch (or a `vmap_method` that batches rather than loops). It
-  already handles periodic images of any order, per-type cutoffs, float32/float64 and, planned, a host-free CUDA
-  build; ace-jax would add nothing but the call. Ask its maintainers before building more here.
-- **Until then: a brute-force builder in JAX for small cells**, which vmaps natively: all pairs over the
+- **The batched entry point in matscipy-neighbours' XLA FFI**, contributed as part of this work
+  (libAtoms/matscipy-neighbours#11, stacked on #10): `xla.neighbour_matrix_batched(positions (B, N, 3),
+  cells (B, 3, 3), cutoff, pbc (3-tuple or (B, 3)), K, n_atoms (B,), types, cutoffs)` returns `idx (B, N, K)`,
+  `shift (B, N, K, 3)`, `count (B, N)` (0 on padding rows) and `status (B, 2)` = (overflow, invalid) per
+  structure, and `jax.vmap` of `neighbour_matrix` / `neighbour_matrix_planned` routes to it (`custom_vmap`).
+  Brute force over the images across planes within the cutoff, so any cell (smaller than the cutoff
+  included) and any per-structure periodicity; OpenMP on the host, three kernel launches with no sync on CUDA
+  (graph-capturable). Measured (RTX 4000 Ada, rc 6 Å, B = 1024): 0.09 / 0.23 / 3.9 µs per 2- / 8- / 64-atom
+  Si cell, against 135-210 µs for the sequential vmap; one CPU core 1.0 / 5.0 / 127 µs. ace-jax adds only the
+  call (with `cutoff = rc + skin` for MD) and maps `status` onto its overflow retry and NaN rows.
+- **Fallback while #10/#11 are unreleased: a brute-force builder in JAX for small cells**, which vmaps natively: all pairs over the
   periodic-image shifts. Shifts per structure from its cell alone (host): `n_k = ceil((rc + skin) / w_k)` images
   per periodic axis (`w_k` the perpendicular widths, as `jaxmd.min_image_ok` computes them), none on
   non-periodic axes, padded to the bucket's largest count S (a 2-atom primitive Si cell at rc 5 Å needs up to
@@ -214,8 +220,9 @@ cells.
 
 ## Risks and open questions
 
-- **The batched list build:** depends on matscipy-neighbours adding a batched FFI entry point; until then the
-  brute-force builder's O(N^2 S) cost bounds it (`N_DEVICE`, from the benchmark).
+- **The batched list build:** the FFI entry point (matscipy-neighbours#11) depends on #10 and #11 merging and
+  a release with built XLA handlers; until then the JAX brute-force fallback's O(N^2 S) cost bounds it
+  (`N_DEVICE`, from the benchmark). Both are O(N^2) per structure, so `N_DEVICE` applies either way.
 - **Recompiles:** one compile per (bucket, B, K, S); a wide mix of sizes or a K overflow recompiles. Bucketing and
   fixed B per bucket bound it; `res.timing` reports compiles.
 - **Memory estimate accuracy** for the batched shapes (Design 2): checked against `bench/gpu_memory` first.
