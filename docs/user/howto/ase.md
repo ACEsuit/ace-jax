@@ -97,11 +97,43 @@ seconds. Later calls take milliseconds.
 | `spline_tol` | `"auto"` | change a *learned* radial to a spline at 1e-10 before evaluation (see [learned radials](learned-radials.md#deployment-spline-speed)); a float changes any analytic radial to a spline; `None` never makes splines |
 | `edge_a_kind` | `"auto"` | the A-basis kernel, `"gather"` or `"matmul"`; `"auto"` measures the time of both, one time for each edge bucket |
 | `skin` | `1.0` | the Verlet skin in Å; `0` builds the list again at each call |
+| `ffi` | `False` | `True`: use the C++ kernel on CPUs (see [CPU kernel](#cpu-kernel)); `"auto"`: use it when possible |
 
 `calc.model` is the model as loaded. `calc.eval_model` is the form that the
 calculator evaluates. If you install the `fast-neighbours` extra
 (matscipy-neighbours), the neighbour lists are faster. If not, the
 calculator uses the ASE neighbour list.
+
+## CPU kernel
+
+On CPUs, a C++ kernel can calculate the energy, forces and stress of a
+linear ACE model. It uses all the cores of the CPU. On a 32-core CPU it is
+approximately 17 times faster than the default for 1,000 to 4,000 atoms.
+The calculator compiles the kernel the first time, and keeps it in a cache.
+
+1. Enable float64 (see [Precision](#precision)).
+2. Make the calculator with `ffi=True`:
+
+    ```python
+    calc = ACECalculator("fit/model.npz", ffi=True)
+    ```
+
+The kernel needs a C++17 compiler (`$CXX`, `c++`, `g++` or `clang++`). With
+`ffi="auto"`, the calculator uses the kernel when possible. If not,
+`calc.ffi_reason` gives the reason. Set `ffi_threads` to use fewer threads.
+
+The kernel tabulates the radial basis in r (`radial_table=True`). Energies
+agree with the default to approximately 1e-12 relative. Forces agree to
+1.5e-8 of the largest force.
+
+!!! note "Derivatives"
+    The kernel gives the derivatives with respect to the positions only.
+    For derivatives with respect to the model coefficients, or for second
+    derivatives, use the JAX model (`ffi=False`, the default).
+
+Install the `fast-neighbours` extra with the kernel. It makes the neighbour
+lists 4 to 12 times faster (512 to 4,096 atoms). The extra also needs a C++
+compiler.
 
 ## Site descriptors
 

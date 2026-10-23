@@ -20,9 +20,27 @@ variable.
 
 ### Added
 
+- **The C++ kernel in the ASE calculator.** `ACECalculator(..., ffi=True)`
+  calculates energy, forces and stress of a linear ACE model with the C++
+  kernel on CPUs, on all cores (XLA's thread pool; `ffi_threads` sets fewer).
+  On 32 cores it is approximately 17 times faster than the JAX model at 1,700
+  to 4,100 atoms (linear ACE o4d20). It uses the calculator's neighbour lists
+  and skin, and the radial table. `ffi="auto"` uses it when possible and gives
+  the reason in `calc.ffi_reason` when not. The default stays the JAX model,
+  which also gives derivatives with respect to the coefficients and second
+  derivatives; the kernel gives position derivatives only.
 - **`aj export --print-env BUNDLE` for kernel bundles.** It prints the
   `LAMMPS_JAX_FFI_HANDLERS` line on the machine that runs LAMMPS. If the kernel
   library is not on that machine, the command compiles it there.
+
+### Fixed
+
+- **Skin-list rebuilds on the CPU were slow.** Matching each edge to its reverse
+  (two sorts over every skin edge) took approximately 90% of a rebuild: 93 of
+  106 ms at 4,096 atoms. The match only helps on a GPU, so the CPU now uses the
+  scatter force assembly, which is as fast. A rebuild of 4,096 atoms now takes
+  14 ms with the `fast-neighbours` extra (was 102 ms) and 159 ms without it
+  (was 249 ms).
 
 ## 0.4.1 (2026-10-22)
 
