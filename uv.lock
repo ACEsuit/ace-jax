@@ -94,7 +94,7 @@ requires-dist = [
     { name = "jax-md", marker = "extra == 'jaxmd'", specifier = ">=0.2.29" },
     { name = "lammps-jax", marker = "extra == 'lammps'", specifier = ">=0.2.1" },
     { name = "lineax", specifier = ">=0.1.1" },
-    { name = "matscipy-neighbours", marker = "extra == 'fast-neighbours'", specifier = ">=1.0" },
+    { name = "matscipy-neighbours", marker = "extra == 'fast-neighbours'", git = "https://github.com/libAtoms/matscipy-neighbours?rev=89f6377d2bafc7cf7aaf061d7765e304b26e5188" },
     { name = "numpy", specifier = ">=1.24" },
     { name = "numpyro", specifier = ">=0.16" },
     { name = "optax", specifier = ">=0.2" },
@@ -1636,13 +1636,12 @@ wheels = [
 
 [[package]]
 name = "matscipy-neighbours"
-version = "1.0.0"
-source = { registry = "https://pypi.org/simple" }
+version = "1.0.1.dev22+g89f6377d2"
+source = { git = "https://github.com/libAtoms/matscipy-neighbours?rev=89f6377d2bafc7cf7aaf061d7765e304b26e5188#89f6377d2bafc7cf7aaf061d7765e304b26e5188" }
 dependencies = [
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/88/da/2ba0f1ba12c405baf9f7ac128780302815b289dc95c405ce6e0a5a43d866/matscipy_neighbours-1.0.0.tar.gz", hash = "sha256:f166ee92410421d69845dd57acade2030c75c61be97f8e86a0dc2301d6a40f1e", size = 503700, upload-time = "2026-09-27T09:02:42.476Z" }
 
 [[package]]
 name = "mdurl"

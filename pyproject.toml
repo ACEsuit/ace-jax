@@ -89,6 +89,13 @@ dev = [
   "ruff==0.16.9", "pre-commit>=4",
 ]
 
+[tool.uv.sources]
+# The lock (CI, `uv sync --extra fast-neighbours`) builds matscipy-neighbours from its main branch:
+# the 1.1.0 changes (GPU caching pool, single-pass GPU neighbour_matrix, unspecified
+# order of neighbours within a row) are not on PyPI yet.  A pip install of the extra still
+# takes the PyPI release.  Replace with the release once 1.1.0 is published.
+matscipy-neighbours = { git = "https://github.com/libAtoms/matscipy-neighbours", rev = "89f6377d2bafc7cf7aaf061d7765e304b26e5188" }
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/ace_jax"]
 

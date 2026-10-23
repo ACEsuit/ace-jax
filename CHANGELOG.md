@@ -153,6 +153,11 @@ basis automatically. `aj fit` fits linear ACE by default.
 
 ### Testing
 
+- The lock builds matscipy-neighbours (`fast-neighbours`) from its `main`
+  branch at a fixed commit, as 1.1.0 is not on PyPI yet. A pip install of
+  the extra is not changed. A test that compared three evaluations bitwise
+  now allows 16 ulp: on a GPU, the order of a sum can change between calls.
+
 - The `pace-parity` CI job builds ML-PACE from
   `jameskermode/lammps-user-pace` (ICAMS/lammps-user-pace#31): the
   `v.2025.12.4.p1` release plus tabulated radials, recursive-evaluator
