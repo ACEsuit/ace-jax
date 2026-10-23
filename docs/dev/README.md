@@ -20,6 +20,8 @@ results behind ace-jax, kept as the record that code comments and tests cite:
 - `jax-md-results.md`: `ace_jax.jaxmd` (JAX-MD) against LAMMPS + lammps-jax: throughput
   on the ACE ladder (A100, RTX 4000 Ada), row blocks, and JAX-MD's neighbour-list memory.
 - `lammps-jax-cpu-port.md`: the plan for lammps-jax bundles on the CPU backend (#89).
+- `python-domain-decomposition.md`: an assessment (deferred) of multi-device MD in Python with
+  lammps-jax's `ghost_exchange`, without LAMMPS: fit, value per case, costs, and what to do first.
 - `ard-force-uq.md`: usage notes for `--uq ard` revision 2 (conformal per-atom force
   uncertainty, `aj calibrate`), the source for its user pages.
 - `basis-build-internals.md`: how `build_model` builds a basis, how `save_npz`
