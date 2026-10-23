@@ -122,7 +122,7 @@ jobs:
             jaxcache-${{ runner.os }}-optional-${{ hashFiles('uv.lock') }}-
             jaxcache-${{ runner.os }}-optional-
       - name: Install matscipy-neighbours (C++ source build), lammps-jax and jax-md
-        run: uv sync --python 3.12 --extra gp --extra fast-neighbours --extra lammps --extra jaxmd
+        run: uv sync --python 3.12 --extra gp --extra native --extra lammps --extra jaxmd
       - name: Optional-dependency tests (CPU JAX)
         env:
           JAX_PLATFORM_NAME: cpu

@@ -19,7 +19,10 @@ Forces are assembled in skin-slot space: the reverse edge of skin slot (i, s),
 j = idx_s[i, s], sits at skin slot rev_s[i, s] of row j (`nlist.reverse_slots`,
 matched per periodic image), and at compact slot csum[j, rev] - 1 of the model's
 (n, K) graph, so F is a gather.  When reverse_slots cannot match every edge (a
-rounding-boundary case) rev_s is None and the step scatters instead.
+rounding-boundary case) rev_s is None and the step scatters instead.  The gather is a GPU
+optimisation (a scatter-add there is slow): on the CPU the two step times are equal, and
+reverse_slots (host numpy, two lexsorts over every skin edge) was ~90% of a rebuild (93 of 106 ms
+at 4096 atoms with matscipy-neighbours), so the list carries rev_s only when JAX runs on a GPU.
 """
 import dataclasses
 
@@ -112,16 +115,23 @@ def build(pos, cell, pbc, numbers, lut, rc, skin, K_skin_hint=None, device=None,
     n_cut = np.sum(live & (r2 < rc * rc), axis=1)
     k_max = int(n_cut.max(initial=0))
     K = max(int(K_hint or 0), round_k(k_max))
-    try:
-        rev = jnp.asarray(reverse_slots(idx, rij, count), jnp.int32)
-    except ValueError:                                 # a rounding-boundary mismatch
-        rev = None
+    rev = None                                         # the scatter assembly (the CPU: as fast, no host sort)
+    if want_reverse():
+        try:
+            rev = jnp.asarray(reverse_slots(idx, rij, count), jnp.int32)
+        except ValueError:                             # a rounding-boundary mismatch
+            rev = None
     return SkinState(
         pos0=pos, cell=np.array(cell, float), pbc=np.array(pbc, bool), numbers=numbers.copy(),
         idx_s=jnp.asarray(idx, jnp.int32), rij0_s=jnp.asarray(rij, dtype),
         live_s=jnp.asarray(live), rev_s=rev,
         node_z=jnp.asarray(z, jnp.int32), half_skin=jnp.asarray(0.5 * skin, dtype),
         K_skin=int(Ks), K=K, n_edges=int(n_cut.sum()), k_max=k_max, backend=backend)
+
+
+def want_reverse():
+    """Whether a list carries rev_s (the gather force assembly): on a GPU only (module docstring)."""
+    return jax.default_backend() == "gpu"
 
 
 def valid(state, pos, cell, pbc, numbers, skin):

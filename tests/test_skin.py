@@ -102,8 +102,11 @@ def test_isolated_atoms():
     assert abs(E - E0) < 1e-12 and np.allclose(F, 0.0)
 
 
-def test_cluster_with_an_isolated_atom():
-    """A row with count == 0 next to rows that have neighbours (Review Focus 1)."""
+@pytest.mark.parametrize("gather", [True, False])
+def test_cluster_with_an_isolated_atom(monkeypatch, gather):
+    """A row with count == 0 next to rows that have neighbours (Review Focus 1), with either force
+    assembly: the reverse-slot gather (a GPU list's; forced here) and the scatter (the CPU default)."""
+    monkeypatch.setattr(skin_mod, "want_reverse", lambda: gather)
     at = _cell("tric")
     at.pbc = False
     at.center(vacuum=8.0)
@@ -116,7 +119,7 @@ def test_cluster_with_an_isolated_atom():
         assert np.all(np.isfinite(got[1]))
         _close(got, want)
         assert np.allclose(got[1][-1], 0.0)
-    assert c._skin_state.rev_s is not None                              # the gather path ran
+    assert (c._skin_state.rev_s is not None) == gather                  # the assembly that ran
 
 
 def test_scatter_fallback_when_reverse_slots_fails(monkeypatch):
@@ -125,6 +128,7 @@ def test_scatter_fallback_when_reverse_slots_fails(monkeypatch):
     def boom(*a, **k):
         raise ValueError("1 edges without a matched reverse")
 
+    monkeypatch.setattr(skin_mod, "want_reverse", lambda: True)          # as on a GPU: try the gather
     monkeypatch.setattr(skin_mod, "reverse_slots", boom)
     at = _cell("small")
     c, ref = ACECalculator(M, layout="dense", skin=1.0), ACECalculator(M, layout="dense", skin=0.0)

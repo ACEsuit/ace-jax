@@ -246,7 +246,17 @@ load; faster only at large `nradbase`). Values are unchanged to roundoff.
 
 ### Calculator performance options
 
-`ACECalculator(path, dtype=None, layout="auto", edge_a_kind="auto", skin=1.0, lean=True, spline_tol="auto", spline_intervals=None, radial_table=None)`:
+`ACECalculator(path, dtype=None, layout="auto", edge_a_kind="auto", skin=1.0, lean=True, spline_tol="auto", spline_intervals=None, radial_table=None, ffi=False, ffi_threads=0)`:
+- `ffi=True` (CPU backend, float64, lean, linear ACEModel incl. species embedding): the C++ kernel
+  (`eval.ffi.KernelModel`, entry point `AceEdges`) evaluates the dense layout's site energies and dE/drij;
+  JAX assembles forces and stress, so skin lists and `calc.model` swaps work as before. Rows run on XLA's
+  intra-op thread pool (`ffi_threads` caps it): ~17x the JAX model at 1.7k-4k atoms on 32 cores (o4d20).
+  Radial table on (energies ~1e-12, forces ~1.5e-8 of max|F|). Compiled on first use (C++17 compiler,
+  cached). `ffi="auto"` falls back to the JAX model with `calc.ffi_reason`. Derivatives in positions only:
+  for parameter gradients or second derivatives keep `ffi=False` (the default). Pair it with the
+  `native` extra (matscipy-neighbours; formerly `fast-neighbours`): list rebuilds 4-12x faster than ASE's (14 ms at
+  4096 atoms). `aj native` reports the compiler, flags, CPU, kernel cache and neighbour list; `aj native --build`
+  compiles the kernel now (exit 1 if it cannot; on a cluster run it on a compute node).
 - `dtype` (e.g. `np.float32`): under x64 the model is read and made lean in float64 and only
   `calc.eval_model` is cast (`eval.with_dtype`); a pre-loaded (model, meta) is cast too.
   `calc.precision.precision_check(model, meta, atoms)` measures the float32 error of a model.
@@ -311,7 +321,7 @@ load; faster only at large `nradbase`). Values are unchanged to roundoff.
 - `edge_a_kind`: `"gather"` or `"matmul"`, the two A-basis forms. `"auto"` times
   both once per edge-count bucket.
 - Edge lists are padded to power-of-two buckets, so MD reuses the jitted
-  function. `pip install "ace-jax[fast-neighbours]"` (matscipy-neighbours,
+  function. `pip install "ace-jax[native]"` (matscipy-neighbours,
   a C++ source build) gives faster neighbour lists; ASE's list is the fallback.
 
 ### JAX-MD (MD fully on the device)

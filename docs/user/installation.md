@@ -18,7 +18,7 @@ project.
 | `ace-jax` | the core: building a basis, fitting (`aj fit`, every arm), learned radials, model loading, evaluation, ASE calculators, `aj basis`, `aj eval` | everything below except the pathfinder rung |
 | `ace-jax[gp]` | blackjax | the `pathfinder` rung of `--rungs` |
 | `ace-jax[cuda]` | `jax[cuda12]` | running on an NVIDIA GPU |
-| `ace-jax[fast-neighbours]` | matscipy-neighbours | faster neighbour lists (ASE's list is the fallback) |
+| `ace-jax[native]` | matscipy-neighbours | native C++ code on CPUs: faster neighbour lists (ASE's list is the fallback), with the C++ kernel |
 | `ace-jax[lammps]` | lammps-jax | LAMMPS export |
 | `ace-jax[jaxmd]` | jax-md (and approximately 40 dependencies, for example flax and pymatgen) | [MD with JAX-MD](howto/jax-md.md) |
 
@@ -51,11 +51,29 @@ coefficients. This takes milliseconds. ace-jax keeps the result in
 `~/.cache/ace-jax/coupling` (or `$ACEJAX_COUPLING_CACHE`). Later builds of
 the same specification read the cache.
 
-### `fast-neighbours`
+### `native`
 
+The `native` extra installs matscipy-neighbours, a C++ neighbour list.
 matscipy-neighbours is a source distribution. Thus its installation compiles
 C++, and needs CMake and a C++17 compiler. ace-jax uses matscipy-neighbours
 when it can import it. If not, ace-jax uses the ASE neighbour list.
+
+The same compiler builds the C++ kernel for linear ACE on CPUs (the ASE
+calculator with `ffi=True`, and LAMMPS bundles). The kernel is included with
+ace-jax as source code. ace-jax compiles it the first time, and keeps it in a
+cache.
+
+1. Install the extra: `pip install "ace-jax[native]"`.
+2. Make sure that ace-jax can use the C++ code:
+
+    ```bash
+    aj native --build
+    ```
+
+    The command compiles the kernel, and shows the compiler and the neighbour
+    list. On a cluster, run it on a compute node.
+
+The former name of the extra, `fast-neighbours`, installs the same packages.
 
 ## GPU
 
