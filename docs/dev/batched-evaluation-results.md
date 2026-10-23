@@ -110,6 +110,27 @@ The JAX model on a CPU, with the host cell list (`lestrade-cpu-host.jsonl`):
   a time.
 - The kernel spreads rows over XLA's thread pool, so it gains at every size.
 
+## Batched MD on a CPU: the C++ kernel under vmap
+
+JAX-MD NVE under `jax.vmap` (`bench/batch/md.py`, `BatchCalculator.energy_fn`), 20 steps per jitted
+chunk, lists fixed; lestrade CPU, float64, load average ~6. µs per atom per step
+(`lestrade-md-cpu.jsonl`):
+
+| atoms | cells | JAX model | C++ kernel | ratio |
+|--:|--:|--:|--:|--:|
+| 8 | 1 | 48.0 | 8.28 | 5.8x |
+| 8 | 16 | 70.9 | 3.52 | 20x |
+| 8 | 64 | 59.1 | 1.59 | 37x |
+| 64 | 1 | 65.8 | 2.60 | 25x |
+| 64 | 16 | 57.1 | 1.29 | 44x |
+| 64 | 64 | 56.6 | 1.18 | 48x |
+
+- The kernel vmaps by flattening: `eval.ffi._edge_kernel` gives its FFI call a `custom_vmap` rule that
+  reshapes (B, rows, K, 3) to (B rows, K, 3), so a vmapped batch is ONE kernel call threaded over
+  every row of every structure. Exact (bitwise against per-structure calls, `tests/test_ffi.py`).
+- The JAX model does not gain from the batch on a CPU (as for single points above); the kernel does,
+  because its rows are spread over XLA's thread pool.
+
 ## Defaults these set
 
 | setting | value | from |

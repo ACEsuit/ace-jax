@@ -38,7 +38,10 @@ variable.
   and its neighbour lists (any cell size, rebuilt by `update` when an atom
   moves skin / 2), `BatchCalculator.energy_fn()` the energy of one structure,
   and `ace_jax.batch.initial_momenta`, `zero_padding` and `temperature` keep
-  the padding atoms out of the dynamics and the temperatures.
+  the padding atoms out of the dynamics and the temperatures. With `ffi=True`
+  the C++ kernel runs under `jax.vmap` (the batch becomes one threaded kernel
+  call): on 32 cores, MD of 64 Si cells of 8 or 64 atoms is 37 to 48 times
+  faster than with the JAX model.
 - **The C++ kernel in the ASE calculator.** `ACECalculator(..., ffi=True)`
   calculates energy, forces and stress of a linear ACE model with the C++
   kernel on CPUs, on all cores (XLA's thread pool; `ffi_threads` sets fewer).

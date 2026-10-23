@@ -183,7 +183,11 @@ Each structure keeps its own FIRE step size.
       size only.
 
 !!! note "C++ kernel"
-    `energy_fn` needs the JAX model. It gives an error with `ffi=True`.
+    On a CPU, use `BatchCalculator(..., ffi=True)`. `energy_fn` then uses the C++
+    kernel, and `jax.vmap` sends the whole batch to it in one call. On 32 cores
+    this MD is 37 to 48 times faster than with the JAX model, for 64 structures
+    of 8 or 64 Si atoms. The kernel gives forces only: it does not give second
+    derivatives.
 
 ## `aj eval`
 

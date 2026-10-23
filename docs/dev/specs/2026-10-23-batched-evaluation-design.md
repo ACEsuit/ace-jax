@@ -11,7 +11,8 @@ Design 7 (JAX-MD under vmap) is implemented too, for a fixed cell: `BatchCalcula
 `neighbour_lists` -> `BatchNeighbours` (`allocate`, `update`, `needs_rebuild`, `unpad`) and the padding
 helpers `initial_momenta`, `zero_padding`, `temperature`. Checked: vmapped FIRE, NVE and Langevin equal
 the per-structure runs; padding found two leaks (JAX-MD's init gives padding atoms momenta and removes
-the centre of mass over every slot; Nose-Hoover counts padding as degrees of freedom).
+the centre of mass over every slot; Nose-Hoover counts padding as degrees of freedom). The C++ kernel
+vmaps too (a flattening `custom_vmap` rule on its FFI call), 37-48x the JAX model for batched MD on a CPU.
 
 ## Goal and scope
 
