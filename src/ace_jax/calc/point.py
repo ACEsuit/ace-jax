@@ -7,6 +7,7 @@ vectors, so the same code path serves LAMMPS, where there is no cell at all.
 """
 
 import math
+import os
 
 import numpy as np
 from ase.calculators.calculator import Calculator, all_changes
@@ -73,7 +74,7 @@ class ACECalculator(Calculator):
                  layout="auto", skin=1.0, lean=True, spline_tol=AUTO,
                  spline_intervals=None, radial_table=None, aa_dag="auto", posterior=None,
                  forces_std_every_call=False, energy_reference="absolute", shape_path="rows",
-                 shape_tau=1.0, shape_rank=None, **kw):
+                 shape_tau=1.0, shape_rank=None, ffi=False, ffi_threads=0, **kw):
         """`ACECalculator("si_fitted.npz")` is the intended form: cutoff,
         species and dtype all come from the file.  A pre-loaded (model, meta)
         pair is still accepted, which is what the validation tests use.
@@ -146,6 +147,19 @@ class ACECalculator(Calculator):
         kernels -- minutes at o4d20 without the NVRTC cache
         (CUEQUIVARIANCE_OPS_NVRTC_CACHE_DIR); plans are not cached.
 
+        `ffi` (False, the default: the JAX model; True; "auto"; a library path) evaluates energies,
+        forces and stress with the C++ kernel of `eval.ffi` (its `AceEdges` entry point, `KernelModel`)
+        in place of the JAX evaluation model: same neighbour lists (the dense layout, the skin list),
+        with forces and the virial assembled by JAX from the kernel's dE/drij.  It needs the CPU
+        backend, float64, lean=True and a linear ACEModel (categorical or species embedding), and turns
+        the radial table on (radial_table=None -> True; energies ~1e-12 relative, forces ~1.5e-8 of
+        max|F|).  The kernel is compiled on first use (`eval.ffi.library`: a C++17 compiler, cached).
+        True raises ValueError (or `eval.ffi.FFIUnavailable`) when it cannot run; "auto" then keeps the
+        JAX model and `calc.ffi_reason` says why.  `calc.ffi` is {"library", "threads"}, None when off.
+        Rows run in parallel on XLA's intra-op thread pool; `ffi_threads` > 0 caps the threads.  The
+        kernel differentiates in positions only: derivatives in the model's parameters, or second
+        derivatives, need the JAX model (ffi=False; `calc.model` and `eval_model` there).
+
         `posterior` (a `posterior.npz` from `fit --uq ard`, with `model` the matching
         `model.npz` FILE) adds the per-atom force uncertainty.  For a revision-2 (schema-3)
         posterior, each atom has a 3x3 shape V -- the centred delete-one-cluster (PRESS)
@@ -217,6 +231,10 @@ class ACECalculator(Calculator):
         self._spline_intervals = spline_intervals
         self._radial_table_opt = radial_table
         self._aa_dag = aa_dag                 # recursive product basis (`eval.aa_dag`); "auto" picks per model
+        if not (ffi is False or ffi is True or ffi == "auto"
+                or (isinstance(ffi, (str, os.PathLike)) and os.path.isfile(ffi))):
+            raise ValueError(f"ffi must be False, True, 'auto' or the path of a built kernel library, got {ffi!r}")
+        self._ffi_opt, self._ffi_threads, self._ffi_layout = ffi, int(ffi_threads), layout
         self.model = model                    # (the setter resets what derives from it)
         self.meta = meta
         self.edge_a_kind = edge_a_kind
@@ -339,17 +357,41 @@ class ACECalculator(Calculator):
                              "ACECalculator(model_file, posterior=posterior_file) instead")
         # built into locals and assigned at the end: a refused model (e.g. aa_dag="cueq" off a GPU, or a model
         # cueq cannot evaluate) leaves the calculator exactly as it was
+        ffi_lib, ffi_reason = self._ffi_choice(model)
+        try:
+            eval_model, splined, radial_table, aa_dag_used = self._eval_form(model, ffi_lib)
+        except (ValueError, OSError) as e:        # the kernel could not take this model (e.g. lean did not fold it)
+            if not ffi_lib or self._ffi_opt != "auto":
+                raise
+            ffi_lib, ffi_reason = None, str(e)
+            eval_model, splined, radial_table, aa_dag_used = self._eval_form(model, None)
+        if hasattr(self, "_model"):
+            self.reset()
+        self._ffi = {"library": str(ffi_lib), "threads": self._ffi_threads} if ffi_lib else None
+        self._ffi_reason = ffi_reason
+        self._model, self._eval_model, self._splined = model, eval_model, splined
+        self._radial_table, self._aa_dag_used = radial_table, aa_dag_used
+        self._e0 = np.asarray(model.E0, np.float64)
+        self._by_kind = {}                    # form -> model in that form
+        self._by_bucket = {}                  # edge bucket -> calibrated form
+        self._skin_state = None               # the skin list in use (calc.skin.SkinState)
+        self._skin_step = None                # f(u, arrays, K), bound to this model's weights
+
+    def _eval_form(self, model, ffi_lib):
+        """(eval_model, splined, radial_table, aa_dag) for `model`: lean, splines, the radial table, the
+        product basis form, E0 and dtype, then (ffi_lib) the C++ kernel in place of the JAX model."""
         eval_model = (lean_form(model, self._spline_tol, self._spline_intervals) if self._lean else model)
         splined = splining(model, eval_model, self._spline_tol)
-        eval_model, radial_table = with_radial_table(eval_model, self._radial_table_opt)
+        eval_model, radial_table = with_radial_table(
+            eval_model, True if ffi_lib and self._radial_table_opt is None else self._radial_table_opt)
         from ..eval.aa_dag import resolve_aa_dag, with_aa_dag
-        aa_dag_used = resolve_aa_dag(eval_model, self._aa_dag)
+        aa_dag_used = "greedy" if ffi_lib else resolve_aa_dag(eval_model, self._aa_dag)   # the kernel: its own plan
         if aa_dag_used == "cueq":
             import jax
             if jax.default_backend() != "gpu":     # before any trace: cueq kernels are CUDA-only
                 raise ValueError("aa_dag='cueq' needs a CUDA GPU; the JAX backend here is "
                                  f"{jax.default_backend()!r}.  Use aa_dag='auto', 'greedy' or None.")
-        if aa_dag_used is not None:
+        if aa_dag_used is not None and not ffi_lib:
             eval_model = with_aa_dag(eval_model, aa_dag_used)
         if self._energy_reference == "E0":        # site energies without the isolated atoms
             import equinox as eqx
@@ -358,15 +400,51 @@ class ACECalculator(Calculator):
         if self._eval_dtype is not None:         # a float64 model traced with float32 inputs promotes to f64
             from ..eval.api import with_dtype
             eval_model = with_dtype(eval_model, self._eval_dtype)
-        if hasattr(self, "_model"):
-            self.reset()
-        self._model, self._eval_model, self._splined = model, eval_model, splined
-        self._radial_table, self._aa_dag_used = radial_table, aa_dag_used
-        self._e0 = np.asarray(model.E0, np.float64)
-        self._by_kind = {}                    # form -> model in that form
-        self._by_bucket = {}                  # edge bucket -> calibrated form
-        self._skin_state = None               # the skin list in use (calc.skin.SkinState)
-        self._skin_step = None                # f(u, arrays, K), bound to this model's weights
+        if ffi_lib:                               # the kernel in place of the JAX evaluation model
+            from ..eval import ffi as kernel
+            kernel.register(ffi_lib)
+            eval_model = kernel.KernelModel.of(eval_model, self._ffi_threads)
+        return eval_model, splined, radial_table, aa_dag_used
+
+    def _ffi_choice(self, model):
+        """(library, reason) for the `ffi` option on `model`: the compiled kernel's path, or None and why
+        "auto" keeps the JAX model.  ffi=True (or a path) raises when the kernel cannot run here."""
+        opt = self._ffi_opt
+        if opt is False:
+            return None, None
+        import jax
+        from ..eval.model import ACEModel
+        f64 = jax.config.jax_enable_x64 and (self._eval_dtype is None or np.dtype(self._eval_dtype) == np.float64)
+        why = (f"the JAX backend is {jax.default_backend()!r} (the kernel is CPU)" if jax.default_backend() != "cpu"
+               else "not float64 (the kernel is float64: enable jax_enable_x64)" if not f64
+               else "lean=False" if not self._lean
+               else "aa_dag='cueq'" if self._aa_dag == "cueq"
+               else "layout='sparse' (the kernel reads the dense layout)" if self._ffi_layout == "sparse"
+               else "radial_table switched off" if self._radial_table_opt is not None and not self._radial_table_opt
+               else f"{type(model).__name__} is not a linear ACEModel" if not isinstance(model, ACEModel) else None)
+        if why:
+            if opt == "auto":
+                return None, why
+            raise ValueError(f"ffi={opt!r}: the C++ kernel cannot run here: {why}")
+        if opt is not True and opt != "auto":
+            return opt, None                      # a prebuilt library
+        from ..eval import ffi as kernel
+        try:
+            return kernel.library(), None
+        except kernel.FFIUnavailable as e:
+            if opt == "auto":
+                return None, str(e)
+            raise
+
+    @property
+    def ffi(self):
+        """The C++ kernel in use: {"library", "threads"}; None for the JAX model."""
+        return self._ffi
+
+    @property
+    def ffi_reason(self):
+        """Why ffi="auto" kept the JAX model (None otherwise)."""
+        return self._ffi_reason
 
     @property
     def splined(self):
@@ -441,7 +519,7 @@ class ACECalculator(Calculator):
         if out is None:
             out = self._rebuild_calculate(pos, cell, pbc, dtype)
         E, F, V, timing = out
-        self.last_timing = {**timing, "rebuilds": self._rebuilds,
+        self.last_timing = {**timing, "rebuilds": self._rebuilds, "ffi": self._ffi is not None,
                             "spline_tol": self._splined["spline_tol"] if self._splined else None,
                             "radial_table": (self._radial_table["n_intervals"]
                                              if self._radial_table else None)}
@@ -732,6 +810,8 @@ class ACECalculator(Calculator):
     def _layout_from(self, n, n_edges, K, dtype):
         if self.layout != "auto":
             return self.layout
+        if self._ffi is not None:                 # the kernel reads the dense layout
+            return "dense"
         return "sparse" if n_edges / (n * K) < MIN_DENSE_FILL else "dense"
 
     def _in_form(self, kind):

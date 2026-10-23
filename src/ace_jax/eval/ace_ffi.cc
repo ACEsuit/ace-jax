@@ -1,10 +1,14 @@
 // Lean linear ACE energies and forces on the CPU, one XLA FFI call on lammps-jax's neighbour matrix.
 // Per row, pairs within the cutoff only: radial table, harmonics, A, product-basis DAG and its adjoint.
 #include <algorithm>
+#include <atomic>
 #include <cmath>
+#include <condition_variable>
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <memory>
+#include <mutex>
 #include <vector>
 
 #include "xla/ffi/api/ffi.h"
@@ -269,7 +273,103 @@ ffi::Error AceDirectImpl(ffi::Buffer<ffi::F64> pos, ffi::Buffer<ffi::S32> specie
   return ffi::Error::Success();
 }
 
+// Rows [0, rows) in chunks, on XLA's intra-op pool and the calling thread.  Every worker, the caller
+// included, claims chunks from one counter until none are left, so a pool of one thread (or none: the FFI
+// then runs the task on the caller) cannot deadlock; the caller then waits only for chunks already running.
+template <class F>
+void parallel_rows(ffi::ThreadPool &pool, int64_t rows, int64_t max_threads, F body) {
+  const int64_t avail = std::max<int64_t>(1, pool.num_threads() + 1);   // the pool and the caller
+  const int64_t threads = max_threads > 0 ? std::min(max_threads, avail) : avail;
+  const int64_t chunk = std::max<int64_t>(16, (rows + 4 * threads - 1) / (4 * threads));
+  const int64_t nchunk = (rows + chunk - 1) / chunk;
+  if (threads == 1 || nchunk <= 1) {
+    body(0, rows);
+    return;
+  }
+  struct Shared {
+    std::atomic<int64_t> next{0}, done{0};
+    std::mutex m;
+    std::condition_variable cv;
+  };
+  auto sh = std::make_shared<Shared>();
+  auto run = [sh, nchunk, chunk, rows, &body]() {   // a late task finds no chunk and never touches body
+    for (int64_t c; (c = sh->next.fetch_add(1)) < nchunk;) {
+      body(c * chunk, std::min(rows, (c + 1) * chunk));
+      if (sh->done.fetch_add(1) + 1 == nchunk) {
+        std::lock_guard<std::mutex> lk(sh->m);
+        sh->cv.notify_all();
+      }
+    }
+  };
+  for (int64_t t = 1; t < std::min(threads, nchunk); ++t) pool.Schedule(decltype(run)(run));   // an rvalue copy: Schedule owns it
+  run();
+  std::unique_lock<std::mutex> lk(sh->m);
+  sh->cv.wait(lk, [&] { return sh->done.load() == nchunk; });
+}
+
+// The ASE path (calc.ACECalculator(ffi=...)): the dense edge input of `EdgeSiteModel.energy_forces_virial_dense`,
+// rij (rows, K, 3) with node_z (rows,), zj (rows, K) and mask (rows, K), to site energies (rows,) and
+// G = dE_i / drij (rows, K, 3), zero on masked slots.  Rows are independent and write only their own outputs,
+// so they run in parallel on XLA's intra-op pool (`max_threads` > 0 caps it).
+ffi::Error AceEdgesImpl(ffi::ThreadPool pool, ffi::Buffer<ffi::F64> rij, ffi::Buffer<ffi::S32> zi,
+                        ffi::Buffer<ffi::S32> zj, ffi::Buffer<ffi::PRED> mask, ffi::Buffer<ffi::F64> rtab,
+                        ffi::Buffer<ffi::F64> rcut, ffi::Buffer<ffi::S32> runs, ffi::Buffer<ffi::S32> groups,
+                        ffi::Buffer<ffi::S32> factor, ffi::Buffer<ffi::F64> ct, ffi::Buffer<ffi::F64> e0,
+                        double x0, double h, int64_t n, int64_t n_rnl, int64_t lmax, int64_t solid,
+                        int64_t n_leaf, int64_t max_threads, ffi::ResultBuffer<ffi::F64> e,
+                        ffi::ResultBuffer<ffi::F64> g) {
+  const int64_t rows = rij.dimensions()[0], K = rij.dimensions()[1];
+  const double *r = rij.typed_data();
+  const int32_t *z = zi.typed_data(), *zn = zj.typed_data();
+  const bool *live = mask.typed_data();
+  double *eo = e->typed_data(), *go = g->typed_data();
+  parallel_rows(pool, rows, max_threads, [&](int64_t i0, int64_t i1) {
+    Site site(rtab, rcut, runs, groups, factor, ct, e0, x0, h, n, n_rnl, lmax, solid, n_leaf, K);
+    std::vector<double> V(K * 3), G(K * 3);
+    std::vector<int32_t> zs(K), slot(K);
+    for (int64_t i = i0; i < i1; ++i) {
+      int64_t nl = 0;
+      for (int64_t k = 0; k < K; ++k)
+        if (live[i * K + k]) {
+          std::memcpy(&V[3 * nl], r + 3 * (i * K + k), 3 * sizeof(double));
+          zs[nl] = zn[i * K + k];
+          slot[nl++] = static_cast<int32_t>(k);
+        }
+      eo[i] = site.eval(z[i], nl, V.data(), zs.data(), G.data());
+      double *gi = go + 3 * i * K;
+      std::memset(gi, 0, 3 * K * sizeof(double));
+      for (int64_t s = 0; s < nl; ++s) std::memcpy(gi + 3 * slot[s], &G[3 * s], 3 * sizeof(double));
+    }
+  });
+  return ffi::Error::Success();
+}
+
 }  // namespace
+
+XLA_FFI_DEFINE_HANDLER_SYMBOL(AceEdges, AceEdgesImpl,
+                              ffi::Ffi::Bind()
+                                  .Ctx<ffi::ThreadPool>()
+                                  .Arg<ffi::Buffer<ffi::F64>>()     // rij (rows, K, 3)
+                                  .Arg<ffi::Buffer<ffi::S32>>()     // centre species (rows,)
+                                  .Arg<ffi::Buffer<ffi::S32>>()     // neighbour species (rows, K)
+                                  .Arg<ffi::Buffer<ffi::PRED>>()    // live slots (rows, K)
+                                  .Arg<ffi::Buffer<ffi::F64>>()     // radial table (NZ, NZ, ncoef, F)
+                                  .Arg<ffi::Buffer<ffi::F64>>()     // pair cutoffs (NZ, NZ)
+                                  .Arg<ffi::Buffer<ffi::S32>>()     // A runs (n_runs, 4): a0, r, y0, len
+                                  .Arg<ffi::Buffer<ffi::S32>>()     // DAG groups (n_groups, 2): parent, end
+                                  .Arg<ffi::Buffer<ffi::S32>>()     // DAG A factor per node
+                                  .Arg<ffi::Buffer<ffi::F64>>()     // readout (NZ, n_A + nodes)
+                                  .Arg<ffi::Buffer<ffi::F64>>()     // E0 (NZ,)
+                                  .Attr<double>("x0")
+                                  .Attr<double>("h")
+                                  .Attr<int64_t>("n")
+                                  .Attr<int64_t>("n_rnl")
+                                  .Attr<int64_t>("lmax")
+                                  .Attr<int64_t>("solid")
+                                  .Attr<int64_t>("n_leaf")
+                                  .Attr<int64_t>("max_threads")
+                                  .Ret<ffi::Buffer<ffi::F64>>()     // site energies (rows,)
+                                  .Ret<ffi::Buffer<ffi::F64>>());   // dE_i / drij (rows, K, 3)
 
 XLA_FFI_DEFINE_HANDLER_SYMBOL(AceDirect, AceDirectImpl,
                               ffi::Ffi::Bind()

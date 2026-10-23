@@ -1,8 +1,14 @@
-"""Lean linear ACE energies and forces on the CPU as one C++ XLA FFI call on lammps-jax's neighbour matrix.
+"""Lean linear ACE energies and forces on the CPU as one C++ XLA FFI call.
 
-`lammps_fns` gives lammps-jax's direct force path for a lean float64 ACEModel with a radial table:
-positions in, atom energies and forces out. LAMMPS loads the kernel with
-LAMMPS_JAX_FFI_HANDLERS="ace_jax_direct=<lib>:AceDirect" (`handlers`).
+Two entry points of one kernel (`ace_ffi.cc`, the same per-site evaluator):
+- `AceDirect` (`lammps_fns`): lammps-jax's direct force path for a lean float64 ACEModel with a radial table:
+  positions and LAMMPS's neighbour matrix in, atom energies and forces out (newton on). Single-threaded:
+  LAMMPS's MPI ranks give the parallelism. LAMMPS loads it with
+  LAMMPS_JAX_FFI_HANDLERS="ace_jax_direct=<lib>:AceDirect" (`handlers`).
+- `AceEdges` (`KernelModel`, `calc.ACECalculator(ffi=...)`): the dense edge input of
+  `EdgeSiteModel.energy_forces_virial_dense` (rij, species, slot mask) to site energies and dE_i/drij, so
+  JAX assembles forces and the virial as for any model.  Rows run in parallel on XLA's intra-op thread pool.
+  Positions only: no gradients in the model's parameters and no second derivatives (use the JAX model).
 
 Distribution: the kernel ships as source in the (pure Python) wheel and `library` compiles it on first
 use with the user's C++17 compiler against the installed jaxlib's FFI headers, into a content-keyed cache;
@@ -10,6 +16,7 @@ no compiler raises `FFIUnavailable`.  Anyone running it already builds LAMMPS an
 from source, so a compiler is there; a prebuilt wheel would trade -march=native for a generic baseline.
 """
 import ctypes
+import functools
 import hashlib
 import os
 import pathlib
@@ -18,14 +25,17 @@ import shutil
 import subprocess
 import tempfile
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpy as np
 
 from .aa_dag import build_plan
+from .edge_model import EdgeSiteModel
 
 TARGET = "ace_jax_direct"
 SYMBOL = "AceDirect"
+EDGE_TARGET, EDGE_SYMBOL = "ace_jax_edges", "AceEdges"
 SOURCE = pathlib.Path(__file__).with_name("ace_ffi.cc")
 DEFAULT_FLAGS = ("-O3", "-march=native")
 REGISTERED = set()
@@ -111,11 +121,14 @@ def handlers(path):
 
 
 def register(path):
-    """Register the compiled kernel for in-process CPU programs."""
-    if TARGET not in REGISTERED:
-        jax.ffi.register_ffi_target(TARGET, jax.ffi.pycapsule(getattr(ctypes.cdll.LoadLibrary(str(path)), SYMBOL)),
-                                    platform="cpu")
-        REGISTERED.add(TARGET)
+    """Register the compiled kernel's entry points for in-process CPU programs (once per process: a later
+    library, e.g. other flags, does not replace them)."""
+    lib = None
+    for target, symbol in ((TARGET, SYMBOL), (EDGE_TARGET, EDGE_SYMBOL)):
+        if target not in REGISTERED:
+            lib = lib or ctypes.cdll.LoadLibrary(str(path))
+            jax.ffi.register_ffi_target(target, jax.ffi.pycapsule(getattr(lib, symbol)), platform="cpu")
+            REGISTERED.add(target)
 
 
 def plan(model):
@@ -196,3 +209,65 @@ def lammps_fns(model, n_species, type_map, rcut):
 
     energy_fn.defvjp(fwd, bwd)
     return energy_fn, (lambda *a: call(*a)[1])
+
+
+def _edge_call(attrs, rij, node_z, zj, mask, consts):
+    """AceEdges: site energies (rows,) and dE_i / drij (rows, K, 3)."""
+    out = (jax.ShapeDtypeStruct(node_z.shape, rij.dtype), jax.ShapeDtypeStruct(rij.shape, rij.dtype))
+    kw = {k: np.float64(v) if isinstance(v, float) else np.int64(v) for k, v in attrs}
+    return jax.ffi.ffi_call(EDGE_TARGET, out)(rij, node_z.astype(jnp.int32), zj.astype(jnp.int32),
+                                              mask.astype(bool), *consts, **kw)
+
+
+@functools.partial(jax.custom_vjp, nondiff_argnums=(0,))
+def edge_site_energies(attrs, rij, node_z, zj, mask, *consts):
+    """Site energies of the dense edge input, by the kernel, differentiable in rij only: one call gives the
+    energies and G = dE_i / drij, and the VJP of a cotangent c is c_i G_i (no second call).  attrs: the
+    kernel's attributes as a hashable tuple of (name, value); consts: `kernel_inputs`' arrays (passed, not
+    closed over, so new weights of a jitted caller do not retrace)."""
+    return _edge_call(attrs, rij, node_z, zj, mask, consts)[0]
+
+
+def _edge_fwd(attrs, rij, node_z, zj, mask, *consts):
+    e, g = _edge_call(attrs, rij, node_z, zj, mask, consts)
+    return e, g
+
+
+def _edge_bwd(attrs, g, ct):
+    return (ct[:, None, None] * g,) + (None,) * 3 + (None,) * N_CONSTS
+
+
+N_CONSTS = 7                                          # `kernel_inputs`' arrays
+edge_site_energies.defvjp(_edge_fwd, _edge_bwd)
+
+
+class KernelModel(EdgeSiteModel):
+    """A lean float64 ACEModel with a radial table, evaluated by the kernel's `AceEdges` entry point: an
+    evaluation model for `energy_forces_virial_dense` (ACECalculator's dense layout and skin step), whose
+    forces and virial JAX assembles from dE/drij as for the model itself.  Energy only, in positions only."""
+    base: object                                      # the lean ACEModel (pad_cutoff, provenance)
+    consts: tuple                                     # `kernel_inputs`' arrays
+    attrs: tuple = eqx.field(static=True)             # the kernel's attributes, (name, value) pairs
+    uses_edge_a = False                               # no edge_a form to calibrate (the sparse layout)
+    energy_only = True
+
+    @classmethod
+    def of(cls, model, max_threads=0):
+        """`model` (a lean ACEModel with a radial table, float64) for the kernel; max_threads > 0 caps
+        the kernel's threads (0: XLA's intra-op pool)."""
+        attrs, consts = kernel_inputs(model)
+        attrs = tuple(sorted((k, float(v) if k in ("x0", "h") else int(v)) for k, v in attrs.items()))
+        return cls(model, tuple(consts), attrs + (("max_threads", int(max_threads)),))
+
+    def pad_cutoff(self):
+        return self.base.pad_cutoff()
+
+    @property
+    def elements(self):
+        return self.base.elements
+
+    def site_energies_dense(self, rij, zi, zj, mask, node_z):
+        return edge_site_energies(self.attrs, rij, node_z, zj, mask, *self.consts)
+
+    def site_energies_dense_blocked(self, rij, zi, zj, mask, node_z, chunk):
+        return self.site_energies_dense(rij, zi, zj, mask, node_z)   # one call: no per-block memory to bound

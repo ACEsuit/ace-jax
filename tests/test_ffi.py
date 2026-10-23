@@ -296,3 +296,78 @@ def test_ffi_matches_matrix_program_on_a_species_embedding_model(kernel):
     e1, f1 = jax.jit(lambda p: (efn(p, z, graph), ffn(p, z, graph)))(pos)
     assert np.abs(e1 - e0).max() <= 1e-12 * np.abs(e0).max()
     assert np.abs(f1 - f0).max() <= 1e-10 * np.abs(f0).max()
+
+
+def _md_cell(meta, r=3):
+    els = [int(z) for z in meta["elements"]]
+    at = (bulk("Ni", "fcc", a=3.6, cubic=True) if len(els) > 2 else bulk("Si", "diamond", a=5.43, cubic=True)).repeat(r)
+    at.numbers = np.asarray(els)[np.arange(len(at)) % len(els)]
+    return at
+
+
+@pytest.mark.parametrize("skin", [1.0, 0.0])
+@pytest.mark.parametrize("name", ["si_fitted", "sige_nofit", "ace_cantor5_small"])
+def test_calculator_kernel_matches_the_jax_model(kernel, name, skin):
+    """ACECalculator(ffi=True) against the JAX model with the same radial table, over MD-like steps (the
+    skin list reused, and rebuilt by one larger move): energy, forces and stress to roundoff, the dense
+    layout.  (Atoms pushed below the table's r_min, 0.5 A, extrapolate its end cubic in both: there the
+    two summation orders differ at ~1e-9 relative, outside physical geometries.)"""
+    path = str(FIXTURES / f"{name}.npz")
+    _, meta, _ = load(path)
+    k, j = ACECalculator(path, ffi=True, skin=skin), ACECalculator(path, radial_table=True, skin=skin)
+    assert k.ffi and k.ffi_reason is None and j.ffi is None
+    at, rng = _md_cell(meta), np.random.default_rng(0)
+    for step in range(5):
+        at.positions += rng.normal(scale=0.2 if step == 2 else 0.02, size=at.positions.shape)
+        a1, a2 = at.copy(), at.copy()
+        a1.calc, a2.calc = k, j
+        F2 = a2.get_forces()
+        assert a1.get_potential_energy() == pytest.approx(a2.get_potential_energy(), rel=1e-12, abs=1e-10)
+        np.testing.assert_allclose(a1.get_forces(), F2, atol=1e-11 * max(1.0, np.abs(F2).max()))
+        np.testing.assert_allclose(a1.get_stress(), a2.get_stress(), atol=1e-12)
+    assert k.last_layout == "dense" and k.last_timing["ffi"] and k.last_timing["rebuilds"] >= 2
+
+
+def test_calculator_kernel_threads_model_swap_and_e0(kernel):
+    """One thread and XLA's pool give identical results (rows write only their own outputs); a calc.model
+    swap keeps the kernel with the new coefficients; energy_reference="E0" drops E0 as the JAX model does."""
+    import dataclasses
+    path = str(FIXTURES / "sige_nofit.npz")
+    m, meta, _ = load(path)
+    at = _md_cell(meta)
+    at.rattle(0.05, seed=1)
+    pool, one = ACECalculator(path, ffi=True), ACECalculator(path, ffi=True, ffi_threads=1)
+    assert one.ffi["threads"] == 1
+    a1, a2 = at.copy(), at.copy()
+    a1.calc, a2.calc = pool, one
+    assert a1.get_potential_energy() == a2.get_potential_energy()
+    np.testing.assert_array_equal(a1.get_forces(), a2.get_forces())
+    k, j = ACECalculator(m, meta, ffi=True), ACECalculator(m, meta, radial_table=True)
+    m2 = dataclasses.replace(m, WB=1.1 * m.WB)
+    k.model, j.model = m2, m2
+    a1, a2 = at.copy(), at.copy()
+    a1.calc, a2.calc = k, j
+    assert k.ffi is not None
+    np.testing.assert_allclose(a1.get_forces(), a2.get_forces(), atol=1e-11)
+    k, j = (ACECalculator(path, energy_reference="E0", **kw) for kw in (dict(ffi=True), dict(radial_table=True)))
+    a1, a2 = at.copy(), at.copy()
+    a1.calc, a2.calc = k, j
+    assert a1.get_potential_energy() == pytest.approx(a2.get_potential_energy(), abs=1e-10)
+
+
+def test_calculator_ffi_auto_and_refusals(kernel):
+    """ffi="auto" keeps the JAX model where the kernel cannot run, with the reason; ffi=True raises there;
+    a PACE model is not a linear ACEModel."""
+    from conftest import pace_fixture
+    path = str(FIXTURES / "si_fitted.npz")
+    for kw, why in ((dict(layout="sparse"), "layout='sparse'"), (dict(lean=False), "lean=False"),
+                    (dict(radial_table=False), "radial_table switched off")):
+        c = ACECalculator(path, ffi="auto", **kw)
+        assert c.ffi is None and why in c.ffi_reason
+        with pytest.raises(ValueError, match="cannot run here"):
+            ACECalculator(path, ffi=True, **kw)
+    assert ACECalculator(path, ffi="auto").ffi is not None
+    c = ACECalculator(str(pace_fixture(FIXTURES / "pace" / "si_chebpow_fs.yace")), ffi="auto")
+    assert c.ffi is None and "not a linear ACEModel" in c.ffi_reason
+    with pytest.raises(ValueError, match="ffi must be"):
+        ACECalculator(path, ffi="yes")
