@@ -166,6 +166,46 @@ them again when an atom moves more than `skin / 2`. If a structure gets more
 neighbours than the lists hold, `nb.update` makes larger lists. The compiled
 step then compiles again.
 
+### Update the lists inside the compiled loop
+
+`nb.update` runs on the host between chunks. `nb.update_fn()` gives the same
+update as a function that can run inside the compiled loop. Use it to check
+the lists at every step:
+
+1. Make the update function after `nb.allocate()`.
+2. In the loop body, update the lists first.
+3. Then apply one step to all structures with `jax.vmap`.
+4. After the loop, read the overflow flags.
+
+```python
+update = nb.update_fn()
+
+def body(i, carry):
+    state, nl, overflow = carry
+    nl, rebuilt, ov = update(state.position, nl)
+    state = jax.vmap(lambda s, n: apply(s, neighbor=n))(state, nl)
+    return state, nl, overflow | ov
+
+run = jax.jit(lambda state, nl: jax.lax.fori_loop(
+    0, 1000, body, (state, nl, jnp.zeros(len(structures), bool))))
+new_state, nl, overflow = run(state, nl)
+if overflow.any():
+    nl = nb.allocate(state.position)      # larger lists; run again from `state`
+```
+
+The lists of the whole batch are made again in one call. The check costs
+approximately 1 to 9% of the step time.
+
+!!! warning "Overflow inside the loop"
+    Inside the loop, the size of the lists cannot change. If a structure gets
+    more neighbours than the lists hold, its list is cut and its forces are
+    wrong. `overflow` then shows the structure. Run the loop again from the
+    last good state with larger lists.
+
+This needs matscipy-neighbours with the batched build, or a GPU. On a CPU
+without the batched build, the lists are made in JAX, which is slow for
+structures of more than approximately 64 atoms.
+
 For a geometry optimisation, use `minimize.fire_descent` in the same way.
 Each structure keeps its own FIRE step size.
 

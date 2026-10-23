@@ -30,6 +30,8 @@ def main():
     ap.add_argument("--sizes", type=int, nargs="+", default=[8, 64, 216])
     ap.add_argument("--batch", type=int, nargs="+", default=[1, 16, 64, 256])
     ap.add_argument("--ffi", action="store_true")
+    ap.add_argument("--update", action="store_true",
+                    help="check the skin (and rebuild) every step inside the loop (BatchNeighbours.update_fn)")
     ap.add_argument("--steps", type=int, default=20)
     ap.add_argument("--reps", type=int, default=5)
     ap.add_argument("--max-atoms", type=int, default=2 ** 15)
@@ -51,15 +53,27 @@ def main():
             p0 = batch.initial_momenta(jax.random.PRNGKey(0), nb.live, 0.01, 28.0855)
             state = jax.jit(jax.vmap(lambda R, p, nn, init=init: init(None, R, kT=0.0, mass=28.0855, momenta=p, neighbor=nn)))(
                 nb.positions, p0, nl)
-            step = jax.jit(jax.vmap(lambda s, nn, apply=apply: jax.lax.fori_loop(0, a.steps, lambda i, x: apply(x, neighbor=nn), s)))
-            state = jax.block_until_ready(step(state, nl))
+            if a.update:
+                update = nb.update_fn()
+
+                def body(i, c, apply=apply, update=update):
+                    st, nn, k = c
+                    nn, rebuilt, _ = update(st.position, nn)
+                    return jax.vmap(lambda x, m: apply(x, neighbor=m))(st, nn), nn, k + rebuilt
+                step = jax.jit(lambda st, nn: jax.lax.fori_loop(0, a.steps, body, (st, nn, 0)))
+            else:
+                step = jax.jit(jax.vmap(lambda s, nn, apply=apply: jax.lax.fori_loop(
+                    0, a.steps, lambda i, x: apply(x, neighbor=nn), s)))
+            run = ((lambda st, nn, step=step: step(st, nn)[:2]) if a.update
+                   else (lambda st, nn, step=step: (step(st, nn), nn)))
+            state, nl = jax.block_until_ready(run(state, nl))
             ts = []
             for _ in range(a.reps):
                 t0 = time.perf_counter()
-                state = jax.block_until_ready(step(state, nl))
+                state, nl = jax.block_until_ready(run(state, nl))
                 ts.append(time.perf_counter() - t0)
             t = statistics.median(ts)
-            print(json.dumps(dict(host=platform.node(), backend=jax.default_backend(), ffi=a.ffi, n=n, cells=B,
+            print(json.dumps(dict(host=platform.node(), backend=jax.default_backend(), ffi=a.ffi, update=a.update, n=n, cells=B,
                                   steps=a.steps, s=t, us_per_atom_step=1e6 * t / (a.steps * n * B))), flush=True)
 
 

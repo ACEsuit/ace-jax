@@ -41,7 +41,8 @@ variable.
   the padding atoms out of the dynamics and the temperatures. With `ffi=True`
   the C++ kernel runs under `jax.vmap` (the batch becomes one threaded kernel
   call): on 32 cores, MD of 64 Si cells of 8 or 64 atoms is 37 to 48 times
-  faster than with the JAX model.
+  faster than with the JAX model. `BatchNeighbours.update_fn()` rebuilds the
+  lists inside the compiled loop (one batched build, under `lax.cond`).
 - **The C++ kernel in the ASE calculator.** `ACECalculator(..., ffi=True)`
   calculates energy, forces and stress of a linear ACE model with the C++
   kernel on CPUs, on all cores (XLA's thread pool; `ffi_threads` sets fewer).

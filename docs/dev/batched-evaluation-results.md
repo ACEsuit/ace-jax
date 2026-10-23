@@ -131,6 +131,28 @@ chunk, lists fixed; lestrade CPU, float64, load average ~6. µs per atom per ste
 - The JAX model does not gain from the batch on a CPU (as for single points above); the kernel does,
   because its rows are spread over XLA's thread pool.
 
+## CPU with matscipy-neighbours' batched build (the branch of #11)
+
+The C++ kernel, `builder="auto"` now picking the batched FFI build (matscipy-neighbours
+`batched-neighbour-matrix`, ea16b2c); lestrade CPU, load average ~2 (`lestrade-cpu-msn.jsonl`); µs per
+atom of the whole `calculate`:
+
+| atoms | loop | B=64 | B=256 | B=1024 | best speed-up |
+|--:|--:|--:|--:|--:|--:|
+| 2 | 150.6 | 15.4 | 7.05 | 4.30 | 35x |
+| 8 | 49.9 | 4.33 | 2.80 | 1.99 | 25x |
+| 64 | 7.2 | 2.14 | 2.08 | 2.09 | 3.5x |
+| 216 | 4.7 | 3.91 | 3.71 | | 1.3x |
+
+(The quieter machine made the loop column faster than in the table above, so the ratios are not
+directly comparable.)  Against the host cell list the 64-atom batch went from 5.6 to 2.1 µs/atom. 216-atom
+cells cost more per atom than 64-atom ones in the batch; not yet explained (the brute-force build is
+O(N) per atom, but measured at 0.4 µs/atom it does not account for it).
+
+**In-loop rebuilds** (`BatchNeighbours.update_fn`: the skin test every step and the batched rebuild under
+`lax.cond`, inside the jitted loop): vmapped kernel NVE, 64 cells, µs per atom per step, lists fixed /
+checked every step: 8 atoms 1.58 / 1.73 (+9%), 64 atoms 1.19 / 1.20 (+1%).
+
 ## Defaults these set
 
 | setting | value | from |
