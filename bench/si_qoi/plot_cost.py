@@ -117,11 +117,14 @@ def family_of(r):
         return "ace_tab_mixed"
     if fam == "nep" and size.startswith("nlit"):
         return "nep_lit"
+    if fam == "nep" and size in NEP_TWO_STAGE:   # loss-weight experiments (docs/dev): not on the NEP line
+        return "nep_2s"
     if fam == "ace_tab" and any(t in r.get("_file", "") for t in PATCHED_MLPACE):   # make_cost's per-row file stem
         return "ace_tabfork"
     if fam == "ace_wl":
         return "ace_wl_o5" if size.startswith("o5") else "ace_wl_" + size.split("_wL")[1]
     return fam
+NEP_TWO_STAGE = {"n50-w", "n50-2s1", "n50-2s", "n120b-2s1", "n120b-2s"}
 INK, MUTED, GRID = "#0b0b0b", "#52514e", "#e6e5e1"
 # refits of a timed basis with other loss weights: the same model form, so the same cost
 COST_AS = {"ace_E10": "ace"}
