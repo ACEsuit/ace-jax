@@ -111,12 +111,16 @@ parameters than linear ACE (f800: 761 parameters, 0.081 eV/Å) but not the QoI t
   | n50-2s1 | 100k, λ 1/10 | 12.7 | 0.099 | 0.177 | 1.58 |
   | n50-2s | + 500k, λ 5/5 | 8.4 | 0.100 | 0.186 | 1.12 |
   | n120b | 300k, λ 1/1 | 7.4 | 0.103 | 0.188 | 0.66 |
+  | n120b-2s1 | 100k, λ 1/10 | 9.6 | 0.092 | 0.168 | 1.03 |
+  | n120b-2s | + 100k, λ 5/5 | 5.9 | 0.093 | 0.173 | 0.73 |
 
-  The recipe helps the small model: n50-2s beats n50-w on force (-11%), energy (-20%) and QoI (1.12 vs
-  1.24), and passes n120b on force with a quarter of its parameters. It does not reach n120b's QoI, and the
-  point defects stay 0.7-1.3 eV low in every NEP here. Stage 2 is flat after its first 50k generations (test F
-  0.1004 from 50k to 500k), so most of its 10.9 A100-hours bought nothing. The n120b version is not run: it
-  would cost ~52 A100-hours as specified (8.7 h per 100k generations), or ~17 with a 100k-generation stage 2.
+  The recipe lowers the force error at both sizes: n50-2s beats n50-w on force (-11%), energy (-20%) and QoI
+  (1.12 vs 1.24). On n120b's descriptor, 200k two-stage generations give 0.093 eV/Å against 0.103 after 300k
+  single-stage generations, and energy 5.9 against 7.4 meV/atom. The QoI does not follow: n120b-2s scores
+  0.73 against n120b's 0.66, and the point defects stay 0.5-1.3 eV low in every NEP here. Stage 1 alone has
+  the lowest force error but a worse QoI (λf 10 trades away energies); stage 2 recovers most of it. Stage 2
+  converges fast: n50-2s's test F was flat (0.1004) from 50k to 500k generations, so n120b-2s ran a 100k stage 2.
+  Cost: 32.7 A100-hours (n50: 13.0 for both stages plus 2.2 for n50-w; n120b: 8.7 per stage).
 - **Symmetrix-XL** is 1.1-3.6x faster than Symmetrix for the same MACE models, most at L = 1 on the GPU.
 - **The DAG product basis** (`eval/aa_dag.py`) is never slower than the chain form and from ~6,000 chain-form
   multiplies per site clearly faster, so `aa_dag="auto"` (the default of `ACECalculator` and `export_lammps`)
