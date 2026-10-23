@@ -258,7 +258,8 @@ def test_matscipy_batched_builder():
     same results as the JAX builder.  Skipped until a matscipy-neighbours with it is installed."""
     from ace_jax.batch import _msn_batched
     if _msn_batched() is None:
-        pytest.skip("matscipy-neighbours without the batched XLA FFI build")
+        (pytest.fail if os.environ.get("ACEJAX_REQUIRE_OPTIONAL") else pytest.skip)(
+            "matscipy-neighbours without the batched XLA FFI build")
     m, meta = model_for("sige_nofit.npz")
     ats = structures(meta["elements"])
     res = BatchCalculator(m, meta, builder="msn", n_device=256).calculate(ats)

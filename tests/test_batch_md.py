@@ -228,3 +228,60 @@ def test_vmapped_md_with_the_kernel(jax_md):
                 assert np.abs(np.asarray(one.position) - np.asarray(vm.position[s])).max() < 1e-12
         finals[ffi] = np.asarray(vm.position)
     assert np.abs(finals[True] - finals[False]).max() < 1e-5      # radial table: forces ~1e-8 of max|F|
+
+
+@pytest.mark.parametrize("builder", ["jax", "msn"])
+def test_rebuild_inside_the_compiled_loop(jax_md, builder):
+    """nb.update_fn(): the skin test and the batched rebuild inside one jitted loop (lax.cond), only the
+    integrator step vmapped.  The run equals the host-checked one (to roundoff amplified by the dynamics)
+    and its final lists still give ACECalculator's energies and forces."""
+    if builder == "msn" and batch._msn_batched() is None:
+        import os
+        (pytest.fail if os.environ.get("ACEJAX_REQUIRE_OPTIONAL") else pytest.skip)(
+            "matscipy-neighbours without the batched XLA FFI build")
+    from jax_md import simulate, space
+    ats = structures()
+    bc = BatchCalculator(MODEL)
+    _, shift = space.free()
+    init, apply = simulate.nve(bc.energy_fn(), shift, dt=DT)
+    nb = bc.neighbour_lists(ats, skin=0.3)
+    nl = nb.allocate()
+    update = nb.update_fn(builder)
+    p0 = batch.initial_momenta(jax.random.PRNGKey(0), nb.live, 0.05, MASS)
+    state = jax.vmap(lambda R, p, n: init(None, R, kT=0.0, mass=MASS, momenta=p, neighbor=n))(nb.positions, p0, nl)
+
+    def body(i, carry):
+        st, n, rebuilds, overflow = carry
+        n, rebuilt, ov = update(st.position, n)
+        st = jax.vmap(lambda s, m: apply(s, neighbor=m))(st, n)
+        return st, n, rebuilds + rebuilt, overflow | ov
+    run = jax.jit(lambda st, n: jax.lax.fori_loop(0, 200, body, (st, n, 0, jnp.zeros(len(ats), bool))))
+    st, nl, rebuilds, overflow = run(state, nl)
+    assert int(rebuilds) > 1 and not np.asarray(overflow).any()
+    check_against_calculator(bc, nb, nl, ats, st.position)
+    # the host-checked run (lists never rebuilt: skin 3) for comparison
+    nb3 = bc.neighbour_lists(ats, skin=3.0)
+    nl3 = nb3.allocate()
+    ref = jax.vmap(lambda R, p, n: init(None, R, kT=0.0, mass=MASS, momenta=p, neighbor=n))(nb3.positions, p0, nl3)
+    ref = jax.jit(jax.vmap(lambda s, n: jax.lax.fori_loop(0, 200, lambda i, x: apply(x, neighbor=n), s)))(ref, nl3)
+    assert np.abs(np.asarray(st.position) - np.asarray(ref.position)).max() < 1e-4
+
+
+def test_in_loop_update_flags_overflow():
+    """A rebuild whose counts exceed the list's K is flagged per structure (exactly where count > K), and
+    allocate() grows K again; with no atom past skin / 2 nothing is rebuilt."""
+    ats = structures()
+    bc = BatchCalculator(MODEL)
+    nb = bc.neighbour_lists(ats, skin=0.3)
+    nl = nb.allocate()
+    nl_same, rebuilt, overflow = jax.jit(nb.update_fn())(nb.positions, nl)
+    assert not bool(rebuilt) and not np.asarray(overflow).any()
+    kmax = bc._build_lists(nb.batch, nb.positions, nb.cutoff + nb.skin, None)[3]
+    K = int(kmax[2]) - 1                                                      # too few slots for structure 2
+    nb.K = K
+    small = nl._replace(rij0=nl.rij0[:, :, :K], idx=nl.idx[:, :, :K], mask=nl.mask[:, :, :K])
+    R = nb.positions + jnp.asarray([0.2, 0.0, 0.0])                           # past skin / 2, counts unchanged
+    _, rebuilt, overflow = jax.jit(nb.update_fn())(R, small)
+    assert bool(rebuilt) and np.asarray(overflow).tolist() == (kmax > K).tolist() and bool(overflow[2])
+    nb.allocate(R)
+    assert nb.K >= int(kmax.max())
