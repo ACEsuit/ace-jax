@@ -54,13 +54,16 @@ cuda = ["jax[cuda12]>=0.10.1"]
 # docs/dev/specs/2026-10-22-cueq-product-basis-design.md).  Linux x86_64 + CUDA 12 only; tested at 0.13.x.
 cueq = ["cuequivariance>=0.13,<0.14", "cuequivariance-jax>=0.13,<0.14",
         "cuequivariance-ops-jax-cu12>=0.13,<0.14; sys_platform == 'linux'"]
-# Fast neighbour lists; ace-jax uses them when present and falls back to ASE's
-# list otherwise, so they are intentionally NOT core deps.  matscipy-neighbours
-# (preferred: OpenMP CPU, native dense neighbour_matrix) ships as a source
-# distribution: installing it compiles C++ (CMake + a C++17 compiler).  For its
+# Native (C++) CPU acceleration.  matscipy-neighbours (OpenMP CPU neighbour lists, native dense
+# neighbour_matrix; ace-jax falls back to ASE's list without it, so NOT a core dep) is a source
+# distribution: installing it compiles C++ (CMake + a C++17 compiler).  The same compiler builds the
+# C++ kernel of ace_jax.eval.ffi (ACECalculator(ffi=...), CPU LAMMPS bundles), which needs no package:
+# its source is in this wheel, compiled on first use or by `aj native --build`.  For matscipy-neighbours'
 # GPU backend (graph built on the device, handed to JAX via DLPack):
 #   pip install -C cmake.define.ENABLE_CUDA=ON \
 #       -C cmake.define.CMAKE_CUDA_ARCHITECTURES=<sm> matscipy-neighbours
+native = ["matscipy-neighbours>=1.0"]
+# the former name of `native` (until the next release but one), same dependencies
 fast-neighbours = ["matscipy-neighbours>=1.0"]
 # LAMMPS export (ace_jax.export.lammps, `aj export --out bundle.json`).  The pair
 # style is lammps-jax's LAMMPS plugin, built separately at the same version.

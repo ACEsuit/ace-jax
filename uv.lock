@@ -65,6 +65,9 @@ jaxmd = [
 lammps = [
     { name = "lammps-jax" },
 ]
+native = [
+    { name = "matscipy-neighbours" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -95,13 +98,14 @@ requires-dist = [
     { name = "lammps-jax", marker = "extra == 'lammps'", specifier = ">=0.2.1" },
     { name = "lineax", specifier = ">=0.1.1" },
     { name = "matscipy-neighbours", marker = "extra == 'fast-neighbours'", specifier = ">=1.0" },
+    { name = "matscipy-neighbours", marker = "extra == 'native'", specifier = ">=1.0" },
     { name = "numpy", specifier = ">=1.24" },
     { name = "numpyro", specifier = ">=0.16" },
     { name = "optax", specifier = ">=0.2" },
     { name = "pyyaml", specifier = ">=6" },
     { name = "scipy", specifier = ">=1.10" },
 ]
-provides-extras = ["gp", "cuda", "cueq", "fast-neighbours", "lammps", "jaxmd"]
+provides-extras = ["gp", "cuda", "cueq", "native", "fast-neighbours", "lammps", "jaxmd"]
 
 [package.metadata.requires-dev]
 dev = [

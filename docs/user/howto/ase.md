@@ -100,7 +100,7 @@ seconds. Later calls take milliseconds.
 | `ffi` | `False` | `True`: use the C++ kernel on CPUs (see [CPU kernel](#cpu-kernel)); `"auto"`: use it when possible |
 
 `calc.model` is the model as loaded. `calc.eval_model` is the form that the
-calculator evaluates. If you install the `fast-neighbours` extra
+calculator evaluates. If you install the `native` extra
 (matscipy-neighbours), the neighbour lists are faster. If not, the
 calculator uses the ASE neighbour list.
 
@@ -131,9 +131,9 @@ agree with the default to approximately 1e-12 relative. Forces agree to
     For derivatives with respect to the model coefficients, or for second
     derivatives, use the JAX model (`ffi=False`, the default).
 
-Install the `fast-neighbours` extra with the kernel. It makes the neighbour
-lists 4 to 12 times faster (512 to 4,096 atoms). The extra also needs a C++
-compiler.
+Install the `native` extra with the kernel. It makes the neighbour lists 4 to
+12 times faster (512 to 4,096 atoms). To compile the kernel before the first
+calculation, use `aj native --build`.
 
 ## Site descriptors
 

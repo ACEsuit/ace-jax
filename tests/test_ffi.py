@@ -371,3 +371,24 @@ def test_calculator_ffi_auto_and_refusals(kernel):
     assert c.ffi is None and "not a linear ACEModel" in c.ffi_reason
     with pytest.raises(ValueError, match="ffi must be"):
         ACECalculator(path, ffi="yes")
+
+
+def test_aj_native_reports_and_builds(kernel, tmp_path, monkeypatch, capsys):
+    """`aj native`: the compiler, flags, CPU, kernel cache state and neighbour list; --build compiles the kernel
+    into the cache (then reported as built); without a compiler the status says so and --build exits 1."""
+    from ace_jax.cli import main
+    monkeypatch.setenv("ACEJAX_FFI_CACHE", str(tmp_path / "cache"))
+    main(["native", "--flags=-O1"])
+    out = capsys.readouterr().out
+    assert "C++ compiler:" in out and "not built yet" in out and "neighbours:" in out and "-O1" in out
+    main(["native", "--build", "--flags=-O1"])
+    out = capsys.readouterr().out
+    assert "built in" in out and len(list((tmp_path / "cache").glob("libace_jax_ffi-*.so"))) == 1
+    main(["native", "--flags=-O1"])
+    assert "C++ kernel:    built:" in capsys.readouterr().out
+    monkeypatch.setattr(ffi, "compiler", lambda env=None: None)
+    main(["native"])
+    assert "C++ compiler:  none" in capsys.readouterr().out
+    with pytest.raises(SystemExit) as e:
+        main(["native", "--build"])
+    assert e.value.code == 1

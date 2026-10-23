@@ -82,11 +82,11 @@ def _cpu():
     return platform.processor() or platform.machine()
 
 
-def library(flags=None, cxx=None, cache=None):
-    """The compiled kernel's path, built on first use: keyed on the source, the jaxlib version (its FFI headers),
-    the compiler and its version, the flags, the machine and, under -march=native, the CPU model.  flags:
-    `ACEJAX_FFI_FLAGS` (space-separated), else DEFAULT_FLAGS; pass e.g. ("-O3", "-march=x86-64-v3") to build on a
-    login node for compute nodes of another CPU type."""
+def library_path(flags=None, cxx=None, cache=None):
+    """(path, compiler, flags) of the kernel library for these settings, without building it: the cache key is
+    the source, the jaxlib version (its FFI headers), the compiler and its version, the flags, the machine and,
+    under -march=native, the CPU model.  flags: `ACEJAX_FFI_FLAGS` (space-separated), else DEFAULT_FLAGS.
+    No compiler raises FFIUnavailable."""
     import jaxlib
     flags = tuple(flags if flags is not None else os.environ.get("ACEJAX_FFI_FLAGS", "").split() or DEFAULT_FLAGS)
     cxx = cxx or compiler()
@@ -98,9 +98,17 @@ def library(flags=None, cxx=None, cache=None):
     key = hashlib.sha256("\0".join([SOURCE.read_text(), jaxlib.__version__, cxx, *ver, *flags, platform.machine(),
                                      _cpu() if native else ""]).encode()).hexdigest()[:16]
     d = pathlib.Path(cache) if cache else cache_dir()
-    out = d / f"libace_jax_ffi-{key}.so"
+    return d / f"libace_jax_ffi-{key}.so", cxx, flags
+
+
+def library(flags=None, cxx=None, cache=None):
+    """The compiled kernel's path, built on first use (`library_path`'s key); pass e.g. flags=("-O3",
+    "-march=x86-64-v3") to build on a login node for compute nodes of another CPU type.  `aj native --build`
+    builds it ahead of use."""
+    out, cxx, flags = library_path(flags, cxx, cache)
     if out.exists():
         return out
+    d = out.parent
     d.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=d, suffix=".so.tmp")      # same dir: os.replace is atomic, so concurrent
     os.close(fd)                                             # ranks or jobs never load a half-written library

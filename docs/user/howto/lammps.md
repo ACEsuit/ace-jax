@@ -166,7 +166,8 @@ for the CPU of the machine that exports.
 !!! warning "Login nodes and compute nodes"
     A kernel compiled with `-march=native` can fail on a different CPU type.
     Export on a node of the same type as the LAMMPS run. Or give generic
-    flags, for example `--ffi-flags="-O3 -march=x86-64-v3"`.
+    flags, for example `--ffi-flags="-O3 -march=x86-64-v3"`. To compile the
+    kernel on a compute node before the export, use `aj native --build`.
 
 - The cache is `~/.cache/ace-jax/ffi`. Set `ACEJAX_FFI_CACHE` to use a different directory.
 - Set `ACEJAX_FFI_FLAGS` to change the default flags.

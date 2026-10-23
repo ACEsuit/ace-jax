@@ -67,6 +67,21 @@ posterior. The model does not change. See
 
 <!-- aj-help calibrate -->
 
+## aj export
+
+Writes a model for LAMMPS: an ML-PACE `.yace` file, or a lammps-jax bundle.
+See [Export a model to LAMMPS](../howto/lammps.md).
+
+<!-- aj-help export -->
+
+## aj native
+
+Shows the native C++ code that ace-jax can use on this machine: the compiler,
+the C++ kernel and the neighbour list. `--build` compiles the kernel. See
+[Installation](../installation.md#native).
+
+<!-- aj-help native -->
+
 ## aj basis
 
 <!-- aj-help basis -->

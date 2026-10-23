@@ -639,6 +639,62 @@ def cmd_export(a):
     return b
 
 
+def cmd_native(a):
+    """`aj native`: the native (C++) CPU acceleration on this machine -- the C++ kernel (`eval.ffi`: compiler,
+    flags, CPU, whether its library is built) and the `native` extra's matscipy-neighbours -- and with --build,
+    the kernel compiled into the cache now (on a cluster: run it on a compute node).  --build exits 1 when the
+    kernel cannot be compiled."""
+    import importlib.metadata
+    import platform
+    import re
+    import subprocess
+    import time
+
+    import jaxlib
+
+    from .eval import ffi as kernel
+    from .eval.nlist import have_matscipy_neighbours
+    from .export.lammps import FFI_MIN_LAMMPS_JAX, lammps_jax_version
+
+    flags = a.flags.split() if a.flags else None
+    try:
+        lib, cxx, flags = kernel.library_path(flags)
+        ver = subprocess.run([cxx, "--version"], capture_output=True, text=True).stdout.splitlines()[:1]
+        print(f"C++ compiler:  {cxx} ({ver[0] if ver else 'unknown version'})")
+    except kernel.FFIUnavailable as e:
+        lib = None
+        print(f"C++ compiler:  none ({e})")
+    print(f"flags:         {' '.join(kernel.DEFAULT_FLAGS if flags is None else flags)}  "
+          "(--flags, or ACEJAX_FFI_FLAGS)")
+    print(f"CPU:           {kernel._cpu()} ({platform.machine()}); jaxlib {jaxlib.__version__}")
+    built = lib is not None and lib.exists()
+    if a.build and lib is not None and not built:
+        t0 = time.perf_counter()
+        try:
+            lib = kernel.library(flags)
+        except kernel.FFIUnavailable as e:
+            print(f"C++ kernel:    build failed: {e}")
+            raise SystemExit(1) from None
+        built = True
+        print(f"C++ kernel:    built in {time.perf_counter() - t0:.1f} s: {lib}")
+    elif built:
+        print(f"C++ kernel:    built: {lib}")
+    else:
+        print("C++ kernel:    " + ("not built yet (compiled on first use; `aj native --build` builds it now): "
+                                    f"{lib}" if lib is not None else "unavailable (no C++ compiler)"))
+    if a.build and not built:
+        raise SystemExit(1)
+    if have_matscipy_neighbours():
+        print(f"neighbours:    matscipy-neighbours {importlib.metadata.version('matscipy-neighbours')}")
+    else:
+        print("neighbours:    ASE's list (pip install \"ace-jax[native]\" for matscipy-neighbours)")
+    lj = lammps_jax_version()
+    vers = re.match(r"(\d+)\.(\d+)\.(\d+)", lj or "")
+    ok = bool(vers) and tuple(map(int, vers.groups())) >= FFI_MIN_LAMMPS_JAX
+    print(f"lammps-jax:    {lj}" + ("" if ok else " (the LAMMPS CPU kernel needs >= 0.2.1)") if lj
+          else "lammps-jax:    not installed (only for LAMMPS export)")
+
+
 def _print_ffi_env(record):
     """The shell line that runs LAMMPS on a C++ kernel bundle, and how to run it."""
     print(f"C++ kernel: {record['library']}\n"
@@ -835,6 +891,14 @@ def _parser():
     exp.add_argument("--type-elements", default=None,
                      help="lammps: comma-separated element of each LAMMPS atom type, in type order "
                           "(default: the model's element order)")
+    nat = sub.add_parser("native", help="the native (C++) CPU acceleration here: the C++ kernel's compiler, "
+                                        "flags and cache, and matscipy-neighbours; --build compiles the kernel now")
+    nat.add_argument("--build", action="store_true",
+                     help="compile the C++ kernel into its cache now (else it is compiled on first use); "
+                          "on a cluster, run it on a compute node.  Exits 1 when it cannot be compiled")
+    nat.add_argument("--flags", default=None,
+                     help="the kernel's compiler flags (default \"-O3 -march=native\", or ACEJAX_FFI_FLAGS), "
+                          "e.g. --flags=\"-O3 -march=x86-64-v3\" (with =)")
     con = sub.add_parser("basis", help="author a new ACE basis: a frozen model (seeded radial init) saved as .npz")
     add_basis_args(con, fit=False)
     con.add_argument("--out", required=True)
@@ -928,7 +992,8 @@ def main(argv=None):
     from .basis.coupling import BasisUnavailable
     a = _parse(argv)
     try:
-        {"eval": cmd_eval, "basis": cmd_basis, "calibrate": cmd_calibrate, "export": cmd_export}.get(a.cmd, run)(a)
+        {"eval": cmd_eval, "basis": cmd_basis, "calibrate": cmd_calibrate, "export": cmd_export,
+         "native": cmd_native}.get(a.cmd, run)(a)
     except (BasisUnavailable, UsageError) as e:       # a user-facing condition, not a crash
         print(f"aj {a.cmd}: error: {e}", file=sys.stderr)
         raise SystemExit(2) from None
