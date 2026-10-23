@@ -402,6 +402,16 @@ for its CPU build, which refuses a cuda bundle and vice versa).
   `max_neighbors`, stays packed dense. `layout="matrix"` requires
   `max_neighbors`: the list holds rcut + skin pairs, so a `k_dense` sized for
   rcut is too small. `max_edges` is needed by sparse and dense only.
+- `ffi=True` (CPU, linear ACE, float64): the C++ XLA FFI kernel `ace_jax.eval.ffi` replaces the XLA
+  program on the matrix layout (positions in, energies and forces out, `newton on`; radial table on).
+  The export compiles it on first use (`ffi.library()`: `$CXX`/c++/g++/clang++, `-O3 -march=native` or
+  `ACEJAX_FFI_FLAGS`, cached in `~/.cache/ace-jax/ffi` or `$ACEJAX_FFI_CACHE`; `ffi.FFIUnavailable` without a
+  compiler); `ffi=<path>` uses a prebuilt one. CLI: `aj export --platform cpu --ffi [--ffi-flags="..."]`, which
+  prints the line to set. Run LAMMPS with `LAMMPS_JAX_FFI_HANDLERS` = `bundle["ace_jax"]["ffi"]["handlers"]`,
+  newton on, one MPI rank per core. `-march=native` on a login node may not run on compute nodes of another CPU:
+  export there, or pass generic flags. Needs a lammps-jax plugin that registers FFI handlers for the CPU
+  (lammps-jax >= 0.2.1, the `lammps` extra's floor; 0.2.0 registers them for CUDA only). Build the plugin at the
+  version of the Python package.
 - An older lammps-jax LAMMPS plugin rejects a matrix bundle ("re-export"). To
   fix it, rebuild the plugin, or export `layout="dense"`. The bundle records
   the exporting lammps-jax as `ace_jax.lammps_jax`.
@@ -426,6 +436,19 @@ for its CPU build, which refuses a cuda bundle and vice versa).
   --tight-slots` opts in; the main suite never does.
 - The dense bundle runs in blocks of `BUNDLE_BLOCK_ROWS` (32,768) rows above
   one block, bounding memory at large N.
+- `aa_dag="cueq"` (opt-in; `auto` never picks it; `aj export --aa-dag cueq`): the product basis as NVIDIA
+  cuequivariance kernels (`eval/cueq.py`), CUDA only, `pip install "ace-jax[cueq]"`. One species, or species-embedding
+  (TrACE) models (a linear `ACEModel`). Refused: cueq missing, PACE or non-ACE models, categorical multi-species, a non-CUDA
+  platform or device (`ACECalculator` also needs a CUDA backend). Needs `LAMMPS_JAX_CONTRIB` = lammps-jax's
+  `contrib/ffi-replay` directory at export (the recorder is not in the package) and at run time (its built
+  `ffi_replay_shim.so`; README gcc command, `-lffi` on libffi.so.6 systems). One cueq bundle per process.
+  The bundle, `<stem>.ffi-replay` and `<stem>.cueq-cache/` go together (recorded by name, relative to the
+  bundle, as `ace_jax.cueq`); `aj export` prints the environment lines (`eval.cueq.run_env(record, bundle_path)`)
+  resolved on the export host; on another LAMMPS machine (with `ace-jax[cueq]` installed, the shim built and
+  `LAMMPS_JAX_CONTRIB` set there) run `aj export --print-env BUNDLE.json` to print them for that machine.
+  `export_lammps(lean=False, aa_dag="cueq")` is refused.
+  Export of o4d20 13-26 min on an A100; without the cache the start compiles kernels (tens of minutes); the cache serves
+  the same GPU architecture only. A `calc.model` swap rebuilds and recompiles.
 - `lean=True` (default) exports `lean(model, spline_tol, spline_intervals)` for
   an ACE model, as `ACECalculator` does. The bundle records what `lean` actually
   did, looking through a wrapper's `.base`:

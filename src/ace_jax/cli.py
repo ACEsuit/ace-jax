@@ -539,13 +539,32 @@ _EXPORT_FORMATS = {".yace": "yace", ".json": "lammps"}
 
 def cmd_export(a):
     """`aj export`: a model as an ML-PACE .yace (`write_yace`) or a lammps-jax bundle (`export_lammps`)."""
+    if a.print_env is not None:
+        return _export_print_env(a)
+    if not a.model or not a.out:
+        raise UsageError("aj export needs --model and --out (or --print-env BUNDLE)")
     from .eval import load
     from .eval.pace_model import PACEModel
     out = pathlib.Path(a.out).expanduser()
     fmt = a.format or _EXPORT_FORMATS.get(out.suffix)
     if fmt is None:
         raise UsageError(f"{a.out}: give --format yace|lammps, or an --out ending in .yace or .json")
+    if fmt == "yace" and a.aa_dag != "auto":
+        raise UsageError("--aa-dag sets a lammps-jax bundle's product basis; a .yace needs none")
+    if (a.ffi or a.ffi_flags) and a.aa_dag == "cueq":
+        raise UsageError("--ffi and --aa-dag cueq are exclusive: the C++ kernel runs on the CPU (--platform cpu), "
+                         "cueq on a CUDA GPU")
     model, meta, extra = load(a.model)
+    aa_dag = None if a.aa_dag == "chain" else a.aa_dag
+    if aa_dag == "cueq" and fmt == "lammps":      # refuse before sizing anything
+        from .eval import cueq
+        try:
+            cueq.check_export(model, a.platform, cueq=False)   # no cueq import: export_lammps sets the cache first
+        except ValueError as e:
+            raise UsageError(str(e)) from None
+        if cueq.backend() != "gpu":               # export_lammps refuses it too (check_export with cueq)
+            raise UsageError("--aa-dag cueq exports on a CUDA GPU (it compiles cuequivariance's kernels there); "
+                             f"the JAX backend here is {cueq.backend()!r}")
     if out.parent and str(out.parent) != ".":
         out.parent.mkdir(parents=True, exist_ok=True)
     if fmt == "yace":
@@ -575,6 +594,8 @@ def cmd_export(a):
         procs = ()
     if procs is not None and (len(procs) != 3 or min(procs) < 1):
         raise UsageError("--procs takes the LAMMPS processor grid: three integers px,py,pz")
+    if (a.ffi or a.ffi_flags) and (a.platform != "cpu" or a.dtype != "float64" or a.layout not in ("auto", "matrix")):
+        raise UsageError("--ffi runs the C++ kernel on the CPU: it needs --platform cpu, float64 and the matrix layout")
     try:
         import lammps_jax  # noqa: F401
     except ImportError:
@@ -589,14 +610,67 @@ def cmd_export(a):
     from ase.data import atomic_numbers
     els = None if a.type_elements is None else [
         int(e) if e.strip().isdigit() else atomic_numbers[e.strip()] for e in a.type_elements.split(",")]
-    b = export_lammps(model, meta, out, max_atoms=cap["max_atoms"], max_edges=cap["max_edges"],
-                      k_dense=cap["k_dense"], max_owned=cap["max_owned"], max_neighbors=cap["max_neighbors"],
-                      dtype=a.dtype, layout=a.layout, type_elements=els, platform=a.platform,
-                      precision_structure=at if a.dtype != "float64" else None)
+    ffi = False
+    if a.ffi or a.ffi_flags:
+        from .eval import ffi as kernel
+        try:                                      # compile (or reuse) the kernel before the export
+            ffi = kernel.library(flags=a.ffi_flags.split() if a.ffi_flags else None)
+        except kernel.FFIUnavailable as e:
+            raise UsageError(str(e)) from None
+    from .eval.cueq import CueqUnavailable
+    try:
+        b = export_lammps(model, meta, out, max_atoms=cap["max_atoms"], max_edges=cap["max_edges"],
+                          k_dense=cap["k_dense"], max_owned=cap["max_owned"], max_neighbors=cap["max_neighbors"],
+                          dtype=a.dtype, layout=a.layout, type_elements=els, platform=a.platform,
+                          precision_structure=at if a.dtype != "float64" else None, aa_dag=aa_dag, ffi=ffi)
+    except CueqUnavailable as e:                  # cueq or the ffi-replay recorder missing (aa_dag="cueq")
+        raise UsageError(str(e)) from None
     per = "" if procs is None else f", per MPI rank of {'x'.join(map(str, procs))}"
     print(f"lammps-jax: layout {b['ace_jax']['layout']}, {a.dtype}, {a.platform or 'cuda'}, sized for {len(at)} "
           f"atoms of {a.structure}{per} (max_atoms {cap['max_atoms']}, neighbour slots {cap['k_dense']}) -> {out}")
+    if b["ace_jax"].get("ffi"):
+        print(f"C++ kernel: {b['ace_jax']['ffi']['library']}; run LAMMPS with newton on and\n"
+              f"  export LAMMPS_JAX_FFI_HANDLERS=\"{b['ace_jax']['ffi']['handlers']}\"")
+    if b["ace_jax"].get("cueq"):
+        _print_cueq_env(b["ace_jax"]["cueq"], out)
     return b
+
+
+def _print_cueq_env(record, bundle):
+    """The shell lines that run LAMMPS on a cueq bundle (`eval.cueq.run_env`), resolved on THIS machine:
+    the sidecars next to `bundle`, this Python's cuequivariance libraries, $LAMMPS_JAX_CONTRIB's shim."""
+    from .eval import cueq
+    env = cueq.run_env(record, bundle)
+    ld = env.pop("LD_LIBRARY_PATH")
+    print(f"cueq kernels: replay {env['FFI_REPLAY_FILE']}, NVRTC cache {env['CUEQUIVARIANCE_OPS_NVRTC_CACHE_DIR']} "
+          "(same GPU architecture only); run LAMMPS with")
+    for k, v in env.items():
+        print(f'  export {k}="{v}"')
+    print(f'  export LD_LIBRARY_PATH="{ld}:$LD_LIBRARY_PATH"   # libcue_ops and the pip CUDA libraries')
+    if env["FFI_REPLAY_LIB"].startswith("<"):
+        print("note: cuequivariance is not installed in this Python: pip install 'ace-jax[cueq]' here, then "
+              "run `aj export --print-env` again")
+    shim = env["LAMMPS_JAX_FFI_HANDLERS"].split("=", 1)[1].rsplit(":", 1)[0]
+    if not pathlib.Path(shim).is_file():
+        print(f"note: build the replay shim first: gcc -shared -fPIC -O2 -o {shim} "
+              f"{pathlib.Path(shim).with_suffix('.c')} -ldl -lpthread -l:libffi.so.8")
+    return env
+
+
+def _export_print_env(a):
+    """`aj export --print-env BUNDLE`: the cueq run environment of an exported bundle, on the machine
+    that runs LAMMPS (no model, no export)."""
+    import json
+    if a.model or a.out:
+        raise UsageError("--print-env reads an exported bundle: give it without --model and --out")
+    path = pathlib.Path(a.print_env).expanduser()
+    try:
+        rec = json.loads(path.read_text()).get("ace_jax", {}).get("cueq")
+    except (OSError, ValueError) as e:
+        raise UsageError(f"{path}: not a readable lammps-jax bundle ({e})") from None
+    if not rec:
+        raise UsageError(f"{path}: not a cueq bundle (no ace_jax.cueq record); it needs no extra environment")
+    return _print_cueq_env(rec, path)
 
 
 def add_basis_args(p, *, fit):
@@ -693,8 +767,8 @@ def _parser():
     cal.add_argument("--out", required=True)
     exp = sub.add_parser("export", help="write a model for LAMMPS: an ML-PACE .yace (pair_style pace) or a "
                                         "lammps-jax bundle (.json, pair_style jax)")
-    exp.add_argument("--model", required=True, help="a model .npz (linear ACE) or .yace")
-    exp.add_argument("--out", required=True, help="the file to write: .yace or .json (else give --format)")
+    exp.add_argument("--model", default=None, help="a model .npz (linear ACE) or .yace (required)")
+    exp.add_argument("--out", default=None, help="the file to write: .yace or .json (else give --format; required)")
     exp.add_argument("--format", choices=["yace", "lammps"], default=None,
                      help="yace: ML-PACE C-tilde (exact, tabulated radials); lammps: a lammps-jax bundle "
                           "(default: from the --out extension)")
@@ -714,6 +788,19 @@ def _parser():
     exp.add_argument("--procs", default=None,
                      help="lammps: the LAMMPS processor grid px,py,pz; sizes one MPI rank's buffers "
                           "(run LAMMPS with `processors px py pz`)")
+    exp.add_argument("--aa-dag", default="auto", choices=["auto", "chain", "greedy", "prefix", "cueq"],
+                     help="lammps: the product basis form: auto (greedy for large bases, else chain), chain, the "
+                          "DAG plans greedy / prefix, or cueq (NVIDIA cuequivariance kernels; CUDA, one species or species-embedding, "
+                          "the cueq extra and lammps-jax's contrib/ffi-replay via LAMMPS_JAX_CONTRIB)")
+    exp.add_argument("--print-env", default=None, metavar="BUNDLE",
+                     help="instead of an export: print the environment that runs LAMMPS on an exported cueq "
+                          "bundle (--aa-dag cueq), resolved on this machine (run it where LAMMPS runs)")
+    exp.add_argument("--ffi", action="store_true",
+                     help="lammps, --platform cpu: run linear ACE as ace-jax's C++ kernel (one FFI call per step), "
+                          "compiled on first use with the C++ compiler ($CXX, c++, g++ or clang++) and cached")
+    exp.add_argument("--ffi-flags", default=None,
+                     help="lammps: the kernel's compiler flags (implies --ffi; default \"-O3 -march=native\"): "
+                          "on a login node for compute nodes of another CPU type, e.g. --ffi-flags=\"-O3 -march=x86-64-v3\" (with =)")
     exp.add_argument("--type-elements", default=None,
                      help="lammps: comma-separated element of each LAMMPS atom type, in type order "
                           "(default: the model's element order)")

@@ -46,14 +46,19 @@ ACE_DTYPES = tuple(os.environ.get("ACEJAX_AC_ACE_DTYPES", "float64").split(","))
 # JAX-MD's cell list; "-tight": model slots for rc pairs ("cutoff" slots)
 JAXMD_MODES = ("jaxmd", "jaxmd-tight")
 LAMMPS_TIGHT = "lammps-tight"   # lammps-jax with run_lammps' "cutoff" slots (opt-in, as the JAX-MD modes)
-OPT_IN_MODES = (*JAXMD_MODES, LAMMPS_TIGHT)
-JAXMD = [("acejax-ace", {"gpu": m}, ACE_DTYPES) for m in OPT_IN_MODES]
+# lammps-jax bundles with NVIDIA cuequivariance as the product basis (export_lammps(aa_dag="cueq"); GPU, one species
+# only; opt-in).  Each model is exported once, sized for the main N: the export compiles every cueq kernel
+# (o4d20: 13-26 min on an A100), so the gate cells and the timed repeats all run that bundle, and there is no N/8 check
+LAMMPS_CUEQ = "lammps-cueq"
+OPT_IN_MODES = (*JAXMD_MODES, LAMMPS_TIGHT, LAMMPS_CUEQ)
+JAXMD = [("acejax-ace", {"gpu": m}, ACE_DTYPES) for m in (*JAXMD_MODES, LAMMPS_TIGHT)]
 PLAN = {"ace": [("acejax-ace", {"cpu": "standalone", "gpu": "lammps"}, ACE_DTYPES), *JAXMD,
+                ("acejax-ace", {"gpu": LAMMPS_CUEQ}, ("float64",)),
                 # ACEpotentials.jl's PR 309 LAMMPS export of the same fit (accuracy_cost/build_trim.py: the
                 # juliac --trim library, pair_style ace; CPU only); only where the env json names `lmp_ace`
                 ("acepotentials-trim", {"cpu": "lammps"}, ("float64",))],
         "ace_lr": [("acejax-ace", {"cpu": "standalone", "gpu": "lammps"}, ("float64",)),
-                   *[("acejax-ace", {"gpu": m}, ("float64",)) for m in OPT_IN_MODES]],
+                   *[("acejax-ace", {"gpu": m}, ("float64",)) for m in (*JAXMD_MODES, LAMMPS_TIGHT)]],
         # PACE-shaped ACE (pacemaker's per-order caps, SBessel radials; feat/sbessel-radials + basis caps):
         # timed as deployed, like ace / ace_lr (lean; an SBessel radial is never splined, learned or not)
         "ace_wl": [("acejax-ace", {"cpu": "standalone", "gpu": "lammps"}, ("float64",))],   # wl_ladder/PLAN.md
@@ -81,12 +86,20 @@ PLAN = {"ace": [("acejax-ace", {"cpu": "standalone", "gpu": "lammps"}, ACE_DTYPE
         # mixed precision (dtype "mixed": float descriptors/network, double accumulation; scaling/run_gpumd.py)
         "nep": [("nep", {"cpu": "lammps"}, ("float64",)),
                 ("nep-gpumd", {"gpu": "gpumd"}, ("mixed",))],
+        # GRACE (fit_grace.py; LAMMPS from the yury-lysogorskiy/lammps `grace` branch, scaling/envs/sulis-grace.sh):
+        # GRACE-1L as pair_style grace/1l/kk (GPU) / grace/1l/cpu/kk (CPU), float64; GRACE-FS as grace/fs/kk / grace/fs.
+        # Seed 0 of each size is timed (the seeds share the architecture); grace_abl is accuracy only
+        "grace": [("grace", {"cpu": "lammps", "gpu": "lammps"}, ("float64",))],
+        "grace_fs": [("grace-fs", {"cpu": "lammps", "gpu": "lammps"}, ("float64",))],
+        "grace_2l": [("grace-2l", {"cpu": "lammps", "gpu": "lammps"}, ("float64",))],   # grace/2l/kk, grace/2l/cpu/kk
         "gap": [("gap", {"cpu": "lammps"}, ("float64",))],         # pair quip: no KOKKOS, CPU only
         "gap_noglue": [("gap", {"cpu": "lammps"}, ("float64",))],  # the XML has no Glue term; same pair style
         "gap_E30": [("gap", {"cpu": "lammps"}, ("float64",))]}     # GAP-18's command, energy sigmas x10/3
 STYLE = {"acejax-ace": "acejax", "acejax-pace": "acejax", "mlpace": "mlpace", "mlpace-mixed": "mlpace",
          "mace": "mace", "gap": "gap", "nep": "nep", "nep-gpumd": "nep-gpumd",
-         "mace-xl": "mace-xl", "mace-xl-f32": "mace-xl-f32", "acepotentials-trim": "acepotentials-trim"}
+         "mace-xl": "mace-xl", "mace-xl-f32": "mace-xl-f32", "acepotentials-trim": "acepotentials-trim",
+         "grace": "grace", "grace-fs": "grace-fs", "grace-2l": "grace-2l"}
+GRACE_CODES = ("grace", "grace-fs", "grace-2l")
 TRIM = "acepotentials-trim"
 XL_CODES = ("mace-xl", "mace-xl-f32")
 GATE_N, GATE_CELLS = 64, 3                        # three rattled 64-atom Si cells
@@ -165,7 +178,14 @@ def plateau_flag(main, check, tol=0.2):
 
 
 def _sizes(fam, e):
+    if fam in ("grace", "grace_fs", "grace_2l"):
+        return [f"{e['size']}_s0"] if e.get("timing", True) else []   # c32l4_long: c32l4's architecture                     # fit_grace's run name: <size>_s<seed>
     return [f"f{n}" for n in e["take"]] if fam == "pace" else [e["size"]]
+
+
+def _elements(fam, e):
+    """The species of a sweep family's models: the benchmark is silicon throughout."""
+    return ["Si"]
 
 
 def _local(path):
@@ -203,6 +223,8 @@ def cases(device, only=None):
                     mode = modes[device]
                     if device == "cpu" and code.startswith("acejax") and os.environ.get("BENCH_LAMMPS_JAX_CPU"):
                         mode = "lammps"                       # lammps-jax's host backend (sweep.lammps_supported)
+                    if mode == LAMMPS_CUEQ and len(_elements(fam, e)) != 1:
+                        continue                              # aa_dag="cueq": single-species models only
                     for dt in dtypes:
                         path = _local(st["model"])
                         if code == "mace":
@@ -212,7 +234,7 @@ def cases(device, only=None):
                         if code in XL_CODES:                  # the gate's PyTorch reference: float64, and on a
                             path = str(d / ("model-cpu.model" if device == "cpu" and (d / "model-cpu.model").exists()
                                             else "model.model"))   # GPU-less node the CPU copy (fit_mace.cpu_copy)
-                        row = {"code": code, "family": fam, "system": "Si", "size": size, "elements": ["Si"],
+                        row = {"code": code, "family": fam, "system": "Si", "size": size, "elements": _elements(fam, e),
                                "path": path, "name": f"{fam}/{size}/{code}", "rattle": RATTLE,
                                "symmetrix": str(d / "model.json"), "symmetrix_xl": str(d / "model-xl.json"),
                                "quip_label": st.get("quip_label"),
@@ -220,8 +242,13 @@ def cases(device, only=None):
                                "n_params": st.get("n_params")}
                         if code == TRIM:
                             row["trim_lib"] = str(trim_lib(d))
+                        if code in GRACE_CODES:                # LAMMPS reads the export; the gate's reference is the SavedModel
+                            row["path"] = _local(st.get("fs_yaml" if code == "grace-fs" else "kokkos_npz") or "")
+                            row["ref"] = path
                         if fam in ("ace", "ace_wl") and os.environ.get("ACEJAX_AC_ACE_SPLINE_TOL"):   # analytic radials splined
                             row["spline_tol"] = float(os.environ["ACEJAX_AC_ACE_SPLINE_TOL"])  # like ace_lr's (opt-in)
+                        if mode == LAMMPS_CUEQ:
+                            row["aa_dag"] = "cueq"            # run_lammps passes it to export_lammps
                         out.append({"row": row, "mode": mode, "dtype": dt})
     return out
 
@@ -260,6 +287,10 @@ def gate_model(row, device, env, work):
     lmp, checks = env["lmp"], []
     for k, at in enumerate(gate_cells()):
         layouts = (parity.BUNDLE_LAYOUTS if k == 0 else ("auto",)) if style == "acejax" else (None,)
+        if style == "acejax" and row.get("bundle"):          # a prebuilt bundle (cueq): the one timed, every cell
+            layouts = ("auto",)
+        elif style == "acejax" and os.environ.get("ACEJAX_EXPORT_FFI"):
+            layouts = ("matrix",)                              # the FFI kernel: the matrix layout only
         for lay in layouts:
             w = work / f"cell{k}" / (lay or style)
             chk = {"cell": k, **({"layout": lay} if lay else {})}
@@ -267,7 +298,11 @@ def gate_model(row, device, env, work):
                 if style == "acejax":
                     E0, F0 = parity._acejax_ef(row["path"], at, **parity._tol_kw(row))   # the model the bundle exports
                     cpu = {"procs": [1, 1, 1], "device_memory": 4 * 2**30} if device == "cpu" else {}
-                    bundle, used, _ = export_bundle({**row, **cpu}, at, "float64", w, layout=lay)
+                    if row.get("bundle"):
+                        bundle = row["bundle"]
+                        used = json.loads(pathlib.Path(bundle).read_text())["ace_jax"]["layout"]
+                    else:
+                        bundle, used, _ = export_bundle({**row, **cpu}, at, "float64", w, layout=lay)
                     chk["layout_used"] = used
                     lmp_aj, pjrt = lammps_for(code, device, env)
                     E1, F1 = parity._lammps_ef("acejax", bundle, row["elements"], at, device, lmp_aj, w, pjrt)
@@ -286,6 +321,9 @@ def gate_model(row, device, env, work):
                     E0, F0 = parity._mace_ef(row["path"], at, device)
                     E1, F1 = parity._lammps_ef(style, row["symmetrix_xl"], row["elements"], at, device,
                                                env["lmp_xl"], w, pair_extra=xl_args)
+                elif style in GRACE_CODES:                             # TPCalculator in the grace venv (env `grace_python`)
+                    E0, F0 = parity._grace_ef(row["ref"], at, env["grace_python"], w)
+                    E1, F1 = parity._lammps_ef(style, row["path"], row["elements"], at, device, lmp, w)
                 elif style == "nep":                                   # NEP_CPU both sides, unshifted energies
                     E0, F0 = parity._nep_ef(row["path"], at)
                     E1, F1 = parity._lammps_ef("nep", row["path"], row["elements"], at, device, lmp, w)
@@ -346,6 +384,22 @@ def time_case(c, device, n, env, work, prev=None):
                                threads=threads, slots=slots, aceplugin=env.get("ace_plugin"))
 
 
+def export_case(row, n, work):
+    """One bundle for a case (the cueq line), sized for n atoms of the timed structure: {"bundle", "layout",
+    "compile_s", "block_rows", "aa_dag"} or {"status": "error", "error"}.  run_lammps.export_bundle exports in
+    its own child, so each cueq bundle has a fresh plan registry (cueq.install_recorder: one per process)."""
+    from scaling.run_lammps import export_bundle
+    from scaling.structures import supercell
+    try:
+        at = supercell(row["system"], n, rattle=row.get("rattle", 0.0))
+        bundle, layout, compile_s = export_bundle(row, at, "float64", pathlib.Path(work))
+    except Exception as ex:                                   # a failed export is a row, as a failed gate is
+        return {"status": "error", "error": str(ex)[-1500:]}
+    aj = json.loads(pathlib.Path(bundle).read_text())["ace_jax"]
+    return {"bundle": bundle, "layout": layout, "compile_s": compile_s, "block_rows": aj.get("block_rows"),
+            "aa_dag": aj.get("aa_dag")}
+
+
 def lammps_for(code, device, env):
     """(LAMMPS wrapper, PJRT plugin) for a code: ace-jax on the CPU runs the host-Kokkos
     lammps-jax build with XLA's CPU plugin (env `lmp_jax_cpu`, `pjrt_cpu`)."""
@@ -369,6 +423,8 @@ def _child_main(kind, payload):
         r = run_jaxmd.gate(p["row"], p["mode"])
     elif kind == "gate":
         r = gate_model(p["row"], p["device"], p["env"], p["work"])
+    elif kind == "export":
+        r = export_case(p["row"], p["n"], p["work"])
     else:
         r = time_case(p["case"], p["device"], p["n"], p["env"], p["work"], p.get("prev"))
     print(json.dumps(r, default=str))
@@ -413,6 +469,22 @@ def subprocess_runner(env, device):
     return runner, gate
 
 
+def subprocess_exporter(env, device):
+    """export(c, n, work): export_case in a child process, as the runner's cases (the parent never imports JAX)."""
+    from scaling.sweep import child_env, run_capped
+    py = env.get("python", sys.executable)
+
+    def export(c, n, work):
+        payload = {"row": c["row"], "n": n, "work": str(work)}
+        cmd = [py, "-m", "accuracy_cost.timing", "--child", "export", json.dumps(payload)]
+        rc, out, err, peak, capped = run_capped(cmd, child_env(env), timeout=7200, cap_bytes=RSS_CAP_GB * 2**30)
+        lines = [ln for ln in out.splitlines() if ln.startswith("{")]
+        if lines and not capped:
+            return json.loads(lines[-1])
+        return {"status": "error", "error": (err or out)[-1500:]}
+    return export
+
+
 def _median_row(rows):
     """The first ok row with step_s the median over the ok repeats, else the first row."""
     for r in rows:                                # standalone: one calculator call is one MD step
@@ -431,13 +503,17 @@ def _done(results):
     return {tuple(r.get(f) for f in KEY): r for r in rows}
 
 
-def run_cases(device, cs, runner, gate, results, n, repeats, work, meta, redo=False, ready=None):
+def run_cases(device, cs, runner, gate, results, n, repeats, work, meta, redo=False, ready=None, export=None):
     """Gate (LAMMPS rows, once per model and code), then time each case: N/8
     first (its step time and bundle layout carry into the main run), then N,
     `repeats` times each, median step_s.  `ready()` runs before each gate and
     each case (wait_idle: it may wait, or stop the run) and its sample is
     recorded on that row.  Resumable: ok and unsupported rows, and ok and
-    unsupported gates, are kept unless `redo`."""
+    unsupported gates, are kept unless `redo`.
+
+    A cueq case (LAMMPS_CUEQ) is exported once by `export(c, N, dir)` (subprocess_exporter), sized for N; its
+    gate and its N repeats run that bundle (row["bundle"]), with no N/8 check.  A bundle already in the case's
+    work dir is reused, redo or not: delete it to re-export."""
     work, ready = pathlib.Path(work), ready or dict
     done = {} if redo else _done(results)
     host = socket.gethostname()
@@ -450,8 +526,28 @@ def run_cases(device, cs, runner, gate, results, n, repeats, work, meta, redo=Fa
         if done.get(key, {}).get("status") in keep:
             continue
         base = {**ident, "mode": c["mode"], "n_params": r0.get("n_params"), "host": host, **meta}
-        if c["mode"] in ("lammps", LAMMPS_TIGHT, "gpumd", *JAXMD_MODES):   # gated: LAMMPS, GPUMD against CPUNEP, JAX-MD
-            gmode = f"parity-{c['mode']}" if c["mode"] in JAXMD_MODES else "parity"   # one gate per JAX-MD line
+        d = work / device / r0["name"].replace("/", "_") / c["mode"] / c["dtype"]
+        if c["mode"] == LAMMPS_CUEQ:                  # one export, reused by the gate and every repeat
+            b = d / "bundle"
+            if (b / "bundle.json").exists() and (b / "export.json").exists():
+                ex = {**json.loads((b / "export.json").read_text()), "reused": True}
+            elif export is None:
+                raise ValueError("a cueq case needs export= (subprocess_exporter)")
+            else:
+                ex = export(c, n[0], b)
+                if ex.get("bundle"):                  # what a resumed run reuses
+                    (b / "export.json").write_text(json.dumps(ex))
+            if not ex.get("bundle"):
+                row = {**base, "status": "error", "error": f"cueq export: {ex.get('error')}"}
+                common.upsert_jsonl(results, row, KEY)
+                print(row["code"], row["family"], row["size"], row["dtype"], row["mode"], "export error", flush=True)
+                continue
+            c = {**c, "row": {**r0, "bundle": ex["bundle"]}}
+            base.update({k: ex[k] for k in ("block_rows",) if ex.get(k) is not None},
+                        **({"export_s": ex["compile_s"]} if "compile_s" in ex else {}))
+        if c["mode"] in ("lammps", LAMMPS_TIGHT, LAMMPS_CUEQ, "gpumd", *JAXMD_MODES):   # gated: LAMMPS, GPUMD against CPUNEP, JAX-MD
+            # one gate per JAX-MD line and for the cueq bundles (another product basis, another bundle)
+            gmode = f"parity-{c['mode']}" if c["mode"] in (*JAXMD_MODES, LAMMPS_CUEQ) else "parity"
             gkey = tuple({**ident, "dtype": "float64", "mode": gmode}.get(f) for f in KEY)
             g = done.get(gkey) if done.get(gkey, {}).get("status") in ("parity_ok", "unsupported") else None
             if g is None:
@@ -468,16 +564,16 @@ def run_cases(device, cs, runner, gate, results, n, repeats, work, meta, redo=Fa
                 continue
         s = ready()
         n_main, n_check = n
-        d = work / device / r0["name"].replace("/", "_") / c["mode"] / c["dtype"]
-        checks = [runner(c, n_check, d / str(n_check) / str(k), None) for k in range(repeats)]
-        check = _median_row(checks)
+        checks = ([] if c["mode"] == LAMMPS_CUEQ else         # the cueq bundle is sized for n_main
+                  [runner(c, n_check, d / str(n_check) / str(k), None) for k in range(repeats)])
+        check = _median_row(checks) if checks else {"status": "skipped"}
         prev = None
         if check.get("status") == "ok":           # same bundle layout at N as at N/8 (run_lammps.bundle_layout)
             prev = {"step_s": check["step_s"], "n_atoms": n_check,
                     **{f: check[f] for f in ("layout", "matrix_overflow") if f in check}}
         mains = [runner(c, n_main, d / str(n_main) / str(k), prev) for k in range(repeats)]
         main = _median_row(mains)
-        row = {**main, **base, **s, "parity": "parity_ok" if c["mode"] in ("lammps", LAMMPS_TIGHT, "gpumd", *JAXMD_MODES) else "not_applicable",
+        row = {**main, **base, **s, "parity": "parity_ok" if c["mode"] in ("lammps", LAMMPS_TIGHT, LAMMPS_CUEQ, "gpumd", *JAXMD_MODES) else "not_applicable",
                "n_atoms": n_main, "check_n_atoms": n_check, "check_status": check.get("status"),
                "check_step_s": check.get("step_s"), "check_layout": check.get("layout"),
                # GPU memory (NVML) and host RSS: the largest over the repeats (scaling.sweep.run_capped)
@@ -526,6 +622,7 @@ def main(argv=None):
     meta = {"forced_busy": a.force_busy,
             "device_name": device_name(a.device), "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES")}
     runner, gate = subprocess_runner(env, a.device)
+    export = subprocess_exporter(env, a.device)
     cs = [c for c in cases(a.device, only=a.only) if (c["row"]["code"] not in XL_CODES or env.get("lmp_xl"))
           and (c["row"]["code"] != TRIM or env.get("lmp_ace"))
           and (c["row"]["code"] != "mlpace-mixed" or env.get("lmp_mixed"))
@@ -534,7 +631,7 @@ def main(argv=None):
     run_cases(a.device, cs, runner, gate,
               pathlib.Path(a.results or RESULTS / f"lestrade-{a.device}.jsonl"),
               n=tuple(a.n) if a.n else N[a.device], repeats=a.repeats, work=work, meta=meta, redo=a.redo,
-              ready=ready)
+              ready=ready, export=export)
 
 
 if __name__ == "__main__":

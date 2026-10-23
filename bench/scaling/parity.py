@@ -30,6 +30,7 @@ Each LAMMPS side is `run 0` with a sorted force dump.  A failed gate blocks
 the LAMMPS rows of that code on this host (`blocked`), and a failed spline gate
 both modes of the -learned line; timing never runs on an unverified path.
 """
+import os
 import pathlib
 import subprocess
 
@@ -37,7 +38,7 @@ import numpy as np
 from ase.io import write
 
 from scaling.models import ACEPOT_CODES, LEARNED_CODES, planned_models
-from scaling.run_lammps import (export_bundle, finished, kokkos_args, lammps_input, lammps_vars,
+from scaling.run_lammps import (bundle_env, export_bundle, finished, kokkos_args, lammps_input, lammps_vars,
                                 read_dump_forces, read_pe)
 from scaling.structures import supercell
 
@@ -64,7 +65,12 @@ TOL = {"mlpace": (1e-6, 1e-5), "acejax": (1e-10, 1e-9), "mace": (1e-6, None),
        # ML-PACE in a KOKKOS_PREC=mixed LAMMPS (float compute) vs the float64 model: float site energies of the
        # linear ACE ladder's .yace miss 1e-5 eV/atom (o4d12-o4d16 5e-5-1.8e-4, stock pace/kk too; densities summed
        # in double still 3-4e-5), as ace-jax float32 does (1-2e-4), so the energy bound is float32's, not mace's
-       "mlpace-mixed": (2e-4, 1e-3)}
+       "mlpace-mixed": (2e-4, 1e-3),
+       # GRACE in LAMMPS (grace/1l/kk .npz, grace/fs C++ YAML; float64) vs gracemaker's TPCalculator on the float64
+       # SavedModel: 1L is the same arithmetic (mnf148 smoke: 2e-11 eV/atom, 1.7e-10 eV/A); the C++ FS evaluator
+       # differs at the force level (smoke fs_small / fs_medium: <= 6e-12 eV/atom, 7e-9-1.3e-8 eV/A), so mlpace's bound
+       # GRACE-2L (grace/2l/cpu/kk smoke, mnf148): 2.0e-7 eV/atom, 2.0e-7 eV/A: not roundoff, but far inside mlpace's bound
+       "grace": (1e-10, 1e-9), "grace-fs": (1e-6, 1e-5), "grace-2l": (1e-6, 1e-5)}
 # gates that check a standalone line: a failure blocks its standalone rows
 STANDALONE_GATES = ("spline", "acepot")
 LEARNED, ANALYTIC = LEARNED_CODES                     # "acejax-ace-learned", "acejax-ace-analytic"
@@ -82,6 +88,28 @@ def _nep_ef(path, at):                   # calorine is optional: imported here o
     from calorine.calculators import CPUNEP
     a = at.copy(); a.calc = CPUNEP(str(path))
     return a.get_potential_energy(), a.get_forces()
+
+
+GRACE_EF = """import json, sys, numpy as np, ase
+from tensorpotential.calculator import TPCalculator
+z = np.load(sys.argv[2]); a = ase.Atoms(numbers=z["numbers"], positions=z["positions"], cell=z["cell"], pbc=z["pbc"])
+a.calc = TPCalculator(sys.argv[1])
+json.dump({"E": float(a.get_potential_energy()), "F": a.get_forces().tolist()}, open(sys.argv[3], "w"))
+"""
+
+
+def _grace_ef(path, at, python, work):
+    """E, F from gracemaker's TPCalculator (SavedModel, no E0: what LAMMPS evaluates) in the grace venv's
+    `python` (TensorFlow is not in the benchmark venv), on the CPU so no TF process holds the GPU.  The cell goes
+    over as an .npz: extxyz's 8 decimals moved forces by 1.5e-7 eV/A."""
+    import json
+    import os
+    work = pathlib.Path(work); work.mkdir(parents=True, exist_ok=True)
+    np.savez(work / "ref.npz", numbers=at.numbers, positions=at.positions, cell=np.asarray(at.cell), pbc=at.pbc)
+    subprocess.run([python, "-c", GRACE_EF, str(path), str(work / "ref.npz"), str(work / "ref.json")], check=True,
+                   capture_output=True, env={**os.environ, "CUDA_VISIBLE_DEVICES": "", "TF_CPP_MIN_LOG_LEVEL": "2"})
+    r = json.loads((work / "ref.json").read_text())
+    return r["E"], np.asarray(r["F"])
 
 
 def error_summary(ex, head=200, tail=500):
@@ -132,7 +160,8 @@ def _lammps_ef(style, model_path, els, at, device, lmp, work, pjrt=None, aceplug
     cmd = [lmp, "-in", "in.parity", "-log", "log.lammps", "-nocite"]
     cmd += kk
     cmd += lammps_vars(style, pjrt, aceplugin)
-    p = subprocess.run(cmd, cwd=work, capture_output=True, text=True, timeout=1800)
+    env = bundle_env(model_path) if style == "acejax" else None     # a cueq bundle's sidecar environment
+    p = subprocess.run(cmd, cwd=work, capture_output=True, text=True, timeout=1800, env=env)
     log = (work / "log.lammps").read_text() if (work / "log.lammps").exists() else ""
     if not finished(p.returncode, log):
         raise RuntimeError(f"lammps exit {p.returncode}: {(p.stderr or p.stdout)[-300:]}")
@@ -168,7 +197,10 @@ def _mace_ef(path, at, device, head=None):
 
 
 def _tol_kw(m):
-    return {"spline_tol": m["spline_tol"]} if "spline_tol" in m else {}
+    """The reference's lean options as the bundle's: the row's spline_tol; under ACEJAX_EXPORT_FFI (the FFI
+    kernel bundles) the radial table those turn on, so the gate holds the kernel to roundoff."""
+    return ({"spline_tol": m["spline_tol"]} if "spline_tol" in m else {}) | (
+        {"radial_table": True} if os.environ.get("ACEJAX_EXPORT_FFI") else {})
 
 
 BUNDLE_LAYOUTS = ("matrix", "dense", "sparse")

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ace-jax"
-version = "0.4.0"
+version = "0.4.1"
 description = "Fit and evaluate ACE interatomic potentials in Python/JAX"
 readme = "README.md"
 license = "MIT"
@@ -50,6 +50,10 @@ dependencies = [
 # GP arm included, needs only the core dependencies).
 gp = ["blackjax>=1.6"]
 cuda = ["jax[cuda12]>=0.10.1"]
+# aa_dag="cueq": NVIDIA cuequivariance as the GPU product basis (single-species and species-embedding models;
+# docs/dev/specs/2026-10-22-cueq-product-basis-design.md).  Linux x86_64 + CUDA 12 only; tested at 0.13.x.
+cueq = ["cuequivariance>=0.13,<0.14", "cuequivariance-jax>=0.13,<0.14",
+        "cuequivariance-ops-jax-cu12>=0.13,<0.14; sys_platform == 'linux'"]
 # Fast neighbour lists; ace-jax uses them when present and falls back to ASE's
 # list otherwise, so they are intentionally NOT core deps.  matscipy-neighbours
 # (preferred: OpenMP CPU, native dense neighbour_matrix) ships as a source
@@ -62,7 +66,7 @@ fast-neighbours = ["matscipy-neighbours>=1.0"]
 # style is lammps-jax's LAMMPS plugin, built separately at the same version.
 # lammps-jax excludes jaxlib 0.10.2 (slow GPU scatter-add), so on Python 3.11
 # this extra resolves jax 0.10.1, the core floor.
-lammps = ["lammps-jax>=0.2.0"]
+lammps = ["lammps-jax>=0.2.1"]   # 0.2.1: the plugin registers FFI handlers for the CPU (aj export --ffi)
 # JAX-MD integration (ace_jax.jaxmd: energy/force functions for JAX-MD's integrators).
 jaxmd = ["jax-md>=0.2.29"]
 

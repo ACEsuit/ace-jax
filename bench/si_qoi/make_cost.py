@@ -6,12 +6,16 @@ standalone).  Models with no ok row are left out (plot_cost then drops them from
     python bench/si_qoi/make_cost.py bench/accuracy_cost/results/sulis-gpu.jsonl [more.jsonl ...] [--out cost.json]
 
 Several files are pooled (e.g. sulis-gpu-ace-splined.jsonl: linear ACE with its analytic radials splined
-at 1e-10, as learned radials are by default); each row's gate is looked up in its own file.
+at 1e-10, as learned radials are by default); each row's gate is looked up in its own file.  A line with its
+own gate mode (accuracy_cost.timing: "parity-lammps-cueq" for the cueq bundles) needs that gate; "parity"
+covers the lammps and gpumd rows.
 """
 import argparse, json, pathlib, sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
-from plot_cost import FAM, REDUCED, ROOT, cost_name, family_of  # noqa: E402
+from plot_cost import COST_NAME, FAM, REDUCED, ROOT, SEEDED, cost_name, family_of, seed_split  # noqa: E402
+
+OWN_GATE = ("lammps-cueq",)          # timing modes gated by their own parity rows ("parity-<mode>")
 
 
 def main():
@@ -34,11 +38,13 @@ def main():
     rows, gates = [], set()
     for f in a.timings:
         rs = [json.loads(l) | {"_file": pathlib.Path(f).stem} for l in open(f)]
-        gates |= {(f, r["code"], r["family"], r["size"]) for r in rs if r.get("mode") == "parity" and r.get("status") == "parity_ok"}
+        gates |= {(f, r["code"], r["family"], r["size"], r["mode"]) for r in rs
+                  if r.get("mode", "").startswith("parity") and r.get("status") == "parity_ok"}
         rows += [r | {"_path": f} for r in rs]
-    # models a --source file covers: their rows of that code come from it alone (others, e.g. the wL ladder, as before)
-    sourced = {(r["code"], r["family"], r["size"]) for r in rows if source.get(r["code"]) == r["_file"]}
-    best, code = {}, {}
+    # models a --source file covers: their rows of that code come from it alone (others, e.g. the wL ladder, as
+    # before); keyed on the plotted family, so another line of the same code (cueq) keeps its own file
+    sourced = {(r["code"], family_of(r), r["size"]) for r in rows if source.get(r["code"]) == r["_file"]}
+    best, code, fam_of = {}, {}, {}
     prefer = [str(pathlib.Path(p)) for p in a.prefer]
     preferred = {}                       # cost name -> the --prefer file that times it
     for r in rows:
@@ -51,15 +57,22 @@ def main():
             continue
         if preferred.get(cost_name(fam, r["size"]), r["_path"]) != r["_path"]:   # superseded by a --prefer file
             continue
-        if r.get("mode") in ("lammps", "gpumd") and (r["_path"], r["code"], r["family"], r["size"]) not in gates:   # standalone: no gate
+        gmode = "parity" if r.get("mode") in ("lammps", "gpumd") else f"parity-{r['mode']}" if r.get("mode") in OWN_GATE else None
+        if gmode and (r["_path"], r["code"], r["family"], r["size"], gmode) not in gates:   # standalone: no gate
             continue
-        if (r["code"], r["family"], r["size"]) in sourced and r["_file"] != source[r["code"]] and fam not in REDUCED:
+        # a line under its own cost name (float32, the FFI kernel, cueq) is not the sourced line: kept from any file
+        if (r["code"], fam, r["size"]) in sourced and r["_file"] != source[r["code"]] and fam not in COST_NAME:
             continue
         name = cost_name(fam, r["size"])                      # Symmetrix-XL under its own name (MACExl_)
         us = 1e6 / r["atom_steps_per_s"]
         if us < best.get(name, float("inf")):
-            best[name], code[name] = us, (f'{r["code"]} {r["dtype"]} {r["mode"]}' + (f' dag:{r["aa_dag"]}' if r.get("aa_dag") else "")
-                                          + f' [{r["_file"]}]')
+            dag = r.get("aa_dag") if r.get("aa_dag") != "cueq" else None   # cueq: its mode names it (no DAG dot)
+            best[name], fam_of[name], code[name] = us, fam, (f'{r["code"]} {r["dtype"]} {r["mode"]}' + (f' dag:{dag}' if dag else "")
+                                          + (" ffi" if r.get("ffi") else "") + f' [{r["_file"]}]')
+    for n in list(best):                    # seeded families (plot_cost.SEEDED): seed 0 is timed for its size
+        base, k = seed_split(n)             # only theirs: GAP's sizes (s9000, ...) read as seed suffixes too
+        if fam_of[n] in SEEDED and k is not None and base not in best:
+            best[base], code[base] = best[n], code[n]
     pathlib.Path(a.out).write_text(json.dumps(best, indent=1, sort_keys=True) + "\n")
     pathlib.Path(a.out).with_suffix(".codes.json").write_text(json.dumps(code, indent=1, sort_keys=True) + "\n")
     for n in sorted(best):

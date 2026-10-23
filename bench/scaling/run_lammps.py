@@ -20,7 +20,11 @@ from scaling.structures import supercell
 
 KOKKOS = {"acejax": "newton on neigh half", "mlpace": "newton on neigh half",
           "mace": "newton on neigh half",                      # gap: CPU only, no KOKKOS
-          "mace-xl": "newton on neigh half", "mace-xl-f32": "newton on neigh half"}
+          "mace-xl": "newton on neigh half", "mace-xl-f32": "newton on neigh half",
+          # GRACE (the yury-lysogorskiy/lammps `grace` branch, bench/scaling/envs/sulis-grace.sh): native Kokkos 1L
+          # (gracemaker export_kokkos .npz; full float64 by default) and the C++ GRACE-FS evaluator; both need newton on
+          "grace": "newton on neigh half", "grace-fs": "newton on neigh half",
+          "grace-2l": "newton on neigh half"}   # GRACE-2L: grace/2l/kk (GPU), grace/2l/cpu/kk (CPU)
 # Symmetrix-XL (bench/scaling/envs/sulis-xl.sh): its fast path is pair_style symmetrix/mace[/float32]/kk with
 # a JIT-compiled R1 artifact, so it runs Kokkos on the CPU too (the non-kk style is the old evaluator)
 XL = {"mace-xl": ("symmetrix/mace/kk", "float64"), "mace-xl-f32": ("symmetrix/mace/float32/kk", "float32")}
@@ -39,6 +43,20 @@ def _pair(style, model_path, elements, device, extra=None):
         dd = "no_domain_decomposition" if device == "gpu" else "mpi_message_passing"
         return (f"pair_style {XL[style][0]} {dd} streamed_edges direct profile speed {extra}\n"
                 f"pair_coeff * * {model_path} {els}\n")
+    if style == "grace":                    # GRACE-1L .npz: GPU kernel, or its CPU-tuned twin (Kokkos OpenMP)
+        # the chunk-size sweep (envs/sulis-gpu-grace-chunk.sbatch): $GRACE_CHUNKSIZE (default 4096 atoms per kernel
+        # batch) and $GRACE_PRECISION ("" float64, "/mixed", "/fp32"); unset = the published rows' defaults
+        prec, chunk = os.environ.get("GRACE_PRECISION", ""), os.environ.get("GRACE_CHUNKSIZE")
+        return (f"pair_style {('grace/1l/kk' if device == 'gpu' else 'grace/1l/cpu/kk') + prec}"
+                f"{f' chunksize {int(chunk)}' if chunk else ''}\n"
+                f"pair_coeff * * {model_path} {els}\n")
+    if style == "grace-2l":                 # GRACE-2L .npz (export_kokkos): the same pair, two layers; the same
+        prec, chunk = os.environ.get("GRACE_PRECISION", ""), os.environ.get("GRACE_CHUNKSIZE")   # overrides as 1L's
+        return (f"pair_style {('grace/2l/kk' if device == 'gpu' else 'grace/2l/cpu/kk') + prec}"
+                f"{f' chunksize {int(chunk)}' if chunk else ''}\n"
+                f"pair_coeff * * {model_path} {els}\n")
+    if style == "grace-fs":                 # GRACE-FS C++ YAML: Kokkos on the GPU, the plain MPI evaluator on the CPU
+        return f"pair_style {'grace/fs/kk' if device == 'gpu' else 'grace/fs'}\npair_coeff * * {model_path} {els}\n"
     if style == "nep":                      # NEP_CPU's USER-NEP (float64, MPI): pair_style takes no arguments
         return f"pair_style nep\npair_coeff * * {model_path} {els}\n"
     if style == TRIM:                       # PR 309 plugin, then the juliac --trim library
@@ -197,8 +215,13 @@ def _export_inprocess(row, at, dtype, workdir, layout="auto", slots="skin", list
                       max_owned=cap["max_owned"], max_neighbors=cap["max_neighbors"],
                       **({"spline_tol": row["spline_tol"]} if "spline_tol" in row else {}),
                       **({"platform": "cpu", "device_memory": row["device_memory"]} if procs else {}),
-                      # opt-in recursive product basis (ace_jax.eval.aa_dag; "greedy" | "prefix"), an ace-jax with it
-                      **({"aa_dag": os.environ["ACEJAX_EXPORT_AA_DAG"]} if os.environ.get("ACEJAX_EXPORT_AA_DAG") else {}))
+                      # opt-in recursive product basis (ace_jax.eval.aa_dag; "greedy" | "prefix"), an ace-jax with it;
+                      # a row's own (accuracy_cost's lammps-cueq line: "cueq") takes precedence
+                      **({"aa_dag": row.get("aa_dag") or os.environ["ACEJAX_EXPORT_AA_DAG"]}
+                         if row.get("aa_dag") or os.environ.get("ACEJAX_EXPORT_AA_DAG") else {}),
+                      # opt-in C++ FFI kernel (ace_jax.eval.ffi; CPU matrix bundles, radial table on): LAMMPS needs
+                      # LAMMPS_JAX_FFI_HANDLERS naming its library, set with this in the env json's os_env
+                      **({"ffi": True} if os.environ.get("ACEJAX_EXPORT_FFI") else {}))
     return (str(pathlib.Path(workdir) / "bundle.json"), b["ace_jax"]["layout"], time.perf_counter() - t0,
             splined_meta(b["ace_jax"]))
 
@@ -219,8 +242,8 @@ def export_bundle(row, at, dtype, workdir, layout="auto", slots="skin", list_hea
     a quarter of it.  Returns (bundle path, layout used, export seconds); a
     row's `spline_tol` is passed to export_lammps, and `info` (a dict), when
     given, gets "splined" (`splined_meta` of the bundle)."""
-    keep = {k: row[k] for k in ("name", "system", "path", "elements", "spline_tol", "procs", "device_memory")
-            if k in row}
+    keep = {k: row[k] for k in ("name", "system", "path", "elements", "spline_tol", "procs", "device_memory",
+                                "aa_dag") if k in row}
     cmd = [sys.executable, str(pathlib.Path(__file__).resolve()), "--export", json.dumps(keep),
            str(len(at)), dtype, str(workdir), layout, slots, str(list_headroom)]
     bench = str(pathlib.Path(__file__).resolve().parents[1])     # so the child imports scaling
@@ -238,6 +261,23 @@ def export_bundle(row, at, dtype, workdir, layout="auto", slots="skin", list_hea
     return out["bundle"], out["layout"], out["compile_s"]
 
 
+
+
+def bundle_env(bundle, base=None):
+    """The environment LAMMPS runs a bundle in: `base` (os.environ) plus, for a cueq bundle (its `ace_jax.cueq`
+    record), the replay sidecar, NVRTC cache, FFI handler and libraries that ace_jax.eval.cueq.run_env names
+    (LD_LIBRARY_PATH prepended); None for any other bundle (LAMMPS inherits the environment)."""
+    try:
+        rec = json.loads(pathlib.Path(bundle).read_text()).get("ace_jax", {}).get("cueq")
+    except (OSError, ValueError):
+        return None
+    if not rec:
+        return None
+    from ace_jax.eval.cueq import run_env
+    base = dict(os.environ if base is None else base)
+    e = run_env(rec, bundle)
+    libs = [x for x in (e.pop("LD_LIBRARY_PATH"), base.get("LD_LIBRARY_PATH")) if x]
+    return {**base, **e, "LD_LIBRARY_PATH": ":".join(libs)}
 
 
 STEP_BUDGET_S = 60.0          # target wall time of the timed segment
@@ -341,6 +381,12 @@ def run_case(row, n_atoms, dtype, device, lmp, ranks, workdir, pjrt=None, prev=N
         model = row.get("symmetrix") if style == "mace" else row.get("symmetrix_xl") if style in XL else row["path"]
         return _run_lammps(row, style, model, data, work, n_atoms, dtype, device, lmp, ranks,
                            pjrt, steps, warmup, {}, **kw)
+    if row.get("bundle"):                       # a prebuilt bundle (accuracy_cost's cueq line): run it as is
+        aj = json.loads(pathlib.Path(row["bundle"]).read_text())["ace_jax"]
+        extra = {"layout": aj["layout"], "spline_tol": row.get("spline_tol", "auto"), "splined": splined_meta(aj),
+                 "bundle": row["bundle"], "block_rows": aj.get("block_rows")}
+        return _run_lammps(row, style, row["bundle"], data, work, n_atoms, dtype, device, lmp, ranks, pjrt,
+                           steps, warmup, extra, **kw)
     # ace-jax: the export's auto layout judges dense against the exporting
     # process's budget, not LAMMPS's (PJRT pool + Kokkos + ghosts): a dense
     # bundle that runs out of memory is retried sparse
@@ -419,7 +465,7 @@ def kokkos_args(style, device, threads=1):
     lammps-jax, whose pair style is jax/kk only, and for a KOKKOS style run with
     threads > 1 (ML-PACE's pace/kk); plain MPI otherwise."""
     if device != "gpu":
-        if style == "acejax" or style in XL or (threads > 1 and style in KOKKOS):
+        if style in ("acejax", "grace", "grace-2l") or style in XL or (threads > 1 and style in KOKKOS):   # grace: /kk only
             return ["-k", "on", "t", str(threads), "-sf", "kk", "-pk", "kokkos", *KOKKOS[style].split()]
         return []
     if style not in KOKKOS:
@@ -448,6 +494,11 @@ def _run_lammps(row, style, model, data, work, n_atoms, dtype, device, lmp, rank
         out.update(threads=threads, proc_grid=list(procs) if procs else None, kokkos=bool(kk))   # parse_log owns "procs"
     if style == "acejax" and os.environ.get("ACEJAX_EXPORT_AA_DAG"):
         out["aa_dag"] = os.environ["ACEJAX_EXPORT_AA_DAG"]
+    cueq = bundle_env(model, env) if style == "acejax" else None
+    if cueq:                                     # its replay sidecar, cache and libraries (not the env-var hooks)
+        env, out["aa_dag"] = cueq, "cueq"
+    if style == "acejax" and os.environ.get("ACEJAX_EXPORT_FFI"):
+        out["ffi"] = True
     if cmd[0] == "mpirun" and mpirun_args():
         out["mpirun_args"] = mpirun_args()
     (work / "log.lammps").unlink(missing_ok=True)

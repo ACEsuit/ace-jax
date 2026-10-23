@@ -29,7 +29,7 @@ METRICS = ROOT / "bench/accuracy_cost/results/metrics.jsonl"
 TARGET_QOI = 0.5                  # geometric-mean |error|/tolerance: the typical QoI within half its tolerance
 # validated (dataviz validate_palette --pairs all, light): red/green CVD 7.2 -> marker shapes + direct labels
 FAM = {  # family: (label, colour, marker, linestyle, filled, qoi model name pattern)
-    "ace":        ("linear ACE",               "#2a78d6", "o", "-",  True,  "ACE_{s}"),
+    "ace":        ("linear ACE, ace-jax",      "#2a78d6", "o", "-",  True,  "ACE_{s}"),   # costs: the XLA bundle
     "ace_E10":    ("linear ACE, pacemaker's E:F balance", "#2a78d6", "o", "--", False, "ACEE10_{s}"),
     # the same linear ACE fits run by ML-PACE (write_yace, Tabulated radials: exact): linear ACE's colour
     # (same models), the code told apart by marker and line; its accuracy is ACE's, its cost its own (COST_NAME)
@@ -39,6 +39,13 @@ FAM = {  # family: (label, colour, marker, linestyle, filled, qoi model name pat
     "ace_tabfork": ("linear ACE, run by patched ML-PACE", "#2a78d6", "*", "--", False, "ACE_{s}"),
     # and by ACEpotentials.jl's LAMMPS export (bench/accuracy_cost/build_trim.py: the juliac --trim library, exact)
     "ace_trim":   ("linear ACE, run by ACEpotentials.jl", "#2a78d6", "X", "-.", True, "ACE_{s}"),
+    # and by ace-jax's C++ FFI kernel in the lammps-jax bundle (ace_jax.eval.ffi; CPU only): the speed-up over the
+    # XLA program of the linear ACE line itself
+    "ace_ffi":    ("linear ACE, ace-jax C++ kernel (FFI)", "#2a78d6", "<", "--", True, "ACE_{s}"),
+    # and by ace-jax with NVIDIA cuequivariance as the product basis (export_lammps(aa_dag="cueq"); A100 only): the
+    # same blue (no new colour to validate), a right triangle; its dash-dot is the CPU-only trim line's, never on
+    # the same axes, and no other blue line of the A100 row has it
+    "ace_cueq":   ("linear ACE, ace-jax + cueq", "#2a78d6", ">", "-.", True, "ACE_{s}"),
     # the order-4 ladder in reduced precision (docs/dev/fp32-results.md): the same fits, their own cost --
     # ace-jax float32 bundles, and patched pace/kk (PACE_KK_RHOW=3) in a KOKKOS_PREC=mixed LAMMPS.  Each pairs with its float64 line:
     # its marker and line style in a lighter blue (the wL ramp's light step; the wL ladder is not in this figure)
@@ -75,7 +82,19 @@ FAM = {  # family: (label, colour, marker, linestyle, filled, qoi model name pat
     "ace_wl_2":    ("linear ACE, wL 2.0",          "#184f95", "o", "-", False, "ACEwl_{s}"),
     "ace_wl_2.5":  ("linear ACE, wL 2.5",          "#0d366b", "o", "-", False, "ACEwl_{s}"),
     "ace_wl_o5":   ("linear ACE, order 5, wL 2.0", "#184f95", "h", ":", False, "ACEwl_{s}"),
+    # GRACE trained from scratch by gracemaker (bench/accuracy_cost/fit_grace.py): three seeds per size, plotted as
+    # the seed mean with a min-max bar (SEEDED); sienna, its own marker; FS open and dashed
+    "grace":      ("GRACE-1L (gracemaker)",    "#a0522d", "h", "-",  True,  "GRACE_{s}"),
+    "grace_fs":   ("GRACE-FS (gracemaker)",    "#a0522d", "h", "--", False, "GRACE_{s}"),
+    # GRACE-2L (two message-passing layers): GRACE-1L's sienna, as MACE's L=0 / L=1 share a colour -- no new hue
+    # passes (dataviz validate_palette --pairs all, light: every brown/orange tried is within CVD dE 2-5 of GAP's
+    # green or ACE-lr's red), so it is told apart by its octagon marker and dash-dot line
+    "grace_2l":   ("GRACE-2L (gracemaker)",    "#a0522d", "8", "-.", True,  "GRACE_{s}"),
 }
+# families fitted with several seeds (sizes "<size>_s<k>"): one point per size, the mean over seeds, with the
+# min-max spread as an error bar; the per-seed rows stay in metrics.jsonl.  SEED_EXCLUDE: checks, not ladder points
+SEEDED = ("grace", "grace_fs", "grace_2l")
+SEED_EXCLUDE = ("c32l4_long", "2l_small_long")   # the 150k-update training-length checks
 WL_FAMILIES = ("ace", "ace_wl_1", "ace_wl_1.75", "ace_wl_2", "ace_wl_2.5", "ace_wl_o5", "ace_lr", "pace")
 WL_RECOLOUR = {"ace": "#3987e5"}                 # the ramp's wL 1.5 step (the categorical blue is too near 1.75)
 
@@ -88,6 +107,10 @@ def family_of(r):
         return ("mace_xl_" if r.get("code", "").startswith("mace-xl") else "mace_") + size[-2:]
     if fam == "ace" and r.get("code") == "acepotentials-trim":
         return "ace_trim"
+    if fam == "ace" and r.get("code") == "acejax-ace" and r.get("aa_dag") == "cueq":
+        return "ace_cueq"
+    if fam == "ace" and r.get("code") == "acejax-ace" and r.get("ffi"):     # a timing row of an FFI bundle
+        return "ace_ffi"
     if fam == "ace" and r.get("code") == "acejax-ace" and r.get("dtype") == "float32":
         return "ace_f32"
     if fam == "ace_tab" and r.get("code") == "mlpace-mixed":
@@ -104,7 +127,9 @@ INK, MUTED, GRID = "#0b0b0b", "#52514e", "#e6e5e1"
 COST_AS = {"ace_E10": "ace"}
 # a second code for the same fits: its cost under its own name (make_cost.py writes it there)
 COST_NAME = {"mace_xl_L0": "MACExl_{s}", "mace_xl_L1": "MACExl_{s}", "ace_tab": "ACEtab_{s}", "ace_trim": "ACEtrim_{s}",
-             "ace_tabfork": "ACEtabfork_{s}", "ace_f32": "ACEf32_{s}", "ace_tab_mixed": "ACEtabmixed_{s}"}
+             "ace_ffi": "ACEffi_{s}",
+             "ace_tabfork": "ACEtabfork_{s}", "ace_f32": "ACEf32_{s}", "ace_tab_mixed": "ACEtabmixed_{s}",
+             "ace_cueq": "ACEcueq_{s}"}
 REDUCED = ("ace_f32", "ace_tab_mixed")              # reduced-precision lines: make_cost --dtype keeps them
 # timing files of ML-PACE with the proposed additions (sulis-{cpu,gpu}-pacefork.sbatch): their
 # mlpace rows are the ace_tabfork line, not stock ML-PACE's
@@ -115,6 +140,37 @@ TAB_SIZES = ("o4d12", "o4d14", "o4d16", "o4d20")    # the ace sizes converted (s
 def cost_name(fam, size):
     fam = COST_AS.get(fam, fam)
     return COST_NAME.get(fam, FAM[fam][5]).format(s=size)
+
+
+def seed_split(size):
+    """("c16l3", 0) for "c16l3_s0"; (size, None) without a seed suffix."""
+    import re
+    m = re.fullmatch(r"(.+)_s(\d+)", size)
+    return (m.group(1), int(m.group(2))) if m else (size, None)
+
+
+def seed_average(pts):
+    """Per-seed points of one family -> one point per size: mean rmse_F / rmse_E / qoi (qoi only when every seed
+    has every QoI) and their min-max (`*_lo`, `*_hi`), n_seeds; x is the seed-0 cost (all seeds share the
+    architecture, so the cost) or the parameter count."""
+    groups = {}
+    for q in pts:
+        base, k = seed_split(q["size"])
+        if base in SEED_EXCLUDE:
+            continue
+        groups.setdefault(base, []).append(q)
+    out = []
+    for base, qs in groups.items():
+        p = {"name": qs[0]["name"].replace(qs[0]["size"], base), "size": base, "n": qs[0]["n"], "n_seeds": len(qs),
+             "x": next((q["x"] for q in qs if q["x"] is not None), None), "n_qoi": min(q["n_qoi"] for q in qs)}
+        for key in ("rmse_F", "rmse_E", "qoi"):
+            v = [q[key] for q in qs]
+            if any(x is None for x in v):
+                p[key] = None
+                continue
+            p[key], p[key + "_lo"], p[key + "_hi"] = float(np.mean(v)), float(min(v)), float(max(v))
+        out.append(p)
+    return out
 SKIP = set()                                     # families left out of this figure (main: the wL ladder)
 
 
@@ -150,7 +206,9 @@ def load_rows():
             + [r | {"family": "ace_tab"} for r in rows if r["family"] == "ace" and r["size"] in TAB_SIZES]
             + [r | {"family": f} for r in rows if r["family"] == "ace" and r["size"] in TAB_SIZES for f in REDUCED]
             + [r | {"family": "ace_tabfork"} for r in rows if r["family"] == "ace" and r["size"] in TAB_SIZES]
-            + [r | {"family": "ace_trim"} for r in rows if r["family"] == "ace"])
+            + [r | {"family": "ace_trim"} for r in rows if r["family"] == "ace"]
+            + [r | {"family": "ace_ffi"} for r in rows if r["family"] == "ace"]
+            + [r | {"family": "ace_cueq"} for r in rows if r["family"] == "ace"])
 
 
 def collect(cost):
@@ -168,6 +226,9 @@ def collect(cost):
         out.setdefault(fam, []).append({"name": name, "size": r["size"], "x": x, "n": r.get("n_params") or 0, "rmse_F": r["rmse_F"],
                                         "rmse_E": r["rmse_E"], "qoi": sc["gm_norm"] if sc["n_qoi"] == sc["n_total"] else None,
                                         "n_qoi": sc["n_qoi"]})
+    for fam in SEEDED:
+        if fam in out:
+            out[fam] = seed_average(out[fam])
     for fam in out:
         out[fam].sort(key=lambda p: p["n"])           # ladder order: a line through sizes, even where cost is not monotone
     out = {f: out[f] for f in FAM if f in out}          # fixed family order: legend and colours never reorder
@@ -195,6 +256,9 @@ def series(ax, data, key):
         x, y = [q["x"] for q in p], [q[key] for q in p]
         ax.plot(x, y, ls=ls, lw=2, color=col, marker=mk, ms=8, mfc=col if filled else "white", mec=col,
                 mew=1.5, label=lab, zorder=3)
+        if all(key + "_lo" in q for q in p):           # SEEDED: the min-max over seeds
+            ax.errorbar(x, y, yerr=[[q[key] - q[key + "_lo"] for q in p], [q[key + "_hi"] - q[key] for q in p]],
+                        fmt="none", ecolor=col, elinewidth=1.2, capsize=3, zorder=3)
 
 
 def flag(ax, data, codes, key):
@@ -241,6 +305,26 @@ def dag_dots(ax, data, codes, key):
     return drawn
 
 
+def cheapest(data, ref):
+    """Per family (in data's order): (family, x of its cheapest point reaching the target or nan, note) -- the
+    note is that point's size, or why there is none.  Shared by the PNG's panel C and the web figure."""
+    out = []
+    for fam, pts in data.items():
+        if fam in REDUCED and all(q["x"] is None for q in pts):
+            continue                                  # a reduced-precision line is a cost row only: no bar until timed
+        ok = [q for q in pts if q["x"] is not None and q["qoi"] is not None and q["rmse_F"] <= ref["rmse_F"]
+              and q["qoi"] <= TARGET_QOI]
+        if ok:
+            best = min(ok, key=lambda q: q["x"]); out.append((fam, best["x"], best["size"]))
+        elif all(q["x"] is None for q in pts):
+            out.append((fam, np.nan, "not timed here"))
+        elif any(q["qoi"] is None for q in pts):
+            out.append((fam, np.nan, "QoIs pending"))
+        else:
+            out.append((fam, np.nan, "not reached in its ladder"))
+    return out
+
+
 def draw_row(axes, data, ref, xlabel, codes, letters, what):
     """One row of the figure: force error, QoI error and the cheapest model reaching the target, all against
     one x (a cost, or the fitted-parameter count)."""
@@ -266,21 +350,9 @@ def draw_row(axes, data, ref, xlabel, codes, letters, what):
 
     ax = axes[2]
     allx = [q["x"] for pts in data.values() for q in pts if q["x"]]
-    names, vals, cols, notes = [], [], [], []
-    for fam, pts in data.items():
-        if fam in REDUCED and all(q["x"] is None for q in pts):
-            continue                                  # a reduced-precision line is a cost row only: no bar until timed
-        ok = [q for q in pts if q["x"] is not None and q["qoi"] is not None and q["rmse_F"] <= ref["rmse_F"]
-              and q["qoi"] <= TARGET_QOI]
-        names.append(FAM[fam][0]); cols.append(FAM[fam][1])
-        if ok:
-            best = min(ok, key=lambda q: q["x"]); vals.append(best["x"]); notes.append(best["size"])
-        elif all(q["x"] is None for q in pts):
-            vals.append(np.nan); notes.append("not timed here")
-        elif any(q["qoi"] is None for q in pts):
-            vals.append(np.nan); notes.append("QoIs pending")
-        else:
-            vals.append(np.nan); notes.append("not reached in its ladder")
+    bars = cheapest(data, ref)
+    names, vals, notes = [FAM[f][0] for f, _, _ in bars], [v for _, v, _ in bars], [n for _, _, n in bars]
+    cols = [FAM[f][1] for f, _, _ in bars]
     y = np.arange(len(names))
     lo, hi = min(allx) / 2, max(allx) * 2
     style(ax, xlabel.split("  (")[0], ""); ax.grid(False, axis="y"); ax.set_xlim(lo, hi)
@@ -313,11 +385,21 @@ def main():
     ap.add_argument("--no-note", action="store_true",
                     help="no footnote (the docs page states the method in its text)")
     ap.add_argument("--wl", action="store_true", help="the wL-ladder figure (WL_FAMILIES, recoloured) instead of the main one")
+    ap.add_argument("--seed-table", action="store_true", help="print the SEEDED families' per-size mean and min-max, then exit")
     a = ap.parse_args()
+    if a.seed_table:
+        data, ref = collect(None)
+        print(f"GAP-18: rmse_F {ref['rmse_F']:.4f}  QoI {ref['qoi']:.2f}")
+        for fam in SEEDED:
+            for q in data.get(fam, []):
+                f = lambda k, fmt, q=q: "-" if q.get(k) is None else f"{q[k]:{fmt}} [{q[k + '_lo']:{fmt}}, {q[k + '_hi']:{fmt}}]"
+                print(f"{fam}/{q['size']:10s} n {q['n']:7d} seeds {q['n_seeds']}  F {f('rmse_F', '.4f')}  "
+                      f"E {f('rmse_E', '.4f')}  QoI {f('qoi', '.2f')}")
+        return
     if a.wl:
         SKIP.update(f for f in FAM if f not in WL_FAMILIES)
         for f, c in WL_RECOLOUR.items():
-            FAM[f] = (FAM[f][0].replace("linear ACE", "linear ACE, wL 1.5"),) + (c,) + FAM[f][2:]
+            FAM[f] = (FAM[f][0].replace("linear ACE, ace-jax", "linear ACE, wL 1.5"),) + (c,) + FAM[f][2:]
     else:
         SKIP.update(f for f in FAM if f.startswith("ace_wl_"))
     rows = [(lab, json.load(open(c)), json.load(open(k[0])) if k else {}, "cost") for lab, c, *k in a.row]
@@ -342,11 +424,15 @@ def main():
         handles[DAG_LABEL] = (Line2D([], [], ls="none", marker="o", ms=8, color=MUTED),
                               Line2D([], [], ls="none", marker="o", ms=3.5, color="white", mec="none"))
         order.append(DAG_LABEL)
-    ncol = min(6, -(-len(order) // 3))                    # at most 6 columns fit the width; more rows instead
-    legend_rows = -(-len(order) // ncol)
     from matplotlib.legend_handler import HandlerTuple
-    fig.legend([handles[l] for l in order], order, loc="upper center", ncol=ncol, frameon=False,
-               fontsize=9, bbox_to_anchor=(0.5, 1.0), handler_map={tuple: HandlerTuple(ndivide=1)})
+    renderer = fig.canvas.get_renderer()
+    for ncol in range(min(6, -(-len(order) // 3)), 0, -1):   # the most columns whose legend fits the figure's width:
+        leg = fig.legend([handles[l] for l in order], order, loc="upper center", ncol=ncol, frameon=False,
+                         fontsize=9, bbox_to_anchor=(0.5, 1.0), handler_map={tuple: HandlerTuple(ndivide=1)})
+        if ncol == 1 or leg.get_window_extent(renderer).width <= 0.98 * fig.bbox.width:   # a fixed 6 clipped
+            break                                                                          # long labels
+        leg.remove()
+    legend_rows = -(-len(order) // ncol)
     cpu_note = ("CPU row: a 128-core EPYC 7742 node, all cores, ranks bound to cores; each model's fastest layout\n"
                 "(128x1 or 64x2 MPI ranks x threads; GAP: 32 ranks).\n"
                 "ace-jax runs in LAMMPS (lammps-jax; aa_dag='auto': the DAG product basis, centre dot, from 4,000 chain-form multiplies per site; the chain form below); MACE runs in LAMMPS via Symmetrix and, separately, Symmetrix-XL.\n"
@@ -356,14 +442,18 @@ def main():
                 "pace/kk with prototype ComputeRho/ComputeWeights kernels (pace_ref/fast) on the GPU.\n"
                 "Linear ACE run by ACEpotentials.jl (CPU only): each fit as an ACEpotentials model, exported and compiled "
                 "with juliac --trim (ACEpotentials PR 309, v0.10.2), in LAMMPS via its pair_style ace plugin.\n"
+                "ace-jax C++ kernel (CPU only): the same bundles with the XLA program replaced by one XLA FFI call "
+                "(ace_jax.eval.ffi; radials tabulated in r), 128x1.\n"
                 "NEP: trained by GPUMD; on the CPU LAMMPS pair_style nep (NEP_CPU, float64); on the GPU GPUMD's own MD code, mixed precision (labelled).\n"
+                + ("ace-jax + cueq (A100 only): the same fits in lammps-jax bundles with NVIDIA cuequivariance as the product basis "
+                   "(aa_dag='cueq'; its kernels replayed in LAMMPS from the shipped NVRTC cache).\n" if "ace_cueq" not in SKIP else "")
                 if any("CPU" in r[0] for r in rows) else "")
     bottom = 0
     if not a.no_note:
         note = (cpu_note + "QoI error clips each QoI to [0.05, 10] x tolerance; compressed hcp is left out (extrapolation, "
                 "outside the training data); only models with every QoI computed.\n"
                 "Cost: the fastest parity-checked code per model, float64 only except NEP on the GPU (one-layer MACE and, on the GPU, Symmetrix MACE c64L1 have "
-                "float32 timings only and are left out of the cost rows). Single fits per point.\n"
+                "float32 timings only and are left out of the cost rows). Single fits per point, except GRACE: the mean of three seeds, bars min-max.\n"
                 "Light blue: the same o4 linear ACE fits in reduced precision -- ace-jax float32 lammps-jax bundles (where timed), and "
                 "patched ML-PACE pace/kk in a KOKKOS_PREC=mixed LAMMPS (accuracy is the float64 fit's).")
         fig.text(0.5, 0.003, note, ha="center", fontsize=8.5, color=MUTED)

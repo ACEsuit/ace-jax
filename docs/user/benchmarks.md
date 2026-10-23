@@ -16,7 +16,10 @@ training and 248 for testing).
 
 - **Model families.** Linear ACE (ace-jax), ACE with learned radials,
   PACE-shaped ACE, PACE (pacemaker), MACE with L = 0 and L = 1, NEP
-  (trained with GPUMD) and GAP refits. Each family has a ladder of model sizes. Each point is one fit.
+  (trained with GPUMD), GAP refits, and GRACE-1L, GRACE-2L and GRACE-FS
+  (trained with gracemaker). Each family has a ladder of model sizes. Each
+  point is one fit. For GRACE, each point is the mean of three fits, and
+  the bars show the range.
 - **Force error.** The root-mean-square force error on the test set.
 - **QoI error.** 21 silicon properties are calculated with each model and
   compared with DFT: elastic constants, energies of other phases, point
@@ -28,26 +31,51 @@ training and 248 for testing).
 - **Cost.** Microseconds per atom per MD step, in LAMMPS, in float64. Each
   model uses the fastest code that agrees with the reference evaluation.
 
+<div class="plotly-figure" markdown>
+
 ![Accuracy against cost on silicon. Rows: A100 GPU, 128-core CPU node, number of fitted parameters. Columns: test force error, QoI error against DFT, and the cheapest model of each family that reaches the target](assets/benchmarks/si_accuracy_cost.png)
 
-The panels on the right (C, F, I) show the cheapest model of each family
-that reaches the target. Panels G to I compare the number of fitted
-parameters, not the cost.
+</div>
+
+The figure shows the force error and the QoI error of each family. The
+lowest row compares the number of fitted parameters, not the cost. At
+first, the figure shows only the main families. To change the families
+that the figure shows:
+
+1. Click a family in the legend to show or hide it in all panels.
+2. Double-click a family to show only that family.
+3. Click a button above the legend to show a group of families.
+4. Put the pointer on a point to show its model, its values and the code
+   that was timed.
+
+The table gives the cheapest model of each family that reaches the
+target.
 
 At the target, in microseconds per atom-step:
 
 | model | A100 GPU | CPU node (128 cores) |
 |---|---|---|
-| linear ACE o4d20, ace-jax with lammps-jax | 3.12 | 50.5 |
+| linear ACE o4d20, ace-jax with lammps-jax (XLA program) | 3.12 | 50.5 |
+| linear ACE o4d20, ace-jax with lammps-jax and cuequivariance | 1.61 | – |
+| linear ACE o4d20, ace-jax C++ kernel with lammps-jax | – | 3.29 |
 | linear ACE o4d20, ML-PACE | 4.13 | 5.31 |
 | linear ACE o4d20, ACEpotentials.jl | – | 10.8 |
 | MACE c16L0, Symmetrix | 1.93 | 2.36 |
 | MACE c16L0, Symmetrix-XL | 1.23 | 2.19 |
 | MACE c16L1, Symmetrix | 5.36 | 8.58 |
 | MACE c16L1, Symmetrix-XL | 1.47 | 2.87 |
+| GRACE-1L c64l4, `grace/1l/kk` | 11.65 | 59.1 |
+| GRACE-2L 2l_c16, `grace/2l/kk` | 8.96 | 24.0 |
 
 In these ladders, PACE (pacemaker), ACE with learned radials, PACE-shaped
-ACE, NEP and the GAP refits do not reach the target. PACE reaches the force
+ACE, NEP, the GAP refits and GRACE-FS do not reach the target. GRACE-1L
+reaches the target only at its largest size (c64l4, 445,793 parameters).
+At that size, its cost is approximately 4 to 27 times the cost of linear
+ACE o4d20 or MACE c16L0 in their fastest codes. GRACE-2L has two
+message-passing layers. It reaches the target at all of its sizes. Its
+smallest size (2l_c16, 98,882 parameters) costs approximately 4 to 11 times
+the cost of linear ACE o4d20 or MACE c16L0 in their fastest codes. GRACE-2L
+2l_small has a QoI error of 0.31, the same as the largest MACE L = 1 models. PACE reaches the force
 error of GAP-18 with fewer parameters than linear ACE, but not the QoI target.
 NEP has the lowest cost on the A100 (0.04 to 0.22 µs/atom-step), in mixed
 precision. On the CPU, NEP costs 0.55 to 3.0 µs/atom-step. PACE reaches the
@@ -60,8 +88,17 @@ On the CPU, the ACEpotentials.jl compiled library is the fastest code for
 linear ACE up to o4d14. It has the same speed as ML-PACE at o4d16. At
 o4d20 it is 2 times slower than ML-PACE.
 
+On the CPU, the ace-jax [C++ kernel](howto/lammps.md#cpu-kernel) is 10 to 23
+times faster than the compiled JAX program on the same node. At o4d20 it is
+1.6 times faster than ML-PACE (3.29 against 5.31 µs/atom-step).
+
 On the A100, ace-jax runs linear ACE o4d20 faster than ML-PACE (3.12
-against 4.13 µs/atom-step).
+against 4.13 µs/atom-step). With the cuequivariance product basis, ace-jax
+runs the same model at 1.61 µs/atom-step. For o4d20, this is the fastest
+linear ACE code on the A100. For o4d12 to o4d16, patched ML-PACE is faster.
+From o3d12 to o4d20, cuequivariance is 1.2 to 1.9 times
+faster than the default product basis. For o3d8 and o3d10, the two forms
+have approximately the same cost.
 
 ### How the cost was measured
 
@@ -73,7 +110,13 @@ against 4.13 µs/atom-step).
 - **ace-jax** runs in LAMMPS with lammps-jax, on the GPU and on the CPU.
   ace-jax selects the form of the product basis for each model. Models with
   4,000 or more chain-form multiplications per atom use the recursive (DAG)
-  form. The figure marks these points with a dot.
+  form. The printed figure marks these points with a dot. In the
+  interactive figure, the code line of these points shows `dag:greedy`.
+- **ace-jax with cuequivariance.** The same linear ACE fits run in
+  lammps-jax bundles with `aa_dag="cueq"`, on the A100 only
+  ([cuequivariance on the GPU](howto/lammps.md#cuequivariance-on-the-gpu)).
+  Each model is exported one time, for 32,768 atoms. The check and the
+  timed runs use that bundle.
 - **Linear ACE, run by ML-PACE.** The same linear ACE fits are written as
   `.yace` files with tabulated radial functions
   ([Write an ACE model as a .yace file](howto/pace.md)). They run in
@@ -83,11 +126,23 @@ against 4.13 µs/atom-step).
   library with `juliac --trim` and runs in LAMMPS with the ACEpotentials.jl
   `pair_style ace` plugin. These results are for the CPU only, with 128 MPI
   ranks.
+- **ace-jax C++ kernel.** The same ace-jax bundles, with the
+  [C++ kernel](howto/lammps.md#cpu-kernel) in place of the compiled JAX
+  program. These results are for the CPU only, with 128 MPI ranks. The
+  kernel uses one thread for each rank.
 - **ML-PACE** on the GPU is the LAMMPS development version with the 2026
   `pace/kk` GPU update.
 - **MACE** runs in LAMMPS with Symmetrix and, separately, with
   Symmetrix-XL.
 - **GAP** runs in LAMMPS with QUIP, on the CPU only.
+- **GRACE** runs in LAMMPS with the native Kokkos styles of gracemaker's
+  LAMMPS version, in float64: `grace/1l/kk` (GPU) and `grace/1l/cpu/kk`
+  (CPU) for GRACE-1L, `grace/2l/kk` and `grace/2l/cpu/kk` for GRACE-2L,
+  and `grace/fs/kk` and `grace/fs` for GRACE-FS. On the CPU, each GRACE
+  model uses its faster layout: 128 MPI ranks, or 64 MPI ranks with 2
+  threads. On the GPU, GRACE-2L 2l_medium uses a chunk size of 1,024
+  atoms, because the default chunk size uses more than the 40 GB of the
+  A100.
 - **NEP** is trained with GPUMD. On the CPU, it runs in LAMMPS with
   `pair_style nep` (NEP_CPU, float64). On the GPU, it runs in GPUMD. GPUMD
   uses mixed precision, and the figure labels these points.

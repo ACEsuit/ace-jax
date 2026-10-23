@@ -12,7 +12,7 @@ the GPU. ace-jax writes the program and its metadata into one JSON
        CPU PJRT plugin (Linux x86_64 only).
     2. Build its LAMMPS plugin at the same version. Use the lammps-jax instructions.
 
-    The ace-jax CI tests the export with lammps-jax 0.2.0. The pair style runs
+    The ace-jax CI tests the export with lammps-jax 0.2.1. The pair style runs
     on a GPU (KOKKOS with CUDA). It also runs on CPUs (KOKKOS with OpenMP) if
     you export with `platform="cpu"`. The plugin refuses a bundle that was
     exported for the other platform.
@@ -52,6 +52,8 @@ aj export --model fit/model.npz --out si_bundle.json --structure start.xyz \
 
 For the CPU backend, add `--platform cpu`. Add `--procs px,py,pz` to size the
 buffers for one MPI rank. Use the same grid in LAMMPS (`processors px py pz`).
+For a linear ACE model on CPUs, also add `--ffi`. This uses a C++ kernel
+in place of the XLA program. See [CPU kernel](#cpu-kernel).
 
  `export_lammps` returns a dictionary, and also writes it in the
 bundle. Its `ace_jax` key records what was exported: the layout, the
@@ -93,6 +95,61 @@ five-component alloy, this is 1.2 to 1.4 times faster.
     Use `slots="cutoff"` only for stable MD of a fitted model, where the
     coordination stays near the coordination of the initial structure.
 
+## CPU kernel
+
+On CPUs, a C++ kernel can replace the compiled JAX program. It is for
+linear ACE models. It runs one MPI rank per core, with one thread per rank.
+The export compiles the kernel the first time, and keeps it in a cache.
+
+!!! warning "lammps-jax version"
+    The kernel needs the LAMMPS plugin of lammps-jax 0.2.1 or later. Earlier
+    plugins register custom calls for CUDA only, so LAMMPS cannot find the
+    kernel on the CPU. Build the plugin at the version of the Python package.
+
+!!! note "C++ compiler"
+    The kernel needs a C++17 compiler (`$CXX`, `c++`, `g++` or `clang++`).
+    The LAMMPS plugin build also needs one. Without a compiler, the export
+    stops with an error. The XLA program does not need a compiler.
+
+1. Export with `--ffi` and `--platform cpu`:
+
+    ```bash
+    aj export --model fit/model.npz --out si_bundle.json --structure start.xyz \
+        --platform cpu --procs 8,4,4 --ffi
+    ```
+
+    In Python, use `export_lammps(..., platform="cpu", ffi=True)`.
+
+2. Set the variable that the command prints. It gives LAMMPS the kernel library:
+
+    ```bash
+    export LAMMPS_JAX_FFI_HANDLERS="ace_jax_direct=<library>:AceDirect"
+    ```
+
+3. Run LAMMPS with `newton on`:
+
+    ```bash
+    mpirun -np 128 lmp -k on t 1 -sf kk -pk kokkos newton on neigh half -in in.lammps
+    ```
+
+The kernel needs a linear ACE model, float64 and the `matrix` layout. It
+tabulates the radial basis in r (`radial_table=True`). Energies agree with
+the calculator to approximately 1e-12 relative. Forces agree to 1.5e-8 of the
+largest force. The bundle records the kernel in `ace_jax.ffi`: the custom-call
+target, the library and the `LAMMPS_JAX_FFI_HANDLERS` value.
+
+The compiler flags are `-O3 -march=native` by default. They tune the kernel
+for the CPU of the machine that exports.
+
+!!! warning "Login nodes and compute nodes"
+    A kernel compiled with `-march=native` can fail on a different CPU type.
+    Export on a node of the same type as the LAMMPS run. Or give generic
+    flags, for example `--ffi-flags="-O3 -march=x86-64-v3"`.
+
+- The cache is `~/.cache/ace-jax/ffi`. Set `ACEJAX_FFI_CACHE` to use a different directory.
+- Set `ACEJAX_FFI_FLAGS` to change the default flags.
+- Use the same jax version as the lammps-jax CPU plugin.
+
 ## Layouts
 
 | Layout | What it does | When `"auto"` picks it |
@@ -126,6 +183,73 @@ The bundle records the block size as `ace_jax.block_rows`. It also records
 A LAMMPS plugin that is older than the lammps-jax Python package does not
 accept a `matrix` bundle. To correct this, build the plugin again at the
 version of the Python package, or export with `layout="dense"`.
+
+## cuequivariance on the GPU
+
+On a CUDA GPU, the product basis can run as NVIDIA cuequivariance kernels.
+This is an option. `aa_dag="auto"` never selects it.
+
+!!! warning
+    - The export of an o4d20 model takes approximately 10 to 30 minutes on an A100.
+    - Without the shipped kernel cache, the first LAMMPS start compiles the kernels. A cold start takes tens of minutes.
+    - The cache works only on the same GPU architecture as the export GPU.
+    - This form supports models with one species.
+    - This form also supports species-embedded (TrACE) models.
+    - This form does not support categorical models with more than one species.
+
+Do these steps:
+
+1. Install the extra on Linux with CUDA 12: `pip install "ace-jax[cueq]"`.
+2. Get a lammps-jax checkout. Build the replay shim in its `contrib/ffi-replay` directory.
+   Use the gcc command from the README of that directory. It needs libffi.
+3. If your system has `libffi.so.6`, replace `-l:libffi.so.8` with `-lffi` in the command.
+4. Set `LAMMPS_JAX_CONTRIB` to the `contrib/ffi-replay` directory for the export.
+5. Export the bundle on a machine with a CUDA GPU:
+
+    ```bash
+    aj export --model fit/model.npz --out si_bundle.json --structure start.xyz \
+        --type-elements Si --aa-dag cueq
+    ```
+
+6. Copy `si_bundle.json`, `si_bundle.ffi-replay` and `si_bundle.cueq-cache/` to the LAMMPS machine.
+   Keep the three items in one directory.
+7. On the LAMMPS machine, install the extra: `pip install "ace-jax[cueq]"`.
+8. On the LAMMPS machine, build the replay shim as in steps 2 and 3.
+9. On the LAMMPS machine, set `LAMMPS_JAX_CONTRIB` to its `contrib/ffi-replay` directory.
+10. On the LAMMPS machine, print the run environment:
+
+    ```bash
+    aj export --print-env si_bundle.json
+    ```
+
+11. Set the printed lines in the shell that runs LAMMPS.
+12. Run LAMMPS as before.
+
+If LAMMPS runs on the export machine, use the lines that the export printed.
+Steps 6 to 10 are then not necessary.
+
+The bundle records the replay file and the cache directory relative to the bundle, as `ace_jax.cueq`.
+The `--print-env` option finds them next to the bundle on the machine where you run it.
+It also finds the cuequivariance libraries of the Python installation on that machine.
+It names the shim in `LAMMPS_JAX_CONTRIB` of that machine.
+If `LAMMPS_JAX_CONTRIB` is not set there, the lines name the shim of the export machine.
+
+The printed lines set `LAMMPS_JAX_FFI_HANDLERS`, `FFI_REPLAY_FILE`, `FFI_REPLAY_LIB`
+and `CUEQUIVARIANCE_OPS_NVRTC_CACHE_DIR`. They also add the directories of the cuequivariance
+library and the pip CUDA libraries to `LD_LIBRARY_PATH`.
+
+The export refuses these cases:
+
+- The model is a `.yace` model, or any model that is not a linear ACE model.
+- The model has more than one species (categorical).
+- The platform is not `cuda`.
+- The export machine has no CUDA GPU: the JAX backend is not `gpu`.
+- cuequivariance or the recorder in `contrib/ffi-replay` is not available.
+- The Python call `export_lammps` has `lean=False`.
+
+Export one cueq bundle for each Python process. A second export in the same process raises an error.
+To use the form in Python, pass `aa_dag="cueq"` to `ACECalculator` on a CUDA GPU.
+A change of `calc.model`, a readout change included, rebuilds the plan and compiles the kernels again.
 
 ## Learned radials and precision
 
