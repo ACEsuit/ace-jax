@@ -460,6 +460,38 @@ class BatchNeighbours:
             return neighbor, False
         return self.allocate(positions), True
 
+    def update_fn(self, builder=None):
+        """A jittable `update(R, nl) -> (nl, rebuilt, overflow)` for use INSIDE a compiled loop: when any
+        live atom has moved skin / 2 the whole batch's lists are rebuilt at R (lax.cond; one batched build
+        call), else nl is returned unchanged.  The shapes are fixed, so a structure that now has more than K
+        neighbours is flagged in `overflow` (B,) and its list is clipped: check it after the loop, and on
+        overflow re-run from the last good state with `allocate` (which grows K).  `rebuilt`: a scalar
+        bool.  builder: "msn" (matscipy-neighbours' batched XLA FFI, when installed) or "jax" (all pairs
+        on the device); "host" cannot run inside a trace.  Loop at batch level and vmap only the step:
+        `nl, rebuilt, ov = update(state.position, nl); state = jax.vmap(apply)(state, neighbor=nl)`."""
+        import jax
+        import jax.numpy as jnp
+        builder = builder or ("msn" if _msn_batched() is not None else "jax")
+        if builder not in ("msn", "jax"):
+            raise ValueError(f"update_fn needs a traceable builder, 'msn' or 'jax', got {builder!r}")
+        if self.K is None:
+            raise ValueError("call allocate() first: it fixes K")
+        b, K, rc, half = self.batch, self.K, self.cutoff + self.skin, self.skin / 2
+        cell, pbc = self._cell, self._pbc
+        images, image_mask = jnp.asarray(b.images), jnp.asarray(b.image_mask)
+        park = float(self.calc.eval_model.pad_cutoff())
+
+        def update(R, nl):
+            def rebuild(_):
+                rij, idx, mask, count = neighbours(_wrap(R, cell, pbc), cell, images, image_mask, nl.live, rc, K,
+                                                   park, builder, pbc)
+                return nl._replace(position0=R, rij0=rij, idx=idx, mask=mask), count.max(-1) > K
+
+            rebuilt = (_moved(R, nl) > half).any()
+            nl, overflow = jax.lax.cond(rebuilt, rebuild, lambda _: (nl, jnp.zeros(R.shape[0], bool)), None)
+            return nl, rebuilt, overflow
+        return update
+
     def unpad(self, x):
         """Per-structure arrays of a padded (B, N, ...) result, in input order (a list)."""
         d = unpad(self.batch, x)
