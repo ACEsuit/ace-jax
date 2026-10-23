@@ -336,8 +336,9 @@ def energy_fn(model, cutoff):
     """`energy(R, neighbor)`: the energy of ONE structure, R (N, 3), neighbor its `BatchList` slice -- the
     form JAX-MD's `simulate.*` and `minimize.*` take (they pass `neighbor=` through), to jax.vmap over the
     batch.  Pairs beyond `cutoff` (the skin pairs) are masked; padding atoms carry no energy and no force.
-    Positions-only derivatives of `model`'s dense site energies (the JAX model: not the C++ kernel, whose
-    FFI call has no batching rule)."""
+    Positions-only derivatives of `model`'s dense site energies; the C++ kernel (`eval.ffi.KernelModel`)
+    works too: under vmap its rows are flattened into one threaded call.  Its derivatives stop at first
+    order in positions (no Hessians, no parameter gradients)."""
     import jax.numpy as jnp
 
     from .eval.edge_model import total_energy
@@ -615,11 +616,8 @@ class BatchCalculator:
 
     def energy_fn(self):
         """JAX-MD's energy function for one structure, `energy(R, neighbor=...)`, over this calculator's
-        evaluation model (`batch.energy_fn`); jax.vmap the integrator or optimizer over the batch.  The JAX
-        model only: ffi has no batching rule under vmap."""
-        if self.ffi is not None:
-            raise ValueError("energy_fn needs the JAX model (ffi=False): the C++ kernel's FFI call cannot "
-                             "run under jax.vmap")
+        evaluation model (`batch.energy_fn`); jax.vmap the integrator or optimizer over the batch.  With
+        ffi the C++ kernel evaluates it: one threaded call for the whole vmapped batch."""
         return energy_fn(self.eval_model, self.cutoff)
 
     def neighbour_lists(self, atoms_list, skin=1.0):
