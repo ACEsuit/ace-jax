@@ -193,8 +193,28 @@ if overflow.any():
     nl = nb.allocate(state.position)      # larger lists; run again from `state`
 ```
 
-The lists of the whole batch are made again in one call. The check costs
-approximately 1 to 9% of the step time.
+The lists of the whole batch are made again in one call. On a CPU, the check
+costs approximately 1 to 9% of the step time.
+
+On a GPU, `update_fn` makes the lists at every step and keeps the new lists
+only for the structures that moved. This keeps the loop on the GPU, but it
+adds a list build to each step. A check that decides on the host costs more
+on a GPU, because the GPU must stop at every step.
+
+To reduce the cost on a GPU, check the lists every 10 steps:
+
+```python
+def chunk(state, nl):
+    return jax.lax.fori_loop(0, 10, lambda i, s: jax.vmap(lambda x, n: apply(x, neighbor=n))(s, nl), state)
+
+def body(i, carry):
+    state, nl, overflow = carry
+    nl, rebuilt, ov = update(state.position, nl)
+    return chunk(state, nl), nl, overflow | ov
+```
+
+Use a skin that is large enough for 10 steps. An atom must not move more than
+`skin / 2` between two checks.
 
 !!! warning "Overflow inside the loop"
     Inside the loop, the size of the lists cannot change. If a structure gets

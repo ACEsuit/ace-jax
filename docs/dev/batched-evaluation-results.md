@@ -153,6 +153,28 @@ O(N) per atom, but measured at 0.4 µs/atom it does not account for it).
 `lax.cond`, inside the jitted loop): vmapped kernel NVE, 64 cells, µs per atom per step, lists fixed /
 checked every step: 8 atoms 1.58 / 1.73 (+9%), 64 atoms 1.19 / 1.20 (+1%).
 
+## Does the loop stay on the GPU?
+
+nsys (`/software/easybuild/software/CUDA/12.5.0/bin/nsys`, called by path: loading the CUDA module
+breaks JAX's pip CUDA libraries), device-to-host copies per jitted call of 200 NVE steps over 5 small
+cells (difference between 3 and 1 calls after the compile), lestrade RTX 4000 Ada shared with another job:
+
+| loop | D2H copies per call | ms per call |
+|---|--:|--:|
+| `vmap(fori_loop(apply))`, lists fixed | 0 | 62 |
+| batch-level loop, `update_fn` with `lax.cond`, msn / jax builder | 200 / 200 | 486 / 484 |
+| same, `branchless=True`, msn / jax | 0 / 0 | 145 / 100 |
+| `lax.cond` check every 10 steps (nested fori_loop) | 20 | 78 |
+
+- The vmapped step and both list builders stay on the device. The copy is XLA's: the GPU
+  backend reads a `lax.cond` predicate on the host (a small copy and a stream sync each time).
+  `--xla_gpu_enable_command_buffer=...,CONDITIONAL,WHILE` did not remove it (JAX 0.11.2).
+- A sync per step is expensive on a shared GPU (7.8x here); hence `update_fn(branchless=None)`
+  is branch-free on a GPU (a build every step, kept per structure where an atom moved) and
+  `lax.cond` on a CPU, and the docs recommend checking every n steps.
+- These cells are tiny (46 atoms in all), so fixed costs dominate; with more atoms per step the
+  build's share and the sync's share both fall.
+
 ## Defaults these set
 
 | setting | value | from |

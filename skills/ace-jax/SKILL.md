@@ -347,7 +347,9 @@ User page: `docs/user/howto/batch.md`; numbers: `docs/dev/batched-evaluation-res
   use `ffi=True`: the kernel vmaps into one threaded call, 37-48x the JAX model), `space.free()`; jit(vmap) a fori_loop chunk, then `nl, rebuilt = nb.update(state.position, nl)`
   between chunks (skin/2 test, K grows on overflow -> recompile), or inside the jitted loop with
   `update = nb.update_fn()`: `nl, rebuilt, ov = update(state.position, nl)` then
-  `jax.vmap(apply)(state, neighbor=nl)`; check `ov` after the loop and `nb.allocate` on overflow. Padding: pass
+  `jax.vmap(apply)(state, neighbor=nl)`; check `ov` after the loop and `nb.allocate` on overflow.
+  On a GPU a per-step lax.cond syncs with the host; `update_fn` is branch-free there by default, and
+  checking every n steps (nested fori_loops) is cheapest. Padding: pass
   `momenta=batch.initial_momenta(key, nb.live, kT, mass)` to `init` (JAX-MD's own draw gives padding
   momenta and removes the COM over all slots, drifting real atoms), `batch.zero_padding` after Langevin,
   `batch.temperature(p, mass, live)`; Nose-Hoover counts padding as DOF -> only unpadded (one-size)
