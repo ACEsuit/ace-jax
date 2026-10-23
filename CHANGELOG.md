@@ -22,6 +22,16 @@ variable.
 
 ### Added
 
+- **Batched evaluation.** `ace_jax.batch.BatchCalculator(model).calculate(structures)`
+  gives the energy, forces and stress of many structures in a small number of
+  compiled calls: structures of similar size are padded into one batch, and
+  the neighbour lists of a batch are made in one step. It accepts the
+  evaluation options of `ACECalculator` and agrees with it to roundoff. On a
+  GPU, 1024 Si cells of 2 or 8 atoms are 28 to 54 times faster than
+  `ACECalculator` one structure per call, 64-atom cells 5 to 7 times. On a
+  CPU it needs the C++ kernel (`ffi=True`): 19 to 52 times for 2 and 8
+  atoms, 2.4 times for 64. `aj eval` uses it when no posterior or GP model is
+  given. Guide: "Evaluate many structures".
 - **The C++ kernel in the ASE calculator.** `ACECalculator(..., ffi=True)`
   calculates energy, forces and stress of a linear ACE model with the C++
   kernel on CPUs, on all cores (XLA's thread pool; `ffi_threads` sets fewer).
@@ -43,6 +53,8 @@ variable.
 
 ### Fixed
 
+- `ACECalculator` no longer fails on a structure with no cell (a cluster with
+  a zero cell): ASE's `get_volume` raised. The stress needs a non-zero volume.
 - **Skin-list rebuilds on the CPU were slow.** Matching each edge to its reverse
   (two sorts over every skin edge) took approximately 90% of a rebuild: 93 of
   106 ms at 4,096 atoms. The match only helps on a GPU, so the CPU now uses the

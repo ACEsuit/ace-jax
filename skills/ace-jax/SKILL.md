@@ -324,6 +324,24 @@ load; faster only at large `nradbase`). Values are unchanged to roundoff.
   function. `pip install "ace-jax[native]"` (matscipy-neighbours,
   a C++ source build) gives faster neighbour lists; ASE's list is the fallback.
 
+### Batched evaluation (many small structures)
+
+`ace_jax.batch.BatchCalculator(model, **ACECalculator evaluation options, max_batch_atoms=None,
+n_device=None, builder="auto").calculate(atoms_list)` -> `BatchResults` (`energy` (n,), `forces` list,
+`stress` (n, 6) NaN unless fully periodic, `virial` (n, 3, 3), `e0_offset`, `timing`; `.to_atoms(atoms_list)`).
+User page: `docs/user/howto/batch.md`; numbers: `docs/dev/batched-evaluation-results.md`.
+
+- Pads structures into size buckets (`batch.pack`), builds each batch's lists in one step, evaluates
+  B x N rows as one dense block (`batch.efv`). Agrees with `ACECalculator` to roundoff; same option
+  resolution (it builds one inside, `bc.calc`).
+- Use it for screening, phonon displacements, committee pools; `aj eval` already uses it (no
+  posterior/GP). Not for one or two structures (slower), not for MD (no integrators in ace-jax).
+- GPU: 28-54x over one-structure-per-call for 2-8 atom Si cells, 5-7x at 64. CPU: only with
+  `ffi=True` (19-52x small cells, 2.4x at 64); the JAX model barely gains on a CPU, so there
+  `n_device` defaults to 16 (bigger structures go through `ACECalculator`).
+- `builder`: "msn" (matscipy-neighbours' batched XLA FFI, when installed), "jax" (all pairs over
+  images, GPU), "host" (cell list per structure); "auto" picks.
+
 ### JAX-MD (MD fully on the device)
 
 `pip install "ace-jax[jaxmd]"`. User page: `docs/user/howto/jax-md.md`.

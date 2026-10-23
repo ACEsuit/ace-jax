@@ -274,6 +274,7 @@ These pages use the words below with one meaning only.
 | configuration | one labelled entry of a dataset: atoms, an optional cell, and labels |
 | cell | the periodic simulation box of a configuration |
 | structure | an arrangement of atoms that you evaluate with a model |
+| batch | a set of structures that ace-jax evaluates in one compiled call |
 | frame | one entry of an extxyz file, or one snapshot of an MD trajectory |
 | dataset | a set of configurations |
 | validation set | configurations taken from the training set and not used to fit the coefficients. They score a choice, for example learned radials or the ARD scales |
