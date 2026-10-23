@@ -352,6 +352,18 @@ def test_cueq_line_is_a_same_model_other_code_family():
     assert "ace_cueq" in W.PRESETS["Same model, other code"]
 
 
+def test_nep_two_stage_experiments_stay_off_the_nep_line():
+    """The NEP loss-weight and two-stage refits (docs/dev) are a family no figure plots, so the NEP ladder keeps
+    one fit per size; every such size in metrics.jsonl is listed."""
+    import json
+    sys.path.insert(0, str(ROOT / "bench" / "si_qoi"))
+    import plot_cost as P
+    assert P.family_of({"family": "nep", "size": "n120b-2s"}) == "nep_2s" and "nep_2s" not in P.FAM
+    assert P.family_of({"family": "nep", "size": "n120b"}) == "nep"
+    rows = [json.loads(l) for l in open(ROOT / "bench" / "accuracy_cost" / "results" / "metrics.jsonl")]
+    assert {r["size"] for r in rows if r["family"] == "nep" and "-" in r["size"]} == P.NEP_TWO_STAGE
+
+
 def test_make_cost_ffi_rows_are_their_own_line(tmp_path):
     """make_cost.py: a timing row of an FFI kernel bundle (`ffi`) is the ACEffi line, not linear ACE's, and its
     code is labelled ffi, so the interactive figure's hover tells the kernel from the XLA bundle."""
