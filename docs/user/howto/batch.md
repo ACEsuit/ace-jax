@@ -93,14 +93,15 @@ The table gives the speed-up of `calculate` against `ACECalculator` with one
 structure in each call. The model is linear ACE for Si (correlation order 4, total degree
 12). Each call has 1024 structures (256 for 216 atoms on the CPU).
 
-| Atoms in each structure | GPU, float32 | GPU, float64 | CPU with the C++ kernel, float64 |
-|--:|--:|--:|--:|
-| 2 | 72x | 71x | 35x |
-| 8 | 45x | 35x | 25x |
-| 64 | 11x | 6.2x | 3.5x |
-| 216 | 3.2x | 2.0x | 1.3x |
+| Atoms in each structure | RTX 4000 Ada, float32 | RTX 4000 Ada, float64 | A100, float32 | A100, float64 | CPU with the C++ kernel, float64 |
+|--:|--:|--:|--:|--:|--:|
+| 2 | 72x | 71x | 62x | 79x | 35x |
+| 8 | 45x | 35x | 48x | 56x | 25x |
+| 64 | 11x | 6.2x | 21x | 18x | 3.5x |
+| 216 | 3.2x | 2.0x | 8.9x | 8.5x | 1.3x |
 
-The GPU is an NVIDIA RTX 4000 Ada. The CPU has 32 cores. The CPU values use
+The GPUs are an NVIDIA RTX 4000 Ada and an NVIDIA A100 (40 GB). The A100 has
+fast float64, so float64 is almost as fast as float32 on it. The CPU has 32 cores. The CPU values use
 matscipy-neighbours with the batched neighbour-list build. Without it, the
 speed-up for 64 atoms is approximately 2.4 times.
 

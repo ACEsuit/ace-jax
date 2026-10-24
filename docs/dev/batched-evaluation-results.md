@@ -56,6 +56,57 @@ The earlier runs, before those changes, are kept as `lestrade-gpu-v2.jsonl`
 - B = 1 is 2-3x slower than the loop: a batch of one pays the batch path's
   fixed cost without amortising it. `BatchCalculator` is for many structures.
 
+## GPU (Sulis, A100-PCIE-40GB, JAX 0.11.2)
+
+Same benchmark and code (rev 8826703), Sulis job 2261539 on gpu003, one A100 to itself
+(`bench/batch/sulis-gpu.sbatch`; results in `runs/batch/sulis/sulis-a100-{points,md}.jsonl`).
+Single points, µs per atom:
+
+| dtype | atoms | builder | loop | B=1 | B=4 | B=16 | B=64 | B=256 | B=1024 | best speed-up |
+|---|--:|---|--:|--:|--:|--:|--:|--:|--:|--:|
+| float32 | 2 | jax | 483.4 | 1307 | 343 | 94.7 | 29.0 | 12.1 | 8.11 | 60x |
+| float32 | 2 | msn | 483.4 | 1376 | 354 | 93.4 | 29.0 | 12.2 | 7.78 | 62x |
+| float32 | 8 | jax | 122.2 | 342 | 85.8 | 24.0 | 7.43 | 3.35 | 2.56 | 48x |
+| float32 | 8 | msn | 122.2 | 350 | 90.3 | 23.7 | 7.42 | 3.37 | 2.54 | 48x |
+| float32 | 64 | jax | 16.5 | 46.1 | 12.3 | 3.60 | 1.41 | 1.10 | 0.99 | 17x |
+| float32 | 64 | msn | 16.5 | 42.2 | 11.2 | 3.20 | 1.34 | 1.02 | 0.78 | 21x |
+| float32 | 216 | jax | 5.5 | 14.0 | 4.53 | 1.83 | 1.45 | 1.07 | 0.84 | 6.6x |
+| float32 | 216 | msn | 5.5 | 13.5 | 3.80 | 1.29 | 1.08 | 0.92 | 0.62 | 8.9x |
+| float64 | 2 | jax | 610.8 | 1471 | 367 | 98.3 | 29.0 | 12.0 | 7.94 | 77x |
+| float64 | 2 | msn | 610.8 | 1424 | 383 | 95.3 | 28.6 | 12.7 | 7.76 | 79x |
+| float64 | 8 | jax | 151.0 | 360 | 91.3 | 24.0 | 7.74 | 3.43 | 2.68 | 56x |
+| float64 | 8 | msn | 151.0 | 352 | 87.4 | 23.2 | 7.43 | 3.40 | 2.68 | 56x |
+| float64 | 64 | jax | 20.2 | 45.0 | 12.7 | 3.88 | 1.65 | 1.35 | 1.16 | 17x |
+| float64 | 64 | msn | 20.2 | 44.0 | 11.7 | 3.31 | 1.29 | 1.26 | 1.11 | 18x |
+| float64 | 216 | jax | 6.7 | 15.0 | 4.86 | 2.21 | 1.87 | 1.37 | 1.10 | 6.1x |
+| float64 | 216 | msn | 6.7 | 14.0 | 4.00 | 1.42 | 0.95 | 0.80 | 0.79 | 8.5x |
+
+- The one-structure loop is about 2x slower than on lestrade at every size, and so is the batched
+  floor for 2- and 8-atom cells (2.5 against 1.3 µs/atom, float32): these are per-call overhead, which
+  is the host's (gpu003's CPU and PCIe), not the card's. The speed-up is the same or larger (48-79x).
+- float64 costs little more than float32 on the A100 (fp64 at half the fp32 rate; the Ada card is at
+  1/64): at 216 atoms 0.79 µs/atom against 2.99 on lestrade, so the 216-atom speed-up rises from 2.0x
+  to 8.5x and the 64-atom one from 6.2x to 18x.
+- `msn` beats `jax` by 20-40% at 64-216 atoms and B = 1024 (0.78 against 0.99, 0.79 against 1.10);
+  below that they tie.
+- Still improving at B = 1024 for small cells (2 x 1024 atoms is far from saturating 40 GB); larger
+  cells level off at approximately 16k-55k atoms per call, so `MAX_BATCH_ATOMS` (16384) holds.
+
+Batched MD (`bench/batch/md.py`: JAX-MD NVE under vmap, the JAX model, float64, compacted K and
+batch-sized row blocks, 20 steps per jitted chunk, lists fixed), µs per atom per step:
+
+| atoms | cells=1 | 16 | 64 | 256 | 1024 |
+|--:|--:|--:|--:|--:|--:|
+| 8 | 43.9 | 3.59 | 1.26 | 0.633 | 0.457 |
+| 64 | 6.09 | 0.802 | 0.422 | 0.364 | 0.409 |
+| 216 | 2.58 | 0.643 | 0.442 | 0.435 | 0.493 |
+
+- Best 0.36 µs/atom/step (64-atom cells x 256, 16k atoms), 17x one 64-atom cell; 8-atom cells reach
+  0.46 at 1024 cells, 96x one cell.
+  Below the single-point floor (1.1 µs/atom) because the MD step builds no list and evaluates
+  compacted slots.
+- Past approximately 16k-55k atoms per call it gets slightly worse (64 x 1024, 216 x 1024).
+
 ## CPU (lestrade, 32 cores, float64)
 
 Not an idle machine: another user's jobs kept the load average at 11-15
@@ -194,7 +245,6 @@ so both take the kernel.
 
 ## Not yet measured
 
-- A Sulis A100 (more cells in flight).
 - `MAX_BATCH_ATOMS` against device memory (`bench/gpu_memory`); the
   default is far below what either card holds for o4d12.
 - Mixed-size streams: compile counts per bucket in practice.
