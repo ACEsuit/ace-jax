@@ -27,10 +27,11 @@ variable.
   compiled calls: structures of similar size are padded into one batch, and
   the neighbour lists of a batch are made in one step. It accepts the
   evaluation options of `ACECalculator` and agrees with it to roundoff. On a
-  GPU, 1024 Si cells of 2 or 8 atoms are 28 to 54 times faster than
-  `ACECalculator` one structure per call, 64-atom cells 5 to 7 times. On a
-  CPU it needs the C++ kernel (`ffi=True`): 19 to 52 times for 2 and 8
-  atoms, 2.4 times for 64. `aj eval` uses it when no posterior or GP model is
+  GPU, 1024 Si cells of 2 or 8 atoms are 35 to 72 times faster than
+  `ACECalculator` one structure per call, 64-atom cells 6 to 11 times. On a
+  CPU it needs the C++ kernel (`ffi=True`): 25 to 35 times for 2 and 8
+  atoms, 3.5 times for 64 (with matscipy-neighbours' batched build; 19 to 52
+  and 2.4 times without it). `aj eval` uses it when no posterior or GP model is
   given. Guide: "Evaluate many structures".
 - **Batched MD and relaxation with JAX-MD.** JAX-MD's integrators and
   optimisers run over a batch of structures with `jax.vmap`:

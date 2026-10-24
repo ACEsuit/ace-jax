@@ -18,39 +18,38 @@ defaults (skin list, matscipy-neighbours). µs per atom throughout. Driver:
 
 Builders: `jax` (all pairs over periodic images, on the device) and `msn`
 (matscipy-neighbours' batched XLA FFI build, libAtoms/matscipy-neighbours#11,
-built locally). The GPU was idle (`lestrade-gpu-v2.jsonl`; 2-atom rows from
-`lestrade-gpu-2atom-pow2.jsonl`, after small buckets became powers of two).
-These runs predate two later changes, which can only make them faster:
-evaluation on the occupied neighbour slots only, and the linear-time
-compaction in the `jax` builder. A rerun on an idle GPU is still to do.
+branch `batched-neighbour-matrix` ea16b2c). Final code (evaluation on the
+occupied slots, linear-time compaction, power-of-two small buckets), idle GPU,
+2026-10-24 (`lestrade-gpu-final.jsonl`; CPU tests ran on the host meanwhile).
+The earlier runs, before those changes, are kept as `lestrade-gpu-v2.jsonl`
+(5-7x at 64 atoms, 28-54x at 2-8 atoms).
 
 | dtype | atoms | builder | loop | B=1 | B=4 | B=16 | B=64 | B=256 | B=1024 | best speed-up |
 |---|--:|---|--:|--:|--:|--:|--:|--:|--:|--:|
-| float32 | 2 | jax | 275.6 | 973 | 140 | 58.8 | 16.8 | 9.41 | 6.47 | 43x |
-| float32 | 2 | msn | 275.6 | 649 | 140 | 82.1 | 13.1 | 8.75 | 6.04 | 46x |
-| float32 | 8 | jax | 86.2 | 135 | 74.0 | 13.0 | 5.32 | 1.94 | 1.68 | 51x |
-| float32 | 8 | msn | 86.2 | 225 | 57.7 | 16.1 | 4.10 | 2.76 | 1.75 | 49x |
-| float32 | 64 | jax | 8.3 | 19.3 | 6.50 | 2.16 | 1.79 | 1.79 | 1.44 | 5.8x |
-| float32 | 64 | msn | 8.3 | 18.4 | 7.05 | 2.15 | 1.62 | 1.23 | 1.12 | 7.4x |
-| float32 | 216 | jax | 2.7 | 9.93 | 3.70 | 3.30 | 2.04 | 1.89 | 1.88 | 1.4x |
-| float32 | 216 | msn | 2.7 | 10.5 | 3.80 | 2.14 | 1.43 | 1.23 | 1.27 | 2.2x |
-| float64 | 2 | jax | 469.0 | 941 | 514 | 77.5 | 26.0 | 11.2 | 9.06 | 52x |
-| float64 | 2 | msn | 469.0 | 780 | 232 | 59.6 | 52.1 | 13.3 | 8.64 | 54x |
-| float64 | 8 | jax | 128.9 | 216 | 52.9 | 12.7 | 6.69 | 4.92 | 6.31 | 26x |
-| float64 | 8 | msn | 128.9 | 236 | 60.5 | 17.8 | 8.03 | 4.62 | 5.59 | 28x |
-| float64 | 64 | jax | 18.5 | 39.0 | 9.58 | 4.63 | 3.93 | 4.85 | 4.82 | 4.7x |
-| float64 | 64 | msn | 18.5 | 33.0 | 12.2 | 4.36 | 3.82 | 4.48 | 4.28 | 4.8x |
-| float64 | 216 | jax | 5.9 | 20.7 | 7.46 | 5.42 | 6.46 | 6.36 | 6.35 | 1.1x |
-| float64 | 216 | msn | 5.9 | 14.2 | 6.64 | 4.00 | 5.40 | 5.08 | 5.11 | 1.5x |
+| float32 | 2 | jax | 229.2 | 747 | 192 | 46.8 | 13.7 | 5.24 | 3.25 | 71x |
+| float32 | 2 | msn | 229.2 | 714 | 190 | 49.7 | 14.6 | 5.55 | 3.19 | 72x |
+| float32 | 8 | jax | 58.1 | 207 | 51.9 | 14.9 | 4.66 | 1.86 | 1.39 | 42x |
+| float32 | 8 | msn | 58.1 | 192 | 45.9 | 13.0 | 3.85 | 1.72 | 1.28 | 45x |
+| float32 | 64 | jax | 7.8 | 28.0 | 7.78 | 2.20 | 0.98 | 0.74 | 0.72 | 11x |
+| float32 | 64 | msn | 7.8 | 23.2 | 6.31 | 1.93 | 0.97 | 0.73 | 0.70 | 11x |
+| float32 | 216 | jax | 2.5 | 9.44 | 2.49 | 1.57 | 1.03 | 0.97 | 0.90 | 2.8x |
+| float32 | 216 | msn | 2.5 | 13.3 | 3.04 | 1.30 | 1.19 | 0.87 | 0.80 | 3.2x |
+| float64 | 2 | jax | 370.7 | 925 | 214 | 59.0 | 18.0 | 8.94 | 6.16 | 60x |
+| float64 | 2 | msn | 370.7 | 917 | 250 | 76.2 | 21.3 | 7.44 | 5.21 | 71x |
+| float64 | 8 | jax | 101.7 | 262 | 57.3 | 17.9 | 7.04 | 3.70 | 3.55 | 29x |
+| float64 | 8 | msn | 101.7 | 196 | 59.6 | 16.0 | 5.90 | 2.90 | 3.59 | 35x |
+| float64 | 64 | jax | 13.9 | 32.9 | 8.36 | 4.19 | 2.35 | 2.98 | 2.69 | 5.9x |
+| float64 | 64 | msn | 13.9 | 33.6 | 11.2 | 3.43 | 2.24 | 2.79 | 2.61 | 6.2x |
+| float64 | 216 | jax | 4.9 | 12.9 | 5.49 | 3.34 | 3.93 | 3.72 | 3.64 | 1.5x |
+| float64 | 216 | msn | 4.9 | 11.5 | 4.46 | 2.47 | 3.31 | 3.07 | 2.99 | 2.0x |
 
-- The gain is largest where one structure per call is all overhead: 40-54x
-  for 2- and 8-atom cells. At 64 atoms it is 5-7x, at 216 atoms 1.1-2.2x (a
+- The gain is largest where one structure per call is all overhead: 29-72x
+  for 2- and 8-atom cells. At 64 atoms it is 6-11x, at 216 atoms 1.5-3.2x (a
   216-atom cell already keeps this card fairly busy).
-- float32 64-atom cells reach 1.1 µs/atom, against 0.66 µs/atom for the
-  model alone on prebuilt lists in the spec's evidence. The rest is the
-  neighbour build and the copies.
+- float32 64-atom cells reach 0.70 µs/atom for the whole call, about the
+  0.66 µs/atom of the model alone on prebuilt lists in the spec's evidence.
 - The two builders are within run-to-run noise up to 64 atoms. At 216
-  atoms `msn` is faster (its image search is pruned by plane distance; the
+  atoms `msn` is 10-20% faster (its image search is pruned by plane distance; the
   `jax` builder visits every image of the range).
 - Batch size: the card saturates at approximately 4k-16k atoms per call.
   `MAX_BATCH_ATOMS` (16384) sits there.
@@ -195,7 +194,7 @@ so both take the kernel.
 
 ## Not yet measured
 
-- An idle GPU with the final code, and a Sulis A100 (more cells in flight).
+- A Sulis A100 (more cells in flight).
 - `MAX_BATCH_ATOMS` against device memory (`bench/gpu_memory`); the
   default is far below what either card holds for o4d12.
 - Mixed-size streams: compile counts per bucket in practice.

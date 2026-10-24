@@ -95,12 +95,14 @@ structure in each call. The model is linear ACE for Si (correlation order 4, tot
 
 | Atoms in each structure | GPU, float32 | GPU, float64 | CPU with the C++ kernel, float64 |
 |--:|--:|--:|--:|
-| 2 | 46x | 54x | 52x |
-| 8 | 51x | 28x | 19x |
-| 64 | 7.4x | 4.8x | 2.4x |
-| 216 | 2.2x | 1.5x | 1.5x |
+| 2 | 72x | 71x | 35x |
+| 8 | 45x | 35x | 25x |
+| 64 | 11x | 6.2x | 3.5x |
+| 216 | 3.2x | 2.0x | 1.3x |
 
-The GPU is an NVIDIA RTX 4000 Ada. The CPU has 32 cores.
+The GPU is an NVIDIA RTX 4000 Ada. The CPU has 32 cores. The CPU values use
+matscipy-neighbours with the batched neighbour-list build. Without it, the
+speed-up for 64 atoms is approximately 2.4 times.
 
 ## Run MD or relax many structures with JAX-MD
 
