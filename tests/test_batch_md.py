@@ -283,7 +283,58 @@ def test_in_loop_update_flags_overflow(branchless):
     nb.K = K
     small = nl._replace(rij0=nl.rij0[:, :, :K], idx=nl.idx[:, :, :K], mask=nl.mask[:, :, :K])
     R = nb.positions + jnp.asarray([0.2, 0.0, 0.0])                           # past skin / 2, counts unchanged
-    _, rebuilt, overflow = jax.jit(nb.update_fn(branchless=branchless))(R, small)
+    nl_over, rebuilt, overflow = jax.jit(nb.update_fn(branchless=branchless))(R, small)
     assert bool(rebuilt) and np.asarray(overflow).tolist() == (kmax > K).tolist() and bool(overflow[2])
+    assert np.asarray(nl_over.overflow).tolist() == (kmax > K).tolist()        # carried in the list:
+    E = jax.vmap(lambda r, n: bc.energy_fn()(r, neighbor=n))(R, nl_over)      # NaN there, never truncated
+    assert np.array_equal(np.isnan(np.asarray(E)), kmax > K)
     nb.allocate(R)
     assert nb.K >= int(kmax.max())
+
+
+def test_batch_energy_fn_compacts_and_blocks_like_the_adapter():
+    """nb.energy_fn(): K from the in-cutoff capacity, rows in blocks (the shared core, eval.dense) --
+    the same energies and forces as every list slot evaluated whole; a K one short of a row's count, or
+    a list flagged as overflowed, makes that structure's energy and forces NaN (never truncation), the
+    others unchanged."""
+    ats = structures()
+    bc = BatchCalculator(MODEL)
+    nb = bc.neighbour_lists(ats, skin=1.0)
+    nl = nb.allocate()
+    vg = lambda f: jax.jit(jax.vmap(jax.value_and_grad(lambda r, n: f(r, neighbor=n))))
+    E0, G0 = vg(bc.energy_fn())(nb.positions, nl)
+    cap = nb.capacity(nl)
+    assert cap < nl.idx.shape[-1]                                   # compaction drops the skin slots
+    for f in (nb.energy_fn(nl), nb.energy_fn(nl, chunk=4), bc.energy_fn(K=cap)):
+        E, G = vg(f)(nb.positions, nl)
+        assert np.abs(np.asarray(E - E0)).max() <= 1e-12 * np.abs(np.asarray(E0)).max()
+        assert np.abs(np.asarray(G - G0)).max() <= 1e-11 * np.abs(np.asarray(G0)).max()
+    E, G = vg(bc.energy_fn(K=cap - 1))(nb.positions, nl)
+    over = np.asarray(jax.vmap(lambda r, n: batch._in_cutoff(r, n, nb.cutoff))(nb.positions, nl)) > cap - 1
+    assert over.any() and np.array_equal(np.isnan(np.asarray(E)), over)
+    flagged = nl._replace(overflow=nl.overflow.at[2].set(True))
+    E, G = vg(bc.energy_fn())(nb.positions, flagged)
+    assert np.isnan(np.asarray(E)).tolist() == [False, False, True, False, False]
+    live = np.asarray(nb.live)
+    assert np.isnan(np.asarray(G[2])[live[2]]).all() and np.isfinite(np.asarray(G)[[0, 1, 3, 4]]).all()
+
+
+def test_batch_energy_fn_on_the_kernel_matches_the_calculator():
+    """ffi=True with the batch-sized energy (compacted, blocked): energies and forces equal
+    ACECalculator(ffi=True)'s per structure."""
+    import os
+    import shutil
+    if jax.default_backend() != "cpu" or shutil.which("c++") is None:
+        if os.environ.get("ACEJAX_REQUIRE_OPTIONAL") and jax.default_backend() == "cpu":
+            pytest.fail("no C++ compiler")
+        pytest.skip("the C++ kernel needs a CPU and a compiler")
+    ats = structures()
+    bc = BatchCalculator(MODEL, ffi=True)
+    nb = bc.neighbour_lists(ats, skin=1.0)
+    nl = nb.allocate()
+    energy = nb.energy_fn(nl)
+    E, G = jax.jit(jax.vmap(jax.value_and_grad(lambda r, n: energy(r, neighbor=n))))(nb.positions, nl)
+    Eref, Fref = reference(ats, nb.unpad(nb.positions), ffi=True)
+    assert np.abs(np.asarray(E) - Eref).max() <= 1e-12 * np.abs(Eref).max()
+    for f, fr in zip(nb.unpad(-G), Fref):
+        assert np.abs(np.asarray(f) - fr).max() <= 1e-10 * max(np.abs(fr).max(), 1.0)
