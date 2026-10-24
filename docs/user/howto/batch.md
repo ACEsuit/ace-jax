@@ -110,7 +110,7 @@ ace-jax does not contain integrators or optimisers. It gives what
 
 - `bc.neighbour_lists(structures, skin)` puts all the structures into one
   padded batch and makes their neighbour lists.
-- `bc.energy_fn()` gives the energy of one structure, in the JAX-MD form.
+- `nb.energy_fn(nl)` gives the energy of one structure, in the JAX-MD form.
 - `ace_jax.batch` gives helpers for the padding atoms.
 
 !!! note "Install"
@@ -135,7 +135,7 @@ from ace_jax.batch import BatchCalculator
 bc = BatchCalculator("fit/model.npz")
 nb = bc.neighbour_lists(structures, skin=1.0)
 nl = nb.allocate()
-energy = bc.energy_fn()
+energy = nb.energy_fn(nl)
 
 _, shift = space.free()
 init, apply = simulate.nve(energy, shift, dt=1.0 / 10.18)    # 1 fs
@@ -156,6 +156,11 @@ for _ in range(100):
 positions = nb.unpad(state.position)          # list of (n_atoms, 3) arrays
 kT = batch.temperature(state.momentum, mass, nb.live)
 ```
+
+`nb.energy_fn(nl)` sets the number of model slots for each atom from the
+neighbours in the cutoff, plus 20%. If an atom gets more neighbours than
+that, the energy and forces of its structure become NaN. Make the energy
+function again with `nb.energy_fn(nb.allocate(state.position))`.
 
 All structures go into one batch with the size of the largest structure.
 The other structures get padding atoms. The cell of each structure can be
@@ -196,12 +201,15 @@ if overflow.any():
 The lists of the whole batch are made again in one call. On a CPU, the check
 costs approximately 1 to 9% of the step time.
 
-On a GPU, `update_fn` makes the lists at every step and keeps the new lists
-only for the structures that moved. This keeps the loop on the GPU, but it
-adds a list build to each step. A check that decides on the host costs more
-on a GPU, because the GPU must stop at every step.
+On a GPU, the check makes the host wait for the GPU at every step. On an idle
+GPU this costs approximately 15 to 20% of the step time for small batches. On
+a GPU that other programs also use, each wait is much longer.
 
-To reduce the cost on a GPU, check the lists every 10 steps:
+`update_fn(branchless=True)` makes the lists at every step and keeps the new
+lists only for the structures that moved. The loop then does not wait for the
+host, but each step makes the lists. Use it on a shared GPU.
+
+To reduce the cost on either device, check the lists every 10 steps:
 
 ```python
 def chunk(state, nl):

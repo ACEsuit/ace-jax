@@ -13,6 +13,10 @@ helpers `initial_momenta`, `zero_padding`, `temperature`. Checked: vmapped FIRE,
 the per-structure runs; padding found two leaks (JAX-MD's init gives padding atoms momenta and removes
 the centre of mass over every slot; Nose-Hoover counts padding as degrees of freedom). The C++ kernel
 vmaps too (a flattening `custom_vmap` rule on its FFI call), 37-48x the JAX model for batched MD on a CPU.
+The adapter (`jaxmd.potential`) and the batched path share one dense energy core (`eval/dense.py`): K
+compaction, NaN on overflow, row blocks; the kernel runs under both. A CUDA FFI kernel (coming) is to
+plug in the same way: an EdgeSiteModel whose FFI call has the row-flattening vmap rule, selected by
+`ACECalculator._ffi_choice` on a GPU backend.
 
 ## Goal and scope
 

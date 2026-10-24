@@ -169,11 +169,19 @@ cells (difference between 3 and 1 calls after the compile), lestrade RTX 4000 Ad
 - The vmapped step and both list builders stay on the device. The copy is XLA's: the GPU
   backend reads a `lax.cond` predicate on the host (a small copy and a stream sync each time).
   `--xla_gpu_enable_command_buffer=...,CONDITIONAL,WHILE` did not remove it (JAX 0.11.2).
-- A sync per step is expensive on a shared GPU (7.8x here); hence `update_fn(branchless=None)`
-  is branch-free on a GPU (a build every step, kept per structure where an atom moved) and
-  `lax.cond` on a CPU, and the docs recommend checking every n steps.
+- A sync per step is expensive on a shared GPU (7.8x here), but not on an idle one. The same
+  runs on the idle GPU (2026-10-24): fixed 30.2 ms, `lax.cond` every step 36.1 (msn) / 34.3
+  (jax), branch-free 69.5 / 48.7, every 10 steps 34.8. So `update_fn` keeps `lax.cond` by
+  default; `branchless=True` is for shared GPUs; checking every n steps is cheapest either way.
 - These cells are tiny (46 atoms in all), so fixed costs dominate; with more atoms per step the
   build's share and the sync's share both fall.
+
+## The kernel on the single-structure route (`jaxmd.potential`)
+
+JAX-MD NVE with a JAX-MD Dense list, K = in-cutoff capacity + 4, 20 steps per jitted chunk; lestrade CPU,
+load ~1: µs per atom per step, JAX model / C++ kernel (`ffi=True`): 216 atoms 33.4 / 3.44 (9.7x), 1728
+atoms 29.9 / 1.68 (18x). The adapter and the batched path share the dense energy core (`eval/dense.py`),
+so both take the kernel.
 
 ## Defaults these set
 

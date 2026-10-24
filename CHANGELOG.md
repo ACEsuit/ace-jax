@@ -43,6 +43,12 @@ variable.
   call): on 32 cores, MD of 64 Si cells of 8 or 64 atoms is 37 to 48 times
   faster than with the JAX model. `BatchNeighbours.update_fn()` rebuilds the
   lists inside the compiled loop (one batched build, under `lax.cond`).
+- **The C++ kernel in the JAX-MD adapter.** `jaxmd.potential(..., ffi=True)`
+  runs the kernel on a CPU: 10 to 18 times faster MD than the JAX model for
+  216 to 1728 Si atoms on 32 cores. The adapter and the batched path now share
+  one energy core, so the batched path also compacts the neighbour slots
+  (`BatchNeighbours.energy_fn`), evaluates rows in blocks, and gives NaN, not a
+  truncated list, when a structure outgrows its neighbour lists.
 - **The C++ kernel in the ASE calculator.** `ACECalculator(..., ffi=True)`
   calculates energy, forces and stress of a linear ACE model with the C++
   kernel on CPUs, on all cores (XLA's thread pool; `ffi_threads` sets fewer).

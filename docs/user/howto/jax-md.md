@@ -121,6 +121,25 @@ Then make the potential again with a larger `K`, and run the chunk again.
 The integrator state keeps the forces of the last step. Calculate them again
 with the new potential before you run the chunk, as in the example.
 
+## Use the C++ kernel on a CPU
+
+On a CPU, give `ffi=True` to `potential`:
+
+```python
+pot = jaxmd.potential("model.npz", disp, atoms.numbers, ffi=True, K=K)
+```
+
+The C++ kernel then calculates the energy and the forces, on all cores. It
+reads a radial table, so the results agree with the JAX model to
+approximately 1e-8 of the largest force. On 32 cores, MD of Si cells of 216
+to 1728 atoms is approximately 10 to 18 times faster.
+
+!!! note "Limits of the kernel"
+    The kernel is for linear ACE models in float64 on a CPU. It gives first
+    derivatives in the positions only: the stress works, second derivatives do
+    not. `ffi="auto"` uses the kernel when it can, and the JAX model when it
+    cannot.
+
 ## Memory
 
 The model calculates the atoms in blocks of rows. Only one block at a time
