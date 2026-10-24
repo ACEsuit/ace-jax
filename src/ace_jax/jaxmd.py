@@ -34,7 +34,8 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from .calc.skin import compact, round_k
+from .calc.skin import round_k, species_lut
+from .eval.dense import dense_energy
 from .eval.edge_model import total_energy
 
 
@@ -147,9 +148,7 @@ def potential(model, displacement_fn, species, meta=None, K=None, chunk="auto", 
         raise ValueError("potential() uses the model's cutoff (jaxmd.cutoff(model)); do not pass cutoff=")
     calc = _calc(model, meta, **calc_kw)
     m, meta, rc, full = calc.eval_model, calc.meta, calc.cutoff, calc.model
-    lut = np.full(119, -1, np.int32)
-    for i, z in enumerate(meta["elements"]):
-        lut[int(z)] = i
+    lut = species_lut(meta["elements"])
     lut_d = jnp.asarray(lut)
 
     def node_z_of(numbers):
@@ -189,28 +188,10 @@ def potential(model, displacement_fn, species, meta=None, K=None, chunk="auto", 
         _, _, valid_s, bad0 = rows(jax.lax.stop_gradient(R), neighbor, kw)
         return bad0 | bad_species | (False if K is None else jnp.any(jnp.sum(valid_s, axis=1) > K))
 
-    def graph(R, neighbor, kw, bad_species):
-        """Dense list -> (rij, j, mask) on the model's rows; NaN when the list
-        or a row overflowed, or the species are invalid."""
-        rij_s, j_s, valid_s, bad0 = rows(R, neighbor, kw)
-        bad0 = bad0 | bad_species
-        if K is None:
-            rij, j, mask, bad = rij_s, j_s, valid_s, bad0
-        else:
-            order, mask, csum = compact(valid_s, K)
-            rij = jnp.take_along_axis(rij_s, order[..., None], axis=1)
-            j = jnp.where(mask, jnp.take_along_axis(j_s, order, axis=1), 0)
-            bad = bad0 | jnp.any(csum[:, -1] > K)
-        # parked slots: a constant vector where every radial vanishes, so their
-        # gradient is zero and never NaN; an overflowed row poisons E and F
-        rij = jnp.where(mask[..., None], rij, park.astype(rij.dtype))
-        return poison(rij, bad), j, mask
-
-    def site_energies_dense(rij, j, mask, node_z):
-        zi = jnp.broadcast_to(node_z[:, None], j.shape)
-        b = (block_rows(full, j.shape[0], j.shape[1], jnp.dtype(rij.dtype).itemsize)
-             if chunk == "auto" else int(chunk))
-        return m.site_energies_dense_blocked(rij, zi, node_z[j], mask, node_z, b)
+    def rows_per_block(rij_s):
+        k = rij_s.shape[1] if K is None else K
+        return (block_rows(full, rij_s.shape[0], k, jnp.dtype(rij_s.dtype).itemsize) if chunk == "auto"
+                else int(chunk))
 
     def dense(neighbor):
         """True for a Dense JAX-MD list, False for a (full) Sparse one."""
@@ -230,8 +211,8 @@ def potential(model, displacement_fn, species, meta=None, K=None, chunk="auto", 
             if not dense(neighbor):
                 bad = bad_species | jnp.asarray(neighbor.did_buffer_overflow, bool)
                 return energy_sparse(R, neighbor.idx, node_z, bad, kw)
-            rij, j, mask = graph(R, neighbor, kw, bad_species)
-            return total_energy(site_energies_dense(rij, j, mask, node_z))
+            rij_s, j_s, valid_s, bad0 = rows(R, neighbor, kw)
+            return dense_energy(m, rij_s, j_s, valid_s, node_z, K, rows_per_block(rij_s), bad0 | bad_species)[0]
 
     def force(R, neighbor, species=None, **kw):
         return -jax.grad(energy)(R, neighbor, species=species, **kw)
@@ -254,10 +235,8 @@ def min_image_ok(cell, cutoff):
     dr_threshold) of this cell (rows: lattice vectors, ASE's convention): every
     perpendicular width exceeds 2 cutoff.  Below that JAX-MD silently misses
     images, so check before a run on a small or sheared cell."""
-    cell = np.asarray(cell, float)
-    vol = abs(np.linalg.det(cell))
-    widths = [vol / np.linalg.norm(np.cross(cell[(k + 1) % 3], cell[(k + 2) % 3])) for k in range(3)]
-    return min(widths) > 2 * cutoff
+    from .eval.nlist import cell_widths
+    return float(cell_widths(cell).min()) > 2 * cutoff
 
 
 def allocate(neighbor_fn, R, **kw):

@@ -27,6 +27,8 @@ from typing import NamedTuple
 
 import numpy as np
 
+from .calc.skin import species_lut
+from .eval.nlist import cell_widths
 from .eval.splinify import AUTO
 
 # Structures above this many atoms go through ACECalculator one at a time: the all-pairs build is
@@ -82,11 +84,10 @@ def complete_cell(cell, pbc):
 
 
 def image_range(cell, pbc, cutoff):
-    """Images per axis, n_k = ceil(cutoff / w_k) on periodic axes (w_k the perpendicular width), 0 on
-    the others: with positions wrapped into the cell, every pair within `cutoff` has its image there."""
-    vol = abs(np.linalg.det(cell))
-    w = [vol / np.linalg.norm(np.cross(cell[(k + 1) % 3], cell[(k + 2) % 3])) for k in range(3)]
-    return [math.ceil(cutoff / w[k]) if pbc[k] else 0 for k in range(3)]
+    """Images per axis (..., 3), n_k = ceil(cutoff / w_k) on periodic axes (w_k the perpendicular width,
+    `nlist.cell_widths`), 0 on the others: with positions wrapped into the cell, every pair within
+    `cutoff` has its image there."""
+    return np.where(pbc, np.ceil(cutoff / cell_widths(cell)), 0).astype(int)
 
 
 @dataclass
@@ -109,12 +110,6 @@ class Batch:
         return self.positions.shape[:2]
 
 
-def _species_lut(elements):
-    lut = np.full(119, -1, np.int32)
-    lut[np.asarray(elements, int)] = np.arange(len(elements), dtype=np.int32)
-    return lut
-
-
 def pack(atoms_list, cutoff, elements, max_batch_atoms=None, indices=None, one_batch=False):
     """Padded batches of `atoms_list` (ASE Atoms), grouped by `bucket_size` of the atom count: a list of
     `Batch`, every batch of a bucket with the same B (the last one padded with empty structures, so B does
@@ -122,7 +117,7 @@ def pack(atoms_list, cutoff, elements, max_batch_atoms=None, indices=None, one_b
     input positions recorded in `Batch.index` (default 0..len-1).  `cutoff`: the list cutoff the image
     ranges are for (cutoff + skin for MD).  `one_batch=True`: a list of one Batch holding every structure,
     padded to the largest one's bucket, B = len(atoms_list) (the layout for vmapped MD)."""
-    cutoff, lut = float(cutoff), _species_lut(elements)
+    cutoff, lut = float(cutoff), species_lut(elements)
     cap = int(max_batch_atoms or MAX_BATCH_ATOMS)
     indices = list(range(len(atoms_list))) if indices is None else list(indices)
     if one_batch:
@@ -171,9 +166,7 @@ def _pack_one(members, B, N, cutoff, lut):
     for b in np.flatnonzero(~((norms > 0) & (volume > 1e-9 * norms))):
         cell[b] = complete_cell(cell0[b], pbc[b])
     cell[m:] = np.eye(3)
-    nrm = np.cross(cell[:, [1, 2, 0]], cell[:, [2, 0, 1]])                # (B, 3, 3): rows c_{k+1} x c_{k+2}
-    width = np.abs(np.linalg.det(cell))[:, None] / np.linalg.norm(nrm, axis=-1)
-    ranges = np.where(pbc, np.ceil(cutoff / width), 0).astype(int)
+    ranges = image_range(cell, pbc, cutoff)
     f = np.linalg.solve(np.swapaxes(cell, 1, 2), np.swapaxes(pos, 1, 2))  # fractional, (B, 3, N)
     w = np.where(pbc[:, :, None], np.floor(f), 0.0)
     pos = np.where(live[..., None], pos - np.einsum("bkn,bkc->bnc", w, cell), 0.0)  # integer shifts: exact images
@@ -330,29 +323,27 @@ class BatchList(NamedTuple):
     mask: object                 # (B, N, K)
     species: object              # (B, N)
     live: object                 # (B, N)
+    overflow: object             # (B,) a structure outgrew K at the last build: its energy and forces are NaN
 
 
-def energy_fn(model, cutoff):
+def energy_fn(model, cutoff, K=None, chunk=None):
     """`energy(R, neighbor)`: the energy of ONE structure, R (N, 3), neighbor its `BatchList` slice -- the
     form JAX-MD's `simulate.*` and `minimize.*` take (they pass `neighbor=` through), to jax.vmap over the
-    batch.  Pairs beyond `cutoff` (the skin pairs) are masked; padding atoms carry no energy and no force.
-    Positions-only derivatives of `model`'s dense site energies; the C++ kernel (`eval.ffi.KernelModel`)
-    works too: under vmap its rows are flattened into one threaded call.  Its derivatives stop at first
-    order in positions (no Hessians, no parameter gradients)."""
-    import jax.numpy as jnp
+    batch.  Edge vectors are the list's rij0 moved with the atoms; slots beyond `cutoff` (the skin pairs)
+    are dropped.  The rest is `eval.dense.dense_energy`, the core `jaxmd.potential` uses: `K` compacts the
+    in-cutoff slots into K model slots (a row with more than K, or a list flagged `overflow`, makes energy
+    and forces NaN: never truncation), `chunk` sets rows per dense block, padding atoms carry no energy.
+    `model` is the JAX model or the C++ kernel (`eval.ffi.KernelModel`), which runs a vmapped batch as one
+    threaded call; positions-only derivatives either way."""
 
-    from .eval.edge_model import total_energy
-    park = float(model.pad_cutoff())
+    from .eval.dense import dense_energy
 
     def energy(R, neighbor, **kwargs):
         nl = neighbor
         d = R - nl.position0
         rij = nl.rij0 + d[nl.idx] - d[:, None]
-        m = nl.mask & ((rij * rij).sum(-1) < cutoff * cutoff)
-        rij = jnp.where(m[..., None], rij, jnp.asarray([park, 0.0, 0.0], rij.dtype))
-        z = nl.species
-        e = model.site_energies_dense(rij, jnp.broadcast_to(z[:, None], nl.idx.shape), z[nl.idx], m, z)
-        return total_energy(jnp.where(nl.live, e, 0.0))
+        valid = nl.mask & ((rij * rij).sum(-1) < cutoff * cutoff)
+        return dense_energy(model, rij, nl.idx, valid, nl.species, K, chunk, nl.overflow, nl.live)[0]
     return energy
 
 
@@ -414,6 +405,13 @@ def _wrap(positions, cell, pbc):
     return positions - jnp.einsum("bkn,bkc->bnc", w, cell)
 
 
+def _in_cutoff(R, nl, cutoff):
+    """The largest in-cutoff neighbour count of one structure's rows at R."""
+    d = R - nl.position0
+    rij = nl.rij0 + d[nl.idx] - d[:, None]
+    return (nl.mask & ((rij * rij).sum(-1) < cutoff * cutoff)).sum(-1).max()
+
+
 def _moved(positions, neighbor):
     """(B,) the largest displacement of a live atom since the build."""
     import jax.numpy as jnp
@@ -448,7 +446,34 @@ class BatchNeighbours:
         W = self._wrap(R, self._cell, self._pbc)
         rij, idx, mask, _, self.K = self.calc._build_lists(self.batch, W, self.cutoff + self.skin, self.K)
         self.rebuilds += 1
-        return BatchList(R, rij, idx, mask, jnp.asarray(self.batch.species), self.live)
+        return BatchList(R, rij, idx, mask, jnp.asarray(self.batch.species), self.live,
+                         jnp.zeros(R.shape[0], bool))
+
+    def capacity(self, neighbor, positions=None):
+        """The largest number of neighbours within the model's cutoff over every row of the batch, at
+        `positions` (default: the list's build positions): the in-cutoff slots a compacted energy needs."""
+        import jax
+        R = neighbor.position0 if positions is None else positions
+        rc = self.cutoff
+        count = jax.jit(lambda R, nl: jax.vmap(lambda r, n: _in_cutoff(r, n, rc))(R, nl).max())(R, neighbor)
+        return int(count)
+
+    def energy_fn(self, neighbor=None, K="auto", chunk="auto", headroom=1.2):
+        """`BatchCalculator.energy_fn` sized for this batch.  K "auto": the in-cutoff `capacity` of
+        `neighbor` (default: a fresh `allocate()`) times `headroom`, rounded (`skin.round_k`): the model
+        evaluates K slots per row instead of the list's cutoff + skin slots (~1.5x fewer at rc 5.5, skin 1),
+        and a row that outgrows K makes the energy NaN.  None: every list slot, masked.  chunk "auto": rows
+        per dense block from the lammps-jax rule (`jaxmd.block_rows`) for the whole batch's B x N rows,
+        divided among the B structures (one block, unblocked, when it holds a whole structure)."""
+        from .calc.skin import round_k
+        from .jaxmd import block_rows
+        if K == "auto":
+            K = round_k(headroom * self.capacity(neighbor if neighbor is not None else self.allocate()))
+        if chunk == "auto":
+            (B, N), k = self.batch.shape, K or (self.K or 1)
+            per = block_rows(self.calc.model, B * N, k, self.positions.dtype.itemsize) // B
+            chunk = None if per >= N else max(per, 1)
+        return energy_fn(self.calc.eval_model, self.cutoff, K, chunk)
 
     def needs_rebuild(self, positions, neighbor):
         """(B,) bool: a live atom has moved more than skin / 2 since the build."""
@@ -460,12 +485,13 @@ class BatchNeighbours:
             return neighbor, False
         return self.allocate(positions), True
 
-    def update_fn(self, builder=None, branchless=None):
+    def update_fn(self, builder=None, branchless=False):
         """A jittable `update(R, nl) -> (nl, rebuilt, overflow)` for use INSIDE a compiled loop: when any
         live atom has moved skin / 2 the whole batch's lists are rebuilt at R (lax.cond; one batched build
         call), else nl is returned unchanged.  The shapes are fixed, so a structure that now has more than K
-        neighbours is flagged in `overflow` (B,) and its list is clipped: check it after the loop, and on
-        overflow re-run from the last good state with `allocate` (which grows K).  `rebuilt`: a scalar
+        neighbours is flagged in `overflow` (B,) and in the list (`BatchList.overflow`), which makes its
+        energy and forces NaN until the next `allocate` -- never a silently truncated list: check the flag
+        after the loop and re-run from the last good state with `allocate` (which grows K).  `rebuilt`: a scalar
         bool.  builder: "msn" (matscipy-neighbours' batched XLA FFI, when installed) or "jax" (all pairs
         on the device); "host" cannot run inside a trace.  Loop at batch level and vmap only the step:
         `nl, rebuilt, ov = update(state.position, nl); state = jax.vmap(apply)(state, neighbor=nl)`.
@@ -473,12 +499,12 @@ class BatchNeighbours:
         On a GPU, XLA reads a lax.cond predicate back to the host: one small device-to-host copy and
         a stream sync per call (measured with nsys; XLA's command-buffer conditionals did not remove it).
         `branchless=True` avoids it: the batch is built on every call and kept per structure where an atom
-        moved (jnp.where), so the loop never leaves the device, at the cost of a build per call.  None (the
-        default): branch-free on a GPU, lax.cond on a CPU (no copy there; a build per step would cost
-        ~30%).  Cheapest on either: call `update` every n steps (an outer loop over inner fori_loops), one
-        check per n steps.  lestrade RTX 4000 Ada (shared), 5 small cells, 200 NVE steps: lists fixed 62
-        ms, cond every step 485 ms, branch-free 100-145 ms, cond every 10 steps 78 ms.  Branch-free
-        rebuilds only the structures that moved."""
+        moved (jnp.where), so the loop never leaves the device, at the cost of a build per call.  On an idle
+        GPU the sync is cheaper than that build, so lax.cond is the default; branch-free pays on a GPU
+        shared with other work, where each sync waits behind the other process's kernels.  Cheapest
+        either way: call `update` every n steps (an outer loop over inner fori_loops).  lestrade RTX 4000
+        Ada, 5 small cells, 200 NVE steps, idle / shared with another job: lists fixed 30 / 62 ms, cond
+        every step 34-36 / 485 ms, branch-free 49-70 / 100-145 ms, cond every 10 steps 35 / 78 ms."""
         import jax
         import jax.numpy as jnp
         builder = builder or ("msn" if _msn_batched() is not None else "jax")
@@ -486,8 +512,6 @@ class BatchNeighbours:
             raise ValueError(f"update_fn needs a traceable builder, 'msn' or 'jax', got {builder!r}")
         if self.K is None:
             raise ValueError("call allocate() first: it fixes K")
-        if branchless is None:
-            branchless = jax.default_backend() != "cpu"
         b, K, rc, half = self.batch, self.K, self.cutoff + self.skin, self.skin / 2
         cell, pbc = self._cell, self._pbc
         images, image_mask = jnp.asarray(b.images), jnp.asarray(b.image_mask)
@@ -503,13 +527,14 @@ class BatchNeighbours:
             if branchless:                    # build every call, keep it per structure where an atom moved
                 rij, idx, mask, over = build(R, nl.live)
                 sel = lambda new, old: jnp.where(moved.reshape(moved.shape + (1,) * (new.ndim - 1)), new, old)
+                over = moved & over
                 nl = nl._replace(position0=sel(R, nl.position0), rij0=sel(rij, nl.rij0), idx=sel(idx, nl.idx),
-                                 mask=sel(mask, nl.mask))
-                return nl, moved.any(), moved & over
+                                 mask=sel(mask, nl.mask), overflow=nl.overflow | over)
+                return nl, moved.any(), over
 
             def rebuild(_):
                 rij, idx, mask, over = build(R, nl.live)
-                return nl._replace(position0=R, rij0=rij, idx=idx, mask=mask), over
+                return nl._replace(position0=R, rij0=rij, idx=idx, mask=mask, overflow=nl.overflow | over), over
 
             rebuilt = moved.any()
             nl, overflow = jax.lax.cond(rebuilt, rebuild, lambda _: (nl, jnp.zeros(R.shape[0], bool)), None)
@@ -670,11 +695,12 @@ class BatchCalculator:
             K = round_k(int(kmax.max()))
             stats["k_retries"] += 1
 
-    def energy_fn(self):
+    def energy_fn(self, K=None, chunk=None):
         """JAX-MD's energy function for one structure, `energy(R, neighbor=...)`, over this calculator's
         evaluation model (`batch.energy_fn`); jax.vmap the integrator or optimizer over the batch.  With
-        ffi the C++ kernel evaluates it: one threaded call for the whole vmapped batch."""
-        return energy_fn(self.eval_model, self.cutoff)
+        ffi the C++ kernel evaluates it: one threaded call for the whole vmapped batch.  `K` compacts the
+        in-cutoff slots, `chunk` sets the row blocks; `BatchNeighbours.energy_fn` sizes both for a batch."""
+        return energy_fn(self.eval_model, self.cutoff, K, chunk)
 
     def neighbour_lists(self, atoms_list, skin=1.0):
         """`BatchNeighbours` for vmapped MD or relaxation of `atoms_list`: all structures in ONE padded batch
