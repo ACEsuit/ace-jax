@@ -4,7 +4,8 @@
 # and bench/batch/md.py (vmapped JAX-MD NVE, the JAX model) for the Si o4d12 linear ACE.
 # Tree $ROOT/ace-jax-batch: code/ (branch feat/batched-eval), venv/ (uv sync --extra cuda --extra jaxmd, then
 # matscipy-neighbours built from libAtoms/matscipy-neighbours#11 with ENABLE_CUDA, sm_80 and JAX's FFI
-# headers), model/o4d12.npz (runs/accuracy_cost/ace/o4d12/model.npz).
+# headers: module load GCCcore/12.3.0 CUDA/12.5.0 for the build only), model/o4d12.npz
+# (runs/accuracy_cost/ace/o4d12/model.npz).
 #   sbatch bench/batch/sulis-gpu.sbatch            (from $ROOT/ace-jax-batch/code)
 # Results: $ROOT/ace-jax-batch/results/sulis-a100-{points,md}.jsonl
 #SBATCH --job-name=batch-gpu
@@ -20,7 +21,10 @@
 set -euo pipefail
 ROOT=${BENCH_ROOT:-$HOME/bench-scaling}; T=$ROOT/ace-jax-batch
 cd "$T/code"
-set +u; source /etc/profile.d/modules.sh 2>/dev/null || true; module purge 2>/dev/null || true; set -u
+set +u; source /etc/profile.d/modules.sh 2>/dev/null || true; module purge 2>/dev/null || true
+module load GCCcore/12.3.0; set -u      # matscipy-neighbours was built with GCC 12.3 (GLIBCXX_3.4.29)
+# its XLA handlers link libcudart.so.12: JAX's pip copy (the CUDA module would shadow JAX's CUDA libraries)
+export LD_LIBRARY_PATH=$T/venv/lib/python3.12/site-packages/nvidia/cuda_runtime/lib:${LD_LIBRARY_PATH:-}
 export XLA_PYTHON_CLIENT_PREALLOCATE=false
 export JAX_COMPILATION_CACHE_DIR=$T/jax_cache
 mkdir -p "$T/results"
