@@ -192,8 +192,10 @@ def test_cli_learn_radial_writes_info_and_reproduces(fast, tmp_path):
     main(["fit", *FAST_CLI, "--learn-radial", "--radial-steps", "3", "--radial-lam-grid", "0",
           "--out", str(a)])
     info = json.loads((a / "radial_info.json").read_text())
-    assert info["lam_grid"] == [0.0] and info["n_q"] == 12
     cand = np.load(a / "radial_lam=0.npz")          # the candidate checkpoint, written before the gate
+    # n_q is the span used: to_analytic only widens, so it can exceed the requested 12 (this model needs 15)
+    assert info["lam_grid"] == [0.0] and info["n_q_requested"] == 12 and info["n_q"] >= 12
+    assert info["n_q"] == cand["rnl_Wnlq"].shape[-1] and info["steps"] == 3
     assert cand["rnl_Wnlq"].shape == np.load(a / "model.npz")["rnl_Wnlq"].shape and int(cand["steps"]) == 3
     # progress.jsonl, written as the fit ran: the stages in order, each radial round with its LML
     ev = [json.loads(line) for line in (a / "progress.jsonl").read_text().splitlines()]
