@@ -1,5 +1,5 @@
 """Batched MD benchmark: µs per atom per step of JAX-MD's NVE under jax.vmap over B rattled Si cells
-(`BatchCalculator.energy_fn`, `neighbour_lists`), the JAX model against the C++ kernel (ffi=True, CPU).
+(`BatchNeighbours.energy_fn`: compacted K slots, batch-sized row blocks), the JAX model against the C++ kernel (ffi=True, CPU).
 One JSON line per point.  The timed part is jitted chunks of --steps steps (lists fixed; skin large
 enough that none is rebuilt in the run), median of --reps after a warm-up.
 
@@ -49,7 +49,7 @@ def main():
             bc = BatchCalculator(a.model, ffi=a.ffi)
             nb = bc.neighbour_lists(ats, skin=1.0)
             nl = nb.allocate()
-            init, apply = simulate.nve(bc.energy_fn(), shift, dt=1.0 / 10.18)
+            init, apply = simulate.nve(nb.energy_fn(nl), shift, dt=1.0 / 10.18)   # compacted K, batch-sized blocks
             p0 = batch.initial_momenta(jax.random.PRNGKey(0), nb.live, 0.01, 28.0855)
             state = jax.jit(jax.vmap(lambda R, p, nn, init=init: init(None, R, kT=0.0, mass=28.0855, momenta=p, neighbor=nn)))(
                 nb.positions, p0, nl)
