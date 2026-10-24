@@ -85,7 +85,9 @@ def projected_residual(W, theta, prob, ds):
     return projected_residual_from_stats(theta, lin, _prior(prob))
 
 
-def _batch_residuals(model, cfg, batch, c):
+def _batch_residuals_rows(model, cfg, batch, c):
+    """_batch_residuals through the design rows Phi (the reference form, for the parity test): (rows, L)
+    per quantity, contracted with c.  Its W-gradient backpropagates through all L columns."""
     from .rows import linear_rows_bounded
     r = linear_rows_bounded(model, cfg, batch)
     L = cfg.len_basis
@@ -99,15 +101,60 @@ def _batch_residuals(model, cfg, batch, c):
     return jnp.stack(sse), jnp.stack(n).astype(jnp.float64)
 
 
-def residual_sums(model, cfg, ds, c):
+def species_readout(c, cfg):
+    """(NZ, n_B + n_pair): the species-blocked readout c (rows._place's layout) per centre species."""
+    nB, nP, NZ = cfg.n_B, cfg.n_pair, cfg.NZ
+    return jnp.stack([jnp.concatenate([c[z * nB:(z + 1) * nB], c[NZ * nB + z * nP:NZ * nB + (z + 1) * nP]])
+                      for z in range(NZ)])
+
+
+def _batch_residuals(model, cfg, batch, c):
+    """(sse (3,), n (3,)) over E, F, V of readout c on one batch: Phi c is the model's own E/F/V at
+    coefficients c -- site energies X c and one reverse pass for dE/drij -- so no design rows are built and
+    the W-gradient costs a model's second derivative, not L of them (8-11x faster than
+    `_batch_residuals_rows` on Si o4d12/o4d20, equal to roundoff; docs/dev/learn-radial-results.md)."""
+    from .data import flat_edges
+    from .rows import _voigt
+    Ncap, K = batch.nbr.shape
+    C = batch.y_E.shape[0]
+    zi = jnp.broadcast_to(batch.node_z[:, None], (Ncap, K))
+    zj = batch.node_z[batch.nbr]
+    Cz = species_readout(c, cfg)[batch.node_z]                                    # (Ncap, n_B + n_pair)
+
+    def energy(rij):
+        s = jnp.sum(jnp.concatenate(model.site_basis_dense(rij, zi, zj, batch.nbr_mask), -1) * Cz, -1)
+        s = s * batch.node_mask
+        return jnp.sum(s), s
+    (_, s), dr = jax.value_and_grad(energy, has_aux=True)(batch.rij)              # dr = dE / drij
+    seg = lambda a, ids, n: jax.ops.segment_sum(a, ids, num_segments=n)           # noqa: E731
+    rij, send, recv, mask = flat_edges(batch.rij, batch.nbr, batch.nbr_mask)
+    T = jnp.where(mask[:, None], dr.reshape(-1, 3), 0.0)
+    E = seg(s, batch.node_cfg, C + 1)[:C]
+    if getattr(cfg, "e0_cols", False):                                            # rows._e0_columns
+        onehot = jax.nn.one_hot(batch.node_z, cfg.NZ) * batch.node_mask[:, None]
+        E = E + seg(onehot, batch.node_cfg, C + 1)[:C] @ c[cfg.len_readout:]
+    F = -(seg(T, recv, Ncap) - seg(T, send, Ncap))
+    V = seg(_voigt(T, rij), batch.node_cfg[send], C + 1)[:C]
+    sse, n = [], []
+    for P, y, w in ((E, batch.y_E, batch.w_E), (F.reshape(-1), batch.y_F.reshape(-1), jnp.repeat(batch.w_F, 3)),
+                    (V.reshape(-1), batch.y_V.reshape(-1), jnp.repeat(batch.w_V, 6))):
+        e = w * (y - P)                            # padded rows have w = 0
+        sse.append(e @ e)
+        n.append(jnp.sum(w > 0))
+    return jnp.stack(sse), jnp.stack(n).astype(jnp.float64)
+
+
+def residual_sums(model, cfg, ds, c, batch_fn=None):
     """(sse, n), each (3,) over E, F, V: ||w (y - Phi c)||^2 of the readout c on ds and the
     live row counts, in one checkpointed streaming pass -- differentiable in the model, with
-    per-batch memory (as linear_statistics)."""
-    f = jax.checkpoint(lambda b: _batch_residuals(model, cfg, b, c))
+    per-batch memory (as linear_statistics).  batch_fn: `_batch_residuals` (default) or the
+    design-row reference `_batch_residuals_rows`."""
+    bf = _batch_residuals if batch_fn is None else batch_fn
+    f = jax.checkpoint(lambda b: bf(model, cfg, b, c))
     return jax.lax.scan(lambda s, b: (jax.tree.map(jnp.add, s, f(b)), None), (jnp.zeros(3), jnp.zeros(3)), ds)[0]
 
 
-_residuals_jit = jax.jit(residual_sums, static_argnames=("cfg",))
+_residuals_jit = jax.jit(residual_sums, static_argnames=("cfg", "batch_fn"))
 
 
 def _batch_normal_residuals(model, cfg, batch, c):
@@ -401,7 +448,7 @@ def lbfgs_loop(f, x0, *, steps, args=(), statics=(), tol=1e-6, patience=3, memor
 
 
 def theta_map_linear(prob, ds, W, *, steps=300, seed=0, init=None, return_stats=False, lin=None,
-                     noise="per-quantity"):
+                     noise="per-quantity", opt="lbfgs"):
     """theta-MAP of the M = 0 LML for the model with radials W (one streaming
     pass for the QR statistics, then run_map on the QR LML,
     objective.log_marginal_likelihood_qr -- the Gram form's Cholesky is NaN once sigma_c
@@ -420,7 +467,12 @@ def theta_map_linear(prob, ds, W, *, steps=300, seed=0, init=None, return_stats=
 
     noise "shared" (pipeline `--noise shared`): sigma_E and sigma_V tied to sigma_F
     (paramset.tied_likelihood), as in the pipeline MAP; the returned theta is tied, and the
-    diagnostic's log-posterior leaves the tied coordinates' hyperpriors out."""
+    diagnostic's log-posterior leaves the tied coordinates' hyperpriors out.
+
+    opt "lbfgs" (default): bounded L-BFGS-B on the log-posterior (the pipeline MAP's optimiser and box,
+    `multistart.lbfgs_map`), at most `steps` iterations; "adam": `steps` SVI steps (run_map).  Each step
+    re-factors a (2L, L) QR, so Adam's fixed 300 steps were the round's dominant cost after the direct
+    residual pass (Si o4d20, A100: 506 s per re-fit); L-BFGS converges in tens of evaluations."""
     from .paramset import noise_tie, tie_noise, tied_likelihood
     tied = noise_tie(noise)
     free = ~tied if tied.any() else None
@@ -430,11 +482,29 @@ def theta_map_linear(prob, ds, W, *, steps=300, seed=0, init=None, return_stats=
     lml = jax.jit(lambda a: ev(from_array(a), lin, prob))
     if free is not None:
         lml = tied_likelihood(lml)
-    h, losses = run_map(lml, prob.prior, steps=steps, seed=seed, return_losses=True,
-                        init=None if init is None else from_array(jnp.asarray(init)))
-    a = to_array(h)
-    if free is not None:          # the tied coordinates only drifted on their own hyperpriors: copy F
-        a = tie_noise(a)
+    if opt == "lbfgs":
+        from .multistart import lbfgs_map
+        from .pipeline.mapfit import LBFGS_HI, LBFGS_LO
+        lp = jax.jit(jax.value_and_grad(lambda x: lml(x) + log_prior(from_array(x), prob.prior, free)))
+        x0 = np.array(to_array(prob.prior.mu) if init is None else init, float)
+        lo, hi = LBFGS_LO.copy(), LBFGS_HI.copy()
+        if free is not None:      # the tied coordinates are pinned at F's value (as fit_map does)
+            x0 = np.asarray(tie_noise(x0), float)
+            lo[tied] = hi[tied] = x0[tied]
+        x0 = np.clip(x0, lo, hi)
+        r = lbfgs_map(lambda x: tuple(map(np.asarray, lp(jnp.asarray(x)))), x0, lo, hi, max(int(steps), 1))
+        a = jnp.asarray(r["x"] if np.isfinite(r["value"]) else x0)
+        losses = [-v for v in r["trace"] if np.isfinite(v)] or [float("nan")]
+        if free is not None:
+            a = tie_noise(a)
+    elif opt == "adam":
+        h, losses = run_map(lml, prob.prior, steps=steps, seed=seed, return_losses=True,
+                            init=None if init is None else from_array(jnp.asarray(init)))
+        a = to_array(h)
+        if free is not None:      # the tied coordinates only drifted on their own hyperpriors: copy F
+            a = tie_noise(a)
+    else:
+        raise ValueError(f"theta_map_linear: opt must be 'lbfgs' or 'adam', got {opt!r}")
     if not return_stats:
         # lml, its gradient and numpyro's SVI step close over `lin`, so each compiles the QR statistics in as
         # constants (3 P x P doubles: ~0.7 GB at o4d20), which JAX's trace and lowering caches keep alive after
@@ -445,7 +515,7 @@ def theta_map_linear(prob, ds, W, *, steps=300, seed=0, init=None, return_stats=
         return a
     logpost = lambda x: lml(x) + log_prior(from_array(x), prob.prior, free)
     k = min(10, len(losses) - 1)
-    diag = {"lml": float(lml(a)), "map_steps": int(steps),
+    diag = {"lml": float(lml(a)), "map_steps": int(steps), "map_evals": len(losses), "map_opt": opt,
             "dloss_last": float(losses[-1] - losses[-1 - k]) if k > 0 else float("nan"),
             "grad_norm": float(jnp.linalg.norm(jax.grad(logpost)(a)))}
     jax.clear_caches()           # the compiled QR constants (see above)

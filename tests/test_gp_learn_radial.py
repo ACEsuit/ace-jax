@@ -591,6 +591,49 @@ def _in_memory_residual_direct(W, prob, ds, theta):
     return float(e @ e)
 
 
+def _residual_parity(prob, ds, W):
+    from ace_jax.fit.objective import posterior_from_qr
+    from ace_jax.fit.radial_learn import _batch_residuals_rows, residual_sums
+    from ace_jax.fit.radial_model import with_radial
+    from ace_jax.fit.stats import linear_qr_statistics
+    c = posterior_from_qr(THETA, linear_qr_statistics(with_radial(prob.model, W), prob.cfg, ds), prob)[0]
+    out = []
+    for bf in (None, _batch_residuals_rows):
+        f = lambda V, bf=bf: residual_sums(with_radial(prob.model, V), prob.cfg, ds, c, batch_fn=bf)[0]  # noqa: E731
+        sse = jax.jit(f)(W)
+        g = jax.jit(jax.grad(lambda V, f=f: jnp.sum(f(V) * jnp.array([1.0, 3.0, 0.5]))))(W)
+        out.append((np.asarray(sse), np.asarray(g)))
+    (s_d, g_d), (s_r, g_r) = out
+    assert np.all(s_r > 0)
+    np.testing.assert_allclose(s_d, s_r, rtol=1e-10)
+    np.testing.assert_allclose(g_d, g_r, rtol=1e-7, atol=1e-9 * np.abs(g_r).max())   # summation order
+
+
+def test_direct_residuals_match_the_design_rows(small):
+    """The residual pass through the model's own E/F/V at readout c equals the design-row form Phi c, in
+    value (E, F and V sums) and in its W-gradient, at radials away from the initial ones."""
+    prob, ds, _ = small
+    W = prob.model.rnl_Wnlq
+    W = W + 0.05 * jax.random.normal(jax.random.PRNGKey(0), W.shape) * (jnp.abs(W).sum(-1, keepdims=True) > 0)
+    _residual_parity(prob, ds, W)
+
+
+def test_direct_residuals_match_the_design_rows_two_species():
+    """NZ = 2: the species-blocked readout reaches each centre species' block (rows._place's layout)."""
+    from ace_jax.fit.radial_model import to_analytic
+    spline, meta, z = load(FIXTURE_DIR / "sige_nofit.npz")
+    model, _ = to_analytic(spline, 12)
+    configs = load_configs(XYZ, "dft_energy", "dft_force", "dft_virial")[:4]
+    ds = build_dataset(configs, meta, np.asarray(z["E0"]), configs_per_batch=2)
+    cfg = GPConfig(r0=2.35, rcut=float(meta["rcut"]), n_B=meta["n_B"], n_pair=meta["n_pair"],
+                   NZ=len(meta["elements"]), C=2)
+    X, S = site_features(model, cfg, ds)
+    ind = select_inducing(X, S, ds.node_z, ds.node_mask, 0, descriptor_scale(X, ds.node_mask))
+    prob = Problem(KernelSpec("cosine", True, cfg.D), model, ind, cfg, jnp.ones(cfg.len_basis), default_prior(2.35))
+    assert cfg.NZ == 2
+    _residual_parity(prob, ds, model.rnl_Wnlq)
+
+
 def test_projected_residual_qr_matches_lstsq_and_the_gram_form(small):
     from ace_jax.fit.radial_learn import projected_residual, projected_residual_qr
     prob, ds, _ = small
@@ -725,8 +768,12 @@ def test_learn_radial_newton_runs_rounds_with_refits(small):
                            opt="newton", cg_iters=5)
     assert np.all(np.isfinite(np.asarray(W))) and len(info["lml"]) == len(info["reasons"]) >= 1
     assert all(np.isfinite(info["lml"])) and set(info["reasons"]) <= {"steps", "converged", "linesearch"}
-    # a rejected trial shrinks the trust region and is not recorded: the accepted objective never rises
-    assert all(b <= a for a, b in zip(info["trace"], info["trace"][1:]))
+    # a rejected trial shrinks the trust region and is not recorded: within a round the accepted objective
+    # never rises (a re-fit of theta re-weights the objective, so rounds are not comparable)
+    ends = np.cumsum(info["round_lengths"])
+    for lo, hi in zip(np.concatenate([[0], ends[:-1]]), ends):
+        t = info["trace"][lo:hi]
+        assert all(b <= a for a, b in zip(t, t[1:]))
     with pytest.raises(ValueError, match="opt"):
         learn_radial(prob, ds, prob.model.rnl_Wnlq, theta0=THETA, profile=False, steps=1, opt="adam")
 

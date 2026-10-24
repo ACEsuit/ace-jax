@@ -16,6 +16,10 @@ variable.
   objective does, so the force errors count. The previous score was a mean
   for each quantity, so the energies decided it. The fit log and
   `radial_info.json` give the polynomial span that is used.
+- **Learned radials are approximately 3 times faster.** The residual pass uses the
+  model's own energies and forces at the coefficients, not the full design
+  rows. The hyperparameters are fitted again by L-BFGS, not by 300 Adam steps.
+  The L-BFGS fit is also better converged.
 - **`fast-neighbours` is now `native`.** The `native` extra installs the same
   packages; `fast-neighbours` remains as an alias until the next release but one.
 - **The C++ kernel is the default for CPU bundles.** `export_lammps` and

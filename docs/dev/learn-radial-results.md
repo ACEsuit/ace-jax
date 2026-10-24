@@ -330,6 +330,19 @@ diagnosis (`bench/liquid_floor/radial_diag.py`, `radial_long.py`) found no deriv
 
 Hence the defaults: 300 steps, theta re-fitted every 100, and a gate weighted as the objective.
 
+**Where the time goes, and two fixes** (`bench/liquid_floor/radial_profile.py`, `radial_direct.py`; o4d12
+on 400 configurations, RTX A4500; o4d20 on 100, A100). One learner evaluation was a QR readout (rows +
+merges: 3.0 s / 3.8 s) and a differentiated residual pass through the design rows (8.5 s / 10.1 s, 74-77%);
+a round's theta re-fit (300 Adam steps of the QR LML) took 9 s / 506 s.
+
+- The residual pass now goes through the model's own E/F/V at readout c (`radial_learn._batch_residuals`;
+  the design-row form is kept as `_batch_residuals_rows`, the parity reference): 8.5 s -> 0.73 s (o4d12),
+  10.3 s -> 1.2 s (o4d20), equal to roundoff (gradient 1e-9 relative).
+- `theta_map_linear(opt="lbfgs")` (default): 15 evaluations instead of 300 Adam steps, 8.4 s -> 3.2 s
+  (o4d12), and 186 nats higher in LML from the same warm start: the Adam re-fit was not converged.
+- One evaluation: 11.5 s -> 3.7 s (o4d12). The QR statistics pass is now 81% of it; a warm-started
+  readout (refinement preconditioned by the last QR) is the next step.
+
 ## Caveats
 
 - **L-BFGS had not converged at 40 steps.** Every round in both systems ended
