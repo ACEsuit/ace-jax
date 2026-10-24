@@ -14,7 +14,9 @@ holds compile-time autotuning scratch, so `in_use` (resident after the run: list
 reported beside it."""
 import argparse
 import json
+import os
 import platform
+import signal
 import statistics
 import subprocess
 import sys
@@ -78,16 +80,20 @@ def child(case):
 
 def run_case(case, timeout):
     t0 = time.perf_counter()
+    # own session: a timeout kills the whole group, ptxas included (an orphaned ptxas ran on for minutes)
+    p = subprocess.Popen([sys.executable, __file__, "_child", json.dumps(case)], stdout=subprocess.PIPE,
+                         stderr=subprocess.PIPE, text=True, start_new_session=True)
     try:
-        p = subprocess.run([sys.executable, __file__, "_child", json.dumps(case)], capture_output=True,
-                           text=True, timeout=timeout)
+        stdout, stderr = p.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
+        os.killpg(p.pid, signal.SIGKILL)
+        p.communicate()
         return dict(status="timeout", wall_s=timeout)
     wall = time.perf_counter() - t0
-    for line in p.stdout.splitlines():
+    for line in stdout.splitlines():
         if line.startswith("RESULT "):
             return dict(status="ok", wall_s=wall, **json.loads(line[7:]))
-    err = p.stderr[-4000:]
+    err = stderr[-4000:]
     oom = any(s in err for s in ("RESOURCE_EXHAUSTED", "out of memory", "Out of memory", "OOM"))
     return dict(status="oom" if oom else "error", wall_s=wall, rc=p.returncode,
                 error=None if oom else err[-1500:])
