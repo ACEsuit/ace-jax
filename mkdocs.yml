@@ -116,6 +116,7 @@ nav:
       - Run files (fit.yaml): howto/fit-yaml.md
       - Multi-element fits: howto/multi-element.md
       - ASE calculators: howto/ase.md
+      - Evaluate many structures: howto/batch.md
       - LAMMPS export: howto/lammps.md
       - MD with JAX-MD: howto/jax-md.md
       - Choose float64 or float32: howto/precision.md

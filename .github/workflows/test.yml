@@ -107,7 +107,8 @@ jobs:
     # those skips into failures (tests/conftest.py `require_optional`), so a
     # broken install cannot pass as all-skipped.  lammps-jax's export is pure
     # Python + JAX (no compiled LAMMPS); the `lammps` extra, at the lock's version.
-    # The `jaxmd` extra runs tests/test_jaxmd.py.
+    # The `jaxmd` extra runs tests/test_jaxmd.py and tests/test_batch_md.py; matscipy-neighbours from its
+    # batched-build branch runs ace_jax.batch's "msn" builder (tests/test_batch*.py).
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -123,6 +124,16 @@ jobs:
             jaxcache-${{ runner.os }}-optional-
       - name: Install matscipy-neighbours (C++ source build), lammps-jax and jax-md
         run: uv sync --python 3.12 --extra gp --extra native --extra lammps --extra jaxmd
+      - name: matscipy-neighbours with the batched XLA FFI build (unreleased; libAtoms/matscipy-neighbours#11)
+        # ace_jax.batch's "msn" builder.  A pinned commit of the PR branch, built against this JAX's FFI
+        # headers; drop this step when a release with the XLA handlers is out.
+        env:
+          SETUPTOOLS_SCM_PRETEND_VERSION_FOR_MATSCIPY_NEIGHBOURS: "1.1.1.dev0"   # a git checkout may lack the tags
+        run: |
+          uv pip install scikit-build-core setuptools_scm cmake ninja
+          INC=$(uv run --no-sync python -c "import jax.ffi; print(jax.ffi.include_dir())")
+          uv pip install --no-build-isolation -C cmake.define.JAX_FFI_INCLUDE_DIR="$INC" \
+            "matscipy-neighbours @ git+https://github.com/libAtoms/matscipy-neighbours@ea16b2ceff50ef385b3a4592bae1be97a6ed563b"
       - name: Optional-dependency tests (CPU JAX)
         env:
           JAX_PLATFORM_NAME: cpu
@@ -132,6 +143,7 @@ jobs:
           uv run --no-sync pytest -n 0 -m "not slow"
           tests/test_export_lammps.py tests/test_bench_scaling.py tests/test_calc_jit.py
           tests/test_efv.py tests/test_skin.py tests/test_perf_parity.py tests/test_jaxmd.py
+          tests/test_batch.py tests/test_batch_md.py
       - uses: actions/cache/save@v4
         if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
         with:

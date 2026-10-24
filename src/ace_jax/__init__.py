@@ -14,7 +14,7 @@ from .eval import (ACEModel, load, highest_precision, site_descriptors, species_
                    sparse_graph, dense_graph)
 
 __all__ = ["__version__", "ACEModel", "load", "highest_precision", "site_descriptors", "species_indices",
-           "sparse_graph", "dense_graph", "ACECalculator", "GPCalculator"]
+           "sparse_graph", "dense_graph", "ACECalculator", "BatchCalculator", "GPCalculator"]
 
 
 def __getattr__(name):
@@ -22,6 +22,9 @@ def __getattr__(name):
     if name == "ACECalculator":
         from .calc.point import ACECalculator
         return ACECalculator
+    if name == "BatchCalculator":
+        from .batch import BatchCalculator
+        return BatchCalculator
     if name == "GPCalculator":
         from .calc.gp import GPCalculator
         return GPCalculator

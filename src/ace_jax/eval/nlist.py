@@ -271,3 +271,12 @@ def dense_to_sparse(g: DenseGraph):
     senders = np.repeat(np.arange(n), K).reshape(n, K)[m].astype(np.int32)
     return SparseGraph(g.rij[m], senders, g.idx[m].astype(np.int32),
                        np.zeros((int(m.sum()), 3)), g.n_nodes, None)
+
+
+def cell_widths(cell):
+    """Perpendicular widths (..., 3) of cells (..., 3, 3) (rows: lattice vectors): |det| / |c_{k+1} x
+    c_{k+2}|, the distance between the planes of axis k.  Images within r of a wrapped cell need
+    ceil(r / w_k) along a periodic axis k; JAX-MD's minimum image needs every w_k > 2 r."""
+    cell = np.asarray(cell, float)
+    nrm = np.cross(cell[..., [1, 2, 0], :], cell[..., [2, 0, 1], :])
+    return np.abs(np.linalg.det(cell))[..., None] / np.linalg.norm(nrm, axis=-1)
