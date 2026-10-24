@@ -55,7 +55,8 @@ def child(case):
         nb = bc.neighbour_lists(ats, skin=1.0)
         nl = nb.allocate()
         init, apply = simulate.nve(nb.energy_fn(nl), shift, dt=1.0 / 10.18)
-        p0 = batch.initial_momenta(jax.random.PRNGKey(0), nb.live, 0.01, 28.0855)
+        p0 = batch.initial_momenta(jax.random.PRNGKey(0), nb.live, 0.01, 28.0855,
+                                    dtype=nb.positions.dtype)
         st = [jax.jit(jax.vmap(lambda R, p, nn: init(None, R, kT=0.0, mass=28.0855, momenta=p, neighbor=nn)))(
             nb.positions, p0, nl)]
         step = jax.jit(jax.vmap(lambda s, nn: jax.lax.fori_loop(0, case["steps"], lambda i, x: apply(x, neighbor=nn), s)))

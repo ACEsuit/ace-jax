@@ -267,6 +267,13 @@ def test_matscipy_batched_builder():
     check(res, reference(ACECalculator(m, meta), ats))
 
 
+def test_pack_tail_batch_takes_the_power_of_two_it_needs():
+    ats = [bulk("Si", "diamond", 5.43, cubic=True) for _ in range(11)]
+    bs = pack(ats, 5.0, [14], max_batch_atoms=8 * 8)                    # B = 8 for the 8-atom bucket
+    assert [b.shape[0] for b in bs] == [8, 4]                           # 3 left: 4, not 8
+    assert sorted(int(i) for b in bs for i in b.index if i >= 0) == list(range(11))
+
+
 def test_bucket_size_and_complete_cell():
     sizes = [bucket_size(n) for n in range(1, 2000)]
     assert all(s >= n for n, s in zip(range(1, 2000), sizes)) and sizes == sorted(sizes)

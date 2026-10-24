@@ -70,7 +70,8 @@ the same meaning:
 Two options control the batches:
 
 - `max_batch_atoms` sets the maximum number of atoms in one call. The
-  default is 16384.
+  default is 262144 on a GPU and 16384 on a CPU. On a GPU, 262144 atoms of
+  the Si model use approximately 1 GB in float64.
 - `n_device` sets the largest structure that goes into a batch. Larger
   structures go through `ACECalculator`, one structure at a time. The default
   is 256 atoms, and 16 atoms for the JAX model on a CPU.
@@ -144,7 +145,8 @@ _, shift = space.free()
 init, apply = simulate.nve(energy, shift, dt=1.0 / 10.18)    # 1 fs
 mass = 28.0855
 
-p0 = batch.initial_momenta(jax.random.PRNGKey(0), nb.live, kT=0.025, mass=mass)
+p0 = batch.initial_momenta(jax.random.PRNGKey(0), nb.live, kT=0.025, mass=mass,
+                           dtype=nb.positions.dtype)
 state = jax.vmap(lambda R, p, n: init(None, R, kT=0.0, mass=mass, momenta=p, neighbor=n))(
     nb.positions, p0, nl)
 

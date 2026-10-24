@@ -351,7 +351,7 @@ User page: `docs/user/howto/batch.md`; numbers: `docs/dev/batched-evaluation-res
   `jax.vmap(apply)(state, neighbor=nl)`; check `ov` after the loop and `nb.allocate` on overflow.
   On a GPU a per-step lax.cond syncs with the host (cheap on an idle GPU, costly on a shared one:
   `update_fn(branchless=True)` then); checking every n steps (nested fori_loops) is cheapest. Padding: pass
-  `momenta=batch.initial_momenta(key, nb.live, kT, mass)` to `init` (JAX-MD's own draw gives padding
+  `momenta=batch.initial_momenta(key, nb.live, kT, mass, dtype=nb.positions.dtype)` to `init` (JAX-MD's own draw gives padding
   momenta and removes the COM over all slots, drifting real atoms), `batch.zero_padding` after Langevin,
   `batch.temperature(p, mass, live)`; Nose-Hoover counts padding as DOF -> only unpadded (one-size)
   batches. Tests `tests/test_batch_md.py`.

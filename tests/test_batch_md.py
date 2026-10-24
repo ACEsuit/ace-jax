@@ -150,6 +150,29 @@ def test_vmapped_nve_padding_inert_and_rebuilds(jax_md):
     assert np.abs(finals[0.3] - finals[3.0]).max() < 1e-4
 
 
+def test_vmapped_nve_float32(jax_md):
+    from jax_md import simulate, space
+    ats = structures()
+    _, shift = space.free()
+    pos = {}
+    for dt in (np.float32, None):
+        bc = BatchCalculator(MODEL, dtype=dt)
+        nb = bc.neighbour_lists(ats, skin=1.0)
+        nl = nb.allocate()
+        init, apply = simulate.nve(nb.energy_fn(nl), shift, dt=DT)
+        assert batch.initial_momenta(jax.random.PRNGKey(0), nb.live, 0.05, MASS,
+                                     dtype=nb.positions.dtype).dtype == nb.positions.dtype
+        # one draw for both (jax.random.normal's samples depend on the dtype)
+        p0 = batch.initial_momenta(jax.random.PRNGKey(0), nb.live, 0.05, MASS).astype(nb.positions.dtype)
+        st = jax.jit(jax.vmap(lambda R, p, n, init=init: init(None, R, kT=0.0, mass=MASS, momenta=p, neighbor=n)))(
+            nb.positions, p0, nl)
+        st = jax.jit(jax.vmap(lambda s, n, apply=apply: jax.lax.fori_loop(0, 10, lambda i, x: apply(x, neighbor=n), s)))(
+            st, nl)                                 # float64 momenta here once failed: the loop carry changed dtype
+        assert st.position.dtype == nb.positions.dtype == (dt or np.float64)
+        pos[dt] = np.asarray(st.position, np.float64)
+    assert np.abs(pos[np.float32] - pos[None]).max() < 1e-3
+
+
 def test_vmapped_langevin_matches_single_and_temperature(jax_md):
     from jax_md import simulate, space
     ats = structures()

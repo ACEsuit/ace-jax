@@ -44,6 +44,10 @@ variable.
   call): on 32 cores, MD of 64 Si cells of 8 or 64 atoms is 37 to 48 times
   faster than with the JAX model. `BatchNeighbours.update_fn()` rebuilds the
   lists inside the compiled loop (one batched build, under `lax.cond`).
+  Give `initial_momenta` the positions' `dtype` for a float32 batch.
+  On an A100, batches of 64 to 216 atom cells are 18 to 21 and 8.5 to 9 times
+  faster than `ACECalculator`; a GPU call holds up to 262144 atoms
+  (`max_batch_atoms`), approximately 1 GB in float64 for the Si model.
 - **The C++ kernel in the JAX-MD adapter.** `jaxmd.potential(..., ffi=True)`
   runs the kernel on a CPU: 10 to 18 times faster MD than the JAX model for
   216 to 1728 Si atoms on 32 cores. The adapter and the batched path now share

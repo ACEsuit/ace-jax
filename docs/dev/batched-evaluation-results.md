@@ -51,8 +51,8 @@ The earlier runs, before those changes, are kept as `lestrade-gpu-v2.jsonl`
 - The two builders are within run-to-run noise up to 64 atoms. At 216
   atoms `msn` is 10-20% faster (its image search is pruned by plane distance; the
   `jax` builder visits every image of the range).
-- Batch size: the card saturates at approximately 4k-16k atoms per call.
-  `MAX_BATCH_ATOMS` (16384) sits there.
+- Batch size: most of the gain is in by approximately 4k-16k atoms per call; float32 gains another
+  1.1-1.2x to 2^18 (see "Batch size and device memory" below; `MAX_BATCH_ATOMS` is now 2^18).
 - B = 1 is 2-3x slower than the loop: a batch of one pays the batch path's
   fixed cost without amortising it. `BatchCalculator` is for many structures.
 
@@ -89,8 +89,8 @@ Single points, µs per atom:
   to 8.5x and the 64-atom one from 6.2x to 18x.
 - `msn` beats `jax` by 20-40% at 64-216 atoms and B = 1024 (0.78 against 0.99, 0.79 against 1.10);
   below that they tie.
-- Still improving at B = 1024 for small cells (2 x 1024 atoms is far from saturating 40 GB); larger
-  cells level off at approximately 16k-55k atoms per call, so `MAX_BATCH_ATOMS` (16384) holds.
+- Still improving at B = 1024 for small cells (2 x 1024 atoms is far from saturating 40 GB). Larger
+  cells keep gaining to approximately 256k atoms per call (next section).
 
 Batched MD (`bench/batch/md.py`: JAX-MD NVE under vmap, the JAX model, float64, compacted K and
 batch-sized row blocks, 20 steps per jitted chunk, lists fixed), µs per atom per step:
@@ -106,6 +106,58 @@ batch-sized row blocks, 20 steps per jitted chunk, lists fixed), µs per atom pe
   Below the single-point floor (1.1 µs/atom) because the MD step builds no list and evaluates
   compacted slots.
 - Past approximately 16k-55k atoms per call it gets slightly worse (64 x 1024, 216 x 1024).
+
+## Batch size and device memory
+
+`bench/batch/memory.py`: one batched call per point, the padded atoms per call doubled from 4096 until the
+device runs out (it never did) or 65,536 cells; each point in its own process, peak from
+`peak_bytes_in_use` with `XLA_PYTHON_CLIENT_PREALLOCATE=false` (it includes compile-time autotuning
+scratch, which dominates below ~32k atoms). Builder `msn`, o4d12. Sulis A100-PCIE-40GB (jobs
+2261695/6, 2261710/1; JAX may use 31.8 GB of it) and lestrade RTX 4000 Ada (20 GB; idle);
+`runs/batch/sulis/sulis-a100-memory.jsonl`, `runs/batch/lestrade-gpu-memory.jsonl`.
+
+Single points (`calculate`), peak GB and µs per atom, 64- and 216-atom cells:
+
+| padded atoms | A100 f32 64 | A100 f32 216 | A100 f64 64 | A100 f64 216 | Ada f32 64 | Ada f64 64 |
+|--:|--:|--:|--:|--:|--:|--:|
+| 16k | 0.16, 1.01 | 0.16, 1.07 | 0.17, 1.26 | 0.17, 1.36 | 0.14, 0.80 | 0.31, 2.83 |
+| 64k | 0.22, 0.90 | 0.22, 0.91 | 0.42, 0.97 | 0.42, 1.17 | 0.29, 0.71 | 0.42, 2.60 |
+| 256k | 0.89, 0.67 | 0.60, 0.61 | 1.07, 0.79 | 0.88, 0.78 | 0.88, 0.66 | 1.04, 2.51 |
+| 1M | 2.32, 0.65 | 2.32, 0.61 | 3.63, 0.78 | 3.63, 0.77 | 2.32, 0.63 | 3.56, 2.50 |
+| 4M | 9.0, 0.70 | 9.0, 0.63 | 14.1, 0.82 | 14.1, 0.78 | | |
+
+- Memory is not the limit. Above ~256k atoms the peak grows linearly: 2.2 KB per padded atom in
+  float32, 3.4 KB in float64 (row blocks bound the model's temporaries; lists, rij and forces remain).
+  The A100 would hold approximately 9M float64 atoms per call, the Ada card approximately 4M.
+- Speed: on the A100, 64-216 atom cells run 1.6-1.7x faster at 256k atoms per call than at 16k, flat
+  to 1M, slightly slower at 4M. On the Ada card float32 gains 1.1-1.2x, float64 (fp64-bound there) 5%
+  past 32k.
+- 2- and 8-atom cells gain little past 16k atoms on either card (A100: 7 and 2.0-2.2 µs/atom, Ada
+  float32 8-atom 1.24 to 1.10).
+- Hence `MAX_BATCH_ATOMS` = 2^18 on a GPU (~1 GB in float64 for o4d12). The CPU keeps 2^14
+  (`MAX_BATCH_ATOMS_CPU`, not measured here). With a larger B, a bucket's last batch takes the power
+  of two its structures need (`pack`), so a short tail is not padded to the full B.
+
+Batched MD (JAX-MD NVE under vmap, float64, 10 steps per jitted chunk; the cell count is the
+caller's: `neighbour_lists` puts every structure in one batch, `MAX_BATCH_ATOMS` does not apply),
+peak GB and µs per atom per step:
+
+| padded atoms | A100 8 | A100 64 | A100 216 | Ada 64 | Ada 216 |
+|--:|--:|--:|--:|--:|--:|
+| 16k | 0.78, 0.41 | 0.31, 0.54 | 0.31, 0.57 | 0.20, 2.14 | 0.20, 2.53 |
+| 64k | | 0.46, 0.41 | 0.46, 0.43 | 0.57, 2.25 | 0.57, 2.57 |
+| 256k | | 1.99, 0.42 | 1.76, 0.49 | 1.98, 1.96 | 1.98, 2.72 |
+| 1M | | | 7.36, 0.50 | 7.36, 2.62 | 7.36, 2.34 |
+
+- About 7 KB per atom at 1M (state, lists at cutoff + skin, forces): the A100 holds ~4M atoms of
+  batched MD, the Ada card ~2M.
+- The A100 is best at 32k-128k atoms (0.37-0.45 µs/atom/step); beyond, slightly slower.
+- **Slow A100 compiles.** About one shape in three took ~10 minutes to compile on Sulis, all of it in
+  `ptxas` (100% of one core, 8.5 GB RSS): 2-atom 4096 and 8192, 8-atom 4096 and 16384, 64-atom 8192
+  and 32768, 216-atom 8192 (and timeouts at 2-atom 16k, 8-atom 64k, 64-atom 512k). The same shapes
+  compile in seconds on lestrade's RTX 4000 Ada with the same jaxlib 0.11.2 and ptxas
+  (nvidia-cuda-nvcc 12.9.86), so it is the sm_80 target or the node. Not investigated further; float32
+  MD on lestrade first failed on a float64 momentum (`initial_momenta` now takes `dtype`).
 
 ## CPU (lestrade, 32 cores, float64)
 
@@ -237,7 +289,8 @@ so both take the kernel.
 
 | setting | value | from |
 |---|---|---|
-| `MAX_BATCH_ATOMS` | 16384 | GPU saturation, above |
+| `MAX_BATCH_ATOMS` | 2^18 (262144) | GPU speed and memory, "Batch size and device memory" |
+| `MAX_BATCH_ATOMS_CPU` | 2^14 (16384) | not measured above it |
 | `N_DEVICE` | 256 | all-pairs cost O(N^2 S); 216-atom cells still gain on the GPU |
 | `N_DEVICE_CPU_JAX` | 16 | JAX model on a CPU, above |
 | `CPU_ALLPAIRS_MAX` | 512 | CPU build split, above |
@@ -245,6 +298,5 @@ so both take the kernel.
 
 ## Not yet measured
 
-- `MAX_BATCH_ATOMS` against device memory (`bench/gpu_memory`); the
-  default is far below what either card holds for o4d12.
+- `MAX_BATCH_ATOMS_CPU` above 2^14; the slow A100 `ptxas` compiles.
 - Mixed-size streams: compile counts per bucket in practice.

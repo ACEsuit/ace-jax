@@ -42,9 +42,14 @@ N_DEVICE_CPU_JAX = 16
 # candidates per atom (N S, padded), a cell list per structure on the host above (lestrade, C++ kernel:
 # all pairs 5 / 3.4 us per atom against 39 / 13 for 2- / 8-atom cells; 15 against 5.6 at 64 atoms).
 CPU_ALLPAIRS_MAX = 512
-# Default cap on the padded atoms of one batch (B x N).  B for a bucket is the largest power of two
-# within it (and no larger than the bucket's structure count rounded up to one).
-MAX_BATCH_ATOMS = 2 ** 14
+# Default cap on the padded atoms of one batch (B x N) on a GPU.  B for a bucket is the largest power of
+# two within it (and no larger than the bucket's structure count rounded up to one).  Sulis A100, o4d12:
+# 64-216 atom cells run 1.6x faster per atom at 2^18 than at 2^14 (lestrade RTX 4000 Ada float32 1.2x,
+# float64 the same); 2^18 atoms peak at ~1.1 GB in float64 (3.4 KB per atom to 4M atoms, never OOM);
+# docs/dev/batched-evaluation-results.md, bench/batch/memory.py.
+MAX_BATCH_ATOMS = 2 ** 18
+# The same on a CPU (not measured above 2^14 there).
+MAX_BATCH_ATOMS_CPU = 2 ** 14
 # Bytes the JAX builder may hold for one lax.map step: its (b, N, N*S, 3) image distances and copies.
 SCRATCH_BYTES = 256 * 2 ** 20
 
@@ -112,8 +117,9 @@ class Batch:
 
 def pack(atoms_list, cutoff, elements, max_batch_atoms=None, indices=None, one_batch=False):
     """Padded batches of `atoms_list` (ASE Atoms), grouped by `bucket_size` of the atom count: a list of
-    `Batch`, every batch of a bucket with the same B (the last one padded with empty structures, so B does
-    not recompile).  `elements`: the model's atomic numbers (the species index order).  `indices`: the
+    `Batch`, every batch of a bucket with the same B except the last, which takes the power of two its
+    structures need (padded with empty structures: a few B shapes per bucket, not a recompile per count,
+    and a short tail is not padded to a large B).  `elements`: the model's atomic numbers (the species index order).  `indices`: the
     input positions recorded in `Batch.index` (default 0..len-1).  `cutoff`: the list cutoff the image
     ranges are for (cutoff + skin for MD).  `one_batch=True`: a list of one Batch holding every structure,
     padded to the largest one's bucket, B = len(atoms_list) (the layout for vmapped MD)."""
@@ -131,7 +137,8 @@ def pack(atoms_list, cutoff, elements, max_batch_atoms=None, indices=None, one_b
         B = min(1 << (max(cap // N, 1).bit_length() - 1),          # the largest power of two within cap
                 1 << (len(members) - 1).bit_length())              # no more than the bucket needs
         for start in range(0, len(members), B):
-            out.append(_pack_one(members[start:start + B], B, N, cutoff, lut))
+            chunk = members[start:start + B]
+            out.append(_pack_one(chunk, min(B, 1 << (len(chunk) - 1).bit_length()), N, cutoff, lut))
     return out
 
 
@@ -359,15 +366,17 @@ def _mass_like(mass, live):
     return jnp.broadcast_to(m, live.shape)[..., None]
 
 
-def initial_momenta(key, live, kT, mass=1.0):
+def initial_momenta(key, live, kT, mass=1.0, dtype=None):
     """Maxwell-Boltzmann momenta (..., N, 3) at kT for the live atoms only, the centre-of-mass momentum
     removed over the live atoms of each structure, zero on padding.  Pass as `momenta=` to a JAX-MD
     `init_fn`: its own draw gives padding atoms momenta and removes the centre of mass over every slot,
-    which drifts the live atoms of a padded structure.  `mass`: a scalar or per atom (..., N)."""
+    which drifts the live atoms of a padded structure.  `mass`: a scalar or per atom (..., N).  `dtype`:
+    the positions' (`nb.positions.dtype`) for a float32 batch under x64; default the float default (a
+    float64 momentum would promote float32 positions, and JAX-MD's loop carry refuses the change)."""
     import jax
     import jax.numpy as jnp
     live = jnp.asarray(live)
-    m = _mass_like(mass, live)
+    m = _mass_like(mass, live).astype(dtype or jnp.result_type(float))
     p = jnp.sqrt(m * kT) * jax.random.normal(key, live.shape + (3,), m.dtype)
     lv = live[..., None]
     P = jnp.where(lv, p, 0.0).sum(-2, keepdims=True)
@@ -593,7 +602,8 @@ class BatchCalculator:
     agree with `ACECalculator` structure by structure to roundoff.
 
     Structures up to `n_device` atoms are padded into buckets (`pack`) and evaluated `max_batch_atoms`
-    padded atoms per call; larger ones go through `calc` one at a time (`n_device` None: `N_DEVICE`, or
+    padded atoms per call (None: `MAX_BATCH_ATOMS`, `MAX_BATCH_ATOMS_CPU` on a CPU); larger ones go through
+    `calc` one at a time (`n_device` None: `N_DEVICE`, or
     `N_DEVICE_CPU_JAX` for the JAX model on a CPU, where batching gains only on the smallest cells).  `builder` picks the neighbour
     lists: "msn" (matscipy-neighbours' batched XLA FFI, one call per batch, CPU or CUDA), "jax" (all
     pairs over images on the device, `neighbours`: fine on a GPU, 10-40 us per atom on a CPU), "host"
@@ -620,7 +630,7 @@ class BatchCalculator:
         if builder == "auto" and (_msn_batched() is not None or not cpu):
             builder = "msn" if _msn_batched() is not None else "jax"
         self.builder = builder           # "auto" here: per batch on a CPU (`_builder_for`)
-        self.max_batch_atoms = int(max_batch_atoms or MAX_BATCH_ATOMS)
+        self.max_batch_atoms = int(max_batch_atoms or (MAX_BATCH_ATOMS_CPU if cpu else MAX_BATCH_ATOMS))
         self.n_device = int(n_device if n_device is not None
                             else N_DEVICE_CPU_JAX if cpu and self.calc.ffi is None else N_DEVICE)
         self._K = {}                     # bucket N -> neighbour slots, grown on overflow
