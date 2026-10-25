@@ -19,6 +19,10 @@ variable.
   reason, and the bundle records it as `ace_jax.ffi_reason`. A missing compiler
   no longer stops the export. `--ffi` (`ffi=True`) requires the kernel and
   `--no-ffi` (`ffi=False`) turns it off. GPU bundles are unchanged.
+- **Faster GPU compiles for single-species ACE models.** The analytic radial
+  is now a matrix multiply when the model has one species. For batched MD on
+  an A100, the previous form made the compile take approximately 10 minutes.
+  Multi-species models are unchanged.
 
 ### Added
 

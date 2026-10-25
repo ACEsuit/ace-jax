@@ -196,7 +196,13 @@ class ACEModel(EdgeSiteModel):
             val = spline_eval_pairs(x, coefs, zi, zj, x0, h, n)     # never coefs[zi, zj]
         elif kind == "analytic":
             P = poly_recursion(x, *ABC)                        # (E, n_q)
-            val = jnp.einsum("eq,enq->en", P, Wnlq[zi, zj])    # (E, n_rnl)
+            if Wnlq.shape[:2] == (1, 1):
+                # one species: a plain (E, q) x (q, n) dot.  The per-edge gathered contraction becomes a
+                # reduce fusion whose fusion-autotuner candidates took ptxas ~580 s on an A100 under vmap
+                # (docs/dev/batched-evaluation-results.md); the dot is also ~3% faster
+                val = P @ Wnlq[0, 0].T
+            else:
+                val = jnp.einsum("eq,enq->en", P, Wnlq[zi, zj])    # (E, n_rnl)
         else:
             raise ValueError(f"unknown radial_kind {kind!r}")
         return val * env[:, None]

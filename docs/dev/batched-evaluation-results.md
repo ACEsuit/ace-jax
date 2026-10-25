@@ -152,12 +152,22 @@ peak GB and µs per atom per step:
 - About 7 KB per atom at 1M (state, lists at cutoff + skin, forces): the A100 holds ~4M atoms of
   batched MD, the Ada card ~2M.
 - The A100 is best at 32k-128k atoms (0.37-0.45 µs/atom/step); beyond, slightly slower.
-- **Slow A100 compiles.** About one shape in three took ~10 minutes to compile on Sulis, all of it in
-  `ptxas` (100% of one core, 8.5 GB RSS): 2-atom 4096 and 8192, 8-atom 4096 and 16384, 64-atom 8192
-  and 32768, 216-atom 8192 (and timeouts at 2-atom 16k, 8-atom 64k, 64-atom 512k). The same shapes
-  compile in seconds on lestrade's RTX 4000 Ada with the same jaxlib 0.11.2 and ptxas
-  (nvidia-cuda-nvcc 12.9.86), so it is the sm_80 target or the node. Not investigated further; float32
-  MD on lestrade first failed on a float64 momentum (`initial_momenta` now takes `dtype`).
+- **Slow A100 compiles.** Every shape took ~10 minutes to compile on Sulis with the persistent compile
+  cache off (with it on, only about one in three did: 2-atom 4096 and 8192, 8-atom 4096 and 16384, 64-atom
+  8192 and 32768, 216-atom 8192; the rest were cache hits), all of it in one `ptxas` call (~580 s, 8.5 GB RSS,
+  plus one of ~68 s) while compiling the vmapped JAX-MD `init`.  Cause: XLA's fusion autotuner.  The radial
+  contraction `einsum("eq,enq->en", P, Wnlq[zi, zj])` in `ACEModel._radial_one` (a per-edge gathered
+  weight) becomes a reduce fusion, and the autotuner compiles candidate kernels for it: shuffle-heavy,
+  256-thread PTX, 49,232 lines on the A100 (6,905 on lestrade's RTX 4000 Ada, where ptxas takes 1.8 s).
+  The kernel XLA keeps is small.  On the Ada the candidates go with
+  `--xla_gpu_experimental_enable_fusion_autotuner=false` or `--xla_gpu_autotune_level=0` (step time
+  unchanged); capping the unroll factor (`--xla_gpu_experimental_max_unroll_factor` 1 or 2) does not help
+  on the A100 (init 588 s, 587 s).  A deviceless A100 compile (`jax.experimental.topologies` with XLA's
+  `a100_sxm_40.txtpb`) does not reproduce it, since it skips autotuning.  Fix: for one species the
+  contraction is a plain `P @ Wnlq[0, 0].T` (a GEMM fusion; no reduce, no such candidates; step 3.5% faster
+  on the Ada, forces equal to 2e-13).  Multi-species models keep the einsum: set the flag above if they
+  compile slowly.  A100 confirmation of the fix is pending.  Float32 MD on lestrade first failed on a
+  float64 momentum (`initial_momenta` now takes `dtype`).
 
 ## CPU (lestrade, 32 cores, float64)
 
@@ -298,5 +308,5 @@ so both take the kernel.
 
 ## Not yet measured
 
-- `MAX_BATCH_ATOMS_CPU` above 2^14; the slow A100 `ptxas` compiles.
+- `MAX_BATCH_ATOMS_CPU` above 2^14; the A100 compile time with the single-species GEMM radial.
 - Mixed-size streams: compile counts per bucket in practice.
