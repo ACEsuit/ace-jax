@@ -324,6 +324,38 @@ load; faster only at large `nradbase`). Values are unchanged to roundoff.
   function. `pip install "ace-jax[native]"` (matscipy-neighbours,
   a C++ source build) gives faster neighbour lists; ASE's list is the fallback.
 
+### Batched evaluation (many small structures)
+
+`ace_jax.batch.BatchCalculator(model, **ACECalculator evaluation options, max_batch_atoms=None,
+n_device=None, builder="auto").calculate(atoms_list)` -> `BatchResults` (`energy` (n,), `forces` list,
+`stress` (n, 6) NaN unless fully periodic, `virial` (n, 3, 3), `e0_offset`, `timing`; `.to_atoms(atoms_list)`).
+User page: `docs/user/howto/batch.md`; numbers: `docs/dev/batched-evaluation-results.md`.
+
+- Pads structures into size buckets (`batch.pack`), builds each batch's lists in one step, evaluates
+  B x N rows as one dense block (`batch.efv`). Agrees with `ACECalculator` to roundoff; same option
+  resolution (it builds one inside, `bc.calc`).
+- Use it for screening, phonon displacements, committee pools; `aj eval` already uses it (no
+  posterior/GP). Not for one or two structures (slower), not for MD (no integrators in ace-jax).
+- GPU: 28-54x over one-structure-per-call for 2-8 atom Si cells, 5-7x at 64. CPU: only with
+  `ffi=True` (19-52x small cells, 2.4x at 64); the JAX model barely gains on a CPU, so there
+  `n_device` defaults to 16 (bigger structures go through `ACECalculator`).
+- `builder`: "msn" (matscipy-neighbours' batched XLA FFI, when installed), "jax" (all pairs over
+  images, GPU), "host" (cell list per structure); "auto" picks.
+- Batched MD / relaxation = JAX-MD's own `simulate.*` / `minimize.*` under `jax.vmap` (ace-jax hosts no
+  integrators): `nb = bc.neighbour_lists(structures, skin)` (one padded batch; `nb.positions`, `nb.live`,
+  `nb.unpad`), `nl = nb.allocate()`, `energy = nb.energy_fn(nl)` (`energy(R, neighbor=nl_slice)`; K slots from
+  the in-cutoff capacity x1.2, row blocks sized for the batch; `bc.energy_fn()` evaluates every list slot;
+  on a CPU use `ffi=True`: the kernel vmaps into one threaded call, 37-48x the JAX model), `space.free()`; jit(vmap) a fori_loop chunk, then `nl, rebuilt = nb.update(state.position, nl)`
+  between chunks (skin/2 test, K grows on overflow -> recompile), or inside the jitted loop with
+  `update = nb.update_fn()`: `nl, rebuilt, ov = update(state.position, nl)` then
+  `jax.vmap(apply)(state, neighbor=nl)`; check `ov` after the loop and `nb.allocate` on overflow.
+  On a GPU a per-step lax.cond syncs with the host (cheap on an idle GPU, costly on a shared one:
+  `update_fn(branchless=True)` then); checking every n steps (nested fori_loops) is cheapest. Padding: pass
+  `momenta=batch.initial_momenta(key, nb.live, kT, mass, dtype=nb.positions.dtype)` to `init` (JAX-MD's own draw gives padding
+  momenta and removes the COM over all slots, drifting real atoms), `batch.zero_padding` after Langevin,
+  `batch.temperature(p, mass, live)`; Nose-Hoover counts padding as DOF -> only unpadded (one-size)
+  batches. Tests `tests/test_batch_md.py`.
+
 ### JAX-MD (MD fully on the device)
 
 `pip install "ace-jax[jaxmd]"`. User page: `docs/user/howto/jax-md.md`.
@@ -357,6 +389,9 @@ init, apply = simulate.nve(pot.force, shift, 1.0 / 10.18)   # dt 1 fs (time unit
   move. Too small a K, or an overflowed list (Dense or Sparse), makes
   energy and forces NaN, never truncated; `pot.overflow` is the explicit check.
 - Sparse JAX-MD lists work without `K` (K is refused for them).
+- CPU: `potential(..., ffi=True)` runs the C++ kernel (linear ACE, float64; stress fine, no second
+  derivatives): 10-18x the JAX model for 216-1728 Si atoms on 32 cores. The dense energy core is
+  shared with the batched path (`eval/dense.py`).
 - Memory: rows run in blocks (`chunk="auto"`: `jaxmd.block_rows`, the lammps-jax
   bundles' `block_rows_for` rule, lax.map + checkpoint above one block). An int
   `chunk` fixes it: one large block avoids the checkpoint recompute (faster for

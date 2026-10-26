@@ -19,9 +19,45 @@ variable.
   reason, and the bundle records it as `ace_jax.ffi_reason`. A missing compiler
   no longer stops the export. `--ffi` (`ffi=True`) requires the kernel and
   `--no-ffi` (`ffi=False`) turns it off. GPU bundles are unchanged.
+- **Faster GPU compiles for single-species ACE models.** The analytic radial
+  is now a matrix multiply when the model has one species. For batched MD on
+  an A100, the compile now takes approximately 5 seconds, not 10 minutes.
+  Multi-species models are unchanged.
 
 ### Added
 
+- **Batched evaluation.** `ace_jax.batch.BatchCalculator(model).calculate(structures)`
+  gives the energy, forces and stress of many structures in a small number of
+  compiled calls: structures of similar size are padded into one batch, and
+  the neighbour lists of a batch are made in one step. It accepts the
+  evaluation options of `ACECalculator` and agrees with it to roundoff. On a
+  GPU, 1024 Si cells of 2 or 8 atoms are 35 to 72 times faster than
+  `ACECalculator` one structure per call, 64-atom cells 6 to 11 times. On a
+  CPU it needs the C++ kernel (`ffi=True`): 25 to 35 times for 2 and 8
+  atoms, 3.5 times for 64 (with matscipy-neighbours' batched build; 19 to 52
+  and 2.4 times without it). `aj eval` uses it when no posterior or GP model is
+  given. Guide: "Evaluate many structures".
+- **Batched MD and relaxation with JAX-MD.** JAX-MD's integrators and
+  optimisers run over a batch of structures with `jax.vmap`:
+  `BatchCalculator.neighbour_lists(structures, skin)` gives the padded batch
+  and its neighbour lists (any cell size, rebuilt by `update` when an atom
+  moves skin / 2), `BatchCalculator.energy_fn()` the energy of one structure,
+  and `ace_jax.batch.initial_momenta`, `zero_padding` and `temperature` keep
+  the padding atoms out of the dynamics and the temperatures. With `ffi=True`
+  the C++ kernel runs under `jax.vmap` (the batch becomes one threaded kernel
+  call): on 32 cores, MD of 64 Si cells of 8 or 64 atoms is 37 to 48 times
+  faster than with the JAX model. `BatchNeighbours.update_fn()` rebuilds the
+  lists inside the compiled loop (one batched build, under `lax.cond`).
+  Give `initial_momenta` the positions' `dtype` for a float32 batch.
+  On an A100, batches of 64 to 216 atom cells are 18 to 21 and 8.5 to 9 times
+  faster than `ACECalculator`; a GPU call holds up to 262144 atoms
+  (`max_batch_atoms`), approximately 1 GB in float64 for the Si model.
+- **The C++ kernel in the JAX-MD adapter.** `jaxmd.potential(..., ffi=True)`
+  runs the kernel on a CPU: 10 to 18 times faster MD than the JAX model for
+  216 to 1728 Si atoms on 32 cores. The adapter and the batched path now share
+  one energy core, so the batched path also compacts the neighbour slots
+  (`BatchNeighbours.energy_fn`), evaluates rows in blocks, and gives NaN, not a
+  truncated list, when a structure outgrows its neighbour lists.
 - **The C++ kernel in the ASE calculator.** `ACECalculator(..., ffi=True)`
   calculates energy, forces and stress of a linear ACE model with the C++
   kernel on CPUs, on all cores (XLA's thread pool; `ffi_threads` sets fewer).
@@ -43,6 +79,8 @@ variable.
 
 ### Fixed
 
+- `ACECalculator` no longer fails on a structure with no cell (a cluster with
+  a zero cell): ASE's `get_volume` raised. The stress needs a non-zero volume.
 - **Skin-list rebuilds on the CPU were slow.** Matching each edge to its reverse
   (two sorts over every skin edge) took approximately 90% of a rebuild: 93 of
   106 ms at 4,096 atoms. The match only helps on a GPU, so the CPU now uses the

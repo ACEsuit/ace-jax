@@ -293,9 +293,10 @@ def cmd_eval(a):
     arrays <prefix>forces (eV/A); a gp_model.npz adds info <prefix>energy_std and arrays
     <prefix>forces_std, --posterior (ARD) arrays <prefix>forces_std.  The structures go
     through the ase-extxyz plugin (create_calc=False: no label moves into a calculator).
-    Every model goes through its jitted calculator: the edge list is padded to buckets,
-    so configs of similar size share one compile.  A linear model is evaluated exactly
-    (lean, never splined: spline_tol=None)."""
+    Without a posterior or GP, every config is evaluated in batches (`batch.BatchCalculator`:
+    configs padded into size buckets, neighbour lists built on the device, one compile per
+    bucket); with one, config by config through its calculator.  A linear model is evaluated
+    exactly (lean, never splined: spline_tol=None)."""
     from ase import Atoms
     from ase.stress import voigt_6_to_full_3x3_stress
     from .fit.data import VOIGT
@@ -320,10 +321,14 @@ def cmd_eval(a):
         from .calc.gp import GPCalculator          # --posterior: the posterior.npz of `fit --uq ard-gp`
         calc = GPCalculator.from_file(a.model, deriv_dtc=not getattr(a, "no_deriv_dtc", False),
                                       posterior=a.posterior if ard else None)
-    else:
+    elif ard:
         from .calc.point import ACECalculator
-        calc = ACECalculator(a.model, posterior=a.posterior if ard else None, spline_tol=None,
-                             **({"shape_path": a.shape_path} if ard else {}))
+        calc = ACECalculator(a.model, posterior=a.posterior, spline_tol=None, shape_path=getattr(a, "shape_path", "rows"))
+    batch = None
+    if not gp and not ard:            # no per-config uncertainty: the whole dataset in batches
+        from .batch import BatchCalculator
+        batch = BatchCalculator(a.model, spline_tol=None).calculate(
+            [Atoms(numbers=c.numbers, positions=c.positions, cell=c.cell, pbc=c.pbc) for c in configs])
     # --per-atom (ARD): a separate extxyz of the served per-atom arrays, unprefixed
     # (forces_pred, forces_std, forces_q, forces_group, forces_cov, forces_q_mahal, support_*)
     per_atom, served = [], {}
@@ -348,9 +353,13 @@ def cmd_eval(a):
     with highest_precision():
         for i, c in enumerate(configs):
             at = Atoms(numbers=c.numbers, positions=c.positions, cell=c.cell, pbc=c.pbc)
-            at.calc = calc
-            E, F = float(at.get_potential_energy()), np.asarray(at.get_forces())
-            S = np.asarray(at.get_stress()) if at.pbc.all() else None          # Voigt xx yy zz yz xz xy
+            if batch is not None:
+                E, F = float(batch.energy[i]), batch.forces[i]
+                S = batch.stress[i] if at.pbc.all() else None
+            else:
+                at.calc = calc
+                E, F = float(at.get_potential_energy()), np.asarray(at.get_forces())
+                S = np.asarray(at.get_stress()) if at.pbc.all() else None      # Voigt xx yy zz yz xz xy
             Em.append(E); Fm.append(F)
             Vm.append(np.full(6, np.nan) if S is None else -S * at.get_volume())   # the virial, VOIGT order
             s_ard = (np.asarray(calc.get_property("forces_std", at))           # on request: E/F reused

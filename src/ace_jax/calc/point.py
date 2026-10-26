@@ -530,7 +530,7 @@ class ACECalculator(Calculator):
             math.fsum(self._e0[self._species_index(self.atoms.get_atomic_numbers())])
             if self._energy_reference == "E0" else 0.0)
         self.results["forces"] = np.asarray(F)
-        vol = self.atoms.get_volume()
+        vol = abs(float(np.linalg.det(self.atoms.get_cell().array)))   # get_volume raises on a cluster's zero cell
         if vol > 0:
             # ASE stress is -virial/volume, Voigt-ordered
             s = -np.asarray(V) / vol

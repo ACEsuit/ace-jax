@@ -1,7 +1,22 @@
 # Batched evaluation of many structures (design)
 
-Status: draft for review, 2026-10-23. Phase 1 of the batched-simulation plan; phases 2-3 are sketched so that
-phase 1's layout serves them.
+Status: phase 1 implemented, 2026-10-23 (`ace_jax.batch`; results and the measured defaults in
+`docs/dev/batched-evaluation-results.md`). Phases 2-3 are sketched so that phase 1's layout serves them.
+Departures from the design below, from the measurements: on a CPU the neighbour lists are built per
+structure on the host for all but the smallest cells (`host_neighbours`), since the all-pairs builder
+costs 10-40 µs per atom there; the JAX model on a CPU batches only structures up to 16 atoms (it gains
+nothing above); evaluation is one dense block of B x N rows rather than a vmap; and `ACECalculator`'s
+option resolution is reused by building one inside `BatchCalculator`, not by refactoring it out.
+Design 7 (JAX-MD under vmap) is implemented too, for a fixed cell: `BatchCalculator.energy_fn`,
+`neighbour_lists` -> `BatchNeighbours` (`allocate`, `update`, `needs_rebuild`, `unpad`) and the padding
+helpers `initial_momenta`, `zero_padding`, `temperature`. Checked: vmapped FIRE, NVE and Langevin equal
+the per-structure runs; padding found two leaks (JAX-MD's init gives padding atoms momenta and removes
+the centre of mass over every slot; Nose-Hoover counts padding as degrees of freedom). The C++ kernel
+vmaps too (a flattening `custom_vmap` rule on its FFI call), 37-48x the JAX model for batched MD on a CPU.
+The adapter (`jaxmd.potential`) and the batched path share one dense energy core (`eval/dense.py`): K
+compaction, NaN on overflow, row blocks; the kernel runs under both. A CUDA FFI kernel (coming) is to
+plug in the same way: an EdgeSiteModel whose FFI call has the row-flattening vmap rule, selected by
+`ACECalculator._ffi_choice` on a GPU backend.
 
 ## Goal and scope
 

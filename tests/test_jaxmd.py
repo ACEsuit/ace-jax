@@ -202,3 +202,35 @@ def test_overflow_flag_marks_a_tight_K_and_an_overflowed_list(cell):
     tight = jaxmd.potential(str(MODEL), disp, at.numbers, K=k - 8)
     assert not bool(jax.jit(ok.overflow)(R, nb)) and np.isfinite(float(ok.energy(R, nb)))
     assert bool(jax.jit(tight.overflow)(R, nb)) and np.isnan(float(tight.energy(R, nb)))
+
+
+def _need_kernel():
+    import os
+    import shutil
+    if jax.default_backend() != "cpu" or shutil.which("c++") is None:
+        if os.environ.get("ACEJAX_REQUIRE_OPTIONAL") and jax.default_backend() == "cpu":
+            pytest.fail("no C++ compiler for the FFI kernel")
+        pytest.skip("the C++ kernel needs a CPU and a compiler")
+
+
+@pytest.mark.parametrize("compact", [False, True])
+def test_the_kernel_through_the_adapter(cell, compact):
+    """ffi=True: the C++ kernel behind JAX-MD's energy contract (one structure).  Energy, forces and
+    stress (through box=, the kernel's custom VJP in rij) equal ACECalculator(ffi=True)'s, which reads
+    the same radial table; and the potential vmaps over a batch of equal cells (one kernel call)."""
+    _need_kernel()
+    at, _, box, disp, _, R = cell
+    calc = ACECalculator(str(MODEL), ffi=True)
+    a = at.copy()
+    a.calc = calc
+    E0, F0, S0 = a.get_potential_energy(), a.get_forces(), a.get_stress(voigt=False)
+    pot = jaxmd.potential(str(MODEL), disp, at.numbers, ffi=True)
+    _, nb = _list(disp, box, pot.cutoff, R)
+    if compact:
+        pot = jaxmd.potential(str(MODEL), disp, at.numbers, ffi=True, K=jaxmd.capacity(R, nb, disp, pot.cutoff))
+    assert abs(float(jax.jit(pot.energy)(R, nb)) - E0) < 1e-10 * len(at)
+    np.testing.assert_allclose(jax.jit(pot.force)(R, nb), F0, atol=1e-10)
+    np.testing.assert_allclose(quantity.stress(pot.energy, R, box, neighbor=nb), -S0, atol=1e-12)
+    Rb = jnp.stack([R, R + 1e-3])                                  # a batch of two equal-size cells
+    Eb = jax.jit(jax.vmap(lambda r: pot.energy(r, nb)))(Rb)
+    assert abs(float(Eb[0]) - E0) < 1e-10 * len(at) and np.isfinite(np.asarray(Eb)).all()

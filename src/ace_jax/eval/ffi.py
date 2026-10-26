@@ -219,12 +219,39 @@ def lammps_fns(model, n_species, type_map, rcut):
     return energy_fn, (lambda *a: call(*a)[1])
 
 
-def _edge_call(attrs, rij, node_z, zj, mask, consts):
-    """AceEdges: site energies (rows,) and dE_i / drij (rows, K, 3)."""
-    out = (jax.ShapeDtypeStruct(node_z.shape, rij.dtype), jax.ShapeDtypeStruct(rij.shape, rij.dtype))
+@functools.lru_cache(maxsize=64)
+def _edge_kernel(attrs):
+    """The AceEdges call for these attributes, with a batching rule: rows are independent, so under
+    jax.vmap the batch is flattened into rows -- (B, rows, K, 3) -> (B rows, K, 3), ONE kernel call threaded
+    over all of them -- and the outputs reshaped back.  Exact (the same per-row arithmetic).  Unbatched row
+    inputs are broadcast to the batch; batched model constants (a different model per batch element) fall
+    back to one call per element (lax.map)."""
     kw = {k: np.float64(v) if isinstance(v, float) else np.int64(v) for k, v in attrs}
-    return jax.ffi.ffi_call(EDGE_TARGET, out)(rij, node_z.astype(jnp.int32), zj.astype(jnp.int32),
-                                              mask.astype(bool), *consts, **kw)
+
+    @jax.custom_batching.custom_vmap
+    def call(rij, node_z, zj, mask, *consts):
+        out = (jax.ShapeDtypeStruct(node_z.shape, rij.dtype), jax.ShapeDtypeStruct(rij.shape, rij.dtype))
+        return jax.ffi.ffi_call(EDGE_TARGET, out)(rij, node_z, zj, mask, *consts, **kw)
+
+    @call.def_vmap
+    def rule(axis_size, in_batched, rij, node_z, zj, mask, *consts):
+        if any(in_batched[4:]):
+            rows = [a if b else jnp.broadcast_to(a, (axis_size,) + a.shape)
+                    for a, b in zip((rij, node_z, zj, mask, *consts), in_batched)]
+            return jax.lax.map(lambda xs: call(*xs), tuple(rows)), (True, True)
+        rij, node_z, zj, mask = (a if b else jnp.broadcast_to(a, (axis_size,) + a.shape)
+                                 for a, b in zip((rij, node_z, zj, mask), in_batched[:4]))
+        lead = rij.shape[:2]
+        flat = lambda a: a.reshape((-1,) + a.shape[2:])
+        e, g = call(flat(rij), flat(node_z), flat(zj), flat(mask), *consts)
+        return (e.reshape(lead), g.reshape(lead + g.shape[1:])), (True, True)
+
+    return call
+
+
+def _edge_call(attrs, rij, node_z, zj, mask, consts):
+    """AceEdges: site energies (rows,) and dE_i / drij (rows, K, 3); vmappable (`_edge_kernel`)."""
+    return _edge_kernel(attrs)(rij, node_z.astype(jnp.int32), zj.astype(jnp.int32), mask.astype(bool), *consts)
 
 
 @functools.partial(jax.custom_vjp, nondiff_argnums=(0,))
