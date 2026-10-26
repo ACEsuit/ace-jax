@@ -49,11 +49,12 @@ dependencies = [
 # The pathfinder rung of the hyperparameter UQ ladder (everything else in `aj fit`,
 # GP arm included, needs only the core dependencies).
 gp = ["blackjax>=1.6"]
-# NVIDIA GPUs: JAX's CUDA 13 wheels and nvcc (the CUDA 13 nvcc wheel; its CUDA 12 counterpart ships only
-# ptxas), which compiles ace-jax's CUDA kernel (ace_jax.eval.ffi, ffi=True) on first use.  CUDA 13 needs
-# an NVIDIA driver >= 580; with an older driver use `cuda12`, and nvcc from a CUDA toolkit ($NVCC).
-cuda = ["jax[cuda13]>=0.10.1", "nvidia-cuda-nvcc>=13.0; sys_platform == 'linux'"]
-cuda12 = ["jax[cuda12]>=0.10.1"]
+# NVIDIA GPUs: JAX's CUDA 12 wheels (any driver >= 525, as HPC sites run: Sulis's A100s are on 560).  ace-jax's
+# CUDA kernel (ace_jax.eval.ffi, ffi=True) is compiled on first use with nvcc from a CUDA toolkit or module
+# ($NVCC, PATH, $CUDA_HOME): NVIDIA's CUDA 12 nvcc wheel ships only ptxas.
+cuda = ["jax[cuda12]>=0.10.1"]
+# NVIDIA driver >= 580: JAX's CUDA 13 wheels and NVIDIA's CUDA 13 nvcc wheel, so the kernel needs no toolkit.
+cuda13 = ["jax[cuda13]>=0.10.1", "nvidia-cuda-nvcc>=13.0; sys_platform == 'linux'"]
 # Native (C++) CPU acceleration.  matscipy-neighbours (OpenMP CPU neighbour lists, native dense
 # neighbour_matrix; ace-jax falls back to ASE's list without it, so NOT a core dep) is a source
 # distribution: installing it compiles C++ (CMake + a C++17 compiler).  The same compiler builds the

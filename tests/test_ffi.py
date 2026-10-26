@@ -569,7 +569,7 @@ def test_calculator_cuda_kernel_float32(backend_kernel):
 
 
 def test_cuda_compiler_takes_the_nvcc_wheel(tmp_path, monkeypatch):
-    """cuda_compiler: $NVCC first, then the CUDA 13 nvcc wheel's (nvidia/cu13/bin/nvcc, the `cuda` extra),
+    """cuda_compiler: $NVCC first, then the CUDA 13 nvcc wheel's (nvidia/cu13/bin/nvcc, the `cuda13` extra),
     then PATH; a wheel without nvcc (the CUDA 12 one ships only ptxas) is skipped."""
     import importlib.util
     import types

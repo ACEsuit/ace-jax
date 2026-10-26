@@ -149,7 +149,7 @@ class ACECalculator(Calculator):
         ACEModel (categorical or species embedding) and float64 (float32 too on a GPU), and turns the
         radial table on (radial_table=None -> True; energies ~1e-12 relative, forces ~1.5e-8 of
         max|F|).  The kernel is compiled on first use (`eval.ffi.library`: a C++17 compiler, or nvcc --
-        the `cuda` extra's -- on a GPU; cached).  True raises ValueError (or `eval.ffi.FFIUnavailable`)
+        a toolkit's, or the `cuda13` extra's -- on a GPU; cached).  True raises ValueError (or `eval.ffi.FFIUnavailable`)
         when it cannot run; "auto" then keeps the JAX model and `calc.ffi_reason` says why.  `calc.ffi`
         is {"library", "threads", "platform"}, None when off.  On the CPU, rows run in parallel on XLA's
         intra-op thread pool; `ffi_threads` > 0 caps the threads.  The

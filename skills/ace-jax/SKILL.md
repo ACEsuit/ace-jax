@@ -468,8 +468,8 @@ for its CPU build, which refuses a cuda bundle and vice versa).
   GPU bundles: `ffi=True` (or `aj export --ffi`) uses the CUDA kernel (`AceDirectGpu`, float64 or float32;
   handlers `ace_jax_direct_gpu=<lib>:AceDirectGpu`); "auto" keeps the XLA program on a GPU. nvcc: `$NVCC`, the
   `cuda` extra's wheel (`nvidia/cu13/bin/nvcc`), PATH, `$CUDA_HOME`; flags `-O3 -arch=sm_XY` for the GPU JAX
-  sees (`ACEJAX_FFI_GPU_FLAGS`, `aj native --gpu-flags`). The `cuda` extra needs driver >= 580; `cuda12` is the
-  older-driver fallback (no nvcc). RTX 4000 Ada, 4096 Si atoms: 3.4-4.8x the XLA DAG in float64, 2.7-3.4x in float32.
+  sees (`ACEJAX_FFI_GPU_FLAGS`, `aj native --gpu-flags`). The `cuda` extra is `jax[cuda12]` (nvcc from a toolkit/module);
+  `cuda13` (driver >= 580) adds the nvcc wheel. RTX 4000 Ada, 4096 Si atoms: 3.4-4.8x the XLA DAG in float64, 2.7-3.4x in float32.
 - An older lammps-jax LAMMPS plugin rejects a matrix bundle ("re-export"). To
   fix it, rebuild the plugin, or export `layout="dense"`. The bundle records
   the exporting lammps-jax as `ace_jax.lammps_jax`.

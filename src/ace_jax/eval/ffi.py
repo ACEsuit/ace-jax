@@ -19,7 +19,7 @@ Distribution: the kernel ships as source in the (pure Python) wheel and `library
 use with the user's C++17 compiler against the installed jaxlib's FFI headers, into a content-keyed cache;
 no compiler raises `FFIUnavailable`.  Anyone running it already builds LAMMPS and the lammps-jax plugin
 from source, so a compiler is there; a prebuilt wheel would trade -march=native for a generic baseline.
-The GPU kernel likewise, with nvcc (the `cuda` extra installs it: NVIDIA's CUDA 13 nvcc wheel), for the GPU
+The GPU kernel likewise, with nvcc (a CUDA toolkit's or module's, or the `cuda13` extra's: NVIDIA's CUDA 13 nvcc wheel), for the GPU
 JAX sees.
 """
 import ctypes
@@ -84,7 +84,7 @@ def compiler(env=None):
 
 
 def _wheel_nvcc():
-    """nvcc from NVIDIA's CUDA 13 nvcc wheel (`nvidia-cuda-nvcc`, the `cuda` extra), with its headers and
+    """nvcc from NVIDIA's CUDA 13 nvcc wheel (`nvidia-cuda-nvcc`, the `cuda13` extra), with its headers and
     cudart beside it; None without it.  (The CUDA 12 wheel ships only ptxas.)"""
     import importlib.util
     try:
@@ -153,8 +153,9 @@ def library_path(flags=None, cxx=None, cache=None, gpu=False):
                   or (("-O3", f"-arch=sm_{gpu_arch()}") if gpu else DEFAULT_FLAGS))
     cxx = cxx or (cuda_compiler() if gpu else compiler())
     if cxx is None and gpu:
-        raise FFIUnavailable("the ace-jax GPU kernel is compiled on first use and needs nvcc: install the "
-                             "`cuda` extra (NVIDIA's nvcc wheel), or set NVCC or CUDA_HOME, or run without ffi")
+        raise FFIUnavailable("the ace-jax GPU kernel is compiled on first use and needs nvcc: load a CUDA "
+                             "module, set NVCC or CUDA_HOME, or install the `cuda13` extra (driver >= 580); "
+                             "or run without ffi")
     if cxx is None:
         raise FFIUnavailable("the ace-jax CPU kernel (ffi=True) is compiled on first use and needs a C++17 compiler; "
                              "none found (set CXX, or install g++ or clang++), or export without ffi")

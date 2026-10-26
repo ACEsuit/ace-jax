@@ -8,15 +8,14 @@ Export with `--no-ffi` (`ffi=False`) for the previous bundle, which needs no
 variable.
 
 **Upgrading.** `aa_dag="cueq"` and the `cueq` extra were removed. On a CUDA
-GPU, use `ffi=True` (`aj export --ffi`) for the CUDA kernel. The `cuda` extra
-now installs the JAX CUDA 13 wheels, which need an NVIDIA driver 580 or later.
-With an older driver, install the `cuda12` extra.
+GPU, use `ffi=True` (`aj export --ffi`) for the CUDA kernel.
 
 ### Changed
 
-- **The `cuda` extra uses CUDA 13 and installs `nvcc`.** It installs
-  `jax[cuda13]` and NVIDIA's `nvcc` wheel, which compiles the CUDA kernel.
-  The new `cuda12` extra installs `jax[cuda12]`, for drivers older than 580.
+- **A `cuda13` extra.** For an NVIDIA driver 580 or later, it installs
+  `jax[cuda13]` and NVIDIA's `nvcc` wheel, which compiles the CUDA kernel. The
+  `cuda` extra is unchanged (`jax[cuda12]`): the kernel then uses the `nvcc` of
+  a CUDA toolkit or module.
 - **`fast-neighbours` is now `native`.** The `native` extra installs the same
   packages; `fast-neighbours` remains as an alias until the next release but one.
 - **The C++ kernel is the default for CPU bundles.** `export_lammps` and

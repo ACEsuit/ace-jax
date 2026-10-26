@@ -706,7 +706,7 @@ def cmd_native(a):
         else:
             print("CUDA kernel:   " + ("not built yet (compiled on first use; `aj native --build` builds it now): "
                                       f"{glib}" if glib is not None
-                                      else "unavailable (no nvcc: pip install \"ace-jax[cuda]\")"))
+                                      else "unavailable (no nvcc: load a CUDA module, or pip install \"ace-jax[cuda13]\")"))
         if a.build and not built:
             raise SystemExit(1)
     if have_matscipy_neighbours():

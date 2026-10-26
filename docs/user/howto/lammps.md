@@ -183,11 +183,10 @@ export compiles the kernel with `nvcc` the first time, and keeps it in the
 same cache.
 
 !!! note "CUDA compiler"
-    The `cuda` extra installs `nvcc`: `pip install "ace-jax[cuda]"`. It uses
-    the CUDA 13 packages, which need an NVIDIA driver 580 or later.
-    With an older driver, install the `cuda12` extra, and set `NVCC` to
-    the `nvcc` of a CUDA toolkit. The kernel also finds `nvcc` on `PATH`
-    or in `$CUDA_HOME/bin`. The flags are `-O3 -arch=sm_XY`, for the GPU
+    The kernel needs `nvcc`. It finds `$NVCC`, `nvcc` on `PATH`, or
+    `$CUDA_HOME/bin/nvcc`. On a cluster, load a CUDA module, for example
+    `module load CUDA/12.6.0`. With an NVIDIA driver 580 or later, the
+    `cuda13` extra installs `nvcc`: `pip install "ace-jax[cuda13]"`. The flags are `-O3 -arch=sm_XY`, for the GPU
     that JAX finds at the export. On a machine without a GPU, give the
     architecture, for example `--ffi-flags="-O3 -arch=sm_80"` for an A100.
 
