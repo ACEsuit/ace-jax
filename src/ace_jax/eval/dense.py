@@ -7,12 +7,10 @@ model's cutoff.  `dense_energy` then compacts the valid slots into K model slots
 the skin list's step does the same), parks the rest where every radial vanishes, poisons energy and
 forces with NaN on any overflow (never truncation), and evaluates the site energies in row blocks.
 
-The evaluation model is whatever `ACECalculator` resolved: the JAX model, or the C++ kernel
-(`eval.ffi.KernelModel`, `ffi=True`).  The kernel's FFI call has a batching rule that flattens a vmapped
-batch into rows (`eval.ffi._edge_kernel`), so the batched path runs it as one threaded call.  A CUDA kernel
-exposed the same way -- an EdgeSiteModel whose `site_energies_dense(_blocked)` is an FFI call with the
-same row-flattening vmap rule -- plugs into both paths here unchanged; only `ACECalculator._ffi_choice`
-(today: CPU only) has to select it.
+The evaluation model is whatever `ACECalculator` resolved: the JAX model, or the kernel
+(`eval.ffi.KernelModel`, `ffi=True`: the C++ one on the CPU, the CUDA one on a GPU).  The kernel's FFI call
+has a batching rule that flattens a vmapped batch into rows (`eval.ffi._edge_kernel`), so the batched path
+runs it as one call (threaded on the CPU, one launch on the GPU).
 """
 import jax.numpy as jnp
 

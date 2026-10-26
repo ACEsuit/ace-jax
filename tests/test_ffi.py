@@ -48,6 +48,18 @@ def device(request, tmp_path_factory):
     return request.param
 
 
+@pytest.fixture(scope="module")
+def backend_kernel(request):
+    """The kernel ACECalculator(ffi=True) takes on this JAX backend, available: the C++ one on the CPU, the
+    CUDA one on a GPU (nvcc: the `cuda` extra, $NVCC or PATH)."""
+    if jax.default_backend() == "cpu":
+        request.getfixturevalue("kernel")
+        return "cpu"
+    if ffi.cuda_compiler() is None:
+        (pytest.fail if os.environ.get("ACEJAX_REQUIRE_OPTIONAL") else pytest.skip)("no nvcc for the CUDA kernel")
+    return "gpu"
+
+
 def cluster(meta, seed=0):
     """A rattled cluster with every species of the model present."""
     els = [int(z) for z in meta["elements"]]
@@ -385,15 +397,16 @@ def _md_cell(meta, r=3):
 
 @pytest.mark.parametrize("skin", [1.0, 0.0])
 @pytest.mark.parametrize("name", ["si_fitted", "sige_nofit", "ace_cantor5_small"])
-def test_calculator_kernel_matches_the_jax_model(kernel, name, skin):
+def test_calculator_kernel_matches_the_jax_model(backend_kernel, name, skin):
     """ACECalculator(ffi=True) against the JAX model with the same radial table, over MD-like steps (the
     skin list reused, and rebuilt by one larger move): energy, forces and stress to roundoff, the dense
-    layout.  (Atoms pushed below the table's r_min, 0.5 A, extrapolate its end cubic in both: there the
+    layout; the backend's kernel (CUDA on a GPU).  (Atoms pushed below the table's r_min, 0.5 A, extrapolate its end cubic in both: there the
     two summation orders differ at ~1e-9 relative, outside physical geometries.)"""
     path = str(FIXTURES / f"{name}.npz")
     _, meta, _ = load(path)
     k, j = ACECalculator(path, ffi=True, skin=skin), ACECalculator(path, radial_table=True, skin=skin)
     assert k.ffi and k.ffi_reason is None and j.ffi is None
+    assert k.ffi["platform"] == {"cpu": "cpu", "gpu": "cuda"}[backend_kernel]
     at, rng = _md_cell(meta), np.random.default_rng(0)
     for step in range(5):
         at.positions += rng.normal(scale=0.2 if step == 2 else 0.02, size=at.positions.shape)
@@ -406,8 +419,9 @@ def test_calculator_kernel_matches_the_jax_model(kernel, name, skin):
     assert k.last_layout == "dense" and k.last_timing["ffi"] and k.last_timing["rebuilds"] >= 2
 
 
-def test_calculator_kernel_threads_model_swap_and_e0(kernel):
-    """One thread and XLA's pool give identical results (rows write only their own outputs); a calc.model
+def test_calculator_kernel_threads_model_swap_and_e0(backend_kernel):
+    """One thread and XLA's pool give identical results (rows write only their own outputs; the CUDA kernel
+    ignores threads and is deterministic, writing each dE/drij once); a calc.model
     swap keeps the kernel with the new coefficients; energy_reference="E0" drops E0 as the JAX model does."""
     import dataclasses
     path = str(FIXTURES / "sige_nofit.npz")
@@ -433,7 +447,7 @@ def test_calculator_kernel_threads_model_swap_and_e0(kernel):
     assert a1.get_potential_energy() == pytest.approx(a2.get_potential_energy(), abs=1e-10)
 
 
-def test_calculator_ffi_auto_and_refusals(kernel):
+def test_calculator_ffi_auto_and_refusals(backend_kernel):
     """ffi="auto" keeps the JAX model where the kernel cannot run, with the reason; ffi=True raises there;
     a PACE model is not a linear ACEModel."""
     from conftest import pace_fixture
@@ -472,15 +486,20 @@ def test_aj_native_reports_and_builds(kernel, tmp_path, monkeypatch, capsys):
     assert e.value.code == 1
 
 
-def test_edge_kernel_vmaps_by_flattening_rows(kernel):
-    """AceEdges under jax.vmap: the batch flattened into rows, one kernel call, results (and dE/drij
-    through the custom VJP) identical to calling it per batch element; unbatched row inputs broadcast;
-    batched model constants fall back to one call per element."""
+def test_edge_kernel_vmaps_by_flattening_rows(device):
+    """AceEdges (AceEdgesGpu on a GPU) under jax.vmap: the batch flattened into rows, one kernel call,
+    results (and dE/drij through the custom VJP) identical to calling it per batch element; unbatched row
+    inputs broadcast; batched model constants fall back to one call per element."""
     from ace_jax.eval.ffi import KernelModel, edge_site_energies
     m, meta, _ = load(str(FIXTURES / "ace_cantor5_small.npz"))
-    km = KernelModel.of(lean(m, spline_tol=None, radial_table=True))
+    km = KernelModel.of(lean(m, spline_tol=None, radial_table=True), gpu=device == "gpu")
     rng = np.random.default_rng(0)
     B, n, K = 3, 7, 12
+    with jax.default_device(jax.devices(device)[0]):
+        _vmap_checks(km, edge_site_energies, rng, B, n, K)
+
+
+def _vmap_checks(km, edge_site_energies, rng, B, n, K):
     rij = jnp.asarray(rng.normal(size=(B, n, K, 3)) * 1.5 + 0.5)
     z = jnp.asarray(rng.integers(0, 5, (B, n)), jnp.int32)
     zj = jnp.asarray(rng.integers(0, 5, (B, n, K)), jnp.int32)
@@ -498,3 +517,87 @@ def test_edge_kernel_vmaps_by_flattening_rows(kernel):
     consts = tuple(jnp.stack([c] * B) for c in km.consts)                     # a model per element
     e = jax.vmap(lambda r, c: edge_site_energies(km.attrs, r, z[0], zj[0], mask[0], *c))(rij, consts)
     assert np.array_equal(e, shared)
+
+
+@pytest.mark.parametrize("name", ["si_fitted", "ace_cantor5_small"])
+def test_edge_kernel_gpu_matches_the_cpu_kernel_and_the_jax_model(device, kernel, name):
+    """AceEdgesGpu on the dense edge input (random rows, masked slots, pairs past the cutoff): site
+    energies and dE/drij equal the C++ AceEdges' to roundoff, and in float32 the JAX model's in float32."""
+    from ace_jax.eval.ffi import KernelModel
+    if device != "gpu":
+        pytest.skip("the CPU kernel is its own reference")
+    m, meta, _ = load(str(FIXTURES / f"{name}.npz"))
+    m1, ns = lean(m, spline_tol=None, radial_table=True), len(meta["elements"])
+    rng = np.random.default_rng(1)
+    n, K = 40, 30
+    rij = rng.normal(size=(n, K, 3))
+    rij *= (rng.uniform(1.8, float(meta["rcut"]) + 0.5, (n, K)) / np.linalg.norm(rij, axis=-1))[..., None]
+    z, zj = rng.integers(0, ns, n).astype(np.int32), rng.integers(0, ns, (n, K)).astype(np.int32)
+    mask = rng.random((n, K)) < 0.85
+    out = {}
+    for dev, dt in (("cpu", "float64"), ("gpu", "float64"), ("gpu", "float32")):
+        km = KernelModel.of(with_dtype(m1, dt), gpu=dev == "gpu")
+        with jax.default_device(jax.devices(dev)[0]):
+            e_of = lambda r, km=km: km.site_energies_dense(r, None, zj, mask, z)
+            f = jax.jit(jax.value_and_grad(lambda r, e_of=e_of: e_of(r).sum()))
+            e = jax.jit(e_of)(jnp.asarray(rij, dt))
+            out[dev, dt] = np.asarray(e, np.float64), np.asarray(f(jnp.asarray(rij, dt))[1], np.float64)
+    (e0, g0), (e1, g1), (e2, g2) = out["cpu", "float64"], out["gpu", "float64"], out["gpu", "float32"]
+    assert np.abs(e1 - e0).max() <= 1e-12 * np.abs(e0).max()
+    assert np.abs(g1 - g0).max() <= 1e-11 * np.abs(g0).max()
+    assert np.all(g1[~mask] == 0)
+    assert np.abs(e2 - e0).max() <= 1e-5 * np.abs(e0).max() and np.abs(g2 - g0).max() <= 3e-5 * np.abs(g0).max()
+
+
+def test_calculator_cuda_kernel_float32(backend_kernel):
+    """ACECalculator(ffi=True, dtype="float32") on a GPU: the CUDA kernel in float32, against the float32
+    JAX model with the same radial table, to float32 roundoff."""
+    if backend_kernel != "gpu":
+        pytest.skip("float32: the CUDA kernel only")
+    path = str(FIXTURES / "sige_nofit.npz")
+    _, meta, _ = load(path)
+    k, j = (ACECalculator(path, dtype="float32", **kw) for kw in (dict(ffi=True), dict(radial_table=True)))
+    assert k.ffi["platform"] == "cuda"
+    at = _md_cell(meta)
+    at.rattle(0.05, seed=2)
+    a1, a2 = at.copy(), at.copy()
+    a1.calc, a2.calc = k, j
+    F2 = a2.get_forces()
+    assert a1.get_potential_energy() == pytest.approx(a2.get_potential_energy(), rel=1e-5)
+    np.testing.assert_allclose(a1.get_forces(), F2, atol=3e-5 * np.abs(F2).max())
+
+
+def test_cuda_compiler_takes_the_nvcc_wheel(tmp_path, monkeypatch):
+    """cuda_compiler: $NVCC first, then the CUDA 13 nvcc wheel's (nvidia/cu13/bin/nvcc, the `cuda` extra),
+    then PATH; a wheel without nvcc (the CUDA 12 one ships only ptxas) is skipped."""
+    import importlib.util
+    import types
+    pkg = tmp_path / "nvidia"
+    nvcc = pkg / "cu13" / "bin" / "nvcc"
+    nvcc.parent.mkdir(parents=True)
+    nvcc.write_text("#!/bin/sh\n")
+    nvcc.chmod(0o755)
+    spec = types.SimpleNamespace(submodule_search_locations=[str(tmp_path / "other"), str(pkg)])
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name: spec if name == "nvidia" else None)
+    monkeypatch.setenv("PATH", str(tmp_path / "empty"))
+    assert ffi.cuda_compiler({}) == str(nvcc)
+    other = tmp_path / "mine"
+    other.write_text("#!/bin/sh\n")
+    other.chmod(0o755)
+    assert ffi.cuda_compiler({"NVCC": str(other)}) == str(other)
+    nvcc.unlink()
+    assert ffi.cuda_compiler({}) is None
+
+
+def test_aj_native_reports_and_builds_the_cuda_kernel(backend_kernel, tmp_path, monkeypatch, capsys):
+    """`aj native` on a CUDA GPU: nvcc, the GPU and the CUDA kernel's cache state; --build compiles it."""
+    from ace_jax.cli import main
+    if backend_kernel != "gpu":
+        pytest.skip("needs a CUDA GPU")
+    monkeypatch.setenv("ACEJAX_FFI_CACHE", str(tmp_path / "cache"))
+    main(["native", "--flags=-O1", "--gpu-flags=-O1 -arch=sm_" + ffi.gpu_arch()])
+    out = capsys.readouterr().out
+    assert "nvcc:" in out and "GPU:" in out and "CUDA kernel:   not built yet" in out
+    main(["native", "--build", "--flags=-O1", "--gpu-flags=-O1 -arch=sm_" + ffi.gpu_arch()])
+    assert "CUDA kernel:   built in" in capsys.readouterr().out
+    assert len(list((tmp_path / "cache").glob("libace_jax_ffi_gpu-*.so"))) == 1

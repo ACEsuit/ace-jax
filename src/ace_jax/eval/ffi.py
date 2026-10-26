@@ -10,14 +10,17 @@ Two entry points of the C++ kernel (`ace_ffi.cc`, the same per-site evaluator):
   `EdgeSiteModel.energy_forces_virial_dense` (rij, species, slot mask) to site energies and dE_i/drij, so
   JAX assembles forces and the virial as for any model.  Rows run in parallel on XLA's intra-op thread pool.
   Positions only: no gradients in the model's parameters and no second derivatives (use the JAX model).
-On a GPU, `AceDirectGpu` (`lammps_fns(..., gpu=True)`) is the direct force path, float64 or float32, loaded
-with LAMMPS_JAX_FFI_HANDLERS="ace_jax_direct_gpu=<lib>:AceDirectGpu".
+On a GPU, `ace_ffi_gpu.cu` has the same two entry points, float64 or float32: `AceDirectGpu`
+(`lammps_fns(..., gpu=True)`, loaded with LAMMPS_JAX_FFI_HANDLERS="ace_jax_direct_gpu=<lib>:AceDirectGpu")
+and `AceEdgesGpu` (`KernelModel.of(model, gpu=True)`), whose dE_i/drij are written once per slot, so its
+forces are deterministic; AceDirectGpu's are summed with atomics.
 
 Distribution: the kernel ships as source in the (pure Python) wheel and `library` compiles it on first
 use with the user's C++17 compiler against the installed jaxlib's FFI headers, into a content-keyed cache;
 no compiler raises `FFIUnavailable`.  Anyone running it already builds LAMMPS and the lammps-jax plugin
 from source, so a compiler is there; a prebuilt wheel would trade -march=native for a generic baseline.
-The GPU kernel likewise, with nvcc, for the GPU JAX sees.
+The GPU kernel likewise, with nvcc (the `cuda` extra installs it: NVIDIA's CUDA 13 nvcc wheel), for the GPU
+JAX sees.
 """
 import ctypes
 import functools
@@ -43,6 +46,7 @@ EDGE_TARGET, EDGE_SYMBOL = "ace_jax_edges", "AceEdges"
 SOURCE = pathlib.Path(__file__).with_name("ace_ffi.cc")
 TARGET_GPU = "ace_jax_direct_gpu"
 SYMBOL_GPU = "AceDirectGpu"
+EDGE_TARGET_GPU, EDGE_SYMBOL_GPU = "ace_jax_edges_gpu", "AceEdgesGpu"
 GPU_SOURCE = pathlib.Path(__file__).with_name("ace_ffi_gpu.cu")
 DEFAULT_FLAGS = ("-O3", "-march=native")
 REGISTERED = set()
@@ -79,12 +83,27 @@ def compiler(env=None):
     return None
 
 
+def _wheel_nvcc():
+    """nvcc from NVIDIA's CUDA 13 nvcc wheel (`nvidia-cuda-nvcc`, the `cuda` extra), with its headers and
+    cudart beside it; None without it.  (The CUDA 12 wheel ships only ptxas.)"""
+    import importlib.util
+    try:
+        spec = importlib.util.find_spec("nvidia")
+    except (ImportError, ValueError):
+        return None
+    for d in (spec.submodule_search_locations or []) if spec else []:
+        if (p := pathlib.Path(d) / "cu13" / "bin" / "nvcc").is_file() and os.access(p, os.X_OK):
+            return str(p)
+    return None
+
+
 def cuda_compiler(env=None):
-    """nvcc: $NVCC, else on PATH, else under $CUDA_HOME; None if there is none."""
+    """nvcc: $NVCC, else the CUDA 13 nvcc wheel's (`_wheel_nvcc`, matching JAX's CUDA 13 wheels), else on PATH,
+    else under $CUDA_HOME; None if there is none."""
     env = os.environ if env is None else env
     home = [os.path.join(env["CUDA_HOME"], "bin", "nvcc")] if env.get("CUDA_HOME") else []
-    for c in ([env["NVCC"]] if env.get("NVCC") else []) + ["nvcc"] + home:
-        if (w := shutil.which(c)):
+    for c in ([env["NVCC"]] if env.get("NVCC") else []) + [_wheel_nvcc()] + ["nvcc"] + home:
+        if c and (w := shutil.which(c)):
             return w
     return None
 
@@ -134,8 +153,8 @@ def library_path(flags=None, cxx=None, cache=None, gpu=False):
                   or (("-O3", f"-arch=sm_{gpu_arch()}") if gpu else DEFAULT_FLAGS))
     cxx = cxx or (cuda_compiler() if gpu else compiler())
     if cxx is None and gpu:
-        raise FFIUnavailable("the ace-jax GPU kernel is compiled on first use and needs nvcc: set NVCC or "
-                             "CUDA_HOME, or export without ffi")
+        raise FFIUnavailable("the ace-jax GPU kernel is compiled on first use and needs nvcc: install the "
+                             "`cuda` extra (NVIDIA's nvcc wheel), or set NVCC or CUDA_HOME, or run without ffi")
     if cxx is None:
         raise FFIUnavailable("the ace-jax CPU kernel (ffi=True) is compiled on first use and needs a C++17 compiler; "
                              "none found (set CXX, or install g++ or clang++), or export without ffi")
@@ -188,11 +207,14 @@ def register(path):
 
 
 def register_gpu(path, platform="CUDA"):
-    """Register the compiled GPU kernel for in-process programs; platform "CUDA" or "ROCM"."""
-    if (TARGET_GPU, platform) not in REGISTERED:
-        handler = getattr(ctypes.cdll.LoadLibrary(str(path)), SYMBOL_GPU)
-        jax.ffi.register_ffi_target(TARGET_GPU, jax.ffi.pycapsule(handler), platform=platform)
-        REGISTERED.add((TARGET_GPU, platform))
+    """Register the compiled GPU kernel's entry points for in-process programs; platform "CUDA" or "ROCM"
+    (once per process, as `register`)."""
+    lib = None
+    for target, symbol in ((TARGET_GPU, SYMBOL_GPU), (EDGE_TARGET_GPU, EDGE_SYMBOL_GPU)):
+        if (target, platform) not in REGISTERED:
+            lib = lib or ctypes.cdll.LoadLibrary(str(path))
+            jax.ffi.register_ffi_target(target, jax.ffi.pycapsule(getattr(lib, symbol)), platform=platform)
+            REGISTERED.add((target, platform))
 
 
 def plan(model, gpu=False):
@@ -308,17 +330,18 @@ def lammps_fns(model, n_species, type_map, rcut, gpu=False):
 
 @functools.lru_cache(maxsize=64)
 def _edge_kernel(attrs):
-    """The AceEdges call for these attributes, with a batching rule: rows are independent, so under
-    jax.vmap the batch is flattened into rows -- (B, rows, K, 3) -> (B rows, K, 3), ONE kernel call threaded
-    over all of them -- and the outputs reshaped back.  Exact (the same per-row arithmetic).  Unbatched row
-    inputs are broadcast to the batch; batched model constants (a different model per batch element) fall
-    back to one call per element (lax.map)."""
-    kw = {k: np.float64(v) if isinstance(v, float) else np.int64(v) for k, v in attrs}
+    """The AceEdges call for these attributes (AceEdgesGpu when they name its target), with a batching rule:
+    rows are independent, so under jax.vmap the batch is flattened into rows -- (B, rows, K, 3) -> (B rows,
+    K, 3), ONE kernel call threaded over all of them (one launch on a GPU) -- and the outputs reshaped back.
+    Exact (the same per-row arithmetic).  Unbatched row inputs are broadcast to the batch; batched model
+    constants (a different model per batch element) fall back to one call per element (lax.map)."""
+    target = dict(attrs).get("target", EDGE_TARGET)
+    kw = {k: np.float64(v) if isinstance(v, float) else np.int64(v) for k, v in attrs if k != "target"}
 
     @jax.custom_batching.custom_vmap
     def call(rij, node_z, zj, mask, *consts):
         out = (jax.ShapeDtypeStruct(node_z.shape, rij.dtype), jax.ShapeDtypeStruct(rij.shape, rij.dtype))
-        return jax.ffi.ffi_call(EDGE_TARGET, out)(rij, node_z, zj, mask, *consts, **kw)
+        return jax.ffi.ffi_call(target, out)(rij, node_z, zj, mask, *consts, **kw)
 
     @call.def_vmap
     def rule(axis_size, in_batched, rij, node_z, zj, mask, *consts):
@@ -356,17 +379,19 @@ def _edge_fwd(attrs, rij, node_z, zj, mask, *consts):
 
 
 def _edge_bwd(attrs, g, ct):
-    return (ct[:, None, None] * g,) + (None,) * 3 + (None,) * N_CONSTS
+    gpu = dict(attrs).get("target") == EDGE_TARGET_GPU
+    return (ct[:, None, None] * g,) + (None,) * 3 + (None,) * (N_CONSTS_GPU if gpu else N_CONSTS)
 
 
-N_CONSTS = 7                                          # `kernel_inputs`' arrays
+N_CONSTS, N_CONSTS_GPU = 7, 13                        # `kernel_inputs`' arrays (gpu=False, True)
 edge_site_energies.defvjp(_edge_fwd, _edge_bwd)
 
 
 class KernelModel(EdgeSiteModel):
-    """A lean float64 ACEModel with a radial table, evaluated by the kernel's `AceEdges` entry point: an
-    evaluation model for `energy_forces_virial_dense` (ACECalculator's dense layout and skin step), whose
-    forces and virial JAX assembles from dE/drij as for the model itself.  Energy only, in positions only."""
+    """A lean ACEModel with a radial table, evaluated by the kernel's `AceEdges` entry point (float64), or on
+    a GPU by `AceEdgesGpu` (float64 or float32): an evaluation model for `energy_forces_virial_dense`
+    (ACECalculator's dense layout and skin step, `eval.dense`), whose forces and virial JAX assembles from
+    dE/drij as for the model itself.  Energy only, in positions only."""
     base: object                                      # the lean ACEModel (pad_cutoff, provenance)
     consts: tuple                                     # `kernel_inputs`' arrays
     attrs: tuple = eqx.field(static=True)             # the kernel's attributes, (name, value) pairs
@@ -374,12 +399,13 @@ class KernelModel(EdgeSiteModel):
     energy_only = True
 
     @classmethod
-    def of(cls, model, max_threads=0):
-        """`model` (a lean ACEModel with a radial table, float64) for the kernel; max_threads > 0 caps
-        the kernel's threads (0: XLA's intra-op pool)."""
-        attrs, consts = kernel_inputs(model)
+    def of(cls, model, max_threads=0, gpu=False):
+        """`model` (a lean ACEModel with a radial table, float64, or float32 on a GPU) for the kernel, the
+        GPU one if `gpu`; max_threads > 0 caps the CPU kernel's threads (0: XLA's intra-op pool)."""
+        attrs, consts = kernel_inputs(model, gpu)
         attrs = tuple(sorted((k, float(v) if k in ("x0", "h") else int(v)) for k, v in attrs.items()))
-        return cls(model, tuple(consts), attrs + (("max_threads", int(max_threads)),))
+        extra = (("target", EDGE_TARGET_GPU),) if gpu else (("max_threads", int(max_threads)),)
+        return cls(model, tuple(consts), attrs + extra)
 
     def pad_cutoff(self):
         return self.base.pad_cutoff()

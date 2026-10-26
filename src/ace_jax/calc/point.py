@@ -148,15 +148,17 @@ class ACECalculator(Calculator):
         (CUEQUIVARIANCE_OPS_NVRTC_CACHE_DIR); plans are not cached.
 
         `ffi` (False, the default: the JAX model; True; "auto"; a library path) evaluates energies,
-        forces and stress with the C++ kernel of `eval.ffi` (its `AceEdges` entry point, `KernelModel`)
-        in place of the JAX evaluation model: same neighbour lists (the dense layout, the skin list),
-        with forces and the virial assembled by JAX from the kernel's dE/drij.  It needs the CPU
-        backend, float64, lean=True and a linear ACEModel (categorical or species embedding), and turns
-        the radial table on (radial_table=None -> True; energies ~1e-12 relative, forces ~1.5e-8 of
-        max|F|).  The kernel is compiled on first use (`eval.ffi.library`: a C++17 compiler, cached).
-        True raises ValueError (or `eval.ffi.FFIUnavailable`) when it cannot run; "auto" then keeps the
-        JAX model and `calc.ffi_reason` says why.  `calc.ffi` is {"library", "threads"}, None when off.
-        Rows run in parallel on XLA's intra-op thread pool; `ffi_threads` > 0 caps the threads.  The
+        forces and stress with the kernel of `eval.ffi` (its `AceEdges` entry point, `KernelModel`) in
+        place of the JAX evaluation model: the C++ kernel on the CPU backend, the CUDA one
+        (`AceEdgesGpu`) on a CUDA GPU.  Same neighbour lists (the dense layout, the skin list), with
+        forces and the virial assembled by JAX from the kernel's dE/drij.  It needs lean=True, a linear
+        ACEModel (categorical or species embedding) and float64 (float32 too on a GPU), and turns the
+        radial table on (radial_table=None -> True; energies ~1e-12 relative, forces ~1.5e-8 of
+        max|F|).  The kernel is compiled on first use (`eval.ffi.library`: a C++17 compiler, or nvcc --
+        the `cuda` extra's -- on a GPU; cached).  True raises ValueError (or `eval.ffi.FFIUnavailable`)
+        when it cannot run; "auto" then keeps the JAX model and `calc.ffi_reason` says why.  `calc.ffi`
+        is {"library", "threads", "platform"}, None when off.  On the CPU, rows run in parallel on XLA's
+        intra-op thread pool; `ffi_threads` > 0 caps the threads.  The
         kernel differentiates in positions only: derivatives in the model's parameters, or second
         derivatives, need the JAX model (ffi=False; `calc.model` and `eval_model` there).
 
@@ -367,7 +369,9 @@ class ACECalculator(Calculator):
             eval_model, splined, radial_table, aa_dag_used = self._eval_form(model, None)
         if hasattr(self, "_model"):
             self.reset()
-        self._ffi = {"library": str(ffi_lib), "threads": self._ffi_threads} if ffi_lib else None
+        gpu = "target" in dict(getattr(eval_model, "attrs", ()))   # KernelModel.of(..., gpu=True)
+        self._ffi = ({"library": str(ffi_lib), "threads": self._ffi_threads, "platform": "cuda" if gpu else "cpu"}
+                     if ffi_lib else None)
         self._ffi_reason = ffi_reason
         self._model, self._eval_model, self._splined = model, eval_model, splined
         self._radial_table, self._aa_dag_used = radial_table, aa_dag_used
@@ -379,7 +383,7 @@ class ACECalculator(Calculator):
 
     def _eval_form(self, model, ffi_lib):
         """(eval_model, splined, radial_table, aa_dag) for `model`: lean, splines, the radial table, the
-        product basis form, E0 and dtype, then (ffi_lib) the C++ kernel in place of the JAX model."""
+        product basis form, E0 and dtype, then (ffi_lib) the kernel in place of the JAX model."""
         eval_model = (lean_form(model, self._spline_tol, self._spline_intervals) if self._lean else model)
         splined = splining(model, eval_model, self._spline_tol)
         eval_model, radial_table = with_radial_table(
@@ -401,9 +405,11 @@ class ACECalculator(Calculator):
             from ..eval.api import with_dtype
             eval_model = with_dtype(eval_model, self._eval_dtype)
         if ffi_lib:                               # the kernel in place of the JAX evaluation model
+            import jax
             from ..eval import ffi as kernel
-            kernel.register(ffi_lib)
-            eval_model = kernel.KernelModel.of(eval_model, self._ffi_threads)
+            gpu = jax.default_backend() == "gpu"
+            (kernel.register_gpu if gpu else kernel.register)(ffi_lib)
+            eval_model = kernel.KernelModel.of(eval_model, self._ffi_threads, gpu=gpu)
         return eval_model, splined, radial_table, aa_dag_used
 
     def _ffi_choice(self, model):
@@ -415,8 +421,11 @@ class ACECalculator(Calculator):
         import jax
         from ..eval.model import ACEModel
         f64 = jax.config.jax_enable_x64 and (self._eval_dtype is None or np.dtype(self._eval_dtype) == np.float64)
-        why = (f"the JAX backend is {jax.default_backend()!r} (the kernel is CPU)" if jax.default_backend() != "cpu"
-               else "not float64 (the kernel is float64: enable jax_enable_x64)" if not f64
+        backend = jax.default_backend()
+        gpu = backend == "gpu" and "cuda" in jax.devices()[0].client.platform_version.lower()   # not ROCm
+        why = (f"the JAX backend is {backend!r} (the kernels are for the CPU and CUDA GPUs)"
+               if backend != "cpu" and not gpu
+               else "not float64 (the CPU kernel is float64: enable jax_enable_x64)" if not (f64 or gpu)
                else "lean=False" if not self._lean
                else "aa_dag='cueq'" if self._aa_dag == "cueq"
                else "layout='sparse' (the kernel reads the dense layout)" if self._ffi_layout == "sparse"
@@ -425,12 +434,12 @@ class ACECalculator(Calculator):
         if why:
             if opt == "auto":
                 return None, why
-            raise ValueError(f"ffi={opt!r}: the C++ kernel cannot run here: {why}")
+            raise ValueError(f"ffi={opt!r}: the {'CUDA' if gpu else 'C++'} kernel cannot run here: {why}")
         if opt is not True and opt != "auto":
             return opt, None                      # a prebuilt library
         from ..eval import ffi as kernel
         try:
-            return kernel.library(), None
+            return kernel.library(gpu=gpu), None
         except kernel.FFIUnavailable as e:
             if opt == "auto":
                 return None, str(e)
@@ -438,7 +447,8 @@ class ACECalculator(Calculator):
 
     @property
     def ffi(self):
-        """The C++ kernel in use: {"library", "threads"}; None for the JAX model."""
+        """The kernel in use: {"library", "threads", "platform"} ("cpu": the C++ kernel; "cuda": the CUDA
+        kernel, where threads does not apply); None for the JAX model."""
         return self._ffi
 
     @property

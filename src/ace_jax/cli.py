@@ -651,10 +651,10 @@ def cmd_export(a):
 
 
 def cmd_native(a):
-    """`aj native`: the native (C++) CPU acceleration on this machine -- the C++ kernel (`eval.ffi`: compiler,
-    flags, CPU, whether its library is built) and the `native` extra's matscipy-neighbours -- and with --build,
-    the kernel compiled into the cache now (on a cluster: run it on a compute node).  --build exits 1 when the
-    kernel cannot be compiled."""
+    """`aj native`: the native acceleration on this machine -- the C++ kernel (`eval.ffi`: compiler, flags, CPU,
+    whether its library is built), on a CUDA GPU the CUDA kernel likewise (nvcc, flags, GPU), and the `native`
+    extra's matscipy-neighbours -- and with --build, the kernels compiled into the cache now (on a cluster: run
+    it on a compute node).  --build exits 1 when a kernel cannot be compiled."""
     import importlib.metadata
     import platform
     import re
@@ -695,6 +695,38 @@ def cmd_native(a):
                                     f"{lib}" if lib is not None else "unavailable (no C++ compiler)"))
     if a.build and not built:
         raise SystemExit(1)
+    import jax
+    if jax.default_backend() == "gpu":                # the CUDA kernel, for the GPU JAX sees
+        gflags = a.gpu_flags.split() if a.gpu_flags else None
+        try:
+            glib, nvcc, gflags = kernel.library_path(gflags, gpu=True)
+            ver = subprocess.run([nvcc, "--version"], capture_output=True, text=True).stdout.splitlines()[-1:]
+            print(f"nvcc:          {nvcc} ({ver[0] if ver else 'unknown version'})")
+        except kernel.FFIUnavailable as e:
+            glib = None
+            print(f"nvcc:          none ({e})")
+        if glib is not None:
+            print(f"GPU flags:     {' '.join(gflags)}  (--gpu-flags, or ACEJAX_FFI_GPU_FLAGS)")
+        d = jax.devices()[0]
+        print(f"GPU:           {d.device_kind} (sm_{kernel.gpu_arch()}; {d.client.platform_version})")
+        built = glib is not None and glib.exists()
+        if a.build and glib is not None and not built:
+            t0 = time.perf_counter()
+            try:
+                glib = kernel.library(gflags, gpu=True)
+            except kernel.FFIUnavailable as e:
+                print(f"CUDA kernel:   build failed: {e}")
+                raise SystemExit(1) from None
+            built = True
+            print(f"CUDA kernel:   built in {time.perf_counter() - t0:.1f} s: {glib}")
+        elif built:
+            print(f"CUDA kernel:   built: {glib}")
+        else:
+            print("CUDA kernel:   " + ("not built yet (compiled on first use; `aj native --build` builds it now): "
+                                      f"{glib}" if glib is not None
+                                      else "unavailable (no nvcc: pip install \"ace-jax[cuda]\")"))
+        if a.build and not built:
+            raise SystemExit(1)
     if have_matscipy_neighbours():
         print(f"neighbours:    matscipy-neighbours {importlib.metadata.version('matscipy-neighbours')}")
     else:
@@ -907,14 +939,19 @@ def _parser():
     exp.add_argument("--type-elements", default=None,
                      help="lammps: comma-separated element of each LAMMPS atom type, in type order "
                           "(default: the model's element order)")
-    nat = sub.add_parser("native", help="the native (C++) CPU acceleration here: the C++ kernel's compiler, "
-                                        "flags and cache, and matscipy-neighbours; --build compiles the kernel now")
+    nat = sub.add_parser("native", help="the native acceleration here: the C++ kernel's compiler, flags and "
+                                        "cache, on a CUDA GPU the CUDA kernel's, and matscipy-neighbours; "
+                                        "--build compiles the kernels now")
     nat.add_argument("--build", action="store_true",
-                     help="compile the C++ kernel into its cache now (else it is compiled on first use); "
-                          "on a cluster, run it on a compute node.  Exits 1 when it cannot be compiled")
+                     help="compile the C++ kernel, and on a CUDA GPU the CUDA kernel, into the cache now (else "
+                          "each is compiled on first use); on a cluster, run it on a compute node.  Exits 1 when "
+                          "one cannot be compiled")
     nat.add_argument("--flags", default=None,
                      help="the kernel's compiler flags (default \"-O3 -march=native\", or ACEJAX_FFI_FLAGS), "
                           "e.g. --flags=\"-O3 -march=x86-64-v3\" (with =)")
+    nat.add_argument("--gpu-flags", default=None,
+                     help="the CUDA kernel's nvcc flags (default \"-O3 -arch=sm_XY\" for this GPU, or "
+                          "ACEJAX_FFI_GPU_FLAGS)")
     con = sub.add_parser("basis", help="author a new ACE basis: a frozen model (seeded radial init) saved as .npz")
     add_basis_args(con, fit=False)
     con.add_argument("--out", required=True)

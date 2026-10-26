@@ -1,9 +1,13 @@
-// Lean linear ACE energies and forces on a GPU, one XLA FFI call on lammps-jax's neighbour matrix, in three
-// passes: each atom's A, its product basis, the forces. float64 or float32, one source for CUDA and ROCm.
+// Lean linear ACE energies and forces on a GPU, one XLA FFI call, in three passes: each atom's A, its product
+// basis, the forces. float64 or float32, one source for CUDA and ROCm. Two entry points: AceDirectGpu on
+// lammps-jax's neighbour matrix (positions in, atom energies and forces out), and AceEdgesGpu on the dense edge
+// input of EdgeSiteModel.energy_forces_virial_dense (rij, species, slot mask in, site energies and dE_i/drij
+// out), which is the same passes with E = true.
 #include <algorithm>
 #include <climits>
 #include <cmath>
 #include <cstdint>
+#include <initializer_list>
 #include <string>
 
 // Shuffles and ballots work in 32-lane chunks, half a wave on AMD; every lane of the warp calls them.
@@ -51,6 +55,16 @@ struct Model {                                            // 32-bit sizes save r
   int nz, ncoef, F, n_rnl, n_runs, N, n_a, n_lev, n_groups, n_st, st_lev, n_lone, n_chunks, n_lf, n, L, solid;
   int local;                                              // the table in radial.spline_local's form
   R x0, ih, rc2;                                          // ih = 1 / h
+};
+
+// The dense edge input (E = true): rij (rows, K, 3), neighbour species and live slots (rows, K), and the
+// output dE_i / drij (rows, K, 3), zero on dead slots.
+template <typename R>
+struct Edges {
+  const R *rij;
+  const int32_t *zj;
+  const bool *mask;
+  R *g;
 };
 
 // A value other threads' atomics changed, read past L1.
@@ -150,11 +164,11 @@ __device__ void chunk_add(R *w, int key, R v) {
 }
 
 // Pass 1: each row's A, its live pairs for pass 3, and E0 plus the pair energy. A block per row, Team lanes
-// per pair, P pairs at a time.
-template <typename R, int T, int Team>
+// per pair, P pairs at a time. E: the pairs are the edge input's live slots.
+template <typename R, int T, int Team, bool E>
 __global__ void __launch_bounds__(T)
-    ace_density(Model<R> m, const R *x, const int32_t *z, const int32_t *nb, const int32_t *cnt, int atoms,
-                int K, int rows, R *Ag, int32_t *lists, R *eo, int *broken) {
+    ace_density(Model<R> m, const R *x, const int32_t *z, const int32_t *nb, const int32_t *cnt, Edges<R> ed,
+                int atoms, int K, int rows, R *Ag, int32_t *lists, R *eo, int *broken) {
   constexpr int P = T / Team;
   extern __shared__ double sh[];
   const int na = m.n_a, nY = (m.L + 1) * (m.L + 1), F = m.F, t = threadIdx.x, lane = t % Team;
@@ -171,7 +185,15 @@ __global__ void __launch_bounds__(T)
   for (int i = blockIdx.x; i < rows && i < atoms; i += gridDim.x) {
     for (int k = t; k < K; k += T) {
       int ok = 0;
-      if (k < cnt[i]) {
+      if constexpr (E) {
+        const int64_t q = static_cast<int64_t>(i) * K + k;
+        if (ed.mask[q]) {
+          R r2 = 0;
+          for (int c = 0; c < 3; ++c) r2 += ed.rij[3 * q + c] * ed.rij[3 * q + c];
+          if (isnan(r2)) atomicOr(broken, 1);
+          ok = 1;
+        }
+      } else if (k < cnt[i]) {
         const int j = nb[static_cast<int64_t>(k) * rows + i];
         if (j >= 0 && j < atoms) {
           R r2 = 0;
@@ -203,11 +225,19 @@ __global__ void __launch_bounds__(T)
     for (int s0 = 0; s0 < nl; s0 += P) {
       const int s = s0 + team;
       if (s < nl) {
-        const int j = nb[static_cast<int64_t>(live[s]) * rows + i];
         R v[3];
-        for (int c = 0; c < 3; ++c) v[c] = x[3 * j + c] - x[3 * i + c];
+        int zn;
+        if constexpr (E) {
+          const int64_t q = static_cast<int64_t>(i) * K + live[s];
+          for (int c = 0; c < 3; ++c) v[c] = ed.rij[3 * q + c];
+          zn = ed.zj[q];
+        } else {
+          const int j = nb[static_cast<int64_t>(live[s]) * rows + i];
+          for (int c = 0; c < 3; ++c) v[c] = x[3 * j + c] - x[3 * i + c];
+          zn = z[j];
+        }
         const R r = sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]), ir = 1 / r;
-        const int pz = zc * m.nz + z[j];
+        const int pz = zc * m.nz + zn;
         R *Rs = Rb + team * F;
         table<false, R>(m, pz, r, Rs, nullptr, lane, Team);
         for (int c = lane; c < F; c += Team) e += c >= m.n_rnl ? Rs[c] : 0;   // pair radial, own columns
@@ -323,16 +353,19 @@ __global__ void __launch_bounds__(kThreads)
 }
 
 // Pass 3: the forces, -sum_i w_i grad e_i, or NaN everywhere after a NaN position. A block per row, Team
-// lanes per pair; a lane per harmonic takes dE/dY over its radial channels, times grad Y.
-template <typename R, int T, int Team>
+// lanes per pair; a lane per harmonic takes dE/dY over its radial channels, times grad Y. E: dE_i / drij
+// per live slot instead, written once each (no atomics, so deterministic), no weights.
+template <typename R, int T, int Team, bool E>
 __global__ void __launch_bounds__(T)
-    ace_forces(Model<R> m, const R *x, const int32_t *z, const int32_t *nb, const R *wt, int atoms, int K,
-               int rows, const int32_t *lists, const R *wAg, const int *broken, R *eo, R *fo) {
+    ace_forces(Model<R> m, const R *x, const int32_t *z, const int32_t *nb, const R *wt, Edges<R> ed,
+               int atoms, int K, int rows, const int32_t *lists, const R *wAg, const int *broken, R *eo,
+               R *fo) {
   constexpr int P = T / Team;
   const int64_t all = static_cast<int64_t>(gridDim.x) * T;
   if (*broken) {
-    for (int64_t u = blockIdx.x * static_cast<int64_t>(T) + threadIdx.x; u < 4ll * atoms; u += all)
-      (u < atoms ? eo[u] : fo[u - atoms]) = NAN;
+    const int64_t nf = E ? 3ll * K * rows : 3ll * atoms;
+    for (int64_t u = blockIdx.x * static_cast<int64_t>(T) + threadIdx.x; u < atoms + nf; u += all)
+      (u < atoms ? eo[u] : (E ? ed.g : fo)[u - atoms]) = NAN;
     return;
   }
   extern __shared__ double sh[];
@@ -355,7 +388,7 @@ __global__ void __launch_bounds__(T)
   for (int i = blockIdx.x; i < rows && i < atoms; i += gridDim.x) {
     const int32_t *list = lists + static_cast<int64_t>(i) * (K + 1);
     const int nl = list[K], zc = z[i];
-    const R wi = wt[i];
+    const R wi = E ? R(1) : wt[i];
     for (int k = t; k < nl; k += T) live[k] = list[k];
     for (int a = t; a < na; a += T) wA[a] = wAg[static_cast<int64_t>(i) * na + a];
     __syncthreads();
@@ -364,11 +397,19 @@ __global__ void __launch_bounds__(T)
       const int s = s0 + team, has = s < nl;
       int j = 0;
       if (has) {
-        j = nb[static_cast<int64_t>(live[s]) * rows + i];
         R v[3];
-        for (int c = 0; c < 3; ++c) v[c] = x[3 * j + c] - x[3 * i + c];
+        int zn;
+        if constexpr (E) {
+          const int64_t q = static_cast<int64_t>(i) * K + live[s];
+          for (int c = 0; c < 3; ++c) v[c] = ed.rij[3 * q + c];
+          zn = ed.zj[q];
+        } else {
+          j = nb[static_cast<int64_t>(live[s]) * rows + i];
+          for (int c = 0; c < 3; ++c) v[c] = x[3 * j + c] - x[3 * i + c];
+          zn = z[j];
+        }
         const R r = sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]), ir = 1 / r;
-        const int pz = zc * m.nz + z[j];
+        const int pz = zc * m.nz + zn;
         table<true>(m, pz, r, Rs, dRs, lane, Team);
         for (int mm = lane; mm <= m.L; mm += Team) harmonics(m.L, m.solid, mm, norm, ca, cb, v, r, ir, Ys);
         if (lane < 4) hat[lane] = lane == 3 ? ir : (lane == 0 ? v[0] : lane == 1 ? v[1] : v[2]) * ir;
@@ -405,50 +446,63 @@ __global__ void __launch_bounds__(T)
       }
       if (has && lane < 3) {
         const R fc = wi * (sc * hat[lane] + (lane == 0 ? g[0] : lane == 1 ? g[1] : g[2]));
-        fi += fc;
-        atomicAdd(&fo[3 * j + lane], -fc);
+        if constexpr (E) {
+          ed.g[3 * (static_cast<int64_t>(i) * K + live[s]) + lane] = fc;
+        } else {
+          fi += fc;
+          atomicAdd(&fo[3 * j + lane], -fc);
+        }
       }
       __syncthreads();
     }
-    for (int o = Team; o < kChunk; o *= 2) fi += SHFL_XOR(fi, o);   // over the chunk's teams, then chunks
-    if (t % kChunk < 3) red[3 * (t / kChunk) + t % kChunk] = fi;
-    __syncthreads();
-    if (t < 3 && nl > 0) {
-      for (int c = 1; c < T / kChunk; ++c) fi += red[3 * c + t];
-      atomicAdd(&fo[3 * i + t], fi);
+    if constexpr (!E) {
+      for (int o = Team; o < kChunk; o *= 2) fi += SHFL_XOR(fi, o);   // over the chunk's teams, then chunks
+      if (t % kChunk < 3) red[3 * (t / kChunk) + t % kChunk] = fi;
+      __syncthreads();
+      if (t < 3 && nl > 0) {
+        for (int c = 1; c < T / kChunk; ++c) fi += red[3 * c + t];
+        atomicAdd(&fo[3 * i + t], fi);
+      }
     }
   }
 }
 
-ffi::Error AceDirectGpuImpl(gpuStream_t stream, ffi::ScratchAllocator scratch, ffi::AnyBuffer pos,
-                            ffi::Buffer<ffi::S32> species, ffi::Buffer<ffi::S32> nbr,
-                            ffi::Buffer<ffi::S32> num, ffi::AnyBuffer weight, ffi::AnyBuffer rtab,
-                            ffi::AnyBuffer rcut, ffi::Buffer<ffi::S32> runs, ffi::Buffer<ffi::S32> groups,
-                            ffi::Buffer<ffi::S32> factor, ffi::AnyBuffer ct, ffi::AnyBuffer e0,
-                            ffi::Buffer<ffi::S32> levels, ffi::Buffer<ffi::S32> parent,
-                            ffi::Buffer<ffi::S32> lone, ffi::Buffer<ffi::S32> chunks,
-                            ffi::Buffer<ffi::S32> lf, ffi::AnyBuffer lc, double x0, double h,
-                            int64_t n, int64_t n_rnl, int64_t lmax, int64_t solid, int64_t n_leaf,
-                            int64_t n_st, double rc2, ffi::Result<ffi::AnyBuffer> e,
-                            ffi::Result<ffi::AnyBuffer> f) {
+// The model's arrays and attributes, as both entry points take them.
+struct Consts {
+  ffi::AnyBuffer rtab, rcut;
+  ffi::Buffer<ffi::S32> runs, groups, factor;
+  ffi::AnyBuffer ct, e0;
+  ffi::Buffer<ffi::S32> levels, parent, lone, chunks, lf;
+  ffi::AnyBuffer lc;
+  double x0, h;
+  int64_t n, n_rnl, lmax, solid, n_leaf, n_st;
+};
+
+// Both entry points: x the positions (atoms, 3), or (E) rij (rows, K, 3); out the forces (atoms, 3), or (E)
+// dE_i / drij (rows, K, 3). `types` are the float buffers besides x, which must share its type.
+template <bool E>
+ffi::Error Launch(gpuStream_t stream, ffi::ScratchAllocator &scratch, ffi::AnyBuffer x_in, const int32_t *zs,
+                  const int32_t *nb, const int32_t *cnt, const void *wt, const int32_t *zj, const bool *mask,
+                  int64_t atoms, int64_t K, int64_t rows, const Consts &c, double rc2,
+                  std::initializer_list<ffi::DataType> types, ffi::Result<ffi::AnyBuffer> &e,
+                  ffi::Result<ffi::AnyBuffer> &f) {
+  const int64_t lmax = c.lmax;
   if (lmax > 31) return ffi::Error::InvalidArgument("the GPU kernel takes lmax up to 31: a lane per m");
-  const ffi::DataType type = pos.element_type();
-  for (const ffi::DataType t : {weight.element_type(), rtab.element_type(), rcut.element_type(),
-                                ct.element_type(), e0.element_type(), lc.element_type(), e->element_type(),
-                                f->element_type()})
+  const ffi::DataType type = x_in.element_type();
+  for (const ffi::DataType t : types)
     if (t != type || (t != ffi::DataType::F64 && t != ffi::DataType::F32))
       return ffi::Error::InvalidArgument("the GPU kernel's floats are all float64 or all float32");
-  const int64_t atoms = pos.dimensions()[0], K = nbr.dimensions()[0], rows = nbr.dimensions()[1];
-  for (const int64_t size : {3 * atoms, rows, static_cast<int64_t>(rtab.element_count()),
-                             static_cast<int64_t>(ct.element_count()),
-                             static_cast<int64_t>(lc.element_count())})
+  const int64_t n_out = static_cast<int64_t>(f->element_count());
+  for (const int64_t size : {3 * atoms, rows, n_out, static_cast<int64_t>(c.rtab.element_count()),
+                             static_cast<int64_t>(c.ct.element_count()),
+                             static_cast<int64_t>(c.lc.element_count())})
     if (size > INT_MAX) return ffi::Error::InvalidArgument("the GPU kernel indexes in 32 bits");
   const auto i32 = [](int64_t v) { return static_cast<int>(v); };
-  const int N = i32(ct.dimensions()[1]), n_lev = i32(levels.element_count()) - 1;
-  const int F = i32(rtab.dimensions().back()), n_a = N - i32(factor.element_count());
-  const int nz = i32(rtab.dimensions()[0]), ncoef = i32(rtab.element_count()) / (nz * nz * F);
-  const int local = rtab.dimensions().size() == 5;        // radial.spline_local's (NZ, NZ, n - 1, 4, F)
-  const int64_t n_rows = std::min(rows, atoms), nY = (lmax + 1) * (lmax + 1), n_runs = runs.dimensions()[0];
+  const int N = i32(c.ct.dimensions()[1]), n_lev = i32(c.levels.element_count()) - 1;
+  const int F = i32(c.rtab.dimensions().back()), n_a = N - i32(c.factor.element_count());
+  const int nz = i32(c.rtab.dimensions()[0]), ncoef = i32(c.rtab.element_count()) / (nz * nz * F);
+  const int local = c.rtab.dimensions().size() == 5;      // radial.spline_local's (NZ, NZ, n - 1, 4, F)
+  const int64_t n_rows = std::min(rows, atoms), nY = (lmax + 1) * (lmax + 1), n_runs = c.runs.dimensions()[0];
   const size_t sz = ffi::ByteWidth(type);
   int dev = 0, sms = 1, warp = 32, optin = 48 << 10;      // errors surface at GetLastError
   (void)GPU(GetDevice)(&dev);
@@ -474,7 +528,7 @@ ffi::Error AceDirectGpuImpl(gpuStream_t stream, ffi::ScratchAllocator scratch, f
   const int T3 = pair_threads((2 * F + nY + 4) * sz, forces_shared(0));
   int T2 = warp;                                          // DAG pass: about a thread per A entry
   while (T2 < n_a && T2 < kThreads) T2 *= 2;
-  const int64_t G = kThreads / T2, kept = n_lev > 1 ? n_st : 0, nL = n_a + kept + 1;
+  const int64_t G = kThreads / T2, kept = n_lev > 1 ? c.n_st : 0, nL = n_a + kept + 1;
   const size_t base = kThreads * sz, room = static_cast<size_t>(optin) / 2;   // two blocks per SM
   const int lv_sh = base + nL * G * sz <= room;
   const auto blocks = [&](auto kernel, int threads, size_t shared, int64_t work) {   // fill the device
@@ -491,19 +545,19 @@ ffi::Error AceDirectGpuImpl(gpuStream_t stream, ffi::ScratchAllocator scratch, f
   const int64_t per_atom = (2 - lv_sh) * nL + n_a, n_A = n_rows * n_a, n_list = n_rows * (K + 1);
   const auto run = [&](auto zero) {                       // the rest in the floats' type R
     using R = decltype(zero);
-    const Model<R> m{rtab.typed_data<R>(), rcut.typed_data<R>(), ct.typed_data<R>(), e0.typed_data<R>(),
-                     lc.typed_data<R>(), runs.typed_data(), groups.typed_data(), factor.typed_data(),
-                     levels.typed_data(), parent.typed_data(), lone.typed_data(), chunks.typed_data(),
-                     lf.typed_data(), nz, ncoef, F, i32(n_rnl), i32(n_runs), N, n_a, n_lev,
-                     i32(groups.dimensions()[0]), i32(kept), std::max(n_lev - 2, 0),
-                     i32(lone.element_count()), i32(chunks.dimensions()[0]), i32(lf.element_count()), i32(n),
-                     i32(lmax), i32(solid), local, R(x0), R(1.0 / h), R(rc2)};
-    const auto density = T1 == 32 ? (four ? ace_density<R, 32, 4> : ace_density<R, 32, 8>)
-                         : T1 == 64 ? (four ? ace_density<R, 64, 4> : ace_density<R, 64, 8>)
-                                    : (four ? ace_density<R, 128, 4> : ace_density<R, 128, 8>);
-    const auto forces = T3 == 32 ? (four ? ace_forces<R, 32, 4> : ace_forces<R, 32, 8>)
-                        : T3 == 64 ? (four ? ace_forces<R, 64, 4> : ace_forces<R, 64, 8>)
-                                   : (four ? ace_forces<R, 128, 4> : ace_forces<R, 128, 8>);
+    const Model<R> m{c.rtab.typed_data<R>(), c.rcut.typed_data<R>(), c.ct.typed_data<R>(), c.e0.typed_data<R>(),
+                     c.lc.typed_data<R>(), c.runs.typed_data(), c.groups.typed_data(), c.factor.typed_data(),
+                     c.levels.typed_data(), c.parent.typed_data(), c.lone.typed_data(), c.chunks.typed_data(),
+                     c.lf.typed_data(), nz, ncoef, F, i32(c.n_rnl), i32(n_runs), N, n_a, n_lev,
+                     i32(c.groups.dimensions()[0]), i32(kept), std::max(n_lev - 2, 0),
+                     i32(c.lone.element_count()), i32(c.chunks.dimensions()[0]), i32(c.lf.element_count()),
+                     i32(c.n), i32(lmax), i32(c.solid), local, R(c.x0), R(1.0 / c.h), R(rc2)};
+    const auto density = T1 == 32 ? (four ? ace_density<R, 32, 4, E> : ace_density<R, 32, 8, E>)
+                         : T1 == 64 ? (four ? ace_density<R, 64, 4, E> : ace_density<R, 64, 8, E>)
+                                    : (four ? ace_density<R, 128, 4, E> : ace_density<R, 128, 8, E>);
+    const auto forces = T3 == 32 ? (four ? ace_forces<R, 32, 4, E> : ace_forces<R, 32, 8, E>)
+                        : T3 == 64 ? (four ? ace_forces<R, 64, 4, E> : ace_forces<R, 64, 8, E>)
+                                   : (four ? ace_forces<R, 128, 4, E> : ace_forces<R, 128, 8, E>);
     const auto dag = T2 == 32 ? ace_dag<R, 32> : T2 == 64 ? ace_dag<R, 64>
                      : T2 == 128 ? ace_dag<R, 128> : ace_dag<R, 256>;
     const int64_t b1 = blocks(density, T1, s1, n_rows), b3 = blocks(forces, T3, s3, n_rows);
@@ -513,18 +567,17 @@ ffi::Error AceDirectGpuImpl(gpuStream_t stream, ffi::ScratchAllocator scratch, f
     const auto mem = scratch.Allocate(bytes, 16);         // XLA aligns to 16 at most
     if (!mem) return ffi::Error(ffi::ErrorCode::kResourceExhausted, "no device scratch for the ACE kernel");
     R *Ag = static_cast<R *>(*mem), *wAg = Ag + n_A, *D = wAg + n_A;
-    R *x = pos.typed_data<R>(), *eo = e->typed_data<R>(), *fo = f->typed_data<R>();
+    R *x = x_in.typed_data<R>(), *eo = e->typed_data<R>(), *fo = f->typed_data<R>();
+    const Edges<R> ed{E ? x : nullptr, zj, mask, E ? fo : nullptr};
     int32_t *lists = reinterpret_cast<int32_t *>(D + b2 * G * per_atom), *broken = lists + n_list;
     (void)GPU(MemsetAsync)(eo, 0, atoms * sz, stream);
-    (void)GPU(MemsetAsync)(fo, 0, 3 * atoms * sz, stream);
+    (void)GPU(MemsetAsync)(fo, 0, n_out * sz, stream);
     (void)GPU(MemsetAsync)(broken, 0, sizeof(int), stream);
     if (n_rows > 0) {
-      density<<<b1, T1, s1, stream>>>(m, x, species.typed_data(), nbr.typed_data(), num.typed_data(),
-                                      i32(atoms), i32(K), i32(rows), Ag, lists, eo, broken);
-      dag<<<b2, kThreads, s2, stream>>>(m, species.typed_data(), i32(n_rows), lv_sh, Ag, wAg, D, per_atom,
-                                        eo);
-      forces<<<b3, T3, s3, stream>>>(m, x, species.typed_data(), nbr.typed_data(), weight.typed_data<R>(),
-                                     i32(atoms), i32(K), i32(rows), lists, wAg, broken, eo, fo);
+      density<<<b1, T1, s1, stream>>>(m, x, zs, nb, cnt, ed, i32(atoms), i32(K), i32(rows), Ag, lists, eo, broken);
+      dag<<<b2, kThreads, s2, stream>>>(m, zs, i32(n_rows), lv_sh, Ag, wAg, D, per_atom, eo);
+      forces<<<b3, T3, s3, stream>>>(m, x, zs, nb, static_cast<const R *>(wt), ed, i32(atoms), i32(K), i32(rows),
+                                     lists, wAg, broken, eo, fo);
     }
     const auto err = GPU(GetLastError)();
     if (err != GPU(Success))
@@ -532,6 +585,47 @@ ffi::Error AceDirectGpuImpl(gpuStream_t stream, ffi::ScratchAllocator scratch, f
     return ffi::Error::Success();
   };
   return type == ffi::DataType::F32 ? run(0.0f) : run(0.0);
+}
+
+ffi::Error AceDirectGpuImpl(gpuStream_t stream, ffi::ScratchAllocator scratch, ffi::AnyBuffer pos,
+                            ffi::Buffer<ffi::S32> species, ffi::Buffer<ffi::S32> nbr,
+                            ffi::Buffer<ffi::S32> num, ffi::AnyBuffer weight, ffi::AnyBuffer rtab,
+                            ffi::AnyBuffer rcut, ffi::Buffer<ffi::S32> runs, ffi::Buffer<ffi::S32> groups,
+                            ffi::Buffer<ffi::S32> factor, ffi::AnyBuffer ct, ffi::AnyBuffer e0,
+                            ffi::Buffer<ffi::S32> levels, ffi::Buffer<ffi::S32> parent,
+                            ffi::Buffer<ffi::S32> lone, ffi::Buffer<ffi::S32> chunks,
+                            ffi::Buffer<ffi::S32> lf, ffi::AnyBuffer lc, double x0, double h,
+                            int64_t n, int64_t n_rnl, int64_t lmax, int64_t solid, int64_t n_leaf,
+                            int64_t n_st, double rc2, ffi::Result<ffi::AnyBuffer> e,
+                            ffi::Result<ffi::AnyBuffer> f) {
+  const Consts c{rtab, rcut, runs, groups, factor, ct, e0, levels, parent, lone, chunks, lf, lc,
+                 x0, h, n, n_rnl, lmax, solid, n_leaf, n_st};
+  return Launch<false>(stream, scratch, pos, species.typed_data(), nbr.typed_data(), num.typed_data(),
+                       weight.untyped_data(), nullptr, nullptr, pos.dimensions()[0], nbr.dimensions()[0],
+                       nbr.dimensions()[1], c, rc2,
+                       {weight.element_type(), rtab.element_type(), rcut.element_type(), ct.element_type(),
+                        e0.element_type(), lc.element_type(), e->element_type(), f->element_type()},
+                       e, f);
+}
+
+// The ASE path (calc.ACECalculator(ffi=...) on a GPU): rows are the atoms, every live slot a pair.
+ffi::Error AceEdgesGpuImpl(gpuStream_t stream, ffi::ScratchAllocator scratch, ffi::AnyBuffer rij,
+                           ffi::Buffer<ffi::S32> zi, ffi::Buffer<ffi::S32> zj, ffi::Buffer<ffi::PRED> mask,
+                           ffi::AnyBuffer rtab, ffi::AnyBuffer rcut, ffi::Buffer<ffi::S32> runs,
+                           ffi::Buffer<ffi::S32> groups, ffi::Buffer<ffi::S32> factor, ffi::AnyBuffer ct,
+                           ffi::AnyBuffer e0, ffi::Buffer<ffi::S32> levels, ffi::Buffer<ffi::S32> parent,
+                           ffi::Buffer<ffi::S32> lone, ffi::Buffer<ffi::S32> chunks,
+                           ffi::Buffer<ffi::S32> lf, ffi::AnyBuffer lc, double x0, double h, int64_t n,
+                           int64_t n_rnl, int64_t lmax, int64_t solid, int64_t n_leaf, int64_t n_st,
+                           ffi::Result<ffi::AnyBuffer> e, ffi::Result<ffi::AnyBuffer> g) {
+  const Consts c{rtab, rcut, runs, groups, factor, ct, e0, levels, parent, lone, chunks, lf, lc,
+                 x0, h, n, n_rnl, lmax, solid, n_leaf, n_st};
+  const int64_t rows = rij.dimensions()[0], K = rij.dimensions()[1];
+  return Launch<true>(stream, scratch, rij, zi.typed_data(), nullptr, nullptr, nullptr, zj.typed_data(),
+                      mask.typed_data(), rows, K, rows, c, 0.0,
+                      {rtab.element_type(), rcut.element_type(), ct.element_type(), e0.element_type(),
+                       lc.element_type(), e->element_type(), g->element_type()},
+                      e, g);
 }
 
 }  // namespace
@@ -569,3 +663,35 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(AceDirectGpu, AceDirectGpuImpl,
                                   .Attr<double>("rc2")
                                   .Ret<ffi::AnyBuffer>()            // atom energies (atoms,)
                                   .Ret<ffi::AnyBuffer>());          // -sum_i w_i grad e_i (atoms, 3)
+
+XLA_FFI_DEFINE_HANDLER_SYMBOL(AceEdgesGpu, AceEdgesGpuImpl,
+                              ffi::Ffi::Bind()
+                                  .Ctx<ffi::PlatformStream<gpuStream_t>>()
+                                  .Ctx<ffi::ScratchAllocator>()
+                                  .Arg<ffi::AnyBuffer>()            // rij (rows, K, 3)
+                                  .Arg<ffi::Buffer<ffi::S32>>()     // centre species (rows,)
+                                  .Arg<ffi::Buffer<ffi::S32>>()     // neighbour species (rows, K)
+                                  .Arg<ffi::Buffer<ffi::PRED>>()    // live slots (rows, K)
+                                  .Arg<ffi::AnyBuffer>()            // radial table (NZ, NZ, ncoef, F)
+                                  .Arg<ffi::AnyBuffer>()            // pair cutoffs (NZ, NZ)
+                                  .Arg<ffi::Buffer<ffi::S32>>()     // A runs (n_runs, 4): a0, r, y0, len
+                                  .Arg<ffi::Buffer<ffi::S32>>()     // DAG groups (n_groups, 2): parent, end
+                                  .Arg<ffi::Buffer<ffi::S32>>()     // DAG A factor per node
+                                  .Arg<ffi::AnyBuffer>()            // readout (NZ, n_A + nodes)
+                                  .Arg<ffi::AnyBuffer>()            // E0 (NZ,)
+                                  .Arg<ffi::Buffer<ffi::S32>>()     // DAG levels' first groups (n_lev + 1,)
+                                  .Arg<ffi::Buffer<ffi::S32>>()     // parent per node
+                                  .Arg<ffi::Buffer<ffi::S32>>()     // mids without leaves
+                                  .Arg<ffi::Buffer<ffi::S32>>()     // leaf chunks (n_chunks, 2): slot, ranks
+                                  .Arg<ffi::Buffer<ffi::S32>>()     // leaf A factors rank by lane, -1 padding
+                                  .Arg<ffi::AnyBuffer>()            // leaf readout rank by lane (NZ, slots)
+                                  .Attr<double>("x0")
+                                  .Attr<double>("h")
+                                  .Attr<int64_t>("n")
+                                  .Attr<int64_t>("n_rnl")
+                                  .Attr<int64_t>("lmax")
+                                  .Attr<int64_t>("solid")
+                                  .Attr<int64_t>("n_leaf")
+                                  .Attr<int64_t>("n_st")
+                                  .Ret<ffi::AnyBuffer>()            // site energies (rows,)
+                                  .Ret<ffi::AnyBuffer>());          // dE_i / drij (rows, K, 3)
