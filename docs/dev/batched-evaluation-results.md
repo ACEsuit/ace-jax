@@ -93,16 +93,21 @@ Single points, µs per atom:
   cells keep gaining to approximately 256k atoms per call (next section).
 
 Batched MD (`bench/batch/md.py`: JAX-MD NVE under vmap, the JAX model, float64, compacted K and
-batch-sized row blocks, 20 steps per jitted chunk, lists fixed), µs per atom per step:
+batch-sized row blocks, 20 steps per jitted chunk, lists fixed), µs per atom per step. Rerun with the
+single-species matmul radial (rev 31116ac, Sulis job 2264940 on gpu012; the einsum-era results of job
+2261539 are in `runs/batch/sulis/einsum-a9d2877/`):
 
 | atoms | cells=1 | 16 | 64 | 256 | 1024 |
 |--:|--:|--:|--:|--:|--:|
-| 8 | 43.9 | 3.59 | 1.26 | 0.633 | 0.457 |
-| 64 | 6.09 | 0.802 | 0.422 | 0.364 | 0.409 |
-| 216 | 2.58 | 0.643 | 0.442 | 0.435 | 0.493 |
+| 8 | 44.3 | 3.59 | 1.20 | 0.561 | 0.391 |
+| 64 | 6.29 | 0.732 | 0.481 | 0.341 | 0.388 |
+| 216 | 2.41 | 0.555 | 0.414 | 0.406 | 0.473 |
 
-- Best 0.36 µs/atom/step (64-atom cells x 256, 16k atoms), 17x one 64-atom cell; 8-atom cells reach
-  0.46 at 1024 cells, 96x one cell.
+- Against the einsum: 0.88-1.17x per point (median 1.07x); the single points of the same job are
+  unchanged (median 1.00x in every dtype/builder group), so the table above them stands.  The radial
+  change is a compile-time fix, not a speed-up.
+- Best 0.34 µs/atom/step (64-atom cells x 256, 16k atoms), 18x one 64-atom cell; 8-atom cells reach
+  0.39 at 1024 cells, 113x one cell.
   Below the single-point floor (1.1 µs/atom) because the MD step builds no list and evaluates
   compacted slots.
 - Past approximately 16k-55k atoms per call it gets slightly worse (64 x 1024, 216 x 1024).
@@ -175,8 +180,19 @@ peak GB and µs per atom per step:
   | elementwise sum over q | 5.5 | 0.0342 |
   | matmul (now, one species) | 5.1 | 0.0312 |
 
-  The matmul also makes the A100 MD step 1.6x faster at this shape; the A100 MD figures above
-  were measured with the einsum.  Float32 MD on lestrade first failed on a
+  The 1.6x step at this shape does not carry over: the benchmark grid gives 0.88-1.17x (MD table
+  above).  Multi-species (Cantor, 5 species, `bench/batch/cantor_model.py` o3d10, `Wnlq` (5, 5, 107, 75)
+  after `lean`; fcc 32-atom cells x 128; Sulis job 2264941) does not hit the slow compile:
+
+  | radial form | A100 init (s) | A100 step (s) | Ada init (s) | Ada step (s) |
+  |---|--:|--:|--:|--:|
+  | einsum (now) | 9.3 | 0.2603 | 3.6 | 1.285 |
+  | einsum, fusion autotuner off | 9.1 | 0.2598 | | |
+  | elementwise sum over q | 18.9 | 0.2214 | 7.4 | 0.890 |
+  | one GEMM over all 25 pairs, gather | | | 6.4 | 5.469 |
+
+  The sum over q steps 1.18x faster on the A100 (1.44x on the Ada) for twice the compile; forces equal
+  to 6e-16.  Float32 MD on lestrade first failed on a
   float64 momentum (`initial_momenta` now takes `dtype`).
 
 ## CPU (lestrade, 32 cores, float64)
@@ -318,5 +334,5 @@ so both take the kernel.
 
 ## Not yet measured
 
-- `MAX_BATCH_ATOMS_CPU` above 2^14; the A100 MD tables again with the single-species GEMM radial.
+- `MAX_BATCH_ATOMS_CPU` above 2^14; the elementwise multi-species radial (1.18x A100, 1.44x Ada MD step).
 - Mixed-size streams: compile counts per bucket in practice.
