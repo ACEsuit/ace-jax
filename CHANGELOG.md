@@ -9,6 +9,12 @@ variable.
 
 ### Changed
 
+- **The radial table is sized to an accuracy.** `radial_table=True` (and the
+  C++ kernel, which turns it on) now uses 4000 intervals or more: enough for
+  an error of 1e-9 in the radial values. Most models keep 4000 intervals. A
+  species-embedded SiGe model gets 16384, and its force error goes from
+  3.6e-7 to 8.9e-9 of the largest force, at the same speed. A float sets
+  another tolerance; an int still sets the number of intervals.
 - **`fast-neighbours` is now `native`.** The `native` extra installs the same
   packages; `fast-neighbours` remains as an alias until the next release but one.
 - **The C++ kernel is the default for CPU bundles.** `export_lammps` and

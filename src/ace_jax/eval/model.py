@@ -990,7 +990,7 @@ def block_dense(model):
                                       if compact else None))
 
 
-from .splinify import AUTO, spline_plan, table_intervals  # noqa: E402
+from .splinify import AUTO, spline_plan, table_intervals, table_option  # noqa: E402
 
 
 def _splined(model, spline_tol, spline_intervals=None):
@@ -1014,18 +1014,19 @@ def _wraps(model):
 def with_radial_table(model, radial_table=None):
     """(model, info): `splinify.radial_table` as the `radial_table=` option asks,
     the one place `lean`, ACECalculator and export_lammps apply it.  None / False
-    (default): `model` itself and None.  True: DEFAULT_RADIAL_TABLE (4000)
-    intervals; an int: that many.  ACEModel and PACEModel only: a wrapper model
+    (default): `model` itself and None.  True: from DEFAULT_RADIAL_TABLE (4000)
+    intervals up to DEFAULT_TABLE_TOL (`splinify.radial_table`'s tol); a float:
+    that tolerance; an int: that many intervals.  ACEModel and PACEModel only: a wrapper model
     (`.base`, `with_base`) reads its base's basis, which a table does not keep
     exact, so it is refused."""
-    n = table_intervals(radial_table)
+    n, tol = table_option(radial_table)
     if n is None:
         return model, None
     if _wraps(model):
         raise ValueError("radial_table: a wrapper model reads its base model's basis, which "
                          "must stay exact; tabulate only an ACEModel or a PACEModel")
     from .splinify import radial_table as _radial_table
-    return _radial_table(model, n, return_info=True)
+    return _radial_table(model, n, return_info=True, tol=tol)
 
 
 def splining(before, after, spline_tol):
@@ -1090,14 +1091,15 @@ def lean(model, spline_tol=AUTO, spline_intervals=None, radial_table=None):
     `model.with_base(lean_keep_basis(model.base, spline_tol, spline_intervals))`:
     the wrapper reads the basis, so only the basis-preserving transforms apply.
 
-    radial_table (None, the default: off; True: `splinify.DEFAULT_RADIAL_TABLE`
-    = 4000 intervals; an int: that many) applies `splinify.radial_table` last,
+    radial_table (None, the default: off; True: from 4000 intervals up to the
+    `splinify.DEFAULT_TABLE_TOL` value error, 1e-9; a float: that tolerance; an
+    int: that many intervals) applies `splinify.radial_table` last,
     via `with_radial_table`: the whole radial stage -- R_nl with its transform
     and envelope, and the folded pair radial -- as one cubic B-spline table per
     species pair in r on [0.5 A, rcut], masked to exact zeros beyond each
     pair's cutoff (the end cubic extrapolates below 0.5 A).  A CPU speed-up
-    (1.1-1.4x on one core), and an approximation: at 4000 intervals energies
-    agree to ~1e-11 relative and forces to ~1e-8 of max|F|.  A PACEModel gets
+    (1.1-1.4x on one core), and an approximation: with True energies agree to
+    ~1e-11 relative and forces to ~1e-8 of max|F|.  A PACEModel gets
     its g_k tabulated (and is otherwise returned as given); a wrapper model
     refuses it.
 

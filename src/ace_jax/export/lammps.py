@@ -460,10 +460,11 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
     unfolded model), `ace_jax.spline_tol` and `ace_jax.spline_intervals`
     ({radial: n}), both None when nothing was splined.
 
-    radial_table (None, the default: off; True: 4000 intervals; an int: that
-    many): tabulate the exported model's radial stage in r after `lean`
+    radial_table (None, the default: off; True: sized to a 1e-9 value error
+    from 4000 intervals up; a float: that tolerance; an int: that many
+    intervals): tabulate the exported model's radial stage in r after `lean`
     (`eval.model.with_radial_table`; ACE R_nl and the pair radial, PACE g_k),
-    for every layout.  A CPU speed-up and an approximation (at 4000 intervals
+    for every layout.  A CPU speed-up and an approximation (with True
     energies to ~1e-11 relative, forces to ~1e-8 of max|F|); exactly zero
     beyond each pair's cutoff, so the matrix layout's skin pairs still drop
     out.  Recorded as `ace_jax.radial_table` (n_intervals, r_min, r_max,

@@ -155,7 +155,8 @@ the command compiles the kernel there.
 
 The kernel tabulates the radial basis in r (`radial_table=True`). Energies
 agree with the XLA program to approximately 1e-12 relative. Forces agree to
-1.5e-8 of the largest force. The bundle records the kernel in `ace_jax.ffi`:
+approximately 1e-8 of the largest force. The table is fine enough for an
+error of 1e-9 in the radial values. For most models it has 4000 intervals. The bundle records the kernel in `ace_jax.ffi`:
 the custom-call target, the library and the `LAMMPS_JAX_FFI_HANDLERS` value.
 If the export used the XLA program on a CPU, `ace_jax.ffi_reason` gives the
 reason.
