@@ -24,10 +24,10 @@ def _cfg(**kw):
 
 def test_config_radial_defaults_and_validation():
     c = _cfg().validate()
-    assert (c.learn_radial, c.radial_n_q, c.radial_steps, c.radial_lam_grid, c.radial_val_frac) == \
-        (False, 12, 40, (0.0, 1e-2), 0.2)
+    assert (c.learn_radial, c.radial_n_q, c.radial_steps, c.radial_reprofile_every, c.radial_lam_grid,
+            c.radial_val_frac) == (False, 12, 300, 100, (0.0, 1e-2), 0.2)
     for bad in (dict(radial_val_frac=0.0), dict(radial_val_frac=1.0), dict(radial_n_q=0),
-                dict(radial_steps=-1), dict(radial_lam_grid=())):
+                dict(radial_steps=-1), dict(radial_reprofile_every=0), dict(radial_lam_grid=())):
         with pytest.raises(ValueError, match="radial"):
             _cfg(learn_radial=True, **bad).validate()
 
@@ -77,6 +77,16 @@ def test_stage_matches_fit_radial_on_the_same_split(fast):
     np.testing.assert_allclose(rr.W, np.asarray(W), rtol=0, atol=1e-12)
     np.testing.assert_allclose(np.asarray(d2.model.rnl_Wnlq), np.asarray(W), rtol=0, atol=1e-12)
     assert np.asarray(d2.z["rnl_Wnlq"]).shape == np.asarray(W).shape
+
+
+def test_stage_reprofiles_every_radial_reprofile_every_steps(fast):
+    """--radial-reprofile-every reaches the learner: 4 steps re-fitted every 2 are two rounds (two theta
+    re-fits after the start), every 4 one."""
+    from ace_jax.fit.pipeline.radials import learn_radials
+    for every, rounds in ((2, 2), (4, 1)):
+        cfg = _cfg(learn_radial=True, radial_steps=4, radial_reprofile_every=every, radial_lam_grid=(0.0,))
+        _, rr = learn_radials(cfg, _data(cfg), log=QUIET)
+        assert len(rr.info["runs"]["0"]["round_lengths"]) == rounds
 
 
 def test_stage_gate_keeps_init(fast):
@@ -182,8 +192,10 @@ def test_cli_learn_radial_writes_info_and_reproduces(fast, tmp_path):
     main(["fit", *FAST_CLI, "--learn-radial", "--radial-steps", "3", "--radial-lam-grid", "0",
           "--out", str(a)])
     info = json.loads((a / "radial_info.json").read_text())
-    assert info["lam_grid"] == [0.0] and info["n_q"] == 12
     cand = np.load(a / "radial_lam=0.npz")          # the candidate checkpoint, written before the gate
+    # n_q is the span used: to_analytic only widens, so it can exceed the requested 12 (this model needs 15)
+    assert info["lam_grid"] == [0.0] and info["n_q_requested"] == 12 and info["n_q"] >= 12
+    assert info["n_q"] == cand["rnl_Wnlq"].shape[-1] and info["steps"] == 3
     assert cand["rnl_Wnlq"].shape == np.load(a / "model.npz")["rnl_Wnlq"].shape and int(cand["steps"]) == 3
     # progress.jsonl, written as the fit ran: the stages in order, each radial round with its LML
     ev = [json.loads(line) for line in (a / "progress.jsonl").read_text().splitlines()]

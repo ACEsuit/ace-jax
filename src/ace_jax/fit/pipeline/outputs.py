@@ -91,7 +91,9 @@ def write_outputs(res, out, layout=("run",), argv=None, save_model=True, model_d
     if res.radial is not None:
         r, c = res.radial, res.config
         _dump(out / "radial_info.json", {
-            "selected": r.info["selected"], "scores": r.info["scores"], "n_q": c.radial_n_q,
+            "selected": r.info["selected"], "scores": r.info["scores"],
+            "n_q": int(np.shape(r.W)[-1]), "n_q_requested": c.radial_n_q,   # to_analytic only widens
+            "steps": c.radial_steps, "reprofile_every": c.radial_reprofile_every,
             "lam_grid": list(c.radial_lam_grid), "val_frac": c.radial_val_frac,
             "to_analytic_relres_max": r.relres_max, "n_fit": r.n_fit, "n_val": r.n_val,
             "seconds": r.seconds})

@@ -65,10 +65,13 @@ def learn_radials(cfg, data, log=print, checkpoint=None):
     ind = blr_inducing(gc, ds_fit.node_z, ds_fit.node_mask)    # linear only: no site features (problem.py)
     prob = Problem(KernelSpec("cosine", True, gc.D), model, ind, gc,
                    jnp.asarray(prior_diagonal(data.z, meta, data.source)), default_prior(r0))
-    log(f"learn radials: n_q={cfg.radial_n_q} on {len(fit_)} configs, gate on {nval} "
+    n_q = int(model.rnl_Wnlq.shape[-1])          # to_analytic only widens: an analytic model keeps a wider span
+    log(f"learn radials: n_q={n_q}" + ("" if n_q == cfg.radial_n_q else f" (the model's own; --radial-n-q "
+        f"{cfg.radial_n_q} only widens)") + f" on {len(fit_)} configs, gate on {nval} "
         f"(to_analytic relres_max={relres_max:.2e})")
     W, info = fit_radial(prob, ds_fit, ds_val, model.rnl_Wnlq, lam_grid=tuple(cfg.radial_lam_grid),
-                         steps=cfg.radial_steps, map_steps=RADIAL_MAP_STEPS,
+                         steps=cfg.radial_steps, reprofile_every=cfg.radial_reprofile_every,
+                         map_steps=RADIAL_MAP_STEPS,
                          rough_weights=1.0 / (1.0 + rnl_degrees(meta)) ** 2, noise=resolved_noise(cfg), log=log,
                          checkpoint=checkpoint, opt=cfg.radial_opt, cg_iters=cfg.radial_cg_iters)
     # patch the source arrays in memory: same file-shaped hand-off as a built basis
