@@ -561,8 +561,8 @@ def cmd_export(a):
     if fmt == "yace" and a.aa_dag != "auto":
         raise UsageError("--aa-dag sets a lammps-jax bundle's product basis; a .yace needs none")
     if (a.ffi or a.ffi_flags) and a.aa_dag == "cueq":
-        raise UsageError("--ffi and --aa-dag cueq are exclusive: the C++ kernel runs on the CPU (--platform cpu), "
-                         "cueq on a CUDA GPU")
+        raise UsageError("--ffi and --aa-dag cueq are exclusive: the kernel evaluates the product basis "
+                         "itself")
     model, meta, extra = load(a.model)
     aa_dag = None if a.aa_dag == "chain" else a.aa_dag
     if aa_dag == "cueq" and fmt == "lammps":      # refuse before sizing anything
@@ -605,8 +605,10 @@ def cmd_export(a):
         raise UsageError("--procs takes the LAMMPS processor grid: three integers px,py,pz")
     if (a.ffi or a.ffi_flags) and a.no_ffi:
         raise UsageError("--no-ffi exports the XLA program: give it without --ffi / --ffi-flags")
-    if (a.ffi or a.ffi_flags) and (a.platform != "cpu" or a.dtype != "float64" or a.layout not in ("auto", "matrix")):
-        raise UsageError("--ffi runs the C++ kernel on the CPU: it needs --platform cpu, float64 and the matrix layout")
+    if (a.ffi or a.ffi_flags) and ((a.dtype != "float64" and a.platform == "cpu")
+                                   or a.layout not in ("auto", "matrix")):
+        raise UsageError("--ffi runs ace-jax's C++ or CUDA kernel: it needs the matrix layout, and float64 "
+                         "on the CPU")
     try:
         import lammps_jax  # noqa: F401
     except ImportError:
@@ -625,7 +627,7 @@ def cmd_export(a):
     if a.ffi or a.ffi_flags:                      # required: compile (or reuse) it now, and refuse what it cannot run
         from .eval import ffi as kernel
         try:
-            ffi = kernel.library(flags=a.ffi_flags.split() if a.ffi_flags else None)
+            ffi = kernel.library(flags=a.ffi_flags.split() if a.ffi_flags else None, gpu=a.platform != "cpu")
         except kernel.FFIUnavailable as e:
             raise UsageError(str(e)) from None
     from .eval.cueq import CueqUnavailable
@@ -705,9 +707,12 @@ def cmd_native(a):
 
 
 def _print_ffi_env(record):
-    """The shell line that runs LAMMPS on a C++ kernel bundle, and how to run it."""
-    print(f"C++ kernel: {record['library']}\n"
-          "  run LAMMPS with `newton on`, one MPI rank per core (the kernel is single-threaded), and\n"
+    """The shell line that runs LAMMPS on a kernel bundle, and how to run it."""
+    from .eval import ffi as kernel
+    gpu = record["target"] == kernel.TARGET_GPU
+    ranks = "a GPU per MPI rank" if gpu else "one MPI rank per core (the kernel is single-threaded)"
+    print(f"{'CUDA' if gpu else 'C++'} kernel: {record['library']}\n"
+          f"  run LAMMPS with `newton on`, {ranks}, and\n"
           f"  export LAMMPS_JAX_FFI_HANDLERS=\"{record['handlers']}\"")
 
 
@@ -752,17 +757,18 @@ def _export_print_env(a):
 
 
 def _ffi_here(record):
-    """A C++ kernel bundle's record with the library on THIS machine: the recorded one when it exists here
-    (a shared filesystem), else the kernel compiled here (`eval.ffi.library`, cached)."""
+    """A kernel bundle's record with the library on THIS machine: the recorded one when it exists here
+    (a shared filesystem), else the kernel compiled here (`eval.ffi.library`, cached), CUDA for a GPU bundle."""
     if pathlib.Path(record["library"]).exists():
         return record
     from .eval import ffi as kernel
+    gpu = record["target"] == kernel.TARGET_GPU
     try:
-        lib = kernel.library()
+        lib = kernel.library(gpu=gpu)
     except kernel.FFIUnavailable as e:
         raise UsageError(f"{record['library']} is not on this machine, and the kernel cannot be compiled here: {e}") from None
     print(f"# {record['library']} is not on this machine: compiled the kernel here")
-    return {**record, "library": str(lib), "handlers": kernel.handlers(lib)}
+    return {**record, "library": str(lib), "handlers": kernel.handlers(lib, gpu)}
 
 
 def add_basis_args(p, *, fit):
@@ -886,17 +892,18 @@ def _parser():
                           "the cueq extra and lammps-jax's contrib/ffi-replay via LAMMPS_JAX_CONTRIB)")
     exp.add_argument("--print-env", default=None, metavar="BUNDLE",
                      help="instead of an export: print the environment that runs LAMMPS on an exported cueq "
-                          "bundle (--aa-dag cueq) or C++ kernel bundle, resolved on this machine (run it where "
+                          "bundle (--aa-dag cueq) or kernel bundle, resolved on this machine (run it where "
                           "LAMMPS runs; a kernel library missing here is compiled here)")
     exp.add_argument("--ffi", action="store_true",
-                     help="lammps, --platform cpu: require ace-jax's C++ kernel for linear ACE (one FFI call per "
-                          "step; the default takes it when it can and says why not), compiled on first use with "
-                          "the C++ compiler ($CXX, c++, g++ or clang++) and cached")
+                     help="lammps: require ace-jax's kernel for linear ACE (one FFI call per step; on --platform "
+                          "cpu the default takes it when it can and says why not), compiled on first use with the "
+                          "C++ compiler ($CXX, c++, g++ or clang++), or nvcc for a GPU bundle, and cached")
     exp.add_argument("--no-ffi", action="store_true",
                      help="lammps, --platform cpu: the XLA program, not the C++ kernel")
     exp.add_argument("--ffi-flags", default=None,
-                     help="lammps: the kernel's compiler flags (implies --ffi; default \"-O3 -march=native\"): "
-                          "on a login node for compute nodes of another CPU type, e.g. --ffi-flags=\"-O3 -march=x86-64-v3\" (with =)")
+                     help="lammps: the kernel's compiler flags (implies --ffi; default \"-O3 -march=native\", "
+                          "or \"-O3 -arch=sm_XY\" for a GPU): on a login node for compute nodes of another CPU "
+                          "type, e.g. --ffi-flags=\"-O3 -march=x86-64-v3\" (with =), or -arch=sm_80 for an A100")
     exp.add_argument("--type-elements", default=None,
                      help="lammps: comma-separated element of each LAMMPS atom type, in type order "
                           "(default: the model's element order)")

@@ -53,7 +53,8 @@ aj export --model fit/model.npz --out si_bundle.json --structure start.xyz \
 For the CPU backend, add `--platform cpu`. Add `--procs px,py,pz` to size the
 buffers for one MPI rank. Use the same grid in LAMMPS (`processors px py pz`).
 For a linear ACE model on CPUs, the export uses a C++ kernel in place of the
-XLA program. See [CPU kernel](#cpu-kernel).
+XLA program. See [CPU kernel](#cpu-kernel). On a CUDA GPU, add `--ffi` to use
+a CUDA kernel. See [GPU kernel](#gpu-kernel).
 
  `export_lammps` returns a dictionary, and also writes it in the
 bundle. Its `ace_jax` key records what was exported: the layout, the
@@ -172,6 +173,50 @@ for the CPU of the machine that exports.
 - The cache is `~/.cache/ace-jax/ffi`. Set `ACEJAX_FFI_CACHE` to use a different directory.
 - Set `ACEJAX_FFI_FLAGS` to change the default flags.
 - Use the same jax version as the lammps-jax CPU plugin.
+
+## GPU kernel
+
+On a CUDA GPU, a CUDA kernel can replace the compiled JAX program. It is for
+linear ACE models, as the [CPU kernel](#cpu-kernel) is. The export compiles the
+kernel with `nvcc` the first time, and keeps it in the same cache.
+
+!!! note "CUDA compiler"
+    The kernel needs `nvcc` (`$NVCC`, on `PATH` or in `$CUDA_HOME/bin`). The
+    flags are `-O3 -arch=sm_XY`, for the GPU that JAX finds at the export.
+    On a machine without a GPU, give the architecture, for example
+    `--ffi-flags="-O3 -arch=sm_80"` for an A100.
+
+1. Export with `--ffi`. The platform is `cuda` by default:
+
+    ```bash
+    aj export --model fit/model.npz --out si_bundle.json --structure start.xyz --ffi
+    ```
+
+    In Python, use `export_lammps(..., ffi=True)`.
+
+2. Set the variable that the command prints:
+
+    ```bash
+    export LAMMPS_JAX_FFI_HANDLERS="ace_jax_direct_gpu=<library>:AceDirectGpu"
+    ```
+
+3. Run LAMMPS with `newton on`:
+
+    ```bash
+    lmp -k on g 1 -sf kk -pk kokkos newton on neigh half -in in.lammps
+    ```
+
+In float64, the requirements and the accuracy are the same as for the CPU kernel.
+
+The GPU kernel also runs float32 bundles. To export one, add `--dtype float32`.
+The kernel then calculates in float32, with the accuracy of the float32 XLA
+program. On a GPU with low float64 throughput, it is 2 to 4 times faster than
+in float64. On an A100, it is 1.2 to 1.3 times faster.
+See [Learned radials and precision](#learned-radials-and-precision).
+
+- Set `ACEJAX_FFI_GPU_FLAGS` to change the default flags.
+- The source also compiles for AMD GPUs with `hipcc` (`eval.ffi.build_gpu`).
+  It is not tested on AMD GPUs, and lammps-jax bundles do not run on AMD GPUs.
 
 ## Layouts
 

@@ -492,27 +492,28 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
     names relative to the bundle's directory), "handlers": the LAMMPS_JAX_FFI_HANDLERS value with the export
     host's shim}; `eval.cueq.run_env(record, bundle_path)` gives LAMMPS's environment.
 
-    ffi ("auto", the default; True; the path of a library built by `eval.ffi.build`; False) runs the
-    model as the C++ FFI kernel of `eval.ffi` on the neighbour matrix, positions in and atom energies
-    and forces out.  "auto" takes it on a CPU bundle when it can (`choose_ffi`), else the XLA program,
-    recording why as `ace_jax.ffi_reason`; False is always the XLA program.  The kernel needs
-    platform="cpu", the matrix layout, float64 and a lean linear ACEModel, and turns the radial table
-    on (radial_table=None -> True).  True compiles the kernel on first use (`eval.ffi.library`: a
-    C++17 compiler, -march=native, cached; `eval.ffi.FFIUnavailable` without one).  The kernel lays
-    out its own greedy DAG and reads every list slot, so `aa_dag`, `k_dense` and `block_rows` do not
-    apply (recorded as "greedy", None, None).  LAMMPS loads the kernel through
-    LAMMPS_JAX_FFI_HANDLERS, set to `ace_jax.ffi["handlers"]`, with a lammps-jax whose plugin
-    registers handlers for the CPU platform.  Recorded as `ace_jax.ffi`: {"target", "library",
-    "handlers"} (None for the XLA program).  ffi=True or a path with aa_dag="cueq" raises ValueError
-    (CPU against CUDA); "auto" takes the XLA program there.
+    ffi ("auto", the default; True; the path of a library built by `eval.ffi.build` or `build_gpu`; False)
+    runs the model as the FFI kernel of `eval.ffi` on the neighbour matrix, positions in and atom energies
+    and forces out: the C++ kernel for platform="cpu", the CUDA one otherwise.  "auto" takes the C++
+    kernel on a CPU bundle when it can (`choose_ffi`), else the XLA program, recording why as
+    `ace_jax.ffi_reason`; a GPU bundle takes the CUDA kernel with True or a path only; False is always
+    the XLA program.  The kernel needs the matrix layout, float64, or float32 on a GPU, and a lean linear
+    ACEModel, and turns the radial table on (radial_table=None -> True).  True compiles the kernel on
+    first use (`eval.ffi.library`: a C++17 compiler and -march=native, or nvcc for the GPU JAX sees,
+    cached; `eval.ffi.FFIUnavailable` without one).  The kernel lays out its own greedy DAG and reads every
+    list slot, so `aa_dag`, `k_dense` and `block_rows` do not apply (recorded as "greedy", None, None).
+    LAMMPS loads the kernel through LAMMPS_JAX_FFI_HANDLERS, set to `ace_jax.ffi["handlers"]`, with a
+    lammps-jax whose plugin registers handlers for the bundle's platform.  Recorded as `ace_jax.ffi`:
+    {"target", "library", "handlers"} (None for the XLA program).  ffi=True or a path with
+    aa_dag="cueq" raises ValueError (two product bases); "auto" takes the XLA program there.
     """
     from lammps_jax.export import export_model
 
     ffi, ffi_reason = choose_ffi(ffi, model, platform=platform, dtype=dtype, layout=layout, lean=lean,
                                  radial_table=radial_table, max_neighbors=max_neighbors, aa_dag=aa_dag)
-    if ffi and aa_dag == "cueq":                  # two product-basis engines, for different platforms: refuse first
-        raise ValueError("ffi and aa_dag='cueq' are exclusive: the C++ kernel runs on the CPU (platform='cpu'), "
-                         "cueq on a CUDA GPU; export with one or the other")
+    if ffi and aa_dag == "cueq":                  # two product-basis engines: refuse first
+        raise ValueError("ffi and aa_dag='cueq' are exclusive: the kernel evaluates the product basis "
+                         "itself; export with one or the other")
     given = model                             # precision_structure checks the model as given
     from ..eval.model import lean as _lean
     from ..eval.model import splining, with_radial_table
@@ -524,9 +525,11 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
         raise ValueError(f"LAMMPS types {missing} are not in the model's elements {model_z}")
     type_map = [model_z.index(z) for z in type_elements]
     n_species = len(type_elements)
-    if ffi:                                       # a CPU custom call on the neighbour matrix
-        if platform != "cpu" or layout not in ("auto", "matrix") or dtype != "float64" or not lean:
-            raise ValueError("ffi=True needs platform='cpu', layout='matrix', dtype='float64' and lean=True")
+    if ffi:                                       # a custom call on the neighbour matrix
+        if (layout not in ("auto", "matrix") or not lean
+                or dtype not in (("float64",) if platform == "cpu" else ("float64", "float32"))):
+            raise ValueError("ffi=True needs layout='matrix', lean=True and dtype='float64', or 'float32' "
+                             "on a GPU")
         layout, k_dense, block_rows = "matrix", None, None
         radial_table = True if radial_table is None else radial_table
     if layout not in BUNDLE_LAYOUTS + ("auto",):
@@ -609,9 +612,11 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
     rcut = float(meta["rcut"])
     if ffi:                                       # positions and the list straight to the kernel
         from ..eval import ffi as kernel
-        energy_fn, force_fn = kernel.lammps_fns(model, n_species, type_map, rcut)
-        lib = Path(kernel.library() if ffi is True else ffi).resolve()   # before the export: fail early
-        ffi_meta = {"target": kernel.TARGET, "library": str(lib), "handlers": kernel.handlers(lib)}
+        gpu = platform != "cpu"                   # the GPU kernel on CUDA bundles
+        target = kernel.TARGET_GPU if gpu else kernel.TARGET
+        energy_fn, force_fn = kernel.lammps_fns(model, n_species, type_map, rcut, gpu)
+        lib = Path(kernel.library(gpu=gpu) if ffi is True else ffi).resolve()   # first: fail early
+        ffi_meta = {"target": target, "library": str(lib), "handlers": kernel.handlers(lib, gpu)}
     else:
         energy_fn = make_energy_fn(model, n_species, layout, k_dense,
                                    None if type_map == list(range(len(model_z))) else type_map,
@@ -623,7 +628,7 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
                           unit_style="metal", precision=dtype, n_species=n_species, **graph,
                           **({"platform": platform} if platform else {}),
                           **({"force_fn": force_fn, "newton": "on",
-                              "custom_call_targets": (kernel.TARGET,)} if ffi
+                              "custom_call_targets": (target,)} if ffi
                              else {"custom_call_targets": (cueq.TARGET,)} if rec is not None else {}))
     cueq_meta = None
     if rec is not None:                       # every plan this process compiled, for the LAMMPS-side replay
@@ -656,7 +661,7 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
                          "radial_table": rtab,
                          # the product basis's DAG plan mode used (None: the chain form)
                          "aa_dag": aa_dag,
-                         # the C++ FFI kernel: target, library, LAMMPS_JAX_FFI_HANDLERS value (None: the XLA program)
+                         # the FFI kernel: target, library, LAMMPS_JAX_FFI_HANDLERS value (None: XLA program)
                          "ffi": ffi_meta if ffi else None,
                          # why ffi="auto" took the XLA program for a CPU bundle (None: the kernel, a GPU bundle, or ffi given)
                          "ffi_reason": ffi_reason,

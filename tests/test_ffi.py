@@ -1,7 +1,9 @@
-"""The C++ FFI kernel on lammps-jax's neighbour matrix against the matrix-layout program of the lean model
-with the same radial table: atom energies and forces to roundoff, since both read one table and differ
-only in summation order.  Fixtures cover spherical and solid harmonics, 1, 2 and 5 species, and
-correlation order 4; periodic cells with ghost atoms (newton on) against ACECalculator."""
+"""The FFI kernels on lammps-jax's neighbour matrix, C++ on the CPU and CUDA on a GPU, against the
+matrix-layout program of the lean model with the same radial table: atom energies and forces to roundoff,
+since both read one table and differ only in summation order.  Fixtures cover spherical and solid
+harmonics, 1, 2 and 5 species, and correlation order 4; periodic cells with ghost atoms (newton on)
+against ACECalculator; the GPU kernel in float32 too.  The GPU cases need nvcc and a CUDA jax."""
+import dataclasses
 import os
 import pathlib
 import shutil
@@ -17,6 +19,7 @@ from ase.build import bulk
 
 from ace_jax.calc.point import ACECalculator
 from ace_jax.eval import ffi, load
+from ace_jax.eval.api import with_dtype
 from ace_jax.eval.model import lean
 from ace_jax.export.lammps import make_energy_fn
 from conftest import FIXTURE_DIR as FIXTURES
@@ -31,6 +34,18 @@ def kernel(tmp_path_factory):
     if shutil.which("c++") is None:                    # ACEJAX_REQUIRE_OPTIONAL: a missing compiler fails
         (pytest.fail if os.environ.get("ACEJAX_REQUIRE_OPTIONAL") else pytest.skip)("no C++ compiler for the FFI kernel")
     ffi.register(ffi.library(flags=("-O3",), cache=tmp_path_factory.mktemp("ffi")))
+
+
+@pytest.fixture(scope="module", params=["cpu", "gpu"])
+def device(request, tmp_path_factory):
+    """The platform: the C++ kernel, or the GPU kernel, built and registered."""
+    if request.param == "cpu":
+        request.getfixturevalue("kernel")
+    elif ffi.cuda_compiler() is None or jax.default_backend() != "gpu":
+        pytest.skip("no nvcc and CUDA GPU for the GPU kernel")
+    else:
+        ffi.register_gpu(ffi.library(gpu=True, cache=tmp_path_factory.getbasetemp() / "ffi-gpu"))
+    return request.param
 
 
 def cluster(meta, seed=0):
@@ -58,20 +73,49 @@ def matrix_inputs(at, cut, z):
     return jnp.asarray(pos), jnp.asarray(z, jnp.int32), Graph(jnp.asarray(nb), num)
 
 
+@pytest.mark.parametrize("dtype", ["float64", "float32"])
 @pytest.mark.parametrize("name", NAMES)
-def test_ffi_matches_matrix_program(kernel, name):
+def test_ffi_matches_matrix_program(device, name, dtype):
+    """float32: the GPU kernel on `with_dtype(model, "float32")`, to float32 roundoff."""
+    if device == "cpu" and dtype == "float32":
+        pytest.skip("the C++ kernel is float64 only")
     m, meta, _ = load(str(FIXTURES / f"{name}.npz"))
     m1, rcut = lean(m, spline_tol=None, radial_table=True), float(meta["rcut"])
     at = cluster(meta)
     z2i = {int(z): i for i, z in enumerate(meta["elements"])}
-    pos, z, graph = matrix_inputs(at, rcut + 1.0, [z2i[int(x)] for x in at.numbers])   # with skin pairs
     ns = len(meta["elements"])
-    efn = make_energy_fn(m1, ns, "matrix", rcut=rcut)
-    e0, f0 = jax.jit(lambda p: (efn(p, z, graph), -jax.grad(lambda q: efn(q, z, graph).sum())(p)))(pos)
-    efn1, ffn1 = ffi.lammps_fns(m1, ns, list(range(ns)), rcut)
-    e1, f1 = jax.jit(lambda p: (efn1(p, z, graph), ffn1(p, z, graph)))(pos)
+    with jax.default_device(jax.devices(device)[0]):
+        pos, z, graph = matrix_inputs(at, rcut + 1.0, [z2i[int(x)] for x in at.numbers])   # with skin pairs
+        efn = make_energy_fn(m1, ns, "matrix", rcut=rcut)
+        e0, f0 = jax.jit(lambda p: (efn(p, z, graph), -jax.grad(lambda q: efn(q, z, graph).sum())(p)))(pos)
+        efn1, ffn1 = ffi.lammps_fns(with_dtype(m1, dtype), ns, list(range(ns)), rcut, device == "gpu")
+        e1, f1 = jax.jit(lambda p: (efn1(p, z, graph), ffn1(p, z, graph)))(pos.astype(dtype))
     print(f"\n  max|de| {np.abs(e1 - e0).max():.1e}"
           f"  max|dF|/max|F| {np.abs(f1 - f0).max() / np.abs(f0).max():.1e}")
+    tol_e, tol_f = (1e-12, 1e-10) if dtype == "float64" else (1e-5, 3e-5)   # float32 XLA: 1.5e-6, 3.6e-6
+    assert e1.dtype == f1.dtype == dtype
+    assert np.abs(e1 - e0).max() <= tol_e * np.abs(e0).max()
+    assert np.abs(f1 - f0).max() <= tol_f * np.abs(f0).max()
+
+
+@pytest.mark.parametrize("device", ["gpu"], indirect=True)
+def test_gpu_ffi_matches_cpu_kernel_on_a_radial_column_of_two_degrees(device, kernel):
+    """A radial column read at l = 1 and 2, which `prune_columns` allows: the GPU kernel's runs must not cross
+    a degree. Energies and forces equal the C++ kernel's."""
+    m, meta, _ = load(str(FIXTURES / "si_fitted.npz"))
+    m1, rcut = lean(m, spline_tol=None, radial_table=True), float(meta["rcut"])
+    ar, deg = np.asarray(m1.aspec_r).copy(), np.sqrt(np.asarray(m1.aspec_y)).astype(int)
+    ar[deg == 2] = ar[deg == 1][0]
+    m2 = dataclasses.replace(m1, aspec_r=jnp.asarray(ar, m1.aspec_r.dtype))
+    at = cluster(meta)
+    pos, z, graph = matrix_inputs(at, rcut + 1.0, [0] * len(at))
+    out = []
+    for dev in ("cpu", "gpu"):
+        with jax.default_device(jax.devices(dev)[0]):
+            efn, ffn = ffi.lammps_fns(m2, 1, [0], rcut, dev == "gpu")
+            run = jax.jit(lambda p, efn=efn, ffn=ffn: (efn(p, z, graph), ffn(p, z, graph)))
+            out.append([np.asarray(a) for a in run(pos)])
+    (e0, f0), (e1, f1) = out
     assert np.abs(e1 - e0).max() <= 1e-12 * np.abs(e0).max()
     assert np.abs(f1 - f0).max() <= 1e-10 * np.abs(f0).max()
 
@@ -96,7 +140,7 @@ def periodic_ghosts(at, cutoff):
 
 
 @pytest.mark.parametrize("name", ["si_fitted", "sige_nofit", "ace_cantor5_small"])
-def test_ffi_periodic_ghosts_match_calculator(kernel, name):
+def test_ffi_periodic_ghosts_match_calculator(device, name):
     """Owned rows only (rows < atoms), three padding rows past nlocal, padding slots, skin pairs and an
     unused position tail: owned energies, and forces with the ghost rows folded back onto their owners
     (newton on), equal ACECalculator with the same radial table; padding rows and the tail get none."""
@@ -112,10 +156,13 @@ def test_ffi_periodic_ghosts_match_calculator(kernel, name):
         nb[:len(js), i] = js
     num = np.r_[[len(js) for js in lists], [0] * (rows - n)].astype(np.int32)
     z2i = {z: i for i, z in enumerate(els)}
-    z = jnp.asarray([z2i[int(x)] for x in np.r_[at.numbers, at.numbers[owner]]] + [0] * tail, jnp.int32)
-    graph = Graph(jnp.asarray(nb), jnp.asarray(num))
-    efn, ffn = ffi.lammps_fns(lean(m, spline_tol=None, radial_table=True), len(els), list(range(len(els))), rcut)
-    e, f = jax.jit(lambda p: (efn(p, z, graph), ffn(p, z, graph)))(jnp.asarray(np.r_[pos, np.zeros((tail, 3))]))
+    m1 = lean(m, spline_tol=None, radial_table=True)
+    with jax.default_device(jax.devices(device)[0]):
+        z = jnp.asarray([z2i[int(x)] for x in np.r_[at.numbers, at.numbers[owner]]] + [0] * tail, jnp.int32)
+        graph = Graph(jnp.asarray(nb), jnp.asarray(num))
+        efn, ffn = ffi.lammps_fns(m1, len(els), list(range(len(els))), rcut, device == "gpu")
+        x = jnp.asarray(np.r_[pos, np.zeros((tail, 3))])
+        e, f = jax.jit(lambda p: (efn(p, z, graph), ffn(p, z, graph)))(x)
     e, f = np.asarray(e), np.asarray(f)
     F = f[:n].copy()
     np.add.at(F, owner, f[n:N])
@@ -160,13 +207,42 @@ def test_export_ffi_bundle(kernel, tmp_path, monkeypatch):
     assert pathlib.Path(lib).parent == tmp_path / "cache" and aj["layout"] == "matrix" and aj["radial_table"]
     assert aj["aa_dag"] == "greedy" and aj["k_dense"] is None and aj["block_rows"] is None
     assert ffi.TARGET in str(b)                       # the contract names the custom call
-    for bad in (dict(layout="dense"), dict(dtype="float32"), dict(platform="cuda")):
+    for bad in (dict(layout="dense"), dict(dtype="float32")):
         with pytest.raises(ValueError, match="ffi=True"):
             export_lammps(m, meta, tmp_path / "x.json", **{**kw, **bad})
 
 
+@pytest.mark.parametrize("dtype", ["float64", "float32"])
+def test_export_ffi_gpu_bundle(tmp_path, dtype):
+    """export_lammps(ffi=<library>) on a CUDA platform, float64 or float32: the GPU kernel's custom call, its
+    target and the LAMMPS_JAX_FFI_HANDLERS value; the export lowers without a GPU, the library is only
+    named."""
+    require_optional("lammps_jax")
+    from ace_jax.export.lammps import export_lammps
+    m, meta, _ = load(str(FIXTURES / "si_fitted.npz"))
+    lib = str(tmp_path / "libace_jax_ffi_gpu.so")
+    b = export_lammps(m, meta, tmp_path / "b.json", max_atoms=256, max_owned=64, k_dense=40, max_neighbors=48,
+                      platform="cuda", ffi=lib, dtype=dtype)
+    aj = b["ace_jax"]
+    assert aj["ffi"] == {"target": ffi.TARGET_GPU, "library": lib, "handlers": ffi.handlers(lib, gpu=True)}
+    assert aj["ffi"]["handlers"] == f"ace_jax_direct_gpu={lib}:AceDirectGpu"
+    assert ffi.TARGET_GPU in str(b) and aj["layout"] == "matrix" and aj["radial_table"]
+    assert b["contract"]["precision"] == dtype
+
+
+def test_gpu_library_needs_nvcc_and_a_gpu(tmp_path, monkeypatch):
+    """library(gpu=True) without nvcc, or without a GPU to take the architecture from, is FFIUnavailable."""
+    monkeypatch.delenv("ACEJAX_FFI_GPU_FLAGS", raising=False)
+    monkeypatch.setattr(ffi, "cuda_compiler", lambda: None)
+    with pytest.raises(ffi.FFIUnavailable, match="nvcc"):
+        ffi.library(gpu=True, flags=("-O3", "-arch=sm_80"), cache=tmp_path)
+    monkeypatch.setattr(jax, "devices", lambda *a: (_ for _ in ()).throw(RuntimeError("no gpu")))
+    with pytest.raises(ffi.FFIUnavailable, match="no CUDA GPU"):
+        ffi.library(gpu=True, cache=tmp_path)
+
+
 @pytest.mark.parametrize("name", ["si_fitted", "si_ace_model", "ace_cantor5_small"])
-def test_ffi_grad_and_vjp_match_matrix_program(kernel, name):
+def test_ffi_grad_and_vjp_match_matrix_program(device, name):
     """jax.grad through the FFI energy (its custom VJP: a second kernel call with the cotangent as site
     weights): grad of the summed energy is minus the kernel's forces and the XLA program's gradient, and
     the VJP of a random per-atom cotangent is the XLA program's, under jit and value_and_grad."""
@@ -174,19 +250,21 @@ def test_ffi_grad_and_vjp_match_matrix_program(kernel, name):
     m1, rcut = lean(m, spline_tol=None, radial_table=True), float(meta["rcut"])
     at = cluster(meta, seed=2)
     z2i = {int(z): i for i, z in enumerate(meta["elements"])}
-    pos, z, graph = matrix_inputs(at, rcut + 1.0, [z2i[int(x)] for x in at.numbers])
     ns = len(meta["elements"])
-    efx = make_energy_fn(m1, ns, "matrix", rcut=rcut)
-    efn, ffn = ffi.lammps_fns(m1, ns, list(range(ns)), rcut)
-    E1, G1 = jax.jit(jax.value_and_grad(lambda p: efn(p, z, graph).sum()))(pos)
-    E0, G0 = jax.jit(jax.value_and_grad(lambda p: efx(p, z, graph).sum()))(pos)
+    with jax.default_device(jax.devices(device)[0]):
+        pos, z, graph = matrix_inputs(at, rcut + 1.0, [z2i[int(x)] for x in at.numbers])
+        efx = make_energy_fn(m1, ns, "matrix", rcut=rcut)
+        efn, ffn = ffi.lammps_fns(m1, ns, list(range(ns)), rcut, device == "gpu")
+        E1, G1 = jax.jit(jax.value_and_grad(lambda p: efn(p, z, graph).sum()))(pos)
+        E0, G0 = jax.jit(jax.value_and_grad(lambda p: efx(p, z, graph).sum()))(pos)
+        F1 = ffn(pos, z, graph)
+        ct = jnp.asarray(np.random.default_rng(0).normal(size=pos.shape[0]))
+        v1 = jax.jit(lambda p: jax.vjp(lambda q: efn(q, z, graph), p)[1](ct)[0])(pos)
+        v0 = jax.jit(lambda p: jax.vjp(lambda q: efx(q, z, graph), p)[1](ct)[0])(pos)
     scale = np.abs(G0).max()
     assert float(E1) == pytest.approx(float(E0), rel=1e-12)
-    np.testing.assert_allclose(G1, -ffn(pos, z, graph), atol=1e-13 * scale)
+    np.testing.assert_allclose(G1, -F1, atol=1e-13 * scale)
     np.testing.assert_allclose(G1, G0, atol=1e-10 * scale)
-    ct = jnp.asarray(np.random.default_rng(0).normal(size=pos.shape[0]))
-    v1 = jax.jit(lambda p: jax.vjp(lambda q: efn(q, z, graph), p)[1](ct)[0])(pos)
-    v0 = jax.jit(lambda p: jax.vjp(lambda q: efx(q, z, graph), p)[1](ct)[0])(pos)
     np.testing.assert_allclose(v1, v0, atol=1e-10 * np.abs(v0).max())
 
 
@@ -260,19 +338,18 @@ def test_auto_falls_back_without_a_kernel_model_lammps_jax_or_compiler(monkeypat
 
 
 def test_explicit_ffi_still_refuses_an_ineligible_export(tmp_path):
-    """ffi=True requires the kernel: a GPU bundle or float32 raises rather than falling back."""
+    """ffi=True requires the kernel: a float32 CPU bundle raises rather than falling back."""
     require_optional("lammps_jax")
     from ace_jax.export.lammps import export_lammps
     m, meta, _ = load(str(FIXTURES / "si_ace_model.npz"))
     cap = cpu_capacity(meta)
     kw = dict(max_atoms=cap["max_atoms"], max_owned=cap["max_owned"], k_dense=cap["k_dense"],
               max_neighbors=cap["max_neighbors"], ffi=True)
-    for bad in (dict(platform="cuda"), dict(platform="cpu", dtype="float32")):
-        with pytest.raises(ValueError, match="ffi=True"):
-            export_lammps(m, meta, tmp_path / "x.json", **kw, **bad)
+    with pytest.raises(ValueError, match="ffi=True"):
+        export_lammps(m, meta, tmp_path / "x.json", **kw, platform="cpu", dtype="float32")
 
 
-def test_ffi_matches_matrix_program_on_a_species_embedding_model(kernel):
+def test_ffi_matches_matrix_program_on_a_species_embedding_model(device):
     """The kernel on a species-embedding model (`build_embedding_model`, the factorised radial), with random
     coefficients: atom energies and forces equal the matrix-layout program's to roundoff, as for the
     categorical fixtures (the radial table holds each species pair's embedded radial)."""
@@ -289,11 +366,12 @@ def test_ffi_matches_matrix_program_on_a_species_embedding_model(kernel):
     assert m.radial_kind == "spline_factorised"
     m1, rcut = lean(m, spline_tol=None, radial_table=True), float(meta["rcut"])
     at = cluster({"elements": els}, seed=3)
-    pos, z, graph = matrix_inputs(at, rcut + 1.0, [els.index(int(x)) for x in at.numbers])
-    efx = make_energy_fn(m1, len(els), "matrix", rcut=rcut)
-    e0, f0 = jax.jit(lambda p: (efx(p, z, graph), -jax.grad(lambda q: efx(q, z, graph).sum())(p)))(pos)
-    efn, ffn = ffi.lammps_fns(m1, len(els), [0, 1], rcut)
-    e1, f1 = jax.jit(lambda p: (efn(p, z, graph), ffn(p, z, graph)))(pos)
+    with jax.default_device(jax.devices(device)[0]):
+        pos, z, graph = matrix_inputs(at, rcut + 1.0, [els.index(int(x)) for x in at.numbers])
+        efx = make_energy_fn(m1, len(els), "matrix", rcut=rcut)
+        e0, f0 = jax.jit(lambda p: (efx(p, z, graph), -jax.grad(lambda q: efx(q, z, graph).sum())(p)))(pos)
+        efn, ffn = ffi.lammps_fns(m1, len(els), [0, 1], rcut, device == "gpu")
+        e1, f1 = jax.jit(lambda p: (efn(p, z, graph), ffn(p, z, graph)))(pos)
     assert np.abs(e1 - e0).max() <= 1e-12 * np.abs(e0).max()
     assert np.abs(f1 - f0).max() <= 1e-10 * np.abs(f0).max()
 

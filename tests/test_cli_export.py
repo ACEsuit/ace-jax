@@ -44,8 +44,9 @@ def test_export_yace_converts_an_ace_model(tmp_path, capsys):
     (["--out", "m.yace", "--structure", "s.xyz"], "needs none"),
     (["--out", "m.json", "--structure", "s.xyz", "--procs", "2,2"], "three integers"),
     (["--out", "m.json", "--delta", "0.01"], "--delta is for a .yace"),
-    (["--out", "m.json", "--structure", "s.xyz", "--ffi"], "needs --platform cpu"),
     (["--out", "m.json", "--structure", "s.xyz", "--platform", "cpu", "--ffi", "--no-ffi"], "--no-ffi exports the XLA"),
+    (["--out", "m.json", "--structure", "s.xyz", "--platform", "cpu", "--ffi", "--dtype", "float32"],
+     "float64 on the CPU"),
     (["--out", "m.json", "--structure", "s.xyz", "--platform", "cpu", "--layout", "dense", "--ffi"], "matrix layout"),
 ])
 def test_export_usage_errors(tmp_path, capsys, args, msg):
