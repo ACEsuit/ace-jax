@@ -988,25 +988,3 @@ def test_block_target_scales_with_device_memory():
     assert lx.block_target_elems(None) == base
     assert lx.block_target_elems(0.5 * ref) == base
     assert lx.block_target_elems(2 * ref) == 2 * base
-
-
-class _Recorder:                                # lammps-jax's contrib/ffi-replay recorder, stubbed
-    def __init__(self, path, records=(), compiles=True):
-        self.__file__, self.RECORDS, self.calls, self.compiles = str(path), list(records), [], compiles
-
-    def install(self, library, symbol):
-        self.calls.append(("install", library, symbol))
-        if self.compiles:                       # a kernel NVRTC compiles into the cache set before the install
-            import os
-            (pathlib.Path(os.environ["CUEQUIVARIANCE_OPS_NVRTC_CACHE_DIR"]) / "kernel_89.tar").write_bytes(b"")
-
-    def dump(self, path, compile_symbol, execute_symbol):
-        self.calls.append(("dump", str(path), compile_symbol, execute_symbol))
-        pathlib.Path(path).write_bytes(b"FFIRPLY1")
-        return len(self.RECORDS)
-
-
-def _si_fitted():
-    return load(str(FIXTURE_DIR / "si_fitted.npz"))
-
-
