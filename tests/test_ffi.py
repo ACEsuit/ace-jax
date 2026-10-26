@@ -4,6 +4,7 @@ since both read one table and differ only in summation order.  Fixtures cover sp
 harmonics, 1, 2 and 5 species, and correlation order 4; periodic cells with ghost atoms (newton on)
 against ACECalculator; the GPU kernel in float32 too.  The GPU cases need nvcc and a CUDA jax."""
 import dataclasses
+import importlib.util
 import os
 import pathlib
 import shutil
@@ -601,3 +602,23 @@ def test_aj_native_reports_and_builds_the_cuda_kernel(backend_kernel, tmp_path, 
     main(["native", "--build", "--flags=-O1", "--gpu-flags=-O1 -arch=sm_" + ffi.gpu_arch()])
     assert "CUDA kernel:   built in" in capsys.readouterr().out
     assert len(list((tmp_path / "cache").glob("libace_jax_ffi_gpu-*.so"))) == 1
+
+
+def test_aa_dag_cueq_was_removed(tmp_path):
+    """aa_dag="cueq" (NVIDIA cuequivariance) is gone: the calculator and the export raise, naming ffi=True,
+    and `aj export` no longer offers --aa-dag cueq."""
+    from ace_jax.cli import main
+    from ace_jax.eval.aa_dag import with_aa_dag
+    path = str(FIXTURES / "si_fitted.npz")
+    m, meta, _ = load(path)
+    with pytest.raises(ValueError, match="was removed.*ffi=True"):
+        ACECalculator(path, aa_dag="cueq")
+    with pytest.raises(ValueError, match="was removed"):
+        with_aa_dag(lean(m), "cueq")
+    if importlib.util.find_spec("lammps_jax"):
+        from ace_jax.export.lammps import export_lammps
+        with pytest.raises(ValueError, match="was removed"):
+            export_lammps(m, meta, tmp_path / "x.json", max_atoms=64, max_edges=64 * 40, k_dense=40,
+                          layout="dense", aa_dag="cueq")
+    with pytest.raises(SystemExit):
+        main(["export", "--model", path, "--out", str(tmp_path / "b.json"), "--aa-dag", "cueq"])

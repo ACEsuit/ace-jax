@@ -115,6 +115,7 @@ have approximately the same cost.
 - **ace-jax with cuequivariance.** The same linear ACE fits run in
   lammps-jax bundles with `aa_dag="cueq"`, on the A100 only
   ([cuequivariance on the GPU](howto/lammps.md#cuequivariance-on-the-gpu)).
+  That form was removed: the [GPU kernel](howto/lammps.md#gpu-kernel) replaces it.
   Each model is exported one time, for 32,768 atoms. The check and the
   timed runs use that bundle.
 - **Linear ACE, run by ML-PACE.** The same linear ACE fits are written as

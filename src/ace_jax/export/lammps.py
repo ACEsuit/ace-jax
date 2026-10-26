@@ -27,7 +27,6 @@ Needs lammps-jax (not on PyPI yet): `uv pip install -e path/to/lammps-jax`.
 Only `export_lammps` imports it; `make_energy_fn` is plain JAX.
 """
 import json
-import os
 import re
 from pathlib import Path
 
@@ -326,26 +325,6 @@ def make_energy_fn(model, n_species, layout, k_dense=None, type_map=None, n_rows
     return energy_fn
 
 
-def cueq_block_rows_for(model, rows, k_dense, budget, itemsize, max_edges=None, prep=0):
-    """Rows per dense block of an aa_dag="cueq" bundle: the first of `eval.cueq.CUEQ_BLOCK_ROWS` (each capped
-    at `rows`), then halvings of the last down to MIN_BLOCK_ROWS, whose estimate (`block_rows_for` with that
-    `block_rows`) fits `budget`; None when none fits.  No per-block element target: cueq kernels want many
-    U-atom groups per launch, and are no faster than the DAG at the DAG's target (docs/dev/specs/
-    2026-10-22-cueq-product-basis-design.md).  A species-embedding (TrACE) model's per-atom weights
-    (`eval.cueq.trace_weight_bytes_per_row`, linear in its paths) count per row, on top of the estimate."""
-    from ..eval.cueq import CUEQ_BLOCK_ROWS, trace_weight_bytes_per_row
-    w = trace_weight_bytes_per_row(model, itemsize)
-    cands = [min(int(b), int(rows)) for b in CUEQ_BLOCK_ROWS]
-    b = cands[-1]
-    while b > MIN_BLOCK_ROWS:
-        b = max(MIN_BLOCK_ROWS, b // 2)
-        cands.append(b)
-    for b in dict.fromkeys(cands):
-        if block_rows_for(model, rows, k_dense, budget, itemsize, max_edges, prep + b * w, block_rows=b):
-            return b
-    return None
-
-
 FFI_MIN_LAMMPS_JAX = (0, 2, 1)     # its LAMMPS plugin registers FFI handlers for the CPU (abhijeetgangan/lammps-jax#3)
 
 
@@ -365,8 +344,7 @@ def choose_ffi(ffi, model, *, platform, dtype, layout, lean, radial_table, max_n
         return False, None
     from ..eval.model import ACEModel
     vers = re.match(r"(\d+)\.(\d+)\.(\d+)", lammps_jax_version() or "")
-    why = ("aa_dag='cueq' (a GPU product basis)" if aa_dag == "cueq"
-           else f"dtype {dtype} (the kernel is float64)" if dtype != "float64"
+    why = (f"dtype {dtype} (the kernel is float64)" if dtype != "float64"
            else "lean=False" if not lean
            else f"layout {layout!r} (the kernel reads the matrix layout)" if layout not in ("auto", "matrix")
            else "no max_neighbors (the matrix layout)" if not max_neighbors
@@ -478,20 +456,6 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
     form below (`eval.aa_dag.resolve_aa_dag`).  Recorded as `ace_jax.aa_dag`, the
     mode used.
 
-    aa_dag="cueq" (opt-in, the `cueq` extra; a CUDA `platform` only; one species or species-embedding (TrACE), a linear ACEModel with
-    lean=True): the product basis as NVIDIA cuequivariance kernels (`eval.cueq.with_cueq`).  The bundle keeps
-    their `uniform_1d_cuda` custom calls, whose lowering bakes a process-local plan handle (a plan-registry
-    index) into each.  So the export records every plan compile with lammps-jax's contrib/ffi-replay recorder
-    (`eval.cueq.recorder`: $LAMMPS_JAX_CONTRIB) to <path stem>.ffi-replay, which the replay shim reissues in the
-    LAMMPS process.  Export one cueq bundle per process, in a process that has compiled no cueq plan before
-    (e.g. no cueq ACECalculator): a second export, or plans compiled before, raise.  The NVRTC kernel cache
-    is <path stem>.cueq-cache (CUEQUIVARIANCE_OPS_NVRTC_CACHE_DIR is set to it for the rest of this process),
-    filled by the export's compiles and shipped with the bundle, so LAMMPS on a GPU of the same architecture
-    skips the compile (minutes at o4d20).  Dense / matrix rows per block: `cueq_block_rows_for` unless
-    `block_rows` is given.  Recorded as `ace_jax.cueq`: {"version", "targets", "replay" and "cache" (file
-    names relative to the bundle's directory), "handlers": the LAMMPS_JAX_FFI_HANDLERS value with the export
-    host's shim}; `eval.cueq.run_env(record, bundle_path)` gives LAMMPS's environment.
-
     ffi ("auto", the default; True; the path of a library built by `eval.ffi.build` or `build_gpu`; False)
     runs the model as the FFI kernel of `eval.ffi` on the neighbour matrix, positions in and atom energies
     and forces out: the C++ kernel for platform="cpu", the CUDA one otherwise.  "auto" takes the C++
@@ -504,16 +468,15 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
     list slot, so `aa_dag`, `k_dense` and `block_rows` do not apply (recorded as "greedy", None, None).
     LAMMPS loads the kernel through LAMMPS_JAX_FFI_HANDLERS, set to `ace_jax.ffi["handlers"]`, with a
     lammps-jax whose plugin registers handlers for the bundle's platform.  Recorded as `ace_jax.ffi`:
-    {"target", "library", "handlers"} (None for the XLA program).  ffi=True or a path with
-    aa_dag="cueq" raises ValueError (two product bases); "auto" takes the XLA program there.
+    {"target", "library", "handlers"} (None for the XLA program).  On a CUDA GPU the kernel replaces the
+    removed aa_dag="cueq" (NVIDIA cuequivariance), which now raises ValueError.
     """
     from lammps_jax.export import export_model
 
     ffi, ffi_reason = choose_ffi(ffi, model, platform=platform, dtype=dtype, layout=layout, lean=lean,
                                  radial_table=radial_table, max_neighbors=max_neighbors, aa_dag=aa_dag)
-    if ffi and aa_dag == "cueq":                  # two product-basis engines: refuse first
-        raise ValueError("ffi and aa_dag='cueq' are exclusive: the kernel evaluates the product basis "
-                         "itself; export with one or the other")
+    from ..eval.aa_dag import check_not_cueq
+    check_not_cueq(aa_dag)                        # removed: refuse before anything else
     given = model                             # precision_structure checks the model as given
     from ..eval.model import lean as _lean
     from ..eval.model import splining, with_radial_table
@@ -539,18 +502,6 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
                          "the rcut + skin list; see neighbour_capacity)")
     if layout in ("sparse", "dense") and max_edges is None:
         raise ValueError(f"the {layout} layout needs max_edges (the packed edge buffer)")
-    rec = None
-    if aa_dag == "cueq":                          # refusals first, then the cache and recorder before any lowering
-        from ..eval import cueq
-        cueq.check_export(model, platform, cueq=False)
-        if not lean:                              # with_cueq needs the folded model: refuse before any side effect
-            raise ValueError("aa_dag='cueq' evaluates the folded (lean) model: export with lean=True")
-        cache = Path(path).absolute().with_suffix(".cueq-cache")
-        cache.mkdir(parents=True, exist_ok=True)
-        # libcue_ops reads it at each NVRTC compile (cueq 0.13.0), but set it before cueq is imported anyway
-        os.environ["CUEQUIVARIANCE_OPS_NVRTC_CACHE_DIR"] = str(cache)
-        cueq.check_export(model, platform)        # now the CUDA backend and cueq itself
-        rec = cueq.install_recorder()
     from ..calc.point import device_memory_bytes
     itemsize = np.dtype(dtype).itemsize
     if device_memory is None:
@@ -561,8 +512,6 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
     sized = layout == "auto" or (layout in ("dense", "matrix") and (device_memory is not None or block_rows))
 
     def rows_for(k, budget, max_edges=None, prep=0):         # the first block size that fits, or None
-        if rec is not None and not block_rows:
-            return cueq_block_rows_for(model, rows, k, budget, itemsize, max_edges, prep)
         return block_rows_for(model, rows, k, budget, itemsize, max_edges, prep, block_rows,
                               block_target_elems(device_memory))
     if layout == "auto":
@@ -584,7 +533,7 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
         block_rows = ((rows_for(k, budget, max_edges if layout == "dense" else None,
                                 matrix_prep_bytes(rows, max_neighbors, k, itemsize) if layout == "matrix" else 0)
                        or MIN_BLOCK_ROWS) if sized
-                      else rows_for(k, float("inf")))                    # the speed target (cueq: sizes) alone
+                      else rows_for(k, float("inf")))                    # the speed target alone
     if layout == "matrix":
         max_neighbors = int(max_neighbors)
         k_dense = min(int(k_dense or max_neighbors), max_neighbors)
@@ -601,9 +550,7 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
     model, rtab = with_radial_table(model, radial_table)
     from ..eval.aa_dag import resolve_aa_dag, with_aa_dag
     aa_dag = "greedy" if ffi else resolve_aa_dag(model, aa_dag)    # "auto" picks per model; the kernel: its own plan
-    if rec is not None:
-        model = cueq.with_cueq(model)         # the cuequivariance product basis (single species or TrACE, folded by lean)
-    elif aa_dag is not None and not ffi:
+    if aa_dag is not None and not ffi:
         model = with_aa_dag(model, aa_dag)
     # the traced model in the bundle dtype: a float64 model with float32 positions lowers to a
     # float64 program with float32 I/O under x64 (`aj export` enables it), i.e. no fp32 speed
@@ -628,25 +575,7 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
                           unit_style="metal", precision=dtype, n_species=n_species, **graph,
                           **({"platform": platform} if platform else {}),
                           **({"force_fn": force_fn, "newton": "on",
-                              "custom_call_targets": (target,)} if ffi
-                             else {"custom_call_targets": (cueq.TARGET,)} if rec is not None else {}))
-    cueq_meta = None
-    if rec is not None:                       # every plan this process compiled, for the LAMMPS-side replay
-        try:
-            cueq.check_replayable(rec.RECORDS)
-        except RuntimeError:
-            Path(path).unlink(missing_ok=True)    # its handles would not replay: no bundle
-            raise
-        replay = cache.with_suffix(".ffi-replay")
-        rec.dump(str(replay), cueq.COMPILE, cueq.EXECUTE)
-        if not any(cache.iterdir()):
-            import warnings
-            warnings.warn(f"{cache} is empty: this process had compiled the cueq kernels before the export, so "
-                          "LAMMPS will compile them again; export in a fresh process to ship them", stacklevel=2)
-        # replay and cache relative to the bundle's directory (they travel with it; `cueq.run_env` resolves
-        # them); the shim is the export host's (`cueq.run_env` prefers $LAMMPS_JAX_CONTRIB's at run time)
-        cueq_meta = {"version": cueq.version(), "targets": [cueq.TARGET], "replay": replay.name,
-                     "cache": cache.name, "handlers": cueq.handlers(cueq.shim(rec))}
+                              "custom_call_targets": (target,)} if ffi else {}))
     # no "platform": lammps-jax's export_info.platform is a contract key its plugin checks
     bundle["ace_jax"] = {"layout": layout, "elements": model_z, "type_elements": type_elements,
                          "k_dense": int(k_dense) if layout in ("dense", "matrix") and not ffi else None,
@@ -665,8 +594,6 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
                          "ffi": ffi_meta if ffi else None,
                          # why ffi="auto" took the XLA program for a CPU bundle (None: the kernel, a GPU bundle, or ffi given)
                          "ffi_reason": ffi_reason,
-                         # aa_dag="cueq": the replay sidecar, the shipped NVRTC cache, LAMMPS_JAX_FFI_HANDLERS
-                         **({"cueq": cueq_meta} if cueq_meta else {}),
                          # dense / matrix rows per block, and the memory they were sized for
                          "block_rows": int(block_rows) if layout in ("dense", "matrix") and not ffi else None,
                          "device_memory": int(device_memory) if device_memory else None,

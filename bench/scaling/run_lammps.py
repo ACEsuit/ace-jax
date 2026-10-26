@@ -215,11 +215,10 @@ def _export_inprocess(row, at, dtype, workdir, layout="auto", slots="skin", list
                       max_owned=cap["max_owned"], max_neighbors=cap["max_neighbors"],
                       **({"spline_tol": row["spline_tol"]} if "spline_tol" in row else {}),
                       **({"platform": "cpu", "device_memory": row["device_memory"]} if procs else {}),
-                      # opt-in recursive product basis (ace_jax.eval.aa_dag; "greedy" | "prefix"), an ace-jax with it;
-                      # a row's own (accuracy_cost's lammps-cueq line: "cueq") takes precedence
-                      **({"aa_dag": row.get("aa_dag") or os.environ["ACEJAX_EXPORT_AA_DAG"]}
-                         if row.get("aa_dag") or os.environ.get("ACEJAX_EXPORT_AA_DAG") else {}),
-                      # opt-in C++ FFI kernel (ace_jax.eval.ffi; CPU matrix bundles, radial table on): LAMMPS needs
+                      # opt-in recursive product basis (ace_jax.eval.aa_dag; "greedy" | "prefix"), an ace-jax with it
+                      **({"aa_dag": os.environ["ACEJAX_EXPORT_AA_DAG"]} if os.environ.get("ACEJAX_EXPORT_AA_DAG") else {}),
+                      # opt-in FFI kernel (ace_jax.eval.ffi; matrix bundles, radial table on; C++ for a CPU bundle,
+                      # CUDA for a GPU one): LAMMPS needs
                       # LAMMPS_JAX_FFI_HANDLERS naming its library, set with this in the env json's os_env
                       # explicit either way: export_lammps's ffi="auto" would take the kernel for a CPU
                       # bundle, and the XLA rows (the plotted ace-jax line) must stay the XLA program
@@ -263,23 +262,6 @@ def export_bundle(row, at, dtype, workdir, layout="auto", slots="skin", list_hea
     return out["bundle"], out["layout"], out["compile_s"]
 
 
-
-
-def bundle_env(bundle, base=None):
-    """The environment LAMMPS runs a bundle in: `base` (os.environ) plus, for a cueq bundle (its `ace_jax.cueq`
-    record), the replay sidecar, NVRTC cache, FFI handler and libraries that ace_jax.eval.cueq.run_env names
-    (LD_LIBRARY_PATH prepended); None for any other bundle (LAMMPS inherits the environment)."""
-    try:
-        rec = json.loads(pathlib.Path(bundle).read_text()).get("ace_jax", {}).get("cueq")
-    except (OSError, ValueError):
-        return None
-    if not rec:
-        return None
-    from ace_jax.eval.cueq import run_env
-    base = dict(os.environ if base is None else base)
-    e = run_env(rec, bundle)
-    libs = [x for x in (e.pop("LD_LIBRARY_PATH"), base.get("LD_LIBRARY_PATH")) if x]
-    return {**base, **e, "LD_LIBRARY_PATH": ":".join(libs)}
 
 
 STEP_BUDGET_S = 60.0          # target wall time of the timed segment
@@ -383,12 +365,6 @@ def run_case(row, n_atoms, dtype, device, lmp, ranks, workdir, pjrt=None, prev=N
         model = row.get("symmetrix") if style == "mace" else row.get("symmetrix_xl") if style in XL else row["path"]
         return _run_lammps(row, style, model, data, work, n_atoms, dtype, device, lmp, ranks,
                            pjrt, steps, warmup, {}, **kw)
-    if row.get("bundle"):                       # a prebuilt bundle (accuracy_cost's cueq line): run it as is
-        aj = json.loads(pathlib.Path(row["bundle"]).read_text())["ace_jax"]
-        extra = {"layout": aj["layout"], "spline_tol": row.get("spline_tol", "auto"), "splined": splined_meta(aj),
-                 "bundle": row["bundle"], "block_rows": aj.get("block_rows")}
-        return _run_lammps(row, style, row["bundle"], data, work, n_atoms, dtype, device, lmp, ranks, pjrt,
-                           steps, warmup, extra, **kw)
     # ace-jax: the export's auto layout judges dense against the exporting
     # process's budget, not LAMMPS's (PJRT pool + Kokkos + ghosts): a dense
     # bundle that runs out of memory is retried sparse
@@ -496,9 +472,6 @@ def _run_lammps(row, style, model, data, work, n_atoms, dtype, device, lmp, rank
         out.update(threads=threads, proc_grid=list(procs) if procs else None, kokkos=bool(kk))   # parse_log owns "procs"
     if style == "acejax" and os.environ.get("ACEJAX_EXPORT_AA_DAG"):
         out["aa_dag"] = os.environ["ACEJAX_EXPORT_AA_DAG"]
-    cueq = bundle_env(model, env) if style == "acejax" else None
-    if cueq:                                     # its replay sidecar, cache and libraries (not the env-var hooks)
-        env, out["aa_dag"] = cueq, "cueq"
     if style == "acejax" and os.environ.get("ACEJAX_EXPORT_FFI"):
         out["ffi"] = True
     if cmd[0] == "mpirun" and mpirun_args():

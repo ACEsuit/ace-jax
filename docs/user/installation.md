@@ -17,7 +17,8 @@ project.
 |---|---|---|
 | `ace-jax` | the core: building a basis, fitting (`aj fit`, every arm), learned radials, model loading, evaluation, ASE calculators, `aj basis`, `aj eval` | everything below except the pathfinder rung |
 | `ace-jax[gp]` | blackjax | the `pathfinder` rung of `--rungs` |
-| `ace-jax[cuda]` | `jax[cuda12]` | running on an NVIDIA GPU |
+| `ace-jax[cuda]` | `jax[cuda13]`, NVIDIA's `nvcc` | running on an NVIDIA GPU, with the CUDA kernel (driver 580 or later) |
+| `ace-jax[cuda12]` | `jax[cuda12]` | running on an NVIDIA GPU with an older driver (no `nvcc`) |
 | `ace-jax[native]` | matscipy-neighbours | native C++ code on CPUs: faster neighbour lists (ASE's list is the fallback), with the C++ kernel |
 | `ace-jax[lammps]` | lammps-jax | LAMMPS export |
 | `ace-jax[jaxmd]` | jax-md (and approximately 40 dependencies, for example flax and pymatgen) | [MD with JAX-MD](howto/jax-md.md) |
@@ -84,7 +85,17 @@ The former name of the extra, `fast-neighbours`, installs the same packages.
     python -c "import jax; print(jax.devices())"    # the output must show a CUDA device
     ```
 
-The `cuda` extra installs the JAX CUDA 12 wheels. For other CUDA versions or
+The `cuda` extra installs the JAX CUDA 13 wheels and `nvcc`. The `nvcc`
+compiles the CUDA kernel for linear ACE the first time that you use it
+(`ffi=True`). CUDA 13 needs an NVIDIA driver 580 or later. Make sure that the
+driver is correct:
+
+```bash
+nvidia-smi --query-gpu=driver_version --format=csv,noheader
+```
+
+With an older driver, install the `cuda12` extra. To use the CUDA kernel
+then, set `NVCC` to the `nvcc` of a CUDA toolkit. For other CUDA versions or
 platforms:
 
 1. Install JAX with the

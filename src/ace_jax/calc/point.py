@@ -138,14 +138,8 @@ class ACECalculator(Calculator):
         to roundoff; "prefix" keeps every AA monomial bitwise.  "auto" takes
         "greedy" from `eval.aa_dag.AUTO_MIN_CHAIN_MUL` chain-form multiplies per
         site, where it is faster on CPU and GPU, and the chain form below (a tie;
-        bitwise as before).  `calc.aa_dag` is the mode used.  "cueq" is an opt-in
-        GPU form (`eval.cueq`, the `cueq` extra; one species or species-embedding
-        (TrACE), folded linear ACE; needs a CUDA backend, else ValueError): the
-        product basis runs in NVIDIA
-        cuequivariance kernels, in float32 or float64.  Each `calc.model` swap
-        (a readout swap included) rebuilds the cueq plan and recompiles its
-        kernels -- minutes at o4d20 without the NVRTC cache
-        (CUEQUIVARIANCE_OPS_NVRTC_CACHE_DIR); plans are not cached.
+        bitwise as before).  `calc.aa_dag` is the mode used.  ("cueq", NVIDIA
+        cuequivariance, was removed: on a CUDA GPU, ffi=True is faster.)
 
         `ffi` (False, the default: the JAX model; True; "auto"; a library path) evaluates energies,
         forces and stress with the kernel of `eval.ffi` (its `AceEdges` entry point, `KernelModel`) in
@@ -232,6 +226,8 @@ class ACECalculator(Calculator):
         self._spline_tol = spline_tol
         self._spline_intervals = spline_intervals
         self._radial_table_opt = radial_table
+        from ..eval.aa_dag import check_not_cueq
+        check_not_cueq(aa_dag)
         self._aa_dag = aa_dag                 # recursive product basis (`eval.aa_dag`); "auto" picks per model
         if not (ffi is False or ffi is True or ffi == "auto"
                 or (isinstance(ffi, (str, os.PathLike)) and os.path.isfile(ffi))):
@@ -357,8 +353,8 @@ class ACECalculator(Calculator):
             raise ValueError("cannot swap calc.model on a calculator with posterior=: forces_std "
                              "would still describe the model it was built with; build a new "
                              "ACECalculator(model_file, posterior=posterior_file) instead")
-        # built into locals and assigned at the end: a refused model (e.g. aa_dag="cueq" off a GPU, or a model
-        # cueq cannot evaluate) leaves the calculator exactly as it was
+        # built into locals and assigned at the end: a refused model (e.g. one the kernel cannot evaluate)
+        # leaves the calculator exactly as it was
         ffi_lib, ffi_reason = self._ffi_choice(model)
         try:
             eval_model, splined, radial_table, aa_dag_used = self._eval_form(model, ffi_lib)
@@ -390,11 +386,6 @@ class ACECalculator(Calculator):
             eval_model, True if ffi_lib and self._radial_table_opt is None else self._radial_table_opt)
         from ..eval.aa_dag import resolve_aa_dag, with_aa_dag
         aa_dag_used = "greedy" if ffi_lib else resolve_aa_dag(eval_model, self._aa_dag)   # the kernel: its own plan
-        if aa_dag_used == "cueq":
-            import jax
-            if jax.default_backend() != "gpu":     # before any trace: cueq kernels are CUDA-only
-                raise ValueError("aa_dag='cueq' needs a CUDA GPU; the JAX backend here is "
-                                 f"{jax.default_backend()!r}.  Use aa_dag='auto', 'greedy' or None.")
         if aa_dag_used is not None and not ffi_lib:
             eval_model = with_aa_dag(eval_model, aa_dag_used)
         if self._energy_reference == "E0":        # site energies without the isolated atoms
@@ -427,7 +418,6 @@ class ACECalculator(Calculator):
                if backend != "cpu" and not gpu
                else "not float64 (the CPU kernel is float64: enable jax_enable_x64)" if not (f64 or gpu)
                else "lean=False" if not self._lean
-               else "aa_dag='cueq'" if self._aa_dag == "cueq"
                else "layout='sparse' (the kernel reads the dense layout)" if self._ffi_layout == "sparse"
                else "radial_table switched off" if self._radial_table_opt is not None and not self._radial_table_opt
                else f"{type(model).__name__} is not a linear ACEModel" if not isinstance(model, ACEModel) else None)
@@ -464,8 +454,8 @@ class ACECalculator(Calculator):
 
     @property
     def aa_dag(self):
-        """The product basis form in use: a DAG plan mode ("greedy" / "prefix"), "cueq" (the
-        cuequivariance kernels), or None for the chain form (what `aa_dag="auto"` resolved to on this
+        """The product basis form in use: a DAG plan mode ("greedy" / "prefix"), or None for the
+        chain form (what `aa_dag="auto"` resolved to on this
         model)."""
         return self._aa_dag_used
 

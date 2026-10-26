@@ -7,8 +7,16 @@ default. LAMMPS then needs `LAMMPS_JAX_FFI_HANDLERS`, which `aj export` prints.
 Export with `--no-ffi` (`ffi=False`) for the previous bundle, which needs no
 variable.
 
+**Upgrading.** `aa_dag="cueq"` and the `cueq` extra were removed. On a CUDA
+GPU, use `ffi=True` (`aj export --ffi`) for the CUDA kernel. The `cuda` extra
+now installs the JAX CUDA 13 wheels, which need an NVIDIA driver 580 or later.
+With an older driver, install the `cuda12` extra.
+
 ### Changed
 
+- **The `cuda` extra uses CUDA 13 and installs `nvcc`.** It installs
+  `jax[cuda13]` and NVIDIA's `nvcc` wheel, which compiles the CUDA kernel.
+  The new `cuda12` extra installs `jax[cuda12]`, for drivers older than 580.
 - **`fast-neighbours` is now `native`.** The `native` extra installs the same
   packages; `fast-neighbours` remains as an alias until the next release but one.
 - **The C++ kernel is the default for CPU bundles.** `export_lammps` and
@@ -26,6 +34,13 @@ variable.
 
 ### Added
 
+- **A CUDA kernel for linear ACE.** On a CUDA GPU, `ffi=True` runs a CUDA
+  kernel in float64 or float32: in `ACECalculator`, `BatchCalculator`, and
+  LAMMPS bundles (`export_lammps(ffi=True)`, `aj export --ffi`). It supports
+  categorical models with any number of species and species-embedded models.
+  On an RTX 4000 Ada with 4096 Si atoms, it is 3.4 to 4.8 times faster than
+  the XLA program in float64, and 2.7 to 3.4 times faster in float32. `nvcc`
+  compiles it the first time; `aj native --build` compiles it before use.
 - **Batched evaluation.** `ace_jax.batch.BatchCalculator(model).calculate(structures)`
   gives the energy, forces and stress of many structures in a small number of
   compiled calls: structures of similar size are padded into one batch, and
@@ -87,6 +102,13 @@ variable.
   scatter force assembly, which is as fast. A rebuild of 4,096 atoms now takes
   14 ms with the `native` extra (was 102 ms) and 159 ms without it
   (was 249 ms).
+
+### Removed
+
+- **`aa_dag="cueq"` (NVIDIA cuequivariance) and the `cueq` extra.** The CUDA
+  kernel replaces it: it is faster on every model that cueq supported, it
+  supports all linear ACE models, and its export needs no replay files or
+  kernel cache. `aa_dag="cueq"` now gives an error that names `ffi=True`.
 
 ## 0.4.1 (2026-10-22)
 

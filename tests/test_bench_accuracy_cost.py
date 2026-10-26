@@ -476,7 +476,6 @@ def test_cases_follow_the_code_table(tmp_path, monkeypatch):
     XL = {("mace", "mace-xl", "lammps", "float64"), ("mace", "mace-xl-f32", "lammps", "float32")}
     JMD = {(f, "acejax-ace", m, "float64") for f in ("ace", "ace_lr") for m in ("jaxmd", "jaxmd-tight", "lammps-tight")}
     assert gpu == {("ace", "acejax-ace", "lammps", "float64"), ("ace_lr", "acejax-ace", "lammps", "float64"), *JMD,
-                   ("ace", "acejax-ace", "lammps-cueq", "float64"),                  # opt-in, single species
                    ("ace_gp", "acejax-gp", "standalone", "float64"), ("pace", "acejax-pace", "lammps", "float64"),
                    ("pace", "mlpace", "lammps", "float64"), ("mace", "mace", "lammps", "float64"),
                    ("mace", "mace", "standalone", "float32"), *XL}                   # no gap on the GPU
@@ -504,98 +503,6 @@ def test_jaxmd_modes_are_opt_in(tmp_path, monkeypatch):
     assert modes(select(cs, modes=["jaxmd"])) == {"jaxmd"}
     assert modes(select(cs, modes=["lammps-tight", "jaxmd-tight"])) == {"lammps-tight", "jaxmd-tight"}
     assert {c["row"]["family"] for c in select(cs, modes=["jaxmd"])} == {"ace", "ace_lr"}
-
-
-def test_cueq_variant_is_opt_in_gpu_only_and_single_species(tmp_path, monkeypatch):
-    """aa_dag="cueq" (lammps-jax bundles with the cuequivariance product basis): the `ace` sizes only (one species,
-    Si), on the GPU, float64, its rows tagged aa_dag "cueq"; opt-in (--modes lammps-cueq) like the JAX-MD lines."""
-    from accuracy_cost import timing
-    _fake_runs(tmp_path, monkeypatch)
-    cq = [c for c in timing.cases("gpu") if c["mode"] == timing.LAMMPS_CUEQ]
-    assert {(c["row"]["family"], c["row"]["code"], c["dtype"]) for c in cq} == {("ace", "acejax-ace", "float64")}
-    assert all(c["row"]["aa_dag"] == "cueq" and c["row"]["elements"] == ["Si"] for c in cq)
-    assert not any(c["row"].get("aa_dag") for c in timing.cases("gpu") if c["mode"] != timing.LAMMPS_CUEQ)
-    assert all(c["mode"] != timing.LAMMPS_CUEQ for c in timing.cases("cpu"))
-    assert timing.select(timing.cases("gpu"), modes=[timing.LAMMPS_CUEQ]) == cq
-    assert timing.LAMMPS_CUEQ not in {c["mode"] for c in timing.select(timing.cases("gpu"))}
-    monkeypatch.setitem(timing.PLAN, "ace_lr", [("acejax-ace", {"gpu": timing.LAMMPS_CUEQ}, ("float64",))])
-    monkeypatch.setattr(timing, "_elements", lambda fam, e: ["Si", "Ge"] if fam == "ace_lr" else ["Si"])
-    assert {c["row"]["family"] for c in timing.cases("gpu") if c["mode"] == timing.LAMMPS_CUEQ} == {"ace"}
-
-
-def test_cueq_case_exports_once_and_reuses_the_bundle(tmp_path):
-    """One cueq export per model (o4d20: 13-26 min on an A100), sized for the main N: the gate's three cells and
-    every timed repeat run that bundle; no N/8 check (a bundle sized for N); its own gate row; a resumed run
-    reuses the bundle on disk."""
-    import json as _json
-    from accuracy_cost import timing
-    exports, gated, timed = [], [], []
-
-    def export(c, n, d):
-        exports.append(n)
-        d.mkdir(parents=True, exist_ok=True)
-        (d / "bundle.json").write_text(_json.dumps({"ace_jax": {"aa_dag": "cueq", "cueq": {}}}))
-        return {"bundle": str(d / "bundle.json"), "layout": "matrix", "compile_s": 600.0, "block_rows": 8192}
-
-    def gate(c):
-        gated.append(c["row"]["bundle"])
-        return {"status": "parity_ok", "gate": "acejax"}
-
-    def runner(c, n, work, prev):
-        timed.append((n, c["row"]["bundle"], prev))
-        return {"code": "acejax-ace", "n_atoms": n, "status": "ok", "step_s": n * 1e-6, "aa_dag": "cueq"}
-    c = _case(mode=timing.LAMMPS_CUEQ)
-    c["row"]["aa_dag"] = "cueq"
-    res = tmp_path / "t.jsonl"
-    timing.run_cases("gpu", [c], runner, gate, res, n=(64, 8), repeats=3, work=tmp_path, meta={}, export=export)
-    rows = [_json.loads(l) for l in res.read_text().splitlines()]
-    assert exports == [64] and len(gated) == 1 and [t[0] for t in timed] == [64, 64, 64]
-    assert {gated[0]} == {t[1] for t in timed} and all(t[2] is None for t in timed)
-    assert [r["mode"] for r in rows] == ["parity-lammps-cueq", timing.LAMMPS_CUEQ]
-    r = rows[1]
-    assert r["status"] == "ok" and r["aa_dag"] == "cueq" and r["check_status"] == "skipped"
-    assert r["export_s"] == 600.0 and r["block_rows"] == 8192 and r["not_plateau"] == "unknown"
-    timing.run_cases("gpu", [c], runner, gate, res, n=(64, 8), repeats=1, work=tmp_path, meta={}, export=export,
-                     redo=True)
-    assert exports == [64]                                     # the bundle on disk is reused
-
-
-def test_cueq_export_failure_is_a_row_not_a_crash(tmp_path):
-    import json as _json
-    from accuracy_cost import timing
-    c = _case(mode=timing.LAMMPS_CUEQ)
-    res = tmp_path / "t.jsonl"
-    timing.run_cases("gpu", [c], lambda *a: pytest.fail("timed"), lambda c: pytest.fail("gated"), res, n=(64, 8),
-                     repeats=1, work=tmp_path, meta={}, export=lambda c, n, d: {"status": "error", "error": "boom"})
-    r = [_json.loads(l) for l in res.read_text().splitlines()][-1]
-    assert r["status"] == "error" and r["mode"] == timing.LAMMPS_CUEQ and "boom" in r["error"]
-
-
-def test_a_prebuilt_bundle_skips_the_gate_export_and_sets_the_lammps_env(tmp_path, monkeypatch):
-    """gate_model with a row's prebuilt bundle (the cueq case): no export, the auto layout only, on every cell;
-    run_lammps.bundle_env gives LAMMPS the sidecar environment of a cueq bundle (None for any other)."""
-    import json as _json
-    from accuracy_cost import timing
-    from scaling import parity, run_lammps
-    b = tmp_path / "bundle.json"
-    b.write_text(_json.dumps({"ace_jax": {"layout": "matrix", "aa_dag": "greedy"}}))
-    assert run_lammps.bundle_env(str(b)) is None
-    rec = {"replay": "bundle.ffi-replay", "cache": "bundle.cueq-cache", "handlers": "uniform_1d_cuda=/x.so:h"}
-    b.write_text(_json.dumps({"ace_jax": {"layout": "matrix", "aa_dag": "cueq", "cueq": rec}}))
-    monkeypatch.delenv("LAMMPS_JAX_CONTRIB", raising=False)
-    env = run_lammps.bundle_env(str(b), base={"LD_LIBRARY_PATH": "/old", "X": "1"})
-    assert env["X"] == "1" and env["FFI_REPLAY_FILE"] == str(tmp_path / "bundle.ffi-replay")
-    assert env["CUEQUIVARIANCE_OPS_NVRTC_CACHE_DIR"] == str(tmp_path / "bundle.cueq-cache")
-    assert env["LAMMPS_JAX_FFI_HANDLERS"] == rec["handlers"] and env["LD_LIBRARY_PATH"].endswith("/old")
-    monkeypatch.setattr(run_lammps, "export_bundle", lambda *a, **k: pytest.fail("re-exported"))
-    monkeypatch.setattr(parity, "_acejax_ef", lambda path, at, **kw: (0.0, at.positions * 0))
-    seen = []
-    monkeypatch.setattr(parity, "_lammps_ef", lambda style, bundle, *a, **k: seen.append(bundle) or (0.0, a[1].positions * 0))
-    row = {**_case(mode=timing.LAMMPS_CUEQ)["row"], "path": "m.npz", "elements": ["Si"], "bundle": str(b),
-           "spline_tol": 1e-10}
-    g = timing.gate_model(row, "gpu", {"lmp": "/l", "pjrt": "/p"}, tmp_path / "g")
-    assert g["status"] == "parity_ok" and seen == [str(b)] * timing.GATE_CELLS
-    assert [c.get("layout_used") for c in g["checks"]] == ["matrix"] * timing.GATE_CELLS
 
 
 def test_mace_xl_rows_name_the_xl_model_its_lammps_and_a_cpu_reference(tmp_path, monkeypatch):

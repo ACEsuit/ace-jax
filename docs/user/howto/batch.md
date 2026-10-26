@@ -64,8 +64,9 @@ the same meaning:
 - `dtype`, `lean`, `spline_tol`, `radial_table` and `aa_dag`.
 - `energy_reference="E0"`. `res.e0_offset` then gives the constant for each
   structure.
-- `ffi=True` or `ffi="auto"`: the C++ kernel on a CPU. On a CPU, use the
-  kernel. The JAX model gets almost no speed-up from batches on a CPU.
+- `ffi=True` or `ffi="auto"`: the C++ kernel on a CPU, or the CUDA kernel on
+  a CUDA GPU. On a CPU, use the kernel. The JAX model gets almost no speed-up
+  from batches on a CPU.
 
 Two options control the batches:
 

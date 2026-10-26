@@ -38,7 +38,7 @@ import numpy as np
 from ase.io import write
 
 from scaling.models import ACEPOT_CODES, LEARNED_CODES, planned_models
-from scaling.run_lammps import (bundle_env, export_bundle, finished, kokkos_args, lammps_input, lammps_vars,
+from scaling.run_lammps import (export_bundle, finished, kokkos_args, lammps_input, lammps_vars,
                                 read_dump_forces, read_pe)
 from scaling.structures import supercell
 
@@ -160,8 +160,7 @@ def _lammps_ef(style, model_path, els, at, device, lmp, work, pjrt=None, aceplug
     cmd = [lmp, "-in", "in.parity", "-log", "log.lammps", "-nocite"]
     cmd += kk
     cmd += lammps_vars(style, pjrt, aceplugin)
-    env = bundle_env(model_path) if style == "acejax" else None     # a cueq bundle's sidecar environment
-    p = subprocess.run(cmd, cwd=work, capture_output=True, text=True, timeout=1800, env=env)
+    p = subprocess.run(cmd, cwd=work, capture_output=True, text=True, timeout=1800)
     log = (work / "log.lammps").read_text() if (work / "log.lammps").exists() else ""
     if not finished(p.returncode, log):
         raise RuntimeError(f"lammps exit {p.returncode}: {(p.stderr or p.stdout)[-300:]}")
