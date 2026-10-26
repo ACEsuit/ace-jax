@@ -166,7 +166,17 @@ peak GB and µs per atom per step:
   `a100_sxm_40.txtpb`) does not reproduce it, since it skips autotuning.  Fix: for one species the
   contraction is a plain `P @ Wnlq[0, 0].T` (a GEMM fusion; no reduce, no such candidates; step 3.5% faster
   on the Ada, forces equal to 2e-13).  Multi-species models keep the einsum: set the flag above if they
-  compile slowly.  A100 confirmation of the fix is pending.  Float32 MD on lestrade first failed on a
+  compile slowly.  On the A100 (Sulis job 2264925; 64-atom cells x 128, NVE, compile cache off):
+
+  | radial form | init compile (s) | step (s, 10 steps) |
+  |---|--:|--:|
+  | einsum (before) | 578.0 | 0.0505 |
+  | einsum, `--xla_gpu_experimental_enable_fusion_autotuner=false` | 4.1 | 0.0511 |
+  | elementwise sum over q | 5.5 | 0.0342 |
+  | matmul (now, one species) | 5.1 | 0.0312 |
+
+  The matmul also makes the A100 MD step 1.6x faster at this shape; the A100 MD figures above
+  were measured with the einsum.  Float32 MD on lestrade first failed on a
   float64 momentum (`initial_momenta` now takes `dtype`).
 
 ## CPU (lestrade, 32 cores, float64)
@@ -308,5 +318,5 @@ so both take the kernel.
 
 ## Not yet measured
 
-- `MAX_BATCH_ATOMS_CPU` above 2^14; the A100 compile time with the single-species GEMM radial.
+- `MAX_BATCH_ATOMS_CPU` above 2^14; the A100 MD tables again with the single-species GEMM radial.
 - Mixed-size streams: compile counts per bucket in practice.

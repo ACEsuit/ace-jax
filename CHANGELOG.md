@@ -21,8 +21,8 @@ variable.
   `--no-ffi` (`ffi=False`) turns it off. GPU bundles are unchanged.
 - **Faster GPU compiles for single-species ACE models.** The analytic radial
   is now a matrix multiply when the model has one species. For batched MD on
-  an A100, the previous form made the compile take approximately 10 minutes.
-  Multi-species models are unchanged.
+  an A100, the compile now takes approximately 5 seconds, not 10 minutes, and
+  each step is 1.6 times faster. Multi-species models are unchanged.
 
 ### Added
 
