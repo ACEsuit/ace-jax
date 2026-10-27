@@ -297,13 +297,17 @@ load; faster only at large `nradbase`). Values are unchanged to roundoff.
     `FSModel(base, ...)`) gets `model.with_base(lean_keep_basis(model.base))`:
     `to_spline` and `prune_columns` only, which keep `site_basis` and the
     unfolded readout valid.
-- `radial_table` (ACE and PACE; default None = off): `True` (4000 intervals) or
-  an int tabulates the per-edge radial stage in r after `lean`: ACE R_nl
+- `radial_table` (ACE and PACE; default None = off): `True` (sized from 4000
+  intervals up to a 1e-9 value error, `splinify.DEFAULT_TABLE_TOL`, checked on
+  r >= 0.4 rcut; one extra fit when 4000 is not enough; it stops early, with a
+  warning, when a finer table's derivative is no more accurate), a float (that tolerance) or an int (that many
+  intervals) tabulates the per-edge radial stage in r after `lean`: ACE R_nl
   (transform and envelope included) and the pair radial, PACE g_k. One cubic
   B-spline per species pair on [0.5 Å, rcut], exactly zero beyond each pair's
   cutoff; below 0.5 Å the end cubic extrapolates. A CPU speed-up (see
-  CHANGELOG), not roundoff: at 4000 intervals energies agree to ~1e-12
-  relative, forces to ~1e-8 of max|F|. `calc.radial_table` (n_intervals,
+  CHANGELOG), not roundoff: with True energies agree to ~1e-12 relative,
+  forces to ~1e-8 of max|F| (4000 fixed intervals gave 3.6e-7 on a
+  species-embedding SiGe o4d16). `calc.radial_table` (n_intervals,
   r_min, r_max, max_rel_err, max_rel_deriv_err) and
   `calc.last_timing["radial_table"]` report it; `lean(model,
   radial_table=True)` gives the same model. Wrapper models refuse it.

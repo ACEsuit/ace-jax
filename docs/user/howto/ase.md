@@ -124,7 +124,8 @@ The kernel needs a C++17 compiler (`$CXX`, `c++`, `g++` or `clang++`). With
 
 The kernel tabulates the radial basis in r (`radial_table=True`). Energies
 agree with the default to approximately 1e-12 relative. Forces agree to
-1.5e-8 of the largest force.
+approximately 1e-8 of the largest force. The table is fine enough for an
+error of 1e-9 in the radial values. For most models it has 4000 intervals.
 
 !!! note "Derivatives"
     The kernel gives the derivatives with respect to the positions only.

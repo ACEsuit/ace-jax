@@ -118,14 +118,15 @@ class ACECalculator(Calculator):
         of the model's arrays): negligible for MD, but a per-step cost if the
         model is swapped every step.
 
-        `radial_table` (None, the default: off; True: 4000 intervals; an int:
-        that many) tabulates the evaluation model's radial stage in r
+        `radial_table` (None, the default: off; True: sized to a 1e-9 value
+        error, from 4000 intervals up; a float: that tolerance; an int: that
+        many intervals) tabulates the evaluation model's radial stage in r
         (`eval.model.with_radial_table`, after `lean`; ACE: R_nl with its
         transform and envelope, and the pair radial; PACE: g_k), one cubic
         B-spline per species pair on [0.5 A, rcut], exactly zero beyond each
         pair's cutoff.  A CPU speed-up (1.1-1.4x on one core), and an
-        approximation: at 4000 intervals energies agree to ~1e-11 relative and
-        forces to ~1e-8 of max|F| (tests/test_radial_table.py).  Applies with
+        approximation: with True energies agree to ~1e-11 relative and forces
+        to ~1e-8 of max|F| (tests/test_radial_table.py).  Applies with
         lean=False too (to the model as given).  `calc.radial_table` is the
         table's info (n_intervals, r_min, r_max, max_rel_err,
         max_rel_deriv_err), None when off; `last_timing["radial_table"]` its

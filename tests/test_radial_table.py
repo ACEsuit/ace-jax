@@ -23,7 +23,8 @@ from test_lean import MODELS, _efv, _structure
 from ace_jax.eval import load
 from ace_jax.eval import splinify
 from ace_jax.eval.model import lean
-from ace_jax.eval.splinify import DEFAULT_RADIAL_TABLE, DEFAULT_TABLE_R_MIN, radial_table
+from ace_jax.eval.splinify import (BUCKETS, DEFAULT_RADIAL_TABLE, DEFAULT_TABLE_R_MIN, DEFAULT_TABLE_TOL,
+                                     radial_table)
 
 ROOT = pathlib.Path(__file__).parent.parent
 PACE = ROOT / "fixtures" / "pace"
@@ -74,7 +75,8 @@ def _pace(name):
 def test_pace_table_agrees(name, layout):
     m, meta = _pace(name)
     m1 = lean(m, radial_table=True)
-    assert m1.rtab_coefs.shape == (*m.radparams.shape[:2], DEFAULT_RADIAL_TABLE + 3, m.nradbase)
+    n = m1.rtab_grid[2] - 1                                   # sized to DEFAULT_TABLE_TOL from 4000 up
+    assert n >= DEFAULT_RADIAL_TABLE and m1.rtab_coefs.shape == (*m.radparams.shape[:2], n + 3, m.nradbase)
     at = _structure(meta)
     _close(_efv(m, meta, at, layout), _efv(m1, meta, at, layout))
 
@@ -272,3 +274,53 @@ def test_export_records_the_table(tmp_path):
     b = export_lammps(m, meta, tmp_path / "n.json", max_atoms=64, max_edges=64 * 64,
                       layout="sparse")
     assert b["ace_jax"]["radial_table"] is None
+
+
+def test_table_sized_to_the_tolerance():
+    """radial_table=True searches from 4000 intervals: a model within DEFAULT_TABLE_TOL there keeps 4000 (sige_nofit,
+    4.6e-10), one beyond it (si_fitted, 4.3e-9) gets the first bucket that meets it, in one more fit; a float is
+    that tolerance; an int is exactly that many intervals, unchecked."""
+    from ace_jax.eval.model import with_radial_table
+    m, _, _ = load(str(MODELS["sige_nofit"]))
+    _, info = with_radial_table(_lean(m), True)
+    assert info["n_intervals"] == DEFAULT_RADIAL_TABLE and info["tol"] == DEFAULT_TABLE_TOL and info["tol_met"]
+    m, _, _ = load(str(MODELS["si_fitted"]))
+    lm = _lean(m)
+    _, at4k = radial_table(lm, return_info=True)
+    _, info = with_radial_table(lm, True)
+    assert at4k["max_rel_err"] > DEFAULT_TABLE_TOL >= info["max_rel_err"] and info["tol_met"]
+    assert info["n_intervals"] in BUCKETS and info["n_intervals"] <= 3 * DEFAULT_RADIAL_TABLE
+    _, loose = with_radial_table(lm, 1e-8)
+    assert loose["n_intervals"] == DEFAULT_RADIAL_TABLE and loose["tol"] == 1e-8
+    _, fixed = with_radial_table(lm, 4000)
+    assert fixed["n_intervals"] == 4000 and fixed["tol"] is None and fixed["tol_met"] is None
+    for bad in (0.0, 1.5, -1e-9):
+        with pytest.raises(ValueError, match="tolerance"):
+            with_radial_table(lm, bad)
+
+
+def test_table_search_stops_at_the_byte_cap(monkeypatch):
+    """A tolerance the byte cap cannot reach keeps the last table and warns."""
+    m, _, _ = load(str(MODELS["si_fitted"]))
+    monkeypatch.setattr(splinify, "MAX_TABLE_BYTES", 1)
+    with pytest.warns(UserWarning, match="keeping 4000 intervals"):
+        _, info = radial_table(_lean(m), return_info=True, tol=1e-12)
+    assert info["n_intervals"] == DEFAULT_RADIAL_TABLE and info["tol_met"] is False
+
+
+def test_table_search_stops_at_the_derivative_noise_floor(monkeypatch):
+    """A finer table whose r-derivative error is no smaller (float64 noise in the samples / h) is not taken:
+    the search keeps the last table, warns and reports noise_floor."""
+    m, _, _ = load(str(MODELS["si_fitted"]))
+    fit = splinify._rtab_fit
+    monkeypatch.setattr(splinify, "_rtab_fit", lambda *a: (lambda c, e, d: (c, e, d if a[-1] <= 4000 else 1e6 * d))(*fit(*a)))
+    splinify.clear_cache()
+    try:
+        with pytest.warns(UserWarning, match="no smaller r-derivative error"):
+            _, info = radial_table(_lean(m), return_info=True, tol=1e-14)
+    finally:
+        splinify.clear_cache()
+    assert info["n_intervals"] == DEFAULT_RADIAL_TABLE and info["noise_floor"] is True and info["tol_met"] is False
+    monkeypatch.undo()
+    _, info = radial_table(_lean(m), return_info=True, tol=1e-9)
+    assert info["noise_floor"] is False

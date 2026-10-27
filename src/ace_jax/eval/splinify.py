@@ -384,26 +384,43 @@ def to_spline(model, n_intervals=None, tol=DEFAULT_SPLINE_TOL, deriv_tol=None,
 # and the pair radial; PACE's radial basis g_k -- as one cubic B-spline table
 # per species pair on a uniform grid in r, so an edge costs a 4-row gather
 # instead of the transcendentals (a CPU speed-up; docs in `radial_table`).
-DEFAULT_RADIAL_TABLE = 4000       # intervals: errors ~1e-11..1e-9; speed flat from 1k to 16k
+DEFAULT_RADIAL_TABLE = 4000       # intervals: the search's start; speed flat from 1k to 16k
+# radial_table=True: the table's max_rel_err (values, worst column, r >= RTAB_CHECK_FRAC rc) bound.  A
+# species-embedding SiGe o4d16 (rcut 6.1 A, spline radials) gives 1.3e-8 at 4000 intervals and forces 2.7e-7
+# of max|F| (64 rattled atoms); at 1e-9 its table is 11585 intervals and forces 1.4e-8.  The Si ladder keeps 4000.
+DEFAULT_TABLE_TOL = 1e-9
+TABLE_RATE = 2.5                  # max_rel_err ~ h^p: measured p 2.7-3.1 (4k-16k); lower predicts more intervals
+MAX_TABLE_BYTES = 256 << 20       # the tolerance search stops below this (all tables, float64)
 DEFAULT_TABLE_R_MIN = 0.5         # A: below it the end cubic extrapolates
 RTAB_CHECK_PER_INTERVAL = 10      # error-check points per interval (knots + 9 interior)
+RTAB_CHECK_FRAC = 0.4             # the error check covers r >= this * the pair's rcut (Si 5 A: 2 A; SiGe 6.1 A: 2.4 A)
 RTAB_CHUNK = 1 << 14              # points per jitted sample call (one compiled shape)
 RTAB_VANISH = 1e-12               # |R| beyond rc, relative to max|R|, that the mask may drop
 
 
-def table_intervals(radial_table):
-    """The `radial_table=` option as an interval count: None / False -> None
-    (off), True -> DEFAULT_RADIAL_TABLE, a positive int -> itself."""
+def table_option(radial_table):
+    """The `radial_table=` option as (n_intervals, tol): None / False -> (None, None) (off); True ->
+    (DEFAULT_RADIAL_TABLE, DEFAULT_TABLE_TOL), the search from 4000 intervals to that tolerance; a float
+    in (0, 1) -> (DEFAULT_RADIAL_TABLE, it); a positive int -> (it, None), that many intervals."""
     if radial_table is None or radial_table is False:
-        return None
+        return None, None
     if radial_table is True:
-        return DEFAULT_RADIAL_TABLE
+        return DEFAULT_RADIAL_TABLE, DEFAULT_TABLE_TOL
+    if isinstance(radial_table, (float, np.floating)):
+        if not 0.0 < radial_table < 1.0:
+            raise ValueError(f"radial_table: a tolerance must be in (0, 1), got {radial_table!r}")
+        return DEFAULT_RADIAL_TABLE, float(radial_table)
     if not isinstance(radial_table, (int, np.integer)):
-        raise TypeError(f"radial_table must be None, True or a number of intervals, "
+        raise TypeError(f"radial_table must be None, True, a tolerance or a number of intervals, "
                         f"got {radial_table!r}")
     if radial_table < 1:
         raise ValueError(f"radial_table must be >= 1 interval, got {radial_table!r}")
-    return int(radial_table)
+    return int(radial_table), None
+
+
+def table_intervals(radial_table):
+    """The `radial_table=` option's (starting) interval count, None when off (`table_option`)."""
+    return table_option(radial_table)[0]
 
 
 def _rtab_vd(m, which, r, zi, zj):
@@ -439,8 +456,11 @@ def _rtab_fit(m, which, rc, r_min, r_max, n_int):
     (r_max - r_min) / n_int, clamped to its own h^2 f'' at both ends (autodiff;
     at r_max just inside, the left limit, as f'' may jump at a cutoff).  Errors
     as `_rel_err`: max over (zi, zj, column) of max|table - exact| / max|exact|,
-    and the same for d/dr, on RTAB_CHECK_PER_INTERVAL points per interval, the
-    table masked at rc[zi, zj] as the models evaluate it.  Raises when the exact
+    and the same for d/dr, on RTAB_CHECK_PER_INTERVAL points per interval from
+    RTAB_CHECK_FRAC * rc[zi, zj] to rc[zi, zj], the table masked at rc as the
+    models evaluate it.  Not from r_min: a repulsive pair radial is ~1e6 times
+    larger near r_min than at bond lengths, so a max over the whole grid hid its
+    error where atoms are (and the noise below).  Raises when the exact
     radial does not vanish from rc on (beyond RTAB_VANISH relative): the mask
     would truncate it."""
     from ..basis.radial_ace1 import cubic_bspline_coefs
@@ -470,9 +490,11 @@ def _rtab_fit(m, which, rc, r_min, r_max, n_int):
             e = np.asarray(_rtab_d2_jit(m, which, ends, z + i, z + j), np.float64) * h * h
             c = out[i, j] = cubic_bspline_coefs(y, (e[0], e[1]))
             live = ~beyond
+            chk = (x >= RTAB_CHECK_FRAC * rc[i, j]) & live          # the error check's range
             ev = np.where(live[:, None], _bspline_eval(x, c, n_int, x0=r_min, h=h), 0.0) - v
             ed = np.where(live[:, None], _bspline_eval(x, c, n_int, True, x0=r_min, h=h), 0.0) - d
-            nrm, dnrm = np.abs(v).max(0), np.abs(d).max(0)
+            ev, ed, v, d = ev[chk], ed[chk], v[chk], d[chk]
+            nrm, dnrm = np.abs(v).max(0, initial=0.0), np.abs(d).max(0, initial=0.0)
             ok, dok = nrm > 0, dnrm > 0
             if ok.any():
                 worst = max(worst, float((np.abs(ev).max(0)[ok] / nrm[ok]).max()))
@@ -482,7 +504,7 @@ def _rtab_fit(m, which, rc, r_min, r_max, n_int):
 
 
 def radial_table(model, n_intervals=DEFAULT_RADIAL_TABLE, r_min=DEFAULT_TABLE_R_MIN,
-                 return_info=False):
+                 return_info=False, tol=None):
     """Tabulate an ACEModel's or PACEModel's per-edge radial stage in r.
 
     ACE: R_nl -- every column `radial()` returns, the Agnesi transform and the
@@ -507,16 +529,29 @@ def radial_table(model, n_intervals=DEFAULT_RADIAL_TABLE, r_min=DEFAULT_TABLE_R_
     model there (the ACE pair radial is singular as r -> 0, which is why r_min
     exists).  0.5 A is far inside any physical first-neighbour distance.
 
-    An approximation, not a restructuring: at 4000 intervals energies agree with
-    the analytic model to ~1e-11 relative and forces to ~1e-9..1e-8 of max|F|
-    on the fixtures and benchmark models (tests/test_radial_table.py).  For
-    evaluation only: the basis and fitting paths need the exact radial (a lean
-    ACE model is `energy_only` already).
+    An approximation, not a restructuring.  `tol` (None: exactly n_intervals)
+    sizes the grid: from n_intervals up, the first count whose max_rel_err (the
+    worst column's value error relative to its max) is <= tol, predicted from
+    the last fit's error at order TABLE_RATE and rounded up to BUCKETS, so a
+    model that meets tol at n_intervals keeps that table and one that does not
+    usually costs one more fit.  It stops below MAX_TABLE_BYTES and warns if
+    tol is not met there; it also stops, keeping the last table and warning
+    (info noise_floor), when a finer table's r-derivative error is no smaller:
+    float64 noise in the samples (~eps |R| times the cancellation in the exact
+    radial) becomes ~noise / h in S', so past that count more intervals only
+    add noise to the forces.  A readout whose terms cancel amplifies that noise
+    further (o3d8 Si: forces closest to the analytic model at ~4000 intervals,
+    4e-9 of max|F|, 1.25e-8 at 16384), which the radial alone cannot see.
+    With `radial_table=True` (DEFAULT_TABLE_TOL, 1e-9) energies agree with the
+    analytic model to ~1e-11 relative and forces to ~1e-8 of max|F| on the
+    fixtures, the benchmark models and a species-embedding model whose
+    4000-interval table was 3.6e-7 (tests/test_radial_table.py).  For evaluation only: the basis and fitting
+    paths need the exact radial (a lean ACE model is `energy_only` already).
 
     Returns the model with the table (an existing table is rebuilt), or with
-    return_info=True (model, info): n_intervals, r_min, r_max and the largest
+    return_info=True (model, info): n_intervals, r_min, r_max, the largest
     relative value and r-derivative errors over species pairs and columns
-    (`_rtab_fit`).  Cached in the `to_spline` LRU on the content of what the
+    (`_rtab_fit`), and tol / tol_met (None when tol is None).  Cached in the `to_spline` LRU on the content of what the
     radial reads (`radial_table_key`), n_intervals and r_min: a readout-only
     swap costs a hash, not a fit."""
     from .model import ACEModel
@@ -532,15 +567,42 @@ def radial_table(model, n_intervals=DEFAULT_RADIAL_TABLE, r_min=DEFAULT_TABLE_R_
     if not 0.0 < r_min < float(rc.min()):
         raise ValueError(f"radial_table: r_min = {r_min:g} must be in (0, {rc.min():g}), "
                          "the smallest pair cutoff")
+    if tol is not None and not 0.0 < tol < 1.0:
+        raise ValueError(f"radial_table: tol must be in (0, 1), got {tol!r}")
     dt = base.E0.dtype
-    kw, errs, derrs = {}, [0.0], [0.0]
-    for which, field in base.radial_table_targets():
-        key = _key("rtab", type(base).__name__, which, str(dt), *base.radial_table_key(), n, r_min)
-        c, err, derr = _memo(key, lambda w=which: _rtab_fit(base, w, rc, r_min, r_max, n))
-        kw[field] = jnp.asarray(c, dt)
-        errs.append(err); derrs.append(derr)
-    out = dataclasses.replace(base, rtab_grid=(r_min, (r_max - r_min) / n, n + 1), **kw)
+
+    def fit(n):                                              # (tables, max_rel_err, max_rel_deriv_err, bytes)
+        kw, errs, derrs, nbytes = {}, [0.0], [0.0], 0
+        for which, field in base.radial_table_targets():
+            key = _key("rtab", type(base).__name__, which, str(dt), *base.radial_table_key(), n, r_min)
+            c, err, derr = _memo(key, lambda w=which: _rtab_fit(base, w, rc, r_min, r_max, n))
+            kw[field] = c
+            errs.append(err); derrs.append(derr); nbytes += c.nbytes
+        return kw, max(errs), max(derrs), nbytes
+
+    kw, err, derr, nbytes = fit(n)
+    floor = False                                            # stopped at the derivative's noise floor
+    while tol is not None and err > tol:
+        want = _bucket(int(np.ceil(n * (err / tol) ** (1.0 / TABLE_RATE))))
+        want = want if want > n else next((b for b in BUCKETS if b > n), n)
+        if want <= n or nbytes * (want + 3) / (n + 3) > MAX_TABLE_BYTES:
+            import warnings
+            warnings.warn(f"radial_table: {n} intervals give max_rel_err {err:.1e} > tol {tol:.1e}, and a finer "
+                          f"table would pass {MAX_TABLE_BYTES >> 20} MB; keeping {n} intervals", stacklevel=2)
+            break
+        nxt = fit(want)
+        if nxt[2] >= derr:          # S' no better: the samples' float64 noise / h now outweighs the h^3 error
+            import warnings
+            floor = True
+            warnings.warn(f"radial_table: {want} intervals give no smaller r-derivative error than {n} "
+                          f"({nxt[2]:.1e} >= {derr:.1e}: noise in the sampled radial, amplified by 1 / h); keeping "
+                          f"{n} intervals at max_rel_err {err:.1e} > tol {tol:.1e}", stacklevel=2)
+            break
+        n, (kw, err, derr, nbytes) = want, nxt
+    out = dataclasses.replace(base, rtab_grid=(r_min, (r_max - r_min) / n, n + 1),
+                              **{f: jnp.asarray(c, dt) for f, c in kw.items()})
     if return_info:
         return out, {"n_intervals": n, "r_min": r_min, "r_max": r_max,
-                     "max_rel_err": max(errs), "max_rel_deriv_err": max(derrs)}
+                     "max_rel_err": err, "max_rel_deriv_err": derr,
+                     "tol": tol, "tol_met": None if tol is None else bool(err <= tol), "noise_floor": floor}
     return out

@@ -27,6 +27,15 @@ GPU, use `ffi=True` (`aj export --ffi`) for the CUDA kernel.
   `jax[cuda13]` and NVIDIA's `nvcc` wheel, which compiles the CUDA kernel. The
   `cuda` extra is unchanged (`jax[cuda12]`): the kernel then uses the `nvcc` of
   a CUDA toolkit or module.
+- **The radial table is sized to an accuracy.** `radial_table=True` (and the
+  C++ and CUDA kernels, which turn it on) now uses 4000 intervals or more: enough for
+  an error of 1e-9 in the radial values. Most models keep 4000 intervals. A
+  species-embedded SiGe model gets 11585, and its force error goes from
+  2.7e-7 to 1.4e-8 of the largest force, at the same speed. The search stops
+  when more intervals give no smaller error in the derivative of the table:
+  past that point, float64 noise in the sampled radial grows with the number
+  of intervals. A float sets another tolerance; an int still sets the number
+  of intervals.
 - **`fast-neighbours` is now `native`.** The `native` extra installs the same
   packages; `fast-neighbours` remains as an alias until the next release but one.
 - **The C++ kernel is the default for CPU bundles.** `export_lammps` and
