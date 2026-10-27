@@ -247,7 +247,7 @@ def test_hybrid_theta_gradient_memory_bounded(hybrid, monkeypatch):
 def test_radial_gradient_memory_bounded(monkeypatch):
     """The radial-learning gradient (wrt the radial weights, through linear_statistics with a fresh
     model per call) is bounded the same way: no stacked per-chunk J."""
-    from test_gp_learn_radial import THETA, make_problem
+    from radial_learn_problem import THETA, make_problem
     from ace_jax.fit import rows
     from ace_jax.fit.radial_learn import projected_residual
     prob, ds, _ = make_problem()
