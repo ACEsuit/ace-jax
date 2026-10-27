@@ -110,9 +110,9 @@ over a file's `basis:`, `--train` over its `data:` (each logged as an override).
 - **Learned radials: `aj fit --learn-radial`.** Learns the tensor radials before
   the fit (VarPro over the training configs, gated on a seeded
   `--radial-val-frac` hold-out, default 0.2), then fits as usual on the full
-  training set. Options: `--radial-n-q 12`, `--radial-steps 40`, `--radial-opt lbfgs|newton` (trust-region Newton with exact Hessian-vector products, `--radial-cg-iters 20` per iteration),
+  training set. Options: `--radial-n-q 12` (only widens: a wider analytic model keeps its span; the log gives the one used), `--radial-steps 300`, `--radial-reprofile-every 100` (theta re-fit, which restarts L-BFGS), `--radial-opt lbfgs|newton` (trust-region Newton with exact Hessian-vector products, `--radial-cg-iters 20` per iteration),
   `--radial-lam-grid 0,1e-2`. Writes `out/radial_info.json` (the gate's
-  selection and scores) and, as each roughness weight finishes and before the gate,
+  selection and scores: validation SSE_E/sigma_E^2 + SSE_F/sigma_F^2, the objective's weighting) and, as each roughness weight finishes and before the gate,
   `out/radial_lam=<w>.npz` (`rnl_Wnlq`, `steps`, `theta_final`): hours of learning
   survive a later failure. The saved model is marked `radial_learned`, so
   `ACECalculator`/`export_lammps` spline it. Works with `--model` and with
