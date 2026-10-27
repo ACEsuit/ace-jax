@@ -340,8 +340,8 @@ def energy_fn(model, cutoff, K=None, chunk=None):
     are dropped.  The rest is `eval.dense.dense_energy`, the core `jaxmd.potential` uses: `K` compacts the
     in-cutoff slots into K model slots (a row with more than K, or a list flagged `overflow`, makes energy
     and forces NaN: never truncation), `chunk` sets rows per dense block, padding atoms carry no energy.
-    `model` is the JAX model or the C++ kernel (`eval.ffi.KernelModel`), which runs a vmapped batch as one
-    threaded call; positions-only derivatives either way."""
+    `model` is the JAX model or the kernel (`eval.ffi.KernelModel`: C++, or CUDA on a GPU), which runs a
+    vmapped batch as one call; positions-only derivatives either way."""
 
     from .eval.dense import dense_energy
 
@@ -708,7 +708,7 @@ class BatchCalculator:
     def energy_fn(self, K=None, chunk=None):
         """JAX-MD's energy function for one structure, `energy(R, neighbor=...)`, over this calculator's
         evaluation model (`batch.energy_fn`); jax.vmap the integrator or optimizer over the batch.  With
-        ffi the C++ kernel evaluates it: one threaded call for the whole vmapped batch.  `K` compacts the
+        ffi the kernel (C++, or CUDA on a GPU) evaluates it: one call for the whole vmapped batch.  `K` compacts the
         in-cutoff slots, `chunk` sets the row blocks; `BatchNeighbours.energy_fn` sizes both for a batch."""
         return energy_fn(self.eval_model, self.cutoff, K, chunk)
 

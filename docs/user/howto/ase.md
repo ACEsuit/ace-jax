@@ -97,7 +97,7 @@ seconds. Later calls take milliseconds.
 | `spline_tol` | `"auto"` | change a *learned* radial to a spline at 1e-10 before evaluation (see [learned radials](learned-radials.md#deployment-spline-speed)); a float changes any analytic radial to a spline; `None` never makes splines |
 | `edge_a_kind` | `"auto"` | the A-basis kernel, `"gather"` or `"matmul"`; `"auto"` measures the time of both, one time for each edge bucket |
 | `skin` | `1.0` | the Verlet skin in Å; `0` builds the list again at each call |
-| `ffi` | `False` | `True`: use the C++ kernel on CPUs (see [CPU kernel](#cpu-kernel)); `"auto"`: use it when possible |
+| `ffi` | `False` | `True`: use the C++ kernel on CPUs (see [CPU kernel](#cpu-kernel)), or the CUDA kernel on a CUDA GPU (see [GPU kernel](#gpu-kernel)); `"auto"`: use it when possible |
 
 `calc.model` is the model as loaded. `calc.eval_model` is the form that the
 calculator evaluates. If you install the `native` extra
@@ -135,6 +135,21 @@ error of 1e-9 in the radial values. For most models it has 4000 intervals.
 Install the `native` extra with the kernel. It makes the neighbour lists 4 to
 12 times faster (512 to 4,096 atoms). To compile the kernel before the first
 calculation, use `aj native --build`.
+
+## GPU kernel
+
+On a CUDA GPU, `ffi=True` uses a CUDA kernel. It calculates the same
+quantities as the [CPU kernel](#cpu-kernel), with the same accuracy.
+
+1. Install the `cuda` extra. It installs `nvcc`, which compiles the kernel.
+2. Make the calculator with `ffi=True`:
+
+    ```python
+    calc = ACECalculator("fit/model.npz", ffi=True)
+    ```
+
+The kernel also calculates in float32. For float32, add `dtype="float32"`.
+`calc.ffi["platform"]` is `"cuda"` when the calculator uses the CUDA kernel.
 
 ## Site descriptors
 

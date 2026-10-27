@@ -176,12 +176,11 @@ def test_float32():
 
 
 def test_the_kernel_batched():
-    """ffi=True: the C++ kernel takes the batch's B x N rows as one block; equal to ACECalculator(ffi=True)
-    to roundoff (both read the same radial table)."""
-    if jax.default_backend() != "cpu":
-        pytest.skip("the C++ kernel is CPU-only")
-    if shutil.which("c++") is None:
-        (pytest.fail if os.environ.get("ACEJAX_REQUIRE_OPTIONAL") else pytest.skip)("no C++ compiler")
+    """ffi=True: the backend's kernel (C++, or CUDA on a GPU) takes the batch's B x N rows as one block;
+    equal to ACECalculator(ffi=True) to roundoff (both read the same radial table)."""
+    from ace_jax.eval import ffi
+    if (shutil.which("c++") if jax.default_backend() == "cpu" else ffi.cuda_compiler()) is None:
+        (pytest.fail if os.environ.get("ACEJAX_REQUIRE_OPTIONAL") else pytest.skip)("no compiler for the kernel")
     m, meta = model_for("ace_cantor5_small.npz")
     ats = structures(meta["elements"])
     bc = BatchCalculator(m, meta, ffi=True)

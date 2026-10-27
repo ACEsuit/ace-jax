@@ -139,25 +139,21 @@ class ACECalculator(Calculator):
         to roundoff; "prefix" keeps every AA monomial bitwise.  "auto" takes
         "greedy" from `eval.aa_dag.AUTO_MIN_CHAIN_MUL` chain-form multiplies per
         site, where it is faster on CPU and GPU, and the chain form below (a tie;
-        bitwise as before).  `calc.aa_dag` is the mode used.  "cueq" is an opt-in
-        GPU form (`eval.cueq`, the `cueq` extra; one species or species-embedding
-        (TrACE), folded linear ACE; needs a CUDA backend, else ValueError): the
-        product basis runs in NVIDIA
-        cuequivariance kernels, in float32 or float64.  Each `calc.model` swap
-        (a readout swap included) rebuilds the cueq plan and recompiles its
-        kernels -- minutes at o4d20 without the NVRTC cache
-        (CUEQUIVARIANCE_OPS_NVRTC_CACHE_DIR); plans are not cached.
+        bitwise as before).  `calc.aa_dag` is the mode used.  ("cueq", NVIDIA
+        cuequivariance, was removed: on a CUDA GPU, ffi=True is faster.)
 
         `ffi` (False, the default: the JAX model; True; "auto"; a library path) evaluates energies,
-        forces and stress with the C++ kernel of `eval.ffi` (its `AceEdges` entry point, `KernelModel`)
-        in place of the JAX evaluation model: same neighbour lists (the dense layout, the skin list),
-        with forces and the virial assembled by JAX from the kernel's dE/drij.  It needs the CPU
-        backend, float64, lean=True and a linear ACEModel (categorical or species embedding), and turns
-        the radial table on (radial_table=None -> True; energies ~1e-12 relative, forces ~1.5e-8 of
-        max|F|).  The kernel is compiled on first use (`eval.ffi.library`: a C++17 compiler, cached).
-        True raises ValueError (or `eval.ffi.FFIUnavailable`) when it cannot run; "auto" then keeps the
-        JAX model and `calc.ffi_reason` says why.  `calc.ffi` is {"library", "threads"}, None when off.
-        Rows run in parallel on XLA's intra-op thread pool; `ffi_threads` > 0 caps the threads.  The
+        forces and stress with the kernel of `eval.ffi` (its `AceEdges` entry point, `KernelModel`) in
+        place of the JAX evaluation model: the C++ kernel on the CPU backend, the CUDA one
+        (`AceEdgesGpu`) on a CUDA GPU.  Same neighbour lists (the dense layout, the skin list), with
+        forces and the virial assembled by JAX from the kernel's dE/drij.  It needs lean=True, a linear
+        ACEModel (categorical or species embedding) and float64 (float32 too on a GPU), and turns the
+        radial table on (radial_table=None -> True; energies ~1e-12 relative, forces ~1.5e-8 of
+        max|F|).  The kernel is compiled on first use (`eval.ffi.library`: a C++17 compiler, or nvcc --
+        a toolkit's, or the `cuda13` extra's -- on a GPU; cached).  True raises ValueError (or `eval.ffi.FFIUnavailable`)
+        when it cannot run; "auto" then keeps the JAX model and `calc.ffi_reason` says why.  `calc.ffi`
+        is {"library", "threads", "platform"}, None when off.  On the CPU, rows run in parallel on XLA's
+        intra-op thread pool; `ffi_threads` > 0 caps the threads.  The
         kernel differentiates in positions only: derivatives in the model's parameters, or second
         derivatives, need the JAX model (ffi=False; `calc.model` and `eval_model` there).
 
@@ -231,6 +227,8 @@ class ACECalculator(Calculator):
         self._spline_tol = spline_tol
         self._spline_intervals = spline_intervals
         self._radial_table_opt = radial_table
+        from ..eval.aa_dag import check_not_cueq
+        check_not_cueq(aa_dag)
         self._aa_dag = aa_dag                 # recursive product basis (`eval.aa_dag`); "auto" picks per model
         if not (ffi is False or ffi is True or ffi == "auto"
                 or (isinstance(ffi, (str, os.PathLike)) and os.path.isfile(ffi))):
@@ -356,8 +354,8 @@ class ACECalculator(Calculator):
             raise ValueError("cannot swap calc.model on a calculator with posterior=: forces_std "
                              "would still describe the model it was built with; build a new "
                              "ACECalculator(model_file, posterior=posterior_file) instead")
-        # built into locals and assigned at the end: a refused model (e.g. aa_dag="cueq" off a GPU, or a model
-        # cueq cannot evaluate) leaves the calculator exactly as it was
+        # built into locals and assigned at the end: a refused model (e.g. one the kernel cannot evaluate)
+        # leaves the calculator exactly as it was
         ffi_lib, ffi_reason = self._ffi_choice(model)
         try:
             eval_model, splined, radial_table, aa_dag_used = self._eval_form(model, ffi_lib)
@@ -368,7 +366,9 @@ class ACECalculator(Calculator):
             eval_model, splined, radial_table, aa_dag_used = self._eval_form(model, None)
         if hasattr(self, "_model"):
             self.reset()
-        self._ffi = {"library": str(ffi_lib), "threads": self._ffi_threads} if ffi_lib else None
+        gpu = "target" in dict(getattr(eval_model, "attrs", ()))   # KernelModel.of(..., gpu=True)
+        self._ffi = ({"library": str(ffi_lib), "threads": self._ffi_threads, "platform": "cuda" if gpu else "cpu"}
+                     if ffi_lib else None)
         self._ffi_reason = ffi_reason
         self._model, self._eval_model, self._splined = model, eval_model, splined
         self._radial_table, self._aa_dag_used = radial_table, aa_dag_used
@@ -380,18 +380,13 @@ class ACECalculator(Calculator):
 
     def _eval_form(self, model, ffi_lib):
         """(eval_model, splined, radial_table, aa_dag) for `model`: lean, splines, the radial table, the
-        product basis form, E0 and dtype, then (ffi_lib) the C++ kernel in place of the JAX model."""
+        product basis form, E0 and dtype, then (ffi_lib) the kernel in place of the JAX model."""
         eval_model = (lean_form(model, self._spline_tol, self._spline_intervals) if self._lean else model)
         splined = splining(model, eval_model, self._spline_tol)
         eval_model, radial_table = with_radial_table(
             eval_model, True if ffi_lib and self._radial_table_opt is None else self._radial_table_opt)
         from ..eval.aa_dag import resolve_aa_dag, with_aa_dag
         aa_dag_used = "greedy" if ffi_lib else resolve_aa_dag(eval_model, self._aa_dag)   # the kernel: its own plan
-        if aa_dag_used == "cueq":
-            import jax
-            if jax.default_backend() != "gpu":     # before any trace: cueq kernels are CUDA-only
-                raise ValueError("aa_dag='cueq' needs a CUDA GPU; the JAX backend here is "
-                                 f"{jax.default_backend()!r}.  Use aa_dag='auto', 'greedy' or None.")
         if aa_dag_used is not None and not ffi_lib:
             eval_model = with_aa_dag(eval_model, aa_dag_used)
         if self._energy_reference == "E0":        # site energies without the isolated atoms
@@ -402,9 +397,11 @@ class ACECalculator(Calculator):
             from ..eval.api import with_dtype
             eval_model = with_dtype(eval_model, self._eval_dtype)
         if ffi_lib:                               # the kernel in place of the JAX evaluation model
+            import jax
             from ..eval import ffi as kernel
-            kernel.register(ffi_lib)
-            eval_model = kernel.KernelModel.of(eval_model, self._ffi_threads)
+            gpu = jax.default_backend() == "gpu"
+            (kernel.register_gpu if gpu else kernel.register)(ffi_lib)
+            eval_model = kernel.KernelModel.of(eval_model, self._ffi_threads, gpu=gpu)
         return eval_model, splined, radial_table, aa_dag_used
 
     def _ffi_choice(self, model):
@@ -416,22 +413,24 @@ class ACECalculator(Calculator):
         import jax
         from ..eval.model import ACEModel
         f64 = jax.config.jax_enable_x64 and (self._eval_dtype is None or np.dtype(self._eval_dtype) == np.float64)
-        why = (f"the JAX backend is {jax.default_backend()!r} (the kernel is CPU)" if jax.default_backend() != "cpu"
-               else "not float64 (the kernel is float64: enable jax_enable_x64)" if not f64
+        backend = jax.default_backend()
+        gpu = backend == "gpu" and "cuda" in jax.devices()[0].client.platform_version.lower()   # not ROCm
+        why = (f"the JAX backend is {backend!r} (the kernels are for the CPU and CUDA GPUs)"
+               if backend != "cpu" and not gpu
+               else "not float64 (the CPU kernel is float64: enable jax_enable_x64)" if not (f64 or gpu)
                else "lean=False" if not self._lean
-               else "aa_dag='cueq'" if self._aa_dag == "cueq"
                else "layout='sparse' (the kernel reads the dense layout)" if self._ffi_layout == "sparse"
                else "radial_table switched off" if self._radial_table_opt is not None and not self._radial_table_opt
                else f"{type(model).__name__} is not a linear ACEModel" if not isinstance(model, ACEModel) else None)
         if why:
             if opt == "auto":
                 return None, why
-            raise ValueError(f"ffi={opt!r}: the C++ kernel cannot run here: {why}")
+            raise ValueError(f"ffi={opt!r}: the {'CUDA' if gpu else 'C++'} kernel cannot run here: {why}")
         if opt is not True and opt != "auto":
             return opt, None                      # a prebuilt library
         from ..eval import ffi as kernel
         try:
-            return kernel.library(), None
+            return kernel.library(gpu=gpu), None
         except kernel.FFIUnavailable as e:
             if opt == "auto":
                 return None, str(e)
@@ -439,7 +438,8 @@ class ACECalculator(Calculator):
 
     @property
     def ffi(self):
-        """The C++ kernel in use: {"library", "threads"}; None for the JAX model."""
+        """The kernel in use: {"library", "threads", "platform"} ("cpu": the C++ kernel; "cuda": the CUDA
+        kernel, where threads does not apply); None for the JAX model."""
         return self._ffi
 
     @property
@@ -455,8 +455,8 @@ class ACECalculator(Calculator):
 
     @property
     def aa_dag(self):
-        """The product basis form in use: a DAG plan mode ("greedy" / "prefix"), "cueq" (the
-        cuequivariance kernels), or None for the chain form (what `aa_dag="auto"` resolved to on this
+        """The product basis form in use: a DAG plan mode ("greedy" / "prefix"), or None for the
+        chain form (what `aa_dag="auto"` resolved to on this
         model)."""
         return self._aa_dag_used
 

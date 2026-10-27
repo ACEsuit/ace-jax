@@ -247,8 +247,10 @@ load; faster only at large `nradbase`). Values are unchanged to roundoff.
 ### Calculator performance options
 
 `ACECalculator(path, dtype=None, layout="auto", edge_a_kind="auto", skin=1.0, lean=True, spline_tol="auto", spline_intervals=None, radial_table=None, ffi=False, ffi_threads=0)`:
-- `ffi=True` (CPU backend, float64, lean, linear ACEModel incl. species embedding): the C++ kernel
-  (`eval.ffi.KernelModel`, entry point `AceEdges`) evaluates the dense layout's site energies and dE/drij;
+- `ffi=True` (lean, linear ACEModel incl. species embedding; CPU backend: float64, the C++ kernel, entry point
+  `AceEdges`; CUDA backend: float64 or float32, the CUDA kernel `eval/ace_ffi_gpu.cu`, entry point `AceEdgesGpu`,
+  compiled with nvcc from the `cuda` extra's CUDA 13 wheel, `calc.ffi["platform"] == "cuda"`, deterministic):
+  the kernel (`eval.ffi.KernelModel`) evaluates the dense layout's site energies and dE/drij;
   JAX assembles forces and stress, so skin lists and `calc.model` swaps work as before. Rows run on XLA's
   intra-op thread pool (`ffi_threads` caps it): ~17x the JAX model at 1.7k-4k atoms on 32 cores (o4d20).
   Radial table on (energies ~1e-12, forces ~1.5e-8 of max|F|). Compiled on first use (C++17 compiler,
@@ -467,6 +469,11 @@ for its CPU build, which refuses a cuda bundle and vice versa).
   export there, or pass generic flags. Needs a lammps-jax plugin that registers FFI handlers for the CPU
   (lammps-jax >= 0.2.1, the `lammps` extra's floor; 0.2.0 registers them for CUDA only). Build the plugin at the
   version of the Python package.
+  GPU bundles: `ffi=True` (or `aj export --ffi`) uses the CUDA kernel (`AceDirectGpu`, float64 or float32;
+  handlers `ace_jax_direct_gpu=<lib>:AceDirectGpu`); "auto" keeps the XLA program on a GPU. nvcc: `$NVCC`, the
+  `cuda` extra's wheel (`nvidia/cu13/bin/nvcc`), PATH, `$CUDA_HOME`; flags `-O3 -arch=sm_XY` for the GPU JAX
+  sees (`ACEJAX_FFI_GPU_FLAGS`, `aj native --gpu-flags`). The `cuda` extra is `jax[cuda12]` (nvcc from a toolkit/module);
+  `cuda13` (driver >= 580) adds the nvcc wheel. RTX 4000 Ada, 4096 Si atoms: 3.4-4.8x the XLA DAG in float64, 2.7-3.4x in float32.
 - An older lammps-jax LAMMPS plugin rejects a matrix bundle ("re-export"). To
   fix it, rebuild the plugin, or export `layout="dense"`. The bundle records
   the exporting lammps-jax as `ace_jax.lammps_jax`.
@@ -491,19 +498,8 @@ for its CPU build, which refuses a cuda bundle and vice versa).
   --tight-slots` opts in; the main suite never does.
 - The dense bundle runs in blocks of `BUNDLE_BLOCK_ROWS` (32,768) rows above
   one block, bounding memory at large N.
-- `aa_dag="cueq"` (opt-in; `auto` never picks it; `aj export --aa-dag cueq`): the product basis as NVIDIA
-  cuequivariance kernels (`eval/cueq.py`), CUDA only, `pip install "ace-jax[cueq]"`. One species, or species-embedding
-  (TrACE) models (a linear `ACEModel`). Refused: cueq missing, PACE or non-ACE models, categorical multi-species, a non-CUDA
-  platform or device (`ACECalculator` also needs a CUDA backend). Needs `LAMMPS_JAX_CONTRIB` = lammps-jax's
-  `contrib/ffi-replay` directory at export (the recorder is not in the package) and at run time (its built
-  `ffi_replay_shim.so`; README gcc command, `-lffi` on libffi.so.6 systems). One cueq bundle per process.
-  The bundle, `<stem>.ffi-replay` and `<stem>.cueq-cache/` go together (recorded by name, relative to the
-  bundle, as `ace_jax.cueq`); `aj export` prints the environment lines (`eval.cueq.run_env(record, bundle_path)`)
-  resolved on the export host; on another LAMMPS machine (with `ace-jax[cueq]` installed, the shim built and
-  `LAMMPS_JAX_CONTRIB` set there) run `aj export --print-env BUNDLE.json` to print them for that machine.
-  `export_lammps(lean=False, aa_dag="cueq")` is refused.
-  Export of o4d20 13-26 min on an A100; without the cache the start compiles kernels (tens of minutes); the cache serves
-  the same GPU architecture only. A `calc.model` swap rebuilds and recompiles.
+- `aa_dag="cueq"` (NVIDIA cuequivariance) was removed: it raises ValueError (`eval.aa_dag.check_not_cueq`). On a
+  CUDA GPU use `ffi=True` (the CUDA kernel): faster, and any linear ACE model.
 - `lean=True` (default) exports `lean(model, spline_tol, spline_intervals)` for
   an ACE model, as `ACECalculator` does. The bundle records what `lean` actually
   did, looking through a wrapper's `.base`:
