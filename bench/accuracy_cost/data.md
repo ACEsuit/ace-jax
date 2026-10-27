@@ -40,6 +40,11 @@ with quippy (bench Task 8).
 
 ## PACE (pacemaker) environment and fit
 
+python-ace/pacemaker and TensorPotential/gracemaker are under the ICAMS
+[Academic Software Licence](https://github.com/ICAMS/python-ace/blob/master/LICENSE.md):
+academic, non-commercial use only. These envs install them from ICAMS; ace-jax does not
+include them. Running these fits commercially needs a licence from ACEworks GmbH.
+
 - Venv `/storage/eng/essswb/venvs/ac-pacemaker`, built from `envs/pacemaker/pyproject.toml`
   (`uv sync -p 3.9`): Python 3.9.25 (python-ace 0.2.8 ships cp39 wheels only; `extxyz`
   has none, so `split.read_atoms` falls back to `_read_plain` there), pacemaker/pyace 0.2.8,

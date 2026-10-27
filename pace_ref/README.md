@@ -4,6 +4,24 @@ Generates the committed PACE references under `fixtures/pace/`. The everyday
 test suite needs neither toolchain; only regenerating the references does
 (and the `pace-parity` CI job).
 
+## Licences
+
+The ace-jax package (`src/ace_jax`, MIT) neither includes nor imports the code
+these tools use. Each tool fetches that code from ICAMS (or LAMMPS) under its own licence:
+
+- **python-ace / pacemaker** (section 2) is under the
+  [Academic Software Licence](https://github.com/ICAMS/python-ace/blob/master/LICENSE.md)
+  (ASL): academic, non-commercial use only. Installing and running it here, and in the
+  `pace-parity` CI job, is subject to the ASL. Commercial use needs a licence from
+  ACEworks GmbH. The committed fixtures are its output (random-coefficient `.yace`
+  files and the energies, forces and stresses it computes), not its code.
+- **ML-PACE** (`lammps-user-pace`) is GPL (GPL-2.0 or GPL-3.0). `unit_ref.cpp` and
+  `tabulated/` (`tab_eval.cpp`, `tab_time.cpp`, `CMakeLists.txt`) build against it, and
+  `tabulated/0001-tabulated-radials.patch` modifies it: these files are distributed
+  under ML-PACE's GPL terms, not the repository's MIT licence.
+- **LAMMPS** is GPL-2.0. The patches in `fast/` modify its `pair_pace_kokkos` and are
+  distributed under GPL-2.0.
+
 ## 1. Unit references (C++, no Python bindings)
 
 `unit_ref.cpp` links the ML-PACE evaluator sources directly and dumps g_k(r)
