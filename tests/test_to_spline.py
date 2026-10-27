@@ -187,7 +187,7 @@ def test_real_learned_radial_keeps_the_pattern():
     """A radial actually learned by `learn_radial` (VarPro, a few L-BFGS steps on
     the si_tiny data) keeps ACE1's per-z_j column pattern: learning freezes the
     zero rows, so its splined table is species-compact under `lean`."""
-    from test_gp_learn_radial import THETA, XYZ
+    from radial_learn_problem import THETA, XYZ
 
     from ace_jax.fit.data import build_dataset, load_configs
     from ace_jax.fit.hypers import default_prior

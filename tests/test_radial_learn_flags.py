@@ -13,7 +13,7 @@ jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 
 from conftest import ROOT
-from test_gp_learn_radial import MODEL, THETA, XYZ, make_problem
+from radial_learn_problem import MODEL, THETA, XYZ, make_problem
 
 pytestmark = pytest.mark.skipif(not (XYZ.exists() and MODEL.exists()), reason="missing fixtures")
 
