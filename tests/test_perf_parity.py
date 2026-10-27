@@ -58,10 +58,23 @@ def _f32_ok(x, x64, kind, n_atoms=1):
     assert err <= bound, f"{kind}: float32 error {err:.3g} > bound {bound:.3g}"
 
 
-# the sparse layout never takes the skin path (ACECalculator._calculate: skin > 0 and
-# layout != "sparse"), so sparse x skin=1 would repeat its skin=0 case exactly
-SKIN_CASES = [pytest.param(ref, skin, id=f"{skin}-{ref.stem}") for ref in CASES
-              for skin in ((0.0,) if ref.stem.rsplit("_", 3)[2] == "sparse" else (0.0, 1.0))]
+# The full float64 grid runs at skin=0. skin=1 runs on one multi-species ACE and one PACE
+# model only: test_skin holds the skin list to a rebuild at 1e-12 for any model, so here it
+# needs only to reach both model classes. The sparse layout never takes the skin path
+# (ACECalculator._calculate: skin > 0 and layout != "sparse"). float32 is a looser accuracy
+# bound on the same code, so one structure per model (the triclinic cell) is enough.
+SKIN_MODELS = ("sige_nofit", "gesi_sbessel")
+F32_STRUCTURES = ("tric",)
+
+
+def _skins(ref):
+    stem, cname, layout, dt = ref.stem.rsplit("_", 3)
+    if dt == "float32" and cname not in F32_STRUCTURES:
+        return ()
+    return (0.0, 1.0) if layout != "sparse" and stem in SKIN_MODELS else (0.0,)
+
+
+SKIN_CASES = [pytest.param(ref, skin, id=f"{skin}-{ref.stem}") for ref in CASES for skin in _skins(ref)]
 
 
 @pytest.mark.parametrize("ref, skin", SKIN_CASES)

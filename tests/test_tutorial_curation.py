@@ -1,6 +1,7 @@
 """The curation campaign loop, with the fixture ACE model standing in for the labeller."""
 import jax
 import numpy as np
+import pytest
 
 jax.config.update("jax_enable_x64", True)
 
@@ -27,6 +28,7 @@ def _labeller():
     return label
 
 
+@pytest.mark.slow                     # tutorial tooling; the docs job runs tutorial 7's campaigns
 def test_campaign_replays_shipped_pools_and_picks_what_the_selector_asks(tmp_path):
     lab = _labeller()
     live = K.run_campaign("novelty", lab, tmp_path / "live", rounds=1, per_round=2, n_steps=4)

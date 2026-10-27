@@ -401,8 +401,10 @@ def test_calibrate_append_replace_exclusive(fitted, calib_set, tmp_path):
 def test_eval_per_atom_writes_served_arrays(fitted, tmp_path):
     from ase.io import read
     from ace_jax.cli import main
+    from conftest import small_si_xyz
+    data = small_si_xyz(tmp_path / "d.xyz", 3)                   # the arrays, not the 53-config eval
     assert main(["eval", "--model", str(fitted / "model.npz"), "--posterior", str(fitted / "posterior.npz"),
-                 "--data", str(XYZ), "--energy-key", "dft_energy", "--force-key", "dft_force",
+                 "--data", str(data), "--energy-key", "dft_energy", "--force-key", "dft_force",
                  "--per-atom", str(tmp_path / "pa.xyz"), "--support"]) == 0
     a = read(tmp_path / "pa.xyz", "0")
     for k in ("forces_std", "forces_q", "forces_group", "support_ok", "support_q"):
@@ -478,9 +480,11 @@ def test_aniso_fit_eval_and_calibrate(aniso_fit, calib_set):
     from ace_jax.cli import main
     from ace_jax.fit.ard import ARDPosterior
     out = aniso_fit
+    from conftest import small_si_xyz
     assert ARDPosterior.load(out / "posterior.npz").force_shape == "aniso"
+    data = small_si_xyz(out / "d.xyz", 3)
     assert main(["eval", "--model", str(out / "model.npz"), "--posterior", str(out / "posterior.npz"),
-                 "--data", str(XYZ), "--energy-key", "dft_energy", "--force-key", "dft_force",
+                 "--data", str(data), "--energy-key", "dft_energy", "--force-key", "dft_force",
                  "--per-atom", str(out / "pa.xyz")]) == 0
     a = read(out / "pa.xyz", "1")
     assert a.arrays["forces_cov"].shape == (len(a), 9) and "forces_q_mahal" in a.arrays
@@ -656,17 +660,23 @@ def test_cli_eval_and_calibrate_shape_path_committee(fitted, calib_set, tmp_path
     np.testing.assert_allclose(b["lam_rms"], a["lam_rms"], rtol=1e-6)
 
 
-def test_cli_fit_and_eval_ard_gp(tmp_path):
-    """aj fit --uq ard-gp writes gp_model.npz + posterior.npz; aj eval serves it with --posterior."""
+def test_cli_fit_and_eval_ard_gp(ard_gp_fit, tmp_path):
+    """aj fit --uq ard-gp flags give the config of the shared ard-gp fit (written as aj fit writes it:
+    gp_model.npz + posterior.npz); aj eval serves it with --posterior."""
     from ase.io import read, write
-    from ace_jax.cli import main
+    from ace_jax.cli import _fit_config, _parse, main
     from ace_jax.fit.xyz import read_extxyz
-    out = tmp_path / "fit"
-    assert main(["fit", "--model", str(FIXTURE_DIR / "si_fitted.npz"), "--data", str(XYZ), "--ntrain", "30",
-                 "--ntest", "8", "--energy-key", "dft_energy", "--force-key", "dft_force", "--virial-key",
-                 "dft_virial", "--m-per-species", "8", "--uq", "ard-gp", "--ard-val-frac", "0.4", "--ard-n-min",
-                 "50", "--opt", "lbfgs", "--map-steps", "5", "--configs-per-batch", "4", "--r0", "2.35",
-                 "--out", str(out)]) == 0
+    from conftest import ard_gp_pipe_cfg
+    c = _fit_config(_parse(["fit", "--model", str(FIXTURE_DIR / "si_fitted.npz"), "--data", str(XYZ), "--ntrain",
+                            "30", "--ntest", "8", "--energy-key", "dft_energy", "--force-key", "dft_force",
+                            "--virial-key", "dft_virial", "--m-per-species", "8", "--uq", "ard-gp",
+                            "--ard-val-frac", "0.4", "--ard-n-min", "50", "--opt", "lbfgs", "--map-steps", "5",
+                            "--configs-per-batch", "4", "--r0", "2.35", "--out", str(tmp_path / "fit")]))
+    ref = ard_gp_pipe_cfg()
+    for k in ("model", "ntrain", "ntest", "batch", "r0", "arm", "m_per_species", "uq", "opt", "rungs", "map_steps",
+              "ard_val_frac", "ard_n_min", "ard_force_shape"):
+        assert getattr(c, k) == getattr(ref, k), k
+    out = ard_gp_fit[0]
     assert (out / "gp_model.npz").exists() and (out / "posterior.npz").exists()
     data = tmp_path / "d.xyz"
     write(data, read(XYZ, ":3"))

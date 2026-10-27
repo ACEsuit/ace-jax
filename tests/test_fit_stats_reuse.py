@@ -103,10 +103,22 @@ CASES = {
 }
 
 
-@pytest.mark.parametrize("case", list(CASES))
+# the objectives whose statistics are bitwise a recompute's, so "auto" reuses them
+REUSED = ["linear_qr", "shared_noise", "pops", "ard"]
+
+
+@pytest.mark.parametrize("case", REUSED)
 def test_reuse_reproduces_recompute(case):
     kw = CASES[case]
     _equivalent(_fit(predict_stats="auto", **kw), _fit(predict_stats="recompute", **kw))
+
+
+@pytest.mark.parametrize("case", ["linear_cholesky", "linear_loo"])
+def test_gram_form_objectives_recompute(case):
+    """A split-Gram objective's statistics differ from a recompute's in summation order only (~1e-15),
+    under any comparison tolerance, so "auto" vs "recompute" cannot see a wrong reuse: check the decision.
+    (The GP case is checked in test_gp_model_file_reuses_the_map_prediction_posterior.)"""
+    assert _fit(predict_stats="auto", **CASES[case]).stats is None
 
 
 @pytest.mark.parametrize("case", ["linear_qr", "shared_noise", "pops"])
@@ -136,6 +148,7 @@ def test_gp_model_file_reuses_the_map_prediction_posterior(monkeypatch, tmp_path
     from ace_jax.fit.pipeline import write_outputs
     p = Passes(monkeypatch)
     res = _fit(p, predict_stats="auto", **CASES["gp"])
+    assert res.stats is None                                     # not reused for the model file
     write_outputs(res, tmp_path, layout=("cli",), log=lambda *a: None)
     assert p.on_train("sufficient_statistics") == 1, p.calls     # the MAP prediction's only
     assert (tmp_path / "gp_model.npz").exists()

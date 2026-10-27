@@ -62,6 +62,7 @@ def _driver(tmp_path, *extra):
     return subprocess.run(args, capture_output=True, text=True)
 
 
+@pytest.mark.slow                     # a subprocess run of a research driver
 def test_bench_driver_extra_train_tol_and_rmse_npz(tmp_path):
     """The driver end to end (summary, model.npz, per-lambda checkpoint, widening report);
     --extra-train appends configs to the training split only; --tol reaches the learners;
@@ -85,6 +86,7 @@ def test_bench_driver_extra_train_tol_and_rmse_npz(tmp_path):
     assert np.isfinite(row["E_rmse_meV_atom"]) and np.isfinite(row["F_rmse_meV_A"])
 
 
+@pytest.mark.slow                     # a subprocess run of a research driver
 def test_bench_driver_init_radials(tmp_path):
     """--init-radials replaces the start (with --steps 0 the written radials are that start,
     normalised, not the model's own); a wrong shape fails fast."""

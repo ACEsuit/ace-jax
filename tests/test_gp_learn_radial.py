@@ -197,12 +197,27 @@ def _perturbed_truth(prob, seed=0, eps=0.2):
     return Wt, W0, c
 
 
-def test_learn_radial_recovers_perturbed_radials():
-    from ace_jax.fit.radial_learn import learn_radial, projected_residual
+@pytest.fixture(scope="module")
+def perturbed():
+    """Labels from the radials Wt and a readout c; W0 is Wt perturbed, the learning start."""
     prob, ds, _ = make_problem(ncfg=12, per_batch=3)
     Wt, W0, c = _perturbed_truth(prob)
-    ds = relabel(prob, ds, Wt, c)
-    W, info = learn_radial(prob, ds, W0, theta0=THETA, profile=False, steps=30)
+    return prob, relabel(prob, ds, Wt, c), W0
+
+
+@pytest.fixture(scope="module")
+def unpenalised(perturbed):
+    """10 learning steps on `perturbed` with no prior on the change: the recovery run, and the
+    zero-weight arm of the spectral and gap tests (lam_spec=0 and lam_gap=0 give these W bitwise)."""
+    from ace_jax.fit.radial_learn import learn_radial
+    prob, ds, W0 = perturbed
+    return learn_radial(prob, ds, W0, theta0=THETA, profile=False, steps=10)
+
+
+def test_learn_radial_recovers_perturbed_radials(perturbed, unpenalised):
+    from ace_jax.fit.radial_learn import projected_residual
+    prob, ds, W0 = perturbed
+    W, info = unpenalised
     f0 = float(projected_residual(W0, THETA, prob, ds))
     f1 = float(projected_residual(W, THETA, prob, ds))
     print(f"recovery: f0={f0:.4e} f1={f1:.4e} reasons={info['reasons']}")
@@ -414,14 +429,12 @@ def test_learned_radials_reject_inducing_points(small):
         fit_radial(bad, ds, ds, prob.model.rnl_Wnlq, steps=0)
 
 
-def test_learn_radial_spectral_prior_suppresses_high_q_change():
+def test_learn_radial_spectral_prior_suppresses_high_q_change(perturbed, unpenalised):
     """A strong spectral prior on the radial change should shrink the high-q
     (q >= n_q/2) part of W - W_ref relative to no prior, while staying finite."""
     from ace_jax.fit.radial_learn import learn_radial
     from ace_jax.fit.radial_model import normalise, radial_gram, row_active
-    prob, ds, _ = make_problem(ncfg=12, per_batch=3)
-    Wt, W0, c = _perturbed_truth(prob)
-    ds = relabel(prob, ds, Wt, c)
+    prob, ds, W0 = perturbed
     Q = radial_gram(prob.model, ds)
     active = row_active(W0)
     W_ref = np.asarray(normalise(W0, Q, active))
@@ -429,8 +442,8 @@ def test_learn_radial_spectral_prior_suppresses_high_q_change():
     hi = slice(n_q // 2, n_q)
     out = {}
     for lam_spec in (0.0, 1e2):
-        W, info = learn_radial(prob, ds, W0, theta0=THETA, profile=False, steps=10,
-                               lam_spec=lam_spec, spec_p=4.0)
+        W, info = unpenalised if lam_spec == 0 else learn_radial(
+            prob, ds, W0, theta0=THETA, profile=False, steps=10, lam_spec=lam_spec, spec_p=4.0)
         W = np.asarray(W)
         assert np.all(np.isfinite(W)) and all(np.isfinite(info["trace"]))
         dW = W - W_ref
@@ -439,16 +452,14 @@ def test_learn_radial_spectral_prior_suppresses_high_q_change():
     assert out[1e2] < out[0.0]
 
 
-def test_learn_radial_gap_prior_shrinks_change_in_gaps():
+def test_learn_radial_gap_prior_shrinks_change_in_gaps(perturbed, unpenalised):
     """A large data-gap prior on the radial change should shrink the change
     measured under the uniform-in-r measure, relative to no prior, while
     staying finite."""
     from ace_jax.fit.radial_learn import learn_radial
     from ace_jax.fit.radial_model import (data_r_range, gap_penalty, normalise, radial_gram,
                                           row_active, uniform_gram)
-    prob, ds, _ = make_problem(ncfg=12, per_batch=3)
-    Wt, W0, c = _perturbed_truth(prob)
-    ds = relabel(prob, ds, Wt, c)
+    prob, ds, W0 = perturbed
     Q = radial_gram(prob.model, ds)
     active = row_active(W0)
     W_ref = np.asarray(normalise(W0, Q, active))
@@ -456,8 +467,8 @@ def test_learn_radial_gap_prior_shrinks_change_in_gaps():
     U = uniform_gram(prob.model, 0.8 * r_min, prob.cfg.rcut)
     out = {}
     for lam_gap in (0.0, 1e2):
-        W, info = learn_radial(prob, ds, W0, theta0=THETA, profile=False, steps=10,
-                               lam_gap=lam_gap, U=U)
+        W, info = unpenalised if lam_gap == 0 else learn_radial(
+            prob, ds, W0, theta0=THETA, profile=False, steps=10, lam_gap=lam_gap, U=U)
         W = np.asarray(W)
         assert np.all(np.isfinite(W)) and all(np.isfinite(info["trace"]))
         out[lam_gap] = float(gap_penalty(jnp.asarray(W), jnp.asarray(W_ref), U))
@@ -667,16 +678,14 @@ def test_learner_gradient_is_the_envelope_gradient(small):
     assert abs(float(jnp.vdot(g, D)) - fd) < 1e-5 * abs(fd)
 
 
-def test_learner_works_where_the_gram_form_fails():
+def test_learner_works_where_the_gram_form_fails(perturbed):
     """Noise-free labels at STIFF theta: kappa(G + Lambda) is far past 1/eps, where the Gram
     form's Cholesky is NaN or wrong.  The QR objective stays at the dense value (summed
     directly), and a learning run is finite and never ends above its start.  The gradient is not
     asserted: here c is fixed only by the near-flat prior along A's weak directions, and the
     W-gradient through them is not resolvable in double precision (qr_readout)."""
     from ace_jax.fit.radial_learn import learn_radial, projected_residual, projected_residual_qr
-    prob, ds, _ = make_problem(ncfg=12, per_batch=3)
-    Wt, W0, c = _perturbed_truth(prob)
-    ds = relabel(prob, ds, Wt, c)
+    prob, ds, W0 = perturbed
     got, ref = projected_residual_qr(W0, STIFF, prob, ds), _in_memory_residual_direct(W0, prob, ds, STIFF)
     print(f"stiff: qr {got:.10e}  dense {ref:.10e}  gram {float(projected_residual(W0, STIFF, prob, ds)):.10e}")
     assert np.isfinite(got) and abs(got - ref) < 1e-8 * abs(ref)
@@ -741,13 +750,11 @@ def test_reduced_hvp_matches_differences_of_the_reduced_gradient(small):
     assert np.abs(hv - fd).max() < 1e-4 * np.abs(fd).max()
 
 
-def test_newton_round_beats_lbfgs_per_iteration_on_recoverable_radials():
+def test_newton_round_beats_lbfgs_per_iteration_on_recoverable_radials(perturbed):
     """The same budget of iterations: trust-region Newton with exact reduced HVPs gets further than
     L-BFGS-B, and its accepted objective never rises."""
     from ace_jax.fit.radial_learn import _lbfgs_round, _newton_round
-    prob, ds, _ = make_problem(ncfg=12, per_batch=3)
-    Wt, W0, c = _perturbed_truth(prob)
-    ds = relabel(prob, ds, Wt, c)
+    prob, ds, W0 = perturbed
     fg, hvp, x0, _ = _reduced(_with_W(prob, W0), ds, THETA)
     _, f0, fl, tl, _, _ = _lbfgs_round(fg, x0, 8, 1e-12)
     _, f0n, fn, tn, reason, _ = _newton_round(fg, hvp, x0, 8, 1e-12, cg_iters=30)

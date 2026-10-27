@@ -36,8 +36,11 @@ def test_chunked_rows_equal_unchunked(chunk):
         ref = linear_rows(model, g, b)[0]
         got = linear_rows_chunked(model, g, b, node_chunk=chunk)
         for k in ("E", "F", "V"):
-            np.testing.assert_allclose(np.asarray(getattr(got, k)), np.asarray(getattr(ref, k)),
-                                       rtol=1e-12, atol=1e-12, err_msg=f"{k} chunk={chunk}")
+            r = np.asarray(getattr(ref, k))
+            # chunking reorders the sums, so rounding scales with the largest entry (V ~ 430),
+            # not each element: an absolute 1e-12 failed by CPU and jaxlib version (3e-15 of max|V|)
+            np.testing.assert_allclose(np.asarray(getattr(got, k)), r, rtol=1e-12,
+                                       atol=1e-14 * np.abs(r).max(), err_msg=f"{k} chunk={chunk}")
 
 
 @pytest.mark.slow

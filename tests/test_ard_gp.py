@@ -94,7 +94,9 @@ def test_evidence_at_h0_is_the_gp_lml(gp_ev):
         v, _ = ev.value_and_grad(ev.h0(theta))
     N = sum(float(getattr(st, f"n_{q}")) for q in "EFV")
     logw = sum(float(getattr(st, f"logw_{q}")) for q in "EFV")
-    assert v + 0.5 * logw - 0.5 * N * np.log(2 * np.pi) == pytest.approx(lml, rel=1e-8)
+    # rel 1e-7: the reference inverts K_MM (cond 7e8), so ~eps * 7e8 = 1.5e-7 of rounding is expected;
+    # 1e-8 passed or failed by CPU and jaxlib version (missed by 1.2e-8 on a Xeon 6130, jaxlib 0.12)
+    assert v + 0.5 * logw - 0.5 * N * np.log(2 * np.pi) == pytest.approx(lml, rel=1e-7)
 
 
 def test_posterior_mean_at_h0_is_the_gp_map_mean(gp_ev):
@@ -235,13 +237,8 @@ def test_ard_gp_shape_is_rotation_equivariant(gp_post):
 
 
 def _gp_pipe_cfg(**kw):
-    from conftest import FIXTURE_DIR
-    from ace_jax.fit.pipeline import FitConfig
-    base = dict(model=str(FIXTURE_DIR / "si_fitted.npz"), energy_key="dft_energy", force_key="dft_force",
-                virial_key="dft_virial", ntrain=30, ntest=8, batch=4, r0=2.35, arm="gp", m_per_species=8,
-                uq="ard-gp", opt="lbfgs", rungs=("map",), map_steps=5, predict_train=False,
-                ard_val_frac=0.4, ard_n_min=50, ard_force_shape="aniso")
-    return FitConfig(**{**base, **kw})
+    from conftest import ard_gp_pipe_cfg
+    return ard_gp_pipe_cfg(**kw)
 
 
 def _gp_stage(**kw):
@@ -261,8 +258,12 @@ def _gp_stage(**kw):
     return d, b, theta, res, pred
 
 
-def test_stage_ard_gp_press_shape_and_group_scales():
-    d, b, theta, res, pred = _gp_stage()
+def test_stage_ard_gp_press_shape_and_group_scales(gp_fit_dir):
+    from ace_jax.fit import ard
+    _, d, fr = gp_fit_dir                          # the pipeline's ard-gp stage, not a second fit
+    b, res = fr.built, fr.ard
+    with highest_precision():
+        pred = ard.predict_ard(res.posterior, b.prob, d.ds_test, rows_fn=ard.rows_fn_for(b.prob, fr.theta))
     post, rep = res.posterior, res.report
     M = b.prob.ind.XM.shape[0]
     assert post.prior_root.M == M and post.R.shape[0] == b.prob.cfg.len_basis + M
@@ -308,23 +309,18 @@ def test_ard_gp_config_refusals(kw, msg):
         _gp_pipe_cfg(**kw).validate()
 
 
-def test_ard_gp_fit_writes_ard_mean_gp_model(tmp_path):
+def test_ard_gp_fit_writes_ard_mean_gp_model(gp_fit_dir):
     """An ard-gp fit writes gp_model.npz holding the ARD posterior mean (so GPCalculator's mean is the served
     posterior's) and no full-posterior factor L: the calibrated force UQ comes from posterior.npz, so the
     Dt x Dt factor (1.9 GB on the Cantor basis) would serve only an uncalibrated energy_std."""
-    from conftest import FIXTURE_DIR
-    from ace_jax.fit.pipeline import fit, load_fit_data, write_outputs
     from ace_jax.fit.pipeline.export import load_gp_model
-    cfg = _gp_pipe_cfg().validate()
-    d = load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz"))
-    res = fit(cfg, d, log=lambda *a: None)
-    write_outputs(res, tmp_path, layout=("run", "cli"), log=lambda *a: None)
-    assert "L" not in np.load(tmp_path / "gp_model.npz").files
-    fg, _ = load_gp_model(tmp_path / "gp_model.npz")
+    out, _, res = gp_fit_dir
+    assert "L" not in np.load(out / "gp_model.npz").files
+    fg, _ = load_gp_model(out / "gp_model.npz")
     mu, L = fg.posteriors[0]
     assert L is None
     np.testing.assert_array_equal(np.asarray(mu), res.ard.posterior.mean)
-    assert (tmp_path / "posterior.npz").exists()
+    assert (out / "posterior.npz").exists()
     np.testing.assert_array_equal(np.asarray(fg.draws[0]), res.ard.posterior.gp_theta)
 
 
@@ -347,15 +343,8 @@ def test_gp_calculator_without_a_posterior_factor_gives_the_mean_only(gp_fit_dir
 
 
 @pytest.fixture(scope="module")
-def gp_fit_dir(tmp_path_factory):
-    from conftest import FIXTURE_DIR
-    from ace_jax.fit.pipeline import fit, load_fit_data, write_outputs
-    out = tmp_path_factory.mktemp("ardgp")
-    cfg = _gp_pipe_cfg().validate()
-    d = load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz"))
-    res = fit(cfg, d, log=lambda *a: None)
-    write_outputs(res, out, layout=("run", "cli"), log=lambda *a: None)
-    return out, d, res
+def gp_fit_dir(ard_gp_fit):
+    return ard_gp_fit
 
 
 def _atoms0():

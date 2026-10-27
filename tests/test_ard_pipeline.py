@@ -134,6 +134,7 @@ def test_ard_checkpoint_survives_a_failure_in_prediction(tmp_path, monkeypatch):
     assert calc.posterior is not None                    # the mean-vs-coefficients guard passed
 
 
+@pytest.mark.slow                     # a subprocess run of a research driver
 def test_bench_run_driver_passes_the_ard_flags_through(tmp_path):
     """bench/acegp_cantor/run.py exposes --ard-variance/--ard-mode/--ard-val-frac and hands them to
     FitConfig (it used to omit them, so --uq ard silently took the defaults)."""
