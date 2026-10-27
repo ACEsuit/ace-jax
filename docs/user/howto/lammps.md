@@ -263,13 +263,6 @@ A LAMMPS plugin that is older than the lammps-jax Python package does not
 accept a `matrix` bundle. To correct this, build the plugin again at the
 version of the Python package, or export with `layout="dense"`.
 
-## cuequivariance on the GPU
-
-!!! warning "Removed"
-    The cuequivariance form (`aa_dag="cueq"`, the `cueq` extra) was removed.
-    Use the [GPU kernel](#gpu-kernel). It is faster, and it supports
-    all linear ACE models. `aa_dag="cueq"` now gives an error.
-
 ## Learned radials and precision
 
 - `lean=True` (the default) exports the lean evaluation form, as the ASE

@@ -49,7 +49,8 @@ reference.
 pip install ace-jax
 ```
 
-Extras: `"ace-jax[cuda]"` (CUDA 12 JAX), `"ace-jax[gp]"` (the Pathfinder rung),
+Extras: `"ace-jax[cuda]"` (CUDA 12 JAX), `"ace-jax[cuda13]"` (CUDA 13 JAX and `nvcc`
+for the GPU kernel; NVIDIA driver 580 or later), `"ace-jax[gp]"` (the Pathfinder rung),
 `"ace-jax[native]"` (C++ code on CPUs: a neighbour list and the kernel), `"ace-jax[lammps]"`
 (LAMMPS export with lammps-jax) and `"ace-jax[jaxmd]"` (MD with JAX-MD).
 
