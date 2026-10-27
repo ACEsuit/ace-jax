@@ -296,8 +296,9 @@ load; faster only at large `nradbase`). Values are unchanged to roundoff.
     `to_spline` and `prune_columns` only, which keep `site_basis` and the
     unfolded readout valid.
 - `radial_table` (ACE and PACE; default None = off): `True` (sized from 4000
-  intervals up to a 1e-9 value error, `splinify.DEFAULT_TABLE_TOL`; one extra
-  fit when 4000 is not enough), a float (that tolerance) or an int (that many
+  intervals up to a 1e-9 value error, `splinify.DEFAULT_TABLE_TOL`, checked on
+  r >= 0.4 rcut; one extra fit when 4000 is not enough; it stops early, with a
+  warning, when a finer table's derivative is no more accurate), a float (that tolerance) or an int (that many
   intervals) tabulates the per-edge radial stage in r after `lean`: ACE R_nl
   (transform and envelope included) and the pair radial, PACE g_k. One cubic
   B-spline per species pair on [0.5 Å, rcut], exactly zero beyond each pair's

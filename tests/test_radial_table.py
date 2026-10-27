@@ -306,3 +306,21 @@ def test_table_search_stops_at_the_byte_cap(monkeypatch):
     with pytest.warns(UserWarning, match="keeping 4000 intervals"):
         _, info = radial_table(_lean(m), return_info=True, tol=1e-12)
     assert info["n_intervals"] == DEFAULT_RADIAL_TABLE and info["tol_met"] is False
+
+
+def test_table_search_stops_at_the_derivative_noise_floor(monkeypatch):
+    """A finer table whose r-derivative error is no smaller (float64 noise in the samples / h) is not taken:
+    the search keeps the last table, warns and reports noise_floor."""
+    m, _, _ = load(str(MODELS["si_fitted"]))
+    fit = splinify._rtab_fit
+    monkeypatch.setattr(splinify, "_rtab_fit", lambda *a: (lambda c, e, d: (c, e, d if a[-1] <= 4000 else 1e6 * d))(*fit(*a)))
+    splinify.clear_cache()
+    try:
+        with pytest.warns(UserWarning, match="no smaller r-derivative error"):
+            _, info = radial_table(_lean(m), return_info=True, tol=1e-14)
+    finally:
+        splinify.clear_cache()
+    assert info["n_intervals"] == DEFAULT_RADIAL_TABLE and info["noise_floor"] is True and info["tol_met"] is False
+    monkeypatch.undo()
+    _, info = radial_table(_lean(m), return_info=True, tol=1e-9)
+    assert info["noise_floor"] is False
