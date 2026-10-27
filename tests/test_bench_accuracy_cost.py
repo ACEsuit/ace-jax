@@ -1030,3 +1030,17 @@ def test_grace_2l_inputs_and_pair_styles(monkeypatch):
     monkeypatch.setenv("GRACE_CHUNKSIZE", "1024")
     assert _pair("grace-2l", "m.npz", ["Si"], "gpu").startswith("pair_style grace/2l/kk chunksize 1024\n")
     assert kokkos_args("grace-2l", "cpu", 2)[:4] == ["-k", "on", "t", "2"]
+
+
+def test_gate_tol_tabulated_radials_take_the_splined_tolerance(monkeypatch):
+    """A splined ace-jax row and a kernel bundle (ACEJAX_EXPORT_FFI: radials tabulated in r) gate at
+    "acejax-splined" (a fine table's ~1/h noise); an exact ace-jax row stays at "acejax"; other codes their own."""
+    from accuracy_cost import timing
+    from scaling import parity
+    monkeypatch.delenv("ACEJAX_EXPORT_FFI", raising=False)
+    assert timing.gate_tol("acejax", "acejax-ace", {}) == parity.TOL["acejax"]
+    assert timing.gate_tol("acejax", "acejax-ace", {"spline_tol": 1e-10}) == parity.TOL["acejax-splined"]
+    assert timing.gate_tol("nep", "nep-gpumd", {}) == parity.TOL["nep-gpumd"]
+    monkeypatch.setenv("ACEJAX_EXPORT_FFI", "1")
+    assert timing.gate_tol("acejax", "acejax-ace", {}) == parity.TOL["acejax-splined"]
+    assert timing.gate_tol("mlpace", "mlpace", {}) == parity.TOL["mlpace"]

@@ -51,7 +51,8 @@ TOL = {"mlpace": (1e-6, 1e-5), "acejax": (1e-10, 1e-9), "mace": (1e-6, None),
        "spline": (1e-9, 3e-8),
        # a splined ace-jax model (spline_tol) against itself in another layout or on another device: the fine
        # spline amplifies roundoff in r through its derivative (~1/h), measured 1.5e-9 eV/A skin vs no-skin list
-       # in ACECalculator alone at 1e-10 (1218/2435 intervals; 1.3e-11 analytic); its error vs analytic is ~1e-6
+       # in ACECalculator alone at 1e-10 (1218/2435 intervals; 1.3e-11 analytic); its error vs analytic is ~1e-6.  Also
+    # the kernel bundles' radial table in r (accuracy_cost.timing.gate_tol)
        "acejax-splined": (1e-10, 1e-8),
        "acepot": (1e-10, 1e-9), "trim": (1e-10, 1e-9), "trim-ace": (1e-5, 1e-3),
        "acepotentials-trim": (1e-10, 1e-9),       # accuracy_cost: the trim library vs the ace-jax fit (exact radials)

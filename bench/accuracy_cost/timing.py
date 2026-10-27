@@ -253,6 +253,17 @@ def gate_cells():
     return [supercell("Si", GATE_N, seed=k, rattle=RATTLE) for k in range(GATE_CELLS)]
 
 
+def gate_tol(style, code, row):
+    """parity.TOL for a gate: a splined ace-jax model, or a kernel bundle (ACEJAX_EXPORT_FFI: its radial tabulated
+    in r, reference and bundle alike), at "acejax-splined" -- a fine table amplifies float64 noise in r and in its
+    samples by ~1/h, so two evaluations of the same table differ by ~1e-9 eV/A (o3d8's 4000-interval table: 1.0e-9
+    XLA CPU vs GPU, 1.2e-9 the CUDA kernel vs XLA; 7.7e-12 analytic), and its error vs the analytic model is ~1e-8."""
+    from scaling import parity
+    if style == "acejax" and ("spline_tol" in row or os.environ.get("ACEJAX_EXPORT_FFI")):
+        return parity.TOL["acejax-splined"]
+    return parity.TOL[code if code in parity.TOL else style]
+
+
 def gate_model(row, device, env, work):
     """LAMMPS E/F of this model against its own evaluator on three rattled
     64-atom Si cells (parity.compare at parity.TOL[style]): acejax and mlpace
@@ -322,8 +333,7 @@ def gate_model(row, device, env, work):
                     E0, F0 = parity._quip_ef(row["path"], at, row["quip_label"])
                     E1, F1 = parity._lammps_ef("gap", row["path"], row["elements"], at, device, lmp, w,
                                                pair_extra=row["quip_label"])
-                tol = parity.TOL["acejax-splined" if style == "acejax" and "spline_tol" in row
-                                 else code if code in parity.TOL else style]
+                tol = gate_tol(style, code, row)
                 chk.update(parity.compare(E0, F0, E1, F1, len(at), tol), tol=list(tol))
             except Exception as ex:                                # a missing style is a failed gate
                 chk.update({"status": "error", "error": parity.error_summary(ex)})
