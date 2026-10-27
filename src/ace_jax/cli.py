@@ -146,8 +146,11 @@ def _add_fit_args(p):
                         "is marked radial_learned and splined at deploy time")
     p.add_argument("--radial-n-q", type=int, default=12,
                    help="tensor-radial polynomial span after widening (with --learn-radial)")
-    p.add_argument("--radial-steps", type=int, default=40,
+    p.add_argument("--radial-steps", type=int, default=300,
                    help="optimiser iterations per roughness weight (with --learn-radial)")
+    p.add_argument("--radial-reprofile-every", type=int, default=100,
+                   help="re-fit the evidence hyperparameters every this many radial steps; each re-fit "
+                        "restarts the optimiser (with --learn-radial)")
     p.add_argument("--radial-opt", choices=["lbfgs", "newton"], default="lbfgs",
                    help="radial optimiser: L-BFGS-B, or trust-region Newton with exact Hessian-vector "
                         "products (each costs about two gradients; capped by --radial-cg-iters per iteration)")
@@ -214,7 +217,7 @@ def _fit_config(a):
         ard_transfer=a.ard_transfer, ard_support=not a.no_ard_support,
         ard_support_features=a.ard_support_features,
         learn_radial=a.learn_radial, radial_n_q=a.radial_n_q, radial_steps=a.radial_steps,
-        radial_opt=a.radial_opt, radial_cg_iters=a.radial_cg_iters,
+        radial_reprofile_every=a.radial_reprofile_every, radial_opt=a.radial_opt, radial_cg_iters=a.radial_cg_iters,
         radial_lam_grid=tuple(float(x) for x in str(a.radial_lam_grid).split(",") if x.strip()),
         radial_val_frac=a.radial_val_frac,
         solver=a.solver, predict_train=False, pops_ridge=ridge,

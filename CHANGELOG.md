@@ -9,6 +9,17 @@ variable.
 
 ### Changed
 
+- **Learned radials: longer runs and a force-aware gate.** `--radial-steps`
+  now defaults to 300 (was 40), and the new `--radial-reprofile-every`
+  (default 100; was fixed at 10) sets how often the hyperparameters are fitted
+  again. The gate score now weights energies and forces as the learning
+  objective does, so the force errors count. The previous score was a mean
+  for each quantity, so the energies decided it. The fit log and
+  `radial_info.json` give the polynomial span that is used.
+- **Learned radials are approximately 3 times faster.** The residual pass uses the
+  model's own energies and forces at the coefficients, not the full design
+  rows. The hyperparameters are fitted again by L-BFGS, not by 300 Adam steps.
+  The L-BFGS fit is also better converged.
 - **The radial table is sized to an accuracy.** `radial_table=True` (and the
   C++ kernel, which turns it on) now uses 4000 intervals or more: enough for
   an error of 1e-9 in the radial values. Most models keep 4000 intervals. A
