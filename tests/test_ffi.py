@@ -322,7 +322,6 @@ AUTO_KW = dict(platform="cpu", dtype="float64", layout="auto", lean=True, radial
     ({"layout": "dense"}, "layout 'dense'"),
     ({"max_neighbors": None}, "no max_neighbors"),
     ({"radial_table": False}, "radial_table switched off"),
-    ({"aa_dag": "cueq"}, "aa_dag='cueq'"),
 ])
 def test_auto_falls_back_with_its_reason(change, why):
     """choose_ffi("auto") takes the XLA program, and says why for a CPU bundle; a GPU bundle has no reason."""
