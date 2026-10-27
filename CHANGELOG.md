@@ -7,6 +7,9 @@ default. LAMMPS then needs `LAMMPS_JAX_FFI_HANDLERS`, which `aj export` prints.
 Export with `--no-ffi` (`ffi=False`) for the previous bundle, which needs no
 variable.
 
+**Upgrading.** `aa_dag="cueq"` and the `cueq` extra were removed. On a CUDA
+GPU, use `ffi=True` (`aj export --ffi`) for the CUDA kernel.
+
 ### Changed
 
 - **Learned radials: longer runs and a force-aware gate.** `--radial-steps`
@@ -20,6 +23,10 @@ variable.
   model's own energies and forces at the coefficients, not the full design
   rows. The hyperparameters are fitted again by L-BFGS, not by 300 Adam steps.
   The L-BFGS fit is also better converged.
+- **A `cuda13` extra.** For an NVIDIA driver 580 or later, it installs
+  `jax[cuda13]` and NVIDIA's `nvcc` wheel, which compiles the CUDA kernel. The
+  `cuda` extra is unchanged (`jax[cuda12]`): the kernel then uses the `nvcc` of
+  a CUDA toolkit or module.
 - **`fast-neighbours` is now `native`.** The `native` extra installs the same
   packages; `fast-neighbours` remains as an alias until the next release but one.
 - **The C++ kernel is the default for CPU bundles.** `export_lammps` and
@@ -37,6 +44,17 @@ variable.
 
 ### Added
 
+- **A CUDA kernel for linear ACE.** On a CUDA GPU, `ffi=True` runs a CUDA
+  kernel in float64 or float32: in `ACECalculator`, `BatchCalculator`, and
+  LAMMPS bundles (`export_lammps(ffi=True)`, `aj export --ffi`). It supports
+  categorical models with any number of species and species-embedded models.
+  On an RTX 4000 Ada with 4096 Si atoms, it is 3.4 to 4.8 times faster than
+  the XLA program in float64, and 2.7 to 3.4 times faster in float32. In
+  LAMMPS on an A100 with 32,768 Si atoms, it is 2.9 to 8.0 times faster in
+  float64 (o3d8 to o4d20) and 2.3 to 5.3 times in float32; linear ACE o4d20
+  costs 1.23 µs/atom-step, against 1.61 with cueq and 2.42 with patched
+  ML-PACE. `nvcc`
+  compiles it the first time; `aj native --build` compiles it before use.
 - **Batched evaluation.** `ace_jax.batch.BatchCalculator(model).calculate(structures)`
   gives the energy, forces and stress of many structures in a small number of
   compiled calls: structures of similar size are padded into one batch, and
@@ -98,6 +116,13 @@ variable.
   scatter force assembly, which is as fast. A rebuild of 4,096 atoms now takes
   14 ms with the `native` extra (was 102 ms) and 159 ms without it
   (was 249 ms).
+
+### Removed
+
+- **`aa_dag="cueq"` (NVIDIA cuequivariance) and the `cueq` extra.** The CUDA
+  kernel replaces it: it is faster on every model that cueq supported, it
+  supports all linear ACE models, and its export needs no replay files or
+  kernel cache. `aa_dag="cueq"` now gives an error that names `ffi=True`.
 
 ## 0.4.1 (2026-10-22)
 

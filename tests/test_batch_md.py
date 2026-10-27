@@ -220,15 +220,16 @@ def test_needs_rebuild_per_structure():
 
 
 def test_vmapped_md_with_the_kernel(jax_md):
-    """ffi=True: the C++ kernel under jax.vmap (its rows flattened into one call).  Energies and forces equal
-    ACECalculator(ffi=True)'s to roundoff (both read one radial table); vmapped NVE equals the per-structure
-    runs and stays on the JAX model's trajectory to the table's accuracy."""
+    """ffi=True: the backend's kernel (C++, or CUDA on a GPU) under jax.vmap (its rows flattened into one
+    call).  Energies and forces equal ACECalculator(ffi=True)'s to roundoff (both read one radial table);
+    vmapped NVE equals the per-structure runs and stays on the JAX model's trajectory to the table's
+    accuracy."""
     import os
     import shutil
-    if jax.default_backend() != "cpu" or shutil.which("c++") is None:
-        if os.environ.get("ACEJAX_REQUIRE_OPTIONAL") and jax.default_backend() == "cpu":
-            pytest.fail("no C++ compiler")
-        pytest.skip("the C++ kernel needs a CPU and a compiler")
+
+    from ace_jax.eval import ffi as kernel
+    if (shutil.which("c++") if jax.default_backend() == "cpu" else kernel.cuda_compiler()) is None:
+        (pytest.fail if os.environ.get("ACEJAX_REQUIRE_OPTIONAL") else pytest.skip)("no compiler for the kernel")
     from jax_md import simulate, space
     ats = structures()
     _, shift = space.free()
@@ -343,14 +344,14 @@ def test_batch_energy_fn_compacts_and_blocks_like_the_adapter():
 
 
 def test_batch_energy_fn_on_the_kernel_matches_the_calculator():
-    """ffi=True with the batch-sized energy (compacted, blocked): energies and forces equal
-    ACECalculator(ffi=True)'s per structure."""
+    """ffi=True (the backend's kernel) with the batch-sized energy (compacted, blocked): energies and forces
+    equal ACECalculator(ffi=True)'s per structure."""
     import os
     import shutil
-    if jax.default_backend() != "cpu" or shutil.which("c++") is None:
-        if os.environ.get("ACEJAX_REQUIRE_OPTIONAL") and jax.default_backend() == "cpu":
-            pytest.fail("no C++ compiler")
-        pytest.skip("the C++ kernel needs a CPU and a compiler")
+
+    from ace_jax.eval import ffi as kernel
+    if (shutil.which("c++") if jax.default_backend() == "cpu" else kernel.cuda_compiler()) is None:
+        (pytest.fail if os.environ.get("ACEJAX_REQUIRE_OPTIONAL") else pytest.skip)("no compiler for the kernel")
     ats = structures()
     bc = BatchCalculator(MODEL, ffi=True)
     nb = bc.neighbour_lists(ats, skin=1.0)

@@ -337,8 +337,9 @@ def test_make_cost_maps_cueq_rows_to_their_own_line(tmp_path):
 
 
 def test_cueq_line_is_a_same_model_other_code_family():
-    """The cueq line: linear ACE's colour, its own marker and line style among the GPU's linear ACE lines, in
-    the "Same model, other code" preset; a second code for the ace fits (its cost under ACEcueq_<size>)."""
+    """The cueq line (removed; its rows stay as data): linear ACE's colour, its own marker and line style among the
+    GPU's linear ACE lines; a second code for the ace fits (its cost under ACEcueq_<size>); left out of the figures
+    (SKIP) and of every preset.  An FFI row is the kernel line, ace_ffi, on the A100 row as on the CPU row."""
     sys.path.insert(0, str(ROOT / "bench" / "si_qoi"))
     import plot_cost as P
     import plot_cost_web as W
@@ -349,7 +350,8 @@ def test_cueq_line_is_a_same_model_other_code_family():
     assert P.cost_name("ace_cueq", "o4d20") == "ACEcueq_o4d20"
     assert P.family_of({"family": "ace", "size": "o4d20", "code": "acejax-ace", "aa_dag": "cueq"}) == "ace_cueq"
     assert P.family_of({"family": "ace", "size": "o4d20", "code": "acejax-ace", "aa_dag": "greedy"}) == "ace"
-    assert "ace_cueq" in W.PRESETS["Same model, other code"]
+    assert "ace_cueq" in P.SKIP and not any("ace_cueq" in (fams or ()) for fams in W.PRESETS.values())
+    assert P.family_of({"family": "ace", "size": "o4d20", "code": "acejax-ace", "device": "gpu", "ffi": True}) == "ace_ffi"
 
 
 def test_nep_two_stage_experiments_stay_off_the_nep_line():

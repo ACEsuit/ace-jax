@@ -44,8 +44,9 @@ def test_export_yace_converts_an_ace_model(tmp_path, capsys):
     (["--out", "m.yace", "--structure", "s.xyz"], "needs none"),
     (["--out", "m.json", "--structure", "s.xyz", "--procs", "2,2"], "three integers"),
     (["--out", "m.json", "--delta", "0.01"], "--delta is for a .yace"),
-    (["--out", "m.json", "--structure", "s.xyz", "--ffi"], "needs --platform cpu"),
     (["--out", "m.json", "--structure", "s.xyz", "--platform", "cpu", "--ffi", "--no-ffi"], "--no-ffi exports the XLA"),
+    (["--out", "m.json", "--structure", "s.xyz", "--platform", "cpu", "--ffi", "--dtype", "float32"],
+     "float64 on the CPU"),
     (["--out", "m.json", "--structure", "s.xyz", "--platform", "cpu", "--layout", "dense", "--ffi"], "matrix layout"),
 ])
 def test_export_usage_errors(tmp_path, capsys, args, msg):
@@ -84,16 +85,6 @@ def test_export_lammps_cpu_bundle_per_rank(tmp_path):
     assert rank["contract"]["max_atoms"] < full["contract"]["max_atoms"]   # one rank's subdomain + ghosts
 
 
-def test_export_aa_dag_cueq_refuses_a_two_species_model(tmp_path, capsys):
-    at = bulk("Si", "diamond", 5.43, cubic=True)
-    write(tmp_path / "start.xyz", at, format="extxyz")
-    with pytest.raises(SystemExit) as e:
-        main(["export", "--model", str(FIXTURE_DIR / "sige_nofit.npz"), "--out", str(tmp_path / "m.json"),
-              "--structure", str(tmp_path / "start.xyz"), "--aa-dag", "cueq"])
-    assert e.value.code == 2 and "one species" in capsys.readouterr().err
-    assert not (tmp_path / "m.json").exists()
-
-
 @pytest.mark.parametrize("flag,mode", [(None, "auto"), ("chain", None), ("greedy", "greedy"), ("prefix", "prefix")])
 def test_export_aa_dag_flag(tmp_path, monkeypatch, flag, mode):
     require_optional("lammps_jax")
@@ -113,66 +104,10 @@ def test_export_aa_dag_is_for_a_bundle(tmp_path, capsys):
     assert e.value.code == 2 and "--aa-dag" in capsys.readouterr().err
 
 
-def test_export_aa_dag_cueq_leaves_the_cueq_import_to_the_export(tmp_path, monkeypatch, capsys):
-    """The CLI must not import cueq before export_lammps sets CUEQUIVARIANCE_OPS_NVRTC_CACHE_DIR; a cueq (or
-    recorder) missing in the export is a usage error."""
-    require_optional("lammps_jax")
-    from ace_jax.eval import cueq
-    from ace_jax.export import lammps as lx
-    def no_import():
-        raise AssertionError("aj export imported cueq before export_lammps")
-    def export(*a, **kw):
-        raise cueq.CueqUnavailable("set LAMMPS_JAX_CONTRIB")
-    monkeypatch.setattr(cueq, "require", no_import)
-    monkeypatch.setattr(cueq, "backend", lambda: "gpu")
-    monkeypatch.setattr(lx, "export_lammps", export)
-    write(tmp_path / "start.xyz", bulk("Si", "diamond", 5.43, cubic=True), format="extxyz")
-    with pytest.raises(SystemExit) as e:
-        main(["export", "--model", str(MODEL), "--out", str(tmp_path / "m.json"), "--structure",
-              str(tmp_path / "start.xyz"), "--aa-dag", "cueq"])
-    assert e.value.code == 2 and "LAMMPS_JAX_CONTRIB" in capsys.readouterr().err
-
-
-def test_export_aa_dag_cueq_refuses_a_host_without_a_gpu(tmp_path, monkeypatch, capsys):
-    from ace_jax.eval import cueq
-    monkeypatch.setattr(cueq, "backend", lambda: "cpu")
-    write(tmp_path / "start.xyz", bulk("Si", "diamond", 5.43, cubic=True), format="extxyz")
-    with pytest.raises(SystemExit) as e:
-        main(["export", "--model", str(MODEL), "--out", str(tmp_path / "m.json"), "--structure",
-              str(tmp_path / "start.xyz"), "--aa-dag", "cueq"])
-    assert e.value.code == 2 and "CUDA GPU" in capsys.readouterr().err
-    assert not (tmp_path / "m.json").exists()
-
-
-def test_export_print_env_resolves_on_this_machine(tmp_path, monkeypatch, capsys):
-    """`aj export --print-env BUNDLE` on the LAMMPS machine: the sidecars next to the bundle where it is now,
-    this machine's shim ($LAMMPS_JAX_CONTRIB), never the export host's paths.  Runs on a CPU host: without
-    cuequivariance the library paths are placeholders, with a note to install the extra."""
-    import json
-    from ace_jax.eval import cueq
-    d = tmp_path / "moved"
-    d.mkdir()
-    rec = {"version": "0.13.0", "targets": ["uniform_1d_cuda"], "replay": "si.ffi-replay", "cache": "si.cueq-cache",
-           "handlers": "uniform_1d_cuda=/export/host/contrib/ffi-replay/ffi_replay_shim.so:ffi_replay_handler"}
-    (d / "si.json").write_text(json.dumps({"ace_jax": {"layout": "dense", "cueq": rec}}))
-    contrib = tmp_path / "contrib"
-    contrib.mkdir()
-    (contrib / "ffi_replay_shim.so").write_bytes(b"")
-    monkeypatch.setenv("LAMMPS_JAX_CONTRIB", str(contrib))
-    main(["export", "--print-env", str(d / "si.json")])
-    env = cueq.run_env(rec, d / "si.json")
-    out = capsys.readouterr().out
-    assert f'export FFI_REPLAY_FILE="{d / "si.ffi-replay"}"' in out
-    assert f'export CUEQUIVARIANCE_OPS_NVRTC_CACHE_DIR="{d / "si.cueq-cache"}"' in out
-    assert f"uniform_1d_cuda={contrib / 'ffi_replay_shim.so'}:ffi_replay_handler" in out
-    assert "/export/host" not in out and "build the replay shim" not in out
-    assert ("pip install" in out) == env["FFI_REPLAY_LIB"].startswith("<")
-
-
 @pytest.mark.parametrize("args,msg", [
     (["--print-env", "b.json", "--model", "m.npz"], "without --model"),
     (["--print-env", "missing.json"], "not a readable"),
-    (["--print-env", "plain.json"], "neither a cueq nor a C++ kernel bundle"),
+    (["--print-env", "plain.json"], "not a kernel bundle"),
     (["--out", "m.json"], "needs --model and --out"),
 ])
 def test_export_print_env_usage_errors(tmp_path, capsys, args, msg):
@@ -199,15 +134,6 @@ def test_export_lammps_ffi_bundle(tmp_path, monkeypatch, capsys):
     f = json.loads((tmp_path / "m.json").read_text())["ace_jax"]["ffi"]
     assert f["library"].startswith(str(tmp_path / "cache"))
     assert f'LAMMPS_JAX_FFI_HANDLERS="{f["handlers"]}"' in capsys.readouterr().out
-
-
-def test_export_ffi_and_aa_dag_cueq_are_exclusive(tmp_path, capsys):
-    write(tmp_path / "start.xyz", bulk("Si", "diamond", 5.43, cubic=True), format="extxyz")
-    with pytest.raises(SystemExit) as e:
-        main(["export", "--model", str(MODEL), "--out", str(tmp_path / "out" / "m.json"), "--structure",
-              str(tmp_path / "start.xyz"), "--platform", "cpu", "--ffi", "--aa-dag", "cueq"])
-    assert e.value.code == 2 and "exclusive" in capsys.readouterr().err
-    assert not (tmp_path / "out").exists()
 
 
 def test_export_lammps_cpu_default_takes_the_kernel(tmp_path, monkeypatch, capsys):
