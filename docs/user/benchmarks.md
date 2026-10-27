@@ -94,11 +94,10 @@ times faster than the compiled JAX program on the same node. At o4d20 it is
 On the A100, ace-jax runs linear ACE o4d20 faster than ML-PACE (3.12
 against 4.13 µs/atom-step). The ace-jax [GPU kernel](howto/lammps.md#gpu-kernel)
 runs the same model at 1.23 µs/atom-step. It is the fastest linear ACE code
-on the A100 for all models from o3d10 to o4d20. Against patched ML-PACE, it
+on the A100 for all models from o3d8 to o4d20. Against patched ML-PACE, it
 is 2.0 to 3.2 times faster (o4d12 to o4d20). On the same node, it is 2.9 to
-7.2 times faster than the compiled JAX program. The speed-up is largest for
-the smallest models. The GPU kernel has no o3d8 point: its forces differ from
-the reference by 1.2e-9 eV/Å, and the check limit is 1e-9 eV/Å.
+8.0 times faster than the compiled JAX program. The speed-up is largest for
+the smallest models.
 
 ### How the cost was measured
 

@@ -39,8 +39,8 @@ GPU, use `ffi=True` (`aj export --ffi`) for the CUDA kernel.
   categorical models with any number of species and species-embedded models.
   On an RTX 4000 Ada with 4096 Si atoms, it is 3.4 to 4.8 times faster than
   the XLA program in float64, and 2.7 to 3.4 times faster in float32. In
-  LAMMPS on an A100 with 32,768 Si atoms, it is 2.9 to 7.2 times faster in
-  float64 (o3d10 to o4d20) and 2.3 to 5.1 times in float32; linear ACE o4d20
+  LAMMPS on an A100 with 32,768 Si atoms, it is 2.9 to 8.0 times faster in
+  float64 (o3d8 to o4d20) and 2.3 to 5.3 times in float32; linear ACE o4d20
   costs 1.23 µs/atom-step, against 1.61 with cueq and 2.42 with patched
   ML-PACE. `nvcc`
   compiles it the first time; `aj native --build` compiles it before use.

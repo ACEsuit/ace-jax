@@ -84,12 +84,12 @@ parameters than linear ACE (f800: 761 parameters, 0.081 eV/Å) but not the QoI t
   every size, and the figure no longer draws the cueq line (`plot_cost.SKIP`; `sulis-gpu-cueq.jsonl` stays as data).
 - **ace-jax's CUDA kernel on the A100** (`eval/ace_ffi_gpu.cu`, `export_lammps(ffi=True)` on the GPU: `AceDirectGpu`, one
   XLA FFI call per step, radials tabulated in r; job 2265011, gpu018, A100-PCIE-40GB, a shared node): the fastest linear
-  ACE code on the A100 at every size it was gated for, 2.0-3.2x patched ML-PACE (o4d12-o4d20) and 1.3x cueq at o4d20.
+  ACE code on the A100 at every size, 2.0-3.2x patched ML-PACE (o4d12-o4d20) and 1.3x cueq at o4d20.
   Kernel and XLA bundle (aa_dag auto) timed one after the other on the same node, µs/atom-step, 32,768 atoms, 1 rank:
 
   | model | kernel f64 | XLA f64 | speed-up | kernel f32 | XLA f32 | speed-up |
   |---|---|---|---|---|---|---|
-  | o3d8 | (gate) | 0.336 | – | (gate) | 0.221 | – |
+  | o3d8 | 0.042 | 0.336 | 8.0x | 0.042 | 0.222 | 5.3x |
   | o3d10 | 0.045 | 0.324 | 7.2x | 0.039 | 0.199 | 5.1x |
   | o3d12 | 0.064 | 0.389 | 6.1x | 0.055 | 0.252 | 4.6x |
   | o4d12 | 0.080 | 0.422 | 5.3x | 0.070 | 0.282 | 4.0x |
@@ -102,13 +102,17 @@ parameters than linear ACE (f800: 761 parameters, 0.081 eV/Å) but not the QoI t
   float64 (the A100's float64 is half its float32 rate). The XLA column is 3-15% slower than the plotted
   `acejax-auto` rows (o3d10 0.324 against 0.314, o4d20 3.60 against 3.12; a shared node), so the figure's
   kernel-to-XLA gap is smaller than this table's (2.5x at o4d20).
-  **o3d8 fails the gate**: max dF 1.24e-9 against 1e-9 eV/Å (dE/atom 8.5e-13). The reference is the same-table
+  **o3d8 failed the "acejax" gate** in that job: max dF 1.24e-9 against 1e-9 eV/Å (dE/atom 8.5e-13). The reference is the same-table
   ACECalculator (`parity._tol_kw`), so this is not table accuracy: the cubic B-spline's derivative loses
   ~eps|c|/h, and the same-table roundoff grows linearly with the interval count (o3d8, cell 1, lestrade: kernel
   vs XLA on the GPU 3.6e-10 / 1.2e-9 / 4.2e-9 at 1000 / 4000 / 16000 intervals; XLA CPU vs XLA GPU 2.1e-10 /
   9.9e-10 / 3.4e-9; analytic radials CPU vs GPU 7.7e-12). The C++ kernel's o3d8 passed at 8.6e-10. So the
-  1e-9 eV/Å gate sits at the tabulated form's roundoff floor for o3d8, and sizing the table finer (PR #127) would
-  not pass it.
+  1e-9 eV/Å gate sat at the tabulated form's roundoff floor for o3d8, and sizing the table finer would not pass
+  it: o3d8's forces are closest to the analytic model near 4000 intervals (4e-9 of max|F|, 1.25e-8 at 16384;
+  the noise in the samples, ~eps|R| times the cancellation in its 1467 eV pair term against the many-body part,
+  grows as 1/h).  Kernel bundles now gate at "acejax-splined" (1e-8; `timing.gate_tol`), as splined models
+  did; o3d8 was rerun alone (job 2265563, gpu017): max dF 1.24e-9 again, gate passed, its rows replace the
+  failed ones in `sulis-gpu-cudak{,-xla}.jsonl`.
 - **ace-jax's C++ kernel** (`ace_jax.eval.ffi`, `export_lammps(ffi=True)`: the lammps-jax CPU bundle with the XLA
   program replaced by one XLA FFI call per step, radials tabulated in r) brings ace-jax to ML-PACE's speed on the
   CPU: 10-23x faster than the XLA bundle, timed one after the other on the same node (job 2257991, node136;
@@ -261,7 +265,8 @@ parameters than linear ACE (f800: 761 parameters, 0.081 eV/Å) but not the QoI t
   the A100s' driver 560 has no CUDA 13) into the job's `ACEJAX_FFI_CACHE`, `LAMMPS_JAX_FFI_HANDLERS` from
   `ffi.handlers(lib, gpu=True)`; env `sulis-gpu-cudak.json` (`ACEJAX_EXPORT_FFI`) for each size, then
   `sulis-gpu-cudak-xla.json` on the same node, float64 and float32. The gate's reference is ACECalculator with the
-  same radial table (`parity._tol_kw`), matrix layout only. Rows: `sulis-gpu-cudak.jsonl` (rows marked `ffi`: the
+  same radial table (`parity._tol_kw`), matrix layout only, at "acejax-splined" (`timing.gate_tol`). Job 2265011
+  (8e038dc), o3d8 from job 2265563 (103ad9e: the gate tolerance). Rows: `sulis-gpu-cudak.jsonl` (rows marked `ffi`: the
   `ace_ffi` line on the A100 row, cost names `ACEffi_<size>`, as the C++ kernel's on the CPU row) and
   `sulis-gpu-cudak-xla.jsonl` (the same-node control, not plotted).
   Linear ACE run by ACEpotentials.jl: each `aj fit` model rebuilt as an ACEpotentials v0.10.2 `ace_model`

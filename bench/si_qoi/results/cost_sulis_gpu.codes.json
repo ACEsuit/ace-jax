@@ -20,6 +20,7 @@
  "ACEf32_o4d20": "acejax-ace float32 lammps [sulis-gpu-fp32-dot-F32_F32_F32]",
  "ACEffi_o3d10": "acejax-ace float64 lammps ffi [sulis-gpu-cudak]",
  "ACEffi_o3d12": "acejax-ace float64 lammps ffi [sulis-gpu-cudak]",
+ "ACEffi_o3d8": "acejax-ace float64 lammps ffi [sulis-gpu-cudak]",
  "ACEffi_o4d12": "acejax-ace float64 lammps ffi [sulis-gpu-cudak]",
  "ACEffi_o4d14": "acejax-ace float64 lammps ffi [sulis-gpu-cudak]",
  "ACEffi_o4d16": "acejax-ace float64 lammps ffi [sulis-gpu-cudak]",

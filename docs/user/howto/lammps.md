@@ -211,8 +211,8 @@ same cache.
     ```
 
 In float64, the requirements and the accuracy are the same as for the CPU kernel.
-On an A100, the kernel is 2.9 to 7.2 times faster than the compiled JAX
-program, for silicon models from o3d10 to o4d20 with 32,768 atoms.
+On an A100, the kernel is 2.9 to 8.0 times faster than the compiled JAX
+program, for silicon models from o3d8 to o4d20 with 32,768 atoms.
 
 The GPU kernel also runs float32 bundles. To export one, add `--dtype float32`.
 The kernel then calculates in float32, with the accuracy of the float32 XLA
