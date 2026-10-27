@@ -55,7 +55,7 @@ def test_stage_matches_fit_radial_on_the_same_split(fast):
     from ace_jax.fit.pipeline.radials import learn_radials
     from ace_jax.fit.radial_learn import fit_radial
     from ace_jax.fit.radial_model import rnl_degrees, to_analytic
-    cfg = _cfg(learn_radial=True, radial_steps=3, radial_lam_grid=(0.0,), radial_val_frac=0.25)
+    cfg = _cfg(learn_radial=True, radial_steps=1, radial_lam_grid=(0.0,), radial_val_frac=0.25)   # the wiring, not the learning
     d = _data(cfg)
     d2, rr = learn_radials(cfg, d, log=QUIET)
     # reference: the driver's construction on the same split
@@ -70,7 +70,7 @@ def test_stage_matches_fit_radial_on_the_same_split(fast):
     ind = select_inducing(X, S, ds_fit.node_z, ds_fit.node_mask, 0, descriptor_scale(X, ds_fit.node_mask))
     prob = Problem(KernelSpec("cosine", True, gc.D), m, ind, gc,
                    jnp.asarray(prior_diagonal(d.z, d.meta, d.source)), default_prior(2.35))
-    W, info = fit_radial(prob, ds_fit, ds_val, m.rnl_Wnlq, lam_grid=(0.0,), steps=3, map_steps=20,
+    W, info = fit_radial(prob, ds_fit, ds_val, m.rnl_Wnlq, lam_grid=(0.0,), steps=1, map_steps=20,
                          rough_weights=1.0 / (1.0 + rnl_degrees(d.meta)) ** 2)
     assert (rr.n_fit, rr.n_val) == (len(fit_), nval)
     assert rr.info["selected"] == info["selected"]
