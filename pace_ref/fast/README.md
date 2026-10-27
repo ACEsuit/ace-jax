@@ -1,5 +1,8 @@
 # pace/kk prototype kernels
 
+These patches modify LAMMPS (GPL-2.0) and are distributed under GPL-2.0, not the repository's MIT
+licence (see `pace_ref/README.md`, Licences).
+
 Patches to LAMMPS develop ec02ed0's `src/KOKKOS/pair_pace_kokkos.{cpp,h}`, applied in order by
 `bench/scaling/envs/sulis-pacetab.sh gpufork` against the ML-PACE of ICAMS/lammps-user-pace#31 (which carries the
 CPU speed-ups, tabulated radials and `summed_neighbour_A`; the ML-PACE side is no longer kept here). They are a

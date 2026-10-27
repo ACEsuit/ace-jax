@@ -1,11 +1,20 @@
 """Pure-JAX ports of ML-PACE radial, core-repulsion and embedding functions.
 
-Source of truth: lammps-user-pace @ 99aa6e6, ML-PACE/ace-evaluator/
-  ace_radial.cpp          radbase 241, chebExpCos 294, chebPow 347, chebLinear 366,
-                          simplified_bessel 423, cutoff_func_poly 220, radcore 615, ZBL 653
-  ace_abstract_basis.cpp  Fexp 37, FexpShiftedScaled 67
-Values are checked against the C++ in tests/test_pace_radial.py.  Every branch
-not taken is evaluated on a safe argument (double-where), so gradients stay
+ML-PACE (lammps-user-pace @ 99aa6e6, GPL) defines these functions for `.yace` files, and its C++ is
+the reference tests/test_pace_radial.py checks values against:
+  ML-PACE/ace-evaluator/ace_radial.cpp   radbase 241, chebExpCos 294, chebPow 347, chebLinear 366,
+                                         simplified_bessel 423, cutoff_func_poly 220, radcore 615, ZBL 653
+  ML-PACE/ace-evaluator/ace_abstract_basis.cpp   Fexp 37, FexpShiftedScaled 67
+Published sources, where there are ones:
+- SBessel: the simplified spherical Bessel basis of Kocer, Mason and Erturk, J. Chem. Phys. 150,
+  154102 (2019), Sec. II (f_n and the e_n, d_n, g_n recursion); evaluated here by a sin/cos rotation
+  recurrence (`_sbessel`) or a constant matrix (`sbessel_matrix`), not ML-PACE's per-n sinc calls.
+- ZBL: the universal screening function of Ziegler, Biersack and Littmark, "The Stopping and Range of
+  Ions in Matter" (1985), with the switching function S(r) of LAMMPS `pair_style lj/gromacs`; the
+  factor 1/2 and the outer `cutoff_func_poly` are ML-PACE's.
+The others (ChebExpCos, ChebPow, ChebLinear, cutoff_func_poly, radcore, Fexp, FexpShiftedScaled, the
+inner-cutoff conventions and their numerical thresholds) follow ML-PACE's implementation.
+Every branch not taken is evaluated on a safe argument (double-where), so gradients stay
 finite at r >= rcut, x = 0 and m = 1.
 """
 import math
