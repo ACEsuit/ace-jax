@@ -203,6 +203,29 @@ def ard_pipe_cfg(**kw):
     return FitConfig(**{**base, **kw})
 
 
+def ard_gp_pipe_cfg(**kw):
+    """A uq='ard-gp' GP-arm FitConfig (8 inducing points per species, aniso force shape)."""
+    from ace_jax.fit.pipeline import FitConfig
+    base = dict(model=str(FIXTURE_DIR / "si_fitted.npz"), energy_key="dft_energy", force_key="dft_force",
+                virial_key="dft_virial", ntrain=30, ntest=8, batch=4, r0=2.35, arm="gp", m_per_species=8,
+                uq="ard-gp", opt="lbfgs", rungs=("map",), map_steps=5, predict_train=False,
+                ard_val_frac=0.4, ard_n_min=50, ard_force_shape="aniso")
+    return FitConfig(**{**base, **kw})
+
+
+@pytest.fixture(scope="session")
+def ard_gp_fit(tmp_path_factory):
+    """One ard-gp pipeline fit of ard_gp_pipe_cfg(), written as `aj fit` writes it: (out dir, FitData,
+    FitResult), shared by the ard-gp stage, calculator and CLI eval tests."""
+    from ace_jax.fit.pipeline import fit, load_fit_data, write_outputs
+    out = tmp_path_factory.mktemp("ardgp")
+    cfg = ard_gp_pipe_cfg().validate()
+    d = load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz"))
+    res = fit(cfg, d, log=lambda *a: None)
+    write_outputs(res, out, layout=("run", "cli"), log=lambda *a: None)
+    return out, d, res
+
+
 @pytest.fixture(scope="module")
 def ard_map():
     """load_fit_data + build_problem + fit_map for ard_pipe_cfg(): identical for every ARD stage

@@ -312,38 +312,12 @@ def test_default_ladder_is_map_only():
     assert tuple(FitConfig(model="m.npz").rungs) == ("map",)
 
 
-def test_pops_fit_with_host_rows_matches_device_rows():
-    """FitConfig.pops_rows="host" (rows evaluated once, cached in host RAM) gives the
-    same POPS fit as "device" (rows re-evaluated per pass), to the Gram's summation
-    order."""
-    from conftest import FIXTURE_DIR
-    from ace_jax.fit.pipeline import FitConfig, fit, load_fit_data
-    base = dict(model=str(FIXTURE_DIR / "si_fitted.npz"), energy_key="dft_energy", force_key="dft_force",
-                virial_key="dft_virial", ntrain=16, ntest=6, batch=4, r0=2.35, arm="linear", uq="pops",
-                opt="lbfgs", rungs=("map",), map_steps=5, predict_train=False,
-                pops_ridge_grid=(1e-3, 1e-5, 1e-7),
-                # unpolished: the converged MAP has a smaller sigma_E, so its ridge-1e-7 POPS solve is
-                # ill-conditioned enough that host vs device summation order moves F_mean ~2x past
-                # this test's tolerance; the rows paths, not the MAP, are under test
-                map_polish="off")
-    out = {}
-    for rows in ("device", "host"):
-        cfg = FitConfig(**base, pops_rows=rows).validate()
-        out[rows] = fit(cfg, load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz")),
-                        log=lambda *a: None).preds
-    assert out["host"].pops["ridge"] == out["device"].pops["ridge"]
-    a, b = out["device"].arrays["test/map"], out["host"].arrays["test/map"]
-    # agree to the problem's solver accuracy (the BLR mean is 1e-5 from QR here)
-    for k in ("E_mean", "F_mean", "E_var", "F_var", "V_var"):
-        assert np.allclose(a[k], b[k], rtol=1e-5, atol=1e-7), k
-    with pytest.raises(ValueError, match="pops_rows"):
-        FitConfig(**base, pops_rows="gpu").validate()
-
-
 def test_pops_host_rows_match_device_rows_at_the_default_converged_map():
-    """The same comparison on the default (polished) MAP.  Its smaller sigma_E leaves the ridge-1e-7
-    POPS solve worse conditioned, and host vs device summation order then moves F_mean ~2x past the
-    unpolished test's 1e-5 / 1e-7 (measured: 1.9x): 5x looser here, still far below any physics."""
+    """FitConfig.pops_rows="host" (rows evaluated once, cached in host RAM) gives the same POPS fit as
+    "device" (rows re-evaluated per pass), to the Gram's summation order.  On the default (polished)
+    MAP the small sigma_E leaves the ridge-1e-7 POPS solve badly conditioned, so host vs device
+    summation order moves F_mean to ~1e-5 (measured: 1.9x an unpolished MAP's): 5e-5 / 5e-7 here,
+    still far below any physics.  The unit-level equality is test_gp_pops_paper's."""
     from conftest import FIXTURE_DIR
     from ace_jax.fit.pipeline import FitConfig, fit, load_fit_data
     base = dict(model=str(FIXTURE_DIR / "si_fitted.npz"), energy_key="dft_energy", force_key="dft_force",
@@ -356,9 +330,12 @@ def test_pops_host_rows_match_device_rows_at_the_default_converged_map():
         res = fit(cfg, load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz")), log=lambda *a: None)
         assert res.map.convergence["converged"]
         out[rows] = res.preds
+    assert out["host"].pops["ridge"] == out["device"].pops["ridge"]
     a, b = out["device"].arrays["test/map"], out["host"].arrays["test/map"]
     for k in ("E_mean", "F_mean", "E_var", "F_var", "V_var"):
         assert np.allclose(a[k], b[k], rtol=5e-5, atol=5e-7), k
+    with pytest.raises(ValueError, match="pops_rows"):
+        FitConfig(**base, pops_rows="gpu").validate()
 
 
 def test_fitting_a_yace_model_raises_a_clear_error():
