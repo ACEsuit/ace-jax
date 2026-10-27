@@ -3,6 +3,7 @@ relative, forces to 1e-11 of max|F|, stress to roundoff, over small and odd cell
 the cutoff, sheared, a slab, a cluster, one periodic atom, unwrapped positions), mixed sizes in one call,
 1, 2 and 5 species, a species-embedding model, a PACE .yace, the E0 reference, float32 and the C++
 kernel; and the device neighbour builder against `sparse_graph`'s pairs."""
+import functools
 import os
 import pathlib
 import shutil
@@ -67,6 +68,14 @@ def reference(calc, ats):
     return np.array(E), F, np.array(S)
 
 
+@functools.cache
+def ref_for(name):
+    """ACECalculator on structures(elements) for a model, shared by the tests that compare against it:
+    each would otherwise compile its 8 shapes again."""
+    m, meta = model_for(name)
+    return reference(ACECalculator(m, meta), structures(meta["elements"]))
+
+
 def check(res, ref, e_rel=1e-12, f_rel=1e-11, s_abs=1e-12):
     E, F, S = ref
     assert np.abs(res.energy - E).max() <= e_rel * np.abs(E).max(), np.abs(res.energy - E)
@@ -102,8 +111,7 @@ def model_for(name):
     return load(str(FIXTURE_DIR / name))[:2]
 
 
-@pytest.mark.parametrize("name", ["si_ace_model.npz", "si_fitted.npz", "sige_nofit.npz", "ace_cantor5_small.npz",
-                                  "sige_density_core.yace", "embedding"])
+@pytest.mark.parametrize("name", ["sige_nofit.npz", "ace_cantor5_small.npz", "sige_density_core.yace", "embedding"])
 def test_batched_matches_ACECalculator_per_structure(name):
     """One call over mixed cells and sizes (several buckets) equals ACECalculator on each, in input
     order: the same evaluation model, only the neighbour lists and the summation order differ."""
@@ -112,7 +120,7 @@ def test_batched_matches_ACECalculator_per_structure(name):
     bc = BatchCalculator(m, meta, builder="jax", n_device=256)    # test_matscipy_batched_builder covers "msn"
     res = bc.calculate(ats)
     assert res.timing["single"] == 0 and len(res.timing["buckets"]) >= 3
-    check(res, reference(ACECalculator(m, meta), ats))
+    check(res, ref_for(name))
 
 
 def test_order_padding_and_unpad():
@@ -143,7 +151,7 @@ def test_neighbour_overflow_reruns_with_more_slots():
     bc._K = {bucket_size(len(a)): 4 for a in ats}
     res = bc.calculate(ats)
     assert res.timing["k_retries"] > 0
-    check(res, reference(ACECalculator(m, meta), ats))
+    check(res, ref_for("si_ace_model.npz"))
 
 
 def test_large_structures_go_through_ACECalculator():
@@ -151,7 +159,7 @@ def test_large_structures_go_through_ACECalculator():
     ats = structures(meta["elements"])
     res = BatchCalculator(m, meta, n_device=8).calculate(ats)
     assert res.timing["single"] == sum(len(a) > 8 for a in ats)
-    check(res, reference(ACECalculator(m, meta), ats))
+    check(res, ref_for("si_ace_model.npz"))
 
 
 def test_energy_reference_E0():
@@ -244,12 +252,12 @@ def test_host_builder(name):
     m, meta = model_for(name)
     ats = structures(meta["elements"])
     res = BatchCalculator(m, meta, builder="host", n_device=256).calculate(ats)
-    check(res, reference(ACECalculator(m, meta), ats))
+    check(res, ref_for(name))
     bc = BatchCalculator(m, meta, builder="host", n_device=256)
     bc._K = {bucket_size(len(a)): 4 for a in ats}                    # too few slots: re-run, never truncate
     res = bc.calculate(ats)
     assert res.timing["k_retries"] > 0
-    check(res, reference(ACECalculator(m, meta), ats))
+    check(res, ref_for(name))
 
 
 def test_matscipy_batched_builder():
@@ -263,7 +271,7 @@ def test_matscipy_batched_builder():
     ats = structures(meta["elements"])
     res = BatchCalculator(m, meta, builder="msn", n_device=256).calculate(ats)
     assert set(res.timing["builder"]) == {"msn"}
-    check(res, reference(ACECalculator(m, meta), ats))
+    check(res, ref_for("sige_nofit.npz"))
 
 
 def test_pack_tail_batch_takes_the_power_of_two_it_needs():

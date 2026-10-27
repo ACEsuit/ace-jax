@@ -113,25 +113,32 @@ def hybrid():
     return prob, ds, theta
 
 
-@pytest.mark.parametrize("nodes", [32, 8])
-def test_hybrid_statistics_and_gradient_chunked_equal(hybrid, monkeypatch, nodes):
-    """sufficient_statistics (linear + residual block, fused per chunk) and its theta-gradient;
-    nodes=8 runs the residual sub-scan below cfg.node_chunk (gcd sub-chunks)."""
+def _hybrid_stats_and_grad(prob, ds, theta):
     from ace_jax.fit.hypers import from_array, to_array
     from ace_jax.fit.stats import sufficient_statistics
-    prob, ds, theta = hybrid
     probe = jax.random.normal(jax.random.PRNGKey(0), (prob.cfg.len_basis + prob.ind.XM.shape[0],))
 
-    def run():
-        def f(a):
-            st = sufficient_statistics(from_array(a), prob.spec, prob.model, prob.ind, prob.cfg, ds)
-            return probe @ st.G_F @ probe + probe @ st.b_E + probe @ st.G_V @ probe, st
-        (v, st), gr = jax.jit(jax.value_and_grad(f, has_aux=True))(to_array(theta))
-        return st, gr
+    def f(a):
+        st = sufficient_statistics(from_array(a), prob.spec, prob.model, prob.ind, prob.cfg, ds)
+        return probe @ st.G_F @ probe + probe @ st.b_E + probe @ st.G_V @ probe, st
+    (v, st), gr = jax.jit(jax.value_and_grad(f, has_aux=True))(to_array(theta))
+    return st, gr
 
-    ref_st, ref_g = run()
+
+@pytest.fixture(scope="module")
+def hybrid_unchunked(hybrid):
+    """The unchunked reference, once for both chunk sizes."""
+    return _hybrid_stats_and_grad(*hybrid)
+
+
+@pytest.mark.parametrize("nodes", [32, 8])
+def test_hybrid_statistics_and_gradient_chunked_equal(hybrid, hybrid_unchunked, monkeypatch, nodes):
+    """sufficient_statistics (linear + residual block, fused per chunk) and its theta-gradient;
+    nodes=8 runs the residual sub-scan below cfg.node_chunk (gcd sub-chunks)."""
+    prob, ds, theta = hybrid
+    ref_st, ref_g = hybrid_unchunked
     _force_chunk(monkeypatch, prob.model, prob.cfg, ds, nodes=nodes)
-    st, gr = run()
+    st, gr = _hybrid_stats_and_grad(prob, ds, theta)
     for k in ref_st._fields:
         _close(getattr(st, k), getattr(ref_st, k), k)
     assert np.all(np.isfinite(np.asarray(gr)))
