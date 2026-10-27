@@ -28,11 +28,11 @@ Cheapest model reaching the target, µs/atom-step, float64, LAMMPS:
 | model | parameters | force RMSE (eV/Å) | QoI error | A100 | CPU node |
 |---|---|---|---|---|---|
 | linear ACE o4d20, ace-jax (lammps-jax, XLA program) | 5,476 | 0.0816 | 0.41 | 3.12 | 50.5 |
-| linear ACE o4d20, ace-jax + cuequivariance (lammps-jax) | 5,476 | 0.0816 | 0.41 | 1.61 | – |
+| linear ACE o4d20, ace-jax + cuequivariance (lammps-jax; removed) | 5,476 | 0.0816 | 0.41 | 1.61 | – |
 | linear ACE o4d20, ML-PACE (tabulated radials) | 5,476 | 0.0816 | 0.41 | 4.13 | 5.31 |
 | linear ACE o4d20, patched ML-PACE (proposed upstream) | 5,476 | 0.0816 | 0.41 | 2.42 | 2.89 |
 | linear ACE o4d20, ACEpotentials.jl (trim library) | 5,476 | 0.0816 | 0.41 | – | 10.8 |
-| linear ACE o4d20, ace-jax C++ kernel (lammps-jax FFI) | 5,476 | 0.0816 | 0.41 | – | 3.29 |
+| linear ACE o4d20, ace-jax kernel (lammps-jax FFI; CUDA / C++) | 5,476 | 0.0816 | 0.41 | 1.23 | 3.29 |
 | MACE c16L0, Symmetrix | 31,152 | 0.0699 | < 0.5 | 1.93 | 2.36 |
 | MACE c16L0, Symmetrix-XL | 31,152 | 0.0699 | < 0.5 | 1.23 | 2.19 |
 | MACE c16L1, Symmetrix | 40,272 | 0.0579 | < 0.5 | 5.36 | 8.58 |
@@ -80,8 +80,35 @@ parameters than linear ACE (f800: 761 parameters, 0.081 eV/Å) but not the QoI t
   o4d16 and o4d20 match the spike's same-node runs (0.671 / 1.611 against the DAG's best row blocks 0.953 / 3.135;
   `bench/cueq_product/README.md` on exp/cueq-product). The o4d20 export took 26 min here against the spike's
   13 min (another node; the export compiles every kernel into the bundle's NVRTC cache). cueq beats patched
-  ML-PACE (2.42) at o4d20 by 1.5x. Headline preset: the cueq line, as the fastest linear ACE code on the A100 at
-  o4d20.
+  ML-PACE (2.42) at o4d20 by 1.5x. `aa_dag="cueq"` has since been removed: ace-jax's CUDA kernel (next) is faster at
+  every size, and the figure no longer draws the cueq line (`plot_cost.SKIP`; `sulis-gpu-cueq.jsonl` stays as data).
+- **ace-jax's CUDA kernel on the A100** (`eval/ace_ffi_gpu.cu`, `export_lammps(ffi=True)` on the GPU: `AceDirectGpu`, one
+  XLA FFI call per step, radials tabulated in r; job 2265011, gpu018, A100-PCIE-40GB, a shared node): the fastest linear
+  ACE code on the A100 at every size it was gated for, 2.0-3.2x patched ML-PACE (o4d12-o4d20) and 1.3x cueq at o4d20.
+  Kernel and XLA bundle (aa_dag auto) timed one after the other on the same node, µs/atom-step, 32,768 atoms, 1 rank:
+
+  | model | kernel f64 | XLA f64 | speed-up | kernel f32 | XLA f32 | speed-up |
+  |---|---|---|---|---|---|---|
+  | o3d8 | (gate) | 0.336 | – | (gate) | 0.221 | – |
+  | o3d10 | 0.045 | 0.324 | 7.2x | 0.039 | 0.199 | 5.1x |
+  | o3d12 | 0.064 | 0.389 | 6.1x | 0.055 | 0.252 | 4.6x |
+  | o4d12 | 0.080 | 0.422 | 5.3x | 0.070 | 0.282 | 4.0x |
+  | o4d14 | 0.142 | 0.648 | 4.6x | 0.116 | 0.410 | 3.5x |
+  | o4d16 | 0.286 | 0.983 | 3.4x | 0.231 | 0.658 | 2.9x |
+  | o4d20 | 1.233 | 3.595 | 2.9x | 1.071 | 2.491 | 2.3x |
+
+  Peak GPU memory per process 0.66-0.93 GB (XLA 0.80-1.59). Most rows up to o4d16 carry `not_plateau`: still
+  speeding up at 32,768 atoms, so the small models' speed-ups are lower bounds. float32 gains 1.14-1.24x over
+  float64 (the A100's float64 is half its float32 rate). The XLA column is 3-15% slower than the plotted
+  `acejax-auto` rows (o3d10 0.324 against 0.314, o4d20 3.60 against 3.12; a shared node), so the figure's
+  kernel-to-XLA gap is smaller than this table's (2.5x at o4d20).
+  **o3d8 fails the gate**: max dF 1.24e-9 against 1e-9 eV/Å (dE/atom 8.5e-13). The reference is the same-table
+  ACECalculator (`parity._tol_kw`), so this is not table accuracy: the cubic B-spline's derivative loses
+  ~eps|c|/h, and the same-table roundoff grows linearly with the interval count (o3d8, cell 1, lestrade: kernel
+  vs XLA on the GPU 3.6e-10 / 1.2e-9 / 4.2e-9 at 1000 / 4000 / 16000 intervals; XLA CPU vs XLA GPU 2.1e-10 /
+  9.9e-10 / 3.4e-9; analytic radials CPU vs GPU 7.7e-12). The C++ kernel's o3d8 passed at 8.6e-10. So the
+  1e-9 eV/Å gate sits at the tabulated form's roundoff floor for o3d8, and sizing the table finer (PR #127) would
+  not pass it.
 - **ace-jax's C++ kernel** (`ace_jax.eval.ffi`, `export_lammps(ffi=True)`: the lammps-jax CPU bundle with the XLA
   program replaced by one XLA FFI call per step, radials tabulated in r) brings ace-jax to ML-PACE's speed on the
   CPU: 10-23x faster than the XLA bundle, timed one after the other on the same node (job 2257991, node136;
@@ -227,8 +254,16 @@ parameters than linear ACE (f800: 761 parameters, 0.081 eV/Å) but not the QoI t
   export compiles every cueq kernel into the bundle's NVRTC cache); the three 64-atom gate cells and the three
   timed repeats run that bundle, with no N/8 plateau check. LAMMPS (the same lammps-jax 4a7f4fb plugin) replays
   the plan compiles through lammps-jax's `contrib/ffi-replay` shim (`run_lammps.bundle_env`). Rows
-  `sulis-gpu-cueq.jsonl`, gate mode `parity-lammps-cueq`; plotted as their own line (`plot_cost.FAM["ace_cueq"]`,
-  cost names `ACEcueq_<size>`).
+  `sulis-gpu-cueq.jsonl`, gate mode `parity-lammps-cueq`; its own line (`plot_cost.FAM["ace_cueq"]`, cost names
+  `ACEcueq_<size>`), no longer drawn (`plot_cost.SKIP`) since `aa_dag="cueq"` was removed.
+- ace-jax CUDA kernel: `envs/sulis-gpu-cudak.sbatch` (ace-jax feat/cuda-kernel 8e038dc; the same lammps-jax 4a7f4fb GPU
+  plugin; jax 0.11.2 cuda12): the kernel compiled in the job by the `CUDA/12.6.0` module's nvcc (`-O3 -arch=sm_80`;
+  the A100s' driver 560 has no CUDA 13) into the job's `ACEJAX_FFI_CACHE`, `LAMMPS_JAX_FFI_HANDLERS` from
+  `ffi.handlers(lib, gpu=True)`; env `sulis-gpu-cudak.json` (`ACEJAX_EXPORT_FFI`) for each size, then
+  `sulis-gpu-cudak-xla.json` on the same node, float64 and float32. The gate's reference is ACECalculator with the
+  same radial table (`parity._tol_kw`), matrix layout only. Rows: `sulis-gpu-cudak.jsonl` (rows marked `ffi`: the
+  `ace_ffi` line on the A100 row, cost names `ACEffi_<size>`, as the C++ kernel's on the CPU row) and
+  `sulis-gpu-cudak-xla.jsonl` (the same-node control, not plotted).
   Linear ACE run by ACEpotentials.jl: each `aj fit` model rebuilt as an ACEpotentials v0.10.2 `ace_model`
   (`bench/scaling/julia/build_trim_acejax.jl`: coefficients mapped through the AA basis, gated to 1e-10 against
   ace-jax before compiling), exported with `for_library=true` and compiled by `juliac --trim=safe` on a compute
@@ -283,7 +318,7 @@ python bench/si_qoi/make_cost.py --dtype float64 --source acejax-ace=sulis-gpu-a
     $R/sulis-gpu-ace-splined-v2.jsonl $R/sulis-gpu-v2.jsonl $R/sulis-gpu-mace_xl.jsonl \
     $R/sulis-gpu-ace_tab5.jsonl $R/sulis-gpu-ace_tabfork.jsonl $R/sulis-gpu-pace-dev.jsonl $R/sulis-gpu-nep.jsonl $R/sulis-gpu-acejax-auto.jsonl \
     $R/sulis-gpu-fp32-mixed.jsonl $R/sulis-gpu-fp32-dot-F32_F32_F32.jsonl $R/sulis-gpu-grace.jsonl $R/sulis-gpu-grace2l.jsonl \
-    $R/sulis-gpu-cueq.jsonl \
+    $R/sulis-gpu-cudak.jsonl \
     --allow nep-gpumd:mixed
 ROWS=(--row "A100 GPU, µs/atom-step|$RR/cost_sulis_gpu.json|$RR/cost_sulis_gpu.codes.json"
       --row "CPU node (128 cores), µs/atom-step|$RR/cost_sulis_cpu.json|$RR/cost_sulis_cpu.codes.json")

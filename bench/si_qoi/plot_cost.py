@@ -39,12 +39,13 @@ FAM = {  # family: (label, colour, marker, linestyle, filled, qoi model name pat
     "ace_tabfork": ("linear ACE, run by patched ML-PACE", "#2a78d6", "*", "--", False, "ACE_{s}"),
     # and by ACEpotentials.jl's LAMMPS export (bench/accuracy_cost/build_trim.py: the juliac --trim library, exact)
     "ace_trim":   ("linear ACE, run by ACEpotentials.jl", "#2a78d6", "X", "-.", True, "ACE_{s}"),
-    # and by ace-jax's C++ FFI kernel in the lammps-jax bundle (ace_jax.eval.ffi; CPU only): the speed-up over the
-    # XLA program of the linear ACE line itself
-    "ace_ffi":    ("linear ACE, ace-jax C++ kernel (FFI)", "#2a78d6", "<", "--", True, "ACE_{s}"),
-    # and by ace-jax with NVIDIA cuequivariance as the product basis (export_lammps(aa_dag="cueq"); A100 only): the
-    # same blue (no new colour to validate), a right triangle; its dash-dot is the CPU-only trim line's, never on
-    # the same axes, and no other blue line of the A100 row has it
+    # and by ace-jax's kernel in the lammps-jax bundle (ace_jax.eval.ffi; export_lammps(ffi=True)): the C++ kernel on
+    # the CPU row, the CUDA kernel (ace_ffi_gpu.cu) on the A100 row -- one line, rows marked `ffi`, each row's cost
+    # file its own backend's
+    "ace_ffi":    ("linear ACE, ace-jax kernel (C++ / CUDA, FFI)", "#2a78d6", "<", "--", True, "ACE_{s}"),
+    # and by ace-jax with NVIDIA cuequivariance as the product basis (export_lammps(aa_dag="cueq"); A100 only), removed
+    # with aa_dag="cueq": the CUDA kernel (ace_ffi) replaced it, and the cost files no longer take its rows
+    # (sulis-gpu-cueq.jsonl stays as data).  The same blue, a right triangle, dash-dot
     "ace_cueq":   ("linear ACE, ace-jax + cueq", "#2a78d6", ">", "-.", True, "ACE_{s}"),
     # the order-4 ladder in reduced precision (docs/dev/fp32-results.md): the same fits, their own cost --
     # ace-jax float32 bundles, and patched pace/kk (PACE_KK_RHOW=3) in a KOKKOS_PREC=mixed LAMMPS.  Each pairs with its float64 line:
@@ -174,7 +175,7 @@ def seed_average(pts):
             p[key], p[key + "_lo"], p[key + "_hi"] = float(np.mean(v)), float(min(v)), float(max(v))
         out.append(p)
     return out
-SKIP = set()                                     # families left out of this figure (main: the wL ladder)
+SKIP = {"ace_cueq"}                              # families left out of this figure (main: the wL ladder; cueq: removed)
 
 
 RUNS = pathlib.Path("/storage/eng/essswb/projects/ace-jax/runs/accuracy_cost")
@@ -445,11 +446,9 @@ def main():
                 "pace/kk with prototype ComputeRho/ComputeWeights kernels (pace_ref/fast) on the GPU.\n"
                 "Linear ACE run by ACEpotentials.jl (CPU only): each fit as an ACEpotentials model, exported and compiled "
                 "with juliac --trim (ACEpotentials PR 309, v0.10.2), in LAMMPS via its pair_style ace plugin.\n"
-                "ace-jax C++ kernel (CPU only): the same bundles with the XLA program replaced by one XLA FFI call "
-                "(ace_jax.eval.ffi; radials tabulated in r), 128x1.\n"
+                "ace-jax kernel: the same bundles with the XLA program replaced by one XLA FFI call "
+                "(ace_jax.eval.ffi; radials tabulated in r): C++ on the CPU (128x1), CUDA on the A100.\n"
                 "NEP: trained by GPUMD; on the CPU LAMMPS pair_style nep (NEP_CPU, float64); on the GPU GPUMD's own MD code, mixed precision (labelled).\n"
-                + ("ace-jax + cueq (A100 only): the same fits in lammps-jax bundles with NVIDIA cuequivariance as the product basis "
-                   "(aa_dag='cueq'; its kernels replayed in LAMMPS from the shipped NVRTC cache).\n" if "ace_cueq" not in SKIP else "")
                 if any("CPU" in r[0] for r in rows) else "")
     bottom = 0
     if not a.no_note:
