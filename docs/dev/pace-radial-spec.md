@@ -9,12 +9,10 @@ published, the definition here is stated as the observed behaviour, marked
 ## Why
 
 ML-PACE (`lammps-user-pace`) is GPL; the ace-jax package is MIT. The first version of
-`pace_radial.py` followed ML-PACE's C++ function by function. ICAMS (R. Drautz,
-2026-10-28) advised that code written to match the published ideas and the results, not
-derived from the C++, is our own, and pointed to the definitions in Bochkarev et al.
-This specification is that route: the equations come from the papers, and ML-PACE
-enters only as reference output (`fixtures/pace/unit_ref.npz` and the `.yace` parity
-fixtures), which is data. `pace_ref/README.md` covers the licences of the reference
+`pace_radial.py` followed ML-PACE's C++ function by function. This version is written to
+match the published ideas and the results, not derived from the C++: the equations come
+from the papers, and ML-PACE enters only as reference output
+(`fixtures/pace/unit_ref.npz` and the `.yace` parity fixtures), which is data. `pace_ref/README.md` covers the licences of the reference
 tools themselves.
 
 ## Sources
