@@ -1,8 +1,9 @@
 """PACE C-tilde potential (pacemaker `.yace`) as an Equinox module.
 
-Mirrors ML-PACE `ACECTildeEvaluator::compute_atom` (ace_evaluator.cpp:146-536,
-lammps-user-pace @ 99aa6e6) with analytic radials instead of its spline tables.
-Neighbour species enter PACE's A as an explicit channel; here edges stay narrow
+The C-tilde form of Bochkarev et al., Phys. Rev. Materials 6, 013804 (2022): densities
+rho_p = sum c-tilde A-products (Eq. B6), the energy F(rho) f_cut(rho_core) + rho_core (Eq. C13;
+the ZBL switch by the nearest neighbour's distance is docs/dev/pace-radial-spec.md 8), with
+analytic radials (`pace_radial`, from that spec) instead of spline tables.  Neighbour species enter PACE's A as an explicit channel; here edges stay narrow
 and are pooled by (node, neighbour species) -- segment id node*NZ + zj -- so per-
 edge work does not grow with the number of elements.  See docs/dev/pace-yace-spec.md.
 
@@ -219,7 +220,7 @@ class PACEModel(EdgeSiteModel):
 
     def _energy_tail(self, rho, cr, d, dcin, segment_ids, n_nodes, node_z):
         """Everything after rho (n, P): embedding, the core-repulsion switch (ZBL
-        by the nearest neighbour's distance, else by rho_core), and E0."""
+        by the nearest neighbour's distance, else by rho_core: pace-radial-spec.md 8), and E0."""
         EF = self._embedding(rho, node_z)
         rho_core = jax.ops.segment_sum(cr, segment_ids, num_segments=n_nodes)
         if self.inner_cutoff_type == "zbl":

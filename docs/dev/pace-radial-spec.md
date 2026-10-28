@@ -46,6 +46,7 @@ tools themselves.
 | `fexp_shifted_scaled` | [SI] 22 (m = ½) | general m: derived here (§7.2) |
 | `fexp` | none published | matched to ML-PACE output (§7.1) |
 | `hermite_table` | cubic Hermite interpolation | none |
+| site energy | [PRM] C13 | `zbl` regime switch (§8) |
 
 ## 1. Notation
 
@@ -225,7 +226,25 @@ The general-m form, **derived here** and matched to ML-PACE output, is
 [SI] says this form gives F′(0) = 1. It does not: F′(0) = m c^{m−1}(1 − c) + d, which
 is 1.25 at m = ½. The implementation follows the equation, not that sentence.
 
-## 8. Tests
+## 8. Site energy — `PACEModel._energy_tail`
+
+The energy assembly is in `pace_model.py`, not in `pace_radial.py`. It uses §2, §5–§7.
+
+- `density` and `distance` regimes, [PRM] C13, with ρ_core = Σ_j φ_core(r_ij) (C11) and
+  the polynomial f of §2 on ρ_core:
+
+      E_i = Σ_p w_p F_p(ρ_p) · f(ρ_core; ρ_c, Δ_c) + ρ_core + E0.
+
+- `zbl` regime, **matched to ML-PACE output**: the switch uses the nearest neighbour.
+  Let j* minimise r_ij − (r_in − Δ_in) over the bonds of atom i, with that bond's r_in
+  and Δ_in, and let s = r_ij* − (r_in − Δ_in). Then
+
+      f = f(Δ_in − s; Δ_in, Δ_in),   E_i = Σ_p w_p F_p(ρ_p) · f + ρ_zbl (1 − f) + E0,
+
+  with ρ_zbl = Σ_j φ_zbl(r_ij) (§6). f = 1 for r_ij* ≥ r_in and f = 0 for
+  r_ij* ≤ r_in − Δ_in. An atom with no neighbours has f = 1.
+
+## 9. Tests
 
 - `tests/test_pace_radial.py`: every function and regime against
   `fixtures/pace/unit_ref.npz` (ML-PACE output, `pace_ref/unit_ref.cpp`) to ≤ 1e-12
