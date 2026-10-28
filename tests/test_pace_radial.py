@@ -32,8 +32,13 @@ def test_zbl_cut_in_quirk(ref):
 
 @pytest.mark.parametrize("inner", ["density", "distance"])
 def test_radcore(ref, inner):
-    c = pr.radcore(jnp.asarray(ref["r"]), 3.0, 0.7, 5.0, 1.2, 0.4, inner)
-    np.testing.assert_allclose(c, ref[f"cr_{inner}"], rtol=1e-12, atol=1e-13)
+    """On the support r < rc only: beyond it ML-PACE's bare function lets the cosine envelope rise
+    again (~1e-12 here), and the spec (docs/dev/pace-radial-spec.md 5) defines it as zero, as
+    `PACEModel` masks those edges anyway."""
+    r = ref["r"]
+    c = np.asarray(pr.radcore(jnp.asarray(r), 3.0, 0.7, 5.0, 1.2, 0.4, inner))
+    np.testing.assert_allclose(c[r < 5.0], ref[f"cr_{inner}"][r < 5.0], rtol=1e-12, atol=1e-13)
+    assert np.all(c[r >= 5.0] == 0)
 
 
 def test_zbl(ref):
