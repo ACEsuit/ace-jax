@@ -84,7 +84,7 @@ def row_rounding_check(cfg, d, b, obj, mf, eps=ROW_EPS, seed=0, log=print):
     else {"eps", "verdict", "max_rmse_change", "dtheta",
     "quantities": {q: rmse_change, change_over_rmse, change_over_posterior_std}}; warns when unstable."""
     from .hypers import from_array, log_prior, to_array
-    from .objective import log_marginal_likelihood_qr, posterior_from_qr
+    from .objective import hoist, jit_lik, log_marginal_likelihood_qr, posterior_from_qr
     from .paramset import tied_likelihood
     from .pipeline.mapfit import fit_map
     from .pipeline.objective import Objective
@@ -95,9 +95,9 @@ def row_rounding_check(cfg, d, b, obj, mf, eps=ROW_EPS, seed=0, log=print):
     qs_p = perturb(qs, eps, seed, n_cols=prob.cfg.len_readout)
     tied = obj.tied
     free = None if tied is None else ~tied
-    lml = jax.jit(lambda a: log_marginal_likelihood_qr(from_array(a), qs_p, prob))
+    lml = hoist(jax.jit(lambda a, q: log_marginal_likelihood_qr(from_array(a), q, prob)), qs_p)
     lik = tied_likelihood(lml) if tied is not None else lml
-    vg = jax.jit(jax.value_and_grad(lambda a: lik(a) + log_prior(from_array(a), prob.prior, free)))
+    vg = jit_lik(lik, lambda L, a: jax.value_and_grad(lambda x: L(x) + log_prior(from_array(x), prob.prior, free))(a))
     obj_p = Objective(lik, vg, None, None, obj.prior_mu, {}, None, tied)
     cfg_p = dataclasses.replace(cfg, init=dict(mf.theta._asdict()), map_restarts=1, strict=False, map_polish="off")
     mf_p = fit_map(cfg_p, d, b, obj_p, log=lambda *a, **k: None)

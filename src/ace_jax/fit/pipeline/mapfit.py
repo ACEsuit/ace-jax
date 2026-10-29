@@ -9,6 +9,7 @@ import numpy as np
 from ..hypers import Hypers, from_array, log_prior, to_array
 from ..ladder import run_map
 from ..multistart import lbfgs_map, multistart_map, prior_starts
+from ..objective import hoist, jit_lik
 from ..newton import _newton_step, newton_polish
 from ..paramset import SHARED_NOISE, tie_noise
 from ..progress import emit
@@ -85,7 +86,7 @@ class _HVPLogPosterior:
 
     def __init__(self, vg_host, lo, hi, logpost, prior_only=None, logprior=None):
         self.vg, self.lo, self.hi, self.n_eval, self.n_hvp = vg_host, lo, hi, 0, 0
-        self._hvp = jax.jit(lambda a, v: jax.jvp(jax.grad(logpost), (a,), (v,))[1])
+        self._hvp = jit_lik(logpost, lambda L, a, v: jax.jvp(jax.grad(L), (a,), (v,))[1])
         self.prior_only = None if prior_only is None or logprior is None else np.asarray(prior_only, bool)
         self._phvp = None if self.prior_only is None else \
             jax.jit(lambda a, v: jax.jvp(jax.grad(logprior), (a,), (v,))[1])
@@ -235,7 +236,9 @@ def fit_map(cfg, d, b, obj, log=print):
     tied = getattr(obj, "tied", None)               # shared noise: log_sigma_E/V copy log_sigma_F
     free = None if tied is None else ~tied
     logprior = lambda a: log_prior(from_array(a), prob.prior, free)                  # noqa: E731
-    logpost = lambda a: obj.lik(a) + logprior(a)                                     # noqa: E731
+    lik = obj.lik
+    logpost = (hoist(lambda a, c: lik.pure(a, c) + logprior(a), lik.consts) if hasattr(lik, "pure")
+               else lambda a: lik(a) + logprior(a))
     prior_only = KERNEL if cfg.arm != "gp" else None
     hvp_ev = lambda: _HVPLogPosterior(vg_host, lo, hi, logpost, prior_only, logprior)  # noqa: E731
     if cfg.opt == "adam":
