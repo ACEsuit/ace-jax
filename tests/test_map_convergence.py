@@ -4,6 +4,7 @@ The CLI's old default (Adam, 500 steps, lr 0.02 decaying) moves each log-hyperpa
 ~5 units from the prior mean; on GAP-18 Si the optimum is ~8 units away in log sigma_E, and the
 shipped MAP sat about 1e7 nats below it (-1.04e7 against +1.92e5) with no warning.  These tests pin the default to a converged MAP.
 """
+import dataclasses
 import warnings
 
 import jax
@@ -227,3 +228,24 @@ def test_linear_kernel_columns_are_the_hyperprior_alone():
     assert np.array_equal(H, Hc)
     assert full.n_hvp == 10 and cheap.n_hvp == 4
     assert np.all(H[KERNEL][:, ~KERNEL] == 0) and np.all(np.diag(H)[KERNEL] < 0)
+
+
+def test_qr_statistics_are_arguments_not_constants():
+    """The MAP's compiled LML, gradient and Hessian-vector product take the QR statistics as arguments.
+    Captured, they were embedded in the executable as HLO constants: a second copy (43 GB at L = 42,324),
+    and past 2^32 elements (R_F of an L = 71,440 basis) a lowering error ("Expected 5104245136 elements in
+    LiteralProto repeated field, has 809277840")."""
+    from ace_jax.eval import highest_precision
+    from ace_jax.fit.pipeline.mapfit import fit_map
+    old = jax.config.jax_captured_constants_warn_bytes
+    with highest_precision(), warnings.catch_warnings():
+        warnings.filterwarnings("error", message="A large amount of constants")
+        cfg, d, b, obj0 = _setup()                       # built with the default threshold: obj0 only sizes R
+        jax.config.update("jax_captured_constants_warn_bytes", int(obj0.lik.qr_stats.R_F.nbytes) // 2)
+        try:
+            jax.clear_caches()
+            from ace_jax.fit.pipeline.objective import make_objective
+            obj = make_objective(cfg, d, b)
+            fit_map(dataclasses.replace(cfg, map_polish="on"), d, b, obj, **QUIET)
+        finally:
+            jax.config.update("jax_captured_constants_warn_bytes", old)

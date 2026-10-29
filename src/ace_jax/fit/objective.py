@@ -189,6 +189,28 @@ def _sigma_type_decode(a, n_hypers, n_types):
     return theta, log_ratios
 
 
+def hoist(pure, consts):
+    """pure(a, consts) as a function of a, carrying (pure, consts) so that a jit tracing it (`jit_lik`)
+    takes consts as an argument.  A jit that closes over them instead embeds them in the executable as
+    HLO constants: a second copy of the QR statistics (43 GB at L = 42,324), and past 2^32 elements a
+    lowering error (R_F at L = 71,440: "Expected 5104245136 elements in LiteralProto repeated field").
+    A plain closure: a jitted PjitFunction cannot carry attributes."""
+    def f(a):
+        return pure(a, consts)
+    f.pure, f.consts = pure, consts
+    return f
+
+
+def jit_lik(lik, body):
+    """jax.jit(lambda *x: body(lik, *x)), with a `hoist`ed lik's statistics passed in rather than captured
+    (any other lik is captured as before).  The ladder rungs past MAP still close over lik."""
+    if not hasattr(lik, "pure"):
+        return jax.jit(lambda *x: body(lik, *x))
+    pure = lik.pure
+    jf = jax.jit(lambda c, *x: body(lambda a: pure(a, c), *x))
+    return lambda *x: jf(lik.consts, *x)
+
+
 def make_lml(prob, ds, mesh=None, cache_linear=True, n_types=1, n_free_ratios=0):
     """cache_linear: stream the theta-independent linear Gram G_BB once and
     recompute only the M residual columns per call (10x for a large basis;
@@ -221,10 +243,7 @@ def make_lml(prob, ds, mesh=None, cache_linear=True, n_types=1, n_free_ratios=0)
                                   row_dtype=getattr(prob, "row_dtype", "float64"))
         jax.block_until_ready(qs)
 
-        lml = jax.jit(lambda a: log_marginal_likelihood_qr(from_array(a), qs, prob))
-
-        def f(a):                  # a plain closure: a jitted PjitFunction cannot carry attributes
-            return lml(a)
+        f = hoist(jax.jit(lambda a, qs: log_marginal_likelihood_qr(from_array(a), qs, prob)), qs)
         f.qr_stats = qs            # the statistics the posterior must share with the LML
         return f
     if cache_linear and mesh is None:

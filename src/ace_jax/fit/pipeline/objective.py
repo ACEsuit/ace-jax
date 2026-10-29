@@ -7,7 +7,7 @@ import numpy as np
 from jax.sharding import Mesh
 
 from ..hypers import from_array, log_prior, to_array
-from ..objective import make_lml, make_log_density
+from ..objective import jit_lik, make_lml, make_log_density
 from ..stats import assemble_statistics, linear_statistics, residual_statistics
 
 
@@ -68,8 +68,8 @@ def make_objective(cfg, d, b):
             ds_fit = _pad_to_multiple(d.ds_train, cfg.devices) if mesh is not None else d.ds_train
             lik = tie(make_log_density(prob, ds_fit, cfg.objective, mesh=mesh).likelihood)
         jax.block_until_ready(lik(to_array(prob.prior.mu)))
-        logpost = jax.jit(lambda a: lik(a) + log_prior(from_array(a), prob.prior, free))
-        vg = jax.jit(jax.value_and_grad(logpost))
+        vg = jit_lik(lik, lambda L, a: jax.value_and_grad(
+            lambda x: L(x) + log_prior(from_array(x), prob.prior, free))(a))
         qs = getattr(lik, "qr_stats", None)
         if qs is not None:         # QR form: predictions share the LML's statistics; no second pass
             lin = qs.gram()        # ARD's joint refit takes the Gram form
