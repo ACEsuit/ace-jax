@@ -117,6 +117,14 @@ def _add_fit_args(p):
                    help="ARD force-uncertainty shape: sandwich (default) = delete-one-cluster PRESS jackknife "
                         "(misspecification-robust); kappa = the posterior A^-1 shape. Both get the "
                         "per-group scales")
+    p.add_argument("--ard-solver", choices=["auto", "qr", "cholesky"], default="auto",
+                   help="ard: factorisation of the ARD evidence and posterior -- qr (auto with --uq ard) factors the "
+                        "data rows, so the prior floor can sit decades lower than cholesky's (auto with --uq ard-gp)")
+    p.add_argument("--ard-cond-max", type=float, default=None,
+                   help="ard: the prior floor keeps cond(S) below this (default: 1e22 qr, 1e14 cholesky)")
+    p.add_argument("--ard-allow-degenerate", action="store_true",
+                   help="ard: write the posterior even when every ARD scale ends on the prior floor with the "
+                        "evidence pointing below it (by default the fit stops with an error)")
     p.add_argument("--ard-val-frac", type=float, default=0.2,
                    help="stratified train fraction held out to score the per-group force scales "
                         "(rms factor and conformal quantile) with the hold-out posterior")
@@ -214,7 +222,8 @@ def _fit_config(a):
         nuts_chains=a.nuts_chains, uq=a.uq, ard_mode=a.ard_mode, ard_variance=a.ard_variance, ard_val_frac=a.ard_val_frac,
         ard_force_shape=a.force_shape, ard_coverage=a.ard_coverage, ard_groups=a.ard_groups,
         ard_cluster_size=a.ard_cluster_size, ard_press=a.ard_press, ard_n_min=a.ard_n_min,
-        ard_transfer=a.ard_transfer, ard_support=not a.no_ard_support,
+        ard_transfer=a.ard_transfer, ard_support=not a.no_ard_support, ard_solver=a.ard_solver,
+        ard_cond_max=a.ard_cond_max, ard_allow_degenerate=a.ard_allow_degenerate,
         ard_support_features=a.ard_support_features,
         learn_radial=a.learn_radial, radial_n_q=a.radial_n_q, radial_steps=a.radial_steps,
         radial_reprofile_every=a.radial_reprofile_every, radial_opt=a.radial_opt, radial_cg_iters=a.radial_cg_iters,

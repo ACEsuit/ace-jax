@@ -73,7 +73,11 @@ class FitConfig:
     ard_mode: str = "joint"              # "joint" (sigma_q + ARD scales) | "sequential" (low memory for "ard" only: "ard-gp" holds ~4 Dt^2)
     ard_variance: str = "sandwich"       # "sandwich" (configuration-clustered, spec addendum) | "kappa"
     ard_val_frac: float = 0.2            # train hold-out for the force-variance scale (lam, kappa)
-    ard_cond_max: float = 1e14           # prior floor: cond(S) <= ard_cond_max
+    ard_cond_max: float | None = None    # prior floor: cond(S) <= ard_cond_max (None: the solver's, ard.default_cond_max:
+                                         # 1e14 cholesky, 1e22 qr)
+    ard_solver: str = "auto"             # "qr" | "cholesky" | "auto" (qr for uq ard, cholesky for ard-gp): the ARD
+                                         # evidence's factorisation (issue #136)
+    ard_allow_degenerate: bool = False   # serve a posterior whose every ARD scale ended on the floor (else raise)
     ard_laplace: bool = False            # Laplace diagnostic of the hyperparameters (ard.json)
     # schema-3 force sigma (docs/dev/specs/2026-09-30-conformal-force-sigma-design.md, rev 2)
     ard_force_shape: str = "aniso"       # "iso" | "aniso" (Mahalanobis scores, forces_q_mahal)
@@ -221,6 +225,14 @@ class FitConfig:
             raise ValueError(f"pops_rows must be 'auto', 'host' or 'device', got {self.pops_rows!r}")
         if self.predict_stats not in ("cached", "recompute", "auto"):
             raise ValueError(f"predict_stats must be 'cached', 'recompute' or 'auto', got {self.predict_stats!r}")
+        if self.ard_solver == "auto":
+            self.ard_solver = "cholesky" if self.uq == "ard-gp" else "qr"
+        if self.ard_solver not in ("qr", "cholesky"):
+            raise ValueError(f"ard_solver must be 'auto', 'qr' or 'cholesky', got {self.ard_solver!r}")
+        if self.ard_solver == "qr" and self.uq == "ard-gp":
+            raise ValueError("ard_solver 'qr' is the linear arm's (uq ard); uq ard-gp uses cholesky")
+        if self.ard_cond_max is not None and not self.ard_cond_max > 1:
+            raise ValueError(f"ard_cond_max must be > 1, got {self.ard_cond_max}")
         if self.lml_solver not in ("qr", "cholesky"):
             raise ValueError(f"lml_solver must be 'qr' or 'cholesky', got {self.lml_solver!r}")
         if self.row_precision not in ("float64", "float32"):
