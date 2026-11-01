@@ -6,6 +6,7 @@ name: coupling-wheels
 on:
   pull_request:
     paths:
+      - ".github/workflows/coupling-wheels.yml"   # a runner or step change is tested by the PR making it
       - "coupling/**"
       - "src/ace_jax/basis/**"
       - "src/ace_jax/fit/pipeline/data.py"
@@ -39,7 +40,7 @@ jobs:
         include:
           - { name: linux-x86_64,  runner: ubuntu-latest,    container: "quay.io/pypa/manylinux_2_28_x86_64",  plat: manylinux_2_28_x86_64 }
           - { name: linux-aarch64, runner: ubuntu-24.04-arm, container: "quay.io/pypa/manylinux_2_28_aarch64", plat: manylinux_2_28_aarch64 }
-          - { name: macos-arm64,   runner: macos-14,         container: "",                                     plat: macosx_11_0_arm64 }
+          - { name: macos-arm64,   runner: macos-15,         container: "",                                     plat: macosx_11_0_arm64 }
           - { name: windows-x86_64, runner: windows-latest,  container: "",                                     plat: win_amd64 }
     name: build ${{ matrix.name }}
     runs-on: ${{ matrix.runner }}
@@ -106,7 +107,7 @@ jobs:
         include:
           - { name: linux-x86_64,  runner: ubuntu-latest,    container: "quay.io/pypa/manylinux_2_28_x86_64",  py: /opt/python/cp311-cp311/bin/python }
           - { name: linux-aarch64, runner: ubuntu-24.04-arm, container: "quay.io/pypa/manylinux_2_28_aarch64", py: /opt/python/cp313-cp313/bin/python }
-          - { name: macos-arm64,   runner: macos-14,         container: "",                                     py: python3 }
+          - { name: macos-arm64,   runner: macos-15,         container: "",                                     py: python3 }
           - { name: windows-x86_64, runner: windows-latest,  container: "",                                     py: python }
     name: test wheel ${{ matrix.name }} (no Julia)
     runs-on: ${{ matrix.runner }}
