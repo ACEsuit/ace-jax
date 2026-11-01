@@ -282,6 +282,12 @@ def _qr_rows(model, cfg, batch):
     return out
 
 
+# the host path's rows with the model as an argument: one compile per (model structure, cfg, shapes).  Opt-in
+# (linear_qr_statistics(cached_rows=True), the ARD stage) -- the default per-call closure is left as it is, since
+# the bit-exact pipeline goldens were recorded with it (linear_qr_statistics' docstring)
+_qr_rows_jit = jax.jit(_qr_rows, static_argnames=("cfg",))
+
+
 @partial(jax.jit, static_argnames=("cfg", "merge_rows"))
 def _device_qr(model, cfg, ds, merge_rows):
     L = cfg.len_basis
@@ -319,7 +325,7 @@ def float32_rows(model, ds):
             None if ds is None else ds._replace(rij=jnp.asarray(ds.rij, jnp.float32)))
 
 
-def linear_qr_statistics(model, cfg, ds, merge_rows=None, host=None, row_dtype="float64"):
+def linear_qr_statistics(model, cfg, ds, merge_rows=None, host=None, row_dtype="float64", cached_rows=False):
     """linear_statistics in QR form (QRStats): one streaming pass over the same linear rows,
     folded into the per-quantity factors by batched updating QRs (QR_MERGE_ROWS_PER_L) -- on
     the host on the CPU backend (host_qr_stream says why), as a lax.scan on a device
@@ -333,7 +339,8 @@ def linear_qr_statistics(model, cfg, ds, merge_rows=None, host=None, row_dtype="
     the GPU spent its rounds compiling.  The host (CPU) path still jits its row function per
     call: taking the model as an argument there moves the bit-exact pipeline goldens (roundoff,
     amplified by the MAP: 3e-4 in run_linear_pops_auto's coefficients), so it is left for a
-    change that re-records them."""
+    change that re-records them.  cached_rows=True takes the module-level `_qr_rows_jit` there instead
+    (the ARD stage, which runs several passes per fit and must not recompile on a repeat)."""
     L = cfg.len_basis
     zeros = [(np.zeros((L, L)), np.zeros(L))] * 3
     if host is None:
@@ -352,7 +359,8 @@ def linear_qr_statistics(model, cfg, ds, merge_rows=None, host=None, row_dtype="
             return QRStats(*(f[0] for f in fac), *(f[1] for f in fac),
                            *(ex[i][k] for k in range(3) for i in range(3)), *(f[2] for f in fac))
     if host:
-        rows = jax.jit(lambda b: _qr_rows(model, cfg, b))
+        rows = ((lambda b: _qr_rows_jit(model, cfg, b)) if cached_rows
+                else jax.jit(lambda b: _qr_rows(model, cfg, b)))
         scal = {f"{k}_{q}": 0.0 for k in ("yy", "n", "logw") for q in "EFV"}
 
         def parts(batch):

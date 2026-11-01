@@ -292,19 +292,21 @@ def test_ard_stage_logs_warning_on_failed_or_bounded_fit(monkeypatch):
     assert any("ABNORMAL" in s for s in warns) and any("log_sigma_E" in s for s in warns)
 
 
+@pytest.mark.parametrize("solver", ["cholesky", "qr"])
 @pytest.mark.parametrize("e0", ["prefit", "lsq"])
-def test_ard_stage_reuses_cached_full_statistics(monkeypatch, e0):
+def test_ard_stage_reuses_cached_full_statistics(monkeypatch, e0, solver):
     """I1: the joint full refit reuses the objective's cached linear statistics (spec 3: "the cached
     M, b where available") -- same h, kappa and posterior as the recompute, one fewer statistics pass.
     e0='lsq' (joint E0, the cache then carries the E0 columns) checks the cache, the evidence at fixed h
-    and the refit endpoints as e0='prefit' does."""
+    and the refit endpoints as e0='prefit' does.  solver 'qr' (issue #136): the cache is the QR objective's
+    own QRStats (obj.lik.qr_stats), and the stage's passes are linear_qr_statistics calls."""
     from conftest import FIXTURE_DIR
     from ace_jax.fit import ard, stats
     from ace_jax.fit.pipeline import load_fit_data
     from ace_jax.fit.pipeline.mapfit import fit_map
     from ace_jax.fit.pipeline.objective import make_objective
     from ace_jax.fit.pipeline.problem import build_problem
-    cfg = _pipe_cfg(e0=e0).validate()
+    cfg = _pipe_cfg(e0=e0, ard_solver=solver).validate()
     d = load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz"))
     b = build_problem(cfg, d)
     calls = []
@@ -312,8 +314,13 @@ def test_ard_stage_reuses_cached_full_statistics(monkeypatch, e0):
     monkeypatch.setattr(stats, "linear_statistics", lambda *a, **k: (calls.append(1), real(*a, **k))[1])
     # the stage's passes go through its cached jit (a cache hit never re-enters linear_statistics)
     stage_calls = []
-    real_jit = ard._linear_statistics_jit
-    monkeypatch.setattr(ard, "_linear_statistics_jit", lambda *a, **k: (stage_calls.append(1), real_jit(*a, **k))[1])
+    if solver == "qr":
+        real_qr = stats.linear_qr_statistics
+        monkeypatch.setattr(stats, "linear_qr_statistics", lambda *a, **k: (stage_calls.append(1), real_qr(*a, **k))[1])
+    else:
+        real_jit = ard._linear_statistics_jit
+        monkeypatch.setattr(ard, "_linear_statistics_jit",
+                            lambda *a, **k: (stage_calls.append(1), real_jit(*a, **k))[1])
     with highest_precision():
         obj = make_objective(cfg, d, b)
         theta = fit_map(cfg, d, b, obj, log=lambda *a: None).theta
@@ -328,18 +335,23 @@ def test_ard_stage_reuses_cached_full_statistics(monkeypatch, e0):
                                        atol=1e-14 * np.abs(bv).max())
             assert float(getattr(obj.lin, f"yy_{'EFV'[q]}")) == pytest.approx(yy, rel=1e-13)
             assert float(getattr(obj.lin, f"n_{'EFV'[q]}")) == n
+        cache = obj.lik.qr_stats if solver == "qr" else obj.lin
+        if solver == "qr":
+            joint = ard.ard_statistics(theta, b.prob, d.ds_train, "joint", solver="qr")
         stage_calls.clear()
         ref = ard.run_ard_stage(cfg, d, b, theta, log=lambda *a: None)
         n_recompute = len(stage_calls)
         stage_calls.clear()
-        got = ard.run_ard_stage(cfg, d, b, theta, log=lambda *a: None, full_stats=obj.lin)
+        got = ard.run_ard_stage(cfg, d, b, theta, log=lambda *a: None, full_stats=cache)
         bc = ard.body_order_columns(d.meta, b.prob.cfg)
         ev_ref = ard.ARDEvidence(joint, ard.ard_gamma(b.prob), bc)
-        ev_got = ard.ARDEvidence(ard.joint_ard_stats(obj.lin), ard.ard_gamma(b.prob), bc)
+        ev_got = ard.ARDEvidence(ard.ard_qr_stats(cache) if solver == "qr" else ard.joint_ard_stats(cache),
+                                 ard.ard_gamma(b.prob), bc)
         v_ref, g_ref = ev_ref.value_and_grad(ref.posterior.h)
         v_got, g_got = ev_got.value_and_grad(ref.posterior.h)
         p_ref = ard.predict_ard(ref.posterior, b.prob, d.ds_test)
         p_got = ard.predict_ard(got.posterior, b.prob, d.ds_test)
+    assert ref.report["solver"] == got.report["solver"] == solver
     # the two hold-out subsets (P_fit and the transfer exponent's P_fit2) only: the full refit reused the cache
     assert n_recompute == 3 and len(stage_calls) == 2
     # logev is resolved only to its roundoff at cond(S) ~ 5e13: each fit reports it (logev_full_noise, the
@@ -350,8 +362,15 @@ def test_ard_stage_reuses_cached_full_statistics(monkeypatch, e0):
     # bound, i.e. ~3x headroom over the worst observed and nothing more.  The gradient at the same h
     # likewise, per component, against the larger of the two fits' measured gradient roundoff (observed
     # <= 1.75x it): 5x.
-    tol = 5 * max(ref.report["logev_full_noise"], got.report["logev_full_noise"])
-    gtol = 5 * np.maximum(ref.report["logev_full_gnoise"], got.report["logev_full_gnoise"])
+    # qr: the QR floor lets the endpoint sit at cond(S) ~1e22 (kappa(R) ~1e11), where the two statistics'
+    # summation-order roundoff moves the gradient by more than its evaluation roundoff gnoise (observed 10x on
+    # lestrade; on mnf148 the log sigma_E component moved 2.2e-9 against a gnoise of 2.8e-12).  That component
+    # cancels terms of size n_q (n_q log sigma_q, yy_q / sigma_q^2), so it is also floored at 1e-10 of sum n_q
+    k = 5 if solver == "cholesky" else 25
+    tol = k * max(ref.report["logev_full_noise"], got.report["logev_full_noise"])
+    gtol = k * np.maximum(ref.report["logev_full_gnoise"], got.report["logev_full_gnoise"])
+    if solver == "qr":
+        gtol = np.maximum(gtol, 1e-10 * float(np.sum(joint.n)))
     assert abs(v_got - v_ref) <= tol and np.all(np.abs(g_got - g_ref) <= gtol)
     # the refit endpoints, under joint E0 too: the Newton-polished evidence fits agree to the evidence's
     # roundoff floor (observed dh ~1e-6, F_mean ~3e-6 relative); L-BFGS-B alone stopped ~1e-3 apart
@@ -1143,3 +1162,143 @@ def test_fit_ard_is_bitwise_deterministic(stage_evidence):
             runs.append((h, v, np.asarray(p.mean), np.asarray(p.chol)))
     for a, b in zip(*runs):
         assert np.array_equal(a, b)
+
+
+# --- issue #136: the QR evidence, its floor, and the degenerate endpoint ------------------------------
+
+def _qr_problem(n=80, L=12, decay=3.0, noise=1e-2, seed=0, wscale=1.0, rotate=False):
+    """A synthetic weighted linear problem: per-quantity rows with column scales spanning 10^-decay,
+    3 body-order groups of L/3 columns, true coefficients ~ wscale.  rotate: mix the scaled columns by a random
+    orthogonal matrix, so the conditioning is not a column scaling (which a Cholesky resolves exactly).  Returns (per-quantity factors R_q, c_q,
+    yy, n, Gram ARDStats, gamma, body)."""
+    from ace_jax.fit.ard import ARDStats
+    rng = np.random.default_rng(seed)
+    w = wscale * rng.normal(size=L)
+    U = np.linalg.qr(rng.normal(size=(L, L)))[0] if rotate else np.eye(L)
+    Rs, cs, G, b, yy, nq = [], [], [], [], [], []
+    for _ in range(3):
+        Phi = (rng.normal(size=(n, L)) * np.logspace(0, -decay, L)) @ U
+        y = Phi @ w + noise * rng.normal(size=n)
+        Q, R = np.linalg.qr(Phi)
+        Rs.append(R); cs.append(Q.T @ y); G.append(Phi.T @ Phi); b.append(Phi.T @ y)
+        yy.append(y @ y); nq.append(n)
+    gamma = np.linspace(1.0, 3.0, L)
+    body = np.repeat([2, 3, 4], L // 3)
+    return Rs, cs, np.array(yy), np.array(nq, float), ARDStats(tuple(G), tuple(b), np.array(yy), np.array(nq, float), None), gamma, body
+
+
+def _qrs(Rs, cs, yy, nq, ls=None):
+    from ace_jax.fit.ard import ard_qr_stats
+    from ace_jax.fit.stats import QRStats
+    z = jnp.zeros(())
+    qs = QRStats(*[jnp.asarray(r) for r in Rs], *[jnp.asarray(c) for c in cs], *[jnp.asarray(v) for v in yy],
+                 *[jnp.asarray(v) for v in nq], z, z, z)
+    return ard_qr_stats(qs, ls)
+
+
+@pytest.mark.parametrize("mode", ["joint", "sequential"])
+def test_qr_evidence_matches_cholesky_where_both_resolve(mode):
+    """At a well-conditioned h the QR evidence equals the Cholesky one: value, gradient, Hessian, and the
+    posterior (mean, factor C C^T = S)."""
+    from ace_jax.fit.ard import ARDEvidence, ARDStats, ard_posterior
+    Rs, cs, yy, nq, st, gamma, body = _qr_problem(decay=1.0)
+    ls = np.log([0.3, 0.05, 0.2])
+    if mode == "sequential":
+        w = np.exp(-2 * ls)
+        st = ARDStats((sum(w[i] * st.G[i] for i in range(3)),), (sum(w[i] * st.b[i] for i in range(3)),),
+                      np.zeros(3), np.zeros(3), ls)
+        h = np.array([-1.0, 0.5, 2.0])
+    else:
+        h = np.r_[ls, -1.0, 0.5, 2.0]
+    evC = ARDEvidence(st, gamma, body)
+    evQ = ARDEvidence(_qrs(Rs, cs, yy, nq, ls if mode == "sequential" else None), gamma, body)
+    assert evQ.solver == "qr" and evC.solver == "cholesky"
+    vC, gC = evC.value_and_grad(h); vQ, gQ = evQ.value_and_grad(h)
+    assert vQ == pytest.approx(vC, rel=1e-10, abs=1e-8)
+    np.testing.assert_allclose(gQ, gC, rtol=1e-8, atol=1e-9)
+    np.testing.assert_allclose(evQ.hessian(h), evC.hessian(h), rtol=1e-7, atol=1e-9)
+    meta = {"n_B": 4, "n_pair": 0, "NZ": 1, "rcut": 5.0}
+    pC, pQ = ard_posterior(evC, h, 1.0, meta), ard_posterior(evQ, h, 1.0, meta)
+    np.testing.assert_allclose(pQ.mean, pC.mean, rtol=1e-9, atol=1e-12)
+    CQ, CC = np.asarray(pQ.chol), np.asarray(pC.chol)
+    assert np.allclose(np.triu(CQ, 1), 0) and np.all(np.diag(CQ) > 0)
+    np.testing.assert_allclose(CQ @ CQ.T, CC @ CC.T, rtol=1e-10, atol=1e-10)
+    assert evQ.cond(h) == pytest.approx(evC.cond(h), rel=1e-6)
+
+
+def test_qr_evidence_resolves_where_the_cholesky_cannot():
+    """At cond(S) ~ 1e22 the Cholesky evidence is lost (NaN, or wrong), the QR one agrees with an SVD reference:
+    log p = 1/2 |z|^2 - sum log sigma_i([diag sqrt(lam); X]) + 1/2 sum log lam (sequential)."""
+    from ace_jax.fit.ard import ARDEvidence, ARDStats
+    Rs, cs, yy, nq, _, gamma, body = _qr_problem(decay=11.0, noise=1e-12, rotate=True)
+    ls = np.zeros(3)
+    evQ = ARDEvidence(_qrs(Rs, cs, yy, nq, ls), gamma, body)
+    X = np.concatenate(Rs) / gamma[None]; y = np.concatenate(cs)
+    G = X.T @ X
+    evC = ARDEvidence(ARDStats((G * gamma[:, None] * gamma[None],), ((X.T @ y) * gamma,), np.zeros(3), np.zeros(3), ls),
+                      gamma, body)
+    h = np.full(3, -60.0)
+    lam = np.exp(h)[np.searchsorted([2, 3, 4], body)]
+    A = np.concatenate([np.diag(np.sqrt(lam)), X])
+    U, sv, Vt = np.linalg.svd(A, full_matrices=False)
+    z = U.T @ np.concatenate([np.zeros(len(lam)), y])
+    ref = 0.5 * z @ z - np.sum(np.log(sv)) + 0.5 * np.sum(np.log(lam))
+    assert (sv.max() / sv.min()) ** 2 > 1e20
+    vQ, gQ = evQ.value_and_grad(h)
+    assert vQ == pytest.approx(ref, rel=1e-9)
+    assert np.all(np.isfinite(gQ))
+    vC, _ = evC.value_and_grad(h)
+    assert not (np.isfinite(vC) and abs(vC - ref) < 1e-6 * abs(ref))
+
+
+def test_qr_floor_is_decades_below_the_cholesky_floor():
+    """The default floors: cond_max 1e14 (Cholesky) vs 1e22 (QR) -- 8 decades, ~18.4 nats."""
+    from ace_jax.fit.ard import ARDEvidence, ARDStats, default_cond_max
+    Rs, cs, yy, nq, st, gamma, body = _qr_problem()
+    ls = np.zeros(3)
+    st = ARDStats((sum(st.G),), (sum(st.b),), np.zeros(3), np.zeros(3), ls)
+    evC, evQ = ARDEvidence(st, gamma, body), ARDEvidence(_qrs(Rs, cs, yy, nq, ls), gamma, body)
+    h0 = np.zeros(3)
+    evC.bounds(h0); evQ.bounds(h0)
+    assert (evC.cond_max, evQ.cond_max) == (default_cond_max("cholesky"), default_cond_max("qr")) == (1e14, 1e22)
+    assert evC.a_floor - evQ.a_floor == pytest.approx(np.log(1e8), rel=1e-6)
+
+
+def test_fit_ard_flags_a_degenerate_endpoint_and_the_qr_floor_clears_it():
+    """Coefficients ~1e6 against a unit-scale prior (as the Si fits, whose BLR sigma_c sat at its 1e4 cap): the
+    evidence keeps rising as the prior weakens.  With the Cholesky floor (cond_max 1e10, a_floor -17.3) every
+    a_k ends on it with the gradient pointing below (degenerate, issue #136); the QR fit, from its floor at
+    1e22 (-44.9), reaches an interior optimum (~-28) with more evidence."""
+    from ace_jax.fit.ard import ARDEvidence, ARDStats, fit_ard
+    Rs, cs, yy, nq, st, gamma, body = _qr_problem(n=100, decay=2.0, noise=1e-3, seed=1, wscale=1e6)
+    ls = np.zeros(3)
+    stC = ARDStats((sum(st.G),), (sum(st.b),), np.zeros(3), np.zeros(3), ls)
+    evC, evQ = ARDEvidence(stC, gamma, body), ARDEvidence(_qrs(Rs, cs, yy, nq, ls), gamma, body)
+    hC, vC, infoC = fit_ard(evC, np.zeros(3), cond_max=1e10)
+    assert infoC["degenerate"] and all(infoC["at_bound"]) and infoC["solver"] == "cholesky"
+    hQ, vQ, infoQ = fit_ard(evQ, np.zeros(3))
+    assert not infoQ["degenerate"] and infoQ["solver"] == "qr" and not any(infoQ["at_bound"])
+    assert np.all(hQ < evC.a_floor - 5)
+    assert vQ > evQ.value_and_grad(hC)[0] + 1.0             # the floor cost evidence
+
+
+def test_ard_fit_warnings_and_check_flag_a_degenerate_fit():
+    from types import SimpleNamespace
+    from ace_jax.fit.ard import _ard_fit_warnings, _check_degenerate
+    info = {"success": True, "message": "ok", "at_bound": [True, True], "cond_S": 1e14, "cond_max": 1e14,
+            "degenerate": True, "a_floor": -6.05, "solver": "cholesky"}
+    w = _ard_fit_warnings("full", info, ["a_2body", "a_3body"])
+    assert any("DEGENERATE" in x for x in w)
+    with pytest.raises(RuntimeError, match="degenerate"):
+        _check_degenerate(SimpleNamespace(ard_allow_degenerate=False), "full", info)
+    _check_degenerate(SimpleNamespace(ard_allow_degenerate=True), "full", info)
+    _check_degenerate(SimpleNamespace(ard_allow_degenerate=False), "full", {**info, "degenerate": False})
+
+
+def test_ard_solver_config_resolves_and_validates():
+    c = _pipe_cfg(ard_mode="sequential").validate()
+    assert c.ard_solver == "qr" and c.ard_cond_max is None and not c.ard_allow_degenerate
+    with pytest.raises(ValueError, match="ard_solver"):
+        _pipe_cfg(ard_solver="lu").validate()
+    with pytest.raises(ValueError, match="ard_cond_max"):
+        _pipe_cfg(ard_cond_max=0.5).validate()
