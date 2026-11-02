@@ -1,5 +1,49 @@
 # Changelog
 
+## 0.5.1 (2026-11-02)
+
+**Highlights.** ARD force uncertainty is reliable on fits that nearly
+interpolate their data. The evidence is now computed by QR, so the prior
+scales no longer stop at a numerical floor, and a fit whose scales all reach
+the floor stops with an error.
+
+**Upgrading from 0.5.0.** Saved models and posteriors are unchanged. An
+`aj fit --uq ard` run can give a different, more accurate posterior than in
+0.5.0, because the prior scales are now fitted past the old floor. Use
+`--ard-solver cholesky --ard-cond-max 1e14` for the 0.5.0 behaviour.
+
+### Fixed
+
+- **ARD evidence by QR** (#137, issue #136). The sequential ARD evidence, its
+  gradient and Hessian, and the posterior come from a QR factor whose
+  condition number is the square root of that of the scaled system. The prior
+  floor is lowered to a condition number of 1e22 for `qr` (1e14 for
+  `cholesky`). On the silicon accuracy-cost fits the 0.5.0 evidence stopped
+  every prior scale on the floor and gave a less accurate posterior than the
+  BLR fit; with QR, o3d12's test energy RMSE is 15.8 meV/atom (0.5.0: 22.0),
+  equal to the BLR fit.
+  - New options: `--ard-solver {auto,qr,cholesky}` (`auto`: `qr` for
+    `--uq ard`, `cholesky` for `--uq ard-gp`), `--ard-cond-max`, and
+    `--ard-allow-degenerate`.
+  - A fit where every prior scale ends on the floor, with the gradient
+    pointing below it, is degenerate: the stage warns and stops unless
+    `--ard-allow-degenerate` is set. `ard.json` and `metrics.csv` record
+    `ard_degenerate`.
+- **Large MAP fits** (#135). The QR statistics are passed to the compiled
+  evidence, gradient and Hessian-vector product as arguments, not embedded as
+  constants. This removes a second copy of the statistics (43 GB at 42,324
+  coefficients) and a lowering error above 2^32 elements.
+
+### Changed
+
+- **PACE radial functions** (#134) are implemented from a specification of
+  the published equations (`docs/dev/pace-radial-spec.md`), not from ML-PACE's
+  source. Public names and model output are unchanged.
+- Licence notes for the PACE reference tools, and sources cited for
+  `pace_radial` (#132).
+- Shorter test suite and refreshed test durations (#129, #131, #133); macOS
+  arm64 CI on macos-15 (#138).
+
 ## 0.5.0 (2026-10-27)
 
 **Highlights.** Linear ACE runs on CUDA GPUs with a CUDA kernel: in LAMMPS,
