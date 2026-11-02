@@ -288,7 +288,8 @@ def test_ard_gp_with_no_inducing_columns_is_the_linear_stage(ard_map):
     d, b, theta = ard_map
     kw = dict(ard_variance="sandwich", ard_val_frac=0.4, ard_n_min=50)
     with highest_precision():
-        lin = ard.run_ard_stage(ard_pipe_cfg(**kw).validate(), d, b, theta, log=lambda *a: None)
+        # the linear stage on the ard-gp stage's solver (cholesky): uq ard's default QR has its own, lower floor
+        lin = ard.run_ard_stage(ard_pipe_cfg(ard_solver="cholesky", **kw).validate(), d, b, theta, log=lambda *a: None)
         gp_cfg = ard_pipe_cfg(**kw)
         gp_cfg.uq = "ard-gp"                    # the stage's ard-gp branch, bypassing validate()'s arm check
         gp = ard.run_ard_stage(gp_cfg, d, b, theta, log=lambda *a: None)

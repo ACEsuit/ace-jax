@@ -56,8 +56,9 @@ def checkpoint_writer(out, names=None):
     return lambda name, payload: (names is None or name in names) and _write_stage(out, name, payload)
 
 
-def _metrics_csv(path, metrics, split):
-    rows = [{"rung": key.split("/")[1], "quantity": q, **m}
+def _metrics_csv(path, metrics, split, extra=None):
+    """extra: columns appended to every row (uq ard: ard_degenerate, issue #136)."""
+    rows = [{"rung": key.split("/")[1], "quantity": q, **m, **(extra or {})}
             for key, per_q in metrics.items() if key.startswith(f"{split}/")
             for q, m in per_q.items()]
     if rows:
@@ -124,8 +125,11 @@ def write_outputs(res, out, layout=("run",), argv=None, save_model=True, model_d
                                     "len_basis": b.gpcfg.len_readout,
                                     "E0": dict(zip(map(str, els), map(float, fitted_e0(res))))})
     if "cli" in layout:
-        _metrics_csv(out / "metrics.csv", res.preds.metrics, "test")
-        _metrics_csv(out / "metrics_ood.csv", res.preds.metrics, "ood")
+        extra = None
+        if getattr(res, "ard", None) is not None:         # a degenerate ARD endpoint is served only when allowed
+            extra = {"ard_degenerate": bool(res.ard.report.get("ard_degenerate", False))}
+        _metrics_csv(out / "metrics.csv", res.preds.metrics, "test", extra)
+        _metrics_csv(out / "metrics_ood.csv", res.preds.metrics, "ood", extra)
         if "run" not in layout:
             _dump(out / "config.json", {**(argv or {}), "M": int(b.prob.ind.XM.shape[0]),
                                         "len_basis": b.gpcfg.len_readout, "n_train": len(d.train),

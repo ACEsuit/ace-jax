@@ -116,6 +116,17 @@ components of $h$, with L-BFGS-B on the gradient-normalised objective. The
 **sequential** mode fixes $\sigma_q$ at the linear MAP and fits only the
 $a_k$, which needs a single Gram matrix and less memory.
 
+The evidence is calculated in the prior-scaled system
+$S=D^{-1}AD^{-1}$, $D=\operatorname{diag}\Gamma$. The `qr` solver (the
+default for `--uq ard`) does not make $S$. It calculates the QR factorisation
+of the stacked rows $[\operatorname{diag}\sqrt{\lambda};\,R_qD^{-1}/\sigma_q]$,
+where $R_q$ is the triangular factor of the weighted design rows of quantity
+$q$. The condition number of that factor is $\sqrt{\kappa(S)}$. Each $a_k$ has
+the lower limit $a_\text{floor}=\log(\lambda_\max(D^{-1}MD^{-1})/\kappa_\max)$,
+with $\kappa_\max=10^{22}$ for `qr` and $10^{14}$ for `cholesky`
+(`--ard-cond-max`). A fit where every $a_k$ is at $a_\text{floor}$, with the
+gradient in the direction below it, is degenerate (`ard_degenerate`).
+
 ## 4. The validation protocol
 
 1. **Stratified split by configuration.** Compute the Mondrian group of every

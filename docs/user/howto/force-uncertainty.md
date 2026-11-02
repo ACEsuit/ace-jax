@@ -391,9 +391,24 @@ default is `raw`.
 | `--ard-press` | `exact` | `exact` leave-one-cluster-out correction, or the faster `block` approximation |
 | `--ard-variance` | `sandwich` | the uncertainty shape: the jackknife (`sandwich`), or the posterior covariance (`kappa`) |
 | `--ard-mode` | `joint` | evidence fit of the noise and prior scales together, or `sequential` (prior scales only; less memory with `--uq ard`, but not with `--uq ard-gp`) |
+| `--ard-solver` | `auto` | the factorisation of the evidence: `qr` (the default for `--uq ard`) or `cholesky` (the default for `--uq ard-gp`) |
+| `--ard-cond-max` | 1e22 (`qr`), 1e14 (`cholesky`) | the largest condition number of the scaled system that the prior floor permits |
+| `--ard-allow-degenerate` | | write the posterior when every prior scale stops on the floor (see below) |
 | `--no-ard-support` | | skip the support reference |
 | `--ard-support-features` | `raw` | features of the support reference: `raw` descriptors, or `normalised` (unit-norm descriptor plus log-norm channels per body order) |
 | `--batch-pack` | `auto` | batches configurations by an atom budget when a set has small and large cells |
+
+The prior scales $a_k$ have a lower limit, the floor. The floor keeps the
+scaled system solvable in float64. The `qr` solver factors the data rows, so
+its floor is approximately 18 units of $a_k$ below the `cholesky` floor.
+
+!!! warning
+    If every prior scale stops on the floor and the evidence continues to
+    increase below it, the fit is degenerate. The prior is then set by the
+    floor, not by the evidence, and the coefficients can be less accurate than
+    the BLR fit. The fit stops with an error. `ard.json` and `metrics.csv`
+    record `ard_degenerate`. Use `--ard-allow-degenerate` to write the
+    posterior.
 
 With `--uq ard`, `--e0 lsq` fits E0 together with the coefficients, as the
 default fit does:

@@ -82,8 +82,8 @@ def fit(cfg, data, log=print, on_stage=None):
             # ard-gp: the full joint statistics at the MAP theta (host-cache assembles the cached
             # linear part with one residual pass), taken before the objective is dropped
             full = None
-            if cfg.ard_mode == "joint":
-                full = obj.lin if cfg.uq == "ard" else obj.stats(mf.theta)
+            if cfg.ard_mode == "joint":       # QR objective: its QRStats, which the ARD QR solver reads as they are
+                full = (getattr(obj.lik, "qr_stats", None) or obj.lin) if cfg.uq == "ard" else obj.stats(mf.theta)
             obj = obj._replace(lik=None, vg=None, host_cache=None, stats=None, lin=None)
             release()
             with progress_stage("ard"):

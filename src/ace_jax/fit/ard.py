@@ -63,14 +63,63 @@ class ARDStats(NamedTuple):
     ls_fixed: np.ndarray | None
 
 
-def ard_statistics(theta, prob, ds, mode, columns="linear"):
+class ARDQRStats(NamedTuple):
+    """The ARD statistics in QR form (solver "qr", issue #136): data factors R (upper, R^T R = G) and
+    c = Q^T (w y), so the evidence factors [diag sqrt(lambda); R D^-1] (kappa(R) = sqrt(kappa(S))) and
+    never forms the Gram.  joint: R_q, c_q per quantity, rr_q = |w y_q|^2 - |c_q|^2 (the residual
+    outside the column space: rho_q^2 when the rows were float32, else yy_q - c_q.c_q, clamped at 0),
+    n_q.  sequential: one factor of the rows combined at the linear MAP noise scales ls_fixed."""
+    R: tuple
+    c: tuple
+    rr: np.ndarray
+    n: np.ndarray
+    ls_fixed: np.ndarray | None
+
+
+def ard_qr_stats(qs, ls_fixed=None):
+    """ARDQRStats from `stats.linear_qr_statistics` output (a QRStats).  ls_fixed None: joint (the
+    per-quantity factors as they are, shared, not copied); else sequential, the rows R_q / sigma_q
+    stacked and re-factored once to one (L, L) factor (a host QR of 3L x L)."""
+    def rr(q):
+        rho = getattr(qs, f"rho_{q}", None)
+        if rho is not None:
+            return float(rho) ** 2
+        c = np.asarray(getattr(qs, f"c_{q}"), np.float64)
+        return max(float(getattr(qs, f"yy_{q}")) - float(c @ c), 0.0)
+    n = np.array([float(getattr(qs, f"n_{q}")) for q in "EFV"])
+    if ls_fixed is None:
+        return ARDQRStats(tuple(getattr(qs, f"R_{q}") for q in "EFV"), tuple(getattr(qs, f"c_{q}") for q in "EFV"),
+                          np.array([rr(q) for q in "EFV"]), n, None)
+    s = np.exp(np.asarray(ls_fixed, np.float64))
+    A = np.concatenate([np.asarray(getattr(qs, f"R_{q}"), np.float64) / s[i] for i, q in enumerate("EFV")])
+    y = np.concatenate([np.asarray(getattr(qs, f"c_{q}"), np.float64) / s[i] for i, q in enumerate("EFV")])
+    Rt = np.linalg.qr(np.concatenate([A, y[:, None]], 1), mode="r")
+    L = A.shape[1]
+    return ARDQRStats((jnp.asarray(Rt[:L, :L]),), (jnp.asarray(Rt[:L, L]),), np.zeros(3), n,
+                      np.asarray(ls_fixed, np.float64))
+
+
+def ard_statistics(theta, prob, ds, mode, columns="linear", solver="cholesky"):
     """joint: per-quantity statistics (3 L^2 matrices).  sequential: the combined Gram at the
     linear MAP noise scales, accumulated in one pass (1 L^2 matrix) -- the low-memory mode.
     columns "linear" (uq "ard"): the L linear columns only -- a hybrid problem's inducing columns never
     enter, and the joint Gram is hyperparameter-independent.  columns "joint" (uq "ard-gp"): the joint
     design [B | k_theta(B, B_M)] at theta (Dt = L + M), streamed by stats.sufficient_statistics; sequential
-    mode then combines its per-quantity Grams at theta's noise scales (3 Dt^2 transiently)."""
+    mode then combines its per-quantity Grams at theta's noise scales (3 Dt^2 transiently).
+    solver "qr" (columns "linear" only): ARDQRStats from stats.linear_qr_statistics, the factors the
+    linear arm's QR LML uses (sequential mode holds 3 L^2 transiently while combining them)."""
     from .rows import ROWS_EDGE_BUDGET
+    if solver not in ("cholesky", "qr"):
+        raise ValueError(f"ard solver must be 'cholesky' or 'qr', got {solver!r}")
+    if solver == "qr":
+        if columns != "linear":
+            raise ValueError("the ARD QR solver is the linear arm's (columns 'linear'); uq 'ard-gp' uses cholesky")
+        if mode not in ("joint", "sequential"):
+            raise ValueError(f"ard mode must be 'joint' or 'sequential', got {mode!r}")
+        from .stats import linear_qr_statistics
+        qs = linear_qr_statistics(prob.model, prob.cfg, ds, cached_rows=True)   # no recompile on a repeat
+        ls = None if mode == "joint" else np.array([float(getattr(theta, f"log_sigma_{q}")) for q in "EFV"])
+        return ard_qr_stats(qs, ls)
     if columns == "joint":
         st = _joint_statistics_jit(theta, prob.spec, prob.model, prob.ind, prob.cfg, ds, ROWS_EDGE_BUDGET)
         if mode == "joint":
@@ -149,14 +198,22 @@ class ARDEvidence:
 
     root (uq "ard-gp"): the prior root R0 = blockdiag(diag Gamma, chol(K_MM)^T) of the joint design
     (prior_root.PriorRoot); S = R0^-T A R0^-1, and the GP_GROUP columns share one scale a_GP, so their
-    prior is exp(a_GP) K_MM.  None: PriorRoot.diag(1 / gamma), the linear arm's D, evaluated verbatim."""
+    prior is exp(a_GP) K_MM.  None: PriorRoot.diag(1 / gamma), the linear arm's D, evaluated verbatim.
+
+    stats an ARDQRStats (solver "qr", linear arm only): the evidence, its derivatives and the posterior
+    come from a QR of [diag sqrt(lambda); R D^-1] (`_ev_logev_qr`), whose factor R_S has kappa(R_S) =
+    sqrt(cond(S)), instead of a Cholesky of S: the prior floor can then sit decades lower (`bounds`,
+    `default_cond_max`).  ARDStats: the Cholesky of S, as before."""
 
     def __init__(self, stats, gamma, body_col, root=None):
         from .prior_root import PriorRoot
+        self.solver = "qr" if isinstance(stats, ARDQRStats) else "cholesky"
         self.joint = stats.ls_fixed is None
         self.ls_fixed = stats.ls_fixed
         self.body_col = np.asarray(body_col)
         self.root = PriorRoot.diag(1.0 / np.asarray(gamma)) if root is None else root
+        if self.solver == "qr" and self.root.M:
+            raise ValueError("ARDEvidence: the QR solver is the linear arm's; a GP-arm (ard-gp) root needs ARDStats")
         if len(np.asarray(gamma)) + self.root.M != len(self.body_col):
             raise ValueError(f"ARDEvidence: gamma has {len(np.asarray(gamma))} columns (+ {self.root.M} "
                              f"inducing), body_col {len(self.body_col)} (a joint-E0 problem: pass ard_gamma(prob); "
@@ -170,7 +227,12 @@ class ARDEvidence:
         # the unscaled G/b are held as given (no scaled copies: the Gram is L^2 per quantity, and a
         # pipeline caller shares them with its cache); D^-1 (sum_q w_q G_q) D^-1 is formed per call.
         # They are jit ARGUMENTS, not closure constants, which XLA would copy into the executable.
-        self._data = (tuple(stats.G), tuple(stats.b), jnp.asarray(stats.yy), jnp.asarray(stats.n))
+        if self.solver == "qr":
+            self._data = (tuple(stats.R), tuple(stats.c), jnp.asarray(stats.rr), jnp.asarray(stats.n))
+            self._vg, self._hvp = _evq_value_and_grad, _evq_hvp
+        else:
+            self._data = (tuple(stats.G), tuple(stats.b), jnp.asarray(stats.yy), jnp.asarray(stats.n))
+            self._vg, self._hvp = _ev_value_and_grad, _ev_hvp
         self._gidx = gidx
         self._nls = 3 if self.joint else 0
         self._parts = lambda h: _ev_parts(h, self._data, self.root, self._gidx, self.joint)
@@ -183,7 +245,7 @@ class ARDEvidence:
         return np.array(ls + [0.0 if g == GP_GROUP else a_blr for g in self.groups])
 
     def value_and_grad(self, h):
-        v, g = _ev_value_and_grad(jnp.asarray(h, float), self._data, self.root, self._gidx, self.joint)
+        v, g = self._vg(jnp.asarray(h, float), self._data, self.root, self._gidx, self.joint)
         return float(v), np.asarray(g)
 
     def hessian(self, h):
@@ -193,21 +255,31 @@ class ARDEvidence:
         P = h.shape[0]
         H = np.empty((P, P))
         for i in range(P):
-            H[:, i] = np.asarray(_ev_hvp(h, jnp.zeros(P).at[i].set(1.0), self._data, self.root, self._gidx,
-                                         self.joint))
+            H[:, i] = np.asarray(self._hvp(h, jnp.zeros(P).at[i].set(1.0), self._data, self.root, self._gidx,
+                                           self.joint))
         return 0.5 * (H + H.T)
 
-    def bounds(self, h0, cond_max):
+    def bounds(self, h0, cond_max=None):
         """log sigma within h0 +- 3; a in [a_floor, 10] with a_floor = log(lambda_max(Ms(h0)) / cond_max):
         at the noise scales of h0 the prior keeps cond(S) <= ~cond_max (at the unfloored Cantor ARD
         optimum cond(S) was 4e17 and repeated evaluations differed by 0.3 nats).  Not a guarantee over
         the box: lambda_max(Ms) scales with 1/sigma_q^2, so with sigma_q down to its bound h0 - 3 cond(S)
-        can reach ~e^6 cond_max (joint mode) -- `cond` reports it at the endpoint."""
-        Ms = self._parts(jnp.asarray(h0, float))[0]
-        v = jnp.ones(Ms.shape[0]) / np.sqrt(Ms.shape[0])
+        can reach ~e^6 cond_max (joint mode) -- `cond` reports it at the endpoint.  cond_max None: the
+        solver's `default_cond_max` (QR resolves cond(S) ~ its square: kappa(R_S) = sqrt(cond(S)))."""
+        cond_max = default_cond_max(self.solver) if cond_max is None else float(cond_max)
+        h0 = jnp.asarray(h0, float)
+        if self.solver == "qr":                              # Ms = X^T X of the scaled data rows X
+            X = _evq_rows(h0, self._data, self.root, self.joint)[0]
+            mv = lambda v: X.T @ (X @ v)
+        else:
+            Ms = self._parts(h0)[0]
+            mv = lambda v: Ms @ v
+        n = len(np.asarray(self.root.dinv)) + self.root.M
+        v = jnp.ones(n) / np.sqrt(n)
         for _ in range(50):                                  # power iteration: lambda_max(Ms)
-            v = Ms @ v; v = v / jnp.linalg.norm(v)
-        lam_max = float(v @ (Ms @ v))
+            v = mv(v); v = v / jnp.linalg.norm(v)
+        lam_max = float(v @ mv(v))
+        self.cond_max = cond_max
         self.a_floor = float(np.log(max(lam_max, 1e-300) / cond_max))
         k = self._nls
         lo = np.concatenate([np.asarray(h0[:k]) - 3.0, np.full(len(self.groups), self.a_floor)])
@@ -215,17 +287,39 @@ class ARDEvidence:
         self.lower, self.upper = lo, hi
         return lo, hi
 
+    def factor(self, h):
+        """(C, x): C lower triangular with C C^T = S(h) and a positive diagonal (Cholesky of S, or R_S^T
+        from the QR), x = S^-1 R0^-T b the scaled posterior mean."""
+        h = jnp.asarray(h, float)
+        if self.solver == "qr":
+            R, z = _evq_factor(h, self._data, self.root, self._gidx, self.joint)
+            return R.T, solve_triangular(R, z, lower=False)
+        Ms, bv, lam, _ = self._parts(h)
+        c, low = cho_factor(Ms + jnp.diag(lam), lower=True)
+        return jnp.tril(c), cho_solve((c, low), bv)
+
     def cond(self, h, iters=50):
-        """cond(S(h)) estimated by power iteration on S (lambda_max) and on S^-1 through its Cholesky
-        factor (lambda_min): O(iters L^2) after one factorisation, deterministic."""
-        Ms, _, lam, _ = self._parts(jnp.asarray(h, float))
-        S = Ms + jnp.diag(lam)
-        c = cho_factor(S, lower=True)
-        v = w = jnp.ones(S.shape[0]) / np.sqrt(S.shape[0])
+        """cond(S(h)) estimated by power iteration on S (lambda_max) and on S^-1 through its factor C
+        (lambda_min): O(iters L^2) after one factorisation, deterministic."""
+        C = self.factor(h)[0]
+        Sv = lambda v: C @ (C.T @ v)
+        Si = lambda w: solve_triangular(C, solve_triangular(C, w, lower=True), lower=True, trans="T")
+        v = w = jnp.ones(C.shape[0]) / np.sqrt(C.shape[0])
         for _ in range(iters):
-            v = S @ v; v = v / jnp.linalg.norm(v)
-            w = cho_solve(c, w); w = w / jnp.linalg.norm(w)
-        return float((v @ (S @ v)) / (w @ (S @ w)))
+            v = Sv(v); v = v / jnp.linalg.norm(v)
+            w = Si(w); w = w / jnp.linalg.norm(w)
+        return float((v @ Sv(v)) / (w @ Sv(w)))
+
+    def degenerate(self, h, g, gnoise=None):
+        """Whether h is the degenerate endpoint of issue #136: every ARD scale a_k on the floor with the
+        evidence's gradient pointing below it (or flat to within 10x its roundoff gnoise): the prior there is
+        the conditioning guard's, not the evidence's choice, so the posterior is not the ARD optimum."""
+        k = self._nls
+        a, ga = np.asarray(h, float)[k:], np.asarray(g, float)[k:]
+        if not len(a) or not hasattr(self, "lower"):
+            return False
+        tol = np.zeros_like(ga) if gnoise is None else 10 * np.nan_to_num(np.asarray(gnoise, float)[k:])
+        return bool(np.all(np.isclose(a, self.lower[k:])) and np.all(ga <= tol))
 
     def sigmas(self, h):
         """Noise scales (sigma_E, sigma_F, sigma_V) of hyperparameters h: fitted [joint] or the fixed
@@ -267,7 +361,70 @@ def _ev_hvp_body(h, t, data, root, gidx, joint):
 _ev_hvp = jax.jit(_ev_hvp_body, static_argnames="joint")
 
 
-def fit_ard(ev, h0, cond_max=1e14, maxiter=500, polish=True, start=None):
+def default_cond_max(solver):
+    """The prior floor's cond(S) target when none is given (FitConfig.ard_cond_max None): 1e14 for the
+    Cholesky of S, whose solves lose ~eps cond(S); 1e22 for the QR, whose factor has kappa(R_S) =
+    sqrt(cond(S)) = 1e11.  On the Si o3d12 sequential evidence the QR gradient is smooth to cond(S)
+    ~1e23 and visibly noisy (2-body component) from ~1e24; the Cholesky evidence is NaN from ~1e18."""
+    return {"cholesky": 1e14, "qr": 1e22}[solver]
+
+
+def _evq_rows(h, data, root, joint):
+    """(X, y, const): the scaled data rows X = [R_q R0^-1 / sigma_q] (stacked [joint], one factor
+    [sequential]), their target y = [c_q / sigma_q], and the h-dependent constant [joint]
+    -1/2 sum_q rr_q / sigma_q^2 - sum_q n_q log sigma_q (0 [sequential])."""
+    R, c, rr, nq = data
+    if joint:
+        s = jnp.exp(h[:3])
+        X = jnp.concatenate([root.rows(R[i]) / s[i] for i in range(3)], 0)
+        y = jnp.concatenate([c[i] / s[i] for i in range(3)])
+        return X, y, -0.5 * jnp.sum(rr * jnp.exp(-2 * h[:3])) - jnp.sum(nq * h[:3])
+    return root.rows(R[0]), c[0], 0.0
+
+
+def _evq_qr(h, data, root, gidx, joint):
+    """The R factor (L + 1, L + 1) of [[diag sqrt(lambda), 0]; [X, y]], and lambda, const."""
+    X, y, const = _evq_rows(h, data, root, joint)
+    nls = 3 if joint else 0
+    lam = jnp.concatenate([jnp.exp(h[nls:]), jnp.ones(1)])[gidx]
+    L = lam.shape[0]
+    A = jnp.concatenate([jnp.concatenate([jnp.diag(jnp.sqrt(lam)), jnp.zeros((L, 1))], 1),
+                         jnp.concatenate([X, y[:, None]], 1)], 0)
+    return jnp.linalg.qr(A, mode="r"), lam, const
+
+
+def _ev_logev_qr(h, data, root, gidx, joint):
+    """_ev_logev from the QR of [diag sqrt(lambda); X | 0; y]: z = Rt[:L, L] has |z|^2 = b~^T S^-1 b~, and
+    Rt[L, L]^2 is the residual |y|^2 - |z|^2 without the cancellation [joint, where the constant
+    carries the out-of-span residual rr_q; sequential has no y'y and keeps +1/2 |z|^2, as the Cholesky
+    form keeps +1/2 b~^T S^-1 b~].  log|S| = 2 sum log|diag R_S|."""
+    Rt, lam, const = _evq_qr(h, data, root, gidx, joint)
+    L = lam.shape[0]
+    logdet = jnp.sum(jnp.log(jnp.abs(jnp.diag(Rt)[:L])))
+    fit = -0.5 * Rt[L, L] ** 2 if joint else 0.5 * Rt[:L, L] @ Rt[:L, L]
+    return const + fit - logdet + 0.5 * jnp.sum(jnp.log(lam))
+
+
+def _evq_factor_body(h, data, root, gidx, joint):
+    """(R_S, z) with a positive diagonal: R_S^T R_S = S, R_S x = z for the scaled mean x."""
+    Rt, lam, _ = _evq_qr(h, data, root, gidx, joint)
+    L = lam.shape[0]
+    sg = jnp.where(jnp.diag(Rt)[:L] < 0, -1.0, 1.0)
+    return Rt[:L, :L] * sg[:, None], Rt[:L, L] * sg
+
+
+_evq_value_and_grad = jax.jit(jax.value_and_grad(_ev_logev_qr), static_argnames="joint")
+_evq_factor = jax.jit(_evq_factor_body, static_argnames="joint")
+
+
+def _evq_hvp_body(h, t, data, root, gidx, joint):
+    return jax.jvp(lambda x: jax.grad(_ev_logev_qr)(x, data, root, gidx, joint), (h,), (t,))[1]
+
+
+_evq_hvp = jax.jit(_evq_hvp_body, static_argnames="joint")
+
+
+def fit_ard(ev, h0, cond_max=None, maxiter=500, polish=True, start=None):
     """Type-II ML by L-BFGS-B, bounded (ev.bounds), on the objective relative to its start and divided
     by the initial gradient norm: L-BFGS-B's first bounded step is the full gradient (~3e3 on the
     Cantor problem), which lands on the box corner; a non-finite point is a rejected step.  Then
@@ -277,9 +434,12 @@ def fit_ard(ev, h0, cond_max=1e14, maxiter=500, polish=True, start=None):
     `start` (default h0) is where L-BFGS-B starts in it.  info["cond_S"]: cond(S) at the endpoint
     (ev.cond), with info["cond_max"] the floor's target (exceeded when sigma ran down, see ev.bounds);
     info["newton"]["noise"] / ["gnoise"]: the measured roundoff of the evidence and of each gradient
-    component at the returned endpoint (the resolution of v and of its gradient)."""
+    component at the returned endpoint (the resolution of v and of its gradient).  cond_max None: the
+    solver's `default_cond_max`.  info["degenerate"]: every a_k on the floor with the gradient pointing
+    below it (`ARDEvidence.degenerate`; issue #136) -- the posterior there is the guard's, not ARD's."""
     from scipy.optimize import minimize
     lo, hi = ev.bounds(h0, cond_max)
+    cond_max = getattr(ev, "cond_max", cond_max)
     x0 = np.clip(np.asarray(h0 if start is None else start, float), lo, hi)
     v0, g0 = ev.value_and_grad(x0)
     gs = max(1.0, float(np.linalg.norm(g0)))
@@ -300,10 +460,13 @@ def fit_ard(ev, h0, cond_max=1e14, maxiter=500, polish=True, start=None):
         info["newton"] = pol
         success = pol["converged"]
         message = f"{message}; newton: {pol['message']}"
-    v, _ = ev.value_and_grad(x)
+    v, g = ev.value_and_grad(x)
+    deg = ev.degenerate(x, g, info.get("newton", {}).get("gnoise")) if hasattr(ev, "degenerate") else False
     return x, v, {**info, "success": success, "message": message, "nit": int(r.nit), "gain": v - v0,
                   "at_bound": ((np.isclose(x, lo)) | (np.isclose(x, hi))).tolist(),
-                  "cond_S": ev.cond(x) if hasattr(ev, "cond") else None, "cond_max": float(cond_max)}
+                  "cond_S": ev.cond(x) if hasattr(ev, "cond") else None, "cond_max": float(cond_max),
+                  "solver": getattr(ev, "solver", "cholesky"), "a_floor": getattr(ev, "a_floor", None),
+                  "degenerate": deg}
 
 
 def laplace_hypers(ev, h, eps=1e-3):
@@ -614,9 +777,7 @@ def _pad_cols(X, width):
 def ard_posterior(ev, h, kappa, meta, theta=None):
     """The ARD posterior at h.  A GP-arm evidence (ev.root.M > 0, uq "ard-gp") also stores its prior root
     and theta (the kernel hyperparameters the inducing columns were built at); pass theta then."""
-    Ms, bv, lam, _ = ev._parts(jnp.asarray(h, float))
-    c, low = cho_factor(Ms + jnp.diag(lam), lower=True)
-    x = cho_solve((c, low), bv)
+    c, x = ev.factor(h)
     keep = {k: meta[k] for k in ("n_B", "n_pair", "NZ", "rcut", "elements") if k in meta}
     if "NZ" not in keep and "elements" in keep:          # model meta carries elements, not NZ
         keep["NZ"] = len(keep["elements"])
@@ -907,7 +1068,23 @@ def _ard_fit_warnings(stage, info, names):
     hit = [n for n, b in zip(names, info.get("at_bound", [])) if b]
     if hit:
         out.append(f"WARNING: ARD {stage} evidence fit ended at a bound for {', '.join(hit)}")
+    if info.get("degenerate"):
+        out.append(f"WARNING: ARD {stage} evidence fit is DEGENERATE: every ARD scale is on the floor a_floor "
+                   f"{info.get('a_floor', float('nan')):.2f} ({info.get('solver', '?')}, ard_cond_max "
+                   f"{info.get('cond_max', float('nan')):.0e}) with the evidence increasing below it; the prior "
+                   f"is the conditioning guard's, not the evidence optimum")
     return out
+
+
+def _check_degenerate(cfg, stage, info):
+    """Raise on a degenerate evidence fit (issue #136) unless cfg.ard_allow_degenerate."""
+    if info.get("degenerate") and not getattr(cfg, "ard_allow_degenerate", False):
+        raise RuntimeError(
+            f"ARD {stage} evidence fit is degenerate: every ARD scale ended on the prior floor a_floor = "
+            f"{info.get('a_floor', float('nan')):.3f} (solver {info.get('solver')}, cond(S) {info.get('cond_S', float('nan')):.1e}, "
+            f"ard_cond_max {info.get('cond_max', float('nan')):.0e}) with the evidence still increasing below it, so the "
+            f"posterior would be the floor's, not the ARD optimum. Use ard_solver 'qr' (the default for uq ard) or "
+            f"a larger ard_cond_max; pass --ard-allow-degenerate (ard_allow_degenerate) to write it anyway")
 
 
 def _gp_parts(cfg, prob, theta, body_col):
@@ -919,6 +1096,12 @@ def _gp_parts(cfg, prob, theta, body_col):
     from .prior_root import prior_root
     return {"columns": "joint", "body": gp_body_columns(body_col, prob.ind.XM.shape[0]),
             "root": prior_root(prob, theta), "rows_fn": rows_fn_for(prob, theta), "theta": theta}
+
+
+def _ard_solver(cfg):
+    """cfg.ard_solver with "auto" resolved (FitConfig.validate does the same): qr on the linear arm."""
+    s = getattr(cfg, "ard_solver", "auto")
+    return ("cholesky" if cfg.uq == "ard-gp" else "qr") if s == "auto" else s
 
 
 def _h_names(ev):
@@ -936,12 +1119,13 @@ def _holdout_posterior(cfg, data, prob, theta, configs, body_col, ell, h0=None, 
     mode = cfg.ard_mode
     gp = _gp_parts(cfg, prob, theta, body_col)
     ds = build_dataset(configs, data.meta, data.E0, cfg.batch, pack=cfg.pack_mode, log=log)
-    ev = ARDEvidence(ard_statistics(theta, prob, ds, mode, columns=gp["columns"]), ard_gamma(prob), gp["body"],
-                     root=gp["root"])
+    ev = ARDEvidence(ard_statistics(theta, prob, ds, mode, columns=gp["columns"], solver=_ard_solver(cfg)),
+                     ard_gamma(prob), gp["body"], root=gp["root"])
     names = _h_names(ev)
     h, v, info = fit_ard(ev, ev.h0(theta) if h0 is None else h0, cfg.ard_cond_max)
     for w in _ard_fit_warnings(stage, info, names):
         log(w)
+    _check_degenerate(cfg, stage, info)
     post = ard_posterior(ev, h, 1.0, data.meta, theta=gp["theta"])
     K = 0
     if cfg.ard_variance == "sandwich" and cfg._score_source == "fit":
@@ -1044,14 +1228,24 @@ def run_ard_stage(cfg, data, built, theta, log=print, full_stats=None):
         del post_fit2                      # as P_fit: freed before the refit
 
     # 4. the served posterior on all of T and its shape
-    st = (joint_ard_stats(full_stats) if (full_stats is not None and mode == "joint")
-          else ard_statistics(theta, prob, data.ds_train, mode, columns=gp["columns"]))
+    from .stats import QRStats
+    solver = _ard_solver(cfg)
+    if full_stats is not None and mode == "joint":
+        if solver == "qr" and isinstance(full_stats, QRStats):
+            st = ard_qr_stats(full_stats)
+        elif solver == "qr":                 # the objective cached a Gram: one QR pass here
+            st = ard_statistics(theta, prob, data.ds_train, mode, columns=gp["columns"], solver=solver)
+        else:
+            st = joint_ard_stats(full_stats)
+    else:
+        st = ard_statistics(theta, prob, data.ds_train, mode, columns=gp["columns"], solver=solver)
     ev = ARDEvidence(st, ard_gamma(prob), gp["body"], root=gp["root"])
     del st
     v_start = ev.value_and_grad(np.clip(h_fit, *ev.bounds(h_fit, cond_max)))[0]   # refit's start
     h, v, info = fit_ard(ev, h_fit, cond_max)
     for w in _ard_fit_warnings("full", info, names):
         log(w)
+    _check_degenerate(cfg, "full", info)
     post = ard_posterior(ev, h, 1.0, data.meta, theta=gp["theta"])
     K, lev = 0, np.zeros(0)
     if variance == "sandwich":
@@ -1138,7 +1332,11 @@ def run_ard_stage(cfg, data, built, theta, log=print, full_stats=None):
               # moves of h): two fits of the same data agree in logev_full only to ~this, not to 1e-15
               "logev_full_noise": info.get("newton", {}).get("noise"),
               "logev_full_gnoise": info.get("newton", {}).get("gnoise"),     # per hyperparameter, likewise
-              "a_floor": ev.a_floor,
+              "a_floor": ev.a_floor, "solver": ev.solver, "cond_max": ev.cond_max,
+              # issue #136: every a_k on the floor with the evidence increasing below it (served only
+              # with ard_allow_degenerate); per fit: the full refit, then the fit subset
+              "ard_degenerate": bool(info.get("degenerate", False)),
+              "ard_degenerate_fit": bool(info_fit.get("degenerate", False)),
               "tempered_quantities": ["F"],        # F_var is lam_rms[g]^2 diag V; E_var / V_var untempered
               "kappa": kappa, "kappa_subset": kappa_subset, "n_val_atoms": int(len(e2)),
               "n_val_configs": len(val), "n_fit_configs": len(fit_),
