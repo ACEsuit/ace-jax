@@ -566,6 +566,16 @@ Other entry points:
 - **POPS.** `--uq pops` changes only the uncertainty. The mean is pinned to the
   BLR mean, and the ridge is selected per quantity by CRPS on a training
   hold-out (`--pops-ridge auto`; `blr` or a number fixes it).
+  - The box is built from the rows at or above the median leverage
+    (`pops_leverage_pct = 50`, POPSRegression's default; 0 keeps every row,
+    and near-zero-leverage rows then make the box unphysical).
+  - The ridge grid stops at `predict.POPS_MIN_RIDGE` (1e-10 of the largest
+    Gram eigenvalue): below it the box is set by eigh roundoff. A smaller
+    ridge warns.
+  - If the Cholesky of the ridge system is not finite (a near-interpolating
+    fit with sigma_c on its bound), the mean comes from the streamed QR
+    (`solve.posterior_qr`) with a warning; ridge selection raises if every
+    score is non-finite, instead of returning the first grid value.
 - **ARD `forces_std` is computed on request, not on every call.** A plain
   `atoms.get_forces()` does not compute it; call
   `calc.get_property("forces_std", atoms)` (reuses the cached E/F/stress), or

@@ -100,10 +100,11 @@ class FitConfig:
     predict_stats: str = "cached"        # "cached" (the objective's; run.py) | "recompute" (per draw) |
                                          # "auto" (CLI: the objective's where bitwise a recompute's, the QR form)
     predict_train: bool = True
-    pops_posterior: str = "hypercube"; pops_leverage_pct: float = 0.0
+    pops_posterior: str = "hypercube"
+    pops_leverage_pct: float = 50.0      # rows >= this leverage percentile define the box: POPSRegression's default
+    #                                      (0 keeps every row; near-zero-leverage rows, r_i / h_i unbounded, then set it)
     pops_ridge: object = "auto"          # "auto" | "blr" | float | {"E":..,"F":..,"V":..}
-    pops_ridge_grid: tuple = (1e-2, 1e-3, 1e-4, 1e-5, 1e-6, 1e-7, 1e-8, 1e-9, 1e-10, 1e-11,
-                              1e-12, 1e-13, 1e-14)
+    pops_ridge_grid: tuple = (1e-2, 1e-3, 1e-4, 1e-5, 1e-6, 1e-7, 1e-8, 1e-9, 1e-10)   # to predict.POPS_MIN_RIDGE
     pops_val_frac: float = 0.2; pops_env_nf: int = 2000
     pops_rows: str = "auto"              # "auto" | "host" (rows cached in host RAM) | "device" (re-evaluated)
     learn_radial: bool = False           # learn the tensor radials (radial_learn.fit_radial) before the fit
