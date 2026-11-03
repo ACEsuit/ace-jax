@@ -103,6 +103,8 @@ def _svd_likelihood(lik, prob, tied, tie):
           flush=True)
     f = tie(jax.jit(lambda a: log_marginal_likelihood_svd(from_array(a), sv)))
     f.qr_stats = qs
+    yy = float(sv.yy)
+    f.qr_check = (lik, lambda a: yy * float(np.exp(-2.0 * float(from_array(a).log_sigma_F))))  # mapfit._svd_guard
     return f
 
 

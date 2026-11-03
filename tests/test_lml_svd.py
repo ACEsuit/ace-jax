@@ -84,7 +84,7 @@ def test_svd_form_refuses_what_it_cannot_represent(m0):
     prob, qs = m0
     assert svd_applicable(prob, qs, tied=True)[0]
     assert not svd_applicable(prob, qs, tied=False)[0]                               # independent noises
-    assert not svd_applicable(prob._replace(e0_prec=np.full(1, 1e16)), qs, tied=True)[0]   # joint-E0 columns
+    assert svd_applicable(prob._replace(e0_prec=np.full(1, 1e16)), qs, tied=True)[0]       # joint-E0: handled
     assert not svd_applicable(prob, qs._replace(rho_E=jnp.zeros(()), rho_F=jnp.zeros(()), rho_V=jnp.zeros(())),
                               tied=True)[0]                                          # float32 rows
 
@@ -97,7 +97,9 @@ def test_fit_with_svd_solver_matches_qr(tmp_path, capsys):
     assert main(args + ["--out", str(tmp_path / "qr")]) == 0
     capsys.readouterr()
     assert main(args + ["--lml-solver", "svd", "--out", str(tmp_path / "svd")]) == 0
-    assert "lml-solver svd: one SVD" in capsys.readouterr().out       # the SVD form ran (no silent QR fallback)
+    out = capsys.readouterr().out
+    assert "lml-solver svd: one SVD" in out                           # the SVD form ran (no silent QR fallback)
+    assert "QR check at the MAP" in out and "agrees" in out           # and the QR check passed
     a = json.loads((tmp_path / "qr" / "theta_map.json").read_text())
     b = json.loads((tmp_path / "svd" / "theta_map.json").read_text())
     for k in ("log_sigma_c", "log_sigma_F"):
@@ -108,3 +110,60 @@ def test_fit_with_svd_solver_matches_qr(tmp_path, capsys):
             # two L-BFGS runs stop within the MAP's tolerance of each other (theta to ~1e-7 above), which moves
             # coefficients by a few 1e-6 relative; the two evidence forms themselves agree to roundoff
             np.testing.assert_allclose(mb[k], ma[k], rtol=2e-5, atol=1e-8 * max(1.0, float(np.abs(ma[k]).max())))
+
+
+def test_svd_map_is_checked_against_qr_and_falls_back(tmp_path, capsys, monkeypatch):
+    """At the SVD-found MAP the QR evidence is evaluated once; when the two disagree (here: corrupted SVD
+    statistics), the fit warns and finishes the MAP on the QR form, ending where a QR fit ends."""
+    import warnings
+
+    from ace_jax.cli import main
+    from ace_jax.fit import lml_svd
+    real = lml_svd.svd_statistics
+    monkeypatch.setattr(lml_svd, "svd_statistics", lambda qs, prob, **kw: real(qs, prob, **kw)._replace(
+        s2=real(qs, prob, **kw).s2 * 1.5))
+    args = ["fit", "--model", str(FIXTURE_DIR / "si_fitted.npz"), "--data", str(XYZ), "--ntrain", "20",
+            "--ntest", "6", "--energy-key", "dft_energy", "--force-key", "dft_force", "--virial-key", "dft_virial",
+            "--m-per-species", "0", "--opt", "lbfgs", "--noise", "shared", "--r0", "2.35"]
+    assert main(args + ["--out", str(tmp_path / "qr")]) == 0
+    capsys.readouterr()
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        assert main(args + ["--lml-solver", "svd", "--out", str(tmp_path / "svd")]) == 0
+    out = capsys.readouterr().out
+    assert "QR check at the MAP" in out
+    assert any("continuing the MAP on the QR form" in str(x.message) for x in w)
+    a = json.loads((tmp_path / "qr" / "theta_map.json").read_text())
+    b = json.loads((tmp_path / "svd" / "theta_map.json").read_text())
+    for k in ("log_sigma_c", "log_sigma_F"):
+        assert b[k] == pytest.approx(a[k], rel=1e-5, abs=1e-6), k
+    ea = json.loads((tmp_path / "qr" / "map_convergence.json").read_text())["log_evidence"]
+    eb = json.loads((tmp_path / "svd" / "map_convergence.json").read_text())["log_evidence"]
+    assert eb == pytest.approx(ea, rel=1e-8)                          # reported by the QR form, not the bad SVD
+
+
+def test_svd_map_on_near_interpolating_mace_labels(tmp_path):
+    """The case the QR form exists for: Cantor with MACE labels (tutorial 3's data), which the model nearly
+    interpolates.  The SVD-form MAP passes its QR check without falling back and matches the QR fit."""
+    import pathlib
+
+    from ase.io import read, write
+
+    from ace_jax.basis.model import BasisSpec, build_basis
+    from ace_jax.fit.pipeline import FitConfig, fit, load_fit_data
+    data = pathlib.Path(__file__).resolve().parents[1] / "docs" / "user" / "tutorials" / "data" / "cantor"
+    write(tmp_path / "train.xyz", read(data / "cantor_train.xyz", ":"))
+    b = build_basis(BasisSpec(order=2, max_degree=4, elements=("Cr", "Mn", "Fe", "Co", "Ni"), rcut=5.5))
+    res, logs = {}, {}
+    for solver in ("qr", "svd"):
+        cfg = FitConfig(model=b, arm="linear", m_per_species=0, e0="lsq", opt="lbfgs", r0=None, rungs=("map",),
+                        noise="shared", lml_solver=solver, energy_key="mace_energy", force_key="mace_force",
+                        virial_key="mace_virial").validate()
+        d = load_fit_data(cfg, train=str(tmp_path / "train.xyz"), log=lambda *a: None)
+        logs[solver] = []
+        res[solver] = fit(cfg, d, log=logs[solver].append)
+    assert any("QR check at the MAP agrees" in line for line in logs["svd"]), logs["svd"][-5:]
+    q, s = res["qr"].theta, res["svd"].theta
+    for k in ("log_sigma_c", "log_sigma_F"):
+        assert float(getattr(s, k)) == pytest.approx(float(getattr(q, k)), rel=1e-5, abs=1e-6), k
+    assert res["svd"].map.log_evidence == pytest.approx(res["qr"].map.log_evidence, rel=1e-8)
