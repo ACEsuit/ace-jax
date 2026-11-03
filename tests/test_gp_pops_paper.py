@@ -375,6 +375,7 @@ def test_a_ridge_below_the_floor_warns(tiny_linear_problem):
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         path.A(10 * POPS_MIN_RIDGE)
+        path.A(POPS_MIN_RIDGE)                           # the grid's last value: no warning by roundoff
     with pytest.warns(RuntimeWarning, match="below POPS_MIN_RIDGE"):
         path.A(POPS_MIN_RIDGE / 100)
 

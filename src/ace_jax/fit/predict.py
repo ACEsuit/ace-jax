@@ -486,7 +486,8 @@ class PopsRidgePath:
     def A(self, ridge):
         lam = self.ridge_abs(ridge)
         rel = lam / float(jnp.max(self.Lam))
-        if rel < POPS_MIN_RIDGE and _rkey(ridge) not in self._warned_floor:
+        if rel < POPS_MIN_RIDGE * (1 - 1e-6) and _rkey(ridge) not in self._warned_floor:   # a grid value at the floor
+            #                                                     (rel = ridge * maxL / maxL) must not warn by roundoff
             import warnings
             self._warned_floor.add(_rkey(ridge))
             warnings.warn(f"POPS ridge {ridge!r} is {rel:.1e} of max Lambda, below POPS_MIN_RIDGE = {POPS_MIN_RIDGE:g}: "
