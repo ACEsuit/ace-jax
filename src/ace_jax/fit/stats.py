@@ -2,6 +2,12 @@
 batches.  Memory is one batch's rows plus the (Dt, Dt) accumulators; the scan's
 reverse pass recomputes each batch under jax.checkpoint, which is the two-pass
 gradient algorithm of the spec with no hand-written VJP."""
+import contextlib
+import hashlib
+import json
+import os
+import pathlib
+import time
 from typing import NamedTuple
 
 from functools import partial
@@ -180,7 +186,69 @@ def _host_merge(R, c, Pw, yw):
     return Ra[:, :n].copy(), Ra[:, n].copy()
 
 
-def host_qr_stream(batch_rows_fn, ds, init, merge_rows=None):
+class QRCheckpoint:
+    """Where and how often `host_qr_stream` saves its state (`aj fit --checkpoint DIR`).  The state is
+    each factor's (R, c) after flushing its buffered rows, the next batch index and the caller's scalar
+    accumulators, in DIR/qrstats-KEY.npz (written to a temporary file, then renamed).  KEY fingerprints
+    the problem (`problem_key`), so a checkpoint of a different model, dataset or row dtype is never
+    loaded.  A complete pass is kept too: a fit killed after the statistics never repeats them.  Size
+    8 L^2 bytes per factor (E, F, V: ~9 GB at L = 2e4); a save costs one extra merge per factor."""
+
+    def __init__(self, directory, every=2700.0, log=print):
+        self.dir, self.every, self.log = pathlib.Path(directory), float(every), log
+
+    def path(self, key):
+        return self.dir / f"qrstats-{key}.npz"
+
+    def load(self, key, n_factors):
+        p = self.path(key)
+        if not p.exists():
+            return None
+        with np.load(p, allow_pickle=False) as z:
+            if str(z["key"]) != key or int(z["n_factors"]) != n_factors:
+                return None
+            acc = [(np.array(z[f"R{k}"]), np.array(z[f"c{k}"])) for k in range(n_factors)]
+            return acc, int(z["next"]), json.loads(str(z["extra"]))
+
+    def save(self, key, acc, nxt, extra):
+        self.dir.mkdir(parents=True, exist_ok=True)
+        for old in self.dir.glob("qrstats-*.npz"):         # one problem per directory: a stale one is GBs
+            if old != self.path(key):
+                old.unlink()
+        tmp = self.dir / f".qrstats-{key}.tmp.npz"
+        np.savez(tmp, key=key, next=nxt, n_factors=len(acc), extra=json.dumps(extra),
+                 **{f"{n}{k}": a for k, (R, c) in enumerate(acc) for n, a in (("R", R), ("c", c))})
+        os.replace(tmp, self.path(key))
+
+
+_QR_CHECKPOINT = None      # set by `qr_checkpoint` (the fit pipeline's objective stage); read by linear_qr_statistics
+
+
+@contextlib.contextmanager
+def qr_checkpoint(directory, every=2700.0, log=print):
+    """Checkpoint the host QR statistics pass(es) run inside the block to `directory` every `every`
+    seconds (QRCheckpoint); None: off.  Scoped, not global: radial learning and ARD, which recompute the
+    statistics for every candidate, run outside it."""
+    global _QR_CHECKPOINT
+    prev = _QR_CHECKPOINT
+    _QR_CHECKPOINT = QRCheckpoint(directory, every, log) if directory else None
+    try:
+        yield _QR_CHECKPOINT
+    finally:
+        _QR_CHECKPOINT = prev
+
+
+def problem_key(*trees):
+    """A short digest of every array leaf (dtype, shape, bytes) and scalar of `trees`."""
+    h = hashlib.blake2b(digest_size=12)
+    for leaf in jax.tree.leaves(trees):
+        a = np.asarray(leaf)
+        h.update(f"{a.dtype}{a.shape}".encode())
+        h.update(a.tobytes() if a.dtype != object else repr(leaf).encode())
+    return h.hexdigest()
+
+
+def host_qr_stream(batch_rows_fn, ds, init, merge_rows=None, checkpoint=None, key=None, extra=None):
     """The updating QR of streamed rows, its merges on the host (SciPy, the calling thread).
     batch_rows_fn(batch) -> [(Pw, yw), ...] (jitted by the caller), one pair per factor;
     init = [(R0, c0), ...].  Returns [(R, c), ...] as jax arrays.  Each factor's live rows are
@@ -192,9 +260,23 @@ def host_qr_stream(batch_rows_fn, ds, init, merge_rows=None):
     inside a compiled loop, returned NaN on finite input -- deterministically, with 4 or 8
     OpenBLAS threads (a GitHub runner's default: 4 vCPUs) on a ~650-column basis, never with
     1-2 threads nor on the same matrices called directly.  Merges run here never did (tutorial 3,
-    #61).  A device (GPU) backend keeps the scan: its QR is not OpenBLAS."""
+    #61).  A device (GPU) backend keeps the scan: its QR is not OpenBLAS.
+
+    checkpoint (a QRCheckpoint) with key: resume from a saved state of the same problem and save every
+    checkpoint.every seconds (after flushing, so a resumed pass merges exactly as an uninterrupted one
+    with the same checkpoints); extra: the caller's dict of scalar accumulators, saved and restored with it."""
     acc = [(np.asarray(R, np.float64), np.asarray(c, np.float64)) for R, c in init]
     buf, fill = [[] for _ in acc], [0] * len(acc)
+    start = 0
+    if checkpoint is not None:
+        st = checkpoint.load(key, len(acc))
+        if st is not None:
+            acc, start, ex = st
+            if extra is not None:
+                extra.clear(); extra.update(ex)
+            checkpoint.log(f"checkpoint: QR statistics complete ({checkpoint.path(key)})" if start >= ds.n_batches
+                           else f"checkpoint: QR statistics resumed at batch {start} of {ds.n_batches}")
+    t_save = time.time()
     target = [max(merge_target(R.shape[1], merge_rows), 1) for R, _ in acc]
 
     def flush(k):
@@ -202,7 +284,7 @@ def host_qr_stream(batch_rows_fn, ds, init, merge_rows=None):
             acc[k] = _host_merge(*acc[k], np.concatenate([p for p, _ in buf[k]]),
                                  np.concatenate([v for _, v in buf[k]]))
         buf[k], fill[k] = [], 0
-    for i in range(ds.n_batches):
+    for i in range(start, ds.n_batches):
         parts = batch_rows_fn(jax.tree.map(lambda a: a[i], ds))
         for k, (Pw, yw) in enumerate(parts):
             Pw, yw = np.asarray(Pw, np.float64), np.asarray(yw, np.float64)
@@ -212,8 +294,15 @@ def host_qr_stream(batch_rows_fn, ds, init, merge_rows=None):
             buf[k].append((Pw, yw)); fill[k] += len(yw)
             if fill[k] >= target[k]:
                 flush(k)
+        if checkpoint is not None and i + 1 < ds.n_batches and time.time() - t_save >= checkpoint.every:
+            for k in range(len(acc)):
+                flush(k)
+            checkpoint.save(key, acc, i + 1, extra or {})
+            t_save = time.time()
     for k in range(len(acc)):
         flush(k)
+    if checkpoint is not None and start < ds.n_batches:
+        checkpoint.save(key, acc, ds.n_batches, extra or {})
     return [(jnp.asarray(R), jnp.asarray(c)) for R, c in acc]
 
 
@@ -368,7 +457,10 @@ def linear_qr_statistics(model, cfg, ds, merge_rows=None, host=None, row_dtype="
             for q, (_, _, yy, n, lw) in zip("EFV", out):
                 scal[f"yy_{q}"] += float(yy); scal[f"n_{q}"] += float(n); scal[f"logw_{q}"] += float(lw)
             return [(Pw, yw) for Pw, yw, *_ in out]
-        (RE, cE), (RF, cF), (RV, cV) = host_qr_stream(parts, ds, zeros, merge_rows)
+        ck = _QR_CHECKPOINT
+        key = None if ck is None else problem_key(model, ds, row_dtype, L, merge_target(L, merge_rows))
+        (RE, cE), (RF, cF), (RV, cV) = host_qr_stream(parts, ds, zeros, merge_rows, checkpoint=ck, key=key,
+                                                      extra=scal)
         return QRStats(RE, RF, RV, cE, cF, cV,
                        *(jnp.asarray(scal[f"{k}_{q}"]) for k in ("yy", "n", "logw") for q in "EFV"))
     ((RE, cE), (RF, cF), (RV, cV)), ex = _device_qr(model, cfg, ds, merge_rows)

@@ -92,6 +92,12 @@ def _add_fit_args(p):
                    help="lstsq: plain weighted least squares with no prior (teaching; overfits a large basis)")
     p.add_argument("--map-restarts", type=int, default=1, help="L-BFGS multi-start (best log-posterior)")
     p.add_argument("--init", default=None, help="theta_map.json to start the MAP from")
+    p.add_argument("--checkpoint", default=None, metavar="DIR",
+                   help="resumable fit: save the training statistics (CPU) every --checkpoint-every minutes and "
+                        "the MAP's best hyperparameters to DIR; rerunning the same command resumes from them "
+                        "(GBs: 8 L^2 bytes per quantity)")
+    p.add_argument("--checkpoint-every", type=float, default=45.0, metavar="MIN",
+                   help="minutes between training-statistics checkpoints (default 45)")
     p.add_argument("--rungs", default="map",
                    help="comma-separated from map,laplace,pathfinder,vi,nuts (default map; the others add "
                         "hyperparameter draws and cost far more than the MAP)")
@@ -216,7 +222,8 @@ def _fit_config(a):
         baseline=a.baseline, e0=a.e0, m_per_species=a.m_per_species, kernel=a.kernel, bump=not a.no_bump,
         density=a.density, pca_d=a.pca_d, embedding=a.embedding, r0=a.r0, objective=a.objective,
         lml=a.lml, lml_solver=a.lml_solver, row_precision=a.row_precision, row_check=a.row_check, devices=a.devices, opt=a.opt, map_steps=a.map_steps, map_restarts=a.map_restarts,
-        map_polish=a.map_polish, strict=a.strict, noise=a.noise,
+        map_polish=a.map_polish, strict=a.strict, noise=a.noise, checkpoint=a.checkpoint,
+        checkpoint_every=a.checkpoint_every,
         init=json.load(open(a.init)) if a.init else None, rungs=rungs, laplace=a.laplace,
         n_draws=a.n_draws, vi_steps=a.vi_steps, nuts_warmup=a.nuts_warmup, nuts_samples=a.nuts_samples,
         nuts_chains=a.nuts_chains, uq=a.uq, ard_mode=a.ard_mode, ard_variance=a.ard_variance, ard_val_frac=a.ard_val_frac,

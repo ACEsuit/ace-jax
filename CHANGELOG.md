@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Resumable fits** (`aj fit --checkpoint DIR`, `--checkpoint-every MIN`, default 45). The training
+  statistics pass saves its QR factors to DIR at that interval, and the MAP saves its best
+  hyperparameters after each evaluation. Run the same command again to resume. A complete statistics pass
+  is kept, so a fit stopped later does not repeat it. The statistics checkpoint applies on the CPU
+  backend. It needs 8 L^2 bytes per quantity on disk (approximately 9 GB at L = 20,000).
+
 ## 0.5.1 (2026-11-02)
 
 **Highlights.** ARD force uncertainty is reliable on fits that nearly
