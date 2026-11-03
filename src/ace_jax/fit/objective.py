@@ -165,7 +165,7 @@ def posterior_from_qr(theta, qs, prob):
 
 def uses_qr(prob):
     """Whether prob's LML and posterior take the QR form: lml_solver 'qr' on the linear arm."""
-    return getattr(prob, "lml_solver", "cholesky") == "qr" and prob.ind.XM.shape[0] == 0
+    return getattr(prob, "lml_solver", "cholesky") in ("qr", "svd") and prob.ind.XM.shape[0] == 0
 
 
 def _stats_fn(mesh):

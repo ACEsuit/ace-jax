@@ -41,6 +41,11 @@ a different, narrower POPS box than in 0.5.1:
 
 ### Added
 
+- **MAP by one SVD** (`aj fit --lml-solver svd`). With shared noise, the linear arm's evidence and its
+  gradient are computed from one SVD of the merged QR factor scaled by the prior, so each MAP evaluation
+  costs O(L) instead of a QR of the whole system. It is as accurate as the QR form, and the posterior and
+  the saved model are computed as before. For approximately L = 50,000 this replaces about a day of MAP
+  evaluations with one decomposition. Other noise settings use the QR form, with a warning.
 - **Resumable fits** (`aj fit --checkpoint DIR`, `--checkpoint-every MIN`, default 45). The training
   statistics pass saves its QR factors to DIR at that interval, and the MAP saves its best
   hyperparameters after each evaluation. Run the same command again to resume. A complete statistics pass

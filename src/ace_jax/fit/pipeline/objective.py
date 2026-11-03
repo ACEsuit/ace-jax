@@ -64,6 +64,8 @@ def make_objective(cfg, d, b):
             mesh = Mesh(np.array(devs), ("data",))
         if mesh is None and cfg.objective == "lml":
             lik = tie(make_lml(prob, d.ds_train, cache_linear=True))
+            if cfg.lml_solver == "svd":
+                lik = _svd_likelihood(lik, prob, tied, tie)
         else:
             ds_fit = _pad_to_multiple(d.ds_train, cfg.devices) if mesh is not None else d.ds_train
             lik = tie(make_log_density(prob, ds_fit, cfg.objective, mesh=mesh).likelihood)
@@ -82,6 +84,26 @@ def make_objective(cfg, d, b):
                                                                             prob.ind, prob.cfg, d.ds_train))
         host = None
     return Objective(lik, vg, stats, host, prob.prior.mu, {"stats_once": time.time() - t}, lin, tied)
+
+
+def _svd_likelihood(lik, prob, tied, tie):
+    """The QR likelihood `lik` replaced, for the MAP, by its SVD form (fit/lml_svd.py) when that represents it
+    exactly; the QR statistics stay attached, so the posterior and predictions are the QR form's."""
+    import warnings
+    from ..lml_svd import log_marginal_likelihood_svd, svd_applicable, svd_statistics
+    qs = getattr(lik, "qr_stats", None)
+    ok, why = (False, "no QR statistics (not the linear arm)") if qs is None else \
+        svd_applicable(prob, qs, tied is not None)
+    if not ok:
+        warnings.warn(f"lml_solver svd: {why}; using the QR form", UserWarning, stacklevel=3)
+        return lik
+    t = time.time()
+    sv = svd_statistics(qs, prob)
+    print(f"lml-solver svd: one SVD of L = {sv.s2.shape[0]} in {time.time() - t:.1f} s; MAP evaluations O(L)",
+          flush=True)
+    f = tie(jax.jit(lambda a: log_marginal_likelihood_svd(from_array(a), sv)))
+    f.qr_stats = qs
+    return f
 
 
 def release():

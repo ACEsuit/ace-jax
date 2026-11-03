@@ -57,9 +57,10 @@ def _add_fit_args(p):
     p.add_argument("--objective", default="lml", choices=["lml", "loo"])
     p.add_argument("--lml", choices=["device", "host-cache"], default="device",
                    help="host-cache: cache the linear design rows in host RAM (GP, pair|pca, L-BFGS, map only)")
-    p.add_argument("--lml-solver", choices=["qr", "cholesky"], default="qr",
-                   help="linear arm: the evidence and posterior by QR (stable; default) or by a Cholesky "
-                        "of the Gram (faster at large basis, but loses accuracy when the fit nearly "
+    p.add_argument("--lml-solver", choices=["qr", "svd", "cholesky"], default="qr",
+                   help="linear arm: the evidence and posterior by QR (stable; default), by one SVD (svd: the "
+                        "MAP's evaluations O(L) after one SVD, as stable as QR; shared noise only, else QR), or by "
+                        "a Cholesky of the Gram (faster at large basis, but loses accuracy when the fit nearly "
                         "interpolates its data). The GP arm always uses the Cholesky")
     p.add_argument("--row-precision", choices=["float64", "float32"], default="float64",
                    help="float32: compute the design rows (and, on a GPU, their QR) in float32, the bulk "
