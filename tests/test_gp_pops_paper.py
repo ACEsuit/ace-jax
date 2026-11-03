@@ -335,3 +335,56 @@ def test_blr_mean_is_accurate_not_the_eigh_formula():
         for rows in ("device", "host"):
             c = np.asarray(PopsRidgePath(theta, b.prob, d.ds_train, rows=rows).c_star_at("blr"))
             assert np.linalg.norm(c - ref) <= 1e-5 * np.linalg.norm(ref), (rows, np.linalg.norm(c - ref) / np.linalg.norm(ref))
+
+
+# --- numerics: NaN mean, silent ridge fallback, ridge floor (si-qoi-uq-paper B2) ---------------------
+
+def test_mean_falls_back_to_the_streamed_qr_when_the_cholesky_fails(tiny_linear_problem, monkeypatch):
+    """A near-interpolating evidence fit (sigma_c on its bound, lam_blr ~ 1e-20 of max Lambda on silicon o3d12)
+    makes the ridge system's Cholesky NaN; c* must then come from the streamed QR, not be NaN."""
+    import jax.scipy.linalg as jsl
+    from ace_jax.fit.solve import solve_qr
+    prob, ds = tiny_linear_problem
+    with highest_precision():
+        ref = np.asarray(PopsRidgePath(THETA, prob, ds).c_star_at("blr"))
+        monkeypatch.setattr(jsl, "cho_solve", lambda cf, b: jnp.full_like(b, jnp.nan))
+        with pytest.warns(RuntimeWarning, match="streamed QR"):
+            c = np.asarray(PopsRidgePath(THETA, prob, ds).c_star_at("blr"))
+        qr = np.asarray(solve_qr(prob, ds, THETA))
+    assert np.all(np.isfinite(c))
+    assert np.linalg.norm(c - qr) <= 1e-10 * np.linalg.norm(qr)
+    assert np.linalg.norm(c - ref) <= 1e-6 * np.linalg.norm(ref)
+
+
+def test_ridge_selection_raises_instead_of_a_silent_grid_start(tiny_linear_problem, monkeypatch):
+    """Every score non-finite used to return grid[0] (silicon o3d12: 1e-2 instead of the 1e-14 chosen when the
+    mean was finite).  It must raise."""
+    import ace_jax.fit.predict as P
+    prob, ds = tiny_linear_problem
+    monkeypatch.setattr(P, "crps_gaussian", lambda y, m, s: np.full(np.shape(y), np.nan))
+    with highest_precision(), pytest.raises(FloatingPointError, match="every score is non-finite"):
+        select_pops_ridge(THETA, prob, ds, ds, (1e-2, 1e-4))
+
+
+def test_a_ridge_below_the_floor_warns(tiny_linear_problem):
+    """The box is set by eigh roundoff below POPS_MIN_RIDGE; asking for it warns (once per ridge)."""
+    import warnings
+    from ace_jax.fit.predict import POPS_MIN_RIDGE
+    prob, ds = tiny_linear_problem
+    path = PopsRidgePath(THETA, prob, ds)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        path.A(10 * POPS_MIN_RIDGE)
+        path.A(POPS_MIN_RIDGE)                           # the grid's last value: no warning by roundoff
+    with pytest.warns(RuntimeWarning, match="below POPS_MIN_RIDGE"):
+        path.A(POPS_MIN_RIDGE / 100)
+
+
+def test_pipeline_pops_defaults_follow_the_reference_package():
+    """POPSRegression's default leverage_percentile is 50 (rows at or above the median leverage define the box);
+    the ridge grid stops at the numerical floor."""
+    from ace_jax.fit.pipeline import FitConfig
+    from ace_jax.fit.predict import POPS_MIN_RIDGE
+    cfg = FitConfig(model="unused.npz")
+    assert cfg.pops_leverage_pct == 50.0
+    assert min(cfg.pops_ridge_grid) >= POPS_MIN_RIDGE

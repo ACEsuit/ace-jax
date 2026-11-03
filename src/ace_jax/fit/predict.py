@@ -344,6 +344,15 @@ def _run_predict(f, theta, prob, ds_train, ds_test, stats=None, posts=None):
 
 # ---------------------------------------------------------------------------
 # Paper-faithful POPS (Swinburne & Perez, arXiv:2402.01810)
+
+POPS_MIN_RIDGE = 1.0e-10
+"""Smallest relative ridge (ridge / max Lambda) at which the POPS box is numerically defined on the Gram route.
+A and the corrections are read off eigh(D^-1 M D^-1), whose absolute resolution is eps * max Lambda, so a direction
+below it gets a weight 1/(Lambda + lam) that is roundoff / lam; the hypercube keeps the extremes of the corrections,
+so that roundoff sets the box.  On the silicon o3d12 design (cond X = 5e16) the box's bulk-energy spread from eigh
+and from an SVD of the rows agreed to four digits from 1e-11 up and differed by 35 % at 1e-14, where two other
+equivalent evaluations gave 1.6 and 78 meV/atom (si-qoi-uq-paper bench/si_qoi_uq/analysis/pops_compare.py).
+A ridge below this floor warns; the selection grid stops at it."""
 # ---------------------------------------------------------------------------
 
 def _ridge_dict(ridge):
@@ -421,7 +430,8 @@ class PopsRidgePath:
         self.mean_ridge = None                              # None: each call uses its own ridge
         self._means = {}                                    # ridge -> c*(ridge)
         self._posts = {}                                    # (mean, ridge, form, lev, thr) -> posterior
-        self.prob, self.ds = prob, ds_train
+        self.prob, self.ds, self.theta = prob, ds_train, theta
+        self._warned_floor = set()
 
     def ridge_abs(self, ridge):
         if ridge == "blr":
@@ -439,8 +449,26 @@ class PopsRidgePath:
         if r not in self._means:
             lam = self.ridge_abs(r)
             cf = cho_factor(self._Ms + lam * jnp.eye(self._Ms.shape[0]), lower=True)
-            self._means[r] = self.Dinv * cho_solve(cf, self._Db)
+            c = self.Dinv * cho_solve(cf, self._Db)
+            if not bool(jnp.all(jnp.isfinite(c))):           # the normal equations failed: the streamed QR does not
+                c = self._qr_mean(lam)                       # square the condition number (solve.posterior_qr)
+            self._means[r] = c
         return self._means[r]
+
+    def _qr_mean(self, lam):
+        """c*(lam) by the streamed QR of [prior; weighted rows] (solve.posterior_qr), at the prior Gamma^2 lam:
+        log_sigma_c = -log(lam) / 2, the theta's noise scales (the same loss weights 1/sigma_q as the rows).  The
+        stable route when D^-1 M D^-1 + lam is too ill-conditioned for a Cholesky (kappa^2 > 1/eps), which is where
+        a near-interpolating evidence fit with sigma_c on its bound puts the BLR mean."""
+        import warnings
+        from .solve import posterior_qr
+        warnings.warn(f"POPS mean: the Cholesky of the ridge system (lam = {lam:.3g}) is not finite; using the "
+                      "streamed QR", RuntimeWarning, stacklevel=3)
+        th = self.theta._replace(log_sigma_c=jnp.asarray(-0.5 * jnp.log(lam), dtype=jnp.asarray(self.theta.log_sigma_c).dtype))
+        c = posterior_qr(self.prob, self.ds, th)[0]
+        if not bool(jnp.all(jnp.isfinite(c))):
+            raise FloatingPointError(f"POPS mean not finite at lam = {lam:.3g}, by Cholesky or by QR")
+        return c
 
     def use_mean(self, ridge):
         """Pin the mean to c*(ridge) for every subsequent ridge (None: unpin)."""
@@ -456,7 +484,15 @@ class PopsRidgePath:
         return self.c_star_at(self.mean_ridge)
 
     def A(self, ridge):
-        return (self.W / (self.Lam + self.ridge_abs(ridge))) @ self.W.T
+        lam = self.ridge_abs(ridge)
+        rel = lam / float(jnp.max(self.Lam))
+        if rel < POPS_MIN_RIDGE * (1 - 1e-6) and _rkey(ridge) not in self._warned_floor:   # a grid value at the floor
+            #                                                     (rel = ridge * maxL / maxL) must not warn by roundoff
+            import warnings
+            self._warned_floor.add(_rkey(ridge))
+            warnings.warn(f"POPS ridge {ridge!r} is {rel:.1e} of max Lambda, below POPS_MIN_RIDGE = {POPS_MIN_RIDGE:g}: "
+                          "the box is set by roundoff there", RuntimeWarning, stacklevel=2)
+        return (self.W / (self.Lam + lam)) @ self.W.T
 
     def _coef(self, ridge, leverage_pct):
         """Pass 1 of the streamed POPS: A, the per-row coefficient c_i = r_i / h_i
@@ -630,8 +666,13 @@ def select_pops_ridge(theta, prob, ds_fit, ds_val, grid, form="hypercube", lever
                 scores[q].append(np.nan); continue
             scores[q].append(float(np.mean(crps_gaussian(y, m, s))))
     scores = {q: np.asarray(v) for q, v in scores.items()}
+    bad = [q for q in "EFV" if len(scores[q]) and not np.isfinite(scores[q]).any()
+           and any(np.asarray(getattr(ds_val, f"w_{q}")).ravel() > 0)]
+    if bad:                                                   # never a silent grid[0]: the mean or every member is NaN
+        raise FloatingPointError(f"POPS ridge selection: every score is non-finite for {bad} "
+                                 f"(mean finite: {bool(np.all(np.isfinite(np.asarray(path.c_star))))})")
     ridge = {q: (float(grid[int(np.nanargmin(scores[q]))]) if np.isfinite(scores[q]).any()
-                 else float(grid[0])) for q in "EFV"}
+                 else float(grid[0])) for q in "EFV"}               # a quantity with no validation rows
     return ridge, scores
 
 
