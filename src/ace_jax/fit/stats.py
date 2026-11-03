@@ -341,7 +341,8 @@ def tree_reduce(acc, extra, comm):
     return acc, extra
 
 
-def host_qr_stream(batch_rows_fn, ds, init, merge_rows=None, checkpoint=None, key=None, extra=None, batches=None):
+def host_qr_stream(batch_rows_fn, ds, init, merge_rows=None, checkpoint=None, key=None, extra=None, batches=None,
+                   progress=None, progress_every=25):
     """The updating QR of streamed rows, its merges on the host (SciPy, the calling thread).
     batch_rows_fn(batch) -> [(Pw, yw), ...] (jitted by the caller), one pair per factor;
     init = [(R0, c0), ...].  Returns [(R, c), ...] as jax arrays.  Each factor's live rows are
@@ -359,7 +360,7 @@ def host_qr_stream(batch_rows_fn, ds, init, merge_rows=None, checkpoint=None, ke
     checkpoint.every seconds (after flushing, so a resumed pass merges exactly as an uninterrupted one
     with the same checkpoints); extra: the caller's dict of scalar accumulators, saved and restored with it.
     batches: the batch indices to stream (default all; an MPI rank's `shard_batches`); the checkpoint
-    counts positions in it."""
+    counts positions in it.  progress(done, total): called every progress_every batches and at the end."""
     order = list(range(ds.n_batches)) if batches is None else list(batches)
     acc = [(np.asarray(R, np.float64), np.asarray(c, np.float64)) for R, c in init]
     buf, fill = [[] for _ in acc], [0] * len(acc)
@@ -391,6 +392,8 @@ def host_qr_stream(batch_rows_fn, ds, init, merge_rows=None, checkpoint=None, ke
             buf[k].append((Pw, yw)); fill[k] += len(yw)
             if fill[k] >= target[k]:
                 flush(k)
+        if progress is not None and ((pos + 1) % progress_every == 0 or pos + 1 == len(order)):
+            progress(pos + 1, len(order))
         if checkpoint is not None and pos + 1 < len(order) and time.time() - t_save >= checkpoint.every:
             for k in range(len(acc)):
                 flush(k)
@@ -559,8 +562,17 @@ def linear_qr_statistics(model, cfg, ds, merge_rows=None, host=None, row_dtype="
         key = None if ck is None else problem_key(model, ds, row_dtype, L, merge_target(L, merge_rows))
         if key is not None and size > 1:
             key = f"{key}-r{rank}of{size}"           # each rank checkpoints its own shard
+        t0 = time.time()
+
+        def report(done, total):                 # per-rank throughput: stderr on every rank, progress.jsonl on 0
+            import sys
+            dt = time.time() - t0
+            print(f"qr stats rank {rank}/{size}: {done}/{total} batches, {dt:.0f} s "
+                  f"({3600.0 * done / max(dt, 1e-9):.1f} batches/h)", file=sys.stderr, flush=True)
+            from .progress import emit
+            emit("qr_batches", rank=rank, size=size, done=done, total=total, seconds=round(dt, 1))
         acc = host_qr_stream(parts, ds, zeros, merge_rows, checkpoint=ck, key=key, extra=scal,
-                             batches=shard_batches(ds.n_batches, rank, size))
+                             batches=shard_batches(ds.n_batches, rank, size), progress=report)
         if size > 1:
             out = tree_reduce(acc, scal, comm)
             if out is None:

@@ -101,3 +101,12 @@ def test_mpi_fit_matches_serial(tmp_path):
     for k in a:
         assert b[k] == pytest.approx(a[k], rel=1e-6, abs=1e-8), k
     assert not (tmp_path / "mpi" / "progress.rank1.jsonl").exists()   # only rank 0 reports
+
+
+def test_host_qr_stream_reports_progress():
+    """progress(done, total) every `every` batches and once at the end (per-rank throughput in large fits)."""
+    ds, init = _problem(nb=11)
+    calls = []
+    stats.host_qr_stream(_rows, ds, init, merge_rows=4, progress=lambda done, total: calls.append((done, total)),
+                         progress_every=4, batches=stats.shard_batches(11, 0, 1))
+    assert calls == [(4, 11), (8, 11), (11, 11)]
