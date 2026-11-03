@@ -58,6 +58,7 @@ class FitConfig:
     init: dict | None = None             # Hypers field -> value
     checkpoint: str | None = None        # directory: resumable fit (stats.QRCheckpoint; MAP theta_ckpt.json)
     checkpoint_every: float = 45.0       # minutes between QR-statistics checkpoints
+    mpi: bool = False                    # shard the training statistics over MPI ranks (mpi4py; the [mpi] extra)
     noise: str = "auto"                  # "per-quantity" (sigma_E, sigma_F, sigma_V free) | "shared" (one
                                          # sigma for every weighted row, ACEfit's BLR: the weights set the balance)
                                          # | "auto": validate() resolves it -- shared when weights/factors are given

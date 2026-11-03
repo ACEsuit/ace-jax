@@ -41,6 +41,10 @@ a different, narrower POPS box than in 0.5.1:
 
 ### Added
 
+- **MPI-sharded training statistics** (`aj fit --mpi`, the new `[mpi]` extra: mpi4py). Run under `srun` or
+  `mpirun` with one rank per node. Each rank streams every N-th batch into its own QR factors. A binary tree
+  merges the factors onto rank 0, which runs the rest of the fit. The statistics pass is limited by memory
+  bandwidth, so it scales with nodes, not with ranks on one node. It works with `--checkpoint`.
 - **Resumable fits** (`aj fit --checkpoint DIR`, `--checkpoint-every MIN`, default 45). The training
   statistics pass saves its QR factors to DIR at that interval, and the MAP saves its best
   hyperparameters after each evaluation. Run the same command again to resume. A complete statistics pass
