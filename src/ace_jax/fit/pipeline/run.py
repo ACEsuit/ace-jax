@@ -58,8 +58,9 @@ def fit(cfg, data, log=print, on_stage=None):
         tm = {**b.timings, **mf.timings, **pr.timings, "total": time.time() - T0}
         return FitResult(cfg, data, b, mf.theta, mf, rg, pr, tm, None, radial, readout)
     with highest_precision():
-        with progress_stage("objective"):            # the training statistics pass
-            obj = make_objective(cfg, data, b)
+        from ..stats import qr_checkpoint
+        with progress_stage("objective"), qr_checkpoint(cfg.checkpoint, 60.0 * cfg.checkpoint_every, log):
+            obj = make_objective(cfg, data, b)       # the training statistics pass; resumable (--checkpoint)
         with progress_stage("map"):
             mf = fit_map(cfg, data, b, obj, log=log)
             if cfg.row_check:                      # recorded in map_convergence.json

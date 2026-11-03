@@ -1,3 +1,7 @@
+import dataclasses
+import json
+import os
+import pathlib
 import time
 import warnings
 from typing import NamedTuple
@@ -214,6 +218,11 @@ def _rho_fix(cfg, prob):
 
 def fit_map(cfg, d, b, obj, log=print):
     prob, t = b.prob, time.time()
+    ckpt = None if cfg.checkpoint is None else pathlib.Path(cfg.checkpoint) / "theta_ckpt.json"
+    best_v = [-np.inf]
+    if ckpt is not None and cfg.init is None and ckpt.exists():
+        cfg = dataclasses.replace(cfg, init=json.loads(ckpt.read_text()))
+        log(f"checkpoint: MAP starts from {ckpt}")
     init = None if cfg.init is None else Hypers(**cfg.init)
     if cfg.sigma_type:
         from ..ladder import run_map_ps
@@ -231,7 +240,14 @@ def fit_map(cfg, d, b, obj, log=print):
 
     def vg_host(x):
         v, g = obj.vg(jnp.asarray(x)); g.block_until_ready()
-        return float(v), np.asarray(g, float)
+        v, g = float(v), np.asarray(g, float)
+        if ckpt is not None and np.isfinite(v) and v > best_v[0]:      # the best point so far, for a restart
+            best_v[0] = v
+            ckpt.parent.mkdir(parents=True, exist_ok=True)
+            tmp = ckpt.with_suffix(".tmp")
+            tmp.write_text(json.dumps({k: float(a) for k, a in zip(Hypers._fields, x)}, indent=1))
+            os.replace(tmp, ckpt)
+        return v, g
     polish = polish_wanted(cfg)
     tied = getattr(obj, "tied", None)               # shared noise: log_sigma_E/V copy log_sigma_F
     free = None if tied is None else ~tied

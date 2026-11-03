@@ -56,6 +56,8 @@ class FitConfig:
                                          # "auto" (linear arm, cached-Gram LML) | "on" (any arm) | "off"
     strict: bool = False                 # raise MapNotConverged (not a warning) when the MAP is not stationary
     init: dict | None = None             # Hypers field -> value
+    checkpoint: str | None = None        # directory: resumable fit (stats.QRCheckpoint; MAP theta_ckpt.json)
+    checkpoint_every: float = 45.0       # minutes between QR-statistics checkpoints
     noise: str = "auto"                  # "per-quantity" (sigma_E, sigma_F, sigma_V free) | "shared" (one
                                          # sigma for every weighted row, ACEfit's BLR: the weights set the balance)
                                          # | "auto": validate() resolves it -- shared when weights/factors are given
