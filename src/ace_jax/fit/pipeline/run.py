@@ -11,6 +11,10 @@ from .problem import build_problem
 from .rungs import run_rungs
 
 
+class StatsOnlyDone(Exception):
+    """Raised by `fit` after the training statistics when cfg.stats_only: they are in cfg.checkpoint."""
+
+
 class FitResult(NamedTuple):
     config: object; data: object; built: object; theta: object
     map: object; rungs: object; preds: object; timings: dict
@@ -58,9 +62,18 @@ def fit(cfg, data, log=print, on_stage=None):
         tm = {**b.timings, **mf.timings, **pr.timings, "total": time.time() - T0}
         return FitResult(cfg, data, b, mf.theta, mf, rg, pr, tm, None, radial, readout)
     with highest_precision():
-        from ..stats import qr_checkpoint
-        with progress_stage("objective"), qr_checkpoint(cfg.checkpoint, 60.0 * cfg.checkpoint_every, log):
+        from ..stats import mpi_shards, qr_checkpoint
+        comm = None
+        if cfg.mpi:
+            from mpi4py import MPI
+            comm = MPI.COMM_WORLD
+        with progress_stage("objective"), qr_checkpoint(cfg.checkpoint, 60.0 * cfg.checkpoint_every, log), \
+                mpi_shards(comm):
             obj = make_objective(cfg, data, b)       # the training statistics pass; resumable (--checkpoint)
+        if cfg.stats_only:
+            log(f"stats-only: training statistics saved in {cfg.checkpoint}; run the same fit without "
+                "--stats-only (and without --mpi) to fit")
+            raise StatsOnlyDone(cfg.checkpoint)
         with progress_stage("map"):
             mf = fit_map(cfg, data, b, obj, log=log)
             if cfg.row_check:                      # recorded in map_convergence.json

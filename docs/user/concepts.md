@@ -283,6 +283,8 @@ These pages use the words below with one meaning only.
 | coefficients | the linear weights $c$ of the B functions (the *readout*) |
 | arm | the model type that a fit uses: the linear model (`--m-per-species 0`) or the hybrid ACE + GP model |
 | evidence | the log marginal likelihood of the training data |
+| training statistics | the QR factors of the weighted design rows of the training set, from which a linear fit calculates the evidence and the coefficients |
+| rank | one MPI process of a fit with `aj fit --mpi`. Use one rank for each node |
 | rung | one approximation of the hyperparameter posterior: `map` (the default), `laplace`, `pathfinder`, `vi`, `nuts` |
 | slot | one place in the fixed-size neighbour row of an atom. `K` slots for each atom set the cost of the model in JAX-MD and LAMMPS |
 | uncertainty shape | the per-atom 3×3 matrix $V$ of `--uq ard`, which shows where the model is not certain and in which direction |

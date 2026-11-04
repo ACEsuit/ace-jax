@@ -198,6 +198,13 @@ def _host_merge(R, c, Pw, yw, upper=False):
     return np.triu(a[:n, :n]), a[:n, n].copy()
 
 
+def _rank_family(key):
+    """The MPI-rank part of a checkpoint key ("-r3of8"), or "" for a serial key: saves clear stale files of their
+    own family only, so ranks sharing a directory keep each other's checkpoints."""
+    i = key.rfind("-r")
+    return key[i:] if i >= 0 and "of" in key[i:] else ""
+
+
 class QRCheckpoint:
     """Where and how often `host_qr_stream` saves its state (`aj fit --checkpoint DIR`).  The state is
     each factor's (R, c) after flushing its buffered rows, the next batch index and the caller's scalar
@@ -224,8 +231,9 @@ class QRCheckpoint:
 
     def save(self, key, acc, nxt, extra):
         self.dir.mkdir(parents=True, exist_ok=True)
-        for old in self.dir.glob("qrstats-*.npz"):         # one problem per directory: a stale one is GBs
-            if old != self.path(key):
+        fam = _rank_family(key)
+        for old in self.dir.glob("qrstats-*.npz"):         # one problem per directory: a stale one is GBs; only
+            if old != self.path(key) and _rank_family(old.name[8:-4]) == fam:    # this rank's, not other ranks'
                 old.unlink()
         tmp = self.dir / f".qrstats-{key}.tmp.npz"
         np.savez(tmp, key=key, next=nxt, n_factors=len(acc), extra=json.dumps(extra),
@@ -260,7 +268,90 @@ def problem_key(*trees):
     return h.hexdigest()
 
 
-def host_qr_stream(batch_rows_fn, ds, init, merge_rows=None, checkpoint=None, key=None, extra=None):
+def shard_batches(n_batches, rank, size):
+    """The batches MPI rank `rank` of `size` streams (`aj fit --mpi`): every size-th, interleaved, so each
+    rank sees the dataset's whole range of configuration sizes."""
+    return range(rank, n_batches, size)
+
+
+def merge_factors(a, b):
+    """[(R, c), ...] of two disjoint row sets merged into the factors of their union: the stacked QR of
+    [R_a; R_b] against [c_a; c_b] (tall-skinny QR).  Exact, as the factors of one pass over both.  Both
+    are triangular, so tpqrt skips R_b's zeros too (_host_merge upper=True: ~3x the dense-rows merge)."""
+    return [_host_merge(np.asarray(Ra, np.float64), np.asarray(ca, np.float64), np.asarray(Rb, np.float64),
+                        np.asarray(cb, np.float64), upper=True) for (Ra, ca), (Rb, cb) in zip(a, b)]
+
+
+def tree_schedule(size):
+    """Rounds of (sender, receiver) pairs merging `size` ranks' factors onto rank 0 in ceil(log2 size)
+    rounds: in round k, rank r + 2^k sends to r for every r divisible by 2^(k+1)."""
+    rounds, step = [], 1
+    while step < size:
+        rounds.append([(r + step, r) for r in range(0, size, 2 * step) if r + step < size])
+        step *= 2
+    return rounds
+
+
+class MPIWorkerDone(Exception):
+    """Raised on MPI ranks other than 0 once their factors are merged: rank 0 runs the rest of the fit."""
+
+
+_MPI_COMM = None           # set by `mpi_shards` (aj fit --mpi): linear_qr_statistics shards its host pass over it
+_MPI_CHUNK = 1 << 27       # elements per Send/Recv: below MPI's 2^31 count for any L
+
+
+@contextlib.contextmanager
+def mpi_shards(comm):
+    """Shard the host QR statistics pass(es) run inside the block over the ranks of `comm` (mpi4py); None: off."""
+    global _MPI_COMM
+    prev = _MPI_COMM
+    _MPI_COMM = comm
+    try:
+        yield comm
+    finally:
+        _MPI_COMM = prev
+
+
+def _send_array(comm, a, dest, tag):
+    flat = np.ascontiguousarray(a).reshape(-1)
+    for k, i in enumerate(range(0, max(flat.size, 1), _MPI_CHUNK)):
+        comm.Send(flat[i:i + _MPI_CHUNK], dest=dest, tag=tag + k)
+
+
+def _recv_array(comm, shape, src, tag):
+    flat = np.empty(int(np.prod(shape)), np.float64)
+    for k, i in enumerate(range(0, max(flat.size, 1), _MPI_CHUNK)):
+        comm.Recv(flat[i:i + _MPI_CHUNK], source=src, tag=tag + k)
+    return flat.reshape(shape)
+
+
+def tree_reduce(acc, extra, comm):
+    """Merge every rank's factors `acc` ([(R, c), ...]) and sum its scalar dict `extra` onto rank 0 by
+    `tree_schedule`.  Returns (acc, extra) on rank 0 and None elsewhere.  A receiver merges factor by factor:
+    peak memory its own factors plus one received factor and its merge workspace (~(1 + 2/3 + 2/3) x its own
+    for three equal factors), not two full sets."""
+    acc = list(acc)
+    rank = comm.Get_rank()
+    for rnd in tree_schedule(comm.Get_size()):
+        for src, dst in rnd:
+            if rank == src:
+                comm.send(dict(extra), dest=dst, tag=1)
+                for k, (R, c) in enumerate(acc):
+                    _send_array(comm, R, dst, 1000 * (2 * k + 1)); _send_array(comm, c, dst, 1000 * (2 * k + 2))
+                return None
+            if rank == dst:                  # one factor at a time: peak own + one received + its merge workspace
+                ex = comm.recv(source=src, tag=1)
+                for k, (R, c) in enumerate(acc):
+                    other = (_recv_array(comm, R.shape, src, 1000 * (2 * k + 1)),
+                             _recv_array(comm, c.shape, src, 1000 * (2 * k + 2)))
+                    acc[k] = merge_factors([(R, c)], [other])[0]
+                    del other
+                extra = {k: extra.get(k, 0.0) + v for k, v in ex.items()}
+    return acc, extra
+
+
+def host_qr_stream(batch_rows_fn, ds, init, merge_rows=None, checkpoint=None, key=None, extra=None, batches=None,
+                   progress=None, progress_every=25):
     """The updating QR of streamed rows, its merges on the host (SciPy, the calling thread).
     batch_rows_fn(batch) -> [(Pw, yw), ...] (jitted by the caller), one pair per factor;
     init = [(R0, c0), ...].  Returns [(R, c), ...] as jax arrays.  Each factor's live rows are
@@ -276,7 +367,10 @@ def host_qr_stream(batch_rows_fn, ds, init, merge_rows=None, checkpoint=None, ke
 
     checkpoint (a QRCheckpoint) with key: resume from a saved state of the same problem and save every
     checkpoint.every seconds (after flushing, so a resumed pass merges exactly as an uninterrupted one
-    with the same checkpoints); extra: the caller's dict of scalar accumulators, saved and restored with it."""
+    with the same checkpoints); extra: the caller's dict of scalar accumulators, saved and restored with it.
+    batches: the batch indices to stream (default all; an MPI rank's `shard_batches`); the checkpoint
+    counts positions in it.  progress(done, total): called every progress_every batches and at the end."""
+    order = list(range(ds.n_batches)) if batches is None else list(batches)
     acc = [(np.asarray(R, np.float64), np.asarray(c, np.float64)) for R, c in init]
     buf, fill = [[] for _ in acc], [0] * len(acc)
     start = 0
@@ -286,8 +380,8 @@ def host_qr_stream(batch_rows_fn, ds, init, merge_rows=None, checkpoint=None, ke
             acc, start, ex = st
             if extra is not None:
                 extra.clear(); extra.update(ex)
-            checkpoint.log(f"checkpoint: QR statistics complete ({checkpoint.path(key)})" if start >= ds.n_batches
-                           else f"checkpoint: QR statistics resumed at batch {start} of {ds.n_batches}")
+            checkpoint.log(f"checkpoint: QR statistics complete ({checkpoint.path(key)})" if start >= len(order)
+                           else f"checkpoint: QR statistics resumed at batch {start} of {len(order)}")
     t_save = time.time()
     target = [max(merge_target(R.shape[1], merge_rows), 1) for R, _ in acc]
 
@@ -296,7 +390,8 @@ def host_qr_stream(batch_rows_fn, ds, init, merge_rows=None, checkpoint=None, ke
             acc[k] = _host_merge(*acc[k], np.concatenate([p for p, _ in buf[k]]),
                                  np.concatenate([v for _, v in buf[k]]))
         buf[k], fill[k] = [], 0
-    for i in range(start, ds.n_batches):
+    for pos in range(start, len(order)):
+        i = order[pos]
         parts = batch_rows_fn(jax.tree.map(lambda a: a[i], ds))
         for k, (Pw, yw) in enumerate(parts):
             Pw, yw = np.asarray(Pw, np.float64), np.asarray(yw, np.float64)
@@ -306,15 +401,21 @@ def host_qr_stream(batch_rows_fn, ds, init, merge_rows=None, checkpoint=None, ke
             buf[k].append((Pw, yw)); fill[k] += len(yw)
             if fill[k] >= target[k]:
                 flush(k)
-        if checkpoint is not None and i + 1 < ds.n_batches and time.time() - t_save >= checkpoint.every:
+        if progress is not None and ((pos + 1) % progress_every == 0 or pos + 1 == len(order)):
+            progress(pos + 1, len(order))
+        if checkpoint is not None and pos + 1 < len(order) and time.time() - t_save >= checkpoint.every:
+            tf = time.time()
             for k in range(len(acc)):
                 flush(k)
-            checkpoint.save(key, acc, i + 1, extra or {})
+            ts = time.time()
+            checkpoint.save(key, acc, pos + 1, extra or {})
+            checkpoint.log(f"checkpoint: saved batch {pos + 1} of {len(order)}: flush {ts - tf:.0f} s, "
+                           f"write {time.time() - ts:.0f} s")
             t_save = time.time()
     for k in range(len(acc)):
         flush(k)
-    if checkpoint is not None and start < ds.n_batches:
-        checkpoint.save(key, acc, ds.n_batches, extra or {})
+    if checkpoint is not None and start < len(order):
+        checkpoint.save(key, acc, len(order), extra or {})
     return [(jnp.asarray(R), jnp.asarray(c)) for R, c in acc]
 
 
@@ -469,10 +570,33 @@ def linear_qr_statistics(model, cfg, ds, merge_rows=None, host=None, row_dtype="
             for q, (_, _, yy, n, lw) in zip("EFV", out):
                 scal[f"yy_{q}"] += float(yy); scal[f"n_{q}"] += float(n); scal[f"logw_{q}"] += float(lw)
             return [(Pw, yw) for Pw, yw, *_ in out]
-        ck = _QR_CHECKPOINT
-        key = None if ck is None else problem_key(model, ds, row_dtype, L, merge_target(L, merge_rows))
-        (RE, cE), (RF, cF), (RV, cV) = host_qr_stream(parts, ds, zeros, merge_rows, checkpoint=ck, key=key,
-                                                      extra=scal)
+        ck, comm = _QR_CHECKPOINT, _MPI_COMM
+        rank, size = (0, 1) if comm is None else (comm.Get_rank(), comm.Get_size())
+        key = base = None if ck is None else problem_key(model, ds, row_dtype, L, merge_target(L, merge_rows))
+        if key is not None and size > 1:
+            key = f"{key}-r{rank}of{size}"           # each rank checkpoints its own shard
+        t0 = time.time()
+
+        def report(done, total):                 # per-rank throughput: stderr on every rank, progress.jsonl on 0
+            import sys
+            dt = time.time() - t0
+            print(f"qr stats rank {rank}/{size}: {done}/{total} batches, {dt:.0f} s "
+                  f"({3600.0 * done / max(dt, 1e-9):.1f} batches/h)", file=sys.stderr, flush=True)
+            from .progress import emit
+            emit("qr_batches", rank=rank, size=size, done=done, total=total, seconds=round(dt, 1))
+        acc = host_qr_stream(parts, ds, zeros, merge_rows, checkpoint=ck, key=key, extra=scal,
+                             batches=shard_batches(ds.n_batches, rank, size), progress=report)
+        if size > 1:
+            out = tree_reduce(acc, scal, comm)
+            if out is None:
+                raise MPIWorkerDone(rank)
+            acc, merged = out
+            scal.update(merged)
+            if ck is not None:          # the merged factors under the serial key: a later run on one process (the
+                t = time.time()         # MAP job of the two-job form, `--stats-only`) finds the statistics complete
+                ck.save(base, acc, ds.n_batches, scal)
+                ck.log(f"checkpoint: merged statistics of {size} ranks saved ({ck.path(base)}, {time.time() - t:.0f} s)")
+        (RE, cE), (RF, cF), (RV, cV) = [(jnp.asarray(R), jnp.asarray(c)) for R, c in acc]
         return QRStats(RE, RF, RV, cE, cF, cV,
                        *(jnp.asarray(scal[f"{k}_{q}"]) for k in ("yy", "n", "logw") for q in "EFV"))
     ((RE, cE), (RF, cF), (RV, cV)), ex = _device_qr(model, cfg, ds, merge_rows)

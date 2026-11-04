@@ -66,6 +66,9 @@ cuda13 = ["jax[cuda13]>=0.10.1", "nvidia-cuda-nvcc>=13.0; sys_platform == 'linux
 native = ["matscipy-neighbours>=1.0"]
 # the former name of `native` (until the next release but one), same dependencies
 fast-neighbours = ["matscipy-neighbours>=1.0"]
+# MPI-sharded training statistics (`aj fit --mpi`, under srun/mpirun).  mpi4py needs an MPI library:
+# a cluster module (mpi4py then builds against its mpicc), or the `mpich` wheel for a local test run.
+mpi = ["mpi4py>=4.0"]
 # LAMMPS export (ace_jax.export.lammps, `aj export --out bundle.json`).  The pair
 # style is lammps-jax's LAMMPS plugin, built separately at the same version.
 # lammps-jax excludes jaxlib 0.10.2 (slow GPU scatter-add), so on Python 3.11

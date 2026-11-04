@@ -59,6 +59,9 @@ class FitConfig:
     init: dict | None = None             # Hypers field -> value
     checkpoint: str | None = None        # directory: resumable fit (stats.QRCheckpoint; MAP theta_ckpt.json)
     checkpoint_every: float = 45.0       # minutes between QR-statistics checkpoints
+    stats_only: bool = False             # stop after the training statistics (saved to `checkpoint`): the first
+                                         # job of a two-job fit; the same fit without it then runs only the MAP
+    mpi: bool = False                    # shard the training statistics over MPI ranks (mpi4py; the [mpi] extra)
     noise: str = "auto"                  # "per-quantity" (sigma_E, sigma_F, sigma_V free) | "shared" (one
                                          # sigma for every weighted row, ACEfit's BLR: the weights set the balance)
                                          # | "auto": validate() resolves it -- shared when weights/factors are given
@@ -148,6 +151,8 @@ class FitConfig:
         return "shared" if weighted and not unavailable else "per-quantity"
 
     def validate(self):
+        if self.stats_only and not self.checkpoint:
+            raise ValueError("stats_only keeps the training statistics only in the checkpoint: set checkpoint")
         if self.batch_pack not in ("auto", "on", "off"):
             raise ValueError(f"batch_pack must be 'auto', 'on' or 'off', got {self.batch_pack!r}")
         if self.e0 not in ("lsq", "prefit", "model"):

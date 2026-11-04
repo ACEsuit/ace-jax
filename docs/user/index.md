@@ -47,6 +47,7 @@ run them on your computer or open them in molab.
 | reproduce or vary a fit from its `fit.yaml` | [Run files](howto/fit-yaml.md) |
 | learn the radial basis | [Learn the radial basis](howto/learned-radials.md) |
 | put calibrated error bars on forces | [Per-atom force uncertainty](howto/force-uncertainty.md) |
+| fit a large basis or dataset, or spread a fit over nodes | [Large linear fits](howto/large-fits.md) |
 | look up every CLI flag | [CLI reference](reference/cli.md) |
 | look up a Python function | [Python API](reference/api.md) |
 | correct a problem | [FAQ and troubleshooting](faq.md) |
