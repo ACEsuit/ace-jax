@@ -5,24 +5,24 @@
  "restart": null,
  "polish": {
   "converged": false,
-  "message": "stalled (3 steps in a row each gained less than F's roundoff 7.0e-10; |pg| 4.51e-08, gradient roundoff 9.3e-10, decrement^2 2.2e-16)",
+  "message": "stalled (3 steps in a row each gained less than F's roundoff 5.8e-10; |pg| 1.71e-08, gradient roundoff 7.0e-10, decrement^2 4.2e-17)",
   "steps": 7,
   "hessian_evals": 8,
-  "pg_start": 2.283671660265013,
-  "pg": 4.512293916292265e-08,
-  "decrement": 2.191218281825746e-16,
-  "noise": 5.854303708474617e-10,
+  "pg_start": 2.28367166193593,
+  "pg": 1.7076271952021216e-08,
+  "decrement": 4.1662613689066195e-17,
+  "noise": 8.151346264639869e-10,
   "hvps": 32,
-  "evals": 72
+  "evals": 47
  },
- "logpost": 192.45028944535866,
- "pgrad_inf": 4.512293927394495e-08,
+ "logpost": 192.45028944502715,
+ "pgrad_inf": 1.7076271840998913e-08,
  "pgrad_worst": "log_sigma_F",
- "gnoise_max": 1.1643271129261882e-09,
- "gain": 1.0973041406388705e-16,
+ "gnoise_max": 9.314095219440946e-10,
+ "gain": 1.6204400427427885e-17,
  "gain_tol": 0.001,
  "noise_floor": 0.0,
  "resolution_limited": false,
  "converged": true,
- "log_evidence": 204.66705063265516
+ "log_evidence": 204.6670506340369
 }
