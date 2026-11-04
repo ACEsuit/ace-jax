@@ -31,15 +31,20 @@ The table gives the measured rates for one dataset: 3600 configurations of
 |---|---|---|
 | Training statistics | 4 nodes of 48 cores (Intel Xeon), one MPI rank each | approximately 1700 batches per hour for each node (17 minutes in total) |
 | Merge of the 4 ranks, with checkpoints | the same 4 nodes | approximately 10 minutes |
-| MAP | one node of 48 cores | approximately 10 minutes for each step |
+| MAP, `--noise shared` | one node of 32 cores (mnf148) | approximately 40 seconds for each step |
+| MAP, `--noise per-quantity` | one node of 32 cores (mnf148) | approximately 100 seconds for each step |
 
 Reading the dataset took approximately 70 seconds. Compiling the calculation
 took less than one minute. With `--mpi`, the rate for each node does not
 change, so N nodes take approximately 1/N of the time.
 
 The MAP usually needs tens of steps. Thus, for this dataset the MAP takes
-more time than the training statistics. Its time does not decrease with more
-nodes. See [Run the MAP as a second job](#run-the-map-as-a-second-job).
+approximately the same time as the training statistics. Its time does not
+decrease with more nodes. See
+[Run the MAP as a second job](#run-the-map-as-a-second-job).
+
+The time of one MAP step increases as L³. At L = 47,000, one step takes
+approximately 11 times longer than at L = 21,000.
 
 ## Pack the configurations into batches
 
@@ -171,8 +176,8 @@ If a setting is different, the second job does not find the checkpoint and
 calculates the training statistics again on one node.
 
 !!! warning "The MAP needs much memory"
-    The MAP needs approximately 170 L² bytes of memory. This is approximately
-    75 GB at L = 21,000 and approximately 380 GB at L = 47,000. For a large
+    The MAP needs approximately 90 L² bytes of memory. This is approximately
+    40 GB at L = 21,000 and approximately 200 GB at L = 47,000. For a large
     basis, use a large-memory node for the second job.
 
 !!! note "Disk space for the checkpoints"
