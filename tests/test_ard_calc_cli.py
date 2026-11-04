@@ -417,8 +417,9 @@ def test_fit_flags_map_to_config():
                               "--uq", "ard", "--m-per-species", "0", "--force-shape", "aniso",
                               "--ard-coverage", "0.8", "--ard-groups", "none", "--ard-cluster-size", "inf",
                               "--ard-press", "block", "--ard-n-min", "7", "--no-ard-support",
-                              "--ard-transfer", "sqrt"])
+                              "--ard-transfer", "sqrt", "--ard-prior", "fixed"])
     c = _fit_config(a)
+    assert c.ard_prior == "fixed"
     assert (c.ard_force_shape, c.ard_coverage, c.ard_groups, c.ard_press, c.ard_n_min, c.ard_support) == \
         ("aniso", 0.8, "none", "block", 7, False)
     assert c.ard_transfer == "sqrt"
@@ -426,7 +427,7 @@ def test_fit_flags_map_to_config():
     d = _fit_config(_parser().parse_args(["fit", "--model", "m.npz", "--data", "d.xyz", "--r0", "2.3", "--out", "o"]))
     assert (d.ard_force_shape, d.ard_coverage, d.ard_groups, d.ard_press, d.ard_n_min, d.ard_support) == \
         ("aniso", 0.9, "distortion", "exact", 20, True)
-    assert d.ard_transfer == "exponent"
+    assert d.ard_transfer == "exponent" and d.ard_prior == "fit"
 
 
 def test_calibrate_per_group_keeps_support_consistent(fitted, calib_set, tmp_path):

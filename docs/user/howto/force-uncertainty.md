@@ -394,6 +394,7 @@ default is `raw`.
 | `--ard-solver` | `auto` | the factorisation of the evidence: `qr` (the default for `--uq ard`) or `cholesky` (the default for `--uq ard-gp`) |
 | `--ard-cond-max` | 1e22 (`qr`), 1e14 (`cholesky`) | the largest condition number of the scaled system that the prior floor permits |
 | `--ard-allow-degenerate` | | write the posterior when every prior scale stops on the floor (see below) |
+| `--ard-prior` | `fit` | `fit` sets the prior scales by evidence; `fixed` keeps the BLR prior (one $\sigma_c$) in every fit of the stage, so the calibrated forces and the jackknife shape are those of the BLR posterior (needs `--ard-solver qr`) |
 | `--no-ard-support` | | skip the support reference |
 | `--ard-support-features` | `raw` | features of the support reference: `raw` descriptors, or `normalised` (unit-norm descriptor plus log-norm channels per body order) |
 | `--batch-pack` | `auto` | batches configurations by an atom budget when a set has small and large cells |
