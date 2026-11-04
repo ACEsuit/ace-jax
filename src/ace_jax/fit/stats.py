@@ -198,6 +198,13 @@ def _host_merge(R, c, Pw, yw, upper=False):
     return np.triu(a[:n, :n]), a[:n, n].copy()
 
 
+def _rank_family(key):
+    """The MPI-rank part of a checkpoint key ("-r3of8"), or "" for a serial key: saves clear stale files of their
+    own family only, so ranks sharing a directory keep each other's checkpoints."""
+    i = key.rfind("-r")
+    return key[i:] if i >= 0 and "of" in key[i:] else ""
+
+
 class QRCheckpoint:
     """Where and how often `host_qr_stream` saves its state (`aj fit --checkpoint DIR`).  The state is
     each factor's (R, c) after flushing its buffered rows, the next batch index and the caller's scalar
@@ -224,8 +231,9 @@ class QRCheckpoint:
 
     def save(self, key, acc, nxt, extra):
         self.dir.mkdir(parents=True, exist_ok=True)
-        for old in self.dir.glob("qrstats-*.npz"):         # one problem per directory: a stale one is GBs
-            if old != self.path(key):
+        fam = _rank_family(key)
+        for old in self.dir.glob("qrstats-*.npz"):         # one problem per directory: a stale one is GBs; only
+            if old != self.path(key) and _rank_family(old.name[8:-4]) == fam:    # this rank's, not other ranks'
                 old.unlink()
         tmp = self.dir / f".qrstats-{key}.tmp.npz"
         np.savez(tmp, key=key, next=nxt, n_factors=len(acc), extra=json.dumps(extra),
@@ -395,9 +403,13 @@ def host_qr_stream(batch_rows_fn, ds, init, merge_rows=None, checkpoint=None, ke
         if progress is not None and ((pos + 1) % progress_every == 0 or pos + 1 == len(order)):
             progress(pos + 1, len(order))
         if checkpoint is not None and pos + 1 < len(order) and time.time() - t_save >= checkpoint.every:
+            tf = time.time()
             for k in range(len(acc)):
                 flush(k)
+            ts = time.time()
             checkpoint.save(key, acc, pos + 1, extra or {})
+            checkpoint.log(f"checkpoint: saved batch {pos + 1} of {len(order)}: flush {ts - tf:.0f} s, "
+                           f"write {time.time() - ts:.0f} s")
             t_save = time.time()
     for k in range(len(acc)):
         flush(k)

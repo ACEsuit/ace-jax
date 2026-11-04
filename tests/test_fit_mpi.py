@@ -110,3 +110,16 @@ def test_host_qr_stream_reports_progress():
     stats.host_qr_stream(_rows, ds, init, merge_rows=4, progress=lambda done, total: calls.append((done, total)),
                          progress_every=4, batches=stats.shard_batches(11, 0, 1))
     assert calls == [(4, 11), (8, 11), (11, 11)]
+
+
+def test_rank_checkpoints_do_not_delete_each_other(tmp_path):
+    """Each MPI rank checkpoints its shard under its own key (`-r{rank}of{size}`) in one directory: a rank's save
+    clears only its own stale files, never another rank's (it did, so a resumed MPI fit recomputed the shards)."""
+    acc = [(np.eye(3), np.ones(3))]
+    r0, r1 = stats.QRCheckpoint(tmp_path, log=lambda *a: None), stats.QRCheckpoint(tmp_path, log=lambda *a: None)
+    r0.save("aa11-r0of2", acc, 5, {}); r1.save("aa11-r1of2", acc, 4, {})
+    assert {p.name for p in tmp_path.glob("qrstats-*.npz")} == {"qrstats-aa11-r0of2.npz", "qrstats-aa11-r1of2.npz"}
+    r0.save("bb22-r0of2", acc, 1, {})                       # a different problem: rank 0's stale file goes
+    assert {p.name for p in tmp_path.glob("qrstats-*.npz")} == {"qrstats-bb22-r0of2.npz", "qrstats-aa11-r1of2.npz"}
+    r0.save("cc33", acc, 1, {})                              # a serial run: its own stale serial files only
+    assert "qrstats-aa11-r1of2.npz" in {p.name for p in tmp_path.glob("qrstats-*.npz")}
