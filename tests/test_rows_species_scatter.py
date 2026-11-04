@@ -57,7 +57,7 @@ def test_species_scatter_matches_masked_passes(cantor):
     model, g, ds = cantor
     assert g.NZ == 5
     for i in range(min(2, ds.n_batches)):
-        bt = jax.tree.map(lambda a: a[i], ds)
+        bt = jax.tree.map(lambda a: a[i], ds)                   # noqa: B023 (consumed in this iteration)
         new, ref = jax.jit(lambda b: linear_rows(model, g, b)[0])(bt), jax.jit(lambda b: _rows_reference(model, g, b))(bt)
         for q in "EFV":
             a, r = np.asarray(getattr(new, q)), np.asarray(getattr(ref, q))
