@@ -124,6 +124,7 @@ nav:
       - Learn the radial basis: howto/learned-radials.md
       - Per-atom force uncertainty: howto/force-uncertainty.md
       - Labels from a foundation model: howto/foundation-labels.md
+      - Large linear fits: howto/large-fits.md
       - Reproducibility: howto/reproducibility.md
   - Performance: benchmarks.md
   - Reference:
