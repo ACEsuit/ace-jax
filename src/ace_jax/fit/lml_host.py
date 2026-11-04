@@ -51,17 +51,33 @@ def _frob_sym(X, Y):
 class HostQREvidence:
     """log_marginal_likelihood_qr(theta, qs, prob) at M = 0, by the structured host evaluation (module
     docstring).  `lml(theta)` is the JAX entry point; n_factor counts factorisations (one per theta: value,
-    gradient and Hessian at the same theta share it)."""
+    gradient and Hessian at the same theta share it).
 
-    def __init__(self, qs, prob):
-        self.R = [np.asarray(getattr(qs, f"R_{q}"), np.float64) for q in "EFV"]
-        self.c = [np.asarray(getattr(qs, f"c_{q}"), np.float64) for q in "EFV"]
-        self.n = np.array([float(getattr(qs, f"n_{q}")) for q in "EFV"])
+    shared: the caller ties sigma_E and sigma_V to sigma_F (cfg.noise "shared", paramset.tied_likelihood), so
+    only log_sigma_F is read and the three factors are merged once, here: one tpqrt merge and one trmm per
+    evaluation instead of three.  The merge's last diagonal r0 joins the residual outside c:
+    kappa = sum_q kappa_q + r0^2.  Only valid under that tie: an untied caller gets the wrong derivatives."""
+
+    def __init__(self, qs, prob, shared=False):
+        R = [np.asarray(getattr(qs, f"R_{q}"), np.float64) for q in "EFV"]
+        c = [np.asarray(getattr(qs, f"c_{q}"), np.float64) for q in "EFV"]
+        n = np.array([float(getattr(qs, f"n_{q}")) for q in "EFV"])
         self.logw = sum(float(getattr(qs, f"logw_{q}")) for q in "EFV")
         if getattr(qs, "rho_E", None) is not None:
-            self.kappa = np.array([float(getattr(qs, f"rho_{q}")) ** 2 for q in "EFV"])
+            kappa = np.array([float(getattr(qs, f"rho_{q}")) ** 2 for q in "EFV"])
         else:
-            self.kappa = np.array([float(getattr(qs, f"yy_{q}")) - float(c @ c) for q, c in zip("EFV", self.c)])
+            kappa = np.array([float(getattr(qs, f"yy_{q}")) - float(cq @ cq) for cq, q in zip(c, "EFV")])
+        self.shared, self.sigmas = bool(shared), ("F",) if shared else ("E", "F", "V")
+        if shared:
+            L = R[0].shape[0]
+            A = np.zeros((L + 1, L + 1), order="F")
+            A[:L, :L], A[:L, L] = R[0], c[0]
+            for Rq, cq in zip(R[1:], c[1:]):
+                A = _tri_merge(A, Rq, cq, 1.0)
+            R, c = [np.triu(A[:L, :L])], [A[:L, L].copy()]
+            kappa, n = np.array([kappa.sum() + float(A[L, L]) ** 2]), np.array([n.sum()])
+            del A
+        self.R, self.c, self.kappa, self.n = R, c, kappa, n
         self.g2 = np.asarray(prob.gamma, np.float64) ** 2
         e0p = getattr(prob, "e0_prec", None)
         self.e0p = np.zeros(0) if e0p is None else np.asarray(e0p, np.float64)
@@ -95,10 +111,11 @@ class HostQREvidence:
         if info != 0:
             raise np.linalg.LinAlgError(f"dtrtri info={info}")
         W = np.triu(W)
-        tr = np.empty(4)
+        K = len(self.R)
+        tr = np.empty(K + 1)
         Wr = W[:Lr]
         tr[0] = float(np.einsum("i,ij,ij->", self.g2, Wr, Wr))
-        rq = np.empty(3)
+        rq = np.empty(K)
         for k, (R, c) in enumerate(zip(self.R, self.c)):
             Yt = self._Yt(W, R)
             tr[k + 1] = float(np.einsum("ij,ij->", Yt, Yt))
@@ -147,7 +164,7 @@ class HostQREvidence:
             Yt = self._Yt(W, R)
             X.append(blas.dsyrk(1.0, Yt, trans=0))
             del Yt
-        Hld = -np.array([[_frob_sym(X[k], X[m]) for m in range(4)] for k in range(4)])
+        Hld = -np.array([[_frob_sym(X[k], X[m]) for m in range(len(X))] for k in range(len(X))])
         del X
         Hp = -0.5 * Hres - 0.5 * Hld - 0.5 * np.diag(f["cnt"] / p ** 2)
         return np.asarray(p[:, None] * Hp * p[None, :] + np.diag(p * gp), np.float64)
@@ -158,11 +175,12 @@ class HostQREvidence:
 
         def cb(fn, shape):
             return lambda t: jax.pure_callback(fn, jax.ShapeDtypeStruct(shape, f64), t, vmap_method="sequential")
-        hess = cb(self.hess, (4, 4))
+        m = 1 + len(self.sigmas)
+        hess = cb(self.hess, (m, m))
 
         @jax.custom_jvp
         def grad(t):
-            return cb(self.grad, (4,))(t)
+            return cb(self.grad, (m,))(t)
 
         @grad.defjvp
         def _grad_jvp(primals, tangents):
@@ -181,5 +199,6 @@ class HostQREvidence:
 
     def lml(self, theta):
         """The evidence at Hypers theta (a JAX function of theta; only sigma_c and the noises are read)."""
-        t = -2.0 * jnp.stack([jnp.asarray(getattr(theta, f"log_sigma_{q}"), jnp.float64) for q in "cEFV"])
+        t = -2.0 * jnp.stack([jnp.asarray(getattr(theta, f"log_sigma_{q}"), jnp.float64)
+                              for q in ("c",) + self.sigmas])
         return self._core(t)

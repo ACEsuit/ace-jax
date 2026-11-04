@@ -137,3 +137,44 @@ def test_host_evidence_on_si_fixture_at_the_stiff_point():
         assert abs(v1 - v0) < 1e-10 * scale, (v0, v1, scale)
         np.testing.assert_allclose(g1[6:], g0[6:], rtol=1e-6, atol=1e-9 * scale)
         np.testing.assert_allclose(H1[6:, 6:], H0[6:, 6:], rtol=1e-5, atol=1e-8 * scale)
+
+
+@pytest.mark.parametrize("case", CASES, ids=["plain", "e0", "rho", "e0-rho"])
+def test_shared_noise_form_matches_the_tied_dense_qr(case):
+    """shared=True (the factors merged once; only sigma_F read) under the noise tie is the tied dense form:
+    value, gradient and Hessian over the full 10-vector."""
+    from ace_jax.fit.lml_host import HostQREvidence
+    from ace_jax.fit.paramset import tie_noise
+    qs, prob = _problem(**case)
+    ev = HostQREvidence(qs, prob, shared=True)
+    for theta in THETAS:
+        a = to_array(theta)
+        dense = lambda x: log_marginal_likelihood_qr(Hypers(*tie_noise(x)), qs, prob)   # noqa: E731
+        host = lambda x: ev.lml(Hypers(*tie_noise(x)))                                  # noqa: E731
+        sF = float(np.exp(-2.0 * theta.log_sigma_F))
+        scale = sF * float(sum(getattr(qs, f"yy_{q}") for q in "EFV"))
+        v0, v1 = float(dense(a)), float(jax.jit(host)(a))
+        assert abs(v1 - v0) < 1e-11 * scale, (v0, v1, scale)
+        g0, g1 = np.asarray(jax.grad(dense)(a)), np.asarray(jax.jit(jax.grad(host))(a))
+        np.testing.assert_allclose(g1, g0, rtol=1e-10, atol=1e-12 * scale)
+        H0, H1 = np.asarray(jax.hessian(dense)(a)), np.asarray(jax.jit(jax.hessian(host))(a))
+        np.testing.assert_allclose(H1, H0, rtol=1e-10, atol=1e-11 * np.abs(H0).max())
+
+
+def test_make_objective_passes_the_noise_tie(monkeypatch):
+    """The pipeline asks make_lml for the shared form exactly when it ties the noise."""
+    from ace_jax.fit import objective
+    seen = []
+    real = objective.make_lml
+    monkeypatch.setattr("ace_jax.fit.pipeline.objective.make_lml",
+                        lambda *a, **k: seen.append(k.get("shared_noise")) or real(*a, **k))
+    qs, prob = _problem()
+    monkeypatch.setattr("ace_jax.fit.stats.linear_qr_statistics", lambda *a, **k: qs)
+    from ace_jax.fit.pipeline.objective import make_objective
+    from ace_jax.fit.hypers import default_prior
+    prob = prob._replace(prior=default_prior(2.35))
+    for noise, want in (("shared", True), ("per-quantity", False)):
+        cfg = SimpleNamespace(noise=noise, lml="qr", lml_solver="qr", devices=1, objective="lml")
+        monkeypatch.setattr("ace_jax.fit.pipeline.config.resolved_noise", lambda c: c.noise)
+        make_objective(cfg, SimpleNamespace(ds_train=None), SimpleNamespace(prob=prob))
+        assert seen[-1] is want

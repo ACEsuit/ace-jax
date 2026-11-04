@@ -63,7 +63,7 @@ def make_objective(cfg, d, b):
                 raise ValueError(f"devices={cfg.devices} requested, only {len(devs)} available")
             mesh = Mesh(np.array(devs), ("data",))
         if mesh is None and cfg.objective == "lml":
-            lik = tie(make_lml(prob, d.ds_train, cache_linear=True))
+            lik = tie(make_lml(prob, d.ds_train, cache_linear=True, shared_noise=tied is not None))
             if cfg.lml_solver == "svd":
                 lik = _svd_likelihood(lik, prob, tied, tie)
         else:
