@@ -24,17 +24,22 @@ L basis functions.
 The progress file `progress.jsonl` in the output directory records the time of
 each stage. The `objective` stage is the training statistics.
 
-The table gives the measured rate of the training statistics for one dataset:
-7800 configurations of 12 elements, in 4051 batches (L = 47,000).
+The table gives the measured rates for one dataset: 3600 configurations of
+8 elements in 1904 batches, with L = approximately 21,000.
 
-| Hardware | Batches per hour for each node |
-|---|---|
-| one node, 128 cores (AMD EPYC) | approximately 55 |
-| one node, 48 cores (Intel Xeon), one of 2 MPI ranks | approximately 148 |
+| Stage | Hardware | Measured time |
+|---|---|---|
+| Training statistics | 4 nodes of 48 cores (Intel Xeon), one MPI rank each | approximately 1700 batches per hour for each node (17 minutes in total) |
+| Merge of the 4 ranks, with checkpoints | the same 4 nodes | approximately 10 minutes |
+| MAP | one node of 48 cores | approximately 10 minutes for each step |
 
-Reading the dataset took approximately 150 seconds. Compiling the calculation
+Reading the dataset took approximately 70 seconds. Compiling the calculation
 took less than one minute. With `--mpi`, the rate for each node does not
 change, so N nodes take approximately 1/N of the time.
+
+The MAP usually needs tens of steps. Thus, for this dataset the MAP takes
+more time than the training statistics. Its time does not decrease with more
+nodes. See [Run the MAP as a second job](#run-the-map-as-a-second-job).
 
 ## Pack the configurations into batches
 
@@ -82,6 +87,8 @@ on rank 0, which does the MAP and writes all outputs.
 
 !!! note "Only the training statistics are parallel"
     The MAP runs on rank 0 only. Its time does not decrease with more nodes.
+    For a long MAP, use two jobs. See
+    [Run the MAP as a second job](#run-the-map-as-a-second-job).
 
 ### Install the MPI extra
 
@@ -126,6 +133,56 @@ only their progress lines to the error log.
 
 With `--checkpoint`, each rank saves its own checkpoint in DIR. Run the same
 command with the same number of ranks to continue.
+
+## Run the MAP as a second job
+
+In one MPI job, the other nodes stay allocated but do no work while rank 0
+does the MAP. Two jobs prevent this:
+
+1. A job on N nodes calculates the training statistics and stops.
+2. A job on one node reads the statistics from the checkpoint and does the MAP.
+
+Do the steps that follow:
+
+1. In the MPI job script, add `--stats-only` to `aj fit`. Keep `--checkpoint DIR`.
+2. Write a second job script for one node. Use the same `aj fit` command, but
+   remove `--mpi` and `--stats-only`. Do not use `mpirun`.
+3. Submit the MPI job: `jobid=$(sbatch --parsable stats.sbatch)`.
+4. Submit the second job after it: `sbatch --dependency=afterok:$jobid map.sbatch`.
+5. Look for the log line `checkpoint: QR statistics complete` in the second job.
+
+```bash
+#!/usr/bin/env bash
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=48
+#SBATCH --time=48:00:00
+export JAX_PLATFORMS=cpu OMP_NUM_THREADS=48 OPENBLAS_NUM_THREADS=48
+aj fit --train train.xyz --test valid.xyz --order 3 --max-degree 4 \
+    --batch-pack on --checkpoint ckpt --out out
+```
+
+With `--stats-only`, rank 0 merges the factors of all ranks and saves them as
+one checkpoint file. The second job reads this file. It does not use the
+checkpoint files of the ranks.
+
+The second job must use the same model, dataset and settings as the first job.
+If a setting is different, the second job does not find the checkpoint and
+calculates the training statistics again on one node.
+
+!!! warning "The MAP needs much memory"
+    The MAP needs approximately 170 L² bytes of memory. This is approximately
+    75 GB at L = 21,000 and approximately 380 GB at L = 47,000. For a large
+    basis, use a large-memory node for the second job.
+
+!!! note "Disk space for the checkpoints"
+    With `--mpi`, the checkpoint directory holds the checkpoint of each rank
+    and the merged checkpoint. Each one is 24 L² bytes. When the second job
+    has started, you can delete the files of the ranks
+    (`qrstats-*-r*of*.npz`).
+
+If the second job stops at its time limit, submit it again. It continues the
+MAP from the best hyperparameters found before.
 
 ## Check the result
 

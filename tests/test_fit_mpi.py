@@ -123,3 +123,42 @@ def test_rank_checkpoints_do_not_delete_each_other(tmp_path):
     assert {p.name for p in tmp_path.glob("qrstats-*.npz")} == {"qrstats-bb22-r0of2.npz", "qrstats-aa11-r1of2.npz"}
     r0.save("cc33", acc, 1, {})                              # a serial run: its own stale serial files only
     assert "qrstats-aa11-r1of2.npz" in {p.name for p in tmp_path.glob("qrstats-*.npz")}
+
+
+def test_two_job_form(tmp_path):
+    """Job 1: `aj fit --mpi --checkpoint DIR --stats-only` on N ranks stops after the training statistics, and
+    rank 0 saves the merged factors as a serial checkpoint.  Job 2: the same command on one process without --mpi
+    and --stats-only finds the statistics complete and runs only the MAP, to the serial fit's result."""
+    mpiexec = _mpiexec()
+    if mpiexec is None:
+        pytest.skip("mpi4py / mpiexec not installed (the [mpi] extra)")
+    from conftest import FIXTURE_DIR
+    args = ["-m", "ace_jax.cli", "fit", "--model", str(FIXTURE_DIR / "si_fitted.npz"),
+            "--data", str(FIXTURE_DIR / "si_tiny_train.xyz"), "--ntrain", "20", "--ntest", "6",
+            "--energy-key", "dft_energy", "--force-key", "dft_force", "--virial-key", "dft_virial",
+            "--m-per-species", "0", "--opt", "lbfgs", "--map-steps", "8", "--configs-per-batch", "2", "--r0", "2.35"]
+    env = {**__import__("os").environ, "JAX_PLATFORMS": "cpu"}
+    ck = tmp_path / "ckpt"
+    subprocess.run([sys.executable, *args, "--out", str(tmp_path / "serial")], check=True, env=env,
+                   capture_output=True)
+    p = subprocess.run([mpiexec, "-n", "3", sys.executable, *args, "--mpi", "--checkpoint", str(ck), "--stats-only",
+                        "--out", str(tmp_path / "job1")], env=env, capture_output=True, text=True)
+    assert p.returncode == 0, p.stderr[-2000:]
+    assert not (tmp_path / "job1" / "theta_map.json").exists()             # no MAP in job 1
+    names = {f.name for f in ck.glob("qrstats-*.npz")}
+    serial = [n for n in names if "-r" not in n]
+    assert len(serial) == 1 and len(names) == 4, names                     # 3 rank shards + the merged one
+    p = subprocess.run([sys.executable, *args, "--checkpoint", str(ck), "--out", str(tmp_path / "job2")],
+                       env=env, capture_output=True, text=True)
+    assert p.returncode == 0, p.stderr[-2000:]
+    assert "QR statistics complete" in p.stdout
+    a = json.loads((tmp_path / "serial" / "theta_map.json").read_text())
+    b = json.loads((tmp_path / "job2" / "theta_map.json").read_text())
+    for k in a:
+        assert b[k] == pytest.approx(a[k], rel=1e-6, abs=1e-8), k
+
+
+def test_stats_only_needs_a_checkpoint():
+    from ace_jax.fit.pipeline import FitConfig
+    with pytest.raises(ValueError, match="stats_only"):
+        FitConfig(model="m.npz", stats_only=True).validate()

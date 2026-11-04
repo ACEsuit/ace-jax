@@ -572,7 +572,7 @@ def linear_qr_statistics(model, cfg, ds, merge_rows=None, host=None, row_dtype="
             return [(Pw, yw) for Pw, yw, *_ in out]
         ck, comm = _QR_CHECKPOINT, _MPI_COMM
         rank, size = (0, 1) if comm is None else (comm.Get_rank(), comm.Get_size())
-        key = None if ck is None else problem_key(model, ds, row_dtype, L, merge_target(L, merge_rows))
+        key = base = None if ck is None else problem_key(model, ds, row_dtype, L, merge_target(L, merge_rows))
         if key is not None and size > 1:
             key = f"{key}-r{rank}of{size}"           # each rank checkpoints its own shard
         t0 = time.time()
@@ -592,6 +592,10 @@ def linear_qr_statistics(model, cfg, ds, merge_rows=None, host=None, row_dtype="
                 raise MPIWorkerDone(rank)
             acc, merged = out
             scal.update(merged)
+            if ck is not None:          # the merged factors under the serial key: a later run on one process (the
+                t = time.time()         # MAP job of the two-job form, `--stats-only`) finds the statistics complete
+                ck.save(base, acc, ds.n_batches, scal)
+                ck.log(f"checkpoint: merged statistics of {size} ranks saved ({ck.path(base)}, {time.time() - t:.0f} s)")
         (RE, cE), (RF, cF), (RV, cV) = [(jnp.asarray(R), jnp.asarray(c)) for R, c in acc]
         return QRStats(RE, RF, RV, cE, cF, cV,
                        *(jnp.asarray(scal[f"{k}_{q}"]) for k in ("yy", "n", "logw") for q in "EFV"))

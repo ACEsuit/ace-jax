@@ -100,6 +100,10 @@ def _add_fit_args(p):
                    help="shard the training statistics over MPI ranks (run under srun/mpirun, one rank per node; "
                         "needs the [mpi] extra): each rank streams every N-th batch, the factors are merged onto "
                         "rank 0, which runs the rest of the fit")
+    p.add_argument("--stats-only", action="store_true",
+                   help="stop after the training statistics, saved to --checkpoint DIR (with --mpi: merged into one "
+                        "file): the first job of a two-job fit; the same command without --stats-only and --mpi, "
+                        "on one node, then runs only the MAP")
     p.add_argument("--checkpoint-every", type=float, default=45.0, metavar="MIN",
                    help="minutes between training-statistics checkpoints (default 45)")
     p.add_argument("--rungs", default="map",
@@ -230,7 +234,7 @@ def _fit_config(a):
         baseline=a.baseline, e0=a.e0, m_per_species=a.m_per_species, kernel=a.kernel, bump=not a.no_bump,
         density=a.density, pca_d=a.pca_d, embedding=a.embedding, r0=a.r0, objective=a.objective,
         lml=a.lml, lml_solver=a.lml_solver, row_precision=a.row_precision, row_check=a.row_check, devices=a.devices, opt=a.opt, map_steps=a.map_steps, map_restarts=a.map_restarts,
-        map_polish=a.map_polish, strict=a.strict, noise=a.noise, checkpoint=a.checkpoint, mpi=a.mpi,
+        map_polish=a.map_polish, strict=a.strict, noise=a.noise, checkpoint=a.checkpoint, mpi=a.mpi, stats_only=a.stats_only,
         checkpoint_every=a.checkpoint_every,
         init=json.load(open(a.init)) if a.init else None, rungs=rungs, laplace=a.laplace,
         n_draws=a.n_draws, vi_steps=a.vi_steps, nuts_warmup=a.nuts_warmup, nuts_samples=a.nuts_samples,
@@ -283,17 +287,23 @@ def run(a):
         from mpi4py import MPI
         comm = MPI.COMM_WORLD
         if comm.Get_rank() > 0:          # a statistics worker: no log, no progress file, no outputs
+            from .fit.pipeline.run import StatsOnlyDone
             from .fit.stats import MPIWorkerDone
             with open(os.devnull, "w") as null, contextlib.redirect_stdout(null):
                 try:
                     _run_fit(a)
-                except MPIWorkerDone:
+                except (MPIWorkerDone, StatsOnlyDone):
                     pass
             return {}
         print(f"mpi: {comm.Get_size()} ranks (training statistics sharded; rank 0 fits)")
     with progress_file(out / "progress.jsonl"):
         emit("fit", status="start", argv=getattr(a, "_argv", None))
-        metrics = _run_fit(a)
+        from .fit.pipeline.run import StatsOnlyDone
+        try:
+            metrics = _run_fit(a)
+        except StatsOnlyDone:
+            emit("fit", status="stats-only")
+            return {}
         emit("fit", status="done", test=metrics)          # {rung: {quantity: {rmse, mae, ...}}}
     return metrics
 

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **MPI-sharded training statistics** (`aj fit --mpi`, the new `[mpi]` extra: mpi4py). Run under `srun` or
+  `mpirun` with one rank per node. Each rank streams every N-th batch into its own QR factors. A binary tree
+  merges the factors onto rank 0, which runs the rest of the fit. The statistics pass is limited by memory
+  bandwidth, so it scales with nodes, not with ranks on one node. It works with `--checkpoint`.
+- **Two-job large fits** (`aj fit --stats-only`, needs `--checkpoint DIR`): stop after the training statistics.
+  With `--mpi`, rank 0 also saves the merged factors as one serial checkpoint, so the same command without
+  `--mpi` and `--stats-only`, as a dependent one-node job, runs only the MAP and the N statistics nodes are
+  released. See `docs/user/howto/large-fits.md`.
 - `aj fit --uq ard --ard-prior fixed` (`FitConfig.ard_prior = "fixed"`) runs the calibrated per-atom force
   stage on the BLR posterior: the hold-out fits, the transfer fit and the served posterior keep the MAP's
   own prior (a_k = -2 log sigma_c for every body order) instead of fitting the ARD scales by evidence. The
@@ -41,10 +49,6 @@ a different, narrower POPS box than in 0.5.1:
 
 ### Added
 
-- **MPI-sharded training statistics** (`aj fit --mpi`, the new `[mpi]` extra: mpi4py). Run under `srun` or
-  `mpirun` with one rank per node. Each rank streams every N-th batch into its own QR factors. A binary tree
-  merges the factors onto rank 0, which runs the rest of the fit. The statistics pass is limited by memory
-  bandwidth, so it scales with nodes, not with ranks on one node. It works with `--checkpoint`.
 - **Resumable fits** (`aj fit --checkpoint DIR`, `--checkpoint-every MIN`, default 45). The training
   statistics pass saves its QR factors to DIR at that interval, and the MAP saves its best
   hyperparameters after each evaluation. Run the same command again to resume. A complete statistics pass
