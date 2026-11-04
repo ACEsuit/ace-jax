@@ -42,7 +42,8 @@ class FitConfig:
     objective: str = "lml"               # "lml" | "loo"
     lml: str = "device"                  # "device" | "host-cache"
     lml_chunk: int = 64
-    lml_solver: str = "qr"               # "qr" | "cholesky": the linear arm's LML and posterior (GP arm: cholesky)
+    lml_solver: str = "qr"               # "qr" | "svd" | "cholesky": the linear arm's LML and posterior (GP arm:
+                                         # cholesky); svd: QR statistics and posterior, MAP by one SVD (lml_svd)
     # "float32": design rows (and, on a device, the QR merges) in float32; the evidence, MAP and posterior
     # stay float64 (docs/dev/fp32-results.md)
     row_precision: str = "float64"
@@ -241,13 +242,13 @@ class FitConfig:
             raise ValueError(f"ard_prior must be 'fit' or 'fixed', got {self.ard_prior!r}")
         if self.ard_cond_max is not None and not self.ard_cond_max > 1:
             raise ValueError(f"ard_cond_max must be > 1, got {self.ard_cond_max}")
-        if self.lml_solver not in ("qr", "cholesky"):
-            raise ValueError(f"lml_solver must be 'qr' or 'cholesky', got {self.lml_solver!r}")
+        if self.lml_solver not in ("qr", "svd", "cholesky"):
+            raise ValueError(f"lml_solver must be 'qr', 'svd' or 'cholesky', got {self.lml_solver!r}")
         if self.row_precision not in ("float64", "float32"):
             raise ValueError(f"row_precision must be 'float64' or 'float32', got {self.row_precision!r}")
         if self.row_precision == "float32":
             why = ("arm gp (the GP arm's statistics are the Gram form)" if self.arm == "gp" else
-                   "lml_solver cholesky (float32 rows need the QR statistics)" if self.lml_solver != "qr" else
+                   "lml_solver cholesky (float32 rows need the QR statistics)" if self.lml_solver == "cholesky" else
                    "learn_radial (learned radials need float64 rows)" if self.learn_radial else
                    "sigma_type" if self.sigma_type else
                    "lml host-cache" if self.lml == "host-cache" else

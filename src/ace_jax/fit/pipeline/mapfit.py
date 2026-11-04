@@ -55,8 +55,10 @@ class MapFit(NamedTuple):
 def _log_evidence(obj, theta):
     """The LML at theta, comparable across bases and across noise modes on the same data (the logged
     L-BFGS 'logpost' adds the hyperprior, which shared noise counts for one noise coordinate, not
-    three, so it is not used).  Written to map_convergence.json as `log_evidence`."""
-    return float(obj.lik(to_array(theta)))
+    three, so it is not used).  Written to map_convergence.json as `log_evidence`.  After an SVD-form MAP
+    it is the QR form's (one more evaluation), so the record never rests on the SVD statistics."""
+    check = getattr(obj.lik, "qr_check", None)
+    return float((obj.lik if check is None else check[0])(to_array(theta)))
 
 
 def _free(x, g, lo, hi):
@@ -216,6 +218,37 @@ def _rho_fix(cfg, prob):
     return float(cfg.fix_rho)
 
 
+SVD_CHECK_TOL = 1e-9     # |LML_svd - LML_qr| at the MAP, relative to y'y / sigma^2 (the cancelled terms): the
+#                          stability tests measured both forms within ~1e-11 of an exact reference
+
+
+def _svd_guard(check, lik_svd, x, v, g, H, gnoise, pol, lo, hi, cfg, logprior, log, log_eval):
+    """One QR evaluation at the SVD form's MAP x.  Agreement within SVD_CHECK_TOL keeps x; otherwise warn and
+    continue the MAP on the QR form from x (L-BFGS, RESTART_EVALS evaluations), so the result is never worse
+    than a QR fit's however the SVD fared."""
+    qr, scale = check
+    a = jnp.asarray(x)
+    vs, vq = float(lik_svd(a)), float(qr(a))
+    tol = SVD_CHECK_TOL * scale(x)
+    if abs(vs - vq) <= tol:
+        log(f"lml-solver svd: QR check at the MAP agrees: |LML_svd - LML_qr| = {abs(vs - vq):.3g} "
+            f"(tolerance {tol:.3g})")
+        return x, v, g, H, gnoise, pol
+    msg = (f"lml-solver svd: QR check at the MAP failed: |LML_svd - LML_qr| = {abs(vs - vq):.3g} > {tol:.3g}; "
+           "continuing the MAP on the QR form")
+    log("WARNING: " + msg); warnings.warn(msg, UserWarning, stacklevel=3)
+    vg_qr = jax.jit(jax.value_and_grad(lambda y: qr(y) + logprior(y)))
+
+    def vg_host(y):
+        val, gr = vg_qr(jnp.asarray(y)); gr.block_until_ready()
+        return float(val), np.asarray(gr, float)
+    n = max(cfg.map_steps, RESTART_EVALS)
+    r = lbfgs_map(vg_host, x, lo, hi, n, maxfun=4 * n, log=lambda i, val: log_eval("qr", i, val))
+    log(f"L-BFGS on the QR form: logpost {r['value']:.6g}  nfev {r['nfev']}  {r['message']}")
+    H = (-np.linalg.inv(0.5 * (r["hess_inv"] + r["hess_inv"].T)) if r.get("hess_inv") is not None else None)
+    return np.asarray(r["x"], float), r["value"], r["grad"], H, None, None
+
+
 def fit_map(cfg, d, b, obj, log=print):
     prob, t = b.prob, time.time()
     ckpt = None if cfg.checkpoint is None else pathlib.Path(cfg.checkpoint) / "theta_ckpt.json"
@@ -322,6 +355,9 @@ def fit_map(cfg, d, b, obj, log=print):
         pol = {**{k: val for k, val in pol.items() if k != "gnoise"}, "hvps": ev.n_hvp, "evals": ev.n_eval}
     elif best.get("hess_inv") is not None and g is not None:
         H = -np.linalg.inv(0.5 * (best["hess_inv"] + best["hess_inv"].T))   # L-BFGS-B's estimate, no evaluation
+    if getattr(obj.lik, "qr_check", None) is not None:      # the SVD form's MAP, checked against the QR form
+        x, v, g, H, gnoise, pol = _svd_guard(obj.lik.qr_check, obj.lik, x, v, g, H, gnoise, pol, lo, hi, cfg,
+                                             logprior, log, log_eval)
     if g is None:                               # never finite: nothing to judge with
         g = np.full(x.size, np.nan)
     conv = judge(v, g, x, lo, hi, H=H, gnoise=gnoise, strict=cfg.strict, log=log)
