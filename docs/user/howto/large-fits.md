@@ -32,8 +32,8 @@ The table gives the measured rate of the training statistics for one dataset:
 | one node, 128 cores (AMD EPYC) | approximately 55 |
 | one node, 48 cores (Intel Xeon), one of 2 MPI ranks | approximately 148 |
 
-The first batch also compiles the calculation. For this basis, the compilation
-takes approximately 1.5 hours. With `--mpi`, the rate for each node does not
+Reading the dataset took approximately 150 seconds. Compiling the calculation
+took less than one minute. With `--mpi`, the rate for each node does not
 change, so N nodes take approximately 1/N of the time.
 
 ## Pack the configurations into batches
