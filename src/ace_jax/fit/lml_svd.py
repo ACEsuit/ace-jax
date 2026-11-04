@@ -29,9 +29,10 @@ import jax.numpy as jnp
 import numpy as np
 
 
-SVD_DRIVER = "gesvd"       # gesdd (divide and conquer, ~2-5x faster) lost up to 1e3 x the QR form's accuracy on
-#                            spectra decaying past 1e-16 under a nearly flat prior (test_lml_svd_stability); gesvd
-#                            stays within 10x of it there.  Paid once per fit, not per MAP evaluation.
+SVD_DRIVER = "gesdd"       # divide and conquer: 1446 s against gesvd's 6403 s at L = 19,636 (48 cores), same MAP
+#                            to 9 digits.  On spectra decaying past 1e-16, or exactly rank deficient, it loses up to
+#                            ~2e-4 of y'y / sigma^2 (gesvd: roundoff; test_lml_svd_stability), far above
+#                            mapfit.SVD_CHECK_TOL, so the QR check at the MAP catches it and the MAP finishes on QR.
 
 
 class SVDStats(NamedTuple):
@@ -55,7 +56,7 @@ def svd_applicable(prob, qs, tied):
 
 def svd_statistics(qs, prob, driver=None):
     """SVDStats of QRStats `qs`: the three quantities' factors merged by one stacked QR (host LAPACK), then
-    the SVD of R_1 D^-1 by LAPACK `driver` ("gesvd", QR iteration, or "gesdd", divide and conquer; default
+    the SVD of R_1 D^-1 by LAPACK `driver` ("gesdd", divide and conquer, or "gesvd", QR iteration; default
     SVD_DRIVER), its full left basis U projecting c and the joint-E0 columns R_2.  Peak memory ~3 (L+k)^2
     doubles beyond qs."""
     import scipy.linalg as sl

@@ -75,12 +75,12 @@ HYPERS = [(np.log(1e-4), np.log(1e6)), (np.log(1e-2), np.log(1e2)), (np.log(1.0)
           (np.log(1e-6), np.log(1e8))]
 
 
-@pytest.mark.parametrize("driver", ["gesvd"])        # gesdd fails decay-1e-17 / rank-deficient by ~1e3x (SVD_DRIVER)
 @pytest.mark.parametrize("spec", sorted(SPECTRA))
 @pytest.mark.parametrize("decades", [2, 8])
-def test_svd_evidence_as_accurate_as_qr(driver, spec, decades):
+def test_svd_evidence_as_accurate_as_qr(spec, decades):
+    """gesvd (QR iteration) is as accurate as the QR form everywhere, the hardest spectra included."""
     qs, prob, R, c, gamma, yy = _problem(SPECTRA[spec], decades)
-    sv = svd_statistics(qs, prob, driver=driver)
+    sv = svd_statistics(qs, prob, driver="gesvd")
     for ls, lc in HYPERS:
         th = _theta(ls, lc)
         ref = _exact(R, c, gamma, yy, 900.0, -3.0, ls, lc)
@@ -91,10 +91,36 @@ def test_svd_evidence_as_accurate_as_qr(driver, spec, decades):
 
 
 @pytest.mark.parametrize("spec", sorted(SPECTRA))
+@pytest.mark.parametrize("decades", [2, 8])
+def test_default_driver_is_accurate_or_caught_by_the_qr_check(spec, decades):
+    """The default driver (gesdd) loses accuracy on spectra past 1e-16 and on exact rank deficiency.  Wherever
+    it is not as accurate as the QR form, either the error is within SVD_CHECK_TOL (what the QR check at the MAP,
+    mapfit._svd_guard, accepts by design: e.g. 1e-13 of y'y / sigma^2 on the rank-deficient spectrum) or its
+    disagreement with the QR form exceeds SVD_CHECK_TOL, so the check rejects it and the MAP finishes on QR."""
+    from ace_jax.fit.lml_svd import SVD_DRIVER
+    from ace_jax.fit.pipeline.mapfit import SVD_CHECK_TOL
+    assert SVD_DRIVER == "gesdd"
+    qs, prob, R, c, gamma, yy = _problem(SPECTRA[spec], decades)
+    sv = svd_statistics(qs, prob)
+    caught = 0
+    for ls, lc in HYPERS:
+        th = _theta(ls, lc)
+        ref = _exact(R, c, gamma, yy, 900.0, -3.0, ls, lc)
+        scale = yy * np.exp(-2.0 * ls)
+        qr, svd = float(log_marginal_likelihood_qr(th, qs, prob)), float(log_marginal_likelihood_svd(th, sv))
+        e_qr, e_svd = abs(qr - ref) / scale, abs(svd - ref) / scale
+        if e_svd > max(10.0 * e_qr, 1e-14) and e_svd > SVD_CHECK_TOL:
+            assert abs(svd - qr) / scale > SVD_CHECK_TOL, (spec, decades, ls, lc, e_svd, e_qr)
+            caught += 1
+    assert caught == 0 or spec != "decay-1e-14", caught             # gesdd is fine on the moderate spectrum
+    assert caught > 0 or spec != "decay-1e-17", caught              # and the check is what saves the hardest one
+
+
+@pytest.mark.parametrize("spec", sorted(SPECTRA))
 def test_svd_gradient_as_accurate_as_qr(spec):
     """d LML / d(log sigma, log sigma_c), against a 60-digit central difference of the exact LML."""
     qs, prob, R, c, gamma, yy = _problem(SPECTRA[spec], 8)
-    sv = svd_statistics(qs, prob)
+    sv = svd_statistics(qs, prob, driver="gesvd")
     for ls, lc in HYPERS[:3]:
         h = 1e-12
         fd = [(_exact(R, c, gamma, yy, 900.0, -3.0, ls + h * (k == 0), lc + h * (k == 1))
@@ -114,7 +140,7 @@ def test_svd_evidence_with_joint_e0_columns(p0, spec):
     a k x k Schur complement in the SVD basis: still as accurate as the QR form."""
     e0 = np.full(3, p0)
     qs, prob, R, c, gamma, yy = _problem(SPECTRA[spec], 8, e0_prec=e0)
-    sv = svd_statistics(qs, prob)
+    sv = svd_statistics(qs, prob, driver="gesvd")
     for ls, lc in HYPERS:
         th = _theta(ls, lc)
         ref = _exact(R, c, gamma, yy, 900.0, -3.0, ls, lc, e0_prec=e0)
