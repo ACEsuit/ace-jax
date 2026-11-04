@@ -159,7 +159,12 @@ def newton_polish(ev, x, lo, hi, maxiter=50, gradient_floor=False):
             break
         accepted = False
         g_resolved = gradient_floor and bool(np.any(np.abs(pgv) > gnoise))
-        if dec > 10 * noise or g_resolved:               # a resolved decrease: backtrack to Armijo
+        if g_resolved and dec <= 10 * noise:             # F cannot judge the step: the gradient can
+            xn = np.clip(x + d, lo, hi)                  # (an Armijo test on F's noise took tiny steps and stalled
+            Fn, gn = evaluate(xn)                        # with |pg| 150x gnoise, 12 Si configs, test_map_convergence)
+            accepted = bool(np.isfinite(Fn) and np.all(np.isfinite(gn)) and Fn <= F + 10 * noise
+                            and np.abs(_projected_gradient(xn, gn, lo, hi)).max() <= 0.5 * pg)
+        if not accepted and (dec > 10 * noise or g_resolved):    # a resolved decrease: backtrack to Armijo
             for t in 0.5 ** np.arange(40):
                 xn = np.clip(x + t * d, lo, hi)
                 if np.array_equal(xn, x):
