@@ -50,6 +50,19 @@ def _place(dst, src, z, cfg):
     return dst.at[..., NZ * nB + z * nP: NZ * nB + (z + 1) * nP].add(src[..., nB:])
 
 
+def _by_species(T, ids, z, n, cfg):
+    """sum_e T[e] into row ids[e] and species block z[e]: (n, c, len_basis) from T (rows, D, c), in _place's
+    layout.  One segment_sum keyed on (row, species) -- NZ masked passes over T, each adding into an
+    L-wide array, took ~95% of a batch's rows at S12 o3d4 (11.5 s against 0.33 s for J itself); the sums
+    are the same, term for term.  The result has the accumulators' default dtype, as _place's did."""
+    NZ, nB, nP = cfg.NZ, cfg.n_B, cfg.n_pair
+    G = jax.ops.segment_sum(T, ids * NZ + z, num_segments=n * NZ).reshape(n, NZ, nB + nP, T.shape[-1])
+    blk = lambda a: jnp.transpose(a, (0, 3, 1, 2)).reshape(n, a.shape[-1], -1)       # (n, c, NZ * width)
+    out = jnp.concatenate([blk(G[:, :, :nB]), blk(G[:, :, nB:])], axis=-1)
+    out = jnp.pad(out, ((0, 0), (0, 0), (0, cfg.len_basis - out.shape[-1])))
+    return out.astype(jnp.zeros(()).dtype)
+
+
 def _voigt(T, rij):
     """T (E, ..., 3) derivative w.r.t. rij (E, 3) -> the 6 Voigt virial
     contributions (E, ..., 6): V_ab = -1/2 (T_a r_b + T_b r_a)."""
@@ -81,18 +94,9 @@ def linear_rows(model, cfg, batch):
     X, J = model.edge_jacobian_dense(batch.rij, jnp.broadcast_to(batch.node_z[:, None], (Ncap, K)),
                                      batch.node_z[batch.nbr], batch.nbr_mask)      # (Ncap, D), (E, D, 3)
     seg = lambda a, ids, n: jax.ops.segment_sum(a, ids, num_segments=n)
-    L = cfg.len_basis
-    E = jnp.zeros((Ncap, L))
-    F = jnp.zeros((Ncap, 3, L))
-    V = jnp.zeros((C + 1, 6, L))
-    edge_cfg = batch.node_cfg[send]
-    for z in range(cfg.NZ):
-        E = _place(E, jnp.where((batch.node_z == z)[:, None], X, 0.0), z, cfg)
-        Jz = jnp.where((zi == z)[:, None, None], J, 0.0)
-        dEdr = seg(Jz, recv, Ncap) - seg(Jz, send, Ncap)             # (Ncap, D, 3)
-        F = _place(F, -jnp.swapaxes(dEdr, 1, 2), z, cfg)
-        Vz = seg(_voigt(Jz, rij), edge_cfg, C + 1)                   # (C+1, D, 6)
-        V = _place(V, jnp.swapaxes(Vz, 1, 2), z, cfg)
+    E = _by_species(X[:, :, None], jnp.arange(Ncap), batch.node_z, Ncap, cfg)[:, 0]
+    F = _by_species(J, send, zi, Ncap, cfg) - _by_species(J, recv, zi, Ncap, cfg)   # -(dE/dr) = -(recv - send)
+    V = _by_species(_voigt(J, rij), batch.node_cfg[send], zi, C + 1, cfg)
     E = _e0_columns(seg(E, batch.node_cfg, C + 1)[:C], batch.node_z, batch.node_mask, batch.node_cfg, cfg)
     return Rows(E, F, V[:C]), X, J
 
@@ -305,16 +309,10 @@ def _rows_scan(model, cfg, batch, node_chunk, with_X=False, proj=None, resid=Non
         X, J = model.edge_jacobian_dense(r_c, jnp.broadcast_to(z_c[:, None], (nc, K)), node_z[nb_c], m_c)
         recv = nb_c.reshape(-1)
         zi, r_flat, edge_cfg = z_c[local], r_c.reshape(-1, 3), node_cfg[s0 + local]
-        E_c = jnp.zeros((nc, L))
-        F = jnp.zeros((Np, 3, L))         # receive side: any node
-        F_c = jnp.zeros((nc, 3, L))       # send side: the senders are this chunk's own centre nodes
-        V = jnp.zeros((C + 1, 6, L))
-        for z in range(cfg.NZ):
-            E_c = _place(E_c, jnp.where((z_c == z)[:, None], X, 0.0), z, cfg)
-            Jz = jnp.where((zi == z)[:, None, None], J, 0.0)
-            F = _place(F, -jnp.swapaxes(seg(Jz, recv, Np), 1, 2), z, cfg)
-            F_c = _place(F_c, jnp.swapaxes(seg(Jz, local, nc), 1, 2), z, cfg)
-            V = _place(V, jnp.swapaxes(seg(_voigt(Jz, r_flat), edge_cfg, C + 1), 1, 2), z, cfg)
+        E_c = _by_species(X[:, :, None], jnp.arange(nc), z_c, nc, cfg)[:, 0]
+        F = -_by_species(J, recv, zi, Np, cfg)         # receive side: any node
+        F_c = _by_species(J, local, zi, nc, cfg)       # send side: the senders are this chunk's own centre nodes
+        V = _by_species(_voigt(J, r_flat), edge_cfg, zi, C + 1, cfg)
         out = {"lin": (E_c, F, F_c, V)}
         J4 = J.reshape(nc, K, D, 3)
         if with_X:
