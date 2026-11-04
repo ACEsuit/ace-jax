@@ -276,9 +276,10 @@ def shard_batches(n_batches, rank, size):
 
 def merge_factors(a, b):
     """[(R, c), ...] of two disjoint row sets merged into the factors of their union: the stacked QR of
-    [R_a; R_b] against [c_a; c_b] (tall-skinny QR).  Exact, as the factors of one pass over both."""
+    [R_a; R_b] against [c_a; c_b] (tall-skinny QR).  Exact, as the factors of one pass over both.  Both
+    are triangular, so tpqrt skips R_b's zeros too (_host_merge upper=True: ~3x the dense-rows merge)."""
     return [_host_merge(np.asarray(Ra, np.float64), np.asarray(ca, np.float64), np.asarray(Rb, np.float64),
-                        np.asarray(cb, np.float64)) for (Ra, ca), (Rb, cb) in zip(a, b)]
+                        np.asarray(cb, np.float64), upper=True) for (Ra, ca), (Rb, cb) in zip(a, b)]
 
 
 def tree_schedule(size):
