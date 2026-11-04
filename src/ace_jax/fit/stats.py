@@ -147,7 +147,9 @@ class QRStats(NamedTuple):
 # across batches and merged once at least merge_target (QR_MERGE_ROWS_PER_L x L) have
 # accumulated, plus a final flush: per row, (4/3) L^3 / buffer + 2 L^2.  The target column
 # rides along as an extra column, so only geqrf's R is formed (its last column is
-# Q^T [c ; yw]): no Householder product, which used to double the flops.
+# Q^T [c ; yw]): no Householder product, which used to double the flops.  That is the device
+# form (_qr_merge, device_qr_stream).  The host merges (_host_merge) use LAPACK tpqrt, which keeps
+# R triangular: 2 r L^2 alone, no L^3 term; buffering there still amortises tpqrt's panels.
 QR_MERGE_ROWS_PER_L = 1
 
 
@@ -171,19 +173,29 @@ def _qr_merge(R, c, Pw, yw):
     return Ra[:, :n], Ra[:, n]
 
 
-def _host_merge(R, c, Pw, yw):
-    """_qr_merge on the host: LAPACK geqrf (blocked: its workspace is queried) of the stacked
-    Fortran-ordered matrix, in place; only R is read back."""
+TPQRT_NB = 256     # tpqrt's block size.  mnf148 (32 cores), L rows into L: L 8000 nb 64 / 128 / 256: 195 / 312 / 418
+#                    GFLOP/s; L 16000 nb 256 / 512 / 1024: 711 / 632 / 195 (geqrf of the stack: 134 at L 8000)
+
+
+def _host_merge(R, c, Pw, yw, upper=False):
+    """_qr_merge on the host: LAPACK tpqrt, the QR of [[R, c], [Pw, yw]] that keeps R triangular.  c is
+    the last column of an (n+1) x (n+1) triangle (zero last row) and only R and c are read back.  geqrf
+    of the stacked matrix, which this replaced, treats R as dense: (10/3) L^3 flops per L rows merged
+    against 2 L^3, and it ran 5x slower at L = 8000 (12.8 s against 2.5 s, 32 cores).  upper: Pw is
+    itself an upper-triangular (n x n) factor (merging two factors, e.g. MPI ranks'): tpqrt then also
+    skips its zeros, ~3x faster again."""
     import scipy.linalg.lapack as la
-    n = R.shape[1]
-    A = np.empty((n + Pw.shape[0], n + 1), order="F")
-    A[:n, :n], A[:n, n], A[n:, :n], A[n:, n] = R, c, Pw, yw
-    lwork = int(la.dgeqrf_lwork(*A.shape)[0])
-    a, _, _, info = la.dgeqrf(A, lwork=max(lwork, n + 1), overwrite_a=1)
+    n, m = R.shape[1], Pw.shape[0]
+    if m == 0:
+        return np.array(R, np.float64), np.array(c, np.float64)
+    A = np.zeros((n + 1, n + 1), order="F")
+    A[:n, :n], A[:n, n] = R, c
+    B = np.empty((m, n + 1), order="F")
+    B[:, :n], B[:, n] = Pw, yw
+    a, _, _, info = la.dtpqrt(min(m, n) if upper else 0, min(TPQRT_NB, n + 1), A, B, overwrite_a=1, overwrite_b=1)
     if info != 0:
-        raise np.linalg.LinAlgError(f"dgeqrf info={info}")
-    Ra = np.triu(a[:n])
-    return Ra[:, :n].copy(), Ra[:, n].copy()
+        raise np.linalg.LinAlgError(f"dtpqrt info={info}")
+    return np.triu(a[:n, :n]), a[:n, n].copy()
 
 
 class QRCheckpoint:
