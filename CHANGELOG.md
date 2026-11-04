@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Faster MAP for large linear fits on the CPU.** The QR evidence is now evaluated with its structure on the
+  host: triangular merges of the per-quantity factors, one triangular inverse, and the gradient and exact
+  Hessian in the four scales written out, instead of a dense QR of the stacked matrix with autodiff through it.
+  Same evidence to roundoff; less memory. GPU statistics keep the dense form (`objective.QR_EVAL`).
 - **MPI-sharded training statistics** (`aj fit --mpi`, the new `[mpi]` extra: mpi4py). Run under `srun` or
   `mpirun` with one rank per node. Each rank streams every N-th batch into its own QR factors. A binary tree
   merges the factors onto rank 0, which runs the rest of the fit. The statistics pass is limited by memory
