@@ -1,6 +1,34 @@
 # Changelog
 
-## Unreleased
+## 0.5.2 (2026-11-03)
+
+**Highlights.** POPS uncertainty (`aj fit --uq pops`) is numerically defined on fits that nearly
+interpolate their data, and its defaults follow the reference package POPSRegression. Fits can be
+resumed after an interruption.
+
+**Upgrading from 0.5.1.** Saved models and posteriors are unchanged. An `aj fit --uq pops` run can give
+a different, narrower POPS box than in 0.5.1:
+
+- The box is built from the rows at or above the median leverage (`FitConfig.pops_leverage_pct = 50`,
+  POPSRegression's `leverage_percentile` default). 0.5.1 used every row, and on the silicon
+  accuracy-cost fits the low-leverage rows made the box unphysical. Set `pops_leverage_pct=0` in
+  Python for the 0.5.1 behaviour.
+- The ridge selection stops at a relative ridge of `1e-10` (`predict.POPS_MIN_RIDGE`). The 0.5.1 grid
+  went down to `1e-14`, where the box is set by round-off.
+
+### Fixed
+
+- **POPS numerics** (#141). On the silicon o3d12 fit (condition number 5e16, with sigma_c on its
+  bound), the Cholesky of the ridge system was not finite. The BLR mean, the test predictions and every
+  ridge-selection score were then NaN, and the selection silently returned the first grid value.
+  - The POPS mean now falls back, with a warning, to the streamed QR (`solve.posterior_qr`). The QR
+    does not square the condition number.
+  - Ridge selection raises `FloatingPointError` when every score of a quantity is non-finite.
+  - `POPS_MIN_RIDGE = 1e-10`: below it the box is set by the round-off of the eigendecomposition. Four
+    equivalent evaluations of one box at `1e-14` gave bulk-energy spreads from 1.6 to 78 meV/atom. A
+    smaller ridge warns, and the default grid stops at it.
+  - The default leverage cut is 50 % (see Upgrading). With the same rows, mean, ridge and cut,
+    POPSRegression's own hypercube step agrees with a stable evaluation of the port.
 
 ### Added
 
