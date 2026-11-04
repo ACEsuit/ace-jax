@@ -161,7 +161,9 @@ These constraints are validated up front. A bad combination raises a
     The evidence is a QR of the data factors by default (`--ard-solver qr`; `cholesky` for ard-gp), with the
     prior floor at cond(S) <= `--ard-cond-max` (1e22 qr, 1e14 cholesky). If every ARD scale ends on that floor
     with the evidence still rising below it, the fit stops with an error (`--ard-allow-degenerate` writes it
-    anyway; `ard.json` and `metrics.csv` record `ard_degenerate`).
+    anyway; `ard.json` and `metrics.csv` record `ard_degenerate`). `--ard-prior fixed` skips the evidence fits:
+    the hold-out fits and the served posterior keep the MAP's own prior (a_k = -2 log sigma_c), i.e. the
+    calibration and jackknife shape of the BLR posterior (qr only; `ard.json` "prior", "optimiser.below_floor").
     `ACECalculator(model, posterior="out_ard/posterior.npz")` and
     `aj eval --posterior out_ard/posterior.npz` add per-atom calibrated force
     uncertainty: `forces_std`, plus `forces_cov`, `forces_q`, `forces_group`, `forces_support`

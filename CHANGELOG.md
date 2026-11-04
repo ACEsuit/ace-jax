@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- `aj fit --uq ard --ard-prior fixed` (`FitConfig.ard_prior = "fixed"`) runs the calibrated per-atom force
+  stage on the BLR posterior: the hold-out fits, the transfer fit and the served posterior keep the MAP's
+  own prior (a_k = -2 log sigma_c for every body order) instead of fitting the ARD scales by evidence. The
+  served mean is the `--uq blr` fit's. Needs `--ard-solver qr` (the default for `--uq ard`): the BLR prior
+  can sit below the evidence fit's floor. `ard.json` records `"prior"` and whether the prior is below the
+  floor. The default, `fit`, is unchanged.
+
 ## 0.5.2 (2026-11-03)
 
 **Highlights.** POPS uncertainty (`aj fit --uq pops`) is numerically defined on fits that nearly

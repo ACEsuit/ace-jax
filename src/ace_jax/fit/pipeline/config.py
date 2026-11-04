@@ -80,6 +80,9 @@ class FitConfig:
     ard_solver: str = "auto"             # "qr" | "cholesky" | "auto" (qr for uq ard, cholesky for ard-gp): the ARD
                                          # evidence's factorisation (issue #136)
     ard_allow_degenerate: bool = False   # serve a posterior whose every ARD scale ended on the floor (else raise)
+    ard_prior: str = "fit"               # "fit" (ARD scales by evidence) | "fixed": every posterior of the stage keeps the
+                                         # MAP's own prior (a_k = -2 log sigma_c, the BLR fit), no evidence fit: the
+                                         # stage's hold-out calibration and shape on the BLR posterior
     ard_laplace: bool = False            # Laplace diagnostic of the hyperparameters (ard.json)
     # schema-3 force sigma (docs/dev/specs/2026-09-30-conformal-force-sigma-design.md, rev 2)
     ard_force_shape: str = "aniso"       # "iso" | "aniso" (Mahalanobis scores, forces_q_mahal)
@@ -234,6 +237,8 @@ class FitConfig:
             raise ValueError(f"ard_solver must be 'auto', 'qr' or 'cholesky', got {self.ard_solver!r}")
         if self.ard_solver == "qr" and self.uq == "ard-gp":
             raise ValueError("ard_solver 'qr' is the linear arm's (uq ard); uq ard-gp uses cholesky")
+        if self.ard_prior not in ("fit", "fixed"):
+            raise ValueError(f"ard_prior must be 'fit' or 'fixed', got {self.ard_prior!r}")
         if self.ard_cond_max is not None and not self.ard_cond_max > 1:
             raise ValueError(f"ard_cond_max must be > 1, got {self.ard_cond_max}")
         if self.lml_solver not in ("qr", "cholesky"):

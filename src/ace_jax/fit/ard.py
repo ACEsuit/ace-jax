@@ -1109,6 +1109,31 @@ def _h_names(ev):
             + ["a_GP" if g == GP_GROUP else f"a_{g}body" for g in ev.groups])
 
 
+def _stage_hypers(cfg, ev, theta, start, stage, names, log=print):
+    """(h, logev, info) of one of the stage's posteriors: the evidence fit from `start` (ard_prior "fit"), or the
+    MAP's own prior ev.h0(theta) with no fit (ard_prior "fixed": the BLR posterior, a_k = -2 log sigma_c).  The
+    fixed prior can sit below the evidence fit's a_floor (the BLR fits of near-interpolating data do, by ~12
+    nats): the QR solver factors the rows there; the Cholesky one may not, so it is refused."""
+    if getattr(cfg, "ard_prior", "fit") == "fixed":
+        if ev.solver != "qr":
+            raise ValueError("ard_prior 'fixed' needs ard_solver 'qr' (the MAP's prior can be far below the "
+                             "Cholesky floor)")
+        h = np.asarray(ev.h0(theta), float)
+        v = ev.value_and_grad(h)[0]
+        ev.bounds(h, cfg.ard_cond_max)            # sets ev.a_floor / cond_max for the report; the box is not used
+        below = bool(np.any(h[3 if ev.joint else 0:] < ev.a_floor))
+        log(f"ARD {stage}: fixed prior (ard_prior 'fixed'): the MAP's own a = {h[-1]:.3f}, no evidence fit; "
+            f"logev {v:.2f}" + (f"; below the evidence fit's floor a_floor {ev.a_floor:.3f}" if below else ""))
+        return h, v, {"message": "fixed prior (ard_prior 'fixed')", "nit": 0, "success": True, "fixed": True,
+                      "at_bound": [False] * len(h), "degenerate": False, "solver": ev.solver,
+                      "a_floor": float(ev.a_floor), "below_floor": below}
+    h, v, info = fit_ard(ev, start, cfg.ard_cond_max)
+    for w in _ard_fit_warnings(stage, info, names):
+        log(w)
+    _check_degenerate(cfg, stage, info)
+    return h, v, info
+
+
 def _holdout_posterior(cfg, data, prob, theta, configs, body_col, ell, h0=None, stage="fit-subset", log=print):
     """A hold-out posterior on the training subset `configs` with its own shape (PRESS jackknife R, the
     legacy sandwich Q, or none for ard_variance "kappa" / the "mixed" ablation).  h0: the evidence fit's
@@ -1122,10 +1147,7 @@ def _holdout_posterior(cfg, data, prob, theta, configs, body_col, ell, h0=None, 
     ev = ARDEvidence(ard_statistics(theta, prob, ds, mode, columns=gp["columns"], solver=_ard_solver(cfg)),
                      ard_gamma(prob), gp["body"], root=gp["root"])
     names = _h_names(ev)
-    h, v, info = fit_ard(ev, ev.h0(theta) if h0 is None else h0, cfg.ard_cond_max)
-    for w in _ard_fit_warnings(stage, info, names):
-        log(w)
-    _check_degenerate(cfg, stage, info)
+    h, v, info = _stage_hypers(cfg, ev, theta, ev.h0(theta) if h0 is None else h0, stage, names, log=log)
     post = ard_posterior(ev, h, 1.0, data.meta, theta=gp["theta"])
     K = 0
     if cfg.ard_variance == "sandwich" and cfg._score_source == "fit":
@@ -1241,11 +1263,11 @@ def run_ard_stage(cfg, data, built, theta, log=print, full_stats=None):
         st = ard_statistics(theta, prob, data.ds_train, mode, columns=gp["columns"], solver=solver)
     ev = ARDEvidence(st, ard_gamma(prob), gp["body"], root=gp["root"])
     del st
-    v_start = ev.value_and_grad(np.clip(h_fit, *ev.bounds(h_fit, cond_max)))[0]   # refit's start
-    h, v, info = fit_ard(ev, h_fit, cond_max)
-    for w in _ard_fit_warnings("full", info, names):
-        log(w)
-    _check_degenerate(cfg, "full", info)
+    fixed = getattr(cfg, "ard_prior", "fit") == "fixed"
+    v_start = (None if fixed else ev.value_and_grad(np.clip(h_fit, *ev.bounds(h_fit, cond_max)))[0])   # refit's start
+    h, v, info = _stage_hypers(cfg, ev, theta, h_fit, "full", names, log=log)
+    if fixed:
+        v_start = v
     post = ard_posterior(ev, h, 1.0, data.meta, theta=gp["theta"])
     K, lev = 0, np.zeros(0)
     if variance == "sandwich":
@@ -1326,7 +1348,7 @@ def run_ard_stage(cfg, data, built, theta, log=print, full_stats=None):
             + (f"; {n_clamp} at leverage 1 within roundoff had 1 - lambda clamped to {_MU_FLOOR:g}" if n_clamp else ""))
     shp = post.R if post.R is not None else post.Q
     lq = (lambda f: float(f(lev))) if len(lev) else (lambda f: None)
-    report = {"mode": mode, "body_groups": list(ev.groups), "gp_cols": ev.root.M, "h": h.tolist(), "h_names": names,
+    report = {"mode": mode, "prior": getattr(cfg, "ard_prior", "fit"), "body_groups": list(ev.groups), "gp_cols": ev.root.M, "h": h.tolist(), "h_names": names,
               "logev_full": v, "logev_full_start": v_start, "optimiser": info, "optimiser_fit": info_fit,
               # the evidence's roundoff at the endpoint, as the polish measured it (its spread over 1e-15
               # moves of h): two fits of the same data agree in logev_full only to ~this, not to 1e-15

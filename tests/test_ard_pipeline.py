@@ -37,6 +37,8 @@ def test_config_validates_ard():
                        ("ard_n_min", 0), ("ard_cluster_size", 0.0), ("ard_transfer", "x")):
         with pytest.raises(ValueError, match=field):
             _cfg(**{field: bad}).validate()
+    with pytest.raises(ValueError, match="ard_prior"):
+        _cfg(ard_prior="blr").validate()
     with pytest.raises(ValueError, match="ard_shape_eps"):         # m4: eps 0 can make the Mahalanobis solve singular
         _cfg(ard_force_shape="aniso", ard_shape_eps=0.0).validate()
     assert _cfg(ard_force_shape="iso", ard_shape_eps=0.0).validate().ard_shape_eps == 0.0
@@ -81,6 +83,28 @@ def test_sequential_mode_runs(tmp_path):
     cfg = _cfg(ard_mode="sequential").validate()
     res = fit(cfg, load_fit_data(cfg, data=str(FIXTURE_DIR / "si_tiny_train.xyz")), log=lambda *a: None)
     assert res.ard.report["mode"] == "sequential" and len(res.ard.report["h"]) == len(res.ard.report["body_groups"])
+
+
+def test_fixed_prior_serves_the_blr_posterior():
+    """ard_prior "fixed": no evidence fit in any of the stage's posteriors; every ARD scale is the MAP's own
+    a = -2 log sigma_c, and the served mean is the plain BLR fit's (uq "blr"), with the calibration still done."""
+    from ace_jax.fit.pipeline import fit, load_fit_data
+    data = str(FIXTURE_DIR / "si_tiny_train.xyz")
+    cfg = _cfg(ard_mode="sequential", ard_prior="fixed").validate()
+    res = fit(cfg, load_fit_data(cfg, data=data), log=lambda *a: None)
+    rep = res.ard.report
+    a_blr = -2 * float(res.theta.log_sigma_c)
+    assert rep["prior"] == "fixed" and rep["optimiser"]["fixed"] and rep["optimiser_fit"]["fixed"]
+    np.testing.assert_allclose(res.ard.posterior.h, a_blr, rtol=0, atol=1e-12)
+    assert rep["transfer"]["N_fit"] < len(res.data.train) and np.isfinite(rep["kappa"]) and rep["kappa"] > 0
+    cb = _cfg(uq="blr").validate()
+    blr = fit(cb, load_fit_data(cb, data=data), log=lambda *a: None)
+    assert float(blr.theta.log_sigma_c) == pytest.approx(float(res.theta.log_sigma_c), rel=1e-12)
+    for k in ("E_mean", "F_mean"):
+        np.testing.assert_allclose(res.preds.arrays["test/map"][k], blr.preds.arrays["test/map"][k], rtol=1e-8, atol=1e-9)
+    with pytest.raises(ValueError, match="ard_solver 'qr'"):
+        c = _cfg(ard_mode="sequential", ard_prior="fixed", ard_solver="cholesky").validate()
+        fit(c, load_fit_data(c, data=data), log=lambda *a: None)
 
 
 def test_joint_ard_noise_comes_from_the_ard_refit(ard_fit):

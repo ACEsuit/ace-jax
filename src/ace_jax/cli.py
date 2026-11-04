@@ -128,6 +128,10 @@ def _add_fit_args(p):
                         "data rows, so the prior floor can sit decades lower than cholesky's (auto with --uq ard-gp)")
     p.add_argument("--ard-cond-max", type=float, default=None,
                    help="ard: the prior floor keeps cond(S) below this (default: 1e22 qr, 1e14 cholesky)")
+    p.add_argument("--ard-prior", choices=["fit", "fixed"], default="fit",
+                   help="ard: fit = the ARD scales by evidence (default); fixed = keep the MAP's own prior (the BLR "
+                        "fit's single sigma_c) in the hold-out fits and the served posterior, so the calibrated "
+                        "per-atom forces and the jackknife shape are those of the BLR posterior")
     p.add_argument("--ard-allow-degenerate", action="store_true",
                    help="ard: write the posterior even when every ARD scale ends on the prior floor with the "
                         "evidence pointing below it (by default the fit stops with an error)")
@@ -230,7 +234,7 @@ def _fit_config(a):
         ard_force_shape=a.force_shape, ard_coverage=a.ard_coverage, ard_groups=a.ard_groups,
         ard_cluster_size=a.ard_cluster_size, ard_press=a.ard_press, ard_n_min=a.ard_n_min,
         ard_transfer=a.ard_transfer, ard_support=not a.no_ard_support, ard_solver=a.ard_solver,
-        ard_cond_max=a.ard_cond_max, ard_allow_degenerate=a.ard_allow_degenerate,
+        ard_cond_max=a.ard_cond_max, ard_allow_degenerate=a.ard_allow_degenerate, ard_prior=a.ard_prior,
         ard_support_features=a.ard_support_features,
         learn_radial=a.learn_radial, radial_n_q=a.radial_n_q, radial_steps=a.radial_steps,
         radial_reprofile_every=a.radial_reprofile_every, radial_opt=a.radial_opt, radial_cg_iters=a.radial_cg_iters,
