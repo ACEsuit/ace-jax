@@ -167,3 +167,21 @@ def test_svd_map_on_near_interpolating_mace_labels(tmp_path):
     for k in ("log_sigma_c", "log_sigma_F"):
         assert float(getattr(s, k)) == pytest.approx(float(getattr(q, k)), rel=1e-5, abs=1e-6), k
     assert res["svd"].map.log_evidence == pytest.approx(res["qr"].map.log_evidence, rel=1e-8)
+
+
+def test_svd_past_scipy_lp64_limit_uses_numpy_ilp64(m0, monkeypatch):
+    """Past SciPy's 32-bit LAPACK indexing (L > 46,340: scipy.linalg.svd refuses a full U) the SVD goes through
+    NumPy's ILP64 LAPACK; forced here by a small limit, the statistics and the evidence are the SciPy path's."""
+    from ace_jax.fit import lml_svd
+    prob, qs = m0
+    assert lml_svd._numpy_ilp64()
+    ref = lml_svd.svd_statistics(qs, prob, driver="gesdd")
+    monkeypatch.setattr(lml_svd, "LP64_MAX", 10)
+    sv = lml_svd.svd_statistics(qs, prob, driver="gesdd")
+    np.testing.assert_allclose(np.asarray(sv.s2), np.asarray(ref.s2), rtol=1e-10, atol=1e-12 * float(ref.s2.max()))
+    for ls, lc in POINTS:
+        th = _theta(ls, lc)
+        a, b = float(lml_svd.log_marginal_likelihood_svd(th, sv)), float(lml_svd.log_marginal_likelihood_svd(th, ref))
+        assert abs(a - b) < 1e-9 * float(ref.yy) * np.exp(-2 * ls) + 1e-9 * abs(b), (ls, lc, a, b)
+    with pytest.warns(UserWarning, match="ILP64"):
+        lml_svd.svd_statistics(qs, prob, driver="gesvd")

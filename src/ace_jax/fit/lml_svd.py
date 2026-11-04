@@ -54,13 +54,45 @@ def svd_applicable(prob, qs, tied):
     return True, ""
 
 
+LP64_MAX = np.iinfo(np.int32).max    # SciPy's LAPACK is LP64 (its wheels: scipy-openblas32): a full U past this many
+#                                      elements overflows its indexing, and scipy.linalg.svd refuses (L > 46,340)
+
+
+def _numpy_ilp64():
+    """Whether NumPy's LAPACK takes 64-bit integers (NumPy >= 2 wheels: scipy-openblas64, USE64BITINT)."""
+    try:
+        lap = np.show_config(mode="dicts")["Build Dependencies"]["lapack"]
+    except Exception:
+        return False
+    return "64" in str(lap.get("name", "")) + str(lap.get("include directory", "")) \
+        or "USE64BITINT" in str(lap.get("openblas configuration", ""))
+
+
+def _svd_full_u(W, driver):
+    """(U (m, m), s) of W by LAPACK `driver` through SciPy, or, when a full U overflows SciPy's 32-bit LAPACK indexing
+    (max(m, n)^2 > LP64_MAX: the S12 o3d4 fit, L = 47,448, failed there after 2.5 h), through NumPy's ILP64 LAPACK,
+    which is always gesdd (the default driver; the MAP's QR check guards it)."""
+    import scipy.linalg as sl
+    m = max(W.shape)
+    if m * m <= LP64_MAX:
+        U, s, _ = sl.svd(W, full_matrices=True, overwrite_a=True, check_finite=False, lapack_driver=driver)
+        return U, s
+    if not _numpy_ilp64():
+        raise RuntimeError(f"lml_solver svd: a {m} x {m} SVD needs 64-bit LAPACK indexing, which neither SciPy nor "
+                           "NumPy provides here; use --lml-solver qr")
+    if driver != "gesdd":
+        import warnings
+        warnings.warn(f"lml_solver svd: {m} x {m} is past SciPy's 32-bit LAPACK; NumPy's ILP64 gesdd is used instead "
+                      f"of {driver}", UserWarning, stacklevel=3)
+    U, s, _ = np.linalg.svd(W, full_matrices=True)
+    return U, s
+
+
 def svd_statistics(qs, prob, driver=None):
     """SVDStats of QRStats `qs`: the three quantities' factors merged by one stacked QR (host LAPACK), then
     the SVD of R_1 D^-1 by LAPACK `driver` ("gesdd", divide and conquer, or "gesvd", QR iteration; default
     SVD_DRIVER), its full left basis U projecting c and the joint-E0 columns R_2.  Peak memory ~3 (L+k)^2
     doubles beyond qs."""
-    import scipy.linalg as sl
-
     from .stats import _host_merge
     R, c = np.asarray(qs.R_E, np.float64), np.asarray(qs.c_E, np.float64)
     for q in "FV":
@@ -72,8 +104,7 @@ def svd_statistics(qs, prob, driver=None):
     R2 = R[:, L:].copy()
     W = R[:, :L] / gamma[None, :]
     del R
-    U, s, _ = sl.svd(W, full_matrices=True, overwrite_a=True, check_finite=False,
-                     lapack_driver=SVD_DRIVER if driver is None else driver)
+    U, s = _svd_full_u(W, SVD_DRIVER if driver is None else driver)
     chat, P = U.T @ c, U.T @ R2
     del U
     tot = lambda k: sum(getattr(qs, f"{k}_{q}") for q in "EFV")                    # noqa: E731
