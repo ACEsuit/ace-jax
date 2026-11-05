@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **Fast species-embedded basis build.** `aj basis --embedding` and `build_embedding_model` with the default
+  `ace1` block rule enumerated the full categorical body set for all S elements and then kept only the
+  z' = 1 channel, a 1/S fraction of the radial indices. The search now enters only those indices. The basis
+  is unchanged (same bodies, same order). For S = 12, order 4, degree 14 the spec takes 1.7 s instead of
+  hours; the cost no longer grows with S.
+
 ## 0.5.3 (2026-11-05)
 
 **Highlights.** Large linear fits are much faster. The training statistics are approximately 6x faster per

@@ -111,7 +111,7 @@ def _caps(caps, order):
     return nm, lm
 
 
-def build_spec(NZ, order, totaldegree, wL=1.5, tol=1e-9, caps=None):
+def build_spec(NZ, order, totaldegree, wL=1.5, tol=1e-9, caps=None, keep=None):
     """From-scratch reproduction of ACEpotentials' ace1_model basis selection
     (Models.oneparticle_spec + sparse_AA_spec, src/models/{smoothness_priors,utils}.jl):
     the many-body mb_spec (list of (n,l) bodies), the one-particle Rnl_spec (n,l),
@@ -126,7 +126,14 @@ def build_spec(NZ, order, totaldegree, wL=1.5, tol=1e-9, caps=None):
     -- pacemaker's nradmax_by_orders / lmax_by_orders.  With wL = 1 the TotalDegree level of a
     single-species body, sum(n + l), is pacemaker's power order, so caps plus a level bound give a
     PACE-shaped basis.  With caps the one-particle spec is only the (n, l) the bodies use.  No caps:
-    the ACEpotentials selection, unchanged."""
+    the ACEpotentials selection, unchanged.
+
+    keep: optional predicate on a one-particle (n, l); the many-body spec is then only the bodies whose
+    every element it accepts -- the same bodies, in the same order, as filtering the full mb_spec
+    afterwards (a body is grown from its own elements, and dropping A entries leaves the remaining
+    levels sorted, so the pruning is unchanged), but the search never enters the rejected elements.
+    build_embedding_spec's z' = 1 channel keeps 1/S of the radial indices, so this cuts the search
+    for order-nu bodies by ~S^nu.  Rnl_spec and Ylm_spec ignore it."""
     import math
     md = totaldegree
     maxn1 = math.ceil(md * NZ)                                    # oneparticle_spec bounds
@@ -135,7 +142,7 @@ def build_spec(NZ, order, totaldegree, wL=1.5, tol=1e-9, caps=None):
     Rnl = sorted([(n, l) for n in range(1, maxn1 + 1) for l in range(0, maxl1 + 1)
                   if _level(n, l, NZ, wL) <= md + tol], key=lambda b: (b[1], b[0]))
     # A-spec (n,l,m), stable-sorted by level (m does not change the level)
-    A = [(n, l, m) for (n, l) in Rnl for m in range(-l, l + 1)]
+    A = [(n, l, m) for (n, l) in Rnl if keep is None or keep(n, l) for m in range(-l, l + 1)]
     A.sort(key=lambda b: _level(b[0], b[1], NZ, wL))             # ascending level (stable)
     Alev = [_level(b[0], b[1], NZ, wL) for b in A]
     # AA/mb: non-decreasing A-index bodies up to `order`, pruned by level (DFS,
@@ -208,11 +215,11 @@ def build_embedding_spec(S, order, totaldegree, widths, wL=1.5, maxl=None, block
     if len(widths) != order:
         raise ValueError(f"need one width per correlation order: {len(widths)} != {order}")
     NZf = S if block_rule == "ace1" else 1
-    mb_f, Rnl_f, _ = build_spec(NZf, order, totaldegree, wL)
     ok = lambda n, l: (n - 1) % NZf == 0 and (maxl is None or l <= maxl)
+    mb_f, Rnl_f, _ = build_spec(NZf, order, totaldegree, wL, keep=ok)  # z' = 1 bodies only: ~S^nu less search
     unfold = lambda n: (n - 1) // NZf + 1
     r1 = [(unfold(n), l) for n, l in Rnl_f if ok(n, l)]                 # (l, n') order
-    mb1 = [[(unfold(n), l) for n, l in b] for b in mb_f if all(ok(n, l) for n, l in b)]
+    mb1 = [[(unfold(n), l) for n, l in b] for b in mb_f]
     d = max(widths)
     rspec = [((n1 - 1) * d + k, l) for n1, l in r1 for k in range(1, d + 1)]
     mb = [[((n1 - 1) * d + k, l) for n1, l in b] for b in mb1 for k in range(1, widths[len(b) - 1] + 1)]
