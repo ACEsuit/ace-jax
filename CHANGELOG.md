@@ -1,25 +1,57 @@
 # Changelog
 
-## Unreleased
+## 0.5.3 (2026-11-05)
 
-- **Faster MAP for large linear fits on the CPU.** The QR evidence is now evaluated with its structure on the
-  host: triangular merges of the per-quantity factors, one triangular inverse, and the gradient and exact
-  Hessian in the four scales written out, instead of a dense QR of the stacked matrix with autodiff through it.
-  Same evidence to roundoff; less memory. GPU statistics keep the dense form (`objective.QR_EVAL`).
+**Highlights.** Large linear fits are much faster. The training statistics are approximately 6x faster per
+batch and can be spread over the nodes of a cluster with MPI. The MAP can use one SVD (shared noise), and on
+the CPU each QR evidence step is 8-20x cheaper. A new how-to, `docs/user/howto/large-fits.md`, shows the
+workflow.
+
+**Upgrading from 0.5.2.** Saved models and the output files are unchanged. A linear fit can give
+hyperparameters and coefficients that differ from 0.5.2 at round-off level (approximately 1e-9 relative in
+theta on the pipeline goldens): the QR factors are merged and the evidence is evaluated in a different order.
+
+### Added
+
+- **MAP by one SVD** (`aj fit --lml-solver svd`). With shared noise, the linear arm's evidence and its
+  gradient are computed from one SVD of the merged QR factor scaled by the prior, so each MAP evaluation
+  costs O(L) instead of a QR of the whole system. It is as accurate as the QR form, and the posterior and
+  the saved model are computed as before. For approximately L = 50,000 this replaces about a day of MAP
+  evaluations with one decomposition. Jointly fitted reference energies (`--e0 lsq`) are supported. At the
+  MAP the QR evidence is evaluated once as a check; if the two disagree, the MAP continues on the QR form.
+  Independent noises and float32 rows use the QR form, with a warning. (#143)
 - **MPI-sharded training statistics** (`aj fit --mpi`, the new `[mpi]` extra: mpi4py). Run under `srun` or
   `mpirun` with one rank per node. Each rank streams every N-th batch into its own QR factors. A binary tree
   merges the factors onto rank 0, which runs the rest of the fit. The statistics pass is limited by memory
-  bandwidth, so it scales with nodes, not with ranks on one node. It works with `--checkpoint`.
+  bandwidth, so it scales with nodes, not with ranks on one node. It works with `--checkpoint`. (#142)
 - **Two-job large fits** (`aj fit --stats-only`, needs `--checkpoint DIR`): stop after the training statistics.
   With `--mpi`, rank 0 also saves the merged factors as one serial checkpoint, so the same command without
   `--mpi` and `--stats-only`, as a dependent one-node job, runs only the MAP and the N statistics nodes are
-  released. See `docs/user/howto/large-fits.md`.
+  released. See `docs/user/howto/large-fits.md`. (#142)
 - `aj fit --uq ard --ard-prior fixed` (`FitConfig.ard_prior = "fixed"`) runs the calibrated per-atom force
   stage on the BLR posterior: the hold-out fits, the transfer fit and the served posterior keep the MAP's
   own prior (a_k = -2 log sigma_c for every body order) instead of fitting the ARD scales by evidence. The
   served mean is the `--uq blr` fit's. Needs `--ard-solver qr` (the default for `--uq ard`): the BLR prior
   can sit below the evidence fit's floor. `ard.json` records `"prior"` and whether the prior is below the
-  floor. The default, `fit`, is unchanged.
+  floor. The default, `fit`, is unchanged. (#145)
+
+### Changed
+
+- **Faster training statistics** (#146). The design rows scatter every centre species in one pass instead of
+  one masked pass per species (11.5 s to 1.7 s per batch at L = 47,000, the same rows bit for bit), and the
+  host QR merges use LAPACK `tpqrt`, which keeps R triangular (approximately 5x faster at L = 8,000).
+- **Faster MAP for large linear fits on the CPU.** The QR evidence is now evaluated with its structure on the
+  host: triangular merges of the per-quantity factors, one triangular inverse, and the gradient and exact
+  Hessian in the four scales written out, instead of a dense QR of the stacked matrix with autodiff through it.
+  Same evidence to roundoff; less memory. GPU statistics keep the dense form (`objective.QR_EVAL`). (#147)
+
+### Fixed
+
+- **SVD MAP for L > 46,340** (#148). SciPy's LAPACK uses 32-bit indices and refused the full SVD; such fits now
+  use NumPy's 64-bit-index LAPACK (divide and conquer). An L = 47,448 fit then completed.
+- **MAP refinement stopped short** (#146). The Newton refinement now accepts a full Newton step that halves the
+  projected gradient without raising the objective beyond its round-off, where the line search failed on that
+  round-off.
 
 ## 0.5.2 (2026-11-03)
 
@@ -53,13 +85,6 @@ a different, narrower POPS box than in 0.5.1:
 
 ### Added
 
-- **MAP by one SVD** (`aj fit --lml-solver svd`). With shared noise, the linear arm's evidence and its
-  gradient are computed from one SVD of the merged QR factor scaled by the prior, so each MAP evaluation
-  costs O(L) instead of a QR of the whole system. It is as accurate as the QR form, and the posterior and
-  the saved model are computed as before. For approximately L = 50,000 this replaces about a day of MAP
-  evaluations with one decomposition. Jointly fitted reference energies (`--e0 lsq`) are supported. At the
-  MAP the QR evidence is evaluated once as a check; if the two disagree, the MAP continues on the QR form.
-  Independent noises and float32 rows use the QR form, with a warning.
 - **Resumable fits** (`aj fit --checkpoint DIR`, `--checkpoint-every MIN`, default 45). The training
   statistics pass saves its QR factors to DIR at that interval, and the MAP saves its best
   hyperparameters after each evaluation. Run the same command again to resume. A complete statistics pass
