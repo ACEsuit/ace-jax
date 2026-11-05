@@ -211,8 +211,24 @@ def jit_lik(lik, body):
     return lambda *x: jf(lik.consts, *x)
 
 
-def make_lml(prob, ds, mesh=None, cache_linear=True, n_types=1, n_free_ratios=0):
-    """cache_linear: stream the theta-independent linear Gram G_BB once and
+QR_EVAL = "auto"    # the QR LML in make_lml: "host" (lml_host.HostQREvidence), "dense" (a jitted QR of the stacked
+                    # matrix, autodiff through it) or "auto": host when the statistics are on the CPU
+
+
+def _host_qr_eval(qs):
+    if QR_EVAL not in ("auto", "host", "dense"):
+        raise ValueError(f"QR_EVAL must be 'auto', 'host' or 'dense', got {QR_EVAL!r}")
+    if QR_EVAL != "auto":
+        return QR_EVAL == "host"
+    devs = getattr(qs.R_F, "devices", None)
+    return all(d.platform == "cpu" for d in devs()) if devs is not None else True
+
+
+def make_lml(prob, ds, mesh=None, cache_linear=True, n_types=1, n_free_ratios=0, shared_noise=False):
+    """shared_noise: the caller wraps the result in paramset.tied_likelihood (cfg.noise "shared"), so the host
+    QR evidence may merge the three quantities' factors once (lml_host.HostQREvidence shared).
+
+    cache_linear: stream the theta-independent linear Gram G_BB once and
     recompute only the M residual columns per call (10x for a large basis;
     stats.py 'theta-split statistics').  mesh disables it (sharded path).
 
@@ -243,7 +259,15 @@ def make_lml(prob, ds, mesh=None, cache_linear=True, n_types=1, n_free_ratios=0)
                                   row_dtype=getattr(prob, "row_dtype", "float64"))
         jax.block_until_ready(qs)
 
-        f = hoist(jax.jit(lambda a, qs: log_marginal_likelihood_qr(from_array(a), qs, prob)), qs)
+        if _host_qr_eval(qs):     # the structured host evaluation (fit/lml_host.py): same evidence, ~10x faster
+            from .lml_host import HostQREvidence
+            ev = HostQREvidence(qs, prob, shared=shared_noise)   # shared: only under paramset.tied_likelihood
+
+            def f(a):
+                return ev.lml(from_array(a))
+            f.host_evidence = ev
+        else:
+            f = hoist(jax.jit(lambda a, qs: log_marginal_likelihood_qr(from_array(a), qs, prob)), qs)
         f.qr_stats = qs            # the statistics the posterior must share with the LML
         return f
     if cache_linear and mesh is None:
