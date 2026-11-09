@@ -485,6 +485,13 @@ The [validation tables](https://github.com/ACEsuit/ace-jax/blob/main/docs/dev/ar
 and the [acceptance report](https://github.com/ACEsuit/ace-jax/blob/main/bench/defect_uq/results/2026-10-03_rev2_acceptance.md)
 give all results, with confidence intervals.
 
+A second study applies the method to silicon (with `--ard-prior fixed`),
+and compares it with Bayesian and POPS uncertainties. It also propagates the
+uncertainty to silicon properties, for example elastic constants and defect
+energies. The paper is J. R. Kermode,
+[arXiv:2611.08678](https://arxiv.org/abs/2611.08678). Its code and results
+are on [GitHub](https://github.com/kermodegroup/si-qoi-uq-paper).
+
 ## Limits
 
 - **Only forces are calibrated.** The calculator gives no energy or virial
