@@ -33,12 +33,21 @@ Cheapest model reaching the target, µs/atom-step, float64, LAMMPS:
 | linear ACE o4d20, patched ML-PACE (proposed upstream) | 5,476 | 0.0816 | 0.41 | 2.42 | 2.89 |
 | linear ACE o4d20, ACEpotentials.jl (trim library) | 5,476 | 0.0816 | 0.41 | – | 10.8 |
 | linear ACE o4d20, ace-jax kernel (lammps-jax FFI; CUDA / C++) | 5,476 | 0.0816 | 0.41 | 1.23 | 3.29 |
-| MACE c16L0, Symmetrix | 31,152 | 0.0699 | < 0.5 | 1.93 | 2.36 |
+| MACE c16L0, Symmetrix 0d86e1e (before 2026-11-10) | 31,152 | 0.0699 | < 0.5 | 1.93 | 2.36 |
+| **MACE c16L0, Symmetrix 0.3.0** | 31,152 | 0.0699 | < 0.5 | **0.65** | **0.59** |
 | MACE c16L0, Symmetrix-XL | 31,152 | 0.0699 | < 0.5 | 1.23 | 2.19 |
-| MACE c16L1, Symmetrix | 40,272 | 0.0579 | < 0.5 | 5.36 | 8.58 |
+| MACE c16L1, Symmetrix 0d86e1e (before 2026-11-10) | 40,272 | 0.0579 | < 0.5 | 5.36 | 8.58 |
+| MACE c16L1, Symmetrix 0.3.0 | 40,272 | 0.0579 | < 0.5 | 1.37 | 1.43 |
 | MACE c16L1, Symmetrix-XL | 40,272 | 0.0579 | < 0.5 | 1.47 | 2.87 |
-| GRACE-1L c64l4, `grace/1l/kk` (3-seed mean) | 445,793 | 0.0764 | 0.46 | 11.65 | 59.1 |
-| GRACE-2L 2l_c16, `grace/2l/kk` (3-seed mean) | 98,882 | 0.0637 | 0.42 | 8.96 | 24.0 |
+| GRACE-1L c64l4, `grace/1l/kk` float64 (3-seed mean) | 445,793 | 0.0764 | 0.46 | 11.65 | 59.1 |
+| GRACE-1L c64l4, grace-runtime 0.1.4, mixed | 445,793 | 0.0764 | 0.46 | 1.68 | 1.88 |
+| GRACE-2L 2l_c16, `grace/2l/kk` float64 (3-seed mean) | 98,882 | 0.0637 | 0.42 | 8.96 | 24.0 |
+| GRACE-2L 2l_c16, grace-runtime 0.1.4, mixed | 98,882 | 0.0637 | 0.42 | 1.47 | 0.81 |
+
+Since 2026-11-10 the plotted costs are Symmetrix 0.3.0 for MACE, grace-runtime for GRACE-1L/2L (mixed precision,
+labelled) and pace/runtime for PACE (see "grace-runtime and Symmetrix 0.3.0" below). MACE c16L0 is now the
+cheapest model at the target on both devices, 1.9x the ace-jax CUDA kernel on the A100 and 5.6x its C++ kernel
+on the CPU.
 
 Not reached in their ladders (best QoI error, at that model's force RMSE):
 
@@ -206,7 +215,8 @@ parameters than linear ACE (f800: 761 parameters, 0.081 eV/Å) but not the QoI t
   the lowest force error but a worse QoI (λf 10 trades away energies); stage 2 recovers most of it. Stage 2
   converges fast: n50-2s's test F was flat (0.1004) from 50k to 500k generations, so n120b-2s ran a 100k stage 2.
   Cost: 32.7 A100-hours (n50: 13.0 for both stages plus 2.2 for n50-w; n120b: 8.7 per stage).
-- **Symmetrix-XL** is 1.1-3.6x faster than Symmetrix for the same MACE models, most at L = 1 on the GPU.
+- **Symmetrix-XL** was 1.1-3.6x faster than Symmetrix 0d86e1e for the same MACE models, most at L = 1 on the GPU.
+  Symmetrix 0.3.0 is faster than Symmetrix-XL at every two-layer size: 1.1-2.1x on the A100, 1.8-3.9x on the CPU.
 - **The DAG product basis** (`eval/aa_dag.py`) is never slower than the chain form and from ~6,000 chain-form
   multiplies per site clearly faster, so `aa_dag="auto"` (the default of `ACECalculator` and `export_lammps`)
   takes it from `AUTO_MIN_CHAIN_MUL` = 4,000. Every ace-jax model of the figure, timed in both forms one after
@@ -233,10 +243,12 @@ parameters than linear ACE (f800: 761 parameters, 0.081 eV/Å) but not the QoI t
 ## How the rows were timed
 
 - GPU: one A100, 32,768 atoms. CPU: one Sulis node (2 x 64-core AMD EPYC 7742), 4,096 atoms, all cores, ranks
-  bound to cores, each model's faster of 128 x 1 and 64 x 2 MPI ranks x threads; GAP at 32 ranks.
+  bound to cores, each model's fastest timed layout (128 x 1, 64 x 2, and for grace-runtime / Symmetrix 0.3.0
+  also 32 x 4, 16 x 8, 8 x 16 MPI ranks x threads); GAP at 32 ranks.
 - Every cost is a LAMMPS row that passed its parity gate (64 atoms against the model's reference evaluation)
-  in the same job; `make_cost.py` takes each model's fastest such row, float64 only. One-layer MACE and, on
-  the GPU, Symmetrix MACE c64L1 have float32 timings only and are left out of the cost rows.
+  in the same job; `make_cost.py` takes each model's fastest such row, float64 only, except NEP on the GPU and
+  grace-runtime (`--allow nep-gpumd:mixed --allow grace-rt:mixed`). One-layer MACE has float32 timings only
+  (Symmetrix supports only two-layer MACE) and is left out of the cost rows.
 - ace-jax: lammps-jax bundles (`export_lammps`; CPU: `platform="cpu"`, `neighbour_capacity(procs=)`), each model
   timed in the chain form and with `aa_dag="greedy"` on the same node (`envs/sulis-{cpu,gpu}-dagpair.sbatch`,
   ace-jax 6debdc9); `accuracy_cost/dag_auto.py` keeps, per model, the form `aa_dag="auto"` picks
@@ -317,14 +329,14 @@ grep -h '"code": "mlpace-mixed"' $R/sulis-gpu-fp32-o4d*.jsonl > $R/sulis-gpu-fp3
 (cd bench && python -m accuracy_cost.dag_auto)
 python bench/si_qoi/make_cost.py --dtype float64 --source acejax-ace=sulis-cpu-128x1-acejax-auto --out $RR/cost_sulis_cpu.json \
     $(ls $R/sulis-cpu*.jsonl | grep -v -e smoke -e ace_yace -e pacetab-check -e "ace_tab\.jsonl" -e ace_tab2 \
-      -e ace_tab3 -e dagpair -e ffi-xla)          # ffi-xla: the C++ kernel's same-node XLA control, not plotted
+      -e ace_tab3 -e dagpair -e ffi-xla) --allow grace-rt:mixed   # ffi-xla: the C++ kernel's same-node XLA control
 python bench/si_qoi/make_cost.py --dtype float64 --source acejax-ace=sulis-gpu-acejax-auto --out $RR/cost_sulis_gpu.json \
     bench/accuracy_cost/results/sulis-gpu.jsonl bench/accuracy_cost/results/sulis-gpu-ace-splined.jsonl \
     $R/sulis-gpu-ace-splined-v2.jsonl $R/sulis-gpu-v2.jsonl $R/sulis-gpu-mace_xl.jsonl \
     $R/sulis-gpu-ace_tab5.jsonl $R/sulis-gpu-ace_tabfork.jsonl $R/sulis-gpu-pace-dev.jsonl $R/sulis-gpu-nep.jsonl $R/sulis-gpu-acejax-auto.jsonl \
     $R/sulis-gpu-fp32-mixed.jsonl $R/sulis-gpu-fp32-dot-F32_F32_F32.jsonl $R/sulis-gpu-grace.jsonl $R/sulis-gpu-grace2l.jsonl \
-    $R/sulis-gpu-cudak.jsonl \
-    --allow nep-gpumd:mixed
+    $R/sulis-gpu-cudak.jsonl $R/sulis-gpu-gracert.jsonl $R/sulis-gpu-symx3.jsonl \
+    --allow nep-gpumd:mixed --allow grace-rt:mixed
 ROWS=(--row "A100 GPU, µs/atom-step|$RR/cost_sulis_gpu.json|$RR/cost_sulis_gpu.codes.json"
       --row "CPU node (128 cores), µs/atom-step|$RR/cost_sulis_cpu.json|$RR/cost_sulis_cpu.codes.json")
 python bench/si_qoi/plot_cost.py "${ROWS[@]}"
@@ -455,3 +467,55 @@ Costs: 19.0 A100-hours of fits (2l_c16 2.0, 2l_small 5.2, 2l_medium 6.7, 2l_smal
 probe (job 2258379) and ~2 for timing (jobs 2258977, 2259084; CPU 2258978, 2258979). Rows: `results/metrics.jsonl`
 (`grace_2l`), QoI scores `results/grace_2l_qoi.json`, timings `results/sulis/sulis-{gpu,cpu-128x1,cpu-64x2}-grace2l.jsonl`
 and `sulis-cpu-64x2-grace.jsonl`.
+
+## grace-runtime and Symmetrix 0.3.0 (2026-11-10)
+
+**grace-runtime 0.1.4** (ICAMS; Academic Software Licence) retimes GRACE-1L/2L and PACE. LAMMPS:
+yury-lysogorskiy/lammps `grace-runtime` c90c3a5 with ML-PACE v.2025.12.4.p1 (`bench/scaling/envs/sulis-grace-runtime.sh`;
+builds 2280014 CPU, `-march=native`, GCC 12.3, plain MPI + OpenMP; 2280015 GPU, kokkos-cuda preset, Ampere80,
+CUDA 12.8). Pair styles `grace/runtime[/kk]` (the fits' kokkos.npz) and `pace/runtime[/kk]` (pacemaker's B-basis
+.yaml, not .yace; its energy omits the .yace `E0`, which the gate adds back). GRACE-FS is not supported. The GRACE
+network is always fp32 (fp64 geometry and sums), so its rows are `mixed`; PACE is float64 with 1,024-interval radial
+tables (`PACE_RT_SPLINE=0` gives exact radials: forces 5e-13 against ace-jax vs 1.8e-7 default). Timing:
+`accuracy_cost/envs/sulis-{cpu,gpu}-gracert.sbatch` (jobs 2280018 CPU 128 x 1 + 32 x 4, 2280021 CPU 8 x 16,
+2280019 A100). Gates: GRACE ≤ 7.4e-8 eV/atom, 5.5e-7 eV/Å (CPU), ≤ 1.9e-7 / 1.5e-6 (A100); PACE ≤ 1.6e-10 / 2.6e-7.
+
+| model | A100 float64 `grace/*/kk` | A100 grace-runtime | CPU float64 | CPU grace-runtime (layout) |
+|---|---|---|---|---|
+| GRACE-1L c8l3 | 2.47 | 0.189 | 4.79 | 0.158 (32 x 4) |
+| GRACE-1L c16l3 | 3.25 | 0.238 | 7.33 | 0.190 (32 x 4) |
+| GRACE-1L c16l4 | 3.81 | 0.412 | 10.5 | 0.384 (128 x 1) |
+| GRACE-1L c32l4 | 6.95 | 0.768 | 26.0 | 0.822 (32 x 4) |
+| GRACE-1L c64l4 | 11.65 | 1.681 | 59.1 | 1.884 (32 x 4) |
+| GRACE-2L 2l_c16 | 8.96 | 1.465 | 24.0 | 0.808 (32 x 4) |
+| GRACE-2L 2l_small | 26.4 | 2.099 | 72.7 | 2.654 (32 x 4) |
+| GRACE-2L 2l_medium | 53.9 | 3.369 | 120.5 | 5.054 (32 x 4) |
+
+GRACE: 24-39x on the CPU, 6-16x on the A100. 2l_small and 2l_medium at 128 x 1 exceed the harness's 48 GB RSS cap
+(95 and 76 GB: per-rank state does not shrink with the subdomain); they time at 32 x 4 and 8 x 16.
+PACE (µs/atom-step, ML-PACE → pace/runtime): CPU 2.1-2.8x (f50 0.263 → 0.112, f800 0.936 → 0.402, f3200 3.98 → 1.85;
+best of 128 x 1 / 32 x 4); A100 0.9-1.0x to f200, rising to 2.2x at f3200 (3.61 → 1.62). PACE still does not reach
+the QoI target, so the target table is unchanged by it.
+
+**Symmetrix v0.3.0** (wcwitt/symmetrix fc7e532; `bench/scaling/envs/sulis-symx3.sh`, LAMMPS release 0165101 with
+Kokkos 5.2.1; builds 2280016 CPU, 2280027 GPU with g++ + `-march=native -ffast-math` per Symmetrix's recipe, the
+foundation styles left out of the GPU build). The release's headline work, `symmetrix/mace/foundation`, accepts only
+preset shapes (96-256 channels), so none of these 8-64-channel fits use it; the gain comes from the v0.1-v0.2 rework
+of the generic `symmetrix/mace` (flattened kernels, in-kernel splines, OpenMP threads per rank, fast math). Models
+re-extracted with v0.3.0's `symmetrix_extract_mace` (`model-symx3.json`). One-layer fits are refused ("only
+supports two-layer MACE models"). Timing: `accuracy_cost/envs/sulis-{cpu,gpu}-symx3.sbatch` (jobs 2280023 CPU 128 x 1
+with the old build alongside, 2280024 CPU 32 x 4 / 16 x 8, 2280028 A100). Gates ≤ 1.3e-10 eV/atom, 1.8e-7 eV/Å
+(the old build: 3-4e-5 eV/Å).
+
+| model | A100 old | A100 0.3.0 | A100 XL | CPU old (same node, 128 x 1) | CPU 0.3.0 (32 x 4) | CPU XL |
+|---|---|---|---|---|---|---|
+| c8L0 | 1.78 | 0.618 | 1.18 | 0.769 | 0.478 | 1.86 |
+| c16L0 | 1.93 | 0.647 | 1.23 | 1.47 | 0.590 | 2.19 |
+| c32L0 | 2.25 | 0.772 | 1.62 | 3.32 | 1.050 | 3.15 |
+| c16L1 | 5.32 | 1.369 | 1.47 | 4.93 | 1.426 | 2.87 |
+| c32L1 | 6.12 | 1.605 | 1.93 | 9.88 | 2.491 | 4.68 |
+| c64L1 | OOM (40 GB) | 2.547 | 3.08 | 20.8 | 5.158 | 9.04 |
+
+32 x 4 is the best CPU layout at every size (16 x 8 is slower than 128 x 1 for L = 0). The old build's same-node
+128 x 1 times are lower than the plotted old rows (1.87 / 2.36 / 6.68 / 8.58 / 18.7 / 38.0: a different node and
+date), so the same-node gain is 1.6-4x, and 3.9-7.4x against the plotted rows.

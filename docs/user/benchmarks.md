@@ -30,6 +30,8 @@ training and 248 for testing).
   the force error of GAP-18, and its QoI error is not more than 0.5.
 - **Cost.** Microseconds per atom per MD step, in LAMMPS, in float64. Each
   model uses the fastest code that agrees with the reference evaluation.
+  NEP on the GPU, GRACE-1L and GRACE-2L are in mixed precision, because
+  their fastest codes have no float64 mode.
 
 <div class="plotly-figure" markdown>
 
@@ -59,26 +61,34 @@ At the target, in microseconds per atom-step:
 | linear ACE o4d20, ace-jax kernel with lammps-jax (CUDA on the GPU, C++ on the CPU) | 1.23 | 3.29 |
 | linear ACE o4d20, ML-PACE | 4.13 | 5.31 |
 | linear ACE o4d20, ACEpotentials.jl | – | 10.8 |
-| MACE c16L0, Symmetrix | 1.93 | 2.36 |
+| MACE c16L0, Symmetrix 0.3.0 | 0.65 | 0.59 |
 | MACE c16L0, Symmetrix-XL | 1.23 | 2.19 |
-| MACE c16L1, Symmetrix | 5.36 | 8.58 |
+| MACE c16L1, Symmetrix 0.3.0 | 1.37 | 1.43 |
 | MACE c16L1, Symmetrix-XL | 1.47 | 2.87 |
-| GRACE-1L c64l4, `grace/1l/kk` | 11.65 | 59.1 |
-| GRACE-2L 2l_c16, `grace/2l/kk` | 8.96 | 24.0 |
+| GRACE-1L c64l4, grace-runtime (mixed precision) | 1.68 | 1.88 |
+| GRACE-2L 2l_c16, grace-runtime (mixed precision) | 1.47 | 0.81 |
+
+MACE c16L0 in Symmetrix 0.3.0 has the lowest cost at the target, on the
+A100 and on the CPU. Symmetrix 0.3.0 is 3 to 4 times faster than the
+earlier Symmetrix version for these MACE models. On the A100, it is
+1.9 times faster than the ace-jax GPU kernel at the target.
 
 In these ladders, PACE (pacemaker), ACE with learned radials, PACE-shaped
 ACE, NEP, the GAP refits and GRACE-FS do not reach the target. GRACE-1L
 reaches the target only at its largest size (c64l4, 445,793 parameters).
-At that size, its cost is approximately 4 to 27 times the cost of linear
-ACE o4d20 or MACE c16L0 in their fastest codes. GRACE-2L has two
-message-passing layers. It reaches the target at all of its sizes. Its
-smallest size (2l_c16, 98,882 parameters) costs approximately 4 to 11 times
-the cost of linear ACE o4d20 or MACE c16L0 in their fastest codes. GRACE-2L
+At that size, its cost is approximately 3 times the cost of MACE c16L0.
+GRACE-2L has two message-passing layers. It reaches the target at all of
+its sizes. Its smallest size (2l_c16, 98,882 parameters) costs
+approximately 1.4 (CPU) to 2.3 (A100) times the cost of MACE c16L0. On the
+CPU, it costs less than linear ACE o4d20 in the ace-jax kernel. GRACE-2L
 2l_small has a QoI error of 0.31, the same as the largest MACE L = 1 models. PACE reaches the force
 error of GAP-18 with fewer parameters than linear ACE, but not the QoI target.
 NEP has the lowest cost on the A100 (0.04 to 0.22 µs/atom-step), in mixed
 precision. On the CPU, NEP costs 0.55 to 3.0 µs/atom-step. PACE reaches the
-same force error on the CPU at a lower cost. The smallest NEP force error is
+same force error on the CPU at a lower cost.
+PACE in grace-runtime is 2.1 to 2.8 times faster than ML-PACE on the CPU.
+On the A100, it has the same speed as ML-PACE up to f200, and it is 2.2
+times faster at f3200. The smallest NEP force error is
 0.103 eV/Å, and its smallest QoI error is 0.66.
 These force errors agree with the published NEP results for this dataset
 (approximately 0.1 eV/Å).
@@ -104,8 +114,8 @@ the smallest models.
 - **GPU.** One NVIDIA A100, 32,768 atoms.
 - **CPU.** One node with two 64-core AMD EPYC 7742 CPUs, 4,096 atoms. All
   cores are used, with each MPI rank bound to a core. Each model uses its
-  faster layout: 128 MPI ranks, or 64 MPI ranks with 2 threads. GAP uses 32
-  MPI ranks.
+  fastest layout, from 128 MPI ranks with 1 thread to 8 MPI ranks with 16
+  threads. GAP uses 32 MPI ranks.
 - **ace-jax** runs in LAMMPS with lammps-jax, on the GPU and on the CPU.
   ace-jax selects the form of the product basis for each model. Models with
   4,000 or more chain-form multiplications per atom use the recursive (DAG)
@@ -127,17 +137,22 @@ the smallest models.
   [GPU kernel](howto/lammps.md#gpu-kernel) runs with one MPI rank.
 - **ML-PACE** on the GPU is the LAMMPS development version with the 2026
   `pace/kk` GPU update.
-- **MACE** runs in LAMMPS with Symmetrix and, separately, with
-  Symmetrix-XL.
+- **MACE** runs in LAMMPS with Symmetrix 0.3.0 (`pair_style
+  symmetrix/mace`) and, separately, with Symmetrix-XL. Symmetrix does not
+  support the one-layer MACE models.
+- **PACE (pacemaker)** runs in LAMMPS with `pair_style pace/runtime` from
+  ICAMS grace-runtime 0.1.4, in float64. It reads the B-basis `.yaml` file
+  of pacemaker. Its radial functions are tables with 1,024 intervals.
 - **GAP** runs in LAMMPS with QUIP, on the CPU only.
-- **GRACE** runs in LAMMPS with the native Kokkos styles of gracemaker's
-  LAMMPS version, in float64: `grace/1l/kk` (GPU) and `grace/1l/cpu/kk`
-  (CPU) for GRACE-1L, `grace/2l/kk` and `grace/2l/cpu/kk` for GRACE-2L,
-  and `grace/fs/kk` and `grace/fs` for GRACE-FS. On the CPU, each GRACE
-  model uses its faster layout: 128 MPI ranks, or 64 MPI ranks with 2
-  threads. On the GPU, GRACE-2L 2l_medium uses a chunk size of 1,024
-  atoms, because the default chunk size uses more than the 40 GB of the
-  A100.
+- **GRACE-1L and GRACE-2L** run in LAMMPS with `pair_style
+  grace/runtime` (CPU) and `grace/runtime/kk` (GPU) from ICAMS
+  grace-runtime 0.1.4. grace-runtime calculates the neural network in
+  float32 and the geometry and the sums in float64. The figure labels
+  these points as mixed precision. They are 24 to 39 times faster on the
+  CPU, and 6 to 16 times faster on the A100, than the float64 Kokkos
+  styles of gracemaker's LAMMPS version.
+- **GRACE-FS** runs in LAMMPS with `grace/fs/kk` (GPU) and `grace/fs`
+  (CPU), in float64. grace-runtime does not support GRACE-FS.
 - **NEP** is trained with GPUMD. On the CPU, it runs in LAMMPS with
   `pair_style nep` (NEP_CPU, float64). On the GPU, it runs in GPUMD. GPUMD
   uses mixed precision, and the figure labels these points.
