@@ -24,7 +24,19 @@ KOKKOS = {"acejax": "newton on neigh half", "mlpace": "newton on neigh half",
           # GRACE (the yury-lysogorskiy/lammps `grace` branch, bench/scaling/envs/sulis-grace.sh): native Kokkos 1L
           # (gracemaker export_kokkos .npz; full float64 by default) and the C++ GRACE-FS evaluator; both need newton on
           "grace": "newton on neigh half", "grace-fs": "newton on neigh half",
-          "grace-2l": "newton on neigh half"}   # GRACE-2L: grace/2l/kk (GPU), grace/2l/cpu/kk (CPU)
+          "grace-2l": "newton on neigh half",   # GRACE-2L: grace/2l/kk (GPU), grace/2l/cpu/kk (CPU)
+          # grace-runtime (ICAMS/grace-runtime 0.1.4, the yury-lysogorskiy/lammps `grace-runtime` branch,
+          # bench/scaling/envs/sulis-grace-runtime.sh): grace/runtime/kk and pace/runtime/kk need newton on, half list
+          "grace-rt": "newton on neigh half", "pace-rt": "newton on neigh half",
+          # Symmetrix v0.3.0 (bench/scaling/envs/sulis-symx3.sh), the same pair style as "mace" in its own LAMMPS
+          "mace-symx3": "newton on neigh half"}
+# grace-runtime's CPU styles (grace/runtime, pace/runtime) are plain MPI + OpenMP styles, not KOKKOS: on the CPU
+# they take OMP_NUM_THREADS threads a rank (cpu_mpirun binds them) and no -k switches
+RUNTIME = ("grace-rt", "pace-rt")
+# Symmetrix's pair styles: v0.3.0's plain symmetrix/mace threads each MPI rank with OpenMP itself ("8 threads per rank"
+# its README's rule of thumb), so on the CPU it, like grace-runtime, takes no -k switches
+MACE_STYLES = ("mace", "mace-symx3")
+OMP_PLAIN = (*RUNTIME, "mace-symx3")
 # Symmetrix-XL (bench/scaling/envs/sulis-xl.sh): its fast path is pair_style symmetrix/mace[/float32]/kk with
 # a JIT-compiled R1 artifact, so it runs Kokkos on the CPU too (the non-kk style is the old evaluator)
 XL = {"mace-xl": ("symmetrix/mace/kk", "float64"), "mace-xl-f32": ("symmetrix/mace/float32/kk", "float32")}
@@ -37,7 +49,7 @@ def _pair(style, model_path, elements, device, extra=None):
     if style == "mlpace":
         return ("pair_style pace product\n" if device == "gpu" else "pair_style pace\n") + \
                f"pair_coeff * * {model_path} {els}\n"
-    if style == "mace":                     # Symmetrix: element-specific .json
+    if style in MACE_STYLES:                # Symmetrix: element-specific .json
         return f"pair_style symmetrix/mace\npair_coeff * * {model_path} {els}\n"
     if style in XL:                         # extra: the R1 artifact fragment (xl_pair_args); GPU one rank
         dd = "no_domain_decomposition" if device == "gpu" else "mpi_message_passing"
@@ -54,6 +66,14 @@ def _pair(style, model_path, elements, device, extra=None):
         prec, chunk = os.environ.get("GRACE_PRECISION", ""), os.environ.get("GRACE_CHUNKSIZE")   # overrides as 1L's
         return (f"pair_style {('grace/2l/kk' if device == 'gpu' else 'grace/2l/cpu/kk') + prec}"
                 f"{f' chunksize {int(chunk)}' if chunk else ''}\n"
+                f"pair_coeff * * {model_path} {els}\n")
+    if style in RUNTIME:                    # grace-runtime: GRACE-1L/2L kokkos.npz, PACE B-basis .yaml (not .yace)
+        # GRACE: one precision scheme (fp64 geometry and sums, fp32 network); PACE: float64.  Defaults (chunksize
+        # auto, spline 1024) as deployed; $GRACE_CHUNKSIZE / $PACE_RT_SPLINE override them (0: radials exact)
+        chunk, spline = os.environ.get("GRACE_CHUNKSIZE"), os.environ.get("PACE_RT_SPLINE")
+        name = {"grace-rt": "grace/runtime", "pace-rt": "pace/runtime"}[style] + ("/kk" if device == "gpu" else "")
+        return (f"pair_style {name}{f' chunksize {int(chunk)}' if chunk and device == 'gpu' else ''}"
+                f"{f' spline {int(spline)}' if spline and style == 'pace-rt' else ''}\n"
                 f"pair_coeff * * {model_path} {els}\n")
     if style == "grace-fs":                 # GRACE-FS C++ YAML: Kokkos on the GPU, the plain MPI evaluator on the CPU
         return f"pair_style {'grace/fs/kk' if device == 'gpu' else 'grace/fs'}\npair_coeff * * {model_path} {els}\n"
@@ -346,7 +366,7 @@ def run_case(row, n_atoms, dtype, device, lmp, ranks, workdir, pjrt=None, prev=N
                     "system": row["system"], "n_atoms": n_atoms, "device": device, "dtype": dtype,
                     "status": "unsupported", "error": why}
         row = {**row, "pair_extra": args}
-    if style == "mace" and not pathlib.Path(row.get("symmetrix") or "").exists():  # e.g. MH-1
+    if style in MACE_STYLES and not pathlib.Path(row.get("symmetrix") or "").exists():  # e.g. MH-1
         return {"code": row["code"], "mode": "lammps", "model": row["name"], "size": row["size"],
                 "system": row["system"], "n_atoms": n_atoms, "device": device, "dtype": dtype,
                 "status": "unsupported", "error": f"no Symmetrix model {row.get('symmetrix')}"}
@@ -362,7 +382,7 @@ def run_case(row, n_atoms, dtype, device, lmp, ranks, workdir, pjrt=None, prev=N
                            {"trim_lib": row["trim_lib"], "trim_build": _trim_build(row)},
                            aceplugin=aceplugin, **kw)
     if style != "acejax":
-        model = row.get("symmetrix") if style == "mace" else row.get("symmetrix_xl") if style in XL else row["path"]
+        model = row.get("symmetrix") if style in MACE_STYLES else row.get("symmetrix_xl") if style in XL else row["path"]
         return _run_lammps(row, style, model, data, work, n_atoms, dtype, device, lmp, ranks,
                            pjrt, steps, warmup, {}, **kw)
     # ace-jax: the export's auto layout judges dense against the exporting
@@ -443,6 +463,8 @@ def kokkos_args(style, device, threads=1):
     lammps-jax, whose pair style is jax/kk only, and for a KOKKOS style run with
     threads > 1 (ML-PACE's pace/kk); plain MPI otherwise."""
     if device != "gpu":
+        if style in OMP_PLAIN:               # plain OpenMP styles (threads: OMP_NUM_THREADS)
+            return []
         if style in ("acejax", "grace", "grace-2l") or style in XL or (threads > 1 and style in KOKKOS):   # grace: /kk only
             return ["-k", "on", "t", str(threads), "-sf", "kk", "-pk", "kokkos", *KOKKOS[style].split()]
         return []

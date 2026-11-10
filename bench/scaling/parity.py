@@ -71,7 +71,14 @@ TOL = {"mlpace": (1e-6, 1e-5), "acejax": (1e-10, 1e-9), "mace": (1e-6, None),
        # SavedModel: 1L is the same arithmetic (mnf148 smoke: 2e-11 eV/atom, 1.7e-10 eV/A); the C++ FS evaluator
        # differs at the force level (smoke fs_small / fs_medium: <= 6e-12 eV/atom, 7e-9-1.3e-8 eV/A), so mlpace's bound
        # GRACE-2L (grace/2l/cpu/kk smoke, mnf148): 2.0e-7 eV/atom, 2.0e-7 eV/A: not roundoff, but far inside mlpace's bound
-       "grace": (1e-10, 1e-9), "grace-fs": (1e-6, 1e-5), "grace-2l": (1e-6, 1e-5)}
+       "grace": (1e-10, 1e-9), "grace-fs": (1e-6, 1e-5), "grace-2l": (1e-6, 1e-5),
+       # grace-runtime (accuracy_cost.timing "grace-rt"): its one precision scheme evaluates the network and radial
+       # tables in fp32 (sums in fp64), "about 1e-6 eV/atom and 5e-6 eV/A" on the foundation models (its docs)
+       "grace-rt": (1e-5, 5e-5),
+       # pace/runtime: float64, radials from 1024-interval cubic tables (forces ~1e-5 eV/A of pace's, its docs;
+       # measured against ace-jax on the Si ladder f100-f3200: 1.8e-7, and 5e-13 with spline 0): mlpace's bound
+       "pace-rt": (1e-6, 1e-5),
+       "mace-symx3": (1e-6, None)}                       # Symmetrix v0.3.0: the "mace" gate
 # gates that check a standalone line: a failure blocks its standalone rows
 STANDALONE_GATES = ("spline", "acepot")
 LEARNED, ANALYTIC = LEARNED_CODES                     # "acejax-ace-learned", "acejax-ace-analytic"
@@ -166,6 +173,16 @@ def _lammps_ef(style, model_path, els, at, device, lmp, work, pjrt=None, aceplug
     if not finished(p.returncode, log):
         raise RuntimeError(f"lammps exit {p.returncode}: {(p.stderr or p.stdout)[-300:]}")
     return read_pe((work / "log.lammps").read_text()), read_dump_forces(work / "f.dump")
+
+
+def yace_e0(path, els):
+    """Sum of a .yace's per-element E0 over the cell's species (`E0: [..]` in its `elements` order): ML-PACE and
+    ace-jax add it, and pacemaker's B-basis .yaml (grace-runtime's pace/runtime reads that) has none."""
+    import yaml                                         # the header only: a large ladder .yace is ~100 MB
+    with open(path) as f:
+        head = yaml.safe_load("".join(ln for _, ln in zip(range(50), f) if ln.startswith(("elements:", "E0:"))))
+    e0 = dict(zip(head["elements"], head.get("E0") or [0.0] * len(head["elements"])))
+    return float(sum(e0[e] for e in els))
 
 
 def _acejax_ef(path, at, **kw):
