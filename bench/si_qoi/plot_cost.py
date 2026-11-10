@@ -267,7 +267,8 @@ def series(ax, data, key):
 
 def flag(ax, data, codes, key):
     """Label points whose cost is not a float64 LAMMPS timing: make_cost.py fell back to a standalone run, or
-    the code is mixed precision only (NEP in GPUMD; make_cost --allow nep-gpumd:mixed)."""
+    the code is mixed precision only (NEP in GPUMD; make_cost --allow nep-gpumd:mixed; GRACE in grace-runtime,
+    --allow grace-rt:mixed, whose network is fp32 with fp64 sums)."""
     said = set()                            # one mixed-precision label per code: both NEP series run in GPUMD
     for fam, pts in data.items():           # one label per family and reason: neighbouring points share it
         why = {}
@@ -276,7 +277,9 @@ def flag(ax, data, codes, key):
             if q["x"] is None or q[key] is None:
                 continue
             if " mixed " in c:
-                head = "NEP (GPUMD): mixed precision" if fam.startswith("nep") else f"{FAM[fam][0]}: mixed precision"
+                head = ("NEP (GPUMD): mixed precision" if fam.startswith("nep") else   # grace-runtime: fp32 network
+                        f"{FAM[fam][0].split(' (')[0]} (grace-runtime): mixed precision" if c.startswith("grace-rt ")
+                        else f"{FAM[fam][0]}: mixed precision")
                 if head not in said or (head, None) in why:
                     said.add(head); why.setdefault((head, None), []).append(q)
             elif "standalone" in c:
@@ -438,8 +441,9 @@ def main():
         leg.remove()
     legend_rows = -(-len(order) // ncol)
     cpu_note = ("CPU row: a 128-core EPYC 7742 node, all cores, ranks bound to cores; each model's fastest layout\n"
-                "(128x1 or 64x2 MPI ranks x threads; GAP: 32 ranks).\n"
-                "ace-jax runs in LAMMPS (lammps-jax; aa_dag='auto': the DAG product basis, centre dot, from 4,000 chain-form multiplies per site; the chain form below); MACE runs in LAMMPS via Symmetrix and, separately, Symmetrix-XL.\n"
+                "(128x1 to 8x16 MPI ranks x threads; GAP: 32 ranks).\n"
+                "ace-jax runs in LAMMPS (lammps-jax; aa_dag='auto': the DAG product basis, centre dot, from 4,000 chain-form multiplies per site; the chain form below); MACE runs in LAMMPS via Symmetrix v0.3.0 (its generic symmetrix/mace) and, separately, Symmetrix-XL.\n"
+                "GRACE and PACE (pacemaker): LAMMPS pair styles grace/runtime and pace/runtime (ICAMS grace-runtime 0.1.4); GRACE's network is fp32 with fp64 sums (labelled mixed precision), PACE is float64 with 1024-interval radial tables.\n"
                 "Linear ACE run by ML-PACE: the o4 fits exported exactly to .yace with tabulated radials (ML-PACE with the tabulated-radial patch, ICAMS/lammps-user-pace#31; pace and pace/kk).  "
                 "GPU ML-PACE: LAMMPS develop ec02ed0 (with the 2026-08 pace/kk GPU rewrite).\n"
                 "Patched ML-PACE: the recursive-evaluator speed-ups proposed upstream (ICAMS/lammps-user-pace#31) on the CPU; "
@@ -454,8 +458,8 @@ def main():
     if not a.no_note:
         note = (cpu_note + "QoI error clips each QoI to [0.05, 10] x tolerance; compressed hcp is left out (extrapolation, "
                 "outside the training data); only models with every QoI computed.\n"
-                "Cost: the fastest parity-checked code per model, float64 only except NEP on the GPU (one-layer MACE and, on the GPU, Symmetrix MACE c64L1 have "
-                "float32 timings only and are left out of the cost rows). Single fits per point, except GRACE: the mean of three seeds, bars min-max.\n"
+                "Cost: the fastest parity-checked code per model, float64 only except NEP on the GPU and GRACE (one-layer MACE has "
+                "float32 timings only and is left out of the cost rows). Single fits per point, except GRACE: the mean of three seeds, bars min-max.\n"
                 "Light blue: the same o4 linear ACE fits in reduced precision -- ace-jax float32 lammps-jax bundles (where timed), and "
                 "patched ML-PACE pace/kk in a KOKKOS_PREC=mixed LAMMPS (accuracy is the float64 fit's).")
         fig.text(0.5, 0.003, note, ha="center", fontsize=8.5, color=MUTED)

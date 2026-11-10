@@ -477,18 +477,23 @@ def test_cases_follow_the_code_table(tmp_path, monkeypatch):
     JMD = {(f, "acejax-ace", m, "float64") for f in ("ace", "ace_lr") for m in ("jaxmd", "jaxmd-tight", "lammps-tight")}
     assert gpu == {("ace", "acejax-ace", "lammps", "float64"), ("ace_lr", "acejax-ace", "lammps", "float64"), *JMD,
                    ("ace_gp", "acejax-gp", "standalone", "float64"), ("pace", "acejax-pace", "lammps", "float64"),
-                   ("pace", "mlpace", "lammps", "float64"), ("mace", "mace", "lammps", "float64"),
+                   ("pace", "mlpace", "lammps", "float64"), ("pace", "pace-rt", "lammps", "float64"),
+                   ("mace", "mace", "lammps", "float64"), ("mace", "mace-symx3", "lammps", "float64"),
                    ("mace", "mace", "standalone", "float32"), *XL}                   # no gap on the GPU
     assert cpu == {("ace", "acejax-ace", "standalone", "float64"), ("ace_lr", "acejax-ace", "standalone", "float64"),
                    ("ace", "acepotentials-trim", "lammps", "float64"),               # CPU only
                    ("ace_gp", "acejax-gp", "standalone", "float64"),
                    ("pace", "acejax-pace", "standalone", "float64"), ("pace", "mlpace", "lammps", "float64"),
+                   ("pace", "pace-rt", "lammps", "float64"),
                    ("mace", "mace", "lammps", "float64"), ("mace", "mace", "standalone", "float32"),
-                   ("gap", "gap", "lammps", "float64"), *XL}
+                   ("mace", "mace-symx3", "lammps", "float64"), ("gap", "gap", "lammps", "float64"), *XL}
+    rt = next(c["row"] for c in cases("cpu") if c["row"]["code"] == "pace-rt")    # grace-runtime reads the B-basis
+    assert rt["path"].endswith("f50/model.yaml") and rt["ref"].endswith("f50/model.yace")   # .yaml; gate on the .yace
     by = {(c["row"]["family"], c["mode"], c["dtype"]): c["row"] for c in cases("cpu")}
     assert by[("gap", "lammps", "float64")]["quip_label"] == "GAP_L"
     assert by[("mace", "standalone", "float32")]["path"].endswith("model-f32.model")
-    assert by[("mace", "lammps", "float64")]["symmetrix"].endswith("c8L0/model.json")
+    sx = {c["row"]["code"]: c["row"]["symmetrix"] for c in cases("cpu") if c["row"]["family"] == "mace"}
+    assert sx["mace"].endswith("c8L0/model.json") and sx["mace-symx3"].endswith("c8L0/model-symx3.json")
     assert all(c["row"]["size"] != "o3d10" for c in cases("cpu"))                      # failed fits are skipped
     assert all(c["row"]["family"] != "gap18_published" for c in cases("cpu"))
     assert [c["row"]["family"] for c in cases("cpu", only="ace/o3d8")] == ["ace", "ace"]       # ace-jax, trim
@@ -1044,3 +1049,17 @@ def test_gate_tol_tabulated_radials_take_the_splined_tolerance(monkeypatch):
     monkeypatch.setenv("ACEJAX_EXPORT_FFI", "1")
     assert timing.gate_tol("acejax", "acejax-ace", {}) == parity.TOL["acejax-splined"]
     assert timing.gate_tol("mlpace", "mlpace", {}) == parity.TOL["mlpace"]
+
+
+def test_grace_runtime_styles(tmp_path):
+    """grace-runtime: /kk on the GPU only (its CPU styles are plain OpenMP, no -k switches); the .yace E0 the
+    pacemaker .yaml lacks is added back in the pace-rt gate."""
+    from scaling.parity import yace_e0
+    from scaling.run_lammps import _pair, kokkos_args
+    assert _pair("grace-rt", "m.npz", ["Si"], "gpu").startswith("pair_style grace/runtime/kk\n")
+    assert _pair("pace-rt", "m.yaml", ["Si"], "cpu") == "pair_style pace/runtime\npair_coeff * * m.yaml Si\n"
+    assert kokkos_args("pace-rt", "cpu", threads=4) == [] and "-sf" in kokkos_args("grace-rt", "gpu")
+    assert kokkos_args("mace-symx3", "cpu", threads=8) == [] and "-sf" in kokkos_args("mace", "cpu", threads=8)
+    assert _pair("mace-symx3", "m.json", ["Si"], "gpu") == "pair_style symmetrix/mace\npair_coeff * * m.json Si\n"
+    (tmp_path / "m.yace").write_text("elements: [Si, Ge]\nE0: [-1.5, -2.0]\ndeltaSplineBins: 0.001\n")
+    assert yace_e0(tmp_path / "m.yace", ["Si", "Ge", "Ge"]) == -5.5
