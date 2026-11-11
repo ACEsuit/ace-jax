@@ -441,7 +441,7 @@ __global__ void __launch_bounds__(kThreads)
 }
 
 // Pass 3: the forces, -sum_i w_i grad e_i, or NaN everywhere after a NaN position. A block per row, Team
-// lanes per pair; a lane per harmonic takes dE/dY over its radial channels, times grad Y. E: dE_i / drij
+// lanes per pair; a lane per harmonic takes dE/dY over its A entries, times grad Y. E: dE_i / drij
 // per live slot instead, written once each (no atomics, so deterministic), no weights.
 template <typename R, int T, int Team, bool E>
 __global__ void __launch_bounds__(T)
@@ -462,23 +462,34 @@ __global__ void __launch_bounds__(T)
   R *norm = reinterpret_cast<R *>(sh), *ca = norm + nY, *cb = ca + nY, *gz = cb + nY, *gp = gz + nY;
   R *gm = gp + nY, *red = gm + nY, *wA = red + 3 * (T / kChunk), *Rs = wA + na + team * per_team;
   R *dRs = Rs + F, *Ys = dRs + F, *hat = Ys + nY;         // hat: rhat, then 1 / r
-  int *run = reinterpret_cast<int *>(wA + na + P * per_team), *lr = run + 4 * m.n_runs;
-  int *live = lr + m.L + 2 + m.n_runs;
+  int *ys = reinterpret_cast<int *>(wA + na + P * per_team), *yr = ys + nY + 1, *ya = yr + na;
+  int *live = ya + na;
   constants(m.L, norm, ca, cb, gz, gp, gm);
-  for (int u = t; u < 4 * m.n_runs; u += T) run[u] = m.run[u];
-  if (t == 0)                                             // runs by degree l: lr[l] to lr[l + 1], after L + 2
-    for (int l = 0, k = 0; l <= m.L; ++l) {
-      lr[l] = k;
-      for (int u = 0; u < m.n_runs; ++u)
-        if (static_cast<int>(sqrt(m.run[4 * u + 2] + 0.5)) == l) lr[m.L + 2 + k++] = u;
-      lr[l + 1] = k;
-    }
+  // The A entries by harmonic: y's are ys[y] to ys[y + 1], radial yr and entry ya, in the runs' order.
+  for (int y = t; y < nY; y += T) {
+    int c = 0;
+    for (int u = 0; u < m.n_runs; ++u) c += y >= m.run[4 * u + 2] && y < m.run[4 * u + 2] + m.run[4 * u + 3];
+    ys[y + 1] = c;
+  }
+  __syncthreads();
+  if (t == 0) {
+    ys[0] = 0;
+    for (int y = 0; y < nY; ++y) ys[y + 1] += ys[y];
+  }
+  __syncthreads();
+  for (int y = t; y < nY; y += T)
+    for (int u = 0, k = ys[y]; u < m.n_runs; ++u)
+      if (y >= m.run[4 * u + 2] && y < m.run[4 * u + 2] + m.run[4 * u + 3]) {
+        yr[k] = m.run[4 * u + 1];
+        ya[k++] = m.run[4 * u] + y - m.run[4 * u + 2];
+      }
+  __syncthreads();
   for (int i = blockIdx.x; i < rows && i < atoms; i += gridDim.x) {
     const int32_t *list = lists + static_cast<int64_t>(i) * (K + 1);
     const int nl = list[K], zc = z[i];
     const R wi = E ? R(1) : wt[i];
     for (int k = t; k < nl; k += T) live[k] = list[k];
-    for (int a = t; a < na; a += T) wA[a] = wAg[static_cast<int64_t>(i) * na + a];
+    for (int a = t; a < na; a += T) wA[a] = wAg[static_cast<int64_t>(i) * na + ya[a]];   // by harmonic
     __syncthreads();
     R fi = 0;                                             // lanes 0 to 2: the force on i
     for (int s0 = 0; s0 < nl; s0 += P) {
@@ -509,13 +520,9 @@ __global__ void __launch_bounds__(T)
         const int l = static_cast<int>(sqrtf(y + 0.5f)), sg = y < l * l + l ? -1 : 1;
         const int am = sg * (y - l * l - l);
         R u = 0, ud = 0;                                  // dE/dY and dE/dY'
-        for (int k = lr[l]; k < lr[l + 1]; ++k) {
-          const int *q = run + 4 * lr[m.L + 2 + k];       // a0, r, y0, len
-          if (y >= q[2] && y < q[2] + q[3]) {
-            const R w = wA[q[0] + y - q[2]];
-            u += Rs[q[1]] * w;
-            ud += dRs[q[1]] * w;
-          }
+        for (int k = ys[y]; k < ys[y + 1]; ++k) {
+          u += Rs[yr[k]] * wA[k];
+          ud += dRs[yr[k]] * wA[k];
         }
         sc += ud * Ys[y];
         if (l == 0) continue;
@@ -610,7 +617,7 @@ ffi::Error Launch(gpuStream_t stream, ffi::ScratchAllocator &scratch, ffi::AnyBu
   };
   const auto forces_shared = [&](int T) {
     return (6 * nY + 3 * T / kChunk + n_a + T / team * (2 * F + nY + 4)) * sz +
-           (5 * n_runs + lmax + 2 + K) * sizeof(int);
+           (nY + 1 + 2 * n_a + K) * sizeof(int);
   };
   const int T1 = pair_threads((F + nY) * sz, density_shared(0));
   const int T3 = pair_threads((2 * F + nY + 4) * sz, forces_shared(0));
