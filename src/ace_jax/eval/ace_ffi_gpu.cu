@@ -630,7 +630,7 @@ ffi::Error Launch(gpuStream_t stream, ffi::ScratchAllocator &scratch, ffi::AnyBu
   };
   const size_t room = static_cast<size_t>(optin) / 2;
   const int mode = c.lv == 0 ? 0 : c.lv == 1 && dag_shared(1, 1) <= static_cast<size_t>(optin) ? 1 : 2;
-  int GA = 4;
+  int GA = sz == 8 ? 2 : 4;                               // A100: float64 fastest at 2, float32 at 4
   if (const char *v = std::getenv("ACEJAX_GA")) GA = std::atoi(v);
   else
     while (GA > 1 && dag_shared(GA, mode) > room) GA /= 2;
