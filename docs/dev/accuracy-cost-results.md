@@ -32,7 +32,7 @@ Cheapest model reaching the target, µs/atom-step, float64, LAMMPS:
 | linear ACE o4d20, ML-PACE (tabulated radials) | 5,476 | 0.0816 | 0.41 | 4.13 | 5.31 |
 | linear ACE o4d20, patched ML-PACE (proposed upstream) | 5,476 | 0.0816 | 0.41 | 2.42 | 2.89 |
 | linear ACE o4d20, ACEpotentials.jl (trim library) | 5,476 | 0.0816 | 0.41 | – | 10.8 |
-| linear ACE o4d20, ace-jax kernel (lammps-jax FFI; CUDA / C++) | 5,476 | 0.0816 | 0.41 | 1.23 | 3.29 |
+| linear ACE o4d20, ace-jax kernel (lammps-jax FFI; CUDA / C++) | 5,476 | 0.0816 | 0.41 | 1.23 | 1.52 |
 | MACE c16L0, Symmetrix 0d86e1e (before 2026-11-10) | 31,152 | 0.0699 | < 0.5 | 1.93 | 2.36 |
 | **MACE c16L0, Symmetrix 0.3.0** | 31,152 | 0.0699 | < 0.5 | **0.65** | **0.59** |
 | MACE c16L0, Symmetrix-XL | 31,152 | 0.0699 | < 0.5 | 1.23 | 2.19 |
@@ -46,8 +46,8 @@ Cheapest model reaching the target, µs/atom-step, float64, LAMMPS:
 
 Since 2026-11-10 the plotted costs are Symmetrix 0.3.0 for MACE, grace-runtime for GRACE-1L/2L (mixed precision,
 labelled) and pace/runtime for PACE (see "grace-runtime and Symmetrix 0.3.0" below). MACE c16L0 is now the
-cheapest model at the target on both devices, 1.9x the ace-jax CUDA kernel on the A100 and 5.6x its C++ kernel
-on the CPU.
+cheapest model at the target on both devices, 1.9x the ace-jax CUDA kernel on the A100 and 2.6x its C++ kernel
+on the CPU (5.6x before the kernel's SIMD lanes, 2026-11-11, below).
 
 Not reached in their ladders (best QoI error, at that model's force RMSE):
 
@@ -67,7 +67,7 @@ parameters than linear ACE (f800: 761 parameters, 0.081 eV/Å) but not the QoI t
 
 - **ML-PACE runs ace-jax's linear ACE fastest on the CPU at o4d20.** Exported exactly (`write_yace`, tabulated radials;
   `ml-pace-tabulated-radials.md`), o4d20 runs at 5.31 µs/atom-step on 128 ranks against 50.5 through the
-  lammps-jax CPU backend with the DAG product basis (3.29 with ace-jax's C++ kernel, next), and 3.98 for PACE f3200. On the A100, ace-jax with the DAG
+  lammps-jax CPU backend with the DAG product basis (1.52 with ace-jax's C++ kernel, next), and 3.98 for PACE f3200. On the A100, ace-jax with the DAG
   is faster than stock ML-PACE (3.12 vs 4.13) and behind patched ML-PACE (2.42).
 - **cuequivariance on the A100** (`aa_dag="cueq"`, job 2259228, gpu003, A100-PCIE-40GB): the fastest ace-jax form
   from o3d12 up, and the fastest linear ACE code on the A100 at o4d20 (every precision: float32 ace-jax 2.49, mixed
@@ -125,7 +125,8 @@ parameters than linear ACE (f800: 761 parameters, 0.081 eV/Å) but not the QoI t
 - **ace-jax's C++ kernel** (`ace_jax.eval.ffi`, `export_lammps(ffi=True)`: the lammps-jax CPU bundle with the XLA
   program replaced by one XLA FFI call per step, radials tabulated in r) brings ace-jax to ML-PACE's speed on the
   CPU: 10-23x faster than the XLA bundle, timed one after the other on the same node (job 2257991, node136;
-  µs/atom-step, 128 ranks):
+  µs/atom-step, 128 ranks; the kernel of 0.4.1, one site and one neighbour at a time: the plotted rows are now
+  the SIMD-lane kernel's, "C++ kernel: SIMD lanes" below, 1.3-2.2x faster again):
 
   | model | C++ kernel | XLA bundle | speed-up |
   |---|---|---|---|
@@ -138,7 +139,7 @@ parameters than linear ACE (f800: 761 parameters, 0.081 eV/Å) but not the QoI t
   | o4d20 | 3.29 | 49.7 | 15x |
 
   The XLA column reproduces the plotted ace-jax line (`acejax-auto` rows, other nodes) to within ~5%. Against
-  the other CPU codes (other nodes, so ~20% either way): at o4d20 the kernel (3.29) is between patched ML-PACE
+  the other CPU codes (other nodes, so ~20% either way): at o4d20 the kernel (3.29; 1.52 with SIMD lanes) is between patched ML-PACE
   (2.89) and stock ML-PACE (5.31) and 3.3x faster than ACEpotentials.jl (10.8); at o4d12-o4d16 it ties or beats
   patched ML-PACE (0.236 / 0.411 / 0.738 against 0.305 / 0.578 / 0.791); below o4d14 ACEpotentials.jl stays
   fastest (o3d8 0.104 against 0.137). Parity: every gate (LAMMPS against `ACECalculator` with the same radial
@@ -293,6 +294,8 @@ parameters than linear ACE (f800: 761 parameters, 0.081 eV/Å) but not the QoI t
   XLA bundle on the same node (`sulis-cpu-lj-ffi-xla.json`). Rows: `sulis-cpu-128x1-ffi.jsonl` (the plotted
   line, `plot_cost.family_of`: rows marked `ffi`) and `sulis-cpu-128x1-ffi-xla.jsonl` (the same-node control, not
   plotted). Analytic radials splined at 1e-10 as the plotted ace rows (o3d8 unsplined), then tabulated.
+  Since 2026-11-11 `sulis-cpu-128x1-ffi.jsonl` holds the SIMD-lane kernel's rows (each model's fastest of two or
+  three runs) and `sulis-cpu-128x1-ffi-main.jsonl` the previous kernel on the same nodes (not plotted).
 - The N/8 check size (512 atoms, 4 per rank) is overhead-bound for every fast CPU code: the C++ kernel,
   patched ML-PACE and ACEpotentials.jl all cost 1.4-4.2x more per atom there than at 4,096 atoms, so their rows
   carry `not_plateau`. Per-step costs that do not scale with atoms (communication, neighbour lists) are still
@@ -329,7 +332,7 @@ grep -h '"code": "mlpace-mixed"' $R/sulis-gpu-fp32-o4d*.jsonl > $R/sulis-gpu-fp3
 (cd bench && python -m accuracy_cost.dag_auto)
 python bench/si_qoi/make_cost.py --dtype float64 --source acejax-ace=sulis-cpu-128x1-acejax-auto --out $RR/cost_sulis_cpu.json \
     $(ls $R/sulis-cpu*.jsonl | grep -v -e smoke -e ace_yace -e pacetab-check -e "ace_tab\.jsonl" -e ace_tab2 \
-      -e ace_tab3 -e dagpair -e ffi-xla) --allow grace-rt:mixed   # ffi-xla: the C++ kernel's same-node XLA control
+      -e ace_tab3 -e dagpair -e ffi-xla -e ffi-main) --allow grace-rt:mixed   # ffi-xla, ffi-main: the C++ kernel's controls
 python bench/si_qoi/make_cost.py --dtype float64 --source acejax-ace=sulis-gpu-acejax-auto --out $RR/cost_sulis_gpu.json \
     bench/accuracy_cost/results/sulis-gpu.jsonl bench/accuracy_cost/results/sulis-gpu-ace-splined.jsonl \
     $R/sulis-gpu-ace-splined-v2.jsonl $R/sulis-gpu-v2.jsonl $R/sulis-gpu-mace_xl.jsonl \
@@ -519,3 +522,43 @@ with the old build alongside, 2280024 CPU 32 x 4 / 16 x 8, 2280028 A100). Gates 
 32 x 4 is the best CPU layout at every size (16 x 8 is slower than 128 x 1 for L = 0). The old build's same-node
 128 x 1 times are lower than the plotted old rows (1.87 / 2.36 / 6.68 / 8.58 / 18.7 / 38.0: a different node and
 date), so the same-node gain is 1.6-4x, and 3.9-7.4x against the plotted rows.
+
+## C++ kernel: SIMD lanes (2026-11-11)
+
+The C++ kernel (`eval/ace_ffi.cc`) now takes four sites of one centre species at a time for the product-basis DAG,
+a site per SIMD lane, and four neighbours at a time for the harmonics, A and the force contraction (GCC/clang
+vector types). LAMMPS, 128 x 1 ranks, Si 4,096 atoms, EPYC 7742, µs/atom-step, the previous kernel timed after the
+new one on the same node (jobs 2281015 node088, 2281016 node090; o3d8-o4d12 repeated in 2281017 node088, the
+fastest row kept):
+
+| model | previous kernel | SIMD lanes | ratio |
+|---|---|---|---|
+| o3d8 | 0.211 | 0.108 | (other node) |
+| o3d10 | 0.267 | 0.114 | 2.3x |
+| o3d12 | 0.326 | 0.138 | (other node) |
+| o4d12 | 0.304 | 0.151 | 2.0x |
+| o4d14 | 0.490 | 0.217 | 2.3x |
+| o4d16 | 0.773 | 0.349 | 2.2x |
+| o4d20 | 3.52 | 1.52 | 2.3x |
+
+The small models are overhead-bound at 32 atoms a rank and vary by up to 2x between runs and nodes (o3d8, new
+kernel: 0.455 / 0.259 / 0.186 on node090, 0.103 / 0.186 / 0.108 on node088; the previous kernel's archived rows,
+node136, were 0.137 / 0.160 / 0.295 / 0.236 for o3d8 / o3d10 / o3d12 / o4d12), so their ratios are indicative; o4d14 and
+above are stable to a few percent. One process on the same CPU, o4d20, 512 atoms through `ACECalculator`: 272 ->
+86 µs/atom; an i9-14900K: 58.7 -> ~30.
+
+How it was found (hardware counters by `perf_event_open`, user space, per kernel stage; no `perf` on these nodes):
+
+- On the i9 the previous kernel was instruction-bound: 12.5 instructions and 3.0 cycles a leaf (IPC 4.2), no branch
+  misses. Lanes cut that to 3.7 instructions a leaf-site.
+- On the EPYC (Zen 2) the same instructions took ~10 cycles a leaf and a node of the adjoint pass (IPC 1.3) with
+  few L2 misses: the `wA[factor] +=` load waited for the previous leaf's store. Removing that update (timing only)
+  halved the kernel (272 -> 142 µs/atom). The kernel keeps the update and alternates two accumulators, each with
+  its own code site (1.16x on the EPYC, 3-5% slower on the i9); one accumulator indexed by `k & 3` did not help.
+- A first lane prototype showed nothing in LAMMPS because it also batched lammps-jax's padding rows (25 of 57 row
+  slots a rank here) and ran the DAG on them; rows without a neighbour are now E0 and never batched.
+- A and the force contraction ran 11 instructions per (A entry, neighbour); four neighbours at a time cut the
+  force contraction 3x and gave the small models most of their gain (i9: o3d12 7.3 -> 4.1 µs/atom).
+
+At the target MACE c16L0 on Symmetrix 0.3.0 stays the cheapest CPU model (0.59 against 1.52).
+
