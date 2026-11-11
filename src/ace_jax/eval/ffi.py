@@ -222,8 +222,7 @@ def register_gpu(path, platform="CUDA"):
 def plan(model, gpu=False):
     """(runs, groups, factor, ct, n_leaf, levels): A in runs of consecutive harmonics; the product basis as a
     flat DAG whose last n_leaf nodes are its deepest level. Each level holds a parent's children together, the
-    largest groups first; for the GPU kernel, groups of a size by their children's factors and children by
-    factor, so a warp's lanes share dE/dA entries. groups (n_groups, 2) gives each group's parent and end,
+    largest groups first. groups (n_groups, 2) gives each group's parent and end,
     levels each level's first group and the end."""
     ar, ay = np.asarray(model.aspec_r), np.asarray(model.aspec_y)
     n_a = len(ar)
@@ -235,14 +234,7 @@ def plan(model, gpu=False):
         p, f = invs[-1][p], new[a]
         _, g, cnt = np.unique(p, return_inverse=True, return_counts=True)
         lev.append(lev[-1] + len(cnt))
-        key = (p, -cnt[g])
-        if gpu:                                             # each group's factors in a row, ascending
-            o = np.lexsort((f, g))
-            rows = np.full((len(cnt), cnt.max()), -1)
-            rows[g[o], np.arange(len(o)) - (np.cumsum(cnt) - cnt)[g[o]]] = f[o]
-            tie = np.empty(len(cnt), np.int64); tie[np.lexsort(rows.T[::-1])] = np.arange(len(cnt))
-            key = (f, p, tie[g], -cnt[g])
-        perm = np.lexsort(key)
+        perm = np.lexsort((p, -cnt[g]))
         invs.append(np.empty(len(p), np.int64)); invs[-1][perm] = np.arange(len(p))
         pars.append(p[perm]); facs.append(f[perm])
     offs = np.cumsum([0, n_a] + [len(p) for p in pars])
@@ -263,9 +255,8 @@ def plan(model, gpu=False):
 
 def kernel_inputs(model, gpu=False):
     """(attrs, consts) of the kernel for a lean ACEModel with a radial table, float64, or float32 on the GPU;
-    the GPU kernel also takes the DAG's levels, each node's parent, n_st, the nodes before the last two
-    levels, which it keeps, the mids without leaves, and the leaves copied rank by lane for chunks of 32
-    groups."""
+    the GPU kernel also takes the DAG's levels, n_st, the nodes before the last two levels, which it keeps,
+    `pull_plan`'s lists and the leaves' coefficients in their two orders."""
     from .model import ACEModel
     if not (isinstance(model, ACEModel) and model.energy_only and model.rtab_grid):
         raise ValueError("the FFI kernel needs a lean ACEModel with a radial table: "
@@ -285,17 +276,110 @@ def kernel_inputs(model, gpu=False):
     starts, n_a = np.r_[0, groups[:, 1]], ct.shape[1] - len(factor)
     n_st = starts[lev[-3]] if len(lev) > 2 else 0
     parent = np.repeat(groups[:, 0], np.diff(starts))
-    kids = np.bincount(parent[parent >= n_a] - n_a, minlength=len(factor))
-    lone = n_st + np.flatnonzero(kids[n_st:len(factor) - n_leaf] == 0)
-    size = np.diff(starts)[lev[-2]:] if n_leaf else np.zeros(0, int)   # the leaf groups, largest first
-    most = size[::32]; first = 32 * (np.cumsum(most) - most)
-    g = np.repeat(np.arange(len(size)), size)
-    slot = first[g // 32] + 32 * (np.arange(n_leaf) - np.repeat(np.cumsum(size) - size, size)) + g % 32
-    lf = np.full(32 * most.sum(), -1); lf[slot] = factor[len(factor) - n_leaf:]
-    lc = np.zeros((len(ct), len(lf))); lc[:, slot] = ct[:, ct.shape[1] - n_leaf:]
+    pull, pos = pull_plan(n_a, n_st, n_leaf, starts, lev, parent, factor)
+    lc = np.zeros((len(ct), pos.max() + 1 if n_leaf else 0)); lc[:, pos] = np.tile(ct[:, ct.shape[1] - n_leaf:], 2)
     return ({**attrs, "n_st": np.int64(n_st)},
-            consts + (i32(lev), i32(parent), i32(lone), i32(np.stack([first, most], 1)), i32(lf),
-                      jnp.asarray(lc, model.E0.dtype)))
+            consts + (i32(lev), i32(pull), jnp.asarray(lc, model.E0.dtype)))
+
+
+PULL_THREADS, PULL_TILE = 256, int(os.environ.get('ACEJAX_TILE', 2048))                   # ace_ffi_gpu.cu's kThreads and kTile
+
+
+def _ranked(n, edge, T=None):
+    """(cut, place): n sorted items in T ranges that end where `edge` (n,) is set, as equal as that allows,
+    and each item's place rank by range: range r's item j at T j + r."""
+    T = T or PULL_THREADS
+    b = np.r_[0, np.flatnonzero(edge) + 1] if n else np.zeros(1, np.int64)
+    cut = b[np.searchsorted(b, (np.arange(T + 1) * n) // T)]
+    r = np.searchsorted(cut, np.arange(n), side="right") - 1
+    return cut, T * (np.arange(n) - cut[r]) + r
+
+
+def pull_plan(n_a, n_st, n_leaf, starts, lev, parent, factor):
+    """(pull, pos): the GPU kernel's adjoint pass, in which each thread sums into targets it alone owns (no
+    atomic adds), from lists stored rank by range (`_ranked`: a warp's loads are neighbours).
+
+    Tiles: the leaves' parents (the mids, or A without them) in runs of whole parent groups, PULL_TILE at
+    most (or n_a), whose adjoints wms fit shared memory. Per tile, the leaves sorted by parent, as (factor,
+    parent in the tile, ~ on a parent's last leaf), ranges ending with a parent.
+
+    Piece lists, one per level then one per tile's mids: the nodes sorted by factor in equal ranges; a node
+    is (x, y), its term's adjoint and its parent's value: a leaf's coefficient and Lv[x] Lv[y] (a mid's
+    value, recomputed), a kept node's wv[x] Lv[y], a mid's wms[x] Lv[y]; y is ~y on the last node of a
+    piece, a run of one factor in one range, whose sum goes to the next piece slot.
+
+    pull = header (tiles, leaf slots, lists, and the offsets of the arrays after it), tiles (u0, size, leaf
+    item base, first and end group), lcut (each tile's ranges), the tiles' leaf items, then per list ib (its
+    first item), ist (each range's first node), pst (its first piece) and fst (each factor's first piece),
+    and the piece items. pos: each leaf's two coefficient slots, by parent then by factor."""
+    T, n_lev = PULL_THREADS, len(lev) - 1
+    if n_a >= 32768:
+        raise ValueError(f"the GPU kernel takes up to 32,767 A entries, got {n_a}")
+    mids, nL, n_nodes = n_lev > 1, n_a + n_st + 1, len(factor)
+    leaf = np.arange(n_nodes - n_leaf, n_nodes)
+    u = parent[leaf] - (n_a + n_st if mids else 0)          # each leaf's parent, in the tiles' numbering
+    if mids:                                                # tiles of whole groups of the mid level
+        size = np.diff(starts)[lev[-3]:lev[-2]]
+        tile = np.zeros(len(size), np.int64)
+        fill = 0
+        for g, c in enumerate(size):
+            new = g and fill + c > max(PULL_TILE, n_a)
+            fill, tile[g] = (c, tile[g - 1] + 1) if new else (fill + c, tile[g - 1] if g else 0)
+        g0 = lev[-3] + np.flatnonzero(np.r_[True, tile[1:] != tile[:-1]])
+        g1 = np.r_[g0[1:], lev[-2]]
+        u0 = starts[g0] - n_st; n_u = starts[g1] - n_st - u0
+    else:
+        g0 = g1 = u0 = np.zeros(1, np.int64); n_u = np.array([n_a])
+    by_u = np.argsort(u, kind="stable")
+    tiles, lcut, litems = [], [], []
+    n_l = 0
+    pos = np.zeros((2, n_leaf), np.int64)
+
+    for a, n, ga, gb in zip(u0, n_u, g0, g1):
+        sel = by_u[np.searchsorted(u[by_u], a):np.searchsorted(u[by_u], a + n)]
+        us = u[sel]
+        end = np.r_[us[1:] != us[:-1], True][:len(sel)]
+        cut, place = _ranked(len(sel), end)
+        it = np.zeros((T * (int(np.diff(cut).max()) if len(sel) else 0), 2), np.int64)
+        it[place] = np.stack([factor[leaf[sel]], np.where(end, ~(us - a), us - a)], 1)
+        pos[0, sel] = n_l + place
+        tiles.append([a, n, n_l, ga, gb]); lcut.append(cut); litems.append(it.ravel()); n_l += len(it)
+    ib, ist, pst, fst, items = [], [], [], [], []
+    n_items = n_pieces = 0
+
+    def pieces(f, x, y):                                    # a list; returns each node's place
+        nonlocal n_items, n_pieces
+        cut = (np.arange(T + 1) * len(f)) // T
+        last = np.zeros(len(f), bool)
+        if len(f):
+            last[:-1] = f[1:] != f[:-1]; last[-1] = True; last[cut[1:-1][cut[1:-1] > 0] - 1] = True
+        r = np.searchsorted(cut, np.arange(len(f)), side="right") - 1
+        place = T * (np.arange(len(f)) - cut[r]) + r
+        it = np.zeros((T * -(-len(f) // T), 2), np.int64); it[place] = np.stack([x, np.where(last, ~y, y)], 1)
+        ib.append([n_items]); ist.append(cut); pst.append(n_pieces + np.r_[0, np.cumsum(last)][cut])
+        fst.append(n_pieces + np.searchsorted(f[last], np.arange(n_a + 1))); items.append(it.ravel())
+        n_items += len(it); n_pieces += int(last.sum())
+        return place
+
+    for l in range(n_lev):
+        k = np.arange(starts[lev[l]], starts[lev[l + 1]])
+        if mids and l == n_lev - 2:
+            k = k[:0]                                       # the mids are in the tiles' lists
+        o = np.argsort(factor[k], kind="stable"); k = k[o]
+        p = parent[k]
+        if l == n_lev - 1:
+            x, y = (parent[p - n_a], factor[p - n_a]) if mids else (p, np.full(len(p), nL - 1))
+            pos[1, o] = n_l + pieces(factor[k], x, y)
+        else:
+            pieces(factor[k], n_a + k, p)
+    for a, n in zip(u0, n_u) if mids else ():
+        k = n_st + a + np.arange(n)
+        o = np.argsort(factor[k], kind="stable")
+        pieces(factor[k][o], o, parent[k][o])
+    cat = lambda a: np.concatenate([np.ravel(v) for v in a]) if a else np.zeros(0, np.int64)
+    parts = [cat(a) for a in (tiles, lcut, litems, ib, ist, pst, fst, items)]
+    offs = 3 + len(parts) + np.cumsum([0] + [len(a) for a in parts])
+    return np.concatenate([[len(tiles), n_l, len(ib)], offs[:len(parts)]] + parts).astype(np.int64), pos.ravel()
 
 
 def lammps_fns(model, n_species, type_map, rcut, gpu=False):
@@ -385,7 +469,7 @@ def _edge_bwd(attrs, g, ct):
     return (ct[:, None, None] * g,) + (None,) * 3 + (None,) * (N_CONSTS_GPU if gpu else N_CONSTS)
 
 
-N_CONSTS, N_CONSTS_GPU = 7, 13                        # `kernel_inputs`' arrays (gpu=False, True)
+N_CONSTS, N_CONSTS_GPU = 7, 10                        # `kernel_inputs`' arrays (gpu=False, True)
 edge_site_energies.defvjp(_edge_fwd, _edge_bwd)
 
 

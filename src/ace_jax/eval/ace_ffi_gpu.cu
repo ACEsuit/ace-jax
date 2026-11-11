@@ -7,6 +7,7 @@
 #include <climits>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <initializer_list>
 #include <string>
 
@@ -44,6 +45,7 @@ namespace ffi = xla::ffi;
 namespace {
 
 constexpr int kThreads = 256;                             // per block of the DAG pass
+constexpr int kTile = 2048;                               // leaf parents per tile, ffi.PULL_TILE
 constexpr int kChunk = 32;                                // lanes per shuffle
 constexpr int kShared = 48 << 10;                         // pair-pass shared memory without opt-in
 constexpr double kPi = 3.14159265358979323846;
@@ -51,8 +53,8 @@ constexpr double kPi = 3.14159265358979323846;
 template <typename R>
 struct Model {                                            // 32-bit sizes save registers
   const R *tab, *rc, *ct, *E0, *lc;
-  const int32_t *run, *grp, *fac, *lev, *par, *lone, *chk, *lf;
-  int nz, ncoef, F, n_rnl, n_runs, N, n_a, n_lev, n_groups, n_st, st_lev, n_lone, n_chunks, n_lf, n, L, solid;
+  const int32_t *run, *grp, *fac, *lev, *pull;
+  int nz, ncoef, F, n_rnl, n_runs, N, n_a, n_lev, n_st, st_lev, n_lc, n, L, solid;
   int local;                                              // the table in radial.spline_local's form
   R x0, ih, rc2;                                          // ih = 1 / h
 };
@@ -66,10 +68,6 @@ struct Edges {
   const bool *mask;
   R *g;
 };
-
-// A value other threads' atomics changed, read past L1.
-template <typename R>
-__device__ R fresh(const R *p) { return *reinterpret_cast<const volatile R *>(p); }
 
 // radial.spline_eval and, if grad, d/dr, on species pair pz's table; zero past its cutoff.
 template <bool grad, typename R>
@@ -147,20 +145,6 @@ __device__ void constants(int L, R *norm, R *ca, R *cb, R *gz, R *gp, R *gm) {
     gp[u] = m + 1 < l ? (m ? -0.5 : -1.0) * c / norm[j + m + 1] : 0.0;   // m = 0: both conjugates
     gm[u] = m >= 1 && m <= l ? 0.5 * (l + m) * (l + m - 1) * c / norm[j + m - 1] : 0.0;
   }
-}
-
-// v added to w[key] for a chunk's lanes, nothing for key < 0; neighbouring lanes with one key sum first.
-template <typename R>
-__device__ void chunk_add(R *w, int key, R v) {
-  const int lane = threadIdx.x % kChunk, prev = SHFL_UP(key, 1);
-  const unsigned heads = BALLOT(lane == 0 || key != prev || key < 0), after = heads & ~((2u << lane) - 1u);
-  const int end = after ? __ffs(after) - 1 : kChunk;      // the next head
-  int o = 1;
-  for (unsigned r = ~heads; r; r &= r >> o, o *= 2) {     // r: lanes starting o non-heads in a row
-    const R u = SHFL_DOWN(v, o);
-    if (lane + o < end) v += u;
-  }
-  if (key >= 0 && (heads >> lane & 1u)) atomicAdd(&w[key], v);
 }
 
 // Pass 1: each row's A, its live pairs for pass 3, and E0 plus the pair energy. A block per row, Team lanes
@@ -263,90 +247,182 @@ __global__ void __launch_bounds__(T)
   }
 }
 
-// Pass 2: the energy and dE/dA from each row's A, a group of T threads per row. Node values Lv, A and the
-// kept nodes then 1, are in shared memory if lv_sh; adjoints wv and dE/dA wg in scratch. The last inner
-// level's nodes, the mids, are recomputed with their leaves.
-template <typename R, int T>
+// Rows in batches of GA of one centre species for pass 2: perm (batches, GA), -1 where a species' last batch
+// is short. cnt (nz,): each species' rows, then its next slot.
+__global__ void ace_count(const int32_t *z, int n_rows, int *cnt) {
+  for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < n_rows; i += gridDim.x * blockDim.x)
+    atomicAdd(&cnt[z[i]], 1);
+}
+
+__global__ void ace_base(int nz, int GA, int *cnt) {
+  for (int zc = 0, b = 0; zc < nz; ++zc) {
+    const int c = cnt[zc];
+    cnt[zc] = b;
+    b += (c + GA - 1) / GA * GA;
+  }
+}
+
+__global__ void ace_fill(const int32_t *z, int n_rows, int *cnt, int32_t *perm) {
+  for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < n_rows; i += gridDim.x * blockDim.x)
+    perm[atomicAdd(&cnt[z[i]], 1)] = i;
+}
+
+// Pass 2: the energy and dE/dA from the rows' A, a block per batch of GA rows of one species: a thread reads
+// each term of ffi.pull_plan's lists once and applies it to the batch's rows, whose values lie side by side
+// (index GA + row). Every sum is by the thread that owns its target (no atomic adds, so deterministic).
+// Forward, the kept levels' values Lv (A, the kept nodes, then 1; in shared memory if lv_sh, a template
+// parameter: a pointer that may be either makes every load a generic one). Then the adjoints by parent,
+// deepest level first: w_p = c_p + sum of w_k A[f_k] over p's children, the leaves' w their coefficients;
+// the energy is sum_a A_a w_a. And dE/dA_f = w_f + sum of w_k L_parent(k) over the nodes with factor f. The
+// leaves' parents go in tiles, whose adjoints wms are in shared memory: the leaves into wms, then (the mids)
+// wms into the kept adjoints wv, in scratch. Every node's dE/dA term goes to a piece slot in pw: per list
+// (a level, or a tile's mids) a thread takes an equal range of the nodes sorted by factor and writes each
+// run's sum. The last inner level's values, the mids, are not kept: Lv[x] Lv[y]
+// where a leaf needs one.
+template <typename R, int GA, bool lv_sh>
 __global__ void __launch_bounds__(kThreads)
-    ace_dag(Model<R> m, const int32_t *z, int n_rows, int lv_sh, const R *Ag, R *wAg, R *scratch,
-            int64_t per_atom, R *eo) {
+    ace_dag(Model<R> m, const int32_t *z, const int32_t *perm, int n_batches, int M, const R *Ag, R *wAg,
+            R *scratch, int64_t per_batch, R *eo) {
   extern __shared__ double sh[];
-  const int na = m.n_a, nL = m.n_a + m.n_st + 1, mids = m.n_lev > 1;
-  constexpr int G = kThreads / T;
-  const int gi = threadIdx.x / T, t = threadIdx.x % T, lane = t % kChunk;
-  R *red = reinterpret_cast<R *>(sh), *off = scratch + (blockIdx.x * G + gi) * per_atom;
-  R *Lv = lv_sh ? red + kThreads + gi * nL : off, *wv = off + (lv_sh ? 0 : nL), *wg = wv + nL, *A = Lv;
-  for (int i0 = blockIdx.x * G; i0 < n_rows; i0 += gridDim.x * G) {
-    const int i = i0 + gi;
-    const bool on = i < n_rows;                           // off groups meet the barriers too
-    const int zc = on ? z[i] : 0;
-    for (int a = t; a < na; a += T) A[a] = on ? Ag[static_cast<int64_t>(i) * na + a] : 0;
-    if (t == 0) Lv[nL - 1] = 1;
+  constexpr int T = kThreads, W = kThreads + 1, C = kThreads / kChunk;
+  const int na = m.n_a, nL = m.n_a + m.n_st + 1, mids = m.n_lev > 1, t = threadIdx.x;
+  const int32_t *P = m.pull, *tiles = P + P[3], *lcut = P + P[4], *litems = P + P[5], *ib = P + P[6];
+  const int32_t *ist = P + P[7], *pst = P + P[8], *fst = P + P[9], *items = P + P[10];
+  const int n_tiles = P[0], n_slots = P[1], n_lists = P[2];
+  R *red = reinterpret_cast<R *>(sh), *mine = red + C * GA, *off = scratch + blockIdx.x * per_batch;
+  R *Lv = lv_sh ? mine : off, *wms = mine + (lv_sh ? nL * GA : 0);
+  R *wv = off + (lv_sh ? 0 : nL * GA), *pw = wv + nL * GA, *A = Lv;
+  for (int b = blockIdx.x; b < n_batches; b += gridDim.x) {
+    int i[GA];
+    for (int g = 0; g < GA; ++g) i[g] = perm[b * GA + g];
+    if (i[0] < 0) continue;                               // past the last batch
+    const R *cz = m.ct + z[i[0]] * m.N, *lcz = m.lc + z[i[0]] * m.n_lc;
+    for (int a = t; a < na; a += T)
+      for (int g = 0; g < GA; ++g) A[a * GA + g] = i[g] >= 0 ? Ag[static_cast<int64_t>(i[g]) * na + a] : 0;
+    if (t < GA) Lv[(nL - 1) * GA + t] = 1;
     __syncthreads();
-    const R *cz = m.ct + zc * m.N, *lcz = m.lc + zc * m.n_lf;
-    R e = 0;
     for (int l = 0; l < m.st_lev; ++l) {                  // the kept levels
-      for (int g = m.lev[l] + t; on && g < m.lev[l + 1]; g += T) {
-        const R Lp = Lv[m.grp[2 * g]];
-        for (int k = g ? m.grp[2 * g - 1] : 0; k < m.grp[2 * g + 1]; ++k) Lv[na + k] = Lp * A[m.fac[k]];
-      }
-      __syncthreads();
-    }
-    for (int j = t; on && j < nL; j += T) {
-      const R c = j < nL - 1 ? cz[j] : 0;
-      e += c * Lv[j];
-      wv[j] = c;
-      if (j < na) wg[j] = 0;
-    }
-    __syncthreads();
-    for (int u0 = t - lane; on && u0 < m.n_lone; u0 += T) {       // mids without leaves, a lane each
-      const int u = u0 + lane, ok = u < m.n_lone, k = ok ? m.lone[u] : 0, p = ok ? m.par[k] : 0;
-      const int f = ok ? m.fac[k] : -1;
-      const R c = ok ? cz[na + k] : 0, Lp = ok ? Lv[p] : 0, At = ok ? A[f] : 0;
-      e += c * Lp * At;
-      chunk_add(wg, f, c * Lp);
-      chunk_add(wv, ok ? p : -1, c * At);
-    }
-    // The leaves, a lane per group, 32 groups at a time from the rank-by-lane copy; their parent q is a mid
-    // or an A entry.
-    for (int c = t / kChunk; on && c < m.n_chunks; c += T / kChunk) {
-      const int g = m.lev[m.n_lev - 1] + kChunk * c + lane, ok = g < m.n_groups, q = ok ? m.grp[2 * g] : 0;
-      const int p = mids && ok ? m.par[q - na] : q, f = mids && ok ? m.fac[q - na] : -1;
-      const R Lp = ok ? Lv[p] : 0, At = f >= 0 ? A[f] : 1, Lt = Lp * At;
-      R s = 0;
-      for (int o = m.chk[2 * c] + lane, end = o + kChunk * m.chk[2 * c + 1]; o < end; o += kChunk) {
-        const int fk = m.lf[o];                           // plan puts equal factors in neighbouring lanes
-        s += fk >= 0 ? lcz[o] * A[fk] : 0;
-        chunk_add(wg, fk, lcz[o] * Lt);
-      }
-      const R w = s + (f >= 0 ? cz[q] : 0);               // with the mid's readout
-      e += w * Lt;
-      chunk_add(wg, f, w * Lp);
-      chunk_add(wv, ok ? p : -1, w * At);
-    }
-    __syncthreads();
-    for (int l = m.st_lev - 1; l >= 0; --l) {             // the kept levels backwards
-      for (int g = m.lev[l] + t; on && g < m.lev[l + 1]; g += T) {
-        const int p = m.grp[2 * g];
-        const R Lp = Lv[p];
-        R acc = 0;
-        for (int k = g ? m.grp[2 * g - 1] : 0; k < m.grp[2 * g + 1]; ++k) {
-          const R w = fresh(&wv[na + k]);
-          acc += w * A[m.fac[k]];
-          atomicAdd(&wg[m.fac[k]], w * Lp);
+      for (int q = m.lev[l] + t; q < m.lev[l + 1]; q += T) {
+        R Lp[GA];
+        for (int g = 0; g < GA; ++g) Lp[g] = Lv[m.grp[2 * q] * GA + g];
+        for (int k = q ? m.grp[2 * q - 1] : 0; k < m.grp[2 * q + 1]; ++k) {
+          const int f = m.fac[k];
+          for (int g = 0; g < GA; ++g) Lv[(na + k) * GA + g] = Lp[g] * A[f * GA + g];
         }
-        wv[p] += acc;
       }
       __syncthreads();
     }
-    for (int o = kChunk / 2; o > 0; o /= 2) e += SHFL_XOR(e, o);   // before the loop below: ptxas 12.8 -O2
-    for (int a = t; on && a < na; a += T)                          // got it wrong after
-      wAg[static_cast<int64_t>(i) * na + a] = fresh(&wv[a]) + fresh(&wg[a]);
-    if (t % kChunk == 0) red[threadIdx.x / kChunk] = e;
+    for (int j = t; j < nL - 1; j += T)
+      for (int g = 0; g < GA; ++g) wv[j * GA + g] = cz[j];
+    for (int ti = 0; ti < n_tiles; ++ti) {
+      const int32_t *tl = tiles + 5 * ti, *lc = lcut + ti * W;
+      const int u0 = tl[0], nt = tl[1];
+      const R *c0 = cz + (mids ? na + m.n_st : 0) + u0;
+      for (int j = t; j < nt; j += T)
+        for (int g = 0; g < GA; ++g) wms[j * GA + g] = c0[j];
+      __syncthreads();
+      {                                                   // the leaves into their parents
+        const int32_t *it = litems + 2 * tl[2];
+        const R *c = lcz + tl[2];
+        R acc[GA] = {};
+        for (int o = t, end = t + T * (lc[t + 1] - lc[t]); o < end; o += T) {
+          const int f = it[2 * o], j = it[2 * o + 1];
+          const R co = c[o];
+          for (int g = 0; g < GA; ++g) acc[g] += co * A[f * GA + g];
+          if (j < 0)
+            for (int g = 0; g < GA; ++g) {
+              wms[~j * GA + g] += acc[g];
+              acc[g] = 0;
+            }
+        }
+      }
+      __syncthreads();
+      if (mids) {
+        for (int q = tl[3] + t; q < tl[4]; q += T) {      // the mids into theirs
+          R acc[GA] = {};
+          for (int k = q ? m.grp[2 * q - 1] : 0; k < m.grp[2 * q + 1]; ++k) {
+            const int f = m.fac[k], j = k - m.n_st - u0;
+            for (int g = 0; g < GA; ++g) acc[g] += wms[j * GA + g] * A[f * GA + g];
+          }
+          for (int g = 0; g < GA; ++g) wv[m.grp[2 * q] * GA + g] += acc[g];
+        }
+        const int L = m.n_lev + ti;                       // and into dE/dA's pieces
+        const int32_t *it = items + 2 * ib[L];
+        int pc = pst[L * W + t];
+        R acc[GA] = {};
+        for (int o = t, end = t + T * (ist[L * W + t + 1] - ist[L * W + t]); o < end; o += T) {
+          const int x = it[2 * o], y = it[2 * o + 1], yy = y < 0 ? ~y : y;
+          for (int g = 0; g < GA; ++g) acc[g] += wms[x * GA + g] * Lv[yy * GA + g];
+          if (y < 0) {
+            for (int g = 0; g < GA; ++g) {
+              pw[pc * GA + g] = acc[g];
+              acc[g] = 0;
+            }
+            ++pc;
+          }
+        }
+      } else {
+        for (int j = t; j < nt; j += T)
+          for (int g = 0; g < GA; ++g) wv[(u0 + j) * GA + g] = wms[j * GA + g];
+      }
+      __syncthreads();
+    }
+    for (int l = m.st_lev - 1; l >= 0; --l) {             // the kept levels into theirs
+      for (int q = m.lev[l] + t; q < m.lev[l + 1]; q += T) {
+        R acc[GA] = {};
+        for (int k = q ? m.grp[2 * q - 1] : 0; k < m.grp[2 * q + 1]; ++k) {
+          const int f = m.fac[k];
+          for (int g = 0; g < GA; ++g) acc[g] += wv[(na + k) * GA + g] * A[f * GA + g];
+        }
+        for (int g = 0; g < GA; ++g) wv[m.grp[2 * q] * GA + g] += acc[g];
+      }
+      __syncthreads();
+    }
+    R e[GA] = {};
+    for (int a = t; a < na; a += T)
+      for (int g = 0; g < GA; ++g) e[g] += A[a * GA + g] * wv[a * GA + g];
+    for (int g = 0; g < GA; ++g)
+      for (int o = kChunk / 2; o > 0; o /= 2) e[g] += SHFL_XOR(e[g], o);
+    for (int l = 0; l < m.n_lev; ++l) {                   // dE/dA: the pieces
+      const bool leaf = l == m.n_lev - 1;
+      const R *w = lcz + n_slots;
+      const int32_t *it = items + 2 * ib[l];
+      int pc = pst[l * W + t];
+      R acc[GA] = {};
+      for (int o = t, end = t + T * (ist[l * W + t + 1] - ist[l * W + t]); o < end; o += T) {
+        const int x = it[2 * o], y = it[2 * o + 1], yy = y < 0 ? ~y : y;
+        if (leaf) {
+          const R co = w[o];
+          for (int g = 0; g < GA; ++g) acc[g] += co * (Lv[x * GA + g] * Lv[yy * GA + g]);
+        } else {
+          for (int g = 0; g < GA; ++g) acc[g] += wv[x * GA + g] * Lv[yy * GA + g];
+        }
+        if (y < 0) {
+          for (int g = 0; g < GA; ++g) {
+            pw[pc * GA + g] = acc[g];
+            acc[g] = 0;
+          }
+          ++pc;
+        }
+      }
+    }
     __syncthreads();
-    if (on && t == 0) {
-      for (int c = 1; c < T / kChunk; ++c) e += red[threadIdx.x / kChunk + c];
-      eo[i] += e;
+    for (int a = t; a < na; a += T) {
+      R w[GA];
+      for (int g = 0; g < GA; ++g) w[g] = wv[a * GA + g];
+      for (int l = 0; l < n_lists; ++l)
+        for (int pc = fst[l * (na + 1) + a]; pc < fst[l * (na + 1) + a + 1]; ++pc)
+          for (int g = 0; g < GA; ++g) w[g] += pw[pc * GA + g];
+      for (int g = 0; g < GA; ++g)
+        if (i[g] >= 0) wAg[static_cast<int64_t>(i[g]) * na + a] = w[g];
+    }
+    if (t % kChunk == 0)
+      for (int g = 0; g < GA; ++g) red[t / kChunk * GA + g] = e[g];
+    __syncthreads();
+    if (t < GA && i[t] >= 0) {                            // thread g sums row g's
+      R s = 0;
+      for (int c = 0; c < C; ++c) s += red[c * GA + t];
+      eo[i[t]] += s;
     }
     __syncthreads();
   }
@@ -472,7 +548,7 @@ struct Consts {
   ffi::AnyBuffer rtab, rcut;
   ffi::Buffer<ffi::S32> runs, groups, factor;
   ffi::AnyBuffer ct, e0;
-  ffi::Buffer<ffi::S32> levels, parent, lone, chunks, lf;
+  ffi::Buffer<ffi::S32> levels, pull;
   ffi::AnyBuffer lc;
   double x0, h;
   int64_t n, n_rnl, lmax, solid, n_leaf, n_st;
@@ -526,11 +602,20 @@ ffi::Error Launch(gpuStream_t stream, ffi::ScratchAllocator &scratch, ffi::AnyBu
   };
   const int T1 = pair_threads((F + nY) * sz, density_shared(0));
   const int T3 = pair_threads((2 * F + nY + 4) * sz, forces_shared(0));
-  int T2 = warp;                                          // DAG pass: about a thread per A entry
-  while (T2 < n_a && T2 < kThreads) T2 *= 2;
-  const int64_t G = kThreads / T2, kept = n_lev > 1 ? c.n_st : 0, nL = n_a + kept + 1;
-  const size_t base = kThreads * sz, room = static_cast<size_t>(optin) / 2;   // two blocks per SM
-  const int lv_sh = base + nL * G * sz <= room;
+  // DAG pass: batches of GA rows, as many as leave two blocks per SM; a tile of M leaf parents.
+  const int64_t kept = n_lev > 1 ? c.n_st : 0, nL = n_a + kept + 1;
+  const int64_t n_mid = n_lev > 1 ? N - n_a - kept - c.n_leaf : 0;
+  const int64_t tile = std::getenv("ACEJAX_TILE") ? std::atoi(std::getenv("ACEJAX_TILE")) : kTile;
+  const int64_t M = n_lev > 1 ? std::min<int64_t>(std::max<int64_t>(tile, n_a), n_mid) : n_a;
+  const auto dag_shared = [&](int64_t GA, bool lv) {
+    return (kThreads / kChunk + M + (lv ? nL : 0)) * GA * sz;
+  };
+  const size_t room = static_cast<size_t>(optin) / 2;
+  const bool lv_sh = dag_shared(1, true) <= static_cast<size_t>(optin);
+  int GA = 2;
+  if (const char *v = std::getenv("ACEJAX_GA")) GA = std::atoi(v);
+  else
+    while (GA > 1 && dag_shared(GA, lv_sh) > room) GA /= 2;
   const auto blocks = [&](auto kernel, int threads, size_t shared, int64_t work) {   // fill the device
     int resident = 1;
     if (shared > (48 << 10))
@@ -539,18 +624,19 @@ ffi::Error Launch(gpuStream_t stream, ffi::ScratchAllocator &scratch, ffi::AnyBu
     (void)GPU(OccupancyMaxActiveBlocksPerMultiprocessor)(&resident, kernel, threads, shared);
     return std::max<int64_t>(1, std::min<int64_t>(work, std::max(resident, 1) * static_cast<int64_t>(sms)));
   };
-  const size_t s1 = density_shared(T1), s2 = base + lv_sh * nL * G * sz, s3 = forces_shared(T3);
-  if (std::max(s1, s3) > static_cast<size_t>(optin))
+  const size_t s1 = density_shared(T1), s2 = dag_shared(GA, lv_sh), s3 = forces_shared(T3);
+  if (std::max({s1, s2, s3}) > static_cast<size_t>(optin))
     return ffi::Error::InvalidArgument("the model needs more shared memory per block than this GPU has");
-  const int64_t per_atom = (2 - lv_sh) * nL + n_a, n_A = n_rows * n_a, n_list = n_rows * (K + 1);
+  const int64_t lists = n_lev + (n_lev > 1 ? 2 * n_mid / M + 2 : 0);   // pw: a piece per list, factor and
+  const int64_t per_batch = GA * ((2 - lv_sh) * nL + lists * (n_a + kThreads));   // range at most
+  const int64_t n_A = n_rows * n_a, n_list = n_rows * (K + 1);
+  const int64_t n_batches = (n_rows + nz * (GA - 1) + GA - 1) / GA;
   const auto run = [&](auto zero) {                       // the rest in the floats' type R
     using R = decltype(zero);
     const Model<R> m{c.rtab.typed_data<R>(), c.rcut.typed_data<R>(), c.ct.typed_data<R>(), c.e0.typed_data<R>(),
                      c.lc.typed_data<R>(), c.runs.typed_data(), c.groups.typed_data(), c.factor.typed_data(),
-                     c.levels.typed_data(), c.parent.typed_data(), c.lone.typed_data(), c.chunks.typed_data(),
-                     c.lf.typed_data(), nz, ncoef, F, i32(c.n_rnl), i32(n_runs), N, n_a, n_lev,
-                     i32(c.groups.dimensions()[0]), i32(kept), std::max(n_lev - 2, 0),
-                     i32(c.lone.element_count()), i32(c.chunks.dimensions()[0]), i32(c.lf.element_count()),
+                     c.levels.typed_data(), c.pull.typed_data(), nz, ncoef, F, i32(c.n_rnl), i32(n_runs), N,
+                     n_a, n_lev, i32(kept), std::max(n_lev - 2, 0), i32(c.lc.dimensions()[1]),
                      i32(c.n), i32(lmax), i32(c.solid), local, R(c.x0), R(1.0 / c.h), R(rc2)};
     const auto density = T1 == 32 ? (four ? ace_density<R, 32, 4, E> : ace_density<R, 32, 8, E>)
                          : T1 == 64 ? (four ? ace_density<R, 64, 4, E> : ace_density<R, 64, 8, E>)
@@ -558,24 +644,33 @@ ffi::Error Launch(gpuStream_t stream, ffi::ScratchAllocator &scratch, ffi::AnyBu
     const auto forces = T3 == 32 ? (four ? ace_forces<R, 32, 4, E> : ace_forces<R, 32, 8, E>)
                         : T3 == 64 ? (four ? ace_forces<R, 64, 4, E> : ace_forces<R, 64, 8, E>)
                                    : (four ? ace_forces<R, 128, 4, E> : ace_forces<R, 128, 8, E>);
-    const auto dag = T2 == 32 ? ace_dag<R, 32> : T2 == 64 ? ace_dag<R, 64>
-                     : T2 == 128 ? ace_dag<R, 128> : ace_dag<R, 256>;
+    const auto dag = lv_sh ? (GA == 1 ? ace_dag<R, 1, true> : GA == 2 ? ace_dag<R, 2, true>
+                              : GA == 4 ? ace_dag<R, 4, true> : ace_dag<R, 8, true>)
+                           : (GA == 1 ? ace_dag<R, 1, false> : GA == 2 ? ace_dag<R, 2, false>
+                              : GA == 4 ? ace_dag<R, 4, false> : ace_dag<R, 8, false>);
     const int64_t b1 = blocks(density, T1, s1, n_rows), b3 = blocks(forces, T3, s3, n_rows);
-    const int64_t b2 = blocks(dag, kThreads, s2, (n_rows + G - 1) / G);
-    // Scratch: A and dE/dA per row, per group the DAG's adjoints and unshared values, then the live lists.
-    const int64_t bytes = (2 * n_A + b2 * G * per_atom) * sz + (n_list + 1) * sizeof(int);
+    const int64_t b2 = blocks(dag, kThreads, s2, n_batches);
+    // Scratch: A and dE/dA per row, per block the DAG's adjoints and unshared values, then the live lists,
+    // the species' counts and the batches.
+    const int64_t bytes = (2 * n_A + b2 * per_batch) * sz + (n_list + 1 + nz + n_batches * GA) * sizeof(int);
     const auto mem = scratch.Allocate(bytes, 16);         // XLA aligns to 16 at most
     if (!mem) return ffi::Error(ffi::ErrorCode::kResourceExhausted, "no device scratch for the ACE kernel");
     R *Ag = static_cast<R *>(*mem), *wAg = Ag + n_A, *D = wAg + n_A;
     R *x = x_in.typed_data<R>(), *eo = e->typed_data<R>(), *fo = f->typed_data<R>();
     const Edges<R> ed{E ? x : nullptr, zj, mask, E ? fo : nullptr};
-    int32_t *lists = reinterpret_cast<int32_t *>(D + b2 * G * per_atom), *broken = lists + n_list;
+    int32_t *lists = reinterpret_cast<int32_t *>(D + b2 * per_batch), *broken = lists + n_list;
+    int32_t *per_z = broken + 1, *perm = per_z + nz;
     (void)GPU(MemsetAsync)(eo, 0, atoms * sz, stream);
     (void)GPU(MemsetAsync)(fo, 0, n_out * sz, stream);
-    (void)GPU(MemsetAsync)(broken, 0, sizeof(int), stream);
+    (void)GPU(MemsetAsync)(broken, 0, (1 + nz) * sizeof(int), stream);
+    (void)GPU(MemsetAsync)(perm, 0xff, n_batches * GA * sizeof(int), stream);
     if (n_rows > 0) {
       density<<<b1, T1, s1, stream>>>(m, x, zs, nb, cnt, ed, i32(atoms), i32(K), i32(rows), Ag, lists, eo, broken);
-      dag<<<b2, kThreads, s2, stream>>>(m, zs, i32(n_rows), lv_sh, Ag, wAg, D, per_atom, eo);
+      const int bc = i32(std::min<int64_t>((n_rows + 255) / 256, 4 * sms));
+      ace_count<<<bc, 256, 0, stream>>>(zs, i32(n_rows), per_z);
+      ace_base<<<1, 1, 0, stream>>>(nz, GA, per_z);
+      ace_fill<<<bc, 256, 0, stream>>>(zs, i32(n_rows), per_z, perm);
+      dag<<<b2, kThreads, s2, stream>>>(m, zs, perm, i32(n_batches), i32(M), Ag, wAg, D, per_batch, eo);
       forces<<<b3, T3, s3, stream>>>(m, x, zs, nb, static_cast<const R *>(wt), ed, i32(atoms), i32(K), i32(rows),
                                      lists, wAg, broken, eo, fo);
     }
@@ -592,13 +687,12 @@ ffi::Error AceDirectGpuImpl(gpuStream_t stream, ffi::ScratchAllocator scratch, f
                             ffi::Buffer<ffi::S32> num, ffi::AnyBuffer weight, ffi::AnyBuffer rtab,
                             ffi::AnyBuffer rcut, ffi::Buffer<ffi::S32> runs, ffi::Buffer<ffi::S32> groups,
                             ffi::Buffer<ffi::S32> factor, ffi::AnyBuffer ct, ffi::AnyBuffer e0,
-                            ffi::Buffer<ffi::S32> levels, ffi::Buffer<ffi::S32> parent,
-                            ffi::Buffer<ffi::S32> lone, ffi::Buffer<ffi::S32> chunks,
-                            ffi::Buffer<ffi::S32> lf, ffi::AnyBuffer lc, double x0, double h,
+                            ffi::Buffer<ffi::S32> levels,
+                            ffi::Buffer<ffi::S32> pull, ffi::AnyBuffer lc, double x0, double h,
                             int64_t n, int64_t n_rnl, int64_t lmax, int64_t solid, int64_t n_leaf,
                             int64_t n_st, double rc2, ffi::Result<ffi::AnyBuffer> e,
                             ffi::Result<ffi::AnyBuffer> f) {
-  const Consts c{rtab, rcut, runs, groups, factor, ct, e0, levels, parent, lone, chunks, lf, lc,
+  const Consts c{rtab, rcut, runs, groups, factor, ct, e0, levels, pull, lc,
                  x0, h, n, n_rnl, lmax, solid, n_leaf, n_st};
   return Launch<false>(stream, scratch, pos, species.typed_data(), nbr.typed_data(), num.typed_data(),
                        weight.untyped_data(), nullptr, nullptr, pos.dimensions()[0], nbr.dimensions()[0],
@@ -613,12 +707,11 @@ ffi::Error AceEdgesGpuImpl(gpuStream_t stream, ffi::ScratchAllocator scratch, ff
                            ffi::Buffer<ffi::S32> zi, ffi::Buffer<ffi::S32> zj, ffi::Buffer<ffi::PRED> mask,
                            ffi::AnyBuffer rtab, ffi::AnyBuffer rcut, ffi::Buffer<ffi::S32> runs,
                            ffi::Buffer<ffi::S32> groups, ffi::Buffer<ffi::S32> factor, ffi::AnyBuffer ct,
-                           ffi::AnyBuffer e0, ffi::Buffer<ffi::S32> levels, ffi::Buffer<ffi::S32> parent,
-                           ffi::Buffer<ffi::S32> lone, ffi::Buffer<ffi::S32> chunks,
-                           ffi::Buffer<ffi::S32> lf, ffi::AnyBuffer lc, double x0, double h, int64_t n,
+                           ffi::AnyBuffer e0, ffi::Buffer<ffi::S32> levels,
+                           ffi::Buffer<ffi::S32> pull, ffi::AnyBuffer lc, double x0, double h, int64_t n,
                            int64_t n_rnl, int64_t lmax, int64_t solid, int64_t n_leaf, int64_t n_st,
                            ffi::Result<ffi::AnyBuffer> e, ffi::Result<ffi::AnyBuffer> g) {
-  const Consts c{rtab, rcut, runs, groups, factor, ct, e0, levels, parent, lone, chunks, lf, lc,
+  const Consts c{rtab, rcut, runs, groups, factor, ct, e0, levels, pull, lc,
                  x0, h, n, n_rnl, lmax, solid, n_leaf, n_st};
   const int64_t rows = rij.dimensions()[0], K = rij.dimensions()[1];
   return Launch<true>(stream, scratch, rij, zi.typed_data(), nullptr, nullptr, nullptr, zj.typed_data(),
@@ -647,11 +740,8 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(AceDirectGpu, AceDirectGpuImpl,
                                   .Arg<ffi::AnyBuffer>()            // readout (NZ, n_A + nodes)
                                   .Arg<ffi::AnyBuffer>()            // E0 (NZ,)
                                   .Arg<ffi::Buffer<ffi::S32>>()     // DAG levels' first groups (n_lev + 1,)
-                                  .Arg<ffi::Buffer<ffi::S32>>()     // parent per node
-                                  .Arg<ffi::Buffer<ffi::S32>>()     // mids without leaves
-                                  .Arg<ffi::Buffer<ffi::S32>>()     // leaf chunks (n_chunks, 2): slot, ranks
-                                  .Arg<ffi::Buffer<ffi::S32>>()     // leaf A factors rank by lane, -1 padding
-                                  .Arg<ffi::AnyBuffer>()            // leaf readout rank by lane (NZ, slots)
+                                  .Arg<ffi::Buffer<ffi::S32>>()     // ffi.pull_plan's lists
+                                  .Arg<ffi::AnyBuffer>()            // leaf readout in its two orders (NZ, slots)
                                   .Attr<double>("x0")
                                   .Attr<double>("h")
                                   .Attr<int64_t>("n")
@@ -680,11 +770,8 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(AceEdgesGpu, AceEdgesGpuImpl,
                                   .Arg<ffi::AnyBuffer>()            // readout (NZ, n_A + nodes)
                                   .Arg<ffi::AnyBuffer>()            // E0 (NZ,)
                                   .Arg<ffi::Buffer<ffi::S32>>()     // DAG levels' first groups (n_lev + 1,)
-                                  .Arg<ffi::Buffer<ffi::S32>>()     // parent per node
-                                  .Arg<ffi::Buffer<ffi::S32>>()     // mids without leaves
-                                  .Arg<ffi::Buffer<ffi::S32>>()     // leaf chunks (n_chunks, 2): slot, ranks
-                                  .Arg<ffi::Buffer<ffi::S32>>()     // leaf A factors rank by lane, -1 padding
-                                  .Arg<ffi::AnyBuffer>()            // leaf readout rank by lane (NZ, slots)
+                                  .Arg<ffi::Buffer<ffi::S32>>()     // ffi.pull_plan's lists
+                                  .Arg<ffi::AnyBuffer>()            // leaf readout in its two orders (NZ, slots)
                                   .Attr<double>("x0")
                                   .Attr<double>("h")
                                   .Attr<int64_t>("n")
