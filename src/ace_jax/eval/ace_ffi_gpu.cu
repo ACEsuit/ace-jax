@@ -45,7 +45,6 @@ namespace ffi = xla::ffi;
 namespace {
 
 constexpr int kThreads = 256;                             // per block of the DAG pass
-constexpr int kTile = 2048;                               // leaf parents per tile, ffi.PULL_TILE
 constexpr int kChunk = 32;                                // lanes per shuffle
 constexpr int kShared = 48 << 10;                         // pair-pass shared memory without opt-in
 constexpr double kPi = 3.14159265358979323846;
@@ -564,7 +563,7 @@ struct Consts {
   ffi::Buffer<ffi::S32> levels, pull;
   ffi::AnyBuffer lc;
   double x0, h;
-  int64_t n, n_rnl, lmax, solid, n_leaf, n_st;
+  int64_t n, n_rnl, lmax, solid, n_leaf, n_st, tile, lv;
 };
 
 // Both entry points: x the positions (atoms, 3), or (E) rij (rows, K, 3); out the forces (atoms, 3), or (E)
@@ -618,13 +617,12 @@ ffi::Error Launch(gpuStream_t stream, ffi::ScratchAllocator &scratch, ffi::AnyBu
   // DAG pass: batches of GA rows, as many as leave two blocks per SM; a tile of M leaf parents.
   const int64_t kept = n_lev > 1 ? c.n_st : 0, nL = n_a + kept + 1;
   const int64_t n_mid = n_lev > 1 ? N - n_a - kept - c.n_leaf : 0;
-  const int64_t tile = std::getenv("ACEJAX_TILE") ? std::atoi(std::getenv("ACEJAX_TILE")) : kTile;
-  const int64_t M = n_lev > 1 ? std::min<int64_t>(std::max<int64_t>(tile, n_a), n_mid) : n_a;
+  const int64_t M = c.tile;
   const auto dag_shared = [&](int64_t GA, int mode) {
     return (kThreads / kChunk + M + (mode == 0 ? n_a + 1 : mode == 1 ? nL : 0)) * GA * sz;
   };
   const size_t room = static_cast<size_t>(optin) / 2;
-  const int mode = n_lev <= 3 ? 0 : dag_shared(1, 1) <= static_cast<size_t>(optin) ? 1 : 2;
+  const int mode = c.lv == 0 ? 0 : c.lv == 1 && dag_shared(1, 1) <= static_cast<size_t>(optin) ? 1 : 2;
   int GA = 4;
   if (const char *v = std::getenv("ACEJAX_GA")) GA = std::atoi(v);
   else
@@ -703,10 +701,10 @@ ffi::Error AceDirectGpuImpl(gpuStream_t stream, ffi::ScratchAllocator scratch, f
                             ffi::Buffer<ffi::S32> levels,
                             ffi::Buffer<ffi::S32> pull, ffi::AnyBuffer lc, double x0, double h,
                             int64_t n, int64_t n_rnl, int64_t lmax, int64_t solid, int64_t n_leaf,
-                            int64_t n_st, double rc2, ffi::Result<ffi::AnyBuffer> e,
+                            int64_t n_st, int64_t tile, int64_t lv, double rc2, ffi::Result<ffi::AnyBuffer> e,
                             ffi::Result<ffi::AnyBuffer> f) {
   const Consts c{rtab, rcut, runs, groups, factor, ct, e0, levels, pull, lc,
-                 x0, h, n, n_rnl, lmax, solid, n_leaf, n_st};
+                 x0, h, n, n_rnl, lmax, solid, n_leaf, n_st, tile, lv};
   return Launch<false>(stream, scratch, pos, species.typed_data(), nbr.typed_data(), num.typed_data(),
                        weight.untyped_data(), nullptr, nullptr, pos.dimensions()[0], nbr.dimensions()[0],
                        nbr.dimensions()[1], c, rc2,
@@ -723,9 +721,10 @@ ffi::Error AceEdgesGpuImpl(gpuStream_t stream, ffi::ScratchAllocator scratch, ff
                            ffi::AnyBuffer e0, ffi::Buffer<ffi::S32> levels,
                            ffi::Buffer<ffi::S32> pull, ffi::AnyBuffer lc, double x0, double h, int64_t n,
                            int64_t n_rnl, int64_t lmax, int64_t solid, int64_t n_leaf, int64_t n_st,
-                           ffi::Result<ffi::AnyBuffer> e, ffi::Result<ffi::AnyBuffer> g) {
+                           int64_t tile, int64_t lv, ffi::Result<ffi::AnyBuffer> e,
+                           ffi::Result<ffi::AnyBuffer> g) {
   const Consts c{rtab, rcut, runs, groups, factor, ct, e0, levels, pull, lc,
-                 x0, h, n, n_rnl, lmax, solid, n_leaf, n_st};
+                 x0, h, n, n_rnl, lmax, solid, n_leaf, n_st, tile, lv};
   const int64_t rows = rij.dimensions()[0], K = rij.dimensions()[1];
   return Launch<true>(stream, scratch, rij, zi.typed_data(), nullptr, nullptr, nullptr, zj.typed_data(),
                       mask.typed_data(), rows, K, rows, c, 0.0,
@@ -763,6 +762,8 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(AceDirectGpu, AceDirectGpuImpl,
                                   .Attr<int64_t>("solid")
                                   .Attr<int64_t>("n_leaf")
                                   .Attr<int64_t>("n_st")
+                                  .Attr<int64_t>("tile")
+                                  .Attr<int64_t>("lv")
                                   .Attr<double>("rc2")
                                   .Ret<ffi::AnyBuffer>()            // atom energies (atoms,)
                                   .Ret<ffi::AnyBuffer>());          // -sum_i w_i grad e_i (atoms, 3)
@@ -793,5 +794,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(AceEdgesGpu, AceEdgesGpuImpl,
                                   .Attr<int64_t>("solid")
                                   .Attr<int64_t>("n_leaf")
                                   .Attr<int64_t>("n_st")
+                                  .Attr<int64_t>("tile")
+                                  .Attr<int64_t>("lv")
                                   .Ret<ffi::AnyBuffer>()            // site energies (rows,)
                                   .Ret<ffi::AnyBuffer>());          // dE_i / drij (rows, K, 3)

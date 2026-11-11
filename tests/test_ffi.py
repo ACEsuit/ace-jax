@@ -133,6 +133,29 @@ def test_gpu_ffi_matches_cpu_kernel_on_a_radial_column_of_two_degrees(device, ke
     assert np.abs(f1 - f0).max() <= 1e-10 * np.abs(f0).max()
 
 
+@pytest.mark.parametrize("device", ["gpu"], indirect=True)
+@pytest.mark.parametrize("lv", [1, 2])
+@pytest.mark.parametrize("name", ["si_fitted", "si_m710"])
+def test_gpu_ffi_kept_values_match_cpu_kernel(device, kernel, monkeypatch, name, lv):
+    """The GPU kernel's forms for models deeper than the fixtures (more than one kept level), forced on
+    these: the kept nodes' values stored, in shared memory (1) or in scratch (2), not recomputed from A.
+    Energies and forces equal the C++ kernel's."""
+    m, meta, _ = load(str(FIXTURES / f"{name}.npz"))
+    m1, rcut = lean(m, spline_tol=None, radial_table=True), float(meta["rcut"])
+    at = cluster(meta)
+    pos, z, graph = matrix_inputs(at, rcut + 1.0, [0] * len(at))
+    out = []
+    for dev in ("cpu", "gpu"):
+        monkeypatch.setattr(ffi, "PULL_LV", lv if dev == "gpu" else None)
+        with jax.default_device(jax.devices(dev)[0]):
+            efn, ffn = ffi.lammps_fns(m1, 1, [0], rcut, dev == "gpu")
+            run = jax.jit(lambda p, efn=efn, ffn=ffn: (efn(p, z, graph), ffn(p, z, graph)))
+            out.append([np.asarray(a) for a in run(pos)])
+    (e0, f0), (e1, f1) = out
+    assert np.abs(e1 - e0).max() <= 1e-12 * np.abs(e0).max()
+    assert np.abs(f1 - f0).max() <= 1e-10 * np.abs(f0).max()
+
+
 def test_ffi_needs_a_table():
     m, _, _ = load(str(FIXTURES / "si_fitted.npz"))
     with pytest.raises(ValueError, match="radial table"):

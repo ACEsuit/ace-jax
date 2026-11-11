@@ -276,13 +276,15 @@ def kernel_inputs(model, gpu=False):
     starts, n_a = np.r_[0, groups[:, 1]], ct.shape[1] - len(factor)
     n_st = starts[lev[-3]] if len(lev) > 2 else 0
     parent = np.repeat(groups[:, 0], np.diff(starts))
-    pull, pos = pull_plan(n_a, n_st, n_leaf, starts, lev, parent, factor)
+    lv = PULL_LV if PULL_LV is not None else int(len(lev) > 4)
+    pull, pos, tile = pull_plan(n_a, n_st, n_leaf, starts, lev, parent, factor, flat=lv == 0)
     lc = np.zeros((len(ct), pos.max() + 1 if n_leaf else 0)); lc[:, pos] = np.tile(ct[:, ct.shape[1] - n_leaf:], 2)
-    return ({**attrs, "n_st": np.int64(n_st)},
+    return ({**attrs, "n_st": np.int64(n_st), "tile": np.int64(tile), "lv": np.int64(lv)},
             consts + (i32(lev), i32(pull), jnp.asarray(lc, model.E0.dtype)))
 
 
-PULL_THREADS, PULL_TILE = 256, int(os.environ.get('ACEJAX_TILE', 2048))                   # ace_ffi_gpu.cu's kThreads and kTile
+PULL_THREADS, PULL_TILE = 256, 2048                   # ace_ffi_gpu.cu's kThreads; leaf parents per tile
+PULL_LV = None                                        # the kept values: None by depth (tests set 1 or 2)
 
 
 def _ranked(n, edge, T=None):
@@ -295,8 +297,8 @@ def _ranked(n, edge, T=None):
     return cut, T * (np.arange(n) - cut[r]) + r
 
 
-def pull_plan(n_a, n_st, n_leaf, starts, lev, parent, factor):
-    """(pull, pos): the GPU kernel's adjoint pass, in which each thread sums into targets it alone owns (no
+def pull_plan(n_a, n_st, n_leaf, starts, lev, parent, factor, flat):
+    """(pull, pos, tile): the GPU kernel's adjoint pass, in which each thread sums into targets it alone owns (no
     atomic adds), from lists stored rank by range (`_ranked`: a warp's loads are neighbours).
 
     Tiles: the leaves' parents (the mids, or A without them) in runs of whole parent groups, PULL_TILE at
@@ -306,19 +308,21 @@ def pull_plan(n_a, n_st, n_leaf, starts, lev, parent, factor):
     Piece lists, one per level then one per tile's mids: the nodes sorted by factor in equal ranges; a node
     is (x, y), its term's adjoint and its parent's value: a leaf's coefficient and Lv[x] Lv[y] (a mid's
     value, recomputed), a kept node's wv[x] Lv[y], a mid's wms[x] Lv[y]; y is ~y on the last node of a
-    piece, a run of one factor in one range, whose sum goes to the next piece slot. With at most one kept
-    level (n_lev <= 3) the kernel keeps no Lv: a value is A[v & 65535] A[v >> 16] (`pair`: an A entry
-    times the 1 at A[n_a], or a kept node's two factors), so a leaf is (pair, y) and a mid (x, pair).
+    piece, a run of one factor in one range, whose sum goes to the next piece slot. `flat` (at most one
+    kept level, n_lev <= 3): the kernel keeps no Lv, and a value is A[v & 65535] A[v >> 16] (`pair`: an A
+    entry times the 1 at A[n_a], or a kept node's two factors), so a leaf is (pair, y) and a mid (x, pair).
 
     pull = header (tiles, leaf slots, lists, and the offsets of the arrays after it), tiles (u0, size, leaf
     item base, first and end group), lcut (each tile's ranges), the tiles' leaf items, then per list ib (its
     first item), ist (each range's first node), pst (its first piece) and fst (each factor's first piece),
-    and the piece items. pos: each leaf's two coefficient slots, by parent then by factor."""
+    and the piece items. pos: each leaf's two coefficient slots, by parent then by factor; tile: the largest
+    tile."""
     T, n_lev = PULL_THREADS, len(lev) - 1
     if n_a >= 32768:
         raise ValueError(f"the GPU kernel takes up to 32,767 A entries, got {n_a}")
     mids, nL, n_nodes = n_lev > 1, n_a + n_st + 1, len(factor)
-    flat = n_lev <= 3                                       # no kept values: A alone
+    if flat and n_lev > 3:
+        raise ValueError("flat: one kept level at most")
 
     def pair(v):                                            # node v's value as two A entries
         k = np.maximum(v - n_a, 0)
@@ -387,7 +391,8 @@ def pull_plan(n_a, n_st, n_leaf, starts, lev, parent, factor):
     cat = lambda a: np.concatenate([np.ravel(v) for v in a]) if a else np.zeros(0, np.int64)
     parts = [cat(a) for a in (tiles, lcut, litems, ib, ist, pst, fst, items)]
     offs = 3 + len(parts) + np.cumsum([0] + [len(a) for a in parts])
-    return np.concatenate([[len(tiles), n_l, len(ib)], offs[:len(parts)]] + parts).astype(np.int64), pos.ravel()
+    return (np.concatenate([[len(tiles), n_l, len(ib)], offs[:len(parts)]] + parts).astype(np.int64), pos.ravel(),
+            int(n_u.max()))
 
 
 def lammps_fns(model, n_species, type_map, rcut, gpu=False):
