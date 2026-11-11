@@ -276,7 +276,7 @@ def kernel_inputs(model, gpu=False):
     starts, n_a = np.r_[0, groups[:, 1]], ct.shape[1] - len(factor)
     n_st = starts[lev[-3]] if len(lev) > 2 else 0
     parent = np.repeat(groups[:, 0], np.diff(starts))
-    lv = PULL_LV if PULL_LV is not None else int(len(lev) > 4)
+    lv = PULL_LV if PULL_LV is not None else int(len(lev) > 4 or n_a > PULL_FLAT_A)
     pull, pos, tile = pull_plan(n_a, n_st, n_leaf, starts, lev, parent, factor, flat=lv == 0)
     lc = np.zeros((len(ct), pos.max() + 1 if n_leaf else 0)); lc[:, pos] = np.tile(ct[:, ct.shape[1] - n_leaf:], 2)
     return ({**attrs, "n_st": np.int64(n_st), "tile": np.int64(tile), "lv": np.int64(lv)},
@@ -284,7 +284,8 @@ def kernel_inputs(model, gpu=False):
 
 
 PULL_THREADS, PULL_TILE = 256, 2048                   # ace_ffi_gpu.cu's kThreads; leaf parents per tile
-PULL_LV = None                                        # the kept values: None by depth (tests set 1 or 2)
+PULL_FLAT_A = 2000                                    # A entries up to which A and a tile share a block's memory
+PULL_LV = None                                        # the kept values: None by depth and size (tests: 1 or 2)
 
 
 def _ranked(n, edge, T=None):
