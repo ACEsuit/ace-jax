@@ -298,6 +298,98 @@ def _ranked(n, edge, T=None):
     return cut, T * (np.arange(n) - cut[r]) + r
 
 
+class _Banks:
+    """The shared-memory banks one load takes in a warp. The kernel loads a batch's values of an index, 16
+    bytes side by side (4 float32 or 2 float64 rows), at once; a warp's load is served a word per bank (32
+    banks of 4 bytes) at a time, lanes that read one index together. So the distinct indices should spread
+    over the residues mod 8 (mod 16 for a batch of 8 bytes). `cost`: the conflicts each candidate adds to the
+    lanes placed so far."""
+
+    def __init__(self, key):
+        self.key, self.seen = key, np.zeros(int(key.max()) + 1 if len(key) else 1, bool)
+        self.o8, self.o16 = np.zeros(8), np.zeros(16)
+
+    def clear(self):
+        self.seen[:] = False; self.o8[:] = 0; self.o16[:] = 0
+
+    def cost(self, cand):
+        k = self.key[cand]
+        return np.where(self.seen[k], 0, self.o8[k % 8] + 0.25 * self.o16[k % 16])
+
+    def take(self, i):
+        k = self.key[i]
+        if not self.seen[k]:
+            self.seen[k] = True; self.o8[k % 8] += 1; self.o16[k % 16] += 1
+
+
+def _spread(cut, last, keys, T=None):
+    """src: an order of a piece list's items (range r's item j runs in lane r at step j) that permutes each
+    piece (it ends where `last` is set) so that the indices `keys` (one array per load) of a warp's lanes
+    fall in different banks, greedily, lane by lane."""
+    T = T or PULL_THREADS
+    n = len(last); src = np.arange(n)
+    if not n:
+        return src
+    end = np.flatnonzero(last) + 1; start = np.r_[0, end[:-1]]
+    rid = np.repeat(np.arange(len(end)), end - start)
+    free = np.ones(n, bool); banks = [_Banks(k) for k in keys]
+    for w in range(0, T, 32):
+        for s in range(int(np.diff(cut[w:w + 33]).max())):
+            for o in banks:
+                o.clear()
+            for r in range(w, w + 32):
+                pos = cut[r] + s
+                if pos >= cut[r + 1]:
+                    continue
+                a = start[rid[pos]]
+                cand = a + np.flatnonzero(free[a:end[rid[pos]]])
+                c = cand[np.argmin(sum(o.cost(cand) for o in banks))] if len(cand) > 1 else cand[0]
+                free[c] = False; src[pos] = c
+                for o in banks:
+                    o.take(c)
+    return src
+
+
+def _deal(g, f, T=None):
+    """(count, place, last): the leaves of a tile, sorted by parent g (the parent's place in the tile), dealt
+    to T lanes a parent at a time: each lane's count, each leaf's place (lane r's step j at T j + r) and
+    whether it is its parent's last there. A lane takes the parent and leaf whose factor f, and at a
+    parent's last leaf the parent, fall in the banks the warp's other lanes leave free (`_bank_cost`)."""
+    T = T or PULL_THREADS
+    n = len(g); place = np.zeros(n, np.int64); last = np.zeros(n, bool); count = np.zeros(T, np.int64)
+    if not n:
+        return count, place, last
+    b = np.r_[0, np.flatnonzero(g[1:] != g[:-1]) + 1, n]
+    gi = np.repeat(np.arange(len(b) - 1), np.diff(b))
+    left = np.diff(b).copy()
+    free = np.ones(n, bool); pool = np.ones(n, bool)        # leaves to place; those of parents not yet begun
+    cur = np.full(T, -1); done = 0
+    of, og, size = _Banks(f), _Banks(g), np.diff(b)[gi] / (4.0 * n)   # ties: the largest parent first
+    while done < n:
+        for w in range(0, T, 32):
+            of.clear(); og.clear()
+            pi = np.flatnonzero(pool)[:4096]
+            for r in range(w, w + 32):
+                if cur[r] >= 0:
+                    a = b[cur[r]]; cand = a + np.flatnonzero(free[a:b[cur[r] + 1]])
+                else:
+                    cand = pi[pool[pi]][:512]
+                    if not len(cand):
+                        continue
+                c = cand[np.argmin(of.cost(cand) + (left[gi[cand]] == 1) * og.cost(cand) - size[cand])]
+                q = gi[c]
+                if cur[r] < 0:
+                    pool[b[q]:b[q + 1]] = False
+                free[c] = False; left[q] -= 1; done += 1
+                place[c] = T * count[r] + r; count[r] += 1
+                of.take(c)
+                if left[q] == 0:
+                    last[c] = True; cur[r] = -1; og.take(c)
+                else:
+                    cur[r] = q
+    return count, place, last
+
+
 def pull_plan(n_a, n_st, n_leaf, starts, lev, parent, factor, flat):
     """(pull, pos, tile): the GPU kernel's adjoint pass, in which each thread sums into targets it alone owns (no
     atomic adds), from lists stored rank by range (`_ranked`: a warp's loads are neighbours).
@@ -329,6 +421,7 @@ def pull_plan(n_a, n_st, n_leaf, starts, lev, parent, factor, flat):
         k = np.maximum(v - n_a, 0)
         return np.where(v < n_a, v + 65536 * n_a, parent[k] + 65536 * factor[k])
 
+    both = lambda v: [v & 65535, v >> 16] if flat else [v]  # the indices a value is loaded from
     leaf = np.arange(n_nodes - n_leaf, n_nodes)
     u = parent[leaf] - (n_a + n_st if mids else 0)          # each leaf's parent, in the tiles' numbering
     if mids:                                                # tiles of whole groups of the mid level
@@ -351,24 +444,26 @@ def pull_plan(n_a, n_st, n_leaf, starts, lev, parent, factor, flat):
     for a, n, ga, gb in zip(u0, n_u, g0, g1):
         sel = by_u[np.searchsorted(u[by_u], a):np.searchsorted(u[by_u], a + n)]
         us = u[sel]
-        end = np.r_[us[1:] != us[:-1], True][:len(sel)]
-        cut, place = _ranked(len(sel), end)
-        it = np.zeros((T * (int(np.diff(cut).max()) if len(sel) else 0), 2), np.int64)
+        count, place, end = _deal(us - a, factor[leaf[sel]])
+        cut = np.r_[0, np.cumsum(count)]
+        it = np.zeros((T * int(count.max()), 2), np.int64)
         it[place] = np.stack([factor[leaf[sel]], np.where(end, ~(us - a), us - a)], 1)
         pos[0, sel] = n_l + place
         tiles.append([a, n, n_l, ga, gb]); lcut.append(cut); litems.append(it.ravel()); n_l += len(it)
     ib, ist, pst, fst, items = [], [], [], [], []
     n_items = n_pieces = 0
 
-    def pieces(f, x, y):                                    # a list; returns each node's place
+    def pieces(f, x, y, keys):                              # a list; returns each node's place
         nonlocal n_items, n_pieces
         cut = (np.arange(T + 1) * len(f)) // T
         last = np.zeros(len(f), bool)
         if len(f):
             last[:-1] = f[1:] != f[:-1]; last[-1] = True; last[cut[1:-1][cut[1:-1] > 0] - 1] = True
         r = np.searchsorted(cut, np.arange(len(f)), side="right") - 1
-        place = T * (np.arange(len(f)) - cut[r]) + r
-        it = np.zeros((T * -(-len(f) // T), 2), np.int64); it[place] = np.stack([x, np.where(last, ~y, y)], 1)
+        at = T * (np.arange(len(f)) - cut[r]) + r
+        src = _spread(cut, last, keys)                      # each piece's nodes, in the order of the banks
+        place = np.empty(len(f), np.int64); place[src] = at
+        it = np.zeros((T * -(-len(f) // T), 2), np.int64); it[at] = np.stack([x[src], np.where(last, ~y[src], y[src])], 1)
         ib.append([n_items]); ist.append(cut); pst.append(n_pieces + np.r_[0, np.cumsum(last)][cut])
         fst.append(n_pieces + np.searchsorted(f[last], np.arange(n_a + 1))); items.append(it.ravel())
         n_items += len(it); n_pieces += int(last.sum())
@@ -382,13 +477,15 @@ def pull_plan(n_a, n_st, n_leaf, starts, lev, parent, factor, flat):
         p = parent[k]
         if l == n_lev - 1:
             x, y = (parent[p - n_a], factor[p - n_a]) if mids else (p, np.full(len(p), nL - 1))
-            pos[1, o] = n_l + pieces(factor[k], pair(x) if flat else x, y)
+            xs = pair(x) if flat else x
+            pos[1, o] = n_l + pieces(factor[k], xs, y, both(xs) + [y])
         else:
-            pieces(factor[k], n_a + k, p)
+            pieces(factor[k], n_a + k, p, [p])
     for a, n in zip(u0, n_u) if mids else ():
         k = n_st + a + np.arange(n)
         o = np.argsort(factor[k], kind="stable")
-        pieces(factor[k][o], o, pair(parent[k][o]) if flat else parent[k][o])
+        ys = pair(parent[k][o]) if flat else parent[k][o]
+        pieces(factor[k][o], o, ys, [o] + both(ys))
     cat = lambda a: np.concatenate([np.ravel(v) for v in a]) if a else np.zeros(0, np.int64)
     parts = [cat(a) for a in (tiles, lcut, litems, ib, ist, pst, fst, items)]
     offs = 3 + len(parts) + np.cumsum([0] + [len(a) for a in parts])
