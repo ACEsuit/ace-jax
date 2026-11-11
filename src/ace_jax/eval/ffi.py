@@ -276,15 +276,15 @@ def kernel_inputs(model, gpu=False):
     starts, n_a = np.r_[0, groups[:, 1]], ct.shape[1] - len(factor)
     n_st = starts[lev[-3]] if len(lev) > 2 else 0
     parent = np.repeat(groups[:, 0], np.diff(starts))
-    lv = PULL_LV if PULL_LV is not None else int(len(lev) > 4 or n_a > PULL_FLAT_A)
-    pull, pos, tile = pull_plan(n_a, n_st, n_leaf, starts, lev, parent, factor, flat=lv == 0)
+    pull, pos, tile, flat = pull_plan(n_a, n_st, n_leaf, starts, lev, parent, factor,
+                                      flat=PULL_LV == 0 or PULL_LV is None and len(lev) <= 4)
+    lv = 0 if flat else PULL_LV or 1
     lc = np.zeros((len(ct), pos.max() + 1 if n_leaf else 0)); lc[:, pos] = np.tile(ct[:, ct.shape[1] - n_leaf:], 2)
     return ({**attrs, "n_st": np.int64(n_st), "tile": np.int64(tile), "lv": np.int64(lv)},
             consts + (i32(lev), i32(pull), jnp.asarray(lc, model.E0.dtype)))
 
 
 PULL_THREADS, PULL_TILE = 256, 2048                   # ace_ffi_gpu.cu's kThreads; leaf parents per tile
-PULL_FLAT_A = 2000                                    # A entries up to which A and a tile share a block's memory
 PULL_LV = None                                        # the kept values: None by depth and size (tests: 1 or 2)
 
 
@@ -364,8 +364,10 @@ def _deal(g, f, T=None):
     left = np.diff(b).copy()
     free = np.ones(n, bool); pool = np.ones(n, bool)        # leaves to place; those of parents not yet begun
     cur = np.full(T, -1); done = 0
-    of, og, size = _Banks(f), _Banks(g), np.diff(b)[gi] / (4.0 * n)   # ties: the largest parent first
+    of, og, size = _Banks(f), _Banks(g), np.diff(b)[gi]
+    full = -(-n // T)                                       # a lane's share: it begins no parent that passes it
     while done < n:
+        before = done
         for w in range(0, T, 32):
             of.clear(); og.clear()
             pi = np.flatnonzero(pool)[:4096]
@@ -373,10 +375,11 @@ def _deal(g, f, T=None):
                 if cur[r] >= 0:
                     a = b[cur[r]]; cand = a + np.flatnonzero(free[a:b[cur[r] + 1]])
                 else:
-                    cand = pi[pool[pi]][:512]
+                    cand = pi[pool[pi]]
+                    cand = cand[size[cand] <= full - count[r]][:512]
                     if not len(cand):
                         continue
-                c = cand[np.argmin(of.cost(cand) + (left[gi[cand]] == 1) * og.cost(cand) - size[cand])]
+                c = cand[np.argmin(of.cost(cand) + (left[gi[cand]] == 1) * og.cost(cand) - size[cand] / (4.0 * n))]
                 q = gi[c]
                 if cur[r] < 0:
                     pool[b[q]:b[q + 1]] = False
@@ -387,6 +390,7 @@ def _deal(g, f, T=None):
                     last[c] = True; cur[r] = -1; og.take(c)
                 else:
                     cur[r] = q
+        full += done == before                              # no parent fits a lane: a longer share
     return count, place, last
 
 
@@ -419,9 +423,8 @@ def pull_plan(n_a, n_st, n_leaf, starts, lev, parent, factor, flat):
 
     def pair(v):                                            # node v's value as two A entries
         k = np.maximum(v - n_a, 0)
-        return np.where(v < n_a, v + 65536 * n_a, parent[k] + 65536 * factor[k])
+        return np.where(v < n_a, v, parent[k]), np.where(v < n_a, n_a, factor[k])
 
-    both = lambda v: [v & 65535, v >> 16] if flat else [v]  # the indices a value is loaded from
     leaf = np.arange(n_nodes - n_leaf, n_nodes)
     u = parent[leaf] - (n_a + n_st if mids else 0)          # each leaf's parent, in the tiles' numbering
     if mids:                                                # tiles of whole groups of the mid level
@@ -436,6 +439,10 @@ def pull_plan(n_a, n_st, n_leaf, starts, lev, parent, factor, flat):
         u0 = starts[g0] - n_st; n_u = starts[g1] - n_st - u0
     else:
         g0 = g1 = u0 = np.zeros(1, np.int64); n_u = np.array([n_a])
+    if n_u.max() >= 65536:
+        raise ValueError(f"the GPU kernel takes up to 65,535 children of a node, got {n_u.max()}")
+    flat = bool(flat and n_a < 1024 and n_u.max() <= 2048 and nL < 1 << 21)   # an item's fields fit 32 bits
+    word = lambda v, end: np.where(end, v - (1 << 31), v)   # an item: the top bit ends a parent or a piece
     by_u = np.argsort(u, kind="stable")
     tiles, lcut, litems = [], [], []
     n_l = 0
@@ -446,14 +453,14 @@ def pull_plan(n_a, n_st, n_leaf, starts, lev, parent, factor, flat):
         us = u[sel]
         count, place, end = _deal(us - a, factor[leaf[sel]])
         cut = np.r_[0, np.cumsum(count)]
-        it = np.zeros((T * int(count.max()), 2), np.int64)
-        it[place] = np.stack([factor[leaf[sel]], np.where(end, ~(us - a), us - a)], 1)
+        it = np.zeros(T * int(count.max()), np.int64)
+        it[place] = word(factor[leaf[sel]] | (us - a) << 15, end)
         pos[0, sel] = n_l + place
         tiles.append([a, n, n_l, ga, gb]); lcut.append(cut); litems.append(it.ravel()); n_l += len(it)
     ib, ist, pst, fst, items = [], [], [], [], []
     n_items = n_pieces = 0
 
-    def pieces(f, x, y, keys):                              # a list; returns each node's place
+    def pieces(f, x, y, keys, packed=None):                 # a list; returns each node's place
         nonlocal n_items, n_pieces
         cut = (np.arange(T + 1) * len(f)) // T
         last = np.zeros(len(f), bool)
@@ -463,10 +470,14 @@ def pull_plan(n_a, n_st, n_leaf, starts, lev, parent, factor, flat):
         at = T * (np.arange(len(f)) - cut[r]) + r
         src = _spread(cut, last, keys)                      # each piece's nodes, in the order of the banks
         place = np.empty(len(f), np.int64); place[src] = at
-        it = np.zeros((T * -(-len(f) // T), 2), np.int64); it[at] = np.stack([x[src], np.where(last, ~y[src], y[src])], 1)
+        if flat:
+            it = np.zeros(T * -(-len(f) // T), np.int64); it[at] = word(packed[src], last)
+        else:
+            it = np.zeros((T * -(-len(f) // T), 2), np.int64)
+            it[at] = np.stack([x[src], np.where(last, ~y[src], y[src])], 1)
         ib.append([n_items]); ist.append(cut); pst.append(n_pieces + np.r_[0, np.cumsum(last)][cut])
         fst.append(n_pieces + np.searchsorted(f[last], np.arange(n_a + 1))); items.append(it.ravel())
-        n_items += len(it); n_pieces += int(last.sum())
+        n_items += it.size; n_pieces += int(last.sum())
         return place
 
     for l in range(n_lev):
@@ -477,20 +488,26 @@ def pull_plan(n_a, n_st, n_leaf, starts, lev, parent, factor, flat):
         p = parent[k]
         if l == n_lev - 1:
             x, y = (parent[p - n_a], factor[p - n_a]) if mids else (p, np.full(len(p), nL - 1))
-            xs = pair(x) if flat else x
-            pos[1, o] = n_l + pieces(factor[k], xs, y, both(xs) + [y])
+            if flat:
+                x0, x1 = pair(x); y = np.where(y == nL - 1, n_a, y)
+                pos[1, o] = n_l + pieces(factor[k], x, y, [x0, x1, y], x0 | x1 << 10 | y << 20)
+            else:
+                pos[1, o] = n_l + pieces(factor[k], x, y, [x, y])
         else:
-            pieces(factor[k], n_a + k, p, [p])
+            pieces(factor[k], n_a + k, p, [p], p | (n_a + k) << 10)
     for a, n in zip(u0, n_u) if mids else ():
         k = n_st + a + np.arange(n)
         o = np.argsort(factor[k], kind="stable")
-        ys = pair(parent[k][o]) if flat else parent[k][o]
-        pieces(factor[k][o], o, ys, [o] + both(ys))
+        if flat:
+            y0, y1 = pair(parent[k][o])
+            pieces(factor[k][o], o, y0, [o, y0, y1], y0 | y1 << 10 | o << 20)
+        else:
+            pieces(factor[k][o], o, parent[k][o], [o, parent[k][o]])
     cat = lambda a: np.concatenate([np.ravel(v) for v in a]) if a else np.zeros(0, np.int64)
     parts = [cat(a) for a in (tiles, lcut, litems, ib, ist, pst, fst, items)]
     offs = 3 + len(parts) + np.cumsum([0] + [len(a) for a in parts])
     return (np.concatenate([[len(tiles), n_l, len(ib)], offs[:len(parts)]] + parts).astype(np.int64), pos.ravel(),
-            int(n_u.max()))
+            int(n_u.max()), flat)
 
 
 def lammps_fns(model, n_species, type_map, rcut, gpu=False):

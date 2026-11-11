@@ -324,18 +324,20 @@ __global__ void __launch_bounds__(kThreads)
         for (int g = 0; g < GA; ++g) wms[j * GA + g] = c0[j];
       __syncthreads();
       {                                                   // the leaves into their parents
-        const int32_t *it = litems + 2 * tl[2];
-        const R *c = lcz + tl[2];
+        const int32_t *it = litems + tl[2];               // an item: factor, parent << 15, the top bit on
+        const R *c = lcz + tl[2];                         // the parent's last
         R acc[GA] = {};
         for (int o = t, end = t + T * (lc[t + 1] - lc[t]); o < end; o += T) {
-          const int f = it[2 * o], j = it[2 * o + 1];
+          const int v = it[o], f = v & 32767;
           const R co = c[o];
           for (int g = 0; g < GA; ++g) acc[g] += co * A[f * GA + g];
-          if (j < 0)
+          if (v < 0) {
+            const int j = (v >> 15) & 65535;
             for (int g = 0; g < GA; ++g) {
-              wms[~j * GA + g] += acc[g];
+              wms[j * GA + g] += acc[g];
               acc[g] = 0;
             }
+          }
         }
       }
       __syncthreads();
@@ -349,18 +351,21 @@ __global__ void __launch_bounds__(kThreads)
           for (int g = 0; g < GA; ++g) wv[m.grp[2 * q] * GA + g] += acc[g];
         }
         const int L = m.n_lev + ti;                       // and into dE/dA's pieces
-        const int32_t *it = items + 2 * ib[L];
+        const int32_t *it = items + ib[L];
         int pc = pst[L * W + t];
         R acc[GA] = {};
         for (int o = t, end = t + T * (ist[L * W + t + 1] - ist[L * W + t]); o < end; o += T) {
-          const int x = it[2 * o], y = it[2 * o + 1], yy = y < 0 ? ~y : y;
-          if constexpr (Mode == 0) {
-            const int y0 = yy & 65535, y1 = yy >> 16;
+          bool last;
+          if constexpr (Mode == 0) {                      // an item: 10 bits for each A factor, then the mid
+            const int v = it[o], y0 = v & 1023, y1 = (v >> 10) & 1023, x = (v >> 20) & 2047;
+            last = v < 0;
             for (int g = 0; g < GA; ++g) acc[g] += wms[x * GA + g] * (A[y0 * GA + g] * A[y1 * GA + g]);
           } else {
+            const int x = it[2 * o], y = it[2 * o + 1], yy = y < 0 ? ~y : y;
+            last = y < 0;
             for (int g = 0; g < GA; ++g) acc[g] += wms[x * GA + g] * Lv[yy * GA + g];
           }
-          if (y < 0) {
+          if (last) {
             for (int g = 0; g < GA; ++g) {
               pw[pc * GA + g] = acc[g];
               acc[g] = 0;
@@ -393,23 +398,33 @@ __global__ void __launch_bounds__(kThreads)
     for (int l = 0; l < m.n_lev; ++l) {                   // dE/dA: the pieces
       const bool leaf = l == m.n_lev - 1;
       const R *w = lcz + n_slots;
-      const int32_t *it = items + 2 * ib[l];
+      const int32_t *it = items + ib[l];
       int pc = pst[l * W + t];
       R acc[GA] = {};
       for (int o = t, end = t + T * (ist[l * W + t + 1] - ist[l * W + t]); o < end; o += T) {
-        const int x = it[2 * o], y = it[2 * o + 1], yy = y < 0 ? ~y : y;
-        if (leaf) {
-          const R co = w[o];
-          if constexpr (Mode == 0) {
-            const int x0 = x & 65535, x1 = x >> 16;
-            for (int g = 0; g < GA; ++g) acc[g] += co * (A[x0 * GA + g] * A[x1 * GA + g] * A[yy * GA + g]);
+        bool last;
+        if constexpr (Mode == 0) {                        // an item: a leaf's three A factors, 10 bits each,
+          const int v = it[o];                            // or a kept node's parent, then the node
+          last = v < 0;
+          if (leaf) {
+            const int x0 = v & 1023, x1 = (v >> 10) & 1023, y = (v >> 20) & 1023;
+            const R co = w[o];
+            for (int g = 0; g < GA; ++g) acc[g] += co * (A[x0 * GA + g] * A[x1 * GA + g] * A[y * GA + g]);
           } else {
-            for (int g = 0; g < GA; ++g) acc[g] += co * (Lv[x * GA + g] * Lv[yy * GA + g]);
+            const int y = v & 1023, x = (v >> 10) & 0x1fffff;
+            for (int g = 0; g < GA; ++g) acc[g] += wv[x * GA + g] * A[y * GA + g];
           }
         } else {
-          for (int g = 0; g < GA; ++g) acc[g] += wv[x * GA + g] * Lv[yy * GA + g];
+          const int x = it[2 * o], y = it[2 * o + 1], yy = y < 0 ? ~y : y;
+          last = y < 0;
+          if (leaf) {
+            const R co = w[o];
+            for (int g = 0; g < GA; ++g) acc[g] += co * (Lv[x * GA + g] * Lv[yy * GA + g]);
+          } else {
+            for (int g = 0; g < GA; ++g) acc[g] += wv[x * GA + g] * Lv[yy * GA + g];
+          }
         }
-        if (y < 0) {
+        if (last) {
           for (int g = 0; g < GA; ++g) {
             pw[pc * GA + g] = acc[g];
             acc[g] = 0;
