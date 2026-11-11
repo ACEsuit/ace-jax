@@ -419,6 +419,27 @@ def test_calculator_kernel_matches_the_jax_model(backend_kernel, name, skin):
     assert k.last_layout == "dense" and k.last_timing["ffi"] and k.last_timing["rebuilds"] >= 2
 
 
+@pytest.mark.parametrize("name", ["si_fitted", "ace_cantor5_small"])
+@pytest.mark.parametrize("n", [1, 2, 3, 5, 6, 7])
+def test_calculator_kernel_batches_and_neighbourless_sites(backend_kernel, name, n):
+    """The CPU kernel takes sites in batches of four of one centre species, and neighbours in blocks of four:
+    cells of n atoms (partial batches of each species, partial neighbour blocks) with one atom moved out of
+    every other's cutoff (no neighbour: E0 alone, no force, never batched), against the JAX model."""
+    path = str(FIXTURES / f"{name}.npz")
+    _, meta, z = load(path)
+    at = _md_cell(meta)[:n + 1]                             # the first n: neighbours in the crystal
+    at.set_cell(np.diag([40.0, 40.0, 40.0])); at.set_pbc(False)
+    at.positions[:n] += np.random.default_rng(n).normal(scale=0.05, size=(n, 3)) + 2.0
+    at.positions[n] = [30.0, 30.0, 30.0]
+    k, j = ACECalculator(path, ffi=True), ACECalculator(path, radial_table=True)
+    a1, a2 = at.copy(), at.copy()
+    a1.calc, a2.calc = k, j
+    F1, F2 = a1.get_forces(), a2.get_forces()
+    assert a1.get_potential_energy() == pytest.approx(a2.get_potential_energy(), rel=1e-12, abs=1e-10)
+    np.testing.assert_allclose(F1, F2, atol=1e-11 * max(1.0, np.abs(F2).max()))
+    assert np.all(F1[n] == 0.0) and k.ffi
+
+
 def test_calculator_kernel_threads_model_swap_and_e0(backend_kernel):
     """One thread and XLA's pool give identical results (rows write only their own outputs; the CUDA kernel
     ignores threads and is deterministic, writing each dE/drij once); a calc.model

@@ -59,7 +59,8 @@ class FFIUnavailable(RuntimeError):
 def build(path, cxx="c++", flags=("-O3",)):
     """Compile the kernel to the shared library `path`."""
     path = pathlib.Path(path)
-    subprocess.run([cxx, *flags, "-std=c++17", "-shared", "-fPIC", "-isystem", jax.ffi.include_dir(),
+    # -Wno-psabi: the kernel's 32-byte vector types never cross its (internal) functions' ABI; without AVX, GCC warns
+    subprocess.run([cxx, *flags, "-std=c++17", "-shared", "-fPIC", "-Wno-psabi", "-isystem", jax.ffi.include_dir(),
                     str(SOURCE), "-o", str(path)], check=True)
     return path
 
