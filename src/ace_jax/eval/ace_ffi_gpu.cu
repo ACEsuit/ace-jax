@@ -270,8 +270,10 @@ __global__ void ace_fill(const int32_t *z, int n_rows, int *cnt, int32_t *perm) 
 // Pass 2: the energy and dE/dA from the rows' A, a block per batch of GA rows of one species: a thread reads
 // each term of ffi.pull_plan's lists once and applies it to the batch's rows, whose values lie side by side
 // (index GA + row). Every sum is by the thread that owns its target (no atomic adds, so deterministic).
-// Forward, the kept levels' values Lv (A, the kept nodes, then 1; in shared memory if lv_sh, a template
-// parameter: a pointer that may be either makes every load a generic one). Then the adjoints by parent,
+// Forward, the kept levels' values Lv (A, the kept nodes, then 1), by Mode, a template parameter (a pointer
+// that may be shared or global makes every load a generic one): 0, with at most one kept level, none but A
+// and the 1, a kept node's value being its two A factors, which halves the shared memory a row takes, so
+// more rows are in flight; 1 in shared memory; 2 in scratch. Then the adjoints by parent,
 // deepest level first: w_p = c_p + sum of w_k A[f_k] over p's children, the leaves' w their coefficients;
 // the energy is sum_a A_a w_a. And dE/dA_f = w_f + sum of w_k L_parent(k) over the nodes with factor f. The
 // leaves' parents go in tiles, whose adjoints wms are in shared memory: the leaves into wms, then (the mids)
@@ -279,19 +281,20 @@ __global__ void ace_fill(const int32_t *z, int n_rows, int *cnt, int32_t *perm) 
 // (a level, or a tile's mids) a thread takes an equal range of the nodes sorted by factor and writes each
 // run's sum. The last inner level's values, the mids, are not kept: Lv[x] Lv[y]
 // where a leaf needs one.
-template <typename R, int GA, bool lv_sh>
+template <typename R, int GA, int Mode>
 __global__ void __launch_bounds__(kThreads)
     ace_dag(Model<R> m, const int32_t *z, const int32_t *perm, int n_batches, int M, const R *Ag, R *wAg,
             R *scratch, int64_t per_batch, R *eo) {
   extern __shared__ double sh[];
   constexpr int T = kThreads, W = kThreads + 1, C = kThreads / kChunk;
   const int na = m.n_a, nL = m.n_a + m.n_st + 1, mids = m.n_lev > 1, t = threadIdx.x;
+  const int nV = Mode ? nL : na + 1;                      // values kept
   const int32_t *P = m.pull, *tiles = P + P[3], *lcut = P + P[4], *litems = P + P[5], *ib = P + P[6];
   const int32_t *ist = P + P[7], *pst = P + P[8], *fst = P + P[9], *items = P + P[10];
   const int n_tiles = P[0], n_slots = P[1], n_lists = P[2];
   R *red = reinterpret_cast<R *>(sh), *mine = red + C * GA, *off = scratch + blockIdx.x * per_batch;
-  R *Lv = lv_sh ? mine : off, *wms = mine + (lv_sh ? nL * GA : 0);
-  R *wv = off + (lv_sh ? 0 : nL * GA), *pw = wv + nL * GA, *A = Lv;
+  R *Lv = Mode < 2 ? mine : off, *wms = mine + (Mode < 2 ? nV * GA : 0);
+  R *wv = off + (Mode < 2 ? 0 : nL * GA), *pw = wv + nL * GA, *A = Lv;
   for (int b = blockIdx.x; b < n_batches; b += gridDim.x) {
     int i[GA];
     for (int g = 0; g < GA; ++g) i[g] = perm[b * GA + g];
@@ -299,9 +302,9 @@ __global__ void __launch_bounds__(kThreads)
     const R *cz = m.ct + z[i[0]] * m.N, *lcz = m.lc + z[i[0]] * m.n_lc;
     for (int a = t; a < na; a += T)
       for (int g = 0; g < GA; ++g) A[a * GA + g] = i[g] >= 0 ? Ag[static_cast<int64_t>(i[g]) * na + a] : 0;
-    if (t < GA) Lv[(nL - 1) * GA + t] = 1;
+    if (t < GA) Lv[(nV - 1) * GA + t] = 1;
     __syncthreads();
-    for (int l = 0; l < m.st_lev; ++l) {                  // the kept levels
+    for (int l = 0; Mode && l < m.st_lev; ++l) {          // the kept levels
       for (int q = m.lev[l] + t; q < m.lev[l + 1]; q += T) {
         R Lp[GA];
         for (int g = 0; g < GA; ++g) Lp[g] = Lv[m.grp[2 * q] * GA + g];
@@ -352,7 +355,12 @@ __global__ void __launch_bounds__(kThreads)
         R acc[GA] = {};
         for (int o = t, end = t + T * (ist[L * W + t + 1] - ist[L * W + t]); o < end; o += T) {
           const int x = it[2 * o], y = it[2 * o + 1], yy = y < 0 ? ~y : y;
-          for (int g = 0; g < GA; ++g) acc[g] += wms[x * GA + g] * Lv[yy * GA + g];
+          if constexpr (Mode == 0) {
+            const int y0 = yy & 65535, y1 = yy >> 16;
+            for (int g = 0; g < GA; ++g) acc[g] += wms[x * GA + g] * (A[y0 * GA + g] * A[y1 * GA + g]);
+          } else {
+            for (int g = 0; g < GA; ++g) acc[g] += wms[x * GA + g] * Lv[yy * GA + g];
+          }
           if (y < 0) {
             for (int g = 0; g < GA; ++g) {
               pw[pc * GA + g] = acc[g];
@@ -393,7 +401,12 @@ __global__ void __launch_bounds__(kThreads)
         const int x = it[2 * o], y = it[2 * o + 1], yy = y < 0 ? ~y : y;
         if (leaf) {
           const R co = w[o];
-          for (int g = 0; g < GA; ++g) acc[g] += co * (Lv[x * GA + g] * Lv[yy * GA + g]);
+          if constexpr (Mode == 0) {
+            const int x0 = x & 65535, x1 = x >> 16;
+            for (int g = 0; g < GA; ++g) acc[g] += co * (A[x0 * GA + g] * A[x1 * GA + g] * A[yy * GA + g]);
+          } else {
+            for (int g = 0; g < GA; ++g) acc[g] += co * (Lv[x * GA + g] * Lv[yy * GA + g]);
+          }
         } else {
           for (int g = 0; g < GA; ++g) acc[g] += wv[x * GA + g] * Lv[yy * GA + g];
         }
@@ -607,15 +620,15 @@ ffi::Error Launch(gpuStream_t stream, ffi::ScratchAllocator &scratch, ffi::AnyBu
   const int64_t n_mid = n_lev > 1 ? N - n_a - kept - c.n_leaf : 0;
   const int64_t tile = std::getenv("ACEJAX_TILE") ? std::atoi(std::getenv("ACEJAX_TILE")) : kTile;
   const int64_t M = n_lev > 1 ? std::min<int64_t>(std::max<int64_t>(tile, n_a), n_mid) : n_a;
-  const auto dag_shared = [&](int64_t GA, bool lv) {
-    return (kThreads / kChunk + M + (lv ? nL : 0)) * GA * sz;
+  const auto dag_shared = [&](int64_t GA, int mode) {
+    return (kThreads / kChunk + M + (mode == 0 ? n_a + 1 : mode == 1 ? nL : 0)) * GA * sz;
   };
   const size_t room = static_cast<size_t>(optin) / 2;
-  const bool lv_sh = dag_shared(1, true) <= static_cast<size_t>(optin);
-  int GA = 2;
+  const int mode = n_lev <= 3 ? 0 : dag_shared(1, 1) <= static_cast<size_t>(optin) ? 1 : 2;
+  int GA = 4;
   if (const char *v = std::getenv("ACEJAX_GA")) GA = std::atoi(v);
   else
-    while (GA > 1 && dag_shared(GA, lv_sh) > room) GA /= 2;
+    while (GA > 1 && dag_shared(GA, mode) > room) GA /= 2;
   const auto blocks = [&](auto kernel, int threads, size_t shared, int64_t work) {   // fill the device
     int resident = 1;
     if (shared > (48 << 10))
@@ -624,11 +637,11 @@ ffi::Error Launch(gpuStream_t stream, ffi::ScratchAllocator &scratch, ffi::AnyBu
     (void)GPU(OccupancyMaxActiveBlocksPerMultiprocessor)(&resident, kernel, threads, shared);
     return std::max<int64_t>(1, std::min<int64_t>(work, std::max(resident, 1) * static_cast<int64_t>(sms)));
   };
-  const size_t s1 = density_shared(T1), s2 = dag_shared(GA, lv_sh), s3 = forces_shared(T3);
+  const size_t s1 = density_shared(T1), s2 = dag_shared(GA, mode), s3 = forces_shared(T3);
   if (std::max({s1, s2, s3}) > static_cast<size_t>(optin))
     return ffi::Error::InvalidArgument("the model needs more shared memory per block than this GPU has");
   const int64_t lists = n_lev + (n_lev > 1 ? 2 * n_mid / M + 2 : 0);   // pw: a piece per list, factor and
-  const int64_t per_batch = GA * ((2 - lv_sh) * nL + lists * (n_a + kThreads));   // range at most
+  const int64_t per_batch = GA * ((1 + (mode == 2)) * nL + lists * (n_a + kThreads));   // range at most
   const int64_t n_A = n_rows * n_a, n_list = n_rows * (K + 1);
   const int64_t n_batches = (n_rows + nz * (GA - 1) + GA - 1) / GA;
   const auto run = [&](auto zero) {                       // the rest in the floats' type R
@@ -644,10 +657,10 @@ ffi::Error Launch(gpuStream_t stream, ffi::ScratchAllocator &scratch, ffi::AnyBu
     const auto forces = T3 == 32 ? (four ? ace_forces<R, 32, 4, E> : ace_forces<R, 32, 8, E>)
                         : T3 == 64 ? (four ? ace_forces<R, 64, 4, E> : ace_forces<R, 64, 8, E>)
                                    : (four ? ace_forces<R, 128, 4, E> : ace_forces<R, 128, 8, E>);
-    const auto dag = lv_sh ? (GA == 1 ? ace_dag<R, 1, true> : GA == 2 ? ace_dag<R, 2, true>
-                              : GA == 4 ? ace_dag<R, 4, true> : ace_dag<R, 8, true>)
-                           : (GA == 1 ? ace_dag<R, 1, false> : GA == 2 ? ace_dag<R, 2, false>
-                              : GA == 4 ? ace_dag<R, 4, false> : ace_dag<R, 8, false>);
+#define ACE_DAG(Mode) \
+  (GA == 1 ? ace_dag<R, 1, Mode> : GA == 2 ? ace_dag<R, 2, Mode> : GA == 4 ? ace_dag<R, 4, Mode> : ace_dag<R, 8, Mode>)
+    const auto dag = mode == 0 ? ACE_DAG(0) : mode == 1 ? ACE_DAG(1) : ACE_DAG(2);
+#undef ACE_DAG
     const int64_t b1 = blocks(density, T1, s1, n_rows), b3 = blocks(forces, T3, s3, n_rows);
     const int64_t b2 = blocks(dag, kThreads, s2, n_batches);
     // Scratch: A and dE/dA per row, per block the DAG's adjoints and unshared values, then the live lists,

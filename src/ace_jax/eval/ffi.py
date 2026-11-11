@@ -306,7 +306,9 @@ def pull_plan(n_a, n_st, n_leaf, starts, lev, parent, factor):
     Piece lists, one per level then one per tile's mids: the nodes sorted by factor in equal ranges; a node
     is (x, y), its term's adjoint and its parent's value: a leaf's coefficient and Lv[x] Lv[y] (a mid's
     value, recomputed), a kept node's wv[x] Lv[y], a mid's wms[x] Lv[y]; y is ~y on the last node of a
-    piece, a run of one factor in one range, whose sum goes to the next piece slot.
+    piece, a run of one factor in one range, whose sum goes to the next piece slot. With at most one kept
+    level (n_lev <= 3) the kernel keeps no Lv: a value is A[v & 65535] A[v >> 16] (`pair`: an A entry
+    times the 1 at A[n_a], or a kept node's two factors), so a leaf is (pair, y) and a mid (x, pair).
 
     pull = header (tiles, leaf slots, lists, and the offsets of the arrays after it), tiles (u0, size, leaf
     item base, first and end group), lcut (each tile's ranges), the tiles' leaf items, then per list ib (its
@@ -316,6 +318,12 @@ def pull_plan(n_a, n_st, n_leaf, starts, lev, parent, factor):
     if n_a >= 32768:
         raise ValueError(f"the GPU kernel takes up to 32,767 A entries, got {n_a}")
     mids, nL, n_nodes = n_lev > 1, n_a + n_st + 1, len(factor)
+    flat = n_lev <= 3                                       # no kept values: A alone
+
+    def pair(v):                                            # node v's value as two A entries
+        k = np.maximum(v - n_a, 0)
+        return np.where(v < n_a, v + 65536 * n_a, parent[k] + 65536 * factor[k])
+
     leaf = np.arange(n_nodes - n_leaf, n_nodes)
     u = parent[leaf] - (n_a + n_st if mids else 0)          # each leaf's parent, in the tiles' numbering
     if mids:                                                # tiles of whole groups of the mid level
@@ -369,13 +377,13 @@ def pull_plan(n_a, n_st, n_leaf, starts, lev, parent, factor):
         p = parent[k]
         if l == n_lev - 1:
             x, y = (parent[p - n_a], factor[p - n_a]) if mids else (p, np.full(len(p), nL - 1))
-            pos[1, o] = n_l + pieces(factor[k], x, y)
+            pos[1, o] = n_l + pieces(factor[k], pair(x) if flat else x, y)
         else:
             pieces(factor[k], n_a + k, p)
     for a, n in zip(u0, n_u) if mids else ():
         k = n_st + a + np.arange(n)
         o = np.argsort(factor[k], kind="stable")
-        pieces(factor[k][o], o, parent[k][o])
+        pieces(factor[k][o], o, pair(parent[k][o]) if flat else parent[k][o])
     cat = lambda a: np.concatenate([np.ravel(v) for v in a]) if a else np.zeros(0, np.int64)
     parts = [cat(a) for a in (tiles, lcut, litems, ib, ist, pst, fst, items)]
     offs = 3 + len(parts) + np.cumsum([0] + [len(a) for a in parts])
