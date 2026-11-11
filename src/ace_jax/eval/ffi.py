@@ -298,6 +298,9 @@ def _ranked(n, edge, T=None):
     return cut, T * (np.arange(n) - cut[r]) + r
 
 
+_CANDIDATES = 48                                      # a lane's choices in the bank orders
+
+
 class _Banks:
     """The shared-memory banks one load takes in a warp. The kernel loads a batch's values of an index, 16
     bytes side by side (4 float32 or 2 float64 rows), at once; a warp's load is served a word per bank (32
@@ -307,19 +310,18 @@ class _Banks:
 
     def __init__(self, key):
         self.key, self.seen = key, np.zeros(int(key.max()) + 1 if len(key) else 1, bool)
-        self.o8, self.o16 = np.zeros(8), np.zeros(16)
+        self.k8, self.k16, self.o8, self.o16 = key % 8, key % 16, np.zeros(8), np.zeros(16)
 
     def clear(self):
         self.seen[:] = False; self.o8[:] = 0; self.o16[:] = 0
 
     def cost(self, cand):
-        k = self.key[cand]
-        return np.where(self.seen[k], 0, self.o8[k % 8] + 0.25 * self.o16[k % 16])
+        return np.where(self.seen[self.key[cand]], 0, self.o8[self.k8[cand]] + 0.25 * self.o16[self.k16[cand]])
 
     def take(self, i):
         k = self.key[i]
         if not self.seen[k]:
-            self.seen[k] = True; self.o8[k % 8] += 1; self.o16[k % 16] += 1
+            self.seen[k] = True; self.o8[self.k8[i]] += 1; self.o16[self.k16[i]] += 1
 
 
 def _spread(cut, last, keys, T=None):
@@ -342,7 +344,7 @@ def _spread(cut, last, keys, T=None):
                 if pos >= cut[r + 1]:
                     continue
                 a = start[rid[pos]]
-                cand = a + np.flatnonzero(free[a:end[rid[pos]]])
+                cand = a + np.flatnonzero(free[a:end[rid[pos]]])[:_CANDIDATES]
                 c = cand[np.argmin(sum(o.cost(cand) for o in banks))] if len(cand) > 1 else cand[0]
                 free[c] = False; src[pos] = c
                 for o in banks:
@@ -370,13 +372,13 @@ def _deal(g, f, T=None):
         before = done
         for w in range(0, T, 32):
             of.clear(); og.clear()
-            pi = np.flatnonzero(pool)[:4096]
+            pi = np.flatnonzero(pool)[:32 * _CANDIDATES]
             for r in range(w, w + 32):
                 if cur[r] >= 0:
                     a = b[cur[r]]; cand = a + np.flatnonzero(free[a:b[cur[r] + 1]])
                 else:
                     cand = pi[pool[pi]]
-                    cand = cand[size[cand] <= full - count[r]][:512]
+                    cand = cand[size[cand] <= full - count[r]][:_CANDIDATES]
                     if not len(cand):
                         continue
                 c = cand[np.argmin(of.cost(cand) + (left[gi[cand]] == 1) * og.cost(cand) - size[cand] / (4.0 * n))]
