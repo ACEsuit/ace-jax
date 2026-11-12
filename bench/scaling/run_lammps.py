@@ -79,6 +79,11 @@ def _pair(style, model_path, elements, device, extra=None):
         return f"pair_style {'grace/fs/kk' if device == 'gpu' else 'grace/fs'}\npair_coeff * * {model_path} {els}\n"
     if style == "nep":                      # NEP_CPU's USER-NEP (float64, MPI): pair_style takes no arguments
         return f"pair_style nep\npair_coeff * * {model_path} {els}\n"
+    if style == "mlpace-product":           # ML-PACE's product evaluator on the CPU (pair_style pace is recursive)
+        return f"pair_style pace product\npair_coeff * * {model_path} {els}\n"
+    if style in YE3T:                       # ye3t-lammps (ML-YE3T): a .yace takes no arguments (block_policy direct,
+        # the product-evaluator form); a fitted tagged model passes `extra` ("model_family tagged_cauchy ...")
+        return f"pair_style ye3t{' ' + extra if extra else ''}\npair_coeff * * {model_path} {els}\n"
     if style == TRIM:                       # PR 309 plugin, then the juliac --trim library
         return f"plugin load ${{aceplugin}}\npair_style ace\npair_coeff * * {model_path} {els}\n"
     if style == "gap":                       # QUIP takes atomic numbers, and the xml label picks the Potential
@@ -91,6 +96,7 @@ def _pair(style, model_path, elements, device, extra=None):
 
 
 TRIM = "acepotentials-trim"
+YE3T = ("ye3t-sym", "ye3t")        # the same pair style: a ChebExpCos .yace of the ACE ladder, or a model ye3t-methods fitted
 
 
 def xl_pair_args(model_json, device, style):

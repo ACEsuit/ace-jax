@@ -519,3 +519,120 @@ with the old build alongside, 2280024 CPU 32 x 4 / 16 x 8, 2280028 A100). Gates 
 32 x 4 is the best CPU layout at every size (16 x 8 is slower than 128 x 1 for L = 0). The old build's same-node
 128 x 1 times are lower than the plotted old rows (1.87 / 2.36 / 6.68 / 8.58 / 18.7 / 38.0: a different node and
 date), so the same-node gain is 1.6-4x, and 3.9-7.4x against the plotted rows.
+
+## YE3T (2026-11-12, first pass)
+
+Spec `docs/dev/specs/2026-11-12-ye3t-polymlp-benchmark-design.md` (it covers YE3T and Seko's polynomial MLPs; the two
+are separate pull requests). Protocol, commands and limits for the method's authors: `bench/accuracy_cost/ye3t/README.md`;
+provenance in `bench/accuracy_cost/data.md`. Tables: `python -m accuracy_cost.ye3t_polymlp_report` (from `bench/`).
+The text of the user-facing Performance page is unchanged; its interactive figure has the new series, hidden until
+selected in the legend. Nothing here is tuned per system: read the rows as a first pass, not as the method's best.
+
+The YE3T fits differ from the other families in their weights (below).
+
+Codes: ye3t f8ff96d, ye3t-methods 6b85c54, ye3t-lammps 06100f9 (LAMMPS develop ec02ed0 with ML-YE3T and stock
+ML-PACE v.2025.12.4.p1 in one binary, `bench/scaling/envs/sulis-ye3t.sh`, CPU style only: `ye3t/kk` exists and
+was not built). Float64. No stop-and-report point of the spec was met: the code and the tagged-basis definition are
+public, and every gate passed.
+
+### YE3T-symmetric as an evaluator (`ace_cheb`, timing only)
+
+`pair_style ye3t` reads a `.yace` only with ChebExpCos radials and the full m list, so the linear ACE fits are
+written once more (`ace_to_ye3t.py`: exact product basis, radials projected on 48 ChebExpCos functions; the file
+is within 1.1e-10 eV/atom and 1.6e-8 eV/Å of the fit, o4d20 2.8e-10 / 4.1e-8). YE3T, ML-PACE's recursive and
+product evaluators read that one file and are gated against ace-jax on the source fit (same-file agreement of the
+three codes is ≤ 1e-12). Jobs `sulis-cpu-ye3t.sbatch`; the tabulated-file, patched ML-PACE and ace-jax kernel
+columns at 1 x 1 come from the same job (`COMPARE=1`), at 128 x 1 from the plotted rows (other nodes and dates).
+
+1 rank x 1 thread, µs/atom-step (the paper's setting; 4,096 atoms):
+
+| fit | YE3T | ML-PACE product | ML-PACE recursive | ML-PACE recursive, tabulated file | patched ML-PACE, tabulated file | ace-jax C++ kernel | product / YE3T | recursive / YE3T |
+|---|---|---|---|---|---|---|---|---|
+| o3d12 | 28.32 | 48.98 | 39.02 | – | – | 15.41 | 1.73 | 1.38 |
+| o4d12 | 29.96 | 61.76 | 41.78 | 36.84 | 25.45 | 17.35 | 2.06 | 1.39 |
+| o4d14 | 45.06 | 127.34 | 71.27 | 64.63 | 41.43 | 29.70 | 2.83 | 1.58 |
+| o4d16 | 74.62 | 268.76 | 112.80 | 100.75 | 60.93 | 53.86 | 3.60 | 1.51 |
+| o4d20 | 326.07 | 1471.64 | 443.13 | 375.62 | 212.78 | 256.52 | 4.51 | 1.36 |
+
+128 ranks x 1 thread:
+
+| fit | YE3T | ML-PACE product | ML-PACE recursive | ML-PACE recursive, tabulated file | patched ML-PACE, tabulated file | ace-jax C++ kernel |
+|---|---|---|---|---|---|---|
+| o3d12 | 0.35 | 0.70 | 0.58 | – | – | 0.30 |
+| o4d12 | 0.37 | 0.79 | 0.51 | 0.52 | 0.31 | 0.24 |
+| o4d14 | 0.72 | 1.82 | 1.00 | 0.85 | 0.58 | 0.41 |
+| o4d16 | 1.39 | 3.57 | 1.56 | 1.37 | 0.79 | 0.74 |
+| o4d20 | 25.89 | 19.27 | 9.25 | 5.31 | 2.89 | 3.29 |
+
+- On one core YE3T is 1.7-4.5x faster than ML-PACE's product evaluator, the gap growing with the basis, and
+  1.4-1.6x faster than stock ML-PACE's recursive evaluator on the same file. The full m list costs ML-PACE: on
+  its own half-basis tabulated file the recursive evaluator is 1.15-1.43x slower than YE3T, not 1.4-1.6x.
+- Patched ML-PACE (ICAMS/lammps-user-pace#31) is 1.1-1.5x faster than YE3T and the ace-jax kernel 1.3-1.8x
+  (o4d20: 1.27x), each on its own file form.
+- At 128 x 1 YE3T keeps its lead over stock ML-PACE to o4d16 (recursive 1.1-1.7x). **o4d20 is anomalous**: 25.9 µs
+  is 10x its one-core time / 128 (2.5), where every other row scales within 1.6x. One run, cause not investigated
+  (memory bandwidth of the direct schedule's tables is the first thing to check); do not quote that row.
+
+### Fitted YE3T models
+
+Protocol (README): ye3t-methods' ridge solve at penalty 1e-8, ChebExpCos decay 0.7799 (the authors' Si value),
+cutoff 5.0 Å, fixed E0, **global weights 1 : 1 on energies and forces and no virials**: ye3t-methods has one weight
+per quantity, so the GAP-18 per-configuration-type weights the other families use cannot be applied. That, not
+the basis, may account for part of the pattern below (lower force error, higher energy and QoI error than ACE at
+equal size).
+
+| family | size | descriptors | penalty | E RMSE (meV/atom) | F RMSE (eV/Å) | QoI error | 128 x 1 µs/atom-step | 1 x 1 |
+|---|---|---|---|---|---|---|---|---|
+| ye3t_sym_fit | r3-34 | 34 | 1e-8 | 100.9 | 0.1852 | 4.17 | 0.12 | 9.35 |
+| ye3t_sym_fit | r3-110 | 110 | 1e-8 | 49.2 | 0.1338 | 2.43 | 0.16 | 12.36 |
+| ye3t_sym_fit | r4-205 | 205 | 1e-8 | 25.1 | 0.1182 | 1.86 | 0.33 | 25.11 |
+| ye3t_sym_fit | r4-490 | 490 | 1e-8 | 21.5 | 0.1024 | 1.42 | 0.70 | 46.20 |
+| ye3t_mix_A | r3-34, r3-110, r4-205 | 34, 110, 205 | 1e-8 | identical to ye3t_sym_fit | | | not timed (same model) | |
+| ye3t_mix_T | t8-284 | 284 | 1e-4 | 15.4 | 0.1213 | 2.15 | 3.28 | 237.1 |
+
+Gates (LAMMPS against ye3t-methods' calculator): ≤ 5.7e-14 eV/atom, 9.3e-14 eV/Å (density); 3.7e-13, 3.9e-12 (tagged).
+
+- **`ye3t_mix_A` = `ye3t_sym_fit`, exactly.** The hypothesis holds by construction: for a density source ye3t
+  resolves `young_kappa: all_valid` to the symmetric space (`ye3t/representation_config.py` `count_fixed_content`,
+  `ye3t_methods/config.py`; quotes in the README). Descriptor rows are bit-identical (`fit_ye3t.same_rows` = 0.0),
+  as are coefficients and test errors. So there is no difference for a smoothness prior to remove.
+- **`ye3t_mix_T`** (tagged Cauchy image, shifted-Jacobi radials, ranks 1-8): one size. Against the density model
+  of nearest size (205): energy 15.4 vs 25.1 meV/atom, forces 0.1213 vs 0.1182 eV/Å, QoI 2.15 vs 1.86, at 10x the
+  cost (3.28 vs 0.33 µs). No force or QoI gain from the tagged family here. It is confounded: the tagged normal
+  equations are not positive definite at penalties 1e-8 to 1e-5 (column norms 12 to 5e12), so the penalty is 1e-4,
+  the smallest of a grid that solves (not selected on any error), and the radial family differs.
+- **Against linear ACE at equal size** (`ace`: o3d12 223, o4d12 350, o4d14 724; table below): YE3T density has the
+  lower force RMSE (205: 0.118 vs 0.158; 490: 0.102 vs 0.144 at 350 and 0.118 at 724) and the higher energy RMSE
+  (25, 22 vs 16, 11, 7 meV/atom) and QoI error (1.9, 1.4 vs 1.0, 0.8, 0.9). Per cost, r4-490 at 0.70 µs sits with
+  ace o4d14-o4d16 on the ace-jax kernel (0.41-0.74 µs; 0.118-0.101 eV/Å).
+- **"ACE saturates".** The paper's truncation (ranks to 8, nmax 6, lmax 4) is not where linear ACE stops on this
+  split: `ace` reaches 0.0816 eV/Å at 5,476 coefficients (o4d20) and `ace_wl` 0.0814 at 8,583 (o4d24_wL2), with QoI
+  error 0.39 in both. The gain per doubling does shrink (0.101 at 1,461; 0.089 at 3,838; 0.086 at 5,053). The YE3T
+  ladder here ends at 490 descriptors, so it neither confirms nor refutes saturation of YE3T itself.
+- Larger density sizes: ye3t-methods' density rows need 8.9 GB (205 descriptors) to 30 GB (490) per 217-atom cell
+  on this training set (GAP-18's large cells), and 109 GB at 1,048, so 2,080 and 4,577 descriptors were dropped and
+  **r8-1048 was still fitting when this was written** (one worker, 256 GB node). One attempt with 24 workers at 490
+  descriptors exhausted the node's memory; `fit_ye3t._Rows` now sizes its pools from a memory budget.
+- Phase 2b (refit with ace-jax's smoothness prior) was not done. The descriptor rows can be had
+  (`ye3t_methods.linear._linear_ace_geometry_row`), but the question it served, mixed vs symmetric under the same
+  regulariser, is settled by the identity above; a prior refit of `ye3t_sym_fit` alone would need a degree
+  assignment for YE3T's labels and is left for the authors' view.
+
+Reference ladders (already in the benchmark; QoI over 21):
+
+| family | size | coefficients | E RMSE (meV/atom) | F RMSE (eV/Å) | QoI error |
+|---|---|---|---|---|---|
+| ace | o3d12 | 223 | 15.9 | 0.1584 | 1.03 |
+| ace | o4d12 | 350 | 10.7 | 0.1439 | 0.76 |
+| ace | o4d14 | 724 | 7.4 | 0.1177 | 0.86 |
+| ace | o4d16 | 1461 | 4.5 | 0.1008 | 0.64 |
+| ace | o4d20 | 5476 | 3.5 | 0.0816 | 0.39 |
+| ace_wl | o4d21_wL2 | 3838 | 4.1 | 0.0889 | 0.50 |
+| ace_wl | o4d22_wL2 | 5053 | 3.9 | 0.0862 | 0.45 |
+| ace_wl | o4d24_wL2 | 8583 | 3.7 | 0.0814 | 0.39 |
+
+### Figures
+
+`bench/si_qoi/results/rmse_qoi_cost.png`, `rmse_qoi_cost_wl.png` and `qoi_heatmap.png` are regenerated with the new families (dark grey hexagons: YE3T density, tagged dotted; "linear ACE, run by YE3T" in the
+linear-ACE blue).
+Existing entries of `cost_sulis_cpu.json` are unchanged (diffed); the new ones are added.

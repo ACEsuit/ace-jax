@@ -17,7 +17,7 @@ import plot_cost as P  # noqa: E402
 
 SYMBOL = {"o": "circle", "D": "diamond", "d": "diamond-tall", "s": "square", "^": "triangle-up", "v": "triangle-down",
           "<": "triangle-left", "*": "star", "X": "x", "P": "cross", "p": "pentagon", "h": "hexagon", ">": "triangle-right",
-          "8": "octagon"}
+          "8": "octagon", "H": "hexagon2"}
 DASH = {"-": "solid", "--": "dash", ":": "dot", "-.": "dashdot"}
 # presets: the families shown (the rest stay in the legend, hidden); the first is the page's initial view
 PRESETS = {
@@ -26,6 +26,8 @@ PRESETS = {
     "ACE variants": ("ace", "ace_E10", "ace_f32", "ace_lr", "ace_pshape", "ace_pshape_lr", "ace_pshape_E10"),
     "Same model, other code": ("ace", "ace_tab", "ace_tabfork", "ace_trim", "ace_ffi", "ace_tab_mixed", "mace_L0",
                                "mace_L1", "mace_xl_L0", "mace_xl_L1"),
+    # (YE3T, first-pass families, are under "All" only: a preset of their own, and "ace_ye3t" under "Same
+    # model, other code", wait for the review of docs/dev/accuracy-cost-results.md -- the page's JSON lists the presets)
     "All": None,
 }
 GAP_X, GAP_Y, ROW_H = 0.08, 0.1, 380          # subplot gaps (paper fraction) and the height of one row (px)

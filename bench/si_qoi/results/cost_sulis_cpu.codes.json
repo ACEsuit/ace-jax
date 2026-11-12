@@ -56,6 +56,11 @@
  "ACEwl_o4d24_wL2": "acejax-ace float64 lammps [sulis-cpu-128x1]",
  "ACEwl_o5d14_wL2": "acejax-ace float64 lammps [sulis-cpu-128x1]",
  "ACEwl_o5d17_wL2": "acejax-ace float64 lammps [sulis-cpu-128x1]",
+ "ACEye3t_o3d12": "ye3t-sym float64 lammps [sulis-cpu-128x1-ye3t]",
+ "ACEye3t_o4d12": "ye3t-sym float64 lammps [sulis-cpu-128x1-ye3t]",
+ "ACEye3t_o4d14": "ye3t-sym float64 lammps [sulis-cpu-128x1-ye3t]",
+ "ACEye3t_o4d16": "ye3t-sym float64 lammps [sulis-cpu-128x1-ye3t]",
+ "ACEye3t_o4d20": "ye3t-sym float64 lammps [sulis-cpu-128x1-ye3t]",
  "GAPE30_s1000": "gap float64 lammps [sulis-cpu-gap_E30]",
  "GAPE30_s3000": "gap float64 lammps [sulis-cpu-gap_E30]",
  "GAPE30_s9000": "gap float64 lammps [sulis-cpu-gap_E30]",
@@ -115,5 +120,10 @@
  "PACE_f3200": "pace-rt float64 lammps [sulis-cpu-32x4-gracert]",
  "PACE_f400": "pace-rt float64 lammps [sulis-cpu-128x1-gracert]",
  "PACE_f50": "pace-rt float64 lammps [sulis-cpu-32x4-gracert]",
- "PACE_f800": "pace-rt float64 lammps [sulis-cpu-128x1-gracert]"
+ "PACE_f800": "pace-rt float64 lammps [sulis-cpu-128x1-gracert]",
+ "YE3T_r3-110": "ye3t float64 lammps [sulis-cpu-128x1-ye3t]",
+ "YE3T_r3-34": "ye3t float64 lammps [sulis-cpu-128x1-ye3t]",
+ "YE3T_r4-205": "ye3t float64 lammps [sulis-cpu-128x1-ye3t]",
+ "YE3T_r4-490": "ye3t float64 lammps [sulis-cpu-128x1-ye3t]",
+ "YE3TmixT_t8-284": "ye3t float64 lammps [sulis-cpu-128x1-ye3t]"
 }
