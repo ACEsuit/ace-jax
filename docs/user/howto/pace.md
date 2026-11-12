@@ -4,6 +4,11 @@ ace-jax reads pacemaker `.yace` potential files and evaluates them in JAX.
 It uses the same calculator, CLI and LAMMPS export as for its own models.
 The results agree with the ML-PACE C++ code, python-ace and LAMMPS.
 
+If you use `.yace` models in published work, cite the PACE paper:
+Y. Lysogorskiy et al.,
+[*npj Comput. Mater.* **7**, 97 (2021)](https://doi.org/10.1038/s41524-021-00559-9).
+See [Licence and citation](../licence.md#citing).
+
 ## Evaluate a `.yace`
 
 ```python

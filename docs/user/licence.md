@@ -53,11 +53,29 @@ If you use ace-jax in published work, cite the atomic cluster expansion
 and its ACEpotentials implementation. ace-jax uses the same models and fits:
 
 - R. Drautz, "Atomic cluster expansion for accurate and transferable
-  interatomic potentials", *Phys. Rev. B* **99**, 014104 (2019).
+  interatomic potentials", *Phys. Rev. B* **99**, 014104 (2019),
+  [doi:10.1103/PhysRevB.99.014104](https://doi.org/10.1103/PhysRevB.99.014104).
 - W. C. Witt et al., "ACEpotentials.jl: A Julia implementation of the
-  atomic cluster expansion", *J. Chem. Phys.* **159**, 164101 (2023).
+  atomic cluster expansion", *J. Chem. Phys.* **159**, 164101 (2023),
+  [doi:10.1063/5.0158783](https://doi.org/10.1063/5.0158783).
 
-If you use POPS uncertainty (`--uq pops`), also cite T. D. Swinburne and
-D. Perez, [arXiv:2402.01810](https://arxiv.org/abs/2402.01810).
+Cite these papers also, if you use the related functions:
+
+- The calibrated force uncertainty (`--uq ard`, `aj calibrate`):
+  J. R. Kermode, "Jackknife-conformal uncertainty for linear ACE
+  potentials: calibrated forces and silicon properties compared with
+  Bayesian and POPS baselines" (2026),
+  [arXiv:2611.08678](https://arxiv.org/abs/2611.08678).
+- PACE `.yace` models: Y. Lysogorskiy et al., "Performant implementation of
+  the atomic cluster expansion (PACE) and application to copper and
+  silicon", *npj Comput. Mater.* **7**, 97 (2021),
+  [doi:10.1038/s41524-021-00559-9](https://doi.org/10.1038/s41524-021-00559-9).
+- POPS uncertainty (`--uq pops`): T. D. Swinburne and D. Perez,
+  [arXiv:2402.01810](https://arxiv.org/abs/2402.01810).
+
+The file
+[`CITATION.cff`](https://github.com/ACEsuit/ace-jax/blob/main/CITATION.cff)
+gives these references in a format that reference managers can read. On
+GitHub, the "Cite this repository" button reads this file.
 
 When a citation for ace-jax is available, it will be on this page.
