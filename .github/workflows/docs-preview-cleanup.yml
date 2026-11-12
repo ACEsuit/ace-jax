@@ -1,0 +1,26 @@
+name: docs-preview-cleanup
+# Remove a pull request's docs preview (<site>/pr/<number>/, published by docs.yml) when it closes.
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: write
+
+jobs:
+  remove:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          sparse-checkout: docs/publish_pages.sh
+          sparse-checkout-cone-mode: false
+      - name: Remove the preview
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          [ -x docs/publish_pages.sh ] || exit 0
+          docs/publish_pages.sh --remove pr/${{ github.event.pull_request.number }}
