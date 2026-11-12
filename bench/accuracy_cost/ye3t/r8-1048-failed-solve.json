@@ -172,5 +172,16 @@
    "fcc": 0.436,
    "sp": 1.107
   }
+ },
+ "timing_sulis_cpu": {
+  "note": "pair_style ye3t on the exported file, gated against the fitted model (same file, so the gate holds for a wrong model); the cost of this descriptor set. Sulis jobs 2282565, 2282566; not in results/sulis.",
+  "us_per_atom_step": {
+   "128x1": 2.885,
+   "1x1": 89.17
+  },
+  "gate": {
+   "max_dE_per_atom": 2.8e-14,
+   "max_dF": 1.6e-14
+  }
  }
 }

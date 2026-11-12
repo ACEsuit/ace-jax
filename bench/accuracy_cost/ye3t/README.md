@@ -133,7 +133,8 @@ equations of the unscaled descriptor columns at penalty 1e-8. The tagged model f
 positive definite below 1e-4). The authors' weighted fit for their Ni model standardises the columns first.
 
 The model is not in `results/metrics.jsonl`, the tables or the figures. Its numbers are in
-`r8-1048-failed-solve.json`. Nothing was changed to make it work: a larger penalty or scaled columns is a
+`r8-1048-failed-solve.json`, with its timing: 2.88 µs/atom-step on 128 ranks and 89.2 on one core (r4-490: 0.70 and
+46.2), which is valid as the cost of this descriptor set. Nothing was changed to make it work: a larger penalty or scaled columns is a
 protocol decision for the authors.
 
 `fit_ye3t` now keeps the density rows (`rows_dir`: `runs/accuracy_cost/ye3t_rows/<key>`, one file per structure).
