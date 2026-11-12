@@ -46,7 +46,7 @@ namespace {
 
 constexpr int kThreads = 256;                             // per block of the DAG pass
 constexpr int kChunk = 32;                                // lanes per shuffle
-constexpr int kAhead = 8;                                 // list steps the DAG pass loads at a time
+constexpr int kAhead = 8;                                 // list steps the DAG pass loads at a time (float32)
 constexpr int kShared = 48 << 10;                         // pair-pass shared memory without opt-in
 constexpr double kPi = 3.14159265358979323846;
 
@@ -287,6 +287,7 @@ __global__ void __launch_bounds__(kThreads)
             R *scratch, int64_t per_batch, R *eo) {
   extern __shared__ double sh[];
   constexpr int T = kThreads, W = kThreads + 1, C = kThreads / kChunk;
+  constexpr int kAhead = sizeof(R) == 8 ? ::kAhead / 2 : ::kAhead;   // A100: float64 is slower at 8
   const int na = m.n_a, nL = m.n_a + m.n_st + 1, mids = m.n_lev > 1, t = threadIdx.x;
   const int nV = Mode ? nL : na + 1;                      // values kept
   const int32_t *P = m.pull, *tiles = P + P[3], *lcut = P + P[4], *litems = P + P[5], *ib = P + P[6];
