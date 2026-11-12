@@ -178,3 +178,21 @@ on every frame, test included, so it is a reference line, not a held-out score. 
   pass their kwargs unchanged), the same data, weights and fit settings; LAMMPS `grace/2l/kk` / `grace/2l/cpu/kk`
   from the same build. Parity: ≤ 9.7e-9 eV/atom, ≤ 1.5e-8 eV/Å on the timed models (bound 1e-6 / 1e-5). The timing
   jobs take `GRACE_TREE`, `GRACE_ENV`, `GRACE_RESULTS` and (CPU) `LAYOUTS`; `GRACE_CHUNKSIZE` sets the Kokkos chunk.
+
+## Polynomial MLPs (pypolymlp) environment and fit
+
+pypolymlp and lammps-polymlp-package are BSD-3-Clause (A. Seko). Nothing from either is in this repository.
+
+- Env `/storage/eng/essswb/venvs/ac-polymlp`: micromamba, conda-forge (`envs/polymlp/environment.yml`):
+  Python 3.12, pypolymlp 0.22.1, numpy 2.5.4, ASE 3.29.0, phonopy 4.10.0, symfc. pypolymlp has no wheels, and a
+  pip build of its sdist fails: its build requirement `eigen` resolves on PyPI to an unrelated package (an
+  eigenproblem solver with a licence manager), not the Eigen headers.
+- Sources (read, not vendored): `$ACEJAX_AC_ROOT/ext/pypolymlp` b5e61e9 (v0.22.1-9, 2026-11-05),
+  `ext/lammps-polymlp-package` 046eaa4 (VERSION 0.3.4, 2026-07-03).
+- Fit: `fit_polymlp.py` (protocol: its docstring and `polymlp/README.md`). Fitted on mnf148 (32 threads).
+  The validation split (10 % of each configuration type of train, seed 0) is in each run's `val_split.json`.
+- LAMMPS (Sulis): `bench/scaling/envs/sulis-polymlp.sh`: lammps-dev ec02ed0 ("2 Sep 2026") copied to
+  `lammps-polymlp`, `src/POLYMLP` registered for CMake, GCC/12.3.0 OpenMPI/4.1.5 Boost/1.82.0, Release,
+  `-march=znver2`, `BUILD_OMP=ON`; `$ROOT/VERSIONS-polymlp`. The gate's pypolymlp is `$ROOT/env-polymlp`
+  (micromamba, the same versions).
+- `pair_style polymlp` has no MPI support (see `polymlp/README.md`): rows are 1 rank × OpenMP threads.

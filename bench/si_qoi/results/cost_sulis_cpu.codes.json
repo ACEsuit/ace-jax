@@ -115,5 +115,14 @@
  "PACE_f3200": "pace-rt float64 lammps [sulis-cpu-32x4-gracert]",
  "PACE_f400": "pace-rt float64 lammps [sulis-cpu-128x1-gracert]",
  "PACE_f50": "pace-rt float64 lammps [sulis-cpu-32x4-gracert]",
- "PACE_f800": "pace-rt float64 lammps [sulis-cpu-128x1-gracert]"
+ "PACE_f800": "pace-rt float64 lammps [sulis-cpu-128x1-gracert]",
+ "POLYMLP_m3g6-l44": "polymlp float64 lammps [sulis-cpu-128x1-polymlp]",
+ "POLYMLP_m3g8-l442": "polymlp float64 lammps [sulis-cpu-128x1-polymlp]",
+ "POLYMLP_m3g9-l882": "polymlp float64 lammps [sulis-cpu-128x1-polymlp]",
+ "POLYMLP_m4g6-l442": "polymlp float64 lammps [sulis-cpu-128x1-polymlp]",
+ "POLYMLP_m4g8-l1282": "polymlp float64 lammps [sulis-cpu-128x1-polymlp]",
+ "POLYMLP_m4g8-l842": "polymlp float64 lammps [sulis-cpu-128x1-polymlp]",
+ "POLYMLP_m4g9-l442": "polymlp float64 lammps [sulis-cpu-128x1-polymlp]",
+ "POLYMLP_m4g9-l882": "polymlp float64 lammps [sulis-cpu-128x1-polymlp]",
+ "POLYMLP_pair-g9p3": "polymlp float64 lammps [sulis-cpu-128x1-polymlp]"
 }

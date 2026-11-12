@@ -187,7 +187,8 @@ def test_sweep_is_complete_and_measured():
     from accuracy_cost.common import load_sweep
     s = load_sweep()
     assert set(s) == {"ace", "ace_lr", "ace_gp", "pace", "mace", "gap", "ace_pshape", "ace_pshape_lr", "ace_wl", "gap_noglue", "gap_E30", "ace_yace", "ace_tab", "nep",
-                      "grace", "grace_fs", "grace_abl", "grace_2l"}
+                      "grace", "grace_fs", "grace_abl", "grace_2l",
+                      "polymlp"}
     assert len(s["ace"]) == 7 and all(e["n_B"] > 0 for e in s["ace"])
     assert [(e["order"], e["max_degree"]) for e in s["ace_lr"]] == [(e["order"], e["max_degree"]) for e in s["ace"]]
     nB = [e["n_B"] for e in s["ace"]]
@@ -1063,3 +1064,88 @@ def test_grace_runtime_styles(tmp_path):
     assert _pair("mace-symx3", "m.json", ["Si"], "gpu") == "pair_style symmetrix/mace\npair_coeff * * m.json Si\n"
     (tmp_path / "m.yace").write_text("elements: [Si, Ge]\nE0: [-1.5, -2.0]\ndeltaSplineBins: 0.001\n")
     assert yace_e0(tmp_path / "m.yace", ["Si", "Ge", "Ge"]) == -5.5
+
+
+# ---- polymlp (docs/dev/specs/2026-11-12-ye3t-polymlp-benchmark-design.md) ----
+
+
+def test_polymlp_pair_style():
+    """polymlp is a plain OpenMP style (no -k switches, no MPI) with no GPU row."""
+    from scaling.run_lammps import _pair, kokkos_args
+    from scaling.sweep import lammps_supported
+    assert _pair("polymlp", "polymlp.yaml", ["Si"], "cpu") == "pair_style polymlp\npair_coeff * * polymlp.yaml Si\n"
+    assert lammps_supported("polymlp", "cpu") and not lammps_supported("polymlp", "gpu")
+    assert kokkos_args("polymlp", "cpu", threads=1) == [] and kokkos_args("polymlp", "cpu", threads=128) == []
+
+
+def test_polymlp_code_table(tmp_path, monkeypatch):
+    """polymlp's code, gate and LAMMPS wrapper; it runs one rank with the node's cores as threads."""
+    from accuracy_cost import common, timing
+    from scaling import parity, run_lammps
+    assert timing.PLAN["polymlp"] == [("polymlp", {"cpu": "lammps"}, ("float64",))]
+    assert set(timing.PLAN) <= set(common.load_sweep())
+    assert timing.gate_tol(timing.STYLE["polymlp"], "polymlp", {}) == parity.TOL["polymlp"]
+    env = {"lmp": "/main", "lmp_polymlp": "/p"}
+    assert timing.lammps_for("polymlp", "cpu", env) == ("/p", None) and timing.lammps_for("mlpace", "cpu", env)[0] == "/main"
+    seen = {}
+    monkeypatch.setattr(run_lammps, "run_case", lambda row, n, dt, dev, lmp, ranks, work, **kw: seen.update(
+        {row["code"]: (ranks, kw["threads"])}) or {})
+    monkeypatch.setattr(timing, "CPU_RANKS", 128); monkeypatch.setattr(timing, "CPU_THREADS", 1)
+    for code in ("polymlp", "mlpace"):
+        timing.time_case({"row": {"code": code}, "mode": "lammps", "dtype": "float64"}, "cpu", 512, env, tmp_path)
+    assert seen == {"polymlp": (1, 128), "mlpace": (128, 1)}
+
+
+def test_polymlp_inputs_and_validation_split():
+    """Sweep entries become pypolymlp parameters at the shared cutoff with E0 as the atomic energy; the validation
+    split is seeded, disjoint from its train part, stratified, and never larger than a tenth of a type."""
+    from accuracy_cost import common, fit_polymlp as fp
+    s = common.load_sweep()["polymlp"]
+    assert 6 <= len(s) <= 10 and min(e["n_params"] for e in s) < 500 and max(e["n_params"] for e in s) >= 5000
+    kw = fp.params_kw(common.entry("polymlp", "m4g9-l882"))
+    assert kw["cutoff"] == common.RCUT and kw["atomic_energy"] == [common.E0_SI] and kw["gtinv_version"] == 1
+    assert kw["gtinv_maxl"] == (8, 8, 2) and kw["gtinv_order"] == 4 and kw["reg_alpha_params"] == fp.REG_ALPHA
+    assert "gtinv_order" not in fp.params_kw(common.entry("polymlp", "pair-g9p3"))
+    types = ["dia"] * 40 + ["liq"] * 25 + ["sp"] * 3
+    tr, va = fp.val_split(types)
+    assert (tr, va) == fp.val_split(types) and not set(tr) & set(va) and sorted(tr + va) == list(range(68))
+    assert [sum(types[i] == t for i in va) for t in ("dia", "liq", "sp")] == [4, 2, 0]
+    assert fp.val_split(types, seed=1)[1] != va
+
+
+def test_polymlp_calculator_conventions(tmp_path):
+    """pypolymlp's evaluator behind ASE: total energy (E0 added back), (N, 3) forces, and ASE's stress (it returns
+    +virial in eV per cell, xx yy zz xy yz zx): a finite-difference check on a small fitted model."""
+    pytest.importorskip("pypolymlp")
+    from ase.build import bulk
+    from accuracy_cost import common, fit_polymlp as fp
+    from pypolymlp.mlp_dev.fit.api_fit import fit_polymlp
+    rng = np.random.default_rng(0)
+    ats = []
+    for k in range(12):
+        a = bulk("Si", "diamond", a=5.43 * (1 + 0.02 * rng.standard_normal()), cubic=True); a.rattle(0.1, seed=k)
+        a.info.update(energy=len(a) * common.E0_SI - 4.6 * len(a) + rng.standard_normal(), config_type="dia" if k % 2 else "liq")
+        a.arrays["forces"] = 0.3 * rng.standard_normal((len(a), 3))
+        if k % 3:
+            a.info["virial"] = rng.standard_normal((3, 3)); a.info["virial"] += a.info["virial"].T
+        ats.append(a)
+    g = fp.groups(ats)
+    assert set(g) == {("dia", False), ("dia", True), ("liq", False), ("liq", True)}
+    p = fp.model({"size": "t", "feature_type": "pair", "model_type": 2, "max_p": 2, "n_gaussians": 4})
+    w = {"Default": 1.0, "liq": 0.5}
+    res = fit_polymlp(p.parameters, fp.dataset_list(ats[:9], w, "train"), fp.dataset_list(ats[9:], w, "val"))
+    res.best_model.save_mlp(filename=str(tmp_path / "polymlp.yaml"))
+    c = fp.calculator(tmp_path / "polymlp.yaml")
+    a = ats[0].copy(); a.calc = c
+    E, F, S = a.get_potential_energy(), a.get_forces(), a.get_stress(voigt=False)
+    Eraw, Fraw = fp.raw_ef(tmp_path / "polymlp.yaml", a)
+    assert F.shape == (len(a), 3) and np.allclose(F, Fraw) and abs(E - Eraw - len(a) * common.E0_SI) < 1e-9
+    h, num = 1e-4, np.zeros((3, 3))
+    for i in range(3):
+        for j in range(3):
+            es = []
+            for sg in (1, -1):
+                eps = np.eye(3); eps[i, j] += sg * h / 2; eps[j, i] += sg * h / 2
+                b = a.copy(); b.calc = c; b.set_cell(a.cell @ eps, scale_atoms=True); es.append(b.get_potential_energy())
+            num[i, j] = (es[0] - es[1]) / (2 * h) / a.get_volume()
+    assert np.abs(num - S).max() < 1e-6 * max(1.0, np.abs(S).max())

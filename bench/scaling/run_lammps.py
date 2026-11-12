@@ -36,7 +36,9 @@ RUNTIME = ("grace-rt", "pace-rt")
 # Symmetrix's pair styles: v0.3.0's plain symmetrix/mace threads each MPI rank with OpenMP itself ("8 threads per rank"
 # its README's rule of thumb), so on the CPU it, like grace-runtime, takes no -k switches
 MACE_STYLES = ("mace", "mace-symx3")
-OMP_PLAIN = (*RUNTIME, "mace-symx3")
+# Seko's pair_style polymlp (lammps-polymlp-package) is OpenMP only and has no MPI support (its per-atom arrays
+# are indexed by atom tag and sized by the local atom count): one rank, OMP_NUM_THREADS threads
+OMP_PLAIN = (*RUNTIME, "mace-symx3", "polymlp")
 # Symmetrix-XL (bench/scaling/envs/sulis-xl.sh): its fast path is pair_style symmetrix/mace[/float32]/kk with
 # a JIT-compiled R1 artifact, so it runs Kokkos on the CPU too (the non-kk style is the old evaluator)
 XL = {"mace-xl": ("symmetrix/mace/kk", "float64"), "mace-xl-f32": ("symmetrix/mace/float32/kk", "float32")}
@@ -79,6 +81,8 @@ def _pair(style, model_path, elements, device, extra=None):
         return f"pair_style {'grace/fs/kk' if device == 'gpu' else 'grace/fs'}\npair_coeff * * {model_path} {els}\n"
     if style == "nep":                      # NEP_CPU's USER-NEP (float64, MPI): pair_style takes no arguments
         return f"pair_style nep\npair_coeff * * {model_path} {els}\n"
+    if style == "polymlp":                  # lammps-polymlp-package: polymlp.yaml (pypolymlp >= 0.9)
+        return f"pair_style polymlp\npair_coeff * * {model_path} {els}\n"
     if style == TRIM:                       # PR 309 plugin, then the juliac --trim library
         return f"plugin load ${{aceplugin}}\npair_style ace\npair_coeff * * {model_path} {els}\n"
     if style == "gap":                       # QUIP takes atomic numbers, and the xml label picks the Potential
