@@ -266,6 +266,19 @@ def test_export_ffi_gpu_bundle(tmp_path, dtype):
     assert b["contract"]["precision"] == dtype
 
 
+def test_gpu_kernel_compiles_without_a_gpu(tmp_path):
+    """The CUDA kernel builds for an A100 with nvcc alone (CI's `cuda-compile` job: NVIDIA's nvcc wheel, no
+    GPU and no toolkit), so a change that breaks its build fails CI. On a GPU host the kernel fixtures
+    already build it."""
+    nvcc = ffi.cuda_compiler()
+    if nvcc is None:
+        (pytest.fail if os.environ.get("ACEJAX_REQUIRE_NVCC") else pytest.skip)("no nvcc for the CUDA kernel")
+    if jax.default_backend() == "gpu":
+        pytest.skip("built by the GPU fixtures")
+    lib = ffi.build_gpu(tmp_path / "ace_gpu.so", nvcc, ("-O3", "-arch=sm_80"))
+    assert lib.stat().st_size > 0
+
+
 def test_gpu_library_needs_nvcc_and_a_gpu(tmp_path, monkeypatch):
     """library(gpu=True) without nvcc, or without a GPU to take the architecture from, is FFIUnavailable."""
     monkeypatch.delenv("ACEJAX_FFI_GPU_FLAGS", raising=False)

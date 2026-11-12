@@ -73,6 +73,7 @@ uv run ruff check                     # lint; `uv run pre-commit run --all-files
   - lammps-jax: `test_export_lammps` and `test_bench_scaling`'s export test. `uv sync --extra lammps`, or `uv pip install -e <lammps-jax>` for a checkout.
   - `jaxmd` (jax-md): `test_jaxmd`.
   - a C++ compiler (`c++`): `test_ffi` (fails instead under ACEJAX_REQUIRE_OPTIONAL); its export test also needs lammps-jax.
+  - nvcc: `test_ffi`'s compile-only test of the CUDA kernel (no GPU needed; CI's `cuda-compile` job installs the nvcc wheel and sets `ACEJAX_REQUIRE_NVCC=1`). `tests/test_ffi_plan.py` needs neither: a NumPy copy of the kernel's DAG pass (`emulate`, keep it in step with `ace_dag`) checks `ffi.pull_plan`'s lists against the plain DAG on the CPU.
   - nvcc and a CUDA backend: `test_ffi`'s GPU cases (the `device` and `backend_kernel` fixtures: on a GPU host the calculator and batch kernel tests run the CUDA kernel), and `test_batch`/`test_batch_md`'s kernel tests there. Run them on lestrade.
   - `native` (matscipy-neighbours): `test_calc_jit`'s native `neighbour_matrix` test and `test_efv`'s dense-vs-neighbour_matrix check; without it the skin list and dense layout also take their fallback neighbour path.
   - `pyace` (python-ace, in its own venv under `pace_ref/`).
@@ -88,6 +89,7 @@ uv run ruff check                     # lint; `uv run pre-commit run --all-files
 - `tests/conftest.py` sets `XLA_FLAGS=--xla_force_host_platform_device_count=2`, for the sharding tests, and a persistent compile cache in `.jax_cache/`. Both must be set before any jax import, so conftest must not import jax at the top level.
 - **CI** (`.github/workflows/`):
   - `test.yml`: 3 shards on Python 3.12 (whole files each: `ACEJAX_SHARD=i/n`, `conftest.shard_files`), a smoke job on 3.11, 3.13 and 3.14, the `slow` ladder, and `optional-deps` (matscipy-neighbours plus the `lammps` and `jaxmd` extras, with `ACEJAX_REQUIRE_OPTIONAL=1`).
+  - `test.yml` also has `cuda-compile`: the CUDA kernel compiled with the nvcc wheel on a runner without a GPU.
   - `lint.yml`.
   - `docs.yml`: each tutorial notebook rendered in its own matrix job (`build_tutorials.py --matrix`; the page is cached on a hash of the notebook, converter, `src/`, lock and tutorial data), then the strict site build from those pages (`ACEJAX_DOCS_NOTEBOOKS=require`: a page not current fails rather than re-renders); path-gated; on `main` it deploys to GitHub Pages.
   - Path-gated parity jobs: `julia-parity` (ACEfit rows/QR on an ACEpotentials-built model, and design rows of a basis built by `build_model` with the live coupling library and only the radials from Julia; it also runs on `src/ace_jax/basis/**`), `coupling-wheels` (builds + clean-env-tests the coupling wheels, then parity vs ACEpotentials), `prior-parity`, `pace-parity` (ML-PACE C++ + python-ace).
