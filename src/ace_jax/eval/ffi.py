@@ -411,16 +411,10 @@ def pull_plan(n_a, n_st, n_leaf, starts, lev, parent, factor, flat):
     kept level, n_lev <= 3): the kernel keeps no Lv, and a value is A[v & 65535] A[v >> 16] (`pair`: an A
     entry times the 1 at A[n_a], or a kept node's two factors), so a leaf is (pair, y) and a mid (x, pair).
 
-    A tile's mids into their parents: the mids, in parent order, in equal ranges, as (factor, mid in the tile,
-    the top bit on a run's last); a run of one parent in one range adds its sum to the parent's adjoint, or,
-    when the parent's last child is in a later range, leaves it for that range (`back`: how many ranges
-    before it hold such sums).
-
     pull = header (tiles, leaf slots, lists, and the offsets of the arrays after it), tiles (u0, size, leaf
-    item base, mid item base), lcut (each tile's ranges), the tiles' leaf items, then per list ib (its
+    item base, first and end group), lcut (each tile's ranges), the tiles' leaf items, then per list ib (its
     first item), ist (each range's first node), pst (its first piece) and fst (each factor's first piece),
-    the piece items, and per tile mtp (each range's first target), back, the mid items and the targets (-1:
-    the sum waits). pos: each leaf's two coefficient slots, by parent then by factor; tile: the largest
+    and the piece items. pos: each leaf's two coefficient slots, by parent then by factor; tile: the largest
     tile."""
     T, n_lev = PULL_THREADS, len(lev) - 1
     if n_a >= 32768:
@@ -452,8 +446,8 @@ def pull_plan(n_a, n_st, n_leaf, starts, lev, parent, factor, flat):
     flat = bool(flat and n_a < 1024 and n_u.max() <= 2048 and nL < 1 << 21)   # an item's fields fit 32 bits
     word = lambda v, end: np.where(end, v - (1 << 31), v)   # an item: the top bit ends a parent or a piece
     by_u = np.argsort(u, kind="stable")
-    tiles, lcut, litems, mtp, mback, mitems, mtgt = [], [], [], [], [], [], []
-    n_l = n_m = n_t = 0
+    tiles, lcut, litems = [], [], []
+    n_l = 0
     pos = np.zeros((2, n_leaf), np.int64)
 
     for a, n, ga, gb in zip(u0, n_u, g0, g1):
@@ -464,20 +458,7 @@ def pull_plan(n_a, n_st, n_leaf, starts, lev, parent, factor, flat):
         it = np.zeros(T * int(count.max()), np.int64)
         it[place] = word(factor[leaf[sel]] | (us - a) << 15, end)
         pos[0, sel] = n_l + place
-        tiles.append([a, n, n_l, n_m, 0]); lcut.append(cut); litems.append(it.ravel()); n_l += len(it)
-        if not mids:
-            continue
-        k = n_st + a + np.arange(n); pk = parent[k]         # the mids into their parents, in equal ranges
-        cut = (np.arange(T + 1) * n) // T
-        whole = np.r_[pk[1:] != pk[:-1], True]              # a parent's last child
-        last = whole.copy(); last[cut[1:-1][cut[1:-1] > 0] - 1] = True
-        r = np.searchsorted(cut, np.arange(n), side="right") - 1
-        src = _spread(cut, last, [factor[k], np.arange(n)])
-        it = np.zeros(T * -(-n // T), np.int64); it[T * (np.arange(n) - cut[r]) + r] = word(factor[k][src] | src << 15, last)
-        first = np.r_[True, whole[:-1]]                     # a parent's ranges before its last: their sums wait
-        back = np.zeros(T, np.int64); np.maximum.at(back, r[whole], r[whole] - r[first])
-        mtp.append(n_t + np.r_[0, np.cumsum(last)][cut]); mback.append(back); mitems.append(it)
-        mtgt.append(np.where(whole[last], pk[last], -1)); n_m += len(it); n_t += int(last.sum())
+        tiles.append([a, n, n_l, ga, gb]); lcut.append(cut); litems.append(it.ravel()); n_l += len(it)
     ib, ist, pst, fst, items = [], [], [], [], []
     n_items = n_pieces = 0
 
@@ -525,7 +506,7 @@ def pull_plan(n_a, n_st, n_leaf, starts, lev, parent, factor, flat):
         else:
             pieces(factor[k][o], o, parent[k][o], [o, parent[k][o]])
     cat = lambda a: np.concatenate([np.ravel(v) for v in a]) if a else np.zeros(0, np.int64)
-    parts = [cat(a) for a in (tiles, lcut, litems, ib, ist, pst, fst, items, mtp, mback, mitems, mtgt)]
+    parts = [cat(a) for a in (tiles, lcut, litems, ib, ist, pst, fst, items)]
     offs = 3 + len(parts) + np.cumsum([0] + [len(a) for a in parts])
     return (np.concatenate([[len(tiles), n_l, len(ib)], offs[:len(parts)]] + parts).astype(np.int64), pos.ravel(),
             int(n_u.max()), flat)

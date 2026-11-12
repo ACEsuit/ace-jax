@@ -292,10 +292,8 @@ __global__ void __launch_bounds__(kThreads)
   const int nV = Mode ? nL : na + 1;                      // values kept
   const int32_t *P = m.pull, *tiles = P + P[3], *lcut = P + P[4], *litems = P + P[5], *ib = P + P[6];
   const int32_t *ist = P + P[7], *pst = P + P[8], *fst = P + P[9], *items = P + P[10];
-  const int32_t *mtp = P + P[11], *mback = P + P[12], *mitems = P + P[13], *mtgt = P + P[14];
   const int n_tiles = P[0], n_slots = P[1], n_lists = P[2];
-  R *red = reinterpret_cast<R *>(sh), *carry = red + C * GA, *mine = carry + T * GA;
-  R *off = scratch + blockIdx.x * per_batch;
+  R *red = reinterpret_cast<R *>(sh), *mine = red + C * GA, *off = scratch + blockIdx.x * per_batch;
   R *Lv = Mode < 2 ? mine : off, *wms = mine + (Mode < 2 ? nV * GA : 0);
   R *wv = off + (Mode < 2 ? 0 : nL * GA), *pw = wv + nL * GA, *A = Lv;
   for (int b = blockIdx.x; b < n_batches; b += gridDim.x) {
@@ -354,28 +352,13 @@ __global__ void __launch_bounds__(kThreads)
       }
       __syncthreads();
       if (mids) {
-        {                                                 // the mids into theirs: an item is a factor,
-          const int32_t *it = mitems + tl[3];             // the mid << 15, the top bit on a run's last
-          const int end = t + T * static_cast<int>((int64_t(t + 1) * nt) / T - (int64_t(t) * nt) / T);
-          int pc = mtp[ti * W + t];
+        for (int q = tl[3] + t; q < tl[4]; q += T) {      // the mids into theirs
           R acc[GA] = {};
-          for (int g = 0; g < GA; ++g) carry[t * GA + g] = 0;
-          for (int o = t; o < end; o += kAhead * T) {
-            int vs[kAhead];
-            for (int u = 0; u < kAhead; ++u) vs[u] = o + u * T < end ? it[o + u * T] : 0;
-            for (int u = 0; u < kAhead && o + u * T < end; ++u) {
-              const int v = vs[u], f = v & 32767, j = (v >> 15) & 65535;
-              for (int g = 0; g < GA; ++g) acc[g] += wms[j * GA + g] * A[f * GA + g];
-              if (v < 0) {
-                const int p = mtgt[pc++];                 // the parent, or -1: its last child is in a later
-                for (int g = 0; g < GA; ++g) {            // range, which adds this sum
-                  if (p >= 0) wv[p * GA + g] += acc[g];
-                  else carry[t * GA + g] = acc[g];
-                  acc[g] = 0;
-                }
-              }
-            }
+          for (int k = q ? m.grp[2 * q - 1] : 0; k < m.grp[2 * q + 1]; ++k) {
+            const int f = m.fac[k], j = k - m.n_st - u0;
+            for (int g = 0; g < GA; ++g) acc[g] += wms[j * GA + g] * A[f * GA + g];
           }
+          for (int g = 0; g < GA; ++g) wv[m.grp[2 * q] * GA + g] += acc[g];
         }
         const int L = m.n_lev + ti;                       // and into dE/dA's pieces
         const int32_t *it = items + ib[L];
@@ -416,16 +399,7 @@ __global__ void __launch_bounds__(kThreads)
           for (int g = 0; g < GA; ++g) wv[(u0 + j) * GA + g] = wms[j * GA + g];
       }
       __syncthreads();
-      if (const int back = mids ? mback[ti * T + t] : 0) {   // the sums that waited for this range
-        const int p = mtgt[mtp[ti * W + t]];
-        for (int g = 0; g < GA; ++g) {
-          R sum = 0;
-          for (int k = 1; k <= back; ++k) sum += carry[(t - k) * GA + g];
-          wv[p * GA + g] += sum;
-        }
-      }
     }
-    if (mids) __syncthreads();                            // the last tile's waiting sums are in
     for (int l = m.st_lev - 1; l >= 0; --l) {             // the kept levels into theirs
       for (int q = m.lev[l] + t; q < m.lev[l + 1]; q += T) {
         R acc[GA] = {};
@@ -703,7 +677,7 @@ ffi::Error Launch(gpuStream_t stream, ffi::ScratchAllocator &scratch, ffi::AnyBu
   const int64_t n_mid = n_lev > 1 ? N - n_a - kept - c.n_leaf : 0;
   const int64_t M = c.tile;
   const auto dag_shared = [&](int64_t GA, int mode) {
-    return (kThreads / kChunk + kThreads + M + (mode == 0 ? n_a + 1 : mode == 1 ? nL : 0)) * GA * sz;
+    return (kThreads / kChunk + M + (mode == 0 ? n_a + 1 : mode == 1 ? nL : 0)) * GA * sz;
   };
   const size_t room = static_cast<size_t>(optin) / 2;
   const int mode = c.lv == 0 ? 0 : c.lv == 1 && dag_shared(1, 1) <= static_cast<size_t>(optin) ? 1 : 2;
