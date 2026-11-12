@@ -396,8 +396,9 @@ def pull_threads(n_nodes):
 
 
 def pull_plan(n_a, n_st, n_leaf, starts, lev, parent, factor, flat, T=256):
-    """(pull, pos, tile): the GPU kernel's adjoint pass, in which each thread sums into targets it alone owns (no
-    atomic adds), from lists stored rank by range (`_ranked`: a warp's loads are neighbours).
+    """(pull, pos, tile, flat): the GPU kernel's adjoint pass for blocks of T threads (`pull_threads`), in
+    which each thread sums into targets it alone owns (no atomic adds), from lists stored rank by range (range
+    r's item j at T j + r: a warp's loads are neighbours).
 
     Tiles: the leaves' parents (the mids, or A without them) in runs of whole parent groups, PULL_TILE at
     most (or n_a), whose adjoints wms fit shared memory. Per tile, the leaves sorted by parent, as (factor,

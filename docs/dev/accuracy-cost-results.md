@@ -562,3 +562,50 @@ How it was found (hardware counters by `perf_event_open`, user space, per kernel
 
 At the target MACE c16L0 on Symmetrix 0.3.0 stays the cheapest CPU model (0.59 against 1.52).
 
+
+## CUDA kernel: a DAG pass without atomic adds (2026-11-12)
+
+The CUDA kernel's product-basis pass (`eval/ace_ffi_gpu.cu`, `ace_dag`) now gathers: a block takes a batch of
+rows of one centre species (2 in float64, 4 in float32), each thread reads the terms of its own lists
+(`ffi.pull_plan`) once and every sum is by the thread that owns its target, so there are no atomic adds and the
+pass is deterministic. o4d20 on an A100 (Sulis), Si 32,768 atoms, ms per force call through `ACECalculator`
+(jobs 2282377, 2282381, 2282394, 2282429), by step:
+
+| kernel | float64 | float32 |
+|---|---|---|
+| main (atomic scatter) | 39.5 | 32.7 |
+| gather pass | 30.6 | 20.9 |
+| items ordered by shared-memory bank | 28.9 | 20.0 |
+| an item in one 32-bit word, lanes dealt equal shares | 26.7 | 17.4 |
+| list items read ahead (4 steps float64, 8 float32) | 24.7 | 15.0 |
+
+The DAG pass alone (Nsight Compute, an A100-SXM4-40GB on Modal, the same 32,768 atoms, µs per launch), main and
+this kernel with its threads per block chosen by DAG size (`ffi.pull_threads`):
+
+| model | nodes | threads | float64 main | float64 new | float32 main | float32 new |
+|---|---|---|---|---|---|---|
+| o3d8 | 76 | 32 | 79 | 81 | 71 | 63 |
+| o3d10 | 229 | 32 | 174 | 128 | 159 | 106 |
+| o3d12 | 624 | 32 | 455 | 256 | 414 | 179 |
+| o4d12 | 1,024 | 64 | 935 | 518 | 872 | 374 |
+| o4d14 | 3,158 | 64 | 1,990 | 1,340 | 1,657 | 860 |
+| o4d16 | 9,280 | 128 | 5,886 | 3,309 | 4,851 | 2,057 |
+| o4d20 | 68,335 | 256 | 30,363 | 17,906 | 28,774 | 10,699 |
+
+How it was found (Nsight Compute in Sulis `gpu-devel` jobs; the SCRTP workstations refuse its counters):
+
+- main's pass was bound by its atomic adds and their shuffles (55% of the pass), not arithmetic: float32 was only
+  1.12x faster than float64.
+- The gather pass is bound by load latency on the plan's lists in global memory (memory busy 86%, 35 warp cycles
+  per instruction). Packing an item into one word, then loading several steps of items before using them, cut the
+  cycles per instruction to 16 and the global sectors read from 3.7 G to 1.9 G. Reading 8 steps ahead is slower
+  than 4 in float64.
+- An offline model of shared-memory bank conflicts overpredicted that step: conflicts fell 14%, time 5%.
+- With 256 threads a block the order-3 models' pass was up to 4.7x slower than main's on the A100 (o3d8 float64:
+  372 against 79 µs) although an RTX 4000 Ada showed no difference: registers bound the blocks resident per SM at
+  three, so rows in flight go as 1 / threads until shared memory binds. At 32, 64, 128 and 256 threads, float64:
+  o3d8 89, 116, 201, 372 µs; o4d12 551, 539, 652, 862; o4d16 6,094, 3,894, 3,124, 3,345; o4d20 48.8, 28.6, 19.6,
+  18.1 ms.
+- No gain: a plane per row instead of interleaved batch values (the compiler loads an interleaved batch with one
+  128-bit load; 13% slower), the mid-level adjoints from a list (5-10% slower on both GPUs), other batch sizes
+  (job 2282429).
