@@ -276,26 +276,19 @@ def kernel_inputs(model, gpu=False):
     starts, n_a = np.r_[0, groups[:, 1]], ct.shape[1] - len(factor)
     n_st = starts[lev[-3]] if len(lev) > 2 else 0
     parent = np.repeat(groups[:, 0], np.diff(starts))
+    T = pull_threads(len(factor))
     pull, pos, tile, flat = pull_plan(n_a, n_st, n_leaf, starts, lev, parent, factor,
-                                      flat=PULL_LV == 0 or PULL_LV is None and len(lev) <= 4)
+                                      flat=PULL_LV == 0 or PULL_LV is None and len(lev) <= 4, T=T)
     lv = 0 if flat else PULL_LV or 1
     lc = np.zeros((len(ct), pos.max() + 1 if n_leaf else 0)); lc[:, pos] = np.tile(ct[:, ct.shape[1] - n_leaf:], 2)
-    return ({**attrs, "n_st": np.int64(n_st), "tile": np.int64(tile), "lv": np.int64(lv)},
+    return ({**attrs, "n_st": np.int64(n_st), "tile": np.int64(tile), "lv": np.int64(lv),
+             "threads": np.int64(T)},
             consts + (i32(lev), i32(pull), jnp.asarray(lc, model.E0.dtype)))
 
 
-PULL_THREADS, PULL_TILE = 256, 2048                   # ace_ffi_gpu.cu's kThreads; leaf parents per tile
+PULL_TILE = 2048                                      # leaf parents per tile
+PULL_THREADS = None                                   # threads per block of the DAG pass: None by size
 PULL_LV = None                                        # the kept values: None by depth and size (tests: 1 or 2)
-
-
-def _ranked(n, edge, T=None):
-    """(cut, place): n sorted items in T ranges that end where `edge` (n,) is set, as equal as that allows,
-    and each item's place rank by range: range r's item j at T j + r."""
-    T = T or PULL_THREADS
-    b = np.r_[0, np.flatnonzero(edge) + 1] if n else np.zeros(1, np.int64)
-    cut = b[np.searchsorted(b, (np.arange(T + 1) * n) // T)]
-    r = np.searchsorted(cut, np.arange(n), side="right") - 1
-    return cut, T * (np.arange(n) - cut[r]) + r
 
 
 _CANDIDATES = 48                                      # a lane's choices in the bank orders
@@ -324,11 +317,10 @@ class _Banks:
             self.seen[k] = True; self.o8[self.k8[i]] += 1; self.o16[self.k16[i]] += 1
 
 
-def _spread(cut, last, keys, T=None):
+def _spread(cut, last, keys, T):
     """src: an order of a piece list's items (range r's item j runs in lane r at step j) that permutes each
     piece (it ends where `last` is set) so that the indices `keys` (one array per load) of a warp's lanes
     fall in different banks, greedily, lane by lane."""
-    T = T or PULL_THREADS
     n = len(last); src = np.arange(n)
     if not n:
         return src
@@ -352,12 +344,11 @@ def _spread(cut, last, keys, T=None):
     return src
 
 
-def _deal(g, f, T=None):
+def _deal(g, f, T):
     """(count, place, last): the leaves of a tile, sorted by parent g (the parent's place in the tile), dealt
     to T lanes a parent at a time: each lane's count, each leaf's place (lane r's step j at T j + r) and
     whether it is its parent's last there. A lane takes the parent and leaf whose factor f, and at a
     parent's last leaf the parent, fall in the banks the warp's other lanes leave free (`_bank_cost`)."""
-    T = T or PULL_THREADS
     n = len(g); place = np.zeros(n, np.int64); last = np.zeros(n, bool); count = np.zeros(T, np.int64)
     if not n:
         return count, place, last
@@ -396,7 +387,15 @@ def _deal(g, f, T=None):
     return count, place, last
 
 
-def pull_plan(n_a, n_st, n_leaf, starts, lev, parent, factor, flat):
+def pull_threads(n_nodes):
+    """Threads per block of the GPU kernel's DAG pass for a DAG of n_nodes: the rows in flight per SM go as
+    1 / threads (registers bound them) until shared memory does, so a small DAG takes few (A100, 32,768 Si,
+    the pass in ms, float64, at 32, 64, 128, 256 threads: 76 nodes 0.09, 0.12, 0.20, 0.37; 1024: 0.55, 0.54,
+    0.65, 0.86; 9280: 6.1, 3.9, 3.1, 3.3; 68,335: 49, 29, 20, 18)."""
+    return PULL_THREADS or (32 if n_nodes < 1000 else 64 if n_nodes < 4000 else 128 if n_nodes < 24000 else 256)
+
+
+def pull_plan(n_a, n_st, n_leaf, starts, lev, parent, factor, flat, T=256):
     """(pull, pos, tile): the GPU kernel's adjoint pass, in which each thread sums into targets it alone owns (no
     atomic adds), from lists stored rank by range (`_ranked`: a warp's loads are neighbours).
 
@@ -416,7 +415,7 @@ def pull_plan(n_a, n_st, n_leaf, starts, lev, parent, factor, flat):
     first item), ist (each range's first node), pst (its first piece) and fst (each factor's first piece),
     and the piece items. pos: each leaf's two coefficient slots, by parent then by factor; tile: the largest
     tile."""
-    T, n_lev = PULL_THREADS, len(lev) - 1
+    n_lev = len(lev) - 1
     if n_a >= 32768:
         raise ValueError(f"the GPU kernel takes up to 32,767 A entries, got {n_a}")
     mids, nL, n_nodes = n_lev > 1, n_a + n_st + 1, len(factor)
@@ -453,7 +452,7 @@ def pull_plan(n_a, n_st, n_leaf, starts, lev, parent, factor, flat):
     for a, n, ga, gb in zip(u0, n_u, g0, g1):
         sel = by_u[np.searchsorted(u[by_u], a):np.searchsorted(u[by_u], a + n)]
         us = u[sel]
-        count, place, end = _deal(us - a, factor[leaf[sel]])
+        count, place, end = _deal(us - a, factor[leaf[sel]], T)
         cut = np.r_[0, np.cumsum(count)]
         it = np.zeros(T * int(count.max()), np.int64)
         it[place] = word(factor[leaf[sel]] | (us - a) << 15, end)
@@ -470,7 +469,7 @@ def pull_plan(n_a, n_st, n_leaf, starts, lev, parent, factor, flat):
             last[:-1] = f[1:] != f[:-1]; last[-1] = True; last[cut[1:-1][cut[1:-1] > 0] - 1] = True
         r = np.searchsorted(cut, np.arange(len(f)), side="right") - 1
         at = T * (np.arange(len(f)) - cut[r]) + r
-        src = _spread(cut, last, keys)                      # each piece's nodes, in the order of the banks
+        src = _spread(cut, last, keys, T)                     # each piece's nodes, in the order of the banks
         place = np.empty(len(f), np.int64); place[src] = at
         if flat:
             it = np.zeros(T * -(-len(f) // T), np.int64); it[at] = word(packed[src], last)

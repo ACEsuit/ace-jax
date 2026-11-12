@@ -44,7 +44,7 @@ namespace ffi = xla::ffi;
 
 namespace {
 
-constexpr int kThreads = 256;                             // per block of the DAG pass
+constexpr int kThreads = 256;                             // per block of the DAG pass, at most
 constexpr int kChunk = 32;                                // lanes per shuffle
 constexpr int kAhead = 8;                                 // list steps the DAG pass loads at a time (float32)
 constexpr int kShared = 48 << 10;                         // pair-pass shared memory without opt-in
@@ -286,7 +286,7 @@ __global__ void __launch_bounds__(kThreads)
     ace_dag(Model<R> m, const int32_t *z, const int32_t *perm, int n_batches, int M, const R *Ag, R *wAg,
             R *scratch, int64_t per_batch, R *eo) {
   extern __shared__ double sh[];
-  constexpr int T = kThreads, W = kThreads + 1, C = kThreads / kChunk;
+  const int T = blockDim.x, W = T + 1, C = T / kChunk;   // ffi.pull_threads: the plan is for T
   constexpr int kAhead = sizeof(R) == 8 ? ::kAhead / 2 : ::kAhead;   // A100: float64 is slower at 8
   const int na = m.n_a, nL = m.n_a + m.n_st + 1, mids = m.n_lev > 1, t = threadIdx.x;
   const int nV = Mode ? nL : na + 1;                      // values kept
@@ -621,7 +621,7 @@ struct Consts {
   ffi::Buffer<ffi::S32> levels, pull;
   ffi::AnyBuffer lc;
   double x0, h;
-  int64_t n, n_rnl, lmax, solid, n_leaf, n_st, tile, lv;
+  int64_t n, n_rnl, lmax, solid, n_leaf, n_st, tile, lv, threads;
 };
 
 // Both entry points: x the positions (atoms, 3), or (E) rij (rows, K, 3); out the forces (atoms, 3), or (E)
@@ -675,16 +675,16 @@ ffi::Error Launch(gpuStream_t stream, ffi::ScratchAllocator &scratch, ffi::AnyBu
   // DAG pass: batches of GA rows, as many as leave two blocks per SM; a tile of M leaf parents.
   const int64_t kept = n_lev > 1 ? c.n_st : 0, nL = n_a + kept + 1;
   const int64_t n_mid = n_lev > 1 ? N - n_a - kept - c.n_leaf : 0;
-  const int64_t M = c.tile;
+  const int64_t M = c.tile, TD = c.threads;
+  if (TD < kChunk || TD > kThreads || TD % kChunk)
+    return ffi::Error::InvalidArgument("the GPU kernel's DAG pass takes 32 to 256 threads, in 32s");
   const auto dag_shared = [&](int64_t GA, int mode) {
-    return (kThreads / kChunk + M + (mode == 0 ? n_a + 1 : mode == 1 ? nL : 0)) * GA * sz;
+    return (TD / kChunk + M + (mode == 0 ? n_a + 1 : mode == 1 ? nL : 0)) * GA * sz;
   };
   const size_t room = static_cast<size_t>(optin) / 2;
   const int mode = c.lv == 0 ? 0 : c.lv == 1 && dag_shared(1, 1) <= static_cast<size_t>(optin) ? 1 : 2;
   int GA = sz == 8 ? 2 : 4;                               // A100: float64 fastest at 2, float32 at 4
-  if (const char *v = std::getenv("ACEJAX_GA")) GA = std::atoi(v);
-  else
-    while (GA > 1 && dag_shared(GA, mode) > room) GA /= 2;
+  while (GA > 1 && dag_shared(GA, mode) > room) GA /= 2;
   const auto blocks = [&](auto kernel, int threads, size_t shared, int64_t work) {   // fill the device
     int resident = 1;
     if (shared > (48 << 10))
@@ -697,7 +697,7 @@ ffi::Error Launch(gpuStream_t stream, ffi::ScratchAllocator &scratch, ffi::AnyBu
   if (std::max({s1, s2, s3}) > static_cast<size_t>(optin))
     return ffi::Error::InvalidArgument("the model needs more shared memory per block than this GPU has");
   const int64_t lists = n_lev + (n_lev > 1 ? 2 * n_mid / M + 2 : 0);   // pw: a piece per list, factor and
-  const int64_t per_batch = GA * ((1 + (mode == 2)) * nL + lists * (n_a + kThreads));   // range at most
+  const int64_t per_batch = GA * ((1 + (mode == 2)) * nL + lists * (n_a + TD));   // range at most
   const int64_t n_A = n_rows * n_a, n_list = n_rows * (K + 1);
   const int64_t n_batches = (n_rows + nz * (GA - 1) + GA - 1) / GA;
   const auto run = [&](auto zero) {                       // the rest in the floats' type R
@@ -718,7 +718,7 @@ ffi::Error Launch(gpuStream_t stream, ffi::ScratchAllocator &scratch, ffi::AnyBu
     const auto dag = mode == 0 ? ACE_DAG(0) : mode == 1 ? ACE_DAG(1) : ACE_DAG(2);
 #undef ACE_DAG
     const int64_t b1 = blocks(density, T1, s1, n_rows), b3 = blocks(forces, T3, s3, n_rows);
-    const int64_t b2 = blocks(dag, kThreads, s2, n_batches);
+    const int64_t b2 = blocks(dag, i32(TD), s2, n_batches);
     // Scratch: A and dE/dA per row, per block the DAG's adjoints and unshared values, then the live lists,
     // the species' counts and the batches.
     const int64_t bytes = (2 * n_A + b2 * per_batch) * sz + (n_list + 1 + nz + n_batches * GA) * sizeof(int);
@@ -739,7 +739,7 @@ ffi::Error Launch(gpuStream_t stream, ffi::ScratchAllocator &scratch, ffi::AnyBu
       ace_count<<<bc, 256, 0, stream>>>(zs, i32(n_rows), per_z);
       ace_base<<<1, 1, 0, stream>>>(nz, GA, per_z);
       ace_fill<<<bc, 256, 0, stream>>>(zs, i32(n_rows), per_z, perm);
-      dag<<<b2, kThreads, s2, stream>>>(m, zs, perm, i32(n_batches), i32(M), Ag, wAg, D, per_batch, eo);
+      dag<<<b2, i32(TD), s2, stream>>>(m, zs, perm, i32(n_batches), i32(M), Ag, wAg, D, per_batch, eo);
       forces<<<b3, T3, s3, stream>>>(m, x, zs, nb, static_cast<const R *>(wt), ed, i32(atoms), i32(K), i32(rows),
                                      lists, wAg, broken, eo, fo);
     }
@@ -759,10 +759,10 @@ ffi::Error AceDirectGpuImpl(gpuStream_t stream, ffi::ScratchAllocator scratch, f
                             ffi::Buffer<ffi::S32> levels,
                             ffi::Buffer<ffi::S32> pull, ffi::AnyBuffer lc, double x0, double h,
                             int64_t n, int64_t n_rnl, int64_t lmax, int64_t solid, int64_t n_leaf,
-                            int64_t n_st, int64_t tile, int64_t lv, double rc2, ffi::Result<ffi::AnyBuffer> e,
+                            int64_t n_st, int64_t tile, int64_t lv, int64_t threads, double rc2, ffi::Result<ffi::AnyBuffer> e,
                             ffi::Result<ffi::AnyBuffer> f) {
   const Consts c{rtab, rcut, runs, groups, factor, ct, e0, levels, pull, lc,
-                 x0, h, n, n_rnl, lmax, solid, n_leaf, n_st, tile, lv};
+                 x0, h, n, n_rnl, lmax, solid, n_leaf, n_st, tile, lv, threads};
   return Launch<false>(stream, scratch, pos, species.typed_data(), nbr.typed_data(), num.typed_data(),
                        weight.untyped_data(), nullptr, nullptr, pos.dimensions()[0], nbr.dimensions()[0],
                        nbr.dimensions()[1], c, rc2,
@@ -779,10 +779,10 @@ ffi::Error AceEdgesGpuImpl(gpuStream_t stream, ffi::ScratchAllocator scratch, ff
                            ffi::AnyBuffer e0, ffi::Buffer<ffi::S32> levels,
                            ffi::Buffer<ffi::S32> pull, ffi::AnyBuffer lc, double x0, double h, int64_t n,
                            int64_t n_rnl, int64_t lmax, int64_t solid, int64_t n_leaf, int64_t n_st,
-                           int64_t tile, int64_t lv, ffi::Result<ffi::AnyBuffer> e,
+                           int64_t tile, int64_t lv, int64_t threads, ffi::Result<ffi::AnyBuffer> e,
                            ffi::Result<ffi::AnyBuffer> g) {
   const Consts c{rtab, rcut, runs, groups, factor, ct, e0, levels, pull, lc,
-                 x0, h, n, n_rnl, lmax, solid, n_leaf, n_st, tile, lv};
+                 x0, h, n, n_rnl, lmax, solid, n_leaf, n_st, tile, lv, threads};
   const int64_t rows = rij.dimensions()[0], K = rij.dimensions()[1];
   return Launch<true>(stream, scratch, rij, zi.typed_data(), nullptr, nullptr, nullptr, zj.typed_data(),
                       mask.typed_data(), rows, K, rows, c, 0.0,
@@ -822,6 +822,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(AceDirectGpu, AceDirectGpuImpl,
                                   .Attr<int64_t>("n_st")
                                   .Attr<int64_t>("tile")
                                   .Attr<int64_t>("lv")
+                                  .Attr<int64_t>("threads")
                                   .Attr<double>("rc2")
                                   .Ret<ffi::AnyBuffer>()            // atom energies (atoms,)
                                   .Ret<ffi::AnyBuffer>());          // -sum_i w_i grad e_i (atoms, 3)
@@ -854,5 +855,6 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(AceEdgesGpu, AceEdgesGpuImpl,
                                   .Attr<int64_t>("n_st")
                                   .Attr<int64_t>("tile")
                                   .Attr<int64_t>("lv")
+                                  .Attr<int64_t>("threads")
                                   .Ret<ffi::AnyBuffer>()            // site energies (rows,)
                                   .Ret<ffi::AnyBuffer>());          // dE_i / drij (rows, K, 3)
