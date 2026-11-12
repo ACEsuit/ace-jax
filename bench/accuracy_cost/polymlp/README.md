@@ -18,7 +18,7 @@ No family gets per-system hyperparameter optimisation in this pass.
 | Data | `$ACEJAX_AC_ROOT/data/si_accuracy_cost/train.xyz` (2,227 configurations), `test.xyz`; split hash in `split.json` |
 | Cutoff | 5.0 Å (every family) |
 | Energies | `atomic_energy` = the isolated-atom DFT energy, -158.54496821 eV; the calculator adds it back |
-| Model ladder | nine points of the grid search of `pypolymlp/utils/grid_search` at 5 Å (`sweep.yaml`, family `polymlp`) |
+| Model ladder | eight points of the grid search of `pypolymlp/utils/grid_search` at 5 Å (`sweep.yaml`, family `polymlp`) |
 | Ridge alpha | pypolymlp's own selection over 10^linspace(-8, 1, 10), on a validation split of *train* |
 | Validation split | 10 % of each configuration type, seed 0 (`fit_polymlp.val_split`; indices in each run's `val_split.json`) |
 | Weights | one dataset per configuration type, weight sigma_F,default / sigma_F from the GAP-18 force sigmas |
@@ -60,7 +60,6 @@ per atom-step on a 128-core EPYC 7742 node, 4,096 atoms.
 | Size | Coefficients | Design rank | Alpha | E | F | QoI | 1 rank × 128 threads | 1 × 1 |
 |---|---|---|---|---|---|---|---|---|
 | m3g6-l44 | 141 | 135 | 1e-7 | 92.2 | 0.1347 | 2.13 | 4.45 | 71.2 |
-| pair-g9p3 | 219 | 200 | 1e-8 | 74.7 | 0.2314 | 3.67 | 1.52 | 10.4 |
 | m3g8-l442 | 300 | 260 | 1e-5 | 40.8 | 0.1191 | 1.75 | 5.04 | 99.8 |
 | m3g9-l882 | 747 | 701 | 1e-8 | 31.4 | 0.1074 | 1.21 | 14.27 | 461.7 |
 | m4g6-l442 | 864 | 768 | 1e-8 | 34.4 | 0.1101 | 1.23 | 4.55 | 80.8 |
@@ -86,7 +85,7 @@ PY=/storage/eng/essswb/venvs/ac-polymlp/bin/python
 
 cd bench
 $PY -m accuracy_cost.fit_polymlp --count                      # coefficients per sweep entry
-$PY -m accuracy_cost.fit_polymlp m3g6-l44 pair-g9p3 ...       # fit: runs/accuracy_cost/polymlp/<size>/polymlp.yaml
+$PY -m accuracy_cost.fit_polymlp m3g6-l44 m3g8-l442 ...      # fit: runs/accuracy_cost/polymlp/<size>/polymlp.yaml
 $PY -m accuracy_cost.evaluate polymlp m3g6-l44 ...            # test errors -> results/metrics.jsonl
 $PY -m accuracy_cost.qoi_models polymlp                       # register with the QoI framework; prints names and tests
 
@@ -98,6 +97,34 @@ sbatch --export=ALL,LAYOUT=1x1 bench/accuracy_cost/envs/sulis-cpu-polymlp.sbatch
 ```
 
 A smoke run beside the real one: set `ACEJAX_AC_RUNS` and `ACEJAX_AC_RESULTS` to scratch directories.
+
+## Seko's repository Si models (looked up 2026-11-12)
+
+The Polynomial MLP Repository has three Si entries: `Si-2024-06-05`, `Si-2024-06-10-hybrid` and `Si-2026-03-31`
+(https://cms.mtl.kyoto-u.ac.jp/seko/mlp-repository/element/index.html). The settings below are from the model
+files of the convex-hull models that have files. The cheapest hull models have no files, so their settings are
+not known.
+
+| | repository | this ladder |
+|---|---|---|
+| Features | `gtinv` in every model; no pair-only model | `gtinv` |
+| Cutoff | 6.0 or 8.0 Å (hybrid second model: 4.0 or 5.0 Å) | 5.0 Å (the benchmark's rule) |
+| Model type | 2 with `gtinv_order` 3 (most models); 4 with `gtinv_order` 4 | 3 and 4 with `gtinv_order` 3 and 4; no type 2 |
+| `max_p` | 2 | 2 |
+| `gtinv_maxl` | type 2: [8, 4] or [12, 4]; type 4: [8, 4, 2] | [4, 4] to [12, 8, 2] |
+| Gaussians | centres 0 to cutoff − 1 Å, width 1.0: 10 or 13 (2024), 7 to 14 (2026) | 6, 8 or 9 |
+| Penalty grid | 1e-4 to 1e3, 15 values (`reg_alpha_params -4 3 15`) | 1e-8 to 10, 10 values |
+| Coefficients | 6,512 (type 4, 6 Å) to 77,420 (type 2, 8 Å) | 141 to 6,984 |
+| Hybrid | 2026 models with files are all sums of two models (second: type 4, order 3, [4, 4] or [8, 8]) | none |
+
+Repository errors on its own dataset (13,264 structures in 2024, 74,085 in 2026): 4.1 to 1.9 meV/atom and
+0.066 to 0.050 eV/Å (2024); 4.4 to 2.4 meV/atom and 0.058 to 0.046 eV/Å (2026 models with files). These are
+not comparable with this benchmark's test set.
+
+The main difference from this ladder is the model type. The repository's accurate Si models are type 2 (a
+polynomial of all invariants) at order 3 with high `l` for the order-2 invariants. This ladder has none: its
+largest models are type 4 at order 4. The repository models are also 2 to 10 times larger and use a longer
+cutoff. Type 2 at 5.0 Å with [8, 4] and [12, 4] is the first thing to add.
 
 ## What a PR could change
 

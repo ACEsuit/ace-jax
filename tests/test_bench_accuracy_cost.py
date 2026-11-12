@@ -1105,7 +1105,7 @@ def test_polymlp_inputs_and_validation_split():
     kw = fp.params_kw(common.entry("polymlp", "m4g9-l882"))
     assert kw["cutoff"] == common.RCUT and kw["atomic_energy"] == [common.E0_SI] and kw["gtinv_version"] == 1
     assert kw["gtinv_maxl"] == (8, 8, 2) and kw["gtinv_order"] == 4 and kw["reg_alpha_params"] == fp.REG_ALPHA
-    assert "gtinv_order" not in fp.params_kw(common.entry("polymlp", "pair-g9p3"))
+    assert "gtinv_order" not in fp.params_kw({"size": "t", "feature_type": "pair", "model_type": 2, "max_p": 3, "n_gaussians": 9})
     types = ["dia"] * 40 + ["liq"] * 25 + ["sp"] * 3
     tr, va = fp.val_split(types)
     assert (tr, va) == fp.val_split(types) and not set(tr) & set(va) and sorted(tr + va) == list(range(68))

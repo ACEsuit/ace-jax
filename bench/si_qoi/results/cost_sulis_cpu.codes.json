@@ -123,6 +123,5 @@
  "POLYMLP_m4g8-l1282": "polymlp float64 lammps [sulis-cpu-128x1-polymlp]",
  "POLYMLP_m4g8-l842": "polymlp float64 lammps [sulis-cpu-128x1-polymlp]",
  "POLYMLP_m4g9-l442": "polymlp float64 lammps [sulis-cpu-128x1-polymlp]",
- "POLYMLP_m4g9-l882": "polymlp float64 lammps [sulis-cpu-128x1-polymlp]",
- "POLYMLP_pair-g9p3": "polymlp float64 lammps [sulis-cpu-128x1-polymlp]"
+ "POLYMLP_m4g9-l882": "polymlp float64 lammps [sulis-cpu-128x1-polymlp]"
 }

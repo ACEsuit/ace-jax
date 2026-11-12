@@ -541,7 +541,6 @@ updating QR of the weighted training design matrix, unit-norm columns, relative 
 | size | coefficients | design rank | penalty | E RMSE (meV/atom) | F RMSE (eV/Å) | QoI error | 1 rank x 128 threads µs/atom-step | 1 x 1 |
 |---|---|---|---|---|---|---|---|---|
 | m3g6-l44 | 141 | 135 | 1e-7 | 92.2 | 0.1347 | 2.13 | 4.45 | 71.2 |
-| pair-g9p3 | 219 | 200 | 1e-8 | 74.7 | 0.2314 | 3.67 | 1.52 | 10.4 |
 | m3g8-l442 | 300 | 260 | 1e-5 | 40.8 | 0.1191 | 1.75 | 5.04 | 99.8 |
 | m3g9-l882 | 747 | 701 | 1e-8 | 31.4 | 0.1074 | 1.21 | 14.27 | 461.7 |
 | m4g6-l442 | 864 | 768 | 1e-8 | 34.4 | 0.1101 | 1.23 | 4.55 | 80.8 |
@@ -562,10 +561,12 @@ Gates (LAMMPS against pypolymlp): ≤ 2.7e-14 eV/atom, 8.1e-13 eV/Å.
   where ACE is at 3.5-7.
 - The design rank is 87-97 % of the coefficient count (260 / 300 lowest; 6,776 / 6,984), so the count overstates
   the effective size only slightly on this training set.
-- Three penalties sit on the grid's lower edge (1e-8: pair-g9p3, m3g9-l882, m4g6-l442); pypolymlp's grid was kept.
-- **Why the ladder is not monotonic.** (i) It is not one nested family: a pair-only model and two model types, so
-  the orders by coefficients, cost and accuracy differ (pair-g9p3 is cheapest and worst, bcc 800 meV/atom off;
-  m3g9-l882 costs 14 µs for QoI 1.21, m4g9-l442 5.5 µs for 0.96). (ii) The plateau 0.96 / 0.98 / 1.01 at 1,782 to
+- Two penalties sit on the grid's lower edge (1e-8: m3g9-l882, m4g6-l442); pypolymlp's grid was kept.
+- A pair-only model (pair-g9p3: 74.7 meV/atom, 0.2314 eV/Å, QoI 3.67, bcc 800 meV/atom off) was fitted and
+  removed: it is not a sensible model for Si, and Seko's repository has no pair-only Si model with files.
+- **Why the ladder is not monotonic.** (i) It is not one nested family: two model types, so
+  the orders by coefficients, cost and accuracy differ
+  (m3g9-l882 costs 14 µs for QoI 1.21, m4g9-l442 5.5 µs for 0.96). (ii) The plateau 0.96 / 0.98 / 1.01 at 1,782 to
   4,797 coefficients is mostly hcp: both l = (8, 8, 2) models put it 37-42 meV/atom too low (neighbours +6, +9),
   which alone moves the geometric mean by 9 %. (iii) m4g8-l842's penalty. Its validation curve has two near-tied
   minima (1e-6: 0.18693, 1e-3: 0.18748) with a bump between, and 1e-6 won. A diagnostic refit on the same 90 %
@@ -584,7 +585,9 @@ Gates (LAMMPS against pypolymlp): ≤ 2.7e-14 eV/atom, 8.1e-13 eV/Å.
   Forces degrade sharply at small penalties while pypolymlp's weighted validation RMSE hardly registers it; at 1e-3
   the force error is on the size trend. The two larger models chose 1e-3. A selection rule that sees forces (or
   a floor on the grid) is a protocol change for a PR, not made here.
-- Seko's repository potentials (`polymlp_repo`) were not added: not looked up in this pass.
+- Seko's repository potentials (`polymlp_repo`) were not added. Their settings were looked up
+  (`bench/accuracy_cost/polymlp/README.md`): cutoff 6 or 8 Å, mostly model type 2 at order 3 with `gtinv_maxl`
+  [8, 4] or [12, 4], 6,512 to 77,420 coefficients. This ladder has no type 2 model; that is the first thing to add.
 
 ### Figures
 

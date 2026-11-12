@@ -179,7 +179,8 @@ polymlp:       # Seko's polynomial MLPs (fit_polymlp.py; pypolymlp 0.22.1): poin
                # utils/grid_search).  model_type 2: polynomial (max_p) of all invariants; 3: polynomial of the pair
                # invariants + linear in all; 4: polynomial of the order <= 2 invariants + linear in all.  gtinv_maxl:
                # max l per invariant order from 2 up.  n_params: Pypolymlp.n_features (fit_polymlp --count)
-  - {size: pair-g9p3,  feature_type: pair, model_type: 2, max_p: 3, n_gaussians: 9, n_params: 219}
+               # No pair-only model (a pair-g9p3 row was fitted and removed, 2026-11-12): every Si model with files
+               # in Seko's repository is gtinv (polymlp/README.md)
   - {size: m3g6-l44,   model_type: 3, max_p: 2, gtinv_order: 3, gtinv_maxl: [4, 4],    n_gaussians: 6, n_params: 141}
   - {size: m3g8-l442,  model_type: 3, max_p: 2, gtinv_order: 4, gtinv_maxl: [4, 4, 2], n_gaussians: 8, n_params: 300}
   - {size: m3g9-l882,  model_type: 3, max_p: 2, gtinv_order: 4, gtinv_maxl: [8, 8, 2], n_gaussians: 9, n_params: 747}
