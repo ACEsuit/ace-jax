@@ -212,13 +212,14 @@ same cache.
     ```
 
 In float64, the requirements and the accuracy are the same as for the CPU kernel.
-On an A100, the kernel is 2.9 to 8.0 times faster than the compiled JAX
+On an A100, the kernel is 4.8 to 8.2 times faster than the compiled JAX
 program, for silicon models from o3d8 to o4d20 with 32,768 atoms.
 
 The GPU kernel also runs float32 bundles. To export one, add `--dtype float32`.
 The kernel then calculates in float32, with the accuracy of the float32 XLA
 program. On a GPU with low float64 throughput, it is 2 to 4 times faster than
-in float64. On an A100, it is 1.1 to 1.2 times faster.
+in float64. On an A100, it is up to 1.7 times faster. The speed-up is largest
+for the largest models.
 See [Learned radials and precision](#learned-radials-and-precision).
 
 In Python, `ACECalculator(path, ffi=True)` uses the same kernel on a CUDA GPU.

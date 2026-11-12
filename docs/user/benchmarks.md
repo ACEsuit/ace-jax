@@ -58,7 +58,7 @@ At the target, in microseconds per atom-step:
 | model | A100 GPU | CPU node (128 cores) |
 |---|---|---|
 | linear ACE o4d20, ace-jax with lammps-jax (XLA program) | 3.12 | 50.5 |
-| linear ACE o4d20, ace-jax kernel with lammps-jax (CUDA on the GPU, C++ on the CPU) | 1.23 | 1.52 |
+| linear ACE o4d20, ace-jax kernel with lammps-jax (CUDA on the GPU, C++ on the CPU) | 0.75 | 1.52 |
 | linear ACE o4d20, ML-PACE | 4.13 | 5.31 |
 | linear ACE o4d20, ACEpotentials.jl | – | 10.8 |
 | MACE c16L0, Symmetrix 0.3.0 | 0.65 | 0.59 |
@@ -103,11 +103,11 @@ than ML-PACE (1.52 against 5.31 µs/atom-step).
 
 On the A100, ace-jax runs linear ACE o4d20 faster than ML-PACE (3.12
 against 4.13 µs/atom-step). The ace-jax [GPU kernel](howto/lammps.md#gpu-kernel)
-runs the same model at 1.23 µs/atom-step. It is the fastest linear ACE code
+runs the same model at 0.75 µs/atom-step. It is the fastest linear ACE code
 on the A100 for all models from o3d8 to o4d20. Against patched ML-PACE, it
-is 2.0 to 3.2 times faster (o4d12 to o4d20). On the same node, it is 2.9 to
-8.0 times faster than the compiled JAX program. The speed-up is largest for
-the smallest models.
+is 2.9 to 3.7 times faster (o4d12 to o4d20). It is 4.8 to 8.2 times faster
+than the compiled JAX program. The speed-up is largest for the smallest
+models.
 
 ### How the cost was measured
 

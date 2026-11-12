@@ -32,7 +32,7 @@ Cheapest model reaching the target, µs/atom-step, float64, LAMMPS:
 | linear ACE o4d20, ML-PACE (tabulated radials) | 5,476 | 0.0816 | 0.41 | 4.13 | 5.31 |
 | linear ACE o4d20, patched ML-PACE (proposed upstream) | 5,476 | 0.0816 | 0.41 | 2.42 | 2.89 |
 | linear ACE o4d20, ACEpotentials.jl (trim library) | 5,476 | 0.0816 | 0.41 | – | 10.8 |
-| linear ACE o4d20, ace-jax kernel (lammps-jax FFI; CUDA / C++) | 5,476 | 0.0816 | 0.41 | 1.23 | 1.52 |
+| linear ACE o4d20, ace-jax kernel (lammps-jax FFI; CUDA / C++) | 5,476 | 0.0816 | 0.41 | 0.75 | 1.52 |
 | MACE c16L0, Symmetrix 0d86e1e (before 2026-11-10) | 31,152 | 0.0699 | < 0.5 | 1.93 | 2.36 |
 | **MACE c16L0, Symmetrix 0.3.0** | 31,152 | 0.0699 | < 0.5 | **0.65** | **0.59** |
 | MACE c16L0, Symmetrix-XL | 31,152 | 0.0699 | < 0.5 | 1.23 | 2.19 |
@@ -591,6 +591,24 @@ this kernel with its threads per block chosen by DAG size (`ffi.pull_threads`):
 | o4d14 | 3,158 | 64 | 1,990 | 1,340 | 1,657 | 860 |
 | o4d16 | 9,280 | 128 | 5,886 | 3,309 | 4,851 | 2,057 |
 | o4d20 | 68,335 | 256 | 30,363 | 17,906 | 28,774 | 10,699 |
+
+LAMMPS on an A100-PCIE-40GB (Sulis gpu020, jobs 2282520 and 2282521, `envs/sulis-gpu-cudak-retime.sbatch`, branch
+at 016488c), Si 32,768 atoms, µs/atom-step, main's kernel timed after the new one on the same GPU
+(`sulis-gpu-cudak.jsonl`; the control rows in `sulis-gpu-cudak-main.jsonl`, not plotted):
+
+| model | float64 main | float64 new | ratio | float32 main | float32 new | ratio |
+|---|---|---|---|---|---|---|
+| o3d8 | 0.042 | 0.041 | 1.01x | 0.041 | 0.042 | 0.98x |
+| o3d10 | 0.046 | 0.046 | 1.00x | 0.042 | 0.038 | 1.10x |
+| o3d12 | 0.067 | 0.058 | 1.15x | 0.056 | 0.045 | 1.22x |
+| o4d12 | 0.081 | 0.069 | 1.16x | 0.069 | 0.052 | 1.33x |
+| o4d14 | 0.142 | 0.115 | 1.24x | 0.115 | 0.086 | 1.34x |
+| o4d16 | 0.284 | 0.190 | 1.50x | 0.230 | 0.133 | 1.73x |
+| o4d20 | 1.234 | 0.748 | 1.65x | 1.075 | 0.444 | 2.42x |
+
+At the target MACE c16L0 on Symmetrix 0.3.0 stays the cheapest float64 model on the A100 (0.65 against 0.75); in
+float32 the kernel runs o4d20 at 0.44. Against the patched ML-PACE the float64 kernel is 2.9-3.7x faster (o4d12
+to o4d20), against the XLA program (job rows of `sulis-gpu-cudak-xla.jsonl`, an earlier node) 4.8-8.2x.
 
 How it was found (Nsight Compute in Sulis `gpu-devel` jobs; the SCRTP workstations refuse its counters):
 
