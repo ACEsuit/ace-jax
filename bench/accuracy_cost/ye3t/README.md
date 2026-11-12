@@ -71,8 +71,12 @@ What is deliberately not done:
 - **No DAKOTA tuning** of the cutoff and decay, and no search over weights and penalty. No family in the
   benchmark is tuned per system. If a PR adds tuned YE3T fits, the `ace` ladder is tuned under the same budget.
 - **No ZBL overlay.** The other families have no added core either.
-- **No per-configuration-type weights.** ye3t-methods has one global weight per quantity, so the GAP-18 sigmas
-  that the other families use are not applied. `status.json` records `per_config_type_weights: false`.
+- **No per-configuration-type weights.** `LinearModel.fit` has one global weight per quantity, so the GAP-18
+  sigmas that the other families use are not applied. `status.json` records `per_config_type_weights: false`.
+  The loss is the sum of squared total-energy errors (one row per structure) and squared force components, all
+  at weight 1. ye3t-methods does contain the paper's weighted loss (per-atom energy rows, forces normalised per
+  structure, target scaling, per-group weights: `portable_refit.py`, `atomistic/linear_statistics.py`), but that
+  path accepts only the authors' nickel model. This weighting matters: see "Weighting diagnostic" below.
 - **No virials.** The stress target needs a stress on every structure, and a third of the training set has none.
 
 ## Limits met
@@ -112,6 +116,28 @@ times faster than ML-PACE's product evaluator and 1.4–1.6 times faster than it
 file. The 128 × 1 time of o4d20 (25.9) is anomalous and not understood; the smaller fits give 0.35 to 1.39.
 
 The r8-1048 density fit was still running when this was written.
+
+### Weighting diagnostic
+
+The fitted density models have higher energy and QoI errors than linear ACE of the same size, and lower force
+errors. The errors are largest for small-cell bulk phases (test energy RMSE of r4-490: bcc 37, fcc 42, st12 26,
+sp2 92 meV/atom; linear ACE o4d14: 3, 1, 2, 7). To test the loss, the r4-205 rows from ye3t-methods' own row
+function were solved again under the benchmark's weights (`ext/logs/probe10.py`; no benchmark row changes).
+Test energy RMSE (meV/atom) / force RMSE (eV/Å):
+
+| Test set | Protocol loss | Energy 30/√N, force 1 | GAP-18 weights | Linear ACE o3d12 (223) |
+|---|---|---|---|---|
+| all | 25.1 / 0.118 | 13.5 / 0.135 | 18.1 / 0.144 | 15.9 / 0.158 |
+| fcc | 46.8 / 0.129 | 12.4 / 0.102 | 16.4 / 0.096 | 10.1 / 0.158 |
+| sp2 | 81.0 / 0.128 | 6.0 / 0.186 | 6.4 / 0.129 | 21.5 / 0.284 |
+| bcc | 87.2 / 0.075 | 44.1 / 0.150 | 42.1 / 0.124 | 6.8 / 0.180 |
+| st12 | 28.7 / 0.150 | 28.9 / 0.170 | 23.5 / 0.184 | 8.7 / 0.199 |
+| hcp | 11.7 / 0.073 | 32.9 / 0.081 | 31.3 / 0.102 | 11.9 / 0.142 |
+
+The protocol column reproduces the benchmark row exactly. Under ACE-like weights the 205-descriptor model has
+about the same overall energy and force errors as linear ACE at 223 coefficients, so much of the gap is the loss.
+It is not all of it: bcc, st12 and hcp stay 2 to 6 times worse than ACE. The QoIs were not recomputed for these
+refits. A fit with a weighted loss is the first thing a PR could change.
 
 ## Commands
 

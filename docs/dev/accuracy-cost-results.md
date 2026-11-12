@@ -576,10 +576,10 @@ columns at 1 x 1 come from the same job (`COMPARE=1`), at 128 x 1 from the plott
 ### Fitted YE3T models
 
 Protocol (README): ye3t-methods' ridge solve at penalty 1e-8, ChebExpCos decay 0.7799 (the authors' Si value),
-cutoff 5.0 Å, fixed E0, **global weights 1 : 1 on energies and forces and no virials**: ye3t-methods has one weight
-per quantity, so the GAP-18 per-configuration-type weights the other families use cannot be applied. That, not
-the basis, may account for part of the pattern below (lower force error, higher energy and QoI error than ACE at
-equal size).
+cutoff 5.0 Å, fixed E0, **global weights 1 : 1 on energies and forces and no virials**: `LinearModel.fit` has one
+weight per quantity, so the GAP-18 per-configuration-type weights the other families use cannot be applied. That
+accounts for most of the pattern below (lower force error, higher energy and QoI error than ACE at equal size):
+see the weighting diagnostic.
 
 | family | size | descriptors | penalty | E RMSE (meV/atom) | F RMSE (eV/Å) | QoI error | 128 x 1 µs/atom-step | 1 x 1 |
 |---|---|---|---|---|---|---|---|---|
@@ -596,6 +596,28 @@ Gates (LAMMPS against ye3t-methods' calculator): ≤ 5.7e-14 eV/atom, 9.3e-14 eV
   resolves `young_kappa: all_valid` to the symmetric space (`ye3t/representation_config.py` `count_fixed_content`,
   `ye3t_methods/config.py`; quotes in the README). Descriptor rows are bit-identical (`fit_ye3t.same_rows` = 0.0),
   as are coefficients and test errors. So there is no difference for a smoothness prior to remove.
+- **Why the QoIs lag: mostly the loss.** `LinearModel.fit` minimises squared total-energy errors (one row per
+  structure) plus squared force components at weight 1, so a two-atom bcc cell 40 meV/atom off counts like one force
+  component 0.08 eV/Å off; the `ace` fits weight that energy row about 450 times more (30/√N and per-type factors).
+  The QoI gap to ACE is where that predicts: energies of small-cell bulk phases (r4-490 test energy RMSE: bcc 37,
+  fcc 42, st12 26, sp2 92 meV/atom; ace o4d14: 3, 1, 2, 7), hence dE_fcc and dE_bcc 50-58 meV/atom low, and virials
+  (not fitted) 2-4x ACE's, hence c12 and c44. Force errors per type match or beat ACE's, and the point-defect QoIs
+  are as bad for ACE and PACE at this size. Diagnostic (`ext/logs/probe10.py`; r4-205 rows from ye3t-methods' row
+  function solved again; no benchmark row changes), test E (meV/atom) / F (eV/Å):
+
+  | test set | protocol loss | E 30/√N, F 1 | GAP-18 weights | ace o3d12 (223) |
+  |---|---|---|---|---|
+  | all | 25.1 / 0.118 | 13.5 / 0.135 | 18.1 / 0.144 | 15.9 / 0.158 |
+  | fcc | 46.8 / 0.129 | 12.4 / 0.102 | 16.4 / 0.096 | 10.1 / 0.158 |
+  | sp2 | 81.0 / 0.128 | 6.0 / 0.186 | 6.4 / 0.129 | 21.5 / 0.284 |
+  | bcc | 87.2 / 0.075 | 44.1 / 0.150 | 42.1 / 0.124 | 6.8 / 0.180 |
+  | st12 | 28.7 / 0.150 | 28.9 / 0.170 | 23.5 / 0.184 | 8.7 / 0.199 |
+  | hcp | 11.7 / 0.073 | 32.9 / 0.081 | 31.3 / 0.102 | 11.9 / 0.142 |
+
+  The protocol column reproduces the benchmark row. Under ACE-like weights YE3T at 205 descriptors is level with
+  ace at 223 overall; bcc, st12 and hcp stay 2-6x worse, so the loss is most but not all of it. QoIs were not
+  recomputed. ye3t-methods has the paper's weighted loss (`portable_refit.py`: per-atom energies, per-structure
+  force normalisation, group weights) only for the authors' nickel model.
 - **`ye3t_mix_T`** (tagged Cauchy image, shifted-Jacobi radials, ranks 1-8): one size. Against the density model
   of nearest size (205): energy 15.4 vs 25.1 meV/atom, forces 0.1213 vs 0.1182 eV/Å, QoI 2.15 vs 1.86, at 10x the
   cost (3.28 vs 0.33 µs). No force or QoI gain from the tagged family here. It is confounded: the tagged normal
