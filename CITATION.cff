@@ -1,0 +1,234 @@
+cff-version: 1.2.0
+message: >-
+  If you use ace-jax in published work, cite the atomic cluster expansion
+  (Drautz 2019; Dusson et al. 2022) and ACEpotentials.jl (Witt et al. 2023),
+  which are in the references. Each other reference has a scope that says
+  which function of ace-jax it applies to: cite it if you use that function.
+title: "ace-jax: fit and evaluate ACE interatomic potentials in Python/JAX"
+type: software
+authors:
+  - name: ACEsuit contributors
+license: MIT
+repository-code: "https://github.com/ACEsuit/ace-jax"
+url: "https://acesuit.github.io/ace-jax/"
+keywords:
+  - atomic cluster expansion
+  - interatomic potential
+  - JAX
+  - molecular dynamics
+  - uncertainty quantification
+references:
+  - type: article
+    scope: "Cite for all use of ace-jax: the atomic cluster expansion."
+    title: "Atomic cluster expansion for accurate and transferable interatomic potentials"
+    authors:
+      - family-names: Drautz
+        given-names: Ralf
+        orcid: "https://orcid.org/0000-0001-7101-8804"
+    journal: "Physical Review B"
+    volume: 99
+    start: "014104"
+    year: 2019
+    doi: 10.1103/PhysRevB.99.014104
+  - type: article
+    scope: "Cite for all use of ace-jax: the construction of the ACE basis."
+    title: "Atomic cluster expansion: Completeness, efficiency and stability"
+    authors:
+      - family-names: Dusson
+        given-names: Geneviève
+      - family-names: Bachmayr
+        given-names: Markus
+        orcid: "https://orcid.org/0000-0002-8051-2270"
+      - family-names: Csányi
+        given-names: Gábor
+        orcid: "https://orcid.org/0000-0002-8180-2034"
+      - family-names: Drautz
+        given-names: Ralf
+        orcid: "https://orcid.org/0000-0001-7101-8804"
+      - family-names: Etter
+        given-names: Simon
+      - family-names: Oord
+        name-particle: van der
+        given-names: Cas
+        orcid: "https://orcid.org/0000-0003-1845-0387"
+      - family-names: Ortner
+        given-names: Christoph
+        orcid: "https://orcid.org/0000-0003-1498-8120"
+    journal: "Journal of Computational Physics"
+    volume: 454
+    start: "110946"
+    year: 2022
+    doi: 10.1016/j.jcp.2022.110946
+  - type: article
+    scope: "Cite for all use of ace-jax: its models and fits follow ACEpotentials.jl."
+    title: "ACEpotentials.jl: A Julia implementation of the atomic cluster expansion"
+    authors:
+      - family-names: Witt
+        given-names: William C.
+        orcid: "https://orcid.org/0000-0002-1578-1888"
+      - family-names: Oord
+        name-particle: van der
+        given-names: Cas
+        orcid: "https://orcid.org/0000-0003-1845-0387"
+      - family-names: Gelžinytė
+        given-names: Elena
+        orcid: "https://orcid.org/0000-0002-8625-1497"
+      - family-names: Järvinen
+        given-names: Teemu
+        orcid: "https://orcid.org/0000-0001-9234-9071"
+      - family-names: Ross
+        given-names: Andres
+      - family-names: Darby
+        given-names: James P.
+        orcid: "https://orcid.org/0000-0002-3365-599X"
+      - family-names: Ho
+        given-names: Cheuk Hin
+        orcid: "https://orcid.org/0009-0001-8595-5775"
+      - family-names: Baldwin
+        given-names: William J.
+        orcid: "https://orcid.org/0009-0005-9863-6422"
+      - family-names: Sachs
+        given-names: Matthias
+        orcid: "https://orcid.org/0000-0002-9003-337X"
+      - family-names: Kermode
+        given-names: James
+        orcid: "https://orcid.org/0000-0001-6755-6271"
+      - family-names: Bernstein
+        given-names: Noam
+        orcid: "https://orcid.org/0000-0002-6532-1337"
+      - family-names: Csányi
+        given-names: Gábor
+        orcid: "https://orcid.org/0000-0002-8180-2034"
+      - family-names: Ortner
+        given-names: Christoph
+        orcid: "https://orcid.org/0000-0003-1498-8120"
+    journal: "The Journal of Chemical Physics"
+    volume: 159
+    issue: 16
+    start: "164101"
+    year: 2023
+    doi: 10.1063/5.0158783
+  - type: article
+    scope: "Cite if you use the calibrated force uncertainty (aj fit --uq ard, aj calibrate)."
+    title: "Jackknife-conformal uncertainty for linear ACE potentials: calibrated forces and silicon properties compared with Bayesian and POPS baselines"
+    authors:
+      - family-names: Kermode
+        given-names: James R.
+        orcid: "https://orcid.org/0000-0001-6755-6271"
+    year: 2026
+    status: preprint
+    doi: 10.48550/arXiv.2611.08678
+    url: "https://arxiv.org/abs/2611.08678"
+    identifiers:
+      - type: other
+        value: "arXiv:2611.08678"
+        description: arXiv preprint
+  - type: article
+    scope: "Cite if you use PACE .yace models (read, evaluate or write)."
+    title: "Performant implementation of the atomic cluster expansion (PACE) and application to copper and silicon"
+    authors:
+      - family-names: Lysogorskiy
+        given-names: Yury
+      - family-names: Oord
+        name-particle: van der
+        given-names: Cas
+      - family-names: Bochkarev
+        given-names: Anton
+      - family-names: Menon
+        given-names: Sarath
+        orcid: "https://orcid.org/0000-0002-6776-1213"
+      - family-names: Rinaldi
+        given-names: Matteo
+      - family-names: Hammerschmidt
+        given-names: Thomas
+        orcid: "https://orcid.org/0000-0002-2270-4469"
+      - family-names: Mrovec
+        given-names: Matous
+      - family-names: Thompson
+        given-names: Aidan
+        orcid: "https://orcid.org/0000-0002-0324-9114"
+      - family-names: Csányi
+        given-names: Gábor
+        orcid: "https://orcid.org/0000-0002-8180-2034"
+      - family-names: Ortner
+        given-names: Christoph
+        orcid: "https://orcid.org/0000-0003-1498-8120"
+      - family-names: Drautz
+        given-names: Ralf
+        orcid: "https://orcid.org/0000-0001-7101-8804"
+    journal: "npj Computational Materials"
+    volume: 7
+    start: "97"
+    year: 2021
+    doi: 10.1038/s41524-021-00559-9
+  - type: article
+    scope: "Cite if you use PACE .yace models that pacemaker fitted."
+    title: "Efficient parametrization of the atomic cluster expansion"
+    authors:
+      - family-names: Bochkarev
+        given-names: Anton
+        orcid: "https://orcid.org/0000-0001-7229-5758"
+      - family-names: Lysogorskiy
+        given-names: Yury
+        orcid: "https://orcid.org/0000-0003-4617-3188"
+      - family-names: Menon
+        given-names: Sarath
+        orcid: "https://orcid.org/0000-0002-6776-1213"
+      - family-names: Qamar
+        given-names: Minaam
+      - family-names: Mrovec
+        given-names: Matous
+        orcid: "https://orcid.org/0000-0001-8216-2254"
+      - family-names: Drautz
+        given-names: Ralf
+        orcid: "https://orcid.org/0000-0001-7101-8804"
+    journal: "Physical Review Materials"
+    volume: 6
+    issue: 1
+    start: "013804"
+    year: 2022
+    doi: 10.1103/PhysRevMaterials.6.013804
+  - type: article
+    scope: "Cite if you use a species-embedded basis (--basis-embedding)."
+    title: "Tensor-Reduced Atomic Density Representations"
+    authors:
+      - family-names: Darby
+        given-names: James P.
+        orcid: "https://orcid.org/0000-0002-3365-599X"
+      - family-names: Kovács
+        given-names: Dávid P.
+        orcid: "https://orcid.org/0000-0002-0854-2635"
+      - family-names: Batatia
+        given-names: Ilyes
+      - family-names: Caro
+        given-names: Miguel A.
+        orcid: "https://orcid.org/0000-0001-9304-4261"
+      - family-names: Hart
+        given-names: Gus L. W.
+        orcid: "https://orcid.org/0000-0002-6149-9234"
+      - family-names: Ortner
+        given-names: Christoph
+        orcid: "https://orcid.org/0000-0003-1498-8120"
+      - family-names: Csányi
+        given-names: Gábor
+        orcid: "https://orcid.org/0000-0002-8180-2034"
+    journal: "Physical Review Letters"
+    volume: 131
+    issue: 2
+    start: "028001"
+    year: 2023
+    doi: 10.1103/PhysRevLett.131.028001
+  - type: article
+    scope: "Cite if you use POPS uncertainty (aj fit --uq pops)."
+    title: "Parameter uncertainties for imperfect surrogate models in the low-noise regime"
+    authors:
+      - family-names: Swinburne
+        given-names: Thomas D.
+      - family-names: Perez
+        given-names: Danny
+    journal: "Machine Learning: Science and Technology"
+    volume: 6
+    issue: 1
+    start: "015008"
+    year: 2025
+    doi: 10.1088/2632-2153/ad9fce

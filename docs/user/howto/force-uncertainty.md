@@ -492,6 +492,9 @@ energies. The paper is J. R. Kermode,
 [arXiv:2611.08678](https://arxiv.org/abs/2611.08678). Its code and results
 are on [GitHub](https://github.com/kermodegroup/si-qoi-uq-paper).
 
+If you use `--uq ard` in published work, cite this paper. See
+[Licence and citation](../licence.md#citing).
+
 ## Limits
 
 - **Only forces are calibrated.** The calculator gives no energy or virial

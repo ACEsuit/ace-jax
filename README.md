@@ -99,6 +99,35 @@ PACE evaluation agrees with the ML-PACE C++ code and python-ace. CI checks
 both. The throughput benchmarks against LAMMPS ML-PACE are in
 [`docs/dev/benchmarks.md`](https://github.com/ACEsuit/ace-jax/blob/main/docs/dev/benchmarks.md).
 
+## Citing
+
+If you use ace-jax in published work, cite these papers:
+
+- R. Drautz, [*Phys. Rev. B* **99**, 014104 (2019)](https://doi.org/10.1103/PhysRevB.99.014104):
+  the atomic cluster expansion.
+- G. Dusson et al., [*J. Comput. Phys.* **454**, 110946 (2022)](https://doi.org/10.1016/j.jcp.2022.110946):
+  the construction of the basis.
+- W. C. Witt et al., [*J. Chem. Phys.* **159**, 164101 (2023)](https://doi.org/10.1063/5.0158783):
+  ACEpotentials. ace-jax uses the same models and fits.
+
+Cite these papers also, if you use the related functions:
+
+- The calibrated force uncertainty (`--uq ard`): J. R. Kermode,
+  [arXiv:2611.08678](https://arxiv.org/abs/2611.08678) (2026).
+- POPS uncertainty (`--uq pops`): T. D. Swinburne and D. Perez,
+  [*Mach. Learn.: Sci. Technol.* **6**, 015008 (2025)](https://doi.org/10.1088/2632-2153/ad9fce).
+- A species-embedded basis (`--basis-embedding`): J. P. Darby et al.,
+  [*Phys. Rev. Lett.* **131**, 028001 (2023)](https://doi.org/10.1103/PhysRevLett.131.028001).
+- PACE `.yace` models: Y. Lysogorskiy et al.,
+  [*npj Comput. Mater.* **7**, 97 (2021)](https://doi.org/10.1038/s41524-021-00559-9),
+  and A. Bochkarev et al.,
+  [*Phys. Rev. Materials* **6**, 013804 (2022)](https://doi.org/10.1103/PhysRevMaterials.6.013804).
+
+[`CITATION.cff`](https://github.com/ACEsuit/ace-jax/blob/main/CITATION.cff)
+has the full references.
+[Licence and citation](https://acesuit.github.io/ace-jax/licence/) also
+lists the software and models that ace-jax uses.
+
 ## Contributing
 
 See [CONTRIBUTING.md](https://github.com/ACEsuit/ace-jax/blob/main/CONTRIBUTING.md)
