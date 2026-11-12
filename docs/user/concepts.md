@@ -189,7 +189,8 @@ options, and the tutorials do not use them.
 
 - **POPS** (`--uq pops`, linear model only): pointwise-optimal parameter
   sets (Swinburne and Perez,
-  [arXiv:2402.01810](https://arxiv.org/abs/2402.01810)). It estimates the
+  [*Mach. Learn.: Sci. Technol.* **6**, 015008 (2025)](https://doi.org/10.1088/2632-2153/ad9fce)).
+  It estimates the
   misspecification uncertainty. It changes only the uncertainty. The mean is
   the mean of the Bayesian regression.
 - **ARD** (`--uq ard`, linear model only): an automatic relevance

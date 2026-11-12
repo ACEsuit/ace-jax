@@ -25,7 +25,8 @@ content, and labels a structure live only when it is not here.
   - Both are trained on Materials Project data (PBE+U). The +U correction does
     not apply to Si.
   - Cite: I. Batatia et al., *A foundation model for atomistic materials
-    chemistry*, arXiv:2401.00096.
+    chemistry*, *J. Chem. Phys.* **163**, 184110 (2025),
+    [doi:10.1063/5.0297006](https://doi.org/10.1063/5.0297006).
 - The E1x structures are those of the MLIP-school-2026 reference set. Their
   original labels are dropped.
 

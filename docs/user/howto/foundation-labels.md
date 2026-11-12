@@ -79,6 +79,10 @@ for a in structures:
 MACE-MPA-0 and MACE-MP-0b3 have the MIT licence. Before you distribute
 labels from a different model, check the licence of that model.
 
+If you publish work that uses labels from a MACE foundation model, cite
+I. Batatia et al., "A foundation model for atomistic materials chemistry",
+[*J. Chem. Phys.* **163**, 184110 (2025)](https://doi.org/10.1063/5.0297006).
+
 ## The tutorials' labels
 
 The tutorials include their labels. Thus, with their default settings,

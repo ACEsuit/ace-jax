@@ -7,6 +7,8 @@ The results agree with the ML-PACE C++ code, python-ace and LAMMPS.
 If you use `.yace` models in published work, cite the PACE paper:
 Y. Lysogorskiy et al.,
 [*npj Comput. Mater.* **7**, 97 (2021)](https://doi.org/10.1038/s41524-021-00559-9).
+For a model that pacemaker fitted, cite also A. Bochkarev et al.,
+[*Phys. Rev. Materials* **6**, 013804 (2022)](https://doi.org/10.1103/PhysRevMaterials.6.013804).
 See [Licence and citation](../licence.md#citing).
 
 ## Evaluate a `.yace`
