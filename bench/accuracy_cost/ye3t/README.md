@@ -115,7 +115,30 @@ times in µs per atom-step on a 128-core EPYC 7742 node, 4,096 atoms.
 times faster than ML-PACE's product evaluator and 1.4–1.6 times faster than its recursive evaluator on the same
 file. The 128 × 1 time of o4d20 (25.9) is anomalous and not understood; the smaller fits give 0.35 to 1.39.
 
-The r8-1048 density fit was still running when this was written.
+### r8-1048: a failed solve, not a row
+
+The 1,048-descriptor density fit (ranks 1 to 8) finished in 5.5 hours, and its model is wrong.
+
+| model | test E (meV/atom) | test F (eV/Å) | training E, every 8th frame | training F, every 8th frame |
+|---|---|---|---|---|
+| r4-490 | 21.5 | 0.1024 | 21.4 | 0.1009 |
+| r8-1048 | 267.4 | 0.4070 | 257.8 | 0.3991 |
+
+It is as wrong on its training data as on the test set, so this is not overfitting. The r8-1048 caps contain
+the r4-490 caps, so an exact least-squares solution cannot fit the training set worse. The errors are in every
+configuration type (training energies: dia 30, fcc 436, sp 1,107 meV/atom).
+
+The probable cause is conditioning, and that is not confirmed. ye3t-methods' general fit solves the normal
+equations of the unscaled descriptor columns at penalty 1e-8. The tagged model failed in a related way (not
+positive definite below 1e-4). The authors' weighted fit for their Ni model standardises the columns first.
+
+The model is not in `results/metrics.jsonl`, the tables or the figures. Its numbers are in
+`r8-1048-failed-solve.json`. Nothing was changed to make it work: a larger penalty or scaled columns is a
+protocol decision for the authors.
+
+`fit_ye3t` now keeps the density rows (`rows_dir`: `runs/accuracy_cost/ye3t_rows/<key>`, one file per structure).
+The key is the catalogue and the structures, not the penalty. The r8-1048 rows of this fit were not kept, so the
+first retry computes them again (5.5 hours, 3 to 4 GB on disk); later solves of that catalogue read them back.
 
 ### Weighting diagnostic
 

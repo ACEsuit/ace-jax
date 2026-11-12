@@ -32,7 +32,13 @@ processes and hands the rows to the unchanged fit loop in order, so the arithmet
 coefficients are identical to a serial fit).  One 217-atom cell's rows take 9 GB at 205 descriptors and 30 GB at
 490 (`row_gb`), so the worker count follows a memory budget (`_Rows`), and catalogues much past 1,000 descriptors
 do not fit a 251 GB node at all.
+
+The density rows are kept (`rows_dir`: RUNS/ye3t_rows/<key>, one .npz per structure; the key is the basis, the
+representation and the structures, not the penalty or the weights), so a second solve of the same catalogue (another
+penalty, a failed solve) reads them back in minutes: at 1,048 descriptors they took 5.5 hours to compute and are
+3-4 GB.  `ACEJAX_AC_YE3T_ROWS=off` turns that off; any other value is the directory to use.
 """
+import hashlib
 import json
 import os
 import pathlib
@@ -163,30 +169,75 @@ def cap_process_memory(frac=0.85):
     resource.setrlimit(resource.RLIMIT_AS, (int(frac * total), int(frac * total)))
 
 
+def rows_dir(conf, atoms):
+    """Where the density rows of `conf`'s catalogue on `atoms` are kept, or None ($ACEJAX_AC_YE3T_ROWS=off).  The
+    key: basis, representation, dtype and every structure's numbers, cell and positions; nothing of the solve."""
+    env = os.environ.get("ACEJAX_AC_YE3T_ROWS")
+    if env == "off":
+        return None
+    h = hashlib.sha256(json.dumps([conf["basis"], conf["representation"], conf["runtime"]["dtype"]], sort_keys=True,
+                                  default=str).encode())
+    for a in atoms:
+        for x in (a.numbers, np.asarray(a.cell), a.positions):
+            h.update(np.ascontiguousarray(x, float).tobytes())
+    return pathlib.Path(env) if env else common.RUNS / "ye3t_rows" / h.hexdigest()[:16]
+
+
+def _stored(store, i, a):
+    """Structure i's saved (energy row, force rows), or None: absent, unreadable, or not this structure's."""
+    try:
+        with np.load(store / f"{i}.npz") as z:
+            return (z["e"], z["f"]) if np.array_equal(z["positions"], a.positions) else None
+    except (OSError, ValueError, KeyError, EOFError):
+        return None
+
+
+def _store(store, i, a, e, f):
+    tmp = store / f".{i}.{os.getpid()}.npz"                  # written whole, then renamed: a killed fit leaves no
+    np.savez(tmp, e=e, f=f, positions=a.positions)           # half file under the final name
+    os.replace(tmp, store / f"{i}.npz")
+
+
 class _Rows:
     """Stands in for ye3t_methods.linear._linear_ace_geometry_row inside LinearModel.fit: the same rows, computed
     beforehand by forked workers and returned in the fit loop's order.  The structures are taken in size classes
     (SIZE_CLASSES), one class at a time, each with as many workers (at most `procs`) as fit `budget_gb` at
-    `row_gb` of its largest cell; `plan` records the worker counts."""
+    `row_gb` of its largest cell; `plan` records the worker counts.  With `store` (a directory), rows found there
+    are read, not computed, and each computed row is written as it arrives (`plan`: `stored` per class)."""
 
-    def __init__(self, basis, atoms, procs, budget_gb=None):
+    def __init__(self, basis, atoms, procs, budget_gb=None, store=None):
         import multiprocessing as mp
         import ye3t_methods.linear as L
         _W.update(basis=basis, atoms=atoms, row=L._linear_ace_geometry_row)
         self.atoms, self.k, self.rows, self.plan = atoms, 0, {}, []
         budget, F, lo = budget_gb or mem_budget_gb(), len(basis.labels), 0
+        if store is not None:
+            store.mkdir(parents=True, exist_ok=True)
         for hi in SIZE_CLASSES:
             idx = [i for i, a in enumerate(atoms) if lo < len(a) <= hi]
             lo = hi
             if not idx:
                 continue
+            if store is not None:
+                for i in idx:
+                    r = _stored(store, i, atoms[i])
+                    if r is not None and r[0].shape[-1] == F:
+                        self.rows[i] = r
+            n_all, idx = len(idx), [i for i in idx if i not in self.rows]
+            if not idx:
+                self.plan.append({"max_atoms": hi, "structures": n_all, "stored": n_all, "workers": 0})
+                print("rows:", self.plan[-1], flush=True)
+                continue
             need = row_gb(F, max(len(atoms[i]) for i in idx))
             n = max(1, min(procs, len(idx), int(budget / need)))
-            self.plan.append({"max_atoms": hi, "structures": len(idx), "workers": n, "row_gb": round(need, 1)})
+            self.plan.append({"max_atoms": hi, "structures": n_all, "stored": n_all - len(idx), "workers": n,
+                              "row_gb": round(need, 1)})
             print("rows:", self.plan[-1], flush=True)
             with mp.get_context("fork").Pool(n, maxtasksperchild=8) as pool:   # a fresh process now and then: the
                 for i, e, f in pool.imap_unordered(_row, idx, chunksize=1):    # allocator keeps a big cell's peak
                     self.rows[i] = (e, f)
+                    if store is not None:
+                        _store(store, i, atoms[i], e, f)
 
     def __call__(self, atoms, **kw):
         import torch
@@ -205,17 +256,21 @@ def fit_model(conf, atoms, procs=1, max_fixed_contents=None):
     from ye3t_methods import LinearModel
     basis = basis_of(conf, max_fixed_contents)
     model = LinearModel(basis)
-    if procs > 1 and conf["basis"]["tensor_product"]["kind"] == "density":
+    store = rows_dir(conf, atoms) if conf["basis"]["tensor_product"]["kind"] == "density" else None
+    if conf["basis"]["tensor_product"]["kind"] == "density" and (procs > 1 or store is not None):
         import torch
+        threads = torch.get_num_threads()
         torch.set_num_threads(1)                             # before the fork: no thread pool to inherit
         basis.create(atoms[0])                               # compile once, in the parent
-        rows, orig = _Rows(basis, atoms, procs), L._linear_ace_geometry_row
+        rows, orig = _Rows(basis, atoms, procs, store=store), L._linear_ace_geometry_row
         L._linear_ace_geometry_row = rows
+        if procs == 1:                                       # (a serial fit keeps its threads for the solve)
+            torch.set_num_threads(threads)
         try:
             model.fit(atoms, config=conf)
         finally:
             L._linear_ace_geometry_row = orig
-        model.row_plan = rows.plan
+        model.row_plan, model.rows_dir = rows.plan, store and str(store)
     else:
         if procs > 1:                                        # tagged: ye3t-methods caches each structure's
             _prewarm(conf, atoms, procs, max_fixed_contents)  # target-free rows (runtime.cache "auto")
@@ -299,7 +354,7 @@ def fit(family, size, procs=1):
         (d / "labels.json").write_text(json.dumps(labels(model.basis), indent=0, default=str))
         art = pathlib.Path(model.write(d / "model"))
         extra = {"n_params": len(model.basis.labels), "fit_wall_s": time.perf_counter() - t0, "procs": procs,
-                 "row_plan": getattr(model, "row_plan", None)}
+                 "row_plan": getattr(model, "row_plan", None), "rows_dir": getattr(model, "rows_dir", None)}
         try:                                                 # density: a strict PACE .yace; tagged: its JSON schema
             lmp = pathlib.Path(model.export_lammps(d / ("lammps.yace" if FAMILIES[family][0] == "density" else "lammps")))
             extra |= {"lammps_model": str(_lammps_file(lmp)), "pair_extra": _pair_extra(family)}

@@ -190,6 +190,9 @@ ye3t_sym_fit:  # YE3T linear models fitted by ye3t-methods (fit_ye3t.py): densit
   - {size: r4-205,  nmax: [6, 4, 3, 2], lmax: [0, 4, 2, 2], n_params: 205}
   - {size: r4-490,  nmax: [6, 6, 4, 2], lmax: [0, 4, 3, 2], n_params: 490}
   - {size: r8-1048, nmax: [6, 6, 4, 3, 2, 2, 1, 1], lmax: [0, 4, 4, 2, 1, 1, 1, 1], n_params: 1048}
+  # r8-1048: fitted, but the solve failed (as wrong on the training set as on the test set); not a results row.
+  # bench/accuracy_cost/ye3t/r8-1048-failed-solve.json.  A retry is a new entry with the same nmax / lmax and an
+  # `alpha` or `alpha_grid`: it shares the saved rows (fit_ye3t.rows_dir) once one fit has computed them.
   # not fitted: the next sizes, [6, 6, 5, 3] / [0, 4, 4, 3] (2,080 descriptors) and [6, 6, 6, 4] / [0, 4, 4, 3] (4,577).
   # They need `max_fixed_contents: 16384` (ye3t-methods refuses catalogues past 4,096 candidate contents), and
   # the PyTorch density row path needs ~285 GB and ~860 GB for one 217-atom training cell (fit_ye3t.row_gb)

@@ -1144,6 +1144,38 @@ def test_ace_to_ye3t_matches_source_energies(tmp_path):
     assert err["max_dE_per_atom"] < 1e-3 and err["max_dF"] < 0.05 and err["rms_dF"] < 0.02
 
 
+def test_ye3t_rows_store(tmp_path, monkeypatch):
+    """The saved density rows: keyed by catalogue and structures (not the penalty or the weights), read back only
+    for the same positions, and switched off or redirected by $ACEJAX_AC_YE3T_ROWS."""
+    from ase.build import bulk
+    from accuracy_cost import common, fit_ye3t as fy
+    monkeypatch.setattr(common, "RUNS", tmp_path); monkeypatch.delenv("ACEJAX_AC_YE3T_ROWS", raising=False)
+    e = {"size": "x", "nmax": [6, 4, 3], "lmax": [0, 2, 2]}
+    at = [bulk("Si", cubic=True), bulk("Si", cubic=True) * (2, 1, 1)]
+    conf = fy.config("ye3t_sym_fit", e)
+    d = fy.rows_dir(conf, at)
+    assert d.parent == tmp_path / "ye3t_rows"
+    other = fy.config("ye3t_sym_fit", {**e, "alpha": 1e-4}); other["model"]["fit"]["weights"]["energy"] = 30.0
+    assert fy.rows_dir(other, at) == d
+    assert fy.rows_dir(fy.config("ye3t_sym_fit", {**e, "nmax": [6, 4, 2]}), at) != d
+    assert fy.rows_dir(conf, at[:1]) != d and fy.rows_dir(conf, at[::-1]) != d
+    moved = at[0].copy(); moved.positions[0, 0] += 1e-3
+    assert fy.rows_dir(conf, [moved, at[1]]) != d
+    d.mkdir(parents=True)
+    ef = (np.arange(5.0), np.arange(8 * 3 * 5.0).reshape(8, 3, 5))
+    fy._store(d, 0, at[0], *ef)
+    assert sorted(p.name for p in d.iterdir()) == ["0.npz"]
+    got = fy._stored(d, 0, at[0])
+    assert all(np.array_equal(a, b) for a, b in zip(got, ef))
+    assert fy._stored(d, 0, moved) is None and fy._stored(d, 1, at[1]) is None
+    (d / "1.npz").write_bytes(b"not an npz")
+    assert fy._stored(d, 1, at[1]) is None
+    monkeypatch.setenv("ACEJAX_AC_YE3T_ROWS", "off")
+    assert fy.rows_dir(conf, at) is None
+    monkeypatch.setenv("ACEJAX_AC_YE3T_ROWS", str(tmp_path / "r"))
+    assert fy.rows_dir(conf, at) == tmp_path / "r"
+
+
 def test_ye3t_config_follows_the_protocol():
     """ye3t-methods' config for a sweep entry: fully symmetric scalar parent, ridge 1e-8, the shared cutoff, E0
     fixed, unweighted energy and forces; sym_fit and mix_A differ only in the intermediates' Young policy."""

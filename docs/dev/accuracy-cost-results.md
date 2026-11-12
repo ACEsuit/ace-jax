@@ -633,7 +633,13 @@ Gates (LAMMPS against ye3t-methods' calculator): ≤ 5.7e-14 eV/atom, 9.3e-14 eV
   ladder here ends at 490 descriptors, so it neither confirms nor refutes saturation of YE3T itself.
 - Larger density sizes: ye3t-methods' density rows need 8.9 GB (205 descriptors) to 30 GB (490) per 217-atom cell
   on this training set (GAP-18's large cells), and 109 GB at 1,048, so 2,080 and 4,577 descriptors were dropped and
-  **r8-1048 was still fitting when this was written** (one worker, 256 GB node). One attempt with 24 workers at 490
+  r8-1048 was fitted with one worker on a 256 GB node (5.5 hours). **Its solve failed**: 267.4 meV/atom and 0.4070
+  eV/Å on the test set, and 257.8 and 0.3991 on every 8th training frame, where r4-490 has 21.4 and 0.1009. A basis
+  whose caps contain r4-490's cannot fit the training set worse in exact arithmetic, so this is the solver
+  (ye3t-methods' unscaled normal equations at penalty 1e-8; conditioning is the probable cause, not confirmed),
+  not overfitting. It is not a row, and it is in no table or figure (`bench/accuracy_cost/ye3t/README.md`,
+  `r8-1048-failed-solve.json`). `fit_ye3t` now keeps the density rows, so a later solve of the same catalogue
+  takes minutes after the first. One attempt with 24 workers at 490
   descriptors exhausted the node's memory; `fit_ye3t._Rows` now sizes its pools from a memory budget.
 - Phase 2b (refit with ace-jax's smoothness prior) was not done. The descriptor rows can be had
   (`ye3t_methods.linear._linear_ace_geometry_row`), but the question it served, mixed vs symmetric under the same
