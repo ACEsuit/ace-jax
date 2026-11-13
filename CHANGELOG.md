@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 0.6.0 (2026-11-13)
+
+**Highlights.** The C++ kernel for linear ACE on CPUs needs no compiler on Linux and on macOS (arm64): the
+wheels for these platforms now include it compiled. The C++ and CUDA kernels are faster (approximately 2x
+for LAMMPS on CPUs, and up to 1.7x in float64 or 2.4x in float32 on an A100), and they have an optional
+mixed-precision mode. The documentation says which papers to cite.
+
+**Upgrading from 0.5.3.** Saved models and the output files are unchanged. On Linux and on macOS (arm64),
+`ffi=True` and `ffi="auto"` now use the kernel that the wheel includes (x86-64-v3 on x86_64), not a kernel
+compiled on your machine with `-march=native`. In our tests the two have the same speed, to 5%. To compile
+the kernel on your machine as before, set `ACEJAX_FFI_FLAGS="-O3 -march=native"`. On a machine with no
+compiler, `ffi="auto"` used the JAX model before, and now uses the kernel.
+
 ### Added
 
 - **Platform wheels with the compiled C++ kernel.** The ace-jax wheels for Linux (x86_64 and aarch64) and
@@ -13,9 +26,6 @@
   first use, as before. To compile with your own flags, set `ACEJAX_FFI_FLAGS` (for example
   `-O3 -march=native`); `ACEJAX_FFI_PREBUILT=0` turns the included kernel off. `aj native` reports which
   kernel is in use. The CUDA kernel is still compiled on first use. `docs/dev/kernel-wheels.md`.
-
-### Added
-
 - **Mixed precision for the kernels** (`ffi_precision="mixed"`, `aj export --ffi-precision mixed`; off by
   default). The C++ and CUDA kernels for linear ACE can calculate the product basis in float32 and all
   other quantities in float64. For the silicon model o4d20, LAMMPS on 128 cores is 1.4 times faster and an
@@ -23,6 +33,20 @@
   float64 by approximately 0.05 meV/Å for o4d20. The energy has noise of approximately 0.1 meV in 200
   atoms, so optimisers with an energy line search can fail: use a force-only optimiser. See
   `docs/user/howto/precision.md`.
+- **Citations.** `CITATION.cff` and the "Licence and citation" page give the papers to cite: the atomic
+  cluster expansion and ACEpotentials for all use, and the papers for the calibrated force uncertainty
+  (`--uq ard`), POPS, species-embedded bases and PACE `.yace` models when you use them. (#153)
+
+### Changed
+
+- **Faster C++ and CUDA kernels** (#157). The C++ kernel takes four sites and four neighbours at a time in
+  SIMD lanes. The CUDA kernel's product-basis pass gathers instead of scattering, so it has no atomic adds
+  and is deterministic. LAMMPS on 128 cores of an EPYC 7742 (4,096 Si atoms) is 2.0 to 2.4 times faster
+  (o4d20: 3.52 to 1.52 µs/atom-step). On an A100 (32,768 Si atoms), o4d20 goes from 1.23 to 0.75 µs/atom-step
+  in float64 and from 1.08 to 0.44 in float32; the order-3 models change little.
+- The `native` extra's matscipy-neighbours has binary wheels from version 1.1, so installing the extra needs
+  no compiler on Linux, macOS (arm64) and Windows. The wheels are for CPUs: a neighbour list built on the GPU
+  needs matscipy-neighbours compiled with CUDA (`docs/user/installation.md`). (#161)
 
 ### Fixed
 
