@@ -344,7 +344,8 @@ load; faster only at large `nradbase`). Values are unchanged to roundoff.
   both once per edge-count bucket.
 - Edge lists are padded to power-of-two buckets, so MD reuses the jitted
   function. `pip install "ace-jax[native]"` (matscipy-neighbours,
-  a C++ source build) gives faster neighbour lists; ASE's list is the fallback.
+  CPU wheels from 1.1; its GPU list needs a source build with `ENABLE_CUDA`, see
+  the installation page) gives faster neighbour lists; ASE's list is the fallback.
 
 ### Batched evaluation (many small structures)
 
