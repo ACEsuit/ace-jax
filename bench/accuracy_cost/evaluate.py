@@ -75,6 +75,9 @@ def load_calc(family, path, device="cpu"):
     if family == "nep":                          # NEP_CPU via calorine, float64, E0 added back (fit_nep)
         from .fit_nep import calculator
         return calculator(path)
+    if family in ("ye3t_sym_fit", "ye3t_mix_A", "ye3t_mix_T", "ye3t_sym_wfit"):   # ye3t-methods' ASE calculator (float64; E0 in the model)
+        from .fit_ye3t import calculator
+        return calculator(path)
     if family in ("grace", "grace_fs", "grace_abl", "grace_2l"):   # gracemaker's SavedModel (float64), E0 added back (fit_grace)
         from .fit_grace import _local, calculator
         return calculator(_local(path))                # a Sulis fit's status.json names its Sulis path

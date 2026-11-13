@@ -178,3 +178,22 @@ on every frame, test included, so it is a reference line, not a held-out score. 
   pass their kwargs unchanged), the same data, weights and fit settings; LAMMPS `grace/2l/kk` / `grace/2l/cpu/kk`
   from the same build. Parity: ≤ 9.7e-9 eV/atom, ≤ 1.5e-8 eV/Å on the timed models (bound 1e-6 / 1e-5). The timing
   jobs take `GRACE_TREE`, `GRACE_ENV`, `GRACE_RESULTS` and (CPU) `LAYOUTS`; `GRACE_CHUNKSIZE` sets the Kokkos chunk.
+
+## YE3T environment and fit
+
+`ye3t` and `ye3t-methods` are BSD-3-Clause (the `native/` C++ of ye3t-methods is GPL-2.0-or-later);
+`ye3t-lammps` is GPL-2.0 (J. M. Goff and A. P. Thompson, arXiv:2609.31895). Nothing from them is in this
+repository; the LAMMPS package is installed into a LAMMPS tree on Sulis by its own `tools/patch_lammps.sh`.
+
+- Venv `/storage/eng/essswb/venvs/ac-ye3t` (`envs/ye3t/build-venv.sh`, freeze in `envs/ye3t/freeze.txt`):
+  Python 3.12, torch 2.15.0+cpu, numpy 2.5.4, ASE 3.29.0, ye3t 0.1.0 at f8ff96d, ye3t-methods 0.1.0 at 6b85c54
+  (built from clones in `$ACEJAX_AC_ROOT/ext`, GCC 11.5; neither is on PyPI).
+- `ext/ye3t-lammps` 06100f9 (2026-10-08).
+- Fits: `fit_ye3t.py` (protocol: its docstring and `ye3t/README.md`), on mnf148.
+- The linear ACE ladder for `pair_style ye3t`: `ace_to_ye3t.py` -> `runs/accuracy_cost/ace_cheb/<size>/model.yace`
+  (`convert.json`: projection and source errors).
+- LAMMPS (Sulis): `bench/scaling/envs/sulis-ye3t.sh`: lammps-dev ec02ed0 copied to `lammps-ye3t`, ML-YE3T
+  installed by the package's installer, stock ML-PACE (lammps-user-pace v.2025.12.4.p1) in the same binary,
+  yaml-cpp 0.8.0, GCC/12.3.0 OpenMPI/4.1.5, Release, Kokkos OpenMP ARCH_ZEN2 (the flags of the other CPU builds);
+  `$ROOT/VERSIONS-ye3t`. Upstream tests ML-YE3T against stable_22Jul2025_update4; its installer's `--check`
+  passes on this tree, and the gate confirms the result.

@@ -98,6 +98,17 @@ PLAN = {"ace": [("acejax-ace", {"cpu": "standalone", "gpu": "lammps"}, ACE_DTYPE
         "grace_fs": [("grace-fs", {"cpu": "lammps", "gpu": "lammps"}, ("float64",))],
         "grace_2l": [("grace-2l", {"cpu": "lammps", "gpu": "lammps"}, ("float64",)),   # grace/2l/kk, grace/2l/cpu/kk
                      ("grace-rt", {"cpu": "lammps", "gpu": "lammps"}, ("mixed",))],
+        # the linear ACE ladder as ChebExpCos .yace (ace_to_ye3t.py: the form pair_style ye3t reads; the fit to
+        # ~2e-9 eV/A): YE3T's lambda = (N) kernels against stock ML-PACE's recursive (pair_style pace) and product
+        # evaluators on the same file.  CPU only here (ye3t/kk exists; not built)
+        "ace_cheb": [("ye3t-sym", {"cpu": "lammps"}, ("float64",)),
+                     ("mlpace", {"cpu": "lammps"}, ("float64",)),
+                     ("mlpace-product", {"cpu": "lammps"}, ("float64",))],
+        # models fitted by ye3t-methods (fit_ye3t.py), run by pair_style ye3t
+        "ye3t_sym_fit": [("ye3t", {"cpu": "lammps"}, ("float64",))],
+        "ye3t_mix_A": [("ye3t", {"cpu": "lammps"}, ("float64",))],
+        "ye3t_mix_T": [("ye3t", {"cpu": "lammps"}, ("float64",))],
+        "ye3t_sym_wfit": [("ye3t", {"cpu": "lammps"}, ("float64",))],
         "gap": [("gap", {"cpu": "lammps"}, ("float64",))],         # pair quip: no KOKKOS, CPU only
         "gap_noglue": [("gap", {"cpu": "lammps"}, ("float64",))],  # the XML has no Glue term; same pair style
         "gap_E30": [("gap", {"cpu": "lammps"}, ("float64",))]}     # GAP-18's command, energy sigmas x10/3
@@ -105,7 +116,11 @@ STYLE = {"acejax-ace": "acejax", "acejax-pace": "acejax", "mlpace": "mlpace", "m
          "mace": "mace", "gap": "gap", "nep": "nep", "nep-gpumd": "nep-gpumd",
          "mace-xl": "mace-xl", "mace-xl-f32": "mace-xl-f32", "acepotentials-trim": "acepotentials-trim",
          "grace": "grace", "grace-fs": "grace-fs", "grace-2l": "grace-2l", "grace-rt": "grace-rt", "pace-rt": "pace-rt",
-         "mace-symx3": "mace-symx3"}
+         "mace-symx3": "mace-symx3", "ye3t-sym": "ye3t-sym", "ye3t": "ye3t",
+         "mlpace-product": "mlpace-product"}
+# optional codes: timed only where the env json names their LAMMPS wrapper
+OPTIONAL_LMP = {"mace-xl": "lmp_xl", "mace-xl-f32": "lmp_xl", "acepotentials-trim": "lmp_ace",
+                "mlpace-mixed": "lmp_mixed", "mace-symx3": "lmp_symx3", "ye3t-sym": "lmp_ye3t", "ye3t": "lmp_ye3t"}
 GRACE_CODES = ("grace", "grace-fs", "grace-2l", "grace-rt")
 TRIM = "acepotentials-trim"
 XL_CODES = ("mace-xl", "mace-xl-f32")
@@ -253,6 +268,9 @@ def cases(device, only=None):
                         if code in GRACE_CODES:                # LAMMPS reads the export; the gate's reference is the SavedModel
                             row["path"] = _local(st.get("fs_yaml" if code == "grace-fs" else "kokkos_npz") or "")
                             row["ref"] = path
+                        if code == "ye3t":                     # LAMMPS reads export_lammps's model; the gate's reference
+                            row["path"], row["ref"] = _local(st.get("lammps_model") or ""), path   # is the saved fit
+                            row["pair_extra"] = st.get("pair_extra")
                         if code == "pace-rt":                  # pacemaker's .yaml beside the .yace; the gate's reference
                             row["path"], row["ref"] = str(pathlib.Path(path).with_suffix(".yaml")), path   # is that .yace
                         if fam in ("ace", "ace_wl") and os.environ.get("ACEJAX_AC_ACE_SPLINE_TOL"):   # analytic radials splined
@@ -325,10 +343,14 @@ def gate_model(row, device, env, work):
                     chk["layout_used"] = used
                     lmp_aj, pjrt = lammps_for(code, device, env)
                     E1, F1 = parity._lammps_ef("acejax", bundle, row["elements"], at, device, lmp_aj, w, pjrt)
-                elif style == "mlpace":                                # a converted model: its source
+                elif style in ("mlpace", "mlpace-product", "ye3t-sym"):   # a converted model: its source
                     E0, F0 = parity._acejax_ef(row.get("ref") or row["path"], at)
-                    E1, F1 = parity._lammps_ef("mlpace", row["path"], row["elements"], at, device,
+                    E1, F1 = parity._lammps_ef(style, row["path"], row["elements"], at, device,
                                                lammps_for(code, device, env)[0], w)
+                elif style == "ye3t":                                  # vs ye3t-methods' ASE calculator on the saved fit
+                    E0, F0 = parity._venv_ef("fit_ye3t", row["ref"], at, env["ye3t_python"], w)
+                    E1, F1 = parity._lammps_ef("ye3t", row["path"], row["elements"], at, device,
+                                               lammps_for(code, device, env)[0], w, pair_extra=row.get("pair_extra"))
                 elif style == "pace-rt":                             # vs ace-jax on pacemaker's .yace, whose E0
                     E0, F0 = parity._acejax_ef(row["ref"], at)       # the .yaml lacks: added back to LAMMPS' E
                     E1, F1 = parity._lammps_ef("pace-rt", row["path"], row["elements"], at, device,
@@ -411,14 +433,8 @@ def time_case(c, device, n, env, work, prev=None):
 def lammps_for(code, device, env):
     """(LAMMPS wrapper, PJRT plugin) for a code: ace-jax on the CPU runs the host-Kokkos
     lammps-jax build with XLA's CPU plugin (env `lmp_jax_cpu`, `pjrt_cpu`)."""
-    if code in XL_CODES:
-        return env["lmp_xl"], None
-    if code == TRIM:
-        return env["lmp_ace"], None
-    if code == "mlpace-mixed":
-        return env["lmp_mixed"], None
-    if code == "mace-symx3":
-        return env["lmp_symx3"], None
+    if code in OPTIONAL_LMP:
+        return env[OPTIONAL_LMP[code]], None
     if not code.startswith("acejax"):
         return env["lmp"], env.get("pjrt")
     if device == "cpu":
@@ -591,10 +607,8 @@ def main(argv=None):
     meta = {"forced_busy": a.force_busy,
             "device_name": device_name(a.device), "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES")}
     runner, gate = subprocess_runner(env, a.device)
-    cs = [c for c in cases(a.device, only=a.only) if (c["row"]["code"] not in XL_CODES or env.get("lmp_xl"))
-          and (c["row"]["code"] != TRIM or env.get("lmp_ace"))
-          and (c["row"]["code"] != "mlpace-mixed" or env.get("lmp_mixed"))
-          and (c["row"]["code"] != "mace-symx3" or env.get("lmp_symx3"))
+    cs = [c for c in cases(a.device, only=a.only)
+          if (c["row"]["code"] not in OPTIONAL_LMP or env.get(OPTIONAL_LMP[c["row"]["code"]]))
           and (c["mode"] != "gpumd" or env.get("gpumd"))]    # optional codes: only where the env json names them
     cs = select(cs, a.codes, a.modes)
     run_cases(a.device, cs, runner, gate,

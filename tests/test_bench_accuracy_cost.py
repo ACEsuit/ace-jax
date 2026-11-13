@@ -187,7 +187,8 @@ def test_sweep_is_complete_and_measured():
     from accuracy_cost.common import load_sweep
     s = load_sweep()
     assert set(s) == {"ace", "ace_lr", "ace_gp", "pace", "mace", "gap", "ace_pshape", "ace_pshape_lr", "ace_wl", "gap_noglue", "gap_E30", "ace_yace", "ace_tab", "nep",
-                      "grace", "grace_fs", "grace_abl", "grace_2l"}
+                      "grace", "grace_fs", "grace_abl", "grace_2l",
+                      "ace_cheb", "ye3t_sym_fit", "ye3t_mix_A", "ye3t_mix_T", "ye3t_sym_wfit"}
     assert len(s["ace"]) == 7 and all(e["n_B"] > 0 for e in s["ace"])
     assert [(e["order"], e["max_degree"]) for e in s["ace_lr"]] == [(e["order"], e["max_degree"]) for e in s["ace"]]
     nB = [e["n_B"] for e in s["ace"]]
@@ -1063,3 +1064,159 @@ def test_grace_runtime_styles(tmp_path):
     assert _pair("mace-symx3", "m.json", ["Si"], "gpu") == "pair_style symmetrix/mace\npair_coeff * * m.json Si\n"
     (tmp_path / "m.yace").write_text("elements: [Si, Ge]\nE0: [-1.5, -2.0]\ndeltaSplineBins: 0.001\n")
     assert yace_e0(tmp_path / "m.yace", ["Si", "Ge", "Ge"]) == -5.5
+
+
+# ---- YE3T (docs/dev/specs/2026-11-12-ye3t-polymlp-benchmark-design.md) ----
+
+
+def test_ye3t_pair_styles():
+    """pair_style ye3t takes a .yace bare (block_policy direct) and a fitted tagged model with `extra`; no GPU row
+    here; `pace product` is the CPU spelling of ML-PACE's product evaluator."""
+    from scaling.run_lammps import _pair, kokkos_args
+    from scaling.sweep import lammps_supported
+    assert _pair("ye3t-sym", "m.yace", ["Si"], "cpu") == "pair_style ye3t\npair_coeff * * m.yace Si\n"
+    assert _pair("ye3t", "m.json", ["Si"], "cpu", "model_family tagged_cauchy") == \
+        "pair_style ye3t model_family tagged_cauchy\npair_coeff * * m.json Si\n"
+    assert _pair("mlpace-product", "m.yace", ["Si"], "cpu") == "pair_style pace product\npair_coeff * * m.yace Si\n"
+    for code in ("ye3t-sym", "ye3t", "mlpace-product"):
+        assert lammps_supported(code, "cpu") and not lammps_supported(code, "gpu")
+        assert kokkos_args(code, "cpu", threads=1) == []
+
+
+def test_ye3t_code_table():
+    """The YE3T families' codes, gates and LAMMPS wrappers."""
+    from accuracy_cost import common, timing
+    from scaling import parity
+    assert [c for c, _, _ in timing.PLAN["ace_cheb"]] == ["ye3t-sym", "mlpace", "mlpace-product"]
+    assert all(timing.PLAN[f] == [("ye3t", {"cpu": "lammps"}, ("float64",))]
+               for f in ("ye3t_sym_fit", "ye3t_mix_A", "ye3t_mix_T", "ye3t_sym_wfit"))
+    assert set(timing.PLAN) <= set(common.load_sweep())
+    for code in ("ye3t-sym", "ye3t", "mlpace-product"):
+        assert timing.gate_tol(timing.STYLE[code], code, {}) == parity.TOL[code]
+    env = {"lmp": "/main", "lmp_ye3t": "/y"}
+    assert timing.lammps_for("ye3t-sym", "cpu", env) == ("/y", None) and timing.lammps_for("ye3t", "cpu", env) == ("/y", None)
+    assert timing.lammps_for("mlpace-product", "cpu", env)[0] == "/main"
+
+
+def test_ye3t_fitted_rows_name_the_export_and_gate_on_the_fit(tmp_path, monkeypatch):
+    from accuracy_cost import common, timing
+    monkeypatch.setattr(common, "RUNS", tmp_path)
+    d = tmp_path / "ye3t_sym_fit" / "r3n6"; d.mkdir(parents=True)
+    common.write_status(d, status="ok", model=str(d / "model.pt"), lammps_model=str(d / "lammps.yace"), pair_extra=None)
+    monkeypatch.setattr(common, "load_sweep", lambda path=None: {**{f: [] for f in timing.PLAN},
+                                                                 "ye3t_sym_fit": [{"size": "r3n6"}]})
+    (row,) = [c["row"] for c in timing.cases("cpu", only="ye3t_sym_fit")]
+    assert row["code"] == "ye3t" and row["path"].endswith("lammps.yace") and row["ref"].endswith("model.pt")
+
+
+def test_ace_to_ye3t_is_the_source_model_in_ye3t_form():
+    """The ChebExpCos file: ye3t's key sets, every m-tuple with its equal conjugate partner, and (ace-jax on both)
+    the source model's energies and forces to the projection error."""
+    from accuracy_cost import ace_to_ye3t
+    src = FIXTURE_DIR / "si_ace_model.npz"
+    tree, info = ace_to_ye3t.convert(src)
+    assert info["full_ms"] and info["radial"] == "chebexpcos" and info["radial_fit_max_rel"] < 1e-8
+    b = tree["bonds"][(0, 0)]
+    assert b["radbasename"] == "ChebExpCos" and b["dcut"] == ace_to_ye3t.DCUT and b["prehc"] == 0
+    tuples = lambda f: [tuple(f["ms_combs"][i * f["rank"]:(i + 1) * f["rank"]]) for i in range(f["num_ms_combs"])]
+    paired = lambda f: [m for m in tuples(f) if ace_to_ye3t._negated(f, m) != m]   # (identical factors: its own partner)
+    f = next(f for f in tree["functions"][0] if f["rank"] > 1 and paired(f))
+    bad = {**tree, "extra": 1}
+    with pytest.raises(ValueError):
+        ace_to_ye3t.check(bad)
+    half = {**tree, "functions": {0: [{**f, "num_ms_combs": 1, "ms_combs": list(paired(f)[0]), "ctildes": [1.0]}]}}
+    with pytest.raises(ValueError, match="conjugate"):
+        ace_to_ye3t.check(half)
+
+
+def test_ace_to_ye3t_matches_source_energies(tmp_path):
+    from ase.build import bulk
+    from accuracy_cost import ace_to_ye3t
+    from ace_jax.eval.pace_io import dump_tree
+    src = FIXTURE_DIR / "si_ace_model.npz"
+    tree, _ = ace_to_ye3t.convert(src, r_fit=1.8)
+    dump_tree(tree, tmp_path / "m.yace")
+    at = bulk("Si", "diamond", a=5.43, cubic=True) * (2, 1, 1); at.rattle(0.05, seed=3)
+    err = ace_to_ye3t.source_error(src, tmp_path / "m.yace", cells=[at])
+    # this fixture's pair radial is a spline table, which 48 ChebExpCos functions follow to 1.5e-6 on [1.8 A, rcut]
+    # (the product basis is exact); the benchmark ladder's analytic pair radial projects to 7e-12, and its files
+    # are the fits to 1.5e-11 eV/atom and 2e-9 eV/A (runs/ace_cheb/*/convert.json `source_error`)
+    assert err["max_dE_per_atom"] < 1e-3 and err["max_dF"] < 0.05 and err["rms_dF"] < 0.02
+
+
+def test_ye3t_rows_store(tmp_path, monkeypatch):
+    """The saved density rows: keyed by catalogue and structures (not the penalty or the weights), read back only
+    for the same positions, and switched off or redirected by $ACEJAX_AC_YE3T_ROWS."""
+    from ase.build import bulk
+    from accuracy_cost import common, fit_ye3t as fy
+    monkeypatch.setattr(common, "RUNS", tmp_path); monkeypatch.delenv("ACEJAX_AC_YE3T_ROWS", raising=False)
+    e = {"size": "x", "nmax": [6, 4, 3], "lmax": [0, 2, 2]}
+    at = [bulk("Si", cubic=True), bulk("Si", cubic=True) * (2, 1, 1)]
+    conf = fy.config("ye3t_sym_fit", e)
+    d = fy.rows_dir(conf, at)
+    assert d.parent == tmp_path / "ye3t_rows"
+    other = fy.config("ye3t_sym_fit", {**e, "alpha": 1e-4}); other["model"]["fit"]["weights"]["energy"] = 30.0
+    assert fy.rows_dir(other, at) == d
+    assert fy.rows_dir(fy.config("ye3t_sym_fit", {**e, "nmax": [6, 4, 2]}), at) != d
+    assert fy.rows_dir(conf, at[:1]) != d and fy.rows_dir(conf, at[::-1]) != d
+    moved = at[0].copy(); moved.positions[0, 0] += 1e-3
+    assert fy.rows_dir(conf, [moved, at[1]]) != d
+    d.mkdir(parents=True)
+    ef = (np.arange(5.0), np.arange(8 * 3 * 5.0).reshape(8, 3, 5))
+    fy._store(d, 0, at[0], *ef)
+    assert sorted(p.name for p in d.iterdir()) == ["0.npz"]
+    got = fy._stored(d, 0, at[0])
+    assert all(np.array_equal(a, b) for a, b in zip(got, ef))
+    assert fy._stored(d, 0, moved) is None and fy._stored(d, 1, at[1]) is None
+    (d / "1.npz").write_bytes(b"not an npz")
+    assert fy._stored(d, 1, at[1]) is None
+    monkeypatch.setenv("ACEJAX_AC_YE3T_ROWS", "off")
+    assert fy.rows_dir(conf, at) is None
+    monkeypatch.setenv("ACEJAX_AC_YE3T_ROWS", str(tmp_path / "r"))
+    assert fy.rows_dir(conf, at) == tmp_path / "r"
+
+
+def test_ye3t_weighted_family_scales_rows_and_targets():
+    """ye3t_sym_wfit: the catalogue of ye3t_sym_fit, a stress target with global weights 1, and per structure the
+    benchmark's weights on the targets and as row factors (virial in the stress slot; none: factor 0, target 0)."""
+    from ase.build import bulk
+    from accuracy_cost import common, fit_ye3t as fy
+    e = {"size": "x", "nmax": [6, 4, 3], "lmax": [0, 2, 2]}
+    s, w = fy.config("ye3t_sym_fit", e), fy.config("ye3t_sym_wfit", e)
+    assert w["basis"] == s["basis"] and w["representation"] == s["representation"]
+    assert w["model"]["fit"]["weights"] == {"energy": 1.0, "forces": 1.0, "stress": 1.0}
+    assert w["targets"]["stress"] == "stress" and s["targets"]["stress"] is None
+    a, b = bulk("Si", cubic=True), bulk("Si", cubic=True) * (2, 1, 1)
+    V = np.arange(9.0).reshape(3, 3); V = V + V.T
+    a.info.update(energy=-1270.0, config_type="liq", virial=V); a.arrays["forces"] = np.ones((8, 3))
+    b.info.update(energy=-2538.0, config_type="dia"); b.arrays["forces"] = np.full((16, 3), 2.0)
+    W = {"default": {"E": 30.0, "F": 1.0, "V": 1.0}, "liq": {"E": 10.0, "F": 0.5, "V": 0.25}}
+    (pa, pb), (sa, sb) = fy.weighted([a, b], W)
+    we, wv = 10 / np.sqrt(8), 0.25 / np.sqrt(8)
+    assert np.isclose(pa.info["energy"] - 8 * common.E0_SI, we * (-1270.0 - 8 * common.E0_SI))
+    assert np.allclose(pa.arrays["forces"], 0.5)
+    assert np.allclose(pa.info["stress"], wv * np.array([V[0, 0], V[1, 1], V[2, 2], V[1, 2], V[0, 2], V[0, 1]]))
+    assert np.allclose(sa, (we, 0.5, -wv * a.get_volume()))
+    assert np.allclose(sb, (30 / 4, 1.0, 0.0)) and np.array_equal(pb.info["stress"], np.zeros(6))
+    assert np.allclose(pb.arrays["forces"], 2.0) and set(pa.info) == {"energy", "stress"}
+    assert a.info["energy"] == -1270.0 and np.allclose(a.arrays["forces"], 1.0)        # the input is not changed
+
+
+def test_ye3t_config_follows_the_protocol():
+    """ye3t-methods' config for a sweep entry: fully symmetric scalar parent, ridge 1e-8, the shared cutoff, E0
+    fixed, unweighted energy and forces; sym_fit and mix_A differ only in the intermediates' Young policy."""
+    from accuracy_cost import common, fit_ye3t as fy
+    assert fy.partitions(4) == [[4], [3, 1], [2, 2], [2, 1, 1], [1, 1, 1, 1]]
+    e = {"size": "x", "nmax": [6, 4, 3], "lmax": [0, 2, 2]}
+    s, a, t = (fy.config(f, e) for f in ("ye3t_sym_fit", "ye3t_mix_A", "ye3t_mix_T"))
+    assert s["representation"]["parent"] == {"young_lambda": "(N)", "L": 0, "parity": "even"}
+    assert s["representation"]["intermediates"]["young_kappa"] == "symmetric_only"
+    assert a["representation"]["intermediates"]["young_kappa"] == "all_valid"
+    drop = lambda c: {**c, "metadata": None, "representation": {**c["representation"], "intermediates": None}}
+    assert drop(s) == drop(a)
+    assert s["basis"]["single_factors"]["radial"] == {"family": "pace_chebexp_cos", "cutoff_A": common.RCUT,
+                                                      "cutoff_width_A": 0.01, "lambda": fy.LAMBDA}
+    assert s["basis"]["catalogue"]["source_block_partitions_by_rank"][3] == [[3], [2, 1], [1, 1, 1]]
+    assert s["model"]["fit"] == {"solver": "ridge", "alpha": 1e-8, "weights": {"energy": 1.0, "forces": 1.0}}
+    assert s["model"]["reference_energy"] == {"per_species_E0_eV": {"Si": common.E0_SI}, "fit_E0": False}
+    assert t["basis"]["tensor_product"]["kind"] == "tagged" and t["basis"]["single_factors"]["radial"]["family"] == "shifted_jacobi"

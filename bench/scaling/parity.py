@@ -81,7 +81,13 @@ TOL = {"mlpace": (1e-6, 1e-5), "acejax": (1e-10, 1e-9), "mace": (1e-6, None),
        # pace/runtime: float64, radials from 1024-interval cubic tables (forces ~1e-5 eV/A of pace's, its docs;
        # measured against ace-jax on the Si ladder f100-f3200: 1.8e-7, and 5e-13 with spline 0): mlpace's bound
        "pace-rt": (1e-6, 1e-5),
-       "mace-symx3": (1e-6, None)}                       # Symmetrix v0.3.0: the "mace" gate
+       "mace-symx3": (1e-6, None),                       # Symmetrix v0.3.0: the "mace" gate
+       # pair_style ye3t / pace product on the ChebExpCos .yace of a linear ACE fit (accuracy_cost/ace_to_ye3t.py)
+       # against ace-jax on the fit: the file is the fit to ~2e-9 eV/A, and both codes spline its radials on the
+       # deltaSplineBins grid as ML-PACE does, so mlpace's bound
+       "ye3t-sym": (1e-6, 1e-5), "mlpace-product": (1e-6, 1e-5),
+       # pair_style ye3t on a model ye3t-methods fitted, against its ASE calculator (the same compiled plan)
+       "ye3t": (1e-6, 1e-5)}
 # gates that check a standalone line: a failure blocks its standalone rows
 STANDALONE_GATES = ("spline", "acepot")
 LEARNED, ANALYTIC = LEARNED_CODES                     # "acejax-ace-learned", "acejax-ace-analytic"
@@ -119,6 +125,31 @@ def _grace_ef(path, at, python, work):
     np.savez(work / "ref.npz", numbers=at.numbers, positions=at.positions, cell=np.asarray(at.cell), pbc=at.pbc)
     subprocess.run([python, "-c", GRACE_EF, str(path), str(work / "ref.npz"), str(work / "ref.json")], check=True,
                    capture_output=True, env={**os.environ, "CUDA_VISIBLE_DEVICES": "", "TF_CPP_MIN_LOG_LEVEL": "2"})
+    r = json.loads((work / "ref.json").read_text())
+    return r["E"], np.asarray(r["F"])
+
+
+VENV_EF = """import json, sys, numpy as np, ase
+z = np.load(sys.argv[3]); a = ase.Atoms(numbers=z["numbers"], positions=z["positions"], cell=z["cell"], pbc=z["pbc"])
+sys.path.insert(0, sys.argv[5])
+from accuracy_cost import {module}
+E, F = {module}.raw_ef(sys.argv[2], a)
+json.dump({{"E": float(E), "F": np.asarray(F).tolist()}}, open(sys.argv[4], "w"))
+"""
+
+
+def _venv_ef(module, path, at, python, work):
+    """E, F from `accuracy_cost.<module>.raw_ef(path, atoms)` in another venv's `python` (ye3t-methods is
+    not in the benchmark venv): the energy LAMMPS evaluates, no E0 shift.  The cell goes over as
+    an .npz (as `_grace_ef`)."""
+    import json
+    work = pathlib.Path(work); work.mkdir(parents=True, exist_ok=True)
+    np.savez(work / "ref.npz", numbers=at.numbers, positions=at.positions, cell=np.asarray(at.cell), pbc=at.pbc)
+    bench = str(pathlib.Path(__file__).resolve().parents[1])
+    p = subprocess.run([python, "-c", VENV_EF.format(module=module), "-", str(path), str(work / "ref.npz"),
+                        str(work / "ref.json"), bench], capture_output=True, text=True)
+    if p.returncode:
+        raise RuntimeError(f"{module}.raw_ef failed: {(p.stderr or p.stdout)[-600:]}")
     r = json.loads((work / "ref.json").read_text())
     return r["E"], np.asarray(r["F"])
 

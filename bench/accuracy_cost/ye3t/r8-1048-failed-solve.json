@@ -1,0 +1,187 @@
+{
+ "note": "Failed solve, not a benchmark row: the model is as wrong on its training data as on the test set. ye3t-methods' unscaled normal equations at penalty 1e-8, 1,048 density descriptors to rank 8.",
+ "test": {
+  "family": "ye3t_sym_fit",
+  "size": "r8-1048",
+  "model": "/storage/eng/essswb/projects/ace-jax/runs/accuracy_cost/ye3t_sym_fit/r8-1048/model.pt",
+  "split_hash": "c433c98d49bb",
+  "n_params": 1048,
+  "fit_wall_s": 19780.43242918409,
+  "fit_host": "mnf148.csc.warwick.ac.uk",
+  "rmse_E": 0.2674460462688944,
+  "rmse_F": 0.40699881743120087,
+  "rmse_V": 0.46599204262603217,
+  "per_type": {
+   "111adatom": {
+    "rmse_E": 0.008903276392592401,
+    "rmse_F": 0.2752695001925992,
+    "rmse_V": 0.049618155220472186,
+    "n_frames": 1
+   },
+   "amorph": {
+    "rmse_E": 0.010508626564731043,
+    "rmse_F": 0.4088261887088549,
+    "rmse_V": null,
+    "n_frames": 16
+   },
+   "bc8": {
+    "rmse_E": 0.3442126171888628,
+    "rmse_F": 0.9199966465517616,
+    "rmse_V": 0.5141132709356991,
+    "n_frames": 5
+   },
+   "bcc": {
+    "rmse_E": 0.2677252170033692,
+    "rmse_F": 0.33131796097359695,
+    "rmse_V": 1.266517012326107,
+    "n_frames": 5
+   },
+   "bt": {
+    "rmse_E": 0.02790909135790054,
+    "rmse_F": 0.22921898127906531,
+    "rmse_V": 0.4373612980054648,
+    "n_frames": 44
+   },
+   "crack_111_1-10": {
+    "rmse_E": 0.01856321428241851,
+    "rmse_F": 0.545013590065023,
+    "rmse_V": 0.3042292025711663,
+    "n_frames": 1
+   },
+   "decohesion": {
+    "rmse_E": 0.04615019955292317,
+    "rmse_F": 0.4025554076304807,
+    "rmse_V": 0.19738147915167248,
+    "n_frames": 3
+   },
+   "dia": {
+    "rmse_E": 0.019028384240542134,
+    "rmse_F": 0.1058515328045872,
+    "rmse_V": 0.34277664545263403,
+    "n_frames": 49
+   },
+   "divacancy": {
+    "rmse_E": 0.004480405870585097,
+    "rmse_F": 0.24815803979185833,
+    "rmse_V": null,
+    "n_frames": 8
+   },
+   "fcc": {
+    "rmse_E": 0.48070367207341186,
+    "rmse_F": 0.4539731599694126,
+    "rmse_V": 0.8014032634247462,
+    "n_frames": 5
+   },
+   "hcp": {
+    "rmse_E": 0.45581484845360215,
+    "rmse_F": 0.4764378256936563,
+    "rmse_V": 0.74293785643768,
+    "n_frames": 5
+   },
+   "hex_diamond": {
+    "rmse_E": 0.013524853266364278,
+    "rmse_F": 0.1979097146430617,
+    "rmse_V": 0.07967433070305059,
+    "n_frames": 5
+   },
+   "interstitial": {
+    "rmse_E": 0.005879857919846016,
+    "rmse_F": 0.2729496316566306,
+    "rmse_V": 0.06353802769712312,
+    "n_frames": 12
+   },
+   "liq": {
+    "rmse_E": 0.02874427730930203,
+    "rmse_F": 0.8538271871749158,
+    "rmse_V": 0.4248295643037368,
+    "n_frames": 8
+   },
+   "screw_disloc": {
+    "rmse_E": 0.006039760682704237,
+    "rmse_F": 0.3764094705124956,
+    "rmse_V": null,
+    "n_frames": 2
+   },
+   "sh": {
+    "rmse_E": 0.06436718289595504,
+    "rmse_F": 0.3108564086092386,
+    "rmse_V": 0.3921770283500028,
+    "n_frames": 22
+   },
+   "sp": {
+    "rmse_E": 1.1484398254237724,
+    "rmse_F": 3.7295394270166224,
+    "rmse_V": null,
+    "n_frames": 10
+   },
+   "sp2": {
+    "rmse_E": 0.45238011830026603,
+    "rmse_F": 0.1841103464488946,
+    "rmse_V": null,
+    "n_frames": 5
+   },
+   "st12": {
+    "rmse_E": 0.1997050840110525,
+    "rmse_F": 0.8126769658334255,
+    "rmse_V": 1.0460634238063524,
+    "n_frames": 5
+   },
+   "surface_001": {
+    "rmse_E": 0.061040924143136194,
+    "rmse_F": 0.5733487208001148,
+    "rmse_V": null,
+    "n_frames": 3
+   },
+   "surface_110": {
+    "rmse_E": 0.047353577214931775,
+    "rmse_F": 0.5289450082822864,
+    "rmse_V": null,
+    "n_frames": 3
+   },
+   "surface_111": {
+    "rmse_E": 0.020428376373940668,
+    "rmse_F": 0.6237040543711335,
+    "rmse_V": null,
+    "n_frames": 5
+   },
+   "surface_111_pandey": {
+    "rmse_E": 0.014895367950007761,
+    "rmse_F": 0.6555808803230492,
+    "rmse_V": null,
+    "n_frames": 5
+   },
+   "vacancy": {
+    "rmse_E": 0.006808165102872063,
+    "rmse_F": 0.20910900516484282,
+    "rmse_V": 0.11864040259760895,
+    "n_frames": 21
+   }
+  }
+ },
+ "train_every_8th_frame": {
+  "r8-1048": {
+   "rmse_E": 0.2578,
+   "rmse_F": 0.3991
+  },
+  "r4-490": {
+   "rmse_E": 0.0214,
+   "rmse_F": 0.1009
+  },
+  "r8-1048_by_type_rmse_E": {
+   "dia": 0.03,
+   "fcc": 0.436,
+   "sp": 1.107
+  }
+ },
+ "timing_sulis_cpu": {
+  "note": "pair_style ye3t on the exported file, gated against the fitted model (same file, so the gate holds for a wrong model); the cost of this descriptor set. Sulis jobs 2282565, 2282566; not in results/sulis.",
+  "us_per_atom_step": {
+   "128x1": 2.885,
+   "1x1": 89.17
+  },
+  "gate": {
+   "max_dE_per_atom": 2.8e-14,
+   "max_dF": 1.6e-14
+  }
+ }
+}
