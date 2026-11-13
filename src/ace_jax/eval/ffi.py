@@ -15,19 +15,27 @@ On a GPU, `ace_ffi_gpu.cu` has the same two entry points, float64 or float32: `A
 and `AceEdgesGpu` (`KernelModel.of(model, gpu=True)`), whose dE_i/drij are written once per slot, so its
 forces are deterministic; AceDirectGpu's are summed with atomics.
 
-Distribution: the kernel ships as source in the (pure Python) wheel and `library` compiles it on first
-use with the user's C++17 compiler against the installed jaxlib's FFI headers, into a content-keyed cache;
-no compiler raises `FFIUnavailable`.  Anyone running it already builds LAMMPS and the lammps-jax plugin
-from source, so a compiler is there; a prebuilt wheel would trade -march=native for a generic baseline.
+Distribution: the CPU kernel ships compiled in ace-jax's platform wheels (Linux x86_64/aarch64, macOS
+arm64; `prebuilt`, `build_prebuilt`, the wheel hook `hatch_build.py`), and as source in every wheel.  A plain
+`library()` takes the prebuilt one; elsewhere (the pure wheel, a checkout, another source than the one that
+was compiled), or with flags (`ACEJAX_FFI_FLAGS`, `flags=`), it compiles the source on first use with the
+user's C++17 compiler against the installed jaxlib's FFI headers, into a content-keyed cache; neither is
+`FFIUnavailable`.  The prebuilt x86_64 kernel is x86-64-v3 (AVX2 + FMA; within 5% of -march=native on a
+Xeon Silver 4216 and 2% on an EPYC 7742; x86-64-v4 was 10-41% SLOWER than native on the Xeon, the x86-64
+baseline 1.3-3.3x slower: docs/dev/kernel-wheels.md), with the baseline for CPUs without AVX2.  It is
+built against the OLDEST supported jaxlib (`PREBUILT_JAXLIB`): XLA accepts an FFI handler of an older API
+minor version and refuses a newer one (built against 0.11.2, API 0.4, jaxlib 0.10.1 refuses it).
 The GPU kernel likewise, with nvcc (a CUDA toolkit's or module's, or the `cuda13` extra's: NVIDIA's CUDA 13 nvcc wheel), for the GPU
 JAX sees.
 """
 import ctypes
 import functools
 import hashlib
+import json
 import os
 import pathlib
 import platform
+import re
 import shutil
 import subprocess
 import tempfile
@@ -49,6 +57,12 @@ SYMBOL_GPU = "AceDirectGpu"
 EDGE_TARGET_GPU, EDGE_SYMBOL_GPU = "ace_jax_edges_gpu", "AceEdgesGpu"
 GPU_SOURCE = pathlib.Path(__file__).with_name("ace_ffi_gpu.cu")
 DEFAULT_FLAGS = ("-O3", "-march=native")
+PREBUILT = pathlib.Path(__file__).with_name("_prebuilt")    # in a platform wheel: the kernel compiled at release
+PREBUILT_JAXLIB = "0.10.1"                 # the jaxlib the wheels' kernel is built against: pyproject's jax floor
+X86_64_V3 = frozenset("avx avx2 bmi1 bmi2 f16c fma abm movbe".split())      # /proc/cpuinfo names (abm: lzcnt)
+# per machine: (variant, flags, the CPU flags it needs), the first this CPU can run is taken
+VARIANTS = {"x86_64": (("x86-64-v3", ("-O3", "-march=x86-64-v3"), X86_64_V3), ("x86-64", ("-O3",), frozenset())),
+            "aarch64": (("generic", ("-O3",), frozenset()),), "arm64": (("generic", ("-O3",), frozenset()),)}
 REGISTERED = set()
 
 
@@ -63,6 +77,77 @@ def build(path, cxx="c++", flags=("-O3",)):
     subprocess.run([cxx, *flags, "-std=c++17", "-shared", "-fPIC", "-Wno-psabi", "-isystem", jax.ffi.include_dir(),
                     str(SOURCE), "-o", str(path)], check=True)
     return path
+
+
+def source_key():
+    """The CPU kernel source's hash: a prebuilt library is used only with the source it was compiled from."""
+    return hashlib.sha256(SOURCE.read_bytes()).hexdigest()[:16]
+
+
+def _version(v):
+    return tuple(int(x) for x in re.findall(r"\d+", v)[:3])
+
+
+def _cpu_flags():
+    """This CPU's feature flags (Linux /proc/cpuinfo; empty elsewhere, where only one variant ships)."""
+    try:
+        for ln in pathlib.Path("/proc/cpuinfo").read_text().splitlines():
+            if ln.startswith("flags"):
+                return frozenset(ln.split(":", 1)[1].split())
+    except OSError:
+        pass
+    return frozenset()
+
+
+def build_prebuilt(out, cxx=None, floor=True):
+    """Compile this machine's `VARIANTS` into the directory `out`, with the manifest `prebuilt` reads: what a
+    platform wheel carries (hatch_build.py; kernel-wheels.yml runs this in a manylinux container, or on
+    macOS for 11.0).  The C++ runtime is linked statically on Linux, so the library needs only glibc.
+    floor: refuse a jaxlib other than `PREBUILT_JAXLIB` (a newer one's kernel does not load under an older)."""
+    import jaxlib
+    if floor and jaxlib.__version__ != PREBUILT_JAXLIB:
+        raise RuntimeError(f"the wheels' kernel is built against jaxlib {PREBUILT_JAXLIB}, not {jaxlib.__version__}")
+    cxx = cxx or compiler()
+    if cxx is None:
+        raise FFIUnavailable("no C++17 compiler to build the prebuilt kernel")
+    out = pathlib.Path(out); out.mkdir(parents=True, exist_ok=True)
+    link = (("-mmacosx-version-min=11.0",) if platform.system() == "Darwin"
+            else ("-static-libstdc++", "-static-libgcc"))
+    variants = []
+    for name, flags, needs in VARIANTS[platform.machine()]:
+        build(out / f"libace_jax_ffi-{name}.so", cxx, (*flags, *link))
+        variants.append({"name": name, "file": f"libace_jax_ffi-{name}.so", "flags": [*flags, *link],
+                         "needs": sorted(needs)})
+    ver = subprocess.run([cxx, "--version"], capture_output=True, text=True).stdout.splitlines()[:1]
+    info = {"source": source_key(), "jaxlib": jaxlib.__version__, "machine": platform.machine(),
+            "system": platform.system(), "compiler": ver[0] if ver else cxx, "variants": variants}
+    (out / "manifest.json").write_text(json.dumps(info, indent=1) + "\n")
+    return info
+
+
+def prebuilt(env=None):
+    """(path, variant) of the kernel compiled into this installation (a platform wheel), or None: no `PREBUILT`
+    directory (the pure wheel, a checkout), `ACEJAX_FFI_PREBUILT=0`, another source than the one it was compiled
+    from (an edited checkout), another machine type, a jaxlib older than the one it was built against, or no
+    variant this CPU can run.  `ACEJAX_FFI_VARIANT` names one variant (e.g. x86-64, to compare)."""
+    import jaxlib
+    env = os.environ if env is None else env
+    manifest = PREBUILT / "manifest.json"
+    if env.get("ACEJAX_FFI_PREBUILT") == "0" or not manifest.is_file():
+        return None
+    info = json.loads(manifest.read_text())
+    if (info["source"] != source_key() or info["machine"] != platform.machine()
+            or info["system"] != platform.system() or _version(jaxlib.__version__) < _version(info["jaxlib"])):
+        return None
+    want, have = env.get("ACEJAX_FFI_VARIANT"), None
+    for v in info["variants"]:
+        if want and v["name"] != want:
+            continue
+        if v["needs"] and have is None:
+            have = _cpu_flags()
+        if set(v["needs"]) <= (have or set()) and (PREBUILT / v["file"]).is_file():
+            return PREBUILT / v["file"], v["name"]
+    return None
 
 
 def build_gpu(path, compiler="nvcc", flags=("-O3", "-arch=native")):
@@ -172,7 +257,11 @@ def library_path(flags=None, cxx=None, cache=None, gpu=False):
 def library(flags=None, cxx=None, cache=None, gpu=False):
     """The compiled kernel's path, built on first use (`library_path`'s key); pass e.g. flags=("-O3",
     "-march=x86-64-v3") to build on a login node for compute nodes of another CPU type.  `aj native --build`
-    builds it ahead of use."""
+    builds it ahead of use.  A plain call (no flags, compiler or cache, and no `ACEJAX_FFI_FLAGS`) for the
+    CPU kernel returns the `prebuilt` one when this installation has it: nothing is compiled."""
+    if not gpu and flags is None and cxx is None and cache is None and not os.environ.get("ACEJAX_FFI_FLAGS"):
+        if (pre := prebuilt()) is not None:
+            return pre[0]
     out, cxx, flags = library_path(flags, cxx, cache, gpu)
     if out.exists():
         return out

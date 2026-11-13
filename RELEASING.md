@@ -20,11 +20,17 @@ its own process: `coupling/RELEASING.md`.)
 
 1. **Version.** Set `version` in `pyproject.toml` and add its section to
    `CHANGELOG.md`. `ace_jax.__version__` and `aj --version` read the installed
-   metadata, so there is nothing else to bump. If the coupling library changed,
+   metadata, so there is nothing else to bump. The platform wheels' kernel is
+   compiled against the oldest supported jaxlib: if the `jax>=` floor in
+   `pyproject.toml` moves, set `PREBUILT_JAXLIB` in `src/ace_jax/eval/ffi.py` to it
+   (a test compares them). If the coupling library changed,
    release it first and update the `ace-jax-coupling==` pin.
 2. **Dry run on TestPyPI.** Actions → publish → Run workflow (on `main`). It
    builds, runs `twine check`, installs the wheel in a clean environment and runs
-   `aj`, then uploads to TestPyPI. Check it in a fresh environment; the
+   `aj`. It also builds the three platform wheels that carry the compiled C++ kernel
+   (`kernel-wheels.yml`: Linux x86_64 and aarch64, macOS arm64) and runs each in a
+   clean environment with no compiler. Then it uploads the sdist, the pure wheel and
+   the platform wheels to TestPyPI. Check it in a fresh environment; the
    dependencies come from PyPI:
 
    ```bash

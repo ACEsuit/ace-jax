@@ -692,8 +692,10 @@ def cmd_native(a):
     """`aj native`: the native acceleration on this machine -- the C++ kernel (`eval.ffi`: compiler, flags, CPU,
     whether its library is built), on a CUDA GPU the CUDA kernel likewise (nvcc, flags, GPU), and the `native`
     extra's matscipy-neighbours -- and with --build, the kernels compiled into the cache now (on a cluster: run
-    it on a compute node).  --build exits 1 when a kernel cannot be compiled."""
+    it on a compute node).  --build exits 1 when a kernel cannot be compiled.  A platform wheel's prebuilt
+    C++ kernel is reported as such and needs no build (--flags compiles the source here instead)."""
     import importlib.metadata
+    import os
     import platform
     import re
     import subprocess
@@ -706,6 +708,7 @@ def cmd_native(a):
     from .export.lammps import FFI_MIN_LAMMPS_JAX, lammps_jax_version
 
     flags = a.flags.split() if a.flags else None
+    pre = None if flags or os.environ.get("ACEJAX_FFI_FLAGS") else kernel.prebuilt()
     try:
         lib, cxx, flags = kernel.library_path(flags)
         ver = subprocess.run([cxx, "--version"], capture_output=True, text=True).stdout.splitlines()[:1]
@@ -716,8 +719,10 @@ def cmd_native(a):
     print(f"flags:         {' '.join(kernel.DEFAULT_FLAGS if flags is None else flags)}  "
           "(--flags, or ACEJAX_FFI_FLAGS)")
     print(f"CPU:           {kernel._cpu()} ({platform.machine()}); jaxlib {jaxlib.__version__}")
-    built = lib is not None and lib.exists()
-    if a.build and lib is not None and not built:
+    built = pre is not None or (lib is not None and lib.exists())
+    if pre is not None:               # a platform wheel's kernel: what a plain library() takes, nothing to compile
+        print(f"C++ kernel:    prebuilt ({pre[1]}): {pre[0]}  (--flags or ACEJAX_FFI_FLAGS compiles it here instead)")
+    elif a.build and lib is not None and not built:
         t0 = time.perf_counter()
         try:
             lib = kernel.library(flags)
