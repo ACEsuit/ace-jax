@@ -72,7 +72,7 @@ jobs:
         run: |
           uv build --wheel --out-dir dist
           ls -l dist
-          test "$(ls dist | wc -l)" = 1 && ls dist/ace_jax-*-py3-none-${{ matrix.plat }}.whl
+          test "$(ls dist | wc -l)" -eq 1 && ls dist/ace_jax-*-py3-none-${{ matrix.plat }}.whl
       - uses: actions/upload-artifact@v4
         with: { name: "kernel-wheel-${{ matrix.name }}", path: dist, if-no-files-found: error }
 
