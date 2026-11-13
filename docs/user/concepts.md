@@ -289,3 +289,6 @@ These pages use the words below with one meaning only.
 | rung | one approximation of the hyperparameter posterior: `map` (the default), `laplace`, `pathfinder`, `vi`, `nuts` |
 | slot | one place in the fixed-size neighbour row of an atom. `K` slots for each atom set the cost of the model in JAX-MD and LAMMPS |
 | uncertainty shape | the per-atom 3×3 matrix $V$ of `--uq ard`, which shows where the model is not certain and in which direction |
+| kernel | the compiled C++ or CUDA program that evaluates a linear ACE model in place of the JAX model (`ffi=True`) |
+| product basis | the products of the one-particle basis functions of an atom. Its calculation uses most of the time of a large model |
+| mixed precision | a mode of the kernel: the product basis in float32, all other quantities in float64 (`ffi_precision="mixed"`) |

@@ -122,6 +122,10 @@ The kernel needs a C++17 compiler (`$CXX`, `c++`, `g++` or `clang++`). With
 `ffi="auto"`, the calculator uses the kernel when possible. If not,
 `calc.ffi_reason` gives the reason. Set `ffi_threads` to use fewer threads.
 
+For large models, `ffi_precision="mixed"` is faster. It calculates the
+product basis in float32, and it adds noise to the energy. It is off by
+default. See [Mixed precision for the kernels](precision.md#mixed-precision-for-the-kernels).
+
 The kernel tabulates the radial basis in r (`radial_table=True`). Energies
 agree with the default to approximately 1e-12 relative. Forces agree to
 approximately 1e-8 of the largest force. The table is fine enough for an
@@ -149,6 +153,8 @@ quantities as the [CPU kernel](#cpu-kernel), with the same accuracy.
     ```
 
 The kernel also calculates in float32. For float32, add `dtype="float32"`.
+It also has the mixed-precision mode of the CPU kernel
+(`ffi_precision="mixed"`).
 `calc.ffi["platform"]` is `"cuda"` when the calculator uses the CUDA kernel.
 
 ## Site descriptors

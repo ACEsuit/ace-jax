@@ -47,7 +47,12 @@ def test_model_body_runs_once_per_shape(monkeypatch, layout, method):
         E.append(calc.results["energy"])
     assert calc.last_layout == layout
     assert len(calls) == 1                       # traced once, then the compiled call
-    assert E[0] == E[1] == E[2]
+    # the same structure three times: equal to summation-order roundoff, not bitwise.  On a GPU
+    # the sparse layout's segment sums are atomic scatter-adds, and matscipy-neighbours >= 1.1
+    # fills a GPU neighbour_matrix row in an unspecified order: 3-4 ulp spreads measured
+    # (gesi_sbessel, A4500, with ASE's list as well); 16 ulp of |E| keeps the check tight.
+    E = np.array(E)
+    assert np.all(np.abs(E - E[0]) <= 16 * np.spacing(abs(E[0]))), E - E[0]
 
 
 def test_last_timing_splits_neighbour_list_and_model():
@@ -81,6 +86,8 @@ def test_dense_path_uses_native_neighbour_matrix(monkeypatch):
     for _ in range(3):
         dense.calculate(at, ["energy", "forces", "stress"], all_changes)
     assert len(calls) >= 2 and dense.last_timing["nlist_backend"] == "neighbour_matrix"
+    if jax.default_backend() == "gpu" and getattr(matscipy_neighbours._matscipy_neighbours, "_has_gpu", 0):
+        assert dense._nl_gpu                           # built on the device: no fall back to the host list
     dense._k_hint = 2                                  # too small: must recover
     dense.calculate(at, ["energy", "forces", "stress"], all_changes)
     E, F = dense.results["energy"], dense.results["forces"].copy()

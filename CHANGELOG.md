@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Added
+
+- **Mixed precision for the kernels** (`ffi_precision="mixed"`, `aj export --ffi-precision mixed`; off by
+  default). The C++ and CUDA kernels for linear ACE can calculate the product basis in float32 and all
+  other quantities in float64. For the silicon model o4d20, LAMMPS on 128 cores is 1.4 times faster and an
+  A100 is 1.4 times faster. Smaller models gain less, and order-3 models gain nothing. Forces differ from
+  float64 by approximately 0.05 meV/Å for o4d20. The energy has noise of approximately 0.1 meV in 200
+  atoms, so optimisers with an energy line search can fail: use a force-only optimiser. See
+  `docs/user/howto/precision.md`.
+
 ### Fixed
 
 - **Fast species-embedded basis build.** `aj basis --embedding` and `build_embedding_model` with the default
@@ -9,6 +19,14 @@
   z' = 1 channel, a 1/S fraction of the radial indices. The search now enters only those indices. The basis
   is unchanged (same bodies, same order). For S = 12, order 4, degree 14 the spec takes 1.7 s instead of
   hours; the cost no longer grows with S.
+
+### Testing
+
+- The lock takes matscipy-neighbours 1.1.0 (the `native` extra; its floor stays `>=1.0`). A test that
+  compared three evaluations of one structure bitwise now allows 16 ulp: on a GPU the order of a sum can
+  change between calls.
+- The `gpu` CI job also runs `tests/test_calc_jit.py`, with matscipy-neighbours built with its CUDA backend,
+  so the neighbour list built on the GPU is tested.
 
 ## 0.5.3 (2026-11-05)
 

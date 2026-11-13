@@ -281,6 +281,8 @@ def gate_tol(style, code, row):
     samples by ~1/h, so two evaluations of the same table differ by ~1e-9 eV/A (o3d8's 4000-interval table: 1.0e-9
     XLA CPU vs GPU, 1.2e-9 the CUDA kernel vs XLA; 7.7e-12 analytic), and its error vs the analytic model is ~1e-8."""
     from scaling import parity
+    if style == "acejax" and os.environ.get("ACEJAX_EXPORT_FFI_PRECISION") == "mixed":
+        return parity.TOL["acejax-mixed"]
     if style == "acejax" and ("spline_tol" in row or os.environ.get("ACEJAX_EXPORT_FFI")):
         return parity.TOL["acejax-splined"]
     return parity.TOL[code if code in parity.TOL else style]

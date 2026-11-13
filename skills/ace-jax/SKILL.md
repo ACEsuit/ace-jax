@@ -254,7 +254,7 @@ load; faster only at large `nradbase`). Values are unchanged to roundoff.
 
 ### Calculator performance options
 
-`ACECalculator(path, dtype=None, layout="auto", edge_a_kind="auto", skin=1.0, lean=True, spline_tol="auto", spline_intervals=None, radial_table=None, ffi=False, ffi_threads=0)`:
+`ACECalculator(path, dtype=None, layout="auto", edge_a_kind="auto", skin=1.0, lean=True, spline_tol="auto", spline_intervals=None, radial_table=None, ffi=False, ffi_threads=0, ffi_precision="float64")`:
 - `ffi=True` (lean, linear ACEModel incl. species embedding; CPU backend: float64, the C++ kernel, entry point
   `AceEdges`; CUDA backend: float64 or float32, the CUDA kernel `eval/ace_ffi_gpu.cu`, entry point `AceEdgesGpu`,
   compiled with nvcc from the `cuda` extra's CUDA 13 wheel, `calc.ffi["platform"] == "cuda"`, deterministic):
@@ -263,7 +263,15 @@ load; faster only at large `nradbase`). Values are unchanged to roundoff.
   intra-op thread pool (`ffi_threads` caps it): ~17x the JAX model at 1.7k-4k atoms on 32 cores (o4d20).
   Radial table on (energies ~1e-12, forces ~1.5e-8 of max|F|). Compiled on first use (C++17 compiler,
   cached). `ffi="auto"` falls back to the JAX model with `calc.ffi_reason`. Derivatives in positions only:
-  for parameter gradients or second derivatives keep `ffi=False` (the default). Pair it with the
+  for parameter gradients or second derivatives keep `ffi=False` (the default).
+  `ffi_precision="mixed"` (off by default; float64 only; CPU and CUDA kernels, the same library): the
+  product basis in float32, everything else float64. Worth it only for large models (o4d20: 1.4x in LAMMPS
+  on 128 cores, 1.4x on an A100; nothing below o4d14). Forces within ~5e-5 eV/A (o4d20), but the energy
+  carries ~0.1 meV of noise per 200 atoms (1 meV at o4d16), so energy line-search optimisers (L-BFGS/CG with
+  Armijo or Wolfe, LAMMPS `min_style cg`) fail near a minimum: use force-only ones (ODE12r, FIRE,
+  `min_style fire`). `calc.ffi["precision"]` reports it. Also on `BatchCalculator` and
+  `export_lammps(ffi_precision=)` / `aj export --ffi-precision mixed` (bundle key `ace_jax.ffi_precision`).
+  Pair the kernel with the
   `native` extra (matscipy-neighbours; formerly `fast-neighbours`): list rebuilds 4-12x faster than ASE's (14 ms at
   4096 atoms). `aj native` reports the compiler, flags, CPU, kernel cache and neighbour list; `aj native --build`
   compiles the kernel now (exit 1 if it cannot; on a cluster run it on a compute node).
@@ -336,7 +344,8 @@ load; faster only at large `nradbase`). Values are unchanged to roundoff.
   both once per edge-count bucket.
 - Edge lists are padded to power-of-two buckets, so MD reuses the jitted
   function. `pip install "ace-jax[native]"` (matscipy-neighbours,
-  a C++ source build) gives faster neighbour lists; ASE's list is the fallback.
+  CPU wheels from 1.1; its GPU list needs a source build with `ENABLE_CUDA`, see
+  the installation page) gives faster neighbour lists; ASE's list is the fallback.
 
 ### Batched evaluation (many small structures)
 

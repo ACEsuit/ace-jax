@@ -58,7 +58,8 @@ At the target, in microseconds per atom-step:
 | model | A100 GPU | CPU node (128 cores) |
 |---|---|---|
 | linear ACE o4d20, ace-jax with lammps-jax (XLA program) | 3.12 | 50.5 |
-| linear ACE o4d20, ace-jax kernel with lammps-jax (CUDA on the GPU, C++ on the CPU) | 1.23 | 3.29 |
+| linear ACE o4d20, ace-jax kernel with lammps-jax (CUDA on the GPU, C++ on the CPU) | 0.75 | 1.52 |
+| linear ACE o4d20, ace-jax kernel in reduced precision (float32 on the GPU, mixed precision on the CPU) | 0.44 | 1.13 |
 | linear ACE o4d20, ML-PACE | 4.13 | 5.31 |
 | linear ACE o4d20, ACEpotentials.jl | – | 10.8 |
 | MACE c16L0, Symmetrix 0.3.0 | 0.65 | 0.59 |
@@ -97,17 +98,17 @@ On the CPU, the ACEpotentials.jl compiled library is the fastest code for
 linear ACE up to o4d14. It has the same speed as ML-PACE at o4d16. At
 o4d20 it is 2 times slower than ML-PACE.
 
-On the CPU, the ace-jax [C++ kernel](howto/lammps.md#cpu-kernel) is 10 to 23
-times faster than the compiled JAX program on the same node. At o4d20 it is
-1.6 times faster than ML-PACE (3.29 against 5.31 µs/atom-step).
+On the CPU, the ace-jax [C++ kernel](howto/lammps.md#cpu-kernel) is 17 to 33
+times faster than the compiled JAX program. At o4d20 it is 3.5 times faster
+than ML-PACE (1.52 against 5.31 µs/atom-step).
 
 On the A100, ace-jax runs linear ACE o4d20 faster than ML-PACE (3.12
 against 4.13 µs/atom-step). The ace-jax [GPU kernel](howto/lammps.md#gpu-kernel)
-runs the same model at 1.23 µs/atom-step. It is the fastest linear ACE code
+runs the same model at 0.75 µs/atom-step. It is the fastest linear ACE code
 on the A100 for all models from o3d8 to o4d20. Against patched ML-PACE, it
-is 2.0 to 3.2 times faster (o4d12 to o4d20). On the same node, it is 2.9 to
-8.0 times faster than the compiled JAX program. The speed-up is largest for
-the smallest models.
+is 2.9 to 3.7 times faster (o4d12 to o4d20). It is 4.8 to 8.2 times faster
+than the compiled JAX program. The speed-up is largest for the smallest
+models.
 
 ### How the cost was measured
 
@@ -135,6 +136,12 @@ the smallest models.
   [C++ kernel](howto/lammps.md#cpu-kernel) runs with 128 MPI ranks and one
   thread for each rank. On the A100, the
   [GPU kernel](howto/lammps.md#gpu-kernel) runs with one MPI rank.
+- **ace-jax kernel in reduced precision.** The light-blue line with
+  triangles is the same kernel with less precision. On the CPU, it uses
+  [mixed precision](howto/precision.md#mixed-precision-for-the-kernels) for
+  o4d14 to o4d20. On the A100, it runs float32 bundles. The accuracy that
+  the figure shows is that of the float64 fit. These results are not
+  included in the comparison with the float64 results of the other codes.
 - **ML-PACE** on the GPU is the LAMMPS development version with the 2026
   `pace/kk` GPU update.
 - **MACE** runs in LAMMPS with Symmetrix 0.3.0 (`pair_style
