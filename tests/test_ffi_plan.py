@@ -160,7 +160,7 @@ def dag_pass_digest():
     return hashlib.sha256(re.sub(r"\s+", "", re.sub(r"//[^\n]*", "", body)).encode()).hexdigest()[:16]
 
 
-DAG_PASS = "aa8dafdf7dae0753"                             # dag_pass_digest() of the kernel `emulate` copies
+DAG_PASS = "432a5e1a7189ca2d"                             # dag_pass_digest() of the kernel `emulate` copies
 
 
 def test_emulation_is_of_this_kernel():

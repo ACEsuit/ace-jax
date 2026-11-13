@@ -253,16 +253,36 @@ def plan(model, gpu=False):
             len(levels[-1][0]) if levels else 0, np.asarray(lev))
 
 
-def kernel_inputs(model, gpu=False):
+PRECISIONS = ("float64", "mixed")
+
+
+def check_precision(precision):
+    """`precision` as the kernels take it: None or "float64" (the default), or "mixed"."""
+    if precision not in (None,) + PRECISIONS:
+        raise ValueError(f"ffi_precision is one of {PRECISIONS}, got {precision!r}")
+    return precision == "mixed"
+
+
+def kernel_inputs(model, gpu=False, precision=None):
     """(attrs, consts) of the kernel for a lean ACEModel with a radial table, float64, or float32 on the GPU;
     the GPU kernel also takes the DAG's levels, n_st, the nodes before the last two levels, which it keeps,
-    `pull_plan`'s lists and the leaves' coefficients in their two orders."""
+    `pull_plan`'s lists and the leaves' coefficients in their two orders.
+
+    precision="mixed" (a float64 model): the readout arrays in float32, which is how both kernels are told to
+    run the product-basis DAG and its adjoint in float32 (twice the sites a CPU register; the GPU pass's
+    float32 form) with everything else float64. Forces differ from float64 by ~1e-5 eV/A; energies carry
+    noise from the float32 node values (~0.1 meV in 200 atoms at o4d20), so optimisers that line-search on
+    energies can fail near a minimum (docs/dev/accuracy-cost-results.md)."""
     from .model import ACEModel
     if not (isinstance(model, ACEModel) and model.energy_only and model.rtab_grid):
         raise ValueError("the FFI kernel needs a lean ACEModel with a radial table: "
                          "lean(model, radial_table=True)")
     if model.E0.dtype != jnp.float64 and not (gpu and model.E0.dtype == jnp.float32):
         raise ValueError(f"the FFI kernel takes float64, or float32 on the GPU, got {model.E0.dtype}")
+    mixed = check_precision(precision)
+    if mixed and model.E0.dtype != jnp.float64:
+        raise ValueError(f"ffi_precision='mixed' is for a float64 model, got {model.E0.dtype}")
+    dag = jnp.float32 if mixed else model.E0.dtype          # the readout's type is the DAG's
     x0, h, n = model.rtab_grid
     runs, groups, factor, ct, n_leaf, lev = plan(model, gpu)
     attrs = dict(x0=np.float64(x0), h=np.float64(h), n=np.int64(n), lmax=np.int64(model.lmax),
@@ -270,7 +290,7 @@ def kernel_inputs(model, gpu=False):
                  solid=np.int64(model.ysolid), n_leaf=np.int64(n_leaf))
     i32 = lambda a: jnp.asarray(a, jnp.int32)
     consts = (model.rtab_coefs, model.table_cutoffs(), i32(runs), i32(groups), i32(factor),
-              jnp.asarray(ct, model.E0.dtype), model.E0)
+              jnp.asarray(ct, dag), model.E0)
     if not gpu:
         return attrs, consts
     starts, n_a = np.r_[0, groups[:, 1]], ct.shape[1] - len(factor)
@@ -283,7 +303,7 @@ def kernel_inputs(model, gpu=False):
     lc = np.zeros((len(ct), pos.max() + 1 if n_leaf else 0)); lc[:, pos] = np.tile(ct[:, ct.shape[1] - n_leaf:], 2)
     return ({**attrs, "n_st": np.int64(n_st), "tile": np.int64(tile), "lv": np.int64(lv),
              "threads": np.int64(T)},
-            consts + (i32(lev), i32(pull), jnp.asarray(lc, model.E0.dtype)))
+            consts + (i32(lev), i32(pull), jnp.asarray(lc, dag)))
 
 
 PULL_TILE = 2048                                      # leaf parents per tile
@@ -512,13 +532,13 @@ def pull_plan(n_a, n_st, n_leaf, starts, lev, parent, factor, flat, T=256):
             int(n_u.max()), flat)
 
 
-def lammps_fns(model, n_species, type_map, rcut, gpu=False):
+def lammps_fns(model, n_species, type_map, rcut, gpu=False, precision=None):
     """(energy_fn, force_fn) of lammps-jax's direct force path: one kernel call on the (K, rows) neighbour
     matrix, on the GPU kernel if `gpu`. type_map[t] is the model species of LAMMPS type t+1.  energy_fn has
     a custom VJP in positions (a second kernel call with the cotangent as site weights), so jax.grad /
     jax.vjp of any function of the atom energies is exact; nothing is differentiable in the model, and
-    there is no second derivative."""
-    attrs, consts = kernel_inputs(model, gpu)
+    there is no second derivative. precision: `kernel_inputs`'."""
+    attrs, consts = kernel_inputs(model, gpu, precision)
     tmap, target = jnp.asarray(type_map, jnp.int32), TARGET_GPU if gpu else TARGET
 
     def call(positions, species, graph, weights=None):
@@ -615,10 +635,11 @@ class KernelModel(EdgeSiteModel):
     energy_only = True
 
     @classmethod
-    def of(cls, model, max_threads=0, gpu=False):
+    def of(cls, model, max_threads=0, gpu=False, precision=None):
         """`model` (a lean ACEModel with a radial table, float64, or float32 on a GPU) for the kernel, the
-        GPU one if `gpu`; max_threads > 0 caps the CPU kernel's threads (0: XLA's intra-op pool)."""
-        attrs, consts = kernel_inputs(model, gpu)
+        GPU one if `gpu`; max_threads > 0 caps the CPU kernel's threads (0: XLA's intra-op pool);
+        precision: `kernel_inputs`'."""
+        attrs, consts = kernel_inputs(model, gpu, precision)
         attrs = tuple(sorted((k, float(v) if k in ("x0", "h") else int(v)) for k, v in attrs.items()))
         extra = (("target", EDGE_TARGET_GPU),) if gpu else (("max_threads", int(max_threads)),)
         return cls(model, tuple(consts), attrs + extra)

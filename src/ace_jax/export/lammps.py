@@ -365,7 +365,7 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
                   dtype="float64", layout="auto", type_elements=None, max_owned=None,
                   lean=True, spline_tol=AUTO, spline_intervals=None, max_neighbors=None,
                   radial_table=None, device_memory=None, block_rows=None, platform=None, aa_dag="auto",
-                  precision_structure=None, ffi="auto"):
+                  precision_structure=None, ffi="auto", ffi_precision="float64"):
     """Write a lammps-jax JSON bundle for `model`; returns the bundle dict.
 
     Capacities: max_atoms (owned + ghost positions); max_edges (sparse / dense:
@@ -469,11 +469,20 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
     list slot, so `aa_dag`, `k_dense` and `block_rows` do not apply (recorded as "greedy", None, None).
     LAMMPS loads the kernel through LAMMPS_JAX_FFI_HANDLERS, set to `ace_jax.ffi["handlers"]`, with a
     lammps-jax whose plugin registers handlers for the bundle's platform.  Recorded as `ace_jax.ffi`:
-    {"target", "library", "handlers"} (None for the XLA program).  On a CUDA GPU the kernel replaces the
+    {"target", "library", "handlers"} (None for the XLA program).  ffi_precision="mixed" (off by
+    default; a float64 bundle with the kernel): the kernel's product basis in float32, the rest float64
+    (`eval.ffi.kernel_inputs`): faster for large models, forces within ~1e-5 eV/A, energies with ~0.1 meV
+    of noise in 200 atoms (minimise with a force-based `min_style` such as fire, not a line search).
+    Recorded as `ace_jax.ffi_precision`.  On a CUDA GPU the kernel replaces the
     removed aa_dag="cueq" (NVIDIA cuequivariance), which now raises ValueError.
     """
     from lammps_jax.export import export_model
 
+    from ..eval.ffi import check_precision
+    mixed = check_precision(ffi_precision)
+    if mixed and (ffi is False or dtype != "float64"):
+        raise ValueError("ffi_precision='mixed' is the kernel's, for a float64 bundle: not with ffi=False or "
+                         f"dtype={dtype!r}")
     ffi, ffi_reason = choose_ffi(ffi, model, platform=platform, dtype=dtype, layout=layout, lean=lean,
                                  radial_table=radial_table, max_neighbors=max_neighbors, aa_dag=aa_dag)
     from ..eval.aa_dag import check_not_cueq
@@ -562,7 +571,7 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
         from ..eval import ffi as kernel
         gpu = platform != "cpu"                   # the GPU kernel on CUDA bundles
         target = kernel.TARGET_GPU if gpu else kernel.TARGET
-        energy_fn, force_fn = kernel.lammps_fns(model, n_species, type_map, rcut, gpu)
+        energy_fn, force_fn = kernel.lammps_fns(model, n_species, type_map, rcut, gpu, ffi_precision)
         lib = Path(kernel.library(gpu=gpu) if ffi is True else ffi).resolve()   # first: fail early
         ffi_meta = {"target": target, "library": str(lib), "handlers": kernel.handlers(lib, gpu)}
     else:
@@ -595,6 +604,10 @@ def export_lammps(model, meta, path, *, max_atoms, max_edges=None, k_dense=None,
                          "ffi": ffi_meta if ffi else None,
                          # why ffi="auto" took the XLA program for a CPU bundle (None: the kernel, a GPU bundle, or ffi given)
                          "ffi_reason": ffi_reason,
+                         # the kernel's precision: "float64", or "mixed" (its product basis in float32); None: no
+                         # kernel.  Not under the name `precision`, nor inside `ffi`: lammps-jax reads that key
+                         # wherever it is in the file
+                         "ffi_precision": (ffi_precision or "float64") if ffi else None,
                          # dense / matrix rows per block, and the memory they were sized for
                          "block_rows": int(block_rows) if layout in ("dense", "matrix") and not ffi else None,
                          "device_memory": int(device_memory) if device_memory else None,

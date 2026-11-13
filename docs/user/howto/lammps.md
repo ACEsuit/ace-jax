@@ -162,6 +162,15 @@ the custom-call target, the library and the `LAMMPS_JAX_FFI_HANDLERS` value.
 If the export used the XLA program on a CPU, `ace_jax.ffi_reason` gives the
 reason.
 
+For large models, `--ffi-precision mixed` (`ffi_precision="mixed"` in
+Python) is faster: 1.4 times for the silicon model o4d20 on 128 cores. The
+kernel then calculates the product basis in float32. It is off by default.
+
+!!! warning "Mixed precision adds noise to the energy"
+    Do not use `min_style cg` or other line-search minimisers with a
+    mixed-precision bundle. Use `min_style fire`. See
+    [Mixed precision for the kernels](precision.md#mixed-precision-for-the-kernels).
+
 The compiler flags are `-O3 -march=native` by default. They tune the kernel
 for the CPU of the machine that exports.
 
@@ -222,6 +231,11 @@ in float64. On an A100, it is up to 1.7 times faster. The speed-up is largest
 for the largest models.
 See [Learned radials and precision](#learned-radials-and-precision).
 
+A float64 bundle can also use mixed precision (`--ffi-precision mixed`),
+as on the CPU. On a GPU it is slower than a float32 bundle. Its force error
+does not increase with the box size, because the positions stay float64.
+See [Mixed precision for the kernels](precision.md#mixed-precision-for-the-kernels).
+
 In Python, `ACECalculator(path, ffi=True)` uses the same kernel on a CUDA GPU.
 Add `dtype="float32"` for float32. `BatchCalculator(..., ffi=True)` also uses it.
 To compile the kernel before the first use, run `aj native --build`.
@@ -278,3 +292,5 @@ version of the Python package, or export with `layout="dense"`.
   The bundle records the result as `ace_jax.precision_check`.
 - A warning occurs above 0.1 meV/atom of energy error or 1e-4 of relative force error.
   `aj export --dtype float32` does this check on `--structure`.
+- `ffi_precision="mixed"` is for a float64 bundle with the kernel. The kernel
+  then calculates the product basis in float32. The default is `"float64"`.

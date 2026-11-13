@@ -242,7 +242,10 @@ def _export_inprocess(row, at, dtype, workdir, layout="auto", slots="skin", list
                       # LAMMPS_JAX_FFI_HANDLERS naming its library, set with this in the env json's os_env
                       # explicit either way: export_lammps's ffi="auto" would take the kernel for a CPU
                       # bundle, and the XLA rows (the plotted ace-jax line) must stay the XLA program
-                      ffi=bool(os.environ.get("ACEJAX_EXPORT_FFI")))
+                      ffi=bool(os.environ.get("ACEJAX_EXPORT_FFI")),
+                      # the kernel's product basis in float32 ("mixed"; off by default)
+                      **({"ffi_precision": os.environ["ACEJAX_EXPORT_FFI_PRECISION"]}
+                         if os.environ.get("ACEJAX_EXPORT_FFI_PRECISION") else {}))
     return (str(pathlib.Path(workdir) / "bundle.json"), b["ace_jax"]["layout"], time.perf_counter() - t0,
             splined_meta(b["ace_jax"]))
 
@@ -496,6 +499,8 @@ def _run_lammps(row, style, model, data, work, n_atoms, dtype, device, lmp, rank
         out["aa_dag"] = os.environ["ACEJAX_EXPORT_AA_DAG"]
     if style == "acejax" and os.environ.get("ACEJAX_EXPORT_FFI"):
         out["ffi"] = True
+        if os.environ.get("ACEJAX_EXPORT_FFI_PRECISION"):
+            out["ffi_precision"] = os.environ["ACEJAX_EXPORT_FFI_PRECISION"]
     if cmd[0] == "mpirun" and mpirun_args():
         out["mpirun_args"] = mpirun_args()
     (work / "log.lammps").unlink(missing_ok=True)

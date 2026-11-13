@@ -598,7 +598,7 @@ class BatchCalculator:
 
     The evaluation model is resolved exactly as `ACECalculator`'s (one is built inside, `calc`): `model`,
     `meta`, `cutoff`, `dtype`, `lean`, `spline_tol`, `spline_intervals`, `radial_table`, `aa_dag`, `ffi`,
-    `ffi_threads` and `energy_reference` mean the same, and the same evaluation model is used.  Results
+    `ffi_threads`, `ffi_precision` and `energy_reference` mean the same, and the same evaluation model is used.  Results
     agree with `ACECalculator` structure by structure to roundoff.
 
     Structures up to `n_device` atoms are padded into buckets (`pack`) and evaluated `max_batch_atoms`
@@ -614,7 +614,7 @@ class BatchCalculator:
 
     def __init__(self, model, meta=None, cutoff=None, dtype=None, lean=True, spline_tol=AUTO,
                  spline_intervals=None, radial_table=None, aa_dag="auto", ffi=False, ffi_threads=0,
-                 energy_reference="absolute", max_batch_atoms=None, n_device=None, builder="auto"):
+                 ffi_precision="float64", energy_reference="absolute", max_batch_atoms=None, n_device=None, builder="auto"):
         from .calc.point import ACECalculator
         if builder not in ("auto", "jax", "msn", "host"):
             raise ValueError(f"builder must be 'auto', 'jax', 'msn' or 'host', got {builder!r}")
@@ -624,6 +624,7 @@ class BatchCalculator:
         self.calc = ACECalculator(model, meta=meta, cutoff=cutoff, dtype=dtype, layout="dense", skin=0.0,
                                   lean=lean, spline_tol=spline_tol, spline_intervals=spline_intervals,
                                   radial_table=radial_table, aa_dag=aa_dag, ffi=ffi, ffi_threads=ffi_threads,
+                                  ffi_precision=ffi_precision,
                                   energy_reference=energy_reference)
         import jax
         cpu = jax.default_backend() == "cpu"

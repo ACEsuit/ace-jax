@@ -643,6 +643,9 @@ def cmd_export(a):
         procs = ()
     if procs is not None and (len(procs) != 3 or min(procs) < 1):
         raise UsageError("--procs takes the LAMMPS processor grid: three integers px,py,pz")
+    if a.ffi_precision == "mixed" and (a.no_ffi or a.dtype != "float64"):
+        raise UsageError("--ffi-precision mixed is the kernel's, for a float64 bundle: not with --no-ffi or "
+                         f"--dtype {a.dtype}")
     if (a.ffi or a.ffi_flags) and a.no_ffi:
         raise UsageError("--no-ffi exports the XLA program: give it without --ffi / --ffi-flags")
     if (a.ffi or a.ffi_flags) and ((a.dtype != "float64" and a.platform == "cpu")
@@ -673,7 +676,8 @@ def cmd_export(a):
     b = export_lammps(model, meta, out, max_atoms=cap["max_atoms"], max_edges=cap["max_edges"],
                       k_dense=cap["k_dense"], max_owned=cap["max_owned"], max_neighbors=cap["max_neighbors"],
                       dtype=a.dtype, layout=a.layout, type_elements=els, platform=a.platform,
-                      precision_structure=at if a.dtype != "float64" else None, aa_dag=aa_dag, ffi=ffi)
+                      precision_structure=at if a.dtype != "float64" else None, aa_dag=aa_dag, ffi=ffi,
+                      ffi_precision=a.ffi_precision)
     per = "" if procs is None else f", per MPI rank of {'x'.join(map(str, procs))}"
     print(f"lammps-jax: layout {b['ace_jax']['layout']}, {a.dtype}, {a.platform or 'cuda'}, sized for {len(at)} "
           f"atoms of {a.structure}{per} (max_atoms {cap['max_atoms']}, neighbour slots {cap['k_dense']}) -> {out}")
@@ -945,6 +949,10 @@ def _parser():
                      help="lammps: the kernel's compiler flags (implies --ffi; default \"-O3 -march=native\", "
                           "or \"-O3 -arch=sm_XY\" for a GPU): on a login node for compute nodes of another CPU "
                           "type, e.g. --ffi-flags=\"-O3 -march=x86-64-v3\" (with =), or -arch=sm_80 for an A100")
+    exp.add_argument("--ffi-precision", choices=("float64", "mixed"), default="float64",
+                     help="lammps: 'mixed' runs the kernel's product basis in float32 and the rest in float64 "
+                          "(faster for large models; energies carry ~0.1 meV of noise in 200 atoms, so minimise "
+                          "with a force-based min_style, not a line search); needs the kernel and float64")
     exp.add_argument("--type-elements", default=None,
                      help="lammps: comma-separated element of each LAMMPS atom type, in type order "
                           "(default: the model's element order)")
