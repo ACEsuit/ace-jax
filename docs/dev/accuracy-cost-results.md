@@ -332,7 +332,7 @@ grep -h '"code": "mlpace-mixed"' $R/sulis-gpu-fp32-o4d*.jsonl > $R/sulis-gpu-fp3
 (cd bench && python -m accuracy_cost.dag_auto)
 python bench/si_qoi/make_cost.py --dtype float64 --source acejax-ace=sulis-cpu-128x1-acejax-auto --out $RR/cost_sulis_cpu.json \
     $(ls $R/sulis-cpu*.jsonl | grep -v -e smoke -e ace_yace -e pacetab-check -e "ace_tab\.jsonl" -e ace_tab2 \
-      -e ace_tab3 -e dagpair -e ffi-xla -e ffi-main) --allow grace-rt:mixed   # ffi-xla, ffi-main: the C++ kernel's controls
+      -e ace_tab3 -e dagpair -e ffi-xla -e ffi-main -e ffi-mixed-float64) --allow grace-rt:mixed   # ffi-xla, ffi-main, ffi-mixed-float64: the C++ kernel's controls
 python bench/si_qoi/make_cost.py --dtype float64 --source acejax-ace=sulis-gpu-acejax-auto --out $RR/cost_sulis_gpu.json \
     bench/accuracy_cost/results/sulis-gpu.jsonl bench/accuracy_cost/results/sulis-gpu-ace-splined.jsonl \
     $R/sulis-gpu-ace-splined-v2.jsonl $R/sulis-gpu-v2.jsonl $R/sulis-gpu-mace_xl.jsonl \
@@ -646,7 +646,7 @@ Speed, o4d20 unless said. The kernel alone (`ACECalculator`, 512 Si atoms, EPYC 
 | o3d12 | 10.4 | 10.2 | 13.8 | 13.9 |
 
 LAMMPS, 128 x 1, Si 4,096 atoms, the same library and node (job 2283977, node051, `envs/
-sulis-cpu-ffi-mixed.sbatch`; rows `sulis-cpu-128x1-ffi-mixed.jsonl`, not plotted, and its float64 control),
+sulis-cpu-ffi-mixed.sbatch`; rows `sulis-cpu-128x1-ffi-mixed.jsonl`, and the float64 control `...-ffi-mixed-float64.jsonl`),
 µs/atom-step:
 
 | model | float64 | mixed | ratio |
@@ -687,6 +687,11 @@ same radial table:
 The six failures (bc8, st12, vacancy, interstitials, stacking fault, relaxed (100) surface) are "Armijo
 linesearch failed", as for float32 (docs/dev/fp32-results.md). The optimiser alone moves diamond C44 by 0.64
 tolerance on the float64 kernel, far more than the precision does.
+
+The figures plot the kernel's reduced precision as one light-blue line (`plot_cost` family `ace_ffi_reduced`, cost
+names `ACEffireduced_*`): these mixed rows on the CPU row, and the float32 rows of `sulis-gpu-cudak.jsonl` (the A100
+retime above) on the GPU row. A row with `ffi_precision: "mixed"` is written to the cost file's codes as dtype
+"mixed".
 
 At the target, mixed leaves the CPU ranking as it was: o4d20 1.13 against GRACE-2L 0.81 and MACE c16L0
 on Symmetrix 0.59 µs/atom-step.
