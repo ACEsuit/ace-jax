@@ -13,7 +13,7 @@ import modal
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 TESTS = ["tests/test_ffi.py", "tests/test_ffi_plan.py", "tests/test_batch.py", "tests/test_batch_md.py",
-         "tests/test_export_lammps.py"]
+         "tests/test_export_lammps.py", "tests/test_calc_jit.py"]
 SYNC = ("cd /deps && UV_PROJECT_ENVIRONMENT=/venv uv sync --frozen --no-install-project --python 3.12 "
         "--extra cuda13 --extra lammps --extra jaxmd --extra native")
 
