@@ -149,6 +149,27 @@ jobs:
         with:
           path: .jax_cache
           key: jaxcache-${{ runner.os }}-optional-${{ hashFiles('uv.lock') }}-${{ github.sha }}
+  cuda-compile:
+    # The CUDA kernel (src/ace_jax/eval/ace_ffi_gpu.cu) has no GPU runner: this job only compiles it, with
+    # NVIDIA's CUDA 13 nvcc wheel (the `cuda13` extra's compiler; no GPU, no toolkit), so a build break fails
+    # CI. ACEJAX_REQUIRE_NVCC turns the test's no-nvcc skip into a failure. The kernel's plan is checked on
+    # the CPU by tests/test_ffi_plan.py in the shards; its arithmetic needs a GPU (tests/test_ffi.py there).
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Install with the nvcc wheel
+        run: |
+          uv sync --python 3.12
+          uv pip install "nvidia-cuda-nvcc>=13.0"
+      - name: Compile the CUDA kernel
+        env:
+          JAX_PLATFORM_NAME: cpu
+          JAX_ENABLE_X64: "1"
+          ACEJAX_REQUIRE_NVCC: "1"
+        run: uv run --no-sync pytest -n 0 tests/test_ffi.py::test_gpu_kernel_compiles_without_a_gpu
+
   smoke:
     # Import + a small descriptor/EFV/kernel smoke on the other supported Pythons
     # -- a cheap compatibility check without re-running the whole (slow) matrix.
