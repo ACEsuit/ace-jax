@@ -59,6 +59,7 @@ At the target, in microseconds per atom-step:
 |---|---|---|
 | linear ACE o4d20, ace-jax with lammps-jax (XLA program) | 3.12 | 50.5 |
 | linear ACE o4d20, ace-jax kernel with lammps-jax (CUDA on the GPU, C++ on the CPU) | 0.75 | 1.52 |
+| linear ACE o4d20, ace-jax kernel in reduced precision (float32 on the GPU, mixed precision on the CPU) | 0.44 | 1.13 |
 | linear ACE o4d20, ML-PACE | 4.13 | 5.31 |
 | linear ACE o4d20, ACEpotentials.jl | – | 10.8 |
 | MACE c16L0, Symmetrix 0.3.0 | 0.65 | 0.59 |
@@ -135,6 +136,12 @@ models.
   [C++ kernel](howto/lammps.md#cpu-kernel) runs with 128 MPI ranks and one
   thread for each rank. On the A100, the
   [GPU kernel](howto/lammps.md#gpu-kernel) runs with one MPI rank.
+- **ace-jax kernel in reduced precision.** The light-blue line with
+  triangles is the same kernel with less precision. On the CPU, it uses
+  [mixed precision](howto/precision.md#mixed-precision-for-the-kernels) for
+  o4d14 to o4d20. On the A100, it runs float32 bundles. The accuracy that
+  the figure shows is that of the float64 fit. These results are not
+  included in the comparison with the float64 results of the other codes.
 - **ML-PACE** on the GPU is the LAMMPS development version with the 2026
   `pace/kk` GPU update.
 - **MACE** runs in LAMMPS with Symmetrix 0.3.0 (`pair_style
