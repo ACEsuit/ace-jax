@@ -579,7 +579,8 @@ Protocol (README): ye3t-methods' ridge solve at penalty 1e-8, ChebExpCos decay 0
 cutoff 5.0 Å, fixed E0, **global weights 1 : 1 on energies and forces and no virials**: `LinearModel.fit` has one
 weight per quantity, so the GAP-18 per-configuration-type weights the other families use cannot be applied. That
 accounts for most of the pattern below (lower force error, higher energy and QoI error than ACE at equal size):
-see the weighting diagnostic.
+see the weighting diagnostic. With QoIs (r4-205, 2026-11-13): the protocol loss gives QoI error 1.85, ACE's weights
+with virials 1.27, linear ACE o3d12 1.03; the rest is mostly c44 and bcc (`bench/accuracy_cost/ye3t/README.md`).
 
 | family | size | descriptors | penalty | E RMSE (meV/atom) | F RMSE (eV/Å) | QoI error | 128 x 1 µs/atom-step | 1 x 1 |
 |---|---|---|---|---|---|---|---|---|

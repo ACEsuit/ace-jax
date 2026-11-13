@@ -163,6 +163,41 @@ about the same overall energy and force errors as linear ACE at 223 coefficients
 It is not all of it: bcc, st12 and hcp stay 2 to 6 times worse than ACE. The QoIs were not recomputed for these
 refits. A fit with a weighted loss is the first thing a PR could change.
 
+
+### Loss diagnostic with QoIs (2026-11-13)
+
+The QoI error of the fitted density models is partly the loss. The r4-205 descriptors (ye3t-methods' own energy,
+force and stress rows) were solved again under four losses, with ye3t-methods' solver (normal equations, penalty
+1e-8). Each solution was run through the QoI tests (`ext/logs/probe12.py`; models `YE3Tdiag_r4-205_*`; no
+benchmark row changes). Virials are in eV with weight w_V/√N, as ace-jax fits them.
+
+| Loss | E (meV/atom) | F (eV/Å) | virial (meV/atom) | QoI error |
+|---|---|---|---|---|
+| Protocol: E and F, weight 1 (the benchmark row) | 25.1 | 0.118 | 231 | 1.85 |
+| Protocol + virials | 29.5 | 0.122 | 86 | 2.29 |
+| ACE weights, no virials | 18.1 | 0.144 | 146 | 1.59 |
+| ACE weights + virials (ace-jax's loss) | 19.5 | 0.147 | 97 | 1.27 |
+| Linear ACE o3d12 (223 coefficients) | 15.9 | 0.158 | | 1.03 |
+
+Signed QoI errors in units of the tolerance:
+
+| QoI | Protocol | ACE weights + virials | ACE o3d12 |
+|---|---|---|---|
+| bulk modulus | 0.72 | 0.00 | −0.53 |
+| c12 | 2.99 | 0.85 | 0.80 |
+| c44 | −1.85 | −1.79 | 0.17 |
+| ΔE fcc | −5.59 | 0.84 | −1.97 |
+| ΔE bcc | −10.41 | −7.28 | −3.08 |
+| ΔE bc8 | −2.23 | −0.94 | −0.13 |
+| ΔE st12 | 1.68 | −0.28 | −1.70 |
+| ΔE hcp | −0.10 | 2.27 | 0.14 |
+
+- The loss accounts for 1.85 → 1.27. The energy weights and the virials are both needed: virials alone make the
+  QoI error worse (2.29), because the unweighted energies then lose more.
+- What remains against ACE o3d12 (1.27 vs 1.03) is mostly c44 and bcc. The loss does not move c44.
+- The benchmark rows keep the protocol loss. A weighted family would be a protocol change for the authors to
+  agree.
+
 ## Commands
 
 ```bash
