@@ -1,0 +1,2114 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Fit and evaluate ACE and PACE interatomic potentials in Python/JAX">
+      
+      
+      
+        <link rel="canonical" href="https://acesuit.github.io/ace-jax/tutorials/truth-about-the-truth/">
+      
+      
+        <link rel="prev" href="../curation/">
+      
+      
+        <link rel="next" href="../bring-your-own-data/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/acesuit-logo.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>8. The truth about the truth - ace-jax</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#tutorial-8-the-truth-about-the-truth" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="ace-jax" class="md-header__button md-logo" aria-label="ace-jax" data-md-component="logo">
+      
+  <img src="../../assets/acesuit-logo.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            ace-jax
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              8. The truth about the truth
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/ACEsuit/ace-jax" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    ACEsuit/ace-jax
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="ace-jax" class="md-nav__button md-logo" aria-label="ace-jax" data-md-component="logo">
+      
+  <img src="../../assets/acesuit-logo.png" alt="logo">
+
+    </a>
+    ace-jax
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/ACEsuit/ace-jax" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    ACEsuit/ace-jax
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorials
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_4" id="__nav_4_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Tutorials
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../first-fit/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    1. First fit: silicon
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../learned-radials/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2. Learned radials: silicon
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../multi-element/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    3. Multi-element fits: categorical and embedded species
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dataset-and-properties/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    4. Your data, your property
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../basis-and-evidence/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    5. Basis size and the evidence
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../surfaces/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    6. Surfaces: coverage and repair
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../curation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    7. Automating curation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    8. The truth about the truth
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    8. The truth about the truth
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#step-1-two-labellers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 1: two labellers
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-2-fit-to-one-teacher" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 2: fit to one teacher
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-3-the-same-recipe-the-other-teacher" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 3: the same recipe, the other teacher
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-same-lesson-one-level-down" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The same lesson, one level down
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reflection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reflection
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#exercises" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exercises
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Summary
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../bring-your-own-data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    9. Bring your own data
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/force-uncertainty-maths/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Force uncertainty: the mathematics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How-to guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    How-to guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/basis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Build a basis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/fit-yaml/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run files (fit.yaml)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/multi-element/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Multi-element fits
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/ase/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ASE calculators
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/batch/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evaluate many structures
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/lammps/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    LAMMPS export
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/jax-md/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MD with JAX-MD
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/precision/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Choose float64 or float32
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/pace/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    PACE .yace models
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/learned-radials/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Learn the radial basis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/force-uncertainty/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Per-atom force uncertainty
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/foundation-labels/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Labels from a foundation model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/large-fits/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Large linear fits
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/reproducibility/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reproducibility
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../benchmarks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Performance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Python API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../faq/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAQ and troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../licence/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Licence and citation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#step-1-two-labellers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 1: two labellers
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-2-fit-to-one-teacher" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 2: fit to one teacher
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-3-the-same-recipe-the-other-teacher" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 3: the same recipe, the other teacher
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-same-lesson-one-level-down" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The same lesson, one level down
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reflection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reflection
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#exercises" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exercises
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Summary
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<!-- generated by docs/build_tutorials.py from notebooks/school_truth_si.py (79d64849af4d3899) -->
+
+<h1 id="tutorial-8-the-truth-about-the-truth">Tutorial 8: the truth about the truth<a class="headerlink" href="#tutorial-8-the-truth-about-the-truth" title="Permanent link">&para;</a></h1>
+<p>A fitted potential is judged against its reference labels. But the
+labels came from somewhere: one functional, one code, one set of
+convergence choices or, here, one foundation model with its own training
+data. This notebook asks two reference models the same question, the
+surface energy of Si(111), and shows that an ACE fit faithfully reproduces
+whichever one taught it.</p>
+<p><strong>Goals</strong></p>
+<ol>
+<li>Compute <span class="arithmatex">\(\gamma(111)\)</span> with two MIT-licensed MACE foundation models,
+   MACE-MPA-0 and MACE-MP-0b3, and measure how far apart they are.</li>
+<li>Fit ACE to a small surface dataset labelled by one of them, and see
+   whose answer it gives.</li>
+<li>Refit the same recipe to the other model's labels, and see the answer move.</li>
+</ol>
+<p>It uses the fitting steps of
+<a href="https://acesuit.github.io/ace-jax/tutorials/dataset-and-properties/">Tutorial 4</a>,
+and is adapted from notebook C of the
+<a href="https://mlipschool.uk/c/c_truth_about_the_truth">MLIP School 2026</a>. The surface
+dataset is the recipe a later tutorial on surfaces builds step by step.</p>
+<p><strong>Run this notebook.</strong> Install <a href="https://docs.astral.sh/uv/">uv</a>. Then run this command:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>uvx<span class="w"> </span>marimo<span class="w"> </span>edit<span class="w"> </span>--sandbox<span class="w"> </span>https://raw.githubusercontent.com/ACEsuit/ace-jax/main/docs/user/tutorials/notebooks/school_truth_si.py
+</code></pre></div>
+<p>The notebook opens in your browser. You do not need an account.
+You can also open the notebook in <a href="https://molab.marimo.io/github/ACEsuit/ace-jax/blob/main/docs/user/tutorials/notebooks/school_truth_si.py">molab</a>,
+the marimo hosted service. You must sign in to run it there.</p>
+<p>This website shows a static copy of the notebook, run on a CPU when the
+site was built.
+Run time: approximately 1 minute.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">pathlib</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="kn">import</span><span class="w"> </span><span class="nn">jax</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="n">jax</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="s2">"jax_enable_x64"</span><span class="p">,</span> <span class="kc">True</span><span class="p">)</span>  <span class="c1"># fitting needs float64</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="kn">import</span><span class="w"> </span><span class="nn">marimo</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">mo</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="kn">import</span><span class="w"> </span><span class="nn">matplotlib.pyplot</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">plt</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="kn">from</span><span class="w"> </span><span class="nn">ace_jax</span><span class="w"> </span><span class="kn">import</span> <span class="n">ACECalculator</span>
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="kn">from</span><span class="w"> </span><span class="nn">ace_jax.tutorials</span><span class="w"> </span><span class="kn">import</span> <span class="n">labels</span> <span class="k">as</span> <span class="n">L</span>
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="kn">from</span><span class="w"> </span><span class="nn">ace_jax.tutorials</span><span class="w"> </span><span class="kn">import</span> <span class="n">structures</span> <span class="k">as</span> <span class="n">T</span>
+</code></pre></div>
+<h2 id="step-1-two-labellers">Step 1: two labellers<a class="headerlink" href="#step-1-two-labellers" title="Permanent link">&para;</a></h2>
+<p>Both models come from <a href="https://github.com/ACEsuit/mace-foundations">ACEsuit/mace-foundations</a>
+and are MIT-licensed:</p>
+<table>
+<thead>
+<tr>
+<th>name</th>
+<th>model</th>
+<th>trained on</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>mpa-0</code></td>
+<td>MACE-MPA-0 (medium)</td>
+<td>MPtrj + sAlex, PBE(+U)</td>
+</tr>
+<tr>
+<td><code>mp-0b3</code></td>
+<td>MACE-MP-0b3 (medium)</td>
+<td>MPtrj, PBE(+U)</td>
+</tr>
+</tbody>
+</table>
+<p>They share a functional family but differ in training data and model
+details, so they are two different "truths". Their labels for every
+structure in this notebook are included with the tutorial.</p>
+<p>The surface energy of a slab with <span class="arithmatex">\(N\)</span> atoms and two faces of area <span class="arithmatex">\(A\)</span> is</p>
+<div class="arithmatex">\[\gamma = \frac{E_\text{slab} - N\,E_\text{bulk}/N_\text{bulk}}{2A}.\]</div>
+<p>The slab is cut on the wide "shuffle" (111) plane of silicon, with one
+broken bond for each surface atom. It has 6 layers and 8 Å of vacuum. It
+is not relaxed.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="n">URL</span> <span class="o">=</span> <span class="s2">"https://raw.githubusercontent.com/ACEsuit/ace-jax/main/docs/user/tutorials/data/school/c/"</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="n">_here</span> <span class="o">=</span> <span class="p">(</span><span class="n">mo</span><span class="o">.</span><span class="n">notebook_dir</span><span class="p">()</span> <span class="o">/</span> <span class="s2">"../data/school/c"</span><span class="p">)</span> <span class="k">if</span> <span class="n">mo</span><span class="o">.</span><span class="n">notebook_dir</span><span class="p">()</span> <span class="k">else</span> <span class="kc">None</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="n">caches</span> <span class="o">=</span> <span class="p">{}</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="k">for</span> <span class="n">_m</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">"mpa-0"</span><span class="p">,</span> <span class="s2">"mp-0b3"</span><span class="p">):</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>    <span class="n">_f</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">"labels-</span><span class="si">{</span><span class="n">_m</span><span class="si">}</span><span class="s2">.xyz"</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>    <span class="n">caches</span><span class="p">[</span><span class="n">_m</span><span class="p">]</span> <span class="o">=</span> <span class="n">L</span><span class="o">.</span><span class="n">LabelCache</span><span class="o">.</span><span class="n">from_file</span><span class="p">(</span><span class="n">_here</span> <span class="o">/</span> <span class="n">_f</span> <span class="k">if</span> <span class="n">_here</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="p">(</span><span class="n">_here</span> <span class="o">/</span> <span class="n">_f</span><span class="p">)</span><span class="o">.</span><span class="n">exists</span><span class="p">()</span> <span class="k">else</span> <span class="n">URL</span> <span class="o">+</span> <span class="n">_f</span><span class="p">)</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="n">structures</span> <span class="o">=</span> <span class="n">T</span><span class="o">.</span><span class="n">c_structures</span><span class="p">()</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="n">work</span> <span class="o">=</span> <span class="n">pathlib</span><span class="o">.</span><span class="n">Path</span><span class="p">(</span><span class="s2">"ace_jax_tutorial_8"</span><span class="p">)</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="n">work</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="k">def</span><span class="w"> </span><span class="nf">gamma_of</span><span class="p">(</span><span class="n">bulk_atoms</span><span class="p">,</span> <span class="n">e_bulk</span><span class="p">,</span> <span class="n">slab_atoms</span><span class="p">,</span> <span class="n">e_slab</span><span class="p">):</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>    <span class="k">return</span> <span class="n">T</span><span class="o">.</span><span class="n">surface_energy</span><span class="p">(</span><span class="n">e_bulk</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">bulk_atoms</span><span class="p">),</span> <span class="n">e_slab</span><span class="p">,</span> <span class="n">slab_atoms</span><span class="p">)</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="n">truths</span> <span class="o">=</span> <span class="p">{}</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="k">for</span> <span class="n">_m</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">"mpa-0"</span><span class="p">,</span> <span class="s2">"mp-0b3"</span><span class="p">):</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>    <span class="n">_b</span><span class="p">,</span> <span class="n">_s</span> <span class="o">=</span> <span class="n">L</span><span class="o">.</span><span class="n">label</span><span class="p">([</span><span class="n">structures</span><span class="p">[</span><span class="s2">"bulk"</span><span class="p">],</span> <span class="n">structures</span><span class="p">[</span><span class="s2">"slab111"</span><span class="p">]],</span> <span class="n">model</span><span class="o">=</span><span class="n">_m</span><span class="p">,</span> <span class="n">cache</span><span class="o">=</span><span class="n">caches</span><span class="p">[</span><span class="n">_m</span><span class="p">])</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>    <span class="n">truths</span><span class="p">[</span><span class="n">_m</span><span class="p">]</span> <span class="o">=</span> <span class="n">gamma_of</span><span class="p">(</span><span class="n">_b</span><span class="p">,</span> <span class="n">_b</span><span class="o">.</span><span class="n">info</span><span class="p">[</span><span class="s2">"energy"</span><span class="p">],</span> <span class="n">_s</span><span class="p">,</span> <span class="n">_s</span><span class="o">.</span><span class="n">info</span><span class="p">[</span><span class="s2">"energy"</span><span class="p">])</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="n">gap</span> <span class="o">=</span> <span class="nb">abs</span><span class="p">(</span><span class="n">truths</span><span class="p">[</span><span class="s2">"mpa-0"</span><span class="p">]</span> <span class="o">-</span> <span class="n">truths</span><span class="p">[</span><span class="s2">"mp-0b3"</span><span class="p">])</span> <span class="o">/</span> <span class="n">truths</span><span class="p">[</span><span class="s2">"mpa-0"</span><span class="p">]</span>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="n">mo</span><span class="o">.</span><span class="n">md</span><span class="p">(</span><span class="s2">"| labeller | γ(111) (eV/Å²) | γ(111) (J/m²) |</span><span class="se">\n</span><span class="s2">|---|---|---|</span><span class="se">\n</span><span class="s2">"</span>
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a>      <span class="o">+</span> <span class="s2">"</span><span class="se">\n</span><span class="s2">"</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="sa">f</span><span class="s2">"| `</span><span class="si">{</span><span class="n">m</span><span class="si">}</span><span class="s2">` | </span><span class="si">{</span><span class="n">g</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2"> | </span><span class="si">{</span><span class="n">g</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mf">16.0218</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2"> |"</span> <span class="k">for</span> <span class="n">m</span><span class="p">,</span> <span class="n">g</span> <span class="ow">in</span> <span class="n">truths</span><span class="o">.</span><span class="n">items</span><span class="p">())</span>
+<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a>      <span class="o">+</span> <span class="sa">f</span><span class="s2">"</span><span class="se">\n\n</span><span class="s2">The two references differ by **</span><span class="si">{</span><span class="mi">100</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">gap</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2">%**."</span><span class="p">)</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>labeller</th>
+<th>γ(111) (eV/Å²)</th>
+<th>γ(111) (J/m²)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>mpa-0</code></td>
+<td>0.0712</td>
+<td>1.140</td>
+</tr>
+<tr>
+<td><code>mp-0b3</code></td>
+<td>0.0683</td>
+<td>1.094</td>
+</tr>
+</tbody>
+</table>
+<p>The two references differ by <strong>4.0%</strong>.</p>
+<h2 id="step-2-fit-to-one-teacher">Step 2: fit to one teacher<a class="headerlink" href="#step-2-fit-to-one-teacher" title="Permanent link">&para;</a></h2>
+<p>The surface dataset has 8 rattled bulk cells (lattice scaled by 0.94 to
+1.06, rattle 0.02 Å) and 4-layer (100), (110) and (111) slabs: 11
+structures. Label it with <code>mpa-0</code> and fit a linear ACE model, order 3 and
+total degree 10, cutoff 5.5 Å. The 6-layer slab that <span class="arithmatex">\(\gamma\)</span> is computed
+on is not in the training set.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">ace_jax.basis.model</span><span class="w"> </span><span class="kn">import</span> <span class="n">BasisSpec</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">ace_jax.fit.pipeline</span><span class="w"> </span><span class="kn">import</span> <span class="n">FitConfig</span><span class="p">,</span> <span class="n">fit</span><span class="p">,</span> <span class="n">load_fit_data</span><span class="p">,</span> <span class="n">save_model</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="k">def</span><span class="w"> </span><span class="nf">fit_and_gamma</span><span class="p">(</span><span class="n">model</span><span class="p">):</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="w">    </span><span class="sd">"""Fit the surface recipe to `model`'s labels; gamma(111) of the fitted potential."""</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>    <span class="n">labelled</span> <span class="o">=</span> <span class="n">L</span><span class="o">.</span><span class="n">label</span><span class="p">(</span><span class="n">structures</span><span class="p">[</span><span class="s2">"recipe"</span><span class="p">],</span> <span class="n">model</span><span class="o">=</span><span class="n">model</span><span class="p">,</span> <span class="n">cache</span><span class="o">=</span><span class="n">caches</span><span class="p">[</span><span class="n">model</span><span class="p">])</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>    <span class="n">cfg</span> <span class="o">=</span> <span class="n">FitConfig</span><span class="p">(</span><span class="n">model</span><span class="o">=</span><span class="n">BasisSpec</span><span class="p">(</span><span class="n">order</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span> <span class="n">max_degree</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span> <span class="n">rcut</span><span class="o">=</span><span class="mf">5.5</span><span class="p">,</span> <span class="n">elements</span><span class="o">=</span><span class="p">(</span><span class="s2">"Si"</span><span class="p">,)),</span> <span class="n">arm</span><span class="o">=</span><span class="s2">"linear"</span><span class="p">,</span>
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>                    <span class="n">m_per_species</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">e0</span><span class="o">=</span><span class="s2">"lsq"</span><span class="p">,</span> <span class="n">opt</span><span class="o">=</span><span class="s2">"lbfgs"</span><span class="p">,</span> <span class="n">r0</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">rungs</span><span class="o">=</span><span class="p">(</span><span class="s2">"map"</span><span class="p">,),</span>
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>                    <span class="n">predict_stats</span><span class="o">=</span><span class="s2">"recompute"</span><span class="p">,</span> <span class="n">predict_train</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a>                    <span class="n">energy_key</span><span class="o">=</span><span class="s2">"energy"</span><span class="p">,</span> <span class="n">force_key</span><span class="o">=</span><span class="s2">"forces"</span><span class="p">,</span> <span class="n">virial_key</span><span class="o">=</span><span class="s2">"virial"</span><span class="p">)</span><span class="o">.</span><span class="n">validate</span><span class="p">()</span>
+<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a>    <span class="n">res</span> <span class="o">=</span> <span class="n">fit</span><span class="p">(</span><span class="n">cfg</span><span class="p">,</span> <span class="n">load_fit_data</span><span class="p">(</span><span class="n">cfg</span><span class="p">,</span> <span class="n">train</span><span class="o">=</span><span class="n">labelled</span><span class="p">,</span> <span class="n">log</span><span class="o">=</span><span class="k">lambda</span> <span class="o">*</span><span class="n">a</span><span class="p">:</span> <span class="kc">None</span><span class="p">),</span> <span class="n">log</span><span class="o">=</span><span class="k">lambda</span> <span class="o">*</span><span class="n">a</span><span class="p">:</span> <span class="kc">None</span><span class="p">)</span>
+<a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a>    <span class="n">calc</span> <span class="o">=</span> <span class="n">ACECalculator</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">save_model</span><span class="p">(</span><span class="n">res</span><span class="p">,</span> <span class="n">work</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">"fit-</span><span class="si">{</span><span class="n">model</span><span class="si">}</span><span class="s2">"</span><span class="p">)),</span> <span class="n">skin</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+<a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a>    <span class="n">E</span> <span class="o">=</span> <span class="p">[]</span>
+<a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a>    <span class="k">for</span> <span class="n">_a</span> <span class="ow">in</span> <span class="p">(</span><span class="n">structures</span><span class="p">[</span><span class="s2">"bulk"</span><span class="p">],</span> <span class="n">structures</span><span class="p">[</span><span class="s2">"slab111"</span><span class="p">]):</span>
+<a id="__codelineno-4-16" name="__codelineno-4-16" href="#__codelineno-4-16"></a>        <span class="n">_b</span> <span class="o">=</span> <span class="n">_a</span><span class="o">.</span><span class="n">copy</span><span class="p">();</span> <span class="n">_b</span><span class="o">.</span><span class="n">calc</span> <span class="o">=</span> <span class="n">calc</span>
+<a id="__codelineno-4-17" name="__codelineno-4-17" href="#__codelineno-4-17"></a>        <span class="n">E</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">_b</span><span class="o">.</span><span class="n">get_potential_energy</span><span class="p">())</span>
+<a id="__codelineno-4-18" name="__codelineno-4-18" href="#__codelineno-4-18"></a>    <span class="k">return</span> <span class="n">gamma_of</span><span class="p">(</span><span class="n">structures</span><span class="p">[</span><span class="s2">"bulk"</span><span class="p">],</span> <span class="n">E</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">structures</span><span class="p">[</span><span class="s2">"slab111"</span><span class="p">],</span> <span class="n">E</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span>
+<a id="__codelineno-4-19" name="__codelineno-4-19" href="#__codelineno-4-19"></a>
+<a id="__codelineno-4-20" name="__codelineno-4-20" href="#__codelineno-4-20"></a>
+<a id="__codelineno-4-21" name="__codelineno-4-21" href="#__codelineno-4-21"></a><span class="n">_t</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+<a id="__codelineno-4-22" name="__codelineno-4-22" href="#__codelineno-4-22"></a><span class="n">gamma_fit</span> <span class="o">=</span> <span class="p">{</span><span class="s2">"mpa-0"</span><span class="p">:</span> <span class="n">fit_and_gamma</span><span class="p">(</span><span class="s2">"mpa-0"</span><span class="p">)}</span>
+<a id="__codelineno-4-23" name="__codelineno-4-23" href="#__codelineno-4-23"></a><span class="n">fit_seconds</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span> <span class="o">-</span> <span class="n">_t</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="n">distance_to_teacher</span> <span class="o">=</span> <span class="nb">abs</span><span class="p">(</span><span class="n">gamma_fit</span><span class="p">[</span><span class="s2">"mpa-0"</span><span class="p">]</span> <span class="o">-</span> <span class="n">truths</span><span class="p">[</span><span class="s2">"mpa-0"</span><span class="p">])</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="n">distance_to_other</span> <span class="o">=</span> <span class="nb">abs</span><span class="p">(</span><span class="n">gamma_fit</span><span class="p">[</span><span class="s2">"mpa-0"</span><span class="p">]</span> <span class="o">-</span> <span class="n">truths</span><span class="p">[</span><span class="s2">"mp-0b3"</span><span class="p">])</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="n">_fig</span><span class="p">,</span> <span class="n">_ax</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">subplots</span><span class="p">(</span><span class="n">figsize</span><span class="o">=</span><span class="p">(</span><span class="mi">7</span><span class="p">,</span> <span class="mf">1.8</span><span class="p">))</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="k">for</span> <span class="n">_g</span><span class="p">,</span> <span class="n">_lab</span><span class="p">,</span> <span class="n">_c</span><span class="p">,</span> <span class="n">_y</span> <span class="ow">in</span> <span class="p">((</span><span class="n">truths</span><span class="p">[</span><span class="s2">"mpa-0"</span><span class="p">],</span> <span class="s2">"MACE-MPA-0 (teacher)"</span><span class="p">,</span> <span class="s2">"C0"</span><span class="p">,</span> <span class="mf">0.7</span><span class="p">),</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>                         <span class="p">(</span><span class="n">truths</span><span class="p">[</span><span class="s2">"mp-0b3"</span><span class="p">],</span> <span class="s2">"MACE-MP-0b3"</span><span class="p">,</span> <span class="s2">"C1"</span><span class="p">,</span> <span class="mf">0.7</span><span class="p">),</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>                         <span class="p">(</span><span class="n">gamma_fit</span><span class="p">[</span><span class="s2">"mpa-0"</span><span class="p">],</span> <span class="s2">"ACE fitted to MPA-0"</span><span class="p">,</span> <span class="s2">"C2"</span><span class="p">,</span> <span class="mf">0.3</span><span class="p">)):</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>    <span class="n">_ax</span><span class="o">.</span><span class="n">plot</span><span class="p">([</span><span class="n">_g</span><span class="p">],</span> <span class="p">[</span><span class="n">_y</span><span class="p">],</span> <span class="s2">"o"</span><span class="p">,</span> <span class="n">c</span><span class="o">=</span><span class="n">_c</span><span class="p">,</span> <span class="n">ms</span><span class="o">=</span><span class="mi">9</span><span class="p">);</span> <span class="n">_ax</span><span class="o">.</span><span class="n">annotate</span><span class="p">(</span><span class="n">_lab</span><span class="p">,</span> <span class="p">(</span><span class="n">_g</span><span class="p">,</span> <span class="n">_y</span><span class="p">),</span> <span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">8</span><span class="p">),</span> <span class="n">textcoords</span><span class="o">=</span><span class="s2">"offset points"</span><span class="p">,</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>                                                         <span class="n">ha</span><span class="o">=</span><span class="s2">"center"</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">8</span><span class="p">)</span>
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="n">_vals</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="n">truths</span><span class="p">[</span><span class="s2">"mpa-0"</span><span class="p">],</span> <span class="n">truths</span><span class="p">[</span><span class="s2">"mp-0b3"</span><span class="p">],</span> <span class="n">gamma_fit</span><span class="p">[</span><span class="s2">"mpa-0"</span><span class="p">]])</span>
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="n">_pad</span> <span class="o">=</span> <span class="mf">0.25</span> <span class="o">*</span> <span class="nb">max</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ptp</span><span class="p">(</span><span class="n">_vals</span><span class="p">),</span> <span class="mf">1e-3</span><span class="p">)</span>
+<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a><span class="n">_ax</span><span class="o">.</span><span class="n">set</span><span class="p">(</span><span class="n">xlim</span><span class="o">=</span><span class="p">(</span><span class="n">_vals</span><span class="o">.</span><span class="n">min</span><span class="p">()</span> <span class="o">-</span> <span class="n">_pad</span><span class="p">,</span> <span class="n">_vals</span><span class="o">.</span><span class="n">max</span><span class="p">()</span> <span class="o">+</span> <span class="n">_pad</span><span class="p">),</span> <span class="n">ylim</span><span class="o">=</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mf">1.1</span><span class="p">),</span> <span class="n">yticks</span><span class="o">=</span><span class="p">[],</span> <span class="n">xlabel</span><span class="o">=</span><span class="s2">"γ(111) (eV/Å²)"</span><span class="p">)</span>
+<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a><span class="n">_ax</span><span class="o">.</span><span class="n">set_title</span><span class="p">(</span><span class="sa">f</span><span class="s2">"ACE: γ(111) = </span><span class="si">{</span><span class="n">gamma_fit</span><span class="p">[</span><span class="s1">'mpa-0'</span><span class="p">]</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2"> eV/Å², </span><span class="si">{</span><span class="n">distance_to_teacher</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2"> from its "</span>
+<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a>              <span class="sa">f</span><span class="s2">"teacher, </span><span class="si">{</span><span class="n">distance_to_other</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2"> from the other model"</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">9</span><span class="p">)</span>
+<a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a><span class="n">_fig</span><span class="o">.</span><span class="n">tight_layout</span><span class="p">()</span>
+<a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a><span class="n">_fig</span>
+</code></pre></div>
+<p><img alt="Figure 1" src="../truth-about-the-truth_files/fig-1.png" /></p>
+<div class="admonition success">
+<p><strong>Checkpoint 1 passed:</strong> the fit sits closer to the model that labelled its data.</p>
+</div>
+
+<h2 id="step-3-the-same-recipe-the-other-teacher">Step 3: the same recipe, the other teacher<a class="headerlink" href="#step-3-the-same-recipe-the-other-teacher" title="Permanent link">&para;</a></h2>
+<p>Nothing in Step 2 was wrong. Label the same 11 structures with <code>mp-0b3</code>
+and fit again with exactly the same settings: the result is a potential
+just as good, aimed at a different answer.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="n">both_fits</span> <span class="o">=</span> <span class="p">{</span><span class="o">**</span><span class="n">gamma_fit</span><span class="p">,</span> <span class="s2">"mp-0b3"</span><span class="p">:</span> <span class="n">fit_and_gamma</span><span class="p">(</span><span class="s2">"mp-0b3"</span><span class="p">)}</span>       <span class="c1"># a new dict: marimo cells don't mutate</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="n">errors</span> <span class="o">=</span> <span class="p">{</span><span class="n">m</span><span class="p">:</span> <span class="nb">abs</span><span class="p">(</span><span class="n">both_fits</span><span class="p">[</span><span class="n">m</span><span class="p">]</span> <span class="o">-</span> <span class="n">truths</span><span class="p">[</span><span class="n">m</span><span class="p">])</span> <span class="k">for</span> <span class="n">m</span> <span class="ow">in</span> <span class="n">truths</span><span class="p">}</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="n">mo</span><span class="o">.</span><span class="n">md</span><span class="p">(</span><span class="s2">"| potential | trained on | γ(111) (eV/Å²) | error against its own teacher |</span><span class="se">\n</span><span class="s2">|---|---|---|---|</span><span class="se">\n</span><span class="s2">"</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>      <span class="o">+</span> <span class="s2">"</span><span class="se">\n</span><span class="s2">"</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="sa">f</span><span class="s2">"| ACE | `</span><span class="si">{</span><span class="n">m</span><span class="si">}</span><span class="s2">` labels | </span><span class="si">{</span><span class="n">both_fits</span><span class="p">[</span><span class="n">m</span><span class="p">]</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2"> | </span><span class="si">{</span><span class="n">errors</span><span class="p">[</span><span class="n">m</span><span class="p">]</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2"> |"</span> <span class="k">for</span> <span class="n">m</span> <span class="ow">in</span> <span class="n">truths</span><span class="p">)</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>      <span class="o">+</span> <span class="s2">"</span><span class="se">\n</span><span class="s2">| | | | |</span><span class="se">\n</span><span class="s2">"</span>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>      <span class="o">+</span> <span class="s2">"</span><span class="se">\n</span><span class="s2">"</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="sa">f</span><span class="s2">"| `</span><span class="si">{</span><span class="n">m</span><span class="si">}</span><span class="s2">` | (itself) | </span><span class="si">{</span><span class="n">truths</span><span class="p">[</span><span class="n">m</span><span class="p">]</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2"> | |"</span> <span class="k">for</span> <span class="n">m</span> <span class="ow">in</span> <span class="n">truths</span><span class="p">))</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>potential</th>
+<th>trained on</th>
+<th>γ(111) (eV/Å²)</th>
+<th>error against its own teacher</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ACE</td>
+<td><code>mpa-0</code> labels</td>
+<td>0.0712</td>
+<td>0.0001</td>
+</tr>
+<tr>
+<td>ACE</td>
+<td><code>mp-0b3</code> labels</td>
+<td>0.0682</td>
+<td>0.0001</td>
+</tr>
+<tr>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>mpa-0</code></td>
+<td>(itself)</td>
+<td>0.0712</td>
+<td></td>
+</tr>
+<tr>
+<td><code>mp-0b3</code></td>
+<td>(itself)</td>
+<td>0.0683</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<div class="admonition success">
+<p><strong>Checkpoint 2 passed:</strong> each fit reproduces its own teacher to within 0.0001 eV/Å², less than half the 4.0% gap between the teachers.</p>
+</div>
+
+<h2 id="the-same-lesson-one-level-down">The same lesson, one level down<a class="headerlink" href="#the-same-lesson-one-level-down" title="Permanent link">&para;</a></h2>
+<p>This is not special to machine learning.</p>
+<ul>
+<li>A DFT surface energy depends on the <strong>functional</strong>: PBE and r²SCAN
+  disagree about silicon surfaces by several percent.</li>
+<li>It depends on <strong>k-point sampling</strong>, the <strong>plane-wave cutoff</strong>, <strong>slab
+  thickness</strong> and <strong>vacuum</strong>, each a convergence parameter somebody chose.</li>
+<li>A foundation model used as a reference adds its own training data and
+  fitting error on top.</li>
+</ul>
+<p>A potential inherits every one of these choices through its labels, and
+then reproduces them at millions of atom-steps per second. The error bar
+on a predicted property is the fitting error <em>plus</em> the uncertainty of the
+reference, and the second can be the larger.</p>
+<h2 id="reflection">Reflection<a class="headerlink" href="#reflection" title="Permanent link">&para;</a></h2>
+<p>You are asked for the surface energy of Si(111) for a paper. What do you
+report, and what do you state alongside it? Write your answer before
+opening the model answer.</p>
+<details class="note">
+<summary>A model answer</summary>
+<p>Report the number together with the ground it stands on: which reference labelled the training set, which functional that reference used, and the convergence choices behind it (slab thickness, vacuum, k-points). Without those, the value is neither reproducible nor comparable with anyone else's. Where it matters, quote more than one reference and treat their spread as a systematic uncertainty: it can be larger than the fitting error. The fitting error says how faithfully the potential copied its teacher, not whether the teacher was right.</p>
+</details>
+
+<h2 id="exercises">Exercises<a class="headerlink" href="#exercises" title="Permanent link">&para;</a></h2>
+<ol>
+<li><strong>Other facets.</strong> The recipe already holds 4-layer (100) and (110)
+   slabs. Compute <span class="arithmatex">\(\gamma\)</span> for each from both labellers (the cached labels
+   cover them), and compare the gap facet by facet.</li>
+<li><strong>Slab thickness.</strong> <span class="arithmatex">\(\gamma\)</span> above uses a 6-layer slab. With the
+   labeller installed (<code>pip install mace-torch --extra-index-url
+   https://download.pytorch.org/whl/cpu</code>), compute <span class="arithmatex">\(\gamma(111)\)</span> from
+   <code>T.slab((1, 1, 1), n)</code> for n = 4, 6, 8, 10. When is it converged?</li>
+<li><strong>Basis size.</strong> Refit at total degree 8 and 12. Does checkpoint 2 still
+   pass, and which error grows first?</li>
+</ol>
+<h2 id="summary">Summary<a class="headerlink" href="#summary" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Two reasonable reference models disagree about a surface energy.</li>
+<li>An ACE fit tracks whichever reference it was taught, to well within
+  that disagreement.</li>
+<li>Report a predicted property with its reference, and count the
+  reference's uncertainty in the error bar.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../curation/" class="md-footer__link md-footer__link--prev" aria-label="Previous: 7. Automating curation">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                7. Automating curation
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../bring-your-own-data/" class="md-footer__link md-footer__link--next" aria-label="Next: 9. Bring your own data">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                9. Bring your own data
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.indexes", "navigation.footer", "search.suggest", "search.highlight", "content.code.copy", "toc.follow"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+        <script src="../../javascripts/mathjax.js"></script>
+      
+        <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+        <script src="../../javascripts/plotly-figures.js"></script>
+      
+    
+  </body>
+</html>

@@ -1,0 +1,22 @@
+/* Tutorial pages are rendered from the notebooks (docs/build_tutorials.py). Their
+   matplotlib figures have a white background: keep them on a white card, so they
+   read the same in the dark (slate) scheme, and centre them. */
+.md-typeset img[alt^="Figure"] {
+  display: block;
+  margin: 0.8em auto;
+  max-width: 100%;
+  background: #fff;
+  border-radius: 0.2rem;
+  padding: 0.4rem;
+  box-shadow: var(--md-shadow-z1);
+}
+
+/* Interactive figures (javascripts/plotly-figures.js): the live plot replaces the fallback image on screen;
+   print keeps the image. */
+.plotly-figure__plot { width: 100%; }
+.plotly-figure__presets .md-button { margin: 0 0.4em 0.4em 0; padding: 0.25em 0.9em; font-size: 0.7rem; }
+.plotly-figure--live img, .plotly-figure:not(.plotly-figure--live) .plotly-figure__presets { display: none; }
+@media print {
+  .plotly-figure--live img { display: block; }
+  .plotly-figure__plot, .plotly-figure__presets { display: none; }
+}

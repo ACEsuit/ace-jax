@@ -1,0 +1,2320 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head><meta name="robots" content="noindex">
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Fit and evaluate ACE and PACE interatomic potentials in Python/JAX">
+      
+      
+      
+        <link rel="canonical" href="https://acesuit.github.io/ace-jax/concepts/">
+      
+      
+        <link rel="prev" href="../tutorials/bring-your-own-data/">
+      
+      
+        <link rel="next" href="force-uncertainty-maths/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/acesuit-logo.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Overview - ace-jax</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/_mkdocstrings.css">
+    
+      <link rel="stylesheet" href="../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#concepts" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="ace-jax" class="md-header__button md-logo" aria-label="ace-jax" data-md-component="logo">
+      
+  <img src="../assets/acesuit-logo.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            ace-jax
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Overview
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/ACEsuit/ace-jax" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    ACEsuit/ace-jax
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="ace-jax" class="md-nav__button md-logo" aria-label="ace-jax" data-md-component="logo">
+      
+  <img src="../assets/acesuit-logo.png" alt="logo">
+
+    </a>
+    ace-jax
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/ACEsuit/ace-jax" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    ACEsuit/ace-jax
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../tutorials/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorials
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_4" id="__nav_4_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Tutorials
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/first-fit/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    1. First fit: silicon
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/learned-radials/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2. Learned radials: silicon
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/multi-element/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    3. Multi-element fits: categorical and embedded species
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/dataset-and-properties/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    4. Your data, your property
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/basis-and-evidence/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    5. Basis size and the evidence
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/surfaces/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    6. Surfaces: coverage and repair
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/curation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    7. Automating curation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/truth-about-the-truth/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    8. The truth about the truth
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/bring-your-own-data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    9. Bring your own data
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-ace-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The ACE model
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#e0-the-reference-energy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        E0: the reference energy
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-radial-basis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The radial basis
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The radial basis">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#multi-element-models" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Multi-element models
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#fitting-bayesian-linear-regression" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fitting: Bayesian linear regression
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Fitting: Bayesian linear regression">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#other-fit-arms" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Other fit arms
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reading-the-metrics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reading the metrics
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#model-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Model files
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#terms" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Terms
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="force-uncertainty-maths/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Force uncertainty: the mathematics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How-to guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    How-to guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../howto/basis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Build a basis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../howto/fit-yaml/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run files (fit.yaml)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../howto/multi-element/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Multi-element fits
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../howto/ase/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ASE calculators
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../howto/batch/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evaluate many structures
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../howto/lammps/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    LAMMPS export
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../howto/jax-md/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MD with JAX-MD
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../howto/precision/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Choose float64 or float32
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../howto/pace/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    PACE .yace models
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../howto/learned-radials/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Learn the radial basis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../howto/force-uncertainty/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Per-atom force uncertainty
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../howto/foundation-labels/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Labels from a foundation model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../howto/large-fits/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Large linear fits
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../howto/reproducibility/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reproducibility
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../benchmarks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Performance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Python API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../faq/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAQ and troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../licence/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Licence and citation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-ace-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The ACE model
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#e0-the-reference-energy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        E0: the reference energy
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-radial-basis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The radial basis
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The radial basis">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#multi-element-models" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Multi-element models
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#fitting-bayesian-linear-regression" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fitting: Bayesian linear regression
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Fitting: Bayesian linear regression">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#other-fit-arms" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Other fit arms
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reading-the-metrics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reading the metrics
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#model-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Model files
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#terms" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Terms
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="concepts">Concepts<a class="headerlink" href="#concepts" title="Permanent link">&para;</a></h1>
+<p>This page explains the model, the reference energy, the radial basis, the
+fit and the metrics. <a href="#terms">Terms</a> at the end of the page defines the
+words that these pages use with a special meaning.</p>
+<h2 id="the-ace-model">The ACE model<a class="headerlink" href="#the-ace-model" title="Permanent link">&para;</a></h2>
+<p>An ACE potential writes the energy as a sum of site energies,
+<span class="arithmatex">\(E = \sum_i E_i\)</span>. Each site energy is a linear combination of basis
+functions of the neighbour environment of atom <span class="arithmatex">\(i\)</span>, in a cutoff <code>rcut</code>:</p>
+<div class="arithmatex">\[
+E_i = E_0(z_i) + \sum_k c_k(z_i)\, B_k(\text{environment of } i)
+\]</div>
+<ul>
+<li>The <strong>B functions</strong> are symmetric polynomials of the neighbour positions:
+  they do not change under rotation, reflection or permutation. Each B
+  function couples a maximum of <code>--order</code> neighbours (the correlation order;
+  body order = order + 1). The B functions are products of radial functions
+  and spherical harmonics. A <strong>pair basis</strong> of 2-body radial functions is
+  added to them.</li>
+<li><code>--max-degree</code> sets the maximum total degree of each B function. This
+  sets the basis size. Each one-particle factor counts as <span class="arithmatex">\(n + w_L\, l\)</span>,
+  with radial degree <span class="arithmatex">\(n\)</span> and angular degree <span class="arithmatex">\(l\)</span>. <code>--wL</code> is 1.5 by default,
+  so angular degree costs more than radial degree. This follows
+  <code>TotalDegree</code> in ACEpotentials.</li>
+<li><code>--nmax-by-order</code> and <code>--lmax-by-order</code> set a maximum <span class="arithmatex">\(n\)</span> and <span class="arithmatex">\(l\)</span> for
+  each correlation order, in a comma-separated list that starts at order 1.
+  If the list is shorter than <code>--order</code>, its last value applies to the
+  higher orders. They are the <code>nradmax_by_orders</code> and <code>lmax_by_orders</code>
+  settings of pacemaker. With <code>--wL 1</code>, <code>--max-degree</code> then gives the power
+  order of pacemaker.</li>
+<li>The <strong>coupling coefficients</strong> turn products of radial functions and
+  spherical harmonics into invariant B functions. The <code>ace-jax-coupling</code>
+  library calculates them at the first build of a basis specification.
+  ace-jax then keeps them in a cache.</li>
+<li>The fit regularises each basis function with the algebraic <strong>smoothness
+  prior</strong> <span class="arithmatex">\(\Gamma\)</span> (<code>algebraic_smoothness_prior</code> in ACEpotentials). This
+  prior penalises high-degree functions more. If the basis does not contain
+  the prior, <code>aj fit</code> builds it again from the basis, and logs
+  <code>gamma missing from &lt;basis&gt; -- rebuilt via basis.prior</code>. This message is
+  normal.</li>
+</ul>
+<p>The model maps edge vectors <span class="arithmatex">\(\mathbf{r}_{ij}\)</span> (not positions and a cell) to
+site energies. JAX differentiates that map once to get the forces and the
+virial. <code>aj eval</code>, ASE and LAMMPS all use the same core.</p>
+<p><span class="arithmatex">\(E\)</span> is linear in the coefficients <span class="arithmatex">\(c\)</span>. Thus the fit is a linear regression on
+a design matrix. The rows of this matrix are the energies, forces and virials
+of the training configurations.</p>
+<h2 id="e0-the-reference-energy">E0: the reference energy<a class="headerlink" href="#e0-the-reference-energy" title="Permanent link">&para;</a></h2>
+<p><span class="arithmatex">\(E_0(z)\)</span> is a fixed energy for each species. It is the site energy of an
+atom with no neighbours, where the basis gives zero. The fit targets
+<span class="arithmatex">\(E - \sum_i E_0(z_i)\)</span>. Thus <span class="arithmatex">\(E_0\)</span> sets what the basis must represent.</p>
+<ul>
+<li>A new basis has <span class="arithmatex">\(E_0 = 0\)</span>. <code>aj fit --e0 model</code> (the default) uses the
+  <span class="arithmatex">\(E_0\)</span> in the basis.</li>
+<li><code>aj fit --e0 lsq</code> fits <span class="arithmatex">\(E_0\)</span> together with the model:<ul>
+<li>It adds one linear coefficient for each species. The prior of this
+  coefficient has a width of 1 eV, centred on a least-squares fit of the
+  training energies to the composition.</li>
+<li>The basis then represents only energy differences. If the basis has a
+  constant site energy that it cannot remove, <span class="arithmatex">\(E_0\)</span> absorbs it. This
+  offset then does not become an energy error.</li>
+<li>Use <code>--e0 lsq</code> for a new basis.</li>
+<li>If the training set has no isolated atom, the fitted <span class="arithmatex">\(E_0\)</span> is a
+  reference level, not the energy of a free atom. It changes together
+  with the basis, and the prior has an effect on its value.</li>
+<li>You can compare the log-evidence of these fits between bases fitted to
+  the same data. Do not compare it with <code>--e0 prefit</code> fits.</li>
+</ul>
+</li>
+<li><code>aj fit --e0 prefit</code> is the older two-step method. It sets <span class="arithmatex">\(E_0\)</span> to the
+  least-squares fit, and then fits the coefficients.</li>
+</ul>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>POPS fits use the <code>prefit</code> method, also with <code>--e0 lsq</code>. ARD fits
+<span class="arithmatex">\(E_0\)</span> together with the coefficients, as the default fit does.</p>
+</div>
+<p>An <strong>isolated atom</strong> is a configuration with one atom and no neighbour in
+the cutoff. The model predicts <span class="arithmatex">\(E_0\)</span> alone for it. With <code>--e0 lsq</code> or
+<code>prefit</code>, if the training set has an isolated atom of a species, <span class="arithmatex">\(E_0\)</span> of
+that species is set to the energy of that atom. The fit calculates <span class="arithmatex">\(E_0\)</span> for
+the other species (see the
+<a href="../faq/#how-do-i-use-isolated-atom-energies-as-e0">FAQ</a>).</p>
+<h2 id="the-radial-basis">The radial basis<a class="headerlink" href="#the-radial-basis" title="Permanent link">&para;</a></h2>
+<p>Each one-particle basis function is a radial function <span class="arithmatex">\(R_{nl}(r)\)</span> multiplied
+by a spherical harmonic <span class="arithmatex">\(Y_{lm}\)</span>. The radial functions are mixtures of a
+polynomial basis <span class="arithmatex">\(P_q(x)\)</span> in a transformed distance <span class="arithmatex">\(x\)</span>, with a weight array
+<span class="arithmatex">\(W\)</span>:</p>
+<div class="arithmatex">\[
+R_{nl}(r) = f_\text{env}(x) \sum_q W_{z_i z_j n q}\, P_q(x)
+\]</div>
+<ul>
+<li><code>--radial-mode</code> (on <code>aj fit</code> and <code>aj basis</code>) sets the initial weights <span class="arithmatex">\(W\)</span>.<ul>
+<li><code>onehot</code> (the default) is the linear-ACE (ACE1) convention. Each radial
+  function is one polynomial multiplied by an indicator of one neighbour
+  species. Thus, for one element, <span class="arithmatex">\(R_n = P_n\)</span>.</li>
+<li><code>glorot_normal</code> uses seeded random mixtures of the polynomials. It is a
+  random start for learned radials. If you keep it frozen, the fit is
+  several times worse.</li>
+</ul>
+</li>
+<li><code>aj fit</code> keeps <span class="arithmatex">\(W\)</span> frozen and fits only the coefficients <span class="arithmatex">\(c\)</span>.</li>
+<li><strong>Learned radials</strong> optimise <span class="arithmatex">\(W\)</span> by variable projection (VarPro). For each
+  <span class="arithmatex">\(W\)</span>, the best coefficients <span class="arithmatex">\(c\)</span> are the solution of a ridge regression in
+  closed form. Thus the optimiser changes only <span class="arithmatex">\(W\)</span>, and <span class="arithmatex">\(c\)</span> follows exactly.
+  Then a validation gate compares the learned radials with the initial
+  radials on the validation set. It keeps the radials that predict the
+  energies and forces better. See
+  <a href="../howto/learned-radials/">Learn the radial basis</a> and
+  <a href="../tutorials/learned-radials/">Tutorial 2</a>.</li>
+<li>For deployment, ace-jax converts a learned radial to a cubic spline (to
+  1e-10), so that its evaluation is as fast as a stock model. See
+  <a href="../howto/learned-radials/#deployment-spline-speed">Learned radials at deployment</a>.</li>
+</ul>
+<h3 id="multi-element-models">Multi-element models<a class="headerlink" href="#multi-element-models" title="Permanent link">&para;</a></h3>
+<p>With more than one element, the default basis is <strong>categorical</strong>. Each
+species pair has its own radial functions, so the basis becomes large
+quickly as you add elements.</p>
+<p><code>aj fit --basis-embedding &lt;table.json&gt;</code> (or <code>aj basis --embedding
+&lt;table.json&gt;</code>) builds a <strong>species-embedded</strong> basis:</p>
+<ul>
+<li>The neighbour species enters through a frozen embedding vector, for
+  example from a MACE model.</li>
+<li><code>--d-max</code> sets the maximum channel width.</li>
+<li><code>identity</code> in place of a table gives a one-hot embedding.</li>
+</ul>
+<p><a href="../tutorials/multi-element/">Tutorial 3</a> compares the two bases on a
+five-element alloy.</p>
+<h2 id="fitting-bayesian-linear-regression">Fitting: Bayesian linear regression<a class="headerlink" href="#fitting-bayesian-linear-regression" title="Permanent link">&para;</a></h2>
+<p><code>aj fit</code> uses Bayesian linear regression. The fit selects its
+hyperparameters <span class="arithmatex">\(\theta\)</span> by maximising the log marginal likelihood (the
+<em>evidence</em>) plus a weak log-normal hyperprior. The hyperparameters are the
+noise scales <span class="arithmatex">\(\sigma_E, \sigma_F, \sigma_V\)</span> and the prior scale of the
+coefficients. Thus you do not set energy, force and virial weights or a
+regulariser by hand.</p>
+<ul>
+<li><strong>Linear ACE</strong> (<code>--m-per-species 0</code>, the default). The features are the
+  ACE basis B. Use this model for most fits.<ul>
+<li>The posterior mean gives the coefficients. The fit writes them to
+  <code>model.npz</code>, a usual ACE model file.</li>
+<li>The posterior covariance gives a predictive <span class="arithmatex">\(\sigma\)</span> (<code>--uq blr</code>, the
+  default).</li>
+</ul>
+</li>
+<li>The default optimiser is bounded L-BFGS (<code>--opt lbfgs</code>).<ul>
+<li>For the linear model, a small number of Newton steps then refine the
+  result to a stationary point (<code>--map-polish</code>).</li>
+<li>If a fit stops away from a stationary point, it gives a warning.
+  <code>--strict</code> makes this an error.</li>
+<li><code>--opt adam</code> uses Adam for <code>--map-steps</code> steps. Adam can stop far from
+  the optimum.</li>
+</ul>
+</li>
+<li><strong>Noise for each quantity, or one shared noise</strong> (<code>--noise</code>).<ul>
+<li>The default is <code>auto</code>. If you give <code>--weights</code>, <code>auto</code> uses <code>shared</code>.
+  If you do not give weights, <code>auto</code> uses <code>per-quantity</code>. <code>fit.yaml</code>
+  records the mode that the fit used.</li>
+<li><code>per-quantity</code> learns <span class="arithmatex">\(\sigma_E\)</span>, <span class="arithmatex">\(\sigma_F\)</span> and <span class="arithmatex">\(\sigma_V\)</span>
+  separately. Each <span class="arithmatex">\(\sigma\)</span> cancels the <code>--weights</code> of its quantity,
+  so the E:F:V weights have no effect.</li>
+<li>There are many more force rows than energy rows. Thus the evidence
+  gives a large <span class="arithmatex">\(\sigma_E\)</span>, and the energies get too little weight.</li>
+<li><code>--noise shared</code> learns one <span class="arithmatex">\(\sigma\)</span> for all weighted rows. This is
+  the Bayesian linear regression (BLR) of ACEpotentials. The weights set
+  the balance, and the evidence sets only the noise level and the prior.</li>
+<li>Use <code>shared</code> when your weights must set the balance, for example the
+  ACEpotentials weights E 30 / F 1 / V 1. On the Si_tiny example, the
+  shared-noise fit gives the same coefficients as the BLR fit of
+  ACEpotentials.</li>
+<li>Without weights, the default weights set the balance to E:F:V 1:1:1.
+  On a Cantor alloy dataset, <code>shared</code> at these weights increased the
+  energy error by 79 %. Thus <code>auto</code> uses <code>per-quantity</code> there.</li>
+<li><code>auto</code> uses <code>per-quantity</code> with <code>--sigma-type</code>, with
+  <code>--uq ard</code> (the joint mode fits its own noise) and with
+  <code>--solver lstsq</code>. These do not support <code>shared</code>.</li>
+</ul>
+</li>
+<li>The fit adds the design rows to sufficient statistics in batches. Thus
+  the memory increases with the square of the number of basis functions,
+  not with the number of configurations.</li>
+</ul>
+<h3 id="other-fit-arms">Other fit arms<a class="headerlink" href="#other-fit-arms" title="Permanent link">&para;</a></h3>
+<p>The same command gives these options. The
+<a href="../reference/cli/">CLI reference</a> documents them. They are research
+options, and the tutorials do not use them.</p>
+<ul>
+<li><strong>POPS</strong> (<code>--uq pops</code>, linear model only): pointwise-optimal parameter
+  sets (Swinburne and Perez,
+  <a href="https://doi.org/10.1088/2632-2153/ad9fce"><em>Mach. Learn.: Sci. Technol.</em> <strong>6</strong>, 015008 (2025)</a>).
+  It estimates the
+  misspecification uncertainty. It changes only the uncertainty. The mean is
+  the mean of the Bayesian regression.</li>
+<li><strong>ARD</strong> (<code>--uq ard</code>, linear model only): an automatic relevance
+  determination posterior with a calibrated per-atom force uncertainty.<ul>
+<li>The uncertainty is a jackknife uncertainty shape multiplied by group
+  scales. The fit calculates the scales on a validation set taken from
+  the training set.</li>
+<li>It gives a standard deviation, a 3×3 covariance and a conformal radius.</li>
+<li>It writes <code>posterior.npz</code> next to <code>model.npz</code>.</li>
+<li>It also changes the mean.</li>
+<li>See <a href="../howto/force-uncertainty/">Per-atom force uncertainty</a> and
+  <a href="force-uncertainty-maths/">the mathematics</a>.</li>
+</ul>
+</li>
+<li><strong>Hybrid ACE + GP</strong> (<code>--m-per-species M</code>, <span class="arithmatex">\(M &gt; 0\)</span>): a Gaussian-process
+  correction on <span class="arithmatex">\(M\)</span> inducing sites for each species.<ul>
+<li>This model is experimental. It is for advanced users. It costs much
+  more time and memory than the linear model.</li>
+<li>It is fitted on the features <span class="arithmatex">\([\,B \mid k_\theta(B, B_M)\,]\)</span>.</li>
+<li>The fitted model is <code>gp_model.npz</code>. Load it with
+  <code>GPCalculator.from_file</code>.</li>
+<li><code>--rungs</code> adds approximations of the hyperparameter posterior
+  (<code>laplace</code>, <code>pathfinder</code>, <code>vi</code>, <code>nuts</code>) to the default <code>map</code>. They cost
+  much more than the MAP. The Laplace rung can take tens of minutes to
+  compile.</li>
+</ul>
+</li>
+</ul>
+<h2 id="reading-the-metrics">Reading the metrics<a class="headerlink" href="#reading-the-metrics" title="Permanent link">&para;</a></h2>
+<p><code>aj fit</code> writes <code>metrics.csv</code> (test set). With <code>--ood</code>, it also writes
+<code>metrics_ood.csv</code>. These files have one row for each rung and quantity.
+Their units are:</p>
+<ul>
+<li>energies: meV/atom;</li>
+<li>forces: eV/Å;</li>
+<li>virials: eV.</li>
+</ul>
+<p><code>aj fit</code> and <code>aj eval</code> also print an RMSE table, with one row for each
+configuration type. The units of this table are meV/atom for energies and
+virials, and eV/Å for forces.</p>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>rmse</code>, <code>mae</code></td>
+<td>errors of the mean prediction</td>
+</tr>
+<tr>
+<td><code>crps</code></td>
+<td>continuous ranked probability score of the predictive distribution (lower is better)</td>
+</tr>
+<tr>
+<td><code>coverage</code></td>
+<td>fraction of errors in <span class="arithmatex">\(\pm 1\sigma\)</span>; approximately 0.68 when <span class="arithmatex">\(\sigma\)</span> is calibrated</td>
+</tr>
+<tr>
+<td><code>rms_z</code></td>
+<td>root-mean-square of error / <span class="arithmatex">\(\sigma\)</span>; approximately 1 when calibrated, more than 1 when <span class="arithmatex">\(\sigma\)</span> is too small</td>
+</tr>
+<tr>
+<td><code>rho</code></td>
+<td>rank correlation between |error| and <span class="arithmatex">\(\sigma\)</span>: does a large <span class="arithmatex">\(\sigma\)</span> show a large error?</td>
+</tr>
+<tr>
+<td><code>sigma_ratio</code>, <code>median_sigma</code></td>
+<td>spread and median of the predicted <span class="arithmatex">\(\sigma\)</span></td>
+</tr>
+</tbody>
+</table>
+<p>The <span class="arithmatex">\(\sigma\)</span> of the linear model comes from the posterior alone. The
+posterior does not know that the model is misspecified. Thus, on small
+datasets, <code>coverage</code> is usually much less than 0.68 and <code>rms_z</code> is more
+than 1. Use this <span class="arithmatex">\(\sigma\)</span> to rank errors, not as a calibrated error bar.</p>
+<h2 id="model-files">Model files<a class="headerlink" href="#model-files" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Written by</th>
+<th>Loaded by</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>basis.npz</code> (any name)</td>
+<td><code>aj basis</code>, <code>ace_jax.basis.export.save_npz</code>, or an ACEpotentials export</td>
+<td><code>aj fit --model</code></td>
+</tr>
+<tr>
+<td><code>model.npz</code></td>
+<td><code>aj fit</code> (linear arm), the radial learner</td>
+<td><code>aj.load</code>, <code>ACECalculator</code>, <code>aj eval</code>, <code>export_lammps</code>, <code>aj fit --model</code></td>
+</tr>
+<tr>
+<td><code>fit.yaml</code></td>
+<td>every <code>aj fit</code></td>
+<td><code>aj fit --config</code></td>
+</tr>
+<tr>
+<td><code>gp_model.npz</code></td>
+<td><code>aj fit</code> (GP arm)</td>
+<td><code>GPCalculator.from_file</code>, <code>aj eval</code></td>
+</tr>
+<tr>
+<td><code>posterior.npz</code></td>
+<td><code>aj fit --uq ard</code>, <code>aj calibrate</code></td>
+<td><code>ACECalculator(..., posterior=)</code>, <code>aj eval --posterior</code>, <code>aj calibrate</code></td>
+</tr>
+<tr>
+<td><code>*.yace</code></td>
+<td>pacemaker, or <code>ace_jax.eval.write_yace</code></td>
+<td><code>aj.load</code>, <code>ACECalculator</code>, <code>aj eval</code>, <code>export_lammps</code></td>
+</tr>
+</tbody>
+</table>
+<p>An ACE <code>.npz</code> contains:</p>
+<ul>
+<li>the basis definition;</li>
+<li>the splined or analytic radials;</li>
+<li>the coupling table;</li>
+<li>the coefficients;</li>
+<li>the metadata, in a <code>meta_json</code> entry (<code>schema_version: 1</code>).</li>
+</ul>
+<p>An unfitted basis and a fitted model have the same format. A fitted model is
+the basis with its coefficients and E0 added. You can evaluate and export
+<code>.yace</code> models, but <code>aj fit</code> needs an ACE <code>.npz</code>.</p>
+<h2 id="terms">Terms<a class="headerlink" href="#terms" title="Permanent link">&para;</a></h2>
+<p>These pages use the words below with one meaning only.</p>
+<table>
+<thead>
+<tr>
+<th>Term</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>configuration</td>
+<td>one labelled entry of a dataset: atoms, an optional cell, and labels</td>
+</tr>
+<tr>
+<td>cell</td>
+<td>the periodic simulation box of a configuration</td>
+</tr>
+<tr>
+<td>structure</td>
+<td>an arrangement of atoms that you evaluate with a model</td>
+</tr>
+<tr>
+<td>batch</td>
+<td>a set of structures that ace-jax evaluates in one compiled call</td>
+</tr>
+<tr>
+<td>frame</td>
+<td>one entry of an extxyz file, or one snapshot of an MD trajectory</td>
+</tr>
+<tr>
+<td>dataset</td>
+<td>a set of configurations</td>
+</tr>
+<tr>
+<td>validation set</td>
+<td>configurations taken from the training set and not used to fit the coefficients. They score a choice, for example learned radials or the ARD scales</td>
+</tr>
+<tr>
+<td>basis</td>
+<td>an ACE model with zero coefficients, ready to fit</td>
+</tr>
+<tr>
+<td>basis specification</td>
+<td>the settings that define a basis: elements, <code>order</code>, <code>max_degree</code> and the other <code>BasisSpec</code> fields</td>
+</tr>
+<tr>
+<td>coefficients</td>
+<td>the linear weights <span class="arithmatex">\(c\)</span> of the B functions (the <em>readout</em>)</td>
+</tr>
+<tr>
+<td>arm</td>
+<td>the model type that a fit uses: the linear model (<code>--m-per-species 0</code>) or the hybrid ACE + GP model</td>
+</tr>
+<tr>
+<td>evidence</td>
+<td>the log marginal likelihood of the training data</td>
+</tr>
+<tr>
+<td>training statistics</td>
+<td>the QR factors of the weighted design rows of the training set, from which a linear fit calculates the evidence and the coefficients</td>
+</tr>
+<tr>
+<td>rank</td>
+<td>one MPI process of a fit with <code>aj fit --mpi</code>. Use one rank for each node</td>
+</tr>
+<tr>
+<td>rung</td>
+<td>one approximation of the hyperparameter posterior: <code>map</code> (the default), <code>laplace</code>, <code>pathfinder</code>, <code>vi</code>, <code>nuts</code></td>
+</tr>
+<tr>
+<td>slot</td>
+<td>one place in the fixed-size neighbour row of an atom. <code>K</code> slots for each atom set the cost of the model in JAX-MD and LAMMPS</td>
+</tr>
+<tr>
+<td>uncertainty shape</td>
+<td>the per-atom 3×3 matrix <span class="arithmatex">\(V\)</span> of <code>--uq ard</code>, which shows where the model is not certain and in which direction</td>
+</tr>
+<tr>
+<td>kernel</td>
+<td>the compiled C++ or CUDA program that evaluates a linear ACE model in place of the JAX model (<code>ffi=True</code>)</td>
+</tr>
+<tr>
+<td>product basis</td>
+<td>the products of the one-particle basis functions of an atom. Its calculation uses most of the time of a large model</td>
+</tr>
+<tr>
+<td>mixed precision</td>
+<td>a mode of the kernel: the product basis in float32, all other quantities in float64 (<code>ffi_precision="mixed"</code>)</td>
+</tr>
+</tbody>
+</table>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../tutorials/bring-your-own-data/" class="md-footer__link md-footer__link--prev" aria-label="Previous: 9. Bring your own data">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                9. Bring your own data
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="force-uncertainty-maths/" class="md-footer__link md-footer__link--next" aria-label="Next: Force uncertainty: the mathematics">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                Force uncertainty: the mathematics
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.indexes", "navigation.footer", "search.suggest", "search.highlight", "content.code.copy", "toc.follow"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+        <script src="../javascripts/mathjax.js"></script>
+      
+        <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+        <script src="../javascripts/plotly-figures.js"></script>
+      
+    
+  </body>
+</html>

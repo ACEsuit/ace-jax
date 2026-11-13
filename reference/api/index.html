@@ -1,0 +1,4864 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Fit and evaluate ACE and PACE interatomic potentials in Python/JAX">
+      
+      
+      
+        <link rel="canonical" href="https://acesuit.github.io/ace-jax/reference/api/">
+      
+      
+        <link rel="prev" href="../cli/">
+      
+      
+        <link rel="next" href="../../faq/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/acesuit-logo.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Python API - ace-jax</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#python-api" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="ace-jax" class="md-header__button md-logo" aria-label="ace-jax" data-md-component="logo">
+      
+  <img src="../../assets/acesuit-logo.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            ace-jax
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Python API
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/ACEsuit/ace-jax" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    ACEsuit/ace-jax
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="ace-jax" class="md-nav__button md-logo" aria-label="ace-jax" data-md-component="logo">
+      
+  <img src="../../assets/acesuit-logo.png" alt="logo">
+
+    </a>
+    ace-jax
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/ACEsuit/ace-jax" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    ACEsuit/ace-jax
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../tutorials/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorials
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_4" id="__nav_4_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Tutorials
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/first-fit/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    1. First fit: silicon
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/learned-radials/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2. Learned radials: silicon
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/multi-element/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    3. Multi-element fits: categorical and embedded species
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/dataset-and-properties/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    4. Your data, your property
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/basis-and-evidence/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    5. Basis size and the evidence
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/surfaces/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    6. Surfaces: coverage and repair
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/curation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    7. Automating curation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/truth-about-the-truth/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    8. The truth about the truth
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/bring-your-own-data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    9. Bring your own data
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/force-uncertainty-maths/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Force uncertainty: the mathematics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How-to guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    How-to guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/basis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Build a basis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/fit-yaml/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run files (fit.yaml)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/multi-element/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Multi-element fits
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/ase/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ASE calculators
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/batch/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evaluate many structures
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/lammps/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    LAMMPS export
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/jax-md/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MD with JAX-MD
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/precision/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Choose float64 or float32
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/pace/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    PACE .yace models
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/learned-radials/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Learn the radial basis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/force-uncertainty/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Per-atom force uncertainty
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/foundation-labels/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Labels from a foundation model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/large-fits/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Large linear fits
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/reproducibility/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reproducibility
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../benchmarks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Performance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Python API
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Python API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#loading-and-evaluating" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Loading and evaluating
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Loading and evaluating">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.load" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        load
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.calc.point.ACECalculator" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ACECalculator
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="ACECalculator">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.calc.point.ACECalculator.splined" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        splined
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.calc.point.ACECalculator.eval_model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        eval_model
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.calc.point.ACECalculator.model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        model
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.calc.point.ACECalculator.skin" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        skin
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.calc.gp.GPCalculator" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GPCalculator
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="GPCalculator">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.calc.gp.GPCalculator.from_file" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        from_file
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.site_descriptors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        site_descriptors
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.highest_precision" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        highest_precision
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#building-a-basis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Building a basis
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Building a basis">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.basis.model.BasisSpec" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BasisSpec
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.basis.model.build_basis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        build_basis
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.basis.model.Basis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Basis
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Basis">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.basis.model.Basis.eval_pair" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        eval_pair
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.basis.model.basis_r0" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        basis_r0
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.basis.export.save_npz" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        save_npz
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.basis.coupling.BasisUnavailable" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BasisUnavailable
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#fitting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fitting
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Fitting">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.fit.pipeline.FitConfig" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FitConfig
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.fit.pipeline.load_fit_data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        load_fit_data
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.fit.pipeline.fit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        fit
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.fit.pipeline.save_model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        save_model
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.fit.pipeline.write_outputs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        write_outputs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.fit.data.load_configs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        load_configs
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#learned-radials" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Learned radials
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Learned radials">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.fit.pipeline.problem.build_problem" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        build_problem
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.fit.radial_model.to_analytic" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        to_analytic
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.fit.radial_learn.fit_radial" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        fit_radial
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.fit.radial_learn.learn_radial" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        learn_radial
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.fit.radial_learn.save_result" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        save_result
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.fit.radial_model.with_radial" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        with_radial
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.basis.export.mark_radial_learned" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        mark_radial_learned
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deployment-forms" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deployment forms
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Deployment forms">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.eval.lean" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        lean
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.eval.to_spline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        to_spline
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pace-yace-models" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PACE .yace models
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="PACE .yace models">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.eval.load_yace" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        load_yace
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.eval.write_yace" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        write_yace
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#lammps-export" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        LAMMPS export
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="LAMMPS export">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.export.lammps.export_lammps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        export_lammps
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.export.lammps.neighbour_capacity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        neighbour_capacity
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.export.lammps.matrix_supported" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        matrix_supported
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#jax-md" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        JAX-MD
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="JAX-MD">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.jaxmd.potential" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        potential
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.jaxmd.cutoff" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        cutoff
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.jaxmd.capacity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        capacity
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.jaxmd.block_rows" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        block_rows
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.jaxmd.allocate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        allocate
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.jaxmd.min_image_ok" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        min_image_ok
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../faq/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAQ and troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../licence/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Licence and citation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#loading-and-evaluating" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Loading and evaluating
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Loading and evaluating">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.load" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        load
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.calc.point.ACECalculator" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ACECalculator
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="ACECalculator">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.calc.point.ACECalculator.splined" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        splined
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.calc.point.ACECalculator.eval_model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        eval_model
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.calc.point.ACECalculator.model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        model
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.calc.point.ACECalculator.skin" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        skin
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.calc.gp.GPCalculator" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GPCalculator
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="GPCalculator">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.calc.gp.GPCalculator.from_file" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        from_file
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.site_descriptors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        site_descriptors
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.highest_precision" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        highest_precision
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#building-a-basis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Building a basis
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Building a basis">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.basis.model.BasisSpec" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BasisSpec
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.basis.model.build_basis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        build_basis
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.basis.model.Basis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Basis
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Basis">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.basis.model.Basis.eval_pair" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        eval_pair
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.basis.model.basis_r0" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        basis_r0
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.basis.export.save_npz" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        save_npz
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.basis.coupling.BasisUnavailable" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BasisUnavailable
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#fitting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fitting
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Fitting">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.fit.pipeline.FitConfig" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FitConfig
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.fit.pipeline.load_fit_data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        load_fit_data
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.fit.pipeline.fit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        fit
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.fit.pipeline.save_model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        save_model
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.fit.pipeline.write_outputs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        write_outputs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.fit.data.load_configs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        load_configs
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#learned-radials" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Learned radials
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Learned radials">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.fit.pipeline.problem.build_problem" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        build_problem
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.fit.radial_model.to_analytic" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        to_analytic
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.fit.radial_learn.fit_radial" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        fit_radial
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.fit.radial_learn.learn_radial" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        learn_radial
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.fit.radial_learn.save_result" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        save_result
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.fit.radial_model.with_radial" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        with_radial
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.basis.export.mark_radial_learned" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        mark_radial_learned
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deployment-forms" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deployment forms
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Deployment forms">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.eval.lean" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        lean
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.eval.to_spline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        to_spline
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pace-yace-models" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PACE .yace models
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="PACE .yace models">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.eval.load_yace" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        load_yace
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.eval.write_yace" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        write_yace
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#lammps-export" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        LAMMPS export
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="LAMMPS export">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.export.lammps.export_lammps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        export_lammps
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.export.lammps.neighbour_capacity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        neighbour_capacity
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.export.lammps.matrix_supported" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        matrix_supported
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#jax-md" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        JAX-MD
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="JAX-MD">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.jaxmd.potential" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        potential
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.jaxmd.cutoff" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        cutoff
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.jaxmd.capacity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        capacity
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.jaxmd.block_rows" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        block_rows
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.jaxmd.allocate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        allocate
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ace_jax.jaxmd.min_image_ok" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        min_image_ok
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="python-api">Python API<a class="headerlink" href="#python-api" title="Permanent link">&para;</a></h1>
+<p>This page gives the public Python interface, in groups by task. All other
+parts of <code>ace_jax</code> are internal. They can change between releases.</p>
+<div class="admonition warning">
+<p class="admonition-title">Enable float64 in Python</p>
+<p>Fitting and radial learning need float64. The <code>aj</code> command enables
+float64 itself. In Python, enable float64 before any other code imports
+JAX:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">jax</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="n">jax</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="s2">"jax_enable_x64"</span><span class="p">,</span> <span class="kc">True</span><span class="p">)</span>
+</code></pre></div>
+<p>Alternatively, set <code>JAX_ENABLE_X64=1</code> in the environment. ace-jax never
+changes the JAX precision setting itself. The JAX default is float32.</p>
+</div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">ace_jax</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">aj</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">model</span><span class="p">,</span> <span class="n">meta</span><span class="p">,</span> <span class="n">arrays</span> <span class="o">=</span> <span class="n">aj</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="s2">"model.npz"</span><span class="p">)</span>      <span class="c1"># an ACE model, its metadata, the raw arrays</span>
+</code></pre></div>
+<h2 id="loading-and-evaluating">Loading and evaluating<a class="headerlink" href="#loading-and-evaluating" title="Permanent link">&para;</a></h2>
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="ace_jax.load" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">ace_jax.load</span>
+
+
+<a href="#ace_jax.load" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">load</span><span class="p">(</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">path</span><span class="p">,</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="n">dtype</span><span class="o">=</span><span class="n">jnp</span><span class="o">.</span><span class="n">float64</span><span class="p">,</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="n">a2b_sparse</span><span class="o">=</span><span class="s2">"auto"</span><span class="p">,</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="n">edge_a_kind</span><span class="o">=</span><span class="s2">"gather"</span><span class="p">,</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="n">fold</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>Load a model.  Caller controls dtype; nothing here touches jax.config, so
+f64 requires the caller to have enabled x64 first.</p>
+<p><code>a2b_sparse</code> selects how A2B is held and contracted.  "auto" (default): sparse
+triplets only, no dense A2B, when at most <code>A2B_SPARSE_MAX_DENSITY</code> of it is
+nonzero (every ACE coupling: 0.025-1.9% occupied), with B and dB/dA by sorted
+segment_sums (<code>with_a2b_sparse</code>).  A file that stores a dense A2B is converted.
+True / False force the sparse / dense form.  The dense form at 5456 basis
+functions is 2.6 GB, and its Jacobian costs 2 n_B n_AA n_A flops per node.</p>
+<p><code>edge_a_kind</code> selects how the A-basis product is formed: "gather" (default,
+today's behaviour) or "matmul", an algebraically identical one-hot form whose
+adjoint is a matmul rather than a scatter.  Which is faster depends on the
+backend, the dtype and the edge-buffer length -- see <code>calibrate_edge_a</code>,
+and do not guess from the platform.</p>
+<p><code>fold</code> (default True) folds the linear readout through A2B (see
+<code>fold_readout</code>); pass False to keep the B-materialising path, e.g. to
+measure the fold by difference.  Descriptors are unaffected either way.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="ace_jax.calc.point.ACECalculator" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">ace_jax.calc.point.ACECalculator</span>
+
+
+<a href="#ace_jax.calc.point.ACECalculator" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">ACECalculator</span><span class="p">(</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">model</span><span class="p">,</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="n">meta</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="n">cutoff</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="n">dtype</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="n">edge_a_kind</span><span class="o">=</span><span class="s2">"auto"</span><span class="p">,</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    <span class="n">layout</span><span class="o">=</span><span class="s2">"auto"</span><span class="p">,</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    <span class="n">skin</span><span class="o">=</span><span class="mf">1.0</span><span class="p">,</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>    <span class="n">lean</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>    <span class="n">spline_tol</span><span class="o">=</span><span class="n">AUTO</span><span class="p">,</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>    <span class="n">spline_intervals</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>    <span class="n">radial_table</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>    <span class="n">aa_dag</span><span class="o">=</span><span class="s2">"auto"</span><span class="p">,</span>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>    <span class="n">posterior</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>    <span class="n">forces_std_every_call</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>    <span class="n">energy_reference</span><span class="o">=</span><span class="s2">"absolute"</span><span class="p">,</span>
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>    <span class="n">shape_path</span><span class="o">=</span><span class="s2">"rows"</span><span class="p">,</span>
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>    <span class="n">shape_tau</span><span class="o">=</span><span class="mf">1.0</span><span class="p">,</span>
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>    <span class="n">shape_rank</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>    <span class="n">ffi</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+<a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a>    <span class="n">ffi_threads</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>
+<a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a>    <span class="n">ffi_precision</span><span class="o">=</span><span class="s2">"float64"</span><span class="p">,</span>
+<a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a>    <span class="o">**</span><span class="n">kw</span><span class="p">,</span>
+<a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a><span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="ase.calculators.calculator.Calculator">Calculator</span></code></p>
+
+
+
+        <p><code>ACECalculator("si_fitted.npz")</code> is the intended form: cutoff,
+species and dtype all come from the file.  A pre-loaded (model, meta)
+pair is still accepted, which is what the validation tests use.</p>
+<p><code>edge_a_kind</code> picks the A-basis form (see <code>EdgeSiteModel.edge_a</code>):
+"gather", "matmul", or "auto" (default), which calibrates both on the
+actual neighbour list once per power-of-two edge-count bucket and keeps
+the faster, using the gather below <code>AUTO_MIN_EDGES</code> edges.  It does not
+apply to a pool-first model (PACE, <code>uses_edge_a</code> False), which is used
+as given and reports <code>last_edge_a_kind</code> None.</p>
+<p><code>layout</code> picks the neighbour layout: "sparse" (edge list), "dense" (padded
+(n, K) per-node blocks; A by a batched outer product), or "auto" (default):
+dense when the padding is efficient (see MIN_DENSE_FILL), else sparse.
+<code>edge_a_kind</code> applies to the sparse layout.</p>
+<p><code>skin</code> (A, default 1.0) is the Verlet skin of the dense layout (see
+<code>calc.skin</code>): the neighbour list is built for cutoff + skin and reused,
+one compiled step per call, until an atom has moved skin / 2 or the
+cell, pbc or species change.  skin=0 rebuilds the list every call.
+<code>last_timing["rebuilds"]</code> counts the calls that built a neighbour list,
+and <code>last_timing["nlist_s"]</code> is this call's build time (0 on reuse).</p>
+<p><code>lean</code> (default True) evaluates energies, forces and stress with
+<code>ace_jax.eval.model.lean(model)</code>: exact to roundoff, with the per-edge
+work the energy never reads removed (docs/dev/ace-vs-pace-gap.md).
+spline_tol="auto" (default) first splines a learned analytic tensor
+radial (<code>radial_learned</code>, set by the radial learner) at 1e-10
+(<code>to_spline</code>).  That is not roundoff: energies agree with lean=False to
+up to ~1e-9 relative and forces to up to ~2.3e-8 of max|F| on the
+benchmark models (docs/dev/learned-radial-splining.md).  Other analytic
+models -- ACEpotentials <code>ace_model</code> exports, built bases -- stay
+exact; a float spline_tol (e.g. 1e-10) opts them in, None never
+splines.  spline_intervals pins the grid.  <code>calc.splined</code> (and <code>last_timing["spline_tol"]</code>) says
+what was splined, None when nothing was.  The spline is cached on the
+radial's content, and its grid is bucketed, so radial swaps usually
+keep the compiled step.  It is
+<code>eval_model</code>; <code>model</code> stays the model as given, and descriptors use it.
+A PACE or unfolded model is evaluated as given either way.  Setting
+<code>calc.model</code> recomputes the lean form on the host (a device-to-host copy
+of the model's arrays): negligible for MD, but a per-step cost if the
+model is swapped every step.</p>
+<p><code>radial_table</code> (None, the default: off; True: sized to a 1e-9 value
+error, from 4000 intervals up; a float: that tolerance; an int: that
+many intervals) tabulates the evaluation model's radial stage in r
+(<code>eval.model.with_radial_table</code>, after <code>lean</code>; ACE: R_nl with its
+transform and envelope, and the pair radial; PACE: g_k), one cubic
+B-spline per species pair on [0.5 A, rcut], exactly zero beyond each
+pair's cutoff.  A CPU speed-up (1.1-1.4x on one core), and an
+approximation: with True energies agree to ~1e-11 relative and forces
+to ~1e-8 of max|F| (tests/test_radial_table.py).  Applies with
+lean=False too (to the model as given).  <code>calc.radial_table</code> is the
+table's info (n_intervals, r_min, r_max, max_rel_err,
+max_rel_deriv_err), None when off; <code>last_timing["radial_table"]</code> its
+n_intervals.  Cached on the radial's content, so a readout-only
+<code>calc.model</code> swap does not rebuild it.</p>
+<p><code>aa_dag</code> ("auto", the default; None: the chain form; "greedy" or "prefix")
+evaluates the product basis as a DAG of one multiply per monomial
+(<code>eval.aa_dag.with_aa_dag</code>, applied to the evaluation model last).  Exact
+to roundoff; "prefix" keeps every AA monomial bitwise.  "auto" takes
+"greedy" from <code>eval.aa_dag.AUTO_MIN_CHAIN_MUL</code> chain-form multiplies per
+site, where it is faster on CPU and GPU, and the chain form below (a tie;
+bitwise as before).  <code>calc.aa_dag</code> is the mode used.  ("cueq", NVIDIA
+cuequivariance, was removed: on a CUDA GPU, ffi=True is faster.)</p>
+<p><code>ffi</code> (False, the default: the JAX model; True; "auto"; a library path) evaluates energies,
+forces and stress with the kernel of <code>eval.ffi</code> (its <code>AceEdges</code> entry point, <code>KernelModel</code>) in
+place of the JAX evaluation model: the C++ kernel on the CPU backend, the CUDA one
+(<code>AceEdgesGpu</code>) on a CUDA GPU.  Same neighbour lists (the dense layout, the skin list), with
+forces and the virial assembled by JAX from the kernel's dE/drij.  It needs lean=True, a linear
+ACEModel (categorical or species embedding) and float64 (float32 too on a GPU), and turns the
+radial table on (radial_table=None -&gt; True; energies ~1e-12 relative, forces ~1.5e-8 of
+max|F|).  The kernel is compiled on first use (<code>eval.ffi.library</code>: a C++17 compiler, or nvcc --
+a toolkit's, or the <code>cuda13</code> extra's -- on a GPU; cached).  True raises ValueError (or <code>eval.ffi.FFIUnavailable</code>)
+when it cannot run; "auto" then keeps the JAX model and <code>calc.ffi_reason</code> says why.  <code>calc.ffi</code>
+is {"library", "threads", "platform"}, None when off.  On the CPU, rows run in parallel on XLA's
+intra-op thread pool; <code>ffi_threads</code> &gt; 0 caps the threads.  <code>ffi_precision="mixed"</code> (off by
+default; a float64 model) runs the kernel's product basis in float32 and the rest in float64
+(<code>eval.ffi.kernel_inputs</code>): faster for large models (o4d20: 1.6x on a CPU), forces within
+~1e-5 eV/A, but the energy carries ~0.1 meV of noise in 200 atoms, so relax with an optimiser
+that uses forces only (FIRE, ODE12r), not an energy line search.  The
+kernel differentiates in positions only: derivatives in the model's parameters, or second
+derivatives, need the JAX model (ffi=False; <code>calc.model</code> and <code>eval_model</code> there).</p>
+<p><code>posterior</code> (a <code>posterior.npz</code> from <code>fit --uq ard</code>, with <code>model</code> the matching
+<code>model.npz</code> FILE) adds the per-atom force uncertainty.  For a revision-2 (schema-3)
+posterior, each atom has a 3x3 shape V -- the centred delete-one-cluster (PRESS)
+jackknife covariance of its force (<code>--ard-variance kappa</code>: phi A^-1 phi^T) -- and a
+Mondrian group g that selects the calibrated scales: <code>forces_std</code> = lam_rms[g] sqrt(tr V),
+(N,); <code>forces_cov</code> = lam_rms[g]^2 V, (N, 3, 3); <code>forces_q</code>, the conformal radius at the
+fit's coverage (q[g] sqrt(tr V / 3) iso, the ellipsoid's largest semi-axis aniso);
+<code>forces_q_mahal</code> = q[g] (aniso); <code>forces_group</code> = g; and <code>forces_support</code> (on request).
+Schema-1/2 posteriors serve only the scalar <code>forces_std</code> (kappa times the epistemic std,
+or lambda times an uncentred configuration-clustered sandwich std).  Energy and stress
+carry no uncertainty.  By default the uncertainty is computed only when requested
+(<code>calc.get_property("forces_std", atoms)</code> or any of the above, which reuses the cached
+E/F/stress): a design-row rebuild plus an L^2 solve per step is not a silent MD cost.
+<code>forces_std_every_call=True</code> adds it to every calculation.  posterior= requires
+<code>jax.config.update("jax_enable_x64", True)</code> (RuntimeError otherwise).</p>
+<p><code>shape_path</code> picks how a schema-3 jackknife shape V is evaluated: "rows" (default) builds the
+whole cell's force design rows (N, 3, L) and contracts them with R; "committee" evaluates the
+forces of the r-output linear ACE with coefficients D^-1 R (<code>fit.jackknife.committee_shape</code>),
+equal to roundoff, in memory O(N r) instead of O(N L) and without the edge Jacobian.
+<code>shape_tau</code> &lt; 1 truncates R to the smallest rank holding that fraction of its sum sigma^2, and
+<code>shape_rank</code> (an int) caps the rank, on either path -- an approximation whose ranking and
+coverage loss against rank is measured in bench/defect_uq; the defaults keep R exact.</p>
+<p><code>energy_reference</code> is "absolute" (default: the model's energy, isolated-atom
+energies E0 included) or "E0": the energy relative to the isolated atoms,
+sum_i (E_i - E0[z_i]).  With "E0" the per-atom constant (~-160 eV for Si) is
+never added to the site energies, so the total of a large cell stays small and
+keeps resolution: an energy-based line search (ASE PreconLBFGS's Armijo test)
+otherwise stops resolving energy decreases once they fall below the ulp of
+|E| ~ 160 eV x N, at fmax ~ 1e-4..1e-5 eV/A on 10^4-10^5 atoms
+(docs/dev/energy-sum-results.md).  Forces and stress are unchanged.
+<code>results["e0_offset"]</code> is sum_i E0[z_i] (math.fsum; 0.0 for "absolute"), so the
+absolute energy is <code>energy + e0_offset</code>.</p>
+<p>Memory: forces_std builds the force design rows of the WHOLE cell, about N<em>3</em>L*8 bytes
+(N atoms padded, L = (n_B + n_pair) * NZ columns) -- 7 GB for N = 100k at L = 3k -- on
+the JAX device, besides the posterior's L^2 factor.  The edge Jacobian is node-chunked
+(<code>linear_rows_chunked</code>), the rows themselves are not: size cells to fit them.  The rows come
+from the FULL <code>model</code> (never the energy-only <code>eval_model</code>), whatever <code>lean</code> is.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h4 id="ace_jax.calc.point.ACECalculator.splined" class="doc doc-heading">
+            <span class="doc doc-object-name doc-attribute-name">splined</span>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#ace_jax.calc.point.ACECalculator.splined" class="headerlink" title="Permanent link">&para;</a></h4>
+<div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="n">splined</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>What the lean form splined, None when nothing: {"spline_tol",
+"radials", "n_intervals"} (<code>eval.model.splining</code>).</p>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h4 id="ace_jax.calc.point.ACECalculator.eval_model" class="doc doc-heading">
+            <span class="doc doc-object-name doc-attribute-name">eval_model</span>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#ace_jax.calc.point.ACECalculator.eval_model" class="headerlink" title="Permanent link">&para;</a></h4>
+<div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="n">eval_model</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>The model energies, forces and stress are evaluated with: <code>lean(model)</code>
+(or <code>model</code> itself with lean=False).  Energy only: no descriptors.</p>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h4 id="ace_jax.calc.point.ACECalculator.model" class="doc doc-heading">
+            <span class="doc doc-object-name doc-attribute-name">model</span>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+      <small class="doc doc-label doc-label-writable"><code>writable</code></small>
+  </span>
+
+<a href="#ace_jax.calc.point.ACECalculator.model" class="headerlink" title="Permanent link">&para;</a></h4>
+<div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="n">model</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h4 id="ace_jax.calc.point.ACECalculator.skin" class="doc doc-heading">
+            <span class="doc doc-object-name doc-attribute-name">skin</span>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+      <small class="doc doc-label doc-label-writable"><code>writable</code></small>
+  </span>
+
+<a href="#ace_jax.calc.point.ACECalculator.skin" class="headerlink" title="Permanent link">&para;</a></h4>
+<div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="n">skin</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+    </div>
+
+</div>
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="ace_jax.calc.gp.GPCalculator" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">ace_jax.calc.gp.GPCalculator</span>
+
+
+<a href="#ace_jax.calc.gp.GPCalculator" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">GPCalculator</span><span class="p">(</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">fitted</span><span class="p">,</span> <span class="n">meta</span><span class="p">,</span> <span class="n">deriv_dtc</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">posterior</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">**</span><span class="n">kw</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="ase.calculators.calculator.Calculator">Calculator</span></code></p>
+
+
+
+        <p>deriv_dtc=False drops the derivative-DTC term from forces_std (SoR-only force
+variance): cheaper, and needed when a big cell's (n, K, d, 3) arrays do not fit.
+posterior: the posterior.npz of <code>fit --uq ard-gp</code> that wrote this gp_model.npz (its mean must be the
+model's); the calibrated force UQ then replaces the mixture forces_std.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="ace_jax.calc.gp.GPCalculator.from_file" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">from_file</span>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-classmethod"><code>classmethod</code></small>
+  </span>
+
+<a href="#ace_jax.calc.gp.GPCalculator.from_file" class="headerlink" title="Permanent link">&para;</a></h4>
+<div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">from_file</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="o">**</span><span class="n">kw</span><span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>A calculator from the gp_model.npz that <code>ace-jax fit</code> writes.</p>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="ace_jax.site_descriptors" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">ace_jax.site_descriptors</span>
+
+
+<a href="#ace_jax.site_descriptors" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">site_descriptors</span><span class="p">(</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">model</span><span class="p">,</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="n">positions</span><span class="p">,</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="n">numbers</span><span class="p">,</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="n">cell</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="n">pbc</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    <span class="n">meta</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    <span class="n">cutoff</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>    <span class="n">dtype</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>    <span class="n">domain</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>Site descriptors, (n_atoms, (n_B + n_pair) * n_species).</p>
+<p>Parity target is <code>ACEpotentials.site_descriptors</code>, which is marked in the
+ACEpotentials source as "RETIRING THIS FOR NOW BECAUSE IT IS HIGHLY INEFFICIENT"
+because it recomputes per site.  This takes the whole batch from one forward
+pass -- the same pass the energy uses -- so the port is genuinely faster
+here, not merely equivalent.</p>
+<p><code>domain</code> restricts the returned rows (as ACEpotentials does); the forward pass
+still covers the whole structure, since a site's descriptor needs its
+neighbours regardless.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="ace_jax.highest_precision" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">ace_jax.highest_precision</span>
+
+
+<a href="#ace_jax.highest_precision" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">highest_precision</span><span class="p">()</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>Force true f32/f64 matmuls.  On Ampere+ the TF32 default silently costs
+~400x accuracy (1.17e-3 vs 2.93e-6 on this descriptor).</p>
+
+
+    </div>
+
+</div><h2 id="building-a-basis">Building a basis<a class="headerlink" href="#building-a-basis" title="Permanent link">&para;</a></h2>
+
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="ace_jax.basis.model.BasisSpec" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">ace_jax.basis.model.BasisSpec</span>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+<a href="#ace_jax.basis.model.BasisSpec" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">BasisSpec</span><span class="p">(</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">order</span><span class="p">,</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="n">max_degree</span><span class="p">,</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="n">elements</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="n">wL</span><span class="o">=</span><span class="mf">1.5</span><span class="p">,</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="n">rcut</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    <span class="n">rin</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    <span class="n">maxl</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>    <span class="n">nmax_by_order</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>    <span class="n">lmax_by_order</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>    <span class="n">d_max</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>    <span class="n">reduction</span><span class="o">=</span><span class="s2">"pca"</span><span class="p">,</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>    <span class="n">radial_mode</span><span class="o">=</span><span class="s2">"onehot"</span><span class="p">,</span>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>    <span class="n">radial_basis</span><span class="o">=</span><span class="s2">"poly"</span><span class="p">,</span>
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>    <span class="n">pair_mode</span><span class="o">=</span><span class="s2">"onehot"</span><span class="p">,</span>
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>    <span class="n">embedding</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>    <span class="n">no_gamma</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>    <span class="n">no_coupling_cache</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>    <span class="n">coupling_cache_dir</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a><span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+
+
+
+        <p>A basis definition: the <code>aj basis</code> flags (and the <code>basis:</code> block of a
+fit.yaml).  <code>elements=None</code> means "the species of the training data".</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="ace_jax.basis.model.build_basis" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">ace_jax.basis.model.build_basis</span>
+
+
+<a href="#ace_jax.basis.model.build_basis" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">build_basis</span><span class="p">(</span><span class="n">spec</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">seed</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>The one basis builder (<code>aj basis</code>, <code>aj fit</code>, Python): a <code>Basis</code> from a
+<code>BasisSpec</code>.  Categorical (<code>build_model</code>) unless <code>spec.embedding</code> is set
+(<code>build_embedding_model</code>).</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="ace_jax.basis.model.Basis" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">ace_jax.basis.model.Basis</span>
+
+
+<a href="#ace_jax.basis.model.Basis" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents first">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="typing.NamedTuple">NamedTuple</span></code></p>
+
+
+
+        <p>An authored model plus everything needed to reproduce or package it.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="ace_jax.basis.model.Basis.eval_pair" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">eval_pair</span>
+
+
+<a href="#ace_jax.basis.model.Basis.eval_pair" class="headerlink" title="Permanent link">&para;</a></h4>
+<div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">eval_pair</span><span class="p">()</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>(model, meta) ready for direct evaluation -- the in-memory hand-off.</p>
+<p>The four branch-selector meta keys are derived from the tree being
+handed over, exactly as <code>export.save_npz</code> does for the file path: the
+loader-side consumers (<code>eval.io.load</code>, and anything that reads meta to
+route branches) must never see authoring defaults that a patched tree
+has outgrown -- JAX clamps out-of-range branch indices silently, so a
+mismatch fails numerically, not loudly.  The meta is deep-copied; the
+caller may mutate it freely.  Structural checks guard the derivable
+keys (<code>_resolve</code> consumers read <code>rcut</code>/<code>elements</code>/<code>n_*</code> from meta).</p>
+<p><code>ACECalculator(*auth.eval_pair())</code> and <code>site_descriptors(auth.model,
+..., meta=meta)</code> evaluate the in-memory tree directly -- no npz
+round-trip; <code>save_npz</code> remains for ACEfit-fitted interchange and
+shell hand-off only.</p>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="ace_jax.basis.model.basis_r0" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">ace_jax.basis.model.basis_r0</span>
+
+
+<a href="#ace_jax.basis.model.basis_r0" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">basis_r0</span><span class="p">(</span><span class="n">meta</span><span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>Mean radial length scale the basis was built with (per-pair table or a
+scalar): the default GP hyperprior centre for a fit of this basis.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="ace_jax.basis.export.save_npz" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">ace_jax.basis.export.save_npz</span>
+
+
+<a href="#ace_jax.basis.export.save_npz" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">save_npz</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">auth</span><span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>Write <code>auth</code> (a <code>Basis</code>) to <code>path</code> in the eval-io schema.</p>
+<p>The meta written here is derived from the model being saved, not from the
+authoring defaults: any tree patched onto a different branch (e.g. the
+fixture-injection round trip) must save as what it now is, or the loader
+silently routes branch arrays to placeholders.  The derivation and the
+structural checks live in <code>Basis.eval_pair</code> -- the file path and the
+in-memory hand-off share one source of truth.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="ace_jax.basis.coupling.BasisUnavailable" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">ace_jax.basis.coupling.BasisUnavailable</span>
+
+
+<a href="#ace_jax.basis.coupling.BasisUnavailable" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents first">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="RuntimeError">RuntimeError</span></code></p>
+
+
+
+        <p>Building a new basis needs the compiled coupling library, which is not
+installed (unsupported platform) or has no compiled payload (dev build).</p>
+
+
+
+
+
+
+
+
+
+    </div>
+
+</div><h2 id="fitting">Fitting<a class="headerlink" href="#fitting" title="Permanent link">&para;</a></h2>
+<p>The pipeline that <code>aj fit</code> uses.</p>
+<div class="admonition warning">
+<p class="admonition-title"><code>FitConfig</code> defaults are different from the command line</p>
+<p>The <code>FitConfig</code> defaults are those of the research driver. Some are
+different from the command-line defaults (for example <code>arm="gp"</code>,
+<code>e0="lsq"</code>, <code>map_steps=150</code>). Set each field that you need explicitly.
+To get exactly the command-line result, also set
+<code>predict_stats="auto"</code>.</p>
+</div>
+
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="ace_jax.fit.pipeline.FitConfig" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">ace_jax.fit.pipeline.FitConfig</span>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+<a href="#ace_jax.fit.pipeline.FitConfig" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">FitConfig</span><span class="p">(</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">model</span><span class="p">,</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="n">arm</span><span class="o">=</span><span class="s2">"gp"</span><span class="p">,</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="n">energy_key</span><span class="o">=</span><span class="s2">"energy"</span><span class="p">,</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="n">force_key</span><span class="o">=</span><span class="s2">"forces"</span><span class="p">,</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="n">virial_key</span><span class="o">=</span><span class="s2">"virial"</span><span class="p">,</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    <span class="n">stress_key</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    <span class="n">ntrain</span><span class="o">=</span><span class="mi">800</span><span class="p">,</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>    <span class="n">ntest</span><span class="o">=</span><span class="mi">200</span><span class="p">,</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>    <span class="n">test_start</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>    <span class="n">seed</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>    <span class="n">batch</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>    <span class="n">batch_pack</span><span class="o">=</span><span class="s2">"auto"</span><span class="p">,</span>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>    <span class="n">weights</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>    <span class="n">factors</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>    <span class="n">sigma_type</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>    <span class="n">route</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>    <span class="n">baseline</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>    <span class="n">base_npz</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>    <span class="n">e0</span><span class="o">=</span><span class="s2">"lsq"</span><span class="p">,</span>
+<a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a>    <span class="n">m_per_species</span><span class="o">=</span><span class="mi">100</span><span class="p">,</span>
+<a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a>    <span class="n">kernel</span><span class="o">=</span><span class="s2">"cosine"</span><span class="p">,</span>
+<a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a>    <span class="n">bump</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+<a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a>    <span class="n">density</span><span class="o">=</span><span class="s2">"none"</span><span class="p">,</span>
+<a id="__codelineno-0-25" name="__codelineno-0-25" href="#__codelineno-0-25"></a>    <span class="n">pca_d</span><span class="o">=</span><span class="mi">128</span><span class="p">,</span>
+<a id="__codelineno-0-26" name="__codelineno-0-26" href="#__codelineno-0-26"></a>    <span class="n">warp</span><span class="o">=</span><span class="s2">"none"</span><span class="p">,</span>
+<a id="__codelineno-0-27" name="__codelineno-0-27" href="#__codelineno-0-27"></a>    <span class="n">embedding</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-28" name="__codelineno-0-28" href="#__codelineno-0-28"></a>    <span class="n">delta_s_floor_q</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-29" name="__codelineno-0-29" href="#__codelineno-0-29"></a>    <span class="n">fix_rho</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-30" name="__codelineno-0-30" href="#__codelineno-0-30"></a>    <span class="n">r0</span><span class="o">=</span><span class="mf">2.5</span><span class="p">,</span>
+<a id="__codelineno-0-31" name="__codelineno-0-31" href="#__codelineno-0-31"></a>    <span class="n">objective</span><span class="o">=</span><span class="s2">"lml"</span><span class="p">,</span>
+<a id="__codelineno-0-32" name="__codelineno-0-32" href="#__codelineno-0-32"></a>    <span class="n">lml</span><span class="o">=</span><span class="s2">"device"</span><span class="p">,</span>
+<a id="__codelineno-0-33" name="__codelineno-0-33" href="#__codelineno-0-33"></a>    <span class="n">lml_chunk</span><span class="o">=</span><span class="mi">64</span><span class="p">,</span>
+<a id="__codelineno-0-34" name="__codelineno-0-34" href="#__codelineno-0-34"></a>    <span class="n">lml_solver</span><span class="o">=</span><span class="s2">"qr"</span><span class="p">,</span>
+<a id="__codelineno-0-35" name="__codelineno-0-35" href="#__codelineno-0-35"></a>    <span class="n">row_precision</span><span class="o">=</span><span class="s2">"float64"</span><span class="p">,</span>
+<a id="__codelineno-0-36" name="__codelineno-0-36" href="#__codelineno-0-36"></a>    <span class="n">row_check</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+<a id="__codelineno-0-37" name="__codelineno-0-37" href="#__codelineno-0-37"></a>    <span class="n">devices</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span>
+<a id="__codelineno-0-38" name="__codelineno-0-38" href="#__codelineno-0-38"></a>    <span class="n">opt</span><span class="o">=</span><span class="s2">"lbfgs"</span><span class="p">,</span>
+<a id="__codelineno-0-39" name="__codelineno-0-39" href="#__codelineno-0-39"></a>    <span class="n">map_steps</span><span class="o">=</span><span class="mi">150</span><span class="p">,</span>
+<a id="__codelineno-0-40" name="__codelineno-0-40" href="#__codelineno-0-40"></a>    <span class="n">map_lr</span><span class="o">=</span><span class="mf">0.02</span><span class="p">,</span>
+<a id="__codelineno-0-41" name="__codelineno-0-41" href="#__codelineno-0-41"></a>    <span class="n">map_restarts</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span>
+<a id="__codelineno-0-42" name="__codelineno-0-42" href="#__codelineno-0-42"></a>    <span class="n">map_polish</span><span class="o">=</span><span class="s2">"auto"</span><span class="p">,</span>
+<a id="__codelineno-0-43" name="__codelineno-0-43" href="#__codelineno-0-43"></a>    <span class="n">strict</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+<a id="__codelineno-0-44" name="__codelineno-0-44" href="#__codelineno-0-44"></a>    <span class="n">init</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-45" name="__codelineno-0-45" href="#__codelineno-0-45"></a>    <span class="n">checkpoint</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-46" name="__codelineno-0-46" href="#__codelineno-0-46"></a>    <span class="n">checkpoint_every</span><span class="o">=</span><span class="mf">45.0</span><span class="p">,</span>
+<a id="__codelineno-0-47" name="__codelineno-0-47" href="#__codelineno-0-47"></a>    <span class="n">stats_only</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+<a id="__codelineno-0-48" name="__codelineno-0-48" href="#__codelineno-0-48"></a>    <span class="n">mpi</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+<a id="__codelineno-0-49" name="__codelineno-0-49" href="#__codelineno-0-49"></a>    <span class="n">noise</span><span class="o">=</span><span class="s2">"auto"</span><span class="p">,</span>
+<a id="__codelineno-0-50" name="__codelineno-0-50" href="#__codelineno-0-50"></a>    <span class="n">rungs</span><span class="o">=</span><span class="p">(</span><span class="s2">"map"</span><span class="p">,),</span>
+<a id="__codelineno-0-51" name="__codelineno-0-51" href="#__codelineno-0-51"></a>    <span class="n">solver</span><span class="o">=</span><span class="s2">"evidence"</span><span class="p">,</span>
+<a id="__codelineno-0-52" name="__codelineno-0-52" href="#__codelineno-0-52"></a>    <span class="n">laplace</span><span class="o">=</span><span class="s2">"fd"</span><span class="p">,</span>
+<a id="__codelineno-0-53" name="__codelineno-0-53" href="#__codelineno-0-53"></a>    <span class="n">n_draws</span><span class="o">=</span><span class="mi">64</span><span class="p">,</span>
+<a id="__codelineno-0-54" name="__codelineno-0-54" href="#__codelineno-0-54"></a>    <span class="n">vi_steps</span><span class="o">=</span><span class="mi">1000</span><span class="p">,</span>
+<a id="__codelineno-0-55" name="__codelineno-0-55" href="#__codelineno-0-55"></a>    <span class="n">nuts_warmup</span><span class="o">=</span><span class="mi">100</span><span class="p">,</span>
+<a id="__codelineno-0-56" name="__codelineno-0-56" href="#__codelineno-0-56"></a>    <span class="n">nuts_samples</span><span class="o">=</span><span class="mi">100</span><span class="p">,</span>
+<a id="__codelineno-0-57" name="__codelineno-0-57" href="#__codelineno-0-57"></a>    <span class="n">nuts_chains</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span>
+<a id="__codelineno-0-58" name="__codelineno-0-58" href="#__codelineno-0-58"></a>    <span class="n">pf_samples</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span>
+<a id="__codelineno-0-59" name="__codelineno-0-59" href="#__codelineno-0-59"></a>    <span class="n">pf_maxiter</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span>
+<a id="__codelineno-0-60" name="__codelineno-0-60" href="#__codelineno-0-60"></a>    <span class="n">uq</span><span class="o">=</span><span class="s2">"blr"</span><span class="p">,</span>
+<a id="__codelineno-0-61" name="__codelineno-0-61" href="#__codelineno-0-61"></a>    <span class="n">ard_mode</span><span class="o">=</span><span class="s2">"joint"</span><span class="p">,</span>
+<a id="__codelineno-0-62" name="__codelineno-0-62" href="#__codelineno-0-62"></a>    <span class="n">ard_variance</span><span class="o">=</span><span class="s2">"sandwich"</span><span class="p">,</span>
+<a id="__codelineno-0-63" name="__codelineno-0-63" href="#__codelineno-0-63"></a>    <span class="n">ard_val_frac</span><span class="o">=</span><span class="mf">0.2</span><span class="p">,</span>
+<a id="__codelineno-0-64" name="__codelineno-0-64" href="#__codelineno-0-64"></a>    <span class="n">ard_cond_max</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-65" name="__codelineno-0-65" href="#__codelineno-0-65"></a>    <span class="n">ard_solver</span><span class="o">=</span><span class="s2">"auto"</span><span class="p">,</span>
+<a id="__codelineno-0-66" name="__codelineno-0-66" href="#__codelineno-0-66"></a>    <span class="n">ard_allow_degenerate</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+<a id="__codelineno-0-67" name="__codelineno-0-67" href="#__codelineno-0-67"></a>    <span class="n">ard_prior</span><span class="o">=</span><span class="s2">"fit"</span><span class="p">,</span>
+<a id="__codelineno-0-68" name="__codelineno-0-68" href="#__codelineno-0-68"></a>    <span class="n">ard_laplace</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+<a id="__codelineno-0-69" name="__codelineno-0-69" href="#__codelineno-0-69"></a>    <span class="n">ard_force_shape</span><span class="o">=</span><span class="s2">"aniso"</span><span class="p">,</span>
+<a id="__codelineno-0-70" name="__codelineno-0-70" href="#__codelineno-0-70"></a>    <span class="n">ard_shape_eps</span><span class="o">=</span><span class="mf">0.001</span><span class="p">,</span>
+<a id="__codelineno-0-71" name="__codelineno-0-71" href="#__codelineno-0-71"></a>    <span class="n">ard_coverage</span><span class="o">=</span><span class="mf">0.9</span><span class="p">,</span>
+<a id="__codelineno-0-72" name="__codelineno-0-72" href="#__codelineno-0-72"></a>    <span class="n">ard_groups</span><span class="o">=</span><span class="s2">"distortion"</span><span class="p">,</span>
+<a id="__codelineno-0-73" name="__codelineno-0-73" href="#__codelineno-0-73"></a>    <span class="n">ard_cluster_size</span><span class="o">=</span><span class="mf">3.0</span><span class="p">,</span>
+<a id="__codelineno-0-74" name="__codelineno-0-74" href="#__codelineno-0-74"></a>    <span class="n">ard_press</span><span class="o">=</span><span class="s2">"exact"</span><span class="p">,</span>
+<a id="__codelineno-0-75" name="__codelineno-0-75" href="#__codelineno-0-75"></a>    <span class="n">ard_shape_tau</span><span class="o">=</span><span class="mf">1.0</span><span class="p">,</span>
+<a id="__codelineno-0-76" name="__codelineno-0-76" href="#__codelineno-0-76"></a>    <span class="n">ard_transfer</span><span class="o">=</span><span class="s2">"exponent"</span><span class="p">,</span>
+<a id="__codelineno-0-77" name="__codelineno-0-77" href="#__codelineno-0-77"></a>    <span class="n">ard_n_min</span><span class="o">=</span><span class="mi">20</span><span class="p">,</span>
+<a id="__codelineno-0-78" name="__codelineno-0-78" href="#__codelineno-0-78"></a>    <span class="n">ard_support</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+<a id="__codelineno-0-79" name="__codelineno-0-79" href="#__codelineno-0-79"></a>    <span class="n">ard_support_features</span><span class="o">=</span><span class="s2">"raw"</span><span class="p">,</span>
+<a id="__codelineno-0-80" name="__codelineno-0-80" href="#__codelineno-0-80"></a>    <span class="n">ard_support_max_atoms</span><span class="o">=</span><span class="mi">50000</span><span class="p">,</span>
+<a id="__codelineno-0-81" name="__codelineno-0-81" href="#__codelineno-0-81"></a>    <span class="n">_shape_variant</span><span class="o">=</span><span class="s2">"press"</span><span class="p">,</span>
+<a id="__codelineno-0-82" name="__codelineno-0-82" href="#__codelineno-0-82"></a>    <span class="n">_score_source</span><span class="o">=</span><span class="s2">"fit"</span><span class="p">,</span>
+<a id="__codelineno-0-83" name="__codelineno-0-83" href="#__codelineno-0-83"></a>    <span class="n">deriv_dtc</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+<a id="__codelineno-0-84" name="__codelineno-0-84" href="#__codelineno-0-84"></a>    <span class="n">predict_stats</span><span class="o">=</span><span class="s2">"cached"</span><span class="p">,</span>
+<a id="__codelineno-0-85" name="__codelineno-0-85" href="#__codelineno-0-85"></a>    <span class="n">predict_train</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+<a id="__codelineno-0-86" name="__codelineno-0-86" href="#__codelineno-0-86"></a>    <span class="n">pops_posterior</span><span class="o">=</span><span class="s2">"hypercube"</span><span class="p">,</span>
+<a id="__codelineno-0-87" name="__codelineno-0-87" href="#__codelineno-0-87"></a>    <span class="n">pops_leverage_pct</span><span class="o">=</span><span class="mf">50.0</span><span class="p">,</span>
+<a id="__codelineno-0-88" name="__codelineno-0-88" href="#__codelineno-0-88"></a>    <span class="n">pops_ridge</span><span class="o">=</span><span class="s2">"auto"</span><span class="p">,</span>
+<a id="__codelineno-0-89" name="__codelineno-0-89" href="#__codelineno-0-89"></a>    <span class="n">pops_ridge_grid</span><span class="o">=</span><span class="p">(</span>
+<a id="__codelineno-0-90" name="__codelineno-0-90" href="#__codelineno-0-90"></a>        <span class="mf">0.01</span><span class="p">,</span>
+<a id="__codelineno-0-91" name="__codelineno-0-91" href="#__codelineno-0-91"></a>        <span class="mf">0.001</span><span class="p">,</span>
+<a id="__codelineno-0-92" name="__codelineno-0-92" href="#__codelineno-0-92"></a>        <span class="mf">0.0001</span><span class="p">,</span>
+<a id="__codelineno-0-93" name="__codelineno-0-93" href="#__codelineno-0-93"></a>        <span class="mf">1e-05</span><span class="p">,</span>
+<a id="__codelineno-0-94" name="__codelineno-0-94" href="#__codelineno-0-94"></a>        <span class="mf">1e-06</span><span class="p">,</span>
+<a id="__codelineno-0-95" name="__codelineno-0-95" href="#__codelineno-0-95"></a>        <span class="mf">1e-07</span><span class="p">,</span>
+<a id="__codelineno-0-96" name="__codelineno-0-96" href="#__codelineno-0-96"></a>        <span class="mf">1e-08</span><span class="p">,</span>
+<a id="__codelineno-0-97" name="__codelineno-0-97" href="#__codelineno-0-97"></a>        <span class="mf">1e-09</span><span class="p">,</span>
+<a id="__codelineno-0-98" name="__codelineno-0-98" href="#__codelineno-0-98"></a>        <span class="mf">1e-10</span><span class="p">,</span>
+<a id="__codelineno-0-99" name="__codelineno-0-99" href="#__codelineno-0-99"></a>    <span class="p">),</span>
+<a id="__codelineno-0-100" name="__codelineno-0-100" href="#__codelineno-0-100"></a>    <span class="n">pops_val_frac</span><span class="o">=</span><span class="mf">0.2</span><span class="p">,</span>
+<a id="__codelineno-0-101" name="__codelineno-0-101" href="#__codelineno-0-101"></a>    <span class="n">pops_env_nf</span><span class="o">=</span><span class="mi">2000</span><span class="p">,</span>
+<a id="__codelineno-0-102" name="__codelineno-0-102" href="#__codelineno-0-102"></a>    <span class="n">pops_rows</span><span class="o">=</span><span class="s2">"auto"</span><span class="p">,</span>
+<a id="__codelineno-0-103" name="__codelineno-0-103" href="#__codelineno-0-103"></a>    <span class="n">learn_radial</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+<a id="__codelineno-0-104" name="__codelineno-0-104" href="#__codelineno-0-104"></a>    <span class="n">radial_n_q</span><span class="o">=</span><span class="mi">12</span><span class="p">,</span>
+<a id="__codelineno-0-105" name="__codelineno-0-105" href="#__codelineno-0-105"></a>    <span class="n">radial_steps</span><span class="o">=</span><span class="mi">300</span><span class="p">,</span>
+<a id="__codelineno-0-106" name="__codelineno-0-106" href="#__codelineno-0-106"></a>    <span class="n">radial_reprofile_every</span><span class="o">=</span><span class="mi">100</span><span class="p">,</span>
+<a id="__codelineno-0-107" name="__codelineno-0-107" href="#__codelineno-0-107"></a>    <span class="n">radial_opt</span><span class="o">=</span><span class="s2">"lbfgs"</span><span class="p">,</span>
+<a id="__codelineno-0-108" name="__codelineno-0-108" href="#__codelineno-0-108"></a>    <span class="n">radial_cg_iters</span><span class="o">=</span><span class="mi">20</span><span class="p">,</span>
+<a id="__codelineno-0-109" name="__codelineno-0-109" href="#__codelineno-0-109"></a>    <span class="n">radial_lam_grid</span><span class="o">=</span><span class="p">(</span><span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.01</span><span class="p">),</span>
+<a id="__codelineno-0-110" name="__codelineno-0-110" href="#__codelineno-0-110"></a>    <span class="n">radial_val_frac</span><span class="o">=</span><span class="mf">0.2</span><span class="p">,</span>
+<a id="__codelineno-0-111" name="__codelineno-0-111" href="#__codelineno-0-111"></a><span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+
+
+
+        <p>Every option of the fitting pipeline.  Defaults are run.py's; the CLI
+overrides the ones where it differs (see cli.py).</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="ace_jax.fit.pipeline.load_fit_data" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">ace_jax.fit.pipeline.load_fit_data</span>
+
+
+<a href="#ace_jax.fit.pipeline.load_fit_data" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">load_fit_data</span><span class="p">(</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">cfg</span><span class="p">,</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="o">*</span><span class="p">,</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="n">data</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="n">train</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="n">test</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    <span class="n">ood</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    <span class="n">log</span><span class="o">=</span><span class="nb">print</span><span class="p">,</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>Configs, baselines, E0 and datasets.  Either <code>data</code> (one file, split with
+split_configs) or <code>train</code> (+ optional <code>test</code>; defaults to train) files.  Each may be
+a path or a list of ase.Atoms (see fit.data.load_configs).  With no test file the
+test Dataset is the training one (ds_test is ds_train), not a second build.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="ace_jax.fit.pipeline.fit" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">ace_jax.fit.pipeline.fit</span>
+
+
+<a href="#ace_jax.fit.pipeline.fit" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">fit</span><span class="p">(</span><span class="n">cfg</span><span class="p">,</span> <span class="n">data</span><span class="p">,</span> <span class="n">log</span><span class="o">=</span><span class="nb">print</span><span class="p">,</span> <span class="n">on_stage</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>Run the pipeline.  on_stage(name, payload), if given, is called as each
+expensive stage finishes ("data" -&gt; FitData, "radial_candidate" -&gt; (key, W, info) as each
+learned radial candidate finishes, before the gate, and "radial" -&gt; RadialResult when
+cfg.learn_radial, "map" -&gt; MapFit, "rungs" -&gt; Rungs,
+"ard" -&gt; ARDResult and "model" -&gt; the ARD-mean model.npz arrays when uq == "ard"),
+so a driver can write those results before a later stage (e.g. POPS or
+prediction running out of memory) can lose them.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="ace_jax.fit.pipeline.save_model" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">ace_jax.fit.pipeline.save_model</span>
+
+
+<a href="#ace_jax.fit.pipeline.save_model" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">save_model</span><span class="p">(</span><span class="n">res</span><span class="p">,</span> <span class="n">out</span><span class="p">,</span> <span class="n">n_draws</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">log</span><span class="o">=</span><span class="nb">print</span><span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>Write the fitted model into directory <code>out</code>: model.npz (linear arm) or
+gp_model.npz (GP arm). Only the model: the fitted hyperparameters are
+<code>res.theta</code> (and <code>res.map.log_evidence</code>), and <code>write_outputs(res, out)</code> also
+writes them (theta_map.json) with the metrics.  Returns the path, or None when the fit cannot be
+represented as a model file (a dimer baseline is added back outside the model;
+a .yace input has no npz schema to write into).</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="ace_jax.fit.pipeline.write_outputs" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">ace_jax.fit.pipeline.write_outputs</span>
+
+
+<a href="#ace_jax.fit.pipeline.write_outputs" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">write_outputs</span><span class="p">(</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">res</span><span class="p">,</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="n">out</span><span class="p">,</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="n">layout</span><span class="o">=</span><span class="p">(</span><span class="s2">"run"</span><span class="p">,),</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="n">argv</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="n">save_model</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    <span class="n">model_draws</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    <span class="n">log</span><span class="o">=</span><span class="nb">print</span><span class="p">,</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>Write the run artefacts; with save_model, also the fitted model file
+(model.npz for the linear arm, gp_model.npz for the GP arm; see export.py).</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="ace_jax.fit.data.load_configs" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">ace_jax.fit.data.load_configs</span>
+
+
+<a href="#ace_jax.fit.data.load_configs" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">load_configs</span><span class="p">(</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">source</span><span class="p">,</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="n">energy_key</span><span class="o">=</span><span class="s2">"energy"</span><span class="p">,</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="n">force_key</span><span class="o">=</span><span class="s2">"forces"</span><span class="p">,</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="n">virial_key</span><span class="o">=</span><span class="s2">"virial"</span><span class="p">,</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="n">stress_key</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    <span class="n">weights</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    <span class="n">weight_key</span><span class="o">=</span><span class="s2">"config_type"</span><span class="p">,</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>    <span class="n">factors</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p><code>factors</code>: an optional list of <code>weights.WeightFactor</code>s (see
+<code>ace_jax.fit.weights</code>), composed via <code>compose()</code> into a single
+fn(meta, quantity) -&gt; float that produces w_E/w_F/w_V.  <code>factors=None</code>
+(the default) reconstructs the CLASSIC weighting -- structural 1/sqrt(n)
+on E,V (1 on F), times the resolved per-config-type {E,F,V} dict from
+<code>weights</code>/<code>weight_key</code> -- as <code>[Structural(), ConfigType(...)]</code>, so every
+existing caller (none of which pass <code>factors</code>) gets bit-identical
+w_E/w_F/w_V to before this was added.  <code>weights</code>/<code>weight_key</code> ALSO still
+drive <code>type_idx</code> (Task 6's per-type sigma routing) independently of
+<code>factors</code> -- that wiring is untouched.</p>
+<p>Read with libAtoms extxyz (<code>fit.xyz.read_extxyz</code>): every label comes back
+under the name it was written with, including <code>energy</code> / <code>forces</code>, which
+ase.io hides in a calculator.  <code>source</code> may instead be a list of ase.Atoms
+(labels in info / arrays, or a SinglePointCalculator's results).  <code>stress_key</code>:
+a periodic config with no virial label takes virial = -stress * volume from it.</p>
+
+
+    </div>
+
+</div><h2 id="learned-radials">Learned radials<a class="headerlink" href="#learned-radials" title="Permanent link">&para;</a></h2>
+<p>See <a href="../../howto/learned-radials/">Learn the radial basis</a> for how these fit
+together.</p>
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="ace_jax.fit.pipeline.problem.build_problem" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">ace_jax.fit.pipeline.problem.build_problem</span>
+
+
+<a href="#ace_jax.fit.pipeline.problem.build_problem" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">build_problem</span><span class="p">(</span><span class="n">cfg</span><span class="p">,</span> <span class="n">d</span><span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="ace_jax.fit.radial_model.to_analytic" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">ace_jax.fit.radial_model.to_analytic</span>
+
+
+<a href="#ace_jax.fit.radial_model.to_analytic" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">to_analytic</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">n_q</span><span class="p">,</span> <span class="n">n_x</span><span class="o">=</span><span class="mi">2001</span><span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>Convert a splined tensor radial to the analytic branch.  Each pair's
+spline S(x) (the envelope-free part) is sampled on a uniform x-grid, env<em>S
+is projected onto env</em>P_q(x) (radial_init.from_table), and the branch is
+swapped.  An analytic model is only widened.  Returns (model, relres) with
+relres (NZ, NZ, n_rnl) the per-radial relative projection residual.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="ace_jax.fit.radial_learn.fit_radial" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">ace_jax.fit.radial_learn.fit_radial</span>
+
+
+<a href="#ace_jax.fit.radial_learn.fit_radial" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">fit_radial</span><span class="p">(</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">prob</span><span class="p">,</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="n">ds_fit</span><span class="p">,</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="n">ds_val</span><span class="p">,</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="n">W0</span><span class="p">,</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="o">*</span><span class="p">,</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    <span class="n">lam_grid</span><span class="o">=</span><span class="p">(</span><span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.001</span><span class="p">,</span> <span class="mf">0.01</span><span class="p">,</span> <span class="mf">0.1</span><span class="p">),</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    <span class="n">spec_grid</span><span class="o">=</span><span class="p">(</span><span class="mf">0.0</span><span class="p">,),</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>    <span class="n">gap_grid</span><span class="o">=</span><span class="p">(</span><span class="mf">0.0</span><span class="p">,),</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>    <span class="n">theta0</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>    <span class="n">map_steps</span><span class="o">=</span><span class="mi">300</span><span class="p">,</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>    <span class="n">log</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>    <span class="n">checkpoint</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>    <span class="n">noise</span><span class="o">=</span><span class="s2">"per-quantity"</span><span class="p">,</span>
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>    <span class="o">**</span><span class="n">learn_kw</span><span class="p">,</span>
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>learn_radial on ds_fit once per (roughness, spectral, data-gap weight)
+triple in lam_grid x spec_grid x gap_grid, then keep the best of {init,
+learned per triple} on the disjoint ds_val (ties -&gt; init).</p>
+<p>Candidate labels are "learned_lam=<l>" with a "_spec=<s>" suffix appended
+when spec_grid has more than one value, and a "<em>gap=<g>" suffix appended
+when gap_grid has more than one value (each independently; backward
+compatible with plain "learned_lam=<l>" when both grids are single-valued,
+an implicit spec=0/gap=0); checkpoints use the same scheme without the
+"learned</em>" prefix (lam_label = f"{l:g}", plus "_spec=..."/"_gap=..." under
+the same conditions).</p>
+<p>Every candidate, init included, is scored by ONE procedure: a_fit =
+theta_map_linear(ds_fit, W, map_steps, init=a0), readout = posterior mean
+on ds_fit at a_fit, score on ds_val with sigma from a0 (a0 = theta0, or the
+theta-MAP at the normalised init).  So with steps=0 (learned == init) the
+scores are identical and the tie goes to init.  Also recorded:
+info["scores_at_a0"] (every candidate's readout at the common a0, no theta
+optimisation involved), info["map_diag"] (per-candidate MAP convergence
+diagnostic, see theta_map_linear), info["theta_fit"] and info["readout"]
+(the SELECTED candidate's M = 0 readout on ds_fit at its a_fit, length
+len_basis, species-blocked as fit.rows._place).  Each candidate costs one
+ds_fit pass plus one ds_val pass.  Returns (W_sel, info).</p>
+<p><code>log</code>: optional one-arg callable given one-line progress strings (forwarded
+to <code>learn_radial</code>, plus fit_radial's own per-candidate and gate-score
+lines); None (default) is silent and leaves all other behaviour unchanged.</p>
+<p><code>checkpoint</code>: optional callable checkpoint(lam_label, W, run_info), called
+as soon as each (lam, spec, gap) triple's learn_radial finishes, so an
+interrupted grid keeps its finished runs (e.g. save_result without
+src_npz).  Q, D2, U and the relative-lambda/spec/gap reference are
+computed once here and shared by every candidate (U only when some
+gap_grid value is &gt; 0, via one extra streaming pass for data_r_range); M &gt;
+0 raises.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="ace_jax.fit.radial_learn.learn_radial" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">ace_jax.fit.radial_learn.learn_radial</span>
+
+
+<a href="#ace_jax.fit.radial_learn.learn_radial" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">learn_radial</span><span class="p">(</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">prob</span><span class="p">,</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="n">ds</span><span class="p">,</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="n">W0</span><span class="p">,</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="o">*</span><span class="p">,</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="n">theta0</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    <span class="n">profile</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    <span class="n">lam_rough</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>    <span class="n">rough_weights</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>    <span class="n">lam_spec</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>    <span class="n">spec_p</span><span class="o">=</span><span class="mf">4.0</span><span class="p">,</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>    <span class="n">lam_gap</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>    <span class="n">steps</span><span class="o">=</span><span class="mi">200</span><span class="p">,</span>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>    <span class="n">reprofile_every</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span>
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>    <span class="n">tol</span><span class="o">=</span><span class="mf">1e-06</span><span class="p">,</span>
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>    <span class="n">patience</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span>
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>    <span class="n">map_steps</span><span class="o">=</span><span class="mi">300</span><span class="p">,</span>
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>    <span class="n">n_prior</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>    <span class="n">seed</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>
+<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>    <span class="n">log</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a>    <span class="n">Q</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a>    <span class="n">D2</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a>    <span class="n">r0</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a>    <span class="n">U</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-25" name="__codelineno-0-25" href="#__codelineno-0-25"></a>    <span class="n">learn_sigma_e_mult</span><span class="o">=</span><span class="mf">1.0</span><span class="p">,</span>
+<a id="__codelineno-0-26" name="__codelineno-0-26" href="#__codelineno-0-26"></a>    <span class="n">noise</span><span class="o">=</span><span class="s2">"per-quantity"</span><span class="p">,</span>
+<a id="__codelineno-0-27" name="__codelineno-0-27" href="#__codelineno-0-27"></a>    <span class="n">opt</span><span class="o">=</span><span class="s2">"lbfgs"</span><span class="p">,</span>
+<a id="__codelineno-0-28" name="__codelineno-0-28" href="#__codelineno-0-28"></a>    <span class="n">cg_iters</span><span class="o">=</span><span class="mi">20</span><span class="p">,</span>
+<a id="__codelineno-0-29" name="__codelineno-0-29" href="#__codelineno-0-29"></a><span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>VarPro-learn the tensor radials of prob.model (analytic branch, M = 0).</p>
+<p>opt "lbfgs" (SciPy L-BFGS-B, <code>steps</code> iterations) or "newton" (<code>_newton_round</code>: trust-region
+Newton with exact Hessian-vector products of the reduced objective, <code>_vp_hvp</code>, at most
+<code>cg_iters</code> per iteration; <code>steps</code> counts Newton iterations).</p>
+<p>learn_sigma_e_mult scales sigma_E inside the radial objective only (after
+every theta re-MAP): &gt; 1 learns the radials under a force-heavier weighting
+than the evidence picks. Everything downstream (gate, final linear fit) keeps
+the plain MAP theta. With a multiplier != 1, r0 (the reference scale of the
+relative priors) is taken at the scaled theta.</p>
+<p>Minimises  r(W; theta) + lam * roughness(W) + lam_spec_abs * spectral_penalty(W, W_ref)
+          + lam_gap_abs * gap_penalty(W, W_ref, U)
+over V with W = normalise(V) (unit empirical norm per radial; rows that
+are zero in W0 stay zero), by L-BFGS in rounds of <code>reprofile_every</code>
+steps.  With profile=True theta is re-MAP'd on the M = 0 LML after every
+round (and at the start unless theta0 is given), and L-BFGS restarts
+because the objective changed.  lam_rough is RELATIVE: lam = lam_rough *
+r(W0) / roughness(W0).  lam_spec is also RELATIVE: lam_spec_abs =
+lam_spec * r0 / n_active, n_active = the number of active (row_active)
+radials; the spectral prior penalises the departure of the normalised W
+from W_ref = normalise(W0) (the starting V), weighted per Legendre degree
+q by spectral_weights(n_q, spec_p) = (1 + q)^spec_p, so it grows with
+degree -- the analogue of the Gamma smoothness prior's degree weighting,
+but on the CHANGE rather than the absolute radial.  lam_gap is also
+RELATIVE (relative_lambda_gap): lam_gap_abs = lam_gap * r0 / n_active; the
+data-gap prior penalises the same departure from W_ref, but measured under
+U = uniform_gram(prob.model, 0.8 * r_min, rcut) (r_min from
+data_r_range(ds), rcut = prob.cfg.rcut) -- a uniform-in-r measure, so it
+costs change equally everywhere on that range, including gaps between
+coordination shells where the data-weighted gauge Q costs nothing.  Stops
+at <code>steps</code> total or at the first round that ends early (converged, line
+search, non-finite).  Returns (W, info); steps=0 returns normalise(W0).</p>
+<p><code>log</code>: optional one-arg callable given one-line progress strings (start
+hyperparameters, then a line per round); None (default) is silent and
+leaves all other behaviour unchanged.</p>
+<p>Precomputed pieces (fit_radial passes them so a lambda grid shares them;
+each is computed here when None): Q = radial_gram(prob.model, ds,
+n_prior) (n_prior None -&gt; radial_gram's default), D2 =
+roughness_matrix(prob.model), r0 = r(normalise(W0); theta0), the
+projected residual at the start -- only valid together with that theta0 --
+and U = uniform_gram(...) as above (only computed, an extra streaming pass
+over ds via data_r_range, when lam_gap &gt; 0; a zeros array of the right
+shape otherwise, so the default path adds no streaming passes and the
+traced arg structure of <code>_objective</code> stays fixed).  M &gt; 0 (inducing
+points) is unsupported and raises.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="ace_jax.fit.radial_learn.save_result" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">ace_jax.fit.radial_learn.save_result</span>
+
+
+<a href="#ace_jax.fit.radial_learn.save_result" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">save_result</span><span class="p">(</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">out_dir</span><span class="p">,</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="n">W</span><span class="p">,</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="n">info</span><span class="p">,</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="o">*</span><span class="p">,</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="n">src_npz</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    <span class="n">model</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    <span class="n">readout</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>Write rnl_Wnlq.npy and radial_info.json to out_dir.  With src_npz and
+model (the analytic model W belongs to, e.g. after widen_radial /
+to_analytic) also write model.npz = src_npz with the learned radial AND
+the readout fitted for it (<code>readout</code>, default info["readout"] as returned
+by fit_radial; also saved as readout.npy).  The source npz's WB/Wpair
+belong to the old radials, so writing model.npz without a readout is
+refused rather than silently stale.  info["readout"] is kept out of the
+JSON (it is len_basis long).  model.npz is marked meta "radial_learned"
+(so <code>lean</code> splines it by default) unless info["selected"] == "init".</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="ace_jax.fit.radial_model.with_radial" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">ace_jax.fit.radial_model.with_radial</span>
+
+
+<a href="#ace_jax.fit.radial_model.with_radial" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">with_radial</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">W</span><span class="p">,</span> <span class="n">learned</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p><code>model</code> with its tensor-radial weights replaced by W (same shape),
+marked <code>radial_learned</code> (the learner's weights; <code>lean</code>'s default splines
+those).  learned=False for weights that are not learned.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="ace_jax.basis.export.mark_radial_learned" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">ace_jax.basis.export.mark_radial_learned</span>
+
+
+<a href="#ace_jax.basis.export.mark_radial_learned" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">mark_radial_learned</span><span class="p">(</span><span class="n">src</span><span class="p">,</span> <span class="n">dst</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">learned</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>Set meta_json "radial_learned" in the npz at <code>src</code> (in place, or into
+<code>dst</code>), leaving every array as is.  For learned-radial files written before
+the flag existed, which load as not learned, so <code>lean</code>'s default keeps
+their radial analytic: <code>mark_radial_learned("model.npz")</code>.  (Or pass
+spline_tol=1e-10 to ACECalculator / export_lammps / lean instead.)</p>
+
+
+    </div>
+
+</div><h2 id="deployment-forms">Deployment forms<a class="headerlink" href="#deployment-forms" title="Permanent link">&para;</a></h2>
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="ace_jax.eval.lean" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">ace_jax.eval.lean</span>
+
+
+<a href="#ace_jax.eval.lean" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">lean</span><span class="p">(</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">model</span><span class="p">,</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="n">spline_tol</span><span class="o">=</span><span class="n">AUTO</span><span class="p">,</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="n">spline_intervals</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="n">radial_table</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>The evaluation form of a folded ACEModel: <code>prune_columns</code>, <code>fold_pair</code>
+and the l-blocked dense A (<code>block_dense</code>).  Exact to roundoff in E, F and the
+virial for a splined model; 1.1-3.3x faster forces on the benchmark models
+(docs/dev/ace-vs-pace-gap.md section 8).</p>
+<p>Splining (<code>splinify.spline_plan</code>, the one decision point):
+spline_tol="auto" (default) splines an analytic tensor radial only when it
+was learned (<code>radial_learned</code>), at <code>DEFAULT_SPLINE_TOL</code> = 1e-10; the pair
+radial is never learned and stays as is.  ACEpotentials <code>ace_model</code> exports and
+built bases are analytic but not learned, so they stay exact.
+A float spline_tol opts every analytic radial in (e.g. 1e-10 for an old
+learned-radial file without the flag); None never splines.  A splined
+radial gets the spline gather and, when each R_nl column belongs to one
+neighbour species (ACE1's pattern, which learned radials keep), the
+species-compact blocks.  That step is an approximation, not roundoff: at
+1e-10 the lean energies agree with the full model to up to ~1e-9 relative
+and forces to up to ~2.3e-8 of max|F| on the benchmark models
+(docs/dev/learned-radial-splining.md).  spline_intervals pins the grid (default: the smallest <code>splinify.BUCKETS</code>
+bucket meeting tol, so radial swaps keep the compiled step).  The
+conversion is cached on the radial's content (<code>splinify</code>), so a re-lean
+after a readout-only change does not re-spline.  For evaluation and
+export only: fitting keeps the analytic model, and a UQ variance should
+come from the full model.  <code>splining(model, lean(model), tol)</code> reports
+what was splined.</p>
+<p>A wrapper model (<code>.base</code> and <code>with_base</code>, e.g. FSModel(base, ...)) returns
+<code>model.with_base(lean_keep_basis(model.base, spline_tol, spline_intervals))</code>:
+the wrapper reads the basis, so only the basis-preserving transforms apply.</p>
+<p>radial_table (None, the default: off; True: from 4000 intervals up to the
+<code>splinify.DEFAULT_TABLE_TOL</code> value error, 1e-9; a float: that tolerance; an
+int: that many intervals) applies <code>splinify.radial_table</code> last,
+via <code>with_radial_table</code>: the whole radial stage -- R_nl with its transform
+and envelope, and the folded pair radial -- as one cubic B-spline table per
+species pair in r on [0.5 A, rcut], masked to exact zeros beyond each
+pair's cutoff (the end cubic extrapolates below 0.5 A).  A CPU speed-up
+(1.1-1.4x on one core), and an approximation: with True energies agree to
+~1e-11 relative and forces to ~1e-8 of max|F|.  A PACEModel gets
+its g_k tabulated (and is otherwise returned as given); a wrapper model
+refuses it.</p>
+<p>Energy only (see <code>fold_pair</code>): keep the original for descriptors and
+fitting.  Anything that is not a folded ACEModel (a PACEModel, an unfolded
+model) is returned as given, as is a model that is already lean.
+Edit the full model, never this one: a lean model holds the radial twice
+and its pair channel is the readout, so replacing rnl_coefs, Wnlq, Wpair,
+WB or ctilde on it changes one layout and not the other (<code>require_full</code>
+guards the radial helpers).  Change the full model and re-apply <code>lean</code>.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="ace_jax.eval.to_spline" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">ace_jax.eval.to_spline</span>
+
+
+<a href="#ace_jax.eval.to_spline" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">to_spline</span><span class="p">(</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">model</span><span class="p">,</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="n">n_intervals</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="n">tol</span><span class="o">=</span><span class="n">DEFAULT_SPLINE_TOL</span><span class="p">,</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="n">deriv_tol</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="n">return_info</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    <span class="n">radials</span><span class="o">=</span><span class="p">(</span><span class="s2">"rnl"</span><span class="p">,</span> <span class="s2">"pair"</span><span class="p">),</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>Convert an ACEModel's analytic radials to the spline branch.</p>
+<p>Converts every analytic radial named in <code>radials</code> ("rnl", "pair"), learned
+or not (an ACEpotentials <code>ace_model</code> export or a built basis too): this is
+the conversion itself.  Whether <code>lean</code> applies it is <code>spline_plan</code>'s call
+(by default only for learned radials).</p>
+<p>The tensor radial (<code>rnl_Wnlq</code>, radial_kind "analytic") and the pair radial
+(<code>pair_Wnlq</code>, pair_radial_kind "analytic") are each tabulated as
+S(x) = sum_q W P_q(x) on a uniform grid of n intervals over x in [-1, 1],
+(x0, h, n + 1) = (-1, 2 / n, n + 1), and interpolated with the cubic
+B-spline <code>spline_eval</code> evaluates, clamped to the polynomial's own second
+derivative at the ends.  The envelope, the transform and every other array
+are unchanged.</p>
+<p>Grid: <code>n_intervals</code> pins it.  None (default) takes the smallest bucket of
+<code>BUCKETS</code> (quarter-octave steps, &lt;= 19% finer than needed) whose error is
+&lt;= <code>tol</code>, separately for the tensor and the pair radial; bucketing keeps
+the table shape, hence the compiled step, across radial swaps.</p>
+<p>Error: the largest, over species pairs and the radial columns the A basis
+reads (<code>aspec_r</code>; all pair columns), of max|spline - exact| / max|exact| on
+10 points per interval.  For R_nl it includes the envelope (a function of
+x), for the pair radial it is envelope-free (its envelope is in r and
+multiplies both alike).  <code>tol</code> bounds VALUES.  The derivative error, which
+forces see, is O(h^3) where values are O(h^4): it is measured the same way
+on d/dx and reported (<code>return_info</code>), and gated too when <code>deriv_tol</code> is
+given.  At 1e-10 the lean energies agree with the full model to
+up to ~1e-9 relative and forces to up to ~2.3e-8 of max|F| on the
+benchmark models (docs/dev/learned-radial-splining.md).</p>
+<p>tol must be in [TOL_FLOOR, inf); it is floored at 10 eps of the model's
+dtype (a float32 table cannot do better).  Returns (model, max_rel_err), or
+with return_info=True (model, info): max_rel_err, max_rel_deriv_err,
+n_intervals {"rnl", "pair"} and the effective tol.  A spline or
+<code>spline_factorised</code> R_nl, and a spline pair radial, are kept as they are.
+The result is an ordinary full model (float64 tables cast to the model's
+dtype), trainable as a spline; it agrees with <code>model</code> to <code>tol</code>, not to
+roundoff.  Needs the full model (<code>require_full</code>).</p>
+<p>Cached (an LRU of at most CACHE_BYTES, <code>clear_cache()</code>) on the content of
+each radial's Wnlq, recursion, (R_nl) envelope and measured columns plus
+n_intervals and the tolerances, so converting a model whose radials are
+unchanged -- e.g. after a readout-only swap -- costs a hash, not a fit.</p>
+
+
+    </div>
+
+</div><h2 id="pace-yace-models">PACE <code>.yace</code> models<a class="headerlink" href="#pace-yace-models" title="Permanent link">&para;</a></h2>
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="ace_jax.eval.load_yace" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">ace_jax.eval.load_yace</span>
+
+
+<a href="#ace_jax.eval.load_yace" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">load_yace</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">jnp</span><span class="o">.</span><span class="n">float64</span><span class="p">,</span> <span class="n">edge_a_kind</span><span class="o">=</span><span class="s1">'gather'</span><span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="ace_jax.eval.write_yace" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">ace_jax.eval.write_yace</span>
+
+
+<a href="#ace_jax.eval.write_yace" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">write_yace</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">path</span><span class="p">,</span> <span class="n">spec</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">**</span><span class="n">options</span><span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>Write <code>model</code> as an ML-PACE C-tilde potential (<code>.yace</code>) at <code>path</code>.</p>
+<ul>
+<li>A PACEModel (<code>aj.load</code> of a <code>.yace</code>) needs the <code>spec</code> that load returned: numeric fields come from
+  its leaves, everything else verbatim from <code>spec.tree</code> (function layout is never regenerated).</li>
+<li>A linear ACEModel is converted exactly (<code>export.yace.ace_ctilde_tree</code>; <code>options</code>: <code>delta</code>, <code>r_min</code>, <code>summed</code>):
+  tabulated radials, which ML-PACE reads with its tabulated-radial addition
+  (docs/dev/ml-pace-tabulated-radials.md).  Returns the export's sizes (functions, terms, lmax, ...).</li>
+</ul>
+<p>The old order <code>write_yace(model, spec, path)</code> still works, with a DeprecationWarning.</p>
+
+
+    </div>
+
+</div><h2 id="lammps-export">LAMMPS export<a class="headerlink" href="#lammps-export" title="Permanent link">&para;</a></h2>
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="ace_jax.export.lammps.export_lammps" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">ace_jax.export.lammps.export_lammps</span>
+
+
+<a href="#ace_jax.export.lammps.export_lammps" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">export_lammps</span><span class="p">(</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">model</span><span class="p">,</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="n">meta</span><span class="p">,</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="n">path</span><span class="p">,</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="o">*</span><span class="p">,</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="n">max_atoms</span><span class="p">,</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    <span class="n">max_edges</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    <span class="n">k_dense</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>    <span class="n">dtype</span><span class="o">=</span><span class="s2">"float64"</span><span class="p">,</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>    <span class="n">layout</span><span class="o">=</span><span class="s2">"auto"</span><span class="p">,</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>    <span class="n">type_elements</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>    <span class="n">max_owned</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>    <span class="n">lean</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>    <span class="n">spline_tol</span><span class="o">=</span><span class="n">AUTO</span><span class="p">,</span>
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>    <span class="n">spline_intervals</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>    <span class="n">max_neighbors</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>    <span class="n">radial_table</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>    <span class="n">device_memory</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>    <span class="n">block_rows</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>    <span class="n">platform</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a>    <span class="n">aa_dag</span><span class="o">=</span><span class="s2">"auto"</span><span class="p">,</span>
+<a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a>    <span class="n">precision_structure</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a>    <span class="n">ffi</span><span class="o">=</span><span class="s2">"auto"</span><span class="p">,</span>
+<a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a>    <span class="n">ffi_precision</span><span class="o">=</span><span class="s2">"float64"</span><span class="p">,</span>
+<a id="__codelineno-0-25" name="__codelineno-0-25" href="#__codelineno-0-25"></a><span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>Write a lammps-jax JSON bundle for <code>model</code>; returns the bundle dict.</p>
+<p>Capacities: max_atoms (owned + ghost positions); max_edges (sparse / dense:
+the packed edge buffer, pairs within rcut); k_dense (dense / matrix: model
+slots per atom, for the matrix default max_neighbors); max_neighbors
+(matrix only, required: list slots per row -- LAMMPS copies its rcut + skin
+list whole, so a k_dense sized for pairs within rcut is too small, and a
+wider row aborts the run).  <code>neighbour_capacity</code> sizes all of them for a
+structure; its slots="cutoff" gives tight model slots (k_dense &lt;
+max_neighbors).</p>
+<p>type_elements: atomic numbers in LAMMPS type order (type 1 first).  LAMMPS
+hands the model species = type - 1, and a model's own element order (a
+.yace lists its elements as fitted) need not match; default: the model's.</p>
+<p>max_owned: dense / matrix row capacity (owned atoms only, LAMMPS numbers
+them first).  When given, the dense energy function evaluates only rows &lt; it
+(see make_energy_fn's n_rows) and the matrix has that many rows (lammps-jax's
+max_owned); always recorded in the bundle, including for the sparse layout,
+which has no row concept and ignores it otherwise.</p>
+<p>device_memory: bytes XLA can allocate on the device LAMMPS will run on (with
+XLA's default preallocation, 75% of the GPU's memory).  The export need not
+run there, so this is a setting of the bundle; None queries the exporting
+process's device (<code>calc.point.dense_budget_bytes</code>: CPU_DENSE_BUDGET_BYTES
+where it reports none).  The dense-family budget is DENSE_BUDGET_FRACTION of it.</p>
+<p>Dense and matrix rows run in blocks of <code>block_rows</code> rows (lax.map +
+jax.checkpoint), so one block's temporaries bound memory.  Default:
+<code>block_rows_for</code>: the largest of BUNDLE_BLOCK_ROWS halved down to
+MIN_BLOCK_ROWS within block_target_elems(device_memory) (speed) whose estimate fits the
+budget (an explicit layout without device_memory: the target alone).</p>
+<p>platform: the PJRT plugin the bundle runs on, "cuda" or "cpu" (lammps-jax's
+export_model(platform=), after its CPU backend; None keeps its default, cuda).
+Lowering is per platform: the dense family's cumsum lowered for cuda aborts
+XLA's CPU compiler.  For a CPU run, pass device_memory too (a rank's share of
+host RAM): the default queries the exporting process's device.</p>
+<p>dtype: the bundle's precision (lammps-jax's contract: positions in, energy and forces out).
+The traced model is cast to it after lean / splines / radial tables (computed in float64),
+so a float32 bundle is a float32 program under x64 too.  precision_structure (ase.Atoms; a
+non-float64 dtype only): run <code>calc.precision.precision_check</code> on it, record the result as
+<code>ace_jax.precision_check</code> and warn above <code>PRECISION_WARN</code> (<code>aj export</code> passes --structure).
+lammps-jax hands a float32 bundle float32 absolute positions, so rij carries ~ulp(|x|) of
+rounding that grows with the box (docs/dev/fp32-results.md).</p>
+<p>layout="auto" picks a dense-family layout when k_dense is given and some
+block fits (estimate_a_bytes for that many rows, of the row capacity --
+max_owned if given, else max_atoms), else sparse.  The dense-family layout
+is "matrix" when max_neighbors is given, the installed lammps-jax supports it
+(<code>matrix_supported</code>) and a block plus the matrix's unblocked pre-processing
+(<code>matrix_prep_bytes</code>) fits; else "dense".  Recorded as <code>ace_jax.block_rows</code>,
+<code>ace_jax.device_memory</code> and <code>ace_jax.dense_budget</code>.  A LAMMPS plugin
+older than the Python package rejects a matrix bundle: rebuild the plugin,
+or export layout="dense".  The bundle records the exporting lammps-jax as
+<code>ace_jax.lammps_jax</code>.</p>
+<p>lean (default True): export <code>ace_jax.eval.model.lean(model, spline_tol,
+spline_intervals)</code>, the evaluation form with the dead per-edge work removed
+(docs/dev/ace-vs-pace-gap.md).  spline_tol="auto" (default) first splines a
+learned analytic tensor radial (<code>radial_learned</code>) at 1e-10, which is not
+roundoff: energies agree with lean=False to up to ~1e-9 relative and forces
+to up to ~2.3e-8 of max|F| on the benchmark models
+(docs/dev/learned-radial-splining.md).  Other analytic models (ACEpotentials
+<code>ace_model</code> exports, built bases) stay exact; a float spline_tol opts
+them in, None never splines.
+Recorded from what lean actually did (looking through a wrapper's <code>.base</code>):
+<code>ace_jax.lean</code> (False when lean returned the model as given, e.g. PACE or an
+unfolded model), <code>ace_jax.spline_tol</code> and <code>ace_jax.spline_intervals</code>
+({radial: n}), both None when nothing was splined.</p>
+<p>radial_table (None, the default: off; True: sized to a 1e-9 value error
+from 4000 intervals up; a float: that tolerance; an int: that many
+intervals): tabulate the exported model's radial stage in r after <code>lean</code>
+(<code>eval.model.with_radial_table</code>; ACE R_nl and the pair radial, PACE g_k),
+for every layout.  A CPU speed-up and an approximation (with True
+energies to ~1e-11 relative, forces to ~1e-8 of max|F|); exactly zero
+beyond each pair's cutoff, so the matrix layout's skin pairs still drop
+out.  Recorded as <code>ace_jax.radial_table</code> (n_intervals, r_min, r_max,
+max_rel_err, max_rel_deriv_err; None when off), next to
+<code>ace_jax.spline_tol</code>.</p>
+<p>aa_dag ("auto", the default; None: the chain form; "greedy" or "prefix"):
+evaluate the product basis as a DAG, one multiply per monomial
+(<code>eval.aa_dag</code>), after <code>lean</code> and the radial table.  Exact to roundoff
+("prefix": bitwise monomials).  "auto" is "greedy" from
+<code>eval.aa_dag.AUTO_MIN_CHAIN_MUL</code> chain-form multiplies per site and the chain
+form below (<code>eval.aa_dag.resolve_aa_dag</code>).  Recorded as <code>ace_jax.aa_dag</code>, the
+mode used.</p>
+<p>ffi ("auto", the default; True; the path of a library built by <code>eval.ffi.build</code> or <code>build_gpu</code>; False)
+runs the model as the FFI kernel of <code>eval.ffi</code> on the neighbour matrix, positions in and atom energies
+and forces out: the C++ kernel for platform="cpu", the CUDA one otherwise.  "auto" takes the C++
+kernel on a CPU bundle when it can (<code>choose_ffi</code>), else the XLA program, recording why as
+<code>ace_jax.ffi_reason</code>; a GPU bundle takes the CUDA kernel with True or a path only; False is always
+the XLA program.  The kernel needs the matrix layout, float64, or float32 on a GPU, and a lean linear
+ACEModel, and turns the radial table on (radial_table=None -&gt; True).  True compiles the kernel on
+first use (<code>eval.ffi.library</code>: a C++17 compiler and -march=native, or nvcc for the GPU JAX sees,
+cached; <code>eval.ffi.FFIUnavailable</code> without one).  The kernel lays out its own greedy DAG and reads every
+list slot, so <code>aa_dag</code>, <code>k_dense</code> and <code>block_rows</code> do not apply (recorded as "greedy", None, None).
+LAMMPS loads the kernel through LAMMPS_JAX_FFI_HANDLERS, set to <code>ace_jax.ffi["handlers"]</code>, with a
+lammps-jax whose plugin registers handlers for the bundle's platform.  Recorded as <code>ace_jax.ffi</code>:
+{"target", "library", "handlers"} (None for the XLA program).  ffi_precision="mixed" (off by
+default; a float64 bundle with the kernel): the kernel's product basis in float32, the rest float64
+(<code>eval.ffi.kernel_inputs</code>): faster for large models, forces within ~1e-5 eV/A, energies with ~0.1 meV
+of noise in 200 atoms (minimise with a force-based <code>min_style</code> such as fire, not a line search).
+Recorded as <code>ace_jax.ffi_precision</code>.  On a CUDA GPU the kernel replaces the
+removed aa_dag="cueq" (NVIDIA cuequivariance), which now raises ValueError.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="ace_jax.export.lammps.neighbour_capacity" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">ace_jax.export.lammps.neighbour_capacity</span>
+
+
+<a href="#ace_jax.export.lammps.neighbour_capacity" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">neighbour_capacity</span><span class="p">(</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">atoms</span><span class="p">,</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="n">rcut</span><span class="p">,</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="n">skin</span><span class="o">=</span><span class="mf">1.0</span><span class="p">,</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="n">slots</span><span class="o">=</span><span class="s2">"skin"</span><span class="p">,</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="n">margin</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    <span class="n">owned</span><span class="o">=</span><span class="mf">1.1</span><span class="p">,</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    <span class="n">list_headroom</span><span class="o">=</span><span class="mf">0.5</span><span class="p">,</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>    <span class="n">procs</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>lammps-jax buffer sizes for <code>atoms</code> (a periodic ase.Atoms, the structure
+the run starts from).  Returns max_atoms (owned + ghost shell rcut + skin
+deep perpendicular to each face -- the face spacings, 1/|reciprocal row|,
+so sheared cells are covered -- x1.1),
+max_owned (owned x <code>owned</code>), k_list / k_cut (largest coordination within
+rcut + skin / rcut), max_neighbors (neighbour-matrix list slots: LAMMPS
+copies its whole rcut + skin list at every rebuild, and a wider row aborts
+the run, so max(k_list + margin, ceil((1 + list_headroom) * k_list))), k_dense
+(model slots; the matrix compacts the in-cutoff pairs into them) and
+max_edges (max_owned * k_dense).</p>
+<p>The list needs more headroom than the model slots: when a structure
+compresses, the rcut + skin count grows as the rcut count does, from a
+larger base.  list_headroom = 0.5 comes from ONE observed overflow: on the
+benchmark deck SiGe medium's widest list row grew from 34 to 45 by the
+first rebuild (k_list + 8 = 42 aborted), while its rcut slots never
+overflowed (docs/dev/perf-lammps-large-n.md).  It is a guess, not a bound;
+for stable MD list_headroom=0 (with margin &gt;= 8) is cheaper.</p>
+<p>slots="skin" (default, always safe between list rebuilds): k_dense =
+k_list + margin.  No atom can gain more neighbours within rcut than its
+rcut + skin list holds, so this covers structures that compress during the
+run (the benchmark's random-weight models push Cantor's coordination within
+rcut from 42 to 50 in 250 steps; docs/dev/perf-lammps-large-n.md).</p>
+<p>slots="cutoff": k_dense = k_cut + margin, 1.2-1.4x faster on Cantor (fewer
+model slots).  Safe for stable MD with a fitted model -- a thermalised
+crystal or liquid whose coordination within rcut stays within <code>margin</code> of
+the starting structure's.  If it does not, an atom overflows its slots and
+the step's energy and forces are NaN (the run fails loudly; never a
+truncation).</p>
+<p>procs=(px, py, pz): one MPI rank's capacities on that processor grid (run
+LAMMPS with <code>processors px py pz</code> to match): the subdomain's face spacings
+are the cell's / p, so max_owned is the rank's share of the atoms (plus
+3 sqrt(n) + 4: small subdomains fluctuate) and
+max_atoms its own owned + ghost shell, which dominates small subdomains.  A
+rank over capacity is a collective LAMMPS error, never a truncation.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="ace_jax.export.lammps.matrix_supported" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">ace_jax.export.lammps.matrix_supported</span>
+
+
+<a href="#ace_jax.export.lammps.matrix_supported" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">matrix_supported</span><span class="p">()</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>Whether the installed lammps-jax exports the neighbour-matrix input
+layout (export_model(max_neighbors=...); lammps-jax 4a7f4fb and later).</p>
+
+
+    </div>
+
+</div><h2 id="jax-md">JAX-MD<a class="headerlink" href="#jax-md" title="Permanent link">&para;</a></h2>
+<p>See <a href="../../howto/jax-md/">Run MD with JAX-MD</a>.</p>
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="ace_jax.jaxmd.potential" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">ace_jax.jaxmd.potential</span>
+
+
+<a href="#ace_jax.jaxmd.potential" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">potential</span><span class="p">(</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">model</span><span class="p">,</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="n">displacement_fn</span><span class="p">,</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="n">species</span><span class="p">,</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="n">meta</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="n">K</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    <span class="n">chunk</span><span class="o">=</span><span class="s2">"auto"</span><span class="p">,</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    <span class="o">**</span><span class="n">calc_kw</span><span class="p">,</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p><code>Potential(energy, force, cutoff, K, overflow)</code> for JAX-MD.</p>
+<p><code>model</code> is a path or a loaded model (then pass <code>meta</code>).  <code>species</code> is the atomic
+numbers (N,), fixed for the run (a <code>species=</code> keyword per call overrides it; a
+traced one with an element the model lacks makes energy and forces NaN, a
+concrete one raises).
+<code>cutoff</code> is the model's rc, the <code>r_cutoff</code> to build the JAX-MD list with.
+<code>K</code> (int) compacts the list to K in-cutoff slots per atom (Dense format only);
+None evaluates every list slot.  K sized for rc + skin (<code>capacity(..., rc +
+skin)</code>) cannot overflow between list rebuilds; sized for rc ("tight": fewer
+model slots, ~1.5x faster forces) it can, as atoms move, and <code>overflow</code> says
+when (energy and forces are then NaN, never truncated).  <code>chunk</code> is the rows
+per dense block: "auto" sizes it at trace time from N and the slots as the
+lammps-jax bundles do (<code>block_rows</code>); an int fixes it.  Other keywords go to
+ACECalculator, which builds the evaluation model.</p>
+<p><code>energy</code> is JAX-MD's energy-function contract: give it to any integrator,
+<code>quantity.force</code> or <code>quantity.stress</code> (stress is JAX-MD's sign, minus ASE's).
+<code>force</code> is -grad(energy) with respect to the positions, as JAX-MD's
+<code>quantity.force(energy)</code>: Cartesian, also under
+<code>space.periodic_general(fractional_coordinates=True)</code> (JAX-MD's <code>transform</code>
+passes the gradient through), for the integrators that take a force
+function.  (An explicit assembly of dE/drij into forces measured no faster:
+the full reverse pass was 5-6% faster on an A100.)</p>
+<p>Supports partition.Dense and partition.Sparse (a full list; without K: K is
+refused for it); OrderedSparse, a half list, is refused.  An overflowed list
+makes energy and forces NaN, whatever its format.  Remaining keywords of a call
+(<code>box=</code> for <code>space.periodic_general</code>) are passed to <code>displacement_fn</code>.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="ace_jax.jaxmd.cutoff" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">ace_jax.jaxmd.cutoff</span>
+
+
+<a href="#ace_jax.jaxmd.cutoff" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">cutoff</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">meta</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>The model's cutoff rc (Angstrom), the <code>r_cutoff</code> for a neighbour list: from the
+model file's metadata (<code>model</code> a path), or from <code>meta</code> (a loaded model), without
+building the evaluation model.  It is <code>potential(...).cutoff</code>.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="ace_jax.jaxmd.capacity" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">ace_jax.jaxmd.capacity</span>
+
+
+<a href="#ace_jax.jaxmd.capacity" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">capacity</span><span class="p">(</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">R</span><span class="p">,</span> <span class="n">neighbor</span><span class="p">,</span> <span class="n">displacement_fn</span><span class="p">,</span> <span class="n">cutoff</span><span class="p">,</span> <span class="n">step</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span> <span class="o">**</span><span class="n">kw</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>K for <code>potential</code>: the largest in-cutoff neighbour count over a Dense list
+at positions R, rounded up
+to <code>step</code> (<code>calc.skin.round_k</code>).  Add headroom (e.g. <code>round_k(1.2 * k)</code>) for
+liquids or compressing cells.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="ace_jax.jaxmd.block_rows" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">ace_jax.jaxmd.block_rows</span>
+
+
+<a href="#ace_jax.jaxmd.block_rows" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">block_rows</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">n</span><span class="p">,</span> <span class="n">k</span><span class="p">,</span> <span class="n">itemsize</span><span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>Rows per dense block for n atoms and k slots: the rule of the lammps-jax
+bundles (<code>export.lammps.block_rows_for</code> on the full <code>model</code>, as export_lammps
+sizes it: estimate_a_bytes underestimates the lean widths), within this
+device's dense budget and block target; MIN_BLOCK_ROWS when none fits.  Above
+one block the rows run under lax.map + checkpoint, so memory follows the block,
+not n.  Si, 32768 atoms, RTX 4000 Ada, float64, against fixed 16384-row blocks:
+o4d20 368 -&gt; 308 ms/step, and the model's GPU memory 10.2 -&gt; 1.3 GB (measured
+with an O(N K) neighbour list: JAX-MD's own cell list adds ~4 GB of build
+temporaries); the checkpoint recompute makes small models slower (o3d10 43 -&gt;
+48 ms, as the bundles: lammps-jax 50 ms).  An int <code>chunk</code> to <code>potential</code> trades
+back.  docs/dev/jax-md-results.md.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="ace_jax.jaxmd.allocate" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">ace_jax.jaxmd.allocate</span>
+
+
+<a href="#ace_jax.jaxmd.allocate" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">allocate</span><span class="p">(</span><span class="n">neighbor_fn</span><span class="p">,</span> <span class="n">R</span><span class="p">,</span> <span class="o">**</span><span class="n">kw</span><span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p><code>neighbor_fn.allocate(R, **kw)</code> with its <code>cell_size</code> a Python float.  JAX-MD
+keeps cell_size, a jax array, in a static (metadata) field; JAX 0.11 compares
+metadata when a jitted function sees a new pytree, and an array there raises
+("metadata fields ... hashable") as soon as a <em>reallocated</em> list reaches a
+function compiled for the old one -- the usual overflow-and-reallocate loop.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="ace_jax.jaxmd.min_image_ok" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">ace_jax.jaxmd.min_image_ok</span>
+
+
+<a href="#ace_jax.jaxmd.min_image_ok" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">min_image_ok</span><span class="p">(</span><span class="n">cell</span><span class="p">,</span> <span class="n">cutoff</span><span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>Whether JAX-MD's minimum image holds every pair within <code>cutoff</code> (rc +
+dr_threshold) of this cell (rows: lattice vectors, ASE's convention): every
+perpendicular width exceeds 2 cutoff.  Below that JAX-MD silently misses
+images, so check before a run on a small or sheared cell.</p>
+
+
+    </div>
+
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../cli/" class="md-footer__link md-footer__link--prev" aria-label="Previous: CLI">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                CLI
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../../faq/" class="md-footer__link md-footer__link--next" aria-label="Next: FAQ and troubleshooting">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                FAQ and troubleshooting
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.indexes", "navigation.footer", "search.suggest", "search.highlight", "content.code.copy", "toc.follow"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+        <script src="../../javascripts/mathjax.js"></script>
+      
+        <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+        <script src="../../javascripts/plotly-figures.js"></script>
+      
+    
+  </body>
+</html>

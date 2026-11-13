@@ -1,0 +1,2522 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head><meta name="robots" content="noindex">
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Fit and evaluate ACE and PACE interatomic potentials in Python/JAX">
+      
+      
+      
+        <link rel="canonical" href="https://acesuit.github.io/ace-jax/tutorials/surfaces/">
+      
+      
+        <link rel="prev" href="../basis-and-evidence/">
+      
+      
+        <link rel="next" href="../curation/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/acesuit-logo.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>6. Surfaces: coverage and repair - ace-jax</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#tutorial-6-surfaces" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="ace-jax" class="md-header__button md-logo" aria-label="ace-jax" data-md-component="logo">
+      
+  <img src="../../assets/acesuit-logo.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            ace-jax
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              6. Surfaces: coverage and repair
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/ACEsuit/ace-jax" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    ACEsuit/ace-jax
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="ace-jax" class="md-nav__button md-logo" aria-label="ace-jax" data-md-component="logo">
+      
+  <img src="../../assets/acesuit-logo.png" alt="logo">
+
+    </a>
+    ace-jax
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/ACEsuit/ace-jax" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    ACEsuit/ace-jax
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorials
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_4" id="__nav_4_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Tutorials
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../first-fit/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    1. First fit: silicon
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../learned-radials/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2. Learned radials: silicon
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../multi-element/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    3. Multi-element fits: categorical and embedded species
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dataset-and-properties/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    4. Your data, your property
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../basis-and-evidence/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    5. Basis size and the evidence
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    6. Surfaces: coverage and repair
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    6. Surfaces: coverage and repair
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#step-1-the-bulk-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 1: the bulk model
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-2-build-the-slabs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 2: build the slabs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-3-surface-energies-true-and-predicted" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 3: surface energies, true and predicted
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-4-how-far-outside-the-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 4: how far outside the data?
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-5-repair-the-dataset" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 5: repair the dataset
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-6-let-the-atoms-move" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 6: let the atoms move
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-7-displaced-slabs-and-a-basis-to-hold-them" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 7: displaced slabs, and a basis to hold them
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reflection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reflection
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#exercises" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exercises
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Summary
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../curation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    7. Automating curation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../truth-about-the-truth/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    8. The truth about the truth
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../bring-your-own-data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    9. Bring your own data
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/force-uncertainty-maths/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Force uncertainty: the mathematics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How-to guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    How-to guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/basis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Build a basis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/fit-yaml/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run files (fit.yaml)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/multi-element/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Multi-element fits
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/ase/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ASE calculators
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/batch/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evaluate many structures
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/lammps/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    LAMMPS export
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/jax-md/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MD with JAX-MD
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/precision/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Choose float64 or float32
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/pace/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    PACE .yace models
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/learned-radials/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Learn the radial basis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/force-uncertainty/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Per-atom force uncertainty
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/foundation-labels/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Labels from a foundation model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/large-fits/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Large linear fits
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../howto/reproducibility/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reproducibility
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../benchmarks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Performance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Python API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../faq/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAQ and troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../licence/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Licence and citation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#step-1-the-bulk-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 1: the bulk model
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-2-build-the-slabs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 2: build the slabs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-3-surface-energies-true-and-predicted" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 3: surface energies, true and predicted
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-4-how-far-outside-the-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 4: how far outside the data?
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-5-repair-the-dataset" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 5: repair the dataset
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-6-let-the-atoms-move" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 6: let the atoms move
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-7-displaced-slabs-and-a-basis-to-hold-them" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 7: displaced slabs, and a basis to hold them
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reflection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reflection
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#exercises" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exercises
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Summary
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<!-- generated by docs/build_tutorials.py from notebooks/school_surfaces_si.py (1c7c4a053aaf63bc) -->
+
+<h1 id="tutorial-6-surfaces">Tutorial 6: surfaces<a class="headerlink" href="#tutorial-6-surfaces" title="Permanent link">&para;</a></h1>
+<p><a href="https://acesuit.github.io/ace-jax/tutorials/dataset-and-properties/">Tutorial 4</a>
+ended with a question: would a bulk-only silicon model get a surface
+energy right? This tutorial answers it, measures why not in descriptor
+space, repairs the dataset, and then lets the surface atoms move, which
+exposes the next gap.</p>
+<p><strong>Goals</strong></p>
+<ol>
+<li>Build silicon slabs for three faces and compute their surface energies
+   with the labeller and with the bulk-only model.</li>
+<li>See in descriptor space how far the surface atoms sit from the data.</li>
+<li>Repair the dataset with a few slabs, and check the surface energies.</li>
+<li>Relax the slabs with the repaired model, find what still breaks, and
+   fix that too.</li>
+</ol>
+<p>It is adapted from notebook E2 of the
+<a href="https://mlipschool.uk/e2/e2_surfaces">MLIP School 2026</a>.</p>
+<p><strong>Run this notebook.</strong> Install <a href="https://docs.astral.sh/uv/">uv</a>. Then run this command:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>uvx<span class="w"> </span>marimo<span class="w"> </span>edit<span class="w"> </span>--sandbox<span class="w"> </span>https://raw.githubusercontent.com/ACEsuit/ace-jax/main/docs/user/tutorials/notebooks/school_surfaces_si.py
+</code></pre></div>
+<p>The notebook opens in your browser. You do not need an account.
+You can also open the notebook in <a href="https://molab.marimo.io/github/ACEsuit/ace-jax/blob/main/docs/user/tutorials/notebooks/school_surfaces_si.py">molab</a>,
+the marimo hosted service. You must sign in to run it there.</p>
+<p>This website shows a static copy of the notebook, run on a CPU when the
+site was built. The interactive controls show their default values.
+Run time: approximately 2 minutes.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">pathlib</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="kn">import</span><span class="w"> </span><span class="nn">jax</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="n">jax</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="s2">"jax_enable_x64"</span><span class="p">,</span> <span class="kc">True</span><span class="p">)</span>  <span class="c1"># fitting needs float64</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="kn">import</span><span class="w"> </span><span class="nn">marimo</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">mo</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="kn">import</span><span class="w"> </span><span class="nn">matplotlib.pyplot</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">plt</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="kn">from</span><span class="w"> </span><span class="nn">ace_jax</span><span class="w"> </span><span class="kn">import</span> <span class="n">ACECalculator</span>
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="kn">from</span><span class="w"> </span><span class="nn">ace_jax.tutorials</span><span class="w"> </span><span class="kn">import</span> <span class="n">campaign</span> <span class="k">as</span> <span class="n">C</span>
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="kn">from</span><span class="w"> </span><span class="nn">ace_jax.tutorials</span><span class="w"> </span><span class="kn">import</span> <span class="n">labels</span> <span class="k">as</span> <span class="n">L</span>
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a><span class="kn">from</span><span class="w"> </span><span class="nn">ace_jax.tutorials</span><span class="w"> </span><span class="kn">import</span> <span class="n">structures</span> <span class="k">as</span> <span class="n">T</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="n">BASE</span> <span class="o">=</span> <span class="s2">"https://raw.githubusercontent.com/ACEsuit/ace-jax/main/docs/user/tutorials/data/school/"</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="k">def</span><span class="w"> </span><span class="nf">shipped</span><span class="p">(</span><span class="n">rel</span><span class="p">):</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">    </span><span class="sd">"""A shipped data file: the checkout's copy when run from one, else the GitHub one."""</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>    <span class="n">_p</span> <span class="o">=</span> <span class="p">(</span><span class="n">mo</span><span class="o">.</span><span class="n">notebook_dir</span><span class="p">()</span> <span class="o">/</span> <span class="s2">"../data/school"</span> <span class="o">/</span> <span class="n">rel</span><span class="p">)</span> <span class="k">if</span> <span class="n">mo</span><span class="o">.</span><span class="n">notebook_dir</span><span class="p">()</span> <span class="k">else</span> <span class="kc">None</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>    <span class="k">return</span> <span class="n">_p</span> <span class="k">if</span> <span class="n">_p</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">_p</span><span class="o">.</span><span class="n">exists</span><span class="p">()</span> <span class="k">else</span> <span class="n">BASE</span> <span class="o">+</span> <span class="n">rel</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="n">caches</span> <span class="o">=</span> <span class="p">[</span><span class="n">L</span><span class="o">.</span><span class="n">LabelCache</span><span class="o">.</span><span class="n">from_file</span><span class="p">(</span><span class="n">shipped</span><span class="p">(</span><span class="n">f</span><span class="p">))</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">"e1/labels-mpa-0.xyz"</span><span class="p">,</span> <span class="s2">"e2/labels-mpa-0.xyz"</span><span class="p">,</span>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>                                                         <span class="s2">"c/labels-mpa-0.xyz"</span><span class="p">)]</span>
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="k">class</span><span class="w"> </span><span class="nc">_Caches</span><span class="p">:</span>          <span class="c1"># one lookup over the three shipped caches</span>
+<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">get</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">atoms</span><span class="p">,</span> <span class="n">model</span><span class="p">):</span>
+<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a>        <span class="k">return</span> <span class="nb">next</span><span class="p">((</span><span class="n">h</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">caches</span> <span class="k">if</span> <span class="p">(</span><span class="n">h</span> <span class="o">:=</span> <span class="n">c</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">atoms</span><span class="p">,</span> <span class="n">model</span><span class="p">))</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">),</span> <span class="kc">None</span><span class="p">)</span>
+<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a>
+<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a>
+<a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a><span class="n">cache</span> <span class="o">=</span> <span class="n">_Caches</span><span class="p">()</span>
+<a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a>
+<a id="__codelineno-2-21" name="__codelineno-2-21" href="#__codelineno-2-21"></a>
+<a id="__codelineno-2-22" name="__codelineno-2-22" href="#__codelineno-2-22"></a><span class="k">def</span><span class="w"> </span><span class="nf">label</span><span class="p">(</span><span class="n">xs</span><span class="p">):</span>
+<a id="__codelineno-2-23" name="__codelineno-2-23" href="#__codelineno-2-23"></a>    <span class="k">return</span> <span class="n">L</span><span class="o">.</span><span class="n">label</span><span class="p">(</span><span class="n">xs</span><span class="p">,</span> <span class="n">model</span><span class="o">=</span><span class="s2">"mpa-0"</span><span class="p">,</span> <span class="n">cache</span><span class="o">=</span><span class="n">cache</span><span class="p">)</span>
+<a id="__codelineno-2-24" name="__codelineno-2-24" href="#__codelineno-2-24"></a>
+<a id="__codelineno-2-25" name="__codelineno-2-25" href="#__codelineno-2-25"></a>
+<a id="__codelineno-2-26" name="__codelineno-2-26" href="#__codelineno-2-26"></a><span class="n">work</span> <span class="o">=</span> <span class="n">pathlib</span><span class="o">.</span><span class="n">Path</span><span class="p">(</span><span class="s2">"ace_jax_tutorial_6"</span><span class="p">)</span>
+<a id="__codelineno-2-27" name="__codelineno-2-27" href="#__codelineno-2-27"></a><span class="n">work</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</code></pre></div>
+<h2 id="step-1-the-bulk-model">Step 1: the bulk model<a class="headerlink" href="#step-1-the-bulk-model" title="Permanent link">&para;</a></h2>
+<p>The starting point is Tutorial 4's dataset at its defaults: ten strained
+and rattled 8-atom diamond cells (strain range 0.08, rattle 0.02 Å),
+labelled by MACE-MPA-0. Fit it with the evidence fit at the size used
+throughout this tutorial: correlation order 3, total degree 10, cutoff 5.5 Å.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">ace_jax.basis.model</span><span class="w"> </span><span class="kn">import</span> <span class="n">BasisSpec</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">ace_jax.fit.pipeline</span><span class="w"> </span><span class="kn">import</span> <span class="n">FitConfig</span><span class="p">,</span> <span class="n">fit</span><span class="p">,</span> <span class="n">load_fit_data</span><span class="p">,</span> <span class="n">save_model</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="n">noise</span> <span class="o">=</span> <span class="p">{}</span>              <span class="c1"># each fit's evidence noise levels (sigma_E, sigma_F), by `out`</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="k">def</span><span class="w"> </span><span class="nf">fit_model</span><span class="p">(</span><span class="n">train</span><span class="p">,</span> <span class="n">out</span><span class="p">,</span> <span class="n">degree</span><span class="o">=</span><span class="mi">10</span><span class="p">):</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="w">    </span><span class="sd">"""The evidence fit of every step here: order 3, degree 10 (unless given), rcut 5.5, E0 fitted."""</span>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a>    <span class="n">_cfg</span> <span class="o">=</span> <span class="n">FitConfig</span><span class="p">(</span><span class="n">model</span><span class="o">=</span><span class="n">BasisSpec</span><span class="p">(</span><span class="n">order</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span> <span class="n">max_degree</span><span class="o">=</span><span class="n">degree</span><span class="p">,</span> <span class="n">rcut</span><span class="o">=</span><span class="mf">5.5</span><span class="p">,</span> <span class="n">elements</span><span class="o">=</span><span class="p">(</span><span class="s2">"Si"</span><span class="p">,)),</span> <span class="n">arm</span><span class="o">=</span><span class="s2">"linear"</span><span class="p">,</span>
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a>                     <span class="n">m_per_species</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">e0</span><span class="o">=</span><span class="s2">"lsq"</span><span class="p">,</span> <span class="n">opt</span><span class="o">=</span><span class="s2">"lbfgs"</span><span class="p">,</span> <span class="n">r0</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">rungs</span><span class="o">=</span><span class="p">(</span><span class="s2">"map"</span><span class="p">,),</span>
+<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a>                     <span class="n">predict_stats</span><span class="o">=</span><span class="s2">"recompute"</span><span class="p">,</span> <span class="n">predict_train</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a>                     <span class="n">energy_key</span><span class="o">=</span><span class="s2">"energy"</span><span class="p">,</span> <span class="n">force_key</span><span class="o">=</span><span class="s2">"forces"</span><span class="p">,</span> <span class="n">virial_key</span><span class="o">=</span><span class="s2">"virial"</span><span class="p">)</span><span class="o">.</span><span class="n">validate</span><span class="p">()</span>
+<a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a>    <span class="n">_res</span> <span class="o">=</span> <span class="n">fit</span><span class="p">(</span><span class="n">_cfg</span><span class="p">,</span> <span class="n">load_fit_data</span><span class="p">(</span><span class="n">_cfg</span><span class="p">,</span> <span class="n">train</span><span class="o">=</span><span class="nb">list</span><span class="p">(</span><span class="n">train</span><span class="p">),</span> <span class="n">log</span><span class="o">=</span><span class="k">lambda</span> <span class="o">*</span><span class="n">a</span><span class="p">:</span> <span class="kc">None</span><span class="p">),</span> <span class="n">log</span><span class="o">=</span><span class="k">lambda</span> <span class="o">*</span><span class="n">a</span><span class="p">:</span> <span class="kc">None</span><span class="p">)</span>
+<a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a>    <span class="n">noise</span><span class="p">[</span><span class="n">out</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="n">_res</span><span class="o">.</span><span class="n">theta</span><span class="o">.</span><span class="n">log_sigma_E</span><span class="p">)),</span> <span class="nb">float</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="n">_res</span><span class="o">.</span><span class="n">theta</span><span class="o">.</span><span class="n">log_sigma_F</span><span class="p">)))</span>
+<a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a>    <span class="k">return</span> <span class="nb">str</span><span class="p">(</span><span class="n">save_model</span><span class="p">(</span><span class="n">_res</span><span class="p">,</span> <span class="n">work</span> <span class="o">/</span> <span class="n">out</span><span class="p">,</span> <span class="n">log</span><span class="o">=</span><span class="k">lambda</span> <span class="o">*</span><span class="n">a</span><span class="p">:</span> <span class="kc">None</span><span class="p">))</span>
+<a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a>
+<a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a>
+<a id="__codelineno-3-19" name="__codelineno-3-19" href="#__codelineno-3-19"></a><span class="n">bulk_training</span> <span class="o">=</span> <span class="n">label</span><span class="p">(</span><span class="n">T</span><span class="o">.</span><span class="n">e1_cells</span><span class="p">(</span><span class="mf">0.08</span><span class="p">,</span> <span class="mf">0.02</span><span class="p">))</span>
+<a id="__codelineno-3-20" name="__codelineno-3-20" href="#__codelineno-3-20"></a><span class="n">_t</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+<a id="__codelineno-3-21" name="__codelineno-3-21" href="#__codelineno-3-21"></a><span class="n">bulk_model</span> <span class="o">=</span> <span class="n">fit_model</span><span class="p">(</span><span class="n">bulk_training</span><span class="p">,</span> <span class="s2">"fit_bulk"</span><span class="p">)</span>
+<a id="__codelineno-3-22" name="__codelineno-3-22" href="#__codelineno-3-22"></a><span class="n">mo</span><span class="o">.</span><span class="n">md</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Fitted the bulk model on </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">bulk_training</span><span class="p">)</span><span class="si">}</span><span class="s2"> cells in </span><span class="si">{</span><span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">_t</span><span class="si">:</span><span class="s2">.0f</span><span class="si">}</span><span class="s2"> s."</span><span class="p">)</span>
+</code></pre></div>
+<p>Fitted the bulk model on 10 cells in 16 s.</p>
+<h2 id="step-2-build-the-slabs">Step 2: build the slabs<a class="headerlink" href="#step-2-build-the-slabs" title="Permanent link">&para;</a></h2>
+<p>A slab is a crystal cut on one plane, a few layers thick, with vacuum
+above and below so that it does not see its own periodic image. Build the
+(100), (110) and (111) faces with <code>ase.build.surface</code>. Two details matter:</p>
+<ul>
+<li><strong>Vacuum.</strong> The labeller sees approximately 6 Å, and its message
+  passing sees two times that distance. Thus the gap between a slab and
+  its image must be a minimum of 12 Å. The vacuum slider sets the vacuum
+  on each side.</li>
+<li><strong>Which (111).</strong> Diamond has two (111) cleavage planes. The wide
+  "shuffle" plane breaks one bond for each surface atom. The narrow
+  "glide" pair breaks three. By default, <code>surface</code> uses the glide pair.
+  <code>T.slab</code> first moves the crystal by a quarter of the cubic diagonal,
+  so the cut is on the shuffle plane. A surface atom with only one
+  neighbour shows a glide cut.</li>
+</ul>
+<p>The sliders move only to the settings that have labels in the tutorial.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="n">layers</span> <span class="o">=</span> <span class="n">mo</span><span class="o">.</span><span class="n">ui</span><span class="o">.</span><span class="n">slider</span><span class="p">(</span><span class="n">steps</span><span class="o">=</span><span class="nb">list</span><span class="p">(</span><span class="n">T</span><span class="o">.</span><span class="n">E2_LAYERS</span><span class="p">),</span> <span class="n">value</span><span class="o">=</span><span class="mi">6</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s2">"layers"</span><span class="p">,</span> <span class="n">show_value</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="n">vacuum</span> <span class="o">=</span> <span class="n">mo</span><span class="o">.</span><span class="n">ui</span><span class="o">.</span><span class="n">slider</span><span class="p">(</span><span class="n">steps</span><span class="o">=</span><span class="nb">list</span><span class="p">(</span><span class="n">T</span><span class="o">.</span><span class="n">E2_VACUA</span><span class="p">),</span> <span class="n">value</span><span class="o">=</span><span class="mf">8.0</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s2">"vacuum per side (Å)"</span><span class="p">,</span> <span class="n">show_value</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="n">mo</span><span class="o">.</span><span class="n">hstack</span><span class="p">([</span><span class="n">layers</span><span class="p">,</span> <span class="n">vacuum</span><span class="p">],</span> <span class="n">justify</span><span class="o">=</span><span class="s2">"start"</span><span class="p">)</span>
+</code></pre></div>
+<div class="admonition abstract">
+<p>Interactive controls in the notebook (this page shows their defaults): <em>layers</em> = <code>6</code>, <em>vacuum per side (Å)</em> = <code>8.0</code></p>
+</div>
+
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="n">slabs</span> <span class="o">=</span> <span class="n">T</span><span class="o">.</span><span class="n">e2_slabs</span><span class="p">(</span><span class="n">layers</span><span class="o">.</span><span class="n">value</span><span class="p">,</span> <span class="n">vacuum</span><span class="o">.</span><span class="n">value</span><span class="p">)</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="n">gap</span><span class="p">,</span> <span class="n">coord</span> <span class="o">=</span> <span class="n">T</span><span class="o">.</span><span class="n">min_vacuum_gap</span><span class="p">(</span><span class="n">slabs</span><span class="p">),</span> <span class="n">T</span><span class="o">.</span><span class="n">min_coordination</span><span class="p">(</span><span class="n">slabs</span><span class="p">)</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="n">mo</span><span class="o">.</span><span class="n">md</span><span class="p">(</span><span class="s2">"| face | atoms |</span><span class="se">\n</span><span class="s2">|---|---|</span><span class="se">\n</span><span class="s2">"</span> <span class="o">+</span> <span class="s2">"</span><span class="se">\n</span><span class="s2">"</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="sa">f</span><span class="s2">"| (</span><span class="si">{</span><span class="n">s</span><span class="o">.</span><span class="n">info</span><span class="p">[</span><span class="s1">'miller'</span><span class="p">]</span><span class="si">}</span><span class="s2">) | </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">s</span><span class="p">)</span><span class="si">}</span><span class="s2"> |"</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">slabs</span><span class="p">)</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>      <span class="o">+</span> <span class="sa">f</span><span class="s2">"</span><span class="se">\n\n</span><span class="s2">Smallest gap between a slab and its image: **</span><span class="si">{</span><span class="n">gap</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2"> Å**; fewest neighbours of any "</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>      <span class="sa">f</span><span class="s2">"atom: **</span><span class="si">{</span><span class="n">coord</span><span class="si">}</span><span class="s2">**."</span><span class="p">)</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>face</th>
+<th>atoms</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>(100)</td>
+<td>48</td>
+</tr>
+<tr>
+<td>(110)</td>
+<td>48</td>
+</tr>
+<tr>
+<td>(111)</td>
+<td>48</td>
+</tr>
+</tbody>
+</table>
+<p>Smallest gap between a slab and its image: <strong>16.0 Å</strong>; fewest neighbours of any atom: <strong>2</strong>.</p>
+<div class="admonition success">
+<p><strong>Checkpoint 1 passed:</strong> a gap of at least 12 Å, and no atom with a single neighbour.</p>
+</div>
+
+<h2 id="step-3-surface-energies-true-and-predicted">Step 3: surface energies, true and predicted<a class="headerlink" href="#step-3-surface-energies-true-and-predicted" title="Permanent link">&para;</a></h2>
+<div class="arithmatex">\[\gamma = \frac{E_\text{slab} - N_\text{slab}\,E_\text{bulk}/N_\text{bulk}}{2A}\]</div>
+<p>with <span class="arithmatex">\(A\)</span> the slab's in-plane area. The bulk reference is the 8-atom cubic
+cell at 5.43 Å.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="n">mo</span><span class="o">.</span><span class="n">stop</span><span class="p">(</span><span class="n">gap</span> <span class="o">&lt;</span> <span class="mf">12.0</span> <span class="o">-</span> <span class="mf">1e-6</span> <span class="ow">or</span> <span class="n">coord</span> <span class="o">&lt;</span> <span class="mi">2</span><span class="p">,</span> <span class="n">mo</span><span class="o">.</span><span class="n">md</span><span class="p">(</span><span class="s2">"Build a valid slab first (checkpoint 1)."</span><span class="p">))</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="n">ref_bulk</span><span class="p">,</span> <span class="o">*</span><span class="n">labelled_slabs</span> <span class="o">=</span> <span class="n">label</span><span class="p">([</span><span class="n">T</span><span class="o">.</span><span class="n">c_structures</span><span class="p">()[</span><span class="s2">"bulk"</span><span class="p">],</span> <span class="o">*</span><span class="n">slabs</span><span class="p">])</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="k">def</span><span class="w"> </span><span class="nf">gammas</span><span class="p">(</span><span class="n">e_bulk</span><span class="p">,</span> <span class="n">e_slabs</span><span class="p">,</span> <span class="n">structures</span><span class="o">=</span><span class="n">slabs</span><span class="p">):</span>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>    <span class="k">return</span> <span class="p">[</span><span class="n">T</span><span class="o">.</span><span class="n">surface_energy</span><span class="p">(</span><span class="n">e_bulk</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">ref_bulk</span><span class="p">),</span> <span class="n">e</span><span class="p">,</span> <span class="n">s</span><span class="p">)</span> <span class="k">for</span> <span class="n">s</span><span class="p">,</span> <span class="n">e</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">structures</span><span class="p">,</span> <span class="n">e_slabs</span><span class="p">)]</span>
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>
+<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a><span class="k">def</span><span class="w"> </span><span class="nf">model_energies</span><span class="p">(</span><span class="n">model_file</span><span class="p">,</span> <span class="n">xs</span><span class="p">):</span>
+<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a>    <span class="n">_calc</span> <span class="o">=</span> <span class="n">ACECalculator</span><span class="p">(</span><span class="n">model_file</span><span class="p">,</span> <span class="n">skin</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+<a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a>    <span class="n">_out</span> <span class="o">=</span> <span class="p">[]</span>
+<a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a>    <span class="k">for</span> <span class="n">_a</span> <span class="ow">in</span> <span class="n">xs</span><span class="p">:</span>
+<a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a>        <span class="n">_b</span> <span class="o">=</span> <span class="n">_a</span><span class="o">.</span><span class="n">copy</span><span class="p">();</span> <span class="n">_b</span><span class="o">.</span><span class="n">calc</span> <span class="o">=</span> <span class="n">_calc</span>
+<a id="__codelineno-6-14" name="__codelineno-6-14" href="#__codelineno-6-14"></a>        <span class="n">_out</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">_b</span><span class="o">.</span><span class="n">get_potential_energy</span><span class="p">())</span>
+<a id="__codelineno-6-15" name="__codelineno-6-15" href="#__codelineno-6-15"></a>    <span class="k">return</span> <span class="n">_out</span>
+<a id="__codelineno-6-16" name="__codelineno-6-16" href="#__codelineno-6-16"></a>
+<a id="__codelineno-6-17" name="__codelineno-6-17" href="#__codelineno-6-17"></a>
+<a id="__codelineno-6-18" name="__codelineno-6-18" href="#__codelineno-6-18"></a><span class="k">def</span><span class="w"> </span><span class="nf">model_gammas</span><span class="p">(</span><span class="n">model_file</span><span class="p">,</span> <span class="n">structures</span><span class="o">=</span><span class="n">slabs</span><span class="p">):</span>
+<a id="__codelineno-6-19" name="__codelineno-6-19" href="#__codelineno-6-19"></a>    <span class="n">_e</span> <span class="o">=</span> <span class="n">model_energies</span><span class="p">(</span><span class="n">model_file</span><span class="p">,</span> <span class="p">[</span><span class="n">ref_bulk</span><span class="p">,</span> <span class="o">*</span><span class="n">structures</span><span class="p">])</span>
+<a id="__codelineno-6-20" name="__codelineno-6-20" href="#__codelineno-6-20"></a>    <span class="k">return</span> <span class="n">gammas</span><span class="p">(</span><span class="n">_e</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">_e</span><span class="p">[</span><span class="mi">1</span><span class="p">:],</span> <span class="n">structures</span><span class="p">)</span>
+<a id="__codelineno-6-21" name="__codelineno-6-21" href="#__codelineno-6-21"></a>
+<a id="__codelineno-6-22" name="__codelineno-6-22" href="#__codelineno-6-22"></a>
+<a id="__codelineno-6-23" name="__codelineno-6-23" href="#__codelineno-6-23"></a><span class="n">truth</span> <span class="o">=</span> <span class="n">gammas</span><span class="p">(</span><span class="n">ref_bulk</span><span class="o">.</span><span class="n">info</span><span class="p">[</span><span class="s2">"energy"</span><span class="p">],</span> <span class="p">[</span><span class="n">a</span><span class="o">.</span><span class="n">info</span><span class="p">[</span><span class="s2">"energy"</span><span class="p">]</span> <span class="k">for</span> <span class="n">a</span> <span class="ow">in</span> <span class="n">labelled_slabs</span><span class="p">])</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="n">gamma_bulk</span> <span class="o">=</span> <span class="n">model_gammas</span><span class="p">(</span><span class="n">bulk_model</span><span class="p">)</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="n">_x</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">slabs</span><span class="p">))</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="n">_fig</span><span class="p">,</span> <span class="n">_ax</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">subplots</span><span class="p">(</span><span class="n">figsize</span><span class="o">=</span><span class="p">(</span><span class="mi">6</span><span class="p">,</span> <span class="mf">3.5</span><span class="p">))</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="n">_ax</span><span class="o">.</span><span class="n">bar</span><span class="p">(</span><span class="n">_x</span> <span class="o">-</span> <span class="mf">0.2</span><span class="p">,</span> <span class="n">truth</span><span class="p">,</span> <span class="mf">0.4</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s2">"MACE-MPA-0"</span><span class="p">)</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="n">_ax</span><span class="o">.</span><span class="n">bar</span><span class="p">(</span><span class="n">_x</span> <span class="o">+</span> <span class="mf">0.2</span><span class="p">,</span> <span class="n">gamma_bulk</span><span class="p">,</span> <span class="mf">0.4</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s2">"bulk-only ACE"</span><span class="p">)</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="n">_ax</span><span class="o">.</span><span class="n">set_xticks</span><span class="p">(</span><span class="n">_x</span><span class="p">,</span> <span class="p">[</span><span class="sa">f</span><span class="s2">"(</span><span class="si">{</span><span class="n">s</span><span class="o">.</span><span class="n">info</span><span class="p">[</span><span class="s1">'miller'</span><span class="p">]</span><span class="si">}</span><span class="s2">)"</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">slabs</span><span class="p">]);</span> <span class="n">_ax</span><span class="o">.</span><span class="n">set_ylabel</span><span class="p">(</span><span class="s2">"γ (eV/Å²)"</span><span class="p">)</span>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="n">_ax</span><span class="o">.</span><span class="n">legend</span><span class="p">(</span><span class="n">frameon</span><span class="o">=</span><span class="kc">False</span><span class="p">);</span> <span class="n">_ax</span><span class="o">.</span><span class="n">set_title</span><span class="p">(</span><span class="s2">"surface energies"</span><span class="p">)</span>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="n">_fig</span><span class="o">.</span><span class="n">tight_layout</span><span class="p">()</span>
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="n">_fig</span>
+</code></pre></div>
+<p><img alt="Figure 1" src="../surfaces_files/fig-1.png" /></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="n">mo</span><span class="o">.</span><span class="n">md</span><span class="p">(</span><span class="s2">"| face | MACE-MPA-0 | bulk-only ACE | error |</span><span class="se">\n</span><span class="s2">|---|---|---|---|</span><span class="se">\n</span><span class="s2">"</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>      <span class="o">+</span> <span class="s2">"</span><span class="se">\n</span><span class="s2">"</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="sa">f</span><span class="s2">"| (</span><span class="si">{</span><span class="n">s</span><span class="o">.</span><span class="n">info</span><span class="p">[</span><span class="s1">'miller'</span><span class="p">]</span><span class="si">}</span><span class="s2">) | </span><span class="si">{</span><span class="n">t</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2"> | </span><span class="si">{</span><span class="n">g</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2"> | </span><span class="si">{</span><span class="n">g</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">t</span><span class="si">:</span><span class="s2">+.4f</span><span class="si">}</span><span class="s2"> |"</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>                  <span class="k">for</span> <span class="n">s</span><span class="p">,</span> <span class="n">t</span><span class="p">,</span> <span class="n">g</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">slabs</span><span class="p">,</span> <span class="n">truth</span><span class="p">,</span> <span class="n">gamma_bulk</span><span class="p">))</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>      <span class="o">+</span> <span class="s2">"</span><span class="se">\n\n</span><span class="s2">γ in eV/Å². The bulk-only model is wrong by several times the surface energy itself."</span><span class="p">)</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>face</th>
+<th>MACE-MPA-0</th>
+<th>bulk-only ACE</th>
+<th>error</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>(100)</td>
+<td>0.1220</td>
+<td>0.1949</td>
+<td>+0.0730</td>
+</tr>
+<tr>
+<td>(110)</td>
+<td>0.0838</td>
+<td>-0.1887</td>
+<td>-0.2725</td>
+</tr>
+<tr>
+<td>(111)</td>
+<td>0.0712</td>
+<td>0.1593</td>
+<td>+0.0881</td>
+</tr>
+</tbody>
+</table>
+<p>γ in eV/Å². The bulk-only model is wrong by several times the surface energy itself.</p>
+<h2 id="step-4-how-far-outside-the-data">Step 4: how far outside the data?<a class="headerlink" href="#step-4-how-far-outside-the-data" title="Permanent link">&para;</a></h2>
+<p>Describe every atom by its ACE descriptor in a fixed reference basis
+(order 3, degree 10: 120 numbers per atom), and compare the slab atoms
+with the bulk training atoms. A principal-component plot shows the gap.
+One number measures it:</p>
+<ul>
+<li>the median distance from a slab atom to its nearest training atom,</li>
+<li>divided by the typical spacing of the training atoms (the median
+  distance from each training atom to its nearest neighbour).</li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="n">_B</span> <span class="o">=</span> <span class="n">C</span><span class="o">.</span><span class="n">reference_basis</span><span class="p">()</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="n">Xb</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">concatenate</span><span class="p">(</span><span class="n">C</span><span class="o">.</span><span class="n">atom_descriptors</span><span class="p">(</span><span class="n">bulk_training</span><span class="p">,</span> <span class="n">_B</span><span class="p">))</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="n">Xs</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">concatenate</span><span class="p">(</span><span class="n">C</span><span class="o">.</span><span class="n">atom_descriptors</span><span class="p">(</span><span class="n">slabs</span><span class="p">,</span> <span class="n">_B</span><span class="p">))</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="n">novelty</span> <span class="o">=</span> <span class="n">C</span><span class="o">.</span><span class="n">nn_ratio</span><span class="p">(</span><span class="n">Xb</span><span class="p">,</span> <span class="n">Xs</span><span class="p">)</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="n">_mu</span> <span class="o">=</span> <span class="n">Xb</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="n">_</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">_Vt</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">svd</span><span class="p">(</span><span class="n">Xb</span> <span class="o">-</span> <span class="n">_mu</span><span class="p">,</span> <span class="n">full_matrices</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="n">_pb</span><span class="p">,</span> <span class="n">_ps</span> <span class="o">=</span> <span class="p">(</span><span class="n">Xb</span> <span class="o">-</span> <span class="n">_mu</span><span class="p">)</span> <span class="o">@</span> <span class="n">_Vt</span><span class="p">[:</span><span class="mi">2</span><span class="p">]</span><span class="o">.</span><span class="n">T</span><span class="p">,</span> <span class="p">(</span><span class="n">Xs</span> <span class="o">-</span> <span class="n">_mu</span><span class="p">)</span> <span class="o">@</span> <span class="n">_Vt</span><span class="p">[:</span><span class="mi">2</span><span class="p">]</span><span class="o">.</span><span class="n">T</span>
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="n">_fig</span><span class="p">,</span> <span class="n">_ax</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">subplots</span><span class="p">(</span><span class="n">figsize</span><span class="o">=</span><span class="p">(</span><span class="mi">5</span><span class="p">,</span> <span class="mi">4</span><span class="p">))</span>
+<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a><span class="n">_ax</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">_pb</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">],</span> <span class="n">_pb</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">],</span> <span class="s2">"."</span><span class="p">,</span> <span class="n">ms</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.6</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s2">"bulk training atoms"</span><span class="p">)</span>
+<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a><span class="n">_ax</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">_ps</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">],</span> <span class="n">_ps</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">],</span> <span class="s2">"x"</span><span class="p">,</span> <span class="n">ms</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s2">"slab atoms"</span><span class="p">)</span>
+<a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a><span class="n">_ax</span><span class="o">.</span><span class="n">set_xlabel</span><span class="p">(</span><span class="s2">"PC 1"</span><span class="p">);</span> <span class="n">_ax</span><span class="o">.</span><span class="n">set_ylabel</span><span class="p">(</span><span class="s2">"PC 2"</span><span class="p">);</span> <span class="n">_ax</span><span class="o">.</span><span class="n">legend</span><span class="p">(</span><span class="n">frameon</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+<a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a><span class="n">_ax</span><span class="o">.</span><span class="n">set_title</span><span class="p">(</span><span class="sa">f</span><span class="s2">"slab atoms sit </span><span class="si">{</span><span class="n">novelty</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2">× out"</span><span class="p">)</span>
+<a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a><span class="n">_fig</span><span class="o">.</span><span class="n">tight_layout</span><span class="p">()</span>
+<a id="__codelineno-9-14" name="__codelineno-9-14" href="#__codelineno-9-14"></a><span class="n">_fig</span>
+</code></pre></div>
+<p><img alt="Figure 2" src="../surfaces_files/fig-2.png" /></p>
+<div class="admonition success">
+<p><strong>Checkpoint 2 passed:</strong> the median slab atom is 19.0 training spacings from the nearest training atom: the model is extrapolating, which is why its surface energies are wrong.</p>
+</div>
+
+<h2 id="step-5-repair-the-dataset">Step 5: repair the dataset<a class="headerlink" href="#step-5-repair-the-dataset" title="Permanent link">&para;</a></h2>
+<p>Add slabs of the same three faces to the training set. Use a thickness
+that the test slabs do not have: 4 layers, or 6 if the test slabs have 4.
+Thus the test slabs stay out of the training set. This adds three
+structures and three labels.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="n">repair</span> <span class="o">=</span> <span class="n">label</span><span class="p">(</span><span class="n">T</span><span class="o">.</span><span class="n">e2_slabs</span><span class="p">(</span><span class="n">T</span><span class="o">.</span><span class="n">e2_repair_layers</span><span class="p">(</span><span class="n">layers</span><span class="o">.</span><span class="n">value</span><span class="p">),</span> <span class="n">vacuum</span><span class="o">.</span><span class="n">value</span><span class="p">))</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">ace_jax.tutorials.labels</span><span class="w"> </span><span class="kn">import</span> <span class="n">structure_key</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="k">assert</span> <span class="ow">not</span> <span class="p">({</span><span class="n">structure_key</span><span class="p">(</span><span class="n">a</span><span class="p">)</span> <span class="k">for</span> <span class="n">a</span> <span class="ow">in</span> <span class="n">repair</span><span class="p">}</span> <span class="o">&amp;</span> <span class="p">{</span><span class="n">structure_key</span><span class="p">(</span><span class="n">s</span><span class="p">)</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">slabs</span><span class="p">}),</span> <span class="s2">"a test slab is in training"</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="n">repaired_model</span> <span class="o">=</span> <span class="n">fit_model</span><span class="p">([</span><span class="o">*</span><span class="n">bulk_training</span><span class="p">,</span> <span class="o">*</span><span class="n">repair</span><span class="p">],</span> <span class="s2">"fit_repaired"</span><span class="p">)</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="n">gamma_repaired</span> <span class="o">=</span> <span class="n">model_gammas</span><span class="p">(</span><span class="n">repaired_model</span><span class="p">)</span>
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="n">repaired_errors</span> <span class="o">=</span> <span class="p">[</span><span class="nb">abs</span><span class="p">(</span><span class="n">g</span> <span class="o">-</span> <span class="n">t</span><span class="p">)</span> <span class="k">for</span> <span class="n">g</span><span class="p">,</span> <span class="n">t</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">gamma_repaired</span><span class="p">,</span> <span class="n">truth</span><span class="p">)]</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="n">mo</span><span class="o">.</span><span class="n">md</span><span class="p">(</span><span class="s2">"| face | bulk-only error | repaired error |</span><span class="se">\n</span><span class="s2">|---|---|---|</span><span class="se">\n</span><span class="s2">"</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>      <span class="o">+</span> <span class="s2">"</span><span class="se">\n</span><span class="s2">"</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="sa">f</span><span class="s2">"| (</span><span class="si">{</span><span class="n">s</span><span class="o">.</span><span class="n">info</span><span class="p">[</span><span class="s1">'miller'</span><span class="p">]</span><span class="si">}</span><span class="s2">) | </span><span class="si">{</span><span class="nb">abs</span><span class="p">(</span><span class="n">g</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">t</span><span class="p">)</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2"> | </span><span class="si">{</span><span class="n">e</span><span class="si">:</span><span class="s2">.5f</span><span class="si">}</span><span class="s2"> |"</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>                  <span class="k">for</span> <span class="n">s</span><span class="p">,</span> <span class="n">g</span><span class="p">,</span> <span class="n">t</span><span class="p">,</span> <span class="n">e</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">slabs</span><span class="p">,</span> <span class="n">gamma_bulk</span><span class="p">,</span> <span class="n">truth</span><span class="p">,</span> <span class="n">repaired_errors</span><span class="p">))</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>      <span class="o">+</span> <span class="s2">"</span><span class="se">\n\n</span><span class="s2">|γ error| in eV/Å²."</span><span class="p">)</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>face</th>
+<th>bulk-only error</th>
+<th>repaired error</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>(100)</td>
+<td>0.0730</td>
+<td>0.00010</td>
+</tr>
+<tr>
+<td>(110)</td>
+<td>0.2725</td>
+<td>0.00007</td>
+</tr>
+<tr>
+<td>(111)</td>
+<td>0.0881</td>
+<td>0.00006</td>
+</tr>
+</tbody>
+</table>
+<p>|γ error| in eV/Å².</p>
+<div class="admonition success">
+<p><strong>Checkpoint 3 passed:</strong> three slabs bring every surface energy to within 0.00010 eV/Å² of the labeller, from 0.27.</p>
+</div>
+
+<h2 id="step-6-let-the-atoms-move">Step 6: let the atoms move<a class="headerlink" href="#step-6-let-the-atoms-move" title="Permanent link">&para;</a></h2>
+<p>The surface energies above are for ideal cleaves, frozen in place. A
+real surface relaxes. Relax each test slab with the repaired model
+(BFGS, until every force is below 0.03 eV/Å, at most 200 steps) and look
+at what happens.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">ase.optimize</span><span class="w"> </span><span class="kn">import</span> <span class="n">BFGS</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="k">def</span><span class="w"> </span><span class="nf">relax</span><span class="p">(</span><span class="n">model_file</span><span class="p">,</span> <span class="n">structures</span><span class="p">):</span>
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="w">    </span><span class="sd">"""BFGS to fmax 0.03 eV/A (at most 200 steps); per slab: converged, energy change, final</span>
+<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="sd">    largest force, and the relaxed copy."""</span>
+<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a>    <span class="n">_out</span> <span class="o">=</span> <span class="p">[]</span>
+<a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a>    <span class="k">for</span> <span class="n">_s</span> <span class="ow">in</span> <span class="n">structures</span><span class="p">:</span>
+<a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a>        <span class="n">_a</span> <span class="o">=</span> <span class="n">_s</span><span class="o">.</span><span class="n">copy</span><span class="p">();</span> <span class="n">_a</span><span class="o">.</span><span class="n">calc</span> <span class="o">=</span> <span class="n">ACECalculator</span><span class="p">(</span><span class="n">model_file</span><span class="p">,</span> <span class="n">skin</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+<a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a>        <span class="n">_e0</span> <span class="o">=</span> <span class="n">_a</span><span class="o">.</span><span class="n">get_potential_energy</span><span class="p">()</span>
+<a id="__codelineno-12-11" name="__codelineno-12-11" href="#__codelineno-12-11"></a>        <span class="n">_conv</span> <span class="o">=</span> <span class="n">BFGS</span><span class="p">(</span><span class="n">_a</span><span class="p">,</span> <span class="n">logfile</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">fmax</span><span class="o">=</span><span class="mf">0.03</span><span class="p">,</span> <span class="n">steps</span><span class="o">=</span><span class="mi">200</span><span class="p">)</span>
+<a id="__codelineno-12-12" name="__codelineno-12-12" href="#__codelineno-12-12"></a>        <span class="n">_out</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="nb">dict</span><span class="p">(</span><span class="n">converged</span><span class="o">=</span><span class="nb">bool</span><span class="p">(</span><span class="n">_conv</span><span class="p">),</span> <span class="n">dE</span><span class="o">=</span><span class="n">_a</span><span class="o">.</span><span class="n">get_potential_energy</span><span class="p">()</span> <span class="o">-</span> <span class="n">_e0</span><span class="p">,</span>
+<a id="__codelineno-12-13" name="__codelineno-12-13" href="#__codelineno-12-13"></a>                         <span class="n">fmax</span><span class="o">=</span><span class="nb">float</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">_a</span><span class="o">.</span><span class="n">get_forces</span><span class="p">())</span><span class="o">.</span><span class="n">max</span><span class="p">()),</span> <span class="n">atoms</span><span class="o">=</span><span class="n">_a</span><span class="p">,</span>
+<a id="__codelineno-12-14" name="__codelineno-12-14" href="#__codelineno-12-14"></a>                         <span class="n">moved</span><span class="o">=</span><span class="nb">float</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">norm</span><span class="p">(</span><span class="n">_a</span><span class="o">.</span><span class="n">positions</span> <span class="o">-</span> <span class="n">_s</span><span class="o">.</span><span class="n">positions</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">max</span><span class="p">())))</span>
+<a id="__codelineno-12-15" name="__codelineno-12-15" href="#__codelineno-12-15"></a>    <span class="k">return</span> <span class="n">_out</span>
+<a id="__codelineno-12-16" name="__codelineno-12-16" href="#__codelineno-12-16"></a>
+<a id="__codelineno-12-17" name="__codelineno-12-17" href="#__codelineno-12-17"></a>
+<a id="__codelineno-12-18" name="__codelineno-12-18" href="#__codelineno-12-18"></a><span class="k">def</span><span class="w"> </span><span class="nf">relax_table</span><span class="p">(</span><span class="n">results</span><span class="p">,</span> <span class="n">gamma</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">truth</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<a id="__codelineno-12-19" name="__codelineno-12-19" href="#__codelineno-12-19"></a><span class="w">    </span><span class="sd">"""The relaxations, and with gamma/truth the relaxed surface energies against the labeller's."""</span>
+<a id="__codelineno-12-20" name="__codelineno-12-20" href="#__codelineno-12-20"></a>    <span class="n">_t</span> <span class="o">=</span> <span class="p">(</span><span class="s2">"| face | converged | energy change (eV) | largest force (eV/Å) |</span><span class="se">\n</span><span class="s2">|---|---|---|---|</span><span class="se">\n</span><span class="s2">"</span>
+<a id="__codelineno-12-21" name="__codelineno-12-21" href="#__codelineno-12-21"></a>          <span class="o">+</span> <span class="s2">"</span><span class="se">\n</span><span class="s2">"</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="sa">f</span><span class="s2">"| (</span><span class="si">{</span><span class="n">s</span><span class="o">.</span><span class="n">info</span><span class="p">[</span><span class="s1">'miller'</span><span class="p">]</span><span class="si">}</span><span class="s2">) | </span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">'converged'</span><span class="p">]</span><span class="si">}</span><span class="s2"> | </span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">'dE'</span><span class="p">]</span><span class="si">:</span><span class="s2">+.2f</span><span class="si">}</span><span class="s2"> | </span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">'fmax'</span><span class="p">]</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2"> |"</span>
+<a id="__codelineno-12-22" name="__codelineno-12-22" href="#__codelineno-12-22"></a>                      <span class="k">for</span> <span class="n">s</span><span class="p">,</span> <span class="n">r</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">slabs</span><span class="p">,</span> <span class="n">results</span><span class="p">)))</span>
+<a id="__codelineno-12-23" name="__codelineno-12-23" href="#__codelineno-12-23"></a>    <span class="k">if</span> <span class="n">gamma</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-12-24" name="__codelineno-12-24" href="#__codelineno-12-24"></a>        <span class="n">_t</span> <span class="o">+=</span> <span class="p">(</span><span class="s2">"</span><span class="se">\n\n</span><span class="s2">| face | relaxed γ, ACE | relaxed γ, MACE-MPA-0 | error |</span><span class="se">\n</span><span class="s2">|---|---|---|---|</span><span class="se">\n</span><span class="s2">"</span>
+<a id="__codelineno-12-25" name="__codelineno-12-25" href="#__codelineno-12-25"></a>               <span class="o">+</span> <span class="s2">"</span><span class="se">\n</span><span class="s2">"</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="sa">f</span><span class="s2">"| (</span><span class="si">{</span><span class="n">s</span><span class="o">.</span><span class="n">info</span><span class="p">[</span><span class="s1">'miller'</span><span class="p">]</span><span class="si">}</span><span class="s2">) | </span><span class="si">{</span><span class="n">a</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2"> | </span><span class="si">{</span><span class="n">b</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2"> | </span><span class="si">{</span><span class="nb">abs</span><span class="p">(</span><span class="n">a</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">b</span><span class="p">)</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2"> |"</span>
+<a id="__codelineno-12-26" name="__codelineno-12-26" href="#__codelineno-12-26"></a>                           <span class="k">for</span> <span class="n">s</span><span class="p">,</span> <span class="n">a</span><span class="p">,</span> <span class="n">b</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">slabs</span><span class="p">,</span> <span class="n">gamma</span><span class="p">,</span> <span class="n">truth</span><span class="p">)))</span>
+<a id="__codelineno-12-27" name="__codelineno-12-27" href="#__codelineno-12-27"></a>    <span class="k">return</span> <span class="n">_t</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">ace_jax.fit.xyz</span><span class="w"> </span><span class="kn">import</span> <span class="n">read_extxyz</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">ace_jax.tutorials.labels</span><span class="w"> </span><span class="kn">import</span> <span class="n">structure_key</span> <span class="k">as</span> <span class="n">_key</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="c1"># the labeller's own relaxations of the same slabs, same protocol (shipped)</span>
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="n">_truth_E</span> <span class="o">=</span> <span class="p">{</span><span class="nb">str</span><span class="p">(</span><span class="n">f</span><span class="o">.</span><span class="n">info</span><span class="p">[</span><span class="s2">"from_key"</span><span class="p">]):</span> <span class="nb">float</span><span class="p">(</span><span class="n">f</span><span class="o">.</span><span class="n">info</span><span class="p">[</span><span class="s2">"energy"</span><span class="p">])</span>
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a>            <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">read_extxyz</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">L</span><span class="o">.</span><span class="n">fetch</span><span class="p">(</span><span class="n">shipped</span><span class="p">(</span><span class="s2">"e2/relaxed-mpa-0.xyz"</span><span class="p">))))}</span>
+<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="n">gamma_relaxed_truth</span> <span class="o">=</span> <span class="n">gammas</span><span class="p">(</span><span class="n">ref_bulk</span><span class="o">.</span><span class="n">info</span><span class="p">[</span><span class="s2">"energy"</span><span class="p">],</span> <span class="p">[</span><span class="n">_truth_E</span><span class="p">[</span><span class="n">_key</span><span class="p">(</span><span class="n">s</span><span class="p">)]</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">slabs</span><span class="p">])</span>
+<a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a><span class="n">relaxed_repaired</span> <span class="o">=</span> <span class="n">relax</span><span class="p">(</span><span class="n">repaired_model</span><span class="p">,</span> <span class="n">slabs</span><span class="p">)</span>
+<a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a><span class="n">_eb</span> <span class="o">=</span> <span class="n">model_energies</span><span class="p">(</span><span class="n">repaired_model</span><span class="p">,</span> <span class="p">[</span><span class="n">ref_bulk</span><span class="p">])[</span><span class="mi">0</span><span class="p">]</span>
+<a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a><span class="n">gamma_relaxed_repaired</span> <span class="o">=</span> <span class="n">gammas</span><span class="p">(</span><span class="n">_eb</span><span class="p">,</span> <span class="p">[</span><span class="n">r</span><span class="p">[</span><span class="s2">"atoms"</span><span class="p">]</span><span class="o">.</span><span class="n">get_potential_energy</span><span class="p">()</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">relaxed_repaired</span><span class="p">])</span>
+<a id="__codelineno-13-11" name="__codelineno-13-11" href="#__codelineno-13-11"></a><span class="n">relaxed_repaired_errors</span> <span class="o">=</span> <span class="p">[</span><span class="nb">abs</span><span class="p">(</span><span class="n">a</span> <span class="o">-</span> <span class="n">b</span><span class="p">)</span> <span class="k">for</span> <span class="n">a</span><span class="p">,</span> <span class="n">b</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">gamma_relaxed_repaired</span><span class="p">,</span> <span class="n">gamma_relaxed_truth</span><span class="p">)]</span>
+<a id="__codelineno-13-12" name="__codelineno-13-12" href="#__codelineno-13-12"></a><span class="n">mo</span><span class="o">.</span><span class="n">md</span><span class="p">(</span><span class="n">relax_table</span><span class="p">(</span><span class="n">relaxed_repaired</span><span class="p">,</span> <span class="n">gamma_relaxed_repaired</span><span class="p">,</span> <span class="n">gamma_relaxed_truth</span><span class="p">))</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>face</th>
+<th>converged</th>
+<th>energy change (eV)</th>
+<th>largest force (eV/Å)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>(100)</td>
+<td>True</td>
+<td>-0.10</td>
+<td>0.023</td>
+</tr>
+<tr>
+<td>(110)</td>
+<td>True</td>
+<td>-0.11</td>
+<td>0.018</td>
+</tr>
+<tr>
+<td>(111)</td>
+<td>True</td>
+<td>-0.10</td>
+<td>0.014</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>face</th>
+<th>relaxed γ, ACE</th>
+<th>relaxed γ, MACE-MPA-0</th>
+<th>error</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>(100)</td>
+<td>0.1204</td>
+<td>0.1200</td>
+<td>0.0003</td>
+</tr>
+<tr>
+<td>(110)</td>
+<td>0.0825</td>
+<td>0.0826</td>
+<td>0.0002</td>
+</tr>
+<tr>
+<td>(111)</td>
+<td>0.0702</td>
+<td>0.0704</td>
+<td>0.0002</td>
+</tr>
+</tbody>
+</table>
+<div class="admonition info">
+<p>The repaired model relaxes all three slabs, releasing 0.10 to 0.11 eV, and its relaxed surface energies agree with the labeller's own relaxations to 0.0003 eV/Å², with atoms moving up to 0.24 Å from the ideal cleave.</p>
+</div>
+
+<h2 id="step-7-displaced-slabs-and-a-basis-to-hold-them">Step 7: displaced slabs, and a basis to hold them<a class="headerlink" href="#step-7-displaced-slabs-and-a-basis-to-hold-them" title="Permanent link">&para;</a></h2>
+<p>A relaxation follows one downhill path. Molecular dynamics at a finite
+temperature moves the surface atoms in all directions. The repair slabs
+have zero forces because of their symmetry. Thus they give no data about
+the forces away from the ideal cleave. Teach the model what a surface does when its
+atoms move: two rattled copies of each repair slab
+(0.05 and 0.12 Å), six more labels. Refit with the same basis, relax
+again, and compare the relaxed surface energies with the labeller's
+relaxations, as in Step 6.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="k">def</span><span class="w"> </span><span class="nf">relaxed_gammas</span><span class="p">(</span><span class="n">model_file</span><span class="p">):</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="w">    </span><span class="sd">"""Relax the test slabs with a model; the relaxations, their surface energies and errors."""</span>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>    <span class="n">_rel</span> <span class="o">=</span> <span class="n">relax</span><span class="p">(</span><span class="n">model_file</span><span class="p">,</span> <span class="n">slabs</span><span class="p">)</span>
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a>    <span class="n">_eb</span> <span class="o">=</span> <span class="n">model_energies</span><span class="p">(</span><span class="n">model_file</span><span class="p">,</span> <span class="p">[</span><span class="n">ref_bulk</span><span class="p">])[</span><span class="mi">0</span><span class="p">]</span>
+<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a>    <span class="n">_g</span> <span class="o">=</span> <span class="n">gammas</span><span class="p">(</span><span class="n">_eb</span><span class="p">,</span> <span class="p">[</span><span class="n">r</span><span class="p">[</span><span class="s2">"atoms"</span><span class="p">]</span><span class="o">.</span><span class="n">get_potential_energy</span><span class="p">()</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">_rel</span><span class="p">])</span>
+<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a>    <span class="k">return</span> <span class="n">_rel</span><span class="p">,</span> <span class="n">_g</span><span class="p">,</span> <span class="p">[</span><span class="nb">abs</span><span class="p">(</span><span class="n">a</span> <span class="o">-</span> <span class="n">b</span><span class="p">)</span> <span class="k">for</span> <span class="n">a</span><span class="p">,</span> <span class="n">b</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">_g</span><span class="p">,</span> <span class="n">gamma_relaxed_truth</span><span class="p">)]</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="n">displaced</span> <span class="o">=</span> <span class="n">label</span><span class="p">(</span><span class="n">T</span><span class="o">.</span><span class="n">e2_displaced</span><span class="p">(</span><span class="n">repair</span><span class="p">))</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="n">displaced_model</span> <span class="o">=</span> <span class="n">fit_model</span><span class="p">([</span><span class="o">*</span><span class="n">bulk_training</span><span class="p">,</span> <span class="o">*</span><span class="n">repair</span><span class="p">,</span> <span class="o">*</span><span class="n">displaced</span><span class="p">],</span> <span class="s2">"fit_displaced"</span><span class="p">)</span>
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="n">_rel</span><span class="p">,</span> <span class="n">_g</span><span class="p">,</span> <span class="n">displaced_errors</span> <span class="o">=</span> <span class="n">relaxed_gammas</span><span class="p">(</span><span class="n">displaced_model</span><span class="p">)</span>
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="n">mo</span><span class="o">.</span><span class="n">md</span><span class="p">(</span><span class="n">relax_table</span><span class="p">(</span><span class="n">_rel</span><span class="p">,</span> <span class="n">_g</span><span class="p">,</span> <span class="n">gamma_relaxed_truth</span><span class="p">))</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>face</th>
+<th>converged</th>
+<th>energy change (eV)</th>
+<th>largest force (eV/Å)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>(100)</td>
+<td>True</td>
+<td>-0.12</td>
+<td>0.018</td>
+</tr>
+<tr>
+<td>(110)</td>
+<td>True</td>
+<td>-0.09</td>
+<td>0.021</td>
+</tr>
+<tr>
+<td>(111)</td>
+<td>True</td>
+<td>-0.08</td>
+<td>0.029</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>face</th>
+<th>relaxed γ, ACE</th>
+<th>relaxed γ, MACE-MPA-0</th>
+<th>error</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>(100)</td>
+<td>0.0982</td>
+<td>0.1200</td>
+<td>0.0219</td>
+</tr>
+<tr>
+<td>(110)</td>
+<td>0.0740</td>
+<td>0.0826</td>
+<td>0.0087</td>
+</tr>
+<tr>
+<td>(111)</td>
+<td>0.0731</td>
+<td>0.0704</td>
+<td>0.0027</td>
+</tr>
+</tbody>
+</table>
+<div class="admonition warning">
+<p><strong>Worse, not better:</strong> the relaxed surface energies are now off by up to 0.0219 eV/Å², against 0.0003 before. The evidence fit has one noise level per quantity, for all the data. A degree-10 basis cannot fit the 0.12 Å slabs, so the evidence explains their misfit as noise: the energy noise level rises from 1.3 to 88 meV and the force noise from 1.7 to 55 meV/Å. That loosens the fit everywhere, the ideal surfaces included.</p>
+</div>
+
+<p>The data now hold more than the basis can describe. Tutorial 5's lesson
+runs the other way here: a basis must grow with the data it is asked to
+fit. Refit the same 19 structures (10 bulk cells, 3 repair slabs, 6 displaced) at
+total degree 12, and relax once more.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="n">stable_model</span> <span class="o">=</span> <span class="n">fit_model</span><span class="p">([</span><span class="o">*</span><span class="n">bulk_training</span><span class="p">,</span> <span class="o">*</span><span class="n">repair</span><span class="p">,</span> <span class="o">*</span><span class="n">displaced</span><span class="p">],</span> <span class="s2">"fit_displaced_d12"</span><span class="p">,</span> <span class="n">degree</span><span class="o">=</span><span class="mi">12</span><span class="p">)</span>
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="n">relaxed_stable</span><span class="p">,</span> <span class="n">_g</span><span class="p">,</span> <span class="n">relaxed_errors</span> <span class="o">=</span> <span class="n">relaxed_gammas</span><span class="p">(</span><span class="n">stable_model</span><span class="p">)</span>
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="n">mo</span><span class="o">.</span><span class="n">md</span><span class="p">(</span><span class="n">relax_table</span><span class="p">(</span><span class="n">relaxed_stable</span><span class="p">,</span> <span class="n">_g</span><span class="p">,</span> <span class="n">gamma_relaxed_truth</span><span class="p">))</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>face</th>
+<th>converged</th>
+<th>energy change (eV)</th>
+<th>largest force (eV/Å)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>(100)</td>
+<td>True</td>
+<td>-0.13</td>
+<td>0.026</td>
+</tr>
+<tr>
+<td>(110)</td>
+<td>True</td>
+<td>-0.10</td>
+<td>0.024</td>
+</tr>
+<tr>
+<td>(111)</td>
+<td>True</td>
+<td>-0.08</td>
+<td>0.029</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>face</th>
+<th>relaxed γ, ACE</th>
+<th>relaxed γ, MACE-MPA-0</th>
+<th>error</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>(100)</td>
+<td>0.1193</td>
+<td>0.1200</td>
+<td>0.0008</td>
+</tr>
+<tr>
+<td>(110)</td>
+<td>0.0830</td>
+<td>0.0826</td>
+<td>0.0003</td>
+</tr>
+<tr>
+<td>(111)</td>
+<td>0.0701</td>
+<td>0.0704</td>
+<td>0.0003</td>
+</tr>
+</tbody>
+</table>
+<div class="admonition success">
+<p><strong>Checkpoint 4 passed:</strong> at degree 12 every relaxation converges gently, and the relaxed surface energies agree with the labeller's own relaxed values to 0.0008 eV/Å², with displaced slabs in the data.</p>
+</div>
+
+<h2 id="reflection">Reflection<a class="headerlink" href="#reflection" title="Permanent link">&para;</a></h2>
+<p>Nine structures and a larger basis turned a model that could not see a
+surface into one that relaxes three of them correctly, trained on
+displaced surfaces as well as ideal ones. Would this model now predict the
+Si(100) surface you would see in an experiment? What is still missing
+from the data? Think before you open the answer.</p>
+<details class="note">
+<summary>A model answer</summary>
+<p>No. Real silicon surfaces reconstruct: (100) forms rows of dimers (2×1, and c(4×2) at low temperature) and (111) the 7×7 reconstruction, with adatoms and stacking faults. None of those bonding environments is in the data, and the surfaces here were relaxed only locally from the ideal cleave, at zero temperature. Steps, vacancies, adatoms and finite-temperature motion are missing too. Each new environment is another coverage gap: finding them one at a time by hand does not scale, which is what Tutorial 7 automates.</p>
+</details>
+
+<h2 id="exercises">Exercises<a class="headerlink" href="#exercises" title="Permanent link">&para;</a></h2>
+<ol>
+<li><strong>Thickness.</strong> Change the layers to 4 and to 12. Do the bulk-only
+   errors and the novelty ratio change? (The repair slabs switch to 6
+   layers when the test slabs are 4.)</li>
+<li><strong>Vacuum.</strong> Set the vacuum to 4 Å per side. Which check fails, and
+   why would a too-small gap make the labeller's surface energy wrong?</li>
+<li><strong>Fewer repairs.</strong> Repair with the (111) slab only (<code>repair[2:]</code>).
+   Which surface energies come back, and which do not?</li>
+<li><strong>The glide cut.</strong> Build a glide-plane (111) slab with
+   <code>ase.build.surface(bulk("Si", "diamond", a=5.43, cubic=True), (1, 1, 1), 6, vacuum=8.0)</code>
+   and count its atoms' neighbours with <code>T.min_coordination</code>.</li>
+</ol>
+<h2 id="summary">Summary<a class="headerlink" href="#summary" title="Permanent link">&para;</a></h2>
+<ul>
+<li>A bulk-only model extrapolates on surfaces, and a descriptor-space
+  distance shows it before any label is spent on the test.</li>
+<li>A few targeted structures repair a property.</li>
+<li>The evidence fit sets one noise level for all the data: structures the
+  basis cannot describe loosen the fit everywhere. Grow the basis with the
+  data.</li>
+<li>Train on what the simulation will do: displaced, relaxed and moving
+  configurations, not only the ideal one.</li>
+</ul>
+<p>Next: <a href="https://acesuit.github.io/ace-jax/tutorials/curation/">Tutorial 7</a>
+lets molecular dynamics and a selection rule find the missing structures.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../basis-and-evidence/" class="md-footer__link md-footer__link--prev" aria-label="Previous: 5. Basis size and the evidence">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                5. Basis size and the evidence
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../curation/" class="md-footer__link md-footer__link--next" aria-label="Next: 7. Automating curation">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                7. Automating curation
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.indexes", "navigation.footer", "search.suggest", "search.highlight", "content.code.copy", "toc.follow"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+        <script src="../../javascripts/mathjax.js"></script>
+      
+        <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+        <script src="../../javascripts/plotly-figures.js"></script>
+      
+    
+  </body>
+</html>

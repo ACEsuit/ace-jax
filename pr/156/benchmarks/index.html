@@ -1,0 +1,2331 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head><meta name="robots" content="noindex">
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Fit and evaluate ACE and PACE interatomic potentials in Python/JAX">
+      
+      
+      
+        <link rel="canonical" href="https://acesuit.github.io/ace-jax/benchmarks/">
+      
+      
+        <link rel="prev" href="../howto/reproducibility/">
+      
+      
+        <link rel="next" href="../reference/cli/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/acesuit-logo.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Performance - ace-jax</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/_mkdocstrings.css">
+    
+      <link rel="stylesheet" href="../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#performance" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="ace-jax" class="md-header__button md-logo" aria-label="ace-jax" data-md-component="logo">
+      
+  <img src="../assets/acesuit-logo.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            ace-jax
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Performance
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/ACEsuit/ace-jax" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    ACEsuit/ace-jax
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="ace-jax" class="md-nav__button md-logo" aria-label="ace-jax" data-md-component="logo">
+      
+  <img src="../assets/acesuit-logo.png" alt="logo">
+
+    </a>
+    ace-jax
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/ACEsuit/ace-jax" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    ACEsuit/ace-jax
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../tutorials/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorials
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_4" id="__nav_4_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Tutorials
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/first-fit/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    1. First fit: silicon
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/learned-radials/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2. Learned radials: silicon
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/multi-element/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    3. Multi-element fits: categorical and embedded species
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/dataset-and-properties/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    4. Your data, your property
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/basis-and-evidence/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    5. Basis size and the evidence
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/surfaces/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    6. Surfaces: coverage and repair
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/curation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    7. Automating curation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/truth-about-the-truth/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    8. The truth about the truth
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/bring-your-own-data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    9. Bring your own data
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../concepts/force-uncertainty-maths/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Force uncertainty: the mathematics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How-to guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    How-to guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../howto/basis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Build a basis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../howto/fit-yaml/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run files (fit.yaml)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../howto/multi-element/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Multi-element fits
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../howto/ase/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ASE calculators
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../howto/batch/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evaluate many structures
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../howto/lammps/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    LAMMPS export
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../howto/jax-md/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MD with JAX-MD
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../howto/precision/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Choose float64 or float32
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../howto/pace/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    PACE .yace models
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../howto/learned-radials/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Learn the radial basis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../howto/force-uncertainty/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Per-atom force uncertainty
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../howto/foundation-labels/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Labels from a foundation model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../howto/large-fits/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Large linear fits
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../howto/reproducibility/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reproducibility
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Performance
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Performance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#accuracy-and-cost-silicon" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Accuracy and cost: silicon
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Accuracy and cost: silicon">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#how-the-cost-was-measured" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How the cost was measured
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#how-the-qoi-error-was-calculated" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How the QoI error was calculated
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#speed-sige-and-cantor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Speed: SiGe and Cantor
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Speed: SiGe and Cantor">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#cpu-float64" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CPU, float64
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#gpu-float64" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GPU, float64
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#gpu-float32" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GPU, float32
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#at-8192-atoms" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        At 8,192 atoms
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#caveats" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Caveats
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#more" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        More
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Python API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../faq/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAQ and troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../licence/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Licence and citation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#accuracy-and-cost-silicon" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Accuracy and cost: silicon
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Accuracy and cost: silicon">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#how-the-cost-was-measured" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How the cost was measured
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#how-the-qoi-error-was-calculated" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How the QoI error was calculated
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#speed-sige-and-cantor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Speed: SiGe and Cantor
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Speed: SiGe and Cantor">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#cpu-float64" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CPU, float64
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#gpu-float64" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GPU, float64
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#gpu-float32" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GPU, float32
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#at-8192-atoms" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        At 8,192 atoms
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#caveats" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Caveats
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#more" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        More
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="performance">Performance<a class="headerlink" href="#performance" title="Permanent link">&para;</a></h1>
+<p>This page gives two benchmarks:</p>
+<ol>
+<li><strong>Accuracy and cost on silicon.</strong> Fitted models of each family are
+   compared at the same accuracy. The cost is the time per atom and MD step
+   in LAMMPS.</li>
+<li><strong>Speed on SiGe and Cantor.</strong> Models with random weights are compared at
+   the same size. These figures compare speed only, not accuracy.</li>
+</ol>
+<h2 id="accuracy-and-cost-silicon">Accuracy and cost: silicon<a class="headerlink" href="#accuracy-and-cost-silicon" title="Permanent link">&para;</a></h2>
+<p>All models are fitted to the same training set and tested on the same test
+set. The data is the GAP-18 silicon dataset (2,475 configurations: 2,227 for
+training and 248 for testing).</p>
+<ul>
+<li><strong>Model families.</strong> Linear ACE (ace-jax), ACE with learned radials,
+  PACE-shaped ACE, PACE (pacemaker), MACE with L = 0 and L = 1, NEP
+  (trained with GPUMD), GAP refits, and GRACE-1L, GRACE-2L and GRACE-FS
+  (trained with gracemaker). Each family has a ladder of model sizes. Each
+  point is one fit. For GRACE, each point is the mean of three fits, and
+  the bars show the range.</li>
+<li><strong>Force error.</strong> The root-mean-square force error on the test set.</li>
+<li><strong>QoI error.</strong> 21 silicon properties are calculated with each model and
+  compared with DFT: elastic constants, energies of other phases, point
+  defects, surface and stacking-fault energies, decohesion stress and
+  phonons. Each error is divided by a tolerance. The QoI error is the
+  geometric mean of these values (lower is better).</li>
+<li><strong>Target.</strong> A model reaches the target if its force error is not more than
+  the force error of GAP-18, and its QoI error is not more than 0.5.</li>
+<li><strong>Cost.</strong> Microseconds per atom per MD step, in LAMMPS, in float64. Each
+  model uses the fastest code that agrees with the reference evaluation.
+  NEP on the GPU, GRACE-1L and GRACE-2L are in mixed precision, because
+  their fastest codes have no float64 mode.</li>
+</ul>
+<div class="plotly-figure">
+<p><img alt="Accuracy against cost on silicon. Rows: A100 GPU, 128-core CPU node, number of fitted parameters. Columns: test force error, QoI error against DFT, and the cheapest model of each family that reaches the target" src="../assets/benchmarks/si_accuracy_cost.png" /></p>
+</div>
+<p>The figure shows the force error and the QoI error of each family. The
+lowest row compares the number of fitted parameters, not the cost. At
+first, the figure shows only the main families. To change the families
+that the figure shows:</p>
+<ol>
+<li>Click a family in the legend to show or hide it in all panels.</li>
+<li>Double-click a family to show only that family.</li>
+<li>Click a button above the legend to show a group of families.</li>
+<li>Put the pointer on a point to show its model, its values and the code
+   that was timed.</li>
+</ol>
+<p>The table gives the cheapest model of each family that reaches the
+target.</p>
+<p>At the target, in microseconds per atom-step:</p>
+<table>
+<thead>
+<tr>
+<th>model</th>
+<th>A100 GPU</th>
+<th>CPU node (128 cores)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>linear ACE o4d20, ace-jax with lammps-jax (XLA program)</td>
+<td>3.12</td>
+<td>50.5</td>
+</tr>
+<tr>
+<td>linear ACE o4d20, ace-jax kernel with lammps-jax (CUDA on the GPU, C++ on the CPU)</td>
+<td>0.75</td>
+<td>1.52</td>
+</tr>
+<tr>
+<td>linear ACE o4d20, ace-jax kernel in reduced precision (float32 on the GPU, mixed precision on the CPU)</td>
+<td>0.44</td>
+<td>1.13</td>
+</tr>
+<tr>
+<td>linear ACE o4d20, ML-PACE</td>
+<td>4.13</td>
+<td>5.31</td>
+</tr>
+<tr>
+<td>linear ACE o4d20, ACEpotentials.jl</td>
+<td>–</td>
+<td>10.8</td>
+</tr>
+<tr>
+<td>MACE c16L0, Symmetrix 0.3.0</td>
+<td>0.65</td>
+<td>0.59</td>
+</tr>
+<tr>
+<td>MACE c16L0, Symmetrix-XL</td>
+<td>1.23</td>
+<td>2.19</td>
+</tr>
+<tr>
+<td>MACE c16L1, Symmetrix 0.3.0</td>
+<td>1.37</td>
+<td>1.43</td>
+</tr>
+<tr>
+<td>MACE c16L1, Symmetrix-XL</td>
+<td>1.47</td>
+<td>2.87</td>
+</tr>
+<tr>
+<td>GRACE-1L c64l4, grace-runtime (mixed precision)</td>
+<td>1.68</td>
+<td>1.88</td>
+</tr>
+<tr>
+<td>GRACE-2L 2l_c16, grace-runtime (mixed precision)</td>
+<td>1.47</td>
+<td>0.81</td>
+</tr>
+</tbody>
+</table>
+<p>MACE c16L0 in Symmetrix 0.3.0 has the lowest cost at the target, on the
+A100 and on the CPU. Symmetrix 0.3.0 is 3 to 4 times faster than the
+earlier Symmetrix version for these MACE models. On the A100, it is
+1.9 times faster than the ace-jax GPU kernel at the target.</p>
+<p>In these ladders, PACE (pacemaker), ACE with learned radials, PACE-shaped
+ACE, NEP, the GAP refits and GRACE-FS do not reach the target. GRACE-1L
+reaches the target only at its largest size (c64l4, 445,793 parameters).
+At that size, its cost is approximately 3 times the cost of MACE c16L0.
+GRACE-2L has two message-passing layers. It reaches the target at all of
+its sizes. Its smallest size (2l_c16, 98,882 parameters) costs
+approximately 1.4 (CPU) to 2.3 (A100) times the cost of MACE c16L0. On the
+CPU, it costs less than linear ACE o4d20 in the ace-jax kernel. GRACE-2L
+2l_small has a QoI error of 0.31, the same as the largest MACE L = 1 models. PACE reaches the force
+error of GAP-18 with fewer parameters than linear ACE, but not the QoI target.
+NEP has the lowest cost on the A100 (0.04 to 0.22 µs/atom-step), in mixed
+precision. On the CPU, NEP costs 0.55 to 3.0 µs/atom-step. PACE reaches the
+same force error on the CPU at a lower cost.
+PACE in grace-runtime is 2.1 to 2.8 times faster than ML-PACE on the CPU.
+On the A100, it has the same speed as ML-PACE up to f200, and it is 2.2
+times faster at f3200. The smallest NEP force error is
+0.103 eV/Å, and its smallest QoI error is 0.66.
+These force errors agree with the published NEP results for this dataset
+(approximately 0.1 eV/Å).</p>
+<p>On the CPU, the ACEpotentials.jl compiled library is the fastest code for
+linear ACE up to o4d14. It has the same speed as ML-PACE at o4d16. At
+o4d20 it is 2 times slower than ML-PACE.</p>
+<p>On the CPU, the ace-jax <a href="../howto/lammps/#cpu-kernel">C++ kernel</a> is 17 to 33
+times faster than the compiled JAX program. At o4d20 it is 3.5 times faster
+than ML-PACE (1.52 against 5.31 µs/atom-step).</p>
+<p>On the A100, ace-jax runs linear ACE o4d20 faster than ML-PACE (3.12
+against 4.13 µs/atom-step). The ace-jax <a href="../howto/lammps/#gpu-kernel">GPU kernel</a>
+runs the same model at 0.75 µs/atom-step. It is the fastest linear ACE code
+on the A100 for all models from o3d8 to o4d20. Against patched ML-PACE, it
+is 2.9 to 3.7 times faster (o4d12 to o4d20). It is 4.8 to 8.2 times faster
+than the compiled JAX program. The speed-up is largest for the smallest
+models.</p>
+<h3 id="how-the-cost-was-measured">How the cost was measured<a class="headerlink" href="#how-the-cost-was-measured" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>GPU.</strong> One NVIDIA A100, 32,768 atoms.</li>
+<li><strong>CPU.</strong> One node with two 64-core AMD EPYC 7742 CPUs, 4,096 atoms. All
+  cores are used, with each MPI rank bound to a core. Each model uses its
+  fastest layout, from 128 MPI ranks with 1 thread to 8 MPI ranks with 16
+  threads. GAP uses 32 MPI ranks.</li>
+<li><strong>ace-jax</strong> runs in LAMMPS with lammps-jax, on the GPU and on the CPU.
+  ace-jax selects the form of the product basis for each model. Models with
+  4,000 or more chain-form multiplications per atom use the recursive (DAG)
+  form. The printed figure marks these points with a dot. In the
+  interactive figure, the code line of these points shows <code>dag:greedy</code>.</li>
+<li><strong>Linear ACE, run by ML-PACE.</strong> The same linear ACE fits are written as
+  <code>.yace</code> files with tabulated radial functions
+  (<a href="../howto/pace/">Write an ACE model as a .yace file</a>). They run in
+  <code>pair_style pace</code> (CPU) and <code>pair_style pace/kk</code> (GPU).</li>
+<li><strong>Linear ACE, run by ACEpotentials.jl.</strong> The same linear ACE fits are
+  converted to ACEpotentials.jl models. Each model is compiled to a shared
+  library with <code>juliac --trim</code> and runs in LAMMPS with the ACEpotentials.jl
+  <code>pair_style ace</code> plugin. These results are for the CPU only, with 128 MPI
+  ranks.</li>
+<li><strong>ace-jax kernel.</strong> The same ace-jax bundles, with a kernel in place of
+  the compiled JAX program. On the CPU, the
+  <a href="../howto/lammps/#cpu-kernel">C++ kernel</a> runs with 128 MPI ranks and one
+  thread for each rank. On the A100, the
+  <a href="../howto/lammps/#gpu-kernel">GPU kernel</a> runs with one MPI rank.</li>
+<li><strong>ace-jax kernel in reduced precision.</strong> The light-blue line with
+  triangles is the same kernel with less precision. On the CPU, it uses
+  <a href="../howto/precision/#mixed-precision-for-the-kernels">mixed precision</a> for
+  o4d14 to o4d20. On the A100, it runs float32 bundles. The accuracy that
+  the figure shows is that of the float64 fit. These results are not
+  included in the comparison with the float64 results of the other codes.</li>
+<li><strong>ML-PACE</strong> on the GPU is the LAMMPS development version with the 2026
+  <code>pace/kk</code> GPU update.</li>
+<li><strong>MACE</strong> runs in LAMMPS with Symmetrix 0.3.0 (<code>pair_style
+  symmetrix/mace</code>) and, separately, with Symmetrix-XL. Symmetrix does not
+  support the one-layer MACE models.</li>
+<li><strong>PACE (pacemaker)</strong> runs in LAMMPS with <code>pair_style pace/runtime</code> from
+  ICAMS grace-runtime 0.1.4, in float64. It reads the B-basis <code>.yaml</code> file
+  of pacemaker. Its radial functions are tables with 1,024 intervals.</li>
+<li><strong>GAP</strong> runs in LAMMPS with QUIP, on the CPU only.</li>
+<li><strong>GRACE-1L and GRACE-2L</strong> run in LAMMPS with <code>pair_style
+  grace/runtime</code> (CPU) and <code>grace/runtime/kk</code> (GPU) from ICAMS
+  grace-runtime 0.1.4. grace-runtime calculates the neural network in
+  float32 and the geometry and the sums in float64. The figure labels
+  these points as mixed precision. They are 24 to 39 times faster on the
+  CPU, and 6 to 16 times faster on the A100, than the float64 Kokkos
+  styles of gracemaker's LAMMPS version.</li>
+<li><strong>GRACE-FS</strong> runs in LAMMPS with <code>grace/fs/kk</code> (GPU) and <code>grace/fs</code>
+  (CPU), in float64. grace-runtime does not support GRACE-FS.</li>
+<li><strong>NEP</strong> is trained with GPUMD. On the CPU, it runs in LAMMPS with
+  <code>pair_style nep</code> (NEP_CPU, float64). On the GPU, it runs in GPUMD. GPUMD
+  uses mixed precision, and the figure labels these points.</li>
+<li><strong>Before each timing</strong>, a short check compares the energies and forces
+  in LAMMPS with the reference evaluation of the same model.</li>
+</ul>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>ML-PACE reads tabulated radial functions only with an addition that is
+not yet in its releases
+(<a href="https://github.com/ICAMS/lammps-user-pace/pull/31">ML-PACE pull request 31</a>).
+The "linear ACE, run by ML-PACE" results use a build of ML-PACE with
+that addition.</p>
+</div>
+<h3 id="how-the-qoi-error-was-calculated">How the QoI error was calculated<a class="headerlink" href="#how-the-qoi-error-was-calculated" title="Permanent link">&para;</a></h3>
+<ul>
+<li>The reference is DFT (CASTEP), as for the training data.</li>
+<li>Each normalised error is limited to the range 0.05 to 10 before the
+  geometric mean. Thus one very large or very small error does not control
+  the result.</li>
+<li>The energy of compressed hcp silicon is not included. These structures
+  are outside the training data, so the error measures extrapolation.</li>
+<li>Only models with all 21 QoIs calculated are shown.</li>
+<li>MACE with one layer, and Symmetrix MACE c64L1 on the GPU, have float32
+  timings only. They are not in the cost rows.</li>
+<li>The GAP parameter count includes only the sparse-point coefficients. The
+  GAP kernel also keeps the sparse descriptors.</li>
+</ul>
+<h2 id="speed-sige-and-cantor">Speed: SiGe and Cantor<a class="headerlink" href="#speed-sige-and-cantor" title="Permanent link">&para;</a></h2>
+<p>Each figure shows the throughput against the system size. The throughput is
+in <strong>atom-steps per second</strong> (atoms × evaluations per second; higher is
+better).</p>
+<ul>
+<li><strong>Workload.</strong> The workload is similar to MD. Before each timed evaluation
+  of energy and forces, each atom moves a small distance, as between two
+  MD steps. The compilation time is not included.</li>
+<li><strong>Models.</strong> The models are <strong>medium-size models with random weights</strong>.
+  Their cost is the same as the cost of a fitted model, but they do not
+  predict correctly:<ul>
+<li>PACE <code>.yace</code> models of approximately 500 basis functions for each
+  element (ace-jax and ML-PACE evaluate the same files);</li>
+<li>linear ACE models of approximately 450 basis functions for each
+  element;</li>
+<li>MACE-MP-0b2 medium.</li>
+</ul>
+</li>
+<li><strong>Standalone</strong> (solid lines) is a direct call of the evaluator, outside an
+  MD engine. For ace-jax and MACE, this is one ASE calculator call from
+  Python, including the neighbour list.</li>
+<li><strong>LAMMPS</strong> (dashed lines) is the time of one MD step in LAMMPS: ace-jax
+  with lammps-jax (<a href="../howto/lammps/">LAMMPS export</a>), ML-PACE as
+  <code>pair_style pace</code>, MACE with Symmetrix.</li>
+<li><strong>Systems.</strong> SiGe, a random alloy on diamond, and Cantor, the equiatomic
+  CrMnFeCoNi alloy on fcc.</li>
+</ul>
+<h3 id="cpu-float64">CPU, float64<a class="headerlink" href="#cpu-float64" title="Permanent link">&para;</a></h3>
+<p><img alt="Throughput against system size on CPU in float64, SiGe and Cantor panels: ACEpotentials.jl trim library and ML-PACE in LAMMPS are fastest, ace-jax standalone 6–10× below ML-PACE and level with ACEpotentials.jl direct, MACE slowest" src="../assets/benchmarks/cpu_float64.png" /></p>
+<p>When these figures were made, lammps-jax supported only GPUs. Thus the CPU
+figure shows ace-jax standalone only. The silicon benchmark above includes
+ace-jax in LAMMPS on the CPU.</p>
+<h3 id="gpu-float64">GPU, float64<a class="headerlink" href="#gpu-float64" title="Permanent link">&para;</a></h3>
+<p><img alt="Throughput against system size on GPU in float64, SiGe and Cantor panels, for ace-jax PACE and linear ACE, ML-PACE and MACE, in LAMMPS and standalone" src="../assets/benchmarks/gpu_float64.png" /></p>
+<h3 id="gpu-float32">GPU, float32<a class="headerlink" href="#gpu-float32" title="Permanent link">&para;</a></h3>
+<p><img alt="Throughput against system size on GPU in float32, SiGe and Cantor panels, for ace-jax PACE and linear ACE and MACE standalone" src="../assets/benchmarks/gpu_float32.png" /></p>
+<h3 id="at-8192-atoms">At 8,192 atoms<a class="headerlink" href="#at-8192-atoms" title="Permanent link">&para;</a></h3>
+<p>Atom-steps per second at 8,192 atoms. "—" shows that a code does not run
+in that setting, or ran out of memory at a smaller size.</p>
+<table>
+<thead>
+<tr>
+<th>evaluator</th>
+<th>mode</th>
+<th style="text-align: right;">CPU, float64: SiGe</th>
+<th style="text-align: right;">CPU, float64: Cantor</th>
+<th style="text-align: right;">GPU, float64: SiGe</th>
+<th style="text-align: right;">GPU, float64: Cantor</th>
+<th style="text-align: right;">GPU, float32: SiGe</th>
+<th style="text-align: right;">GPU, float32: Cantor</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ace-jax (PACE model)</td>
+<td>standalone</td>
+<td style="text-align: right;">28k</td>
+<td style="text-align: right;">43k</td>
+<td style="text-align: right;">892k</td>
+<td style="text-align: right;">961k</td>
+<td style="text-align: right;">932k</td>
+<td style="text-align: right;">1.40M</td>
+</tr>
+<tr>
+<td>ace-jax (PACE model)</td>
+<td>LAMMPS</td>
+<td style="text-align: right;">—</td>
+<td style="text-align: right;">—</td>
+<td style="text-align: right;">1.09M</td>
+<td style="text-align: right;">1.33M</td>
+<td style="text-align: right;">1.79M</td>
+<td style="text-align: right;">2.04M</td>
+</tr>
+<tr>
+<td>ace-jax (linear ACE)</td>
+<td>standalone</td>
+<td style="text-align: right;">69k</td>
+<td style="text-align: right;">73k</td>
+<td style="text-align: right;">1.47M</td>
+<td style="text-align: right;">1.48M</td>
+<td style="text-align: right;">2.04M</td>
+<td style="text-align: right;">2.03M</td>
+</tr>
+<tr>
+<td>ace-jax (linear ACE)</td>
+<td>LAMMPS</td>
+<td style="text-align: right;">—</td>
+<td style="text-align: right;">—</td>
+<td style="text-align: right;">2.47M</td>
+<td style="text-align: right;">1.49M</td>
+<td style="text-align: right;">3.90M</td>
+<td style="text-align: right;">2.45M</td>
+</tr>
+<tr>
+<td>ML-PACE</td>
+<td>LAMMPS</td>
+<td style="text-align: right;">423k</td>
+<td style="text-align: right;">567k</td>
+<td style="text-align: right;">2.91M</td>
+<td style="text-align: right;">3.30M</td>
+<td style="text-align: right;">—</td>
+<td style="text-align: right;">—</td>
+</tr>
+<tr>
+<td>MACE</td>
+<td>standalone</td>
+<td style="text-align: right;">336</td>
+<td style="text-align: right;">—</td>
+<td style="text-align: right;">24k</td>
+<td style="text-align: right;">19k</td>
+<td style="text-align: right;">26k</td>
+<td style="text-align: right;">20k</td>
+</tr>
+<tr>
+<td>MACE</td>
+<td>LAMMPS</td>
+<td style="text-align: right;">4k</td>
+<td style="text-align: right;">3k</td>
+<td style="text-align: right;">60k</td>
+<td style="text-align: right;">48k</td>
+<td style="text-align: right;">—</td>
+<td style="text-align: right;">—</td>
+</tr>
+<tr>
+<td>ACEpotentials.jl (linear ACE, direct)</td>
+<td>standalone</td>
+<td style="text-align: right;">95k</td>
+<td style="text-align: right;">63k</td>
+<td style="text-align: right;">—</td>
+<td style="text-align: right;">—</td>
+<td style="text-align: right;">—</td>
+<td style="text-align: right;">—</td>
+</tr>
+<tr>
+<td>ACEpotentials.jl (linear ACE, trim library in LAMMPS)</td>
+<td>LAMMPS</td>
+<td style="text-align: right;">1.08M</td>
+<td style="text-align: right;">944k</td>
+<td style="text-align: right;">—</td>
+<td style="text-align: right;">—</td>
+<td style="text-align: right;">—</td>
+<td style="text-align: right;">—</td>
+</tr>
+</tbody>
+</table>
+<h2 id="caveats">Caveats<a class="headerlink" href="#caveats" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>CPU:</strong> <code>lestrade-cpu</code>, Intel(R) Core(TM) i9-14900K: standalone with 16 threads, LAMMPS with 8 MPI ranks, on CPUs 0-15.</li>
+<li><strong>GPU:</strong> <code>sulis-a100</code>, NVIDIA A100-PCIE-40GB.</li>
+<li>ACEpotentials.jl standalone is one <code>energy_forces</code> call in Julia (neighbour list included), timed after a warm-up call.</li>
+<li>ACEpotentials.jl (linear ACE, trim library in LAMMPS) evaluates the exact radial basis; the other ACE lines evaluate splined radials.</li>
+<li>ML-PACE runs only in float64, so it is absent from the float32 figure.</li>
+<li>
+<p>MACE in LAMMPS (Symmetrix) evaluates in double whatever the input, so it is shown in float64 only. A MACE line that stops early ran out of memory.</p>
+</li>
+<li>
+<p>Random weights set the cost of a model, not its accuracy. Thus these
+  numbers compare only speed. A fitted model of the same size has the same
+  speed.</p>
+</li>
+<li>ace-jax standalone uses its neighbour list again while the atoms stay in
+  the skin. MACE standalone builds the list again at each call.</li>
+<li>The throughput depends on the model size, the cutoff and the number of
+  neighbours. The <a href="https://github.com/ACEsuit/ace-jax/blob/main/docs/dev/benchmarks.md">full benchmarks</a>
+  include small and large models, peak memory and the largest system that
+  fits in memory.</li>
+</ul>
+<h2 id="more">More<a class="headerlink" href="#more" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="https://github.com/ACEsuit/ace-jax/blob/main/docs/dev/benchmarks.md">Full benchmark results</a>:
+  every model size and host, memory, precision, parity checks and versions.</li>
+<li><a href="https://github.com/ACEsuit/ace-jax/blob/main/bench/scaling/README.md">How to rerun the benchmarks</a>.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../howto/reproducibility/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Reproducibility">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Reproducibility
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../reference/cli/" class="md-footer__link md-footer__link--next" aria-label="Next: CLI">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                CLI
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.indexes", "navigation.footer", "search.suggest", "search.highlight", "content.code.copy", "toc.follow"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+        <script src="../javascripts/mathjax.js"></script>
+      
+        <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+        <script src="../javascripts/plotly-figures.js"></script>
+      
+    
+  </body>
+</html>

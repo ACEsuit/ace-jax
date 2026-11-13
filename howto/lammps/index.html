@@ -1,0 +1,2165 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Fit and evaluate ACE and PACE interatomic potentials in Python/JAX">
+      
+      
+      
+        <link rel="canonical" href="https://acesuit.github.io/ace-jax/howto/lammps/">
+      
+      
+        <link rel="prev" href="../batch/">
+      
+      
+        <link rel="next" href="../jax-md/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/acesuit-logo.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>LAMMPS export - ace-jax</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#export-a-model-to-lammps" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="ace-jax" class="md-header__button md-logo" aria-label="ace-jax" data-md-component="logo">
+      
+  <img src="../../assets/acesuit-logo.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            ace-jax
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              LAMMPS export
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/ACEsuit/ace-jax" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    ACEsuit/ace-jax
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="ace-jax" class="md-nav__button md-logo" aria-label="ace-jax" data-md-component="logo">
+      
+  <img src="../../assets/acesuit-logo.png" alt="logo">
+
+    </a>
+    ace-jax
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/ACEsuit/ace-jax" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    ACEsuit/ace-jax
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../tutorials/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorials
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_4" id="__nav_4_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Tutorials
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/first-fit/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    1. First fit: silicon
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/learned-radials/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2. Learned radials: silicon
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/multi-element/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    3. Multi-element fits: categorical and embedded species
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/dataset-and-properties/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    4. Your data, your property
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/basis-and-evidence/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    5. Basis size and the evidence
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/surfaces/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    6. Surfaces: coverage and repair
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/curation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    7. Automating curation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/truth-about-the-truth/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    8. The truth about the truth
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/bring-your-own-data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    9. Bring your own data
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/force-uncertainty-maths/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Force uncertainty: the mathematics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How-to guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    How-to guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../basis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Build a basis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../fit-yaml/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run files (fit.yaml)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../multi-element/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Multi-element fits
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ase/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ASE calculators
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../batch/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evaluate many structures
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    LAMMPS export
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    LAMMPS export
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#export" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Export
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#capacities" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Capacities
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cpu-kernel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CPU kernel
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#gpu-kernel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GPU kernel
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#layouts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layouts
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#gpu-memory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GPU memory
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#learned-radials-and-precision" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Learned radials and precision
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../jax-md/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MD with JAX-MD
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../precision/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Choose float64 or float32
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../pace/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    PACE .yace models
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../learned-radials/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Learn the radial basis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../force-uncertainty/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Per-atom force uncertainty
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../foundation-labels/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Labels from a foundation model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../large-fits/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Large linear fits
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reproducibility/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reproducibility
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../benchmarks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Performance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Python API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../faq/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAQ and troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../licence/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Licence and citation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#export" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Export
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#capacities" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Capacities
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cpu-kernel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CPU kernel
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#gpu-kernel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GPU kernel
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#layouts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layouts
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#gpu-memory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GPU memory
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#learned-radials-and-precision" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Learned radials and precision
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="export-a-model-to-lammps">Export a model to LAMMPS<a class="headerlink" href="#export-a-model-to-lammps" title="Permanent link">&para;</a></h1>
+<p>ace-jax models run in LAMMPS with
+<a href="https://github.com/abhijeetgangan/lammps-jax">lammps-jax</a>. lammps-jax gives
+<code>pair_style jax/kk</code>, a KOKKOS pair style that runs a compiled JAX program on
+the GPU. ace-jax writes the program and its metadata into one JSON
+<em>bundle</em>.</p>
+<div class="admonition note">
+<p class="admonition-title">Install lammps-jax</p>
+<ol>
+<li>Install ace-jax with the <code>lammps</code> extra: <code>pip install "ace-jax[lammps]"</code>.
+   For a CPU run, also install <code>"lammps-jax[cpu]"</code>. This gives the XLA
+   CPU PJRT plugin (Linux x86_64 only).</li>
+<li>Build its LAMMPS plugin at the same version. Use the lammps-jax instructions.</li>
+</ol>
+<p>The ace-jax CI tests the export with lammps-jax 0.2.1. The pair style runs
+on a GPU (KOKKOS with CUDA). It also runs on CPUs (KOKKOS with OpenMP) if
+you export with <code>platform="cpu"</code>. The plugin refuses a bundle that was
+exported for the other platform.</p>
+</div>
+<h2 id="export">Export<a class="headerlink" href="#export" title="Permanent link">&para;</a></h2>
+<p>The buffers of the bundle have fixed sizes. Calculate these sizes from the
+initial structure of the run:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">jax</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="n">jax</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="s2">"jax_enable_x64"</span><span class="p">,</span> <span class="kc">True</span><span class="p">)</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">ase.build</span><span class="w"> </span><span class="kn">import</span> <span class="n">bulk</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="kn">import</span><span class="w"> </span><span class="nn">ace_jax</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">aj</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="kn">from</span><span class="w"> </span><span class="nn">ace_jax.export.lammps</span><span class="w"> </span><span class="kn">import</span> <span class="n">export_lammps</span><span class="p">,</span> <span class="n">neighbour_capacity</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="n">model</span><span class="p">,</span> <span class="n">meta</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">aj</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="s2">"fit/model.npz"</span><span class="p">)</span>                 <span class="c1"># or a .yace</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="n">atoms</span> <span class="o">=</span> <span class="n">bulk</span><span class="p">(</span><span class="s2">"Si"</span><span class="p">,</span> <span class="s2">"diamond"</span><span class="p">,</span> <span class="n">a</span><span class="o">=</span><span class="mf">5.43</span><span class="p">,</span> <span class="n">cubic</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span><span class="o">.</span><span class="n">repeat</span><span class="p">(</span><span class="mi">4</span><span class="p">)</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="n">cap</span> <span class="o">=</span> <span class="n">neighbour_capacity</span><span class="p">(</span><span class="n">atoms</span><span class="p">,</span> <span class="n">meta</span><span class="p">[</span><span class="s2">"rcut"</span><span class="p">],</span> <span class="n">skin</span><span class="o">=</span><span class="mf">1.0</span><span class="p">)</span>    <span class="c1"># skin = the LAMMPS `neighbor` skin</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="n">export_lammps</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">meta</span><span class="p">,</span> <span class="s2">"si_bundle.json"</span><span class="p">,</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>              <span class="n">max_atoms</span><span class="o">=</span><span class="n">cap</span><span class="p">[</span><span class="s2">"max_atoms"</span><span class="p">],</span> <span class="n">max_edges</span><span class="o">=</span><span class="n">cap</span><span class="p">[</span><span class="s2">"max_edges"</span><span class="p">],</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>              <span class="n">k_dense</span><span class="o">=</span><span class="n">cap</span><span class="p">[</span><span class="s2">"k_dense"</span><span class="p">],</span> <span class="n">max_neighbors</span><span class="o">=</span><span class="n">cap</span><span class="p">[</span><span class="s2">"max_neighbors"</span><span class="p">],</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>              <span class="n">max_owned</span><span class="o">=</span><span class="n">cap</span><span class="p">[</span><span class="s2">"max_owned"</span><span class="p">],</span>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>              <span class="n">type_elements</span><span class="o">=</span><span class="p">[</span><span class="mi">14</span><span class="p">])</span>                          <span class="c1"># Z of LAMMPS types 1, 2, ...</span>
+</code></pre></div>
+<p><code>type_elements</code> maps LAMMPS atom types to elements. Type 1 is the first
+entry.</p>
+<p>The <code>aj export</code> command does the same steps. It reads the initial structure
+from the first configuration of an extxyz file:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>aj<span class="w"> </span><span class="nb">export</span><span class="w"> </span>--model<span class="w"> </span>fit/model.npz<span class="w"> </span>--out<span class="w"> </span>si_bundle.json<span class="w"> </span>--structure<span class="w"> </span>start.xyz<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">    </span>--skin<span class="w"> </span><span class="m">1</span>.0<span class="w"> </span>--type-elements<span class="w"> </span>Si
+</code></pre></div>
+<p>For the CPU backend, add <code>--platform cpu</code>. Add <code>--procs px,py,pz</code> to size the
+buffers for one MPI rank. Use the same grid in LAMMPS (<code>processors px py pz</code>).
+For a linear ACE model on CPUs, the export uses a C++ kernel in place of the
+XLA program. See <a href="#cpu-kernel">CPU kernel</a>. On a CUDA GPU, add <code>--ffi</code> to use
+a CUDA kernel. See <a href="#gpu-kernel">GPU kernel</a>.</p>
+<p><code>export_lammps</code> returns a dictionary, and also writes it in the
+bundle. Its <code>ace_jax</code> key records what was exported: the layout, the
+capacities, the use of the lean form and of splines, and the lammps-jax
+version.</p>
+<p>In the LAMMPS input:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>pair_style jax/kk &lt;path to the PJRT GPU plugin&gt;    # see the lammps-jax documentation
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>pair_coeff * * si_bundle.json
+</code></pre></div>
+<p>Run LAMMPS with KOKKOS on the GPU. For example:
+<code>lmp -k on g 1 -sf kk -pk kokkos newton on neigh half -in in.lammps</code>.</p>
+<h2 id="capacities">Capacities<a class="headerlink" href="#capacities" title="Permanent link">&para;</a></h2>
+<p><code>neighbour_capacity(atoms, rcut, skin=1.0, slots="skin", margin=8, list_headroom=0.5)</code>
+returns all buffer sizes for a structure:</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>max_atoms</code></td>
+<td>owned plus ghost atoms (the ghost shell size comes from the face spacings of the cell, so it is also correct for triclinic cells)</td>
+</tr>
+<tr>
+<td><code>max_owned</code></td>
+<td>owned atoms (with 10% headroom); rows after it are never evaluated</td>
+</tr>
+<tr>
+<td><code>k_dense</code></td>
+<td>model neighbour slots per atom</td>
+</tr>
+<tr>
+<td><code>max_neighbors</code></td>
+<td>LAMMPS neighbour-list slots per atom (with 50% headroom: the list increases most when a structure is compressed)</td>
+</tr>
+<tr>
+<td><code>max_edges</code></td>
+<td>the packed edge buffer of the sparse and dense layouts</td>
+</tr>
+</tbody>
+</table>
+<p>If a structure becomes too large for a buffer, the forces are never
+truncated without a message. The energy and forces become NaN, or LAMMPS
+stops the run. If this occurs, export again with sizes for the larger
+structure.</p>
+<p><code>slots="cutoff"</code> sizes the model slots only for pairs in the cutoff. On a
+five-component alloy, this is 1.2 to 1.4 times faster.</p>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>Use <code>slots="cutoff"</code> only for stable MD of a fitted model, where the
+coordination stays near the coordination of the initial structure.</p>
+</div>
+<h2 id="cpu-kernel">CPU kernel<a class="headerlink" href="#cpu-kernel" title="Permanent link">&para;</a></h2>
+<p>On CPUs, the export uses a C++ kernel for linear ACE models. The kernel
+replaces the compiled JAX program. It runs one MPI rank per core, with one
+thread per rank. The export compiles the kernel the first time, and keeps it
+in a cache.</p>
+<p>The export uses the kernel if all these conditions are true:</p>
+<ul>
+<li>The model is a linear ACE model, in float64.</li>
+<li>The bundle can use the <code>matrix</code> layout (<code>--layout</code> <code>auto</code> or <code>matrix</code>).</li>
+<li>lammps-jax is version 0.2.1 or later.</li>
+<li>The kernel is available: the ace-jax wheels for Linux and for macOS (arm64)
+  include it. On other platforms, a C++17 compiler (<code>$CXX</code>, <code>c++</code>, <code>g++</code> or
+  <code>clang++</code>) is necessary.</li>
+</ul>
+<p>If a condition is false, the export uses the XLA program. <code>aj export</code> prints
+the reason.</p>
+<div class="admonition warning">
+<p class="admonition-title">Environment for LAMMPS</p>
+<p>A bundle with the kernel needs the variable <code>LAMMPS_JAX_FFI_HANDLERS</code> in
+LAMMPS. Without it, LAMMPS stops with an error that gives the variable.
+Export with <code>--no-ffi</code> to get a bundle that needs no variable.</p>
+</div>
+<div class="admonition warning">
+<p class="admonition-title">lammps-jax version</p>
+<p>The kernel needs the LAMMPS plugin of lammps-jax 0.2.1 or later. Earlier
+plugins register custom calls for CUDA only, so LAMMPS cannot find the
+kernel on the CPU. Build the plugin at the version of the Python package.</p>
+</div>
+<ol>
+<li>
+<p>Export with <code>--platform cpu</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>aj<span class="w"> </span><span class="nb">export</span><span class="w"> </span>--model<span class="w"> </span>fit/model.npz<span class="w"> </span>--out<span class="w"> </span>si_bundle.json<span class="w"> </span>--structure<span class="w"> </span>start.xyz<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">    </span>--platform<span class="w"> </span>cpu<span class="w"> </span>--procs<span class="w"> </span><span class="m">8</span>,4,4
+</code></pre></div>
+<p>In Python, use <code>export_lammps(..., platform="cpu")</code>.</p>
+</li>
+<li>
+<p>Set the variable that the command prints. It gives LAMMPS the kernel library:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">LAMMPS_JAX_FFI_HANDLERS</span><span class="o">=</span><span class="s2">"ace_jax_direct=&lt;library&gt;:AceDirect"</span>
+</code></pre></div>
+</li>
+<li>
+<p>Run LAMMPS with <code>newton on</code> and one MPI rank per core:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>mpirun<span class="w"> </span>-np<span class="w"> </span><span class="m">128</span><span class="w"> </span>lmp<span class="w"> </span>-k<span class="w"> </span>on<span class="w"> </span>t<span class="w"> </span><span class="m">1</span><span class="w"> </span>-sf<span class="w"> </span>kk<span class="w"> </span>-pk<span class="w"> </span>kokkos<span class="w"> </span>newton<span class="w"> </span>on<span class="w"> </span>neigh<span class="w"> </span>half<span class="w"> </span>-in<span class="w"> </span><span class="k">in</span>.lammps
+</code></pre></div>
+</li>
+</ol>
+<p>To get the variable on the machine that runs LAMMPS, use
+<code>aj export --print-env si_bundle.json</code>. If the library is not on that machine,
+the command compiles the kernel there.</p>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Command line</th>
+<th>Python</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Use the kernel when possible (default)</td>
+<td>(no option)</td>
+<td><code>ffi="auto"</code></td>
+</tr>
+<tr>
+<td>Always use the kernel; stop with an error if it is not possible</td>
+<td><code>--ffi</code></td>
+<td><code>ffi=True</code></td>
+</tr>
+<tr>
+<td>Always use the XLA program</td>
+<td><code>--no-ffi</code></td>
+<td><code>ffi=False</code></td>
+</tr>
+</tbody>
+</table>
+<p>The kernel tabulates the radial basis in r (<code>radial_table=True</code>). Energies
+agree with the XLA program to approximately 1e-12 relative. Forces agree to
+approximately 1e-8 of the largest force. The table is fine enough for an
+error of 1e-9 in the radial values. For most models it has 4000 intervals. The bundle records the kernel in <code>ace_jax.ffi</code>:
+the custom-call target, the library and the <code>LAMMPS_JAX_FFI_HANDLERS</code> value.
+If the export used the XLA program on a CPU, <code>ace_jax.ffi_reason</code> gives the
+reason.</p>
+<p>For large models, <code>--ffi-precision mixed</code> (<code>ffi_precision="mixed"</code> in
+Python) is faster: 1.4 times for the silicon model o4d20 on 128 cores. The
+kernel then calculates the product basis in float32. It is off by default.</p>
+<div class="admonition warning">
+<p class="admonition-title">Mixed precision adds noise to the energy</p>
+<p>Do not use <code>min_style cg</code> or other line-search minimisers with a
+mixed-precision bundle. Use <code>min_style fire</code>. See
+<a href="../precision/#mixed-precision-for-the-kernels">Mixed precision for the kernels</a>.</p>
+</div>
+<p>The compiler flags are <code>-O3 -march=native</code> by default. They tune the kernel
+for the CPU of the machine that exports.</p>
+<div class="admonition warning">
+<p class="admonition-title">Login nodes and compute nodes</p>
+<p>A kernel compiled with <code>-march=native</code> can fail on a different CPU type.
+Export on a node of the same type as the LAMMPS run. Or give generic
+flags, for example <code>--ffi-flags="-O3 -march=x86-64-v3"</code>. To compile the
+kernel on a compute node before the export, use <code>aj native --build</code>.</p>
+</div>
+<ul>
+<li>The cache is <code>~/.cache/ace-jax/ffi</code>. Set <code>ACEJAX_FFI_CACHE</code> to use a different directory.</li>
+<li>Set <code>ACEJAX_FFI_FLAGS</code> to change the default flags.</li>
+<li>Use the same jax version as the lammps-jax CPU plugin.</li>
+</ul>
+<h2 id="gpu-kernel">GPU kernel<a class="headerlink" href="#gpu-kernel" title="Permanent link">&para;</a></h2>
+<p>On a CUDA GPU, a CUDA kernel can replace the compiled JAX program. It is for
+linear ACE models, as the <a href="#cpu-kernel">CPU kernel</a> is. It supports categorical
+models with one or more species, and species-embedded (TrACE) models. The
+export compiles the kernel with <code>nvcc</code> the first time, and keeps it in the
+same cache.</p>
+<div class="admonition note">
+<p class="admonition-title">CUDA compiler</p>
+<p>The kernel needs <code>nvcc</code>. It finds <code>$NVCC</code>, <code>nvcc</code> on <code>PATH</code>, or
+<code>$CUDA_HOME/bin/nvcc</code>. On a cluster, load a CUDA module, for example
+<code>module load CUDA/12.6.0</code>. With an NVIDIA driver 580 or later, the
+<code>cuda13</code> extra installs <code>nvcc</code>: <code>pip install "ace-jax[cuda13]"</code>. The flags are <code>-O3 -arch=sm_XY</code>, for the GPU
+that JAX finds at the export. On a machine without a GPU, give the
+architecture, for example <code>--ffi-flags="-O3 -arch=sm_80"</code> for an A100.</p>
+</div>
+<ol>
+<li>
+<p>Export with <code>--ffi</code>. The platform is <code>cuda</code> by default:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>aj<span class="w"> </span><span class="nb">export</span><span class="w"> </span>--model<span class="w"> </span>fit/model.npz<span class="w"> </span>--out<span class="w"> </span>si_bundle.json<span class="w"> </span>--structure<span class="w"> </span>start.xyz<span class="w"> </span>--ffi
+</code></pre></div>
+<p>In Python, use <code>export_lammps(..., ffi=True)</code>.</p>
+</li>
+<li>
+<p>Set the variable that the command prints:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">LAMMPS_JAX_FFI_HANDLERS</span><span class="o">=</span><span class="s2">"ace_jax_direct_gpu=&lt;library&gt;:AceDirectGpu"</span>
+</code></pre></div>
+</li>
+<li>
+<p>Run LAMMPS with <code>newton on</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>lmp<span class="w"> </span>-k<span class="w"> </span>on<span class="w"> </span>g<span class="w"> </span><span class="m">1</span><span class="w"> </span>-sf<span class="w"> </span>kk<span class="w"> </span>-pk<span class="w"> </span>kokkos<span class="w"> </span>newton<span class="w"> </span>on<span class="w"> </span>neigh<span class="w"> </span>half<span class="w"> </span>-in<span class="w"> </span><span class="k">in</span>.lammps
+</code></pre></div>
+</li>
+</ol>
+<p>In float64, the requirements and the accuracy are the same as for the CPU kernel.
+On an A100, the kernel is 4.8 to 8.2 times faster than the compiled JAX
+program, for silicon models from o3d8 to o4d20 with 32,768 atoms.</p>
+<p>The GPU kernel also runs float32 bundles. To export one, add <code>--dtype float32</code>.
+The kernel then calculates in float32, with the accuracy of the float32 XLA
+program. On a GPU with low float64 throughput, it is 2 to 4 times faster than
+in float64. On an A100, it is up to 1.7 times faster. The speed-up is largest
+for the largest models.
+See <a href="#learned-radials-and-precision">Learned radials and precision</a>.</p>
+<p>A float64 bundle can also use mixed precision (<code>--ffi-precision mixed</code>),
+as on the CPU. On a GPU it is slower than a float32 bundle. Its force error
+does not increase with the box size, because the positions stay float64.
+See <a href="../precision/#mixed-precision-for-the-kernels">Mixed precision for the kernels</a>.</p>
+<p>In Python, <code>ACECalculator(path, ffi=True)</code> uses the same kernel on a CUDA GPU.
+Add <code>dtype="float32"</code> for float32. <code>BatchCalculator(..., ffi=True)</code> also uses it.
+To compile the kernel before the first use, run <code>aj native --build</code>.</p>
+<ul>
+<li>Set <code>ACEJAX_FFI_GPU_FLAGS</code> to change the default flags.</li>
+<li>The source also compiles for AMD GPUs with <code>hipcc</code> (<code>eval.ffi.build_gpu</code>).
+  It is not tested on AMD GPUs, and lammps-jax bundles do not run on AMD GPUs.</li>
+</ul>
+<h2 id="layouts">Layouts<a class="headerlink" href="#layouts" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Layout</th>
+<th>What it does</th>
+<th>When <code>"auto"</code> picks it</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>matrix</code></td>
+<td>reads the LAMMPS neighbour list directly, copied only when LAMMPS rebuilds it; no per-step packing</td>
+<td><code>k_dense</code> and <code>max_neighbors</code> given, the installed lammps-jax supports it, and a block fits in memory</td>
+</tr>
+<tr>
+<td><code>dense</code></td>
+<td>packs the edge buffer into per-atom slots every step</td>
+<td><code>k_dense</code> given and <code>matrix</code> not chosen</td>
+</tr>
+<tr>
+<td><code>sparse</code></td>
+<td>an edge list</td>
+<td>no <code>k_dense</code>, or no dense block fits in memory</td>
+</tr>
+</tbody>
+</table>
+<h2 id="gpu-memory">GPU memory<a class="headerlink" href="#gpu-memory" title="Permanent link">&para;</a></h2>
+<p>The <code>matrix</code> and <code>dense</code> layouts evaluate the atoms in blocks of rows. One
+block sets the peak memory. <code>export_lammps</code> uses the largest block that fits
+in half of the GPU memory. It starts at 32768 rows and halves the block down to
+1024 rows. If no block fits, <code>layout="auto"</code> uses <code>sparse</code>.</p>
+<p>By default, <code>export_lammps</code> reads the memory of the GPU that does the export.
+If LAMMPS runs on a different GPU, give its memory:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="n">export_lammps</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">meta</span><span class="p">,</span> <span class="s2">"si_bundle.json"</span><span class="p">,</span> <span class="o">...</span><span class="p">,</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>              <span class="n">device_memory</span><span class="o">=</span><span class="mf">30e9</span><span class="p">)</span>                          <span class="c1"># bytes JAX can use on the LAMMPS GPU</span>
+</code></pre></div>
+<p><code>device_memory</code> is the memory that JAX can use, not the total memory of the
+GPU. By default, JAX uses 75% of the GPU memory. For a 40 GB A100, use
+approximately 30e9. <code>block_rows</code> sets the block size directly.</p>
+<p>The bundle records the block size as <code>ace_jax.block_rows</code>. It also records
+<code>ace_jax.device_memory</code> and <code>ace_jax.dense_budget</code>.</p>
+<p>A LAMMPS plugin that is older than the lammps-jax Python package does not
+accept a <code>matrix</code> bundle. To correct this, build the plugin again at the
+version of the Python package, or export with <code>layout="dense"</code>.</p>
+<h2 id="learned-radials-and-precision">Learned radials and precision<a class="headerlink" href="#learned-radials-and-precision" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>lean=True</code> (the default) exports the lean evaluation form, as the ASE
+  calculator does. With <code>spline_tol="auto"</code>, <code>export_lammps</code> first changes a
+  learned radial to a spline at 1e-10; see <a href="../learned-radials/#deployment-spline-speed">Learn the radial basis</a>.</li>
+<li><code>dtype="float64"</code> is the default. <code>"float32"</code> is faster and less accurate.
+  On a GPU with low float64 throughput, a float32 bundle is 2 to 4.5 times faster.
+  On an A100, it is 1.3 to 1.5 times faster.
+  See <a href="../precision/">Choose float64 or float32</a>.</li>
+<li>The float32 error depends on the model. Large coefficients that cancel make it larger.</li>
+<li><code>precision_structure=atoms</code> compares float32 with float64 on <code>atoms</code>.
+  The bundle records the result as <code>ace_jax.precision_check</code>.</li>
+<li>A warning occurs above 0.1 meV/atom of energy error or 1e-4 of relative force error.
+  <code>aj export --dtype float32</code> does this check on <code>--structure</code>.</li>
+<li><code>ffi_precision="mixed"</code> is for a float64 bundle with the kernel. The kernel
+  then calculates the product basis in float32. The default is <code>"float64"</code>.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../batch/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Evaluate many structures">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Evaluate many structures
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../jax-md/" class="md-footer__link md-footer__link--next" aria-label="Next: MD with JAX-MD">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                MD with JAX-MD
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.indexes", "navigation.footer", "search.suggest", "search.highlight", "content.code.copy", "toc.follow"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+        <script src="../../javascripts/mathjax.js"></script>
+      
+        <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+        <script src="../../javascripts/plotly-figures.js"></script>
+      
+    
+  </body>
+</html>

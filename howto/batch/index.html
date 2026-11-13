@@ -1,0 +1,2154 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Fit and evaluate ACE and PACE interatomic potentials in Python/JAX">
+      
+      
+      
+        <link rel="canonical" href="https://acesuit.github.io/ace-jax/howto/batch/">
+      
+      
+        <link rel="prev" href="../ase/">
+      
+      
+        <link rel="next" href="../lammps/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/acesuit-logo.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Evaluate many structures - ace-jax</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#evaluate-many-structures" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="ace-jax" class="md-header__button md-logo" aria-label="ace-jax" data-md-component="logo">
+      
+  <img src="../../assets/acesuit-logo.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            ace-jax
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Evaluate many structures
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/ACEsuit/ace-jax" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    ACEsuit/ace-jax
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="ace-jax" class="md-nav__button md-logo" aria-label="ace-jax" data-md-component="logo">
+      
+  <img src="../../assets/acesuit-logo.png" alt="logo">
+
+    </a>
+    ace-jax
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/ACEsuit/ace-jax" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    ACEsuit/ace-jax
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../tutorials/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorials
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_4" id="__nav_4_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Tutorials
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/first-fit/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    1. First fit: silicon
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/learned-radials/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2. Learned radials: silicon
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/multi-element/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    3. Multi-element fits: categorical and embedded species
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/dataset-and-properties/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    4. Your data, your property
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/basis-and-evidence/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    5. Basis size and the evidence
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/surfaces/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    6. Surfaces: coverage and repair
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/curation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    7. Automating curation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/truth-about-the-truth/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    8. The truth about the truth
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/bring-your-own-data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    9. Bring your own data
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/force-uncertainty-maths/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Force uncertainty: the mathematics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How-to guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    How-to guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../basis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Build a basis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../fit-yaml/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run files (fit.yaml)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../multi-element/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Multi-element fits
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ase/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ASE calculators
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evaluate many structures
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evaluate many structures
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#evaluate-a-list-of-structures" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Evaluate a list of structures
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#options" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Options
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#speed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Speed
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#run-md-or-relax-many-structures-with-jax-md" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run MD or relax many structures with JAX-MD
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Run MD or relax many structures with JAX-MD">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#update-the-lists-inside-the-compiled-loop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Update the lists inside the compiled loop
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#aj-eval" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        aj eval
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#limits" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Limits
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../lammps/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    LAMMPS export
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../jax-md/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MD with JAX-MD
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../precision/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Choose float64 or float32
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../pace/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    PACE .yace models
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../learned-radials/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Learn the radial basis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../force-uncertainty/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Per-atom force uncertainty
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../foundation-labels/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Labels from a foundation model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../large-fits/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Large linear fits
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reproducibility/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reproducibility
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../benchmarks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Performance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Python API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../faq/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAQ and troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../licence/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Licence and citation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#evaluate-a-list-of-structures" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Evaluate a list of structures
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#options" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Options
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#speed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Speed
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#run-md-or-relax-many-structures-with-jax-md" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run MD or relax many structures with JAX-MD
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Run MD or relax many structures with JAX-MD">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#update-the-lists-inside-the-compiled-loop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Update the lists inside the compiled loop
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#aj-eval" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        aj eval
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#limits" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Limits
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="evaluate-many-structures">Evaluate many structures<a class="headerlink" href="#evaluate-many-structures" title="Permanent link">&para;</a></h1>
+<p><code>BatchCalculator</code> gives the energy, the forces and the stress of many
+structures in a small number of calls. Use it for screening, finite
+displacements, committee or active-learning pools, and other lists of small
+cells.</p>
+<p>One structure in each call keeps a GPU or a multi-core CPU mostly idle when the
+structure is small. <code>BatchCalculator</code> puts structures of similar size into one
+batch, makes the neighbour lists of the batch in one step, and evaluates the
+batch in one compiled call.</p>
+<p>The results are the results of <code>ACECalculator</code> with the same options. The two
+agree to roundoff.</p>
+<div class="admonition warning">
+<p class="admonition-title">Enable float64 in Python</p>
+<p>Fitting and radial learning need float64. The <code>aj</code> command enables
+float64 itself. In Python, enable float64 before any other code imports
+JAX:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">jax</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="n">jax</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="s2">"jax_enable_x64"</span><span class="p">,</span> <span class="kc">True</span><span class="p">)</span>
+</code></pre></div>
+<p>Alternatively, set <code>JAX_ENABLE_X64=1</code> in the environment. ace-jax never
+changes the JAX precision setting itself. The JAX default is float32.</p>
+</div>
+<h2 id="evaluate-a-list-of-structures">Evaluate a list of structures<a class="headerlink" href="#evaluate-a-list-of-structures" title="Permanent link">&para;</a></h2>
+<ol>
+<li>Make the calculator from the model file.</li>
+<li>Give the list of structures to <code>calculate</code>.</li>
+<li>Read the results in the order of the input list.</li>
+</ol>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">jax</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">jax</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="s2">"jax_enable_x64"</span><span class="p">,</span> <span class="kc">True</span><span class="p">)</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="kn">from</span><span class="w"> </span><span class="nn">ase.build</span><span class="w"> </span><span class="kn">import</span> <span class="n">bulk</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="kn">from</span><span class="w"> </span><span class="nn">ace_jax.batch</span><span class="w"> </span><span class="kn">import</span> <span class="n">BatchCalculator</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="n">structures</span> <span class="o">=</span> <span class="p">[]</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1000</span><span class="p">):</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>    <span class="n">atoms</span> <span class="o">=</span> <span class="n">bulk</span><span class="p">(</span><span class="s2">"Si"</span><span class="p">,</span> <span class="s2">"diamond"</span><span class="p">,</span> <span class="n">a</span><span class="o">=</span><span class="mf">5.43</span><span class="p">)</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>    <span class="n">atoms</span><span class="o">.</span><span class="n">rattle</span><span class="p">(</span><span class="mf">0.05</span><span class="p">,</span> <span class="n">seed</span><span class="o">=</span><span class="n">k</span><span class="p">)</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>    <span class="n">structures</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">atoms</span><span class="p">)</span>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="n">bc</span> <span class="o">=</span> <span class="n">BatchCalculator</span><span class="p">(</span><span class="s2">"fit/model.npz"</span><span class="p">)</span>
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="n">res</span> <span class="o">=</span> <span class="n">bc</span><span class="o">.</span><span class="n">calculate</span><span class="p">(</span><span class="n">structures</span><span class="p">)</span>
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a><span class="n">res</span><span class="o">.</span><span class="n">energy</span>        <span class="c1"># eV, shape (n_structures,)</span>
+<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a><span class="n">res</span><span class="o">.</span><span class="n">forces</span>        <span class="c1"># list of arrays, eV/Å, shape (n_atoms, 3) each</span>
+<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a><span class="n">res</span><span class="o">.</span><span class="n">stress</span>        <span class="c1"># eV/Å³, shape (n_structures, 6), Voigt order</span>
+</code></pre></div>
+<p>The structures can have different sizes, cells, periodicity and species. A
+cell can be smaller than the cutoff. Positions do not have to be inside the
+cell.</p>
+<p>The stress row of a structure is NaN when the structure is not periodic in
+all three directions. <code>res.virial</code> (eV, shape <code>(n_structures, 3, 3)</code>) gives
+the virial of every structure.</p>
+<p>To attach the results to copies of the structures, use <code>to_atoms</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="n">labelled</span> <span class="o">=</span> <span class="n">res</span><span class="o">.</span><span class="n">to_atoms</span><span class="p">(</span><span class="n">structures</span><span class="p">)</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="n">labelled</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">get_potential_energy</span><span class="p">()</span>
+</code></pre></div>
+<h2 id="options">Options<a class="headerlink" href="#options" title="Permanent link">&para;</a></h2>
+<p><code>BatchCalculator</code> accepts the evaluation options of <code>ACECalculator</code>, with
+the same meaning:</p>
+<ul>
+<li><code>dtype</code>, <code>lean</code>, <code>spline_tol</code>, <code>radial_table</code> and <code>aa_dag</code>.</li>
+<li><code>energy_reference="E0"</code>. <code>res.e0_offset</code> then gives the constant for each
+  structure.</li>
+<li><code>ffi=True</code> or <code>ffi="auto"</code>: the C++ kernel on a CPU, or the CUDA kernel on
+  a CUDA GPU. On a CPU, use the kernel. The JAX model gets almost no speed-up
+  from batches on a CPU.</li>
+<li><code>ffi_precision="mixed"</code>: the kernel's
+  <a href="../precision/#mixed-precision-for-the-kernels">mixed-precision mode</a>.</li>
+</ul>
+<p>Two options control the batches:</p>
+<ul>
+<li><code>max_batch_atoms</code> sets the maximum number of atoms in one call. The
+  default is 262144 on a GPU and 16384 on a CPU. On a GPU, 262144 atoms of
+  the Si model use approximately 1 GB in float64.</li>
+<li><code>n_device</code> sets the largest structure that goes into a batch. Larger
+  structures go through <code>ACECalculator</code>, one structure at a time. The default
+  is 256 atoms, and 16 atoms for the JAX model on a CPU.</li>
+</ul>
+<p><code>bc.last_timing</code> gives the time of each step, the number of compilations and
+the neighbour-list method.</p>
+<div class="admonition note">
+<p class="admonition-title">Compilation</p>
+<p>Each size group compiles once, on its first batch. The first call is
+therefore slow. Later calls with structures of similar sizes do not
+compile again.</p>
+</div>
+<div class="admonition warning">
+<p class="admonition-title">Small lists are slow</p>
+<p>A list of one or two structures is slower than <code>ACECalculator</code>. Use
+<code>BatchCalculator</code> for tens of structures or more.</p>
+</div>
+<h2 id="speed">Speed<a class="headerlink" href="#speed" title="Permanent link">&para;</a></h2>
+<p>The table gives the speed-up of <code>calculate</code> against <code>ACECalculator</code> with one
+structure in each call. The model is linear ACE for Si (correlation order 4, total degree
+12). Each call has 1024 structures (256 for 216 atoms on the CPU).</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: right;">Atoms in each structure</th>
+<th style="text-align: right;">RTX 4000 Ada, float32</th>
+<th style="text-align: right;">RTX 4000 Ada, float64</th>
+<th style="text-align: right;">A100, float32</th>
+<th style="text-align: right;">A100, float64</th>
+<th style="text-align: right;">CPU with the C++ kernel, float64</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">72x</td>
+<td style="text-align: right;">71x</td>
+<td style="text-align: right;">62x</td>
+<td style="text-align: right;">79x</td>
+<td style="text-align: right;">35x</td>
+</tr>
+<tr>
+<td style="text-align: right;">8</td>
+<td style="text-align: right;">45x</td>
+<td style="text-align: right;">35x</td>
+<td style="text-align: right;">48x</td>
+<td style="text-align: right;">56x</td>
+<td style="text-align: right;">25x</td>
+</tr>
+<tr>
+<td style="text-align: right;">64</td>
+<td style="text-align: right;">11x</td>
+<td style="text-align: right;">6.2x</td>
+<td style="text-align: right;">21x</td>
+<td style="text-align: right;">18x</td>
+<td style="text-align: right;">3.5x</td>
+</tr>
+<tr>
+<td style="text-align: right;">216</td>
+<td style="text-align: right;">3.2x</td>
+<td style="text-align: right;">2.0x</td>
+<td style="text-align: right;">8.9x</td>
+<td style="text-align: right;">8.5x</td>
+<td style="text-align: right;">1.3x</td>
+</tr>
+</tbody>
+</table>
+<p>The GPUs are an NVIDIA RTX 4000 Ada and an NVIDIA A100 (40 GB). The A100 has
+fast float64, so float64 is almost as fast as float32 on it. The CPU has 32 cores. The CPU values use
+matscipy-neighbours with the batched neighbour-list build. Without it, the
+speed-up for 64 atoms is approximately 2.4 times.</p>
+<h2 id="run-md-or-relax-many-structures-with-jax-md">Run MD or relax many structures with JAX-MD<a class="headerlink" href="#run-md-or-relax-many-structures-with-jax-md" title="Permanent link">&para;</a></h2>
+<p>ace-jax does not contain integrators or optimisers. It gives what
+<a href="https://github.com/jax-md/jax-md">JAX-MD</a> needs to run them on a batch with
+<code>jax.vmap</code>:</p>
+<ul>
+<li><code>bc.neighbour_lists(structures, skin)</code> puts all the structures into one
+  padded batch and makes their neighbour lists.</li>
+<li><code>nb.energy_fn(nl)</code> gives the energy of one structure, in the JAX-MD form.</li>
+<li><code>ace_jax.batch</code> gives helpers for the padding atoms.</li>
+</ul>
+<div class="admonition note">
+<p class="admonition-title">Install</p>
+<p>Install ace-jax with the <code>jaxmd</code> extra: <code>pip install "ace-jax[jaxmd]"</code>.</p>
+</div>
+<p>The procedure for NVE MD:</p>
+<ol>
+<li>Make the neighbour lists and the energy function.</li>
+<li>Make the JAX-MD integrator with <code>space.free()</code>.</li>
+<li>Make the initial momenta with <code>batch.initial_momenta</code>.</li>
+<li>Initialise the integrator for each structure with <code>jax.vmap</code>.</li>
+<li>Run the steps in compiled chunks.</li>
+<li>After each chunk, update the neighbour lists.</li>
+</ol>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">jax</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="n">jax</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="s2">"jax_enable_x64"</span><span class="p">,</span> <span class="kc">True</span><span class="p">)</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">jax_md</span><span class="w"> </span><span class="kn">import</span> <span class="n">simulate</span><span class="p">,</span> <span class="n">space</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="kn">from</span><span class="w"> </span><span class="nn">ace_jax</span><span class="w"> </span><span class="kn">import</span> <span class="n">batch</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="kn">from</span><span class="w"> </span><span class="nn">ace_jax.batch</span><span class="w"> </span><span class="kn">import</span> <span class="n">BatchCalculator</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="n">bc</span> <span class="o">=</span> <span class="n">BatchCalculator</span><span class="p">(</span><span class="s2">"fit/model.npz"</span><span class="p">)</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="n">nb</span> <span class="o">=</span> <span class="n">bc</span><span class="o">.</span><span class="n">neighbour_lists</span><span class="p">(</span><span class="n">structures</span><span class="p">,</span> <span class="n">skin</span><span class="o">=</span><span class="mf">1.0</span><span class="p">)</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="n">nl</span> <span class="o">=</span> <span class="n">nb</span><span class="o">.</span><span class="n">allocate</span><span class="p">()</span>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="n">energy</span> <span class="o">=</span> <span class="n">nb</span><span class="o">.</span><span class="n">energy_fn</span><span class="p">(</span><span class="n">nl</span><span class="p">)</span>
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a>
+<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a><span class="n">_</span><span class="p">,</span> <span class="n">shift</span> <span class="o">=</span> <span class="n">space</span><span class="o">.</span><span class="n">free</span><span class="p">()</span>
+<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a><span class="n">init</span><span class="p">,</span> <span class="n">apply</span> <span class="o">=</span> <span class="n">simulate</span><span class="o">.</span><span class="n">nve</span><span class="p">(</span><span class="n">energy</span><span class="p">,</span> <span class="n">shift</span><span class="p">,</span> <span class="n">dt</span><span class="o">=</span><span class="mf">1.0</span> <span class="o">/</span> <span class="mf">10.18</span><span class="p">)</span>    <span class="c1"># 1 fs</span>
+<a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a><span class="n">mass</span> <span class="o">=</span> <span class="mf">28.0855</span>
+<a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a>
+<a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a><span class="n">p0</span> <span class="o">=</span> <span class="n">batch</span><span class="o">.</span><span class="n">initial_momenta</span><span class="p">(</span><span class="n">jax</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">PRNGKey</span><span class="p">(</span><span class="mi">0</span><span class="p">),</span> <span class="n">nb</span><span class="o">.</span><span class="n">live</span><span class="p">,</span> <span class="n">kT</span><span class="o">=</span><span class="mf">0.025</span><span class="p">,</span> <span class="n">mass</span><span class="o">=</span><span class="n">mass</span><span class="p">,</span>
+<a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a>                           <span class="n">dtype</span><span class="o">=</span><span class="n">nb</span><span class="o">.</span><span class="n">positions</span><span class="o">.</span><span class="n">dtype</span><span class="p">)</span>
+<a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a><span class="n">state</span> <span class="o">=</span> <span class="n">jax</span><span class="o">.</span><span class="n">vmap</span><span class="p">(</span><span class="k">lambda</span> <span class="n">R</span><span class="p">,</span> <span class="n">p</span><span class="p">,</span> <span class="n">n</span><span class="p">:</span> <span class="n">init</span><span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="n">R</span><span class="p">,</span> <span class="n">kT</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span> <span class="n">mass</span><span class="o">=</span><span class="n">mass</span><span class="p">,</span> <span class="n">momenta</span><span class="o">=</span><span class="n">p</span><span class="p">,</span> <span class="n">neighbor</span><span class="o">=</span><span class="n">n</span><span class="p">))(</span>
+<a id="__codelineno-3-19" name="__codelineno-3-19" href="#__codelineno-3-19"></a>    <span class="n">nb</span><span class="o">.</span><span class="n">positions</span><span class="p">,</span> <span class="n">p0</span><span class="p">,</span> <span class="n">nl</span><span class="p">)</span>
+<a id="__codelineno-3-20" name="__codelineno-3-20" href="#__codelineno-3-20"></a>
+<a id="__codelineno-3-21" name="__codelineno-3-21" href="#__codelineno-3-21"></a><span class="k">def</span><span class="w"> </span><span class="nf">chunk</span><span class="p">(</span><span class="n">state</span><span class="p">,</span> <span class="n">n</span><span class="p">):</span>
+<a id="__codelineno-3-22" name="__codelineno-3-22" href="#__codelineno-3-22"></a>    <span class="k">return</span> <span class="n">jax</span><span class="o">.</span><span class="n">lax</span><span class="o">.</span><span class="n">fori_loop</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">50</span><span class="p">,</span> <span class="k">lambda</span> <span class="n">i</span><span class="p">,</span> <span class="n">s</span><span class="p">:</span> <span class="n">apply</span><span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="n">neighbor</span><span class="o">=</span><span class="n">n</span><span class="p">),</span> <span class="n">state</span><span class="p">)</span>
+<a id="__codelineno-3-23" name="__codelineno-3-23" href="#__codelineno-3-23"></a><span class="n">step</span> <span class="o">=</span> <span class="n">jax</span><span class="o">.</span><span class="n">jit</span><span class="p">(</span><span class="n">jax</span><span class="o">.</span><span class="n">vmap</span><span class="p">(</span><span class="n">chunk</span><span class="p">))</span>
+<a id="__codelineno-3-24" name="__codelineno-3-24" href="#__codelineno-3-24"></a>
+<a id="__codelineno-3-25" name="__codelineno-3-25" href="#__codelineno-3-25"></a><span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">100</span><span class="p">):</span>
+<a id="__codelineno-3-26" name="__codelineno-3-26" href="#__codelineno-3-26"></a>    <span class="n">state</span> <span class="o">=</span> <span class="n">step</span><span class="p">(</span><span class="n">state</span><span class="p">,</span> <span class="n">nl</span><span class="p">)</span>
+<a id="__codelineno-3-27" name="__codelineno-3-27" href="#__codelineno-3-27"></a>    <span class="n">nl</span><span class="p">,</span> <span class="n">rebuilt</span> <span class="o">=</span> <span class="n">nb</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">state</span><span class="o">.</span><span class="n">position</span><span class="p">,</span> <span class="n">nl</span><span class="p">)</span>
+<a id="__codelineno-3-28" name="__codelineno-3-28" href="#__codelineno-3-28"></a>
+<a id="__codelineno-3-29" name="__codelineno-3-29" href="#__codelineno-3-29"></a><span class="n">positions</span> <span class="o">=</span> <span class="n">nb</span><span class="o">.</span><span class="n">unpad</span><span class="p">(</span><span class="n">state</span><span class="o">.</span><span class="n">position</span><span class="p">)</span>          <span class="c1"># list of (n_atoms, 3) arrays</span>
+<a id="__codelineno-3-30" name="__codelineno-3-30" href="#__codelineno-3-30"></a><span class="n">kT</span> <span class="o">=</span> <span class="n">batch</span><span class="o">.</span><span class="n">temperature</span><span class="p">(</span><span class="n">state</span><span class="o">.</span><span class="n">momentum</span><span class="p">,</span> <span class="n">mass</span><span class="p">,</span> <span class="n">nb</span><span class="o">.</span><span class="n">live</span><span class="p">)</span>
+</code></pre></div>
+<p><code>nb.energy_fn(nl)</code> sets the number of model slots for each atom from the
+neighbours in the cutoff, plus 20%. If an atom gets more neighbours than
+that, the energy and forces of its structure become NaN. Make the energy
+function again with <code>nb.energy_fn(nb.allocate(state.position))</code>.</p>
+<p>All structures go into one batch with the size of the largest structure.
+The other structures get padding atoms. The cell of each structure can be
+smaller than the cutoff.</p>
+<p>The neighbour lists are made for the cutoff plus <code>skin</code>. <code>nb.update</code> makes
+them again when an atom moves more than <code>skin / 2</code>. If a structure gets more
+neighbours than the lists hold, <code>nb.update</code> makes larger lists. The compiled
+step then compiles again.</p>
+<h3 id="update-the-lists-inside-the-compiled-loop">Update the lists inside the compiled loop<a class="headerlink" href="#update-the-lists-inside-the-compiled-loop" title="Permanent link">&para;</a></h3>
+<p><code>nb.update</code> runs on the host between chunks. <code>nb.update_fn()</code> gives the same
+update as a function that can run inside the compiled loop. Use it to check
+the lists at every step:</p>
+<ol>
+<li>Make the update function after <code>nb.allocate()</code>.</li>
+<li>In the loop body, update the lists first.</li>
+<li>Then apply one step to all structures with <code>jax.vmap</code>.</li>
+<li>After the loop, read the overflow flags.</li>
+</ol>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="n">update</span> <span class="o">=</span> <span class="n">nb</span><span class="o">.</span><span class="n">update_fn</span><span class="p">()</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="k">def</span><span class="w"> </span><span class="nf">body</span><span class="p">(</span><span class="n">i</span><span class="p">,</span> <span class="n">carry</span><span class="p">):</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>    <span class="n">state</span><span class="p">,</span> <span class="n">nl</span><span class="p">,</span> <span class="n">overflow</span> <span class="o">=</span> <span class="n">carry</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>    <span class="n">nl</span><span class="p">,</span> <span class="n">rebuilt</span><span class="p">,</span> <span class="n">ov</span> <span class="o">=</span> <span class="n">update</span><span class="p">(</span><span class="n">state</span><span class="o">.</span><span class="n">position</span><span class="p">,</span> <span class="n">nl</span><span class="p">)</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>    <span class="n">state</span> <span class="o">=</span> <span class="n">jax</span><span class="o">.</span><span class="n">vmap</span><span class="p">(</span><span class="k">lambda</span> <span class="n">s</span><span class="p">,</span> <span class="n">n</span><span class="p">:</span> <span class="n">apply</span><span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="n">neighbor</span><span class="o">=</span><span class="n">n</span><span class="p">))(</span><span class="n">state</span><span class="p">,</span> <span class="n">nl</span><span class="p">)</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>    <span class="k">return</span> <span class="n">state</span><span class="p">,</span> <span class="n">nl</span><span class="p">,</span> <span class="n">overflow</span> <span class="o">|</span> <span class="n">ov</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="n">run</span> <span class="o">=</span> <span class="n">jax</span><span class="o">.</span><span class="n">jit</span><span class="p">(</span><span class="k">lambda</span> <span class="n">state</span><span class="p">,</span> <span class="n">nl</span><span class="p">:</span> <span class="n">jax</span><span class="o">.</span><span class="n">lax</span><span class="o">.</span><span class="n">fori_loop</span><span class="p">(</span>
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>    <span class="mi">0</span><span class="p">,</span> <span class="mi">1000</span><span class="p">,</span> <span class="n">body</span><span class="p">,</span> <span class="p">(</span><span class="n">state</span><span class="p">,</span> <span class="n">nl</span><span class="p">,</span> <span class="n">jnp</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">structures</span><span class="p">),</span> <span class="nb">bool</span><span class="p">))))</span>
+<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a><span class="n">new_state</span><span class="p">,</span> <span class="n">nl</span><span class="p">,</span> <span class="n">overflow</span> <span class="o">=</span> <span class="n">run</span><span class="p">(</span><span class="n">state</span><span class="p">,</span> <span class="n">nl</span><span class="p">)</span>
+<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a><span class="k">if</span> <span class="n">overflow</span><span class="o">.</span><span class="n">any</span><span class="p">():</span>
+<a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a>    <span class="n">nl</span> <span class="o">=</span> <span class="n">nb</span><span class="o">.</span><span class="n">allocate</span><span class="p">(</span><span class="n">state</span><span class="o">.</span><span class="n">position</span><span class="p">)</span>      <span class="c1"># larger lists; run again from `state`</span>
+</code></pre></div>
+<p>The lists of the whole batch are made again in one call. On a CPU, the check
+costs approximately 1 to 9% of the step time.</p>
+<p>On a GPU, the check makes the host wait for the GPU at every step. On an idle
+GPU this costs approximately 15 to 20% of the step time for small batches. On
+a GPU that other programs also use, each wait is much longer.</p>
+<p><code>update_fn(branchless=True)</code> makes the lists at every step and keeps the new
+lists only for the structures that moved. The loop then does not wait for the
+host, but each step makes the lists. Use it on a shared GPU.</p>
+<p>To reduce the cost on either device, check the lists every 10 steps:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="k">def</span><span class="w"> </span><span class="nf">chunk</span><span class="p">(</span><span class="n">state</span><span class="p">,</span> <span class="n">nl</span><span class="p">):</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>    <span class="k">return</span> <span class="n">jax</span><span class="o">.</span><span class="n">lax</span><span class="o">.</span><span class="n">fori_loop</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">10</span><span class="p">,</span> <span class="k">lambda</span> <span class="n">i</span><span class="p">,</span> <span class="n">s</span><span class="p">:</span> <span class="n">jax</span><span class="o">.</span><span class="n">vmap</span><span class="p">(</span><span class="k">lambda</span> <span class="n">x</span><span class="p">,</span> <span class="n">n</span><span class="p">:</span> <span class="n">apply</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">neighbor</span><span class="o">=</span><span class="n">n</span><span class="p">))(</span><span class="n">s</span><span class="p">,</span> <span class="n">nl</span><span class="p">),</span> <span class="n">state</span><span class="p">)</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="k">def</span><span class="w"> </span><span class="nf">body</span><span class="p">(</span><span class="n">i</span><span class="p">,</span> <span class="n">carry</span><span class="p">):</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>    <span class="n">state</span><span class="p">,</span> <span class="n">nl</span><span class="p">,</span> <span class="n">overflow</span> <span class="o">=</span> <span class="n">carry</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>    <span class="n">nl</span><span class="p">,</span> <span class="n">rebuilt</span><span class="p">,</span> <span class="n">ov</span> <span class="o">=</span> <span class="n">update</span><span class="p">(</span><span class="n">state</span><span class="o">.</span><span class="n">position</span><span class="p">,</span> <span class="n">nl</span><span class="p">)</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>    <span class="k">return</span> <span class="n">chunk</span><span class="p">(</span><span class="n">state</span><span class="p">,</span> <span class="n">nl</span><span class="p">),</span> <span class="n">nl</span><span class="p">,</span> <span class="n">overflow</span> <span class="o">|</span> <span class="n">ov</span>
+</code></pre></div>
+<p>Use a skin that is large enough for 10 steps. An atom must not move more than
+<code>skin / 2</code> between two checks.</p>
+<div class="admonition warning">
+<p class="admonition-title">Overflow inside the loop</p>
+<p>Inside the loop, the size of the lists cannot change. If a structure gets
+more neighbours than the lists hold, its list is cut and its forces are
+wrong. <code>overflow</code> then shows the structure. Run the loop again from the
+last good state with larger lists.</p>
+</div>
+<p>This needs matscipy-neighbours with the batched build, or a GPU. On a CPU
+without the batched build, the lists are made in JAX, which is slow for
+structures of more than approximately 64 atoms.</p>
+<p>For a geometry optimisation, use <code>minimize.fire_descent</code> in the same way.
+Each structure keeps its own FIRE step size.</p>
+<div class="admonition warning">
+<p class="admonition-title">Padding atoms</p>
+<p>JAX-MD gives momenta to all atoms, padding atoms included. This changes
+the kinetic energy and moves the centre of mass of the real atoms.</p>
+<ul>
+<li>Give the initial momenta with <code>batch.initial_momenta</code>. Do not let
+  <code>init</code> make them.</li>
+<li>After Langevin steps, use <code>batch.zero_padding</code> before you read
+  temperatures.</li>
+<li>Calculate temperatures with <code>batch.temperature</code>, not with JAX-MD.</li>
+<li>Do not use the Nose-Hoover thermostat with padding atoms. It counts
+  the padding atoms as degrees of freedom. Give it structures of one
+  size only.</li>
+</ul>
+</div>
+<div class="admonition note">
+<p class="admonition-title">C++ kernel</p>
+<p>On a CPU, use <code>BatchCalculator(..., ffi=True)</code>. <code>energy_fn</code> then uses the C++
+kernel, and <code>jax.vmap</code> sends the whole batch to it in one call. On 32 cores
+this MD is 37 to 48 times faster than with the JAX model, for 64 structures
+of 8 or 64 Si atoms. The kernel gives forces only: it does not give second
+derivatives.</p>
+</div>
+<h2 id="aj-eval"><code>aj eval</code><a class="headerlink" href="#aj-eval" title="Permanent link">&para;</a></h2>
+<p><code>aj eval</code> uses <code>BatchCalculator</code> when you do not give a posterior or a GP
+model. You do not have to change the command.</p>
+<h2 id="limits">Limits<a class="headerlink" href="#limits" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>BatchCalculator</code> gives the energy, the forces, the stress and the virial.
+  It does not give uncertainties. For per-atom force uncertainty, use
+  <code>ACECalculator</code> with <code>posterior=</code> (see
+  <a href="../force-uncertainty/">Per-atom force uncertainty</a>).</li>
+<li>The forces are derivatives with respect to positions only. For
+  derivatives with respect to the coefficients, use the JAX model directly.</li>
+<li>MD and geometry optimisation use JAX-MD (see above). The cell is fixed:
+  NPT and cell relaxation are not available.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../ase/" class="md-footer__link md-footer__link--prev" aria-label="Previous: ASE calculators">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                ASE calculators
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../lammps/" class="md-footer__link md-footer__link--next" aria-label="Next: LAMMPS export">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                LAMMPS export
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.indexes", "navigation.footer", "search.suggest", "search.highlight", "content.code.copy", "toc.follow"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+        <script src="../../javascripts/mathjax.js"></script>
+      
+        <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+        <script src="../../javascripts/plotly-figures.js"></script>
+      
+    
+  </body>
+</html>
