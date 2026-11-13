@@ -15,6 +15,8 @@
 - The lock takes matscipy-neighbours 1.1.0 (the `native` extra; its floor stays `>=1.0`). A test that
   compared three evaluations of one structure bitwise now allows 16 ulp: on a GPU the order of a sum can
   change between calls.
+- The `gpu` CI job also runs `tests/test_calc_jit.py`, with matscipy-neighbours built with its CUDA backend,
+  so the neighbour list built on the GPU is tested.
 
 ## 0.5.3 (2026-11-05)
 

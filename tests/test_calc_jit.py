@@ -86,6 +86,8 @@ def test_dense_path_uses_native_neighbour_matrix(monkeypatch):
     for _ in range(3):
         dense.calculate(at, ["energy", "forces", "stress"], all_changes)
     assert len(calls) >= 2 and dense.last_timing["nlist_backend"] == "neighbour_matrix"
+    if jax.default_backend() == "gpu" and getattr(matscipy_neighbours._matscipy_neighbours, "_has_gpu", 0):
+        assert dense._nl_gpu                           # built on the device: no fall back to the host list
     dense._k_hint = 2                                  # too small: must recover
     dense.calculate(at, ["energy", "forces", "stress"], all_changes)
     E, F = dense.results["energy"], dense.results["forces"].copy()
