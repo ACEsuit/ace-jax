@@ -32,7 +32,7 @@ Cheapest model reaching the target, µs/atom-step, float64, LAMMPS:
 | linear ACE o4d20, ML-PACE (tabulated radials) | 5,476 | 0.0816 | 0.41 | 4.13 | 5.31 |
 | linear ACE o4d20, patched ML-PACE (proposed upstream) | 5,476 | 0.0816 | 0.41 | 2.42 | 2.89 |
 | linear ACE o4d20, ACEpotentials.jl (trim library) | 5,476 | 0.0816 | 0.41 | – | 10.8 |
-| linear ACE o4d20, ace-jax kernel (lammps-jax FFI; CUDA / C++) | 5,476 | 0.0816 | 0.41 | 1.23 | 3.29 |
+| linear ACE o4d20, ace-jax kernel (lammps-jax FFI; CUDA / C++) | 5,476 | 0.0816 | 0.41 | 0.75 | 1.52 |
 | MACE c16L0, Symmetrix 0d86e1e (before 2026-11-10) | 31,152 | 0.0699 | < 0.5 | 1.93 | 2.36 |
 | **MACE c16L0, Symmetrix 0.3.0** | 31,152 | 0.0699 | < 0.5 | **0.65** | **0.59** |
 | MACE c16L0, Symmetrix-XL | 31,152 | 0.0699 | < 0.5 | 1.23 | 2.19 |
@@ -46,8 +46,8 @@ Cheapest model reaching the target, µs/atom-step, float64, LAMMPS:
 
 Since 2026-11-10 the plotted costs are Symmetrix 0.3.0 for MACE, grace-runtime for GRACE-1L/2L (mixed precision,
 labelled) and pace/runtime for PACE (see "grace-runtime and Symmetrix 0.3.0" below). MACE c16L0 is now the
-cheapest model at the target on both devices, 1.9x the ace-jax CUDA kernel on the A100 and 5.6x its C++ kernel
-on the CPU.
+cheapest model at the target on both devices, 1.9x the ace-jax CUDA kernel on the A100 and 2.6x its C++ kernel
+on the CPU (5.6x before the kernel's SIMD lanes, 2026-11-11, below).
 
 Not reached in their ladders (best QoI error, at that model's force RMSE):
 
@@ -67,7 +67,7 @@ parameters than linear ACE (f800: 761 parameters, 0.081 eV/Å) but not the QoI t
 
 - **ML-PACE runs ace-jax's linear ACE fastest on the CPU at o4d20.** Exported exactly (`write_yace`, tabulated radials;
   `ml-pace-tabulated-radials.md`), o4d20 runs at 5.31 µs/atom-step on 128 ranks against 50.5 through the
-  lammps-jax CPU backend with the DAG product basis (3.29 with ace-jax's C++ kernel, next), and 3.98 for PACE f3200. On the A100, ace-jax with the DAG
+  lammps-jax CPU backend with the DAG product basis (1.52 with ace-jax's C++ kernel, next), and 3.98 for PACE f3200. On the A100, ace-jax with the DAG
   is faster than stock ML-PACE (3.12 vs 4.13) and behind patched ML-PACE (2.42).
 - **cuequivariance on the A100** (`aa_dag="cueq"`, job 2259228, gpu003, A100-PCIE-40GB): the fastest ace-jax form
   from o3d12 up, and the fastest linear ACE code on the A100 at o4d20 (every precision: float32 ace-jax 2.49, mixed
@@ -125,7 +125,8 @@ parameters than linear ACE (f800: 761 parameters, 0.081 eV/Å) but not the QoI t
 - **ace-jax's C++ kernel** (`ace_jax.eval.ffi`, `export_lammps(ffi=True)`: the lammps-jax CPU bundle with the XLA
   program replaced by one XLA FFI call per step, radials tabulated in r) brings ace-jax to ML-PACE's speed on the
   CPU: 10-23x faster than the XLA bundle, timed one after the other on the same node (job 2257991, node136;
-  µs/atom-step, 128 ranks):
+  µs/atom-step, 128 ranks; the kernel of 0.4.1, one site and one neighbour at a time: the plotted rows are now
+  the SIMD-lane kernel's, "C++ kernel: SIMD lanes" below, 1.3-2.2x faster again):
 
   | model | C++ kernel | XLA bundle | speed-up |
   |---|---|---|---|
@@ -138,7 +139,7 @@ parameters than linear ACE (f800: 761 parameters, 0.081 eV/Å) but not the QoI t
   | o4d20 | 3.29 | 49.7 | 15x |
 
   The XLA column reproduces the plotted ace-jax line (`acejax-auto` rows, other nodes) to within ~5%. Against
-  the other CPU codes (other nodes, so ~20% either way): at o4d20 the kernel (3.29) is between patched ML-PACE
+  the other CPU codes (other nodes, so ~20% either way): at o4d20 the kernel (3.29; 1.52 with SIMD lanes) is between patched ML-PACE
   (2.89) and stock ML-PACE (5.31) and 3.3x faster than ACEpotentials.jl (10.8); at o4d12-o4d16 it ties or beats
   patched ML-PACE (0.236 / 0.411 / 0.738 against 0.305 / 0.578 / 0.791); below o4d14 ACEpotentials.jl stays
   fastest (o3d8 0.104 against 0.137). Parity: every gate (LAMMPS against `ACECalculator` with the same radial
@@ -293,6 +294,8 @@ parameters than linear ACE (f800: 761 parameters, 0.081 eV/Å) but not the QoI t
   XLA bundle on the same node (`sulis-cpu-lj-ffi-xla.json`). Rows: `sulis-cpu-128x1-ffi.jsonl` (the plotted
   line, `plot_cost.family_of`: rows marked `ffi`) and `sulis-cpu-128x1-ffi-xla.jsonl` (the same-node control, not
   plotted). Analytic radials splined at 1e-10 as the plotted ace rows (o3d8 unsplined), then tabulated.
+  Since 2026-11-11 `sulis-cpu-128x1-ffi.jsonl` holds the SIMD-lane kernel's rows (each model's fastest of two or
+  three runs) and `sulis-cpu-128x1-ffi-main.jsonl` the previous kernel on the same nodes (not plotted).
 - The N/8 check size (512 atoms, 4 per rank) is overhead-bound for every fast CPU code: the C++ kernel,
   patched ML-PACE and ACEpotentials.jl all cost 1.4-4.2x more per atom there than at 4,096 atoms, so their rows
   carry `not_plateau`. Per-step costs that do not scale with atoms (communication, neighbour lists) are still
@@ -329,7 +332,7 @@ grep -h '"code": "mlpace-mixed"' $R/sulis-gpu-fp32-o4d*.jsonl > $R/sulis-gpu-fp3
 (cd bench && python -m accuracy_cost.dag_auto)
 python bench/si_qoi/make_cost.py --dtype float64 --source acejax-ace=sulis-cpu-128x1-acejax-auto --out $RR/cost_sulis_cpu.json \
     $(ls $R/sulis-cpu*.jsonl | grep -v -e smoke -e ace_yace -e pacetab-check -e "ace_tab\.jsonl" -e ace_tab2 \
-      -e ace_tab3 -e dagpair -e ffi-xla) --allow grace-rt:mixed   # ffi-xla: the C++ kernel's same-node XLA control
+      -e ace_tab3 -e dagpair -e ffi-xla -e ffi-main -e ffi-mixed-float64 -e cpu-1x1) --allow grace-rt:mixed   # ffi-xla, ffi-main, ffi-mixed-float64: the C++ kernel's controls; cpu-1x1: the single-core layout
 python bench/si_qoi/make_cost.py --dtype float64 --source acejax-ace=sulis-gpu-acejax-auto --out $RR/cost_sulis_gpu.json \
     bench/accuracy_cost/results/sulis-gpu.jsonl bench/accuracy_cost/results/sulis-gpu-ace-splined.jsonl \
     $R/sulis-gpu-ace-splined-v2.jsonl $R/sulis-gpu-v2.jsonl $R/sulis-gpu-mace_xl.jsonl \
@@ -519,6 +522,179 @@ with the old build alongside, 2280024 CPU 32 x 4 / 16 x 8, 2280028 A100). Gates 
 32 x 4 is the best CPU layout at every size (16 x 8 is slower than 128 x 1 for L = 0). The old build's same-node
 128 x 1 times are lower than the plotted old rows (1.87 / 2.36 / 6.68 / 8.58 / 18.7 / 38.0: a different node and
 date), so the same-node gain is 1.6-4x, and 3.9-7.4x against the plotted rows.
+
+## C++ kernel: SIMD lanes (2026-11-11)
+
+The C++ kernel (`eval/ace_ffi.cc`) now takes four sites of one centre species at a time for the product-basis DAG,
+a site per SIMD lane, and four neighbours at a time for the harmonics, A and the force contraction (GCC/clang
+vector types). LAMMPS, 128 x 1 ranks, Si 4,096 atoms, EPYC 7742, µs/atom-step, the previous kernel timed after the
+new one on the same node (jobs 2281015 node088, 2281016 node090; o3d8-o4d12 repeated in 2281017 node088, the
+fastest row kept):
+
+| model | previous kernel | SIMD lanes | ratio |
+|---|---|---|---|
+| o3d8 | 0.211 | 0.108 | (other node) |
+| o3d10 | 0.267 | 0.114 | 2.3x |
+| o3d12 | 0.326 | 0.138 | (other node) |
+| o4d12 | 0.304 | 0.151 | 2.0x |
+| o4d14 | 0.490 | 0.217 | 2.3x |
+| o4d16 | 0.773 | 0.349 | 2.2x |
+| o4d20 | 3.52 | 1.52 | 2.3x |
+
+The small models are overhead-bound at 32 atoms a rank and vary by up to 2x between runs and nodes (o3d8, new
+kernel: 0.455 / 0.259 / 0.186 on node090, 0.103 / 0.186 / 0.108 on node088; the previous kernel's archived rows,
+node136, were 0.137 / 0.160 / 0.295 / 0.236 for o3d8 / o3d10 / o3d12 / o4d12), so their ratios are indicative; o4d14 and
+above are stable to a few percent. One process on the same CPU, o4d20, 512 atoms through `ACECalculator`: 272 ->
+86 µs/atom; an i9-14900K: 58.7 -> ~30.
+
+How it was found (hardware counters by `perf_event_open`, user space, per kernel stage; no `perf` on these nodes):
+
+- On the i9 the previous kernel was instruction-bound: 12.5 instructions and 3.0 cycles a leaf (IPC 4.2), no branch
+  misses. Lanes cut that to 3.7 instructions a leaf-site.
+- On the EPYC (Zen 2) the same instructions took ~10 cycles a leaf and a node of the adjoint pass (IPC 1.3) with
+  few L2 misses: the `wA[factor] +=` load waited for the previous leaf's store. Removing that update (timing only)
+  halved the kernel (272 -> 142 µs/atom). The kernel keeps the update and alternates two accumulators, each with
+  its own code site (1.16x on the EPYC, 3-5% slower on the i9); one accumulator indexed by `k & 3` did not help.
+- A first lane prototype showed nothing in LAMMPS because it also batched lammps-jax's padding rows (25 of 57 row
+  slots a rank here) and ran the DAG on them; rows without a neighbour are now E0 and never batched.
+- A and the force contraction ran 11 instructions per (A entry, neighbour); four neighbours at a time cut the
+  force contraction 3x and gave the small models most of their gain (i9: o3d12 7.3 -> 4.1 µs/atom).
+
+At the target MACE c16L0 on Symmetrix 0.3.0 stays the cheapest CPU model (0.59 against 1.52).
+
+
+## CUDA kernel: a DAG pass without atomic adds (2026-11-12)
+
+The CUDA kernel's product-basis pass (`eval/ace_ffi_gpu.cu`, `ace_dag`) now gathers: a block takes a batch of
+rows of one centre species (2 in float64, 4 in float32), each thread reads the terms of its own lists
+(`ffi.pull_plan`) once and every sum is by the thread that owns its target, so there are no atomic adds and the
+pass is deterministic. o4d20 on an A100 (Sulis), Si 32,768 atoms, ms per force call through `ACECalculator`
+(jobs 2282377, 2282381, 2282394, 2282429), by step:
+
+| kernel | float64 | float32 |
+|---|---|---|
+| main (atomic scatter) | 39.5 | 32.7 |
+| gather pass | 30.6 | 20.9 |
+| items ordered by shared-memory bank | 28.9 | 20.0 |
+| an item in one 32-bit word, lanes dealt equal shares | 26.7 | 17.4 |
+| list items read ahead (4 steps float64, 8 float32) | 24.7 | 15.0 |
+
+The DAG pass alone (Nsight Compute, an A100-SXM4-40GB on Modal, the same 32,768 atoms, µs per launch), main and
+this kernel with its threads per block chosen by DAG size (`ffi.pull_threads`):
+
+| model | nodes | threads | float64 main | float64 new | float32 main | float32 new |
+|---|---|---|---|---|---|---|
+| o3d8 | 76 | 32 | 79 | 81 | 71 | 63 |
+| o3d10 | 229 | 32 | 174 | 128 | 159 | 106 |
+| o3d12 | 624 | 32 | 455 | 256 | 414 | 179 |
+| o4d12 | 1,024 | 64 | 935 | 518 | 872 | 374 |
+| o4d14 | 3,158 | 64 | 1,990 | 1,340 | 1,657 | 860 |
+| o4d16 | 9,280 | 128 | 5,886 | 3,309 | 4,851 | 2,057 |
+| o4d20 | 68,335 | 256 | 30,363 | 17,906 | 28,774 | 10,699 |
+
+LAMMPS on an A100-PCIE-40GB (Sulis gpu020, jobs 2282520 and 2282521, `envs/sulis-gpu-cudak-retime.sbatch`, branch
+at 016488c), Si 32,768 atoms, µs/atom-step, main's kernel timed after the new one on the same GPU
+(`sulis-gpu-cudak.jsonl`; the control rows in `sulis-gpu-cudak-main.jsonl`, not plotted):
+
+| model | float64 main | float64 new | ratio | float32 main | float32 new | ratio |
+|---|---|---|---|---|---|---|
+| o3d8 | 0.042 | 0.041 | 1.01x | 0.041 | 0.042 | 0.98x |
+| o3d10 | 0.046 | 0.046 | 1.00x | 0.042 | 0.038 | 1.10x |
+| o3d12 | 0.067 | 0.058 | 1.15x | 0.056 | 0.045 | 1.22x |
+| o4d12 | 0.081 | 0.069 | 1.16x | 0.069 | 0.052 | 1.33x |
+| o4d14 | 0.142 | 0.115 | 1.24x | 0.115 | 0.086 | 1.34x |
+| o4d16 | 0.284 | 0.190 | 1.50x | 0.230 | 0.133 | 1.73x |
+| o4d20 | 1.234 | 0.748 | 1.65x | 1.075 | 0.444 | 2.42x |
+
+At the target MACE c16L0 on Symmetrix 0.3.0 stays the cheapest float64 model on the A100 (0.65 against 0.75); in
+float32 the kernel runs o4d20 at 0.44. Against the patched ML-PACE the float64 kernel is 2.9-3.7x faster (o4d12
+to o4d20), against the XLA program (job rows of `sulis-gpu-cudak-xla.jsonl`, an earlier node) 4.8-8.2x.
+
+How it was found (Nsight Compute in Sulis `gpu-devel` jobs; the SCRTP workstations refuse its counters):
+
+- main's pass was bound by its atomic adds and their shuffles (55% of the pass), not arithmetic: float32 was only
+  1.12x faster than float64.
+- The gather pass is bound by load latency on the plan's lists in global memory (memory busy 86%, 35 warp cycles
+  per instruction). Packing an item into one word, then loading several steps of items before using them, cut the
+  cycles per instruction to 16 and the global sectors read from 3.7 G to 1.9 G. Reading 8 steps ahead is slower
+  than 4 in float64.
+- An offline model of shared-memory bank conflicts overpredicted that step: conflicts fell 14%, time 5%.
+- With 256 threads a block the order-3 models' pass was up to 4.7x slower than main's on the A100 (o3d8 float64:
+  372 against 79 µs) although an RTX 4000 Ada showed no difference: registers bound the blocks resident per SM at
+  three, so rows in flight go as 1 / threads until shared memory binds. At 32, 64, 128 and 256 threads, float64:
+  o3d8 89, 116, 201, 372 µs; o4d12 551, 539, 652, 862; o4d16 6,094, 3,894, 3,124, 3,345; o4d20 48.8, 28.6, 19.6,
+  18.1 ms.
+- No gain: a plane per row instead of interleaved batch values (the compiler loads an interleaved batch with one
+  128-bit load; 13% slower), the mid-level adjoints from a list (5-10% slower on both GPUs), other batch sizes
+  (job 2282429).
+
+## Mixed precision for the kernels (2026-11-13)
+
+`ffi_precision="mixed"` (off by default) runs the product-basis DAG and its adjoint in float32 and everything
+else (bond vectors, radial table, harmonics, A, the force contraction, the outputs) in float64. Both kernels take
+the DAG's type from the readout array, which `ffi.kernel_inputs(precision="mixed")` passes in float32, so one
+library holds both forms: the C++ kernel's `Site<float>` batches 8 sites a 256-bit register, the CUDA pass is
+`ace_dag<float, double, ...>` with its float32 batch of 4 rows and read-ahead of 8. The energy is
+sum_a A_a w_a in double, w_a the adjoint of A_a as a node.
+
+Speed, o4d20 unless said. The kernel alone (`ACECalculator`, 512 Si atoms, EPYC 7742, job 2283957), µs/atom:
+
+| model | one process, float64 | mixed | 128 processes, float64 | mixed |
+|---|---|---|---|---|
+| o4d20 | 92 | 54 (1.71x) | 102 | 62 (1.64x) |
+| o4d16 | 25.3 | 19.3 (1.31x) | 30.2 | 24.1 (1.26x) |
+| o3d12 | 10.4 | 10.2 | 13.8 | 13.9 |
+
+LAMMPS, 128 x 1, Si 4,096 atoms, the same library and node (job 2283977, node051, `envs/
+sulis-cpu-ffi-mixed.sbatch`; rows `sulis-cpu-128x1-ffi-mixed.jsonl`, and the float64 control `...-ffi-mixed-float64.jsonl`),
+µs/atom-step:
+
+| model | float64 | mixed | ratio |
+|---|---|---|---|
+| o4d14 | 0.217 | 0.195 | 1.11x |
+| o4d16 | 0.333 | 0.302 | 1.10x |
+| o4d20 | 1.572 | 1.133 | 1.39x |
+
+An A100 (Modal, `ACECalculator`, 32,768 atoms), µs/atom, float64 / mixed / float32: o4d20 0.98 / 0.71 / 0.65;
+o4d16 0.38 / 0.34 / 0.28; o4d12 0.24 / 0.23 / 0.18; o3d12 0.23 / 0.21 / 0.17. Mixed is slower than float32
+there (the density and forces passes stay float64) and no more accurate in a small box: max |dF| against
+float64, mixed / float32, o4d20 5.9e-5 / 6.1e-5 eV/Å, o4d16 2.1e-4 / 2.1e-4, o4d12 4.7e-4 / 4.8e-4. Its use on
+a GPU is LAMMPS in a large box: a float32 bundle takes float32 positions, and on a 512-atom cluster moved 0,
+100, 1000 and 10,000 Å from the origin its max |dF| is 5.2e-5, 1.2e-4, 8.3e-4 and 1.2e-2 eV/Å, while the
+mixed bundle's stays 3.9e-5.
+
+Accuracy on the CPU, o4d20 against the float64 kernel: 512 rattled atoms, max |dF| 4.6e-5 eV/Å (rms 1.5e-5); a
+215-atom vacancy cell along a 1e-3 Å line:
+
+| energy | noise, meV rms | speed-up (Xeon Gold 6130) |
+|---|---|---|
+| summed in float32 | 0.73 | 1.58x |
+| readout sums in double, float32 node values | 0.10 | 1.32x |
+| sum_a A_a w_a in double (shipped) | 0.14 | 1.62x |
+| node values and energy in double, adjoints in float32 | 0 | 0.95x |
+
+So the noise is in the float32 node values, not the sums, and an exact energy costs the whole gain. o4d16
+carries 1.1 meV in the same cell (its readout cancels more).
+
+Silicon testing framework, o4d20, the float64 kernel (`ACEk_o4d20`) against mixed (`ACEkf_o4d20`), both on the
+same radial table:
+
+| relaxations | float64 | mixed | largest QoI difference, in score tolerances |
+|---|---|---|---|
+| the protocol's (PreconLBFGS, Armijo) | 16 of 16 tests | 10 of 16 | 0.004 (12 QoIs both have) |
+| ODE12r (`SI_TESTS_OPTIMIZER=ode12r`) | 16 of 16 | 16 of 16 | 0.013 (all 21; tetrahedral interstitial) |
+
+The six failures (bc8, st12, vacancy, interstitials, stacking fault, relaxed (100) surface) are "Armijo
+linesearch failed", as for float32 (docs/dev/fp32-results.md). The optimiser alone moves diamond C44 by 0.64
+tolerance on the float64 kernel, far more than the precision does.
+
+The figures plot the kernel's reduced precision as one light-blue line (`plot_cost` family `ace_ffi_reduced`, cost
+names `ACEffireduced_*`): these mixed rows on the CPU row, and the float32 rows of `sulis-gpu-cudak.jsonl` (the A100
+retime above) on the GPU row. A row with `ffi_precision: "mixed"` is written to the cost file's codes as dtype
+"mixed".
+
+At the target, mixed leaves the CPU ranking as it was: o4d20 1.13 against GRACE-2L 0.81 and MACE c16L0
+on Symmetrix 0.59 µs/atom-step.
 
 ## YE3T (2026-11-12, first pass)
 

@@ -42,8 +42,8 @@ def device(request, tmp_path_factory):
     """The platform: the C++ kernel, or the GPU kernel, built and registered."""
     if request.param == "cpu":
         request.getfixturevalue("kernel")
-    elif ffi.cuda_compiler() is None or jax.default_backend() != "gpu":
-        pytest.skip("no nvcc and CUDA GPU for the GPU kernel")
+    elif ffi.cuda_compiler() is None or jax.default_backend() != "gpu":     # ACEJAX_REQUIRE_GPU: CI's GPU job
+        (pytest.fail if os.environ.get("ACEJAX_REQUIRE_GPU") else pytest.skip)("no nvcc and CUDA GPU for the GPU kernel")
     else:
         ffi.register_gpu(ffi.library(gpu=True, cache=tmp_path_factory.getbasetemp() / "ffi-gpu"))
     return request.param
@@ -133,6 +133,67 @@ def test_gpu_ffi_matches_cpu_kernel_on_a_radial_column_of_two_degrees(device, ke
     assert np.abs(f1 - f0).max() <= 1e-10 * np.abs(f0).max()
 
 
+@pytest.mark.parametrize("device", ["gpu"], indirect=True)
+@pytest.mark.parametrize("lv", [1, 2])
+@pytest.mark.parametrize("name", ["si_fitted", "si_m710"])
+def test_gpu_ffi_kept_values_match_cpu_kernel(device, kernel, monkeypatch, name, lv):
+    """The GPU kernel's forms for models deeper than the fixtures (more than one kept level), forced on
+    these: the kept nodes' values stored, in shared memory (1) or in scratch (2), not recomputed from A.
+    Energies and forces equal the C++ kernel's."""
+    m, meta, _ = load(str(FIXTURES / f"{name}.npz"))
+    m1, rcut = lean(m, spline_tol=None, radial_table=True), float(meta["rcut"])
+    at = cluster(meta)
+    pos, z, graph = matrix_inputs(at, rcut + 1.0, [0] * len(at))
+    out = []
+    for dev in ("cpu", "gpu"):
+        monkeypatch.setattr(ffi, "PULL_LV", lv if dev == "gpu" else None)
+        with jax.default_device(jax.devices(dev)[0]):
+            efn, ffn = ffi.lammps_fns(m1, 1, [0], rcut, dev == "gpu")
+            run = jax.jit(lambda p, efn=efn, ffn=ffn: (efn(p, z, graph), ffn(p, z, graph)))
+            out.append([np.asarray(a) for a in run(pos)])
+    (e0, f0), (e1, f1) = out
+    assert np.abs(e1 - e0).max() <= 1e-12 * np.abs(e0).max()
+    assert np.abs(f1 - f0).max() <= 1e-10 * np.abs(f0).max()
+
+
+@pytest.mark.parametrize("name", NAMES)
+def test_mixed_precision_kernel_is_close_to_float64(device, name):
+    """ffi precision "mixed": the product basis in float32 and the rest in float64, in the same library, by
+    the readout's type. Energies and forces are float32-close to the float64 kernel's, and not equal (so
+    the float32 form did run). The bounds are loose: a small model's readout cancels more than a large
+    one's."""
+    m, meta, _ = load(str(FIXTURES / f"{name}.npz"))
+    m1, rcut = lean(m, spline_tol=None, radial_table=True), float(meta["rcut"])
+    at = cluster(meta)
+    els = [int(z) for z in meta["elements"]]
+    pos, z, graph = matrix_inputs(at, rcut + 1.0, [els.index(int(n)) for n in at.numbers])
+    assert ffi.kernel_inputs(m1, device == "gpu", "mixed")[1][5].dtype == jnp.float32
+    out = []
+    with jax.default_device(jax.devices(device)[0]):
+        for precision in (None, "mixed"):
+            efn, ffn = ffi.lammps_fns(m1, len(els), list(range(len(els))), rcut, device == "gpu", precision)
+            out.append([np.asarray(a) for a in (efn(pos, z, graph), ffn(pos, z, graph))])
+    (e0, f0), (e1, f1) = out
+    assert e1.dtype == np.float64 and f1.dtype == np.float64
+    assert 0 < np.abs(e1 - e0).max() <= 2e-5 * max(np.abs(e0).max(), 1.0)
+    assert 0 < np.abs(f1 - f0).max() <= 2e-4 * max(np.abs(f0).max(), 1.0)
+
+
+def test_mixed_precision_option():
+    """The option's values, and that it is the kernel's, for float64."""
+    path = str(FIXTURES / "si_fitted.npz")
+    m, _, _ = load(path)
+    m1 = lean(m, spline_tol=None, radial_table=True)
+    with pytest.raises(ValueError, match="ffi_precision is one of"):
+        ffi.kernel_inputs(m1, precision="float32")
+    with pytest.raises(ValueError, match="float64 model"):
+        ffi.kernel_inputs(with_dtype(m1, "float32"), True, "mixed")
+    with pytest.raises(ValueError, match="pass ffi=True"):
+        ACECalculator(path, ffi_precision="mixed")
+    with pytest.raises(ValueError, match="is for float64"):
+        ACECalculator(path, ffi="auto", ffi_precision="mixed", dtype="float32")
+
+
 def test_ffi_needs_a_table():
     m, _, _ = load(str(FIXTURES / "si_fitted.npz"))
     with pytest.raises(ValueError, match="radial table"):
@@ -220,6 +281,14 @@ def test_export_ffi_bundle(kernel, tmp_path, monkeypatch):
     assert pathlib.Path(lib).parent == tmp_path / "cache" and aj["layout"] == "matrix" and aj["radial_table"]
     assert aj["aa_dag"] == "greedy" and aj["k_dense"] is None and aj["block_rows"] is None
     assert ffi.TARGET in str(b)                       # the contract names the custom call
+    assert aj["ffi_precision"] == "float64"
+    mixed = export_lammps(m, meta, tmp_path / "m.json", **kw, ffi_precision="mixed")["ace_jax"]
+    assert mixed["ffi_precision"] == "mixed" and mixed["ffi"] == aj["ffi"]       # the same library
+    from test_export_lammps import LAMMPS_JAX_KEYS    # lammps-jax reads its keys wherever they are in the file
+    keys = lambda d: set(d) | set().union(*(keys(v) for v in d.values() if isinstance(v, dict)))
+    assert not keys(mixed) & LAMMPS_JAX_KEYS
+    with pytest.raises(ValueError, match="ffi_precision='mixed'"):
+        export_lammps(m, meta, tmp_path / "x.json", **{**kw, "ffi": False}, ffi_precision="mixed")
     for bad in (dict(layout="dense"), dict(dtype="float32")):
         with pytest.raises(ValueError, match="ffi=True"):
             export_lammps(m, meta, tmp_path / "x.json", **{**kw, **bad})
@@ -241,6 +310,19 @@ def test_export_ffi_gpu_bundle(tmp_path, dtype):
     assert aj["ffi"]["handlers"] == f"ace_jax_direct_gpu={lib}:AceDirectGpu"
     assert ffi.TARGET_GPU in str(b) and aj["layout"] == "matrix" and aj["radial_table"]
     assert b["contract"]["precision"] == dtype
+
+
+def test_gpu_kernel_compiles_without_a_gpu(tmp_path):
+    """The CUDA kernel builds for an A100 with nvcc alone (CI's `cuda-compile` job: NVIDIA's nvcc wheel, no
+    GPU and no toolkit), so a change that breaks its build fails CI. On a GPU host the kernel fixtures
+    already build it."""
+    nvcc = ffi.cuda_compiler()
+    if nvcc is None:
+        (pytest.fail if os.environ.get("ACEJAX_REQUIRE_NVCC") else pytest.skip)("no nvcc for the CUDA kernel")
+    if jax.default_backend() == "gpu":
+        pytest.skip("built by the GPU fixtures")
+    lib = ffi.build_gpu(tmp_path / "ace_gpu.so", nvcc, ("-O3", "-arch=sm_80"))
+    assert lib.stat().st_size > 0
 
 
 def test_gpu_library_needs_nvcc_and_a_gpu(tmp_path, monkeypatch):
@@ -419,6 +501,27 @@ def test_calculator_kernel_matches_the_jax_model(backend_kernel, name, skin):
     assert k.last_layout == "dense" and k.last_timing["ffi"] and k.last_timing["rebuilds"] >= 2
 
 
+@pytest.mark.parametrize("name", ["si_fitted", "ace_cantor5_small"])
+@pytest.mark.parametrize("n", [1, 2, 3, 5, 6, 7])
+def test_calculator_kernel_batches_and_neighbourless_sites(backend_kernel, name, n):
+    """The CPU kernel takes sites in batches of four of one centre species, and neighbours in blocks of four:
+    cells of n atoms (partial batches of each species, partial neighbour blocks) with one atom moved out of
+    every other's cutoff (no neighbour: E0 alone, no force, never batched), against the JAX model."""
+    path = str(FIXTURES / f"{name}.npz")
+    _, meta, z = load(path)
+    at = _md_cell(meta)[:n + 1]                             # the first n: neighbours in the crystal
+    at.set_cell(np.diag([40.0, 40.0, 40.0])); at.set_pbc(False)
+    at.positions[:n] += np.random.default_rng(n).normal(scale=0.05, size=(n, 3)) + 2.0
+    at.positions[n] = [30.0, 30.0, 30.0]
+    k, j = ACECalculator(path, ffi=True), ACECalculator(path, radial_table=True)
+    a1, a2 = at.copy(), at.copy()
+    a1.calc, a2.calc = k, j
+    F1, F2 = a1.get_forces(), a2.get_forces()
+    assert a1.get_potential_energy() == pytest.approx(a2.get_potential_energy(), rel=1e-12, abs=1e-10)
+    np.testing.assert_allclose(F1, F2, atol=1e-11 * max(1.0, np.abs(F2).max()))
+    assert np.all(F1[n] == 0.0) and k.ffi
+
+
 def test_calculator_kernel_threads_model_swap_and_e0(backend_kernel):
     """One thread and XLA's pool give identical results (rows write only their own outputs; the CUDA kernel
     ignores threads and is deterministic, writing each dE/drij once); a calc.model
@@ -458,7 +561,8 @@ def test_calculator_ffi_auto_and_refusals(backend_kernel):
         assert c.ffi is None and why in c.ffi_reason
         with pytest.raises(ValueError, match="cannot run here"):
             ACECalculator(path, ffi=True, **kw)
-    assert ACECalculator(path, ffi="auto").ffi is not None
+    assert ACECalculator(path, ffi="auto").ffi["precision"] == "float64"
+    assert ACECalculator(path, ffi="auto", ffi_precision="mixed").ffi["precision"] == "mixed"
     c = ACECalculator(str(pace_fixture(FIXTURES / "pace" / "si_chebpow_fs.yace")), ffi="auto")
     assert c.ffi is None and "not a linear ACEModel" in c.ffi_reason
     with pytest.raises(ValueError, match="ffi must be"):

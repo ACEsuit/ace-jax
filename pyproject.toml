@@ -56,12 +56,14 @@ cuda = ["jax[cuda12]>=0.10.1"]
 # NVIDIA driver >= 580: JAX's CUDA 13 wheels and NVIDIA's CUDA 13 nvcc wheel, so the kernel needs no toolkit.
 cuda13 = ["jax[cuda13]>=0.10.1", "nvidia-cuda-nvcc>=13.0; sys_platform == 'linux'"]
 # Native (C++) CPU acceleration.  matscipy-neighbours (OpenMP CPU neighbour lists, native dense
-# neighbour_matrix; ace-jax falls back to ASE's list without it, so NOT a core dep) is a source
-# distribution: installing it compiles C++ (CMake + a C++17 compiler).  The same compiler builds the
+# neighbour_matrix; ace-jax falls back to ASE's list without it, so NOT a core dep) has binary wheels
+# from 1.1 (Linux x86_64/aarch64, macOS arm64, Windows x64), so installing it needs no compiler; 1.0 and
+# other platforms build the sdist (CMake + a C++17 compiler).  A C++17 compiler is still what builds the
 # C++ kernel of ace_jax.eval.ffi (ACECalculator(ffi=...), CPU LAMMPS bundles), which needs no package:
-# its source is in this wheel, compiled on first use or by `aj native --build`.  For matscipy-neighbours'
-# GPU backend (graph built on the device, handed to JAX via DLPack):
-#   pip install -C cmake.define.ENABLE_CUDA=ON \
+# its source is in this wheel, compiled on first use or by `aj native --build`.  The wheels are CPU-only.
+# For matscipy-neighbours' GPU backend (graph built on the device, handed to JAX via DLPack), build it
+# from source against the local CUDA toolkit (nvcc on PATH, e.g. after `module load CUDA` on a cluster):
+#   pip install --no-binary matscipy-neighbours -C cmake.define.ENABLE_CUDA=ON \
 #       -C cmake.define.CMAKE_CUDA_ARCHITECTURES=<sm> matscipy-neighbours
 native = ["matscipy-neighbours>=1.0"]
 # the former name of `native` (until the next release but one), same dependencies

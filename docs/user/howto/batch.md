@@ -67,6 +67,8 @@ the same meaning:
 - `ffi=True` or `ffi="auto"`: the C++ kernel on a CPU, or the CUDA kernel on
   a CUDA GPU. On a CPU, use the kernel. The JAX model gets almost no speed-up
   from batches on a CPU.
+- `ffi_precision="mixed"`: the kernel's
+  [mixed-precision mode](precision.md#mixed-precision-for-the-kernels).
 
 Two options control the batches:
 

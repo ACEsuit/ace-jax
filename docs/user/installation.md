@@ -55,11 +55,30 @@ the same specification read the cache.
 ### `native`
 
 The `native` extra installs matscipy-neighbours, a C++ neighbour list.
-matscipy-neighbours is a source distribution. Thus its installation compiles
-C++, and needs CMake and a C++17 compiler. ace-jax uses matscipy-neighbours
-when it can import it. If not, ace-jax uses the ASE neighbour list.
+From version 1.1, matscipy-neighbours has binary wheels for Linux, macOS
+(arm64) and Windows. Thus its installation needs no compiler. On other
+platforms, pip compiles it, and needs CMake and a C++17 compiler. ace-jax
+uses matscipy-neighbours when it can import it. If not, ace-jax uses the ASE
+neighbour list.
 
-The same compiler builds the C++ kernel for linear ACE on CPUs (the ASE
+The wheels are for CPUs only. To build the neighbour list on a GPU, compile
+matscipy-neighbours with the CUDA toolkit of your machine:
+
+1. Put `nvcc` on your `PATH`. On a cluster, load the CUDA module (for
+   example, `module load CUDA`).
+2. Compile matscipy-neighbours. Replace `80` with the compute capability of
+   your GPU (80 for an A100, 75 for a T4):
+
+    ```bash
+    pip install --no-binary matscipy-neighbours \
+        -C cmake.define.ENABLE_CUDA=ON \
+        -C cmake.define.CMAKE_CUDA_ARCHITECTURES=80 matscipy-neighbours
+    ```
+
+Without this step, ace-jax on a GPU builds the neighbour list on the CPU.
+The results agree to round-off.
+
+A C++17 compiler builds the C++ kernel for linear ACE on CPUs (the ASE
 calculator with `ffi=True`, and LAMMPS bundles). The kernel is included with
 ace-jax as source code. ace-jax compiles it the first time, and keeps it in a
 cache.

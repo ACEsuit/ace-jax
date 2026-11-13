@@ -74,7 +74,8 @@ class ACECalculator(Calculator):
                  layout="auto", skin=1.0, lean=True, spline_tol=AUTO,
                  spline_intervals=None, radial_table=None, aa_dag="auto", posterior=None,
                  forces_std_every_call=False, energy_reference="absolute", shape_path="rows",
-                 shape_tau=1.0, shape_rank=None, ffi=False, ffi_threads=0, **kw):
+                 shape_tau=1.0, shape_rank=None, ffi=False, ffi_threads=0, ffi_precision="float64",
+                 **kw):
         """`ACECalculator("si_fitted.npz")` is the intended form: cutoff,
         species and dtype all come from the file.  A pre-loaded (model, meta)
         pair is still accepted, which is what the validation tests use.
@@ -153,7 +154,11 @@ class ACECalculator(Calculator):
         a toolkit's, or the `cuda13` extra's -- on a GPU; cached).  True raises ValueError (or `eval.ffi.FFIUnavailable`)
         when it cannot run; "auto" then keeps the JAX model and `calc.ffi_reason` says why.  `calc.ffi`
         is {"library", "threads", "platform"}, None when off.  On the CPU, rows run in parallel on XLA's
-        intra-op thread pool; `ffi_threads` > 0 caps the threads.  The
+        intra-op thread pool; `ffi_threads` > 0 caps the threads.  `ffi_precision="mixed"` (off by
+        default; a float64 model) runs the kernel's product basis in float32 and the rest in float64
+        (`eval.ffi.kernel_inputs`): faster for large models (o4d20: 1.6x on a CPU), forces within
+        ~1e-5 eV/A, but the energy carries ~0.1 meV of noise in 200 atoms, so relax with an optimiser
+        that uses forces only (FIRE, ODE12r), not an energy line search.  The
         kernel differentiates in positions only: derivatives in the model's parameters, or second
         derivatives, need the JAX model (ffi=False; `calc.model` and `eval_model` there).
 
@@ -233,6 +238,12 @@ class ACECalculator(Calculator):
         if not (ffi is False or ffi is True or ffi == "auto"
                 or (isinstance(ffi, (str, os.PathLike)) and os.path.isfile(ffi))):
             raise ValueError(f"ffi must be False, True, 'auto' or the path of a built kernel library, got {ffi!r}")
+        from ..eval.ffi import check_precision
+        if check_precision(ffi_precision) and ffi is False:
+            raise ValueError("ffi_precision='mixed' is the kernel's: pass ffi=True or 'auto'")
+        if check_precision(ffi_precision) and dtype is not None and np.dtype(dtype) != np.float64:
+            raise ValueError(f"ffi_precision='mixed' is for float64, got dtype={dtype!r}")
+        self._ffi_precision = ffi_precision or "float64"
         self._ffi_opt, self._ffi_threads, self._ffi_layout = ffi, int(ffi_threads), layout
         self.model = model                    # (the setter resets what derives from it)
         self.meta = meta
@@ -367,7 +378,8 @@ class ACECalculator(Calculator):
         if hasattr(self, "_model"):
             self.reset()
         gpu = "target" in dict(getattr(eval_model, "attrs", ()))   # KernelModel.of(..., gpu=True)
-        self._ffi = ({"library": str(ffi_lib), "threads": self._ffi_threads, "platform": "cuda" if gpu else "cpu"}
+        self._ffi = ({"library": str(ffi_lib), "threads": self._ffi_threads, "platform": "cuda" if gpu else "cpu",
+                      "precision": self._ffi_precision}
                      if ffi_lib else None)
         self._ffi_reason = ffi_reason
         self._model, self._eval_model, self._splined = model, eval_model, splined
@@ -401,7 +413,8 @@ class ACECalculator(Calculator):
             from ..eval import ffi as kernel
             gpu = jax.default_backend() == "gpu"
             (kernel.register_gpu if gpu else kernel.register)(ffi_lib)
-            eval_model = kernel.KernelModel.of(eval_model, self._ffi_threads, gpu=gpu)
+            eval_model = kernel.KernelModel.of(eval_model, self._ffi_threads, gpu=gpu,
+                                               precision=self._ffi_precision)
         return eval_model, splined, radial_table, aa_dag_used
 
     def _ffi_choice(self, model):

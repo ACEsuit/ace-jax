@@ -110,7 +110,67 @@ increase with time. At 2 fs, float32 possibly drifts by up to approximately
     A float32 LAMMPS bundle receives float32 atom positions. The round-off of
     the bond vectors thus increases with the box size. Measure the error in a
     box of the size that you use. The ASE calculator calculates bond vectors
-    in float64, so this does not apply to it.
+    in float64, so this does not apply to it. With the kernel,
+    [mixed precision](#mixed-precision-for-the-kernels) keeps float64
+    positions.
+
+## Mixed precision for the kernels
+
+The [C++ kernel](ase.md#cpu-kernel) and the [CUDA kernel](ase.md#gpu-kernel)
+for linear ACE have a mixed-precision mode. It is off by default. In this
+mode, the kernel calculates the product basis in float32. It calculates the
+bond vectors, the radial basis, the spherical harmonics and the sums over
+neighbours in float64. Positions, energies and forces stay float64.
+
+Mixed precision is faster only for large models, where the product basis
+uses most of the time:
+
+| model (silicon, linear ACE) | CPU, LAMMPS, 128 cores | A100, ASE calculator |
+|---|---|---|
+| o4d20 (5,476 basis functions) | 1.4 times | 1.4 times |
+| o4d16 | 1.1 times | 1.1 to 1.2 times |
+| o4d14 | 1.1 times | no gain |
+| order 3 | no gain | no gain |
+
+The errors are those of float32 for the product basis. For the silicon model
+o4d20, the maximum force error is approximately 0.05 meV/Å, and the energy has
+noise of approximately 0.1 meV in a cell of 200 atoms. For o4d16, the
+maximum force error is approximately 0.2 meV/Å and the noise is 1 meV. The
+errors are larger for smaller models, as they are in float32. With a
+force-only optimiser, mixed precision changed no property of o4d20 by more
+than 0.013 of its tolerance in the [silicon benchmark](../benchmarks.md).
+
+!!! warning "Energy line searches fail in mixed precision"
+    The energy noise is the same type as in float32. Optimisers with an
+    energy line search (L-BFGS or CG with Armijo or Wolfe tests) can fail
+    near a minimum. Use an optimiser that uses only forces, for example ASE
+    `ODE12r` or `FIRE`, or `min_style fire` in LAMMPS. The table in
+    [Tasks that can use float32](#tasks-that-can-use-float32) applies to
+    mixed precision also.
+
+Use mixed precision in place of float32 in these conditions:
+
+- On a CPU. The C++ kernel has no float32 mode.
+- In LAMMPS on a GPU with a large box. A float32 bundle receives float32
+  positions, and its force error increases with the distance from the
+  origin (0.05 meV/Å at the origin, 0.8 meV/Å at 1000 Å for o4d20). A
+  mixed-precision bundle receives float64 positions, and its error does
+  not change.
+
+On a GPU, a float32 calculation is faster than mixed precision and has
+approximately the same force error in a small box.
+
+To set mixed precision:
+
+- ASE: `ACECalculator("model.npz", ffi=True, ffi_precision="mixed")`.
+  `calc.ffi["precision"]` then gives `"mixed"`.
+- Batches: `BatchCalculator(..., ffi=True, ffi_precision="mixed")`.
+- LAMMPS: `aj export --ffi --ffi-precision mixed`, or
+  `export_lammps(..., ffi=True, ffi_precision="mixed")`. The bundle records
+  it as `ace_jax.ffi_precision`.
+
+Mixed precision needs the kernel and float64. It uses the same compiled
+kernel library as float64.
 
 ## Check a new task
 
@@ -129,3 +189,5 @@ increase with time. At 2 fs, float32 possibly drifts by up to approximately
   [ASE calculators](ase.md#precision).
 - LAMMPS: `export_lammps(..., dtype="float32")` or
   `aj export --dtype float32`. See [LAMMPS export](lammps.md#learned-radials-and-precision).
+- Mixed precision of the kernels: `ffi_precision="mixed"`. See
+  [Mixed precision for the kernels](#mixed-precision-for-the-kernels).
