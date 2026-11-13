@@ -174,3 +174,26 @@ grace_2l:      # GRACE-2L (two message-passing layers) from scratch: gracemaker'
   # training-length check: 2l_small at 3x the updates (150k), seed 0 only; accuracy only
   - {size: 2l_small_long, preset: GRACE_2LAYER_latest, lmax: [4, 3], max_order: 4, indicator_lmax: 1, n_rad_max: [32, 32],
      prod_func_n_max: [32, 32], n_mlp_dens: 12, n_rad_base: 8, target_total_updates: 150000, timing: false}
+polymlp:       # Seko's polynomial MLPs (fit_polymlp.py; pypolymlp 0.22.1): points of his grid search at cutoff 5 A
+               # (n_gaussians rint((rc + 1) x {1, 1.25, 1.5}) = 6, 8, 9; gtinv l-sets and model types of
+               # utils/grid_search).  model_type 2: polynomial (max_p) of all invariants; 3: polynomial of the pair
+               # invariants + linear in all; 4: polynomial of the order <= 2 invariants + linear in all.  gtinv_maxl:
+               # max l per invariant order from 2 up.  n_params: Pypolymlp.n_features (fit_polymlp --count)
+               # No pair-only model (a pair-g9p3 row was fitted and removed, 2026-11-12): every Si model with files
+               # in Seko's repository is gtinv (polymlp/README.md)
+  - {size: m3g6-l44,   model_type: 3, max_p: 2, gtinv_order: 3, gtinv_maxl: [4, 4],    n_gaussians: 6, n_params: 141}
+  - {size: m3g8-l442,  model_type: 3, max_p: 2, gtinv_order: 4, gtinv_maxl: [4, 4, 2], n_gaussians: 8, n_params: 300}
+  - {size: m3g9-l882,  model_type: 3, max_p: 2, gtinv_order: 4, gtinv_maxl: [8, 8, 2], n_gaussians: 9, n_params: 747}
+  - {size: m4g6-l442,  model_type: 4, max_p: 2, gtinv_order: 4, gtinv_maxl: [4, 4, 2], n_gaussians: 6, n_params: 864}
+  - {size: m4g9-l442,  model_type: 4, max_p: 2, gtinv_order: 4, gtinv_maxl: [4, 4, 2], n_gaussians: 9, n_params: 1782}
+  - {size: m4g8-l842,  model_type: 4, max_p: 2, gtinv_order: 4, gtinv_maxl: [8, 4, 2], n_gaussians: 8, n_params: 3536}
+  - {size: m4g9-l882,  model_type: 4, max_p: 2, gtinv_order: 4, gtinv_maxl: [8, 8, 2], n_gaussians: 9, n_params: 4797}
+  - {size: m4g8-l1282, model_type: 4, max_p: 2, gtinv_order: 4, gtinv_maxl: [12, 8, 2], n_gaussians: 8, n_params: 6984}
+  # model type 2 at order 3: the form of the accurate Si models in Seko's repository (gtinv_maxl [8, 4] and [12, 4]
+  # there, at 6 and 8 A; here at the benchmark's cutoff).  rank: false -- no design rank (an SVD at this size)
+  - {size: m2g6-l44,   model_type: 2, max_p: 2, gtinv_order: 3, gtinv_maxl: [4, 4],  n_gaussians: 6, n_params: 7380,  rank: false}
+  - {size: m2g6-l84,   model_type: 2, max_p: 2, gtinv_order: 3, gtinv_maxl: [8, 4],  n_gaussians: 6, n_params: 10584, rank: false}
+  - {size: m2g8-l84,   model_type: 2, max_p: 2, gtinv_order: 3, gtinv_maxl: [8, 4],  n_gaussians: 8, n_params: 18720, rank: false}
+  - {size: m2g9-l84,   model_type: 2, max_p: 2, gtinv_order: 3, gtinv_maxl: [8, 4],  n_gaussians: 9, n_params: 23652, rank: false}
+  - {size: m2g8-l124,  model_type: 2, max_p: 2, gtinv_order: 3, gtinv_maxl: [12, 4], n_gaussians: 8, n_params: 25424, rank: false}
+  - {size: m2g9-l124,  model_type: 2, max_p: 2, gtinv_order: 3, gtinv_maxl: [12, 4], n_gaussians: 9, n_params: 32130, rank: false}

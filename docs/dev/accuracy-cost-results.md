@@ -332,7 +332,7 @@ grep -h '"code": "mlpace-mixed"' $R/sulis-gpu-fp32-o4d*.jsonl > $R/sulis-gpu-fp3
 (cd bench && python -m accuracy_cost.dag_auto)
 python bench/si_qoi/make_cost.py --dtype float64 --source acejax-ace=sulis-cpu-128x1-acejax-auto --out $RR/cost_sulis_cpu.json \
     $(ls $R/sulis-cpu*.jsonl | grep -v -e smoke -e ace_yace -e pacetab-check -e "ace_tab\.jsonl" -e ace_tab2 \
-      -e ace_tab3 -e dagpair -e ffi-xla -e ffi-main -e ffi-mixed-float64) --allow grace-rt:mixed   # ffi-xla, ffi-main, ffi-mixed-float64: the C++ kernel's controls
+      -e ace_tab3 -e dagpair -e ffi-xla -e ffi-main -e ffi-mixed-float64 -e cpu-1x1) --allow grace-rt:mixed   # ffi-xla, ffi-main, ffi-mixed-float64: the C++ kernel's controls; cpu-1x1: the single-core layout
 python bench/si_qoi/make_cost.py --dtype float64 --source acejax-ace=sulis-gpu-acejax-auto --out $RR/cost_sulis_gpu.json \
     bench/accuracy_cost/results/sulis-gpu.jsonl bench/accuracy_cost/results/sulis-gpu-ace-splined.jsonl \
     $R/sulis-gpu-ace-splined-v2.jsonl $R/sulis-gpu-v2.jsonl $R/sulis-gpu-mace_xl.jsonl \
@@ -695,3 +695,89 @@ retime above) on the GPU row. A row with `ffi_precision: "mixed"` is written to 
 
 At the target, mixed leaves the CPU ranking as it was: o4d20 1.13 against GRACE-2L 0.81 and MACE c16L0
 on Symmetrix 0.59 µs/atom-step.
+
+## Polynomial MLPs (2026-11-12, first pass)
+
+Spec `docs/dev/specs/2026-11-12-ye3t-polymlp-benchmark-design.md` (it covers YE3T and Seko's polynomial MLPs; the two
+are separate pull requests). Protocol, commands and limits for the method's authors: `bench/accuracy_cost/polymlp/README.md`;
+provenance in `bench/accuracy_cost/data.md`. Tables: `python -m accuracy_cost.ye3t_polymlp_report` (from `bench/`).
+The text of the user-facing Performance page is unchanged; its interactive figure has the new series, hidden until
+selected in the legend. Nothing here is tuned per system: read the rows as a first pass, not as the method's best.
+
+Codes: pypolymlp 0.22.1 (b5e61e9) and lammps-polymlp-package 046eaa4 on LAMMPS develop ec02ed0
+(`bench/scaling/envs/sulis-polymlp.sh`). Float64. No stop-and-report point of the spec was met: the code is public,
+every gate passed, the package built, and the penalty is chosen without the test set.
+
+pypolymlp on the training split, cutoff 5.0 Å, Gaussian radials, GAP-18 weights (square roots of the benchmark's
+weights as pypolymlp's row weights), ridge penalty from pypolymlp's grid 1e-8 to 10 on a seeded 10 % validation
+split of train (per configuration type, seed 0; `val_split.json`). The model is the solution on the other 90 %:
+pypolymlp does not refit on train + validation. Design rank:
+updating QR of the weighted training design matrix, unit-norm columns, relative cutoff 1e-10.
+
+| size | coefficients | design rank | penalty | E RMSE (meV/atom) | F RMSE (eV/Å) | QoI error | 1 rank x 128 threads µs/atom-step | 1 x 1 |
+|---|---|---|---|---|---|---|---|---|
+| m3g6-l44 | 141 | 135 | 1e-7 | 92.2 | 0.1347 | 2.13 | 4.45 | 71.2 |
+| m3g8-l442 | 300 | 260 | 1e-5 | 40.8 | 0.1191 | 1.75 | 5.04 | 99.8 |
+| m3g9-l882 | 747 | 701 | 1e-8 | 31.4 | 0.1074 | 1.21 | 14.27 | 461.7 |
+| m4g6-l442 | 864 | 768 | 1e-8 | 34.4 | 0.1101 | 1.23 | 4.55 | 80.8 |
+| m4g9-l442 | 1782 | 1629 | 1e-7 | 14.6 | 0.1063 | 0.96 | 5.53 | 122.6 |
+| m4g8-l842 | 3536 | 3401 | 1e-6 | 13.4 | 0.1252 | 0.98 | 11.36 | 276.0 |
+| m4g9-l882 | 4797 | 4569 | 1e-3 | 13.9 | 0.0956 | 1.01 | 14.96 | 532.2 |
+| m4g8-l1282 | 6984 | 6776 | 1e-3 | 11.8 | 0.0922 | 0.82 | 21.51 | 750.6 |
+| m2g6-l44 | 7380 | – | 1e-2 | 11.0 | 0.0966 | 1.10 | 7.94 | 360.9 |
+| m2g6-l84 | 10584 | – | 1e-2 | 9.4 | 0.0953 | 0.74 | 13.02 | 554.9 |
+| m2g8-l84 | 18720 | – | 1e-2 | 9.8 | 0.0994 | 0.66 | 19.46 | 921.9 |
+| m2g9-l84 | 23652 | – | 1e-1 | 8.5 | 0.0965 | 0.62 | 45.51 | 1261.9 |
+| m2g8-l124 | 25424 | – | 1e-1 | 8.6 | 0.1009 | 0.54 | 61.21 | 1503.4 |
+| m2g9-l124 | 32130 | – | 1e-1 | 8.6 | 0.0973 | 0.54 | 122.40 | 2320.6 |
+
+Gates (LAMMPS against pypolymlp): ≤ 2.7e-14 eV/atom, 8.1e-13 eV/Å.
+
+- **No MPI.** The package README says "MPI is not currently available", and `pair_polymlp.cpp` indexes its per-atom
+  arrays by atom tag with the local atom count as their size (not run decomposed; read from the source), so the 128 x 1 layout cannot be run: the rows are one rank with 128 OpenMP
+  threads, recorded as such, and plotted on the CPU row under that label. Thread scaling is 7-36x on 128 cores, so
+  the CPU-node cost (1.5-22 µs) is far from the one-core cost / 128; the 1 x 1 column is the fairer measure of the
+  kernel. CPU only (no GPU code).
+- Accuracy: forces reach 0.092 eV/Å at 6,984 coefficients (model type 4; linear ACE: 0.082 at 5,476) and stay at
+  0.095-0.101 for the model type 2 sizes, so the ladder does not reach the target (force RMSE ≤ 0.0825 and QoI ≤
+  0.5). Energy RMSE is 8.5-11 meV/atom for type 2 and above 11 for the others, where ACE is at 3.5-7.
+- **Model type 2 (added 2026-11-13, the form of the accurate Si models in Seko's repository).** Six sizes at order
+  3 with `gtinv_maxl` [4, 4], [8, 4] and [12, 4], 7,380 to 32,130 coefficients. Their QoI error is 0.74 to 0.54
+  from 10,584 coefficients up, against 0.82 for the best type 4 model: the vacancy is −2.0 tolerances (type 4:
+  −3.5) and every phase energy is within one tolerance. Forces do not improve, and the cost is high: 13 to 122 µs
+  per atom-step on the node and 0.55 to 2.3 ms on one core. Their penalties (1e-2, 1e-1) are inside Seko's grid.
+  No design rank was computed at these sizes (an SVD of days).
+- The design rank is 87-97 % of the coefficient count (260 / 300 lowest; 6,776 / 6,984), so the count overstates
+  the effective size only slightly on this training set.
+- Two penalties sit on the grid's lower edge (1e-8: m3g9-l882, m4g6-l442); pypolymlp's grid was kept.
+- A pair-only model (pair-g9p3: 74.7 meV/atom, 0.2314 eV/Å, QoI 3.67, bcc 800 meV/atom off) was fitted and
+  removed: it is not a sensible model for Si, and Seko's repository has no pair-only Si model with files.
+- **Why the ladder is not monotonic.** (i) It is not one nested family: two model types, so
+  the orders by coefficients, cost and accuracy differ
+  (m3g9-l882 costs 14 µs for QoI 1.21, m4g9-l442 5.5 µs for 0.96). (ii) The plateau 0.96 / 0.98 / 1.01 at 1,782 to
+  4,797 coefficients is mostly hcp: both l = (8, 8, 2) models put it 37-42 meV/atom too low (neighbours +6, +9),
+  which alone moves the geometric mean by 9 %. (iii) m4g8-l842's penalty. Its validation curve has two near-tied
+  minima (1e-6: 0.18693, 1e-3: 0.18748) with a bump between, and 1e-6 won. A diagnostic refit on the same 90 %
+  scored on the test set (`ext/logs/probe9.py`; not a selection, the row is unchanged):
+
+  | penalty | validation (weighted) | E RMSE (meV/atom) | F RMSE (eV/Å) |
+  |---|---|---|---|
+  | 1e-8 | 0.478 | 16.1 | 0.296 |
+  | 1e-7 | 0.282 | 12.8 | 0.208 |
+  | 1e-6 (chosen) | 0.1869 | 13.4 | 0.125 |
+  | 1e-5 | 0.221 | 15.9 | 0.112 |
+  | 1e-4 | 0.204 | 17.8 | 0.114 |
+  | 1e-3 | 0.1875 | 18.6 | 0.101 |
+  | 1e-2 | 0.193 | 21.4 | 0.102 |
+
+  Forces degrade sharply at small penalties while pypolymlp's weighted validation RMSE hardly registers it; at 1e-3
+  the force error is on the size trend. The two larger models chose 1e-3. A selection rule that sees forces (or
+  a floor on the grid) is a protocol change for a PR, not made here.
+- Seko's repository potentials (`polymlp_repo`) were not added. Their settings were looked up
+  (`bench/accuracy_cost/polymlp/README.md`): cutoff 6 or 8 Å, mostly model type 2 at order 3 with `gtinv_maxl`
+  [8, 4] or [12, 4], 6,512 to 77,420 coefficients. The type 2 sizes above follow them at this benchmark's 5.0 Å cutoff.
+
+### Figures
+
+`bench/si_qoi/results/rmse_qoi_cost.png`, `rmse_qoi_cost_wl.png` and `qoi_heatmap.png` are regenerated with the new family (dark grey thin diamonds).
+Existing entries of `cost_sulis_cpu.json` are unchanged (diffed); the new ones are added.
