@@ -125,5 +125,9 @@
  "YE3T_r3-34": "ye3t float64 lammps [sulis-cpu-128x1-ye3t]",
  "YE3T_r4-205": "ye3t float64 lammps [sulis-cpu-128x1-ye3t]",
  "YE3T_r4-490": "ye3t float64 lammps [sulis-cpu-128x1-ye3t]",
- "YE3TmixT_t8-284": "ye3t float64 lammps [sulis-cpu-128x1-ye3t]"
+ "YE3TmixT_t8-284": "ye3t float64 lammps [sulis-cpu-128x1-ye3t]",
+ "YE3Tw_r3-110": "ye3t float64 lammps [sulis-cpu-128x1-ye3t]",
+ "YE3Tw_r3-34": "ye3t float64 lammps [sulis-cpu-128x1-ye3t]",
+ "YE3Tw_r4-205": "ye3t float64 lammps [sulis-cpu-128x1-ye3t]",
+ "YE3Tw_r4-490": "ye3t float64 lammps [sulis-cpu-128x1-ye3t]"
 }

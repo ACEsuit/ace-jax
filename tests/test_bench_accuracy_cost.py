@@ -188,7 +188,7 @@ def test_sweep_is_complete_and_measured():
     s = load_sweep()
     assert set(s) == {"ace", "ace_lr", "ace_gp", "pace", "mace", "gap", "ace_pshape", "ace_pshape_lr", "ace_wl", "gap_noglue", "gap_E30", "ace_yace", "ace_tab", "nep",
                       "grace", "grace_fs", "grace_abl", "grace_2l",
-                      "ace_cheb", "ye3t_sym_fit", "ye3t_mix_A", "ye3t_mix_T"}
+                      "ace_cheb", "ye3t_sym_fit", "ye3t_mix_A", "ye3t_mix_T", "ye3t_sym_wfit"}
     assert len(s["ace"]) == 7 and all(e["n_B"] > 0 for e in s["ace"])
     assert [(e["order"], e["max_degree"]) for e in s["ace_lr"]] == [(e["order"], e["max_degree"]) for e in s["ace"]]
     nB = [e["n_B"] for e in s["ace"]]
@@ -1089,7 +1089,7 @@ def test_ye3t_code_table():
     from scaling import parity
     assert [c for c, _, _ in timing.PLAN["ace_cheb"]] == ["ye3t-sym", "mlpace", "mlpace-product"]
     assert all(timing.PLAN[f] == [("ye3t", {"cpu": "lammps"}, ("float64",))]
-               for f in ("ye3t_sym_fit", "ye3t_mix_A", "ye3t_mix_T"))
+               for f in ("ye3t_sym_fit", "ye3t_mix_A", "ye3t_mix_T", "ye3t_sym_wfit"))
     assert set(timing.PLAN) <= set(common.load_sweep())
     for code in ("ye3t-sym", "ye3t", "mlpace-product"):
         assert timing.gate_tol(timing.STYLE[code], code, {}) == parity.TOL[code]
@@ -1174,6 +1174,32 @@ def test_ye3t_rows_store(tmp_path, monkeypatch):
     assert fy.rows_dir(conf, at) is None
     monkeypatch.setenv("ACEJAX_AC_YE3T_ROWS", str(tmp_path / "r"))
     assert fy.rows_dir(conf, at) == tmp_path / "r"
+
+
+def test_ye3t_weighted_family_scales_rows_and_targets():
+    """ye3t_sym_wfit: the catalogue of ye3t_sym_fit, a stress target with global weights 1, and per structure the
+    benchmark's weights on the targets and as row factors (virial in the stress slot; none: factor 0, target 0)."""
+    from ase.build import bulk
+    from accuracy_cost import common, fit_ye3t as fy
+    e = {"size": "x", "nmax": [6, 4, 3], "lmax": [0, 2, 2]}
+    s, w = fy.config("ye3t_sym_fit", e), fy.config("ye3t_sym_wfit", e)
+    assert w["basis"] == s["basis"] and w["representation"] == s["representation"]
+    assert w["model"]["fit"]["weights"] == {"energy": 1.0, "forces": 1.0, "stress": 1.0}
+    assert w["targets"]["stress"] == "stress" and s["targets"]["stress"] is None
+    a, b = bulk("Si", cubic=True), bulk("Si", cubic=True) * (2, 1, 1)
+    V = np.arange(9.0).reshape(3, 3); V = V + V.T
+    a.info.update(energy=-1270.0, config_type="liq", virial=V); a.arrays["forces"] = np.ones((8, 3))
+    b.info.update(energy=-2538.0, config_type="dia"); b.arrays["forces"] = np.full((16, 3), 2.0)
+    W = {"default": {"E": 30.0, "F": 1.0, "V": 1.0}, "liq": {"E": 10.0, "F": 0.5, "V": 0.25}}
+    (pa, pb), (sa, sb) = fy.weighted([a, b], W)
+    we, wv = 10 / np.sqrt(8), 0.25 / np.sqrt(8)
+    assert np.isclose(pa.info["energy"] - 8 * common.E0_SI, we * (-1270.0 - 8 * common.E0_SI))
+    assert np.allclose(pa.arrays["forces"], 0.5)
+    assert np.allclose(pa.info["stress"], wv * np.array([V[0, 0], V[1, 1], V[2, 2], V[1, 2], V[0, 2], V[0, 1]]))
+    assert np.allclose(sa, (we, 0.5, -wv * a.get_volume()))
+    assert np.allclose(sb, (30 / 4, 1.0, 0.0)) and np.array_equal(pb.info["stress"], np.zeros(6))
+    assert np.allclose(pb.arrays["forces"], 2.0) and set(pa.info) == {"energy", "stress"}
+    assert a.info["energy"] == -1270.0 and np.allclose(a.arrays["forces"], 1.0)        # the input is not changed
 
 
 def test_ye3t_config_follows_the_protocol():

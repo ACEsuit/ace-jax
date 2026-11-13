@@ -196,6 +196,13 @@ ye3t_sym_fit:  # YE3T linear models fitted by ye3t-methods (fit_ye3t.py): densit
   # not fitted: the next sizes, [6, 6, 5, 3] / [0, 4, 4, 3] (2,080 descriptors) and [6, 6, 6, 4] / [0, 4, 4, 3] (4,577).
   # They need `max_fixed_contents: 16384` (ye3t-methods refuses catalogues past 4,096 candidate contents), and
   # the PyTorch density row path needs ~285 GB and ~860 GB for one 217-atom training cell (fit_ye3t.row_gb)
+ye3t_sym_wfit: # the ye3t_sym_fit catalogues under the benchmark's loss: per-config-type weights (weights_acejax.json),
+               # energy and virial rows / sqrt(N), virials fitted; ye3t-methods' own fit on scaled rows and targets
+               # (fit_ye3t.py "Weighted family").  Not the authors' protocol: a second line beside ye3t_sym_fit
+  - {size: r3-34,   nmax: [6, 3, 2],    lmax: [0, 2, 1],    n_params: 34}
+  - {size: r3-110,  nmax: [6, 4, 3],    lmax: [0, 2, 2],    n_params: 110}
+  - {size: r4-205,  nmax: [6, 4, 3, 2], lmax: [0, 4, 2, 2], n_params: 205}
+  - {size: r4-490,  nmax: [6, 6, 4, 2], lmax: [0, 4, 3, 2], n_params: 490}
 ye3t_mix_A:    # the same catalogues with young_kappa all_valid (mixed-permutation intermediates, density inputs)
   - {size: r3-34,   nmax: [6, 3, 2],    lmax: [0, 2, 1],    n_params: 34}
   - {size: r3-110,  nmax: [6, 4, 3],    lmax: [0, 2, 2],    n_params: 110}

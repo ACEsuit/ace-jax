@@ -11,6 +11,7 @@ Families (sweep.yaml), all with a fully symmetric scalar parent (lambda = (N), L
   config.py: "commutative density resolves all_valid Young blocks to physically trivial block sectors"), and the
   descriptor rows are identical bit for bit (`same_rows`).
 - `ye3t_mix_T`: the tagged basis (u = T; ye3t-methods' tagged Cauchy image, shifted-Jacobi radials).
+- `ye3t_sym_wfit`: the `ye3t_sym_fit` catalogues under the benchmark's loss (see "Weighted family" below).
 
 Protocol (the paper's Sec. IV.3 where it states one; fixed values where it tuned with DAKOTA):
 
@@ -25,6 +26,14 @@ Protocol (the paper's Sec. IV.3 where it states one; fixed values where it tuned
   has none) and takes one global weight on stresses in eV/A^3; the authors' Si fits record no stress weight.
 
 The descriptor list of each size is saved as `labels.json` in the run directory.
+
+Weighted family (`ye3t_sym_wfit`): ye3t-methods' descriptors and its own `LinearModel.fit` (assembly and ridge solve,
+penalty 1e-8), with the loss the other linear families use: energy row x w_E / sqrt(N), force rows x w_F, virial
+rows (eV) x w_V / sqrt(N), w per config type from DATA/weights_acejax.json.  ye3t-methods has one global weight per
+quantity and needs a stress on every structure, so the weights are applied by scaling what its fit loop is handed,
+which is the same least-squares problem: each structure's rows (`_Rows`) and its targets (`weighted`) are multiplied
+by the structure's weights, and the global weights stay 1.  The stress slot carries the virial: rows -V x (stress
+row) x w, target w x virial (Voigt); a structure without a virial gets zero rows and a zero target.
 
 Speed and memory: ye3t-methods' density fit is one loop over the structures, calling `_linear_ace_geometry_row`
 for each structure's energy and force rows on one thread (PyTorch autograd).  `fit` runs that function in worker
@@ -51,7 +60,8 @@ from . import common
 from .common import E0_SI, RCUT
 
 FAMILIES = {"ye3t_sym_fit": ("density", "symmetric_only"), "ye3t_mix_A": ("density", "all_valid"),
-            "ye3t_mix_T": ("tagged", "all_valid")}
+            "ye3t_mix_T": ("tagged", "all_valid"), "ye3t_sym_wfit": ("density", "symmetric_only")}
+WEIGHTED = ("ye3t_sym_wfit",)                     # the benchmark's per-structure weights and virials (`weighted`)
 LAMBDA, DCUT, ALPHA = 0.7798690236210712, 0.01, 1e-8
 RUNTIME = {"evaluator": "torch", "neighbors": "ase", "cache": {"mode": "off"}, "dtype": "float64", "device": "cpu"}
 
@@ -93,9 +103,9 @@ def config(family, e):
                                                                  "cache": {"mode": "auto"}},
             "model": {"kind": "linear",
                       "fit": {"solver": "ridge", "alpha": float(e.get("alpha", ALPHA)),
-                              "weights": {"energy": 1.0, "forces": 1.0}},
+                              "weights": {"energy": 1.0, "forces": 1.0, **({"stress": 1.0} if family in WEIGHTED else {})}},
                       "reference_energy": {"per_species_E0_eV": {"Si": E0_SI}, "fit_E0": False}},
-            "targets": {"energy": "energy", "forces": "forces", "stress": None},
+            "targets": {"energy": "energy", "forces": "forces", "stress": "stress" if family in WEIGHTED else None},
             "validation": {"checks": []}}
 
 
@@ -130,6 +140,28 @@ def prepared(atoms):
     return out
 
 
+VOIGT = ((0, 0), (1, 1), (2, 2), (1, 2), (0, 2), (0, 1))
+
+
+def weighted(atoms, weights=None):
+    """(frames, scale) for the weighted family: `prepared` frames whose targets are multiplied by the structure's
+    weights, and per structure the row factors (energy, forces, stress-slot).  Energy: w_E / sqrt(N) on E - N E0
+    (ye3t-methods subtracts N E0 itself, so the stored energy is N E0 + w (E - N E0)); forces: w_F; virial: rows
+    -V x stress row and target the libAtoms virial (Voigt), both x w_V / sqrt(N); no virial: factor 0, target 0."""
+    W = weights or json.loads((common.DATA / "weights_acejax.json").read_text())
+    out, scale = prepared(atoms), []
+    for a, b in zip(atoms, out):
+        n, w = len(a), W.get(a.info.get("config_type"), W["default"])
+        we, wf, wv = w["E"] / np.sqrt(n), w["F"], w["V"] / np.sqrt(n)
+        v = a.info.get("virial")
+        v = None if v is None else np.asarray(v, float).reshape(3, 3)
+        b.info["energy"] = n * E0_SI + we * (float(a.info["energy"]) - n * E0_SI)
+        b.arrays["forces"] = wf * b.arrays["forces"]
+        b.info["stress"] = np.zeros(6) if v is None else wv * np.array([v[i, j] for i, j in VOIGT])
+        scale.append((we, wf, 0.0 if v is None else -wv * a.get_volume()))
+    return out, scale
+
+
 _W = {}                                           # worker state: the basis and the row function (inherited by fork)
 
 
@@ -138,15 +170,17 @@ def _row(i):
     torch.set_num_threads(1)
     d = _W["basis"]._descriptor
     r = _W["row"](_W["atoms"][i], evaluator=d.ace_descriptor.calculator.evaluator, descriptors=d.descriptor_specs,
-                  cutoff=_W["basis"].cutoff, type_map=d.type_map, device="cpu", forces=True, stress=False,
-                  chunk_size=None)
-    return i, r["energy"].detach().cpu().numpy(), r["forces"].detach().cpu().numpy()
+                  cutoff=_W["basis"].cutoff, type_map=d.type_map, device="cpu", forces=True,
+                  stress=bool(_W.get("stress")), chunk_size=None)
+    g = lambda k: r[k].detach().cpu().numpy()
+    return i, g("energy"), g("forces"), g("stress") if _W.get("stress") else None
 
 
 # Memory of one structure's rows in ye3t-methods' PyTorch density path (peak RSS, one thread, mnf148): 8.9 GB at
 # 205 descriptors and 30.1 GB at 490 for the largest training cell (217 atoms); 1.9 and 5.4 GB for a 27-atom cell.
 # `row_gb` is that fit (a power law in the descriptor count, linear in the atom count) with a quarter of headroom.
 ROW_GB_217, ROW_F0, ROW_EXP, ROW_HEADROOM = 8.9, 205, 1.4, 1.25
+ROW_STRESS = 1.5                                  # the same with stress rows (budgeted, not measured)
 SIZE_CLASSES = (32, 100, 10**9)                   # atoms: each class is computed on its own, never two at once
 
 
@@ -184,17 +218,19 @@ def rows_dir(conf, atoms):
 
 
 def _stored(store, i, a):
-    """Structure i's saved (energy row, force rows), or None: absent, unreadable, or not this structure's."""
+    """Structure i's saved (energy row, force rows, stress rows or None), or None: absent, unreadable, or not
+    this structure's."""
     try:
         with np.load(store / f"{i}.npz") as z:
-            return (z["e"], z["f"]) if np.array_equal(z["positions"], a.positions) else None
+            return (z["e"], z["f"], z["s"] if "s" in z else None) if np.array_equal(z["positions"], a.positions) \
+                else None
     except (OSError, ValueError, KeyError, EOFError):
         return None
 
 
-def _store(store, i, a, e, f):
+def _store(store, i, a, e, f, s=None):
     tmp = store / f".{i}.{os.getpid()}.npz"                  # written whole, then renamed: a killed fit leaves no
-    np.savez(tmp, e=e, f=f, positions=a.positions)           # half file under the final name
+    np.savez(tmp, e=e, f=f, positions=a.positions, **({} if s is None else {"s": s}))   # half file under the name
     os.replace(tmp, store / f"{i}.npz")
 
 
@@ -203,13 +239,15 @@ class _Rows:
     beforehand by forked workers and returned in the fit loop's order.  The structures are taken in size classes
     (SIZE_CLASSES), one class at a time, each with as many workers (at most `procs`) as fit `budget_gb` at
     `row_gb` of its largest cell; `plan` records the worker counts.  With `store` (a directory), rows found there
-    are read, not computed, and each computed row is written as it arrives (`plan`: `stored` per class)."""
+    are read, not computed, and each computed row is written as it arrives (`plan`: `stored` per class).  With
+    `scale` (per structure: energy, force and stress-slot factors, from `weighted`) the stress rows are computed
+    too and every row is handed over multiplied by its factor; the store keeps the unscaled rows."""
 
-    def __init__(self, basis, atoms, procs, budget_gb=None, store=None):
+    def __init__(self, basis, atoms, procs, budget_gb=None, store=None, scale=None):
         import multiprocessing as mp
         import ye3t_methods.linear as L
-        _W.update(basis=basis, atoms=atoms, row=L._linear_ace_geometry_row)
-        self.atoms, self.k, self.rows, self.plan = atoms, 0, {}, []
+        _W.update(basis=basis, atoms=atoms, row=L._linear_ace_geometry_row, stress=scale is not None)
+        self.atoms, self.k, self.rows, self.plan, self.scale = atoms, 0, {}, [], scale
         budget, F, lo = budget_gb or mem_budget_gb(), len(basis.labels), 0
         if store is not None:
             store.mkdir(parents=True, exist_ok=True)
@@ -221,48 +259,57 @@ class _Rows:
             if store is not None:
                 for i in idx:
                     r = _stored(store, i, atoms[i])
-                    if r is not None and r[0].shape[-1] == F:
+                    if r is not None and r[0].shape[-1] == F and (scale is None or r[2] is not None):
                         self.rows[i] = r
             n_all, idx = len(idx), [i for i in idx if i not in self.rows]
             if not idx:
                 self.plan.append({"max_atoms": hi, "structures": n_all, "stored": n_all, "workers": 0})
                 print("rows:", self.plan[-1], flush=True)
                 continue
-            need = row_gb(F, max(len(atoms[i]) for i in idx))
+            need = row_gb(F, max(len(atoms[i]) for i in idx)) * (ROW_STRESS if scale is not None else 1.0)
             n = max(1, min(procs, len(idx), int(budget / need)))
             self.plan.append({"max_atoms": hi, "structures": n_all, "stored": n_all - len(idx), "workers": n,
                               "row_gb": round(need, 1)})
             print("rows:", self.plan[-1], flush=True)
             with mp.get_context("fork").Pool(n, maxtasksperchild=8) as pool:   # a fresh process now and then: the
-                for i, e, f in pool.imap_unordered(_row, idx, chunksize=1):    # allocator keeps a big cell's peak
-                    self.rows[i] = (e, f)
+                for i, e, f, s in pool.imap_unordered(_row, idx, chunksize=1):  # allocator keeps a big cell's peak
+                    self.rows[i] = (e, f, s)
                     if store is not None:
-                        _store(store, i, atoms[i], e, f)
+                        _store(store, i, atoms[i], e, f, s)
 
     def __call__(self, atoms, **kw):
         import torch
         mine = self.atoms[self.k]                            # the fit loop works on its own copies, in order
         if len(atoms) != len(mine) or not np.array_equal(atoms.positions, mine.positions) \
-                or kw.get("stress") or not kw.get("forces"):
+                or bool(kw.get("stress")) != (self.scale is not None) or not kw.get("forces"):
             raise RuntimeError("fit loop left the order or the targets the rows were computed for")
-        e, f = self.rows.pop(self.k)
+        e, f, s = self.rows.pop(self.k)
+        if self.scale is None:
+            out = {"energy": torch.from_numpy(e), "forces": torch.from_numpy(f)}
+        else:
+            we, wf, ws = self.scale[self.k]
+            out = {"energy": torch.from_numpy(we * e), "forces": torch.from_numpy(wf * f),
+                   "stress": torch.from_numpy(ws * s)}
         self.k += 1
-        return {"energy": torch.from_numpy(e), "forces": torch.from_numpy(f)}
+        return out
 
 
-def fit_model(conf, atoms, procs=1, max_fixed_contents=None):
-    """ye3t-methods' LinearModel fitted to `atoms` (already `prepared`); density rows in `procs` processes."""
+def fit_model(conf, atoms, procs=1, max_fixed_contents=None, scale=None):
+    """ye3t-methods' LinearModel fitted to `atoms` (already `prepared`, or `weighted` with its `scale`); density
+    rows in `procs` processes."""
     import ye3t_methods.linear as L
     from ye3t_methods import LinearModel
     basis = basis_of(conf, max_fixed_contents)
     model = LinearModel(basis)
     store = rows_dir(conf, atoms) if conf["basis"]["tensor_product"]["kind"] == "density" else None
-    if conf["basis"]["tensor_product"]["kind"] == "density" and (procs > 1 or store is not None):
+    if scale is not None and conf["basis"]["tensor_product"]["kind"] != "density":
+        raise ValueError("the weighted fit is for density catalogues")
+    if conf["basis"]["tensor_product"]["kind"] == "density" and (procs > 1 or store is not None or scale is not None):
         import torch
         threads = torch.get_num_threads()
         torch.set_num_threads(1)                             # before the fork: no thread pool to inherit
         basis.create(atoms[0])                               # compile once, in the parent
-        rows, orig = _Rows(basis, atoms, procs, store=store), L._linear_ace_geometry_row
+        rows, orig = _Rows(basis, atoms, procs, store=store, scale=scale), L._linear_ace_geometry_row
         L._linear_ace_geometry_row = rows
         if procs == 1:                                       # (a serial fit keeps its threads for the solve)
             torch.set_num_threads(threads)
@@ -331,9 +378,10 @@ def fit(family, size, procs=1):
     cap_process_memory()
     conf = config(family, e)
     (d / "config.json").write_text(json.dumps(conf, indent=1, default=str))
-    atoms = prepared(read_atoms(common.DATA / "train.xyz"))
+    atoms = read_atoms(common.DATA / "train.xyz")
     if os.environ.get("ACEJAX_AC_YE3T_SUBSET"):              # a smoke run: every k-th frame (never a results row:
         atoms = atoms[::int(os.environ["ACEJAX_AC_YE3T_SUBSET"])]   # status.json records n_train)
+    atoms, scale = weighted(atoms) if family in WEIGHTED else (prepared(atoms), None)
     t0 = time.perf_counter()
     try:
         # `alpha_grid` (a sweep entry's key): the first penalty, in the order given, at which ye3t-methods' solve
@@ -343,7 +391,7 @@ def fit(family, size, procs=1):
         for alpha in e.get("alpha_grid") or [conf["model"]["fit"]["alpha"]]:
             conf["model"]["fit"]["alpha"] = float(alpha)
             try:
-                model = fit_model(conf, atoms, procs if not tried else 1, e.get("max_fixed_contents"))
+                model = fit_model(conf, atoms, procs if not tried else 1, e.get("max_fixed_contents"), scale=scale)
                 break
             except np.linalg.LinAlgError as ex:
                 tried.append({"alpha": float(alpha), "error": repr(ex)})
@@ -369,7 +417,7 @@ def fit(family, size, procs=1):
                         e0_per_atom=E0_SI, n_train=len(atoms), entry=e,
                         protocol={"alpha": conf["model"]["fit"]["alpha"], "weights": conf["model"]["fit"]["weights"],
                                   "alphas_failed": locals().get("tried") or [],
-                                  "per_config_type_weights": False, "virials": False,
+                                  "per_config_type_weights": family in WEIGHTED, "virials": family in WEIGHTED,
                                   "radial": conf["basis"]["single_factors"]["radial"]},
                         fit_peak_rss_gb=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1e6,
                         versions=versions(), **extra)

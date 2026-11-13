@@ -15,7 +15,8 @@ import sys
 from . import common
 
 FW = pathlib.Path(os.path.expanduser(os.environ.get("ACEJAX_SI_FW", "~/silicon-testing-framework")))
-NAMES = {"polymlp": "POLYMLP_{s}", "ye3t_sym_fit": "YE3T_{s}", "ye3t_mix_A": "YE3TmixA_{s}", "ye3t_mix_T": "YE3TmixT_{s}"}
+NAMES = {"polymlp": "POLYMLP_{s}", "ye3t_sym_fit": "YE3T_{s}", "ye3t_mix_A": "YE3TmixA_{s}", "ye3t_mix_T": "YE3TmixT_{s}",
+         "ye3t_sym_wfit": "YE3Tw_{s}"}
 TESTS = ("bulk_diamond,bulk_bc8,bulk_bcc,bulk_beta-Sn,bulk_fcc,bulk_hcp,bulk_hcp_short_and_fat,bulk_hex_diamond,"
          "bulk_sh,bulk_st12,vacancy-energy,interstitial-energy,surface-energy-100-relaxed,"
          "surface-decohesion-100-unrelaxed,phonon_diamond,stacking-fault-surface")

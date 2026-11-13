@@ -49,6 +49,20 @@ all_valid for those carriers"; `ye3t_methods/config.py`: "commutative density re
 physically trivial block sectors"). The descriptor rows are identical bit for bit (`fit_ye3t.same_rows` returns
 0.0), and the fitted coefficients are identical. `ye3t_mix_A` is fitted at three sizes to show this.
 
+### 2b. The same descriptors under the benchmark's loss: family `ye3t_sym_wfit`
+
+This family is not the authors' protocol. It has the catalogues of `ye3t_sym_fit` and ye3t-methods' own
+`LinearModel.fit` (assembly and ridge solve, penalty 1e-8). The loss is the one the benchmark's other linear
+families use: per-configuration-type weights (`weights_acejax.json`), energy rows × w_E/√N, force rows × w_F, and
+virial rows (eV) × w_V/√N. ye3t-methods has one global weight per quantity. The weights are therefore applied to
+what its fit loop receives: each structure's rows and targets are multiplied by that structure's weights, and the
+global weights stay 1. That is the same least-squares problem. The stress slot carries the virial (rows −V × stress
+row); a structure without a virial has zero rows and a zero target. Code: `fit_ye3t.py`, "Weighted family". The
+exported model is an ordinary YE3T file: evaluation, the LAMMPS gate and the timing are unchanged.
+
+It is shown as a second line beside `ye3t_sym_fit`, so the protocol rows stay as they were. Whether a weighted
+loss of this kind is how the authors would fit silicon is a question for them.
+
 ### 3. Fitted tagged models: family `ye3t_mix_T`
 
 The tagged basis (u = T): ye3t-methods' tagged Cauchy image with shifted-Jacobi radials, ranks 1–8.
@@ -109,7 +123,16 @@ times in µs per atom-step on a 128-core EPYC 7742 node, 4,096 atoms.
 | `ye3t_sym_fit` | r3-110 | 110 | 49.2 | 0.1338 | 2.43 | 0.16 | 12.36 |
 | `ye3t_sym_fit` | r4-205 | 205 | 25.1 | 0.1182 | 1.86 | 0.33 | 25.11 |
 | `ye3t_sym_fit` | r4-490 | 490 | 21.5 | 0.1024 | 1.42 | 0.70 | 46.20 |
+| `ye3t_sym_wfit` | r3-34 | 34 | 56.8 | 0.2311 | 2.61 | 0.12 | 9.94 |
+| `ye3t_sym_wfit` | r3-110 | 110 | 26.1 | 0.1756 | 1.69 | 0.16 | 13.13 |
+| `ye3t_sym_wfit` | r4-205 | 205 | 19.5 | 0.1468 | 1.27 | 0.42 | 26.45 |
+| `ye3t_sym_wfit` | r4-490 | 490 | 11.6 | 0.1278 | 1.12 | 0.70 | 48.20 |
 | `ye3t_mix_T` | t8-284 | 284 | 15.4 | 0.1213 | 2.15 | 3.28 | 237.1 |
+
+`ye3t_sym_wfit` against `ye3t_sym_fit`, same descriptors and cost: QoI error 2.61, 1.69,
+1.27, 1.12 instead of 4.17, 2.43, 1.86, 1.42. Energy RMSE is about half at the largest size (11.6 vs
+21.5 meV/atom) and force RMSE is higher (0.128 vs 0.102 eV/Å), the trade the ACE fits also make. Linear ACE has
+QoI error 1.03 at 223 coefficients and 0.76 at 350.
 
 `pair_style ye3t` on the linear ACE fits, 1 × 1: 28.3, 30.0, 45.1, 74.6, 326.1 (o3d12 to o4d20). It is 1.7–4.5
 times faster than ML-PACE's product evaluator and 1.4–1.6 times faster than its recursive evaluator on the same
@@ -195,8 +218,8 @@ Signed QoI errors in units of the tolerance:
 - The loss accounts for 1.85 → 1.27. The energy weights and the virials are both needed: virials alone make the
   QoI error worse (2.29), because the unweighted energies then lose more.
 - What remains against ACE o3d12 (1.27 vs 1.03) is mostly c44 and bcc. The loss does not move c44.
-- The benchmark rows keep the protocol loss. A weighted family would be a protocol change for the authors to
-  agree.
+- The `ye3t_sym_fit` rows keep the protocol loss. The weighted loss is now its own family, `ye3t_sym_wfit`
+  (section 2b), at all four sizes; its r4-205 row is the "ACE weights + virials" row above.
 
 ## Commands
 

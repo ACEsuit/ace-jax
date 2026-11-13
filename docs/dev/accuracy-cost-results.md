@@ -588,6 +588,10 @@ with virials 1.27, linear ACE o3d12 1.03; the rest is mostly c44 and bcc (`bench
 | ye3t_sym_fit | r3-110 | 110 | 1e-8 | 49.2 | 0.1338 | 2.43 | 0.16 | 12.36 |
 | ye3t_sym_fit | r4-205 | 205 | 1e-8 | 25.1 | 0.1182 | 1.86 | 0.33 | 25.11 |
 | ye3t_sym_fit | r4-490 | 490 | 1e-8 | 21.5 | 0.1024 | 1.42 | 0.70 | 46.20 |
+| ye3t_sym_wfit | r3-34 | 34 | 1e-8 | 56.8 | 0.2311 | 2.61 | 0.12 | 9.94 |
+| ye3t_sym_wfit | r3-110 | 110 | 1e-8 | 26.1 | 0.1756 | 1.69 | 0.16 | 13.13 |
+| ye3t_sym_wfit | r4-205 | 205 | 1e-8 | 19.5 | 0.1468 | 1.27 | 0.42 | 26.45 |
+| ye3t_sym_wfit | r4-490 | 490 | 1e-8 | 11.6 | 0.1278 | 1.12 | 0.70 | 48.20 |
 | ye3t_mix_A | r3-34, r3-110, r4-205 | 34, 110, 205 | 1e-8 | identical to ye3t_sym_fit | | | not timed (same model) | |
 | ye3t_mix_T | t8-284 | 284 | 1e-4 | 15.4 | 0.1213 | 2.15 | 3.28 | 237.1 |
 
@@ -619,6 +623,15 @@ Gates (LAMMPS against ye3t-methods' calculator): ≤ 5.7e-14 eV/atom, 9.3e-14 eV
   ace at 223 overall; bcc, st12 and hcp stay 2-6x worse, so the loss is most but not all of it. QoIs were not
   recomputed. ye3t-methods has the paper's weighted loss (`portable_refit.py`: per-atom energies, per-structure
   force normalisation, group weights) only for the authors' nickel model.
+- **`ye3t_sym_wfit`: the same descriptors under the benchmark's loss** (2026-11-13). Not the authors' protocol: the
+  `ye3t_sym_fit` catalogues and ye3t-methods' own fit, with per-configuration-type weights, energy and virial rows
+  / √N and virials fitted, applied by scaling each structure's rows and targets (README section 2b). QoI error
+  2.61, 1.69, 1.27, 1.12 against 4.17, 2.43, 1.86, 1.42 for the protocol loss at the same cost; energy RMSE
+  11.6 vs 21.5 meV/atom and force RMSE 0.128 vs 0.102 eV/Å at 490 descriptors. Against linear ACE at
+  nearest size the QoI gap narrows but stays: 1.27 (205) vs 1.03 (o3d12, 223); 1.12 (490) vs 0.76 (o4d12, 350).
+  The cost is that of `ye3t_sym_fit` (same descriptors: 0.70 µs/atom-step at 490). The remaining r4-490
+  errors past 1.5 tolerances are hcp, bcc, the point defects and the shuffle stacking fault, the last three shared
+  with ACE at this size.
 - **`ye3t_mix_T`** (tagged Cauchy image, shifted-Jacobi radials, ranks 1-8): one size. Against the density model
   of nearest size (205): energy 15.4 vs 25.1 meV/atom, forces 0.1213 vs 0.1182 eV/Å, QoI 2.15 vs 1.86, at 10x the
   cost (3.28 vs 0.33 µs). No force or QoI gain from the tagged family here. It is confounded: the tagged normal

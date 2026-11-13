@@ -108,6 +108,7 @@ PLAN = {"ace": [("acejax-ace", {"cpu": "standalone", "gpu": "lammps"}, ACE_DTYPE
         "ye3t_sym_fit": [("ye3t", {"cpu": "lammps"}, ("float64",))],
         "ye3t_mix_A": [("ye3t", {"cpu": "lammps"}, ("float64",))],
         "ye3t_mix_T": [("ye3t", {"cpu": "lammps"}, ("float64",))],
+        "ye3t_sym_wfit": [("ye3t", {"cpu": "lammps"}, ("float64",))],
         "gap": [("gap", {"cpu": "lammps"}, ("float64",))],         # pair quip: no KOKKOS, CPU only
         "gap_noglue": [("gap", {"cpu": "lammps"}, ("float64",))],  # the XML has no Glue term; same pair style
         "gap_E30": [("gap", {"cpu": "lammps"}, ("float64",))]}     # GAP-18's command, energy sigmas x10/3

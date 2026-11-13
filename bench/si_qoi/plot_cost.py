@@ -99,6 +99,8 @@ FAM = {  # family: (label, colour, marker, linestyle, filled, qoi model name pat
     # The linear ACE fits run by pair_style ye3t are linear ACE's blue with YE3T's hexagon (accuracy: ACE's)
     "ace_ye3t":     ("linear ACE, run by YE3T (pair_style ye3t)",        "#2a78d6", "H", "-.", False, "ACE_{s}"),
     "ye3t_sym_fit": ("YE3T density, λ = (N) (ye3t-methods)",             NEUTRAL_INK,  "H", "-",  True,  "YE3T_{s}"),
+    # the same descriptors under the benchmark's loss (fit_ye3t.py "Weighted family"): hollow, dash-dot
+    "ye3t_sym_wfit": ("YE3T density, benchmark's weights and virials",   NEUTRAL_INK,  "H", "-.", False, "YE3Tw_{s}"),
     "ye3t_mix_A":   ("YE3T density, mixed intermediates (same model)",   NEUTRAL_INK,  "H", "--", False, "YE3TmixA_{s}"),
     "ye3t_mix_T":   ("YE3T tagged (ye3t-methods)",                       NEUTRAL_INK,  "H", ":",  False, "YE3TmixT_{s}"),
 }

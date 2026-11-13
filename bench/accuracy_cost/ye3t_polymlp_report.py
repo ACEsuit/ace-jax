@@ -12,7 +12,7 @@ from . import common
 from .qoi_models import NAMES
 
 SULIS = common.HERE / "results" / "sulis"
-FIT_FAMILIES = ("polymlp", "ye3t_sym_fit", "ye3t_mix_A", "ye3t_mix_T")
+FIT_FAMILIES = ("polymlp", "ye3t_sym_fit", "ye3t_sym_wfit", "ye3t_mix_A", "ye3t_mix_T")
 REFERENCE = ("ace", "ace_wl")                     # overlaid ladders (the "ACE saturates" question)
 CHEB = ("o3d12", "o4d12", "o4d14", "o4d16", "o4d20")
 
