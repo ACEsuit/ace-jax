@@ -139,6 +139,16 @@ void table(const double *coef, int64_t F, double x0, double h, int64_t n, double
 #define ACEJAX_FFI_LANES 4
 #endif
 constexpr int kLanes = ACEJAX_FFI_LANES;
+// The DAG's floats: double, or (prototype, -DACEJAX_FFI_DAG_FLOAT with -DACEJAX_FFI_LANES=8) float, twice the
+// sites a register; the radials, harmonics, A and the force contraction stay double.
+#ifdef ACEJAX_FFI_DAG_FLOAT
+typedef float dreal;
+#else
+typedef double dreal;
+#endif
+#ifndef ACEJAX_FFI_E
+#define ACEJAX_FFI_E 1                                      // the float DAG's energy: 0 float leaf terms, 1 a group's sum in double, 2 every term
+#endif
 
 // One batch's energies and dE/dv for each site's live neighbour vectors; model buffers and scratch.
 struct Site {
@@ -148,7 +158,8 @@ struct Site {
   int64_t nz, ncoef, F, n_rnl, n_runs, n_groups, n_nodes, N, n_a, nY, n, n_leaf, g_leaf, K;
   double x0, h;
   Harmonics harm;
-  std::vector<double> hat, A, wA, wB, L, w, wl, tR, tdR;
+  std::vector<double> hat, A, wl, tR, tdR;
+  std::vector<dreal> wA, wB, L, w, ctd;                   // the DAG's own, and the readout in its type
   std::vector<v4> R, dR, Y, dY, at, q, dq;               // [lane][block of 4 neighbours][feature]
   int64_t Kb;
   std::vector<double> vin, G;                             // per lane: neighbour vectors in, dE/dv out
@@ -166,7 +177,8 @@ struct Site {
         n_runs(runs.dimensions()[0]), n_groups(groups.dimensions()[0]), n_nodes(factor.element_count()),
         N(ctz.dimensions()[1]), n_a(N - n_nodes), nY((lmax + 1) * (lmax + 1)), n(n_), n_leaf(n_leaf_),
         g_leaf(0), K(K_), x0(x0_), h(h_), harm(static_cast<int>(lmax), solid != 0), hat(V * K_ * 3), A(n_a * V), wA(n_a * V), wB(n_a * V),
-        L((N - n_leaf) * V), w((N - n_leaf) * V), wl(n_a), tR(4 * F), tdR(4 * F),
+        wl(n_a), tR(4 * F), tdR(4 * F), L((N - n_leaf) * V), w((N - n_leaf) * V),
+        ctd(ct, ct + ctz.element_count()),
         R(V * ((K_ + 3) / 4) * F), dR(R.size()), Y(V * ((K_ + 3) / 4) * nY), dY(3 * Y.size()), at(n_a), q(nY), dq(nY),
         Kb((K_ + 3) / 4), vin(V * K * 3), G(V * K * 3),
         zin(V * K), idx(V * K), nzc(e0.element_count()) {
@@ -212,48 +224,58 @@ struct Site {
   }
 
   // The product basis of every lane (centre species zc): energies into e, dE/dA into wA.
-  typedef double vd __attribute__((vector_size(8 * kLanes), aligned(8), may_alias));
-  static inline vd ld(const double *p) { return *(const vd *)p; }
-  static inline void st(double *p, vd x) { *(vd *)p = x; }
+  typedef dreal vd __attribute__((vector_size(sizeof(dreal) * kLanes), aligned(sizeof(dreal)), may_alias));
+  static inline vd ld(const dreal *p) { return *(const vd *)p; }
+  static inline void st(dreal *p, vd x) { *(vd *)p = x; }
+  typedef double vdd __attribute__((vector_size(8 * kLanes)));   // the energy's sums are double
+  static inline vdd up(vd x) { return __builtin_convertvector(x, vdd); }
   void dag(int64_t zc) {
     const int64_t n_in = n_nodes - n_leaf, M = n_a + n_in;   // leaves: the last level, never stored
     const int32_t *gp = grp, *fa = fac;
-    const double *cz = ct + zc * N, *cn = cz + n_a, *Av = A.data();
-    double *Lv = L.data(), *wv = w.data(), *wa = wA.data(), *wb = wB.data();
-    std::copy(Av, Av + n_a * V, Lv);
+    dreal *Lv = L.data(), *wv = w.data(), *wa = wA.data(), *wb = wB.data();
+    const dreal *cz = ctd.data() + zc * N, *cn = cz + n_a, *Av = Lv;   // A in the DAG's type
+    const double *czd = ct + zc * N, *cnd = czd + n_a;
+    (void)cnd;
+    std::copy(A.data(), A.data() + n_a * V, Lv);
 
     int64_t k = 0;
     for (int64_t g = 0; g < g_leaf; ++g) {                // a group: one parent's children, together
       const vd lp = ld(Lv + gp[2 * g] * V);
       for (const int64_t end = gp[2 * g + 1]; k < end; ++k) st(Lv + (n_a + k) * V, lp * ld(Av + fa[k] * V));
     }
-    vd s0 = {}, s1 = {}, s2 = {}, s3 = {};                 // four sums a lane: no add chain over M
+    vdd s0 = {}, s1 = {}, s2 = {}, s3 = {};                // four sums a lane: no add chain over M
     int64_t j = 0;
-    for (; j + 3 < M; j += 4) {
-      const vd c0 = cz[j] + vd{}, c1 = cz[j + 1] + vd{}, c2 = cz[j + 2] + vd{}, c3 = cz[j + 3] + vd{};
-      s0 += c0 * ld(Lv + j * V); s1 += c1 * ld(Lv + (j + 1) * V);
-      s2 += c2 * ld(Lv + (j + 2) * V); s3 += c3 * ld(Lv + (j + 3) * V);
+    for (; ACEJAX_FFI_E != 3 && j + 3 < M; j += 4) {
+      const vdd c0 = czd[j] + vdd{}, c1 = czd[j + 1] + vdd{}, c2 = czd[j + 2] + vdd{}, c3 = czd[j + 3] + vdd{};
+      s0 += c0 * up(ld(Lv + j * V)); s1 += c1 * up(ld(Lv + (j + 1) * V));
+      s2 += c2 * up(ld(Lv + (j + 2) * V)); s3 += c3 * up(ld(Lv + (j + 3) * V));
     }
-    for (; j < M; ++j) {
-      const vd c = cz[j] + vd{};
-      s0 += c * ld(Lv + j * V);
+    for (; ACEJAX_FFI_E != 3 && j < M; ++j) {
+      const vdd c = czd[j] + vdd{};
+      s0 += c * up(ld(Lv + j * V));
     }
-    std::fill(wa, wa + n_a * V, 0.0);
-    std::fill(wb, wb + n_a * V, 0.0);
-    std::fill(wv, wv + M * V, 0.0);                       // adjoints less their seeds (the readout, added on read)
-    vd el = {};
+    std::fill(wa, wa + n_a * V, dreal(0));
+    std::fill(wb, wb + n_a * V, dreal(0));
+    std::fill(wv, wv + M * V, dreal(0));                       // adjoints less their seeds (the readout, added on read)
+    vdd el = {};
     for (int64_t g = g_leaf; g < n_groups; ++g) {         // leaves: energy and both adjoints in one pass
       const int32_t p = gp[2 * g];
       const vd lp = ld(Lv + p * V);
       vd acc = {};
       const int64_t end = gp[2 * g + 1];
       vd ac2 = {};
+#if ACEJAX_FFI_E == 2
+      vdd ad = {};
+#endif
       for (; k + 1 < end; k += 2) {                       // two dE/dA accumulators (wa, wb), a code site each:
         // on Zen 2 one accumulator's load waits for the previous leaf's store (1.16x, EPYC 7742)
         const vd c = cn[k] + vd{}, c2 = cn[k + 1] + vd{};
         const int64_t f = (int64_t)fa[k] * V, f2 = (int64_t)fa[k + 1] * V;
         acc += c * ld(Av + f);
         ac2 += c2 * ld(Av + f2);
+#if ACEJAX_FFI_E == 2
+        ad += cnd[k] * up(ld(Av + f)) + cnd[k + 1] * up(ld(Av + f2));
+#endif
         st(wa + f, ld(wa + f) + c * lp);
         st(wb + f2, ld(wb + f2) + c2 * lp);
       }
@@ -261,14 +283,24 @@ struct Site {
         const vd c = cn[k] + vd{};
         const int64_t f = (int64_t)fa[k] * V;
         acc += c * ld(Av + f);
+#if ACEJAX_FFI_E == 2
+        ad += cnd[k] * up(ld(Av + f));
+#endif
         st(wa + f, ld(wa + f) + c * lp);
         ++k;
       }
       acc += ac2;
       st(wv + p * V, ld(wv + p * V) + acc);
-      el += acc * lp;
+#if ACEJAX_FFI_E == 2
+      el += ad * up(lp);
+#elif ACEJAX_FFI_E == 1
+      el += up(acc) * up(lp);
+#elif ACEJAX_FFI_E == 3
+#else
+      el += up(acc * lp);
+#endif
     }
-    const vd tot = ((s0 + s1) + (s2 + s3)) + el;
+    const vdd tot = ((s0 + s1) + (s2 + s3)) + el;
     for (int v = 0; v < V; ++v) e[v] += tot[v];
     for (int64_t g = g_leaf - 1; g >= 0; --g) {           // children before their parents
       const int32_t p = gp[2 * g];
@@ -293,6 +325,10 @@ struct Site {
       acc += ac2;
       st(wv + p * V, ld(wv + p * V) + acc);
     }
+#if ACEJAX_FFI_E == 3
+    for (int64_t a = 0; a < n_a; ++a)                     // E = sum_a A_a w_a, w_a the adjoint of A_a as a node
+      for (int v = 0; v < V; ++v) e[v] += A[a * V + v] * (static_cast<double>(wv[a * V + v]) + czd[a]);
+#endif
     for (int64_t a = 0; a < n_a; ++a) st(wa + a * V, (ld(wa + a * V) + ld(wb + a * V)) + ld(wv + a * V) + cz[a]);
   }
 
