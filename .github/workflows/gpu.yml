@@ -11,6 +11,7 @@ on:
       - src/ace_jax/eval/ffi.py
       - tests/test_ffi.py
       - tests/test_ffi_plan.py
+      - tests/test_calc_jit.py
       - tests/modal_gpu.py
       - .github/workflows/gpu.yml
   pull_request:
@@ -20,6 +21,7 @@ on:
       - src/ace_jax/eval/ffi.py
       - tests/test_ffi.py
       - tests/test_ffi_plan.py
+      - tests/test_calc_jit.py
       - tests/modal_gpu.py
       - .github/workflows/gpu.yml
   workflow_dispatch:
