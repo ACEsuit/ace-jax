@@ -655,6 +655,21 @@ sulis-cpu-ffi-mixed.sbatch`; rows `sulis-cpu-128x1-ffi-mixed.jsonl`, and the flo
 | o4d16 | 0.333 | 0.302 | 1.10x |
 | o4d20 | 1.572 | 1.133 | 1.39x |
 
+The small models (jobs 2284005 and 2284006, 2026-11-13, node094 for the second; the same script, two repeats, the
+faster kept, because these runs are overhead-bound and vary: o4d12 mixed gave 0.147 and 0.258):
+
+| model | float64 | mixed | note |
+|---|---|---|---|
+| o4d12 | 0.200 | 0.147 | not a gain: the float64 kernel line has 0.151 (`sulis-cpu-128x1-ffi.jsonl`) |
+| o3d12 | 0.137 | 0.140 | |
+| o3d10 | 0.113 | 0.115 | |
+| o3d8 | 0.104 | no row | parity failed in both jobs: dE 0.56 meV/atom against the 0.2 limit (dF 1.3e-4 eV/Å passes) |
+
+The second job replaced the first job's rows (`upsert_jsonl`), so the o4d12 rows carry the first job's rate from its
+log and a `note` field. The o3d8 energy error is an offset for each atom, the same at 64 and 512 atoms
+(`ACECalculator`, rattled bulk: o3d8 5.8e-4 eV/atom, o3d10 1.7e-4, o3d12 2e-5 to 3e-5, o4d12 3e-5 to 4e-5), not
+noise. The reduced-precision line thus has o3d10 to o4d20 on the CPU row and every size on the GPU row.
+
 An A100 (Modal, `ACECalculator`, 32,768 atoms), µs/atom, float64 / mixed / float32: o4d20 0.98 / 0.71 / 0.65;
 o4d16 0.38 / 0.34 / 0.28; o4d12 0.24 / 0.23 / 0.18; o3d12 0.23 / 0.21 / 0.17. Mixed is slower than float32
 there (the density and forces passes stay float64) and no more accurate in a small box: max |dF| against

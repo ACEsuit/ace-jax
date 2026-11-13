@@ -212,7 +212,9 @@ def load_rows():
     # and linear ACE run by ML-PACE or ACEpotentials.jl is the ace fits again
     return (rows + [r | {"family": "mace_xl_" + r["family"][-2:]} for r in rows if r["family"] in ("mace_L0", "mace_L1")]
             + [r | {"family": "ace_tab"} for r in rows if r["family"] == "ace" and r["size"] in TAB_SIZES]
-            + [r | {"family": f} for r in rows if r["family"] == "ace" and r["size"] in TAB_SIZES for f in REDUCED]
+            # the kernel's reduced precision runs every ace size (as ace_ffi); the other reduced lines the converted ones
+            + [r | {"family": f} for r in rows if r["family"] == "ace" for f in REDUCED
+               if f == "ace_ffi_reduced" or r["size"] in TAB_SIZES]
             + [r | {"family": "ace_tabfork"} for r in rows if r["family"] == "ace" and r["size"] in TAB_SIZES]
             + [r | {"family": "ace_trim"} for r in rows if r["family"] == "ace"]
             + [r | {"family": "ace_ffi"} for r in rows if r["family"] == "ace"]
