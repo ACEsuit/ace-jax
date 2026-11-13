@@ -73,7 +73,7 @@ uv run ruff check                     # lint; `uv run pre-commit run --all-files
   - lammps-jax: `test_export_lammps` and `test_bench_scaling`'s export test. `uv sync --extra lammps`, or `uv pip install -e <lammps-jax>` for a checkout.
   - `jaxmd` (jax-md): `test_jaxmd`.
   - a C++ compiler (`c++`): `test_ffi` (fails instead under ACEJAX_REQUIRE_OPTIONAL); its export test also needs lammps-jax.
-  - nvcc: `test_ffi`'s compile-only test of the CUDA kernel (no GPU needed; CI's `cuda-compile` job installs the nvcc wheel and sets `ACEJAX_REQUIRE_NVCC=1`). `tests/test_ffi_plan.py` needs neither: a NumPy copy of the kernel's DAG pass (`emulate`, keep it in step with `ace_dag`) checks `ffi.pull_plan`'s lists against the plain DAG on the CPU.
+  - nvcc: `test_ffi`'s compile-only test of the CUDA kernel (no GPU needed; CI's `cuda-compile` job installs the nvcc wheel and sets `ACEJAX_REQUIRE_NVCC=1`). `tests/test_ffi_plan.py` needs neither: a NumPy copy of the kernel's DAG pass (`emulate`; `DAG_PASS` there is a digest of `ace_dag`'s code, so a change to the pass fails the test until `emulate` is brought in step and the digest updated) checks `ffi.pull_plan`'s lists against the plain DAG on the CPU.
   - nvcc and a CUDA backend: `test_ffi`'s GPU cases (the `device` and `backend_kernel` fixtures: on a GPU host the calculator and batch kernel tests run the CUDA kernel), and `test_batch`/`test_batch_md`'s kernel tests there. Run them on lestrade.
   - `native` (matscipy-neighbours): `test_calc_jit`'s native `neighbour_matrix` test and `test_efv`'s dense-vs-neighbour_matrix check; without it the skin list and dense layout also take their fallback neighbour path.
   - `pyace` (python-ace, in its own venv under `pace_ref/`).

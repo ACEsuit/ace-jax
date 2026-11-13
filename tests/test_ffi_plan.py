@@ -149,3 +149,23 @@ def test_emulation_sees_a_wrong_item(model):
     P[at] ^= 1
     (e0, d0), (e1, d1) = reference(attrs, consts, 0, A), emulate(attrs, consts[:8] + (P,) + consts[9:], 0, A)
     assert abs(e1 - e0) > 1e-8 * max(abs(e0), 1.0) or np.abs(d1 - d0).max() > 1e-8 * np.abs(d0).max()
+
+
+def dag_pass_digest():
+    """A digest of ace_dag's code in ace_ffi_gpu.cu, without comments and white space."""
+    import hashlib
+    import re
+    src = ffi.GPU_SOURCE.read_text()
+    body = src[src.index("    ace_dag(Model<R> m"):src.index("// Pass 3:")]
+    return hashlib.sha256(re.sub(r"\s+", "", re.sub(r"//[^\n]*", "", body)).encode()).hexdigest()[:16]
+
+
+DAG_PASS = "aa8dafdf7dae0753"                             # dag_pass_digest() of the kernel `emulate` copies
+
+
+def test_emulation_is_of_this_kernel():
+    """`emulate` is a hand copy of ace_dag, so a change to the kernel's pass must be looked at here: make the
+    same change to `emulate` (or see that it needs none), then set DAG_PASS to the new digest."""
+    assert dag_pass_digest() == DAG_PASS, (
+        f"ace_dag in ace_ffi_gpu.cu changed (digest {dag_pass_digest()}): bring tests/test_ffi_plan.py's "
+        "`emulate` in step with it, then set DAG_PASS to that digest")
