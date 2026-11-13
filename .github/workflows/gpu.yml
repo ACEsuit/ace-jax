@@ -1,0 +1,51 @@
+name: gpu
+# The CUDA kernel's tests on a Modal T4 (tests/modal_gpu.py): GitHub's runners have no GPU. Only when the
+# kernels, their plan or their tests change (23 min and about $0.35 with empty caches). Needs the repository secrets
+# MODAL_TOKEN_ID and MODAL_TOKEN_SECRET; without them (a fork's pull request) the job warns and passes.
+on:
+  push:
+    branches: [main]
+    paths:
+      - src/ace_jax/eval/ace_ffi_gpu.cu
+      - src/ace_jax/eval/ace_ffi.cc
+      - src/ace_jax/eval/ffi.py
+      - tests/test_ffi.py
+      - tests/test_ffi_plan.py
+      - tests/modal_gpu.py
+      - .github/workflows/gpu.yml
+  pull_request:
+    paths:
+      - src/ace_jax/eval/ace_ffi_gpu.cu
+      - src/ace_jax/eval/ace_ffi.cc
+      - src/ace_jax/eval/ffi.py
+      - tests/test_ffi.py
+      - tests/test_ffi_plan.py
+      - tests/modal_gpu.py
+      - .github/workflows/gpu.yml
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  modal-t4:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: token
+        run: |
+          if [ -z "$MODAL_TOKEN_ID" ] || [ -z "$MODAL_TOKEN_SECRET" ]; then
+            echo "::warning::No Modal token (a fork's pull request, or the secrets are not set): the GPU tests were not run."
+          else
+            echo "run=1" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: astral-sh/setup-uv@v5
+        if: steps.token.outputs.run
+      - name: GPU tests on a Modal T4
+        if: steps.token.outputs.run
+        run: uvx --from "modal>=1.6,<2" modal run tests/modal_gpu.py

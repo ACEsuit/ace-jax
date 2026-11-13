@@ -42,8 +42,8 @@ def device(request, tmp_path_factory):
     """The platform: the C++ kernel, or the GPU kernel, built and registered."""
     if request.param == "cpu":
         request.getfixturevalue("kernel")
-    elif ffi.cuda_compiler() is None or jax.default_backend() != "gpu":
-        pytest.skip("no nvcc and CUDA GPU for the GPU kernel")
+    elif ffi.cuda_compiler() is None or jax.default_backend() != "gpu":     # ACEJAX_REQUIRE_GPU: CI's GPU job
+        (pytest.fail if os.environ.get("ACEJAX_REQUIRE_GPU") else pytest.skip)("no nvcc and CUDA GPU for the GPU kernel")
     else:
         ffi.register_gpu(ffi.library(gpu=True, cache=tmp_path_factory.getbasetemp() / "ffi-gpu"))
     return request.param
