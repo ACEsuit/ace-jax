@@ -548,6 +548,12 @@ updating QR of the weighted training design matrix, unit-norm columns, relative 
 | m4g8-l842 | 3536 | 3401 | 1e-6 | 13.4 | 0.1252 | 0.98 | 11.36 | 276.0 |
 | m4g9-l882 | 4797 | 4569 | 1e-3 | 13.9 | 0.0956 | 1.01 | 14.96 | 532.2 |
 | m4g8-l1282 | 6984 | 6776 | 1e-3 | 11.8 | 0.0922 | 0.82 | 21.51 | 750.6 |
+| m2g6-l44 | 7380 | – | 1e-2 | 11.0 | 0.0966 | 1.10 | 7.94 | 360.9 |
+| m2g6-l84 | 10584 | – | 1e-2 | 9.4 | 0.0953 | 0.74 | 13.02 | 554.9 |
+| m2g8-l84 | 18720 | – | 1e-2 | 9.8 | 0.0994 | 0.66 | 19.46 | 921.9 |
+| m2g9-l84 | 23652 | – | 1e-1 | 8.5 | 0.0965 | 0.62 | 45.51 | 1261.9 |
+| m2g8-l124 | 25424 | – | 1e-1 | 8.6 | 0.1009 | 0.54 | 61.21 | 1503.4 |
+| m2g9-l124 | 32130 | – | 1e-1 | 8.6 | 0.0973 | 0.54 | 122.40 | 2320.6 |
 
 Gates (LAMMPS against pypolymlp): ≤ 2.7e-14 eV/atom, 8.1e-13 eV/Å.
 
@@ -556,9 +562,15 @@ Gates (LAMMPS against pypolymlp): ≤ 2.7e-14 eV/atom, 8.1e-13 eV/Å.
   threads, recorded as such, and plotted on the CPU row under that label. Thread scaling is 7-36x on 128 cores, so
   the CPU-node cost (1.5-22 µs) is far from the one-core cost / 128; the 1 x 1 column is the fairer measure of the
   kernel. CPU only (no GPU code).
-- Accuracy: forces reach 0.092 eV/Å at 6,984 coefficients (linear ACE: 0.082 at 5,476) and the QoI error 0.82, so
-  the ladder does not reach the target (force RMSE ≤ 0.0825 and QoI ≤ 0.5). Energy RMSE stays above 11 meV/atom
-  where ACE is at 3.5-7.
+- Accuracy: forces reach 0.092 eV/Å at 6,984 coefficients (model type 4; linear ACE: 0.082 at 5,476) and stay at
+  0.095-0.101 for the model type 2 sizes, so the ladder does not reach the target (force RMSE ≤ 0.0825 and QoI ≤
+  0.5). Energy RMSE is 8.5-11 meV/atom for type 2 and above 11 for the others, where ACE is at 3.5-7.
+- **Model type 2 (added 2026-11-13, the form of the accurate Si models in Seko's repository).** Six sizes at order
+  3 with `gtinv_maxl` [4, 4], [8, 4] and [12, 4], 7,380 to 32,130 coefficients. Their QoI error is 0.74 to 0.54
+  from 10,584 coefficients up, against 0.82 for the best type 4 model: the vacancy is −2.0 tolerances (type 4:
+  −3.5) and every phase energy is within one tolerance. Forces do not improve, and the cost is high: 13 to 122 µs
+  per atom-step on the node and 0.55 to 2.3 ms on one core. Their penalties (1e-2, 1e-1) are inside Seko's grid.
+  No design rank was computed at these sizes (an SVD of days).
 - The design rank is 87-97 % of the coefficient count (260 / 300 lowest; 6,776 / 6,984), so the count overstates
   the effective size only slightly on this training set.
 - Two penalties sit on the grid's lower edge (1e-8: m3g9-l882, m4g6-l442); pypolymlp's grid was kept.
@@ -587,7 +599,7 @@ Gates (LAMMPS against pypolymlp): ≤ 2.7e-14 eV/atom, 8.1e-13 eV/Å.
   a floor on the grid) is a protocol change for a PR, not made here.
 - Seko's repository potentials (`polymlp_repo`) were not added. Their settings were looked up
   (`bench/accuracy_cost/polymlp/README.md`): cutoff 6 or 8 Å, mostly model type 2 at order 3 with `gtinv_maxl`
-  [8, 4] or [12, 4], 6,512 to 77,420 coefficients. This ladder has no type 2 model; that is the first thing to add.
+  [8, 4] or [12, 4], 6,512 to 77,420 coefficients. The type 2 sizes above follow them at this benchmark's 5.0 Å cutoff.
 
 ### Figures
 

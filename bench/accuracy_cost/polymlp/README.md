@@ -18,7 +18,7 @@ No family gets per-system hyperparameter optimisation in this pass.
 | Data | `$ACEJAX_AC_ROOT/data/si_accuracy_cost/train.xyz` (2,227 configurations), `test.xyz`; split hash in `split.json` |
 | Cutoff | 5.0 Å (every family) |
 | Energies | `atomic_energy` = the isolated-atom DFT energy, -158.54496821 eV; the calculator adds it back |
-| Model ladder | eight points of the grid search of `pypolymlp/utils/grid_search` at 5 Å (`sweep.yaml`, family `polymlp`) |
+| Model ladder | fourteen points at 5 Å: eight of the grid search of `pypolymlp/utils/grid_search`, six of model type 2 (`sweep.yaml`, family `polymlp`) |
 | Ridge alpha | pypolymlp's own selection over 10^linspace(-8, 1, 10), on a validation split of *train* |
 | Validation split | 10 % of each configuration type, seed 0 (`fit_polymlp.val_split`; indices in each run's `val_split.json`) |
 | Weights | one dataset per configuration type, weight sigma_F,default / sigma_F from the GAP-18 force sigmas |
@@ -67,6 +67,12 @@ per atom-step on a 128-core EPYC 7742 node, 4,096 atoms.
 | m4g8-l842 | 3536 | 3401 | 1e-6 | 13.4 | 0.1252 | 0.98 | 11.36 | 276.0 |
 | m4g9-l882 | 4797 | 4569 | 1e-3 | 13.9 | 0.0956 | 1.01 | 14.96 | 532.2 |
 | m4g8-l1282 | 6984 | 6776 | 1e-3 | 11.8 | 0.0922 | 0.82 | 21.51 | 750.6 |
+| m2g6-l44 | 7380 | – | 1e-2 | 11.0 | 0.0966 | 1.10 | 7.94 | 360.9 |
+| m2g6-l84 | 10584 | – | 1e-2 | 9.4 | 0.0953 | 0.74 | 13.02 | 554.9 |
+| m2g8-l84 | 18720 | – | 1e-2 | 9.8 | 0.0994 | 0.66 | 19.46 | 921.9 |
+| m2g9-l84 | 23652 | – | 1e-1 | 8.5 | 0.0965 | 0.62 | 45.51 | 1261.9 |
+| m2g8-l124 | 25424 | – | 1e-1 | 8.6 | 0.1009 | 0.54 | 61.21 | 1503.4 |
+| m2g9-l124 | 32130 | – | 1e-1 | 8.6 | 0.0973 | 0.54 | 122.40 | 2320.6 |
 
 Two things to know when reading it:
 
@@ -109,22 +115,23 @@ not known.
 |---|---|---|
 | Features | `gtinv` in every model; no pair-only model | `gtinv` |
 | Cutoff | 6.0 or 8.0 Å (hybrid second model: 4.0 or 5.0 Å) | 5.0 Å (the benchmark's rule) |
-| Model type | 2 with `gtinv_order` 3 (most models); 4 with `gtinv_order` 4 | 3 and 4 with `gtinv_order` 3 and 4; no type 2 |
+| Model type | 2 with `gtinv_order` 3 (most models); 4 with `gtinv_order` 4 | 3 and 4 with `gtinv_order` 3 and 4; 2 with `gtinv_order` 3 (added 2026-11-13) |
 | `max_p` | 2 | 2 |
 | `gtinv_maxl` | type 2: [8, 4] or [12, 4]; type 4: [8, 4, 2] | [4, 4] to [12, 8, 2] |
 | Gaussians | centres 0 to cutoff − 1 Å, width 1.0: 10 or 13 (2024), 7 to 14 (2026) | 6, 8 or 9 |
 | Penalty grid | 1e-4 to 1e3, 15 values (`reg_alpha_params -4 3 15`) | 1e-8 to 10, 10 values |
-| Coefficients | 6,512 (type 4, 6 Å) to 77,420 (type 2, 8 Å) | 141 to 6,984 |
+| Coefficients | 6,512 (type 4, 6 Å) to 77,420 (type 2, 8 Å) | 141 to 32,130 |
 | Hybrid | 2026 models with files are all sums of two models (second: type 4, order 3, [4, 4] or [8, 8]) | none |
 
 Repository errors on its own dataset (13,264 structures in 2024, 74,085 in 2026): 4.1 to 1.9 meV/atom and
 0.066 to 0.050 eV/Å (2024); 4.4 to 2.4 meV/atom and 0.058 to 0.046 eV/Å (2026 models with files). These are
 not comparable with this benchmark's test set.
 
-The main difference from this ladder is the model type. The repository's accurate Si models are type 2 (a
-polynomial of all invariants) at order 3 with high `l` for the order-2 invariants. This ladder has none: its
-largest models are type 4 at order 4. The repository models are also 2 to 10 times larger and use a longer
-cutoff. Type 2 at 5.0 Å with [8, 4] and [12, 4] is the first thing to add.
+The first eight sizes of this ladder have no type 2 model, which is the form of the repository's accurate Si
+models (a polynomial of all invariants at order 3, with high `l` for the order-2 invariants). The six `m2*` sizes
+add it at 5.0 Å: `gtinv_maxl` [4, 4], [8, 4] and [12, 4] with 6, 8 or 9 Gaussians. They have the lowest QoI
+error of the family (0.54) and its highest cost. The design rank was not computed for them. The repository's
+cutoff (6 or 8 Å) and its hybrid models are not followed: the benchmark fixes the cutoff at 5.0 Å.
 
 ## What a PR could change
 

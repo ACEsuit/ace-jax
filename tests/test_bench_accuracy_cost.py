@@ -1101,7 +1101,7 @@ def test_polymlp_inputs_and_validation_split():
     split is seeded, disjoint from its train part, stratified, and never larger than a tenth of a type."""
     from accuracy_cost import common, fit_polymlp as fp
     s = common.load_sweep()["polymlp"]
-    assert 6 <= len(s) <= 10 and min(e["n_params"] for e in s) < 500 and max(e["n_params"] for e in s) >= 5000
+    assert 6 <= len(s) <= 16 and min(e["n_params"] for e in s) < 500 and max(e["n_params"] for e in s) >= 5000
     kw = fp.params_kw(common.entry("polymlp", "m4g9-l882"))
     assert kw["cutoff"] == common.RCUT and kw["atomic_energy"] == [common.E0_SI] and kw["gtinv_version"] == 1
     assert kw["gtinv_maxl"] == (8, 8, 2) and kw["gtinv_order"] == 4 and kw["reg_alpha_params"] == fp.REG_ALPHA

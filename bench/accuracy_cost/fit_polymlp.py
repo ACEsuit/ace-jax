@@ -173,7 +173,7 @@ def fit(size, rank=True):
                  "val_rmse_weighted": [float(m.rmse_test) for m in res.all_models],
                  "alpha_at_edge": bool(float(best.alpha) in (min(alphas), max(alphas))),
                  "fit_wall_s": time.perf_counter() - t0}
-        if rank:
+        if rank and e.get("rank", True):                   # (`rank: false` on a sweep entry: too large for the SVD)
             t1 = time.perf_counter()
             extra |= {"design_rank": design_rank(prm, [atoms[i] for i in tr], w), "rank_wall_s": None}
             extra["rank_wall_s"] = time.perf_counter() - t1
