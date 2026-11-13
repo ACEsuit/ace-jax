@@ -281,10 +281,14 @@ __global__ void ace_fill(const int32_t *z, int n_rows, int *cnt, int32_t *perm) 
 // (a level, or a tile's mids) a thread takes an equal range of the nodes sorted by factor and writes each
 // run's sum. The last inner level's values, the mids, are not kept: Lv[x] Lv[y]
 // where a leaf needs one.
-template <typename R, int GA, int Mode>
+//
+// R is the pass's own type and S the rows' (A, dE/dA, the energies): the same, or (mixed precision, the
+// readout passed in float32) R float and S double. Mixed, the energy is sum_a A_a w_a in double from the
+// rows' A and the float adjoints: good to ~1e-6 eV/atom, with noise from the float node values.
+template <typename R, typename S, int GA, int Mode>
 __global__ void __launch_bounds__(kThreads)
-    ace_dag(Model<R> m, const int32_t *z, const int32_t *perm, int n_batches, int M, const R *Ag, R *wAg,
-            R *scratch, int64_t per_batch, R *eo) {
+    ace_dag(Model<R> m, const int32_t *z, const int32_t *perm, int n_batches, int M, const S *Ag, S *wAg,
+            R *scratch, int64_t per_batch, S *eo) {
   extern __shared__ double sh[];
   const int T = blockDim.x, W = T + 1, C = T / kChunk;   // ffi.pull_threads: the plan is for T
   constexpr int kAhead = sizeof(R) == 8 ? ::kAhead / 2 : ::kAhead;   // A100: float64 is slower at 8
@@ -293,7 +297,8 @@ __global__ void __launch_bounds__(kThreads)
   const int32_t *P = m.pull, *tiles = P + P[3], *lcut = P + P[4], *litems = P + P[5], *ib = P + P[6];
   const int32_t *ist = P + P[7], *pst = P + P[8], *fst = P + P[9], *items = P + P[10];
   const int n_tiles = P[0], n_slots = P[1], n_lists = P[2];
-  R *red = reinterpret_cast<R *>(sh), *mine = red + C * GA, *off = scratch + blockIdx.x * per_batch;
+  S *red = reinterpret_cast<S *>(sh);
+  R *mine = reinterpret_cast<R *>(red + C * GA), *off = scratch + blockIdx.x * per_batch;
   R *Lv = Mode < 2 ? mine : off, *wms = mine + (Mode < 2 ? nV * GA : 0);
   R *wv = off + (Mode < 2 ? 0 : nL * GA), *pw = wv + nL * GA, *A = Lv;
   for (int b = blockIdx.x; b < n_batches; b += gridDim.x) {
@@ -411,9 +416,12 @@ __global__ void __launch_bounds__(kThreads)
       }
       __syncthreads();
     }
-    R e[GA] = {};
+    S e[GA] = {};
     for (int a = t; a < na; a += T)
-      for (int g = 0; g < GA; ++g) e[g] += A[a * GA + g] * wv[a * GA + g];
+      for (int g = 0; g < GA; ++g) {
+        if constexpr (sizeof(S) == sizeof(R)) e[g] += A[a * GA + g] * wv[a * GA + g];
+        else if (i[g] >= 0) e[g] += Ag[static_cast<int64_t>(i[g]) * na + a] * static_cast<S>(wv[a * GA + g]);
+      }
     for (int g = 0; g < GA; ++g)
       for (int o = kChunk / 2; o > 0; o /= 2) e[g] += SHFL_XOR(e[g], o);
     for (int l = 0; l < m.n_lev; ++l) {                   // dE/dA: the pieces
@@ -483,7 +491,7 @@ __global__ void __launch_bounds__(kThreads)
       for (int g = 0; g < GA; ++g) red[t / kChunk * GA + g] = e[g];
     __syncthreads();
     if (t < GA && i[t] >= 0) {                            // thread g sums row g's
-      R s = 0;
+      S s = 0;
       for (int c = 0; c < C; ++c) s += red[c * GA + t];
       eo[i[t]] += s;
     }
@@ -634,10 +642,13 @@ ffi::Error Launch(gpuStream_t stream, ffi::ScratchAllocator &scratch, ffi::AnyBu
                   ffi::Result<ffi::AnyBuffer> &f) {
   const int64_t lmax = c.lmax;
   if (lmax > 31) return ffi::Error::InvalidArgument("the GPU kernel takes lmax up to 31: a lane per m");
-  const ffi::DataType type = x_in.element_type();
+  const ffi::DataType type = x_in.element_type(), tdag = c.ct.element_type();
   for (const ffi::DataType t : types)
     if (t != type || (t != ffi::DataType::F64 && t != ffi::DataType::F32))
       return ffi::Error::InvalidArgument("the GPU kernel's floats are all float64 or all float32");
+  if (c.lc.element_type() != tdag || (tdag != type && !(type == ffi::DataType::F64 && tdag == ffi::DataType::F32)))
+    return ffi::Error::InvalidArgument("the GPU kernel's readout has the floats' type, or float32 with "
+                                       "float64 (mixed precision)");
   const int64_t n_out = static_cast<int64_t>(f->element_count());
   for (const int64_t size : {3 * atoms, rows, n_out, static_cast<int64_t>(c.rtab.element_count()),
                              static_cast<int64_t>(c.ct.element_count()),
@@ -649,7 +660,7 @@ ffi::Error Launch(gpuStream_t stream, ffi::ScratchAllocator &scratch, ffi::AnyBu
   const int nz = i32(c.rtab.dimensions()[0]), ncoef = i32(c.rtab.element_count()) / (nz * nz * F);
   const int local = c.rtab.dimensions().size() == 5;      // radial.spline_local's (NZ, NZ, n - 1, 4, F)
   const int64_t n_rows = std::min(rows, atoms), nY = (lmax + 1) * (lmax + 1), n_runs = c.runs.dimensions()[0];
-  const size_t sz = ffi::ByteWidth(type);
+  const size_t sz = ffi::ByteWidth(type), szd = ffi::ByteWidth(tdag);   // the rows' floats, the DAG's
   int dev = 0, sms = 1, warp = 32, optin = 48 << 10;      // errors surface at GetLastError
   (void)GPU(GetDevice)(&dev);
   (void)GPU(DeviceGetAttribute)(&sms, GPU_SM_COUNT, dev);
@@ -679,11 +690,11 @@ ffi::Error Launch(gpuStream_t stream, ffi::ScratchAllocator &scratch, ffi::AnyBu
   if (TD < kChunk || TD > kThreads || TD % kChunk)
     return ffi::Error::InvalidArgument("the GPU kernel's DAG pass takes 32 to 256 threads, in 32s");
   const auto dag_shared = [&](int64_t GA, int mode) {
-    return (TD / kChunk + M + (mode == 0 ? n_a + 1 : mode == 1 ? nL : 0)) * GA * sz;
+    return TD / kChunk * GA * sz + (M + (mode == 0 ? n_a + 1 : mode == 1 ? nL : 0)) * GA * szd;
   };
   const size_t room = static_cast<size_t>(optin) / 2;
   const int mode = c.lv == 0 ? 0 : c.lv == 1 && dag_shared(1, 1) <= static_cast<size_t>(optin) ? 1 : 2;
-  int GA = sz == 8 ? 2 : 4;                               // A100: float64 fastest at 2, float32 at 4
+  int GA = szd == 8 ? 2 : 4;                              // A100: float64 fastest at 2, float32 at 4
   while (GA > 1 && dag_shared(GA, mode) > room) GA /= 2;
   const auto blocks = [&](auto kernel, int threads, size_t shared, int64_t work) {   // fill the device
     int resident = 1;
@@ -700,13 +711,18 @@ ffi::Error Launch(gpuStream_t stream, ffi::ScratchAllocator &scratch, ffi::AnyBu
   const int64_t per_batch = GA * ((1 + (mode == 2)) * nL + lists * (n_a + TD));   // range at most
   const int64_t n_A = n_rows * n_a, n_list = n_rows * (K + 1);
   const int64_t n_batches = (n_rows + nz * (GA - 1) + GA - 1) / GA;
-  const auto run = [&](auto zero) {                       // the rest in the floats' type R
+  const auto run = [&](auto zero, auto zero_dag) {        // the rest in the floats' type R, the DAG pass in Rd
     using R = decltype(zero);
-    const Model<R> m{c.rtab.typed_data<R>(), c.rcut.typed_data<R>(), c.ct.typed_data<R>(), c.e0.typed_data<R>(),
-                     c.lc.typed_data<R>(), c.runs.typed_data(), c.groups.typed_data(), c.factor.typed_data(),
+    using Rd = decltype(zero_dag);
+    const Model<R> m{c.rtab.typed_data<R>(), c.rcut.typed_data<R>(), nullptr, c.e0.typed_data<R>(),
+                     nullptr, c.runs.typed_data(), c.groups.typed_data(), c.factor.typed_data(),
                      c.levels.typed_data(), c.pull.typed_data(), nz, ncoef, F, i32(c.n_rnl), i32(n_runs), N,
                      n_a, n_lev, i32(kept), std::max(n_lev - 2, 0), i32(c.lc.dimensions()[1]),
                      i32(c.n), i32(lmax), i32(c.solid), local, R(c.x0), R(1.0 / c.h), R(rc2)};
+    const Model<Rd> md{nullptr, nullptr, c.ct.typed_data<Rd>(), nullptr,   // the readout: all the DAG reads
+                       c.lc.typed_data<Rd>(), m.run, m.grp, m.fac, m.lev, m.pull, nz, ncoef, F, m.n_rnl, m.n_runs, N,
+                       n_a, n_lev, m.n_st, m.st_lev, m.n_lc, m.n, m.L, m.solid, local, Rd(c.x0), Rd(1.0 / c.h),
+                       Rd(rc2)};
     const auto density = T1 == 32 ? (four ? ace_density<R, 32, 4, E> : ace_density<R, 32, 8, E>)
                          : T1 == 64 ? (four ? ace_density<R, 64, 4, E> : ace_density<R, 64, 8, E>)
                                     : (four ? ace_density<R, 128, 4, E> : ace_density<R, 128, 8, E>);
@@ -714,17 +730,18 @@ ffi::Error Launch(gpuStream_t stream, ffi::ScratchAllocator &scratch, ffi::AnyBu
                         : T3 == 64 ? (four ? ace_forces<R, 64, 4, E> : ace_forces<R, 64, 8, E>)
                                    : (four ? ace_forces<R, 128, 4, E> : ace_forces<R, 128, 8, E>);
 #define ACE_DAG(Mode) \
-  (GA == 1 ? ace_dag<R, 1, Mode> : GA == 2 ? ace_dag<R, 2, Mode> : GA == 4 ? ace_dag<R, 4, Mode> : ace_dag<R, 8, Mode>)
+  (GA == 1 ? ace_dag<Rd, R, 1, Mode> : GA == 2 ? ace_dag<Rd, R, 2, Mode> : ace_dag<Rd, R, 4, Mode>)
     const auto dag = mode == 0 ? ACE_DAG(0) : mode == 1 ? ACE_DAG(1) : ACE_DAG(2);
 #undef ACE_DAG
     const int64_t b1 = blocks(density, T1, s1, n_rows), b3 = blocks(forces, T3, s3, n_rows);
     const int64_t b2 = blocks(dag, i32(TD), s2, n_batches);
     // Scratch: A and dE/dA per row, per block the DAG's adjoints and unshared values, then the live lists,
     // the species' counts and the batches.
-    const int64_t bytes = (2 * n_A + b2 * per_batch) * sz + (n_list + 1 + nz + n_batches * GA) * sizeof(int);
+    const int64_t bytes = 2 * n_A * sz + b2 * per_batch * szd + (n_list + 1 + nz + n_batches * GA) * sizeof(int);
     const auto mem = scratch.Allocate(bytes, 16);         // XLA aligns to 16 at most
     if (!mem) return ffi::Error(ffi::ErrorCode::kResourceExhausted, "no device scratch for the ACE kernel");
-    R *Ag = static_cast<R *>(*mem), *wAg = Ag + n_A, *D = wAg + n_A;
+    R *Ag = static_cast<R *>(*mem), *wAg = Ag + n_A;
+    Rd *D = reinterpret_cast<Rd *>(wAg + n_A);
     R *x = x_in.typed_data<R>(), *eo = e->typed_data<R>(), *fo = f->typed_data<R>();
     const Edges<R> ed{E ? x : nullptr, zj, mask, E ? fo : nullptr};
     int32_t *lists = reinterpret_cast<int32_t *>(D + b2 * per_batch), *broken = lists + n_list;
@@ -739,7 +756,7 @@ ffi::Error Launch(gpuStream_t stream, ffi::ScratchAllocator &scratch, ffi::AnyBu
       ace_count<<<bc, 256, 0, stream>>>(zs, i32(n_rows), per_z);
       ace_base<<<1, 1, 0, stream>>>(nz, GA, per_z);
       ace_fill<<<bc, 256, 0, stream>>>(zs, i32(n_rows), per_z, perm);
-      dag<<<b2, i32(TD), s2, stream>>>(m, zs, perm, i32(n_batches), i32(M), Ag, wAg, D, per_batch, eo);
+      dag<<<b2, i32(TD), s2, stream>>>(md, zs, perm, i32(n_batches), i32(M), Ag, wAg, D, per_batch, eo);
       forces<<<b3, T3, s3, stream>>>(m, x, zs, nb, static_cast<const R *>(wt), ed, i32(atoms), i32(K), i32(rows),
                                      lists, wAg, broken, eo, fo);
     }
@@ -748,7 +765,7 @@ ffi::Error Launch(gpuStream_t stream, ffi::ScratchAllocator &scratch, ffi::AnyBu
       return ffi::Error::Internal(std::string("ACE kernel launch: ") + GPU(GetErrorString)(err));
     return ffi::Error::Success();
   };
-  return type == ffi::DataType::F32 ? run(0.0f) : run(0.0);
+  return type == ffi::DataType::F32 ? run(0.0f, 0.0f) : tdag == ffi::DataType::F32 ? run(0.0, 0.0f) : run(0.0, 0.0);
 }
 
 ffi::Error AceDirectGpuImpl(gpuStream_t stream, ffi::ScratchAllocator scratch, ffi::AnyBuffer pos,
@@ -766,8 +783,8 @@ ffi::Error AceDirectGpuImpl(gpuStream_t stream, ffi::ScratchAllocator scratch, f
   return Launch<false>(stream, scratch, pos, species.typed_data(), nbr.typed_data(), num.typed_data(),
                        weight.untyped_data(), nullptr, nullptr, pos.dimensions()[0], nbr.dimensions()[0],
                        nbr.dimensions()[1], c, rc2,
-                       {weight.element_type(), rtab.element_type(), rcut.element_type(), ct.element_type(),
-                        e0.element_type(), lc.element_type(), e->element_type(), f->element_type()},
+                       {weight.element_type(), rtab.element_type(), rcut.element_type(),
+                        e0.element_type(), e->element_type(), f->element_type()},
                        e, f);
 }
 
@@ -786,8 +803,8 @@ ffi::Error AceEdgesGpuImpl(gpuStream_t stream, ffi::ScratchAllocator scratch, ff
   const int64_t rows = rij.dimensions()[0], K = rij.dimensions()[1];
   return Launch<true>(stream, scratch, rij, zi.typed_data(), nullptr, nullptr, nullptr, zj.typed_data(),
                       mask.typed_data(), rows, K, rows, c, 0.0,
-                      {rtab.element_type(), rcut.element_type(), ct.element_type(), e0.element_type(),
-                       lc.element_type(), e->element_type(), g->element_type()},
+                      {rtab.element_type(), rcut.element_type(), e0.element_type(),
+                       e->element_type(), g->element_type()},
                       e, g);
 }
 

@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Added
+
+- **Mixed precision for the kernels** (`ffi_precision="mixed"`, `aj export --ffi-precision mixed`; off by
+  default). The C++ and CUDA kernels for linear ACE can calculate the product basis in float32 and all
+  other quantities in float64. For the silicon model o4d20, LAMMPS on 128 cores is 1.4 times faster and an
+  A100 is 1.4 times faster. Smaller models gain less, and order-3 models gain nothing. Forces differ from
+  float64 by approximately 0.05 meV/Å for o4d20. The energy has noise of approximately 0.1 meV in 200
+  atoms, so optimisers with an energy line search can fail: use a force-only optimiser. See
+  `docs/user/howto/precision.md`.
+
 ### Fixed
 
 - **Fast species-embedded basis build.** `aj basis --embedding` and `build_embedding_model` with the default

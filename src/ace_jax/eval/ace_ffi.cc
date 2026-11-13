@@ -135,32 +135,29 @@ void table(const double *coef, int64_t F, double x0, double h, int64_t n, double
 // factors and groups: ~1 MB at o4d20) once for kLanes sites.  Per site that was 12 instructions a leaf, and
 // on Zen 2 ~10 cycles (the dE/dA update's load waits for the previous store); a batch of 4 halves the
 // kernel's time on an i9-14900K and an EPYC 7742 (docs/dev/accuracy-cost-results.md).  8 lanes need AVX-512.
+//
+// D is the type of the product-basis DAG, its adjoint and the readout: double, or float when the readout
+// buffer is float32 (ffi.kernel_inputs(dag="float32")), with twice the sites a register.  The radials, the
+// harmonics, A and the force contraction are double in both.  In float the energy is sum_a A_a w_a in double,
+// w_a the adjoint of A_a as a DAG node: it is good to ~1e-6 eV/atom, with noise from the float node values
+// (0.1 meV in 200 atoms at o4d20), so a line search on energies can fail near a minimum.
 #ifndef ACEJAX_FFI_LANES
 #define ACEJAX_FFI_LANES 4
 #endif
 constexpr int kLanes = ACEJAX_FFI_LANES;
-// The DAG's floats: double, or (prototype, -DACEJAX_FFI_DAG_FLOAT with -DACEJAX_FFI_LANES=8) float, twice the
-// sites a register; the radials, harmonics, A and the force contraction stay double.
-#ifdef ACEJAX_FFI_DAG_FLOAT
-typedef float dreal;
-#else
-typedef double dreal;
-#endif
-#ifndef ACEJAX_FFI_E
-#define ACEJAX_FFI_E 1                                      // the float DAG's energy: 0 float leaf terms, 1 a group's sum in double, 2 every term
-#endif
 
 // One batch's energies and dE/dv for each site's live neighbour vectors; model buffers and scratch.
+template <typename D>
 struct Site {
-  static constexpr int V = kLanes;
-  const double *tab, *rc, *ct, *E0;
+  static constexpr int V = kLanes * static_cast<int>(sizeof(double) / sizeof(D));
+  const double *tab, *rc, *E0;
+  const D *ct;
   const int32_t *run, *grp, *fac;
   int64_t nz, ncoef, F, n_rnl, n_runs, n_groups, n_nodes, N, n_a, nY, n, n_leaf, g_leaf, K;
   double x0, h;
   Harmonics harm;
   std::vector<double> hat, A, wl, tR, tdR;
-  std::vector<double> Ld;                                 // ACEJAX_FFI_E 4: the inner values in double
-  std::vector<dreal> wA, wB, L, w, ctd;                   // the DAG's own, and the readout in its type
+  std::vector<D> wA, wB, L, w;
   std::vector<v4> R, dR, Y, dY, at, q, dq;               // [lane][block of 4 neighbours][feature]
   int64_t Kb;
   std::vector<double> vin, G;                             // per lane: neighbour vectors in, dE/dv out
@@ -169,17 +166,16 @@ struct Site {
   int64_t nl[V], nzc;
 
   Site(ffi::Buffer<ffi::F64> rtab, ffi::Buffer<ffi::F64> rcut, ffi::Buffer<ffi::S32> runs,
-       ffi::Buffer<ffi::S32> groups, ffi::Buffer<ffi::S32> factor, ffi::Buffer<ffi::F64> ctz,
+       ffi::Buffer<ffi::S32> groups, ffi::Buffer<ffi::S32> factor, ffi::AnyBuffer ctz,
        ffi::Buffer<ffi::F64> e0, double x0_, double h_, int64_t n_, int64_t n_rnl_, int64_t lmax,
        int64_t solid, int64_t n_leaf_, int64_t K_)
-      : tab(rtab.typed_data()), rc(rcut.typed_data()), ct(ctz.typed_data()), E0(e0.typed_data()),
+      : tab(rtab.typed_data()), rc(rcut.typed_data()), E0(e0.typed_data()), ct(ctz.typed_data<D>()),
         run(runs.typed_data()), grp(groups.typed_data()), fac(factor.typed_data()),
         nz(rtab.dimensions()[0]), ncoef(rtab.dimensions()[2]), F(rtab.dimensions()[3]), n_rnl(n_rnl_),
         n_runs(runs.dimensions()[0]), n_groups(groups.dimensions()[0]), n_nodes(factor.element_count()),
         N(ctz.dimensions()[1]), n_a(N - n_nodes), nY((lmax + 1) * (lmax + 1)), n(n_), n_leaf(n_leaf_),
-        g_leaf(0), K(K_), x0(x0_), h(h_), harm(static_cast<int>(lmax), solid != 0), hat(V * K_ * 3), A(n_a * V), wA(n_a * V), wB(n_a * V),
-        wl(n_a), tR(4 * F), tdR(4 * F), Ld((N - n_leaf) * V), L((N - n_leaf) * V), w((N - n_leaf) * V),
-        ctd(ct, ct + ctz.element_count()),
+        g_leaf(0), K(K_), x0(x0_), h(h_), harm(static_cast<int>(lmax), solid != 0), hat(V * K_ * 3), A(n_a * V), wl(n_a), tR(4 * F), tdR(4 * F),
+        wA(n_a * V), wB(n_a * V), L((N - n_leaf) * V), w((N - n_leaf) * V),
         R(V * ((K_ + 3) / 4) * F), dR(R.size()), Y(V * ((K_ + 3) / 4) * nY), dY(3 * Y.size()), at(n_a), q(nY), dq(nY),
         Kb((K_ + 3) / 4), vin(V * K * 3), G(V * K * 3),
         zin(V * K), idx(V * K), nzc(e0.element_count()) {
@@ -225,133 +221,49 @@ struct Site {
   }
 
   // The product basis of every lane (centre species zc): energies into e, dE/dA into wA.
-  typedef dreal vd __attribute__((vector_size(sizeof(dreal) * kLanes), aligned(sizeof(dreal)), may_alias));
-  static inline vd ld(const dreal *p) { return *(const vd *)p; }
-  static inline void st(dreal *p, vd x) { *(vd *)p = x; }
-#ifdef ACEJAX_FFI_DAG_FLOAT
-  // The energy's sums are double: kLanes doubles as two registers of the DAG's width (GCC lowers one vector
-  // twice the register's width through memory).
-  typedef double vh __attribute__((vector_size(4 * kLanes), aligned(8), may_alias));
-  typedef float fh __attribute__((vector_size(2 * kLanes)));
-  struct vdd {
-    vh a, b;
-    vdd operator+(vdd o) const { return {a + o.a, b + o.b}; }
-    vdd operator*(vdd o) const { return {a * o.a, b * o.b}; }
-    vdd &operator+=(vdd o) { a += o.a; b += o.b; return *this; }
-    double operator[](int i) const { return i < kLanes / 2 ? a[i] : b[i - kLanes / 2]; }
-  };
-  friend inline vdd operator*(double c, vdd x) { return {c * x.a, c * x.b}; }
-  friend inline vdd operator+(double c, vdd x) { return {c + x.a, c + x.b}; }
-  static inline vdd up(vd x) {
-    fh lo, hi;
-    __builtin_memcpy(&lo, &x, sizeof lo);
-    __builtin_memcpy(&hi, (const char *)&x + sizeof lo, sizeof hi);
-    return {__builtin_convertvector(lo, vh), __builtin_convertvector(hi, vh)};
-  }
-  static inline vd dn(vdd x) {
-    const fh lo = __builtin_convertvector(x.a, fh), hi = __builtin_convertvector(x.b, fh);
-    vd r;
-    __builtin_memcpy(&r, &lo, sizeof lo);
-    __builtin_memcpy((char *)&r + sizeof lo, &hi, sizeof hi);
-    return r;
-  }
-  static inline vdd ldd(const double *p) { return {*(const vh *)p, *(const vh *)(p + kLanes / 2)}; }
-  static inline void std_(double *p, vdd x) { *(vh *)p = x.a; *(vh *)(p + kLanes / 2) = x.b; }
-#else
-  typedef double vdd __attribute__((vector_size(8 * kLanes)));
-  static inline vdd up(vd x) { return x; }
-  static inline vd dn(vdd x) { return x; }
-  static inline vdd ldd(const double *p) { return ld(p); }
-  static inline void std_(double *p, vdd x) { st(p, x); }
-#endif
+  typedef D vd __attribute__((vector_size(sizeof(D) * V), aligned(sizeof(D)), may_alias));
+  static inline vd ld(const D *p) { return *(const vd *)p; }
+  static inline void st(D *p, vd x) { *(vd *)p = x; }
   void dag(int64_t zc) {
     const int64_t n_in = n_nodes - n_leaf, M = n_a + n_in;   // leaves: the last level, never stored
     const int32_t *gp = grp, *fa = fac;
-    dreal *Lv = L.data(), *wv = w.data(), *wa = wA.data(), *wb = wB.data();
-    const dreal *cz = ctd.data() + zc * N, *cn = cz + n_a, *Av = Lv;   // A in the DAG's type
-    const double *czd = ct + zc * N, *cnd = czd + n_a;
-    (void)cnd;
+    constexpr bool dbl = sizeof(D) == sizeof(double);
+    D *Lv = L.data(), *wv = w.data(), *wa = wA.data(), *wb = wB.data();
+    const D *cz = ct + zc * N, *cn = cz + n_a, *Av = Lv;   // A in the DAG's type
     std::copy(A.data(), A.data() + n_a * V, Lv);
 
     int64_t k = 0;
-#if ACEJAX_FFI_E == 4                                      // values and energy in double, adjoints in dreal
-    double *Ldv = Ld.data();
-    std::copy(A.data(), A.data() + n_a * V, Ldv);
-    for (int64_t g = 0; g < g_leaf; ++g) {
-      const vdd lp = ldd(Ldv + gp[2 * g] * V);
-      for (const int64_t end = gp[2 * g + 1]; k < end; ++k) {
-        const vdd x = lp * ldd(Ldv + fa[k] * V);
-        std_(Ldv + (n_a + k) * V, x);
-        st(Lv + (n_a + k) * V, dn(x));
-      }
-    }
-#define ACE_LD(j) ldd(Ldv + (j) * V)
-#else
     for (int64_t g = 0; g < g_leaf; ++g) {                // a group: one parent's children, together
       const vd lp = ld(Lv + gp[2 * g] * V);
       for (const int64_t end = gp[2 * g + 1]; k < end; ++k) st(Lv + (n_a + k) * V, lp * ld(Av + fa[k] * V));
     }
-#define ACE_LD(j) up(ld(Lv + (j) * V))
-#endif
-    vdd s0 = {}, s1 = {}, s2 = {}, s3 = {};                // four sums a lane: no add chain over M
+    vd s0 = {}, s1 = {}, s2 = {}, s3 = {};                 // four sums a lane: no add chain over M
     int64_t j = 0;
-    for (; ACEJAX_FFI_E != 3 && j + 3 < M; j += 4) {
-      const vdd c0 = czd[j] + vdd{}, c1 = czd[j + 1] + vdd{}, c2 = czd[j + 2] + vdd{}, c3 = czd[j + 3] + vdd{};
-      s0 += c0 * ACE_LD(j); s1 += c1 * ACE_LD(j + 1);
-      s2 += c2 * ACE_LD(j + 2); s3 += c3 * ACE_LD(j + 3);
+    for (; dbl && j + 3 < M; j += 4) {                    // (float: the energy is summed at the end)
+      const vd c0 = cz[j] + vd{}, c1 = cz[j + 1] + vd{}, c2 = cz[j + 2] + vd{}, c3 = cz[j + 3] + vd{};
+      s0 += c0 * ld(Lv + j * V); s1 += c1 * ld(Lv + (j + 1) * V);
+      s2 += c2 * ld(Lv + (j + 2) * V); s3 += c3 * ld(Lv + (j + 3) * V);
     }
-    for (; ACEJAX_FFI_E != 3 && j < M; ++j) {
-      const vdd c = czd[j] + vdd{};
-      s0 += c * ACE_LD(j);
+    for (; dbl && j < M; ++j) {
+      const vd c = cz[j] + vd{};
+      s0 += c * ld(Lv + j * V);
     }
-#undef ACE_LD
-    std::fill(wa, wa + n_a * V, dreal(0));
-    std::fill(wb, wb + n_a * V, dreal(0));
-    std::fill(wv, wv + M * V, dreal(0));                       // adjoints less their seeds (the readout, added on read)
-    vdd el = {};
-#if ACEJAX_FFI_E == 4
-    for (int64_t g = g_leaf; g < n_groups; ++g) {         // leaves: the energy's sums in double
-      const int32_t p = gp[2 * g];
-      const vd lp = ld(Lv + p * V);
-      vdd ad = {}, ad2 = {};
-      const int64_t end = gp[2 * g + 1];
-      for (; k + 1 < end; k += 2) {
-        const vd c = cn[k] + vd{}, c2 = cn[k + 1] + vd{};
-        const int64_t f = (int64_t)fa[k] * V, f2 = (int64_t)fa[k + 1] * V;
-        ad += cnd[k] * ldd(Ldv + f);
-        ad2 += cnd[k + 1] * ldd(Ldv + f2);
-        st(wa + f, ld(wa + f) + c * lp);
-        st(wb + f2, ld(wb + f2) + c2 * lp);
-      }
-      if (k < end) {
-        const int64_t f = (int64_t)fa[k] * V;
-        ad += cnd[k] * ldd(Ldv + f);
-        st(wa + f, ld(wa + f) + (cn[k] + vd{}) * lp);
-        ++k;
-      }
-      ad += ad2;
-      st(wv + p * V, ld(wv + p * V) + dn(ad));
-      el += ad * ldd(Ldv + p * V);
-    }
-#else
+    std::fill(wa, wa + n_a * V, D(0));
+    std::fill(wb, wb + n_a * V, D(0));
+    std::fill(wv, wv + M * V, D(0));                       // adjoints less their seeds (the readout, added on read)
+    vd el = {};
     for (int64_t g = g_leaf; g < n_groups; ++g) {         // leaves: energy and both adjoints in one pass
       const int32_t p = gp[2 * g];
       const vd lp = ld(Lv + p * V);
       vd acc = {};
       const int64_t end = gp[2 * g + 1];
       vd ac2 = {};
-#if ACEJAX_FFI_E == 2
-      vdd ad = {};
-#endif
       for (; k + 1 < end; k += 2) {                       // two dE/dA accumulators (wa, wb), a code site each:
         // on Zen 2 one accumulator's load waits for the previous leaf's store (1.16x, EPYC 7742)
         const vd c = cn[k] + vd{}, c2 = cn[k + 1] + vd{};
         const int64_t f = (int64_t)fa[k] * V, f2 = (int64_t)fa[k + 1] * V;
         acc += c * ld(Av + f);
         ac2 += c2 * ld(Av + f2);
-#if ACEJAX_FFI_E == 2
-        ad += cnd[k] * up(ld(Av + f)) + cnd[k + 1] * up(ld(Av + f2));
-#endif
         st(wa + f, ld(wa + f) + c * lp);
         st(wb + f2, ld(wb + f2) + c2 * lp);
       }
@@ -359,26 +271,15 @@ struct Site {
         const vd c = cn[k] + vd{};
         const int64_t f = (int64_t)fa[k] * V;
         acc += c * ld(Av + f);
-#if ACEJAX_FFI_E == 2
-        ad += cnd[k] * up(ld(Av + f));
-#endif
         st(wa + f, ld(wa + f) + c * lp);
         ++k;
       }
       acc += ac2;
       st(wv + p * V, ld(wv + p * V) + acc);
-#if ACEJAX_FFI_E == 2
-      el += ad * up(lp);
-#elif ACEJAX_FFI_E == 1
-      el += up(acc) * up(lp);
-#elif ACEJAX_FFI_E == 3
-#else
-      el += up(acc * lp);
-#endif
+      if (dbl) el += acc * lp;
     }
-#endif
-    const vdd tot = ((s0 + s1) + (s2 + s3)) + el;
-    for (int v = 0; v < V; ++v) e[v] += tot[v];
+    const vd tot = ((s0 + s1) + (s2 + s3)) + el;
+    for (int v = 0; dbl && v < V; ++v) e[v] += tot[v];
     for (int64_t g = g_leaf - 1; g >= 0; --g) {           // children before their parents
       const int32_t p = gp[2 * g];
       const vd lp = ld(Lv + p * V);
@@ -402,10 +303,8 @@ struct Site {
       acc += ac2;
       st(wv + p * V, ld(wv + p * V) + acc);
     }
-#if ACEJAX_FFI_E == 3
-    for (int64_t a = 0; a < n_a; ++a)                     // E = sum_a A_a w_a, w_a the adjoint of A_a as a node
-      for (int v = 0; v < V; ++v) e[v] += A[a * V + v] * (static_cast<double>(wv[a * V + v]) + czd[a]);
-#endif
+    for (int64_t a = 0; !dbl && a < n_a; ++a)             // E = sum_a A_a w_a, in double
+      for (int v = 0; v < V; ++v) e[v] += A[a * V + v] * (static_cast<double>(wv[a * V + v]) + cz[a]);
     for (int64_t a = 0; a < n_a; ++a) st(wa + a * V, (ld(wa + a * V) + ld(wb + a * V)) + ld(wv + a * V) + cz[a]);
   }
 
@@ -446,13 +345,13 @@ struct Site {
   }
 };
 
-// Rows [i0, i1) in batches of kLanes of one centre species z[i].  gather(i, vec, zs, ix) writes row i's live
+// Rows [i0, i1) in batches of the site's V lanes of one centre species z[i].  gather(i, vec, zs, ix) writes row i's live
 // neighbour vectors, species and atom (or slot) indices and returns their count; emit(i, e, nl, G, ix) takes
 // the row's energy and dE/dv.  A batch runs when it fills, and the remainders at the end with empty lanes
 // (no neighbours, results discarded).
-template <class Gather, class Emit>
-void batched(Site &site, int64_t i0, int64_t i1, const int32_t *z, Gather gather, Emit emit) {
-  constexpr int V = kLanes;
+template <class S, class Gather, class Emit>
+void batched(S &site, int64_t i0, int64_t i1, const int32_t *z, Gather gather, Emit emit) {
+  constexpr int V = S::V;
   const int64_t K = site.K;
   std::vector<std::vector<int64_t>> pend(site.nzc);
   auto run = [&](int64_t zc, std::vector<int64_t> &rows) {
@@ -488,7 +387,7 @@ ffi::Error AceDirectImpl(ffi::Buffer<ffi::F64> pos, ffi::Buffer<ffi::S32> specie
                          ffi::Buffer<ffi::S32> num, ffi::Buffer<ffi::F64> weight, ffi::Buffer<ffi::F64> rtab,
                          ffi::Buffer<ffi::F64> rcut,
                          ffi::Buffer<ffi::S32> runs, ffi::Buffer<ffi::S32> groups,
-                         ffi::Buffer<ffi::S32> factor, ffi::Buffer<ffi::F64> ct, ffi::Buffer<ffi::F64> e0,
+                         ffi::Buffer<ffi::S32> factor, ffi::AnyBuffer ct, ffi::Buffer<ffi::F64> e0,
                          double x0, double h, int64_t n, int64_t n_rnl, int64_t lmax, int64_t solid,
                          int64_t n_leaf, double rc2, ffi::ResultBuffer<ffi::F64> e,
                          ffi::ResultBuffer<ffi::F64> f) {
@@ -496,7 +395,8 @@ ffi::Error AceDirectImpl(ffi::Buffer<ffi::F64> pos, ffi::Buffer<ffi::S32> specie
   const double *x = pos.typed_data(), *wt = weight.typed_data();
   const int32_t *z = species.typed_data(), *nb = nbr.typed_data(), *cnt = num.typed_data();
   double *eo = e->typed_data(), *fo = f->typed_data();
-  Site site(rtab, rcut, runs, groups, factor, ct, e0, x0, h, n, n_rnl, lmax, solid, n_leaf, K);
+  if (ct.element_type() != ffi::F64 && ct.element_type() != ffi::F32)
+    return ffi::Error::InvalidArgument("the ACE kernel's readout is float64, or float32 for a float DAG");
   std::memset(eo, 0, atoms * sizeof(double));
   std::memset(fo, 0, atoms * 3 * sizeof(double));
   bool broken = false;
@@ -527,7 +427,12 @@ ffi::Error AceDirectImpl(ffi::Buffer<ffi::F64> pos, ffi::Buffer<ffi::S32> specie
         fo[3 * js[s] + c] -= wi * G[3 * s + c];
       }
   };
-  batched(site, 0, std::min(rows, atoms), z, gather, emit);
+  const auto run = [&](auto d) {                          // the DAG's type, from the readout's
+    Site<decltype(d)> site(rtab, rcut, runs, groups, factor, ct, e0, x0, h, n, n_rnl, lmax, solid, n_leaf, K);
+    batched(site, 0, std::min(rows, atoms), z, gather, emit);
+  };
+  if (ct.element_type() == ffi::F32) run(float{});
+  else run(double{});
   if (broken) {                                           // a NaN position: NaN out, not a dropped pair
     std::fill(eo, eo + atoms, std::numeric_limits<double>::quiet_NaN());
     std::fill(fo, fo + atoms * 3, std::numeric_limits<double>::quiet_NaN());
@@ -576,7 +481,7 @@ void parallel_rows(ffi::ThreadPool &pool, int64_t rows, int64_t max_threads, F b
 ffi::Error AceEdgesImpl(ffi::ThreadPool pool, ffi::Buffer<ffi::F64> rij, ffi::Buffer<ffi::S32> zi,
                         ffi::Buffer<ffi::S32> zj, ffi::Buffer<ffi::PRED> mask, ffi::Buffer<ffi::F64> rtab,
                         ffi::Buffer<ffi::F64> rcut, ffi::Buffer<ffi::S32> runs, ffi::Buffer<ffi::S32> groups,
-                        ffi::Buffer<ffi::S32> factor, ffi::Buffer<ffi::F64> ct, ffi::Buffer<ffi::F64> e0,
+                        ffi::Buffer<ffi::S32> factor, ffi::AnyBuffer ct, ffi::Buffer<ffi::F64> e0,
                         double x0, double h, int64_t n, int64_t n_rnl, int64_t lmax, int64_t solid,
                         int64_t n_leaf, int64_t max_threads, ffi::ResultBuffer<ffi::F64> e,
                         ffi::ResultBuffer<ffi::F64> g) {
@@ -585,8 +490,9 @@ ffi::Error AceEdgesImpl(ffi::ThreadPool pool, ffi::Buffer<ffi::F64> rij, ffi::Bu
   const int32_t *z = zi.typed_data(), *zn = zj.typed_data();
   const bool *live = mask.typed_data();
   double *eo = e->typed_data(), *go = g->typed_data();
+  if (ct.element_type() != ffi::F64 && ct.element_type() != ffi::F32)
+    return ffi::Error::InvalidArgument("the ACE kernel's readout is float64, or float32 for a float DAG");
   parallel_rows(pool, rows, max_threads, [&](int64_t i0, int64_t i1) {
-    Site site(rtab, rcut, runs, groups, factor, ct, e0, x0, h, n, n_rnl, lmax, solid, n_leaf, K);
     auto gather = [&](int64_t i, double *V, int32_t *zs, int32_t *slot) {
       int64_t nl = 0;
       for (int64_t k = 0; k < K; ++k)
@@ -603,7 +509,12 @@ ffi::Error AceEdgesImpl(ffi::ThreadPool pool, ffi::Buffer<ffi::F64> rij, ffi::Bu
       std::memset(gi, 0, 3 * K * sizeof(double));
       for (int64_t s = 0; s < nl; ++s) std::memcpy(gi + 3 * slot[s], &G[3 * s], 3 * sizeof(double));
     };
-    batched(site, i0, i1, z, gather, emit);
+    const auto run = [&](auto d) {
+      Site<decltype(d)> site(rtab, rcut, runs, groups, factor, ct, e0, x0, h, n, n_rnl, lmax, solid, n_leaf, K);
+      batched(site, i0, i1, z, gather, emit);
+    };
+    if (ct.element_type() == ffi::F32) run(float{});
+    else run(double{});
   });
   return ffi::Error::Success();
 }
@@ -622,7 +533,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(AceEdges, AceEdgesImpl,
                                   .Arg<ffi::Buffer<ffi::S32>>()     // A runs (n_runs, 4): a0, r, y0, len
                                   .Arg<ffi::Buffer<ffi::S32>>()     // DAG groups (n_groups, 2): parent, end
                                   .Arg<ffi::Buffer<ffi::S32>>()     // DAG A factor per node
-                                  .Arg<ffi::Buffer<ffi::F64>>()     // readout (NZ, n_A + nodes)
+                                  .Arg<ffi::AnyBuffer>()            // readout (NZ, n_A + nodes): its type is the DAG's
                                   .Arg<ffi::Buffer<ffi::F64>>()     // E0 (NZ,)
                                   .Attr<double>("x0")
                                   .Attr<double>("h")
@@ -647,7 +558,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(AceDirect, AceDirectImpl,
                                   .Arg<ffi::Buffer<ffi::S32>>()     // A runs (n_runs, 4): a0, r, y0, len
                                   .Arg<ffi::Buffer<ffi::S32>>()     // DAG groups (n_groups, 2): parent, end
                                   .Arg<ffi::Buffer<ffi::S32>>()     // DAG A factor per node
-                                  .Arg<ffi::Buffer<ffi::F64>>()     // readout (NZ, n_A + nodes)
+                                  .Arg<ffi::AnyBuffer>()            // readout (NZ, n_A + nodes): its type is the DAG's
                                   .Arg<ffi::Buffer<ffi::F64>>()     // E0 (NZ,)
                                   .Attr<double>("x0")
                                   .Attr<double>("h")

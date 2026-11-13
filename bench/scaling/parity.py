@@ -54,6 +54,9 @@ TOL = {"mlpace": (1e-6, 1e-5), "acejax": (1e-10, 1e-9), "mace": (1e-6, None),
        # in ACECalculator alone at 1e-10 (1218/2435 intervals; 1.3e-11 analytic); its error vs analytic is ~1e-6.  Also
     # the kernel bundles' radial table in r (accuracy_cost.timing.gate_tol)
        "acejax-splined": (1e-10, 1e-8),
+       # a kernel bundle with ffi_precision="mixed" (the product basis in float32) against the float64 model:
+       # o4d20 4e-6 eV/atom, 5e-5 eV/A; o4d16 1.8e-4 eV/A; the smaller models' readouts cancel more
+       "acejax-mixed": (2e-4, 1e-3),
        "acepot": (1e-10, 1e-9), "trim": (1e-10, 1e-9), "trim-ace": (1e-5, 1e-3),
        "acepotentials-trim": (1e-10, 1e-9),       # accuracy_cost: the trim library vs the ace-jax fit (exact radials)
        "gap": (1e-6, 1e-5),

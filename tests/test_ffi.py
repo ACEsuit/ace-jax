@@ -156,6 +156,44 @@ def test_gpu_ffi_kept_values_match_cpu_kernel(device, kernel, monkeypatch, name,
     assert np.abs(f1 - f0).max() <= 1e-10 * np.abs(f0).max()
 
 
+@pytest.mark.parametrize("name", NAMES)
+def test_mixed_precision_kernel_is_close_to_float64(device, name):
+    """ffi precision "mixed": the product basis in float32 and the rest in float64, in the same library, by
+    the readout's type. Energies and forces are float32-close to the float64 kernel's, and not equal (so
+    the float32 form did run). The bounds are loose: a small model's readout cancels more than a large
+    one's."""
+    m, meta, _ = load(str(FIXTURES / f"{name}.npz"))
+    m1, rcut = lean(m, spline_tol=None, radial_table=True), float(meta["rcut"])
+    at = cluster(meta)
+    els = [int(z) for z in meta["elements"]]
+    pos, z, graph = matrix_inputs(at, rcut + 1.0, [els.index(int(n)) for n in at.numbers])
+    assert ffi.kernel_inputs(m1, device == "gpu", "mixed")[1][5].dtype == jnp.float32
+    out = []
+    with jax.default_device(jax.devices(device)[0]):
+        for precision in (None, "mixed"):
+            efn, ffn = ffi.lammps_fns(m1, len(els), list(range(len(els))), rcut, device == "gpu", precision)
+            out.append([np.asarray(a) for a in (efn(pos, z, graph), ffn(pos, z, graph))])
+    (e0, f0), (e1, f1) = out
+    assert e1.dtype == np.float64 and f1.dtype == np.float64
+    assert 0 < np.abs(e1 - e0).max() <= 2e-5 * max(np.abs(e0).max(), 1.0)
+    assert 0 < np.abs(f1 - f0).max() <= 2e-4 * max(np.abs(f0).max(), 1.0)
+
+
+def test_mixed_precision_option():
+    """The option's values, and that it is the kernel's, for float64."""
+    path = str(FIXTURES / "si_fitted.npz")
+    m, _, _ = load(path)
+    m1 = lean(m, spline_tol=None, radial_table=True)
+    with pytest.raises(ValueError, match="ffi_precision is one of"):
+        ffi.kernel_inputs(m1, precision="float32")
+    with pytest.raises(ValueError, match="float64 model"):
+        ffi.kernel_inputs(with_dtype(m1, "float32"), True, "mixed")
+    with pytest.raises(ValueError, match="pass ffi=True"):
+        ACECalculator(path, ffi_precision="mixed")
+    with pytest.raises(ValueError, match="is for float64"):
+        ACECalculator(path, ffi="auto", ffi_precision="mixed", dtype="float32")
+
+
 def test_ffi_needs_a_table():
     m, _, _ = load(str(FIXTURES / "si_fitted.npz"))
     with pytest.raises(ValueError, match="radial table"):
@@ -243,6 +281,14 @@ def test_export_ffi_bundle(kernel, tmp_path, monkeypatch):
     assert pathlib.Path(lib).parent == tmp_path / "cache" and aj["layout"] == "matrix" and aj["radial_table"]
     assert aj["aa_dag"] == "greedy" and aj["k_dense"] is None and aj["block_rows"] is None
     assert ffi.TARGET in str(b)                       # the contract names the custom call
+    assert aj["ffi_precision"] == "float64"
+    mixed = export_lammps(m, meta, tmp_path / "m.json", **kw, ffi_precision="mixed")["ace_jax"]
+    assert mixed["ffi_precision"] == "mixed" and mixed["ffi"] == aj["ffi"]       # the same library
+    from test_export_lammps import LAMMPS_JAX_KEYS    # lammps-jax reads its keys wherever they are in the file
+    keys = lambda d: set(d) | set().union(*(keys(v) for v in d.values() if isinstance(v, dict)))
+    assert not keys(mixed) & LAMMPS_JAX_KEYS
+    with pytest.raises(ValueError, match="ffi_precision='mixed'"):
+        export_lammps(m, meta, tmp_path / "x.json", **{**kw, "ffi": False}, ffi_precision="mixed")
     for bad in (dict(layout="dense"), dict(dtype="float32")):
         with pytest.raises(ValueError, match="ffi=True"):
             export_lammps(m, meta, tmp_path / "x.json", **{**kw, **bad})
@@ -515,7 +561,8 @@ def test_calculator_ffi_auto_and_refusals(backend_kernel):
         assert c.ffi is None and why in c.ffi_reason
         with pytest.raises(ValueError, match="cannot run here"):
             ACECalculator(path, ffi=True, **kw)
-    assert ACECalculator(path, ffi="auto").ffi is not None
+    assert ACECalculator(path, ffi="auto").ffi["precision"] == "float64"
+    assert ACECalculator(path, ffi="auto", ffi_precision="mixed").ffi["precision"] == "mixed"
     c = ACECalculator(str(pace_fixture(FIXTURES / "pace" / "si_chebpow_fs.yace")), ffi="auto")
     assert c.ffi is None and "not a linear ACEModel" in c.ffi_reason
     with pytest.raises(ValueError, match="ffi must be"):

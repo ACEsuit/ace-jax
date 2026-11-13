@@ -627,3 +627,66 @@ How it was found (Nsight Compute in Sulis `gpu-devel` jobs; the SCRTP workstatio
 - No gain: a plane per row instead of interleaved batch values (the compiler loads an interleaved batch with one
   128-bit load; 13% slower), the mid-level adjoints from a list (5-10% slower on both GPUs), other batch sizes
   (job 2282429).
+
+## Mixed precision for the kernels (2026-11-13)
+
+`ffi_precision="mixed"` (off by default) runs the product-basis DAG and its adjoint in float32 and everything
+else (bond vectors, radial table, harmonics, A, the force contraction, the outputs) in float64. Both kernels take
+the DAG's type from the readout array, which `ffi.kernel_inputs(precision="mixed")` passes in float32, so one
+library holds both forms: the C++ kernel's `Site<float>` batches 8 sites a 256-bit register, the CUDA pass is
+`ace_dag<float, double, ...>` with its float32 batch of 4 rows and read-ahead of 8. The energy is
+sum_a A_a w_a in double, w_a the adjoint of A_a as a node.
+
+Speed, o4d20 unless said. The kernel alone (`ACECalculator`, 512 Si atoms, EPYC 7742, job 2283957), µs/atom:
+
+| model | one process, float64 | mixed | 128 processes, float64 | mixed |
+|---|---|---|---|---|
+| o4d20 | 92 | 54 (1.71x) | 102 | 62 (1.64x) |
+| o4d16 | 25.3 | 19.3 (1.31x) | 30.2 | 24.1 (1.26x) |
+| o3d12 | 10.4 | 10.2 | 13.8 | 13.9 |
+
+LAMMPS, 128 x 1, Si 4,096 atoms, the same library and node (job 2283977, node051, `envs/
+sulis-cpu-ffi-mixed.sbatch`; rows `sulis-cpu-128x1-ffi-mixed.jsonl`, not plotted, and its float64 control),
+µs/atom-step:
+
+| model | float64 | mixed | ratio |
+|---|---|---|---|
+| o4d14 | 0.217 | 0.195 | 1.11x |
+| o4d16 | 0.333 | 0.302 | 1.10x |
+| o4d20 | 1.572 | 1.133 | 1.39x |
+
+An A100 (Modal, `ACECalculator`, 32,768 atoms), µs/atom, float64 / mixed / float32: o4d20 0.98 / 0.71 / 0.65;
+o4d16 0.38 / 0.34 / 0.28; o4d12 0.24 / 0.23 / 0.18; o3d12 0.23 / 0.21 / 0.17. Mixed is slower than float32
+there (the density and forces passes stay float64) and no more accurate in a small box: max |dF| against
+float64, mixed / float32, o4d20 5.9e-5 / 6.1e-5 eV/Å, o4d16 2.1e-4 / 2.1e-4, o4d12 4.7e-4 / 4.8e-4. Its use on
+a GPU is LAMMPS in a large box: a float32 bundle takes float32 positions, and on a 512-atom cluster moved 0,
+100, 1000 and 10,000 Å from the origin its max |dF| is 5.2e-5, 1.2e-4, 8.3e-4 and 1.2e-2 eV/Å, while the
+mixed bundle's stays 3.9e-5.
+
+Accuracy on the CPU, o4d20 against the float64 kernel: 512 rattled atoms, max |dF| 4.6e-5 eV/Å (rms 1.5e-5); a
+215-atom vacancy cell along a 1e-3 Å line:
+
+| energy | noise, meV rms | speed-up (Xeon Gold 6130) |
+|---|---|---|
+| summed in float32 | 0.73 | 1.58x |
+| readout sums in double, float32 node values | 0.10 | 1.32x |
+| sum_a A_a w_a in double (shipped) | 0.14 | 1.62x |
+| node values and energy in double, adjoints in float32 | 0 | 0.95x |
+
+So the noise is in the float32 node values, not the sums, and an exact energy costs the whole gain. o4d16
+carries 1.1 meV in the same cell (its readout cancels more).
+
+Silicon testing framework, o4d20, the float64 kernel (`ACEk_o4d20`) against mixed (`ACEkf_o4d20`), both on the
+same radial table:
+
+| relaxations | float64 | mixed | largest QoI difference, in score tolerances |
+|---|---|---|---|
+| the protocol's (PreconLBFGS, Armijo) | 16 of 16 tests | 10 of 16 | 0.004 (12 QoIs both have) |
+| ODE12r (`SI_TESTS_OPTIMIZER=ode12r`) | 16 of 16 | 16 of 16 | 0.013 (all 21; tetrahedral interstitial) |
+
+The six failures (bc8, st12, vacancy, interstitials, stacking fault, relaxed (100) surface) are "Armijo
+linesearch failed", as for float32 (docs/dev/fp32-results.md). The optimiser alone moves diamond C44 by 0.64
+tolerance on the float64 kernel, far more than the precision does.
+
+At the target, mixed leaves the CPU ranking as it was: o4d20 1.13 against GRACE-2L 0.81 and MACE c16L0
+on Symmetrix 0.59 µs/atom-step.
