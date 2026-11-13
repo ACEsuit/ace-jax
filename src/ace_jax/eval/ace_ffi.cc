@@ -159,6 +159,7 @@ struct Site {
   double x0, h;
   Harmonics harm;
   std::vector<double> hat, A, wl, tR, tdR;
+  std::vector<double> Ld;                                 // ACEJAX_FFI_E 4: the inner values in double
   std::vector<dreal> wA, wB, L, w, ctd;                   // the DAG's own, and the readout in its type
   std::vector<v4> R, dR, Y, dY, at, q, dq;               // [lane][block of 4 neighbours][feature]
   int64_t Kb;
@@ -177,7 +178,7 @@ struct Site {
         n_runs(runs.dimensions()[0]), n_groups(groups.dimensions()[0]), n_nodes(factor.element_count()),
         N(ctz.dimensions()[1]), n_a(N - n_nodes), nY((lmax + 1) * (lmax + 1)), n(n_), n_leaf(n_leaf_),
         g_leaf(0), K(K_), x0(x0_), h(h_), harm(static_cast<int>(lmax), solid != 0), hat(V * K_ * 3), A(n_a * V), wA(n_a * V), wB(n_a * V),
-        wl(n_a), tR(4 * F), tdR(4 * F), L((N - n_leaf) * V), w((N - n_leaf) * V),
+        wl(n_a), tR(4 * F), tdR(4 * F), Ld((N - n_leaf) * V), L((N - n_leaf) * V), w((N - n_leaf) * V),
         ctd(ct, ct + ctz.element_count()),
         R(V * ((K_ + 3) / 4) * F), dR(R.size()), Y(V * ((K_ + 3) / 4) * nY), dY(3 * Y.size()), at(n_a), q(nY), dq(nY),
         Kb((K_ + 3) / 4), vin(V * K * 3), G(V * K * 3),
@@ -227,8 +228,42 @@ struct Site {
   typedef dreal vd __attribute__((vector_size(sizeof(dreal) * kLanes), aligned(sizeof(dreal)), may_alias));
   static inline vd ld(const dreal *p) { return *(const vd *)p; }
   static inline void st(dreal *p, vd x) { *(vd *)p = x; }
-  typedef double vdd __attribute__((vector_size(8 * kLanes)));   // the energy's sums are double
-  static inline vdd up(vd x) { return __builtin_convertvector(x, vdd); }
+#ifdef ACEJAX_FFI_DAG_FLOAT
+  // The energy's sums are double: kLanes doubles as two registers of the DAG's width (GCC lowers one vector
+  // twice the register's width through memory).
+  typedef double vh __attribute__((vector_size(4 * kLanes), aligned(8), may_alias));
+  typedef float fh __attribute__((vector_size(2 * kLanes)));
+  struct vdd {
+    vh a, b;
+    vdd operator+(vdd o) const { return {a + o.a, b + o.b}; }
+    vdd operator*(vdd o) const { return {a * o.a, b * o.b}; }
+    vdd &operator+=(vdd o) { a += o.a; b += o.b; return *this; }
+    double operator[](int i) const { return i < kLanes / 2 ? a[i] : b[i - kLanes / 2]; }
+  };
+  friend inline vdd operator*(double c, vdd x) { return {c * x.a, c * x.b}; }
+  friend inline vdd operator+(double c, vdd x) { return {c + x.a, c + x.b}; }
+  static inline vdd up(vd x) {
+    fh lo, hi;
+    __builtin_memcpy(&lo, &x, sizeof lo);
+    __builtin_memcpy(&hi, (const char *)&x + sizeof lo, sizeof hi);
+    return {__builtin_convertvector(lo, vh), __builtin_convertvector(hi, vh)};
+  }
+  static inline vd dn(vdd x) {
+    const fh lo = __builtin_convertvector(x.a, fh), hi = __builtin_convertvector(x.b, fh);
+    vd r;
+    __builtin_memcpy(&r, &lo, sizeof lo);
+    __builtin_memcpy((char *)&r + sizeof lo, &hi, sizeof hi);
+    return r;
+  }
+  static inline vdd ldd(const double *p) { return {*(const vh *)p, *(const vh *)(p + kLanes / 2)}; }
+  static inline void std_(double *p, vdd x) { *(vh *)p = x.a; *(vh *)(p + kLanes / 2) = x.b; }
+#else
+  typedef double vdd __attribute__((vector_size(8 * kLanes)));
+  static inline vdd up(vd x) { return x; }
+  static inline vd dn(vdd x) { return x; }
+  static inline vdd ldd(const double *p) { return ld(p); }
+  static inline void std_(double *p, vdd x) { st(p, x); }
+#endif
   void dag(int64_t zc) {
     const int64_t n_in = n_nodes - n_leaf, M = n_a + n_in;   // leaves: the last level, never stored
     const int32_t *gp = grp, *fa = fac;
@@ -239,25 +274,66 @@ struct Site {
     std::copy(A.data(), A.data() + n_a * V, Lv);
 
     int64_t k = 0;
+#if ACEJAX_FFI_E == 4                                      // values and energy in double, adjoints in dreal
+    double *Ldv = Ld.data();
+    std::copy(A.data(), A.data() + n_a * V, Ldv);
+    for (int64_t g = 0; g < g_leaf; ++g) {
+      const vdd lp = ldd(Ldv + gp[2 * g] * V);
+      for (const int64_t end = gp[2 * g + 1]; k < end; ++k) {
+        const vdd x = lp * ldd(Ldv + fa[k] * V);
+        std_(Ldv + (n_a + k) * V, x);
+        st(Lv + (n_a + k) * V, dn(x));
+      }
+    }
+#define ACE_LD(j) ldd(Ldv + (j) * V)
+#else
     for (int64_t g = 0; g < g_leaf; ++g) {                // a group: one parent's children, together
       const vd lp = ld(Lv + gp[2 * g] * V);
       for (const int64_t end = gp[2 * g + 1]; k < end; ++k) st(Lv + (n_a + k) * V, lp * ld(Av + fa[k] * V));
     }
+#define ACE_LD(j) up(ld(Lv + (j) * V))
+#endif
     vdd s0 = {}, s1 = {}, s2 = {}, s3 = {};                // four sums a lane: no add chain over M
     int64_t j = 0;
     for (; ACEJAX_FFI_E != 3 && j + 3 < M; j += 4) {
       const vdd c0 = czd[j] + vdd{}, c1 = czd[j + 1] + vdd{}, c2 = czd[j + 2] + vdd{}, c3 = czd[j + 3] + vdd{};
-      s0 += c0 * up(ld(Lv + j * V)); s1 += c1 * up(ld(Lv + (j + 1) * V));
-      s2 += c2 * up(ld(Lv + (j + 2) * V)); s3 += c3 * up(ld(Lv + (j + 3) * V));
+      s0 += c0 * ACE_LD(j); s1 += c1 * ACE_LD(j + 1);
+      s2 += c2 * ACE_LD(j + 2); s3 += c3 * ACE_LD(j + 3);
     }
     for (; ACEJAX_FFI_E != 3 && j < M; ++j) {
       const vdd c = czd[j] + vdd{};
-      s0 += c * up(ld(Lv + j * V));
+      s0 += c * ACE_LD(j);
     }
+#undef ACE_LD
     std::fill(wa, wa + n_a * V, dreal(0));
     std::fill(wb, wb + n_a * V, dreal(0));
     std::fill(wv, wv + M * V, dreal(0));                       // adjoints less their seeds (the readout, added on read)
     vdd el = {};
+#if ACEJAX_FFI_E == 4
+    for (int64_t g = g_leaf; g < n_groups; ++g) {         // leaves: the energy's sums in double
+      const int32_t p = gp[2 * g];
+      const vd lp = ld(Lv + p * V);
+      vdd ad = {}, ad2 = {};
+      const int64_t end = gp[2 * g + 1];
+      for (; k + 1 < end; k += 2) {
+        const vd c = cn[k] + vd{}, c2 = cn[k + 1] + vd{};
+        const int64_t f = (int64_t)fa[k] * V, f2 = (int64_t)fa[k + 1] * V;
+        ad += cnd[k] * ldd(Ldv + f);
+        ad2 += cnd[k + 1] * ldd(Ldv + f2);
+        st(wa + f, ld(wa + f) + c * lp);
+        st(wb + f2, ld(wb + f2) + c2 * lp);
+      }
+      if (k < end) {
+        const int64_t f = (int64_t)fa[k] * V;
+        ad += cnd[k] * ldd(Ldv + f);
+        st(wa + f, ld(wa + f) + (cn[k] + vd{}) * lp);
+        ++k;
+      }
+      ad += ad2;
+      st(wv + p * V, ld(wv + p * V) + dn(ad));
+      el += ad * ldd(Ldv + p * V);
+    }
+#else
     for (int64_t g = g_leaf; g < n_groups; ++g) {         // leaves: energy and both adjoints in one pass
       const int32_t p = gp[2 * g];
       const vd lp = ld(Lv + p * V);
@@ -300,6 +376,7 @@ struct Site {
       el += up(acc * lp);
 #endif
     }
+#endif
     const vdd tot = ((s0 + s1) + (s2 + s3)) + el;
     for (int v = 0; v < V; ++v) e[v] += tot[v];
     for (int64_t g = g_leaf - 1; g >= 0; --g) {           // children before their parents
