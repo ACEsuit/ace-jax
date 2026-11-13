@@ -10,6 +10,12 @@
   is unchanged (same bodies, same order). For S = 12, order 4, degree 14 the spec takes 1.7 s instead of
   hours; the cost no longer grows with S.
 
+### Testing
+
+- The lock takes matscipy-neighbours 1.1.0 (the `native` extra; its floor stays `>=1.0`). A test that
+  compared three evaluations of one structure bitwise now allows 16 ulp: on a GPU the order of a sum can
+  change between calls.
+
 ## 0.5.3 (2026-11-05)
 
 **Highlights.** Large linear fits are much faster. The training statistics are approximately 6x faster per
