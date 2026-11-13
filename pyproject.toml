@@ -58,9 +58,11 @@ cuda13 = ["jax[cuda13]>=0.10.1", "nvidia-cuda-nvcc>=13.0; sys_platform == 'linux
 # Native (C++) CPU acceleration.  matscipy-neighbours (OpenMP CPU neighbour lists, native dense
 # neighbour_matrix; ace-jax falls back to ASE's list without it, so NOT a core dep) has binary wheels
 # from 1.1 (Linux x86_64/aarch64, macOS arm64, Windows x64), so installing it needs no compiler; 1.0 and
-# other platforms build the sdist (CMake + a C++17 compiler).  A C++17 compiler is still what builds the
-# C++ kernel of ace_jax.eval.ffi (ACECalculator(ffi=...), CPU LAMMPS bundles), which needs no package:
-# its source is in this wheel, compiled on first use or by `aj native --build`.  The wheels are CPU-only.
+# other platforms build the sdist (CMake + a C++17 compiler).  The C++ kernel of ace_jax.eval.ffi
+# (ACECalculator(ffi=...), CPU LAMMPS bundles) needs no package either: ace-jax's own platform wheels
+# (Linux x86_64/aarch64, macOS arm64) carry it compiled, and every wheel carries its source, which a
+# C++17 compiler builds on first use or by `aj native --build` elsewhere, or with ACEJAX_FFI_FLAGS (e.g.
+# -march=native).  matscipy-neighbours' wheels are CPU-only.
 # For matscipy-neighbours' GPU backend (graph built on the device, handed to JAX via DLPack), build it
 # from source against the local CUDA toolkit (nvcc on PATH, e.g. after `module load CUDA` on a cluster):
 #   pip install --no-binary matscipy-neighbours -C cmake.define.ENABLE_CUDA=ON \
@@ -103,8 +105,13 @@ dev = [
 [tool.hatch.build.targets.wheel]
 packages = ["src/ace_jax"]
 
+# hatch_build.py: with ACEJAX_KERNEL_DIR (kernel-wheels.yml) the wheel carries the compiled C++ kernel and a
+# platform tag; without it, the pure wheel.
+[tool.hatch.build.targets.wheel.hooks.custom]
+path = "hatch_build.py"
+
 [tool.hatch.build.targets.sdist]
-include = ["/src/ace_jax", "/README.md", "/LICENSE"]   # anchored: unanchored names match nested READMEs too
+include = ["/src/ace_jax", "/hatch_build.py", "/README.md", "/LICENSE"]   # anchored: unanchored names match nested READMEs too
 
 [tool.pytest.ini_options]
 pythonpath = ["src", "tests"]

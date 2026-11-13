@@ -4,6 +4,18 @@
 
 ### Added
 
+- **Platform wheels with the compiled C++ kernel.** The ace-jax wheels for Linux (x86_64 and aarch64) and
+  for macOS (arm64) now include the compiled CPU kernel, so `ACECalculator(ffi=True)` or `ffi="auto"`,
+  `BatchCalculator`, JAX-MD and CPU LAMMPS bundles need no C++ compiler there, and there is no compile on
+  first use. Before, `ffi="auto"` used the slower JAX model on a machine without a compiler. The x86_64
+  kernel uses AVX2 (x86-64-v3): within 5% of `-march=native` on a Xeon Silver 4216 and 2% on an EPYC 7742;
+  CPUs without AVX2 get a baseline build. Other platforms take the pure wheel and compile the kernel on
+  first use, as before. To compile with your own flags, set `ACEJAX_FFI_FLAGS` (for example
+  `-O3 -march=native`); `ACEJAX_FFI_PREBUILT=0` turns the included kernel off. `aj native` reports which
+  kernel is in use. The CUDA kernel is still compiled on first use. `docs/dev/kernel-wheels.md`.
+
+### Added
+
 - **Mixed precision for the kernels** (`ffi_precision="mixed"`, `aj export --ffi-precision mixed`; off by
   default). The C++ and CUDA kernels for linear ACE can calculate the product basis in float32 and all
   other quantities in float64. For the silicon model o4d20, LAMMPS on 128 cores is 1.4 times faster and an

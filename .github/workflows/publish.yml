@@ -1,5 +1,6 @@
 name: publish
-# Build, check and publish the ace-jax sdist and wheel (RELEASING.md).
+# Build, check and publish the ace-jax sdist, the pure wheel and the platform wheels with the compiled C++
+# kernel (kernel-wheels.yml: Linux x86_64/aarch64, macOS arm64) (RELEASING.md).
 #  - a `v<version>` tag uploads to PyPI (environment `pypi`);
 #  - a manual run uploads to TestPyPI (environment `testpypi`), a dry run of the same files.
 # Both use trusted publishing (OIDC): the PyPI / TestPyPI project trusts this workflow
@@ -41,8 +42,11 @@ jobs:
       - uses: actions/upload-artifact@v4
         with: { name: dist, path: dist }
 
+  kernel:                                  # the platform wheels, each built and run in a clean environment
+    uses: ./.github/workflows/kernel-wheels.yml
+
   publish:
-    needs: build
+    needs: [build, kernel]
     runs-on: ubuntu-latest
     environment:
       name: ${{ github.event_name == 'push' && 'pypi' || 'testpypi' }}
@@ -53,6 +57,14 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with: { name: dist, path: dist }
+      - uses: actions/download-artifact@v4
+        with: { pattern: "kernel-wheel-*", path: dist, merge-multiple: true }
+      - name: Exactly the sdist, the pure wheel and the three platform wheels
+        run: |
+          ls -l dist
+          test "$(ls dist | wc -l)" = 5
+          ls dist/ace_jax-*.tar.gz dist/ace_jax-*-py3-none-any.whl
+          for p in manylinux_2_28_x86_64 manylinux_2_28_aarch64 macosx_11_0_arm64; do ls dist/ace_jax-*-py3-none-$p.whl; done
       - uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist
