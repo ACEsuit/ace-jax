@@ -104,7 +104,6 @@ FAM = {  # family: (label, colour, marker, linestyle, filled, qoi model name pat
     "ye3t_sym_fit": ("YE3T density, λ = (N) (ye3t-methods)",             NEUTRAL_INK,  "H", "-",  True,  "YE3T_{s}"),
     # the same descriptors under the benchmark's loss (fit_ye3t.py "Weighted family"): hollow, dash-dot
     "ye3t_sym_wfit": ("YE3T density, benchmark's weights and virials",   NEUTRAL_INK,  "H", "-.", False, "YE3Tw_{s}"),
-    "ye3t_mix_A":   ("YE3T density, mixed intermediates (same model)",   NEUTRAL_INK,  "H", "--", False, "YE3TmixA_{s}"),
     "ye3t_mix_T":   ("YE3T tagged (ye3t-methods)",                       NEUTRAL_INK,  "H", ":",  False, "YE3TmixT_{s}"),
 }
 # families fitted with several seeds (sizes "<size>_s<k>"): one point per size, the mean over seeds, with the

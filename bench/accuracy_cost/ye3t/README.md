@@ -48,6 +48,7 @@ ChebExpCos radials. `ye3t_sym_fit` sets `young_kappa: symmetric_only`. `ye3t_mix
 all_valid for those carriers"; `ye3t_methods/config.py`: "commutative density resolves all_valid Young blocks to
 physically trivial block sectors"). The descriptor rows are identical bit for bit (`fit_ye3t.same_rows` returns
 0.0), and the fitted coefficients are identical. `ye3t_mix_A` is fitted at three sizes to show this.
+It is not drawn on the figures: its points are those of `ye3t_sym_fit`.
 
 ### 2b. The same descriptors under the benchmark's loss: family `ye3t_sym_wfit`
 
