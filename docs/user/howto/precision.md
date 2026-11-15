@@ -130,13 +130,15 @@ uses most of the time:
 | o4d20 (5,476 basis functions) | 1.4 times | 1.4 times |
 | o4d16 | 1.1 times | 1.1 to 1.2 times |
 | o4d14 | 1.1 times | no gain |
-| order 3 | no gain | no gain |
+| o4d12 and order 3 | no gain | no gain |
 
 The errors are those of float32 for the product basis. For the silicon model
 o4d20, the maximum force error is approximately 0.05 meV/Å, and the energy has
 noise of approximately 0.1 meV in a cell of 200 atoms. For o4d16, the
 maximum force error is approximately 0.2 meV/Å and the noise is 1 meV. The
-errors are larger for smaller models, as they are in float32. With a
+errors are larger for smaller models, as they are in float32. The smallest
+models also have an energy offset that is the same for each atom:
+approximately 0.6 meV for o3d8 and 0.2 meV for o3d10 in bulk silicon. With a
 force-only optimiser, mixed precision changed no property of o4d20 by more
 than 0.013 of its tolerance in the [silicon benchmark](../benchmarks.md).
 

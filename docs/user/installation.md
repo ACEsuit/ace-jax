@@ -78,10 +78,24 @@ matscipy-neighbours with the CUDA toolkit of your machine:
 Without this step, ace-jax on a GPU builds the neighbour list on the CPU.
 The results agree to round-off.
 
-A C++17 compiler builds the C++ kernel for linear ACE on CPUs (the ASE
-calculator with `ffi=True`, and LAMMPS bundles). The kernel is included with
-ace-jax as source code. ace-jax compiles it the first time, and keeps it in a
-cache.
+ace-jax has a C++ kernel for linear ACE on CPUs (the ASE calculator with
+`ffi=True`, and LAMMPS bundles). The ace-jax wheels for Linux (x86_64 and
+aarch64) and for macOS (arm64) include the compiled kernel. Thus the kernel
+needs no compiler and no extra on these platforms.
+
+On other platforms, the kernel is included as source code. A C++17 compiler
+builds it the first time, and ace-jax keeps it in a cache.
+
+The included kernel for x86_64 uses AVX2. In our tests it was as fast as a
+kernel compiled for the machine (`-march=native`), to 5%. To compile the
+kernel with your own flags, set `ACEJAX_FFI_FLAGS`:
+
+```bash
+ACEJAX_FFI_FLAGS="-O3 -march=native" aj native --build
+```
+
+Set the same variable when you run ace-jax, or ace-jax uses the included
+kernel.
 
 1. Install the extra: `pip install "ace-jax[native]"`.
 2. Make sure that ace-jax can use the C++ code:
@@ -90,8 +104,9 @@ cache.
     aj native --build
     ```
 
-    The command compiles the kernel, and shows the compiler and the neighbour
-    list. On a cluster, run it on a compute node.
+    The command shows the kernel, the compiler and the neighbour list. If
+    your wheel does not include the kernel, the command compiles it. On a
+    cluster, run it on a compute node.
 
 The former name of the extra, `fast-neighbours`, installs the same packages.
 
@@ -143,8 +158,8 @@ LAMMPS export needs [lammps-jax](https://github.com/abhijeetgangan/lammps-jax).
 1. Add `lammps` to the extras that you install.
 2. Build the lammps-jax LAMMPS plugin at the same version as the Python package.
 
-The CPU kernel for linear ACE also needs a C++17 compiler. The export compiles
-the kernel the first time. Without a compiler, the export uses the XLA program.
+The export uses the CPU kernel for linear ACE when it is available (see
+[`native`](#native)). If not, the export uses the XLA program.
 
 See [LAMMPS export](howto/lammps.md).
 

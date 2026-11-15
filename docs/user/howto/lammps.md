@@ -108,7 +108,9 @@ The export uses the kernel if all these conditions are true:
 - The model is a linear ACE model, in float64.
 - The bundle can use the `matrix` layout (`--layout` `auto` or `matrix`).
 - lammps-jax is version 0.2.1 or later.
-- A C++17 compiler is available (`$CXX`, `c++`, `g++` or `clang++`).
+- The kernel is available: the ace-jax wheels for Linux and for macOS (arm64)
+  include it. On other platforms, a C++17 compiler (`$CXX`, `c++`, `g++` or
+  `clang++`) is necessary.
 
 If a condition is false, the export uses the XLA program. `aj export` prints
 the reason.

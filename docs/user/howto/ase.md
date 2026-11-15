@@ -118,7 +118,9 @@ The calculator compiles the kernel the first time, and keeps it in a cache.
     calc = ACECalculator("fit/model.npz", ffi=True)
     ```
 
-The kernel needs a C++17 compiler (`$CXX`, `c++`, `g++` or `clang++`). With
+The ace-jax wheels for Linux and for macOS (arm64) include the compiled
+kernel. On other platforms, the kernel needs a C++17 compiler (`$CXX`, `c++`,
+`g++` or `clang++`), and ace-jax compiles it the first time. With
 `ffi="auto"`, the calculator uses the kernel when possible. If not,
 `calc.ffi_reason` gives the reason. Set `ffi_threads` to use fewer threads.
 
