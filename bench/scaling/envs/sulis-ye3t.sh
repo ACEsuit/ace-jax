@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # YE3T (Goff and Thompson, arXiv:2609.31895) for the accuracy-cost benchmark on Sulis:
 #   cpu    LAMMPS with ML-YE3T (`pair_style ye3t`, float64, MPI) and stock ML-PACE in one binary -> $ROOT/lmp-ye3t-cpu.sh
+#   gpu    the same tree with Kokkos CUDA (A100, FP64): `pair_style ye3t/kk` and pace/kk                 -> $ROOT/lmp-ye3t-gpu.sh
+#          (after `cpu`, which copies and patches the tree and builds yaml-cpp)
 #   venv   ye3t + ye3t-methods (the fitted models' reference evaluator for the timing gate)     -> $ROOT/venv-ye3t
 # The LAMMPS is the lammps-dev tree (develop ec02ed0, "2 Sep 2026", as every other CPU row) copied to lammps-ye3t and
 # patched by ye3t-lammps's own installer (tools/patch_lammps.sh; upstream tests stable_22Jul2025_update4, and its
@@ -20,6 +22,7 @@ PACE=$ROOT/lammps-user-pace-v.2025.12.4.p1
 YAML=$ROOT/yaml-cpp-ye3t
 JOBS=${JOBS:-${SLURM_CPUS_PER_TASK:-16}}
 MODS_CPU="GCC/12.3.0 OpenMPI/4.1.5 CMake/3.26.3"
+MODS_GPU="GCC/12.3.0 OpenMPI/4.1.5 CUDA/12.8.0 CMake/3.26.3"
 set +u; source /etc/profile.d/modules.sh 2>/dev/null || true; set -u
 
 fetch() {   # login node (network): the yaml-cpp release
@@ -57,6 +60,29 @@ cpu() {
     echo "ML-PACE: lammps-user-pace v.2025.12.4.p1 (stock); yaml-cpp 0.8.0 (static, for both packages)"
     echo "modules: $MODS_CPU; cmake: Release, Kokkos OpenMP+Serial ARCH_ZEN2, BUILD_MPI, BUILD_OMP"
     echo "built $(date -Is) on $(hostname)"; } > "$ROOT/VERSIONS-ye3t"
+}
+
+gpu() {   # ye3t-lammps README "CUDA/Kokkos build": FP64 Kokkos, the legacy layout (the validated one); as sulis-pacetab.sh gpu
+  set +u; module purge; module load $MODS_GPU; set -u
+  export NVCC_WRAPPER_DEFAULT_COMPILER=g++
+  [ -f "$DST/src/ML-YE3T/pair_ye3t.cpp" ] || [ -n "$(find "$DST/src" -name 'pair_ye3t_kokkos.cpp' | head -1)" ] || { echo "run cpu first: $DST is not patched"; exit 1; }
+  local B=$DST/build-kk-gpu-ye3t
+  rm -rf "$B"
+  cmake -S "$DST/cmake" -B "$B" -D CMAKE_BUILD_TYPE=Release -D CMAKE_CXX_COMPILER="$DST/lib/kokkos/bin/nvcc_wrapper" \
+    -D BUILD_SHARED_LIBS=ON -D BUILD_MPI=ON -D BUILD_OMP=ON \
+    -D PKG_KOKKOS=ON -D Kokkos_ENABLE_CUDA=ON -D Kokkos_ENABLE_OPENMP=ON -D Kokkos_ENABLE_SERIAL=ON -D Kokkos_ARCH_AMPERE80=ON \
+    -D KOKKOS_PREC=double -D KOKKOS_LAYOUT=legacy \
+    -D PKG_ML-PACE=ON -D LOCAL_ML-PACE="$PACE" \
+    -D PKG_ML-YE3T=ON -D ML_YE3T_RUNTIME_SOURCE="$ROOT/ye3t" -D CMAKE_PREFIX_PATH="$YAML"
+  cmake --build "$B" -j "$JOBS"
+  printf '%s\n' '#!/usr/bin/env bash' 'source /etc/profile.d/modules.sh 2>/dev/null || true' \
+    "module purge; module load $MODS_GPU" "export LD_LIBRARY_PATH=$B:\${LD_LIBRARY_PATH:-}" \
+    "exec $B/lmp \"\$@\"" > "$ROOT/lmp-ye3t-gpu.sh"
+  chmod +x "$ROOT/lmp-ye3t-gpu.sh"
+  help=$("$ROOT/lmp-ye3t-gpu.sh" -h)
+  grep -q 'ye3t/kk' <<< "$help" && echo "pair_style ye3t/kk: built" || { echo "pair_style ye3t/kk missing from $B/lmp"; exit 1; }
+  { echo "lammps-ye3t (GPU): the tree of VERSIONS-ye3t; modules: $MODS_GPU; cmake: Release, Kokkos CUDA+OpenMP+Serial ARCH_AMPERE80,"
+    echo "KOKKOS_PREC=double KOKKOS_LAYOUT=legacy, BUILD_MPI, ML-PACE (stock) and ML-YE3T; built $(date -Is) on $(hostname)"; } > "$ROOT/VERSIONS-ye3t-gpu"
 }
 
 venv() {   # the gate's reference for fitted models: ye3t-methods' ASE calculator (C++20 build: GCC 12.3)

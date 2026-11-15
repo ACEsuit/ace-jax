@@ -100,15 +100,15 @@ PLAN = {"ace": [("acejax-ace", {"cpu": "standalone", "gpu": "lammps"}, ACE_DTYPE
                      ("grace-rt", {"cpu": "lammps", "gpu": "lammps"}, ("mixed",))],
         # the linear ACE ladder as ChebExpCos .yace (ace_to_ye3t.py: the form pair_style ye3t reads; the fit to
         # ~2e-9 eV/A): YE3T's lambda = (N) kernels against stock ML-PACE's recursive (pair_style pace) and product
-        # evaluators on the same file.  CPU only here (ye3t/kk exists; not built)
-        "ace_cheb": [("ye3t-sym", {"cpu": "lammps"}, ("float64",)),
-                     ("mlpace", {"cpu": "lammps"}, ("float64",)),
+        # evaluators on the same file; on a GPU ye3t/kk against pace/kk (the product form) on the same file
+        "ace_cheb": [("ye3t-sym", {"cpu": "lammps", "gpu": "lammps"}, ("float64",)),
+                     ("mlpace", {"cpu": "lammps", "gpu": "lammps"}, ("float64",)),
                      ("mlpace-product", {"cpu": "lammps"}, ("float64",))],
         # models fitted by ye3t-methods (fit_ye3t.py), run by pair_style ye3t
-        "ye3t_sym_fit": [("ye3t", {"cpu": "lammps"}, ("float64",))],
-        "ye3t_mix_A": [("ye3t", {"cpu": "lammps"}, ("float64",))],
-        "ye3t_mix_T": [("ye3t", {"cpu": "lammps"}, ("float64",))],
-        "ye3t_sym_wfit": [("ye3t", {"cpu": "lammps"}, ("float64",))],
+        "ye3t_sym_fit": [("ye3t", {"cpu": "lammps", "gpu": "lammps"}, ("float64",))],
+        "ye3t_mix_A": [("ye3t", {"cpu": "lammps", "gpu": "lammps"}, ("float64",))],
+        "ye3t_mix_T": [("ye3t", {"cpu": "lammps", "gpu": "lammps"}, ("float64",))],
+        "ye3t_sym_wfit": [("ye3t", {"cpu": "lammps", "gpu": "lammps"}, ("float64",))],
         "gap": [("gap", {"cpu": "lammps"}, ("float64",))],         # pair quip: no KOKKOS, CPU only
         "gap_noglue": [("gap", {"cpu": "lammps"}, ("float64",))],  # the XML has no Glue term; same pair style
         "gap_E30": [("gap", {"cpu": "lammps"}, ("float64",))]}     # GAP-18's command, energy sigmas x10/3

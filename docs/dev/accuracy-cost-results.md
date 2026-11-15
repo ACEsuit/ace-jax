@@ -338,7 +338,7 @@ python bench/si_qoi/make_cost.py --dtype float64 --source acejax-ace=sulis-gpu-a
     $R/sulis-gpu-ace-splined-v2.jsonl $R/sulis-gpu-v2.jsonl $R/sulis-gpu-mace_xl.jsonl \
     $R/sulis-gpu-ace_tab5.jsonl $R/sulis-gpu-ace_tabfork.jsonl $R/sulis-gpu-pace-dev.jsonl $R/sulis-gpu-nep.jsonl $R/sulis-gpu-acejax-auto.jsonl \
     $R/sulis-gpu-fp32-mixed.jsonl $R/sulis-gpu-fp32-dot-F32_F32_F32.jsonl $R/sulis-gpu-grace.jsonl $R/sulis-gpu-grace2l.jsonl \
-    $R/sulis-gpu-cudak.jsonl $R/sulis-gpu-gracert.jsonl $R/sulis-gpu-symx3.jsonl \
+    $R/sulis-gpu-cudak.jsonl $R/sulis-gpu-gracert.jsonl $R/sulis-gpu-symx3.jsonl $R/sulis-gpu-ye3t.jsonl \
     --allow nep-gpumd:mixed --allow grace-rt:mixed
 ROWS=(--row "A100 GPU, µs/atom-step|$RR/cost_sulis_gpu.json|$RR/cost_sulis_gpu.codes.json"
       --row "CPU node (128 cores), µs/atom-step|$RR/cost_sulis_cpu.json|$RR/cost_sulis_cpu.codes.json")
@@ -707,8 +707,8 @@ selected in the legend. Nothing here is tuned per system: read the rows as a fir
 The YE3T fits differ from the other families in their weights (below).
 
 Codes: ye3t f8ff96d, ye3t-methods 6b85c54, ye3t-lammps 06100f9 (LAMMPS develop ec02ed0 with ML-YE3T and stock
-ML-PACE v.2025.12.4.p1 in one binary, `bench/scaling/envs/sulis-ye3t.sh`, CPU style only: `ye3t/kk` exists and
-was not built). Float64. No stop-and-report point of the spec was met: the code and the tagged-basis definition are
+ML-PACE v.2025.12.4.p1 in one binary, `bench/scaling/envs/sulis-ye3t.sh`: the CPU style, and since 2026-11-15 `ye3t/kk` with Kokkos CUDA for the A100
+rows below). Float64. No stop-and-report point of the spec was met: the code and the tagged-basis definition are
 public, and every gate passed.
 
 ### YE3T-symmetric as an evaluator (`ace_cheb`, timing only)
@@ -748,6 +748,44 @@ columns at 1 x 1 come from the same job (`COMPARE=1`), at 128 x 1 from the plott
 - At 128 x 1 YE3T keeps its lead over stock ML-PACE to o4d16 (recursive 1.1-1.7x). **o4d20 is anomalous**: 25.9 µs
   is 10x its one-core time / 128 (2.5), where every other row scales within 1.6x. One run, cause not investigated
   (memory bandwidth of the direct schedule's tables is the first thing to check); do not quote that row.
+
+### YE3T on the A100 (2026-11-15)
+
+One A100 (40 GB), `pair_style ye3t/kk` (Kokkos CUDA, float64), 32,768 atoms, µs per atom-step. Job 2286567: a shared
+node (one GPU and 8 cores of gpu014; load 3.4–7.7 during the run), where the benchmark's plotted A100 rows of the
+other codes had a node to themselves. The gate passed on every row: ≤ 2.8e-10 eV/atom and 4.2e-8 eV/Å against ace-jax for the ACE
+files, ≤ 5.7e-14 eV/atom and 1.2e-13 eV/Å against ye3t-methods for the fitted models.
+
+Linear ACE fits (ChebExpCos files; stock ML-PACE's `pace/kk` is in the same binary):
+
+| fit | `ye3t/kk` | `pace/kk`, same file | `pace/kk`, tabulated file | ace-jax CUDA kernel | `ye3t/kk` / `pace/kk` | GPU memory `ye3t/kk` / `pace/kk` (GB) |
+|---|---|---|---|---|---|---|
+| o3d12 | 0.42 | 0.33 | – | 0.06 | 1.26 | 0.8 / 1.0 |
+| o4d12 | 0.47 | 0.38 | 0.28 | 0.07 | 1.26 | 0.8 / 1.0 |
+| o4d14 | 0.97 | 0.61 | 0.45 | 0.12 | 1.60 | 1.1 / 1.1 |
+| o4d16 | 2.15 | 1.21 | 0.83 | 0.19 | 1.78 | 1.7 / 1.1 |
+| o4d20 | 12.12 | 6.75 | 4.13 | 0.75 | 1.80 | 7.1 / 1.5 |
+
+Fitted density models:
+
+| Size | Descriptors | `ye3t_sym_fit` | `ye3t_sym_wfit` |
+|---|---|---|---|
+| r3-34 | 34 | 0.139 | 0.139 |
+| r3-110 | 110 | 0.191 | 0.191 |
+| r4-205 | 205 | 0.382 | 0.382 |
+| r4-490 | 490 | 1.070 | 1.069 |
+
+- On the A100 stock ML-PACE is faster than YE3T on the same file, by 1.26–1.80 times, more for the larger
+  bases. This is the reverse of the one-core CPU result.
+- The ace-jax CUDA kernel is 7–16 times faster than `ye3t/kk` on these fits (its own file form, another node).
+- `ye3t/kk` takes 7.1 GB of GPU memory at o4d20 against 1.5 GB for `pace/kk`.
+- The fitted models cost 0.14–1.07 µs. The weighted family has the cost of the protocol family, as on the CPU.
+- **The tagged model does not run on the GPU.** `ye3t/kk` stops at `pair_coeff` on `ye3t_mix_T` t8-284: "Tagged V4
+  pair-specific sources and bound references require CPU pair_style ye3t; Kokkos is not qualified". No A100 row.
+
+Build `sulis-ye3t.sh gpu` (GCC 12.3, CUDA 12.8, `Kokkos_ARCH_AMPERE80`, `KOKKOS_PREC=double`; job 2285652, built on an L40
+node); rows `sulis-gpu-ye3t.jsonl`, in the GPU `make_cost` command above. The shared node: the driver's load limit was
+lifted for this job (`ACEJAX_AC_MAX_LOAD1`); each row records its load.
 
 ### Fitted YE3T models
 

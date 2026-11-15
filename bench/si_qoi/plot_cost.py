@@ -475,7 +475,7 @@ def main():
                 "ace-jax kernel: the same bundles with the XLA program replaced by one XLA FFI call "
                 "(ace_jax.eval.ffi; radials tabulated in r): C++ on the CPU (128x1), CUDA on the A100.\n"
                 "NEP: trained by GPUMD; on the CPU LAMMPS pair_style nep (NEP_CPU, float64); on the GPU GPUMD's own MD code, mixed precision (labelled).\n"
-                "YE3T: pair_style ye3t (ye3t-lammps, float64, 128x1; CPU style only built) on the linear ACE fits rewritten with ChebExpCos radials, and on models fitted by ye3t-methods.\n"
+                "YE3T: pair_style ye3t (ye3t-lammps, float64; 128x1 on the CPU, ye3t/kk on the A100) on the linear ACE fits rewritten with ChebExpCos radials, and on models fitted by ye3t-methods.\n"
                 if any("CPU" in r[0] for r in rows) else "")
     bottom = 0
     if not a.no_note:

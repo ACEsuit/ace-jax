@@ -29,7 +29,9 @@ KOKKOS = {"acejax": "newton on neigh half", "mlpace": "newton on neigh half",
           # bench/scaling/envs/sulis-grace-runtime.sh): grace/runtime/kk and pace/runtime/kk need newton on, half list
           "grace-rt": "newton on neigh half", "pace-rt": "newton on neigh half",
           # Symmetrix v0.3.0 (bench/scaling/envs/sulis-symx3.sh), the same pair style as "mace" in its own LAMMPS
-          "mace-symx3": "newton on neigh half"}
+          "mace-symx3": "newton on neigh half",
+          # ye3t-lammps: ye3t/kk (device only, FP64 Kokkos) needs newton on and a half list (doc/src/pair_ye3t.rst)
+          "ye3t-sym": "newton on neigh half", "ye3t": "newton on neigh half"}
 # grace-runtime's CPU styles (grace/runtime, pace/runtime) are plain MPI + OpenMP styles, not KOKKOS: on the CPU
 # they take OMP_NUM_THREADS threads a rank (cpu_mpirun binds them) and no -k switches
 RUNTIME = ("grace-rt", "pace-rt")
@@ -474,7 +476,7 @@ def kokkos_args(style, device, threads=1):
     if device != "gpu":
         if style in OMP_PLAIN:               # plain OpenMP styles (threads: OMP_NUM_THREADS)
             return []
-        if style in ("acejax", "grace", "grace-2l") or style in XL or (threads > 1 and style in KOKKOS):   # grace: /kk only
+        if style in ("acejax", "grace", "grace-2l") or style in XL or (threads > 1 and style in KOKKOS and style not in YE3T):   # ye3t/kk: device only   # grace: /kk only
             return ["-k", "on", "t", str(threads), "-sf", "kk", "-pk", "kokkos", *KOKKOS[style].split()]
         return []
     if style not in KOKKOS:

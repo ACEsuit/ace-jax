@@ -44,9 +44,9 @@ GPU_ONLY_LAMMPS = ("acejax-pace", "acejax-ace", *LEARNED_CODES)
 # CPU-only for now: no GPU path for either ACEpotentials.jl line
 CPU_ONLY = ACEPOT_CODES
 # pair quip has no KOKKOS variant (run_lammps.KOKKOS has no "gap" key)
-# pair quip and pair nep: no KOKKOS variant.  ye3t-lammps has a CUDA style (ye3t/kk, device only) that this
-# suite has not built: CPU rows only.  mlpace-product is the CPU spelling of what "mlpace" runs on a GPU
-CPU_ONLY_LAMMPS = ("gap", "nep", "ye3t-sym", "ye3t", "mlpace-product")
+# pair quip and pair nep: no KOKKOS variant.  mlpace-product is the CPU spelling of what "mlpace" runs on a GPU.
+# (ye3t-lammps has a CUDA style, ye3t/kk, device only: bench/scaling/envs/sulis-ye3t.sh gpu)
+CPU_ONLY_LAMMPS = ("gap", "nep", "mlpace-product")
 
 
 def lammps_supported(code, device):

@@ -137,7 +137,42 @@ QoI error 1.03 at 223 coefficients and 0.76 at 350.
 
 `pair_style ye3t` on the linear ACE fits, 1 × 1: 28.3, 30.0, 45.1, 74.6, 326.1 (o3d12 to o4d20). It is 1.7–4.5
 times faster than ML-PACE's product evaluator and 1.4–1.6 times faster than its recursive evaluator on the same
-file. The 128 × 1 time of o4d20 (25.9) is anomalous and not understood; the smaller fits give 0.35 to 1.39.
+file. ML-PACE's own file form keeps half of each conjugate pair of m-terms; on that file (tabulated radials) its
+recursive evaluator is 10–18% faster, and YE3T's lead is 1.15–1.43 times. The 128 × 1 time of o4d20 (25.9) is anomalous and not understood; the smaller fits give 0.35 to 1.39.
+
+### A100 (2026-11-15)
+
+One A100 (40 GB), `pair_style ye3t/kk` (Kokkos CUDA, float64), 32,768 atoms, µs per atom-step. Job 2286567: a shared
+node (one GPU and 8 cores of gpu014; load 3.4–7.7 during the run), where the benchmark's plotted A100 rows of the
+other codes had a node to themselves. The gate passed on every row: ≤ 2.8e-10 eV/atom and 4.2e-8 eV/Å against ace-jax for the ACE
+files, ≤ 5.7e-14 eV/atom and 1.2e-13 eV/Å against ye3t-methods for the fitted models.
+
+Linear ACE fits (ChebExpCos files; stock ML-PACE's `pace/kk` is in the same binary):
+
+| fit | `ye3t/kk` | `pace/kk`, same file | `pace/kk`, tabulated file | ace-jax CUDA kernel | `ye3t/kk` / `pace/kk` | GPU memory `ye3t/kk` / `pace/kk` (GB) |
+|---|---|---|---|---|---|---|
+| o3d12 | 0.42 | 0.33 | – | 0.06 | 1.26 | 0.8 / 1.0 |
+| o4d12 | 0.47 | 0.38 | 0.28 | 0.07 | 1.26 | 0.8 / 1.0 |
+| o4d14 | 0.97 | 0.61 | 0.45 | 0.12 | 1.60 | 1.1 / 1.1 |
+| o4d16 | 2.15 | 1.21 | 0.83 | 0.19 | 1.78 | 1.7 / 1.1 |
+| o4d20 | 12.12 | 6.75 | 4.13 | 0.75 | 1.80 | 7.1 / 1.5 |
+
+Fitted density models:
+
+| Size | Descriptors | `ye3t_sym_fit` | `ye3t_sym_wfit` |
+|---|---|---|---|
+| r3-34 | 34 | 0.139 | 0.139 |
+| r3-110 | 110 | 0.191 | 0.191 |
+| r4-205 | 205 | 0.382 | 0.382 |
+| r4-490 | 490 | 1.070 | 1.069 |
+
+- On the A100 stock ML-PACE is faster than YE3T on the same file, by 1.26–1.80 times, more for the larger
+  bases. This is the reverse of the one-core CPU result.
+- The ace-jax CUDA kernel is 7–16 times faster than `ye3t/kk` on these fits (its own file form, another node).
+- `ye3t/kk` takes 7.1 GB of GPU memory at o4d20 against 1.5 GB for `pace/kk`.
+- The fitted models cost 0.14–1.07 µs. The weighted family has the cost of the protocol family, as on the CPU.
+- **The tagged model does not run on the GPU.** `ye3t/kk` stops at `pair_coeff` on `ye3t_mix_T` t8-284: "Tagged V4
+  pair-specific sources and bound references require CPU pair_style ye3t; Kokkos is not qualified". No A100 row.
 
 ### r8-1048: a failed solve, not a row
 
@@ -239,6 +274,8 @@ $PY -m accuracy_cost.qoi_models ye3t_sym_fit                  # register with th
 sbatch bench/scaling/envs/sulis-ye3t-build-cpu.sbatch
 sbatch bench/accuracy_cost/envs/sulis-cpu-ye3t.sbatch                          # 128 ranks x 1 thread
 sbatch --export=ALL,LAYOUT=1x1 bench/accuracy_cost/envs/sulis-cpu-ye3t.sbatch  # 1 rank x 1 thread (the paper's setting)
+sbatch bench/scaling/envs/sulis-ye3t-build-gpu.sbatch                          # ye3t/kk and pace/kk (Kokkos CUDA)
+sbatch bench/accuracy_cost/envs/sulis-gpu-ye3t.sbatch                          # one A100
 ```
 
 A smoke run beside the real one: set `ACEJAX_AC_RUNS` and `ACEJAX_AC_RESULTS` to scratch directories, and
@@ -250,4 +287,4 @@ A smoke run beside the real one: set `ACEJAX_AC_RUNS` and `ACEJAX_AC_RESULTS` to
 - The fit settings (`fit_ye3t.py`): weights, penalty, radial decay, a ZBL reference, tuned cutoffs as a
   separate family.
 - A plan sidecar for the `ace_cheb` files, to time `block_policy auto`.
-- A CUDA row: ye3t-lammps has `ye3t/kk`; this pass built the CPU style only.
+- The `ye3t/kk` settings: the A100 rows use the defaults (`newton on`, `neigh half`, `block_policy direct`).

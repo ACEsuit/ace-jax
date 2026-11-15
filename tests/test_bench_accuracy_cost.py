@@ -1070,8 +1070,8 @@ def test_grace_runtime_styles(tmp_path):
 
 
 def test_ye3t_pair_styles():
-    """pair_style ye3t takes a .yace bare (block_policy direct) and a fitted tagged model with `extra`; no GPU row
-    here; `pace product` is the CPU spelling of ML-PACE's product evaluator."""
+    """pair_style ye3t takes a .yace bare (block_policy direct) and a fitted tagged model with `extra`; on a GPU
+    it is ye3t/kk (device only: never host Kokkos); `pace product` is the CPU spelling of ML-PACE's product evaluator."""
     from scaling.run_lammps import _pair, kokkos_args
     from scaling.sweep import lammps_supported
     assert _pair("ye3t-sym", "m.yace", ["Si"], "cpu") == "pair_style ye3t\npair_coeff * * m.yace Si\n"
@@ -1079,8 +1079,11 @@ def test_ye3t_pair_styles():
         "pair_style ye3t model_family tagged_cauchy\npair_coeff * * m.json Si\n"
     assert _pair("mlpace-product", "m.yace", ["Si"], "cpu") == "pair_style pace product\npair_coeff * * m.yace Si\n"
     for code in ("ye3t-sym", "ye3t", "mlpace-product"):
-        assert lammps_supported(code, "cpu") and not lammps_supported(code, "gpu")
+        assert lammps_supported(code, "cpu") and lammps_supported(code, "gpu") == (code != "mlpace-product")
         assert kokkos_args(code, "cpu", threads=1) == []
+    for code in ("ye3t-sym", "ye3t"):
+        assert kokkos_args(code, "cpu", threads=8) == []
+        assert kokkos_args(code, "gpu") == ["-k", "on", "g", "1", "-sf", "kk", "-pk", "kokkos", "newton", "on", "neigh", "half"]
 
 
 def test_ye3t_code_table():
@@ -1088,7 +1091,7 @@ def test_ye3t_code_table():
     from accuracy_cost import common, timing
     from scaling import parity
     assert [c for c, _, _ in timing.PLAN["ace_cheb"]] == ["ye3t-sym", "mlpace", "mlpace-product"]
-    assert all(timing.PLAN[f] == [("ye3t", {"cpu": "lammps"}, ("float64",))]
+    assert all(timing.PLAN[f] == [("ye3t", {"cpu": "lammps", "gpu": "lammps"}, ("float64",))]
                for f in ("ye3t_sym_fit", "ye3t_mix_A", "ye3t_mix_T", "ye3t_sym_wfit"))
     assert set(timing.PLAN) <= set(common.load_sweep())
     for code in ("ye3t-sym", "ye3t", "mlpace-product"):
