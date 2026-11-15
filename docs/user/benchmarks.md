@@ -138,8 +138,11 @@ models.
   [GPU kernel](howto/lammps.md#gpu-kernel) runs with one MPI rank.
 - **ace-jax kernel in reduced precision.** The light-blue line with
   triangles is the same kernel with less precision. On the CPU, it uses
-  [mixed precision](howto/precision.md#mixed-precision-for-the-kernels) for
-  o4d14 to o4d20. On the A100, it runs float32 bundles. The accuracy that
+  [mixed precision](howto/precision.md#mixed-precision-for-the-kernels). The
+  CPU line starts at o3d10: for o3d8, the energy error of mixed precision
+  (0.6 meV for each atom) is more than the limit of the benchmark. Below
+  o4d14, mixed precision is not faster than float64. On the A100, it runs
+  float32 bundles. The accuracy that
   the figure shows is that of the float64 fit. These results are not
   included in the comparison with the float64 results of the other codes.
 - **ML-PACE** on the GPU is the LAMMPS development version with the 2026

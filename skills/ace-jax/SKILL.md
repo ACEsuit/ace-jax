@@ -261,7 +261,8 @@ load; faster only at large `nradbase`). Values are unchanged to roundoff.
   the kernel (`eval.ffi.KernelModel`) evaluates the dense layout's site energies and dE/drij;
   JAX assembles forces and stress, so skin lists and `calc.model` swaps work as before. Rows run on XLA's
   intra-op thread pool (`ffi_threads` caps it): ~17x the JAX model at 1.7k-4k atoms on 32 cores (o4d20).
-  Radial table on (energies ~1e-12, forces ~1.5e-8 of max|F|). Compiled on first use (C++17 compiler,
+  Radial table on (energies ~1e-12, forces ~1.5e-8 of max|F|). Precompiled in the Linux and macOS arm64
+  wheels (no compiler needed); elsewhere, or with `ACEJAX_FFI_FLAGS`, compiled on first use (C++17 compiler,
   cached). `ffi="auto"` falls back to the JAX model with `calc.ffi_reason`. Derivatives in positions only:
   for parameter gradients or second derivatives keep `ffi=False` (the default).
   `ffi_precision="mixed"` (off by default; float64 only; CPU and CUDA kernels, the same library): the

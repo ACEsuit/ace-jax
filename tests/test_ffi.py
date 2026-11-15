@@ -5,6 +5,7 @@ harmonics, 1, 2 and 5 species, and correlation order 4; periodic cells with ghos
 against ACECalculator; the GPU kernel in float32 too.  The GPU cases need nvcc and a CUDA jax."""
 import dataclasses
 import importlib.util
+import contextlib
 import os
 import pathlib
 import shutil
@@ -262,6 +263,58 @@ def test_library_is_cached_and_keyed(kernel, tmp_path, monkeypatch):
     monkeypatch.setattr(ffi, "compiler", lambda: None)
     with pytest.raises(ffi.FFIUnavailable, match="C\\+\\+17 compiler"):
         ffi.library(flags=("-O2",), cache=tmp_path)
+
+
+def test_prebuilt_kernel_is_taken_and_guarded(kernel, tmp_path, monkeypatch, capsys):
+    """A platform wheel's kernel (`build_prebuilt` into `ffi.PREBUILT`): a plain library() returns it and
+    compiles nothing, with or without a compiler, and `aj native` reports it; flags, ACEJAX_FFI_FLAGS,
+    ACEJAX_FFI_PREBUILT=0, another source, another machine and an older jaxlib each fall back to compiling;
+    ACEJAX_FFI_VARIANT names a variant."""
+    import json
+    import jaxlib
+    from ace_jax.cli import main
+    with pytest.raises(RuntimeError, match="built against jaxlib") if jaxlib.__version__ != ffi.PREBUILT_JAXLIB \
+            else contextlib.nullcontext():
+        ffi.build_prebuilt(tmp_path / "floor")                       # the wheels' kernel: the oldest jaxlib only
+    info = ffi.build_prebuilt(tmp_path / "pre", floor=False)
+    names = [v["name"] for v in info["variants"]]
+    assert info["source"] == ffi.source_key() and names == [v[0] for v in ffi.VARIANTS[info["machine"]]]
+    monkeypatch.setattr(ffi, "PREBUILT", tmp_path / "pre")
+    monkeypatch.setenv("ACEJAX_FFI_CACHE", str(tmp_path / "cache"))
+    monkeypatch.delenv("ACEJAX_FFI_FLAGS", raising=False)
+    built = []
+    real = ffi.build
+    monkeypatch.setattr(ffi, "build", lambda *a: built.append(a) or real(*a))
+    lib, variant = ffi.prebuilt()
+    assert lib.parent == tmp_path / "pre" and variant in names and ffi.library() == lib and not built
+    assert ffi.prebuilt({"ACEJAX_FFI_VARIANT": names[-1]}) == (tmp_path / "pre" / f"libace_jax_ffi-{names[-1]}.so", names[-1])
+    assert ffi.prebuilt({"ACEJAX_FFI_VARIANT": "no-such"}) is None and ffi.prebuilt({"ACEJAX_FFI_PREBUILT": "0"}) is None
+    ctypes = pytest.importorskip("ctypes")
+    assert all(hasattr(ctypes.cdll.LoadLibrary(str(lib)), s) for s in (ffi.SYMBOL, ffi.EDGE_SYMBOL))
+    main(["native"])
+    assert f"prebuilt ({variant})" in capsys.readouterr().out
+    assert ffi.library(flags=("-O1",)).parent == tmp_path / "cache" and len(built) == 1      # flags: compiled here
+    monkeypatch.setenv("ACEJAX_FFI_FLAGS", "-O1")
+    assert ffi.library().parent == tmp_path / "cache" and len(built) == 1
+    monkeypatch.delenv("ACEJAX_FFI_FLAGS")
+    manifest = tmp_path / "pre" / "manifest.json"
+    for change in ({"source": "0" * 16}, {"machine": "other"}, {"system": "other"}, {"jaxlib": "99.0.0"}):
+        manifest.write_text(json.dumps({**info, **change}))
+        assert ffi.prebuilt() is None, change
+    manifest.write_text(json.dumps(info))
+    monkeypatch.setattr(ffi, "compiler", lambda env=None: None)                               # no compiler at all
+    assert ffi.library() == lib
+    main(["native"])
+    out = capsys.readouterr().out
+    assert "C++ compiler:  none" in out and f"prebuilt ({variant})" in out
+    main(["native", "--build"])                                      # nothing to build, and no failure
+
+
+def test_prebuilt_jaxlib_is_the_jax_floor():
+    """The wheels' kernel is built against pyproject's oldest jax: a newer build does not load under it."""
+    import re
+    text = (pathlib.Path(__file__).resolve().parents[1] / "pyproject.toml").read_text()
+    assert re.search(r'"jax>=([\d.]+)"', text).group(1) == ffi.PREBUILT_JAXLIB
 
 
 def test_export_ffi_bundle(kernel, tmp_path, monkeypatch):
