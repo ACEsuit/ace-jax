@@ -25,6 +25,10 @@ const ORDER_TOO_HIGH = Cint(3)
 const NO_INVARIANTS = Cint(4)             # no body of mb_spec admits an L = 0 invariant
 const INTERNAL_ERROR = Cint(5)            # anything else thrown by ET, or inconsistent sizes
 const IMAGINARY_COUPLING = Cint(6)        # reserved: ET resolves purely imaginary real-basis couplings itself
+# components of an L-vector at or below this are structural zeros that rounding
+# filled in (the values are O(0.1)); an exact == 0 test made the triplet count
+# depend on the BLAS build
+const ZERO_TOL = 1e-12
 const NSIZES = 7                          # [nnz, n_B, n_AA, n_sig, n_A, n_aaidx, n_nnll]
 
 const NL = @NamedTuple{n::Int, l::Int}
@@ -128,13 +132,13 @@ function _compute(::Val{L}, rs::Symbol, mb::Vector{Vector{NL}}, rnl::Vector{NL},
    t = ET._tensor_specs(symm, 𝔸spec, rnl, ylm)
    I0, J0, V0 = findnz(t.symm)
    L == 0 && return _result(t, I0, J0, _scalars(V0), zeros(Int, length(V0)))
-   # one (row, col, m, value) per nonzero component, findnz order then m ascending
+   # one (row, col, m, value) per component above ZERO_TOL, findnz order then m ascending
    I = Int[]; J = Int[]; M = Int[]; V = Float64[]
    for k in eachindex(V0)
       v = V0[k]
       for m in 1:(2L + 1)
          x = _component(v, m)
-         x == 0 && continue
+         abs(x) <= ZERO_TOL && continue
          push!(I, I0[k]); push!(J, J0[k]); push!(M, m - 1); push!(V, x)
       end
    end

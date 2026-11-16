@@ -51,7 +51,7 @@ def test_layout(L, parity):
         return
     nB, nAA = r.A2B_shape
     assert nB > 0 and r.A2B_m.dtype == np.int64 and r.A2B_m.shape == r.A2B_vals.shape
-    assert r.A2B_m.min() >= 0 and r.A2B_m.max() <= 2 * L and np.all(r.A2B_vals != 0)
+    assert r.A2B_m.min() >= 0 and r.A2B_m.max() <= 2 * L and np.all(np.abs(r.A2B_vals) > 1e-12)
     assert r.A2B_rows.max() == nB - 1 and r.A2B_cols.max() <= nAA - 1
     # each (row, m, col) once
     key = (r.A2B_rows * (2 * L + 1) + r.A2B_m) * nAA + r.A2B_cols
@@ -91,3 +91,37 @@ def test_old_library_keeps_v1_and_refuses_v2(monkeypatch):
     with pytest.raises(ajc.CouplingLibError, match="ABI 1"):
         ajc.couple_equivariant_raw(1, -1, *c)
     assert lib is _loader.lib()
+
+
+def test_matches_upstream_et_equivariant():
+    """Against untrimmed ET's Integer API (coupling/julia/reference/reference_equivariant.jl,
+    :dense): every index array identical, values within 4 ulp, for L = 0..Lmax and both
+    parities; an (L, parity) the oracle found empty is NO_INVARIANTS here."""
+    import json
+    import pathlib
+    data = pathlib.Path(__file__).parent / "data"
+    cases = json.loads((data / "cases_equivariant.json").read_text())
+    ref = np.load(data / "et_reference_equivariant.npz")
+    fields = ["A2B_rows", "A2B_cols", "A2B_m", "A2B_vals", "aa_sig_off", "aa_sig", "aspec",
+              "aa_off", "aa_idx", "nnll_off", "nnll"]
+    n = 0
+    for name, c in cases.items():
+        for L in range(c["Lmax"] + 1):
+            for parity in (1, -1):
+                key = f"{name}__L{L}_p{'e' if parity == 1 else 'o'}"
+                if f"{key}__empty" in ref.files:
+                    with pytest.raises(ValueError, match="NO_INVARIANTS"):
+                        ajc.couple_equivariant_raw(L, parity, c["mb"], c["R"], c["Y"])
+                    continue
+                r = ajc.couple_equivariant_raw(L, parity, c["mb"], c["R"], c["Y"])
+                assert r.A2B_shape == tuple(int(v) for v in ref[f"{key}__A2B_shape"]), key
+                for f in fields:
+                    got, want = getattr(r, f), ref[f"{key}__{f}"]
+                    assert got.dtype == want.dtype and got.shape == want.shape, (key, f, got.shape, want.shape)
+                    if f == "A2B_vals":
+                        tol = 4 * np.finfo(np.float64).eps * np.maximum(1.0, np.abs(want))
+                        assert np.all(np.abs(got - want) <= tol), (key, float(np.abs(got - want).max()))
+                    else:
+                        assert np.array_equal(got, want), (key, f)
+                n += 1
+    assert n >= 30

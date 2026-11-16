@@ -129,8 +129,8 @@ end
       E = zeros(r.nB, 2L + 1, r.nAA)
       I, J, V = findnz(t.symm)
       for k in eachindex(V), m in 1:(2L + 1); E[I[k], m, J[k]] = V[k][m]; end
-      @test D == E
-      @test all(!iszero, r.V) && all(m -> 0 <= m <= 2L, r.M)
+      @test maximum(abs, D - E) <= ETCouple.ZERO_TOL && all(D[abs.(E) .> ETCouple.ZERO_TOL] .== E[abs.(E) .> ETCouple.ZERO_TOL])
+      @test all(v -> abs(v) > ETCouple.ZERO_TOL, r.V) && all(m -> 0 <= m <= 2L, r.M)
       @test r.sig == t.𝔸spec
       @test r.aspec == [(Int(p[1]), Int(p[2])) for p in t.Aspec_raw]
       @test length(r.nnll) == r.nB
