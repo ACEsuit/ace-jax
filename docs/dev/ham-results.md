@@ -141,10 +141,10 @@ ace-jax (`bench/ham/offsite_time_deeph.py`): on-site model plus the shared-featu
 | MACE-H, GPU (RTX 4000 Ada), float32 | 400 ms | 3.7 ms | 23 µs |
 | ace-jax, GPU, float32, coupled (2, l ≤ 2) | 113–176 ms (5 runs) | 1.05–1.63 ms | 6.6–10.2 µs |
 | ace-jax, GPU, float32, coupled (4, l ≤ 2) | 164–168 ms (2 runs) | 1.52–1.56 ms | 9.5–9.8 µs |
-| ace-jax, GPU, float32, coupled (4, l ≤ 4) | 831 ms once; then stalled | 7.7 ms | 48 µs |
+| ace-jax, GPU, float32, coupled (4, l ≤ 4) | 148 ms, 831 ms, and one run over 500 s | 1.37 ms, 7.7 ms, – | 8.6 µs, 48 µs, – |
 
 - **CPU, one thread: 4 to 6 times faster than MACE-H.** GPU: 2.3 to 3.5 times faster for the two smaller coupled models.
-- **The largest coupled model does not run properly on this GPU yet.** It holds 15 GB of the card's 20 GB (the per-atom coefficient tensors for all atoms at once) and two of three runs did not finish in 500 s. It needs the atoms processed in chunks. Its one completed run was slower than MACE-H.
+- **The largest coupled model is erratic on this GPU.** Three runs: 1.37 ms per atom (2.7 times faster than MACE-H), 7.7 ms, and one that did not finish in 500 s. It holds 15 GB of the card's 20 GB (the per-atom coefficient tensors for all atoms at once), so memory pressure is the suspected cause, not confirmed; processing the atoms in chunks is the fix to try.
 - On the GPU the time is nearly the same for the two smaller models (113–176 ms) while the on-site program takes 2.5 ms: most of the off-site time is on the host (building the bond list with a Python dictionary for the reverse bonds, and copying 62 MB of blocks back). That is the next thing to remove.
 - float64 on this GPU did not finish (its float64 rate is 1/64 of float32); float64 GPU numbers need an A100.
 - Three consecutive GPU runs gave 10 to 24 ms per atom while a stray float64 run of mine was still on the GPU; they are excluded.
