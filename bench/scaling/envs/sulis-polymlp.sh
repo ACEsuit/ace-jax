@@ -39,7 +39,7 @@ cpu() {
   chmod +x "$ROOT/lmp-polymlp-cpu.sh"
   help=$("$ROOT/lmp-polymlp-cpu.sh" -h)                              # (not piped into grep -q: under pipefail lmp's SIGPIPE fails)
   grep -qw polymlp <<< "$help" && echo "pair_style polymlp: built" || { echo "pair_style polymlp missing from $B/lmp"; exit 1; }
-  { echo "lammps-polymlp: lammps-dev ec02ed0 (2 Sep 2026) + lammps-polymlp-package 046eaa4 (VERSION 0.3.4), src/POLYMLP registered for CMake"
+  { echo "lammps-polymlp: lammps-dev ec02ed0 (25 Sep 2026; version string 2 Sep 2026) + lammps-polymlp-package 046eaa4 (VERSION 0.3.4), src/POLYMLP registered for CMake"
     echo "modules: $MODS_CPU; cmake: Release, -march=znver2, BUILD_MPI, BUILD_OMP (no KOKKOS)"
     echo "built $(date -Is) on $(hostname)"; } > "$ROOT/VERSIONS-polymlp"
 }

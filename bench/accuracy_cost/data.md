@@ -191,7 +191,7 @@ pypolymlp and lammps-polymlp-package are BSD-3-Clause (A. Seko). Nothing from ei
   `ext/lammps-polymlp-package` 046eaa4 (VERSION 0.3.4, 2026-07-03).
 - Fit: `fit_polymlp.py` (protocol: its docstring and `polymlp/README.md`). Fitted on mnf148 (32 threads).
   The validation split (10 % of each configuration type of train, seed 0) is in each run's `val_split.json`.
-- LAMMPS (Sulis): `bench/scaling/envs/sulis-polymlp.sh`: lammps-dev ec02ed0 ("2 Sep 2026") copied to
+- LAMMPS (Sulis): `bench/scaling/envs/sulis-polymlp.sh`: lammps-dev ec02ed0 (25 Sep 2026; version string "2 Sep 2026") copied to
   `lammps-polymlp`, `src/POLYMLP` registered for CMake, GCC/12.3.0 OpenMPI/4.1.5 Boost/1.82.0, Release,
   `-march=znver2`, `BUILD_OMP=ON`; `$ROOT/VERSIONS-polymlp`. The gate's pypolymlp is `$ROOT/env-polymlp`
   (micromamba, the same versions).
