@@ -1,0 +1,47 @@
+name: ham-ingest
+# The Quoll.jl ingestion step of ace_jax.ham, CI-only (no Julia in the main test job).
+# ham/julia/ingest.jl converts Quoll's own SiC FHI-aims regression data to the DeepH
+# layout; ace_jax.ham.deeph must read it identically to Quoll's reference conversion of
+# the same calculation, and the result must survive the npz cache.
+on:
+  pull_request:
+    paths:
+      - "ham/julia/**"
+      - "src/ace_jax/ham/deeph.py"
+      - "src/ace_jax/ham/cache.py"
+      - "src/ace_jax/ham/orbitals.py"
+      - "tests/ham/check_ingest.py"
+      - ".github/workflows/ham-ingest.yml"
+  workflow_dispatch:
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      # Quoll.jl's regression data (its Artifacts.toml, test-data-v0.4.0)
+      DATA_URL: https://github.com/maurergroup/Quoll.jl/releases/download/test-data-v0.4.0/test-data-v0.4.0.tar.gz
+      DATA_SHA256: 0fc22ea2f1f81adae7cc0cf55926be8e2f527ebfe5bc7208da1e880fc4c0115d
+      JULIA_CONDAPKG_ENV: ${{ runner.temp }}/condapkg
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: "1.13.1"        # the Manifest's julia_version
+      - uses: julia-actions/cache@v2
+      - name: Quoll's SiC data
+        run: |
+          curl -fsSL -o data.tar.gz "$DATA_URL"
+          echo "$DATA_SHA256  data.tar.gz" | sha256sum -c -
+          mkdir -p data sic && tar xzf data.tar.gz -C data
+          for t in siliconcarbide_fhi siliconcarbide_deeph; do
+            tar xzf "$(find data -name "$t.tar.gz")" -C sic
+          done
+          ls sic
+      - name: Ingest FHI-aims output with Quoll
+        run: |
+          julia --startup-file=no --project=ham/julia -e 'using Pkg; Pkg.instantiate()'
+          julia --startup-file=no --project=ham/julia ham/julia/ingest.jl fhi-aims sic/siliconcarbide_fhi sic/ingested
+      - name: Read it in ace-jax and compare with Quoll's reference conversion
+        env: { JAX_PLATFORM_NAME: cpu, JAX_ENABLE_X64: "1" }
+        run: uv run --extra ham python tests/ham/check_ingest.py sic/ingested sic/siliconcarbide_deeph
