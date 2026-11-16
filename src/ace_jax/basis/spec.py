@@ -111,7 +111,7 @@ def _caps(caps, order):
     return nm, lm
 
 
-def build_spec(NZ, order, totaldegree, wL=1.5, tol=1e-9, caps=None, keep=None):
+def build_spec(NZ, order, totaldegree, wL=1.5, tol=1e-9, caps=None, keep=None, admit=None):
     """From-scratch reproduction of ACEpotentials' ace1_model basis selection
     (Models.oneparticle_spec + sparse_AA_spec, src/models/{smoothness_priors,utils}.jl):
     the many-body mb_spec (list of (n,l) bodies), the one-particle Rnl_spec (n,l),
@@ -133,7 +133,12 @@ def build_spec(NZ, order, totaldegree, wL=1.5, tol=1e-9, caps=None, keep=None):
     afterwards (a body is grown from its own elements, and dropping A entries leaves the remaining
     levels sorted, so the pruning is unchanged), but the search never enters the rejected elements.
     build_embedding_spec's z' = 1 channel keeps 1/S of the radial indices, so this cuts the search
-    for order-nu bodies by ~S^nu.  Rnl_spec and Ylm_spec ignore it."""
+    for order-nu bodies by ~S^nu.  Rnl_spec and Ylm_spec ignore it.
+
+    admit: optional predicate on a body (a tuple of (n, l, m)), replacing the test that it couples
+    to an L = 0 invariant (`rpe_admissible` and `_couples_to_zero`).  Equivariant bases (L > 0, either
+    parity: `coupling.couple_equivariant`) pass `lambda bb: True` and let the coupling find which
+    bodies carry a function of each symmetry."""
     import math
     md = totaldegree
     maxn1 = math.ceil(md * NZ)                                    # oneparticle_spec bounds
@@ -158,8 +163,10 @@ def build_spec(NZ, order, totaldegree, wL=1.5, tol=1e-9, caps=None, keep=None):
         return cp is None or any(capped(bb, nu) for nu in range(len(bb), order + 1))
 
     def emit(bb):
-        if len(bb) == 0 or not capped(bb, len(bb)) or not rpe_admissible(bb) \
-                or not _couples_to_zero([b[1] for b in bb]):
+        if len(bb) == 0 or not capped(bb, len(bb)):
+            return
+        if not (admit(tuple(bb)) if admit is not None
+                else rpe_admissible(bb) and _couples_to_zero([b[1] for b in bb])):
             return
         nl = tuple((b[0], b[1]) for b in bb)
         if nl not in seen:
