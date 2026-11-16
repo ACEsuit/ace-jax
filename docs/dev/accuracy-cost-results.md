@@ -255,8 +255,8 @@ parameters than linear ACE (f800: 761 parameters, 0.081 eV/Å) but not the QoI t
   ace-jax 6debdc9); `accuracy_cost/dag_auto.py` keeps, per model, the form `aa_dag="auto"` picks
   (`results/dag_chain_multiplies.json`, from `dag_chain_multiplies.py`) in `sulis-{cpu-128x1,gpu}-acejax-auto.jsonl`,
   and `make_cost.py --source` takes the ace-jax rows from those files alone.
-  ML-PACE on the GPU: LAMMPS develop ec02ed0 (Stan Moore's 2026-08 `pace/kk`
-  rewrite; about 2x faster than the 10Sep2025 patch release). Linear ACE run by ML-PACE: that tree with
+  ML-PACE on the GPU: LAMMPS develop ec02ed0 of 25 Sep 2026 (with Stan Moore's `pace/kk`
+  rewrite, lammps/lammps#5174, merged 2026-09-01; about 2x faster than the 10Sep2025 patch release). Linear ACE run by ML-PACE: that tree with
   `LOCAL_ML-PACE` = v.2025.12.4.p1 + the tabulated-radial patch (`bench/scaling/envs/sulis-pacetab.sh`).
   Stock rows: `sulis-cpu-128x1-ace_tab5.jsonl` / `sulis-gpu-ace_tab5.jsonl`, timed in the same jobs as the patched
   ones. Patched ML-PACE: the same LAMMPS tree with `LOCAL_ML-PACE` = ICAMS/lammps-user-pace#31
