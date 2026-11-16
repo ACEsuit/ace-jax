@@ -90,7 +90,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "ace-jax-coupling", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')", specifier = "==0.2.0" },
+    { name = "ace-jax-coupling", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32')", specifier = "==0.3.0" },
     { name = "ase", specifier = ">=3.22" },
     { name = "ase-extxyz", specifier = ">=0.1.2" },
     { name = "blackjax", marker = "extra == 'gp'", specifier = ">=1.6" },
@@ -130,17 +130,16 @@ dev = [
 
 [[package]]
 name = "ace-jax-coupling"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c4/6b/a8b1a9c1ca430a8400b5f048cd1b27495f250ec8d335eebbd7637d17f399/ace_jax_coupling-0.2.0-py3-none-macosx_11_0_arm64.whl", hash = "sha256:772dac1a04afa70bc50e01de9ec89ecd97de4af6958467a88867d51180eafb68", size = 17049086, upload-time = "2026-10-01T14:06:38.085Z" },
-    { url = "https://files.pythonhosted.org/packages/56/77/9d49a78ba78becf764682c60e746e6e2f4d4a6da86a0ea6510e7db44c774/ace_jax_coupling-0.2.0-py3-none-manylinux_2_28_aarch64.whl", hash = "sha256:3bbd0350fa4cd460b844782de2b324342224500acbaeb33a87403111dc38ec1b", size = 23212122, upload-time = "2026-10-01T14:06:40.68Z" },
-    { url = "https://files.pythonhosted.org/packages/9d/a1/918be271f55a359048ca4de95ae9e08976a8523d67ae4cb1308dd3cb102b/ace_jax_coupling-0.2.0-py3-none-manylinux_2_28_x86_64.whl", hash = "sha256:2836159161d650e8fa463794d744660187ce4b08e50a4506630424b4a2cda8f9", size = 25560173, upload-time = "2026-10-01T14:06:43.057Z" },
-    { url = "https://files.pythonhosted.org/packages/ab/bd/6bd08e88f0c8f7aec9dbd6c83c2652e749d2082bd46e3a5b8c1f27eb8052/ace_jax_coupling-0.2.0-py3-none-win_amd64.whl", hash = "sha256:d051117b6e4bf6984772471cf448f6f1ddd97c6e6938d650bc01a30bfb3e9edd", size = 21920141, upload-time = "2026-10-01T14:06:45.456Z" },
+    { url = "https://files.pythonhosted.org/packages/a8/cf/ce07ffbfbd617123113643931363d48c6c1d63644174ed36b618ced74d64/ace_jax_coupling-0.3.0-py3-none-macosx_11_0_arm64.whl", hash = "sha256:2703f80188eecdf2f46d4fc5cc6d259efdadadfae2188afd50c0cbdf5b33251d", size = 17544145, upload-time = "2026-11-16T20:15:08.009Z" },
+    { url = "https://files.pythonhosted.org/packages/87/44/7444b382b57d7100d339a803679ce6ee2b65b48f87252b4fb9cc1993f2b4/ace_jax_coupling-0.3.0-py3-none-manylinux_2_28_aarch64.whl", hash = "sha256:9603d1e67bb47c1f1e5d3e8ac80abfe5414af9e8ac205f6385a7623df66faa39", size = 24342265, upload-time = "2026-11-16T20:15:10.305Z" },
+    { url = "https://files.pythonhosted.org/packages/ed/09/ae1b94499f95c5f5e55f6bcb2a7b872c232ae7191669d9dcffa70be31775/ace_jax_coupling-0.3.0-py3-none-manylinux_2_28_x86_64.whl", hash = "sha256:1aa593b7ff9fe9616a33f4893dd69ae6970b57f819ef5330a12b45b4c6cda35a", size = 26872304, upload-time = "2026-11-16T20:15:13.215Z" },
 ]
 
 [[package]]

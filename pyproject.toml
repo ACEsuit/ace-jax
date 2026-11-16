@@ -42,7 +42,7 @@ dependencies = [
   "optax>=0.2",
   # coupling tables for new basis shapes (a compiled library, nothing to install
   # besides the wheel); platform wheels only -- elsewhere fit from an existing .npz
-  "ace-jax-coupling==0.2.0; (sys_platform == 'linux' and (platform_machine == 'x86_64' or platform_machine == 'aarch64')) or (sys_platform == 'darwin' and platform_machine == 'arm64') or (sys_platform == 'win32' and platform_machine == 'AMD64')",
+  "ace-jax-coupling==0.3.0; (sys_platform == 'linux' and (platform_machine == 'x86_64' or platform_machine == 'aarch64')) or (sys_platform == 'darwin' and platform_machine == 'arm64') or (sys_platform == 'win32' and platform_machine == 'AMD64')",
 ]
 
 [project.optional-dependencies]
