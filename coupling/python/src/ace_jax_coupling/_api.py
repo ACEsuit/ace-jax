@@ -1,4 +1,4 @@
-"""couple_raw: validated, two-phase call into etc_couple."""
+"""couple_raw and couple_equivariant_raw: validated, two-phase calls into the library."""
 import numbers
 from typing import NamedTuple
 
@@ -7,6 +7,7 @@ import numpy as np
 from . import _loader
 
 MAX_ORDER = 8
+MAX_L = 6
 _OK, _SHORT, _INVALID, _ORDER, _NOINV = 0, 1, 2, 3, 4
 
 
@@ -69,11 +70,28 @@ def _validate(mb, R, Y):
                     raise ValueError(f"mb_spec[{i}]: {(l, m)} not in Ylm_spec")
 
 
-def couple_raw(mb_spec, Rnl_spec, Ylm_spec) -> RawCoupling:
-    """L = 0 real-basis coupling of EquivariantTensors for the given specs.
-    mb_spec: bodies of (n, l); Rnl_spec: (n, l); Ylm_spec: (l, m).  All
-    returned indices are 0-based; layout documented on `RawCoupling`'s fields
-    (docs/dev/coupling-etshim-spec.md)."""
+class RawEquivariantCoupling(NamedTuple):
+    """As `RawCoupling`, for the (L, parity) coupling: entry k of A2B is the m-th
+    component (`A2B_m[k]`, 0..2L) of the L-vector at (row, col)."""
+    L: int
+    parity: int
+    A2B_shape: tuple
+    A2B_rows: np.ndarray
+    A2B_cols: np.ndarray
+    A2B_m: np.ndarray
+    A2B_vals: np.ndarray
+    aa_sig_off: np.ndarray
+    aa_sig: np.ndarray
+    aspec: np.ndarray
+    aa_off: np.ndarray
+    aa_idx: np.ndarray
+    nnll_off: np.ndarray
+    nnll: np.ndarray
+
+
+def _two_phase(fn, head, mb_spec, Rnl_spec, Ylm_spec, with_m, what):
+    """Marshal the specs, size the buffers with a first call and fill them with a
+    second.  Returns ((nB, nAA), buffers); `with_m` adds the a2b_m buffer."""
     mb = [_pairs(bb, "mb_spec") for bb in mb_spec]
     R, Y = _pairs(Rnl_spec, "Rnl_spec"), _pairs(Ylm_spec, "Ylm_spec")
     _validate(mb, R, Y)
@@ -84,34 +102,68 @@ def couple_raw(mb_spec, Rnl_spec, Ylm_spec) -> RawCoupling:
     rn, rl = i64([n for n, _ in R]), i64([l for _, l in R])
     yl, ym = i64([l for l, _ in Y]), i64([m for _, m in Y])
     p = lambda a: a.ctypes.data
-    h = _loader.lib()
     sizes = np.zeros(7, np.int64)
+    nbuf = 11 if with_m else 10
 
     def call(bufs):
-        return h.etc_couple(len(mb), p(off), p(mn), p(ml), len(R), p(rn), p(rl), len(Y), p(yl), p(ym),
-                            p(sizes), *[p(b) if b is not None else None for b in bufs])
+        return fn(*head, len(mb), p(off), p(mn), p(ml), len(R), p(rn), p(rl), len(Y), p(yl), p(ym),
+                  p(sizes), *[p(b) if b is not None else None for b in bufs])
 
     with _loader.LOCK:
-        code = call([None] * 10)
+        code = call([None] * nbuf)
         if code not in (_OK, _SHORT):
-            raise _error(code)
+            raise _error(code, what)
         nnz, nB, nAA, nsig, nA, naa, nnl = (int(v) for v in sizes)
-        bufs = [np.zeros(nnz, np.int64), np.zeros(nnz, np.int64), np.zeros(nnz, np.float64),
-                np.zeros(nAA + 1, np.int64), np.zeros(3 * nsig, np.int64), np.zeros(2 * nA, np.int64),
-                np.zeros(nAA + 1, np.int64), np.zeros(naa, np.int64),
-                np.zeros(nB + 1, np.int64), np.zeros(2 * nnl, np.int64)]
+        bufs = ([np.zeros(nnz, np.int64), np.zeros(nnz, np.int64)] + ([np.zeros(nnz, np.int64)] if with_m else [])
+                + [np.zeros(nnz, np.float64),
+                   np.zeros(nAA + 1, np.int64), np.zeros(3 * nsig, np.int64), np.zeros(2 * nA, np.int64),
+                   np.zeros(nAA + 1, np.int64), np.zeros(naa, np.int64),
+                   np.zeros(nB + 1, np.int64), np.zeros(2 * nnl, np.int64)])
         code = call(bufs)
         if code != _OK:
-            raise _error(code)
-    return RawCoupling((nB, nAA), bufs[0], bufs[1], bufs[2], bufs[3], bufs[4].reshape(-1, 3),
-                       bufs[5].reshape(-1, 2), bufs[6], bufs[7], bufs[8], bufs[9].reshape(-1, 2))
+            raise _error(code, what)
+    bufs[-6] = bufs[-6].reshape(-1, 3)
+    bufs[-5] = bufs[-5].reshape(-1, 2)
+    bufs[-1] = bufs[-1].reshape(-1, 2)
+    return (nB, nAA), bufs
 
 
-def _error(code):
+def couple_raw(mb_spec, Rnl_spec, Ylm_spec) -> RawCoupling:
+    """L = 0 real-basis coupling of EquivariantTensors for the given specs.
+    mb_spec: bodies of (n, l); Rnl_spec: (n, l); Ylm_spec: (l, m).  All
+    returned indices are 0-based; layout documented on `RawCoupling`'s fields
+    (docs/dev/coupling-etshim-spec.md)."""
+    shape, bufs = _two_phase(_loader.lib().etc_couple, (), mb_spec, Rnl_spec, Ylm_spec, False, "etc_couple")
+    return RawCoupling(shape, *bufs)
+
+
+def couple_equivariant_raw(L, parity, mb_spec, Rnl_spec, Ylm_spec) -> RawEquivariantCoupling:
+    """Real-basis coupling to an L-vector (L = 0..MAX_L) of reflection parity
+    `parity` = (-1)^sum(l) of its products: +1 or -1.  (L, +1) for even L and
+    (L, -1) for odd L are the true tensors; the other two are pseudo-tensors.
+    (0, +1) is `couple_raw`.  Raises ValueError (NO_INVARIANTS) when `mb_spec` has
+    no function of that symmetry."""
+    L, parity = _int(L, "L"), _int(parity, "parity")
+    if not 0 <= L <= MAX_L:
+        raise ValueError(f"L must be in 0..{MAX_L}, got {L}")
+    if parity not in (1, -1):
+        raise ValueError(f"parity must be +1 or -1, got {parity}")
+    h = _loader.lib()
+    if _loader._ABI < 2:
+        raise _loader.CouplingLibError(f"the loaded coupling library has ABI {_loader._ABI}; "
+                                       "couple_equivariant_raw needs ABI 2 (ace-jax-coupling >= 0.3.0)")
+    shape, bufs = _two_phase(h.etc_couple_equivariant, (L, parity), mb_spec, Rnl_spec, Ylm_spec, True,
+                             "etc_couple_equivariant")
+    return RawEquivariantCoupling(L, parity, shape, *bufs)
+
+
+def _error(code, what="etc_couple"):
     if code == _INVALID:
         return ValueError("coupling library rejected the specs (INVALID_INPUT)")
     if code == _ORDER:
         return ValueError(f"correlation order > {MAX_ORDER} (ORDER_TOO_HIGH)")
     if code == _NOINV:
-        return ValueError("no body of mb_spec admits an L = 0 invariant (NO_INVARIANTS)")
-    return _loader.CouplingLibError(f"etc_couple returned unexpected code {code}")
+        if what == "etc_couple":
+            return ValueError("no body of mb_spec admits an L = 0 invariant (NO_INVARIANTS)")
+        return ValueError("mb_spec has no function of this L and parity (NO_INVARIANTS)")
+    return _loader.CouplingLibError(f"{what} returned unexpected code {code}")
