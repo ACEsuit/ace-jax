@@ -21,11 +21,13 @@ Results of `ace_jax.ham` as they are measured. Design: `specs/2026-11-16-hamilto
 
 | per atom | 32 threads | 1 thread |
 |---|---|---|
-| neighbour list | 21 µs | 23 µs |
-| A and AA (once, for all L) | 37 µs | 43 µs |
-| A, AA and the features of all 12 (L, parity) | 43 µs | 55 µs |
-| on-site H and S blocks of every shell pair | 224 µs | 148 µs |
+| neighbour list (host) | 22 µs | 23 µs |
+| A and AA (once, for all L) | 30–39 µs | 43 µs |
+| A, AA and the features of all 12 (L, parity) | 51 µs | 54 µs |
+| on-site H and S, reference readout (a numpy loop over shell pairs) | 209 µs | 148 µs |
+| on-site H and S, `OnsitePredictor` (one compiled program), neighbour list included | 225 µs | 95 µs |
 
-- The features of every symmetry cost 15 to 25% on top of the A/AA evaluation an ACE potential already does.
-- The rest of the last row is the readout, which is still a Python loop over shell pairs in numpy (and is slower with more threads). It has to become one jitted contraction per (L, parity) over all shell pairs and channels.
+- The features of every symmetry cost about 25% on top of the A/AA evaluation an ACE potential already does.
+- On one thread the compiled readout of all 175 shell-pair parts and both channels costs about 18 µs per atom: one contraction and one sparse scatter per (L, parity).
+- On 32 threads the same compiled program is slower than on one (225 against 95 µs), and the cost is in the readout. This is open: it needs a profile before the off-site model reuses the same readout.
 - The comparison with ACEhamiltonians.jl waits for the off-site model, where its cost is.

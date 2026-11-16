@@ -155,3 +155,19 @@ def test_parts_without_features_are_reported(basis):
     assert {k for k in report if k[3] >= 4} <= set(empty)                      # and some pseudo-tensor parts
     assert max(float(report[k][2].max()) for k in empty) > 1.0                   # eV: a real omission
     assert np.isfinite(model.predict(d.positions, d.cell, d.numbers)["H"][(0, 0, 0, 0, 0)]).all()
+
+
+def test_compiled_readout_is_the_reference_readout(basis):
+    """`OnsitePredictor` (one jitted program, dense tensors) against `OnsiteModel.predict`
+    (a loop over shell pairs), for a model with every part, and for an isolated atom."""
+    from ace_jax.ham.onsite import OnsitePredictor
+    m = random_model(basis)
+    fast = OnsitePredictor(m)
+    for pos, cell, numbers in (structure(), structure(3), (np.zeros((1, 3)), 50 * np.eye(3), np.array([6]))):
+        a, b = m.predict(pos, cell, numbers), fast(pos, cell, numbers)
+        assert set(a["H"]) == set(b["H"])
+        for name in a:
+            for k, v in a[name].items():
+                assert np.abs(b[name][k] - v).max() < 1e-11 * max(1.0, np.abs(v).max()), (name, k)
+    atoms, blocks = fast.dense(*structure())
+    assert [list(x) for x in atoms] == [[1, 3, 4], [0, 2]] and blocks[0].shape == (3, 2, ORB.n_orb(6), ORB.n_orb(6))

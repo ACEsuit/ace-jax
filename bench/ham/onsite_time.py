@@ -60,9 +60,13 @@ def main(n=4):
     t_feat = best(lambda: jax.block_until_ready(_features(basis, rij, zi, zj, seg, N)))
     t_graph = best(lambda: site_graph(basis, pos, cell, numbers), reps=3)
     t_all = best(lambda: model.predict(pos, cell, numbers), reps=3)
+    from ace_jax.ham.onsite import OnsitePredictor
+    fast = OnsitePredictor(model)
+    t_fast = best(lambda: jax.block_until_ready(fast.dense(pos, cell, numbers)[1]), reps=3)
     us = lambda t: 1e6 * t / N
     print(f"per atom: neighbour list {us(t_graph):.1f} us, A+AA {us(t_aa):.1f} us, A+AA+features {us(t_feat):.1f} us, "
-          f"everything (H and S, numpy readout) {us(t_all):.1f} us")
+          f"everything (H and S, numpy readout) {us(t_all):.1f} us, "
+          f"everything compiled, neighbour list included {us(t_fast):.1f} us")
 
 
 if __name__ == "__main__":

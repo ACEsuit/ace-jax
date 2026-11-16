@@ -98,3 +98,113 @@ def part_values(coef, F, atoms, L, n_channel):
     if coef is None:
         return np.zeros((len(atoms), n_channel, 2 * L + 1))
     return np.einsum("amk,ck->acm", design(F, atoms, L), np.asarray(coef))
+
+
+# ------------------------------------------------------------------ fast readout
+class Readout(eqx.Module):
+    """The coefficients of an `OnsiteModel` as dense tensors, per species z (in
+    `species` order): for each (L, p), W (n_channel, Q, n_B) over the Q shell pairs
+    that have that part, and the CG tensors placed in the atom's orbital block
+    (both triangles) as sparse entries: value `Gv` at flat (shell pair, m) index
+    `Gq` and flat orbital-pair index `Gij` (a dense (Q, 2L+1, n_orb, n_orb) is
+    almost all zeros); `const` (n_channel, n_orb, n_orb), the isolated-atom block.
+    block = const + sum_(L,p) scatter((W . B^(L,p))[Gq] Gv -> Gij): one contraction
+    and one scatter per symmetry for all shell pairs and channels at once."""
+
+    W: tuple
+    Gq: tuple
+    Gij: tuple
+    Gv: tuple
+    const: tuple
+    species: tuple = eqx.field(static=True)
+    lps: tuple = eqx.field(static=True)          # per species: the (L, p) of W / G
+
+    def blocks(self, F, k, atoms):
+        """(n_atoms, n_channel, n_orb, n_orb) for the atoms (indices into F) of species k."""
+        jnp = jax.numpy
+        const = self.const[k]
+        nc, n = const.shape[0], const.shape[-1]
+        flat = jnp.zeros((n * n, atoms.shape[0], nc), const.dtype)
+        for lp, W, q, ij, v in zip(self.lps[k], self.W[k], self.Gq[k], self.Gij[k], self.Gv[k]):
+            P = jnp.einsum("cqb,abm->qmac", W, F[lp][atoms])                 # (Q, 2L+1, n_atoms, n_channel)
+            P = P.reshape(P.shape[0] * P.shape[1], *P.shape[2:])
+            flat = flat + jax.ops.segment_sum(P[q] * v[:, None, None], ij, num_segments=n * n)
+        return const[None] + jnp.moveaxis(flat, 0, -1).reshape(atoms.shape[0], nc, n, n)
+
+
+def compile_readout(model):
+    """`Readout` of an `OnsiteModel` (numpy work, once per model)."""
+    orb, nc = model.orbitals, len(model.channels)
+    Ws, Gq, Gij, Gv, consts, lps_all = [], [], [], [], [], []
+    for z in orb.species:
+        n = orb.n_orb(z)
+        const = np.zeros((nc, n, n))
+        by_lp = {}
+        for s1, s2, l1, l2 in shell_pairs(orb, z):
+            a, b = orb.shell_slice(z, s1), orb.shell_slice(z, s2)
+            for L, p in parts_of(l1, l2, s1 == s2):
+                c = model.coef.get((z, s1, s2, L))
+                if c is None:
+                    continue
+                c = np.asarray(c)
+                T = cg.real_cg(l1, l2, L)                                  # (i, j, M)
+                g = np.zeros((2 * L + 1, n, n))
+                g[:, a, b] = np.moveaxis(T, 2, 0)
+                if s1 != s2:
+                    g[:, b, a] = np.moveaxis(T, 2, 0).transpose(0, 2, 1)
+                nB = model.basis.n(L, p)
+                if L == 0:
+                    const += c[:, -1][:, None, None] * g[0]
+                if nB:
+                    by_lp.setdefault((L, p), []).append((c[:, :nB], g))
+        lps = tuple(sorted(by_lp))
+        Ws.append(tuple(jax.numpy.asarray(np.stack([w for w, _ in by_lp[lp]], axis=1)) for lp in lps))
+        dense = [np.stack([g for _, g in by_lp[lp]]).reshape(-1, n * n) for lp in lps]      # (Q (2L+1), n n)
+        nz = [np.nonzero(d) for d in dense]
+        Gq.append(tuple(jax.numpy.asarray(r, jax.numpy.int32) for r, _ in nz))
+        Gij.append(tuple(jax.numpy.asarray(c, jax.numpy.int32) for _, c in nz))
+        Gv.append(tuple(jax.numpy.asarray(d[r, c]) for d, (r, c) in zip(dense, nz)))
+        consts.append(jax.numpy.asarray(const))
+        lps_all.append(lps)
+    return Readout(W=tuple(Ws), Gq=tuple(Gq), Gij=tuple(Gij), Gv=tuple(Gv), const=tuple(consts),
+                   species=orb.species, lps=tuple(lps_all))
+
+
+def _dense_impl(basis, readout, rij, zi, zj, seg, atoms, n):
+    F = basis.features(rij, zi, zj, seg, n)
+    return tuple(readout.blocks(F, k, a) for k, a in enumerate(atoms))
+
+
+_dense = jax.jit(_dense_impl, static_argnums=7)
+
+
+class OnsitePredictor:
+    """`OnsiteModel.predict` as one compiled program: neighbour list on the host,
+    then features and readout on the device.  `dense` returns, per species of the
+    orbital basis, the atom indices and their (n_atoms, n_channel, n_orb, n_orb) blocks."""
+
+    def __init__(self, model):
+        self.model, self.readout = model, compile_readout(model)
+
+    def dense(self, positions, cell, numbers, pbc=True):
+        numbers = np.asarray(numbers)
+        m = self.model
+        for z in set(int(z) for z in numbers):
+            m.orbitals.ls(z)
+        rij, zi, zj, seg, n = site_graph(m.basis, positions, cell, numbers, pbc)
+        atoms = tuple(np.flatnonzero(numbers == z).astype(np.int32) for z in m.orbitals.species)
+        if len(rij) == 0:                                    # no neighbour: one masked edge keeps the shapes
+            z1 = np.zeros(1, np.int32)                       # at the cutoff, where every radial vanishes
+            rij, zi, zj, seg = np.array([[m.basis.rcut, 0.0, 0.0]]), z1, z1, z1
+        return atoms, _dense(m.basis, self.readout, rij, zi, zj, seg, atoms, n)
+
+    def __call__(self, positions, cell, numbers, pbc=True):
+        """As `OnsiteModel.predict`."""
+        atoms, blocks = self.dense(positions, cell, numbers, pbc)
+        out = {c: {} for c in self.model.channels}
+        for a, b in zip(atoms, blocks):
+            b = np.asarray(b)
+            for k, i in enumerate(a):
+                for c, name in enumerate(self.model.channels):
+                    out[name][(0, 0, 0, int(i), int(i))] = b[k, c]
+        return out
