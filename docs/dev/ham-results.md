@@ -108,3 +108,21 @@ A 32-thread CPU run did not finish in 48 minutes (one core busy); it was stopped
 - What remains is forming and pooling 784 A functions over 158 neighbours per atom; the readout is 2 µs.
 - For orientation only: one on-site block costs ace-jax about 0.25 ms on one CPU thread; MACE-H's average cost per block is 0.39 ms on one CPU thread and 0.023 ms on the GPU, for all blocks at once. The off-site model decides the comparison: it has to deliver about 158 off-site blocks per atom, and if each needs its own environment pooling at this cost it will not beat MACE-H's GPU time. That is the argument for sharing the per-atom features across bonds (design option B) and for a GPU run of ace-jax.
 - MACE-H's accuracy is not part of this: the weights are untrained, and its model size here is its example's, not one matched to an error.
+
+## Off-site blocks from shared site features: first accuracy (2026-11-16)
+
+The off-site model (`ham/bond.py`, `ham/offsite.py`): for a bond i→j, two-centre functions φ_n(r) Y_L(r̂) plus the bond harmonics coupled with the per-atom features of i and of j, which the on-site model already computes. No environment is pooled per bond. Bond reversal H_ji(−R) = H_ij(R)ᵀ is exact by construction.
+
+**Data.** The aluminium supercells of the ACEhamiltonians paper, all pairs within 9 Å (168 bonds per atom). Train on 20,000 bonds drawn from BCC `SK-supercell-001` and FCC `SK-supercell-002`, test on 10,000 bonds from FCC `SK-supercell-001` and BCC `SK-supercell-002`. Site basis: order 1, 8 radials, l ≤ 4, cutoff 9 Å. 12 two-centre radials. `bench/ham/offsite_accuracy.py`. RMSE over the elements of the canonical blocks; H in meV, S × 1e3.
+
+| coupled features (radials n_cpl, bond harmonics l ≤ l_cpl) | coefficients per channel | H test (train) | S test | H, d–d | H, bonds < 3.5 Å |
+|---|---|---|---|---|---|
+| none: two-centre only | 336 | 2.40 (2.44) | 0.0077 | 4.10 | 7.15 |
+| 2, l ≤ 2 | 4128 | 1.69 (1.71) | 0.0075 | 3.16 | 3.36 |
+| 4, l ≤ 2 | 7920 | 1.51 (1.52) | 0.0073 | 2.80 | 3.09 |
+| 4, l ≤ 4 | 13392 | 0.92 (0.94) | 0.0069 | 1.79 | 1.52 |
+
+- The overlap is two-centre and is fitted to 7e-6 by the two-centre functions alone.
+- The shared site features carry real environment dependence of H: 2.40 → 0.92 meV overall, and 7.2 → 1.5 meV for nearest-neighbour bonds. Train and test errors agree, so the limit is the basis, not the amount of data.
+- The error is still falling with l_cpl and n_cpl; where it stops, and how that compares with ACEhamiltonians.jl's bond-environment model on the same bonds, is not yet measured. The on-site errors on this data were 0.5 to 1.1 meV for comparison.
+- Largest single least-squares problem: 652 columns; the fit streams bonds in chunks and takes 37 s.
