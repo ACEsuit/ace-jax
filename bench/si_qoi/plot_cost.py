@@ -12,7 +12,7 @@ the GPU, appears there only).
 
     python bench/si_qoi/plot_cost.py [--row "A100 cost (µs per atom-step, log)|cost.json|cost.codes.json" ...] [--out fig.png]
 """
-import argparse, json, pathlib, sys
+import argparse, json, pathlib, sys, textwrap
 
 import matplotlib
 import matplotlib.ticker  # noqa: E402,F401
@@ -515,6 +515,9 @@ def main():
                 "Foundation models (stars, squares): MACE-MH-1 (omat_pbe head; Symmetrix v0.3.0 symmetrix/mace/foundation, float64, and its float32-mixed style in light violet) and "
                 "GRACE-1L/2L-OMAT-large (grace-runtime, mixed precision), with their own architecture and 6 Å cutoff (the other models: 5 Å).\n"
                 "Zero-shot (open): one energy shift per atom from the training split. Fine-tuned (filled): every parameter, on the benchmark's training split; an arrow joins each model's two points. A100 row: timed on shared nodes.")
+        # wrap to the figure: at 8.5 pt a character is ~0.062 in, and an unwrapped line is clipped at both edges
+        width = int(fig.get_figwidth() / 0.062 * 0.95)
+        note = "\n".join(w for line in note.split("\n") for w in (textwrap.wrap(line, width) or [""]))
         fig.text(0.5, 0.003, note, ha="center", fontsize=8.5, color=MUTED)
         # the axes start above the note: its lines (8.5 pt, 1.2 spacing) plus room for the bottom row's axis label
         bottom = ((note.count("\n") + 1) * 8.5 * 1.2 / 72 + 0.2) / fig.get_figheight()
