@@ -4,7 +4,7 @@
 #   gpu    the same tree with Kokkos CUDA (A100, FP64): `pair_style ye3t/kk` and pace/kk                 -> $ROOT/lmp-ye3t-gpu.sh
 #          (after `cpu`, which copies and patches the tree and builds yaml-cpp)
 #   venv   ye3t + ye3t-methods (the fitted models' reference evaluator for the timing gate)     -> $ROOT/venv-ye3t
-# The LAMMPS is the lammps-dev tree (develop ec02ed0, "2 Sep 2026", as every other CPU row) copied to lammps-ye3t and
+# The LAMMPS is the lammps-dev tree (develop ec02ed0 of 25 Sep 2026, version string "2 Sep 2026", as every other CPU row) copied to lammps-ye3t and
 # patched by ye3t-lammps's own installer (tools/patch_lammps.sh; upstream tests stable_22Jul2025_update4, and its
 # --check passes on this tree).  Configured as sulis-pacetab.sh's CPU build (Kokkos OpenMP, Zen 2: the same
 # compiler flags for pace and ye3t), with stock lammps-user-pace v.2025.12.4.p1.  ML-YE3T needs yaml-cpp with a
@@ -56,7 +56,7 @@ cpu() {
   chmod +x "$ROOT/lmp-ye3t-cpu.sh"
   help=$("$ROOT/lmp-ye3t-cpu.sh" -h)                              # (not piped into grep -q: under pipefail lmp's SIGPIPE fails)
   grep -qw ye3t <<< "$help" && echo "pair_style ye3t: built" || { echo "pair_style ye3t missing from $B/lmp"; exit 1; }
-  { echo "lammps-ye3t: lammps-dev ec02ed0 (2 Sep 2026) + ye3t-lammps 06100f9 (tools/patch_lammps.sh) + ye3t f8ff96d runtime"
+  { echo "lammps-ye3t: lammps-dev ec02ed0 (25 Sep 2026; version string 2 Sep 2026) + ye3t-lammps 06100f9 (tools/patch_lammps.sh) + ye3t f8ff96d runtime"
     echo "ML-PACE: lammps-user-pace v.2025.12.4.p1 (stock); yaml-cpp 0.8.0 (static, for both packages)"
     echo "modules: $MODS_CPU; cmake: Release, Kokkos OpenMP+Serial ARCH_ZEN2, BUILD_MPI, BUILD_OMP"
     echo "built $(date -Is) on $(hostname)"; } > "$ROOT/VERSIONS-ye3t"
