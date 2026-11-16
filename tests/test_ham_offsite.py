@@ -135,3 +135,20 @@ def test_fit_on_real_data(basis):
     # H is not two-centre: the same model leaves a real residual, far above the overlap's
     errH = max(np.abs(pred["H"][k] - d.blocks["H"][k]).max() for k in off)
     assert errH > 10 * err
+
+
+def test_compiled_prediction_is_the_reference(basis):
+    """`OffsitePredictor` (coefficients contracted with the site features once per atom, a
+    matrix product per atom over its bonds) against `OffsiteModel.predict`, every bond and
+    channel, both species orders, with and without coupled features."""
+    from ace_jax.ham.offsite_fast import OffsitePredictor
+    for b in (basis, basis._replace(n_cpl=0)):
+        m = random_model(b)
+        fast = OffsitePredictor(m)
+        for seed in (0, 3):
+            pos, cell, numbers = structure(seed)
+            ref, got = m.predict(pos, cell, numbers), fast(pos, cell, numbers)
+            for name in ref:
+                assert set(ref[name]) == set(got[name])
+                worst = max(np.abs(got[name][k] - v).max() / max(1.0, np.abs(v).max()) for k, v in ref[name].items())
+                assert worst < 1e-10, (name, worst)
