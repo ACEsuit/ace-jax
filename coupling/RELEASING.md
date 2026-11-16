@@ -19,6 +19,9 @@ library. ace-jax's dependency marker already limits the install to these platfor
 
 ## Each release
 
+0. **Regenerate the oracles if ET or the shim changed.** `reference/reference.jl` (ABI v1) and
+   `reference/reference_equivariant.jl` (ABI v2), each with the command in its header; the
+   cases come from `coupling/tools/gen_cases.py`.
 1. **Pick the version.** Bump `version` in `coupling/python/pyproject.toml`,
    `__version__` in `coupling/python/src/ace_jax_coupling/__init__.py` and
    `COUPLING_LIB_VERSION` in ace-jax, together with ace-jax's `ace-jax-coupling==`

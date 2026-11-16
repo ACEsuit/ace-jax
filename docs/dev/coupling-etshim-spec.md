@@ -118,6 +118,53 @@ permutation from the `A2B` column order. The shim reproduces
 row's first stored column), both checked against the real ET objects in
 `coupling/julia/test/runtests.jl`.
 
+### C ABI v2: equivariant couplings (ace-jax-coupling 0.3.0)
+
+Additive. `etc_couple` keeps its signature and its results; `etc_abi_version()`
+returns 2. The Python loader accepts ABI 1 and 2, so `couple_raw` works on
+either and `couple_equivariant_raw` says which ABI it needs.
+
+```c
+int32_t etc_max_L(void);                // 6
+int32_t etc_couple_equivariant(
+    int64_t L /* 0..6 */, int64_t parity /* +1 or -1 */,
+    /* the ten input arguments of etc_couple */, int64_t *sizes,
+    int64_t *a2b_i, int64_t *a2b_j, int64_t *a2b_m, double *a2b_v, // [nnz] (row, col, m, value), m = 0..2L
+    /* the seven remaining outputs of etc_couple */);
+// as etc_couple; 2 INVALID_INPUT also for L or parity out of range; 4 NO_INVARIANTS: mb_spec has no
+// function of this L and parity; 6 IMAGINARY_COUPLING is reserved (ET resolves that case itself)
+```
+
+- **Parity** is (−1)^Σl of the products, the factor B takes under inversion:
+  +1 is ET's `refl_sym = :sym`, −1 is `:asym`. (L, (−1)^L) are the true tensors
+  and (L, −(−1)^L) the pseudo-tensors, so "true/pseudo" is not in the interface.
+- **Component order.** Entry `m` of the L-vector is Y_L's m − L, the order of
+  `Ylm_spec` and of `eval/harmonics.py`. `tests/test_coupling_equivariant.py`
+  checks B(QR) = D_L(Q) B(R) with D_L from ace-jax's own harmonics.
+- **Entries.** In `findnz` order of ET's `SVector`-valued matrix, then `m`
+  ascending. For L > 0 a component with |x| ≤ 1e-12 is not stored: an exact
+  zero test made the count depend on the BLAS build (840 against 844 entries
+  between the trimmed library and ordinary Julia on one case). L = 0 keeps
+  `etc_couple`'s entries exactly, and (0, +1) equals it array for array.
+- **L is static.** ET's `Val(L)` API makes L a compile-time constant, so the
+  shim dispatches over a table L = 0…6 (4 for spd orbitals, 6 with f), as ET
+  does for the correlation order. The fork forwards `refl_sym` through
+  `symmetrisation_matrix(Val(L), …)`, `O3.coupling_coeffs(Val(L), …)` and
+  `sparse_equivariant_tensor_spec(Val(L); …)`; its `--trim=safe` test covers
+  L = 0…6 with both values. No trim fixes were needed beyond that.
+- **Python.** `ace_jax_coupling.couple_equivariant_raw(L, parity, mb, R, Y)` →
+  `RawEquivariantCoupling`. In ace-jax, `basis.coupling.couple_equivariant` →
+  `EquivariantCoupling` (A2B as sparse (row, m, col) entries, `A2B3`, columns in
+  the AA evaluation order; empty when there is no function of that symmetry),
+  `couple_equivariant_cached` (files `cple-<key>.npz`, L and parity in the key)
+  and `couple_equivariant_set(lps, …)` → `EquivariantSet`: several (L, parity)
+  on one A list and one AA evaluation order, the union by (n, l, m) identity.
+- **Oracle.** `coupling/julia/reference/reference_equivariant.jl` runs the same
+  untrimmed ET as `reference.jl` through the Integer API upstream ships
+  (`symmetrisation_matrix(L, mb; refl_sym)`), on `tests/data/cases_equivariant.json`
+  (from `gen_cases.py`): three specs, L up to 6, both parities, one with
+  degenerate blocks. Index arrays identical, values within 4 ulp.
+
 ### Bundle and wheels
 
 `coupling/tools/prune_bundle.py` keeps only the shared libraries actually
@@ -173,6 +220,10 @@ row factor; descriptors by the factor).
   differs in the last bit or two where ET's sparse LU runs) on 8 shapes (orders 1–8, up to
   6216×17302), via `coupling/julia/reference/` → `tests/data/et_reference.npz`;
   input validation, threads, SIGINT after load, lazy loading.
+  `test_equivariant.py`: ABI v2 against `et_reference_equivariant.npz`, (0, +1) against
+  `couple_raw`, bad L or parity, an ABI 1 library.
+- `tests/test_coupling_equivariant.py` — rotation and inversion of B^(L, parity) with ace-jax's
+  harmonics, the shared-AA set, the cache (the cache tests need no library).
 - `tests/test_coupling_parity.py` — vs the ACEpotentials fixtures, in-process:
   multiplicity-1 blocks equal up to a per-row scale, degenerate blocks on the
   row subspace (`subspace_residual`), all residuals < 1e-12.

@@ -70,7 +70,7 @@ def check(root):
     else:
         ext = "dylib" if sys.platform == "darwin" else "so"
         lib = ctypes.CDLL(str(root / "lib" / f"libetcouple.{ext}"), mode=os.RTLD_NOW | os.RTLD_LOCAL)
-    assert lib.etc_abi_version() == 1 == info["abi"], "ABI mismatch"
+    assert lib.etc_abi_version() == 2 == info["abi"], "ABI mismatch"
     assert lib.etc_max_order() == 8 == info["max_order"], "max order mismatch"
     bad = []
     for f in _libs(root):

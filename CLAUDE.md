@@ -24,7 +24,7 @@ parity CI jobs. User docs: `README.md`. Agent-facing usage guide:
   - `pipeline/` is the `aj fit` pipeline (`radials.py`: the `--learn-radial` stage).
   - `radial_learn.py` learns radials. `varpro.py` (the FS-density VarPro driver), `density.py` and `block_lbfgs.py` are research tools kept from PR #22 and exercised only by their tests; no pipeline path uses them.
 - `src/ace_jax/basis/`: building an ACE basis (a frozen, zero-readout model).
-  - `spec.py`, `coupling.py`: the EquivariantTensors shim via the compiled `ace-jax-coupling` library; `BasisUnavailable` when it cannot run.
+  - `spec.py`, `coupling.py`: the EquivariantTensors shim via the compiled `ace-jax-coupling` library; `BasisUnavailable` when it cannot run. `couple_equivariant(L, parity, ...)` / `couple_equivariant_cached` / `couple_equivariant_set` (the library's ABI v2, ace-jax-coupling >= 0.3.0): the coupling of an L-vector (L <= 6) of parity (-1)^sum(l), A2B as sparse (row, m, col) entries (`A2B3`), component m = Y_L's m - L; the set puts several (L, parity) on one A list and AA order (`docs/dev/coupling-etshim-spec.md`, 'C ABI v2'; `tests/test_coupling_equivariant.py`).
   - `model.py`: `BasisSpec`, `build_basis` (the one entry point: `aj basis`, `aj fit`, Python), over `build_model` / `build_embedding_model`; `Basis` (NamedTuple), `basis_r0`.
   - `prior.py`: the smoothness prior. `export.py`: `save_npz`.
 - `src/ace_jax/eval/dense.py`: `dense_energy`, the energy of dense rows with more slots than the model needs (compact valid slots to K with `calc.skin.compact`, park the rest, NaN on any overflow, row blocks, padding atoms dropped); the one core under `jaxmd.potential` and `batch.energy_fn`, so both take the JAX model or the C++ kernel (and a CUDA kernel later: an EdgeSiteModel whose FFI call has the same row-flattening vmap rule plugs in; only `ACECalculator._ffi_choice`, CPU-only today, has to select it).
@@ -42,7 +42,7 @@ parity CI jobs. User docs: `README.md`. Agent-facing usage guide:
   - `learn_radial/`.
   - `gpu_memory/`: peak device memory of the force call by stage (XLA dump attribution), max system size by bisection, variant checks; `docs/dev/gpu-memory-results.md`, tested by `tests/test_bench_gpu_memory.py`.
 - `coupling/`: the `ace-jax-coupling` distribution.
-  - `julia/src/ETCouple.jl`: the C ABI over EquivariantTensors (fork rev pinned in `julia/Project.toml` `[sources]`); `julia/build.jl` compiles it with JuliaC (`--trim=safe`, Julia 1.13); `julia/reference/` is the unpatched-upstream oracle.
+  - `julia/src/ETCouple.jl`: the C ABI over EquivariantTensors (`etc_couple`, L = 0; `etc_couple_equivariant`, ABI v2) (fork rev pinned in `julia/Project.toml` `[sources]`); `julia/build.jl` compiles it with JuliaC (`--trim=safe`, Julia 1.13); `julia/reference/` is the unpatched-upstream oracle.
   - `python/`: the ctypes package `ace_jax_coupling` and its wheel hook; `tools/`: bundle check, trace-based pruning, clean-env wheel test.
   - Spec: `docs/dev/coupling-etshim-spec.md`.
 - `julia/`: ACEpotentials reference generators. `export_model.jl` exports a model ACEpotentials built (evaluator parity); `built_basis_reference.jl` exports radials and design rows for the bases `build_model` reproduces (builder parity, `tests/test_built_basis_parity.py`); `export_arrays.jl` holds their shared array extraction.
