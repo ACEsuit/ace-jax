@@ -514,7 +514,7 @@ def main():
                 "LAMMPS (accuracy is the float64 fit's).\n"
                 "Foundation models (stars, squares): MACE-MH-1 (omat_pbe head; Symmetrix v0.3.0 symmetrix/mace/foundation, float64, and its float32-mixed style in light violet) and "
                 "GRACE-1L/2L-OMAT-large (grace-runtime, mixed precision), with their own architecture and 6 Å cutoff (the other models: 5 Å).\n"
-                "Zero-shot (open): one energy shift per atom from the training split. Fine-tuned (filled): every parameter, on the benchmark's training split; an arrow joins each model's two points. A100 row: timed on shared nodes.")
+                "Zero-shot (open): one energy shift per atom from the training split. Fine-tuned (filled): every parameter, on the benchmark's training split; an arrow joins each model's two points. A100 row: timed on shared nodes; CPU row: the same styles' CPU builds.")
         # wrap to the figure: at 8.5 pt a character is ~0.062 in, and an unwrapped line is clipped at both edges
         width = int(fig.get_figwidth() / 0.062 * 0.95)
         note = "\n".join(w for line in note.split("\n") for w in (textwrap.wrap(line, width) or [""]))

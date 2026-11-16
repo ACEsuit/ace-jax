@@ -42,7 +42,7 @@ RUNTIME = ("grace-rt", "pace-rt")
 FDN = {"mace-fdn": "symmetrix/mace/foundation", "mace-fdn-f32": "symmetrix/mace/foundation/float32",
        "mace-fdn-f32m": "symmetrix/mace/foundation/float32-mixed"}
 MACE_STYLES = ("mace", "mace-symx3", *FDN)
-OMP_PLAIN = (*RUNTIME, "mace-symx3")
+OMP_PLAIN = (*RUNTIME, "mace-symx3", "mace-fdn", "mace-fdn-f32")   # on the CPU
 # Symmetrix-XL (bench/scaling/envs/sulis-xl.sh): its fast path is pair_style symmetrix/mace[/float32]/kk with
 # a JIT-compiled R1 artifact, so it runs Kokkos on the CPU too (the non-kk style is the old evaluator)
 XL = {"mace-xl": ("symmetrix/mace/kk", "float64"), "mace-xl-f32": ("symmetrix/mace/float32/kk", "float32")}

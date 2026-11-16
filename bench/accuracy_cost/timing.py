@@ -86,8 +86,8 @@ PLAN = {"ace": [("acejax-ace", {"cpu": "standalone", "gpu": "lammps"}, ACE_DTYPE
                  ("mace-xl-f32", {"cpu": "lammps", "gpu": "lammps"}, ("float32",))],
         # Foundation MACE models (fit_mace_fm.py: zero-shot and fine-tuned on the benchmark's split), run by Symmetrix
         # v0.3.0's fixed-architecture styles: only where the env json names `lmp_fdn`
-        "mace_fm": [("mace-fdn", {"gpu": "lammps"}, ("float64",)),
-                    ("mace-fdn-f32", {"gpu": "lammps"}, ("float32",)),
+        "mace_fm": [("mace-fdn", {"cpu": "lammps", "gpu": "lammps"}, ("float64",)),   # CPU: OpenMP threads per rank
+                    ("mace-fdn-f32", {"cpu": "lammps", "gpu": "lammps"}, ("float32",)),
                     ("mace-fdn-f32m", {"gpu": "lammps"}, ("mixed",))],
         # NEP: pair_style nep (NEP_CPU, float64, MPI) on the CPU; on the GPU GPUMD's own MD code, whose NEP is
         # mixed precision (dtype "mixed": float descriptors/network, double accumulation; scaling/run_gpumd.py)
@@ -247,8 +247,10 @@ def cases(device, only=None):
                         if code == "mace-symx3":              # float64 reference as mace's; its own extraction
                             path = str(d / ("model-cpu.model" if device == "cpu" and (d / "model-cpu.model").exists()
                                             else "model.model"))
-                        if code in FDN_CODES:                 # the model file as registered (fit_mace_fm.py)
-                            path = _local(st["model"])
+                        if code in FDN_CODES:                 # the model file as registered (fit_mace_fm.py); on a
+                            path = _local(st["model"])        # GPU-less node a fine-tuned model's CPU copy (export_fdn)
+                            if device == "cpu" and (d / "model-cpu.model").exists():
+                                path = str(d / "model-cpu.model")
                         if code in XL_CODES:                  # the gate's PyTorch reference: float64, and on a
                             path = str(d / ("model-cpu.model" if device == "cpu" and (d / "model-cpu.model").exists()
                                             else "model.model"))   # GPU-less node the CPU copy (fit_mace.cpu_copy)

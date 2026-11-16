@@ -778,8 +778,30 @@ GRACE ≤ 3.9e-6 / 2.1e-6.
 **Timing.** 32,768 atoms, one A100-PCIE-40GB each, on *shared* nodes (8 cores; load 1.4-3.8), not the exclusive
 nodes of the other rows: `accuracy_cost/envs/sulis-gpu-fdn.sbatch` (jobs 2289095, 2289390) and
 `sulis-gpu-grace-fm.sbatch` (jobs 2289094, 2289389), rows in `results/sulis/sulis-gpu-fdn.jsonl` and
-`sulis-gpu-grace-fm.jsonl`. MACE-MH-1 float64 takes 30.3 GB of device memory at this size, mixed 15.5 GB. There is
-no CPU row: Symmetrix's foundation styles are GPU only, and GRACE was not timed there.
+`sulis-gpu-grace-fm.jsonl`. MACE-MH-1 float64 takes 30.3 GB of device memory at this size, mixed 15.5 GB.
 
-Not done: a float64 GRACE timing (the native `grace/2l/kk` style on the foundation `kokkos.npz`), a CPU row, and
-more than one fine-tuning seed.
+**CPU row.** One exclusive 128-core EPYC 7742 node, 4,096 atoms, as the other CPU rows; µs/atom-step at each
+layout (MPI ranks x OpenMP threads), the figure taking each model's fastest. MACE-MH-1: the same Symmetrix styles
+in its CPU build (`lmp-symx3-cpu.sh`; float64 and float32, the float32-mixed style being GPU only),
+`accuracy_cost/envs/sulis-cpu-fdn.sbatch` (jobs 2290209, 2290229). GRACE: `grace/runtime`,
+`sulis-cpu-grace-fm.sbatch` (job 2290210). Rows in `results/sulis/sulis-cpu-<RxT>-fdn.jsonl` and
+`sulis-cpu-<RxT>-grace-fm.jsonl`.
+
+| model | 128x1 | 32x4 | 16x8 (MACE) / 8x16 (GRACE) | fastest | A100 |
+|---|---|---|---|---|---|
+| MACE-MH-1 zero-shot, float64 | 52.5 | 46.0 | 48.0 | 46.0 | 6.04 |
+| MACE-MH-1 fine-tuned, float64 | 53.2 | 45.1 | 47.2 | 45.1 | 6.07 |
+| MACE-MH-1 zero-shot, float32 | 21.2 | 18.4 | 21.6 | 18.4 | 4.29 |
+| MACE-MH-1 fine-tuned, float32 | 21.5 | 18.5 | 21.5 | 18.5 | 4.31 |
+| GRACE-1L-OMAT-large zero-shot | 3.17 | 2.09 | 2.07 | 2.07 | 1.78 |
+| GRACE-1L fine-tuned | 3.05 | 2.08 | 2.09 | 2.08 | 1.77 |
+| GRACE-2L-OMAT-large zero-shot | out of memory | 8.94 | 8.81 | 8.81 | 5.59 |
+| GRACE-2L fine-tuned | out of memory | 8.86 | 8.83 | 8.83 | 5.60 |
+
+Gates as on the A100 (MACE-MH-1 float64 ≤ 1.5e-10 / 2.0e-7, float32 ≤ 5.3e-8 / 3.7e-6; GRACE ≤ 5.7e-8 / 9.9e-7).
+GRACE-2L does not fit at 128 ranks (each rank holds the model). The float32 MACE rows are not in the cost file
+(float64 only, as for the other models). The fine-tuned MACE model holds CUDA tensors, so on a CPU node the gate's
+PyTorch reference is its CPU copy (`timing.cases`; the first run, job 2290209, failed that gate at loading).
+
+Not done: a float64 GRACE timing (the native `grace/2l/kk` style on the foundation `kokkos.npz`), and more than
+one fine-tuning seed.

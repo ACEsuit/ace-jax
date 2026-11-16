@@ -1093,7 +1093,9 @@ def test_foundation_families(tmp_path, monkeypatch):
     assert y["fit"]["opt_params"]["learning_rate"] == fit_grace_fm.FT_LR
 
     assert [c for c, _, _ in timing.PLAN["mace_fm"]] == list(timing.FDN_CODES) and [c for c, _, _ in timing.PLAN["grace_fm"]] == ["grace-rt"]
-    assert all(set(dev) == {"gpu"} for _, dev, _ in timing.PLAN["mace_fm"])     # Symmetrix's foundation styles: GPU only
+    assert [set(dev) for _, dev, _ in timing.PLAN["mace_fm"]] == [{"cpu", "gpu"}, {"cpu", "gpu"}, {"gpu"}]   # float32-mixed: GPU only
+    from scaling import sweep
+    assert sweep.lammps_supported("mace-fdn", "cpu") and not sweep.lammps_supported("mace-fdn-f32m", "cpu")
     for code, style in run_lammps.FDN.items():
         assert f"pair_style {style}\n" in run_lammps._pair(code, "m.json", ["Si"], "gpu")
         assert parity.TOL[code][1] <= 1e-4
