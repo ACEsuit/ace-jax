@@ -24,7 +24,9 @@ was slow. ace-jax has the evaluation and fitting machinery to do the same physic
 3. Data: a pure-Python DeepH reader and writer; a Quoll ingestion script writing a frozen npz cache.
 4. Stage-A fitting: QR evidence per (species or species pair, L, parity), every shell pair a
    right-hand side; block covariance, jackknife shape and Mondrian conformal scales; POPS.
-5. Validation on Quoll's SiC data and the ACEhamiltonians Si data; DeepH prediction output with an
+5. Collinear spin: H↑ and H↓ as operator channels on the same features, validated on a minimal
+   spin-polarised dataset generated for this work.
+6. Validation on Quoll's SiC data and the ACEhamiltonians Si data; DeepH prediction output with an
    uncertainty twin.
 
 ## Non-goals (this branch)
@@ -32,6 +34,8 @@ was slow. ace-jax has the evaluation and fitting machinery to do the same physic
 - Observable (spectral) training, the degenerate-safe eigensolver rule: phase 2b.
 - Dense bond layouts, GPU k-batches, a `jax.export` artifact, a C++ kernel: phase 3.
 - Learned orbitals: phase 4.
+- Non-collinear spin and spin-orbit coupling (complex spinor blocks, spin ⊗ orbital coupling,
+  time reversal). The readout keeps the channel axis separate from the CG map so it is not blocked.
 - An `aj ham` CLI and user documentation pages. Python API only until 2a is done.
 - Loading old ACEhamiltonians.jl models, or parity with its basis functions.
 - A trim-compiled Quoll.
@@ -141,8 +145,11 @@ was slow. ace-jax has the evaluation and fitting machinery to do the same physic
   Per-block mean (ACEhamiltonians' `mean`) is an L = 0 constant column.
 - `model.py`: `HamModel` (an `eqx.Module`): on-site model per species, off-site provider per
   species pair, coefficients, CG tables, orbital basis; `predict(atoms)` → blocks keyed
-  (i, j, T); the same object serves H and S (two coefficient sets on one basis), so S costs only a
-  second contraction.
+  (i, j, T). **Operator channels**: the coefficients carry a leading channel axis, named in the
+  model file: `("H", "S")` without spin, `("H_up", "H_dn", "S")` for collinear spin. Every channel
+  has the symmetry of a real scalar operator, so all channels read the same features and each costs
+  one more contraction, in evaluation, and one more right-hand side, in the fit. The cache, the
+  DeepH reader/writer and the ASE calculator carry the same axis.
 - `operator.py`: blocks → H(T), S(T) → H(k), S(k) by Bloch sum; `bands(kpath)` through
   Cholesky + `eigh` (values only; no gradient claims before 2b).
 - `build.py`: `build_ham_basis(spec)` on the pattern of `basis/model.py::build_basis`.
@@ -166,6 +173,15 @@ the first working model on.
 - A path-gated `ham-ingest` CI job checks the Python reader against the script on a subset of
   Quoll's artifact. The convention test (rotate, convert with Quoll, check
   H(QR) = D(Q) H D(Q)ᵀ with ace-jax's D) runs there and, on the committed fixture, in the main job.
+- **Spin**: the ingestion script reads Quoll's `FHIaimsCSCSpinRealMetadata` operators
+  (`rs_hamiltonian_up`/`_dn`); the DeepH side follows `info.json`'s `isspinful` (the exact spinful
+  DeepH layout Quoll writes is read from Quoll's writer before the reader is written, not assumed).
+- **Minimal spin dataset** (generated here; none exists): bcc Fe, a 2-atom cell with a fixed
+  ferromagnetic initial moment, about 20 rattled and strained configurations, light settings, an
+  spd basis, a coarse k-grid, `spin collinear`, `output_rs_matrices`. Enough to check the two
+  channels differ, round-trip through Quoll, and fit; not an accuracy benchmark. A subset becomes
+  the committed spin fixture. It needs an FHI-aims build that has `output_rs_matrices` (Quoll's
+  test data is from 250610; the binary in `~` is 210928 and does not have the keyword).
 - SH anchor: SpheriCart internally, conversion at the IO boundary. Pseudo-tensor parts on by
   default.
 
@@ -202,7 +218,8 @@ ACE 0.12.22, ACEfit 0.1.4 and a one-line local patch (`linear_solve` → `ACEfit
 1. Coupling: fork fixes under trim → ABI v2 → parity → local wheel; **stop for approval** → fork
    push, release 0.3.0, dependency bump.
 2. Framework refactor and the import boundary.
-3. DeepH IO, ingestion script, fixture, convention test.
+3. DeepH IO, ingestion script, fixture, convention test; the spin dataset as soon as a suitable
+   FHI-aims build is available (it does not block the non-spin path).
 4. On-site model, then `BondEnv`, assembly, structural tests, first speed benchmark.
 5. Generic rows, stage-A fit, UQ, DeepH output.
 6. `SiteBond` provider; accuracy and speed comparison; results document.
@@ -217,7 +234,8 @@ ACEhamiltonians tests are handled if the comparator needs those paths.
 
 - L_MAX = 6 in the library.
 - `parity` = (−1)^Σl in the ABI, rather than exposing `refl_sym`.
-- H and S as two coefficient sets on one basis.
+- H and S (and H↑, H↓) as coefficient channels on one basis.
+- The spin dataset: bcc Fe, 2 atoms, about 20 configurations, light settings.
 - Same-shell on-site blocks: odd-L parts left out; (s₂, s₁) taken as the transpose of (s₁, s₂).
 - The model work (steps 2–4) continues against a local library build while the 0.3.0 release
   waits for approval.
