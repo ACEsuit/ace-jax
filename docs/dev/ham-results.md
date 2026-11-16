@@ -126,3 +126,26 @@ The off-site model (`ham/bond.py`, `ham/offsite.py`): for a bond i→j, two-cent
 - The shared site features carry real environment dependence of H: 2.40 → 0.92 meV overall, and 7.2 → 1.5 meV for nearest-neighbour bonds. Train and test errors agree, so the limit is the basis, not the amount of data.
 - The error is still falling with l_cpl and n_cpl; where it stops, and how that compares with ACEhamiltonians.jl's bond-environment model on the same bonds, is not yet measured. The on-site errors on this data were 0.5 to 1.1 meV for comparison.
 - Largest single least-squares problem: 652 columns; the fit streams bonds in chunks and takes 37 s.
+
+## Full Hamiltonian inference time against MACE-H (2026-11-16)
+
+Now like for like in what is predicted: every on-site and off-site block of H for the 108-atom SiC input above (159 blocks per atom, cutoff 7.2 Å, s to f orbitals), with untrained weights in both codes. **Not matched in accuracy**: neither model is fitted to this system, and the two model sizes are not known to give the same error.
+
+ace-jax (`bench/ham/offsite_time_deeph.py`): on-site model plus the shared-feature off-site model, compiled (`OnsitePredictor`, `OffsitePredictor`). Site basis order 1, 8 radials per species, l ≤ 6, tabulated radials; 12 two-centre radials. The off-site program contracts the coefficients with the site features once per atom, then does one matrix product per atom over its bonds.
+
+| | per structure | per atom | per block |
+|---|---|---|---|
+| MACE-H, CPU, 1 thread, float32 | 6772 ms | 62.7 ms | 394 µs |
+| ace-jax, CPU, 1 thread, float64, coupled features (2 radials, l ≤ 2) | 1141 ms | 10.6 ms | 67 µs |
+| ace-jax, CPU, 1 thread, float64, coupled (4, l ≤ 4) | 1647 ms | 15.3 ms | 96 µs |
+| MACE-H, GPU (RTX 4000 Ada), float32 | 400 ms | 3.7 ms | 23 µs |
+| ace-jax, GPU, float32, coupled (2, l ≤ 2) | 113–176 ms (5 runs) | 1.05–1.63 ms | 6.6–10.2 µs |
+| ace-jax, GPU, float32, coupled (4, l ≤ 2) | 164–168 ms (2 runs) | 1.52–1.56 ms | 9.5–9.8 µs |
+| ace-jax, GPU, float32, coupled (4, l ≤ 4) | 831 ms once; then stalled | 7.7 ms | 48 µs |
+
+- **CPU, one thread: 4 to 6 times faster than MACE-H.** GPU: 2.3 to 3.5 times faster for the two smaller coupled models.
+- **The largest coupled model does not run properly on this GPU yet.** It holds 15 GB of the card's 20 GB (the per-atom coefficient tensors for all atoms at once) and two of three runs did not finish in 500 s. It needs the atoms processed in chunks. Its one completed run was slower than MACE-H.
+- On the GPU the time is nearly the same for the two smaller models (113–176 ms) while the on-site program takes 2.5 ms: most of the off-site time is on the host (building the bond list with a Python dictionary for the reverse bonds, and copying 62 MB of blocks back). That is the next thing to remove.
+- float64 on this GPU did not finish (its float64 rate is 1/64 of float32); float64 GPU numbers need an A100.
+- Three consecutive GPU runs gave 10 to 24 ms per atom while a stray float64 run of mine was still on the GPU; they are excluded.
+- Cost by model part: the off-site matrix product does about 100 multiplications per predicted number at (4, l ≤ 4) and 18 at (2, l ≤ 2); the accuracy table above shows what the larger one buys on aluminium (0.92 against 1.69 meV).
