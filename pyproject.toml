@@ -80,6 +80,8 @@ mpi = ["mpi4py>=4.0"]
 lammps = ["lammps-jax>=0.2.1"]   # 0.2.1: the plugin registers FFI handlers for the CPU (aj export --ffi)
 # JAX-MD integration (ace_jax.jaxmd: energy/force functions for JAX-MD's integrators).
 jaxmd = ["jax-md>=0.2.29"]
+# Hamiltonian models (ace_jax.ham): h5py for the DeepH-layout files that Quoll.jl reads and writes.
+ham = ["h5py>=3.8"]
 
 [project.scripts]
 ace-jax = "ace_jax.cli:main"
