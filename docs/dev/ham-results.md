@@ -80,3 +80,31 @@ Model time is features plus readout for ace-jax and `predict` on prebuilt states
 - ACEhamiltonians.jl needs order 2 (order 1 stalls at 2.5 meV); ace-jax does not. Not understood: it may be its radial basis or its mean handling.
 - One dataset, one element, 500 K crystals. Whether order 2 matters for defects, surfaces or liquids is open.
 - On 32 threads ace-jax's feature time at this neighbour count is 253 µs against 68 µs on one thread: the open threading item again.
+
+## Inference time of MACE-H, and where ace-jax's on-site model stands (2026-11-16)
+
+**Not yet like for like.** MACE-H (maurergroup/MACE-H @ 3d6248b, arXiv:2508.15108) predicts every block of the Hamiltonian in one forward pass, on-site and off-site. ace-jax has only the on-site model so far. The MACE-H numbers below are the target the off-site model has to be compared with; the ace-jax numbers are the on-site part alone.
+
+**Input.** Quoll's SiC data tiled to a 3×3×3 supercell (108 atoms) and truncated at 7.2 Å, MACE-H's example cutoff: 159 blocks per atom (`bench/ham/tile_deeph.py`). Orbital basis s to f on Si, s to d on C (30 and 23 orbitals).
+
+**MACE-H** (`bench/ham/maceh_time.py`, its own environment: torch 2.4, e3nn 0.6): the network of its example config (3 blocks, correlation 3, hidden 64x0e+64x1o+64x2e, l_max 4, 1.48 M parameters), untrained weights, float32, forward pass plus conversion to blocks as its `eval` does.
+
+| MACE-H | per structure | per atom | per block |
+|---|---|---|---|
+| CPU, 1 thread (i9-14900K) | 6772 ms | 62.7 ms | 394 µs |
+| GPU (RTX 4000 Ada) | 400 ms | 3.7 ms | 23 µs |
+| GPU, the 4-atom cell | 49 ms | 12.3 ms | 78 µs |
+
+A 32-thread CPU run did not finish in 48 minutes (one core busy); it was stopped and is not reported.
+
+**ace-jax, on-site H only** (`bench/ham/onsite_time_deeph.py`): the same 108 atoms, environment cutoff 7.2 Å (158 neighbours), order 1 with l ≤ 6, random coefficients, float64, CPU, one thread.
+
+| ace-jax on-site | per atom, polynomial radials | per atom, tabulated radials |
+|---|---|---|
+| 8 radials per species (112 features, 2375 coefficients) | 558 µs | 247 µs |
+| 12 radials (168 features, 3543 coefficients) | 1220 µs | 347 µs |
+
+- With two species and l ≤ 6 the per-neighbour radial stage dominated (543 of 558 µs); the radial tables ace-jax already has for potentials (`eval.model.with_radial_table`, relative error 1.4e-10 here) cut the feature time from 543 to 227 µs. They should be the default for the Hamiltonian carrier.
+- What remains is forming and pooling 784 A functions over 158 neighbours per atom; the readout is 2 µs.
+- For orientation only: one on-site block costs ace-jax about 0.25 ms on one CPU thread; MACE-H's average cost per block is 0.39 ms on one CPU thread and 0.023 ms on the GPU, for all blocks at once. The off-site model decides the comparison: it has to deliver about 158 off-site blocks per atom, and if each needs its own environment pooling at this cost it will not beat MACE-H's GPU time. That is the argument for sharing the per-atom features across bonds (design option B) and for a GPU run of ace-jax.
+- MACE-H's accuracy is not part of this: the weights are untrained, and its model size here is its example's, not one matched to an error.
