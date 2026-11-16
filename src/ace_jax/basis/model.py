@@ -95,7 +95,7 @@ def build_model(elements, order, totaldegree, *, wL=1.5, rcut=5.5, r0=None,
                 rin=0.0, radial_mode="onehot", pair_mode="onehot",
                 seed=0, with_gamma=True, edge_a_kind="gather",
                 coupling_cache=True, coupling_cache_dir=None, n_q_factor=1.5, a2b_sparse="auto",
-                rnl_basis="poly", nmax_by_order=None, lmax_by_order=None):
+                rnl_basis="poly", nmax_by_order=None, lmax_by_order=None, admit=None):
     """Author a frozen `ace_model`-family model in memory.
 
     elements: atomic numbers or symbols (order kept, no duplicates); order:
@@ -133,7 +133,9 @@ def build_model(elements, order, totaldegree, *, wL=1.5, rcut=5.5, r0=None,
     zs = ri.resolve_elements(elements)
     NZ = len(zs)
     caps = None if nmax_by_order is None and lmax_by_order is None else (nmax_by_order, lmax_by_order)
-    mb, Rnl, Ylm = build_spec(NZ, order, totaldegree, wL, caps=caps)
+    # admit (spec.build_spec): which bodies to keep; None is the L = 0 selection.  An equivariant
+    # basis (ace_jax.ham) passes its own so the one-particle basis covers the bodies of every L.
+    mb, Rnl, Ylm = build_spec(NZ, order, totaldegree, wL, caps=caps, admit=admit)
     if coupling_cache:
         from .coupling import couple_cached
         cpl = couple_cached(mb, Rnl, Ylm, cache_dir=coupling_cache_dir)

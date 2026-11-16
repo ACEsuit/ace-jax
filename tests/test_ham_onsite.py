@@ -171,3 +171,15 @@ def test_compiled_readout_is_the_reference_readout(basis):
                 assert np.abs(b[name][k] - v).max() < 1e-11 * max(1.0, np.abs(v).max()), (name, k)
     atoms, blocks = fast.dense(*structure())
     assert [list(x) for x in atoms] == [[1, 3, 4], [0, 2]] and blocks[0].shape == (3, 2, ORB.n_orb(6), ORB.n_orb(6))
+
+
+def test_fit_to_selected_atoms(basis_spdf):
+    """`atoms=` restricts the fit to some atoms of each dataset, for every species (a loop
+    variable once shadowed the argument, so only the first species was fitted)."""
+    require_optional("h5py")
+    d = deeph.read(FIX)
+    model, report = fit_onsite(basis_spdf, [d], atoms=[[0, 1]])
+    assert {k[0] for k in report} == {6, 14} and report[(14, 0, 0, 0)][0] == 1 and report[(6, 0, 0, 0)][0] == 1
+    pred = model.predict(d.positions, d.cell, d.numbers)
+    # atoms 2 and 3 were not fitted but are equivalent to 0 and 1
+    assert max(np.abs(pred["H"][k] - d.blocks["H"][k]).max() for k in pred["H"]) < 1e-6

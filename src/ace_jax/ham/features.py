@@ -62,16 +62,30 @@ class SiteBasis(eqx.Module):
         return self.from_aa(self.aa(rij, zi, zj, segment_ids, n_nodes, mask))
 
 
+def _all_bodies(bb):
+    """Every body: the coupling finds which carry a function of each (L, parity)."""
+    return True
+
+
 def build_site_basis(elements, order, totaldegree, lmax_feat, *, rcut, wL=1.5, coupling_cache_dir=None,
-                     **radial):
+                     nmax_by_order=None, lmax_by_order=None, **radial):
     """A `SiteBasis` on the TotalDegree basis of `build_model` (same radials and
     one-particle basis), with every (L, +-1), L <= lmax_feat, that has a
     function.  lmax_feat = 2 * (largest orbital l).  `radial`: `build_model`'s
-    r0, rin, radial_mode, seed, n_q_factor, rnl_basis."""
+    r0, rin, radial_mode, seed, n_q_factor, rnl_basis.
+
+    nmax_by_order / lmax_by_order (`spec.build_spec`'s caps): radial degree and l allowed in a
+    body of each correlation order.  An operator block is to leading order linear in the
+    neighbour density, each L part with its own radial profile, so the basis that pays is
+    many radial functions at order 1 for l <= lmax_feat and few at higher orders
+    (docs/dev/ham-results.md); a plain total-degree bound gives high l too few radials.  With
+    caps, radials and harmonics the bodies do not use are not evaluated."""
+    caps = None if nmax_by_order is None and lmax_by_order is None else (nmax_by_order, lmax_by_order)
     base = build_model(elements, order, totaldegree, wL=wL, rcut=rcut, with_gamma=False,
-                       coupling_cache_dir=coupling_cache_dir, **radial)
+                       coupling_cache_dir=coupling_cache_dir, nmax_by_order=nmax_by_order,
+                       lmax_by_order=lmax_by_order, admit=_all_bodies, **radial)
     NZ = len(base.model.elements)
-    mb = build_spec(NZ, order, totaldegree, wL, admit=lambda bb: True)[0]
+    mb = build_spec(NZ, order, totaldegree, wL, caps=caps, admit=_all_bodies)[0]
     lps = [(L, p) for L in range(lmax_feat + 1) for p in (1, -1)]
     es = couple_equivariant_set(lps, mb, list(base.Rnl_spec), list(base.Ylm_spec), cache_dir=coupling_cache_dir)
     lps = [lp for lp in lps if es.A2B[lp].shape[0]]

@@ -17,12 +17,13 @@ def _solve(A, Y, ridge):
     return np.linalg.solve(R, Q.T @ np.concatenate([Y, np.zeros((n, Y.shape[1]))]))
 
 
-def fit_onsite(basis, datasets, orbitals=None, channels=("H", "S"), ridge=1e-10):
+def fit_onsite(basis, datasets, orbitals=None, channels=("H", "S"), ridge=1e-10, atoms=None):
     """An `OnsiteModel` fitted to the on-site blocks of `datasets` (`OperatorData`s).
 
     Returns (model, report): report[(z, s1, s2, L)] = (rows, columns, rms residual per channel).
     A part with no feature of its parity and L > 0 has no coefficients (predicted zero); its
-    report entry has 0 columns and the rms of the target itself."""
+    report entry has 0 columns and the rms of the target itself.  `atoms`: per dataset, the atom
+    indices to fit to (default: every atom); the others still act as neighbours."""
     datasets = list(datasets)
     orbitals = datasets[0].basis if orbitals is None else orbitals
     feats = []
@@ -34,6 +35,8 @@ def fit_onsite(basis, datasets, orbitals=None, channels=("H", "S"), ridge=1e-10)
     coef, report = {}, {}
     for z in orbitals.species:
         where = [(k, np.flatnonzero(np.asarray(d.numbers) == z)) for k, d in enumerate(datasets)]
+        if atoms is not None:
+            where = [(k, np.intersect1d(a, np.asarray(atoms[k], int))) for k, a in where]
         if not any(len(a) for _, a in where):
             continue
         for s1, s2, l1, l2 in shell_pairs(orbitals, z):
@@ -41,13 +44,13 @@ def fit_onsite(basis, datasets, orbitals=None, channels=("H", "S"), ridge=1e-10)
             for L, p in parts_of(l1, l2, s1 == s2):
                 T = cg.real_cg(l1, l2, L)
                 rows, rhs = [], []
-                for k, atoms in where:
-                    if not len(atoms):
+                for k, idx in where:
+                    if not len(idx):
                         continue
                     d = datasets[k]
-                    rows.append(design(feats[k].get((L, p)), atoms, L).reshape(len(atoms) * (2 * L + 1), -1))
-                    blocks = np.stack([[d.blocks[c][(0, 0, 0, int(i), int(i))][a, b] for c in channels] for i in atoms])
-                    rhs.append(np.einsum("acij,ijm->amc", blocks, T).reshape(len(atoms) * (2 * L + 1), len(channels)))
+                    rows.append(design(feats[k].get((L, p)), idx, L).reshape(len(idx) * (2 * L + 1), -1))
+                    blocks = np.stack([[d.blocks[c][(0, 0, 0, int(i), int(i))][a, b] for c in channels] for i in idx])
+                    rhs.append(np.einsum("acij,ijm->amc", blocks, T).reshape(len(idx) * (2 * L + 1), len(channels)))
                 A, Y = np.concatenate(rows), np.concatenate(rhs)
                 if A.shape[1] == 0:
                     report[(z, s1, s2, L)] = (A.shape[0], 0, np.sqrt((Y ** 2).mean(0)))

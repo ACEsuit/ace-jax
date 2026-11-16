@@ -1,3 +1,4 @@
+# ruff: noqa: B023 -- the timing lambdas are called inside their own iteration
 """On-site prediction time of ace_jax.ham on the structure and orbital basis that
 bench/ham/aceh_onsite_time.jl times for ACEhamiltonians.jl (silicon, s to f shells,
 30 orbitals; random coefficients in both).
