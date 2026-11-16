@@ -453,7 +453,7 @@ def main():
                 "ace-jax runs in LAMMPS (lammps-jax; aa_dag='auto': the DAG product basis, centre dot, from 4,000 chain-form multiplies per site; the chain form below); MACE runs in LAMMPS via Symmetrix v0.3.0 (its generic symmetrix/mace) and, separately, Symmetrix-XL.\n"
                 "GRACE and PACE (pacemaker): LAMMPS pair styles grace/runtime and pace/runtime (ICAMS grace-runtime 0.1.4); GRACE's network is fp32 with fp64 sums (labelled mixed precision), PACE is float64 with 1024-interval radial tables.\n"
                 "Linear ACE run by ML-PACE: the o4 fits exported exactly to .yace with tabulated radials (ML-PACE with the tabulated-radial patch, ICAMS/lammps-user-pace#31; pace and pace/kk).  "
-                "GPU ML-PACE: LAMMPS develop ec02ed0 (with the 2026-08 pace/kk GPU rewrite).\n"
+                "GPU ML-PACE: LAMMPS develop ec02ed0 (25 Sep 2026; with the pace/kk GPU rewrite, lammps/lammps#5174, merged 2026-09-01).\n"
                 "Patched ML-PACE: the recursive-evaluator speed-ups proposed upstream (ICAMS/lammps-user-pace#31) on the CPU; "
                 "pace/kk with prototype ComputeRho/ComputeWeights kernels (pace_ref/fast) on the GPU.\n"
                 "Linear ACE run by ACEpotentials.jl (CPU only): each fit as an ACEpotentials model, exported and compiled "
