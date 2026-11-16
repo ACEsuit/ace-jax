@@ -21,7 +21,7 @@ Julia 1.13.1's standard library; `tests/test_coupling_notices.py` checks them.
 | Component | Version | Bundled file(s) | Licence (SPDX) | Text |
 |---|---|---|---|---|
 | ace-jax glue (Python + Julia shim) | ace-jax-coupling 0.3.0 | `ace_jax_coupling/*.py`, `libetcouple` | MIT | `LICENSE` |
-| EquivariantTensors.jl (compiled into `libetcouple`; fork rev in `build_info()`) | 0.5.1 at jameskermode/EquivariantTensors.jl `f5b274b` (exact commit: `build_info()`) | `libetcouple` | MIT | `licenses/EquivariantTensors.txt` |
+| EquivariantTensors.jl (compiled into `libetcouple`; fork rev in `build_info()`) | 0.5.1 at jameskermode/EquivariantTensors.jl `ac86f4a` (exact commit: `build_info()`) | `libetcouple` | MIT | `licenses/EquivariantTensors.txt` |
 | Julia runtime and standard library | Julia 1.13.1 | `libjulia`, `libjulia-internal` (privatized names), `libetcouple` | MIT (+ components listed in THIRDPARTY.md) | `licenses/Julia.txt`, `licenses/Julia-THIRDPARTY.md` |
 | libunwind (Linux, macOS) | 1.8.3 (LibUnwind_jll 1.8.3+1) | `libunwind.1` | MIT | `licenses/libunwind.txt` |
 | OpenBLAS (incl. reference LAPACK) | 0.3.30 (OpenBLAS_jll 0.3.30+0) | `libopenblas64_` | BSD-3-Clause | `licenses/OpenBLAS.txt` |

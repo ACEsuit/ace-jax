@@ -2,7 +2,7 @@
 
 julia_version = "1.13.1"
 manifest_format = "2.1"
-project_hash = "520fc9904215514409193075e0eb249d5577f056"
+project_hash = "9ad4a0561a5cc9900158b2ac236b0e6c823f4a2c"
 
 [[deps.ACEbase]]
 deps = ["DataStructures", "JSON", "LinearAlgebra", "Printf", "Reexport", "SparseArrays", "StaticArrays", "Test", "YAML", "ZipArchives"]
@@ -323,8 +323,8 @@ weakdeps = ["Adapt", "ChainRulesCore"]
 
 [[deps.EquivariantTensors]]
 deps = ["ACEbase", "Adapt", "Bumper", "ChainRulesCore", "Combinatorics", "ConcreteStructs", "DecoratedParticles", "ForwardDiff", "Functors", "GPUArraysCore", "KernelAbstractions", "LinearAlgebra", "Lux", "LuxCore", "MLDataDevices", "NamedTupleTools", "PartialWaveFunctions", "Polynomials4ML", "Random", "Rotations", "SparseArrays", "StaticArrays", "WithAlloc"]
-git-tree-sha1 = "132db72b1fdf48fd4cabd9c2cd11cba53dd1a2ac"
-repo-rev = "f5b274b550f68a17b57f9492d6a361037da3cced"
+git-tree-sha1 = "deea9411787f226744ba92e3f7a580a6b2163945"
+repo-rev = "ac86f4a399ca802efab338bc6decaec935f5e31d"
 repo-url = "https://github.com/jameskermode/EquivariantTensors.jl"
 uuid = "5e107534-7145-4f8f-b06f-47a52840c895"
 version = "0.5.1"

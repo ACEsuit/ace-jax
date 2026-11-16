@@ -4,7 +4,7 @@ SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [sources]
-EquivariantTensors = {url = "https://github.com/jameskermode/EquivariantTensors.jl", rev = "f5b274b550f68a17b57f9492d6a361037da3cced"}
+EquivariantTensors = {url = "https://github.com/jameskermode/EquivariantTensors.jl", rev = "ac86f4a399ca802efab338bc6decaec935f5e31d"}
 
 [compat]
 julia = "1.13"
