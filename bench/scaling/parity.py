@@ -81,7 +81,12 @@ TOL = {"mlpace": (1e-6, 1e-5), "acejax": (1e-10, 1e-9), "mace": (1e-6, None),
        # pace/runtime: float64, radials from 1024-interval cubic tables (forces ~1e-5 eV/A of pace's, its docs;
        # measured against ace-jax on the Si ladder f100-f3200: 1.8e-7, and 5e-13 with spline 0): mlpace's bound
        "pace-rt": (1e-6, 1e-5),
-       "mace-symx3": (1e-6, None)}                       # Symmetrix v0.3.0: the "mace" gate
+       "mace-symx3": (1e-6, None),                       # Symmetrix v0.3.0: the "mace" gate
+       # symmetrix/mace/foundation vs the model in PyTorch (float64, the timed head): the radial splines are tabulated
+       # (--num-spline-points, default 256: "sufficient for most observables", its README), so not roundoff even in
+       # float64; float32 and float32-mixed (fp16 GEMMs) looser, as mace-xl-f32
+       # measured on MACE-MH-1 (A100, 64-atom cells): 1.5e-10 / 2.0e-7; float32 5.6e-8 / 3.6e-6; mixed 3.3e-8 / 3.0e-6
+       "mace-fdn": (1e-8, 1e-5), "mace-fdn-f32": (1e-6, 1e-4), "mace-fdn-f32m": (1e-6, 1e-4)}
 # gates that check a standalone line: a failure blocks its standalone rows
 STANDALONE_GATES = ("spline", "acepot")
 LEARNED, ANALYTIC = LEARNED_CODES                     # "acejax-ace-learned", "acejax-ace-analytic"

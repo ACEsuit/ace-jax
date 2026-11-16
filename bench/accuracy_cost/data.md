@@ -178,3 +178,8 @@ on every frame, test included, so it is a reference line, not a held-out score. 
   pass their kwargs unchanged), the same data, weights and fit settings; LAMMPS `grace/2l/kk` / `grace/2l/cpu/kk`
   from the same build. Parity: ≤ 9.7e-9 eV/atom, ≤ 1.5e-8 eV/Å on the timed models (bound 1e-6 / 1e-5). The timing
   jobs take `GRACE_TREE`, `GRACE_ENV`, `GRACE_RESULTS` and (CPU) `LAYOUTS`; `GRACE_CHUNKSIZE` sets the Kokkos chunk.
+- **Foundation models** (`mace_fm`, `grace_fm`, 2026-11-16): MACE-MH-1 (`omat_pbe` head; `~/.cache/mace` or
+  `$ACEJAX_AC_MACE_FM`) and GRACE-1L/2L-OMAT-large-base-fp64 (`grace_models download NAME --kokkos`, `$GRACE_CACHE`;
+  Academic Software Licence), zero-shot and fine-tuned on the training split (`fit_mace_fm.py`, `fit_grace_fm.py`;
+  `envs/sulis-mace-fm.sbatch`, `sulis-grace-fm.sbatch`). Their cutoff is the model's 6 Å. Zero-shot rows carry
+  `e_shift` (eV/atom, from the training split) in `status.json`. Results: docs/dev/accuracy-cost-results.md.

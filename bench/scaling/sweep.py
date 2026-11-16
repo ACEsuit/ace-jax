@@ -40,7 +40,8 @@ for _code in LEARNED_CODES:
 MODES.update({"acepotentials": ("standalone",), "acepotentials-trim": ("lammps",)})
 DTYPES.update({"acepotentials": ("float64",), "acepotentials-trim": ("float64",)})
 # lammps-jax ships only pair_style jax/kk, which needs KOKKOS built with CUDA
-GPU_ONLY_LAMMPS = ("acejax-pace", "acejax-ace", *LEARNED_CODES)
+GPU_ONLY_LAMMPS = ("acejax-pace", "acejax-ace", *LEARNED_CODES,
+                   "mace-fdn", "mace-fdn-f32", "mace-fdn-f32m")   # the foundation styles: only the CUDA build is set up
 # CPU-only for now: no GPU path for either ACEpotentials.jl line
 CPU_ONLY = ACEPOT_CODES
 # pair quip has no KOKKOS variant (run_lammps.KOKKOS has no "gap" key)

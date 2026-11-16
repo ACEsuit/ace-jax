@@ -187,7 +187,7 @@ def test_sweep_is_complete_and_measured():
     from accuracy_cost.common import load_sweep
     s = load_sweep()
     assert set(s) == {"ace", "ace_lr", "ace_gp", "pace", "mace", "gap", "ace_pshape", "ace_pshape_lr", "ace_wl", "gap_noglue", "gap_E30", "ace_yace", "ace_tab", "nep",
-                      "grace", "grace_fs", "grace_abl", "grace_2l"}
+                      "grace", "grace_fs", "grace_abl", "grace_2l", "mace_fm", "grace_fm"}
     assert len(s["ace"]) == 7 and all(e["n_B"] > 0 for e in s["ace"])
     assert [(e["order"], e["max_degree"]) for e in s["ace_lr"]] == [(e["order"], e["max_degree"]) for e in s["ace"]]
     nB = [e["n_B"] for e in s["ace"]]
@@ -1063,3 +1063,53 @@ def test_grace_runtime_styles(tmp_path):
     assert _pair("mace-symx3", "m.json", ["Si"], "gpu") == "pair_style symmetrix/mace\npair_coeff * * m.json Si\n"
     (tmp_path / "m.yace").write_text("elements: [Si, Ge]\nE0: [-1.5, -2.0]\ndeltaSplineBins: 0.001\n")
     assert yace_e0(tmp_path / "m.yace", ["Si", "Ge", "Ge"]) == -5.5
+
+
+def test_foundation_families(tmp_path, monkeypatch):
+    """Foundation models (mace_fm, grace_fm): the sweep's zero-shot and fine-tuned entries, the fine-tuning inputs
+    (single head, the foundation model's architecture, the benchmark's loss), the LAMMPS styles and tolerances, and
+    the figure's families (one plotted learning rate; the mixed-precision line under its own cost name)."""
+    import sys
+    from accuracy_cost import common as C, fit_grace_fm, fit_mace_fm, timing
+    from accuracy_cost.common import load_sweep
+    from scaling import parity, run_lammps
+    s = load_sweep()
+    assert [e["size"] for e in s["mace_fm"] if "finetune" not in e] == ["mh1-omat"]
+    assert {e["finetune"]["lr"] for e in s["mace_fm"] if "finetune" in e} == {0.01, 0.001, 0.0001}
+    assert all(e["head"] == "omat_pbe" for e in s["mace_fm"])
+    assert sorted(e["size"] for e in s["grace_fm"]) == ["1l-omat-large", "1l-omat-large-ft", "2l-omat-large", "2l-omat-large-ft"]
+
+    monkeypatch.setattr(fit_mace_fm, "DATA", tmp_path)
+    e = {**C.entry("mace_fm", "mh1-omat-ft-lr1e-3"), "E0": -158.5}
+    cmd = fit_mace_fm.command(e, tmp_path)
+    assert f"--foundation_model={tmp_path / 'base.model'}" in cmd and "--foundation_head=omat_pbe" in cmd
+    assert "--multiheads_finetuning=False" in cmd and "--lr=0.001" in cmd and "--max_num_epochs=60" in cmd
+    assert "--loss=virials" in cmd and "--default_dtype=float64" in cmd and "--E0s={14: -158.5}" in cmd
+    assert not any(c.startswith("--r_max") for c in cmd)            # the foundation model's cutoff, not the 5 A rule
+
+    y = fit_grace_fm.input_yaml(C.entry("grace_fm", "2l-omat-large-ft"))
+    assert y["potential"] == {"finetune_foundation_model": "GRACE-2L-OMAT-large-base-fp64", "reduce_elements": True, "shift": "auto"}
+    assert y["data"]["reference_energy"] == 0 and y["fit"]["target_total_updates"] == 10000
+    assert y["fit"]["opt_params"]["learning_rate"] == fit_grace_fm.FT_LR
+
+    assert [c for c, _, _ in timing.PLAN["mace_fm"]] == list(timing.FDN_CODES) and [c for c, _, _ in timing.PLAN["grace_fm"]] == ["grace-rt"]
+    assert all(set(dev) == {"gpu"} for _, dev, _ in timing.PLAN["mace_fm"])     # Symmetrix's foundation styles: GPU only
+    for code, style in run_lammps.FDN.items():
+        assert f"pair_style {style}\n" in run_lammps._pair(code, "m.json", ["Si"], "gpu")
+        assert parity.TOL[code][1] <= 1e-4
+
+    sys.path.insert(0, str(pathlib.Path(__file__).parent.parent / "bench" / "si_qoi"))
+    import plot_cost as P
+    f = lambda fam, size, **k: P.family_of({"family": fam, "size": size, **k})
+    assert f("mace_fm", "mh1-omat") == "mace_fm" and f("mace_fm", P.FM_PLOTTED) == "mace_fm_ft"
+    assert f("mace_fm", P.FM_PLOTTED, code="mace-fdn-f32m") == "mace_fm_ft_mixed" in P.REDUCED
+    assert f("mace_fm", "mh1-omat-ft-lr1e-2") not in P.FAM and f("mace_fm", "mh1-omat", code="mace-fdn-f32m") not in P.FAM
+    assert f("grace_fm", "2l-omat-large") == "grace_fm" and f("grace_fm", "1l-omat-large-ft") == "grace_fm_ft"
+    assert P.cost_name("mace_fm_ft_mixed", P.FM_PLOTTED) == "MACEFMmixed_" + P.FM_PLOTTED
+    assert P.cost_name("grace_fm_ft", "2l-omat-large-ft") == "GRACEFM_2l-omat-large-ft"
+    # an arrow from each zero-shot point to its fine-tuned one, only where both are on the axes; no line through them
+    pt = lambda size, x, y: {"size": size, "x": x, "rmse_F": y}
+    data = {"grace_fm": [pt("2l-omat-large", 5.6, 0.066), pt("1l-omat-large", None, 0.10)],
+            "grace_fm_ft": [pt("2l-omat-large-ft", 5.6, 0.045), pt("1l-omat-large-ft", 1.8, 0.079)]}
+    assert P.arrow_pairs(data, "rmse_F") == [("grace_fm_ft", (5.6, 0.066), (5.6, 0.045))]
+    assert {f for k, v in P.FM_ARROWS.items() for f in (k[0], v[0])} <= P.POINTS_ONLY and all(f in P.FAM for f in P.POINTS_ONLY)

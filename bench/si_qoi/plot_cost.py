@@ -94,7 +94,39 @@ FAM = {  # family: (label, colour, marker, linestyle, filled, qoi model name pat
     # passes (dataviz validate_palette --pairs all, light: every brown/orange tried is within CVD dE 2-5 of GAP's
     # green or ACE-lr's red), so it is told apart by its octagon marker and dash-dot line
     "grace_2l":   ("GRACE-2L (gracemaker)",    "#a0522d", "8", "-.", True,  "GRACE_{s}"),
+    # foundation models (bench/accuracy_cost/fit_mace_fm.py, fit_grace_fm.py), zero-shot (open) and fine-tuned on the
+    # benchmark's training split (filled): their family's colour (MACE's violet, GRACE's sienna), a marker of their
+    # own (star, square).  Their architecture and 6 A cutoff are the foundation model's, not the benchmark's 5 A.
+    # MACE-MH-1 (omat_pbe head) runs in Symmetrix's fixed-architecture style; the fine-tuned model is the learning
+    # rate with the lowest validation loss (FM_PLOTTED).  Points only (POINTS_ONLY), an arrow from each zero-shot
+    # model to its fine-tuned one (FM_ARROWS)
+    "mace_fm":          ("MACE-MH-1 (foundation), zero-shot",        "#4a3aa7", "*", ":", False, "MACEFM_{s}"),
+    "mace_fm_ft":       ("MACE-MH-1, fine-tuned",                    "#4a3aa7", "*", "-", True,  "MACEFM_{s}"),
+    "mace_fm_ft_mixed": ("MACE-MH-1, fine-tuned, mixed precision",   "#a197ea", "*", "-", True,  "MACEFM_{s}"),
+    "grace_fm":         ("GRACE-OMAT 1L, 2L (foundation), zero-shot", "#a0522d", "s", ":", False, "GRACEFM_{s}"),
+    "grace_fm_ft":      ("GRACE-OMAT 1L, 2L, fine-tuned",            "#a0522d", "s", "-", True,  "GRACEFM_{s}"),
 }
+FM_PLOTTED = "mh1-omat-ft-lr1e-3"                # of the mace_fm learning-rate runs: the lowest validation loss
+# derived models: (family, size) -> the (family, size) it was made from.  The figure draws an arrow from the source to
+# the derived point (zero-shot -> fine-tuned: straight down, the cost is the architecture's) and no line through the
+# sizes of these families.  A model distilled from a fine-tuned one (e.g. to GRACE-FS) is one more entry: an arrow left
+FM_ARROWS = {("mace_fm_ft", FM_PLOTTED): ("mace_fm", "mh1-omat"),
+             ("grace_fm_ft", "2l-omat-large-ft"): ("grace_fm", "2l-omat-large"),
+             ("grace_fm_ft", "1l-omat-large-ft"): ("grace_fm", "1l-omat-large")}
+POINTS_ONLY = {f for k, v in FM_ARROWS.items() for f in (k[0], v[0])} | {"mace_fm_ft_mixed"}
+
+
+def arrow_pairs(data, key):
+    """[(family of the derived point, (x, y) source, (x, y) derived)] of FM_ARROWS with both ends on these axes."""
+    at = {(fam, q["size"]): q for fam, pts in data.items() for q in pts if q["x"] is not None and q[key] is not None}
+    return [(to[0], (at[src]["x"], at[src][key]), (at[to]["x"], at[to][key])) for to, src in FM_ARROWS.items()
+            if to in at and src in at]
+
+
+def arrows(ax, data, key):
+    for fam, a, b in arrow_pairs(data, key):
+        ax.annotate("", xy=b, xytext=a, zorder=2.5, arrowprops={"arrowstyle": "-|>", "color": FAM[fam][1], "lw": 1.6,
+                                                               "shrinkA": 7, "shrinkB": 7, "mutation_scale": 14})
 # families fitted with several seeds (sizes "<size>_s<k>"): one point per size, the mean over seeds, with the
 # min-max spread as an error bar; the per-seed rows stay in metrics.jsonl.  SEED_EXCLUDE: checks, not ladder points
 SEEDED = ("grace", "grace_fs", "grace_2l")
@@ -125,6 +157,13 @@ def family_of(r):
         return "nep_2s"
     if fam == "ace_tab" and any(t in r.get("_file", "") for t in PATCHED_MLPACE):   # make_cost's per-row file stem
         return "ace_tabfork"
+    if fam == "mace_fm":                         # a metrics row or a timing row (by code: the mixed-precision line)
+        if not size.endswith(FM_PLOTTED) and "-ft" in size:
+            return "mace_fm_lr"                  # the other learning rates: in metrics.jsonl, not plotted
+        mixed = r.get("code") == "mace-fdn-f32m"
+        return ("mace_fm_ft_mixed" if mixed else "mace_fm_ft") if "-ft" in size else ("mace_fm_zs_mixed" if mixed else "mace_fm")
+    if fam == "grace_fm":
+        return "grace_fm_ft" if size.endswith("-ft") else "grace_fm"
     if fam == "ace_wl":
         return "ace_wl_o5" if size.startswith("o5") else "ace_wl_" + size.split("_wL")[1]
     return fam
@@ -137,8 +176,8 @@ COST_NAME = {"mace_xl_L0": "MACExl_{s}", "mace_xl_L1": "MACExl_{s}", "ace_tab": 
              "ace_ffi": "ACEffi_{s}",
              "ace_tabfork": "ACEtabfork_{s}", "ace_f32": "ACEf32_{s}", "ace_tab_mixed": "ACEtabmixed_{s}",
              "ace_ffi_reduced": "ACEffireduced_{s}",
-             "ace_cueq": "ACEcueq_{s}"}
-REDUCED = ("ace_f32", "ace_tab_mixed", "ace_ffi_reduced")   # reduced-precision lines: make_cost --dtype keeps them
+             "ace_cueq": "ACEcueq_{s}", "mace_fm_ft_mixed": "MACEFMmixed_{s}"}
+REDUCED = ("ace_f32", "ace_tab_mixed", "ace_ffi_reduced", "mace_fm_ft_mixed")   # reduced-precision lines: make_cost --dtype keeps them
 # timing files of ML-PACE with the proposed additions (sulis-{cpu,gpu}-pacefork.sbatch): their
 # mlpace rows are the ace_tabfork line, not stock ML-PACE's
 PATCHED_MLPACE = ("ace_tabfork",)
@@ -213,8 +252,9 @@ def load_rows():
     return (rows + [r | {"family": "mace_xl_" + r["family"][-2:]} for r in rows if r["family"] in ("mace_L0", "mace_L1")]
             + [r | {"family": "ace_tab"} for r in rows if r["family"] == "ace" and r["size"] in TAB_SIZES]
             # the kernel's reduced precision runs every ace size (as ace_ffi); the other reduced lines the converted ones
-            + [r | {"family": f} for r in rows if r["family"] == "ace" for f in REDUCED
-               if f == "ace_ffi_reduced" or r["size"] in TAB_SIZES]
+            + [r | {"family": f} for r in rows if r["family"] == "ace" for f in REDUCED if f.startswith("ace_")
+               and (f == "ace_ffi_reduced" or r["size"] in TAB_SIZES)]
+            + [r | {"family": "mace_fm_ft_mixed"} for r in rows if r["family"] == "mace_fm_ft"]
             + [r | {"family": "ace_tabfork"} for r in rows if r["family"] == "ace" and r["size"] in TAB_SIZES]
             + [r | {"family": "ace_trim"} for r in rows if r["family"] == "ace"]
             + [r | {"family": "ace_ffi"} for r in rows if r["family"] == "ace"]
@@ -264,7 +304,7 @@ def series(ax, data, key):
         if not p:
             continue
         x, y = [q["x"] for q in p], [q[key] for q in p]
-        ax.plot(x, y, ls=ls, lw=2, color=col, marker=mk, ms=8, mfc=col if filled else "white", mec=col,
+        ax.plot(x, y, ls="none" if fam in POINTS_ONLY else ls, lw=2, color=col, marker=mk, ms=8, mfc=col if filled else "white", mec=col,
                 mew=1.5, label=lab, zorder=3)
         if all(key + "_lo" in q for q in p):           # SEEDED: the min-max over seeds
             ax.errorbar(x, y, yerr=[[q[key] - q[key + "_lo"] for q in p], [q[key + "_hi"] - q[key] for q in p]],
@@ -286,6 +326,7 @@ def flag(ax, data, codes, key):
                 continue
             if " mixed " in c:
                 head = ("NEP (GPUMD): mixed precision" if fam.startswith("nep") else   # grace-runtime: fp32 network
+                        "GRACE-OMAT (grace-runtime): mixed precision" if fam.startswith("grace_fm") else   # one label for both
                         f"{FAM[fam][0].split(' (')[0]} (grace-runtime): mixed precision" if c.startswith("grace-rt ")
                         else f"{FAM[fam][0]}: mixed precision")
                 if head not in said or (head, None) in why:
@@ -345,7 +386,7 @@ def draw_row(axes, data, ref, xlabel, codes, letters, what):
     one x (a cost, or the fitted-parameter count)."""
     a, b, c = letters
     ax = axes[0]; style(ax, xlabel, "test force RMSE (eV/Å)")
-    series(ax, data, "rmse_F"); dag_dots(ax, data, codes, "rmse_F")
+    series(ax, data, "rmse_F"); arrows(ax, data, "rmse_F"); dag_dots(ax, data, codes, "rmse_F")
     if "A100" in xlabel or "GPU" in xlabel:                   # on the CPU every ace-jax row is standalone by design
         flag(ax, data, codes, "rmse_F")
     ax.axhline(ref["rmse_F"], color=MUTED, ls=":", lw=1.2)
@@ -354,7 +395,7 @@ def draw_row(axes, data, ref, xlabel, codes, letters, what):
     ax.set_title(f"{a}  force error", loc="left", color=INK, fontweight="bold")
 
     ax = axes[1]; style(ax, xlabel, f"QoI error: geometric mean of |error| / tolerance\nover {len(TOLERANCES)} QoIs (lower is better)")
-    series(ax, data, "qoi"); dag_dots(ax, data, codes, "qoi"); ax.set_yscale("log")             # (standalone points flagged in the force panel only)
+    series(ax, data, "qoi"); dag_dots(ax, data, codes, "qoi"); ax.set_yscale("log"); arrows(ax, data, "qoi")             # (standalone points flagged in the force panel only)
     ax.axhline(ref["qoi"], color=MUTED, ls=":", lw=1.2)
     ax.annotate("GAP-18", (ax.get_xlim()[0], ref["qoi"]), xytext=(4, 4), textcoords="offset points", fontsize=8, color=MUTED)
     ax.axhline(TARGET_QOI, color=MUTED, ls="--", lw=1)
@@ -470,7 +511,10 @@ def main():
                 "float32 timings only and is left out of the cost rows). Single fits per point, except GRACE: the mean of three seeds, bars min-max.\n"
                 "Light blue: the same o4 linear ACE fits in reduced precision -- ace-jax float32 lammps-jax bundles (where timed), the "
                 "ace-jax kernel (mixed precision on the CPU, float32 on the GPU), and patched ML-PACE pace/kk in a KOKKOS_PREC=mixed "
-                "LAMMPS (accuracy is the float64 fit's).")
+                "LAMMPS (accuracy is the float64 fit's).\n"
+                "Foundation models (stars, squares): MACE-MH-1 (omat_pbe head; Symmetrix v0.3.0 symmetrix/mace/foundation, float64, and its float32-mixed style in light violet) and "
+                "GRACE-1L/2L-OMAT-large (grace-runtime, mixed precision), with their own architecture and 6 Å cutoff (the other models: 5 Å).\n"
+                "Zero-shot (open): one energy shift per atom from the training split. Fine-tuned (filled): every parameter, on the benchmark's training split; an arrow joins each model's two points. A100 row: timed on shared nodes.")
         fig.text(0.5, 0.003, note, ha="center", fontsize=8.5, color=MUTED)
         # the axes start above the note: its lines (8.5 pt, 1.2 spacing) plus room for the bottom row's axis label
         bottom = ((note.count("\n") + 1) * 8.5 * 1.2 / 72 + 0.2) / fig.get_figheight()
