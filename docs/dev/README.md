@@ -12,6 +12,8 @@ results behind ace-jax, kept as the record that code comments and tests cite:
   (figures in `figures/`). Some cite prototypes that are archived at the git tag
   `archive/research-prototypes` (see `bench/ARCHIVED.md`).
 - `coupling-etshim-spec.md`: the compiled coupling library.
+- `acehamiltonians-port-scoping.md`: scoping for ACE Hamiltonians (an ACEhamiltonians.jl port) on
+  ace-jax, with the route comparison against a Julia package on EquivariantTensors.
 - `accuracy-cost-spec.md`, `accuracy-cost-plan.md`: the accuracy-matched speed
   benchmark on Si (`bench/accuracy_cost/`); `accuracy-cost-results.md`: its results
   and how to redraw the figures.
