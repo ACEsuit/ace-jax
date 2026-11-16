@@ -1,8 +1,9 @@
 """
     ETCouple
 
-C entry point (compiled with `juliac --trim=safe`, see ../build.jl) for the L = 0,
-real-basis SO(3) coupling of EquivariantTensors.  Stateless: every call computes
+C entry points (compiled with `juliac --trim=safe`, see ../build.jl) for the
+real-basis O(3) couplings of EquivariantTensors: `etc_couple` (L = 0, ABI v1) and
+`etc_couple_equivariant` (L = 0..MAX_L and either reflection parity, ABI v2).  Stateless: every call computes
 from its inputs and writes only into caller-owned buffers; no Julia object
 outlives a call.  Two-phase: a call whose capacities (`sizes`) are too small
 returns BUFFERS_TOO_SMALL with the required sizes written back.  Inputs are
@@ -14,7 +15,8 @@ module ETCouple
 import EquivariantTensors as ET
 using SparseArrays: findnz
 
-const ABI_VERSION = Cint(1)
+const ABI_VERSION = Cint(2)                # v2 adds etc_max_L and etc_couple_equivariant; v1 unchanged
+const MAX_L = 6                           # the static L table of compute_equivariant
 const MAX_ORDER = 8                       # == ET.O3.MAX_STATIC_ORDER
 const OK = Cint(0)
 const BUFFERS_TOO_SMALL = Cint(1)
@@ -22,6 +24,7 @@ const INVALID_INPUT = Cint(2)
 const ORDER_TOO_HIGH = Cint(3)
 const NO_INVARIANTS = Cint(4)             # no body of mb_spec admits an L = 0 invariant
 const INTERNAL_ERROR = Cint(5)            # anything else thrown by ET, or inconsistent sizes
+const IMAGINARY_COUPLING = Cint(6)        # reserved: ET resolves purely imaginary real-basis couplings itself
 const NSIZES = 7                          # [nnz, n_B, n_AA, n_sig, n_A, n_aaidx, n_nnll]
 
 const NL = @NamedTuple{n::Int, l::Int}
@@ -35,6 +38,7 @@ struct Result
    I::Vector{Int}                         # A2B triplets, findnz order
    J::Vector{Int}
    V::Vector{Float64}
+   M::Vector{Int}                         # 0-based component of the L-vector per triplet (all 0 for L = 0)
    sig::Vector{Vector{NLM}}               # per A2B column: meta["𝔸spec"]
    aspec::Vector{Tuple{Int, Int}}         # abasis.spec: (Rnl_idx, Ylm_idx)
    aa::Vector{Vector{Int}}                # aabasis evaluation order (SparseSymmProd)
@@ -77,6 +81,10 @@ function compute(mb::Vector{Vector{NL}}, rnl::Vector{NL}, ylm::Vector{LM})::Unio
    isempty(𝔸spec) && return nothing
    t = ET._tensor_specs(symm, 𝔸spec, rnl, ylm)      # == sparse_equivariant_tensor_spec(Val(0); ...)
    I, J, V = findnz(t.symm)
+   return _result(t, I, J, Vector{Float64}(V), zeros(Int, length(V)))
+end
+
+function _result(t, I::Vector{Int}, J::Vector{Int}, V::Vector{Float64}, M::Vector{Int})::Result
    nB, nAA = size(t.symm)
    # SparseSymmProd(𝔸spec_raw) evaluation order: the constructor's own
    # `sort(spec, by = length)` (stable); each body is already sorted by
@@ -89,8 +97,56 @@ function compute(mb::Vector{Vector{NL}}, rnl::Vector{NL}, ylm::Vector{LM})::Unio
    end
    nnll = Vector{NL}[NL[(n = b.n, l = b.l) for b in t.𝔸spec[first_col[i]]] for i in 1:nB]
    aspec = Tuple{Int, Int}[(Int(p[1]), Int(p[2])) for p in t.Aspec_raw]
-   return Result(nB, nAA, I, J, Vector{Float64}(V), t.𝔸spec, aspec, aa, nnll)
+   return Result(nB, nAA, I, J, V, M, t.𝔸spec, aspec, aa, nnll)
 end
+
+# ------------------------------------------------------------------ ABI v2
+validate_equivariant(L::Integer, parity::Integer)::Cint =
+   (0 <= L <= MAX_L && (parity == 1 || parity == -1)) ? OK : INVALID_INPUT
+
+# L is a compile-time constant in ET's Val API, so the run-time L goes through a
+# static table (as ET does for the correlation order).  parity = (-1)^∑l of the
+# products: +1 is ET's refl_sym = :sym, -1 is :asym.
+function compute_equivariant(L::Integer, parity::Integer, mb::Vector{Vector{NL}}, rnl::Vector{NL},
+                             ylm::Vector{LM})::Union{Result, Nothing}
+   rs = parity == 1 ? :sym : :asym
+   L == 0 && return _compute(Val(0), rs, mb, rnl, ylm)
+   L == 1 && return _compute(Val(1), rs, mb, rnl, ylm)
+   L == 2 && return _compute(Val(2), rs, mb, rnl, ylm)
+   L == 3 && return _compute(Val(3), rs, mb, rnl, ylm)
+   L == 4 && return _compute(Val(4), rs, mb, rnl, ylm)
+   L == 5 && return _compute(Val(5), rs, mb, rnl, ylm)
+   L == 6 && return _compute(Val(6), rs, mb, rnl, ylm)
+   throw(ArgumentError("compute_equivariant: L must be in 0:6"))
+end
+
+function _compute(::Val{L}, rs::Symbol, mb::Vector{Vector{NL}}, rnl::Vector{NL},
+                  ylm::Vector{LM})::Union{Result, Nothing} where {L}
+   symm, 𝔸spec = ET.symmetrisation_matrix(Val(L), mb; prune = true, PI = true, basis = real,
+                                         nullspace_solver = :dense, refl_sym = rs)
+   isempty(𝔸spec) && return nothing
+   t = ET._tensor_specs(symm, 𝔸spec, rnl, ylm)
+   I0, J0, V0 = findnz(t.symm)
+   L == 0 && return _result(t, I0, J0, _scalars(V0), zeros(Int, length(V0)))
+   # one (row, col, m, value) per nonzero component, findnz order then m ascending
+   I = Int[]; J = Int[]; M = Int[]; V = Float64[]
+   for k in eachindex(V0)
+      v = V0[k]
+      for m in 1:(2L + 1)
+         x = _component(v, m)
+         x == 0 && continue
+         push!(I, I0[k]); push!(J, J0[k]); push!(M, m - 1); push!(V, x)
+      end
+   end
+   isempty(V) && return nothing
+   # rows of the triplets must stay consistent with first_col: computed from (I, J), unaffected by m
+   return _result(t, I, J, V, M)
+end
+
+_scalars(V::Vector{Float64}) = V
+_scalars(V::AbstractVector) = Float64[_component(v, 1) for v in V]
+_component(v::Float64, m::Int) = v
+_component(v::AbstractVector{Float64}, m::Int) = v[m]
 
 required_sizes(r::Result) = (length(r.V), r.nB, r.nAA, sum(length, r.sig; init = 0),
                              length(r.aspec), sum(length, r.aa; init = 0), sum(length, r.nnll; init = 0))
@@ -119,30 +175,28 @@ Base.@ccallable function etc_max_order()::Cint
    return Cint(MAX_ORDER)
 end
 
-Base.@ccallable function etc_couple(
-      n_mb::Int64, mb_off::Ptr{Int64}, mb_n::Ptr{Int64}, mb_l::Ptr{Int64},
-      n_r::Int64, r_n::Ptr{Int64}, r_l::Ptr{Int64},
-      n_y::Int64, y_l::Ptr{Int64}, y_m::Ptr{Int64},
-      sizes::Ptr{Int64},
-      a2b_i::Ptr{Int64}, a2b_j::Ptr{Int64}, a2b_v::Ptr{Float64},
+# inputs of both entry points -> (code, mb, rnl, ylm); the vectors are empty unless code == OK
+function _read_inputs(n_mb::Int64, mb_off::Ptr{Int64}, mb_n::Ptr{Int64}, mb_l::Ptr{Int64},
+                      n_r::Int64, r_n::Ptr{Int64}, r_l::Ptr{Int64},
+                      n_y::Int64, y_l::Ptr{Int64}, y_m::Ptr{Int64})
+   none = (Vector{NL}[], NL[], LM[])
+   (n_mb < 1 || n_r < 1 || n_y < 1) && return (INVALID_INPUT, none...)
+   mb = _read_mb(n_mb, mb_off, mb_n, mb_l)
+   mb === nothing && return (INVALID_INPUT, none...)
+   rnl = NL[(n = Int(unsafe_load(r_n, k)), l = Int(unsafe_load(r_l, k))) for k in 1:n_r]
+   ylm = LM[(l = Int(unsafe_load(y_l, k)), m = Int(unsafe_load(y_m, k))) for k in 1:n_y]
+   return (validate(mb, rnl, ylm), mb, rnl, ylm)
+end
+
+# two-phase write of a Result; a2b_m is C_NULL for the v1 entry point
+function _write_outputs(r::Result, sizes::Ptr{Int64},
+      a2b_i::Ptr{Int64}, a2b_j::Ptr{Int64}, a2b_m::Ptr{Int64}, a2b_v::Ptr{Float64},
       sig_off::Ptr{Int64}, sig::Ptr{Int64}, aspec::Ptr{Int64},
       aa_off::Ptr{Int64}, aa_idx::Ptr{Int64},
       nnll_off::Ptr{Int64}, nnll::Ptr{Int64})::Cint
-   (n_mb < 1 || n_r < 1 || n_y < 1) && return INVALID_INPUT
-   mb = _read_mb(n_mb, mb_off, mb_n, mb_l)
-   mb === nothing && return INVALID_INPUT
-   rnl = NL[(n = Int(unsafe_load(r_n, k)), l = Int(unsafe_load(r_l, k))) for k in 1:n_r]
-   ylm = LM[(l = Int(unsafe_load(y_l, k)), m = Int(unsafe_load(y_m, k))) for k in 1:n_y]
-   code = validate(mb, rnl, ylm)
-   code == OK || return code
-   r = try
-      compute(mb, rnl, ylm)
-   catch
-      return INTERNAL_ERROR
-   end
-   r === nothing && return NO_INVARIANTS
    # the offset arrays below are sized from nAA / nB: never trust ET's shapes blindly
-   (length(r.sig) == r.nAA && length(r.aa) == r.nAA && length(r.nnll) == r.nB) || return INTERNAL_ERROR
+   (length(r.sig) == r.nAA && length(r.aa) == r.nAA && length(r.nnll) == r.nB &&
+    length(r.M) == length(r.V)) || return INTERNAL_ERROR
    need = required_sizes(r)
    short = false
    for k in 1:NSIZES
@@ -152,6 +206,11 @@ Base.@ccallable function etc_couple(
    short && return BUFFERS_TOO_SMALL
    for k in eachindex(r.V)
       unsafe_store!(a2b_i, r.I[k] - 1, k); unsafe_store!(a2b_j, r.J[k] - 1, k); unsafe_store!(a2b_v, r.V[k], k)
+   end
+   if a2b_m != C_NULL
+      for k in eachindex(r.M)
+         unsafe_store!(a2b_m, r.M[k], k)
+      end
    end
    p = 0; unsafe_store!(sig_off, 0, 1)
    for (c, bb) in enumerate(r.sig)
@@ -180,6 +239,57 @@ Base.@ccallable function etc_couple(
       unsafe_store!(nnll_off, p, i + 1)
    end
    return OK
+end
+
+Base.@ccallable function etc_max_L()::Cint
+   return Cint(MAX_L)
+end
+
+Base.@ccallable function etc_couple(
+      n_mb::Int64, mb_off::Ptr{Int64}, mb_n::Ptr{Int64}, mb_l::Ptr{Int64},
+      n_r::Int64, r_n::Ptr{Int64}, r_l::Ptr{Int64},
+      n_y::Int64, y_l::Ptr{Int64}, y_m::Ptr{Int64},
+      sizes::Ptr{Int64},
+      a2b_i::Ptr{Int64}, a2b_j::Ptr{Int64}, a2b_v::Ptr{Float64},
+      sig_off::Ptr{Int64}, sig::Ptr{Int64}, aspec::Ptr{Int64},
+      aa_off::Ptr{Int64}, aa_idx::Ptr{Int64},
+      nnll_off::Ptr{Int64}, nnll::Ptr{Int64})::Cint
+   code, mb, rnl, ylm = _read_inputs(n_mb, mb_off, mb_n, mb_l, n_r, r_n, r_l, n_y, y_l, y_m)
+   code == OK || return code
+   r = try
+      compute(mb, rnl, ylm)
+   catch
+      return INTERNAL_ERROR
+   end
+   r === nothing && return NO_INVARIANTS
+   return _write_outputs(r, sizes, a2b_i, a2b_j, Ptr{Int64}(C_NULL), a2b_v, sig_off, sig, aspec,
+                         aa_off, aa_idx, nnll_off, nnll)
+end
+
+# ABI v2.  As etc_couple, for the (L, parity) coupling: A2B is (row, col, m, value),
+# m = 0..2L the component of the L-vector, one entry per nonzero component.
+# NO_INVARIANTS when mb_spec has no function of that L and parity.
+Base.@ccallable function etc_couple_equivariant(
+      L::Int64, parity::Int64,
+      n_mb::Int64, mb_off::Ptr{Int64}, mb_n::Ptr{Int64}, mb_l::Ptr{Int64},
+      n_r::Int64, r_n::Ptr{Int64}, r_l::Ptr{Int64},
+      n_y::Int64, y_l::Ptr{Int64}, y_m::Ptr{Int64},
+      sizes::Ptr{Int64},
+      a2b_i::Ptr{Int64}, a2b_j::Ptr{Int64}, a2b_m::Ptr{Int64}, a2b_v::Ptr{Float64},
+      sig_off::Ptr{Int64}, sig::Ptr{Int64}, aspec::Ptr{Int64},
+      aa_off::Ptr{Int64}, aa_idx::Ptr{Int64},
+      nnll_off::Ptr{Int64}, nnll::Ptr{Int64})::Cint
+   validate_equivariant(L, parity) == OK || return INVALID_INPUT
+   code, mb, rnl, ylm = _read_inputs(n_mb, mb_off, mb_n, mb_l, n_r, r_n, r_l, n_y, y_l, y_m)
+   code == OK || return code
+   r = try
+      compute_equivariant(L, parity, mb, rnl, ylm)
+   catch
+      return INTERNAL_ERROR
+   end
+   r === nothing && return NO_INVARIANTS
+   return _write_outputs(r, sizes, a2b_i, a2b_j, a2b_m, a2b_v, sig_off, sig, aspec,
+                         aa_off, aa_idx, nnll_off, nnll)
 end
 
 end # module
