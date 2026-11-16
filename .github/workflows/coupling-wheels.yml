@@ -136,7 +136,9 @@ jobs:
         run: |
           uv sync --python 3.12 --extra gp
           uv pip install --reinstall dist/*.whl
-          uv run --no-sync pytest -n 0 -v tests/test_coupling_parity.py tests/test_coupling_etshim.py tests/test_coupling_cache.py tests/test_basis_build.py tests/test_fit_basis_pipeline.py tests/test_cli_fit_basis.py tests/test_built_basis_parity.py
+          # the dependency pin (and uv.lock) can name a version only once it is on PyPI, so during a
+          # release the wheel under test is one version ahead of the pin: that check runs in test.yml
+          uv run --no-sync pytest -n 0 -v --deselect tests/test_coupling_cache.py::test_backend_id_matches_dependency_pin tests/test_coupling_parity.py tests/test_coupling_etshim.py tests/test_coupling_equivariant.py tests/test_coupling_cache.py tests/test_basis_build.py tests/test_fit_basis_pipeline.py tests/test_cli_fit_basis.py tests/test_built_basis_parity.py
 
   publish:
     # only after every platform's wheel built, passed its clean-environment tests,

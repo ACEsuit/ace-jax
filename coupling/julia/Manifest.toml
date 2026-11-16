@@ -2,10 +2,10 @@
 
 julia_version = "1.13.1"
 manifest_format = "2.1"
-project_hash = "6985df31d90a921951b4fb4c64082daf5223999b"
+project_hash = "520fc9904215514409193075e0eb249d5577f056"
 
 [[deps.ACEbase]]
-deps = ["JSON", "LinearAlgebra", "Printf", "Reexport", "SparseArrays", "StaticArrays", "Test", "YAML", "ZipArchives"]
+deps = ["DataStructures", "JSON", "LinearAlgebra", "Printf", "Reexport", "SparseArrays", "StaticArrays", "Test", "YAML", "ZipArchives"]
 git-tree-sha1 = "0e50b7a4762456c54adcbd686c426f1f62ce80d4"
 registries = "General"
 uuid = "14bae519-eb20-449c-a949-9c58ed33163e"
@@ -323,8 +323,8 @@ weakdeps = ["Adapt", "ChainRulesCore"]
 
 [[deps.EquivariantTensors]]
 deps = ["ACEbase", "Adapt", "Bumper", "ChainRulesCore", "Combinatorics", "ConcreteStructs", "DecoratedParticles", "ForwardDiff", "Functors", "GPUArraysCore", "KernelAbstractions", "LinearAlgebra", "Lux", "LuxCore", "MLDataDevices", "NamedTupleTools", "PartialWaveFunctions", "Polynomials4ML", "Random", "Rotations", "SparseArrays", "StaticArrays", "WithAlloc"]
-git-tree-sha1 = "662e51cb681972888b5c2a0660576588c38c7b21"
-repo-rev = "1f24438016c30bb46b3b8e2a7021ecf83adaee2e"
+git-tree-sha1 = "132db72b1fdf48fd4cabd9c2cd11cba53dd1a2ac"
+repo-rev = "f5b274b550f68a17b57f9492d6a361037da3cced"
 repo-url = "https://github.com/jameskermode/EquivariantTensors.jl"
 uuid = "5e107534-7145-4f8f-b06f-47a52840c895"
 version = "0.5.1"
@@ -799,7 +799,7 @@ uuid = "7b2266bf-644c-5ea3-82d8-af4bbd25a884"
 version = "1.2.1"
 
 [[deps.Polynomials4ML]]
-deps = ["ACEbase", "BenchmarkTools", "Bumper", "ChainRulesCore", "Combinatorics", "DiffResults", "ForwardDiff", "GPUArraysCore", "HyperDualNumbers", "Interpolations", "KernelAbstractions", "LinearAlgebra", "LuxCore", "QuadGK", "Random", "SparseArrays", "SpecialFunctions", "SpheriCart", "StaticArrays", "Test", "WithAlloc"]
+deps = ["ACEbase", "BenchmarkTools", "Bumper", "ChainRulesCore", "Combinatorics", "DiffResults", "ForwardDiff", "GPUArraysCore", "HyperDualNumbers", "Interpolations", "KernelAbstractions", "LinearAlgebra", "LuxCore", "Printf", "QuadGK", "Random", "SparseArrays", "SpecialFunctions", "SpheriCart", "StaticArrays", "Test", "WithAlloc"]
 git-tree-sha1 = "753cadaf6496e559332f9f608f43218356313f9f"
 registries = "General"
 uuid = "03c4bcba-a943-47e9-bfa1-b1661fc2974f"
@@ -962,7 +962,7 @@ weakdeps = ["ChainRulesCore"]
     SpecialFunctionsChainRulesCoreExt = "ChainRulesCore"
 
 [[deps.SpheriCart]]
-deps = ["BenchmarkTools", "Bumper", "ForwardDiff", "GPUArraysCore", "KernelAbstractions", "LinearAlgebra", "StaticArrays"]
+deps = ["BenchmarkTools", "Bumper", "ForwardDiff", "GPUArraysCore", "KernelAbstractions", "LinearAlgebra", "OffsetArrays", "StaticArrays"]
 git-tree-sha1 = "6afdb7696752e4612d09f399c062e66f5e9673cd"
 registries = "General"
 uuid = "5caf2b29-02d9-47a3-9434-5931c85ba645"

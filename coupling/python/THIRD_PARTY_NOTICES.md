@@ -20,8 +20,8 @@ Julia 1.13.1's standard library; `tests/test_coupling_notices.py` checks them.
 
 | Component | Version | Bundled file(s) | Licence (SPDX) | Text |
 |---|---|---|---|---|
-| ace-jax glue (Python + Julia shim) | ace-jax-coupling 0.2.0 | `ace_jax_coupling/*.py`, `libetcouple` | MIT | `LICENSE` |
-| EquivariantTensors.jl (compiled into `libetcouple`; fork rev in `build_info()`) | 0.5.1 at jameskermode/EquivariantTensors.jl `1f24438` (exact commit: `build_info()`) | `libetcouple` | MIT | `licenses/EquivariantTensors.txt` |
+| ace-jax glue (Python + Julia shim) | ace-jax-coupling 0.3.0 | `ace_jax_coupling/*.py`, `libetcouple` | MIT | `LICENSE` |
+| EquivariantTensors.jl (compiled into `libetcouple`; fork rev in `build_info()`) | 0.5.1 at jameskermode/EquivariantTensors.jl `f5b274b` (exact commit: `build_info()`) | `libetcouple` | MIT | `licenses/EquivariantTensors.txt` |
 | Julia runtime and standard library | Julia 1.13.1 | `libjulia`, `libjulia-internal` (privatized names), `libetcouple` | MIT (+ components listed in THIRDPARTY.md) | `licenses/Julia.txt`, `licenses/Julia-THIRDPARTY.md` |
 | libunwind (Linux, macOS) | 1.8.3 (LibUnwind_jll 1.8.3+1) | `libunwind.1` | MIT | `licenses/libunwind.txt` |
 | OpenBLAS (incl. reference LAPACK) | 0.3.30 (OpenBLAS_jll 0.3.30+0) | `libopenblas64_` | BSD-3-Clause | `licenses/OpenBLAS.txt` |
@@ -40,7 +40,7 @@ Julia 1.13.1's standard library; `tests/test_coupling_notices.py` checks them.
 | SuiteSparse BTF | 7.10.1 (SuiteSparse_jll 7.10.1+0) | `libbtf.2` | LGPL-2.1-or-later | `licenses/SuiteSparse-BTF.txt`, `licenses/LGPL-2.1.txt` |
 | SuiteSparse KLU | 7.10.1 (SuiteSparse_jll 7.10.1+0) | `libklu.2` | LGPL-2.1-or-later | `licenses/SuiteSparse-KLU.txt`, `licenses/LGPL-2.1.txt` |
 | SuiteSparse LDL | 7.10.1 (SuiteSparse_jll 7.10.1+0) | `libldl.3` | LGPL-2.1-or-later | `licenses/SuiteSparse-LDL.txt`, `licenses/LGPL-2.1.txt` |
-| SuiteSparse CHOLMOD, UMFPACK, SPQR, RBio: **not bundled** | placeholders (ace-jax-coupling 0.2.0) | `libcholmod.5`, `libumfpack.6`, `libspqr.4`, `librbio.4` (Windows: `lib*.dll`) are empty placeholders of the same names, built by `coupling/tools/prune_bundle.py` (SuiteSparse_jll's init opens every SuiteSparse library; the coupling never calls these, as it uses EquivariantTensors' `nullspace_solver = :dense`) | MIT (ace-jax glue; no SuiteSparse code) | `LICENSE` |
+| SuiteSparse CHOLMOD, UMFPACK, SPQR, RBio: **not bundled** | placeholders (ace-jax-coupling 0.3.0) | `libcholmod.5`, `libumfpack.6`, `libspqr.4`, `librbio.4` (Windows: `lib*.dll`) are empty placeholders of the same names, built by `coupling/tools/prune_bundle.py` (SuiteSparse_jll's init opens every SuiteSparse library; the coupling never calls these, as it uses EquivariantTensors' `nullspace_solver = :dense`) | MIT (ace-jax glue; no SuiteSparse code) | `LICENSE` |
 | MinGW-w64 winpthreads (Windows only) | the Julia 1.13.1 Windows runtime | `libwinpthread-1.dll` | MIT AND BSD-3-Clause | `licenses/winpthreads.txt` |
 | GCC runtime: libgcc_s, libgfortran, libgomp, libatomic, libssp, libstdc++ | CompilerSupportLibraries_jll 1.5.5+2 | `libgcc_s.1.1`, `libgfortran.5`, `libgomp.1`, `libatomic.1`, `libssp.0`, `libstdc++.6` | GPL-3.0-or-later WITH GCC-exception-3.1 | `licenses/GPL-3.0.txt`, `licenses/GCC-exception-3.1.txt` |
 | libquadmath (GCC) | CompilerSupportLibraries_jll 1.5.5+2 | `libquadmath.0` | LGPL-2.1-or-later | `licenses/LGPL-2.1.txt` |
