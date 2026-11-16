@@ -25,9 +25,11 @@ Results of `ace_jax.ham` as they are measured. Design: `specs/2026-11-16-hamilto
 | A and AA (once, for all L) | 30–39 µs | 43 µs |
 | A, AA and the features of all 12 (L, parity) | 51 µs | 54 µs |
 | on-site H and S, reference readout (a numpy loop over shell pairs) | 209 µs | 148 µs |
-| on-site H and S, `OnsitePredictor` (one compiled program), neighbour list included | 225 µs | 95 µs |
+| on-site H and S readout alone (compiled), given the features | 5 µs | 10 µs |
+| on-site H and S, `OnsitePredictor`, end to end with the neighbour list | 190–225 µs | 93 µs |
 
 - The features of every symmetry cost about 25% on top of the A/AA evaluation an ACE potential already does.
-- On one thread the compiled readout of all 175 shell-pair parts and both channels costs about 18 µs per atom: one contraction and one sparse scatter per (L, parity).
-- On 32 threads the same compiled program is slower than on one (225 against 95 µs), and the cost is in the readout. This is open: it needs a profile before the off-site model reuses the same readout.
+- The compiled readout of all 175 shell-pair parts and both channels costs 5 to 10 µs per atom: one contraction and one sparse scatter per (L, parity).
+- **Open.** On one thread the end-to-end time is the sum of its stages (23 + 54 + 10, measured 93 µs). On 32 threads it is 190 to 225 µs, although the stages timed alone take 22, 42 and 5 µs. Fusing features and readout into one compiled program, or `OMP_WAIT_POLICY=passive`, did not change it. Until this is understood, one thread per process is the faster way to run the on-site path, and the off-site model should be timed both ways from the start.
+
 - The comparison with ACEhamiltonians.jl waits for the off-site model, where its cost is.

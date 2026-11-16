@@ -170,12 +170,17 @@ def compile_readout(model):
                    species=orb.species, lps=tuple(lps_all))
 
 
-def _dense_impl(basis, readout, rij, zi, zj, seg, atoms, n):
-    F = basis.features(rij, zi, zj, seg, n)
+@jax.jit
+def _readout(readout, F, atoms):
     return tuple(readout.blocks(F, k, a) for k, a in enumerate(atoms))
 
 
-_dense = jax.jit(_dense_impl, static_argnums=7)
+def _dense(basis, readout, rij, zi, zj, seg, atoms, n):
+    """Features, then readout, as two compiled programs (the feature program is shared with
+    `OnsiteModel.site_features` and the fit).  Open: on a 32-thread CPU the chain runs at
+    150-200 us per atom although its stages take 42 and 5 us when timed alone, and 70 us on
+    one thread; fusing the two into one program did not change it.  docs/dev/ham-results.md."""
+    return _readout(readout, _features(basis, rij, zi, zj, seg, n), atoms)
 
 
 class OnsitePredictor:
