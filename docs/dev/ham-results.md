@@ -52,3 +52,31 @@ Same structure and orbital basis for both codes: 512-atom diamond silicon rattle
 - Where it comes from: ACEhamiltonians.jl evaluates 55 separate ACE bases per atom, at 30 to 760 µs each. Here the per-atom work that depends on the environment (A, AA, features) is done once, and half of the 26 µs is the neighbour list.
 - **What this does not show.** The two bases are not the same functions (different radials, and a shared feature set against per-block bases), so equal coefficient counts are not equal accuracy. An accuracy-matched comparison needs fits of both codes on the same data, which is planned for the stage-A fitting work. The ACEhamiltonians.jl environment is its last release on current dependencies, not a tuned build.
 - On 32 threads ace-jax's stage sums are the same or lower (21 and 49 µs), but the end-to-end time at total degree 9 is 192 µs: the open item above again. At total degree 7 it is 25 µs.
+
+## Accuracy-matched on-site comparison with ACEhamiltonians.jl (2026-11-16)
+
+**Data and protocol** (the ACEhamiltonians paper's own on-site benchmark, arXiv:2111.13736): aluminium, FHI-aims, 729-atom supercells from 500 K MD, 14 orbitals per atom (3 s, 2 p, 1 d shells; 21 shell pairs). Train on the odd-numbered atoms of BCC `SK-supercell-001` and FCC `SK-supercell-002` (730 atoms), the paper's selection; test on every third atom of FCC `SK-supercell-001` and BCC `SK-supercell-002` (486 atoms). Environment cutoff 9 Å (176 neighbours), the paper's value. H blocks divided by 27 (the files hold a 3×3×3 k-sum). Error: RMSE over the elements of the shell pairs s₁ ≤ s₂. Time: one thread, lestrade.
+
+- ace-jax: `bench/ham/onsite_accuracy.py` (reader `bench/ham/aitb.py`; FHI-aims' phases converted with Quoll's table and checked by the overlap's two-centre form, violation 1e-3 on a scale of 27). Least squares, ridge 1e-10.
+- ACEhamiltonians.jl @ 9ff1572: `bench/ham/aceh_onsite_accuracy.jl`, same atoms, its own assembly, mean, scaling and LSQR solver (λ = 1e-7), one sub-model per shell pair.
+
+| model | coefficients | test RMSE (meV) | worst block type | model time per atom |
+|---|---|---|---|---|
+| ACEhamiltonians.jl, order 2, degree 3 | 241 | 9.88 | dd 21.6 | 1198 µs |
+| ACEhamiltonians.jl, order 2, degree 4 | 446 | 1.10 | dd 1.99 | 1736 µs |
+| ACEhamiltonians.jl, order 2, degree 6 | 1106 | 0.53 | ss 0.98 | 3491 µs |
+| ACEhamiltonians.jl, order 1, degree 12 | 322 | 2.52 | dd 4.22 | 10135 µs |
+| ace-jax, order 1, 6 radials, l ≤ 4 | 178 | 4.51 | dd 8.11 | 56 µs |
+| ace-jax, order 1, 8 radials | 234 | 1.13 | dd 1.94 | 68 µs |
+| ace-jax, order 1, 12 radials | 346 | 0.49 | ss 0.97 | 96 µs |
+| ace-jax, order 2, (10, 4) radials, l ≤ 4 | 2276 | 0.56 | ss 1.03 | 112 µs |
+| ace-jax, order 2, total degree 10, wL = 1 (no caps) | 2210 | 2.93 | dd 7.59 | 143 µs |
+
+Model time is features plus readout for ace-jax and `predict` on prebuilt states for ACEhamiltonians.jl; neither includes the neighbour search (ace-jax: 11.5 µs per atom with matscipy-neighbours, 355 µs with the ASE fallback that the earlier tables used).
+
+- **At matched accuracy ace-jax is 25 times faster at 1.1 meV (68 against 1736 µs) and 36 times faster at 0.5 meV (96 against 3491 µs)**, with fewer coefficients (234 against 446; 346 against 1106). With the neighbour search included on ace-jax's side only, 22 and 33 times.
+- Both codes reach the same floor, 0.97 meV in the s–s blocks, whatever the basis.
+- **The basis has to be shaped for the problem.** A plain total-degree basis is poor here: 2.9 meV with 2210 coefficients. The L part of an on-site block is, to leading order, linear in the neighbour density with its own radial profile, so accuracy follows the number of radial functions each l ≤ 4 has at correlation order 1; order-2 terms change nothing on this data (1.13 meV with and without them at 8 radials). `build_site_basis(nmax_by_order=, lmax_by_order=)` gives that shape. Total degree charges high l with too few radials (5 features for the L = 4 part of d–d at total degree 6, and 20 meV left of a 33 meV signal).
+- ACEhamiltonians.jl needs order 2 (order 1 stalls at 2.5 meV); ace-jax does not. Not understood: it may be its radial basis or its mean handling.
+- One dataset, one element, 500 K crystals. Whether order 2 matters for defects, surfaces or liquids is open.
+- On 32 threads ace-jax's feature time at this neighbour count is 253 µs against 68 µs on one thread: the open threading item again.
