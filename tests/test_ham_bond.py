@@ -104,7 +104,7 @@ def test_reverse_bond_swaps_the_groups(basis):
     with the sign (-1)^l of each feature.  The model's reversal symmetry rests on this."""
     pos, cell, numbers = structure()
     g, f = all_features(basis, pos, cell, numbers)
-    for (L, p), d in f.items():
+    for (L, _), d in f.items():
         assert np.allclose(d["bond"][g.reverse], (-1) ** L * d["bond"], atol=1e-12)
         s = d["sign"][None, :, None]
         assert np.allclose(d["i"][g.reverse], s * d["j"], atol=1e-12)

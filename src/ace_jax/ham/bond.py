@@ -114,8 +114,9 @@ def features(basis, F, graph, sel, lps):
                 g = np.einsum("ebn,enM->ebM", F[(lam, pi)][site], W)       # (e, n_B, M)
                 acc.append((phi1[:, :, None, None] * g[:, None]).reshape(len(sel), -1, k))
             sign += [(-1) ** l] * (basis.n_cpl * nB)
-        cat = lambda xs: np.concatenate(xs, axis=1) if xs else np.zeros((len(sel), 0, k))
-        out[(L, p)] = {"bond": bond, "i": cat(gi), "j": cat(gj), "sign": np.asarray(sign, float)}
+        empty = np.zeros((len(sel), 0, k))
+        out[(L, p)] = {"bond": bond, "i": np.concatenate(gi, axis=1) if gi else empty,
+                       "j": np.concatenate(gj, axis=1) if gj else empty, "sign": np.asarray(sign, float)}
     return out
 
 
