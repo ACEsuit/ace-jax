@@ -543,7 +543,8 @@ Other entry points:
   `export_lammps` spline the learned radial through `lean` (see above);
   `ace_jax.eval.to_spline(model, n_intervals=None, tol=1e-10)` returns
   `(spline model, max_rel_err)` directly.
-- Benchmarks: `docs/dev/benchmarks.md` (harness in `bench/scaling/`).
+- Benchmarks: the Performance page, <https://acesuit.github.io/ace-jax/benchmarks/> (silicon accuracy and cost; SiGe and
+  Cantor speed). Full tables: `docs/dev/benchmarks.md` (harness in `bench/scaling/`).
 
 ## Gotchas
 
