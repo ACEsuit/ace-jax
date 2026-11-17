@@ -113,3 +113,58 @@ def test_reverse_bond_swaps_the_groups(basis):
         A = bond.design(d, L, same=True)
         assert np.allclose(A[g.reverse], (-1) ** L * A, atol=1e-12)
         assert bond.design(d, L, same=False).shape[1] == d["bond"].shape[1] + 2 * d["i"].shape[1]
+
+
+@pytest.fixture(scope="module")
+def basis_env(basis):
+    return basis._replace(r_env=4.5, n_env=3, l_env=2, n_ebond=2, l_ebond=2)
+
+
+def env_features(basis, pos, cell, numbers):
+    rij, zi, zj, seg, n = site_graph(basis.site, pos, cell, numbers)
+    F = {k: np.asarray(v) for k, v in _features(basis.site, rij, zi, zj, seg, n).items()}
+    g = bond.bond_graph(basis, pos, cell, numbers)
+    return g, bond.features(basis, F, g, np.arange(len(g.i)), LPS, env=bond.env_lists(basis, pos, cell))
+
+
+def test_bond_environment_group(basis_env):
+    """The environment about the midpoint: rotates with the Wigner matrices, parity (-1)^(l+lam)
+    under inversion, and for the reverse bond the same up to the sign (-1)^l of its bond harmonic."""
+    pos, cell, numbers = structure()
+    g, f = env_features(basis_env, pos, cell, numbers)
+    q, _ = np.linalg.qr(np.random.default_rng(2).normal(size=(3, 3)))
+    Q = q * np.sign(np.linalg.det(q))
+    gr, fr = env_features(basis_env, pos @ Q.T, cell @ Q.T, numbers)
+    gi, fi = env_features(basis_env, -pos, -cell, numbers)
+    order = lambda gg: {(int(a), int(b), *map(int, c)): k for k, (a, b, c) in enumerate(zip(gg.i, gg.j, gg.R))}
+    pr = np.asarray([order(gr)[k] for k in order(g)])
+    pi_ = np.asarray([order(gi)[k] for k in order(g)])
+    seen = 0
+    for (L, p), d in f.items():
+        a = d["env"]
+        assert a.shape[1] == bond.n_env_features(basis_env, L, p) == len(d["env_sign"])
+        if a.shape[1] == 0:
+            continue
+        seen += 1
+        scale = np.abs(a).max()
+        assert scale > 1e-8
+        D = wigner(L, Q) if L else np.ones((1, 1))
+        assert np.abs(fr[(L, p)]["env"][pr] - a @ D.T).max() < 1e-9 * scale, (L, p)
+        assert np.abs(fi[(L, p)]["env"][pi_] - p * a).max() < 1e-11 * scale, (L, p)
+        assert np.allclose(a[g.reverse], d["env_sign"][None, :, None] * a, atol=1e-12 * scale)
+        A = bond.design(d, L, same=True)
+        assert np.allclose(A[g.reverse], (-1) ** L * A, atol=1e-12 * max(1.0, np.abs(A).max()))
+        assert A.shape[1] == d["bond"].shape[1] + d["i"].shape[1] + bond.n_env_features(basis_env, L, p, same=True)
+    assert seen >= 5
+    # the pseudo-tensor symmetries get environment features too: (1, +1) has no two-centre part
+    assert bond.n_env_features(basis_env, 1, 1) > 0 and f[(1, 1)]["bond"].shape[1] == 0
+
+
+def test_bond_environment_sees_atoms_the_ends_do_not_share(basis_env):
+    """Moving an atom near a bond changes the bond's environment features; an atom far from both
+    ends does not; and a basis with an environment needs its lists."""
+    pos, cell, numbers = structure()
+    g, f = env_features(basis_env, pos, cell, numbers)
+    with pytest.raises(ValueError, match="env_lists"):
+        bond.features(basis_env, {}, g, np.arange(2), LPS)
+    assert bond.env_lists(basis_env._replace(n_env=0), pos, cell) is None

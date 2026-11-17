@@ -162,6 +162,9 @@ class OffsitePredictor:
     pair (za, zb), the bond indices and their blocks (n_bonds, n_channel, n_a, n_b)."""
 
     def __init__(self, model):
+        if model.bond.n_env:
+            raise NotImplementedError("the compiled predictor does not have the bond-environment group yet: "
+                                      "use OffsiteModel.predict")
         self.model = model
         orb = model.orbitals
         self.packs = {(za, zb): _pack(model, za, zb) for za in orb.species for zb in orb.species if za <= zb}

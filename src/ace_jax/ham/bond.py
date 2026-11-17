@@ -12,9 +12,20 @@ pooling over an environment of its own.  Under r -> -r and i <-> j the groups
 map into each other ("bond" and the coupled terms pick up (-1)^L and (-1)^l),
 which `symmetric` uses for blocks between equal shells of equal species.
 
-What this basis cannot represent: terms joint in the environments of i and j
-beyond their sum, and an environment centred on the bond.  Its accuracy is an
-empirical question (docs/dev/ham-results.md)."""
+What these three groups cannot represent: terms joint in the environments of i and j
+beyond their sum, and an environment centred on the bond.  On aluminium that leaves the
+blocks of bonds beyond the first neighbour shell too inaccurate for band structures
+(docs/dev/ham-results.md), so there is a fourth group:
+
+  "env"   phi_n(r) [Y_l(r) (x) A^env_(n' lam)]^L     A^env = sum_k w_k R_n'(|x_k|) Y_lam(x_k)
+
+the bond-environment ACE at correlation order 1 (ACEhamiltonians' off-site model): x_k is the
+position of environment atom k relative to the bond's MIDPOINT, and w_k = e(d_ik) + e(d_jk)
+with e a smooth cutoff at `r_env` around each end (a dumbbell where ACEhamiltonians has a
+cylinder; for bonds up to about 2 r_env it covers the same region, and it lets the pooling
+run over each end's own neighbour list).  It is the same for a bond and its reverse, so under
+reversal the group only takes the sign (-1)^l of the bond harmonic.  This group does pool an
+environment per bond."""
 from typing import NamedTuple
 
 import numpy as np
@@ -28,13 +39,21 @@ from .features import SiteBasis
 class BondBasis(NamedTuple):
     """site: the shared `SiteBasis`; rcut_bond: longest bond with a block; n_bond: radial
     functions of the two-centre features; n_cpl, l_cpl: radial functions and largest bond
-    harmonic of the coupled features (0 radial functions: two-centre only)."""
+    harmonic of the coupled features (0 radial functions: two-centre only).  Bond environment
+    (off when n_env = 0): r_env, the cutoff around each end; n_env, l_env: radial functions and
+    largest harmonic of the environment about the midpoint; n_ebond, l_ebond: radial functions
+    and largest bond harmonic it is coupled with."""
 
     site: SiteBasis
     rcut_bond: float
     n_bond: int
     n_cpl: int = 0
     l_cpl: int = 0
+    r_env: float = 0.0
+    n_env: int = 0
+    l_env: int = 0
+    n_ebond: int = 0
+    l_ebond: int = 0
 
 
 class BondGraph(NamedTuple):
@@ -74,6 +93,43 @@ def bond_graph(basis, positions, cell, numbers, pbc=True):
     return BondGraph(i, j, R, g.rij, reverse)
 
 
+def env_lists(basis, positions, cell, pbc=True):
+    """Dense neighbour vectors within `r_env` of every atom, (n, K, 3) and counts, for the bond
+    environment; None when the basis has none."""
+    if not basis.n_env:
+        return None
+    from ..eval.nlist import dense_graph
+    positions, cell = np.asarray(positions, float), np.asarray(cell, float)
+    g = sparse_graph(positions, cell, pbc, basis.r_env)
+    K = max(int(np.bincount(g.senders, minlength=len(positions)).max()) if len(g.rij) else 1, 1)
+    d = dense_graph(positions, cell, pbc, basis.r_env, K)
+    return np.asarray(d.rij), np.asarray(d.count)
+
+
+def env_layout(basis, L, p):
+    """[(l, lam)] of the bond-environment groups of symmetry (L, p): bond harmonic l with the
+    environment's lam, parity (-1)^(l + lam)."""
+    if not basis.n_env:
+        return []
+    return [(l, lam) for lam in range(basis.l_env + 1) for l in range(basis.l_ebond + 1)
+            if (-1) ** (l + lam) == p and abs(l - lam) <= L <= l + lam]
+
+
+def _env_side(basis, env, atoms, r):
+    """(n_bonds, n_env, (l_env+1)^2): the half of A^env pooled over the neighbours of the bond's
+    first atom `atoms`, for bond vectors `r` (the partner atom itself is left out)."""
+    rij, count = env
+    d = rij[atoms]                                                     # (e, K, 3) from the first atom
+    K = d.shape[1]
+    dist = np.linalg.norm(d, axis=-1)
+    live = (np.arange(K)[None, :] < count[atoms][:, None]) & (np.linalg.norm(d - r[:, None, :], axis=-1) > 1e-6)
+    w = np.where(live & (dist < basis.r_env), (1 - np.clip(dist / basis.r_env, 0, 1) ** 2) ** 2, 0.0)
+    x = d - 0.5 * r[:, None, :]                                        # relative to the midpoint
+    R = radial(np.linalg.norm(x, axis=-1), basis.r_env + 0.5 * basis.rcut_bond, basis.n_env)
+    Y = np.asarray(real_spherical_harmonics(x.reshape(-1, 3), max(basis.l_env, 1))).reshape(*x.shape[:2], -1)
+    return np.einsum("ek,ekn,eky->eny", w, R, Y[..., :(basis.l_env + 1) ** 2])
+
+
 def layout(basis, L, p):
     """What the (L, p) features of a bond are: (has two-centre features, [(l, lam, pi, n_B)])
     for the coupled groups, in the order `features` stacks them."""
@@ -93,11 +149,18 @@ def n_features(basis, L, p):
     return (basis.n_bond if two else 0), basis.n_cpl * sum(nB for *_, nB in cpl)
 
 
-def features(basis, F, graph, sel, lps):
+def n_env_features(basis, L, p, same=False):
+    """Bond-environment feature count of symmetry (L, p); `same`: only the groups a block
+    between equal shells of equal species keeps (bond harmonic of the parity of L)."""
+    return basis.n_ebond * basis.n_env * sum(1 for l, _ in env_layout(basis, L, p) if not same or (l - L) % 2 == 0)
+
+
+def features(basis, F, graph, sel, lps, env=None):
     """{(L, p): {"bond": (n, k0, 2L+1), "i": (n, k1, 2L+1), "j": (n, k1, 2L+1), "sign": (k1,)}}
     for the bonds `sel` (indices into `graph`) and the symmetries `lps`.  `F`: site features
     {(lam, pi): (n_atoms, n_B, 2 lam + 1)} as numpy arrays.  "sign"[k] = (-1)^l of coupled
-    feature k: the factor its group takes under r -> -r."""
+    feature k: the factor its group takes under r -> -r.  With a bond environment (`env`:
+    `env_lists`) also "env": (n, k2, 2L+1) and "env_sign": (k2,)."""
     sel = np.asarray(sel)
     r = graph.rij[sel]
     dist = np.linalg.norm(r, axis=1)
@@ -106,6 +169,12 @@ def features(basis, F, graph, sel, lps):
     y = lambda l: Y[:, l * l:(l + 1) ** 2]
     phi0, phi1 = radial(dist, basis.rcut_bond, basis.n_bond), radial(dist, basis.rcut_bond, basis.n_cpl)
     i, j = graph.i[sel], graph.j[sel]
+    if basis.n_env:
+        if env is None:
+            raise ValueError("this bond basis has a bond environment: pass env=env_lists(...)")
+        # the environment about the midpoint: each end's half; the second end's is the reverse bond's first
+        Aenv = _env_side(basis, env, i, r) + _env_side(basis, env, j, -r)
+        phi2 = radial(dist, basis.rcut_bond, basis.n_ebond)
     out = {}
     for L, p in lps:
         two, cpl = layout(basis, L, p)
@@ -122,6 +191,14 @@ def features(basis, F, graph, sel, lps):
         empty = np.zeros((len(sel), 0, k))
         out[(L, p)] = {"bond": bond, "i": np.concatenate(gi, axis=1) if gi else empty,
                        "j": np.concatenate(gj, axis=1) if gj else empty, "sign": np.asarray(sign, float)}
+        ge, esign = [], []
+        for l, lam in env_layout(basis, L, p):
+            W = np.einsum("em,mnM->enM", y(l), cg.real_cg(l, lam, L))
+            a = np.einsum("ebn,enM->ebM", Aenv[:, :, lam * lam:(lam + 1) ** 2], W)       # (e, n_env, M)
+            ge.append((phi2[:, :, None, None] * a[:, None]).reshape(len(sel), -1, k))
+            esign += [(-1) ** l] * (basis.n_ebond * basis.n_env)
+        out[(L, p)]["env"] = np.concatenate(ge, axis=1) if ge else empty
+        out[(L, p)]["env_sign"] = np.asarray(esign, float)
     return out
 
 
@@ -131,8 +208,11 @@ def design(f, L, same):
     Different shells or species: [bond | i | j].  Equal shells of equal species (`same`): the
     block of the reverse bond is this block's transpose, so the coefficients of the i and j
     groups are tied: [bond | (i + (-1)^L sign j) / 2], and two-centre features exist only for
-    even L (they do anyway: parity +)."""
+    even L (they do anyway: parity +).
+    The bond-environment group is the same for a bond and its reverse up to the sign of its bond
+    harmonic, so it needs no tying; an equal-shell block keeps only its features of sign (-1)^L."""
     if not same:
-        return np.concatenate([f["bond"], f["i"], f["j"]], axis=1)
+        return np.concatenate([f["bond"], f["i"], f["j"], f["env"]], axis=1)
     s = ((-1) ** L) * f["sign"]
-    return np.concatenate([f["bond"], 0.5 * (f["i"] + s[None, :, None] * f["j"])], axis=1)
+    keep = f["env_sign"] == (-1) ** L
+    return np.concatenate([f["bond"], 0.5 * (f["i"] + s[None, :, None] * f["j"]), f["env"][:, keep]], axis=1)

@@ -37,7 +37,7 @@ def random_model(basis, seed=0, channels=("H", "S")):
                 p = 1 if (l1 + l2) % 2 == 0 else -1
                 for L in cg.Ls(l1, l2):
                     k0, k1 = bond.n_features(basis, L, p)
-                    n = k0 + (k1 if same else 2 * k1)
+                    n = k0 + (k1 if same else 2 * k1) + bond.n_env_features(basis, L, p, same=same)
                     if n:
                         coef[(zi, zj, s1, s2, L)] = rng.normal(size=(len(channels), n))
     return OffsiteModel(bond=basis, coef=coef, orbitals=ORB, channels=channels)
@@ -152,3 +152,46 @@ def test_compiled_prediction_is_the_reference(basis):
                 assert set(ref[name]) == set(got[name])
                 worst = max(np.abs(got[name][k] - v).max() / max(1.0, np.abs(v).max()) for k, v in ref[name].items())
                 assert worst < 1e-10, (name, worst)
+
+
+@pytest.fixture(scope="module")
+def basis_env(basis):
+    return basis._replace(r_env=4.5, n_env=3, l_env=2, n_ebond=2, l_ebond=2)
+
+
+@pytest.mark.parametrize("improper", [False, True])
+def test_bond_environment_model_symmetries(basis_env, improper):
+    """With the bond-environment group: every bond's reverse is still its transpose, and the
+    blocks rotate and invert with the orbitals."""
+    pos, cell, numbers = structure()
+    m = random_model(basis_env)
+    a = m.predict(pos, cell, numbers)
+    for name, blocks in a.items():
+        for (Rx, Ry, Rz, i, j), blk in blocks.items():
+            assert np.allclose(blocks[(-Rx, -Ry, -Rz, j, i)], blk.T, atol=1e-12), (name, Rx, Ry, Rz, i, j)
+    q, _ = np.linalg.qr(np.random.default_rng(4).normal(size=(3, 3)))
+    Q = q * np.sign(np.linalg.det(q))
+    s = -1 if improper else 1
+    b = m.predict(s * pos @ Q.T, s * cell @ Q.T, numbers)
+    for name in a:
+        for key, blk in a[name].items():
+            Di, Dj = atom_rotation(int(numbers[key[3]]), Q, improper), atom_rotation(int(numbers[key[4]]), Q, improper)
+            assert np.abs(b[name][key] - Di @ blk @ Dj.T).max() < 1e-9 * np.abs(blk).max(), (name, key)
+    # the environment group matters: the same coefficients without it give other blocks
+    k = next(iter(a["H"]))
+    assert not np.allclose(a["H"][k], random_model(basis_env._replace(n_env=0)).predict(pos, cell, numbers)["H"][k])
+
+
+def test_predict_selected_bonds(basis_env):
+    pos, cell, numbers = structure()
+    m = random_model(basis_env)
+    full = m.predict(pos, cell, numbers)
+    some = m.predict(pos, cell, numbers, only=lambda g: np.flatnonzero(g.i == 0))
+    assert set(some["H"]) == {k for k in full["H"] if k[3] == 0} and len(some["H"]) > 5
+    assert all(np.allclose(some["H"][k], full["H"][k], atol=1e-13) for k in some["H"])
+
+
+def test_compiled_predictor_refuses_the_environment_group(basis_env):
+    from ace_jax.ham.offsite_fast import OffsitePredictor
+    with pytest.raises(NotImplementedError, match="bond-environment"):
+        OffsitePredictor(random_model(basis_env))

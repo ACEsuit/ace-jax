@@ -47,25 +47,31 @@ class OffsiteModel(eqx.Module):
     orbitals: OrbitalBasis = eqx.field(static=True)
     channels: tuple = eqx.field(static=True)
 
-    def predict(self, positions, cell, numbers, pbc=True, chunk=4096):
-        """{channel: {(Rx, Ry, Rz, i, j): (n_orb_i, n_orb_j)}} for every pair within the bond cutoff."""
+    def predict(self, positions, cell, numbers, pbc=True, chunk=4096, only=None):
+        """{channel: {(Rx, Ry, Rz, i, j): (n_orb_i, n_orb_j)}} for every pair within the bond cutoff.
+        `only`: a function of the bond graph giving the bond indices wanted (default all); their
+        reverse bonds are evaluated too, since a block takes its non-canonical part from them."""
         numbers = np.asarray(numbers)
         orb, nc = self.orbitals, len(self.channels)
         F = site_features(self.bond, positions, cell, numbers, pbc)
         g = B.bond_graph(self.bond, positions, cell, numbers, pbc)
+        env = B.env_lists(self.bond, positions, cell, pbc)
         lps = block_lps(orb)
         zi, zj = numbers[g.i], numbers[g.j]
+        want = np.arange(len(g.i)) if only is None else np.asarray(only(g), np.int64)
+        need = np.zeros(len(g.i), bool)
+        need[want] = need[g.reverse[want]] = True
         blocks = [None] * len(g.i)                       # per bond: (n_channel, n_i, n_j), canonical parts filled
         for za in orb.species:
             for zb in orb.species:
                 pairs = canonical_pairs(orb, za, zb)
-                sel_all = np.flatnonzero((zi == za) & (zj == zb))
+                sel_all = np.flatnonzero((zi == za) & (zj == zb) & need)
                 na, nb = orb.n_orb(za), orb.n_orb(zb)
                 for lo in range(0, len(sel_all), chunk):
                     sel = sel_all[lo:lo + chunk]
                     full = np.zeros((len(sel), nc, na, nb))
                     if pairs:
-                        f = B.features(self.bond, F, g, sel, lps)
+                        f = B.features(self.bond, F, g, sel, lps, env=env)
                         for s1, s2, l1, l2, same in pairs:
                             p = 1 if (l1 + l2) % 2 == 0 else -1
                             blk = 0.0
@@ -80,7 +86,7 @@ class OffsiteModel(eqx.Module):
                         blocks[e] = full[k]
         # the non-canonical parts: transpose of the reverse bond's canonical block
         out = {c: {} for c in self.channels}
-        for e in range(len(g.i)):
+        for e in want:
             za, zb = int(zi[e]), int(zj[e])
             blk = blocks[e].copy()
             rev = blocks[g.reverse[e]]

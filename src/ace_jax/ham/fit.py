@@ -88,6 +88,7 @@ def fit_offsite(bond_basis, datasets, orbitals=None, channels=("H", "S"), ridge=
             raise ValueError("fit_offsite: the datasets have different orbital bases")
         F = site_features(bond_basis, d.positions, d.cell, d.numbers)
         g = B.bond_graph(bond_basis, d.positions, d.cell, d.numbers)
+        env = B.env_lists(bond_basis, d.positions, d.cell)
         keys = [(int(r[0]), int(r[1]), int(r[2]), int(a), int(b)) for r, a, b in zip(g.R, g.i, g.j)]
         have = np.asarray([all(k in d.blocks[c] for c in channels) for k in keys])
         numbers = np.asarray(d.numbers)
@@ -97,7 +98,7 @@ def fit_offsite(bond_basis, datasets, orbitals=None, channels=("H", "S"), ridge=
                 sel_all = np.flatnonzero(have & (numbers[g.i] == za) & (numbers[g.j] == zb)) if pairs else []
                 for lo in range(0, len(sel_all), chunk):
                     sel = sel_all[lo:lo + chunk]
-                    f = B.features(bond_basis, F, g, sel, lps)
+                    f = B.features(bond_basis, F, g, sel, lps, env=env)
                     blocks = np.stack([[d.blocks[c][keys[e]] for c in channels] for e in sel])   # (e, c, ni, nj)
                     for s1, s2, l1, l2, same in pairs:
                         p = 1 if (l1 + l2) % 2 == 0 else -1
