@@ -293,3 +293,40 @@ Same test and metric as the section above (`band_accuracy.py … env=5.0,6,4,4,4
 - The off-site error is now spread evenly over bond lengths (each range alone costs 0.015–0.05 eV), no longer concentrated beyond the first shell.
 - On BCC the on-site model is now the larger part (0.097 eV with the reference off-site blocks).
 - **Not yet measured: the cost.** This group pools an environment per bond, which the shared-feature design avoided; the compiled predictor does not have it yet (`OffsitePredictor` refuses, the reference `OffsiteModel.predict` has it), so there is no timing, and no test of how small the group can be made, or whether the site-coupled groups are still needed beside it.
+
+## Ablation of the off-site feature groups, and what the bond environment costs (2026-11-17)
+
+**Ablation** on the paper's band metric (`band_accuracy.py`; site basis 12 radials, 12 two-centre radials, bond cutoff 9 Å, 20,000 training bonds). `env` = (cutoff around each end, environment radials, environment l_max, bond radials, bond l_max); `site` = coupled site features (radials, bond l_max).
+
+| off-site groups | largest fit, columns | FCC / BCC, paper's band error | plain RMSE to E_F + 10 eV |
+|---|---|---|---|
+| target (paper) | – | < 0.4 / < 0.4 eV | – |
+| site (4, 4) only | 652 | 0.219 / 0.711 | 959 / 973 meV |
+| env (5, 6, 4, 4, 4) only | 252 | 0.063 / 0.194 | 205 / 238 meV |
+| env (5, 4, 4, 2, 4) only | 92 | 0.340 / 0.312 | 634 / 622 meV |
+| env (5, 4, 2, 2, 2) only | 44 | 2.161 / 0.671 | 3241 / 1554 meV |
+| env (5, 6, 2, 4, 2) only | 108 | 1.923 / 0.545 | 2517 / 1498 meV |
+| env (4, 6, 4, 4, 4) only | 252 | 0.059 / 0.225 | 284 / 428 meV |
+| env (6, 6, 4, 4, 4) only | 252 | 0.110 / 0.187 | 210 / 252 meV |
+| site (2, 2) + env (5, 6, 4, 4, 4) | 540 | 0.039 / 0.083 | 139 / 145 meV |
+| site (4, 4) + env (5, 3, 2, 2, 2) | 996 | 0.158 / 0.195 | 1021 / 326 meV |
+| site (4, 4) + env (5, 6, 4, 4, 4) | 1212 | 0.021 / 0.107 | 82 / 98 meV |
+
+- **The bond environment alone meets the target** with 252 columns (0.063 / 0.194 eV), where the site group alone, with 652, does not.
+- **It needs harmonics to l = 4** in both the environment and the bond (the d shells): cutting either to l = 2 fails by a wide margin. The number of radial functions matters less (4 environment and 2 bond radials are just inside the target).
+- The cutoff around each end is not sensitive between 4 and 6 Å.
+- **The site group still helps beside it**: adding the small one (2, 2) roughly halves both errors (0.039 / 0.083 eV), and it is nearly free at inference. That combination is the best trade found.
+
+**Cost** (`offsite_time_deeph.py … env=`; the 108-atom SiC input of the MACE-H comparison, 158 bonds per atom, H only; compiled predictor, which equals the reference predictor to 1e-10 with the group on):
+
+| per atom | CPU, 1 thread, float64 | GPU (RTX 4000 Ada), float32, end to end |
+|---|---|---|
+| MACE-H | 62.7 ms | 3.7 ms |
+| site (2, 2) only (misses the target on BCC) | 10.6 ms | 1.05–1.63 ms |
+| env (5, 6, 4, 4, 4) only | 42.0 ms | 0.85 ms |
+| site (2, 2) + env (5, 6, 4, 4, 4) | 44.8 ms | 0.88 ms |
+| site (4, 4) + env (5, 6, 4, 4, 4) | 60.5 ms | 0.92 ms |
+
+- **On the GPU the accurate model costs nothing extra**: 0.85–0.92 ms per atom, about four times faster than MACE-H, including the copy of the blocks to the host.
+- **On one CPU thread the bond environment costs about 34 ms per atom**, four times the rest of the model, and brings the total to 42–60 ms, close to MACE-H's 62.7 ms. The cost is the harmonics and radials of every (bond, environment atom) pair about the bond midpoint: about 9,500 pairs per atom here. This is the pooling per bond that the shared-feature design set out to avoid, and it is where CPU work would have to go (an expansion about each atom translated to the midpoint, or fewer environment atoms per bond).
+- Not accuracy-matched with MACE-H (untrained there), and the accuracy numbers are for aluminium while the timings are for the SiC input; the feature sizes are the same.

@@ -33,7 +33,8 @@ def best(f, reps=3):
     return min(ts)
 
 
-a = sys.argv[1:]
+ENV = next((tuple(float(v) for v in x[4:].split(",")) for x in sys.argv[1:] if x.startswith("env=")), None)
+a = [x for x in sys.argv[1:] if not x.startswith("env=")]
 d = deeph.read(a[0], operators=())
 rcut, nsite, n_bond, n_cpl, l_cpl = float(a[1]), int(a[2]), int(a[3]), int(a[4]), int(a[5])
 channels = tuple(a[6].split(",")) if len(a) > 6 else ("H",)
@@ -43,6 +44,8 @@ site = build_site_basis(elements, order=1, totaldegree=40, lmax_feat=lf, rcut=rc
                         nmax_by_order=(nsite,), lmax_by_order=(lf,))
 site = dataclasses.replace(site, carrier=with_radial_table(site.carrier, True)[0])
 basis = B.BondBasis(site=site, rcut_bond=rcut, n_bond=n_bond, n_cpl=n_cpl, l_cpl=l_cpl)
+if ENV:                                              # env=<r_env>,<n_env>,<l_env>,<n_ebond>,<l_ebond>: the bond-environment group
+    basis = basis._replace(r_env=ENV[0], n_env=int(ENV[1]), l_env=int(ENV[2]), n_ebond=int(ENV[3]), l_ebond=int(ENV[4]))
 rng = np.random.default_rng(0)
 nc = len(channels)
 on = {(z, s1, s2, L): rng.normal(size=(nc, site.n(L, p) + (L == 0)))
@@ -55,8 +58,9 @@ for zi in elements:
             p = 1 if (l1 + l2) % 2 == 0 else -1
             for L in cg.Ls(l1, l2):
                 k0, k1 = B.n_features(basis, L, p)
-                if k0 + k1:
-                    off[(zi, zj, s1, s2, L)] = rng.normal(size=(nc, k0 + (k1 if same else 2 * k1)))
+                k = k0 + (k1 if same else 2 * k1) + B.n_env_features(basis, L, p, same=same)
+                if k:
+                    off[(zi, zj, s1, s2, L)] = rng.normal(size=(nc, k))
 f_on = OnsitePredictor(OnsiteModel(basis=site, coef=on, orbitals=orb, channels=channels))
 f_off = OffsitePredictor(OffsiteModel(bond=basis, coef=off, orbitals=orb, channels=channels))
 N = len(d.numbers)
@@ -68,5 +72,5 @@ ncoef = sum(np.asarray(c).size for c in off.values()) + sum(np.asarray(c).size f
 dev = jax.devices()[0]
 print(f"ace-jax full {'+'.join(channels)}, {dev.platform} {'float64' if X64 else 'float32'}, threads {len(os.sched_getaffinity(0))}: "
       f"{N} atoms, {len(g.i) / N:.0f} bonds per atom within {rcut}; site radials {nsite}, n_bond {n_bond}, n_cpl {n_cpl}, "
-      f"l_cpl {l_cpl}; {ncoef} coefficients; off-site {1e3 * t_off:.1f} ms, on-site {1e3 * t_on:.1f} ms per structure; "
+      f"l_cpl {l_cpl}, env {ENV}; {ncoef} coefficients; off-site {1e3 * t_off:.1f} ms, on-site {1e3 * t_on:.1f} ms per structure; "
       f"{1e6 * (t_on + t_off) / N:.0f} us per atom, {1e6 * (t_on + t_off) / n_blocks:.1f} us per block")
