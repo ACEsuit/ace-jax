@@ -84,7 +84,7 @@ def row_rounding_check(cfg, d, b, obj, mf, eps=ROW_EPS, seed=0, log=print):
     else {"eps", "verdict", "max_rmse_change", "dtheta",
     "quantities": {q: rmse_change, change_over_rmse, change_over_posterior_std}}; warns when unstable."""
     from ..hypers import from_array, log_prior, to_array
-    from ..linear.objective import hoist, jit_lik, log_marginal_likelihood_qr, posterior_from_qr
+    from ..objective import hoist, jit_lik, log_marginal_likelihood_qr, posterior_from_qr
     from ..paramset import tied_likelihood
     from .mapfit import fit_map
     from .objective import Objective

@@ -12,11 +12,11 @@ import jax.numpy as jnp
 
 from ace_jax.eval import highest_precision
 from ace_jax.fit.hypers import Hypers
-from ace_jax.fit.linear.objective import posterior
+from ace_jax.fit.objective import posterior
 from ace_jax.uq.pops import _fit_hypercube_cov
 from ace_jax.fit.gp.predict import PopsRidgePath, predict_fixed, select_pops_ridge
 from ace_jax.fit.rows import linear_rows
-from ace_jax.fit.linear.stats import sufficient_statistics
+from ace_jax.fit.stats import sufficient_statistics
 
 # sigma_q deliberately far from 1 and unequal: the loss weights must be 1/sigma_q
 THETA = Hypers(log_ell=0.0, log_A=0.0, log_alpha=0.0, log_r0=np.log(2.35), log_eps=0.0,
@@ -231,7 +231,7 @@ def test_predict_reuses_a_prebuilt_path_and_its_posteriors(tiny_linear_problem, 
         ref = predict_fixed(THETA, prob, ds, ds, uq="pops", pops_ridge={"E": 1e-2, "F": 1e-4, "V": 1e-4})
         path = PopsRidgePath(THETA, prob, ds)
         calls = []                                            # one streamed moment pass per posterior built
-        import ace_jax.fit.linear.stats as S                         # DeviceRows calls it there
+        import ace_jax.fit.stats as S                         # DeviceRows calls it there
         real = S.pops_moment_sums
         monkeypatch.setattr(S, "pops_moment_sums", lambda *a, **k: calls.append(1) or real(*a, **k))
         monkeypatch.setattr(PopsRidgePath, "__init__",
@@ -261,7 +261,7 @@ def test_ridge_selection_compiles_the_predictor_once(tiny_linear_problem, monkey
 # --- host-cached rows: one ACE pass, every POPS pass streams the cache -------------
 
 def _host(prob, ds, block=7):
-    from ace_jax.fit.linear.stats import HostRows
+    from ace_jax.fit.stats import HostRows
     qs = PopsRidgePath(THETA, prob, ds).qs
     return HostRows(prob.model, prob.cfg, ds, qs, block=block)     # 7: many blocks + a padded tail
 
@@ -320,7 +320,7 @@ def test_blr_mean_is_accurate_not_the_eigh_formula():
     from ace_jax.fit.pipeline.mapfit import fit_map
     from ace_jax.fit.pipeline.objective import make_objective
     from ace_jax.fit.pipeline.problem import build_problem
-    from ace_jax.fit.linear.solve import solve_qr
+    from ace_jax.fit.solve import solve_qr
     cfg = FitConfig(model=str(FIXTURE_DIR / "si_fitted.npz"), energy_key="dft_energy", force_key="dft_force",
                     virial_key="dft_virial", ntrain=16, ntest=6, batch=4, r0=2.35, arm="linear",
                     opt="lbfgs", rungs=("map",), map_steps=5, e0="prefit",   # POPS: E0 fixed
@@ -343,7 +343,7 @@ def test_mean_falls_back_to_the_streamed_qr_when_the_cholesky_fails(tiny_linear_
     """A near-interpolating evidence fit (sigma_c on its bound, lam_blr ~ 1e-20 of max Lambda on silicon o3d12)
     makes the ridge system's Cholesky NaN; c* must then come from the streamed QR, not be NaN."""
     import jax.scipy.linalg as jsl
-    from ace_jax.fit.linear.solve import solve_qr
+    from ace_jax.fit.solve import solve_qr
     prob, ds = tiny_linear_problem
     with highest_precision():
         ref = np.asarray(PopsRidgePath(THETA, prob, ds).c_star_at("blr"))

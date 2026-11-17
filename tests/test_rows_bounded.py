@@ -69,7 +69,7 @@ def test_linear_rows_bounded_equals_unchunked(packed, monkeypatch):
 
 
 def test_linear_statistics_chunked_equal(packed, monkeypatch):
-    from ace_jax.fit.linear.stats import linear_statistics
+    from ace_jax.fit.stats import linear_statistics
     model, g, ds = packed
     ref = jax.jit(lambda: linear_statistics(model, g, ds))()
     _force_chunk(monkeypatch, model, g, ds, nodes=96)
@@ -95,7 +95,7 @@ def hybrid():
     from ace_jax.fit.hypers import Hypers, default_prior
     from ace_jax.fit.gp.inducing import GPConfig, descriptor_scale, select_inducing, site_features
     from ace_jax.fit.gp.kernels import KernelSpec
-    from ace_jax.fit.linear.objective import Problem
+    from ace_jax.fit.objective import Problem
     model, meta, z = load(FIXTURE_DIR / "si_fitted.npz")
     cfgs = load_configs(XYZ, "dft_energy", "dft_force", "dft_virial")
     cfgs = [c for c in cfgs if len(c.numbers) == 64][:1] + cfgs[:5]
@@ -115,7 +115,7 @@ def hybrid():
 
 def _hybrid_stats_and_grad(prob, ds, theta):
     from ace_jax.fit.hypers import from_array, to_array
-    from ace_jax.fit.linear.stats import sufficient_statistics
+    from ace_jax.fit.stats import sufficient_statistics
     probe = jax.random.normal(jax.random.PRNGKey(0), (prob.cfg.len_basis + prob.ind.XM.shape[0],))
 
     def f(a):
@@ -147,9 +147,9 @@ def test_hybrid_statistics_and_gradient_chunked_equal(hybrid, hybrid_unchunked, 
 
 def test_predict_batch_chunked_equal(hybrid, monkeypatch):
     """The predictive rows path (rows + residual + energy and derivative DTC) chunked."""
-    from ace_jax.fit.linear.objective import posterior
+    from ace_jax.fit.objective import posterior
     from ace_jax.fit.gp.predict import _predict_batch
-    from ace_jax.fit.linear.stats import sufficient_statistics
+    from ace_jax.fit.stats import sufficient_statistics
     prob, ds, theta = hybrid
     st = sufficient_statistics(theta, prob.spec, prob.model, prob.ind, prob.cfg, ds)
     mu, L = posterior(theta, st, prob)
@@ -179,7 +179,7 @@ def test_statistics_memory_shape_bounded(packed, monkeypatch):
     when n_cap doubles (only the (Ncap, 3, L) rows do, negligible at this L), while the unchunked
     trace holds the whole-batch edge Jacobian Ncap*K*D -- the check is live."""
     from ace_jax.fit import rows
-    from ace_jax.fit.linear.stats import linear_statistics
+    from ace_jax.fit.stats import linear_statistics
     model, g, ds = packed
     Ncap, K = 3296, 928
     peak = lambda n: rows._max_elems(
@@ -242,7 +242,7 @@ def test_hybrid_theta_gradient_memory_bounded(hybrid, monkeypatch):
     every chunk's residuals made it Ncap*K*d*3."""
     from ace_jax.fit import rows
     from ace_jax.fit.hypers import from_array, to_array
-    from ace_jax.fit.linear.stats import sufficient_statistics
+    from ace_jax.fit.stats import sufficient_statistics
     prob, ds, theta = hybrid
     g, K = prob.cfg, ds.nbr.shape[2]
     monkeypatch.setattr(rows, "ROWS_EDGE_BUDGET", g.node_chunk * rows._node_elems(prob.model, g, K))

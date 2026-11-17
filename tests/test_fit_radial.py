@@ -35,8 +35,8 @@ def test_holdout_score_energy_only_split(small):
     from ace_jax.fit.radial.learn import holdout_score
     prob, ds_fit, _ = small
     _, ds_val, _ = make_problem(ncfg=6, start=6, force_key=None)            # no force labels
-    from ace_jax.fit.linear.objective import posterior_from_qr
-    from ace_jax.fit.linear.stats import linear_qr_statistics, linear_statistics
+    from ace_jax.fit.objective import posterior_from_qr
+    from ace_jax.fit.stats import linear_qr_statistics, linear_statistics
     a = to_array(THETA)
     W = prob.model.rnl_Wnlq
     s = holdout_score(W, a, a, prob, ds_fit, ds_val)
@@ -53,9 +53,9 @@ def test_holdout_score_weights_quantities_as_the_objective():
     validation configs: forces count by their rows, not as one per-row mean that each energy row
     outweighs ~100x (the Si GAP-18 gate kept init radials that lowered the validation force error)."""
     from ace_jax.fit.hypers import from_array, to_array
-    from ace_jax.fit.linear.objective import posterior_from_qr
+    from ace_jax.fit.objective import posterior_from_qr
     from ace_jax.fit.radial.learn import holdout_score
-    from ace_jax.fit.linear.stats import linear_qr_statistics, linear_statistics
+    from ace_jax.fit.stats import linear_qr_statistics, linear_statistics
     prob, ds_fit, _ = make_problem(ncfg=6)
     _, ds_val, _ = make_problem(ncfg=6, start=6)
     a = to_array(THETA)

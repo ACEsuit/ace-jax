@@ -15,7 +15,7 @@ from ace_jax.fit.hypers import Hypers, from_array, to_array
 from ace_jax.fit.gp.inducing import GPConfig, descriptor_scale, select_inducing, site_features
 from ace_jax.fit.gp.kernels import KernelSpec
 from ace_jax.fit.rows import batch_rows
-from ace_jax.fit.linear.stats import sufficient_statistics
+from ace_jax.fit.stats import sufficient_statistics
 
 XYZ = FIXTURE_DIR / "si_tiny_train.xyz"
 pytestmark = pytest.mark.skipif(not XYZ.exists(), reason="missing si_tiny_train.xyz")
@@ -93,7 +93,7 @@ def test_streamed_gradient_equals_dense_gradient(setup):
 def test_theta_split_equals_full(setup):
     """assemble(linear, residual(theta)) == sufficient_statistics(theta), value
     and theta-gradient, to f64 roundoff."""
-    from ace_jax.fit.linear.stats import (assemble_statistics, linear_statistics,
+    from ace_jax.fit.stats import (assemble_statistics, linear_statistics,
                              residual_statistics)
     model, ds, cfg, ind, spec = setup
     with highest_precision():
@@ -125,10 +125,10 @@ def test_streamed_pops_equals_monolithic(tiny_linear_problem):
     in one go (streaming == monolithic), for leverage_pct 0 and a top-fraction."""
     from jax.scipy.linalg import cho_solve
 
-    from ace_jax.fit.linear.objective import posterior
+    from ace_jax.fit.objective import posterior
     from ace_jax.uq.pops import pops_corrections, whiten
     from ace_jax.fit.rows import linear_rows
-    from ace_jax.fit.linear.stats import pops_statistics
+    from ace_jax.fit.stats import pops_statistics
 
     prob, ds = tiny_linear_problem
     assert ds.n_batches == 2                        # 6 configs / 3 per batch

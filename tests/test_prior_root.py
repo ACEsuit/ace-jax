@@ -4,7 +4,8 @@ import jax.numpy as jnp  # noqa: E402
 import numpy as np  # noqa: E402
 import pytest  # noqa: E402
 
-from ace_jax.fit.linear.prior_root import PriorRoot, prior_root  # noqa: E402
+from ace_jax.fit.ard import prior_root  # noqa: E402
+from ace_jax.fit.linear.prior_root import PriorRoot  # noqa: E402
 
 
 def _dense(root):
@@ -56,7 +57,7 @@ def test_prior_root_diag_is_todays_dinv_bitwise():
 
 
 def test_prior_root_from_problem(tiny_gp_problem):
-    from ace_jax.uq.ard import ard_gamma
+    from ace_jax.fit.ard import ard_gamma
     from ace_jax.fit.gp.kernels import K_MM
     prob, _, theta = tiny_gp_problem
     root = prior_root(prob, theta)

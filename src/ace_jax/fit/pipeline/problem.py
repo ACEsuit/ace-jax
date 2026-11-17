@@ -26,7 +26,7 @@ def _e0_prec(d, els):
     from .data import _isolated
     iso = {int(c.numbers[0]) for c in d.train if _isolated(c, float(d.meta["rcut"]))}
     return jnp.asarray([(E0_PINNED_STD if e in iso else E0_PRIOR_STD) ** -2.0 for e in els])
-from ..linear.objective import Problem
+from ..objective import Problem
 
 
 class Built(NamedTuple):

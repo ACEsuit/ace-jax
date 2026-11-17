@@ -23,7 +23,7 @@ def pointwise_corrections(Sigma0, phi_t, r_t):
 
     This is the jit-safe core of :func:`pops_corrections`: it contains no
     boolean masking, so it can run inside a ``jax.lax.scan`` body (Task 9's
-    streamed :func:`ace_jax.fit.linear.stats.pops_statistics`).  The correction for
+    streamed :func:`ace_jax.fit.stats.pops_statistics`).  The correction for
     training point ``i`` is the minimum-norm Newton step (under the ``A``
     metric) that makes the model fit point ``i`` exactly,
     ``phi_i . (c + delta_i) = y_i``::

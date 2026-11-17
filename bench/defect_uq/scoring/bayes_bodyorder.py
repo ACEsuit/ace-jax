@@ -39,7 +39,7 @@ from ace_jax.fit.gp.inducing import site_features                            # n
 from ace_jax.fit.pipeline import FitConfig, load_fit_data                 # noqa: E402
 from ace_jax.fit.pipeline.problem import build_problem                    # noqa: E402
 from ace_jax.fit.rows import chunked_rows_fn                              # noqa: E402
-from ace_jax.fit.linear.stats import sufficient_statistics                       # noqa: E402
+from ace_jax.fit.stats import sufficient_statistics                       # noqa: E402
 
 data, theta_path, out_path = sys.argv[1], sys.argv[2], sys.argv[3]
 T0 = time.time()

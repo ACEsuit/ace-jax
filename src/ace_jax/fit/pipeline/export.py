@@ -172,7 +172,7 @@ def load_gp_model(path):
     from ...eval import load
     from ..gp.inducing import GPConfig, Inducing
     from ..gp.kernels import KernelSpec
-    from ..linear.objective import Problem
+    from ..objective import Problem
     z = np.load(path)
     info = json.loads(bytes(z["gp_json"]).decode())
     if info["schema_version"] != GP_SCHEMA:

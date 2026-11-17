@@ -12,7 +12,7 @@ from typing import NamedTuple  # noqa: E402
 import numpy as np  # noqa: E402
 import pytest  # noqa: E402
 
-from ace_jax.fit.linear import stats  # noqa: E402
+from ace_jax.fit import stats  # noqa: E402
 
 
 class _DS(NamedTuple):

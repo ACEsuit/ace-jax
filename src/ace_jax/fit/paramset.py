@@ -64,7 +64,7 @@ def tied_likelihood(lik):
     """lik(tie_noise(a)): the shared-noise likelihood over the full 10-vector.  Attributes that
     callers read from a likelihood (qr_stats, lin_stats, and a host cache's value_and_grad) carry over."""
     if hasattr(lik, "pure"):                  # keep the statistics hoistable (objective.hoist)
-        from .linear.objective import hoist
+        from .objective import hoist
         pure = lik.pure
         f = hoist(lambda a, c: pure(tie_noise(a), c), lik.consts)
     else:

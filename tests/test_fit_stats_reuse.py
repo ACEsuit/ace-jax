@@ -29,7 +29,7 @@ class Passes:
     def __init__(self, monkeypatch):
         import ace_jax.fit.pipeline.objective as pobj
         import ace_jax.fit.gp.predict as pred
-        import ace_jax.fit.linear.stats as st
+        import ace_jax.fit.stats as st
         self.calls, self.ds = [], None
         for mod, name in ((st, "linear_qr_statistics"), (st, "linear_statistics"), (pobj, "linear_statistics"),
                           (st, "sufficient_statistics"), (pred, "sufficient_statistics")):

@@ -275,7 +275,7 @@ class ACECalculator(Calculator):
         self.forces_std_every_call = bool(forces_std_every_call)
         if posterior is not None:
             from ..eval import load as _load_fit_model
-            from ..uq.ard import ARDPosterior
+            from ..fit.ard import ARDPosterior
             from ..fit.gp.inducing import GPConfig
             if not isinstance(model_path, (str, bytes)) and not hasattr(model_path, "__fspath__"):
                 raise ValueError("posterior= needs the model FILE path (the design rows use the fit model)")
@@ -318,7 +318,7 @@ class ACECalculator(Calculator):
             if shape_path not in ("rows", "committee"):
                 raise ValueError(f"shape_path must be 'rows' or 'committee', got {shape_path!r}")
             if post.R is not None:
-                from ..uq.jackknife import truncate_shape_factor
+                from ..fit.jackknife import truncate_shape_factor
                 if not 0.0 < float(shape_tau) <= 1.0:
                     raise ValueError(f"shape_tau must be in (0, 1], got {shape_tau!r}")
                 R = truncate_shape_factor(post.R, float(shape_tau))
@@ -339,7 +339,7 @@ class ACECalculator(Calculator):
             self._fit_cfg = GPConfig(r0=1.0, rcut=float(meta["rcut"]), n_B=meta["n_B"],
                                      n_pair=meta["n_pair"], NZ=NZ, C=1)
             if shape_path == "committee":                   # C = D^-1 R per species block, on the device once
-                from ..uq.jackknife import committee_coefs
+                from ..fit.jackknife import committee_coefs
                 self._committee = committee_coefs(post.R, post.dinv, self._fit_cfg)
 
     @property
@@ -701,7 +701,7 @@ class ACECalculator(Calculator):
         Calibrated ARD std (lam x the shape, or kappa x the posterior std for --ard-variance kappa /
         schema 1) from node-chunked design rows of the full fit model."""
 
-        from ..uq.ard import _NEED3
+        from ..fit.ard import _NEED3
         from ..fit.rows import chunked_rows_fn
         post = self.posterior
         which = set(which)
@@ -729,7 +729,7 @@ class ACECalculator(Calculator):
                 and b.nbr.shape[1] > 0):
             import jax.numpy as jnp
 
-            from ..uq.jackknife import committee_forces
+            from ..fit.jackknife import committee_forces
             with highest_precision():
                 P = committee_forces(self._fit_model, self._fit_cfg, b, *self._committee)
                 V = np.asarray(jnp.einsum("nar,nbr->nab", P, P))[np.asarray(live)]

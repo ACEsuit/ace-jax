@@ -76,16 +76,3 @@ class PriorRoot(NamedTuple):
         if self.M == 0:
             return d[:, None] * Mx * d[None, :]
         return self.rows(self.dual(Mx))
-
-
-def prior_root(prob, theta):
-    """The ARD prior root of prob at theta: Gamma (ard_gamma) on the linear columns, chol(K_MM(theta))^T on
-    the M inducing columns (None when M = 0)."""
-    from ...uq.ard import ard_gamma
-    from ..gp.kernels import K_MM
-    dinv = 1.0 / ard_gamma(prob)
-    if prob.ind.XM.shape[0] == 0:
-        return PriorRoot.diag(dinv)
-    ind = prob.ind
-    K = K_MM(theta, prob.spec, ind.XM, ind.SM, ind.ZM, ind.embed)
-    return PriorRoot(dinv, jnp.linalg.cholesky(K).T)

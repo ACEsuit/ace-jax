@@ -37,18 +37,6 @@ LAYERS = [
 
 # (importer, imported): the step of the spec's order of work that removes the edge.
 ALLOWED = {
-    # the linear fit knows the E/F/V rows, the kernel and the hyperparameter vector
-    ("fit.linear.stats", "fit.rows"): 4, ("fit.linear.stats", "uq.pops"): 4, ("fit.linear.stats", "eval.api"): 4,
-    ("fit.linear.objective", "fit.hypers"): 4, ("fit.linear.objective", "fit.gp.kernels"): 4,
-    ("fit.linear.objective", "uq.loo"): 4,
-    ("fit.linear.hostcache", "fit.hypers"): 4, ("fit.linear.hostcache", "fit.rows"): 4,
-    ("fit.linear.solve", "fit.gp.kernels"): 4, ("fit.linear.solve", "fit.rows"): 4,
-    ("fit.linear.prior_root", "uq.ard"): 4, ("fit.linear.prior_root", "fit.gp.kernels"): 4,
-    ("fit.linear.block_lbfgs", "fit.radial.learn"): 4,
-    # UQ is written against energies and forces
-    ("uq.ard", "fit.data"): 4, ("uq.ard", "fit.hypers"): 4, ("uq.ard", "fit.gp.inducing"): 4,
-    ("uq.ard", "fit.gp.predict"): 4, ("uq.ard", "fit.rows"): 4,
-    ("uq.jackknife", "fit.rows"): 4, ("uq.loo", "fit.rows"): 4,
 }
 
 
@@ -137,6 +125,34 @@ def test_no_upward_imports():
     assert not new, "imports of a lower layer (spec section 1):\n" + "\n".join(f"  {a} -> {b}" for a, b in new)
     fixed = sorted(set(ALLOWED) - bad)
     assert not fixed, f"edges that no longer exist: remove them from ALLOWED: {fixed}"
+
+
+def _from_target(node, mod, pkg):
+    """The dotted ace_jax module a `from ... import` names (None: not an ace_jax import)."""
+    if node.level:
+        base = mod.split(".") if mod else []
+        base = (base if pkg else base[:-1])
+        base = base[:len(base) - (node.level - 1)]
+        return ".".join(base + (node.module.split(".") if node.module else []))
+    if node.module and (node.module == "ace_jax" or node.module.startswith("ace_jax.")):
+        return node.module[8:]
+    return None
+
+
+def test_internal_imports_resolve():
+    """Every `from <ace_jax module> import name` in `src`, inside functions too, names a module that
+    exists and a name it defines: a lazy import of a moved name fails here, not at its first call."""
+    bad = []
+    for mod, (p, pkg) in ALL.items():
+        for n in ast.walk(ast.parse(p.read_text())):
+            if not isinstance(n, ast.ImportFrom) or (tgt := _from_target(n, mod, pkg)) is None:
+                continue
+            if tgt not in MODS:
+                bad.append(f"{mod}:{n.lineno}: no module ace_jax.{tgt}")
+                continue
+            bad += [f"{mod}:{n.lineno}: no {a.name!r} in ace_jax.{tgt}" for a in n.names
+                    if a.name != "*" and not _has(tgt, a.name)]
+    assert not bad, "\n".join(bad)
 
 
 def test_eval_imports_no_other_package():

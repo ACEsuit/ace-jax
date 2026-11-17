@@ -20,7 +20,7 @@ problem (docs/dev/learn-radial-density-results.md, "Optimiser"):
   one block at a time (alternating), instead of ending the run; the next round tries
   joint again.  mode="alternating" uses blocks throughout.
 
-The scales are traced, so the whole run goes through radial_learn's single compiled
+The scales are traced, so the whole run goes through `lbfgs`'s single compiled
 `_lbfgs_step` (one compile per block kind).  `f` and `statics` must be hashable
 (e.g. a module-level function and a tuple of configs).
 """
@@ -31,7 +31,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from ..radial import learn as radial_learn
+from . import lbfgs
 
 R_MIN = 0.1
 MODES = ("joint", "alternating")
@@ -155,7 +155,7 @@ def block_lbfgs(f, blocks, *, steps, round_steps=10, mode="joint", args=(), stat
             if nb == 0:
                 continue
             xb, other = pack(blocks, rj, sel)
-            xb, obj, trace, reason = radial_learn.lbfgs_loop(
+            xb, obj, trace, reason = lbfgs.lbfgs_loop(
                 _packed, xb, steps=nb, tol=tol, patience=patience, args=(other, rj, args),
                 statics=(f, sel, shapes, tuple(statics)))
             blocks = unpack(xb, other, rj, sel, shapes)

@@ -51,7 +51,7 @@ def test_stage_matches_fit_radial_on_the_same_split(fast):
     from ace_jax.fit.hypers import default_prior
     from ace_jax.fit.gp.inducing import GPConfig, descriptor_scale, select_inducing, site_features
     from ace_jax.fit.gp.kernels import KernelSpec
-    from ace_jax.fit.linear.objective import Problem
+    from ace_jax.fit.objective import Problem
     from ace_jax.fit.pipeline.radials import learn_radials
     from ace_jax.fit.radial.learn import fit_radial
     from ace_jax.fit.radial.model import rnl_degrees, to_analytic

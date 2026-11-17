@@ -80,7 +80,7 @@ def test_alternating_mode_splits_each_round():
 
 
 def test_joint_linesearch_failure_falls_back_to_alternating(monkeypatch):
-    real, calls = bl.radial_learn.lbfgs_loop, []
+    real, calls = bl.lbfgs.lbfgs_loop, []
 
     def fake(f, x0, *, steps, statics, **kw):
         calls.append((statics[1], steps))
@@ -89,7 +89,7 @@ def test_joint_linesearch_failure_falls_back_to_alternating(monkeypatch):
             return x, fx, trace, "linesearch"
         return real(f, x0, steps=steps, statics=statics, **kw)
 
-    monkeypatch.setattr(bl.radial_learn, "lbfgs_loop", fake)
+    monkeypatch.setattr(bl.lbfgs, "lbfgs_loop", fake)
     _, info = bl.block_lbfgs(quad, _blocks(), steps=12, round_steps=6, args=(1.0, 1e3, 0.1), tol=0.0)
     assert calls == [(None, 6), (0, 2), (1, 2)] * 2                # 6 - 1 accepted - 1 failed = 4 left
     assert info["fallbacks"] == 2 and info["steps"] == 12

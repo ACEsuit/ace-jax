@@ -142,7 +142,7 @@ def tiny_linear_problem():
     from ace_jax.fit.gp.inducing import (GPConfig, descriptor_scale, select_inducing,
                                        site_features)
     from ace_jax.fit.gp.kernels import KernelSpec
-    from ace_jax.fit.linear.objective import Problem
+    from ace_jax.fit.objective import Problem
 
     xyz = FIXTURE_DIR / "si_tiny_train.xyz"
     design = FIXTURE_DIR / "si_tiny_design.npz"
@@ -176,7 +176,7 @@ def tiny_gp_problem():
     from ace_jax.fit.hypers import default_prior
     from ace_jax.fit.gp.inducing import GPConfig, descriptor_scale, select_inducing, site_features
     from ace_jax.fit.gp.kernels import KernelSpec
-    from ace_jax.fit.linear.objective import Problem
+    from ace_jax.fit.objective import Problem
 
     xyz, fitted = FIXTURE_DIR / "si_tiny_train.xyz", FIXTURE_DIR / "si_fitted.npz"
     if not (xyz.exists() and fitted.exists()):
@@ -256,7 +256,7 @@ def ard_setup(tiny_linear_problem):
     """(prob, ds, ev, h, post): the joint ARD evidence of the tiny problem and its posterior at h0."""
     import numpy as np
     from ace_jax.eval import highest_precision
-    from ace_jax.uq.ard import ARDEvidence, ard_posterior, ard_statistics, body_order_columns
+    from ace_jax.fit.ard import ARDEvidence, ard_posterior, ard_statistics, body_order_columns
     from ace_jax.fit.hypers import default_prior
     prob, ds = tiny_linear_problem
     theta = default_prior(2.35).mu
@@ -290,7 +290,7 @@ def two_type_synthetic():
     from ace_jax.fit.gp.inducing import (GPConfig, descriptor_scale, select_inducing,
                                        site_features)
     from ace_jax.fit.gp.kernels import KernelSpec
-    from ace_jax.fit.linear.objective import Problem
+    from ace_jax.fit.objective import Problem
 
     xyz = FIXTURE_DIR / "si_tiny_train.xyz"
     fitted = FIXTURE_DIR / "si_fitted.npz"

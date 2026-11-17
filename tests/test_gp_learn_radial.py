@@ -12,7 +12,7 @@ from ace_jax.fit.data import build_dataset, load_configs  # noqa: E402
 from ace_jax.fit.hypers import default_prior  # noqa: E402
 from ace_jax.fit.gp.inducing import GPConfig, descriptor_scale, select_inducing, site_features  # noqa: E402
 from ace_jax.fit.gp.kernels import KernelSpec  # noqa: E402
-from ace_jax.fit.linear.objective import Problem  # noqa: E402
+from ace_jax.fit.objective import Problem  # noqa: E402
 from conftest import FIXTURE_DIR  # noqa: E402
 from radial_learn_problem import (HAVE_FIXTURES, MODEL, THETA, XYZ, make_problem,  # noqa: E402
                                   perturbed_truth, relabel)
@@ -28,7 +28,7 @@ def small():
 def _in_memory_residual(W, prob, ds, theta):
     """min_c ||Phi~ c - y~||^2 on the materialised prior-augmented design."""
     from ace_jax.fit.radial.model import with_radial
-    from ace_jax.fit.linear.solve import stacked_design
+    from ace_jax.fit.solve import stacked_design
     Phi, y = stacked_design(prob._replace(model=with_radial(prob.model, W)), ds, theta)
     # jnp.linalg.lstsq has no custom VJP: its gradient is plain autodiff through
     # svd, whose singular-VECTOR gradient is NaN on this degenerate ACE design
@@ -338,7 +338,7 @@ def _in_memory_residual_direct(W, prob, ds, theta):
     """The dense reference summed directly, ||y - Phi~ c||^2 at the QR least-squares c (Phi~ holds
     the prior rows): y.y - v.v cancels where the fit nearly interpolates."""
     from ace_jax.fit.radial.model import with_radial
-    from ace_jax.fit.linear.solve import stacked_design
+    from ace_jax.fit.solve import stacked_design
     Phi, y = stacked_design(prob._replace(model=with_radial(prob.model, W)), ds, theta)
     Qm, Rm = np.linalg.qr(np.asarray(Phi))
     c = np.linalg.solve(Rm, Qm.T @ np.asarray(y))
@@ -347,10 +347,10 @@ def _in_memory_residual_direct(W, prob, ds, theta):
 
 
 def _residual_parity(prob, ds, W):
-    from ace_jax.fit.linear.objective import posterior_from_qr
+    from ace_jax.fit.objective import posterior_from_qr
     from ace_jax.fit.radial.learn import _batch_residuals_rows, residual_sums
     from ace_jax.fit.radial.model import with_radial
-    from ace_jax.fit.linear.stats import linear_qr_statistics
+    from ace_jax.fit.stats import linear_qr_statistics
     c = posterior_from_qr(THETA, linear_qr_statistics(with_radial(prob.model, W), prob.cfg, ds), prob)[0]
     out = []
     for bf in (None, _batch_residuals_rows):
@@ -453,7 +453,7 @@ def test_residual_gradient_memory_does_not_scale_with_batches():
 def _reduced(prob, ds, theta):
     """fg and hvp as learn_radial builds them for one round (lam = spec = gap = 0)."""
     from ace_jax.fit.hypers import to_array
-    from ace_jax.fit.linear.objective import posterior_from_qr
+    from ace_jax.fit.objective import posterior_from_qr
     from ace_jax.fit.radial.learn import _prior, _vp_hvp, _vp_value_and_grad, qr_readout
     from ace_jax.fit.radial.model import normalise, radial_gram, roughness_matrix, row_active, with_radial
     W0 = prob.model.rnl_Wnlq

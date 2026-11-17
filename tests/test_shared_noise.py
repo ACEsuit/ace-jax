@@ -188,7 +188,7 @@ def test_shared_posterior_mean_is_the_blr_ridge_solve(shared40):
     with lambda = sigma^2 / sigma_c^2 -- the BLR identity (ACEfit: ridge on W A / P)."""
     from ace_jax.eval import highest_precision
     from ace_jax.fit.gp.predict import fit_posterior
-    from ace_jax.fit.linear.solve import stacked_design
+    from ace_jax.fit.solve import stacked_design
     cfg, d, b, obj, mf = shared40
     assert getattr(b.prob, "e0_prec", None) is None               # e0 'model': no fixed-precision E0 columns
     with highest_precision():

@@ -13,7 +13,7 @@ import numpy as np
 from ..hypers import Hypers, from_array, log_prior, to_array
 from ..gp.ladder import run_map
 from ..linear.multistart import lbfgs_map, multistart_map, prior_starts
-from ..linear.objective import hoist, jit_lik
+from ..objective import hoist, jit_lik
 from ..linear.newton import _newton_step, newton_polish
 from ..paramset import SHARED_NOISE, tie_noise
 from ..linear.progress import emit

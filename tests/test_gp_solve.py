@@ -15,9 +15,9 @@ from ace_jax.fit.data import build_dataset, load_configs
 from ace_jax.fit.hypers import Hypers, default_prior
 from ace_jax.fit.gp.inducing import GPConfig, descriptor_scale, select_inducing, site_features
 from ace_jax.fit.gp.kernels import KernelSpec
-from ace_jax.fit.linear.objective import Problem, posterior, combine, prior_precision
-from ace_jax.fit.linear.stats import sufficient_statistics
-from ace_jax.fit.linear.solve import solve_qr, solve_qr_streaming, lsqr, stacked_design, streamed_operators
+from ace_jax.fit.objective import Problem, posterior, combine, prior_precision
+from ace_jax.fit.stats import sufficient_statistics
+from ace_jax.fit.solve import solve_qr, solve_qr_streaming, lsqr, stacked_design, streamed_operators
 
 XYZ = FIXTURE_DIR / "si_tiny_train.xyz"
 DESIGN = FIXTURE_DIR / "si_tiny_design.npz"
@@ -211,7 +211,7 @@ STIFF = dict(log_sigma_c=np.log(1e4), log_sigma_E=np.log(1e-4), log_sigma_F=np.l
 def test_posterior_qr_matches_cholesky(m0):
     """posterior_qr's (mu, L) is the Cholesky posterior's where that one is well conditioned:
     the same mean, and L L^T = G + Lambda."""
-    from ace_jax.fit.linear.solve import posterior_qr
+    from ace_jax.fit.solve import posterior_qr
     prob, ds = m0
     theta = _theta()
     with highest_precision():

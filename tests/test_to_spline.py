@@ -193,7 +193,7 @@ def test_real_learned_radial_keeps_the_pattern():
     from ace_jax.fit.hypers import default_prior
     from ace_jax.fit.gp.inducing import GPConfig, descriptor_scale, select_inducing, site_features
     from ace_jax.fit.gp.kernels import KernelSpec
-    from ace_jax.fit.linear.objective import Problem
+    from ace_jax.fit.objective import Problem
     from ace_jax.fit.radial.learn import learn_radial
     from ace_jax.fit.radial.model import with_radial
     spline, meta, z = load(str(SIGE))

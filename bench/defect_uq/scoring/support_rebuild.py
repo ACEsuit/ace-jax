@@ -42,7 +42,7 @@ def descriptors(calc, frames, log=print):
 
 def build(a):
     from ace_jax.calc.point import ACECalculator
-    from ace_jax.uq.ard import ARDPosterior
+    from ace_jax.fit.ard import ARDPosterior
     from ace_jax.uq.support import build_support, explained_variance, fit_pca, flatten_support, n_pass, \
         support_body, support_features
     post = ARDPosterior.load(a.posterior)
@@ -167,7 +167,7 @@ def main(argv=None):
         build(a)
         return
     from ace_jax.calc.point import ACECalculator
-    from ace_jax.uq.ard import ARDPosterior
+    from ace_jax.fit.ard import ARDPosterior
     post = ARDPosterior.load(a.posterior)
     calc = ACECalculator(a.model, posterior=a.posterior)
     alpha = float(np.asarray(post.group_table["alpha"]))

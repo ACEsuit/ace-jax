@@ -20,8 +20,8 @@ from ace_jax.fit.data import build_dataset, load_configs
 from ace_jax.fit.hypers import Hypers, default_prior, to_array
 from ace_jax.fit.gp.inducing import GPConfig, descriptor_scale, select_inducing, site_features
 from ace_jax.fit.gp.kernels import KernelSpec
-from ace_jax.fit.linear.objective import Problem, log_marginal_likelihood_qr, posterior_from_qr
-from ace_jax.fit.linear.stats import QRStats, linear_qr_statistics, linear_statistics, merge_target
+from ace_jax.fit.objective import Problem, log_marginal_likelihood_qr, posterior_from_qr
+from ace_jax.fit.stats import QRStats, linear_qr_statistics, linear_statistics, merge_target
 
 XYZ = FIXTURE_DIR / "si_tiny_train.xyz"
 pytestmark = pytest.mark.skipif(not XYZ.exists(), reason="missing GP fixtures")
@@ -94,7 +94,7 @@ def _skip_cpu_scan(prob):
     loop, returns NaN on finite input -- with 4 vCPUs (a GitHub runner) at L ~ 1448, per-batch
     merges included.  That is why the CPU production path merges on the host (#61,
     stats.host_qr_stream); the scan runs only on a device, so si_1429 checks it on the host only."""
-    from ace_jax.fit.linear.stats import CPU_SCAN_MAX_L
+    from ace_jax.fit.stats import CPU_SCAN_MAX_L
     if jax.default_backend() == "cpu" and prob.cfg.len_basis > CPU_SCAN_MAX_L:
         pytest.skip("scan geqrf on the CPU backend is unreliable at this L (#61)")
 
@@ -126,11 +126,12 @@ def test_merges_count_live_rows_only(case, monkeypatch):
     """The host merges once per >= target live rows per quantity: zero rows (padded configs and
     nodes, absent virials, an isolated atom's zero-target energy row) neither cost a merge nor fill
     the buffer."""
-    from ace_jax.fit.linear import stats
+    from ace_jax.fit import stats
+    from ace_jax.fit.linear import stats as lstats           # host_qr_stream's module: the merge it calls
     prob, ds, ref, lin = case
     L, calls = prob.cfg.len_basis, []
-    merge = stats._host_merge
-    monkeypatch.setattr(stats, "_host_merge", lambda R, c, P, y: calls.append(len(y)) or merge(R, c, P, y))
+    merge = lstats._host_merge
+    monkeypatch.setattr(lstats, "_host_merge", lambda R, c, P, y: calls.append(len(y)) or merge(R, c, P, y))
     assert merge_target(L) == L and merge_target(L, 0) == 0
     rows = jax.jit(lambda b: stats._qr_rows(prob.model, prob.cfg, b))
     per = [[int((np.any(np.asarray(P) != 0, 1) | (np.asarray(y) != 0)).sum()) for P, y, *_ in
@@ -155,7 +156,7 @@ def test_merges_count_live_rows_only(case, monkeypatch):
 def test_solve_qr_factor_scan_matches_host():
     """solve._qr_factor (the GP / fallback posterior's streaming QR, prior-seeded) gives the same
     R^T R and R^T d on the scan as on the host."""
-    from ace_jax.fit.linear.solve import _qr_factor
+    from ace_jax.fit.solve import _qr_factor
     prob, ds = _problem("si_fitted.npz", 24, 2)
     th = _theta()
     with highest_precision():

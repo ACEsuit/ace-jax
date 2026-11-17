@@ -289,7 +289,7 @@ def run(a):
         comm = MPI.COMM_WORLD
         if comm.Get_rank() > 0:          # a statistics worker: no log, no progress file, no outputs
             from .fit.pipeline.run import StatsOnlyDone
-            from .fit.linear.stats import MPIWorkerDone
+            from .fit.stats import MPIWorkerDone
             with open(os.devnull, "w") as null, contextlib.redirect_stdout(null):
                 try:
                     _run_fit(a)
@@ -362,7 +362,7 @@ def cmd_eval(a):
     gp = str(a.model).endswith(".npz") and "gp_json" in np.load(a.model).files   # gp_model.npz from `fit`
     ard = getattr(a, "posterior", None) is not None
     if gp and ard:
-        from .uq.ard import ARDPosterior
+        from .fit.ard import ARDPosterior
         if ARDPosterior.load(a.posterior).prior_root.M == 0:
             raise ValueError("--posterior is a linear `fit --uq ard` posterior: it belongs with its model.npz, "
                              "not a gp_model.npz (a GP model takes the posterior.npz of `fit --uq ard-gp`)")
@@ -493,7 +493,7 @@ def cmd_calibrate(a):
     from ase import Atoms
 
     from .calc.point import ACECalculator
-    from .uq.ard import ARDPosterior, conformal_scores
+    from .fit.ard import ARDPosterior, conformal_scores
     from .uq.conformal import effective_n_min, group_scales
     if "gp_json" in np.load(a.posterior).files:           # a gp_model.npz passed as the posterior
         raise UsageError(f"{a.posterior}: {_ARD_ONLY}")

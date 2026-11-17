@@ -102,7 +102,7 @@ def predict_splits(cfg, d, b, stats, theta, draws, log=print, ard=None, readout=
         for split, cfgs, ds, base in splits:
             t = time.time()
             if cfg.uq in ("ard", "ard-gp"):
-                from ...uq.ard import predict_ard, rows_fn_for
+                from ..ard import predict_ard, rows_fn_for
                 pred = predict_ard(ard.posterior, prob, ds,
                                    rows_fn=rows_fn_for(prob, theta) if cfg.uq == "ard-gp" else None)
             elif readout is not None:        # solver lstsq: the fixed readout, zero variance

@@ -8,7 +8,7 @@ jax.config.update("jax_enable_x64", True)
 def test_predict_uses_explicit_stats(tiny_linear_problem):
     from ace_jax.fit.hypers import to_array
     from ace_jax.fit.gp.predict import predict_mixture
-    from ace_jax.fit.linear.stats import sufficient_statistics
+    from ace_jax.fit.stats import sufficient_statistics
     prob, ds = tiny_linear_problem
     theta = prob.prior.mu
     calls = []
@@ -269,7 +269,7 @@ def test_map_and_rung_outputs_survive_a_failure_in_prediction(tmp_path, monkeypa
 def test_pops_reuses_the_objectives_linear_statistics(monkeypatch):
     from conftest import FIXTURE_DIR
     import ace_jax.fit.pipeline.objective as O
-    import ace_jax.fit.linear.stats as ST
+    import ace_jax.fit.stats as ST
     from ace_jax.fit.pipeline import fit, load_fit_data
     calls = []
     real = ST.linear_statistics
@@ -431,7 +431,7 @@ def test_lstsq_solver_is_plain_weighted_least_squares():
     from ace_jax.fit.pipeline.export import linear_model_arrays
     from ace_jax.fit.pipeline.lstsq import lstsq_theta
     from ace_jax.fit.pipeline.problem import build_problem
-    from ace_jax.fit.linear.solve import stacked_design
+    from ace_jax.fit.solve import stacked_design
     cfg, d, res = _lstsq_fit()
     b = build_problem(cfg, d)
     with highest_precision():

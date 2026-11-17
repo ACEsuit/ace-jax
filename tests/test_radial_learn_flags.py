@@ -24,7 +24,7 @@ def small():
 
 
 def test_prior_precision_sizes_from_gamma(small):
-    from ace_jax.fit.linear.objective import prior_precision
+    from ace_jax.fit.objective import prior_precision
     prob, _, _ = small
     L = prob.cfg.len_basis
     Lam, _ = prior_precision(THETA, prob._replace(gamma=jnp.full(L + 3, 2.0)))
@@ -37,7 +37,7 @@ def test_prior_precision_sizes_from_gamma(small):
 def test_theta_map_and_holdout_take_precomputed_stats(small):
     from ace_jax.fit.hypers import to_array
     from ace_jax.fit.radial.learn import holdout_score, theta_map_linear
-    from ace_jax.fit.linear.stats import linear_qr_statistics, linear_statistics
+    from ace_jax.fit.stats import linear_qr_statistics, linear_statistics
     prob, ds, _ = small
     _, ds_val, _ = make_problem(ncfg=6, start=6)
     W = prob.model.rnl_Wnlq

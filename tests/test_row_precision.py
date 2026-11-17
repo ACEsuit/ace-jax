@@ -35,7 +35,7 @@ def problem():
 @pytest.fixture(scope="module")
 def stats(problem):
     """float64 (host merges) and float32 (device path on the CPU backend: small L) statistics."""
-    from ace_jax.fit.linear.stats import linear_qr_statistics
+    from ace_jax.fit.stats import linear_qr_statistics
     _, d, b = problem
     p = b.prob
     return (linear_qr_statistics(p.model, p.cfg, d.ds_train),
@@ -55,7 +55,7 @@ def test_float32_statistics_carry_the_residual(stats):
 
 def test_rho_lml_equals_the_library_form_in_float64(problem, stats):
     """With rho made exact from float64 statistics the two LML forms agree."""
-    from ace_jax.fit.linear.objective import log_marginal_likelihood_qr
+    from ace_jax.fit.objective import log_marginal_likelihood_qr
     _, _, b = problem
     q64, _ = stats
     rho = {f"rho_{q}": np.sqrt(max(float(getattr(q64, f"yy_{q}")) - float(getattr(q64, f"c_{q}") @ getattr(q64, f"c_{q}")), 0.0))
@@ -66,7 +66,7 @@ def test_rho_lml_equals_the_library_form_in_float64(problem, stats):
 
 
 def test_float32_rows_change_the_evidence_and_mean_little(problem, stats):
-    from ace_jax.fit.linear.objective import log_marginal_likelihood_qr, posterior_from_qr
+    from ace_jax.fit.objective import log_marginal_likelihood_qr, posterior_from_qr
     _, _, b = problem
     q64, q32 = stats
     th = b.prob.prior.mu
@@ -80,7 +80,7 @@ def test_float32_rows_change_the_evidence_and_mean_little(problem, stats):
 
 
 def test_perturb_at_zero_is_the_identity(problem, stats):
-    from ace_jax.fit.linear.objective import log_marginal_likelihood_qr
+    from ace_jax.fit.objective import log_marginal_likelihood_qr
     from ace_jax.fit.pipeline.rowcheck import perturb
     _, _, b = problem
     _, q32 = stats
@@ -136,7 +136,7 @@ def test_float32_rows_through_the_chunked_scan(problem):
     """The node-chunked rows (linear_rows_chunked / _rows_scan, which predictions take when a
     batch exceeds ROWS_EDGE_BUDGET) accept float32 rows: their accumulators keep their dtype."""
     from ace_jax.fit.rows import linear_rows, linear_rows_chunked
-    from ace_jax.fit.linear.stats import float32_rows
+    from ace_jax.fit.stats import float32_rows
     _, d, b = problem
     p = b.prob
     m32, ds32 = float32_rows(p.model, d.ds_train)

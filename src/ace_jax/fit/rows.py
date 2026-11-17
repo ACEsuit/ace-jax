@@ -42,6 +42,19 @@ class Rows(NamedTuple):
     V: jnp.ndarray   # (C, 6, Dt)
 
 
+QUANTITIES = ("E", "F", "V")     # the quantities of a potential fit, in the order every statistic keeps
+
+
+def efv_rows(r, batch):
+    """The row generator of a potential fit (`fit.linear.stats`): (Phi, y, w) for the energy, force and
+    virial rows r (.E, .F, .V) of one batch, flattened to (n, Dt), with the batch's targets and structural
+    weights (a force weight per atom, a virial weight per configuration, repeated over the components)."""
+    Dt = r.E.shape[-1]
+    return ((r.E, batch.y_E, batch.w_E),
+            (r.F.reshape(-1, Dt), batch.y_F.reshape(-1), jnp.repeat(batch.w_F, 3)),
+            (r.V.reshape(-1, Dt), batch.y_V.reshape(-1), jnp.repeat(batch.w_V, 6)))
+
+
 def _place(dst, src, z, cfg):
     """Add compact (..., D) rows into species block z of a (..., len_basis) array,
     in the layout of ACEModel.site_descriptors (B blocks first, then pair blocks)."""

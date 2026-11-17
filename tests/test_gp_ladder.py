@@ -54,7 +54,7 @@ def test_nuts_recovers_target():
 def test_run_map_ps_matches_flat_run_map(tiny_linear_problem):
     from ace_jax.fit.paramset import from_hypers
     from ace_jax.fit.gp.ladder import run_map, run_map_ps
-    from ace_jax.fit.linear.objective import make_lml
+    from ace_jax.fit.objective import make_lml
     prob, ds = tiny_linear_problem
     lml = make_lml(prob, ds)
     flat = run_map(lml, prob.prior, steps=20, seed=0)          # existing path
@@ -83,7 +83,7 @@ def _tiny_embed_problem(mps=4, ncfg=3):
     from ace_jax.fit.hypers import default_prior
     from ace_jax.fit.gp.inducing import GPConfig, build_pmap, descriptor_scale, select_inducing, site_features
     from ace_jax.fit.gp.kernels import KernelSpec
-    from ace_jax.fit.linear.objective import Problem
+    from ace_jax.fit.objective import Problem
     model, meta, z = load(FIXTURE_DIR / "sige_nofit.npz")
     els = [int(e) for e in meta["elements"]]
     cfgs = load_configs(FIXTURE_DIR / "si_tiny_train.xyz", "dft_energy", "dft_force", "dft_virial")[:ncfg]

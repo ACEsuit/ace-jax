@@ -1,192 +1,131 @@
-"""Log marginal likelihood of the hybrid model at fixed hyperparameters, from
-the streamed sufficient statistics.  At fixed theta the model is Bayesian
-linear regression over Phi = [B | k_theta(B, B_M)] with prior precision
-Lambda = blkdiag(Gamma^2 / sigma_c^2, K_MM) and noise precision
-tau_i = (w_i / sigma_type(i))^2."""
-from typing import NamedTuple
+"""The evidence and posterior of a Bayesian linear model from its streamed statistics.
 
+The model: weighted rows of several quantities, quantity q with noise scale sigma_q, and a Gaussian prior
+on the coefficients with precision Lambda.  With G = sum_q G_q / sigma_q^2, b = sum_q b_q / sigma_q^2 and
+S = G + Lambda,
+
+    log p(y) = -1/2 (y'y - b' S^-1 b) - 1/2 (log|S| - log|Lambda| - log|tau|) - N/2 log 2 pi,
+
+log|tau| = sum_q (logw_q - n_q log sigma_q^2) the log-determinant of the noise precision and N the live
+rows.  Two forms: from the Gram statistics by Cholesky (`combine`, `log_evidence`, `posterior_cholesky`),
+and from the QR statistics with a diagonal prior by a QR of the stacked factors (`qr_system`,
+`log_evidence_qr`, `posterior_qr`), at kappa(Phi) and not its square.  Statistics are sequences of
+`stats.Gram` / `stats.Factor`, one per quantity; noise scales are their log sigma_q in the same order.
+With k right-hand sides (b, c with a second axis) the evidence is the sum over them (shared noise and
+prior) and the posterior mean has one column each.
+
+`hoist` and `jit_lik` pass a likelihood's statistics into its jit as arguments."""
 import jax
 import jax.numpy as jnp
 from jax.scipy.linalg import cho_solve, solve_triangular
 
-from ..hypers import from_array, log_prior
-from ..gp.kernels import K_MM
-from .stats import sufficient_statistics
 
-
-class Problem(NamedTuple):
-    spec: object
-    model: object
-    ind: object
-    cfg: object
-    gamma: jnp.ndarray    # (len_basis,), or wider when extra linear columns are appended
-    prior: object
-    e0_prec: object = None  # (NZ,) fixed prior precision of the joint-E0 columns (cfg.e0_cols)
-    lml_solver: str = "cholesky"  # "qr": the linear arm's LML and posterior from QRStats (make_lml)
-    row_dtype: str = "float64"    # "float32": QR statistics from float32 rows (stats.linear_qr_statistics)
-
-
-def linear_prior_diag(theta, prob):
-    """Prior precision of the linear columns: gamma^2 / sigma_c^2 for the readout, then
-    the fixed e0_prec for the joint-E0 columns (independent of sigma_c)."""
-    lin = prob.gamma ** 2 / jnp.exp(2.0 * theta.log_sigma_c)
-    e0p = getattr(prob, "e0_prec", None)
-    return lin if e0p is None else jnp.concatenate([lin, jnp.asarray(e0p, lin.dtype)])
-
-
-def prior_precision(theta, prob):
-    lin = linear_prior_diag(theta, prob)
-    L = lin.shape[0]
-    M = prob.ind.XM.shape[0]
-    Kmm = K_MM(theta, prob.spec, prob.ind.XM, prob.ind.SM, prob.ind.ZM, prob.ind.embed)
-    Lam = jnp.zeros((L + M, L + M)).at[jnp.arange(L), jnp.arange(L)].set(lin).at[L:, L:].set(Kmm)
-    logdet = jnp.sum(jnp.log(lin)) + (2.0 * jnp.sum(jnp.log(jnp.diag(jnp.linalg.cholesky(Kmm))))
-                                      if M > 0 else 0.0)
-    return Lam, logdet
-
-
-def combine(theta, st, log_ratios=None):
-    """Assemble the noise-scaled Gram G, right-hand side b, y'y, log|noise
-    precision| and observation count from the sufficient statistics.
-
-    log_ratios=None is the single-type path (st fields have NO leading axis):
-    each quantity's block is scaled by 1/sigma_q^2, exactly as before.
-
-    log_ratios (n_types, 3) columns (E, F, V) is the per-config-type path (st
-    fields carry a leading n_types axis).  The effective noise for quantity q,
-    type t is sigma_{q,t} = sigma_q * exp(log_ratios[t, q]), so each per-(q,t)
-    block is scaled by 1/sigma_{q,t}^2 = (1/sigma_q^2) * exp(-2 log_ratios[t, q]).
-    The default type (row 0) is pinned to log_ratios[0]=0 upstream, so its scale
-    is exactly 1/sigma_q^2 and the single-type limit is bit-identical."""
-    s2 = {t: jnp.exp(2.0 * getattr(theta, f"log_sigma_{t}")) for t in "EFV"}
-    if log_ratios is None:
-        G = sum(getattr(st, f"G_{t}") / s2[t] for t in "EFV")
-        b = sum(getattr(st, f"b_{t}") / s2[t] for t in "EFV")
-        yy = sum(getattr(st, f"yy_{t}") / s2[t] for t in "EFV")
-        logtau = sum(getattr(st, f"logw_{t}") - getattr(st, f"n_{t}") * jnp.log(s2[t]) for t in "EFV")
-        N = sum(getattr(st, f"n_{t}") for t in "EFV")
-        return G, b, yy, logtau, N
-    n_types = log_ratios.shape[0]
-    G = b = yy = logtau = N = 0.0
-    for col, q in enumerate("EFV"):
-        Gq, bq = getattr(st, f"G_{q}"), getattr(st, f"b_{q}")
-        yyq, nq, logwq = getattr(st, f"yy_{q}"), getattr(st, f"n_{q}"), getattr(st, f"logw_{q}")
-        logs2 = jnp.log(s2[q])
-        for t in range(n_types):
-            inv = jnp.exp(-2.0 * log_ratios[t, col]) / s2[q]     # 1 / sigma_{q,t}^2
-            G = G + Gq[t] * inv
-            b = b + bq[t] * inv
-            yy = yy + yyq[t] * inv
-            logtau = logtau + logwq[t] - nq[t] * (logs2 + 2.0 * log_ratios[t, col])
-            N = N + nq[t]
+def combine(grams, log_sigmas):
+    """The noise-scaled Gram G, right-hand side b, y'y, log|noise precision| and row count of the
+    quantities `grams` at noise scales exp(log_sigmas)."""
+    s2 = [jnp.exp(2.0 * ls) for ls in log_sigmas]
+    G = sum(g.G / v for g, v in zip(grams, s2))
+    b = sum(g.b / v for g, v in zip(grams, s2))
+    yy = sum(g.yy / v for g, v in zip(grams, s2))
+    logtau = sum(g.logw - g.n * jnp.log(v) for g, v in zip(grams, s2))
+    N = sum(g.n for g in grams)
     return G, b, yy, logtau, N
 
 
-def _chol_S(theta, st, prob, log_ratios=None):
-    G, b, yy, logtau, N = combine(theta, st, log_ratios)
-    Lam, logdet_Lam = prior_precision(theta, prob)
-    L = jnp.linalg.cholesky(G + Lam)
-    return L, b, yy, logtau, N, logdet_Lam
+def _quad(v):
+    """v'v, summed over right-hand sides."""
+    return v @ v if v.ndim == 1 else jnp.sum(v * v)
 
 
-def log_marginal_likelihood(theta, st, prob, log_ratios=None):
-    L, b, yy, logtau, N, logdet_Lam = _chol_S(theta, st, prob, log_ratios)
+def _rhs(v):
+    """Number of right-hand sides of a (L,) or (L, k) array."""
+    return 1 if v.ndim == 1 else v.shape[1]
+
+
+def log_evidence(L, b, yy, logtau, N, logdet_Lam):
+    """The evidence from the lower Cholesky factor L of S = G + Lambda and `combine`'s b, yy, logtau, N."""
     v = solve_triangular(L, b, lower=True)
     logdet_S = 2.0 * jnp.sum(jnp.log(jnp.diag(L)))
-    return (-0.5 * (yy - v @ v) - 0.5 * (logdet_S - logdet_Lam - logtau)
-            - 0.5 * N * jnp.log(2.0 * jnp.pi))
+    if b.ndim == 1:
+        return (-0.5 * (yy - v @ v) - 0.5 * (logdet_S - logdet_Lam - logtau)
+                - 0.5 * N * jnp.log(2.0 * jnp.pi))
+    k = b.shape[1]
+    return (-0.5 * (jnp.sum(yy) - _quad(v)) - 0.5 * k * (logdet_S - logdet_Lam - logtau)
+            - 0.5 * k * N * jnp.log(2.0 * jnp.pi))
 
 
-def posterior(theta, st, prob, log_ratios=None):
-    L, b, *_ = _chol_S(theta, st, prob, log_ratios)
+def posterior_cholesky(L, b):
+    """(mean, L) from the lower Cholesky factor of S."""
     return cho_solve((L, True), b), L
 
 
 # ---------------------------------------------------------------------------
-# QR form (linear arm, M = 0).  G + Lambda = A^T A with
-#     A = [ diag(sqrt(lin)) ; R_E / sigma_E ; R_F / sigma_F ; R_V / sigma_V ]   (4L x L)
-# (R_q from QRStats; lin = linear_prior_diag), and b = A^T [0 ; c_q / sigma_q], so a QR of
-# A, A = Q R, gives the Cholesky factor R^T and v = L^-1 b = Q^T [0 ; c_q / sigma_q] at
-# kappa(A) = kappa(Phi), not kappa(Phi)^2.  An evidence fit that nearly interpolates its data
-# (noise at its floor, prior near flat) drives kappa(G + Lambda) past 1/eps: there the
-# Cholesky LML is NaN, or finite but wrong by percent, and this form is not.  The prior rows
-# go first: Householder QR is accurate for rows of widely varying norm when the large ones
-# lead (Powell & Reid), and the pinned joint-E0 precision is 1e16.
+# QR form, diagonal prior `lin` (L,).  G + Lambda = A^T A with
+#     A = [ diag(sqrt(lin)) ; R_q / sigma_q ... ]
+# and b = A^T [0 ; c_q / sigma_q], so a QR of A, A = Q R, gives the Cholesky factor R^T and
+# v = L^-1 b = Q^T [0 ; c_q / sigma_q] at kappa(A) = kappa(Phi), not kappa(Phi)^2.  An evidence fit that
+# nearly interpolates its data (noise at its floor, prior near flat) drives kappa(G + Lambda) past 1/eps:
+# there the Cholesky evidence is NaN, or finite but wrong by percent, and this form is not.  The prior rows
+# go first: Householder QR is accurate for rows of widely varying norm when the large ones lead (Powell &
+# Reid), and a pinned column's precision can be 1e16.
 
-def _qr_S(theta, qs, prob):
-    lin = linear_prior_diag(theta, prob)
-    s = {q: jnp.exp(getattr(theta, f"log_sigma_{q}")) for q in "EFV"}
-    A = jnp.concatenate([jnp.diag(jnp.sqrt(lin))] + [getattr(qs, f"R_{q}") / s[q] for q in "EFV"], 0)
-    y = jnp.concatenate([jnp.zeros_like(lin)] + [getattr(qs, f"c_{q}") / s[q] for q in "EFV"])
+def _stacked(lin, factors, log_sigmas):
+    s = [jnp.exp(ls) for ls in log_sigmas]
+    A = jnp.concatenate([jnp.diag(jnp.sqrt(lin))] + [f.R / v for f, v in zip(factors, s)], 0)
+    c0 = factors[0].c
+    y = jnp.concatenate([jnp.zeros_like(lin) if c0.ndim == 1 else jnp.zeros((lin.shape[0], c0.shape[1]), lin.dtype)]
+                        + [f.c / v for f, v in zip(factors, s)])
+    return A, y
+
+
+def qr_system(lin, factors, log_sigmas):
+    """(R_S, v): the upper factor of S (positive diagonal, R_S^T R_S = G + diag(lin)) and v = R_S^-T b."""
+    A, y = _stacked(lin, factors, log_sigmas)
     Q, R = jnp.linalg.qr(A, mode="reduced")
     sg = jnp.where(jnp.diag(R) < 0, -1.0, 1.0)              # Q -> Q diag(sg): a positive diagonal
-    return R * sg[:, None], (Q.T @ y) * sg, lin
+    return R * sg[:, None], (Q.T @ y) * (sg if y.ndim == 1 else sg[:, None])
 
 
-def _qr_resid(theta, qs, prob):
-    """(R_S, residual^2, lin) with the residual from the factors alone: the reduced system's QR
-    takes its target as an extra column (last diagonal = its residual norm), plus the carried
-    rho_q^2 / sigma_q^2.  No y'y - v'v, which cancels when QRStats came from float32 rows."""
-    lin = linear_prior_diag(theta, prob)
-    s = {q: jnp.exp(getattr(theta, f"log_sigma_{q}")) for q in "EFV"}
-    A = jnp.concatenate([jnp.diag(jnp.sqrt(lin))] + [getattr(qs, f"R_{q}") / s[q] for q in "EFV"], 0)
-    y = jnp.concatenate([jnp.zeros_like(lin)] + [getattr(qs, f"c_{q}") / s[q] for q in "EFV"])
+def qr_residual_system(lin, factors, log_sigmas):
+    """(R_S, residual^2) with the residual from the factors alone: the reduced system's QR takes its
+    target as an extra column (last diagonal = its residual norm), plus the carried rho_q^2 / sigma_q^2.
+    No y'y - v'v, which cancels when the factors came from float32 rows.  One right-hand side."""
+    s = [jnp.exp(ls) for ls in log_sigmas]
+    A, y = _stacked(lin, factors, log_sigmas)
     Rt = jnp.linalg.qr(jnp.concatenate([A, y[:, None]], 1), mode="r")
     L = lin.shape[0]
-    resid = Rt[L, L] ** 2 + sum(getattr(qs, f"rho_{q}") ** 2 / s[q] ** 2 for q in "EFV")
-    return Rt[:L, :L], resid, lin
+    resid = Rt[L, L] ** 2 + sum(f.rho ** 2 / v ** 2 for f, v in zip(factors, s))
+    return Rt[:L, :L], resid
 
 
-def log_marginal_likelihood_qr(theta, qs, prob):
-    """log_marginal_likelihood of the linear arm (M = 0) from QRStats, by QR (see above).  With
-    QRStats.rho_q (float32 rows) the residual comes from the factors (`_qr_resid`)."""
-    s2 = {q: jnp.exp(2.0 * getattr(theta, f"log_sigma_{q}")) for q in "EFV"}
-    if getattr(qs, "rho_E", None) is not None:
-        R, resid, lin = _qr_resid(theta, qs, prob)
-        logtau = sum(getattr(qs, f"logw_{q}") - getattr(qs, f"n_{q}") * jnp.log(s2[q]) for q in "EFV")
-        N = sum(getattr(qs, f"n_{q}") for q in "EFV")
+def log_evidence_qr(lin, factors, log_sigmas):
+    """The evidence of the diagonal-prior model from its QR statistics.  Factors that carry rho (float32
+    rows) take the residual from the factors (`qr_residual_system`)."""
+    s2 = [jnp.exp(2.0 * ls) for ls in log_sigmas]
+    if factors[0].rho is not None:
+        R, resid = qr_residual_system(lin, factors, log_sigmas)
+        logtau = sum(f.logw - f.n * jnp.log(v) for f, v in zip(factors, s2))
+        N = sum(f.n for f in factors)
         logdet_S = 2.0 * jnp.sum(jnp.log(jnp.abs(jnp.diag(R))))
         return -0.5 * resid - 0.5 * (logdet_S - jnp.sum(jnp.log(lin)) - logtau) - 0.5 * N * jnp.log(2.0 * jnp.pi)
-    R, v, lin = _qr_S(theta, qs, prob)
-    yy = sum(getattr(qs, f"yy_{q}") / s2[q] for q in "EFV")
-    logtau = sum(getattr(qs, f"logw_{q}") - getattr(qs, f"n_{q}") * jnp.log(s2[q]) for q in "EFV")
-    N = sum(getattr(qs, f"n_{q}") for q in "EFV")
+    R, v = qr_system(lin, factors, log_sigmas)
+    yy = sum(f.yy / v2 for f, v2 in zip(factors, s2))
+    logtau = sum(f.logw - f.n * jnp.log(v2) for f, v2 in zip(factors, s2))
+    N = sum(f.n for f in factors)
     logdet_S = 2.0 * jnp.sum(jnp.log(jnp.diag(R)))
-    return (-0.5 * (yy - v @ v) - 0.5 * (logdet_S - jnp.sum(jnp.log(lin)) - logtau)
-            - 0.5 * N * jnp.log(2.0 * jnp.pi))
+    if v.ndim == 1:
+        return (-0.5 * (yy - v @ v) - 0.5 * (logdet_S - jnp.sum(jnp.log(lin)) - logtau)
+                - 0.5 * N * jnp.log(2.0 * jnp.pi))
+    k = _rhs(v)
+    return (-0.5 * (jnp.sum(yy) - _quad(v)) - 0.5 * k * (logdet_S - jnp.sum(jnp.log(lin)) - logtau)
+            - 0.5 * k * N * jnp.log(2.0 * jnp.pi))
 
 
-def posterior_from_qr(theta, qs, prob):
-    """posterior's (mu, L) from the same QR as log_marginal_likelihood_qr: L = R^T, lower
-    with a positive diagonal, L L^T = G + Lambda."""
-    R, v, _ = _qr_S(theta, qs, prob)
+def posterior_qr(lin, factors, log_sigmas):
+    """(mean, L) from the same QR as `log_evidence_qr`: L = R_S^T, lower with a positive diagonal,
+    L L^T = G + diag(lin)."""
+    R, v = qr_system(lin, factors, log_sigmas)
     return solve_triangular(R, v, lower=False), R.T
-
-
-def uses_qr(prob):
-    """Whether prob's LML and posterior take the QR form: lml_solver 'qr' on the linear arm."""
-    return getattr(prob, "lml_solver", "cholesky") in ("qr", "svd") and prob.ind.XM.shape[0] == 0
-
-
-def _stats_fn(mesh):
-    """sufficient_statistics, or its shard_map'd multi-device counterpart when
-    a mesh is given (Task 15)."""
-    if mesh is None:
-        return sufficient_statistics
-    from .sharding import sufficient_statistics_sharded
-
-    def f(theta, spec, model, ind, cfg, ds):
-        return sufficient_statistics_sharded(theta, spec, model, ind, cfg, ds, mesh)
-    return f
-
-
-def _sigma_type_decode(a, n_hypers, n_types):
-    """Split the LML vector into (theta, log_ratios).  a = [hypers | free rows],
-    the free rows being log_ratios[1:] flattened; row 0 is pinned to 0."""
-    theta = from_array(a[:n_hypers])
-    free = a[n_hypers:].reshape(n_types - 1, 3)
-    log_ratios = jnp.concatenate([jnp.zeros((1, 3)), free], axis=0)
-    return theta, log_ratios
 
 
 def hoist(pure, consts):
@@ -209,109 +148,3 @@ def jit_lik(lik, body):
     pure = lik.pure
     jf = jax.jit(lambda c, *x: body(lambda a: pure(a, c), *x))
     return lambda *x: jf(lik.consts, *x)
-
-
-QR_EVAL = "auto"    # the QR LML in make_lml: "host" (lml_host.HostQREvidence), "dense" (a jitted QR of the stacked
-                    # matrix, autodiff through it) or "auto": host when the statistics are on the CPU
-
-
-def _host_qr_eval(qs):
-    if QR_EVAL not in ("auto", "host", "dense"):
-        raise ValueError(f"QR_EVAL must be 'auto', 'host' or 'dense', got {QR_EVAL!r}")
-    if QR_EVAL != "auto":
-        return QR_EVAL == "host"
-    devs = getattr(qs.R_F, "devices", None)
-    return all(d.platform == "cpu" for d in devs()) if devs is not None else True
-
-
-def make_lml(prob, ds, mesh=None, cache_linear=True, n_types=1, n_free_ratios=0, shared_noise=False):
-    """shared_noise: the caller wraps the result in paramset.tied_likelihood (cfg.noise "shared"), so the host
-    QR evidence may merge the three quantities' factors once (lml_host.HostQREvidence shared).
-
-    cache_linear: stream the theta-independent linear Gram G_BB once and
-    recompute only the M residual columns per call (10x for a large basis;
-    stats.py 'theta-split statistics').  mesh disables it (sharded path).
-
-    n_free_ratios > 0 selects the per-config-type noise path: the LML vector is
-    [10 hypers | (n_types-1)*3 free log-ratios], decoded by _sigma_type_decode
-    (default type row pinned to 0).  The per-(quantity, type) Gram is streamed
-    ONCE and cached exactly like the single-type linear Gram; only the noise
-    scaling 1/sigma_{q,t}^2 depends on the ratios, so caching is preserved."""
-    if n_free_ratios:
-        from ..hypers import Hypers
-        from .stats import (assemble_statistics_typed, linear_statistics_typed,
-                            residual_statistics_typed)
-        n_hypers = len(Hypers._fields)
-        lin = jax.jit(lambda: linear_statistics_typed(prob.model, prob.cfg, ds, n_types))()
-        jax.block_until_ready(lin)
-
-        @jax.jit
-        def f(a):
-            theta, log_ratios = _sigma_type_decode(a, n_hypers, n_types)
-            res = residual_statistics_typed(theta, prob.spec, prob.model, prob.ind,
-                                            prob.cfg, ds, n_types)
-            st = assemble_statistics_typed(lin, res)
-            return log_marginal_likelihood(theta, st, prob, log_ratios)
-        return f
-    if uses_qr(prob) and mesh is None:
-        from .stats import linear_qr_statistics
-        qs = linear_qr_statistics(prob.model, prob.cfg, ds,      # a host loop on the CPU: not jitted
-                                  row_dtype=getattr(prob, "row_dtype", "float64"))
-        jax.block_until_ready(qs)
-
-        if _host_qr_eval(qs):     # the structured host evaluation (fit/lml_host.py): same evidence, ~10x faster
-            from .lml_host import HostQREvidence
-            ev = HostQREvidence(qs, prob, shared=shared_noise)   # shared: only under paramset.tied_likelihood
-
-            def f(a):
-                return ev.lml(from_array(a))
-            f.host_evidence = ev
-        else:
-            f = hoist(jax.jit(lambda a, qs: log_marginal_likelihood_qr(from_array(a), qs, prob)), qs)
-        f.qr_stats = qs            # the statistics the posterior must share with the LML
-        return f
-    if cache_linear and mesh is None:
-        from .stats import assemble_statistics, linear_statistics, residual_statistics
-        lin = jax.jit(lambda: linear_statistics(prob.model, prob.cfg, ds))()
-        jax.block_until_ready(lin)
-
-        @jax.jit
-        def lml(a):
-            theta = from_array(a)
-            res = residual_statistics(theta, prob.spec, prob.model, prob.ind, prob.cfg, ds)
-            return log_marginal_likelihood(theta, assemble_statistics(lin, res), prob)
-
-        def f(a):                  # a plain closure, as above, to carry the cached Gram
-            return lml(a)
-        f.lin_stats = lin          # the predictions' linear statistics: no second linear pass
-        return f
-    stats = _stats_fn(mesh)
-
-    @jax.jit
-    def f(a):
-        theta = from_array(a)
-        st = stats(theta, prob.spec, prob.model, prob.ind, prob.cfg, ds)
-        return log_marginal_likelihood(theta, st, prob)
-    return f
-
-
-def make_log_density(prob, ds, objective="lml", mesh=None, cache_linear=True):
-    stats = _stats_fn(mesh)
-    if objective == "lml":
-        lik = make_lml(prob, ds, mesh, cache_linear)
-    elif objective == "loo":
-        from ...uq.loo import config_row_index, loo_objective
-        rows = jnp.asarray(config_row_index(ds))
-
-        @jax.jit
-        def lik(a):
-            theta = from_array(a)
-            st = stats(theta, prob.spec, prob.model, prob.ind, prob.cfg, ds)
-            return loo_objective(theta, st, prob, ds, rows)
-    else:
-        raise ValueError(f"objective must be 'lml' or 'loo', got {objective!r}")
-
-    def f(a):                       # plain closure: a jitted PjitFunction cannot carry attributes
-        return lik(a) + log_prior(from_array(a), prob.prior)
-    f.likelihood = lik
-    return f

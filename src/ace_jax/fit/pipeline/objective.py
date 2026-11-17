@@ -7,8 +7,8 @@ import numpy as np
 from jax.sharding import Mesh
 
 from ..hypers import from_array, log_prior, to_array
-from ..linear.objective import jit_lik, make_lml, make_log_density
-from ..linear.stats import assemble_statistics, linear_statistics, residual_statistics
+from ..objective import jit_lik, make_lml, make_log_density
+from ..stats import assemble_statistics, linear_statistics, residual_statistics
 
 
 class Objective(NamedTuple):
@@ -46,7 +46,7 @@ def make_objective(cfg, d, b):
     tied, free = (tied, ~tied) if tied.any() else (None, None)
     tie = tied_likelihood if tied is not None else (lambda f: f)
     if cfg.lml == "host-cache":
-        from ..linear.hostcache import HostCachedLML
+        from ..gp.hostcache import HostCachedLML
         host = HostCachedLML(prob, d.ds_train, chunk=cfg.lml_chunk)
         lik = tie(host)
         prior_vg = jax.jit(jax.value_and_grad(lambda a: log_prior(from_array(a), prob.prior, free)))

@@ -182,7 +182,7 @@ def plot(results, path):
 
 def main(argv=None):
     from ace_jax.calc.point import ACECalculator
-    from ace_jax.uq.ard import ARDPosterior
+    from ace_jax.fit.ard import ARDPosterior
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     p.add_argument("--model", required=True)
     p.add_argument("--posterior", required=True)

@@ -13,7 +13,7 @@ from ace_jax.fit.data import build_dataset, load_configs  # noqa: E402
 from ace_jax.fit.hypers import Hypers, default_prior  # noqa: E402
 from ace_jax.fit.gp.inducing import GPConfig, descriptor_scale, select_inducing, site_features  # noqa: E402
 from ace_jax.fit.gp.kernels import KernelSpec  # noqa: E402
-from ace_jax.fit.linear.objective import Problem  # noqa: E402
+from ace_jax.fit.objective import Problem  # noqa: E402
 
 XYZ = FIXTURE_DIR / "si_tiny_train.xyz"
 MODEL = FIXTURE_DIR / "si_ace_model.npz"

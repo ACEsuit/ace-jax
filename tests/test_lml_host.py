@@ -13,8 +13,8 @@ import numpy as np  # noqa: E402
 import pytest  # noqa: E402
 
 from ace_jax.fit.hypers import Hypers, to_array  # noqa: E402
-from ace_jax.fit.linear.objective import Problem, log_marginal_likelihood_qr  # noqa: E402
-from ace_jax.fit.linear.stats import QRStats  # noqa: E402
+from ace_jax.fit.objective import Problem, log_marginal_likelihood_qr  # noqa: E402
+from ace_jax.fit.stats import QRStats  # noqa: E402
 
 
 def _theta(**kw):
@@ -94,9 +94,9 @@ def test_host_evidence_vmaps_and_caches():
 def test_make_lml_takes_the_host_form_on_cpu(monkeypatch):
     """make_lml's QR branch uses the host evaluation on the CPU backend (objective.QR_EVAL 'auto'), and the
     dense form with QR_EVAL 'dense'."""
-    from ace_jax.fit.linear import objective
+    from ace_jax.fit import objective
     qs, prob = _problem()
-    monkeypatch.setattr("ace_jax.fit.linear.stats.linear_qr_statistics", lambda *a, **k: qs)
+    monkeypatch.setattr("ace_jax.fit.stats.linear_qr_statistics", lambda *a, **k: qs)
     f = objective.make_lml(prob, None)
     assert f.qr_stats is qs and getattr(f, "host_evidence", None) is not None
     a = to_array(THETAS[0])
@@ -113,7 +113,7 @@ def test_host_evidence_on_si_fixture_at_the_stiff_point():
     from ace_jax.eval import highest_precision, load
     from ace_jax.fit.data import build_dataset, load_configs
     from ace_jax.fit.linear.lml_host import HostQREvidence
-    from ace_jax.fit.linear.stats import linear_qr_statistics
+    from ace_jax.fit.stats import linear_qr_statistics
     if not T.XYZ.exists():
         pytest.skip("missing GP fixtures")
     model, meta, z = load(FIXTURE_DIR / "si_fitted.npz")
@@ -163,13 +163,13 @@ def test_shared_noise_form_matches_the_tied_dense_qr(case):
 
 def test_make_objective_passes_the_noise_tie(monkeypatch):
     """The pipeline asks make_lml for the shared form exactly when it ties the noise."""
-    from ace_jax.fit.linear import objective
+    from ace_jax.fit import objective
     seen = []
     real = objective.make_lml
     monkeypatch.setattr("ace_jax.fit.pipeline.objective.make_lml",
                         lambda *a, **k: seen.append(k.get("shared_noise")) or real(*a, **k))
     qs, prob = _problem()
-    monkeypatch.setattr("ace_jax.fit.linear.stats.linear_qr_statistics", lambda *a, **k: qs)
+    monkeypatch.setattr("ace_jax.fit.stats.linear_qr_statistics", lambda *a, **k: qs)
     from ace_jax.fit.pipeline.objective import make_objective
     from ace_jax.fit.hypers import default_prior
     prob = prob._replace(prior=default_prior(2.35))

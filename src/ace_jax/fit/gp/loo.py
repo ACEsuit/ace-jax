@@ -7,8 +7,8 @@ import jax.numpy as jnp
 import numpy as np
 from jax.scipy.linalg import cho_solve, solve_triangular
 
-from ..fit.linear.objective import _chol_S
-from ..fit.rows import batch_rows
+from ..objective import _chol_S
+from ..rows import batch_rows
 
 
 def config_row_index(ds):

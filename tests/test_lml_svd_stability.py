@@ -14,8 +14,8 @@ import pytest  # noqa: E402
 
 from ace_jax.fit.hypers import Hypers  # noqa: E402
 from ace_jax.fit.linear.lml_svd import log_marginal_likelihood_svd, svd_statistics  # noqa: E402
-from ace_jax.fit.linear.objective import log_marginal_likelihood_qr  # noqa: E402
-from ace_jax.fit.linear.stats import QRStats  # noqa: E402
+from ace_jax.fit.objective import log_marginal_likelihood_qr  # noqa: E402
+from ace_jax.fit.stats import QRStats  # noqa: E402
 
 mp = pytest.importorskip("mpmath")
 L = 36

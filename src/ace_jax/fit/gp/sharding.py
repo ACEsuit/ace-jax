@@ -6,7 +6,7 @@ import jax
 from jax import shard_map                      # public since JAX 0.7; keyword is check_vma
 from jax.sharding import NamedSharding, PartitionSpec as P
 
-from .stats import Stats, sufficient_statistics
+from ..stats import Stats, sufficient_statistics
 
 
 def sufficient_statistics_sharded(theta, spec, model, ind, cfg, ds, mesh):

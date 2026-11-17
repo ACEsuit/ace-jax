@@ -19,7 +19,7 @@ from ace_jax.fit.hypers import Hypers, default_prior, to_array
 from ace_jax.fit.gp.inducing import (GPConfig, build_pmap, descriptor_scale, select_inducing,
                                    site_features)
 from ace_jax.fit.gp.kernels import KernelSpec
-from ace_jax.fit.linear.objective import Problem, make_lml
+from ace_jax.fit.objective import Problem, make_lml
 
 XYZ = FIXTURE_DIR / "si_tiny_train.xyz"
 pytestmark = pytest.mark.skipif(not XYZ.exists(), reason="missing si_tiny_train.xyz")
@@ -89,9 +89,9 @@ def test_pair_residual_inputs_match_projection(pair_problem):
 def test_hostcache_statistics_match_device(cached_problem, chunk):
     """The correctness check proper: cached linear statistics and streamed residual
     statistics equal the device path's to f64 roundoff, for any chunking."""
-    from ace_jax.fit.linear.hostcache import HostCachedLML
+    from ace_jax.fit.gp.hostcache import HostCachedLML
     from ace_jax.fit.hypers import from_array
-    from ace_jax.fit.linear.stats import linear_statistics, residual_statistics
+    from ace_jax.fit.stats import linear_statistics, residual_statistics
     prob, ds = cached_problem
     a = jnp.asarray(to_array(THETA))
     with highest_precision():
@@ -111,7 +111,7 @@ def test_hostcached_lml_matches_device_lml(cached_problem, chunk, request):
     """Value and gradient of the host-cached LML equal make_lml's.  The statistics
     agree to ~1e-15 (above), but the posterior precision here has cond ~1e19, so
     summation-order roundoff reaches the LML at ~1e-9 relative: tolerances say so."""
-    from ace_jax.fit.linear.hostcache import HostCachedLML
+    from ace_jax.fit.gp.hostcache import HostCachedLML
     prob, ds = cached_problem
     a = jnp.asarray(to_array(THETA))
     with highest_precision():
@@ -134,7 +134,7 @@ def test_hostcache_requires_pair_features():
     """The isotropic full-descriptor map (d = D) would cache a D-wide input
     Jacobian per batch -- as large as the ACE Jacobian itself: refuse, and point
     at the low-rank --density pca map."""
-    from ace_jax.fit.linear.hostcache import HostCachedLML
+    from ace_jax.fit.gp.hostcache import HostCachedLML
     prob, ds = _problem(None)
     with pytest.raises(ValueError, match="density"):
         HostCachedLML(prob, ds)

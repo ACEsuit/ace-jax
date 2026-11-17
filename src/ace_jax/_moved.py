@@ -9,11 +9,16 @@ import warnings
 REMOVED_IN = "0.8"
 
 
-def moved(old, new):
+def moved(old, new, *also):
+    """`also`: modules that took some of the old module's names when it was split."""
     def __getattr__(name):
         if name.startswith("_"):
             raise AttributeError(f"module {old!r} has no attribute {name!r} (it moved to {new})")
-        warnings.warn(f"{old} moved to {new}; the old name will be removed in ace-jax {REMOVED_IN}",
-                      DeprecationWarning, stacklevel=2)
-        return getattr(importlib.import_module(new), name)
+        for target in (new, *also):
+            mod = importlib.import_module(target)
+            if hasattr(mod, name):
+                warnings.warn(f"{old} moved to {target}; the old name will be removed in ace-jax {REMOVED_IN}",
+                              DeprecationWarning, stacklevel=2)
+                return getattr(mod, name)
+        raise AttributeError(f"module {old!r} has no attribute {name!r} (it moved to {new})")
     return __getattr__

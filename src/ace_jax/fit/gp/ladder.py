@@ -110,7 +110,7 @@ def run_map_ps(ps, prob, ds, *, steps=500, lr=0.02, seed=0):
     `ind.embed` with its rows normalised (`normalize_rows(E)`), as the kernel's
     coregionalization expects -- the embed block carries the RAW E -- so a raw
     and a pre-normalised E give the same inner MAP."""
-    from ..linear.objective import make_lml
+    from ..objective import make_lml
     from ..radial.embedding import normalize_rows
     h, embed = ps.materialise()
     if embed is not None:

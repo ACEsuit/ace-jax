@@ -5,17 +5,31 @@
 ### Changed
 
 - **`ace_jax.fit` is split by role, and uncertainty quantification is `ace_jax.uq`.** No behaviour changes.
-  The old module names still import, with a `DeprecationWarning`, until 0.8; names with a leading
-  underscore do not. `ace_jax.fit.pipeline`, `ace_jax.fit.data`, `ace_jax.fit.xyz`, `ace_jax.fit.rows`
-  and `ace_jax.fit.paramset` do not move. `docs/dev/specs/2026-11-17-package-structure-design.md`.
+  `ace_jax.fit.linear` and `ace_jax.uq` are generic: they take rows of any quantities and know no model.
+  `ace_jax.fit.{stats, objective, solve, ard, jackknife}` keep their names and are the energy, force and
+  virial fit on top of them. Modules that moved still import under the old name, with a
+  `DeprecationWarning`, until 0.8; names with a leading underscore do not.
+  `docs/dev/specs/2026-11-17-package-structure-design.md`.
 
   | Before | Now |
   |---|---|
-  | `fit.{stats, solve, objective, lml_host, lml_svd, hostcache, prior_root, block_lbfgs, newton, multistart, varpro, sharding, progress}` | `fit.linear.*` |
-  | `fit.{ard, jackknife, conformal, pops, support, loo, clusters}` | `uq.*` |
-  | `fit.{kernels, inducing, ladder, predict, feature, density}` | `fit.gp.*` |
+  | `fit.{lml_host, lml_svd, prior_root, block_lbfgs, newton, multistart, varpro, progress}` | `fit.linear.*` (`prior_root.prior_root` is in `fit.ard`) |
+  | `fit.{conformal, pops, support, clusters}` | `uq.*` |
+  | `fit.{kernels, inducing, ladder, predict, feature, density, hostcache, loo, sharding}` | `fit.gp.*` |
   | `fit.radial_learn`, `fit.radial_model`, `fit.embedding` | `fit.radial.learn`, `fit.radial.model`, `fit.radial.embedding` |
   | `fit.rowcheck` | `fit.pipeline.rowcheck` |
+
+### Added
+
+- **A generic linear fit, `ace_jax.fit.linear`.** A row generator gives `(Phi, Y, w)` for each quantity of
+  a batch, with one or more right-hand sides `Y`. `stats.qr_statistics` and `stats.gram_statistics` stream
+  it into one `Factor` or `Gram` for each quantity (on the host with checkpoints and MPI, or on a device).
+  `objective.log_evidence_qr`, `objective.posterior_qr` and `lml_host.HostQREvidence` give the evidence
+  and the posterior. `ace_jax.uq.ard.ARDEvidence` and `ace_jax.uq.jackknife.press_scores_rows` take any
+  labelled quantities. The energy, force and virial fit uses these functions; its results are bit-identical.
+
+### Changed
+
 - **`ace_jax.eval.product`** holds the A basis and its products as functions of arrays (`pool_sparse`,
   `edge_a`, `product_basis`, `estimate_a_bytes`, ...). `ace_jax.eval.edge_model` and `ace_jax.eval.model`
   still give these names. `compact` is in `ace_jax.eval.dense`, `cubic_bspline_coefs` in

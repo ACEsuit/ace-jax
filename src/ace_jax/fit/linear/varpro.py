@@ -10,7 +10,7 @@ The gradient d/deta of the projected residual is obtained by autodiff THROUGH
 the inner solve (JAX differentiates the QR/lstsq exactly), i.e. the
 Golub-Pereyra/Kaufman VarPro gradient with no hand-coded formula.  The inner
 solve is the stable stacked least squares [ (w) Phi ; Lam_sqrt ] (kappa, not
-kappa^2), matching ace_jax.fit.linear.solve.
+kappa^2), matching ace_jax.fit.solve.
 """
 import jax.numpy as jnp
 from jax.scipy.optimize import minimize

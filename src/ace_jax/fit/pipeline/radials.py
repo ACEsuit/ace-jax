@@ -22,7 +22,7 @@ from ..data import build_dataset
 from ..hypers import default_prior
 from ..gp.inducing import GPConfig, blr_inducing
 from ..gp.kernels import KernelSpec
-from ..linear.objective import Problem
+from ..objective import Problem
 from ..radial.learn import fit_radial
 from ..radial.model import rnl_degrees, to_analytic, with_radial
 from .config import resolved_noise

@@ -16,12 +16,12 @@ from ..hypers import Hypers, from_array, to_array
 from .kernels import K_MM, k_rows
 from ..summary import site_summary
 from .feature import apply as _feat, dwarp
-from ..linear.objective import posterior, posterior_from_qr, uses_qr
+from ..objective import posterior, posterior_from_qr, uses_qr
 from ..data import VOIGT, flat_edges
 from ..metrics import crps_gaussian
 from ...uq.pops import leverage_select, pops_var
 from ..rows import _cat_rows, batch_rows_parts, linear_rows_bounded, residual_inputs
-from ..linear.stats import (DeviceRows, HostRows, _stream_pops_pointwise, available_host_bytes, host_rows_bytes,
+from ..stats import (DeviceRows, HostRows, _stream_pops_pointwise, available_host_bytes, host_rows_bytes,
                     sufficient_statistics)
 
 
@@ -265,7 +265,7 @@ def _predict_fn(prob, dtc, deriv_dtc):
     prob.row_dtype "float32": the batch's design rows in float32, as the training statistics
     were (stats.float32_rows); the posterior products and the E0 offset (_pack) stay float64."""
     if getattr(prob, "row_dtype", "float64") == "float32":
-        from ..linear.stats import float32_rows
+        from ..stats import float32_rows
         rows_prob = prob._replace(model=float32_rows(prob.model, None)[0])
         f32 = lambda b: b._replace(rij=b.rij.astype(jnp.float32))      # noqa: E731
         return jax.jit(lambda th, mu, L, b: _predict_batch(th, rows_prob, mu, L, f32(b), dtc, deriv_dtc))
@@ -290,7 +290,7 @@ def _train_stats(theta, prob, ds_train, stats):
     if stats is not None:
         return stats(theta)
     if uses_qr(prob):
-        from ..linear.stats import linear_qr_statistics
+        from ..stats import linear_qr_statistics
         return linear_qr_statistics(prob.model, prob.cfg, ds_train, row_dtype=getattr(prob, "row_dtype", "float64"))
     return sufficient_statistics(theta, prob.spec, prob.model, prob.ind, prob.cfg, ds_train)
 
@@ -298,7 +298,7 @@ def _train_stats(theta, prob, ds_train, stats):
 def fit_posterior(theta, st, prob, ds_train):
     """The posterior (mu, L) from training statistics st, by the factorisation the LML used:
     QR for QRStats, else the Cholesky (stable_posterior's QR fallback when it fails)."""
-    from ..linear.stats import QRStats
+    from ..stats import QRStats
     if isinstance(st, QRStats):
         return posterior_from_qr(theta, st, prob)
     return stable_posterior(theta, st, prob, ds_train)
@@ -312,7 +312,7 @@ def stable_posterior(theta, st, prob, ds_train):
     mu, L = posterior(theta, st, prob)
     if bool(jnp.all(jnp.isfinite(L))) and bool(jnp.all(jnp.isfinite(mu))):
         return mu, L
-    from ..linear.solve import posterior_qr
+    from ..solve import posterior_qr
     return posterior_qr(prob, ds_train, theta)
 
 
@@ -461,7 +461,7 @@ class PopsRidgePath:
         stable route when D^-1 M D^-1 + lam is too ill-conditioned for a Cholesky (kappa^2 > 1/eps), which is where
         a near-interpolating evidence fit with sigma_c on its bound puts the BLR mean."""
         import warnings
-        from ..linear.solve import posterior_qr
+        from ..solve import posterior_qr
         warnings.warn(f"POPS mean: the Cholesky of the ridge system (lam = {lam:.3g}) is not finite; using the "
                       "streamed QR", RuntimeWarning, stacklevel=3)
         th = self.theta._replace(log_sigma_c=jnp.asarray(-0.5 * jnp.log(lam), dtype=jnp.asarray(self.theta.log_sigma_c).dtype))

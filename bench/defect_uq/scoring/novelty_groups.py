@@ -124,7 +124,7 @@ def quantiles(s, grp, cfg, G, alpha, n_min, fallback):
 
 def load_big(spec, post):
     """(s, g, gamma-input X, Z, family, cell) of the free atoms of one big_errors file + its descriptors."""
-    from ace_jax.uq.ard import conformal_scores
+    from ace_jax.fit.ard import conformal_scores
     err, desc = spec.split(":")
     e = np.load(err, allow_pickle=True)
     d = np.load(desc)
@@ -146,7 +146,7 @@ def main(argv=None):
     sys.path.insert(0, str(pathlib.Path(__file__).parent))
     from support_rebuild import load_ref
 
-    from ace_jax.uq.ard import ARDPosterior
+    from ace_jax.fit.ard import ARDPosterior
     from ace_jax.uq.conformal import effective_n_min
     from ace_jax.uq.support import _proj, support_features
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])

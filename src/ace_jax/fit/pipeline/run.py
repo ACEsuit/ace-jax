@@ -62,7 +62,7 @@ def fit(cfg, data, log=print, on_stage=None):
         tm = {**b.timings, **mf.timings, **pr.timings, "total": time.time() - T0}
         return FitResult(cfg, data, b, mf.theta, mf, rg, pr, tm, None, radial, readout)
     with highest_precision():
-        from ..linear.stats import mpi_shards, qr_checkpoint
+        from ..stats import mpi_shards, qr_checkpoint
         comm = None
         if cfg.mpi:
             from mpi4py import MPI
@@ -89,7 +89,7 @@ def fit(cfg, data, log=print, on_stage=None):
         stage("rungs", rg)
         ard = None
         if cfg.uq in ("ard", "ard-gp"):
-            from ...uq.ard import run_ard_stage
+            from ..ard import run_ard_stage
             # joint mode refits on the objective's cached linear statistics (not a second pass);
             # drop everything else the objective holds -- the LML, its jitted objective and the
             # stats closure (ARD predicts from its own posterior) -- then free their buffers.

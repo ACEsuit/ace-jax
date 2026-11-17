@@ -1,6 +1,8 @@
-"""The linear arm's QR evidence (objective.log_marginal_likelihood_qr) evaluated on the host with its structure.
+"""The QR evidence of a diagonal-prior linear model (objective.log_evidence_qr) evaluated on the host with its
+structure.  Written for the quantities q of any statistics object (`stats.quantities_of`); a potential fit
+has E, F and V.
 
-At M = 0 the evidence reads theta only through four scales, p = (s, a_E, a_F, a_V) = (1 / sigma_c^2,
+The evidence reads its hyperparameters only through the scales p = (s, a_q ...) = (1 / sigma_c^2,
 1 / sigma_q^2):  S = s M_0 + C + sum_q a_q R_q^T R_q, with M_0 = diag(gamma^2) on the readout columns and
 C = diag(e0_prec) on the joint-E0 columns.  The dense form QR-factors the stacked (4L x L) matrix
 [diag(sqrt(lin)); sqrt(a_q) R_q] per evaluation, forms Q, and autodiff differentiates through both: ~25 L^3
@@ -49,25 +51,31 @@ def _frob_sym(X, Y):
 
 
 class HostQREvidence:
-    """log_marginal_likelihood_qr(theta, qs, prob) at M = 0, by the structured host evaluation (module
-    docstring).  `lml(theta)` is the JAX entry point; n_factor counts factorisations (one per theta: value,
-    gradient and Hessian at the same theta share it).
+    """The evidence of statistics `qs` (QR form: `.factors` and `.quantities`, or a sequence of Factor) under
+    the prior of `prob` (`.gamma`, and `.e0_prec` for columns with a fixed precision), by the structured host
+    evaluation (module docstring).  `lml(theta)` is the JAX entry point: theta has `log_sigma_c` and one
+    `log_sigma_<quantity>` per quantity.  n_factor counts factorisations (one per theta: value, gradient and
+    Hessian at the same theta share it).
 
-    shared: the caller ties sigma_E and sigma_V to sigma_F (cfg.noise "shared", paramset.tied_likelihood), so
-    only log_sigma_F is read and the three factors are merged once, here: one tpqrt merge and one trmm per
-    evaluation instead of three.  The merge's last diagonal r0 joins the residual outside c:
+    shared: the caller ties every quantity's noise to one (a potential fit: sigma_E and sigma_V to sigma_F,
+    cfg.noise "shared", paramset.tied_likelihood), so only that scale is read (True: the statistics'
+    `shared_quantity`, else the first; or the quantity's label) and the factors are merged once, here: one
+    tpqrt merge and one trmm per evaluation instead of one per quantity.  The merge's last diagonal r0 joins the residual outside c:
     kappa = sum_q kappa_q + r0^2.  Only valid under that tie: an untied caller gets the wrong derivatives."""
 
     def __init__(self, qs, prob, shared=False):
-        R = [np.asarray(getattr(qs, f"R_{q}"), np.float64) for q in "EFV"]
-        c = [np.asarray(getattr(qs, f"c_{q}"), np.float64) for q in "EFV"]
-        n = np.array([float(getattr(qs, f"n_{q}")) for q in "EFV"])
-        self.logw = sum(float(getattr(qs, f"logw_{q}")) for q in "EFV")
-        if getattr(qs, "rho_E", None) is not None:
-            kappa = np.array([float(getattr(qs, f"rho_{q}")) ** 2 for q in "EFV"])
+        from .stats import quantities_of
+        fs, labels = quantities_of(qs)
+        R = [np.asarray(f.R, np.float64) for f in fs]
+        c = [np.asarray(f.c, np.float64) for f in fs]
+        n = np.array([float(f.n) for f in fs])
+        self.logw = sum(float(f.logw) for f in fs)
+        if fs[0].rho is not None:
+            kappa = np.array([float(f.rho) ** 2 for f in fs])
         else:
-            kappa = np.array([float(getattr(qs, f"yy_{q}")) - float(cq @ cq) for cq, q in zip(c, "EFV")])
-        self.shared, self.sigmas = bool(shared), ("F",) if shared else ("E", "F", "V")
+            kappa = np.array([float(f.yy) - float(cq @ cq) for cq, f in zip(c, fs)])
+        one = getattr(qs, "shared_quantity", labels[0]) if shared is True else shared
+        self.shared, self.sigmas = bool(shared), (one,) if shared else labels
         if shared:
             L = R[0].shape[0]
             A = np.zeros((L + 1, L + 1), order="F")

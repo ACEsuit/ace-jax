@@ -1,4 +1,4 @@
-"""Moved to `ace_jax.fit.linear.hostcache`; this stub warns and will be removed in ace-jax 0.8."""
+"""Moved to `ace_jax.fit.gp.hostcache`; this stub warns and will be removed in ace-jax 0.8."""
 from .._moved import moved
 
-__getattr__ = moved(__name__, "ace_jax.fit.linear.hostcache")
+__getattr__ = moved(__name__, "ace_jax.fit.gp.hostcache")

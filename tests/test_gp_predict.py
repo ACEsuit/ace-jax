@@ -14,7 +14,7 @@ from ace_jax.fit.hypers import Hypers, default_prior, to_array
 from ace_jax.fit.gp.inducing import GPConfig, descriptor_scale, select_inducing, site_features
 from ace_jax.fit.gp.kernels import KernelSpec
 from ace_jax.fit.metrics import coverage, crps_gaussian, sigma_ratio, spearman, summarise
-from ace_jax.fit.linear.objective import Problem
+from ace_jax.fit.objective import Problem
 from ace_jax.fit.gp.predict import predict_fixed, predict_mixture
 
 XYZ = FIXTURE_DIR / "si_tiny_train.xyz"

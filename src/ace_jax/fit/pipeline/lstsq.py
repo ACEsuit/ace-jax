@@ -15,7 +15,7 @@ import time
 import numpy as np
 
 from ..hypers import to_array
-from ..linear.solve import stacked_design
+from ..solve import stacked_design
 from .mapfit import MapFit
 from .rungs import Rungs
 

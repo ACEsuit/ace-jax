@@ -63,7 +63,7 @@ p.add_argument("--fix-rho", default=None,
 p.add_argument("--lml", choices=["device", "host-cache"], default="device",
                help="joint-LML engine. host-cache (needs --arm gp --density pair, --rungs map, --opt lbfgs): "
                     "cache the linear design rows in host RAM once and never re-evaluate the ACE basis "
-                    "per evaluation (ace_jax.fit.linear.hostcache; ~rows x L x 8 B of host RAM)")
+                    "per evaluation (ace_jax.fit.gp.hostcache; ~rows x L x 8 B of host RAM)")
 p.add_argument("--lml-chunk", type=int, default=64, help="host-cache: batches per host->device transfer")
 p.add_argument("--no-predict-train", action="store_true", help="skip train-set UQ prediction (a diagnostic; ~46%% of runtime at Cantor scale)")
 p.add_argument("--rungs", default="map,laplace"); p.add_argument("--n-draws", type=int, default=64)
