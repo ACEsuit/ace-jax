@@ -26,6 +26,8 @@ PRESETS = {
     "ACE variants": ("ace", "ace_E10", "ace_f32", "ace_ffi_reduced", "ace_lr", "ace_pshape", "ace_pshape_lr", "ace_pshape_E10"),
     "Same model, other code": ("ace", "ace_tab", "ace_tabfork", "ace_trim", "ace_ffi", "ace_ffi_reduced", "ace_tab_mixed", "mace_L0",
                                "mace_L1", "mace_xl_L0", "mace_xl_L1"),
+    # (polymlp, a first-pass family, is under "All" only: a preset of its own waits for the review of
+    # docs/dev/accuracy-cost-results.md -- the page's JSON lists the presets)
     "All": None,
 }
 GAP_X, GAP_Y, ROW_H = 0.08, 0.1, 380          # subplot gaps (paper fraction) and the height of one row (px)
