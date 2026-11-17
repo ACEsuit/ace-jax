@@ -203,3 +203,20 @@ def test_compiled_predictor_with_the_environment_group(basis_env):
             assert set(ref[name]) == set(got[name])
             worst = max(np.abs(got[name][k] - v).max() / max(1.0, np.abs(v).max()) for k, v in ref[name].items())
             assert worst < 1e-10, (name, worst)
+
+
+@pytest.mark.parametrize("threads", [2, 5])
+def test_threaded_prediction_is_the_single_call(basis_env, threads):
+    """Rows in chunks on a thread pool (`threads` > 1): the same blocks as the one compiled call,
+    with the coupled and bond-environment groups on, for chunk counts that do and do not divide
+    the number of atoms of a species."""
+    from ace_jax.ham.offsite_fast import OffsitePredictor
+    m = random_model(basis_env)
+    one, many = OffsitePredictor(m), OffsitePredictor(m, threads=threads)
+    for seed in (0, 3):
+        pos, cell, numbers = structure(seed)
+        ref, got = one(pos, cell, numbers), many(pos, cell, numbers)
+        for name in ref:
+            assert set(ref[name]) == set(got[name])
+            assert max(np.abs(got[name][k] - v).max() for k, v in ref[name].items()) < 1e-12 * max(
+                np.abs(v).max() for v in ref[name].values())

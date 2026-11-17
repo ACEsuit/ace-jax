@@ -66,7 +66,7 @@ for zi in elements:
                 if k:
                     off[(zi, zj, s1, s2, L)] = rng.normal(size=(nc, k))
 f_on = OnsitePredictor(OnsiteModel(basis=site, coef=on, orbitals=orb, channels=channels))
-f_off = OffsitePredictor(OffsiteModel(bond=basis, coef=off, orbitals=orb, channels=channels))
+f_off = OffsitePredictor(OffsiteModel(bond=basis, coef=off, orbitals=orb, channels=channels), threads=int(os.environ.get("HAM_THREADS", 1)))
 N = len(d.numbers)
 g, dense = f_off.dense(d.positions, d.cell, d.numbers)
 n_blocks = len(g.i) + N

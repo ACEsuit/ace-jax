@@ -381,3 +381,25 @@ The compiled off-site predictor now takes one dense layout per ordered species p
 | ace-jax, site (2, 2) + env (5, 6, 4, 4, 4) (meets the paper's target) | 5.0 ms | 14.2 ms |
 
 - **Like for like, the model that meets the paper's target is 10.7 times faster than MACE-H on a performance core and 8.3 times on an efficiency core.** The ratios between ace-jax configurations in the earlier tables stand; their absolute times are the efficiency core's.
+
+## CPU threads (2026-11-17)
+
+XLA's own CPU threading gives this program little: 1.65 times on 16 cores (mnf148, 2 x 16-core Xeon Gold 6130, idle), and on lestrade it was sometimes slower than one thread. Independent compiled calls from Python threads do scale (they release the GIL): 16 concurrent calls gave 15 times the one-core throughput.
+
+`OffsitePredictor(model, threads=T)` / `HamiltonianPredictor(onsite, offsite, threads=T)` (CPU backend only; default 1) evaluates the rows of every species-pair layout in chunks on a pool of T threads, in passes whose chunks are each complete in themselves: (1) the bond geometry of every layout and the second-atom part on the reverse layouts; (2) the canonical blocks, reading pass 1 through the reverse index; (3) for `dense`, the per-bond output gathered (and, for the other orientation, transposed) in chunks of bonds; for `prepare`, the other orientation's layout. A test holds the result to the single call's at 1e-12.
+
+Full H, 108-atom SiC, site (2, 2) + env (5, 6, 4, 4, 4), float64, mnf148 (`HAM_THREADS=T taskset -c 0-(T-1) offsite_time_deeph.py`):
+
+| threads | XLA threading only | chunks on a thread pool | speed-up |
+|---|---|---|---|
+| 1 | 19.0 ms per atom | 18.8 ms | 1.0 |
+| 2 | 15.4 | 10.8 | 1.7 |
+| 4 | 13.5 | 6.3 | 3.0 |
+| 8 | 11.6 | 3.6 | 5.2 |
+| 16 | 11.5 | 2.7 | 7.0 |
+| 32 (both sockets) | – | 2.6 | 7.2 |
+
+- The off-site part alone scales 8.1 times on 16 threads. What is left serial: the site features and on-site blocks (45 ms of 289 at 16 threads, still on XLA's threading), the host neighbour and bond lists (about 15 ms), and memory traffic of the 96 MB of blocks.
+- At 32 threads a chunk is two atoms of this 108-atom cell; larger structures should scale further. Not measured.
+- lestrade, 8 performance cores, with two unrelated jobs running on two of them: 5.1 ms (1 thread) to 1.4 ms per atom (8 threads).
+- For a DFT code that runs one MPI rank per core, the one-thread figure is the relevant one, and each rank can call the predictor for its own atoms; that interface is not built.

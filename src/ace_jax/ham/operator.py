@@ -138,13 +138,13 @@ class Prepared:
 class HamiltonianPredictor:
     """`onsite` and `offsite`: fitted models on the same site basis, orbital basis and channels."""
 
-    def __init__(self, onsite, offsite):
+    def __init__(self, onsite, offsite, threads=1):
         if onsite.channels != offsite.channels or onsite.orbitals != offsite.orbitals:
             raise ValueError("the on-site and off-site models have different channels or orbital bases")
         if onsite.basis is not offsite.bond.site:
             raise ValueError("the on-site and off-site models must share one site basis (the same object): "
                              "its features are evaluated once for both")
-        self.onsite, self.offsite = OnsitePredictor(onsite), OffsitePredictor(offsite)
+        self.onsite, self.offsite = OnsitePredictor(onsite), OffsitePredictor(offsite, threads=threads)
         self.channels, self.orbitals = onsite.channels, onsite.orbitals
         self._k = {}                                   # slots of the device neighbour lists, by cutoff
         self._ns = None
@@ -221,7 +221,7 @@ class HamiltonianPredictor:
         on = _readout(self.onsite.readout, F, atoms)
         g = B.bond_graph(basis, positions, cell, numbers, pbc)
         pl = OF.PairLayouts(g, numbers, orb.species, basis.rcut_bond)
-        off = self.offsite.device(F, pl.lay, B.env_lists(basis, positions, cell, pbc))
+        off = self.offsite.blocks(F, pl.lay, B.env_lists(basis, positions, cell, pbc))
         offsets = np.concatenate([[0], np.cumsum([orb.n_orb(z) for z in numbers])])
         lists_off = {}
         for key in off:

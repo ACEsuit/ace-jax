@@ -7,6 +7,10 @@ costs one matrix-vector product with its own u (two: the i group on its first at
 group on its second, read through the reverse bond), i.e. a batched matrix product per atom
 over its neighbours, plus the two-centre term and a sparse scatter of the parts into the
 orbital block.  Nothing is pooled per bond."""
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from functools import partial
+
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -115,19 +119,40 @@ def _radial(x, n):
     return jnp.stack(T[:n], axis=-1) * ((1 - x * x) ** 2)[..., None]
 
 
-def _canonical(pack, Fa, Fb, ga, gb, rev, usign, n_cpl, l_cpl):
+def _take(x, rev, n, K):
+    """Rows of the flat (row, slot) array `x` at the flat positions `rev`, as (n, K, ...)."""
+    return x.reshape(-1, *x.shape[2:])[rev].reshape(n, K, *x.shape[2:])
+
+
+def _usign(l_cpl):
+    return jnp.asarray(np.concatenate([[(-1.0) ** l] * (2 * l + 1) for l in range(l_cpl + 1)]))
+
+
+def _dj(pack, Fb, Ub, n_cpl, l_cpl):
+    """Per (L, p) of the pack, (n_b, K, c, Q, 2L+1) or None: the part of the canonical blocks that
+    lives on the bond's SECOND atom, evaluated there, on the reverse bond (whose u is the bond's
+    with the sign (-1)^l).  The canonical layout reads it back through its reverse index."""
+    out = []
+    for k, (L, _p) in enumerate(pack.lps):
+        if not (n_cpl and pack.groups[k]):
+            out.append(None)
+            continue
+        nc, Q = pack.W0[k].shape[:2]
+        Cj = jnp.zeros((Ub.shape[0], nc, Q, 2 * L + 1, n_cpl, (l_cpl + 1) ** 2), Ub.dtype)
+        for (l, lam, pi), Wj, T in zip(pack.groups[k], pack.Wj[k], pack.T[k]):
+            Cj = Cj.at[..., l * l:(l + 1) ** 2].add(jnp.einsum("cqnb,abu,muM->acqMnm", Wj, Fb[(lam, pi)], T))
+        out.append(jnp.einsum("acqMnm,aKnm->aKcqM", Cj, Ub * _usign(l_cpl)))
+    return tuple(out)
+
+
+def _canonical(pack, Fa, ga, Aenv, dj, n_cpl, l_cpl):
     """(n_a, K, c, n_orb_a, n_orb_b): the canonical blocks of one species pair on the slots of its
-    layout.  `ga`: the bond geometry on this layout (first atoms of species a); `gb`: on the
-    reverse layout (b -> a), where the features that live on the second atom are evaluated;
-    `rev`: for each slot, the flat position of its reverse bond in that layout."""
-    phi0, U, Y, phi2, side = ga
+    layout.  `ga` = (phi0, U, Y, phi2): the bond geometry on these rows; `Aenv`: the pooled bond
+    environment of both ends; `dj`: `_dj` of the reverse layout, already gathered to these slots."""
+    phi0, U, Y, phi2 = ga
     n, K = phi0.shape[:2]
     na, nb = pack.shape
     nlm = (l_cpl + 1) ** 2
-    Aenv = None
-    if side is not None:                                  # both ends: the reverse bond's half
-        sb = gb[4]
-        Aenv = side + sb.reshape(-1, *sb.shape[2:])[rev].reshape(side.shape)
     flat = None
     for k, (L, _p) in enumerate(pack.lps):
         W0 = pack.W0[k]
@@ -135,18 +160,10 @@ def _canonical(pack, Fa, Fb, ga, gb, rev, usign, n_cpl, l_cpl):
         yL = Y[..., L * L:(L + 1) ** 2]
         part = jnp.einsum("cqn,aKn,aKM->aKcqM", W0, phi0, yL)
         if n_cpl and pack.groups[k]:
-            Ub = gb[1]
             Ci = jnp.zeros((n, nc, Q, 2 * L + 1, n_cpl, nlm), phi0.dtype)
-            Cj = jnp.zeros((Ub.shape[0], nc, Q, 2 * L + 1, n_cpl, nlm), phi0.dtype)
-            for (l, lam, pi), Wi, Wj, T in zip(pack.groups[k], pack.Wi[k], pack.Wj[k], pack.T[k]):
-                sl = slice(l * l, (l + 1) ** 2)
-                Ci = Ci.at[..., sl].add(jnp.einsum("cqnb,abu,muM->acqMnm", Wi, Fa[(lam, pi)], T))
-                Cj = Cj.at[..., sl].add(jnp.einsum("cqnb,abu,muM->acqMnm", Wj, Fb[(lam, pi)], T))
-            part = part + jnp.einsum("acqMnm,aKnm->aKcqM", Ci, U)
-            # the j group lives on the bond's second atom: evaluate it there, on the reverse bond
-            # (whose u is this bond's with the sign (-1)^l), and read it back through `rev`
-            Dj = jnp.einsum("acqMnm,aKnm->aKcqM", Cj, Ub * usign)
-            part = part + Dj.reshape(-1, nc, Q, 2 * L + 1)[rev].reshape(n, K, nc, Q, 2 * L + 1)
+            for (l, lam, pi), Wi, T in zip(pack.groups[k], pack.Wi[k], pack.T[k]):
+                Ci = Ci.at[..., l * l:(l + 1) ** 2].add(jnp.einsum("cqnb,abu,muM->acqMnm", Wi, Fa[(lam, pi)], T))
+            part = part + jnp.einsum("acqMnm,aKnm->aKcqM", Ci, U) + dj[k]
         if pack.egroups[k]:
             # bond environment.  Per atom (its bonds' features fit the cache): the features
             # phi_n (Y_l (x) A^env_lam)^L of every group side by side, then ONE matrix product with
@@ -191,6 +208,26 @@ def _env_side(e_rij, e_live, rvec, mask, r_env, rmax, n_env, l_env):
     return jax.lax.map(one, (e_rij, e_live, rvec, mask))
 
 
+def _geo(rows, rvec, mask, env, rcut, shape_args):
+    """The bond geometry of the rows of one layout: (phi0, U, Y, phi2, side)."""
+    n_bond, n_cpl, l_cpl, lmax, n_env, l_env, n_ebond, l_ebond, r_env = shape_args
+    x = jnp.clip(jnp.sqrt(jnp.sum(rvec * rvec, axis=-1)) / rcut, 0.0, 1.0)
+    Y = real_spherical_harmonics(rvec, max(lmax, 1))
+    U = _radial(x, n_cpl)[..., :, None] * Y[..., None, :(l_cpl + 1) ** 2] * mask[..., None, None]
+    phi2 = side = None
+    if n_env:
+        e_rij, e_count = env
+        e_live = jnp.arange(e_rij.shape[1])[None, :] < e_count[:, None]
+        side = _env_side(e_rij[rows], e_live[rows], rvec, mask, r_env, r_env + 0.5 * rcut, n_env, l_env)
+        phi2 = _radial(x, n_ebond) * mask[..., None]
+    return _radial(x, n_bond) * mask[..., None], U, Y, phi2, side
+
+
+def _back(c, rev, n, K):
+    """The other orientation of the blocks `c`: the reverse bond's block, transposed."""
+    return jnp.swapaxes(c.reshape(-1, *c.shape[2:])[rev], -1, -2).reshape(n, K, c.shape[2], c.shape[4], c.shape[3])
+
+
 def _blocks_impl(packs, F, lay, rcut, shape_args, env=None):
     """{(za, zb): (n_a, K_ab, c, n_orb_a, n_orb_b)} for every ordered species pair in `lay`.
 
@@ -198,33 +235,21 @@ def _blocks_impl(packs, F, lay, rcut, shape_args, env=None):
     species zb in dense slots (padding at the cutoff), and for each slot the flat position of its
     reverse bond in lay[(zb, za)].  Each bond is evaluated once, in the layout of its canonical
     pair (za <= zb); the other orientation is that block transposed."""
-    n_bond, n_cpl, l_cpl, lmax, n_env, l_env, n_ebond, l_ebond, r_env = shape_args
-    usign = jnp.asarray(np.concatenate([[(-1.0) ** l] * (2 * l + 1) for l in range(l_cpl + 1)]))
-    geo = {}
-    for key, (rows, rvec, mask, _rev) in lay.items():
-        dist = jnp.sqrt(jnp.sum(rvec * rvec, axis=-1))
-        x = jnp.clip(dist / rcut, 0.0, 1.0)
-        Y = real_spherical_harmonics(rvec, max(lmax, 1))
-        U = _radial(x, n_cpl)[..., :, None] * Y[..., None, :(l_cpl + 1) ** 2] * mask[..., None, None]
-        phi2 = side = None
-        if n_env:
-            e_rij, e_count = env
-            e_live = jnp.arange(e_rij.shape[1])[None, :] < e_count[:, None]
-            side = _env_side(e_rij[rows], e_live[rows], rvec, mask, r_env, r_env + 0.5 * rcut, n_env, l_env)
-            phi2 = _radial(x, n_ebond) * mask[..., None]
-        geo[key] = (_radial(x, n_bond) * mask[..., None], U, Y, phi2, side)
+    n_cpl, l_cpl, n_env = shape_args[1], shape_args[2], shape_args[4]
+    geo = {key: _geo(rows, rvec, mask, env, rcut, shape_args) for key, (rows, rvec, mask, _rev) in lay.items()}
     out = {}
     for (za, zb), pack in packs.items():
         if (za, zb) not in lay:
             continue
-        rows_a, _, _, rev_ab = lay[(za, zb)]
-        rows_b, _, _, rev_ba = lay[(zb, za)]
-        Fa = {k: v[rows_a] for k, v in F.items()}
-        Fb = Fa if za == zb else {k: v[rows_b] for k, v in F.items()}
-        c = _canonical(pack, Fa, Fb, geo[(za, zb)], geo[(zb, za)], rev_ab, usign, n_cpl, l_cpl)
-        # the other orientation: the reverse bond's block, transposed
-        nb_rows, Kb = lay[(zb, za)][2].shape
-        back = jnp.swapaxes(c.reshape(-1, *c.shape[2:])[rev_ba], -1, -2).reshape(nb_rows, Kb, c.shape[2], c.shape[4], c.shape[3])
+        rows_a, _, mask_a, rev_ab = lay[(za, zb)]
+        rows_b, _, mask_b, rev_ba = lay[(zb, za)]
+        ga, gb = geo[(za, zb)], geo[(zb, za)]
+        n, K = mask_a.shape
+        dj = tuple(None if d is None else _take(d, rev_ab, n, K)
+                   for d in _dj(pack, {k: v[rows_b] for k, v in F.items()}, gb[1], n_cpl, l_cpl))
+        Aenv = ga[4] + _take(gb[4], rev_ab, n, K) if n_env else None      # both ends: the reverse bond's half
+        c = _canonical(pack, {k: v[rows_a] for k, v in F.items()}, ga[:4], Aenv, dj, n_cpl, l_cpl)
+        back = _back(c, rev_ba, *mask_b.shape)
         if za == zb:
             out[(za, zb)] = c + pack.low * back
         else:
@@ -233,6 +258,101 @@ def _blocks_impl(packs, F, lay, rcut, shape_args, env=None):
 
 
 _blocks = jax.jit(_blocks_impl, static_argnums=4)       # the basis sizes fix the program
+
+
+# ---- the same in chunks of rows, for a pool of threads.  XLA's own CPU threading gives little on
+# this program (1.65x on 16 cores); independent calls from Python threads scale (the calls release
+# the GIL).  Three passes, each over chunks of rows, each chunk complete in itself:
+#   1. geometry of every layout, and `_dj` on the reverse layouts;
+#   2. the canonical blocks (reading pass 1 of the reverse layout through the reverse index);
+#   3. the other orientation (reading pass 2).
+@partial(jax.jit, static_argnums=7)
+def _pass1(pack, F, rows, rvec, mask, env, rcut, shape_args):
+    g = _geo(rows, rvec, mask, env, rcut, shape_args)
+    dj = () if pack is None else _dj(pack, {k: v[rows] for k, v in F.items()}, g[1], shape_args[1], shape_args[2])
+    return g, dj
+
+
+@partial(jax.jit, static_argnums=8)
+def _pass2(pack, F, rows, ga, side_rev, dj_rev, rev, mask, shape_args):
+    n, K = mask.shape
+    dj = tuple(None if d is None else _take(d, rev, n, K) for d in dj_rev)
+    Aenv = ga[4] + _take(side_rev, rev, n, K) if shape_args[4] else None
+    return _canonical(pack, {k: v[rows] for k, v in F.items()}, ga[:4], Aenv, dj, shape_args[1], shape_args[2])
+
+
+_pass3 = jax.jit(lambda c, rev, mask: _back(c, rev, *mask.shape))
+
+
+def _chunks(lay_one, T, rcut):
+    """Split one layout's rows into at most T chunks of one shape (the last padded with empty rows)."""
+    rows, rvec, mask, rev = (np.asarray(x) for x in lay_one)
+    n, K = mask.shape
+    m = -(-n // T)
+    out = []
+    for i0 in range(0, n, m):
+        k = min(m, n - i0)
+        r, v, mk, rv = np.zeros(m, rows.dtype), np.zeros((m, K, 3), rvec.dtype), np.zeros((m, K), mask.dtype), np.zeros(m * K, rev.dtype)
+        v[..., 0] = rcut
+        r[:k], v[:k], mk[:k], rv[:k * K] = rows[i0:i0 + k], rvec[i0:i0 + k], mask[i0:i0 + k], rev[i0 * K:(i0 + k) * K]
+        out.append((i0, k, r, v, mk, rv))
+    return out
+
+
+def _blocks_threaded(packs, F, lay, rcut, shape_args, env, pool, T, orient=True):
+    """`_blocks` on the CPU with the rows of every layout in chunks on `pool` (T threads).
+    Returns host arrays.  `orient=False`: passes 1 and 2 only, the canonical pairs."""
+    ch = {key: _chunks(v, T, rcut) for key, v in lay.items()}
+    canon = [key for key in packs if key in lay]
+    rpack = {(zb, za): packs[(za, zb)] for za, zb in canon}                 # layouts that carry a `_dj`
+    full = {}                                                             # (layout, name) -> host array over all rows
+
+    def put(key, name, i0, k, x):
+        x = np.asarray(x)
+        with lock:
+            if (key, name) not in full:
+                full[(key, name)] = np.empty((lay[key][2].shape[0], *x.shape[1:]), x.dtype)
+        full[(key, name)][i0:i0 + k] = x[:k]
+
+    lock = threading.Lock()
+
+    def one1(job):
+        key, (i0, k, rows, rvec, mask, _rev) = job
+        g, dj = _pass1(rpack.get(key), F, rows, rvec, mask, env, rcut, shape_args)
+        if key in rpack:
+            if g[4] is not None:
+                put(key, "side", i0, k, g[4])
+            for q, d in enumerate(dj):
+                if d is not None:
+                    put(key, q, i0, k, d)
+        return g
+
+    jobs = [(key, c) for key in lay for c in ch[key]]
+    geo = dict(zip([(key, c[0]) for key, c in jobs], pool.map(one1, jobs)))
+
+    def one2(job):
+        (za, zb), (i0, k, rows, _rvec, mask, rev) = job
+        pack, r = packs[(za, zb)], (zb, za)
+        dj = tuple(full.get((r, q)) for q in range(len(pack.lps)))
+        put((za, zb), "c", i0, k, _pass2(pack, F, rows, geo[((za, zb), i0)], full.get((r, "side")), dj, rev, mask, shape_args))
+
+    list(pool.map(one2, [(key, c) for key in canon for c in ch[key]]))
+    if not orient:
+        return {key: full[(key, "c")] for key in canon}
+
+    def one3(job):
+        (za, zb), (i0, k, _rows, _rvec, mask, rev) = job              # a chunk of the layout (zb, za)
+        put((zb, za), "back", i0, k, _pass3(full[((za, zb), "c")], rev, mask))
+
+    list(pool.map(one3, [(key, c) for key in canon for c in ch[(key[1], key[0])]]))
+    out = {}
+    for za, zb in canon:
+        c, back = full[((za, zb), "c")], full[((zb, za), "back")]
+        if za == zb:
+            out[(za, zb)] = c + np.asarray(packs[(za, zb)].low) * back
+        else:
+            out[(za, zb)], out[(zb, za)] = c, back
+    return out
 
 
 class PairLayouts:
@@ -280,8 +400,10 @@ class OffsitePredictor:
     """Compiled `OffsiteModel.predict`.  `dense` returns the bond graph and, per ordered species
     pair (za, zb), the bond indices and their blocks (n_bonds, n_channel, n_a, n_b)."""
 
-    def __init__(self, model):
-        self.model = model
+    def __init__(self, model, threads=1):
+        """`threads` > 1 (CPU only): evaluate the rows in chunks on that many threads."""
+        self.model, self.threads = model, int(threads)
+        self._pool = ThreadPoolExecutor(self.threads) if self.threads > 1 else None
         orb = model.orbitals
         self.packs = {(za, zb): _pack(model, za, zb) for za in orb.species for zb in orb.species if za <= zb}
         self.lmax = max([L for p in self.packs.values() for L, _ in p.lps] + [model.bond.l_cpl, model.bond.l_ebond, 1])
@@ -295,6 +417,16 @@ class OffsitePredictor:
             raise ValueError("this model has a bond environment: pass env = (neighbour vectors (n, Ke, 3), counts) within r_env")
         return _blocks(self.packs, F, lay, b.rcut_bond, self.static(), env if b.n_env else None)
 
+    def blocks(self, F, lay, env=None):
+        """`device`, or with `threads` > 1 on a CPU backend the same blocks as host arrays,
+        evaluated in chunks of rows on the thread pool."""
+        if self._pool is None or jax.default_backend() != "cpu":
+            return self.device(F, lay, env)
+        b = self.model.bond
+        if b.n_env and env is None:
+            raise ValueError("this model has a bond environment: pass env = (neighbour vectors (n, Ke, 3), counts) within r_env")
+        return _blocks_threaded(self.packs, F, lay, b.rcut_bond, self.static(), env if b.n_env else None, self._pool, self.threads)
+
     def static(self):
         b = self.model.bond
         return (b.n_bond, b.n_cpl, b.l_cpl, self.lmax, b.n_env, b.l_env, b.n_ebond, b.l_ebond, b.r_env)
@@ -306,13 +438,48 @@ class OffsitePredictor:
         F = _features(basis.site, rij, zi, zj, seg, n)
         g = B.bond_graph(basis, positions, cell, numbers, pbc)
         pl = PairLayouts(g, numbers, m.orbitals.species, basis.rcut_bond)
-        blocks = self.device(F, pl.lay, B.env_lists(basis, positions, cell, pbc))
+        env = B.env_lists(basis, positions, cell, pbc)
+        if self._pool is not None and jax.default_backend() == "cpu":
+            return g, self._dense_threaded(F, pl, g, env if basis.n_env else None)
+        blocks = self.blocks(F, pl.lay, env)
         out = {}
         for pair, e in pl.sel.items():
             if len(e):
                 c = blocks[pair]
                 out[pair] = (e, np.asarray(c).reshape(-1, *c.shape[2:])[pl.flatpos[e]])
         return g, out
+
+    def _dense_threaded(self, F, pl, g, env):
+        """The blocks of every bond from the canonical pairs' layouts, gathered (and, for the
+        other orientation, transposed) in chunks of bonds on the pool: no layout of the
+        non-canonical orientation is ever built."""
+        T = self.threads
+        canon = _blocks_threaded(self.packs, F, pl.lay, self.model.bond.rcut_bond, self.static(), env, self._pool, T, orient=False)
+        flat = {key: c.reshape(-1, *c.shape[2:]) for key, c in canon.items()}
+        out, jobs = {}, []
+        for (za, zb), e in pl.sel.items():
+            if not len(e):
+                continue
+            cf = flat[(za, zb) if za <= zb else (zb, za)]
+            shape = cf.shape[1:] if za <= zb else (cf.shape[1], cf.shape[3], cf.shape[2])
+            blk = np.empty((len(e), *shape), cf.dtype)
+            out[(za, zb)] = (e, blk)
+            fwd, bwd = pl.flatpos[e], pl.flatpos[g.reverse[e]]
+            low = np.asarray(self.packs[(za, za)].low) if za == zb else None
+            step = -(-len(e) // T)
+            jobs += [(cf, blk, fwd, bwd, low, za <= zb, i0, min(i0 + step, len(e))) for i0 in range(0, len(e), step)]
+
+        def one(job):
+            cf, blk, fwd, bwd, low, direct, i0, i1 = job
+            if direct:
+                np.take(cf, fwd[i0:i1], axis=0, out=blk[i0:i1], mode="clip")
+                if low is not None:
+                    blk[i0:i1] += low * np.swapaxes(np.take(cf, bwd[i0:i1], axis=0), -1, -2)
+            else:
+                blk[i0:i1] = np.swapaxes(np.take(cf, bwd[i0:i1], axis=0), -1, -2)
+
+        list(self._pool.map(one, jobs))
+        return out
 
     def __call__(self, positions, cell, numbers, pbc=True):
         """As `OffsiteModel.predict`."""
