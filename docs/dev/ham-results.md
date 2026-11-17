@@ -149,3 +149,23 @@ ace-jax (`bench/ham/offsite_time_deeph.py`): on-site model plus the shared-featu
 - float64 on this GPU did not finish (its float64 rate is 1/64 of float32); float64 GPU numbers need an A100.
 - Three consecutive GPU runs gave 10 to 24 ms per atom while a stray float64 run of mine was still on the GPU; they are excluded.
 - Cost by model part: the off-site matrix product does about 100 multiplications per predicted number at (4, l ≤ 4) and 18 at (2, l ≤ 2); the accuracy table above shows what the larger one buys on aluminium (0.92 against 1.69 meV).
+
+## Profile of the full-Hamiltonian prediction on the GPU (2026-11-17)
+
+`bench/ham/offsite_profile.py`: the 108-atom SiC input (158 bonds per atom, s to f orbitals), the small coupled model (2 radials, l ≤ 2; 12 two-centre radials), H only, float32, RTX 4000 Ada.
+
+| stage | where | before | after |
+|---|---|---|---|
+| site neighbour list | host | 1.0 ms | 1.0 ms |
+| site features | device | 2.3 ms | 1.3 ms |
+| bond list and reverse-bond index | host | 29.6 ms (a Python dictionary) | 4.8 ms (two sorts) |
+| dense (atom, slot) layout | host | 0.2 ms | 0.4 ms |
+| off-site blocks | device | 21.5 ms | 20.0 ms (now with the transposed, non-canonical parts) |
+| copy the blocks to the host | – | about 190 ms (hidden in the end-to-end time) | 88.5 ms for 192 MB |
+| select bonds per species pair, transposes | host | 111.3 ms | 16.9 ms (selection only) |
+| end to end | | 354 ms | 123 ms |
+
+- **The model is 21 ms on the device: 0.20 ms per atom, 1.2 µs per block.** With the host-side lists, 27.5 ms (0.25 ms per atom), against MACE-H's 400 ms (3.7 ms per atom) on the same GPU: about 15 times faster if the blocks stay on the device.
+- **Two thirds of the remaining end-to-end time is copying the blocks back to the host** (192 MB of float32). A consumer that works on the device (Bloch sums, eigenvalues) does not pay it: `OffsitePredictor.device` returns the blocks there. MACE-H's 400 ms includes its `.cpu()` copy of the same blocks.
+- Changes made from the profile: the reverse-bond index by sorting rather than a dictionary, and the non-canonical blocks (transposes of the reverse bond) formed on the device.
+- Still wasteful: each ordered species pair is computed on every (atom, slot) and masked afterwards, so a two-species system does about twice the necessary work.

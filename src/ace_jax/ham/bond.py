@@ -64,8 +64,13 @@ def bond_graph(basis, positions, cell, numbers, pbc=True):
     g = sparse_graph(positions, cell, pbc, basis.rcut_bond)
     R = np.rint(g.shifts @ np.linalg.inv(cell)).astype(np.int64)
     i, j = g.senders.astype(np.int64), g.receivers.astype(np.int64)
-    index = {(int(a), int(b), *map(int, s)): k for k, (a, b, s) in enumerate(zip(i, j, R))}
-    reverse = np.asarray([index[(int(b), int(a), *map(int, -s))] for a, b, s in zip(i, j, R)], np.int64)
+    # reverse[k]: the bond (j, i, -R).  Both key lists hold the same set, so their sort orders pair them up.
+    fwd = np.lexsort((R[:, 2], R[:, 1], R[:, 0], j, i))
+    bwd = np.lexsort((-R[:, 2], -R[:, 1], -R[:, 0], i, j))
+    reverse = np.empty(len(i), np.int64)
+    reverse[bwd] = fwd
+    if len(i) and not (np.array_equal(i[reverse], j) and np.array_equal(R[reverse], -R)):
+        raise ValueError("bond list is not symmetric: a pair within the bond cutoff has no reverse")
     return BondGraph(i, j, R, g.rij, reverse)
 
 

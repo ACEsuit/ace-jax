@@ -141,10 +141,16 @@ def _blocks_impl(packs, F, rvec, mask, rev, rcut, shape_args):
     U = phi1[..., :, None] * Ylm[..., None, :] * mask[..., None, None]
     usign = jnp.asarray(np.concatenate([[(-1.0) ** l] * (2 * l + 1) for l in range(l_cpl + 1)]))
     phi0 = phi0 * mask[..., None]
+    flat_rev = rev.reshape(-1)
+    canon = {key: _canonical(pack, F, phi0, U, Y, usign, flat_rev, n_cpl, l_cpl) for key, pack in packs.items()}
+    # every ordered species pair, on the device: the non-canonical parts are the reverse bond's, transposed
     out = {}
-    for key, pack in packs.items():
-        canon = _canonical(pack, F, phi0, U, Y, usign, rev.reshape(-1), n_cpl, l_cpl)
-        out[key] = canon
+    for (za, zb), c in canon.items():
+        back = jnp.swapaxes(c.reshape(n * K, *c.shape[2:])[flat_rev], -1, -2).reshape(n, K, c.shape[2], c.shape[4], c.shape[3])
+        if za == zb:
+            out[(za, zb)] = c + packs[(za, zb)].low * back
+        else:
+            out[(za, zb)], out[(zb, za)] = c, back
     return out
 
 
@@ -160,6 +166,13 @@ class OffsitePredictor:
         orb = model.orbitals
         self.packs = {(za, zb): _pack(model, za, zb) for za in orb.species for zb in orb.species if za <= zb}
         self.lmax = max([L for p in self.packs.values() for L, _ in p.lps] + [model.bond.l_cpl, 1])
+
+    def device(self, F, rvec, mask, rev):
+        """{(za, zb): (n_atoms, K, n_channel, n_a, n_b)} on the device, for every ordered species
+        pair on every (atom, slot); a slot holds a block of that pair only where the species
+        match.  For consumers that stay on the device (H(k), eigenvalues): no copy to the host."""
+        b = self.model.bond
+        return _blocks(self.packs, F, rvec, mask, rev, b.rcut_bond, (b.n_bond, b.n_cpl, b.l_cpl, self.lmax))
 
     def dense(self, positions, cell, numbers, pbc=True):
         m, basis = self.model, self.model.bond
@@ -179,8 +192,7 @@ class OffsitePredictor:
         mask.reshape(-1)[flat] = 1.0
         rev = np.zeros(n * K, np.int32)
         rev[flat] = flat[g.reverse]
-        canon = _blocks(self.packs, F, rvec, mask, rev.reshape(n, K), basis.rcut_bond,
-                        (basis.n_bond, basis.n_cpl, basis.l_cpl, self.lmax))
+        canon = self.device(F, rvec, mask, rev.reshape(n, K))
         out = {}
         za_e, zb_e = numbers[g.i], numbers[g.j]
         for za in m.orbitals.species:
@@ -188,16 +200,8 @@ class OffsitePredictor:
                 e = np.flatnonzero((za_e == za) & (zb_e == zb))
                 if not len(e):
                     continue
-                if za < zb:
-                    blk = np.asarray(canon[(za, zb)]).reshape(n * K, *canon[(za, zb)].shape[2:])[flat[e]]
-                elif za > zb:
-                    c = np.asarray(canon[(zb, za)]).reshape(n * K, *canon[(zb, za)].shape[2:])
-                    blk = np.swapaxes(c[flat[g.reverse[e]]], -1, -2)
-                else:
-                    c = np.asarray(canon[(za, za)]).reshape(n * K, *canon[(za, za)].shape[2:])
-                    low = np.asarray(self.packs[(za, za)].low)
-                    blk = c[flat[e]] + low * np.swapaxes(c[flat[g.reverse[e]]], -1, -2)
-                out[(za, zb)] = (e, blk)
+                c = canon[(za, zb)]
+                out[(za, zb)] = (e, np.asarray(c).reshape(n * K, *c.shape[2:])[flat[e]])
         return g, out
 
     def __call__(self, positions, cell, numbers, pbc=True):
