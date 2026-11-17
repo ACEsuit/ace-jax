@@ -5,7 +5,10 @@ Train on bonds sampled from BCC SK-supercell-001 and FCC SK-supercell-002, test 
 sampled from FCC SK-supercell-001 and BCC SK-supercell-002.  Blocks are divided by 27 (the
 files hold a 3 x 3 x 3 k-sum).  The supercells are 25 angstrom wide, so a pair within the bond
 cutoff has one image and its block is the dense matrix's.
-    uv run python bench/ham/offsite_accuracy.py <n site radials> <n_bond> <n_cpl> <l_cpl> [rcut_bond=9] [n_train=20000]
+    uv run python bench/ham/offsite_accuracy.py <n site radials> <n_bond> <n_cpl> <l_cpl> [rcut_bond=9] [n_train=20000] [n_test=10000]
+    uv run python bench/ham/offsite_accuracy.py export <out.h5> [rcut_bond=9] [n_train=20000] [n_test=10000]
+The second form writes the same bonds (drawn with the same seeds) with their blocks in FHI-aims'
+own phases, for bench/ham/aceh_offsite_accuracy.jl.
 """
 import os
 import sys
@@ -87,12 +90,31 @@ def errors(model, datasets, chunk=4096):
     return tot, rms(by_type), rms(by_dist)
 
 
-def main(nsite, n_bond, n_cpl, l_cpl, rcut_bond=9.0, n_train=20000):
+def export(out, rcut_bond=9.0, n_train=20000, n_test=10000):
+    import h5py
+    basis = B.BondBasis(site=None, rcut_bond=rcut_bond, n_bond=1)
+    s = aitb.atom_signs(aitb.AL.ls(13))
+    undo = 1.0 / (s[:, None] * s[None, :])                       # back to FHI-aims' phases
+    with h5py.File(out, "w") as f:
+        f["shells"] = np.asarray(aitb.AL.ls(13))
+        for tag, names, n, seed0 in (("train", TRAIN, n_train // 2, 0), ("test", TEST, n_test // 2, 10)):
+            for k, name in enumerate(names):
+                d, _ = dataset(name, basis, n, seed0 + k)
+                keys = sorted(d.blocks["H"])
+                g = f.create_group(f"{tag}/{k}")
+                g["positions"], g["cell"] = d.positions, d.cell
+                g["bonds"] = np.asarray(keys, np.int64)                 # (n, 5): Rx, Ry, Rz, i, j (0-based)
+                for c in CH:
+                    g[c] = np.stack([d.blocks[c][key] * undo for key in keys])
+                print(tag, name, len(keys), "bonds")
+
+
+def main(nsite, n_bond, n_cpl, l_cpl, rcut_bond=9.0, n_train=20000, n_test=10000):
     site = build_site_basis([13], order=1, totaldegree=40, lmax_feat=4, rcut=9.0, wL=0.5,
                             nmax_by_order=(nsite,), lmax_by_order=(4,))
     basis = B.BondBasis(site=site, rcut_bond=rcut_bond, n_bond=n_bond, n_cpl=n_cpl, l_cpl=l_cpl)
     train = [dataset(n, basis, n_train // 2, k) for k, n in enumerate(TRAIN)]
-    test = [dataset(n, basis, 5000, 10 + k)[0] for k, n in enumerate(TEST)]
+    test = [dataset(n, basis, n_test // 2, 10 + k)[0] for k, n in enumerate(TEST)]
     t = time.perf_counter()
     model, report = fit_offsite(basis, [d for d, _ in train], channels=CH)
     t_fit = time.perf_counter() - t
@@ -110,4 +132,7 @@ def main(nsite, n_bond, n_cpl, l_cpl, rcut_bond=9.0, n_train=20000):
 
 if __name__ == "__main__":
     a = sys.argv[1:]
-    main(int(a[0]), int(a[1]), int(a[2]), int(a[3]), *(float(x) if k == 0 else int(x) for k, x in enumerate(a[4:])))
+    if a[0] == "export":
+        export(a[1], *(float(x) if k == 0 else int(x) for k, x in enumerate(a[2:])))
+    else:
+        main(int(a[0]), int(a[1]), int(a[2]), int(a[3]), *(float(x) if k == 0 else int(x) for k, x in enumerate(a[4:])))

@@ -55,29 +55,29 @@ Same structure and orbital basis for both codes: 512-atom diamond silicon rattle
 
 ## Accuracy-matched on-site comparison with ACEhamiltonians.jl (2026-11-16)
 
-**Data and protocol** (the ACEhamiltonians paper's own on-site benchmark, arXiv:2111.13736): aluminium, FHI-aims, 729-atom supercells from 500 K MD, 14 orbitals per atom (3 s, 2 p, 1 d shells; 21 shell pairs). Train on the odd-numbered atoms of BCC `SK-supercell-001` and FCC `SK-supercell-002` (730 atoms), the paper's selection; test on every third atom of FCC `SK-supercell-001` and BCC `SK-supercell-002` (486 atoms). Environment cutoff 9 Å (176 neighbours), the paper's value. H blocks divided by 27 (the files hold a 3×3×3 k-sum). Error: RMSE over the elements of the shell pairs s₁ ≤ s₂. Time: one thread, lestrade.
+**Data and protocol** (the ACEhamiltonians paper's own on-site benchmark, arXiv:2111.13736): aluminium, FHI-aims, 729-atom supercells from 500 K MD, 14 orbitals per atom (3 s, 2 p, 1 d shells; 21 shell pairs). Train on the odd-numbered atoms of BCC `SK-supercell-001` and FCC `SK-supercell-002` (730 atoms), the paper's selection; test on every third atom of FCC `SK-supercell-001` and BCC `SK-supercell-002` (486 atoms). Environment cutoff 9 Å (176 neighbours), the paper's value. H blocks divided by 27 (the files hold a 3×3×3 k-sum). Error: RMSE over the elements of the shell pairs s₁ ≤ s₂, in meV (the files are in Hartree; an earlier version of this table printed mHa as meV). Time: one thread, lestrade.
 
 - ace-jax: `bench/ham/onsite_accuracy.py` (reader `bench/ham/aitb.py`; FHI-aims' phases converted with Quoll's table and checked by the overlap's two-centre form, violation 1e-3 on a scale of 27). Least squares, ridge 1e-10.
 - ACEhamiltonians.jl @ 9ff1572: `bench/ham/aceh_onsite_accuracy.jl`, same atoms, its own assembly, mean, scaling and LSQR solver (λ = 1e-7), one sub-model per shell pair.
 
 | model | coefficients | test RMSE (meV) | worst block type | model time per atom |
 |---|---|---|---|---|
-| ACEhamiltonians.jl, order 2, degree 3 | 241 | 9.88 | dd 21.6 | 1198 µs |
-| ACEhamiltonians.jl, order 2, degree 4 | 446 | 1.10 | dd 1.99 | 1736 µs |
-| ACEhamiltonians.jl, order 2, degree 6 | 1106 | 0.53 | ss 0.98 | 3491 µs |
-| ACEhamiltonians.jl, order 1, degree 12 | 322 | 2.52 | dd 4.22 | 10135 µs |
-| ace-jax, order 1, 6 radials, l ≤ 4 | 178 | 4.51 | dd 8.11 | 56 µs |
-| ace-jax, order 1, 8 radials | 234 | 1.13 | dd 1.94 | 68 µs |
-| ace-jax, order 1, 12 radials | 346 | 0.49 | ss 0.97 | 96 µs |
-| ace-jax, order 2, (10, 4) radials, l ≤ 4 | 2276 | 0.56 | ss 1.03 | 112 µs |
-| ace-jax, order 2, total degree 10, wL = 1 (no caps) | 2210 | 2.93 | dd 7.59 | 143 µs |
+| ACEhamiltonians.jl, order 2, degree 3 | 241 | 268.8 | dd 587.8 | 1198 µs |
+| ACEhamiltonians.jl, order 2, degree 4 | 446 | 29.9 | dd 54.2 | 1736 µs |
+| ACEhamiltonians.jl, order 2, degree 6 | 1106 | 14.4 | ss 26.7 | 3491 µs |
+| ACEhamiltonians.jl, order 1, degree 12 | 322 | 68.6 | dd 114.8 | 10135 µs |
+| ace-jax, order 1, 6 radials, l ≤ 4 | 178 | 122.7 | dd 220.7 | 56 µs |
+| ace-jax, order 1, 8 radials | 234 | 30.7 | dd 52.8 | 68 µs |
+| ace-jax, order 1, 12 radials | 346 | 13.3 | ss 26.4 | 96 µs |
+| ace-jax, order 2, (10, 4) radials, l ≤ 4 | 2276 | 15.2 | ss 28.0 | 112 µs |
+| ace-jax, order 2, total degree 10, wL = 1 (no caps) | 2210 | 79.7 | dd 206.5 | 143 µs |
 
 Model time is features plus readout for ace-jax and `predict` on prebuilt states for ACEhamiltonians.jl; neither includes the neighbour search (ace-jax: 11.5 µs per atom with matscipy-neighbours, 355 µs with the ASE fallback that the earlier tables used).
 
-- **At matched accuracy ace-jax is 25 times faster at 1.1 meV (68 against 1736 µs) and 36 times faster at 0.5 meV (96 against 3491 µs)**, with fewer coefficients (234 against 446; 346 against 1106). With the neighbour search included on ace-jax's side only, 22 and 33 times.
-- Both codes reach the same floor, 0.97 meV in the s–s blocks, whatever the basis.
-- **The basis has to be shaped for the problem.** A plain total-degree basis is poor here: 2.9 meV with 2210 coefficients. The L part of an on-site block is, to leading order, linear in the neighbour density with its own radial profile, so accuracy follows the number of radial functions each l ≤ 4 has at correlation order 1; order-2 terms change nothing on this data (1.13 meV with and without them at 8 radials). `build_site_basis(nmax_by_order=, lmax_by_order=)` gives that shape. Total degree charges high l with too few radials (5 features for the L = 4 part of d–d at total degree 6, and 20 meV left of a 33 meV signal).
-- ACEhamiltonians.jl needs order 2 (order 1 stalls at 2.5 meV); ace-jax does not. Not understood: it may be its radial basis or its mean handling.
+- **At matched accuracy ace-jax is 25 times faster at 30 meV (68 against 1736 µs) and 36 times faster at 14 meV (96 against 3491 µs)**, with fewer coefficients (234 against 446; 346 against 1106). With the neighbour search included on ace-jax's side only, 22 and 33 times.
+- Both codes reach the same floor, 26 meV in the s–s blocks, whatever the basis.
+- **The basis has to be shaped for the problem.** A plain total-degree basis is poor here: 79 meV with 2210 coefficients. The L part of an on-site block is, to leading order, linear in the neighbour density with its own radial profile, so accuracy follows the number of radial functions each l ≤ 4 has at correlation order 1; order-2 terms change nothing on this data (31 meV with and without them at 8 radials). `build_site_basis(nmax_by_order=, lmax_by_order=)` gives that shape. Total degree charges high l with too few radials (5 features for the L = 4 part of d–d at total degree 6, and 20 meV left of a 33 meV signal).
+- ACEhamiltonians.jl needs order 2 (order 1 stalls at 68 meV); ace-jax does not. Not understood: it may be its radial basis or its mean handling.
 - One dataset, one element, 500 K crystals. Whether order 2 matters for defects, surfaces or liquids is open.
 - On 32 threads ace-jax's feature time at this neighbour count is 253 µs against 68 µs on one thread: the open threading item again.
 
@@ -113,18 +113,18 @@ A 32-thread CPU run did not finish in 48 minutes (one core busy); it was stopped
 
 The off-site model (`ham/bond.py`, `ham/offsite.py`): for a bond i→j, two-centre functions φ_n(r) Y_L(r̂) plus the bond harmonics coupled with the per-atom features of i and of j, which the on-site model already computes. No environment is pooled per bond. Bond reversal H_ji(−R) = H_ij(R)ᵀ is exact by construction.
 
-**Data.** The aluminium supercells of the ACEhamiltonians paper, all pairs within 9 Å (168 bonds per atom). Train on 20,000 bonds drawn from BCC `SK-supercell-001` and FCC `SK-supercell-002`, test on 10,000 bonds from FCC `SK-supercell-001` and BCC `SK-supercell-002`. Site basis: order 1, 8 radials, l ≤ 4, cutoff 9 Å. 12 two-centre radials. `bench/ham/offsite_accuracy.py`. RMSE over the elements of the canonical blocks; H in meV, S × 1e3.
+**Data.** The aluminium supercells of the ACEhamiltonians paper, all pairs within 9 Å (168 bonds per atom). Train on 20,000 bonds drawn from BCC `SK-supercell-001` and FCC `SK-supercell-002`, test on 10,000 bonds from FCC `SK-supercell-001` and BCC `SK-supercell-002`. Site basis: order 1, 8 radials, l ≤ 4, cutoff 9 Å. 12 two-centre radials. `bench/ham/offsite_accuracy.py`. RMSE over the elements of the canonical blocks; H in meV (converted from the files' Hartree; an earlier version printed mHa as meV), S × 1e3.
 
 | coupled features (radials n_cpl, bond harmonics l ≤ l_cpl) | coefficients per channel | H test (train) | S test | H, d–d | H, bonds < 3.5 Å |
 |---|---|---|---|---|---|
-| none: two-centre only | 336 | 2.40 (2.44) | 0.0077 | 4.10 | 7.15 |
-| 2, l ≤ 2 | 4128 | 1.69 (1.71) | 0.0075 | 3.16 | 3.36 |
-| 4, l ≤ 2 | 7920 | 1.51 (1.52) | 0.0073 | 2.80 | 3.09 |
-| 4, l ≤ 4 | 13392 | 0.92 (0.94) | 0.0069 | 1.79 | 1.52 |
+| none: two-centre only | 336 | 65.3 (66.4) | 0.0077 | 111.6 | 194.6 |
+| 2, l ≤ 2 | 4128 | 46.0 (46.5) | 0.0075 | 86.0 | 91.4 |
+| 4, l ≤ 2 | 7920 | 41.1 (41.4) | 0.0073 | 76.2 | 84.1 |
+| 4, l ≤ 4 | 13392 | 25.0 (25.6) | 0.0069 | 48.7 | 41.4 |
 
 - The overlap is two-centre and is fitted to 7e-6 by the two-centre functions alone.
-- The shared site features carry real environment dependence of H: 2.40 → 0.92 meV overall, and 7.2 → 1.5 meV for nearest-neighbour bonds. Train and test errors agree, so the limit is the basis, not the amount of data.
-- The error is still falling with l_cpl and n_cpl; where it stops, and how that compares with ACEhamiltonians.jl's bond-environment model on the same bonds, is not yet measured. The on-site errors on this data were 0.5 to 1.1 meV for comparison.
+- The shared site features carry real environment dependence of H: 65 → 25 meV overall, and 196 → 41 meV for nearest-neighbour bonds. Train and test errors agree, so the limit is the basis, not the amount of data.
+- The error is still falling with l_cpl and n_cpl; where it stops, and how that compares with ACEhamiltonians.jl's bond-environment model on the same bonds, is not yet measured. The on-site errors on this data were 14 to 30 meV for comparison.
 - Largest single least-squares problem: 652 columns; the fit streams bonds in chunks and takes 37 s.
 
 ## Full Hamiltonian inference time against MACE-H (2026-11-16)
