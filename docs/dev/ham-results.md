@@ -403,3 +403,15 @@ Full H, 108-atom SiC, site (2, 2) + env (5, 6, 4, 4, 4), float64, mnf148 (`HAM_T
 - At 32 threads a chunk is two atoms of this 108-atom cell; larger structures should scale further. Not measured.
 - lestrade, 8 performance cores, with two unrelated jobs running on two of them: 5.1 ms (1 thread) to 1.4 ms per atom (8 threads).
 - For a DFT code that runs one MPI rank per core, the one-thread figure is the relevant one, and each rank can call the predictor for its own atoms; that interface is not built.
+
+## Collinear spin: data and ingestion (2026-11-17)
+
+**FHI-aims.** Version 261002, built on the SCRTP nodes with GCC 14.3, OpenMPI 5.0.8, FlexiBLAS/OpenBLAS and ScaLAPACK 2.2.2 (`module load foss/2025b`; CMake with Unix Makefiles: Ninja refuses the source, two rules generate `full_rel_gw_types.mod`; no HDF5, so `output_rs_matrices plain`). Not in this repository (licensed); the build is under `/storage/eng/essswb/projects/ace-jax/ham-ref/fhi-aims/`.
+
+**Dataset** (`ham-ref/fe_spin/`: `make_structures.py`, `control.head`, `run_all.sh`, `ingest_all.sh`): bcc Fe, 2 x 2 x 2 conventional cells (16 atoms), a = 2.83 Å, positions rattled by 0.05, 0.1 or 0.15 Å, every second cell strained by up to 3 %; 40 structures. PBE, light species defaults (31 orbitals per atom: 5 s, 3 p, 2 d, 1 f shells), atomic ZORA, `spin collinear` with initial moments 2.5, Gaussian smearing 0.1 eV, 6 x 6 x 6 k-points, `sc_accuracy_rho 1e-5`. 70 to 100 SCF cycles and 7 to 10 minutes each on 32 cores (default Pulay mixing; a mixing parameter of 0.2 instead of 0.05 was no faster). Moments 1.9 to 2.2 µ_B per atom. Blocks reach 9 Å (328 per atom; beyond that below 1e-8 eV).
+
+**Ingestion.** Quoll reads `rs_hamiltonian_up.out` / `_dn.out` (`FHIaimsCSCSpinRealMetadata`) but has no conversion of those operators to its canonical form (`convert_spins_source` has no FHI-aims method). Each spin channel's file has the layout of a spin-free Hamiltonian, so `ham/julia/ingest.jl fhi-aims-spin` sends each through the spin-free path from a directory of links and writes `<out>/up` (H, S) and `<out>/dn` (H); `deeph.read_spin` returns one `OperatorData` with the channels `("H_up", "H_dn", "S")`, which the cache, both fits and the predictors take as they are (`bands(..., channel=)` selects the spin).
+
+**Check** (`bench/ham/spin_check.py`, on the 16-atom and the 2-atom calculation): the eigenvalues of each ingested channel with the overlap equal the ones FHI-aims lists for its first k-point to 5e-6 eV (its print precision), all 296 (37) listed states of both spins; the electron count on the calculation's k-grid at its chemical potential is 416.00000 (52.00000). The moment from the same sum is 34.340 where FHI-aims prints 34.264 (0.2 %): not understood, and not an ingestion error given the eigenvalues.
+
+**Fixture** `fixtures/ham/fe_spin_deeph` (2-atom distorted bcc cell, blocks to 3 Å, three files of 30 blocks) and `tests/test_ham_spin.py`: the reader, its refusal of two different structures, the cache, a three-channel fit and the bands of each spin channel.
