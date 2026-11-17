@@ -191,7 +191,15 @@ def test_predict_selected_bonds(basis_env):
     assert all(np.allclose(some["H"][k], full["H"][k], atol=1e-13) for k in some["H"])
 
 
-def test_compiled_predictor_refuses_the_environment_group(basis_env):
+def test_compiled_predictor_with_the_environment_group(basis_env):
+    """The compiled predictor with the bond-environment group equals the reference predictor."""
     from ace_jax.ham.offsite_fast import OffsitePredictor
-    with pytest.raises(NotImplementedError, match="bond-environment"):
-        OffsitePredictor(random_model(basis_env))
+    m = random_model(basis_env)
+    fast = OffsitePredictor(m)
+    for seed in (0, 3):
+        pos, cell, numbers = structure(seed)
+        ref, got = m.predict(pos, cell, numbers), fast(pos, cell, numbers)
+        for name in ref:
+            assert set(ref[name]) == set(got[name])
+            worst = max(np.abs(got[name][k] - v).max() / max(1.0, np.abs(v).max()) for k, v in ref[name].items())
+            assert worst < 1e-10, (name, worst)

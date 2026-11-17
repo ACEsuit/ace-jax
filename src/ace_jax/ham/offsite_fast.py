@@ -27,6 +27,8 @@ class _Pack(eqx.Module):
     W0: tuple
     Wi: tuple
     Wj: tuple
+    We: tuple                    # per lp, per bond-environment group: (c, Q, n_ebond, n_env)
+    Te: tuple
     T: tuple
     Gq: tuple
     Gij: tuple
@@ -34,6 +36,7 @@ class _Pack(eqx.Module):
     low: jnp.ndarray                 # same species: 1 where the row's shell > the column's shell
     lps: tuple = eqx.field(static=True)
     groups: tuple = eqx.field(static=True)      # per lp: ((l, lam, pi), ...)
+    egroups: tuple = eqx.field(static=True)     # per lp: ((l, lam), ...) of the bond environment
     shape: tuple = eqx.field(static=True)       # (n_a, n_b)
 
 
@@ -50,6 +53,7 @@ def _pack(model, za, zb):
                 by.setdefault((L, p), []).append((s1, s2, l1, l2, same, np.asarray(c)))
     lps = tuple(sorted(by))
     W0s, Wis, Wjs, Ts, Gqs, Gijs, Gvs, grps = [], [], [], [], [], [], [], []
+    Wes, Tes, egrps = [], [], []
     for L, p in lps:
         two, cpl = B.layout(basis, L, p)
         k0 = basis.n_bond if two else 0
@@ -59,6 +63,9 @@ def _pack(model, za, zb):
         Wj = [np.zeros((nc, len(items), basis.n_cpl, nB)) for *_, nB in cpl]
         dense = np.zeros((len(items), 2 * L + 1, na * nb))
         k1 = basis.n_cpl * sum(nB for *_, nB in cpl)
+        ecpl = B.env_layout(basis, L, p)
+        ke = basis.n_ebond * basis.n_env
+        We = [np.zeros((nc, len(items), basis.n_ebond, basis.n_env)) for _ in ecpl]
         for q, (s1, s2, l1, l2, same, c) in enumerate(items):
             W0[:, q, :k0] = c[:, :k0]
             o = k0
@@ -70,6 +77,12 @@ def _pack(model, za, zb):
                     Wi[g][:, q] = w
                     Wj[g][:, q] = c[:, o + k1:o + k1 + basis.n_cpl * nB].reshape(nc, basis.n_cpl, nB)
                 o += basis.n_cpl * nB
+            o = k0 + (k1 if same else 2 * k1)             # the bond-environment columns follow
+            for g, (l, _lam) in enumerate(ecpl):
+                if same and (l - L) % 2:                  # an equal-shell block does not have this group
+                    continue
+                We[g][:, q] = c[:, o:o + ke].reshape(nc, basis.n_ebond, basis.n_env)
+                o += ke
             blk = np.zeros((2 * L + 1, na, nb))
             blk[:, orb.shell_slice(za, s1), orb.shell_slice(zb, s2)] = np.moveaxis(cg.real_cg(l1, l2, L), 2, 0)
             dense[q] = blk.reshape(2 * L + 1, na * nb)
@@ -79,12 +92,16 @@ def _pack(model, za, zb):
         Ts.append(tuple(jnp.asarray(cg.real_cg(l, lam, L)) for l, lam, _, _ in cpl))
         Gqs.append(jnp.asarray(r, jnp.int32)); Gijs.append(jnp.asarray(cidx, jnp.int32)); Gvs.append(jnp.asarray(dense[r, cidx]))
         grps.append(tuple((l, lam, pi) for l, lam, pi, _ in cpl))
+        Wes.append(tuple(jnp.asarray(w) for w in We))
+        Tes.append(tuple(jnp.asarray(cg.real_cg(l, lam, L)) for l, lam in ecpl))
+        egrps.append(tuple(ecpl))
     low = np.zeros((na, nb))
     if za == zb:
         sh = np.concatenate([[s] * (2 * l + 1) for s, l in enumerate(orb.ls(za))])
         low = (sh[:, None] > sh[None, :]).astype(float)
-    return _Pack(W0=tuple(W0s), Wi=tuple(Wis), Wj=tuple(Wjs), T=tuple(Ts), Gq=tuple(Gqs), Gij=tuple(Gijs),
-                 Gv=tuple(Gvs), low=jnp.asarray(low), lps=lps, groups=tuple(grps), shape=(na, nb))
+    return _Pack(W0=tuple(W0s), Wi=tuple(Wis), Wj=tuple(Wjs), We=tuple(Wes), Te=tuple(Tes), T=tuple(Ts),
+                 Gq=tuple(Gqs), Gij=tuple(Gijs), Gv=tuple(Gvs), low=jnp.asarray(low), lps=lps, groups=tuple(grps),
+                 egroups=tuple(egrps), shape=(na, nb))
 
 
 def _radial(x, n):
@@ -98,7 +115,7 @@ def _radial(x, n):
     return jnp.stack(T[:n], axis=-1) * ((1 - x * x) ** 2)[..., None]
 
 
-def _canonical(pack, F, phi0, U, Y, usign, rev, n_cpl, l_cpl):
+def _canonical(pack, F, phi0, U, Y, usign, rev, n_cpl, l_cpl, phi2=None, Aenv=None):
     """(n, K, c, n_a, n_b): the canonical blocks of one species pair on every (atom, slot)."""
     n, K = phi0.shape[:2]
     na, nb = pack.shape
@@ -122,6 +139,10 @@ def _canonical(pack, F, phi0, U, Y, usign, rev, n_cpl, l_cpl):
             # (whose u is this bond's with the sign (-1)^l), and read it back through `rev`
             Dj = jnp.einsum("acqMnm,aKnm->aKcqM", Cj, U * usign)
             part = part + Dj.reshape(n * K, nc, Q, 2 * L + 1)[rev].reshape(n, K, nc, Q, 2 * L + 1)
+        for (l, lam), We, Te in zip(pack.egroups[k], pack.We[k], pack.Te[k]):
+            # bond environment: (Y_l (x) A^env_lam)^L per environment radial, then the coefficients
+            Z = jnp.einsum("aKm,muM,aKeu->aKeM", Y[..., l * l:(l + 1) ** 2], Te, Aenv[..., lam * lam:(lam + 1) ** 2])
+            part = part + jnp.einsum("aKcqe,aKeM->aKcqM", jnp.einsum("cqne,aKn->aKcqe", We, phi2), Z)
         P = jnp.moveaxis(part.reshape(n, K, nc, Q * (2 * L + 1)), -1, 0)          # (Q M, n, K, c)
         add = jax.ops.segment_sum(P[pack.Gq[k]] * pack.Gv[k][:, None, None, None], pack.Gij[k], num_segments=na * nb)
         flat = add if flat is None else flat + add
@@ -130,8 +151,23 @@ def _canonical(pack, F, phi0, U, Y, usign, rev, n_cpl, l_cpl):
     return jnp.moveaxis(flat, 0, -1).reshape(n, K, -1, na, nb)
 
 
-def _blocks_impl(packs, F, rvec, mask, rev, rcut, shape_args):
-    n_bond, n_cpl, l_cpl, lmax = shape_args
+def _env_side(e_rij, e_live, rvec, mask, r_env, rmax, n_env, l_env):
+    """(n, K, n_env, (l_env+1)^2): for each bond slot, the half of A^env pooled over the neighbours
+    of its first atom (`bond._env_side` on the dense layouts)."""
+    d = e_rij[:, None, :, :]                                            # (n, 1, Ke, 3)
+    r = rvec[:, :, None, :]                                             # (n, K, 1, 3)
+    dist = jnp.sqrt(jnp.sum(e_rij * e_rij, axis=-1))[:, None, :]
+    partner = jnp.sum((d - r) ** 2, axis=-1) < 1e-8                     # the bond's own second atom
+    w = jnp.where(e_live[:, None, :] & ~partner & (dist < r_env), (1 - jnp.clip(dist / r_env, 0, 1) ** 2) ** 2, 0.0)
+    w = w * mask[:, :, None]
+    x = d - 0.5 * r                                                     # (n, K, Ke, 3) about the midpoint
+    R = _radial(jnp.clip(jnp.sqrt(jnp.sum(x * x, axis=-1)) / rmax, 0.0, 1.0), n_env)
+    Yx = real_spherical_harmonics(x, max(l_env, 1))[..., :(l_env + 1) ** 2]
+    return jnp.einsum("aKe,aKen,aKey->aKny", w, R, Yx)
+
+
+def _blocks_impl(packs, F, rvec, mask, rev, rcut, shape_args, env=None):
+    n_bond, n_cpl, l_cpl, lmax, n_env, l_env, n_ebond, l_ebond, r_env = shape_args
     n, K = mask.shape
     dist = jnp.sqrt(jnp.sum(rvec * rvec, axis=-1))
     x = jnp.clip(dist / rcut, 0.0, 1.0)
@@ -142,7 +178,14 @@ def _blocks_impl(packs, F, rvec, mask, rev, rcut, shape_args):
     usign = jnp.asarray(np.concatenate([[(-1.0) ** l] * (2 * l + 1) for l in range(l_cpl + 1)]))
     phi0 = phi0 * mask[..., None]
     flat_rev = rev.reshape(-1)
-    canon = {key: _canonical(pack, F, phi0, U, Y, usign, flat_rev, n_cpl, l_cpl) for key, pack in packs.items()}
+    phi2 = Aenv = None
+    if n_env:
+        e_rij, e_count = env
+        e_live = jnp.arange(e_rij.shape[1])[None, :] < e_count[:, None]
+        side = _env_side(e_rij, e_live, rvec, mask, r_env, r_env + 0.5 * rcut, n_env, l_env)
+        Aenv = side + side.reshape(n * K, *side.shape[2:])[flat_rev].reshape(side.shape)   # both ends: the reverse bond's half
+        phi2 = _radial(x, n_ebond) * mask[..., None]
+    canon = {key: _canonical(pack, F, phi0, U, Y, usign, flat_rev, n_cpl, l_cpl, phi2, Aenv) for key, pack in packs.items()}
     # every ordered species pair, on the device: the non-canonical parts are the reverse bond's, transposed
     out = {}
     for (za, zb), c in canon.items():
@@ -154,7 +197,7 @@ def _blocks_impl(packs, F, rvec, mask, rev, rcut, shape_args):
     return out
 
 
-_blocks = jax.jit(_blocks_impl, static_argnums=6)       # (n_bond, n_cpl, l_cpl, lmax) size the program
+_blocks = jax.jit(_blocks_impl, static_argnums=6)       # the basis sizes fix the program
 
 
 class OffsitePredictor:
@@ -162,20 +205,23 @@ class OffsitePredictor:
     pair (za, zb), the bond indices and their blocks (n_bonds, n_channel, n_a, n_b)."""
 
     def __init__(self, model):
-        if model.bond.n_env:
-            raise NotImplementedError("the compiled predictor does not have the bond-environment group yet: "
-                                      "use OffsiteModel.predict")
         self.model = model
         orb = model.orbitals
         self.packs = {(za, zb): _pack(model, za, zb) for za in orb.species for zb in orb.species if za <= zb}
-        self.lmax = max([L for p in self.packs.values() for L, _ in p.lps] + [model.bond.l_cpl, 1])
+        self.lmax = max([L for p in self.packs.values() for L, _ in p.lps] + [model.bond.l_cpl, model.bond.l_ebond, 1])
 
-    def device(self, F, rvec, mask, rev):
+    def device(self, F, rvec, mask, rev, env=None):
         """{(za, zb): (n_atoms, K, n_channel, n_a, n_b)} on the device, for every ordered species
         pair on every (atom, slot); a slot holds a block of that pair only where the species
         match.  For consumers that stay on the device (H(k), eigenvalues): no copy to the host."""
         b = self.model.bond
-        return _blocks(self.packs, F, rvec, mask, rev, b.rcut_bond, (b.n_bond, b.n_cpl, b.l_cpl, self.lmax))
+        if b.n_env and env is None:
+            raise ValueError("this model has a bond environment: pass env = (neighbour vectors (n, Ke, 3), counts) within r_env")
+        return _blocks(self.packs, F, rvec, mask, rev, b.rcut_bond, self.static(), env if b.n_env else None)
+
+    def static(self):
+        b = self.model.bond
+        return (b.n_bond, b.n_cpl, b.l_cpl, self.lmax, b.n_env, b.l_env, b.n_ebond, b.l_ebond, b.r_env)
 
     def dense(self, positions, cell, numbers, pbc=True):
         m, basis = self.model, self.model.bond
@@ -195,7 +241,7 @@ class OffsitePredictor:
         mask.reshape(-1)[flat] = 1.0
         rev = np.zeros(n * K, np.int32)
         rev[flat] = flat[g.reverse]
-        canon = self.device(F, rvec, mask, rev.reshape(n, K))
+        canon = self.device(F, rvec, mask, rev.reshape(n, K), B.env_lists(basis, positions, cell, pbc))
         out = {}
         za_e, zb_e = numbers[g.i], numbers[g.j]
         for za in m.orbitals.species:

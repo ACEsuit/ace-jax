@@ -52,7 +52,7 @@ def _eigvals_impl(H, S):
 _eigvals = jax.jit(_eigvals_impl)
 
 
-def _device_impl(site, readout, packs, pos, cell, species, site_species, s_rij, s_idx, s_count, b_rij, b_idx, b_count, static):
+def _device_impl(site, readout, packs, pos, cell, species, site_species, s_rij, s_idx, s_count, b_rij, b_idx, b_count, env, static):
     """Everything `prepare` does after the neighbour lists, on the device: site features, on-site
     blocks, the reverse slot and image of every bond, off-site blocks, and the index lists of the
     Bloch sum.  `species`: index into the orbital basis' species, per atom; `site_species`: index
@@ -78,7 +78,7 @@ def _device_impl(site, readout, packs, pos, cell, species, site_species, s_rij, 
     bwd = jnp.lexsort((-fR[:, 2], -fR[:, 1], -fR[:, 0], fi, fj))
     rev = jnp.zeros(n * K, jnp.int32).at[bwd].set(fwd.astype(jnp.int32)).reshape(n, K)
     fmask = mask.astype(dtype)
-    off = OF._blocks_impl(packs, F, b_rij, fmask, rev, rcut_bond, args)
+    off = OF._blocks_impl(packs, F, b_rij, fmask, rev, rcut_bond, args, env)
     norb = jnp.asarray(norbs, jnp.int32)[species]
     offsets = jnp.concatenate([jnp.zeros(1, jnp.int32), jnp.cumsum(norb)[:-1]])
     zj = species[b_idx]
@@ -90,7 +90,7 @@ def _device_impl(site, readout, packs, pos, cell, species, site_species, s_rij, 
     return on, off, lists, ok
 
 
-_device = jax.jit(_device_impl, static_argnums=13)
+_device = jax.jit(_device_impl, static_argnums=14)
 
 
 # compiled, with the slot count static: an eager slice uploads its bounds as scalars
@@ -154,11 +154,15 @@ class HamiltonianPredictor:
         counts = tuple(int((species == k).sum()) for k in range(len(orb.species)))
         norbs = tuple(orb.n_orb(z) for z in orb.species)
         pairs = tuple((orb.species.index(za), orb.species.index(zb)) for za, zb in self._pair_order())
-        static = ((basis.n_bond, basis.n_cpl, basis.l_cpl, self.offsite.lmax), counts, norbs, basis.rcut_bond, pairs)
+        static = (self.offsite.static(), counts, norbs, basis.rcut_bond, pairs)
+        env = None
+        if basis.n_env:
+            ge = self._dense(positions, cell, pbc, basis.r_env)
+            env = (ge.rij, ge.count)
         pos_d, cell_d, sp_d, ss_d = (jax.device_put(np.asarray(positions, dtype)), jax.device_put(np.asarray(cell, dtype)),
                                      jax.device_put(species), jax.device_put(basis.site.species_index(numbers)))
         on, off, lists, ok = _device(basis.site, self.onsite.readout, self.offsite.packs, pos_d, cell_d, sp_d, ss_d,
-                                     gs.rij, gs.idx, gs.count, gb.rij, gb.idx, gb.count, static)
+                                     gs.rij, gs.idx, gs.count, gb.rij, gb.idx, gb.count, env, static)
         prep = Prepared(on, off, lists, int(sum(orb.n_orb(z) for z in numbers)), None, None)
         prep.reverse_ok = ok                              # device scalar: every bond found its reverse
         return prep
@@ -197,7 +201,7 @@ class HamiltonianPredictor:
         rvec.reshape(-1, 3)[flat] = g.rij
         mask.reshape(-1)[flat] = 1.0
         nbr[flat], R[flat], rev[flat] = g.j, g.R, flat[g.reverse]
-        off = self.offsite.device(F, rvec, mask, rev.reshape(n, K))
+        off = self.offsite.device(F, rvec, mask, rev.reshape(n, K), B.env_lists(basis, positions, cell, pbc))
         offsets = np.concatenate([[0], np.cumsum([orb.n_orb(z) for z in numbers])])
         zj_slot = numbers[nbr].reshape(n, K)
         valid = {(za, zb): jnp.asarray(((numbers[:, None] == za) & (zj_slot == zb) & (mask > 0)).astype(np.float32))
