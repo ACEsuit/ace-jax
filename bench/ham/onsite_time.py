@@ -51,8 +51,8 @@ def main(n=4):
     pos, cell, numbers = sic(n)
     N = len(pos)
     rij, zi, zj, seg, _ = site_graph(basis, pos, cell, numbers)
-    n_aa = sum(int(g.shape[0]) for g in basis.carrier.aa_specs)
-    print(f"{N} atoms, {len(rij) / N:.1f} neighbours, n_A {len(basis.carrier.aspec_r)}, n_AA {n_aa}, "
+    n_aa = sum(int(g.shape[0]) for g in basis.aa_specs)
+    print(f"{N} atoms, {len(rij) / N:.1f} neighbours, n_A {len(basis.aspec_r)}, n_AA {n_aa}, "
           f"features {sum(basis.n_B)} over {len(basis.lps)} (L, parity), {len(coef)} coefficient vectors, "
           f"threads {len(__import__('os').sched_getaffinity(0))}")
     aa = jax.jit(lambda *a: basis.aa(*a, N))

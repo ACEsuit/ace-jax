@@ -3,7 +3,6 @@ blocks (`HamiltonianPredictor.prepare`), Bloch sums of H and S, and the Hermitia
 Random coefficients, so the overlap is not positive definite: the eigensolver is timed on H(k)
 alone (the generalised problem adds a Cholesky factor and two triangular solves).
     HAM_X64=0 uv run --extra ham python bench/ham/bands_time.py <deeph dir> <rcut> <site radials> <n_bond> <n_cpl> <l_cpl>"""
-import dataclasses
 import os
 import sys
 import time
@@ -16,7 +15,6 @@ jax.config.update("jax_enable_x64", X64)
 import jax.numpy as jnp
 import numpy as np
 
-from ace_jax.eval.model import with_radial_table
 from ace_jax.operators import bond as B
 from ace_jax.basis import cg
 from ace_jax.ham import deeph
@@ -41,7 +39,7 @@ elements, orb = [int(z) for z in d.basis.species], d.basis
 lf = 2 * orb.lmax
 site = build_site_basis(elements, order=1, totaldegree=40, lmax_feat=lf, rcut=rcut, wL=0.5,
                         nmax_by_order=(nsite,), lmax_by_order=(lf,))
-site = dataclasses.replace(site, carrier=with_radial_table(site.carrier, True)[0])
+site = site.with_table()
 basis = B.BondBasis(site=site, rcut_bond=rcut, n_bond=n_bond, n_cpl=n_cpl, l_cpl=l_cpl)
 rng = np.random.default_rng(0)
 CH = ("H", "S")

@@ -32,12 +32,8 @@ lf = 2 * d.basis.lmax
 basis = build_site_basis(elements, order=1, totaldegree=40, lmax_feat=lf, rcut=rcut, wL=0.5,
                          nmax_by_order=(nmax,), lmax_by_order=(lf,))
 if os.environ.get("HAM_RADIAL_TABLE"):
-    import dataclasses
 
-    from ace_jax.eval.model import with_radial_table
-    carrier, info = with_radial_table(basis.carrier, True)
-    basis = dataclasses.replace(basis, carrier=carrier)
-    print("radial table:", info)
+    basis = basis.with_table()
 rng = np.random.default_rng(0)
 coef = {(z, s1, s2, L): rng.normal(size=(1, basis.n(L, p) + (L == 0)))
         for z in elements for s1, s2, l1, l2 in shell_pairs(d.basis, z) for L, p in parts_of(l1, l2, s1 == s2)

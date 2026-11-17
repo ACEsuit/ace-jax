@@ -12,11 +12,9 @@ import jax
 X64 = os.environ.get("HAM_X64", "1") != "0"
 jax.config.update("jax_enable_x64", X64)
 
-import dataclasses
 
 import numpy as np
 
-from ace_jax.eval.model import with_radial_table
 from ace_jax.operators import bond as B
 from ace_jax.basis import cg
 from ace_jax.ham import deeph
@@ -47,7 +45,7 @@ elements, orb = [int(z) for z in d.basis.species], d.basis
 lf = 2 * orb.lmax
 site = build_site_basis(elements, order=1, totaldegree=40, lmax_feat=lf, rcut=rcut, wL=0.5,
                         nmax_by_order=(nsite,), lmax_by_order=(lf,))
-site = dataclasses.replace(site, carrier=with_radial_table(site.carrier, True)[0])
+site = site.with_table()
 basis = B.BondBasis(site=site, rcut_bond=rcut, n_bond=n_bond, n_cpl=n_cpl, l_cpl=l_cpl)
 if ENV:                                              # env=<r_env>,<n_env>,<l_env>,<n_ebond>,<l_ebond>: the bond-environment group
     basis = basis._replace(r_env=ENV[0], n_env=int(ENV[1]), l_env=int(ENV[2]), n_ebond=int(ENV[3]), l_ebond=int(ENV[4]))

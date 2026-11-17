@@ -50,9 +50,9 @@ def main(path, order, totaldegree, rcut, wL=1.0):
         t_all = best(lambda: jax.block_until_ready(fast.dense(pos, cell, numbers)[1]), reps=3)
         us = lambda t: round(1e6 * t / N, 1)
         if len(channels) == 1:
-            n_aa = sum(int(g.shape[0]) for g in basis.carrier.aa_specs)
+            n_aa = sum(int(g.shape[0]) for g in basis.aa_specs)
             print(f"{N} atoms, {len(rij) / N:.1f} neighbours, threads {len(os.sched_getaffinity(0))}; "
-                  f"order {order}, total degree {totaldegree}, wL {wL}: n_A {len(basis.carrier.aspec_r)}, n_AA {n_aa}, "
+                  f"order {order}, total degree {totaldegree}, wL {wL}: n_A {len(basis.aspec_r)}, n_AA {n_aa}, "
                   f"{sum(basis.n_B)} features over {len(basis.lps)} (L, parity); "
                   f"{sum(np.asarray(c).shape[1] for c in coef.values())} coefficients per channel in {len(coef)} parts "
                   f"of {len(shell_pairs(ORB, 14))} shell pairs")

@@ -83,3 +83,24 @@ def test_unknown_element(basis):
     assert list(basis.species_index([6, 14, 14])) == [1, 0, 0]
     with pytest.raises(KeyError, match="Z = 8"):
         basis.species_index([14, 8])
+
+
+def test_provider_protocol_and_radial_table():
+    """The site basis is a `SiteFeatures` provider that holds no model, and its radial tabulated
+    in r (`with_table`, the CPU form) gives the same features at physical distances."""
+    from ace_jax.eval.features import SiteFeatures
+    from ace_jax.eval.radial import TensorRadial
+    from ace_jax.operators.features import RadialTable
+    b = build_site_basis([14, 6], order=2, totaldegree=5, lmax_feat=4, rcut=4.0, coupling_cache_dir=str(CACHE))
+    assert isinstance(b, SiteFeatures) and isinstance(b.radial, TensorRadial)
+    t = b.with_table()
+    assert isinstance(t.radial, RadialTable) and t.with_table() is t and isinstance(t, SiteFeatures)
+    rng = np.random.default_rng(0)
+    E, n = 300, 20
+    u = rng.normal(size=(E, 3))
+    rij = u / np.linalg.norm(u, axis=1)[:, None] * rng.uniform(1.2, 4.3, (E, 1))        # some past the cutoff
+    zi, zj = rng.integers(0, 2, E).astype(np.int32), rng.integers(0, 2, E).astype(np.int32)
+    seg = np.sort(rng.integers(0, n, E)).astype(np.int32)
+    fa, fb = b.features(rij, zi, zj, seg, n), t.features(rij, zi, zj, seg, n)
+    scale = max(float(np.abs(v).max()) for v in fa.values())
+    assert max(float(np.abs(fa[k] - fb[k]).max()) for k in fa) < 1e-11 * scale

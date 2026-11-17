@@ -109,7 +109,7 @@ def fit(totaldegree, wL=1.0, order=None):
     t_f = best(lambda: jax.block_until_ready(_features(basis, rij, zi, zj, seg, n)))
     t_r = best(lambda: jax.block_until_ready(_readout(fast.readout, F, at)))
     us = lambda x: 1e6 * x / N
-    n_aa = sum(int(g.shape[0]) for g in basis.carrier.aa_specs)
+    n_aa = sum(int(g.shape[0]) for g in basis.aa_specs)
     print(f"ace-jax order {order} totaldegree {totaldegree} wL {wL}: n_AA {n_aa}, features {sum(basis.n_B)}, "
           f"coefficients {ncoef}; fit {t_fit:.1f} s; RMSE over shell pairs s1 <= s2: train {1e3 * err['train'][0]:.3f} test {1e3 * err['test'][0]:.3f} meV; "
           f"per atom ({len(rij) / N:.0f} neighbours, {len(os.sched_getaffinity(0))} thread): neighbour list {us(t_nl):.1f}, "
