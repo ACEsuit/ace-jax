@@ -186,13 +186,54 @@ _device = jax.jit(_device_impl, static_argnums=14)
 
 
 class BandEnergy(NamedTuple):
-    """energy: E_band = sum_k w_k sum_n f e; gradient: dE / d positions (n_atoms, 3), the force is
-    its negative; stress: (1 / V) dE / d strain (3, 3), symmetric, at fixed fractional k-points and
-    occupations (energy per volume: eV / angstrom^3 for eV and angstrom); eigenvalues (n_k, n_orb)."""
+    """energy: E_band = sum_k w_k sum_n f e; gradient: d free_energy / d positions (n_atoms, 3), the
+    force is its negative; stress: (1 / V) d free_energy / d strain (3, 3), symmetric, at fixed
+    fractional k-points (energy per volume: eV / angstrom^3 for eV and angstrom); eigenvalues
+    (n_k, n_orb); free_energy: E_band - T S of the smearing (E_band for fixed occupations), the
+    quantity the gradient and stress are derivatives of; fermi_level (nan for fixed occupations)."""
     energy: jax.Array
     gradient: jax.Array
     stress: jax.Array
     eigenvalues: jax.Array
+    free_energy: jax.Array = None
+    fermi_level: jax.Array = None
+
+
+SMEARINGS = ("fermi-dirac", "gaussian")
+
+
+def smeared_occupations(e, wk, nelec, width, kind="fermi-dirac", degeneracy=2.0):
+    """(f, mu, -T S): occupations f (n_k, n) in [0, degeneracy] of the bands e with k-point weights
+    wk that hold `nelec` electrons, the chemical potential (bisection), and the entropy term of
+    the free energy.  fermi-dirac: f = g / (1 + exp((e - mu) / width)), width = k_B T.
+    gaussian: f = g erfc((e - mu) / width) / 2 (FHI-aims' `occupation_type gaussian`)."""
+    def occ(mu):
+        x = (e - mu) / width
+        return degeneracy * (jax.nn.sigmoid(-x) if kind == "fermi-dirac" else 0.5 * jax.scipy.special.erfc(x))
+
+    def step(_, b):
+        lo, hi = b
+        mid = 0.5 * (lo + hi)
+        low = jnp.sum(wk[:, None] * occ(mid)) < nelec
+        return jnp.where(low, mid, lo), jnp.where(low, hi, mid)
+
+    lo, hi = jax.lax.fori_loop(0, 100, step, (jnp.min(e) - 20.0 * width, jnp.max(e) + 20.0 * width))
+    mu = 0.5 * (lo + hi)
+    f = occ(mu)
+    if kind == "fermi-dirac":
+        x = jnp.clip(f / degeneracy, 1e-300, 1.0)
+        y = jnp.clip(1.0 - f / degeneracy, 1e-300, 1.0)
+        mts = degeneracy * width * jnp.sum(wk[:, None] * (x * jnp.log(x) + y * jnp.log(y)))
+    else:
+        mts = -degeneracy * width / (2.0 * jnp.sqrt(jnp.pi)) * jnp.sum(wk[:, None] * jnp.exp(-((e - mu) / width) ** 2))
+    return f, mu, mts
+
+
+def _occupation_fn(kind, degeneracy, params):
+    """occ(e, wk) -> (f, mu, -T S) for `kind` "fixed" (params: (f,)) or a smearing (params: (nelec, width))."""
+    if kind == "fixed":
+        return lambda e, wk: (jnp.broadcast_to(params[0], e.shape), jnp.asarray(jnp.nan, e.dtype), jnp.zeros((), e.dtype))
+    return lambda e, wk: smeared_occupations(e, wk, params[0], params[1], kind, degeneracy)
 
 
 def _geig(H, S):
@@ -212,22 +253,24 @@ def _band_energy(hs, pos, occ, wk, volume):
     def trace(x):
         H, S = hs(*x)
         e, C = jax.vmap(_geig)(jax.lax.stop_gradient(H), jax.lax.stop_gradient(S))
-        f = jax.lax.stop_gradient(occ(e)) * wk[:, None]
+        f, mu, mts = jax.tree.map(jax.lax.stop_gradient, occ(e, wk))
+        f = f * wk[:, None]
         rho = jnp.einsum("kin,kn,kjn->kij", C, f, C.conj())
         W = jnp.einsum("kin,kn,kjn->kij", C, f * e, C.conj())
-        # tr[rho H - W S]: zero in value; its derivative at fixed rho, W is dE_band
-        return jnp.real(jnp.sum(H * jnp.swapaxes(rho, 1, 2)) - jnp.sum(S * jnp.swapaxes(W, 1, 2))), (jnp.sum(f * e), e)
+        # tr[rho H - W S]: zero in value; its derivative at fixed rho, W is dE_band at fixed
+        # occupations, which with smeared occupations is the derivative of the free energy
+        return jnp.real(jnp.sum(H * jnp.swapaxes(rho, 1, 2)) - jnp.sum(S * jnp.swapaxes(W, 1, 2))), (jnp.sum(f * e), e, mu, mts)
 
-    (gpos, gstrain), (E, e) = jax.grad(trace, has_aux=True)((pos, jnp.zeros((3, 3), pos.dtype)))
-    return BandEnergy(E, gpos, 0.5 * (gstrain + gstrain.T) / volume, e)
+    (gpos, gstrain), (E, e, mu, mts) = jax.grad(trace, has_aux=True)((pos, jnp.zeros((3, 3), pos.dtype)))
+    return BandEnergy(E, gpos, 0.5 * (gstrain + gstrain.T) / volume, e, E + mts, mu)
 
 
 def _device_energy_impl(site, readout, packs, pos, cell, species, site_species, s_rij, s_idx, s_count, b_rij, b_idx, b_count,
-                        env, e_idx, kpts, occ, wk, static):
+                        env, e_idx, kpts, occ, wk, static):  # occ: the parameters of `_occupation_fn`
     """`_band_energy` from device neighbour lists: the list vectors are rebuilt from the positions
     (v = x_j - x_i + shift, the shift read off the list and held fixed), so the derivative with
     respect to the positions and the strain flows through them."""
-    dev_static, n_orb, ch, cs = static
+    dev_static, n_orb, ch, cs, kind, degeneracy = static
 
     def vectors(p, strain, r0, idx):
         d = p[idx] - p[:, None, :]
@@ -245,10 +288,43 @@ def _device_energy_impl(site, readout, packs, pos, cell, species, site_species, 
         herm = lambda M: 0.5 * (M + jnp.swapaxes(M.conj(), 1, 2))
         return herm(H), herm(S)
 
-    return _band_energy(hs, pos, lambda ev: jnp.broadcast_to(occ, ev.shape), wk, jnp.abs(jnp.linalg.det(cell)))
+    return _band_energy(hs, pos, _occupation_fn(kind, degeneracy, occ), wk, jnp.abs(jnp.linalg.det(cell)))
 
 
 _device_energy = jax.jit(_device_energy_impl, static_argnums=18)
+
+
+def _host_hs(site, readout, packs, pos, strain, G, kpts, static, overlap_shift=0.0):
+    """(H(k), S(k)), Hermitian, from host neighbour lists `G` (`HamiltonianPredictor._host_lists`): every
+    edge vector is rebuilt from the positions, v = x_j - x_i + shift, and scaled by the strain."""
+    args, n_orb, ch, cs, rcut_bond = static
+    st = (lambda v: v) if strain is None else (lambda v: v + v @ strain.T)
+    n = pos.shape[0]
+    F = site.features(st(pos[G["s_j"]] - pos[G["s_i"]] + G["s_shift"]), G["sp"][G["s_i"]], G["sp"][G["s_j"]], G["s_i"], n, G["s_mask"])
+    on = _readout(readout, F, G["atoms"])
+    pad = jnp.asarray([rcut_bond, 0.0, 0.0], pos.dtype)
+    lay = {key: (rows, jnp.where(live[..., None], st(pos[bj] - pos[bi] + shift), pad), mask, rev)
+           for key, (rows, bi, bj, shift, live, mask, rev) in G["lay"].items()}
+    env = None
+    if G["env"] is not None:
+        e_rij, e_idx, e_shift, e_live, e_count, e_z = G["env"]
+        env = (jnp.where(e_live[..., None], st(pos[e_idx] - pos[:, None, :] + e_shift), e_rij), e_count, e_z)
+    off = OF._blocks_impl(packs, F, lay, rcut_bond, args, env)
+    H = jax.vmap(lambda k: _bloch_impl(on, off, G["bloch"], k, ch, n_orb))(kpts)
+    eye = jnp.eye(n_orb, dtype=H.dtype)
+    S = (jax.vmap(lambda k: _bloch_impl(on, off, G["bloch"], k, cs, n_orb))(kpts) + overlap_shift * eye if cs is not None
+         else jnp.broadcast_to(eye, H.shape))
+    herm = lambda M: 0.5 * (M + jnp.swapaxes(M.conj(), 1, 2))
+    return herm(H), herm(S)
+
+
+def _host_energy_impl(site, readout, packs, pos, cell, G, kpts, occ, wk, static):
+    hs_static, kind, degeneracy = static
+    return _band_energy(lambda p, strain: _host_hs(site, readout, packs, p, strain, G, kpts, hs_static), pos,
+                        _occupation_fn(kind, degeneracy, occ), wk, jnp.abs(jnp.linalg.det(cell)))
+
+
+_host_energy = jax.jit(_host_energy_impl, static_argnums=9)        # compiled once per set of list shapes
 
 
 # compiled, with the slot count static: an eager slice uploads its bounds as scalars
@@ -359,9 +435,10 @@ class HamiltonianPredictor:
         a = self._device_inputs(positions, cell, numbers, pbc)
         kpts = np.atleast_2d(np.asarray(kpts, a["dtype"]))
         wk = np.full(len(kpts), 1.0 / len(kpts), a["dtype"]) if weights is None else np.asarray(weights, a["dtype"])
-        static = (a["static"], a["n_orb"], self.channels.index(channel), self.channels.index(overlap) if overlap else None)
+        static = (a["static"], a["n_orb"], self.channels.index(channel), self.channels.index(overlap) if overlap else None,
+                  "fixed", 2.0)
         return _device_energy(*a["args"], a["env"], a["e_idx"], jax.device_put(kpts),
-                              jax.device_put(np.asarray(occupations, a["dtype"])), jax.device_put(wk), static)
+                              (jax.device_put(np.asarray(occupations, a["dtype"])),), jax.device_put(wk), static)
 
     def prepare(self, positions, cell, numbers, pbc=True):
         """Evaluate every block of the structure; they stay on the device."""
@@ -437,62 +514,87 @@ class HamiltonianPredictor:
         smoothly at its cutoff, so the derivative at these positions is exact, and fn is valid
         while no pair crosses a cutoff.  The Bloch phases use the cells R only (the lattice
         gauge); eigenvalues do not depend on the gauge.  overlap, overlap_shift: as `spectrum_fn`."""
+        G, n_orb = self._host_lists(positions, cell, numbers, pbc)
+        static = (self.offsite.static(), n_orb, self.channels.index(channel), self.channels.index(overlap) if overlap else None,
+                  self.offsite.model.bond.rcut_bond)
+        site, readout, packs = self.offsite.model.bond.site, self.onsite.readout, self.offsite.packs
+        kpts = jnp.asarray(np.atleast_2d(np.asarray(kpts, float)))
+        hs = lambda pos, strain=None: _host_hs(site, readout, packs, pos, strain, G, kpts, static, overlap_shift)
+        return hs, jnp.asarray(np.asarray(positions, float))
+
+    def _host_lists(self, positions, cell, numbers, pbc=True, edge_step=1, k_step=1):
+        """(G, n_orb): the host neighbour lists of a structure as device arrays, in the form
+        `_host_hs` rebuilds the edge vectors from.  edge_step, k_step: pad the site edge list and
+        the bond / environment slots up to multiples of these, so that structures whose neighbour
+        counts differ a little share one compiled program."""
         orb, basis = self.orbitals, self.offsite.model.bond
         numbers = np.asarray(numbers)
         pos0, cell = np.asarray(positions, float), np.asarray(cell, float)
         n = len(numbers)
-        prep = self.prepare(pos0, cell, numbers, pbc)
-        _, atoms, _, _ = prep.inputs
+        for z in set(int(z) for z in numbers):
+            orb.ls(z)
         gs = sparse_graph(pos0, cell, pbc, basis.site.rcut)
-        sp = jnp.asarray(basis.site.species_index(numbers))
-        s_i, s_j, s_shift = jnp.asarray(gs.senders), jnp.asarray(gs.receivers), jnp.asarray(gs.shifts)
-        g = prep.graph
-        pl = OF.PairLayouts(g, numbers, orb.species, basis.rcut_bond)
-        pad = jnp.asarray([basis.rcut_bond, 0.0, 0.0])
-        lay0 = {}
+        E = max(-(-len(gs.senders) // edge_step) * edge_step, 1)
+        npad = E - len(gs.senders)
+        s_i, s_j = (np.concatenate([a, np.zeros(npad, a.dtype)]) for a in (gs.senders, gs.receivers))
+        s_shift = np.concatenate([gs.shifts, np.tile([basis.site.rcut, 0.0, 0.0], (npad, 1))])       # padding: at the cutoff
+        s_mask = np.arange(E) < len(gs.senders)
+        atoms = tuple(np.flatnonzero(numbers == z).astype(np.int32) for z in orb.species)
+        g = B.bond_graph(basis, pos0, cell, numbers, pbc)
+        pl = OF.PairLayouts(g, numbers, orb.species, basis.rcut_bond, k_step=k_step)
+        offsets = np.concatenate([[0], np.cumsum([orb.n_orb(z) for z in numbers])])
+        lay0, bloch_off = {}, {}
         for key, (rows, _rvec, mask, rev) in pl.lay.items():
             b = pl.bond[key]
             live, e = b >= 0, np.maximum(b, 0)
             lay0[key] = (jnp.asarray(rows), jnp.asarray(g.i[e]), jnp.asarray(g.j[e]), jnp.asarray(g.R[e] @ cell),
                          jnp.asarray(live), jnp.asarray(mask), jnp.asarray(rev))
+            bloch_off[key] = (jnp.asarray(offsets[g.i[e]], jnp.int32), jnp.asarray(offsets[g.j[e]], jnp.int32),
+                              jnp.asarray(np.where(live[..., None], g.R[e], 0), float), jnp.asarray(live.astype(np.float32)))
         env0 = None
         if basis.n_env:
             ge = sparse_graph(pos0, cell, pbc, basis.r_env)
             K = max(int(np.bincount(ge.senders, minlength=n).max()) if len(ge.rij) else 1, 1)
+            K = -(-K // k_step) * k_step
             d = dense_graph(pos0, cell, pbc, basis.r_env, K)
             e_rij, e_idx, e_count = np.asarray(d.rij), np.asarray(d.idx), np.asarray(d.count)
             e_live = np.arange(K)[None, :] < e_count[:, None]
             e_shift = np.where(e_live[..., None], e_rij - (pos0[e_idx] - pos0[:, None, :]), 0.0)
             env0 = (jnp.asarray(e_rij), jnp.asarray(e_idx), jnp.asarray(e_shift), jnp.asarray(e_live), jnp.asarray(e_count),
                     jnp.asarray(basis.site.species_index(numbers)[e_idx]))
-        readout, packs = self.onsite.readout, self.offsite.packs
-        args, lists, n_orb = self.offsite.static(), prep.lists, prep.n_orb
-        kpts = jnp.asarray(np.atleast_2d(np.asarray(kpts, float)), prep.on[0].dtype)
-        ch = self.channels.index(channel)
-        cs = self.channels.index(overlap) if overlap else None
-        eye = jnp.eye(n_orb, dtype=jnp.result_type(kpts.dtype, jnp.complex64))
-        site = basis.site
+        G = dict(sp=jnp.asarray(basis.site.species_index(numbers)), s_i=jnp.asarray(s_i), s_j=jnp.asarray(s_j),
+                 s_shift=jnp.asarray(s_shift), s_mask=jnp.asarray(s_mask), atoms=tuple(jnp.asarray(a) for a in atoms), lay=lay0, env=env0,
+                 bloch={"off": bloch_off, "on_rows": tuple(jnp.asarray(offsets[a], jnp.int32) for a in atoms)})
+        return G, int(offsets[-1])
 
-        def hs(pos, strain=None):
-            """(H(k), S(k)), Hermitian, (n_k, n_orb, n_orb) each, at the positions; strain (3, 3):
-            every edge vector v -> v (1 + strain)^T (positions and cell strained together)."""
-            st = (lambda v: v) if strain is None else (lambda v: v + v @ strain.T)
-            F = site.features(st(pos[s_j] - pos[s_i] + s_shift), sp[s_i], sp[s_j], s_i, n)
-            on = _readout(readout, F, atoms)
-            lay = {key: (rows, jnp.where(live[..., None], st(pos[bj] - pos[bi] + shift), pad), mask, rev)
-                   for key, (rows, bi, bj, shift, live, mask, rev) in lay0.items()}
-            env = None
-            if env0 is not None:
-                e_rij, e_idx, e_shift, e_live, e_count, e_z = env0
-                env = (jnp.where(e_live[..., None], st(pos[e_idx] - pos[:, None, :] + e_shift), e_rij), e_count, e_z)
-            off = OF._blocks_impl(packs, F, lay, basis.rcut_bond, args, env)
-            H = jax.vmap(lambda k: _bloch_impl(on, off, lists, k, ch, n_orb))(kpts)
-            S = (jax.vmap(lambda k: _bloch_impl(on, off, lists, k, cs, n_orb))(kpts) + overlap_shift * eye if overlap
-                 else jnp.broadcast_to(eye, H.shape))
-            herm = lambda M: 0.5 * (M + jnp.swapaxes(M.conj(), 1, 2))
-            return herm(H), herm(S)
-
-        return hs, jnp.asarray(pos0)
+    def band_energy(self, positions, cell, numbers, kpts, nelectrons, width=0.1, smearing="fermi-dirac", weights=None,
+                    overlap="S", channel="H", degeneracy=2.0, device=False, pbc=True):
+        """`BandEnergy` of a structure with smeared occupations: band energy, free energy, the
+        gradient and stress of the free energy (trace form), eigenvalues and Fermi level, in one
+        compiled call.  nelectrons: the electrons the bands hold (of the orbitals the model has:
+        all of them for an all-electron basis).  smearing: "fermi-dirac" (width = k_B T) or
+        "gaussian"; degeneracy: 2 without spin.  The program is compiled once per set of list
+        shapes (the lists are padded in steps), so a trajectory re-uses it.  device=True: the
+        neighbour lists on the GPU (`band_energy_device`'s path); otherwise built on the host."""
+        if smearing not in SMEARINGS:
+            raise ValueError(f"smearing must be one of {SMEARINGS}, got {smearing!r}")
+        kpts = np.atleast_2d(np.asarray(kpts, float))
+        wk = np.full(len(kpts), 1.0 / len(kpts)) if weights is None else np.asarray(weights, float)
+        occ = (jnp.asarray(float(nelectrons)), jnp.asarray(float(width)))
+        ch, cs = self.channels.index(channel), self.channels.index(overlap) if overlap else None
+        if device:
+            if jax.default_backend() != "gpu" or not have_matscipy_neighbours():
+                raise RuntimeError("device=True needs JAX on a GPU and matscipy-neighbours built with CUDA")
+            a = self._device_inputs(positions, cell, numbers, pbc)
+            dt = a["dtype"]
+            return _device_energy(*a["args"], a["env"], a["e_idx"], jax.device_put(kpts.astype(dt)),
+                                  tuple(jax.device_put(np.asarray(x, dt)) for x in occ), jax.device_put(wk.astype(dt)),
+                                  (a["static"], a["n_orb"], ch, cs, smearing, float(degeneracy)))
+        G, n_orb = self._host_lists(positions, cell, numbers, pbc, edge_step=1024, k_step=8)
+        b = self.offsite.model.bond
+        static = ((self.offsite.static(), n_orb, ch, cs, b.rcut_bond), smearing, float(degeneracy))
+        return _host_energy(b.site, self.onsite.readout, self.offsite.packs, jnp.asarray(np.asarray(positions, float)),
+                            jnp.asarray(np.asarray(cell, float)), G, jnp.asarray(kpts), occ, jnp.asarray(wk), static)
 
     def bands_fn(self, positions, cell, numbers, kpts, overlap="S", channel="H", overlap_shift=0.0, pbc=True):
         """(fn, positions): fn(positions) -> (n_k, n_orb) eigenvalues, differentiable through the
@@ -518,8 +620,10 @@ class HamiltonianPredictor:
         hs, pos0 = self._hs_fn(positions, cell, numbers, kpts, overlap, channel, overlap_shift, pbc)
         nk = len(np.atleast_2d(np.asarray(kpts, float)))
         wk = jnp.full(nk, 1.0 / nk) if weights is None else jnp.asarray(weights)
-        fixed = None if callable(occupations) else jnp.asarray(occupations)
-        occ = occupations if fixed is None else (lambda e: jnp.broadcast_to(fixed, e.shape))
+        if callable(occupations):
+            occ = lambda e, w: (occupations(e), jnp.asarray(jnp.nan, e.dtype), jnp.zeros((), e.dtype))
+        else:
+            occ = _occupation_fn("fixed", 2.0, (jnp.asarray(occupations),))
 
         volume = float(abs(np.linalg.det(np.asarray(cell, float))))
         return jax.jit(lambda pos: _band_energy(hs, pos, occ, wk, volume)), pos0

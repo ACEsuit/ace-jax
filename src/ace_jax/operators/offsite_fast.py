@@ -363,7 +363,7 @@ class PairLayouts:
     indices (into the bond graph) of the pair; `flatpos[e]`: the flat (row, slot) position of bond e
     in its pair's layout; `bond[(za, zb)]`: (n_a, K_ab) bond index per slot, -1 for padding."""
 
-    def __init__(self, g, numbers, species, rcut):
+    def __init__(self, g, numbers, species, rcut, k_step=1):
         numbers = np.asarray(numbers)
         present = [z for z in species if (numbers == z).any()]
         zi, zj = numbers[g.i], numbers[g.j]
@@ -379,6 +379,7 @@ class PairLayouts:
                 r = rowpos[g.i[e]]
                 count = np.bincount(r, minlength=len(rows))
                 K = max(int(count.max()) if len(e) else 1, 1)
+                K = -(-K // k_step) * k_step              # slots in steps: fewer shapes, fewer compilations
                 start = np.concatenate([[0], np.cumsum(count)])
                 pos = r * K + (np.arange(len(e)) - start[r])
                 self.flatpos[e] = pos
