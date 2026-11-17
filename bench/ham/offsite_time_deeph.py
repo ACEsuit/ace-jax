@@ -17,13 +17,13 @@ import dataclasses
 import numpy as np
 
 from ace_jax.eval.model import with_radial_table
-from ace_jax.ham import bond as B
+from ace_jax.operators import bond as B
 from ace_jax.basis import cg
 from ace_jax.ham import deeph
-from ace_jax.ham.features import build_site_basis
-from ace_jax.ham.offsite import OffsiteModel, canonical_pairs
-from ace_jax.ham.offsite_fast import OffsitePredictor
-from ace_jax.ham.onsite import OnsiteModel, OnsitePredictor, parts_of, shell_pairs
+from ace_jax.operators.features import build_site_basis
+from ace_jax.operators.offsite import OffsiteModel, canonical_pairs
+from ace_jax.operators.offsite_fast import OffsitePredictor
+from ace_jax.operators.onsite import OnsiteModel, OnsitePredictor, parts_of, shell_pairs
 
 
 def best(f, reps=3):
@@ -39,7 +39,7 @@ a = [x for x in sys.argv[1:] if not x.startswith("env=")]
 d = deeph.read(a[0], operators=())
 rcut, nsite, n_bond, n_cpl, l_cpl = float(a[1]), int(a[2]), int(a[3]), int(a[4]), int(a[5])
 if os.environ.get("HAM_ONE_SPECIES"):                 # the same geometry with every atom the heaviest species
-    from ace_jax.ham.orbitals import OrbitalBasis
+    from ace_jax.operators.orbitals import OrbitalBasis
     z = max(d.basis.species)
     d = d._replace(numbers=np.full(len(d.numbers), z), basis=OrbitalBasis.of({z: d.basis.ls(z)}))
 channels = tuple(a[6].split(",")) if len(a) > 6 else ("H",)

@@ -18,34 +18,17 @@ harmonic of the bond direction.
 Units are the file's (eV and angstrom in Quoll's output); nothing is converted."""
 import json
 import pathlib
-from typing import NamedTuple
 
 import numpy as np
 
-from .orbitals import OrbitalBasis
+from ..operators.data import OperatorData
+from ..operators.orbitals import OrbitalBasis
 
 # deeph_shell[k] = ace_shell[DEEPH_ORDER[l][k]], ace order m = -l..l
 DEEPH_ORDER = {0: (0,), 1: (2, 0, 1), 2: (2, 4, 0, 3, 1), 3: (3, 4, 2, 5, 1, 6, 0)}
 FILES = {"H": "hamiltonians.h5", "S": "overlaps.h5"}
 
 
-class OperatorData(NamedTuple):
-    """One structure with its operators.
-
-    cell: (3, 3), lattice vectors in ROWS (ASE's layout); positions (N, 3);
-    numbers (N,); basis: `OrbitalBasis`; blocks: {name: {(Rx, Ry, Rz, i, j): (n_i, n_j) array}},
-    0-based atoms, ace-jax orbital order; names are operator channels ("H", "S", ...)."""
-
-    cell: np.ndarray
-    positions: np.ndarray
-    numbers: np.ndarray
-    basis: OrbitalBasis
-    blocks: dict
-
-    def bond(self, key):
-        """Vector from atom i to atom j in cell R, for a block key."""
-        Rx, Ry, Rz, i, j = key
-        return self.positions[j] + np.array([Rx, Ry, Rz]) @ self.cell - self.positions[i]
 
 
 def _atom_perm(ls):

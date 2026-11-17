@@ -10,10 +10,10 @@ import jax.numpy as jnp
 import numpy as np
 
 from ..eval.nlist import dense_graph, have_matscipy_neighbours
-from . import bond as B
-from . import offsite_fast as OF
-from .offsite_fast import OffsitePredictor
-from .onsite import OnsitePredictor, _features, _readout, site_graph
+from ..operators import bond as B
+from ..operators import offsite_fast as OF
+from ..operators.offsite_fast import OffsitePredictor
+from ..operators.onsite import OnsitePredictor, _features, _readout, site_graph
 
 
 def _scatter(M, blocks, rows, cols, weight, n_orb):

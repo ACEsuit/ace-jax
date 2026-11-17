@@ -14,13 +14,13 @@ jax.config.update("jax_enable_x64", X64)
 import numpy as np
 
 from ace_jax.eval.model import with_radial_table
-from ace_jax.ham import bond as B
+from ace_jax.operators import bond as B
 from ace_jax.basis import cg
 from ace_jax.ham import deeph
-from ace_jax.ham import offsite_fast as OF
-from ace_jax.ham.features import build_site_basis
-from ace_jax.ham.offsite import OffsiteModel, canonical_pairs
-from ace_jax.ham.onsite import _features, site_graph
+from ace_jax.operators import offsite_fast as OF
+from ace_jax.operators.features import build_site_basis
+from ace_jax.operators.offsite import OffsiteModel, canonical_pairs
+from ace_jax.operators.onsite import _features, site_graph
 
 
 def best(f, reps=5):

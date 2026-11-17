@@ -11,12 +11,12 @@ import pytest
 import scipy.linalg
 
 from ace_jax.basis import cg
-from ace_jax.ham import bond
-from ace_jax.ham.features import build_site_basis
-from ace_jax.ham.offsite import OffsiteModel, canonical_pairs
-from ace_jax.ham.onsite import OnsiteModel, parts_of, shell_pairs
+from ace_jax.operators import bond
+from ace_jax.operators.features import build_site_basis
+from ace_jax.operators.offsite import OffsiteModel, canonical_pairs
+from ace_jax.operators.onsite import OnsiteModel, parts_of, shell_pairs
 from ace_jax.ham.operator import HamiltonianPredictor
-from ace_jax.ham.orbitals import OrbitalBasis
+from ace_jax.operators.orbitals import OrbitalBasis
 
 CACHE = pathlib.Path(__file__).resolve().parents[1] / "fixtures" / "ham" / "coupling_cache"
 ORB = OrbitalBasis.of({14: (0, 1, 1, 2), 6: (0, 1)})

@@ -30,11 +30,11 @@ import aitb
 import offsite_accuracy as OA
 import onsite_accuracy as ON
 
-from ace_jax.ham import bond as B
-from ace_jax.ham.features import build_site_basis
-from ace_jax.ham.fit import fit_offsite, fit_onsite
-from ace_jax.ham.offsite_fast import OffsitePredictor
-from ace_jax.ham.onsite import OnsitePredictor
+from ace_jax.operators import bond as B
+from ace_jax.operators.features import build_site_basis
+from ace_jax.operators.fit import fit_offsite, fit_onsite
+from ace_jax.operators.offsite_fast import OffsitePredictor
+from ace_jax.operators.onsite import OnsitePredictor
 
 N, KGRID = 14, 27.0
 N_ELECTRONS = 13
@@ -108,7 +108,7 @@ def main(nsite, n_bond, n_cpl, l_cpl, rcut_bond=9.0, n_train=20000, test="FCC/SK
     on_train = []
     for name, _ in ON.TRAIN:
         d = aitb.load(os.path.join(ON.DATA, name), operators=("H", "S"))
-        from ace_jax.ham.deeph import OperatorData
+        from ace_jax.operators.data import OperatorData
         on_train.append(OperatorData(d["cell"], d["positions"], d["numbers"], aitb.AL,
                                      {c: {(0, 0, 0, i, i): d[c][i] / KGRID for i in range(len(d["positions"]))} for c in ("H", "S")}))
     onsite, _ = fit_onsite(site, on_train, channels=("H", "S"), atoms=[a for _, a in ON.TRAIN])

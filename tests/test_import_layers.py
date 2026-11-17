@@ -38,8 +38,8 @@ LAYERS = [
 # (importer, imported): the step of the spec's order of work that removes the edge.
 ALLOWED = {
     # the carrier ACEModel of the site features: step 6 (features on eval.product / eval.features)
-    ("ham.features", "basis.model"): 6,
-    ("ham.features", "eval.model"): 6,
+    ("operators.features", "basis.model"): 6,
+    ("operators.features", "eval.model"): 6,
 }
 
 

@@ -10,7 +10,7 @@ ace-jax's convention; `bench/ham/onsite_accuracy.py` checks it with the overlap'
 import h5py
 import numpy as np
 
-from ace_jax.ham.orbitals import OrbitalBasis
+from ace_jax.operators.orbitals import OrbitalBasis
 
 AL = OrbitalBasis.of({13: (0, 0, 0, 1, 1, 2)})
 HARTREE = 27.211386245988          # eV

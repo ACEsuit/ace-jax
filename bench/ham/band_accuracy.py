@@ -14,7 +14,7 @@ Also printed: the plain RMSE of the valence bands up to E_F + 10 eV, and the sam
 the reference truncated at the bond cutoff.
     JAX_PLATFORMS=cpu uv run python bench/ham/band_accuracy.py <site radials> <n_bond> <n_cpl> <l_cpl> [rcut_bond=9] [n_train=20000]
         [env=<r_env>,<n_env>,<l_env>,<n_ebond>,<l_ebond>]
-`env=`: add the bond-environment feature group (`ham/bond.py`).
+`env=`: add the bond-environment feature group (`operators/bond.py`).
 """
 import json
 import os
@@ -33,12 +33,12 @@ import aitb
 import offsite_accuracy as OA
 import onsite_accuracy as ON
 
-from ace_jax.ham import bond as B
-from ace_jax.ham.deeph import OperatorData
-from ace_jax.ham.features import build_site_basis
-from ace_jax.ham.fit import fit_offsite, fit_onsite
-from ace_jax.ham.offsite_fast import OffsitePredictor
-from ace_jax.ham.onsite import OnsitePredictor
+from ace_jax.operators import bond as B
+from ace_jax.operators.data import OperatorData
+from ace_jax.operators.features import build_site_basis
+from ace_jax.operators.fit import fit_offsite, fit_onsite
+from ace_jax.operators.offsite_fast import OffsitePredictor
+from ace_jax.operators.onsite import OnsitePredictor
 
 ROOT = os.path.dirname(OA.DATA)                      # .../ACEhamiltonians-data
 N, KGRID, SIGMA = 14, 27.0, 0.086

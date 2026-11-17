@@ -12,10 +12,10 @@ from conftest import require_optional
 from ace_jax.eval.harmonics import real_spherical_harmonics
 from ace_jax.basis import cg
 from ace_jax.ham import deeph
-from ace_jax.ham.features import build_site_basis
-from ace_jax.ham.fit import fit_onsite
-from ace_jax.ham.onsite import OnsiteModel, parts_of, shell_pairs
-from ace_jax.ham.orbitals import OrbitalBasis
+from ace_jax.operators.features import build_site_basis
+from ace_jax.operators.fit import fit_onsite
+from ace_jax.operators.onsite import OnsiteModel, parts_of, shell_pairs
+from ace_jax.operators.orbitals import OrbitalBasis
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 CACHE, FIX = ROOT / "fixtures" / "ham" / "coupling_cache", ROOT / "fixtures" / "ham" / "sic_deeph"
@@ -161,7 +161,7 @@ def test_parts_without_features_are_reported(basis):
 def test_compiled_readout_is_the_reference_readout(basis):
     """`OnsitePredictor` (one jitted program, dense tensors) against `OnsiteModel.predict`
     (a loop over shell pairs), for a model with every part, and for an isolated atom."""
-    from ace_jax.ham.onsite import OnsitePredictor
+    from ace_jax.operators.onsite import OnsitePredictor
     m = random_model(basis)
     fast = OnsitePredictor(m)
     for pos, cell, numbers in (structure(), structure(3), (np.zeros((1, 3)), 50 * np.eye(3), np.array([6]))):

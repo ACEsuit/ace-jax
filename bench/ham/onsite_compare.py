@@ -14,9 +14,9 @@ jax.config.update("jax_enable_x64", True)
 
 import numpy as np
 
-from ace_jax.ham.features import build_site_basis
-from ace_jax.ham.onsite import OnsiteModel, OnsitePredictor, _features, _readout, parts_of, shell_pairs, site_graph
-from ace_jax.ham.orbitals import OrbitalBasis
+from ace_jax.operators.features import build_site_basis
+from ace_jax.operators.onsite import OnsiteModel, OnsitePredictor, _features, _readout, parts_of, shell_pairs, site_graph
+from ace_jax.operators.orbitals import OrbitalBasis
 
 ORB = OrbitalBasis.of({14: (0, 0, 0, 0, 1, 1, 1, 2, 2, 3)})
 

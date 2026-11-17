@@ -9,9 +9,9 @@ import numpy as np
 import pytest
 
 from ace_jax.eval.harmonics import real_spherical_harmonics
-from ace_jax.ham import bond
-from ace_jax.ham.features import build_site_basis
-from ace_jax.ham.onsite import _features, site_graph
+from ace_jax.operators import bond
+from ace_jax.operators.features import build_site_basis
+from ace_jax.operators.onsite import _features, site_graph
 
 CACHE = pathlib.Path(__file__).resolve().parents[1] / "fixtures" / "ham" / "coupling_cache"
 LPS = [(0, 1), (1, -1), (1, 1), (2, 1), (2, -1), (3, -1), (4, 1)]

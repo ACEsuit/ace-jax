@@ -12,11 +12,12 @@ from conftest import require_optional
 
 from ace_jax.eval.harmonics import real_spherical_harmonics
 from ace_jax.basis import cg
-from ace_jax.ham import bond, deeph
-from ace_jax.ham.features import build_site_basis
-from ace_jax.ham.fit import fit_offsite
-from ace_jax.ham.offsite import OffsiteModel, block_lps, canonical_pairs
-from ace_jax.ham.orbitals import OrbitalBasis
+from ace_jax.ham import deeph
+from ace_jax.operators import bond
+from ace_jax.operators.features import build_site_basis
+from ace_jax.operators.fit import fit_offsite
+from ace_jax.operators.offsite import OffsiteModel, block_lps, canonical_pairs
+from ace_jax.operators.orbitals import OrbitalBasis
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 CACHE, FIX = ROOT / "fixtures" / "ham" / "coupling_cache", ROOT / "fixtures" / "ham" / "sic_deeph"
@@ -142,7 +143,7 @@ def test_compiled_prediction_is_the_reference(basis):
     """`OffsitePredictor` (coefficients contracted with the site features once per atom, a
     matrix product per atom over its bonds) against `OffsiteModel.predict`, every bond and
     channel, both species orders, with and without coupled features."""
-    from ace_jax.ham.offsite_fast import OffsitePredictor
+    from ace_jax.operators.offsite_fast import OffsitePredictor
     for b in (basis, basis._replace(n_cpl=0)):
         m = random_model(b)
         fast = OffsitePredictor(m)
@@ -194,7 +195,7 @@ def test_predict_selected_bonds(basis_env):
 
 def test_compiled_predictor_with_the_environment_group(basis_env):
     """The compiled predictor with the bond-environment group equals the reference predictor."""
-    from ace_jax.ham.offsite_fast import OffsitePredictor
+    from ace_jax.operators.offsite_fast import OffsitePredictor
     m = random_model(basis_env)
     fast = OffsitePredictor(m)
     for seed in (0, 3):
@@ -211,7 +212,7 @@ def test_threaded_prediction_is_the_single_call(basis_env, threads):
     """Rows in chunks on a thread pool (`threads` > 1): the same blocks as the one compiled call,
     with the coupled and bond-environment groups on, for chunk counts that do and do not divide
     the number of atoms of a species."""
-    from ace_jax.ham.offsite_fast import OffsitePredictor
+    from ace_jax.operators.offsite_fast import OffsitePredictor
     m = random_model(basis_env)
     one, many = OffsitePredictor(m), OffsitePredictor(m, threads=threads)
     for seed in (0, 3):

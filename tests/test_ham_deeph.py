@@ -14,7 +14,7 @@ from conftest import require_optional
 from ace_jax.eval.harmonics import real_spherical_harmonics
 from ace_jax.basis import cg
 from ace_jax.ham import deeph
-from ace_jax.ham.orbitals import OrbitalBasis
+from ace_jax.operators.orbitals import OrbitalBasis
 
 FIX = pathlib.Path(__file__).resolve().parents[1] / "fixtures" / "ham" / "sic_deeph"
 

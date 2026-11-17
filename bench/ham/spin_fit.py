@@ -20,13 +20,13 @@ import scipy.linalg
 from scipy.optimize import brentq
 from scipy.special import erfc
 
-from ace_jax.ham import bond as B
+from ace_jax.operators import bond as B
 from ace_jax.ham import cache
-from ace_jax.ham.deeph import OperatorData
-from ace_jax.ham.features import build_site_basis
-from ace_jax.ham.fit import fit_offsite, fit_onsite
-from ace_jax.ham.offsite_fast import OffsitePredictor
-from ace_jax.ham.onsite import OnsitePredictor
+from ace_jax.operators.data import OperatorData
+from ace_jax.operators.features import build_site_basis
+from ace_jax.operators.fit import fit_offsite, fit_onsite
+from ace_jax.operators.offsite_fast import OffsitePredictor
+from ace_jax.operators.onsite import OnsitePredictor
 
 CH, WIDTH, NK, RCUT = ("H_up", "H_dn", "S"), 0.1, 4, 9.0
 STHR = (1e-3, 1e-2, 1e-1)

@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 
 from ace_jax.eval.harmonics import real_spherical_harmonics
-from ace_jax.ham.features import build_site_basis
+from ace_jax.operators.features import build_site_basis
 
 CACHE = pathlib.Path(__file__).resolve().parents[1] / "fixtures" / "ham" / "coupling_cache"
 

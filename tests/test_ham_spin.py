@@ -14,9 +14,9 @@ import pytest
 from conftest import require_optional
 
 from ace_jax.ham import cache, deeph
-from ace_jax.ham.bond import BondBasis
-from ace_jax.ham.features import build_site_basis
-from ace_jax.ham.fit import fit_offsite, fit_onsite
+from ace_jax.operators.bond import BondBasis
+from ace_jax.operators.features import build_site_basis
+from ace_jax.operators.fit import fit_offsite, fit_onsite
 from ace_jax.ham.operator import HamiltonianPredictor
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]

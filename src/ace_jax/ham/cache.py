@@ -10,8 +10,8 @@ import json
 
 import numpy as np
 
-from .deeph import OperatorData
-from .orbitals import OrbitalBasis
+from ..operators.data import OperatorData
+from ..operators.orbitals import OrbitalBasis
 
 SCHEMA = 1
 

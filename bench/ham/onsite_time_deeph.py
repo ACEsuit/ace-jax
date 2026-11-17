@@ -13,8 +13,8 @@ jax.config.update("jax_enable_x64", True)
 import numpy as np
 
 from ace_jax.ham import deeph
-from ace_jax.ham.features import build_site_basis
-from ace_jax.ham.onsite import OnsiteModel, OnsitePredictor, _features, _readout, parts_of, shell_pairs, site_graph
+from ace_jax.operators.features import build_site_basis
+from ace_jax.operators.onsite import OnsiteModel, OnsitePredictor, _features, _readout, parts_of, shell_pairs, site_graph
 
 
 def best(f, reps=5):

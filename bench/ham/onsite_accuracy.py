@@ -23,10 +23,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import aitb
 
 from ace_jax.eval.nlist import sparse_graph
-from ace_jax.ham.deeph import OperatorData
-from ace_jax.ham.features import build_site_basis
-from ace_jax.ham.fit import fit_onsite
-from ace_jax.ham.onsite import OnsitePredictor, _features, _readout, shell_pairs, site_graph
+from ace_jax.operators.data import OperatorData
+from ace_jax.operators.features import build_site_basis
+from ace_jax.operators.fit import fit_onsite
+from ace_jax.operators.onsite import OnsitePredictor, _features, _readout, shell_pairs, site_graph
 
 DATA = os.environ.get("ACEH_DATA", "/storage/eng/essswb/ACEhamiltonians-data/training_data")
 TRAIN = [("BCC/SK-supercell-001.h5", np.arange(0, 729, 2)), ("FCC/SK-supercell-002.h5", np.arange(0, 729, 2))]

@@ -13,7 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import aitb
 import offsite_accuracy as OA
 
-from ace_jax.ham import bond as B
+from ace_jax.operators import bond as B
 from ace_jax.ham import deeph
 
 N = 14

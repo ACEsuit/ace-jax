@@ -23,12 +23,12 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import aitb
 
-from ace_jax.ham import bond as B
+from ace_jax.operators import bond as B
 from ace_jax.basis import cg
-from ace_jax.ham.deeph import OperatorData
-from ace_jax.ham.features import build_site_basis
-from ace_jax.ham.fit import fit_offsite
-from ace_jax.ham.offsite import block_lps, canonical_pairs, site_features
+from ace_jax.operators.data import OperatorData
+from ace_jax.operators.features import build_site_basis
+from ace_jax.operators.fit import fit_offsite
+from ace_jax.operators.offsite import block_lps, canonical_pairs, site_features
 
 DATA = os.environ.get("ACEH_DATA", "/storage/eng/essswb/ACEhamiltonians-data/training_data")
 TRAIN, TEST = ["BCC/SK-supercell-001.h5", "FCC/SK-supercell-002.h5"], ["FCC/SK-supercell-001.h5", "BCC/SK-supercell-002.h5"]

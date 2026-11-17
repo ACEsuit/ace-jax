@@ -2,7 +2,7 @@
 (L, parity), then the numpy readout of all shell pairs and channels.
     ACEJAX_COUPLING_CACHE_ONLY=1 uv run python bench/ham/onsite_time.py [n_cells_per_side]
 The structure is zincblende SiC rattled by 0.05 angstrom; the model is the test basis of
-tests/test_ham_onsite.py (order 2, total degree 7, wL = 1, features to L = 6) with random
+tests/test_operators_onsite.py (order 2, total degree 7, wL = 1, features to L = 6) with random
 coefficients for the fixture's spdf orbital basis (30 orbitals on Si, 23 on C)."""
 import pathlib
 import sys
@@ -14,9 +14,9 @@ jax.config.update("jax_enable_x64", True)
 
 import numpy as np
 
-from ace_jax.ham.features import build_site_basis
-from ace_jax.ham.onsite import OnsiteModel, _features, parts_of, shell_pairs, site_graph
-from ace_jax.ham.orbitals import OrbitalBasis
+from ace_jax.operators.features import build_site_basis
+from ace_jax.operators.onsite import OnsiteModel, _features, parts_of, shell_pairs, site_graph
+from ace_jax.operators.orbitals import OrbitalBasis
 
 CACHE = pathlib.Path(__file__).resolve().parents[2] / "fixtures" / "ham" / "coupling_cache"
 ORB = OrbitalBasis.of({6: (0, 0, 0, 0, 1, 1, 1, 2, 2), 14: (0, 0, 0, 0, 1, 1, 1, 2, 2, 3)})
@@ -60,7 +60,7 @@ def main(n=4):
     t_feat = best(lambda: jax.block_until_ready(_features(basis, rij, zi, zj, seg, N)))
     t_graph = best(lambda: site_graph(basis, pos, cell, numbers), reps=3)
     t_all = best(lambda: model.predict(pos, cell, numbers), reps=3)
-    from ace_jax.ham.onsite import OnsitePredictor
+    from ace_jax.operators.onsite import OnsitePredictor
     fast = OnsitePredictor(model)
     t_fast = best(lambda: jax.block_until_ready(fast.dense(pos, cell, numbers)[1]), reps=3)
     us = lambda t: 1e6 * t / N

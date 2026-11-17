@@ -7,7 +7,7 @@ import pytest
 from conftest import require_optional
 
 from ace_jax.ham import cache, deeph
-from ace_jax.ham.orbitals import OrbitalBasis
+from ace_jax.operators.orbitals import OrbitalBasis
 
 FIX = pathlib.Path(__file__).resolve().parents[1] / "fixtures" / "ham" / "sic_deeph"
 
