@@ -28,6 +28,8 @@ PRESETS = {
                                "mace_L1", "mace_xl_L0", "mace_xl_L1"),
     "Foundation models": ("ace", "ace_ffi", "mace_L0", "mace_L1", "grace", "grace_2l", "mace_fm", "mace_fm_ft",
                           "mace_fm_ft_mixed", "grace_fm", "grace_fm_ft"),
+    # (polymlp, a first-pass family, is under "All" only: a preset of its own waits for the review of
+    # docs/dev/accuracy-cost-results.md -- the page's JSON lists the presets)
     "All": None,
 }
 GAP_X, GAP_Y, ROW_H = 0.08, 0.1, 380          # subplot gaps (paper fraction) and the height of one row (px)

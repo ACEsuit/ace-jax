@@ -30,6 +30,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
+from ..eval.dense import compact  # noqa: F401  (its old home; `step` uses it)
 from ..eval.nlist import dense_from_sparse, dense_graph, have_matscipy_neighbours
 from ..eval.nlist import backend as nlist_backend
 from ..eval.nlist import reverse_slots, sparse_graph
@@ -158,22 +159,6 @@ def unpack(out, n):
     F, V = values[1:1 + 3 * n].reshape(n, 3), values[1 + 3 * n:10 + 3 * n].reshape(3, 3)
     drift, overflow, k_max, n_edges = (int(c) for c in counts)
     return E, F, V, bool(drift), bool(overflow), k_max, n_edges
-
-
-def compact(valid_s, K):
-    """Slot map from a skin row to the K slots inside the cutoff: (order, mask,
-    csum).  Compact slot k of row i reads skin slot order[i, k]; mask marks the
-    live compact slots; csum is the row's running count of valid slots (cnt =
-    csum[:, -1], overflow where cnt > K).  In-cutoff slots keep their skin order:
-    compact slot k takes the (k+1)-th valid entry, found by a search in the row's
-    running count (gathers only; a per-row argsort was ~1 ms at 8k atoms on an
-    A100)."""
-    csum = jnp.cumsum(valid_s.astype(jnp.int32), axis=1)
-    want = jnp.arange(1, K + 1, dtype=jnp.int32)
-    order = jax.vmap(lambda c: jnp.searchsorted(c, want, side="left"))(csum)
-    order = jnp.minimum(order, valid_s.shape[1] - 1)
-    # slots past the row's count are padding, whatever `order` clipped to
-    return order, want[None, :] <= csum[:, -1:], csum
 
 
 def step(model, u, arrays, rc, K):

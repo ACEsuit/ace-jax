@@ -20,11 +20,11 @@ from ...basis.prior import prior_diagonal
 from ...eval import load
 from ..data import build_dataset
 from ..hypers import default_prior
-from ..inducing import GPConfig, blr_inducing
-from ..kernels import KernelSpec
+from ..gp.inducing import GPConfig, blr_inducing
+from ..gp.kernels import KernelSpec
 from ..objective import Problem
-from ..radial_learn import fit_radial
-from ..radial_model import rnl_degrees, to_analytic, with_radial
+from ..radial.learn import fit_radial
+from ..radial.model import rnl_degrees, to_analytic, with_radial
 from .config import resolved_noise
 
 RADIAL_MAP_STEPS = 300               # per-candidate theta-MAP steps in fit_radial (the driver's)

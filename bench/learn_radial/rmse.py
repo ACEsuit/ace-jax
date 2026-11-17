@@ -25,11 +25,11 @@ from ace_jax.basis.prior import prior_diagonal
 from ace_jax.eval import load
 from ace_jax.fit.data import build_dataset, load_configs
 from ace_jax.fit.hypers import default_prior, from_array
-from ace_jax.fit.inducing import GPConfig, descriptor_scale, select_inducing, site_features
-from ace_jax.fit.kernels import KernelSpec
+from ace_jax.fit.gp.inducing import GPConfig, descriptor_scale, select_inducing, site_features
+from ace_jax.fit.gp.kernels import KernelSpec
 from ace_jax.fit.objective import Problem, posterior
-from ace_jax.fit.radial_learn import theta_map_linear
-from ace_jax.fit.radial_model import normalise, radial_gram, row_active, to_analytic, with_radial
+from ace_jax.fit.radial.learn import theta_map_linear
+from ace_jax.fit.radial.model import normalise, radial_gram, row_active, to_analytic, with_radial
 from ace_jax.fit.rows import linear_rows
 from ace_jax.fit.stats import linear_statistics
 

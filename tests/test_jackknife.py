@@ -14,7 +14,7 @@ def _cfg(at):
 
 
 def test_config_blocks_small_and_large():
-    from ace_jax.fit.clusters import config_blocks
+    from ace_jax.uq.clusters import config_blocks
     ell = 3 * 6.25
     assert config_blocks(_cfg(bulk("Ni", "fcc", a=3.65, cubic=True).repeat(4)), ell) is None   # 14.6 A
     big = bulk("Ni", "fcc", a=3.65, cubic=True).repeat((12, 4, 4))                              # 43.8 A in x
@@ -25,7 +25,7 @@ def test_config_blocks_small_and_large():
 
 
 def test_config_blocks_nonperiodic_uses_bounding_box():
-    from ace_jax.fit.clusters import config_blocks
+    from ace_jax.uq.clusters import config_blocks
     at = bulk("Ni", "fcc", a=3.65, cubic=True).repeat((16, 16, 2))                              # 58.4 A in x, y
     at.pbc = (False, False, True)
     at.center(vacuum=10.0, axis=(0, 1))
@@ -33,7 +33,7 @@ def test_config_blocks_nonperiodic_uses_bounding_box():
 
 
 def test_row_clusters_ids():
-    from ace_jax.fit.clusters import row_clusters
+    from ace_jax.uq.clusters import row_clusters
     from ace_jax.fit.data import build_dataset
     small = _cfg(bulk("Ni", "fcc", a=3.65, cubic=True).repeat(2))
     large = _cfg(bulk("Ni", "fcc", a=3.65, cubic=True).repeat((12, 4, 4)))
@@ -49,7 +49,7 @@ def test_row_clusters_ids():
 
 
 def test_config_blocks_degenerate_cell_uses_cartesian_bounding_box():
-    from ace_jax.fit.clusters import config_blocks
+    from ace_jax.uq.clusters import config_blocks
     for pbc in (False, True):
         at = bulk("Ni", "fcc", a=3.65, cubic=True).repeat((12, 4, 4))
         at.set_cell(np.zeros((3, 3)))
@@ -62,7 +62,7 @@ def test_config_blocks_degenerate_cell_uses_cartesian_bounding_box():
 
 def test_row_clusters_validates_configs():
     import pytest
-    from ace_jax.fit.clusters import row_clusters
+    from ace_jax.uq.clusters import row_clusters
     from ace_jax.fit.data import build_dataset
     small = _cfg(bulk("Ni", "fcc", a=3.65, cubic=True).repeat(2))
     ds = build_dataset([small], {"elements": [28], "rcut": 6.25}, np.zeros(1), 1)
@@ -111,7 +111,7 @@ def _A(post):
 
 def test_press_equals_exact_deletion(ard_setup):
     """c - c_(-k) = A^-1 g~_k for every whole-configuration cluster, h fixed."""
-    from ace_jax.fit.clusters import row_clusters
+    from ace_jax.uq.clusters import row_clusters
     from ace_jax.fit.jackknife import press_scores
     prob, ds, ev, h, post = ard_setup
     sig = ev.sigmas(h)
@@ -129,7 +129,7 @@ def test_press_equals_exact_deletion(ard_setup):
 
 
 def test_push_through_matches_exact(ard_setup):
-    from ace_jax.fit.clusters import row_clusters
+    from ace_jax.uq.clusters import row_clusters
     from ace_jax.fit.jackknife import press_scores
     prob, ds, ev, h, post = ard_setup
     rc, K = row_clusters(ds, None, float("inf"))
@@ -140,7 +140,7 @@ def test_push_through_matches_exact(ard_setup):
 
 def test_press_high_leverage_cluster(ard_setup):
     """Prior precision > 0 keeps every lambda_max(H_kk) < 1; a near-1 cluster stays finite and exact."""
-    from ace_jax.fit.clusters import row_clusters
+    from ace_jax.uq.clusters import row_clusters
     from ace_jax.fit.jackknife import press_scores
     prob, ds, ev, h, post = ard_setup
     rc, K = row_clusters(ds, None, float("inf"))
@@ -168,7 +168,7 @@ def _posterior_at(ev, h, post):
 
 def test_press_spatial_and_ev_clusters(tiny_linear_problem):
     from ace_jax.fit.ard import ARDEvidence, ard_posterior, ard_statistics, body_order_columns
-    from ace_jax.fit.clusters import row_clusters
+    from ace_jax.uq.clusters import row_clusters
     from ace_jax.fit.data import Config, build_dataset
     from ace_jax.fit.hypers import default_prior
     from ace_jax.fit.jackknife import press_scores
@@ -206,7 +206,7 @@ def test_press_spatial_and_ev_clusters(tiny_linear_problem):
 
 
 def test_centring_and_factor(ard_setup):
-    from ace_jax.fit.clusters import row_clusters
+    from ace_jax.uq.clusters import row_clusters
     from ace_jax.fit.jackknife import atom_shape, press_scores, shape_factor
     from ace_jax.fit.rows import linear_rows
     prob, ds, ev, h, post = ard_setup
@@ -248,7 +248,7 @@ def _row_block_clusters(ds):
 def test_press_block_mode(ard_setup):
     """Block mode is exact when every cluster is one row-block, and an approximation (finite, same order,
     not identical) for whole-configuration clusters."""
-    from ace_jax.fit.clusters import row_clusters
+    from ace_jax.uq.clusters import row_clusters
     from ace_jax.fit.jackknife import press_scores
     prob, ds, ev, h, post = ard_setup
     sig = ev.sigmas(h)
@@ -266,7 +266,7 @@ def test_press_block_mode(ard_setup):
 
 
 def test_press_rejects_cluster_spanning_batches(ard_setup):
-    from ace_jax.fit.clusters import row_clusters
+    from ace_jax.uq.clusters import row_clusters
     from ace_jax.fit.jackknife import press_scores
     prob, ds, ev, h, post = ard_setup
     rc, K = row_clusters(ds, None, float("inf"))
@@ -310,7 +310,7 @@ def test_solve_sym_guards_nonpositive_mu():
 
 def test_atom_shape_chunked(ard_setup, monkeypatch):
     from ace_jax.fit import jackknife
-    from ace_jax.fit.clusters import row_clusters
+    from ace_jax.uq.clusters import row_clusters
     from ace_jax.fit.jackknife import atom_shape, press_scores, shape_factor
     from ace_jax.fit.rows import linear_rows
     prob, ds, ev, h, post = ard_setup

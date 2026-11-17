@@ -36,11 +36,12 @@ def force_rows(calc, at):
     """(N, 3, L) float64 force design rows of the live atoms of `at` (as ACECalculator serves them)."""
     from ace_jax.fit.rows import chunked_rows_fn
     from ace_jax.eval.model import highest_precision
-    ds, b, live = calc._one_config_dataset(at)
-    if getattr(calc, "_rows_fn", None) is None:
-        calc._rows_fn = chunked_rows_fn(calc._fit_model, calc._fit_cfg)
+    ds, b, live = calc.uq.design.one_config(at)
+    design = calc.uq.design
+    if design.rows_fn is None:
+        design.rows_fn = chunked_rows_fn(design.model, design.cfg)
     with highest_precision():
-        F = calc._rows_fn(b).F
+        F = design.rows_fn(b).F
     return np.asarray(F)[np.asarray(live)]
 
 
@@ -76,7 +77,7 @@ def main(argv=None):
     if post.R is None:
         raise SystemExit("posterior has no schema-3 shape factor R")
     calc = ACECalculator(a.model, posterior=a.posterior)
-    L0 = calc._fit_cfg.len_basis
+    L0 = calc.uq.design.cfg.len_basis
     R = np.asarray(post.R, np.float64)[:L0]
     dinv = np.asarray(post.dinv, np.float64)[:L0]
     Rs = [rounding(R, k) for k in range(a.seeds)]

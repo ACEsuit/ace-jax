@@ -30,7 +30,7 @@ def packed():
     from ase.build import bulk
     from ace_jax.eval import load
     from ace_jax.fit.data import Config, build_dataset, load_configs
-    from ace_jax.fit.inducing import GPConfig
+    from ace_jax.fit.gp.inducing import GPConfig
     model, meta, z = load(FIXTURE_DIR / "si_fitted.npz")
     at = bulk("Si", "diamond", a=5.43, cubic=True).repeat((5, 5, 4))
     at.rattle(0.05, seed=1)
@@ -79,7 +79,7 @@ def test_linear_statistics_chunked_equal(packed, monkeypatch):
 
 
 def test_site_features_chunked_equal(packed, monkeypatch):
-    from ace_jax.fit.inducing import site_features
+    from ace_jax.fit.gp.inducing import site_features
     model, g, ds = packed
     X0, S0 = site_features(model, g, ds)
     _force_chunk(monkeypatch, model, g, ds)
@@ -93,8 +93,8 @@ def hybrid():
     from ace_jax.eval import load
     from ace_jax.fit.data import build_dataset, load_configs
     from ace_jax.fit.hypers import Hypers, default_prior
-    from ace_jax.fit.inducing import GPConfig, descriptor_scale, select_inducing, site_features
-    from ace_jax.fit.kernels import KernelSpec
+    from ace_jax.fit.gp.inducing import GPConfig, descriptor_scale, select_inducing, site_features
+    from ace_jax.fit.gp.kernels import KernelSpec
     from ace_jax.fit.objective import Problem
     model, meta, z = load(FIXTURE_DIR / "si_fitted.npz")
     cfgs = load_configs(XYZ, "dft_energy", "dft_force", "dft_virial")
@@ -148,7 +148,7 @@ def test_hybrid_statistics_and_gradient_chunked_equal(hybrid, hybrid_unchunked, 
 def test_predict_batch_chunked_equal(hybrid, monkeypatch):
     """The predictive rows path (rows + residual + energy and derivative DTC) chunked."""
     from ace_jax.fit.objective import posterior
-    from ace_jax.fit.predict import _predict_batch
+    from ace_jax.fit.gp.predict import _predict_batch
     from ace_jax.fit.stats import sufficient_statistics
     prob, ds, theta = hybrid
     st = sufficient_statistics(theta, prob.spec, prob.model, prob.ind, prob.cfg, ds)
@@ -197,8 +197,9 @@ def test_statistics_memory_shape_bounded(packed, monkeypatch):
 def test_derivative_dtc_over_budget_warns_and_matches(hybrid, monkeypatch):
     """The derivative DTC is not node-chunked: over budget it still builds its whole-batch
     arrays (same result) and warns once, naming the remedies."""
-    from ace_jax.fit import predict, rows
-    from ace_jax.fit.predict import _dtc_deriv_residual
+    from ace_jax.fit.gp import predict
+    from ace_jax.fit import rows
+    from ace_jax.fit.gp.predict import _dtc_deriv_residual
     prob, ds, theta = hybrid
     b = jax.tree.map(lambda a: a[0], ds)
     ref = _dtc_deriv_residual(theta, prob, b)
@@ -256,7 +257,7 @@ def test_radial_gradient_memory_bounded(monkeypatch):
     model per call) is bounded the same way: no stacked per-chunk J."""
     from radial_learn_problem import THETA, make_problem
     from ace_jax.fit import rows
-    from ace_jax.fit.radial_learn import projected_residual
+    from ace_jax.fit.radial.learn import projected_residual
     prob, ds, _ = make_problem()
     K = ds.nbr.shape[2]
     monkeypatch.setattr(rows, "ROWS_EDGE_BUDGET", 8 * rows._node_elems(prob.model, prob.cfg, K))

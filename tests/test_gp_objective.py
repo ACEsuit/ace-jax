@@ -12,8 +12,8 @@ import jax.numpy as jnp
 from ace_jax.eval import highest_precision, load
 from ace_jax.fit.data import build_dataset, load_configs
 from ace_jax.fit.hypers import Hypers, default_prior, to_array
-from ace_jax.fit.inducing import GPConfig, descriptor_scale, select_inducing, site_features
-from ace_jax.fit.kernels import KernelSpec
+from ace_jax.fit.gp.inducing import GPConfig, descriptor_scale, select_inducing, site_features
+from ace_jax.fit.gp.kernels import KernelSpec
 from ace_jax.fit.objective import Problem, log_marginal_likelihood, make_log_density, posterior
 from ace_jax.fit.stats import sufficient_statistics
 

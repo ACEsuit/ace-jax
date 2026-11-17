@@ -11,12 +11,12 @@ import jax.numpy as jnp
 import numpy as np
 
 from ..hypers import Hypers, from_array, log_prior, to_array
-from ..ladder import run_map
-from ..multistart import lbfgs_map, multistart_map, prior_starts
+from ..gp.ladder import run_map
+from ..linear.multistart import lbfgs_map, multistart_map, prior_starts
 from ..objective import hoist, jit_lik
-from ..newton import _newton_step, newton_polish
+from ..linear.newton import _newton_step, newton_polish
 from ..paramset import SHARED_NOISE, tie_noise
-from ..progress import emit
+from ..linear.progress import emit
 
 # log-space boxes: generous, but keep the Cholesky away from sigma -> 0; A up to
 # 1e3 (the full/PCA-descriptor GP sat at the old bound of 10, Cantor-1k)
@@ -258,7 +258,7 @@ def fit_map(cfg, d, b, obj, log=print):
         log(f"checkpoint: MAP starts from {ckpt}")
     init = None if cfg.init is None else Hypers(**cfg.init)
     if cfg.sigma_type:
-        from ..ladder import run_map_ps
+        from ..gp.ladder import run_map_ps
         from ..paramset import build_fit_paramset
         msg = ("sigma_type: the per-config-type MAP runs Adam over the extended vector and is not checked "
                "for convergence (map_polish and strict do not apply)")

@@ -9,7 +9,7 @@ def fit_linear_with_sigma_type(bundle, *, steps=300, lr=0.05, seed=0):
 
     `bundle` is (prob, ds, n_types) with ds carrying `cfg_type`/`node_type`.
     """
-    from .ladder import run_map_ps
+    from .gp.ladder import run_map_ps
     from .paramset import from_hypers
     prob, ds, n_types = bundle
     ps = from_hypers(prob.prior.mu, prob.prior, n_types=n_types)

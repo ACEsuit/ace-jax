@@ -92,7 +92,7 @@ def test_npz_roundtrip_keeps_the_basis(tmp_path, monkeypatch):
 def test_lean_matches_the_full_model(tmp_path, monkeypatch, learned):
     """lean keeps an sbessel radial analytic (to_spline tabulates polynomials in x only), learned
     or not, so lean and full agree to roundoff."""
-    from ace_jax.fit.radial_model import with_radial
+    from ace_jax.fit.radial.model import with_radial
     b = _build(tmp_path, monkeypatch); m, meta = b.model, b.meta
     if learned:
         rng = np.random.default_rng(2)
@@ -108,7 +108,7 @@ def test_lean_matches_the_full_model(tmp_path, monkeypatch, learned):
 def test_learner_helpers_take_the_sbessel_basis(tmp_path, monkeypatch):
     """The radial Gram is positive definite, the roughness matrix symmetric and PSD, and widening
     adds g_k columns without changing any radial."""
-    from ace_jax.fit.radial_model import _uniform_moment, roughness_matrix, widen_radial
+    from ace_jax.fit.radial.model import _uniform_moment, roughness_matrix, widen_radial
     m = _build(tmp_path, monkeypatch).model
     U = np.asarray(_uniform_moment(m, 401))[0, 0]
     assert np.linalg.eigvalsh(U).min() > 0
@@ -150,3 +150,11 @@ def test_radial_basis_is_a_basis_flag_not_a_learner_option():
     assert a.radial_basis == "sbessel" and not a.learn_radial
     with pytest.raises(SystemExit):
         _parse(["fit", "--train", "x.xyz", "--order", "2", "--max-degree", "6", "--radial-steps", "5", "--out", "o"])
+
+
+def test_model_free_radial_reads_the_sbessel_basis(tmp_path, monkeypatch):
+    """eval.radial.TensorRadial / eval.features.pooled_a on the sbessel radial: the model's own A."""
+    from test_eval_features import check_one_particle
+    m = _build(tmp_path, monkeypatch).model
+    assert m.rnl_basis == "sbessel"
+    check_one_particle(m)

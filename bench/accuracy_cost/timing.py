@@ -105,6 +105,9 @@ PLAN = {"ace": [("acejax-ace", {"cpu": "standalone", "gpu": "lammps"}, ACE_DTYPE
                      ("grace-rt", {"cpu": "lammps", "gpu": "lammps"}, ("mixed",))],
         # GRACE foundation models (fit_grace_fm.py): grace-runtime on the model's kokkos.npz, as grace / grace_2l
         "grace_fm": [("grace-rt", {"cpu": "lammps", "gpu": "lammps"}, ("mixed",))],
+        # Seko's polynomial MLPs: pair_style polymlp has no MPI and no GPU code -- one rank, OpenMP threads
+        # (SERIAL_CODES: the node's ranks x threads become threads of one rank; rows record ranks 1)
+        "polymlp": [("polymlp", {"cpu": "lammps"}, ("float64",))],
         "gap": [("gap", {"cpu": "lammps"}, ("float64",))],         # pair quip: no KOKKOS, CPU only
         "gap_noglue": [("gap", {"cpu": "lammps"}, ("float64",))],  # the XML has no Glue term; same pair style
         "gap_E30": [("gap", {"cpu": "lammps"}, ("float64",))]}     # GAP-18's command, energy sigmas x10/3
@@ -112,7 +115,13 @@ STYLE = {"acejax-ace": "acejax", "acejax-pace": "acejax", "mlpace": "mlpace", "m
          "mace": "mace", "gap": "gap", "nep": "nep", "nep-gpumd": "nep-gpumd",
          "mace-xl": "mace-xl", "mace-xl-f32": "mace-xl-f32", "acepotentials-trim": "acepotentials-trim",
          "grace": "grace", "grace-fs": "grace-fs", "grace-2l": "grace-2l", "grace-rt": "grace-rt", "pace-rt": "pace-rt",
-         "mace-symx3": "mace-symx3", "mace-fdn": "mace-fdn", "mace-fdn-f32": "mace-fdn-f32", "mace-fdn-f32m": "mace-fdn-f32m"}
+         "mace-symx3": "mace-symx3", "mace-fdn": "mace-fdn", "mace-fdn-f32": "mace-fdn-f32", "mace-fdn-f32m": "mace-fdn-f32m",
+         "polymlp": "polymlp"}
+SERIAL_CODES = ("polymlp",)                       # no MPI: one rank, the node's cores as OpenMP threads
+# optional codes: timed only where the env json names their LAMMPS wrapper
+OPTIONAL_LMP = {"mace-xl": "lmp_xl", "mace-xl-f32": "lmp_xl", "acepotentials-trim": "lmp_ace",
+                "mlpace-mixed": "lmp_mixed", "mace-symx3": "lmp_symx3", "polymlp": "lmp_polymlp",
+                "mace-fdn": "lmp_fdn", "mace-fdn-f32": "lmp_fdn", "mace-fdn-f32m": "lmp_fdn"}
 GRACE_CODES = ("grace", "grace-fs", "grace-2l", "grace-rt")
 TRIM = "acepotentials-trim"
 XL_CODES = ("mace-xl", "mace-xl-f32")
@@ -342,6 +351,10 @@ def gate_model(row, device, env, work):
                     E0, F0 = parity._acejax_ef(row.get("ref") or row["path"], at)
                     E1, F1 = parity._lammps_ef("mlpace", row["path"], row["elements"], at, device,
                                                lammps_for(code, device, env)[0], w)
+                elif style == "polymlp":                               # vs pypolymlp's evaluator (no E0 either side)
+                    E0, F0 = parity._venv_ef("fit_polymlp", row["path"], at, env["polymlp_python"], w)
+                    E1, F1 = parity._lammps_ef("polymlp", row["path"], row["elements"], at, device,
+                                               lammps_for(code, device, env)[0], w)
                 elif style == "pace-rt":                             # vs ace-jax on pacemaker's .yace, whose E0
                     E0, F0 = parity._acejax_ef(row["ref"], at)       # the .yaml lacks: added back to LAMMPS' E
                     E1, F1 = parity._lammps_ef("pace-rt", row["path"], row["elements"], at, device,
@@ -417,6 +430,8 @@ def time_case(c, device, n, env, work, prev=None):
         return run_gpumd.run_case(row, n, device, env["gpumd"], work, prev)
     lmp, pjrt = lammps_for(row["code"], device, env)
     ranks, threads = (CPU_RANKS, CPU_THREADS) if device == "cpu" else (1, 1)
+    if row["code"] in SERIAL_CODES:
+        ranks, threads = 1, ranks * threads
     return run_lammps.run_case(row, n, c["dtype"], device, lmp, ranks, work, pjrt=pjrt, prev=prev,
                                threads=threads, slots=slots, aceplugin=env.get("ace_plugin"))
 
@@ -424,16 +439,8 @@ def time_case(c, device, n, env, work, prev=None):
 def lammps_for(code, device, env):
     """(LAMMPS wrapper, PJRT plugin) for a code: ace-jax on the CPU runs the host-Kokkos
     lammps-jax build with XLA's CPU plugin (env `lmp_jax_cpu`, `pjrt_cpu`)."""
-    if code in XL_CODES:
-        return env["lmp_xl"], None
-    if code == TRIM:
-        return env["lmp_ace"], None
-    if code == "mlpace-mixed":
-        return env["lmp_mixed"], None
-    if code == "mace-symx3":
-        return env["lmp_symx3"], None
-    if code in FDN_CODES:
-        return env["lmp_fdn"], None
+    if code in OPTIONAL_LMP:
+        return env[OPTIONAL_LMP[code]], None
     if not code.startswith("acejax"):
         return env["lmp"], env.get("pjrt")
     if device == "cpu":
@@ -606,11 +613,8 @@ def main(argv=None):
     meta = {"forced_busy": a.force_busy,
             "device_name": device_name(a.device), "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES")}
     runner, gate = subprocess_runner(env, a.device)
-    cs = [c for c in cases(a.device, only=a.only) if (c["row"]["code"] not in XL_CODES or env.get("lmp_xl"))
-          and (c["row"]["code"] != TRIM or env.get("lmp_ace"))
-          and (c["row"]["code"] != "mlpace-mixed" or env.get("lmp_mixed"))
-          and (c["row"]["code"] != "mace-symx3" or env.get("lmp_symx3"))
-          and (c["row"]["code"] not in FDN_CODES or env.get("lmp_fdn"))
+    cs = [c for c in cases(a.device, only=a.only)
+          if (c["row"]["code"] not in OPTIONAL_LMP or env.get(OPTIONAL_LMP[c["row"]["code"]]))
           and (c["mode"] != "gpumd" or env.get("gpumd"))]    # optional codes: only where the env json names them
     cs = select(cs, a.codes, a.modes)
     run_cases(a.device, cs, runner, gate,

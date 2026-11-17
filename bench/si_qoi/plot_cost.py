@@ -28,6 +28,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 METRICS = ROOT / "bench/accuracy_cost/results/metrics.jsonl"
 TARGET_QOI = 0.5                  # geometric-mean |error|/tolerance: the typical QoI within half its tolerance
 # validated (dataviz validate_palette --pairs all, light): red/green CVD 7.2 -> marker shapes + direct labels
+NEUTRAL_INK = "#3d3c3a"              # the neutral of the families that take no hue (below)
 FAM = {  # family: (label, colour, marker, linestyle, filled, qoi model name pattern)
     "ace":        ("linear ACE, ace-jax",      "#2a78d6", "o", "-",  True,  "ACE_{s}"),   # costs: the XLA bundle
     "ace_E10":    ("linear ACE, pacemaker's E:F balance", "#2a78d6", "o", "--", False, "ACEE10_{s}"),
@@ -105,6 +106,11 @@ FAM = {  # family: (label, colour, marker, linestyle, filled, qoi model name pat
     "mace_fm_ft_mixed": ("MACE-MH-1, fine-tuned, mixed precision",   "#a197ea", "*", "-", True,  "MACEFM_{s}"),
     "grace_fm":         ("GRACE-OMAT 1L, 2L (foundation), zero-shot", "#a0522d", "s", ":", False, "GRACEFM_{s}"),
     "grace_fm_ft":      ("GRACE-OMAT 1L, 2L, fine-tuned",            "#a0522d", "s", "-", True,  "GRACEFM_{s}"),
+    # Seko's polynomial MLPs (docs/dev/specs/2026-11-12-ye3t-polymlp-benchmark-design.md).  No further hue passes with this many
+    # families (dataviz validate_palette --pairs all, light: each of six candidates fails the normal-vision floor
+    # against an existing family), so, as GRACE-2L, it takes no new hue: a dark neutral, told apart by marker
+    # (thin diamond), line style and legend
+    "polymlp":      ("polynomial MLP (pypolymlp; CPU: 1 rank, OpenMP)",  NEUTRAL_INK,  "d", "-",  True,  "POLYMLP_{s}"),
 }
 FM_PLOTTED = "mh1-omat-ft-lr1e-3"                # of the mace_fm learning-rate runs: the lowest validation loss
 # derived models: (family, size) -> the (family, size) it was made from.  The figure draws an arrow from the source to
@@ -131,6 +137,7 @@ def arrows(ax, data, key):
 # min-max spread as an error bar; the per-seed rows stay in metrics.jsonl.  SEED_EXCLUDE: checks, not ladder points
 SEEDED = ("grace", "grace_fs", "grace_2l", "mace_fm_ft", "mace_fm_ft_mixed", "grace_fm_ft")   # fine-tunes: seed 0 has no suffix
 SEED_EXCLUDE = ("c32l4_long", "2l_small_long")   # the 150k-update training-length checks
+CHECK_SUFFIX = ("-a28",)                         # polymlp's dense-penalty-grid refits: a check, not ladder points
 WL_FAMILIES = ("ace", "ace_wl_1", "ace_wl_1.75", "ace_wl_2", "ace_wl_2.5", "ace_wl_o5", "ace_lr", "pace")
 WL_RECOLOUR = {"ace": "#3987e5"}                 # the ramp's wL 1.5 step (the categorical blue is too near 1.75)
 
@@ -243,7 +250,7 @@ def trainable(fam, size, n, model=None):
 
 
 def load_rows():
-    rows = [json.loads(l) for l in open(METRICS)]
+    rows = [r for r in map(json.loads, open(METRICS)) if not r["size"].endswith(CHECK_SUFFIX)]
     for r in rows:
         r["n_params"] = trainable(r["family"], r["size"], r.get("n_params"), r.get("model"))
         r["family"] = family_of(r)
@@ -410,15 +417,16 @@ def draw_row(axes, data, ref, xlabel, codes, letters, what):
     names, vals, notes = [FAM[f][0] for f, _, _ in bars], [v for _, v, _ in bars], [n for _, _, n in bars]
     cols = [FAM[f][1] for f, _, _ in bars]
     y = np.arange(len(names))
+    fs = min(8, 200 / max(len(names), 1))                     # rows share a fixed panel height: shrink past ~25
     lo, hi = min(allx) / 2, max(allx) * 2
     style(ax, xlabel.split("  (")[0], ""); ax.grid(False, axis="y"); ax.set_xlim(lo, hi)
     for i, (v, n, col) in enumerate(zip(vals, notes, cols)):
         if np.isfinite(v):
             ax.barh(i, v - lo, left=lo, color=col, height=0.6)
-            ax.annotate(n, (v, i), xytext=(4, 0), textcoords="offset points", va="center", fontsize=8, color=INK)
+            ax.annotate(n, (v, i), xytext=(4, 0), textcoords="offset points", va="center", fontsize=fs, color=INK)
         else:
-            ax.annotate(n, (lo, i), xytext=(4, 0), textcoords="offset points", va="center", fontsize=8, color=MUTED)
-    ax.set_yticks(y, names); ax.set_ylim(len(names) - 0.4, -0.6)
+            ax.annotate(n, (lo, i), xytext=(4, 0), textcoords="offset points", va="center", fontsize=fs, color=MUTED)
+    ax.set_yticks(y, names, fontsize=fs + 1.5); ax.set_ylim(len(names) - 0.4, -0.6)
     ax.set_title(f"{c}  {what} to reach the target", loc="left", color=INK, fontweight="bold", pad=16)
     ax.text(0, 1.01, f"force RMSE ≤ GAP-18's and QoI error ≤ {TARGET_QOI:g}", transform=ax.transAxes, fontsize=8,
             color=MUTED, va="bottom")
@@ -502,6 +510,7 @@ def main():
                 "ace-jax kernel: the same bundles with the XLA program replaced by one XLA FFI call "
                 "(ace_jax.eval.ffi; radials tabulated in r): C++ on the CPU (128x1), CUDA on the A100.\n"
                 "NEP: trained by GPUMD; on the CPU LAMMPS pair_style nep (NEP_CPU, float64); on the GPU GPUMD's own MD code, mixed precision (labelled).\n"
+                "Polynomial MLP: pair_style polymlp has no MPI and no GPU code: one rank with 128 OpenMP threads.\n"
                 if any("CPU" in r[0] for r in rows) else "")
     bottom = 0
     if not a.no_note:

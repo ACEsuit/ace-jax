@@ -295,7 +295,7 @@ def test_radial_edits_refuse_a_lean_model():
     """A lean model keeps the radial twice (rnl_coefs for the sparse layout,
     blk_rnl_coefs for the dense one) and its pair channel is the readout, so
     editing its radials would silently desynchronise the layouts."""
-    from ace_jax.fit.radial_model import to_analytic, widen_radial, with_radial
+    from ace_jax.fit.radial.model import to_analytic, widen_radial, with_radial
     m, meta, _ = load(str(MODELS["sige_nofit"]))
     a, _ = to_analytic(m, 6)
     for mm in (lean(m), block_dense(m)):
@@ -344,7 +344,7 @@ def _no_pair(m):
 
 
 def _analytic_rnl(m):
-    from ace_jax.fit.radial_model import to_analytic
+    from ace_jax.fit.radial.model import to_analytic
     return to_analytic(m, 8)[0]
 
 

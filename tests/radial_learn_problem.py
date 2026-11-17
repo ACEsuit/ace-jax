@@ -11,8 +11,8 @@ import jax.numpy as jnp  # noqa: E402
 from ace_jax.eval import load  # noqa: E402
 from ace_jax.fit.data import build_dataset, load_configs  # noqa: E402
 from ace_jax.fit.hypers import Hypers, default_prior  # noqa: E402
-from ace_jax.fit.inducing import GPConfig, descriptor_scale, select_inducing, site_features  # noqa: E402
-from ace_jax.fit.kernels import KernelSpec  # noqa: E402
+from ace_jax.fit.gp.inducing import GPConfig, descriptor_scale, select_inducing, site_features  # noqa: E402
+from ace_jax.fit.gp.kernels import KernelSpec  # noqa: E402
 from ace_jax.fit.objective import Problem  # noqa: E402
 
 XYZ = FIXTURE_DIR / "si_tiny_train.xyz"
@@ -40,7 +40,7 @@ def make_problem(ncfg=6, per_batch=3, start=0, force_key="dft_force"):
 
 def relabel(prob, ds, W, c):
     """ds with targets replaced by the noiseless linear ACE with radials W and readout c."""
-    from ace_jax.fit.radial_model import with_radial
+    from ace_jax.fit.radial.model import with_radial
     from ace_jax.fit.rows import linear_rows
     m = with_radial(prob.model, W)
     yE, yF, yV = [], [], []

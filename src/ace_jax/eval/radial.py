@@ -12,8 +12,10 @@ No module-level jax.config here, or anywhere in this package: precision is the
 caller's to choose.
 """
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
+import numpy as np
 
 
 def agnesi_normalized(r, params):
@@ -149,3 +151,151 @@ def poly_recursion(y, A, B, C):
     for k in range(2, n):
         out.append((A[k] * y + B[k]) * out[k - 1] + C[k] * out[k - 2])
     return jnp.stack(out, axis=-1)                       # (..., n_polys)
+
+
+# ---------------------------------------------------------------------------
+# The tensor radial R_nl of the ACE basis as functions of its arrays.  `f` is any object with the
+# radial's fields under ACEModel's names: an ACEModel, or a `TensorRadial` (those fields alone).
+
+def radial_one(r, zi, zj, kind, trans, coefs, grid, Wnlq, ABC, env):
+    """One radial basis, either branch.  `env` is the already-evaluated
+    envelope; both branches multiply by it identically."""
+    x = agnesi_normalized(r, trans[zi, zj])
+    if kind == "spline":
+        x0, h, n = grid
+        val = spline_eval_pairs(x, coefs, zi, zj, x0, h, n)     # never coefs[zi, zj]
+    elif kind == "analytic":
+        P = poly_recursion(x, *ABC)                        # (E, n_q)
+        if Wnlq.shape[:2] == (1, 1):
+            # one species: a plain (E, q) x (q, n) dot.  The per-edge gathered contraction becomes a
+            # reduce fusion whose fusion-autotuner candidates took ptxas ~580 s on an A100 under vmap
+            # (docs/dev/batched-evaluation-results.md); the dot is also ~3% faster
+            val = P @ Wnlq[0, 0].T
+        else:
+            val = jnp.einsum("eq,enq->en", P, Wnlq[zi, zj])    # (E, n_rnl)
+    else:
+        raise ValueError(f"unknown radial_kind {kind!r}")
+    return val * env[:, None]
+
+
+def rnl_basis_values(f, r, zi, zj):
+    """(E, n_q) the analytic tensor radial's basis per edge, R_nl = sum_q basis_q W_nlq:
+    env(x) P_q(x) ("poly"), or PACE's g_k(r) ("sbessel", `pace_radial._sbessel` on [0, rc]
+    with rc the pair cutoff, zero from rc on)."""
+    n_q = f.rnl_Wnlq.shape[-1]
+    if f.rnl_basis == "sbessel":
+        from .pace_radial import _sbessel
+        rc = f.pair_envelope[zi, zj, 0]
+        inside = r < rc
+        g = _sbessel(jnp.where(inside, r, 0.5 * rc), rc, n_q)
+        return jnp.where(inside[:, None], g, 0.0)
+    if f.rnl_basis != "poly":
+        raise ValueError(f"unknown rnl_basis {f.rnl_basis!r}")
+    x = agnesi_normalized(r, f.rnl_transform[zi, zj])
+    env = env_poly2sx(x, f.rnl_envelope[zi, zj])
+    return env[:, None] * poly_recursion(x, f.polys_A, f.polys_B, f.polys_C)
+
+
+def tensor_radial(f, r, zi, zj, one=radial_one):
+    """R_nl (E, n_rnl) at distances r (E,) for species index pairs zi, zj: the envelope in transformed
+    coordinates times the spline, the polynomials, the factorised table with its species embedding, or
+    the spherical Bessel basis, by `f.radial_kind` / `f.rnl_basis`.  A radial table in r (`rtab_grid`,
+    the lean evaluation form) is not read here.  `one`: the spline / analytic branch (`radial_one`;
+    ACEModel passes its method, which a subclass may override)."""
+    # many-body envelope is applied in transformed coordinates
+    env = env_poly2sx(agnesi_normalized(r, f.rnl_transform[zi, zj]),
+                      f.rnl_envelope[zi, zj])
+    if f.radial_kind == "analytic" and f.rnl_basis == "sbessel":
+        Rnl = jnp.einsum("eq,enq->en", rnl_basis_values(f, r, zi, zj), f.rnl_Wnlq[zi, zj])
+    elif f.radial_kind == "spline_factorised":
+        # Rnl[e, i] = P[e, n'(i)] * emb[zj[e], k(i)]
+        # The spline table is species-independent, so there is no
+        # (E, ncoef, n_rnl) gather here at all -- that gather is what makes
+        # many-element models memory-bandwidth bound.
+        x = agnesi_normalized(r, f.rnl_transform[zi, zj])
+        x0, h, nsp = f.rnl_grid
+        P = jax.vmap(lambda xx: spline_eval(xx, f.rnl_coefs_single,
+                                            x0, h, nsp))(x)          # (E, n1)
+        Rnl = (P[:, f.rnl_emb_nidx]
+               * f.rnl_embedding[zj][:, f.rnl_emb_kidx]) * env[:, None]
+    else:
+        Rnl = one(r, zi, zj, f.radial_kind, f.rnl_transform,
+                  f.rnl_coefs, f.rnl_grid, f.rnl_Wnlq,
+                  (f.polys_A, f.polys_B, f.polys_C), env)
+    return Rnl
+
+
+class TensorRadial(eqx.Module):
+    """The tensor radial of an ACE basis without its model: the fields `tensor_radial` reads, under
+    ACEModel's names (categorical species, or an element embedding: the "spline_factorised" kind).
+    `TensorRadial.of(model)` takes them from a full model; calling it gives R_nl (E, n_rnl)."""
+    rnl_transform: jax.Array
+    rnl_envelope: jax.Array
+    pair_envelope: jax.Array                         # [..., 0]: the pair cutoffs (sbessel; `rcut`)
+    rnl_coefs: jax.Array
+    rnl_Wnlq: jax.Array
+    polys_A: jax.Array
+    polys_B: jax.Array
+    polys_C: jax.Array
+    rnl_coefs_single: jax.Array = None
+    rnl_embedding: jax.Array = None
+    rnl_emb_nidx: jax.Array = None
+    rnl_emb_kidx: jax.Array = None
+    radial_kind: str = eqx.field(static=True, default="spline")
+    rnl_basis: str = eqx.field(static=True, default="poly")
+    rnl_grid: tuple = eqx.field(static=True, default=())
+
+    @classmethod
+    def of(cls, model):
+        return cls(**{k: getattr(model, k) for k in cls.__dataclass_fields__})
+
+    @property
+    def n_rnl(self):
+        return int(self.rnl_emb_nidx.shape[0] if self.radial_kind == "spline_factorised"
+                   else self.rnl_coefs.shape[-1] if self.radial_kind == "spline" else self.rnl_Wnlq.shape[-2])
+
+    def rcut(self):
+        """The largest pair cutoff (where every radial vanishes; padded edges are parked there)."""
+        return jnp.max(self.pair_envelope[..., 0])
+
+    def __call__(self, r, zi, zj):
+        return tensor_radial(self, r, zi, zj)
+
+
+def cubic_bspline_coefs(y, end_d2=None):
+    """Interpolations.jl `cubic_spline_interpolation` coefficients on a uniform
+    grid: BSpline(Cubic(Line(OnGrid()))).  y (n, m) nodal values -> (n+2, m)
+    coefficients (one pad each side): interior rows (c[i-1] + 4 c[i] + c[i+1])/6
+    = y[i], boundary rows c0 - 2 c1 + c2 = 0 (y'' = 0 at the end knots).
+
+    end_d2 = (lo, hi), each (m,): prescribe h^2 y'' at the two end knots
+    instead (clamped second derivative).  Line(OnGrid()) is then the lo = hi = 0
+    case.  Interpolating a smooth f with its true end curvature makes the error
+    O(h^4) up to the ends, where y'' = 0 leaves an O(h^2) boundary layer
+    (`eval.splinify.to_spline`).  That path is a banded (2, 2) solve, O(n), so
+    fine grids are cheap.  end_d2=None keeps the original dense solve, so the authored and
+    Julia-matching tables stay bit-for-bit what they were."""
+    from scipy.linalg import solve_banded
+    y = np.asarray(y, dtype=np.float64)
+    squeeze = y.ndim == 1
+    y = y[:, None] if squeeze else y
+    n = y.shape[0]
+    if end_d2 is None:
+        M = np.zeros((n + 2, n + 2))
+        M[0, :3] = (1.0, -2.0, 1.0)
+        M[-1, -3:] = (1.0, -2.0, 1.0)
+        i = np.arange(1, n + 1)
+        M[i, i - 1] = 1.0 / 6.0; M[i, i] = 2.0 / 3.0; M[i, i + 1] = 1.0 / 6.0
+        rhs = np.zeros((n + 2, y.shape[1])); rhs[1:-1] = y
+        c = np.linalg.solve(M, rhs)
+        return c[:, 0] if squeeze else c
+    ab = np.zeros((5, n + 2))                    # ab[2 + i - j, j] = M[i, j]
+    ab[2, 1:-1] = 2.0 / 3.0
+    ab[1, 2:] = 1.0 / 6.0                        # M[i, i+1], rows 1..n
+    ab[3, :-2] = 1.0 / 6.0                       # M[i, i-1], rows 1..n
+    ab[2, 0], ab[1, 1], ab[0, 2] = 1.0, -2.0, 1.0            # row 0: c0 - 2 c1 + c2
+    ab[4, -3], ab[3, -2], ab[2, -1] = 1.0, -2.0, 1.0         # row n+1: c[n-1] - 2 c[n] + c[n+1]
+    rhs = np.zeros((n + 2, y.shape[1])); rhs[1:-1] = y
+    rhs[0], rhs[-1] = end_d2
+    c = solve_banded((2, 2), ab, rhs)
+    return c[:, 0] if squeeze else c

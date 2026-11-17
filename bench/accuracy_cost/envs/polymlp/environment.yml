@@ -1,0 +1,16 @@
+# pypolymlp for bench/accuracy_cost/fit_polymlp.py (conda-forge; no ace_jax in this env).
+#   micromamba create -p /storage/eng/essswb/venvs/ac-polymlp -f envs/polymlp/environment.yml
+# pypolymlp publishes no wheels, and a pip build of its sdist fails: its build requirement `eigen` resolves on PyPI
+# to an unrelated package (an eigenproblem solver), not the Eigen C++ headers.  conda-forge has binaries.
+name: ac-polymlp
+channels: [conda-forge]
+dependencies:
+  - python=3.12
+  - pypolymlp=0.22.1
+  - ase=3.29.0
+  - phonopy          # pypolymlp.api.pypolymlp_calc (the evaluator) imports symfc and phonopy
+  - symfc
+  - pyyaml
+  - pytest
+  - matscipy         # the silicon QoI test framework (bench/si_qoi) imports matscipy and spglib
+  - spglib

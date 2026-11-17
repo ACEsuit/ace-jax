@@ -266,7 +266,7 @@ def test_calculator_forces_support(fitted):
     assert ok.shape == (len(at),) and ok.dtype == bool and all(v > 0 for v in sup["n_eff"].values())
     assert np.isfinite(sup["support_q"][ok]).all() and np.isinf(sup["support_q"][~ok]).all()
     # the level: the (1 - alpha) weighted quantile with alpha the posterior's miscoverage (0.1), not alpha itself
-    from ace_jax.fit.support import support_check
+    from ace_jax.uq.support import support_check
     post = calc.posterior
     alpha = float(np.asarray(post.group_table["alpha"]))
     assert alpha < 0.5
@@ -452,7 +452,7 @@ def test_calibrate_per_group_keeps_support_consistent(fitted, calib_set, tmp_pat
 
 
 def test_keep_for_mode_two_groups():
-    from ace_jax.fit.support import fit_pca, build_support, recalibrate_support
+    from ace_jax.uq.support import fit_pca, build_support, recalibrate_support
     rng = np.random.default_rng(0)
     X = rng.normal(size=(120, 4))
     Z = np.zeros(120, int)
