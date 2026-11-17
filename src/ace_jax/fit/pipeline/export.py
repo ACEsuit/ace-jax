@@ -16,6 +16,7 @@ import io
 import os
 import json
 import pathlib
+from typing import NamedTuple
 
 import jax.numpy as jnp
 import numpy as np
@@ -166,9 +167,26 @@ def save_model(res, out, n_draws=1, log=print):
     return path
 
 
+class FittedGP(NamedTuple):
+    prob: object
+    draws: np.ndarray
+    posteriors: list
+
+
+def fit_posteriors(prob, ds_train, draws):
+    """The FittedGP of prob at each hyperparameter draw: its posterior from the training statistics."""
+    from ..objective import posterior
+    from ..stats import sufficient_statistics
+    posts = []
+    for d in np.asarray(draws):
+        theta = from_array(jnp.asarray(d))
+        st = sufficient_statistics(theta, prob.spec, prob.model, prob.ind, prob.cfg, ds_train)
+        posts.append(posterior(theta, st, prob))
+    return FittedGP(prob, np.asarray(draws), posts)
+
+
 def load_gp_model(path):
     """(FittedGP, meta) from a gp_model.npz; see GPCalculator.from_file."""
-    from ...calc.gp import FittedGP
     from ...eval import load
     from ..gp.inducing import GPConfig, Inducing
     from ..gp.kernels import KernelSpec

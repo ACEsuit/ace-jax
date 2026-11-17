@@ -162,6 +162,18 @@ def test_eval_imports_no_other_package():
     assert not back, back
 
 
+def test_point_calculator_takes_uq_through_its_interface():
+    """`ACECalculator` reads the fit and the UQ through two modules only (spec, step 5): the design rows
+    of the model (`fit.design`) and the object that serves the posterior (`uq.force`)."""
+    got = sorted(b for a, b in _edges() if a == "calc.point" and b.split(".")[0] in ("fit", "uq"))
+    assert got == ["fit.design", "uq.force"], got
+
+
+def test_fit_does_not_import_the_calculators():
+    back = sorted((a, b) for a, b in _edges() if a.split(".")[0] in ("fit", "uq") and b.split(".")[0] == "calc")
+    assert not back, back
+
+
 def test_stubs_point_at_modules_and_nothing_here_uses_them():
     """A stub names a module that exists; `src`, `tests` and `bench` import the new path (so the stubs
     can be deleted without a search)."""

@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Added
+
+- **A generic linear fit, `ace_jax.fit.linear`.** A row generator gives `(Phi, Y, w)` for each quantity of
+  a batch, with one or more right-hand sides `Y`. `stats.qr_statistics` and `stats.gram_statistics` stream
+  it into one `Factor` or `Gram` for each quantity (on the host with checkpoints and MPI, or on a device).
+  `objective.log_evidence_qr`, `objective.posterior_qr` and `lml_host.HostQREvidence` give the evidence
+  and the posterior. `ace_jax.uq.ard.ARDEvidence` and `ace_jax.uq.jackknife.press_scores_rows` take any
+  labelled quantities. The energy, force and virial fit uses these functions; its results are bit-identical.
+- **`ace_jax.uq.force.ForceUQ`** gives the force uncertainty of a posterior for one structure. It takes the
+  design rows of the model from an object such as `ace_jax.fit.design.ForceDesign`.
+  `ACECalculator(posterior=...)` uses it (`calc.uq`); the results are the same.
+
 ### Changed
 
 - **`ace_jax.fit` is split by role, and uncertainty quantification is `ace_jax.uq`.** No behaviour changes.
@@ -18,18 +30,6 @@
   | `fit.{kernels, inducing, ladder, predict, feature, density, hostcache, loo, sharding}` | `fit.gp.*` |
   | `fit.radial_learn`, `fit.radial_model`, `fit.embedding` | `fit.radial.learn`, `fit.radial.model`, `fit.radial.embedding` |
   | `fit.rowcheck` | `fit.pipeline.rowcheck` |
-
-### Added
-
-- **A generic linear fit, `ace_jax.fit.linear`.** A row generator gives `(Phi, Y, w)` for each quantity of
-  a batch, with one or more right-hand sides `Y`. `stats.qr_statistics` and `stats.gram_statistics` stream
-  it into one `Factor` or `Gram` for each quantity (on the host with checkpoints and MPI, or on a device).
-  `objective.log_evidence_qr`, `objective.posterior_qr` and `lml_host.HostQREvidence` give the evidence
-  and the posterior. `ace_jax.uq.ard.ARDEvidence` and `ace_jax.uq.jackknife.press_scores_rows` take any
-  labelled quantities. The energy, force and virial fit uses these functions; its results are bit-identical.
-
-### Changed
-
 - **`ace_jax.eval.product`** holds the A basis and its products as functions of arrays (`pool_sparse`,
   `edge_a`, `product_basis`, `estimate_a_bytes`, ...). `ace_jax.eval.edge_model` and `ace_jax.eval.model`
   still give these names. `compact` is in `ace_jax.eval.dense`, `cubic_bspline_coefs` in

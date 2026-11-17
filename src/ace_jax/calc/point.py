@@ -64,7 +64,7 @@ def dense_budget_bytes():
 
 
 POSTERIOR_PROPS = ("forces_std", "forces_cov", "forces_q", "forces_q_mahal", "forces_group",
-                   "forces_support")
+                   "forces_support")       # uq.force.PROPS (not imported here: ase-free import path)
 
 
 class ACECalculator(Calculator):
@@ -271,76 +271,29 @@ class ACECalculator(Calculator):
         self._efv_sparse = eqx.filter_jit(
             lambda m, rij, zi, zj, s, r, n, nz, emask: m.energy_forces_virial(
                 rij, zi, zj, s, r, n, nz, emask))
-        self.posterior = None
+        self.uq = None                # the force UQ of posterior= (uq.force.ForceUQ); `posterior` reads it
         self.forces_std_every_call = bool(forces_std_every_call)
         if posterior is not None:
             from ..eval import load as _load_fit_model
-            from ..fit.ard import ARDPosterior
-            from ..fit.gp.inducing import GPConfig
+            from ..fit.design import ForceDesign
+            from ..uq.force import ForceUQ
             if not isinstance(model_path, (str, bytes)) and not hasattr(model_path, "__fspath__"):
                 raise ValueError("posterior= needs the model FILE path (the design rows use the fit model)")
-            post = ARDPosterior.load(posterior)
-            if post.prior_root.M:
-                raise ValueError(f"posterior {posterior} is from --uq ard-gp (a GP fit): serve it with "
-                                 "GPCalculator.from_file(gp_model.npz, posterior=...)")
-            NZ = len(meta["elements"])
-            L = (meta["n_B"] + meta["n_pair"]) * NZ
-            # a joint-E0 posterior (meta e0_cols) carries NZ E0 columns after the readout: the model
-            # file folds their shift into E0, and they are zero on every force row (ARDPosterior pads)
-            if (len(post.mean) - post.n_e0 != L or post.meta.get("n_B") != meta["n_B"]
-                    or post.meta.get("NZ") != NZ):
-                raise ValueError(f"posterior {posterior} does not match the model: "
-                                 f"basis {len(post.mean) - post.n_e0} vs {L}")
-            p_els = [int(e) for e in post.meta.get("elements", [])]
-            m_els = [int(e) for e in meta["elements"]]
-            if p_els != m_els:                           # order-sensitive: columns are per species index
-                raise ValueError(f"posterior {posterior} does not match the model: "
-                                 f"elements {p_els} vs {m_els}")
-            # the posterior must belong to THIS model's readout: its mean is the fit's coefficients in
-            # the `rows._place` layout (species-major WB blocks, then Wpair blocks), bit-identical when
-            # one run wrote both files
-            z = np.load(model_path)
-            if "WB" not in z.files or "Wpair" not in z.files:
-                raise ValueError(f"posterior= needs the model.npz written by the same fit; {model_path} "
-                                 f"has no WB/Wpair readout")
-            coef = np.concatenate([np.asarray(z["WB"]).T.ravel(), np.asarray(z["Wpair"]).T.ravel()])
-            mean = np.asarray(post.mean, np.float64)[:len(post.mean) - post.n_e0]
-            if coef.shape != mean.shape or not np.allclose(
-                    coef, mean, rtol=1e-10, atol=1e-14 * max(float(np.abs(mean).max(initial=0.0)), 1e-300)):
-                raise ValueError(f"posterior {posterior} does not match the model: its mean is not the "
-                                 f"model's coefficients (a posterior from a different fit?)")
-            # the L x L Cholesky factor and the sandwich factor: host->device once, not on every call
-            import jax.numpy as jnp
-            if post.chol is not None:          # only kappa posteriors carry it (the sandwich shape serves from R)
-                post = post._replace(chol=jnp.asarray(post.chol, jnp.float64))
-            if post.Q is not None:
-                post = post._replace(Q=jnp.asarray(post.Q, jnp.float64))
-            if shape_path not in ("rows", "committee"):
-                raise ValueError(f"shape_path must be 'rows' or 'committee', got {shape_path!r}")
-            if post.R is not None:
-                from ..fit.jackknife import truncate_shape_factor
-                if not 0.0 < float(shape_tau) <= 1.0:
-                    raise ValueError(f"shape_tau must be in (0, 1], got {shape_tau!r}")
-                R = truncate_shape_factor(post.R, float(shape_tau))
-                if shape_rank is not None:
-                    if int(shape_rank) < 1:
-                        raise ValueError(f"shape_rank must be >= 1, got {shape_rank!r}")
-                    R = R if int(shape_rank) >= R.shape[1] else truncate_shape_factor(R, int(shape_rank))
-                post = post._replace(R=jnp.asarray(R, jnp.float64))
-            elif shape_path == "committee" or shape_tau != 1.0 or shape_rank is not None:
-                raise ValueError("shape_path='committee', shape_tau and shape_rank need a schema-3 jackknife shape factor R "
-                                 "(fit --uq ard with the default --ard-variance sandwich)")
-            self.posterior = post
-            self.shape_path = shape_path
             # design rows from the full model as given (calc.model; the lean eval_model is energy-only);
             # a non-float64 dtype would degrade sigma, so the fit model is then re-read in float64
-            self._fit_model = (self.model if dtype is None or np.dtype(dtype) == np.float64
-                               else _load_fit_model(model_path)[0])
-            self._fit_cfg = GPConfig(r0=1.0, rcut=float(meta["rcut"]), n_B=meta["n_B"],
-                                     n_pair=meta["n_pair"], NZ=NZ, C=1)
-            if shape_path == "committee":                   # C = D^-1 R per species block, on the device once
-                from ..fit.jackknife import committee_coefs
-                self._committee = committee_coefs(post.R, post.dinv, self._fit_cfg)
+            fit_model = (self.model if dtype is None or np.dtype(dtype) == np.float64
+                         else _load_fit_model(model_path)[0])
+            self.uq = ForceUQ.load(posterior, ForceDesign(fit_model, meta, model_path), shape_path=shape_path,
+                                   shape_tau=shape_tau, shape_rank=shape_rank)
+
+    @property
+    def posterior(self):
+        """The ARD posterior of posterior= (None without one)."""
+        return None if getattr(self, "uq", None) is None else self.uq.posterior
+
+    @property
+    def shape_path(self):
+        return "rows" if self.uq is None else self.uq.shape_path
 
     @property
     def energy_reference(self):
@@ -681,112 +634,13 @@ class ACECalculator(Calculator):
         # nlist_s: neighbour list + layout + host->device; model_s: the compiled call
         return E, F, V, {"nlist_s": t1 - t0, "model_s": t2 - t1, "nlist_backend": backend}
 
-    def _served_set(self):
-        """The posterior properties that share one pass over the force rows and the shape V: forces_std,
-        plus forces_cov / forces_q / forces_group (schema 3) and forces_q_mahal (aniso).  Any one of them
-        requested computes and caches all of them (cleared with the other results on a system change)."""
-        post = self.posterior
-        out = {"forces_std"}
-        if post.group_table is not None:
-            out |= {"forces_cov", "forces_q", "forces_group"}
-            if post.force_shape == "aniso":
-                out.add("forces_q_mahal")
-        return out
-
     def _posterior_quantities(self, which):
-        """Posterior-served per-atom properties as a dict: the requested ones (subset of POSTERIOR_PROPS)
-        together with every other property of `_served_set` (one rows + shape pass serves them all):
-        forces_std (N,), forces_cov (N,3,3), forces_q (N,), forces_q_mahal (N,; aniso only),
-        forces_group (N,) int; forces_support (dict) only when requested (it is the expensive one).
-        Calibrated ARD std (lam x the shape, or kappa x the posterior std for --ard-variance kappa /
-        schema 1) from node-chunked design rows of the full fit model."""
-
-        from ..fit.ard import _NEED3
-        from ..fit.rows import chunked_rows_fn
-        post = self.posterior
-        which = set(which)
-        if which & {"forces_cov", "forces_q", "forces_q_mahal", "forces_group"} and post.group_table is None:
-            raise ValueError(_NEED3)
-        if "forces_q_mahal" in which and post.force_shape != "aniso":
-            from ase.calculators.calculator import PropertyNotImplementedError
-            raise PropertyNotImplementedError("forces_q_mahal needs an aniso posterior (--uq ard "
-                                              "--force-shape aniso)")
-        if "forces_support" in which and post.support is None:
-            raise ValueError("this posterior has no support reference (fitted with --no-ard-support, or "
-                             "predates it): refit with --uq ard without --no-ard-support")
-        shared = self._served_set() if which - {"forces_support"} else set()
-        at = self.atoms
-        n = len(at)
-        ds, b, live = self._one_config_dataset(at)
-        groups = (np.asarray(post.groups_of(b))[live].astype(np.int64)
-                  if post.group_consts is not None else None)
-        out = {}
-        if "forces_support" in which:
-            out["forces_support"] = self._support(ds, live, b)
-        if not shared:
-            return out
-        if (getattr(self, "shape_path", "rows") == "committee" and post.group_table is not None
-                and b.nbr.shape[1] > 0):
-            import jax.numpy as jnp
-
-            from ..fit.jackknife import committee_forces
-            with highest_precision():
-                P = committee_forces(self._fit_model, self._fit_cfg, b, *self._committee)
-                V = np.asarray(jnp.einsum("nar,nbr->nab", P, P))[np.asarray(live)]
-            out.update({k: np.asarray(v) for k, v in
-                        post.served_from_V(V, groups, shared - {"forces_group"}).items()})
-            out["forces_group"] = groups
-            return out
-        if b.nbr.shape[1] == 0 or not bool(np.asarray(b.nbr_mask).any()):
-            # no neighbours: forces are identically zero, so is every spread
-            F = np.zeros((n, 3, len(np.asarray(post.mean))))
-        else:
-            with highest_precision():
-                if getattr(self, "_rows_fn", None) is None:    # compiled once per cell shape (MD)
-                    self._rows_fn = chunked_rows_fn(self._fit_model, self._fit_cfg)
-                # padding rows are zero; F[live] drops the padded nodes
-                F = self._rows_fn(b).F
-                if not bool(np.all(live)):
-                    F = F[live]
-        if post.group_table is not None:
-            out.update({k: np.asarray(v) for k, v in
-                        post.served(F, groups, shared - {"forces_group"}).items()})
-            out["forces_group"] = groups
-        else:
-            out["forces_std"] = np.asarray(post.forces_std(F, groups))
-        return out
-
-    def _support(self, ds, live, b):
-        """Covariate-shift support of each atom against the posterior's reference (uq/support.py), from
-        the same site_features descriptors the fit stage used (they depend on the model only)."""
-        from ..uq.support import support_check
-        post = self.posterior
-        alpha = float(np.asarray(post.group_table["alpha"]))
-        # alpha is the miscoverage (group_table); support_check takes it as such: q = Q_{1-alpha}
-        return support_check(post.support, self._site_X(ds, b), np.asarray(b.node_z)[live], alpha)
-
-    def _one_config_dataset(self, at):
-        """(ds, b, live): the one-config dataset of atoms, its batch, and the live-node mask."""
-        import jax
-
-        from ..fit.data import Config, build_dataset
-        c = Config(at.get_positions(), at.get_atomic_numbers(), at.get_cell().array, at.get_pbc(),
-                   None, None, None, 1.0, 1.0, 1.0)
-        ds = build_dataset([c], self.meta, np.zeros(len(self.meta["elements"])), 1)
-        b = jax.tree.map(lambda a: a[0], ds)
-        return ds, b, np.asarray(b.node_mask)
-
-    def _site_X(self, ds, b):
-        """Live-atom site descriptors (the ones the support reference uses) of one-config dataset ds."""
-        from ..fit.gp.inducing import site_features
-        live = np.asarray(b.node_mask)
-        with highest_precision():
-            return np.asarray(site_features(self._fit_model, self._fit_cfg, ds)[0])[0][live]
+        """Posterior-served per-atom properties as a dict (`uq.force.ForceUQ.quantities`)."""
+        return self.uq.quantities(self.atoms, which)
 
     def support_descriptors(self, atoms):
         """(X, Z) site descriptors and species indices of the live atoms; for `aj calibrate`."""
-        ds, b, live = self._one_config_dataset(atoms)
-        return self._site_X(ds, b), np.asarray(b.node_z)[live]
+        return self.uq.support_descriptors(atoms)
 
     def _native_dense(self, pos, cell, pbc, n, dtype):
         """The dense graph straight from matscipy_neighbours' neighbour_matrix,
