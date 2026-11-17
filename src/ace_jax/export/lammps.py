@@ -34,7 +34,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from ..eval.edge_model import LAYOUTS, estimate_a_bytes
+from ..eval.product import LAYOUTS, estimate_a_bytes
 from ..eval.splinify import AUTO
 
 BUNDLE_LAYOUTS = LAYOUTS + ("matrix",)

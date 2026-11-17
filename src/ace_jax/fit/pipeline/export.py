@@ -21,7 +21,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from ..hypers import from_array, to_array
-from ..predict import _train_stats, fit_posterior, theta_key
+from ..gp.predict import _train_stats, fit_posterior, theta_key
 
 GP_SCHEMA = 1
 
@@ -170,8 +170,8 @@ def load_gp_model(path):
     """(FittedGP, meta) from a gp_model.npz; see GPCalculator.from_file."""
     from ...calc.gp import FittedGP
     from ...eval import load
-    from ..inducing import GPConfig, Inducing
-    from ..kernels import KernelSpec
+    from ..gp.inducing import GPConfig, Inducing
+    from ..gp.kernels import KernelSpec
     from ..objective import Problem
     z = np.load(path)
     info = json.loads(bytes(z["gp_json"]).decode())

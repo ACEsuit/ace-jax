@@ -8,7 +8,7 @@ jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 
 from ace_jax.fit.hypers import Hypers, Prior, to_array
-from ace_jax.fit.ladder import run_laplace, run_map, run_nuts, run_vi
+from ace_jax.fit.gp.ladder import run_laplace, run_map, run_nuts, run_vi
 
 # The GP ladder is experimental: ~10 min of compiles (Laplace, NUTS) that held up every PR's
 # shards, so the whole module runs in the `slow` job (pytest -m slow), not the default suite.
@@ -53,7 +53,7 @@ def test_nuts_recovers_target():
 
 def test_run_map_ps_matches_flat_run_map(tiny_linear_problem):
     from ace_jax.fit.paramset import from_hypers
-    from ace_jax.fit.ladder import run_map, run_map_ps
+    from ace_jax.fit.gp.ladder import run_map, run_map_ps
     from ace_jax.fit.objective import make_lml
     prob, ds = tiny_linear_problem
     lml = make_lml(prob, ds)
@@ -64,7 +64,7 @@ def test_run_map_ps_matches_flat_run_map(tiny_linear_problem):
 
 
 def test_laplace_fd_matches_exact_width():
-    from ace_jax.fit.ladder import run_laplace_fd
+    from ace_jax.fit.gp.ladder import run_laplace_fd
     h = run_map(lml, PRIOR, steps=2000, lr=0.05)
     draws, info = run_laplace_fd(lml, PRIOR, h, n_draws=4000)
     assert draws.shape == (4000, 10) and info["n_floored"] == 0
@@ -81,8 +81,8 @@ def _tiny_embed_problem(mps=4, ncfg=3):
     from ace_jax.eval import load
     from ace_jax.fit.data import build_dataset, load_configs
     from ace_jax.fit.hypers import default_prior
-    from ace_jax.fit.inducing import GPConfig, build_pmap, descriptor_scale, select_inducing, site_features
-    from ace_jax.fit.kernels import KernelSpec
+    from ace_jax.fit.gp.inducing import GPConfig, build_pmap, descriptor_scale, select_inducing, site_features
+    from ace_jax.fit.gp.kernels import KernelSpec
     from ace_jax.fit.objective import Problem
     model, meta, z = load(FIXTURE_DIR / "sige_nofit.npz")
     els = [int(e) for e in meta["elements"]]
@@ -108,8 +108,8 @@ def test_run_map_ps_normalizes_embed_for_inner_map():
     # a pre-normalised (frozen) E give the same inner theta-MAP.
     from ace_jax.eval import highest_precision
     from ace_jax.fit.paramset import from_hypers
-    from ace_jax.fit.ladder import run_map_ps
-    from ace_jax.fit.embedding import normalize_rows
+    from ace_jax.fit.gp.ladder import run_map_ps
+    from ace_jax.fit.radial.embedding import normalize_rows
     with highest_precision():
         prob, ds, els = _tiny_embed_problem()
         NZ = len(els)

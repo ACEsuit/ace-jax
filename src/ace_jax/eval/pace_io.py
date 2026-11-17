@@ -205,7 +205,7 @@ def write_yace(model, path, spec=None, **options):
 
     - A PACEModel (`aj.load` of a `.yace`) needs the `spec` that load returned: numeric fields come from
       its leaves, everything else verbatim from `spec.tree` (function layout is never regenerated).
-    - A linear ACEModel is converted exactly (`export.yace.ace_ctilde_tree`; `options`: `delta`, `r_min`, `summed`):
+    - A linear ACEModel is converted exactly (`pace_ace.ace_ctilde_tree`; `options`: `delta`, `r_min`, `summed`):
       tabulated radials, which ML-PACE reads with its tabulated-radial addition
       (docs/dev/ml-pace-tabulated-radials.md).  Returns the export's sizes (functions, terms, lmax, ...).
 
@@ -219,7 +219,7 @@ def write_yace(model, path, spec=None, **options):
     if type(model) is ACEModel:
         if spec is not None:
             raise TypeError("an ACEModel is converted from scratch: write_yace takes no spec for it")
-        from ..export.yace import ace_ctilde_tree
+        from .pace_ace import ace_ctilde_tree
         info = {}
         dump_tree(ace_ctilde_tree(model, info=info, **options), path)
         return info

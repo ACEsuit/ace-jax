@@ -49,12 +49,12 @@ def test_stage_matches_fit_radial_on_the_same_split(fast):
     from ace_jax.basis.prior import prior_diagonal
     from ace_jax.fit.data import build_dataset
     from ace_jax.fit.hypers import default_prior
-    from ace_jax.fit.inducing import GPConfig, descriptor_scale, select_inducing, site_features
-    from ace_jax.fit.kernels import KernelSpec
+    from ace_jax.fit.gp.inducing import GPConfig, descriptor_scale, select_inducing, site_features
+    from ace_jax.fit.gp.kernels import KernelSpec
     from ace_jax.fit.objective import Problem
     from ace_jax.fit.pipeline.radials import learn_radials
-    from ace_jax.fit.radial_learn import fit_radial
-    from ace_jax.fit.radial_model import rnl_degrees, to_analytic
+    from ace_jax.fit.radial.learn import fit_radial
+    from ace_jax.fit.radial.model import rnl_degrees, to_analytic
     cfg = _cfg(learn_radial=True, radial_steps=1, radial_lam_grid=(0.0,), radial_val_frac=0.25)   # the wiring, not the learning
     d = _data(cfg)
     d2, rr = learn_radials(cfg, d, log=QUIET)
@@ -94,7 +94,7 @@ def test_stage_gate_keeps_init(fast):
     With e0='lsq' (written into the model by load_fit_data) the fitted E0 survives the
     reload from the patched arrays (the reload does not depend on the step count)."""
     from ace_jax.fit.pipeline.radials import learn_radials
-    from ace_jax.fit.radial_model import to_analytic
+    from ace_jax.fit.radial.model import to_analytic
     cfg = _cfg(e0="lsq", learn_radial=True, radial_steps=0, radial_lam_grid=(0.0,))
     d = _data(cfg)
     d2, rr = learn_radials(cfg, d, log=QUIET)

@@ -3,7 +3,7 @@
 The readout minimises sum_rows (w (y - Phi c))^2 with the configured per-config-type
 weights and unit noise, and no prior on the readout (joint-E0 columns, with e0='lsq', keep
 their prior, so E0 stays anchored): the smoothness prior and sigma_c rows of
-fit/solve.py::stacked_design are dropped, and numpy's lstsq returns the minimum-norm
+fit/linear/solve.py::stacked_design are dropped, and numpy's lstsq returns the minimum-norm
 solution when the basis outgrows the data. That is what ACEfit's QR solver does with
 ACEpotentials' weights, so a growing basis overfits; the evidence fit
 (solver="evidence") is the regularised counterpart.

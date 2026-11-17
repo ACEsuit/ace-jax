@@ -1,4 +1,4 @@
-"""fit.block_lbfgs: curvature-matched block scaling and the joint -> alternating fallback,
+"""fit.linear.block_lbfgs: curvature-matched block scaling and the joint -> alternating fallback,
 on toy objectives with known curvature."""
 import jax
 import numpy as np
@@ -7,7 +7,7 @@ import pytest
 jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 
-from ace_jax.fit import block_lbfgs as bl
+from ace_jax.fit.linear import block_lbfgs as bl
 
 
 def quad(blocks, a, b, c):
@@ -80,7 +80,7 @@ def test_alternating_mode_splits_each_round():
 
 
 def test_joint_linesearch_failure_falls_back_to_alternating(monkeypatch):
-    real, calls = bl.radial_learn.lbfgs_loop, []
+    real, calls = bl.lbfgs.lbfgs_loop, []
 
     def fake(f, x0, *, steps, statics, **kw):
         calls.append((statics[1], steps))
@@ -89,7 +89,7 @@ def test_joint_linesearch_failure_falls_back_to_alternating(monkeypatch):
             return x, fx, trace, "linesearch"
         return real(f, x0, steps=steps, statics=statics, **kw)
 
-    monkeypatch.setattr(bl.radial_learn, "lbfgs_loop", fake)
+    monkeypatch.setattr(bl.lbfgs, "lbfgs_loop", fake)
     _, info = bl.block_lbfgs(quad, _blocks(), steps=12, round_steps=6, args=(1.0, 1e3, 0.1), tol=0.0)
     assert calls == [(None, 6), (0, 2), (1, 2)] * 2                # 6 - 1 accepted - 1 failed = 4 left
     assert info["fallbacks"] == 2 and info["steps"] == 12
@@ -98,7 +98,7 @@ def test_joint_linesearch_failure_falls_back_to_alternating(monkeypatch):
 def test_hooks_and_single_compile():
     """normalise / after_round run once per round; changing arg VALUES between rounds
     reuses the compiled step."""
-    from ace_jax.fit.radial_learn import _lbfgs_step
+    from ace_jax.fit.radial.learn import _lbfgs_step
     seen = []
 
     def normalise(blocks):

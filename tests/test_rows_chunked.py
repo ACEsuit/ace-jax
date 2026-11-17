@@ -16,7 +16,7 @@ pytestmark = pytest.mark.skipif(not XYZ.exists(), reason="missing si_tiny_train.
 def _problem(n_cfg=8, per_batch=4):
     from ace_jax.eval import load
     from ace_jax.fit.data import build_dataset, load_configs
-    from ace_jax.fit.inducing import GPConfig
+    from ace_jax.fit.gp.inducing import GPConfig
     model, meta, z = load(FIXTURE_DIR / "si_fitted.npz")
     cfgs = load_configs(XYZ, "dft_energy", "dft_force", "dft_virial")
     big = [c for c in cfgs if len(c.numbers) == 64][:1]           # a 64-atom cell among small ones
@@ -51,7 +51,7 @@ def test_chunked_rows_big_cell():
     from ase.build import bulk
     from ace_jax.eval import load
     from ace_jax.fit.data import Config, build_dataset
-    from ace_jax.fit.inducing import GPConfig
+    from ace_jax.fit.gp.inducing import GPConfig
     from ace_jax.fit.rows import linear_rows_chunked
     model, meta, z = load(FIXTURE_DIR / "si_fitted.npz")
     at = bulk("Si", "diamond", a=5.43, cubic=True).repeat((8, 8, 8))

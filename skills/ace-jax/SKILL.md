@@ -119,7 +119,7 @@ over a file's `basis:`, `--train` over its `data:` (each logged as an override).
   survive a later failure. The saved model is marked `radial_learned`, so
   `ACECalculator`/`export_lammps` spline it. Works with `--model` and with
   `--order/--max-degree`; not with embedding models (issue #31). Advanced priors:
-  `ace_jax.fit.radial_learn.fit_radial`.
+  `ace_jax.fit.radial.learn.fit_radial`.
 - **Radial basis: `--radial-basis poly|sbessel`** (a basis flag, no
   `--learn-radial` needed; `BasisSpec.radial_basis`, `build_model(rnl_basis=)`,
   `ACEModel.rnl_basis`). `sbessel` is pacemaker's simplified spherical Bessel
@@ -537,7 +537,7 @@ Other entry points:
 - `ace_jax.basis.export.save_npz`: write an authored model to `.npz`.
 - Learned radial basis (research, linear arm): `bench/learn_radial/run.py
   --model M.npz --data D.xyz --out DIR --r0 2.35 [--n-q 12] [--lam-grid 0,1e-2]`
-  learns the tensor radials by VarPro (`ace_jax.fit.radial_learn.learn_radial`)
+  learns the tensor radials by VarPro (`ace_jax.fit.radial.learn.learn_radial`)
   and writes `DIR/model.npz` with the radials a held-out gate selects. Fit the GP
   on that file as usual. Needs float64. For MD, `ACECalculator` and
   `export_lammps` spline the learned radial through `lean` (see above);

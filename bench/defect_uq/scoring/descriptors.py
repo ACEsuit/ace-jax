@@ -12,7 +12,7 @@ import numpy as np
 
 jax.config.update("jax_enable_x64", True)
 from ase.io import read                                       # noqa: E402
-from ace_jax.fit.inducing import GPConfig, site_features      # noqa: E402
+from ace_jax.fit.gp.inducing import GPConfig, site_features      # noqa: E402
 from ace_jax.fit.pipeline import FitConfig, load_fit_data     # noqa: E402
 
 B = pathlib.Path.home() / "acegp-data" / "cantor" / "bench365"

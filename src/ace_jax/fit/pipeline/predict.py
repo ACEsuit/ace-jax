@@ -8,7 +8,7 @@ import numpy as np
 from ..data import build_dataset
 from ..metrics import summarise
 from ..report import format_rmse_table, rmse_by_type
-from ..predict import POPS_MEAN, PopsRidgePath, predict_fixed, predict_mixture, predict_readout, select_pops_ridge
+from ..gp.predict import POPS_MEAN, PopsRidgePath, predict_fixed, predict_mixture, predict_readout, select_pops_ridge
 
 VOIGT = [(0, 0), (1, 1), (2, 2), (1, 2), (0, 2), (0, 1)]
 

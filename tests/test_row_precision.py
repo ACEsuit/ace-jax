@@ -1,7 +1,7 @@
 # tests/test_row_precision.py
 """Fits from float32 design rows (FitConfig.row_precision "float32"; docs/dev/fp32-results.md,
 step 3): QR statistics from float32 rows carry the residual (QRStats.rho_q) and the LML reads it
-instead of y'y - v'v; the stability check (fit/rowcheck.py) runs after the MAP and is recorded."""
+instead of y'y - v'v; the stability check (fit/pipeline/rowcheck.py) runs after the MAP and is recorded."""
 import jax
 
 jax.config.update("jax_enable_x64", True)
@@ -81,7 +81,7 @@ def test_float32_rows_change_the_evidence_and_mean_little(problem, stats):
 
 def test_perturb_at_zero_is_the_identity(problem, stats):
     from ace_jax.fit.objective import log_marginal_likelihood_qr
-    from ace_jax.fit.rowcheck import perturb
+    from ace_jax.fit.pipeline.rowcheck import perturb
     _, _, b = problem
     _, q32 = stats
     th = b.prob.prior.mu
@@ -117,7 +117,7 @@ def test_pipeline_records_the_row_rounding_check():
 def test_float32_row_predictions_match_float64(problem, stats):
     """predict_fixed with prob.row_dtype "float32" evaluates the test rows in float32 (the
     posterior stays float64): means and variances agree with float64 to float32 rounding."""
-    from ace_jax.fit.predict import predict_fixed
+    from ace_jax.fit.gp.predict import predict_fixed
     _, d, b = problem
     q64, _ = stats
     th = b.prob.prior.mu

@@ -23,7 +23,7 @@ def run_rungs(cfg, b, obj, theta, log=print, fixed=None):
     bad = [r for r in cfg.rungs if r not in KNOWN]
     if bad:
         raise ValueError(f"unknown rung(s) {bad}; known: {list(KNOWN)}")
-    from ..ladder import run_laplace, run_laplace_fd, run_nuts, run_pathfinder, run_vi
+    from ..gp.ladder import run_laplace, run_laplace_fd, run_nuts, run_pathfinder, run_vi
     draws, info, tm = {"map": np.asarray(to_array(theta))[None]}, {}, {}
     prior = None if b is None else b.prob.prior
     tied = getattr(obj, "tied", None)

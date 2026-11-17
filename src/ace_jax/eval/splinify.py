@@ -4,7 +4,7 @@ The analytic radial is R_n(r) = env(x) sum_q W[zi, zj, n, q] P_q(x) with
 x = T_{zi,zj}(r) (`ACEModel._radial_one`), so its envelope-free part
 S_n(x) = sum_q W P_q(x) is a polynomial on [-1, 1].  `to_spline` tabulates S on a
 uniform grid and interpolates it with the cubic B-spline `spline_eval` evaluates
-(`construct.radial_ace1.cubic_bspline_coefs`, the builder of the Python-authored
+(`radial.cubic_bspline_coefs`, the builder of the Python-authored
 and Julia `splinify` tables), with the polynomial's exact end curvature as the
 boundary condition, so the error is O(h^4) up to the ends.  Per edge the
 spline is a 4-row gather instead of the n_q-term recursion and an
@@ -184,7 +184,7 @@ def _bspline_eval(x, c, n_int, deriv=False, x0=-1.0, h=None):
 
 def _table(W, polys, n_int):
     """Spline coefficients (NZ, NZ, n_int+3, F) of S = W . P on n_int intervals."""
-    from ..basis.radial_ace1 import cubic_bspline_coefs
+    from .radial import cubic_bspline_coefs
     NZ, _, F, n_q = W.shape
     xs = np.linspace(-1.0, 1.0, n_int + 1)
     P, _, _ = _poly_d012(xs, *polys)
@@ -322,8 +322,7 @@ def to_spline(model, n_intervals=None, tol=DEFAULT_SPLINE_TOL, deriv_tol=None,
     each radial's Wnlq, recursion, (R_nl) envelope and measured columns plus
     n_intervals and the tolerances, so converting a model whose radials are
     unchanged -- e.g. after a readout-only swap -- costs a hash, not a fit."""
-    from .model import ACEModel
-    if not isinstance(model, ACEModel):
+    if not (hasattr(model, "pair_radial_kind") and hasattr(model, "require_full")):      # an ACEModel, by its fields
         raise TypeError(f"to_spline needs an ACEModel, got {type(model).__name__}")
     if not (tol >= TOL_FLOOR):
         raise ValueError(f"to_spline: tol={tol!r} must be >= {TOL_FLOOR:g} (float64 roundoff "
@@ -463,7 +462,7 @@ def _rtab_fit(m, which, rc, r_min, r_max, n_int):
     error where atoms are (and the noise below).  Raises when the exact
     radial does not vanish from rc on (beyond RTAB_VANISH relative): the mask
     would truncate it."""
-    from ..basis.radial_ace1 import cubic_bspline_coefs
+    from .radial import cubic_bspline_coefs
     nz = rc.shape[0]
     h = (r_max - r_min) / n_int
     C = RTAB_CHECK_PER_INTERVAL
@@ -554,9 +553,7 @@ def radial_table(model, n_intervals=DEFAULT_RADIAL_TABLE, r_min=DEFAULT_TABLE_R_
     (`_rtab_fit`), and tol / tol_met (None when tol is None).  Cached in the `to_spline` LRU on the content of what the
     radial reads (`radial_table_key`), n_intervals and r_min: a readout-only
     swap costs a hash, not a fit."""
-    from .model import ACEModel
-    from .pace_model import PACEModel
-    if not isinstance(model, (ACEModel, PACEModel)):
+    if not hasattr(model, "radial_table_targets"):               # the models that tabulate: ACEModel, PACEModel
         raise TypeError(f"radial_table needs an ACEModel or a PACEModel, got {type(model).__name__}")
     n = table_intervals(n_intervals)
     if n is None:

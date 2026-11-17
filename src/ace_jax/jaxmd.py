@@ -16,7 +16,7 @@ calculator's options choose), so the two agree to roundoff.
 A JAX-MD list holds every pair within cutoff + dr_threshold, so up to
 ((rc + skin) / rc)^3 more slots than the model needs (1.6x at rc 5.5 A, skin 1 A,
 times JAX-MD's capacity_multiplier).  With `K` the in-cutoff slots are compacted
-into (N, K) rows before the model (`calc.skin.compact`, as the skin list's step
+into (N, K) rows before the model (`eval.dense.compact`, as the skin list's step
 does); without it the model runs on the whole list, masked at rc.  A row with more
 than K in-cutoff neighbours makes the energy and forces NaN: never truncation.
 `capacity` sizes K from a structure; `overflow` is the explicit check.  Install

@@ -18,17 +18,16 @@ SRC = ROOT / "src" / "ace_jax"
 
 # (pattern, layer, side): first match wins; "" is ace_jax/__init__.py.  A package's __init__ takes
 # its package's pattern, so `eval` (which re-exports the models) is an application module.
+# `eval.io` is one too, not framework as in the spec's table: `load` constructs the models.
 FRAMEWORK, LINEAR, UQ, APP, FRONT = range(5)
 LAYERS = [
     *[(f"basis.{m}", FRAMEWORK, None) for m in
       ("spec", "coupling", "prior", "export", "embedding", "radial_init", "radial_ace1")],
     *[(f"eval.{m}", FRAMEWORK, None) for m in
-      ("harmonics", "radial", "splinify", "nlist", "aa_dag", "product", "io")],
-    *[(f"fit.{m}", LINEAR, None) for m in
-      ("stats", "solve", "objective", "lml_host", "lml_svd", "hostcache", "prior_root", "block_lbfgs",
-       "newton", "multistart", "varpro", "sharding", "progress")],
-    *[(f"fit.{m}", UQ, None) for m in
-      ("ard", "jackknife", "conformal", "pops", "support", "loo", "clusters")],
+      ("harmonics", "radial", "splinify", "nlist", "aa_dag", "product")],
+    ("_moved", FRAMEWORK, None),
+    ("fit.linear", LINEAR, None), ("fit.linear.*", LINEAR, None),
+    ("uq", UQ, None), ("uq.*", UQ, None),
     ("operators", APP, "operators"), ("operators.*", APP, "operators"),
     ("ham", APP, "operators"), ("ham.*", APP, "operators"),
     ("", FRONT, None), ("cli", FRONT, None), ("runfile", FRONT, None),
@@ -38,20 +37,6 @@ LAYERS = [
 
 # (importer, imported): the step of the spec's order of work that removes the edge.
 ALLOWED = {
-    # eval's loader and spline conversion build the models they serve
-    ("eval.io", "eval.edge_model"): 3, ("eval.io", "eval.model"): 3, ("eval.io", "eval.pace_model"): 3,
-    ("eval.splinify", "eval.model"): 3, ("eval.splinify", "eval.pace_model"): 3,
-    # the linear fit knows the E/F/V rows, the kernel and the hyperparameter vector
-    ("fit.stats", "fit.rows"): 4, ("fit.stats", "fit.pops"): 4, ("fit.stats", "eval.api"): 4,
-    ("fit.objective", "fit.hypers"): 4, ("fit.objective", "fit.kernels"): 4, ("fit.objective", "fit.loo"): 4,
-    ("fit.hostcache", "fit.hypers"): 4, ("fit.hostcache", "fit.rows"): 4,
-    ("fit.solve", "fit.kernels"): 4, ("fit.solve", "fit.rows"): 4,
-    ("fit.prior_root", "fit.ard"): 4, ("fit.prior_root", "fit.kernels"): 4,
-    ("fit.block_lbfgs", "fit.radial_learn"): 4,
-    # UQ is written against energies and forces
-    ("fit.ard", "fit.data"): 4, ("fit.ard", "fit.hypers"): 4, ("fit.ard", "fit.inducing"): 4,
-    ("fit.ard", "fit.predict"): 4, ("fit.ard", "fit.rows"): 4,
-    ("fit.jackknife", "fit.rows"): 4, ("fit.loo", "fit.rows"): 4,
 }
 
 
@@ -65,7 +50,18 @@ def _modules(root):
     return out
 
 
-MODS = _modules(SRC)
+def _stub_target(path):
+    """The new dotted module of a moved-module stub (`__getattr__ = moved(__name__, "ace_jax.x")`), else None."""
+    for n in ast.parse(path.read_text()).body:
+        if (isinstance(n, ast.Assign) and isinstance(n.value, ast.Call) and getattr(n.value.func, "id", "") == "moved"
+                and [getattr(t, "id", "") for t in n.targets] == ["__getattr__"]):
+            return n.value.args[1].value[8:]
+    return None
+
+
+ALL = _modules(SRC)
+STUBS = {m: t for m, (p, _) in ALL.items() if (t := _stub_target(p))}
+MODS = {m: v for m, v in ALL.items() if m not in STUBS}      # the layering and the bench check see no stub
 
 
 def _resolve(name):
@@ -119,7 +115,7 @@ def _violates(a, b):
 def test_layers_cover_real_modules():
     """A pattern that matches nothing is a module that moved without its layer."""
     stale = [pat for pat, _, side in LAYERS
-             if side != "operators" and "product" not in pat and not any(fnmatch.fnmatchcase(m, pat) for m in MODS)]
+             if side != "operators" and not any(fnmatch.fnmatchcase(m, pat) for m in MODS)]
     assert not stale, f"LAYERS patterns that match no module: {stale}"
 
 
@@ -129,6 +125,71 @@ def test_no_upward_imports():
     assert not new, "imports of a lower layer (spec section 1):\n" + "\n".join(f"  {a} -> {b}" for a, b in new)
     fixed = sorted(set(ALLOWED) - bad)
     assert not fixed, f"edges that no longer exist: remove them from ALLOWED: {fixed}"
+
+
+def _from_target(node, mod, pkg):
+    """The dotted ace_jax module a `from ... import` names (None: not an ace_jax import)."""
+    if node.level:
+        base = mod.split(".") if mod else []
+        base = (base if pkg else base[:-1])
+        base = base[:len(base) - (node.level - 1)]
+        return ".".join(base + (node.module.split(".") if node.module else []))
+    if node.module and (node.module == "ace_jax" or node.module.startswith("ace_jax.")):
+        return node.module[8:]
+    return None
+
+
+def test_internal_imports_resolve():
+    """Every `from <ace_jax module> import name` in `src`, inside functions too, names a module that
+    exists and a name it defines: a lazy import of a moved name fails here, not at its first call."""
+    bad = []
+    for mod, (p, pkg) in ALL.items():
+        for n in ast.walk(ast.parse(p.read_text())):
+            if not isinstance(n, ast.ImportFrom) or (tgt := _from_target(n, mod, pkg)) is None:
+                continue
+            if tgt not in MODS:
+                bad.append(f"{mod}:{n.lineno}: no module ace_jax.{tgt}")
+                continue
+            bad += [f"{mod}:{n.lineno}: no {a.name!r} in ace_jax.{tgt}" for a in n.names
+                    if a.name != "*" and not _has(tgt, a.name)]
+    assert not bad, "\n".join(bad)
+
+
+def test_eval_imports_no_other_package():
+    """`eval` is the bottom of the potential stack (spec section 3): it maps edge vectors to site
+    energies and knows no calculator, exporter, basis builder or fit, not even inside a function."""
+    back = sorted((a, b) for a, b in _edges() if a.split(".")[0] == "eval" and b.split(".")[0] != "eval")
+    assert not back, back
+
+
+def test_stubs_point_at_modules_and_nothing_here_uses_them():
+    """A stub names a module that exists; `src`, `tests` and `bench` import the new path (so the stubs
+    can be deleted without a search)."""
+    assert STUBS and all(t in MODS for t in STUBS.values()), {m: t for m, t in STUBS.items() if t not in MODS}
+    users = []
+    for d in ("src", "tests", "bench", "docs/user"):
+        for p in sorted((ROOT / d).rglob("*.py")):
+            if p == pathlib.Path(__file__) or ".venv" in p.parts:
+                continue
+            users += [(p.relative_to(ROOT).as_posix(), n.lineno, s) for n in ast.walk(ast.parse(p.read_text()))
+                      if isinstance(n, ast.Import | ast.ImportFrom)
+                      for s in STUBS if f"ace_jax.{s}" in {getattr(n, "module", None), *(a.name for a in n.names)}
+                      or (isinstance(n, ast.ImportFrom) and n.module and any(f"{n.module}.{a.name}" == f"ace_jax.{s}" for a in n.names))]
+    assert not users, users
+
+
+def test_stub_warns_and_serves_public_names_only():
+    import importlib
+
+    import pytest
+    for old, new in sorted(STUBS.items()):
+        mod = importlib.import_module(f"ace_jax.{new}")
+        name = next(n for n in sorted(vars(mod)) if not n.startswith("_"))
+        with pytest.warns(DeprecationWarning, match=f"ace_jax.{old} moved to ace_jax.{new}"):
+            assert getattr(importlib.import_module(f"ace_jax.{old}"), name) is getattr(mod, name)
+    old = next(iter(STUBS))
+    with pytest.raises(AttributeError):
+        _ = importlib.import_module(f"ace_jax.{old}")._private
 
 
 # ---- bench: every ace_jax import names something that exists ------------------------------------
@@ -178,7 +239,7 @@ def _has(mod, attr):
 
 
 def _module_of(dotted):
-    """'ace_jax.fit.stats' -> 'fit.stats' when that is a module, else None."""
+    """'ace_jax.fit.rows' -> 'fit.rows' when that is a module, else None."""
     if dotted != "ace_jax" and not dotted.startswith("ace_jax."):
         return None
     m = dotted[8:]

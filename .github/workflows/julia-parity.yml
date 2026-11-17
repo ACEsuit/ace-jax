@@ -10,7 +10,7 @@ on:
     paths:
       - "src/ace_jax/eval/model.py"
       - "src/ace_jax/fit/rows.py"
-      - "src/ace_jax/fit/solve.py"
+      - "src/ace_jax/fit/linear/solve.py"
       - "src/ace_jax/basis/**"
       - "julia/export_model.jl"
       - "julia/export_arrays.jl"

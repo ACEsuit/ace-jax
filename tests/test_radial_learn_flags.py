@@ -36,7 +36,7 @@ def test_prior_precision_sizes_from_gamma(small):
 
 def test_theta_map_and_holdout_take_precomputed_stats(small):
     from ace_jax.fit.hypers import to_array
-    from ace_jax.fit.radial_learn import holdout_score, theta_map_linear
+    from ace_jax.fit.radial.learn import holdout_score, theta_map_linear
     from ace_jax.fit.stats import linear_qr_statistics, linear_statistics
     prob, ds, _ = small
     _, ds_val, _ = make_problem(ncfg=6, start=6)
@@ -91,7 +91,7 @@ def test_bench_driver_init_radials(tmp_path):
     """--init-radials replaces the start (with --steps 0 the written radials are that start,
     normalised, not the model's own); a wrong shape fails fast."""
     from ace_jax.eval import load
-    from ace_jax.fit.radial_model import to_analytic
+    from ace_jax.fit.radial.model import to_analytic
     m, _, _ = load(MODEL)
     W = np.asarray(to_analytic(m, 20)[0].rnl_Wnlq)
     act = np.abs(W).sum(-1) > 0

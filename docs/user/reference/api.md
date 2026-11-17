@@ -76,15 +76,15 @@ together.
 
 ::: ace_jax.fit.pipeline.problem.build_problem
 
-::: ace_jax.fit.radial_model.to_analytic
+::: ace_jax.fit.radial.model.to_analytic
 
-::: ace_jax.fit.radial_learn.fit_radial
+::: ace_jax.fit.radial.learn.fit_radial
 
-::: ace_jax.fit.radial_learn.learn_radial
+::: ace_jax.fit.radial.learn.learn_radial
 
-::: ace_jax.fit.radial_learn.save_result
+::: ace_jax.fit.radial.learn.save_result
 
-::: ace_jax.fit.radial_model.with_radial
+::: ace_jax.fit.radial.model.with_radial
 
 ::: ace_jax.basis.export.mark_radial_learned
 

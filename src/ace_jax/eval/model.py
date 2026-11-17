@@ -29,8 +29,9 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 
-from .edge_model import (EdgeSiteModel, calibrate_edge_a, one_hot_selector,  # noqa: F401
-                         product_basis, product_basis_dot, product_basis_t, with_edge_a_kind)
+from .edge_model import EdgeSiteModel, calibrate_edge_a  # noqa: F401
+from .product import (one_hot_selector, pool_dense, pool_sparse, product_basis,  # noqa: F401  (re-exported)
+                      product_basis_dot, product_basis_t, with_edge_a_kind)
 from .aa_dag import dag_contract
 from .harmonics import real_solid_harmonics, real_spherical_harmonics
 from .radial import (agnesi_normalized, env_ace1_poly1sr, env_poly1sr,
@@ -59,19 +60,6 @@ def highest_precision():
     ~400x accuracy (1.17e-3 vs 2.93e-6 on this descriptor)."""
     with jax.default_matmul_precision("highest"):
         yield
-
-
-def pool_sparse(edge_feats, segment_ids, n_nodes, mask=None):
-    """Sum edge features into nodes over a sparse edge list."""
-    if mask is not None:
-        edge_feats = jnp.where(mask[:, None], edge_feats, 0.0)
-    return jax.ops.segment_sum(edge_feats, segment_ids, num_segments=n_nodes,
-                               indices_are_sorted=False)
-
-
-def pool_dense(edge_feats, mask):
-    """Sum over a fixed neighbour axis: edge_feats (n_nodes, K, F), mask (n_nodes, K)."""
-    return jnp.sum(jnp.where(mask[..., None], edge_feats, 0.0), axis=1)
 
 
 class ACEModel(EdgeSiteModel):
@@ -145,7 +133,7 @@ class ACEModel(EdgeSiteModel):
     # part of `lean`): the energy is unchanged, but the pair channel is no longer
     # Apair, so the basis methods (descriptors, Jacobians, fitting rows) refuse.
     energy_only: bool = eqx.field(static=True, default=False)
-    # The tensor radial's Wnlq were learned (`fit.radial_model.with_radial`,
+    # The tensor radial's Wnlq were learned (`fit.radial.model.with_radial`,
     # `radial_learn`), not exported or authored.  `lean`'s default ("auto")
     # splines an analytic R_nl only when this is set; stored as meta_json
     # "radial_learned" (absent = False).  Only the tensor radial is ever learned.
@@ -207,7 +195,7 @@ class ACEModel(EdgeSiteModel):
         """(E, n_q) the analytic tensor radial's basis per edge, R_nl = sum_q basis_q W_nlq:
         env(x) P_q(x) ("poly"), or PACE's g_k(r) ("sbessel", `pace_radial._sbessel` on [0, rc]
         with rc the pair cutoff, zero from rc on).  The single definition the learner's Gram,
-        roughness and conversions read (`fit.radial_model`)."""
+        roughness and conversions read (`fit.radial.model`)."""
         n_q = self.rnl_Wnlq.shape[-1]
         if self.rnl_basis == "sbessel":
             from .pace_radial import _sbessel
