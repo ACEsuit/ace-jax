@@ -21,9 +21,10 @@ jobs:
       # Quoll.jl's regression data (its Artifacts.toml, test-data-v0.4.0)
       DATA_URL: https://github.com/maurergroup/Quoll.jl/releases/download/test-data-v0.4.0/test-data-v0.4.0.tar.gz
       DATA_SHA256: 0fc22ea2f1f81adae7cc0cf55926be8e2f527ebfe5bc7208da1e880fc4c0115d
-      JULIA_CONDAPKG_ENV: ${{ runner.temp }}/condapkg
     steps:
       - uses: actions/checkout@v4
+      # the `runner` context is not available in a job's `env`
+      - run: echo "JULIA_CONDAPKG_ENV=$RUNNER_TEMP/condapkg" >> "$GITHUB_ENV"
       - uses: astral-sh/setup-uv@v5
       - uses: julia-actions/setup-julia@v2
         with:
