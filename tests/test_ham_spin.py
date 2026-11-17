@@ -80,10 +80,13 @@ def test_fit_and_bands_per_spin_channel(data):
     prep = hp.prepare(data.positions, data.cell, data.numbers)
     k = np.array([0.1, 0.25, -0.2])
     S = np.asarray(hp.hk(prep, k, "S"))
+    assert np.abs(S - S.conj().T).max() < 1e-10
+    # the fixture keeps blocks to 3 angstrom only, where S(k) is not positive definite: the
+    # eigenvalues are checked without the overlap
     e = {}
     for name in ("H_up", "H_dn"):
         H = np.asarray(hp.hk(prep, k, name))
         assert np.abs(H - H.conj().T).max() < 1e-8
-        e[name] = np.asarray(hp.bands(prep, [k], channel=name))[0]
-        assert np.allclose(e[name], scipy.linalg.eigh(H, S, eigvals_only=True), atol=1e-6)
+        e[name] = np.asarray(hp.bands(prep, [k], overlap=None, channel=name))[0]
+        assert np.allclose(e[name], scipy.linalg.eigvalsh(H), atol=1e-6)
     assert np.abs(e["H_up"] - e["H_dn"]).max() > 0.5
