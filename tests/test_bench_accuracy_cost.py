@@ -1101,7 +1101,7 @@ def test_polymlp_inputs_and_validation_split():
     split is seeded, disjoint from its train part, stratified, and never larger than a tenth of a type."""
     from accuracy_cost import common, fit_polymlp as fp
     s = common.load_sweep()["polymlp"]
-    assert 6 <= len(s) <= 16 and min(e["n_params"] for e in s) < 500 and max(e["n_params"] for e in s) >= 5000
+    assert 6 <= len([e for e in s if "reg_alpha" not in e]) <= 16 and min(e["n_params"] for e in s) < 500 and max(e["n_params"] for e in s) >= 5000
     kw = fp.params_kw(common.entry("polymlp", "m4g9-l882"))
     assert kw["cutoff"] == common.RCUT and kw["atomic_energy"] == [common.E0_SI] and kw["gtinv_version"] == 1
     assert kw["gtinv_maxl"] == (8, 8, 2) and kw["gtinv_order"] == 4 and kw["reg_alpha_params"] == fp.REG_ALPHA
@@ -1149,3 +1149,28 @@ def test_polymlp_calculator_conventions(tmp_path):
                 b = a.copy(); b.calc = c; b.set_cell(a.cell @ eps, scale_atoms=True); es.append(b.get_potential_energy())
             num[i, j] = (es[0] - es[1]) / (2 * h) / a.get_volume()
     assert np.abs(num - S).max() < 1e-6 * max(1.0, np.abs(S).max())
+
+
+def test_force_measures():
+    """force_measures.measures: the RMSE splits at pypolymlp's 1 eV/A threshold and recombines; the weighted RMSE
+    is pypolymlp's min(1, 1/|F|); the sweep's dense-grid polymlp entries are the nine largest models again."""
+    from accuracy_cost import common as C, force_measures as M
+    F = np.array([[0.5, -2.0, 0.0], [4.0, 0.2, -1.0]]); dF = np.array([[0.1, 0.4, -0.1], [-0.8, 0.0, 0.2]])
+    m = M.measures(dF, F)
+    big = np.abs(F) > M.LARGE
+    assert m["frac_large"] == pytest.approx(2 / 6) and big.sum() == 2            # |F| = 1 is not large
+    assert m["rmse_F"] == pytest.approx(np.sqrt(np.mean(dF ** 2))) and m["mae_F"] == pytest.approx(np.mean(np.abs(dF)))
+    assert m["rmse_F_small"] == pytest.approx(np.sqrt(np.mean(dF[~big] ** 2)))
+    assert m["rmse_F_large"] == pytest.approx(np.sqrt((0.4 ** 2 + 0.8 ** 2) / 2))
+    assert m["rmse_F"] ** 2 == pytest.approx(m["frac_large"] * m["rmse_F_large"] ** 2 + (1 - m["frac_large"]) * m["rmse_F_small"] ** 2)
+    assert m["share_large"] == pytest.approx((0.4 ** 2 + 0.8 ** 2) / np.sum(dF ** 2))
+    assert m["rel_F_large"] == pytest.approx((0.4 / 2 + 0.8 / 4) / 2)
+    assert m["wrmse_F"] == pytest.approx(np.sqrt(np.mean((dF * np.array([[1, 0.5, 1], [0.25, 1, 1]])) ** 2)))
+    assert M.measures(np.zeros(3), np.array([0.1, 0.2, 0.3]))["rmse_F_large"] is None
+    dense = [e for e in C.load_sweep()["polymlp"] if e["size"].endswith("-a28")]
+    base = {e["size"]: e for e in C.load_sweep()["polymlp"]}
+    assert len(dense) == 9 and all(e["reg_alpha"] == [-8, 1, 28] for e in dense)
+    for e in dense:                                     # the same model, only the penalty grid differs
+        b = base[e["size"][:-4]]
+        assert {k: v for k, v in e.items() if k not in ("size", "reg_alpha")} == {k: v for k, v in b.items() if k != "size"}
+    assert set(np.round(np.linspace(-8, 1, 10), 9)) <= set(np.round(np.linspace(-8, 1, 28), 9))   # a superset of the old grid

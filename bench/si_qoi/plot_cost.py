@@ -105,6 +105,7 @@ FAM = {  # family: (label, colour, marker, linestyle, filled, qoi model name pat
 # min-max spread as an error bar; the per-seed rows stay in metrics.jsonl.  SEED_EXCLUDE: checks, not ladder points
 SEEDED = ("grace", "grace_fs", "grace_2l")
 SEED_EXCLUDE = ("c32l4_long", "2l_small_long")   # the 150k-update training-length checks
+CHECK_SUFFIX = ("-a28",)                         # polymlp's dense-penalty-grid refits: a check, not ladder points
 WL_FAMILIES = ("ace", "ace_wl_1", "ace_wl_1.75", "ace_wl_2", "ace_wl_2.5", "ace_wl_o5", "ace_lr", "pace")
 WL_RECOLOUR = {"ace": "#3987e5"}                 # the ramp's wL 1.5 step (the categorical blue is too near 1.75)
 
@@ -210,7 +211,7 @@ def trainable(fam, size, n, model=None):
 
 
 def load_rows():
-    rows = [json.loads(l) for l in open(METRICS)]
+    rows = [r for r in map(json.loads, open(METRICS)) if not r["size"].endswith(CHECK_SUFFIX)]
     for r in rows:
         r["n_params"] = trainable(r["family"], r["size"], r.get("n_params"), r.get("model"))
         r["family"] = family_of(r)

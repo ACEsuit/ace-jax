@@ -796,3 +796,10 @@ Gates (LAMMPS against pypolymlp): ≤ 2.7e-14 eV/atom, 8.1e-13 eV/Å.
 
 `bench/si_qoi/results/rmse_qoi_cost.png`, `rmse_qoi_cost_wl.png` and `qoi_heatmap.png` are regenerated with the new family (dark grey thin diamonds).
 Existing entries of `cost_sulis_cpu.json` are unchanged (diffed); the new ones are added.
+
+**Author's comments (2026-11-17).** A. Seko confirmed the 5.0 Å cutoff and that there is no MPI version, and
+pointed to pypolymlp's 1/|F| weighting of forces above 1 eV/Å and to the penalty grid. Both were checked
+(`bench/accuracy_cost/polymlp/README.md`, "Author's comments and two checks"): in MAE and small-force RMSE the
+largest polymlp is within 4 % of linear ACE o4d20 (19 % in RMSE), the difference being the large components
+(24-42 % of polymlp's squared error, 17-19 % of ACE's and PACE's; `force_measures.py`); a 28-value penalty grid
+changes the force errors by at most 3.5 % and no row here.

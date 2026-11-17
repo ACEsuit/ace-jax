@@ -82,6 +82,66 @@ Two things to know when reading it:
 - **hcp.** The two models with `gtinv_maxl` [8, 8, 2] put hcp 37–42 meV/atom too low. Their neighbours are within
   10 meV/atom. This is most of the reason the QoI error does not fall between 1,782 and 4,797 coefficients.
 
+## Author's comments and two checks (2026-11-17)
+
+A. Seko replied to the first pass. He confirmed the 5.0 Å cutoff (a longer one "is not essential to the method")
+and that there is no MPI version. He raised two points, both checked here; neither changes a row above.
+
+**1. Weighting and the error measure.** pypolymlp weights a force component above 1 eV/Å by 1/|F|, so a plain
+RMSE is dominated by the components its fit holds least important. `force_measures.py` gives, for the same test
+set: the MAE and median |dF|; the RMSE over components with |F_DFT| ≤ 1 eV/Å ("small") and above ("large", 14 %
+of the test components); and the large components' share of the summed squared error. Values in eV/Å; rows in
+`results/force_measures.jsonl` (polymlp, linear ACE, PACE; the other families are not scored yet).
+
+| Model | Coefficients | RMSE | MAE | Median | Small | Large | Share large |
+|---|---|---|---|---|---|---|---|
+| polymlp m4g9-l442 | 1,782 | 0.106 | 0.064 | 0.036 | 0.095 | 0.161 | 32 % |
+| polymlp m4g8-l842 | 3,536 | 0.125 | 0.059 | 0.031 | 0.088 | 0.253 | 57 % |
+| polymlp m4g8-l1282 | 6,984 | 0.092 | 0.055 | 0.028 | 0.087 | 0.121 | 24 % |
+| polymlp m2g6-l84 | 10,584 | 0.095 | 0.055 | 0.029 | 0.085 | 0.142 | 31 % |
+| polymlp m2g8-l84 | 18,720 | 0.099 | 0.052 | 0.027 | 0.082 | 0.172 | 42 % |
+| polymlp m2g8-l124 | 25,424 | 0.101 | 0.053 | 0.028 | 0.083 | 0.173 | 42 % |
+| polymlp m2g9-l124 | 32,130 | 0.097 | 0.053 | 0.027 | 0.082 | 0.161 | 38 % |
+| linear ACE o4d12 | 350 | 0.144 | 0.093 | 0.056 | 0.141 | 0.161 | 18 % |
+| linear ACE o4d16 | 1,461 | 0.101 | 0.064 | 0.037 | 0.099 | 0.114 | 18 % |
+| linear ACE o4d20 | 5,476 | 0.082 | 0.051 | 0.027 | 0.079 | 0.094 | 19 % |
+| PACE f800 | 761 | 0.081 | 0.051 | 0.028 | 0.079 | 0.089 | 17 % |
+| PACE f3200 | 3,200 | 0.070 | 0.044 | 0.023 | 0.069 | 0.081 | 18 % |
+
+- The type 2 ladder is flat in RMSE (0.095-0.101) but improves with size in MAE, median and small-force RMSE.
+- On those measures the largest polymlp is within 4 % of linear ACE o4d20 (equal median), against 19 % in RMSE.
+- The remaining difference is the large components: 24-42 % of polymlp's squared error (57 % for m4g8-l842),
+  17-19 % for ACE and PACE.
+- m4g8-l842's RMSE of 0.125 is a large-force effect alone: its MAE and small-force RMSE are in line with its
+  neighbours.
+- The RMSE stays the benchmark's measure and the target's, as for every other method.
+
+**2. Penalty grid.** He tests 10 to 30 penalties. The nine largest models were refitted with 28 values
+(10^linspace(-8, 1, 28): the 10 above and two between each pair), selection unchanged; sweep sizes `<size>-a28`,
+kept out of the figures (`plot_cost.CHECK_SUFFIX`).
+
+| Model | Alpha, 10 → 28 values | F RMSE | F MAE | E RMSE (meV/atom) | QoI error |
+|---|---|---|---|---|---|
+| m4g8-l842 | 1e-6 → 1e-6 | 0.125 | 0.059 | 13.4 | same model |
+| m4g9-l882 | 1e-3 → 4.6e-4 | 0.096 → 0.095 | 0.057 → 0.056 | 13.9 → 13.4 | 1.01 → 1.01 |
+| m4g8-l1282 | 1e-3 → 1e-3 | 0.092 | 0.055 | 11.8 | same model |
+| m2g6-l44 | 1e-2 → 4.6e-3 | 0.097 → 0.096 | 0.059 → 0.058 | 11.0 → 10.5 | 1.10 → 0.96 |
+| m2g6-l84 | 1e-2 → 4.6e-3 | 0.095 → 0.096 | 0.055 → 0.054 | 9.4 → 8.5 | 0.74 → 0.75 |
+| m2g8-l84 | 1e-2 → 2.2e-2 | 0.099 → 0.098 | 0.052 → 0.053 | 9.8 → 9.8 | 0.66 → 0.64 |
+| m2g9-l84 | 1e-1 → 4.6e-2 | 0.097 → 0.096 | 0.054 → 0.053 | 8.5 → 9.0 | 0.62 → incomplete |
+| m2g8-l124 | 1e-1 → 4.6e-2 | 0.101 → 0.097 | 0.053 → 0.052 | 8.6 → 11.6 | 0.54 → 0.55 |
+| m2g9-l124 | 1e-1 → 4.6e-2 | 0.097 → 0.096 | 0.053 → 0.051 | 8.6 → 11.7 | 0.54 → incomplete |
+
+- Forces change by at most 3.5 % in RMSE and 3 % in MAE: the grid did not limit the force error.
+- The three models that moved from 1e-1 to 4.6e-2 trade energy for force: two lose 3 meV/atom in energy RMSE.
+- Two of them (m2g9-l84, m2g9-l124) then fail the interstitial relaxation (the line search aborts, twice), so
+  their QoI error is incomplete (18 of 21). The 1e-1 models complete it.
+- m4g8-l842 keeps 1e-6: the weighted validation RMSE does not see its large-force error.
+- The rows above therefore stay as they are.
+
+Open with the author: an option for unweighted regression (planned in pypolymlp) and efficiency improvements;
+the benchmark is to be rerun with each.
+
 ## Commands
 
 ```bash
@@ -94,6 +154,7 @@ $PY -m accuracy_cost.fit_polymlp --count                      # coefficients per
 $PY -m accuracy_cost.fit_polymlp m3g6-l44 m3g8-l442 ...      # fit: runs/accuracy_cost/polymlp/<size>/polymlp.yaml
 $PY -m accuracy_cost.evaluate polymlp m3g6-l44 ...            # test errors -> results/metrics.jsonl
 $PY -m accuracy_cost.qoi_models polymlp                       # register with the QoI framework; prints names and tests
+$PY -m accuracy_cost.force_measures polymlp                  # MAE, small/large-force RMSE -> results/force_measures.jsonl
 
 # LAMMPS on Sulis: build, then gate and time
 sbatch bench/scaling/envs/sulis-polymlp-build-cpu.sbatch

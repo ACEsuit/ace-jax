@@ -197,3 +197,14 @@ polymlp:       # Seko's polynomial MLPs (fit_polymlp.py; pypolymlp 0.22.1): poin
   - {size: m2g9-l84,   model_type: 2, max_p: 2, gtinv_order: 3, gtinv_maxl: [8, 4],  n_gaussians: 9, n_params: 23652, rank: false}
   - {size: m2g8-l124,  model_type: 2, max_p: 2, gtinv_order: 3, gtinv_maxl: [12, 4], n_gaussians: 8, n_params: 25424, rank: false}
   - {size: m2g9-l124,  model_type: 2, max_p: 2, gtinv_order: 3, gtinv_maxl: [12, 4], n_gaussians: 9, n_params: 32130, rank: false}
+  # the same models with a denser penalty grid (Seko, 2026-11-17: he tests 10-30 values): 28 values, 1/3 decade
+  # apart, a superset of the 10 above; selection as before, on the validation split of train
+  - {size: m4g8-l842-a28, model_type: 4, max_p: 2, gtinv_order: 4, gtinv_maxl: [8, 4, 2], n_gaussians: 8, n_params: 3536, reg_alpha: [-8, 1, 28]}
+  - {size: m4g9-l882-a28, model_type: 4, max_p: 2, gtinv_order: 4, gtinv_maxl: [8, 8, 2], n_gaussians: 9, n_params: 4797, reg_alpha: [-8, 1, 28]}
+  - {size: m4g8-l1282-a28, model_type: 4, max_p: 2, gtinv_order: 4, gtinv_maxl: [12, 8, 2], n_gaussians: 8, n_params: 6984, reg_alpha: [-8, 1, 28]}
+  - {size: m2g6-l44-a28, model_type: 2, max_p: 2, gtinv_order: 3, gtinv_maxl: [4, 4], n_gaussians: 6, n_params: 7380, rank: false, reg_alpha: [-8, 1, 28]}
+  - {size: m2g6-l84-a28, model_type: 2, max_p: 2, gtinv_order: 3, gtinv_maxl: [8, 4], n_gaussians: 6, n_params: 10584, rank: false, reg_alpha: [-8, 1, 28]}
+  - {size: m2g8-l84-a28, model_type: 2, max_p: 2, gtinv_order: 3, gtinv_maxl: [8, 4], n_gaussians: 8, n_params: 18720, rank: false, reg_alpha: [-8, 1, 28]}
+  - {size: m2g9-l84-a28, model_type: 2, max_p: 2, gtinv_order: 3, gtinv_maxl: [8, 4], n_gaussians: 9, n_params: 23652, rank: false, reg_alpha: [-8, 1, 28]}
+  - {size: m2g8-l124-a28, model_type: 2, max_p: 2, gtinv_order: 3, gtinv_maxl: [12, 4], n_gaussians: 8, n_params: 25424, rank: false, reg_alpha: [-8, 1, 28]}
+  - {size: m2g9-l124-a28, model_type: 2, max_p: 2, gtinv_order: 3, gtinv_maxl: [12, 4], n_gaussians: 9, n_params: 32130, rank: false, reg_alpha: [-8, 1, 28]}
