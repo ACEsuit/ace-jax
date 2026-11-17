@@ -27,7 +27,7 @@ class _Pack(eqx.Module):
     W0: tuple
     Wi: tuple
     Wj: tuple
-    We: tuple                    # per lp, per bond-environment group: (c, Q, n_ebond, n_env)
+    We: tuple                    # per lp: (c Q, G n_ebond n_env), the bond-environment groups side by side
     Te: tuple
     T: tuple
     Gq: tuple
@@ -92,7 +92,7 @@ def _pack(model, za, zb):
         Ts.append(tuple(jnp.asarray(cg.real_cg(l, lam, L)) for l, lam, _, _ in cpl))
         Gqs.append(jnp.asarray(r, jnp.int32)); Gijs.append(jnp.asarray(cidx, jnp.int32)); Gvs.append(jnp.asarray(dense[r, cidx]))
         grps.append(tuple((l, lam, pi) for l, lam, pi, _ in cpl))
-        Wes.append(tuple(jnp.asarray(w) for w in We))
+        Wes.append(jnp.asarray(np.stack(We, axis=2).reshape(nc * len(items), -1)) if We else jnp.zeros((nc * len(items), 0)))
         Tes.append(tuple(jnp.asarray(cg.real_cg(l, lam, L)) for l, lam in ecpl))
         egrps.append(tuple(ecpl))
     low = np.zeros((na, nb))
@@ -139,10 +139,21 @@ def _canonical(pack, F, phi0, U, Y, usign, rev, n_cpl, l_cpl, phi2=None, Aenv=No
             # (whose u is this bond's with the sign (-1)^l), and read it back through `rev`
             Dj = jnp.einsum("acqMnm,aKnm->aKcqM", Cj, U * usign)
             part = part + Dj.reshape(n * K, nc, Q, 2 * L + 1)[rev].reshape(n, K, nc, Q, 2 * L + 1)
-        for (l, lam), We, Te in zip(pack.egroups[k], pack.We[k], pack.Te[k]):
-            # bond environment: (Y_l (x) A^env_lam)^L per environment radial, then the coefficients
-            Z = jnp.einsum("aKm,muM,aKeu->aKeM", Y[..., l * l:(l + 1) ** 2], Te, Aenv[..., lam * lam:(lam + 1) ** 2])
-            part = part + jnp.einsum("aKcqe,aKeM->aKcqM", jnp.einsum("cqne,aKn->aKcqe", We, phi2), Z)
+        if pack.egroups[k]:
+            # bond environment.  Per atom (its bonds' features fit the cache): the features
+            # phi_n (Y_l (x) A^env_lam)^L of every group side by side, then ONE matrix product with
+            # the coefficients of all shell pairs and channels.
+            groups, Tes, We = pack.egroups[k], pack.Te[k], pack.We[k]
+
+            def one(args, groups=groups, Tes=Tes, We=We, L=L):
+                y, A, ph = args                                         # (K, nlm), (K, n_env, nlm_env), (K, n_ebond)
+                Z = jnp.stack([jnp.einsum("Keu,KuM->KeM", A[..., lam * lam:(lam + 1) ** 2],
+                                          jnp.einsum("Km,muM->KuM", y[:, l * l:(l + 1) ** 2], Te))
+                               for (l, lam), Te in zip(groups, Tes)], axis=1)                   # (K, G, n_env, M)
+                Phi = (ph[:, None, :, None, None] * Z[:, :, None, :, :]).reshape(y.shape[0], -1, 2 * L + 1)
+                return jnp.einsum("xk,KkM->KxM", We, Phi)                # (K, c Q, M)
+
+            part = part + jax.lax.map(one, (Y, Aenv, phi2)).reshape(n, K, nc, Q, 2 * L + 1)
         P = jnp.moveaxis(part.reshape(n, K, nc, Q * (2 * L + 1)), -1, 0)          # (Q M, n, K, c)
         add = jax.ops.segment_sum(P[pack.Gq[k]] * pack.Gv[k][:, None, None, None], pack.Gij[k], num_segments=na * nb)
         flat = add if flat is None else flat + add
@@ -153,17 +164,23 @@ def _canonical(pack, F, phi0, U, Y, usign, rev, n_cpl, l_cpl, phi2=None, Aenv=No
 
 def _env_side(e_rij, e_live, rvec, mask, r_env, rmax, n_env, l_env):
     """(n, K, n_env, (l_env+1)^2): for each bond slot, the half of A^env pooled over the neighbours
-    of its first atom (`bond._env_side` on the dense layouts)."""
-    d = e_rij[:, None, :, :]                                            # (n, 1, Ke, 3)
-    r = rvec[:, :, None, :]                                             # (n, K, 1, 3)
-    dist = jnp.sqrt(jnp.sum(e_rij * e_rij, axis=-1))[:, None, :]
-    partner = jnp.sum((d - r) ** 2, axis=-1) < 1e-8                     # the bond's own second atom
-    w = jnp.where(e_live[:, None, :] & ~partner & (dist < r_env), (1 - jnp.clip(dist / r_env, 0, 1) ** 2) ** 2, 0.0)
-    w = w * mask[:, :, None]
-    x = d - 0.5 * r                                                     # (n, K, Ke, 3) about the midpoint
-    R = _radial(jnp.clip(jnp.sqrt(jnp.sum(x * x, axis=-1)) / rmax, 0.0, 1.0), n_env)
-    Yx = real_spherical_harmonics(x, max(l_env, 1))[..., :(l_env + 1) ** 2]
-    return jnp.einsum("aKe,aKen,aKey->aKny", w, R, Yx)
+    of its first atom (`bond._env_side` on the dense layouts).  One atom at a time: its
+    (bonds x environment atoms) intermediates fit the cache, where all atoms at once is a pass
+    over hundreds of MB per operation."""
+    nlm = (l_env + 1) ** 2
+
+    def one(args):
+        d, live, r, m = args                                            # (Ke, 3), (Ke,), (K, 3), (K,)
+        dist = jnp.sqrt(jnp.sum(d * d, axis=-1))
+        e = jnp.where(live & (dist < r_env), (1 - jnp.clip(dist / r_env, 0, 1) ** 2) ** 2, 0.0)   # (Ke,)
+        partner = jnp.sum((d[None, :, :] - r[:, None, :]) ** 2, axis=-1) < 1e-8                # (K, Ke)
+        w = jnp.where(partner, 0.0, e[None, :]) * m[:, None]
+        x = d[None, :, :] - 0.5 * r[:, None, :]                         # about the midpoint
+        R = _radial(jnp.clip(jnp.sqrt(jnp.sum(x * x, axis=-1)) / rmax, 0.0, 1.0), n_env)
+        Yx = real_spherical_harmonics(x, max(l_env, 1))[..., :nlm]
+        return jnp.einsum("Ken,Key->Kny", w[..., None] * R, Yx)
+
+    return jax.lax.map(one, (e_rij, e_live, rvec, mask))
 
 
 def _blocks_impl(packs, F, rvec, mask, rev, rcut, shape_args, env=None):
