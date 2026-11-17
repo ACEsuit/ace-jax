@@ -4,7 +4,8 @@
 # it as an npz cache (ace_jax.ham.cache); no Julia after this step.
 #   julia --startup-file=no --project=ham/julia ham/julia/ingest.jl <format> <in dir> <out dir> [H,S]
 # <format>: fhi-aims (rs_hamiltonian.h5 / .out, rs_overlap, basis-indices.out,
-# geometry.in) or deeph (a round trip through Quoll's canonical form).
+# geometry.in), fhi-aims-spin (collinear: rs_hamiltonian_up.out / _dn.out; writes <out dir>/up
+# and <out dir>/dn) or deeph (a round trip through Quoll's canonical form).
 # Quoll reads FHI-aims geometries with ASE through CondaPkg, which puts a ~400 MB conda
 # environment in <project>/.CondaPkg unless JULIA_CONDAPKG_ENV names another directory.
 # Configurations is held at 0.17.6 in Project.toml: the release after it breaks
@@ -15,11 +16,26 @@ const FORMATS = Dict("fhi-aims" => Quoll.FHIaimsCSCNoSpinRealMetadata,
                      "deeph" => Quoll.DeepHBlockNoSpinRealMetadata)
 const KINDS = Dict("H" => () -> Quoll.Hamiltonian(; source = :ref), "S" => () -> Quoll.Overlap(; source = :ref))
 
-function main(args)
-   3 <= length(args) <= 4 || error("usage: ingest.jl <fhi-aims|deeph> <in dir> <out dir> [H,S]")
-   fmt, indir, outdir = args[1], args[2], args[3]
-   haskey(FORMATS, fmt) || error("unknown format $fmt; one of $(sort(collect(keys(FORMATS))))")
-   names = split(length(args) == 4 ? args[4] : "H,S", ",")
+# Collinear spin.  Quoll reads rs_hamiltonian_up / _dn (FHIaimsCSCSpinRealMetadata) but has no
+# conversion of those operators to its canonical form; each spin channel's file has the layout
+# of a spin-free Hamiltonian, so each goes through the spin-free path from a directory of links.
+# Writes <out>/up (H, S) and <out>/dn (H): two DeepH directories on one geometry and basis.
+const SPIN_FILES = ("up" => "rs_hamiltonian_up.out", "dn" => "rs_hamiltonian_dn.out")
+
+function spin(indir, outdir)
+   for (ch, hfile) in SPIN_FILES
+      isfile(joinpath(indir, hfile)) || error("$indir has no $hfile (spin collinear with output_rs_matrices plain)")
+      mktempdir() do tmp
+         for f in ("rs_overlap.out", "rs_indices.out", "basis-indices.out", "geometry.in", "control.in", "aims.out")
+            isfile(joinpath(indir, f)) && symlink(abspath(joinpath(indir, f)), joinpath(tmp, f))
+         end
+         symlink(abspath(joinpath(indir, hfile)), joinpath(tmp, "rs_hamiltonian.out"))
+         one("fhi-aims", tmp, joinpath(outdir, ch), ch == "up" ? ["H", "S"] : ["H"])
+      end
+   end
+end
+
+function one(fmt, indir, outdir, names)
    ops = map(names) do name
       haskey(KINDS, name) || error("unknown operator $name; one of H, S")
       op = Quoll.load_operator(Quoll.Operator, FORMATS[fmt], indir, KINDS[name]())
@@ -28,6 +44,14 @@ function main(args)
    end
    Quoll.write_operators(Quoll.DeepHBlockNoSpinRealMetadata, outdir, ops)
    println("wrote ", join(names, ", "), " to ", outdir)
+end
+
+function main(args)
+   3 <= length(args) <= 4 || error("usage: ingest.jl <fhi-aims|fhi-aims-spin|deeph> <in dir> <out dir> [H,S]")
+   fmt, indir, outdir = args[1], args[2], args[3]
+   fmt == "fhi-aims-spin" && return spin(indir, outdir)
+   haskey(FORMATS, fmt) || error("unknown format $fmt; one of $(sort(collect(keys(FORMATS)))) or fhi-aims-spin")
+   one(fmt, indir, outdir, split(length(args) == 4 ? args[4] : "H,S", ","))
 end
 
 main(ARGS)

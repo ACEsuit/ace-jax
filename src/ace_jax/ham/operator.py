@@ -237,12 +237,13 @@ class HamiltonianPredictor:
         k = jnp.asarray(k, prep.on[0].dtype)
         return _bloch(prep.on, prep.off, prep.lists, k, self.channels.index(channel), prep.n_orb)
 
-    def bands(self, prep, kpts, overlap="S"):
+    def bands(self, prep, kpts, overlap="S", channel="H"):
         """(n_k, n_orb) eigenvalues of H(k) c = e S(k) c at the fractional k-points `kpts`.
-        `overlap=None`: an orthonormal basis (S = 1)."""
+        `overlap=None`: an orthonormal basis (S = 1).  `channel`: the Hamiltonian channel
+        ("H_up" or "H_dn" of a collinear-spin model)."""
         out = []
         for k in np.atleast_2d(np.asarray(kpts, float)):
-            H = self.hk(prep, k, "H")
+            H = self.hk(prep, k, channel)
             S = self.hk(prep, k, overlap) if overlap else jnp.eye(prep.n_orb, dtype=H.dtype)
             out.append(_eigvals(H, S))
         return jnp.stack(out)

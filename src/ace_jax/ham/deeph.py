@@ -101,6 +101,25 @@ def read(directory, operators=("H", "S")):
     return OperatorData(cell, positions, numbers, basis, blocks)
 
 
+def read_spin(directory, overlap=True):
+    """Collinear spin: `OperatorData` with the channels ("H_up", "H_dn", "S") from the two
+    DeepH directories `<directory>/up` (H and S) and `<directory>/dn` (H) that
+    `ham/julia/ingest.jl fhi-aims-spin` writes.  Both must hold one geometry and orbital basis."""
+    d = pathlib.Path(directory)
+    up = read(d / "up", operators=(("H_up", FILES["H"]),) + ((("S", FILES["S"]),) if overlap else ()))
+    dn = read(d / "dn", operators=(("H_dn", FILES["H"]),))
+    same = (np.array_equal(up.cell, dn.cell) and np.array_equal(up.positions, dn.positions)
+            and np.array_equal(up.numbers, dn.numbers) and up.basis == dn.basis)
+    if not same:
+        raise ValueError(f"{d}: the up and dn directories hold different structures or orbital bases")
+    if set(up.blocks["H_up"]) != set(dn.blocks["H_dn"]):
+        raise ValueError(f"{d}: the up and dn Hamiltonians have different blocks")
+    blocks = {"H_up": up.blocks["H_up"], "H_dn": dn.blocks["H_dn"]}
+    if overlap:
+        blocks["S"] = up.blocks["S"]
+    return OperatorData(up.cell, up.positions, up.numbers, up.basis, blocks)
+
+
 def write(directory, data, files=None, spinful=False):
     """Write `data` in the DeepH layout.  `files`: {channel: file name} (default
     `FILES` for the channels present; another name, e.g. "hamiltonians_pred.h5",
