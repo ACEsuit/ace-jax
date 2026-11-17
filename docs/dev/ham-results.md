@@ -415,3 +415,27 @@ Full H, 108-atom SiC, site (2, 2) + env (5, 6, 4, 4, 4), float64, mnf148 (`HAM_T
 **Check** (`bench/ham/spin_check.py`, on the 16-atom and the 2-atom calculation): the eigenvalues of each ingested channel with the overlap equal the ones FHI-aims lists for its first k-point to 5e-6 eV (its print precision), all 296 (37) listed states of both spins; the electron count on the calculation's k-grid at its chemical potential is 416.00000 (52.00000). The moment from the same sum is 34.340 where FHI-aims prints 34.264 (0.2 %): not understood, and not an ingestion error given the eigenvalues.
 
 **Fixture** `fixtures/ham/fe_spin_deeph` (2-atom distorted bcc cell, blocks to 3 Å, three files of 30 blocks) and `tests/test_ham_spin.py`: the reader, its refusal of two different structures, the cache, a three-channel fit and the bands of each spin channel.
+
+## Collinear spin: first fit, 12 structures (2026-11-17)
+
+`bench/ham/spin_fit.py <npz dir> 2 3000`: one on-site and one off-site model with the channels (H_up, H_dn, S); site basis 12 radials, site group (2, 2), bond environment (5, 6, 4, 4, 4), bond cutoff 9 Å; 12 training structures (3,000 bonds of each), 2 test structures; fitted in 296 s.
+
+| test blocks | RMSE | largest |
+|---|---|---|
+| H_up, H_dn on-site | 6.2, 6.9 meV | 88, 148 meV |
+| H_up, H_dn off-site | 5.1, 5.1 meV | 319 meV |
+| S on-site, off-site | 0.006, 0.013 meV | 0.1, 0.5 meV |
+
+| eigenvalues, E_F − 12 to E_F + 5 eV, both spins, 4 x 4 x 4 k-points, predicted H with the reference S | RMSE | largest | E_F error | moment per atom, mean error |
+|---|---|---|---|---|
+| full generalised eigenproblem | 5326 meV | 48.8 eV | 333 meV | −0.10 µ_B |
+| in the span of S(k) eigenvectors above 1e-3 | 21.8 meV | 108 meV | 3.5 meV | −0.014 µ_B |
+| above 1e-2 | 21.3 meV | 94 meV | 2.4 meV | −0.013 µ_B |
+| above 1e-1 | 21.8 meV | 98 meV | 1.7 meV | −0.012 µ_B |
+
+- **The light Fe basis is nearly linearly dependent**: the smallest eigenvalue of S(k) is 1.8e-4. A 5 meV error in H in such a direction is a spurious state anywhere in the spectrum, and the full eigenproblem of the predicted H is useless although its blocks are good. Aluminium's minimal basis did not show this.
+- Solving in the well-conditioned part of the overlap (canonical orthogonalisation, as DFT codes do with a much smaller threshold) removes the spurious states: 22 meV RMSE, and the moment to 0.014 µ_B per atom (reference 2.10 to 2.14).
+- That subspace is itself an approximation: the reference's own eigenvalues move by 19 meV RMSE (171 meV at most) at 1e-3 and by 118 meV at 1e-1. So the threshold trades a known projection error for robustness; the alternative is a fit that weights the error in the metric of S^(-1/2) (a spectral loss), which the design lists as later work.
+- With the predicted S instead of the reference S the numbers are the same to 1 % (S is predicted to 0.01 meV).
+- For SCF injection only the blocks matter (the DFT code solves its own eigenproblem with its own basis threshold), so this concerns direct use of the predicted bands.
+- Prediction: 99 to 123 ms per atom for this call (8 threads, including compilation; 31 orbitals and 328 bonds per atom, three channels). Not yet timed properly.

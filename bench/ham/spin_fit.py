@@ -29,6 +29,7 @@ from ace_jax.ham.offsite_fast import OffsitePredictor
 from ace_jax.ham.onsite import OnsitePredictor
 
 CH, WIDTH, NK, RCUT = ("H_up", "H_dn", "S"), 0.1, 4, 9.0
+STHR = (1e-3, 1e-2, 1e-1)
 
 
 def subset(d, n, seed):
@@ -52,10 +53,19 @@ def dense(d, blocks, ks):
     return out
 
 
-def spectrum(M, S, nel):
+def spectrum(M, S, nel, sthr=0.0):
     """Eigenvalues (2, n_k, n) of the two spin channels, the Fermi level that holds `nel`
-    electrons with Gaussian smearing, and the moment there."""
-    e = np.array([[scipy.linalg.eigh(h, s, eigvals_only=True) for h, s in zip(M[c], S)] for c in ("H_up", "H_dn")])
+    electrons with Gaussian smearing, and the moment there.  `sthr` > 0: solve in the span of
+    the eigenvectors of S(k) with eigenvalue above it (canonical orthogonalisation; the same
+    number of them at every k, the smallest count), which leaves out the nearly dependent
+    combinations of orbitals that a small error in H turns into spurious states."""
+    if sthr <= 0:
+        e = np.array([[scipy.linalg.eigh(h, s, eigvals_only=True) for h, s in zip(M[c], S)] for c in ("H_up", "H_dn")])
+    else:
+        sv = [np.linalg.eigh(s) for s in S]
+        keep = min(int((w > sthr).sum()) for w, _ in sv)
+        X = [v[:, -keep:] / np.sqrt(w[-keep:]) for w, v in sv]
+        e = np.array([[np.linalg.eigvalsh(x.conj().T @ h @ x) for h, x in zip(M[c], X)] for c in ("H_up", "H_dn")])
     occ = lambda mu: 0.5 * erfc((e - mu) / WIDTH).sum(axis=(1, 2)) / e.shape[1]
     mu = brentq(lambda m: occ(m).sum() - nel, e.min(), e.max())
     n_up, n_dn = occ(mu)
@@ -96,17 +106,28 @@ def main(folder, n_test, n_bonds=3000, site_cpl=(2, 2), env=(5.0, 6, 4, 4, 4), n
         e0, mu0, m0 = spectrum(ref, ref["S"], nel)
         smin = min(np.linalg.eigvalsh(x)[0] for x in ref["S"])
         acc.setdefault(("smin", ""), []).append(smin)
-        for label, S in (("predicted H and S", prd["S"]), ("predicted H, reference S", ref["S"])):
+        cases = [("predicted H and S", prd["S"], 0.0), ("predicted H, reference S", ref["S"], 0.0)]
+        cases += [(f"predicted H, reference S, S(k) eigenvalues above {t:g}", ref["S"], t) for t in STHR]
+        for label, S, sthr in cases:
+            if sthr:                                   # the reference in the same subspace, and what leaving the rest out costs
+                e0s, mu0s, m0s = spectrum(ref, ref["S"], nel, sthr)
+                w = (e0[..., :e0s.shape[-1]] > mu0 - 12.0) & (e0[..., :e0s.shape[-1]] < mu0 + 5.0)
+                acc.setdefault(("trunc", label), []).append(((e0s - mu0s) - (e0[..., :e0s.shape[-1]] - mu0))[w])
+            else:
+                e0s, mu0s, m0s = e0, mu0, m0
             try:
-                e1, mu1, m1 = spectrum(prd, S, nel)
+                e1, mu1, m1 = spectrum(prd, S, nel, sthr)
             except np.linalg.LinAlgError:              # the predicted S(k) is not positive definite
                 acc.setdefault(("failed", label), []).append(os.path.basename(name))
                 continue
+            e0_, mu0_, m0_ = e0, mu0, m0
+            e0, mu0, m0 = e0s, mu0s, m0s
             val = (e0 > mu0 - 12.0) & (e0 < mu0 + 5.0)
             err = (e1 - mu1) - (e0 - mu0)
             acc.setdefault(("bands", label), []).append(err[val])
             acc.setdefault(("moment", label), []).append((m1 / len(d.numbers), m0 / len(d.numbers)))
             acc.setdefault(("fermi", label), []).append(mu1 - mu0)
+            e0, mu0, m0 = e0_, mu0_, m0_
         print(f"  {os.path.basename(name)}: predicted in {dt:.2f} s ({1e3 * dt / len(d.numbers):.1f} ms per atom, {threads} threads); "
               f"reference moment per atom {m0 / len(d.numbers):.3f}, smallest eigenvalue of S(k) {smin:.2e}")
     print("block errors on the test structures, meV (RMSE; largest):")
@@ -114,7 +135,10 @@ def main(folder, n_test, n_bonds=3000, site_cpl=(2, 2), env=(5.0, 6, 4, 4, 4), n
         if c in CH:
             v = np.concatenate(v)
             print(f"  {c:5s} {part:9s} {1e3 * np.sqrt((v ** 2).mean()):9.3f} {1e3 * np.abs(v).max():10.1f}")
-    for label in ("predicted H and S", "predicted H, reference S"):
+    for label in [k[1] for k in acc if k[0] == "bands"] + [k[1] for k in acc if k[0] == "failed" and ("bands", k[1]) not in acc]:
+        if ("trunc", label) in acc:
+            v = np.concatenate(acc[("trunc", label)])
+            print(f"reference in that subspace against the full reference: RMSE {1e3 * np.sqrt((v ** 2).mean()):.2f} meV, max {1e3 * np.abs(v).max():.1f} meV")
         if ("failed", label) in acc:
             print(f"{label}: S(k) not positive definite for {len(acc[('failed', label)])} of {n_test} test structures")
         if ("bands", label) not in acc:
