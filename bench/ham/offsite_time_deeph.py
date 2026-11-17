@@ -37,6 +37,10 @@ ENV = next((tuple(float(v) for v in x[4:].split(",")) for x in sys.argv[1:] if x
 a = [x for x in sys.argv[1:] if not x.startswith("env=")]
 d = deeph.read(a[0], operators=())
 rcut, nsite, n_bond, n_cpl, l_cpl = float(a[1]), int(a[2]), int(a[3]), int(a[4]), int(a[5])
+if os.environ.get("HAM_ONE_SPECIES"):                 # the same geometry with every atom the heaviest species
+    from ace_jax.ham.orbitals import OrbitalBasis
+    z = max(d.basis.species)
+    d = d._replace(numbers=np.full(len(d.numbers), z), basis=OrbitalBasis.of({z: d.basis.ls(z)}))
 channels = tuple(a[6].split(",")) if len(a) > 6 else ("H",)
 elements, orb = [int(z) for z in d.basis.species], d.basis
 lf = 2 * orb.lmax

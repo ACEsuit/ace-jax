@@ -330,3 +330,28 @@ Same test and metric as the section above (`band_accuracy.py … env=5.0,6,4,4,4
 - **On the GPU the accurate model costs nothing extra**: 0.85–0.92 ms per atom, about four times faster than MACE-H, including the copy of the blocks to the host.
 - **On one CPU thread the bond environment costs about 34 ms per atom**, four times the rest of the model, and brings the total to 42–60 ms, close to MACE-H's 62.7 ms. The cost is the harmonics and radials of every (bond, environment atom) pair about the bond midpoint: about 9,500 pairs per atom here. This is the pooling per bond that the shared-feature design set out to avoid, and it is where CPU work would have to go (an expansion about each atom translated to the midpoint, or fewer environment atoms per bond).
 - Not accuracy-matched with MACE-H (untrained there), and the accuracy numbers are for aluminium while the timings are for the SiC input; the feature sizes are the same.
+
+## CPU cost of the bond environment: where it goes (2026-11-17)
+
+CPU inference is a requirement (coupling to DFT codes for SCF injection), so the 34 ms per atom the environment group adds on one thread was profiled (108-atom SiC, one thread, float64):
+
+| piece | per atom |
+|---|---|
+| pooling the environment about each bond's midpoint (harmonics and radials of 7,268 pairs) | 1.2 ms |
+| building the coupled features φ_n (Y_l ⊗ A^env_λ)^L, all 13 symmetries | 7.1 ms |
+| one matrix product per symmetry with the coefficients (17 GFLOP/s, as fast as BLAS) | about 6 ms |
+| **one species pair, total added by the environment** | **about 14 ms** |
+| the same for SiC as the code stands: three species pairs, each on every (atom, slot) | about 34 ms |
+
+- The pooling per bond, which I expected to be the cost, is small. Two attempts that did not help: one atom at a time instead of all atoms at once (cache), and one matrix product per symmetry instead of a contraction per group.
+- **Most of the two-species cost is waste**: each canonical species pair is evaluated on every (atom, slot) and masked afterwards, although a bond belongs to exactly one pair. With the same geometry declared as one species the full prediction takes 20.1 ms per atom with the environment and 6.1 ms without, against 44.8 and 10.6 ms for SiC.
+
+| full H, one CPU thread, per atom | without environment | with environment (5, 6, 4, 4, 4) + site (2, 2) |
+|---|---|---|
+| MACE-H | 62.7 ms | – |
+| SiC geometry as one species (no waste) | 6.1 ms | 20.1 ms |
+| SiC, two species, as the code stands | 10.6 ms | 44.8 ms |
+
+- Next: dense layouts per ordered species pair (rows of one species, slots of the other), so each bond is evaluated once. Expected to bring two-species systems to about the one-species figure, three times faster than MACE-H on one thread at the accuracy that meets the paper's target.
+- After that the per-bond cost is set by the number of environment features per predicted number (240 to 360 here); fewer radials (the ablation's 4 and 2, just inside the target) cut it roughly in proportion.
+- Still open from earlier: more CPU threads do not help and sometimes hurt. For a DFT code running on many cores this matters as much as the single-thread time.
