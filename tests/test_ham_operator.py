@@ -5,6 +5,7 @@ jax.config.update("jax_enable_x64", True)
 
 import pathlib
 
+import jax.numpy as jnp
 import numpy as np
 import pytest
 import scipy.linalg
@@ -101,3 +102,58 @@ def test_models_must_share_the_site_basis(models):
         HamiltonianPredictor(OnsiteModel(basis=other, coef=onsite.coef, orbitals=ORB, channels=CH), offsite)
     with pytest.raises(ValueError, match="channels"):
         HamiltonianPredictor(OnsiteModel(basis=onsite.basis, coef={}, orbitals=ORB, channels=("H",)), offsite)
+
+
+def need_gpu_list():
+    if jax.default_backend() != "gpu":
+        pytest.skip("no CUDA backend")
+    try:
+        from ace_jax.eval.nlist import dense_graph
+        dense_graph(np.zeros((1, 3)), 10 * np.eye(3), True, 2.0, 4, device="cuda")
+    except Exception as e:                                  # the PyPI wheels are CPU-only
+        pytest.skip(f"matscipy-neighbours has no CUDA backend ({type(e).__name__})")
+
+
+def test_device_lists_give_the_same_matrices(models):
+    """`prepare_device`: neighbour lists on the GPU, reverse slots, images and index lists
+    derived there.  Same H(k) and S(k) as the host-list path, and every bond finds its reverse."""
+    need_gpu_list()
+    onsite, offsite = models
+    hp = HamiltonianPredictor(onsite, offsite)
+    for seed in (0, 2):
+        pos, cell, numbers = structure(seed)
+        a, b = hp.prepare(pos, cell, numbers), hp.prepare_device(pos, cell, numbers)
+        assert bool(b.reverse_ok) and a.n_orb == b.n_orb
+        for k in ((0.0, 0.0, 0.0), (0.31, -0.2, 0.45)):
+            for c in CH:
+                A, Bm = np.asarray(hp.hk(a, k, c)), np.asarray(hp.hk(b, k, c))
+                assert np.abs(A - Bm).max() < 1e-10 * max(1.0, np.abs(A).max()), (seed, k, c)
+
+
+def test_device_path_uploads_nothing_but_its_inputs(models):
+    """After the first (compiling) call, positions to eigenvalues runs with JAX's host-to-device
+    transfers disallowed: `prepare_device` uploads the positions, cell and species explicitly
+    (and the neighbour-list library takes the positions), and nothing else goes up."""
+    need_gpu_list()
+    onsite, offsite = models
+    hp = HamiltonianPredictor(onsite, offsite)
+    pos, cell, numbers = structure()
+    k = jax.device_put(jnp.asarray([0.13, 0.27, -0.4]))
+    prep = hp.prepare_device(pos, cell, numbers)
+    e0 = np.asarray(T_bands(hp, prep, k))
+    with jax.transfer_guard_host_to_device("disallow"):
+        moved = pos + 0.05 * np.random.default_rng(5).normal(size=pos.shape)
+        prep = hp.prepare_device(moved, cell, numbers)               # new positions (not a rigid shift)
+        e = T_bands(hp, prep, k)
+    assert np.asarray(e).shape == e0.shape and np.abs(np.asarray(e) - e0).max() > 1e-6
+    with pytest.raises(Exception, match="[Dd]isallowed"):            # the host-list path does upload
+        with jax.transfer_guard_host_to_device("disallow"):
+            hp.prepare(pos, cell, numbers)
+
+
+def T_bands(hp, prep, k):
+    """Eigenvalues at a k already on the device (`bands` takes host k-points)."""
+    from ace_jax.ham.operator import _bloch, _eigvals
+    H = _bloch(prep.on, prep.off, prep.lists, k, hp.channels.index("H"), prep.n_orb)
+    S = _bloch(prep.on, prep.off, prep.lists, k, hp.channels.index("S"), prep.n_orb)
+    return _eigvals(H, S)

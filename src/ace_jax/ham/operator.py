@@ -9,7 +9,9 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
+from ..eval.nlist import dense_graph, have_matscipy_neighbours
 from . import bond as B
+from . import offsite_fast as OF
 from .offsite_fast import OffsitePredictor
 from .onsite import OnsitePredictor, _features, _readout, site_graph
 
@@ -50,6 +52,51 @@ def _eigvals_impl(H, S):
 _eigvals = jax.jit(_eigvals_impl)
 
 
+def _device_impl(site, readout, packs, pos, cell, species, site_species, s_rij, s_idx, s_count, b_rij, b_idx, b_count, static):
+    """Everything `prepare` does after the neighbour lists, on the device: site features, on-site
+    blocks, the reverse slot and image of every bond, off-site blocks, and the index lists of the
+    Bloch sum.  `species`: index into the orbital basis' species, per atom; `site_species`: index
+    into the site basis' elements (its radials are tabulated in that order)."""
+    args, counts, norbs, rcut_bond, pairs = static
+    n, Ks = s_idx.shape
+    K = b_idx.shape[1]
+    dtype = b_rij.dtype
+    # site features from the dense site list
+    live = (jnp.arange(Ks)[None, :] < s_count[:, None]).reshape(-1)
+    centre = jnp.repeat(jnp.arange(n), Ks)
+    F = site.features(s_rij.reshape(-1, 3), site_species[centre], site_species[s_idx.reshape(-1)], centre, n, live)
+    atoms = tuple(jnp.nonzero(species == k, size=c)[0] for k, c in enumerate(counts))
+    on = tuple(readout.blocks(F, k, a) for k, a in enumerate(atoms))
+    # bonds: (atom, slot) is the dense bond list itself
+    mask = jnp.arange(K)[None, :] < b_count[:, None]
+    i = jnp.broadcast_to(jnp.arange(n)[:, None], (n, K))
+    R = jnp.rint((b_rij - (pos[b_idx] - pos[:, None, :])) @ jnp.linalg.inv(cell)).astype(jnp.int32)
+    R = jnp.where(mask[..., None], R, 0)
+    # reverse slot: the bond (j, i, -R).  Sort both key lists; padding (key n) sorts last in both.
+    fi, fj, fR = jnp.where(mask, i, n).reshape(-1), jnp.where(mask, b_idx, n).reshape(-1), R.reshape(-1, 3)
+    fwd = jnp.lexsort((fR[:, 2], fR[:, 1], fR[:, 0], fj, fi))
+    bwd = jnp.lexsort((-fR[:, 2], -fR[:, 1], -fR[:, 0], fi, fj))
+    rev = jnp.zeros(n * K, jnp.int32).at[bwd].set(fwd.astype(jnp.int32)).reshape(n, K)
+    fmask = mask.astype(dtype)
+    off = OF._blocks_impl(packs, F, b_rij, fmask, rev, rcut_bond, args)
+    norb = jnp.asarray(norbs, jnp.int32)[species]
+    offsets = jnp.concatenate([jnp.zeros(1, jnp.int32), jnp.cumsum(norb)[:-1]])
+    zj = species[b_idx]
+    valid = {key: ((species[:, None] == ka) & (zj == kb) & mask).astype(jnp.float32)
+             for key, (ka, kb) in zip(off, pairs)}
+    lists = {"rows": jnp.broadcast_to(offsets[:, None], (n, K)), "cols": offsets[b_idx], "R": R.astype(dtype),
+             "valid": valid, "on_rows": tuple(offsets[a] for a in atoms)}
+    ok = jnp.all(jnp.where(mask, (b_idx.reshape(-1)[rev.reshape(-1)].reshape(n, K) == i), True))
+    return on, off, lists, ok
+
+
+_device = jax.jit(_device_impl, static_argnums=13)
+
+
+# compiled, with the slot count static: an eager slice uploads its bounds as scalars
+_trim = jax.jit(lambda rij, idx, kt: (rij[:, :kt], idx[:, :kt]), static_argnums=2)
+
+
 class Prepared:
     """One structure, ready for `hk` and `bands`: the blocks on the device and the index lists
     that place them in the orbital matrix (`n_orb` orbitals; atom a starts at `offsets[a]`)."""
@@ -69,6 +116,59 @@ class HamiltonianPredictor:
                              "its features are evaluated once for both")
         self.onsite, self.offsite = OnsitePredictor(onsite), OffsitePredictor(offsite)
         self.channels, self.orbitals = onsite.channels, onsite.orbitals
+        self._k = {}                                   # slots of the device neighbour lists, by cutoff
+
+    def _dense(self, positions, cell, pbc, cutoff):
+        """Dense neighbour list on the GPU (matscipy-neighbours' CUDA backend), growing the slot
+        count until every atom fits."""
+        K = self._k.get(cutoff, 64)
+        while True:
+            try:
+                g = dense_graph(positions, cell, pbc, cutoff, K, device="cuda")
+                self._k[cutoff] = K
+                # keep only the occupied slots, in steps of 16 so that small changes of the largest
+                # neighbour count do not recompile (one scalar comes down to the host for this)
+                kt = min(K, max(16, -(-int(g.count.max()) // 16) * 16))
+                rij, idx = _trim(g.rij, g.idx, kt)
+                return g._replace(rij=rij, idx=idx)
+            except ValueError as e:
+                if "max_neighbours" not in str(e) or K > 1 << 14:
+                    raise
+                K *= 2
+
+    def prepare_device(self, positions, cell, numbers, pbc=True):
+        """`prepare` with the neighbour lists built on the GPU and every list derived from them
+        there: the only uploads are the positions, the cell and the species.  Needs a CUDA
+        backend and matscipy-neighbours built with CUDA (`eval.nlist.dense_graph(device="cuda")`)."""
+        if jax.default_backend() != "gpu" or not have_matscipy_neighbours():
+            raise RuntimeError("prepare_device needs JAX on a GPU and matscipy-neighbours built with CUDA")
+        orb, basis = self.orbitals, self.offsite.model.bond
+        numbers = np.asarray(numbers)
+        species = np.asarray([orb.species.index(int(z)) for z in numbers], np.int32) if all(
+            int(z) in orb.species for z in numbers) else None
+        if species is None:
+            raise KeyError("the structure has a species without an orbital basis")
+        gs = self._dense(positions, cell, pbc, basis.site.rcut)
+        gb = self._dense(positions, cell, pbc, basis.rcut_bond)
+        dtype = gb.rij.dtype
+        counts = tuple(int((species == k).sum()) for k in range(len(orb.species)))
+        norbs = tuple(orb.n_orb(z) for z in orb.species)
+        pairs = tuple((orb.species.index(za), orb.species.index(zb)) for za, zb in self._pair_order())
+        static = ((basis.n_bond, basis.n_cpl, basis.l_cpl, self.offsite.lmax), counts, norbs, basis.rcut_bond, pairs)
+        pos_d, cell_d, sp_d, ss_d = (jax.device_put(np.asarray(positions, dtype)), jax.device_put(np.asarray(cell, dtype)),
+                                     jax.device_put(species), jax.device_put(basis.site.species_index(numbers)))
+        on, off, lists, ok = _device(basis.site, self.onsite.readout, self.offsite.packs, pos_d, cell_d, sp_d, ss_d,
+                                     gs.rij, gs.idx, gs.count, gb.rij, gb.idx, gb.count, static)
+        prep = Prepared(on, off, lists, int(sum(orb.n_orb(z) for z in numbers)), None, None)
+        prep.reverse_ok = ok                              # device scalar: every bond found its reverse
+        return prep
+
+    def _pair_order(self):
+        """The ordered species pairs in the order `offsite_fast._blocks` returns them."""
+        out = []
+        for za, zb in self.offsite.packs:
+            out += [(za, zb)] if za == zb else [(za, zb), (zb, za)]
+        return out
 
     def prepare(self, positions, cell, numbers, pbc=True):
         """Evaluate every block of the structure; they stay on the device."""

@@ -61,16 +61,21 @@ hp = HamiltonianPredictor(OnsiteModel(basis=site, coef=on, orbitals=orb, channel
 pos, cell, numbers = d.positions, d.cell, np.asarray(d.numbers)
 N = len(numbers)
 ready = lambda p: jax.block_until_ready((p.on, p.off))
-t_prep, prep = best(lambda: (lambda p: (ready(p), p)[1])(hp.prepare(pos, cell, numbers)), reps=3)
+DEVICE = os.environ.get("HAM_DEVICE_LISTS", "0") == "1"       # neighbour lists on the GPU (matscipy-neighbours with CUDA)
+prepare = hp.prepare_device if DEVICE else hp.prepare
+t_prep, prep = best(lambda: (lambda p: (ready(p), p)[1])(prepare(pos, cell, numbers)), reps=3)
+if DEVICE:
+    with jax.transfer_guard_host_to_device("disallow"):       # nothing but the explicit inputs goes up
+        ready(prepare(pos, cell, numbers))
 k = (0.13, 0.27, -0.4)
 t_h, H = best(lambda: jax.block_until_ready(hp.hk(prep, k, "H")))
 t_s, _ = best(lambda: jax.block_until_ready(hp.hk(prep, k, "S")))
 t_e, e = best(lambda: np.asarray(jnp.linalg.eigvalsh(0.5 * (H + H.conj().T))), reps=3)
 tot = t_prep + t_h + t_s + t_e
 dev = jax.devices()[0]
-print(f"{dev.platform} {'float64' if X64 else 'float32'}: {N} atoms, {prep.n_orb} orbitals, {len(prep.graph.i) / N:.0f} bonds per atom; "
-      f"H and S; n_cpl {n_cpl}, l_cpl {l_cpl}")
-for name, t in (("blocks of H and S on the device (lists on the host)", t_prep), ("Bloch sum H(k)", t_h), ("Bloch sum S(k)", t_s),
+print(f"{dev.platform} {'float64' if X64 else 'float32'}: {N} atoms, {prep.n_orb} orbitals, {prep.lists['rows'].shape[1]} bond slots per atom; "
+      f"H and S; n_cpl {n_cpl}, l_cpl {l_cpl}; neighbour lists on the {'device' if DEVICE else 'host'}")
+for name, t in ((f"blocks of H and S on the device (lists on the {'device' if DEVICE else 'host'})", t_prep), ("Bloch sum H(k)", t_h), ("Bloch sum S(k)", t_s),
                 (f"eigenvalues of H(k) ({prep.n_orb} x {prep.n_orb} Hermitian), copied to the host", t_e)):
     print(f"  {name:72s} {1e3 * t:8.1f} ms  {100 * t / tot:5.1f} %")
 print(f"  {'positions to eigenvalues at one k-point':72s} {1e3 * tot:8.1f} ms          {1e6 * tot / N:.0f} us per atom")

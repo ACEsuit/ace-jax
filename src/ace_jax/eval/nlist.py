@@ -219,7 +219,10 @@ def dense_graph(positions, cell, pbc, cutoff, max_neighbours, pad_vector=None, d
         idx, dist, count = _dense_from_sparse(i, j, D, len(positions),
                                               int(max_neighbours))
     if pad_vector is None:
-        pad_vector = xp.asarray([float(cutoff), 0.0, 0.0], dtype=dist.dtype)
+        pad_vector = np.asarray([float(cutoff), 0.0, 0.0], dtype=dist.dtype)
+        if xp is not np:                     # an explicit upload: callers may run under a transfer guard
+            import jax
+            pad_vector = jax.device_put(pad_vector)
     live = xp.arange(dist.shape[1])[None, :] < count[:, None]
     dist = xp.where(live[..., None], dist, pad_vector)
     return DenseGraph(dist, idx, count, len(positions))
