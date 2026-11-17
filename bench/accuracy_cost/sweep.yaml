@@ -46,12 +46,21 @@ mace_fm:      # foundation MACE models (fit_mace_fm.py): zero-shot (one constant
   - {size: mh1-omat-ft-lr1e-2, model: mace-mh-1, head: omat_pbe, finetune: {lr: 0.01, epochs: 60}}
   - {size: mh1-omat-ft-lr1e-3, model: mace-mh-1, head: omat_pbe, finetune: {lr: 0.001, epochs: 60}}
   - {size: mh1-omat-ft-lr1e-4, model: mace-mh-1, head: omat_pbe, finetune: {lr: 0.0001, epochs: 60}}
+  # two more fine-tuning seeds of the plotted learning rate (`seed`: mace_run_train's --seed, which sets the 5%
+  # validation draw and the batch order; the starting weights are the foundation model's in every seed)
+  - {size: mh1-omat-ft-lr1e-3_s1, model: mace-mh-1, head: omat_pbe, seed: 1, finetune: {lr: 0.001, epochs: 60}}
+  - {size: mh1-omat-ft-lr1e-3_s2, model: mace-mh-1, head: omat_pbe, seed: 2, finetune: {lr: 0.001, epochs: 60}}
 grace_fm:     # GRACE foundation models (fit_grace_fm.py; OMat24, PBE): zero-shot and fine-tuned on the benchmark's
               # training split (gracemaker's fine-tuning recipe, every parameter updated)
   - {size: 2l-omat-large, model: GRACE-2L-OMAT-large-base-fp64}
   - {size: 1l-omat-large, model: GRACE-1L-OMAT-large-base-fp64}
   - {size: 2l-omat-large-ft, model: GRACE-2L-OMAT-large-base-fp64, finetune: {updates: 10000}}
   - {size: 1l-omat-large-ft, model: GRACE-1L-OMAT-large-base-fp64, finetune: {updates: 10000}}
+  # two more fine-tuning seeds each (`seed`: gracemaker's, which sets the 5% test draw and the batch order)
+  - {size: 2l-omat-large-ft_s1, model: GRACE-2L-OMAT-large-base-fp64, seed: 1, finetune: {updates: 10000}}
+  - {size: 2l-omat-large-ft_s2, model: GRACE-2L-OMAT-large-base-fp64, seed: 2, finetune: {updates: 10000}}
+  - {size: 1l-omat-large-ft_s1, model: GRACE-1L-OMAT-large-base-fp64, seed: 1, finetune: {updates: 10000}}
+  - {size: 1l-omat-large-ft_s2, model: GRACE-1L-OMAT-large-base-fp64, seed: 2, finetune: {updates: 10000}}
 gap:          # GAP-18's gap_fit command line, only n_sparse changed
   - {size: s1000, n_sparse: 1000}
   - {size: s3000, n_sparse: 3000}

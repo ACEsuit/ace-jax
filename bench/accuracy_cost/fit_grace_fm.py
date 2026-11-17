@@ -110,6 +110,7 @@ def fit(size, overrides=None, seed=0):
     from .weights import command_line, gap_sigmas
     h = ensure_split()
     e, d = {**common.entry(FAMILY, size), **(overrides or {})}, common.run_dir(FAMILY, size)
+    seed = e.get("seed", seed)                    # the sweep entry's (sizes "<size>_s<k>"), else the argument
     d.mkdir(parents=True, exist_ok=True)
     ats = train_atoms()
     if e.get("n_train"):

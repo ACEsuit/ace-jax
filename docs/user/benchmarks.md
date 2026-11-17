@@ -18,8 +18,11 @@ training and 248 for testing).
   PACE-shaped ACE, PACE (pacemaker), MACE with L = 0 and L = 1, NEP
   (trained with GPUMD), GAP refits, and GRACE-1L, GRACE-2L and GRACE-FS
   (trained with gracemaker). Each family has a ladder of model sizes. Each
-  point is one fit. For GRACE, each point is the mean of three fits, and
-  the bars show the range.
+  point is one fit. For GRACE and for the fine-tuned foundation models,
+  each point is the mean of three fits, and the bars show the range.
+- **Foundation models.** MACE-MH-1, GRACE-2L-OMAT-large and
+  GRACE-1L-OMAT-large are tested as published and after fine-tuning. Refer
+  to [Foundation models](#foundation-models).
 - **Force error.** The root-mean-square force error on the test set.
 - **QoI error.** 21 silicon properties are calculated with each model and
   compared with DFT: elastic constants, energies of other phases, point
@@ -46,7 +49,8 @@ that the figure shows:
 
 1. Click a family in the legend to show or hide it in all panels.
 2. Double-click a family to show only that family.
-3. Click a button above the legend to show a group of families.
+3. Click a button above the legend to show a group of families. The
+   **Foundation models** button shows the foundation models.
 4. Put the pointer on a point to show its model, its values and the code
    that was timed.
 
@@ -110,6 +114,45 @@ is 2.9 to 3.7 times faster (o4d12 to o4d20). It is 4.8 to 8.2 times faster
 than the compiled JAX program. The speed-up is largest for the smallest
 models.
 
+### Foundation models
+
+A foundation model is fitted to a large dataset of many elements. The
+benchmark includes three foundation models: MACE-MH-1 (its `omat_pbe`
+head), GRACE-2L-OMAT-large and GRACE-1L-OMAT-large. Each model is tested in
+two conditions:
+
+- **Zero-shot.** The model is used as published. Its energies have a
+  different reference from the DFT data. Thus one constant energy for each
+  atom is calculated from the training set and added. The forces and the
+  QoIs do not change with this constant.
+- **Fine-tuned.** All parameters of the model are fitted again to the
+  silicon training set of this benchmark. The loss function and the
+  weights are those of the models trained from the start. Each
+  point is the mean of three fits with different seeds.
+
+In the figure, an arrow connects each zero-shot model to its fine-tuned
+model.
+
+!!! note
+    The foundation models keep their architecture. Thus their cutoff
+    radius is 6 Å. The cutoff radius of all other models is 5 Å.
+
+| model | force error (eV/Å) | QoI error | A100 GPU | CPU node (128 cores) |
+|---|---|---|---|---|
+| MACE-MH-1, zero-shot | 0.072 | 1.08 | 6.04 | 46.0 |
+| MACE-MH-1, fine-tuned | FT_MH1_F | FT_MH1_Q | 6.07 | 45.1 |
+| MACE-MH-1, fine-tuned, mixed precision | FT_MH1_F | FT_MH1_Q | 2.48 | – |
+| GRACE-2L-OMAT-large, zero-shot | 0.066 | 1.29 | 5.59 | 8.81 |
+| GRACE-2L-OMAT-large, fine-tuned | FT_G2_F | FT_G2_Q | 5.60 | 8.83 |
+| GRACE-1L-OMAT-large, zero-shot | 0.103 | 2.68 | 1.78 | 2.07 |
+| GRACE-1L-OMAT-large, fine-tuned | FT_G1_F | FT_G1_Q | 1.77 | 2.08 |
+
+The costs are in microseconds per atom-step. For the fine-tuned models,
+the errors are the mean of three fits, with the range in brackets. The
+GRACE costs are in mixed precision.
+
+FINDINGS
+
 ### How the cost was measured
 
 - **GPU.** One NVIDIA A100, 32,768 atoms.
@@ -163,6 +206,17 @@ models.
   styles of gracemaker's LAMMPS version.
 - **GRACE-FS** runs in LAMMPS with `grace/fs/kk` (GPU) and `grace/fs`
   (CPU), in float64. grace-runtime does not support GRACE-FS.
+- **MACE-MH-1** runs in LAMMPS with `pair_style
+  symmetrix/mace/foundation` from Symmetrix 0.3.0, in float64. The
+  mixed-precision result uses `symmetrix/mace/foundation/float32-mixed`,
+  which runs on the GPU only.
+- **GRACE-OMAT** runs in LAMMPS with the same grace-runtime styles as
+  GRACE-1L and GRACE-2L, in mixed precision. On the CPU, GRACE-2L-OMAT-large
+  does not have sufficient memory with 128 MPI ranks. It uses 8 MPI ranks
+  with 16 threads.
+- **The foundation models on the A100** were timed on nodes that other
+  jobs used at the same time. All other models were timed on nodes with
+  no other jobs.
 - **NEP** is trained with GPUMD. On the CPU, it runs in LAMMPS with
   `pair_style nep` (NEP_CPU, float64). On the GPU, it runs in GPUMD. GPUMD
   uses mixed precision, and the figure labels these points.

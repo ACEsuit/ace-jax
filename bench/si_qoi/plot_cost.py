@@ -129,7 +129,7 @@ def arrows(ax, data, key):
                                                                "shrinkA": 7, "shrinkB": 7, "mutation_scale": 14})
 # families fitted with several seeds (sizes "<size>_s<k>"): one point per size, the mean over seeds, with the
 # min-max spread as an error bar; the per-seed rows stay in metrics.jsonl.  SEED_EXCLUDE: checks, not ladder points
-SEEDED = ("grace", "grace_fs", "grace_2l")
+SEEDED = ("grace", "grace_fs", "grace_2l", "mace_fm_ft", "mace_fm_ft_mixed", "grace_fm_ft")   # fine-tunes: seed 0 has no suffix
 SEED_EXCLUDE = ("c32l4_long", "2l_small_long")   # the 150k-update training-length checks
 WL_FAMILIES = ("ace", "ace_wl_1", "ace_wl_1.75", "ace_wl_2", "ace_wl_2.5", "ace_wl_o5", "ace_lr", "pace")
 WL_RECOLOUR = {"ace": "#3987e5"}                 # the ramp's wL 1.5 step (the categorical blue is too near 1.75)
@@ -158,12 +158,12 @@ def family_of(r):
     if fam == "ace_tab" and any(t in r.get("_file", "") for t in PATCHED_MLPACE):   # make_cost's per-row file stem
         return "ace_tabfork"
     if fam == "mace_fm":                         # a metrics row or a timing row (by code: the mixed-precision line)
-        if not size.endswith(FM_PLOTTED) and "-ft" in size:
+        if not seed_split(size)[0].endswith(FM_PLOTTED) and "-ft" in size:
             return "mace_fm_lr"                  # the other learning rates: in metrics.jsonl, not plotted
         mixed = r.get("code") == "mace-fdn-f32m"
         return ("mace_fm_ft_mixed" if mixed else "mace_fm_ft") if "-ft" in size else ("mace_fm_zs_mixed" if mixed else "mace_fm")
     if fam == "grace_fm":
-        return "grace_fm_ft" if size.endswith("-ft") else "grace_fm"
+        return "grace_fm_ft" if seed_split(size)[0].endswith("-ft") else "grace_fm"
     if fam == "ace_wl":
         return "ace_wl_o5" if size.startswith("o5") else "ace_wl_" + size.split("_wL")[1]
     return fam

@@ -112,7 +112,7 @@ def command(e, d):
             "--energy_key=energy", "--forces_key=forces", "--virials_key=virial", "--loss=virials",
             f"--E0s={{14: {e['E0']}}}", f"--config_type_weights={json.dumps(w)}", "--batch_size=5",
             f"--lr={ft['lr']}", f"--max_num_epochs={ft['epochs']}", "--swa", "--ema", "--default_dtype=float64",
-            f"--device={os.environ.get('ACEJAX_AC_DEVICE', 'cuda')}", "--seed=0",
+            f"--device={os.environ.get('ACEJAX_AC_DEVICE', 'cuda')}", f"--seed={e.get('seed', 0)}",
             f"--results_dir={d}", f"--model_dir={d}", f"--checkpoints_dir={d / 'ckpt'}", "--restart_latest",
             *ft.get("args", [])]
 

@@ -292,3 +292,6 @@ These pages use the words below with one meaning only.
 | kernel | the compiled C++ or CUDA program that evaluates a linear ACE model in place of the JAX model (`ffi=True`) |
 | product basis | the products of the one-particle basis functions of an atom. Its calculation uses most of the time of a large model |
 | mixed precision | a mode of the kernel: the product basis in float32, all other quantities in float64 (`ffi_precision="mixed"`) |
+| foundation model | a model that its authors fitted to a large dataset of many elements, for use with many materials |
+| zero-shot | the use of a foundation model as published, with no fit to the data of the benchmark |
+| fine-tuning | a fit that starts from the parameters of a foundation model and changes them to agree with a small dataset |
