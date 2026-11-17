@@ -21,6 +21,7 @@ from . import bond as B
 from ..basis import cg
 from .offsite import canonical_pairs
 from .onsite import _features, site_graph
+from .precision import highest
 
 
 class _Pack(eqx.Module):
@@ -129,6 +130,7 @@ def _usign(l_cpl):
     return jnp.asarray(np.concatenate([[(-1.0) ** l] * (2 * l + 1) for l in range(l_cpl + 1)]))
 
 
+@highest
 def _dj(pack, Fb, Ub, n_cpl, l_cpl):
     """Per (L, p) of the pack, (n_b, K, c, Q, 2L+1) or None: the part of the canonical blocks that
     lives on the bond's SECOND atom, evaluated there, on the reverse bond (whose u is the bond's
@@ -146,6 +148,7 @@ def _dj(pack, Fb, Ub, n_cpl, l_cpl):
     return tuple(out)
 
 
+@highest
 def _canonical(pack, Fa, ga, Aenv, dj, n_cpl, l_cpl):
     """(n_a, K, c, n_orb_a, n_orb_b): the canonical blocks of one species pair on the slots of its
     layout.  `ga` = (phi0, U, Y, phi2): the bond geometry on these rows; `Aenv`: the pooled bond
@@ -188,6 +191,7 @@ def _canonical(pack, Fa, ga, Aenv, dj, n_cpl, l_cpl):
     return jnp.moveaxis(flat, 0, -1).reshape(n, K, -1, na, nb)
 
 
+@highest
 def _env_side(e_rij, e_live, e_ch, rvec, mask, r_env, rmax, n_env, l_env):
     """(n, K, channels n_env, (l_env+1)^2): for each bond slot, the half of A^env pooled over the neighbours
     of its first atom (`bond._env_side` on the dense layouts).  One atom at a time: its
@@ -209,6 +213,7 @@ def _env_side(e_rij, e_live, e_ch, rvec, mask, r_env, rmax, n_env, l_env):
     return jax.lax.map(one, (e_rij, e_live, e_ch, rvec, mask))
 
 
+@highest
 def _geo(rows, rvec, mask, env, rcut, shape_args):
     """The bond geometry of the rows of one layout: (phi0, U, Y, phi2, side)."""
     n_bond, n_cpl, l_cpl, lmax, n_env, l_env, n_ebond, l_ebond, r_env, env_emb = shape_args

@@ -642,5 +642,24 @@ This supersedes leaving core bands out of the sum (`core_bands=`, kept for all-e
 - **The eigensolver is the bottleneck**, 60 to 64 % at every size, and it is the part that grows as N³. The reverse pass (which rebuilds the blocks' derivatives and contracts them with the density matrices) is second and grows with it. The blocks themselves, the part a hand-written kernel like the potential's would replace, are 18 % at 64 atoms and 9 % at 256.
 - **E_eff is negligible**: under 0.2 % of the total with the CUDA kernel.
 - **Transfers.** In a warm call nothing goes from host to device implicitly (`jax.transfer_guard_host_to_device("disallow")` passes). The guard did catch one on the first run: the electron count, smearing width and core-band count were made into device scalars implicitly and brought back; they are now host scalars uploaded explicitly. From device to host there is one implicit download per neighbour list, by design: the largest neighbour count, to size the slots (`_dense`), and the slots per species pair.
-- **Float32 is not usable as it stands.** It is 4 to 7 times faster (125 ms at 64 atoms; the eigensolver 103 ms), but the band energy is wrong: −3,222 eV against −2,067 eV. Not the tabulated radial (the same without it) and not the overlap's conditioning (smallest eigenvalue of S(k) 0.032, condition number 219). The cause is not found.
+- **Float32** (first run: wrong, band energy −3,222 eV against −2,067 eV; resolved below).
 - What follows for a kernel for E_band: it would not move the total much on this hardware in float64. The things that would are the eigensolver (float64 on a workstation GPU is bound by its float64 units, so an A100 should do better; a correct mixed-precision path; fewer k-points by symmetry; or a density-matrix method that needs only products with H and S) and the reverse pass.
+
+## Float32 on the GPU: TF32 was the error (2026-11-17)
+
+The wrong float32 band energy was not float32: on a CPU the float32 prediction is right (blocks to 3e-5 relative, band energy of the 64-atom cell −2066.8345 eV against −2066.8333 eV). On the GPU the default precision of float32 dot products is TF32, and with it the on-site blocks were off by 0.5 eV (S by 0.02), on the host-list and device-list paths alike. With `JAX_DEFAULT_MATMUL_PRECISION=highest` the same run is right.
+
+Fix: `operators/precision.py::highest`, a decorator that traces a function under `jax.default_matmul_precision("highest")`, on every traced function of `operators` and `ham` with a contraction (site features, on-site readout, off-site blocks and their thread passes, the fit's design rows and QR merge, Bloch sums, eigensolvers, the band-energy reverse pass, the list-vector rebuilds with their strain product). `tests/test_ham_operator.py::test_contractions_are_traced_at_full_precision` reads the traced programs and fails on a dot product without the precision recorded (no GPU needed). The potential code already did this (`eval.model.highest_precision`, `fit.rows._highest`); the operator code had not.
+
+RTX 4000 Ada, E_band with forces and stress (`total_profile.py`), float32 with the fix against float64:
+
+| | 64 atoms | 128 atoms | 256 atoms |
+|---|---|---|---|
+| float64 | 500 ms | 1,372 ms | 4,174 ms |
+| float32 | 130 ms | 272 ms | 617 ms |
+| band energy, float32 − float64, per atom | −0.10 meV | −0.07 meV | −0.06 meV |
+| largest force component, float32 / float64 | 2.759 / 2.753 eV/Å | 2.767 / 2.753 | 2.875 / 2.877 |
+
+- Float32 is 4 to 7 times faster and agrees to 0.1 meV per atom in the band energy; the largest force component differs by up to 0.014 eV/Å (0.5 %). Whether that is good enough for dynamics is not tested (the potential's kernel needed its relaxations checked in float32 too).
+- In float32 the eigensolver is 47 to 53 % of the total at 128 and 256 atoms, the reverse pass 22 to 31 %, the blocks 19 to 20 %. The split is flatter than in float64, so the blocks and the reverse pass matter more for a float32 kernel.
+- The earlier float32 timings of the inference benchmarks (MACE-H comparison, GPU rows) were taken with TF32 on: their speed is that of a less accurate product and their accuracy was not checked. They need re-timing.

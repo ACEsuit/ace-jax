@@ -16,6 +16,7 @@ from ..operators import bond as B
 from ..operators import offsite_fast as OF
 from ..operators.offsite_fast import OffsitePredictor
 from ..operators.onsite import OnsitePredictor, _features, _readout, site_graph
+from ..operators.precision import highest
 
 
 def _scatter(M, blocks, rows, cols, weight, n_orb):
@@ -26,6 +27,7 @@ def _scatter(M, blocks, rows, cols, weight, n_orb):
     return M.at[idx.reshape(-1)].add((blocks * weight[..., None, None]).reshape(-1))
 
 
+@highest
 def _bloch_impl(on, off, lists, k, channel, n_orb):
     """(n_orb, n_orb) complex: the Bloch sum of one operator channel at fractional k."""
     cdtype = jnp.result_type(k.dtype, jnp.complex64)
@@ -42,6 +44,7 @@ def _bloch_impl(on, off, lists, k, channel, n_orb):
 _bloch = jax.jit(_bloch_impl, static_argnums=(4, 5))
 
 
+@highest
 def _eigvals_impl(H, S):
     """Eigenvalues of H c = e S c, both Hermitian and S positive definite."""
     H, S = 0.5 * (H + H.conj().T), 0.5 * (S + S.conj().T)
@@ -55,6 +58,7 @@ _eigvals = jax.jit(_eigvals_impl)
 _eigvals_k = jax.jit(jax.vmap(_eigvals_impl))             # a batch of k-points in one call
 
 
+@highest
 def _bloch_blocks_impl(B, idx, R, kpts, n_orb):
     """(n_k, n_orb, n_orb): the Bloch sums of stacked blocks at every k of `kpts` at once.  B: one
     (m, n_a, n_b) array per block shape, idx: their flat positions (m, n_a, n_b) in the n_orb^2
@@ -122,6 +126,7 @@ def eigvals(H, S, chunk=64):
     return jnp.concatenate([_eigvals_k(H[i:i + chunk], S[i:i + chunk]) for i in range(0, len(H), chunk)])
 
 
+@highest
 def _device_impl(site, readout, packs, pos, cell, species, site_species, s_rij, s_idx, s_count, b_rij, b_idx, b_count, env, static):
     """Everything `prepare` does after the neighbour lists, on the device: site features, on-site
     blocks, the reverse slot and image of every bond, off-site blocks, and the index lists of the
@@ -244,6 +249,7 @@ def _occupation_fn(kind, degeneracy, params):
     return occ
 
 
+@highest
 def _geig(H, S):
     """Eigenvalues and S-orthonormal eigenvectors of H C = S C e."""
     L = jnp.linalg.cholesky(S)
@@ -253,6 +259,7 @@ def _geig(H, S):
     return e, jax.scipy.linalg.solve_triangular(L.conj().T, U, lower=False)
 
 
+@highest
 def _band_energy(hs, pos, occ, wk, volume):
     """`BandEnergy` of hs(positions, strain) -> (H(k), S(k)) by the trace form: the eigenproblem is
     solved once and not differentiated; one reverse pass gives the position gradient and the strain
@@ -273,6 +280,7 @@ def _band_energy(hs, pos, occ, wk, volume):
     return BandEnergy(E, gpos, 0.5 * (gstrain + gstrain.T) / volume, e, E + mts, mu)
 
 
+@highest
 def _device_energy_impl(site, readout, packs, pos, cell, species, site_species, s_rij, s_idx, s_count, b_rij, b_idx, b_count,
                         env, e_idx, kpts, occ, wk, static):  # occ: the parameters of `_occupation_fn`
     """`_band_energy` from device neighbour lists: the list vectors are rebuilt from the positions
@@ -302,6 +310,7 @@ def _device_energy_impl(site, readout, packs, pos, cell, species, site_species, 
 _device_energy = jax.jit(_device_energy_impl, static_argnums=18)
 
 
+@highest
 def _host_hs(site, readout, packs, pos, strain, G, kpts, static, overlap_shift=0.0):
     """(H(k), S(k)), Hermitian, from host neighbour lists `G` (`HamiltonianPredictor._host_lists`): every
     edge vector is rebuilt from the positions, v = x_j - x_i + shift, and scaled by the strain."""
@@ -326,6 +335,7 @@ def _host_hs(site, readout, packs, pos, strain, G, kpts, static, overlap_shift=0
     return herm(H), herm(S)
 
 
+@highest
 def _host_energy_impl(site, readout, packs, pos, cell, G, kpts, occ, wk, static):
     hs_static, kind, degeneracy = static
     return _band_energy(lambda p, strain: _host_hs(site, readout, packs, p, strain, G, kpts, hs_static), pos,

@@ -389,3 +389,37 @@ def test_band_energy_from_device_lists(models):
         assert np.abs(np.asarray(dev.eigenvalues) - np.asarray(ref.eigenvalues)).max() < 1e-8
         assert np.abs(np.asarray(dev.gradient) - np.asarray(ref.gradient)).max() < 1e-7 * np.abs(np.asarray(ref.gradient)).max()
         assert np.abs(np.asarray(dev.stress) - np.asarray(ref.stress)).max() < 1e-7 * np.abs(np.asarray(ref.stress)).max()
+
+
+def test_contractions_are_traced_at_full_precision(models):
+    """Every dot product of the predictors is traced at the highest matmul precision: the GPU's
+    float32 default (TF32) made the on-site blocks wrong by 0.5 eV and the band energy of a
+    64-atom cell by a thousand eV.  Read off the traced programs (no GPU needed)."""
+    import jax
+
+    from ace_jax.ham import operator as O
+    from ace_jax.operators import offsite_fast as OF
+    hp = _env_predictor(models)
+    pos, cell, numbers = structure()
+    prep = hp.prepare(pos, cell, numbers)
+    F, atoms, lay, env = prep.inputs
+    b = hp.offsite.model.bond
+    G, n_orb = hp._host_lists(pos, cell, numbers)
+    hs_static = (hp.offsite.static(), n_orb, 0, 1, b.rcut_bond)
+    programs = {
+        "H(k), S(k) of positions and strain": jax.make_jaxpr(lambda p, e: O._host_hs(b.site, hp.onsite.readout, hp.offsite.packs, p, e, G, np.zeros((1, 3)), hs_static))(
+            np.asarray(pos), np.zeros((3, 3))),
+        "site features": jax.make_jaxpr(lambda r: b.site.features(r, np.zeros(5, np.int32), np.ones(5, np.int32), np.zeros(5, np.int32), 1))(np.ones((5, 3))),
+        "on-site readout": jax.make_jaxpr(lambda f: hp.onsite.readout.blocks(f, 0, atoms[0]))(F),
+        "off-site blocks": jax.make_jaxpr(lambda f: OF._blocks_impl(hp.offsite.packs, f, lay, b.rcut_bond, hp.offsite.static(), env))(F),
+        "Bloch sum": jax.make_jaxpr(lambda k: O._bloch_impl(prep.on, prep.off, prep.lists, k, 0, prep.n_orb))(np.zeros(3)),
+        "eigensolver": jax.make_jaxpr(O._geig)(np.eye(4, dtype=complex), np.eye(4, dtype=complex)),
+    }
+    seen = 0
+    for name, pr in programs.items():
+        text = str(pr)
+        n = text.count("dot_general")
+        seen += n
+        # a dot product at the default precision prints no precision at all
+        assert n == text.count("precision=(Precision.HIGHEST, Precision.HIGHEST)"), f"{name}: a dot product at the default precision"
+    assert seen > 10

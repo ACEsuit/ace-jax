@@ -13,8 +13,10 @@ from ..basis import cg
 from ..eval.harmonics import real_spherical_harmonics
 from . import bond as B
 from .offsite_fast import _radial
+from .precision import highest
 
 
+@highest
 def _env_half(basis, emb, e_rij, e_count, e_z, atoms, r):
     """`bond._env_side`: (e, channels n_env, (l_env+1)^2) for the bonds' first atoms `atoms`."""
     d = e_rij[atoms]                                                   # (e, K, 3)
@@ -41,6 +43,7 @@ def bond_designs(basis, keys):
     emb = B.env_embedding(basis) if basis.n_env else None
     n_ch = emb.shape[1] if basis.n_env else 0
 
+    @highest
     def impl(F, r, i, j, mask, env):
         dist = jnp.sqrt(jnp.sum(r * r, axis=-1))
         x = jnp.clip(dist / basis.rcut_bond, 0.0, 1.0)
@@ -90,6 +93,7 @@ def bond_designs(basis, keys):
 
 
 @jax.jit
+@highest
 def qr_merge(R, A, Y):
     """The triangular factor of [R; A | Y]: R (K + k, K + k) carries the right-hand sides as its
     last k columns (c = R[:K, K:]), so only R is formed."""

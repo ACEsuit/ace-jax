@@ -22,6 +22,7 @@ from ..basis.spec import build_spec
 from ..eval.features import pooled_a
 from ..eval.product import product_basis
 from ..eval.radial import TensorRadial, cubic_bspline_coefs, spline_eval_pairs
+from .precision import highest
 
 
 class RadialTable(eqx.Module):
@@ -99,11 +100,13 @@ class SiteBasis(eqx.Module):
         except KeyError as e:
             raise KeyError(f"the site basis has no element Z = {e.args[0]} (it has {self.elements})") from None
 
+    @highest
     def aa(self, rij, zi, zj, segment_ids, n_nodes, mask=None):
         """(n_nodes, n_AA): the pooled A basis and its products, once."""
         A = pooled_a(self.radial, rij, zi, zj, segment_ids, n_nodes, self.aspec_r, self.aspec_y, self.lmax, self.solid, mask=mask)
         return product_basis(A, self.aa_specs)
 
+    @highest
     def from_aa(self, AA):
         """{(L, p): (n, n_B, 2L+1)} from an AA matrix (n, n_AA)."""
         out = {}

@@ -15,6 +15,7 @@ from ..eval.nlist import sparse_graph
 from ..basis import cg
 from .features import SiteBasis
 from .orbitals import OrbitalBasis
+from .precision import highest
 
 
 def parts_of(l1, l2, same_shell):
@@ -76,6 +77,7 @@ class OnsiteModel(eqx.Module):
         return out
 
 
+@highest
 def _features_impl(basis, rij, zi, zj, seg, n):
     return basis.features(rij, zi, zj, seg, n)
 
@@ -119,6 +121,7 @@ class Readout(eqx.Module):
     species: tuple = eqx.field(static=True)
     lps: tuple = eqx.field(static=True)          # per species: the (L, p) of W / G
 
+    @highest
     def blocks(self, F, k, atoms):
         """(n_atoms, n_channel, n_orb, n_orb) for the atoms (indices into F) of species k."""
         jnp = jax.numpy
