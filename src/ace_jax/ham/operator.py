@@ -5,6 +5,8 @@ keeps the blocks where they were computed.  `hk` sums them into the Bloch matric
 M(k) = sum_R exp(2 pi i k.R) M(R) (k in fractional coordinates of the reciprocal cell) and
 `bands` solves H(k) c = e S(k) c through a Cholesky factor of S(k).  Nothing the size of the
 blocks crosses to the host: the lists go up (a few MB), the eigenvalues come down."""
+from typing import NamedTuple
+
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -183,6 +185,72 @@ def _device_impl(site, readout, packs, pos, cell, species, site_species, s_rij, 
 _device = jax.jit(_device_impl, static_argnums=14)
 
 
+class BandEnergy(NamedTuple):
+    """energy: E_band = sum_k w_k sum_n f e; gradient: dE / d positions (n_atoms, 3), the force is
+    its negative; stress: (1 / V) dE / d strain (3, 3), symmetric, at fixed fractional k-points and
+    occupations (energy per volume: eV / angstrom^3 for eV and angstrom); eigenvalues (n_k, n_orb)."""
+    energy: jax.Array
+    gradient: jax.Array
+    stress: jax.Array
+    eigenvalues: jax.Array
+
+
+def _geig(H, S):
+    """Eigenvalues and S-orthonormal eigenvectors of H C = S C e."""
+    L = jnp.linalg.cholesky(S)
+    A = jax.scipy.linalg.solve_triangular(L, H, lower=True)
+    A = jax.scipy.linalg.solve_triangular(L, A.conj().T, lower=True).conj().T
+    e, U = jnp.linalg.eigh(0.5 * (A + A.conj().T))
+    return e, jax.scipy.linalg.solve_triangular(L.conj().T, U, lower=False)
+
+
+def _band_energy(hs, pos, occ, wk, volume):
+    """`BandEnergy` of hs(positions, strain) -> (H(k), S(k)) by the trace form: the eigenproblem is
+    solved once and not differentiated; one reverse pass gives the position gradient and the strain
+    derivative together.  The strain scales every edge vector, v -> v (1 + strain)^T, which is what
+    straining positions and cell together does; the Bloch phases depend on the cells only."""
+    def trace(x):
+        H, S = hs(*x)
+        e, C = jax.vmap(_geig)(jax.lax.stop_gradient(H), jax.lax.stop_gradient(S))
+        f = jax.lax.stop_gradient(occ(e)) * wk[:, None]
+        rho = jnp.einsum("kin,kn,kjn->kij", C, f, C.conj())
+        W = jnp.einsum("kin,kn,kjn->kij", C, f * e, C.conj())
+        # tr[rho H - W S]: zero in value; its derivative at fixed rho, W is dE_band
+        return jnp.real(jnp.sum(H * jnp.swapaxes(rho, 1, 2)) - jnp.sum(S * jnp.swapaxes(W, 1, 2))), (jnp.sum(f * e), e)
+
+    (gpos, gstrain), (E, e) = jax.grad(trace, has_aux=True)((pos, jnp.zeros((3, 3), pos.dtype)))
+    return BandEnergy(E, gpos, 0.5 * (gstrain + gstrain.T) / volume, e)
+
+
+def _device_energy_impl(site, readout, packs, pos, cell, species, site_species, s_rij, s_idx, s_count, b_rij, b_idx, b_count,
+                        env, e_idx, kpts, occ, wk, static):
+    """`_band_energy` from device neighbour lists: the list vectors are rebuilt from the positions
+    (v = x_j - x_i + shift, the shift read off the list and held fixed), so the derivative with
+    respect to the positions and the strain flows through them."""
+    dev_static, n_orb, ch, cs = static
+
+    def vectors(p, strain, r0, idx):
+        d = p[idx] - p[:, None, :]
+        v = d + jax.lax.stop_gradient(r0 - d)
+        return v + v @ strain.T
+
+    def hs(p, strain):
+        e = None if env is None else (vectors(p, strain, env[0], e_idx), env[1], env[2])
+        on, off, lists, _ok = _device_impl(site, readout, packs, jax.lax.stop_gradient(p), cell, species, site_species,
+                                           vectors(p, strain, s_rij, s_idx), s_idx, s_count,
+                                           vectors(p, strain, b_rij, b_idx), b_idx, b_count, e, dev_static)
+        H = jax.vmap(lambda k: _bloch_impl(on, off, lists, k, ch, n_orb))(kpts)
+        S = (jax.vmap(lambda k: _bloch_impl(on, off, lists, k, cs, n_orb))(kpts) if cs is not None
+             else jnp.broadcast_to(jnp.eye(n_orb, dtype=H.dtype), H.shape))
+        herm = lambda M: 0.5 * (M + jnp.swapaxes(M.conj(), 1, 2))
+        return herm(H), herm(S)
+
+    return _band_energy(hs, pos, lambda ev: jnp.broadcast_to(occ, ev.shape), wk, jnp.abs(jnp.linalg.det(cell)))
+
+
+_device_energy = jax.jit(_device_energy_impl, static_argnums=18)
+
+
 # compiled, with the slot count static: an eager slice uploads its bounds as scalars
 @jax.jit
 def _pair_slots(species, b_idx, b_count, ns):
@@ -247,12 +315,19 @@ class HamiltonianPredictor:
         backend and matscipy-neighbours built with CUDA (`eval.nlist.dense_graph(device="cuda")`)."""
         if jax.default_backend() != "gpu" or not have_matscipy_neighbours():
             raise RuntimeError("prepare_device needs JAX on a GPU and matscipy-neighbours built with CUDA")
+        a = self._device_inputs(positions, cell, numbers, pbc)
+        on, off, lists, ok = _device(*a["args"], a["env"], a["static"])
+        prep = Prepared(on, off, lists, a["n_orb"], None, None)
+        prep.reverse_ok = ok                              # device scalar: every bond found its reverse
+        return prep
+
+    def _device_inputs(self, positions, cell, numbers, pbc):
+        """The device neighbour lists and the arguments of `_device` for a structure."""
         orb, basis = self.orbitals, self.offsite.model.bond
         numbers = np.asarray(numbers)
-        species = np.asarray([orb.species.index(int(z)) for z in numbers], np.int32) if all(
-            int(z) in orb.species for z in numbers) else None
-        if species is None:
+        if not all(int(z) in orb.species for z in numbers):
             raise KeyError("the structure has a species without an orbital basis")
+        species = np.asarray([orb.species.index(int(z)) for z in numbers], np.int32)
         gs = self._dense(positions, cell, pbc, basis.site.rcut)
         gb = self._dense(positions, cell, pbc, basis.rcut_bond)
         dtype = gb.rij.dtype
@@ -264,15 +339,29 @@ class HamiltonianPredictor:
         kp = np.asarray(_pair_slots(sp_d, gb.idx, gb.count, self._species_range()))
         kpair = tuple(tuple(int(min(gb.idx.shape[1], max(8, -(-int(v) // 8) * 8))) for v in row) for row in kp)
         static = (self.offsite.static(), counts, norbs, basis.rcut_bond, tuple(orb.species), kpair)
-        env = None
+        env = e_idx = None
         if basis.n_env:
             ge = self._dense(positions, cell, pbc, basis.r_env)
-            env = (ge.rij, ge.count, _take_species(ss_d, ge.idx))
-        on, off, lists, ok = _device(basis.site, self.onsite.readout, self.offsite.packs, pos_d, cell_d, sp_d, ss_d,
-                                     gs.rij, gs.idx, gs.count, gb.rij, gb.idx, gb.count, env, static)
-        prep = Prepared(on, off, lists, int(sum(orb.n_orb(z) for z in numbers)), None, None)
-        prep.reverse_ok = ok                              # device scalar: every bond found its reverse
-        return prep
+            env, e_idx = (ge.rij, ge.count, _take_species(ss_d, ge.idx)), ge.idx
+        return dict(args=(basis.site, self.onsite.readout, self.offsite.packs, pos_d, cell_d, sp_d, ss_d,
+                          gs.rij, gs.idx, gs.count, gb.rij, gb.idx, gb.count),
+                    env=env, e_idx=e_idx, static=static, n_orb=int(sum(orb.n_orb(z) for z in numbers)), dtype=dtype)
+
+    def band_energy_device(self, positions, cell, numbers, kpts, occupations, weights=None, overlap="S", channel="H", pbc=True):
+        """`BandEnergy` (energy, position gradient, stress, eigenvalues) with the neighbour lists
+        built on the GPU and everything derived from them there, as `prepare_device`: for
+        structures that change every call (MD).  The uploads are the positions, the cell, the
+        species, the k-points and the occupations; the lists are rebuilt on each call and the
+        program is compiled once per set of list shapes.  occupations: (n_k, n_orb) or (n_orb,)
+        fixed occupations (a function of the eigenvalues is not taken here)."""
+        if jax.default_backend() != "gpu" or not have_matscipy_neighbours():
+            raise RuntimeError("band_energy_device needs JAX on a GPU and matscipy-neighbours built with CUDA")
+        a = self._device_inputs(positions, cell, numbers, pbc)
+        kpts = np.atleast_2d(np.asarray(kpts, a["dtype"]))
+        wk = np.full(len(kpts), 1.0 / len(kpts), a["dtype"]) if weights is None else np.asarray(weights, a["dtype"])
+        static = (a["static"], a["n_orb"], self.channels.index(channel), self.channels.index(overlap) if overlap else None)
+        return _device_energy(*a["args"], a["env"], a["e_idx"], jax.device_put(kpts),
+                              jax.device_put(np.asarray(occupations, a["dtype"])), jax.device_put(wk), static)
 
     def prepare(self, positions, cell, numbers, pbc=True):
         """Evaluate every block of the structure; they stay on the device."""
@@ -384,16 +473,18 @@ class HamiltonianPredictor:
         eye = jnp.eye(n_orb, dtype=jnp.result_type(kpts.dtype, jnp.complex64))
         site = basis.site
 
-        def hs(pos):
-            """(H(k), S(k)), Hermitian, (n_k, n_orb, n_orb) each, at the positions."""
-            F = site.features(pos[s_j] - pos[s_i] + s_shift, sp[s_i], sp[s_j], s_i, n)
+        def hs(pos, strain=None):
+            """(H(k), S(k)), Hermitian, (n_k, n_orb, n_orb) each, at the positions; strain (3, 3):
+            every edge vector v -> v (1 + strain)^T (positions and cell strained together)."""
+            st = (lambda v: v) if strain is None else (lambda v: v + v @ strain.T)
+            F = site.features(st(pos[s_j] - pos[s_i] + s_shift), sp[s_i], sp[s_j], s_i, n)
             on = _readout(readout, F, atoms)
-            lay = {key: (rows, jnp.where(live[..., None], pos[bj] - pos[bi] + shift, pad), mask, rev)
+            lay = {key: (rows, jnp.where(live[..., None], st(pos[bj] - pos[bi] + shift), pad), mask, rev)
                    for key, (rows, bi, bj, shift, live, mask, rev) in lay0.items()}
             env = None
             if env0 is not None:
                 e_rij, e_idx, e_shift, e_live, e_count, e_z = env0
-                env = (jnp.where(e_live[..., None], pos[e_idx] - pos[:, None, :] + e_shift, e_rij), e_count, e_z)
+                env = (jnp.where(e_live[..., None], st(pos[e_idx] - pos[:, None, :] + e_shift), e_rij), e_count, e_z)
             off = OF._blocks_impl(packs, F, lay, basis.rcut_bond, args, env)
             H = jax.vmap(lambda k: _bloch_impl(on, off, lists, k, ch, n_orb))(kpts)
             S = (jax.vmap(lambda k: _bloch_impl(on, off, lists, k, cs, n_orb))(kpts) + overlap_shift * eye if overlap
@@ -412,8 +503,9 @@ class HamiltonianPredictor:
 
     def band_energy_fn(self, positions, cell, numbers, kpts, occupations, weights=None, overlap="S", channel="H",
                        overlap_shift=0.0, pbc=True):
-        """(fn, positions): fn(positions) -> (E_band, dE_band / d positions, eigenvalues), with
-        E_band = sum_k w_k sum_n f_kn e_kn; the force is minus the gradient.
+        """(fn, positions): fn(positions) -> `BandEnergy` (energy, gradient, stress, eigenvalues),
+        with E_band = sum_k w_k sum_n f_kn e_kn; the force is minus the gradient, and the stress is
+        (1 / V) dE / d strain from the same reverse pass (every edge vector scaled by the strain).
 
         The gradient is the trace form (Hellmann-Feynman for a non-orthogonal basis),
             dE = sum_k w_k Re tr[rho_k dH_k - W_k dS_k],
@@ -429,27 +521,8 @@ class HamiltonianPredictor:
         fixed = None if callable(occupations) else jnp.asarray(occupations)
         occ = occupations if fixed is None else (lambda e: jnp.broadcast_to(fixed, e.shape))
 
-        def solve(H, S):
-            L = jnp.linalg.cholesky(S)
-            A = jax.scipy.linalg.solve_triangular(L, H, lower=True)
-            A = jax.scipy.linalg.solve_triangular(L, A.conj().T, lower=True).conj().T
-            e, U = jnp.linalg.eigh(0.5 * (A + A.conj().T))
-            return e, jax.scipy.linalg.solve_triangular(L.conj().T, U, lower=False)       # C: C^+ S C = 1
-
-        def trace(pos):
-            H, S = hs(pos)
-            e, C = jax.vmap(solve)(jax.lax.stop_gradient(H), jax.lax.stop_gradient(S))
-            f = jax.lax.stop_gradient(occ(e)) * wk[:, None]
-            rho = jnp.einsum("kin,kn,kjn->kij", C, f, C.conj())
-            W = jnp.einsum("kin,kn,kjn->kij", C, f * e, C.conj())
-            # tr[rho H - W S]: zero in value, and its derivative at fixed rho, W is dE_band
-            return jnp.real(jnp.sum(H * jnp.swapaxes(rho, 1, 2)) - jnp.sum(S * jnp.swapaxes(W, 1, 2))), (jnp.sum(f * e), e)
-
-        def fn(pos):
-            grad, (E, e) = jax.grad(trace, has_aux=True)(pos)
-            return E, grad, e
-
-        return jax.jit(fn), pos0
+        volume = float(abs(np.linalg.det(np.asarray(cell, float))))
+        return jax.jit(lambda pos: _band_energy(hs, pos, occ, wk, volume)), pos0
 
     def hk(self, prep, k=(0.0, 0.0, 0.0), channel="H"):
         """(n_orb, n_orb) complex Bloch matrix of `channel` at fractional k, on the device."""

@@ -307,7 +307,8 @@ def test_band_energy_gradient_by_the_trace_form(models):
     ks = np.array([[0.1, 0.2, -0.3], [0.37, 0.0, 0.21]])
     occ = np.zeros((2, hp.prepare(pos, cell, numbers).n_orb)); occ[:, :20] = 2.0; occ[:, 20] = 0.7
     fn, p0 = hp.band_energy_fn(pos, cell, numbers, ks, occ, overlap_shift=6.0)
-    E, g, e = (np.asarray(x) for x in fn(p0))
+    out = fn(p0)
+    E, g, e = (np.asarray(x) for x in (out.energy, out.gradient, out.eigenvalues))
     bands, _ = hp.bands_fn(pos, cell, numbers, ks, overlap_shift=6.0)
     through = lambda p: jax.numpy.sum(0.5 * occ * bands(p))
     assert np.allclose(e, np.asarray(bands(p0)), atol=1e-9) and abs(E - float(through(p0))) < 1e-9
@@ -315,14 +316,14 @@ def test_band_energy_gradient_by_the_trace_form(models):
     assert np.abs(g.sum(axis=0)).max() < 1e-8 * np.abs(g).max()
     d = np.random.default_rng(6).normal(size=pos.shape)
     h = 1e-5
-    fd = (float(fn(p0 + h * d)[0]) - float(fn(p0 - h * d)[0])) / (2 * h)
+    fd = (float(fn(p0 + h * d).energy) - float(fn(p0 - h * d).energy)) / (2 * h)
     assert abs(fd - float((g * d).sum())) < 1e-6 * max(1.0, abs(fd))
     # occupations from the eigenvalues: held fixed in the derivative
     mu = 0.5 * (e[:, 20] + e[:, 21]).mean()
     fermi = lambda x: 2.0 / (1.0 + jax.numpy.exp((x - mu) / 0.05))
     f2, _ = hp.band_energy_fn(pos, cell, numbers, ks, fermi, overlap_shift=6.0)
     fixed, _ = hp.band_energy_fn(pos, cell, numbers, ks, np.asarray(fermi(e)), overlap_shift=6.0)
-    assert np.allclose(np.asarray(f2(p0)[1]), np.asarray(fixed(p0)[1]), atol=1e-10)
+    assert np.allclose(np.asarray(f2(p0).gradient), np.asarray(fixed(p0).gradient), atol=1e-10)
     # a crystal: zincblende, degenerate states at Gamma
     a = 4.4
     zb_cell = 0.5 * a * np.array([[0.0, 1, 1], [1, 0, 1], [1, 1, 0]])
@@ -330,9 +331,61 @@ def test_band_energy_gradient_by_the_trace_form(models):
     zb_numbers = np.array([14, 6])
     gam = np.zeros((1, 3))
     full, q0 = hp.band_energy_fn(zb_pos, zb_cell, zb_numbers, gam, 1.0, overlap_shift=6.0)
-    E0, g0, e0 = (np.asarray(x) for x in full(q0))
+    out0 = full(q0)
+    E0, g0, e0 = (np.asarray(x) for x in (out0.energy, out0.gradient, out0.eigenvalues))
     assert (np.diff(e0[0]) < 1e-8).sum() >= 2                              # degenerate levels are there
     assert np.isfinite(g0).all() and np.abs(g0.sum(axis=0)).max() < 1e-8 * max(1.0, np.abs(g0).max())
     d = np.random.default_rng(7).normal(size=zb_pos.shape)
-    fd = (float(full(q0 + h * d)[0]) - float(full(q0 - h * d)[0])) / (2 * h)
+    fd = (float(full(q0 + h * d).energy) - float(full(q0 - h * d).energy)) / (2 * h)
     assert abs(fd - float((g0 * d).sum())) < 1e-6 * max(1.0, abs(fd), np.abs(g0).max())
+
+
+def test_stress_is_the_strain_derivative_of_the_band_energy(models):
+    """The stress of `band_energy_fn` against central differences of E_band with positions and
+    cell strained together (fresh neighbour lists), every component; it is symmetric."""
+    hp = _env_predictor(models)
+    pos, cell, numbers = structure()
+    ks = np.array([[0.1, 0.2, -0.3], [0.37, 0.0, 0.21]])
+    occ = np.zeros(hp.prepare(pos, cell, numbers).n_orb); occ[:20] = 2.0
+    fn, p0 = hp.band_energy_fn(pos, cell, numbers, ks, occ, overlap_shift=6.0)
+    out = fn(p0)
+    stress, V = np.asarray(out.stress), abs(np.linalg.det(cell))
+    assert stress.shape == (3, 3) and np.allclose(stress, stress.T) and np.abs(stress).max() > 1e-4
+
+    def energy(eps):
+        A = np.eye(3) + eps
+        f, q = hp.band_energy_fn(pos @ A.T, cell @ A.T, numbers, ks, occ, overlap_shift=6.0)
+        return float(f(q).energy)
+    h = 1e-5
+    for a in range(3):
+        for b in range(a, 3):
+            eps = np.zeros((3, 3)); eps[a, b] += 0.5; eps[b, a] += 0.5           # a symmetric strain
+            fd = (energy(h * eps) - energy(-h * eps)) / (2 * h) / V
+            assert abs(fd - stress[a, b]) < 1e-6 * max(1.0, np.abs(stress).max()), (a, b, fd, stress[a, b])
+
+
+def test_band_energy_from_device_lists(models):
+    """`band_energy_device` (lists on the GPU): the energy, forces, stress and eigenvalues of the
+    host-list `band_energy_fn`, and again after the atoms move (new lists, the same compiled
+    program).  Orthonormal basis: the random model's overlap is not positive definite."""
+    import jax
+    from ace_jax.eval.nlist import have_matscipy_neighbours
+    if jax.default_backend() != "gpu" or not have_matscipy_neighbours():
+        pytest.skip("needs a GPU and matscipy-neighbours")
+    hp = _env_predictor(models)
+    pos, cell, numbers = structure()
+    ks = np.array([[0.1, 0.2, -0.3], [0.37, 0.0, 0.21]])
+    occ = np.zeros(hp.prepare(pos, cell, numbers).n_orb); occ[:20] = 2.0
+    try:
+        dev = hp.band_energy_device(pos, cell, numbers, ks, occ, overlap=None)
+    except RuntimeError as e:
+        pytest.skip(f"matscipy-neighbours has no CUDA backend ({type(e).__name__})")
+    moved = pos + 0.05 * np.random.default_rng(8).normal(size=pos.shape)
+    for x in (pos, moved):
+        dev = hp.band_energy_device(x, cell, numbers, ks, occ, overlap=None)
+        fn, q = hp.band_energy_fn(x, cell, numbers, ks, occ, overlap=None)
+        ref = fn(q)
+        assert abs(float(dev.energy) - float(ref.energy)) < 1e-8 * abs(float(ref.energy))
+        assert np.abs(np.asarray(dev.eigenvalues) - np.asarray(ref.eigenvalues)).max() < 1e-8
+        assert np.abs(np.asarray(dev.gradient) - np.asarray(ref.gradient)).max() < 1e-7 * np.abs(np.asarray(ref.gradient)).max()
+        assert np.abs(np.asarray(dev.stress) - np.asarray(ref.stress)).max() < 1e-7 * np.abs(np.asarray(ref.stress)).max()
