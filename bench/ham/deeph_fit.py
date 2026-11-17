@@ -9,11 +9,15 @@ neutrality, each set of bands measured from its own mu as that paper's Band.py d
 as MACE-H's (it predicts H only).
     JAX_PLATFORMS=cpu uv run python bench/ham/deeph_fit.py <dataset dir> <n_train> <valence electrons per atom>
         [bonds=<per structure, 0 = all>] [site=<n_cpl>,<l_cpl>] [env=<r_env>,<n_env>,<l_env>,<n_ebond>,<l_ebond>|none]
-        [nsite=12] [nbond=12] [rsite=7.0] [nk=7] [threads=8] [ntest=<structures>] [seed=0]
+        [nsite=12] [nbond=12] [rsite=7.0] [nk=7] [threads=8] [ntest=<structures>] [seed=0] [out=<file.jsonl>]
+`out=`: append one JSON record of the settings and results.  The reference bands of each test
+structure are cached beside the dataset's test folder (`.bands_<nk>/`), so a grid of runs pays
+for them once.
 With `pred=<dir>` nothing is fitted (<n_train> is ignored): the predictions of another code,
 `<dir>/<structure>/hamiltonians_pred.h5` (MACE-H, DeepH-E3: `bench/ham/maceh_eval.py`), are scored.
 Training structures: the first <n_train> of <dataset dir>/train in name order after a seeded
 shuffle (nested: a larger <n_train> contains a smaller one's)."""
+import json
 import os
 import sys
 import time
@@ -76,11 +80,14 @@ def train_names(folder, seed=0):
 
 
 def main(folder, n_train, nel, bonds=3000, site=(2, 2), env=(5.0, 6, 4, 4, 4), nsite=12, nbond=12, rsite=7.0, nk=7, threads=8,
-         ntest=None, seed=0, T=1000.0, pred=None):
+         ntest=None, seed=0, T=1000.0, pred=None, out=None):
+    record = dict(n_train=n_train, bonds=bonds, site=site, env=env, nsite=nsite, nbond=nbond, rsite=rsite, seed=seed,
+                  backend=jax.default_backend(), threads=threads)
     if pred:
-        return score(folder, nel, lambda d, name: (deeph.read(os.path.join(folder, "test", name), operators=(
+        res = score(folder, nel, lambda d, name: (deeph.read(os.path.join(folder, "test", name), operators=(
             ("H", os.path.abspath(os.path.join(pred, name, "hamiltonians_pred.h5"))),)).blocks["H"], float("nan")),
             nk, ntest, T, f"predictions in {pred}")
+        return save(out, dict(pred=pred, **res))
     names = train_names(folder, seed)
     train = [deeph.read(os.path.join(folder, "train", n), operators=("H",)) for n in names[:n_train]]
     orb = train[0].basis
@@ -95,6 +102,7 @@ def main(folder, n_train, nel, bonds=3000, site=(2, 2), env=(5.0, 6, 4, 4, 4), n
     on, _ = fit_onsite(sb, train, channels=("H",))
     off, _ = fit_offsite(basis, [subset(d, bonds, k) for k, d in enumerate(train)], channels=("H",))
     kmax = max(np.asarray(c).shape[1] for c in off.coef.values())
+    record.update(columns=int(kmax), fit_s=round(time.perf_counter() - t, 1), n_coef=int(sum(np.asarray(c).size for c in off.coef.values())))
     print(f"{n_train} training structures ({len(train[0].numbers)} atoms, {len(train[0].blocks['H'])} blocks each), "
           f"{bonds or 'all'} bonds of each; site radials {nsite} to {rsite} A, {nbond} bond radials, site group {site}, env {env}, "
           f"bond cutoff {rcut}; largest problem {kmax} columns; fitted in {time.perf_counter() - t:.0f} s", flush=True)
@@ -107,7 +115,13 @@ def main(folder, n_train, nel, bonds=3000, site=(2, 2), env=(5.0, 6, 4, 4, 4), n
         out = {**f_off(d.positions, d.cell, d.numbers)["H"], **f_on(d.positions, d.cell, d.numbers)["H"]}
         return out, (time.perf_counter() - t) / len(d.numbers)
 
-    score(folder, nel, predict, nk, ntest, T, f"{threads} threads")
+    save(out, {**record, **score(folder, nel, predict, nk, ntest, T, f"{threads} threads")})
+
+
+def save(out, record):
+    if out:
+        with open(out, "a") as f:
+            f.write(json.dumps(record) + "\n")
 
 
 def score(folder, nel, predict, nk, ntest, T, label):
@@ -123,7 +137,13 @@ def score(folder, nel, predict, nk, ntest, T, label):
         diff = np.concatenate([(pred[k] - v).ravel() for k, v in d.blocks["H"].items()])
         err.append(diff)
         S = bloch(d, d.blocks["S"], ks)
-        e0 = np.array([scipy.linalg.eigh(h, s, eigvals_only=True) for h, s in zip(bloch(d, d.blocks["H"], ks), S)])
+        cached = os.path.join(folder, f".bands_{nk}", name + ".npy")
+        if os.path.exists(cached):
+            e0 = np.load(cached)
+        else:
+            e0 = np.array([scipy.linalg.eigh(h, s, eigvals_only=True) for h, s in zip(bloch(d, d.blocks["H"], ks), S)])
+            os.makedirs(os.path.dirname(cached), exist_ok=True)
+            np.save(cached, e0)
         e1 = np.array([scipy.linalg.eigh(h, s, eigvals_only=True) for h, s in zip(bloch(d, {k: pred[k] for k in d.blocks["H"]}, ks), S)])
         mu0, mu1 = (chemical_potential(e, nel * len(d.numbers), T) for e in (e0, e1))
         w = fermi(e0, mu0, T)
@@ -135,6 +155,9 @@ def score(folder, nel, predict, nk, ntest, T, label):
     print(f"test set ({len(tests)} structures): H MAE {1e3 * np.abs(err).mean():.3f} meV, RMSE {1e3 * np.sqrt((err ** 2).mean()):.3f} meV, "
           f"largest {1e3 * np.abs(err).max():.1f} meV; EE mean {1e3 * np.mean(ee):.2f} meV (absolute {1e3 * np.mean(ee_abs):.2f}); "
           f"{1e3 * np.mean(times):.1f} ms per atom; {label}")
+    return dict(n_test=len(tests), h_mae_meV=1e3 * float(np.abs(err).mean()), h_rmse_meV=1e3 * float(np.sqrt((err ** 2).mean())),
+                h_max_meV=1e3 * float(np.abs(err).max()), ee_meV=1e3 * float(np.mean(ee)), ee_abs_meV=1e3 * float(np.mean(ee_abs)),
+                ms_per_atom=1e3 * float(np.mean(times)))
 
 
 if __name__ == "__main__":
@@ -142,7 +165,7 @@ if __name__ == "__main__":
     kw = {}
     for x in [x for x in a if "=" in x]:
         k, v = x.split("=")
-        kw[k] = (v if k == "pred" else None if v == "none" else float(v) if k == "rsite" else int(v) if k in ("bonds", "nsite", "nbond", "nk", "threads", "ntest", "seed")
+        kw[k] = (v if k in ("pred", "out") else None if v == "none" else float(v) if k == "rsite" else int(v) if k in ("bonds", "nsite", "nbond", "nk", "threads", "ntest", "seed")
                  else tuple(float(t) if k == "env" and i == 0 else int(t) for i, t in enumerate(v.split(","))))
     pos = [x for x in a if "=" not in x]
     main(pos[0], int(pos[1]), float(pos[2]), **kw)

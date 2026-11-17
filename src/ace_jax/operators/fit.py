@@ -35,13 +35,29 @@ def _need_x64():
         raise ValueError("the block fit needs float64: jax.config.update('jax_enable_x64', True)")
 
 
-def _fit(designs, n_chunks, rows, nc, ridge):
+def _fit(designs, n_chunks, rows, nc, ridge, device=False):
     """Stream and solve.  designs: {design key: (n columns, [coefficient keys])}; rows(i) ->
     {design key: (A (n_rows, n_columns), Y (n_rows, n_keys * nc))} for chunk i (a design without
-    rows in the chunk is left out).  Returns (coef, report, stats)."""
+    rows in the chunk is left out).  Returns (coef, report, stats).
+
+    device: rows(i) gives {design key: (A, Y, n_rows)} with A a JAX array on the device, padded
+    with zero rows to a fixed size (n_rows: the real ones), and the triangular factors are
+    merged there (`design.qr_merge`): nothing the size of the design rows comes to the host."""
     live = [d for d, (k, _) in designs.items() if k > 0]
     yy = {d: np.zeros(len(keys) * nc) for d, (_, keys) in designs.items()}
     n = dict.fromkeys(designs, 0)
+    if device:
+        from .design import qr_merge
+        Rs = {}
+        for i in range(n_chunks):
+            for d, (A, Y, rows_d) in rows(i).items():
+                yy[d] += (Y ** 2).sum(0)
+                n[d] += rows_d
+                if d in live:
+                    w = designs[d][0] + Y.shape[1]
+                    Rs[d] = qr_merge(Rs.get(d, jnp.zeros((w, w))), A, jnp.asarray(Y))
+        acc = {d: (R[:designs[d][0], :designs[d][0]], R[:designs[d][0], designs[d][0]:]) for d, R in Rs.items()}
+        return _solve(designs, acc, yy, n, nc, ridge)
 
     def parts(i):
         out = rows(int(i))
@@ -58,6 +74,11 @@ def _fit(designs, n_chunks, rows, nc, ridge):
             for p in parts_d:
                 if p is not None:
                     yy[d] += (p[1] ** 2).sum(0); n[d] += len(p[1])
+    return _solve(designs, acc, yy, n, nc, ridge)
+
+
+def _solve(designs, acc, yy, n, nc, ridge):
+    """Coefficients, report and statistics from the factors (R, c) of each design."""
     coef, report, stats = {}, {}, {}
     for d, (k, keys) in designs.items():
         if not n[d]:
@@ -124,14 +145,19 @@ def fit_onsite(basis, datasets, orbitals=None, channels=("H", "S"), ridge=1e-10,
     return (model, report, st) if stats else (model, report)
 
 
-def fit_offsite(bond_basis, datasets, orbitals=None, channels=("H", "S"), ridge=1e-10, chunk=2048, stats=False):
+def fit_offsite(bond_basis, datasets, orbitals=None, channels=("H", "S"), ridge=1e-10, chunk=2048, stats=False, compiled=True):
     """An `OffsiteModel` fitted to the off-site blocks present in `datasets` (`OperatorData`s).
 
     Every bond within the bond cutoff whose block (R, i, j) is in the data is a sample; to fit
     to a subset, give datasets that hold only those blocks.  Bonds are processed in chunks and
     each design keeps only its triangular factor, so the design matrix is never held.  Returns
     (model, report) with report[(zi, zj, s1, s2, L)] = (rows, columns, rms residual per channel).
-    `stats=True`: also {(zi, zj, L, p, same shell): `DesignStats`}."""
+    `stats=True`: also {(zi, zj, L, p, same shell): `DesignStats`}.
+
+    compiled (default): the design rows come from `design.bond_designs`, one compiled program per
+    species pair, and the factors are merged on the device JAX runs on (a GPU: feature assembly
+    and QR there, in float64).  False: the NumPy reference `bond.features` with host merges (the
+    same coefficients; tests compare the two)."""
     from . import bond as B
     from .offsite import OffsiteModel, block_lps, canonical_pairs, site_features
 
@@ -186,6 +212,37 @@ def fit_offsite(bond_basis, datasets, orbitals=None, channels=("H", "S"), ridge=
             out[(a, b, L, p, same)] = (A, np.concatenate(Y, axis=1))
         return out
 
-    coef, report, st = _fit(designs, len(chunks), rows, nc, ridge)
+    if compiled:
+        from .design import bond_designs
+        progs, dev = {}, {}
+
+        def rows_device(i):
+            k, za, zb, sel = chunks[i]
+            d, (g, keys) = datasets[k], graphs[k]
+            if dev.get("k") != k:                        # this dataset's features and lists, on the device
+                env = B.env_lists(bond_basis, d.positions, d.cell, numbers=d.numbers)
+                dev.update(k=k, F=_features(bond_basis.site, *site_graph(bond_basis.site, d.positions, d.cell, d.numbers)),
+                           env=None if env is None else tuple(jnp.asarray(x) for x in env))
+            mine = [key for key in members if key[:2] == (za, zb)]
+            if (za, zb) not in progs:
+                progs[(za, zb)] = bond_designs(bond_basis, [key[2:] for key in mine])
+            pad = np.concatenate([sel, np.full(chunk - len(sel), sel[0])])           # fixed size: one compilation
+            mask = np.concatenate([np.ones(len(sel)), np.zeros(chunk - len(sel))])
+            As = progs[(za, zb)](dev["F"], jnp.asarray(g.rij[pad]), jnp.asarray(g.i[pad]), jnp.asarray(g.j[pad]),
+                                 jnp.asarray(mask), dev["env"])
+            blocks = np.stack([[d.blocks[c][keys[e]] for c in channels] for e in sel])
+            out = {}
+            for key, A in zip(mine, As):
+                L = key[2]
+                Y = np.zeros((chunk * (2 * L + 1), len(members[key]) * nc))
+                Y[:len(sel) * (2 * L + 1)] = np.concatenate(
+                    [np.einsum("ecij,ijm->emc", blocks[:, :, orbitals.shell_slice(za, s1), orbitals.shell_slice(zb, s2)],
+                               cg.real_cg(l1, l2, L)).reshape(len(sel) * (2 * L + 1), nc) for s1, s2, l1, l2 in members[key]], axis=1)
+                out[key] = (A, Y, len(sel) * (2 * L + 1))
+            return out
+
+        coef, report, st = _fit(designs, len(chunks), rows_device, nc, ridge, device=True)
+    else:
+        coef, report, st = _fit(designs, len(chunks), rows, nc, ridge)
     model = OffsiteModel(bond=bond_basis, coef=coef, orbitals=orbitals, channels=tuple(channels))
     return (model, report, st) if stats else (model, report)
