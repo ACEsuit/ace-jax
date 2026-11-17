@@ -215,3 +215,36 @@ What matters for use is the spectrum, not the blocks. `bench/ham/eigen_accuracy.
 - Block errors do not average out in the spectrum. The overlap matrix of this basis has eigenvalues down to 0.03, so the generalised problem amplifies errors of H along nearly dependent orbital combinations, and the errors of the ~180 bonds of an atom are correlated, not independent. A block RMSE is the wrong target for these two reasons.
 - Core levels are far better (5 meV): they depend on a few on-site elements.
 - ACEhamiltonians.jl's off-site model on the same bonds reaches block errors of 58, 33 and 18 meV at order 1, degrees 4, 6 and 8 (4.1, 14.8 and 39.7 ms per bond), and 51 and 32 meV at order 2, degrees 4 and 6 (11 and 230 ms per bond). Its eigenvalue error is not measured here; at 18–33 meV of block error there is no reason to expect it to be better than the table above.
+
+## Against the 2022 ACEhamiltonians paper: band error on FCC and BCC aluminium (2026-11-17)
+
+**The target** (arXiv:2111.13736, npj Comput. Mater. 2022). Its optimised model (on-site H order 2, degree 9, cutoff 10 Å; off-site H order 1, bond cutoff 10 Å, environment cutoff 5 Å, degrees 9 to 14 per sub-block; overlap order 0, degree 16) gives band structures "with a RMSE of less than 0.4 eV for both phases"; the on-site d–d sub-block has an RMSE of about 10 meV, its largest; the off-site overlap an RMSE of 1e-4. The band error is the paper's `band_error` (its `test/plots.jl`): the RMS over k and over bands 2 to 14 of e·f(e) − e_ref·f(e_ref), f the Fermi function at the DFT Fermi level with σ = 0.086 eV, normalised by all 14 bands; the 1s band is left out. Unoccupied bands therefore count for nothing, and occupied bands count by their full value.
+
+**Same test here** (`bench/ham/band_accuracy.py`): train on the 500 K MD supercells as above; test on the equilibrium FCC and BCC crystals of the paper's `reference_data` (not in the training data, and at lattice constants 4.00 and 3.24 Å, about 1.3 % below the MD cells'), primitive-cell bands along the paper's k-paths from one atom's row of the 9×9×9 supercell matrices.
+
+| ace-jax model (bond cutoff 9 Å, 20,000 training bonds) | FCC, paper's band error | BCC, paper's band error | valence bands to E_F + 10 eV, plain RMSE (FCC / BCC) |
+|---|---|---|---|
+| reference truncated at 9 Å (floor) | 0.0015 eV | 0.0065 eV | 4.6 / 12.6 meV |
+| coupled features (4 radials, l ≤ 4) | **0.219 eV** | **0.711 eV** | 959 / 973 meV |
+| paper's optimised model | < 0.4 eV | < 0.4 eV | not given |
+
+- **FCC is inside the paper's target, BCC is not** (0.71 against 0.4 eV).
+- The plain RMSE of the valence and low conduction bands is about 1 eV with errors up to 4.8 eV: the unoccupied bands are poor. The paper's metric does not see them; its Fig. 5 claims agreement to 10 eV above the Fermi level, which this model does not have.
+- The reference files here are not multiplied by 27, unlike the MD files (their on-site overlap is 1); the script reads the factor from the data.
+
+**What drives the spectrum error** (first-order attribution on the 729-atom MD supercell, `eigen_accuracy.py … diagnose`, valence window, exact MAE 143 meV):
+
+| part of ΔH | block RMSE | first-order eigenvalue MAE |
+|---|---|---|
+| on-site blocks | 10.5 meV | 5.0 meV |
+| off-site, bonds < 3.5 Å | 28.3 meV | 5.8 meV |
+| off-site, 3.5–5.5 Å | 43.4 meV | 48.3 meV |
+| off-site, 5.5–9 Å | 8.0 meV | 20.5 meV |
+| pairs beyond the cutoff | 0.06 meV | 0.9 meV |
+| p–d blocks | 10.8 meV | 43.2 meV |
+| d–d blocks | 23.0 meV | 28.2 meV |
+| p–p blocks | 2.8 meV | 22.1 meV |
+
+- The second and third neighbour shells (3.5–5.5 Å) carry most of the eigenvalue error, and the long-range blocks matter far more than their small block error suggests (8 meV of block error, 20 meV in the eigenvalues): many bonds, coherent errors.
+- In the orthonormalised basis ΔH has an RMS element of 47 meV against 10 meV in the orbital basis, and an RMS diagonal of 590 meV. The near-dependence of the basis (overlap eigenvalues down to 0.03) amplifies the error, as suspected.
+- First order explains only part: its MAE is 59 meV against the exact 143 meV, and 139 meV of the exact error is a rigid downward shift of the window. The error is not small on the scale of the level spacing of a 10206-orbital supercell.
