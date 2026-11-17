@@ -117,4 +117,22 @@ lammps_cuda() {
   wrapper lmp-symx3.sh "$MODS $CUDA_MOD" "$B"
 }
 
+lammps_cuda_fdn() {       # as lammps_cuda, with symmetrix/mace/foundation (MACE-MH-1 and the other preset shapes) in a
+  local B=$LAMMPS/build-kk-fdn   # second build dir of the same tree.  The NequIP foundation style stays out (nvcc 12.8).
+  export PATH=$VENV/bin:$PATH NVCC_WRAPPER_DEFAULT_COMPILER=g++
+  set +u; module load $CUDA_MOD; set -u
+  ln -sf "$SX"/pair_symmetrix/pair_symmetrix_mace_foundation.{h,cpp} "$LAMMPS/src/"
+  ln -sf "$SX"/pair_symmetrix/pair_symmetrix_mace_foundation_kokkos.{h,cpp} "$LAMMPS/src/KOKKOS/"
+  [ "${KEEP_BUILD:-0}" = 1 ] || rm -rf "$B"
+  cmake -S "$LAMMPS/cmake" -B "$B" -D CMAKE_BUILD_TYPE=Release -D CMAKE_CXX_STANDARD=20 \
+    -D CMAKE_CXX_STANDARD_REQUIRED=ON -D CMAKE_CXX_COMPILER=g++ -D CMAKE_CXX_FLAGS="-march=native -ffast-math" \
+    -D BUILD_SHARED_LIBS=ON -D BUILD_MPI=ON -D BUILD_OMP=ON \
+    -D PKG_KOKKOS=ON -D Kokkos_ENABLE_CUDA=ON -D Kokkos_ENABLE_OPENMP=ON -D Kokkos_ENABLE_SERIAL=ON \
+    -D Kokkos_ARCH_NATIVE=ON -D Kokkos_ENABLE_AGGRESSIVE_VECTORIZATION=ON \
+    -D Kokkos_ARCH_AMPERE80=ON -D SYMMETRIX_KOKKOS=ON -D SYMMETRIX_SPHERICART_CUDA=ON
+  cmake --build "$B" -j "$JOBS"
+  rm -f "$LAMMPS"/src/pair_symmetrix_mace_foundation.{h,cpp} "$LAMMPS"/src/KOKKOS/pair_symmetrix_mace_foundation_kokkos.{h,cpp}   # build-kk's tree as it was
+  wrapper lmp-symx3-fdn.sh "$MODS $CUDA_MOD" "$B"
+}
+
 for step in "$@"; do "$step"; done

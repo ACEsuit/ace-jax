@@ -338,7 +338,7 @@ python bench/si_qoi/make_cost.py --dtype float64 --source acejax-ace=sulis-gpu-a
     $R/sulis-gpu-ace-splined-v2.jsonl $R/sulis-gpu-v2.jsonl $R/sulis-gpu-mace_xl.jsonl \
     $R/sulis-gpu-ace_tab5.jsonl $R/sulis-gpu-ace_tabfork.jsonl $R/sulis-gpu-pace-dev.jsonl $R/sulis-gpu-nep.jsonl $R/sulis-gpu-acejax-auto.jsonl \
     $R/sulis-gpu-fp32-mixed.jsonl $R/sulis-gpu-fp32-dot-F32_F32_F32.jsonl $R/sulis-gpu-grace.jsonl $R/sulis-gpu-grace2l.jsonl \
-    $R/sulis-gpu-cudak.jsonl $R/sulis-gpu-gracert.jsonl $R/sulis-gpu-symx3.jsonl \
+    $R/sulis-gpu-cudak.jsonl $R/sulis-gpu-gracert.jsonl $R/sulis-gpu-symx3.jsonl $R/sulis-gpu-fdn.jsonl $R/sulis-gpu-grace-fm.jsonl \
     --allow nep-gpumd:mixed --allow grace-rt:mixed
 ROWS=(--row "A100 GPU, µs/atom-step|$RR/cost_sulis_gpu.json|$RR/cost_sulis_gpu.codes.json"
       --row "CPU node (128 cores), µs/atom-step|$RR/cost_sulis_cpu.json|$RR/cost_sulis_cpu.codes.json")
@@ -803,3 +803,123 @@ pointed to pypolymlp's 1/|F| weighting of forces above 1 eV/Å and to the penalt
 largest polymlp is within 4 % of linear ACE o4d20 (19 % in RMSE), the difference being the large components
 (24-42 % of polymlp's squared error, 17-19 % of ACE's and PACE's; `force_measures.py`); a 28-value penalty grid
 changes the force errors by at most 3.5 % and no row here.
+
+## Foundation models: zero-shot and fine-tuned (2026-11-16)
+
+Two foundation-model families join the figure (stars and squares, points only, with an arrow from each zero-shot
+model down to its fine-tuned one: `plot_cost.FM_ARROWS`, which a distilled model would extend with an arrow to the
+left; web preset "Foundation models"): **MACE-MH-1**
+(`mace_fm`, the `omat_pbe` head; `bench/accuracy_cost/fit_mace_fm.py`) and **GRACE-1L/2L-OMAT-large**
+(`grace_fm`, the `-base-fp64` models; `fit_grace_fm.py`). Each is scored zero-shot and after fine-tuning on the
+benchmark's training split.
+
+These rows do not follow two of the benchmark's rules, and the figure's footnote says so:
+
+- **Cutoff.** The architecture is the foundation model's, so the cutoff is 6 Å, not 5 Å.
+- **Precision.** GRACE is timed by grace-runtime, which is mixed precision only (as the from-scratch GRACE rows).
+  MACE-MH-1 has a float64 row (plotted) and a mixed-precision row (light violet, its own line).
+
+**Zero-shot.** A foundation model's energies are on its own reference. One constant per atom is taken from the
+*training* split (`e_shift`: the mean of (E_DFT − E_model)/N over 2,226 configurations, the isolated atom left out)
+and added by the scoring calculator. Nothing else is fitted. Forces, virials and the QoIs do not depend on it.
+
+**Fine-tuned.** Every parameter is updated, with the benchmark's loss (energies, forces, virials, the GAP-18
+per-type weights), 5% of the training split as the validation set, float64.
+
+- MACE-MH-1: `mace_run_train`, single head (`--multiheads_finetuning=False`), 60 epochs with `--swa --ema`, batch 5,
+  at learning rates 1e-2, 1e-3 and 1e-4. E0 is the head's own Si reference plus `e_shift`, so the fine-tune starts
+  from the zero-shot energies. The plotted row is the learning rate with the lowest validation loss (stage one):
+  1e-3 (0.0128; 1e-4 0.0139; 1e-2 0.0221) (`plot_cost.FM_PLOTTED`). The test set took no part in that choice. About
+  4 h each on a Sulis L40 (jobs 2289089-91).
+- GRACE: gracemaker's fine-tuning recipe (`finetune_foundation_model`, `reduce_elements`, `shift: auto`, Adam at
+  0.001 with cosine decay), 10,000 updates; 76 min (2L) and 21 min (1L) on a Sulis L40 (jobs 2289103-4).
+  `reduce_elements` keeps only Si, so the fine-tuned parameter counts are far below the zero-shot ones.
+
+| Model | Parameters | E RMSE (meV/atom) | F RMSE (eV/Å) | V RMSE (meV/atom) | QoI error | QoIs within tolerance | A100 µs/atom-step |
+|---|---|---|---|---|---|---|---|
+| MACE-MH-1, zero-shot | 6,439,878 | 20.0 | 0.0716 | 72.8 | 1.08 | 52% | 6.04 (float64), 4.29 (float32), 2.47 (mixed) |
+| MACE-MH-1, fine-tuned, lr 1e-3 (seed 0) | 6,170,528 | 3.3 | 0.0443 | 26.2 | 0.27 | 86% | 6.07 (float64), 4.31 (float32), 2.48 (mixed) |
+| MACE-MH-1, fine-tuned, lr 1e-4 | 6,170,528 | 6.3 | 0.0518 | 33.1 | not run | not run | not timed |
+| MACE-MH-1, fine-tuned, lr 1e-2 | 6,170,528 | 7.4 | 0.0889 | 47.0 | not run | not run | not timed |
+| GRACE-2L-OMAT-large, zero-shot | 26,394,284 | 15.4 | 0.0655 | 56.4 | 1.29 | 38% | 5.59 (mixed) |
+| GRACE-2L-OMAT-large, fine-tuned (seed 0) | 984,548 | 2.1 | 0.0455 | 19.6 | 0.21 | 95% | 5.60 (mixed) |
+| GRACE-1L-OMAT-large, zero-shot | 8,953,529 | 34.0 | 0.1025 | 128.9 | 2.68 | 24% | 1.78 (mixed) |
+| GRACE-1L-OMAT-large, fine-tuned (seed 0) | 468,833 | 5.8 | 0.0788 | 27.7 | 0.52 | 76% | 1.77 (mixed) |
+
+**Fine-tuning seeds (2026-11-17).** Each plotted fine-tune has two more fits (sweep sizes `<size>_s1`, `_s2`, entry
+key `seed`; the unsuffixed row is seed 0). The seed is `mace_run_train --seed` / gracemaker's `seed`: it sets the
+5% validation draw and the batch order; the starting weights are the foundation model's in every seed. The figure
+plots the mean of the three with the min-max as a bar (`plot_cost.SEEDED`), at seed 0's cost (same architecture).
+Sulis L40 jobs 2290900-5; the other MACE learning rates have one seed.
+
+| Fine-tuned model | seed | E RMSE (meV/atom) | F RMSE (eV/Å) | V RMSE (meV/atom) | QoI error | QoIs within tolerance |
+|---|---|---|---|---|---|---|
+| MACE-MH-1, lr 1e-3 | 0 | 3.3 | 0.0443 | 26.2 | 0.27 | 86% |
+| | 1 | 3.1 | 0.0444 | 27.1 | 0.32 | 86% |
+| | 2 | 4.1 | 0.0439 | 25.0 | 0.27 | 86% |
+| | mean [min, max] | 3.5 [3.1, 4.1] | 0.0442 [0.0439, 0.0444] | | 0.29 [0.27, 0.32] | |
+| GRACE-2L-OMAT-large | 0 | 2.1 | 0.0455 | 19.6 | 0.21 | 95% |
+| | 1 | 2.1 | 0.0456 | 19.5 | 0.22 | 95% |
+| | 2 | 2.1 | 0.0457 | 19.7 | 0.25 | 90% |
+| | mean [min, max] | 2.1 [2.1, 2.1] | 0.0456 [0.0455, 0.0457] | | 0.23 [0.21, 0.25] | |
+| GRACE-1L-OMAT-large | 0 | 5.8 | 0.0788 | 27.7 | 0.52 | 76% |
+| | 1 | 5.8 | 0.0789 | 27.5 | 0.49 | 76% |
+| | 2 | 5.7 | 0.0788 | 27.9 | 0.51 | 76% |
+| | mean [min, max] | 5.8 [5.7, 5.8] | 0.0788 [0.0788, 0.0789] | | 0.51 [0.49, 0.52] | |
+
+The force error is reproducible to 0.0005 eV/Å; the QoI error moves by up to 0.05 between seeds. GRACE-1L-OMAT is
+at the QoI target's edge: one seed of three is below 0.5, the mean is not. On lestrade, two MACE QoI tests at once
+ran out of GPU memory (20 GB) for four tests of seeds 1 and 2; they were rerun one at a time.
+
+Target: force RMSE ≤ GAP-18's and QoI error ≤ 0.5. For comparison, linear ACE o4d20: 0.0816 eV/Å, QoI error 0.39,
+0.75 µs/atom-step (CUDA kernel, float64).
+
+- **Zero-shot** MACE-MH-1 and GRACE-2L are below GAP-18's force error without seeing the data, but none of the three
+  reaches the QoI target. The large errors are in the high-coordination phases and point defects (MACE-MH-1, in
+  tolerances: fcc −7.7, st12 +4.7, vacancy −4.7, bcc −4.5, hcp −4.4).
+- **Fine-tuned** MACE-MH-1 and GRACE-2L reach the target (seed means: QoI 0.29 and 0.23; GRACE-2L-OMAT is the
+  lowest in the figure, MACE-MH-1 level with the best from-scratch models at 0.31). GRACE-1L reaches the force
+  target but not the QoI one (seed mean 0.51).
+- **Cost.** Fine-tuning does not change the cost (≤ 0.5%). At the target, fine-tuned MACE-MH-1 costs 8.1 times
+  linear ACE o4d20 in float64 and 3.3 times in mixed precision; fine-tuned GRACE-2L costs 7.5 times (mixed).
+- The `MACEFM_mh1-omat` QoIs are identical to the earlier `SYMX_mh1` entry.
+
+**Codes.** MACE-MH-1: Symmetrix v0.3.0 `pair_style symmetrix/mace/foundation`, `.../float32` and
+`.../float32-mixed` (`bench/scaling/envs/sulis-symx3.sh lammps_cuda_fdn`, build job 2289052; the model extracted
+for Si with `symmetrix_extract_mace --head omat_pbe`; a fine-tuned model is extracted from a CPU copy). GRACE:
+`grace/runtime/kk` on the model's `kokkos.npz` (grace-runtime 0.1.4, Academic Software Licence, as are the GRACE
+foundation models).
+
+**Gates** (64-atom cells, against the model in PyTorch / TensorFlow, float64): MACE-MH-1 float64 ≤ 1.5e-10
+eV/atom, 2.0e-7 eV/Å; float32 ≤ 5.6e-8 / 3.6e-6; mixed ≤ 3.3e-8 / 3.0e-6 (bounds 1e-8 / 1e-5 and 1e-6 / 1e-4).
+GRACE ≤ 3.9e-6 / 2.1e-6.
+
+**Timing.** 32,768 atoms, one A100-PCIE-40GB each, on *shared* nodes (8 cores; load 1.4-3.8), not the exclusive
+nodes of the other rows: `accuracy_cost/envs/sulis-gpu-fdn.sbatch` (jobs 2289095, 2289390) and
+`sulis-gpu-grace-fm.sbatch` (jobs 2289094, 2289389), rows in `results/sulis/sulis-gpu-fdn.jsonl` and
+`sulis-gpu-grace-fm.jsonl`. MACE-MH-1 float64 takes 30.3 GB of device memory at this size, mixed 15.5 GB.
+
+**CPU row.** One exclusive 128-core EPYC 7742 node, 4,096 atoms, as the other CPU rows; µs/atom-step at each
+layout (MPI ranks x OpenMP threads), the figure taking each model's fastest. MACE-MH-1: the same Symmetrix styles
+in its CPU build (`lmp-symx3-cpu.sh`; float64 and float32, the float32-mixed style being GPU only),
+`accuracy_cost/envs/sulis-cpu-fdn.sbatch` (jobs 2290209, 2290229). GRACE: `grace/runtime`,
+`sulis-cpu-grace-fm.sbatch` (job 2290210). Rows in `results/sulis/sulis-cpu-<RxT>-fdn.jsonl` and
+`sulis-cpu-<RxT>-grace-fm.jsonl`.
+
+| model | 128x1 | 32x4 | 16x8 (MACE) / 8x16 (GRACE) | fastest | A100 |
+|---|---|---|---|---|---|
+| MACE-MH-1 zero-shot, float64 | 52.5 | 46.0 | 48.0 | 46.0 | 6.04 |
+| MACE-MH-1 fine-tuned, float64 | 53.2 | 45.1 | 47.2 | 45.1 | 6.07 |
+| MACE-MH-1 zero-shot, float32 | 21.2 | 18.4 | 21.6 | 18.4 | 4.29 |
+| MACE-MH-1 fine-tuned, float32 | 21.5 | 18.5 | 21.5 | 18.5 | 4.31 |
+| GRACE-1L-OMAT-large zero-shot | 3.17 | 2.09 | 2.07 | 2.07 | 1.78 |
+| GRACE-1L fine-tuned | 3.05 | 2.08 | 2.09 | 2.08 | 1.77 |
+| GRACE-2L-OMAT-large zero-shot | out of memory | 8.94 | 8.81 | 8.81 | 5.59 |
+| GRACE-2L fine-tuned | out of memory | 8.86 | 8.83 | 8.83 | 5.60 |
+
+Gates as on the A100 (MACE-MH-1 float64 ≤ 1.5e-10 / 2.0e-7, float32 ≤ 5.3e-8 / 3.7e-6; GRACE ≤ 5.7e-8 / 9.9e-7).
+GRACE-2L does not fit at 128 ranks (each rank holds the model). The float32 MACE rows are not in the cost file
+(float64 only, as for the other models). The fine-tuned MACE model holds CUDA tensors, so on a CPU node the gate's
+PyTorch reference is its CPU copy (`timing.cases`; the first run, job 2290209, failed that gate at loading).
+
+Not done: a float64 GRACE timing (the native `grace/2l/kk` style on the foundation `kokkos.npz`).
