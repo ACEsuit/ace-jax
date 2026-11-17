@@ -370,3 +370,14 @@ The compiled off-site predictor now takes one dense layout per ordered species p
 
 - **CPU, one thread, with the model that meets the paper's target: 14.2 ms per atom, 4.4 times faster than MACE-H.** Better than the one-species estimate (20 ms), because a mixed pair is evaluated in one orientation only.
 - The GPU time with the environment did not change: there the environment contraction runs one atom at a time (`lax.map`, chosen for the CPU cache), which is sequential on a GPU. Not pursued (CPU is the requirement).
+
+**Correction: which core (2026-11-17).** lestrade's i9-14900K has 8 performance cores (logical CPUs 0–15) and 16 efficiency cores (16–31). The one-thread ace-jax rows of the two tables above, and of the ablation and profile sections, were pinned to CPU 20, an efficiency core; MACE-H's 62.7 ms was not pinned. Both codes pinned to the same core (`taskset -c 4` and `-c 20`; full H, 108-atom SiC, one thread; ace-jax float64, MACE-H float32):
+
+| per atom | performance core | efficiency core |
+|---|---|---|
+| MACE-H | 54.1 ms | 118.2 ms |
+| ace-jax, site (2, 2) only | 2.1 ms | 5.0 ms |
+| ace-jax, env (5, 6, 4, 4, 4) only | 4.6 ms | 13.0 ms |
+| ace-jax, site (2, 2) + env (5, 6, 4, 4, 4) (meets the paper's target) | 5.0 ms | 14.2 ms |
+
+- **Like for like, the model that meets the paper's target is 10.7 times faster than MACE-H on a performance core and 8.3 times on an efficiency core.** The ratios between ace-jax configurations in the earlier tables stand; their absolute times are the efficiency core's.
