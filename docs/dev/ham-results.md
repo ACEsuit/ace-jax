@@ -248,3 +248,29 @@ What matters for use is the spectrum, not the blocks. `bench/ham/eigen_accuracy.
 - The second and third neighbour shells (3.5–5.5 Å) carry most of the eigenvalue error, and the long-range blocks matter far more than their small block error suggests (8 meV of block error, 20 meV in the eigenvalues): many bonds, coherent errors.
 - In the orthonormalised basis ΔH has an RMS element of 47 meV against 10 meV in the orbital basis, and an RMS diagonal of 590 meV. The near-dependence of the basis (overlap eigenvalues down to 0.03) amplifies the error, as suspected.
 - First order explains only part: its MAE is 59 meV against the exact 143 meV, and 139 meV of the exact error is a rigid downward shift of the window. The error is not small on the scale of the level spacing of a 10206-orbital supercell.
+
+**Model variants on the paper's metric** (same test; bond cutoff 9 Å and 20,000 training bonds unless said):
+
+| variant | FCC | BCC |
+|---|---|---|
+| two-centre features only | 2.41 eV | 1.79 eV |
+| coupled, 4 radials, l ≤ 4 (the model above) | 0.219 eV | 0.711 eV |
+| coupled, 6 radials, l ≤ 4 | 0.235 eV | 0.587 eV |
+| coupled, 4 radials; bond cutoff 10 Å, 16 two-centre radials | 0.539 eV | 0.999 eV |
+| coupled, 4 radials; 60,000 training bonds | 0.216 eV | 0.801 eV |
+
+No variant reaches 0.4 eV on BCC. More coupled radials help a little, more data does not, and a longer cutoff makes it worse.
+
+**Where the band error comes from** (reference blocks swapped in for one part at a time, reference S):
+
+| H used | FCC: paper's error / plain RMSE to E_F + 10 eV | BCC |
+|---|---|---|
+| predicted on-site, reference off-site | 0.007 eV / 11 meV | 0.097 eV / 55 meV |
+| reference on-site, predicted off-site | 0.219 eV / 965 meV | 0.672 eV / 971 meV |
+| predicted only for bonds < 3.5 Å | 0.012 eV / 66 meV | 0.162 eV / 240 meV |
+| predicted only for bonds 3.5–5.5 Å | 0.171 eV / 801 meV | 0.233 eV / 872 meV |
+| predicted only for bonds > 5.5 Å | 0.157 eV / 303 meV | 0.125 eV / 404 meV |
+
+- **The on-site model is good enough**: with the reference off-site blocks the bands are right to 11 meV (FCC) and 55 meV (BCC).
+- **The whole problem is the off-site model, at medium and long range.** Nearest-neighbour bonds are fine in FCC; the second and third shells (3.5–5.5 Å) and the long bonds each cost about as much as the paper's whole budget.
+- This is the regime the shared-feature design is weakest in by construction: for a bond longer than a few ångström the environment that matters lies between and around the two atoms, and features centred on each atom separately, summed, do not describe it. ACEhamiltonians' bond-centred cylinder does.

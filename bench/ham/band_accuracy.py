@@ -117,6 +117,17 @@ def main(nsite, n_bond, n_cpl, l_cpl, rcut_bond=9.0, n_train=20000):
         print("    " + report("reference truncated at the cutoff", trunc, ref, ef))
         print("    " + report("predicted H and S", pred, ref, ef))
         print("    " + report("predicted H, reference S", pred_refS, ref, ef))
+        # which part of H carries the error: swap in the reference for one part at a time (reference S throughout)
+        jj = g.j[e][mine]
+        Sr = np.concatenate([SR[:1], SR[jj]])
+        H_on_ref = np.concatenate([HR[:1], blk[mine, 0]])
+        H_off_ref = np.concatenate([np.asarray(on_blocks)[:1, 0], HR[jj]])
+        print("    " + report("reference on-site H, predicted off-site H", bands(H_on_ref, Sr, n_pred, kpts), ref, ef))
+        print("    " + report("predicted on-site H, reference off-site H", bands(H_off_ref, Sr, n_pred, kpts), ref, ef))
+        dist = np.linalg.norm(g.rij[e][mine], axis=1)
+        for lo, hi in ((0, 3.5), (3.5, 5.5), (5.5, 99)):
+            Hm = np.concatenate([HR[:1], np.where(((dist >= lo) & (dist < hi))[:, None, None], blk[mine, 0], HR[jj])])
+            print("    " + report(f"predicted H only for bonds {lo}-{hi} A", bands(Hm, Sr, n_pred, kpts), ref, ef))
 
 
 if __name__ == "__main__":
