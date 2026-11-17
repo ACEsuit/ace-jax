@@ -160,3 +160,17 @@ def test_identity_embedding_is_the_categorical_basis():
         for k in range(3):                                # the same numbers in channel 0 when the element is relabelled
             lv0 = np.flatnonzero(np.abs(as_0[k][lp][0]).max(axis=1) > 1e-12)
             assert np.allclose(parts[k][lp][0][live[k]], as_0[k][lp][0][lv0], atol=1e-12 * np.abs(v).max())
+
+
+def test_embedding_widths_per_order():
+    """`widths` sets the channels of each order: order 1 at full width (it is linear in each
+    element's neighbour density, so fewer channels lose information), order 2 compressed."""
+    from ace_jax.operators.features import build_embedding_site_basis
+    kw = dict(rcut=4.0, wL=0.5, coupling_cache_dir=str(CACHE))
+    n = lambda b: sum(b.n(*lp) for lp in b.lps)
+    full, one = build_embedding_site_basis(ELS[:3], 2, 6, 2, d_max=3, **kw), build_embedding_site_basis(ELS[:3], 2, 6, 2, d_max=1, **kw)
+    mixed = build_embedding_site_basis(ELS[:3], 2, 6, 2, widths=(3, 1), **kw)
+    first = lambda b: n(build_embedding_site_basis(ELS[:3], 1, 6, 2, d_max=b, **kw))
+    assert n(one) < n(mixed) < n(full)
+    assert n(mixed) - n(one) == first(3) - first(1)                      # the two more order-1 channels, nothing else
+    assert np.asarray(mixed.radial.rnl_embedding).shape[-1] == 3

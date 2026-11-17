@@ -663,3 +663,25 @@ RTX 4000 Ada, E_band with forces and stress (`total_profile.py`), float32 with t
 - Float32 is 4 to 7 times faster and agrees to 0.1 meV per atom in the band energy; the largest force component differs by up to 0.014 eV/Å (0.5 %). Whether that is good enough for dynamics is not tested (the potential's kernel needed its relaxations checked in float32 too).
 - In float32 the eigensolver is 47 to 53 % of the total at 128 and 256 atoms, the reverse pass 22 to 31 %, the blocks 19 to 20 %. The split is flatter than in float64, so the blocks and the reverse pass matter more for a float32 kernel.
 - The earlier float32 timings of the inference benchmarks (MACE-H comparison, GPU rows) were taken with TF32 on: their speed is that of a less accurate product and their accuracy was not checked. They need re-timing.
+
+## Why TrACE did badly on the four-element alloy (2026-11-17)
+
+Full models (site order 1, environment order 1; 80 training, 16 test structures): categorical H on-site 28.7 / off-site 24.9 meV; TrACE with d = 1, 2, 3 random channels 926 / 112, 878 / 106, 1,688 / 196 meV. Isolated on the on-site H blocks alone (`work/trace_onsite.py`, rcut 6 Å, 12 radials):
+
+| site features, order 1 | features | test RMSE | train RMSE |
+|---|---|---|---|
+| categorical | 336 | 28.3 meV | 13.4 |
+| TrACE, identity embedding (4 channels) | 372 | 51.1 | 12.4 |
+| TrACE, random, d = 4 (seed 0 and seed 1) | 372 | 51.1, 51.0 | 12.4 |
+| TrACE, random, d = 3 | 279 | 1,688 | 620 |
+| TrACE, random, d = 2 (seed 0, seed 1) | 186 | 878, 1,653 | 442, 698 |
+| TrACE, random, d = 1 | 93 | 926 | 706 |
+
+- **Not a bug in the embedding.** Four random channels for four elements give the identity embedding's result to 0.01 meV, for both seeds: the span is the same.
+- **The loss is the compression of order 1.** An order-1 feature is linear in the neighbour density of each element. Fewer channels than elements project those S densities onto d mixtures, and no readout gets the rest back: the training error itself is 0.4 to 0.7 eV. Every Hamiltonian model so far is order 1 in the site features and in the bond environment, so for these models an embedding narrower than the number of elements can only lose.
+- **Compression is free from order 2.** Order 2, total degree 8, order 1 at full width (the new `widths=` of `build_embedding_site_basis`): order-2 width 1, 2, 4 give 66.4, 65.7, 67.1 meV with 850, 1,524, 2,872 features. Both orders at width 1: 620 meV. The lossless order-2 width (10) overfits (6.2 eV unregularised, 95 meV with the prior).
+- **Order 2 does not pay here yet.** None of the order-2 on-site models beats order 1 (a categorical order-2 basis, 10,744 features, is at 27 eV even with the prior): 80 structures do not determine them. That is a question for the evidence, not for the basis.
+- **The smoothness prior matters on this set**, unlike on gold. Identity embedding, order 1: none 51.1, sigma_c 1e5 32.1, 3e5 26.1, **1e6 21.9**, 3e6 30.4, 1e7 47.5 meV. Categorical: none 28.3, 1e6 29.7. The optimum is narrow, so sigma_c should come from the evidence.
+- **A bug in the categorical prior, fixed.** A categorical basis folds the neighbour element into the radial index, n = (n' − 1) NZ + z', and `SiteBasis.smoothness` took that n as the radial degree, so the penalty grew with the element's position in the list. With n' (sigma_c 1e5): 207 → 50 meV. One-element fits (gold, Al, Fe) are unchanged.
+
+What follows: for many elements use `widths=(S, d, ...)`, order 1 at full width and the higher orders compressed, which needs order-2 site features and a prior chosen by the evidence to be worth it. The bond-environment channels (`env_emb`) are order 1 and have the same limit.

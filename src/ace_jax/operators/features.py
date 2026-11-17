@@ -86,7 +86,8 @@ class SiteBasis(eqx.Module):
     def smoothness(self, L, p):
         """(n(L, p),) the algebraic smoothness prior gamma of each feature of symmetry (L, p)
         (`basis.prior.smoothness_prior` on the (n, l) of its one-particle functions, n the radial
-        degree: with an element embedding the channel is not counted)."""
+        degree: the neighbour element folded into the radial index of a categorical basis, and
+        the channel of an element embedding, are not counted)."""
         return np.asarray(self.gamma[self.lps.index((L, p))], float) if (L, p) in self.lps else np.zeros(0)
 
     def n(self, L, p):
@@ -161,7 +162,8 @@ def random_embedding(n_elements, d, seed=0):
 
 
 def build_embedding_site_basis(elements, order, totaldegree, lmax_feat, embedding="random", *, rcut, rows=None, d_max=None,
-                               wL=1.5, reduction="pca", normalise=True, block_rule="symmetric", coupling_cache_dir=None, seed=0):
+                               wL=1.5, reduction="pca", normalise=True, block_rule="symmetric", coupling_cache_dir=None, seed=0,
+                               widths=None):
     """A `SiteBasis` with an element embedding (the species-compressed linear ACE, "TrACE";
     `basis.model.build_embedding_model`'s one-particle basis): the neighbour species enters the
     radial through a frozen embedding row, R_(n'k)l(r, Z1, Z2) = Q_n'(x) emb[Z2, k], so the
@@ -174,13 +176,19 @@ def build_embedding_site_basis(elements, order, totaldegree, lmax_feat, embeddin
     basis on these radials); rows: an explicit (S, d) block instead.  rcut is shared by every
     pair (ace1's uniform cutoffs).  Radials: Jacobi(4, 4) in the Agnesi coordinate, splined on
     100 nodes, one table for all species; spherical harmonics.  block_rule: "symmetric" counts
-    the degree on the radial index alone (the default here), "ace1" as the categorical ace1_model."""
+    the degree on the radial index alone (the default here), "ace1" as the categorical ace1_model.
+
+    widths: the channels of each correlation order, instead of min(d_max, C(S+nu-1, nu)).  Order 1
+    is linear in the neighbour density of each element, so fewer than S channels there lose
+    information that no readout recovers (on a four-element alloy the on-site blocks went from 51
+    meV to an eV; docs/dev/ham-results.md): compress the higher orders, widths = (S, d, ...).  With
+    an embedding of fewer than max(widths) columns the first widths[nu-1] of them serve order nu."""
     from ..basis import radial_ace1 as ra
     from ..basis.embedding import embedding_rows, embedding_widths, read_embedding
     from ..basis.spec import build_embedding_spec
     zs = ri.resolve_elements(elements)
     S = len(zs)
-    widths = embedding_widths(S, order, d_max=d_max)
+    widths = embedding_widths(S, order, d_max=d_max) if widths is None else [int(w) for w in widths]
     d = max(widths)
     if rows is not None:
         emb = np.asarray(rows, np.float64)
@@ -240,4 +248,5 @@ def build_site_basis(elements, order, totaldegree, lmax_feat, *, rcut, wL=1.5, c
         pair_envelope=jnp.asarray(pair_env), rnl_coefs=jnp.zeros((1, 1, 1, 1)), rnl_Wnlq=jnp.asarray(t["rnl_Wnlq"]),
         polys_A=jnp.asarray(t["polys_A"]), polys_B=jnp.asarray(t["polys_B"]), polys_C=jnp.asarray(t["polys_C"]),
         radial_kind="analytic", rnl_basis=rnl_basis, rnl_grid=(0.0, 1.0, 2))
-    return _coupled(tr, lmax_feat, mb, Rnl, Ylm, zs, rcut, True, coupling_cache_dir)
+    # the categorical radial index carries the neighbour element, n = (n' - 1) NZ + z': the prior counts n'
+    return _coupled(tr, lmax_feat, mb, Rnl, Ylm, zs, rcut, True, coupling_cache_dir, channels=len(zs))
