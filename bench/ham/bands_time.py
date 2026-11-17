@@ -73,7 +73,7 @@ t_s, _ = best(lambda: jax.block_until_ready(hp.hk(prep, k, "S")))
 t_e, e = best(lambda: np.asarray(jnp.linalg.eigvalsh(0.5 * (H + H.conj().T))), reps=3)
 tot = t_prep + t_h + t_s + t_e
 dev = jax.devices()[0]
-print(f"{dev.platform} {'float64' if X64 else 'float32'}: {N} atoms, {prep.n_orb} orbitals, {prep.lists['rows'].shape[1]} bond slots per atom; "
+print(f"{dev.platform} {'float64' if X64 else 'float32'}: {N} atoms, {prep.n_orb} orbitals, {sum(v[0].shape[1] for v in prep.lists['off'].values())} bond slots per atom over the species pairs; "
       f"H and S; n_cpl {n_cpl}, l_cpl {l_cpl}; neighbour lists on the {'device' if DEVICE else 'host'}")
 for name, t in ((f"blocks of H and S on the device (lists on the {'device' if DEVICE else 'host'})", t_prep), ("Bloch sum H(k)", t_h), ("Bloch sum S(k)", t_s),
                 (f"eigenvalues of H(k) ({prep.n_orb} x {prep.n_orb} Hermitian), copied to the host", t_e)):

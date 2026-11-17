@@ -60,25 +60,16 @@ t, g = best(lambda: B.bond_graph(basis, pos, cell, numbers), reps=3); rows.appen
 
 
 def layout():
-    count = np.bincount(g.i, minlength=n)
-    K = int(count.max())
-    start = np.concatenate([[0], np.cumsum(count)])
-    flat = g.i * K + (np.arange(len(g.i)) - start[g.i])
-    rvec = np.zeros((n, K, 3)); rvec[..., 0] = basis.rcut_bond
-    mask = np.zeros((n, K))
-    rvec.reshape(-1, 3)[flat] = g.rij
-    mask.reshape(-1)[flat] = 1.0
-    rev = np.zeros(n * K, np.int32)
-    rev[flat] = flat[g.reverse]
-    return rvec, mask, rev.reshape(n, K), flat, K
+    return OF.PairLayouts(g, numbers, orb.species, basis.rcut_bond)
 
 
-t, (rvec, mask, rev, flat, K) = best(layout); rows.append(("dense (atom, slot) layout (host)", t))
-args = (basis.n_bond, basis.n_cpl, basis.l_cpl, fast.lmax)
-t, canon = best(lambda: jax.block_until_ready(OF._blocks(fast.packs, F, rvec, mask, rev, basis.rcut_bond, args)))
+t, pl = best(layout); rows.append(("dense layout per ordered species pair (host)", t))
+K = round(sum(r * k for r, k in pl.shape.values()) / N)
+args = fast.static()
+t, canon = best(lambda: jax.block_until_ready(OF._blocks(fast.packs, F, pl.lay, basis.rcut_bond, args)))
 rows.append(("off-site blocks, every ordered species pair (device)", t))
 def copy():
-    fresh = OF._blocks(fast.packs, F, rvec, mask, rev, basis.rcut_bond, args)      # a new result: the copy is not cached
+    fresh = OF._blocks(fast.packs, F, pl.lay, basis.rcut_bond, args)      # a new result: the copy is not cached
     jax.block_until_ready(fresh)
     t0 = time.perf_counter()
     h = {k: np.asarray(v) for k, v in fresh.items()}
@@ -90,21 +81,15 @@ nbytes = sum(v.nbytes for v in host.values())
 
 
 def assemble():
-    out = {}
-    za_e, zb_e = numbers[g.i], numbers[g.j]
-    for za in orb.species:
-        for zb in orb.species:
-            e = np.flatnonzero((za_e == za) & (zb_e == zb))
-            out[(za, zb)] = host[(za, zb)].reshape(n * K, *host[(za, zb)].shape[2:])[flat[e]]
-    return out
+    return {key: host[key].reshape(-1, *host[key].shape[2:])[pl.flatpos[e]] for key, e in pl.sel.items()}
 
 
 t, _ = best(assemble, reps=3); rows.append(("select the bonds of each species pair (host)", t))
 t_all, _ = best(lambda: fast.dense(pos, cell, numbers), reps=3)
 total = sum(t for _, t in rows)
 dev = jax.devices()[0]
-print(f"{dev.platform} {'float64' if X64 else 'float32'}: {N} atoms, {len(g.i) / N:.0f} bonds per atom, K = {K}; "
-      f"n_bond {n_bond}, n_cpl {n_cpl}, l_cpl {l_cpl}; species pairs computed on all {N} x {K} slots: {len(fast.packs)}; "
+print(f"{dev.platform} {'float64' if X64 else 'float32'}: {N} atoms, {len(g.i) / N:.0f} bonds per atom, {K} slots per atom over the species pairs; "
+      f"n_bond {n_bond}, n_cpl {n_cpl}, l_cpl {l_cpl}; "
       f"blocks copied back: {nbytes / 1e6:.0f} MB")
 for name, t in rows:
     print(f"  {name:48s} {1e3 * t:8.1f} ms  {100 * t / total:5.1f} %  {1e6 * t / N:8.0f} us per atom")

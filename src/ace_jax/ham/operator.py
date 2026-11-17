@@ -30,10 +30,10 @@ def _bloch_impl(on, off, lists, k, channel, n_orb):
     M = jnp.zeros(n_orb * n_orb, cdtype)
     for blocks, rows in zip(on, lists["on_rows"]):
         M = _scatter(M, blocks[:, channel].astype(cdtype), rows, rows, jnp.ones(rows.shape, cdtype), n_orb)
-    phase = jnp.exp(2j * jnp.pi * (lists["R"] @ k)).astype(cdtype)             # (n, K)
     for key, blocks in off.items():
-        w = phase * lists["valid"][key]
-        M = _scatter(M, blocks[:, :, channel].astype(cdtype), lists["rows"], lists["cols"], w, n_orb)
+        rows, cols, R, valid = lists["off"][key]                               # (n_a, K_ab) each
+        w = jnp.exp(2j * jnp.pi * (R @ k)).astype(cdtype) * valid
+        M = _scatter(M, blocks[:, :, channel].astype(cdtype), rows, cols, w, n_orb)
     return M.reshape(n_orb, n_orb)
 
 
@@ -57,7 +57,7 @@ def _device_impl(site, readout, packs, pos, cell, species, site_species, s_rij, 
     blocks, the reverse slot and image of every bond, off-site blocks, and the index lists of the
     Bloch sum.  `species`: index into the orbital basis' species, per atom; `site_species`: index
     into the site basis' elements (its radials are tabulated in that order)."""
-    args, counts, norbs, rcut_bond, pairs = static
+    args, counts, norbs, rcut_bond, zs, kpair = static
     n, Ks = s_idx.shape
     K = b_idx.shape[1]
     dtype = b_rij.dtype
@@ -77,15 +77,37 @@ def _device_impl(site, readout, packs, pos, cell, species, site_species, s_rij, 
     fwd = jnp.lexsort((fR[:, 2], fR[:, 1], fR[:, 0], fj, fi))
     bwd = jnp.lexsort((-fR[:, 2], -fR[:, 1], -fR[:, 0], fi, fj))
     rev = jnp.zeros(n * K, jnp.int32).at[bwd].set(fwd.astype(jnp.int32)).reshape(n, K)
-    fmask = mask.astype(dtype)
-    off = OF._blocks_impl(packs, F, b_rij, fmask, rev, rcut_bond, args, env)
     norb = jnp.asarray(norbs, jnp.int32)[species]
     offsets = jnp.concatenate([jnp.zeros(1, jnp.int32), jnp.cumsum(norb)[:-1]])
+    # one dense layout per ordered species pair: the rows are the atoms of the first species, and
+    # their neighbours of the second are packed into the first slots (a stable sort per row)
     zj = species[b_idx]
-    valid = {key: ((species[:, None] == ka) & (zj == kb) & mask).astype(jnp.float32)
-             for key, (ka, kb) in zip(off, pairs)}
-    lists = {"rows": jnp.broadcast_to(offsets[:, None], (n, K)), "cols": offsets[b_idx], "R": R.astype(dtype),
-             "valid": valid, "on_rows": tuple(offsets[a] for a in atoms)}
+    where = jnp.full(n * K + 1, 0, jnp.int32)             # global (atom, slot) -> position in its pair's layout
+    part = {}
+    for ka, za in enumerate(zs):
+        if not counts[ka]:
+            continue
+        rows = atoms[ka]
+        for kb, zb in enumerate(zs):
+            if not counts[kb]:
+                continue
+            Kab = kpair[ka][kb]
+            want = mask[rows] & (zj[rows] == kb)
+            order = jnp.argsort(~want, axis=1, stable=True)[:, :Kab]              # (n_a, K_ab) slots of the bond list
+            m = jnp.take_along_axis(want, order, axis=1)
+            gflat = rows[:, None] * K + order
+            where = where.at[jnp.where(m, gflat, n * K).reshape(-1)].set(jnp.arange(m.size, dtype=jnp.int32))
+            part[(za, zb)] = (rows, order, m, gflat)
+    lay, lists_off = {}, {}
+    pad = jnp.asarray([rcut_bond, 0.0, 0.0], dtype)
+    for key, (rows, order, m, gflat) in part.items():
+        rvec = jnp.where(m[..., None], jnp.take_along_axis(b_rij[rows], order[..., None], axis=1), pad)
+        lay[key] = (rows, rvec, m.astype(dtype), where[rev.reshape(-1)[gflat.reshape(-1)]])
+        nbr = jnp.take_along_axis(b_idx[rows], order, axis=1)
+        lists_off[key] = (jnp.broadcast_to(offsets[rows][:, None], m.shape), offsets[nbr],
+                          jnp.take_along_axis(R[rows], order[..., None], axis=1).astype(dtype), m.astype(jnp.float32))
+    off = OF._blocks_impl(packs, F, lay, rcut_bond, args, env)
+    lists = {"off": lists_off, "on_rows": tuple(offsets[a] for a in atoms)}
     ok = jnp.all(jnp.where(mask, (b_idx.reshape(-1)[rev.reshape(-1)].reshape(n, K) == i), True))
     return on, off, lists, ok
 
@@ -94,6 +116,14 @@ _device = jax.jit(_device_impl, static_argnums=14)
 
 
 # compiled, with the slot count static: an eager slice uploads its bounds as scalars
+@jax.jit
+def _pair_slots(species, b_idx, b_count, ns):
+    """(ns, ns): the largest number of neighbours of species b any atom of species a has."""
+    mask = jnp.arange(b_idx.shape[1])[None, :] < b_count[:, None]
+    per = jax.vmap(lambda kb: jnp.sum(mask & (species[b_idx] == kb), axis=1))(ns)        # (ns, n)
+    return jax.vmap(lambda ka: jnp.max(jnp.where(species[None, :] == ka, per, 0), axis=1))(ns)
+
+
 _trim = jax.jit(lambda rij, idx, kt: (rij[:, :kt], idx[:, :kt]), static_argnums=2)
 
 
@@ -117,6 +147,12 @@ class HamiltonianPredictor:
         self.onsite, self.offsite = OnsitePredictor(onsite), OffsitePredictor(offsite)
         self.channels, self.orbitals = onsite.channels, onsite.orbitals
         self._k = {}                                   # slots of the device neighbour lists, by cutoff
+        self._ns = None
+
+    def _species_range(self):
+        if self._ns is None:
+            self._ns = jax.device_put(np.arange(len(self.orbitals.species), dtype=np.int32))
+        return self._ns
 
     def _dense(self, positions, cell, pbc, cutoff):
         """Dense neighbour list on the GPU (matscipy-neighbours' CUDA backend), growing the slot
@@ -153,26 +189,21 @@ class HamiltonianPredictor:
         dtype = gb.rij.dtype
         counts = tuple(int((species == k).sum()) for k in range(len(orb.species)))
         norbs = tuple(orb.n_orb(z) for z in orb.species)
-        pairs = tuple((orb.species.index(za), orb.species.index(zb)) for za, zb in self._pair_order())
-        static = (self.offsite.static(), counts, norbs, basis.rcut_bond, pairs)
+        pos_d, cell_d, sp_d, ss_d = (jax.device_put(np.asarray(positions, dtype)), jax.device_put(np.asarray(cell, dtype)),
+                                     jax.device_put(species), jax.device_put(basis.site.species_index(numbers)))
+        # slots per species pair, in steps of 8 (a small array comes down to the host for this)
+        kp = np.asarray(_pair_slots(sp_d, gb.idx, gb.count, self._species_range()))
+        kpair = tuple(tuple(int(min(gb.idx.shape[1], max(8, -(-int(v) // 8) * 8))) for v in row) for row in kp)
+        static = (self.offsite.static(), counts, norbs, basis.rcut_bond, tuple(orb.species), kpair)
         env = None
         if basis.n_env:
             ge = self._dense(positions, cell, pbc, basis.r_env)
             env = (ge.rij, ge.count)
-        pos_d, cell_d, sp_d, ss_d = (jax.device_put(np.asarray(positions, dtype)), jax.device_put(np.asarray(cell, dtype)),
-                                     jax.device_put(species), jax.device_put(basis.site.species_index(numbers)))
         on, off, lists, ok = _device(basis.site, self.onsite.readout, self.offsite.packs, pos_d, cell_d, sp_d, ss_d,
                                      gs.rij, gs.idx, gs.count, gb.rij, gb.idx, gb.count, env, static)
         prep = Prepared(on, off, lists, int(sum(orb.n_orb(z) for z in numbers)), None, None)
         prep.reverse_ok = ok                              # device scalar: every bond found its reverse
         return prep
-
-    def _pair_order(self):
-        """The ordered species pairs in the order `offsite_fast._blocks` returns them."""
-        out = []
-        for za, zb in self.offsite.packs:
-            out += [(za, zb)] if za == zb else [(za, zb), (zb, za)]
-        return out
 
     def prepare(self, positions, cell, numbers, pbc=True):
         """Evaluate every block of the structure; they stay on the device."""
@@ -189,33 +220,21 @@ class HamiltonianPredictor:
         atoms = tuple(np.flatnonzero(numbers == z).astype(np.int32) for z in orb.species)
         on = _readout(self.onsite.readout, F, atoms)
         g = B.bond_graph(basis, positions, cell, numbers, pbc)
-        count = np.bincount(g.i, minlength=n)
-        K = max(int(count.max()) if len(g.i) else 1, 1)
-        start = np.concatenate([[0], np.cumsum(count)])
-        flat = g.i * K + (np.arange(len(g.i)) - start[g.i])
-        rvec = np.zeros((n, K, 3)); rvec[..., 0] = basis.rcut_bond
-        mask = np.zeros((n, K))
-        nbr = np.zeros(n * K, np.int64)
-        R = np.zeros((n * K, 3))
-        rev = np.zeros(n * K, np.int32)
-        rvec.reshape(-1, 3)[flat] = g.rij
-        mask.reshape(-1)[flat] = 1.0
-        nbr[flat], R[flat], rev[flat] = g.j, g.R, flat[g.reverse]
-        off = self.offsite.device(F, rvec, mask, rev.reshape(n, K), B.env_lists(basis, positions, cell, pbc))
+        pl = OF.PairLayouts(g, numbers, orb.species, basis.rcut_bond)
+        off = self.offsite.device(F, pl.lay, B.env_lists(basis, positions, cell, pbc))
         offsets = np.concatenate([[0], np.cumsum([orb.n_orb(z) for z in numbers])])
-        zj_slot = numbers[nbr].reshape(n, K)
-        valid = {(za, zb): jnp.asarray(((numbers[:, None] == za) & (zj_slot == zb) & (mask > 0)).astype(np.float32))
-                 for za, zb in off}
-        lists = {"rows": jnp.asarray(np.repeat(offsets[:-1, None], K, 1), jnp.int32),
-                 "cols": jnp.asarray(offsets[nbr].reshape(n, K), jnp.int32),
-                 "R": jnp.asarray(R.reshape(n, K, 3), off[next(iter(off))].dtype if off else jnp.float32),
-                 "valid": valid,
-                 "on_rows": tuple(jnp.asarray(offsets[a], jnp.int32) for a in atoms)}
+        lists_off = {}
+        for key in off:
+            b = pl.bond[key]                                                  # (n_a, K_ab) bond per slot, -1 padding
+            live, e = b >= 0, np.maximum(b, 0)
+            lists_off[key] = (jnp.asarray(offsets[g.i[e]], jnp.int32), jnp.asarray(offsets[g.j[e]], jnp.int32),
+                              jnp.asarray(np.where(live[..., None], g.R[e], 0), off[key].dtype), jnp.asarray(live.astype(np.float32)))
+        lists = {"off": lists_off, "on_rows": tuple(jnp.asarray(offsets[a], jnp.int32) for a in atoms)}
         return Prepared(on, off, lists, int(offsets[-1]), offsets, g)
 
     def hk(self, prep, k=(0.0, 0.0, 0.0), channel="H"):
         """(n_orb, n_orb) complex Bloch matrix of `channel` at fractional k, on the device."""
-        k = jnp.asarray(k, prep.lists["R"].dtype)
+        k = jnp.asarray(k, prep.on[0].dtype)
         return _bloch(prep.on, prep.off, prep.lists, k, self.channels.index(channel), prep.n_orb)
 
     def bands(self, prep, kpts, overlap="S"):

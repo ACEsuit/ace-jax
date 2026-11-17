@@ -355,3 +355,18 @@ CPU inference is a requirement (coupling to DFT codes for SCF injection), so the
 - Next: dense layouts per ordered species pair (rows of one species, slots of the other), so each bond is evaluated once. Expected to bring two-species systems to about the one-species figure, three times faster than MACE-H on one thread at the accuracy that meets the paper's target.
 - After that the per-bond cost is set by the number of environment features per predicted number (240 to 360 here); fewer radials (the ablation's 4 and 2, just inside the target) cut it roughly in proportion.
 - Still open from earlier: more CPU threads do not help and sometimes hurt. For a DFT code running on many cores this matters as much as the single-thread time.
+
+## One dense layout per ordered species pair (2026-11-17)
+
+The compiled off-site predictor now takes one dense layout per ordered species pair (rows: the atoms of the first species; slots: their bonds to the second), on the host-list path (`offsite_fast.PairLayouts`) and the device-list path (a stable sort per row packs each pair's neighbours; one small array of slot counts comes down to the host). Each bond is evaluated once, in the layout of its canonical pair; the other orientation is that block transposed. Before, every canonical pair was evaluated on every (atom, slot) and masked.
+
+| full H, 108-atom SiC, per atom | before | now | MACE-H |
+|---|---|---|---|
+| CPU, 1 thread, float64: site (2, 2) only | 10.6 ms | 5.0 ms | 62.7 ms |
+| CPU, 1 thread: env (5, 6, 4, 4, 4) only | 42.0 ms | 13.0 ms | |
+| CPU, 1 thread: site (2, 2) + env (5, 6, 4, 4, 4) | 44.8 ms | 14.2 ms | |
+| GPU (RTX 4000 Ada), float32: site (2, 2) only | 1.05–1.63 ms | 0.31 ms | 3.7 ms |
+| GPU, float32: site (2, 2) + env | 0.88 ms | 0.94 ms | |
+
+- **CPU, one thread, with the model that meets the paper's target: 14.2 ms per atom, 4.4 times faster than MACE-H.** Better than the one-species estimate (20 ms), because a mixed pair is evaluated in one orientation only.
+- The GPU time with the environment did not change: there the environment contraction runs one atom at a time (`lax.map`, chosen for the CPU cache), which is sequential on a GPU. Not pursued (CPU is the requirement).

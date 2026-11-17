@@ -115,11 +115,19 @@ def _radial(x, n):
     return jnp.stack(T[:n], axis=-1) * ((1 - x * x) ** 2)[..., None]
 
 
-def _canonical(pack, F, phi0, U, Y, usign, rev, n_cpl, l_cpl, phi2=None, Aenv=None):
-    """(n, K, c, n_a, n_b): the canonical blocks of one species pair on every (atom, slot)."""
+def _canonical(pack, Fa, Fb, ga, gb, rev, usign, n_cpl, l_cpl):
+    """(n_a, K, c, n_orb_a, n_orb_b): the canonical blocks of one species pair on the slots of its
+    layout.  `ga`: the bond geometry on this layout (first atoms of species a); `gb`: on the
+    reverse layout (b -> a), where the features that live on the second atom are evaluated;
+    `rev`: for each slot, the flat position of its reverse bond in that layout."""
+    phi0, U, Y, phi2, side = ga
     n, K = phi0.shape[:2]
     na, nb = pack.shape
     nlm = (l_cpl + 1) ** 2
+    Aenv = None
+    if side is not None:                                  # both ends: the reverse bond's half
+        sb = gb[4]
+        Aenv = side + sb.reshape(-1, *sb.shape[2:])[rev].reshape(side.shape)
     flat = None
     for k, (L, _p) in enumerate(pack.lps):
         W0 = pack.W0[k]
@@ -127,18 +135,18 @@ def _canonical(pack, F, phi0, U, Y, usign, rev, n_cpl, l_cpl, phi2=None, Aenv=No
         yL = Y[..., L * L:(L + 1) ** 2]
         part = jnp.einsum("cqn,aKn,aKM->aKcqM", W0, phi0, yL)
         if n_cpl and pack.groups[k]:
+            Ub = gb[1]
             Ci = jnp.zeros((n, nc, Q, 2 * L + 1, n_cpl, nlm), phi0.dtype)
-            Cj = jnp.zeros_like(Ci)
+            Cj = jnp.zeros((Ub.shape[0], nc, Q, 2 * L + 1, n_cpl, nlm), phi0.dtype)
             for (l, lam, pi), Wi, Wj, T in zip(pack.groups[k], pack.Wi[k], pack.Wj[k], pack.T[k]):
-                f = F[(lam, pi)]
                 sl = slice(l * l, (l + 1) ** 2)
-                Ci = Ci.at[..., sl].add(jnp.einsum("cqnb,abu,muM->acqMnm", Wi, f, T))
-                Cj = Cj.at[..., sl].add(jnp.einsum("cqnb,abu,muM->acqMnm", Wj, f, T))
+                Ci = Ci.at[..., sl].add(jnp.einsum("cqnb,abu,muM->acqMnm", Wi, Fa[(lam, pi)], T))
+                Cj = Cj.at[..., sl].add(jnp.einsum("cqnb,abu,muM->acqMnm", Wj, Fb[(lam, pi)], T))
             part = part + jnp.einsum("acqMnm,aKnm->aKcqM", Ci, U)
             # the j group lives on the bond's second atom: evaluate it there, on the reverse bond
             # (whose u is this bond's with the sign (-1)^l), and read it back through `rev`
-            Dj = jnp.einsum("acqMnm,aKnm->aKcqM", Cj, U * usign)
-            part = part + Dj.reshape(n * K, nc, Q, 2 * L + 1)[rev].reshape(n, K, nc, Q, 2 * L + 1)
+            Dj = jnp.einsum("acqMnm,aKnm->aKcqM", Cj, Ub * usign)
+            part = part + Dj.reshape(-1, nc, Q, 2 * L + 1)[rev].reshape(n, K, nc, Q, 2 * L + 1)
         if pack.egroups[k]:
             # bond environment.  Per atom (its bonds' features fit the cache): the features
             # phi_n (Y_l (x) A^env_lam)^L of every group side by side, then ONE matrix product with
@@ -183,38 +191,89 @@ def _env_side(e_rij, e_live, rvec, mask, r_env, rmax, n_env, l_env):
     return jax.lax.map(one, (e_rij, e_live, rvec, mask))
 
 
-def _blocks_impl(packs, F, rvec, mask, rev, rcut, shape_args, env=None):
+def _blocks_impl(packs, F, lay, rcut, shape_args, env=None):
+    """{(za, zb): (n_a, K_ab, c, n_orb_a, n_orb_b)} for every ordered species pair in `lay`.
+
+    lay[(za, zb)] = (rows, rvec, mask, rev): the atoms of species za, their bonds to atoms of
+    species zb in dense slots (padding at the cutoff), and for each slot the flat position of its
+    reverse bond in lay[(zb, za)].  Each bond is evaluated once, in the layout of its canonical
+    pair (za <= zb); the other orientation is that block transposed."""
     n_bond, n_cpl, l_cpl, lmax, n_env, l_env, n_ebond, l_ebond, r_env = shape_args
-    n, K = mask.shape
-    dist = jnp.sqrt(jnp.sum(rvec * rvec, axis=-1))
-    x = jnp.clip(dist / rcut, 0.0, 1.0)
-    phi0, phi1 = _radial(x, n_bond), _radial(x, n_cpl)
-    Y = real_spherical_harmonics(rvec, max(lmax, 1))
-    Ylm = Y[..., :(l_cpl + 1) ** 2]
-    U = phi1[..., :, None] * Ylm[..., None, :] * mask[..., None, None]
     usign = jnp.asarray(np.concatenate([[(-1.0) ** l] * (2 * l + 1) for l in range(l_cpl + 1)]))
-    phi0 = phi0 * mask[..., None]
-    flat_rev = rev.reshape(-1)
-    phi2 = Aenv = None
-    if n_env:
-        e_rij, e_count = env
-        e_live = jnp.arange(e_rij.shape[1])[None, :] < e_count[:, None]
-        side = _env_side(e_rij, e_live, rvec, mask, r_env, r_env + 0.5 * rcut, n_env, l_env)
-        Aenv = side + side.reshape(n * K, *side.shape[2:])[flat_rev].reshape(side.shape)   # both ends: the reverse bond's half
-        phi2 = _radial(x, n_ebond) * mask[..., None]
-    canon = {key: _canonical(pack, F, phi0, U, Y, usign, flat_rev, n_cpl, l_cpl, phi2, Aenv) for key, pack in packs.items()}
-    # every ordered species pair, on the device: the non-canonical parts are the reverse bond's, transposed
+    geo = {}
+    for key, (rows, rvec, mask, _rev) in lay.items():
+        dist = jnp.sqrt(jnp.sum(rvec * rvec, axis=-1))
+        x = jnp.clip(dist / rcut, 0.0, 1.0)
+        Y = real_spherical_harmonics(rvec, max(lmax, 1))
+        U = _radial(x, n_cpl)[..., :, None] * Y[..., None, :(l_cpl + 1) ** 2] * mask[..., None, None]
+        phi2 = side = None
+        if n_env:
+            e_rij, e_count = env
+            e_live = jnp.arange(e_rij.shape[1])[None, :] < e_count[:, None]
+            side = _env_side(e_rij[rows], e_live[rows], rvec, mask, r_env, r_env + 0.5 * rcut, n_env, l_env)
+            phi2 = _radial(x, n_ebond) * mask[..., None]
+        geo[key] = (_radial(x, n_bond) * mask[..., None], U, Y, phi2, side)
     out = {}
-    for (za, zb), c in canon.items():
-        back = jnp.swapaxes(c.reshape(n * K, *c.shape[2:])[flat_rev], -1, -2).reshape(n, K, c.shape[2], c.shape[4], c.shape[3])
+    for (za, zb), pack in packs.items():
+        if (za, zb) not in lay:
+            continue
+        rows_a, _, _, rev_ab = lay[(za, zb)]
+        rows_b, _, _, rev_ba = lay[(zb, za)]
+        Fa = {k: v[rows_a] for k, v in F.items()}
+        Fb = Fa if za == zb else {k: v[rows_b] for k, v in F.items()}
+        c = _canonical(pack, Fa, Fb, geo[(za, zb)], geo[(zb, za)], rev_ab, usign, n_cpl, l_cpl)
+        # the other orientation: the reverse bond's block, transposed
+        nb_rows, Kb = lay[(zb, za)][2].shape
+        back = jnp.swapaxes(c.reshape(-1, *c.shape[2:])[rev_ba], -1, -2).reshape(nb_rows, Kb, c.shape[2], c.shape[4], c.shape[3])
         if za == zb:
-            out[(za, zb)] = c + packs[(za, zb)].low * back
+            out[(za, zb)] = c + pack.low * back
         else:
             out[(za, zb)], out[(zb, za)] = c, back
     return out
 
 
-_blocks = jax.jit(_blocks_impl, static_argnums=6)       # the basis sizes fix the program
+_blocks = jax.jit(_blocks_impl, static_argnums=4)       # the basis sizes fix the program
+
+
+class PairLayouts:
+    """The bonds of a structure in one dense layout per ordered species pair (host arrays).
+    lay[(za, zb)] = (rows, rvec, mask, rev) as `_blocks_impl` takes them; `sel[(za, zb)]`: the bond
+    indices (into the bond graph) of the pair; `flatpos[e]`: the flat (row, slot) position of bond e
+    in its pair's layout; `bond[(za, zb)]`: (n_a, K_ab) bond index per slot, -1 for padding."""
+
+    def __init__(self, g, numbers, species, rcut):
+        numbers = np.asarray(numbers)
+        present = [z for z in species if (numbers == z).any()]
+        zi, zj = numbers[g.i], numbers[g.j]
+        self.flatpos = np.zeros(len(g.i), np.int64)
+        self.sel, self.bond, self.shape = {}, {}, {}
+        tmp = {}
+        for za in present:
+            rows = np.flatnonzero(numbers == za)
+            rowpos = np.full(len(numbers), -1, np.int64)
+            rowpos[rows] = np.arange(len(rows))
+            for zb in present:
+                e = np.flatnonzero((zi == za) & (zj == zb))               # sorted by first atom, as the graph is
+                r = rowpos[g.i[e]]
+                count = np.bincount(r, minlength=len(rows))
+                K = max(int(count.max()) if len(e) else 1, 1)
+                start = np.concatenate([[0], np.cumsum(count)])
+                pos = r * K + (np.arange(len(e)) - start[r])
+                self.flatpos[e] = pos
+                rvec = np.zeros((len(rows), K, 3)); rvec[..., 0] = rcut       # padding: at the cutoff
+                mask = np.zeros((len(rows), K))
+                bond = np.full(len(rows) * K, -1, np.int64)
+                rvec.reshape(-1, 3)[pos] = g.rij[e]
+                mask.reshape(-1)[pos] = 1.0
+                bond[pos] = e
+                tmp[(za, zb)] = (rows.astype(np.int32), rvec, mask)
+                self.sel[(za, zb)], self.bond[(za, zb)], self.shape[(za, zb)] = e, bond.reshape(len(rows), K), (len(rows), K)
+        self.lay = {}
+        for (za, zb), (rows, rvec, mask) in tmp.items():
+            rev = np.zeros(rows.shape[0] * mask.shape[1], np.int32)
+            e = self.sel[(za, zb)]
+            rev[self.flatpos[e]] = self.flatpos[g.reverse[e]]             # in the layout of (zb, za)
+            self.lay[(za, zb)] = (rows, rvec, mask, rev)
 
 
 class OffsitePredictor:
@@ -227,14 +286,14 @@ class OffsitePredictor:
         self.packs = {(za, zb): _pack(model, za, zb) for za in orb.species for zb in orb.species if za <= zb}
         self.lmax = max([L for p in self.packs.values() for L, _ in p.lps] + [model.bond.l_cpl, model.bond.l_ebond, 1])
 
-    def device(self, F, rvec, mask, rev, env=None):
-        """{(za, zb): (n_atoms, K, n_channel, n_a, n_b)} on the device, for every ordered species
-        pair on every (atom, slot); a slot holds a block of that pair only where the species
-        match.  For consumers that stay on the device (H(k), eigenvalues): no copy to the host."""
+    def device(self, F, lay, env=None):
+        """{(za, zb): (n_a, K_ab, n_channel, n_orb_a, n_orb_b)} on the device, one dense layout per
+        ordered species pair (`PairLayouts.lay`, or the same built on the device).  For consumers
+        that stay on the device (H(k), eigenvalues): no copy to the host."""
         b = self.model.bond
         if b.n_env and env is None:
             raise ValueError("this model has a bond environment: pass env = (neighbour vectors (n, Ke, 3), counts) within r_env")
-        return _blocks(self.packs, F, rvec, mask, rev, b.rcut_bond, self.static(), env if b.n_env else None)
+        return _blocks(self.packs, F, lay, b.rcut_bond, self.static(), env if b.n_env else None)
 
     def static(self):
         b = self.model.bond
@@ -246,28 +305,13 @@ class OffsitePredictor:
         rij, zi, zj, seg, n = site_graph(basis.site, positions, cell, numbers, pbc)
         F = _features(basis.site, rij, zi, zj, seg, n)
         g = B.bond_graph(basis, positions, cell, numbers, pbc)
-        # dense (atom, slot) layout: bonds are sorted by their first atom
-        count = np.bincount(g.i, minlength=n)
-        K = int(count.max()) if len(g.i) else 1
-        start = np.concatenate([[0], np.cumsum(count)])
-        slot = np.arange(len(g.i)) - start[g.i]
-        flat = g.i * K + slot
-        rvec = np.zeros((n, K, 3)); rvec[..., 0] = basis.rcut_bond            # padding: at the cutoff
-        mask = np.zeros((n, K))
-        rvec.reshape(-1, 3)[flat] = g.rij
-        mask.reshape(-1)[flat] = 1.0
-        rev = np.zeros(n * K, np.int32)
-        rev[flat] = flat[g.reverse]
-        canon = self.device(F, rvec, mask, rev.reshape(n, K), B.env_lists(basis, positions, cell, pbc))
+        pl = PairLayouts(g, numbers, m.orbitals.species, basis.rcut_bond)
+        blocks = self.device(F, pl.lay, B.env_lists(basis, positions, cell, pbc))
         out = {}
-        za_e, zb_e = numbers[g.i], numbers[g.j]
-        for za in m.orbitals.species:
-            for zb in m.orbitals.species:
-                e = np.flatnonzero((za_e == za) & (zb_e == zb))
-                if not len(e):
-                    continue
-                c = canon[(za, zb)]
-                out[(za, zb)] = (e, np.asarray(c).reshape(n * K, *c.shape[2:])[flat[e]])
+        for pair, e in pl.sel.items():
+            if len(e):
+                c = blocks[pair]
+                out[pair] = (e, np.asarray(c).reshape(-1, *c.shape[2:])[pl.flatpos[e]])
         return g, out
 
     def __call__(self, positions, cell, numbers, pbc=True):
