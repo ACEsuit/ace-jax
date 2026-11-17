@@ -22,7 +22,7 @@ SRC = ROOT / "src" / "ace_jax"
 FRAMEWORK, LINEAR, UQ, APP, FRONT = range(5)
 LAYERS = [
     *[(f"basis.{m}", FRAMEWORK, None) for m in
-      ("spec", "coupling", "prior", "export", "embedding", "radial_init", "radial_ace1")],
+      ("spec", "coupling", "prior", "export", "embedding", "radial_init", "radial_ace1", "cg")],
     *[(f"eval.{m}", FRAMEWORK, None) for m in
       ("harmonics", "radial", "splinify", "nlist", "aa_dag", "product")],
     ("_moved", FRAMEWORK, None),
@@ -37,6 +37,9 @@ LAYERS = [
 
 # (importer, imported): the step of the spec's order of work that removes the edge.
 ALLOWED = {
+    # the carrier ACEModel of the site features: step 6 (features on eval.product / eval.features)
+    ("ham.features", "basis.model"): 6,
+    ("ham.features", "eval.model"): 6,
 }
 
 
