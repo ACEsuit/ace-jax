@@ -609,3 +609,18 @@ On one 64-atom aluminium structure (shells s s s p p d; core 1s, 2s, 2p; grid 5 
 Tests (`tests/test_ham_project.py`, a synthetic two-atom system): on the grid the Bloch matrices of the projected blocks are the valence blocks of B⁺HB and B⁺SB; with the core an eigenfunction up to a small coupling the valence spectrum is that of the full problem, and the error grows with the coupling.
 
 This supersedes leaving core bands out of the sum (`core_bands=`, kept for all-electron models): the model then has no core blocks to get wrong.
+
+**Against Quoll.** Quoll.jl has the same projection (`LaikovCore`, `perform_core_projection`; its `FC99V` variant uses the raw core-valence overlap). Its formula, Ō₂₂ = O₂₂ + A + A⁺ with A = Ŝ₁₂⁺(½ O₁₁ Ŝ₁₂ − O₁₂) and Ŝ₁₂ = S₁₁⁻¹ S₁₂, is the one here written differently. Run on the same FHI-aims calculation (aluminium `fcc_000`, core 1s 2s 2p, mesh 5 x 5 x 5, which Quoll reduces to 63 k-points by time reversal; `ham-ref/work/quoll_proj/`): the same 23,080 blocks, and the largest difference is 1.4e-14 eV in H (largest element 13.8 eV) and 1.1e-15 in S. So data can be projected at ingestion by Quoll or afterwards by `core_projection` with the same result.
+
+**Residual with the projected model** (aluminium, 200 training and 20 test structures, energies only, as the table above):
+
+| band term | test RMSE of the potential |
+|---|---|
+| none (DFT energy directly) | 0.55 meV per atom |
+| valence band energy, reference H | 1.04 |
+| valence band energy, all-electron model with the core bands left out | 3.07 |
+| band energy of the core-projected model | 3.54 |
+
+- The projected model is no more accurate in band energy than the all-electron model with its core bands left out (on a training structure its band energy is off by +18.6 meV per atom against −1.1), which fits the MACE-H paper's remark that the projected valence functions depend on the environment. It is three times cheaper (9 orbitals: the band terms of 220 structures took 538 s against 1,740 s).
+- Either way the H model costs a factor of three over the reference H; it was fitted to two structures with one model size, so there is room there.
+- Measured from the Fermi level the residual is again far worse (21.8 meV per atom).
