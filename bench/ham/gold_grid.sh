@@ -18,7 +18,8 @@ for n in 1 2 4 8 16 32 64 152; do
   for m in "${models[@]}"; do
     tag="n=$n $m"
     grep -qsF "\"tag\": \"$tag\"" "$out.tags" && continue
-    $py bench/ham/deeph_fit.py "$gold" "$n" 11 bonds=0 $m out="$out" 2>&1 | grep -E "training structures|test set|Error" | cut -c1-300 \
-      && echo "{\"tag\": \"$tag\"}" >> "$out.tags"
+    before=$(wc -l < "$out" 2>/dev/null || echo 0)
+    $py bench/ham/deeph_fit.py "$gold" "$n" 11 bonds=0 $m out="$out" 2>&1 | grep -E "training structures|test set|Error" | cut -c1-300
+    [ "$(wc -l < "$out" 2>/dev/null || echo 0)" -gt "$before" ] && echo "{\"tag\": \"$tag\"}" >> "$out.tags"
   done
 done
