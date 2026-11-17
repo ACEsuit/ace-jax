@@ -9,7 +9,11 @@ valence window (above E_F - 15 eV, below E_F + 3 eV):
               with this cutoff can reach at best);
   predicted H and S; and predicted H with the reference S.
     JAX_PLATFORMS=cpu uv run python bench/ham/eigen_accuracy.py <site radials> <n_bond> <n_cpl> <l_cpl> [rcut_bond=9] [n_train=20000] [test=FCC/SK-supercell-001.h5]
-With `dump=<file.npz>` as a last argument the predicted and reference spectra are saved."""
+With `dump=<file.npz>` as a last argument the predicted and reference spectra are saved.
+With `diagnose` as a last argument, the eigenvalue error is attributed to parts of the matrix by
+first-order perturbation theory on the reference eigenvectors, de_n = v_n^T (dH - e_n dS) v_n
+(checked against the exact error of the full prediction): on-site blocks, off-site blocks by
+bond length, and blocks by shell type."""
 import os
 import sys
 import time
@@ -57,7 +61,46 @@ def compare(e, ref, n_occ):
             f"core ({int(core.sum())} states): {f(d[core])}")
 
 
-def main(nsite, n_bond, n_cpl, l_cpl, rcut_bond=9.0, n_train=20000, test="FCC/SK-supercell-001.h5", dump=None):
+def diagnose(ref, pred, d, g, e, n_occ):
+    """First-order attribution of the valence eigenvalue error to parts of dH."""
+    na = len(d["positions"])
+    w, V = scipy.linalg.eigh(0.5 * (ref["H"] + ref["H"].T), 0.5 * (ref["S"] + ref["S"].T), check_finite=False)
+    ef = 0.5 * (w[n_occ - 1] + w[n_occ])
+    val = (w > ef - 15.0) & (w < ef + 3.0)
+    Vv = V[:, val]
+    dH, dS = pred["H"] - ref["H"], pred["S"] - ref["S"]
+    first = lambda M: np.einsum("in,in->n", Vv, M @ Vv)
+    stat = lambda x: f"MAE {1e3 * np.abs(x).mean():8.2f}  RMSE {1e3 * np.sqrt((x ** 2).mean()):8.2f}  mean {1e3 * x.mean():8.2f} meV"
+    exact = spectrum(pred["H"], pred["S"])[val] - w[val]
+    full = first(dH) - w[val] * first(dS)
+    print(f"   diagnosis, valence window ({int(val.sum())} states):")
+    print(f"     exact error of the full prediction             {stat(exact)}")
+    print(f"     first order, dH and dS                         {stat(full)}   (max |exact - first order| {1e3 * np.abs(exact - full).max():.2f} meV)")
+    print(f"     first order, dH only                           {stat(first(dH))}")
+    dist = np.full((na, na), np.inf)
+    dist[g.i[e], g.j[e]] = np.linalg.norm(g.rij[e], axis=1)
+    dist[np.arange(na), np.arange(na)] = 0.0
+    big = lambda m: np.repeat(np.repeat(m, N, 0), N, 1)
+    for label, m in (("on-site blocks", dist == 0), ("off-site, bonds < 3.5 A", (dist > 0) & (dist < 3.5)),
+                     ("off-site, 3.5 - 5.5 A", (dist >= 3.5) & (dist < 5.5)), ("off-site, 5.5 - 9 A", (dist >= 5.5) & np.isfinite(dist)),
+                     ("pairs beyond the cutoff (truncation)", ~np.isfinite(dist))):
+        mm = big(m)
+        print(f"     first order, dH of {label:36s} {stat(first(dH * mm))}   block RMSE {1e3 * np.sqrt((dH[mm] ** 2).mean()):.2f} meV")
+    ls = np.tile(np.concatenate([[l] * (2 * l + 1) for l in aitb.AL.ls(13)]), na)
+    for a in range(3):
+        for b in range(a, 3):
+            mm = ((ls[:, None] == a) & (ls[None, :] == b)) | ((ls[:, None] == b) & (ls[None, :] == a))
+            print(f"     first order, dH of {'spd'[a]}-{'spd'[b]} blocks (on- and off-site)        {stat(first(dH * mm))}   block RMSE {1e3 * np.sqrt((dH[mm] ** 2).mean()):.2f} meV")
+    # how much of the error is a rigid shift of the valence band, and how much is in the Loewdin metric
+    print(f"     error after removing its mean (a rigid shift)  MAE {1e3 * np.abs(exact - exact.mean()).mean():.2f} meV")
+    L = np.linalg.cholesky(0.5 * (ref["S"] + ref["S"].T))
+    X = scipy.linalg.solve_triangular(L, dH, lower=True, check_finite=False)
+    Ht = scipy.linalg.solve_triangular(L, X.T, lower=True, check_finite=False)
+    print(f"     dH in the orthonormalised basis (L^-1 dH L^-T): RMS element {1e3 * np.sqrt((Ht ** 2).mean()):.2f} meV, "
+          f"against {1e3 * np.sqrt((dH ** 2).mean()):.2f} meV in the orbital basis; RMS diagonal {1e3 * np.sqrt((np.diag(Ht) ** 2).mean()):.2f} meV")
+
+
+def main(nsite, n_bond, n_cpl, l_cpl, rcut_bond=9.0, n_train=20000, test="FCC/SK-supercell-001.h5", dump=None, diag=False):
     site = build_site_basis([13], order=1, totaldegree=40, lmax_feat=4, rcut=9.0, wL=0.5,
                             nmax_by_order=(nsite,), lmax_by_order=(4,))
     basis = B.BondBasis(site=site, rcut_bond=rcut_bond, n_bond=n_bond, n_cpl=n_cpl, l_cpl=l_cpl)
@@ -94,6 +137,9 @@ def main(nsite, n_bond, n_cpl, l_cpl, rcut_bond=9.0, n_train=20000, test="FCC/SK
     print(f"   prediction of H and S: {t_pred:.1f} s ({len(e) / na:.0f} bonds per atom); block RMSE inside the cutoff: "
           f"H {1e3 * np.sqrt(((pred['H'] - ref['H'])[mask] ** 2).mean()):.3f} meV, S {np.sqrt(((pred['S'] - ref['S'])[mask] ** 2).mean()):.2e}; "
           f"reference outside the cutoff: max |H| {1e3 * np.abs(ref['H'][~mask]).max():.2f} meV, max |S| {np.abs(ref['S'][~mask]).max():.2e}")
+    if diag:
+        diagnose(ref, pred, d, g, e, n_occ)
+        return
     out = {"ref": e_ref}
     for label, H, S in (("truncation only (reference inside the cutoff)", ref["H"] * mask, ref["S"] * mask),
                         ("predicted H and S", pred["H"], pred["S"]),
@@ -109,9 +155,9 @@ def main(nsite, n_bond, n_cpl, l_cpl, rcut_bond=9.0, n_train=20000, test="FCC/SK
 
 
 if __name__ == "__main__":
-    a = [x for x in sys.argv[1:] if not x.startswith("dump=")]
+    a = [x for x in sys.argv[1:] if not x.startswith("dump=") and x != "diagnose"]
     dump = next((x[5:] for x in sys.argv[1:] if x.startswith("dump=")), None)
     extra = [float(a[4])] if len(a) > 4 else []
     extra += [int(a[5])] if len(a) > 5 else []
     extra += [a[6]] if len(a) > 6 else []
-    main(int(a[0]), int(a[1]), int(a[2]), int(a[3]), *extra, dump=dump)
+    main(int(a[0]), int(a[1]), int(a[2]), int(a[3]), *extra, dump=dump, diag="diagnose" in sys.argv)
