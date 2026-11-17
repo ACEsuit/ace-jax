@@ -116,9 +116,12 @@ def test_embedding_provider_is_equivariant_and_compressed():
     basis of the same radials has channels for, not five elements' worth."""
     from ace_jax.eval.features import SiteFeatures
     from ace_jax.operators.features import build_embedding_site_basis
-    table = np.random.default_rng(5).normal(size=(len(ELS), 3))             # any element properties
     kw = dict(order=2, totaldegree=5, lmax_feat=3, rcut=4.0, coupling_cache_dir=str(CACHE))
-    b = build_embedding_site_basis(ELS, embedding=(ELS, table), d_max=2, **kw)
+    b = build_embedding_site_basis(ELS, d_max=2, **kw)                       # the default: a random embedding
+    emb = np.asarray(b.radial.rnl_embedding)
+    assert emb.shape == (5, 2) and np.allclose(np.linalg.norm(emb, axis=1), 1.0)
+    assert np.array_equal(emb, np.asarray(build_embedding_site_basis(ELS, d_max=2, **kw).radial.rnl_embedding))   # seeded
+    assert not np.allclose(emb, np.asarray(build_embedding_site_basis(ELS, d_max=2, seed=1, **kw).radial.rnl_embedding))
     assert isinstance(b, SiteFeatures) and b.with_table() is b and b.elements == ELS
     two = build_embedding_site_basis(ELS[:2], embedding="identity", d_max=2, **kw)     # order-2 width 2, not C(3, 2)
     assert b.lps == two.lps and b.n_B == two.n_B

@@ -6,11 +6,11 @@ on-site and one off-site model for H and S: a site basis at correlation order 1,
 group and the bond-environment group, whose atoms enter through the same species channels as the
 site basis:
   categorical   `build_site_basis`, one radial channel and one environment channel per element
-  TrACE d       `build_embedding_site_basis` with d channels (an embedding of element properties,
-                PCA-reduced), and the environment group on the same embedding rows
+  TrACE d       `build_embedding_site_basis` with d channels of a random element embedding (seeded
+                Gaussian rows of unit norm), and the environment group on the same embedding rows
 The readouts stay per species (on-site) and per species pair (off-site) in every model.
     JAX_PLATFORMS=cpu uv run python bench/ham/species_fit.py <npz dir> <n_test> [bonds per structure=3000]
-        [d=1,2,3] [categorical=1] [threads=8]
+        [d=1,2,3] [categorical=1] [threads=8] [seed=0]
 (one model per process is safest: the compiled programs of four elements' species pairs are many,
 and a second model in the same process ran out of mappings for compiled code)
 Errors on the test structures: block RMSE, and eigenvalues from E_F - 12 to E_F + 5 eV on a k-grid
@@ -38,8 +38,6 @@ from ace_jax.operators.offsite_fast import OffsitePredictor
 from ace_jax.operators.onsite import OnsitePredictor
 
 CH, WIDTH, NK, STHR = ("H", "S"), 0.1, 3, 1e-3
-# element properties for the embedding: period, covalent radius (angstrom), Pauling electronegativity, bulk a (angstrom)
-PROPS = {6: (2, 0.76, 2.55, 3.57), 14: (3, 1.11, 1.90, 5.43), 32: (4, 1.20, 2.01, 5.66), 50: (5, 1.39, 1.96, 6.49)}
 VALENCE = {6: 6, 14: 14, 32: 32, 50: 50}             # all-electron bases: every electron
 
 
@@ -69,7 +67,7 @@ def spectrum(H, X, nel):
     return e, mu
 
 
-def main(folder, n_test, n_bonds=3000, d=(1, 2, 3), categorical=1, threads=8, nsite=12, rsite=6.0, env=(5.0, 4, 4, 2, 4), site=(2, 2)):
+def main(folder, n_test, n_bonds=3000, d=(1, 2, 3), categorical=1, threads=8, seed=0, nsite=12, rsite=6.0, env=(5.0, 4, 4, 2, 4), site=(2, 2)):
     files = sorted(glob.glob(os.path.join(folder, "*.npz")))
     data = [cache.load(f)[0] for f in files]
     train, test = data[:-n_test], data[-n_test:]
@@ -79,13 +77,11 @@ def main(folder, n_test, n_bonds=3000, d=(1, 2, 3), categorical=1, threads=8, ns
     rcut = float(np.ceil(10 * max(np.linalg.norm(x.bond(k)) for x in data for k in x.blocks["S"])) / 10)
     print(f"{len(train)} training and {len(test)} test structures of {len(data[0].numbers)} atoms; elements {els}, "
           f"orbitals per atom {[orb.n_orb(z) for z in els]}; bond cutoff {rcut}; {n_bonds} training bonds of each structure", flush=True)
-    table = np.array([PROPS[z] for z in els], float)
-    table = (table - table.mean(0)) / table.std(0)
     models = []
     if categorical:
         models.append(("categorical", build_site_basis(els, 1, 40, lf, rcut=rsite, wL=0.5, nmax_by_order=(nsite,), lmax_by_order=(lf,)).with_table(), None))
     for dd in d:
-        sb = build_embedding_site_basis(els, 1, nsite + 0.5 * lf, lf, (els, table), d_max=dd, rcut=rsite, wL=0.5)
+        sb = build_embedding_site_basis(els, 1, nsite + 0.5 * lf, lf, "random", d_max=dd, rcut=rsite, wL=0.5, seed=seed)
         models.append((f"TrACE d = {dd}", sb, tuple(tuple(float(v) for v in row) for row in np.asarray(sb.radial.rnl_embedding))))
     ks = np.array([[a, b, c] for a in range(NK) for b in range(NK) for c in range(NK)]) / NK
     ref = []

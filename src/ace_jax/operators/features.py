@@ -139,15 +139,24 @@ def _coupled(radial, lmax_feat, mb, Rnl, Ylm, zs, rcut, solid, coupling_cache_di
         elements=tuple(int(z) for z in zs), rcut=float(rcut), lmax=int(max(l for l, _ in Ylm)), solid=solid)
 
 
-def build_embedding_site_basis(elements, order, totaldegree, lmax_feat, embedding=None, *, rcut, rows=None, d_max=None,
-                               wL=1.5, reduction="pca", normalise=True, block_rule="symmetric", coupling_cache_dir=None):
+def random_embedding(n_elements, d, seed=0):
+    """(n_elements, d) random element embedding, rows of unit norm: independent Gaussian entries
+    from a seeded generator.  The usual TrACE choice: the elements need distinct directions, not
+    meaningful ones (the coefficients are fitted on top)."""
+    rows = np.random.default_rng(seed).normal(size=(n_elements, d))
+    return rows / np.linalg.norm(rows, axis=1, keepdims=True)
+
+
+def build_embedding_site_basis(elements, order, totaldegree, lmax_feat, embedding="random", *, rcut, rows=None, d_max=None,
+                               wL=1.5, reduction="pca", normalise=True, block_rule="symmetric", coupling_cache_dir=None, seed=0):
     """A `SiteBasis` with an element embedding (the species-compressed linear ACE, "TrACE";
     `basis.model.build_embedding_model`'s one-particle basis): the neighbour species enters the
     radial through a frozen embedding row, R_(n'k)l(r, Z1, Z2) = Q_n'(x) emb[Z2, k], so the
     number of features grows with the channel width d (d_max), not with the number of elements.
     Bodies are channel-diagonal; order nu has min(d_max, C(S+nu-1, nu)) channels.
 
-    embedding: a JSON artefact path (keys Z, emb), a (Z, table) pair or "identity" (needs
+    embedding: "random" (the default: `random_embedding` with `seed`), a JSON artefact path (keys
+    Z, emb), a (Z, table) pair reduced by PCA, or "identity" (needs
     d_max >= number of elements; then channel k is "neighbours of element k", the categorical
     basis on these radials); rows: an explicit (S, d) block instead.  rcut is shared by every
     pair (ace1's uniform cutoffs).  Radials: Jacobi(4, 4) in the Agnesi coordinate, splined on
@@ -165,7 +174,9 @@ def build_embedding_site_basis(elements, order, totaldegree, lmax_feat, embeddin
         if emb.shape != (S, d):
             raise ValueError(f"rows must be ({S}, {d}) for these elements and widths, got {emb.shape}")
     elif embedding is None:
-        raise ValueError("pass an embedding (path, (Z, table) or 'identity') or explicit rows")
+        raise ValueError("pass an embedding ('random', a path, (Z, table) or 'identity') or explicit rows")
+    elif isinstance(embedding, str) and embedding == "random":
+        emb = random_embedding(S, d, seed)
     elif isinstance(embedding, str) and embedding == "identity":
         if d < S:
             raise ValueError(f"embedding='identity' needs one channel per element: d_max={d_max} gives {d} for {S} elements")
