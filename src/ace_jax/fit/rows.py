@@ -18,7 +18,7 @@ import jax
 import jax.numpy as jnp
 
 from .data import VOIGT, flat_edges
-from .kernels import grad_k_rows, k_rows
+from .gp.kernels import grad_k_rows, k_rows
 from .summary import summary_edge_jacobian
 
 
@@ -40,6 +40,19 @@ class Rows(NamedTuple):
     E: jnp.ndarray   # (C, Dt)
     F: jnp.ndarray   # (Ncap, 3, Dt)
     V: jnp.ndarray   # (C, 6, Dt)
+
+
+QUANTITIES = ("E", "F", "V")     # the quantities of a potential fit, in the order every statistic keeps
+
+
+def efv_rows(r, batch):
+    """The row generator of a potential fit (`fit.linear.stats`): (Phi, y, w) for the energy, force and
+    virial rows r (.E, .F, .V) of one batch, flattened to (n, Dt), with the batch's targets and structural
+    weights (a force weight per atom, a virial weight per configuration, repeated over the components)."""
+    Dt = r.E.shape[-1]
+    return ((r.E, batch.y_E, batch.w_E),
+            (r.F.reshape(-1, Dt), batch.y_F.reshape(-1), jnp.repeat(batch.w_F, 3)),
+            (r.V.reshape(-1, Dt), batch.y_V.reshape(-1), jnp.repeat(batch.w_V, 6)))
 
 
 def _place(dst, src, z, cfg):
@@ -289,7 +302,7 @@ def _rows_scan(model, cfg, batch, node_chunk, with_X=False, proj=None, resid=Non
     if resid is not None and resid[2].XM.shape[0] == 0:
         resid = None                    # BLR limit: no residual block
     if resid is not None:
-        from .feature import dwarp, warp_u
+        from .gp.feature import dwarp, warp_u
         theta, spec, ind = resid
         M = ind.XM.shape[0]
         c = math.gcd(nc, int(cfg.node_chunk))       # residual sub-chunk: divides nc, <= node_chunk
@@ -398,7 +411,7 @@ def residual_inputs(ind, cfg, batch, X):
     """The residual GP's site inputs for one batch: feature-mapped coordinates
     U = phi_res(X) (Ncap, d), summaries s (Ncap,) and the summary edge Jacobian
     Js (E, 3).  Shared by residual_rows and predict's DTC term."""
-    from .feature import apply
+    from .gp.feature import apply
     Ncap = batch.nbr.shape[0]
     rij, send, _, mask = flat_edges(batch.rij, batch.nbr, batch.nbr_mask)
     s, Js = summary_edge_jacobian(rij, send, Ncap, cfg.r0, cfg.rcut, cfg.p, mask)
@@ -435,7 +448,7 @@ def pair_feature_inputs(model, ind, cfg, batch):
 def residual_rows_from_inputs(theta, spec, ind, cfg, batch, U0, JU0):
     """Residual rows from the projected feature coordinates U0 = X @ Pmap
     (Ncap, d) and their edge Jacobian JU0 = Pmap^T J (Ncap, K, d, 3), pre-warp."""
-    from .feature import dwarp, warp_u
+    from .gp.feature import dwarp, warp_u
     Ncap, K = batch.nbr.shape
     C, c = batch.y_E.shape[0], cfg.node_chunk
     M, d = ind.XM.shape                 # d = feature dim (D for isotropic, n_pair for density)

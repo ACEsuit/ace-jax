@@ -14,7 +14,7 @@ from ..eval import sparse_graph
 from ..fit.data import Config, build_dataset
 from ..fit.hypers import from_array
 from ..fit.objective import posterior
-from ..fit.predict import _e0_offset, _predict_fn
+from ..fit.gp.predict import _e0_offset, _predict_fn
 from ..fit.stats import sufficient_statistics
 
 

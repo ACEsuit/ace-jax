@@ -51,7 +51,7 @@ design is in `docs/dev/benchmark-scaling-spec.md`, and how to reproduce it is in
 
 {{parity}}
 
-**Learned radials.** A learned radial (`fit/radial_learn.py`) lives on the
+**Learned radials.** A learned radial (`fit/radial/learn.py`) lives on the
 analytic branch, a per-edge polynomial recursion that costs more than the
 stock models' spline gather and loses the species-compact lean form;
 `lean`'s default (`spline_tol="auto"`) splines it back at 1e-10. The

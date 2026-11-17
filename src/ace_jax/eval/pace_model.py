@@ -21,7 +21,8 @@ import numpy as np
 
 from .aa_dag import dag_contract
 from .harmonics import real_spherical_harmonics
-from .edge_model import EdgeSiteModel, check_edge_a_kind, product_basis_t, with_edge_a_kind
+from .edge_model import EdgeSiteModel
+from .product import check_edge_a_kind, product_basis_t, with_edge_a_kind
 from .pace_build import build_basis
 from .pace_io import parse_yace
 from .radial import spline_eval_pairs, spline_local

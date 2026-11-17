@@ -12,7 +12,8 @@ import os
 import numpy as np
 from ase.calculators.calculator import Calculator, all_changes
 
-from ..eval.edge_model import LAYOUTS, calibrate_edge_a, check_edge_a_kind, with_edge_a_kind
+from ..eval.edge_model import calibrate_edge_a
+from ..eval.product import LAYOUTS, check_edge_a_kind, with_edge_a_kind
 from ..eval.model import highest_precision
 from ..eval.model import lean as lean_form
 from ..eval.model import splining, with_radial_table
@@ -180,7 +181,7 @@ class ACECalculator(Calculator):
 
         `shape_path` picks how a schema-3 jackknife shape V is evaluated: "rows" (default) builds the
         whole cell's force design rows (N, 3, L) and contracts them with R; "committee" evaluates the
-        forces of the r-output linear ACE with coefficients D^-1 R (`fit.jackknife.committee_shape`),
+        forces of the r-output linear ACE with coefficients D^-1 R (`uq.jackknife.committee_shape`),
         equal to roundoff, in memory O(N r) instead of O(N L) and without the edge Jacobian.
         `shape_tau` < 1 truncates R to the smallest rank holding that fraction of its sum sigma^2, and
         `shape_rank` (an int) caps the rank, on either path -- an approximation whose ranking and
@@ -275,7 +276,7 @@ class ACECalculator(Calculator):
         if posterior is not None:
             from ..eval import load as _load_fit_model
             from ..fit.ard import ARDPosterior
-            from ..fit.inducing import GPConfig
+            from ..fit.gp.inducing import GPConfig
             if not isinstance(model_path, (str, bytes)) and not hasattr(model_path, "__fspath__"):
                 raise ValueError("posterior= needs the model FILE path (the design rows use the fit model)")
             post = ARDPosterior.load(posterior)
@@ -756,9 +757,9 @@ class ACECalculator(Calculator):
         return out
 
     def _support(self, ds, live, b):
-        """Covariate-shift support of each atom against the posterior's reference (fit/support.py), from
+        """Covariate-shift support of each atom against the posterior's reference (uq/support.py), from
         the same site_features descriptors the fit stage used (they depend on the model only)."""
-        from ..fit.support import support_check
+        from ..uq.support import support_check
         post = self.posterior
         alpha = float(np.asarray(post.group_table["alpha"]))
         # alpha is the miscoverage (group_table); support_check takes it as such: q = Q_{1-alpha}
@@ -777,7 +778,7 @@ class ACECalculator(Calculator):
 
     def _site_X(self, ds, b):
         """Live-atom site descriptors (the ones the support reference uses) of one-config dataset ds."""
-        from ..fit.inducing import site_features
+        from ..fit.gp.inducing import site_features
         live = np.asarray(b.node_mask)
         with highest_precision():
             return np.asarray(site_features(self._fit_model, self._fit_cfg, ds)[0])[0][live]

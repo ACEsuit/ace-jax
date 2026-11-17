@@ -1,0 +1,956 @@
+"""Learned tensor-basis radials by variable projection (VarPro).
+
+The optimiser moves the analytic-branch mixing weights Wnlq; the linear readout
+is projected out exactly.  At fixed hyperparameters theta the projected ridge
+residual
+
+    r(W) = min_c ||Phi(W) c - y||^2_w + c^T Lambda c = yy - b^T (G + Lambda)^{-1} b,
+    Lambda = diag(gamma^2 / sigma_c^2),
+
+is closed form in the streamed linear statistics (G, b, yy) of the model with
+radials W, so no design matrix is ever materialised (`projected_residual`, the
+reference form).  M = 0 throughout: the residual GP is fitted afterwards on the
+frozen learned model.  See docs/dev/specs/2026-09-26-learned-radial-varpro-design.md.
+
+The learner does not use that closed form.  The Gram G has condition number
+kappa(Phi)^2: on Si order 4 degree 16 its smallest computed eigenvalue is -1e7
+(roundoff), the Cholesky of G + Lambda is NaN from log sigma_c ~ 5 (the MAP sits at
+7.4), and even at 3.3 its LML is 21 nats off.  So, as the pipeline's QR evidence
+(objective.log_marginal_likelihood_qr):
+
+- the readout c*(W) = argmin_c is a QR solve on the QR statistics of W
+  (`qr_readout`: stats.linear_qr_statistics, objective.posterior_from_qr);
+- r(W) is summed directly as ||w (y - Phi(W) c*)||^2 / sigma^2 + c*^T Lambda c*
+  (`residual_sums`: one checkpointed streaming pass), not as yy - b^T S^-1 b, whose
+  two terms cancel to the residual;
+- its W-gradient is that sum's gradient at fixed c* -- exact, by the envelope theorem
+  (Golub-Pereyra/Kaufman), since c* minimises the inner problem -- and it backpropagates
+  through Phi(W) c*, a vector per row, not through the L x L Gram;
+- theta is re-fitted (`theta_map_linear`) and candidates are scored (`holdout_score`)
+  on the same QR statistics, the validation error summed directly too.
+
+Each evaluation is then a forward QR pass (not differentiated) plus a differentiated
+residual pass; the QR pass runs on the host on the CPU backend, so each L-BFGS round
+is a host loop (SciPy L-BFGS-B, `_lbfgs_round`), not one compiled optax step.
+"""
+import gc
+import itertools
+import json
+import pathlib
+import time
+from functools import partial
+
+import jax
+import jax.numpy as jnp
+import numpy as np
+from jax.scipy.linalg import solve_triangular
+
+from ..hypers import from_array, log_prior, to_array
+from ..gp.ladder import run_map
+from ..objective import (combine, linear_prior_diag, log_marginal_likelihood, log_marginal_likelihood_qr,
+                        posterior, posterior_from_qr)
+from ..linear.lbfgs import _lbfgs_step, lbfgs_loop  # noqa: F401  (their old home)
+from ..linear.progress import emit
+from .model import (data_r_range, gap_penalty, normalise, radial_gram, require_analytic,
+                           roughness, roughness_matrix, row_active, spectral_penalty,
+                           spectral_weights, uniform_gram, with_radial)
+from ..stats import QRStats, linear_qr_statistics, linear_statistics
+
+
+def _prior(prob):
+    """The readout prior the objective needs: gamma, or (gamma, e0_prec) with joint-E0 columns."""
+    e0p = getattr(prob, "e0_prec", None)
+    return prob.gamma if e0p is None else (prob.gamma, e0p)
+
+
+def projected_residual_from_stats(theta, lin, gamma):
+    """yy - b^T (G + Lambda)^{-1} b from linear statistics `lin` (M = 0); `gamma` is the
+    readout's prior diagonal, or (gamma, e0_prec) when joint-E0 columns follow it.
+    A failed Cholesky yields NaN; the learner treats that as a stop signal."""
+    G, b, yy, _, _ = combine(theta, lin)
+    g, e0p = gamma if isinstance(gamma, tuple) else (gamma, None)
+    lam = g ** 2 * jnp.exp(-2.0 * theta.log_sigma_c)
+    if e0p is not None:          # the fixed E0 precision does not scale with sigma_c
+        lam = jnp.concatenate([lam, jnp.asarray(e0p, lam.dtype)])
+    L = jnp.linalg.cholesky(G + jnp.diag(lam))
+    v = solve_triangular(L, b, lower=True)
+    return yy - v @ v
+
+
+def projected_residual(W, theta, prob, ds):
+    """VarPro objective of the linear ACE with tensor radials W (one full
+    streaming pass over ds), in the closed Gram form: the reference, accurate only
+    while kappa(Phi)^2 is well below 1/eps.  The learner uses `projected_residual_qr`."""
+    lin = linear_statistics(with_radial(prob.model, W), prob.cfg, ds)
+    return projected_residual_from_stats(theta, lin, _prior(prob))
+
+
+def _batch_residuals_rows(model, cfg, batch, c):
+    """_batch_residuals through the design rows Phi (the reference form, for the parity test): (rows, L)
+    per quantity, contracted with c.  Its W-gradient backpropagates through all L columns."""
+    from ..rows import linear_rows_bounded
+    r = linear_rows_bounded(model, cfg, batch)
+    L = cfg.len_basis
+    sse, n = [], []
+    for P, y, w in ((r.E, batch.y_E, batch.w_E),               # weighted as stats._qr_rows weights them
+                    (r.F.reshape(-1, L), batch.y_F.reshape(-1), jnp.repeat(batch.w_F, 3)),
+                    (r.V.reshape(-1, L), batch.y_V.reshape(-1), jnp.repeat(batch.w_V, 6))):
+        e = w * y - (P * w[:, None]) @ c[:L]       # padded rows have w = 0
+        sse.append(e @ e)
+        n.append(jnp.sum(w > 0))
+    return jnp.stack(sse), jnp.stack(n).astype(jnp.float64)
+
+
+def species_readout(c, cfg):
+    """(NZ, n_B + n_pair): the species-blocked readout c (rows._place's layout) per centre species."""
+    nB, nP, NZ = cfg.n_B, cfg.n_pair, cfg.NZ
+    return jnp.stack([jnp.concatenate([c[z * nB:(z + 1) * nB], c[NZ * nB + z * nP:NZ * nB + (z + 1) * nP]])
+                      for z in range(NZ)])
+
+
+def _batch_residuals(model, cfg, batch, c):
+    """(sse (3,), n (3,)) over E, F, V of readout c on one batch: Phi c is the model's own E/F/V at
+    coefficients c -- site energies X c and one reverse pass for dE/drij -- so no design rows are built and
+    the W-gradient costs a model's second derivative, not L of them (8-11x faster than
+    `_batch_residuals_rows` on Si o4d12/o4d20, equal to roundoff; docs/dev/learn-radial-results.md)."""
+    from ..data import flat_edges
+    from ..rows import _voigt
+    Ncap, K = batch.nbr.shape
+    C = batch.y_E.shape[0]
+    zi = jnp.broadcast_to(batch.node_z[:, None], (Ncap, K))
+    zj = batch.node_z[batch.nbr]
+    Cz = species_readout(c, cfg)[batch.node_z]                                    # (Ncap, n_B + n_pair)
+
+    def energy(rij):
+        s = jnp.sum(jnp.concatenate(model.site_basis_dense(rij, zi, zj, batch.nbr_mask), -1) * Cz, -1)
+        s = s * batch.node_mask
+        return jnp.sum(s), s
+    (_, s), dr = jax.value_and_grad(energy, has_aux=True)(batch.rij)              # dr = dE / drij
+    seg = lambda a, ids, n: jax.ops.segment_sum(a, ids, num_segments=n)           # noqa: E731
+    rij, send, recv, mask = flat_edges(batch.rij, batch.nbr, batch.nbr_mask)
+    T = jnp.where(mask[:, None], dr.reshape(-1, 3), 0.0)
+    E = seg(s, batch.node_cfg, C + 1)[:C]
+    if getattr(cfg, "e0_cols", False):                                            # rows._e0_columns
+        onehot = jax.nn.one_hot(batch.node_z, cfg.NZ) * batch.node_mask[:, None]
+        E = E + seg(onehot, batch.node_cfg, C + 1)[:C] @ c[cfg.len_readout:]
+    F = -(seg(T, recv, Ncap) - seg(T, send, Ncap))
+    V = seg(_voigt(T, rij), batch.node_cfg[send], C + 1)[:C]
+    sse, n = [], []
+    for P, y, w in ((E, batch.y_E, batch.w_E), (F.reshape(-1), batch.y_F.reshape(-1), jnp.repeat(batch.w_F, 3)),
+                    (V.reshape(-1), batch.y_V.reshape(-1), jnp.repeat(batch.w_V, 6))):
+        e = w * (y - P)                            # padded rows have w = 0
+        sse.append(e @ e)
+        n.append(jnp.sum(w > 0))
+    return jnp.stack(sse), jnp.stack(n).astype(jnp.float64)
+
+
+def residual_sums(model, cfg, ds, c, batch_fn=None):
+    """(sse, n), each (3,) over E, F, V: ||w (y - Phi c)||^2 of the readout c on ds and the
+    live row counts, in one checkpointed streaming pass -- differentiable in the model, with
+    per-batch memory (as linear_statistics).  batch_fn: `_batch_residuals` (default) or the
+    design-row reference `_batch_residuals_rows`."""
+    bf = _batch_residuals if batch_fn is None else batch_fn
+    f = jax.checkpoint(lambda b: bf(model, cfg, b, c))
+    return jax.lax.scan(lambda s, b: (jax.tree.map(jnp.add, s, f(b)), None), (jnp.zeros(3), jnp.zeros(3)), ds)[0]
+
+
+_residuals_jit = jax.jit(residual_sums, static_argnames=("cfg", "batch_fn"))
+
+
+def _batch_normal_residuals(model, cfg, batch, c):
+    from ..rows import linear_rows_bounded
+    r = linear_rows_bounded(model, cfg, batch)
+    L = cfg.len_basis
+    out = []
+    for P, y, w in ((r.E, batch.y_E, batch.w_E),
+                    (r.F.reshape(-1, L), batch.y_F.reshape(-1), jnp.repeat(batch.w_F, 3)),
+                    (r.V.reshape(-1, L), batch.y_V.reshape(-1), jnp.repeat(batch.w_V, 6))):
+        Pw = P * w[:, None]
+        out.append(Pw.T @ (w * y - Pw @ c[:L]))
+    return jnp.stack(out)
+
+
+@partial(jax.jit, static_argnames=("cfg",))
+def _normal_residuals(model, cfg, ds, c):
+    """(3, L): (w Phi_q)^T w (y_q - Phi_q c) per quantity, one forward streaming pass."""
+    f = lambda b: _batch_normal_residuals(model, cfg, b, c)                           # noqa: E731
+    return jax.lax.scan(lambda s, b: (s + f(b), None), jnp.zeros((3, cfg.len_basis)), ds)[0]
+
+
+def _data_misfit(sse, theta):
+    s2 = jnp.exp(2.0 * jnp.stack([theta.log_sigma_E, theta.log_sigma_F, theta.log_sigma_V]))
+    return jnp.sum(sse / s2)
+
+
+def _ridge(c, theta, gamma):
+    """c^T Lambda c, Lambda as projected_residual_from_stats builds it from `gamma` (_prior)."""
+    g, e0p = gamma if isinstance(gamma, tuple) else (gamma, None)
+    lam = g ** 2 * jnp.exp(-2.0 * theta.log_sigma_c)
+    if e0p is not None:
+        lam = jnp.concatenate([lam, jnp.asarray(e0p, lam.dtype)])
+    return c @ (lam * c)
+
+
+def qr_readout(theta, prob, model, ds, qs=None, refine=0):
+    """(c*, qs): the ridge readout of `model` on ds at theta (the posterior mean) by QR, and the
+    QRStats it was solved from (streamed here unless given).  Eager: on the CPU backend the QR
+    pass runs on the host (stats.host_qr_stream).
+
+    `refine` steps of iterative refinement follow, c <- c + (R^T R)^-1 A^T e(c), with the normal
+    residual A^T e summed directly over ds (one forward pass each).  The QR solution's error
+    dc ~ eps kappa(A) |c| is harmless to r (second order) but not to its envelope gradient,
+    which is first order in it: where the fit nearly interpolates, Phi dc exceeds the true
+    residual (Si fixture, sigma 1e-4, sigma_c 1e4: the gradient was off 2300x).  The
+    correction removes dc's component in the column space of A, the part that corrupts the
+    gradient, leaving ~(eps kappa)^2.  Off by default: on Si o4d16 at the MAP theta (log sigma_c
+    7.38, where the Gram form is NaN) the gradient without it already matches central
+    differences to 5e-5 and one step moves it 5e-6, for an extra pass.  Where c is fixed only by
+    a near-flat prior (noise-free labels, sigma 1e-4) the gradient is not resolvable in double
+    precision at all: the steps do not converge."""
+    if qs is None:
+        qs = linear_qr_statistics(model, prob.cfg, ds)
+    c, Lc = posterior_from_qr(theta, qs, prob)
+    s2 = jnp.exp(2.0 * jnp.stack([theta.log_sigma_E, theta.log_sigma_F, theta.log_sigma_V]))
+    lam = linear_prior_diag(theta, prob)
+    for _ in range(int(refine)):
+        g = jnp.sum(_normal_residuals(model, cfg=prob.cfg, ds=ds, c=c) / s2[:, None], 0)
+        g = jnp.concatenate([g, jnp.zeros(c.shape[0] - g.shape[0])]) - lam * c     # A^T e(c)
+        c = c + solve_triangular(Lc.T, solve_triangular(Lc, g, lower=True), lower=False)
+    return c, qs
+
+
+def projected_residual_qr(W, theta, prob, ds, qs=None):
+    """r(W) as the learner evaluates it: c* by QR, then the residual and ridge terms summed
+    directly (module docstring).  `qs`: the QRStats of ds at W, if the caller has them."""
+    model = with_radial(prob.model, W)
+    c, _ = qr_readout(theta, prob, model, ds, qs)
+    sse, _ = _residuals_jit(model, ds=ds, c=c, cfg=prob.cfg)
+    return float(_data_misfit(sse, theta) + _ridge(c, theta, _prior(prob)))
+
+
+def _vp_objective(V, c, a, model, ds, gamma, Q, active, D2, wn, lam, W_ref, sw, lam_spec, U, lam_gap, cfg):
+    """The learner's objective at fixed readout c and theta a: the residual and ridge terms of
+    r (exact at c = c*(normalise(V)), with the exact gradient there) plus the priors on W."""
+    theta = from_array(a)
+    W = normalise(V, Q, active)
+    sse, _ = residual_sums(with_radial(model, W), cfg, ds, c)
+    return (_data_misfit(sse, theta) + _ridge(c, theta, gamma) + lam * roughness(W, D2, wn)
+            + lam_spec * spectral_penalty(W, W_ref, sw) + lam_gap * gap_penalty(W, W_ref, U))
+
+
+_vp_value_and_grad = jax.jit(jax.value_and_grad(_vp_objective), static_argnames=("cfg",))
+
+
+@partial(jax.jit, static_argnames=("cfg",))
+def _vp_hvp(V, c, Lc, v, a, model, ds, gamma, Q, active, D2, wn, lam, W_ref, sw, lam_spec, U, lam_gap, cfg):
+    """The exact Hessian-vector product of the REDUCED objective r(V) = F(V, c*(V)) at c = c*(V):
+    H_r v = F_VV v + F_Vc w with w = dc*/dV v = -F_cc^-1 F_cV v (implicit function theorem on
+    F_c = 0), F_cc = 2 A^T A = 2 Lc Lc^T (Lc from posterior_from_qr).  Two forward-over-reverse
+    passes over ds (F_cV v, then (F_VV, F_Vc) along (v, w)) and two triangular solves; at fixed c
+    alone (w = 0) it would be the Hessian of a different function, whose minimiser is not r's."""
+    args = (a, model, ds, gamma, Q, active, D2, wn, lam, W_ref, sw, lam_spec, U, lam_gap, cfg)
+    gc = lambda X: jax.grad(_vp_objective, argnums=1)(X, c, *args)                   # noqa: E731
+    Fcv = jax.jvp(gc, (V,), (v,))[1]
+    w = -0.5 * solve_triangular(Lc.T, solve_triangular(Lc, Fcv, lower=True), lower=False)
+    gV = lambda X, C: jax.grad(_vp_objective, argnums=0)(X, C, *args)               # noqa: E731
+    return jax.jvp(gV, (V, c), (v, w))[1]
+
+
+def _steihaug(hv, g, delta, iters, rtol):
+    """Truncated CG on the Newton model g.p + 1/2 p.H p inside |p| <= delta (Steihaug-Toint):
+    stops at `iters` products, on the boundary, at negative curvature (to the boundary along it)
+    or once |r| <= rtol |g|.  Returns (p, H p, products used)."""
+    p, Hp, r = np.zeros_like(g), np.zeros_like(g), g.copy()
+    d, rr, gn = -r, float(r @ r), float(np.sqrt(g @ g))
+
+    def to_boundary(p, Hp, d, Hd):
+        pd, dd, pp = float(p @ d), float(d @ d), float(p @ p)
+        tau = (-pd + np.sqrt(max(pd * pd + dd * (delta * delta - pp), 0.0))) / dd
+        return p + tau * d, Hp + tau * Hd
+    for k in range(int(iters)):
+        Hd = hv(d)
+        dHd = float(d @ Hd)
+        if dHd <= 0.0:
+            pb, Hpb = to_boundary(p, Hp, d, Hd)
+            return pb, Hpb, k + 1
+        alpha = rr / dHd
+        pn = p + alpha * d
+        if np.sqrt(pn @ pn) >= delta:
+            pb, Hpb = to_boundary(p, Hp, d, Hd)
+            return pb, Hpb, k + 1
+        p, Hp, r = pn, Hp + alpha * Hd, r + alpha * Hd
+        rr_new = float(r @ r)
+        if np.sqrt(rr_new) <= rtol * gn:
+            return p, Hp, k + 1
+        d, rr = -r + (rr_new / rr) * d, rr_new
+    return p, Hp, int(iters)
+
+
+def _newton_round(fg, hvp, x0, steps, tol, patience=3, cg_iters=20, delta0=None):
+    """`steps` trust-region Newton iterations (Steihaug CG, at most `cg_iters` exact Hessian-vector
+    products each) from x0: fg(x) -> (f, g, aux), hvp(x, aux, v) -> H v at x.  A step is accepted when
+    the actual decrease is at least 0.1 of the model's; the radius shrinks x4 below a ratio of 0.25 and
+    doubles above 0.75 on the boundary.  Same returns and reasons as _lbfgs_round ("linesearch": the
+    radius collapsed with no acceptable step)."""
+    x = np.array(x0, float)
+    f, g, aux = fg(x)
+    if not (np.isfinite(f) and np.all(np.isfinite(g))):
+        return x, float("nan"), float("nan"), [], "nonfinite", None
+    f0, trace, small, reason = f, [], 0, "steps"
+    delta = float(delta0) if delta0 else 0.1 * max(float(np.sqrt(x @ x)), 1e-12)
+    g0n = max(float(np.sqrt(g @ g)), 1e-300)
+    for _ in range(int(steps)):
+        # forcing term relative to the round's first gradient (the objective's scale is ~1e5 here)
+        eta = min(0.5, float(np.sqrt(np.sqrt(g @ g) / g0n)))
+        p, Hp, _ = _steihaug(lambda v, x=x, aux=aux: hvp(x, aux, v), g, delta, cg_iters, rtol=eta)
+        pred = -float(g @ p + 0.5 * p @ Hp)
+        if not pred > 0.0:
+            reason = "converged"
+            break
+        fn, gn, auxn = fg(x + p)
+        ok = np.isfinite(fn) and np.all(np.isfinite(gn))
+        ratio = (f - fn) / pred if ok else -np.inf
+        pn = float(np.sqrt(p @ p))
+        delta = 0.25 * pn if ratio < 0.25 else (2.0 * delta if ratio > 0.75 and pn >= 0.99 * delta else delta)
+        if ratio > 0.1:
+            small = small + 1 if f - fn <= tol * max(abs(f), 1e-300) else 0
+            x, f, g, aux = x + p, fn, gn, auxn
+            trace.append(f)
+            if small >= patience:
+                reason = "converged"
+                break
+        elif delta < 1e-12 * max(float(np.sqrt(x @ x)), 1.0):
+            reason = "linesearch"
+            break
+    return x, f0, f, trace, reason, aux
+
+
+class _NonFinite(Exception):
+    pass
+
+
+def _lbfgs_round(fg, x0, steps, tol, patience=3):
+    """Minimise fg(x) -> (f, g) (host arrays) by SciPy L-BFGS-B for `steps` iterations, from x0.
+    Returns (x_best, f0, f_best, trace, reason, best_aux): the best finite point evaluated (with
+    the aux fg returned there), f(x0), trace = f after each iteration (decreasing), reason as
+    lbfgs_loop's: "steps", "converged" (relative decrease below tol), "linesearch", "nonfinite"."""
+    from scipy.optimize import minimize
+    best = {"f": None}
+    first = {}
+
+    def fun(x):
+        f, g, aux = fg(x)
+        if not (np.isfinite(f) and np.all(np.isfinite(g))):
+            raise _NonFinite
+        first.setdefault("f", f)
+        if best["f"] is None or f < best["f"]:
+            best.update(f=f, x=np.array(x), aux=aux)
+        return f, g
+
+    trace, small = [], [0]
+
+    def record(intermediate_result):          # SciPy passes the OptimizeResult only under this name
+        f = float(intermediate_result.fun)
+        prev = trace[-1] if trace else first["f"]
+        trace.append(f)
+        small[0] = small[0] + 1 if prev - f <= tol * max(abs(prev), 1e-300) else 0
+        if small[0] >= patience:              # lbfgs_loop's rule: `patience` small decreases in a row
+            raise StopIteration
+    try:
+        r = minimize(fun, x0, jac=True, method="L-BFGS-B", callback=record,
+                     options={"maxiter": int(steps), "maxfun": 20 * int(steps) + 20, "ftol": 0.0, "gtol": 0.0,
+                              "maxcor": 10})
+        reason = ("converged" if small[0] >= patience else "steps" if r.nit >= steps else "linesearch")
+    except _NonFinite:
+        reason = "nonfinite"
+    if best["f"] is None:
+        return x0, float("nan"), float("nan"), trace, "nonfinite", None
+    return best["x"], first["f"], best["f"], trace, reason, best["aux"]
+
+
+def require_x64():
+    if not jax.config.jax_enable_x64:
+        raise RuntimeError("learned radials need float64: jax.config.update('jax_enable_x64', True)")
+
+
+def theta_map_linear(prob, ds, W, *, steps=300, seed=0, init=None, return_stats=False, lin=None,
+                     noise="per-quantity", opt="lbfgs"):
+    """theta-MAP of the M = 0 LML for the model with radials W (one streaming
+    pass for the QR statistics, then run_map on the QR LML,
+    objective.log_marginal_likelihood_qr -- the Gram form's Cholesky is NaN once sigma_c
+    is large, module docstring).  init: optional theta array to warm-start from.  `lin`:
+    the statistics of ds if the caller already has them (then W is unused and may be
+    None): QRStats take the QR LML, Gram Stats the Cholesky one.  Returns the theta array; with
+    return_stats=True returns (a, lin, diag): `lin` the linear statistics of
+    ds it streamed (so a caller can reuse them without another pass) and
+    `diag` a MAP convergence diagnostic computed on the cached `lin` (no extra
+    pass): the final LML, the change in the SVI loss (-log posterior) over the
+    last min(10, steps) steps, and the norm of the log-posterior gradient at
+    the returned theta.
+
+    Not checked like the pipeline MAP (`pipeline.mapfit.judge`): this inner Adam MAP is a step of the
+    radial search, and only `diag` reports how stationary it is.
+
+    noise "shared" (pipeline `--noise shared`): sigma_E and sigma_V tied to sigma_F
+    (paramset.tied_likelihood), as in the pipeline MAP; the returned theta is tied, and the
+    diagnostic's log-posterior leaves the tied coordinates' hyperpriors out.
+
+    opt "lbfgs" (default): bounded L-BFGS-B on the log-posterior (the pipeline MAP's optimiser and box,
+    `multistart.lbfgs_map`), at most `steps` iterations; "adam": `steps` SVI steps (run_map).  Each step
+    re-factors a (2L, L) QR, so Adam's fixed 300 steps were the round's dominant cost after the direct
+    residual pass (Si o4d20, A100: 506 s per re-fit); L-BFGS converges in tens of evaluations."""
+    from ..paramset import noise_tie, tie_noise, tied_likelihood
+    tied = noise_tie(noise)
+    free = ~tied if tied.any() else None
+    if lin is None:
+        lin = linear_qr_statistics(with_radial(prob.model, W), prob.cfg, ds)
+    ev = log_marginal_likelihood_qr if isinstance(lin, QRStats) else log_marginal_likelihood
+    lml = jax.jit(lambda a: ev(from_array(a), lin, prob))
+    if free is not None:
+        lml = tied_likelihood(lml)
+    if opt == "lbfgs":
+        from ..linear.multistart import lbfgs_map
+        from ..pipeline.mapfit import LBFGS_HI, LBFGS_LO
+        lp = jax.jit(jax.value_and_grad(lambda x: lml(x) + log_prior(from_array(x), prob.prior, free)))
+        x0 = np.array(to_array(prob.prior.mu) if init is None else init, float)
+        lo, hi = LBFGS_LO.copy(), LBFGS_HI.copy()
+        if free is not None:      # the tied coordinates are pinned at F's value (as fit_map does)
+            x0 = np.asarray(tie_noise(x0), float)
+            lo[tied] = hi[tied] = x0[tied]
+        x0 = np.clip(x0, lo, hi)
+        r = lbfgs_map(lambda x: tuple(map(np.asarray, lp(jnp.asarray(x)))), x0, lo, hi, max(int(steps), 1))
+        a = jnp.asarray(r["x"] if np.isfinite(r["value"]) else x0)
+        losses = [-v for v in r["trace"] if np.isfinite(v)] or [float("nan")]
+        if free is not None:
+            a = tie_noise(a)
+    elif opt == "adam":
+        h, losses = run_map(lml, prob.prior, steps=steps, seed=seed, return_losses=True,
+                            init=None if init is None else from_array(jnp.asarray(init)))
+        a = to_array(h)
+        if free is not None:      # the tied coordinates only drifted on their own hyperpriors: copy F
+            a = tie_noise(a)
+    else:
+        raise ValueError(f"theta_map_linear: opt must be 'lbfgs' or 'adam', got {opt!r}")
+    if not return_stats:
+        # lml, its gradient and numpyro's SVI step close over `lin`, so each compiles the QR statistics in as
+        # constants (3 P x P doubles: ~0.7 GB at o4d20), which JAX's trace and lowering caches keep alive after
+        # this returns.  On a GPU they sit outside the allocator pool, and one copy per radial round ran an
+        # A100 out of memory in round 3 (CUBIN load).  Clearing the caches frees them; the caller's
+        # module-level jits recompile once per call.
+        jax.clear_caches()
+        return a
+    logpost = lambda x: lml(x) + log_prior(from_array(x), prob.prior, free)
+    k = min(10, len(losses) - 1)
+    diag = {"lml": float(lml(a)), "map_steps": int(steps), "map_evals": len(losses), "map_opt": opt,
+            "dloss_last": float(losses[-1] - losses[-1 - k]) if k > 0 else float("nan"),
+            "grad_norm": float(jnp.linalg.norm(jax.grad(logpost)(a)))}
+    jax.clear_caches()           # the compiled QR constants (see above)
+    return a, lin, diag
+
+
+def require_linear(prob):
+    if prob.ind.XM.shape[0] != 0:
+        raise ValueError(f"learned radials support the linear model only (M = 0 inducing points), "
+                         f"got M = {prob.ind.XM.shape[0]}; fit the residual GP afterwards")
+
+
+def relative_lambda(lam_rough, r0, rough0):
+    """Absolute roughness weight lam_rough * r0 / rough0 (0 for lam_rough = 0).
+    Raises if the init is (numerically) perfectly smooth, where the relative
+    weight would be effectively infinite."""
+    if not lam_rough:
+        return 0.0
+    if rough0 < 1e-12 * max(abs(r0), 1.0):
+        raise ValueError(f"relative lam_rough={lam_rough:g} is undefined: roughness of the init "
+                         f"rough0={rough0:.3e} is ~0 relative to r0={r0:.3e}; use lam_rough=0")
+    return float(lam_rough) * r0 / rough0
+
+
+def relative_lambda_spec(lam_spec, r0, n_active):
+    """Absolute spectral weight lam_spec * r0 / n_active (0 for lam_spec = 0),
+    the analogue of `relative_lambda` for the spectral prior on the radial
+    change: n_active is the number of active radials (row_active count), not
+    a roughness scale.
+
+    Scale: the weights (1+q)^p are large (~9e5 at q=30, p=4), so the useful
+    window is narrow. Measured on si_tiny with n_q=30, p=4 and a 5%
+    flat-spectrum change, the penalty/r0 ratio is about lam_spec * 5.5e3:
+    1e-6 is negligible, 1e-5..3e-5 is comparable to lam_rough=1e-2, and 1e-4
+    already dominates the fit. Sweep roughly 1e-6..1e-4, not the lam_rough
+    grid. The window moves by about n_q^dp per unit change of p."""
+    if lam_spec < 0:
+        raise ValueError(f"lam_spec must be >= 0, got {lam_spec}")
+    if not lam_spec:
+        return 0.0
+    if n_active <= 0:
+        raise ValueError("spectral prior: no active radials in W0 (all rows zero)")
+    return float(lam_spec) * r0 / n_active
+
+
+def relative_lambda_gap(lam_gap, r0, n_active):
+    """Absolute data-gap weight lam_gap * r0 / n_active (0 for lam_gap = 0),
+    the analogue of `relative_lambda_spec` for the data-gap prior on the
+    radial change: n_active is the number of active radials (row_active
+    count), not a roughness or spectral scale.
+
+    Scale, measured on the real learned change (n_q=12, lam_gap=0, 40 steps):
+    gap_penalty(W_learned, W_ref, U) / n_active = 0.009 (SiGe) and 0.017
+    (Cantor), so the penalty/r0 ratio is about lam_gap * 0.01-0.02. Learning
+    gains ~0.5 r0 in the fit term, so lam_gap ~1 is weak, ~10 is comparable,
+    and ~30 or more is strong. Sweep roughly 1..30. A synthetic iid-random 25%
+    change on si_tiny gave 0.12; that overstates the scale about 10x
+    because it spreads change over every degree. The weight is not comparable
+    to lam_rough or lam_spec, which act on other quantities."""
+    if lam_gap < 0:
+        raise ValueError(f"lam_gap must be >= 0, got {lam_gap}")
+    if not lam_gap:
+        return 0.0
+    if n_active <= 0:
+        raise ValueError("gap prior: no active radials in W0 (all rows zero)")
+    return float(lam_gap) * r0 / n_active
+
+
+_I_SIGMA_E = None
+
+
+def _learn_theta(a, mult):
+    """theta array for the radial objective: log_sigma_E shifted by log(mult)."""
+    global _I_SIGMA_E
+    if mult == 1.0:
+        return a
+    if _I_SIGMA_E is None:
+        from ..hypers import Hypers
+        _I_SIGMA_E = Hypers._fields.index("log_sigma_E")
+    return jnp.asarray(a).at[_I_SIGMA_E].add(float(np.log(mult)))
+
+
+def learn_radial(prob, ds, W0, *, theta0=None, profile=True, lam_rough=0.0, rough_weights=None,
+                 lam_spec=0.0, spec_p=4.0, lam_gap=0.0, steps=200, reprofile_every=10, tol=1e-6,
+                 patience=3, map_steps=300, n_prior=None, seed=0, log=None, Q=None, D2=None,
+                 r0=None, U=None, learn_sigma_e_mult=1.0, noise="per-quantity", opt="lbfgs", cg_iters=20):
+    """VarPro-learn the tensor radials of prob.model (analytic branch, M = 0).
+
+    opt "lbfgs" (SciPy L-BFGS-B, `steps` iterations) or "newton" (`_newton_round`: trust-region
+    Newton with exact Hessian-vector products of the reduced objective, `_vp_hvp`, at most
+    `cg_iters` per iteration; `steps` counts Newton iterations).
+
+    learn_sigma_e_mult scales sigma_E inside the radial objective only (after
+    every theta re-MAP): > 1 learns the radials under a force-heavier weighting
+    than the evidence picks. Everything downstream (gate, final linear fit) keeps
+    the plain MAP theta. With a multiplier != 1, r0 (the reference scale of the
+    relative priors) is taken at the scaled theta.
+
+    Minimises  r(W; theta) + lam * roughness(W) + lam_spec_abs * spectral_penalty(W, W_ref)
+              + lam_gap_abs * gap_penalty(W, W_ref, U)
+    over V with W = normalise(V) (unit empirical norm per radial; rows that
+    are zero in W0 stay zero), by L-BFGS in rounds of `reprofile_every`
+    steps.  With profile=True theta is re-MAP'd on the M = 0 LML after every
+    round (and at the start unless theta0 is given), and L-BFGS restarts
+    because the objective changed.  lam_rough is RELATIVE: lam = lam_rough *
+    r(W0) / roughness(W0).  lam_spec is also RELATIVE: lam_spec_abs =
+    lam_spec * r0 / n_active, n_active = the number of active (row_active)
+    radials; the spectral prior penalises the departure of the normalised W
+    from W_ref = normalise(W0) (the starting V), weighted per Legendre degree
+    q by spectral_weights(n_q, spec_p) = (1 + q)^spec_p, so it grows with
+    degree -- the analogue of the Gamma smoothness prior's degree weighting,
+    but on the CHANGE rather than the absolute radial.  lam_gap is also
+    RELATIVE (relative_lambda_gap): lam_gap_abs = lam_gap * r0 / n_active; the
+    data-gap prior penalises the same departure from W_ref, but measured under
+    U = uniform_gram(prob.model, 0.8 * r_min, rcut) (r_min from
+    data_r_range(ds), rcut = prob.cfg.rcut) -- a uniform-in-r measure, so it
+    costs change equally everywhere on that range, including gaps between
+    coordination shells where the data-weighted gauge Q costs nothing.  Stops
+    at `steps` total or at the first round that ends early (converged, line
+    search, non-finite).  Returns (W, info); steps=0 returns normalise(W0).
+
+    `log`: optional one-arg callable given one-line progress strings (start
+    hyperparameters, then a line per round); None (default) is silent and
+    leaves all other behaviour unchanged.
+
+    Precomputed pieces (fit_radial passes them so a lambda grid shares them;
+    each is computed here when None): Q = radial_gram(prob.model, ds,
+    n_prior) (n_prior None -> radial_gram's default), D2 =
+    roughness_matrix(prob.model), r0 = r(normalise(W0); theta0), the
+    projected residual at the start -- only valid together with that theta0 --
+    and U = uniform_gram(...) as above (only computed, an extra streaming pass
+    over ds via data_r_range, when lam_gap > 0; a zeros array of the right
+    shape otherwise, so the default path adds no streaming passes and the
+    traced arg structure of `_objective` stays fixed).  M > 0 (inducing
+    points) is unsupported and raises."""
+    require_x64()
+    require_analytic(prob.model)
+    require_linear(prob)
+    W0 = jnp.asarray(W0, jnp.float64)
+    active = row_active(W0)
+    if Q is None:
+        Q = radial_gram(prob.model, ds) if n_prior is None else radial_gram(prob.model, ds, n_prior=n_prior)
+    if D2 is None:
+        D2 = roughness_matrix(prob.model)
+    if U is None:
+        if lam_gap:
+            r_min, _ = data_r_range(ds)
+            U = uniform_gram(prob.model, 0.8 * r_min, prob.cfg.rcut)
+        else:
+            NZ, n_q = W0.shape[0], W0.shape[-1]
+            U = jnp.zeros((NZ, NZ, n_q, n_q), jnp.float64)
+    wn = jnp.ones(W0.shape[2]) if rough_weights is None else jnp.asarray(rough_weights, jnp.float64)
+    V = normalise(W0, Q, active)
+    W_ref = V                              # reference for the spectral/gap priors: the starting V
+    sw = spectral_weights(W0.shape[-1], spec_p)
+    lin0 = None
+    if theta0 is not None:
+        a = to_array(theta0)
+    elif profile:
+        a, lin0, _ = theta_map_linear(prob, ds, V, steps=map_steps, seed=seed, return_stats=True, noise=noise)
+    else:
+        raise ValueError("learn_radial: profile=False needs theta0")
+    if learn_sigma_e_mult <= 0:
+        raise ValueError(f"learn_sigma_e_mult must be > 0, got {learn_sigma_e_mult}")
+    if r0 is None or learn_sigma_e_mult != 1.0:
+        r0 = projected_residual_qr(V, from_array(_learn_theta(a, learn_sigma_e_mult)), prob, ds,
+                                   qs=lin0)       # QR statistics do not depend on theta
+    r0 = float(r0)
+    rough0 = float(roughness(V, D2, wn))
+    lam = relative_lambda(lam_rough, r0, rough0)
+    n_active = int(jnp.sum(active))
+    lam_spec_abs = relative_lambda_spec(lam_spec, r0, n_active)
+    lam_gap_abs = relative_lambda_gap(lam_gap, r0, n_active)
+    info = {"trace": [], "reasons": [], "theta": [np.asarray(a)], "lam_abs": lam,
+            "lam_rough": float(lam_rough), "r0": r0, "rough0": rough0, "steps": 0,
+            "round_lengths": [], "lam_spec": float(lam_spec), "lam_spec_abs": lam_spec_abs,
+            "spec_p": float(spec_p), "lam_gap": float(lam_gap), "lam_gap_abs": lam_gap_abs,
+            "learn_sigma_e_mult": float(learn_sigma_e_mult)}
+    if log is not None:
+        log(f"learn_radial: lam_rough={float(lam_rough):g} lam_abs={lam:.6e} "
+            f"lam_spec={float(lam_spec):g} lam_spec_abs={lam_spec_abs:.6e} spec_p={float(spec_p):g} "
+            f"lam_gap={float(lam_gap):g} lam_gap_abs={lam_gap_abs:.6e} "
+            f"r0={r0:.6e} profile={bool(profile)} learn_sigma_e_mult={float(learn_sigma_e_mult):g}")
+    lam = jnp.asarray(lam, jnp.float64)
+    lam_spec_abs = jnp.asarray(lam_spec_abs, jnp.float64)
+    lam_gap_abs = jnp.asarray(lam_gap_abs, jnp.float64)
+    done = 0
+    round_idx = 0
+    while done < int(steps):
+        round_idx += 1
+        n = min(int(reprofile_every), int(steps) - done)
+        t_round = time.perf_counter()
+        # one evaluation: the QR readout c*(W) (a forward pass, eager), then the objective and its
+        # exact gradient at fixed c* (_vp_value_and_grad: one compile for the whole call -- every
+        # array argument keeps its shape and dtype from round to round)
+        a_obj = _learn_theta(a, learn_sigma_e_mult)
+        th_obj, shape = from_array(a_obj), V.shape
+
+        def fg(x, th_obj=th_obj, a_obj=a_obj, shape=shape):     # bound: used within this round only
+            Vx = jnp.asarray(x.reshape(shape))
+            c, qs = qr_readout(th_obj, prob, with_radial(prob.model, normalise(Vx, Q, active)), ds)
+            f, g = _vp_value_and_grad(Vx, c, a_obj, prob.model, ds, _prior(prob), Q, active, D2, wn, lam,
+                                      W_ref, sw, lam_spec_abs, U, lam_gap_abs, cfg=prob.cfg)
+            return float(f), np.asarray(g, float).ravel(), (qs, c)
+
+        def hvp(x, aux, v, a_obj=a_obj, shape=shape, th_obj=th_obj):
+            qs, c = aux
+            Lc = posterior_from_qr(th_obj, qs, prob)[1]
+            hv = _vp_hvp(jnp.asarray(x.reshape(shape)), c, Lc, jnp.asarray(v.reshape(shape)), a_obj, prob.model,
+                         ds, _prior(prob), Q, active, D2, wn, lam, W_ref, sw, lam_spec_abs, U, lam_gap_abs,
+                         cfg=prob.cfg)
+            return np.asarray(hv, float).ravel()
+        if opt == "newton":
+            x, f0, f_best, trace, reason, aux = _newton_round(fg, hvp, np.asarray(V, float).ravel(), n, tol,
+                                                              patience, cg_iters=cg_iters)
+        elif opt == "lbfgs":
+            x, f0, f_best, trace, reason, aux = _lbfgs_round(fg, np.asarray(V, float).ravel(), n, tol, patience)
+        else:
+            raise ValueError(f"learn_radial: opt must be 'lbfgs' or 'newton', got {opt!r}")
+        qs_best = None if aux is None else aux[0]
+        V = jnp.asarray(x.reshape(shape))
+        info["trace"].extend(trace)
+        info["reasons"].append(reason)
+        info["round_lengths"].append(len(trace))
+        done += n
+        # Canonicalise once per round (lbfgs_loop moves V, not W = normalise(V));
+        # persisting it back avoids a second normalise() at the return below,
+        # which for steps=0 would perturb the already-normalised V0 by ~1 ULP
+        # (rsqrt(1 + eps) != 1 bit-for-bit) and break exact-equality recovery
+        # of normalise(W0) against an independently-computed reference.
+        V = normalise(V, Q, active)
+        profile_dt, lml = 0.0, None
+        if profile:
+            t_profile = time.perf_counter()
+            # the re-fit theta's LML (the evidence of these radials, maximised over theta) is the
+            # progress measure comparable across rounds: the objective is not, since each round
+            # minimises it at that round's theta and the next round re-weights it (1 / sigma^2)
+            a, _, diag = theta_map_linear(prob, ds, V, steps=map_steps, seed=seed, init=a, noise=noise,
+                                          return_stats=True, lin=qs_best)      # the best point's statistics
+            lml = diag["lml"]
+            profile_dt = time.perf_counter() - t_profile
+            info["theta"].append(np.asarray(a))
+            info.setdefault("lml", []).append(lml)
+        # round_dt is measured after the (optional) re-profile above, so it
+        # covers the whole round -- theta_map_linear does its own full
+        # streaming pass and must not be left out of the wall time.
+        round_dt = time.perf_counter() - t_round
+        eta = round_dt * (int(steps) - done) / n      # this lam's remaining rounds at this round's pace
+        th = from_array(a)
+        emit("radial_round", lam_rough=float(lam_rough), lam_spec=float(lam_spec), lam_gap=float(lam_gap),
+             round=round_idx, steps=done, steps_total=int(steps), accepted=len(trace), reason=reason,
+             obj_start=f0, obj_end=f_best, lml=lml, log_sigma_c=float(th.log_sigma_c),
+             log_sigma_E=float(th.log_sigma_E), log_sigma_F=float(th.log_sigma_F),
+             log_sigma_V=float(th.log_sigma_V), seconds=round(round_dt, 3), profile_seconds=round(profile_dt, 3),
+             eta_s=round(eta, 1))
+        if log is not None:
+            fit_msg = ""
+            if profile:
+                prev = info["lml"][-2] if len(info["lml"]) > 1 else None
+                fit_msg = (f"; re-fit theta: LML {lml:.6e}" + ("" if prev is None else f" ({lml - prev:+.4g})")
+                           + f", log sigma_c {float(th.log_sigma_c):.4f}, log sigma_E/F "
+                           f"{float(th.log_sigma_E):.4f}/{float(th.log_sigma_F):.4f}")
+            rel = (f_best - f0) / abs(f0) if f0 else 0.0
+            log(f"learn_radial: round {round_idx} ({done}/{int(steps)} steps, {len(trace)} accepted, {reason}): "
+                f"objective {f0:.6e} -> {f_best:.6e} ({100 * rel:+.2f}%, at this round's theta)" + fit_msg
+                + f"; {round_dt:.0f} s (profile {profile_dt:.0f} s)"
+                + (f", eta {eta:.0f} s for this lam" if done < int(steps) else ""))
+        if reason != "steps":
+            break
+    info["steps"] = done
+    info["theta_final"] = np.asarray(a)
+    return V, info
+
+
+def _val_score(c, val, a_norm):
+    """sum_{t in E, F} SSE_t / (n_val sigma_t^2) of readout c on the validation
+    statistics `val`, sigma from a_norm; SSE_t = yy - 2 c.b + c.G.c, n_val the validation configs.
+
+    The quantities are weighted as the learner's objective weights them (rows summed, 1 / sigma^2), not
+    per-row means: on Si GAP-18 a per-row mean weighted each of ~450 energy rows ~100x a force row, so the
+    gate was an energy test and kept the initial radials of fits whose learned radials lowered the
+    validation force error (o4d20, n <= 5: docs/dev/learn-radial-results.md).  n_val only rescales."""
+    th = from_array(a_norm)
+    score = 0.0
+    for t in "EF":
+        if float(getattr(val, f"n_{t}")) == 0:
+            continue
+        G, b, yy = getattr(val, f"G_{t}"), getattr(val, f"b_{t}"), getattr(val, f"yy_{t}")
+        sse = float(yy - 2.0 * c @ b + c @ G @ c)
+        score += sse / float(jnp.exp(2.0 * getattr(th, f"log_sigma_{t}")))
+    return score / max(float(val.n_E), 1.0)
+
+
+def _val_score_residuals(sse, n, a_norm):
+    """_val_score from summed residuals (residual_sums): E and F terms, an empty type skipped."""
+    th = from_array(a_norm)
+    return sum(float(sse[i]) / float(jnp.exp(2.0 * getattr(th, f"log_sigma_{t}")))
+               for i, t in enumerate("EF") if float(n[i]) > 0) / max(float(n[0]), 1.0)
+
+
+def holdout_score(W, a_fit, a_norm, prob, ds_fit, ds_val, *, lin_fit=None, lin_val=None,
+                  return_readout=False):
+    """Validation error of the M = 0 linear fit with radials W: the readout c is
+    the posterior mean on ds_fit at theta a_fit; the score is
+    sum_{t in E, F} SSE_t / sigma_t^2 on ds_val, over its configs (_val_score), with sigma from a_norm
+    (fixed across candidates so scores are comparable), summed directly over ds_val
+    (residual_sums) -- no design matrix.  A type with no rows in ds_val is skipped.
+    lin_fit: the statistics of ds_fit at W if the caller has them (QRStats: the QR
+    posterior; Gram Stats: the Cholesky one), else QR statistics are streamed.  lin_val:
+    ds_val's Gram statistics, to score from them instead (yy - 2 c.b + c.G.c, which loses
+    the digits the direct sum keeps).  With
+    return_readout=True returns (score, c); W may be None when both statistics are given."""
+    if lin_fit is None or lin_val is None:
+        model = with_radial(prob.model, W)
+    if lin_fit is None:
+        lin_fit = linear_qr_statistics(model, prob.cfg, ds_fit)
+    c, _ = (posterior_from_qr if isinstance(lin_fit, QRStats) else posterior)(from_array(a_fit), lin_fit, prob)
+    if lin_val is None:             # summed directly: yy - 2 c.b + c.G.c cancels to the residual
+        score = _val_score_residuals(*_residuals_jit(model, ds=ds_val, c=c, cfg=prob.cfg), a_norm)
+    else:
+        score = _val_score(c, lin_val, a_norm)
+    return (score, c) if return_readout else score
+
+
+def _device_bytes_in_use():
+    """bytes_in_use of the default device's allocator, or None where it reports none (CPU)."""
+    try:
+        return (jax.devices()[0].memory_stats() or {}).get("bytes_in_use")
+    except Exception:                                  # noqa: BLE001 -- a diagnostic only
+        return None
+
+
+def gate(candidates, score):
+    """Score every candidate (lower is better) as score(label, W); ties resolve
+    to insertion order, so put the conservative choice ("init") first.
+    Returns (label, scores)."""
+    scores = {k: float(score(k, w)) for k, w in candidates.items()}
+    order = list(scores)
+    return min(order, key=lambda k: (scores[k], order.index(k))), scores
+
+
+def fit_radial(prob, ds_fit, ds_val, W0, *, lam_grid=(0.0, 1e-3, 1e-2, 1e-1), spec_grid=(0.0,),
+               gap_grid=(0.0,), theta0=None, map_steps=300, log=None, checkpoint=None, noise="per-quantity",
+               **learn_kw):
+    """learn_radial on ds_fit once per (roughness, spectral, data-gap weight)
+    triple in lam_grid x spec_grid x gap_grid, then keep the best of {init,
+    learned per triple} on the disjoint ds_val (ties -> init).
+
+    Candidate labels are "learned_lam=<l>" with a "_spec=<s>" suffix appended
+    when spec_grid has more than one value, and a "_gap=<g>" suffix appended
+    when gap_grid has more than one value (each independently; backward
+    compatible with plain "learned_lam=<l>" when both grids are single-valued,
+    an implicit spec=0/gap=0); checkpoints use the same scheme without the
+    "learned_" prefix (lam_label = f"{l:g}", plus "_spec=..."/"_gap=..." under
+    the same conditions).
+
+    Every candidate, init included, is scored by ONE procedure: a_fit =
+    theta_map_linear(ds_fit, W, map_steps, init=a0), readout = posterior mean
+    on ds_fit at a_fit, score on ds_val with sigma from a0 (a0 = theta0, or the
+    theta-MAP at the normalised init).  So with steps=0 (learned == init) the
+    scores are identical and the tie goes to init.  Also recorded:
+    info["scores_at_a0"] (every candidate's readout at the common a0, no theta
+    optimisation involved), info["map_diag"] (per-candidate MAP convergence
+    diagnostic, see theta_map_linear), info["theta_fit"] and info["readout"]
+    (the SELECTED candidate's M = 0 readout on ds_fit at its a_fit, length
+    len_basis, species-blocked as fit.rows._place).  Each candidate costs one
+    ds_fit pass plus one ds_val pass.  Returns (W_sel, info).
+
+    `log`: optional one-arg callable given one-line progress strings (forwarded
+    to `learn_radial`, plus fit_radial's own per-candidate and gate-score
+    lines); None (default) is silent and leaves all other behaviour unchanged.
+
+    `checkpoint`: optional callable checkpoint(lam_label, W, run_info), called
+    as soon as each (lam, spec, gap) triple's learn_radial finishes, so an
+    interrupted grid keeps its finished runs (e.g. save_result without
+    src_npz).  Q, D2, U and the relative-lambda/spec/gap reference are
+    computed once here and shared by every candidate (U only when some
+    gap_grid value is > 0, via one extra streaming pass for data_r_range); M >
+    0 raises."""
+    require_x64()
+    require_analytic(prob.model)
+    require_linear(prob)
+    multi_spec = len(spec_grid) > 1
+    multi_gap = len(gap_grid) > 1
+    combos = list(itertools.product(lam_grid, spec_grid, gap_grid))
+
+    def cand_label(lam, spec, gap):
+        label = f"learned_lam={float(lam):g}"
+        if multi_spec:
+            label += f"_spec={float(spec):g}"
+        if multi_gap:
+            label += f"_gap={float(gap):g}"
+        return label
+
+    def run_key(lam, spec, gap):
+        key = f"{float(lam):g}"
+        if multi_spec:
+            key += f"_spec={float(spec):g}"
+        if multi_gap:
+            key += f"_gap={float(gap):g}"
+        return key
+
+    labels = [cand_label(*c) for c in combos]
+    if len(set(labels)) != len(labels):
+        raise ValueError(f"fit_radial: duplicate combinations in lam_grid x spec_grid x gap_grid {combos}")
+    W0 = jnp.asarray(W0, jnp.float64)
+    # shared by every candidate: the gauge Gram, the roughness matrix, the
+    # uniform-in-r Gram (if needed), and the relative-lambda reference
+    # r0 = r(W_init; a0) (all runs start there)
+    n_prior = learn_kw.pop("n_prior", None)
+    Q = radial_gram(prob.model, ds_fit) if n_prior is None else radial_gram(prob.model, ds_fit, n_prior=n_prior)
+    D2 = roughness_matrix(prob.model)
+    U = None
+    if any(gap_grid):
+        r_min, _ = data_r_range(ds_fit)
+        U = uniform_gram(prob.model, 0.8 * r_min, prob.cfg.rcut)
+    W_init = normalise(W0, Q, row_active(W0))
+    if theta0 is not None:
+        a0 = to_array(theta0)
+        lin0 = linear_qr_statistics(with_radial(prob.model, W_init), prob.cfg, ds_fit)
+    else:
+        a0, lin0, _ = theta_map_linear(prob, ds_fit, W_init, steps=map_steps, return_stats=True, noise=noise)
+    r0 = projected_residual_qr(W_init, from_array(a0), prob, ds_fit, qs=lin0)
+    rw = learn_kw.get("rough_weights")
+    rough0 = float(roughness(W_init, D2, jnp.ones(W0.shape[2]) if rw is None
+                             else jnp.asarray(rw, jnp.float64)))
+    for lam in lam_grid:
+        relative_lambda(lam, r0, rough0)          # fail before any learning, not mid-grid
+    cands, runs = {"init": W_init}, {}
+    for lam, spec, gap in combos:
+        label, key = cand_label(lam, spec, gap), run_key(lam, spec, gap)
+        emit("radial_candidate", label=label, lam_rough=float(lam), lam_spec=float(spec), lam_gap=float(gap))
+        if log is not None:
+            log(f"fit_radial: lam={lam:g} spec={spec:g} gap={gap:g} starting")
+        W, info = learn_radial(prob, ds_fit, W0, theta0=from_array(a0), lam_rough=lam,
+                               lam_spec=spec, lam_gap=gap, map_steps=map_steps, log=log, Q=Q,
+                               D2=D2, r0=r0, U=U, noise=noise, **learn_kw)
+        cands[label] = W
+        runs[key] = info
+        if checkpoint is not None:
+            checkpoint(key, W, info)
+
+    # Hours of learning leave its compiled executables (and the CUDA modules they hold) cached; at o4d20
+    # on a 40 GB A100 the gate then could not load even a one-op kernel (CUDA_ERROR_OUT_OF_MEMORY loading
+    # a CUBIN) and the learned candidates were lost.  The gate compiles its own functions anyway.
+    jax.clear_caches(); gc.collect()
+    if log is not None and (mem := _device_bytes_in_use()) is not None:
+        log(f"fit_radial: gate starting, device memory in use {mem / 2**30:.2f} GiB")
+    at_a0, theta_fit, map_diag, readouts = {}, {}, {}, {}
+
+    def score(label, W):
+        a_fit, lin_fit, diag = theta_map_linear(prob, ds_fit, W, steps=map_steps, init=a0,
+                                                return_stats=True, noise=noise)
+        s, c = holdout_score(W, a_fit, a0, prob, ds_fit, ds_val, lin_fit=lin_fit, return_readout=True)
+        at_a0[label] = holdout_score(W, a0, a0, prob, ds_fit, ds_val, lin_fit=lin_fit)
+        theta_fit[label], map_diag[label], readouts[label] = np.asarray(a_fit), diag, np.asarray(c)
+        emit("radial_gate", label=label, score=float(s), score_at_theta0=float(at_a0[label]), lml=diag["lml"])
+        if log is not None:
+            log(f"fit_radial: gate {label} score={s:.6e} score_at_a0={at_a0[label]:.6e} "
+                f"map_dloss_last={diag['dloss_last']:.3e} map_grad_norm={diag['grad_norm']:.3e}")
+        return s
+
+    label, scores = gate(cands, score)
+    emit("radial_selected", label=label, scores=scores)
+    if log is not None:
+        log(f"fit_radial: selected {label}")
+    return cands[label], {"selected": label, "scores": scores, "scores_at_a0": at_a0,
+                          "map_diag": map_diag, "theta_fit": theta_fit, "runs": runs,
+                          "theta_init": np.asarray(a0), "readout": readouts[label]}
+
+
+def _jsonable(x):
+    if isinstance(x, dict):
+        return {str(k): _jsonable(v) for k, v in x.items()}
+    if isinstance(x, (list, tuple)):
+        return [_jsonable(v) for v in x]
+    if hasattr(x, "tolist"):
+        return x.tolist()
+    return x
+
+
+def save_result(out_dir, W, info, *, src_npz=None, model=None, readout=None):
+    """Write rnl_Wnlq.npy and radial_info.json to out_dir.  With src_npz and
+    model (the analytic model W belongs to, e.g. after widen_radial /
+    to_analytic) also write model.npz = src_npz with the learned radial AND
+    the readout fitted for it (`readout`, default info["readout"] as returned
+    by fit_radial; also saved as readout.npy).  The source npz's WB/Wpair
+    belong to the old radials, so writing model.npz without a readout is
+    refused rather than silently stale.  info["readout"] is kept out of the
+    JSON (it is len_basis long).  model.npz is marked meta "radial_learned"
+    (so `lean` splines it by default) unless info["selected"] == "init"."""
+    if readout is None:
+        readout = info.get("readout")
+    if src_npz is not None:
+        if model is None:
+            raise ValueError("save_result: src_npz needs the analytic `model` W belongs to")
+        if readout is None:
+            raise ValueError("save_result: writing model.npz needs the readout fitted for W "
+                             "(fit_radial's info['readout']); the source WB/Wpair are stale")
+    out = pathlib.Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    np.save(out / "rnl_Wnlq.npy", np.asarray(W))
+    (out / "radial_info.json").write_text(
+        json.dumps(_jsonable({k: v for k, v in info.items() if k != "readout"}), indent=1))
+    if readout is not None:
+        np.save(out / "readout.npy", np.asarray(readout))
+    if src_npz is not None:
+        from ...basis.export import patch_radial_npz
+        # the held-out gate may keep the initial radial: then nothing was learned
+        learned = info.get("selected") != "init"
+        patch_radial_npz(src_npz, out / "model.npz", with_radial(model, W, learned=learned),
+                         readout=readout)

@@ -10,7 +10,7 @@ from conftest import FIXTURE_DIR
 jax.config.update("jax_enable_x64", True)
 
 from ace_jax.basis.embedding import _fix_signs, principal_frame
-from ace_jax.fit.inducing import _frame_from_rows, build_pmap
+from ace_jax.fit.gp.inducing import _frame_from_rows, build_pmap
 
 
 def test_principal_frame_is_the_truncated_uncentred_svd():
@@ -37,7 +37,7 @@ def test_principal_frame_caps_d_at_the_rank():
 def _si():
     from ace_jax.eval import load
     from ace_jax.fit.data import build_dataset, load_configs
-    from ace_jax.fit.inducing import GPConfig, descriptor_scale, site_features
+    from ace_jax.fit.gp.inducing import GPConfig, descriptor_scale, site_features
     XYZ = FIXTURE_DIR / "si_tiny_train.xyz"
     if not XYZ.exists():
         pytest.skip("missing si_tiny_train.xyz")

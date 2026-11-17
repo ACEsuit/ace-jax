@@ -9,7 +9,7 @@ jax.config.update("jax_enable_x64", True)
 import numpy as np  # noqa: E402
 import pytest  # noqa: E402
 
-from ace_jax.fit.support import (  # noqa: E402
+from ace_jax.uq.support import (  # noqa: E402
     _proj,
     build_support,
     extend_support,

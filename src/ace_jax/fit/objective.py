@@ -7,10 +7,14 @@ from typing import NamedTuple
 
 import jax
 import jax.numpy as jnp
-from jax.scipy.linalg import cho_solve, solve_triangular
+from jax.scipy.linalg import cho_solve
 
 from .hypers import from_array, log_prior
-from .kernels import K_MM
+from .gp.kernels import K_MM
+from .linear import objective as _lin
+from .linear.objective import hoist, jit_lik  # noqa: F401
+from .rows import QUANTITIES
+from .linear.stats import Factor, Gram
 from .stats import sufficient_statistics
 
 
@@ -45,6 +49,23 @@ def prior_precision(theta, prob):
     return Lam, logdet
 
 
+def log_sigmas(theta):
+    """The noise scales of the E, F and V rows in `rows.QUANTITIES` order: theta's log_sigma_E, _F, _V."""
+    return [getattr(theta, f"log_sigma_{q}") for q in QUANTITIES]
+
+
+def _grams(st):
+    """st's quantities as `linear.stats.Gram`s, read by field name (Stats, QRStats, or any object with them)."""
+    return tuple(Gram(getattr(st, f"G_{q}"), getattr(st, f"b_{q}"), getattr(st, f"yy_{q}"), getattr(st, f"n_{q}"),
+                      getattr(st, f"logw_{q}")) for q in QUANTITIES)
+
+
+def _factors(qs):
+    """qs's quantities as `linear.stats.Factor`s, read by field name."""
+    return tuple(Factor(getattr(qs, f"R_{q}"), getattr(qs, f"c_{q}"), getattr(qs, f"yy_{q}"), getattr(qs, f"n_{q}"),
+                        getattr(qs, f"logw_{q}"), getattr(qs, f"rho_{q}", None)) for q in QUANTITIES)
+
+
 def combine(theta, st, log_ratios=None):
     """Assemble the noise-scaled Gram G, right-hand side b, y'y, log|noise
     precision| and observation count from the sufficient statistics.
@@ -58,14 +79,9 @@ def combine(theta, st, log_ratios=None):
     block is scaled by 1/sigma_{q,t}^2 = (1/sigma_q^2) * exp(-2 log_ratios[t, q]).
     The default type (row 0) is pinned to log_ratios[0]=0 upstream, so its scale
     is exactly 1/sigma_q^2 and the single-type limit is bit-identical."""
-    s2 = {t: jnp.exp(2.0 * getattr(theta, f"log_sigma_{t}")) for t in "EFV"}
     if log_ratios is None:
-        G = sum(getattr(st, f"G_{t}") / s2[t] for t in "EFV")
-        b = sum(getattr(st, f"b_{t}") / s2[t] for t in "EFV")
-        yy = sum(getattr(st, f"yy_{t}") / s2[t] for t in "EFV")
-        logtau = sum(getattr(st, f"logw_{t}") - getattr(st, f"n_{t}") * jnp.log(s2[t]) for t in "EFV")
-        N = sum(getattr(st, f"n_{t}") for t in "EFV")
-        return G, b, yy, logtau, N
+        return _lin.combine(_grams(st), log_sigmas(theta))
+    s2 = {t: jnp.exp(2.0 * getattr(theta, f"log_sigma_{t}")) for t in "EFV"}
     n_types = log_ratios.shape[0]
     G = b = yy = logtau = N = 0.0
     for col, q in enumerate("EFV"):
@@ -91,10 +107,7 @@ def _chol_S(theta, st, prob, log_ratios=None):
 
 def log_marginal_likelihood(theta, st, prob, log_ratios=None):
     L, b, yy, logtau, N, logdet_Lam = _chol_S(theta, st, prob, log_ratios)
-    v = solve_triangular(L, b, lower=True)
-    logdet_S = 2.0 * jnp.sum(jnp.log(jnp.diag(L)))
-    return (-0.5 * (yy - v @ v) - 0.5 * (logdet_S - logdet_Lam - logtau)
-            - 0.5 * N * jnp.log(2.0 * jnp.pi))
+    return _lin.log_evidence(L, b, yy, logtau, N, logdet_Lam)
 
 
 def posterior(theta, st, prob, log_ratios=None):
@@ -103,64 +116,30 @@ def posterior(theta, st, prob, log_ratios=None):
 
 
 # ---------------------------------------------------------------------------
-# QR form (linear arm, M = 0).  G + Lambda = A^T A with
-#     A = [ diag(sqrt(lin)) ; R_E / sigma_E ; R_F / sigma_F ; R_V / sigma_V ]   (4L x L)
-# (R_q from QRStats; lin = linear_prior_diag), and b = A^T [0 ; c_q / sigma_q], so a QR of
-# A, A = Q R, gives the Cholesky factor R^T and v = L^-1 b = Q^T [0 ; c_q / sigma_q] at
-# kappa(A) = kappa(Phi), not kappa(Phi)^2.  An evidence fit that nearly interpolates its data
-# (noise at its floor, prior near flat) drives kappa(G + Lambda) past 1/eps: there the
-# Cholesky LML is NaN, or finite but wrong by percent, and this form is not.  The prior rows
-# go first: Householder QR is accurate for rows of widely varying norm when the large ones
-# lead (Powell & Reid), and the pinned joint-E0 precision is 1e16.
+# QR form (linear arm, M = 0): `linear.objective`'s, with the prior precision linear_prior_diag and the
+# noise scales of theta.  qs: QRStats.
 
 def _qr_S(theta, qs, prob):
     lin = linear_prior_diag(theta, prob)
-    s = {q: jnp.exp(getattr(theta, f"log_sigma_{q}")) for q in "EFV"}
-    A = jnp.concatenate([jnp.diag(jnp.sqrt(lin))] + [getattr(qs, f"R_{q}") / s[q] for q in "EFV"], 0)
-    y = jnp.concatenate([jnp.zeros_like(lin)] + [getattr(qs, f"c_{q}") / s[q] for q in "EFV"])
-    Q, R = jnp.linalg.qr(A, mode="reduced")
-    sg = jnp.where(jnp.diag(R) < 0, -1.0, 1.0)              # Q -> Q diag(sg): a positive diagonal
-    return R * sg[:, None], (Q.T @ y) * sg, lin
+    return (*_lin.qr_system(lin, _factors(qs), log_sigmas(theta)), lin)
 
 
 def _qr_resid(theta, qs, prob):
-    """(R_S, residual^2, lin) with the residual from the factors alone: the reduced system's QR
-    takes its target as an extra column (last diagonal = its residual norm), plus the carried
-    rho_q^2 / sigma_q^2.  No y'y - v'v, which cancels when QRStats came from float32 rows."""
+    """(R_S, residual^2, lin) with the residual from the factors alone (`linear.objective.qr_residual_system`)."""
     lin = linear_prior_diag(theta, prob)
-    s = {q: jnp.exp(getattr(theta, f"log_sigma_{q}")) for q in "EFV"}
-    A = jnp.concatenate([jnp.diag(jnp.sqrt(lin))] + [getattr(qs, f"R_{q}") / s[q] for q in "EFV"], 0)
-    y = jnp.concatenate([jnp.zeros_like(lin)] + [getattr(qs, f"c_{q}") / s[q] for q in "EFV"])
-    Rt = jnp.linalg.qr(jnp.concatenate([A, y[:, None]], 1), mode="r")
-    L = lin.shape[0]
-    resid = Rt[L, L] ** 2 + sum(getattr(qs, f"rho_{q}") ** 2 / s[q] ** 2 for q in "EFV")
-    return Rt[:L, :L], resid, lin
+    return (*_lin.qr_residual_system(lin, _factors(qs), log_sigmas(theta)), lin)
 
 
 def log_marginal_likelihood_qr(theta, qs, prob):
-    """log_marginal_likelihood of the linear arm (M = 0) from QRStats, by QR (see above).  With
-    QRStats.rho_q (float32 rows) the residual comes from the factors (`_qr_resid`)."""
-    s2 = {q: jnp.exp(2.0 * getattr(theta, f"log_sigma_{q}")) for q in "EFV"}
-    if getattr(qs, "rho_E", None) is not None:
-        R, resid, lin = _qr_resid(theta, qs, prob)
-        logtau = sum(getattr(qs, f"logw_{q}") - getattr(qs, f"n_{q}") * jnp.log(s2[q]) for q in "EFV")
-        N = sum(getattr(qs, f"n_{q}") for q in "EFV")
-        logdet_S = 2.0 * jnp.sum(jnp.log(jnp.abs(jnp.diag(R))))
-        return -0.5 * resid - 0.5 * (logdet_S - jnp.sum(jnp.log(lin)) - logtau) - 0.5 * N * jnp.log(2.0 * jnp.pi)
-    R, v, lin = _qr_S(theta, qs, prob)
-    yy = sum(getattr(qs, f"yy_{q}") / s2[q] for q in "EFV")
-    logtau = sum(getattr(qs, f"logw_{q}") - getattr(qs, f"n_{q}") * jnp.log(s2[q]) for q in "EFV")
-    N = sum(getattr(qs, f"n_{q}") for q in "EFV")
-    logdet_S = 2.0 * jnp.sum(jnp.log(jnp.diag(R)))
-    return (-0.5 * (yy - v @ v) - 0.5 * (logdet_S - jnp.sum(jnp.log(lin)) - logtau)
-            - 0.5 * N * jnp.log(2.0 * jnp.pi))
+    """log_marginal_likelihood of the linear arm (M = 0) from QRStats, by QR (`linear.objective.log_evidence_qr`).
+    With QRStats.rho_q (float32 rows) the residual comes from the factors."""
+    return _lin.log_evidence_qr(linear_prior_diag(theta, prob), _factors(qs), log_sigmas(theta))
 
 
 def posterior_from_qr(theta, qs, prob):
     """posterior's (mu, L) from the same QR as log_marginal_likelihood_qr: L = R^T, lower
     with a positive diagonal, L L^T = G + Lambda."""
-    R, v, _ = _qr_S(theta, qs, prob)
-    return solve_triangular(R, v, lower=False), R.T
+    return _lin.posterior_qr(linear_prior_diag(theta, prob), _factors(qs), log_sigmas(theta))
 
 
 def uses_qr(prob):
@@ -173,7 +152,7 @@ def _stats_fn(mesh):
     a mesh is given (Task 15)."""
     if mesh is None:
         return sufficient_statistics
-    from .sharding import sufficient_statistics_sharded
+    from .gp.sharding import sufficient_statistics_sharded
 
     def f(theta, spec, model, ind, cfg, ds):
         return sufficient_statistics_sharded(theta, spec, model, ind, cfg, ds, mesh)
@@ -187,28 +166,6 @@ def _sigma_type_decode(a, n_hypers, n_types):
     free = a[n_hypers:].reshape(n_types - 1, 3)
     log_ratios = jnp.concatenate([jnp.zeros((1, 3)), free], axis=0)
     return theta, log_ratios
-
-
-def hoist(pure, consts):
-    """pure(a, consts) as a function of a, carrying (pure, consts) so that a jit tracing it (`jit_lik`)
-    takes consts as an argument.  A jit that closes over them instead embeds them in the executable as
-    HLO constants: a second copy of the QR statistics (43 GB at L = 42,324), and past 2^32 elements a
-    lowering error (R_F at L = 71,440: "Expected 5104245136 elements in LiteralProto repeated field").
-    A plain closure: a jitted PjitFunction cannot carry attributes."""
-    def f(a):
-        return pure(a, consts)
-    f.pure, f.consts = pure, consts
-    return f
-
-
-def jit_lik(lik, body):
-    """jax.jit(lambda *x: body(lik, *x)), with a `hoist`ed lik's statistics passed in rather than captured
-    (any other lik is captured as before).  The ladder rungs past MAP still close over lik."""
-    if not hasattr(lik, "pure"):
-        return jax.jit(lambda *x: body(lik, *x))
-    pure = lik.pure
-    jf = jax.jit(lambda c, *x: body(lambda a: pure(a, c), *x))
-    return lambda *x: jf(lik.consts, *x)
 
 
 QR_EVAL = "auto"    # the QR LML in make_lml: "host" (lml_host.HostQREvidence), "dense" (a jitted QR of the stacked
@@ -260,7 +217,7 @@ def make_lml(prob, ds, mesh=None, cache_linear=True, n_types=1, n_free_ratios=0,
         jax.block_until_ready(qs)
 
         if _host_qr_eval(qs):     # the structured host evaluation (fit/lml_host.py): same evidence, ~10x faster
-            from .lml_host import HostQREvidence
+            from .linear.lml_host import HostQREvidence
             ev = HostQREvidence(qs, prob, shared=shared_noise)   # shared: only under paramset.tied_likelihood
 
             def f(a):
@@ -300,7 +257,7 @@ def make_log_density(prob, ds, objective="lml", mesh=None, cache_linear=True):
     if objective == "lml":
         lik = make_lml(prob, ds, mesh, cache_linear)
     elif objective == "loo":
-        from .loo import config_row_index, loo_objective
+        from .gp.loo import config_row_index, loo_objective
         rows = jnp.asarray(config_row_index(ds))
 
         @jax.jit

@@ -21,7 +21,7 @@ def _setup(name, seed=0):
 
     from ace_jax.eval import load
     from ace_jax.fit.data import Config, build_dataset
-    from ace_jax.fit.inducing import GPConfig
+    from ace_jax.fit.gp.inducing import GPConfig
     path = FIXTURE_DIR / CASES[name][0]
     if not path.exists():
         pytest.skip(f"missing {path.name}")

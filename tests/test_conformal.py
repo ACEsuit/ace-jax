@@ -13,7 +13,7 @@ def _wq(s, w, alpha, n_cfg=None):
 
 
 def test_shell_features_fcc_strained_slab(one_config_batch):
-    from ace_jax.fit.conformal import shell_features
+    from ace_jax.uq.conformal import shell_features
     a0 = 3.65
     r1 = 0.5 * (a0 / np.sqrt(2) + a0)
     z, d = shell_features(one_config_batch(bulk("Ni", "fcc", a=a0, cubic=True).repeat(3)), r1)
@@ -29,7 +29,7 @@ def test_shell_features_fcc_strained_slab(one_config_batch):
 
 
 def test_shell_reference_fcc_bcc_and_fallback():
-    from ace_jax.fit.conformal import shell_reference
+    from ace_jax.uq.conformal import shell_reference
     from ase.neighborlist import neighbor_list
     # bcc: the first minimum is the clean gap between the 8 and 6 neighbour shells (2.49 | 2.87 A)
     for at, lo, hi in ((bulk("Ni", "fcc", a=3.65, cubic=True).repeat(4), 2.6, 3.6),
@@ -41,7 +41,7 @@ def test_shell_reference_fcc_bcc_and_fallback():
 
 
 def test_assign_groups_extremes():
-    from ace_jax.fit.conformal import assign_groups, n_groups
+    from ace_jax.uq.conformal import assign_groups, n_groups
     edges = np.array([0.01, 0.02, 0.05])
     g = assign_groups(np.array([12, 12, 11, 3, 1]), np.array([0.0, 0.03, 0.9, np.nan, np.nan]), 12, edges)
     assert g.tolist() == [0, 4, 7, 7, 7] and n_groups(edges) == 8
@@ -50,7 +50,7 @@ def test_assign_groups_extremes():
 
 
 def test_stratified_split_guarantees():
-    from ace_jax.fit.conformal import config_strata, stratified_split
+    from ace_jax.uq.conformal import config_strata, stratified_split
     assert config_strata([np.array([0, 4, 1]), np.array([], int), np.array([7])]).tolist() == [4, 0, 7]
     strata = np.r_[np.zeros(100, int), np.full(10, 6), np.full(2, 7), [5]]  # a lone config in stratum 5
     fit, val = stratified_split(strata, 0.2, seed=0)
@@ -64,7 +64,7 @@ def test_stratified_split_guarantees():
 
 
 def test_config_weighted_scales_against_brute_force():
-    from ace_jax.fit.conformal import chi3_ppf, group_scales
+    from ace_jax.uq.conformal import chi3_ppf, group_scales
     rng = np.random.default_rng(3)
     n_cfg = 60
     sizes = rng.integers(1, 40, n_cfg)                                          # very unequal atom counts
@@ -80,7 +80,7 @@ def test_config_weighted_scales_against_brute_force():
 
 
 def test_scales_merge_small_groups():
-    from ace_jax.fit.conformal import GroupTable, group_scales
+    from ace_jax.uq.conformal import GroupTable, group_scales
     rng = np.random.default_rng(4)
     cfg = np.r_[np.arange(400) // 10, 1000 + np.arange(30) // 10]               # 40 cfgs in g=0, 3 in g=2
     g = np.r_[np.zeros(400, int), np.full(30, 2)]
@@ -95,7 +95,7 @@ def test_scales_merge_small_groups():
 
 
 def test_support_flags_out_of_support_with_config_masses():
-    from ace_jax.fit.support import build_support, fit_pca, support_check
+    from ace_jax.uq.support import build_support, fit_pca, support_check
     rng = np.random.default_rng(0)
     X = rng.normal(size=(4000, 10))
     Z = np.zeros(4000, int)
@@ -111,7 +111,7 @@ def test_support_flags_out_of_support_with_config_masses():
 
 
 def test_support_pca_cap_and_variance():
-    from ace_jax.fit.support import fit_pca
+    from ace_jax.uq.support import fit_pca
     rng = np.random.default_rng(1)
     X = rng.normal(size=(500, 3)) @ rng.normal(size=(3, 100)) + 1e-6 * rng.normal(size=(500, 100))
     mu, sd, W = fit_pca({0: X})[0]
@@ -121,7 +121,7 @@ def test_support_pca_cap_and_variance():
 
 
 def test_support_flatten_roundtrip_and_absent_species():
-    from ace_jax.fit.support import build_support, fit_pca, flatten_support, support_check, unflatten_support
+    from ace_jax.uq.support import build_support, fit_pca, flatten_support, support_check, unflatten_support
     rng = np.random.default_rng(2)
     X = rng.normal(size=(600, 6))
     Z = np.arange(600) % 2
@@ -137,7 +137,7 @@ def test_support_flatten_roundtrip_and_absent_species():
 
 def test_support_logistic_separable_no_nan_and_fails_closed():
     import warnings
-    from ace_jax.fit.support import _logistic, build_support, fit_pca, support_check
+    from ace_jax.uq.support import _logistic, build_support, fit_pca, support_check
     rng = np.random.default_rng(3)
     X = np.r_[rng.normal(size=(50, 3)) - 20, rng.normal(size=(50, 3)) + 20]
     y = np.r_[np.zeros(50), np.ones(50)]
@@ -146,7 +146,7 @@ def test_support_logistic_separable_no_nan_and_fails_closed():
     # a reference whose classifier cannot converge must fail closed with a warning
     Xr = rng.normal(size=(300, 4))
     ref = build_support(fit_pca({0: Xr}), Xr, np.zeros(300, int), rng.random(300), np.arange(300) // 5, 1000, 0)
-    import ace_jax.fit.support as sp
+    import ace_jax.uq.support as sp
     orig = sp._logistic
     sp._logistic = lambda *a, **k: (orig(*a, **k)[0], False)
     try:
@@ -160,7 +160,7 @@ def test_support_logistic_separable_no_nan_and_fails_closed():
 
 
 def test_support_zero_mass_gives_neff_zero():
-    from ace_jax.fit.support import build_support, fit_pca, support_check
+    from ace_jax.uq.support import build_support, fit_pca, support_check
     rng = np.random.default_rng(4)
     Xr = rng.normal(size=(200, 3))
     ref = build_support(fit_pca({0: Xr}), Xr, np.zeros(200, int), rng.random(200), np.arange(200) // 5, 1000, 0)
@@ -170,7 +170,7 @@ def test_support_zero_mass_gives_neff_zero():
 
 
 def test_support_weighted_quantile_matches_direct_formula(monkeypatch):
-    import ace_jax.fit.support as sp
+    import ace_jax.uq.support as sp
     rng = np.random.default_rng(5)
     n = 40
     s = rng.random(n)
@@ -196,7 +196,7 @@ def test_support_weighted_quantile_matches_direct_formula(monkeypatch):
 
 def test_support_check_time_large_reference():
     import time
-    from ace_jax.fit.support import build_support, fit_pca, support_check
+    from ace_jax.uq.support import build_support, fit_pca, support_check
     rng = np.random.default_rng(6)
     X = rng.normal(size=(50000, 40))
     ref = build_support(fit_pca({0: X}), X, np.zeros(50000, int), rng.random(50000), np.arange(50000) // 25, 50000, 0)
@@ -209,7 +209,7 @@ def test_support_check_time_large_reference():
 def test_fallback_scale_normalised_by_total_weight():
     """C1: the all-groups fallback (no group reaches n_min) normalises sum w s^2 by sum w, not by the number
     of configurations -- each configuration spans 8 groups, so 3 n_cfg would inflate lam by sqrt(8)."""
-    from ace_jax.fit.conformal import group_scales
+    from ace_jax.uq.conformal import group_scales
     rng = np.random.default_rng(11)
     n_cfg, per = 40, 8 * 6
     cfg = np.repeat(np.arange(n_cfg), per)
@@ -231,7 +231,7 @@ def test_fallback_scale_normalised_by_total_weight():
 def test_small_pools_merge_to_finite_q_or_warn():
     """I2: a group whose n_cfg cannot give a finite q at this alpha (n_cfg < (1-alpha)/alpha) merges even
     when n_cfg >= n_min; a pool too small overall keeps q = inf and logs a WARNING."""
-    from ace_jax.fit.conformal import effective_n_min, group_scales
+    from ace_jax.uq.conformal import effective_n_min, group_scales
     assert effective_n_min(20, 0.1) == 20 and effective_n_min(20, 0.01) == 99 and effective_n_min(5, 0.1) == 9
     rng = np.random.default_rng(12)
     cfg = np.r_[np.arange(1200) // 10, 1000 + np.arange(400) // 10]     # 120 cfgs in g=0, 40 in g=2
@@ -248,7 +248,7 @@ def test_small_pools_merge_to_finite_q_or_warn():
 
 def test_band_edges_and_groups_tie_safe():
     """m1: > 50 % identical d (perfect-lattice atoms) must not empty the low bands."""
-    from ace_jax.fit.conformal import assign_groups, band_edges, n_groups
+    from ace_jax.uq.conformal import assign_groups, band_edges, n_groups
     rng = np.random.default_rng(13)
     d = np.r_[np.zeros(700), rng.random(300) * 0.1]
     e = band_edges(d)
@@ -265,7 +265,7 @@ def test_band_edges_and_groups_tie_safe():
 
 def test_extend_support_notes_species_without_reference(capsys):
     """m5: U atoms of a species the stored reference does not have are not added -- say so."""
-    from ace_jax.fit.support import build_support, extend_support, fit_pca
+    from ace_jax.uq.support import build_support, extend_support, fit_pca
     rng = np.random.default_rng(14)
     X = rng.normal(size=(200, 4))
     Z = np.zeros(200, int)
@@ -289,7 +289,7 @@ def _old_pooled_q(s, w, alpha):
 def test_fallback_q_needs_ceil_configurations(n_cfg, finite):
     """Residual fix: in the all-groups fallback each config spans 8 groups (total weight 8), yet the +inf test
     point must weigh one configuration's mean weight, so q is finite iff n_cfg >= ceil((1-alpha)/alpha) = 9."""
-    from ace_jax.fit.conformal import group_scales
+    from ace_jax.uq.conformal import group_scales
     rng = np.random.default_rng(21)
     cfg = np.repeat(np.arange(n_cfg), 8 * 3)
     g = np.tile(np.repeat(np.arange(8), 3), n_cfg)
@@ -305,7 +305,7 @@ def test_fallback_q_needs_ceil_configurations(n_cfg, finite):
 
 def test_per_group_pool_unchanged_by_test_point_weight():
     """Single-group pools have sum w = n_cfg, so q and lam_rms equal the old formula (weight-1 test point)."""
-    from ace_jax.fit.conformal import group_scales
+    from ace_jax.uq.conformal import group_scales
     rng = np.random.default_rng(22)
     n = 600
     cfg = rng.integers(0, 60, n)
@@ -325,7 +325,7 @@ def test_per_group_pool_unchanged_by_test_point_weight():
 
 def test_pooled_lam_rms_is_the_all_groups_fallback_scale():
     """pooled_lam_rms is group_scales' all-groups lam (weights 1/n_{c,g} pooled over every (c, g))."""
-    from ace_jax.fit.conformal import group_scales, pooled_lam_rms
+    from ace_jax.uq.conformal import group_scales, pooled_lam_rms
     rng = np.random.default_rng(12)
     cfg = np.repeat(np.arange(30), rng.integers(2, 20, 30))
     g = rng.integers(0, 8, len(cfg))
@@ -342,7 +342,7 @@ def test_pooled_lam_rms_is_the_all_groups_fallback_scale():
 def test_transfer_exponent_estimate_and_clip(ratio, beta_want, clipped):
     """beta_raw = log(lam1/lam2) / log(N_fit/N_fit2), clipped to [0, 1/2]; t = (N/N_fit)^beta; a WARNING
     when clipped (and the lam_fit2 >= lam_fit case named)."""
-    from ace_jax.fit.conformal import transfer_exponent
+    from ace_jax.uq.conformal import transfer_exponent
     N, N_fit, N_fit2 = 3680, 2944, 2355
     lines = []
     tr = transfer_exponent(5.27 * ratio, 5.27, N, N_fit, N_fit2, log=lines.append)
@@ -362,7 +362,7 @@ def test_transfer_exponent_estimate_and_clip(ratio, beta_want, clipped):
 def test_transfer_exponent_degenerate_split_is_conservative():
     """No smaller second fit (N_fit2 == N_fit) or a non-finite scale: beta_raw is undefined; beta falls back
     to the bias-dominated bound 1/2, with a WARNING."""
-    from ace_jax.fit.conformal import transfer_exponent
+    from ace_jax.uq.conformal import transfer_exponent
     for args in ((5.0, 4.0, 100, 50, 50), (np.nan, 4.0, 100, 80, 64)):
         lines = []
         tr = transfer_exponent(*args, log=lines.append)
@@ -371,7 +371,7 @@ def test_transfer_exponent_degenerate_split_is_conservative():
 
 
 def test_transfer_fixed_methods():
-    from ace_jax.fit.conformal import transfer_fixed
+    from ace_jax.uq.conformal import transfer_fixed
     assert transfer_fixed("sqrt", 4.0, 100, 80)["factor"] == pytest.approx(1.25 ** 0.5, rel=1e-15)
     t0 = transfer_fixed("none", 4.0, 100, 80)
     assert t0["factor"] == 1.0 and t0["beta"] == 0.0 and t0["N_fit2"] is None and t0["lam2"] is None

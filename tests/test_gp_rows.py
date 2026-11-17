@@ -12,8 +12,8 @@ import jax.numpy as jnp
 from ace_jax.eval import highest_precision, load
 from ace_jax.fit.data import VOIGT, build_dataset, flat_edges, load_configs
 from ace_jax.fit.hypers import Hypers
-from ace_jax.fit.inducing import GPConfig, descriptor_scale, select_inducing, site_features
-from ace_jax.fit.kernels import KernelSpec
+from ace_jax.fit.gp.inducing import GPConfig, descriptor_scale, select_inducing, site_features
+from ace_jax.fit.gp.kernels import KernelSpec
 from ace_jax.fit.rows import batch_rows, linear_rows, residual_rows
 
 XYZ = FIXTURE_DIR / "si_tiny_train.xyz"
@@ -126,7 +126,7 @@ def test_residual_rows_density_map_match_autodiff(setup, batch4):
     embedding): the residual force/virial rows are still the exact derivative
     of the residual energy rows -- the JU contraction folds Pmap and the sqrt
     warp into the edge Jacobian correctly."""
-    from ace_jax.fit.inducing import build_pmap, select_inducing
+    from ace_jax.fit.gp.inducing import build_pmap, select_inducing
     model, meta, configs, ds, cfg, ind0 = setup
     X, S = site_features(model, cfg, ds)
     scale = descriptor_scale(X, ds.node_mask)

@@ -1,9 +1,9 @@
 import json, numpy as np, jax.numpy as jnp, pytest
-from ace_jax.fit.embedding import species_onehot, normalize_rows, load_mace_embedding
+from ace_jax.fit.radial.embedding import species_onehot, normalize_rows, load_mace_embedding
 
 def test_gram_is_correlation_matrix():
     import numpy as np, jax.numpy as jnp
-    from ace_jax.fit.embedding import gram
+    from ace_jax.fit.radial.embedding import gram
     E = jnp.asarray([[3.0, 0.0], [0.6, 0.8]])       # row 1 already unit
     B = np.asarray(gram(E))
     assert B.shape == (2, 2)
@@ -38,8 +38,8 @@ def test_sige_coregionalization_end_to_end():
     import numpy as np, jax.numpy as jnp
     from ace_jax.eval import highest_precision
     from ace_jax.fit.hypers import default_prior
-    from ace_jax.fit.kernels import KernelSpec, K_MM
-    from ace_jax.fit.inducing import descriptor_scale, select_inducing
+    from ace_jax.fit.gp.kernels import KernelSpec, K_MM
+    from ace_jax.fit.gp.inducing import descriptor_scale, select_inducing
     rng = np.random.default_rng(0)
     D, k = 6, 5
     X = jnp.asarray(rng.normal(size=(2 * k, D)))         # synthetic site features, 2 species

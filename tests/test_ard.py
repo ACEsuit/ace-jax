@@ -37,7 +37,7 @@ def _dense_logev(Phi, y, q, h, gamma, gidx, groups_n):
 
 def test_body_order_columns_layout():
     from ace_jax.fit.ard import body_order_columns
-    from ace_jax.fit.inducing import GPConfig
+    from ace_jax.fit.gp.inducing import GPConfig
     meta = {"nnll": [[(1, 0)], [(1, 0), (1, 1)], [(1, 0), (1, 1), (2, 1)]]}
     g = GPConfig(r0=2.35, rcut=5.0, n_B=3, n_pair=2, NZ=2, C=1)
     col = body_order_columns(meta, g)
@@ -111,7 +111,7 @@ def test_posterior_variance_matches_blr_path_at_gamma_prior(tiny_linear_problem)
     from ace_jax.fit.ard import ARDEvidence, ard_posterior, ard_statistics, body_order_columns
     from ace_jax.fit.hypers import default_prior
     from ace_jax.fit.objective import posterior
-    from ace_jax.fit.predict import _rows_mean_var
+    from ace_jax.fit.gp.predict import _rows_mean_var
     from ace_jax.fit.rows import linear_rows
     from ace_jax.fit.stats import sufficient_statistics
     prob, ds = tiny_linear_problem
@@ -200,7 +200,7 @@ def test_joint_statistics_are_linear_only_with_inducing_points(tiny_linear_probl
     points (M > 0): the residual columns never enter the ARD posterior."""
     from ace_jax.fit.ard import ard_statistics
     from ace_jax.fit.hypers import default_prior
-    from ace_jax.fit.inducing import descriptor_scale, select_inducing, site_features
+    from ace_jax.fit.gp.inducing import descriptor_scale, select_inducing, site_features
     prob, ds = tiny_linear_problem
     theta = default_prior(2.35).mu
     with highest_precision():
@@ -301,7 +301,8 @@ def test_ard_stage_reuses_cached_full_statistics(monkeypatch, e0, solver):
     and the refit endpoints as e0='prefit' does.  solver 'qr' (issue #136): the cache is the QR objective's
     own QRStats (obj.lik.qr_stats), and the stage's passes are linear_qr_statistics calls."""
     from conftest import FIXTURE_DIR
-    from ace_jax.fit import ard, stats
+    from ace_jax.fit import ard
+    from ace_jax.fit import stats
     from ace_jax.fit.pipeline import load_fit_data
     from ace_jax.fit.pipeline.mapfit import fit_map
     from ace_jax.fit.pipeline.objective import make_objective
@@ -659,7 +660,7 @@ def test_posterior_chol_and_sandwich_factor_stay_on_device(ard_setup):
 
 
 def _table(G=2):
-    from ace_jax.fit.conformal import GroupTable
+    from ace_jax.uq.conformal import GroupTable
     return GroupTable(alpha=0.1, n_min=20, lam_rms=np.array([2.0, 3.0]), q=np.array([5.0, 9.0]),
                       r=np.array([1.0, 1.2]), n_cfg=np.array([30, 30]), n_cfg_val=np.array([30, 30]),
                       n_cfg_cal=np.array([0, 0]), n_atoms=np.array([100, 100]), merged=[])
@@ -667,7 +668,7 @@ def _table(G=2):
 
 def test_schema3_served_quantities(ard_setup, tmp_path):
     from ace_jax.fit.ard import ARDPosterior
-    from ace_jax.fit.clusters import row_clusters
+    from ace_jax.uq.clusters import row_clusters
     from ace_jax.fit.jackknife import press_scores, shape_factor
     from ace_jax.fit.rows import linear_rows
     prob, ds, ev, h, post = ard_setup
@@ -733,7 +734,7 @@ def _stage(**kw):
 
 @pytest.mark.parametrize("shape", ["iso", "aniso"])
 def test_stage_default_press_shape_and_group_scales(shape):
-    from ace_jax.fit.conformal import chi3_ppf
+    from ace_jax.uq.conformal import chi3_ppf
     d, res, pred = _stage(ard_force_shape=shape)
     post, rep = res.posterior, res.report
     assert post.R is not None and post.group_table is not None and post.cal is not None
@@ -783,7 +784,7 @@ def test_stage_transfer_exponent_scales_the_none_run():
     N_fit2 = 10 evidence fit sits past ard_cond_max and its lam2 moves ~4% with the machine's roundoff.
     transfer_exponent's interior, clipped and degenerate cases are test_conformal's; "sqrt" is the
     factor > 1 scaling check."""
-    from ace_jax.fit.conformal import json_safe
+    from ace_jax.uq.conformal import json_safe
     import json
     runs = {m: _stage(ard_transfer=m, **_FINITE_Q)[1] for m in ("none", "exponent", "sqrt")}
     t0 = runs["none"].report["transfer"]
@@ -847,7 +848,7 @@ def test_stage_reports_and_warns_near_unit_leverage(monkeypatch):
 
 def test_stage_support_reference_and_roundtrip(tmp_path):
     from ace_jax.fit.ard import ARDPosterior
-    from ace_jax.fit.support import support_check
+    from ace_jax.uq.support import support_check
     d, res, _ = _stage(**_FINITE_Q)
     post = res.posterior
     zs = {int(z) for z in np.unique(np.asarray(d.ds_train.node_z)[np.asarray(d.ds_train.node_mask)])}
@@ -865,7 +866,7 @@ def test_stage_support_reference_and_roundtrip(tmp_path):
 
 
 def _p3(ard_setup, tab):
-    from ace_jax.fit.clusters import row_clusters
+    from ace_jax.uq.clusters import row_clusters
     from ace_jax.fit.jackknife import press_scores, shape_factor
     from ace_jax.fit.rows import linear_rows
     prob, ds, ev, h, post = ard_setup
@@ -1096,7 +1097,7 @@ def test_newton_polish_stops_when_steps_gain_less_than_the_roundoff():
     """The gradient floor keeps the polish stepping while a gradient component is resolved, but a run of
     steps that each gain less than F's roundoff is a stall, not progress: stop after STALL_STEPS of them
     rather than run to maxiter (each step is a Hessian and a line search: tens of minutes at scale)."""
-    from ace_jax.fit.newton import STALL_STEPS, newton_polish
+    from ace_jax.fit.linear.newton import STALL_STEPS, newton_polish
     A, c = np.diag([1.0, 2.0]), np.array([0.1, -0.2])
     ev = _StallingQuad(A, c, off=-1e3)
     x0 = c + np.array([1e-3, 0.0])                  # |pg| 1e-3; the whole remaining gain is 5e-7 < amp

@@ -219,7 +219,7 @@ def learned_proxy(src, dst, n_q=12, scale=0.1, seed=0):
     import numpy as np
     from ace_jax.basis.export import patch_radial_npz
     from ace_jax.eval import load
-    from ace_jax.fit.radial_model import row_active, to_analytic, with_radial
+    from ace_jax.fit.radial.model import row_active, to_analytic, with_radial
     model, _, _ = load(str(src))
     m, _ = to_analytic(model, n_q)
     W = np.asarray(m.rnl_Wnlq, np.float64)

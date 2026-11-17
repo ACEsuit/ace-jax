@@ -1,4 +1,4 @@
-"""VarPro driver (ace_jax.fit.varpro): the outer optimiser learns the nonlinear
+"""VarPro driver (ace_jax.fit.linear.varpro): the outer optimiser learns the nonlinear
 FS-density weights on the projected residual, driving the stable inner solve;
 it beats the linear-only fit and the learned density transfers frozen to a
 disjoint split."""
@@ -7,7 +7,7 @@ import jax
 jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 
-from ace_jax.fit.varpro import learn, projected_residual, fit_frozen
+from ace_jax.fit.linear.varpro import learn, projected_residual, fit_frozen
 
 
 def _problem(rng, n_cfg=200, sites=6, L=12, n_chan=8, eta_true=None, noise=1e-3):

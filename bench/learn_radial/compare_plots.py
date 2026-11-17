@@ -19,7 +19,7 @@ import numpy as np
 from ace_jax.basis.spec import build_spec
 from ace_jax.eval import load
 from ace_jax.fit.data import build_dataset, flat_edges, load_configs
-from ace_jax.fit.radial_model import normalise, poly_env, radial_gram, row_active, to_analytic
+from ace_jax.fit.radial.model import normalise, poly_env, radial_gram, row_active, to_analytic
 
 INK, INK2, GRID, SURF = "#0b0b0b", "#52514e", "#e4e3df", "#fcfcfb"
 SERIES = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100"]           # reference categorical slots 1-4
