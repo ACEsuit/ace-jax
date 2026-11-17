@@ -455,3 +455,47 @@ Full H, 108-atom SiC, site (2, 2) + env (5, 6, 4, 4, 4), float64, mnf148 (`HAM_T
 - `with_table()` replaces `with_radial_table(carrier)`: a cubic B-spline in r per species pair with the radial's own end curvatures; features agree to 3e-14 relative at 4,096 intervals for r from 1.2 Å. Timing unchanged (5.0 ms per atom, one performance core, back to back with the previous commit).
 - `build_embedding_site_basis`: the element-embedding (TrACE) provider on `build_embedding_model`'s one-particle basis (one Jacobi spline table and a frozen embedding row for the neighbour species; channel-diagonal bodies). Tests: rotation and inversion of every feature with five elements through two channels at order 2; with the identity embedding at order 1 the features are the categorical ones (additive over elements, each element in its own channel). Five elements through two channels give as many features as two elements.
 - Not yet species-aware: the bond-environment group pools the environment atoms without their species, and the two-centre and coupled groups still have coefficients per species pair. A many-species benchmark needs the embedding in the environment group too.
+
+## Cross-code benchmark: plan and first findings (2026-11-17)
+
+**Aim** (owner): Pareto fronts of accuracy against inference cost against training-set size for ace-jax, ACEhamiltonians.jl, MACE-H and DeepH, analogous to the Si benchmark for potentials. Accuracy is an eigenvalue error, not a matrix-element error. Primary dataset: the MACE-H paper's bulk gold. Later: the MACE-H paper's other benchmarks, and a system with more species than ACEhamiltonians.jl can take (needs the element embedding in the bond-environment group).
+
+**Bulk gold** (Zenodo 10.5281/zenodo.15223696, arXiv:2508.15108; in `ham-ref/maceh-zenodo/`): 200 FCC cells of 64 atoms from 1000 K EMT molecular dynamics (farthest-point sampled), FHI-aims PBE, **no spin-orbit coupling** (`isspinful: false`, real blocks; the config files are only named `Au_soc`), core states projected out: 9 orbitals per atom (s, p, d), blocks to 10 Å (227 per atom), DeepH layout. 190 train (the authors split 4:1 into training and validation), 10 test. Metrics: MAE of the H matrix elements; EE(T) = Σ |ε − ε̃| f(ε, μ, T) / Σ f on 7 x 7 x 7 k-points at 1000 K, 11 electrons per atom, with the reference overlap.
+
+| published, gold test set | H MAE | EE, average |
+|---|---|---|
+| MACE-H (pristine; 0.269 meV with shift-and-scale) | 0.316 meV | 2.96 meV |
+| DeepH-E3 | 0.409 meV | 6.28 meV |
+
+MACE-H inference there: 10 s per configuration on 8 threads of an EPYC 7742 (about 156 ms per atom).
+
+**ace-jax, first runs** (`bench/ham/deeph_fit.py <gold dir> <n_train> 11`; site basis 12 radials to 7 Å, 12 bond radials, site group (2, 2), environment (5, 6, 4, 4, 4), H only, 540 columns at most; lestrade):
+
+| training structures | fit | H MAE | H RMSE | EE absolute / relative to each μ | prediction, 8 threads |
+|---|---|---|---|---|---|
+| 1 (all 14,556 bonds) | 23 s | 0.360 meV | 0.834 meV | 4.17 / 2.47 meV | 1.3 ms per atom |
+| 4 (3,000 bonds each; 2 test structures) | 16 s | 0.371 meV | 0.838 meV | 4.71 / 2.47 meV | 1.3 ms per atom |
+
+- One training structure and 23 s already give the matrix-element error of the published networks trained on 152. The error does not fall with more data: this model is at its capacity, so the next step is a larger basis, not more data.
+- Which EE convention the paper's band script uses (absolute, or relative to each chemical potential) is not yet checked.
+- The largest error is 70 meV: a few elements are far worse than the mean.
+
+**The other codes on gold** (probes on moriarty's RTX A4500, 20 GB; `bench/ham/maceh_train.py`, which now also drives DeepH-E3):
+
+- MACE-H with its authors' gold settings trains: 4.9 s per epoch for 8 structures at batch size 2. The published recipe (152 structures, 2,500 epochs) is then about 65 GPU-hours on this card; a ladder of training-set sizes from 1 to 152 about 120.
+- DeepH-E3 (`Xiaoxun-Gong/DeepH-E3`, MIT) runs in MACE-H's environment unchanged (torch 2.4, e3nn 0.6) with the same data folders and config files: 5.0 s per epoch for 8 structures at batch size 1 (batch size 2 does not fit 20 GB with its default network). The paper already gives its gold numbers.
+- The aluminium cells of the 2022 paper (729 atoms, 130,000 bonds each) do not fit MACE-H on 20 GB at any width tried; a 64-atom aluminium set with that paper's FHI-aims settings is being computed (`ham-ref/al_small/`) as the link to it.
+
+**DeepH variants** (survey):
+
+| variant | what it is | code | viable here |
+|---|---|---|---|
+| DeepH (2022) | local coordinates, not equivariant layers | `mzjb/DeepH-pack`, LGPL; torch 1.9, PyG 1.7 | probably, in its own old environment; superseded |
+| DeepH-E3 (2023) | E(3)-equivariant; MACE-H's starting point | open, MIT | yes: runs now |
+| DeepH-2 (2024) | eSCN (SO(2)) convolutions, transformer | no standalone repository found | only through the new DeepH-pack |
+| DeepH-pack 1.0 "deepx" (arXiv:2601.02938, January 2026) | the group's rewrite in JAX/FLAX that consolidates the methods; "light" wheel | GPL-3; the wheel is obtained by applying on the DeepH-pack website; Python 3.13, CUDA 12.8 | needs the owner to apply; the one most likely to be fast, and the current reference |
+| xDeepH | magnetic systems | `mzjb/xDeepH`, on DeepH-E3 | relevant to the Fe spin data, later |
+| DeepH-hybrid, -Zero, -DFPT, HPRO | other targets (hybrid functionals, unsupervised, perturbation theory, plane waves) | – | not for this comparison |
+| DeepH-UMM | universal pretrained model | OpenMX bases | no: another basis |
+
+Plan: DeepH-E3 first (it runs, and has published gold numbers), DeepH-pack 1.0 if a wheel can be obtained, the 2022 DeepH only if it is wanted for completeness.
