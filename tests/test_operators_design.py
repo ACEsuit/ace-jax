@@ -87,3 +87,45 @@ def test_compiled_fit_is_the_reference_fit(basis):
     for c in ("H", "S"):
         assert max(np.abs(pa[c][k] - pr[c][k]).max() for k in pr[c]) < 1e-6 * max(np.abs(v).max() for v in pr[c].values())
     assert all(ra[k][:2] == rr[k][:2] for k in rr)
+
+
+def test_smoothness_prior_lines_up_with_the_design_columns(basis):
+    """`bond.smoothness` has one gamma per column of `bond.design`, for the tied and untied forms;
+    it is the potential fit's functional on the factors of each feature (two-centre: bond radial
+    and L; coupled: plus the site feature's gamma; environment: plus its radial and lam, the same
+    in every species channel), and a fit with it shrinks the rough columns' coefficients."""
+    from ace_jax.basis.prior import P, WL
+    pos, cell, numbers = structure()
+    b = basis
+    F = {k: np.asarray(v) for k, v in _features(b.site, *site_graph(b.site, pos, cell, numbers)).items()}
+    g = bond.bond_graph(b, pos, cell, numbers)
+    lps = [(L, p) for L in range(5) for p in (1, -1)]
+    f = bond.features(b, F, g, np.arange(6), lps, env=bond.env_lists(b, pos, cell, numbers=numbers))
+    for L, p in lps:
+        for same in (False, True):
+            gam = bond.smoothness(b, L, p, same)
+            assert gam.shape == (bond.design(f[(L, p)], L, same).shape[1],) and (gam > 0).all()
+    assert np.allclose(bond.smoothness(b, 2, 1, False)[:b.n_bond], [(2 / WL) ** P + n ** P for n in (1, 2, 3)])
+    two, cpl = bond.layout(b, 2, 1)
+    l, lam, pi, nB = cpl[0]
+    first = bond.smoothness(b, 2, 1, False)[b.n_bond:b.n_bond + nB]                 # bond radial 1 with the first group
+    assert np.allclose(first, (l / WL) ** P + 1 + b.site.smoothness(lam, pi))
+    env = bond.smoothness(b, 2, 1, False)[-bond.n_env_features(b, 2, 1):].reshape(-1, b.n_ebond, 2, b.n_env)
+    assert np.allclose(env[:, :, 0], env[:, :, 1])                                 # the two species channels
+    assert (np.diff(env, axis=3) > 0).all() and (np.diff(env, axis=1) > 0).all()   # rougher with either radial
+
+
+def test_fit_with_the_smoothness_prior(basis):
+    require_optional("h5py")
+    d = deeph.read(FIX)
+    b = basis._replace(rcut_bond=3.3, r_env=3.5)
+    plain, _ = fit_offsite(b, [d], channels=("H",), ridge=1e-8)
+    smooth, _ = fit_offsite(b, [d], channels=("H",), ridge=1e-8, sigma_c=1e2)
+    ref, _ = fit_offsite(b, [d], channels=("H",), ridge=1e-8, sigma_c=1e2, compiled=False)
+    weak, _ = fit_offsite(b, [d], channels=("H",), ridge=1e-8, sigma_c=1e12)
+    norm = lambda m: np.sqrt(sum((np.asarray(c) ** 2).sum() for c in m.coef.values()))
+    assert norm(smooth) < 0.8 * norm(plain)                                        # the prior shrinks the coefficients
+    pw, pp = weak.predict(d.positions, d.cell, d.numbers)["H"], plain.predict(d.positions, d.cell, d.numbers)["H"]
+    assert max(np.abs(pw[k] - pp[k]).max() for k in pp) < 1e-5                      # and vanishes as sigma_c grows
+    ps, pr = smooth.predict(d.positions, d.cell, d.numbers)["H"], ref.predict(d.positions, d.cell, d.numbers)["H"]
+    assert max(np.abs(ps[k] - pr[k]).max() for k in pr) < 1e-7

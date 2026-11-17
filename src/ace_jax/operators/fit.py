@@ -35,7 +35,7 @@ def _need_x64():
         raise ValueError("the block fit needs float64: jax.config.update('jax_enable_x64', True)")
 
 
-def _fit(designs, n_chunks, rows, nc, ridge, device=False):
+def _fit(designs, n_chunks, rows, nc, ridge, device=False, gamma=None):
     """Stream and solve.  designs: {design key: (n columns, [coefficient keys])}; rows(i) ->
     {design key: (A (n_rows, n_columns), Y (n_rows, n_keys * nc))} for chunk i (a design without
     rows in the chunk is left out).  Returns (coef, report, stats).
@@ -57,7 +57,7 @@ def _fit(designs, n_chunks, rows, nc, ridge, device=False):
                     w = designs[d][0] + Y.shape[1]
                     Rs[d] = qr_merge(Rs.get(d, jnp.zeros((w, w))), A, jnp.asarray(Y))
         acc = {d: (R[:designs[d][0], :designs[d][0]], R[:designs[d][0], designs[d][0]:]) for d, R in Rs.items()}
-        return _solve(designs, acc, yy, n, nc, ridge)
+        return _solve(designs, acc, yy, n, nc, ridge, gamma)
 
     def parts(i):
         out = rows(int(i))
@@ -74,11 +74,12 @@ def _fit(designs, n_chunks, rows, nc, ridge, device=False):
             for p in parts_d:
                 if p is not None:
                     yy[d] += (p[1] ** 2).sum(0); n[d] += len(p[1])
-    return _solve(designs, acc, yy, n, nc, ridge)
+    return _solve(designs, acc, yy, n, nc, ridge, gamma)
 
 
-def _solve(designs, acc, yy, n, nc, ridge):
-    """Coefficients, report and statistics from the factors (R, c) of each design."""
+def _solve(designs, acc, yy, n, nc, ridge, gamma=None):
+    """Coefficients, report and statistics from the factors (R, c) of each design.  gamma:
+    {design key: prior precision of each column} added to the ridge (the smoothness prior)."""
     coef, report, stats = {}, {}, {}
     for d, (k, keys) in designs.items():
         if not n[d]:
@@ -89,7 +90,8 @@ def _solve(designs, acc, yy, n, nc, ridge):
             continue
         R, c = acc[d]
         fac = ls.Factor(R, c, jnp.asarray(yy[d]), jnp.asarray(float(n[d])), jnp.zeros(()))
-        mu = np.asarray(lo.posterior_qr(jnp.full(k, ridge), [fac], [0.0])[0])            # (k, n_keys * nc)
+        lin = jnp.full(k, ridge) if gamma is None else ridge + jnp.asarray(gamma[d])
+        mu = np.asarray(lo.posterior_qr(lin, [fac], [0.0])[0])                           # (k, n_keys * nc)
         res2 = ((np.asarray(R) @ mu - np.asarray(c)) ** 2).sum(0) + np.maximum(yy[d] - (np.asarray(c) ** 2).sum(0), 0.0)
         for q, key in enumerate(keys):
             coef[key] = mu[:, q * nc:(q + 1) * nc].T.copy()
@@ -98,14 +100,19 @@ def _solve(designs, acc, yy, n, nc, ridge):
     return coef, report, stats
 
 
-def fit_onsite(basis, datasets, orbitals=None, channels=("H", "S"), ridge=1e-10, atoms=None, stats=False):
+def fit_onsite(basis, datasets, orbitals=None, channels=("H", "S"), ridge=1e-10, atoms=None, stats=False, sigma_c=None):
     """An `OnsiteModel` fitted to the on-site blocks of `datasets` (`OperatorData`s).
 
     Returns (model, report): report[(z, s1, s2, L)] = (rows, columns, rms residual per channel).
     A part with no feature of its parity and L > 0 has no coefficients (predicted zero); its
     report entry has 0 columns and the rms of the target itself.  `atoms`: per dataset, the atom
     indices to fit to (default: every atom); the others still act as neighbours.
-    `stats=True`: also {(z, L, p): `DesignStats`}, the QR statistics of each design."""
+    `stats=True`: also {(z, L, p): `DesignStats`}, the QR statistics of each design.
+
+    sigma_c: None, the plain ridge; a number: the algebraic smoothness prior of the potential
+    fit (`basis.prior`), precision ridge + (gamma / sigma_c)^2 on the feature of smoothness gamma
+    (`SiteBasis.smoothness`; unit noise, so sigma_c is in the units of the blocks).  The constant
+    column of the L = 0 parts keeps the ridge alone."""
     _need_x64()
     datasets = list(datasets)
     orbitals = datasets[0].basis if orbitals is None else orbitals
@@ -140,12 +147,15 @@ def fit_onsite(basis, datasets, orbitals=None, channels=("H", "S"), ridge=1e-10,
                 out[(z, L, p)] = (A, np.concatenate(Y, axis=1))
         return out
 
-    coef, report, st = _fit(designs, len(datasets), rows, nc, ridge)
+    gamma = None if sigma_c is None else {
+        (z, L, p): np.concatenate([basis.smoothness(L, p), np.zeros(int(L == 0))]) ** 2 / sigma_c ** 2 for z, L, p in designs}
+    coef, report, st = _fit(designs, len(datasets), rows, nc, ridge, gamma=gamma)
     model = OnsiteModel(basis=basis, coef=coef, orbitals=orbitals, channels=tuple(channels))
     return (model, report, st) if stats else (model, report)
 
 
-def fit_offsite(bond_basis, datasets, orbitals=None, channels=("H", "S"), ridge=1e-10, chunk=2048, stats=False, compiled=True):
+def fit_offsite(bond_basis, datasets, orbitals=None, channels=("H", "S"), ridge=1e-10, chunk=2048, stats=False, compiled=True,
+                sigma_c=None):
     """An `OffsiteModel` fitted to the off-site blocks present in `datasets` (`OperatorData`s).
 
     Every bond within the bond cutoff whose block (R, i, j) is in the data is a sample; to fit
@@ -157,7 +167,9 @@ def fit_offsite(bond_basis, datasets, orbitals=None, channels=("H", "S"), ridge=
     compiled (default): the design rows come from `design.bond_designs`, one compiled program per
     species pair, and the factors are merged on the device JAX runs on (a GPU: feature assembly
     and QR there, in float64).  False: the NumPy reference `bond.features` with host merges (the
-    same coefficients; tests compare the two)."""
+    same coefficients; tests compare the two).
+
+    sigma_c: as `fit_onsite`, with `bond.smoothness` for the columns of each design."""
     from . import bond as B
     from .offsite import OffsiteModel, block_lps, canonical_pairs, site_features
 
@@ -212,6 +224,8 @@ def fit_offsite(bond_basis, datasets, orbitals=None, channels=("H", "S"), ridge=
             out[(a, b, L, p, same)] = (A, np.concatenate(Y, axis=1))
         return out
 
+    gamma = None if sigma_c is None else {
+        key: B.smoothness(bond_basis, key[2], key[3], key[4]) ** 2 / sigma_c ** 2 for key in designs}
     if compiled:
         from .design import bond_designs
         progs, dev = {}, {}
@@ -241,8 +255,8 @@ def fit_offsite(bond_basis, datasets, orbitals=None, channels=("H", "S"), ridge=
                 out[key] = (A, Y, len(sel) * (2 * L + 1))
             return out
 
-        coef, report, st = _fit(designs, len(chunks), rows_device, nc, ridge, device=True)
+        coef, report, st = _fit(designs, len(chunks), rows_device, nc, ridge, device=True, gamma=gamma)
     else:
-        coef, report, st = _fit(designs, len(chunks), rows, nc, ridge)
+        coef, report, st = _fit(designs, len(chunks), rows, nc, ridge, gamma=gamma)
     model = OffsiteModel(bond=bond_basis, coef=coef, orbitals=orbitals, channels=tuple(channels))
     return (model, report, st) if stats else (model, report)

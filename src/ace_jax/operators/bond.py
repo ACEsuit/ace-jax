@@ -187,6 +187,31 @@ def n_env_features(basis, L, p, same=False):
             * sum(1 for l, _ in env_layout(basis, L, p) if not same or (l - L) % 2 == 0))
 
 
+def smoothness(basis, L, p, same):
+    """(n_columns,) the smoothness prior gamma of each column of `design` for symmetry (L, p):
+    `basis.prior`'s functional sum (l / wl)^p + (n / wn)^p over the factors of a feature.
+    Two-centre: (bond radial n, L).  Coupled: (bond radial n, bond l) plus the site feature's
+    own gamma.  Bond environment: (bond radial n, bond l) plus (environment radial n', lam),
+    the same for every species channel.  Radial indices count from 1 (the polynomial degree
+    plus one of the Chebyshev radials here)."""
+    from ..basis.prior import P, WL, WN
+    term = lambda n, l: (l / WL) ** P + (n / WN) ** P
+    two, cpl = layout(basis, L, p)
+    out = [np.array([term(n, L) for n in range(1, basis.n_bond + 1)]) if two else np.zeros(0)]
+    g = [np.add.outer([term(n, l) for n in range(1, basis.n_cpl + 1)], basis.site.smoothness(lam, pi)).ravel()
+         for l, lam, pi, _ in cpl]
+    g = np.concatenate(g) if g else np.zeros(0)
+    out += [g] if same else [g, g]
+    if basis.n_env:
+        ch = env_embedding(basis).shape[1]
+        for l, lam in env_layout(basis, L, p):
+            if same and (l - L) % 2:
+                continue
+            inner = np.tile([term(n, lam) for n in range(1, basis.n_env + 1)], ch)             # channel-major
+            out.append(np.add.outer([term(n, l) for n in range(1, basis.n_ebond + 1)], inner).ravel())
+    return np.concatenate(out)
+
+
 def features(basis, F, graph, sel, lps, env=None):
     """{(L, p): {"bond": (n, k0, 2L+1), "i": (n, k1, 2L+1), "j": (n, k1, 2L+1), "sign": (k1,)}}
     for the bonds `sel` (indices into `graph`) and the symmetries `lps`.  `F`: site features

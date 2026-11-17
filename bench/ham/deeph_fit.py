@@ -9,7 +9,8 @@ neutrality, each set of bands measured from its own mu as that paper's Band.py d
 as MACE-H's (it predicts H only).
     JAX_PLATFORMS=cpu uv run python bench/ham/deeph_fit.py <dataset dir> <n_train> <valence electrons per atom>
         [bonds=<per structure, 0 = all>] [site=<n_cpl>,<l_cpl>] [env=<r_env>,<n_env>,<l_env>,<n_ebond>,<l_ebond>|none]
-        [nsite=12] [nbond=12] [rsite=7.0] [nk=7] [threads=8] [ntest=<structures>] [seed=0] [out=<file.jsonl>]
+        [nsite=12] [nbond=12] [rsite=7.0] [nk=7] [threads=8] [ntest=<structures>] [seed=0] [out=<file.jsonl>] [smooth=<sigma_c>]
+`smooth=`: the smoothness prior with that sigma_c (default: the plain ridge).
 `out=`: append one JSON record of the settings and results.  The reference bands of each test
 structure are cached beside the dataset's test folder (`.bands_<nk>/`), so a grid of runs pays
 for them once.
@@ -80,8 +81,8 @@ def train_names(folder, seed=0):
 
 
 def main(folder, n_train, nel, bonds=3000, site=(2, 2), env=(5.0, 6, 4, 4, 4), nsite=12, nbond=12, rsite=7.0, nk=7, threads=8,
-         ntest=None, seed=0, T=1000.0, pred=None, out=None):
-    record = dict(n_train=n_train, bonds=bonds, site=site, env=env, nsite=nsite, nbond=nbond, rsite=rsite, seed=seed,
+         ntest=None, seed=0, T=1000.0, pred=None, out=None, smooth=None):
+    record = dict(n_train=n_train, bonds=bonds, site=site, env=env, nsite=nsite, nbond=nbond, rsite=rsite, seed=seed, sigma_c=smooth,
                   backend=jax.default_backend(), threads=threads)
     if pred:
         res = score(folder, nel, lambda d, name: (deeph.read(os.path.join(folder, "test", name), operators=(
@@ -99,8 +100,8 @@ def main(folder, n_train, nel, bonds=3000, site=(2, 2), env=(5.0, 6, 4, 4, 4), n
     if env:
         basis = basis._replace(r_env=env[0], n_env=int(env[1]), l_env=int(env[2]), n_ebond=int(env[3]), l_ebond=int(env[4]))
     t = time.perf_counter()
-    on, _ = fit_onsite(sb, train, channels=("H",))
-    off, _ = fit_offsite(basis, [subset(d, bonds, k) for k, d in enumerate(train)], channels=("H",))
+    on, _ = fit_onsite(sb, train, channels=("H",), sigma_c=smooth)
+    off, _ = fit_offsite(basis, [subset(d, bonds, k) for k, d in enumerate(train)], channels=("H",), sigma_c=smooth)
     kmax = max(np.asarray(c).shape[1] for c in off.coef.values())
     record.update(columns=int(kmax), fit_s=round(time.perf_counter() - t, 1), n_coef=int(sum(np.asarray(c).size for c in off.coef.values())))
     print(f"{n_train} training structures ({len(train[0].numbers)} atoms, {len(train[0].blocks['H'])} blocks each), "
@@ -165,7 +166,7 @@ if __name__ == "__main__":
     kw = {}
     for x in [x for x in a if "=" in x]:
         k, v = x.split("=")
-        kw[k] = (v if k in ("pred", "out") else None if v == "none" else float(v) if k == "rsite" else int(v) if k in ("bonds", "nsite", "nbond", "nk", "threads", "ntest", "seed")
+        kw[k] = (v if k in ("pred", "out") else None if v == "none" else float(v) if k in ("rsite", "smooth") else int(v) if k in ("bonds", "nsite", "nbond", "nk", "threads", "ntest", "seed")
                  else tuple(float(t) if k == "env" and i == 0 else int(t) for i, t in enumerate(v.split(","))))
     pos = [x for x in a if "=" not in x]
     main(pos[0], int(pos[1]), float(pos[2]), **kw)

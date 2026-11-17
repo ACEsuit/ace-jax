@@ -17,6 +17,7 @@ import numpy as np
 
 from ..basis import radial_init as ri
 from ..basis.coupling import couple_equivariant_set
+from ..basis.prior import smoothness_prior
 from ..basis.spec import build_spec
 from ..eval.features import pooled_a
 from ..eval.product import product_basis
@@ -79,6 +80,13 @@ class SiteBasis(eqx.Module):
     rcut: float = eqx.field(static=True)
     lmax: int = eqx.field(static=True)
     solid: bool = eqx.field(static=True, default=True)     # solid (r^l Y_lm) or spherical harmonics
+    gamma: tuple = eqx.field(static=True, default=None)    # per lp: the smoothness prior of each feature
+
+    def smoothness(self, L, p):
+        """(n(L, p),) the algebraic smoothness prior gamma of each feature of symmetry (L, p)
+        (`basis.prior.smoothness_prior` on the (n, l) of its one-particle functions, n the radial
+        degree: with an element embedding the channel is not counted)."""
+        return np.asarray(self.gamma[self.lps.index((L, p))], float) if (L, p) in self.lps else np.zeros(0)
 
     def n(self, L, p):
         """Number of features of symmetry (L, p); 0 if the basis has none."""
@@ -121,7 +129,7 @@ def _all_bodies(bb):
     return True
 
 
-def _coupled(radial, lmax_feat, mb, Rnl, Ylm, zs, rcut, solid, coupling_cache_dir):
+def _coupled(radial, lmax_feat, mb, Rnl, Ylm, zs, rcut, solid, coupling_cache_dir, channels=1):
     """The `SiteBasis` of a radial and a many-body spec: every (L, +-1), L <= lmax_feat, that has a function."""
     lps = [(L, p) for L in range(lmax_feat + 1) for p in (1, -1)]
     es = couple_equivariant_set(lps, mb, list(Rnl), list(Ylm), cache_dir=coupling_cache_dir)
@@ -136,7 +144,9 @@ def _coupled(radial, lmax_feat, mb, Rnl, Ylm, zs, rcut, solid, coupling_cache_di
         cols=tuple(jnp.asarray(es.A2B[lp].cols, jnp.int32) for lp in lps),
         vals=tuple(jnp.asarray(es.A2B[lp].vals, jnp.float64) for lp in lps),
         lps=tuple(lps), n_B=tuple(int(es.A2B[lp].shape[0]) for lp in lps),
-        elements=tuple(int(z) for z in zs), rcut=float(rcut), lmax=int(max(l for l, _ in Ylm)), solid=solid)
+        elements=tuple(int(z) for z in zs), rcut=float(rcut), lmax=int(max(l for l, _ in Ylm)), solid=solid,
+        gamma=tuple(tuple(float(g) for g in smoothness_prior([[((n - 1) // channels + 1, l) for n, l in bb] for bb in es.nnll[lp]]))
+                    for lp in lps))
 
 
 def random_embedding(n_elements, d, seed=0):
@@ -195,7 +205,7 @@ def build_embedding_site_basis(elements, order, totaldegree, lmax_feat, embeddin
         rnl_coefs_single=jnp.asarray(single), rnl_embedding=jnp.asarray(emb),
         rnl_emb_nidx=jnp.asarray(sp.nidx), rnl_emb_kidx=jnp.asarray(sp.kidx),
         radial_kind="spline_factorised", rnl_grid=(-1.0, 2.0 / (ra.SPLINE_NODES - 1), ra.SPLINE_NODES))
-    return _coupled(tr, lmax_feat, sp.mb, sp.rspec, sp.Ylm, zs, cut[2], False, coupling_cache_dir)
+    return _coupled(tr, lmax_feat, sp.mb, sp.rspec, sp.Ylm, zs, cut[2], False, coupling_cache_dir, channels=sp.d)
 
 
 def build_site_basis(elements, order, totaldegree, lmax_feat, *, rcut, wL=1.5, coupling_cache_dir=None,
