@@ -426,7 +426,8 @@ class HamiltonianPredictor:
         hs, pos0 = self._hs_fn(positions, cell, numbers, kpts, overlap, channel, overlap_shift, pbc)
         nk = len(np.atleast_2d(np.asarray(kpts, float)))
         wk = jnp.full(nk, 1.0 / nk) if weights is None else jnp.asarray(weights)
-        occ = occupations if callable(occupations) else (lambda e, f=jnp.asarray(occupations): jnp.broadcast_to(f, e.shape))
+        fixed = None if callable(occupations) else jnp.asarray(occupations)
+        occ = occupations if fixed is None else (lambda e: jnp.broadcast_to(fixed, e.shape))
 
         def solve(H, S):
             L = jnp.linalg.cholesky(S)
