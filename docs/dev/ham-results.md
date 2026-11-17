@@ -624,3 +624,23 @@ This supersedes leaving core bands out of the sum (`core_bands=`, kept for all-e
 - The projected model is no more accurate in band energy than the all-electron model with its core bands left out (on a training structure its band energy is off by +18.6 meV per atom against −1.1), which fits the MACE-H paper's remark that the projected valence functions depend on the environment. It is three times cheaper (9 orbitals: the band terms of 220 structures took 538 s against 1,740 s).
 - Either way the H model costs a factor of three over the reference H; it was fitted to two structures with one model size, so there is room there.
 - Measured from the Fermi level the residual is again far worse (21.8 meV per atom).
+
+## Profile of E_band + E_eff on a GPU (2026-11-17)
+
+`bench/ham/total_profile.py`: core-projected aluminium (9 orbitals per atom; H and S model: site (2, 2) + environment (5, 6, 4, 4, 4), bond cutoff 11.4 Å), `band_energy(device=True)` with forces and stress, Gaussian smearing; E_eff: the residual potential (order 2, degree 10) through `ACECalculator(ffi=True)`, the CUDA kernel. RTX 4000 Ada, float64. Supercells of the 64-atom cell along one axis, the k-points reduced in proportion.
+
+| | 64 atoms, 576 orbitals, 8 k | 128 atoms, 1,152 orbitals, 4 k | 256 atoms, 2,304 orbitals, 2 k |
+|---|---|---|---|
+| **E_band, forces, stress** | **500 ms** | **1,372 ms** | **4,174 ms** |
+| neighbour lists (three cutoffs, on the GPU) | 6.8 ms, 1.4 % | 8.3, 0.6 % | 13.7, 0.3 % |
+| site features and all blocks | 88 ms, 18 % | 181, 13 % | 367, 9 % |
+| Bloch sums of H and S | 4.8 ms, 1.0 % | 7.2, 0.5 % | 10.8, 0.3 % |
+| eigenvalues and eigenvectors (Cholesky + `eigh`) | 298 ms, **60 %** | 834, **61 %** | 2,649, **64 %** |
+| density matrices and the reverse pass (the rest) | 102 ms, 20 % | 342, 25 % | 1,134, 27 % |
+| **E_eff**, energy and forces, CUDA FFI kernel | 0.8 ms | 1.6 ms | 1.8 ms |
+
+- **The eigensolver is the bottleneck**, 60 to 64 % at every size, and it is the part that grows as N³. The reverse pass (which rebuilds the blocks' derivatives and contracts them with the density matrices) is second and grows with it. The blocks themselves, the part a hand-written kernel like the potential's would replace, are 18 % at 64 atoms and 9 % at 256.
+- **E_eff is negligible**: under 0.2 % of the total with the CUDA kernel.
+- **Transfers.** In a warm call nothing goes from host to device implicitly (`jax.transfer_guard_host_to_device("disallow")` passes). The guard did catch one on the first run: the electron count, smearing width and core-band count were made into device scalars implicitly and brought back; they are now host scalars uploaded explicitly. From device to host there is one implicit download per neighbour list, by design: the largest neighbour count, to size the slots (`_dense`), and the slots per species pair.
+- **Float32 is not usable as it stands.** It is 4 to 7 times faster (125 ms at 64 atoms; the eigensolver 103 ms), but the band energy is wrong: −3,222 eV against −2,067 eV. Not the tabulated radial (the same without it) and not the overlap's conditioning (smallest eigenvalue of S(k) 0.032, condition number 219). The cause is not found.
+- What follows for a kernel for E_band: it would not move the total much on this hardware in float64. The things that would are the eigensolver (float64 on a workstation GPU is bound by its float64 units, so an A100 should do better; a correct mixed-precision path; fewer k-points by symmetry; or a density-matrix method that needs only products with H and S) and the reverse pass.

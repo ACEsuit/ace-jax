@@ -590,7 +590,7 @@ class HamiltonianPredictor:
             raise ValueError(f"smearing must be one of {SMEARINGS}, got {smearing!r}")
         kpts = np.atleast_2d(np.asarray(kpts, float))
         wk = np.full(len(kpts), 1.0 / len(kpts)) if weights is None else np.asarray(weights, float)
-        occ = (jnp.asarray(float(nelectrons)), jnp.asarray(float(width)), jnp.asarray(int(core_bands)))
+        occ = (np.float64(nelectrons), np.float64(width), np.int32(core_bands))            # host scalars: uploaded explicitly below
         ch, cs = self.channels.index(channel), self.channels.index(overlap) if overlap else None
         if device:
             if jax.default_backend() != "gpu" or not have_matscipy_neighbours():
@@ -598,13 +598,15 @@ class HamiltonianPredictor:
             a = self._device_inputs(positions, cell, numbers, pbc)
             dt = a["dtype"]
             return _device_energy(*a["args"], a["env"], a["e_idx"], jax.device_put(kpts.astype(dt)),
-                                  tuple(jax.device_put(np.asarray(x, dt)) for x in occ), jax.device_put(wk.astype(dt)),
+                                  (jax.device_put(occ[0].astype(dt)), jax.device_put(occ[1].astype(dt)), jax.device_put(occ[2])),
+                                  jax.device_put(wk.astype(dt)),
                                   (a["static"], a["n_orb"], ch, cs, smearing, float(degeneracy)))
         G, n_orb = self._host_lists(positions, cell, numbers, pbc, edge_step=1024, k_step=8)
         b = self.offsite.model.bond
         static = ((self.offsite.static(), n_orb, ch, cs, b.rcut_bond), smearing, float(degeneracy))
         return _host_energy(b.site, self.onsite.readout, self.offsite.packs, jnp.asarray(np.asarray(positions, float)),
-                            jnp.asarray(np.asarray(cell, float)), G, jnp.asarray(kpts), occ, jnp.asarray(wk), static)
+                            jnp.asarray(np.asarray(cell, float)), G, jnp.asarray(kpts), tuple(jnp.asarray(x) for x in occ),
+                            jnp.asarray(wk), static)
 
     def bands_fn(self, positions, cell, numbers, kpts, overlap="S", channel="H", overlap_shift=0.0, pbc=True):
         """(fn, positions): fn(positions) -> (n_k, n_orb) eigenvalues, differentiable through the
