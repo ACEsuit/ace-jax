@@ -222,3 +222,30 @@ def test_threaded_prediction_is_the_single_call(basis_env, threads):
             assert set(ref[name]) == set(got[name])
             assert max(np.abs(got[name][k] - v).max() for k, v in ref[name].items()) < 1e-12 * max(
                 np.abs(v).max() for v in ref[name].values())
+
+
+def test_species_aware_environment_on_real_data(basis):
+    """SiC fixture, H: the bond environment fits the off-site blocks better than the two-centre
+    model alone, and with one channel per element no worse than blind to the species of its atoms
+    (in this perfect crystal every bond of a kind has the same environment, so the blind group
+    already fits what the group can: the species dependence itself is tested on a random
+    structure in test_operators_bond.py).  The compiled predictor (one call, and chunks on
+    threads) returns the reference predictor's blocks for the two-element structure."""
+    from ace_jax.operators.offsite_fast import OffsitePredictor
+    require_optional("h5py")
+    d = deeph.read(FIX)
+    off = [k for k in d.blocks["H"] if np.linalg.norm(d.bond(k)) > 1e-6]
+    two = bond.BondBasis(site=basis.site, rcut_bond=3.3, n_bond=6)
+    aware = two._replace(r_env=3.5, n_env=2, l_env=2, n_ebond=2, l_ebond=2)
+    blind = aware._replace(env_emb=((1.0,), (1.0,)))
+    rms = {}
+    for name, b in (("two", two), ("blind", blind), ("aware", aware)):
+        model, _ = fit_offsite(b, [d], channels=("H",), ridge=1e-8)
+        pred = model.predict(d.positions, d.cell, d.numbers)["H"]
+        rms[name] = np.sqrt(np.mean(np.concatenate([(pred[k] - d.blocks["H"][k]).ravel() for k in off]) ** 2))
+        if name == "aware":
+            for fast in (OffsitePredictor(model), OffsitePredictor(model, threads=3)):
+                got = fast(d.positions, d.cell, d.numbers)["H"]
+                assert set(got) >= set(off)
+                assert max(np.abs(got[k] - pred[k]).max() for k in off) < 1e-9 * max(np.abs(pred[k]).max() for k in off)
+    assert rms["aware"] < rms["blind"] * (1 + 1e-6) and rms["blind"] < 0.8 * rms["two"], rms

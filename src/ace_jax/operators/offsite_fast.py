@@ -68,8 +68,9 @@ def _pack(model, za, zb):
         dense = np.zeros((len(items), 2 * L + 1, na * nb))
         k1 = basis.n_cpl * sum(nB for *_, nB in cpl)
         ecpl = B.env_layout(basis, L, p)
-        ke = basis.n_ebond * basis.n_env
-        We = [np.zeros((nc, len(items), basis.n_ebond, basis.n_env)) for _ in ecpl]
+        ne = basis.n_env * (B.env_embedding(basis).shape[1] if basis.n_env else 0)     # channels x radials
+        ke = basis.n_ebond * ne
+        We = [np.zeros((nc, len(items), basis.n_ebond, ne)) for _ in ecpl]
         for q, (s1, s2, l1, l2, same, c) in enumerate(items):
             W0[:, q, :k0] = c[:, :k0]
             o = k0
@@ -85,7 +86,7 @@ def _pack(model, za, zb):
             for g, (l, _lam) in enumerate(ecpl):
                 if same and (l - L) % 2:                  # an equal-shell block does not have this group
                     continue
-                We[g][:, q] = c[:, o:o + ke].reshape(nc, basis.n_ebond, basis.n_env)
+                We[g][:, q] = c[:, o:o + ke].reshape(nc, basis.n_ebond, ne)
                 o += ke
             blk = np.zeros((2 * L + 1, na, nb))
             blk[:, orb.shell_slice(za, s1), orb.shell_slice(zb, s2)] = np.moveaxis(cg.real_cg(l1, l2, L), 2, 0)
@@ -187,15 +188,15 @@ def _canonical(pack, Fa, ga, Aenv, dj, n_cpl, l_cpl):
     return jnp.moveaxis(flat, 0, -1).reshape(n, K, -1, na, nb)
 
 
-def _env_side(e_rij, e_live, rvec, mask, r_env, rmax, n_env, l_env):
-    """(n, K, n_env, (l_env+1)^2): for each bond slot, the half of A^env pooled over the neighbours
+def _env_side(e_rij, e_live, e_ch, rvec, mask, r_env, rmax, n_env, l_env):
+    """(n, K, channels n_env, (l_env+1)^2): for each bond slot, the half of A^env pooled over the neighbours
     of its first atom (`bond._env_side` on the dense layouts).  One atom at a time: its
     (bonds x environment atoms) intermediates fit the cache, where all atoms at once is a pass
     over hundreds of MB per operation."""
     nlm = (l_env + 1) ** 2
 
     def one(args):
-        d, live, r, m = args                                            # (Ke, 3), (Ke,), (K, 3), (K,)
+        d, live, ch, r, m = args                                        # (Ke, 3), (Ke,), (Ke, C), (K, 3), (K,)
         dist = jnp.sqrt(jnp.sum(d * d, axis=-1))
         e = jnp.where(live & (dist < r_env), (1 - jnp.clip(dist / r_env, 0, 1) ** 2) ** 2, 0.0)   # (Ke,)
         partner = jnp.sum((d[None, :, :] - r[:, None, :]) ** 2, axis=-1) < 1e-8                # (K, Ke)
@@ -203,22 +204,23 @@ def _env_side(e_rij, e_live, rvec, mask, r_env, rmax, n_env, l_env):
         x = d[None, :, :] - 0.5 * r[:, None, :]                         # about the midpoint
         R = _radial(jnp.clip(jnp.sqrt(jnp.sum(x * x, axis=-1)) / rmax, 0.0, 1.0), n_env)
         Yx = real_spherical_harmonics(x, max(l_env, 1))[..., :nlm]
-        return jnp.einsum("Ken,Key->Kny", w[..., None] * R, Yx)
+        return jnp.einsum("Ken,ec,Key->Kcny", w[..., None] * R, ch, Yx).reshape(r.shape[0], -1, nlm)
 
-    return jax.lax.map(one, (e_rij, e_live, rvec, mask))
+    return jax.lax.map(one, (e_rij, e_live, e_ch, rvec, mask))
 
 
 def _geo(rows, rvec, mask, env, rcut, shape_args):
     """The bond geometry of the rows of one layout: (phi0, U, Y, phi2, side)."""
-    n_bond, n_cpl, l_cpl, lmax, n_env, l_env, n_ebond, l_ebond, r_env = shape_args
+    n_bond, n_cpl, l_cpl, lmax, n_env, l_env, n_ebond, l_ebond, r_env, env_emb = shape_args
     x = jnp.clip(jnp.sqrt(jnp.sum(rvec * rvec, axis=-1)) / rcut, 0.0, 1.0)
     Y = real_spherical_harmonics(rvec, max(lmax, 1))
     U = _radial(x, n_cpl)[..., :, None] * Y[..., None, :(l_cpl + 1) ** 2] * mask[..., None, None]
     phi2 = side = None
     if n_env:
-        e_rij, e_count = env
+        e_rij, e_count, e_z = env
         e_live = jnp.arange(e_rij.shape[1])[None, :] < e_count[:, None]
-        side = _env_side(e_rij[rows], e_live[rows], rvec, mask, r_env, r_env + 0.5 * rcut, n_env, l_env)
+        e_ch = jnp.asarray(env_emb, rvec.dtype)[e_z[rows]]               # (rows, Ke, channels)
+        side = _env_side(e_rij[rows], e_live[rows], e_ch, rvec, mask, r_env, r_env + 0.5 * rcut, n_env, l_env)
         phi2 = _radial(x, n_ebond) * mask[..., None]
     return _radial(x, n_bond) * mask[..., None], U, Y, phi2, side
 
@@ -414,7 +416,7 @@ class OffsitePredictor:
         that stay on the device (H(k), eigenvalues): no copy to the host."""
         b = self.model.bond
         if b.n_env and env is None:
-            raise ValueError("this model has a bond environment: pass env = (neighbour vectors (n, Ke, 3), counts) within r_env")
+            raise ValueError("this model has a bond environment: pass env = (neighbour vectors (n, Ke, 3), counts, species indices (n, Ke)) within r_env")
         return _blocks(self.packs, F, lay, b.rcut_bond, self.static(), env if b.n_env else None)
 
     def blocks(self, F, lay, env=None):
@@ -424,12 +426,13 @@ class OffsitePredictor:
             return self.device(F, lay, env)
         b = self.model.bond
         if b.n_env and env is None:
-            raise ValueError("this model has a bond environment: pass env = (neighbour vectors (n, Ke, 3), counts) within r_env")
+            raise ValueError("this model has a bond environment: pass env = (neighbour vectors (n, Ke, 3), counts, species indices (n, Ke)) within r_env")
         return _blocks_threaded(self.packs, F, lay, b.rcut_bond, self.static(), env if b.n_env else None, self._pool, self.threads)
 
     def static(self):
         b = self.model.bond
-        return (b.n_bond, b.n_cpl, b.l_cpl, self.lmax, b.n_env, b.l_env, b.n_ebond, b.l_ebond, b.r_env)
+        emb = tuple(tuple(float(v) for v in row) for row in B.env_embedding(b)) if b.n_env else ()
+        return (b.n_bond, b.n_cpl, b.l_cpl, self.lmax, b.n_env, b.l_env, b.n_ebond, b.l_ebond, b.r_env, emb)
 
     def dense(self, positions, cell, numbers, pbc=True):
         m, basis = self.model, self.model.bond
@@ -438,7 +441,7 @@ class OffsitePredictor:
         F = _features(basis.site, rij, zi, zj, seg, n)
         g = B.bond_graph(basis, positions, cell, numbers, pbc)
         pl = PairLayouts(g, numbers, m.orbitals.species, basis.rcut_bond)
-        env = B.env_lists(basis, positions, cell, pbc)
+        env = B.env_lists(basis, positions, cell, pbc, numbers)
         if self._pool is not None and jax.default_backend() == "cpu":
             return g, self._dense_threaded(F, pl, g, env if basis.n_env else None)
         blocks = self.blocks(F, pl.lay, env)

@@ -10,6 +10,8 @@ as MACE-H's (it predicts H only).
     JAX_PLATFORMS=cpu uv run python bench/ham/deeph_fit.py <dataset dir> <n_train> <valence electrons per atom>
         [bonds=<per structure, 0 = all>] [site=<n_cpl>,<l_cpl>] [env=<r_env>,<n_env>,<l_env>,<n_ebond>,<l_ebond>|none]
         [nsite=12] [nbond=12] [rsite=7.0] [nk=7] [threads=8] [ntest=<structures>] [seed=0]
+With `pred=<dir>` nothing is fitted (<n_train> is ignored): the predictions of another code,
+`<dir>/<structure>/hamiltonians_pred.h5` (MACE-H, DeepH-E3: `bench/ham/maceh_eval.py`), are scored.
 Training structures: the first <n_train> of <dataset dir>/train in name order after a seeded
 shuffle (nested: a larger <n_train> contains a smaller one's)."""
 import os
@@ -66,10 +68,20 @@ def chemical_potential(e, n_electrons, T):
     return brentq(lambda m: 2.0 * fermi(e, m, T).sum() / len(e) - n_electrons, e.min(), e.max())
 
 
-def main(folder, n_train, nel, bonds=3000, site=(2, 2), env=(5.0, 6, 4, 4, 4), nsite=12, nbond=12, rsite=7.0, nk=7, threads=8,
-         ntest=None, seed=0, T=1000.0):
+def train_names(folder, seed=0):
+    """The training structures in the seeded order every code's nested training sets are cut from."""
     names = sorted(os.listdir(os.path.join(folder, "train")))
     np.random.default_rng(seed).shuffle(names)
+    return names
+
+
+def main(folder, n_train, nel, bonds=3000, site=(2, 2), env=(5.0, 6, 4, 4, 4), nsite=12, nbond=12, rsite=7.0, nk=7, threads=8,
+         ntest=None, seed=0, T=1000.0, pred=None):
+    if pred:
+        return score(folder, nel, lambda d, name: (deeph.read(os.path.join(folder, "test", name), operators=(
+            ("H", os.path.abspath(os.path.join(pred, name, "hamiltonians_pred.h5"))),)).blocks["H"], float("nan")),
+            nk, ntest, T, f"predictions in {pred}")
+    names = train_names(folder, seed)
     train = [deeph.read(os.path.join(folder, "train", n), operators=("H",)) for n in names[:n_train]]
     orb = train[0].basis
     rmax = max(np.linalg.norm(train[0].bond(k)) for k in train[0].blocks["H"])
@@ -88,32 +100,41 @@ def main(folder, n_train, nel, bonds=3000, site=(2, 2), env=(5.0, 6, 4, 4, 4), n
           f"bond cutoff {rcut}; largest problem {kmax} columns; fitted in {time.perf_counter() - t:.0f} s", flush=True)
     del train
     f_on, f_off = OnsitePredictor(on), OffsitePredictor(off, threads=threads)
-    ks = np.array([[a, b, c] for a in range(nk) for b in range(nk) for c in range(nk)]) / nk
-    tests = sorted(os.listdir(os.path.join(folder, "test")))[:ntest]
-    err, ee, ee_rel, times = [], [], [], []
-    for name in tests:
-        d = deeph.read(os.path.join(folder, "test", name))
+
+    def predict(d, name):
         f_on(d.positions, d.cell, d.numbers); f_off(d.positions, d.cell, d.numbers)          # compile, lists
         t = time.perf_counter()
-        pred = {**f_off(d.positions, d.cell, d.numbers)["H"], **f_on(d.positions, d.cell, d.numbers)["H"]}
-        times.append((time.perf_counter() - t) / len(d.numbers))
+        out = {**f_off(d.positions, d.cell, d.numbers)["H"], **f_on(d.positions, d.cell, d.numbers)["H"]}
+        return out, (time.perf_counter() - t) / len(d.numbers)
+
+    score(folder, nel, predict, nk, ntest, T, f"{threads} threads")
+
+
+def score(folder, nel, predict, nk, ntest, T, label):
+    """The test set's H MAE and smeared eigenvalue error of predict(d, name) -> (blocks, s per atom)."""
+    ks = np.array([[a, b, c] for a in range(nk) for b in range(nk) for c in range(nk)]) / nk
+    tests = sorted(os.listdir(os.path.join(folder, "test")))[:ntest]
+    err, ee, ee_abs, times = [], [], [], []
+    for name in tests:
+        d = deeph.read(os.path.join(folder, "test", name))
+        pred, dt = predict(d, name)
+        times.append(dt)
+        assert not [k for k in d.blocks["H"] if k not in pred], "the prediction lacks blocks of the reference"
         diff = np.concatenate([(pred[k] - v).ravel() for k, v in d.blocks["H"].items()])
-        missing = sum(v.size for k, v in d.blocks["H"].items() if k not in pred)
-        assert not missing
         err.append(diff)
         S = bloch(d, d.blocks["S"], ks)
         e0 = np.array([scipy.linalg.eigh(h, s, eigvals_only=True) for h, s in zip(bloch(d, d.blocks["H"], ks), S)])
-        e1 = np.array([scipy.linalg.eigh(h, s, eigvals_only=True) for h, s in zip(bloch(d, pred, ks), S)])
+        e1 = np.array([scipy.linalg.eigh(h, s, eigvals_only=True) for h, s in zip(bloch(d, {k: pred[k] for k in d.blocks["H"]}, ks), S)])
         mu0, mu1 = (chemical_potential(e, nel * len(d.numbers), T) for e in (e0, e1))
         w = fermi(e0, mu0, T)
-        ee.append((np.abs(e1 - e0) * w).sum() / w.sum())
-        ee_rel.append((np.abs((e1 - mu1) - (e0 - mu0)) * w).sum() / w.sum())
+        ee.append((np.abs((e1 - mu1) - (e0 - mu0)) * w).sum() / w.sum())
+        ee_abs.append((np.abs(e1 - e0) * w).sum() / w.sum())
         print(f"  {name}: H MAE {1e3 * np.abs(diff).mean():.3f} meV, EE {1e3 * ee[-1]:.2f} meV "
-              f"(relative to each chemical potential {1e3 * ee_rel[-1]:.2f}), {1e3 * times[-1]:.1f} ms per atom", flush=True)
+              f"(absolute {1e3 * ee_abs[-1]:.2f}), {1e3 * dt:.1f} ms per atom", flush=True)
     err = np.concatenate(err)
     print(f"test set ({len(tests)} structures): H MAE {1e3 * np.abs(err).mean():.3f} meV, RMSE {1e3 * np.sqrt((err ** 2).mean()):.3f} meV, "
-          f"largest {1e3 * np.abs(err).max():.1f} meV; EE mean {1e3 * np.mean(ee):.2f} meV (relative to mu {1e3 * np.mean(ee_rel):.2f}); "
-          f"{1e3 * np.mean(times):.1f} ms per atom on {threads} threads")
+          f"largest {1e3 * np.abs(err).max():.1f} meV; EE mean {1e3 * np.mean(ee):.2f} meV (absolute {1e3 * np.mean(ee_abs):.2f}); "
+          f"{1e3 * np.mean(times):.1f} ms per atom; {label}")
 
 
 if __name__ == "__main__":
@@ -121,7 +142,7 @@ if __name__ == "__main__":
     kw = {}
     for x in [x for x in a if "=" in x]:
         k, v = x.split("=")
-        kw[k] = (None if v == "none" else float(v) if k == "rsite" else int(v) if k in ("bonds", "nsite", "nbond", "nk", "threads", "ntest", "seed")
+        kw[k] = (v if k == "pred" else None if v == "none" else float(v) if k == "rsite" else int(v) if k in ("bonds", "nsite", "nbond", "nk", "threads", "ntest", "seed")
                  else tuple(float(t) if k == "env" and i == 0 else int(t) for i, t in enumerate(v.split(","))))
     pos = [x for x in a if "=" not in x]
     main(pos[0], int(pos[1]), float(pos[2]), **kw)

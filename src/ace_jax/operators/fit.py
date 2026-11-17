@@ -173,7 +173,7 @@ def fit_offsite(bond_basis, datasets, orbitals=None, channels=("H", "S"), ridge=
         d, (g, keys) = datasets[k], graphs[k]
         if cache.get("k") != k:                          # chunks come dataset by dataset
             cache.update(k=k, F=site_features(bond_basis, d.positions, d.cell, d.numbers),
-                         env=B.env_lists(bond_basis, d.positions, d.cell))
+                         env=B.env_lists(bond_basis, d.positions, d.cell, numbers=d.numbers))
         f = B.features(bond_basis, cache["F"], g, sel, lps, env=cache["env"])
         blocks = np.stack([[d.blocks[c][keys[e]] for c in channels] for e in sel])               # (e, c, ni, nj)
         out = {}

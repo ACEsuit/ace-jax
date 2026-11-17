@@ -25,7 +25,13 @@ with e a smooth cutoff at `r_env` around each end (a dumbbell where ACEhamiltoni
 cylinder; for bonds up to about 2 r_env it covers the same region, and it lets the pooling
 run over each end's own neighbour list).  It is the same for a bond and its reverse, so under
 reversal the group only takes the sign (-1)^l of the bond harmonic.  This group does pool an
-environment per bond."""
+environment per bond.
+
+The environment atoms' species enter through channels: A^env_(c n' lam) carries a further factor
+emb[z_k, c], with emb the (elements, channels) table `env_embedding`: the identity by default (one
+channel per element of the site basis: a categorical environment; one element, one channel), or
+`BondBasis.env_emb`, an element embedding whose width, not the number of elements, then sets the
+number of features."""
 from typing import NamedTuple
 
 import numpy as np
@@ -42,7 +48,9 @@ class BondBasis(NamedTuple):
     harmonic of the coupled features (0 radial functions: two-centre only).  Bond environment
     (off when n_env = 0): r_env, the cutoff around each end; n_env, l_env: radial functions and
     largest harmonic of the environment about the midpoint; n_ebond, l_ebond: radial functions
-    and largest bond harmonic it is coupled with."""
+    and largest bond harmonic it is coupled with; env_emb: None (one channel per element) or the
+    (elements, channels) embedding of the environment atoms' species as nested tuples, rows in the
+    order of `site.elements`."""
 
     site: SiteBasis
     rcut_bond: float
@@ -54,6 +62,7 @@ class BondBasis(NamedTuple):
     l_env: int = 0
     n_ebond: int = 0
     l_ebond: int = 0
+    env_emb: tuple = None
 
 
 class BondGraph(NamedTuple):
@@ -93,9 +102,21 @@ def bond_graph(basis, positions, cell, numbers, pbc=True):
     return BondGraph(i, j, R, g.rij, reverse)
 
 
-def env_lists(basis, positions, cell, pbc=True):
-    """Dense neighbour vectors within `r_env` of every atom, (n, K, 3) and counts, for the bond
-    environment; None when the basis has none."""
+def env_embedding(basis):
+    """(elements, channels) table of the environment atoms' species: `env_emb`, or the identity."""
+    S = len(basis.site.elements)
+    if basis.env_emb is None:
+        return np.eye(S)
+    emb = np.asarray(basis.env_emb, float)
+    if emb.ndim != 2 or emb.shape[0] != S:
+        raise ValueError(f"env_emb must have one row per element of the site basis ({S}), got shape {emb.shape}")
+    return emb
+
+
+def env_lists(basis, positions, cell, pbc=True, numbers=None):
+    """For the bond environment: dense neighbour vectors within `r_env` of every atom (n, K, 3), counts
+    (n,) and the neighbours' species indices (n, K) (`site.species_index`; `numbers` may be left out
+    for a one-element basis).  None when the basis has no environment group."""
     if not basis.n_env:
         return None
     from ..eval.nlist import dense_graph
@@ -103,7 +124,13 @@ def env_lists(basis, positions, cell, pbc=True):
     g = sparse_graph(positions, cell, pbc, basis.r_env)
     K = max(int(np.bincount(g.senders, minlength=len(positions)).max()) if len(g.rij) else 1, 1)
     d = dense_graph(positions, cell, pbc, basis.r_env, K)
-    return np.asarray(d.rij), np.asarray(d.count)
+    if numbers is None:
+        if len(basis.site.elements) > 1:
+            raise ValueError("env_lists: pass numbers= (the environment group needs the neighbours' species)")
+        z = np.zeros(np.asarray(d.idx).shape, np.int32)
+    else:
+        z = basis.site.species_index(numbers)[np.asarray(d.idx)]
+    return np.asarray(d.rij), np.asarray(d.count), z
 
 
 def env_layout(basis, L, p):
@@ -116,9 +143,10 @@ def env_layout(basis, L, p):
 
 
 def _env_side(basis, env, atoms, r):
-    """(n_bonds, n_env, (l_env+1)^2): the half of A^env pooled over the neighbours of the bond's
-    first atom `atoms`, for bond vectors `r` (the partner atom itself is left out)."""
-    rij, count = env
+    """(n_bonds, channels * n_env, (l_env+1)^2), channel-major: the half of A^env pooled over the
+    neighbours of the bond's first atom `atoms`, for bond vectors `r` (the partner atom itself is
+    left out)."""
+    rij, count, z = env
     d = rij[atoms]                                                     # (e, K, 3) from the first atom
     K = d.shape[1]
     dist = np.linalg.norm(d, axis=-1)
@@ -127,7 +155,8 @@ def _env_side(basis, env, atoms, r):
     x = d - 0.5 * r[:, None, :]                                        # relative to the midpoint
     R = radial(np.linalg.norm(x, axis=-1), basis.r_env + 0.5 * basis.rcut_bond, basis.n_env)
     Y = np.asarray(real_spherical_harmonics(x.reshape(-1, 3), max(basis.l_env, 1))).reshape(*x.shape[:2], -1)
-    return np.einsum("ek,ekn,eky->eny", w, R, Y[..., :(basis.l_env + 1) ** 2])
+    ch = env_embedding(basis)[z[atoms]]                                # (e, K, channels)
+    return np.einsum("ek,ekc,ekn,eky->ecny", w, ch, R, Y[..., :(basis.l_env + 1) ** 2]).reshape(len(atoms), -1, (basis.l_env + 1) ** 2)
 
 
 def layout(basis, L, p):
@@ -152,7 +181,10 @@ def n_features(basis, L, p):
 def n_env_features(basis, L, p, same=False):
     """Bond-environment feature count of symmetry (L, p); `same`: only the groups a block
     between equal shells of equal species keeps (bond harmonic of the parity of L)."""
-    return basis.n_ebond * basis.n_env * sum(1 for l, _ in env_layout(basis, L, p) if not same or (l - L) % 2 == 0)
+    if not basis.n_env:
+        return 0
+    return (basis.n_ebond * basis.n_env * env_embedding(basis).shape[1]
+            * sum(1 for l, _ in env_layout(basis, L, p) if not same or (l - L) % 2 == 0))
 
 
 def features(basis, F, graph, sel, lps, env=None):
@@ -194,9 +226,9 @@ def features(basis, F, graph, sel, lps, env=None):
         ge, esign = [], []
         for l, lam in env_layout(basis, L, p):
             W = np.einsum("em,mnM->enM", y(l), cg.real_cg(l, lam, L))
-            a = np.einsum("ebn,enM->ebM", Aenv[:, :, lam * lam:(lam + 1) ** 2], W)       # (e, n_env, M)
+            a = np.einsum("ebn,enM->ebM", Aenv[:, :, lam * lam:(lam + 1) ** 2], W)       # (e, channels n_env, M)
             ge.append((phi2[:, :, None, None] * a[:, None]).reshape(len(sel), -1, k))
-            esign += [(-1) ** l] * (basis.n_ebond * basis.n_env)
+            esign += [(-1) ** l] * (basis.n_ebond * Aenv.shape[1])
         out[(L, p)]["env"] = np.concatenate(ge, axis=1) if ge else empty
         out[(L, p)]["env_sign"] = np.asarray(esign, float)
     return out

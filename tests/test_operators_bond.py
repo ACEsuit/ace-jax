@@ -124,7 +124,7 @@ def env_features(basis, pos, cell, numbers):
     rij, zi, zj, seg, n = site_graph(basis.site, pos, cell, numbers)
     F = {k: np.asarray(v) for k, v in _features(basis.site, rij, zi, zj, seg, n).items()}
     g = bond.bond_graph(basis, pos, cell, numbers)
-    return g, bond.features(basis, F, g, np.arange(len(g.i)), LPS, env=bond.env_lists(basis, pos, cell))
+    return g, bond.features(basis, F, g, np.arange(len(g.i)), LPS, env=bond.env_lists(basis, pos, cell, numbers=numbers))
 
 
 def test_bond_environment_group(basis_env):
@@ -168,3 +168,43 @@ def test_bond_environment_sees_atoms_the_ends_do_not_share(basis_env):
     with pytest.raises(ValueError, match="env_lists"):
         bond.features(basis_env, {}, g, np.arange(2), LPS)
     assert bond.env_lists(basis_env._replace(n_env=0), pos, cell) is None
+
+
+def test_bond_environment_knows_the_species_of_its_atoms(basis_env):
+    """Bonds between atoms 0 and 1 while atoms 2 and 3 swap species: the environment features
+    change with the default one channel per element, and do not with a one-channel embedding
+    that gives both elements the same weight.  The channels are a partition of the environment:
+    summed, they are the species-blind features, and any embedding is a combination of them."""
+    pos, cell, numbers = structure()
+    swapped = numbers.copy(); swapped[[2, 3]] = swapped[[3, 2]]
+    assert not np.array_equal(numbers, swapped)
+    blind = basis_env._replace(env_emb=((1.0,), (1.0,)))
+    mixed = basis_env._replace(env_emb=((1.0, 0.5), (-2.0, 0.25)))
+    g, f = env_features(basis_env, pos, cell, numbers)
+    _, fs = env_features(basis_env, pos, cell, swapped)
+    _, fb = env_features(blind, pos, cell, numbers)
+    _, fbs = env_features(blind, pos, cell, swapped)
+    _, fm = env_features(mixed, pos, cell, numbers)
+    ends = np.flatnonzero((g.i < 2) & (g.j < 2))
+    assert len(ends) > 4
+    ne, nr, seen = basis_env.n_ebond, basis_env.n_env, 0
+    for (L, p), d in f.items():
+        a = d["env"][ends]
+        if a.shape[1] == 0:
+            continue
+        seen += 1
+        scale = np.abs(a).max()
+        assert bond.n_env_features(basis_env, L, p) == 2 * bond.n_env_features(blind, L, p) == bond.n_env_features(mixed, L, p)
+        assert np.abs(fs[(L, p)]["env"][ends] - a).max() > 1e-6 * scale, (L, p)
+        assert np.abs(fbs[(L, p)]["env"][ends] - fb[(L, p)]["env"][ends]).max() < 1e-12 * scale, (L, p)
+        ch = a.reshape(len(ends), -1, ne, 2, nr, 2 * L + 1)                     # (bond, group, bond radial, channel, env radial, M)
+        b = fb[(L, p)]["env"][ends].reshape(len(ends), -1, ne, 1, nr, 2 * L + 1)
+        assert np.allclose(ch.sum(axis=3, keepdims=True), b, atol=1e-12 * scale)
+        m = fm[(L, p)]["env"][ends].reshape(ch.shape)
+        emb = np.asarray(mixed.env_emb)                                       # (element, channel)
+        assert np.allclose(m, np.einsum("bgnzrm,zc->bgncrm", ch, emb), atol=1e-12 * scale)
+    assert seen >= 5
+    with pytest.raises(ValueError, match="numbers"):
+        bond.env_lists(basis_env, pos, cell)
+    with pytest.raises(ValueError, match="one row per element"):
+        bond.env_embedding(basis_env._replace(env_emb=((1.0,),)))

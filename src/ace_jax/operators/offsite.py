@@ -55,7 +55,7 @@ class OffsiteModel(eqx.Module):
         orb, nc = self.orbitals, len(self.channels)
         F = site_features(self.bond, positions, cell, numbers, pbc)
         g = B.bond_graph(self.bond, positions, cell, numbers, pbc)
-        env = B.env_lists(self.bond, positions, cell, pbc)
+        env = B.env_lists(self.bond, positions, cell, pbc, numbers)
         lps = block_lps(orb)
         zi, zj = numbers[g.i], numbers[g.j]
         want = np.arange(len(g.i)) if only is None else np.asarray(only(g), np.int64)

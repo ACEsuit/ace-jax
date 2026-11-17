@@ -124,6 +124,7 @@ def _pair_slots(species, b_idx, b_count, ns):
     return jax.vmap(lambda ka: jnp.max(jnp.where(species[None, :] == ka, per, 0), axis=1))(ns)
 
 
+_take_species = jax.jit(lambda species, idx: species[idx])        # compiled: an eager gather uploads its bounds
 _trim = jax.jit(lambda rij, idx, kt: (rij[:, :kt], idx[:, :kt]), static_argnums=2)
 
 
@@ -198,7 +199,7 @@ class HamiltonianPredictor:
         env = None
         if basis.n_env:
             ge = self._dense(positions, cell, pbc, basis.r_env)
-            env = (ge.rij, ge.count)
+            env = (ge.rij, ge.count, _take_species(ss_d, ge.idx))
         on, off, lists, ok = _device(basis.site, self.onsite.readout, self.offsite.packs, pos_d, cell_d, sp_d, ss_d,
                                      gs.rij, gs.idx, gs.count, gb.rij, gb.idx, gb.count, env, static)
         prep = Prepared(on, off, lists, int(sum(orb.n_orb(z) for z in numbers)), None, None)
@@ -221,7 +222,7 @@ class HamiltonianPredictor:
         on = _readout(self.onsite.readout, F, atoms)
         g = B.bond_graph(basis, positions, cell, numbers, pbc)
         pl = OF.PairLayouts(g, numbers, orb.species, basis.rcut_bond)
-        off = self.offsite.blocks(F, pl.lay, B.env_lists(basis, positions, cell, pbc))
+        off = self.offsite.blocks(F, pl.lay, B.env_lists(basis, positions, cell, pbc, numbers))
         offsets = np.concatenate([[0], np.cumsum([orb.n_orb(z) for z in numbers])])
         lists_off = {}
         for key in off:

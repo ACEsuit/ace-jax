@@ -500,3 +500,13 @@ MACE-H inference there: 10 s per configuration on 8 threads of an EPYC 7742 (abo
 | DeepH-UMM | universal pretrained model | OpenMX bases | no: another basis |
 
 Plan: DeepH-E3 first (it runs, and has published gold numbers), DeepH-pack 1.0 if a wheel can be obtained, the 2022 DeepH only if it is wanted for completeness.
+
+## Species in the bond-environment group (2026-11-17)
+
+The environment about the bond midpoint now has species channels: A^env_(c n' λ) = Σ_k w_k emb[z_k, c] R_n'(|x_k|) Y_λ(x_k). `emb` is the identity by default (one channel per element of the site basis) or `BondBasis.env_emb`, an (elements, channels) embedding, so that the number of environment features follows the channel width. One element is one channel, and the gold result is unchanged to the digit (0.375 meV, 2.83 meV on the same test structure). `env_lists` returns the neighbours' species as a third array (`numbers=`), on the host and on the device path.
+
+Tests (`test_operators_bond.py`, `test_operators_offsite.py`): on a random two-element structure the environment features of a bond change when two atoms away from it swap species, and do not with a one-channel embedding of equal weights; the channels sum to the species-blind features and any embedding is a linear combination of them; rotation, inversion and bond reversal as before; on the SiC fixture the compiled predictor (one call, and threads) equals the reference with the group on, and the fit is no worse than the blind group's (in that perfect crystal every bond of a kind has one environment, so the fixture cannot show a gain).
+
+Cost: 108-atom SiC, site (2, 2) + environment (5, 6, 4, 4, 4), one performance core: 6.4 ms per atom with the two channels, against 5.0 ms species-blind.
+
+Not yet done for many species: the two-centre and site-coupled groups, and the readouts, are still per species pair; and no accuracy measurement on a multi-element dataset exists (the SiC data here is one 4-atom crystal).
