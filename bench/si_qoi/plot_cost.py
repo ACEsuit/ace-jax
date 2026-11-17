@@ -111,6 +111,16 @@ FAM = {  # family: (label, colour, marker, linestyle, filled, qoi model name pat
     # against an existing family), so, as GRACE-2L, it takes no new hue: a dark neutral, told apart by marker
     # (thin diamond), line style and legend
     "polymlp":      ("polynomial MLP (pypolymlp; CPU: 1 rank, OpenMP)",  NEUTRAL_INK,  "d", "-",  True,  "POLYMLP_{s}"),
+    # YE3T (Goff and Thompson, arXiv:2609.31895) (docs/dev/specs/2026-11-12-ye3t-polymlp-benchmark-design.md).  No further hue passes with this many
+    # families (dataviz validate_palette --pairs all, light: each of six candidates fails the normal-vision floor
+    # against an existing family), so, as GRACE-2L, they take no new hue: a dark neutral, told apart by marker
+    # (wide hexagon), line style and legend.
+    # The linear ACE fits run by pair_style ye3t are linear ACE's blue with YE3T's hexagon (accuracy: ACE's)
+    "ace_ye3t":     ("linear ACE, run by YE3T (pair_style ye3t)",        "#2a78d6", "H", "-.", False, "ACE_{s}"),
+    "ye3t_sym_fit": ("YE3T density, λ = (N) (ye3t-methods)",             NEUTRAL_INK,  "H", "-",  True,  "YE3T_{s}"),
+    # the same descriptors under the benchmark's loss (fit_ye3t.py "Weighted family"): hollow, dash-dot
+    "ye3t_sym_wfit": ("YE3T density, benchmark's weights and virials",   NEUTRAL_INK,  "H", "-.", False, "YE3Tw_{s}"),
+    "ye3t_mix_T":   ("YE3T tagged (ye3t-methods)",                       NEUTRAL_INK,  "H", ":",  False, "YE3TmixT_{s}"),
 }
 FM_PLOTTED = "mh1-omat-ft-lr1e-3"                # of the mace_fm learning-rate runs: the lowest validation loss
 # derived models: (family, size) -> the (family, size) it was made from.  The figure draws an arrow from the source to
@@ -174,6 +184,8 @@ def family_of(r):
         return ("mace_fm_ft_mixed" if mixed else "mace_fm_ft") if "-ft" in size else ("mace_fm_zs_mixed" if mixed else "mace_fm")
     if fam == "grace_fm":
         return "grace_fm_ft" if seed_split(size)[0].endswith("-ft") else "grace_fm"
+    if fam == "ace_cheb":                        # timing rows of the ChebExpCos files: ye3t's is the plotted line;
+        return "ace_ye3t" if r.get("code") == "ye3t-sym" else "ace_cheb_" + r.get("code", "")   # stock ML-PACE's stay rows
     if fam == "ace_wl":
         return "ace_wl_o5" if size.startswith("o5") else "ace_wl_" + size.split("_wL")[1]
     return fam
@@ -186,12 +198,13 @@ COST_NAME = {"mace_xl_L0": "MACExl_{s}", "mace_xl_L1": "MACExl_{s}", "ace_tab": 
              "ace_ffi": "ACEffi_{s}",
              "ace_tabfork": "ACEtabfork_{s}", "ace_f32": "ACEf32_{s}", "ace_tab_mixed": "ACEtabmixed_{s}",
              "ace_ffi_reduced": "ACEffireduced_{s}",
-             "ace_cueq": "ACEcueq_{s}", "mace_fm_ft_mixed": "MACEFMmixed_{s}"}
+             "ace_cueq": "ACEcueq_{s}", "mace_fm_ft_mixed": "MACEFMmixed_{s}", "ace_ye3t": "ACEye3t_{s}"}
 REDUCED = ("ace_f32", "ace_tab_mixed", "ace_ffi_reduced", "mace_fm_ft_mixed")   # reduced-precision lines: make_cost --dtype keeps them
 # timing files of ML-PACE with the proposed additions (sulis-{cpu,gpu}-pacefork.sbatch): their
 # mlpace rows are the ace_tabfork line, not stock ML-PACE's
 PATCHED_MLPACE = ("ace_tabfork",)
 TAB_SIZES = ("o4d12", "o4d14", "o4d16", "o4d20")    # the ace sizes converted (sweep.yaml ace_tab)
+CHEB_SIZES = ("o3d12", *TAB_SIZES)                  # the ace sizes pair_style ye3t runs (sweep.yaml ace_cheb)
 
 
 def cost_name(fam, size):
@@ -266,6 +279,7 @@ def load_rows():
                and (f == "ace_ffi_reduced" or r["size"] in TAB_SIZES)]
             + [r | {"family": "mace_fm_ft_mixed"} for r in rows if r["family"] == "mace_fm_ft"]
             + [r | {"family": "ace_tabfork"} for r in rows if r["family"] == "ace" and r["size"] in TAB_SIZES]
+            + [r | {"family": "ace_ye3t"} for r in rows if r["family"] == "ace" and r["size"] in CHEB_SIZES]
             + [r | {"family": "ace_trim"} for r in rows if r["family"] == "ace"]
             + [r | {"family": "ace_ffi"} for r in rows if r["family"] == "ace"]
             + [r | {"family": "ace_cueq"} for r in rows if r["family"] == "ace"])
@@ -516,6 +530,7 @@ def main():
                 "(ace_jax.eval.ffi; radials tabulated in r): C++ on the CPU (128x1), CUDA on the A100.\n"
                 "NEP: trained by GPUMD; on the CPU LAMMPS pair_style nep (NEP_CPU, float64); on the GPU GPUMD's own MD code, mixed precision (labelled).\n"
                 "Polynomial MLP: pair_style polymlp has no MPI and no GPU code: one rank with 128 OpenMP threads.\n"
+                "YE3T: pair_style ye3t (ye3t-lammps, float64; 128x1 on the CPU, ye3t/kk on the A100) on the linear ACE fits rewritten with ChebExpCos radials, and on models fitted by ye3t-methods.\n"
                 if any("CPU" in r[0] for r in rows) else "")
     bottom = 0
     if not a.no_note:

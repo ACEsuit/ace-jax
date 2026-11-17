@@ -31,7 +31,9 @@ KOKKOS = {"acejax": "newton on neigh half", "mlpace": "newton on neigh half",
           # Symmetrix v0.3.0 (bench/scaling/envs/sulis-symx3.sh), the same pair style as "mace" in its own LAMMPS
           "mace-symx3": "newton on neigh half",
           # Symmetrix v0.3.0's foundation-model styles (FDN below; the lammps_cuda_fdn build of sulis-symx3.sh)
-          "mace-fdn": "newton on neigh half", "mace-fdn-f32": "newton on neigh half", "mace-fdn-f32m": "newton on neigh half"}
+          "mace-fdn": "newton on neigh half", "mace-fdn-f32": "newton on neigh half", "mace-fdn-f32m": "newton on neigh half",
+          # ye3t-lammps: ye3t/kk (device only, FP64 Kokkos) needs newton on and a half list (doc/src/pair_ye3t.rst)
+          "ye3t-sym": "newton on neigh half", "ye3t": "newton on neigh half"}
 # grace-runtime's CPU styles (grace/runtime, pace/runtime) are plain MPI + OpenMP styles, not KOKKOS: on the CPU
 # they take OMP_NUM_THREADS threads a rank (cpu_mpirun binds them) and no -k switches
 RUNTIME = ("grace-rt", "pace-rt")
@@ -89,6 +91,11 @@ def _pair(style, model_path, elements, device, extra=None):
         return f"pair_style nep\npair_coeff * * {model_path} {els}\n"
     if style == "polymlp":                  # lammps-polymlp-package: polymlp.yaml (pypolymlp >= 0.9)
         return f"pair_style polymlp\npair_coeff * * {model_path} {els}\n"
+    if style == "mlpace-product":           # ML-PACE's product evaluator on the CPU (pair_style pace is recursive)
+        return f"pair_style pace product\npair_coeff * * {model_path} {els}\n"
+    if style in YE3T:                       # ye3t-lammps (ML-YE3T): a .yace takes no arguments (block_policy direct,
+        # the product-evaluator form); a fitted tagged model passes `extra` ("model_family tagged_cauchy ...")
+        return f"pair_style ye3t{' ' + extra if extra else ''}\npair_coeff * * {model_path} {els}\n"
     if style == TRIM:                       # PR 309 plugin, then the juliac --trim library
         return f"plugin load ${{aceplugin}}\npair_style ace\npair_coeff * * {model_path} {els}\n"
     if style == "gap":                       # QUIP takes atomic numbers, and the xml label picks the Potential
@@ -101,6 +108,7 @@ def _pair(style, model_path, elements, device, extra=None):
 
 
 TRIM = "acepotentials-trim"
+YE3T = ("ye3t-sym", "ye3t")        # the same pair style: a ChebExpCos .yace of the ACE ladder, or a model ye3t-methods fitted
 
 
 def xl_pair_args(model_json, device, style):
@@ -478,7 +486,7 @@ def kokkos_args(style, device, threads=1):
     if device != "gpu":
         if style in OMP_PLAIN:               # plain OpenMP styles (threads: OMP_NUM_THREADS)
             return []
-        if style in ("acejax", "grace", "grace-2l") or style in XL or (threads > 1 and style in KOKKOS):   # grace: /kk only
+        if style in ("acejax", "grace", "grace-2l") or style in XL or (threads > 1 and style in KOKKOS and style not in YE3T):   # ye3t/kk: device only   # grace: /kk only
             return ["-k", "on", "t", str(threads), "-sf", "kk", "-pk", "kokkos", *KOKKOS[style].split()]
         return []
     if style not in KOKKOS:

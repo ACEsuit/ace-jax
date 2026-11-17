@@ -37,10 +37,11 @@ S4PI = math.sqrt(4 * math.pi)
 R_MIN = 0.5                     # tables continue linearly below this (Å)
 
 
-def gbasis(r, rc, K):
-    """PACE g_k (SBessel, inner_cutoff_type distance with rcut_in = dcut_in = 0), (len(r), K)."""
+def gbasis(r, rc, K, name="SBessel", lam=1.0, dcut=0.01):
+    """PACE g_k (SBessel, or ChebExpCos with decay `lam`; inner_cutoff_type distance with rcut_in = dcut_in = 0),
+    (len(r), K)."""
     one = jnp.ones_like(r)
-    return np.asarray(radbase(jnp.asarray(r), "SBessel", "distance", 1.0 * one, rc * one, 0.01 * one,
+    return np.asarray(radbase(jnp.asarray(r), name, "distance", lam * one, rc * one, dcut * one,
                               0 * one, 0 * one, K))
 
 
@@ -82,7 +83,13 @@ def products(m, cols, lmax):
     return acc, order1
 
 
-def convert(path, radial="sbessel", K=80, r_fit=1.6, delta=0.001):
+RADBASE = {"sbessel": "SBessel", "chebexpcos": "ChebExpCos"}
+
+
+def convert(path, radial="sbessel", K=80, r_fit=1.6, delta=0.001, lam=1.0, dcut=0.01, full=False):
+    """`radial`: the PACE radial family the model's radials are least-squares projected on ("sbessel", or
+    "chebexpcos" with decay `lam`: the family pair_style ye3t reads).  `full`: every m-tuple and its negation as
+    separate terms (ye3t's reader requires the conjugation-closed list), not pacemaker's half basis."""
     m, meta, _ = aj.load(path)
     if m.E0.shape[0] != 1:
         raise NotImplementedError("single species only")
@@ -111,13 +118,13 @@ def convert(path, radial="sbessel", K=80, r_fit=1.6, delta=0.001):
     wpair = np.asarray(m.Wpair[:, 0])
     h = lambda Rnl, Rp: Rp @ wpair + sum(w * Rnl[:, c] for c, w in order1.items())   # rank-1 function
 
-    bond = {"nradmax": int(nradmax), "lmax": lmax, "prehc": 0, "lambdahc": 0, "rcut": rc, "dcut": 0.01,
+    bond = {"nradmax": int(nradmax), "lmax": lmax, "prehc": 0, "lambdahc": 0, "rcut": rc, "dcut": dcut,
             "rcut_in": 0, "dcut_in": 0, "inner_cutoff_type": "distance"}
     info = {"radial": radial}
-    if radial == "sbessel":
+    if radial in RADBASE:
         r = np.linspace(r_fit, rc, 4000)[:-1]
         Rnl, Rp, _, _ = radials(m, r)
-        G = gbasis(r, rc, K)
+        G = gbasis(r, rc, K, RADBASE[radial], lam, dcut)
         fit = lambda f: np.linalg.lstsq(G, f, rcond=None)[0]
         relerr = lambda f, w: np.max(np.abs(G @ w - f)) / max(np.max(np.abs(f)), 1e-300)
         crad, errs = np.zeros((nradmax, lmax + 1, K)), []
@@ -126,14 +133,15 @@ def convert(path, radial="sbessel", K=80, r_fit=1.6, delta=0.001):
             crad[n - 1, l] = fit(f)
             errs.append(relerr(f, crad[n - 1, l]))
         w1 = fit(h(Rnl, Rp))
-        bond |= {"nradbasemax": K, "radbasename": "SBessel", "radparameters": [1.0], "radcoefficients": crad.tolist()}
+        bond |= {"nradbasemax": K, "radbasename": RADBASE[radial], "radparameters": [float(lam)],
+                 "radcoefficients": crad.tolist()}
         rank1 = [{"mu0": 0, "rank": 1, "ndensity": 1, "num_ms_combs": 1, "mus": [0], "ns": [k + 1], "ls": [0],
                   "ms_combs": [0], "ctildes": [float(w1[k])]} for k in range(K)]
         info |= {"nradbase": K, "r_fit": r_fit, "radial_fit_max_rel": float(max(errs)),
                  "rank1_fit_max_rel": float(relerr(h(Rnl, Rp), w1))}
         delta = 0.001
     else:
-        raise ValueError(f"convert writes the sbessel form; tabulated is write_yace's, got {radial!r}")
+        raise ValueError(f"convert writes the projected forms {sorted(RADBASE)}; tabulated is write_yace's, got {radial!r}")
 
     # half basis, as pacemaker writes it: an invariant has sum(m) = 0, so P(-m) = conj(P(m)) and the
     # m-tuple and its negation contribute the same Re(c P); keep one of each pair with the summed
@@ -142,6 +150,15 @@ def convert(path, radial="sbessel", K=80, r_fit=1.6, delta=0.001):
     for key, v in acc.items():
         neg = tuple(sorted((n, l, -mm) for n, l, mm in key))
         half[min(key, neg)] += v.real
+    if full:                                     # both members of each pair, each with half the summed coefficient
+        whole = {}
+        for key, v in half.items():
+            neg = tuple(sorted((n, l, -mm) for n, l, mm in key))
+            if neg == key:
+                whole[key] = v
+            else:
+                whole[key] = whole[neg] = 0.5 * v
+        half = whole
     funcs = defaultdict(list)                    # (n, l) multiset -> PACE function
     scale = max((abs(v) for v in half.values()), default=1.0)
     for key, v in half.items():
@@ -159,7 +176,7 @@ def convert(path, radial="sbessel", K=80, r_fit=1.6, delta=0.001):
                            "rho_core_cutoff": 100000, "drho_core_cutoff": 250}},
         "bonds": {(0, 0): bond}, "functions": {0: fl},
     }
-    info |= {"nradmax": int(nradmax), "lmax": lmax, "n_functions": len(fl),
+    info |= {"full_ms": bool(full), "nradmax": int(nradmax), "lmax": lmax, "n_functions": len(fl),
              "n_terms": sum(f["num_ms_combs"] for f in fl),
              "max_imag_rel": float(max((abs(v.imag) for v in acc.values()), default=0.0)
                                    / max((abs(v) for v in acc.values()), default=1.0))}
@@ -169,9 +186,11 @@ def convert(path, radial="sbessel", K=80, r_fit=1.6, delta=0.001):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("model"); ap.add_argument("out")
-    ap.add_argument("--radial", default="tabulated", choices=("tabulated", "sbessel"))
+    ap.add_argument("--radial", default="tabulated", choices=("tabulated", *RADBASE))
     ap.add_argument("--delta", type=float, default=0.001, help="tabulated: grid spacing = deltaSplineBins (Å)")
-    ap.add_argument("--nradbase", type=int, default=80, help="sbessel: number of g_k")
+    ap.add_argument("--nradbase", type=int, default=80, help="sbessel / chebexpcos: number of g_k")
+    ap.add_argument("--lam", type=float, default=1.0, help="chebexpcos: the radial decay (radparameters)")
+    ap.add_argument("--full", action="store_true", help="write every m-tuple and its negation (pair_style ye3t)")
     ap.add_argument("--r-fit", type=float, default=1.6, help="sbessel: radials are fitted on [r_fit, rcut] (Å)")
     a = ap.parse_args()
     if a.radial == "tabulated":                  # exact: ace-jax's write_yace (identical files to this script's
@@ -179,7 +198,7 @@ def main():
         m, _, _ = aj.load(a.model)
         print(write_yace(m, a.out, delta=a.delta))
         return
-    tree, info = convert(a.model, a.radial, a.nradbase, a.r_fit, a.delta)
+    tree, info = convert(a.model, a.radial, a.nradbase, a.r_fit, a.delta, lam=a.lam, full=a.full)
     dump_tree(tree, a.out)
     print(info)
 

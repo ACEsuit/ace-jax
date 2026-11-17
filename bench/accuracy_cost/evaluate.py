@@ -79,6 +79,9 @@ def load_calc(family, path, device="cpu"):
     if family == "nep":                          # NEP_CPU via calorine, float64, E0 added back (fit_nep)
         from .fit_nep import calculator
         return calculator(path)
+    if family in ("ye3t_sym_fit", "ye3t_mix_A", "ye3t_mix_T", "ye3t_sym_wfit"):   # ye3t-methods' ASE calculator (float64; E0 in the model)
+        from .fit_ye3t import calculator
+        return calculator(path)
     if family == "polymlp":                      # pypolymlp's evaluator (float64), E0 added back, ASE stress (fit_polymlp)
         from .fit_polymlp import calculator
         return calculator(path)

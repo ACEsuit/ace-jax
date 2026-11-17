@@ -17,7 +17,7 @@ import plot_cost as P  # noqa: E402
 
 SYMBOL = {"o": "circle", "D": "diamond", "d": "diamond-tall", "s": "square", "^": "triangle-up", "v": "triangle-down",
           "<": "triangle-left", "*": "star", "X": "x", "P": "cross", "p": "pentagon", "h": "hexagon", ">": "triangle-right",
-          "8": "octagon"}
+          "8": "octagon", "H": "hexagon2"}
 DASH = {"-": "solid", "--": "dash", ":": "dot", "-.": "dashdot"}
 # presets: the families shown (the rest stay in the legend, hidden); the first is the page's initial view
 PRESETS = {
@@ -28,8 +28,8 @@ PRESETS = {
                                "mace_L1", "mace_xl_L0", "mace_xl_L1"),
     "Foundation models": ("ace", "ace_ffi", "mace_L0", "mace_L1", "grace", "grace_2l", "mace_fm", "mace_fm_ft",
                           "mace_fm_ft_mixed", "grace_fm", "grace_fm_ft"),
-    # (polymlp, a first-pass family, is under "All" only: a preset of its own waits for the review of
-    # docs/dev/accuracy-cost-results.md -- the page's JSON lists the presets)
+    # (polymlp and YE3T, first-pass families, are under "All" only: presets of their own, and "ace_ye3t" under "Same
+    # model, other code", wait for the review of docs/dev/accuracy-cost-results.md -- the page's JSON lists the presets)
     "All": None,
 }
 GAP_X, GAP_Y, ROW_H = 0.08, 0.1, 380          # subplot gaps (paper fraction) and the height of one row (px)
