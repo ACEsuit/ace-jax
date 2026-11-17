@@ -198,3 +198,20 @@ ace-jax (`bench/ham/offsite_time_deeph.py`): on-site model plus the shared-featu
 - **Build.** The PyPI wheels of matscipy-neighbours are CPU-only. On lestrade: a CUDA 12.9 toolchain from conda-forge (`micromamba create -p /storage/eng/essswb/venvs/cuda-build -c conda-forge cuda-nvcc=12.9 cuda-cudart-dev=12.9 cuda-cccl cuda-version=12.9`), then, with its `bin` on `PATH` and `CUDA_HOME` set, `uv pip install --reinstall --no-binary matscipy-neighbours -C cmake.define.ENABLE_CUDA=ON -C cmake.define.CMAKE_CUDA_ARCHITECTURES=89 matscipy-neighbours==1.1.0`. A later `uv sync` puts the CPU wheel back.
 - **Time.** No gain at this size: blocks of H and S take 58–60 ms with device lists against 56–67 ms with host lists (108-atom SiC, float32); positions to eigenvalues 251–254 ms either way, three quarters of it the eigensolver. The first version was slower (127 ms) because the slot count doubled from 64 to 256 where 158 are occupied; the lists are now trimmed to the occupied slots in steps of 16. What the device lists buy is a pipeline with nothing large on the host, which matters when the structure changes every call (MD) and for larger systems, not a faster single call here.
 - Two things had to be made explicit to pass the guard: the padding vector in `dense_graph` (now an explicit upload) and the trimming slice (compiled, because an eager slice uploads its bounds).
+
+## Eigenvalue error on a held-out aluminium supercell (2026-11-17)
+
+What matters for use is the spectrum, not the blocks. `bench/ham/eigen_accuracy.py`: fit on-site and off-site H and S on BCC `SK-supercell-001` and FCC `SK-supercell-002`, predict the full matrices of FCC `SK-supercell-001` (729 atoms, 10206 orbitals, the Γ point of the supercell), solve H c = e S c and compare with the reference spectrum state by state. Site basis: order 1, 12 radials, l ≤ 4; bond cutoff 9 Å; 20,000 training bonds. Run on mnf148 (the job needs about 12 GB).
+
+| | block RMSE of H inside the cutoff | valence window (E_F − 15 … E_F + 3 eV, 1554 states): MAE / RMSE / max | core (3645 states): MAE / max | all occupied (4739): MAE |
+|---|---|---|---|---|
+| reference truncated at 9 Å (the floor for this cutoff) | 0 | 0.8 / 1.1 / 3.1 meV | 0.0 / 0.0 meV | 0.12 meV |
+| two-centre features only | 55.8 meV | 3954 / 4406 / 43,920 meV | 5.4 / 87 meV | 861 meV |
+| with coupled features (4 radials, l ≤ 4) | 20.5 meV | 143 / 188 / 521 meV | 5.5 / 87 meV | 24.9 meV |
+
+- **The model is not accurate enough in the quantity that matters.** A 20 meV block error becomes a 143 meV mean error in the valence eigenvalues, seven times larger; the two-centre model's 56 meV becomes 4 eV.
+- The cutoff is not the cause: truncating the reference itself at 9 Å costs 0.8 meV.
+- The overlap is not the cause: with the reference S in place of the predicted one the numbers do not change (S is fitted to 5e-6).
+- Block errors do not average out in the spectrum. The overlap matrix of this basis has eigenvalues down to 0.03, so the generalised problem amplifies errors of H along nearly dependent orbital combinations, and the errors of the ~180 bonds of an atom are correlated, not independent. A block RMSE is the wrong target for these two reasons.
+- Core levels are far better (5 meV): they depend on a few on-site elements.
+- ACEhamiltonians.jl's off-site model on the same bonds reaches block errors of 58, 33 and 18 meV at order 1, degrees 4, 6 and 8 (4.1, 14.8 and 39.7 ms per bond), and 51 and 32 meV at order 2, degrees 4 and 6 (11 and 230 ms per bond). Its eigenvalue error is not measured here; at 18–33 meV of block error there is no reason to expect it to be better than the table above.
