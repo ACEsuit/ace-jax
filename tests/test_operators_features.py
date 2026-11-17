@@ -104,3 +104,56 @@ def test_provider_protocol_and_radial_table():
     fa, fb = b.features(rij, zi, zj, seg, n), t.features(rij, zi, zj, seg, n)
     scale = max(float(np.abs(v).max()) for v in fa.values())
     assert max(float(np.abs(fa[k] - fb[k]).max()) for k in fa) < 1e-11 * scale
+
+
+# ---- element embedding (the species-compressed provider)
+ELS = (1, 6, 7, 8, 9)
+
+
+def test_embedding_provider_is_equivariant_and_compressed():
+    """Five elements through two embedding channels at order 2: every feature rotates with the
+    Wigner matrix of its L and has its parity, and there are as many features as a two-element
+    basis of the same radials has channels for, not five elements' worth."""
+    from ace_jax.eval.features import SiteFeatures
+    from ace_jax.operators.features import build_embedding_site_basis
+    table = np.random.default_rng(5).normal(size=(len(ELS), 3))             # any element properties
+    kw = dict(order=2, totaldegree=5, lmax_feat=3, rcut=4.0, coupling_cache_dir=str(CACHE))
+    b = build_embedding_site_basis(ELS, embedding=(ELS, table), d_max=2, **kw)
+    assert isinstance(b, SiteFeatures) and b.with_table() is b and b.elements == ELS
+    two = build_embedding_site_basis(ELS[:2], embedding="identity", d_max=2, **kw)     # order-2 width 2, not C(3, 2)
+    assert b.lps == two.lps and b.n_B == two.n_B
+    rng = np.random.default_rng(0)
+    rij = rng.normal(size=(7, 3)) * 1.2
+    zi, zj, seg = np.zeros(7, np.int32), rng.integers(0, 5, 7).astype(np.int32), np.zeros(7, np.int32)
+    B = feats(b, rij, zi, zj, seg)
+    q, _ = np.linalg.qr(np.random.default_rng(2).normal(size=(3, 3)))
+    Q = q * np.sign(np.linalg.det(q))
+    Br, Bi = feats(b, rij @ Q.T, zi, zj, seg), feats(b, -rij, zi, zj, seg)
+    for (L, p), v in B.items():
+        scale = np.abs(v).max()
+        assert v.shape == (1, b.n(L, p), 2 * L + 1) and scale > 1e-6
+        assert np.abs(Br[(L, p)] - v @ (wigner(L, Q) if L else np.ones((1, 1))).T).max() < 1e-10 * scale, (L, p)
+        assert np.abs(Bi[(L, p)] - p * v).max() < 1e-12 * scale, (L, p)
+    assert np.abs(feats(b, rij, zi, (zj + 1) % 5, seg)[(2, 1)] - B[(2, 1)]).max() > 1e-6       # species matter
+
+
+def test_identity_embedding_is_the_categorical_basis():
+    """Order 1 with the identity embedding: channel k is "neighbours of element k".  The features
+    of a neighbourhood are the sum over elements of the features of that element's neighbours
+    alone, each of which lives in its own channel, and relabelling the elements of a
+    one-element neighbourhood moves the same numbers to another channel."""
+    from ace_jax.operators.features import build_embedding_site_basis
+    b = build_embedding_site_basis(ELS[:3], 1, 6, 3, "identity", rcut=4.0, wL=0.5, coupling_cache_dir=str(CACHE))
+    rng = np.random.default_rng(1)
+    rij = rng.normal(size=(9, 3)) * 1.3
+    zi, zj, seg = np.zeros(9, np.int32), rng.integers(0, 3, 9).astype(np.int32), np.zeros(9, np.int32)
+    full = feats(b, rij, zi, zj, seg)
+    parts = [feats(b, rij[zj == k], zi[zj == k], zj[zj == k], seg[zj == k]) for k in range(3)]
+    as_0 = [feats(b, rij[zj == k], zi[zj == k], np.zeros((zj == k).sum(), np.int32), seg[zj == k]) for k in range(3)]
+    for lp, v in full.items():
+        assert np.allclose(v, sum(p[lp] for p in parts), atol=1e-12 * np.abs(v).max())
+        live = [np.flatnonzero(np.abs(p[lp][0]).max(axis=1) > 1e-12) for p in parts]
+        assert all(len(a) == b.n(*lp) // 3 for a in live) and len(np.unique(np.concatenate(live))) == b.n(*lp)
+        for k in range(3):                                # the same numbers in channel 0 when the element is relabelled
+            lv0 = np.flatnonzero(np.abs(as_0[k][lp][0]).max(axis=1) > 1e-12)
+            assert np.allclose(parts[k][lp][0][live[k]], as_0[k][lp][0][lv0], atol=1e-12 * np.abs(v).max())

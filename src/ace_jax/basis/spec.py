@@ -205,7 +205,7 @@ class EmbeddingSpec(NamedTuple):
     kidx: np.ndarray          # radial i -> channel k
 
 
-def build_embedding_spec(S, order, totaldegree, widths, wL=1.5, maxl=None, block_rule="ace1"):
+def build_embedding_spec(S, order, totaldegree, widths, wL=1.5, maxl=None, block_rule="ace1", admit=None):
     """The basis spec of `ace_embedding_model` for S elements.
 
     block_rule="ace1" (default) admits the (n', l) blocks the categorical
@@ -216,14 +216,14 @@ def build_embedding_spec(S, order, totaldegree, widths, wL=1.5, maxl=None, block
     folded into the radial index, n = (n'-1) d + k, and the many-body spec is
     channel-diagonal: every factor of a body shares one k, order nu drawing on
     its own d_nu = widths[nu-1] channels.  Bodies are grouped by order (ET
-    mis-couples an ungrouped spec)."""
+    mis-couples an ungrouped spec).  admit: `build_spec`'s (equivariant bases)."""
     if block_rule not in ("ace1", "symmetric"):
         raise ValueError(f"block_rule = {block_rule!r}; expected 'ace1' or 'symmetric'")
     if len(widths) != order:
         raise ValueError(f"need one width per correlation order: {len(widths)} != {order}")
     NZf = S if block_rule == "ace1" else 1
     ok = lambda n, l: (n - 1) % NZf == 0 and (maxl is None or l <= maxl)
-    mb_f, Rnl_f, _ = build_spec(NZf, order, totaldegree, wL, keep=ok)  # z' = 1 bodies only: ~S^nu less search
+    mb_f, Rnl_f, _ = build_spec(NZf, order, totaldegree, wL, keep=ok, admit=admit)  # z' = 1 bodies only: ~S^nu less search
     unfold = lambda n: (n - 1) // NZf + 1
     r1 = [(unfold(n), l) for n, l in Rnl_f if ok(n, l)]                 # (l, n') order
     mb1 = [[(unfold(n), l) for n, l in b] for b in mb_f]

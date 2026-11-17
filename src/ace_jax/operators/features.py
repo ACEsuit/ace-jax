@@ -78,6 +78,7 @@ class SiteBasis(eqx.Module):
     elements: tuple = eqx.field(static=True)
     rcut: float = eqx.field(static=True)
     lmax: int = eqx.field(static=True)
+    solid: bool = eqx.field(static=True, default=True)     # solid (r^l Y_lm) or spherical harmonics
 
     def n(self, L, p):
         """Number of features of symmetry (L, p); 0 if the basis has none."""
@@ -92,7 +93,7 @@ class SiteBasis(eqx.Module):
 
     def aa(self, rij, zi, zj, segment_ids, n_nodes, mask=None):
         """(n_nodes, n_AA): the pooled A basis and its products, once."""
-        A = pooled_a(self.radial, rij, zi, zj, segment_ids, n_nodes, self.aspec_r, self.aspec_y, self.lmax, mask=mask)
+        A = pooled_a(self.radial, rij, zi, zj, segment_ids, n_nodes, self.aspec_r, self.aspec_y, self.lmax, self.solid, mask=mask)
         return product_basis(A, self.aa_specs)
 
     def from_aa(self, AA):
@@ -110,14 +111,80 @@ class SiteBasis(eqx.Module):
 
     def with_table(self, n_intervals=4096):
         """This basis with its radial tabulated in r (`RadialTable`): the CPU evaluation form."""
-        if isinstance(self.radial, RadialTable):
-            return self
+        if isinstance(self.radial, RadialTable) or getattr(self.radial, "radial_kind", "") == "spline_factorised":
+            return self                                 # the element-embedding radial is one small spline table already
         return dataclasses.replace(self, radial=tabulate(self.radial, len(self.elements), self.rcut, n_intervals))
 
 
 def _all_bodies(bb):
     """Every body: the coupling finds which carry a function of each (L, parity)."""
     return True
+
+
+def _coupled(radial, lmax_feat, mb, Rnl, Ylm, zs, rcut, solid, coupling_cache_dir):
+    """The `SiteBasis` of a radial and a many-body spec: every (L, +-1), L <= lmax_feat, that has a function."""
+    lps = [(L, p) for L in range(lmax_feat + 1) for p in (1, -1)]
+    es = couple_equivariant_set(lps, mb, list(Rnl), list(Ylm), cache_dir=coupling_cache_dir)
+    lps = [lp for lp in lps if es.A2B[lp].shape[0]]
+    k = lambda lp: 2 * lp[0] + 1
+    return SiteBasis(
+        radial=radial,
+        aspec_r=jnp.asarray([a[0] for a in es.aspec], jnp.int32),
+        aspec_y=jnp.asarray([a[1] for a in es.aspec], jnp.int32),
+        aa_specs=tuple(jnp.asarray(g, jnp.int32) for g in es.aa_specs),
+        flat=tuple(jnp.asarray(es.A2B[lp].rows * k(lp) + es.A2B[lp].ms, jnp.int32) for lp in lps),
+        cols=tuple(jnp.asarray(es.A2B[lp].cols, jnp.int32) for lp in lps),
+        vals=tuple(jnp.asarray(es.A2B[lp].vals, jnp.float64) for lp in lps),
+        lps=tuple(lps), n_B=tuple(int(es.A2B[lp].shape[0]) for lp in lps),
+        elements=tuple(int(z) for z in zs), rcut=float(rcut), lmax=int(max(l for l, _ in Ylm)), solid=solid)
+
+
+def build_embedding_site_basis(elements, order, totaldegree, lmax_feat, embedding=None, *, rcut, rows=None, d_max=None,
+                               wL=1.5, reduction="pca", normalise=True, block_rule="symmetric", coupling_cache_dir=None):
+    """A `SiteBasis` with an element embedding (the species-compressed linear ACE, "TrACE";
+    `basis.model.build_embedding_model`'s one-particle basis): the neighbour species enters the
+    radial through a frozen embedding row, R_(n'k)l(r, Z1, Z2) = Q_n'(x) emb[Z2, k], so the
+    number of features grows with the channel width d (d_max), not with the number of elements.
+    Bodies are channel-diagonal; order nu has min(d_max, C(S+nu-1, nu)) channels.
+
+    embedding: a JSON artefact path (keys Z, emb), a (Z, table) pair or "identity" (needs
+    d_max >= number of elements; then channel k is "neighbours of element k", the categorical
+    basis on these radials); rows: an explicit (S, d) block instead.  rcut is shared by every
+    pair (ace1's uniform cutoffs).  Radials: Jacobi(4, 4) in the Agnesi coordinate, splined on
+    100 nodes, one table for all species; spherical harmonics.  block_rule: "symmetric" counts
+    the degree on the radial index alone (the default here), "ace1" as the categorical ace1_model."""
+    from ..basis import radial_ace1 as ra
+    from ..basis.embedding import embedding_rows, embedding_widths, read_embedding
+    from ..basis.spec import build_embedding_spec
+    zs = ri.resolve_elements(elements)
+    S = len(zs)
+    widths = embedding_widths(S, order, d_max=d_max)
+    d = max(widths)
+    if rows is not None:
+        emb = np.asarray(rows, np.float64)
+        if emb.shape != (S, d):
+            raise ValueError(f"rows must be ({S}, {d}) for these elements and widths, got {emb.shape}")
+    elif embedding is None:
+        raise ValueError("pass an embedding (path, (Z, table) or 'identity') or explicit rows")
+    elif isinstance(embedding, str) and embedding == "identity":
+        if d < S:
+            raise ValueError(f"embedding='identity' needs one channel per element: d_max={d_max} gives {d} for {S} elements")
+        emb = np.eye(S, d)
+    else:
+        Z, table = read_embedding(embedding)[:2] if isinstance(embedding, (str, bytes)) or hasattr(embedding, "__fspath__") else embedding
+        emb = embedding_rows(table, Z, zs, d=d, reduction=reduction, normalise=normalise)
+    sp = build_embedding_spec(S, order, totaldegree, widths, wL=wL, maxl=lmax_feat, block_rule=block_rule, admit=_all_bodies)
+    cut = ra.uniform_cutoffs(zs, rcut)
+    single = ra.jacobi_spline_table(max(n for n, _ in sp.r1), 4.0, 4.0)[:, [n - 1 for n, _ in sp.r1]]
+    z1 = jnp.zeros((1, 1, 1, 1))
+    tr = TensorRadial(
+        rnl_transform=jnp.asarray(ra.transform_table(S, cut, 2, 4)), rnl_envelope=jnp.asarray(ra.tensor_envelope_table(S)),
+        pair_envelope=jnp.asarray(ra.pair_envelope_table(S, cut)), rnl_coefs=z1, rnl_Wnlq=z1,
+        polys_A=jnp.zeros(1), polys_B=jnp.zeros(1), polys_C=jnp.zeros(1),
+        rnl_coefs_single=jnp.asarray(single), rnl_embedding=jnp.asarray(emb),
+        rnl_emb_nidx=jnp.asarray(sp.nidx), rnl_emb_kidx=jnp.asarray(sp.kidx),
+        radial_kind="spline_factorised", rnl_grid=(-1.0, 2.0 / (ra.SPLINE_NODES - 1), ra.SPLINE_NODES))
+    return _coupled(tr, lmax_feat, sp.mb, sp.rspec, sp.Ylm, zs, cut[2], False, coupling_cache_dir)
 
 
 def build_site_basis(elements, order, totaldegree, lmax_feat, *, rcut, wL=1.5, coupling_cache_dir=None,
@@ -149,17 +216,4 @@ def build_site_basis(elements, order, totaldegree, lmax_feat, *, rcut, wL=1.5, c
         pair_envelope=jnp.asarray(pair_env), rnl_coefs=jnp.zeros((1, 1, 1, 1)), rnl_Wnlq=jnp.asarray(t["rnl_Wnlq"]),
         polys_A=jnp.asarray(t["polys_A"]), polys_B=jnp.asarray(t["polys_B"]), polys_C=jnp.asarray(t["polys_C"]),
         radial_kind="analytic", rnl_basis=rnl_basis, rnl_grid=(0.0, 1.0, 2))
-    lps = [(L, p) for L in range(lmax_feat + 1) for p in (1, -1)]
-    es = couple_equivariant_set(lps, mb, list(Rnl), list(Ylm), cache_dir=coupling_cache_dir)
-    lps = [lp for lp in lps if es.A2B[lp].shape[0]]
-    k = lambda lp: 2 * lp[0] + 1
-    return SiteBasis(
-        radial=tr,
-        aspec_r=jnp.asarray([a[0] for a in es.aspec], jnp.int32),
-        aspec_y=jnp.asarray([a[1] for a in es.aspec], jnp.int32),
-        aa_specs=tuple(jnp.asarray(g, jnp.int32) for g in es.aa_specs),
-        flat=tuple(jnp.asarray(es.A2B[lp].rows * k(lp) + es.A2B[lp].ms, jnp.int32) for lp in lps),
-        cols=tuple(jnp.asarray(es.A2B[lp].cols, jnp.int32) for lp in lps),
-        vals=tuple(jnp.asarray(es.A2B[lp].vals, jnp.float64) for lp in lps),
-        lps=tuple(lps), n_B=tuple(int(es.A2B[lp].shape[0]) for lp in lps),
-        elements=tuple(int(z) for z in zs), rcut=float(rcut), lmax=int(max(l for l, _ in Ylm)))
+    return _coupled(tr, lmax_feat, mb, Rnl, Ylm, zs, rcut, True, coupling_cache_dir)
