@@ -4,7 +4,8 @@ the MACE-H paper's bulk gold data, Zenodo 10.5281/zenodo.15223696), with that pa
 elements of the test set, and the smeared eigenvalue error
     EE(T) = sum_ki |e_ki - e~_ki| f(e_ki, mu, T) / sum_ki f(e_ki, mu, T)
 on a k-grid (7 x 7 x 7 for gold), f the Fermi-Dirac function at T = 1000 K with mu from charge
-neutrality of the reference bands; the predicted H is diagonalised with the reference overlap,
+neutrality, each set of bands measured from its own mu as that paper's Band.py does
+(`compute_eigenvalue_error`; the absolute difference is printed beside it); the predicted H is diagonalised with the reference overlap,
 as MACE-H's (it predicts H only).
     JAX_PLATFORMS=cpu uv run python bench/ham/deeph_fit.py <dataset dir> <n_train> <valence electrons per atom>
         [bonds=<per structure, 0 = all>] [site=<n_cpl>,<l_cpl>] [env=<r_env>,<n_env>,<l_env>,<n_ebond>,<l_ebond>|none]

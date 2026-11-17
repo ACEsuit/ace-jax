@@ -475,9 +475,10 @@ MACE-H inference there: 10 s per configuration on 8 threads of an EPYC 7742 (abo
 |---|---|---|---|---|---|
 | 1 (all 14,556 bonds) | 23 s | 0.360 meV | 0.834 meV | 4.17 / 2.47 meV | 1.3 ms per atom |
 | 4 (3,000 bonds each; 2 test structures) | 16 s | 0.371 meV | 0.838 meV | 4.71 / 2.47 meV | 1.3 ms per atom |
+| 16 (all bonds) | 233 s | 0.349 meV | 0.788 meV | 4.57 / 2.44 meV | 1.1 ms per atom |
 
 - One training structure and 23 s already give the matrix-element error of the published networks trained on 152. The error does not fall with more data: this model is at its capacity, so the next step is a larger basis, not more data.
-- Which EE convention the paper's band script uses (absolute, or relative to each chemical potential) is not yet checked.
+- **EE convention: relative to each chemical potential** (`MACE-H/inference_tools/new_version/Band.py::compute_eigenvalue_error`), so the comparable ace-jax figure is the second one: **2.47 meV with one training structure, 2.44 with 16, against 2.96 (MACE-H) and 6.28 (DeepH-E3)**.
 - The largest error is 70 meV: a few elements are far worse than the mean.
 
 **The other codes on gold** (probes on moriarty's RTX A4500, 20 GB; `bench/ham/maceh_train.py`, which now also drives DeepH-E3):
