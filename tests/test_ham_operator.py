@@ -10,7 +10,8 @@ import numpy as np
 import pytest
 import scipy.linalg
 
-from ace_jax.ham import bond, cg
+from ace_jax.basis import cg
+from ace_jax.ham import bond
 from ace_jax.ham.features import build_site_basis
 from ace_jax.ham.offsite import OffsiteModel, canonical_pairs
 from ace_jax.ham.onsite import OnsiteModel, parts_of, shell_pairs

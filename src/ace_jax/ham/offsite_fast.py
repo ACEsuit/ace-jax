@@ -18,7 +18,7 @@ import numpy as np
 
 from ..eval.harmonics import real_spherical_harmonics
 from . import bond as B
-from . import cg
+from ..basis import cg
 from .offsite import canonical_pairs
 from .onsite import _features, site_graph
 

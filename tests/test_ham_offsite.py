@@ -11,7 +11,8 @@ import scipy.linalg
 from conftest import require_optional
 
 from ace_jax.eval.harmonics import real_spherical_harmonics
-from ace_jax.ham import bond, cg, deeph
+from ace_jax.basis import cg
+from ace_jax.ham import bond, deeph
 from ace_jax.ham.features import build_site_basis
 from ace_jax.ham.fit import fit_offsite
 from ace_jax.ham.offsite import OffsiteModel, block_lps, canonical_pairs

@@ -6,7 +6,7 @@ rows per atom, and every operator channel is a right-hand side of the same
 design matrix: one factorisation serves H, S and the spin channels."""
 import numpy as np
 
-from . import cg
+from ..basis import cg
 from .onsite import OnsiteModel, design, parts_of, shell_pairs, site_graph, _features
 
 

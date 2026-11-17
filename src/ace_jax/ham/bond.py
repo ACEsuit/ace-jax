@@ -32,7 +32,7 @@ import numpy as np
 
 from ..eval.harmonics import real_spherical_harmonics
 from ..eval.nlist import sparse_graph
-from . import cg
+from ..basis import cg
 from .features import SiteBasis
 
 

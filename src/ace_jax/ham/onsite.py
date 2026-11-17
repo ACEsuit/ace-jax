@@ -12,7 +12,7 @@ import jax
 import numpy as np
 
 from ..eval.nlist import sparse_graph
-from . import cg
+from ..basis import cg
 from .features import SiteBasis
 from .orbitals import OrbitalBasis
 

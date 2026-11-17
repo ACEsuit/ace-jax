@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 from ace_jax.eval.harmonics import real_spherical_harmonics
-from ace_jax.ham import cg
+from ace_jax.basis import cg
 
 LL = [(l1, l2) for l1 in range(4) for l2 in range(4)]
 

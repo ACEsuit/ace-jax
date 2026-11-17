@@ -9,7 +9,7 @@ import equinox as eqx
 import numpy as np
 
 from . import bond as B
-from . import cg
+from ..basis import cg
 from .onsite import _features, site_graph
 from .orbitals import OrbitalBasis
 

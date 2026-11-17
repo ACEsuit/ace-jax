@@ -24,7 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import aitb
 
 from ace_jax.ham import bond as B
-from ace_jax.ham import cg
+from ace_jax.basis import cg
 from ace_jax.ham.deeph import OperatorData
 from ace_jax.ham.features import build_site_basis
 from ace_jax.ham.fit import fit_offsite

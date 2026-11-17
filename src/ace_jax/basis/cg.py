@@ -9,7 +9,7 @@ block of an operator between shells l1 and l2 splits exactly into its L parts
 
 T comes from the complex coefficients (Racah's formula) and the unitary change
 to the real harmonics; in the real basis it is purely real or purely imaginary,
-and the nonzero part is kept, which fixes its sign.  tests/test_ham_cg.py checks
+and the nonzero part is kept, which fixes its sign.  tests/test_basis_cg.py checks
 it against Wigner matrices taken from the harmonics themselves."""
 import functools
 import math
