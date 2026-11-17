@@ -139,9 +139,9 @@ def tiny_linear_problem():
     from ace_jax.eval import load
     from ace_jax.fit.data import build_dataset, load_configs
     from ace_jax.fit.hypers import default_prior
-    from ace_jax.fit.inducing import (GPConfig, descriptor_scale, select_inducing,
+    from ace_jax.fit.gp.inducing import (GPConfig, descriptor_scale, select_inducing,
                                        site_features)
-    from ace_jax.fit.kernels import KernelSpec
+    from ace_jax.fit.gp.kernels import KernelSpec
     from ace_jax.fit.objective import Problem
 
     xyz = FIXTURE_DIR / "si_tiny_train.xyz"
@@ -174,8 +174,8 @@ def tiny_gp_problem():
     from ace_jax.eval import load
     from ace_jax.fit.data import build_dataset, load_configs
     from ace_jax.fit.hypers import default_prior
-    from ace_jax.fit.inducing import GPConfig, descriptor_scale, select_inducing, site_features
-    from ace_jax.fit.kernels import KernelSpec
+    from ace_jax.fit.gp.inducing import GPConfig, descriptor_scale, select_inducing, site_features
+    from ace_jax.fit.gp.kernels import KernelSpec
     from ace_jax.fit.objective import Problem
 
     xyz, fitted = FIXTURE_DIR / "si_tiny_train.xyz", FIXTURE_DIR / "si_fitted.npz"
@@ -287,9 +287,9 @@ def two_type_synthetic():
     from ace_jax.eval import load
     from ace_jax.fit.data import build_dataset, load_configs
     from ace_jax.fit.hypers import default_prior
-    from ace_jax.fit.inducing import (GPConfig, descriptor_scale, select_inducing,
+    from ace_jax.fit.gp.inducing import (GPConfig, descriptor_scale, select_inducing,
                                        site_features)
-    from ace_jax.fit.kernels import KernelSpec
+    from ace_jax.fit.gp.kernels import KernelSpec
     from ace_jax.fit.objective import Problem
 
     xyz = FIXTURE_DIR / "si_tiny_train.xyz"

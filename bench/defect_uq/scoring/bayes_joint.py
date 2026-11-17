@@ -113,7 +113,7 @@ HI = np.concatenate([ls_map + 3.0, [10.0] * 3])
 def maximise(h0, free):
     """Bounded L-BFGS-B on -log p.  The log-sigma gradient scales with ~1e6 data rows, so unbounded
     first steps fling sigma to extremes and the Cholesky fails; a non-finite evaluation is returned as
-    a large value with zero gradient (a rejected step), as in fit/multistart.lbfgs_map."""
+    a large value with zero gradient (a rejected step), as in fit/linear/multistart.lbfgs_map."""
     from scipy.optimize import minimize
     h0 = np.asarray(h0, float); free = np.asarray(free)
     v0, g0 = vg(jnp.asarray(h0))

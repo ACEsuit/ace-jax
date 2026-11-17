@@ -6,10 +6,10 @@ import numpy as np
 
 from ...basis.prior import prior_diagonal
 from ...eval import highest_precision
-from ..embedding import load_mace_embedding
+from ..radial.embedding import load_mace_embedding
 from ..hypers import default_prior
-from ..inducing import GPConfig, blr_inducing, build_pmap, descriptor_scale, select_inducing, site_features
-from ..kernels import KernelSpec
+from ..gp.inducing import GPConfig, blr_inducing, build_pmap, descriptor_scale, select_inducing, site_features
+from ..gp.kernels import KernelSpec
 
 # Joint E0 (e0='lsq'): the E0 columns' prior is N(pre-fit E0, E0_PRIOR_STD^2) per species, in eV --
 # wide against fit errors, but E0 is only weakly identified against the readout (a constant site

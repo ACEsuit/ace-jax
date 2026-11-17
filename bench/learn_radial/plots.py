@@ -15,7 +15,7 @@ import matplotlib; matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from ace_jax.eval import load
 from ace_jax.fit.data import build_dataset, load_configs, flat_edges
-from ace_jax.fit.radial_model import (to_analytic, radial_gram, normalise, row_active,
+from ace_jax.fit.radial.model import (to_analytic, radial_gram, normalise, row_active,
                                       poly_env)
 from ace_jax.basis.spec import build_spec
 

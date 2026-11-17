@@ -3,8 +3,6 @@ mixture standard deviations as `energy_std` / `forces_std`.  With posterior= (th
 posterior.npz of `fit --uq ard-gp`) it serves the calibrated force UQ instead:
 forces_std / forces_cov / forces_q / forces_q_mahal / forces_group, as ACECalculator does
 for --uq ard, from the joint rows [B | k(B, B_M)] at the posterior's theta."""
-from typing import NamedTuple
-
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -12,10 +10,9 @@ from ase.calculators.calculator import Calculator, all_changes
 
 from ..eval import sparse_graph
 from ..fit.data import Config, build_dataset
+from ..fit.gp.predict import _e0_offset, _predict_fn
 from ..fit.hypers import from_array
-from ..fit.objective import posterior
-from ..fit.predict import _e0_offset, _predict_fn
-from ..fit.stats import sufficient_statistics
+from ..fit.pipeline.export import FittedGP, fit_posteriors  # noqa: F401  (their old home)
 
 
 # Neighbour slots are padded to a quarter-octave bucket, round(2^(j/4)) (at least 8),
@@ -29,21 +26,6 @@ SLOT_BUCKETS = tuple(sorted({int(round(2 ** (j / 4))) for j in range(12, 61)})) 
 def slot_bucket(k):
     """The padded neighbour-slot count for a maximum of k neighbours."""
     return next((b for b in SLOT_BUCKETS if b >= k), -(-k // SLOT_BUCKETS[-1]) * SLOT_BUCKETS[-1])
-
-
-class FittedGP(NamedTuple):
-    prob: object
-    draws: np.ndarray
-    posteriors: list
-
-
-def fit_posteriors(prob, ds_train, draws):
-    posts = []
-    for d in np.asarray(draws):
-        theta = from_array(jnp.asarray(d))
-        st = sufficient_statistics(theta, prob.spec, prob.model, prob.ind, prob.cfg, ds_train)
-        posts.append(posterior(theta, st, prob))
-    return FittedGP(prob, np.asarray(draws), posts)
 
 
 class GPCalculator(Calculator):

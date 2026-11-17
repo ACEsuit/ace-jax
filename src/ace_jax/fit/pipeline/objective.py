@@ -46,7 +46,7 @@ def make_objective(cfg, d, b):
     tied, free = (tied, ~tied) if tied.any() else (None, None)
     tie = tied_likelihood if tied is not None else (lambda f: f)
     if cfg.lml == "host-cache":
-        from ..hostcache import HostCachedLML
+        from ..gp.hostcache import HostCachedLML
         host = HostCachedLML(prob, d.ds_train, chunk=cfg.lml_chunk)
         lik = tie(host)
         prior_vg = jax.jit(jax.value_and_grad(lambda a: log_prior(from_array(a), prob.prior, free)))
@@ -90,7 +90,7 @@ def _svd_likelihood(lik, prob, tied, tie):
     """The QR likelihood `lik` replaced, for the MAP, by its SVD form (fit/lml_svd.py) when that represents it
     exactly; the QR statistics stay attached, so the posterior and predictions are the QR form's."""
     import warnings
-    from ..lml_svd import log_marginal_likelihood_svd, svd_applicable, svd_statistics
+    from ..linear.lml_svd import log_marginal_likelihood_svd, svd_applicable, svd_statistics
     qs = getattr(lik, "qr_stats", None)
     ok, why = (False, "no QR statistics (not the linear arm)") if qs is None else \
         svd_applicable(prob, qs, tied is not None)

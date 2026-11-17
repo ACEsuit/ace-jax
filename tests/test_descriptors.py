@@ -14,7 +14,8 @@ from conftest import species_index
 jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 
-from ace_jax.eval import ACECalculator, highest_precision, load, site_descriptors
+from ace_jax import ACECalculator
+from ace_jax.eval import highest_precision, load, site_descriptors
 
 TOL = 1e-10
 

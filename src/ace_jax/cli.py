@@ -275,11 +275,11 @@ def _check_fit_args(p, a):
 def run(a):
     """aj fit.  While it runs, stdout is line-buffered (a log redirected to a file follows the fit
     line by line, not only at exit) and <out>/progress.jsonl receives one JSON event per stage,
-    MAP evaluation and radial-learning round (`fit.progress`)."""
+    MAP evaluation and radial-learning round (`fit.linear.progress`)."""
     import contextlib
     import os
     import sys
-    from .fit.progress import emit, progress_file
+    from .fit.linear.progress import emit, progress_file
     out = pathlib.Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     if hasattr(sys.stdout, "reconfigure"):
@@ -312,7 +312,7 @@ def run(a):
 def _run_fit(a):
     from .fit.pipeline import fit, load_fit_data, write_outputs
     from .fit.pipeline.outputs import checkpoint_writer
-    from .fit.progress import stage
+    from .fit.linear.progress import stage
     cfg = _fit_config(a)
     with stage("data"):
         data = (load_fit_data(cfg, data=a.data, ood=a.ood) if a.data
@@ -494,7 +494,7 @@ def cmd_calibrate(a):
 
     from .calc.point import ACECalculator
     from .fit.ard import ARDPosterior, conformal_scores
-    from .fit.conformal import effective_n_min, group_scales
+    from .uq.conformal import effective_n_min, group_scales
     if "gp_json" in np.load(a.posterior).files:           # a gp_model.npz passed as the posterior
         raise UsageError(f"{a.posterior}: {_ARD_ONLY}")
     post = ARDPosterior.load(a.posterior)
@@ -563,7 +563,7 @@ def cmd_calibrate(a):
     tab = dataclasses.replace(tab, sources=sources)
     support = None
     if want_support:
-        from .fit.support import recalibrate_support
+        from .uq.support import recalibrate_support
         support = recalibrate_support(post.support, mode, u_cfg, n_keep, np.concatenate(X_u),
                                       np.concatenate(Z_u), s_u, c_u, g_u)
     new = post._replace(group_table=tab.to_dict(),

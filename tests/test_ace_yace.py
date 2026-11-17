@@ -1,4 +1,4 @@
-"""A linear ACEModel written as a `.yace` (export/yace.py) and read back (pace_io, radbasename Tabulated)
+"""A linear ACEModel written as a `.yace` (eval/pace_ace.py) and read back (pace_io, radbasename Tabulated)
 evaluates as the source model: the radial tables are its own values and derivatives, the products a
 re-expression of its coefficients.  ML-PACE parity needs its tabulated-radial addition, so it is not
 tested here (docs/dev/ml-pace-tabulated-radials.md)."""

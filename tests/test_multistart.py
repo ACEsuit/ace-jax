@@ -1,4 +1,4 @@
-"""Multi-start L-BFGS MAP (fit/multistart.py).  The joint GP LML is multimodal:
+"""Multi-start L-BFGS MAP (fit/linear/multistart.py).  The joint GP LML is multimodal:
 on Cantor-1k the same start reached log-posteriors 620 nats apart depending on
 round-off (device vs host-cache paths diverged after ~10 evaluations), so the MAP
 is chosen as the best of several starts."""
@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from ace_jax.fit.hypers import Hypers, Prior
-from ace_jax.fit.multistart import lbfgs_map, multistart_map, prior_starts
+from ace_jax.fit.linear.multistart import lbfgs_map, multistart_map, prior_starts
 
 
 def _double_well(x):

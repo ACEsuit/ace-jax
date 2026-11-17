@@ -3,8 +3,8 @@ by the JAX-MD adapter (`ace_jax.jaxmd.potential`, one structure, a JAX-MD list) 
 (`ace_jax.batch.energy_fn`, ace-jax's own lists, under jax.vmap).
 
 Both hand over rows of cutoff + skin slots (rij_s, j_s) with `valid_s` marking the slots within the
-model's cutoff.  `dense_energy` then compacts the valid slots into K model slots (`calc.skin.compact`,
-the skin list's step does the same), parks the rest where every radial vanishes, poisons energy and
+model's cutoff.  `dense_energy` then compacts the valid slots into K model slots (`compact`; the skin
+list's step, `calc.skin.step`, does the same), parks the rest where every radial vanishes, poisons energy and
 forces with NaN on any overflow (never truncation), and evaluates the site energies in row blocks.
 
 The evaluation model is whatever `ACECalculator` resolved: the JAX model, or the kernel
@@ -12,9 +12,26 @@ The evaluation model is whatever `ACECalculator` resolved: the JAX model, or the
 has a batching rule that flattens a vmapped batch into rows (`eval.ffi._edge_kernel`), so the batched path
 runs it as one call (threaded on the CPU, one launch on the GPU).
 """
+import jax
 import jax.numpy as jnp
 
 from .edge_model import total_energy
+
+
+def compact(valid_s, K):
+    """Slot map from a skin row to the K slots inside the cutoff: (order, mask,
+    csum).  Compact slot k of row i reads skin slot order[i, k]; mask marks the
+    live compact slots; csum is the row's running count of valid slots (cnt =
+    csum[:, -1], overflow where cnt > K).  In-cutoff slots keep their skin order:
+    compact slot k takes the (k+1)-th valid entry, found by a search in the row's
+    running count (gathers only; a per-row argsort was ~1 ms at 8k atoms on an
+    A100)."""
+    csum = jnp.cumsum(valid_s.astype(jnp.int32), axis=1)
+    want = jnp.arange(1, K + 1, dtype=jnp.int32)
+    order = jax.vmap(lambda c: jnp.searchsorted(c, want, side="left"))(csum)
+    order = jnp.minimum(order, valid_s.shape[1] - 1)
+    # slots past the row's count are padding, whatever `order` clipped to
+    return order, want[None, :] <= csum[:, -1:], csum
 
 
 def dense_energy(model, rij_s, j_s, valid_s, node_z, K=None, chunk=None, bad=None, live=None):
@@ -27,7 +44,6 @@ def dense_energy(model, rij_s, j_s, valid_s, node_z, K=None, chunk=None, bad=Non
     lax.map + checkpoint above one block); None, one block.  `bad` (a device bool) makes energy and
     forces NaN (a list overflow, an invalid species); `live` (N,) drops padding atoms' site energies.
     Returns (E, overflow): overflow is bad or a row over K."""
-    from ..calc.skin import compact
     bad = jnp.zeros((), bool) if bad is None else jnp.asarray(bad, bool)
     if K is None:
         rij, j, mask = rij_s, j_s, valid_s

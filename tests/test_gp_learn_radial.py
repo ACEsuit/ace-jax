@@ -1,4 +1,4 @@
-"""fit.radial_learn: the VarPro objective, its gradients, the L-BFGS and Newton loops, the priors
+"""fit.radial.learn: the VarPro objective, its gradients, the L-BFGS and Newton loops, the priors
 (the held-out gate and saving: test_fit_radial)."""
 import jax
 import numpy as np
@@ -10,8 +10,8 @@ import jax.numpy as jnp  # noqa: E402
 from ace_jax.eval import load  # noqa: E402
 from ace_jax.fit.data import build_dataset, load_configs  # noqa: E402
 from ace_jax.fit.hypers import default_prior  # noqa: E402
-from ace_jax.fit.inducing import GPConfig, descriptor_scale, select_inducing, site_features  # noqa: E402
-from ace_jax.fit.kernels import KernelSpec  # noqa: E402
+from ace_jax.fit.gp.inducing import GPConfig, descriptor_scale, select_inducing, site_features  # noqa: E402
+from ace_jax.fit.gp.kernels import KernelSpec  # noqa: E402
 from ace_jax.fit.objective import Problem  # noqa: E402
 from conftest import FIXTURE_DIR  # noqa: E402
 from radial_learn_problem import (HAVE_FIXTURES, MODEL, THETA, XYZ, make_problem,  # noqa: E402
@@ -27,7 +27,7 @@ def small():
 
 def _in_memory_residual(W, prob, ds, theta):
     """min_c ||Phi~ c - y~||^2 on the materialised prior-augmented design."""
-    from ace_jax.fit.radial_model import with_radial
+    from ace_jax.fit.radial.model import with_radial
     from ace_jax.fit.solve import stacked_design
     Phi, y = stacked_design(prob._replace(model=with_radial(prob.model, W)), ds, theta)
     # jnp.linalg.lstsq has no custom VJP: its gradient is plain autodiff through
@@ -40,7 +40,7 @@ def _in_memory_residual(W, prob, ds, theta):
 
 
 def test_projected_residual_matches_in_memory_lstsq(small):
-    from ace_jax.fit.radial_learn import projected_residual
+    from ace_jax.fit.radial.learn import projected_residual
     prob, ds, _ = small
     W = prob.model.rnl_Wnlq
     got = float(projected_residual(W, THETA, prob, ds))
@@ -49,7 +49,7 @@ def test_projected_residual_matches_in_memory_lstsq(small):
 
 
 def test_projected_residual_gradient(small):
-    from ace_jax.fit.radial_learn import projected_residual
+    from ace_jax.fit.radial.learn import projected_residual
     prob, ds, _ = small
     W = prob.model.rnl_Wnlq
     f = lambda X: projected_residual(X, THETA, prob, ds)
@@ -76,7 +76,7 @@ def _temp_bytes(fn, *args):
 
 
 def test_gradient_memory_does_not_scale_with_batches():
-    from ace_jax.fit.radial_learn import projected_residual
+    from ace_jax.fit.radial.learn import projected_residual
     prob, ds6, _ = make_problem(ncfg=12, per_batch=2)          # 6 equal-shape batches
     ds2 = jax.tree.map(lambda a: a[:2], ds6)
     W = prob.model.rnl_Wnlq
@@ -88,7 +88,7 @@ def test_gradient_memory_does_not_scale_with_batches():
 
 
 def test_lbfgs_loop_quadratic():
-    from ace_jax.fit.radial_learn import lbfgs_loop
+    from ace_jax.fit.radial.learn import lbfgs_loop
     t = jnp.arange(5.0)
     s = jnp.array([1.0, 10.0, 100.0, 0.1, 3.0])
     f = jax.jit(lambda x: jnp.sum(s * (x - t) ** 2))
@@ -98,14 +98,14 @@ def test_lbfgs_loop_quadratic():
 
 
 def test_lbfgs_loop_zero_steps_returns_start():
-    from ace_jax.fit.radial_learn import lbfgs_loop
+    from ace_jax.fit.radial.learn import lbfgs_loop
     x0 = jnp.ones(3)
     x, fx, trace, reason = lbfgs_loop(lambda x: jnp.sum(x ** 2), x0, steps=0)
     assert bool(jnp.all(x == x0)) and trace == [] and reason == "steps" and fx == 3.0
 
 
 def test_lbfgs_loop_nonfinite_keeps_best():
-    from ace_jax.fit.radial_learn import lbfgs_loop
+    from ace_jax.fit.radial.learn import lbfgs_loop
     f = jax.jit(lambda x: jnp.where(x[0] > 0.5, jnp.sum(x ** 2), jnp.nan))
     x0 = jnp.array([2.0, 1.0])
     x, fx, _, _ = lbfgs_loop(f, x0, steps=50)
@@ -123,7 +123,7 @@ def test_lbfgs_loop_no_recompile_across_rounds():
     """Two lbfgs_loop calls with the same f/statics and matching x0/args
     shapes -- exactly how learn_radial drives one round per call -- must
     compile _lbfgs_step at most once between them, not once per call."""
-    from ace_jax.fit.radial_learn import _lbfgs_step, lbfgs_loop
+    from ace_jax.fit.radial.learn import _lbfgs_step, lbfgs_loop
     t = jnp.arange(5.0)
     s1 = jnp.array([1.0, 10.0, 100.0, 0.1, 3.0])
     s2 = jnp.array([2.0, 5.0, 50.0, 0.2, 1.0])          # different VALUES, same shape/dtype
@@ -138,7 +138,7 @@ def test_lbfgs_loop_no_recompile_across_rounds():
 
 def test_learn_radial_requires_x64(small, monkeypatch):
     import types
-    from ace_jax.fit import radial_learn
+    from ace_jax.fit.radial import learn as radial_learn
     prob, ds, _ = small
     # require_x64 is learn_radial's first statement, so only its read of
     # jax.config sees the stub; the global flag is never touched
@@ -149,8 +149,8 @@ def test_learn_radial_requires_x64(small, monkeypatch):
 
 
 def test_learn_radial_zero_steps_is_normalised_init(small):
-    from ace_jax.fit.radial_learn import learn_radial
-    from ace_jax.fit.radial_model import normalise, radial_gram, row_active
+    from ace_jax.fit.radial.learn import learn_radial
+    from ace_jax.fit.radial.model import normalise, radial_gram, row_active
     prob, ds, _ = small
     W0 = prob.model.rnl_Wnlq
     W, info = learn_radial(prob, ds, W0, theta0=THETA, profile=False, steps=0)
@@ -171,13 +171,13 @@ def perturbed():
 def unpenalised(perturbed):
     """10 learning steps on `perturbed` with no prior on the change: the recovery run, and the
     zero-weight arm of the spectral and gap tests (lam_spec=0 and lam_gap=0 give these W bitwise)."""
-    from ace_jax.fit.radial_learn import learn_radial
+    from ace_jax.fit.radial.learn import learn_radial
     prob, ds, W0 = perturbed
     return learn_radial(prob, ds, W0, theta0=THETA, profile=False, steps=10)
 
 
 def test_learn_radial_recovers_perturbed_radials(perturbed, unpenalised):
-    from ace_jax.fit.radial_learn import projected_residual
+    from ace_jax.fit.radial.learn import projected_residual
     prob, ds, W0 = perturbed
     W, info = unpenalised
     f0 = float(projected_residual(W0, THETA, prob, ds))
@@ -188,7 +188,7 @@ def test_learn_radial_recovers_perturbed_radials(perturbed, unpenalised):
 
 
 def test_learn_radial_profiles_theta_and_logs_per_round(small):
-    from ace_jax.fit.radial_learn import learn_radial
+    from ace_jax.fit.radial.learn import learn_radial
     prob, ds, _ = small
     lines = []
     W, info = learn_radial(prob, ds, prob.model.rnl_Wnlq, steps=4, reprofile_every=2, map_steps=20,
@@ -205,8 +205,8 @@ def test_learn_radial_two_species_roughness():
     """NZ = 2 (SiGe, structurally-zero onehot rows) and lam > 0: zero rows stay
     exactly zero, everything is finite, the roughness penalty lowers the
     learned roughness, and lam_abs is the relative weight times r0/rough0."""
-    from ace_jax.fit.radial_learn import learn_radial
-    from ace_jax.fit.radial_model import (rnl_degrees, roughness, roughness_matrix,
+    from ace_jax.fit.radial.learn import learn_radial
+    from ace_jax.fit.radial.model import (rnl_degrees, roughness, roughness_matrix,
                                           row_active, to_analytic)
     spline, meta, z = load(FIXTURE_DIR / "sige_nofit.npz")
     model, _ = to_analytic(spline, 12)
@@ -238,8 +238,8 @@ def test_learn_radial_two_species_roughness():
 
 def test_learn_radial_precomputed_pieces_match(small):
     """Q/D2/r0 passed in (as fit_radial does) give the same run as computed."""
-    from ace_jax.fit.radial_learn import learn_radial, projected_residual_qr
-    from ace_jax.fit.radial_model import normalise, radial_gram, roughness_matrix, row_active
+    from ace_jax.fit.radial.learn import learn_radial, projected_residual_qr
+    from ace_jax.fit.radial.model import normalise, radial_gram, roughness_matrix, row_active
     prob, ds, _ = small
     W0 = prob.model.rnl_Wnlq
     Q, D2 = radial_gram(prob.model, ds), roughness_matrix(prob.model)
@@ -252,7 +252,7 @@ def test_learn_radial_precomputed_pieces_match(small):
 
 
 def test_learn_radial_rejects_smooth_init_with_lambda(small):
-    from ace_jax.fit.radial_learn import learn_radial, relative_lambda
+    from ace_jax.fit.radial.learn import learn_radial, relative_lambda
     prob, ds, _ = small
     assert relative_lambda(0.0, 1.0, 0.0) == 0.0
     with pytest.raises(ValueError, match="rough0"):
@@ -265,8 +265,8 @@ def test_learn_radial_rejects_smooth_init_with_lambda(small):
 def test_learn_radial_spectral_prior_suppresses_high_q_change(perturbed, unpenalised):
     """A strong spectral prior on the radial change should shrink the high-q
     (q >= n_q/2) part of W - W_ref relative to no prior, while staying finite."""
-    from ace_jax.fit.radial_learn import learn_radial
-    from ace_jax.fit.radial_model import normalise, radial_gram, row_active
+    from ace_jax.fit.radial.learn import learn_radial
+    from ace_jax.fit.radial.model import normalise, radial_gram, row_active
     prob, ds, W0 = perturbed
     Q = radial_gram(prob.model, ds)
     active = row_active(W0)
@@ -289,8 +289,8 @@ def test_learn_radial_gap_prior_shrinks_change_in_gaps(perturbed, unpenalised):
     """A large data-gap prior on the radial change should shrink the change
     measured under the uniform-in-r measure, relative to no prior, while
     staying finite."""
-    from ace_jax.fit.radial_learn import learn_radial
-    from ace_jax.fit.radial_model import (data_r_range, gap_penalty, normalise, radial_gram,
+    from ace_jax.fit.radial.learn import learn_radial
+    from ace_jax.fit.radial.model import (data_r_range, gap_penalty, normalise, radial_gram,
                                           row_active, uniform_gram)
     prob, ds, W0 = perturbed
     Q = radial_gram(prob.model, ds)
@@ -313,7 +313,7 @@ def test_learn_radial_gap_prior_shrinks_change_in_gaps(perturbed, unpenalised):
 def test_learn_sigma_e_mult_scales_only_the_radial_objective(small):
     """A force-heavier radial objective (sigma_E x 10) changes the learned radials and
     the objective's reference scale r0, but the recorded theta stays the plain MAP one."""
-    from ace_jax.fit.radial_learn import learn_radial
+    from ace_jax.fit.radial.learn import learn_radial
     prob, ds, _ = small
     W1, i1 = learn_radial(prob, ds, prob.model.rnl_Wnlq, theta0=THETA, profile=False, steps=3)
     W10, i10 = learn_radial(prob, ds, prob.model.rnl_Wnlq, theta0=THETA, profile=False, steps=3,
@@ -337,7 +337,7 @@ STIFF = THETA._replace(log_sigma_c=np.log(1e4), log_sigma_E=np.log(1e-4), log_si
 def _in_memory_residual_direct(W, prob, ds, theta):
     """The dense reference summed directly, ||y - Phi~ c||^2 at the QR least-squares c (Phi~ holds
     the prior rows): y.y - v.v cancels where the fit nearly interpolates."""
-    from ace_jax.fit.radial_model import with_radial
+    from ace_jax.fit.radial.model import with_radial
     from ace_jax.fit.solve import stacked_design
     Phi, y = stacked_design(prob._replace(model=with_radial(prob.model, W)), ds, theta)
     Qm, Rm = np.linalg.qr(np.asarray(Phi))
@@ -348,8 +348,8 @@ def _in_memory_residual_direct(W, prob, ds, theta):
 
 def _residual_parity(prob, ds, W):
     from ace_jax.fit.objective import posterior_from_qr
-    from ace_jax.fit.radial_learn import _batch_residuals_rows, residual_sums
-    from ace_jax.fit.radial_model import with_radial
+    from ace_jax.fit.radial.learn import _batch_residuals_rows, residual_sums
+    from ace_jax.fit.radial.model import with_radial
     from ace_jax.fit.stats import linear_qr_statistics
     c = posterior_from_qr(THETA, linear_qr_statistics(with_radial(prob.model, W), prob.cfg, ds), prob)[0]
     out = []
@@ -375,7 +375,7 @@ def test_direct_residuals_match_the_design_rows(small):
 
 def test_direct_residuals_match_the_design_rows_two_species():
     """NZ = 2: the species-blocked readout reaches each centre species' block (rows._place's layout)."""
-    from ace_jax.fit.radial_model import to_analytic
+    from ace_jax.fit.radial.model import to_analytic
     spline, meta, z = load(FIXTURE_DIR / "sige_nofit.npz")
     model, _ = to_analytic(spline, 12)
     configs = load_configs(XYZ, "dft_energy", "dft_force", "dft_virial")[:4]
@@ -390,7 +390,7 @@ def test_direct_residuals_match_the_design_rows_two_species():
 
 
 def test_projected_residual_qr_matches_lstsq_and_the_gram_form(small):
-    from ace_jax.fit.radial_learn import projected_residual, projected_residual_qr
+    from ace_jax.fit.radial.learn import projected_residual, projected_residual_qr
     prob, ds, _ = small
     W = prob.model.rnl_Wnlq
     got = projected_residual_qr(W, THETA, prob, ds)
@@ -402,9 +402,9 @@ def test_projected_residual_qr_matches_lstsq_and_the_gram_form(small):
 def test_learner_gradient_is_the_envelope_gradient(small):
     """At fixed c* = c*(W) the learner's objective equals r(W), and its V-gradient is r's (envelope
     theorem): checked against central differences of r itself, which re-solve c* at each point."""
-    from ace_jax.fit.radial_learn import _prior, _vp_value_and_grad, projected_residual_qr, qr_readout
+    from ace_jax.fit.radial.learn import _prior, _vp_value_and_grad, projected_residual_qr, qr_readout
     from ace_jax.fit.hypers import to_array
-    from ace_jax.fit.radial_model import normalise, radial_gram, roughness_matrix, row_active, with_radial
+    from ace_jax.fit.radial.model import normalise, radial_gram, roughness_matrix, row_active, with_radial
     prob, ds, _ = small
     W0 = prob.model.rnl_Wnlq
     Q, active, D2 = radial_gram(prob.model, ds), row_active(W0), roughness_matrix(prob.model)
@@ -428,7 +428,7 @@ def test_learner_works_where_the_gram_form_fails(perturbed):
     directly), and a learning run is finite and never ends above its start.  The gradient is not
     asserted: here c is fixed only by the near-flat prior along A's weak directions, and the
     W-gradient through them is not resolvable in double precision (qr_readout)."""
-    from ace_jax.fit.radial_learn import learn_radial, projected_residual, projected_residual_qr
+    from ace_jax.fit.radial.learn import learn_radial, projected_residual, projected_residual_qr
     prob, ds, W0 = perturbed
     got, ref = projected_residual_qr(W0, STIFF, prob, ds), _in_memory_residual_direct(W0, prob, ds, STIFF)
     print(f"stiff: qr {got:.10e}  dense {ref:.10e}  gram {float(projected_residual(W0, STIFF, prob, ds)):.10e}")
@@ -440,8 +440,8 @@ def test_learner_works_where_the_gram_form_fails(perturbed):
 
 
 def test_residual_gradient_memory_does_not_scale_with_batches():
-    from ace_jax.fit.radial_learn import residual_sums
-    from ace_jax.fit.radial_model import with_radial
+    from ace_jax.fit.radial.learn import residual_sums
+    from ace_jax.fit.radial.model import with_radial
     prob, ds6, _ = make_problem(ncfg=12, per_batch=2)
     ds2 = jax.tree.map(lambda a: a[:2], ds6)
     W, c = prob.model.rnl_Wnlq, jnp.ones(prob.cfg.len_basis)
@@ -454,8 +454,8 @@ def _reduced(prob, ds, theta):
     """fg and hvp as learn_radial builds them for one round (lam = spec = gap = 0)."""
     from ace_jax.fit.hypers import to_array
     from ace_jax.fit.objective import posterior_from_qr
-    from ace_jax.fit.radial_learn import _prior, _vp_hvp, _vp_value_and_grad, qr_readout
-    from ace_jax.fit.radial_model import normalise, radial_gram, roughness_matrix, row_active, with_radial
+    from ace_jax.fit.radial.learn import _prior, _vp_hvp, _vp_value_and_grad, qr_readout
+    from ace_jax.fit.radial.model import normalise, radial_gram, roughness_matrix, row_active, with_radial
     W0 = prob.model.rnl_Wnlq
     Q, active, D2 = radial_gram(prob.model, ds), row_active(W0), roughness_matrix(prob.model)
     V0 = normalise(W0, Q, active)
@@ -497,7 +497,7 @@ def test_reduced_hvp_matches_differences_of_the_reduced_gradient(small):
 def test_newton_round_beats_lbfgs_per_iteration_on_recoverable_radials(perturbed):
     """The same budget of iterations: trust-region Newton with exact reduced HVPs gets further than
     L-BFGS-B, and its accepted objective never rises."""
-    from ace_jax.fit.radial_learn import _lbfgs_round, _newton_round
+    from ace_jax.fit.radial.learn import _lbfgs_round, _newton_round
     prob, ds, W0 = perturbed
     fg, hvp, x0, _ = _reduced(_with_W(prob, W0), ds, THETA)
     _, f0, fl, tl, _, _ = _lbfgs_round(fg, x0, 8, 1e-12)
@@ -507,13 +507,13 @@ def test_newton_round_beats_lbfgs_per_iteration_on_recoverable_radials(perturbed
 
 
 def _with_W(prob, W):
-    from ace_jax.fit.radial_model import with_radial
+    from ace_jax.fit.radial.model import with_radial
     return prob._replace(model=with_radial(prob.model, W))
 
 
 def test_learn_radial_newton_runs_rounds_with_refits(small):
     """opt="newton" through learn_radial: rounds, theta re-fits and the LML record, all finite."""
-    from ace_jax.fit.radial_learn import learn_radial
+    from ace_jax.fit.radial.learn import learn_radial
     prob, ds, _ = small
     W, info = learn_radial(prob, ds, prob.model.rnl_Wnlq, steps=4, reprofile_every=2, map_steps=20,
                            opt="newton", cg_iters=5)

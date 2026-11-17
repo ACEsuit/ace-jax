@@ -17,8 +17,8 @@ import jax.numpy as jnp
 from ace_jax.eval import highest_precision, load
 from ace_jax.fit.data import build_dataset, load_configs
 from ace_jax.fit.hypers import Hypers, default_prior, to_array
-from ace_jax.fit.inducing import GPConfig, descriptor_scale, select_inducing, site_features
-from ace_jax.fit.kernels import KernelSpec
+from ace_jax.fit.gp.inducing import GPConfig, descriptor_scale, select_inducing, site_features
+from ace_jax.fit.gp.kernels import KernelSpec
 from ace_jax.fit.objective import (Problem, combine, log_marginal_likelihood, log_marginal_likelihood_qr,
                                    make_lml, posterior, posterior_from_qr, prior_precision)
 from ace_jax.fit.solve import posterior_qr
@@ -257,7 +257,7 @@ def test_qr_statistics_compile_once_across_models(m0):
     compiled pass must be reused (a per-call jit of a closure over the model recompiled it every
     time).  Different radial weights, same shapes: one cache entry; the statistics still differ."""
     from ace_jax.fit import stats
-    from ace_jax.fit.radial_model import to_analytic, with_radial
+    from ace_jax.fit.radial.model import to_analytic, with_radial
     prob, ds, _, _ = m0
     model, _ = to_analytic(prob.model, 12)
     f = stats._device_qr                       # the device path (the host path still jits per call)

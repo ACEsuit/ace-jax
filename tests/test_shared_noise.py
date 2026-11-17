@@ -187,7 +187,7 @@ def test_shared_posterior_mean_is_the_blr_ridge_solve(shared40):
     """At the shared MAP the posterior mean is the ridge solution on the weighted, prior-scaled design
     with lambda = sigma^2 / sigma_c^2 -- the BLR identity (ACEfit: ridge on W A / P)."""
     from ace_jax.eval import highest_precision
-    from ace_jax.fit.predict import fit_posterior
+    from ace_jax.fit.gp.predict import fit_posterior
     from ace_jax.fit.solve import stacked_design
     cfg, d, b, obj, mf = shared40
     assert getattr(b.prob, "e0_prec", None) is None               # e0 'model': no fixed-precision E0 columns
@@ -217,7 +217,7 @@ def test_matches_the_acefit_blr_reference():
     from ace_jax.fit.hypers import from_array, to_array
     from ace_jax.fit.pipeline import fit
     from ace_jax.fit.pipeline.export import linear_arrays_from_mean, linear_model_arrays
-    from ace_jax.fit.predict import fit_posterior
+    from ace_jax.fit.gp.predict import fit_posterior
     ref = np.load(MODEL)
 
     def rel(got):

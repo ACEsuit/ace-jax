@@ -6,7 +6,7 @@ jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 
 from ace_jax.fit.hypers import Hypers, default_prior
-from ace_jax.fit.kernels import K_MM, KernelSpec, delta, grad_k_rows, k_rows, kernel
+from ace_jax.fit.gp.kernels import K_MM, KernelSpec, delta, grad_k_rows, k_rows, kernel
 
 THETA = Hypers(log_ell=np.log(0.7), log_A=np.log(0.2), log_alpha=np.log(1.0),
                log_r0=np.log(2.3), log_eps=np.log(0.3), log_rho=np.log(3.0),
@@ -126,7 +126,7 @@ def test_default_inducing_embed_is_onehot():
     from conftest import FIXTURE_DIR
     from ace_jax.eval import load
     from ace_jax.fit.data import build_dataset, load_configs
-    from ace_jax.fit.inducing import GPConfig, descriptor_scale, select_inducing, site_features
+    from ace_jax.fit.gp.inducing import GPConfig, descriptor_scale, select_inducing, site_features
     model, meta, z = load(FIXTURE_DIR / "sige_nofit.npz")
     cfgs = load_configs(FIXTURE_DIR / "si_tiny_train.xyz", "dft_energy", "dft_force", "dft_virial")[:3]
     ds = build_dataset(cfgs, meta, np.asarray(z["E0"]), 3)
@@ -146,7 +146,7 @@ def test_inducing_embed_nz_gives_full_width_onehot():
     # I1 regression: with nz set, the default one-hot spans ALL model species even when the
     # data presents only some, so a predict-time gather of a test-only species cannot clamp.
     import numpy as np, jax.numpy as jnp
-    from ace_jax.fit.inducing import descriptor_scale, select_inducing
+    from ace_jax.fit.gp.inducing import descriptor_scale, select_inducing
     rng = np.random.default_rng(0)
     X = jnp.asarray(rng.normal(size=(8, 4))); S = jnp.asarray(2.5 + rng.random(8))
     Z = jnp.asarray([0] * 8, jnp.int32); mask = jnp.ones(8, bool)     # only species 0 present
@@ -159,7 +159,7 @@ def test_inducing_embed_nz_gives_full_width_onehot():
 
 def test_select_inducing_accepts_lowrank_embed():
     import numpy as np, jax.numpy as jnp
-    from ace_jax.fit.inducing import descriptor_scale, select_inducing
+    from ace_jax.fit.gp.inducing import descriptor_scale, select_inducing
     rng = np.random.default_rng(0)
     X = jnp.asarray(rng.normal(size=(10, 4))); S = jnp.asarray(2.5 + rng.random(10))
     Z = jnp.asarray([0] * 5 + [1] * 5, jnp.int32); mask = jnp.ones(10, bool)

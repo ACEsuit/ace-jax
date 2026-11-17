@@ -66,7 +66,7 @@ def scaled(at0, s, u, rattle, d_eq):
 def evaluate(calc, at, post, refs=None):
     """Per-atom served quantities; for each support reference `name` in refs: support_q@name,
     support_bad@name and xc@name (|whitened projection| in that reference's feature space)."""
-    from ace_jax.fit.support import _proj, support_check, support_features
+    from ace_jax.uq.support import _proj, support_check, support_features
     std = calc.get_property("forces_std", at)
     out = {"forces_std": std}
     if post.group_table is not None:

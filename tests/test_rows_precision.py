@@ -34,7 +34,7 @@ def _dot_precisions(jaxpr, out):
 def problem():
     from ace_jax.eval import load
     from ace_jax.fit.data import build_dataset, load_configs
-    from ace_jax.fit.inducing import GPConfig
+    from ace_jax.fit.gp.inducing import GPConfig
     model, meta, z = load(FIXTURE_DIR / "si_fitted.npz")
     cfgs = [c for c in load_configs(XYZ, "dft_energy", "dft_force", "dft_virial") if len(c.numbers) < 64][:4]
     ds = build_dataset(cfgs, meta, np.asarray(z["E0"]), 2)
