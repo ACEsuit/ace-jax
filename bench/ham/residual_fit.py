@@ -9,7 +9,8 @@
     also     `aj fit` with the same basis on the DFT labels themselves, for comparison.
 
     JAX_PLATFORMS=cpu uv run python bench/ham/residual_fit.py <npz dir> <labels dir> <work dir>
-        [nh=2] [order=3] [degree=12] [rcut=6.0] [nk=2] [width=0.1] [nel=13] [limit=<structures>]
+        [nh=2] [order=3] [degree=12] [rcut=6.0] [nk=2] [width=0.1] [nel=13] [limit=<structures>] [core=0]
+`core`: lowest bands per atom left out of the band term (5 for Al's 1s 2s 2p: the valence band energy).
 <npz dir>: H and S caches (`<name>.npz`); <labels dir>: `<name>/aims.out` with the total energy and,
 if computed, forces and stress; names `*_100`.. are the test set, as in ham-ref/al_small.
 The residual is defined by the H model and the electronic settings: both are recorded in
@@ -78,7 +79,7 @@ def aj_fit(train, test, out, order, degree, rcut, forces, stress):
     return r.returncode, [ln for ln in (r.stdout + r.stderr).splitlines() if re.search(r"rmse|RMSE|mae|MAE", ln)][-12:]
 
 
-def main(npz, lab, work, nh=2, order=3, degree=12, rcut=6.0, nk=2, width=0.1, nel=13, limit=None):
+def main(npz, lab, work, nh=2, order=3, degree=12, rcut=6.0, nk=2, width=0.1, nel=13, limit=None, core=0):
     os.makedirs(work, exist_ok=True)
     names = sorted(n for n in os.listdir(lab) if os.path.exists(os.path.join(lab, n, "aims.out")) and os.path.exists(os.path.join(npz, n + ".npz"))
                    and "Have a nice day" in open(os.path.join(lab, n, "aims.out")).read()[-3000:] and re.match(r"(fcc|bcc)_\d+", n))
@@ -93,7 +94,8 @@ def main(npz, lab, work, nh=2, order=3, degree=12, rcut=6.0, nk=2, width=0.1, ne
     on, _ = fit_onsite(site, train)
     off, _ = fit_offsite(basis, train)
     print(f"stage 1: H and S fitted to {fit_names} in {time.perf_counter() - t:.0f} s (bond cutoff {rmax})", flush=True)
-    calc = HamiltonianCalculator((on, off), kpts=(nk, nk, nk), nelectrons={13: nel}, width=width, smearing="gaussian")
+    calc = HamiltonianCalculator((on, off), kpts=(nk, nk, nk), nelectrons={13: nel}, width=width, smearing="gaussian",
+                                 core_bands={13: core} if core else None)
     # the settings against the DFT calculation: band energy of the REFERENCE blocks and the model's
     d = train[0]
     bs = BlockSum(list(d.blocks["H"]), d.numbers, d.basis)
@@ -102,7 +104,8 @@ def main(npz, lab, work, nh=2, order=3, degree=12, rcut=6.0, nk=2, width=0.1, ne
     text = open(os.path.join(lab, fit_names[0][:-4], "aims.out")).read()
     soe = float(re.findall(r"Sum of eigenvalues\s+:\s+(-?[\d.]+) Ha\s+(-?[\d.]+) eV", text)[-1][1])
     a0 = Atoms(numbers=d.numbers, positions=d.positions, cell=d.cell, pbc=True); a0.calc = calc
-    eb = float((np.asarray(f) * e * calc.weights[:, None]).sum())
+    eb = float((np.asarray(f) * e * calc.weights[:, None])[:, core * len(d.numbers):].sum())
+    soe = soe if not core else float("nan")                              # FHI-aims prints the sum over all states only
     print(f"check on {fit_names[0][:-4]}: sum of eigenvalues, FHI-aims {soe:.4f} eV; reference blocks {eb:.4f} ({1e3 * (eb - soe) / len(d.numbers):+.3f} meV per atom); "
           f"predicted blocks {a0.get_potential_energy():.4f} ({1e3 * (a0.get_potential_energy() - eb) / len(d.numbers):+.3f} meV per atom); "
           f"Fermi level {float(mu):.4f} eV", flush=True)
@@ -134,7 +137,7 @@ def main(npz, lab, work, nh=2, order=3, degree=12, rcut=6.0, nk=2, width=0.1, ne
         frames["dft"][part].append((b, F, forces, stress))
     print(f"stage 2: band energy{', forces' if has_f else ''}{', stress' if has_s else ''} of {len(names)} structures in {time.perf_counter() - t:.0f} s "
           f"({len(frames['res']['train'])} train, {len(frames['res']['test'])} test)", flush=True)
-    json.dump(dict(h_fit=fit_names, kpts=[nk] * 3, smearing="gaussian", width=width, nelectrons_per_atom=nel, bond_cutoff=rmax,
+    json.dump(dict(h_fit=fit_names, kpts=[nk] * 3, smearing="gaussian", width=width, nelectrons_per_atom=nel, core_bands_per_atom=core, bond_cutoff=rmax,
                    site="order 1, 12 radials, l <= 4, rcut 7", offsite="site (2, 2) + env (5, 6, 4, 4, 4)"),
               open(os.path.join(work, "residual.json"), "w"), indent=1)
     title = {"res": "residual", "resmu": "residual, band energy from the Fermi level (energies only)", "dft": "DFT labels directly"}

@@ -74,3 +74,31 @@ def test_electron_counts():
     for spec, want in ((None, 14 + 6 + 14), (7.0, 7.0), ({14: 4, 6: 4}, 12.0)):
         c.nelectrons = spec
         assert c.electrons(np.array([14, 6, 14])) == want
+
+
+def test_core_bands_are_left_out_of_the_energy_and_its_derivatives(setup):
+    """`core_bands`: the band energy is the sum over the remaining bands with the same Fermi level,
+    and the forces are still the derivative of the free energy.  That holds when the bands left
+    out are fully occupied (their occupations do not respond), so the smearing here is narrow."""
+    atoms, calc = setup
+    kw = dict(kpts=(2, 1, 2), nelectrons=40, width=0.01, overlap=None)
+    full = HamiltonianCalculator(calc.predictor, **kw)
+    val = HamiltonianCalculator(calc.predictor, core_bands={14: 2, 6: 1}, **kw)
+    assert val.core(atoms.numbers) == 6 and full.core(atoms.numbers) == 0
+    a, b = atoms.copy(), atoms.copy()
+    a.calc, b.calc = full, val
+    a.get_potential_energy()
+    ev, mu, w = full.results["eigenvalues"], full.results["fermi_level"], full.get_k_point_weights()
+    occ = 2.0 / (1.0 + np.exp(np.clip((ev - mu) / 0.01, -500, 500)))
+    assert np.allclose(occ[:, :6], 2.0)                                   # the bands left out are full
+    assert abs(b.get_potential_energy() - (occ * ev * w[:, None])[:, 6:].sum()) < 1e-8 and abs(val.get_fermi_level() - mu) < 1e-10
+    F = b.get_forces()
+    h = 1e-4
+
+    def free(x):
+        c = Atoms(numbers=atoms.numbers, positions=x, cell=atoms.cell, pbc=True); c.calc = val
+        return c.get_potential_energy(force_consistent=True)
+    for i, d in ((1, 2), (2, 0)):
+        dx = np.zeros_like(atoms.positions); dx[i, d] = h
+        fd = -(free(atoms.positions + dx) - free(atoms.positions - dx)) / (2 * h)
+        assert abs(fd - F[i, d]) < 1e-5 * max(1.0, np.abs(F).max()), (i, d, fd, F[i, d])

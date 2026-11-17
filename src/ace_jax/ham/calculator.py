@@ -32,6 +32,10 @@ class HamiltonianCalculator(Calculator):
     overlap: the overlap channel ("S"), or None for an orthonormal basis; channel: the Hamiltonian
     channel ("H"; "H_up" or "H_dn" of a collinear-spin model, one spin per calculator, with
     degeneracy 1).  device: build the neighbour lists on the GPU.
+    core_bands: {Z: bands per atom} (or a number per cell) left out of the band energy, forces and
+    stress: with an all-electron basis the sum over core levels moves by an eV per atom between
+    structures and a residual potential cannot follow it, where the valence band energy leaves a
+    learnable remainder (docs/dev/ham-results.md).  The eigenvalues and the Fermi level keep them.
 
     Properties: energy (band energy), free_energy (energy - T S; what forces and stress
     differentiate), forces, stress (ASE's sign and Voigt order), eigenvalues (n_k, n_orb),
@@ -40,7 +44,7 @@ class HamiltonianCalculator(Calculator):
     implemented_properties = ["energy", "free_energy", "forces", "stress", "eigenvalues", "fermi_level", "hamiltonian", "overlap"]
 
     def __init__(self, predictor, kpts=(1, 1, 1), weights=None, nelectrons=None, width=0.1, smearing="fermi-dirac",
-                 overlap="S", channel="H", degeneracy=2.0, device=False, **kwargs):
+                 overlap="S", channel="H", degeneracy=2.0, device=False, core_bands=None, **kwargs):
         super().__init__(**kwargs)
         self.predictor = predictor if isinstance(predictor, HamiltonianPredictor) else HamiltonianPredictor(*predictor)
         if smearing not in SMEARINGS:
@@ -53,6 +57,7 @@ class HamiltonianCalculator(Calculator):
         self.weights = np.full(len(self.kpts), 1.0 / len(self.kpts)) if weights is None else np.asarray(weights, float)
         self.nelectrons, self.width, self.smearing = nelectrons, float(width), smearing
         self.overlap, self.channel, self.degeneracy, self.device = overlap, channel, float(degeneracy), bool(device)
+        self.core_bands = core_bands
 
     def electrons(self, numbers):
         """The number of electrons of a cell with these atomic numbers."""
@@ -62,6 +67,14 @@ class HamiltonianCalculator(Calculator):
             return float(sum(self.nelectrons[int(z)] for z in numbers))
         return float(self.nelectrons)
 
+    def core(self, numbers):
+        """The number of lowest bands of the cell left out of the band energy."""
+        if self.core_bands is None:
+            return 0
+        if isinstance(self.core_bands, dict):
+            return int(sum(self.core_bands.get(int(z), 0) for z in numbers))
+        return int(self.core_bands)
+
     def calculate(self, atoms=None, properties=("energy",), system_changes=all_changes):
         super().calculate(atoms, properties, system_changes)
         a = self.atoms
@@ -69,7 +82,8 @@ class HamiltonianCalculator(Calculator):
             raise ValueError("HamiltonianCalculator needs a cell (put an isolated system in a box)")
         out = self.predictor.band_energy(a.positions, np.asarray(a.cell), a.numbers, self.kpts, self.electrons(a.numbers),
                                          width=self.width, smearing=self.smearing, weights=self.weights, overlap=self.overlap,
-                                         channel=self.channel, degeneracy=self.degeneracy, device=self.device, pbc=a.pbc)
+                                         channel=self.channel, degeneracy=self.degeneracy, device=self.device, pbc=a.pbc,
+                                         core_bands=self.core(a.numbers))
         self.results = {"energy": float(out.energy), "free_energy": float(out.free_energy),
                         "forces": -np.asarray(out.gradient, float),
                         "stress": full_3x3_to_voigt_6_stress(np.asarray(out.stress, float)),

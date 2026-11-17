@@ -230,10 +230,18 @@ def smeared_occupations(e, wk, nelec, width, kind="fermi-dirac", degeneracy=2.0)
 
 
 def _occupation_fn(kind, degeneracy, params):
-    """occ(e, wk) -> (f, mu, -T S) for `kind` "fixed" (params: (f,)) or a smearing (params: (nelec, width))."""
+    """occ(e, wk) -> (f, mu, -T S) for `kind` "fixed" (params: (f,)) or a smearing (params: (nelec,
+    width[, n_core])).  n_core: the lowest bands left out of the band energy (their occupations are
+    returned as zero, after the chemical potential is found with every electron)."""
     if kind == "fixed":
         return lambda e, wk: (jnp.broadcast_to(params[0], e.shape), jnp.asarray(jnp.nan, e.dtype), jnp.zeros((), e.dtype))
-    return lambda e, wk: smeared_occupations(e, wk, params[0], params[1], kind, degeneracy)
+
+    def occ(e, wk):
+        f, mu, mts = smeared_occupations(e, wk, params[0], params[1], kind, degeneracy)
+        if len(params) > 2:
+            f = jnp.where(jnp.arange(e.shape[-1])[None, :] < params[2], 0.0, f)
+        return f, mu, mts
+    return occ
 
 
 def _geig(H, S):
@@ -568,19 +576,21 @@ class HamiltonianPredictor:
         return G, int(offsets[-1])
 
     def band_energy(self, positions, cell, numbers, kpts, nelectrons, width=0.1, smearing="fermi-dirac", weights=None,
-                    overlap="S", channel="H", degeneracy=2.0, device=False, pbc=True):
+                    overlap="S", channel="H", degeneracy=2.0, device=False, pbc=True, core_bands=0):
         """`BandEnergy` of a structure with smeared occupations: band energy, free energy, the
         gradient and stress of the free energy (trace form), eigenvalues and Fermi level, in one
         compiled call.  nelectrons: the electrons the bands hold (of the orbitals the model has:
         all of them for an all-electron basis).  smearing: "fermi-dirac" (width = k_B T) or
         "gaussian"; degeneracy: 2 without spin.  The program is compiled once per set of list
         shapes (the lists are padded in steps), so a trajectory re-uses it.  device=True: the
-        neighbour lists on the GPU (`band_energy_device`'s path); otherwise built on the host."""
+        neighbour lists on the GPU (`band_energy_device`'s path); otherwise built on the host.
+        core_bands: the lowest bands of the cell left out of the band energy and its derivatives
+        (a valence band energy from an all-electron basis); the Fermi level still counts them."""
         if smearing not in SMEARINGS:
             raise ValueError(f"smearing must be one of {SMEARINGS}, got {smearing!r}")
         kpts = np.atleast_2d(np.asarray(kpts, float))
         wk = np.full(len(kpts), 1.0 / len(kpts)) if weights is None else np.asarray(weights, float)
-        occ = (jnp.asarray(float(nelectrons)), jnp.asarray(float(width)))
+        occ = (jnp.asarray(float(nelectrons)), jnp.asarray(float(width)), jnp.asarray(int(core_bands)))
         ch, cs = self.channels.index(channel), self.channels.index(overlap) if overlap else None
         if device:
             if jax.default_backend() != "gpu" or not have_matscipy_neighbours():

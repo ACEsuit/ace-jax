@@ -569,3 +569,29 @@ Not yet done for many species: the two-centre and site-coupled groups, and the r
 - Gold, 64 atoms, 2 x 2 x 2 k-points, 16 CPU threads, four different test structures in turn: 5.2 s, 5.3 s (compilations: the list shapes of the first two differ), then 2.0 s and 2.1 s per force call.
 - It is a band energy, not a total energy: no repulsive or double-counting term. On gold the band-energy pressure is about −390 GPa and the forces are 18 to 23 eV/Å, as expected of that term alone.
 - Not there: a model file format (the calculator takes model objects; MACE-H's loads a directory), collinear spin as two channels in one calculation, uncertainty.
+
+## Effective potential by residual: first results on aluminium (2026-11-17)
+
+Decision (owner): total energy = band term of the predicted H and S + an ace-jax potential fitted to the residual of the DFT energy, forces and stress; joint fitting later, if at all. `bench/ham/residual_fit.py`.
+
+64-atom aluminium set (`ham-ref/al_small`), 200 training and 20 test structures, energies only so far (forces and stress are being computed in `ham-ref/al_small_ef`), FHI-aims' own k-grid, Gaussian smearing and 13 electrons per atom; H and S model fitted to one FCC and one BCC structure; potential: `aj fit`, order 2, degree 10, cutoff 6 Å.
+
+- The settings reproduce the calculation: the band energy from the reference blocks is FHI-aims' sum of eigenvalues to its last digit (−237669.2484 eV).
+
+| target of the potential | spread over the training set | test RMSE |
+|---|---|---|
+| DFT energy directly | 87 meV per atom | **0.55 meV per atom** |
+| DFT − band energy of the predicted H (all states) | 1,662 | 16.4 |
+| the same, band energy measured from the Fermi level | 994 | 96.0 |
+| with the REFERENCE H: DFT − sum of all eigenvalues | 1,387 | 14.1 |
+| reference H, all states from the Fermi level | 869 | 103.8 |
+| reference H, **valence bands only** (1s 2s 2p left out) | 645 | **1.04** |
+| reference H, valence from the Fermi level | 148 | 23.5 |
+| reference H, valence from the mean core level | 433 | 3.1 |
+| reference H, valence from the mean 2p level | 416 | 3.0 |
+
+- **The all-electron sum of eigenvalues is the wrong band term.** It moves by more than an eV per atom between structures and its residual is 25 times harder to fit than the energy itself, with the exact H. The core levels do this: leaving them out gives a residual a potential fits to 1.0 meV per atom, within a factor of two of fitting the energy directly.
+- **Measuring from the Fermi level makes it worse**, by a factor of 7 to 20: the residual's spread falls but what is left is not a local function of the structure. Measuring from a core level is in between.
+- **The H model's all-electron band energy is poor away from its training structures**: its error against the reference sum of eigenvalues is −620 ± 511 meV per atom over the 220 structures (+27 on a training structure). The core states near −1,500 eV carry it: a relative error of 1e-5 in an on-site block is 15 meV per orbital.
+- Hence `band_energy(..., core_bands=)` and `HamiltonianCalculator(core_bands={Z: n})`: the lowest bands are left out of the band energy, forces and stress (the Fermi level still counts them). With those bands full, the forces remain the derivative of the free energy (tested).
+- Open: the residual with the valence band energy of the PREDICTED H (running), and with forces and stress.
