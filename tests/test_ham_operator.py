@@ -238,3 +238,101 @@ def test_spectrum_is_differentiable_in_the_coefficients(models, overlap):
     for _ in range(5):
         p = jax.tree.map(lambda x, g: x - lr * g, p, jax.grad(loss)(p))
     assert float(loss(p)) < 0.97 * float(val)
+
+
+def _env_predictor(models):
+    """A random model with the site-coupled and bond-environment groups, H and S."""
+    from ace_jax.basis import cg as CG
+    from ace_jax.operators.offsite import OffsiteModel, canonical_pairs
+    on, off = models
+    env = off.bond._replace(r_env=4.0, n_env=2, l_env=2, n_ebond=2, l_ebond=2)
+    rng = np.random.default_rng(3)
+    coef = {}
+    for za in on.orbitals.species:
+        for zb in on.orbitals.species:
+            for s1, s2, l1, l2, same in canonical_pairs(on.orbitals, za, zb):
+                p = 1 if (l1 + l2) % 2 == 0 else -1
+                for L in CG.Ls(l1, l2):
+                    k0, k1 = bond.n_features(env, L, p)
+                    k = k0 + (k1 if same else 2 * k1) + bond.n_env_features(env, L, p, same=same)
+                    if k:
+                        coef[(za, zb, s1, s2, L)] = 0.05 * rng.normal(size=(2, k))
+    return HamiltonianPredictor(on, OffsiteModel(bond=env, coef=coef, orbitals=on.orbitals, channels=on.channels))
+
+
+@pytest.mark.parametrize("overlap", [None, "S"])
+def test_spectrum_is_differentiable_in_the_positions(models, overlap):
+    """`bands_fn`: the eigenvalues as one program of the atomic positions (what forces need).  Its
+    value is `bands`; the gradient of a band-energy-like sum agrees with central differences of
+    the program itself and of a fresh evaluation with new neighbour lists; and it sums to zero
+    over the atoms (a rigid translation changes nothing)."""
+    import jax
+    hp = _env_predictor(models)
+    pos, cell, numbers = structure()
+    ks = np.array([[0.1, 0.2, -0.3], [0.37, 0.0, 0.21]])
+    shift = 6.0 if overlap else 0.0
+    fn, p0 = hp.bands_fn(pos, cell, numbers, ks, overlap=overlap, overlap_shift=shift)
+    e = np.asarray(fn(p0))
+    assert np.isfinite(e).all()
+    if overlap is None:
+        assert np.allclose(e, np.asarray(hp.bands(hp.prepare(pos, cell, numbers), ks, overlap=None)), atol=1e-9)
+    w = np.random.default_rng(5).uniform(size=e.shape)                     # occupations of a band energy
+    energy = lambda p: jax.numpy.sum(w * fn(p))
+    grad = np.asarray(jax.grad(energy)(p0))
+    assert grad.shape == pos.shape and np.isfinite(grad).all() and np.abs(grad).max() > 1e-3
+    assert np.abs(grad.sum(axis=0)).max() < 1e-8 * np.abs(grad).max()       # translation invariance
+    d = np.random.default_rng(6).normal(size=pos.shape)
+    h = 1e-5
+    fd = (float(energy(p0 + h * d)) - float(energy(p0 - h * d))) / (2 * h)
+    assert abs(fd - float((grad * d).sum())) < 1e-6 * max(1.0, abs(fd)), (fd, float((grad * d).sum()))
+
+    def fresh(x):                                                         # new lists at the moved positions
+        f, q = hp.bands_fn(x, cell, numbers, ks, overlap=overlap, overlap_shift=shift)
+        return float((w * np.asarray(f(q))).sum())
+    h = 1e-4
+    fd2 = (fresh(pos + h * d) - fresh(pos - h * d)) / (2 * h)
+    assert abs(fd2 - float((grad * d).sum())) < 1e-5 * max(1.0, abs(fd2)), (fd2, float((grad * d).sum()))
+
+
+def test_band_energy_gradient_by_the_trace_form(models):
+    """`band_energy_fn`: E_band = sum f e and its gradient from tr[rho dH - W dS], without
+    differentiating the eigensolver.  It equals the gradient through the eigensolver
+    (`bands_fn`) and a central difference; with occupations as a function of the eigenvalues it
+    is the derivative at those occupations held fixed; and on a crystal with degenerate states
+    at Gamma it is finite, where it is tested against a central difference with every state
+    occupied (a smooth function of the positions whatever the degeneracies)."""
+    import jax
+    hp = _env_predictor(models)
+    pos, cell, numbers = structure()
+    ks = np.array([[0.1, 0.2, -0.3], [0.37, 0.0, 0.21]])
+    occ = np.zeros((2, hp.prepare(pos, cell, numbers).n_orb)); occ[:, :20] = 2.0; occ[:, 20] = 0.7
+    fn, p0 = hp.band_energy_fn(pos, cell, numbers, ks, occ, overlap_shift=6.0)
+    E, g, e = (np.asarray(x) for x in fn(p0))
+    bands, _ = hp.bands_fn(pos, cell, numbers, ks, overlap_shift=6.0)
+    through = lambda p: jax.numpy.sum(0.5 * occ * bands(p))
+    assert np.allclose(e, np.asarray(bands(p0)), atol=1e-9) and abs(E - float(through(p0))) < 1e-9
+    assert np.abs(g - np.asarray(jax.grad(through)(p0))).max() < 1e-8 * np.abs(g).max()
+    assert np.abs(g.sum(axis=0)).max() < 1e-8 * np.abs(g).max()
+    d = np.random.default_rng(6).normal(size=pos.shape)
+    h = 1e-5
+    fd = (float(fn(p0 + h * d)[0]) - float(fn(p0 - h * d)[0])) / (2 * h)
+    assert abs(fd - float((g * d).sum())) < 1e-6 * max(1.0, abs(fd))
+    # occupations from the eigenvalues: held fixed in the derivative
+    mu = 0.5 * (e[:, 20] + e[:, 21]).mean()
+    fermi = lambda x: 2.0 / (1.0 + jax.numpy.exp((x - mu) / 0.05))
+    f2, _ = hp.band_energy_fn(pos, cell, numbers, ks, fermi, overlap_shift=6.0)
+    fixed, _ = hp.band_energy_fn(pos, cell, numbers, ks, np.asarray(fermi(e)), overlap_shift=6.0)
+    assert np.allclose(np.asarray(f2(p0)[1]), np.asarray(fixed(p0)[1]), atol=1e-10)
+    # a crystal: zincblende, degenerate states at Gamma
+    a = 4.4
+    zb_cell = 0.5 * a * np.array([[0.0, 1, 1], [1, 0, 1], [1, 1, 0]])
+    zb_pos = np.array([[0.0, 0, 0], [0.25 * a] * 3])
+    zb_numbers = np.array([14, 6])
+    gam = np.zeros((1, 3))
+    full, q0 = hp.band_energy_fn(zb_pos, zb_cell, zb_numbers, gam, 1.0, overlap_shift=6.0)
+    E0, g0, e0 = (np.asarray(x) for x in full(q0))
+    assert (np.diff(e0[0]) < 1e-8).sum() >= 2                              # degenerate levels are there
+    assert np.isfinite(g0).all() and np.abs(g0.sum(axis=0)).max() < 1e-8 * max(1.0, np.abs(g0).max())
+    d = np.random.default_rng(7).normal(size=zb_pos.shape)
+    fd = (float(full(q0 + h * d)[0]) - float(full(q0 - h * d)[0])) / (2 * h)
+    assert abs(fd - float((g0 * d).sum())) < 1e-6 * max(1.0, abs(fd), np.abs(g0).max())

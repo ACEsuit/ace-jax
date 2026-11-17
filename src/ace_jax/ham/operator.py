@@ -9,7 +9,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from ..eval.nlist import dense_graph, have_matscipy_neighbours
+from ..eval.nlist import dense_graph, have_matscipy_neighbours, sparse_graph
 from ..operators import bond as B
 from ..operators import offsite_fast as OF
 from ..operators.offsite_fast import OffsitePredictor
@@ -337,6 +337,118 @@ class HamiltonianPredictor:
             return jax.vmap(_eigvals_impl)(H, S)
 
         return jax.jit(fn), params
+
+    def _hs_fn(self, positions, cell, numbers, kpts, overlap="S", channel="H", overlap_shift=0.0, pbc=True):
+        """(hs, positions): hs(positions) -> (H(k), S(k)) at the fractional k-points as a traceable
+        function of the atomic positions, through the edge vectors of the site features, the bond
+        and environment geometry and the Bloch sums.
+
+        The neighbour topology (which pairs are site neighbours, bonds and environment atoms, and
+        in which cells) is that of the given positions and is held fixed: every feature vanishes
+        smoothly at its cutoff, so the derivative at these positions is exact, and fn is valid
+        while no pair crosses a cutoff.  The Bloch phases use the cells R only (the lattice
+        gauge); eigenvalues do not depend on the gauge.  overlap, overlap_shift: as `spectrum_fn`."""
+        orb, basis = self.orbitals, self.offsite.model.bond
+        numbers = np.asarray(numbers)
+        pos0, cell = np.asarray(positions, float), np.asarray(cell, float)
+        n = len(numbers)
+        prep = self.prepare(pos0, cell, numbers, pbc)
+        _, atoms, _, _ = prep.inputs
+        gs = sparse_graph(pos0, cell, pbc, basis.site.rcut)
+        sp = jnp.asarray(basis.site.species_index(numbers))
+        s_i, s_j, s_shift = jnp.asarray(gs.senders), jnp.asarray(gs.receivers), jnp.asarray(gs.shifts)
+        g = prep.graph
+        pl = OF.PairLayouts(g, numbers, orb.species, basis.rcut_bond)
+        pad = jnp.asarray([basis.rcut_bond, 0.0, 0.0])
+        lay0 = {}
+        for key, (rows, _rvec, mask, rev) in pl.lay.items():
+            b = pl.bond[key]
+            live, e = b >= 0, np.maximum(b, 0)
+            lay0[key] = (jnp.asarray(rows), jnp.asarray(g.i[e]), jnp.asarray(g.j[e]), jnp.asarray(g.R[e] @ cell),
+                         jnp.asarray(live), jnp.asarray(mask), jnp.asarray(rev))
+        env0 = None
+        if basis.n_env:
+            ge = sparse_graph(pos0, cell, pbc, basis.r_env)
+            K = max(int(np.bincount(ge.senders, minlength=n).max()) if len(ge.rij) else 1, 1)
+            d = dense_graph(pos0, cell, pbc, basis.r_env, K)
+            e_rij, e_idx, e_count = np.asarray(d.rij), np.asarray(d.idx), np.asarray(d.count)
+            e_live = np.arange(K)[None, :] < e_count[:, None]
+            e_shift = np.where(e_live[..., None], e_rij - (pos0[e_idx] - pos0[:, None, :]), 0.0)
+            env0 = (jnp.asarray(e_rij), jnp.asarray(e_idx), jnp.asarray(e_shift), jnp.asarray(e_live), jnp.asarray(e_count),
+                    jnp.asarray(basis.site.species_index(numbers)[e_idx]))
+        readout, packs = self.onsite.readout, self.offsite.packs
+        args, lists, n_orb = self.offsite.static(), prep.lists, prep.n_orb
+        kpts = jnp.asarray(np.atleast_2d(np.asarray(kpts, float)), prep.on[0].dtype)
+        ch = self.channels.index(channel)
+        cs = self.channels.index(overlap) if overlap else None
+        eye = jnp.eye(n_orb, dtype=jnp.result_type(kpts.dtype, jnp.complex64))
+        site = basis.site
+
+        def hs(pos):
+            """(H(k), S(k)), Hermitian, (n_k, n_orb, n_orb) each, at the positions."""
+            F = site.features(pos[s_j] - pos[s_i] + s_shift, sp[s_i], sp[s_j], s_i, n)
+            on = _readout(readout, F, atoms)
+            lay = {key: (rows, jnp.where(live[..., None], pos[bj] - pos[bi] + shift, pad), mask, rev)
+                   for key, (rows, bi, bj, shift, live, mask, rev) in lay0.items()}
+            env = None
+            if env0 is not None:
+                e_rij, e_idx, e_shift, e_live, e_count, e_z = env0
+                env = (jnp.where(e_live[..., None], pos[e_idx] - pos[:, None, :] + e_shift, e_rij), e_count, e_z)
+            off = OF._blocks_impl(packs, F, lay, basis.rcut_bond, args, env)
+            H = jax.vmap(lambda k: _bloch_impl(on, off, lists, k, ch, n_orb))(kpts)
+            S = (jax.vmap(lambda k: _bloch_impl(on, off, lists, k, cs, n_orb))(kpts) + overlap_shift * eye if overlap
+                 else jnp.broadcast_to(eye, H.shape))
+            herm = lambda M: 0.5 * (M + jnp.swapaxes(M.conj(), 1, 2))
+            return herm(H), herm(S)
+
+        return hs, jnp.asarray(pos0)
+
+    def bands_fn(self, positions, cell, numbers, kpts, overlap="S", channel="H", overlap_shift=0.0, pbc=True):
+        """(fn, positions): fn(positions) -> (n_k, n_orb) eigenvalues, differentiable through the
+        eigensolver (`_hs_fn` says what is held fixed).  For the force of a band energy use
+        `band_energy_fn`, which does not differentiate the eigensolver."""
+        hs, pos0 = self._hs_fn(positions, cell, numbers, kpts, overlap, channel, overlap_shift, pbc)
+        return jax.jit(lambda pos: jax.vmap(_eigvals_impl)(*hs(pos))), pos0
+
+    def band_energy_fn(self, positions, cell, numbers, kpts, occupations, weights=None, overlap="S", channel="H",
+                       overlap_shift=0.0, pbc=True):
+        """(fn, positions): fn(positions) -> (E_band, dE_band / d positions, eigenvalues), with
+        E_band = sum_k w_k sum_n f_kn e_kn; the force is minus the gradient.
+
+        The gradient is the trace form (Hellmann-Feynman for a non-orthogonal basis),
+            dE = sum_k w_k Re tr[rho_k dH_k - W_k dS_k],
+            rho_k = C f C^+,  W_k = C (f e) C^+,  H C = S C e,
+        so the eigenproblem is solved once and never differentiated: one reverse pass through the
+        Bloch sums and the block predictors, no 1 / (e_n - e_m) terms, finite at degeneracies.
+        occupations: (n_k, n_orb) or (n_orb,) fixed f, or a function of the eigenvalues (evaluated
+        at the current eigenvalues and held fixed in the derivative: the force at fixed
+        occupations).  weights: k-point weights (default 1 / n_k).  The rest as `bands_fn`."""
+        hs, pos0 = self._hs_fn(positions, cell, numbers, kpts, overlap, channel, overlap_shift, pbc)
+        nk = len(np.atleast_2d(np.asarray(kpts, float)))
+        wk = jnp.full(nk, 1.0 / nk) if weights is None else jnp.asarray(weights)
+        occ = occupations if callable(occupations) else (lambda e, f=jnp.asarray(occupations): jnp.broadcast_to(f, e.shape))
+
+        def solve(H, S):
+            L = jnp.linalg.cholesky(S)
+            A = jax.scipy.linalg.solve_triangular(L, H, lower=True)
+            A = jax.scipy.linalg.solve_triangular(L, A.conj().T, lower=True).conj().T
+            e, U = jnp.linalg.eigh(0.5 * (A + A.conj().T))
+            return e, jax.scipy.linalg.solve_triangular(L.conj().T, U, lower=False)       # C: C^+ S C = 1
+
+        def trace(pos):
+            H, S = hs(pos)
+            e, C = jax.vmap(solve)(jax.lax.stop_gradient(H), jax.lax.stop_gradient(S))
+            f = jax.lax.stop_gradient(occ(e)) * wk[:, None]
+            rho = jnp.einsum("kin,kn,kjn->kij", C, f, C.conj())
+            W = jnp.einsum("kin,kn,kjn->kij", C, f * e, C.conj())
+            # tr[rho H - W S]: zero in value, and its derivative at fixed rho, W is dE_band
+            return jnp.real(jnp.sum(H * jnp.swapaxes(rho, 1, 2)) - jnp.sum(S * jnp.swapaxes(W, 1, 2))), (jnp.sum(f * e), e)
+
+        def fn(pos):
+            grad, (E, e) = jax.grad(trace, has_aux=True)(pos)
+            return E, grad, e
+
+        return jax.jit(fn), pos0
 
     def hk(self, prep, k=(0.0, 0.0, 0.0), channel="H"):
         """(n_orb, n_orb) complex Bloch matrix of `channel` at fractional k, on the device."""
