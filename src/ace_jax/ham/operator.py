@@ -299,7 +299,44 @@ class HamiltonianPredictor:
             lists_off[key] = (jnp.asarray(offsets[g.i[e]], jnp.int32), jnp.asarray(offsets[g.j[e]], jnp.int32),
                               jnp.asarray(np.where(live[..., None], g.R[e], 0), off[key].dtype), jnp.asarray(live.astype(np.float32)))
         lists = {"off": lists_off, "on_rows": tuple(jnp.asarray(offsets[a], jnp.int32) for a in atoms)}
-        return Prepared(on, off, lists, int(offsets[-1]), offsets, g)
+        prep = Prepared(on, off, lists, int(offsets[-1]), offsets, g)
+        prep.inputs = (F, atoms, pl.lay, B.env_lists(basis, positions, cell, pbc, numbers))    # what `spectrum_fn` re-evaluates from
+        return prep
+
+    def spectrum_fn(self, prep, kpts, overlap="S", channel="H", overlap_shift=0.0):
+        """(fn, params) for learning on spectral observations: fn(params) -> (n_k, n_orb) eigenvalues
+        of the structure of `prep` (from `prepare`) at the fractional k-points, one compiled program
+        from the coefficients to the eigenvalues that `jax.grad` differentiates.  params: the
+        floating-point arrays of the on-site readout and the off-site packs (the fitted
+        coefficients in the layout the predictors evaluate; the index arrays stay fixed), a pytree
+        to hand to an optimiser; `fn(params)` at the returned params is `bands`.
+
+        The site features, neighbour lists and index lists are those of `prep`: constants of fn.
+        overlap=None: an orthonormal basis.  overlap_shift: added to the diagonal of S(k) (for
+        models whose predicted overlap is not positive definite, e.g. random ones in tests).
+        Eigenvalue gradients are those of `jnp.linalg.eigh`: exact degeneracies can give NaN."""
+        import equinox as eqx
+        b = self.offsite.model.bond
+        params, static = eqx.partition((self.onsite.readout, self.offsite.packs), eqx.is_inexact_array)
+        F, atoms, lay, env = prep.inputs
+        lay = {k: tuple(jnp.asarray(x) for x in v) for k, v in lay.items()}
+        env = None if env is None or not b.n_env else tuple(jnp.asarray(x) for x in env)
+        args, lists, n_orb = self.offsite.static(), prep.lists, prep.n_orb
+        kpts = jnp.asarray(np.atleast_2d(np.asarray(kpts, float)), prep.on[0].dtype)
+        ch = self.channels.index(channel)
+        cs = self.channels.index(overlap) if overlap else None
+        eye = jnp.eye(n_orb, dtype=jnp.result_type(kpts.dtype, jnp.complex64))
+
+        def fn(p):
+            readout, packs = eqx.combine(p, static)
+            on = _readout(readout, F, atoms)
+            off = OF._blocks_impl(packs, F, lay, b.rcut_bond, args, env)
+            H = jax.vmap(lambda k: _bloch_impl(on, off, lists, k, ch, n_orb))(kpts)
+            S = (jax.vmap(lambda k: _bloch_impl(on, off, lists, k, cs, n_orb))(kpts) + overlap_shift * eye if overlap
+                 else jnp.broadcast_to(eye, H.shape))
+            return jax.vmap(_eigvals_impl)(H, S)
+
+        return jax.jit(fn), params
 
     def hk(self, prep, k=(0.0, 0.0, 0.0), channel="H"):
         """(n_orb, n_orb) complex Bloch matrix of `channel` at fractional k, on the device."""

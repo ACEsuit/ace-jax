@@ -532,3 +532,21 @@ Not yet done for many species: the two-centre and site-coupled groups, and the r
 - The environment group carries it: without it the best model here is at 1.26 meV / 31.8 meV. More environment and bond radials help; a larger environment cutoff (6 Å) does not.
 - The largest single error is 65.7 meV in every environment model: it is not in the off-site blocks. The absolute eigenvalue error (4.5 to 5 meV) is likewise almost constant, i.e. a rigid shift; both point at the on-site model, which has not been tuned here.
 - Timings are not yet on the same machine as MACE-H's.
+
+## Evening of 2026-11-17: fit on the device, batched bands, smoothness prior, spectral gradient
+
+- **Fit on the device.** `operators/design.py::bond_designs` is `bond.features` + `bond.design` as one compiled program per species pair (equal to 1e-12), and `fit_offsite` merges the triangular factors where JAX runs. Gold, 16 structures, all bonds, 540 columns: 233 s (NumPy rows, host merges) to 46 s on an RTX 4000 Ada in float64. On CPU the compiled rows gain little.
+- **Bands in batches of k.** `HamiltonianPredictor.bands` vmaps Bloch sums and eigensolves over chunks of k-points; `BlockSum` / `block_bands` do it for any dictionary of blocks. `deeph_fit.py` scores with them (it used a NumPy loop over blocks and one SciPy eigensolve per k-point). On CPU it is no faster (JAX's CPU eigensolver runs a batch serially: about a minute per 64-atom gold structure on 7 x 7 x 7); the GPU time is not measured yet.
+- **Smoothness prior.** `SiteBasis.smoothness` (the potential fit's `basis.prior.smoothness_prior` on each feature's (n, l) bodies) and `bond.smoothness` (the same functional summed over the factors of a design column); `fit_onsite` / `fit_offsite(sigma_c=)` use precision ridge + (γ / σ_c)². Gold, one training structure, site (2, 2) + env (5, 8, 4, 6, 4), four test structures:
+
+  | σ_c | H MAE | EE |
+  |---|---|---|
+  | 1e2 | 3.37 meV | 88.3 meV |
+  | 1e3 | 1.08 | 16.2 |
+  | 1e4 | 0.444 | 4.48 |
+  | 1e5 | 0.278 | 2.20 |
+  | plain ridge 1e-10 (10 test structures) | 0.196 | 1.20 |
+
+  On this dataset the prior only costs accuracy at the strengths tried: one 64-atom structure already has 14,556 bonds, far more rows than columns, so there is nothing for it to regularise. It is expected to matter where data is thin per coefficient (many species pairs); not yet tested there.
+- **Derivative of the spectrum.** `HamiltonianPredictor.spectrum_fn(prep, kpts)` returns (fn, params): fn maps the coefficient arrays (on-site readout and off-site packs) to the eigenvalues at the k-points in one compiled program, through site features, bond-environment group, Bloch sums, Cholesky of S(k) and the eigensolver. `jax.grad` of a spectral loss agrees with a central difference along a random direction in every coefficient array to 1e-5 relative, with and without the overlap, on CPU and GPU, and gradient steps reduce the loss (`tests/test_ham_operator.py`). Not covered: gradients at exact degeneracies (symmetric crystals at symmetric k-points), where `eigh`'s derivative can be NaN; gradients with respect to positions.
+- **MACE-H / DeepH-E3 on Sulis.** A100: 0.65 s per training step (MACE-H, batch 2) and 0.42 s (DeepH-E3, batch 1). Their evaluation step is a Python loop over bonds (about 4.5 minutes per 64-atom structure), which timed the one-hour probe jobs out; the ladder jobs (training sizes 1 to 64 for both codes, 14 jobs, about 95 GPU-hours) therefore train only, and predictions are made on the desktop from the fetched models.

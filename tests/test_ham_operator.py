@@ -187,3 +187,54 @@ def test_block_sums_and_batched_eigenvalues_match_the_host(models):
     from ace_jax.ham.operator import block_bands
     shifted = {k: v + (3.0 * np.eye(len(v)) if k[:3] == (0, 0, 0) and k[3] == k[4] else 0.0) for k, v in blocks["S"].items()}
     assert np.abs(block_bands(bs, blocks["H"], shifted, ks, chunk=4) - want).max() < 1e-8 * max(1.0, np.abs(want).max())
+
+
+@pytest.mark.parametrize("overlap", [None, "S"])
+def test_spectrum_is_differentiable_in_the_coefficients(models, overlap):
+    """`spectrum_fn`: the eigenvalues as one program of the coefficients.  Its value is `bands`,
+    its gradient of a spectral loss agrees with a central difference along a random direction in
+    every coefficient array (on-site and off-site, H and S), and a few steps of gradient descent
+    on the distance to a target spectrum reduce it (a crude fixed step: only the direction is tested)."""
+    import jax
+    on, off = models
+    env = off.bond._replace(r_env=4.0, n_env=2, l_env=2, n_ebond=2, l_ebond=2)       # with the bond-environment group
+    rng = np.random.default_rng(3)
+    coef = dict(off.coef)
+    from ace_jax.operators.offsite import OffsiteModel, canonical_pairs
+    from ace_jax.basis import cg as CG
+    for za in on.orbitals.species:
+        for zb in on.orbitals.species:
+            for s1, s2, l1, l2, same in canonical_pairs(on.orbitals, za, zb):
+                p = 1 if (l1 + l2) % 2 == 0 else -1
+                for L in CG.Ls(l1, l2):
+                    k0, k1 = bond.n_features(env, L, p)
+                    k = k0 + (k1 if same else 2 * k1) + bond.n_env_features(env, L, p, same=same)
+                    if k:
+                        coef[(za, zb, s1, s2, L)] = 0.05 * rng.normal(size=(2, k))
+    hp = HamiltonianPredictor(on, OffsiteModel(bond=env, coef=coef, orbitals=on.orbitals, channels=on.channels))
+    pos, cell, numbers = structure()
+    prep = hp.prepare(pos, cell, numbers)
+    ks = np.array([[0.1, 0.2, -0.3], [0.37, 0.0, 0.21]])
+    shift = 6.0 if overlap else 0.0
+    fn, params = hp.spectrum_fn(prep, ks, overlap=overlap, overlap_shift=shift)
+    e = np.asarray(fn(params))
+    if overlap is None:
+        assert np.allclose(e, np.asarray(hp.bands(prep, ks, overlap=None)), atol=1e-9)
+    assert np.isfinite(e).all() and e.shape == (2, prep.n_orb)
+    target = e + 0.1 * np.random.default_rng(1).normal(size=e.shape)
+    loss = lambda p: jax.numpy.sum((fn(p) - target) ** 2)
+    val, grad = jax.value_and_grad(loss)(params)
+    leaves, _ = jax.tree.flatten(grad)
+    assert len(leaves) > 10 and all(np.isfinite(np.asarray(x)).all() for x in leaves)
+    assert sum(float(np.abs(np.asarray(x)).max() > 0) for x in leaves) > 0.5 * len(leaves)    # most arrays matter
+    r = np.random.default_rng(2)
+    direction = jax.tree.map(lambda x: r.normal(size=x.shape), params)
+    step = lambda t: jax.tree.map(lambda x, d: x + t * d, params, direction)
+    h = 1e-5
+    fd = (float(loss(step(h))) - float(loss(step(-h)))) / (2 * h)
+    an = sum(float(np.vdot(np.asarray(g), np.asarray(d))) for g, d in zip(leaves, jax.tree.leaves(direction)))
+    assert abs(fd - an) < 1e-5 * max(1.0, abs(an)), (fd, an)
+    p, lr = params, 0.2 * float(val) / sum(float((np.asarray(x) ** 2).sum()) for x in leaves)
+    for _ in range(5):
+        p = jax.tree.map(lambda x, g: x - lr * g, p, jax.grad(loss)(p))
+    assert float(loss(p)) < 0.97 * float(val)

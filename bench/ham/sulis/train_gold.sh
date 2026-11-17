@@ -9,9 +9,8 @@
 #SBATCH --gres=gpu:ampere_a100:1
 #SBATCH --time=47:00:00
 #SBATCH --output=logs/%x-%j.out
-# One training run of MACE-H or DeepH-E3 on the MACE-H paper's bulk gold data, then its predictions
-# for the 10 test structures (bench/ham/maceh_train.py, maceh_eval.py; scored on the desktop with
-# bench/ham/deeph_fit.py pred=).  Single node, one A100.
+# One training run of MACE-H or DeepH-E3 on the MACE-H paper's bulk gold data
+# (bench/ham/maceh_train.py).  Single node, one A100.
 #   sbatch [--time=..] train_gold.sh <MACE-H|DeepH-E3> <n_train> [epochs]
 # Training structures: the first <n_train> of gold_order.txt (the seeded order ace-jax's nested
 # training sets use); validation: the last max(1, n_train / 4) of it.  Epochs: 2500 (the authors'
@@ -30,6 +29,7 @@ cd $root
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
 venv/bin/python scripts/maceh_train.py $root/$code $root/data/bulk_gold_data/train "$work" "$train" "$val" \
     num_epoch="$epochs" batch_size="$batch" > "$work/train.log" 2>&1
-venv/bin/python scripts/maceh_eval.py $root/$code $root/data/bulk_gold_data/test "$work" > "$work/eval.log" 2>&1
 grep -E "Epoch #" "$work/train.log" | tail -2
-ls "$work/pred" | head -3
+# The predictions for the test structures are made afterwards on the desktop from the fetched
+# `run` folder (bench/ham/maceh_eval.py): that step is a Python loop over the bonds, about 4.5
+# minutes per 64-atom structure on a CPU core, and does not need the GPU.
