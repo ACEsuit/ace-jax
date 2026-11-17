@@ -150,3 +150,11 @@ def test_radial_basis_is_a_basis_flag_not_a_learner_option():
     assert a.radial_basis == "sbessel" and not a.learn_radial
     with pytest.raises(SystemExit):
         _parse(["fit", "--train", "x.xyz", "--order", "2", "--max-degree", "6", "--radial-steps", "5", "--out", "o"])
+
+
+def test_model_free_radial_reads_the_sbessel_basis(tmp_path, monkeypatch):
+    """eval.radial.TensorRadial / eval.features.pooled_a on the sbessel radial: the model's own A."""
+    from test_eval_features import check_one_particle
+    m = _build(tmp_path, monkeypatch).model
+    assert m.rnl_basis == "sbessel"
+    check_one_particle(m)

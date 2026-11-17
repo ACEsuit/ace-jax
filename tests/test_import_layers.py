@@ -19,12 +19,13 @@ SRC = ROOT / "src" / "ace_jax"
 # (pattern, layer, side): first match wins; "" is ace_jax/__init__.py.  A package's __init__ takes
 # its package's pattern, so `eval` (which re-exports the models) is an application module.
 # `eval.io` is one too, not framework as in the spec's table: `load` constructs the models.
+# `eval.pace_radial` is framework: radial functions of arrays, which `eval.radial` reads for "sbessel".
 FRAMEWORK, LINEAR, UQ, APP, FRONT = range(5)
 LAYERS = [
     *[(f"basis.{m}", FRAMEWORK, None) for m in
       ("spec", "coupling", "prior", "export", "embedding", "radial_init", "radial_ace1", "cg")],
     *[(f"eval.{m}", FRAMEWORK, None) for m in
-      ("harmonics", "radial", "splinify", "nlist", "aa_dag", "product")],
+      ("harmonics", "radial", "splinify", "nlist", "aa_dag", "product", "features", "pace_radial")],
     ("_moved", FRAMEWORK, None),
     ("fit.linear", LINEAR, None), ("fit.linear.*", LINEAR, None),
     ("uq", UQ, None), ("uq.*", UQ, None),
@@ -34,6 +35,10 @@ LAYERS = [
     ("tutorials", FRONT, None), ("tutorials.*", FRONT, None),
     ("*", APP, "potentials"),
 ]
+
+# Listed before they exist, so that the branch that adds them need not edit this file: `basis.cg`, the real
+# Clebsch-Gordan tables (the addendum's A2, on feat/hamiltonians).
+PLANNED = {"basis.cg"}
 
 # (importer, imported): the step of the spec's order of work that removes the edge.
 ALLOWED = {
@@ -118,7 +123,7 @@ def _violates(a, b):
 def test_layers_cover_real_modules():
     """A pattern that matches nothing is a module that moved without its layer."""
     stale = [pat for pat, _, side in LAYERS
-             if side != "operators" and not any(fnmatch.fnmatchcase(m, pat) for m in MODS)]
+             if side != "operators" and pat not in PLANNED and not any(fnmatch.fnmatchcase(m, pat) for m in MODS)]
     assert not stale, f"LAYERS patterns that match no module: {stale}"
 
 
@@ -162,6 +167,18 @@ def test_eval_imports_no_other_package():
     """`eval` is the bottom of the potential stack (spec section 3): it maps edge vectors to site
     energies and knows no calculator, exporter, basis builder or fit, not even inside a function."""
     back = sorted((a, b) for a, b in _edges() if a.split(".")[0] == "eval" and b.split(".")[0] != "eval")
+    assert not back, back
+
+
+def test_point_calculator_takes_uq_through_its_interface():
+    """`ACECalculator` reads the fit and the UQ through two modules only (spec, step 5): the design rows
+    of the model (`fit.design`) and the object that serves the posterior (`uq.force`)."""
+    got = sorted(b for a, b in _edges() if a == "calc.point" and b.split(".")[0] in ("fit", "uq"))
+    assert got == ["fit.design", "uq.force"], got
+
+
+def test_fit_does_not_import_the_calculators():
+    back = sorted((a, b) for a, b in _edges() if a.split(".")[0] in ("fit", "uq") and b.split(".")[0] == "calc")
     assert not back, back
 
 

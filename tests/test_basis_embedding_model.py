@@ -146,3 +146,14 @@ def test_save_npz_round_trip(tmp_path, monkeypatch):
     b = site_descriptors(m_mem, z["pos"][:n], z["Z"][:n], cell=z["cells"][:3], pbc=True, meta=meta_mem)
     assert meta["radial_kind"] in ("spline", "spline_factorised")
     assert np.abs(np.asarray(a) - np.asarray(b)).max() < 1e-13
+
+
+@pytest.mark.parametrize("case", CASES)
+def test_model_free_one_particle_basis_of_the_embedding_model(case, monkeypatch):
+    """The element-embedding (factorised) radial through eval.radial.TensorRadial / eval.features.pooled_a:
+    the model's own A and product basis (the route an operator model takes for a TrACE basis)."""
+    from test_eval_features import check_one_particle
+    monkeypatch.setenv("ACEJAX_COUPLING_CACHE_ONLY", "1")
+    auth, _ = _build(case)
+    assert auth.model.radial_kind == "spline_factorised"
+    check_one_particle(auth.model)

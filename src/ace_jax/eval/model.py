@@ -34,8 +34,9 @@ from .product import (one_hot_selector, pool_dense, pool_sparse, product_basis, 
                       product_basis_dot, product_basis_t, with_edge_a_kind)
 from .aa_dag import dag_contract
 from .harmonics import real_solid_harmonics, real_spherical_harmonics
-from .radial import (agnesi_normalized, env_ace1_poly1sr, env_poly1sr,
-                     env_poly2sx, poly_recursion, spline_eval, spline_eval_pairs, spline_local)
+from .radial import (agnesi_normalized, env_ace1_poly1sr, env_poly1sr, env_poly2sx,  # noqa: F401  (re-exported)
+                     poly_recursion, radial_one, rnl_basis_values, spline_eval, spline_eval_pairs, spline_local,
+                     tensor_radial)
 
 # `load` / `build_model` hold A2B as sparse triplets only (`with_a2b_sparse`) when at most
 # this fraction of it is nonzero.  Every ACE coupling is far below it (0.025-1.9%: about
@@ -172,42 +173,14 @@ class ACEModel(EdgeSiteModel):
 
     # -------------------------------------------------- edge embeddings
     def _radial_one(self, r, zi, zj, kind, trans, coefs, grid, Wnlq, ABC, env):
-        """One radial basis, either branch.  `env` is the already-evaluated
-        envelope; both branches multiply by it identically."""
-        x = agnesi_normalized(r, trans[zi, zj])
-        if kind == "spline":
-            x0, h, n = grid
-            val = spline_eval_pairs(x, coefs, zi, zj, x0, h, n)     # never coefs[zi, zj]
-        elif kind == "analytic":
-            P = poly_recursion(x, *ABC)                        # (E, n_q)
-            if Wnlq.shape[:2] == (1, 1):
-                # one species: a plain (E, q) x (q, n) dot.  The per-edge gathered contraction becomes a
-                # reduce fusion whose fusion-autotuner candidates took ptxas ~580 s on an A100 under vmap
-                # (docs/dev/batched-evaluation-results.md); the dot is also ~3% faster
-                val = P @ Wnlq[0, 0].T
-            else:
-                val = jnp.einsum("eq,enq->en", P, Wnlq[zi, zj])    # (E, n_rnl)
-        else:
-            raise ValueError(f"unknown radial_kind {kind!r}")
-        return val * env[:, None]
+        """One radial basis, either branch (`radial.radial_one`)."""
+        return radial_one(r, zi, zj, kind, trans, coefs, grid, Wnlq, ABC, env)
 
     def rnl_basis_values(self, r, zi, zj):
-        """(E, n_q) the analytic tensor radial's basis per edge, R_nl = sum_q basis_q W_nlq:
-        env(x) P_q(x) ("poly"), or PACE's g_k(r) ("sbessel", `pace_radial._sbessel` on [0, rc]
-        with rc the pair cutoff, zero from rc on).  The single definition the learner's Gram,
-        roughness and conversions read (`fit.radial.model`)."""
-        n_q = self.rnl_Wnlq.shape[-1]
-        if self.rnl_basis == "sbessel":
-            from .pace_radial import _sbessel
-            rc = self.pair_envelope[zi, zj, 0]
-            inside = r < rc
-            g = _sbessel(jnp.where(inside, r, 0.5 * rc), rc, n_q)
-            return jnp.where(inside[:, None], g, 0.0)
-        if self.rnl_basis != "poly":
-            raise ValueError(f"unknown rnl_basis {self.rnl_basis!r}")
-        x = agnesi_normalized(r, self.rnl_transform[zi, zj])
-        env = env_poly2sx(x, self.rnl_envelope[zi, zj])
-        return env[:, None] * poly_recursion(x, self.polys_A, self.polys_B, self.polys_C)
+        """(E, n_q) the analytic tensor radial's basis per edge, R_nl = sum_q basis_q W_nlq
+        (`radial.rnl_basis_values`).  The single definition the learner's Gram, roughness and
+        conversions read (`fit.radial.model`)."""
+        return rnl_basis_values(self, r, zi, zj)
 
     def _table(self, r, zi, zj, coefs):
         """A radial table (`splinify.radial_table`) at r (E,): exact zeros from
@@ -227,26 +200,7 @@ class ACEModel(EdgeSiteModel):
         r = jnp.linalg.norm(rij, axis=-1)
         if self.rtab_grid:
             return self._split_pair(self._table(r, zi, zj, self.rtab_coefs))
-        # many-body envelope is applied in transformed coordinates
-        env = env_poly2sx(agnesi_normalized(r, self.rnl_transform[zi, zj]),
-                          self.rnl_envelope[zi, zj])
-        if self.radial_kind == "analytic" and self.rnl_basis == "sbessel":
-            Rnl = jnp.einsum("eq,enq->en", self.rnl_basis_values(r, zi, zj), self.rnl_Wnlq[zi, zj])
-        elif self.radial_kind == "spline_factorised":
-            # Rnl[e, i] = P[e, n'(i)] * emb[zj[e], k(i)]
-            # The spline table is species-independent, so there is no
-            # (E, ncoef, n_rnl) gather here at all -- that gather is what makes
-            # many-element models memory-bandwidth bound.
-            x = agnesi_normalized(r, self.rnl_transform[zi, zj])
-            x0, h, nsp = self.rnl_grid
-            P = jax.vmap(lambda xx: spline_eval(xx, self.rnl_coefs_single,
-                                                x0, h, nsp))(x)          # (E, n1)
-            Rnl = (P[:, self.rnl_emb_nidx]
-                   * self.rnl_embedding[zj][:, self.rnl_emb_kidx]) * env[:, None]
-        else:
-            Rnl = self._radial_one(r, zi, zj, self.radial_kind, self.rnl_transform,
-                                   self.rnl_coefs, self.rnl_grid, self.rnl_Wnlq,
-                                   (self.polys_A, self.polys_B, self.polys_C), env)
+        Rnl = tensor_radial(self, r, zi, zj, one=self._radial_one)
         # pair envelope is a function of r, and its form differs by model family
         pe = self.pair_envelope[zi, zj]
         envp = (env_ace1_poly1sr(r, pe) if self.pair_envelope_kind == "ace1_poly1sr"
