@@ -510,3 +510,25 @@ Tests (`test_operators_bond.py`, `test_operators_offsite.py`): on a random two-e
 Cost: 108-atom SiC, site (2, 2) + environment (5, 6, 4, 4, 4), one performance core: 6.4 ms per atom with the two channels, against 5.0 ms species-blind.
 
 Not yet done for many species: the two-centre and site-coupled groups, and the readouts, are still per species pair; and no accuracy measurement on a multi-element dataset exists (the SiC data here is one 4-atom crystal).
+
+## Gold: model-size ladder (2026-11-17)
+
+`deeph_fit.py <gold> 2 11 bonds=0 …`: two training structures (all bonds), the 10 test structures, lestrade, 8 threads. EE in the MACE-H paper's convention (relative to each chemical potential).
+
+| off-site model | columns | fit | H MAE | EE | prediction |
+|---|---|---|---|---|---|
+| two-centre only | 12 | 2 s | 2.68 meV | 50.7 meV | 0.4 ms per atom |
+| + site (2, 2) | 300 | 15 s | 2.14 | 45.6 | 0.6 |
+| + site (4, 4) | 972 | 98 s | 1.26 | 31.8 | 0.5 |
+| two-centre + env (5, 4, 4, 2, 4) | 92 | 7 s | 0.951 | 13.5 | 0.8 |
+| two-centre + env (5, 6, 4, 4, 4) | 252 | 16 s | 0.387 | 2.98 | 1.0 |
+| site (2, 2) + env (5, 6, 4, 4, 4), 24 bond radials | 552 | 33 s | 0.352 | 2.42 | 1.1 |
+| site (2, 2) + env (5, 8, 4, 6, 4) | 780 | 74 s | **0.188** | **1.16** | 1.9 |
+| site (2, 2) + env (6, 6, 4, 4, 4) | 540 | 56 s | 0.432 | 4.43 | 1.8 |
+| MACE-H, published (152 training structures) | – | – | 0.316 (0.269) | 2.96 | about 156 (EPYC 7742, 8 threads) |
+| DeepH-E3, published | – | – | 0.409 | 6.28 | – |
+
+- **With two training structures and a 74 s fit, the larger environment group is below both published networks on both metrics** (0.188 meV and 1.16 meV against 0.316 and 2.96).
+- The environment group carries it: without it the best model here is at 1.26 meV / 31.8 meV. More environment and bond radials help; a larger environment cutoff (6 Å) does not.
+- The largest single error is 65.7 meV in every environment model: it is not in the off-site blocks. The absolute eigenvalue error (4.5 to 5 meV) is likewise almost constant, i.e. a rigid shift; both point at the on-site model, which has not been tuned here.
+- Timings are not yet on the same machine as MACE-H's.
