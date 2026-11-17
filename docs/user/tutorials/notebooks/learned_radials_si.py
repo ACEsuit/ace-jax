@@ -211,8 +211,8 @@ def _(mo):
 @app.cell
 def _(basis_file, config, files, load_fit_data, np, steps, time, work):
     from ace_jax.fit.pipeline.problem import build_problem
-    from ace_jax.fit.radial_learn import fit_radial, save_result
-    from ace_jax.fit.radial_model import rnl_degrees, to_analytic
+    from ace_jax.fit.radial.learn import fit_radial, save_result
+    from ace_jax.fit.radial.model import rnl_degrees, to_analytic
 
     # The radial-learning step. Everything it needs is the basis file and the
     # fit/val split; everything after it reads only learned_dir / "model.npz".
@@ -276,7 +276,7 @@ def _(mo):
 def _(W, files, jnp, keys, np, plt, start_model):
     from ace_jax.eval import sparse_graph
     from ace_jax.fit.data import load_configs
-    from ace_jax.fit.radial_model import poly_env
+    from ace_jax.fit.radial.model import poly_env
 
     _r = np.linspace(1.8, 5.5, 300)
     _z = jnp.zeros(len(_r), dtype=int)

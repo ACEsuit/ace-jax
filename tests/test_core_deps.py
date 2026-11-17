@@ -42,7 +42,7 @@ def test_jaxmd_without_jax_md_says_what_to_install(monkeypatch):
 
 def test_pathfinder_without_blackjax_says_what_to_install(monkeypatch):
     import pytest
-    from ace_jax.fit.ladder import run_pathfinder
+    from ace_jax.fit.gp.ladder import run_pathfinder
     monkeypatch.setitem(sys.modules, "blackjax", None)            # import blackjax -> ImportError
     with pytest.raises(ImportError, match=r"ace-jax\[gp\]"):
         run_pathfinder(lambda a: 0.0, None, None)

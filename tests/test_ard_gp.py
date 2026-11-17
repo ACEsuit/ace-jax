@@ -18,7 +18,7 @@ def _meta(prob):
 def gp_ev(tiny_gp_problem):
     from ace_jax.fit.ard import (ARDEvidence, ard_gamma, ard_statistics, body_order_columns,
                                  gp_body_columns)
-    from ace_jax.fit.prior_root import prior_root
+    from ace_jax.fit.ard import prior_root
     prob, ds, theta = tiny_gp_problem
     M = prob.ind.XM.shape[0]
     with highest_precision():
@@ -64,7 +64,7 @@ def _obs_space_reference(prob, ds, theta):
     """(LML, posterior mean) of the hybrid model at theta from the observation-space covariance
     C~ = Psi Lambda^-1 Psi^T + I (Lambda = blkdiag(Gamma^2/sigma_c^2, K_MM)): independent of the
     weight-space code, and well-conditioned (the identity), unlike G + Lambda on this fixture."""
-    from ace_jax.fit.kernels import K_MM
+    from ace_jax.fit.gp.kernels import K_MM
     from ace_jax.fit.stats import sufficient_statistics
     sig = np.exp([float(getattr(theta, f"log_sigma_{q}")) for q in "EFV"])
     Psi, y, _ = _gp_dense_rows(prob, ds, theta, sig)
@@ -175,7 +175,7 @@ def test_gp_press_equals_exact_deletion(gp_post, ell):
     the joint design: the spec's PRESS/DFBETA identity, compared through the fitted values Psi (c - c_(-k))
     (the inducing weights alone are only as determined as cond(K_MM) allows; see the mean test)."""
     from ace_jax.fit.ard import rows_fn_for
-    from ace_jax.fit.clusters import row_clusters
+    from ace_jax.uq.clusters import row_clusters
     from ace_jax.fit.jackknife import press_scores
     prob, ds, theta, ev, h, post = gp_post
     sig = ev.sigmas(h)
@@ -204,7 +204,7 @@ def test_gp_press_equals_exact_deletion(gp_post, ell):
 
 def test_gp_push_through_matches_exact(gp_post):
     from ace_jax.fit.ard import rows_fn_for
-    from ace_jax.fit.clusters import row_clusters
+    from ace_jax.uq.clusters import row_clusters
     from ace_jax.fit.jackknife import press_scores
     prob, ds, theta, ev, h, post = gp_post
     rc, K = row_clusters(ds, None, float("inf"))
@@ -219,7 +219,7 @@ def test_ard_gp_shape_is_rotation_equivariant(gp_post):
     """V(R x) = R V(x) R^T for the PRESS shape over the joint rows (Review Focus 5)."""
     from scipy.spatial.transform import Rotation
     from ace_jax.fit.ard import rows_fn_for
-    from ace_jax.fit.clusters import row_clusters
+    from ace_jax.uq.clusters import row_clusters
     from ace_jax.fit.jackknife import press_scores, shape_factor
     prob, ds, theta, ev, h, post = gp_post
     rc, K = row_clusters(ds, None, float("inf"))
@@ -426,7 +426,7 @@ def test_gp_calculator_with_a_sandwich_posterior_skips_the_derivative_dtc(gp_fit
     """Review fix: with a posterior attached the mixture forces_std is replaced, so the calculator must not
     build the derivative-DTC (n, K, d, 3) arrays it would discard (the big-cell memory hog)."""
     from ace_jax.calc.gp import GPCalculator
-    from ace_jax.fit import predict
+    from ace_jax.fit.gp import predict
     out, _, _ = gp_fit_dir
     calls, orig = [], predict._dtc_deriv_residual
     monkeypatch.setattr(predict, "_dtc_deriv_residual", lambda *a, **k: calls.append(1) or orig(*a, **k))
@@ -441,7 +441,7 @@ def test_evidence_with_near_duplicate_inducing_points(tiny_gp_problem):
     """Review Focus 2: two inducing points 1e-9 apart (K_MM singular up to its jitter).  The scaled-system
     evidence still matches the observation-space reference, to a tolerance set by cond(K_MM)."""
     from ace_jax.fit.ard import ARDEvidence, ard_gamma, ard_statistics, body_order_columns, gp_body_columns
-    from ace_jax.fit.prior_root import prior_root
+    from ace_jax.fit.ard import prior_root
     prob, ds, theta = tiny_gp_problem
     ind = prob.ind
     prob = prob._replace(ind=ind._replace(XM=ind.XM.at[1].set(ind.XM[0] + 1e-9), SM=ind.SM.at[1].set(ind.SM[0]),

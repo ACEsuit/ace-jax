@@ -82,6 +82,15 @@ TOL = {"mlpace": (1e-6, 1e-5), "acejax": (1e-10, 1e-9), "mace": (1e-6, None),
        # measured against ace-jax on the Si ladder f100-f3200: 1.8e-7, and 5e-13 with spline 0): mlpace's bound
        "pace-rt": (1e-6, 1e-5),
        "mace-symx3": (1e-6, None),                       # Symmetrix v0.3.0: the "mace" gate
+       # symmetrix/mace/foundation vs the model in PyTorch (float64, the timed head): the radial splines are tabulated
+       # (--num-spline-points, default 256: "sufficient for most observables", its README), so not roundoff even in
+       # float64; float32 and float32-mixed (fp16 GEMMs) looser, as mace-xl-f32
+       # measured on MACE-MH-1 (A100, 64-atom cells): 1.5e-10 / 2.0e-7; float32 5.6e-8 / 3.6e-6; mixed 3.3e-8 / 3.0e-6
+       "mace-fdn": (1e-8, 1e-5), "mace-fdn-f32": (1e-6, 1e-4), "mace-fdn-f32m": (1e-6, 1e-4),
+       # pair_style polymlp against pypolymlp's evaluator: float64 both sides; the LAMMPS package is an older
+       # snapshot of the same C++ core and agrees to roundoff (Sulis, m3g6-l44 / pair-g9p3 / m3g9-l882:
+       # <= 1.2e-14 eV/atom, <= 8.3e-13 eV/A)
+       "polymlp": (1e-10, 1e-9),
        # pair_style ye3t / pace product on the ChebExpCos .yace of a linear ACE fit (accuracy_cost/ace_to_ye3t.py)
        # against ace-jax on the fit: the file is the fit to ~2e-9 eV/A, and both codes spline its radials on the
        # deltaSplineBins grid as ML-PACE does, so mlpace's bound
@@ -139,7 +148,7 @@ json.dump({{"E": float(E), "F": np.asarray(F).tolist()}}, open(sys.argv[4], "w")
 
 
 def _venv_ef(module, path, at, python, work):
-    """E, F from `accuracy_cost.<module>.raw_ef(path, atoms)` in another venv's `python` (ye3t-methods is
+    """E, F from `accuracy_cost.<module>.raw_ef(path, atoms)` in another venv's `python` (pypolymlp and ye3t-methods are
     not in the benchmark venv): the energy LAMMPS evaluates, no E0 shift.  The cell goes over as
     an .npz (as `_grace_ef`)."""
     import json

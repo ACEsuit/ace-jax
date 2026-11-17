@@ -1,4 +1,4 @@
-"""fit.radial_learn: the held-out gate over learned candidates (fit_radial), its scores and
+"""fit.radial.learn: the held-out gate over learned candidates (fit_radial), its scores and
 checkpoints, and saving the selected radials."""
 import jax
 import numpy as np
@@ -20,7 +20,7 @@ def small():
 
 
 def test_gate_ties_go_to_first():
-    from ace_jax.fit.radial_learn import gate
+    from ace_jax.fit.radial.learn import gate
     label, scores = gate({"init": 1, "learned": 2}, lambda k, w: 0.5)
     assert label == "init" and scores == {"init": 0.5, "learned": 0.5}
     label, _ = gate({"init": 1, "learned": 2}, lambda k, w: 1.0 if w == 1 else 0.1)
@@ -32,7 +32,7 @@ def test_gate_ties_go_to_first():
 
 def test_holdout_score_energy_only_split(small):
     from ace_jax.fit.hypers import to_array
-    from ace_jax.fit.radial_learn import holdout_score
+    from ace_jax.fit.radial.learn import holdout_score
     prob, ds_fit, _ = small
     _, ds_val, _ = make_problem(ncfg=6, start=6, force_key=None)            # no force labels
     from ace_jax.fit.objective import posterior_from_qr
@@ -54,7 +54,7 @@ def test_holdout_score_weights_quantities_as_the_objective():
     outweighs ~100x (the Si GAP-18 gate kept init radials that lowered the validation force error)."""
     from ace_jax.fit.hypers import from_array, to_array
     from ace_jax.fit.objective import posterior_from_qr
-    from ace_jax.fit.radial_learn import holdout_score
+    from ace_jax.fit.radial.learn import holdout_score
     from ace_jax.fit.stats import linear_qr_statistics, linear_statistics
     prob, ds_fit, _ = make_problem(ncfg=6)
     _, ds_val, _ = make_problem(ncfg=6, start=6)
@@ -70,7 +70,7 @@ def test_holdout_score_weights_quantities_as_the_objective():
 
 
 def test_fit_radial_gate_prefers_learned_on_recoverable_problem():
-    from ace_jax.fit.radial_learn import fit_radial
+    from ace_jax.fit.radial.learn import fit_radial
     prob, ds_fit, _ = make_problem(ncfg=12, per_batch=3, start=0)
     _, ds_val, _ = make_problem(ncfg=12, per_batch=3, start=12)
     Wt, W0, c = perturbed_truth(prob)
@@ -88,7 +88,7 @@ def test_fit_radial_gate_prefers_learned_on_recoverable_problem():
 def test_fit_radial_zero_steps_gate_is_fair(small):
     """steps=0: learned == init, so both are scored by the identical procedure
     and must tie exactly (-> init), whatever the MAP's convergence."""
-    from ace_jax.fit.radial_learn import fit_radial
+    from ace_jax.fit.radial.learn import fit_radial
     prob, ds_fit, _ = small
     _, ds_val, _ = make_problem(ncfg=6, start=6)
     W, info = fit_radial(prob, ds_fit, ds_val, prob.model.rnl_Wnlq, lam_grid=(0.0,), theta0=None,
@@ -109,7 +109,7 @@ def test_fit_radial_zero_steps_gate_is_fair(small):
 def checkpointed(small, tmp_path_factory):
     """One fit_radial over two roughness weights with a checkpoint callback, shared by
     the tests that only read its result: (W, info, ds_val, checkpoint dir, labels)."""
-    from ace_jax.fit.radial_learn import fit_radial, save_result
+    from ace_jax.fit.radial.learn import fit_radial, save_result
     prob, ds_fit, _ = small
     _, ds_val, _ = make_problem(ncfg=6, start=6)
     out, calls = tmp_path_factory.mktemp("ckpt"), []
@@ -138,7 +138,7 @@ def test_fit_radial_checkpoints_each_lambda(checkpointed):
 
 
 def test_learned_radials_reject_inducing_points(small):
-    from ace_jax.fit.radial_learn import fit_radial, learn_radial
+    from ace_jax.fit.radial.learn import fit_radial, learn_radial
     prob, ds, _ = small
     ind = prob.ind._replace(XM=jnp.zeros((3, prob.ind.XM.shape[1])))
     bad = prob._replace(ind=ind)
@@ -150,7 +150,7 @@ def test_learned_radials_reject_inducing_points(small):
 
 def test_fit_radial_spec_and_gap_grid_labels(small):
     """Both suffixes in one grid (gap > 0 also exercises the uniform-Gram precompute)."""
-    from ace_jax.fit.radial_learn import fit_radial
+    from ace_jax.fit.radial.learn import fit_radial
     prob, ds_fit, _ = small
     _, ds_val, _ = make_problem(ncfg=6, start=6)
     spec_grid, gap_grid = (0.0, 1.0), (0.0, 1.0)
@@ -161,14 +161,14 @@ def test_fit_radial_spec_and_gap_grid_labels(small):
 
 
 def test_fit_radial_rejects_duplicate_lambdas(small):
-    from ace_jax.fit.radial_learn import fit_radial
+    from ace_jax.fit.radial.learn import fit_radial
     prob, ds, _ = small
     with pytest.raises(ValueError, match="duplicate"):
         fit_radial(prob, ds, ds, prob.model.rnl_Wnlq, lam_grid=(0.0, 1e-2, 0.01), steps=0)
 
 
 def test_save_result_roundtrip(tmp_path, small):
-    from ace_jax.fit.radial_learn import save_result
+    from ace_jax.fit.radial.learn import save_result
     prob, _, _ = small
     W = 1.5 * prob.model.rnl_Wnlq
     c = np.arange(prob.cfg.len_basis, dtype=float)
@@ -187,7 +187,7 @@ def test_save_result_roundtrip(tmp_path, small):
 
 
 def test_save_result_refuses_stale_readout(tmp_path, small):
-    from ace_jax.fit.radial_learn import save_result
+    from ace_jax.fit.radial.learn import save_result
     prob, _, _ = small
     with pytest.raises(ValueError, match="readout"):
         save_result(tmp_path, prob.model.rnl_Wnlq, {"selected": "init"}, src_npz=MODEL, model=prob.model)
@@ -210,8 +210,8 @@ def test_readout_to_npz_layout():
 def test_saved_model_energies_match_fitted_readout(tmp_path, small, checkpointed):
     """model.npz written by save_result evaluates to linear_rows @ readout
     (+ E0): the readout is the one fitted for the selected radials."""
-    from ace_jax.fit.radial_learn import save_result
-    from ace_jax.fit.radial_model import with_radial
+    from ace_jax.fit.radial.learn import save_result
+    from ace_jax.fit.radial.model import with_radial
     from ace_jax.fit.rows import linear_rows
     prob, ds_fit, _ = small
     W, info, ds_val, _, _ = checkpointed

@@ -1,11 +1,11 @@
-"""fit.progress: the JSON-lines event sink `aj fit` writes as it runs (tests/test_fit_learn_radial.py
+"""fit.linear.progress: the JSON-lines event sink `aj fit` writes as it runs (tests/test_fit_learn_radial.py
 covers the events of a real fit)."""
 import json
 
 import numpy as np
 import pytest
 
-from ace_jax.fit.progress import active, emit, progress_file, stage
+from ace_jax.fit.linear.progress import active, emit, progress_file, stage
 
 
 def _read(p):
@@ -45,7 +45,7 @@ def test_lbfgs_loop_reports_its_starting_value():
     import jax
     jax.config.update("jax_enable_x64", True)
     import jax.numpy as jnp
-    from ace_jax.fit.radial_learn import lbfgs_loop
+    from ace_jax.fit.radial.learn import lbfgs_loop
     info = {}
     _, fx, _, _ = lbfgs_loop(lambda x: jnp.sum((x - 1.0) ** 2), jnp.zeros(3), steps=5, info=info)
     assert info["f0"] == 3.0 and fx < info["f0"]

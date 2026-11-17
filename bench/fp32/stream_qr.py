@@ -38,7 +38,7 @@ import numpy as np  # noqa: E402
 
 from ace_jax.eval import load, with_dtype  # noqa: E402
 from ace_jax.fit.data import build_dataset, load_configs  # noqa: E402
-from ace_jax.fit.inducing import GPConfig  # noqa: E402
+from ace_jax.fit.gp.inducing import GPConfig  # noqa: E402
 from ace_jax.fit.rows import linear_rows_bounded  # noqa: E402
 from ace_jax.fit.stats import device_qr_stream  # noqa: E402
 

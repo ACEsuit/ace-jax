@@ -9,7 +9,7 @@ import jax.numpy as jnp
 
 from ace_jax.eval import load
 from ace_jax.fit.data import build_dataset, load_configs
-from ace_jax.fit.inducing import (GPConfig, descriptor_scale, farthest_point, select_inducing,
+from ace_jax.fit.gp.inducing import (GPConfig, descriptor_scale, farthest_point, select_inducing,
                             site_features)
 
 

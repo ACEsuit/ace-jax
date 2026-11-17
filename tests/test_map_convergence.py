@@ -71,7 +71,7 @@ def _reference_optimum(obj, prior):
 def test_default_map_is_stationary_and_matches_the_reference_optimum():
     from ace_jax.eval import highest_precision
     from ace_jax.fit.hypers import to_array
-    from ace_jax.fit.newton import _projected_gradient
+    from ace_jax.fit.linear.newton import _projected_gradient
     from ace_jax.fit.pipeline.mapfit import LBFGS_HI, LBFGS_LO, MAP_GAIN_TOL, fit_map
     with highest_precision():
         cfg, d, b, obj = _setup()

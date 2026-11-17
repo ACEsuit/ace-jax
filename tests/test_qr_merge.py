@@ -18,8 +18,8 @@ import jax.numpy as jnp
 from ace_jax.eval import highest_precision, load
 from ace_jax.fit.data import build_dataset, load_configs
 from ace_jax.fit.hypers import Hypers, default_prior, to_array
-from ace_jax.fit.inducing import GPConfig, descriptor_scale, select_inducing, site_features
-from ace_jax.fit.kernels import KernelSpec
+from ace_jax.fit.gp.inducing import GPConfig, descriptor_scale, select_inducing, site_features
+from ace_jax.fit.gp.kernels import KernelSpec
 from ace_jax.fit.objective import Problem, log_marginal_likelihood_qr, posterior_from_qr
 from ace_jax.fit.stats import QRStats, linear_qr_statistics, linear_statistics, merge_target
 
@@ -127,10 +127,11 @@ def test_merges_count_live_rows_only(case, monkeypatch):
     nodes, absent virials, an isolated atom's zero-target energy row) neither cost a merge nor fill
     the buffer."""
     from ace_jax.fit import stats
+    from ace_jax.fit.linear import stats as lstats           # host_qr_stream's module: the merge it calls
     prob, ds, ref, lin = case
     L, calls = prob.cfg.len_basis, []
-    merge = stats._host_merge
-    monkeypatch.setattr(stats, "_host_merge", lambda R, c, P, y: calls.append(len(y)) or merge(R, c, P, y))
+    merge = lstats._host_merge
+    monkeypatch.setattr(lstats, "_host_merge", lambda R, c, P, y: calls.append(len(y)) or merge(R, c, P, y))
     assert merge_target(L) == L and merge_target(L, 0) == 0
     rows = jax.jit(lambda b: stats._qr_rows(prob.model, prob.cfg, b))
     per = [[int((np.any(np.asarray(P) != 0, 1) | (np.asarray(y) != 0)).sum()) for P, y, *_ in

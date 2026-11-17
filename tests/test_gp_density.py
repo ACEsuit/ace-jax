@@ -1,4 +1,4 @@
-"""Per-species FS-density columns (ace_jax.fit.density): force/virial rows are the
+"""Per-species FS-density columns (ace_jax.fit.gp.density): force/virial rows are the
 exact derivative of the energy rows (analytic, from the edge Jacobian)."""
 import numpy as np
 import pytest
@@ -9,9 +9,9 @@ import jax.numpy as jnp
 from conftest import FIXTURE_DIR
 from ace_jax.eval import highest_precision, load
 from ace_jax.fit.data import VOIGT, build_dataset, flat_edges, load_configs
-from ace_jax.fit.inducing import GPConfig
+from ace_jax.fit.gp.inducing import GPConfig
 from ace_jax.fit.rows import linear_rows
-from ace_jax.fit.density import density_rows
+from ace_jax.fit.gp.density import density_rows
 
 XYZ = FIXTURE_DIR / "si_tiny_train.xyz"
 pytestmark = pytest.mark.skipif(not XYZ.exists(), reason="missing fixtures")

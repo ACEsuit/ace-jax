@@ -187,8 +187,8 @@ def test_sweep_is_complete_and_measured():
     from accuracy_cost.common import load_sweep
     s = load_sweep()
     assert set(s) == {"ace", "ace_lr", "ace_gp", "pace", "mace", "gap", "ace_pshape", "ace_pshape_lr", "ace_wl", "gap_noglue", "gap_E30", "ace_yace", "ace_tab", "nep",
-                      "grace", "grace_fs", "grace_abl", "grace_2l",
-                      "ace_cheb", "ye3t_sym_fit", "ye3t_mix_A", "ye3t_mix_T", "ye3t_sym_wfit"}
+                      "grace", "grace_fs", "grace_abl", "grace_2l", "mace_fm", "grace_fm",
+                      "polymlp", "ace_cheb", "ye3t_sym_fit", "ye3t_mix_A", "ye3t_mix_T", "ye3t_sym_wfit"}
     assert len(s["ace"]) == 7 and all(e["n_B"] > 0 for e in s["ace"])
     assert [(e["order"], e["max_degree"]) for e in s["ace_lr"]] == [(e["order"], e["max_degree"]) for e in s["ace"]]
     nB = [e["n_B"] for e in s["ace"]]
@@ -1064,6 +1064,186 @@ def test_grace_runtime_styles(tmp_path):
     assert _pair("mace-symx3", "m.json", ["Si"], "gpu") == "pair_style symmetrix/mace\npair_coeff * * m.json Si\n"
     (tmp_path / "m.yace").write_text("elements: [Si, Ge]\nE0: [-1.5, -2.0]\ndeltaSplineBins: 0.001\n")
     assert yace_e0(tmp_path / "m.yace", ["Si", "Ge", "Ge"]) == -5.5
+
+
+def test_foundation_families(tmp_path, monkeypatch):
+    """Foundation models (mace_fm, grace_fm): the sweep's zero-shot and fine-tuned entries, the fine-tuning inputs
+    (single head, the foundation model's architecture, the benchmark's loss), the LAMMPS styles and tolerances, and
+    the figure's families (one plotted learning rate; the mixed-precision line under its own cost name)."""
+    import sys
+    from accuracy_cost import common as C, fit_grace_fm, fit_mace_fm, timing
+    from accuracy_cost.common import load_sweep
+    from scaling import parity, run_lammps
+    s = load_sweep()
+    assert [e["size"] for e in s["mace_fm"] if "finetune" not in e] == ["mh1-omat"]
+    assert {e["finetune"]["lr"] for e in s["mace_fm"] if "finetune" in e} == {0.01, 0.001, 0.0001}
+    assert all(e["head"] == "omat_pbe" for e in s["mace_fm"])
+    assert sorted(e["size"] for e in s["grace_fm"] if "seed" not in e) == ["1l-omat-large", "1l-omat-large-ft", "2l-omat-large", "2l-omat-large-ft"]
+    # two more fine-tuning seeds of each plotted fine-tune: the seed-0 entry again, only `seed` and the suffix differ
+    for fam, bases in (("mace_fm", ["mh1-omat-ft-lr1e-3"]), ("grace_fm", ["1l-omat-large-ft", "2l-omat-large-ft"])):
+        by = {e["size"]: e for e in s[fam]}
+        assert sorted(e["size"] for e in s[fam] if "seed" in e) == sorted(f"{b}_s{k}" for b in bases for k in (1, 2))
+        for b in bases:
+            for k in (1, 2):
+                assert {**by[f"{b}_s{k}"], "size": b} == {**by[b], "seed": k}
+
+    monkeypatch.setattr(fit_mace_fm, "DATA", tmp_path)
+    e = {**C.entry("mace_fm", "mh1-omat-ft-lr1e-3"), "E0": -158.5}
+    cmd = fit_mace_fm.command(e, tmp_path)
+    assert f"--foundation_model={tmp_path / 'base.model'}" in cmd and "--foundation_head=omat_pbe" in cmd
+    assert "--multiheads_finetuning=False" in cmd and "--lr=0.001" in cmd and "--max_num_epochs=60" in cmd
+    assert "--loss=virials" in cmd and "--default_dtype=float64" in cmd and "--E0s={14: -158.5}" in cmd
+    assert not any(c.startswith("--r_max") for c in cmd)            # the foundation model's cutoff, not the 5 A rule
+    assert "--seed=0" in cmd and "--seed=2" in fit_mace_fm.command({**C.entry("mace_fm", "mh1-omat-ft-lr1e-3_s2"), "E0": -158.5}, tmp_path)
+
+    y = fit_grace_fm.input_yaml(C.entry("grace_fm", "2l-omat-large-ft"))
+    assert y["potential"] == {"finetune_foundation_model": "GRACE-2L-OMAT-large-base-fp64", "reduce_elements": True, "shift": "auto"}
+    assert y["data"]["reference_energy"] == 0 and y["fit"]["target_total_updates"] == 10000
+    assert y["fit"]["opt_params"]["learning_rate"] == fit_grace_fm.FT_LR
+
+    assert [c for c, _, _ in timing.PLAN["mace_fm"]] == list(timing.FDN_CODES) and [c for c, _, _ in timing.PLAN["grace_fm"]] == ["grace-rt"]
+    assert [set(dev) for _, dev, _ in timing.PLAN["mace_fm"]] == [{"cpu", "gpu"}, {"cpu", "gpu"}, {"gpu"}]   # float32-mixed: GPU only
+    from scaling import sweep
+    assert sweep.lammps_supported("mace-fdn", "cpu") and not sweep.lammps_supported("mace-fdn-f32m", "cpu")
+    for code, style in run_lammps.FDN.items():
+        assert f"pair_style {style}\n" in run_lammps._pair(code, "m.json", ["Si"], "gpu")
+        assert parity.TOL[code][1] <= 1e-4
+
+    sys.path.insert(0, str(pathlib.Path(__file__).parent.parent / "bench" / "si_qoi"))
+    import plot_cost as P
+    f = lambda fam, size, **k: P.family_of({"family": fam, "size": size, **k})
+    assert f("mace_fm", "mh1-omat") == "mace_fm" and f("mace_fm", P.FM_PLOTTED) == "mace_fm_ft"
+    assert f("mace_fm", P.FM_PLOTTED, code="mace-fdn-f32m") == "mace_fm_ft_mixed" in P.REDUCED
+    assert f("mace_fm", "mh1-omat-ft-lr1e-2") not in P.FAM and f("mace_fm", "mh1-omat", code="mace-fdn-f32m") not in P.FAM
+    assert f("grace_fm", "2l-omat-large") == "grace_fm" and f("grace_fm", "1l-omat-large-ft") == "grace_fm_ft"
+    # seeds: "<size>_s<k>" rows join their size's family, and the fine-tuned families plot the seed mean
+    assert f("mace_fm", P.FM_PLOTTED + "_s1") == "mace_fm_ft" and f("mace_fm", "mh1-omat-ft-lr1e-2_s1") not in P.FAM
+    assert f("grace_fm", "2l-omat-large-ft_s2") == "grace_fm_ft" and {"mace_fm_ft", "mace_fm_ft_mixed", "grace_fm_ft"} <= set(P.SEEDED)
+    sp = lambda size, x, y: {"name": "GRACEFM_" + size, "size": size, "x": x, "n": 5, "n_qoi": 21, "rmse_F": y, "rmse_E": y, "qoi": y}
+    (avg,) = P.seed_average([sp("2l-omat-large-ft", 5.6, 0.2), sp("2l-omat-large-ft_s1", None, 0.3), sp("2l-omat-large-ft_s2", None, 0.4)])
+    assert avg["size"] == "2l-omat-large-ft" and avg["name"] == "GRACEFM_2l-omat-large-ft" and avg["x"] == 5.6 and avg["n_seeds"] == 3
+    assert avg["qoi"] == pytest.approx(0.3) and (avg["qoi_lo"], avg["qoi_hi"]) == (0.2, 0.4)
+    assert P.cost_name("mace_fm_ft_mixed", P.FM_PLOTTED) == "MACEFMmixed_" + P.FM_PLOTTED
+    assert P.cost_name("grace_fm_ft", "2l-omat-large-ft") == "GRACEFM_2l-omat-large-ft"
+    # an arrow from each zero-shot point to its fine-tuned one, only where both are on the axes; no line through them
+    pt = lambda size, x, y: {"size": size, "x": x, "rmse_F": y}
+    data = {"grace_fm": [pt("2l-omat-large", 5.6, 0.066), pt("1l-omat-large", None, 0.10)],
+            "grace_fm_ft": [pt("2l-omat-large-ft", 5.6, 0.045), pt("1l-omat-large-ft", 1.8, 0.079)]}
+    assert P.arrow_pairs(data, "rmse_F") == [("grace_fm_ft", (5.6, 0.066), (5.6, 0.045))]
+    assert {f for k, v in P.FM_ARROWS.items() for f in (k[0], v[0])} <= P.POINTS_ONLY and all(f in P.FAM for f in P.POINTS_ONLY)
+    # a seed-averaged point: the arrow ends at the near end of its min-max bar
+    data["grace_fm_ft"][0] |= {"rmse_F_lo": 0.044, "rmse_F_hi": 0.047}
+    assert P.arrow_pairs(data, "rmse_F") == [("grace_fm_ft", (5.6, 0.066), (5.6, 0.047))]
+
+
+# ---- polymlp (docs/dev/specs/2026-11-12-ye3t-polymlp-benchmark-design.md) ----
+
+
+def test_polymlp_pair_style():
+    """polymlp is a plain OpenMP style (no -k switches, no MPI) with no GPU row."""
+    from scaling.run_lammps import _pair, kokkos_args
+    from scaling.sweep import lammps_supported
+    assert _pair("polymlp", "polymlp.yaml", ["Si"], "cpu") == "pair_style polymlp\npair_coeff * * polymlp.yaml Si\n"
+    assert lammps_supported("polymlp", "cpu") and not lammps_supported("polymlp", "gpu")
+    assert kokkos_args("polymlp", "cpu", threads=1) == [] and kokkos_args("polymlp", "cpu", threads=128) == []
+
+
+def test_polymlp_code_table(tmp_path, monkeypatch):
+    """polymlp's code, gate and LAMMPS wrapper; it runs one rank with the node's cores as threads."""
+    from accuracy_cost import common, timing
+    from scaling import parity, run_lammps
+    assert timing.PLAN["polymlp"] == [("polymlp", {"cpu": "lammps"}, ("float64",))]
+    assert set(timing.PLAN) <= set(common.load_sweep())
+    assert timing.gate_tol(timing.STYLE["polymlp"], "polymlp", {}) == parity.TOL["polymlp"]
+    env = {"lmp": "/main", "lmp_polymlp": "/p"}
+    assert timing.lammps_for("polymlp", "cpu", env) == ("/p", None) and timing.lammps_for("mlpace", "cpu", env)[0] == "/main"
+    seen = {}
+    monkeypatch.setattr(run_lammps, "run_case", lambda row, n, dt, dev, lmp, ranks, work, **kw: seen.update(
+        {row["code"]: (ranks, kw["threads"])}) or {})
+    monkeypatch.setattr(timing, "CPU_RANKS", 128); monkeypatch.setattr(timing, "CPU_THREADS", 1)
+    for code in ("polymlp", "mlpace"):
+        timing.time_case({"row": {"code": code}, "mode": "lammps", "dtype": "float64"}, "cpu", 512, env, tmp_path)
+    assert seen == {"polymlp": (1, 128), "mlpace": (128, 1)}
+
+
+def test_polymlp_inputs_and_validation_split():
+    """Sweep entries become pypolymlp parameters at the shared cutoff with E0 as the atomic energy; the validation
+    split is seeded, disjoint from its train part, stratified, and never larger than a tenth of a type."""
+    from accuracy_cost import common, fit_polymlp as fp
+    s = common.load_sweep()["polymlp"]
+    assert 6 <= len([e for e in s if "reg_alpha" not in e]) <= 16 and min(e["n_params"] for e in s) < 500 and max(e["n_params"] for e in s) >= 5000
+    kw = fp.params_kw(common.entry("polymlp", "m4g9-l882"))
+    assert kw["cutoff"] == common.RCUT and kw["atomic_energy"] == [common.E0_SI] and kw["gtinv_version"] == 1
+    assert kw["gtinv_maxl"] == (8, 8, 2) and kw["gtinv_order"] == 4 and kw["reg_alpha_params"] == fp.REG_ALPHA
+    assert "gtinv_order" not in fp.params_kw({"size": "t", "feature_type": "pair", "model_type": 2, "max_p": 3, "n_gaussians": 9})
+    types = ["dia"] * 40 + ["liq"] * 25 + ["sp"] * 3
+    tr, va = fp.val_split(types)
+    assert (tr, va) == fp.val_split(types) and not set(tr) & set(va) and sorted(tr + va) == list(range(68))
+    assert [sum(types[i] == t for i in va) for t in ("dia", "liq", "sp")] == [4, 2, 0]
+    assert fp.val_split(types, seed=1)[1] != va
+
+
+def test_polymlp_calculator_conventions(tmp_path):
+    """pypolymlp's evaluator behind ASE: total energy (E0 added back), (N, 3) forces, and ASE's stress (it returns
+    +virial in eV per cell, xx yy zz xy yz zx): a finite-difference check on a small fitted model."""
+    pytest.importorskip("pypolymlp")
+    from ase.build import bulk
+    from accuracy_cost import common, fit_polymlp as fp
+    from pypolymlp.mlp_dev.fit.api_fit import fit_polymlp
+    rng = np.random.default_rng(0)
+    ats = []
+    for k in range(12):
+        a = bulk("Si", "diamond", a=5.43 * (1 + 0.02 * rng.standard_normal()), cubic=True); a.rattle(0.1, seed=k)
+        a.info.update(energy=len(a) * common.E0_SI - 4.6 * len(a) + rng.standard_normal(), config_type="dia" if k % 2 else "liq")
+        a.arrays["forces"] = 0.3 * rng.standard_normal((len(a), 3))
+        if k % 3:
+            a.info["virial"] = rng.standard_normal((3, 3)); a.info["virial"] += a.info["virial"].T
+        ats.append(a)
+    g = fp.groups(ats)
+    assert set(g) == {("dia", False), ("dia", True), ("liq", False), ("liq", True)}
+    p = fp.model({"size": "t", "feature_type": "pair", "model_type": 2, "max_p": 2, "n_gaussians": 4})
+    w = {"Default": 1.0, "liq": 0.5}
+    res = fit_polymlp(p.parameters, fp.dataset_list(ats[:9], w, "train"), fp.dataset_list(ats[9:], w, "val"))
+    res.best_model.save_mlp(filename=str(tmp_path / "polymlp.yaml"))
+    c = fp.calculator(tmp_path / "polymlp.yaml")
+    a = ats[0].copy(); a.calc = c
+    E, F, S = a.get_potential_energy(), a.get_forces(), a.get_stress(voigt=False)
+    Eraw, Fraw = fp.raw_ef(tmp_path / "polymlp.yaml", a)
+    assert F.shape == (len(a), 3) and np.allclose(F, Fraw) and abs(E - Eraw - len(a) * common.E0_SI) < 1e-9
+    h, num = 1e-4, np.zeros((3, 3))
+    for i in range(3):
+        for j in range(3):
+            es = []
+            for sg in (1, -1):
+                eps = np.eye(3); eps[i, j] += sg * h / 2; eps[j, i] += sg * h / 2
+                b = a.copy(); b.calc = c; b.set_cell(a.cell @ eps, scale_atoms=True); es.append(b.get_potential_energy())
+            num[i, j] = (es[0] - es[1]) / (2 * h) / a.get_volume()
+    assert np.abs(num - S).max() < 1e-6 * max(1.0, np.abs(S).max())
+
+
+def test_force_measures():
+    """force_measures.measures: the RMSE splits at pypolymlp's 1 eV/A threshold and recombines; the weighted RMSE
+    is pypolymlp's min(1, 1/|F|); the sweep's dense-grid polymlp entries are the nine largest models again."""
+    from accuracy_cost import common as C, force_measures as M
+    F = np.array([[0.5, -2.0, 0.0], [4.0, 0.2, -1.0]]); dF = np.array([[0.1, 0.4, -0.1], [-0.8, 0.0, 0.2]])
+    m = M.measures(dF, F)
+    big = np.abs(F) > M.LARGE
+    assert m["frac_large"] == pytest.approx(2 / 6) and big.sum() == 2            # |F| = 1 is not large
+    assert m["rmse_F"] == pytest.approx(np.sqrt(np.mean(dF ** 2))) and m["mae_F"] == pytest.approx(np.mean(np.abs(dF)))
+    assert m["rmse_F_small"] == pytest.approx(np.sqrt(np.mean(dF[~big] ** 2)))
+    assert m["rmse_F_large"] == pytest.approx(np.sqrt((0.4 ** 2 + 0.8 ** 2) / 2))
+    assert m["rmse_F"] ** 2 == pytest.approx(m["frac_large"] * m["rmse_F_large"] ** 2 + (1 - m["frac_large"]) * m["rmse_F_small"] ** 2)
+    assert m["share_large"] == pytest.approx((0.4 ** 2 + 0.8 ** 2) / np.sum(dF ** 2))
+    assert m["rel_F_large"] == pytest.approx((0.4 / 2 + 0.8 / 4) / 2)
+    assert m["wrmse_F"] == pytest.approx(np.sqrt(np.mean((dF * np.array([[1, 0.5, 1], [0.25, 1, 1]])) ** 2)))
+    assert M.measures(np.zeros(3), np.array([0.1, 0.2, 0.3]))["rmse_F_large"] is None
+    dense = [e for e in C.load_sweep()["polymlp"] if e["size"].endswith("-a28")]
+    base = {e["size"]: e for e in C.load_sweep()["polymlp"]}
+    assert len(dense) == 9 and all(e["reg_alpha"] == [-8, 1, 28] for e in dense)
+    for e in dense:                                     # the same model, only the penalty grid differs
+        b = base[e["size"][:-4]]
+        assert {k: v for k, v in e.items() if k not in ("size", "reg_alpha")} == {k: v for k, v in b.items() if k != "size"}
+    assert set(np.round(np.linspace(-8, 1, 10), 9)) <= set(np.round(np.linspace(-8, 1, 28), 9))   # a superset of the old grid
 
 
 # ---- YE3T (docs/dev/specs/2026-11-12-ye3t-polymlp-benchmark-design.md) ----

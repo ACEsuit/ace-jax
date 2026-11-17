@@ -12,9 +12,9 @@ from ace_jax.eval import highest_precision, load
 from ace_jax.cli import _pad_to_multiple
 from ace_jax.fit.data import build_dataset, load_configs
 from ace_jax.fit.hypers import Hypers, from_array, to_array
-from ace_jax.fit.inducing import GPConfig, descriptor_scale, select_inducing, site_features
-from ace_jax.fit.kernels import KernelSpec
-from ace_jax.fit.sharding import sufficient_statistics_sharded
+from ace_jax.fit.gp.inducing import GPConfig, descriptor_scale, select_inducing, site_features
+from ace_jax.fit.gp.kernels import KernelSpec
+from ace_jax.fit.gp.sharding import sufficient_statistics_sharded
 from ace_jax.fit.stats import sufficient_statistics
 
 XYZ = FIXTURE_DIR / "si_tiny_train.xyz"

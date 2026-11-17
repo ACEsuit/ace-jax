@@ -8,7 +8,8 @@ jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 from ase import Atoms
 
-from ace_jax.eval import ACECalculator, load, sparse_graph
+from ace_jax import ACECalculator
+from ace_jax.eval import load, sparse_graph
 
 FIX = pathlib.Path(__file__).parent.parent / "fixtures" / "pace"
 NAMES = ["si_chebexpcos", "si_chebpow_fs", "si_cheblinear", "gesi_sbessel",

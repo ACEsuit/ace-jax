@@ -48,7 +48,7 @@ def _built_rows(z, meta):
     from ace_jax.basis.model import build_model
     from ace_jax.eval import highest_precision
     from ace_jax.fit.data import build_dataset, load_configs
-    from ace_jax.fit.inducing import GPConfig
+    from ace_jax.fit.gp.inducing import GPConfig
     from ace_jax.fit.rows import linear_rows
     b = build_model(meta["elements"], meta["order"], meta["totaldegree"], wL=meta["wL"],
                     rcut=meta["rcut"], coupling_cache=False)

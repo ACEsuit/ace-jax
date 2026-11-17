@@ -15,8 +15,8 @@ from conftest import FIXTURE_DIR  # noqa: E402
 from ace_jax.eval import load  # noqa: E402
 from ace_jax.fit.data import build_dataset, load_configs  # noqa: E402
 from ace_jax.fit.hypers import Hypers, default_prior  # noqa: E402
-from ace_jax.fit.inducing import GPConfig, descriptor_scale, select_inducing, site_features  # noqa: E402
-from ace_jax.fit.kernels import KernelSpec  # noqa: E402
+from ace_jax.fit.gp.inducing import GPConfig, descriptor_scale, select_inducing, site_features  # noqa: E402
+from ace_jax.fit.gp.kernels import KernelSpec  # noqa: E402
 from ace_jax.fit.objective import Problem, prior_precision  # noqa: E402
 from ace_jax.fit.rows import linear_rows  # noqa: E402
 
@@ -171,7 +171,7 @@ def test_an_isolated_atom_in_training_still_fixes_its_species_e0(tmp_path):
 
 def test_patch_radial_npz_accepts_a_readout_with_joint_e0_columns(tmp_path):
     from ace_jax.basis.export import patch_radial_npz
-    from ace_jax.fit.radial_model import to_analytic
+    from ace_jax.fit.radial.model import to_analytic
     src = FIXTURE_DIR / "si_fitted.npz"
     model, meta, z = load(src)
     m, _ = to_analytic(model, 8)
@@ -203,7 +203,7 @@ def test_run_config_records_the_fitted_e0(joint, tmp_path):
 
 def test_patch_radial_npz_warns_when_it_drops_an_e0_shift(tmp_path):
     from ace_jax.basis.export import patch_radial_npz
-    from ace_jax.fit.radial_model import to_analytic
+    from ace_jax.fit.radial.model import to_analytic
     src = FIXTURE_DIR / "si_fitted.npz"
     model, meta, z = load(src)
     m, _ = to_analytic(model, 8)

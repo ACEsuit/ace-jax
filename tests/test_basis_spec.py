@@ -93,7 +93,7 @@ def test_capped_model_records_caps_and_rebuilds_its_radial_degrees():
     from conftest import require_coupling_lib
     require_coupling_lib()
     from ace_jax.basis.model import build_model
-    from ace_jax.fit.radial_model import rnl_degrees
+    from ace_jax.fit.radial.model import rnl_degrees
     b = build_model([14], 6, 8, wL=1.0, nmax_by_order=CAPS[0], lmax_by_order=CAPS[1])
     assert b.meta["basis"]["nmax_by_order"] == list(CAPS[0])
     assert len(rnl_degrees(b.meta)) == b.meta["n_rnl"] == len(b.Rnl_spec)

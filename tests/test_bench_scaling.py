@@ -1052,7 +1052,7 @@ def test_learned_proxy_is_deterministic_and_marked_learned(sige_learned, tmp_pat
     import jax
     jax.config.update("jax_enable_x64", True)
     from ace_jax.eval import load
-    from ace_jax.fit.radial_model import row_active, to_analytic
+    from ace_jax.fit.radial.model import row_active, to_analytic
     from scaling.models import learned_proxy
     src, dst = sige_learned
     again = tmp_path / "again.npz"

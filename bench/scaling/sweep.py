@@ -40,13 +40,14 @@ for _code in LEARNED_CODES:
 MODES.update({"acepotentials": ("standalone",), "acepotentials-trim": ("lammps",)})
 DTYPES.update({"acepotentials": ("float64",), "acepotentials-trim": ("float64",)})
 # lammps-jax ships only pair_style jax/kk, which needs KOKKOS built with CUDA
-GPU_ONLY_LAMMPS = ("acejax-pace", "acejax-ace", *LEARNED_CODES)
+GPU_ONLY_LAMMPS = ("acejax-pace", "acejax-ace", *LEARNED_CODES,
+                   "mace-fdn-f32m")   # symmetrix/mace/foundation/float32-mixed: fp16 tensor-core GEMMs, GPU only
 # CPU-only for now: no GPU path for either ACEpotentials.jl line
 CPU_ONLY = ACEPOT_CODES
 # pair quip has no KOKKOS variant (run_lammps.KOKKOS has no "gap" key)
-# pair quip and pair nep: no KOKKOS variant.  mlpace-product is the CPU spelling of what "mlpace" runs on a GPU.
-# (ye3t-lammps has a CUDA style, ye3t/kk, device only: bench/scaling/envs/sulis-ye3t.sh gpu)
-CPU_ONLY_LAMMPS = ("gap", "nep", "mlpace-product")
+# pair quip, pair nep and pair polymlp: no KOKKOS variant.  mlpace-product is the CPU spelling of what "mlpace" runs
+# on a GPU.  (ye3t-lammps has a CUDA style, ye3t/kk, device only: bench/scaling/envs/sulis-ye3t.sh gpu)
+CPU_ONLY_LAMMPS = ("gap", "nep", "polymlp", "mlpace-product")
 
 
 def lammps_supported(code, device):
