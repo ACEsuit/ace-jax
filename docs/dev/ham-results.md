@@ -169,3 +169,22 @@ ace-jax (`bench/ham/offsite_time_deeph.py`): on-site model plus the shared-featu
 - **Two thirds of the remaining end-to-end time is copying the blocks back to the host** (192 MB of float32). A consumer that works on the device (Bloch sums, eigenvalues) does not pay it: `OffsitePredictor.device` returns the blocks there. MACE-H's 400 ms includes its `.cpu()` copy of the same blocks.
 - Changes made from the profile: the reverse-bond index by sorting rather than a dictionary, and the non-canonical blocks (transposes of the reverse bond) formed on the device.
 - Still wasteful: each ordered species pair is computed on every (atom, slot) and masked afterwards, so a two-species system does about twice the necessary work.
+
+## Positions to eigenvalues on the device (2026-11-17)
+
+`ham/operator.py::HamiltonianPredictor` keeps the predicted blocks on the device, sums them into H(k) and S(k), and solves H(k) c = e S(k) c there (Cholesky of S, then a Hermitian eigensolver). Against a host assembly of the reference predictions and SciPy, the Bloch matrices agree to 1e-11 and the eigenvalues to 1e-9 (`tests/test_ham_operator.py`).
+
+`bench/ham/bands_time.py`, the 108-atom SiC input (2862 orbitals, 158 bonds per atom), H and S, small coupled model, float32, RTX 4000 Ada, one k-point:
+
+| stage | time | share |
+|---|---|---|
+| blocks of H and S on the device, with the host-side lists | 55.7 ms | 22 % |
+| Bloch sum H(k) | 3.2 ms | 1 % |
+| Bloch sum S(k) | 3.2 ms | 1 % |
+| eigenvalues of a 2862 × 2862 Hermitian matrix, copied to the host | 186.3 ms | 75 % |
+| positions to eigenvalues | 248 ms | 2.3 ms per atom |
+
+- The 88 ms copy of the blocks to the host is gone; the only download is the eigenvalues.
+- The eigensolver is now three quarters of the time, and it grows as the cube of the orbital count while everything else is linear in the atom count.
+- Timed on H(k) alone: with random coefficients the overlap is not positive definite, so the generalised solve (one more Cholesky factor and two triangular solves) is not in this number.
+- float32 throughout. Core levels near −1800 eV carry about 0.1 eV of float32 rounding in the eigenvalues; float64 on this card is 1/64 the speed, so an accurate GPU spectrum needs an A100 or a core/valence split.
