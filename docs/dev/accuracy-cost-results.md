@@ -838,13 +838,38 @@ per-type weights), 5% of the training split as the validation set, float64.
 | Model | Parameters | E RMSE (meV/atom) | F RMSE (eV/Å) | V RMSE (meV/atom) | QoI error | QoIs within tolerance | A100 µs/atom-step |
 |---|---|---|---|---|---|---|---|
 | MACE-MH-1, zero-shot | 6,439,878 | 20.0 | 0.0716 | 72.8 | 1.08 | 52% | 6.04 (float64), 4.29 (float32), 2.47 (mixed) |
-| MACE-MH-1, fine-tuned, lr 1e-3 | 6,170,528 | 3.3 | 0.0443 | 26.2 | 0.27 | 86% | 6.07 (float64), 4.31 (float32), 2.48 (mixed) |
+| MACE-MH-1, fine-tuned, lr 1e-3 (seed 0) | 6,170,528 | 3.3 | 0.0443 | 26.2 | 0.27 | 86% | 6.07 (float64), 4.31 (float32), 2.48 (mixed) |
 | MACE-MH-1, fine-tuned, lr 1e-4 | 6,170,528 | 6.3 | 0.0518 | 33.1 | not run | not run | not timed |
 | MACE-MH-1, fine-tuned, lr 1e-2 | 6,170,528 | 7.4 | 0.0889 | 47.0 | not run | not run | not timed |
 | GRACE-2L-OMAT-large, zero-shot | 26,394,284 | 15.4 | 0.0655 | 56.4 | 1.29 | 38% | 5.59 (mixed) |
-| GRACE-2L-OMAT-large, fine-tuned | 984,548 | 2.1 | 0.0455 | 19.6 | 0.21 | 95% | 5.60 (mixed) |
+| GRACE-2L-OMAT-large, fine-tuned (seed 0) | 984,548 | 2.1 | 0.0455 | 19.6 | 0.21 | 95% | 5.60 (mixed) |
 | GRACE-1L-OMAT-large, zero-shot | 8,953,529 | 34.0 | 0.1025 | 128.9 | 2.68 | 24% | 1.78 (mixed) |
-| GRACE-1L-OMAT-large, fine-tuned | 468,833 | 5.8 | 0.0788 | 27.7 | 0.52 | 76% | 1.77 (mixed) |
+| GRACE-1L-OMAT-large, fine-tuned (seed 0) | 468,833 | 5.8 | 0.0788 | 27.7 | 0.52 | 76% | 1.77 (mixed) |
+
+**Fine-tuning seeds (2026-11-17).** Each plotted fine-tune has two more fits (sweep sizes `<size>_s1`, `_s2`, entry
+key `seed`; the unsuffixed row is seed 0). The seed is `mace_run_train --seed` / gracemaker's `seed`: it sets the
+5% validation draw and the batch order; the starting weights are the foundation model's in every seed. The figure
+plots the mean of the three with the min-max as a bar (`plot_cost.SEEDED`), at seed 0's cost (same architecture).
+Sulis L40 jobs 2290900-5; the other MACE learning rates have one seed.
+
+| Fine-tuned model | seed | E RMSE (meV/atom) | F RMSE (eV/Å) | V RMSE (meV/atom) | QoI error | QoIs within tolerance |
+|---|---|---|---|---|---|---|
+| MACE-MH-1, lr 1e-3 | 0 | 3.3 | 0.0443 | 26.2 | 0.27 | 86% |
+| | 1 | 3.1 | 0.0444 | 27.1 | 0.32 | 86% |
+| | 2 | 4.1 | 0.0439 | 25.0 | 0.27 | 86% |
+| | mean [min, max] | 3.5 [3.1, 4.1] | 0.0442 [0.0439, 0.0444] | | 0.29 [0.27, 0.32] | |
+| GRACE-2L-OMAT-large | 0 | 2.1 | 0.0455 | 19.6 | 0.21 | 95% |
+| | 1 | 2.1 | 0.0456 | 19.5 | 0.22 | 95% |
+| | 2 | 2.1 | 0.0457 | 19.7 | 0.25 | 90% |
+| | mean [min, max] | 2.1 [2.1, 2.1] | 0.0456 [0.0455, 0.0457] | | 0.23 [0.21, 0.25] | |
+| GRACE-1L-OMAT-large | 0 | 5.8 | 0.0788 | 27.7 | 0.52 | 76% |
+| | 1 | 5.8 | 0.0789 | 27.5 | 0.49 | 76% |
+| | 2 | 5.7 | 0.0788 | 27.9 | 0.51 | 76% |
+| | mean [min, max] | 5.8 [5.7, 5.8] | 0.0788 [0.0788, 0.0789] | | 0.51 [0.49, 0.52] | |
+
+The force error is reproducible to 0.0005 eV/Å; the QoI error moves by up to 0.05 between seeds. GRACE-1L-OMAT is
+at the QoI target's edge: one seed of three is below 0.5, the mean is not. On lestrade, two MACE QoI tests at once
+ran out of GPU memory (20 GB) for four tests of seeds 1 and 2; they were rerun one at a time.
 
 Target: force RMSE ≤ GAP-18's and QoI error ≤ 0.5. For comparison, linear ACE o4d20: 0.0816 eV/Å, QoI error 0.39,
 0.75 µs/atom-step (CUDA kernel, float64).
@@ -852,8 +877,9 @@ Target: force RMSE ≤ GAP-18's and QoI error ≤ 0.5. For comparison, linear AC
 - **Zero-shot** MACE-MH-1 and GRACE-2L are below GAP-18's force error without seeing the data, but none of the three
   reaches the QoI target. The large errors are in the high-coordination phases and point defects (MACE-MH-1, in
   tolerances: fcc −7.7, st12 +4.7, vacancy −4.7, bcc −4.5, hcp −4.4).
-- **Fine-tuned** MACE-MH-1 and GRACE-2L reach the target and have the lowest QoI errors in the figure (0.27, 0.21).
-  GRACE-1L reaches the force target but not the QoI one (0.52).
+- **Fine-tuned** MACE-MH-1 and GRACE-2L reach the target (seed means: QoI 0.29 and 0.23; GRACE-2L-OMAT is the
+  lowest in the figure, MACE-MH-1 level with the best from-scratch models at 0.31). GRACE-1L reaches the force
+  target but not the QoI one (seed mean 0.51).
 - **Cost.** Fine-tuning does not change the cost (≤ 0.5%). At the target, fine-tuned MACE-MH-1 costs 8.1 times
   linear ACE o4d20 in float64 and 3.3 times in mixed precision; fine-tuned GRACE-2L costs 7.5 times (mixed).
 - The `MACEFM_mh1-omat` QoIs are identical to the earlier `SYMX_mh1` entry.
@@ -896,5 +922,4 @@ GRACE-2L does not fit at 128 ranks (each rank holds the model). The float32 MACE
 (float64 only, as for the other models). The fine-tuned MACE model holds CUDA tensors, so on a CPU node the gate's
 PyTorch reference is its CPU copy (`timing.cases`; the first run, job 2290209, failed that gate at loading).
 
-Not done: a float64 GRACE timing (the native `grace/2l/kk` style on the foundation `kokkos.npz`), and more than
-one fine-tuning seed.
+Not done: a float64 GRACE timing (the native `grace/2l/kk` style on the foundation `kokkos.npz`).

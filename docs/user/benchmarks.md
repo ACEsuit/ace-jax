@@ -140,18 +140,36 @@ model.
 | model | force error (eV/Å) | QoI error | A100 GPU | CPU node (128 cores) |
 |---|---|---|---|---|
 | MACE-MH-1, zero-shot | 0.072 | 1.08 | 6.04 | 46.0 |
-| MACE-MH-1, fine-tuned | FT_MH1_F | FT_MH1_Q | 6.07 | 45.1 |
-| MACE-MH-1, fine-tuned, mixed precision | FT_MH1_F | FT_MH1_Q | 2.48 | – |
+| MACE-MH-1, fine-tuned | 0.044 | 0.29 (0.27 to 0.32) | 6.07 | 45.1 |
+| MACE-MH-1, fine-tuned, mixed precision | 0.044 | 0.29 (0.27 to 0.32) | 2.48 | – |
 | GRACE-2L-OMAT-large, zero-shot | 0.066 | 1.29 | 5.59 | 8.81 |
-| GRACE-2L-OMAT-large, fine-tuned | FT_G2_F | FT_G2_Q | 5.60 | 8.83 |
+| GRACE-2L-OMAT-large, fine-tuned | 0.046 | 0.23 (0.21 to 0.25) | 5.60 | 8.83 |
 | GRACE-1L-OMAT-large, zero-shot | 0.103 | 2.68 | 1.78 | 2.07 |
-| GRACE-1L-OMAT-large, fine-tuned | FT_G1_F | FT_G1_Q | 1.77 | 2.08 |
+| GRACE-1L-OMAT-large, fine-tuned | 0.079 | 0.51 (0.49 to 0.52) | 1.77 | 2.08 |
 
 The costs are in microseconds per atom-step. For the fine-tuned models,
-the errors are the mean of three fits, with the range in brackets. The
+the errors are the mean of three fits. The range of the QoI error is in
+brackets. The force errors of the three fits agree to 0.001 eV/Å. The
 GRACE costs are in mixed precision.
 
-FINDINGS
+**Zero-shot.** MACE-MH-1 and GRACE-2L-OMAT-large have a smaller force
+error than GAP-18 (0.083 eV/Å), although they were not fitted to this
+dataset. No zero-shot model reaches the QoI target.
+
+**Fine-tuned.** MACE-MH-1 and GRACE-2L-OMAT-large reach the target.
+GRACE-2L-OMAT-large has the lowest QoI error in the figure (0.23). The QoI
+error of MACE-MH-1 (0.29) is approximately that of the best models trained
+from the start (0.31, GRACE-2L 2l_small and the largest MACE L = 1 models).
+GRACE-1L-OMAT-large reaches the force target. Its QoI error is at the limit
+of the target: one of the three fits is below 0.5.
+
+**Cost.** Fine-tuning does not change the cost of a model. On the A100,
+fine-tuned MACE-MH-1 costs 9.3 times the cost of MACE c16L0 in float64,
+and 3.8 times in mixed precision. Fine-tuned GRACE-2L-OMAT-large costs 8.6
+times the cost of MACE c16L0. On the CPU, MACE-MH-1 costs 76 times and
+GRACE-2L-OMAT-large costs 15 times the cost of MACE c16L0.
+Thus the small models trained from the start reach the target at a much
+lower cost. The fine-tuned foundation models have lower errors.
 
 ### How the cost was measured
 

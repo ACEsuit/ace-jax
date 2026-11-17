@@ -123,9 +123,12 @@ POINTS_ONLY = {f for k, v in FM_ARROWS.items() for f in (k[0], v[0])} | {"mace_f
 
 
 def arrow_pairs(data, key):
-    """[(family of the derived point, (x, y) source, (x, y) derived)] of FM_ARROWS with both ends on these axes."""
+    """[(family of the derived point, (x, y) source, (x, y) derived)] of FM_ARROWS with both ends on these axes.
+    A seed-averaged derived point (seed_average) is entered at the near end of its min-max bar, so the arrow
+    stops at the bar and does not cover it."""
     at = {(fam, q["size"]): q for fam, pts in data.items() for q in pts if q["x"] is not None and q[key] is not None}
-    return [(to[0], (at[src]["x"], at[src][key]), (at[to]["x"], at[to][key])) for to, src in FM_ARROWS.items()
+    end = lambda q, y0: q.get(key + ("_hi" if y0 > q[key] else "_lo"), q[key])
+    return [(to[0], (at[src]["x"], at[src][key]), (at[to]["x"], end(at[to], at[src][key]))) for to, src in FM_ARROWS.items()
             if to in at and src in at]
 
 
@@ -314,8 +317,10 @@ def series(ax, data, key):
         ax.plot(x, y, ls="none" if fam in POINTS_ONLY else ls, lw=2, color=col, marker=mk, ms=8, mfc=col if filled else "white", mec=col,
                 mew=1.5, label=lab, zorder=3)
         if all(key + "_lo" in q for q in p):           # SEEDED: the min-max over seeds
+            top = fam in POINTS_ONLY                   # a lone point: the bar over the marker, in ink, or the marker hides it
             ax.errorbar(x, y, yerr=[[q[key] - q[key + "_lo"] for q in p], [q[key + "_hi"] - q[key] for q in p]],
-                        fmt="none", ecolor=col, elinewidth=1.2, capsize=3, zorder=3)
+                        fmt="none", ecolor=INK if top else col, elinewidth=1.4 if top else 1.2, capsize=4 if top else 3,
+                        zorder=4 if top else 3)
 
 
 def flag(ax, data, codes, key):
@@ -517,7 +522,7 @@ def main():
         note = (cpu_note + "QoI error clips each QoI to [0.05, 10] x tolerance; compressed hcp is left out (extrapolation, "
                 "outside the training data); only models with every QoI computed.\n"
                 "Cost: the fastest parity-checked code per model, float64 only except NEP on the GPU and GRACE (one-layer MACE has "
-                "float32 timings only and is left out of the cost rows). Single fits per point, except GRACE: the mean of three seeds, bars min-max.\n"
+                "float32 timings only and is left out of the cost rows). Single fits per point, except GRACE and the fine-tuned foundation models: the mean of three seeds, bars min-max.\n"
                 "Light blue: the same o4 linear ACE fits in reduced precision -- ace-jax float32 lammps-jax bundles (where timed), the "
                 "ace-jax kernel (mixed precision on the CPU, float32 on the GPU), and patched ML-PACE pace/kk in a KOKKOS_PREC=mixed "
                 "LAMMPS (accuracy is the float64 fit's).\n"

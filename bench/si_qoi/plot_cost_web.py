@@ -65,7 +65,9 @@ def traces(data, key, xa, ya, xlabel, shown, codes):
                                "parameters %{customdata[1]:,}<br>%{customdata[4]}<extra></extra>"),
              "visible": True if shown is None or fam in shown else "legendonly", "meta": fam}
         if all(key + "_lo" in q for q in p):
-            t["error_y"] = {"type": "data", "symmetric": False, "color": col, "thickness": 1.2, "width": 3,
+            top = fam in P.POINTS_ONLY                 # as plot_cost.series: a lone point's bar in ink, wider
+            t["error_y"] = {"type": "data", "symmetric": False, "color": P.INK if top else col,
+                            "thickness": 1.6 if top else 1.2, "width": 5 if top else 3,
                             "array": [q[key + "_hi"] - q[key] for q in p],
                             "arrayminus": [q[key] - q[key + "_lo"] for q in p]}
         out.append(t)

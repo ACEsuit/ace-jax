@@ -1131,6 +1131,9 @@ def test_foundation_families(tmp_path, monkeypatch):
             "grace_fm_ft": [pt("2l-omat-large-ft", 5.6, 0.045), pt("1l-omat-large-ft", 1.8, 0.079)]}
     assert P.arrow_pairs(data, "rmse_F") == [("grace_fm_ft", (5.6, 0.066), (5.6, 0.045))]
     assert {f for k, v in P.FM_ARROWS.items() for f in (k[0], v[0])} <= P.POINTS_ONLY and all(f in P.FAM for f in P.POINTS_ONLY)
+    # a seed-averaged point: the arrow ends at the near end of its min-max bar
+    data["grace_fm_ft"][0] |= {"rmse_F_lo": 0.044, "rmse_F_hi": 0.047}
+    assert P.arrow_pairs(data, "rmse_F") == [("grace_fm_ft", (5.6, 0.066), (5.6, 0.047))]
 
 
 # ---- polymlp (docs/dev/specs/2026-11-12-ye3t-polymlp-benchmark-design.md) ----
