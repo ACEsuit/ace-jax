@@ -12,7 +12,8 @@ import os
 import numpy as np
 from ase.calculators.calculator import Calculator, all_changes
 
-from ..eval.edge_model import LAYOUTS, calibrate_edge_a, check_edge_a_kind, with_edge_a_kind
+from ..eval.edge_model import calibrate_edge_a
+from ..eval.product import LAYOUTS, check_edge_a_kind, with_edge_a_kind
 from ..eval.model import highest_precision
 from ..eval.model import lean as lean_form
 from ..eval.model import splining, with_radial_table

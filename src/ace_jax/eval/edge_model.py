@@ -4,8 +4,8 @@ A model here maps edge vectors rij -- never positions and a cell -- to per-site
 energies.  Everything downstream of that contract is model-independent and lives
 in `EdgeSiteModel`, so the two model families cannot drift apart:
 
-* the A-basis product in its two interchangeable forms (`edge_a`), and the
-  helpers that switch and calibrate between them;
+* the A basis on the model's own arrays (`edge_a` and the pooling methods; the
+  arithmetic is `product`'s), and the calibration between its two forms;
 * energy, forces and virial from one `value_and_grad` over the edge vectors,
   the total a compensated sum of the site energies (`total_energy`);
 * the lammps-jax positions entry point.
@@ -23,16 +23,15 @@ A model whose A basis is built pool-first (`pool_first_dense` /
 `estimate_a_bytes`), and sets `uses_edge_a = False`: the `edge_a` form is then
 inert and `ACECalculator` does not calibrate it.
 """
-import dataclasses
-import functools
-import operator
 import time
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 
-EDGE_A_KINDS = ("gather", "matmul")
+from . import product
+from .product import (EDGE_A_KINDS, LAYOUTS, check_edge_a_kind, estimate_a_bytes,  # noqa: F401  (their old home)
+                      one_hot_selector, product_basis, product_basis_dot, product_basis_t, with_edge_a_kind)
 
 CHUNK_NODES = 16384   # dense rows per block: peak memory ~ block, not N (spec, component 2)
 # On a GPU, 4096: the block's temp is ~120 KB/row at o4d20 (the DAG product basis's
@@ -117,76 +116,6 @@ def _total_energy_jvp(primals, tangents):
     return total_energy(e), jnp.sum(t).astype(_acc_dtype(e.dtype))
 
 
-def _mul_rows(At, s):
-    return functools.reduce(operator.mul, [At[s[:, k]] for k in range(s.shape[1])])
-
-
-def _product_basis_t_cpu(At, specs):
-    return jnp.concatenate([_mul_rows(At, s) for s in specs], axis=0)
-
-
-def _product_basis_t_default(At, specs):
-    return jnp.concatenate([jnp.prod(At[s.T], axis=0) for s in specs], axis=0)
-
-
-def _product_basis_cpu(A, specs):
-    return _product_basis_t_cpu(A.T, specs).T
-
-
-def _product_basis_default(A, specs):
-    return jnp.concatenate([jnp.prod(A[:, g], axis=-1) for g in specs], axis=-1)
-
-
-def product_basis_t(At, specs):
-    """AA (n_AA, n) = prod_k At[spec[:, k]] from feature-major A (n_A, n), one
-    (n_v, order) index array per correlation order in `specs`.
-
-    The form is chosen per backend at lowering (`lax.platform_dependent`, so an
-    exported bundle gets the form of the platform it is lowered for).  On the CPU,
-    an explicit chain of whole-row multiplies: `jnp.prod`'s reverse mode lowers to
-    pads, slices and transposing copies that XLA:CPU runs as strided scalar loops
-    (14-18x the forward; 1.65x on the order-3 ACE SiGe step,
-    docs/dev/cpu-gap-profile.md 6.2).  Elsewhere `jnp.prod`, the layout the GPU was
-    tuned for (ace-vs-pace-gap.md 4.1).  Same multiply order, so the values agree
-    bitwise; gradients to roundoff."""
-    return jax.lax.platform_dependent(At, cpu=lambda At: _product_basis_t_cpu(At, specs),
-                                      default=lambda At: _product_basis_t_default(At, specs))
-
-
-def product_basis(A, specs):
-    """`product_basis_t` for node-major A (n, n_A), returning (n, n_AA).  The CPU
-    form multiplies feature-major rows (A.T) and transposes back."""
-    return jax.lax.platform_dependent(A, cpu=lambda A: _product_basis_cpu(A, specs),
-                                      default=lambda A: _product_basis_default(A, specs))
-
-
-def _product_basis_dot_cpu(A, specs, C):
-    return jnp.einsum("ai,ai->i", _product_basis_t_cpu(A.T, specs), C)
-
-
-def _product_basis_dot_default(A, specs, C):
-    return jnp.einsum("ia,ai->i", _product_basis_default(A, specs), C)
-
-
-def product_basis_dot(A, specs, C):
-    """sum_a AA[i, a] C[a, i] per node i: the product basis of node-major A (n, n_A)
-    against per-node readout columns C (n_AA, n), without forming node-major AA on
-    the CPU (its transpose back cost 6% of the order-2 ACE Cantor step).  Forms as
-    `product_basis_t`."""
-    return jax.lax.platform_dependent(A, C, cpu=lambda A, C: _product_basis_dot_cpu(A, specs, C),
-                                      default=lambda A, C: _product_basis_dot_default(A, specs, C))
-
-
-def one_hot_selector(idx, width, dtype):
-    """One-hot (width, n) matrix S with X @ S == X[:, idx]."""
-    return jnp.zeros((width, idx.shape[0]), dtype).at[idx, jnp.arange(idx.shape[0])].set(1)
-
-
-def check_edge_a_kind(kind):
-    if kind not in EDGE_A_KINDS:
-        raise ValueError(f'edge_a_kind must be "gather" or "matmul", got {kind!r}')
-
-
 class EdgeSiteModel(eqx.Module):
     """Base class: no fields of its own, only the shared behaviour."""
 
@@ -194,99 +123,29 @@ class EdgeSiteModel(eqx.Module):
     # so the `edge_a` form, and its calibration, do not apply.
     uses_edge_a = True
 
-    # -------------------------------------------------- A-basis product
+    # -------------------------------------------------- A basis (`product`, on this model's arrays)
     def edge_a(self, R, Y):
-        """Per-edge A-basis rows from radial columns R and harmonics Y.
+        """Per-edge A-basis rows from radial columns R and harmonics Y, in the form
+        `edge_a_kind` selects (`product.edge_a`: "gather" or "matmul", identical values)."""
+        return product.edge_a(R, Y, self.aspec_r, self.aspec_y, self.edge_a_kind, self.a_sel_r, self.a_sel_y)
 
-        Two algebraically identical forms, selected by `edge_a_kind`; they agree
-        to bit-identity on values and (in f64) on gradients.
-
-          "gather"  A = R[:, aspec_r] * Y[:, aspec_y]
-          "matmul"  A = (R @ Sr) * (Y @ Sy),  Sr/Sy one-hot
-
-        They differ only in the reverse pass: the gather's adjoint is an axis-1
-        scatter whose cost per slot grows with buffer length, while the matmul's
-        adjoint is a matmul and is flat.  Neither wins everywhere -- on an M3 Pro
-        the matmul wins throughout and by up to 11x, on a Xeon the gather wins
-        below ~200k edge slots, and on an A4500 the gather's two scatters were
-        66-84% of a PACE force call -- so this is a choice to calibrate, not a
-        constant to hardcode.  See docs/findings/FINDINGS_apple_scaling.md and
-        `calibrate_edge_a`.
-        """
-        if self.edge_a_kind == "matmul":
-            # the one-hot products only select, so they must not round: at default
-            # precision an f32 matmul on Ampere+ is TF32 (10-bit mantissa)
-            hi = jax.lax.Precision.HIGHEST
-            return (jnp.matmul(R, self.a_sel_r, precision=hi)
-                    * jnp.matmul(Y, self.a_sel_y, precision=hi))
-        return R[:, self.aspec_r] * Y[:, self.aspec_y]
-
-    # -------------------------------------------------- A basis, two layouts
     def pool_a_sparse(self, cols, Y, seg, channel, n_nodes):
-        """A (n_nodes, C * n_A) from edge-list factors: per-edge rows in the chosen
-        form (`edge_a`), summed per (node, channel).  Memory ~ E * n_A."""
-        C = self.a_channels
-        rows = self.edge_a(cols, Y)
-        A = jax.ops.segment_sum(rows, seg * C + channel, num_segments=n_nodes * C)
-        return A.reshape(n_nodes, C * rows.shape[1])
+        """A (n_nodes, C * n_A) from edge-list factors (`product.pool_a_sparse` of `edge_a`'s rows)."""
+        return product.pool_a_sparse(self.edge_a(cols, Y), seg, channel, n_nodes, self.a_channels)
 
     def pool_a_dense(self, cols, Y, channel):
-        """A (n, C * n_A) from padded (n, K, .) factors, per node as a batched
-        outer product sum_k cols_k (x) Y_k, then the used entries selected.  No
-        per-edge column gather, so no scatter in the reverse pass (3-13x faster
-        forces measured on A4500/A100/H100).  Memory ~ n * K * (C * n_cols + n_Y)
-        + n * C * n_cols * n_Y, so it grows with channels and neighbour padding --
-        which is why the sparse layout stays."""
-        n, K, nc = cols.shape
-        ny = Y.shape[-1]
-        C = self.a_channels
-        if C > 1:                                    # neighbour-species channel
-            oh = jax.nn.one_hot(channel, C, dtype=cols.dtype)
-            cols = (oh[..., :, None] * cols[..., None, :]).reshape(n, K, C * nc)
-        A_full = jnp.einsum("nkr,nky->nry", cols, Y,
-                            precision=jax.lax.Precision.HIGHEST).reshape(n, -1)
-        mu = jnp.arange(C, dtype=self.aspec_r.dtype)[:, None]
-        sel = ((mu * nc + self.aspec_r[None, :]) * ny + self.aspec_y[None, :]).reshape(-1)
-        return A_full[:, sel]
+        """A (n, C * n_A) from padded (n, K, .) factors (`product.pool_a_dense`)."""
+        return product.pool_a_dense(cols, Y, channel, self.aspec_r, self.aspec_y, self.a_channels)
 
-    # -------------------------------------------------- pool-first A (feature-major)
     def pool_first_dense(self, b, Y, zj, node_z):
-        """A_t (C*n_a, n) = sum_k W[z_i, z_j] b_k (x) Y_y, pooled BEFORE W.
-
-        Every model here has a radial that is linear in per-pair coefficients
-        over a fixed per-edge basis b (PACE: g_k with crad; ACE: polynomials,
-        spline or factorised table with its weights), so the per-edge R_nl is
-        never formed: pool b (x) Y per (node, neighbour-species channel), then
-        apply W per node.  Feature-major output so the product-basis gathers read
-        whole rows.  b (n, K, n_b), Y (n, K, n_Y), zj (n, K) neighbour channel.
-        docs/dev/pace-performance-gap.md #4, #5."""
-        n, K, nb = b.shape
-        C = self.a_channels
-        hi = jax.lax.Precision.HIGHEST
-        if C > 1:
-            oh = jax.nn.one_hot(zj, C, dtype=b.dtype)
-            b = (oh[..., :, None] * b[..., None, :]).reshape(n, K, C * nb)
-        Ag = jnp.einsum("nkg,nky->ngy", b, Y, precision=hi)                  # (n, C*nb, nY)
-        Agy = jnp.matmul(Ag, self.pool_first_sel_y, precision=hi)            # (n, C*nb, n_a)
-        Agy = Agy.reshape(n, C, nb, -1)
-        W = self.pool_first_weights()                                        # (NZ, C, n_a, nb)
-        At = jnp.einsum("nmka,nmak->man", Agy, W[node_z], precision=hi)     # (C, n_a, n)
-        return At.reshape(C * At.shape[1], n)
+        """A_t (C*n_a, n), pooled before the radial weights (`product.pool_first_dense`)."""
+        return product.pool_first_dense(b, Y, zj, node_z, self.pool_first_weights(), self.pool_first_sel_y,
+                                        self.a_channels)
 
     def pool_first_sparse(self, b, Y, seg, zj, node_z, n_nodes):
-        """`pool_first_dense` for an edge list: pool b (x) Y per (node, channel)
-        by segment_sum, then W per node.  Same output layout, (C*n_a, n_nodes)."""
-        C = self.a_channels
-        hi = jax.lax.Precision.HIGHEST
-        nb = b.shape[1]
-        outer = (b[:, :, None] * Y[:, None, :]).reshape(b.shape[0], nb * Y.shape[1])  # explicit: E may be 0
-        Ag = jax.ops.segment_sum(outer, seg * C + (zj if C > 1 else 0),
-                                 num_segments=n_nodes * C)
-        Ag = Ag.reshape(n_nodes, C, nb, -1)
-        Agy = jnp.matmul(Ag, self.pool_first_sel_y, precision=hi)             # (n, C, nb, n_a)
-        W = self.pool_first_weights()
-        At = jnp.einsum("nmka,nmak->man", Agy, W[node_z], precision=hi)     # (C, n_a, n)
-        return At.reshape(C * At.shape[1], n_nodes)
+        """`pool_first_dense` for an edge list (`product.pool_first_sparse`)."""
+        return product.pool_first_sparse(b, Y, seg, zj, node_z, n_nodes, self.pool_first_weights(),
+                                         self.pool_first_sel_y, self.a_channels)
 
     # -------------------------------------------------- energy / forces / virial
     def energy_forces_virial(self, rij, zi, zj, senders, receivers, n_nodes,
@@ -406,70 +265,6 @@ class EdgeSiteModel(eqx.Module):
             rij = jnp.where(edge_mask[:, None], rij, pad)
         zi, zj = node_z[senders], node_z[receivers]
         return self.site_energies(rij, zi, zj, senders, n_nodes, node_z, edge_mask)
-
-
-# ------------------------------------------------------------------ layouts
-LAYOUTS = ("sparse", "dense")
-
-
-def estimate_a_bytes(model, layout, n_nodes, n_edges, max_neighbours, itemsize):
-    """Peak bytes of the A-basis stage (energy + forces; pool-first: the whole
-    dense call), for choosing a layout.
-
-    Fitted to measured peaks on A4500/A100/H100 (c_ace, 4k and 14k atoms):
-    dense  ~ 2 n K (C n_cols + n_Y) + 3 n C n_cols n_Y   (factors + A_full)
-    sparse ~ 2 E (n_cols + n_Y + n_A)                    (factors + per-edge rows)
-    with C neighbour-species channels.  Dense grows with C and with the (n, K)
-    padding; sparse only with the edge count.
-
-    A pool-first model (`uses_edge_a` False; PACE) never forms per-edge columns
-    or A rows: per edge it holds the fixed basis b (n_b wide, one-hot over the C
-    channels) and Y; per node the pooled Ag = b (x) Y, A, the (n, C, n_b, n_a)
-    Agy = Ag @ sel_y that W[z_i] contracts, and the product basis (n_P =
-    `product_basis_width()`: the gathered A factors of every order and AA), so
-    with n_b, n_Y = `pool_first_widths()`
-    dense  ~ 2 n K (C n_b + n_Y) + per_node
-    sparse ~ 2 E (n_b + n_Y + n_b n_Y) + per_node
-    per_node = n C (n_b n_Y + n_a) + n C n_b n_a + n n_P / 4
-    Refitted to XLA's compiled temp size of the dense E/F/V call on an A100
-    (six PACE models x 1k/4k/8k atoms, float64,
-    bench/perf/results/microbench_memory_float64.json): measured / estimate
-    0.68-1.06, so the estimate errs high by at most 1.5x.  XLA's CPU backend
-    keeps about twice as much live (fewer fusions), so on the CPU this is low
-    by about 2x.
-    """
-    C, n_a = model.a_channels, int(model.aspec_r.shape[0])
-    if not model.uses_edge_a:
-        nb, ny = model.pool_first_widths()
-        per_node = (n_nodes * C * (nb * ny + n_a) + n_nodes * C * nb * n_a
-                    + n_nodes * model.product_basis_width() // 4)
-        if layout == "dense":
-            return itemsize * (2 * n_nodes * max_neighbours * (C * nb + ny) + per_node)
-        if layout == "sparse":
-            return itemsize * (2 * n_edges * (nb + ny + nb * ny) + per_node)
-        raise ValueError(f"layout must be one of {LAYOUTS}, got {layout!r}")
-    nc, ny = model.edge_a_widths()
-    if layout == "dense":
-        return itemsize * (2 * n_nodes * max_neighbours * (C * nc + ny) + 3 * n_nodes * C * nc * ny)
-    if layout == "sparse":
-        return itemsize * 2 * n_edges * (nc + ny + n_a)
-    raise ValueError(f"layout must be one of {LAYOUTS}, got {layout!r}")
-
-
-# ------------------------------------------------------------------ edge_A kind
-def with_edge_a_kind(model, kind):
-    """Return `model` using the other A-basis form.  Values and gradients are
-    unchanged (bit-identically, measured); only the reverse-pass cost differs."""
-    check_edge_a_kind(kind)
-    if kind == model.edge_a_kind:
-        return model
-    if kind == "gather":
-        return dataclasses.replace(model, edge_a_kind="gather", a_sel_r=None, a_sel_y=None)
-    n_r, n_y = model.edge_a_widths()
-    dt = model.E0.dtype
-    return dataclasses.replace(model, edge_a_kind="matmul",
-                               a_sel_r=one_hot_selector(model.aspec_r, n_r, dt),
-                               a_sel_y=one_hot_selector(model.aspec_y, n_y, dt))
 
 
 def calibrate_edge_a(model, rij, zi, zj, segment_ids, n_nodes, node_z, mask=None, reps=5):

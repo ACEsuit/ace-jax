@@ -18,12 +18,13 @@ SRC = ROOT / "src" / "ace_jax"
 
 # (pattern, layer, side): first match wins; "" is ace_jax/__init__.py.  A package's __init__ takes
 # its package's pattern, so `eval` (which re-exports the models) is an application module.
+# `eval.io` is one too, not framework as in the spec's table: `load` constructs the models.
 FRAMEWORK, LINEAR, UQ, APP, FRONT = range(5)
 LAYERS = [
     *[(f"basis.{m}", FRAMEWORK, None) for m in
       ("spec", "coupling", "prior", "export", "embedding", "radial_init", "radial_ace1")],
     *[(f"eval.{m}", FRAMEWORK, None) for m in
-      ("harmonics", "radial", "splinify", "nlist", "aa_dag", "product", "io")],
+      ("harmonics", "radial", "splinify", "nlist", "aa_dag", "product")],
     ("_moved", FRAMEWORK, None),
     ("fit.linear", LINEAR, None), ("fit.linear.*", LINEAR, None),
     ("uq", UQ, None), ("uq.*", UQ, None),
@@ -36,9 +37,6 @@ LAYERS = [
 
 # (importer, imported): the step of the spec's order of work that removes the edge.
 ALLOWED = {
-    # eval's loader and spline conversion build the models they serve
-    ("eval.io", "eval.edge_model"): 3, ("eval.io", "eval.model"): 3, ("eval.io", "eval.pace_model"): 3,
-    ("eval.splinify", "eval.model"): 3, ("eval.splinify", "eval.pace_model"): 3,
     # the linear fit knows the E/F/V rows, the kernel and the hyperparameter vector
     ("fit.linear.stats", "fit.rows"): 4, ("fit.linear.stats", "uq.pops"): 4, ("fit.linear.stats", "eval.api"): 4,
     ("fit.linear.objective", "fit.hypers"): 4, ("fit.linear.objective", "fit.gp.kernels"): 4,
@@ -129,7 +127,7 @@ def _violates(a, b):
 def test_layers_cover_real_modules():
     """A pattern that matches nothing is a module that moved without its layer."""
     stale = [pat for pat, _, side in LAYERS
-             if side != "operators" and "product" not in pat and not any(fnmatch.fnmatchcase(m, pat) for m in MODS)]
+             if side != "operators" and not any(fnmatch.fnmatchcase(m, pat) for m in MODS)]
     assert not stale, f"LAYERS patterns that match no module: {stale}"
 
 
@@ -139,6 +137,13 @@ def test_no_upward_imports():
     assert not new, "imports of a lower layer (spec section 1):\n" + "\n".join(f"  {a} -> {b}" for a, b in new)
     fixed = sorted(set(ALLOWED) - bad)
     assert not fixed, f"edges that no longer exist: remove them from ALLOWED: {fixed}"
+
+
+def test_eval_imports_no_other_package():
+    """`eval` is the bottom of the potential stack (spec section 3): it maps edge vectors to site
+    energies and knows no calculator, exporter, basis builder or fit, not even inside a function."""
+    back = sorted((a, b) for a, b in _edges() if a.split(".")[0] == "eval" and b.split(".")[0] != "eval")
+    assert not back, back
 
 
 def test_stubs_point_at_modules_and_nothing_here_uses_them():

@@ -16,6 +16,14 @@
   | `fit.{kernels, inducing, ladder, predict, feature, density}` | `fit.gp.*` |
   | `fit.radial_learn`, `fit.radial_model`, `fit.embedding` | `fit.radial.learn`, `fit.radial.model`, `fit.radial.embedding` |
   | `fit.rowcheck` | `fit.pipeline.rowcheck` |
+- **`ace_jax.eval.product`** holds the A basis and its products as functions of arrays (`pool_sparse`,
+  `edge_a`, `product_basis`, `estimate_a_bytes`, ...). `ace_jax.eval.edge_model` and `ace_jax.eval.model`
+  still give these names. `compact` is in `ace_jax.eval.dense`, `cubic_bspline_coefs` in
+  `ace_jax.eval.radial` and `ace_ctilde_tree` in `ace_jax.eval.pace_ace`; their old modules still give them.
+
+### Removed
+
+- `ace_jax.eval.ACECalculator`. Use `ace_jax.ACECalculator`.
 
 ## 0.6.0 (2026-11-13)
 

@@ -8,7 +8,8 @@ from conftest import pace_fixture
 jax.config.update("jax_enable_x64", True)
 from ase import Atoms
 
-from ace_jax.eval import ACECalculator, load
+from ace_jax import ACECalculator
+from ace_jax.eval import load
 from ace_jax.eval.pace_io import load_tree, write_yace
 
 FIX = pathlib.Path(__file__).parent.parent / "fixtures" / "pace"

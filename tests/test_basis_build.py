@@ -168,7 +168,8 @@ def test_eval_pair_in_memory_handoff():
     import jax
     jax.config.update("jax_enable_x64", True)
     from ase import Atoms
-    from ace_jax.eval import ACECalculator, load
+    from ace_jax import ACECalculator
+    from ace_jax.eval import load
     from ace_jax.basis.model import Basis
 
     path = os.path.join(FIX, "si_ace_model.npz")
@@ -253,7 +254,7 @@ def test_build_model_edge_a_kind_matmul(tmp_path, monkeypatch):
     import jax
     jax.config.update("jax_enable_x64", True)
     from ace_jax.basis.model import build_model
-    from ace_jax.eval import ACECalculator
+    from ace_jax import ACECalculator
     monkeypatch.setenv("ACEJAX_COUPLING_CACHE_ONLY", "1")
     cache = _primed_cache(tmp_path)
     g = build_model([14], 3, 10, coupling_cache_dir=cache)
@@ -279,7 +280,8 @@ def test_save_npz_spline_factorised_roundtrip(tmp_path):
     jax.config.update("jax_enable_x64", True)
     import jax.numpy as jnp
     from ace_jax.basis.export import save_npz
-    from ace_jax.eval import ACECalculator, load
+    from ace_jax import ACECalculator
+    from ace_jax.eval import load
 
     path = os.path.join(FIX, "si_1429.npz")
     model, meta, _ = load(path)
@@ -407,7 +409,7 @@ for name, got, ref in (
 
 # evaluate against the fixture's stored references (Julia calculator)
 from ase import Atoms
-from ace_jax.eval import ACECalculator
+from ace_jax import ACECalculator
 
 atoms = Atoms(numbers=zf["test_Z"], positions=zf["test_pos"].T,
               cell=zf["test_cell"].T, pbc=zf["test_pbc"].astype(bool))

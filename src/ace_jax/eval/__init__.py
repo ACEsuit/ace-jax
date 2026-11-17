@@ -12,13 +12,3 @@ __all__ = ["calibrate_edge_a", "with_edge_a_kind", "fold_readout", "lean", "lean
            "highest_precision", "with_dtype", "pool_sparse", "pool_dense", "SparseGraph", "DenseGraph",
            "sparse_graph", "dense_graph", "dense_to_sparse", "site_descriptors", "species_indices",
            "PACEModel", "load_yace", "write_yace"]
-
-__all__.append("ACECalculator")
-
-
-def __getattr__(name):
-    # ase is only needed for the calculator; keep it out of the core import path
-    if name == "ACECalculator":
-        from ..calc.point import ACECalculator
-        return ACECalculator
-    raise AttributeError(name)

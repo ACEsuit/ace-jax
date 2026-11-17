@@ -21,7 +21,7 @@ import json
 import jax.numpy as jnp
 import numpy as np
 
-from .edge_model import check_edge_a_kind, with_edge_a_kind
+from .product import check_edge_a_kind, with_edge_a_kind
 from .model import ACEModel, a2b_sparse_auto, with_a2b_sparse
 
 
