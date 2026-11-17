@@ -595,3 +595,17 @@ Decision (owner): total energy = band term of the predicted H and S + an ace-jax
 - **The H model's all-electron band energy is poor away from its training structures**: its error against the reference sum of eigenvalues is −620 ± 511 meV per atom over the 220 structures (+27 on a training structure). The core states near −1,500 eV carry it: a relative error of 1e-5 in an on-site block is 15 meV per orbital.
 - Hence `band_energy(..., core_bands=)` and `HamiltonianCalculator(core_bands={Z: n})`: the lowest bands are left out of the band energy, forces and stress (the Fermi level still counts them). With those bands full, the forces remain the derivative of the free energy (tested).
 - Open: the residual with the valence band energy of the PREDICTED H (running), and with forces and stress.
+
+## Core-orbital projection (2026-11-17)
+
+The owner's pointer: the MACE-H paper does not drop core bands from an all-electron Hamiltonian, it transforms the data so that the core-valence blocks are close to zero and learns the valence block. `ham/project.py::core_projection` is that construction (arXiv:2508.15108, Methods): at each k-point of a grid the valence functions are orthogonalised to the core ones, χ_v → χ_v − χ_c S_cc⁻¹ S_cv, giving S̄_vv = S_vv − S_vc X and H̄_vv = H_vv − H_vc X − X⁺H_cv + X⁺H_cc X with X = S_cc⁻¹ S_cv, and the valence blocks are transformed back to real space on the pattern of the data. `bench/ham/project_dataset.py` does a folder of caches in parallel.
+
+On one 64-atom aluminium structure (shells s s s p p d; core 1s, 2s, 2p; grid 5 x 5 x 5 from the cells in the data; 34 s):
+
+- valence eigenvalues of the projected problem against the all-electron ones: 1.6e-4 eV mean absolute, 4e-4 eV at most, on and off the grid of the transform (the paper reports 1.4e-4 eV for gold); occupied band energy −0.48 meV per atom;
+- blocks go from 14 x 14 to 9 x 9 and the largest element of H from 1,516 eV to 13.8 eV;
+- the largest core-valence element that is dropped is 0.15 eV.
+
+Tests (`tests/test_ham_project.py`, a synthetic two-atom system): on the grid the Bloch matrices of the projected blocks are the valence blocks of B⁺HB and B⁺SB; with the core an eigenfunction up to a small coupling the valence spectrum is that of the full problem, and the error grows with the coupling.
+
+This supersedes leaving core bands out of the sum (`core_bands=`, kept for all-electron models): the model then has no core blocks to get wrong.
