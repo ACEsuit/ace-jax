@@ -60,6 +60,11 @@ def fermi(e, mu, T):
     return 1.0 / (1.0 + np.exp(np.clip((e - mu) / (KB * T), -500, 500)))
 
 
+def chemical_potential(e, n_electrons, T):
+    """mu that holds `n_electrons` (two per state) in the bands e (n_k, n) at temperature T."""
+    return brentq(lambda m: 2.0 * fermi(e, m, T).sum() / len(e) - n_electrons, e.min(), e.max())
+
+
 def main(folder, n_train, nel, bonds=3000, site=(2, 2), env=(5.0, 6, 4, 4, 4), nsite=12, nbond=12, rsite=7.0, nk=7, threads=8,
          ntest=None, seed=0, T=1000.0):
     names = sorted(os.listdir(os.path.join(folder, "train")))
@@ -98,9 +103,7 @@ def main(folder, n_train, nel, bonds=3000, site=(2, 2), env=(5.0, 6, 4, 4, 4), n
         S = bloch(d, d.blocks["S"], ks)
         e0 = np.array([scipy.linalg.eigh(h, s, eigvals_only=True) for h, s in zip(bloch(d, d.blocks["H"], ks), S)])
         e1 = np.array([scipy.linalg.eigh(h, s, eigvals_only=True) for h, s in zip(bloch(d, pred, ks), S)])
-        N = nel * len(d.numbers)
-        mu = lambda e: brentq(lambda m: 2.0 * fermi(e, m, T).sum() / len(ks) - N, e.min(), e.max())
-        mu0, mu1 = mu(e0), mu(e1)
+        mu0, mu1 = (chemical_potential(e, nel * len(d.numbers), T) for e in (e0, e1))
         w = fermi(e0, mu0, T)
         ee.append((np.abs(e1 - e0) * w).sum() / w.sum())
         ee_rel.append((np.abs((e1 - mu1) - (e0 - mu0)) * w).sum() / w.sum())
