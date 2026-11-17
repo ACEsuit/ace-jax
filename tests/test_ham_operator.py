@@ -158,3 +158,32 @@ def T_bands(hp, prep, k):
     H = _bloch(prep.on, prep.off, prep.lists, k, hp.channels.index("H"), prep.n_orb)
     S = _bloch(prep.on, prep.off, prep.lists, k, hp.channels.index("S"), prep.n_orb)
     return _eigvals(H, S)
+
+
+def test_block_sums_and_batched_eigenvalues_match_the_host(models):
+    """`BlockSum` on a dictionary of blocks and `eigvals` over a batch of k-points against a NumPy
+    Bloch sum and SciPy, for a grid of k-points in batches that do not divide it."""
+    import scipy.linalg
+
+    from ace_jax.ham.operator import BlockSum, eigvals
+    on, off = models
+    pos, cell, numbers = structure()
+    blocks = {c: {**off.predict(pos, cell, numbers)[c], **on.predict(pos, cell, numbers)[c]} for c in ("H", "S")}
+    orb = on.orbitals
+    o = np.concatenate([[0], np.cumsum([orb.n_orb(int(z)) for z in numbers])])
+    ks = np.array([[a, b, 0.3] for a in (0.0, 0.25, 0.5) for b in (0.0, 0.1, 0.7)])
+    bs = BlockSum(list(blocks["S"]), numbers, orb)
+    H, S = bs.matrices(blocks["H"], ks, chunk=4), bs.matrices(blocks["S"], ks, chunk=4)
+    S = S + 3.0 * np.eye(bs.n_orb)                       # the random model's overlap is not positive definite
+    for q, k in enumerate(ks):
+        ref = np.zeros((o[-1], o[-1]), complex)
+        for (Rx, Ry, Rz, i, j), b in blocks["H"].items():
+            ref[o[i]:o[i + 1], o[j]:o[j + 1]] += np.exp(2j * np.pi * np.dot(k, (Rx, Ry, Rz))) * b
+        ref = 0.5 * (ref + ref.conj().T)
+        assert np.abs(np.asarray(H[q]) - ref).max() < 1e-10 * max(1.0, np.abs(ref).max())
+    e = np.asarray(eigvals(H, S, chunk=4))
+    want = np.array([scipy.linalg.eigh(np.asarray(h), np.asarray(s), eigvals_only=True) for h, s in zip(H, S)])
+    assert e.shape == want.shape and np.abs(e - want).max() < 1e-8 * max(1.0, np.abs(want).max())
+    from ace_jax.ham.operator import block_bands
+    shifted = {k: v + (3.0 * np.eye(len(v)) if k[:3] == (0, 0, 0) and k[3] == k[4] else 0.0) for k, v in blocks["S"].items()}
+    assert np.abs(block_bands(bs, blocks["H"], shifted, ks, chunk=4) - want).max() < 1e-8 * max(1.0, np.abs(want).max())

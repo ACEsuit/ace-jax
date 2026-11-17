@@ -50,6 +50,74 @@ def _eigvals_impl(H, S):
 
 
 _eigvals = jax.jit(_eigvals_impl)
+_eigvals_k = jax.jit(jax.vmap(_eigvals_impl))             # a batch of k-points in one call
+
+
+def _bloch_blocks_impl(B, idx, R, kpts, n_orb):
+    """(n_k, n_orb, n_orb): the Bloch sums of stacked blocks at every k of `kpts` at once.  B: one
+    (m, n_a, n_b) array per block shape, idx: their flat positions (m, n_a, n_b) in the n_orb^2
+    matrix, R: their cells (m, 3)."""
+    cdtype = jnp.result_type(kpts.dtype, jnp.complex64)
+
+    def one(k):
+        M = jnp.zeros(n_orb * n_orb, cdtype)
+        for b, i, r in zip(B, idx, R):
+            M = M.at[i.reshape(-1)].add((jnp.exp(2j * jnp.pi * (r @ k)).astype(cdtype)[:, None, None] * b).reshape(-1))
+        return M.reshape(n_orb, n_orb)
+
+    return jax.vmap(one)(kpts)
+
+
+_bloch_blocks = jax.jit(_bloch_blocks_impl, static_argnums=4)
+
+
+class BlockSum:
+    """The Bloch sums of a dictionary of blocks {(Rx, Ry, Rz, i, j): (n_i, n_j)} (reference data, or
+    any code's predictions) on the device, every k-point of a batch in one compiled call.  The
+    index lists are built once; `matrices(blocks, kpts)` then takes any blocks with these keys."""
+
+    def __init__(self, keys, numbers, basis):
+        numbers = np.asarray(numbers)
+        norb = np.array([basis.n_orb(int(z)) for z in numbers])
+        off = np.concatenate([[0], np.cumsum(norb)])
+        self.n_orb = int(off[-1])
+        groups = {}
+        for key in keys:
+            groups.setdefault((int(norb[key[3]]), int(norb[key[4]])), []).append(key)
+        self.groups = [(shape, ks) for shape, ks in sorted(groups.items())]
+        self.idx, self.R = [], []
+        for (na, nb), ks in self.groups:
+            a = np.asarray(ks)
+            rows, cols = off[a[:, 3]], off[a[:, 4]]
+            self.idx.append(jnp.asarray((rows[:, None, None] + np.arange(na)[:, None]) * self.n_orb + cols[:, None, None] + np.arange(nb), jnp.int32))
+            self.R.append(jnp.asarray(a[:, :3], float))
+
+    def matrices(self, blocks, kpts, chunk=64):
+        """(n_k, n_orb, n_orb) complex Hermitian Bloch matrices at the fractional k-points."""
+        B = [jnp.asarray(np.stack([blocks[k] for k in ks])) for _, ks in self.groups]
+        kpts = jnp.asarray(np.atleast_2d(kpts), B[0].dtype if B else float)
+        out = [_bloch_blocks(B, self.idx, self.R, kpts[i:i + chunk], self.n_orb) for i in range(0, len(kpts), chunk)]
+        M = jnp.concatenate(out)
+        return 0.5 * (M + jnp.swapaxes(M.conj(), 1, 2))
+
+
+def block_bands(bs, H, S, kpts, chunk=48):
+    """(n_k, n_orb) eigenvalues, as a host array, of the generalised problem of two dictionaries of
+    blocks at the fractional k-points: Bloch sums and eigensolves of `chunk` k-points at a time on
+    the device, so that only that many matrices exist at once."""
+    kpts = np.atleast_2d(np.asarray(kpts, float))
+    Hb = [jnp.asarray(np.stack([H[k] for k in ks])) for _, ks in bs.groups]
+    Sb = [jnp.asarray(np.stack([S[k] for k in ks])) for _, ks in bs.groups]
+    out = []
+    for i in range(0, len(kpts), chunk):
+        k = jnp.asarray(kpts[i:i + chunk], Hb[0].dtype)
+        out.append(np.asarray(_eigvals_k(_bloch_blocks(Hb, bs.idx, bs.R, k, bs.n_orb), _bloch_blocks(Sb, bs.idx, bs.R, k, bs.n_orb))))
+    return np.concatenate(out)
+
+
+def eigvals(H, S, chunk=64):
+    """(n_k, n_orb) eigenvalues of H(k) c = e S(k) c for batches of matrices, on the device."""
+    return jnp.concatenate([_eigvals_k(H[i:i + chunk], S[i:i + chunk]) for i in range(0, len(H), chunk)])
 
 
 def _device_impl(site, readout, packs, pos, cell, species, site_species, s_rij, s_idx, s_count, b_rij, b_idx, b_count, env, static):
@@ -238,13 +306,17 @@ class HamiltonianPredictor:
         k = jnp.asarray(k, prep.on[0].dtype)
         return _bloch(prep.on, prep.off, prep.lists, k, self.channels.index(channel), prep.n_orb)
 
-    def bands(self, prep, kpts, overlap="S", channel="H"):
+    def bands(self, prep, kpts, overlap="S", channel="H", chunk=64):
         """(n_k, n_orb) eigenvalues of H(k) c = e S(k) c at the fractional k-points `kpts`.
         `overlap=None`: an orthonormal basis (S = 1).  `channel`: the Hamiltonian channel
-        ("H_up" or "H_dn" of a collinear-spin model)."""
-        out = []
-        for k in np.atleast_2d(np.asarray(kpts, float)):
-            H = self.hk(prep, k, channel)
-            S = self.hk(prep, k, overlap) if overlap else jnp.eye(prep.n_orb, dtype=H.dtype)
-            out.append(_eigvals(H, S))
-        return jnp.stack(out)
+        ("H_up" or "H_dn" of a collinear-spin model).  The k-points are evaluated in batches of
+        `chunk`: Bloch sums and eigensolves vmapped, nothing on the host."""
+        kpts = jnp.asarray(np.atleast_2d(np.asarray(kpts, float)), prep.on[0].dtype)
+        ch = self.channels.index(channel)
+        Hk = jax.vmap(lambda k: _bloch_impl(prep.on, prep.off, prep.lists, k, ch, prep.n_orb))
+        if overlap:
+            cs = self.channels.index(overlap)
+            Sk = jax.vmap(lambda k: _bloch_impl(prep.on, prep.off, prep.lists, k, cs, prep.n_orb))
+        else:
+            Sk = lambda ks: jnp.broadcast_to(jnp.eye(prep.n_orb, dtype=jnp.result_type(kpts.dtype, jnp.complex64)), (len(ks), prep.n_orb, prep.n_orb))
+        return jnp.concatenate([_eigvals_k(Hk(kpts[i:i + chunk]), Sk(kpts[i:i + chunk])) for i in range(0, len(kpts), chunk)])

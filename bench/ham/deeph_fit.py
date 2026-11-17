@@ -28,10 +28,10 @@ import jax
 jax.config.update("jax_enable_x64", True)
 
 import numpy as np
-import scipy.linalg
 from scipy.optimize import brentq
 
 from ace_jax.ham import deeph
+from ace_jax.ham.operator import BlockSum, block_bands
 from ace_jax.operators import bond as B
 from ace_jax.operators.data import OperatorData
 from ace_jax.operators.features import build_site_basis
@@ -54,14 +54,6 @@ def subset(d, n, seed):
     pick = np.random.default_rng(seed).choice(len(keys), size=min(n, len(keys)), replace=False)
     keep = {keys[i] for i in pick} | {k for k in d.blocks["H"] if onsite(k)}
     return OperatorData(d.cell, d.positions, d.numbers, d.basis, {"H": {k: d.blocks["H"][k] for k in keep}})
-
-
-def bloch(d, blocks, ks):
-    off = np.concatenate([[0], np.cumsum([d.basis.n_orb(int(z)) for z in d.numbers])])
-    M = np.zeros((len(ks), off[-1], off[-1]), complex)
-    for (Rx, Ry, Rz, i, j), b in blocks.items():
-        M[:, off[i]:off[i + 1], off[j]:off[j + 1]] += np.exp(2j * np.pi * (ks @ (Rx, Ry, Rz)))[:, None, None] * b
-    return 0.5 * (M + M.conj().transpose(0, 2, 1))
 
 
 def fermi(e, mu, T):
@@ -137,15 +129,15 @@ def score(folder, nel, predict, nk, ntest, T, label):
         assert not [k for k in d.blocks["H"] if k not in pred], "the prediction lacks blocks of the reference"
         diff = np.concatenate([(pred[k] - v).ravel() for k, v in d.blocks["H"].items()])
         err.append(diff)
-        S = bloch(d, d.blocks["S"], ks)
+        bs = BlockSum(list(d.blocks["H"]), d.numbers, d.basis)             # Bloch sums and eigenvalues in batches of k, on the device
         cached = os.path.join(folder, f".bands_{nk}", name + ".npy")
         if os.path.exists(cached):
             e0 = np.load(cached)
         else:
-            e0 = np.array([scipy.linalg.eigh(h, s, eigvals_only=True) for h, s in zip(bloch(d, d.blocks["H"], ks), S)])
+            e0 = block_bands(bs, d.blocks["H"], d.blocks["S"], ks)
             os.makedirs(os.path.dirname(cached), exist_ok=True)
             np.save(cached, e0)
-        e1 = np.array([scipy.linalg.eigh(h, s, eigvals_only=True) for h, s in zip(bloch(d, {k: pred[k] for k in d.blocks["H"]}, ks), S)])
+        e1 = block_bands(bs, pred, d.blocks["S"], ks)
         mu0, mu1 = (chemical_potential(e, nel * len(d.numbers), T) for e in (e0, e1))
         w = fermi(e0, mu0, T)
         ee.append((np.abs((e1 - mu1) - (e0 - mu0)) * w).sum() / w.sum())
