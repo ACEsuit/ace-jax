@@ -1244,3 +1244,21 @@ def test_force_measures():
         b = base[e["size"][:-4]]
         assert {k: v for k, v in e.items() if k not in ("size", "reg_alpha")} == {k: v for k, v in b.items() if k != "size"}
     assert set(np.round(np.linspace(-8, 1, 10), 9)) <= set(np.round(np.linspace(-8, 1, 28), 9))   # a superset of the old grid
+
+
+def test_multicomponent_cases(monkeypatch):
+    """The multi-component speed rows: one float64 LAMMPS case per code on the medium Cantor models, MACE on
+    Symmetrix v0.3.0 with its own extraction, and the gate on Cantor cells of the row's size."""
+    from accuracy_cost import multicomponent as mc, timing
+    from scaling import models
+    cs = mc.cases()
+    assert sorted(c["row"]["code"] for c in cs) == ["acejax-ace", "acejax-pace", "mace-symx3", "mlpace"]
+    assert all((c["mode"], c["dtype"]) == ("lammps", "float64") for c in cs)
+    by = {c["row"]["code"]: c["row"] for c in cs}
+    assert all(r["system"] == "Cantor" and r["elements"] == models.ELEMENTS["Cantor"] and r["gate_n"] == 256 for r in by.values())
+    assert by["acejax-pace"]["path"] == by["mlpace"]["path"] and by["mlpace"]["path"].endswith("pace_Cantor_medium.yace")
+    assert by["mace-symx3"]["symmetrix"].endswith("mace_medium_Cantor-symx3.json")
+    assert len({tuple({**r, "dtype": "float64", "mode": "lammps", "device": "gpu"}[f] for f in timing.KEY) for r in by.values()}) == 4
+    cells = timing.gate_cells("Cantor", 256)
+    assert len(cells) == timing.GATE_CELLS and all(len(a) == 256 and set(a.get_chemical_symbols()) == set(models.ELEMENTS["Cantor"]) for a in cells)
+    assert set(timing.gate_cells()[0].get_chemical_symbols()) == {"Si"} and len(timing.gate_cells()[0]) == timing.GATE_N
